@@ -230,7 +230,10 @@ jobs:
     # it now downloads it (#1087). 60 since main's run 44588485912 (2026-11-19):
     # ubuntu go 1.27 reached minute 45 in make cross, four targets at about 4
     # minutes each after make test-race, and was cancelled before linux/arm64.
-    timeout-minutes: 60
+    # 75 since main's run 44891736706: macOS took 49 of its 60 minutes in
+    # 44875166859, and WASM_TEST_TIMEOUT went from 10m to 20m when the
+    # vertexai package outran 10m on a runner 18-27% slower (Makefile).
+    timeout-minutes: 75
     # The emulator binaries, from the job above (#1087).
     needs: bigquery-emulator
     env:
@@ -1269,7 +1272,9 @@ jobs:
           # before, so about 615 s. And 20m in sql, 365 s in main run
           # 44875166859 before Backup and DR's Compute Engine pages, whose VM
           # and disk round trip took 152 s in its compat test.
-          BROWSER_TIMEOUT=10m; case "$SHARD" in served|run|storage|sql) BROWSER_TIMEOUT=20m ;; esac
+          # And 30m in run since Cloud Build's and the Logging console rounds'
+          # tests joined it: 1,005 s in main run 44891736706 before them.
+          BROWSER_TIMEOUT=10m; case "$SHARD" in served|storage|sql) BROWSER_TIMEOUT=20m ;; run) BROWSER_TIMEOUT=30m ;; esac
           go test -tags=browser -count=1 -timeout "$BROWSER_TIMEOUT" -v "${SELECT[@]}" ./test/browser/ | tee browser.log || rc=1
           for t in $(go test -tags=browser -list '.*' ./test/browser/ | grep '^Test' | "${PICK[@]}" | grep -vE "$NOT"); do
             grep -q -- "^--- PASS: $t (" browser.log ||
