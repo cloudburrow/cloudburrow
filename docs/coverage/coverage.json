@@ -1016,7 +1016,8 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/DeleteAttachment",
         "status": "Verified",
         "tests": [
-          "test/compat/artifactregistryconfig_test.go:78 TestArtifactRegistryConfigAndMetadata"
+          "test/compat/artifactregistryconfig_test.go:78 TestArtifactRegistryConfigAndMetadata",
+          "test/compat/artifactregistryreferrers2111_test.go:131 TestArtifactRegistryReferrers"
         ]
       },
       {
@@ -1083,7 +1084,8 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetAttachment",
         "status": "Verified",
         "tests": [
-          "test/compat/artifactregistryconfig_test.go:78 TestArtifactRegistryConfigAndMetadata"
+          "test/compat/artifactregistryconfig_test.go:78 TestArtifactRegistryConfigAndMetadata",
+          "test/compat/artifactregistryreferrers2111_test.go:131 TestArtifactRegistryReferrers"
         ]
       },
       {
@@ -1215,7 +1217,8 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ListAttachments",
         "status": "Verified",
         "tests": [
-          "test/compat/artifactregistryconfig_test.go:78 TestArtifactRegistryConfigAndMetadata"
+          "test/compat/artifactregistryconfig_test.go:78 TestArtifactRegistryConfigAndMetadata",
+          "test/compat/artifactregistryreferrers2111_test.go:131 TestArtifactRegistryReferrers"
         ]
       },
       {
@@ -1321,6 +1324,7 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/SetIamPolicy",
         "status": "Verified",
         "tests": [
+          "test/compat/artifactregistryreferrers2111_test.go:284 TestIAMEnforcementArtifactRegistryDocker",
           "test/compat/consoleartifactregistrypermissions_test.go:22 TestConsolePermissionsOnARepository",
           "test/compat/terraform_batch5_test.go:362 TestTerraformArtifactRegistryRepositoryIAM"
         ]

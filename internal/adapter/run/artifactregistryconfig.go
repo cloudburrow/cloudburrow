@@ -566,6 +566,9 @@ func (a *ArtifactRegistryServer) GetAttachment(_ context.Context, req *arpb.GetA
 	defer arConfig.mu.Unlock()
 	at, ok := arConfig.attachments[req.GetName()]
 	if !ok {
+		if da := dockerAttachment(req.GetName()); da != nil {
+			return da, nil
+		}
 		return nil, apierror.NotFound("Requested entity was not found.")
 	}
 	return proto.Clone(at).(*arpb.Attachment), nil
@@ -614,6 +617,15 @@ func (a *ArtifactRegistryServer) ListAttachments(_ context.Context, req *arpb.Li
 		all = append(all, proto.Clone(at).(*arpb.Attachment))
 	}
 	arConfig.mu.Unlock()
+	for _, at := range dockerAttachments(req.GetParent()) {
+		if t, ok := want["target"]; ok && at.GetTarget() != dockerTarget(req.GetParent(), t) {
+			continue
+		}
+		if t, ok := want["type"]; ok && at.GetType() != t {
+			continue
+		}
+		all = append(all, at)
+	}
 	sort.Slice(all, func(i, j int) bool { return all[i].Name < all[j].Name })
 	page, next, err := pageOf(all, req.GetPageSize(), req.GetPageToken())
 	if err != nil {
@@ -627,7 +639,16 @@ func (a *ArtifactRegistryServer) DeleteAttachment(_ context.Context, req *arpb.D
 	arConfig.mu.Lock()
 	if _, ok := arConfig.attachments[req.GetName()]; !ok {
 		arConfig.mu.Unlock()
-		return nil, apierror.NotFound("Requested entity was not found.")
+		if found, err := deleteDockerAttachment(req.GetName()); err != nil {
+			return nil, err
+		} else if !found {
+			return nil, apierror.NotFound("Requested entity was not found.")
+		}
+		if a.s == nil {
+			return nil, nil
+		}
+		repoName, _, _ := splitChild(req.GetName(), "attachments")
+		return a.doneEmpty(repoName, req.GetName())
 	}
 	delete(arConfig.attachments, req.GetName())
 	saveARConfigLocked()
