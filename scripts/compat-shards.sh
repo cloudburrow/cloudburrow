@@ -481,9 +481,10 @@ compat_shard() {
       # connector from Maven Central. Cloud Storage for the procedures'
       # files, Cloud Logging for their output, Cloud Run for the Artifact
       # Registry a container_image is read from, and Resource Manager and
-      # the metadata server for the invoker's minted tokens.
-      SERVICES=bigquery,storage,logging,run
-      TEST_VARS+=,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT,BIGQUERY_RESOURCEMANAGER,RESOURCEMANAGER,STORAGE,LOGGING,RUN,GCLOUD
+      # the metadata server for the invoker's minted tokens, and Cloud KMS
+      # for a procedure's customer-managed key.
+      SERVICES=bigquery,storage,logging,run,kms
+      TEST_VARS+=,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT,BIGQUERY_RESOURCEMANAGER,RESOURCEMANAGER,STORAGE,LOGGING,RUN,KMS,GCLOUD
       export CLOUDBURROW_TEST_SPARK=1
       COMPAT_RUN='^Test(BigQuerySpark|BqSpark)'
       COMPAT_TIMEOUT=150m ;;

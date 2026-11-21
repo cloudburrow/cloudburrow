@@ -86,6 +86,14 @@ type Job struct {
 	// of the instance for it, and the job runs as that account.
 	AccessToken string `json:"accessToken,omitempty"`
 	RunAs       string `json:"runAs,omitempty"`
+	// KMSKey is the job's customer-managed key (a CryptoKey of the
+	// instance's Cloud KMS), or "", and KeyAgent BigQuery's encryption
+	// service account, which must be able to encrypt with it. The runner
+	// checks the key before it runs anything (Docker.KeyCheck).
+	KMSKey   string `json:"kmsKey,omitempty"`
+	KeyAgent string `json:"keyAgent,omitempty"`
+	// KeyOnly asks for the key's check alone: nothing is run.
+	KeyOnly bool `json:"keyOnly,omitempty"`
 }
 
 // File is one Cloud Storage object of a job, by its gs:// URI.
@@ -114,7 +122,18 @@ type Result struct {
 	// Out are the OUT and INOUT arguments' final values, JSON-encoded, by
 	// name; one the procedure left unset is missing.
 	Out map[string]string `json:"out,omitempty"`
+	// DriverOutput is the driver's output, its last MaxDriverOutput
+	// bytes, for the job's staging bucket.
+	DriverOutput string `json:"driverOutput,omitempty"`
+	// KeyRefused is why the job's KMSKey cannot be used, and KeyKind
+	// which way (invalid, notFound, unusable, permissionDenied,
+	// unavailable, noKMS); nothing was run.
+	KeyRefused string `json:"keyRefused,omitempty"`
+	KeyKind    string `json:"keyKind,omitempty"`
 }
+
+// MaxDriverOutput bounds Result.DriverOutput.
+const MaxDriverOutput = 4 << 20
 
 // Unavailable is a runner that could not run Spark at all (no docker, or
 // the image or the connector could not be had).

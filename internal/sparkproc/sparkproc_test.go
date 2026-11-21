@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/cloudburrow/cloudburrow/internal/cmek"
 )
 
 type fakeEngine struct {
@@ -135,5 +137,31 @@ func TestRuntimeAndRegistryPath(t *testing.T) {
 		if _, _, err := registryPath(bad); err == nil || !strings.Contains(err.Error(), "cannot fetch containers from other registries") {
 			t.Errorf("registryPath(%s): %v", bad, err)
 		}
+	}
+}
+
+// TestKeyCheck (#2104): a job's customer-managed key is checked before
+// anything runs; a KeyOnly job is the check alone.
+func TestKeyCheck(t *testing.T) {
+	ctx := context.Background()
+	job := Job{Project: "p", KMSKey: "projects/p/locations/us-central1/keyRings/r/cryptoKeys/k", KeyAgent: "bq-1@bigquery-encryption.iam.gserviceaccount.com", KeyOnly: true}
+	if res, err := (&Docker{}).Run(ctx, job); err != nil || res.KeyKind != "noKMS" {
+		t.Errorf("no Cloud KMS: %+v, %v", res, err)
+	}
+	var seen string
+	d := &Docker{KeyCheck: func(_ context.Context, project, agent, key string) error {
+		seen = project + " " + agent + " " + key
+		return &cmek.Error{Kind: cmek.PermissionDenied, Key: key, Msg: "no role"}
+	}}
+	res, err := d.Run(ctx, job)
+	if err != nil || res.KeyKind != "permissionDenied" || !strings.Contains(res.KeyRefused, "no role") {
+		t.Errorf("refused key: %+v, %v", res, err)
+	}
+	if seen != "p "+job.KeyAgent+" "+job.KMSKey {
+		t.Errorf("checked %q", seen)
+	}
+	d.KeyCheck = func(context.Context, string, string, string) error { return nil }
+	if res, err := d.Run(ctx, job); err != nil || res.KeyRefused != "" || res.Failed {
+		t.Errorf("usable key, KeyOnly: %+v, %v", res, err)
 	}
 }

@@ -1298,7 +1298,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			email = a.Email
 		}
 		return creds.MintAccessTokenFor(email, metadata.TokenTTL), nil
-	})
+	}, cmekKeys(kmsSvc, iamEnforcer).Usable)
 	if sparkRunner != nil {
 		coord.Register(sparkRunner)
 	}

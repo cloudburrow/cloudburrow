@@ -78,6 +78,10 @@ type Docker struct {
 	// Mint mints a token of the instance for a service account that
 	// exists, for a job's RunAs; nil refuses RunAs.
 	Mint func(email string) (string, error)
+	// KeyCheck checks a job's customer-managed key for its agent
+	// (cmek.Keys.Usable on the host's Cloud KMS), or is nil, when a job
+	// with a key is refused: the instance serves no Cloud KMS.
+	KeyCheck func(ctx context.Context, project, agent, key string) error
 	// Instance labels the containers and networks made.
 	Instance string
 	// Tmp holds each job's directory ("": the system's); Cache the Spark
@@ -117,6 +121,14 @@ func (d *Docker) runtime(job Job) (Runtime, string, bool) {
 
 // Run runs job to its end.
 func (d *Docker) Run(ctx context.Context, job Job) (Result, error) {
+	if job.KMSKey != "" {
+		if res, refused := d.checkKey(ctx, job); refused {
+			return res, nil
+		}
+	}
+	if job.KeyOnly {
+		return Result{}, nil
+	}
 	if _, err := exec.LookPath("docker"); err != nil {
 		return Result{}, &Unavailable{Msg: "docker is not on PATH: stored procedures for Apache Spark run in a local Spark container"}
 	}
@@ -269,9 +281,9 @@ func (d *Docker) Run(ctx context.Context, job Job) (Result, error) {
 	if err := cmd.Start(); err != nil {
 		return Result{}, &Unavailable{Msg: "start the Spark container: " + err.Error()}
 	}
-	tail := d.follow(job, stdout)
+	tail, output := d.follow(job, stdout)
 	waitErr := cmd.Wait()
-	res := Result{Out: map[string]string{}}
+	res := Result{Out: map[string]string{}, DriverOutput: output}
 	if b, err := os.ReadFile(filepath.Join(dir, "out", "params.json")); err == nil {
 		_ = json.Unmarshal(b, &res.Out)
 	}
@@ -352,10 +364,12 @@ func (d *Docker) waitReady(ctx context.Context, name string) error {
 // log4j's console layout in the image: "25/11/21 10:00:00 INFO Executor: …".
 var log4jLine = regexp.MustCompile(`^\d\d/\d\d/\d\d \d\d:\d\d:\d\d (TRACE|DEBUG|INFO|WARN|ERROR|FATAL) (\S+?):`)
 
-// follow sends each line of r to Log, and returns the last lines read.
-func (d *Docker) follow(job Job, r io.Reader) func() []string {
+// follow sends each line of r to Log, and returns the last lines read
+// and the output's last MaxDriverOutput bytes.
+func (d *Docker) follow(job Job, r io.Reader) (func() []string, string) {
 	var mu sync.Mutex
 	var last []string
+	var all []byte
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 64<<10), 4<<20)
 	for sc.Scan() {
@@ -378,13 +392,18 @@ func (d *Docker) follow(job Job, r io.Reader) func() []string {
 		if len(last) > 400 {
 			last = last[len(last)-400:]
 		}
+		all = append(all, line...)
+		all = append(all, '\n')
+		if len(all) > MaxDriverOutput {
+			all = append(all[:0], all[len(all)-MaxDriverOutput:]...)
+		}
 		mu.Unlock()
 	}
 	return func() []string {
 		mu.Lock()
 		defer mu.Unlock()
 		return append([]string(nil), last...)
-	}
+	}, string(all)
 }
 
 // pyError is a Python traceback's last line: "ValueError: kaboom".

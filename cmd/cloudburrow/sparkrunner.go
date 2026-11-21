@@ -86,8 +86,10 @@ type sparkRunnerService struct {
 // live is the instance's bound addresses (BigQuery's, its Storage API's,
 // Cloud Logging's and the Artifact Registry's, the Run port), read at each
 // run. mint mints the instance's token for a service account, for an
-// invoker's @@spark_proc_properties.service_account.
-func newSparkRunner(cfg config.Config, out io.Writer, live func() map[string]string, mint func(email string) (string, error)) *sparkRunnerService {
+// invoker's @@spark_proc_properties.service_account. keyCheck checks a
+// job's customer-managed key on the instance's Cloud KMS (cmekKeys' Usable).
+func newSparkRunner(cfg config.Config, out io.Writer, live func() map[string]string, mint func(email string) (string, error),
+	keyCheck func(ctx context.Context, project, agent, key string) error) *sparkRunnerService {
 	if !sparkRunnerEnabled(cfg) {
 		return nil
 	}
@@ -112,6 +114,7 @@ func newSparkRunner(cfg config.Config, out io.Writer, live func() map[string]str
 		Storage:  addr("bigquery-storage"),
 		Registry: addr("run"),
 		Mint:     mint,
+		KeyCheck: keyCheck,
 		Instance: cfg.Name,
 		Cache:    cache,
 		Logf:     func(format string, args ...any) { fmt.Fprintf(out, "cloudburrow: "+format+"\n", args...) },

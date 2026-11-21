@@ -295,7 +295,8 @@ jobs:
           [ "$rc" -eq 0 ] || { echo "compat failed"; exit 1; }
           # Every Spark test must have run and passed, not skipped.
           for t in TestBigQuerySparkStoredProcedures TestBqSparkStoredProcedure TestBigQuerySparkProcedureRuntimesAndTypes \
-            TestBigQuerySparkProcedureContainerImage TestBigQuerySparkProcedureInvoker; do
+            TestBigQuerySparkProcedureContainerImage TestBigQuerySparkProcedureInvoker \
+            TestBigQuerySparkProcedureStagingAndCMEK; do
             grep -q -- "^--- PASS: $t (" compat.log ||
               { echo "$t did not pass: $(grep -- "^--- [A-Z]*: $t (" compat.log || echo 'no result')"; exit 1; }
           done

@@ -50,8 +50,9 @@ package bigqueryfront
 // that service account, so the job's reads and writes are checked as that
 // identity's; a DEFINER procedure (the default) runs as its connection's
 // service account. The routine's securityMode is INVOKER.
-// @@spark_proc_properties also takes staging_bucket, staging_dataset_id
-// (the connector's materializationDataset) and kms_key_name.
+// @@spark_proc_properties also takes staging_dataset_id (the connector's
+// materializationDataset), and staging_bucket and kms_key_name
+// (sparkstaging.go).
 //
 // container_image: an Artifact Registry image of the instance's own
 // registry, run with the runtime's Spark and Java mounted into it as
@@ -550,6 +551,13 @@ func (s *scriptRun) callSpark(proc storedProc, path []string, project string, sc
 			job.ServiceAccount = callerIdentity(project)
 		}
 	}
+	stage, flow := s.sparkStaging(def, cn, job.ServiceAccount, stmt) // sparkstaging.go
+	if flow != nil {
+		return flow
+	}
+	if stage.key != "" {
+		job.KMSKey, job.KeyAgent = stage.key, serviceAccountEmail(project, s.f.numbers)
+	}
 	if d := s.sparkProps["staging_dataset_id"]; d != "" {
 		props := map[string]string{"spark.datasource.bigquery.materializationDataset": d}
 		for k, v := range job.Properties {
@@ -645,13 +653,44 @@ func (s *scriptRun) callSpark(proc storedProc, path []string, project string, sc
 	if kid != nil {
 		kid.spark = stats
 	}
-	res, err := s.f.spark.Run(s.r.Context(), job)
-	if err != nil {
-		var u *sparkproc.Unavailable
-		if errors.As(err, &u) {
-			return fail(http.StatusServiceUnavailable, "backendError", "The Spark runner could not run the procedure: "+u.Msg)
+	run := func(job sparkproc.Job) (sparkproc.Result, *scriptFlow) {
+		res, err := s.f.spark.Run(s.r.Context(), job)
+		if err != nil {
+			var u *sparkproc.Unavailable
+			if errors.As(err, &u) {
+				return res, fail(http.StatusServiceUnavailable, "backendError", "The Spark runner could not run the procedure: "+u.Msg)
+			}
+			return res, fail(http.StatusInternalServerError, "internalError", "cloudburrow: the Spark runner: "+err.Error())
 		}
-		return fail(http.StatusInternalServerError, "internalError", "cloudburrow: the Spark runner: "+err.Error())
+		if res.KeyRefused == "" {
+			return res, nil
+		}
+		code, reason := http.StatusBadRequest, "invalid"
+		switch res.KeyKind {
+		case "permissionDenied":
+			code, reason = http.StatusForbidden, "accessDenied"
+		case "unavailable":
+			code, reason = http.StatusServiceUnavailable, "backendError"
+		}
+		return res, fail(code, reason, "The customer-managed encryption key "+job.KMSKey+" cannot be used: "+res.KeyRefused)
+	}
+	// The key is checked before anything is staged with it.
+	if job.KMSKey != "" {
+		check := job
+		check.KeyOnly = true
+		if _, flow := run(check); flow != nil {
+			return flow
+		}
+	}
+	if err := s.stageSparkFiles(s.r.Context(), stage, job); err != nil {
+		return fail(http.StatusBadRequest, "invalid", "The staging bucket "+stage.bucket+" cannot hold the job's files: "+err.Error())
+	}
+	res, flow := run(job)
+	if flow != nil {
+		return flow
+	}
+	if err := s.stageDriverOutput(s.r.Context(), stage, job, res.DriverOutput); err != nil {
+		return fail(http.StatusBadRequest, "invalid", "The staging bucket "+stage.bucket+" cannot hold the driver's output: "+err.Error())
 	}
 	if res.Failed {
 		return fail(http.StatusBadRequest, "invalidQuery", fmt.Sprintf("Spark job %s failed: %s. See the job's logs in Cloud Logging: "+
