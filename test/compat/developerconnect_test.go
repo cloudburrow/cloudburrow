@@ -4,7 +4,6 @@ package compat
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"os"
 	"os/exec"
@@ -21,7 +20,6 @@ import (
 	ssmpb "cloud.google.com/go/securesourcemanager/apiv1/securesourcemanagerpb"
 	"github.com/google/uuid"
 	cbrest "google.golang.org/api/cloudbuild/v1"
-	"google.golang.org/api/googleapi"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc/codes"
@@ -285,13 +283,21 @@ func TestDeveloperConnectSourceManagerTrigger(t *testing.T) {
 	if _, err := svc.Projects.Locations.Triggers.Delete(made.ResourceName).Context(ctx).Do(); err != nil {
 		t.Errorf("DeleteBuildTrigger: %v", err)
 	}
-	var gerr *googleapi.Error
-	_, err = svc.Projects.Locations.Triggers.Create(parent, &cbrest.BuildTrigger{Name: "dc-pr-" + suffix,
+	// A pull request filter (#2077) is kept and answered in
+	// developerConnectEventConfig.pullRequest.
+	pr, err := svc.Projects.Locations.Triggers.Create(parent, &cbrest.BuildTrigger{Name: "dc-pr-" + suffix,
 		DeveloperConnectEventConfig: &cbrest.DeveloperConnectEventConfig{GitRepositoryLink: link.GetName(),
-			PullRequest: &cbrest.PullRequestFilter{Branch: "^main$"}},
+			PullRequest: &cbrest.PullRequestFilter{Branch: "^main$", CommentControl: "COMMENTS_ENABLED"}},
 		Build: &cbrest.Build{Steps: []*cbrest.BuildStep{{Name: "ubuntu", Args: []string{"true"}}}}}).Context(ctx).Do()
-	if !errors.As(err, &gerr) || gerr.Code != http.StatusNotImplemented {
-		t.Errorf("CreateBuildTrigger with a pull request filter: %v; want 501", err)
+	if err != nil {
+		t.Fatalf("CreateBuildTrigger with a pull request filter: %v", err)
+	}
+	if dce := pr.DeveloperConnectEventConfig; dce == nil || dce.PullRequest == nil || dce.PullRequest.Branch != "^main$" ||
+		dce.PullRequest.CommentControl != "COMMENTS_ENABLED" {
+		t.Errorf("the trigger's developerConnectEventConfig = %+v; want its pull request filter", dce)
+	}
+	if _, err := svc.Projects.Locations.Triggers.Delete(pr.ResourceName).Context(ctx).Do(); err != nil {
+		t.Errorf("DeleteBuildTrigger: %v", err)
 	}
 
 	if _, err := dc.DeleteConnection(ctx, &dcpb.DeleteConnectionRequest{Name: conn.GetName()}); status.Code(err) != codes.FailedPrecondition {

@@ -285,6 +285,9 @@ func addApprovalConfig(raw []byte) []byte {
 			if p, ok := rc["push"]; ok {
 				dc["push"] = p
 			}
+			if p, ok := rc["pullRequest"]; ok {
+				dc["pullRequest"] = p
+			}
 			delete(t, "repositoryEventConfig")
 			t["developerConnectEventConfig"], _ = json.Marshal(dc)
 		}

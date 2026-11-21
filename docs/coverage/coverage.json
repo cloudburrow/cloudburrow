@@ -1446,6 +1446,7 @@
           "test/compat/cloudbuildapproval_test.go:308 TestTerraformCloudBuildTriggerApproval",
           "test/compat/cloudbuildpubsub_test.go:108 TestTerraformCloudBuildPubsubTrigger",
           "test/compat/cloudbuildpubsub_test.go:31 TestCloudBuildPubsubTrigger",
+          "test/compat/cloudbuildpullrequests_test.go:36 TestCloudBuildPullRequestTriggers",
           "test/compat/cloudbuildserviceaccount_test.go:92 TestCloudBuildServiceAccount",
           "test/compat/cloudbuildssm_test.go:183 TestCloudBuildSourceManagerTriggerFilters",
           "test/compat/cloudbuildssm_test.go:455 TestTerraformCloudBuildSourceManagerTrigger",
@@ -1538,6 +1539,7 @@
         "method": "google.devtools.cloudbuild.v1.CloudBuild/ListBuilds",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudbuildpullrequests_test.go:36 TestCloudBuildPullRequestTriggers",
           "test/compat/cloudbuildssm_test.go:183 TestCloudBuildSourceManagerTriggerFilters",
           "test/compat/cloudbuildsteps_test.go:220 TestGcloudBuildsStepsAndList",
           "test/compat/cloudbuildsteps_test.go:283 TestCloudBuildHostStepsOff",
@@ -1670,6 +1672,7 @@
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/CreatePullRequest",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudbuildpullrequests_test.go:36 TestCloudBuildPullRequestTriggers",
           "test/compat/securesourcemanagercontent_test.go:249 TestSecureSourceManagerPullRequestsAndBranchRules"
         ]
       },
@@ -1677,6 +1680,7 @@
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/CreatePullRequestComment",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudbuildpullrequests_test.go:36 TestCloudBuildPullRequestTriggers",
           "test/compat/securesourcemanagerreviews_test.go:128 TestSecureSourceManagerReviewsAndHooks"
         ]
       },
@@ -2005,14 +2009,14 @@
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/CreateConnection",
         "status": "Verified",
         "tests": [
-          "test/compat/developerconnect_test.go:49 TestDeveloperConnectSourceManagerTrigger"
+          "test/compat/developerconnect_test.go:47 TestDeveloperConnectSourceManagerTrigger"
         ]
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/CreateGitRepositoryLink",
         "status": "Verified",
         "tests": [
-          "test/compat/developerconnect_test.go:49 TestDeveloperConnectSourceManagerTrigger",
+          "test/compat/developerconnect_test.go:47 TestDeveloperConnectSourceManagerTrigger",
           "test/compat/terraform_developerconnect_test.go:31 TestTerraformDeveloperConnect"
         ]
       },
@@ -2025,7 +2029,7 @@
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/DeleteConnection",
         "status": "Verified",
         "tests": [
-          "test/compat/developerconnect_test.go:49 TestDeveloperConnectSourceManagerTrigger",
+          "test/compat/developerconnect_test.go:47 TestDeveloperConnectSourceManagerTrigger",
           "test/compat/terraform_developerconnect_test.go:31 TestTerraformDeveloperConnect"
         ]
       },
@@ -2033,7 +2037,7 @@
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/DeleteGitRepositoryLink",
         "status": "Verified",
         "tests": [
-          "test/compat/developerconnect_test.go:49 TestDeveloperConnectSourceManagerTrigger",
+          "test/compat/developerconnect_test.go:47 TestDeveloperConnectSourceManagerTrigger",
           "test/compat/terraform_developerconnect_test.go:31 TestTerraformDeveloperConnect"
         ]
       },
@@ -2061,14 +2065,14 @@
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/FetchGitRefs",
         "status": "Verified",
         "tests": [
-          "test/compat/developerconnect_test.go:49 TestDeveloperConnectSourceManagerTrigger"
+          "test/compat/developerconnect_test.go:47 TestDeveloperConnectSourceManagerTrigger"
         ]
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/FetchLinkableGitRepositories",
         "status": "Verified",
         "tests": [
-          "test/compat/developerconnect_test.go:49 TestDeveloperConnectSourceManagerTrigger"
+          "test/compat/developerconnect_test.go:47 TestDeveloperConnectSourceManagerTrigger"
         ]
       },
       {
@@ -2104,7 +2108,7 @@
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/GetConnection",
         "status": "Verified",
         "tests": [
-          "test/compat/developerconnect_test.go:49 TestDeveloperConnectSourceManagerTrigger",
+          "test/compat/developerconnect_test.go:47 TestDeveloperConnectSourceManagerTrigger",
           "test/compat/terraform_developerconnect_test.go:31 TestTerraformDeveloperConnect"
         ]
       },
@@ -2112,7 +2116,7 @@
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/GetGitRepositoryLink",
         "status": "Verified",
         "tests": [
-          "test/compat/developerconnect_test.go:49 TestDeveloperConnectSourceManagerTrigger",
+          "test/compat/developerconnect_test.go:47 TestDeveloperConnectSourceManagerTrigger",
           "test/compat/terraform_developerconnect_test.go:31 TestTerraformDeveloperConnect"
         ]
       },
@@ -2125,14 +2129,14 @@
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/ListConnections",
         "status": "Verified",
         "tests": [
-          "test/compat/developerconnect_test.go:49 TestDeveloperConnectSourceManagerTrigger"
+          "test/compat/developerconnect_test.go:47 TestDeveloperConnectSourceManagerTrigger"
         ]
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/ListGitRepositoryLinks",
         "status": "Verified",
         "tests": [
-          "test/compat/developerconnect_test.go:49 TestDeveloperConnectSourceManagerTrigger"
+          "test/compat/developerconnect_test.go:47 TestDeveloperConnectSourceManagerTrigger"
         ]
       },
       {
@@ -2154,7 +2158,7 @@
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/UpdateConnection",
         "status": "Verified",
         "tests": [
-          "test/compat/developerconnect_test.go:49 TestDeveloperConnectSourceManagerTrigger",
+          "test/compat/developerconnect_test.go:47 TestDeveloperConnectSourceManagerTrigger",
           "test/compat/terraform_developerconnect_test.go:31 TestTerraformDeveloperConnect"
         ]
       }

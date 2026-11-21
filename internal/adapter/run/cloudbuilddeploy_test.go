@@ -64,7 +64,11 @@ func TestDevConnectEventErrorRefusesWhatIsNotALink(t *testing.T) {
 	for _, rc := range []*cbpb.RepositoryEventConfig{
 		{Repository: "projects/p/locations/l/connections/c/repositories/r", Filter: push},
 		{Repository: "projects/p/locations/l/connections/c/gitRepositoryLinks/k",
-			Filter: &cbpb.RepositoryEventConfig_PullRequest{PullRequest: &cbpb.PullRequestFilter{}}},
+			Filter: &cbpb.RepositoryEventConfig_PullRequest{PullRequest: &cbpb.PullRequestFilter{}}}, // no branch regex
+		{Repository: "projects/p/locations/l/connections/c/gitRepositoryLinks/k",
+			Filter: &cbpb.RepositoryEventConfig_PullRequest{PullRequest: &cbpb.PullRequestFilter{GitRef: &cbpb.PullRequestFilter_Branch{Branch: "[x"}}}},
+		{Repository: "projects/p/locations/l/connections/c/gitRepositoryLinks/missing",
+			Filter: &cbpb.RepositoryEventConfig_PullRequest{PullRequest: &cbpb.PullRequestFilter{GitRef: &cbpb.PullRequestFilter_Branch{Branch: "^main$"}}}},
 		{Repository: "projects/p/locations/l/connections/c/gitRepositoryLinks/k"},
 		{Repository: "projects/p/locations/l/connections/c/gitRepositoryLinks/missing", Filter: push},
 	} {

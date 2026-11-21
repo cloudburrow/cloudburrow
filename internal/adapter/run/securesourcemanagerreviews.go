@@ -302,6 +302,10 @@ func (m *SecureSourceManagerServer) CreatePullRequestComment(ctx context.Context
 	if out.GetComment() != nil {
 		m.deliverPullComment(ctx, pr.GetName(), out, "created", author)
 	}
+	if commentRunsBuilds(out) {
+		// A writer's /gcbrun runs the pull request's Cloud Build triggers (#2077).
+		m.runDevConnectPullTriggers(context.WithoutCancel(ctx), pr.GetName(), author)
+	}
 	return m.done(ssmRepoOf(pr.GetName()), out.GetName(), "create", out)
 }
 
@@ -360,6 +364,9 @@ func (m *SecureSourceManagerServer) BatchCreatePullRequestComments(ctx context.C
 	resp.PullRequestComments = append(resp.PullRequestComments, addCommentLocked(pr.GetName(), review, author))
 	saveSSMLocked()
 	ssmState.mu.Unlock()
+	if commentRunsBuilds(review) {
+		m.runDevConnectPullTriggers(context.WithoutCancel(ctx), pr.GetName(), author)
+	}
 	return m.done(ssmRepoOf(pr.GetName()), pr.GetName(), "create", resp)
 }
 

@@ -93,10 +93,19 @@ func TestCloudRunBuildTriggerEditAndDisableThroughThePage(t *testing.T) {
 			t.Errorf("Create trigger has no %q", want)
 		}
 	}
+	// Pull request (#2077) is a choice like the others: choosing it shows
+	// Base branch and Comment control, with Google's three choices.
 	var prDisabled bool
 	p.eval(`[...document.querySelectorAll("form.create-page input[type=radio]")].some((r) => r.value === "Pull request" && r.disabled)`, &prDisabled)
-	if !prDisabled {
-		t.Error("Create trigger's Pull request is not drawn disabled")
+	if prDisabled {
+		t.Error("Create trigger's Pull request is drawn disabled")
+	}
+	p.eval(`(() => { document.querySelector('form.create-page input[type=radio][value="Pull request"]').click(); return true; })()`, nil)
+	p.waitFor(`(() => { const b = document.querySelector("#f-base"); return b !== null && b.offsetParent !== null; })()`)
+	var cc string
+	p.eval(`[...document.querySelectorAll('form.create-page input[type=radio][name="f-commentControl-choice"]')].filter((r) => r.offsetParent !== null).map((r) => r.value + (r.checked ? "*" : "")).join("|")`, &cc)
+	if cc != "Required except for owners and collaborators*|Required|Not required" {
+		t.Errorf("Create trigger's Comment control = %q; want Google's three choices, Required except for owners and collaborators chosen", cc)
 	}
 
 	// The row: a Run button, then the menu Edit, Disable, Delete (#1854).
@@ -140,6 +149,17 @@ func TestCloudRunBuildTriggerEditAndDisableThroughThePage(t *testing.T) {
 	p.navigate("/cloud-build/settings?project=" + project)
 	p.waitFor(`document.querySelector("#view").textContent.includes("Service account permissions") &&
 		document.querySelector("#view").textContent.includes("Cloud Run Admin")`)
+}
+
+// TestCloudBuildPullRequestTriggerFormMeetsWCAG (#2077), in the run shard:
+// Create trigger with Pull request chosen, which shows Base branch and
+// Comment control, passes the console's WCAG 2.1 AA audit.
+func TestCloudBuildPullRequestTriggerFormMeetsWCAG(t *testing.T) {
+	needService(t, "cloud-build-triggers")
+	project := uniqueProject(t)
+	auditScreens(t, []a11yPage{{"create trigger on a pull request", "/cloud-build/triggers/create?project=" + project,
+		`document.querySelector('form.create-page input[type=radio][value="Pull request"]') !== null`,
+		`document.querySelector('form.create-page input[type=radio][value="Pull request"]').click()`}})
 }
 
 // TestCloudRunBuildWorkerPoolEditThroughThePage (#1491), in the run shard.
