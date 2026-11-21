@@ -1,0 +1,565 @@
+CloudBurrow patch 107 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#2120). Applies after patch 0106.
+
+BigQuery: a table function's parameter may be a table, TABLE<column
+type, ...>, which "accepts an input table containing a superset of
+those columns in any order", or ANY TABLE, a table of any columns; a call
+gives it as TABLE dataset.table or a subquery
+(https://docs.cloud.google.com/bigquery/docs/table-functions#table_parameters,
+and the CREATE TABLE FUNCTION statement of the data definition language
+reference). The engine panicked on CREATE TABLE FUNCTION of a TABLE<...>
+parameter, and refused one of ANY TABLE (or ANY TYPE) ("TVF body is
+missing").
+
+A TABLE<...> parameter is now kept in the function's spec with its
+columns, and registered as a relation argument of that schema, extra
+columns allowed; the analyzer matches a call's table to it by column
+name and coerces each column, and refuses a column of a type that does
+not coerce ("Invalid type STRING for column "year INT64" of argument 1
+of ...") or one missing ("Required column "year" not found in table
+passed as argument 1 of ..."). The body's reads of the parameter
+(ResolvedRelationArgumentScan) are formatted as a subquery of @name, and
+the call's table, a subquery of the parameter's columns, put in its
+place. A function with an ANY TABLE or ANY TYPE parameter is registered
+as a templated SQL table function, whose body the analyzer resolves at
+each call; the formatter analyzes it again for the call's own argument
+types to format it. Arguments are put in their @name's place in one
+pass, so a parameter named t is no longer put into @t1. Regression test
+TestTableFunctionTableParameters.
+
+Derived from github.com/goccy/googlesqlite v0.3.1, under its MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch is
+offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+--- a/internal/catalog.go
++++ b/internal/catalog.go
+@@ -2902,6 +2902,9 @@ func (c *Catalog) tvfHandleForSpec(spec *TVFSpec) (*googlesql.TableValuedFunctio
+ 		}
+ 		argTypes = append(argTypes, argType)
+ 	}
++	if spec.Templated {
++		return templatedTVFHandle(storageName, spec, argTypes) // CloudBurrow patch (cloudburrow/cloudburrow#2120)
++	}
+ 	columns := make([]*googlesql.TVFSchemaColumn, 0, len(spec.OutputColumns))
+ 	for _, col := range spec.OutputColumns {
+ 		typ, err := col.Type.ToGoogleSQLType()
+@@ -2944,6 +2947,8 @@ func (c *Catalog) copyTVFSpec(spec *TVFSpec, newNamePath []string) *TVFSpec {
+ 		Args:          spec.Args,
+ 		OutputColumns: spec.OutputColumns,
+ 		Body:          spec.Body,
++		Templated:     spec.Templated,
++		Code:          spec.Code,
+ 	}
+ }
+ 
+--- a/internal/formatter.go
++++ b/internal/formatter.go
+@@ -2642,7 +2642,30 @@ func (n *TVFScanNode) FormatSQL(ctx context.Context) (string, error) {
+ 		return "", fmt.Errorf("TVF spec not found for %s", strings.Join(pathParts, "."))
+ 	}
+ 	argValues := make([]string, 0, len(spec.Args))
+-	for _, argNode := range m1(n.node.ArgumentList()) {
++	argNodes := m1(n.node.ArgumentList())
++	if spec.Templated {
++		// CloudBurrow patch (cloudburrow/cloudburrow#2120).
++		concrete, err := instantiateTemplatedTVF(ctx, spec, argNodes)
++		if err != nil {
++			return "", err
++		}
++		spec = concrete
++	}
++	for i, argNode := range argNodes {
++		if scan, _ := argNode.Scan(); scan != nil {
++			// CloudBurrow patch (cloudburrow/cloudburrow#2120): a table
++			// argument, as a subquery of the parameter's columns.
++			var param *NameWithType
++			if i < len(spec.Args) {
++				param = spec.Args[i]
++			}
++			formatted, err := formatRelationArgument(ctx, argNode, scan, param)
++			if err != nil {
++				return "", err
++			}
++			argValues = append(argValues, formatted)
++			continue
++		}
+ 		expr, _ := argNode.Expr()
+ 		if expr == nil {
+ 			argValues = append(argValues, "NULL")
+--- a/internal/node.go
++++ b/internal/node.go
+@@ -103,6 +103,8 @@ func newNode(node googlesql.ResolvedNode) Formatter {
+ 		return newDropStmtNode(node.(*googlesql.ResolvedDropStmt))
+ 	case googlesql.ResolvedNodeKindResolvedRecursiveRefScan:
+ 		return newRecursiveRefScanNode(node.(*googlesql.ResolvedRecursiveRefScan))
++	case googlesql.ResolvedNodeKindResolvedRelationArgumentScan:
++		return &RelationArgumentScanNode{node: node.(*googlesql.ResolvedRelationArgumentScan)} // CloudBurrow patch (cloudburrow/cloudburrow#2120)
+ 	case googlesql.ResolvedNodeKindResolvedRecursiveScan:
+ 		return newRecursiveScanNode(node.(*googlesql.ResolvedRecursiveScan))
+ 	case googlesql.ResolvedNodeKindResolvedWithScan:
+--- a/internal/spec.go
++++ b/internal/spec.go
+@@ -32,6 +32,9 @@ type NameWithType struct {
+ }
+ 
+ func (t *NameWithType) FunctionArgumentType() (*googlesql.FunctionArgumentType, error) {
++	if t.Type.IsRelation {
++		return t.Type.FunctionArgumentType() // CloudBurrow patch (cloudburrow/cloudburrow#2120)
++	}
+ 	if t.Type.SignatureKind != googlesql.SignatureArgumentKindArgTypeFixed {
+ 		return m1(googlesql.NewFunctionArgumentType5(
+ 			t.Type.SignatureKind,
+@@ -245,8 +248,14 @@ type TVFSpec struct {
+ 	Args          []*NameWithType `json:"args"`
+ 	OutputColumns []*ColumnSpec   `json:"outputColumns"`
+ 	Body          string          `json:"body"`
+-	UpdatedAt     time.Time       `json:"updatedAt"`
+-	CreatedAt     time.Time       `json:"createdAt"`
++	// Templated and Code are a table function with an ANY TABLE or ANY
++	// TYPE parameter (CloudBurrow patch, cloudburrow/cloudburrow#2120):
++	// its body is analyzed at each call, for the arguments' own types
++	// (tvf_templated.go), from Code, its query as written.
++	Templated bool      `json:"templated,omitempty"`
++	Code      string    `json:"code,omitempty"`
++	UpdatedAt time.Time `json:"updatedAt"`
++	CreatedAt time.Time `json:"createdAt"`
+ }
+ 
+ func (s *TVFSpec) TVFName() string {
+@@ -266,14 +275,7 @@ func (s *TVFSpec) CallSQL(argValues []string, callOutputColumns []string) (strin
+ 			s.TVFName(), len(callOutputColumns), len(s.OutputColumns),
+ 		)
+ 	}
+-	body := s.Body
+-	for i, arg := range s.Args {
+-		if i >= len(argValues) {
+-			break
+-		}
+-		argRef := fmt.Sprintf("@%s", arg.Name)
+-		body = strings.Replace(body, argRef, argValues[i], -1)
+-	}
++	body := substituteTVFArguments(s.Body, s.Args, argValues) // CloudBurrow patch (cloudburrow/cloudburrow#2120)
+ 	projections := make([]string, 0, len(s.OutputColumns))
+ 	for i, col := range s.OutputColumns {
+ 		projections = append(
+@@ -294,6 +296,11 @@ type Type struct {
+ 	SignatureKind googlesql.SignatureArgumentKind `json:"signatureKind"`
+ 	ElementType   *Type                           `json:"elementType"`
+ 	FieldTypes    []*NameWithType                 `json:"fieldTypes"`
++	// IsRelation and RelationColumns are a table function's table
++	// parameter (CloudBurrow patch, cloudburrow/cloudburrow#2120):
++	// TABLE<column type, ...>, its columns, or ANY TABLE, none.
++	IsRelation      bool            `json:"isRelation,omitempty"`
++	RelationColumns []*NameWithType `json:"relationColumns,omitempty"`
+ 
+ 	// node memoizes ToGoogleSQLType. The global TypeFactory interns
+ 	// every type it makes, so rebuilding the handle is a pure wasm
+@@ -311,6 +318,27 @@ type Type struct {
+ }
+ 
+ func (t *Type) FunctionArgumentType() (*googlesql.FunctionArgumentType, error) {
++	if t.IsRelation && len(t.RelationColumns) > 0 {
++		// CloudBurrow patch (cloudburrow/cloudburrow#2120): TABLE<...>
++		// "accepts an input table containing a superset of those columns
++		// in any order" (BigQuery's CREATE TABLE FUNCTION reference).
++		columns := make([]*googlesql.TVFSchemaColumn, 0, len(t.RelationColumns))
++		for _, col := range t.RelationColumns {
++			typ, err := col.Type.ToGoogleSQLType()
++			if err != nil {
++				return nil, err
++			}
++			columns = append(columns, &googlesql.TVFSchemaColumn{Name: col.Name, Type_: typ})
++		}
++		relation, err := googlesql.NewTVFRelation(columns)
++		if err != nil {
++			return nil, err
++		}
++		return googlesql.NewFunctionArgumentTypeRelationWithSchema(relation, true)
++	}
++	if t.IsRelation {
++		return googlesql.NewFunctionArgumentType5(googlesql.SignatureArgumentKindArgTypeRelation, m1(googlesql.NewFunctionArgumentTypeOptions()), -1)
++	}
+ 	if t.SignatureKind != googlesql.SignatureArgumentKindArgTypeFixed {
+ 		return m1(googlesql.NewFunctionArgumentType5(
+ 			t.SignatureKind,
+@@ -577,6 +605,22 @@ func (s *ColumnSpec) SQLiteSchema() string {
+ }
+ 
+ func newTypeFromFunctionArgumentType(t *googlesql.FunctionArgumentType) *Type {
++	if m1(t.IsRelation()) {
++		// CloudBurrow patch (cloudburrow/cloudburrow#2120): a table
++		// parameter, TABLE<...> with its columns or ANY TABLE.
++		typ := &Type{SignatureKind: googlesql.SignatureArgumentKindArgTypeRelation, IsRelation: true}
++		if opts, err := t.Options(); err == nil && opts != nil && m1(opts.HasRelationInputSchema()) {
++			if schema, err := opts.RelationInputSchema(); err == nil && schema != nil {
++				for _, col := range m1(schema.Columns()) {
++					if col == nil || col.Type_ == nil {
++						continue
++					}
++					typ.RelationColumns = append(typ.RelationColumns, &NameWithType{Name: col.Name, Type: newType(col.Type_)})
++				}
++			}
++		}
++		return typ
++	}
+ 	if m1(t.IsTemplated()) {
+ 		return &Type{SignatureKind: m1(t.Kind())}
+ 	}
+@@ -911,6 +955,20 @@ func newTVFSpec(ctx context.Context, namePath *NamePath, stmt *googlesql.Resolve
+ 	if err != nil {
+ 		return nil, fmt.Errorf("failed to read TVF body: %w", err)
+ 	}
++	if innerScan == nil && templatedSignature(signature) {
++		// CloudBurrow patch (cloudburrow/cloudburrow#2120): an ANY
++		// TABLE or ANY TYPE parameter; the body is analyzed per call.
++		now := time.Now()
++		return &TVFSpec{
++			IsTemp:    resolvedCreateScope(stmt) == googlesql.ResolvedCreateStatementEnums_CreateScopeCreateTemp,
++			NamePath:  namePath.mergePath(m1(stmt.NamePath())),
++			Args:      args,
++			Templated: true,
++			Code:      m1(stmt.Code()),
++			CreatedAt: now,
++			UpdatedAt: now,
++		}, nil
++	}
+ 	if innerScan == nil {
+ 		return nil, fmt.Errorf("TVF body is missing for %s", strings.Join(m1(stmt.NamePath()), "."))
+ 	}
+--- /dev/null
++++ b/internal/tvf_table_parameters.go
+@@ -0,0 +1,239 @@
++package internal
++
++// CloudBurrow patch (cloudburrow/cloudburrow#2120): table parameters of a
++// table function. BigQuery: a table function's parameter may be a table,
++// TABLE<column type, ...>, which "accepts an input table containing a
++// superset of those columns in any order", or ANY TABLE, a table of any
++// columns; a call gives it as TABLE dataset.table or a subquery
++// (https://docs.cloud.google.com/bigquery/docs/table-functions#table_parameters).
++//
++// The analyzer resolves a TABLE<...> parameter as a relation argument of
++// the function's signature, and a reference to it in the body as a
++// ResolvedRelationArgumentScan, formatted as a subquery of its columns
++// FROM @name; a call's table argument is formatted as a subquery of the
++// parameter's columns, by their names (the analyzer has matched and
++// coerced them), and put in @name's place. A function with an ANY TABLE
++// or ANY TYPE parameter is a templated SQL function: the analyzer
++// resolves its body at each call, and the formatter analyzes it again for
++// the call's own argument types (a CREATE TEMP TABLE FUNCTION of them)
++// to format it.
++
++import (
++	"context"
++	"fmt"
++	"regexp"
++	"strings"
++
++	googlesql "github.com/goccy/go-googlesql"
++)
++
++// RelationArgumentScanNode is a table parameter read in a function's body.
++type RelationArgumentScanNode struct {
++	node *googlesql.ResolvedRelationArgumentScan
++}
++
++func (n *RelationArgumentScanNode) FormatSQL(ctx context.Context) (string, error) {
++	if n == nil || n.node == nil {
++		return "", nil
++	}
++	name, err := n.node.Name()
++	if err != nil {
++		return "", err
++	}
++	columns := []string{}
++	for _, col := range m1(n.node.ColumnList()) {
++		columns = append(columns, fmt.Sprintf("`%s` AS `%s`", m1(col.Name()), uniqueColumnName(ctx, col)))
++	}
++	if len(columns) == 0 {
++		columns = append(columns, "NULL")
++	}
++	return fmt.Sprintf("(SELECT %s FROM @%s)", strings.Join(columns, ","), name), nil
++}
++
++// templatedSignature reports whether a function's signature has an ANY
++// TABLE or ANY TYPE parameter.
++func templatedSignature(sig *googlesql.FunctionSignature) bool {
++	if sig == nil {
++		return false
++	}
++	for _, arg := range m1(sig.Arguments()) {
++		if m1(arg.IsTemplated()) && !(m1(arg.IsRelation()) && relationHasSchema(arg)) {
++			return true
++		}
++	}
++	return false
++}
++
++// relationHasSchema reports whether a relation parameter is TABLE<...>.
++func relationHasSchema(arg *googlesql.FunctionArgumentType) bool {
++	opts, err := arg.Options()
++	if err != nil || opts == nil {
++		return false
++	}
++	return m1(opts.HasRelationInputSchema())
++}
++
++// tvfArgumentRef is an argument's place in a function body: @name, not
++// part of @@name (a system variable) nor of a longer name.
++var tvfArgumentRef = regexp.MustCompile(`@@?[A-Za-z_][A-Za-z0-9_]*`)
++
++// substituteTVFArguments puts each argument's SQL in its @name's place in
++// body, in one pass, so that an argument whose name begins another's
++// (t and t1) is not put in the other's place.
++func substituteTVFArguments(body string, args []*NameWithType, values []string) string {
++	byName := map[string]string{}
++	for i, arg := range args {
++		if i >= len(values) {
++			break
++		}
++		byName[arg.Name] = values[i]
++	}
++	return tvfArgumentRef.ReplaceAllStringFunc(body, func(ref string) string {
++		if strings.HasPrefix(ref, "@@") {
++			return ref
++		}
++		if v, ok := byName[ref[1:]]; ok {
++			return v
++		}
++		return ref
++	})
++}
++
++// formatRelationArgument is a call's table argument (scan) as a subquery
++// of the parameter's columns by their names: param's declared columns,
++// or, for ANY TABLE, every column of the argument.
++func formatRelationArgument(ctx context.Context, arg *googlesql.ResolvedFunctionArgument, scan googlesql.ResolvedScanNode, param *NameWithType) (string, error) {
++	input, err := newNode(scan).FormatSQL(ctx)
++	if err != nil {
++		return "", fmt.Errorf("failed to format TVF table argument: %w", err)
++	}
++	cols := m1(arg.ArgumentColumnList())
++	if len(cols) == 0 {
++		cols = m1(scan.MutableColumnList())
++	}
++	var projections []string
++	if param != nil && param.Type != nil && len(param.Type.RelationColumns) > 0 {
++		for _, want := range param.Type.RelationColumns {
++			var found *googlesql.ResolvedColumn
++			for _, col := range cols {
++				if strings.EqualFold(m1(col.Name()), want.Name) {
++					found = col
++					break
++				}
++			}
++			if found == nil {
++				return "", fmt.Errorf("Required column %q not found in table passed as argument %s", want.Name, param.Name)
++			}
++			projections = append(projections, fmt.Sprintf("`%s` AS `%s`", uniqueColumnName(ctx, found), want.Name))
++		}
++	} else {
++		for _, col := range cols {
++			projections = append(projections, fmt.Sprintf("`%s` AS `%s`", uniqueColumnName(ctx, col), m1(col.Name())))
++		}
++	}
++	from, err := formatInput(input)
++	if err != nil {
++		return "", err
++	}
++	return fmt.Sprintf("(SELECT %s %s)", strings.Join(projections, ","), from), nil
++}
++
++// templatedTVFHandle is the catalog's handle of a templated function: a
++// templated SQL table function of spec's signature and body.
++func templatedTVFHandle(storageName string, spec *TVFSpec, argTypes []*googlesql.FunctionArgumentType) (*googlesql.TableValuedFunction, error) {
++	result, err := googlesql.NewFunctionArgumentType5(googlesql.SignatureArgumentKindArgTypeRelation, m1(googlesql.NewFunctionArgumentTypeOptions()), -1)
++	if err != nil {
++		return nil, err
++	}
++	sig, err := googlesql.NewFunctionSignature3(result, argTypes, 0)
++	if err != nil {
++		return nil, fmt.Errorf("failed to build TVF signature: %w", err)
++	}
++	names := make([]string, 0, len(spec.Args))
++	for _, arg := range spec.Args {
++		names = append(names, arg.Name)
++	}
++	loc, err := googlesql.NewParseResumeLocationFromString(spec.Code)
++	if err != nil {
++		return nil, err
++	}
++	tvf, err := googlesql.NewTemplatedSQLTVF([]string{storageName}, sig, names, loc, nil)
++	if err != nil {
++		return nil, fmt.Errorf("failed to build TVF handle: %w", err)
++	}
++	return tvf.TableValuedFunction, nil
++}
++
++// instantiateTemplatedTVF is a templated function (spec) for one call's
++// arguments: its body analyzed with each parameter of the type the call
++// gives it, as a TVFSpec with that body.
++func instantiateTemplatedTVF(ctx context.Context, spec *TVFSpec, args []*googlesql.ResolvedFunctionArgument) (*TVFSpec, error) {
++	a := analyzerFromContext(ctx)
++	if a == nil || a.catalog == nil {
++		return nil, fmt.Errorf("TVF %s: no analyzer to instantiate it", spec.TVFName())
++	}
++	decls := make([]string, 0, len(spec.Args))
++	for i, param := range spec.Args {
++		var arg *googlesql.ResolvedFunctionArgument
++		if i < len(args) {
++			arg = args[i]
++		}
++		decl, err := concreteArgumentType(param, arg)
++		if err != nil {
++			return nil, fmt.Errorf("TVF %s: %w", spec.TVFName(), err)
++		}
++		decls = append(decls, fmt.Sprintf("`%s` %s", param.Name, decl))
++	}
++	text := fmt.Sprintf("CREATE TEMP TABLE FUNCTION __googlesqlite_tvf__(%s) AS (%s)", strings.Join(decls, ", "), spec.Code)
++	out, err := googlesql.AnalyzeStatement(text, a.opt, a.catalog.catalog, tf())
++	if err != nil {
++		return nil, fmt.Errorf("TVF %s: %w", spec.TVFName(), err)
++	}
++	stmt, ok := m1(out.ResolvedStatement()).(*googlesql.ResolvedCreateTableFunctionStmt)
++	if !ok {
++		return nil, fmt.Errorf("TVF %s: its body did not analyze as a table function", spec.TVFName())
++	}
++	concrete, err := newTVFSpec(ctx, a.namePath, stmt)
++	if err != nil {
++		return nil, err
++	}
++	if concrete.Templated {
++		return nil, fmt.Errorf("TVF %s: its arguments' types could not be told", spec.TVFName())
++	}
++	// The parameters' names as the function declares them.
++	for i := range concrete.Args {
++		if i < len(spec.Args) {
++			concrete.Args[i].Name = spec.Args[i].Name
++		}
++	}
++	return concrete, nil
++}
++
++// concreteArgumentType is the type a call gives a parameter, as SQL.
++func concreteArgumentType(param *NameWithType, arg *googlesql.ResolvedFunctionArgument) (string, error) {
++	if param.Type != nil && param.Type.IsRelation {
++		if arg == nil {
++			return "", fmt.Errorf("no table for parameter %s", param.Name)
++		}
++		cols := m1(arg.ArgumentColumnList())
++		if len(cols) == 0 {
++			if scan, _ := arg.Scan(); scan != nil {
++				cols = m1(scan.MutableColumnList())
++			}
++		}
++		fields := make([]string, 0, len(cols))
++		for _, col := range cols {
++			fields = append(fields, fmt.Sprintf("`%s` %s", m1(col.Name()), newType(m1(col.Type())).FormatType()))
++		}
++		return fmt.Sprintf("TABLE<%s>", strings.Join(fields, ", ")), nil
++	}
++	if param.Type != nil && param.Type.SignatureKind == googlesql.SignatureArgumentKindArgTypeFixed {
++		return param.Type.FormatType(), nil
++	}
++	if arg != nil {
++		if expr, _ := arg.Expr(); expr != nil {
++			return newType(m1(expr.Type())).FormatType(), nil
++		}
++	}
++	return "", fmt.Errorf("no type for parameter %s", param.Name)
++}
+--- /dev/null
++++ b/table_parameters_test.go
+@@ -0,0 +1,90 @@
++package googlesqlite_test
++
++import (
++	"context"
++	"database/sql"
++	"fmt"
++	"strings"
++	"testing"
++)
++
++// TestTableFunctionTableParameters is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#2120): a table function's TABLE<...> parameter
++// takes a table or a subquery with those columns among others, in any
++// order, coerced to the declared types; a column of a type that does not
++// coerce, or one missing, fails the call; an ANY TABLE parameter takes a
++// table of any columns, and the body is analyzed for the call's own.
++func TestTableFunctionTableParameters(t *testing.T) {
++	db, err := sql.Open("googlesqlite", ":memory:?_test=tvf_table_parameters")
++	if err != nil {
++		t.Fatalf("sql.Open: %v", err)
++	}
++	defer db.Close()
++	ctx := context.Background()
++	for _, q := range []string{
++		"CREATE TABLE years (name STRING, year INT64)",
++		"INSERT INTO years VALUES ('a', 2019), ('b', 2021), ('c', 2023)",
++		"CREATE TABLE syears (year STRING)",
++		"CREATE TABLE FUNCTION tf(t1 TABLE<year INT64>, y INT64) AS (SELECT * FROM t1 WHERE year > y)",
++		"CREATE TABLE FUNCTION tfloat(t1 TABLE<year FLOAT64>) AS (SELECT year / 2 AS half FROM t1)",
++		"CREATE TABLE FUNCTION t2(t TABLE<name STRING>, t1 TABLE<year INT64>) AS (SELECT name FROM t UNION ALL SELECT CAST(year AS STRING) FROM t1)",
++		"CREATE TABLE FUNCTION tany(t1 ANY TABLE) AS (SELECT * FROM t1)",
++		"CREATE TABLE FUNCTION tany2(t1 ANY TABLE, y INT64) AS (SELECT name FROM t1 WHERE year > y)",
++		// A table parameter given on to another table function, as a
++		// clean room's linked dataset gives a query template's.
++		"CREATE TABLE FUNCTION fwd(t1 TABLE<year INT64>, y INT64) AS (SELECT * FROM tf(TABLE t1, y))",
++		"CREATE TABLE FUNCTION fwdany(t1 ANY TABLE) AS (SELECT * FROM tany(TABLE t1))",
++	} {
++		if _, err := db.ExecContext(ctx, q); err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++	}
++	read := func(q string) (string, error) {
++		rows, err := db.QueryContext(ctx, q)
++		if err != nil {
++			return "", err
++		}
++		defer rows.Close()
++		cols, _ := rows.Columns()
++		var out []string
++		for rows.Next() {
++			vals := make([]any, len(cols))
++			ptrs := make([]any, len(cols))
++			for i := range vals {
++				ptrs[i] = &vals[i]
++			}
++			if err := rows.Scan(ptrs...); err != nil {
++				return "", err
++			}
++			out = append(out, strings.TrimSpace(fmt.Sprintln(vals...)))
++		}
++		return strings.Join(cols, ",") + ": " + strings.Join(out, "; "), rows.Err()
++	}
++	for q, want := range map[string]string{
++		"SELECT * FROM tf(TABLE years, 2020)":                                               "year: 2021; 2023",
++		"SELECT * FROM tf((SELECT year FROM years WHERE name != 'c'), 2020)":                "year: 2021",
++		"SELECT * FROM tfloat(TABLE years) ORDER BY half":                                   "half: 1009.5; 1010.5; 1011.5",
++		"SELECT * FROM t2(TABLE years, (SELECT 7 AS year)) ORDER BY name":                   "name: 7; a; b; c",
++		"SELECT * FROM fwd(TABLE years, 2022)":                                              "year: 2023",
++		"SELECT name FROM fwdany(TABLE years) ORDER BY year":                                "name: a; b; c",
++		"SELECT * FROM tany(TABLE years) ORDER BY year":                                     "name,year: a 2019; b 2021; c 2023",
++		"SELECT * FROM tany2(TABLE years, 2020) ORDER BY name":                              "name: b; c",
++		"SELECT * FROM tany2((SELECT 2030 AS year, 'z' AS name, 1 AS extra), 2020)":         "name: z",
++		"SELECT COUNT(*) AS n FROM tf(TABLE years, 2020) AS a JOIN years AS b USING (year)": "n: 2",
++	} {
++		got, err := read(q)
++		if err != nil || got != want {
++			t.Errorf("%s = %q, %v; want %q", q, got, err, want)
++		}
++	}
++	for q, want := range map[string]string{
++		"SELECT * FROM tf(TABLE syears, 2020)":          `Invalid type STRING for column "year INT64" of argument 1`,
++		"SELECT * FROM tf((SELECT 'x' AS name), 2020)":  `Required column "year" not found in table passed as argument 1`,
++		"SELECT * FROM tf(2020, 2020)":                  "must be a relation",
++		"SELECT * FROM tany2((SELECT 1 AS year), 2020)": "Unrecognized name: name",
++	} {
++		if _, err := read(q); err == nil || !strings.Contains(err.Error(), want) {
++			t.Errorf("%s: %v; want an error with %q", q, err, want)
++		}
++	}
++}

@@ -92,12 +92,14 @@ and approved. Approving on the page makes the template's table-valued function
 in the approver's dataset and lists it, so subscribers call it in the linked
 dataset: ``SELECT * FROM `project.linked_dataset.template`(...)``. Through the
 API, make the function with `CREATE TABLE FUNCTION`, list it with
-`selected_resources.routine`, then call `ApproveQueryTemplate`.
+`selected_resources.routine`, then call `ApproveQueryTemplate`. A template
+whose function takes the subscriber's table, `t1 TABLE<year INT64>`, is called
+with `TABLE` of the subscriber's own table (it may have more columns) or with a
+subquery: ``SELECT * FROM `project.linked_dataset.template`(TABLE mydataset.mytable)``.
 
 ## Not served
 
 Pub/Sub topic listings, routines in `selected_resources` outside a clean
 room, multi-region listings and linked dataset replicas, and Marketplace
-commercial listings are refused UNIMPLEMENTED; a query template's `TABLE`
-arguments are not forwarded to the linked dataset (#2120). See
+commercial listings are refused UNIMPLEMENTED. See
 [compatibility.md](compatibility.md#bigquery-sharing-analytics-hub--googlecloudbigqueryanalyticshubv1).

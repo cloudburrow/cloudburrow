@@ -125,6 +125,9 @@ func statementTables(stmt []token, temps map[string]bool) []nameRef {
 			ctes[strings.ToLower(stmt[i].text)] = true
 		}
 	}
+	for name := range tableParameters(stmt) { // #2120
+		ctes[name] = true
+	}
 	var refs []nameRef
 	seen := map[int]bool{}
 	// dml is whether the statement is DML, whose tables the engine does
@@ -237,6 +240,9 @@ func statementTables(stmt []token, temps map[string]bool) []nameRef {
 			add(i+1, true, true)
 		case t.punct(",") && fromAt[depth]:
 			add(i+1, true, true)
+		case t.is("TABLE") && i > 0 && (stmt[i-1].punct("(") || stmt[i-1].punct(",")) && depth > 0:
+			// A table function's table argument, TABLE name (#2120).
+			add(i+1, true, false)
 		case t.is("USING") && stmt[0].is("MERGE") && depth == 0:
 			add(i+1, true, true)
 			delete(fromAt, depth)
@@ -563,4 +569,40 @@ func (f front) emulatorTableData(r *http.Request, dataset, table string) ([]json
 		}
 		token = page.PageToken
 	}
+}
+
+// tableParameters are the names of a CREATE TABLE FUNCTION statement's
+// table parameters, TABLE<...> or ANY TABLE, in lower case (#2120): its
+// body reads them as tables, which are not in any dataset.
+func tableParameters(stmt []token) map[string]bool {
+	i := 0
+	for i < len(stmt) && !stmt[i].is("FUNCTION") {
+		i++
+	}
+	if i == 0 || i >= len(stmt) || !stmt[i-1].is("TABLE") {
+		return nil
+	}
+	for i < len(stmt) && !stmt[i].punct("(") {
+		i++
+	}
+	end := closing(stmt, i)
+	if end < 0 {
+		return nil
+	}
+	names := map[string]bool{}
+	depth := 0
+	for j := i + 1; j < end; j++ {
+		t := stmt[j]
+		switch {
+		case t.punct("(") || t.punct("[") || t.punct("<"):
+			depth++
+		case t.punct(")") || t.punct("]") || t.punct(">"):
+			depth--
+		case depth == 0 && (t.kind == tokWord || t.kind == tokQuoted) && (j == i+1 || stmt[j-1].punct(",")) && j+1 < end:
+			if stmt[j+1].is("TABLE") || j+2 < end && stmt[j+1].is("ANY") && stmt[j+2].is("TABLE") {
+				names[strings.ToLower(t.text)] = true
+			}
+		}
+	}
+	return names
 }

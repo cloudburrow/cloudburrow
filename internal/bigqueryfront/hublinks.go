@@ -446,7 +446,11 @@ func (f front) syncHubRoutines(r *http.Request, dataset string, l hubLink) {
 				call = nil
 				break
 			}
-			call = append(call, quotePath([]string{name}))
+			arg := quotePath([]string{name})
+			if k := strings.ToUpper(str(m, "argumentKind")); k == "FIXED_TABLE" || k == "ANY_TABLE" {
+				arg = "TABLE " + arg // #2120: a table parameter, given on
+			}
+			call = append(call, arg)
 		}
 		if len(call) != len(args) {
 			continue

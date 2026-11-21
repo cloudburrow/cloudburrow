@@ -452,6 +452,13 @@ var routinesRoute = regexp.MustCompile(`^(/bigquery/v2)?/projects/([^/]+)/datase
 // (measured: a SQL function routines.insert made was called), and DROP
 // SCHEMA drops it with its dataset.
 func (f front) insertRoutine(w http.ResponseWriter, r *http.Request, project string) {
+	if m := routinesRoute.FindStringSubmatch(r.URL.EscapedPath()); m != nil {
+		if ds, err := url.PathUnescape(m[3]); err == nil {
+			if def := readRoutineRequest(r); def != nil && f.insertTableRoutine(w, r, project, ds, def) { // #2120
+				return
+			}
+		}
+	}
 	rec := newRecorder()
 	f.next.ServeHTTP(rec, r)
 	var made struct {

@@ -12230,6 +12230,7 @@
           "test/compat/bigquerytransactions_test.go:118 TestBigQueryScriptTransactionsMore",
           "test/compat/bigquerytransactions_test.go:236 TestBigQueryScriptRangeVariables",
           "test/compat/bigquerytransactions_test.go:24 TestBigQueryScriptTransactions",
+          "test/compat/bigquerytvftables2120_test.go:269 TestBqTableFunctionTableParameter",
           "test/compat/bigquerytxncolumns2012_test.go:114 TestBigQueryTenThousandColumnsQueriesAndDDL",
           "test/compat/bigquerytxncolumns2012_test.go:35 TestBigQueryStreamingBufferDMLInTransaction",
           "test/compat/bigqueryundelete1483_test.go:204 TestBigQueryTableDecorators",
@@ -12526,6 +12527,7 @@
           "test/compat/bigquerytransactions_test.go:118 TestBigQueryScriptTransactionsMore",
           "test/compat/bigquerytransactions_test.go:236 TestBigQueryScriptRangeVariables",
           "test/compat/bigquerytransactions_test.go:24 TestBigQueryScriptTransactions",
+          "test/compat/bigquerytvftables2120_test.go:41 TestBigQueryTableFunctionTableParameters",
           "test/compat/bigquerytxncolumns2012_test.go:114 TestBigQueryTenThousandColumnsQueriesAndDDL",
           "test/compat/bigquerytxncolumns2012_test.go:35 TestBigQueryStreamingBufferDMLInTransaction",
           "test/compat/bigqueryundelete1483_test.go:41 TestBigQueryUndeleteKeepsMore",
@@ -12662,6 +12664,8 @@
           "test/compat/bigqueryroutines_test.go:144 TestConsoleBigQueryRoutines",
           "test/compat/bigqueryroutines_test.go:29 TestBigQueryRoutinesListGetDelete",
           "test/compat/bigquerytimes_test.go:22 TestBigQueryResourceTimesInMilliseconds",
+          "test/compat/bigquerytvftables2120_test.go:269 TestBqTableFunctionTableParameter",
+          "test/compat/bigquerytvftables2120_test.go:41 TestBigQueryTableFunctionTableParameters",
           "test/compat/bigqueryundeleteroutines_test.go:43 TestBigQueryUndeleteKeepsRoutinesAndModels",
           "test/compat/terraform_iam_test.go:224 TestTerraformBigQueryIAM"
         ]
@@ -12683,6 +12687,7 @@
           "test/compat/bigquerypurge1781_test.go:36 TestBigQueryPurgedProjectStartsEmpty",
           "test/compat/bigqueryquerydialect_test.go:97 TestBigQueryParametersModeOfAProcedure",
           "test/compat/bigquerytimes_test.go:22 TestBigQueryResourceTimesInMilliseconds",
+          "test/compat/bigquerytvftables2120_test.go:41 TestBigQueryTableFunctionTableParameters",
           "test/compat/bigqueryundeleteroutines_test.go:43 TestBigQueryUndeleteKeepsRoutinesAndModels",
           "test/compat/orgpolicycustom1895_bigquery_test.go:27 TestOrgPolicyCustomConstraintsBigQuery",
           "test/compat/terraform_iam_test.go:224 TestTerraformBigQueryIAM"
@@ -18435,7 +18440,8 @@
         "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/ApproveQueryTemplate",
         "status": "Verified",
         "tests": [
-          "test/compat/analyticshub2101_test.go:61 TestAnalyticsHubDataCleanRoom"
+          "test/compat/analyticshub2101_test.go:61 TestAnalyticsHubDataCleanRoom",
+          "test/compat/bigquerytvftables2120_test.go:161 TestAnalyticsHubCleanRoomTableTemplate"
         ]
       },
       {
@@ -18459,7 +18465,8 @@
         "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/CreateQueryTemplate",
         "status": "Verified",
         "tests": [
-          "test/compat/analyticshub2101_test.go:61 TestAnalyticsHubDataCleanRoom"
+          "test/compat/analyticshub2101_test.go:61 TestAnalyticsHubDataCleanRoom",
+          "test/compat/bigquerytvftables2120_test.go:161 TestAnalyticsHubCleanRoomTableTemplate"
         ]
       },
       {
@@ -18601,14 +18608,16 @@
         "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/SubmitQueryTemplate",
         "status": "Verified",
         "tests": [
-          "test/compat/analyticshub2101_test.go:61 TestAnalyticsHubDataCleanRoom"
+          "test/compat/analyticshub2101_test.go:61 TestAnalyticsHubDataCleanRoom",
+          "test/compat/bigquerytvftables2120_test.go:161 TestAnalyticsHubCleanRoomTableTemplate"
         ]
       },
       {
         "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/SubscribeDataExchange",
         "status": "Verified",
         "tests": [
-          "test/compat/analyticshub2101_test.go:61 TestAnalyticsHubDataCleanRoom"
+          "test/compat/analyticshub2101_test.go:61 TestAnalyticsHubDataCleanRoom",
+          "test/compat/bigquerytvftables2120_test.go:161 TestAnalyticsHubCleanRoomTableTemplate"
         ]
       },
       {
