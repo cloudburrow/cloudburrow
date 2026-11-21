@@ -159,12 +159,19 @@ func TestLegacyMySQLServed(t *testing.T) {
 	if err := legacyRefusal(base); err != nil {
 		t.Errorf("a standalone ZONAL MYSQL_5_7 instance: %v", err)
 	}
-	replica, regional := base, base
+	// Read replicas, REGIONAL and external replicas run in 5.7's and
+	// 5.6's statements (#1524); a physical sync is XtraBackup 8.0's.
+	replica, regional, external, physical := base, base, base, base
 	replica.MasterInstanceName, regional.AvailabilityType = "p", "REGIONAL"
-	for _, sp := range []Spec{replica, regional} {
-		if err := legacyRefusal(sp); err == nil || !strings.Contains(errStatus(err), "501") {
-			t.Errorf("%+v: %v, want 501", sp, err)
+	external.External = &ExternalSource{}
+	physical.External = &ExternalSource{Physical: true}
+	for _, sp := range []Spec{replica, regional, external} {
+		if err := legacyRefusal(sp); err != nil {
+			t.Errorf("%+v: %v", sp, err)
 		}
+	}
+	if err := legacyRefusal(physical); err == nil || !strings.Contains(errStatus(err), "501") {
+		t.Errorf("a MYSQL_5_7 physical external sync: %v, want 501", err)
 	}
 	// A major version upgrade goes one version at a time: 5.6 to 5.7, 5.7
 	// to 8.0, where the node runs the images.
@@ -194,7 +201,48 @@ func TestLegacyMySQLServed(t *testing.T) {
 	if err := noAMD.copyRefusal("MYSQL_5_7", "instances.clone"); err == nil || !strings.Contains(errStatus(err), "501") {
 		t.Errorf("cloning a MYSQL_5_7 instance where the node cannot run it: %v, want 501", err)
 	}
-	if err := legacyRefusal(Spec{Name: "b", DatabaseVersion: "MYSQL_5_6", MasterInstanceName: "p"}); err == nil || !strings.Contains(errStatus(err), "501") {
-		t.Errorf("a MYSQL_5_6 read replica: %v, want 501", err)
+	if err := legacyRefusal(Spec{Name: "b", DatabaseVersion: "MYSQL_5_6", MasterInstanceName: "p"}); err != nil {
+		t.Errorf("a MYSQL_5_6 read replica: %v", err)
+	}
+	for _, v := range []string{"MYSQL_5_6", "MYSQL_5_7"} {
+		if err := limitedUnimplemented(v, "a blue-green deployment"); err != nil {
+			t.Errorf("limitedUnimplemented(%s): %v", v, err)
+		}
+	}
+	if err := mysql56BlueGreenErr("a"); !strings.Contains(errStatus(err), "400") {
+		t.Errorf("a MYSQL_5_6 blue-green deployment: %v, want 400", err)
+	}
+}
+
+// MySQL 8.0's replication statements in 5.7's and 5.6's names (#1524).
+func TestMySQLDialect(t *testing.T) {
+	const in = "CHANGE REPLICATION SOURCE TO SOURCE_HOST = 'h', SOURCE_PORT = 3306, SOURCE_AUTO_POSITION = 1, SOURCE_SSL = 1; " +
+		"START REPLICA; SET PERSIST super_read_only = ON; START REPLICA UNTIL SOURCE_LOG_FILE = 'f', SOURCE_LOG_POS = 4; " +
+		"SET PERSIST rpl_semi_sync_source_wait_point = 'AFTER_SYNC'; SET PERSIST rpl_semi_sync_source_wait_for_replica_count = 1; " +
+		"SET PERSIST rpl_semi_sync_source_enabled = ON; INSTALL PLUGIN rpl_semi_sync_replica SONAME 'semisync_replica.so'; " +
+		"sed -n 's/^ *Relay_Source_Log_File: //p'; echo $CLOUDSQL_SOURCE_HOST; SHOW REPLICA STATUS; " +
+		"SELECT VARIABLE_VALUE FROM performance_schema.global_status"
+	if got := MySQLDialect("MYSQL_8_0_41", in); got != in {
+		t.Errorf("8.0: %q", got)
+	}
+	want57 := "CHANGE MASTER TO MASTER_HOST = 'h', MASTER_PORT = 3306, MASTER_AUTO_POSITION = 1, MASTER_SSL = 1; " +
+		"START SLAVE; SET GLOBAL super_read_only = ON; START SLAVE UNTIL MASTER_LOG_FILE = 'f', MASTER_LOG_POS = 4; " +
+		"SET GLOBAL rpl_semi_sync_master_wait_point = 'AFTER_SYNC'; SET GLOBAL rpl_semi_sync_master_wait_for_slave_count = 1; " +
+		"SET GLOBAL rpl_semi_sync_master_enabled = ON; INSTALL PLUGIN rpl_semi_sync_slave SONAME 'semisync_slave.so'; " +
+		"sed -n 's/^ *Relay_Master_Log_File: //p'; echo $CLOUDSQL_SOURCE_HOST; SHOW SLAVE STATUS; " +
+		"SELECT VARIABLE_VALUE FROM performance_schema.global_status"
+	if got := MySQLDialect("MYSQL_5_7", in); got != want57 {
+		t.Errorf("5.7:\n got %q\nwant %q", got, want57)
+	}
+	want56 := "CHANGE MASTER TO MASTER_HOST = 'h', MASTER_PORT = 3306, MASTER_AUTO_POSITION = 1, MASTER_SSL = 0; " +
+		"START SLAVE; SET GLOBAL read_only = ON; START SLAVE UNTIL MASTER_LOG_FILE = 'f', MASTER_LOG_POS = 4; " +
+		"SET GLOBAL rpl_semi_sync_master_enabled = ON; INSTALL PLUGIN rpl_semi_sync_slave SONAME 'semisync_slave.so'; " +
+		"sed -n 's/^ *Relay_Master_Log_File: //p'; echo $CLOUDSQL_SOURCE_HOST; SHOW SLAVE STATUS; " +
+		"SELECT VARIABLE_VALUE FROM information_schema.GLOBAL_STATUS"
+	if got := MySQLDialect("MYSQL_5_6", in); got != want56 {
+		t.Errorf("5.6:\n got %q\nwant %q", got, want56)
+	}
+	if got := mysqlUpsertUser("MYSQL_5_6", "u", "p", "REPLICATION SLAVE"); len(got) != 1 || !strings.HasPrefix(got[0], "GRANT REPLICATION SLAVE ON *.* TO 'u'@'%' IDENTIFIED BY ") {
+		t.Errorf("5.6 user: %q", got)
 	}
 }

@@ -254,7 +254,7 @@ func (p *sqlProvisioner) Failover(ctx context.Context, from, to sqladmin.Spec) e
 	// Every transaction the old primary committed, the standby had
 	// flushed; promotion replays what it has and ends recovery.
 	if to.MySQL() {
-		if out, err := p.mysqlScript(ctx, newPrimary, mysqlPromoteStandby); err != nil {
+		if out, err := p.mysqlScript(ctx, to.DatabaseVersion, newPrimary, mysqlPromoteStandby); err != nil {
 			return fmt.Errorf("promote the standby %s: %v %s", newPrimary, err, out)
 		}
 	} else {
@@ -273,10 +273,11 @@ func (p *sqlProvisioner) Failover(ctx context.Context, from, to sqladmin.Spec) e
 }
 
 // mysqlScript runs a shell script, after mysqlRootEnv, in deployment's
-// server.
-func (p *sqlProvisioner) mysqlScript(ctx context.Context, deployment, script string) (string, error) {
+// server, which runs version: MySQL 8.0's statements are 5.7's or 5.6's
+// on those (sqladmin.MySQLDialect, #1524).
+func (p *sqlProvisioner) mysqlScript(ctx context.Context, version, deployment, script string) (string, error) {
 	var out strings.Builder
-	err := nodeExec(p.cfg, deployment)(ctx, nil, &out, "sh", "-c", "set -e\n"+mysqlRootEnv+script)
+	err := nodeExec(p.cfg, deployment)(ctx, nil, &out, "sh", "-c", "set -e\n"+mysqlRootEnv+sqladmin.MySQLDialect(version, script))
 	return strings.TrimSpace(out.String()), err
 }
 
@@ -332,12 +333,23 @@ else
   mysql $MYSQL_LOCAL -e "SET GLOBAL gtid_purged = '$(src mysql -N -e 'SELECT @@GLOBAL.gtid_executed')'"
 fi
 users=$(src mysql -N -e "SELECT CONCAT(QUOTE(user), '@', QUOTE(host)) FROM mysql.user WHERE user NOT IN ('root', '` + sqladmin.MySQLAdminUser + `', 'mysql.sys', 'mysql.session', 'mysql.infoschema')")
+v56=; case "$(mysql $MYSQL_LOCAL -N -e 'SELECT VERSION()')" in 5.6*) v56=1 ;; esac
 {
   echo 'SET SESSION sql_log_bin = 0;'
   # A primary whose 'root'@'%' the user deleted (#1993) has a standby without one.
-  [ "$(src mysql -N -e "SELECT COUNT(*) FROM mysql.user WHERE user = 'root' AND host = '%'")" != 0 ] || echo "DROP USER IF EXISTS 'root'@'%';"
+  if [ "$(src mysql -N -e "SELECT COUNT(*) FROM mysql.user WHERE user = 'root' AND host = '%'")" = 0 ]; then
+    if [ -n "$v56" ]; then echo "DROP USER 'root'@'%';"; else echo "DROP USER IF EXISTS 'root'@'%';"; fi
+  fi
   for u in $users; do
-    src mysql -N --init-command='SET SESSION print_identified_with_as_hex = ON' -e "SHOW CREATE USER $u" | sed 's/^CREATE USER /CREATE USER IF NOT EXISTS /; s/$/;/'
+    if [ -n "$v56" ]; then
+      # MySQL 5.6 has no SHOW CREATE USER (#1524): the account from its
+      # password hash, then its grants without it.
+      src mysql -N -r -e "SELECT CONCAT('CREATE USER ', QUOTE(user), '@', QUOTE(host), IF(password = '', '', CONCAT(' IDENTIFIED BY PASSWORD ', QUOTE(password))), ';') FROM mysql.user WHERE CONCAT(QUOTE(user), '@', QUOTE(host)) = \"$u\""
+      src mysql -N -r -e "SHOW GRANTS FOR $u" | grep -v '^GRANT PROXY ON ' | sed -E "s/ IDENTIFIED BY PASSWORD '[^']*'//; s/$/;/"
+      continue
+    fi
+    { src mysql -N -r -e "SET SESSION print_identified_with_as_hex = ON; SHOW CREATE USER $u" 2>/dev/null ||
+      src mysql -N -r -e "SHOW CREATE USER $u"; } | sed 's/^CREATE USER /CREATE USER IF NOT EXISTS /; s/$/;/'
     src mysql -N -e "SHOW GRANTS FOR $u" | sed 's/$/;/'
   done
 } | mysql $MYSQL_LOCAL
@@ -369,8 +381,14 @@ const mysqlSemiSync = `mysql $MYSQL_LOCAL -e "SET PERSIST rpl_semi_sync_source_w
 // committed (AFTER_SYNC).
 const mysqlPromoteStandby = `q() { mysql $MYSQL_LOCAL -N -e "$1"; }
 q 'STOP REPLICA IO_THREAD'
-set=$(q "SELECT RECEIVED_TRANSACTION_SET FROM performance_schema.replication_connection_status" | tr -d '\n')
-[ "$(q "SELECT WAIT_FOR_EXECUTED_GTID_SET('$set', 120)")" = 0 ] || { echo "the standby did not apply $set" >&2; exit 1; }
+case "$(q 'SELECT VERSION()')" in
+5.6*) # no replication_connection_status, no WAIT_FOR_EXECUTED_GTID_SET (#1524)
+  set=$(mysql $MYSQL_LOCAL -e 'SHOW REPLICA STATUS\G' | sed -n '/Retrieved_Gtid_Set:/,/Executed_Gtid_Set:/p' | sed 's/.*Retrieved_Gtid_Set://; /Executed_Gtid_Set:/d' | tr -d ' \n')
+  [ -z "$set" ] || [ "$(q "SELECT WAIT_UNTIL_SQL_THREAD_AFTER_GTIDS('$set', 120)")" -ge 0 ] || { echo "the standby did not apply $set" >&2; exit 1; } ;;
+*)
+  set=$(q "SELECT RECEIVED_TRANSACTION_SET FROM performance_schema.replication_connection_status" | tr -d '\n')
+  [ "$(q "SELECT WAIT_FOR_EXECUTED_GTID_SET('$set', 120)")" = 0 ] || { echo "the standby did not apply $set" >&2; exit 1; } ;;
+esac
 q "STOP REPLICA; RESET REPLICA ALL; SET PERSIST rpl_semi_sync_replica_enabled = OFF; SET PERSIST super_read_only = OFF; SET PERSIST read_only = OFF"
 `
 
@@ -382,7 +400,7 @@ func (p *sqlProvisioner) mysqlStandby(ctx context.Context, spec sqladmin.Spec) e
 		if spec.HAEpochs == [2]int{} {
 			return nil
 		}
-		if out, err := p.mysqlScript(ctx, primary, `[ "$(mysql $MYSQL_LOCAL -N -e "SELECT COUNT(*) FROM information_schema.plugins `+
+		if out, err := p.mysqlScript(ctx, spec.DatabaseVersion, primary, `[ "$(mysql $MYSQL_LOCAL -N -e "SELECT COUNT(*) FROM information_schema.plugins `+
 			`WHERE plugin_name = 'rpl_semi_sync_source'")" = 0 ] || mysql $MYSQL_LOCAL -e 'SET PERSIST rpl_semi_sync_source_enabled = OFF'`); err != nil {
 			return fmt.Errorf("turn semi-synchronous replication off on %s: %w %s", primary, err, out)
 		}
@@ -393,7 +411,7 @@ func (p *sqlProvisioner) mysqlStandby(ctx context.Context, spec sqladmin.Spec) e
 		_, err := p.inst.Kubectl(ctx, append(append([]string{"-n", p.inst.Namespace, "delete"}, obj...), "--ignore-not-found", "--wait=true")...)
 		return err
 	}
-	if out, err := p.mysqlScript(ctx, primary, "set -- '"+spec.HAPassword+"'\n"+mysqlStandbySource); err != nil {
+	if out, err := p.mysqlScript(ctx, spec.DatabaseVersion, primary, "set -- '"+spec.HAPassword+"'\n"+mysqlStandbySource); err != nil {
 		return fmt.Errorf("prepare %s as the standby's source: %w %s", primary, err, out)
 	}
 	b := p.nodeBackend(spec, 1-spec.PrimaryNode())
@@ -406,19 +424,19 @@ func (p *sqlProvisioner) mysqlStandby(ctx context.Context, spec sqladmin.Spec) e
 	if err := p.mysqlSystemAccounts(ctx, sb, spec); err != nil {
 		return err
 	}
-	if out, err := p.mysqlScript(ctx, sb, mysqlStandbySetup); err != nil {
+	if out, err := p.mysqlScript(ctx, spec.DatabaseVersion, sb, mysqlStandbySetup); err != nil {
 		return fmt.Errorf("start the standby %s: %w %s", sb, err, out)
 	}
-	if out, err := p.mysqlScript(ctx, primary, mysqlSemiSync); err != nil {
+	if out, err := p.mysqlScript(ctx, spec.DatabaseVersion, primary, mysqlSemiSync); err != nil {
 		return fmt.Errorf("turn semi-synchronous replication on on %s: %w %s", primary, err, out)
 	}
 	// The standby negotiates semi-synchronous replication when it
 	// connects: it reconnects, and the primary is done once it counts it.
-	if out, err := p.mysqlScript(ctx, sb, `mysql $MYSQL_LOCAL -e 'STOP REPLICA IO_THREAD; START REPLICA IO_THREAD'`); err != nil {
+	if out, err := p.mysqlScript(ctx, spec.DatabaseVersion, sb, `mysql $MYSQL_LOCAL -e 'STOP REPLICA IO_THREAD; START REPLICA IO_THREAD'`); err != nil {
 		return fmt.Errorf("reconnect the standby %s: %w %s", sb, err, out)
 	}
 	for {
-		out, err := p.mysqlScript(ctx, primary, `mysql $MYSQL_LOCAL -N -e "SELECT VARIABLE_VALUE FROM performance_schema.global_status `+
+		out, err := p.mysqlScript(ctx, spec.DatabaseVersion, primary, `mysql $MYSQL_LOCAL -N -e "SELECT VARIABLE_VALUE FROM performance_schema.global_status `+
 			`WHERE VARIABLE_NAME IN ('Rpl_semi_sync_source_status', 'Rpl_semi_sync_source_clients') ORDER BY VARIABLE_NAME"`)
 		if f := strings.Fields(out); err == nil && len(f) == 2 && f[0] != "0" && f[1] == "ON" {
 			return nil

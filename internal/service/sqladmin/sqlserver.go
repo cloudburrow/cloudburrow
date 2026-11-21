@@ -236,13 +236,11 @@ func sqlServerUnimplemented(what string) error {
 }
 
 // limitedUnimplemented is the 501 for what on an instance of version that
-// serves only its server, databases, users, flags and connections: MySQL
-// 5.7 and 5.6, and SQL Server. nil for any other version.
+// serves only its server, databases, users, flags and connections: SQL
+// Server. nil for any other version: MySQL 5.7 and 5.6 serve replicas,
+// demotion and blue-green deployments in their own statements (#1524).
 func limitedUnimplemented(version, what string) error {
-	switch {
-	case legacyMySQL(version):
-		return legacyUnimplemented(what)
-	case IsSQLServer(version):
+	if IsSQLServer(version) {
 		return sqlServerUnimplemented(what)
 	}
 	return nil

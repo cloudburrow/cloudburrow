@@ -499,7 +499,7 @@ func (m *MySQL) exec(ctx context.Context, stmts ...string) error {
 	}
 	defer db.Close()
 	for _, s := range stmts {
-		if _, err := db.ExecContext(ctx, s); err != nil {
+		if _, err := db.ExecContext(ctx, MySQLDialect(m.Version, s)); err != nil {
 			return myError(err)
 		}
 	}
@@ -524,7 +524,7 @@ func (m *MySQL) execUnlogged(ctx context.Context, stmts ...string) error {
 	}
 	defer conn.Close()
 	for _, s := range append([]string{"SET SESSION sql_log_bin = 0"}, stmts...) {
-		if _, err := conn.ExecContext(ctx, s); err != nil {
+		if _, err := conn.ExecContext(ctx, MySQLDialect(m.Version, s)); err != nil {
 			return myError(err)
 		}
 	}

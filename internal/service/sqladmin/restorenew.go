@@ -214,7 +214,7 @@ func (s *Server) restoreToNewInstance(r *http.Request, base, project, dest strin
 		}
 		s.setState(dest, "PENDING_CREATE")
 		ctx, cancel := context.WithTimeout(context.Background(), startTimeout)
-		err := b.dumper.Load(ctx, DumpTarget{Instance: dest, MySQL: spec.MySQL(), Created: true}, b.runDir(cp.ID))
+		err := b.dumper.Load(ctx, DumpTarget{Instance: dest, MySQL: spec.MySQL(), Created: true, Version: spec.DatabaseVersion}, b.runDir(cp.ID))
 		cancel()
 		if err == nil {
 			err = s.takePITRBase(dest)

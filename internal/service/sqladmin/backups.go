@@ -31,6 +31,9 @@ type DumpTarget struct {
 	// Created is whether the instance was created through the API, rather
 	// than being a server `up` runs.
 	Created bool
+	// Version is its databaseVersion, when known: a MySQL 5.7 or 5.6
+	// server runs its recovery steps in its own statements (#1524).
+	Version string
 }
 
 // Dumper takes and loads backups.
@@ -177,7 +180,8 @@ func (s *Server) target(e Engine) DumpTarget {
 	s.emu.RLock()
 	defer s.emu.RUnlock()
 	created := s.writes != nil && s.writes.byName[e.Instance()] != nil
-	return DumpTarget{Instance: e.Instance(), MySQL: strings.HasPrefix(e.DatabaseVersion(), "MYSQL_"), Created: created}
+	return DumpTarget{Instance: e.Instance(), MySQL: strings.HasPrefix(e.DatabaseVersion(), "MYSQL_"), Created: created,
+		Version: e.DatabaseVersion()}
 }
 
 func backupRunJSON(base string, r *BackupRun) map[string]any {
@@ -698,7 +702,7 @@ func (s *Server) cloneInstance(r *http.Request, base, project string, e Engine) 
 			return
 		}
 		s.setState(dest, "PENDING_CREATE")
-		dst := DumpTarget{Instance: dest, MySQL: spec.MySQL(), Created: true}
+		dst := DumpTarget{Instance: dest, MySQL: spec.MySQL(), Created: true, Version: spec.DatabaseVersion}
 		var err error
 		if coords != nil {
 			err = s.copyToCoordinates(src, dst, *coords)

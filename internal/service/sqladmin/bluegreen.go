@@ -226,6 +226,9 @@ func (s *Server) createBlueGreen(r *http.Request, base, project, location string
 	if err := limitedUnimplemented(bc.spec.DatabaseVersion, "a blue-green deployment"); err != nil {
 		return nil, err
 	}
+	if bc.spec.DatabaseVersion == "MYSQL_5_6" {
+		return nil, mysql56BlueGreenErr(blue)
+	}
 	target := ""
 	if body.RequestedConfig != nil {
 		target = body.RequestedConfig.DatabaseVersion
