@@ -480,6 +480,23 @@ var (
 	polEnvErr  error
 )
 
+// allowlistRe is allowlistedDomains.list's filter: "Currently, only exact
+// matches on the domain are supported, such as \"domain = 'google.com'\",
+// with no composite conditions" (cloudidentity v1 discovery document).
+var allowlistRe = regexp.MustCompile(`^\s*domain\s*==?\s*(?:'([^']*)'|"([^"]*)")\s*$`)
+
+// allowlistFilter reads that filter: the one domain it matches, or "".
+func allowlistFilter(f string) (string, error) {
+	if strings.TrimSpace(f) == "" {
+		return "", nil
+	}
+	m := allowlistRe.FindStringSubmatch(f)
+	if m == nil {
+		return "", apierror.InvalidArgument("Invalid filter %q: only an exact match on the domain is supported, as domain = 'example.com', with no composite conditions.", f)
+	}
+	return m[1] + m[2], nil
+}
+
 // policyFilter compiles list's CEL filter over setting and customer.
 func policyFilter(f string) (func(*ci.Policy) bool, error) {
 	if strings.TrimSpace(f) == "" {
@@ -778,8 +795,9 @@ func (r *Registry) customerRoutes(rt *rest.Router) {
 	})
 
 	rt.Handle("GET /v1/allowlistedDomains", func(w http.ResponseWriter, req *http.Request) error {
-		if f := req.URL.Query().Get("filter"); f != "" {
-			return apierror.Unimplemented("Not implemented here: allowlistedDomains.list's filter, whose syntax Google does not document.")
+		only, err := allowlistFilter(req.URL.Query().Get("filter"))
+		if err != nil {
+			return err
 		}
 		size, err := listSize(req, 50, 100)
 		if err != nil {
@@ -792,10 +810,13 @@ func (r *Registry) customerRoutes(rt *rest.Router) {
 		keys := []string{}
 		byKey := map[string]*ci.AllowlistedDomain{}
 		for _, d := range all {
+			if only != "" && !strings.EqualFold(d.Domain, only) {
+				continue
+			}
 			keys = append(keys, d.Name)
 			byKey[d.Name] = d
 		}
-		page, next, err := pageOfSize(req, "allowlist", keys, size)
+		page, next, err := pageOfSize(req, "allowlist"+only, keys, size)
 		if err != nil {
 			return err
 		}

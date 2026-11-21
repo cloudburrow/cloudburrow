@@ -16468,7 +16468,8 @@
         "method": "cloudidentity.allowlistedDomains.list",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudidentity2103_test.go:418 TestCloudIdentityInvitationsPolicies2103"
+          "test/compat/cloudidentity2103_test.go:418 TestCloudIdentityInvitationsPolicies2103",
+          "test/compat/cloudidentitysearch2103_test.go:27 TestCloudIdentitySearch2103"
         ]
       },
       {
@@ -16559,7 +16560,8 @@
         "method": "cloudidentity.devices.deviceUsers.clientStates.list",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudidentity2103_test.go:253 TestCloudIdentityDevices2103"
+          "test/compat/cloudidentity2103_test.go:253 TestCloudIdentityDevices2103",
+          "test/compat/cloudidentitysearch2103_test.go:27 TestCloudIdentitySearch2103"
         ]
       },
       {
@@ -16587,7 +16589,8 @@
         "method": "cloudidentity.devices.deviceUsers.list",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudidentity2103_test.go:253 TestCloudIdentityDevices2103"
+          "test/compat/cloudidentity2103_test.go:253 TestCloudIdentityDevices2103",
+          "test/compat/cloudidentitysearch2103_test.go:27 TestCloudIdentitySearch2103"
         ]
       },
       {
@@ -16615,7 +16618,8 @@
         "method": "cloudidentity.devices.list",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudidentity2103_test.go:253 TestCloudIdentityDevices2103"
+          "test/compat/cloudidentity2103_test.go:253 TestCloudIdentityDevices2103",
+          "test/compat/cloudidentitysearch2103_test.go:27 TestCloudIdentitySearch2103"
         ]
       },
       {

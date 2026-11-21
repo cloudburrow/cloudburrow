@@ -442,8 +442,15 @@ func (r *Registry) directoryRoutes(rt *rest.Router) {
 		if domain != "" && normEmail(domain) != OrganizationDomain {
 			return apierror.NotFound("Domain not found.")
 		}
-		if q.Get("query") != "" {
-			return apierror.Unimplemented("Not implemented here: users.list's query; list every user and filter, or use a dynamic group's query.")
+		uq, err := parseUserQuery(q.Get("query"))
+		if err != nil {
+			return err
+		}
+		for _, c := range uq {
+			// orgUnitPath "Requires viewType=admin_view".
+			if c.field == "orgUnitPath" && q.Get("viewType") == "domain_public" {
+				return apierror.InvalidArgument("Invalid Input: query on orgUnitPath requires viewType=admin_view.")
+			}
 		}
 		size := 100
 		if s := q.Get("maxResults"); s != "" {
@@ -453,9 +460,16 @@ func (r *Registry) directoryRoutes(rt *rest.Router) {
 			}
 			size = n
 		}
-		us, err := r.Users()
+		all, err := r.Users()
 		if err != nil {
 			return err
+		}
+		ix := newUserIndex(all)
+		var us []*DirectoryUser
+		for _, u := range all {
+			if uq.matches(u, ix) {
+				us = append(us, u)
+			}
 		}
 		key := func(u *DirectoryUser) string { return u.Email() }
 		switch ob := q.Get("orderBy"); ob {
@@ -481,7 +495,7 @@ func (r *Registry) directoryRoutes(rt *rest.Router) {
 			keys[i] = u.ID()
 			byKey[u.ID()] = u
 		}
-		page, next, err := pageOfSize(req, "users:"+q.Get("orderBy")+q.Get("sortOrder"), keys, size)
+		page, next, err := pageOfSize(req, "users:"+q.Get("orderBy")+q.Get("sortOrder")+q.Get("query"), keys, size)
 		if err != nil {
 			return err
 		}

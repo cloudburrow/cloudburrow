@@ -46,10 +46,9 @@ import (
 //   - list's view (COMPANY_INVENTORY, USER_ASSIGNED_DEVICES), orderBy
 //     (createTime, lastSyncTime, model, osVersion, deviceType,
 //     serialNumber, optionally desc), page sizes (devices 20 up to 100,
-//     device users 5 up to 20, larger coerced), and the "Mobile device
-//     search fields" filter terms serial:, model:, os:, type:, status:,
-//     email:, owner:, imei:, meid:, manufacturer:, brand:, id: and a bare
-//     word (a serial number), separated by spaces;
+//     device users 5 up to 20, larger coerced), and the filter's Mobile
+//     device search fields (devicesearch.go), which clientStates.list's
+//     filter also takes;
 //   - lookup ("Must be set to 'me'"), for the caller's own device users,
 //     matched by the device's deviceId (rawResourceId, androidId or
 //     iosDeviceId);
@@ -71,6 +70,13 @@ type DeviceRecord struct {
 	// BeforeWipe is the device's state before a pending wipe.
 	BeforeWipe string        `json:"beforeWipe,omitempty"`
 	Users      []*DeviceUser `json:"users,omitempty"`
+	// Apps, Hardware, HardwareID and ManagementType are what the device
+	// reports that the API's resource has no field for, searched by the
+	// apps:, hardware:, hid: and management_type: filter fields.
+	Apps           []string `json:"apps,omitempty"`
+	Hardware       string   `json:"hardware,omitempty"`
+	HardwareID     string   `json:"hardwareId,omitempty"`
+	ManagementType string   `json:"managementType,omitempty"`
 }
 
 // DeviceUser is a stored device user with its client states.
@@ -370,6 +376,18 @@ type SignInInput struct {
 	OSVersion    string `json:"osVersion"`
 	Manufacturer string `json:"manufacturer"`
 	UserAgent    string `json:"userAgent"`
+	// LanguageCode is the device user's language (default en-US).
+	LanguageCode string `json:"languageCode"`
+	// Attributes are the device's other reported attributes, in the
+	// Devices API's resource: a non-empty field replaces the stored one.
+	// Name, owner, state, times and serial number are not taken from it.
+	Attributes *ci.GoogleAppsCloudidentityDevicesV1Device `json:"attributes"`
+	// Apps, Hardware, HardwareID and ManagementType ("advanced" or
+	// "basic") are reported attributes with no field in the resource.
+	Apps           []string `json:"apps"`
+	Hardware       string   `json:"hardware"`
+	HardwareID     string   `json:"hardwareId"`
+	ManagementType string   `json:"managementType"`
 }
 
 // SignIn is a managed user signing in on a device: the company-owned
@@ -401,7 +419,15 @@ func (r *Registry) SignIn(in SignInInput) (*DeviceRecord, *DeviceUser, error) {
 	now := ciTime(r.now())
 	if d == nil {
 		d = &DeviceRecord{Device: &ci.GoogleAppsCloudidentityDevicesV1Device{Name: "devices/" + newDeviceID(), OwnerType: "BYOD",
-			SerialNumber: in.SerialNumber, DeviceType: in.DeviceType}}
+			SerialNumber: in.SerialNumber, DeviceType: in.DeviceType, CreateTime: now}}
+	}
+	switch in.ManagementType {
+	case "", "advanced", "basic":
+	default:
+		return nil, nil, apierror.InvalidArgument("Invalid managementType %q: it is advanced or basic.", in.ManagementType)
+	}
+	if err := mergeReported(d, in); err != nil {
+		return nil, nil, err
 	}
 	if d.Device.ManagementState == "WIPED" {
 		return nil, nil, apierror.FailedPrecondition("The device %s has been wiped.", d.Device.Name)
@@ -413,17 +439,61 @@ func (r *Registry) SignIn(in SignInInput) (*DeviceRecord, *DeviceUser, error) {
 			*kv[0] = *kv[1]
 		}
 	}
+	lang := "en-US"
+	if in.LanguageCode != "" {
+		lang = in.LanguageCode
+	}
 	for _, u := range d.Users {
 		if u.User.UserEmail == email {
 			u.User.LastSyncTime = now
+			if in.LanguageCode != "" {
+				u.User.LanguageCode = lang
+			}
 			return d, u, r.putDeviceLocked(d)
 		}
 	}
 	u := &DeviceUser{User: &ci.GoogleAppsCloudidentityDevicesV1DeviceUser{Name: dev.Name + "/deviceUsers/" + newDeviceID(),
 		UserEmail: email, ManagementState: "PENDING_APPROVAL", CreateTime: now, FirstSyncTime: now, LastSyncTime: now,
-		UserAgent: in.UserAgent, CompromisedState: "NOT_COMPROMISED", PasswordState: "PASSWORD_SET", LanguageCode: "en-US"}}
+		UserAgent: in.UserAgent, CompromisedState: "NOT_COMPROMISED", PasswordState: "PASSWORD_SET", LanguageCode: lang}}
 	d.Users = append(d.Users, u)
 	return d, u, r.putDeviceLocked(d)
+}
+
+// mergeReported takes a sign-in's reported attributes into the device.
+func mergeReported(d *DeviceRecord, in SignInInput) error {
+	if in.Attributes != nil {
+		cur, err := json.Marshal(d.Device)
+		if err != nil {
+			return apierror.Internal(err, "encode device")
+		}
+		a := *in.Attributes
+		a.Name, a.OwnerType, a.ManagementState, a.CreateTime, a.LastSyncTime, a.SerialNumber, a.DeviceType, a.AssetTag = "", "", "", "", "", "", "", ""
+		rep, err := json.Marshal(&a)
+		if err != nil {
+			return apierror.Internal(err, "encode attributes")
+		}
+		var m, add map[string]any
+		_ = json.Unmarshal(cur, &m)
+		_ = json.Unmarshal(rep, &add)
+		for k, v := range add {
+			m[k] = v
+		}
+		b, _ := json.Marshal(m)
+		var dev ci.GoogleAppsCloudidentityDevicesV1Device
+		if err := json.Unmarshal(b, &dev); err != nil {
+			return apierror.InvalidArgument("Invalid attributes: %v", err)
+		}
+		d.Device = &dev
+	}
+	if in.Apps != nil {
+		d.Apps = in.Apps
+	}
+	for _, kv := range [][2]*string{{&d.Hardware, &in.Hardware}, {&d.HardwareID, &in.HardwareID}, {&d.ManagementType, &in.ManagementType}} {
+		if *kv[1] != "" {
+			*kv[0] = *kv[1]
+		}
+	}
+	return nil
 }
 
 // SyncDevice is the device checking in: a pending wipe is carried out.
@@ -446,96 +516,6 @@ func (r *Registry) SyncDevice(name string) (*DeviceRecord, error) {
 		}
 	}
 	return d, r.putDeviceLocked(d)
-}
-
-// deviceFilter is a devices.list filter: field:value terms, all of
-// which must match.
-type deviceFilter [][2]string
-
-var deviceFilterFields = map[string]bool{"serial": true, "model": true, "os": true, "type": true, "status": true, "email": true,
-	"owner": true, "imei": true, "meid": true, "manufacturer": true, "brand": true, "id": true}
-
-var documentedDeviceFields = []string{"apps", "bootloader_version", "build_number", "carrier", "compromised_status", "default_language",
-	"encryption_status", "endpoint_verification_cert_fingerprint", "endpoint_verification_cert_thumbprint", "hardware", "hid",
-	"kernel_version", "mac_address", "management_type", "name", "privilege", "register", "security_patch_level", "sync"}
-
-func parseDeviceFilter(s string) (deviceFilter, error) {
-	var out deviceFilter
-	for _, term := range strings.Fields(s) {
-		k, v, ok := strings.Cut(term, ":")
-		if !ok {
-			out = append(out, [2]string{"serial", term})
-			continue
-		}
-		k = strings.ToLower(k)
-		if !deviceFilterFields[k] {
-			for _, f := range documentedDeviceFields {
-				if f == k {
-					return nil, apierror.Unimplemented("Not implemented here: the %s: search field of devices.list's filter; serial:, model:, os:, type:, status:, email:, owner:, imei:, meid:, manufacturer:, brand: and id: are evaluated.", k)
-				}
-			}
-			return nil, apierror.InvalidArgument("Invalid filter %q: unknown search field %s.", s, k)
-		}
-		out = append(out, [2]string{k, v})
-	}
-	return out, nil
-}
-
-var statusWords = map[string][]string{"pending": {"PENDING", "PENDING_APPROVAL"}, "approved": {"APPROVED"}, "blocked": {"BLOCKED"},
-	"account_wiped": {"WIPED"}, "wiped": {"WIPED"}, "wiping": {"WIPING"}, "unprovisioned": {"UNPROVISIONED"}}
-
-func prefixFold(s, p string) bool { return strings.HasPrefix(strings.ToLower(s), strings.ToLower(p)) }
-
-// matches is whether the device (and, for a device user's listing, the
-// user) passes every term.
-func (f deviceFilter) matches(d *DeviceRecord, only *DeviceUser) bool {
-	dev := d.Device
-	users := d.Users
-	if only != nil {
-		users = []*DeviceUser{only}
-	}
-	for _, t := range f {
-		v := t[1]
-		ok := false
-		switch t[0] {
-		case "serial":
-			ok = prefixFold(dev.SerialNumber, v)
-		case "model":
-			ok = prefixFold(dev.Model, v)
-		case "os":
-			ok = prefixFold(dev.OsVersion, v)
-		case "type":
-			ok = strings.EqualFold(strings.ReplaceAll(dev.DeviceType, "_", ""), strings.ReplaceAll(v, "_", ""))
-		case "owner":
-			ok = strings.EqualFold(dev.OwnerType, v) || (strings.EqualFold(v, "company") && dev.OwnerType == "COMPANY")
-		case "imei":
-			ok = prefixFold(dev.Imei, v)
-		case "meid":
-			ok = prefixFold(dev.Meid, v)
-		case "manufacturer":
-			ok = prefixFold(dev.Manufacturer, v)
-		case "brand":
-			ok = prefixFold(dev.Brand, v)
-		case "id":
-			ok = strings.TrimPrefix(dev.Name, "devices/") == v || dev.DeviceId == v
-		case "status":
-			for _, st := range statusWords[strings.ToLower(v)] {
-				if only != nil && only.User.ManagementState == st || only == nil && dev.ManagementState == st {
-					ok = true
-				}
-			}
-		case "email":
-			for _, u := range users {
-				if prefixFold(u.User.UserEmail, v) {
-					ok = true
-				}
-			}
-		}
-		if !ok {
-			return false
-		}
-	}
-	return true
 }
 
 func listSize(req *http.Request, def, max int) (int, error) {
@@ -730,6 +710,7 @@ func (r *Registry) deviceRoutes(rt *rest.Router) {
 		if err != nil {
 			return err
 		}
+		names := r.userNames()
 		order, err := deviceOrder(q.Get("orderBy"))
 		if err != nil {
 			return err
@@ -756,7 +737,7 @@ func (r *Registry) deviceRoutes(rt *rest.Router) {
 			if vw == "USER_ASSIGNED_DEVICES" && len(d.Users) == 0 {
 				continue
 			}
-			if !f.matches(d, nil) {
+			if !f.matches(d, nil, names) {
 				continue
 			}
 			dev := *d.Device
@@ -834,6 +815,7 @@ func (r *Registry) deviceRoutes(rt *rest.Router) {
 		if err != nil {
 			return err
 		}
+		names := r.userNames()
 		size, err := listSize(req, 5, 20)
 		if err != nil {
 			return err
@@ -854,7 +836,7 @@ func (r *Registry) deviceRoutes(rt *rest.Router) {
 		var keys []string
 		for _, d := range devs {
 			for _, u := range d.Users {
-				if f.matches(d, u) {
+				if f.matches(d, u, names) {
 					keys = append(keys, u.User.Name)
 					byKey[u.User.Name] = u.User
 				}
@@ -910,9 +892,18 @@ func (r *Registry) deviceRoutes(rt *rest.Router) {
 		if err := checkCustomer(q.Get("customer")); err != nil {
 			return err
 		}
-		if q.Get("filter") != "" {
-			return apierror.Unimplemented("Not implemented here: clientStates.list's filter, whose syntax Google does not document.")
+		// clientStates.list's filter: "Additional restrictions when
+		// fetching list of client states" is all Google documents. Cloud
+		// Identity's device searches share one grammar, so this takes
+		// devices.list's (Mobile device search fields), evaluated over
+		// each client state's device and device user. UNVERIFIED: docs
+		// re-read 2026-11-21, still undocumented:
+		// https://docs.cloud.google.com/identity/docs/reference/rest/v1/devices.deviceUsers.clientStates/list
+		f, err := parseDeviceFilter(q.Get("filter"))
+		if err != nil {
+			return err
 		}
+		names := r.userNames()
 		dv, us := req.PathValue("device"), req.PathValue("user")
 		var states []*ci.GoogleAppsCloudidentityDevicesV1ClientState
 		if dv == "-" && us == "-" {
@@ -922,15 +913,19 @@ func (r *Registry) deviceRoutes(rt *rest.Router) {
 			}
 			for _, d := range all {
 				for _, u := range d.Users {
-					states = append(states, u.ClientStates...)
+					if f.matches(d, u, names) {
+						states = append(states, u.ClientStates...)
+					}
 				}
 			}
 		} else {
-			_, u, err := r.DeviceUserByName("devices/" + dv + "/deviceUsers/" + us)
+			d, u, err := r.DeviceUserByName("devices/" + dv + "/deviceUsers/" + us)
 			if err != nil {
 				return err
 			}
-			states = u.ClientStates
+			if f.matches(d, u, names) {
+				states = u.ClientStates
+			}
 		}
 		if states == nil {
 			states = []*ci.GoogleAppsCloudidentityDevicesV1ClientState{}
@@ -941,7 +936,7 @@ func (r *Registry) deviceRoutes(rt *rest.Router) {
 			keys[i] = s.Name
 			byKey[s.Name] = s
 		}
-		page, next, err := pageOfSize(req, "clientStates:"+dv+"/"+us, keys, 100)
+		page, next, err := pageOfSize(req, "clientStates:"+dv+"/"+us+q.Get("filter"), keys, 100)
 		if err != nil {
 			return err
 		}

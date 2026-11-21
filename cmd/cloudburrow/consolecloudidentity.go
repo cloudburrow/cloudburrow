@@ -70,11 +70,23 @@ func userStatus(u *resourcemanager.DirectoryUser) string {
 	return "ACTIVE"
 }
 
-func (p ciUsersProvider) List(_ context.Context, _ string) (console.Listing, error) {
-	l := console.Listing{NameColumn: "Email", Columns: []string{"Name", "Department", "Title", "Org unit path"}, Noun: "users", Note: directoryNote}
-	us, err := p.registry.Users()
+func (p ciUsersProvider) List(ctx context.Context, project string) (console.Listing, error) {
+	return p.ListFiltered(ctx, project, "")
+}
+
+// ListFiltered is the users, or the ones a users.list query finds, as the
+// Admin console's user search.
+func (p ciUsersProvider) ListFiltered(_ context.Context, _ string, filter string) (console.Listing, error) {
+	l := console.Listing{NameColumn: "Email", Columns: []string{"Name", "Department", "Title", "Org unit path"}, Noun: "users", Note: directoryNote,
+		ServerFilter: &console.ServerFilter{Value: filter, Placeholder: "orgDepartment=Engineering orgTitle:Manager",
+			Help: "The Directory API's user query: field, operator (= : :PREFIX* > >= < <= :[MIN,MAX]) and value, clauses separated by spaces."}}
+	us, err := p.registry.SearchUsers(filter)
 	if err != nil {
-		l.Unavailable = consoleErr(err)
+		if strings.TrimSpace(filter) == "" {
+			l.Unavailable = consoleErr(err)
+		} else {
+			l.ServerFilter.Error = consoleErr(err)
+		}
 		return l, nil
 	}
 	for _, u := range us {
@@ -196,6 +208,7 @@ func (p ciUsersProvider) Delete(_ context.Context, _ string, row string) error {
 }
 
 var _ console.Creator = ciUsersProvider{}
+var _ console.FilterLister = ciUsersProvider{}
 var _ console.Deleter = ciUsersProvider{}
 var _ console.Driller = ciUsersProvider{}
 var _ console.Editor = ciUsersProvider{}
@@ -216,11 +229,23 @@ var deviceStatusLabels = map[string]string{"APPROVED": "Approved", "BLOCKED": "B
 
 func deviceID(d *resourcemanager.DeviceRecord) string { return d.ID() }
 
-func (p ciDevicesProvider) List(_ context.Context, _ string) (console.Listing, error) {
-	l := console.Listing{NameColumn: "Device ID", Columns: []string{"Type", "Serial number", "Model", "Ownership", "Users", "Last sync"}, Noun: "devices", Note: devicesNote}
-	ds, err := p.registry.Devices()
+func (p ciDevicesProvider) List(ctx context.Context, project string) (console.Listing, error) {
+	return p.ListFiltered(ctx, project, "")
+}
+
+// ListFiltered is the devices, or the ones a devices.list filter finds
+// (the Mobile device search fields), as the Admin console's device search.
+func (p ciDevicesProvider) ListFiltered(_ context.Context, _ string, filter string) (console.Listing, error) {
+	l := console.Listing{NameColumn: "Device ID", Columns: []string{"Type", "Serial number", "Model", "Ownership", "Users", "Last sync"}, Noun: "devices", Note: devicesNote,
+		ServerFilter: &console.ServerFilter{Value: filter, Placeholder: "status:approved type:android",
+			Help: "Mobile device search fields: field:value terms separated by spaces (serial:, model:, os:, email:, name:, status:, register:2024-01-01.., …)."}}
+	ds, err := p.registry.SearchDevices(filter)
 	if err != nil {
-		l.Unavailable = consoleErr(err)
+		if strings.TrimSpace(filter) == "" {
+			l.Unavailable = consoleErr(err)
+		} else {
+			l.ServerFilter.Error = consoleErr(err)
+		}
 		return l, nil
 	}
 	for _, d := range ds {
@@ -386,6 +411,7 @@ func (p ciDevicesProvider) Delete(_ context.Context, _ string, row string) error
 }
 
 var _ console.Creator = ciDevicesProvider{}
+var _ console.FilterLister = ciDevicesProvider{}
 var _ console.Driller = ciDevicesProvider{}
 var _ console.PathActor = ciDevicesProvider{}
 
