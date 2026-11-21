@@ -65,11 +65,17 @@ type icebergTable struct {
 
 // icebergTables are the tables for Apache Iceberg, by streamKey.
 type icebergTables struct {
-	mu    sync.Mutex
-	m     map[string]icebergTable
-	path  string
-	store *bqiceberg.Store
-	logf  func(string, ...any)
+	mu sync.Mutex
+	m  map[string]icebergTable
+	// writing holds one lock a table, taken for the whole of write: every
+	// request but a GET runs syncAll, so two requests answered at once
+	// both read the rows a change left, both found them unlike Print, and
+	// both committed them, one snapshot of a change twice (main run
+	// 44845978136: 3 snapshots of an INSERT and an UPDATE).
+	writing map[string]*sync.Mutex
+	path    string
+	store   *bqiceberg.Store
+	logf    func(string, ...any)
 }
 
 func icebergStateFile(dir string) string { return filepath.Join(dir, "iceberg.json") }
@@ -318,10 +324,46 @@ func (t *icebergTables) syncFresh(r *http.Request, mk func(base string) front, k
 	return it, msg, fresh
 }
 
+// writeLock is key's lock of writing.
+func (t *icebergTables) writeLock(key string) *sync.Mutex {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.writing == nil {
+		t.writing = map[string]*sync.Mutex{}
+	}
+	l := t.writing[key]
+	if l == nil {
+		l = &sync.Mutex{}
+		t.writing[key] = l
+	}
+	return l
+}
+
+// rowsPrint is the hash of a table's schema and rows: of its rows as a
+// set, since tabledata.list promises no order and a table whose rows came
+// back in another order has not changed.
+func rowsPrint(fields []field, rows [][]any) string {
+	lines := make([]string, len(rows))
+	for i, row := range rows {
+		b, _ := json.Marshal(row)
+		lines[i] = string(b)
+	}
+	sort.Strings(lines)
+	h := sha256.New()
+	_ = json.NewEncoder(h).Encode(fields)
+	_ = json.NewEncoder(h).Encode(lines)
+	return hex.EncodeToString(h.Sum(nil))
+}
+
 // write writes key's files if its rows changed; it returns the table, the
 // hash of its rows ("" before they were read), and why its files could not
-// be written, or "".
+// be written, or "". One write of a table runs at a time (writing), and it
+// reads Print once it holds the table's lock, so a change is committed
+// once whoever else is writing it.
 func (t *icebergTables) write(r *http.Request, mk func(base string) front, key string) (icebergTable, string, string) {
+	l := t.writeLock(key)
+	l.Lock()
+	defer l.Unlock()
 	t.mu.Lock()
 	it, ok := t.m[key]
 	t.mu.Unlock()
@@ -359,10 +401,7 @@ func (t *icebergTables) write(r *http.Request, mk func(base string) front, key s
 	if status != http.StatusOK {
 		return it, "", errorMessage(got, status)
 	}
-	h := sha256.New()
-	_ = json.NewEncoder(h).Encode(meta.Schema.Fields)
-	_ = json.NewEncoder(h).Encode(rows)
-	print := hex.EncodeToString(h.Sum(nil))
+	print := rowsPrint(meta.Schema.Fields, rows)
 	if print == it.Print {
 		return it, print, ""
 	}
