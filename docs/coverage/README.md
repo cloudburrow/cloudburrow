@@ -57,6 +57,7 @@ Do not edit these files by hand.
 | [Certificate Authority Service (v1)](privateca.md) | 29 | 29 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Parameter Manager (v1)](parametermanager.md) | 22 | 22 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Dataform (v1)](dataform.md) | 74 | 73 | 0 | 0 | 1 | 0 | 0 | 0 |
+| [App Hub (v1)](apphub.md) | 31 | 31 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Workflows and Workflow Executions (v1)](workflows.md) | 10 | 10 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Kubernetes Engine API (v1)](gke.md) | 37 | 36 | 0 | 0 | 1 | 0 | 0 | 0 |
 | [BigQuery sharing (Analytics Hub) API (v1)](analyticshub.md) | 29 | 20 | 0 | 8 | 1 | 0 | 0 | 0 |

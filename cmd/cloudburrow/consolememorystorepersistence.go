@@ -94,7 +94,7 @@ func (v persistenceView) action() console.Action {
 	return console.Action{ID: persistenceActionID, Label: "Edit persistence", Title: "Persistence", Fields: []console.Field{
 		{Name: "persistence", Label: "Data persistence strategy", Type: "radio", Default: v.mode, Options: []string{"DISABLED", "AOF", "RDB"},
 			OptionLabels: map[string]string{"DISABLED": "No persistence", "AOF": "Append Only File (AOF)", "RDB": v.snapshot},
-			Help: "Without persistence the " + v.what + " keeps no data across a restart of its nodes; with it, the data comes back from the last snapshot or the append-only file."},
+			Help:         "Without persistence the " + v.what + " keeps no data across a restart of its nodes; with it, the data comes back from the last snapshot or the append-only file."},
 		{Name: "snapshotInterval", Label: "Snapshot interval", Type: "select", Default: v.interval, ShowWhen: "persistence=RDB",
 			Options: persistenceIntervals, OptionLabels: persistenceIntervalLabels},
 		{Name: "appendFsync", Label: "AOF Fsync mode", Type: "select", Default: v.fsync, ShowWhen: "persistence=AOF",
