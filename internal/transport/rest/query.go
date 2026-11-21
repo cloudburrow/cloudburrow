@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/sysparams"
@@ -289,6 +291,14 @@ func scalar(fd protoreflect.FieldDescriptor, name, v string, newMsg func() proto
 		quoted, _ := json.Marshal(v)
 		if err := protojson.Unmarshal(quoted, val.Message().Interface()); err != nil {
 			if fd.Message().FullName() == "google.protobuf.FieldMask" {
+				// gcloud sends some masks in proto (snake_case) form, as
+				// `gcloud logging buckets update` does (updateMask=
+				// retention_days), and Google takes them: each path may
+				// be either form.
+				if fm, ok := mixedFieldMask(v); ok {
+					val.Message().Interface().(*fieldmaskpb.FieldMask).Paths = fm
+					return val, nil
+				}
 				return protoreflect.Value{}, apierror.InvalidArgument("%s is not a field mask of lowerCamelCase paths: %q", name, v)
 			}
 			return protoreflect.Value{}, apierror.InvalidArgument("%s is not a valid %s: %q", name, fd.Message().Name(), v)
@@ -339,4 +349,30 @@ func camelMask(v string) string {
 		b.WriteRune(r)
 	}
 	return b.String()
+}
+
+// snakePathRe is a field mask path in proto form.
+var snakePathRe = regexp.MustCompile(`^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$`)
+
+// mixedFieldMask reads a comma-separated mask whose paths are each
+// lowerCamelCase or snake_case, as proto (snake_case) paths.
+func mixedFieldMask(v string) ([]string, bool) {
+	var out []string
+	for _, p := range strings.Split(v, ",") {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		one := &fieldmaskpb.FieldMask{}
+		quoted, _ := json.Marshal(p)
+		if err := protojson.Unmarshal(quoted, one); err == nil && len(one.GetPaths()) == 1 {
+			out = append(out, one.GetPaths()[0])
+			continue
+		}
+		if !snakePathRe.MatchString(p) {
+			return nil, false
+		}
+		out = append(out, p)
+	}
+	return out, len(out) > 0
 }

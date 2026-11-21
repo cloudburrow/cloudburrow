@@ -30,6 +30,9 @@ func (m Map) Root() map[string]any { return m }
 type Options struct {
 	// Source evaluates source("RESOURCE"); nil refuses the function.
 	Source func(arg string) (func(Record) bool, error)
+	// Index is the custom index on a field, by its CanonicalPath (index.go);
+	// nil means none.
+	Index func(path string) (Index, bool)
 }
 
 // Filter is a parsed query. A nil *Filter (an empty query) matches every
@@ -214,7 +217,13 @@ func (p *parser) primary() (node, *Error) {
 			if ferr != nil {
 				return nil, ferr
 			}
-			return p.comparison(pathLHS{fi})
+			n, cerr := p.comparison(pathLHS{fi})
+			if cmp, ok := n.(cmpNode); ok && cerr == nil && p.opts.Index != nil {
+				if ix, ok := p.opts.Index(strings.Join(fi.path, ".")); ok {
+					return indexedCmp{plain: cmp, fi: fi, ix: ix}, nil
+				}
+			}
+			return n, cerr
 		}
 		src := t
 		src.text = sourceText(p.toks[start:p.i])

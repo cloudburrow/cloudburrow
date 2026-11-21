@@ -52,7 +52,9 @@ func TestLoggingAdminFormsFollowGoogle(t *testing.T) {
 	}
 
 	label, fields = loggingBucketsProvider{}.CreateForm()
-	if label != "Create log bucket" || fields[len(fields)-1].Label != "Retention period" || fields[len(fields)-1].Default != "30" {
+	// The last step: Retention period, then Custom indexes (#2108).
+	if n := len(fields); label != "Create log bucket" || fields[n-2].Label != "Retention period" || fields[n-2].Default != "30" ||
+		fields[n-1].Label != "Custom indexes" || fields[n-1].AddLabel != "Add index" || len(fields[n-1].Group) != 2 {
 		t.Errorf("Create log bucket = %q %+v", label, fields)
 	}
 }
@@ -76,7 +78,12 @@ func TestConsoleLoggingParityActions(t *testing.T) {
 	}
 	var l console.Listing
 	getJSON200(t, sinks, &l)
-	if len(l.Items) != 1 || l.Items[0].Fields["Type"] != "Pub/Sub topic" || l.Items[0].Fields["Enabled"] != "Enabled" ||
+	// The _Required sink is listed after it, Edit, Disable and Delete
+	// greyed out (#2108).
+	if len(l.Items) != 2 || l.Items[1].Name != "projects/proj-1/sinks/_Required" || l.Items[1].Withheld["edit"] == "" || l.Items[1].Actions[1].Unavailable == "" {
+		t.Errorf("the _Required row = %+v", l.Items)
+	}
+	if len(l.Items) < 1 || l.Items[0].Fields["Type"] != "Pub/Sub topic" || l.Items[0].Fields["Enabled"] != "Enabled" ||
 		l.Items[0].Fields["Description"] != "errors out" || len(l.Items[0].Actions) != 4 || l.Items[0].Actions[1].Label != "Disable sink" || l.Items[0].Fields["Volume"] != "0 B" ||
 		l.Items[0].Actions[2].Label != "Troubleshoot sink" {
 		t.Fatalf("the Log Router row = %+v", l.Items)

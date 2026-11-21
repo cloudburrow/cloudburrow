@@ -149,7 +149,11 @@ func (p loggingSinksProvider) List(ctx context.Context, project string) (console
 		}
 		// Target: the row's actions go to ActAt, so Troubleshoot sink
 		// answers with its findings.
-		out.Items = append(out.Items, console.Resource{Name: name, Target: []string{name}, Fields: f})
+		row := console.Resource{Name: name, Target: []string{name}, Fields: f}
+		if requiredSinkName(name) {
+			row.Withheld = map[string]string{"edit": requiredSinkNoChange, "delete": requiredSinkNoChange}
+		}
+		out.Items = append(out.Items, row)
 	}
 	out.Total = len(out.Items)
 	out.RowsOpenable = true
@@ -342,7 +346,24 @@ func (loggingSinksProvider) CreateLayout() string { return console.CreateLayoutP
 // (RowMenuOrder places Edit and Delete).
 func (p loggingSinksProvider) Actions(r console.Resource) []console.Action {
 	out := []console.Action{{ID: "view", Label: "View sink details", Href: "/logs/sinks/" + url.PathEscape(r.Name)}}
-	return append(out, sinkToggle(r.Fields["Enabled"] != "Disabled"), sinkTroubleshootAction, p.sinkVolumeLink(r.Name))
+	return append(out, sinkToggleOf(r.Name, r.Fields["Enabled"] != "Disabled"), sinkTroubleshootAction, p.sinkVolumeLink(r.Name))
+}
+
+// requiredSinkNoChange is why the _Required sink's Edit, Disable and
+// Delete are greyed out: "You can't modify or delete the _Required log
+// sink" (docs.cloud.google.com/logging/docs/routing/overview, read
+// 2026-11-21; #2108).
+const requiredSinkNoChange = "You can't modify or delete the _Required log sink."
+
+func requiredSinkName(name string) bool { return strings.HasSuffix(name, "/sinks/_Required") }
+
+// sinkToggleOf is sinkToggle, greyed out on the _Required sink.
+func sinkToggleOf(name string, enabled bool) console.Action {
+	a := sinkToggle(enabled)
+	if requiredSinkName(name) {
+		a.Unavailable = requiredSinkNoChange
+	}
+	return a
 }
 
 var sinkTroubleshootAction = console.Action{ID: sinkCheckTroubleshoot, Label: "Troubleshoot sink"}
@@ -403,7 +424,7 @@ func (p loggingSinksProvider) DetailActions(ctx context.Context, project string,
 	if err != nil {
 		return nil
 	}
-	return []console.Action{sinkToggle(!s.GetDisabled()), sinkTroubleshootAction}
+	return []console.Action{sinkToggleOf(path[0], !s.GetDisabled()), sinkTroubleshootAction}
 }
 
 // ActAt performs a sink page's action.
@@ -525,6 +546,10 @@ func (p loggingSinksProvider) Detail(ctx context.Context, project string, path [
 			"Filter": e.GetFilter(), "State": enabledWord(e.GetDisabled()), "Description": orDash(e.GetDescription())}})
 	}
 	exclusions.Total = len(exclusions.Items)
+	edit := &console.EditForm{Label: "Edit sink", Fields: sinkFields(s), Note: "The name is the sink's identity and cannot change."}
+	if requiredSinkName(path[0]) {
+		edit, note = nil, requiredSinkNoChange+" It routes Admin Activity, System Event and Access Transparency audit logs that originate here to the _Required bucket; no exclusion applies to it. "+note
+	}
 	return console.Detail{
 		Summary: []console.Property{{Label: "Destination", Value: s.GetDestination()}, {Label: "State", Value: enabledWord(s.GetDisabled())},
 			{Label: "Delivery", Value: delivery}},
@@ -533,7 +558,7 @@ func (p loggingSinksProvider) Detail(ctx context.Context, project string, path [
 				Groups: []console.PropertyGroup{{Heading: "Sink", Properties: props}}, Note: note},
 			{ID: "exclusions", Label: "Exclusions", Listing: exclusions},
 		},
-		Edit: &console.EditForm{Label: "Edit sink", Fields: sinkFields(s), Note: "The name is the sink's identity and cannot change."},
+		Edit: edit,
 	}, nil
 }
 

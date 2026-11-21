@@ -72,7 +72,7 @@ func TestListSinksInScope(t *testing.T) {
 			for _, s := range ss {
 				m := s.(map[string]any)
 				names = append(names, m["name"].(string))
-				if m["name"] != "own" && m["interceptChildren"] != true {
+				if m["name"] != "own" && m["name"] != "_Required" && m["interceptChildren"] != true {
 					intercepting = false
 				}
 			}
@@ -86,8 +86,8 @@ func TestListSinksInScope(t *testing.T) {
 		filter string
 		want   []string
 	}{
-		{"", []string{"own"}},
-		{`in_scope("DEFAULT")`, []string{"own"}},
+		{"", []string{"own", "_Required"}},
+		{`in_scope("DEFAULT")`, []string{"own", "_Required"}},
 		{`in_scope("ANCESTOR")`, []string{"grab", "top"}},
 		{`in_scope("ALL")`, []string{"own", "grab", "top"}},
 	} {

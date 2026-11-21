@@ -448,7 +448,9 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			loggingSettingsProvider{screen},
 			// Saved queries and log scopes (#1519).
 			loggingSavedQueriesProvider{screen},
-			loggingLogScopesProvider{loggingAdminScreen: screen})
+			loggingLogScopesProvider{loggingAdminScreen: screen},
+			// Trace scopes (#2108), a tab of Settings beside Log Scopes.
+			loggingTraceScopesProvider{loggingAdminScreen: screen})
 		// Log Analytics (#1863), over the buckets' linked datasets in the
 		// instance's BigQuery; without BigQuery the page says it is not
 		// available.

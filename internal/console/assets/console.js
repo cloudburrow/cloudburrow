@@ -125,7 +125,7 @@ const SECRET_TABS = ["/secrets", "/secrets-regional"];
 const GKE_STORAGE = ["/kubernetes/storage", "/kubernetes/storage-classes"];
 // Cloud Logging's Settings and its Log Scopes tab (#2020), as Google's
 // Settings page has a Log Scopes tab (log-scope/create-and-manage).
-const LOGGING_SETTINGS = ["/logs/settings", "/logs/log-scopes"];
+const LOGGING_SETTINGS = ["/logs/settings", "/logs/log-scopes", "/logs/trace-scopes"];
 
 
 const ROUTES = [
@@ -703,6 +703,10 @@ const ROUTES = [
     section: "Operations", product: "logging", productTitle: "Cloud Logging" },
   // Log Scopes is a tab of Settings (#2020), as on Google.
   { path: "/logs/log-scopes", service: "logging-log-scopes", icon: "logs", title: "Settings", tabTitle: "Log Scopes", kind: "Log scope",
+    navHidden: true, navAs: "/logs/settings", pageTabs: LOGGING_SETTINGS,
+    section: "Operations", product: "logging", productTitle: "Cloud Logging" },
+  // Trace Scopes (#2108), the Observability API's trace scopes, beside it.
+  { path: "/logs/trace-scopes", service: "logging-trace-scopes", icon: "logs", title: "Settings", tabTitle: "Trace Scopes", kind: "Trace scope",
     navHidden: true, navAs: "/logs/settings", pageTabs: LOGGING_SETTINGS,
     section: "Operations", product: "logging", productTitle: "Cloud Logging" },
   { path: "/logs/exclusions", service: "logging-exclusions", icon: "logs", title: "Exclusions", kind: "Exclusion",
@@ -3438,7 +3442,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
     // where Google's menu begins with it, as a trigger's Edit, Disable,
     // Delete (#1854).
     const edit = caps.editRow ? [{
-      key: "edit", label: caps.editRow,
+      key: "edit", label: caps.editRow, unavailable: (item.withheld || {}).edit,
       run: () => editFromRow(route, (item.opens || []).length ? item.opens : [item.name], refresh),
     }] : [];
     // A row's own buttons, before its menu: a trigger's Run (#1854).
@@ -3467,7 +3471,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
       })),
       ...(caps.editRowFirst ? [] : edit),
       ...(caps.delete && !caps.deleteIcon ? [{
-        key: "delete", label: caps.deleteLabel || "Delete", destructive: true,
+        key: "delete", label: caps.deleteLabel || "Delete", destructive: true, unavailable: (item.withheld || {}).delete,
         run: () => deleteResource(route, item.name, refresh, rowBusy(item.name)),
       }] : []),
       ...(item.object ? objectActions(route, item, refresh, rowBusy(item.name)) : []),
@@ -10800,6 +10804,7 @@ const DELETE_DETAIL = {
   "logging-exclusions": "Entries it matches are stored again from now on. Entries it dropped are not brought back.",
   "logging-saved-queries": "The saved query is deleted. No log entry is removed.",
   "logging-log-scopes": "The log scope is deleted. The projects and views it named are not changed.",
+  "logging-trace-scopes": "The trace scope is deleted. The projects it named are not changed; if it was the default, _Default is again.",
   "logging-buckets": "The bucket is kept as Delete requested for 7 days and can be undeleted until then. No log entry is removed.",
   "pubsub-schemas": "Every revision is deleted with it. A topic that uses it keeps its " +
             "schema settings, which then name _deleted-schema_.",

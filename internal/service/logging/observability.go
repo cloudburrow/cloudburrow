@@ -36,8 +36,8 @@ import (
 // projects/{project}/locations/global/traceScopes/{id}, is INVALID_ARGUMENT;
 // a logScope that names a log scope the project does not hold is
 // NOT_FOUND; and an updateMask path other than logScope or traceScope is
-// INVALID_ARGUMENT. CloudBurrow serves no trace scopes, so a traceScope is
-// kept as given once its shape is checked.
+// INVALID_ARGUMENT. A traceScope must name a trace scope the project holds
+// (tracescopes.go, #2108), else NOT_FOUND.
 
 // ObservabilityScope is an Observability API Scope resource.
 type ObservabilityScope struct {
@@ -82,10 +82,20 @@ func (a *Admin) ServeObservability(w http.ResponseWriter, r *http.Request) bool 
 	if len(parts) < 3 || parts[1] != "locations" {
 		return false
 	}
+	if len(parts) >= 4 && parts[3] == "traceScopes" && len(parts) <= 5 {
+		id := ""
+		if len(parts) == 5 {
+			id = parts[4]
+		}
+		if err := a.serveTraceScopes(w, r, parts[0], parts[2], id); err != nil {
+			rest.WriteError(w, err)
+		}
+		return true
+	}
 	if len(parts) != 5 || parts[3] != "scopes" {
-		// The Observability API's other collections (buckets, trace
-		// scopes, settings, operations) are not served.
-		rest.WriteError(w, apierror.Unimplemented("the Observability API serves only projects.locations.scopes here, not %s", r.URL.Path))
+		// The Observability API's other collections (buckets, datasets,
+		// links, views, settings, operations) are not served.
+		rest.WriteError(w, apierror.Unimplemented("the Observability API serves only projects.locations.scopes and traceScopes here, not %s", r.URL.Path))
 		return true
 	}
 	if err := a.serveObservability(w, r, parts[0], parts[2], parts[4]); err != nil {
@@ -174,6 +184,9 @@ func (a *Admin) patchObservabilityScope(r *http.Request, project string) (Observ
 			m := obsTraceScopeRe.FindStringSubmatch(body.TraceScope)
 			if m == nil || m[1] != project {
 				return ObservabilityScope{}, apierror.InvalidArgument("traceScope %q is not projects/%s/locations/global/traceScopes/{trace_scope}", body.TraceScope, project)
+			}
+			if _, err := a.traceScope(project, m[2]); err != nil {
+				return ObservabilityScope{}, err // NOT_FOUND: a trace scope the project does not hold (tracescopes.go)
 			}
 			cur.TraceScope = body.TraceScope
 		default:

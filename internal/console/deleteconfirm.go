@@ -147,6 +147,8 @@ var DeleteConfirmRules = map[string]DeleteConfirmRule{
 	"logging-saved-queries": unverified,
 	// UNVERIFIED: "select Delete scope, and then complete the dialog." Its contents not described (docs re-read 2026-11-19).
 	"logging-log-scopes": unverified,
+	// UNVERIFIED: "click More, and then select Delete scope." No dialog described (docs re-read 2026-11-21).
+	"logging-trace-scopes": unverified,
 	// "confirm deletion by typing the database ID in the text field."
 	"firestore-databases": {Style: DeleteConfirmName, Source: "https://docs.cloud.google.com/firestore/native/docs/manage-databases", Verified: true},
 	// "Click Delete, and then confirm you want to delete the Task entity."
