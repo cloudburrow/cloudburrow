@@ -45,7 +45,12 @@ func TestBigQueryStudioExplorerEditorAndHistory(t *testing.T) {
 	var menu []string
 	p.eval(`[...document.querySelectorAll("#product-nav li a")].map((a) => a.textContent)`, &menu)
 	want := []string{"Studio", "Search", "Datasets", "Job history", "Data transfers", "Scheduled queries",
-		"Analytics Hub", "Dataform", "Dataform folders", "Dataform settings", "Partner Center", "Settings"}
+		"Analytics Hub", "Partner Center", "Settings"}
+	// Dataform's three pages are in the menu only where it is served
+	// (#2105), which the emulators shard's instance is not.
+	if hasService(t, "dataform") {
+		want = append(want[:7:7], "Dataform", "Dataform folders", "Dataform settings", "Partner Center", "Settings")
+	}
 	if strings.Join(menu, "|") != strings.Join(want, "|") {
 		t.Errorf("BigQuery's menu is %q, want %q", menu, want)
 	}
