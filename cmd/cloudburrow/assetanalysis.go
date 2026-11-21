@@ -56,13 +56,15 @@ import (
 // The resources under a project are its service accounts and the
 // resources of the services that list theirs for the analysis
 // (Enforcer.Resources: Secret Manager's secrets, Cloud KMS's key rings and
-// keys, Cloud Tasks's queues); other services' resources are reached only
-// through resourceSelector.
+// keys, Cloud Tasks's queues) and its Cloud Storage buckets; other services'
+// resources are reached only through resourceSelector.
 //
 // The BigQuery tables' columns are the API's JSON field names, as the
 // page's example queries read them (opName, requestTime, analysisId,
 // analysis.analysisQuery, analysisResult.identityList.identities.name, ...):
-// Google publishes no column list beyond those (UNVERIFIED).
+// Google publishes no column list beyond those
+// (UNVERIFIED, docs re-read 2026-11-21:
+// https://docs.cloud.google.com/asset-inventory/docs/analyzing-iam-policy-longrunning-bigquery).
 
 // assetOutputs are the destinations analyzeIamPolicyLongrunning writes to.
 type assetOutputs struct {
@@ -70,6 +72,68 @@ type assetOutputs struct {
 	// storage is the instance's Cloud Storage base URL, "" when it is not
 	// served.
 	storage func() string
+}
+
+// storageBuckets are a project's buckets, read through the instance's
+// Cloud Storage JSON API, for the analysis's resources under a project.
+func (o *assetOutputs) storageBuckets(ctx context.Context, project string) []iameval.ChildResource {
+	if o == nil || o.storage == nil || o.storage() == "" {
+		return nil
+	}
+	var out []iameval.ChildResource
+	token := ""
+	for i := 0; i < 100; i++ {
+		u := o.storage() + "/storage/v1/b?maxResults=1000&project=" + url.QueryEscape(project)
+		if token != "" {
+			u += "&pageToken=" + url.QueryEscape(token)
+		}
+		var page struct {
+			Items         []struct{ Name string } `json:"items"`
+			NextPageToken string                  `json:"nextPageToken"`
+		}
+		if !assetGetJSON(ctx, u, &page) {
+			return out
+		}
+		for _, b := range page.Items {
+			out = append(out, iameval.ChildResource{Name: "projects/_/buckets/" + b.Name})
+		}
+		if token = page.NextPageToken; token == "" {
+			break
+		}
+	}
+	return out
+}
+
+// storagePolicy is a bucket's IAM policy, read through the instance's
+// Cloud Storage JSON API.
+func (o *assetOutputs) storagePolicy(ctx context.Context, name string) *iampolicy.Stored {
+	bucket, ok := strings.CutPrefix(name, "projects/_/buckets/")
+	if o == nil || o.storage == nil || o.storage() == "" || !ok || strings.Contains(bucket, "/") {
+		return nil
+	}
+	var pol struct {
+		Bindings []iampolicy.Binding `json:"bindings"`
+	}
+	if !assetGetJSON(ctx, o.storage()+"/storage/v1/b/"+url.PathEscape(bucket)+"/iam?optionsRequestedPolicyVersion=3", &pol) {
+		return nil
+	}
+	return &iampolicy.Stored{Bindings: pol.Bindings}
+}
+
+func assetGetJSON(ctx context.Context, u string, out any) bool {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return false
+	}
+	resp, err := (&http.Client{Timeout: time.Minute}).Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return false
+	}
+	return json.NewDecoder(io.LimitReader(resp.Body, 16<<20)).Decode(out) == nil
 }
 
 const (
@@ -964,6 +1028,9 @@ func (v *analysisInventory) projectResources(project string) []analysisChild {
 			}
 		}
 	}
+	for _, b := range v.a.out.storageBuckets(v.ctx, project) {
+		out = append(out, analysisChild{full: "//storage.googleapis.com/" + b.Name})
+	}
 	if v.a.e != nil {
 		hosts := make([]string, 0, len(v.a.e.Resources))
 		for h := range v.a.e.Resources {
@@ -1033,6 +1100,8 @@ func (v *analysisInventory) Policy(full string) *iampolicy.Stored {
 	switch host {
 	case "cloudresourcemanager.googleapis.com", iameval.IAM.Name:
 		return v.src.Policy(name)
+	case "storage.googleapis.com":
+		return v.a.out.storagePolicy(v.ctx, name)
 	}
 	if v.a.e != nil {
 		if get := v.a.e.Policies[host]; get != nil {

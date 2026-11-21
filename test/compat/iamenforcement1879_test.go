@@ -440,12 +440,14 @@ func TestIAMEnforcementInherited(t *testing.T) {
 		t.Errorf("iam:troubleshoot secrets.delete = %s; want CANNOT_ACCESS", resp.OverallAccessState)
 	}
 
-	// Policy Analyzer finds the folder's binding.
+	// Policy Analyzer finds the folder's binding at the folder's scope: a
+	// project scope reads only the project's and its descendants' policies
+	// (#2112).
 	as1, err := asset.NewService(ctx, option.WithEndpoint(base), option.WithoutAuthentication())
 	if err != nil {
 		t.Fatal(err)
 	}
-	ar, err := as1.V1.AnalyzeIamPolicy("projects/" + project).AnalysisQueryIdentitySelectorIdentity("serviceAccount:" + p.email).
+	ar, err := as1.V1.AnalyzeIamPolicy(folder.GetName()).AnalysisQueryIdentitySelectorIdentity("serviceAccount:" + p.email).
 		AnalysisQueryAccessSelectorPermissions("secretmanager.versions.access").Context(ctx).Do()
 	if err != nil {
 		t.Fatalf("analyzeIamPolicy: %v", err)

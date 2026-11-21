@@ -38,17 +38,8 @@ import (
 // resource's project, folders and organization, rule by rule (#1886): a
 // denied permission is CANNOT_ACCESS whatever the allow policies grant.
 //
-// analyzeIamPolicy (GET v1/{scope}:analyzeIamPolicy) answers from the
-// policies of the scope (a project, folder or organization) and of the
-// project's ancestors, or, with analysisQuery.resourceSelector, of that
-// resource's chain: each binding that names the identity
-// (analysisQuery.identitySelector.identity, matched through its groups and
-// domain) and holds one of the permissions or roles
-// (analysisQuery.accessSelector), as an analysis result. Policies of a
-// service's resources are read only through resourceSelector: the
-// resources under a scope are not enumerated (UNVERIFIED against Google's
-// expanded output, which lists them; docs re-read 2026-11-19:
-// https://docs.cloud.google.com/asset-inventory/docs/analyzing-iam-policy).
+// analyzeIamPolicy and the rest of Cloud Asset's IAM policy analysis are
+// assetanalysis.go's (#2112), over internal/iameval's Analyzer.
 
 const (
 	troubleshootPath = "/v3/iam:troubleshoot"

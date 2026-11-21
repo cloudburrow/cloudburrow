@@ -180,8 +180,11 @@ COMPAT_SHARDS="storage served run crossservice scale emulators memorystore sql s
 # KMS Inventory's protected resources (#2053: a CMEK bucket and a BigQuery
 # dataset beside the key, through the client and gcloud), and Firestore's
 # and Cloud Tasks' metrics in Cloud Monitoring (#2050, Firestore or Cloud
-# Tasks with Monitoring), which no other shard serves together.
+# Tasks with Monitoring), and Cloud Asset's analyzeIamPolicyLongrunning to
+# BigQuery (#2112, Resource Manager with BigQuery), which no other shard
+# serves together.
 COMPAT_CROSSSERVICE_TEST_NAMES="ArtifactRegistryCleanupPolicies
+  CloudAssetAnalyzeIamPolicyLongrunningBigQuery
   FirestoreDocumentMetrics FirestoreStreamMetrics GcloudKMSInventory
   KMSInventoryCountsCMEKResources TasksQueueMetricsInCloudMonitoring
   GcloudPubSubTopicStoragePolicyUpdate GcloudStorageInsightsDatasetConfigs
