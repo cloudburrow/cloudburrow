@@ -26,6 +26,8 @@ func TestClientAuthSendsServerLibrariesAsTheOwner(t *testing.T) {
 		{"a Google ID token", doc, "Bearer " + other, "", ownerToken},
 		{"a Firebase ID token", doc, "Bearer " + firebase, "", "Bearer " + firebase},
 		{"an unauthenticated Firebase SDK", doc, "", "gl-js/ fire/12.0.0", ""},
+		{"a Firebase SDK as the emulator's owner", doc, "Bearer owner", "gl-js/ fire/12.0.0", "Bearer owner"},
+		{"an OAuth token with a Firebase SDK's header", doc, "Bearer ya29.local", "gl-js/ fire/12.0.0", ownerToken},
 		{"the web SDK's WebChannel", "/google.firestore.v1.Firestore/Listen/channel", "", "", ""},
 		{"an admin call", "/v1/projects/p/databases", "", "", ""},
 	} {

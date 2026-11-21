@@ -38,6 +38,9 @@ func (s *Server) Test(ctx context.Context, project string, src *Source, suite *r
 		default:
 			return nil, invalid("testSuite.testCases[%d].expectation must be ALLOW or DENY.", i)
 		}
+		if err := checkMocks(i, c.FunctionMocks); err != nil {
+			return nil, err
+		}
 	}
 	b := make([]byte, 3)
 	_, _ = rand.Read(b)
@@ -51,7 +54,23 @@ func (s *Server) Test(ctx context.Context, project string, src *Source, suite *r
 		return out, nil
 	}
 	defer clearProject(context.WithoutCancel(ctx), s.emu, scratch)
+	text := sourceText(src)
+	inForce := text
 	for _, c := range cases {
+		// The case's source: its service function calls answered by its
+		// function mocks (mocks.go).
+		mocked, err := mockedSource(text, c.FunctionMocks)
+		if err != nil {
+			return nil, err
+		}
+		if mocked != inForce {
+			if err := setRules(ctx, s.emu, scratch, mocked); err != nil {
+				out.TestResults = append(out.TestResults, failed("The function mocks could not be applied: "+err.Error()))
+				inForce = ""
+				continue
+			}
+			inForce = mocked
+		}
 		out.TestResults = append(out.TestResults, s.runCase(ctx, scratch, c))
 	}
 	return out, nil
@@ -75,9 +94,6 @@ func failed(msg string) *rules.TestResult {
 
 // runCase evaluates one case on scratch, whose documents it clears first.
 func (s *Server) runCase(ctx context.Context, scratch string, c *rules.TestCase) *rules.TestResult {
-	if len(c.FunctionMocks) > 0 {
-		return failed("Function mocks are not evaluated locally: the Firestore emulator evaluates rules against its own documents.")
-	}
 	raw, _ := json.Marshal(c.Request)
 	var req testRequest
 	if err := json.Unmarshal(raw, &req); err != nil {

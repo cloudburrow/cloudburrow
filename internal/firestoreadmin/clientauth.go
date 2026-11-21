@@ -46,15 +46,52 @@ func ClientAuth(next http.Handler) http.Handler {
 	})
 }
 
+// IsClientCall reports a documents call a Firebase client SDK made: the web
+// SDK's WebChannel, a call with a Firebase ID token, or one whose
+// x-goog-api-client names a Firebase SDK and that carries no OAuth access
+// token. Security Rules govern these calls on Google, not IAM; every other
+// call is a server client library's, which IAM governs and Rules never
+// bind.
+func IsClientCall(r *http.Request) bool {
+	return isDocumentsCall(r) && (isWebChannel(r) || isFirebaseClient(r.Header))
+}
+
+// ByCaller sends a Firebase client SDK's documents call (IsClientCall) to
+// client, and every other call to server. Under IAM enforcement server is
+// the IAM gate in front of client, so a client SDK call, whatever the
+// project's IAM policy grants, is answered by Security Rules alone, and a
+// server library's is checked by IAM (#1879, #2048).
+func ByCaller(client, server http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if IsClientCall(r) {
+			client.ServeHTTP(w, r)
+			return
+		}
+		server.ServeHTTP(w, r)
+	})
+}
+
 // isWebChannel reports the web SDK's WebChannel transport
 // (/google.firestore.v1.Firestore/Listen/channel and Write/channel).
 func isWebChannel(r *http.Request) bool {
 	return strings.HasPrefix(r.URL.Path, "/google.firestore.v1.Firestore/") && strings.HasSuffix(r.URL.Path, "/channel")
 }
 
-// isFirebaseClient reports a call a Firebase client SDK made, or one made
-// as a Firebase user.
+// isFirebaseClient reports a call made as a Firebase user, or one a
+// Firebase client SDK made with no OAuth access token: an access token
+// names an IAM principal, whose calls are a server library's, whatever
+// x-goog-api-client says. "Bearer owner", the emulator's own account, is no
+// access token.
 func isFirebaseClient(h http.Header) bool {
+	if tok, ok := strings.CutPrefix(h.Get("Authorization"), "Bearer "); ok {
+		tok = strings.TrimSpace(tok)
+		if firebaseIDToken(tok) {
+			return true
+		}
+		if tok != "" && tok != "owner" {
+			return false
+		}
+	}
 	for _, v := range h.Values("X-Goog-Api-Client") {
 		for _, f := range strings.Fields(v) {
 			if strings.HasPrefix(f, "fire/") {
@@ -62,11 +99,7 @@ func isFirebaseClient(h http.Header) bool {
 			}
 		}
 	}
-	tok, ok := strings.CutPrefix(h.Get("Authorization"), "Bearer ")
-	if !ok {
-		return false
-	}
-	return firebaseIDToken(strings.TrimSpace(tok))
+	return false
 }
 
 // firebaseIDToken reports a JWT whose issuer is Firebase Authentication's.

@@ -156,7 +156,7 @@ func TestRulesetsReleasesAndTest(t *testing.T) {
 	if _, err := c.Projects.Releases.Delete(rel.Name).Do(); err != nil {
 		t.Fatal(err)
 	}
-	if emu.rules["p"] != OpenRules {
+	if emu.rules["p"] != DenyRules {
 		t.Fatalf("deleting the release left %q", emu.rules["p"])
 	}
 	if _, err := c.Projects.Rulesets.Delete(rs.Name).Do(); err != nil {

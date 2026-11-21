@@ -115,8 +115,8 @@ func TestFirestoreRulesUsageAndInsightsThroughThePage(t *testing.T) {
 	p.clickText("#product-nav-pages a", "Security")
 	p.waitFor(`location.pathname === "/firestore-databases/(default)" && new URLSearchParams(location.search).get("tab") === "rules" &&
 		document.querySelector("#section-actions-rules button") !== null`)
-	if code := clientGet(t, addr, project, "users/alice", "bob"); code != http.StatusOK {
-		t.Errorf("before any rules are published, a client get = %d, want 200", code)
+	if code := clientGet(t, addr, project, "users/alice", "bob"); code != http.StatusForbidden {
+		t.Errorf("before any rules are published, a client get = %d, want 403, as on Google (#2050)", code)
 	}
 
 	p.clickText("#section-actions-rules button", "Edit rules")

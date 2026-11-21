@@ -9957,6 +9957,7 @@
           "test/compat/firestorecompact1969_test.go:40 TestFirestoreCompactsItsVersionsBeforeTheHeapFills",
           "test/compat/firestorepersist1615_test.go:120 TestFirestoreRestartSetup",
           "test/compat/firestorepersist1615_test.go:64 TestFirestoreSurvivesAPodRestart",
+          "test/compat/iamenforcementfirestorerules_test.go:30 TestIAMEnforcementFirestoreClientSDKRules",
           "test/compat/iamenforcementround9_1879_test.go:64 TestIAMEnforcementFirestore",
           "test/compat/optional_test.go:43 TestFirestoreDocumentCRUD"
         ]
@@ -9991,6 +9992,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/firestoremethods_test.go:59 TestFirestoreDocumentRPCs",
+          "test/compat/iamenforcementfirestorerules_test.go:30 TestIAMEnforcementFirestoreClientSDKRules",
           "test/compat/iamenforcementround9_1879_test.go:64 TestIAMEnforcementFirestore"
         ]
       },
@@ -14374,7 +14376,8 @@
         "method": "firebaserules.projects.test",
         "status": "Verified",
         "tests": [
-          "test/compat/firebaserules_test.go:92 TestFirebaseRulesReleaseEnforcesOnClientCalls"
+          "test/compat/firebaserules_test.go:92 TestFirebaseRulesReleaseEnforcesOnClientCalls",
+          "test/compat/firestorerules2050_test.go:114 TestFirebaseRulesTestFunctionMocks"
         ]
       },
       {
@@ -14382,7 +14385,9 @@
         "status": "Verified",
         "tests": [
           "test/compat/firebaserules_test.go:245 TestTerraformFirebaseRules",
-          "test/compat/firebaserules_test.go:92 TestFirebaseRulesReleaseEnforcesOnClientCalls"
+          "test/compat/firebaserules_test.go:92 TestFirebaseRulesReleaseEnforcesOnClientCalls",
+          "test/compat/firestorerules2050_test.go:42 TestFirebaseRulesNoReleaseDeniesClients",
+          "test/compat/iamenforcementfirestorerules_test.go:30 TestIAMEnforcementFirestoreClientSDKRules"
         ]
       },
       {
@@ -14413,7 +14418,9 @@
         "status": "Verified",
         "tests": [
           "test/compat/firebaserules_test.go:245 TestTerraformFirebaseRules",
-          "test/compat/firebaserules_test.go:92 TestFirebaseRulesReleaseEnforcesOnClientCalls"
+          "test/compat/firebaserules_test.go:92 TestFirebaseRulesReleaseEnforcesOnClientCalls",
+          "test/compat/firestorerules2050_test.go:42 TestFirebaseRulesNoReleaseDeniesClients",
+          "test/compat/iamenforcementfirestorerules_test.go:30 TestIAMEnforcementFirestoreClientSDKRules"
         ]
       },
       {
@@ -14451,7 +14458,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/firebaserules_test.go:245 TestTerraformFirebaseRules",
-          "test/compat/firebaserules_test.go:92 TestFirebaseRulesReleaseEnforcesOnClientCalls"
+          "test/compat/firebaserules_test.go:92 TestFirebaseRulesReleaseEnforcesOnClientCalls",
+          "test/compat/firestorerules2050_test.go:42 TestFirebaseRulesNoReleaseDeniesClients"
         ]
       }
     ]
@@ -18840,6 +18848,7 @@
         "method": "google.monitoring.v3.MetricService/ListTimeSeries",
         "status": "Verified",
         "tests": [
+          "test/compat/firestorerules2050_test.go:187 TestFirestoreStreamMetrics",
           "test/compat/firestoreusage_test.go:20 TestFirestoreDocumentMetrics",
           "test/compat/logging2021_test.go:34 TestMonitoringSinkVolumeAndIngestion",
           "test/compat/monitoring_query_test.go:288 TestMonitoringSLOCompliance",

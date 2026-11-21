@@ -65,13 +65,16 @@ func (e HTTPEmulator) Do(ctx context.Context, method, path string, header http.H
 // checkProject is the scratch project rulesets are compiled on.
 const checkProject = "cloudburrow-rules-check"
 
-// OpenRules are the rules of a project with no cloud.firestore release:
-// everything allowed, as CloudBurrow's Firestore always served.
-const OpenRules = `rules_version = '2';
+// DenyRules are the rules of a project with no cloud.firestore release,
+// as on Google: every client SDK call is denied (#2050), while server
+// client libraries, which rules never bind, still pass. The Firestore front
+// sets them itself for a project a client calls before any release
+// (firestoreadmin.DenyRules, the same text).
+const DenyRules = `rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if false;
     }
   }
 }
