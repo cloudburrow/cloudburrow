@@ -420,12 +420,14 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	computeSvc.register(coord)
 	gkeSvc.register(coord)
-	// App Hub (#2110), in process; it discovers Cloud Run's services and
-	// jobs and Kubernetes Engine's clusters.
+	// App Hub (#2110), in process; it discovers the supported resources
+	// of every served product (apphubdiscover.go).
 	appHubSvc := newAppHubService(cfg)
 	if appHubSvc != nil {
 		appHubSvc.run = runSvc
 		appHubSvc.gke = gkeSvc
+		appHubSvc.live = boundAddrs
+		appHubSvc.bigquery = func() *netfwd.Forwarder { return forwarderFor(forwarders, "bigquery") }
 	}
 	appHubSvc.register(coord)
 	if gkeSvc != nil && runSvc != nil && runSvc.events != nil {
@@ -466,6 +468,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	memorystoreAdminSvc.register(coord)
 	loggingSvc := newLoggingService(cfg)
+	// Log entries' App Hub metadata (#2096), in entries.list and the Logs
+	// Explorer.
+	appHubSvc.useLogging(loggingSvc)
 	loggingSvc.register(coord)
 	// Cloud Monitoring (#1939), in process: log-based metrics' values come
 	// from this instance's Cloud Logging, request metrics from its counters.

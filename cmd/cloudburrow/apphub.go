@@ -17,8 +17,10 @@ import (
 
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/iameval"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
+	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/service/apphub"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/telemetry"
@@ -47,6 +49,11 @@ type appHubService struct {
 	// registry is Resource Manager's: projects, numbers and app-enabled
 	// folders.
 	registry func() *resourcemanager.Registry
+	// live is every bound address, through which the other supported
+	// types are listed (apphubdiscover.go); nil lists none.
+	live func() map[string]string
+	// bigquery is BigQuery's forwarder, whose datasets are discovered.
+	bigquery func() *netfwd.Forwarder
 	server   *grpctransport.Server
 	api      *apphub.Server
 }
@@ -131,8 +138,10 @@ func (s *appHubService) Stop(ctx context.Context) error {
 }
 
 // discover lists project's resources of the supported types: Cloud Run
-// services (EXCLUSIVE services) and jobs (workloads), and Kubernetes Engine
-// clusters (SHARED services), with supported-resources' URIs.
+// services (EXCLUSIVE services), jobs and worker pools (workloads),
+// Kubernetes Engine clusters (SHARED services) and their objects, and every
+// other supported type this instance serves (appHubOtherResources), with
+// supported-resources' URIs.
 func (s *appHubService) discover(ctx context.Context, project string) ([]apphub.Resource, error) {
 	var out []apphub.Resource
 	if s.run != nil {
@@ -176,6 +185,7 @@ func (s *appHubService) discover(ctx context.Context, project string) ([]apphub.
 			}
 		}
 	}
+	out = append(out, s.appHubOtherResources(ctx, project)...)
 	return out, nil
 }
 
@@ -375,4 +385,50 @@ func useIAMEnforcementAppHub(e *iameval.Enforcer, s *appHubService) {
 		}
 		return api.IAMPolicy().GetIamPolicy
 	})
+}
+
+// logFields is the App Hub metadata (#2096) of a log entry with the
+// monitored resource resourceType and labels, flattened: that of the one
+// application its resource is registered to, nil for none.
+func (s *appHubService) logFields(resourceType string, labels map[string]string) map[string]string {
+	api := s.API()
+	if api == nil {
+		return nil
+	}
+	number := ""
+	if p := labels["project_id"]; p != "" && s.registry != nil {
+		if reg := s.registry(); reg != nil {
+			if n, ok := reg.NumberOf(p); ok {
+				number = strconv.FormatInt(n, 10)
+			}
+		}
+	}
+	for _, uri := range apphub.LogResourceURIs(resourceType, labels, number) {
+		if m, ok := api.LogMetadata(uri); ok {
+			return m
+		}
+	}
+	return nil
+}
+
+// logAppHub is logFields as LogEntry.apphub's JSON nests it.
+func (s *appHubService) logAppHub(resourceType string, labels map[string]string) map[string]any {
+	m := s.logFields(resourceType, labels)
+	if m == nil {
+		return nil
+	}
+	return apphub.LogMetadata(m).Nested()
+}
+
+// useLogging gives log entries their App Hub metadata (#2096): entries.list's
+// apphub, and the Logs Explorer's Application and Workload / Service
+// dimensions.
+func (s *appHubService) useLogging(l *loggingService) {
+	if s == nil {
+		return
+	}
+	if l != nil {
+		l.appHub = s.logAppHub
+	}
+	console.SetAppHubFields(s.logFields)
 }

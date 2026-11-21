@@ -14577,8 +14577,12 @@ async function renderLogs(view) {
   // (logs-explorer-interface, read 2026-11-20). Workload / Service is made
   // from the k8s-pod/app label (a Kubernetes container's workload) and
   // from service.name, each value adding the clause of the label it came
-  // from.
-  const LABEL_DIMENSIONS = [["Workload / Service", ['labels."k8s-pod/app"', 'labels."service.name"']]];
+  // from. Application is made from the App Hub application ID label
+  // apphub.application.id, and Workload / Service from apphub.workload.id
+  // and apphub.service.id too: the entry's apphub, which the instance
+  // fills in for a resource registered to an application (#2096).
+  const LABEL_DIMENSIONS = [["Application", ["apphub.application.id"]],
+    ["Workload / Service", ["apphub.workload.id", "apphub.service.id", 'labels."k8s-pod/app"', 'labels."service.name"']]];
   // How many json_payload fields Frequent fields lists, and values a field.
   const FREQUENT_FIELDS = 10;
   const FIELD_VALUES = 20;

@@ -178,3 +178,31 @@ func detachAppHubProject(t *testing.T, h *Harness, c *apphub.Client, project str
 	detach()
 	t.Cleanup(detach)
 }
+
+// TestTerraformAppHubMultiRegionalIsTheProvidersLimit (#2110): App Hub
+// serves MULTI_REGIONAL applications (TestAppHubMultiRegional), but
+// hashicorp/google's google_apphub_application validates scope.type
+// against ["REGIONAL", "GLOBAL"] (verify.ValidateEnum in
+// resource_apphub_application.go, 8.4.0 to main, read 2026-11-21), so a
+// plan with MULTI_REGIONAL is refused by the provider itself, before any
+// request is sent.
+func TestTerraformAppHubMultiRegionalIsTheProvidersLimit(t *testing.T) {
+	h := New(t)
+	appHubClients(t, h) // skips without CLOUDBURROW_TEST_APPHUB
+	m := newTFModule(t)
+	m.write(fmt.Sprintf(`
+resource "google_apphub_application" "mr" {
+  project        = %q
+  location       = "us"
+  application_id = "tf-mr"
+  scope {
+    type = "MULTI_REGIONAL"
+  }
+}
+`, m.project))
+	m.must("init", "-input=false", "-no-color")
+	out, err := m.tf("plan", "-input=false", "-no-color")
+	if err == nil || !strings.Contains(out, "MULTI_REGIONAL") || !strings.Contains(out, "GLOBAL") {
+		t.Fatalf("plan with MULTI_REGIONAL: %v\n%s\nwant the provider's scope.type validation error", err, out)
+	}
+}

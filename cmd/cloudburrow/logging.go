@@ -41,6 +41,8 @@ import (
 // that grew without limit on a laptop would be a problem of its own.
 type loggingService struct {
 	cfg config.Config
+	// appHub is an entry's LogEntry.apphub (#2096); nil without App Hub.
+	appHub logging.AppHubOf
 	// tracing, when on, spans gRPC calls (#600), as for Cloud Tasks.
 	tracing *telemetry.Tracing
 	calls   grpctransport.Observer
@@ -342,6 +344,9 @@ func (s *loggingService) Start(ctx context.Context) error {
 		s.admin.RegisterViewIAM(g) // log views' IAM (#1519)
 	}
 	var jsonAPI http.Handler = logging.NewRESTHandler(register)
+	// entries.list's output-only apphub (#2096), from App Hub's
+	// registrations.
+	jsonAPI = logging.WithAppHub(jsonAPI, s.appHub)
 	if s.wrapJSON != nil {
 		jsonAPI = s.wrapJSON(jsonAPI)
 	}

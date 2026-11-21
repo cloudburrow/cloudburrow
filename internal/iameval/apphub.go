@@ -16,7 +16,8 @@ import "fmt"
 // (testIamPermissions is not checked, as elsewhere). Applications keep
 // their own policies. Google's wording of a denial is UNVERIFIED: its
 // newer APIs' "Permission 'P' denied on resource 'R' (or it may not
-// exist).", with ErrorInfo IAM_PERMISSION_DENIED.
+// exist).", with ErrorInfo IAM_PERMISSION_DENIED (docs re-read 2026-11-21:
+// https://docs.cloud.google.com/app-hub/docs/reference/rest/v1).
 var AppHub = &Service{
 	Name:              "apphub.googleapis.com",
 	PolicyCollections: []string{"applications"},
