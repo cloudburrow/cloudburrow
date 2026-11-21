@@ -9,6 +9,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/authplatform"
 	"github.com/cloudburrow/cloudburrow/internal/quotalimit"
+	"github.com/cloudburrow/cloudburrow/internal/ratequota"
 	"github.com/cloudburrow/cloudburrow/internal/service/cloudquotas"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
@@ -37,8 +38,9 @@ func isSiteVerificationPath(r *http.Request) bool {
 
 // serveCloudQuotas mounts the Cloud Quotas API and the Site Verification
 // API (#2030) on the Resource Manager port, and makes the quotas the
-// services enforce read the granted preferences.
-func serveCloudQuotas(rm *resourcemanager.Server, reg *resourcemanager.Registry, su func() *serviceusage.Server, owner string, caller func(string) (string, bool)) (*cloudquotas.Server, *siteverification.Server) {
+// services enforce, the request quotas among them, read the granted
+// preferences.
+func serveCloudQuotas(rm *resourcemanager.Server, reg *resourcemanager.Registry, su func() *serviceusage.Server, requests *ratequota.Limiter, owner string, caller func(string) (string, bool)) (*cloudquotas.Server, *siteverification.Server) {
 	served := func(service string) bool {
 		if alwaysServedQuotaAPIs[service] {
 			return true
@@ -55,6 +57,11 @@ func serveCloudQuotas(rm *resourcemanager.Server, reg *resourcemanager.Registry,
 		return false
 	}
 	q := cloudquotas.NewServer(reg.Backing(), serviceUsageProjects{reg: reg}, served)
+	// The per-minute request quotas (#2090) are quotas of their services,
+	// which a preference sets.
+	if requests != nil {
+		q.AddQuotas(requestQuotaInfos(requests))
+	}
 	rm.HandleService("google.api.cloudquotas.v1", isCloudQuotasPath,
 		resourcemanager.Impl{Desc: &pb.CloudQuotas_ServiceDesc, Impl: q},
 		resourcemanager.Impl{Desc: &pb.QuotaAdjusterSettingsManager_ServiceDesc, Impl: q.Adjuster()})

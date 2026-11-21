@@ -14,7 +14,6 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/metrics"
-	"github.com/cloudburrow/cloudburrow/internal/ratequota"
 	"github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
 )
 
@@ -44,9 +43,6 @@ type serviceUsageProvider struct {
 	// metaAddr is the metadata server's address, which serves the OAuth
 	// endpoints.
 	metaAddr func() string
-	// requestQuotas are the request quotas (#2063) the Quotas & System
-	// Limits tab lists and edits for the project; nil lists none.
-	requestQuotas *ratequota.Limiter
 }
 
 func (serviceUsageProvider) ID() string    { return "serviceusage" }
