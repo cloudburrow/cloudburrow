@@ -53,8 +53,9 @@ import (
 //     Translation API's model (translateSegments, #1799);
 //     denoiserConfig.denoiseAudio denoises the audio first (RNNoise,
 //     internal/speech/denoise.go, #1799), a non-zero snrThreshold is
-//     UNIMPLEMENTED; diarizationConfig is UNIMPLEMENTED (no permissive
-//     local model, docs/compatibility.md);
+//     UNIMPLEMENTED; diarizationConfig labels each word's speaker with
+//     3D-Speaker's CAM++ in the onnx build, and is UNIMPLEMENTED without
+//     it (speechdiarize.go, #2131);
 //     adaptation biases whisper (speechbias.go), and transcriptNormalization
 //     rewrites each final transcript (speechconfig's Normalize, #1799).
 //   - each model, location, language and feature is checked against
@@ -231,6 +232,10 @@ func (s *Server) transcribeAudioMax(ctx context.Context, name string, config jso
 		return none, nil, cfg, err
 	}
 	if cfg.PerChannel {
+		if cfg.Diarization {
+			return none, nil, cfg, apierror.Unimplemented("Not implemented here: features.diarizationConfig with SEPARATE_RECOGNITION_PER_CHANNEL: " +
+				"CloudBurrow diarizes one mixed channel, and never calls Google")
+		}
 		return s.transcribeChannels(ctx, cfg, data, maxSeconds)
 	}
 	samples, err := speech.DecodeMax(cfg.Decoding, data, maxSeconds)
@@ -251,6 +256,9 @@ func (s *Server) transcribeAudioMax(ctx context.Context, name string, config jso
 	defer cancel()
 	res, cfg, err := transcribeBestFit(ctx, samples, opt, cfg)
 	if err != nil {
+		return none, nil, cfg, err
+	}
+	if err := diarizeSegments(ctx, samples, res.Segments, cfg); err != nil {
 		return none, nil, cfg, err
 	}
 	normalize(res.Segments, cfg, resultLanguage(cfg, res))
@@ -404,7 +412,8 @@ func (s *Server) transcribeOptions(cfg speechconfig.Config) (speech.Options, err
 	if err != nil {
 		return speech.Options{}, err
 	}
-	return speech.Options{Language: cfg.Language, Words: cfg.Words, Phrases: phrases, Prompt: prompt}, nil
+	// Diarization labels whisper's words, so it needs their timestamps.
+	return speech.Options{Language: cfg.Language, Words: cfg.Words || cfg.Diarization, Phrases: phrases, Prompt: prompt}, nil
 }
 
 // checkLanguage refuses a language the local Whisper model does not know.
@@ -543,7 +552,7 @@ func recognizeResponse(res speech.Result, samples []float32, f speechconfig.Conf
 		if f.TranslateTo == "" {
 			alt["confidence"] = math.Round(seg.Confidence*1e6) / 1e6
 		}
-		if (f.WordOffsets || f.WordConfidence) && f.TranslateTo == "" {
+		if (f.WordOffsets || f.WordConfidence || f.Diarization) && f.TranslateTo == "" {
 			var words []any
 			for _, wd := range seg.Words {
 				m := map[string]any{"word": wd.Text}
@@ -552,6 +561,9 @@ func recognizeResponse(res speech.Result, samples []float32, f speechconfig.Conf
 				}
 				if f.WordConfidence {
 					m["confidence"] = math.Round(wd.Confidence*1e6) / 1e6
+				}
+				if wd.Speaker > 0 {
+					m["speakerLabel"] = strconv.Itoa(wd.Speaker)
 				}
 				words = append(words, m)
 			}

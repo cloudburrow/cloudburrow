@@ -68,6 +68,9 @@ type Word struct {
 	Text       string
 	Start, End time.Duration
 	Confidence float64
+	// Speaker is who spoke it, from 1, when the audio was diarized
+	// (internal/speaker, #2131), 0 otherwise.
+	Speaker int
 }
 
 // Segment is one stretch of speech whisper.cpp recognised.

@@ -51,8 +51,8 @@ import (
 //     snrThreshold (#1799) silences the half-second windows whose
 //     signal-to-noise ratio is below it: at 1 the sentence is still read,
 //     at 1000 none of it is. diarizationConfig is INVALID_ARGUMENT on
-//     chirp_2 (no diarization in the supported languages table) and stays
-//     UNIMPLEMENTED on chirp_3.
+//     chirp_2 (no diarization in the supported languages table) and
+//     UNIMPLEMENTED on chirp_3 without the onnx build (#2131).
 //
 // Speech-to-Text v1's Recognize (cloud.google.com/go/speech/apiv1) takes
 // enable_spoken_punctuation, enable_spoken_emojis and profanity_filter too,
@@ -248,8 +248,13 @@ func TestSpeechRecognitionFeatures1799(t *testing.T) {
 		}
 	}
 
-	// Diarization: not a feature of chirp_2; chirp_3's (in us) not served.
-	for model, want := range map[string]codes.Code{"chirp_2": codes.InvalidArgument, "chirp_3": codes.Unimplemented} {
+	// Diarization: not a feature of chirp_2; chirp_3's (in us) served by
+	// the onnx build only (TestSpeechDiarization2131, #2131).
+	chirp3 := codes.Unimplemented
+	if os.Getenv(EnvONNX) != "" {
+		chirp3 = codes.OK
+	}
+	for model, want := range map[string]codes.Code{"chirp_2": codes.InvalidArgument, "chirp_3": chirp3} {
 		loc := map[string]string{"chirp_2": "us-central1", "chirp_3": "us"}[model]
 		cfg := &speechv2pb.RecognitionConfig{Model: model, LanguageCodes: []string{"en-US"}, DecodingConfig: auto,
 			Features: &speechv2pb.RecognitionFeatures{DiarizationConfig: &speechv2pb.SpeakerDiarizationConfig{}}}

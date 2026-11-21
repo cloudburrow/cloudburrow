@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -97,8 +98,6 @@ func v1Config(c *speechv1pb.RecognitionConfig) (json.RawMessage, error) {
 		return nil, unimpl("alternative_language_codes")
 	case c.GetEnableSeparateRecognitionPerChannel():
 		return nil, unimpl("enable_separate_recognition_per_channel")
-	case c.GetDiarizationConfig().GetEnableSpeakerDiarization():
-		return nil, unimpl("diarization_config")
 	case c.GetTranscriptNormalization() != nil:
 		return nil, unimpl("transcript_normalization")
 	case len(c.GetAdaptation().GetPhraseSetReferences()) > 0:
@@ -178,6 +177,20 @@ func v1Config(c *speechv1pb.RecognitionConfig) (json.RawMessage, error) {
 	}
 	if c.GetEnableSpokenEmojis().GetValue() {
 		features["enableSpokenEmojis"] = true
+	}
+	if dc := c.GetDiarizationConfig(); dc.GetEnableSpeakerDiarization() {
+		// v1's defaults: "If not set, the default value is 2" and 6.
+		lo, hi := dc.GetMinSpeakerCount(), dc.GetMaxSpeakerCount()
+		if lo == 0 {
+			lo = 2
+		}
+		if hi == 0 {
+			hi = 6
+		}
+		if lo > hi {
+			return nil, apierror.InvalidArgument("diarization_config.min_speaker_count %d is greater than max_speaker_count %d", lo, hi)
+		}
+		features["diarizationConfig"] = map[string]any{"minSpeakerCount": lo, "maxSpeakerCount": hi}
 	}
 	if n := c.GetMaxAlternatives(); n != 0 {
 		features["maxAlternatives"] = n
@@ -261,6 +274,9 @@ func (s *Server) v1Checked(c *speechv1pb.RecognitionConfig, single bool) (speech
 	if err != nil {
 		return cfg, speech.Options{}, err
 	}
+	if err := cfg.Unserved(); err != nil {
+		return cfg, speech.Options{}, apierror.Unimplemented("%v", err)
+	}
 	opt, err := s.transcribeOptions(cfg)
 	return cfg, opt, err
 }
@@ -297,6 +313,24 @@ func v1Results(res speech.Result, cfg speechconfig.Config) []*speechv1pb.SpeechR
 		out = append(out, &speechv1pb.SpeechRecognitionResult{Alternatives: []*speechv1pb.SpeechRecognitionAlternative{v1Alternative([]speech.Segment{seg}, cfg)},
 			ResultEndTime: durationpb.New(seg.End), LanguageCode: code})
 	}
+	if cfg.Diarization && len(res.Segments) > 0 {
+		// The speakers, in one last result of every word (speechdiarize.go).
+		last := &speechv1pb.SpeechRecognitionAlternative{}
+		for _, seg := range res.Segments {
+			for _, w := range seg.Words {
+				wi := &speechv1pb.WordInfo{Word: w.Text, SpeakerTag: int32(w.Speaker), SpeakerLabel: strconv.Itoa(w.Speaker)}
+				if cfg.WordOffsets {
+					wi.StartTime, wi.EndTime = durationpb.New(w.Start), durationpb.New(w.End)
+				}
+				if cfg.WordConfidence {
+					wi.Confidence = float32(w.Confidence)
+				}
+				last.Words = append(last.Words, wi)
+			}
+		}
+		out = append(out, &speechv1pb.SpeechRecognitionResult{Alternatives: []*speechv1pb.SpeechRecognitionAlternative{last},
+			ResultEndTime: durationpb.New(res.Segments[len(res.Segments)-1].End), LanguageCode: code})
+	}
 	return out
 }
 
@@ -330,6 +364,9 @@ func (s *Server) v1Transcribe(ctx context.Context, cfg speechconfig.Config, opt 
 	res, err := speech.Transcribe(ctx, samples, opt)
 	if err != nil {
 		return res, nil, speechError(err)
+	}
+	if err := diarizeSegments(ctx, samples, res.Segments, cfg); err != nil {
+		return res, nil, err
 	}
 	return res, samples, nil
 }
@@ -403,6 +440,10 @@ func (v *speechV1Service) StreamingRecognize(stream speechv1pb.Speech_StreamingR
 	cfg, opt, err := v.s.v1Checked(sc.GetConfig(), sc.GetSingleUtterance())
 	if err != nil {
 		return grpcError(err)
+	}
+	if cfg.Diarization {
+		return grpcError(apierror.Unimplemented("Not implemented here: diarization_config in StreamingRecognize: CloudBurrow diarizes " +
+			"the whole audio at once (Recognize and LongRunningRecognize), and never calls Google"))
 	}
 	if err := v.s.checkStreamLanguage(stream.Context(), cfg); err != nil {
 		return grpcError(err)

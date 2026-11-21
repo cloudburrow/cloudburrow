@@ -41,9 +41,12 @@ type Options struct {
 	// without it, a model that does not punctuate by itself
 	// (PunctuatesByDefault) answers with the punctuation removed.
 	AutomaticPunctuation bool
-	// Diarization is a features.diarizationConfig: UNIMPLEMENTED
-	// (Unserved) where the table allows it.
-	Diarization bool
+	// Diarization is a features.diarizationConfig, served by
+	// internal/speaker in the onnx build and UNIMPLEMENTED (Unserved)
+	// without it, where the table allows it. MinSpeakers and MaxSpeakers
+	// are its minSpeakerCount and maxSpeakerCount, 0 when unset.
+	Diarization              bool
+	MinSpeakers, MaxSpeakers int
 }
 
 // Encodings are ExplicitDecodingConfig's AudioEncoding values, true for
@@ -419,7 +422,25 @@ func parse(raw []byte) (Decoding, string, Options, int, error) {
 		case f.MaxAlternatives < 0 || f.MaxAlternatives > 30:
 			return d, "", opt, 400, fmt.Errorf("features.maxAlternatives %d is out of range: valid values are 0-30", f.MaxAlternatives)
 		}
-		opt = Options{Words: f.EnableWordTimeOffsets || f.EnableWordConfidence, WordOffsets: f.EnableWordTimeOffsets, WordConfidence: f.EnableWordConfidence,
+		var dz struct {
+			Min      int `json:"minSpeakerCount"`
+			Max      int `json:"maxSpeakerCount"`
+			MinSnake int `json:"min_speaker_count"`
+			MaxSnake int `json:"max_speaker_count"`
+		}
+		if len(f.DiarizationConfig) > 0 && string(f.DiarizationConfig) != "null" {
+			if err := json.Unmarshal(f.DiarizationConfig, &dz); err != nil {
+				return d, "", opt, 400, fmt.Errorf("invalid features.diarizationConfig: %v", err)
+			}
+			dz.Min, dz.Max = max(dz.Min, dz.MinSnake), max(dz.Max, dz.MaxSnake)
+			switch {
+			case dz.Min < 0 || dz.Max < 0:
+				return d, "", opt, 400, fmt.Errorf("features.diarizationConfig: minSpeakerCount and maxSpeakerCount must not be negative")
+			case dz.Min > 0 && dz.Max > 0 && dz.Min > dz.Max:
+				return d, "", opt, 400, fmt.Errorf("features.diarizationConfig: minSpeakerCount %d is greater than maxSpeakerCount %d", dz.Min, dz.Max)
+			}
+		}
+		opt = Options{MinSpeakers: dz.Min, MaxSpeakers: dz.Max, Words: f.EnableWordTimeOffsets || f.EnableWordConfidence, WordOffsets: f.EnableWordTimeOffsets, WordConfidence: f.EnableWordConfidence,
 			PerChannel:      f.MultiChannelMode == "SEPARATE_RECOGNITION_PER_CHANNEL",
 			ProfanityFilter: f.ProfanityFilter, SpokenPunctuation: f.EnableSpokenPunctuation, SpokenEmojis: f.EnableSpokenEmojis,
 			AutomaticPunctuation: f.EnableAutomaticPunctuation, Diarization: f.DiarizationConfig != nil && string(f.DiarizationConfig) != "null"}

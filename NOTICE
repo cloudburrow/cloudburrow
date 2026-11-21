@@ -140,6 +140,17 @@ mediapipe/tasks/cc/text/language_detector/custom_ops), Copyright 2023 The
 MediaPipe Authors, under the Apache License, Version 2.0;
 third_party/mediapipe-langid/PROVENANCE.md records the source and digest.
 
+The -tags onnx build's speaker diarization (internal/speaker) runs 3D-Speaker's
+CAM++ speaker-embedding model (https://github.com/modelscope/3D-Speaker,
+iic/speech_campplus_sv_zh_en_16k-common_advanced), Copyright Alibaba DAMO
+Academy (Speech Lab), under the Apache License, Version 2.0, in the ONNX export
+published by the sherpa-onnx project (https://github.com/k2-fsa/sherpa-onnx,
+Copyright Xiaomi Corporation, Apache License, Version 2.0). The model is not
+embedded: it is fetched at run time and checked against the SHA-256 pinned in
+internal/localai/speaker.go. internal/speaker's filter-bank features
+reimplement Kaldi's compute-fbank-feats (https://github.com/kaldi-asr/kaldi,
+Apache License, Version 2.0) in Go.
+
 internal/syntaxnet runs SyntaxNet's Parsey McParseface tagger and parser
 (https://github.com/tensorflow/models, research/syntaxnet, tag v1.13.0),
 Copyright 2016 Google Inc., under the Apache License, Version 2.0: its feature

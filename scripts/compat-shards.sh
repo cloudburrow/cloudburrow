@@ -153,7 +153,7 @@ COMPAT_LOCALAI_TEST_NAMES="
   GenerateContentThroughTheOfficialSDK
   GenerationNeverUsesApplicationDefaultCredentials
   RawPredictOnTheEmbeddingModel RawPredictOnTheGenerationModel
-  SpeechAdaptationBoost SpeechAdaptationResources SpeechBatchRecognize
+  SpeechAdaptationBoost SpeechAdaptationResources SpeechBatchRecognize SpeechDiarization2131
   SpeechRecognitionFeatures1799 SpeechRecognizers SpeechStreamingRecognize SpeechV1
   SpeechV1AdaptationResources
   StreamGenerateContentThroughTheOfficialSDK

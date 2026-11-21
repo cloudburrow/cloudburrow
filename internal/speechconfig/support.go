@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"unicode"
+
+	"github.com/cloudburrow/cloudburrow/internal/speaker"
 )
 
 // The feature matrix (#2127): which languages each model takes in each
@@ -251,15 +253,18 @@ func StripPunctuation(text string) string {
 	return strings.Join(strings.Fields(b.String()), " ")
 }
 
-// Unserved is the 501 of a feature the table allows but CloudBurrow cannot
-// serve locally: speaker diarization, which chirp_3 offers. Google
-// publishes no speaker model, and the permissive ones (WeSpeaker, 3D-Speaker)
-// need ONNX Runtime, which the static CLI lacks (docs/gaps.md, #2131).
-// Callers ask it after CheckV2 or CheckV1.
+// Unserved is the 501 of a feature the table allows but this binary cannot
+// serve locally: speaker diarization (chirp_3's, and v1's models'), which
+// internal/speaker answers with 3D-Speaker's CAM++ model on ONNX Runtime,
+// in the opt-in `-tags onnx` build only (#2131). Google publishes no
+// speaker model, and the static CLI has no ONNX Runtime. Callers ask it
+// after CheckV2 or CheckV1.
 func (c Config) Unserved() error {
 	if c.Diarization {
-		return fmt.Errorf("Not implemented here: features.diarizationConfig of Speech-to-Text: CloudBurrow transcribes locally with whisper.cpp, " +
-			"which has no equivalent, and never calls Google")
+		if err := speaker.Unavailable(); err != nil {
+			return fmt.Errorf("Not implemented here: features.diarizationConfig of Speech-to-Text: CloudBurrow transcribes locally with whisper.cpp, "+
+				"which has no speaker identities, and never calls Google: %v", err)
+		}
 	}
 	return nil
 }

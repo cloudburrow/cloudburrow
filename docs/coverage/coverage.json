@@ -6951,7 +6951,8 @@
         "method": "google.cloud.speech.v2.Speech/BatchRecognize",
         "status": "Verified",
         "tests": [
-          "test/compat/speech_test.go:321 TestSpeechBatchRecognize"
+          "test/compat/speech_test.go:321 TestSpeechBatchRecognize",
+          "test/compat/speechdiarization2131_test.go:47 TestSpeechDiarization2131"
         ]
       },
       {
@@ -7055,6 +7056,7 @@
         "tests": [
           "test/compat/speech_test.go:321 TestSpeechBatchRecognize",
           "test/compat/speech_test.go:80 TestSpeechRecognizers",
+          "test/compat/speechdiarization2131_test.go:47 TestSpeechDiarization2131",
           "test/compat/speechfeatures_test.go:62 TestSpeechRecognitionFeatures1799",
           "test/compat/speechmatrix2127_test.go:46 TestSpeechFeatureMatrix2127",
           "test/compat/speechstream_test.go:59 TestSpeechAdaptationBoost"
@@ -7266,6 +7268,7 @@
         "method": "google.cloud.speech.v1.Speech/Recognize",
         "status": "Verified",
         "tests": [
+          "test/compat/speechdiarization2131_test.go:47 TestSpeechDiarization2131",
           "test/compat/speechfeatures_test.go:62 TestSpeechRecognitionFeatures1799",
           "test/compat/speechmatrix2127_test.go:46 TestSpeechFeatureMatrix2127",
           "test/compat/speechstream_test.go:230 TestSpeechV1"
