@@ -1,12 +1,14 @@
 package components
 
 import (
+	"encoding/base64"
 	"fmt"
 	"net"
 	"sort"
 	"strings"
 
 	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/rediscmek"
 	"github.com/cloudburrow/cloudburrow/internal/redistlsfront"
 )
 
@@ -709,7 +711,25 @@ type MemorystoreSettings struct {
 	// FrontImage, Instance and Namespace are TLSFront's image, the
 	// instance's server name and its Services' namespace.
 	FrontImage, Instance, Namespace string
+
+	// CMEK, when set, is a customer-managed key (#2113): the server's
+	// persistence files are kept sealed with the instance's data key
+	// (internal/rediscmek), never in the clear on a disk.
+	CMEK *MemorystoreCMEK
 }
+
+// MemorystoreCMEK is a Memorystore server's customer-managed key: Key, the
+// CryptoKey that wrapped the data key Wrapped, which the server's pod asks
+// the Cloud KMS at KMS (host:port, gRPC) to unwrap; the keeper is
+// cloudburrow-storage from Image.
+type MemorystoreCMEK struct {
+	Image, Key, KMS string
+	Wrapped         []byte
+}
+
+// MemorystoreSealedDir is where a CMEK server's volume is mounted, for its
+// sealed files (#2113): the server's own directory, /data, is in memory.
+const MemorystoreSealedDir = "/sealed"
 
 // memorystoreBindPodAndLoopback6 is the bind PodAndLoopback6 adds:
 // hostname -i is the pod's address, from the hosts file the kubelet writes.
@@ -896,6 +916,23 @@ func MemorystoreServerOf(o MemorystoreSettings) Backend {
 		} else {
 			b.Args = append([]string{"sh", "-c", rm + `exec docker-entrypoint.sh "$@"`, "sh"}, b.Args...)
 		}
+	}
+	if o.CMEK != nil {
+		// The keeper unwraps the data key, opens the sealed files into the
+		// memory directory, then runs the image's own entrypoint with the
+		// server's arguments, as without it.
+		args := []string{"memorystore-cmek", "--plain", "/data", "--sealed", MemorystoreSealedDir,
+			"--key", o.CMEK.Key, "--kms", o.CMEK.KMS}
+		if forget {
+			args = append(args, "--forget")
+		}
+		b.Sealed = &Sealed{Image: o.CMEK.Image, PullPolicy: "Never", Dir: MemorystoreSealedDir, Args: args}
+		b.Command = []string{"docker-entrypoint.sh"}
+		env := map[string]string{rediscmek.EnvWrapped: base64.StdEncoding.EncodeToString(o.CMEK.Wrapped)}
+		for k, v := range b.Env {
+			env[k] = v
+		}
+		b.Env = env
 	}
 	if o.PodAndLoopback6 {
 		if len(b.Args) > 2 && b.Args[0] == "sh" {

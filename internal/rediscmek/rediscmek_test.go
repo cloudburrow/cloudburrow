@@ -94,3 +94,25 @@ func TestUnwrapRefusedKey(t *testing.T) {
 		t.Fatalf("Unwrap = %d bytes, %v", len(dek), err)
 	}
 }
+
+// Forget empties the sealed directory and keeps it: it is a volume's
+// mount point (persistence_config DISABLED, #2113).
+func TestForgetKeepsTheDirectory(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "g1"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "g1", "appendonly.aof"+Suffix), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Forget(dir); err != nil {
+		t.Fatal(err)
+	}
+	ents, err := os.ReadDir(dir)
+	if err != nil || len(ents) != 0 {
+		t.Errorf("after Forget: %v, %v", ents, err)
+	}
+	if err := Forget(filepath.Join(dir, "missing")); err != nil {
+		t.Errorf("Forget of a missing directory: %v", err)
+	}
+}

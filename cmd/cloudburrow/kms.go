@@ -384,6 +384,12 @@ func spannerKMS(cfg config.Config) bool {
 	return serviceEnabled(cfg, config.ServiceSpanner) && serviceEnabled(cfg, config.ServiceKMS)
 }
 
+// memorystoreCMEK reports whether a Memorystore server's pod unwraps its
+// customer-managed key's data key with this instance's Cloud KMS (#2113).
+func memorystoreCMEK(cfg config.Config) bool {
+	return serviceEnabled(cfg, config.ServiceMemorystore) && serviceEnabled(cfg, config.ServiceKMS)
+}
+
 // pinKMSPort chooses Cloud KMS's port now when it is OS-assigned (0), so
 // the Firestore front can be told it before the API binds.
 func pinKMSPort(cfg *config.Config) error {

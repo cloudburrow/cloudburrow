@@ -17,7 +17,11 @@
 // sealed files into the memory directory; starts the server; seals every
 // file that changed every interval and once more when the server exits
 // (its shutdown snapshot among them), each written beside its old copy and
-// renamed over it; and passes SIGTERM and SIGINT on to the server.
+// renamed over it; and passes SIGTERM and SIGINT on to the server. It asks
+// Cloud KMS again every --check: while the key cannot be used it drops the
+// data key and seals nothing more, so nothing more reaches the volume (a
+// Redis cluster's or Valkey instance's persistence is deactivated, as
+// Memorystore documents), and it seals again once the key can be used.
 package rediscmek
 
 import (
@@ -72,6 +76,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	kmsAddr := fs.String("kms", "", "host:port of the instance's Cloud KMS (gRPC)")
 	every := fs.Duration("every", time.Second, "how often changed files are sealed")
 	forget := fs.Bool("forget", false, "drop the sealed files first: persistence is DISABLED")
+	check := fs.Duration("check", 5*time.Second, "how often the key is checked again with Cloud KMS")
 	if err := fs.Parse(args); err != nil {
 		return ErrUsage
 	}
@@ -89,13 +94,14 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	defer conn.Close()
-	dek, err := Unwrap(ctx, kmspb.NewKeyManagementServiceClient(conn), *key, wrapped)
+	kms := kmspb.NewKeyManagementServiceClient(conn)
+	dek, err := Unwrap(ctx, kms, *key, wrapped)
 	if err != nil {
 		return err
 	}
 	k := &Keeper{Plain: *plain, Sealed: *sealed, DEK: dek}
 	if *forget {
-		if err := os.RemoveAll(*sealed); err != nil {
+		if err := Forget(*sealed); err != nil {
 			return err
 		}
 	}
@@ -114,17 +120,38 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	go func() { done <- c.Wait() }()
 	t := time.NewTicker(*every)
 	defer t.Stop()
+	kt := time.NewTicker(*check)
+	defer kt.Stop()
+	// lost is whether the key could not be used at its last check: the
+	// data key is then dropped and nothing more is sealed, so nothing more
+	// is written to the volume, until the key can be used again.
+	lost := false
 	for {
 		select {
 		case s := <-sigs:
 			_ = c.Process.Signal(s)
+		case <-kt.C:
+			d, err := Unwrap(ctx, kms, *key, wrapped)
+			switch {
+			case err != nil && !lost:
+				fmt.Fprintln(stderr, "memorystore-cmek: the key can no longer be used; nothing more is sealed:", err)
+				lost, k.DEK = true, nil
+			case err == nil && lost:
+				fmt.Fprintln(stderr, "memorystore-cmek: the key can be used again")
+				lost, k.DEK = false, d
+			}
 		case <-t.C:
+			if lost {
+				continue
+			}
 			if err := k.Seal(); err != nil {
 				fmt.Fprintln(stderr, "memorystore-cmek: seal:", err)
 			}
 		case err := <-done:
-			if serr := k.Seal(); serr != nil {
-				fmt.Fprintln(stderr, "memorystore-cmek: seal:", serr)
+			if !lost {
+				if serr := k.Seal(); serr != nil {
+					fmt.Fprintln(stderr, "memorystore-cmek: seal:", serr)
+				}
 			}
 			var ee *exec.ExitError
 			if errors.As(err, &ee) {
@@ -133,6 +160,24 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			return err
 		}
 	}
+}
+
+// Forget removes everything under dir, which stays: it is the persistent
+// volume's mount point, which cannot itself be removed.
+func Forget(dir string) error {
+	ents, err := os.ReadDir(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, e := range ents {
+		if err := os.RemoveAll(filepath.Join(dir, e.Name())); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Unwrap asks Cloud KMS to Decrypt the wrapped data key.

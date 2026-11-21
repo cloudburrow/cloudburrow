@@ -74,6 +74,9 @@ type memorystoreAdminService struct {
 	prov     *memorystoreProvisioner
 	// kms is Cloud KMS, for customer_managed_key (#1463); nil without it.
 	kms *kmsService
+	// kmsInCluster is Cloud KMS's address for pods, "" until published;
+	// nil without Cloud KMS (#2113).
+	kmsInCluster func() string
 	// privateca is Certificate Authority Service, for a Redis cluster's
 	// customer-managed CA (#1907); nil without it.
 	privateca *privateCAService
@@ -160,6 +163,7 @@ func (s *memorystoreAdminService) Start(ctx context.Context) error {
 	s.cancel = cancel
 	s.prov = newMemorystoreProvisioner(s.cfg, bg)
 	s.prov.frontImage = s.frontImage
+	s.prov.kmsAddr = s.kmsInCluster
 	s.api.EnableCreate(bg, s.prov, redisadmin.Dial, db, nil)
 	// Memorystore for Redis Cluster (#1519): a real Redis Cluster per
 	// cluster, its nodes Valkey servers in cluster mode.
@@ -312,6 +316,39 @@ type memorystoreProvisioner struct {
 	// customer-managed CA pool (#1907); nil without Certificate Authority
 	// Service.
 	cas *sqlAdminCAS
+	// kmsAddr is Cloud KMS's in-cluster address, through cloudburrow-host,
+	// "" until it is published: a CMEK server's pod asks it to unwrap
+	// the data key its files are sealed with (#2113). nil without KMS.
+	kmsAddr func() string
+}
+
+// cmek is the keeper of a CMEK server's files (#2113), nil without a
+// customer-managed key: the storage image, which runs it, and Cloud KMS's
+// in-cluster address, waited for while cloudburrow-host is not yet
+// published.
+func (p *memorystoreProvisioner) cmek(ctx context.Context, spec redisadmin.Spec) (*components.MemorystoreCMEK, error) {
+	if spec.CMEKKey == "" {
+		return nil, nil
+	}
+	if p.frontImage == nil || p.kmsAddr == nil {
+		return nil, fmt.Errorf("the customer-managed key of %s needs Cloud KMS and the cloudburrow-storage image in the cluster", spec.Server)
+	}
+	img, err := p.frontImage(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("the customer-managed key of %s: the cloudburrow-storage image its keeper runs from: %w", spec.Server, err)
+	}
+	t := time.NewTicker(500 * time.Millisecond)
+	defer t.Stop()
+	for {
+		if a := p.kmsAddr(); a != "" {
+			return &components.MemorystoreCMEK{Image: img, Key: spec.CMEKKey, KMS: a, Wrapped: spec.CMEKWrapped}, nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("the customer-managed key of %s: Cloud KMS is not published to the cluster: %w", spec.Server, ctx.Err())
+		case <-t.C:
+		}
+	}
 }
 
 func newMemorystoreProvisioner(cfg config.Config, bg context.Context) *memorystoreProvisioner {
@@ -367,6 +404,10 @@ func (p *memorystoreProvisioner) Provision(ctx context.Context, spec redisadmin.
 	settings := components.MemorystoreSettings{Name: spec.Server, Persistent: p.cfg.Mode == config.ModePersistent,
 		MaxMemory: spec.MaxMemory, Password: spec.Password, Settings: spec.Configs, RDBSeconds: spec.RDBSeconds,
 		NoPersistence: spec.NoPersistence, ReplicaOf: spec.ReplicaOf, Image: memorystoreImages[spec.Version]}
+	var err error
+	if settings.CMEK, err = p.cmek(ctx, spec); err != nil {
+		return "", err
+	}
 	port := components.MemorystorePort
 	if tlsFiles != nil {
 		settings.TLSCert, settings.TLSKey, settings.TLSCA = tlsFiles.Cert, tlsFiles.Key, tlsFiles.CA
@@ -441,6 +482,9 @@ func (p *memorystoreProvisioner) StartClusterNode(ctx context.Context, spec redi
 	settings := components.MemorystoreSettings{Name: spec.Server, Persistent: p.cfg.Mode == config.ModePersistent,
 		MaxMemory: spec.MaxMemory, Password: spec.Password, Settings: cfg, Image: memorystoreImages[spec.Version], Dir: spec.Dir,
 		PodAndLoopback6: p.byFamily()}
+	if settings.CMEK, err = p.cmek(ctx, spec); err != nil {
+		return "", "", 0, err
+	}
 	clusterIP := ""
 	if settings.PodAndLoopback6 {
 		// The node's Service first, for its cluster IP, which the node

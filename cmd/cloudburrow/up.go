@@ -1387,7 +1387,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// verify the URLs those accounts sign (#1787).
 	runEnabled := serviceEnabled(cfg, config.ServiceRun)
 	pubsubKMS := serviceEnabled(cfg, config.ServicePubSub) && serviceEnabled(cfg, config.ServiceKMS)
-	if runEnabled || serviceEnabled(cfg, config.ServiceBigQuery) || serviceEnabled(cfg, config.ServiceStorage) || pubsubKMS || firestoreKMS(cfg) || spannerKMS(cfg) || computeEnabled(cfg) {
+	if runEnabled || serviceEnabled(cfg, config.ServiceBigQuery) || serviceEnabled(cfg, config.ServiceStorage) || pubsubKMS || firestoreKMS(cfg) || spannerKMS(cfg) || memorystoreCMEK(cfg) || computeEnabled(cfg) {
 		// The Cloud SQL Admin API and its connector are published for Cloud
 		// SQL volumes (#1346): the Auth Proxy a revision runs reaches both.
 		published := map[string]bool{"run": true, "tasks": true, "secretmanager": true, "kms": true,
@@ -1412,6 +1412,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			// Cloud Storage (#1938) and Spanner (#1950) encrypt with
 			// customer-managed keys.
 			if storageKMS(cfg) || spannerKMS(cfg) {
+				published["kms"] = true
+			}
+			// A CMEK Memorystore server's pod unwraps its data key (#2113).
+			if memorystoreCMEK(cfg) {
 				published["kms"] = true
 			}
 		}
@@ -1448,6 +1452,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			return ""
 		}
 		computeSvc.metadataHost = func() string { return hostComp.InCluster("metadata") }
+	}
+	if memorystoreAdminSvc != nil && kmsSvc != nil {
+		// A CMEK Memorystore server's pod unwraps its data key with Cloud
+		// KMS, through cloudburrow-host (#2113).
+		memorystoreAdminSvc.kmsInCluster = func() string { return hostComp.InCluster("kms") }
 	}
 	if runSvc != nil {
 		// A build step reaches the metadata server as its build's account (#1854).
