@@ -9534,11 +9534,22 @@ function notFound(view, path) {
 
 // --- router ----------------------------------------------------------
 
+// BOOTED is set by main just before it draws the first screen. The toolbar
+// and its links are in the page from the start, so a click can land while
+// main still reads the services, the operations and the projects: drawing
+// that screen then, and again when main finishes, wiped it back to its
+// loading state under whoever was using it (main run 44830404935, #2080: the
+// Connect page's Format select went away under a click). Until then a
+// navigation only moves the URL, and main's one route() draws where it
+// ended up, with the project resolved.
+let BOOTED = false;
+
 // route dispatches, and does not let a screen fail silently.
 //
 // dispatch() returns the render's promise, which nobody used to await: a
 // throw inside a render function left the skeleton on screen permanently.
 function route() {
+  if (!BOOTED) return undefined;
   syncResourceScope();
   const view = document.getElementById("view");
   // An action's info panel (#2013) belongs to the screen that opened it.
@@ -11207,6 +11218,7 @@ async function main() {
   // The project is resolved before the first screen renders, so a per-project
   // screen is not painted once with no project and again with one.
   await initProjects();
+  BOOTED = true;
   route();
 }
 

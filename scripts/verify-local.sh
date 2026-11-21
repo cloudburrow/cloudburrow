@@ -510,9 +510,9 @@ browser_suite() {  # <shard> <dir> <flags...>
   BROWSER_ENV=$(scripts/compat-env.sh --only "$BROWSER_VARS" --cli "$CLI" -- "$@" 2>/dev/null)
   (
     eval "$BROWSER_ENV"
-    # As in CI: 20m in served and run, 10m elsewhere.
+    # As in CI: 20m in served, run and storage (#2080), 10m elsewhere.
     local timeout=10m
-    case "$shard" in served|run) timeout=20m ;; esac
+    case "$shard" in served|run|storage) timeout=20m ;; esac
     # As in CI: what the restarted instance needs before its tests (#1985).
     compat_browser_prepare "$shard" 2>> "$dir/browser-prepare.err" || true
     export CLOUDBURROW_TEST_CHROME="$chrome" CLOUDBURROW_TEST_SCREENSHOTS="$dir/browser-screenshots"
