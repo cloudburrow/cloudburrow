@@ -406,6 +406,23 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		parameterManagerSvc.quotas = requestQuotas
 	}
 	parameterManagerSvc.register(coord)
+	// Dataform (#2105), in process; its invocations run on BigQuery, its
+	// git remotes are Secure Source Manager's (Cloud Run's port) and its
+	// access tokens are Secret Manager's.
+	dataformSvc := newDataformService(cfg)
+	if dataformSvc != nil {
+		dataformSvc.secrets = secretsSvc
+		dataformSvc.bigquery = func() *netfwd.Forwarder { return forwarderFor(forwarders, "bigquery") }
+		if runSvc != nil {
+			dataformSvc.gitBase = func() string {
+				if a := runSvc.Addr(); a != "" {
+					return hostURL(a)
+				}
+				return ""
+			}
+		}
+	}
+	dataformSvc.register(coord)
 	// The Kubernetes Engine API (#1913), in process; its clusters are
 	// kind clusters of their own.
 	gkeSvc := newGKEService(cfg)
@@ -590,6 +607,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		analyticsHub:     analyticsHub,
 		workflows:        workflowsSvc,
 		parameterManager: parameterManagerSvc,
+		dataform:         dataformSvc,
 		gke:              gkeSvc,
 		monitoring:       monitoringSvc,
 		compute:          computeSvc,
@@ -691,6 +709,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		parameterManagerSvc.calls = callEvents(recorder, requestMetrics, "parametermanager")
 		parameterManagerSvc.interpose = append(parameterManagerSvc.interpose, grpctransport.LogInterceptor(logger, "parametermanager"), faults.Interceptor("parametermanager"))
 		parameterManagerSvc.requests = requestEvents(recorder, requestMetrics, "parametermanager")
+	}
+	if dataformSvc != nil {
+		dataformSvc.tracing = tracing
+		dataformSvc.calls = callEvents(recorder, requestMetrics, "dataform")
+		dataformSvc.interpose = append(dataformSvc.interpose, grpctransport.LogInterceptor(logger, "dataform"), faults.Interceptor("dataform"))
+		dataformSvc.requests = requestEvents(recorder, requestMetrics, "dataform")
 	}
 	if dataTransfer != nil {
 		dataTransfer.tracing = tracing
@@ -1211,6 +1235,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		analyticsHub:     analyticsHub,
 		workflows:        workflowsSvc,
 		parameterManager: parameterManagerSvc,
+		dataform:         dataformSvc,
 		gke:              gkeSvc,
 		monitoring:       monitoringSvc,
 		compute:          computeSvc,
@@ -1308,6 +1333,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if a := parameterManagerSvc.Addr(); a != "" {
 			live["parametermanager"] = a
 		}
+		if a := dataformSvc.Addr(); a != "" {
+			live["dataform"] = a
+		}
 		if a := gkeSvc.Addr(); a != "" {
 			live["gke"] = a
 		}
@@ -1381,7 +1409,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		published := map[string]bool{"run": true, "tasks": true, "secretmanager": true, "kms": true,
 			"scheduler": true, "logging": true, "resourcemanager": true, "serviceusage": true, "apikeys": true, "metadata": true,
 			"storagebatchoperations": true, "storageinsights": true, "storagetransfer": true,
-			"sqladmin": true, "cloudsql-connector": true, "onnx": true, "tfconvert": true, "localai": true, "workflows": true, "parametermanager": true}
+			"sqladmin": true, "cloudsql-connector": true, "onnx": true, "tfconvert": true, "localai": true, "workflows": true, "parametermanager": true, "dataform": true}
 		if !runEnabled {
 			published = map[string]bool{"resourcemanager": true, "onnx": true, "tfconvert": true, "localai": true}
 			// The storage server reads IAM service accounts' certificates

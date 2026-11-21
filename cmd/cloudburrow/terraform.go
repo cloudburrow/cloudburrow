@@ -152,6 +152,10 @@ var terraformEndpoints = []terraformEndpoint{
 	// TestTerraformParameterManager applies them, plans clean and destroys.
 	{config.ServiceParameterManager, "parameter_manager_custom_endpoint", "GOOGLE_PARAMETER_MANAGER_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	{config.ServiceParameterManager, "parameter_manager_regional_custom_endpoint", "GOOGLE_PARAMETER_MANAGER_REGIONAL_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	// Dataform (#2105): google_dataform_repository and its release and
+	// workflow configs. TestTerraformDataformRepository applies them, plans
+	// clean and destroys.
+	{config.ServiceDataform, "dataform_custom_endpoint", "GOOGLE_DATAFORM_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	// The Kubernetes Engine API (#1913): a google_container_cluster with
 	// remove_default_node_pool and a google_container_node_pool apply, plan
 	// clean, update in place and destroy in
@@ -343,6 +347,7 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 		config.ServiceCompute:          cfg.Endpoints.Compute,
 		config.ServiceWorkflows:        cfg.Endpoints.Workflows,
 		config.ServiceParameterManager: cfg.Endpoints.ParameterManager,
+		config.ServiceDataform:         cfg.Endpoints.Dataform,
 		localAIEndpoint:                cfg.Endpoints.LocalAI,
 		storageTransferService:         cfg.Endpoints.StorageTransfer,
 		storageInsightsService:         cfg.Endpoints.StorageInsights,
@@ -360,6 +365,7 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 	enabled[config.ServiceMonitoring] = monitoringEnabled(cfg)
 	enabled[config.ServiceWorkflows] = workflowsEnabled(cfg)
 	enabled[config.ServiceParameterManager] = parameterManagerEnabled(cfg)
+	enabled[config.ServiceDataform] = dataformEnabled(cfg)
 	enabled[localAIEndpoint] = localAIServed(cfg)
 	enabled[storageTransferService] = storageJobsEnabled(cfg)
 	enabled[storageInsightsService] = storageJobsEnabled(cfg)

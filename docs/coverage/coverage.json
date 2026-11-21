@@ -18063,6 +18063,486 @@
     ]
   },
   {
+    "Key": "dataform",
+    "Title": "Dataform (v1)",
+    "counts": {
+      "Implemented": 24,
+      "Verified": 50
+    },
+    "rows": [
+      {
+        "method": "google.cloud.dataform.v1.Dataform/CancelWorkflowInvocation",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/CommitRepositoryChanges",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:116 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/CommitWorkspaceChanges",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:116 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/ComputeRepositoryAccessTokenStatus",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/CreateCompilationResult",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/CreateCompilationResultLongRunning",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/CreateFolder",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:723 TestDataformFoldersAndConfig"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/CreateReleaseConfig",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/CreateRepository",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:116 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/CreateTeamFolder",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:723 TestDataformFoldersAndConfig"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/CreateWorkflowConfig",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/CreateWorkflowInvocation",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/CreateWorkspace",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:116 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/DeleteFolder",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:723 TestDataformFoldersAndConfig"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/DeleteFolderTree",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:723 TestDataformFoldersAndConfig"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/DeleteReleaseConfig",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/DeleteRepository",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:116 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/DeleteTeamFolder",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:723 TestDataformFoldersAndConfig"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/DeleteTeamFolderTree",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:723 TestDataformFoldersAndConfig"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/DeleteWorkflowConfig",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/DeleteWorkflowInvocation",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/DeleteWorkspace",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:116 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/FetchFileDiff",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:116 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/FetchFileGitStatuses",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:116 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/FetchGitAheadBehind",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:116 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/FetchRemoteBranches",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/FetchRepositoryHistory",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:116 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/GetCompilationResult",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/GetConfig",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:723 TestDataformFoldersAndConfig"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/GetFolder",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:723 TestDataformFoldersAndConfig"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/GetIamPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:116 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/GetReleaseConfig",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/GetRepository",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:116 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/GetTeamFolder",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:723 TestDataformFoldersAndConfig"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/GetWorkflowConfig",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/GetWorkflowInvocation",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/GetWorkspace",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:116 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/InstallNpmPackages",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/ListCompilationResults",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/ListReleaseConfigs",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/ListRepositories",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:116 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/ListWorkflowConfigs",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/ListWorkflowInvocations",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/ListWorkspaces",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:116 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/MakeDirectory",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:116 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/MoveDirectory",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:116 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/MoveFile",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:116 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/MoveFolder",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:723 TestDataformFoldersAndConfig"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/MoveRepository",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:723 TestDataformFoldersAndConfig"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/PullGitCommits",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:116 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/PushGitCommits",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:116 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/QueryCompilationResultActions",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/QueryDirectoryContents",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:116 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/QueryFolderContents",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:723 TestDataformFoldersAndConfig"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/QueryRepositoryDirectoryContents",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:116 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/QueryTeamFolderContents",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:723 TestDataformFoldersAndConfig"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/QueryUserRootContents",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:723 TestDataformFoldersAndConfig"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/QueryWorkflowInvocationActions",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/ReadFile",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:116 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/ReadRepositoryFile",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:116 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/RemoveDirectory",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:116 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/RemoveFile",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:116 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/ResetWorkspaceChanges",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:116 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/SearchFiles",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:116 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/SearchTeamFolders",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:723 TestDataformFoldersAndConfig"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/SetIamPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:116 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/TestIamPermissions",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:116 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/UpdateConfig",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:723 TestDataformFoldersAndConfig"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/UpdateFolder",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:723 TestDataformFoldersAndConfig"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/UpdateReleaseConfig",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/UpdateRepository",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:116 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/UpdateTeamFolder",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:723 TestDataformFoldersAndConfig"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/UpdateWorkflowConfig",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/WriteFile",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:116 TestDataformWorkspaceFilesAndGit"
+        ]
+      }
+    ]
+  },
+  {
     "Key": "workflows",
     "Title": "Workflows and Workflow Executions (v1)",
     "counts": {

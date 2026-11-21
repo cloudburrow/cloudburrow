@@ -14,6 +14,7 @@ import (
 
 	ahpb "cloud.google.com/go/bigquery/analyticshub/apiv1/analyticshubpb"
 	"cloud.google.com/go/cloudquotas/apiv1/cloudquotaspb"
+	dfpb "cloud.google.com/go/dataform/apiv1/dataformpb"
 	iamadminpb "cloud.google.com/go/iam/admin/apiv1/adminpb"
 	iamv2pb "cloud.google.com/go/iam/apiv2/iampb"
 	"cloud.google.com/go/orgpolicy/apiv2/orgpolicypb"
@@ -38,6 +39,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/sched"
 	"github.com/cloudburrow/cloudburrow/internal/service/analyticshub"
 	"github.com/cloudburrow/cloudburrow/internal/service/cloudquotas"
+	"github.com/cloudburrow/cloudburrow/internal/service/dataform"
 	"github.com/cloudburrow/cloudburrow/internal/service/datatransfer"
 	"github.com/cloudburrow/cloudburrow/internal/service/gke"
 	"github.com/cloudburrow/cloudburrow/internal/service/kms"
@@ -97,6 +99,13 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 		t.Fatal(err)
 	}
 	pmpb.RegisterParameterManagerServer(srv, pm)
+	// Dataform alone (#2105): its Locations and Operations mixins are
+	// other services' rows.
+	df, err := dataform.NewServer(dataform.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dfpb.RegisterDataformServer(srv, df)
 	gkeSrv, err := gke.NewServer(nil, gke.Options{Versions: []gke.Version{{GKE: "1.36.4-gke.0", Image: "kindest/node:v1.36.4"}}})
 	if err != nil {
 		t.Fatal(err)

@@ -221,6 +221,8 @@ cloud.google.com/go/datacatalog v1.33.0 h1:8V80PpoAGdOOr2QhBrp4wZ66MDCbATdAB/fmV
 cloud.google.com/go/datacatalog v1.33.0/go.mod h1:/EMN04S73fZcPdtNg86VYLDrhi2HheMehQtMCS86Klk=
 cloud.google.com/go/dataflow v0.16.0/go.mod h1:BWhSrIGmsMfuYj3J+nJ2Tw7tplRR6r28kvRiqCD3WlQ=
 cloud.google.com/go/dataform v1.2.0/go.mod h1:Lhkjd6L04/nBqsEo7S9Tx7D+Vm0pDDDZuKczewAJuX0=
+cloud.google.com/go/dataform v1.9.0 h1:4y2XrCF/9hwsEr7yqAGPL1hHBXnx5bEeFd8lvzxw10w=
+cloud.google.com/go/dataform v1.9.0/go.mod h1:T9/hPx1whZKZgfJfH0AqjFeQ3RXHbc30zyluIGO0kMQ=
 cloud.google.com/go/datafusion v1.14.0/go.mod h1:2z+uDUKkLPacNNos5lW1Jf1IRDoFyeE+glJ4hmxF2Uc=
 cloud.google.com/go/datalabeling v0.15.0/go.mod h1:H8WSRKD9XYCDXDlZE3bPgvV7UYI0F05e+ufKev2AFc8=
 cloud.google.com/go/dataplex v1.36.0/go.mod h1:ftgNMXBt+wJ4wPVNvYJ3UY3VTZtKS/i/uFEQppaEbKk=

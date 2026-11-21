@@ -79,6 +79,7 @@ import (
 	_ "cloud.google.com/go/cloudquotas/apiv1/cloudquotaspb"
 	_ "cloud.google.com/go/cloudtasks/apiv2/cloudtaskspb"
 	_ "cloud.google.com/go/container/apiv1/containerpb"
+	_ "cloud.google.com/go/dataform/apiv1/dataformpb"
 	_ "cloud.google.com/go/datastore/admin/apiv1/adminpb"
 	_ "cloud.google.com/go/datastore/apiv1/datastorepb"
 	_ "cloud.google.com/go/developerconnect/apiv1/developerconnectpb"
@@ -325,6 +326,9 @@ var areas = []area{
 	// Parameter Manager (#2054): CloudBurrow's own, gRPC and JSON on one
 	// port; its Locations mixin is another area's row.
 	{Key: "parametermanager", Title: "Parameter Manager (v1)", Own: true, Services: []string{"google.cloud.parametermanager.v1.ParameterManager"}},
+	// Dataform (#2105): CloudBurrow's own, gRPC and JSON on one port;
+	// Dataform core compiles, BigQuery runs the invocations.
+	{Key: "dataform", Title: "Dataform (v1)", Own: true, Services: []string{"google.cloud.dataform.v1.Dataform"}},
 	{Key: "workflows", Title: "Workflows and Workflow Executions (v1)", Own: true,
 		Services: []string{"google.cloud.workflows.v1.Workflows", "google.cloud.workflows.executions.v1.Executions"}},
 	// The Kubernetes Engine API (#1913): CloudBurrow's own, gRPC and JSON
