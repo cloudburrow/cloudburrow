@@ -2797,6 +2797,16 @@ creator `roles/owner`, so every client, the console and `gcloud-setup` keep work
 instance did not mint is `UNAUTHENTICATED`, as Google refuses one it did not issue. Cloud Run
 invoke is the exception: a request with no bearer token is `allUsers` alone, as on Google (below).
 
+`cloudburrow terraform` on an enforcing instance signs `hashicorp/google` in as a principal rather
+than with its fixed `owner` token, which would be 401: an access token from
+`GOOGLE_OAUTH_ACCESS_TOKEN`, a local service account key from `GOOGLE_CREDENTIALS` (or
+`GOOGLE_APPLICATION_CREDENTIALS`), which the provider exchanges at the key's `token_uri`, or the
+instance's fixture; keys, files and impersonation that would sign in at Google are refused before
+Terraform runs ([credentials.md](credentials.md#verified-with-real-tooling)). `TestIAMEnforcementTerraform`
+applies a `google_secret_manager_secret` as the fixture's account, and as a service account's key:
+`Error 403` naming `secretmanager.secrets.create` without a role, applied, planned clean and destroyed
+with `roles/secretmanager.admin`.
+
 IAM v2 deny policies (#1886) are evaluated first, as Google's "Deny policies" describes
 (https://docs.cloud.google.com/iam/docs/deny-overview, read 2026-11-19): the deny policies attached
 to the resource's project, its folders and its organization apply to everything below them, each

@@ -27,6 +27,8 @@ type tfModule struct {
 	dir     string
 	project string
 	binary  string // terraform or tofu, run by the wrapper's --binary
+	// env is added to every run's environment, after the harness's.
+	env []string
 }
 
 func newTFModule(t *testing.T) *tfModule { return newTFModuleWith(t, "terraform") }
@@ -66,7 +68,7 @@ func (m *tfModule) tf(args ...string) (string, error) {
 	cmd := exec.Command(m.cli, append(ours, args...)...)
 	cmd.Dir = m.dir
 	if args[0] != "init" {
-		cmd.Env = noGoogleEgress()
+		cmd.Env = append(noGoogleEgress(), m.env...)
 	}
 	b, err := cmd.CombinedOutput()
 	return string(b), err
