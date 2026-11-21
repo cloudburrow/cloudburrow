@@ -945,7 +945,9 @@ type EditForm struct {
 	// Page draws the form as a page of its own, the resource's address
 	// with ?edit=1, ending in Submit and Cancel, rather than as a dialog:
 	// Google's Edit opens the "Edit Redis instance" page, which saves with
-	// Save (#1862).
+	// Save (#1862). Google's Edit job is Create job's page too, its steps
+	// (Steps) drawn as the create page draws them, and opened from the
+	// jobs list it goes back there (#2062).
 	Page bool `json:"page,omitempty"`
 	// Inline means the form opens only from the Edit beside a property
 	// that names it (Property.Edit), not from a button by the title:
@@ -966,6 +968,11 @@ type EditForm struct {
 	// labelled Review. Google's Cloud Run service tabs end in View diff &
 	// redeploy, whose review ends in Deploy changes (#1852).
 	Review string `json:"review,omitempty"`
+	// Steps lays the form out as the create page's numbered steps, its
+	// fields' Sections each a step with Continue, as Google's Edit job
+	// follows Create job's steps (#1849): "continue" for Continue, "next"
+	// for Next.
+	Steps string `json:"steps,omitempty"`
 }
 
 // DateTimeFieldType is a Field.Type drawn as the browser's date and time

@@ -1234,8 +1234,9 @@ var parityRows = []parityRow{
 	// Cloud Scheduler
 	{Resource: "Cloud Scheduler jobs", Service: "scheduler",
 		Methods:  []string{"CloudScheduler/CreateJob", "CloudScheduler/DeleteJob", "CloudScheduler/GetJob", "CloudScheduler/ListJobs", "CloudScheduler/PauseJob", "CloudScheduler/ResumeJob", "CloudScheduler/RunJob"},
-		Provider: "scheduler", Offers: "Jobs list, job detail, Create job (HTTP and Pub/Sub targets), Pause / Resume, Force run, Delete; an HTTP target's Auth header on Create job and Edit job: an OIDC token (service account, audience) or an OAuth token (service account, scope), shown on the job's page (#1243)",
-		Tests: []string{"TestConsoleSchedulerFollowsTheSDK", "TestSchedulerPauseFromARow", "TestConsoleTaskAndJobTokens"}},
+		Provider: "scheduler", Offers: "Jobs list (Scheduler jobs and App Engine cron jobs tabs), job detail, Create job in Google's three steps (HTTP, Pub/Sub and App Engine HTTP targets; #1849), Pause / Resume, Force run, Delete; an HTTP target's Auth header on Create job and Edit job: an OIDC token (service account, audience) or an OAuth token (service account, scope), shown on the job's page (#1243); each attempt's execution logs on the job's Logs tab and through the row menu's View logs in the Logs Explorer (#1849)",
+		Tests: []string{"TestConsoleSchedulerFollowsTheSDK", "TestSchedulerPauseFromARow", "TestConsoleTaskAndJobTokens", "TestSchedulerCreateJobSteps",
+			"TestSchedulerJobPagesMatchGoogle", "TestConsoleSchedulerLogsAndEditSteps", "TestSchedulerLogsAndEditStepsThroughThePage"}},
 	{Resource: "Cloud Scheduler locations", Service: "scheduler",
 		Methods:  []string{"Locations/ListLocations"},
 		Provider: "scheduler", Offers: "Create job: the Region is chosen from the listed locations (#1237)",
@@ -1245,8 +1246,9 @@ var parityRows = []parityRow{
 		Excluded: "a read of one listed location; the Create job form's Region shows every location ListLocations lists"},
 	{Resource: "Cloud Scheduler job edit", Service: "scheduler",
 		Methods:  []string{"CloudScheduler/UpdateJob"},
-		Provider: "scheduler", Offers: "Edit job on a job's page: description, schedule, time zone, the target's fields and retry configuration, with the name, region and target type fixed (#795)",
-		Tests: []string{"TestConsoleSchedulerEditJob", "TestSchedulerEditJobThroughUpdateJob", "TestSchedulerEditJobThroughTheForm"}},
+		Provider: "scheduler", Offers: "Edit job on a job's page and in each row's menu, the Edit job page with Create job's three steps (#1849, #2062): description, schedule, time zone, the target's fields, retry configuration and attempt deadline, with the name, region and target type fixed (#795)",
+		Tests: []string{"TestConsoleSchedulerEditJob", "TestSchedulerEditJobThroughUpdateJob", "TestSchedulerEditJobThroughTheForm",
+			"TestConsoleSchedulerLogsAndEditSteps", "TestSchedulerLogsAndEditStepsThroughThePage"}},
 
 	// Cloud Logging
 	{Resource: "Cloud Logging log names", Service: "logging",

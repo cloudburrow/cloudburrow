@@ -50,6 +50,10 @@ func consoleEntry(e *loggingpb.LogEntry) console.Entry {
 		Project:   project,
 		Resource:  e.GetLogName(),
 		Message:   console.Redact(entryMessage(e)),
+		// The monitored resource, for resource.type and resource.labels
+		// queries (#1849).
+		ResourceType:   e.GetResource().GetType(),
+		ResourceLabels: e.GetResource().GetLabels(),
 	}
 	// The jsonPayload itself, for the query editor and the Fields pane's
 	// Frequent fields (#2031).

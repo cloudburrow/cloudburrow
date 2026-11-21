@@ -3958,8 +3958,9 @@ async function renderDetail(view, route, resourcePath) {
   // "<Kind> details".
   if (data.heading) crumb.querySelector("h1, h2").textContent = data.heading;
   // An edit form that is a page of its own (#1862), as Google's Edit opens
-  // the Edit Redis instance page: the resource's address with ?edit=1 draws
-  // the form instead of the resource's tabs.
+  // the Edit Redis instance page and Edit job Create job's page (#2062):
+  // the resource's address with ?edit=1 draws the form instead of the
+  // resource's tabs.
   if (data.edit && data.edit.page && new URLSearchParams(location.search).get("edit") === "1") {
     return renderEditPage(view, route, segments, data, crumb);
   }
@@ -5689,12 +5690,9 @@ async function editFromRow(route, segments, onDone) {
     const data = await api(`/api/detail/${route.service}?project=${encodeURIComponent(project)}` +
       segments.map((sg) => `&name=${encodeURIComponent(sg)}`).join(""));
     if (!data.edit) throw new Error("This resource has nothing that can be edited.");
-    // An edit form that is a page of its own (#1862) opens that page.
-    if (data.edit.page) {
-      const url = new URL(detailHref(route, segments), location.origin);
-      url.searchParams.set("edit", "1");
-      return navigate(url.pathname + url.search);
-    }
+    // An edit form that is a page of its own (#1862) opens that page,
+    // whose Save and Cancel come back to this list (#2062).
+    if (data.edit.page) return openEditPage(route, segments);
     if (data.edit.layout === "page") return navigate(editPageHref(detailHref(route, segments)));
     openEditForm(route, segments, data.edit, onDone);
   } catch (err) {
@@ -5716,8 +5714,13 @@ function openEditForm(route, segments, spec, onDone) {
     to.searchParams.set("edit", "1");
     return navigate(to.pathname + to.search);
   }
+  // An edit that is a page (EditForm.Page, #2062): Google's Edit job is
+  // Create job's page, so it opens at the resource's address with ?edit=1.
+  if (spec.page) return openEditPage(route, segments);
   const name = segments[segments.length - 1];
   const fields = buildCreateForm(spec);
+  // Google's Edit job follows Create job's steps (EditForm.Steps, #1849).
+  const steps = spec.steps ? createSteps(fields.nodes, spec.steps === "next" ? "Next" : "Continue") : null;
   const error = el("p", { class: "form-error", role: "alert", hidden: true });
   let submitting = false;
 
@@ -5736,7 +5739,11 @@ function openEditForm(route, segments, spec, onDone) {
   const submit = async (e) => {
     e.preventDefault();
     error.hidden = true;
-    if (submitting || !fields.validate()) return;
+    if (submitting) return;
+    if (!fields.validate()) {
+      if (steps) steps.revealInvalid();
+      return;
+    }
     // Google's View diff & redeploy (#1852): the changes, then Deploy changes.
     if (spec.review && !(await reviewChanges(spec, initial, fields.values()))) return;
     submitting = true;
@@ -5766,7 +5773,7 @@ function openEditForm(route, segments, spec, onDone) {
     el("h2", { id: "edit-title", text: `${spec.title || spec.label || "Edit"} ${name}` }),
     spec.note ? el("p", { class: "form-help", text: spec.note }) : null,
     error,
-    ...fields.nodes,
+    ...(steps ? steps.nodes : fields.nodes),
     el("div", { class: "modal-actions" }, cancel, primary)));
   fields.focusFirst();
 }
@@ -5840,6 +5847,16 @@ function renderLayoutEditPage(view, route, segments, spec, crumb) {
       el("div", { class: "form-actions" }, primary, cancel)));
   fields.focusFirst();
   announce(`${title} form`);
+}
+
+// openEditPage opens a resource's Edit page (EditForm.Page, #2062): its
+// detail address with ?edit=1, and ?return= naming the list it was opened
+// from, where Save and Cancel go back to.
+function openEditPage(route, segments) {
+  const url = new URL(detailHref(route, segments), location.origin);
+  url.searchParams.set("edit", "1");
+  if (location.pathname === route.path) url.searchParams.set("return", location.pathname + location.search);
+  navigate(url.pathname + url.search);
 }
 
 // reviewChanges is an edit form's review step (EditForm.Review, #1852):
@@ -5919,29 +5936,39 @@ function inlineEditForm(route, segments, section, onDone) {
 // renderEditPage draws an edit form that is a page of its own (#1862):
 // Google's Edit opens the "Edit Redis instance" page, under the resource's
 // crumbs, which saves with Save and goes back to the resource's page;
-// Cancel goes back without saving.
+// Cancel goes back without saving. A form with Steps is drawn in the
+// create page's steps, as Google's Edit job follows Create job's (#2062),
+// and one opened from a list (?return=) goes back to that list.
 function renderEditPage(view, route, segments, data, crumb) {
   const spec = data.edit;
   const name = segments[segments.length - 1];
-  const here = detailHref(route, segments);
+  const detail = detailHref(route, segments);
+  const returnTo = createReturn(new URLSearchParams(location.search).get("return"));
+  const here = returnTo ? returnTo.href : detail;
   const title = spec.title || spec.label || "Edit";
   // The resource's crumbs, its own now a link back to it, then the form.
   const nav = crumb.querySelector(".breadcrumb").cloneNode(true);
   const last = nav.lastElementChild;
-  if (last && last.tagName === "SPAN") last.replaceWith(el("a", { href: here, text: last.textContent }));
+  if (last && last.tagName === "SPAN") last.replaceWith(el("a", { href: detail, text: last.textContent }));
   nav.append(el("span", { "aria-hidden": "true", text: "/" }), el("span", { text: title }));
   const header = pageHeader(title, `${name} · ` + (currentProject() ? `Project ${currentProject()}` : "All projects"),
-    { back: here, backLabel: `Back to ${name}` });
+    { back: here, backLabel: returnTo ? `Back to ${returnTo.title}` : `Back to ${name}` });
   header.prepend(nav);
 
   const fields = buildCreateForm(spec);
+  const steps = spec.steps
+    ? createSteps(fields.nodes, spec.steps === "next" ? "Next" : "Continue")
+    : { nodes: fields.nodes, revealInvalid() {} };
   const error = el("p", { class: "form-error", role: "alert", hidden: true });
   const primary = el("button", { type: "submit", class: "primary", id: "edit-page-save", text: spec.submit || "Save" });
   const cancel = el("a", { class: "button secondary", href: here, text: "Cancel" });
+  let submitting = false;
   const submit = async (e) => {
     e.preventDefault();
     error.hidden = true;
-    if (!fields.validate()) return;
+    if (submitting) return;
+    if (!fields.validate()) { steps.revealInvalid(); return; }
+    submitting = true;
     setBusy(primary, true);
     const op = recordOperation(`Update ${name}`);
     try {
@@ -5955,16 +5982,17 @@ function renderEditPage(view, route, segments, data, crumb) {
     } catch (err) {
       // The API's own message, on the page where the change was made.
       op.failed(err.message, err.operation);
+      submitting = false;
       setBusy(primary, false);
       error.textContent = err.message;
       error.hidden = false;
     }
   };
   setChildren(view, header,
-    el("form", { class: "create-page is-single-page edit-page", novalidate: true, onsubmit: submit },
+    el("form", { class: "create-page edit-page" + (spec.steps ? "" : " is-single-page"), novalidate: true, onsubmit: submit },
       spec.note ? el("p", { class: "form-help", text: spec.note }) : null,
       error,
-      ...fields.nodes,
+      ...steps.nodes,
       el("div", { class: "form-actions" }, primary, cancel)));
   fields.focusFirst();
   announce(`${title} form`);

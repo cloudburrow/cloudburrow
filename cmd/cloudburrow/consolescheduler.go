@@ -29,6 +29,9 @@ import (
 type schedulerProvider struct {
 	svc    *schedulerService
 	faults *admin.Faults
+	// logs is the instance's Cloud Logging, which the runner writes each
+	// attempt's start and end to (#1849); nil without it.
+	logs *loggingService
 }
 
 func (schedulerProvider) ID() string    { return "scheduler" }
@@ -120,7 +123,7 @@ func schedulerJob(project, name string) error {
 	return nil
 }
 
-func (p schedulerProvider) Detail(_ context.Context, project string, path []string) (console.Detail, error) {
+func (p schedulerProvider) Detail(ctx context.Context, project string, path []string) (console.Detail, error) {
 	if len(path) > 1 {
 		return console.DeeperThan(1, path), nil
 	}
@@ -245,7 +248,7 @@ func (p schedulerProvider) Detail(_ context.Context, project string, path []stri
 			{Label: "Last run", Value: schedulerTime(j.LastAttemptTime)},
 			{Label: "Next run", Value: schedulerNext(j)},
 		},
-		Sections: []console.Section{run, targetSection, config},
+		Sections: []console.Section{run, targetSection, config, p.logsSection(ctx, j.Name)},
 	}, nil
 }
 
@@ -259,8 +262,10 @@ func schedulerActions(state string) []console.Action {
 	return []console.Action{{ID: "pause", Label: "Pause"}, run}
 }
 
+// Actions are a row's menu: Pause or Resume, Force run, and View logs
+// (Actions > View logs, docs.cloud.google.com/scheduler/docs/viewing-logs).
 func (schedulerProvider) Actions(r console.Resource) []console.Action {
-	return schedulerActions(r.Status)
+	return append(schedulerActions(r.Status), schedulerViewLogs(r.Name))
 }
 
 func (p schedulerProvider) Act(ctx context.Context, project, name, action string) error {
