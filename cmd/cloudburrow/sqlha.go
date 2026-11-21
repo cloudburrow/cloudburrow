@@ -343,16 +343,20 @@ v56=; case "$(mysql $MYSQL_LOCAL -N -e 'SELECT VERSION()')" in 5.6*) v56=1 ;; es
   for u in $users; do
     if [ -n "$v56" ]; then
       # MySQL 5.6 has no SHOW CREATE USER (#1524): the account from its
-      # password hash, then its grants without it.
+      # password hash, then its grants without it (which 5.6 masks as
+      # <secret> for a user without SUPER, as the standby's is).
       src mysql -N -r -e "SELECT CONCAT('CREATE USER ', QUOTE(user), '@', QUOTE(host), IF(password = '', '', CONCAT(' IDENTIFIED BY PASSWORD ', QUOTE(password))), ';') FROM mysql.user WHERE CONCAT(QUOTE(user), '@', QUOTE(host)) = \"$u\""
-      src mysql -N -r -e "SHOW GRANTS FOR $u" | grep -v '^GRANT PROXY ON ' | sed -E "s/ IDENTIFIED BY PASSWORD '[^']*'//; s/$/;/"
+      src mysql -N -r -e "SHOW GRANTS FOR $u" | grep -v '^GRANT PROXY ON ' | sed -E "s/ IDENTIFIED BY PASSWORD ('[^']*'|<secret>)//; s/$/;/"
       continue
     fi
     { src mysql -N -r -e "SET SESSION print_identified_with_as_hex = ON; SHOW CREATE USER $u" 2>/dev/null ||
       src mysql -N -r -e "SHOW CREATE USER $u"; } | sed 's/^CREATE USER /CREATE USER IF NOT EXISTS /; s/$/;/'
     src mysql -N -e "SHOW GRANTS FOR $u" | sed 's/$/;/'
   done
-} | mysql $MYSQL_LOCAL
+} > /tmp/cloudsql-standby-accounts.sql
+# On a failure, the statements' shape, with every quoted value masked.
+mysql $MYSQL_LOCAL < /tmp/cloudsql-standby-accounts.sql || { sed "s/'[^']*'/'?'/g" /tmp/cloudsql-standby-accounts.sql >&2; rm -f /tmp/cloudsql-standby-accounts.sql; exit 1; }
+rm -f /tmp/cloudsql-standby-accounts.sql
 q() { mysql $MYSQL_LOCAL -N -e "$1"; }
 [ "$(q "SELECT COUNT(*) FROM information_schema.plugins WHERE plugin_name = 'rpl_semi_sync_replica'")" = 1 ] ||
   q "INSTALL PLUGIN rpl_semi_sync_replica SONAME 'semisync_replica.so'"

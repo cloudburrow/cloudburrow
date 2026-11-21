@@ -324,40 +324,8 @@ func testLegacyMySQLReplication(t *testing.T, h *Harness, svc *sqladmin.Service,
 	done("ZONAL "+version, op, err)
 	rows(root, "the rows on the ZONAL instance", 1, 2, 3, 4, 5, 6)
 
-	// A blue-green deployment, on MySQL 5.7 and later.
-	loc := "projects/" + project + "/locations/us-central1"
-	bg := &sqladmin.BlueGreenDeployment{SourceInstance: "projects/" + project + "/instances/" + name}
-	if version == "MYSQL_5_6" {
-		_, err = svc.BlueGreenDeployments.Create(loc, bg).BlueGreenDeploymentId("bg-56").Do()
-		wantHTTP(t, "a MYSQL_5_6 blue-green deployment", err, http.StatusBadRequest)
-	} else {
-		op, err = svc.BlueGreenDeployments.Create(loc, bg).BlueGreenDeploymentId("bg-57").Do()
-		done("a "+version+" blue-green deployment", op, err)
-		dn := loc + "/blueGreenDeployments/bg-57"
-		d, err := svc.BlueGreenDeployments.Get(dn).Do()
-		if err != nil {
-			t.Fatal(err)
-		}
-		green := strings.TrimPrefix(d.SwitchoverTargetInstance, "projects/"+project+"/instances/")
-		t.Cleanup(func() { del(green) })
-		eventuallyTrue(t, "the deployment is SWITCHOVER_READY", func() bool {
-			d, err = svc.BlueGreenDeployments.Get(dn).Do()
-			return err == nil && d.State == "SWITCHOVER_READY"
-		})
-		write(root, 7)
-		rows(e.root(t, h, conn(green)), "the blue rows on the green instance", 1, 2, 3, 4, 5, 6, 7)
-		op, err = svc.BlueGreenDeployments.Switchover(dn, &sqladmin.SwitchoverBlueGreenDeploymentRequest{}).Do()
-		done("the switchover", op, err)
-		if bi, err := svc.Instances.Get(project, name).Do(); err != nil || bi.MasterInstanceName != "" || bi.DatabaseVersion != version {
-			t.Fatalf("the blue name after the switchover: %+v %v", bi, err)
-		}
-		root = e.root(t, h, conn(name))
-		write(root, 8)
-		rows(root, "the rows through the blue name after the switchover", 1, 2, 3, 4, 5, 6, 7, 8)
-		op, err = svc.BlueGreenDeployments.Delete(dn).DeleteOldSource(true).Do()
-		done("delete the deployment", op, err)
-	}
-
+	// Demotion first: the source representation instance names this
+	// instance's server, which a blue-green switchover replaces.
 	// demoteMaster, then demote and startExternalSync, make another
 	// instance a replica of this one through a source representation
 	// instance.
@@ -386,9 +354,6 @@ func testLegacyMySQLReplication(t *testing.T, h *Harness, svc *sqladmin.Service,
 	done("startExternalSync after demote", op, err)
 	ddb := e.root(t, h, dd.ConnectionName)
 	last := []int{1, 2, 3, 4, 5, 6}
-	if version != "MYSQL_5_6" {
-		last = append(last, 7, 8)
-	}
 	rows(ddb, "the source's rows after demote and startExternalSync", last...)
 	write(root, 9)
 	rows(ddb, "a row written after the sync", append(last, 9)...)
@@ -405,6 +370,40 @@ func testLegacyMySQLReplication(t *testing.T, h *Harness, svc *sqladmin.Service,
 	rows(ddb, "a row written after demoteMaster", append(last, 9, 10)...)
 	del(dem)
 	del(rep)
+	// A blue-green deployment, on MySQL 5.7 and later.
+	loc := "projects/" + project + "/locations/us-central1"
+	bg := &sqladmin.BlueGreenDeployment{SourceInstance: "projects/" + project + "/instances/" + name}
+	if version == "MYSQL_5_6" {
+		_, err = svc.BlueGreenDeployments.Create(loc, bg).BlueGreenDeploymentId("bg-56").Do()
+		wantHTTP(t, "a MYSQL_5_6 blue-green deployment", err, http.StatusBadRequest)
+	} else {
+		op, err = svc.BlueGreenDeployments.Create(loc, bg).BlueGreenDeploymentId("bg-57").Do()
+		done("a "+version+" blue-green deployment", op, err)
+		dn := loc + "/blueGreenDeployments/bg-57"
+		d, err := svc.BlueGreenDeployments.Get(dn).Do()
+		if err != nil {
+			t.Fatal(err)
+		}
+		green := strings.TrimPrefix(d.SwitchoverTargetInstance, "projects/"+project+"/instances/")
+		t.Cleanup(func() { del(green) })
+		eventuallyTrue(t, "the deployment is SWITCHOVER_READY", func() bool {
+			d, err = svc.BlueGreenDeployments.Get(dn).Do()
+			return err == nil && d.State == "SWITCHOVER_READY"
+		})
+		write(root, 11)
+		rows(e.root(t, h, conn(green)), "the blue rows on the green instance", 1, 2, 3, 4, 5, 6, 9, 10, 11)
+		op, err = svc.BlueGreenDeployments.Switchover(dn, &sqladmin.SwitchoverBlueGreenDeploymentRequest{}).Do()
+		done("the switchover", op, err)
+		if bi, err := svc.Instances.Get(project, name).Do(); err != nil || bi.MasterInstanceName != "" || bi.DatabaseVersion != version {
+			t.Fatalf("the blue name after the switchover: %+v %v", bi, err)
+		}
+		root = e.root(t, h, conn(name))
+		write(root, 12)
+		rows(root, "the rows through the blue name after the switchover", 1, 2, 3, 4, 5, 6, 9, 10, 11, 12)
+		op, err = svc.BlueGreenDeployments.Delete(dn).DeleteOldSource(true).Do()
+		done("delete the deployment", op, err)
+	}
+
 	// The later steps expect row 1 alone.
 	eventually(t, "back to row 1", func() error { _, err := root.Exec("DELETE FROM app.t WHERE id > 1"); return err })
 }

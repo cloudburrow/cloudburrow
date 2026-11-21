@@ -323,8 +323,13 @@ func (s *Server) prepareExternalReplica(b instanceBody, rep *SourceRep, spec *Sp
 		return Errorf(http.StatusBadRequest, "Invalid request: the replica's databaseVersion %s is not the engine of its source, %s.",
 			spec.DatabaseVersion, rep.DatabaseVersion)
 	}
-	if !SupportedVersions[spec.DatabaseVersion] {
-		return unimplemented("databaseVersion "+spec.DatabaseVersion, unservedVersionWhy(spec.DatabaseVersion))
+	if ok, why := s.versionServed(spec.DatabaseVersion); !ok || IsSQLServer(spec.DatabaseVersion) {
+		// MYSQL_5_7 and MYSQL_5_6 replicate from an external server too,
+		// where the node runs their image (#1524).
+		if why == "" {
+			why = unservedVersionWhy(spec.DatabaseVersion)
+		}
+		return unimplemented("databaseVersion "+spec.DatabaseVersion, why)
 	}
 	if b.InstanceType != "" && b.InstanceType != "READ_REPLICA_INSTANCE" {
 		return Errorf(http.StatusBadRequest, "Invalid request: an instance with masterInstanceName must have instanceType READ_REPLICA_INSTANCE.")
