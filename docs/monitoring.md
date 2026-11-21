@@ -30,7 +30,7 @@ OpenTelemetry's Google Cloud exporter takes the same endpoint and options.
   - `serviceruntime.googleapis.com/api/request_count` and `api/request_latencies` on `consumed_api`, for the APIs CloudBurrow serves itself, attributed to the project each call names (a call that names none to the instance's default project).
   - Cloud Tasks' `cloudtasks.googleapis.com/api/request_count` (DELTA, `api_method`, `response_code`), `queue/depth` (GAUGE), `queue/task_attempt_count` (DELTA, `response_code`) and `queue/task_attempt_delays` (DELTA distribution, ms) on `cloud_tasks_queue` (#2064): every API call naming a queue or task, each dispatch attempt with its canonical code (`ok`, `unavailable`, ...) and its delay after its scheduled time, and each queue's task count, sampled every 60 seconds and at each read. A queue's Metrics tab charts them.
 
-User-defined descriptors and points are kept in `monitoring.json` in the instance directory in persistent mode. Log-based values come from Cloud Logging's in-memory entries, and request and Cloud Tasks metrics are kept in memory for a week.
+User-defined descriptors and points are kept in `monitoring.json` in the instance directory in persistent mode. Log-based values come from Cloud Logging's in-memory entries; request metrics are kept in memory for 30 days, the longest time range the APIs & Services charts offer (#1866), and Cloud Tasks metrics for a week.
 
 Terraform's `google_monitoring_metric_descriptor` works through `cloudburrow terraform` (`monitoring_custom_endpoint`). gcloud has no command for metric descriptors or time series.
 

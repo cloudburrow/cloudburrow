@@ -8,6 +8,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -40,13 +41,16 @@ import (
 //     endOffset, from whisper's token timestamps), enableWordConfidence,
 //     maxAlternatives (one alternative is returned, which the reference
 //     allows) and enableAutomaticPunctuation (whisper punctuates
-//     regardless) are read; profanityFilter, enableSpokenPunctuation,
-//     enableSpokenEmojis, diarizationConfig and SEPARATE_RECOGNITION_PER_CHANNEL
-//     are UNIMPLEMENTED, as are adaptation, transcriptNormalization,
-//     translationConfig and denoiserConfig.
+//     regardless) are read, and SEPARATE_RECOGNITION_PER_CHANNEL
+//     transcribes each channel on its own (transcribeChannels, #1799);
+//     profanityFilter, enableSpokenPunctuation, enableSpokenEmojis and
+//     diarizationConfig are UNIMPLEMENTED, as are translationConfig and denoiserConfig;
+//     adaptation biases whisper (speechbias.go), and transcriptNormalization
+//     rewrites each final transcript (speechconfig's Normalize, #1799).
 //   - decoding (speech/audio.go): WAV, headerless LINEAR16, MULAW and ALAW,
-//     MP3, AAC in MP4, M4A or MOV, and FLAC (internal/speech/flac.go, #1799);
-//     Opus and AMR are UNIMPLEMENTED.
+//     MP3, AAC in MP4, M4A or MOV, FLAC (internal/speech/flac.go, #1799),
+//     and Opus in Ogg or WebM (internal/speech/opus.go, #1799); AMR and
+//     AMR-WB are UNIMPLEMENTED.
 //   - each whisper segment is one result, its resultEndOffset the segment's
 //     end; metadata.totalBilledDuration is the audio's length rounded up to
 //     a second.
@@ -173,19 +177,15 @@ func (s *Server) transcribeAudioMax(ctx context.Context, name string, config jso
 	if err != nil {
 		return none, nil, cfg, err
 	}
+	if cfg.PerChannel {
+		return s.transcribeChannels(ctx, cfg, data, maxSeconds)
+	}
 	samples, err := speech.DecodeMax(cfg.Decoding, data, maxSeconds)
 	if err != nil {
 		return none, nil, cfg, decodeError(err)
 	}
-	if lang := cfg.Language; lang != "" {
-		known, err := speech.LanguageKnown(ctx, lang)
-		if err != nil {
-			return none, nil, cfg, speechError(err)
-		}
-		if !known {
-			return none, nil, cfg, apierror.Unimplemented("Not implemented here: the language %s: CloudBurrow's local Whisper model "+
-				"does not recognise it, and CloudBurrow never calls Google", lang)
-		}
+	if err := checkLanguage(ctx, cfg); err != nil {
+		return none, nil, cfg, err
 	}
 	opt, err := s.transcribeOptions(cfg)
 	if err != nil {
@@ -197,6 +197,7 @@ func (s *Server) transcribeAudioMax(ctx context.Context, name string, config jso
 	if err != nil {
 		return none, nil, cfg, speechError(err)
 	}
+	normalize(res.Segments, cfg)
 	return res, samples, cfg, nil
 }
 
@@ -208,6 +209,90 @@ func (s *Server) transcribeOptions(cfg speechconfig.Config) (speech.Options, err
 		return speech.Options{}, err
 	}
 	return speech.Options{Language: cfg.Language, Words: cfg.Words, Phrases: phrases, Prompt: prompt}, nil
+}
+
+// checkLanguage refuses a language the local Whisper model does not know.
+func checkLanguage(ctx context.Context, cfg speechconfig.Config) error {
+	lang := cfg.Language
+	if lang == "" {
+		return nil
+	}
+	known, err := speech.LanguageKnown(ctx, lang)
+	if err != nil {
+		return speechError(err)
+	}
+	if !known {
+		return apierror.Unimplemented("Not implemented here: the language %s: CloudBurrow's local Whisper model "+
+			"does not recognise it, and CloudBurrow never calls Google", lang)
+	}
+	return nil
+}
+
+// transcribeChannels is transcribeAudioMax with
+// SEPARATE_RECOGNITION_PER_CHANNEL (#1799): each channel of the audio is
+// decoded on its own (speech.DecodeChannelsMax) and transcribed
+// independently, as the reference's MultiChannelMode says, each segment
+// tagged with its 1-based channel; the results are ordered by their end,
+// then channel. The samples returned are the channels one after another,
+// so the billed duration counts each channel.
+//
+// UNVERIFIED (re-read 2026-11-20:
+// https://docs.cloud.google.com/speech-to-text/docs/reference/rest/v2/projects.locations.recognizers#MultiChannelMode
+// and .../multi-channel, which do not say): the order of the channels'
+// results, and that each channel is billed.
+func (s *Server) transcribeChannels(ctx context.Context, cfg speechconfig.Config, data []byte, maxSeconds int) (speech.Result, []float32, speechconfig.Config, error) {
+	var none speech.Result
+	chans, err := speech.DecodeChannelsMax(cfg.Decoding, data, maxSeconds)
+	if err != nil {
+		return none, nil, cfg, decodeError(err)
+	}
+	if err := checkLanguage(ctx, cfg); err != nil {
+		return none, nil, cfg, err
+	}
+	opt, err := s.transcribeOptions(cfg)
+	if err != nil {
+		return none, nil, cfg, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 8*time.Hour)
+	defer cancel()
+	var (
+		out     speech.Result
+		samples []float32
+	)
+	for c, ch := range chans {
+		res, err := speech.Transcribe(ctx, ch, opt)
+		if err != nil {
+			return none, nil, cfg, speechError(err)
+		}
+		if out.Language == "" {
+			out.Language = res.Language
+		}
+		for _, seg := range res.Segments {
+			seg.Channel = c + 1
+			out.Segments = append(out.Segments, seg)
+		}
+		samples = append(samples, ch...)
+	}
+	sort.SliceStable(out.Segments, func(i, j int) bool {
+		a, b := out.Segments[i], out.Segments[j]
+		if a.End != b.End {
+			return a.End < b.End
+		}
+		return a.Channel < b.Channel
+	})
+	normalize(out.Segments, cfg)
+	return out, samples, cfg, nil
+}
+
+// normalize applies the config's transcriptNormalization to each final
+// segment's transcript (speechconfig's Normalize).
+func normalize(segs []speech.Segment, cfg speechconfig.Config) {
+	if len(cfg.Normalization) == 0 {
+		return
+	}
+	for i := range segs {
+		segs[i].Text = cfg.Normalize(segs[i].Text)
+	}
 }
 
 // decodeError is a speech.Decode error as the API answers it.
@@ -251,7 +336,11 @@ func recognizeResponse(res speech.Result, samples []float32, f speechconfig.Conf
 			}
 			alt["words"] = words
 		}
-		results = append(results, map[string]any{"alternatives": []any{alt}, "resultEndOffset": protoDuration(seg.End), "languageCode": code})
+		r := map[string]any{"alternatives": []any{alt}, "resultEndOffset": protoDuration(seg.End), "languageCode": code}
+		if seg.Channel > 0 {
+			r["channelTag"] = seg.Channel
+		}
+		results = append(results, r)
 	}
 	billed := time.Duration(math.Ceil(float64(len(samples))/speech.SampleRate)) * time.Second
 	out := map[string]any{"metadata": map[string]any{"totalBilledDuration": protoDuration(billed)}}

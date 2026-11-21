@@ -28,7 +28,8 @@ import (
 //
 //   - encoding: ENCODING_UNSPECIFIED (WAV or FLAC, their headers read) is
 //     v2's autoDecodingConfig; LINEAR16, MULAW, FLAC and MP3 are
-//     decoded; AMR, AMR_WB, OGG_OPUS, SPEEX_WITH_HEADER_BYTE and WEBM_OPUS
+//     decoded, and OGG_OPUS and WEBM_OPUS (#1799) at one of Opus's
+//     sample_rate_hertz values; AMR, AMR_WB and SPEEX_WITH_HEADER_BYTE
 //     are UNIMPLEMENTED, as in v2.
 //   - model: "" (default), default, latest_long, video and phone_call read
 //     as v2's long and telephony, latest_short and command_and_search as
@@ -115,6 +116,16 @@ func v1Config(c *speechv1pb.RecognitionConfig) (json.RawMessage, error) {
 		}
 		out["explicitDecodingConfig"] = map[string]any{"encoding": enc.String(), "sampleRateHertz": rate,
 			"audioChannelCount": max(c.GetAudioChannelCount(), 1)}
+	case speechv1pb.RecognitionConfig_OGG_OPUS, speechv1pb.RecognitionConfig_WEBM_OPUS:
+		// Opus in its container (internal/speech/opus.go, #1799); v1 asks
+		// for one of Opus's rates.
+		switch rate := c.GetSampleRateHertz(); rate {
+		case 8000, 12000, 16000, 24000, 48000:
+			out["explicitDecodingConfig"] = map[string]any{"encoding": enc.String(), "sampleRateHertz": rate,
+				"audioChannelCount": max(c.GetAudioChannelCount(), 1)}
+		default:
+			return nil, apierror.InvalidArgument("sample_rate_hertz %d is invalid for %s: it must be one of 8000, 12000, 16000, 24000 or 48000", rate, enc)
+		}
 	default:
 		return nil, apierror.Unimplemented("Not implemented here: %s audio has no local decoder in CloudBurrow, and it never calls Google", enc)
 	}

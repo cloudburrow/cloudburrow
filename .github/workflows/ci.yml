@@ -1226,8 +1226,12 @@ jobs:
           # in run, whose suite took 527 s in main run 44774469756 before the
           # Model Registry's Deploy, which waits up to four minutes for the
           # serving container (#1940), and the Document AI and Speech batch
-          # pages joined it.
-          BROWSER_TIMEOUT=10m; case "$SHARD" in served|run) BROWSER_TIMEOUT=20m ;; esac
+          # pages joined it. And 20m in storage, the rest of the suite: 403 s
+          # in 44774469756, then past 10m in 44830404935 (#2080) with no test
+          # hung: its 140 tests in both took 1.30x as long (median), Landing
+          # 161 added 77 s of tests, and the six it did not reach took 15 s
+          # before, so about 615 s.
+          BROWSER_TIMEOUT=10m; case "$SHARD" in served|run|storage) BROWSER_TIMEOUT=20m ;; esac
           go test -tags=browser -count=1 -timeout "$BROWSER_TIMEOUT" -v "${SELECT[@]}" ./test/browser/ | tee browser.log || rc=1
           for t in $(go test -tags=browser -list '.*' ./test/browser/ | grep '^Test' | "${PICK[@]}" | grep -vE "$NEVER_TESTS"); do
             grep -q -- "^--- PASS: $t (" browser.log ||

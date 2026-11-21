@@ -58,10 +58,16 @@ const MemorystoreRESTPrefix = "/memorystore"
 const valkeyPrefix = "valkey/"
 
 // DefaultValkeyVersion is the engine_version an instance runs when none
-// is asked: the image is Valkey 8.1 (components.MemorystoreImage),
-// Memorystore's VALKEY_8_0 line. VALKEY_7_2 runs Valkey 7.2 and
+// is asked: VALKEY_9_1, Valkey 9.1, as Google documents (#2019: "If you
+// don't specify a value, then VALKEY_9_1 is the default value"). VALKEY_7_2
+// runs Valkey 7.2, VALKEY_8_0 Valkey 8.1 (components.MemorystoreImage) and
 // VALKEY_9_0 Valkey 9.0 (#1557).
-const DefaultValkeyVersion = "VALKEY_8_0"
+const DefaultValkeyVersion = "VALKEY_9_1"
+
+// redisClusterEngineVersion is the Valkey line a Memorystore for Redis
+// Cluster's nodes run, and the engine_version a Valkey instance stored
+// before engine versions were (#1557) keeps: Valkey 8.1.
+const redisClusterEngineVersion = "VALKEY_8_0"
 
 // valkeyNodeSizes are the GB a node of each node_type holds, as Memorystore
 // for Valkey documents (node specification).

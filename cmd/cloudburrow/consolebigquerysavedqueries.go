@@ -44,7 +44,15 @@ type bqSavedQuery struct {
 	Updated string `json:"updated"`
 }
 
-type bqSavedQueryStore struct{ path string }
+// bqSavedQueryStore is a product's saved queries record. Bigtable Studio
+// keeps its own (bigtableSavedQueriesFile, #1858) with region, its
+// product's regions; a nil region is BigQuery's locations.
+type bqSavedQueryStore struct {
+	path   string
+	region func(string) bool
+	// product names the regions in a refusal ("BigQuery").
+	product string
+}
 
 func (s bqSavedQueryStore) read() ([]bqSavedQuery, error) {
 	if s.path == "" {
@@ -109,8 +117,12 @@ func (s bqSavedQueryStore) save(project string, in bqSavedQuery, now time.Time) 
 	case len(in.Query) > bqSavedQueryLimit:
 		return in, fmt.Errorf("a saved query is at most %d bytes", bqSavedQueryLimit)
 	}
-	if in.Region != "" && !bqKnownLocation(in.Region) {
-		return in, fmt.Errorf("%q is not a BigQuery region", in.Region)
+	known, product := s.region, s.product
+	if known == nil {
+		known, product = bqKnownLocation, "BigQuery"
+	}
+	if in.Region != "" && !known(in.Region) {
+		return in, fmt.Errorf("%q is not a %s region", in.Region, product)
 	}
 	bqSavedMu.Lock()
 	defer bqSavedMu.Unlock()

@@ -70,7 +70,8 @@ Out of contract, not merely unscheduled:
   against this instance's own minted tokens and the project's stored policy (`internal/iamcond`,
   `internal/iamroles`), and BigQuery remote models' connection permissions; and, with
   `up --iam-enforcement=on` (#1879, off by default), the methods `internal/iameval` maps on Secret
-  Manager, Cloud KMS and Cloud Tasks ([compatibility.md](compatibility.md#iam-enforcement)).
+  Manager, Cloud KMS, Cloud Tasks, Cloud Storage, Pub/Sub, Cloud Run invoke, BigQuery sharing, Cloud
+  Scheduler and Workflows ([compatibility.md](compatibility.md#iam-enforcement)).
 - **GKE-specific APIs**, Google-managed load balancing, storage classes and identity.
 - **BigQuery beyond what its community emulator does.** Firestore, Spanner, Bigtable and
   Datastore now ship as opt-in Google emulators. BigQuery ships as `goccy/bigquery-emulator`,
@@ -121,6 +122,8 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/admin/` | The loopback-only control API: seed, reset, event inspection. |
 | `internal/aipfilter/` | The shared list `filter` (AIP-160) and `order_by` (AIP-132) evaluator (#1943): compiles a filter or order against a resource's message descriptor (INVALID_ARGUMENT for an unknown field, a wrong-typed value or bad syntax), matches and sorts protocol buffer resources, the Locations mixin's filter, and an order-preserving pager. |
 | `internal/apicontract/` | Pins the Google API contracts CloudBurrow implements against, and where each comes from. |
+| `internal/authplatform/` | Google Auth Platform's OAuth app and clients (the console's Branding, Audience, Clients and Data Access) and the authorization, token-grant and revocation endpoints the metadata server serves for them (#2030). |
+| `internal/quotalimit/` | The quota limits APIs enforce, read from the Cloud Quotas API's granted preferences, and the usage its safety checks compare with (#2030). |
 | `internal/apienable/` | Refuses calls to an API disabled in their project with Google's `SERVICE_DISABLED` (#1914): the gRPC interceptors and HTTP gate the in-process services and the in-cluster servers wrap, the Service Usage server's decision, and the host endpoint the in-cluster servers ask, with a one-second cache. |
 | `internal/apierror/` | One internal cause mapped to a Google-style gRPC status and JSON error body. |
 | `internal/archtest/` | Tests only (#672): enforces rules 1–3 below against the module, each with an explicit list of today's exceptions. |
@@ -205,6 +208,8 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/service/backupdr/` | The Backup and DR Service API v1 for Cloud SQL (vaults, plans, associations, data sources, backups over Cloud SQL backup runs), built by us (#1433). |
 | `internal/service/storagejobs/` | The Cloud Storage companion APIs, built by us over the instance's buckets: Storage Batch Operations jobs, Storage Insights inventory reports and Storage Transfer Service jobs with local agent pools, on one shared clock (#1957). |
 | `internal/service/datatransfer/` | The BigQuery Data Transfer Service v1 (scheduled queries and dataset copies: transfer configs, runs, logs, BigQuery's schedule syntax and table templates), built by us (#1948); runs execute on the instance's BigQuery through an `Executor` `cmd/cloudburrow` wires. |
+| `internal/service/cloudquotas/` | The Cloud Quotas API v1 (quota infos of the APIs CloudBurrow serves, quota preferences granted at once with Google's safety checks, quota adjuster settings), built by us; the source `internal/quotalimit` reads (#2030). |
+| `internal/service/siteverification/` | The Site Verification API v1 (FILE and META tokens checked against sites on this machine; verified sites and their owners), built by us (#2030). |
 | `internal/service/apikeys/` | The API Keys API v2 (each project's API keys and their restrictions), built by us; `Authorize` is Google's decision on a request that carries a key, with its API_KEY_* errors (#1915). |
 | `internal/service/gke/` | The Kubernetes Engine API v1 (clusters, node pools, operations), built by us (#1913); each cluster is a kind cluster that `internal/cluster`'s `GKE` makes and resizes. |
 | `internal/service/analyticshub/` | BigQuery sharing, formerly Analytics Hub, v1 (data exchanges, listings, subscriptions, their IAM policies), built by us (#1960); a subscription's linked dataset is made in the instance's BigQuery through a `Linker` `cmd/cloudburrow` wires, and the BigQuery front (`internal/bigqueryfront/hublinks.go`) keeps it a read-only pointer with the listing's egress restrictions. |

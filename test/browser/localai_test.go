@@ -202,7 +202,13 @@ func TestEmbeddingsPageEmbedsAnImage(t *testing.T) {
 		t.Fatalf("after choosing an image the model and method read %v; want %s and embedContent", picked, model2)
 	}
 	p.clickText("button", "Embed")
-	p.waitFor(`document.querySelectorAll("#emb-results tbody tr").length === 7 || /\[error\]/.test(document.body.textContent)`)
+	// Seven EmbedContent calls, five of them images through EmbeddingGemma
+	// 2's vision encoder on the CPU: 14.6 s on an M-series Mac, where this
+	// shard's audio and OCR page tests take 3.2 s and 10.6 s, against 14.9 s
+	// and 27.9 s on CI's ubuntu-latest runner (2.6x to 4.6x), so about 40 to
+	// 70 s there, past waitFor's 30 s (main's run 44798510814, "running…"
+	// still shown). An error still ends the wait at once.
+	p.waitForWithin(`document.querySelectorAll("#emb-results tbody tr").length === 7 || /\[error\]/.test(document.body.textContent)`, 3*time.Minute)
 	var rows [][]string
 	p.eval(`[...document.querySelectorAll("#emb-results tbody tr")].map((tr) => [...tr.children].map((td) => td.textContent.trim()))`, &rows)
 	if len(rows) != 7 {

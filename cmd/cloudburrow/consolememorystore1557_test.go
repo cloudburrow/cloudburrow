@@ -60,7 +60,7 @@ func TestConsoleValkeyReplicationMigrationVersions(t *testing.T) {
 		t.Errorf("secondary's page shows %v", props)
 	}
 	_, props = valkeyPageProps(t, p, "vk-pri")
-	if props["Cross-instance replication"] != "PRIMARY" || props["Engine version"] != "VALKEY_7_2" || props["Persistence"] != "AOF" ||
+	if props["Cross-instance replication"] != "PRIMARY" || props["Version"] != "Valkey 7.2" || props["Data persistence strategy"] != "Append Only File (AOF)" ||
 		props["Secondary instances"] == "—" {
 		t.Errorf("primary's page shows %v", props)
 	}
@@ -99,7 +99,7 @@ func TestConsoleValkeyReplicationMigrationVersions(t *testing.T) {
 	d, _ := valkeyPageProps(t, p, "vk-pri")
 	found := false
 	for _, f := range d.Edit.Fields {
-		if f.Name == "engineVersion" && f.Default == "VALKEY_7_2" && len(f.Options) == 3 {
+		if f.Name == "engineVersion" && f.Default == "VALKEY_7_2" && len(f.Options) == 4 {
 			found = true
 		}
 	}
@@ -140,7 +140,7 @@ func TestConsoleValkeySecondaryWithTLS(t *testing.T) {
 	}
 	_, props := valkeyPageProps(t, p, "vk-tls-sec")
 	if props["Cross-instance replication"] != "SECONDARY" || props["Primary instance"] != primary ||
-		props["In-transit encryption"] != "SERVER_AUTHENTICATION" {
+		props["In-transit encryption"] != "Enabled (TLS)" {
 		t.Errorf("secondary's page shows %v", props)
 	}
 }

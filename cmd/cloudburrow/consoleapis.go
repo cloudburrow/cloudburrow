@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/metrics"
 )
@@ -16,7 +17,8 @@ import (
 // calls are the serviceusage provider's Studio, so they read and change the
 // same serviceusage.Server gcloud and Terraform call, and count calls from
 // the instance's own request counters (/metrics), which are kept per
-// service, not per project.
+// service and per project; the pages read their one-minute history
+// (consoleapicharts.go).
 
 // apiLibraryInfo is what the Library shows of an API beside its name and
 // title: Google's Library category and a one-line summary.
@@ -31,6 +33,8 @@ var apiLibrary = map[string]apiLibraryInfo{
 	"cloudresourcemanager.googleapis.com": {"Management tools", "Creates, reads and updates projects, folders and the organization.", "resourcemanager"},
 	"serviceusage.googleapis.com":         {"Management tools", "Lists, enables and disables the APIs a project uses.", ""},
 	"apikeys.googleapis.com":              {"Security", "Manages the API keys of a project and their restrictions.", ""},
+	"cloudquotas.googleapis.com":          {"Management tools", "Lists the quotas of the APIs a project uses and adjusts them with quota preferences.", ""},
+	"siteverification.googleapis.com":     {"Developer tools", "Verifies that you own a website or a domain, and lists what you have verified.", ""},
 	"storage.googleapis.com":              {"Storage", "Stores and retrieves objects in buckets.", "storage"},
 	"pubsub.googleapis.com":               {"Big data", "Sends and receives messages between independent applications.", "pubsub"},
 	"cloudtasks.googleapis.com":           {"Developer tools", "Manages the execution of large numbers of distributed requests.", "tasks"},
@@ -142,15 +146,38 @@ func (a *totalsAcc) totals() apiTotals {
 		P50MS: quantileMS(0.5, a.buckets, a.n), P95MS: quantileMS(0.95, a.buckets, a.n)}
 }
 
-// apiCounters sums the request counters per metrics service, and per
-// method of each.
-func (p serviceUsageProvider) apiCounters() (map[string]*totalsAcc, map[string]map[string]*totalsAcc) {
+// window is project's request history over the range, or nil without one.
+func (p serviceUsageProvider) window(project, rangeID string) (*apiWindow, error) {
+	r, err := lookupAPIRange(rangeID)
+	if err != nil {
+		return nil, err
+	}
+	if p.history == nil {
+		return nil, nil
+	}
+	// The calls made up to now are a sample before the window ends, so a
+	// call just made is in it.
+	p.history.Sample()
+	now := time.Now()
+	start := now.Add(-r.Span)
+	return &apiWindow{Range: r, Start: start, End: now, Began: p.history.Began(), Deltas: p.history.Deltas(project, start, now)}, nil
+}
+
+// apiCounters sums the calls per metrics service, and per method of each:
+// the window's, or every project's since the instance started without one.
+func (p serviceUsageProvider) apiCounters(w *apiWindow) (map[string]*totalsAcc, map[string]map[string]*totalsAcc) {
 	byService := map[string]*totalsAcc{}
 	byMethod := map[string]map[string]*totalsAcc{}
-	if p.metrics == nil {
-		return byService, byMethod
+	var points []metrics.Point
+	switch {
+	case w != nil:
+		for _, d := range w.Deltas {
+			points = append(points, deltaPoint(d))
+		}
+	case p.metrics != nil:
+		points = p.metrics.Snapshot()
 	}
-	for _, pt := range p.metrics.Snapshot() {
+	for _, pt := range points {
 		if byService[pt.Service] == nil {
 			byService[pt.Service] = &totalsAcc{}
 			byMethod[pt.Service] = map[string]*totalsAcc{}
@@ -204,12 +231,12 @@ type apiEntry struct {
 	Totals     apiTotals `json:"totals"`
 }
 
-func (p serviceUsageProvider) entries(project string) ([]apiEntry, map[string]map[string]*totalsAcc, error) {
+func (p serviceUsageProvider) entries(project string, w *apiWindow) ([]apiEntry, map[string]map[string]*totalsAcc, error) {
 	services, err := p.api.Services(project)
 	if err != nil {
 		return nil, nil, err
 	}
-	byService, byMethod := p.apiCounters()
+	byService, byMethod := p.apiCounters(w)
 	var out []apiEntry
 	for _, s := range services {
 		cfg, _ := s["config"].(map[string]any)
@@ -244,12 +271,14 @@ func (p serviceUsageProvider) entries(project string) ([]apiEntry, map[string]ma
 //   - apis: every API, served (with its state and counters) or not;
 //   - api {service}: one API, with its methods' counters;
 //   - enable / disable {service}: services.enable and services.disable.
-func (p serviceUsageProvider) StudioCall(_ context.Context, project, call string, body json.RawMessage) (any, error) {
+func (p serviceUsageProvider) StudioCall(ctx context.Context, project, call string, body json.RawMessage) (any, error) {
 	if project == "" {
 		return nil, errors.New("choose a project first")
 	}
 	var req struct {
 		Service string `json:"service"`
+		// Range is the time range's ID (apiRanges); empty is the first.
+		Range string `json:"range"`
 	}
 	if len(body) > 0 {
 		if err := json.Unmarshal(body, &req); err != nil {
@@ -259,17 +288,38 @@ func (p serviceUsageProvider) StudioCall(_ context.Context, project, call string
 	if strings.HasPrefix(call, "key") {
 		return p.keysCall(project, call, body)
 	}
+	if strings.HasPrefix(call, "oauth-") {
+		return p.oauthCall(project, call, body)
+	}
+	if strings.HasPrefix(call, "quota") || strings.HasPrefix(call, "domain") {
+		return p.quotasCall(ctx, project, call, body)
+	}
 	switch call {
-	case "apis":
-		list, _, err := p.entries(project)
+	case "apis", "api":
+		w, err := p.window(project, req.Range)
 		if err != nil {
 			return nil, err
 		}
-		return map[string]any{"project": project, "apis": list, "countersNote": apiCountersNote}, nil
-	case "api":
-		list, byMethod, err := p.entries(project)
+		list, byMethod, err := p.entries(project, w)
 		if err != nil {
 			return nil, err
+		}
+		out := map[string]any{"project": project, "ranges": apiRanges, "countersNote": p.countersNote(project)}
+		if w != nil {
+			out["range"] = w.Range.ID
+		}
+		if call == "apis" {
+			out["apis"] = list
+			if w != nil {
+				counted := map[string]bool{}
+				for _, e := range list {
+					if e.State == "ENABLED" && e.MetricsService != "" {
+						counted[e.MetricsService] = true
+					}
+				}
+				out["charts"] = w.dashboardCharts(counted)
+			}
+			return out, nil
 		}
 		for _, e := range list {
 			if e.Name != req.Service {
@@ -282,7 +332,11 @@ func (p serviceUsageProvider) StudioCall(_ context.Context, project, call string
 				}
 				sort.Slice(methods, func(i, j int) bool { return methods[i].Method < methods[j].Method })
 			}
-			return map[string]any{"project": project, "api": e, "methods": methods, "countersNote": apiCountersNote}, nil
+			out["api"], out["methods"] = e, methods
+			if w != nil && e.MetricsService != "" {
+				out["charts"] = w.apiPageCharts(map[string]bool{e.MetricsService: true})
+			}
+			return out, nil
 		}
 		return nil, fmt.Errorf("CloudBurrow does not serve %s", strings.TrimSpace(req.Service))
 	case "enable", "disable":
@@ -297,5 +351,16 @@ func (p serviceUsageProvider) StudioCall(_ context.Context, project, call string
 	return nil, fmt.Errorf("unknown call %q", call)
 }
 
-const apiCountersNote = "Calls this instance has served since it started, from its own request counters (/metrics). " +
-	"They are counted per API for every project together, not per project."
+// countersNote says what the counts are.
+func (p serviceUsageProvider) countersNote(project string) string {
+	if p.history == nil {
+		return "Calls this instance has served since it started, from its own request counters (/metrics). " +
+			"They are counted per API for every project together, not per project."
+	}
+	note := fmt.Sprintf("Calls this instance served in project %s over the time range, sampled every minute from its request counters, "+
+		"as Cloud Monitoring's serviceruntime.googleapis.com/api metrics are.", project)
+	if p.history.Project() == project {
+		note += " A call that named no project counts in this project, the instance's default."
+	}
+	return note + " History starts when the instance started."
+}

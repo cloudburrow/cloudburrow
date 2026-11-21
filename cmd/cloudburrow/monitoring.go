@@ -44,7 +44,9 @@ type monitoringService struct {
 	// counters.
 	logging  *loggingService
 	counters *metrics.Registry
-	reqs     *monitoring.RequestBuiltin
+	// reqs are the serviceruntime request metrics; set before Start, they
+	// are sampled by whoever set them.
+	reqs *monitoring.RequestBuiltin
 	// tasks is the instance's Cloud Tasks, or nil, whose calls, attempts
 	// and queue depths are cloudtasks.googleapis.com metrics (#2064).
 	tasks     *tasksService
@@ -126,7 +128,11 @@ func (s *monitoringService) Start(ctx context.Context) error {
 	evalCtx, cancel := context.WithCancel(context.Background())
 	s.cancel = cancel
 	api.StartEvaluating(evalCtx)
-	if s.counters != nil {
+	if s.reqs != nil {
+		// up's request history (#1866), which it samples itself, shared
+		// with the APIs & Services charts.
+		api.AddBuiltin(s.reqs)
+	} else if s.counters != nil {
 		s.reqs = monitoring.NewRequestBuiltin(monitoringCounters{reg: s.counters}, s.cfg.DefaultProject(), time.Now)
 		api.AddBuiltin(s.reqs)
 	}
@@ -370,4 +376,42 @@ func (m monitoringTasks) Depths() []monitoring.TasksQueueDepth {
 		out[i] = monitoring.TasksQueueDepth{Queue: d.Queue, TargetType: d.TargetType, Tasks: d.Tasks}
 	}
 	return out
+}
+
+// requestSampler samples the request history every requestSampleInterval,
+// so serviceruntime.googleapis.com/api/* and the APIs & Services charts
+// (#1866) have one-minute points whether or not anybody reads them.
+type requestSampler struct {
+	history *monitoring.RequestBuiltin
+	stop    chan struct{}
+	done    chan struct{}
+}
+
+func (s *requestSampler) Name() string { return "request-history" }
+
+func (s *requestSampler) Start(context.Context) error {
+	s.stop, s.done = make(chan struct{}), make(chan struct{})
+	go func(stop, done chan struct{}) {
+		defer close(done)
+		t := time.NewTicker(requestSampleInterval)
+		defer t.Stop()
+		for {
+			select {
+			case <-t.C:
+				s.history.Sample()
+			case <-stop:
+				return
+			}
+		}
+	}(s.stop, s.done)
+	return nil
+}
+
+func (s *requestSampler) Stop(context.Context) error {
+	if s.stop != nil {
+		close(s.stop)
+		<-s.done
+		s.stop = nil
+	}
+	return nil
 }

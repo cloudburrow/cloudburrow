@@ -12,6 +12,7 @@ import (
 
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/admin"
+	"github.com/cloudburrow/cloudburrow/internal/authplatform"
 	"github.com/cloudburrow/cloudburrow/internal/components"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/console"
@@ -25,9 +26,12 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/service/apikeys"
 	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
+	"github.com/cloudburrow/cloudburrow/internal/service/cloudquotas"
 	"github.com/cloudburrow/cloudburrow/internal/service/datatransfer"
+	"github.com/cloudburrow/cloudburrow/internal/service/monitoring"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
+	"github.com/cloudburrow/cloudburrow/internal/service/siteverification"
 	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
 	"github.com/cloudburrow/cloudburrow/internal/service/vertexai"
 )
@@ -80,9 +84,18 @@ type consoleDeps struct {
 	serviceUsage *serviceusage.Server
 	// apiKeys is the API Keys API (#1915), whose keys Credentials lists.
 	apiKeys *apikeys.Server
+	// cloudQuotas and siteVerify (#2030) back Quotas & System Limits and
+	// Domain verification.
+	cloudQuotas *cloudquotas.Server
+	siteVerify  *siteverification.Server
+	// authPlatform backs the OAuth consent screen and OAuth clients.
+	authPlatform *authplatform.Store
 	// requestMetrics are the request counters, which APIs & Services
 	// counts each API's calls from (#1866).
 	requestMetrics *metrics.Registry
+	// requestHistory is their one-minute history per project, which the
+	// APIs & Services charts read over a time range (#1866).
+	requestHistory *monitoring.RequestBuiltin
 	// backupdr is the Backup and DR Service (#1433), nil unless enabled.
 	backupdr *backupdr.Server
 	// privateCA is Certificate Authority Service (#1834), nil unless enabled.
@@ -370,7 +383,7 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	}
 	// APIs & Services (#1352): always served, as projects are.
 	if d.serviceUsage != nil {
-		providers = append(providers, serviceUsageProvider{api: d.serviceUsage, metrics: d.requestMetrics, apiKeys: d.apiKeys}, serviceUsageOperationsProvider{api: d.serviceUsage})
+		providers = append(providers, serviceUsageProvider{api: d.serviceUsage, metrics: d.requestMetrics, history: d.requestHistory, apiKeys: d.apiKeys, quotas: d.cloudQuotas, sites: d.siteVerify, auth: d.authPlatform, metaAddr: d.metaAddr}, serviceUsageOperationsProvider{api: d.serviceUsage})
 	}
 	// Backup and DR (#1433), in process, restoring through Cloud SQL.
 	if enabled[config.ServiceBackupDR] && d.backupdr != nil {
@@ -425,7 +438,9 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		{config.ServiceBigtable, func(a string) console.Provider { return bigtableProvider{endpoint: a} }},
 		// Instances, clusters, app profiles and instance IAM, through the
 		// instance admin API the Bigtable front serves (#1358).
-		{config.ServiceBigtable, func(a string) console.Provider { return bigtableInstancesProvider{endpoint: a} }},
+		{config.ServiceBigtable, func(a string) console.Provider {
+			return bigtableInstancesProvider{endpoint: a, savedQueries: filepath.Join(d.cfg.InstanceDir(), bigtableSavedQueriesFile)}
+		}},
 		{config.ServiceSpanner, func(a string) console.Provider { return spannerProvider{endpoint: a} }},
 		{config.ServiceCloudSQL, func(a string) console.Provider { return cloudSQLProvider{endpoint: a} }},
 		{config.ServiceCloudSQLMySQL, func(a string) console.Provider { return newCloudSQLMySQLProvider(a, d.mysql) }},

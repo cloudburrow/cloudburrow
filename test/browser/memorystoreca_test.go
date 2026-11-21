@@ -104,7 +104,8 @@ func TestMemorystoreClusterServerCATabsThroughThePage(t *testing.T) {
 		t.Fatalf("GetClusterCertificateAuthority = %v, %v", cca, err)
 	}
 	page, tab := serverCA("memorystore-clusters", cid)
-	for _, want := range []string{"TRANSIT_ENCRYPTION_MODE_SERVER_AUTHENTICATION", "AUTH_MODE_IAM_AUTH"} {
+	// The modes in the create page's words (#1862), not the API's enums.
+	for _, want := range []string{"Enabled (TLS)", "IAM Auth"} {
 		if !strings.Contains(page, want) {
 			t.Errorf("the cluster's page does not show %q", want)
 		}
@@ -126,7 +127,7 @@ func TestMemorystoreClusterServerCATabsThroughThePage(t *testing.T) {
 		t.Fatalf("GetCertificateAuthority = %v, %v", vca, err)
 	}
 	page, tab = serverCA("memorystore-valkey", vid)
-	for _, want := range []string{"SERVER_AUTHENTICATION", "IAM_AUTH"} {
+	for _, want := range []string{"Enabled (TLS)", "IAM Auth"} {
 		if !strings.Contains(page, want) {
 			t.Errorf("the instance's page does not show %q", want)
 		}

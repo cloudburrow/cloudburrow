@@ -107,6 +107,24 @@ func (p *tab) submitForm(values map[string]string, first string) {
 	p.run(chromedp.Click(chromedp.CSS(`[data-cb-click]`)))
 }
 
+// listedRow is true once the list at path ("" for wherever it is) shows a
+// row holding text. A list shows 25 rows a page, and the shard's earlier
+// tests leave folders behind: main run 44845978136 had 31, ordered by
+// their random IDs, and the one just made was on the second page. So,
+// while no row on the page holds text, it types text into the list's
+// filter, as someone looking for the row would; a list drawn again after
+// the create starts with an empty filter, and is filtered again.
+func listedRow(path, text string) string {
+	return fmt.Sprintf(`(() => {
+		if (%[1]q !== "" && location.pathname !== %[1]q) return false;
+		const has = () => [...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%[2]q));
+		if (has()) return true;
+		const f = document.querySelector("#view input.filter");
+		if (f && f.value !== %[2]q) { f.value = %[2]q; f.dispatchEvent(new Event("input", { bubbles: true })); }
+		return has();
+	})()`, path, text)
+}
+
 // TestResourceHierarchyAndTagsThroughTheDrawer, in the storage shard. The
 // Resource hierarchy and Tags screens (#1294, #1295) had providers but no
 // route. Since #1865 they are IAM & Admin's, as Google's are: the drawer
@@ -175,8 +193,7 @@ func TestResourceHierarchyAndTagsThroughTheDrawer(t *testing.T) {
 	folder := fmt.Sprintf("Browser %d", time.Now().UnixNano()%1e8)
 	p.clickText("#view button", "Create folder")
 	p.submitForm(map[string]string{"displayName": folder}, "displayName")
-	p.waitFor(fmt.Sprintf(`location.pathname === "/resource-hierarchy" &&
-		[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q))`, folder))
+	p.waitFor(listedRow("/resource-hierarchy", folder))
 	var made *rmpb.Folder
 	it := folders.ListFolders(ctx, &rmpb.ListFoldersRequest{Parent: org.GetName()})
 	for {
@@ -209,7 +226,7 @@ func TestResourceHierarchyAndTagsThroughTheDrawer(t *testing.T) {
 	var tagLabels []string
 	p.clickText("#view button", "Create tag key")
 	p.waitFor(`document.querySelector("#f-shortName") !== null`)
-	p.eval(`[...document.querySelectorAll("label[for^=f-] > span:first-child")].map((s) => s.textContent.trim())`, &tagLabels)
+	p.eval(`[...document.querySelectorAll("label[for^=f-] > span:first-child, #view form fieldset > legend")].map((s) => s.textContent.trim())`, &tagLabels)
 	for _, want := range []string{"Tag key", "Tag key description", "For use with network firewall", "Tag values"} {
 		if !contains(tagLabels, want) {
 			t.Errorf("Create tag key's fields are %q; want Google's %q among them", tagLabels, want)
@@ -219,7 +236,7 @@ func TestResourceHierarchyAndTagsThroughTheDrawer(t *testing.T) {
 	short := fmt.Sprintf("browser-env-%d", time.Now().UnixNano()%1e8)
 	p.clickText("#view button", "Create tag key")
 	p.submitForm(map[string]string{"shortName": short, "description": "made in the browser"}, "shortName")
-	p.waitFor(fmt.Sprintf(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q))`, short))
+	p.waitFor(listedRow("", short))
 	key, err := keys.GetNamespacedTagKey(ctx, &rmpb.GetNamespacedTagKeyRequest{Name: tagNamespace(org.GetName()) + "/" + short})
 	if err != nil {
 		t.Fatalf("GetNamespacedTagKey after Create tag key: %v", err)
@@ -377,8 +394,8 @@ func TestServiceUsageDisableAndEnableThroughThePage(t *testing.T) {
 // Credentials has Create credentials, whose Service account opens IAM's
 // form and whose API key and OAuth client ID say they are not available
 // locally, and lists API Keys and OAuth 2.0 Client IDs as not served; the
-// OAuth consent screen, Page usage agreements and Domain verification say
-// why a local instance has none; a library entry this instance does not
+// Page usage agreements says why a local instance has none (the OAuth
+// consent screen and Domain verification are served since #2030); a library entry this instance does not
 // serve has Enable disabled with the --services value that would serve it.
 func TestAPIsCredentialsAndUnservedPages(t *testing.T) {
 	needService(t, "serviceusage")
@@ -394,17 +411,16 @@ func TestAPIsCredentialsAndUnservedPages(t *testing.T) {
 		!strings.HasPrefix(items[1], "OAuth client ID") || !strings.HasPrefix(items[2], "Service account") {
 		t.Errorf("Create credentials = %q", items)
 	}
-	for _, id := range []string{"#credentials-oauth"} {
-		var text string
-		p.eval(fmt.Sprintf(`document.querySelector(%q).textContent`, id), &text)
-		if !strings.Contains(text, "Not available locally") {
-			t.Errorf("%s = %q, want not available locally", id, text)
-		}
+	// OAuth client ID goes to Google Auth Platform's Create client since
+	// #2030 (TestGoogleAuthPlatformThroughThePages).
+	var href string
+	p.eval(`document.querySelector("#credentials-create-oauth").getAttribute("href")`, &href)
+	if !strings.HasPrefix(href, "/apis/credentials/consent/clients/create") {
+		t.Errorf("OAuth client ID links to %q", href)
 	}
-	for _, path := range []string{"/apis/credentials/consent", "/apis/credentials/agreements", "/apis/credentials/domainverification"} {
-		p.navigate(path + "?project=" + project)
-		p.waitFor(`[...document.querySelectorAll(".state h2")].some((n) => n.textContent === "Not available locally")`)
-	}
+	// Page usage agreements are Google's terms acceptance, console-only.
+	p.navigate("/apis/credentials/agreements?project=" + project)
+	p.waitFor(`[...document.querySelectorAll(".state h2")].some((n) => n.textContent === "Not available locally")`)
 	// Spanner is not in the storage shard's --services.
 	p.navigate("/apis/library/spanner.googleapis.com?project=" + project)
 	p.waitFor(`document.querySelector("#library-unavailable") !== null`)

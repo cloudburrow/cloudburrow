@@ -99,6 +99,13 @@ type Resource struct {
 	// Spanner Instances list opens a checked instance's Labels tab, where
 	// its labels are added, updated and deleted (#1859).
 	Info []InfoTab `json:"info,omitempty"`
+	// Children are rows listed under this one, behind an arrow beside its
+	// name: a Bigtable table's replications, one per cluster with its
+	// replication state ("Click the arrow next to the table ID to expand
+	// a list of replications of the table", #2027). They carry the
+	// listing's columns, have no actions, and are not counted, filtered or
+	// paged on their own.
+	Children []Resource `json:"children,omitempty"`
 }
 
 // InfoTab is one tab of the info panel for a row (Resource.Info).
@@ -157,6 +164,9 @@ type Listing struct {
 	// rows do not look identical from the client's side, and guessing wrong
 	// either hides a level or offers a link that 501s.
 	RowsOpenable bool `json:"rowsOpenable,omitempty"`
+	// ChildNoun is the plural word for the rows' Children, which names
+	// each row's expand arrow ("Show replications of orders").
+	ChildNoun string `json:"childNoun,omitempty"`
 	// AlwaysStatus declares that this listing has a status column even when no
 	// row currently carries one.
 	//
@@ -899,12 +909,16 @@ type EditForm struct {
 	// opens Deploy worker pool revision, ending in Deploy (#1852).
 	Title  string `json:"title,omitempty"`
 	Submit string `json:"submit,omitempty"`
-	// Page draws the form at an address of its own, the resource's page
-	// with ?edit=1, instead of in a dialog: Google's Edit Repository is a
-	// page with the create page's sections, ending in Update (#1855). The
-	// Edit button and a row's Edit item open it; Cancel and a saved change
-	// return to the resource's page.
+	// Page draws the form as a page of its own, the resource's address
+	// with ?edit=1, ending in Submit and Cancel, rather than as a dialog:
+	// Google's Edit opens the "Edit Redis instance" page, which saves with
+	// Save (#1862), and Edit Repository its page ending in Update (#1855).
+	// The Edit button and a row's Edit item open it.
 	Page bool `json:"page,omitempty"`
+	// Inline means the form opens only from the Edit beside a property
+	// that names it (Property.Edit), not from a button by the title:
+	// Google's tag key page has Edit next to Description (#1865).
+	Inline bool `json:"inline,omitempty"`
 }
 
 // Property is one label/value pair on a resource's summary.
@@ -923,6 +937,10 @@ type Property struct {
 	// instance's edition (#1859).
 	Action     string `json:"action,omitempty"`
 	ActionText string `json:"actionText,omitempty"`
+	// Edit, when set, is the label of a button beside the value that opens
+	// the page's EditForm, as Google's tag key page has Edit next to
+	// Description (#1865).
+	Edit string `json:"edit,omitempty"`
 }
 
 // SectionKind says what a section actually holds.

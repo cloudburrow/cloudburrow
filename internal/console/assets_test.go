@@ -726,7 +726,9 @@ func TestNavigationLinksCarryOnlyTheScope(t *testing.T) {
 	// be updated every time a screen invents a parameter.
 	block := js[strings.Index(js, "function scopeSearch()"):]
 	block = block[:strings.Index(block, "\n}")]
-	if !strings.Contains(block, `["project"]`) {
+	// The project, and the folder or organization the toolbar's resource
+	// selector chose (#2023).
+	if !strings.Contains(block, `["project", "folder", "organizationId"]`) {
 		t.Error("scopeSearch does not copy a named set of parameters")
 	}
 	for _, leaked := range []string{"resource", "\"q\""} {
@@ -2642,14 +2644,109 @@ func TestAnEditFormCanBeAPageAndAListingHasGroupsOverItsRows(t *testing.T) {
 		"href: editPageHref(route, segments),",
 		`u.searchParams.set("edit", "1");`,
 		`new URLSearchParams(location.search).get("edit") === "1"`,
-		"return renderEditPage(view, route, segments, data);",
+		"return renderEditPage(view, route, segments, data, crumb);",
 		"if (data.edit.page) return navigate(editPageHref(route, segments));",
-		`el("form", { class: "create-page edit-page", id: "edit-page-form", novalidate: true, onsubmit: submit },`,
-		"navigate(pageHref);",
+		`el("form", { class: "create-page is-single-page edit-page", id: "edit-page-form", novalidate: true, onsubmit: submit },`,
+		"navigate(here);",
 		"const cards = (section.groups || []).filter((g) => (g.properties || []).length).map((group) =>",
 	} {
 		if !strings.Contains(js, want) {
 			t.Errorf("console.js is missing %q", want)
 		}
+	}
+}
+
+// TestNoScreenIsDrawnBeforeTheConsoleBoots: the toolbar's links work from
+// the first paint, while main still reads the services, the operations and
+// the projects. A screen drawn by such a click was drawn again by main's own
+// route(), back through its loading state, under the user (main run
+// 44830404935, #2080: the Connect page's Format select was gone when the test
+// chose JSON). route() draws nothing until main has finished, and main
+// marks itself finished just before the one route() that draws the screen.
+func TestNoScreenIsDrawnBeforeTheConsoleBoots(t *testing.T) {
+	js := consoleAsset(t, "console.js")
+	start := strings.Index(js, "\nfunction route() {")
+	if start < 0 {
+		t.Fatal("console.js has no route()")
+	}
+	body := js[start:]
+	if end := strings.Index(body, "\n}\n"); end >= 0 {
+		body = body[:end]
+	}
+	guard := strings.Index(body, "if (!BOOTED) return")
+	if guard < 0 {
+		t.Fatal("route() draws a screen before main has finished booting")
+	}
+	if d := strings.Index(body, "dispatch("); d >= 0 && d < guard {
+		t.Error("route() dispatches before it checks that main has finished")
+	}
+	if strings.Count(js, "BOOTED = true") != 1 {
+		t.Fatal("BOOTED is not set exactly once")
+	}
+	mainStart := strings.Index(js, "\nasync function main() {")
+	if mainStart < 0 {
+		t.Fatal("console.js has no main()")
+	}
+	main := js[mainStart:]
+	if end := strings.Index(main, "\n}\n"); end >= 0 {
+		main = main[:end]
+	}
+	set := strings.Index(main, "BOOTED = true;")
+	projects := strings.Index(main, "await initProjects();")
+	last := strings.LastIndex(main, "route();")
+	if set < 0 || projects < 0 || last < 0 || !(projects < set && set < last) {
+		t.Error("main does not set BOOTED after resolving the projects and before its route()")
+	}
+}
+
+// TestNavigationAfterBootDraws: route() draws nothing before main has
+// finished booting (TestNoScreenIsDrawnBeforeTheConsoleBoots), and every
+// navigation after that draws, so the guard does not leave the console on
+// its first screen. Main run 44845978136 suspected it, when a folder made
+// on Resource hierarchy was not in the list it went back to (the folder
+// was on the list's second page). BOOTED goes from false to true once and
+// never back; a link's click and navigate() move the URL and then call
+// route(), and so does the browser's Back (popstate); and route() has no
+// other way out before it dispatches.
+func TestNavigationAfterBootDraws(t *testing.T) {
+	js := consoleAsset(t, "console.js")
+	body := func(start string) string {
+		t.Helper()
+		i := strings.Index(js, start)
+		if i < 0 {
+			t.Fatalf("console.js has no %q", strings.TrimSpace(start))
+		}
+		b := js[i:]
+		if end := strings.Index(b, "\n}\n"); end >= 0 {
+			b = b[:end]
+		}
+		return b
+	}
+	if got := regexp.MustCompile(`\bBOOTED\s*=[^=]`).FindAllString(js, -1); len(got) != 2 ||
+		!strings.Contains(js, "let BOOTED = false;") || strings.Count(js, "BOOTED = true;") != 1 {
+		t.Errorf("BOOTED is assigned %q: want its declaration, false, and one assignment of true", got)
+	}
+	route := body("\nfunction route() {")
+	dispatch := strings.Index(route, "dispatch(")
+	if dispatch < 0 {
+		t.Fatal("route() does not dispatch")
+	}
+	// route()'s own statements are indented by two spaces; a return of a
+	// function inside it (its title) is not route() returning.
+	if returns := regexp.MustCompile(`(?m)^  (if \(.*\) )?return\b`).FindAllString(route[:dispatch], -1); len(returns) != 1 {
+		t.Errorf("route() returns %q before it dispatches; want only the one before boot", returns)
+	}
+	follows := func(name, code string) {
+		t.Helper()
+		push := strings.Index(code, "history.pushState(")
+		if push < 0 || !strings.Contains(code[push:], "route();") {
+			t.Errorf("%s does not call route() after it moves the URL", name)
+		}
+	}
+	follows("navigate()", body("\nfunction navigate(path) {"))
+	routing := body("\nfunction initRouting() {")
+	follows("a link's click", routing)
+	if !strings.Contains(routing, `window.addEventListener("popstate", route);`) {
+		t.Error("Back and Forward (popstate) do not call route()")
 	}
 }

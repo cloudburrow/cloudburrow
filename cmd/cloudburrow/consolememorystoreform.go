@@ -34,6 +34,7 @@ const (
 	msSectionBackups     = "Automated backups"
 	msSectionMaintenance = "Maintenance"
 	msSectionAdvanced    = "Advanced options"
+	msSectionNetwork     = "Advanced network options"
 )
 
 // memorystoreHours are a day's hours, the Time window and maintenance

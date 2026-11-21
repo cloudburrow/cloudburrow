@@ -64,8 +64,9 @@
 # (UP_FLAGS) and runs only the enforcement tests (COMPAT_RUN,
 # ^TestIAMEnforcement), which skip on every other shard's instance, as
 # those run with enforcement off (#1879): Cloud Storage, Pub/Sub, Cloud
-# Tasks, Secret Manager, Cloud KMS, Cloud Run (for run.routes.invoke) and
-# BigQuery (for Pub/Sub's BigQuery subscriptions, #1998).
+# Tasks, Secret Manager, Cloud KMS, Cloud Run (for run.routes.invoke),
+# BigQuery (for Pub/Sub's BigQuery subscriptions, #1998), Cloud Scheduler
+# and Workflows.
 
 # An eleventh, cross, is the run shard's instance again for
 # COMPAT_CROSS_TESTS, which the run shard skips: Eventarc's tests and
@@ -437,9 +438,10 @@ compat_shard() {
       # minutes; the other suites ran with enforcement off in their shards.
       # BigQuery for BigQuery sharing's (Analytics Hub, #1989) and for the
       # Pub/Sub BigQuery subscriptions' writer roles (#1998), with the one
-      # project its emulator serves.
-      SERVICES=storage,pubsub,tasks,secretmanager,kms,run,bigquery
-      TEST_VARS+=,STORAGE,PUBSUB,TASKS,SECRETS,KMS,RUN,RESOURCEMANAGER,ANALYTICSHUB,BIGQUERY,BIGQUERY_PROJECT,IAM_ENFORCEMENT
+      # project its emulator serves. Cloud Scheduler and Workflows since
+      # the fourth round.
+      SERVICES=storage,pubsub,tasks,secretmanager,kms,run,bigquery,scheduler,workflows
+      TEST_VARS+=,STORAGE,PUBSUB,TASKS,SECRETS,KMS,RUN,RESOURCEMANAGER,ANALYTICSHUB,BIGQUERY,BIGQUERY_PROJECT,SCHEDULER,WORKFLOWS,IAM_ENFORCEMENT
       UP_FLAGS=(--iam-enforcement=on)
       # And Workload Identity Federation's federated principal reading a
       # bucket, refused until it is granted (#1941), which needs enforcement.

@@ -3,16 +3,19 @@ package metadata
 import (
 	"context"
 	"crypto"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/cloudburrow/cloudburrow/internal/authplatform"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/resource"
 )
@@ -61,6 +64,9 @@ type Server struct {
 	// accounts resolves a workload's metadata host to its account; nil
 	// names the instance's own account to everyone.
 	accounts AccountResolver
+	// oauth is Google Auth Platform's OAuth clients (#2030): the
+	// authorization endpoint, and the token requests of its clients.
+	oauth *authplatform.Endpoints
 
 	mu   sync.Mutex
 	ln   net.Listener
@@ -74,6 +80,14 @@ func NewServer(creds *Credentials, project, host string, port int) *Server {
 		host = "127.0.0.1"
 	}
 	return &Server{creds: creds, project: project, host: host, port: port}
+}
+
+// WithOAuth serves the local OAuth clients' authorization code flow
+// (#2030): the authorization and revocation endpoints, and /token for
+// their client IDs. It is set before Start.
+func (s *Server) WithOAuth(e *authplatform.Endpoints) *Server {
+	s.oauth = e
+	return s
 }
 
 // WithAccounts makes the server name, to a workload that reaches it under
@@ -187,6 +201,11 @@ func (s *Server) Handler() http.Handler {
 	// token URI that never leaves the machine.
 	mux.HandleFunc("/token", s.token)
 	mux.HandleFunc("/certs", s.certs)
+	if s.oauth != nil {
+		for _, p := range []string{authplatform.AuthorizePath, authplatform.AuthorizePathV1, authplatform.RevokePath} {
+			mux.Handle(p, s.oauth)
+		}
+	}
 	// A service account's public certificates (#1750); see serviceaccountcerts.go.
 	for _, p := range []string{saX509Prefix, saJWKPrefix, robotX509Prefix} {
 		mux.HandleFunc(p, s.serviceAccountCerts)
@@ -236,7 +255,10 @@ func (s *Server) requireFlavor(next http.Handler) http.Handler {
 		// And a service account's public certificates (#1750), which any
 		// verifier fetches as www.googleapis.com serves them.
 		// And the Security Token Service (#1941), another Google API.
-		if r.URL.Path == "/token" || r.URL.Path == "/certs" || r.URL.Path == STSPath || strings.HasPrefix(r.URL.Path, iamPrefix) || isCertPath(r.URL.Path) {
+		// And the OAuth endpoints of the local clients (#2030), which a
+		// browser and an application reach.
+		if r.URL.Path == "/token" || r.URL.Path == "/certs" || r.URL.Path == STSPath || strings.HasPrefix(r.URL.Path, iamPrefix) || isCertPath(r.URL.Path) ||
+			r.URL.Path == authplatform.AuthorizePath || r.URL.Path == authplatform.AuthorizePathV1 || r.URL.Path == authplatform.RevokePath {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -339,6 +361,9 @@ func (s *Server) token(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "malformed token request", http.StatusBadRequest)
 		return
 	}
+	if s.oauthToken(w, r) {
+		return
+	}
 	if r.PostForm.Get("assertion") == "" && r.PostForm.Get("refresh_token") == "" {
 		http.Error(w, `{"error":"invalid_request","error_description":"missing assertion"}`,
 			http.StatusBadRequest)
@@ -358,6 +383,45 @@ func (s *Server) token(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.writeAccessToken(w, email)
+}
+
+// oauthToken answers a token request whose client is a local OAuth
+// client (#2030), as Google's token endpoint answers it, and says whether
+// it was one.
+func (s *Server) oauthToken(w http.ResponseWriter, r *http.Request) bool {
+	if s.oauth == nil {
+		return false
+	}
+	id, secret, basic := r.BasicAuth()
+	if !basic {
+		id = r.PostForm.Get("client_id")
+	}
+	if !s.oauth.Store.Knows(id) {
+		return false
+	}
+	if !basic {
+		id, secret = "", ""
+	}
+	g, oerr := s.oauth.Store.Exchange(r.PostForm, id, secret)
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	if oerr != nil {
+		w.WriteHeader(oerr.Code)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": oerr.OAuth, "error_description": oerr.Detail})
+		return true
+	}
+	out := map[string]any{"access_token": s.creds.MintAccessTokenFor(g.Email, TokenTTL),
+		"expires_in": int(TokenTTL.Seconds()), "token_type": "Bearer", "scope": g.Scope}
+	if g.RefreshToken != "" {
+		out["refresh_token"] = g.RefreshToken
+	}
+	if slices.Contains(strings.Fields(g.Scope), "openid") {
+		if tok, err := s.creds.MintIDTokenFor(g.Email, g.ClientID, time.Now(), TokenTTL); err == nil {
+			out["id_token"] = tok
+		}
+	}
+	_ = json.NewEncoder(w).Encode(out)
+	return true
 }
 
 // certs serves the public key, so a client configured to fetch certificates

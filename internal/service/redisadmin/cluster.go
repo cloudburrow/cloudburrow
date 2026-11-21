@@ -716,7 +716,7 @@ func (r *clusterRecord) engineVersion() string {
 	if r.Valkey != nil && r.Valkey.EngineVersion != "" {
 		return r.Valkey.EngineVersion
 	}
-	return DefaultValkeyVersion
+	return redisClusterEngineVersion
 }
 
 // clusterConfigs are the redis_configs a cluster takes, as Memorystore

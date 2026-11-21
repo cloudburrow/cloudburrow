@@ -128,11 +128,11 @@ func TestConsoleValkeyInstances(t *testing.T) {
 		t.Fatal("no Create instance form")
 	}
 	for _, tc := range []struct {
-		id, mode, shards, endpoint string
-		tls                        bool
+		id, mode, shards, endpoint, clusterMode string
+		tls                                     bool
 	}{
-		{"vk-cluster", "CLUSTER", "2", "Discovery endpoint", true},
-		{"vk-single", "CLUSTER_DISABLED", "1", "Primary endpoint", false},
+		{"vk-cluster", "CLUSTER", "2", "Discovery endpoint", "Enabled", true},
+		{"vk-single", "CLUSTER_DISABLED", "1", "Primary endpoint", "Disabled", false},
 	} {
 		id, err := p.Create(ctx, "p", map[string]string{"id": tc.id, "region": redisadmin.Region, "mode": tc.mode, "shardCount": tc.shards,
 			"replicaCount": "1", "nodeType": "SHARED_CORE_NANO", "network": "projects/p/global/networks/default",
@@ -148,7 +148,7 @@ func TestConsoleValkeyInstances(t *testing.T) {
 		for _, pr := range memorystoreAllProps(d) {
 			props[pr.Label] = pr.Value
 		}
-		if props["Mode"] != tc.mode || !strings.HasPrefix(props[tc.endpoint], "127.0.0.1:") || props["PSC networks"] != "projects/p/global/networks/default" ||
+		if props["Cluster Mode"] != tc.clusterMode || !d.Edit.Page || !strings.HasPrefix(props[tc.endpoint], "127.0.0.1:") || props["PSC networks"] != "projects/p/global/networks/default" ||
 			props["Engine configs"] == "—" || props["State"] != "ACTIVE" {
 			t.Errorf("%s's page shows %v", tc.id, props)
 		}
@@ -156,7 +156,7 @@ func TestConsoleValkeyInstances(t *testing.T) {
 		// Server CA tab with the instance's CA.
 		caTab := sectionByID(d, "server-ca")
 		hasCA := caTab != nil && strings.Contains(caTab.Text, "BEGIN CERTIFICATE")
-		if tc.tls && (props["In-transit encryption"] != "SERVER_AUTHENTICATION" || props["Authorization"] != "IAM_AUTH" || !hasCA) {
+		if tc.tls && (props["In-transit encryption"] != "Enabled (TLS)" || props["Security"] != "IAM Auth" || !hasCA) {
 			t.Errorf("%s with in-transit encryption: page shows %v, Server CA tab %v", tc.id, props, hasCA)
 		}
 		if !tc.tls && hasCA {

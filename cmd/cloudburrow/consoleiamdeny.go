@@ -90,7 +90,17 @@ func denyParent(resource string) string {
 // denyResources are the project, the folders above it and the
 // organization, which Google's resource selector offers whether or not the
 // project is under it.
-func (p projectIAMProvider) denyResources(project string) []denyResource {
+//
+// With a folder or the organization chosen in the toolbar (sel, #2023),
+// they are that resource and the folders and organization above it.
+func (p projectIAMProvider) denyResources(project string, sel *selectedResource) []denyResource {
+	if sel != nil {
+		out := []denyResource{{Resource: sel.Name, Display: sel.Display, Kind: sel.Kind}}
+		for _, a := range ancestorsOf(p.registry, sel.Name) {
+			out = append(out, denyResource{Resource: a.Name, Display: a.Display, Kind: a.Kind})
+		}
+		return out
+	}
 	out := []denyResource{{Resource: "projects/" + project, Display: project, Kind: "Project"}}
 	org := denyResource{Resource: resourcemanager.OrganizationName, Display: resourcemanager.OrganizationName, Kind: "Organization"}
 	chain, err := p.registry.Ancestry(project)
@@ -111,8 +121,8 @@ func (p projectIAMProvider) denyResources(project string) []denyResource {
 }
 
 // denyScope is resource checked against what the page offers for project.
-func (p projectIAMProvider) denyScope(project, resource string) (string, []denyResource, error) {
-	offered := p.denyResources(project)
+func (p projectIAMProvider) denyScope(project string, sel *selectedResource, resource string) (string, []denyResource, error) {
+	offered := p.denyResources(project, sel)
 	if resource == "" {
 		return offered[0].Resource, offered, nil
 	}
@@ -120,6 +130,9 @@ func (p projectIAMProvider) denyScope(project, resource string) (string, []denyR
 		if r.Resource == resource {
 			return resource, offered, nil
 		}
+	}
+	if sel != nil {
+		return "", nil, fmt.Errorf("%s is not %s or a folder or organization above it", resource, sel.Name)
 	}
 	return "", nil, fmt.Errorf("%s is not project %s or a folder or organization above it", resource, project)
 }
@@ -194,7 +207,7 @@ func denyRules(in []denyPageRule) ([]*iamv2.PolicyRule, error) {
 }
 
 // denyCall serves the Deny tab's calls.
-func (p projectIAMProvider) denyCall(project, call string, body json.RawMessage) (any, error) {
+func (p projectIAMProvider) denyCall(project string, sel *selectedResource, call string, body json.RawMessage) (any, error) {
 	var c denyPageChange
 	if len(body) > 0 {
 		if err := json.Unmarshal(body, &c); err != nil {
@@ -203,7 +216,7 @@ func (p projectIAMProvider) denyCall(project, call string, body json.RawMessage)
 	}
 	switch call {
 	case "deny-list":
-		resource, offered, err := p.denyScope(project, c.Resource)
+		resource, offered, err := p.denyScope(project, sel, c.Resource)
 		if err != nil {
 			return nil, err
 		}
@@ -229,7 +242,7 @@ func (p projectIAMProvider) denyCall(project, call string, body json.RawMessage)
 		}
 		return toDenyPage(pol), nil
 	case "deny-create":
-		resource, _, err := p.denyScope(project, c.Resource)
+		resource, _, err := p.denyScope(project, sel, c.Resource)
 		if err != nil {
 			return nil, err
 		}

@@ -70,6 +70,9 @@ var compatSections = map[string]string{
 	"serviceusage": "## Service Usage — `serviceusage.googleapis.com` v1",
 	// The API Keys API (#1915), named by whole discovery ID.
 	"apikeys": "## API Keys — `apikeys.googleapis.com` v2",
+	// #2030, on the Resource Manager port.
+	"cloudquotas":      "## Cloud Quotas — `google.api.cloudquotas.v1`",
+	"siteverification": "## Site Verification — `siteVerification` v1",
 	// The Cloud Storage companion APIs (#1957), named by whole discovery ID.
 	"storagejobs": "## Cloud Storage companion APIs — Storage Batch Operations, Storage Insights, Storage Transfer Service",
 	// The Backup and DR Service (#1433), named by whole discovery ID.
@@ -182,7 +185,7 @@ func namedMethods(key, op string, report map[string]string) (ids, ambiguous []st
 	// Cloud SQL Admin API (#1301), Resource Manager v1 REST (#1296) and
 	// Service Usage (#1352).
 	if key == "bigquery" || key == "runv1" || key == "sqladmin" || key == "resourcemanagerv1" || key == "serviceusage" || key == "apikeys" || key == "storagejobs" || key == "compute" || key == "backupdr" ||
-		key == "cloudidentity" || key == "workloadidentity" {
+		key == "cloudidentity" || key == "workloadidentity" || key == "siteverification" {
 		for _, tok := range storageToken.FindAllStringSubmatch(op, -1) {
 			if _, ok := report[tok[1]]; ok {
 				ids = append(ids, tok[1])

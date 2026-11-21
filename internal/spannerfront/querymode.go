@@ -1,0 +1,243 @@
+package spannerfront
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"regexp"
+
+	"cloud.google.com/go/spanner/apiv1/spannerpb"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
+)
+
+// Query modes (#2017). Google documents ExecuteSqlRequest.query_mode
+// (google/spanner/v1/spanner.proto): NORMAL returns the results; PLAN the
+// query plan and no results; PROFILE the plan, the results and the
+// statistics; WITH_STATS "the overall (but not operator-level) execution
+// statistics along with the results"; WITH_PLAN_AND_STATS the plan, the
+// overall statistics and the results. A plan is Spanner's QueryPlan, plan
+// nodes of operators (Distributed Union, Table Scan, Filter, ...) that its
+// optimizer chose.
+//
+// Measured on the emulator (cloud-spanner-emulator 1.5.58, 2026-11-20): PLAN
+// and PROFILE answer a plan of one node, display name "No query plan" and
+// no kind, which is no plan at all (its README: "The SQL query modes PLAN
+// and PROFILE do not return any query plans"); PROFILE's statistics are
+// rows_returned and elapsed_time; WITH_STATS and WITH_PLAN_AND_STATS
+// return the results with no statistics at all.
+//
+// The front does not draw a plan of its own: which operators run, which
+// index is chosen, where the distributed unions go and how a join is made
+// are Spanner's optimizer's decisions, and nothing local makes them (the
+// emulator runs a query on ZetaSQL's reference evaluator, which has no
+// plan), so a plan written here from the query's text could look right and
+// differ from the one Spanner runs. Read in its source for #2029
+// (cloud-spanner-emulator d357ec1d): EvaluateQuery hands the resolved AST
+// to googlesql::PreparedQuery, every table is read whole from its base
+// table (QueryableTable::CreateEvaluatorTableIterator, KeySet::All),
+// FORCE_INDEX is only validated and JOIN_METHOD validated and dropped, so
+// no shape (scan, filter, join, index read) runs as Spanner's plan would,
+// and none is given one. The modes whose answer is a plan, PLAN,
+// PROFILE and WITH_PLAN_AND_STATS, are refused UNIMPLEMENTED, rather than
+// answered with the emulator's placeholder node. WITH_STATS, which has no
+// plan, is served: the front runs the query in PROFILE mode on the
+// emulator and returns its results and statistics without the placeholder
+// plan. NORMAL passes as it is.
+
+var restExecuteSQL = regexp.MustCompile(`^/v1/(` + pDB + `/sessions/[^/:]+):(executeSql|executeStreamingSql)$`)
+
+// planModes are the modes whose answer includes a query plan.
+var planModes = map[spannerpb.ExecuteSqlRequest_QueryMode]bool{
+	spannerpb.ExecuteSqlRequest_PLAN:                true,
+	spannerpb.ExecuteSqlRequest_PROFILE:             true,
+	spannerpb.ExecuteSqlRequest_WITH_PLAN_AND_STATS: true,
+}
+
+// errNoQueryPlan is the refusal of a mode that returns a plan.
+func errNoQueryPlan(m spannerpb.ExecuteSqlRequest_QueryMode) error {
+	return status.Errorf(codes.Unimplemented, "Query mode %s is not served here: it returns a query plan, and CloudBurrow's Spanner engine (the Spanner emulator) has no query optimizer to make Spanner's plan, so it has none to return. Run the query in NORMAL mode, or in WITH_STATS mode for its execution statistics.", m)
+}
+
+// emulatorMode is req as the emulator is sent it, and whether its plan is
+// to be dropped from the answer: WITH_STATS runs as PROFILE. A mode with a
+// plan is refused.
+func emulatorMode(req *spannerpb.ExecuteSqlRequest) (*spannerpb.ExecuteSqlRequest, bool, error) {
+	m := req.GetQueryMode()
+	if planModes[m] {
+		return nil, false, errNoQueryPlan(m)
+	}
+	if m != spannerpb.ExecuteSqlRequest_WITH_STATS {
+		return req, false, nil
+	}
+	r := proto.Clone(req).(*spannerpb.ExecuteSqlRequest)
+	r.QueryMode = spannerpb.ExecuteSqlRequest_PROFILE
+	return r, true, nil
+}
+
+// withoutPlan drops the emulator's placeholder plan from stats.
+func withoutPlan(stats *spannerpb.ResultSetStats) {
+	if stats != nil {
+		stats.QueryPlan = nil
+	}
+}
+
+func (d cacheData) ExecuteSql(ctx context.Context, req *spannerpb.ExecuteSqlRequest) (*spannerpb.ResultSet, error) {
+	if err := d.check(ctx, req.GetSession()); err != nil {
+		return nil, err
+	}
+	req, strip, err := emulatorMode(req)
+	if err != nil {
+		return nil, err
+	}
+	rs, err := d.s.data.ExecuteSql(ctx, req)
+	if err == nil && strip {
+		withoutPlan(rs.GetStats())
+	}
+	return rs, err
+}
+
+func (d cacheData) ExecuteStreamingSql(req *spannerpb.ExecuteSqlRequest, stream spannerpb.Spanner_ExecuteStreamingSqlServer) error {
+	if err := d.check(stream.Context(), req.GetSession()); err != nil {
+		return err
+	}
+	req, strip, err := emulatorMode(req)
+	if err != nil {
+		return err
+	}
+	in, err := d.s.data.ExecuteStreamingSql(stream.Context(), req)
+	if err != nil {
+		return err
+	}
+	for {
+		m, err := in.Recv()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if strip {
+			withoutPlan(m.GetStats())
+		}
+		if err := stream.Send(m); err != nil {
+			return err
+		}
+	}
+}
+
+// restQueryMode is the query mode of a REST executeSql or
+// executeStreamingSql call, read from its body, which is put back for
+// whoever answers the call; ok is false for any other call.
+func restQueryMode(r *http.Request) (spannerpb.ExecuteSqlRequest_QueryMode, bool) {
+	if r.Method != http.MethodPost || !restExecuteSQL.MatchString(r.URL.Path) || r.Body == nil {
+		return 0, false
+	}
+	b, err := io.ReadAll(r.Body)
+	r.Body = io.NopCloser(bytes.NewReader(b))
+	if err != nil {
+		return 0, false
+	}
+	var body struct {
+		QueryMode json.RawMessage `json:"queryMode"`
+	}
+	if json.Unmarshal(b, &body) != nil || len(body.QueryMode) == 0 {
+		return spannerpb.ExecuteSqlRequest_NORMAL, true
+	}
+	var name string
+	if json.Unmarshal(body.QueryMode, &name) == nil {
+		return spannerpb.ExecuteSqlRequest_QueryMode(spannerpb.ExecuteSqlRequest_QueryMode_value[name]), true
+	}
+	var n int32
+	if json.Unmarshal(body.QueryMode, &n) == nil {
+		return spannerpb.ExecuteSqlRequest_QueryMode(n), true
+	}
+	return spannerpb.ExecuteSqlRequest_NORMAL, true
+}
+
+// claimsRESTQuery says whether the front answers a REST query call: one
+// in a mode it refuses or serves (WITH_STATS).
+func claimsRESTQuery(r *http.Request) bool {
+	m, ok := restQueryMode(r)
+	return ok && (planModes[m] || m == spannerpb.ExecuteSqlRequest_WITH_STATS)
+}
+
+// serveRESTQuery answers a REST query call claimsRESTQuery claimed, as the
+// gRPC methods do: executeSql's ResultSet, or executeStreamingSql's
+// PartialResultSets as a JSON array.
+func (s *Instances) serveRESTQuery(w http.ResponseWriter, r *http.Request) {
+	m := restExecuteSQL.FindStringSubmatch(r.URL.Path)
+	b, err := io.ReadAll(io.LimitReader(r.Body, 64<<20))
+	req := &spannerpb.ExecuteSqlRequest{}
+	if err == nil {
+		err = protojson.UnmarshalOptions{DiscardUnknown: true}.Unmarshal(b, req)
+	}
+	if err != nil {
+		writeError(w, status.Errorf(codes.InvalidArgument, "Invalid JSON payload received. %v", err))
+		return
+	}
+	req.Session = m[1]
+	d := cacheData{s: s}
+	ctx := r.Context()
+	if err := d.check(ctx, req.GetSession()); err != nil {
+		writeError(w, err)
+		return
+	}
+	er, strip, err := emulatorMode(req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	var out []byte
+	if m[2] == "executeSql" {
+		rs, err := s.data.ExecuteSql(ctx, er)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		if strip {
+			withoutPlan(rs.GetStats())
+		}
+		out, err = protojson.Marshal(rs)
+		if err != nil {
+			writeError(w, status.Errorf(codes.Internal, "encoding the response: %v", err))
+			return
+		}
+	} else {
+		in, err := s.data.ExecuteStreamingSql(ctx, er)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		var parts []json.RawMessage
+		for {
+			prs, err := in.Recv()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			if strip {
+				withoutPlan(prs.GetStats())
+			}
+			j, err := protojson.Marshal(prs)
+			if err != nil {
+				writeError(w, status.Errorf(codes.Internal, "encoding the response: %v", err))
+				return
+			}
+			parts = append(parts, j)
+		}
+		if parts == nil {
+			parts = []json.RawMessage{}
+		}
+		out, _ = json.Marshal(parts)
+	}
+	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+	_, _ = w.Write(out)
+}

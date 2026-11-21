@@ -5161,6 +5161,7 @@
         "method": "google.cloud.resourcemanager.v3.TagBindings/CreateTagBinding",
         "status": "Verified",
         "tests": [
+          "test/compat/resourcemanagerdynamictags_test.go:28 TestResourceManagerDynamicTagValues",
           "test/compat/resourcemanagerregionaltags_test.go:54 TestResourceManagerRegionalTagBindings",
           "test/compat/resourcemanagertags_test.go:94 TestResourceManagerV3Tags"
         ]
@@ -5169,6 +5170,7 @@
         "method": "google.cloud.resourcemanager.v3.TagBindings/DeleteTagBinding",
         "status": "Verified",
         "tests": [
+          "test/compat/resourcemanagerdynamictags_test.go:28 TestResourceManagerDynamicTagValues",
           "test/compat/resourcemanagerregionaltags_test.go:54 TestResourceManagerRegionalTagBindings",
           "test/compat/resourcemanagertags_test.go:94 TestResourceManagerV3Tags"
         ]
@@ -5177,6 +5179,7 @@
         "method": "google.cloud.resourcemanager.v3.TagBindings/ListEffectiveTags",
         "status": "Verified",
         "tests": [
+          "test/compat/resourcemanagerdynamictags_test.go:28 TestResourceManagerDynamicTagValues",
           "test/compat/resourcemanagerregionaltags_test.go:54 TestResourceManagerRegionalTagBindings",
           "test/compat/resourcemanagertags_test.go:94 TestResourceManagerV3Tags",
           "test/compat/secrettags1961_test.go:31 TestSecretManagerTagsAndAliasesAtCreation"
@@ -5186,6 +5189,7 @@
         "method": "google.cloud.resourcemanager.v3.TagBindings/ListTagBindings",
         "status": "Verified",
         "tests": [
+          "test/compat/resourcemanagerdynamictags_test.go:28 TestResourceManagerDynamicTagValues",
           "test/compat/resourcemanagerregionaltags_test.go:54 TestResourceManagerRegionalTagBindings",
           "test/compat/resourcemanagertags_test.go:94 TestResourceManagerV3Tags",
           "test/compat/secrettags1961_test.go:157 TestTerraformSecretTags",
@@ -5217,6 +5221,7 @@
         "method": "google.cloud.resourcemanager.v3.TagKeys/CreateTagKey",
         "status": "Verified",
         "tests": [
+          "test/compat/resourcemanagerdynamictags_test.go:28 TestResourceManagerDynamicTagValues",
           "test/compat/resourcemanagertags_test.go:94 TestResourceManagerV3Tags",
           "test/compat/resterrorstatus_test.go:126 TestGcloudResourceManagerErrorStatus"
         ]
@@ -5225,6 +5230,7 @@
         "method": "google.cloud.resourcemanager.v3.TagKeys/DeleteTagKey",
         "status": "Verified",
         "tests": [
+          "test/compat/resourcemanagerdynamictags_test.go:28 TestResourceManagerDynamicTagValues",
           "test/compat/resourcemanagertags_test.go:94 TestResourceManagerV3Tags",
           "test/compat/resterrorstatus_test.go:126 TestGcloudResourceManagerErrorStatus"
         ]
@@ -5250,6 +5256,7 @@
         "method": "google.cloud.resourcemanager.v3.TagKeys/GetTagKey",
         "status": "Verified",
         "tests": [
+          "test/compat/resourcemanagerdynamictags_test.go:28 TestResourceManagerDynamicTagValues",
           "test/compat/resourcemanagertags_test.go:94 TestResourceManagerV3Tags"
         ]
       },
@@ -5257,6 +5264,7 @@
         "method": "google.cloud.resourcemanager.v3.TagKeys/ListTagKeys",
         "status": "Verified",
         "tests": [
+          "test/compat/resourcemanagerdynamictags_test.go:28 TestResourceManagerDynamicTagValues",
           "test/compat/resourcemanagertags_test.go:94 TestResourceManagerV3Tags",
           "test/compat/terraform_batch12_test.go:39 TestTerraformClientConfigAndTagLists"
         ]
@@ -5282,6 +5290,7 @@
         "method": "google.cloud.resourcemanager.v3.TagKeys/UpdateTagKey",
         "status": "Verified",
         "tests": [
+          "test/compat/resourcemanagerdynamictags_test.go:28 TestResourceManagerDynamicTagValues",
           "test/compat/resourcemanagertags_test.go:94 TestResourceManagerV3Tags"
         ]
       },
@@ -5289,6 +5298,7 @@
         "method": "google.cloud.resourcemanager.v3.TagValues/CreateTagValue",
         "status": "Verified",
         "tests": [
+          "test/compat/resourcemanagerdynamictags_test.go:28 TestResourceManagerDynamicTagValues",
           "test/compat/resourcemanagertags_test.go:94 TestResourceManagerV3Tags"
         ]
       },
@@ -7152,6 +7162,7 @@
         "method": "google.cloud.memorystore.v1.Memorystore/CreateAclPolicy",
         "status": "Verified",
         "tests": [
+          "test/compat/memorystore2019_test.go:140 TestMemorystoreValkeyDefaultVersion",
           "test/compat/memorystorevalkeyacl_test.go:58 TestMemorystoreValkeyACLPolicies"
         ]
       },
@@ -7174,6 +7185,10 @@
           "test/compat/memorystore1614_test.go:224 TestMemorystoreValkeyCrossInstanceFollowsFailover",
           "test/compat/memorystore1614_test.go:60 TestMemorystoreValkeyReaderAndFailover",
           "test/compat/memorystore1657_test.go:59 TestMemorystoreValkeyAutomaticFailover",
+          "test/compat/memorystore2019_test.go:140 TestMemorystoreValkeyDefaultVersion",
+          "test/compat/memorystore2019_test.go:191 TestMemorystoreValkeyUpgrade90To91",
+          "test/compat/memorystore2019_test.go:250 TestMemorystoreValkeyUpgrade80To91",
+          "test/compat/memorystore2019_test.go:80 TestMemorystoreValkey91",
           "test/compat/memorystoreclusterfailover1910_test.go:172 TestValkeyClusterModeAutomaticFailover",
           "test/compat/memorystoreclustertls_test.go:130 TestMemorystoreValkeyInTransitEncryption",
           "test/compat/memorystoreiam1614_test.go:121 TestMemorystoreIAMAuthChecksTheToken",
@@ -7305,6 +7320,7 @@
           "test/compat/memorystore1563_test.go:169 TestMemorystoreValkeyUpgradeKeepsWrites",
           "test/compat/memorystore1614_test.go:60 TestMemorystoreValkeyReaderAndFailover",
           "test/compat/memorystore1657_test.go:59 TestMemorystoreValkeyAutomaticFailover",
+          "test/compat/memorystore2019_test.go:80 TestMemorystoreValkey91",
           "test/compat/memorystoreclusterfailover1910_test.go:172 TestValkeyClusterModeAutomaticFailover",
           "test/compat/memorystoreclustermaintenance_test.go:194 TestValkeyRescheduleMaintenance",
           "test/compat/memorystorerestart1557_test.go:74 TestMemorystoreClustersAcrossRestart",
@@ -7418,6 +7434,8 @@
           "test/compat/memorystore1563_test.go:202 TestMemorystoreValkeyClusterUpgradeKeepsWrites",
           "test/compat/memorystore1563_test.go:57 TestMemorystoreValkeyCrossInstanceReplicationTLS",
           "test/compat/memorystore1614_test.go:224 TestMemorystoreValkeyCrossInstanceFollowsFailover",
+          "test/compat/memorystore2019_test.go:191 TestMemorystoreValkeyUpgrade90To91",
+          "test/compat/memorystore2019_test.go:250 TestMemorystoreValkeyUpgrade80To91",
           "test/compat/memorystorevalkey_test.go:233 TestMemorystoreValkeyClusterDisabled",
           "test/compat/memorystorevalkey_test.go:85 TestMemorystoreValkeyInstance",
           "test/compat/memorystorevalkeyca1918_test.go:47 TestMemorystoreValkeyServerCA",
@@ -10803,6 +10821,7 @@
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/GetTable",
         "status": "Verified",
         "tests": [
+          "test/compat/bigtableclusterstates_test.go:27 TestBigtableTableClusterStates",
           "test/compat/bigtablerowkeyschema_test.go:30 TestBigtableRowKeySchemas",
           "test/compat/consolebigtableactions_test.go:37 TestConsoleBigtableTableAndCellActions",
           "test/compat/consolebigtableedit_test.go:103 TestConsoleBigtableFamiliesAndRowWrites",
@@ -10845,6 +10864,7 @@
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/ListTables",
         "status": "Verified",
         "tests": [
+          "test/compat/bigtableclusterstates_test.go:27 TestBigtableTableClusterStates",
           "test/compat/bigtablerowkeyschema_test.go:30 TestBigtableRowKeySchemas",
           "test/compat/consolebigtablepicker_test.go:33 TestConsoleBigtableInstancePicker",
           "test/compat/consoledatabases_test.go:47 TestConsoleBigtableCreateAndDeleteTable"
@@ -11105,7 +11125,8 @@
           "test/compat/spanner_test.go:104 TestSpannerReadWriteTransactionIsAtomic",
           "test/compat/spanner_test.go:202 TestSpannerDatabasesAreIsolated",
           "test/compat/spannercmek1950_test.go:61 TestSpannerCMEK",
-          "test/compat/spannereditions1949_test.go:78 TestSpannerEditionsAutoscalingAndSchedules"
+          "test/compat/spannereditions1949_test.go:78 TestSpannerEditionsAutoscalingAndSchedules",
+          "test/compat/spannerproto2017_test.go:59 TestSpannerProtoBundleColumns"
         ]
       },
       {
@@ -11165,7 +11186,8 @@
         "tests": [
           "test/compat/consoledatabases_test.go:120 TestConsoleSpannerCreateAndDropDatabase",
           "test/compat/consoledatabases_test.go:208 TestConsoleSpannerDML",
-          "test/compat/consolespanneradmin_test.go:75 TestConsoleSpannerSchemaConfigurationsAndPartitions"
+          "test/compat/consolespanneradmin_test.go:75 TestConsoleSpannerSchemaConfigurationsAndPartitions",
+          "test/compat/spannerproto2017_test.go:59 TestSpannerProtoBundleColumns"
         ]
       },
       {
@@ -11551,14 +11573,18 @@
         "status": "Verified",
         "tests": [
           "test/compat/spannercmek1950_test.go:61 TestSpannerCMEK",
-          "test/compat/spannerdata_test.go:137 TestSpannerUnaryQueryDMLAndRollback"
+          "test/compat/spannerdata_test.go:137 TestSpannerUnaryQueryDMLAndRollback",
+          "test/compat/spannerprofile_test.go:35 TestSpannerQueryModes",
+          "test/compat/spannerproto2017_test.go:59 TestSpannerProtoBundleColumns"
         ]
       },
       {
         "method": "google.spanner.v1.Spanner/ExecuteStreamingSql",
         "status": "Verified",
         "tests": [
-          "test/compat/optional_test.go:264 TestSpannerSchemaAndQuery"
+          "test/compat/optional_test.go:264 TestSpannerSchemaAndQuery",
+          "test/compat/spannerplans2029_test.go:35 TestSpannerQueryPlansRefusedForEveryShape",
+          "test/compat/spannerprofile_test.go:35 TestSpannerQueryModes"
         ]
       },
       {
@@ -12274,12 +12300,12 @@
           "test/compat/bigquerymlseries_test.go:140 TestBigQueryMLSeqSplit",
           "test/compat/bigquerymlseries_test.go:21 TestBigQueryMLXregDetectAnomalies",
           "test/compat/bigquerymlseries_test.go:72 TestBigQueryMLSeveralSeriesIDs",
-          "test/compat/bigquerymlservice_test.go:200 TestBigQueryMLAnnotateImageLabels",
-          "test/compat/bigquerymlservice_test.go:251 TestBigQueryMLAnnotateImageDetections",
-          "test/compat/bigquerymlservice_test.go:314 TestBigQueryMLTranscribe",
-          "test/compat/bigquerymlservice_test.go:37 TestBigQueryMLAnnotateImage",
-          "test/compat/bigquerymlservice_test.go:483 TestBigQueryMLTranslate",
-          "test/compat/bigquerymlservice_test.go:665 TestBigQueryMLUnderstandText",
+          "test/compat/bigquerymlservice_test.go:204 TestBigQueryMLAnnotateImageLabels",
+          "test/compat/bigquerymlservice_test.go:255 TestBigQueryMLAnnotateImageDetections",
+          "test/compat/bigquerymlservice_test.go:323 TestBigQueryMLTranscribe",
+          "test/compat/bigquerymlservice_test.go:41 TestBigQueryMLAnnotateImage",
+          "test/compat/bigquerymlservice_test.go:577 TestBigQueryMLTranslate",
+          "test/compat/bigquerymlservice_test.go:759 TestBigQueryMLUnderstandText",
           "test/compat/bigquerymltensorflow_test.go:41 TestBigQueryMLImportedTensorFlowModel",
           "test/compat/bigquerymltflite_test.go:35 TestBigQueryMLImportedTFLiteModel",
           "test/compat/bigquerymltflitegaps_test.go:29 TestBigQueryMLImportedTFLiteGaps",
@@ -12421,8 +12447,8 @@
           "test/compat/bigquerymlremote_test.go:94 TestBigQueryMLRemoteGenerateText",
           "test/compat/bigquerymlseries_test.go:140 TestBigQueryMLSeqSplit",
           "test/compat/bigquerymlseries_test.go:72 TestBigQueryMLSeveralSeriesIDs",
-          "test/compat/bigquerymlservice_test.go:37 TestBigQueryMLAnnotateImage",
-          "test/compat/bigquerymlservice_test.go:665 TestBigQueryMLUnderstandText",
+          "test/compat/bigquerymlservice_test.go:41 TestBigQueryMLAnnotateImage",
+          "test/compat/bigquerymlservice_test.go:759 TestBigQueryMLUnderstandText",
           "test/compat/bigquerymltensorflow_test.go:41 TestBigQueryMLImportedTensorFlowModel",
           "test/compat/bigquerymltflite_test.go:35 TestBigQueryMLImportedTFLiteModel",
           "test/compat/bigquerymltflitegaps_test.go:29 TestBigQueryMLImportedTFLiteGaps",
@@ -14022,44 +14048,44 @@
         "method": "serviceusage.operations.cancel",
         "status": "Verified",
         "tests": [
-          "test/compat/serviceusage_test.go:277 TestServiceUsageOperations"
+          "test/compat/serviceusage_test.go:281 TestServiceUsageOperations"
         ]
       },
       {
         "method": "serviceusage.operations.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/serviceusage_test.go:277 TestServiceUsageOperations"
+          "test/compat/serviceusage_test.go:281 TestServiceUsageOperations"
         ]
       },
       {
         "method": "serviceusage.operations.get",
         "status": "Verified",
         "tests": [
-          "test/compat/serviceusage_test.go:277 TestServiceUsageOperations",
-          "test/compat/serviceusage_test.go:52 TestServiceUsageServices"
+          "test/compat/serviceusage_test.go:281 TestServiceUsageOperations",
+          "test/compat/serviceusage_test.go:53 TestServiceUsageServices"
         ]
       },
       {
         "method": "serviceusage.operations.list",
         "status": "Verified",
         "tests": [
-          "test/compat/serviceusage_test.go:277 TestServiceUsageOperations"
+          "test/compat/serviceusage_test.go:281 TestServiceUsageOperations"
         ]
       },
       {
         "method": "serviceusage.services.batchEnable",
         "status": "Verified",
         "tests": [
-          "test/compat/serviceusage_test.go:167 TestTerraformProjectService",
-          "test/compat/serviceusage_test.go:52 TestServiceUsageServices"
+          "test/compat/serviceusage_test.go:168 TestTerraformProjectService",
+          "test/compat/serviceusage_test.go:53 TestServiceUsageServices"
         ]
       },
       {
         "method": "serviceusage.services.batchGet",
         "status": "Verified",
         "tests": [
-          "test/compat/serviceusage_test.go:52 TestServiceUsageServices"
+          "test/compat/serviceusage_test.go:53 TestServiceUsageServices"
         ]
       },
       {
@@ -14072,9 +14098,9 @@
           "test/compat/apienable_test.go:211 TestServiceDisabledBigQuery",
           "test/compat/apienable_test.go:244 TestServiceDisabledFirestore",
           "test/compat/apienable_test.go:270 TestGcloudServicesDisableEnforced",
-          "test/compat/serviceusage_test.go:167 TestTerraformProjectService",
-          "test/compat/serviceusage_test.go:238 TestGcloudServices",
-          "test/compat/serviceusage_test.go:52 TestServiceUsageServices"
+          "test/compat/serviceusage_test.go:168 TestTerraformProjectService",
+          "test/compat/serviceusage_test.go:239 TestGcloudServices",
+          "test/compat/serviceusage_test.go:53 TestServiceUsageServices"
         ]
       },
       {
@@ -14087,18 +14113,18 @@
           "test/compat/apienable_test.go:211 TestServiceDisabledBigQuery",
           "test/compat/apienable_test.go:244 TestServiceDisabledFirestore",
           "test/compat/apienable_test.go:270 TestGcloudServicesDisableEnforced",
-          "test/compat/serviceusage_test.go:167 TestTerraformProjectService",
-          "test/compat/serviceusage_test.go:238 TestGcloudServices",
-          "test/compat/serviceusage_test.go:52 TestServiceUsageServices"
+          "test/compat/serviceusage_test.go:168 TestTerraformProjectService",
+          "test/compat/serviceusage_test.go:239 TestGcloudServices",
+          "test/compat/serviceusage_test.go:53 TestServiceUsageServices"
         ]
       },
       {
         "method": "serviceusage.services.get",
         "status": "Verified",
         "tests": [
-          "test/compat/serviceusage_test.go:167 TestTerraformProjectService",
-          "test/compat/serviceusage_test.go:238 TestGcloudServices",
-          "test/compat/serviceusage_test.go:52 TestServiceUsageServices"
+          "test/compat/serviceusage_test.go:168 TestTerraformProjectService",
+          "test/compat/serviceusage_test.go:239 TestGcloudServices",
+          "test/compat/serviceusage_test.go:53 TestServiceUsageServices"
         ]
       },
       {
@@ -14106,9 +14132,9 @@
         "status": "Verified",
         "tests": [
           "test/compat/loggingparents_test.go:282 TestServiceUsageFolderParentRefused",
-          "test/compat/serviceusage_test.go:167 TestTerraformProjectService",
-          "test/compat/serviceusage_test.go:238 TestGcloudServices",
-          "test/compat/serviceusage_test.go:52 TestServiceUsageServices"
+          "test/compat/serviceusage_test.go:168 TestTerraformProjectService",
+          "test/compat/serviceusage_test.go:239 TestGcloudServices",
+          "test/compat/serviceusage_test.go:53 TestServiceUsageServices"
         ]
       }
     ]
@@ -16570,6 +16596,129 @@
         "method": "cloudidentity.policies.patch",
         "status": "Unimplemented",
         "note": "returns UNIMPLEMENTED (in-process check)"
+      }
+    ]
+  },
+  {
+    "Key": "cloudquotas",
+    "Title": "Cloud Quotas API (v1)",
+    "counts": {
+      "Verified": 8
+    },
+    "rows": [
+      {
+        "method": "google.api.cloudquotas.v1.CloudQuotas/CreateQuotaPreference",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudquotas2030_test.go:82 TestCloudQuotasLifecycle"
+        ]
+      },
+      {
+        "method": "google.api.cloudquotas.v1.CloudQuotas/GetQuotaInfo",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudquotas2030_test.go:82 TestCloudQuotasLifecycle"
+        ]
+      },
+      {
+        "method": "google.api.cloudquotas.v1.CloudQuotas/GetQuotaPreference",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudquotas2030_test.go:82 TestCloudQuotasLifecycle"
+        ]
+      },
+      {
+        "method": "google.api.cloudquotas.v1.CloudQuotas/ListQuotaInfos",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudquotas2030_test.go:82 TestCloudQuotasLifecycle"
+        ]
+      },
+      {
+        "method": "google.api.cloudquotas.v1.CloudQuotas/ListQuotaPreferences",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudquotas2030_test.go:82 TestCloudQuotasLifecycle"
+        ]
+      },
+      {
+        "method": "google.api.cloudquotas.v1.CloudQuotas/UpdateQuotaPreference",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudquotas2030_test.go:82 TestCloudQuotasLifecycle"
+        ]
+      },
+      {
+        "method": "google.api.cloudquotas.v1.QuotaAdjusterSettingsManager/GetQuotaAdjusterSettings",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudquotas2030_test.go:82 TestCloudQuotasLifecycle"
+        ]
+      },
+      {
+        "method": "google.api.cloudquotas.v1.QuotaAdjusterSettingsManager/UpdateQuotaAdjusterSettings",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudquotas2030_test.go:82 TestCloudQuotasLifecycle"
+        ]
+      }
+    ]
+  },
+  {
+    "Key": "siteverification",
+    "Title": "Site Verification API (v1)",
+    "counts": {
+      "Verified": 7
+    },
+    "rows": [
+      {
+        "method": "siteVerification.webResource.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/siteverification2030_test.go:63 TestSiteVerificationLifecycle"
+        ]
+      },
+      {
+        "method": "siteVerification.webResource.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/siteverification2030_test.go:63 TestSiteVerificationLifecycle"
+        ]
+      },
+      {
+        "method": "siteVerification.webResource.getToken",
+        "status": "Verified",
+        "tests": [
+          "test/compat/siteverification2030_test.go:63 TestSiteVerificationLifecycle"
+        ]
+      },
+      {
+        "method": "siteVerification.webResource.insert",
+        "status": "Verified",
+        "tests": [
+          "test/compat/siteverification2030_test.go:63 TestSiteVerificationLifecycle"
+        ]
+      },
+      {
+        "method": "siteVerification.webResource.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/siteverification2030_test.go:63 TestSiteVerificationLifecycle"
+        ]
+      },
+      {
+        "method": "siteVerification.webResource.patch",
+        "status": "Verified",
+        "tests": [
+          "test/compat/siteverification2030_test.go:63 TestSiteVerificationLifecycle"
+        ]
+      },
+      {
+        "method": "siteVerification.webResource.update",
+        "status": "Verified",
+        "tests": [
+          "test/compat/siteverification2030_test.go:63 TestSiteVerificationLifecycle"
+        ]
       }
     ]
   },

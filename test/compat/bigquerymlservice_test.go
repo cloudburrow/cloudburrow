@@ -4,8 +4,10 @@ package compat
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"strings"
 	"testing"
@@ -14,6 +16,8 @@ import (
 	"cloud.google.com/go/bigquery"
 	"cloud.google.com/go/bigquery/connection/apiv1/connectionpb"
 	"cloud.google.com/go/iam"
+
+	"github.com/cloudburrow/cloudburrow/internal/embedding"
 )
 
 // TestBigQueryMLAnnotateImage (#1773): a remote model over a Cloud AI
@@ -300,8 +304,13 @@ func TestBigQueryMLAnnotateImageDetections(t *testing.T) {
 // result_end_offset, metadata.total_billed_duration, and each word's
 // offsets with enable_word_time_offsets) and an empty ml_transcribe_status;
 // the same speech as a FLAC file (decoded locally since #1799) answers the
-// same words; an Ogg Opus file (no local decoder) and a text file are their
-// rows' errors.
+// same words, as do the same speech as Opus in Ogg (mono) and in WebM
+// (stereo), decoded locally since #1799; an Ogg file that is not Opus and
+// a text file are their rows' errors. transcript_normalization's entries
+// rewrite the transcripts in order, case-insensitively unless
+// case_sensitive, and an entry over the documented limits is refused.
+// SEPARATE_RECOGNITION_PER_CHANNEL transcribes a stereo WAV's channels
+// (JFK left, other speech right) apart, each result with its channel_tag.
 // A model with SPEECH_RECOGNIZER, a recognizer made with the official
 // cloud.google.com/go/speech client on the local endpoint, transcribes with
 // no recognition_config (the recognizer's chirp and word offsets apply); a
@@ -334,6 +343,14 @@ func TestBigQueryMLTranscribe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	oggOpus, err := os.ReadFile("../../internal/speech/testdata/jfk.opus")
+	if err != nil {
+		t.Fatal(err)
+	}
+	webmOpus, err := os.ReadFile("../../internal/speech/testdata/jfk-stereo.webm")
+	if err != nil {
+		t.Fatal(err)
+	}
 	id := strings.ReplaceAll(h.Project(), "-", "_") + "_speech"
 	cn, err := cc.CreateConnection(ctx, &connectionpb.CreateConnectionRequest{Parent: "projects/" + project + "/locations/us", ConnectionId: id,
 		Connection: &connectionpb.Connection{Properties: &connectionpb.Connection_CloudResource{CloudResource: &connectionpb.CloudResourceProperties{}}}})
@@ -360,8 +377,12 @@ func TestBigQueryMLTranscribe(t *testing.T) {
 	}{
 		"audio/jfk.wav":   {"audio/wav", wav},
 		"audio/jfk.flac":  {"audio/flac", flac},
+		"audio/jfk.opus":  {"audio/ogg", oggOpus},
+		"audio/jfk.webm":  {"audio/webm", webmOpus},
 		"audio/song.ogg":  {"audio/ogg", []byte("OggS\x00\x02 not really")},
 		"audio/notes.txt": {"text/plain", []byte("not audio at all")},
+		"stereo/call.wav": {"audio/wav", stereoCall(t)},
+		"wav/jfk.wav":     {"audio/wav", wav},
 	} {
 		w := bh.Object(name).NewWriter(ctx)
 		w.ContentType = o.ct
@@ -384,6 +405,19 @@ func TestBigQueryMLTranscribe(t *testing.T) {
 	if err := run(fmt.Sprintf("CREATE EXTERNAL TABLE `%s.audio` WITH CONNECTION `%s` OPTIONS(object_metadata = 'SIMPLE', uris = ['gs://%s/audio/*'])",
 		ds, conn, bh.BucketName())); err != nil {
 		t.Fatalf("CREATE EXTERNAL TABLE: %v", err)
+	}
+	if err := run(fmt.Sprintf("CREATE EXTERNAL TABLE `%s.stereo` WITH CONNECTION `%s` OPTIONS(object_metadata = 'SIMPLE', uris = ['gs://%s/stereo/*'])",
+		ds, conn, bh.BucketName())); err != nil {
+		t.Fatalf("CREATE EXTERNAL TABLE stereo: %v", err)
+	}
+	// The WAV alone, for the queries that read one row. ML.TRANSCRIBE
+	// transcribes every object of its TABLE before a WHERE sees them: over
+	// audio, a WHERE uri LIKE '%.wav' still transcribed all four files and
+	// dropped three, six clips of the fourteen that took the test past its
+	// ten minutes at about 50 s a clip in main run 44830404935 (#2080).
+	if err := run(fmt.Sprintf("CREATE EXTERNAL TABLE `%s.wav` WITH CONNECTION `%s` OPTIONS(object_metadata = 'SIMPLE', uris = ['gs://%s/wav/*'])",
+		ds, conn, bh.BucketName())); err != nil {
+		t.Fatalf("CREATE EXTERNAL TABLE wav: %v", err)
 	}
 	if err := run(fmt.Sprintf("CREATE MODEL `%s.refused` REMOTE WITH CONNECTION `%s` OPTIONS(REMOTE_SERVICE_TYPE = 'CLOUD_AI_SPEECH_TO_TEXT_V2', "+
 		"SPEECH_RECOGNIZER = 'projects/%s/locations/us/recognizers/none')", ds, conn, h.Project())); err == nil || !strings.Contains(err.Error(), "doesn't exist") {
@@ -419,10 +453,10 @@ func TestBigQueryMLTranscribe(t *testing.T) {
 		"LAX_INT64(ml_transcribe_result.results[0].alternatives[0].words[1].start_offset.nanos) AS word_nanos "+
 		`FROM ML.TRANSCRIBE(MODEL `+"`%s.speech`, TABLE `%s.audio`"+`, recognition_config => (JSON '{"language_codes": ["en-US"], "model": "chirp", `+
 		`"auto_decoding_config": {}, "features": {"enable_word_time_offsets": true}}')) ORDER BY uri`, ds, ds))
-	if len(rows) != 4 {
+	if len(rows) != 6 {
 		t.Fatalf("rows: %v", rows)
 	}
-	jfkFLAC, jfk, notes, song := rows[0], rows[1], rows[2], rows[3]
+	jfkFLAC, jfkOgg, jfk, jfkWebM, notes, song := rows[0], rows[1], rows[2], rows[3], rows[4], rows[5]
 	text, _ := jfk["transcripts"].(string)
 	confidence, _ := jfk["confidence"].(float64)
 	if !strings.HasSuffix(fmt.Sprint(jfk["uri"]), "/audio/jfk.wav") || jfk["status"] != "" || jfk["content_type"] != "audio/wav" ||
@@ -433,24 +467,84 @@ func TestBigQueryMLTranscribe(t *testing.T) {
 	if flacText, _ := jfkFLAC["transcripts"].(string); jfkFLAC["status"] != "" || flacText != text || jfkFLAC["billed"] != int64(11) {
 		t.Errorf("jfk.flac row: %v", jfkFLAC)
 	}
-	if status, _ := song["status"].(string); !strings.Contains(status, "OGG_OPUS") || song["transcripts"] != nil {
-		t.Errorf("Ogg Opus row: %v", song)
+	for name, row := range map[string]map[string]bigquery.Value{"jfk.opus": jfkOgg, "jfk.webm": jfkWebM} {
+		// Opus is lossy: whisper hears the same sentence, its words
+		// within a word or two of the WAV's.
+		opusText, _ := row["transcripts"].(string)
+		if row["status"] != "" || row["billed"] != int64(11) || row["lang"] != "en-us" ||
+			!strings.Contains(strings.ToLower(opusText), "ask not what your country can do for you") {
+			t.Errorf("%s row: %v", name, row)
+		}
+	}
+	if status, _ := song["status"].(string); !strings.Contains(status, "INVALID_ARGUMENT") || song["transcripts"] != nil {
+		t.Errorf("not-Opus Ogg row: %v", song)
 	}
 	if status, _ := notes["status"].(string); !strings.Contains(status, "INVALID_ARGUMENT") || notes["transcripts"] != nil {
 		t.Errorf("text row: %v", notes)
 	}
 
+	normRows := mlQueryIn(t, ctx, c, fmt.Sprintf("SELECT transcripts, ml_transcribe_status AS status, "+
+		"JSON_VALUE(ml_transcribe_result, '$.results[0].alternatives[0].transcript') AS first "+
+		`FROM ML.TRANSCRIBE(MODEL `+"`%s.speech`, TABLE `%s.wav`"+`, recognition_config => (JSON '{"language_codes": ["en-US"], "model": "chirp", `+
+		`"auto_decoding_config": {}, "transcript_normalization": {"entries": [{"search": "COUNTRY", "replace": "nation"}, `+
+		`{"search": "your country", "replace": "never matched"}, {"search": "Ask", "replace": "ASK", "case_sensitive": true}]}}'))`, ds, ds))
+	wantNorm := strings.ReplaceAll(strings.ReplaceAll(strings.ReplaceAll(text, "country", "nation"), "Country", "nation"), "Ask", "ASK")
+	if len(normRows) != 1 || normRows[0]["status"] != "" || normRows[0]["transcripts"] != wantNorm ||
+		strings.Contains(strings.ToLower(fmt.Sprint(normRows[0]["first"])), "country") || !strings.Contains(wantNorm, "nation") {
+		t.Errorf("transcript_normalization: %v, want %q", normRows, wantNorm)
+	}
+
+	// SEPARATE_RECOGNITION_PER_CHANNEL (#1799): JFK on the left channel,
+	// the adaptation sample on the right, each transcribed on its own and
+	// tagged with its channel; the billed duration counts both channels.
+	chRows := mlQueryIn(t, ctx, c, fmt.Sprintf("SELECT transcripts, ml_transcribe_status AS status, TO_JSON_STRING(ml_transcribe_result) AS result "+
+		`FROM ML.TRANSCRIBE(MODEL `+"`%s.speech`, TABLE `%s.stereo`"+`, recognition_config => (JSON '{"language_codes": ["en-US"], "model": "chirp", `+
+		`"auto_decoding_config": {}, "features": {"multi_channel_mode": "SEPARATE_RECOGNITION_PER_CHANNEL"}}'))`, ds, ds))
+	if len(chRows) != 1 || chRows[0]["status"] != "" {
+		t.Fatalf("per-channel rows: %v", chRows)
+	}
+	var chResult struct {
+		Results []struct {
+			ChannelTag   int `json:"channel_tag"`
+			Alternatives []struct {
+				Transcript string `json:"transcript"`
+			} `json:"alternatives"`
+		} `json:"results"`
+		Metadata struct {
+			TotalBilledDuration struct {
+				Seconds int `json:"seconds"`
+			} `json:"total_billed_duration"`
+		} `json:"metadata"`
+	}
+	if err := json.Unmarshal([]byte(fmt.Sprint(chRows[0]["result"])), &chResult); err != nil {
+		t.Fatalf("per-channel result: %v", err)
+	}
+	byChannel := map[int]string{}
+	for _, r := range chResult.Results {
+		if len(r.Alternatives) > 0 {
+			byChannel[r.ChannelTag] += strings.ToLower(r.Alternatives[0].Transcript) + " "
+		}
+	}
+	if len(byChannel) != 2 || !strings.Contains(byChannel[1], "ask not what your country can do for you") || strings.Contains(byChannel[1], "station") ||
+		!strings.Contains(byChannel[2], "station") || strings.Contains(byChannel[2], "country") || chResult.Metadata.TotalBilledDuration.Seconds != 22 {
+		t.Errorf("per-channel result: channels %v, billed %d s", byChannel, chResult.Metadata.TotalBilledDuration.Seconds)
+	}
+	if text, _ := chRows[0]["transcripts"].(string); !strings.Contains(strings.ToLower(text), "station") || !strings.Contains(strings.ToLower(text), "country") {
+		t.Errorf("per-channel transcripts: %q", text)
+	}
+
 	recRows := mlQueryIn(t, ctx, c, fmt.Sprintf("SELECT uri, transcripts, ml_transcribe_status AS status, "+
 		"LAX_INT64(ml_transcribe_result.results[0].alternatives[0].words[1].start_offset.nanos) AS word_nanos "+
-		"FROM ML.TRANSCRIBE(MODEL `%s.speech_rec`, TABLE `%s.audio`) WHERE uri LIKE '%%.wav'", ds, ds))
-	if len(recRows) != 1 || recRows[0]["status"] != "" || recRows[0]["transcripts"] != text || recRows[0]["word_nanos"] == nil {
+		"FROM ML.TRANSCRIBE(MODEL `%s.speech_rec`, TABLE `%s.wav`)", ds, ds))
+	if len(recRows) != 1 || !strings.HasSuffix(fmt.Sprint(recRows[0]["uri"]), "/wav/jfk.wav") || recRows[0]["status"] != "" || recRows[0]["transcripts"] != text || recRows[0]["word_nanos"] == nil {
 		t.Errorf("ML.TRANSCRIBE with the recognizer: %v", recRows)
 	}
 
 	for cfg, want := range map[string]string{
 		"": "requires recognition_config",
-		`, recognition_config => (JSON '{"language_codes": ["en-US"], "model": "long", "auto_decoding_config": {}}')`:                                          "chirp",
-		`, recognition_config => (JSON '{"language_codes": ["en-US"], "model": "chirp", "auto_decoding_config": {}, "features": {"profanity_filter": true}}')`: "Not implemented here",
+		`, recognition_config => (JSON '{"language_codes": ["en-US"], "model": "long", "auto_decoding_config": {}}')`:                                                               "chirp",
+		`, recognition_config => (JSON '{"language_codes": ["en-US"], "model": "chirp", "auto_decoding_config": {}, "features": {"profanity_filter": true}}')`:                      "Not implemented here",
+		`, recognition_config => (JSON '{"language_codes": ["en-US"], "model": "chirp", "auto_decoding_config": {}, "transcript_normalization": {"entries": [{"replace": "x"}]}}')`: "search is empty",
 	} {
 		if err := run(fmt.Sprintf("SELECT * FROM ML.TRANSCRIBE(MODEL `%s.speech`, TABLE `%s.audio`%s)", ds, ds, cfg)); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("ML.TRANSCRIBE%s: %v, want %q", cfg, err, want)
@@ -849,4 +943,48 @@ func TestBigQueryMLUnderstandText(t *testing.T) {
 		!strings.Contains(err.Error(), "ML.UNDERSTAND_TEXT") {
 		t.Errorf("ML.TRANSLATE of the Natural Language model: %v", err)
 	}
+}
+
+// stereoCall is a stereo WAV at 16 kHz: JFK's sample on the left channel,
+// internal/speech's adaptation sample on the right, the shorter padded
+// with silence (#1799, per-channel recognition).
+func stereoCall(t *testing.T) []byte {
+	t.Helper()
+	read := func(name string) []float32 {
+		b, err := os.ReadFile("../../internal/speech/testdata/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s, err := embedding.DecodeWAVSpeech(b)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	left, right := read("jfk.wav"), read("adaptation.wav")
+	n := max(len(left), len(right))
+	b := make([]byte, 44+4*n)
+	copy(b, "RIFF")
+	binary.LittleEndian.PutUint32(b[4:], uint32(36+4*n))
+	copy(b[8:], "WAVEfmt ")
+	binary.LittleEndian.PutUint32(b[16:], 16)
+	binary.LittleEndian.PutUint16(b[20:], 1)
+	binary.LittleEndian.PutUint16(b[22:], 2)
+	binary.LittleEndian.PutUint32(b[24:], 16000)
+	binary.LittleEndian.PutUint32(b[28:], 4*16000)
+	binary.LittleEndian.PutUint16(b[32:], 4)
+	binary.LittleEndian.PutUint16(b[34:], 16)
+	copy(b[36:], "data")
+	binary.LittleEndian.PutUint32(b[40:], uint32(4*n))
+	at := func(s []float32, i int) uint16 {
+		if i >= len(s) {
+			return 0
+		}
+		return uint16(int16(max(-32768, min(32767, math.Round(float64(s[i])*32767)))))
+	}
+	for i := range n {
+		binary.LittleEndian.PutUint16(b[44+4*i:], at(left, i))
+		binary.LittleEndian.PutUint16(b[46+4*i:], at(right, i))
+	}
+	return b
 }

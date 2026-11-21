@@ -29,8 +29,40 @@ type iamOrgPoliciesProvider struct {
 func (iamOrgPoliciesProvider) ID() string    { return "iam-orgpolicies" }
 func (iamOrgPoliciesProvider) Title() string { return "Organization Policies" }
 
-// List is every constraint Google's page lists for the project, set or
-// not, with where its policy comes from and what is in effect.
+// resourceOf is the resource the page shows: the folder or organization
+// chosen in the toolbar's resource selector (#2023), else the project; its
+// word is "project", "folder" or "organization".
+func (p iamOrgPoliciesProvider) resourceOf(ctx context.Context, project string) (resource, word string, err error) {
+	sel, scoped, err := consoleResourceScope(ctx, p.registry)
+	switch {
+	case err != nil:
+		return "", "", err
+	case scoped:
+		return sel.Name, strings.ToLower(sel.Kind), nil
+	case project == "":
+		return "", "", errors.New("choose a project in the toolbar")
+	}
+	return "projects/" + project, "project", nil
+}
+
+// scopeQuery is the query string a link of the page carries: the project,
+// and the folder or organization chosen in the toolbar.
+func scopeQuery(ctx context.Context, project string) string {
+	q := url.Values{}
+	if project != "" {
+		q.Set("project", project)
+	}
+	for _, k := range []string{scopeFolderParam, scopeOrgParam} {
+		if v := console.ScopeValue(ctx, k); v != "" {
+			q.Set(k, v)
+		}
+	}
+	return q.Encode()
+}
+
+// List is every constraint Google's page lists for the project, folder or
+// organization (#2023), set or not, with where its policy comes from and
+// what is in effect.
 //
 // The columns (#2013): Google's docs name the list, its Filter (by
 // constraint name), Policy details and the three policy sources, but no
@@ -41,14 +73,18 @@ func (iamOrgPoliciesProvider) Title() string { return "Organization Policies" }
 // project's own policy is (none: Inherit parent's policy; spec.reset:
 // Google-managed default; rules: Override parent's policy); Effective is
 // getEffectivePolicy's; Last edited is the policy's updateTime.
-func (p iamOrgPoliciesProvider) List(_ context.Context, project string) (console.Listing, error) {
+func (p iamOrgPoliciesProvider) List(ctx context.Context, project string) (console.Listing, error) {
 	l := console.Listing{NameColumn: "Constraint", Columns: []string{"Name", "Policy source", "Effective", "Last edited"},
 		Noun: "organization policies", Note: orgPolicyNote}
-	if project == "" {
-		l.Prompt = "Organization policies are per project. Choose one in the toolbar."
+	resource, _, err := p.resourceOf(ctx, project)
+	if err != nil {
+		if _, scoped, _ := consoleResourceScope(ctx, p.registry); !scoped {
+			l.Prompt = "Organization policies are per project. Choose one in the toolbar."
+		} else {
+			l.Unavailable = err.Error()
+		}
 		return l, nil
 	}
-	resource := "projects/" + project
 	own, reset := map[string]string{}, map[string]bool{}
 	if all, err := p.registry.OrgPolicies(resource); err == nil {
 		for _, op := range all {
@@ -83,7 +119,7 @@ func (p iamOrgPoliciesProvider) List(_ context.Context, project string) (console
 
 // Detail is Google's Policy details: the constraint, the project's own
 // policy and the effective one, with Manage policy beside the title.
-func (p iamOrgPoliciesProvider) Detail(_ context.Context, project string, path []string) (console.Detail, error) {
+func (p iamOrgPoliciesProvider) Detail(ctx context.Context, project string, path []string) (console.Detail, error) {
 	if len(path) > 1 {
 		return console.DeeperThan(1, path), nil
 	}
@@ -91,10 +127,10 @@ func (p iamOrgPoliciesProvider) Detail(_ context.Context, project string, path [
 	if c == nil {
 		return console.Detail{Unavailable: fmt.Sprintf("no constraint %s", path[0])}, nil
 	}
-	if project == "" {
-		return console.Detail{Unavailable: "choose a project in the toolbar"}, nil
+	resource, word, err := p.resourceOf(ctx, project)
+	if err != nil {
+		return console.Detail{Unavailable: err.Error()}, nil
 	}
-	resource := "projects/" + project
 	kind := "Boolean"
 	if c.ListConstraint != nil {
 		kind = "List"
@@ -113,20 +149,21 @@ func (p iamOrgPoliciesProvider) Detail(_ context.Context, project string, path [
 	return console.Detail{Title: c.DisplayName, Summary: []console.Property{
 		{Label: "Constraint ID", Value: c.Name}, {Label: "Constraint type", Value: kind},
 		{Label: "Applies to", Value: resource},
-		{Label: "Policy for this project", Value: own}, {Label: "Effective policy", Value: effective},
+		{Label: "Policy for this " + word, Value: own}, {Label: "Effective policy", Value: effective},
 	}, Sections: []console.Section{{ID: "about", Label: "Details", Kind: console.KindText, Text: orgPolicyNote}}}, nil
 }
 
 // DetailActions are Manage policy, which opens Edit policy
 // (consoleorgpolicyedit.go), as Google's page does, and, on a policy of the
 // project's own, Delete policy, each on this constraint.
-func (p iamOrgPoliciesProvider) DetailActions(_ context.Context, project string, path []string) []console.Action {
-	if project == "" || len(path) != 1 || resourcemanager.KnownConstraint(path[0]) == nil {
+func (p iamOrgPoliciesProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
+	resource, _, err := p.resourceOf(ctx, project)
+	if err != nil || len(path) != 1 || resourcemanager.KnownConstraint(path[0]) == nil {
 		return nil
 	}
 	out := []console.Action{{ID: "manage-policy", Label: "Manage policy",
-		Href: "/iam-admin/orgpolicies/" + url.PathEscape(path[0]) + "/edit?project=" + url.QueryEscape(project)}}
-	for _, a := range orgPolicyActions(p.registry, "projects/"+project, "") {
+		Href: "/iam-admin/orgpolicies/" + url.PathEscape(path[0]) + "/edit?" + scopeQuery(ctx, project)}}
+	for _, a := range orgPolicyActions(p.registry, resource, "") {
 		if a.ID == orgPolicySet {
 			continue
 		}
@@ -151,12 +188,16 @@ func (p iamOrgPoliciesProvider) DetailActions(_ context.Context, project string,
 	return out
 }
 
-func (p iamOrgPoliciesProvider) ActAt(_ context.Context, project string, path []string, action string, values map[string]string) error {
-	if project == "" || len(path) != 1 {
-		return errors.New("open a constraint of the selected project")
+func (p iamOrgPoliciesProvider) ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error {
+	resource, _, err := p.resourceOf(ctx, project)
+	if err != nil {
+		return err
+	}
+	if len(path) != 1 {
+		return errors.New("open a constraint of the selected resource")
 	}
 	values["constraint"] = path[0]
-	ok, err := orgPolicyAct(p.registry, "projects/"+project, action, values)
+	ok, err := orgPolicyAct(p.registry, resource, action, values)
 	if !ok {
 		return fmt.Errorf("unknown action %q", action)
 	}

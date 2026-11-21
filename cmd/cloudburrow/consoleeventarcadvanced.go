@@ -453,39 +453,103 @@ func (p eaPipelinesProvider) List(ctx context.Context, project string) (console.
 }
 
 func (p eaPipelinesProvider) CreateForm() (string, []console.Field) {
-	dst, fmtSec, med, retry := "Destination", "Payload format", "Mediation", "Retry policy"
-	return "Create pipeline", []console.Field{
+	fields := []console.Field{
 		{Name: "name", Label: "Pipeline name", Type: "text", Required: true, Pattern: eaIDPattern, Section: "Details",
 			Help: "Lowercase letters, digits and hyphens, starting with a letter, at most 63."},
 		p.regionField(),
-		{Name: "displayName", Label: "Display name", Type: "text", Section: "Details"},
-		{Name: "destination", Label: "Destination", Type: "select", Options: eaPipelineDestinations, Default: eaPipelineDestinations[0], Section: dst,
+	}
+	return "Create pipeline", append(fields, eaPipelineFields(nil)...)
+}
+
+// eaPipelineValues are the form values a pipeline holds, which Edit
+// pipeline's fields are prefilled with.
+func eaPipelineValues(pl *eventarcpb.Pipeline) map[string]string {
+	v := map[string]string{"destination": eaPipelineDestinations[0], "inputFormat": "None", "outputFormat": "None",
+		"maxAttempts": "5", "minRetryDelay": "1", "maxRetryDelay": "60"}
+	if pl == nil {
+		return v
+	}
+	v["displayName"], v["cryptoKey"] = pl.GetDisplayName(), pl.GetCryptoKeyName()
+	if ds := pl.GetDestinations(); len(ds) > 0 {
+		d := ds[0]
+		kind, target := eaPipelineDestination(d)
+		v["destination"] = kind
+		switch kind {
+		case "HTTP endpoint":
+			v["uri"] = target
+		case "Pub/Sub topic":
+			v["topic"] = target
+		case "Message bus":
+			v["bus"] = target
+		case "Workflows":
+			v["workflow"] = target
+		}
+		v["networkAttachment"] = d.GetNetworkConfig().GetNetworkAttachment()
+		v["serviceAccount"] = d.GetAuthenticationConfig().GetGoogleOidc().GetServiceAccount()
+		v["outputFormat"], v["outputSchema"] = eaFormatText(d.GetOutputPayloadFormat()), eaSchemaText(d.GetOutputPayloadFormat())
+	}
+	v["inputFormat"], v["inputSchema"] = eaFormatText(pl.GetInputPayloadFormat()), eaSchemaText(pl.GetInputPayloadFormat())
+	if ms := pl.GetMediations(); len(ms) > 0 {
+		v["transformation"] = ms[0].GetTransformation().GetTransformationTemplate()
+	}
+	rp := pl.GetRetryPolicy()
+	if rp.GetMaxAttempts() > 0 {
+		v["maxAttempts"] = strconv.Itoa(int(rp.GetMaxAttempts()))
+	}
+	if rp.GetMinRetryDelay() != nil {
+		v["minRetryDelay"] = strconv.Itoa(int(rp.GetMinRetryDelay().AsDuration() / time.Second))
+	}
+	if rp.GetMaxRetryDelay() != nil {
+		v["maxRetryDelay"] = strconv.Itoa(int(rp.GetMaxRetryDelay().AsDuration() / time.Second))
+	}
+	return v
+}
+
+// eaSchemaText is an Avro or Protobuf format's schema definition.
+func eaSchemaText(f *eventarcpb.Pipeline_MessagePayloadFormat) string {
+	if a := f.GetAvro(); a != nil {
+		return a.GetSchemaDefinition()
+	}
+	return f.GetProtobuf().GetSchemaDefinition()
+}
+
+// eaPipelineFields are Create pipeline's fields after its name and region,
+// and Edit pipeline's, prefilled with what the pipeline holds.
+func eaPipelineFields(pl *eventarcpb.Pipeline) []console.Field {
+	v := eaPipelineValues(pl)
+	dst, fmtSec, med, retry := "Destination", "Payload format", "Mediation", "Retry policy"
+	return []console.Field{
+		{Name: "displayName", Label: "Display name", Type: "text", Default: v["displayName"], Section: "Details"},
+		{Name: "destination", Label: "Destination", Type: "select", Options: eaPipelineDestinations, Default: v["destination"], Section: dst,
 			Help: "Where the pipeline delivers each message. A pipeline's Workflows destination is not served; a trigger's is."},
-		{Name: "uri", Label: "Destination URI", Type: "text", Section: dst,
+		{Name: "uri", Label: "Destination URI", Type: "text", Default: v["uri"], Section: dst,
 			Help: "HTTP endpoint: an https URI, or the URL of a Cloud Run service of this instance, which is reached through the cluster's ingress."},
-		{Name: "networkAttachment", Label: "Network attachment", Type: "text", Section: dst,
+		{Name: "networkAttachment", Label: "Network attachment", Type: "text", Default: v["networkAttachment"], Section: dst,
 			Help: "HTTP endpoint: optional. projects/P/regions/R/networkAttachments/NAME; recorded, not used."},
-		{Name: "serviceAccount", Label: "Authentication: Google OIDC service account", Type: "text", Section: dst,
+		{Name: "serviceAccount", Label: "Authentication: Google OIDC service account", Type: "text", Default: v["serviceAccount"], Section: dst,
 			Help: "HTTP endpoint: optional. The account whose OIDC token each request carries (a Cloud Run service needs one)."},
-		{Name: "topic", Label: "Pub/Sub topic", Type: "text", Section: dst, Help: "Pub/Sub topic: the topic ID, or projects/P/topics/T."},
-		{Name: "bus", Label: "Message bus", Type: "text", Section: dst, Help: "Message bus: the bus ID in the pipeline's region, or its full name."},
-		{Name: "workflow", Label: "Workflow", Type: "text", Section: dst, Help: "Workflows: not served for a pipeline (a trigger's Workflows destination is)."},
-		{Name: "inputFormat", Label: "Input payload format", Type: "select", Options: eaPayloadFormats, Default: "None", Section: fmtSec},
-		{Name: "inputSchema", Label: "Input schema definition", Type: "textarea", Section: fmtSec,
+		{Name: "topic", Label: "Pub/Sub topic", Type: "text", Default: v["topic"], Section: dst, Help: "Pub/Sub topic: the topic ID, or projects/P/topics/T."},
+		{Name: "bus", Label: "Message bus", Type: "text", Default: v["bus"], Section: dst, Help: "Message bus: the bus ID in the pipeline's region, or its full name."},
+		{Name: "workflow", Label: "Workflow", Type: "text", Default: v["workflow"], Section: dst, Help: "Workflows: not served for a pipeline (a trigger's Workflows destination is)."},
+		{Name: "inputFormat", Label: "Input payload format", Type: "select", Options: eaPayloadFormats, Default: v["inputFormat"], Section: fmtSec},
+		{Name: "inputSchema", Label: "Input schema definition", Type: "textarea", Default: v["inputSchema"], Section: fmtSec,
 			Help: "Avro or Protobuf: the schema the input data is written in."},
-		{Name: "outputFormat", Label: "Output payload format", Type: "select", Options: eaPayloadFormats, Default: "None", Section: fmtSec,
+		{Name: "outputFormat", Label: "Output payload format", Type: "select", Options: eaPayloadFormats, Default: v["outputFormat"], Section: fmtSec,
 			Help: "None delivers the data in the input format; an output format needs an input format."},
-		{Name: "outputSchema", Label: "Output schema definition", Type: "textarea", Section: fmtSec},
-		{Name: "transformation", Label: "Transformation (CEL)", Type: "textarea", Section: med,
+		{Name: "outputSchema", Label: "Output schema definition", Type: "textarea", Default: v["outputSchema"], Section: fmtSec},
+		{Name: "transformation", Label: "Transformation (CEL)", Type: "textarea", Default: v["transformation"], Section: med,
 			Help: `Optional. A CEL expression that builds the new message, such as message.setField("data.seen", true).`},
-		{Name: "maxAttempts", Label: "Maximum attempts", Type: "text", Default: "5", Pattern: `^([1-9][0-9]?|100)?$`, Section: retry,
+		{Name: "maxAttempts", Label: "Maximum attempts", Type: "text", Default: v["maxAttempts"], Pattern: `^([1-9][0-9]?|100)?$`, Section: retry,
 			Help: "1 to 100; 5 by default."},
-		{Name: "minRetryDelay", Label: "Minimum retry delay (seconds)", Type: "text", Default: "1", Pattern: `^[0-9]*$`, Section: retry,
+		{Name: "minRetryDelay", Label: "Minimum retry delay (seconds)", Type: "text", Default: v["minRetryDelay"], Pattern: `^[0-9]*$`, Section: retry,
 			Help: "1 to 600; 1 by default."},
-		{Name: "maxRetryDelay", Label: "Maximum retry delay (seconds)", Type: "text", Default: "60", Pattern: `^[0-9]*$`, Section: retry,
+		{Name: "maxRetryDelay", Label: "Maximum retry delay (seconds)", Type: "text", Default: v["maxRetryDelay"], Pattern: `^[0-9]*$`, Section: retry,
 			Help: "1 to 600; 60 by default."},
-		eaSeverityField(0),
-		eaLabelsField(nil),
+		eaSeverityField(pl.GetLoggingConfig().GetLogSeverity()),
+		{Name: "cryptoKey", Label: "Cloud KMS key", Type: "text", Default: v["cryptoKey"], Section: "Encryption",
+			Pattern: `^(projects/[^\/]+/locations/[^\/]+/keyRings/[^\/]+/cryptoKeys/[^\/]+)?$`,
+			Help:    "Optional. A customer-managed key, projects/P/locations/L/keyRings/R/cryptoKeys/K; empty for a Google-managed key."},
+		eaLabelsField(pl.GetLabels()),
 	}
 }
 
@@ -567,7 +631,8 @@ func eaFormPipeline(project, region string, values map[string]string) (*eventarc
 	default:
 		return nil, fmt.Errorf("destination %q is not one of %v", kind, eaPipelineDestinations)
 	}
-	pl := &eventarcpb.Pipeline{DisplayName: strings.TrimSpace(values["displayName"]), Destinations: []*eventarcpb.Pipeline_Destination{d}}
+	pl := &eventarcpb.Pipeline{DisplayName: strings.TrimSpace(values["displayName"]), CryptoKeyName: strings.TrimSpace(values["cryptoKey"]),
+		Destinations: []*eventarcpb.Pipeline_Destination{d}}
 	var err error
 	if pl.InputPayloadFormat, err = eaFormFormat(values["inputFormat"], values["inputSchema"]); err != nil {
 		return nil, err
@@ -686,12 +751,48 @@ func (p eaPipelinesProvider) Detail(ctx context.Context, project string, path []
 		{Label: "Minimum retry delay", Value: lo},
 		{Label: "Maximum retry delay", Value: hi},
 		{Label: "Log severity", Value: eaSeverityText(pl.GetLoggingConfig())},
+		{Label: "Encryption", Value: eaKeyText(pl.GetCryptoKeyName())},
 		{Label: "Display name", Value: orDash(pl.GetDisplayName())},
 		{Label: "Labels", Value: eaLabelsText(pl.GetLabels())},
 		{Label: "Created", Value: eaStampText(pl.GetCreateTime())},
 		{Label: "Updated", Value: eaStampText(pl.GetUpdateTime())},
+		{Label: "Etag", Value: orDash(pl.GetEtag())},
 	}, 5)
+	// Google's Pipeline details pane has Edit, which opens the pipeline's
+	// settings again and ends in Save.
+	d.Edit = &console.EditForm{Label: "Edit", Title: "Edit pipeline", Submit: "Save", Fields: eaPipelineFields(pl),
+		Note: "The pipeline's name and region cannot change, as on Google. Its enrollments are edited on the Enrollments page."}
 	return d, nil
+}
+
+// eaPipelineMask is what Edit pipeline sends: every setting its form holds.
+var eaPipelineMask = []string{"display_name", "destinations", "input_payload_format", "mediations", "retry_policy",
+	"logging_config", "crypto_key_name", "labels"}
+
+func (p eaPipelinesProvider) Edit(ctx context.Context, project string, path []string, values map[string]string) error {
+	if len(path) != 1 {
+		return errors.New("only a pipeline can be edited")
+	}
+	cur, err := p.find(ctx, project, path[0])
+	if err != nil {
+		return err
+	}
+	pl, err := eaFormPipeline(p.project(project), eaRegion(cur.GetName()), values)
+	if err != nil {
+		return err
+	}
+	pl.Name, pl.Etag = cur.GetName(), cur.GetEtag()
+	c, err := p.client(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = c.Close() }()
+	op, err := c.UpdatePipeline(ctx, &eventarcpb.UpdatePipelineRequest{Pipeline: pl, UpdateMask: &fieldmaskpb.FieldMask{Paths: eaPipelineMask}})
+	if err != nil {
+		return err
+	}
+	_, err = op.Wait(ctx)
+	return err
 }
 
 func (p eaPipelinesProvider) Delete(ctx context.Context, project, row string) error {
@@ -972,15 +1073,59 @@ func (p eaSourcesProvider) List(ctx context.Context, project string) (console.Li
 }
 
 func (p eaSourcesProvider) fields(buses []string) []console.Field {
-	return []console.Field{
+	return append([]console.Field{
 		{Name: "name", Label: "Google API source name", Type: "text", Required: true, Pattern: eaIDPattern, Section: "Details",
 			Help: "Lowercase letters, digits and hyphens, starting with a letter, at most 63."},
 		p.regionField(),
-		{Name: "displayName", Label: "Display name", Type: "text", Section: "Details"},
-		eaChoiceField("bus", "Destination bus", buses, "", "Destination", "The bus the project's Google events are published to."),
-		eaSeverityField(0),
-		eaLabelsField(nil),
+	}, eaSourceFields(buses, nil)...)
+}
+
+// eaSourceFields are a Google API source's settings, prefilled with what
+// the source holds for Edit.
+func eaSourceFields(buses []string, s *eventarcpb.GoogleApiSource) []console.Field {
+	return []console.Field{
+		{Name: "displayName", Label: "Display name", Type: "text", Default: s.GetDisplayName(), Section: "Details"},
+		eaChoiceField("bus", "Destination bus", buses, lastSegment(s.GetDestination()), "Destination", "The bus the project's Google events are published to."),
+		eaSeverityField(s.GetLoggingConfig().GetLogSeverity()),
+		eaLabelsField(s.GetLabels()),
 	}
+}
+
+func (p eaSourcesProvider) busChoices(ctx context.Context, project string) []string {
+	var buses []string
+	if bs, err := (eaBusesProvider{p.eaAdvBase}).buses(ctx, project); err == nil {
+		for _, b := range bs {
+			buses = append(buses, lastSegment(b.GetName()))
+		}
+	}
+	return buses
+}
+
+func (p eaSourcesProvider) Edit(ctx context.Context, project string, path []string, values map[string]string) error {
+	if len(path) != 1 {
+		return errors.New("only a Google API source can be edited")
+	}
+	cur, err := p.find(ctx, project, path[0])
+	if err != nil {
+		return err
+	}
+	s, err := eaFormSource(p.project(project), eaRegion(cur.GetName()), values)
+	if err != nil {
+		return err
+	}
+	s.Name, s.Etag = cur.GetName(), cur.GetEtag()
+	c, err := p.client(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = c.Close() }()
+	op, err := c.UpdateGoogleApiSource(ctx, &eventarcpb.UpdateGoogleApiSourceRequest{GoogleApiSource: s,
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"display_name", "destination", "logging_config", "labels"}}})
+	if err != nil {
+		return err
+	}
+	_, err = op.Wait(ctx)
+	return err
 }
 
 func (p eaSourcesProvider) CreateForm() (string, []console.Field) {
@@ -989,13 +1134,7 @@ func (p eaSourcesProvider) CreateForm() (string, []console.Field) {
 
 // CreateFormFor offers the project's buses.
 func (p eaSourcesProvider) CreateFormFor(ctx context.Context, project string) []console.Field {
-	var buses []string
-	if bs, err := (eaBusesProvider{p.eaAdvBase}).buses(ctx, project); err == nil {
-		for _, b := range bs {
-			buses = append(buses, lastSegment(b.GetName()))
-		}
-	}
-	return p.fields(buses)
+	return p.fields(p.busChoices(ctx, project))
 }
 
 func (eaSourcesProvider) CreateOnPage() bool   { return true }
@@ -1067,7 +1206,7 @@ func (p eaSourcesProvider) Detail(ctx context.Context, project string, path []st
 	} else if l := s.GetProjectSubscriptions().GetList(); len(l) > 0 {
 		subs = strings.Join(l, ", ")
 	}
-	return eaProps("Google API source", []console.Property{
+	d := eaProps("Google API source", []console.Property{
 		{Label: "Google API source name", Value: lastSegment(s.GetName())},
 		{Label: "Resource name", Value: s.GetName()},
 		{Label: "Region", Value: eaRegion(s.GetName())},
@@ -1079,7 +1218,13 @@ func (p eaSourcesProvider) Detail(ctx context.Context, project string, path []st
 		{Label: "Labels", Value: eaLabelsText(s.GetLabels())},
 		{Label: "Created", Value: eaStampText(s.GetCreateTime())},
 		{Label: "Updated", Value: eaStampText(s.GetUpdateTime())},
-	}, 5), nil
+	}, 5)
+	// Google's console changes a source from its bus's Edit page; here the
+	// source's own page has Edit too, with the same settings.
+	d.Edit = &console.EditForm{Label: "Edit", Title: "Edit Google API source", Submit: "Save",
+		Fields: eaSourceFields(p.busChoices(ctx, project), s),
+		Note:   "The source's name and region cannot change, as on Google."}
+	return d, nil
 }
 
 func (p eaSourcesProvider) Delete(ctx context.Context, project, row string) error {
@@ -1258,6 +1403,7 @@ var (
 	_ console.Deleter             = eaBusesProvider{}
 	_ console.PageCreator         = eaPipelinesProvider{}
 	_ console.Driller             = eaPipelinesProvider{}
+	_ console.Editor              = eaPipelinesProvider{}
 	_ console.Deleter             = eaPipelinesProvider{}
 	_ console.ProjectCreateFormer = eaEnrollmentsProvider{}
 	_ console.PageCreator         = eaEnrollmentsProvider{}
@@ -1267,6 +1413,7 @@ var (
 	_ console.ProjectCreateFormer = eaSourcesProvider{}
 	_ console.PageCreator         = eaSourcesProvider{}
 	_ console.Driller             = eaSourcesProvider{}
+	_ console.Editor              = eaSourcesProvider{}
 	_ console.Deleter             = eaSourcesProvider{}
 	_ console.PageCreator         = eaChannelsProvider{}
 	_ console.Driller             = eaChannelsProvider{}

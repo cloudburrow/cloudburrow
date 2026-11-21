@@ -643,6 +643,7 @@ func (f *Front) withConfig(t *btapb.Table, view btapb.Table_View) *btapb.Table {
 		t.ChangeStreamConfig = f.changes.config(t.GetName())
 		t.RowKeySchema = f.keys.get(t.GetName())
 	}
+	f.instances.withClusterStates(t, view)
 	return t
 }
 

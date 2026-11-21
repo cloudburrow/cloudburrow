@@ -36,10 +36,28 @@ const tagShortNamePattern = `^[A-Za-z0-9]([A-Za-z0-9._\-]{0,254}[A-Za-z0-9])?$`
 
 func tagID(name string) string { return name[strings.LastIndex(name, "/")+1:] }
 
-func (p tagsProvider) List(context.Context, string) (console.Listing, error) {
+func (p tagsProvider) List(ctx context.Context, _ string) (console.Listing, error) {
 	l := console.Listing{NameColumn: "Tag key ID", Columns: []string{"Short name", "Namespaced name", "Parent", "Values", "Description"},
 		Noun: "tag keys", Note: tagsNote}
-	keys, err := p.registry.AllTagKeys()
+	// The organization chosen in the toolbar lists its own keys, through
+	// TagKeys' list of that parent (#2023); a folder holds no tag keys, so
+	// with a folder chosen the page lists the organization's, the keys its
+	// resources can carry.
+	sel, scoped, err := consoleResourceScope(ctx, p.registry)
+	if err != nil {
+		l.Unavailable = err.Error()
+		return l, nil
+	}
+	var keys []*rmpb.TagKey
+	if scoped {
+		keys, err = p.registry.TagKeys(resourcemanager.OrganizationName)
+		if sel.Kind == "Folder" {
+			l.Note = "A folder holds no tag keys: they are created in the organization or a project. These are the organization's, " +
+				"which " + sel.Display + " and its resources can carry. " + tagsNote
+		}
+	} else {
+		keys, err = p.registry.AllTagKeys()
+	}
 	if err != nil {
 		l.Unavailable = consoleErr(err)
 		return l, nil
@@ -49,9 +67,18 @@ func (p tagsProvider) List(context.Context, string) (console.Listing, error) {
 		if vs, err := p.registry.TagValues(k.GetName()); err == nil {
 			n = len(vs)
 		}
+		count := strconv.Itoa(n)
+		if re := p.registry.TagKeyAllowedValuesRegex(k.GetName()); re != "" {
+			count = "Dynamic: " + re
+		}
+		// Google's row menu: Actions, View details, and Manage access, the
+		// key's IAM policy (#1865).
+		page := "/tags/" + tagID(k.GetName())
 		l.Items = append(l.Items, console.Resource{Name: tagID(k.GetName()), Fields: map[string]string{
 			"Short name": k.GetShortName(), "Namespaced name": k.GetNamespacedName(), "Parent": k.GetParent(),
-			"Values": strconv.Itoa(n), "Description": k.GetDescription()}})
+			"Values": count, "Description": k.GetDescription()},
+			Actions: []console.Action{{ID: "view", Label: "View details", Href: page},
+				{ID: "access", Label: "Manage access", Href: page + "?tab=permissions"}}})
 	}
 	l.Total = len(l.Items)
 	return l, nil
@@ -70,9 +97,13 @@ func (p tagsProvider) parentOptions() []string {
 }
 
 // CreateForm is Google's Create tag key (#1865, "Creating and managing
-// tags", read 2026-11-19): Tag key, Tag key description, the purpose
+// tags", read 2026-11-20): Tag key, Tag key description, the purpose
 // (For use with network firewall, GCE_FIREWALL, with its network), then
-// the Tag values, each a value and its description, made with the key.
+// the Tag values section: Predefined values, a row per value made with
+// Add value, each its Tag value and Tag value description, or Dynamic
+// values (#2023): Add value constraints, then the validation regular
+// expression, the key's allowedValuesRegex (".*", any value, without
+// constraints). The page ends in Create tag key.
 // The key is made in the organization or a project, as the resource
 // selector names it on Google's page.
 func (p tagsProvider) CreateForm() (string, []console.Field) {
@@ -84,12 +115,57 @@ func (p tagsProvider) CreateForm() (string, []console.Field) {
 			Help: "A key for network firewall policies (purpose GCE_FIREWALL): its values can be bound to the VPC network below only."},
 		{Name: "network", Label: "Network", Type: "text", ShowWhen: "purpose",
 			Help: "The VPC network the key's values apply to, as PROJECT_ID/NETWORK or projects/PROJECT_ID/global/networks/NETWORK."},
-		{Name: "values", Label: "Tag values", Type: "map",
-			Help: "One per line: the tag value, then = and its tag value description, such as production=Serving traffic. Values can also be added later on the key's page."},
+		{Name: "valueType", Label: "Tag values", Type: "radio", Default: tagValuesPredefined,
+			Options:      []string{tagValuesPredefined, tagValuesDynamic},
+			OptionLabels: map[string]string{tagValuesPredefined: "Predefined values", tagValuesDynamic: "Dynamic values"},
+			Help: "Predefined values: a fixed list of allowed values, which can also be added later on the key's page. " +
+				"Dynamic values: a value is typed when the tag is attached, and the key can't also have predefined values."},
+		{Name: "valueConstraints", Label: "Add value constraints", Type: "checkbox", ShowWhen: "valueType=" + tagValuesDynamic,
+			Help: "Without constraints, any value can be attached (the regular expression .*)."},
+		{Name: "allowedValuesRegex", Label: "Validation regular expression", Type: "text", Default: ".*",
+			ShowWhen: "valueType=" + tagValuesDynamic + "&valueConstraints",
+			Help:     "RE2 syntax. A dynamic value must match it whole, for example env-[a-z]+."},
+		{Name: "values", Label: "Tag value", Type: console.GroupFieldType, AddLabel: "Add value", ShowWhen: "valueType=" + tagValuesPredefined,
+			Group: []console.Field{
+				{Name: "shortName", Label: "Tag value", Type: "text", Required: true, Pattern: tagShortNamePattern,
+					Help: "up to 256 characters, starting and ending with a letter or digit"},
+				{Name: "description", Label: "Tag value description", Type: "text"},
+			}},
 		{Name: "parent", Label: "Organization or project", Type: "select", Required: true, Options: p.parentOptions(), Default: resourcemanager.OrganizationName,
 			Help: "The key's namespace: the organization, or a project."},
 	}
 }
+
+// CreateFormFor implements console.ProjectCreateFormer: with the
+// organization or a folder chosen in the toolbar (#2023), the key is made
+// in the organization, as Google's Create tag key does for the resource
+// the selector names.
+func (p tagsProvider) CreateFormFor(ctx context.Context, _ string) []console.Field {
+	_, fields := p.CreateForm()
+	if _, scoped, err := consoleResourceScope(ctx, p.registry); err == nil && scoped {
+		for i := range fields {
+			if fields[i].Name == "parent" {
+				fields[i].Options, fields[i].Default = []string{resourcemanager.OrganizationName}, resourcemanager.OrganizationName
+			}
+		}
+	}
+	return fields
+}
+
+var _ console.ProjectCreateFormer = tagsProvider{}
+
+// The Tag values choices of Create tag key.
+const (
+	tagValuesPredefined = "predefined"
+	tagValuesDynamic    = "dynamic"
+)
+
+// CreateSubmit implements console.CreateSubmitter: Google's page ends in
+// Create tag key.
+func (tagsProvider) CreateSubmit() string { return "Create tag key" }
+
+// CreateLayout implements console.CreateLayouter: one page, as Google's.
+func (tagsProvider) CreateLayout() string { return console.CreateLayoutPage }
 
 func (p tagsProvider) Create(_ context.Context, _ string, values map[string]string) (string, error) {
 	in := &rmpb.TagKey{Parent: values["parent"], ShortName: strings.TrimSpace(values["shortName"]), Description: values["description"]}
@@ -97,9 +173,28 @@ func (p tagsProvider) Create(_ context.Context, _ string, values map[string]stri
 		in.Purpose = rmpb.Purpose_GCE_FIREWALL
 		in.PurposeData = map[string]string{"network": strings.TrimSpace(values["network"])}
 	}
-	tagValues, err := console.ParseMap(values["values"])
+	if values["valueType"] == tagValuesDynamic {
+		re := ".*"
+		if values["valueConstraints"] == "true" && strings.TrimSpace(values["allowedValuesRegex"]) != "" {
+			re = strings.TrimSpace(values["allowedValuesRegex"])
+		}
+		k, err := p.registry.CreateTagKeyWithRegex(in, re, false)
+		if err != nil {
+			return "", err
+		}
+		return tagID(k.GetName()), nil
+	}
+	rows, err := console.ParseGroup(values["values"])
 	if err != nil {
 		return "", fmt.Errorf("tag values: %w", err)
+	}
+	tagValues := map[string]string{}
+	for _, r := range rows {
+		v := strings.TrimSpace(r["shortName"])
+		if _, dup := tagValues[v]; dup {
+			return "", fmt.Errorf("tag value %q is listed twice", v)
+		}
+		tagValues[v] = strings.TrimSpace(r["description"])
 	}
 	// Every value is checked before the key is made, so a bad one leaves
 	// nothing behind.
@@ -153,11 +248,10 @@ func (p tagsProvider) Detail(_ context.Context, _ string, path []string) (consol
 			{Label: "Description", Value: orDash(v.GetDescription())},
 			{Label: "Created", Value: v.GetCreateTime().AsTime().Local().Format("2006-01-02 15:04")},
 		}
-		return console.Detail{Summary: props[:2],
+		return console.Detail{Summary: []console.Property{props[0], props[1], {Label: "Description", Value: orDash(v.GetDescription()), Edit: "Edit"}},
 			Sections: []console.Section{{ID: "details", Label: "Details", Kind: console.KindProperties,
 				Groups: []console.PropertyGroup{{Heading: "Tag value", Properties: props}}}},
-			Edit: &console.EditForm{Label: "Edit description", Fields: []console.Field{
-				{Name: "description", Label: "Description", Type: "text", Default: v.GetDescription()}}},
+			Edit: tagDescriptionEdit(v.GetDescription(), ""),
 		}, nil
 	}
 	props := []console.Property{
@@ -169,6 +263,24 @@ func (p tagsProvider) Detail(_ context.Context, _ string, path []string) (consol
 		{Label: "Description", Value: orDash(k.GetDescription())},
 		{Label: "Created", Value: k.GetCreateTime().AsTime().Local().Format("2006-01-02 15:04")},
 	}
+	if re := p.registry.TagKeyAllowedValuesRegex(k.GetName()); re != "" {
+		// A key of dynamic values shows its validation regular expression
+		// instead of a list of values, as Google's page does (#2023).
+		props = append(props, console.Property{Label: "Tag values", Value: "Dynamic values"},
+			console.Property{Label: "Validation regular expression", Value: re})
+		edit := tagDescriptionEdit(k.GetDescription(), "The short name and parent cannot change, as on Google. "+
+			"A new regular expression applies to values attached from now on; bound values stay.")
+		edit.Title = "Edit tag key"
+		edit.Fields = append(edit.Fields, console.Field{Name: "allowedValuesRegex", Label: "Validation regular expression", Type: "text",
+			Required: true, Default: re, Help: "RE2 syntax; .* allows any value."})
+		return console.Detail{Summary: []console.Property{props[0], props[1], {Label: "Description", Value: orDash(k.GetDescription()), Edit: "Edit"},
+			{Label: "Validation regular expression", Value: re, Edit: "Edit"}},
+			Sections: []console.Section{
+				{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Heading: "Tag key", Properties: props}}},
+			},
+			Edit: edit,
+		}, nil
+	}
 	values := console.Listing{NameColumn: "Tag value ID", Columns: []string{"Short name", "Namespaced name", "Description"}, Noun: "values"}
 	if vs, err := p.registry.TagValues(k.GetName()); err != nil {
 		values.Unavailable = consoleErr(err)
@@ -179,21 +291,33 @@ func (p tagsProvider) Detail(_ context.Context, _ string, path []string) (consol
 		}
 	}
 	values.Total = len(values.Items)
-	return console.Detail{Summary: props[:2],
+	return console.Detail{Summary: []console.Property{props[0], props[1], {Label: "Description", Value: orDash(k.GetDescription()), Edit: "Edit"}},
 		Sections: []console.Section{
 			{ID: "values", Label: "Values", Listing: values},
 			{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Heading: "Tag key", Properties: props}}},
 		},
-		Edit: &console.EditForm{Label: "Edit description", Fields: []console.Field{
-			{Name: "description", Label: "Description", Type: "text", Default: k.GetDescription()}},
-			Note: "The short name and parent cannot change, as on Google."},
+		Edit: tagDescriptionEdit(k.GetDescription(), "The short name and parent cannot change, as on Google."),
 	}, nil
+}
+
+// tagDescriptionEdit is the edit panel Google's Edit next to a tag key's or
+// value's Description opens (#1865): Description, then Save.
+func tagDescriptionEdit(description, note string) *console.EditForm {
+	return &console.EditForm{Label: "Edit", Title: "Edit description", Submit: "Save", Inline: true, Note: note,
+		Fields: []console.Field{{Name: "description", Label: "Description", Type: "text", Default: description,
+			Help: "At most 256 characters."}}}
 }
 
 func (p tagsProvider) Edit(_ context.Context, _ string, path []string, values map[string]string) error {
 	switch len(path) {
 	case 1:
-		_, err := p.registry.UpdateTagKey(&rmpb.TagKey{Name: "tagKeys/" + path[0], Description: values["description"]}, []string{"description"}, false)
+		name := "tagKeys/" + path[0]
+		if re, ok := values["allowedValuesRegex"]; ok && p.registry.TagKeyAllowedValuesRegex(name) != "" {
+			_, err := p.registry.UpdateTagKeyWithRegex(&rmpb.TagKey{Name: name, Description: values["description"]}, strings.TrimSpace(re),
+				[]string{"description", "allowed_values_regex"}, false)
+			return err
+		}
+		_, err := p.registry.UpdateTagKey(&rmpb.TagKey{Name: name, Description: values["description"]}, []string{"description"}, false)
 		return err
 	case 2:
 		_, err := p.registry.UpdateTagValue(&rmpb.TagValue{Name: "tagValues/" + path[1], Description: values["description"]}, []string{"description"}, false)
@@ -212,7 +336,7 @@ func (p tagsProvider) DetailActions(_ context.Context, _ string, path []string) 
 	if len(path) == 2 {
 		return []console.Action{{ID: tagDeleteValue, Label: "Delete tag value", Destructive: true}}
 	}
-	if len(path) != 1 {
+	if len(path) != 1 || p.registry.TagKeyAllowedValuesRegex("tagKeys/"+path[0]) != "" {
 		return nil
 	}
 	out := []console.Action{{ID: tagCreateValue, Label: "Create tag value", Fields: []console.Field{
@@ -271,9 +395,24 @@ var _ console.Editor = tagsProvider{}
 // --- bindings on a project's or folder's page ---------------------------
 
 const (
-	tagBind   = "bind-tag"
-	tagUnbind = "unbind-tag"
+	tagBind        = "bind-tag"
+	tagBindDynamic = "bind-dynamic-tag"
+	tagUnbind      = "unbind-tag"
 )
+
+// dynamicTagKeys are the keys of dynamic values (#2023) by namespaced name,
+// each with its validation regular expression.
+func dynamicTagKeys(reg *resourcemanager.Registry) map[string]string {
+	out := map[string]string{}
+	if keys, err := reg.AllTagKeys(); err == nil {
+		for _, k := range keys {
+			if re := reg.TagKeyAllowedValuesRegex(k.GetName()); re != "" {
+				out[k.GetNamespacedName()] = re
+			}
+		}
+	}
+	return out
+}
 
 // tagSection is a resource's effective tags: its own bindings and the ones
 // its folders and the organization give it.
@@ -316,6 +455,22 @@ func tagActions(reg *resourcemanager.Registry, target string) []console.Action {
 			{Name: "value", Label: "Tag value", Type: "select", Required: true, Options: values, Default: values[0],
 				Help: "Created on the Tags screen. A resource carries one value of each key."}}})
 	}
+	if keys := dynamicTagKeys(reg); len(keys) > 0 {
+		names := make([]string, 0, len(keys))
+		for n := range keys {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+		labels := map[string]string{}
+		for _, n := range names {
+			labels[n] = n + " (matching " + keys[n] + ")"
+		}
+		out = append(out, console.Action{ID: tagBindDynamic, Label: "Bind dynamic tag", Fields: []console.Field{
+			{Name: "key", Label: "Tag key", Type: "select", Required: true, Options: names, OptionLabels: labels, Default: names[0],
+				Help: "A key of dynamic values: its value is typed here."},
+			{Name: "dynamicValue", Label: "Tag value", Type: "text", Required: true,
+				Help: "A value matching the key's validation regular expression."}}})
+	}
 	if bs, err := reg.TagBindings(target); err == nil && len(bs) > 0 {
 		bound := make([]string, 0, len(bs))
 		for _, b := range bs {
@@ -332,6 +487,10 @@ func tagAct(reg *resourcemanager.Registry, target, action string, values map[str
 	switch action {
 	case tagBind:
 		_, err := reg.CreateTagBinding(&rmpb.TagBinding{Parent: target, TagValueNamespacedName: values["value"]}, false)
+		return true, err
+	case tagBindDynamic:
+		_, err := reg.CreateTagBinding(&rmpb.TagBinding{Parent: target,
+			TagValueNamespacedName: values["key"] + "/" + strings.TrimSpace(values["dynamicValue"])}, false)
 		return true, err
 	case tagUnbind:
 		bs, err := reg.TagBindings(target)
