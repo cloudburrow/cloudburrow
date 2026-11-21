@@ -961,7 +961,10 @@ jobs:
             # (Landing 160's Eventarc, Workflows and Memorystore events):
             # Eventarc's tests and Artifact Registry's cleanup policies
             # moved to the crossservice shard, the run instance again (about
-            # 860 s).
+            # 860 s). Main run 44905534820 cancelled it at the job's 90m
+            # (suite 4,021 s, then the browser step's 30m from #2123): Cloud
+            # Run's own tests and gcloud's and Terraform's of Cloud Run and
+            # Cloud Functions moved to crossservice too (about 1,430 s).
             # The sql shard passed 60m in 44645694075 with no test hung
             # (3,185 s in 44617241748): its replica tests moved to the
             # sqlreplicas shard, about 28 minutes of tests, leaving sql
