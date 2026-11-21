@@ -38,7 +38,9 @@ func init() {
 		}
 	}
 	Services["google.cloud.documentai.v1.DocumentProcessorService"] = DocumentAI
+	Services["google.cloud.documentai.v1beta3.DocumentService"] = DocumentAI
 	Services["google.cloud.speech.v2.Speech"] = Speech
+	Services["google.cloud.speech.v1.Adaptation"] = Speech
 }
 
 const aiPredict = "aiplatform.endpoints.predict"
@@ -125,7 +127,12 @@ func docAIByType(verb string) func(string) string {
 
 // DocumentAI is Document AI's table: its RPC reference
 // (https://docs.cloud.google.com/document-ai/docs/reference/rpc/google.cloud.documentai.v1,
-// read 2026-11-20). Document AI keeps no resource-level policies.
+// read 2026-11-20), and v1beta3's DocumentService, whose permissions the
+// IAM permissions page does not list but the roles page does
+// (https://docs.cloud.google.com/iam/docs/roles-permissions/clouddocumentai,
+// read 2026-11-21: documentai.datasets.* and documentai.datasetSchemas.*,
+// in Viewer the get and list ones, in Editor and Admin all). Document AI
+// keeps no resource-level policies.
 var DocumentAI = &Service{
 	Name: "documentai.googleapis.com",
 	Methods: func() map[string]Method {
@@ -142,6 +149,17 @@ var DocumentAI = &Service{
 				"EvaluateProcessorVersion": {"documentai.evaluations.create", "processor_version"}, "GetEvaluation": {"documentai.evaluations.get", "name"},
 				"ListEvaluations": {"documentai.evaluations.list", "parent"}, "ReviewDocument": {"documentai.humanReviewConfigs.review", "human_review_config"},
 				"ProcessDocument": {"", "name"}, "BatchProcessDocuments": {"", "name"},
+			},
+			// The datasets of custom processors (#2124): each method's v1beta3
+			// REST reference, "Requires the following IAM permission on the
+			// dataset resource" (.../reference/rest/v1beta3/projects.locations.processors.dataset/importDocuments
+			// and its siblings, and .../projects.locations.processors/updateDataset,
+			// read 2026-11-21).
+			"/google.cloud.documentai.v1beta3.DocumentService/": {
+				"UpdateDataset": {"documentai.datasets.update", "dataset.name"}, "ImportDocuments": {"documentai.datasets.createDocuments", "dataset"},
+				"GetDocument": {"documentai.datasets.getDocuments", "dataset"}, "ListDocuments": {"documentai.datasets.listDocuments", "dataset"},
+				"BatchDeleteDocuments": {"documentai.datasets.deleteDocuments", "dataset"},
+				"GetDatasetSchema":     {"documentai.datasetSchemas.get", "name"}, "UpdateDatasetSchema": {"documentai.datasetSchemas.update", "dataset_schema.name"},
 			},
 		})
 		const p = "/google.cloud.documentai.v1.DocumentProcessorService/"

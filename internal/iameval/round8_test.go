@@ -8,6 +8,8 @@ import (
 	_ "cloud.google.com/go/aiplatform/apiv1/aiplatformpb"
 	_ "cloud.google.com/go/aiplatform/apiv1beta1/aiplatformpb"
 	_ "cloud.google.com/go/documentai/apiv1/documentaipb"
+	_ "cloud.google.com/go/documentai/apiv1beta3/documentaipb"
+	_ "cloud.google.com/go/speech/apiv1/speechpb"
 	_ "cloud.google.com/go/speech/apiv2/speechpb"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"

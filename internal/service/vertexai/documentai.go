@@ -575,7 +575,7 @@ func (s *Server) processDocument(ctx context.Context, req *documentaipb.ProcessR
 		return nil, err
 	}
 	if isCustomType(p.GetType()) {
-		if err := s.applyCustom(p, doc); err != nil {
+		if err := s.applyCustom(ctx, p, doc); err != nil {
 			return nil, err
 		}
 	}

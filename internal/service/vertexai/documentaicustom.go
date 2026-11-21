@@ -277,7 +277,7 @@ func (s *Server) customReady(p *documentaipb.Processor) error {
 }
 
 // applyCustom adds p's version's entities to the OCR'd doc.
-func (s *Server) applyCustom(p *documentaipb.Processor, doc *documentaipb.Document) error {
+func (s *Server) applyCustom(ctx context.Context, p *documentaipb.Processor, doc *documentaipb.Document) error {
 	pname := p.GetName()
 	s.mu.Lock()
 	v := s.docAI().customOf(pname).version(p.GetDefaultProcessorVersion())
@@ -290,7 +290,11 @@ func (s *Server) applyCustom(p *documentaipb.Processor, doc *documentaipb.Docume
 	if m == nil {
 		return apierror.NotFound("Processor version %s not found", p.GetDefaultProcessorVersion())
 	}
-	doc.Entities = append(doc.Entities, m.predictEntities(doc, schema)...)
+	ents, err := s.docPredict(ctx, m, doc, schema)
+	if err != nil {
+		return err
+	}
+	doc.Entities = append(doc.Entities, ents...)
 	return nil
 }
 
@@ -432,8 +436,16 @@ func (s *Server) listInputs(ctx context.Context, cfg *documentaipb.BatchDocument
 }
 
 // checkTrainingSet applies the documented minimums.
-func checkTrainingSet(kind string, schema *documentaipb.DocumentSchema, set trainingSet) error {
+// A generative extractor needs no labeled document: with none it is
+// zero-shot, as Google's foundation model version is.
+func checkTrainingSet(kind string, schema *documentaipb.DocumentSchema, set trainingSet, generative bool) error {
 	if kind == "extractor" {
+		if len(extractorTypes(schema)) == 0 {
+			return apierror.InvalidArgument("The document schema has no entity types to extract")
+		}
+		if generative {
+			return nil
+		}
 		n := 0
 		for _, d := range set.train {
 			if len(d.GetEntities()) > 0 {
@@ -533,10 +545,14 @@ func (d *documentAIService) trainCustom(ctx context.Context, p *documentaipb.Pro
 			}
 		}
 	}
-	if err := checkTrainingSet(kind, schema, set); err != nil {
+	generative := s.generativeAvailable()
+	if err := checkTrainingSet(kind, schema, set, generative); err != nil {
 		return nil, err
 	}
-	m := &docModel{Kind: kind}
+	m := &docModel{Kind: kind, Generative: generative}
+	if generative {
+		keepShots(m, set.train)
+	}
 	switch kind {
 	case "classifier":
 		trainClassifier(m, set.train)
@@ -550,6 +566,15 @@ func (d *documentAIService) trainCustom(ctx context.Context, p *documentaipb.Pro
 	name := pname + "/processorVersions/" + newHexID()
 	pv := &documentaipb.ProcessorVersion{Name: name, DisplayName: req.GetProcessorVersion().GetDisplayName(), DocumentSchema: schema,
 		State: documentaipb.ProcessorVersion_UNDEPLOYED, CreateTime: now, ModelType: documentaipb.ProcessorVersion_MODEL_TYPE_CUSTOM}
+	if m.Generative {
+		// A version of the local foundation model, read with its examples
+		// (documentaigen.go): Google's versioned foundation model.
+		pv.ModelType = documentaipb.ProcessorVersion_MODEL_TYPE_GENERATIVE
+		pv.GenAiModelInfo = &documentaipb.ProcessorVersion_GenAiModelInfo{ModelInfo: &documentaipb.ProcessorVersion_GenAiModelInfo_CustomGenAiModelInfo_{
+			CustomGenAiModelInfo: &documentaipb.ProcessorVersion_GenAiModelInfo_CustomGenAiModelInfo{
+				CustomModelType:        documentaipb.ProcessorVersion_GenAiModelInfo_CustomGenAiModelInfo_VERSIONED_FOUNDATION,
+				BaseProcessorVersionId: req.GetBaseProcessorVersion()[strings.LastIndex(req.GetBaseProcessorVersion(), "/")+1:]}}}
+	}
 	if p.GetKmsKeyName() != "" {
 		pv = s.withKey(pv, p)
 	}
@@ -558,7 +583,10 @@ func (d *documentAIService) trainCustom(ctx context.Context, p *documentaipb.Pro
 	opName := s.newOp("projects/" + pr + "/locations/" + l)
 	var evalRef *documentaipb.EvaluationReference
 	if len(set.test) > 0 {
-		ev := evaluateModel(m, schema, set.test, name+"/evaluations/"+newHexID())
+		ev, err := s.evaluateModel(ctx, m, schema, set.test, name+"/evaluations/"+newHexID())
+		if err != nil {
+			return nil, err
+		}
 		v.Evaluations = append(v.Evaluations, ev)
 		evalRef = evaluationRef(ev, opName)
 		pv.LatestEvaluation = evalRef
@@ -766,7 +794,7 @@ func multiConfidence(fuzzy, exact []evalDoc, typ string) *documentaipb.Evaluatio
 }
 
 // evaluateModel scores m on the labeled test documents.
-func evaluateModel(m *docModel, schema *documentaipb.DocumentSchema, test []*documentaipb.Document, name string) *documentaipb.Evaluation {
+func (s *Server) evaluateModel(ctx context.Context, m *docModel, schema *documentaipb.DocumentSchema, test []*documentaipb.Document, name string) (*documentaipb.Evaluation, error) {
 	var fuzzy, exact []evalDoc
 	types := map[string]bool{}
 	invalid := int32(0)
@@ -778,7 +806,10 @@ func evaluateModel(m *docModel, schema *documentaipb.DocumentSchema, test []*doc
 		}
 		in := proto.Clone(d).(*documentaipb.Document)
 		in.Entities = nil
-		pred := m.predictEntities(in, schema)
+		pred, err := s.docPredict(ctx, m, in, schema)
+		if err != nil {
+			return nil, err
+		}
 		fuzzy = append(fuzzy, evalDoc{entityItems(m.Kind, truth, d.GetText(), true, false), entityItems(m.Kind, pred, d.GetText(), false, false)})
 		exact = append(exact, evalDoc{entityItems(m.Kind, truth, d.GetText(), true, true), entityItems(m.Kind, pred, d.GetText(), false, true)})
 		for _, e := range truth {
@@ -792,7 +823,7 @@ func evaluateModel(m *docModel, schema *documentaipb.DocumentSchema, test []*doc
 	for t := range types {
 		ev.EntityMetrics[t] = multiConfidence(fuzzy, exact, t)
 	}
-	return ev
+	return ev, nil
 }
 
 // bestLevel is the metrics at the confidence level of the best F1.
@@ -843,7 +874,10 @@ func (d *documentAIService) evaluateCustom(ctx context.Context, name string, doc
 	}
 	pr, l, _, _ := parseChild("name", "processors", pname)
 	opName := s.newOp("projects/" + pr + "/locations/" + l)
-	ev := evaluateModel(m, schema, test, name+"/evaluations/"+newHexID())
+	ev, err := s.evaluateModel(ctx, m, schema, test, name+"/evaluations/"+newHexID())
+	if err != nil {
+		return nil, err
+	}
 	if v.Proto.GetKmsKeyName() != "" {
 		ev.KmsKeyName, ev.KmsKeyVersionName = v.Proto.GetKmsKeyName(), v.Proto.GetKmsKeyVersionName()
 	}

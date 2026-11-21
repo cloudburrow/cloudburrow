@@ -230,7 +230,7 @@ func (s *Server) batchOne(ctx context.Context, p *documentaipb.Processor, opts *
 		return err
 	}
 	if isCustomType(p.GetType()) {
-		if err := s.applyCustom(p, doc); err != nil {
+		if err := s.applyCustom(ctx, p, doc); err != nil {
 			return err
 		}
 	}

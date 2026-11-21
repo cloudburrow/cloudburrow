@@ -42,6 +42,11 @@ type docModel struct {
 	Start *naiveBayes `json:"start,omitempty"`
 	// Fields are the extractor's, by entity type.
 	Fields map[string]*fieldModel `json:"fields,omitempty"`
+	// Generative is a version trained where a local generation model is
+	// served, and Shots the labeled training documents it reads as
+	// examples, none for a zero-shot extractor (documentaigen.go, #2124).
+	Generative bool      `json:"generative,omitempty"`
+	Shots      []fewShot `json:"shots,omitempty"`
 }
 
 // naiveBayes is a multinomial naive Bayes classifier's counts.
@@ -561,6 +566,11 @@ func trainClassifier(m *docModel, docs []*documentaipb.Document) {
 func mergeModel(m, base *docModel) {
 	if base == nil {
 		return
+	}
+	for _, sh := range base.Shots {
+		if m.Generative && len(m.Shots) < 4*docAIShots {
+			m.Shots = append(m.Shots, sh)
+		}
 	}
 	if base.Class != nil {
 		if m.Class == nil {
