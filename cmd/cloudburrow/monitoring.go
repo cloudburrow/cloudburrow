@@ -358,3 +358,33 @@ func (s *requestSampler) Stop(context.Context) error {
 	}
 	return nil
 }
+
+// SinkVolumes is monitoring.LogVolumeSource over the instance's Cloud
+// Logging (#2021): what each of the project's sinks routed.
+func (l monitoringLogs) SinkVolumes(project string, from, to time.Time) []monitoring.SinkVolume {
+	api := l.api()
+	if api == nil {
+		return nil
+	}
+	vs := api.SinkVolumes("projects/"+project, from, to)
+	out := make([]monitoring.SinkVolume, 0, len(vs))
+	for _, v := range vs {
+		out = append(out, monitoring.SinkVolume{End: v.End, Sink: v.Sink[strings.LastIndex(v.Sink, "/")+1:], Destination: v.Destination,
+			Bytes: v.Bytes, Entries: v.Entries, Errors: v.Errors})
+	}
+	return out
+}
+
+// Ingested is what the project's log buckets took.
+func (l monitoringLogs) Ingested(project string, from, to time.Time) []monitoring.Ingestion {
+	api := l.api()
+	if api == nil {
+		return nil
+	}
+	vs := api.Ingested(project, from, to)
+	out := make([]monitoring.Ingestion, 0, len(vs))
+	for _, v := range vs {
+		out = append(out, monitoring.Ingestion{End: v.End, ResourceType: v.ResourceType, Bytes: v.Bytes})
+	}
+	return out
+}

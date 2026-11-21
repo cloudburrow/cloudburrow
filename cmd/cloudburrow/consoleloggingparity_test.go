@@ -77,13 +77,19 @@ func TestConsoleLoggingParityActions(t *testing.T) {
 	var l console.Listing
 	getJSON200(t, sinks, &l)
 	if len(l.Items) != 1 || l.Items[0].Fields["Type"] != "Pub/Sub topic" || l.Items[0].Fields["Enabled"] != "Enabled" ||
-		l.Items[0].Fields["Description"] != "errors out" || len(l.Items[0].Actions) != 2 || l.Items[0].Actions[1].Label != "Disable sink" {
+		l.Items[0].Fields["Description"] != "errors out" || len(l.Items[0].Actions) != 4 || l.Items[0].Actions[1].Label != "Disable sink" || l.Items[0].Fields["Volume"] != "0 B" ||
+		l.Items[0].Actions[2].Label != "Troubleshoot sink" {
 		t.Fatalf("the Log Router row = %+v", l.Items)
 	}
 	name := "projects/proj-1/sinks/to-topic"
 	act := srv.URL + "/api/actions/logging-sinks?project=" + project
 	if code, out := consolePost(t, act, map[string]string{"Name": name, "Action": "disable"}); code != http.StatusOK {
 		t.Fatalf("Disable sink = %d %s", code, out)
+	}
+	// Troubleshoot sink on the row answers with its findings (#1863).
+	if code, out := consolePost(t, act, map[string]any{"Path": []string{name}, "Action": "troubleshoot-sink"}); code != http.StatusOK ||
+		!strings.Contains(out, "the inclusion filter") && !strings.Contains(out, "no inclusion filter") {
+		t.Errorf("Troubleshoot sink = %d %s", code, out)
 	}
 	s, _ := svc.admin.ConfigServer().GetSink(ctx, &loggingpb.GetSinkRequest{SinkName: name})
 	if !s.GetDisabled() || s.GetDestination() != "pubsub.googleapis.com/projects/proj-1/topics/t" || s.GetDescription() != "errors out" {

@@ -214,6 +214,7 @@ var gcloudOverrides = []struct {
 	{"cloudtasks", []string{"TASKS"}},
 	{"cloudscheduler", []string{"SCHEDULER"}},
 	{"logging", []string{"LOGGING", "RUN_LOGGING", "SINK_LOGGING"}},
+	{"observability", []string{"LOGGING", "RUN_LOGGING", "SINK_LOGGING"}},
 	{"cloudresourcemanager", []string{"RESOURCEMANAGER", "LOGGING_RESOURCEMANAGER", "RUN_RESOURCEMANAGER"}},
 	{"iam", []string{"RESOURCEMANAGER"}},
 	// Cloud Identity groups (#1812), on the Resource Manager port.

@@ -31,9 +31,15 @@ func TestLogsExplorerThroughViewAndParentPicker(t *testing.T) {
 		t.Skipf("%s is not set: the entries are written through the Logging API", envLogging)
 	}
 	project := uniqueProject(t)
+	// INFO goes to the log app and ERROR to errors: a log view filter takes
+	// log_id(), not severity (#2028).
 	write := func(sev, text string) {
 		t.Helper()
-		b, _ := json.Marshal(map[string]any{"logName": "projects/" + project + "/logs/app", "resource": map[string]string{"type": "global"},
+		log := "app"
+		if sev == "ERROR" {
+			log = "errors"
+		}
+		b, _ := json.Marshal(map[string]any{"logName": "projects/" + project + "/logs/" + log, "resource": map[string]string{"type": "global"},
 			"entries": []map[string]string{{"severity": sev, "textPayload": text}}})
 		if code, out := do(t, http.MethodPost, "http://"+logAddr+"/v2/entries:write", string(b), ""); code != http.StatusOK {
 			t.Fatalf("entries:write = %d: %s", code, out)
@@ -44,7 +50,7 @@ func TestLogsExplorerThroughViewAndParentPicker(t *testing.T) {
 	bucket := "projects/" + project + "/locations/global/buckets/_Default"
 	view := bucket + "/views/errors"
 	body, _ := json.Marshal(map[string]any{"Path": []string{bucket}, "Action": "create-view",
-		"Values": map[string]string{"id": "errors", "filter": "severity>=ERROR"}})
+		"Values": map[string]string{"id": "errors", "filter": `LOG_ID("errors")`}})
 	if code, out := consoleDo(t, http.MethodPost, "/api/actions/logging-buckets?project="+project, string(body)); code != http.StatusOK {
 		t.Fatalf("create-view = %d: %s", code, out)
 	}
@@ -66,14 +72,14 @@ func TestLogsExplorerThroughViewAndParentPicker(t *testing.T) {
 	p.waitFor(`(document.querySelector("#log-view-note").textContent || "").includes("30 days")`)
 	var note string
 	p.eval(`document.querySelector("#log-view-note").textContent`, &note)
-	if !strings.Contains(note, "severity>=ERROR") {
+	if !strings.Contains(note, `LOG_ID("errors")`) {
 		t.Errorf("the view note is %q; want the view's filter", note)
 	}
 	p.waitFor(`[...document.querySelectorAll("#view tbody td")].some((td) => td.textContent === "browser-error")`)
 	var shown bool
 	p.eval(`[...document.querySelectorAll("#view tbody td")].some((td) => td.textContent === "browser-info")`, &shown)
 	if shown {
-		t.Error("the Explorer shows an INFO entry through a severity>=ERROR view")
+		t.Error("the Explorer shows the app log's INFO entry through a LOG_ID(\"errors\") view")
 	}
 	// Later entries are drawn while streaming (#1863).
 	p.eval(`[...document.querySelectorAll("#view button")].find((b) => b.textContent === "Stream logs").click(), true`, nil)

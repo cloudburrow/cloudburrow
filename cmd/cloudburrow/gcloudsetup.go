@@ -74,6 +74,11 @@ var gcloudVerified = []gcloudEndpoint{
 	// and deletes logs.
 	{config.ServiceScheduler, "cloudscheduler", "/", false, false},
 	{config.ServiceLogging, "logging", "/", false, false},
+	// The Observability API (#2020): gcloud observability scopes describe
+	// and update call v1, which gcloud appends, served on the Logging port
+	// beside the log scopes a scope's logScope names. TestGcloudObservabilityScopes
+	// drives them.
+	{config.ServiceLogging, "observability", "/", false, false},
 	// Resource Manager (#682): gcloud's projects commands call the v1 REST
 	// API, served since #301 on the Resource Manager port beside v3.
 	// TestGcloudProjectsThroughGcloudSetup drives list, create, describe and

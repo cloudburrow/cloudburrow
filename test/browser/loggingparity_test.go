@@ -76,8 +76,9 @@ func TestLoggingRouterPagesFollowGoogle(t *testing.T) {
 	p.run(chromedp.Click(chromedp.CSS(fmt.Sprintf(`button[aria-label=%q]`, "Actions for "+name))))
 	var items string
 	p.eval(`[...document.querySelectorAll('.overflow-menu:not([hidden]) [role="menuitem"]')].map((b) => b.textContent.trim()).join("|")`, &items)
-	if !strings.HasPrefix(items, "View sink details|Disable sink") {
-		t.Errorf("the row's menu = %q, want View sink details then Disable sink", items)
+	// Google's order (#1863 round 3).
+	if items != "View sink details|Edit sink|Disable sink|Delete sink|Troubleshoot sink|View sink log volume and error rates" {
+		t.Errorf("the row's menu = %q, want View sink details, Edit sink, Disable sink, Delete sink, Troubleshoot sink", items)
 	}
 	p.clickText(`.overflow-menu:not([hidden]) [role="menuitem"]`, "Disable sink")
 	p.waitFor(fmt.Sprintf(`(document.querySelector(%q) || { textContent: "" }).textContent.includes("Disabled")`, row))

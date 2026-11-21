@@ -345,6 +345,9 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	}
 	// Cloud Monitoring (#1939) runs in this process too: Metrics explorer
 	// and Metrics management.
+	// A dashboard's Log Analytics chart runs its SQL through Log
+	// Analytics (#2032), set below where the instance serves it.
+	var runAnalytics func(ctx context.Context, project, sql string) (console.Listing, error)
 	if enabled[config.ServiceMonitoring] && d.monitoring != nil {
 		screen := monitoringScreen{api: monitoringAPIOf(d.monitoring)}
 		providers = append(providers, monitoringExplorerProvider{screen}, monitoringMetricsProvider{screen})
@@ -353,7 +356,12 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		admin := monitoringAdmin{api: monitoringServerOf(d.monitoring)}
 		providers = append(providers, monitoringAlertingProvider{admin}, monitoringIncidentsProvider{admin},
 			monitoringChannelsProvider{admin}, monitoringUptimeProvider{admin},
-			monitoringDashboardsProvider{monitoringAdmin: admin, metrics: screen}, monitoringGroupsProvider{admin},
+			monitoringDashboardsProvider{monitoringAdmin: admin, metrics: screen, analytics: func(ctx context.Context, project, sql string) (console.Listing, error) {
+				if runAnalytics == nil {
+					return console.Listing{}, errAnalyticsUnavailable
+				}
+				return runAnalytics(ctx, project, sql)
+			}}, monitoringGroupsProvider{admin},
 			monitoringServicesProvider{admin}, monitoringSnoozesProvider{admin})
 	}
 	// VPC network (#1936): the Compute Engine API's networks, subnets,
@@ -393,16 +401,25 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	// Cloud Logging's admin screens, beside the Logs Explorer (#1226).
 	if enabled[config.ServiceLogging] && d.logging != nil {
 		screen := loggingAdminScreen{svc: d.logging, faults: d.faults}
-		providers = append(providers, loggingMetricsProvider{screen}, loggingSinksProvider{screen}, loggingExclusionsProvider{screen}, loggingBucketsProvider{screen},
+		if enabled[config.ServiceMonitoring] && d.monitoring != nil {
+			screen.monitoring = monitoringServerOf(d.monitoring)
+		}
+		metrics := loggingMetricsProvider{loggingAdminScreen: screen, monitoring: enabled[config.ServiceMonitoring] && d.monitoring != nil}
+		providers = append(providers, metrics, loggingSinksProvider{screen}, loggingExclusionsProvider{screen}, loggingBucketsProvider{screen},
 			loggingSettingsProvider{screen},
 			// Saved queries and log scopes (#1519).
-			loggingSavedQueriesProvider{screen}, loggingLogScopesProvider{screen})
+			loggingSavedQueriesProvider{screen},
+			loggingLogScopesProvider{loggingAdminScreen: screen})
 		// Log Analytics (#1863), over the buckets' linked datasets in the
 		// instance's BigQuery; without BigQuery the page says it is not
 		// available.
 		if addr := forwardedAddr(d.forwarders, string(config.ServiceBigQuery)); enabled[config.ServiceBigQuery] && addr != "" {
-			providers = append(providers, loggingAnalyticsProvider{screen,
-				bigqueryProvider{endpoint: addr, project: d.cfg.DefaultProject(), registry: d.projects}})
+			la := loggingAnalyticsProvider{screen,
+				bigqueryProvider{endpoint: addr, project: d.cfg.DefaultProject(), registry: d.projects}}
+			providers = append(providers, la)
+			runAnalytics = func(ctx context.Context, project, sql string) (console.Listing, error) {
+				return la.Query(ctx, project, nil, sql)
+			}
 		}
 	}
 	// The opt-in databases. Each had a working backend and no screen, which

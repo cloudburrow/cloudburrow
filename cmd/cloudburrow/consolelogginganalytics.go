@@ -5,11 +5,13 @@ package main
 // `PROJECT_ID.LOCATION.BUCKET_ID.LOG_VIEW_ID`
 // (docs.cloud.google.com/logging/docs/analyze/query-and-view, re-read
 // 2026-11-19). Here the statement runs in the instance's BigQuery, over the
-// bucket's linked dataset (#1423, #1435), which holds a view per log view of
-// the bucket with Log Analytics' schema: each such reference is rewritten to
-// `PROJECT_ID.DATASET.LOG_VIEW_ID`, the linked dataset's view of that log
-// view. A bucket with no link is refused, naming Create link: a bucket's
-// entries reach BigQuery only through one.
+// bucket's linked dataset (#1423, #1435) when it has one, which holds a
+// view per log view of the bucket with Log Analytics' schema: each such
+// reference is rewritten to `PROJECT_ID.DATASET.LOG_VIEW_ID`, that
+// dataset's view of the log view. A bucket with no link is queried as
+// Google's page queries it, without one (#2021): over a query dataset the
+// Logging server makes for the query and deletes after it
+// (logging.Admin.AnalyticsDataset).
 
 import (
 	"context"
@@ -33,8 +35,8 @@ func (loggingAnalyticsProvider) ID() string    { return "logging-analytics" }
 func (loggingAnalyticsProvider) Title() string { return "Log Analytics" }
 
 const analyticsNote = "Each row is a log view of a bucket upgraded to use Log Analytics. Name it in FROM as " +
-	"`PROJECT_ID.LOCATION.BUCKET_ID.LOG_VIEW_ID`, as on Google's page; the query runs in this instance's BigQuery over " +
-	"the bucket's linked dataset, so a bucket needs a link (Logs Storage, open the bucket, Create link)."
+	"`PROJECT_ID.LOCATION.BUCKET_ID.LOG_VIEW_ID`, as on Google's page; the query runs in this instance's BigQuery, " +
+	"over the bucket's linked dataset when it has one, and otherwise over the bucket's entries directly: no link is needed."
 
 // List is the page's Log views panel: each log view of the project's
 // buckets with Log Analytics on, by the name a query gives it.
@@ -81,7 +83,7 @@ func (p loggingAnalyticsProvider) List(ctx context.Context, project string) (con
 // QueryHint is the editor's contract.
 func (loggingAnalyticsProvider) QueryHint() string {
 	return "GoogleSQL, one SELECT (or WITH … SELECT), over log views named `PROJECT_ID.LOCATION.BUCKET_ID.LOG_VIEW_ID`. " +
-		"It runs in this instance's BigQuery over each bucket's linked dataset, with Log Analytics' schema " +
+		"It runs in this instance's BigQuery, with or without a linked dataset, over Log Analytics' schema " +
 		"(timestamp, severity, log_name, resource, text_payload, json_payload, labels, trace, …)."
 }
 
@@ -97,11 +99,14 @@ func (p loggingAnalyticsProvider) Query(ctx context.Context, project string, _ [
 	if err := readOnlyBigQuery(statement); err != nil {
 		return console.Listing{}, err
 	}
-	rewritten, err := p.rewrite(ctx, statement)
+	bq := p.bq.in(project)
+	rewritten, drops, err := p.rewrite(ctx, statement, bq.project)
+	for _, d := range drops {
+		defer d()
+	}
 	if err != nil {
 		return console.Listing{}, err
 	}
-	bq := p.bq.in(project)
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()
 	c, err := bq.client(ctx)
@@ -115,18 +120,34 @@ func (p loggingAnalyticsProvider) Query(ctx context.Context, project string, _ [
 	if err != nil {
 		return console.Listing{}, err
 	}
-	return readRows(it, nil)
+	out, err := readRows(it, nil)
+	if err != nil {
+		return console.Listing{}, err
+	}
+	// The column types, for the results' chart (#2021).
+	out.ColumnTypes = map[string]string{}
+	for _, f := range it.Schema {
+		if f.Repeated {
+			out.ColumnTypes[f.Name] = "REPEATED"
+			continue
+		}
+		out.ColumnTypes[f.Name] = string(f.Type)
+	}
+	return out, nil
 }
 
 // rewrite replaces each `PROJECT.LOCATION.BUCKET.VIEW` with the bucket's
-// linked dataset's view of it. It refuses a statement that names no log
-// view, a bucket that does not exist or has Log Analytics off, one with no
-// link, and a view the bucket does not have.
-func (p loggingAnalyticsProvider) rewrite(ctx context.Context, statement string) (string, error) {
+// linked dataset's view of it, or, for a bucket with no link, its query
+// dataset's, made in fallback when BigQuery does not serve the bucket's
+// project; drops delete the query datasets once the query has run. It
+// refuses a statement that names no log view, a bucket that does not exist
+// or has Log Analytics off, and a view the bucket does not have.
+func (p loggingAnalyticsProvider) rewrite(ctx context.Context, statement, fallback string) (_ string, drops []func(), _ error) {
 	a, err := p.admin()
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
+	made := map[string]string{} // bucket name: project.dataset
 	buckets := loggingBucketsProvider{p.loggingAdminScreen}
 	var failure error
 	found := false
@@ -161,21 +182,31 @@ func (p loggingAnalyticsProvider) rewrite(ctx context.Context, statement string)
 				return fmt.Sprintf("`%s.%s.%s`", parts[2], parts[4], m[4])
 			}
 		}
-		failure = fmt.Errorf("log bucket %s has no linked BigQuery dataset, which this instance runs Log Analytics over: "+
-			"in Logs Storage, open the bucket and Create link", m[3])
-		return ref
+		at, ok := made[name]
+		if !ok {
+			project, dataset, drop, err := a.AnalyticsDataset(ctx, name, fallback)
+			if err != nil {
+				failure = fmt.Errorf("%s: %v", strings.Trim(ref, "`"), err)
+				return ref
+			}
+			drops = append(drops, drop)
+			at = project + "." + dataset
+			made[name] = at
+		}
+		return fmt.Sprintf("`%s.%s`", at, m[4])
 	})
 	if failure != nil {
-		return "", failure
+		return "", drops, failure
 	}
 	if !found {
-		return "", fmt.Errorf("name a log view in FROM as `PROJECT_ID.LOCATION.BUCKET_ID.LOG_VIEW_ID`, such as `%s`",
+		return "", drops, fmt.Errorf("name a log view in FROM as `PROJECT_ID.LOCATION.BUCKET_ID.LOG_VIEW_ID`, such as `%s`",
 			"my-project.global._Default._AllLogs")
 	}
-	return out, nil
+	return out, drops, nil
 }
 
 var (
-	_ console.Provider = loggingAnalyticsProvider{}
-	_ console.Executor = loggingAnalyticsProvider{}
+	_ console.Provider  = loggingAnalyticsProvider{}
+	_ console.Executor  = loggingAnalyticsProvider{}
+	_ console.ListActor = loggingAnalyticsProvider{}
 )

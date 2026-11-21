@@ -42,13 +42,86 @@ type LogViewInfo struct {
 type LogViewReader interface {
 	// Buckets lists parent's buckets and their views.
 	Buckets(ctx context.Context, parent string) ([]LogBucketViews, error)
-	// Read is the view's newest limit entries, oldest first, through
+	// Read is the newest limit entries of the resource names (log views, or
+	// a log scope's projects and log views), oldest first, through
 	// ListLogEntries.
-	Read(ctx context.Context, view string, limit int) ([]Entry, error)
-	// Tail sends the view's entries as they are written, through
+	Read(ctx context.Context, names []string, limit int) ([]Entry, error)
+	// Tail sends the resource names' entries as they are written, through
 	// TailLogEntries, until ctx ends. It returns at once with the API's
 	// error when the tail is refused.
-	Tail(ctx context.Context, view string, send func(Entry)) error
+	Tail(ctx context.Context, names []string, send func(Entry)) error
+	// LogScopes is the project's log scopes, its _Default first, and the
+	// name of its default log scope (#2020): the Observability API's
+	// _Default scope's logScope.
+	LogScopes(ctx context.Context, project string) (LogScopeSet, error)
+}
+
+// LogScopeSet is a project's log scopes and its default one.
+type LogScopeSet struct {
+	Default string         `json:"default"`
+	Scopes  []LogScopeInfo `json:"scopes"`
+}
+
+// LogScopeInfo is one log scope: the projects and log views it searches.
+type LogScopeInfo struct {
+	Name          string   `json:"name"`
+	ResourceNames []string `json:"resourceNames"`
+	Description   string   `json:"description,omitempty"`
+}
+
+// handleLogScopes is GET /api/logs/scopes?project=: the project's log
+// scopes and its default one, for the Explorer's Refine scope.
+func (s *Server) handleLogScopes(w http.ResponseWriter, r *http.Request) {
+	if s.logViews == nil {
+		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "Cloud Logging is not enabled on this instance"})
+		return
+	}
+	project := strings.TrimSpace(r.URL.Query().Get("project"))
+	if project == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "project is required: log scopes are a project's"})
+		return
+	}
+	set, err := s.logViews.LogScopes(r.Context(), project)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": userMessage(err)})
+		return
+	}
+	if set.Scopes == nil {
+		set.Scopes = []LogScopeInfo{}
+	}
+	writeJSON(w, http.StatusOK, set)
+}
+
+// scopeResources is what a log view or log scope read names: the view
+// itself, or the log scope's projects and log views, as Google's Logs
+// Explorer searches a log scope's resources.
+func (s *Server) scopeResources(ctx context.Context, r *http.Request) (names []string, label string, err error) {
+	q := r.URL.Query()
+	if view := q.Get("view"); view != "" {
+		return []string{view}, view, nil
+	}
+	name := q.Get("logScope")
+	project, rest, ok := strings.Cut(strings.TrimPrefix(name, "projects/"), "/")
+	if !strings.HasPrefix(name, "projects/") || !ok || !strings.HasPrefix(rest, "locations/global/logScopes/") {
+		return nil, "", fmt.Errorf("log scope %q is not projects/PROJECT/locations/global/logScopes/SCOPE", name)
+	}
+	set, err := s.logViews.LogScopes(ctx, project)
+	if err != nil {
+		return nil, "", err
+	}
+	for _, sc := range set.Scopes {
+		if sc.Name == name {
+			return sc.ResourceNames, name, nil
+		}
+	}
+	return nil, "", fmt.Errorf("log scope %s does not exist", name)
+}
+
+// scopedRead reports whether the request reads through Cloud Logging: a
+// log view or a log scope.
+func scopedRead(r *http.Request) bool {
+	q := r.URL.Query()
+	return q.Get("view") != "" || q.Get("logScope") != ""
 }
 
 // SetLogViewReader attaches Cloud Logging's view reads. Nil, the default,
@@ -80,12 +153,12 @@ func (s *Server) handleLogBuckets(w http.ResponseWriter, r *http.Request) {
 
 // viewEntries reads a view and applies the Explorer's own filters to it; the
 // view names the scope, so the project and parent filters do not apply.
-func (s *Server) viewEntries(ctx context.Context, view string, f Filter) ([]Entry, error) {
+func (s *Server) viewEntries(ctx context.Context, names []string, f Filter) ([]Entry, error) {
 	limit := f.Limit
 	if limit <= 0 || limit > 1000 {
 		limit = 1000
 	}
-	all, err := s.logViews.Read(ctx, view, 1000)
+	all, err := s.logViews.Read(ctx, names, 1000)
 	if err != nil {
 		return nil, err
 	}
@@ -103,10 +176,10 @@ func (s *Server) viewEntries(ctx context.Context, view string, f Filter) ([]Entr
 	return out, nil
 }
 
-// handleViewLogs is GET /api/logs?view=.
-func (s *Server) handleViewLogs(w http.ResponseWriter, r *http.Request, view string) {
+// handleViewLogs is GET /api/logs?view= or ?logScope=.
+func (s *Server) handleViewLogs(w http.ResponseWriter, r *http.Request) {
 	if s.logViews == nil {
-		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "Cloud Logging is not enabled on this instance, so no log view can be read"})
+		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "Cloud Logging is not enabled on this instance, so no log view or log scope can be read"})
 		return
 	}
 	f := filterFrom(r)
@@ -114,19 +187,37 @@ func (s *Server) handleViewLogs(w http.ResponseWriter, r *http.Request, view str
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": f.QueryError})
 		return
 	}
-	entries, err := s.viewEntries(r.Context(), view, f)
+	names, label, err := s.scopeResources(r.Context(), r)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": userMessage(err)})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	entries, err := s.viewEntries(r.Context(), names, f)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": userMessage(err)})
+		return
+	}
+	out := map[string]any{
 		"entries": entries, "held": len(entries), "unattributed": 0,
-		"histogram": histogram(entries), "logDelete": s.logDeleter != nil, "view": view,
-	})
+		"histogram": histogram(entries), "logDelete": s.logDeleter != nil,
+	}
+	if r.URL.Query().Get("view") != "" {
+		out["view"] = label
+	} else {
+		out["logScope"], out["resourceNames"] = label, names
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
-// streamView is /api/stream?view=: the view's backlog, then its tail.
-func (s *Server) streamView(w http.ResponseWriter, r *http.Request, flusher http.Flusher, view string) {
+// streamView is /api/stream?view= or ?logScope=: the backlog, then its
+// tail.
+func (s *Server) streamView(w http.ResponseWriter, r *http.Request, flusher http.Flusher) {
+	names, _, err := s.scopeResources(r.Context(), r)
+	if err != nil {
+		fmt.Fprintf(w, "event: failure\ndata: %s\n\n", mustJSON(map[string]string{"error": userMessage(err)}))
+		flusher.Flush()
+		return
+	}
 	filter := filterFrom(r)
 	since := filter.Since
 	if last := r.Header.Get("Last-Event-ID"); last != "" {
@@ -135,7 +226,7 @@ func (s *Server) streamView(w http.ResponseWriter, r *http.Request, flusher http
 		}
 	}
 	filter.Since = 0
-	backlog, err := s.viewEntries(r.Context(), view, filter)
+	backlog, err := s.viewEntries(r.Context(), names, filter)
 	if err != nil {
 		fmt.Fprintf(w, "event: failure\ndata: %s\n\n", mustJSON(map[string]string{"error": userMessage(err)}))
 		flusher.Flush()
@@ -156,7 +247,7 @@ func (s *Server) streamView(w http.ResponseWriter, r *http.Request, flusher http
 	live := make(chan Entry, 256)
 	failed := make(chan error, 1)
 	go func() {
-		if err := s.logViews.Tail(ctx, view, func(e Entry) {
+		if err := s.logViews.Tail(ctx, names, func(e Entry) {
 			select {
 			case live <- e:
 			case <-ctx.Done():

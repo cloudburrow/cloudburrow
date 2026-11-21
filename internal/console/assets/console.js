@@ -121,6 +121,9 @@ const AP_ROUTES = agentPlatformRoutes();
 // Kubernetes Engine's pages drawn as one page's tabs (#1857).
 const GKE_DISCOVERY = ["/kubernetes/gateways", "/kubernetes/services", "/kubernetes/ingress"];
 const GKE_STORAGE = ["/kubernetes/storage", "/kubernetes/storage-classes"];
+// Cloud Logging's Settings and its Log Scopes tab (#2020), as Google's
+// Settings page has a Log Scopes tab (log-scope/create-and-manage).
+const LOGGING_SETTINGS = ["/logs/settings", "/logs/log-scopes"];
 
 
 const ROUTES = [
@@ -662,12 +665,14 @@ const ROUTES = [
   // Saved queries and log scopes (#1519).
   { path: "/logs/saved-queries", service: "logging-saved-queries", icon: "logs", title: "Saved queries", kind: "Saved query",
     section: "Operations", product: "logging", productTitle: "Cloud Logging" },
-  { path: "/logs/log-scopes", service: "logging-log-scopes", icon: "logs", title: "Log scopes", kind: "Log scope",
+  // Log Scopes is a tab of Settings (#2020), as on Google.
+  { path: "/logs/log-scopes", service: "logging-log-scopes", icon: "logs", title: "Settings", tabTitle: "Log Scopes", kind: "Log scope",
+    navHidden: true, navAs: "/logs/settings", pageTabs: LOGGING_SETTINGS,
     section: "Operations", product: "logging", productTitle: "Cloud Logging" },
   { path: "/logs/exclusions", service: "logging-exclusions", icon: "logs", title: "Exclusions", kind: "Exclusion",
     section: "Operations", product: "logging", productTitle: "Cloud Logging" },
   // Logging's Settings (#1311): GetSettings, UpdateSettings, GetCmekSettings.
-  { path: "/logs/settings",   service: "logging-settings",   icon: "logs", title: "Settings",
+  { path: "/logs/settings",   service: "logging-settings",   icon: "logs", title: "Settings", tabTitle: "Settings", pageTabs: LOGGING_SETTINGS,
     section: "Operations", product: "logging", productTitle: "Cloud Logging" },
   { path: "/activity", service: null, screen: "activity", title: "Activity",      section: "Operations" },
   { path: "/requests", service: null, screen: "requests", title: "Request Log",   section: "Operations" },
@@ -3142,7 +3147,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
     // where Google's menu begins with it, as a trigger's Edit, Disable,
     // Delete (#1854).
     const edit = caps.editRow ? [{
-      label: caps.editRow,
+      key: "edit", label: caps.editRow,
       run: () => editFromRow(route, (item.opens || []).length ? item.opens : [item.name], refresh),
     }] : [];
     // A row's own buttons, before its menu: a trigger's Run (#1854).
@@ -3152,7 +3157,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
     const actions = [
       ...(caps.editRowFirst ? edit : []),
       ...(item.actions || []).filter((a) => !a.button && !a.panel).map((a) => ({
-        label: a.label, destructive: a.destructive,
+        key: a.id, label: a.label, destructive: a.destructive,
         // A row whose actions address a path of their own is named by its
         // row, not the path's last segment: a value inside a Datastore
         // property is addressed by its steps as JSON, [6,"when"], and its
@@ -3162,11 +3167,17 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
       })),
       ...(caps.editRowFirst ? [] : edit),
       ...(caps.delete ? [{
-        label: caps.deleteLabel || "Delete", destructive: true,
+        key: "delete", label: caps.deleteLabel || "Delete", destructive: true,
         run: () => deleteResource(route, item.name, refresh, rowBusy(item.name)),
       }] : []),
       ...(item.object ? objectActions(route, item, refresh, rowBusy(item.name)) : []),
     ];
+    // Google's order, where the provider gives it (#1863: Log Router's View
+    // sink details, Edit sink, Disable sink, Delete sink, Troubleshoot sink).
+    if ((caps.rowMenuOrder || []).length) {
+      const rank = (a) => { const i = caps.rowMenuOrder.indexOf(a.key); return i < 0 ? caps.rowMenuOrder.length : i; };
+      actions.sort((a, b) => rank(a) - rank(b));
+    }
     if (!actions.length && !buttons.length) return el("td", {});
     if (!actions.length) return el("td", { class: "row-actions" }, ...buttons);
     // Suppressed rather than merely ignored while the row is busy: a live
@@ -3961,6 +3972,8 @@ async function renderDetail(view, route, resourcePath) {
         return drawTextSection(panel, section, note);
       case "chart":
         return drawChartSection(panel, section, note);
+      case "analytics":
+        return drawAnalyticsSection(panel, section, note);
       case "logs":
         return drawLogsSection(panel, section, note);
       case "permissions":
@@ -6314,11 +6327,15 @@ function queryPane(route, segments, spec, onDone) {
     if (writing) return executeWrite(statement);
     setBusy(run, true);
     const started = performance.now();
+    // The result, for a page that draws more from it: Log Analytics'
+    // chart (#2021). Null when the query failed.
+    let result = null;
     try {
       const data = await send(
         `/api/query/${route.service}?project=${encodeURIComponent(currentProject())}`,
         "POST", { Path: segments, Statement: statement });
       const listing = data.listing || {};
+      result = listing;
       const took = Math.round(performance.now() - started);
 
       if (!(listing.items || []).length) {
@@ -6342,7 +6359,7 @@ function queryPane(route, segments, spec, onDone) {
     } finally {
       setBusy(run, false);
     }
-    if (onDone) onDone();
+    if (onDone) onDone(result);
   };
 
   run.addEventListener("click", execute);
@@ -9579,9 +9596,31 @@ function route() {
 // CloudBurrow does not run (#1843): its place in the menu, and why.
 // Log Analytics (#1863), as Google's page: the Log views panel beside a
 // SQL editor whose FROM names a view as PROJECT_ID.LOCATION.BUCKET_ID.
-// LOG_VIEW_ID. The logging-analytics provider runs it over the bucket's
-// linked dataset in this instance's BigQuery; a view's name in the panel
-// puts Google's default query on it in the editor.
+// LOG_VIEW_ID. The logging-analytics provider runs it in this instance's
+// BigQuery, over the bucket's linked dataset when it has one and over the
+// bucket's entries directly when it has none (#2021); a view's name in the
+// panel puts Google's default query on it in the editor. The results are
+// a table and, as Google's page lets them be, a chart (#2021), drawn as
+// BigQuery's Visualization draws one, from the result's column types.
+// Recent queries (#2031): Cloud Logging keeps the user's last 10,000
+// unique queries over 30 days (recentQueries.list), the Logs Explorer's and
+// Log Analytics' each in the Query library's Recent tab of its own page.
+// Recording one never stands in the way of running it.
+// Kept only where the instance serves Cloud Logging, whose Saved queries
+// screen comes with it.
+const keepsRecentQueries = () => !!capabilityOf("logging-saved-queries").id;
+
+function recordRecentQuery(project, query, sql) {
+  if (!project || !query || !query.trim() || !keepsRecentQueries()) return;
+  send(`/api/logs/recent-queries?project=${encodeURIComponent(project)}`, "POST", { query: query.trim(), sql })
+    .catch(() => { /* the query still runs */ });
+}
+
+async function listRecentQueries(project, sql) {
+  const d = await api(`/api/logs/recent-queries?project=${encodeURIComponent(project)}&type=${sql ? "sql" : "logging"}`);
+  return d.recentQueries || [];
+}
+
 async function renderLogAnalytics(view, match) {
   const caps = capabilityOf("logging-analytics");
   if (!caps.id) return renderUnavailable(view, match);
@@ -9599,11 +9638,98 @@ async function renderLogAnalytics(view, match) {
   const views = data.items || [];
   // The query route asks for a resource: the page's is the project's log
   // views, which the statement itself names.
-  const pane = queryPane(route, ["log-views"], caps.query, () => {});
+  const chart = el("section", { class: "card log-analytics-chart", id: "log-analytics-chart", "aria-labelledby": "log-analytics-chart-title", hidden: true });
+  const chartTab = {};
+  // The statement whose results are drawn: what Save to dashboard saves.
+  let chartedSQL = "";
+  // Save to dashboard (#2031), as on Google's Log Analytics: the chart, or
+  // the table, to a new or existing custom dashboard of the project, a
+  // widget whose query is the statement (opsAnalyticsQuery).
+  const dashboardsServed = !!capabilityOf("monitoring-dashboards").id;
+  const openSaveToDashboard = async () => {
+    const { dialog, close } = openModal({ labelledBy: "la-dash-title" });
+    const error = el("p", { class: "form-error", role: "alert", hidden: true });
+    const choice = el("select", { id: "la-dash-choice" }, el("option", { value: "New dashboard", text: "New dashboard" }));
+    const name = el("input", { type: "text", id: "la-dash-name", required: true });
+    const nameRow = el("div", { class: "form-row" }, el("label", { for: "la-dash-name", text: "Dashboard name" }), name);
+    const title = el("input", { type: "text", id: "la-dash-chart-title", required: true, value: "Log Analytics chart" });
+    const kind = el("select", { id: "la-dash-kind" },
+      ...["Bar", "Line", "Table"].map((k) => el("option", { value: k, text: k === "Table" ? "Table" : `${k} chart` })));
+    kind.value = ((chartTab.viz || {}).type === "Line") ? "Line" : "Bar";
+    choice.addEventListener("change", () => {
+      nameRow.hidden = choice.value !== "New dashboard";
+      name.required = !nameRow.hidden;
+    });
+    const submit = el("button", { type: "submit", class: "primary", text: "Save" });
+    dialog.append(el("form", { class: "modal-body", onsubmit: async (e) => {
+        e.preventDefault();
+        error.hidden = true;
+        submit.disabled = true;
+        try {
+          await send(`/api/actions/logging-analytics?project=${encodeURIComponent(project)}`, "POST", {
+            Path: [], Action: "save-chart-to-dashboard", Values: { dashboard: choice.value, dashboardName: name.value.trim(),
+              title: title.value.trim(), kind: kind.value, sql: chartedSQL } });
+          const where = choice.value === "New dashboard" ? name.value.trim() : choice.selectedOptions[0].textContent;
+          close();
+          notify(`Saved ${title.value.trim()} to dashboard ${where}`);
+        } catch (err) {
+          error.textContent = err.message;
+          error.hidden = false;
+          submit.disabled = false;
+        }
+      } },
+      el("h2", { id: "la-dash-title", text: "Save to dashboard" }),
+      el("div", { class: "form-row" }, el("label", { for: "la-dash-choice", text: "Dashboard" }), choice),
+      nameRow,
+      el("div", { class: "form-row" }, el("label", { for: "la-dash-chart-title", text: "Chart title" }), title),
+      el("div", { class: "form-row" }, el("label", { for: "la-dash-kind", text: "Save as" }), kind),
+      el("p", { class: "unavailable", text: "The dashboard runs this query, as Cloud Monitoring keeps it: a widget whose query is the SQL (opsAnalyticsQuery)." }),
+      error,
+      el("div", { class: "modal-actions" },
+        el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }),
+        submit)));
+    name.focus();
+    try {
+      const list = await api(`/api/resources/monitoring-dashboards?project=${encodeURIComponent(project)}`);
+      for (const d of list.items || []) choice.append(el("option", { value: d.name, text: (d.fields || {})["Display name"] || d.name }));
+    } catch { /* New dashboard alone */ }
+  };
+  const saveToDashboard = el("button", { type: "button", class: "secondary", id: "log-analytics-save-dashboard",
+    text: "Save to dashboard", "aria-haspopup": "dialog",
+    disabled: dashboardsServed && project ? null : "disabled",
+    title: dashboardsServed ? (project ? "Save this chart to a custom dashboard" : "Choose a project: a dashboard is one project's")
+      : "Not available locally: a dashboard is Cloud Monitoring's, and this instance does not serve Cloud Monitoring.",
+    onclick: () => openSaveToDashboard() });
+  const drawResultChart = (listing) => {
+    if (!listing || !(listing.items || []).length) { chart.hidden = true; return; }
+    chartedSQL = editor.value.trim();
+    const res = analyticsResultSet(listing);
+    const draw = () => setChildren(chart,
+      el("div", { class: "log-fields-head" }, el("h2", { id: "log-analytics-chart-title", text: "Chart" }), saveToDashboard),
+      bqVisualization(res, chartTab, draw));
+    draw();
+    chart.hidden = false;
+  };
+  const pane = queryPane(route, ["log-views"], caps.query, drawResultChart);
   const editor = pane.querySelector("textarea.query-editor");
   editor.setAttribute("aria-label", "Query");
   const run = [...pane.querySelectorAll("button")].find((b) => b.textContent === "Run");
   if (run) run.textContent = "Run query";
+  // Each statement run is one of the user's recent queries (#2031).
+  if (run) run.addEventListener("click", () => { recordRecentQuery(project, editor.value, true); setTimeout(drawRecent, 500); });
+  const recentList = el("div", { id: "log-analytics-recent" });
+  const drawRecent = async () => {
+    if (!project || !keepsRecentQueries()) return setChildren(recentList);
+    let recent = [];
+    try { recent = await listRecentQueries(project, true); } catch { /* none shown */ }
+    setChildren(recentList, el("h2", { text: "Recent queries" }), recent.length
+      ? el("ul", { class: "log-view-list" }, ...recent.slice(0, 10).map((r) => el("li", {},
+          el("button", { type: "button", class: "link-button mono", text: r.query.replace(/\s+/g, " ").slice(0, 120),
+            title: "Put this query in the editor",
+            onclick: () => { editor.value = r.query; editor.dispatchEvent(new Event("input")); editor.focus(); } }),
+          el("span", { class: "unavailable", text: ` ${relativeTime(new Date(r.lastRunTime))}` }))))
+      : el("p", { class: "unavailable", text: "No recent queries. Each query you run is kept here for 30 days." }));
+  };
   const defaultQuery = (name) => "SELECT\n  timestamp, severity, log_name, resource.type, text_payload, json_payload\n" +
     `FROM\n  \`${name}\`\nORDER BY timestamp DESC\nLIMIT 1000`;
   if (!editor.value && views.length) {
@@ -9618,12 +9744,91 @@ async function renderLogAnalytics(view, match) {
           el("button", { type: "button", class: "link-button mono", text: v.name,
             title: `Query ${v.name}`,
             onclick: () => { editor.value = defaultQuery(v.name); editor.dispatchEvent(new Event("input")); editor.focus(); } }),
-          el("span", { class: "unavailable", text: ` Linked dataset: ${(v.fields || {})["Linked dataset in BigQuery"] || "—"}` }))))
+          el("span", { class: "unavailable", text: ` Linked dataset: ${(v.fields || {})["Linked dataset in BigQuery"] || "none needed"}` }))))
       : el("p", { class: "unavailable", text: data.prompt ||
-          "No bucket of this project is upgraded to use Log Analytics. Upgrade one in Logs Storage, and Create link to query it here." }));
-  setChildren(view, header, el("div", { class: "log-analytics" }, panel, pane));
+          "No bucket of this project is upgraded to use Log Analytics. Upgrade one in Logs Storage to query it here." }),
+    recentList);
+  setChildren(view, header, el("div", { class: "log-analytics" }, panel, el("div", { class: "log-analytics-main" }, pane, chart)));
+  drawRecent();
   announce("Log Analytics");
 }
+
+// LOG_QUERY_LIBRARY is the Query library's Queries provided by Google Cloud
+// tab (#2021): Google's sample queries, by product, as
+// docs.cloud.google.com/logging/docs/view/query-library-preview publishes
+// them (read 2026-11-20), for the products CloudBurrow serves. Upper-case
+// words such as BUCKET_NAME are Google's placeholders, to replace.
+const LOG_QUERY_LIBRARY = [
+  ["API enable and disable", [
+    ["Audit API enable logs", 'protoPayload.methodName="google.api.serviceusage.v1.ServiceUsage.EnableService"'],
+    ["Audit API disable logs", 'protoPayload.methodName="google.api.serviceusage.v1.ServiceUsage.DisableService"'],
+  ]],
+  ["BigQuery", [
+    ["BigQuery audit logs", 'resource.type= ("bigquery_dataset" OR "bigquery_project") AND logName:"cloudaudit.googleapis.com"'],
+    ["BigQuery audit logs for a project", 'resource.type="bigquery_project" AND logName:"cloudaudit.googleapis.com"'],
+    ["BigQuery audit logs for a dataset", 'resource.type="bigquery_dataset" AND logName:"cloudaudit.googleapis.com"'],
+    ["BigQuery dataset updates", 'resource.type="bigquery_dataset" AND log_id("cloudaudit.googleapis.com/activity") AND protoPayload.methodName= "google.cloud.bigquery.v2.DatasetService.UpdateDataset"'],
+    ["BigQuery jobs completed", 'resource.type="bigquery_project" AND log_id("cloudaudit.googleapis.com/data_access") AND protoPayload.methodName= ("google.cloud.bigquery.v2.JobService.InsertJob" OR "google.cloud.bigquery.v2.JobService.Query")'],
+    ["BigQuery quota exceeded", 'resource.type= ("bigquery_dataset" OR "bigquery_project") AND protoPayload.status.code=8 AND severity>=WARNING'],
+  ]],
+  ["Cloud Monitoring", [
+    ["Show all notification channel errors", 'resource.type="stackdriver_notification_channel" AND severity>=ERROR'],
+    ["Show logs written by the uptime resource", 'resource.type="uptime_url"'],
+    ["Alerting policy incident violations", 'log_id("monitoring.googleapis.com/Violation") AND labels.policy_id="POLICY_ID"'],
+  ]],
+  ["Cloud Run functions", [
+    ["Cloud Run functions errors", 'resource.type="cloud_function" AND log_id("cloudfunctions.googleapis.com/cloud-functions") AND severity>=ERROR'],
+    ["Cloud Run functions execution logs", 'resource.type="cloud_function" AND resource.labels.function_name="FUNCTION_NAME" AND resource.labels.region="REGION"'],
+    ["Cloud Run functions build logs", 'resource.type="build" AND resource.labels.build_id="BUILD_ID" AND log_id("cloudbuild")'],
+  ]],
+  ["Cloud Run", [
+    ["Cloud Run logs for a specific job", 'resource.type="cloud_run_job" AND resource.labels.job_name="JOB_NAME"'],
+    ["Cloud Run logs for a specific revision and service", 'resource.type="cloud_run_revision" AND resource.labels.service_name="SERVICE_NAME"'],
+  ]],
+  ["Cloud SQL", [
+    ["Cloud SQL audit logs", 'resource.type="cloudsql_database" AND resource.labels.database_id="DATABASE_ID" AND log_id("cloudaudit.googleapis.com/activity")'],
+    ["Cloud SQL instance deletion logs", 'resource.type="cloudsql_database" AND resource.labels.database_id="PROJECT_ID:INSTANCE_ID" AND protoPayload.methodName="cloudsql.instances.delete"'],
+    ["Cloud SQL MySQL error logs", 'resource.type="cloudsql_database" AND log_id("cloudsql.googleapis.com/mysql.err")'],
+    ["Cloud SQL Postgres-based databases", 'resource.type="cloudsql_database" AND resource.labels.database_id="DATABASE_ID" AND log_id("cloudsql.googleapis.com/postgres.log")'],
+    ["Cloud SQL SQL Server error logs", 'resource.type="cloudsql_database" AND log_id("cloudsql.googleapis.com/sqlserver.err")'],
+  ]],
+  ["Cloud Storage", [
+    ["Cloud Storage bucket logs", 'resource.type="gcs_bucket" AND resource.labels.bucket_name="BUCKET_NAME"'],
+    ["Cloud Storage bucket audit logs", 'resource.type="gcs_bucket" AND logName:"cloudaudit.googleapis.com"'],
+    ["Cloud Storage bucket creation logs", 'resource.type="gcs_bucket" AND log_id("cloudaudit.googleapis.com/activity") AND protoPayload.methodName="storage.buckets.create"'],
+    ["Cloud Storage bucket deletion logs", 'resource.type="gcs_bucket" AND log_id("cloudaudit.googleapis.com/activity") AND protoPayload.methodName="storage.buckets.delete"'],
+  ]],
+  ["Cloud Tasks", [
+    ["Cloud Tasks queue logs", 'resource.type="cloud_tasks_queue" AND resource.labels.queue_id="QUEUE_ID"'],
+  ]],
+  ["Compute Engine", [
+    ["Compute Engine Admin Activity logs", 'resource.type="gce_instance" AND log_id("cloudaudit.googleapis.com/activity")'],
+    ["Compute Engine VM syslogs", 'resource.type="gce_instance" AND log_id("syslog")'],
+    ["Compute Engine VM authlogs", 'resource.type="gce_instance" AND log_id("authlog")'],
+  ]],
+  ["Google Cloud Observability", [
+    ["Log sink activities", 'resource.type="logging_sink" AND log_id("cloudaudit.googleapis.com/activity")'],
+    ["Log-based metric create or update activities", 'resource.type="metric" AND log_id("cloudaudit.googleapis.com/activity") AND protoPayload.methodName:(UpdateLogMetric OR CreateLogMetric)'],
+    ["Uptime URL checks for a host", 'resource.type="uptime_url" AND resource.labels.host="URL"'],
+  ]],
+  ["Identity and Access Management", [
+    ["Service account creation logs", 'resource.type="service_account" AND log_id("cloudaudit.googleapis.com/activity") AND protoPayload.methodName="google.iam.admin.v1.CreateServiceAccount"'],
+    ["Service account creation key logs", 'resource.type="service_account" AND log_id("cloudaudit.googleapis.com/activity") AND protoPayload.methodName="google.iam.admin.v1.CreateServiceAccountKey"'],
+    ["Set access control policy logs", 'resource.type="project" AND log_id("cloudaudit.googleapis.com/activity") AND protoPayload.methodName="SetIamPolicy"'],
+    ["Resource creation, modification, or deletion", 'log_id("cloudaudit.googleapis.com/activity") AND protoPayload.methodName:("create" OR "delete" OR "update")'],
+  ]],
+  ["Kubernetes", [
+    ["Stdout container logs across all pods and containers in a cluster", 'resource.type="k8s_container" AND log_id("stdout")'],
+    ["Container error logs across all pods and containers in a cluster", 'resource.type="k8s_container" AND log_id("stderr") AND severity=ERROR'],
+    ["Container error logs for a pod with a specific name", 'resource.type="k8s_container" AND resource.labels.pod_name="POD_NAME" AND severity=ERROR'],
+    ["Container errors logs in the kube-system namespace", 'resource.type="k8s_container" AND resource.labels.namespace_name="kube-system" AND severity=ERROR'],
+    ["Kubernetes container logs", 'resource.type="k8s_container" AND resource.labels.container_name="CONTAINER_NAME"'],
+    ["Kubernetes events", 'resource.type="k8s_cluster" AND log_id("events")'],
+  ]],
+  ["Spanner", [
+    ["Cloud Spanner logs for a specific spanner instance", 'resource.type="spanner_instance" AND resource.labels.instance_id="SPANNER_INSTANCE"'],
+  ]],
+];
 
 function renderUnavailable(view, route) {
   setChildren(view, pageHeader(route.title, "Not available locally"),
@@ -12500,19 +12705,23 @@ const LOG_SEVERITIES = ["DEFAULT", "DEBUG", "INFO", "NOTICE", "WARNING", "ERROR"
 // logQueryValue quotes a value for the Logging query language.
 const logQueryValue = (v) => JSON.stringify(String(v));
 
+// logFieldKey is a key as a field path names it: quoted unless it is an
+// identifier, as labels."k8s-pod/app" (#2032).
+const logFieldKey = (k) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(k) ? k : JSON.stringify(k);
+
 // logJSONTree draws an entry's LogEntry as Google's expanded entry does:
-// nested fields that fold, each value with Show matching entries and Hide
-// matching entries.
-function logJSONTree(value, path, onMatch) {
+// nested fields that fold, each value with Show matching entries, Hide
+// matching entries and Pin to Fields pane.
+function logJSONTree(value, path, onMatch, onPin) {
   if (value && typeof value === "object") {
     const keys = Object.keys(value).sort();
     return el("ul", { class: "log-json" }, ...keys.map((k) => {
       const child = value[k];
-      const p = path ? `${path}.${k}` : k;
+      const p = path ? `${path}.${logFieldKey(k)}` : logFieldKey(k);
       if (child && typeof child === "object") {
         return el("li", {}, el("details", { class: "log-json-node", open: true },
           el("summary", {}, el("span", { class: "log-json-key", text: k }), el("span", { text: ": {…}" })),
-          logJSONTree(child, p, onMatch)));
+          logJSONTree(child, p, onMatch, onPin)));
       }
       return el("li", { class: "log-json-leaf", "data-field": p },
         el("span", { class: "log-json-key", text: k }), el("span", { text: ": " }),
@@ -12520,6 +12729,7 @@ function logJSONTree(value, path, onMatch) {
         overflowMenu([
           { label: "Show matching entries", run: () => onMatch(`${p}=${logQueryValue(child)}`) },
           { label: "Hide matching entries", run: () => onMatch(`-${p}=${logQueryValue(child)}`) },
+          ...(onPin ? [{ label: "Pin to Fields pane", run: () => onPin(p) }] : []),
         ], `${p} ${child}`));
     }));
   }
@@ -12544,7 +12754,14 @@ async function renderLogs(view) {
   // views, of a project, folder, organization or billing account, read with
   // ListLogEntries and tailed with TailLogEntries, so the view's filter and
   // the bucket's retention apply.
-  let scope = ["project", "parent", "view"].includes(params.get("scope")) ? params.get("scope") : "all";
+  let scope = ["project", "parent", "view", "logScope"].includes(params.get("scope")) ? params.get("scope") : "all";
+  // Or a log scope (#2020), as Google's Refine scope picks one: its
+  // projects and log views, read together through ListLogEntries. When the
+  // address names no scope, the Explorer opens on the project's default log
+  // scope (the Observability API's _Default scope's logScope) once one has
+  // been set as default; with _Default the default, it opens on All sources
+  // as before, as _Default names only the project and pod lines carry none.
+  const scopeChosen = params.has("scope");
   // Followed from a failed operation in Activity. The server has always
   // supported the filter; the client simply never read it, so the one path
   // built to explain a failure landed on the unfiltered stream of the whole
@@ -12558,8 +12775,36 @@ async function renderLogs(view) {
     el("option", { value: "project", text: project ? `Project logs (${project})` : "Project logs",
                    disabled: project ? null : "disabled" }),
     el("option", { value: "parent", text: "A folder or organization" }),
-    el("option", { value: "view", text: "Through a log view" }));
+    el("option", { value: "view", text: "Through a log view" }),
+    el("option", { value: "logScope", text: "Log scope", disabled: project ? null : "disabled" }));
   scopeSelect.value = scope;
+
+  // The log scope picker: the project's log scopes, the default marked.
+  const logScopeSelect = el("select", { id: "log-scope-name", "aria-label": "Log scope" });
+  const logScopeNote = el("p", { class: "unavailable", id: "log-scope-note" });
+  let logScopes = { default: "", scopes: [] };
+  const drawLogScopeNote = (error) => {
+    if (error) return setChildren(logScopeNote, el("span", { text: error }));
+    const sc = logScopes.scopes.find((x) => x.name === logScopeSelect.value);
+    if (!sc) return setChildren(logScopeNote, el("span", { text: "No log scope chosen." }));
+    setChildren(logScopeNote, el("span", { text: `Searching ${sc.resourceNames.join(", ")}.` }));
+  };
+  const loadLogScopes = async (want) => {
+    if (!project) return false;
+    try {
+      logScopes = await api(`/api/logs/scopes?${new URLSearchParams({ project })}`);
+    } catch (err) {
+      logScopes = { default: "", scopes: [] };
+      drawLogScopeNote(err.message);
+      return false;
+    }
+    setChildren(logScopeSelect, ...logScopes.scopes.map((sc) => el("option", { value: sc.name,
+      text: sc.name.slice(sc.name.lastIndexOf("/") + 1) + (sc.name === logScopes.default ? " (default)" : "") })));
+    const pick = want && logScopes.scopes.some((x) => x.name === want) ? want : logScopes.default;
+    if (pick) logScopeSelect.value = pick;
+    drawLogScopeNote();
+    return true;
+  };
 
   // The view scope's pickers: whose buckets, which bucket, which view.
   const initialView = params.get("view") || "";
@@ -12577,6 +12822,8 @@ async function renderLogs(view) {
   const showViewControls = () => {
     viewControls.hidden = scope !== "view";
     viewNote.hidden = scope !== "view";
+    logScopeSelect.hidden = scope !== "logScope";
+    logScopeNote.hidden = scope !== "logScope";
   };
   const drawViewNote = (error) => {
     if (error) return setChildren(viewNote, el("span", { text: error }));
@@ -12656,7 +12903,7 @@ async function renderLogs(view) {
   const learnFields = (obj, prefix) => {
     if (!obj || typeof obj !== "object" || knownFields.size > 2000) return;
     for (const [k, v] of Object.entries(obj)) {
-      const path = prefix ? `${prefix}.${k}` : k;
+      const path = prefix ? `${prefix}.${logFieldKey(k)}` : logFieldKey(k);
       if (v && typeof v === "object" && !Array.isArray(v)) { learnFields(v, path); continue; }
       if (Array.isArray(v)) continue;
       if (!knownFields.has(path)) knownFields.set(path, new Set());
@@ -12719,11 +12966,17 @@ async function renderLogs(view) {
   // Summary fields (#1863), Google's Preferences > Manage summary fields:
   // custom fields drawn as chips at the start of each entry's summary,
   // optionally truncated; and Show summary chips. Per viewer.
+  // Recent queries (#2031): the user's, as Google keeps them, in Cloud
+  // Logging (recentQueries.list), each query run recorded there.
+  const rememberQuery = (query) => recordRecentQuery(project, query, false);
   const SUMMARY_KEY = "cloudburrow.logs.summary";
-  let summary = { fields: [], truncate: false, chars: 30, fromEnd: false, show: true };
+  let summary = { fields: [], truncate: false, chars: 30, fromEnd: false, show: true, defaults: true };
   try { summary = { ...summary, ...JSON.parse(readStored(SUMMARY_KEY, "{}")) }; } catch { /* the defaults */ }
   const saveSummary = () => writeStored(SUMMARY_KEY, JSON.stringify(summary));
-  const fieldValue = (entry, path) => path.split(".").map((k) => k.replace(/^"|"$/g, ""))
+  // A field's value in an entry; a quoted part of the path is one key,
+  // dots and all (labels."service.name", #2032).
+  const fieldValue = (entry, path) => (path.match(/"(?:[^"\\]|\\.)*"|[^.]+/g) || [])
+    .map((k) => { if (!k.startsWith('"')) return k; try { return JSON.parse(k); } catch { return k.slice(1, -1); } })
     .reduce((o, k) => (o && typeof o === "object" ? o[k] : undefined), entry.logEntry || {});
   const summaryChips = (entry) => {
     if (!summary.show) return [];
@@ -12854,40 +13107,140 @@ async function renderLogs(view) {
   // histogram and the rows can never disagree about what is being looked at.
   const timeline = el("div", { class: "card log-timeline", id: "log-timeline" });
   let timelineCollapsed = false;
-  // The Fields pane (#1863): the values of the entries the query matches,
-  // each with its count, as Google's Log fields pane lists them; choosing one
+  // The Fields pane (#1863, #2031): the values of the entries the query
+  // matches, each with its approximate count, as Google's Fields pane lists
+  // them in three sections (logs-explorer-interface, re-read 2026-11-20):
+  // Pinned, the fields pinned from an entry; System metadata, the entries
+  // broken down by Resource type and Severity, which are always there, and
+  // by Log name and Project ID; and Frequent fields, "the most frequent
+  // json_payload fields in the current query results". Choosing a value
   // adds its clause to the query and runs it.
-  const fieldsPane = el("aside", { class: "card log-fields", id: "log-fields", "aria-label": "Log fields" });
+  const fieldsPane = el("aside", { class: "card log-fields", id: "log-fields", "aria-label": "Fields" });
   const LOG_FIELD_GROUPS = [["resource.type", "Resource type"], ["severity", "Severity"],
     ["logName", "Log name"], ["resource.labels.project_id", "Project ID"]];
-  const drawFields = (entries) => {
-    const groups = LOG_FIELD_GROUPS.map(([path, label]) => {
-      const counts = new Map();
-      for (const e of entries) {
-        const v = path.split(".").reduce((o, k) => (o && typeof o === "object" ? o[k] : undefined), e.logEntry || {});
-        if (v !== undefined && v !== "") counts.set(v, (counts.get(v) || 0) + 1);
+  // The label dimensions (#2032): System metadata dimensions that appear
+  // only when the entries carry the labels they are made from
+  // (logs-explorer-interface, read 2026-11-20). Workload / Service is made
+  // from the k8s-pod/app label (a Kubernetes container's workload) and
+  // from service.name, each value adding the clause of the label it came
+  // from.
+  const LABEL_DIMENSIONS = [["Workload / Service", ['labels."k8s-pod/app"', 'labels."service.name"']]];
+  // How many json_payload fields Frequent fields lists, and values a field.
+  const FREQUENT_FIELDS = 10;
+  const FIELD_VALUES = 20;
+  // Pin to Fields pane (#1863): a field of an expanded entry gets a group of
+  // its own under Pinned, at the top of the pane. Per viewer.
+  const PINNED_FIELDS_KEY = "cloudburrow.logs.pinnedFields";
+  let pinnedFields = [];
+  try { pinnedFields = JSON.parse(readStored(PINNED_FIELDS_KEY, "[]")).filter((f) => typeof f === "string"); } catch { /* none */ }
+  let fieldEntries = [];
+  const pinField = (path) => {
+    if (!pinnedFields.includes(path)) pinnedFields.push(path);
+    writeStored(PINNED_FIELDS_KEY, JSON.stringify(pinnedFields));
+    drawFields(fieldEntries);
+    announce(`Pinned ${path} to the Fields pane`);
+  };
+  const unpinField = (path) => {
+    pinnedFields = pinnedFields.filter((f) => f !== path);
+    writeStored(PINNED_FIELDS_KEY, JSON.stringify(pinnedFields));
+    drawFields(fieldEntries);
+    announce(`Removed ${path} from the Fields pane`);
+  };
+  // jsonPayloadLeaves calls f with each scalar field of a JSON payload and
+  // its path, jsonPayload.a.b; a key that is not an identifier is quoted,
+  // as the query language takes it. Arrays are not walked: a field with an
+  // array index cannot be added (logs-explorer-interface).
+  const jsonPayloadLeaves = (v, path, f) => {
+    if (v === null || v === undefined) return;
+    if (Array.isArray(v)) return;
+    if (typeof v === "object") {
+      for (const [k, x] of Object.entries(v)) {
+        jsonPayloadLeaves(x, `${path}.${/^[A-Za-z_][A-Za-z0-9_]*$/.test(k) ? k : JSON.stringify(k)}`, f);
       }
-      return { path, label, values: [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 20) };
-    });
-    const types = groups[0].values.map(([v]) => v);
+      return;
+    }
+    f(path, v);
+  };
+  // A field's scalar value in an entry, or undefined.
+  const scalarValue = (e, path) => {
+    const v = fieldValue(e, path);
+    return v !== undefined && v !== "" && v !== null && typeof v !== "object" ? v : undefined;
+  };
+  const countValues = (entries, path) => {
+    const counts = new Map();
+    for (const e of entries) {
+      const v = scalarValue(e, path);
+      if (v !== undefined) counts.set(v, (counts.get(v) || 0) + 1);
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, FIELD_VALUES);
+  };
+  // A label dimension's values: each entry's from the first of the
+  // dimension's labels it carries, with that label's path.
+  const dimensionValues = (entries, paths) => {
+    const counts = new Map();
+    for (const e of entries) {
+      for (const path of paths) {
+        const v = scalarValue(e, path);
+        if (v === undefined) continue;
+        const key = JSON.stringify([path, v]);
+        counts.set(key, (counts.get(key) || 0) + 1);
+        break;
+      }
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, FIELD_VALUES)
+      .map(([k, n]) => { const [path, v] = JSON.parse(k); return [v, n, path]; });
+  };
+  const frequentFields = (entries) => {
+    const seen = new Map();
+    for (const e of entries) {
+      const payload = (e.logEntry || {}).jsonPayload;
+      if (!payload || typeof payload !== "object") continue;
+      const here = new Set();
+      jsonPayloadLeaves(payload, "jsonPayload", (path) => here.add(path));
+      for (const p of here) seen.set(p, (seen.get(p) || 0) + 1);
+    }
+    return [...seen.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).slice(0, FREQUENT_FIELDS).map(([p]) => p);
+  };
+  const fieldGroup = (g) => el("section", { class: "log-field-group" + (g.pinned ? " is-pinned" : ""), "data-field": g.path },
+    g.pinned
+      ? el("div", { class: "log-fields-head" }, el("h4", { class: "mono", text: g.label }),
+          el("button", { class: "link-button is-inline", text: "Remove", "aria-label": `Remove ${g.path} from the Fields pane`,
+            onclick: () => unpinField(g.path) }))
+      : el("h4", { class: g.mono ? "mono" : null, text: g.label }),
+    g.values.length
+      ? el("ul", {}, ...g.values.map(([v, n, at = g.path]) => el("li", {},
+          el("button", { class: "log-field-value", "data-value": String(v),
+            title: `Add ${at}=${logQueryValue(String(v))} to the query`,
+            onclick: () => { addClause(`${at}=${logQueryValue(String(v))}`); runQuery(); } },
+            el("span", { class: "mono", text: g.path === "logName" ? decodeURIComponent(String(v).slice(String(v).indexOf("/logs/") + 6)) : String(v) }),
+            el("span", { class: "log-field-count", "aria-label": `about ${n} entries`, text: String(n) })))))
+      : el("p", { class: "unavailable", text: "No values" }));
+  const drawFields = (entries) => {
+    fieldEntries = entries;
+    const pinned = pinnedFields.map((path) => ({ path, label: path, pinned: true, values: countValues(entries, path) }));
+    const system = LOG_FIELD_GROUPS.map(([path, label]) => ({ path, label, values: countValues(entries, path) }));
+    // After Resource type and Severity, each label dimension the entries
+    // carry values for (#2032).
+    const dimensions = LABEL_DIMENSIONS.map(([label, paths]) => ({ path: paths[0], label, values: dimensionValues(entries, paths) }))
+      .filter((g) => g.values.length);
+    system.splice(2, 0, ...dimensions);
+    const frequent = frequentFields(entries).map((path) => ({ path, label: path, mono: true, values: countValues(entries, path) }));
+    const types = system.find((g) => g.path === "resource.type").values.map(([v]) => v);
     const keep = resourceType.value;
     setChildren(resourceType, el("option", { value: "", text: "All resources" }),
       ...[...new Set([...types, ...(keep ? [keep] : [])])].sort().map((v) => el("option", { value: v, text: v })));
     resourceType.value = keep;
+    const section = (id, title, groups, empty) => el("section", { class: "log-fields-section", id, "aria-labelledby": `${id}-title` },
+      el("h3", { class: "log-fields-subhead", id: `${id}-title`, text: title }),
+      groups.length ? groups.map(fieldGroup) : el("p", { class: "unavailable", text: empty }));
     setChildren(fieldsPane,
-      el("div", { class: "log-fields-head" }, el("h2", { text: "Log fields" }),
+      el("div", { class: "log-fields-head" }, el("h2", { text: "Fields" }),
         el("button", { class: "link-button is-inline", text: "Clear", onclick: () => {
           queryEditor.value = ""; severity.value = ""; resourceType.value = ""; runQuery(); } })),
-      ...groups.map((g) => el("section", { class: "log-field-group", "data-field": g.path },
-        el("h3", { text: g.label }),
-        g.values.length
-          ? el("ul", {}, ...g.values.map(([v, n]) => el("li", {},
-              el("button", { class: "log-field-value", "data-value": v,
-                title: `Add ${g.path}=${logQueryValue(v)} to the query`,
-                onclick: () => { addClause(`${g.path}=${logQueryValue(v)}`); runQuery(); } },
-                el("span", { class: "mono", text: g.path === "logName" ? decodeURIComponent(v.slice(v.indexOf("/logs/") + 6)) : v }),
-                el("span", { class: "log-field-count", text: String(n) })))))
-          : el("p", { class: "unavailable", text: "No values" }))));
+      el("p", { class: "unavailable log-fields-note", text: "Approximate counts, over the entries the query read." }),
+      pinned.length ? section("log-fields-pinned", "Pinned", pinned, "") : null,
+      section("log-fields-system", "System metadata", system, ""),
+      section("log-fields-frequent", "Frequent fields", frequent, "No json_payload fields in the current query results."));
   };
 
   // The Timeline's drag handles (#1863): the start and end of the range,
@@ -12965,6 +13318,36 @@ async function renderLogs(view) {
     announce(pinned.has(id) ? "Pinned the log entry" : "Unpinned the log entry");
   };
 
+  // The range the query reads: the custom one, or the preset ending now.
+  const currentRange = () => {
+    if (timeRange.value === "custom" && customFrom) {
+      return [new Date(customFrom), customTo ? new Date(customTo) : new Date()];
+    }
+    const preset = LOG_TIME_RANGES.find(([v]) => v === timeRange.value) || LOG_TIME_RANGES[3];
+    return [new Date(Date.now() - preset[2] * 60000), new Date()];
+  };
+  const setRange = (from, to) => {
+    customFrom = from.toISOString();
+    customTo = to.toISOString();
+    timeRange.value = "custom";
+    runQuery();
+  };
+  // Scroll to time: the first result at or after the time, or the last.
+  const scrollToTime = (at, width) => {
+    const rowsNow = [...body.querySelectorAll("tr.log-entry")];
+    const end = at.getTime() + Math.max(width, 1000);
+    const row = rowsNow.find((r) => {
+      const t = new Date((r.logEntryData || {}).timestamp).getTime();
+      return t >= at.getTime() && t < end;
+    });
+    if (!row) return notify(`No result held at ${at.toLocaleTimeString()}`);
+    row.scrollIntoView({ block: "center" });
+    row.classList.add("is-located");
+    setTimeout(() => row.classList.remove("is-located"), 2000);
+    row.querySelector("button").focus();
+    announce(`Scrolled to ${at.toLocaleTimeString()}`);
+  };
+
   const drawTimeline = async () => {
     const query = filterQuery();
     query.set("limit", "1000");
@@ -12984,7 +13367,26 @@ async function renderLogs(view) {
       "aria-expanded": timelineCollapsed ? "false" : "true",
       text: timelineCollapsed ? "Expand timeline" : "Collapse timeline",
       onclick: () => { timelineCollapsed = !timelineCollapsed; drawTimeline(); } });
+    // Google's Timeline controls: Zoom-out and Zoom-in about the range's
+    // middle, and the backward and forward arrows sliding it by half its
+    // width (logs-explorer-interface, re-read 2026-11-20).
+    const rangeButton = (id, label, run) => el("button", { type: "button", class: "secondary", id, text: label, onclick: run });
+    const zoomBy = (factor) => {
+      const [from, to] = currentRange();
+      const mid = (from.getTime() + to.getTime()) / 2, half = Math.max(1000, (to - from) * factor / 2);
+      setRange(new Date(mid - half), new Date(Math.min(Date.now(), mid + half)));
+    };
+    const slide = (dir) => {
+      const [from, to] = currentRange();
+      const step = (to - from) / 2 * dir;
+      setRange(new Date(from.getTime() + step), new Date(to.getTime() + step));
+    };
     const head = el("div", { class: "log-timeline-head" }, el("h2", { text: "Timeline" }), collapse,
+      el("div", { class: "actions timeline-controls" },
+        rangeButton("timeline-back", "Backward", () => slide(-1)),
+        rangeButton("timeline-zoom-out", "Zoom out", () => zoomBy(2)),
+        rangeButton("timeline-zoom-in", "Zoom in", () => zoomBy(0.5)),
+        rangeButton("timeline-forward", "Forward", () => slide(1))),
       timeRange.value === "custom"
         ? el("button", { class: "link-button is-inline", text: "Jump to now", onclick: () => {
             timeRange.value = "1h"; runQuery(); } })
@@ -13000,21 +13402,28 @@ async function renderLogs(view) {
 
     setChildren(timeline,
       head,
-      el("div", { class: "timeline-bars", role: "img",
+      el("div", { class: "timeline-bars", role: "group",
         "aria-label": `${total} entries over ${first && last ? relativeTime(first) : "the retained window"}` +
                       `, ${errors} of them errors` },
         ...buckets.map((b) => {
           const counts = b.counts || {};
-          // Zoom to time: a column's click narrows the range to it.
-          const column = el("div", { class: "timeline-column",
-            title: `${new Date(b.at).toLocaleTimeString()} · ${b.total || 0} entries · click to zoom to time`,
-            onclick: () => {
-              customFrom = new Date(b.at).toISOString();
-              customTo = new Date(new Date(b.at).getTime() + Math.max(width, 1000)).toISOString();
-              timeRange.value = "custom";
-              runQuery();
-              announce(`Zoomed to ${new Date(b.at).toLocaleTimeString()}`);
-            } });
+          const at = new Date(b.at);
+          // A bar's pop-up, as Google's Timeline: Scroll to time brings the
+          // results to the bar's first entry, Zoom to time narrows the range
+          // to the bar.
+          const popup = overflowMenu([
+            { label: "Scroll to time", run: () => scrollToTime(at, width) },
+            { label: "Zoom to time", run: () => {
+              setRange(at, new Date(at.getTime() + Math.max(width, 1000)));
+              announce(`Zoomed to ${at.toLocaleTimeString()}`);
+            } },
+          ], `${at.toLocaleTimeString()}`);
+          popup.classList.add("timeline-popup");
+          const column = popup.querySelector(".overflow-trigger");
+          column.className = "timeline-column overflow-trigger";
+          column.setAttribute("aria-label", `${at.toLocaleTimeString()}, ${b.total || 0} entries`);
+          column.title = `${at.toLocaleTimeString()} · ${b.total || 0} entries`;
+          column.replaceChildren();
           // Stacked in severity order with the worst on top, so a column that
           // contains an error is unmistakable however few of them there are.
           for (const [name, state] of [["ERROR", "error"], ["WARNING", "warn"],
@@ -13028,7 +13437,7 @@ async function renderLogs(view) {
               style: `height: ${Math.max(2, (n / peak) * 100)}%`,
             }));
           }
-          return column;
+          return popup;
         })),
       timelineHandles(buckets, width),
       pinStrip,
@@ -13045,6 +13454,7 @@ async function renderLogs(view) {
     if (scope === "project" && project) query.set("project", project);
     if (scope === "parent" && parentInput.value.trim()) query.set("parent", parentInput.value.trim());
     if (scope === "view" && viewSelect.value) query.set("view", viewSelect.value);
+    if (scope === "logScope" && logScopeSelect.value) query.set("logScope", logScopeSelect.value);
     if (operation) query.set("operation", operation);
     if (source.value) query.set("source", source.value);
     if (resource.value) query.set("resource", resource.value);
@@ -13084,10 +13494,10 @@ async function renderLogs(view) {
     el("span", { text: "connecting…" }));
   const chips = el("div", { class: "filter-chips" });
   const body = el("tbody");
-  const table = el("table", {},
+  const table = el("table", { class: summary.defaults ? null : "hide-default-summary" },
     el("thead", {}, el("tr", {},
       el("th", { scope: "col" }, el("span", { class: "sr-only", text: "Expand" })),
-      LOG_COLUMNS.map((c) => el("th", { scope: "col", text: c })),
+      LOG_COLUMNS.map((c) => el("th", { scope: "col", text: c, class: c === "Resource" ? "log-default-summary" : null })),
       logDelete ? el("th", { scope: "col" }, el("span", { class: "sr-only", text: "Actions" })) : null)),
     body);
 
@@ -13161,18 +13571,24 @@ async function renderLogs(view) {
     else url.searchParams.delete("parent");
     if (next === "view" && viewSelect.value) url.searchParams.set("view", viewSelect.value);
     else url.searchParams.delete("view");
+    if (next === "logScope" && logScopeSelect.value) url.searchParams.set("logScope", logScopeSelect.value);
+    else url.searchParams.delete("logScope");
     history.replaceState({}, "", url);
     parentInput.hidden = next !== "parent";
     showViewControls();
     loadLogNames();
     connect();
     announce(next === "project" ? `Scoped to project ${project}`
-      : next === "parent" ? `Scoped to ${parentInput.value.trim() || "a folder or organization"}` : "Showing all sources");
+      : next === "parent" ? `Scoped to ${parentInput.value.trim() || "a folder or organization"}`
+      : next === "logScope" ? `Scoped to log scope ${logScopeSelect.value.slice(logScopeSelect.value.lastIndexOf("/") + 1)}`
+      : "Showing all sources");
   };
   scopeSelect.addEventListener("change", async () => {
     if (scopeSelect.value === "view" && !viewBuckets.length) await loadBuckets("");
+    if (scopeSelect.value === "logScope" && !logScopes.scopes.length) await loadLogScopes("");
     setScope(scopeSelect.value);
   });
+  logScopeSelect.addEventListener("change", () => { drawLogScopeNote(); setScope("logScope"); });
   parentInput.addEventListener("change", () => setScope("parent"));
   viewParentInput.addEventListener("change", async () => { await loadBuckets(""); setScope("view"); });
   bucketSelect.addEventListener("change", () => { fillViews(`${bucketSelect.value}/views/_AllLogs`); setScope("view"); });
@@ -13264,7 +13680,7 @@ async function renderLogs(view) {
         expand.setAttribute("aria-expanded", "false");
         return;
       }
-      const tree = logJSONTree(entry.logEntry || {}, "", onMatch);
+      const tree = logJSONTree(entry.logEntry || {}, "", onMatch, pinField);
       const setOpen = (open) => { for (const d of tree.querySelectorAll("details")) d.open = open; };
       detail = el("tr", { class: "log-detail" }, el("td", { colspan: String(columns) },
         el("div", { class: "log-detail-actions" },
@@ -13286,7 +13702,7 @@ async function renderLogs(view) {
       el("td", { class: "mono", text: new Date(entry.timestamp).toLocaleString() }),
       // Project and operation ride along in the title, so an entry that
       // carries them can be traced without a column per field.
-      el("td", { class: "mono", text: entry.resource || "—",
+      el("td", { class: "mono log-default-summary", text: entry.resource || "—",
                  title: [entry.project ? `project ${entry.project}` : "no project",
                          entry.operationId ? `operation ${entry.operationId}` : null]
                    .filter(Boolean).join(" · ") }),
@@ -13383,6 +13799,10 @@ async function renderLogs(view) {
       setStatus("choose a log view", "warn");
       return;
     }
+    if (scope === "logScope" && !logScopeSelect.value) {
+      setStatus("choose a log scope", "warn");
+      return;
+    }
 
     setStatus(attempt ? `reconnecting (attempt ${attempt})` : "connecting…", "warn");
     drawTimeline();
@@ -13445,11 +13865,17 @@ async function renderLogs(view) {
   // Run query: the editor, the menus and the time range, read once.
   const runQuery = () => {
     severity.value = (/^\s*severity\s*>=\s*(\w+)/m.exec(queryEditor.value) || [])[1] || "";
+    rememberQuery(queryEditor.value.trim());
     writeFilters();
     connect();
     announce("Query run");
   };
   const runButton = el("button", { class: "primary", id: "log-run-query", text: "Run query", onclick: runQuery });
+  // Save (#1863), in the Query pane as Google's: the Save query dialog.
+  const saveButton = el("button", { type: "button", class: "secondary", id: "log-save-query", text: "Save",
+    "aria-haspopup": "dialog", disabled: project ? null : "disabled",
+    title: project ? null : "Choose a project in the toolbar: a saved query belongs to one.",
+    onclick: () => openSaveQuery() });
   queryEditor.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); runQuery(); }
   });
@@ -13467,10 +13893,13 @@ async function renderLogs(view) {
   const queryActions = overflowMenu([
     { label: "Create metric", run: () => navigate(`/logs/metrics/create?${new URLSearchParams({ filter: queryEditor.value.trim() })}`) },
     { label: "Create sink", run: () => navigate(`/logs/sinks/create?${new URLSearchParams({ filter: queryEditor.value.trim() })}`) },
-    // Google's Create log alert makes a Cloud Monitoring alerting policy,
-    // which this instance does not serve (#1863).
-    { label: "Create log alert", run: () => {},
-      unavailable: "Not available locally: a log alert is a Cloud Monitoring alerting policy, and this instance does not serve Cloud Monitoring." },
+    // Google's Create log alert makes a Cloud Monitoring alerting policy
+    // whose condition is a log match on the query (#1863): Alerting's
+    // create page, its condition type and log filter given.
+    { label: "Create log alert",
+      run: () => navigate(`/monitoring/alerting/create?${new URLSearchParams({ conditionType: "log-match", logFilter: queryEditor.value.trim() })}`),
+      unavailable: SERVICES.some((sv) => sv.id === "monitoring-alerting") ? ""
+        : "Not available locally: a log alert is a Cloud Monitoring alerting policy, and this instance does not serve Cloud Monitoring." },
     { label: "Highlight in results", run: () => openHighlight() },
     { label: "Download", run: async () => {
       const query = filterQuery();
@@ -13528,10 +13957,16 @@ async function renderLogs(view) {
     const fromEnd = el("select", { id: "log-summary-from", "aria-label": "Truncate from" },
       el("option", { value: "start", text: "Show the beginning" }), el("option", { value: "end", text: "Show the end" }));
     fromEnd.value = summary.fromEnd ? "end" : "start";
+    // Hide or show default summary fields: here the Resource each entry is
+    // summarised under, beside its summary.
+    const defaults = el("input", { type: "checkbox", id: "log-summary-defaults" });
+    defaults.checked = summary.defaults !== false;
     drawList();
     dialog.append(el("form", { class: "modal-body", onsubmit: (e) => {
         e.preventDefault();
-        summary = { ...summary, fields, truncate: truncate.checked, chars: Math.max(1, +chars.value || 30), fromEnd: fromEnd.value === "end" };
+        summary = { ...summary, fields, truncate: truncate.checked, chars: Math.max(1, +chars.value || 30), fromEnd: fromEnd.value === "end",
+          defaults: defaults.checked };
+        table.classList.toggle("hide-default-summary", !summary.defaults);
         saveSummary(); redrawSummaries(); close(); announce("Summary fields applied"); } },
       el("h2", { id: "log-summary-title", text: "Manage summary fields" }),
       el("h3", { text: "Custom summary fields" }), list,
@@ -13539,6 +13974,8 @@ async function renderLogs(view) {
         el("label", { for: "log-summary-input", class: "sr-only", text: "Field name" }), input, options, add),
       el("div", { class: "check-line" }, truncate, el("label", { for: "log-summary-truncate", text: "Truncate custom summary fields" })),
       el("div", { class: "actions" }, chars, fromEnd),
+      el("h3", { text: "Hide or show default summary fields" }),
+      el("div", { class: "check-line" }, defaults, el("label", { for: "log-summary-defaults", text: "Show default summary fields (Resource)" })),
       el("div", { class: "modal-actions" },
         el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }),
         el("button", { type: "submit", class: "primary", text: "Apply" }))));
@@ -13552,11 +13989,202 @@ async function renderLogs(view) {
   ], "the query results' preferences");
   preferences.querySelector(".overflow-trigger").setAttribute("aria-label", "Preferences");
 
+  // The Query library (#1863), from building-queries and
+  // logs-explorer-interface (re-read 2026-11-20): Recent queries, Saved
+  // queries and Suggested queries, each with Run and Stream; a saved
+  // query's More options has Edit and Delete. Recent queries are the
+  // viewer's own, kept in this browser; saved queries are Cloud Logging's
+  // SavedQuery resources of the project (savedQueries.create, .patch,
+  // .delete); suggestions come from the entries the query has read.
+  const openQueryLibrary = async () => {
+    const { dialog, close } = openModal({ labelledBy: "log-library-title" });
+    const tabs = [["recent", "Recent queries"], ["saved", "Saved queries"], ["suggested", "Suggested queries"],
+      ["google", "Queries provided by Google Cloud"]];
+    let current = "recent";
+    const panel = el("div", { class: "query-library-panel", role: "tabpanel", id: "log-library-panel", tabindex: "0" });
+    const use = (q, stream) => {
+      queryEditor.value = q.query;
+      if (q.summary) { summary = { ...summary, ...q.summary }; saveSummary(); }
+      close();
+      runQuery();
+      if (stream && paused) pauseButton.click();
+    };
+    const item = (q, extra) => el("li", { class: "query-library-item" },
+      q.title ? el(q.level || "h3", { text: q.title }) : null,
+      el("span", { class: "mono query-library-text", text: q.query || "(empty query: every entry)" }),
+      el("button", { type: "button", class: "secondary", text: "Run", "aria-label": `Run ${q.title || q.query}`, onclick: () => use(q, false) }),
+      el("button", { type: "button", class: "secondary", text: "Stream", "aria-label": `Stream ${q.title || q.query}`, onclick: () => use(q, true) }),
+      extra || null);
+    const drawPanel = async () => {
+      for (const b of strip.querySelectorAll("[role=tab]")) {
+        const on = b.dataset.tab === current;
+        b.classList.toggle("is-selected", on);
+        b.setAttribute("aria-selected", on ? "true" : "false");
+        b.tabIndex = on ? 0 : -1;
+      }
+      panel.setAttribute("aria-labelledby", `log-library-tab-${current}`);
+      if (current === "recent") {
+        if (!keepsRecentQueries()) return setChildren(panel, el("p", { class: "unavailable", text: "Not available locally: recent queries are Cloud Logging's, and this instance does not serve Cloud Logging." }));
+        if (!project) return setChildren(panel, el("p", { class: "unavailable", text: "Choose a project in the toolbar: recent queries belong to one." }));
+        setChildren(panel, el("p", { class: "unavailable", text: "Loading recent queries…" }));
+        let recent;
+        try {
+          recent = await listRecentQueries(project, false);
+        } catch (err) {
+          return setChildren(panel, el("p", { class: "form-error", role: "alert", text: err.message }));
+        }
+        if (current !== "recent") return;
+        return setChildren(panel, recent.length
+          ? el("ul", { class: "query-library-list", id: "log-recent-queries" }, ...recent.map((r) => item({ query: r.query },
+              el("span", { class: "unavailable", text: `Last run ${relativeTime(new Date(r.lastRunTime))}` }))))
+          : el("p", { class: "unavailable", text: "No recent queries. Each query you run is kept here for 30 days." }));
+      }
+      if (current === "google") {
+        return setChildren(panel, ...LOG_QUERY_LIBRARY.map(([section, queries]) => el("section", { class: "query-library-section" },
+          el("h3", { class: "query-library-heading", text: section }),
+          el("ul", { class: "query-library-list" }, ...queries.map(([title, query]) => item({ title, query, level: "h4" }))))));
+      }
+      if (current === "suggested") {
+        const list = suggestedQueries();
+        return setChildren(panel, list.length
+          ? el("ul", { class: "query-library-list" }, ...list.map((q) => item(q)))
+          : el("p", { class: "unavailable", text: "No suggestions: run a query that reads entries first." }));
+      }
+      if (!project) return setChildren(panel, el("p", { class: "unavailable", text: "Choose a project in the toolbar: saved queries belong to one." }));
+      setChildren(panel, el("p", { class: "unavailable", text: "Loading saved queries…" }));
+      let saved;
+      try {
+        saved = ((await api(`/api/resources/logging-saved-queries?project=${encodeURIComponent(project)}`)).items || [])
+          .filter((r) => (r.fields || {}).kind !== "sql");
+      } catch (err) {
+        return setChildren(panel, el("p", { class: "form-error", role: "alert", text: err.message }));
+      }
+      setChildren(panel, saved.length
+        ? el("ul", { class: "query-library-list" }, ...saved.map((r) => {
+            const f = r.fields || {};
+            const q = { title: f["Display name"] || r.name, query: f.filter || "", summary: savedSummary(f) };
+            return item(q, overflowMenu([
+              { label: "Edit", run: () => { close(); openSaveQuery(r); } },
+              { label: "Delete", destructive: true, run: () => confirmDestructive({
+                title: `Delete saved query ${q.title}?`,
+                detail: "The saved query is deleted from Cloud Logging. No log entry is removed.",
+                confirmWord: q.title, confirmLabel: "Delete",
+                onConfirm: async () => {
+                  await send(`/api/resources/logging-saved-queries?project=${encodeURIComponent(project)}&name=${encodeURIComponent(r.name)}`, "DELETE");
+                  notify(`Deleted saved query ${q.title}`);
+                  drawPanel();
+                } }) },
+            ], `saved query ${q.title}`));
+          }))
+        : el("p", { class: "unavailable", text: "No saved queries in this project. Save a query from the Query pane." }));
+    };
+    const strip = el("div", { class: "tab-strip", role: "tablist", "aria-label": "Query library" },
+      ...tabs.map(([id, label]) => el("button", { type: "button", class: "tab", role: "tab", id: `log-library-tab-${id}`,
+        "data-tab": id, "aria-controls": "log-library-panel", text: label,
+        onclick: () => { current = id; drawPanel(); },
+        onkeydown: (e) => {
+          if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+          const i = tabs.findIndex(([t]) => t === current);
+          current = tabs[(i + (e.key === "ArrowRight" ? 1 : tabs.length - 1)) % tabs.length][0];
+          drawPanel();
+          strip.querySelector(`[data-tab="${current}"]`).focus();
+        } })));
+    dialog.append(el("div", { class: "modal-body" },
+      el("h2", { id: "log-library-title", text: "Query library" }),
+      strip, panel,
+      el("div", { class: "modal-actions" },
+        el("button", { type: "button", class: "secondary", text: "Close", onclick: () => close() }))));
+    await drawPanel();
+    strip.querySelector("[aria-selected=true]").focus();
+  };
+  // A saved query's summary fields, as the Explorer's preferences take them.
+  const savedSummary = (f) => {
+    const fields = (f.summaryFields || "").split(",").map((x) => x.trim()).filter(Boolean);
+    if (!fields.length) return null;
+    const start = +f.summaryFieldStart || 0, end = +f.summaryFieldEnd || 0;
+    return { fields, truncate: !!(start || end), chars: start || end || 30, fromEnd: !start && !!end };
+  };
+  const suggestedQueries = () => {
+    const out = [];
+    const sev = new Set(fieldEntries.map((e) => (e.logEntry || {}).severity));
+    if (["ERROR", "CRITICAL", "ALERT", "EMERGENCY"].some((v) => sev.has(v))) out.push({ title: "Errors", query: "severity>=ERROR" });
+    if (fieldEntries.some((e) => ((e.logEntry || {}).httpRequest || {}).status >= 400)) {
+      out.push({ title: "HTTP requests that failed", query: "httpRequest.status>=400" });
+    }
+    const types = new Map();
+    for (const e of fieldEntries) {
+      const t = ((e.logEntry || {}).resource || {}).type;
+      if (t) types.set(t, (types.get(t) || 0) + 1);
+    }
+    for (const [t] of [...types.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5)) {
+      out.push({ title: `Entries of ${t}`, query: `resource.type=${logQueryValue(t)}` });
+    }
+    return out;
+  };
+  // The Save query dialog, or a saved query's Edit: Name, Description,
+  // Include custom summary fields, Truncate summary fields, Share with
+  // project, then Save query (building-queries, re-read 2026-11-20).
+  const openSaveQuery = (existing) => {
+    const f = existing ? existing.fields || {} : {};
+    const { dialog, close } = openModal({ labelledBy: "log-save-title" });
+    const error = el("p", { class: "form-error", role: "alert", hidden: true });
+    const name = el("input", { type: "text", id: "log-save-name", required: true, value: existing ? f["Display name"] || "" : "" });
+    const description = el("input", { type: "text", id: "log-save-description", value: f.description || "" });
+    const text = el("textarea", { id: "log-save-query-text", class: "mono", rows: "3" });
+    text.value = existing ? f.filter || "" : queryEditor.value.trim();
+    const hasFields = existing ? !!f.summaryFields : summary.fields.length > 0;
+    const include = el("input", { type: "checkbox", id: "log-save-summary" });
+    include.checked = hasFields;
+    const truncate = el("input", { type: "checkbox", id: "log-save-truncate" });
+    truncate.checked = existing ? !!(+f.summaryFieldStart || +f.summaryFieldEnd) : summary.truncate;
+    const share = el("input", { type: "checkbox", id: "log-save-share" });
+    share.checked = f.visibility === "SHARED";
+    const fieldsNote = el("p", { class: "unavailable", id: "log-save-summary-note", text: summary.fields.length
+      ? `Custom summary fields: ${summary.fields.join(", ")}` : "No custom summary fields: add them in Preferences > Manage summary fields." });
+    const submit = el("button", { type: "submit", class: "primary", text: existing ? "Save" : "Save query" });
+    dialog.append(el("form", { class: "modal-body", onsubmit: async (e) => {
+        e.preventDefault();
+        error.hidden = true;
+        const fields = existing && !summary.fields.length ? (f.summaryFields || "") : summary.fields.join(",");
+        const chars = String(summary.chars || 30);
+        const values = { displayName: name.value.trim(), description: description.value.trim(), kind: "Logging query",
+          query: text.value.trim(), visibility: share.checked ? "SHARED" : "PRIVATE",
+          summaryFields: include.checked ? fields : "",
+          summaryFieldStart: include.checked && truncate.checked && !summary.fromEnd ? chars : "",
+          summaryFieldEnd: include.checked && truncate.checked && summary.fromEnd ? chars : "" };
+        submit.disabled = true;
+        try {
+          const base = `/api/resources/logging-saved-queries?project=${encodeURIComponent(project)}`;
+          if (existing) await send(base, "PATCH", { Path: [existing.name], Values: values });
+          else await send(base, "POST", { ...values, location: "global" });
+          close();
+          notify(existing ? `Saved query ${values.displayName} updated` : `Saved query ${values.displayName}`);
+        } catch (err) {
+          error.textContent = err.message;
+          error.hidden = false;
+          submit.disabled = false;
+        }
+      } },
+      el("h2", { id: "log-save-title", text: existing ? "Edit query" : "Save query" }),
+      el("label", { for: "log-save-name", text: "Name" }), name,
+      el("label", { for: "log-save-description", text: "Description (optional)" }), description,
+      el("label", { for: "log-save-query-text", text: "Query" }), text,
+      el("div", { class: "check-line" }, include, el("label", { for: "log-save-summary", text: "Include custom summary fields" })),
+      fieldsNote,
+      el("div", { class: "check-line" }, truncate, el("label", { for: "log-save-truncate", text: "Truncate summary fields" })),
+      el("div", { class: "check-line" }, share, el("label", { for: "log-save-share", text: "Share with project" })),
+      error,
+      el("div", { class: "modal-actions" },
+        el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }),
+        submit)));
+    name.focus();
+  };
+
   drawScope();
   const shareLink = el("button", { class: "secondary", text: "Share link",
     onclick: () => copy(location.href, "link to this query") });
-  const queryLibrary = el("a", { class: "button secondary", href: "/logs/saved-queries", text: "Query library",
-    onclick: (e) => { e.preventDefault(); navigate("/logs/saved-queries"); } });
+  const queryLibrary = el("button", { type: "button", class: "secondary", id: "log-query-library", text: "Query library",
+    "aria-haspopup": "dialog", onclick: () => openQueryLibrary() });
   setChildren(view,
     pageHeader("Logs Explorer",
       "Live from the local stack. Credentials are redacted before an entry is stored.",
@@ -13566,15 +14194,16 @@ async function renderLogs(view) {
           text: "Delete log is on the Cloud Logging entries (source logging/…) of the selected project. " +
                 "Pod logs and CloudBurrow's own request log are not held by the Logging API, so they cannot be deleted here." })
       : null,
-    el("div", { class: "actions log-toolbar" }, scopeSelect, parentInput, viewControls, timeRange,
+    el("div", { class: "actions log-toolbar" }, scopeSelect, parentInput, viewControls, logScopeSelect, timeRange,
        pauseButton, reconnectButton, status),
     viewNote,
+    logScopeNote,
     el("section", { class: "card log-query", "aria-label": "Query" },
       el("div", { class: "actions" }, contains, resourceType, logName, severity, source, resource),
       queryEditor,
       suggestions,
       queryError,
-      el("div", { class: "actions" }, runButton)),
+      el("div", { class: "actions" }, runButton, saveButton)),
     chips,
     timeline,
     el("div", { class: "log-panes" },
@@ -13585,6 +14214,21 @@ async function renderLogs(view) {
 
   showViewControls();
   if (scope === "view") await loadBuckets(initialView);
+  if (scope === "logScope") await loadLogScopes(params.get("logScope") || "");
+  // No scope in the address: open on the project's default log scope when
+  // one other than _Default has been set as default (#2020).
+  if (!scopeChosen && !operation && project && SERVICES.some((sv) => sv.id === "logging-log-scopes") && await loadLogScopes("") &&
+      logScopes.default && !logScopes.default.endsWith("/logScopes/_Default")) {
+    logScopeSelect.value = logScopes.default;
+    drawLogScopeNote();
+    scope = "logScope";
+    scopeSelect.value = scope;
+    const url = new URL(location.href);
+    url.searchParams.set("scope", scope);
+    url.searchParams.set("logScope", logScopes.default);
+    history.replaceState({}, "", url);
+  }
+  showViewControls();
   loadLogNames();
   connect();
   announce(operation ? `Logs Explorer opened, scoped to operation ${operation}`
@@ -18103,22 +18747,20 @@ const BQ_MEASURE_TYPES = ["INTEGER", "INT64", "FLOAT", "FLOAT64", "NUMERIC", "BI
 const BQ_DIMENSION_TYPES = [...BQ_MEASURE_TYPES, "TIMESTAMP", "DATE", "DATETIME", "TIME", "STRING"];
 const BQ_SERIES_COLOURS = ["#1a73e8", "#e8710a", "#188038", "#d93025", "#9334e6", "#12b5cb"];
 
-// bqVisualization is the Visualization tab: the chart of the result set,
-// drawn here as SVG from the rows the query returned, and the
-// Visualization configuration pane (Visualization type, Dimension,
-// Measures), prefilled from the schema and kept on the tab across runs.
-// The chart zooms, toggles its legend and downloads as a PNG.
-function bqVisualization(res, tab, save) {
+// bqVizDefaults fills viz (type, dimension, measures, legend, zoom) from
+// the result's schema, as Visualization prefills its configuration, and
+// gives the dimension and measure columns, or, when nothing can be
+// charted, the paragraph that says why (empty).
+function bqVizDefaults(res, viz) {
   const schema = (res.schema || []).filter((f) => (f.mode || "NULLABLE") !== "REPEATED");
   const dims = schema.filter((f) => BQ_DIMENSION_TYPES.includes(f.type));
   const measures = schema.filter((f) => BQ_MEASURE_TYPES.includes(f.type));
   const geo = schema.some((f) => f.type === "GEOGRAPHY");
   if (!dims.length || !measures.length) {
-    return el("p", { class: "unavailable", text: geo
+    return { empty: el("p", { class: "unavailable", text: geo
       ? "Not available locally: a GEOGRAPHY result is drawn on Google Maps' map, which CloudBurrow does not reach. Line, Bar and Scatter need a numeric measure."
-      : "There is nothing to chart: a chart needs a dimension column (a number, a date or time, or a string) and a numeric measure column." });
+      : "There is nothing to chart: a chart needs a dimension column (a number, a date or time, or a string) and a numeric measure column." }) };
   }
-  const viz = tab.viz || (tab.viz = {});
   if (!dims.some((f) => f.name === viz.dimension)) {
     const firstOther = dims.find((f) => !BQ_MEASURE_TYPES.includes(f.type)) || dims[0];
     viz.dimension = firstOther.name;
@@ -18131,6 +18773,19 @@ function bqVisualization(res, tab, save) {
   if (!["Bar", "Line", "Scatter"].includes(viz.type)) viz.type = "Bar";
   if (viz.legend === undefined) viz.legend = true;
   viz.zoom = viz.zoom || 1;
+  return { dims, measures };
+}
+
+// bqVisualization is the Visualization tab: the chart of the result set,
+// drawn here as SVG from the rows the query returned, and the
+// Visualization configuration pane (Visualization type, Dimension,
+// Measures), prefilled from the schema and kept on the tab across runs.
+// The chart zooms, toggles its legend and downloads as a PNG.
+function bqVisualization(res, tab, save) {
+  const viz = tab.viz || (tab.viz = {});
+  const fit = bqVizDefaults(res, viz);
+  if (!fit.dims) return fit.empty;
+  const { dims, measures } = fit;
 
   const chartHost = el("div", { class: "bq-chart-host" });
   const redraw = () => { save(); drawChart(); };
@@ -18165,95 +18820,7 @@ function bqVisualization(res, tab, save) {
       onclick: (e) => { viz.legend = !viz.legend; e.target.setAttribute("aria-pressed", String(viz.legend)); redraw(); } }),
     el("button", { type: "button", class: "secondary", text: "Download PNG", onclick: () => bqChartPNG(chartHost.querySelector("svg")) }));
 
-  const drawChart = () => {
-    const rows = res.rows || [];
-    const dimType = (dims.find((f) => f.name === viz.dimension) || {}).type;
-    const numericDim = BQ_MEASURE_TYPES.includes(dimType);
-    const timeDim = ["TIMESTAMP", "DATE", "DATETIME"].includes(dimType);
-    const xOf = (v) => numericDim ? Number(v) : timeDim ? Date.parse(String(v).replace(" UTC", "Z").replace(" ", "T")) : NaN;
-    const continuous = viz.type !== "Bar" && (numericDim || timeDim);
-    const points = rows.map((r) => ({ label: cellText(r[viz.dimension]), x: xOf(r[viz.dimension]),
-      ys: viz.measures.map((m) => (r[m] === null || r[m] === undefined ? NaN : Number(r[m]))) }))
-      .filter((p) => !continuous || Number.isFinite(p.x));
-    if (continuous) points.sort((a, b) => a.x - b.x);
-    // As wide as its column (once drawn), times the zoom.
-    const fit = chartHost.isConnected && chartHost.clientWidth > 0 ? Math.max(320, chartHost.clientWidth - 2) : 640;
-    const W = Math.round(fit * viz.zoom), H = 320, L = 56, R = 16, T = 16, B = 56;
-    const ys = points.flatMap((p) => p.ys).filter(Number.isFinite);
-    let yMin = Math.min(0, ...ys), yMax = Math.max(0, ...ys);
-    if (yMin === yMax) yMax = yMin + 1;
-    const sy = (v) => T + (H - T - B) * (1 - (v - yMin) / (yMax - yMin));
-    let sx;
-    if (continuous) {
-      const xs = points.map((p) => p.x);
-      const x0 = Math.min(...xs), x1 = Math.max(...xs);
-      sx = (p) => L + (W - L - R) * (x1 === x0 ? 0.5 : (p.x - x0) / (x1 - x0));
-    } else {
-      const step = (W - L - R) / Math.max(1, points.length);
-      sx = (p, i) => L + step * (i + 0.5);
-    }
-    const NS = "http://www.w3.org/2000/svg";
-    const svg = document.createElementNS(NS, "svg");
-    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
-    svg.setAttribute("width", String(W));
-    svg.setAttribute("height", String(H));
-    // Its own size, which the console's icon rules for svg would shrink.
-    svg.setAttribute("style", `width:${W}px;height:${H}px;max-width:none`);
-    svg.setAttribute("role", "img");
-    svg.setAttribute("class", "bq-chart");
-    svg.setAttribute("aria-label", `${viz.type} chart of ${viz.measures.join(", ")} by ${viz.dimension}, ${points.length} points`);
-    const add = (tag, attrs, text) => {
-      const n = document.createElementNS(NS, tag);
-      for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, String(v));
-      if (text !== undefined) n.textContent = text;
-      svg.append(n);
-      return n;
-    };
-    add("rect", { x: 0, y: 0, width: W, height: H, fill: "#ffffff" });
-    // Axes and four gridlines with their values.
-    for (let i = 0; i <= 4; i++) {
-      const v = yMin + (yMax - yMin) * i / 4;
-      add("line", { x1: L, x2: W - R, y1: sy(v), y2: sy(v), stroke: "#e0e0e0" });
-      add("text", { x: L - 6, y: sy(v) + 4, "text-anchor": "end", "font-size": 11, fill: "#5f6368" }, bqShortNumber(v));
-    }
-    add("line", { x1: L, x2: W - R, y1: sy(0), y2: sy(0), stroke: "#5f6368" });
-    const labelEvery = Math.max(1, Math.ceil(points.length / Math.floor((W - L - R) / 72)));
-    points.forEach((p, i) => {
-      if (i % labelEvery) return;
-      add("text", { x: sx(p, i), y: H - B + 16, "text-anchor": "middle", "font-size": 11, fill: "#5f6368" },
-        p.label.length > 14 ? p.label.slice(0, 13) + "…" : p.label);
-    });
-    add("text", { x: (L + W - R) / 2, y: H - 8, "text-anchor": "middle", "font-size": 12, fill: "#202124" }, viz.dimension);
-    const n = viz.measures.length;
-    viz.measures.forEach((m, k) => {
-      const colour = BQ_SERIES_COLOURS[k % BQ_SERIES_COLOURS.length];
-      if (viz.type === "Bar") {
-        const step = (W - L - R) / Math.max(1, points.length);
-        const bw = Math.max(1, (step * 0.8) / n);
-        points.forEach((p, i) => {
-          const v = p.ys[k];
-          if (!Number.isFinite(v)) return;
-          const x = sx(p, i) - (step * 0.8) / 2 + bw * k;
-          add("rect", { x, y: Math.min(sy(v), sy(0)), width: bw, height: Math.abs(sy(v) - sy(0)), fill: colour },
-          ).append(Object.assign(document.createElementNS(NS, "title"), { textContent: `${p.label}: ${m} ${v}` }));
-        });
-      } else {
-        const pts = points.map((p, i) => [sx(p, i), p.ys[k]]).filter(([, v]) => Number.isFinite(v));
-        if (viz.type === "Line" && pts.length > 1) {
-          add("polyline", { points: pts.map(([x, v]) => `${x},${sy(v)}`).join(" "), fill: "none", stroke: colour, "stroke-width": 2 });
-        }
-        pts.forEach(([x, v]) => add("circle", { cx: x, cy: sy(v), r: viz.type === "Scatter" ? 4 : 2.5, fill: colour }));
-      }
-    });
-    const legend = viz.legend
-      ? el("ul", { class: "bq-chart-legend" }, ...viz.measures.map((m, k) => el("li", {},
-          el("span", { class: "bq-swatch", style: `background:${BQ_SERIES_COLOURS[k % BQ_SERIES_COLOURS.length]}` }),
-          el("span", { text: " " + m }))))
-      : null;
-    setChildren(chartHost, el("div", { class: "bq-chart-scroll" }, svg), legend,
-      rows.length < res.totalRows
-        ? el("p", { class: "unavailable", text: `Charted from the ${rows.length} rows read of ${res.totalRows}.` }) : null);
-  };
+  const drawChart = () => bqDrawChart(chartHost, res, dims, viz);
   drawChart();
   requestAnimationFrame(() => { if (chartHost.isConnected) drawChart(); });
   return el("div", { class: "bq-viz" },
@@ -18263,6 +18830,140 @@ function bqVisualization(res, tab, save) {
       el("label", { for: "bq-viz-type", text: "Visualization type" }), typeSelect,
       el("label", { for: "bq-viz-dimension", text: "Dimension" }), dimSelect,
       measureBoxes));
+}
+
+// bqDrawChart draws viz's chart of the result's rows into chartHost, as
+// SVG: Visualization's, Log Analytics' and a dashboard's Log Analytics
+// chart's (#2032).
+function bqDrawChart(chartHost, res, dims, viz) {
+  const rows = res.rows || [];
+  const dimType = (dims.find((f) => f.name === viz.dimension) || {}).type;
+  const numericDim = BQ_MEASURE_TYPES.includes(dimType);
+  const timeDim = ["TIMESTAMP", "DATE", "DATETIME"].includes(dimType);
+  const xOf = (v) => numericDim ? Number(v) : timeDim ? Date.parse(String(v).replace(" UTC", "Z").replace(" ", "T")) : NaN;
+  const continuous = viz.type !== "Bar" && (numericDim || timeDim);
+  const points = rows.map((r) => ({ label: cellText(r[viz.dimension]), x: xOf(r[viz.dimension]),
+    ys: viz.measures.map((m) => (r[m] === null || r[m] === undefined ? NaN : Number(r[m]))) }))
+    .filter((p) => !continuous || Number.isFinite(p.x));
+  if (continuous) points.sort((a, b) => a.x - b.x);
+  // As wide as its column (once drawn), times the zoom.
+  const fit = chartHost.isConnected && chartHost.clientWidth > 0 ? Math.max(320, chartHost.clientWidth - 2) : 640;
+  const W = Math.round(fit * viz.zoom), H = 320, L = 56, R = 16, T = 16, B = 56;
+  const ys = points.flatMap((p) => p.ys).filter(Number.isFinite);
+  let yMin = Math.min(0, ...ys), yMax = Math.max(0, ...ys);
+  if (yMin === yMax) yMax = yMin + 1;
+  const sy = (v) => T + (H - T - B) * (1 - (v - yMin) / (yMax - yMin));
+  let sx;
+  if (continuous) {
+    const xs = points.map((p) => p.x);
+    const x0 = Math.min(...xs), x1 = Math.max(...xs);
+    sx = (p) => L + (W - L - R) * (x1 === x0 ? 0.5 : (p.x - x0) / (x1 - x0));
+  } else {
+    const step = (W - L - R) / Math.max(1, points.length);
+    sx = (p, i) => L + step * (i + 0.5);
+  }
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("width", String(W));
+  svg.setAttribute("height", String(H));
+  // Its own size, which the console's icon rules for svg would shrink.
+  svg.setAttribute("style", `width:${W}px;height:${H}px;max-width:none`);
+  svg.setAttribute("role", "img");
+  svg.setAttribute("class", "bq-chart");
+  svg.setAttribute("aria-label", `${viz.type} chart of ${viz.measures.join(", ")} by ${viz.dimension}, ${points.length} points`);
+  const add = (tag, attrs, text) => {
+    const n = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, String(v));
+    if (text !== undefined) n.textContent = text;
+    svg.append(n);
+    return n;
+  };
+  add("rect", { x: 0, y: 0, width: W, height: H, fill: "#ffffff" });
+  // Axes and four gridlines with their values.
+  for (let i = 0; i <= 4; i++) {
+    const v = yMin + (yMax - yMin) * i / 4;
+    add("line", { x1: L, x2: W - R, y1: sy(v), y2: sy(v), stroke: "#e0e0e0" });
+    add("text", { x: L - 6, y: sy(v) + 4, "text-anchor": "end", "font-size": 11, fill: "#5f6368" }, bqShortNumber(v));
+  }
+  add("line", { x1: L, x2: W - R, y1: sy(0), y2: sy(0), stroke: "#5f6368" });
+  const labelEvery = Math.max(1, Math.ceil(points.length / Math.floor((W - L - R) / 72)));
+  points.forEach((p, i) => {
+    if (i % labelEvery) return;
+    add("text", { x: sx(p, i), y: H - B + 16, "text-anchor": "middle", "font-size": 11, fill: "#5f6368" },
+      p.label.length > 14 ? p.label.slice(0, 13) + "…" : p.label);
+  });
+  add("text", { x: (L + W - R) / 2, y: H - 8, "text-anchor": "middle", "font-size": 12, fill: "#202124" }, viz.dimension);
+  const n = viz.measures.length;
+  viz.measures.forEach((m, k) => {
+    const colour = BQ_SERIES_COLOURS[k % BQ_SERIES_COLOURS.length];
+    if (viz.type === "Bar") {
+      const step = (W - L - R) / Math.max(1, points.length);
+      const bw = Math.max(1, (step * 0.8) / n);
+      points.forEach((p, i) => {
+        const v = p.ys[k];
+        if (!Number.isFinite(v)) return;
+        const x = sx(p, i) - (step * 0.8) / 2 + bw * k;
+        add("rect", { x, y: Math.min(sy(v), sy(0)), width: bw, height: Math.abs(sy(v) - sy(0)), fill: colour },
+        ).append(Object.assign(document.createElementNS(NS, "title"), { textContent: `${p.label}: ${m} ${v}` }));
+      });
+    } else {
+      const pts = points.map((p, i) => [sx(p, i), p.ys[k]]).filter(([, v]) => Number.isFinite(v));
+      if (viz.type === "Line" && pts.length > 1) {
+        add("polyline", { points: pts.map(([x, v]) => `${x},${sy(v)}`).join(" "), fill: "none", stroke: colour, "stroke-width": 2 });
+      }
+      pts.forEach(([x, v]) => add("circle", { cx: x, cy: sy(v), r: viz.type === "Scatter" ? 4 : 2.5, fill: colour }));
+    }
+  });
+  const legend = viz.legend
+    ? el("ul", { class: "bq-chart-legend" }, ...viz.measures.map((m, k) => el("li", {},
+        el("span", { class: "bq-swatch", style: `background:${BQ_SERIES_COLOURS[k % BQ_SERIES_COLOURS.length]}` }),
+        el("span", { text: " " + m }))))
+    : null;
+  setChildren(chartHost, el("div", { class: "bq-chart-scroll" }, svg), legend,
+    rows.length < res.totalRows
+      ? el("p", { class: "unavailable", text: `Charted from the ${rows.length} rows read of ${res.totalRows}.` }) : null);
+}
+
+// analyticsResultSet is a Log Analytics query's listing as a result set
+// the charts draw: its columns with their types, and its rows.
+function analyticsResultSet(listing) {
+  const types = listing.columnTypes || {};
+  const cols = [listing.nameColumn, ...(listing.columns || [])].filter(Boolean);
+  const res = {
+    schema: cols.map((c) => ({ name: c, type: types[c] === "REPEATED" ? "STRING" : (types[c] || "STRING"),
+      mode: types[c] === "REPEATED" ? "REPEATED" : "NULLABLE" })),
+    rows: (listing.items || []).map((it) => ({ [listing.nameColumn]: it.name, ...(it.fields || {}) })),
+  };
+  res.totalRows = res.rows.length;
+  return res;
+}
+
+// drawAnalyticsSection is a dashboard's Log Analytics chart (#2032): the
+// widget's SQL, run through Log Analytics by the provider, drawn as Log
+// Analytics draws its results' chart, with the chart's default
+// configuration (Google's dashboard keeps no custom chart configuration),
+// or as a table when the widget was saved as one.
+function drawAnalyticsSection(panel, section, note) {
+  const res = analyticsResultSet(section.listing || {});
+  const head = note || null;
+  if (!res.rows.length) {
+    return setChildren(panel, head, el("p", { class: "unavailable", text: "This query returned no results." }));
+  }
+  if (section.visualization === "Table") {
+    const cols = res.schema.map((f) => f.name);
+    return setChildren(panel, head, el("div", { class: "bq-results-scroll" }, el("table", { class: "bq-results-table analytics-widget-table" },
+      el("caption", { class: "sr-only", text: section.label }),
+      el("thead", {}, el("tr", {}, ...cols.map((c) => el("th", { scope: "col", text: c })))),
+      el("tbody", {}, ...res.rows.map((r) => el("tr", {}, ...cols.map((c) => el("td", { class: "mono", text: cellText(r[c]) }))))))));
+  }
+  const viz = { type: section.visualization === "Line" ? "Line" : "Bar" };
+  const fit = bqVizDefaults(res, viz);
+  if (!fit.dims) return setChildren(panel, head, fit.empty);
+  const host = el("div", { class: "bq-chart-host analytics-widget-chart" });
+  setChildren(panel, head, host);
+  bqDrawChart(host, res, fit.dims, viz);
+  requestAnimationFrame(() => { if (host.isConnected) bqDrawChart(host, res, fit.dims, viz); });
 }
 
 function cellText(v) {

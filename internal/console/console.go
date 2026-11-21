@@ -254,6 +254,10 @@ type Listing struct {
 	// over it, beside its text and rows: Document AI's Upload test
 	// document draws the layout it found on the document (#1930).
 	Pages []ResultPage `json:"pages,omitempty"`
+	// ColumnTypes are a query result's column types, by column name, as
+	// BigQuery names them (STRING, INTEGER, TIMESTAMP, …; REPEATED for an
+	// array), for the results' chart: Log Analytics' (#2021).
+	ColumnTypes map[string]string `json:"columnTypes,omitempty"`
 }
 
 // ResultPage is one page image of an action's answer, and its boxes.
@@ -976,6 +980,11 @@ const (
 	// provider's Studio: Spanner Studio on a database's page (#1859). The
 	// page then has no separate Query tab, the Studio's editor being it.
 	KindStudio SectionKind = "studio"
+	// KindAnalytics is a Log Analytics query's results drawn as the Log
+	// Analytics page draws them (#2032): a dashboard's opsAnalyticsQuery
+	// widget, its SQL run through Log Analytics. Listing holds the rows
+	// (with ColumnTypes) and Visualization says Bar, Line or Table.
+	KindAnalytics SectionKind = "analytics"
 )
 
 // Section is one aspect of a resource, rendered as a tab.
@@ -1023,6 +1032,9 @@ type Section struct {
 	StepEntries []StepEntryView `json:"stepEntries,omitempty"`
 	// Series is the content when Kind is KindChart.
 	Series []ChartSeries `json:"series,omitempty"`
+	// Visualization is how a KindAnalytics section draws its rows: Bar,
+	// Line or Table (#2032).
+	Visualization string `json:"visualization,omitempty"`
 	// Unavailable explains why this one section has no content, so a section
 	// that cannot be read shows its own error inside its own panel rather
 	// than an empty table claiming the resource holds nothing.
@@ -1269,6 +1281,20 @@ type DeleteLabeler interface {
 	Deleter
 	DeleteLabel() string
 }
+
+// RowMenuOrderer orders a list row's menu (#1863): the row's action IDs,
+// with RowMenuEdit and RowMenuDelete for its Edit and Delete, as Google's
+// Log Router reads View sink details, Edit sink, Disable sink, Delete
+// sink, Troubleshoot sink. Items it does not name follow, in their order.
+type RowMenuOrderer interface {
+	RowMenuOrder() []string
+}
+
+// The RowMenuOrder names of a row's Edit and Delete.
+const (
+	RowMenuEdit   = "edit"
+	RowMenuDelete = "delete"
+)
 
 // RowEditLeader is a RowEditor whose rows' menus begin with Edit, as
 // Google's Triggers menu reads Edit, Disable, Delete (#1854).
@@ -1594,6 +1620,8 @@ type Server struct {
 	// logNames lists a parent's log names, for the Logs Explorer's Log name
 	// picker (#1554).
 	logNames LogNameLister
+	// recentQueries are Cloud Logging's per-user recent queries (#2031).
+	recentQueries RecentQueries
 	// linter is the IAM API's LintPolicy, for the condition editor's Run
 	// Linter (#1756, iamlint.go); nil offers none.
 	linter PolicyLinter
@@ -1689,6 +1717,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/logs", s.handleLogs)
 	mux.HandleFunc("GET /api/logs/buckets", s.handleLogBuckets)
 	mux.HandleFunc("GET /api/logs/names", s.handleLogNames)
+	mux.HandleFunc("GET /api/logs/scopes", s.handleLogScopes)
+	mux.HandleFunc("GET /api/logs/recent-queries", s.handleRecentQueries)
+	mux.HandleFunc("POST /api/logs/recent-queries", s.handleRecentQueries)
 	mux.HandleFunc("DELETE /api/logs", s.handleDeleteLog)
 	mux.HandleFunc("GET /api/operations", s.handleOperations)
 	mux.HandleFunc("GET /api/instance", s.handleInstance)
@@ -1878,7 +1909,7 @@ func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
 			"id": p.ID(), "title": p.Title(),
 			"create": caps.Create, "delete": caps.Delete, "detail": caps.Detail,
 			"query": caps.Query, "edit": caps.Edit, "reveal": caps.Reveal,
-			"deleteLabel": caps.DeleteLabel, "deleteConfirm": caps.DeleteConfirm, "editRow": caps.EditRow, "editRowFirst": caps.EditRowFirst,
+			"deleteLabel": caps.DeleteLabel, "deleteConfirm": caps.DeleteConfirm, "editRow": caps.EditRow, "editRowFirst": caps.EditRowFirst, "rowMenuOrder": caps.RowMenuOrder,
 			"page": caps.Page, "scope": caps.Scope, "filters": caps.Filters,
 		})
 	}
@@ -2073,6 +2104,8 @@ type capabilities struct {
 	EditRow       string `json:"editRow,omitempty"`
 	// EditRowFirst puts the rows' Edit first in their menus (RowEditLeader).
 	EditRowFirst bool `json:"editRowFirst,omitempty"`
+	// RowMenuOrder is RowMenuOrderer's order of a row's menu.
+	RowMenuOrder []string `json:"rowMenuOrder,omitempty"`
 	// Detail means a row can be opened to show what is inside it.
 	Detail bool `json:"detail,omitempty"`
 	// Edit means a resource's detail page can offer an edit form. The form
@@ -2240,6 +2273,9 @@ func (s *Server) capabilitiesOf(p Provider) capabilities {
 	}
 	if rl, ok := p.(RowEditLeader); ok {
 		c.EditRowFirst = rl.RowEditFirst()
+	}
+	if ro, ok := p.(RowMenuOrderer); ok {
+		c.RowMenuOrder = ro.RowMenuOrder()
 	}
 	if re, ok := p.(RowEditor); ok {
 		c.EditRow = re.RowEditLabel()

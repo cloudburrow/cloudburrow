@@ -17,6 +17,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/apikeys"
 	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
 	"github.com/cloudburrow/cloudburrow/internal/service/cloudquotas"
+	"github.com/cloudburrow/cloudburrow/internal/service/logging"
 	"github.com/cloudburrow/cloudburrow/internal/service/monitoring"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
@@ -162,6 +163,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// Secure Source Manager names a review's or a pull request's author
 	// from the request's bearer token (#1927).
 	runadapter.SetSourceManagerCaller(func(bearer string) (string, bool) { return creds.TokenAccount(bearer, time.Now()) }, creds.Email)
+	// Cloud Logging's recent queries are the requesting user's (#2031).
+	logging.SetCallerResolver(func(bearer string) (string, bool) { return creds.TokenAccount(bearer, time.Now()) }, creds.Email)
 
 	coord := lifecycle.New(time.Duration(cfg.ShutdownTimeout))
 	control := lifecycle.NewControlServer(cfg.Endpoints.Control, coord)
@@ -1145,6 +1148,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// And its Log name picker lists ListLogs (#1554).
 		if l := loggingSvc.logNameLister(faults); l != nil {
 			consoleSrv.SetLogNameLister(l)
+		}
+		// And the Query library's Recent queries are the user's, through
+		// recentQueries.list (#2031).
+		if q := loggingSvc.recentQueries(); q != nil {
+			consoleSrv.SetRecentQueries(q)
 		}
 	}
 

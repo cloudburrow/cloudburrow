@@ -20,5 +20,6 @@ func Routes() []rest.Route { return Transcoder().Routes() }
 func NewRESTHandler(s *Server) http.Handler {
 	t := Transcoder()
 	s.Register(t)
-	return withPrometheusAPI(s, t)
+	// And dashboards' opsAnalyticsQuery, which the protos lack (#2031).
+	return withDashboardSQL(s, withPrometheusAPI(s, t))
 }

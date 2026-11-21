@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -13,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"google.golang.org/grpc/codes"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/paging"
@@ -82,9 +85,14 @@ var (
 	scopeResourceRe = regexp.MustCompile(`^(projects/[^/]+|projects/[^/]+/locations/[^/]+/buckets/[^/]+/views/[^/]+)$`)
 )
 
-// maxScopeResources is a log scope's limit on resource_names (documented
-// as at most 100 entries, of which 5 projects; only the total is checked).
-const maxScopeResources = 100
+// A log scope's limits (log-scope/create-and-manage, re-read 2026-11-20):
+// at most 100 projects and log views, of which at most 5 projects, and at
+// most 100 log scopes in a project.
+const (
+	maxScopeResources = 100
+	maxScopeProjects  = 5
+	maxProjectScopes  = 100
+)
 
 // extraCollection is savedQueries or logScopes.
 type extraCollection struct {
@@ -123,6 +131,16 @@ func (a *Admin) ServeExtra(w http.ResponseWriter, r *http.Request) bool {
 		c = collSavedQueries
 	case strings.Contains(path, "/logScopes"):
 		c = collLogScopes
+	case strings.Contains(path, "/recentQueries"):
+		// Recent queries (#2031), list only (recentqueries.go).
+		before, after, _ = strings.Cut(path, "/recentQueries")
+		if after != "" && !strings.HasPrefix(after, "/") {
+			return false
+		}
+		if err := a.serveRecent(w, r, before, strings.TrimPrefix(after, "/")); err != nil {
+			rest.WriteError(w, err)
+		}
+		return true
 	default:
 		return false
 	}
@@ -181,6 +199,11 @@ func (a *Admin) serveExtra(w http.ResponseWriter, r *http.Request, c extraCollec
 		if err := a.db.Delete(c.key(p, loc, id)); err != nil {
 			return apierror.Internal(err, "deleting the %s", c.name)
 		}
+		if c.name == "logScopes" && p.isProject() {
+			if err := a.forgetDefaultLogScope(p.id, id); err != nil {
+				return err
+			}
+		}
 		return rest.WriteJSON(w, http.StatusOK, map[string]any{})
 	}
 	return apierror.NotFound("no %s method answers %s %s", c.name, r.Method, r.URL.Path)
@@ -224,10 +247,17 @@ func checkExtra(c extraCollection, v any) error {
 		if len(x.ResourceNames) > maxScopeResources {
 			return apierror.InvalidArgument("resourceNames has %d entries; at most %d", len(x.ResourceNames), maxScopeResources)
 		}
+		projects := 0
 		for _, n := range x.ResourceNames {
 			if !scopeResourceRe.MatchString(n) {
 				return apierror.InvalidArgument("resourceNames entry %q is not projects/{project} or a log view's name", n)
 			}
+			if !strings.Contains(n, "/views/") {
+				projects++
+			}
+		}
+		if projects > maxScopeProjects {
+			return apierror.InvalidArgument("resourceNames has %d projects; a log scope holds at most %d", projects, maxScopeProjects)
 		}
 		return checkDescription(x.Description)
 	}
@@ -271,6 +301,16 @@ func (a *Admin) createExtra(w http.ResponseWriter, r *http.Request, c extraColle
 	}
 	if _, err := a.db.Get(c.key(p, loc, id)); err == nil {
 		return apierror.AlreadyExists("%s already exists", extraName(c, p, loc, id))
+	}
+	if c.name == "logScopes" {
+		keys, err := a.db.List(c.prefix(p, loc))
+		if err != nil {
+			return apierror.Internal(err, "counting log scopes")
+		}
+		if len(keys) >= maxProjectScopes {
+			return &apierror.Error{Code: codes.ResourceExhausted, Reason: "quotaExceeded",
+				Message: fmt.Sprintf("%s holds %d log scopes, the most a project can", p, len(keys))}
+		}
 	}
 	now := a.now().UTC().Format(time.RFC3339Nano)
 	stamp(v, extraName(c, p, loc, id), now, now)
@@ -463,8 +503,9 @@ func (a *Admin) listExtra(w http.ResponseWriter, r *http.Request, c extraCollect
 	return rest.WriteJSON(w, http.StatusOK, out)
 }
 
-// CallExtra calls the saved query and log scope JSON API in process, for
-// the console, and returns the status and body a client would get.
+// CallExtra calls the saved query, log scope and recent query JSON API in
+// process, for the console, as the instance's own account, and returns the
+// status and body a client would get.
 func (a *Admin) CallExtra(method, path string, body []byte) (int, []byte) {
 	r := httptest.NewRequest(method, path, bytes.NewReader(body))
 	if len(body) > 0 {

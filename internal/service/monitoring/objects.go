@@ -14,6 +14,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
+	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
@@ -52,6 +53,8 @@ func newObject(kind string) proto.Message {
 		return &monitoringpb.Snooze{}
 	case kindDashboards:
 		return &dashboardpb.Dashboard{}
+	case kindDashboardSQL:
+		return &structpb.Struct{}
 	}
 	return nil
 }

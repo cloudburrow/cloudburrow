@@ -124,9 +124,10 @@ func TestUnsupportedFiltersAreRefusedByName(t *testing.T) {
 	}
 	defer ac.Close()
 	for filter, term := range map[string]string{
-		`jsonPayload.msg = "crashed"`:        "jsonPayload.msg",
-		`severity >= WARNING OR logName = x`: "OR",
-		`textPayload:"disk"`:                 "textPayload",
+		`jsonPayload.msg = "crashed" OR`: "Unparseable filter: syntax error at line 1, column 32, token 'AND'",
+		`nosuch.field = "crashed"`:       `"nosuch.field" is not defined`,
+		`severity >= WARNING AND (`:      "Unparseable filter: syntax error",
+		`textPayload =~ "("`:             "invalid regular expression",
 	} {
 		_, err := ac.Entries(ctx, logadmin.Filter(filter)).Next()
 		if status.Code(err) != codes.InvalidArgument || !strings.Contains(err.Error(), term) {
@@ -222,7 +223,7 @@ func TestLabelFiltersWithLogadmin(t *testing.T) {
 			t.Errorf("filter %q = [%s], want [%s]", filter, got, want)
 		}
 	}
-	for _, filter := range []string{`labels.a.b = x`, `resource.labels = x`, `labels."unterminated = x`} {
+	for _, filter := range []string{`labels.a = `, `resource.lables.x = x`, `labels."unterminated = x`} {
 		if _, err := ac.Entries(ctx, logadmin.Filter(filter)).Next(); status.Code(err) != codes.InvalidArgument {
 			t.Errorf("filter %q = %v, want InvalidArgument", filter, err)
 		}

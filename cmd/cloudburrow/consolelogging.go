@@ -17,6 +17,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"regexp"
 	"sort"
 	"strconv"
@@ -33,6 +34,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/admin"
 	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/service/logging"
+	"github.com/cloudburrow/cloudburrow/internal/service/monitoring"
 )
 
 const loggingNotStarted = "Cloud Logging has not started"
@@ -42,6 +44,9 @@ const loggingNotStarted = "Cloud Logging has not started"
 type loggingAdminScreen struct {
 	svc    *loggingService
 	faults *admin.Faults
+	// monitoring is the instance's Cloud Monitoring, nil when it is not
+	// served: Create usage alert and the sinks' volume links (#2021).
+	monitoring func() *monitoring.Server
 }
 
 func (s loggingAdminScreen) admin() (*logging.Admin, error) {
@@ -86,7 +91,12 @@ func enabledWord(disabled bool) string {
 
 // ---- Log-based metrics ----
 
-type loggingMetricsProvider struct{ loggingAdminScreen }
+type loggingMetricsProvider struct {
+	loggingAdminScreen
+	// monitoring reports whether the instance serves Cloud Monitoring, where
+	// View in Metrics Explorer charts the metric's time series.
+	monitoring bool
+}
 
 func (loggingMetricsProvider) ID() string    { return "logging-metrics" }
 func (loggingMetricsProvider) Title() string { return "Log-based Metrics" }
@@ -396,6 +406,42 @@ func (p loggingMetricsProvider) Create(ctx context.Context, project string, valu
 	return logging.MetricName(project, created.GetName()), nil
 }
 
+// The User-defined metrics row menu, as Google's (counter-metrics, re-read
+// 2026-11-20): Edit metric, View in Metrics Explorer, Delete metric.
+func (loggingMetricsProvider) RowEditLabel() string { return "Edit metric" }
+func (loggingMetricsProvider) DeleteLabel() string  { return "Delete metric" }
+func (loggingMetricsProvider) RowMenuOrder() []string {
+	return []string{console.RowMenuEdit, metricExplorerAction, console.RowMenuDelete}
+}
+
+const metricExplorerAction = "metrics-explorer"
+
+// Actions implements console.Actor: View in Metrics Explorer opens Cloud
+// Monitoring's Metrics Explorer on logging.googleapis.com/user/NAME, or is
+// drawn unavailable when the instance does not serve Cloud Monitoring.
+func (p loggingMetricsProvider) Actions(r console.Resource) []console.Action {
+	a := console.Action{ID: metricExplorerAction, Label: "View in Metrics Explorer"}
+	if !p.monitoring {
+		a.Unavailable = "Not available: this instance does not serve Cloud Monitoring, whose Metrics Explorer charts the metric."
+		return []console.Action{a}
+	}
+	project, id := "", r.Name
+	if rest, ok := strings.CutPrefix(r.Name, "projects/"); ok {
+		project, id, _ = strings.Cut(rest, "/metrics/")
+	}
+	q := url.Values{"metric": {"logging.googleapis.com/user/" + id}}
+	if project != "" {
+		q.Set("project", project)
+	}
+	a.Href = "/monitoring/metrics-explorer?" + q.Encode()
+	return []console.Action{a}
+}
+
+// Act refuses: View in Metrics Explorer is a link.
+func (loggingMetricsProvider) Act(_ context.Context, _, _, action string) error {
+	return fmt.Errorf("unknown action %q", action)
+}
+
 func (p loggingMetricsProvider) get(ctx context.Context, project, name string) (*loggingpb.LogMetric, error) {
 	a, err := p.admin()
 	if err != nil {
@@ -672,6 +718,10 @@ var (
 	_ console.CreateLayouter = loggingMetricsProvider{}
 	_ console.Editor         = loggingMetricsProvider{}
 	_ console.Deleter        = loggingMetricsProvider{}
+	_ console.RowEditor      = loggingMetricsProvider{}
+	_ console.DeleteLabeler  = loggingMetricsProvider{}
+	_ console.RowMenuOrderer = loggingMetricsProvider{}
+	_ console.Actor          = loggingMetricsProvider{}
 	_ console.Driller        = loggingSinksProvider{}
 	_ console.Creator        = loggingSinksProvider{}
 	_ console.Editor         = loggingSinksProvider{}

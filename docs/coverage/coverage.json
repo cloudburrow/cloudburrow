@@ -5858,6 +5858,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/logging1226_test.go:279 TestLoggingExclusions",
+          "test/compat/logging2026_test.go:32 TestLoggingQueryLanguage",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
           "test/compat/terraform_logging_parents_test.go:60 TestTerraformLoggingFolderAndOrganizationExclusionsAndBuckets",
@@ -5869,8 +5870,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",
-          "test/compat/logginganalyticsviews_test.go:188 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
-          "test/compat/logginganalyticsviews_test.go:266 TestLoggingLinkedDatasetAcrossRestarts",
+          "test/compat/logginganalyticsviews_test.go:191 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
+          "test/compat/logginganalyticsviews_test.go:269 TestLoggingLinkedDatasetAcrossRestarts",
           "test/compat/logginglinks_test.go:119 TestLoggingLinksToBigQuery",
           "test/compat/terraform_logging_buckets_test.go:33 TestTerraformLoggingBucketsAndLinks"
         ]
@@ -5887,6 +5888,7 @@
           "test/compat/logging1521_test.go:63 TestLoggingInterceptingSinks",
           "test/compat/logging1577_test.go:28 TestLoggingListSinksInScope",
           "test/compat/logging1595_test.go:27 TestLoggingOldTimestampsFollowEachBucketsRetention",
+          "test/compat/logging2026_test.go:32 TestLoggingQueryLanguage",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/loggingparentstools_test.go:87 TestTerraformLoggingFolderAndOrganizationSinks",
           "test/compat/terraform_batch11_test.go:59 TestTerraformLoggingSavedQueryAndLogScope",
@@ -5899,10 +5901,18 @@
         "status": "Verified",
         "tests": [
           "test/compat/logging1519_test.go:63 TestLoggingViewIAMSavedQueriesAndLogScopes",
-          "test/compat/logginganalyticsviews_test.go:188 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
+          "test/compat/logging2028_test.go:34 TestLoggingViewFilterSubset",
+          "test/compat/logginganalyticsviews_test.go:191 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
           "test/compat/loggingviews_test.go:83 TestLoggingViewFiltersAndRetention",
           "test/compat/terraform_logging_buckets_test.go:151 TestTerraformLoggingLogView"
+        ],
+        "unverified": [
+          {
+            "code": "INVALID_ARGUMENT",
+            "case": "a log view filter outside the documented subset (docs re-read 2026-11-20, still unanswered: https://docs.cloud.google.com/logging/docs/logs-views)",
+            "test": "test/compat/logging2028_test.go:34 TestLoggingViewFilterSubset"
+          }
         ]
       },
       {
@@ -5955,7 +5965,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/logging1519_test.go:63 TestLoggingViewIAMSavedQueriesAndLogScopes",
-          "test/compat/logginganalyticsviews_test.go:188 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
+          "test/compat/logginganalyticsviews_test.go:191 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
           "test/compat/terraform_logging_buckets_test.go:151 TestTerraformLoggingLogView"
         ]
@@ -6091,7 +6101,7 @@
         "method": "google.logging.v2.ConfigServiceV2/UpdateBucket",
         "status": "Verified",
         "tests": [
-          "test/compat/logginganalyticsviews_test.go:188 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
+          "test/compat/logginganalyticsviews_test.go:191 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
           "test/compat/loggingcmek1950_test.go:70 TestLoggingBucketCMEK",
           "test/compat/terraform_logging_buckets_test.go:33 TestTerraformLoggingBucketsAndLinks",
@@ -6151,9 +6161,17 @@
         "method": "google.logging.v2.ConfigServiceV2/UpdateView",
         "status": "Verified",
         "tests": [
-          "test/compat/logginganalyticsviews_test.go:188 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
+          "test/compat/logging2028_test.go:34 TestLoggingViewFilterSubset",
+          "test/compat/logginganalyticsviews_test.go:191 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
           "test/compat/terraform_logging_buckets_test.go:151 TestTerraformLoggingLogView"
+        ],
+        "unverified": [
+          {
+            "code": "INVALID_ARGUMENT",
+            "case": "a log view filter outside the documented subset (docs re-read 2026-11-20, still unanswered: https://docs.cloud.google.com/logging/docs/logs-views)",
+            "test": "test/compat/logging2028_test.go:34 TestLoggingViewFilterSubset"
+          }
         ]
       },
       {
@@ -6161,8 +6179,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:79 TestGcloudLogging",
-          "test/compat/logging_test.go:106 TestConsoleDeleteLogIsSeenByTheOfficialClient",
-          "test/compat/logginganalyticsviews_test.go:188 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
+          "test/compat/logging_test.go:111 TestConsoleDeleteLogIsSeenByTheOfficialClient",
+          "test/compat/logginganalyticsviews_test.go:191 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents"
         ]
       },
@@ -6176,6 +6194,7 @@
           "test/compat/gcloudschedulerlogging_test.go:79 TestGcloudLogging",
           "test/compat/logging1521_test.go:63 TestLoggingInterceptingSinks",
           "test/compat/logging1595_test.go:27 TestLoggingOldTimestampsFollowEachBucketsRetention",
+          "test/compat/logging2026_test.go:32 TestLoggingQueryLanguage",
           "test/compat/logging_fidelity_test.go:31 TestLoggingPartialSuccessAndScopedPaging",
           "test/compat/logging_test.go:34 TestLoggingWriteAndRead",
           "test/compat/loggingcmek1950_test.go:70 TestLoggingBucketCMEK",
@@ -6226,8 +6245,9 @@
           "test/compat/logging_fidelity_test.go:31 TestLoggingPartialSuccessAndScopedPaging",
           "test/compat/logging_test.go:34 TestLoggingWriteAndRead",
           "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",
-          "test/compat/logginganalyticsviews_test.go:188 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
-          "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents"
+          "test/compat/logginganalyticsviews_test.go:191 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
+          "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
+          "test/compat/observability2020_test.go:44 TestObservabilityDefaultLogScope"
         ]
       },
       {
@@ -12106,7 +12126,7 @@
           "test/compat/consolebigqueryloadfile_test.go:97 TestConsoleBigQueryLoadFromAFile",
           "test/compat/consolebigqueryorc_test.go:17 TestConsoleBigQueryLoadORCThroughTheForm",
           "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",
-          "test/compat/logginganalyticsviews_test.go:188 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
+          "test/compat/logginganalyticsviews_test.go:191 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
           "test/compat/terraform_bigquery_tables_test.go:24 TestTerraformBigQueryPartitionedTableAndJob"
         ]
       },
@@ -12399,8 +12419,8 @@
           "test/compat/consolebigquerywrites_test.go:398 TestConsoleBigQueryReadWriteEditorRunsDML",
           "test/compat/documentai_test.go:201 TestBigQueryMLProcessDocument",
           "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",
-          "test/compat/logginganalyticsviews_test.go:188 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
-          "test/compat/logginganalyticsviews_test.go:266 TestLoggingLinkedDatasetAcrossRestarts",
+          "test/compat/logginganalyticsviews_test.go:191 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
+          "test/compat/logginganalyticsviews_test.go:269 TestLoggingLinkedDatasetAcrossRestarts",
           "test/compat/orgpolicycustom1891_test.go:436 TestOrgPolicyEnforcementBigQueryDDL"
         ]
       },
@@ -12820,7 +12840,7 @@
           "test/compat/bigqueryviewcolumns_test.go:29 TestBigQueryCreateViewWithAColumnList",
           "test/compat/bqcopysnapshot_test.go:25 TestBqCopySnapshotCloneAndRestore",
           "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",
-          "test/compat/logginganalyticsviews_test.go:188 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
+          "test/compat/logginganalyticsviews_test.go:191 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
           "test/compat/terraform_batch6_test.go:318 TestTerraformBigQueryDatasetCMEK",
           "test/compat/terraform_bigquery_access_test.go:22 TestTerraformBigQueryAccess",
           "test/compat/terraform_bigquery_tables_test.go:24 TestTerraformBigQueryPartitionedTableAndJob",
@@ -12872,7 +12892,7 @@
           "test/compat/bigqueryprojectconfig_test.go:34 TestBigQueryProjectConfigurations",
           "test/compat/bigquerytimes_test.go:22 TestBigQueryResourceTimesInMilliseconds",
           "test/compat/bigquerytimezonecolumns_test.go:27 TestBigQueryDefaultTimeZoneOfColumns",
-          "test/compat/logginganalyticsviews_test.go:266 TestLoggingLinkedDatasetAcrossRestarts",
+          "test/compat/logginganalyticsviews_test.go:269 TestLoggingLinkedDatasetAcrossRestarts",
           "test/compat/orgpolicycustom1895_bigquery_test.go:27 TestOrgPolicyCustomConstraintsBigQuery",
           "test/compat/terraform_batch6_test.go:318 TestTerraformBigQueryDatasetCMEK",
           "test/compat/terraform_bigquery_access_test.go:22 TestTerraformBigQueryAccess",
@@ -12888,7 +12908,7 @@
           "test/compat/bigqueryobjecttables_test.go:48 TestBigQueryObjectTables",
           "test/compat/consolebigquery_test.go:89 TestConsoleBigQueryDatasetsSchemaAndQuery",
           "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",
-          "test/compat/logginganalyticsviews_test.go:188 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
+          "test/compat/logginganalyticsviews_test.go:191 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
           "test/compat/terraform_batch12_emulators_test.go:28 TestTerraformBigQueryListsAndServiceAccount"
         ]
       },
@@ -17861,6 +17881,7 @@
         "method": "google.monitoring.dashboard.v1.DashboardsService/CreateDashboard",
         "status": "Verified",
         "tests": [
+          "test/compat/logging2031_test.go:147 TestMonitoringDashboardOpsAnalyticsQuery",
           "test/compat/monitoring_alerting_test.go:544 TestMonitoringDashboards",
           "test/compat/monitoring_alerting_test.go:594 TestTerraformMonitoringAlerting",
           "test/compat/monitoring_alerting_test.go:703 TestGcloudMonitoring"
@@ -17870,6 +17891,7 @@
         "method": "google.monitoring.dashboard.v1.DashboardsService/DeleteDashboard",
         "status": "Verified",
         "tests": [
+          "test/compat/logging2031_test.go:147 TestMonitoringDashboardOpsAnalyticsQuery",
           "test/compat/monitoring_alerting_test.go:544 TestMonitoringDashboards",
           "test/compat/monitoring_alerting_test.go:594 TestTerraformMonitoringAlerting",
           "test/compat/monitoring_alerting_test.go:703 TestGcloudMonitoring"
@@ -17879,6 +17901,7 @@
         "method": "google.monitoring.dashboard.v1.DashboardsService/GetDashboard",
         "status": "Verified",
         "tests": [
+          "test/compat/logging2031_test.go:147 TestMonitoringDashboardOpsAnalyticsQuery",
           "test/compat/monitoring_alerting_test.go:544 TestMonitoringDashboards",
           "test/compat/monitoring_alerting_test.go:594 TestTerraformMonitoringAlerting",
           "test/compat/monitoring_alerting_test.go:703 TestGcloudMonitoring"
@@ -17888,6 +17911,7 @@
         "method": "google.monitoring.dashboard.v1.DashboardsService/ListDashboards",
         "status": "Verified",
         "tests": [
+          "test/compat/logging2031_test.go:147 TestMonitoringDashboardOpsAnalyticsQuery",
           "test/compat/monitoring_alerting_test.go:544 TestMonitoringDashboards",
           "test/compat/monitoring_alerting_test.go:703 TestGcloudMonitoring"
         ]
@@ -17896,6 +17920,7 @@
         "method": "google.monitoring.dashboard.v1.DashboardsService/UpdateDashboard",
         "status": "Verified",
         "tests": [
+          "test/compat/logging2031_test.go:147 TestMonitoringDashboardOpsAnalyticsQuery",
           "test/compat/monitoring_alerting_test.go:544 TestMonitoringDashboards"
         ]
       },
@@ -18022,6 +18047,7 @@
         "method": "google.monitoring.v3.MetricService/GetMetricDescriptor",
         "status": "Verified",
         "tests": [
+          "test/compat/logging2021_test.go:34 TestMonitoringSinkVolumeAndIngestion",
           "test/compat/monitoring_test.go:242 TestMonitoringLogBasedMetrics",
           "test/compat/monitoring_test.go:365 TestTerraformMonitoringMetricDescriptor",
           "test/compat/monitoring_test.go:88 TestMonitoringCustomMetrics"
@@ -18031,6 +18057,7 @@
         "method": "google.monitoring.v3.MetricService/GetMonitoredResourceDescriptor",
         "status": "Verified",
         "tests": [
+          "test/compat/logging2021_test.go:34 TestMonitoringSinkVolumeAndIngestion",
           "test/compat/monitoring_test.go:88 TestMonitoringCustomMetrics"
         ]
       },
@@ -18052,6 +18079,7 @@
         "method": "google.monitoring.v3.MetricService/ListTimeSeries",
         "status": "Verified",
         "tests": [
+          "test/compat/logging2021_test.go:34 TestMonitoringSinkVolumeAndIngestion",
           "test/compat/monitoring_query_test.go:288 TestMonitoringSLOCompliance",
           "test/compat/monitoring_test.go:242 TestMonitoringLogBasedMetrics",
           "test/compat/monitoring_test.go:324 TestMonitoringRequestCounts",
