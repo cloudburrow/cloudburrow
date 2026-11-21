@@ -162,6 +162,9 @@ func visionObjectTable(t *testing.T, h *Harness, extra ...map[string][]byte) (*b
 	for name, data := range objects {
 		w := bh.Object(name).NewWriter(ctx)
 		w.ContentType = "image/png"
+		if strings.HasSuffix(name, ".pdf") {
+			w.ContentType = "application/pdf"
+		}
 		if _, err := w.Write(data); err != nil {
 			t.Fatal(err)
 		}

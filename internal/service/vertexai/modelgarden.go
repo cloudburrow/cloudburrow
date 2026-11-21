@@ -660,5 +660,9 @@ func (s *Server) serveREST(w http.ResponseWriter, r *http.Request, body []byte) 
 	if body != nil {
 		r.Body = io.NopCloser(strings.NewReader(string(body)))
 	}
+	if r.Header.Get(callerHeader) == callerProcessDocument && r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, ":process") {
+		// BigQuery ML's ML.PROCESS_DOCUMENT (documentai.go's page limits).
+		r = r.WithContext(context.WithValue(r.Context(), processDocumentCaller{}, true))
+	}
 	s.restTranscoder().ServeHTTP(w, r)
 }

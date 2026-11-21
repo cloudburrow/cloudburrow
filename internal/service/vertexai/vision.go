@@ -55,7 +55,14 @@ import (
 //   - Every other feature (LANDMARK_DETECTION, LOGO_DETECTION,
 //     SAFE_SEARCH_DETECTION, CROP_HINTS, WEB_DETECTION,
 //     PRODUCT_SEARCH) has no local model: that image's response is an
-//     UNIMPLEMENTED error naming it, and nothing is read.
+//     UNIMPLEMENTED error naming it, and nothing is read. Re-checked
+//     2026-11-21 for logos and landmarks: Google publishes no logo model
+//     (MediaPipe's, Kaggle's and TF Hub's lists have none); its on-device
+//     landmark classifiers cannot answer "no landmark" (measured, #1799);
+//     DELF and DELG (tensorflow/models, Apache-2.0, ungated) are retrieval
+//     embeddings, which need a TensorFlow runtime and an index of labelled
+//     landmark images with Knowledge Graph mids that Google does not
+//     publish.
 //   - image.content (base64) alone: image.source, a URL Vision would fetch,
 //     is refused. PNG, JPEG and GIF are decoded; other data is "Bad image
 //     data." as Vision answers it.

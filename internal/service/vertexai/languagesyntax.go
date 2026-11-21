@@ -31,7 +31,8 @@ import (
 //   - English alone is parsed: the API's other syntax languages have no
 //     local model and are UNIMPLEMENTED, naming the language.
 //
-// UNVERIFIED (the references define the fields, not these values): that
+// UNVERIFIED (re-read 2026-11-21: the references define the fields, not
+// these values): that
 // Google's English model answers Parsey's tags and edges (the NL API's
 // syntax descends from SyntaxNet, and the analyzing-syntax sample's edges,
 // Google NSUBJ of unveiled and the final period P, are Parsey's for that
