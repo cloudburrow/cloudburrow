@@ -28,8 +28,9 @@ type upFake struct {
 	next   int
 	log    []string
 	master string
-	// hook, when set, runs before each AddNode and RemoveNode, outside
-	// the fake's lock (#2076's tests stop an upgrade midway with it).
+	// hook, when set, runs before each UpgradeControlPlane, AddNode and
+	// RemoveNode, outside the fake's lock (#2076's tests stop an upgrade
+	// midway with it; #2069's hold one running).
 	hook func(verb, name string)
 }
 
@@ -47,6 +48,7 @@ func (f *upFake) Resize(ctx context.Context, kind, image, pool string, n int) er
 }
 
 func (f *upFake) UpgradeControlPlane(_ context.Context, _, image string) error {
+	f.runHook("master", image)
 	f.umu.Lock()
 	defer f.umu.Unlock()
 	f.master = image
@@ -221,13 +223,28 @@ func TestUpgradeMaxUnavailableAndRefusals(t *testing.T) {
 	_, err = s.UpdateNodePool(ctx, &containerpb.UpdateNodePoolRequest{Name: name + "/nodePools/default-pool", NodeVersion: "-", ImageType: "COS_CONTAINERD",
 		UpgradeSettings: &containerpb.NodePool_UpgradeSettings{}})
 	wantCode(t, "surge and unavailable both 0", err, codes.InvalidArgument)
+	// Hold the control plane upgrade until the second request is answered:
+	// the fake upgrades at once, so without the hold the operation can be
+	// DONE (and "latest" already current) before the second request runs.
+	reached, release := make(chan struct{}), make(chan struct{})
+	f.setHook(func(verb, _ string) {
+		if verb == "master" {
+			close(reached)
+			<-release
+		}
+	})
 	op, err := s.UpdateCluster(ctx, &containerpb.UpdateClusterRequest{Name: name, Update: &containerpb.ClusterUpdate{DesiredMasterVersion: "latest"}})
 	if err != nil {
 		t.Fatal(err)
 	}
+	<-reached
 	_, err = s.UpdateCluster(ctx, &containerpb.UpdateClusterRequest{Name: name, Update: &containerpb.ClusterUpdate{DesiredMasterVersion: "latest"}})
 	wantCode(t, "a second operation", err, codes.FailedPrecondition)
-	wait(t, s, "p", "us-central1-a", op)
+	close(release)
+	f.setHook(nil)
+	if got := wait(t, s, "p", "us-central1-a", op); got.Error != nil {
+		t.Fatal(got.Error)
+	}
 	// Downgrading the control plane is refused.
 	_, err = s.UpdateCluster(ctx, &containerpb.UpdateClusterRequest{Name: name, Update: &containerpb.ClusterUpdate{DesiredMasterVersion: oldV}})
 	wantCode(t, "a downgrade", err, codes.InvalidArgument)
