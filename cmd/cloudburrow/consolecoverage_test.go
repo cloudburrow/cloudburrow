@@ -49,7 +49,7 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 	config.ServiceBigQuery:      {Providers: []string{"bigquery", "bigquery-jobs", "bigquery-transfers", "bigquery-scheduled-queries", "bigquery-sharing"}},
 	config.ServiceScheduler:     {Providers: []string{"scheduler"}},
 	config.ServiceKMS:           {Providers: []string{"kms", "kms-ekm", "kms-autokey", "kms-config", "kms-inventory", "kms-hsm"}},
-	config.ServiceLogging:       {Providers: []string{"logging-metrics", "logging-sinks", "logging-exclusions", "logging-buckets", "logging-settings", "logging-saved-queries", "logging-log-scopes", "logging-analytics"}, Screen: "/logs"},
+	config.ServiceLogging:       {Providers: []string{"logging-metrics", "logging-sinks", "logging-exclusions", "logging-buckets", "logging-settings", "logging-saved-queries", "logging-log-scopes", "logging-trace-scopes", "logging-analytics"}, Screen: "/logs"},
 	config.ServiceMemorystore:   {Providers: []string{"memorystore", "memorystore-clusters", "memorystore-valkey"}},
 	config.ServiceCloudSQLMySQL: {Providers: []string{"cloudsql-mysql", "cloudsql-instances", "cloudsql-backups"}},
 	config.ServiceBackupDR: {Providers: []string{"backupdr-overview", "backupdr-vaulted", "backupdr-plans", "backupdr-associations",

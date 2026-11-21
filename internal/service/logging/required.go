@@ -31,8 +31,8 @@ package logging
 //
 // Google documents no error text or code for a change to the _Required
 // sink or bucket: FAILED_PRECONDITION is this package's code for every
-// undocumented refusal, and the wording is ours (UNVERIFIED (docs re-read
-// 2026-11-21: https://docs.cloud.google.com/logging/docs/routing/overview)).
+// undocumented refusal, and the wording is ours.
+// UNVERIFIED (docs re-read 2026-11-21: https://docs.cloud.google.com/logging/docs/routing/overview)
 
 import (
 	"net/url"

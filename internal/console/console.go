@@ -110,6 +110,11 @@ type Resource struct {
 	// Label: Google's Vulnerabilities rows link View or View Fixed, which
 	// open the Vulnerability details panel (#2066).
 	Panel *SidePanel `json:"panel,omitempty"`
+	// Withheld draws the row's Edit ("edit") or Delete ("delete") menu
+	// item disabled with the reason given, where the provider offers it on
+	// other rows: Google's Logs Storage greys out Edit bucket and Delete
+	// bucket on _Required, and Log Router the _Required sink's (#2108).
+	Withheld map[string]string `json:"withheld,omitempty"`
 }
 
 // SidePanel is a panel drawn at the side of the page, over the info
