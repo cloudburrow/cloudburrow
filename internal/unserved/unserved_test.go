@@ -45,9 +45,9 @@ func TestTheRefusalNamesTheAPIAndIsNotRetried(t *testing.T) {
 
 func TestTheInventoriesAreWhole(t *testing.T) {
 	g, b, o := TerraformEndpoints(false), TerraformEndpoints(true), GcloudOverrides()
-	// hashicorp/google 8.4.0 has 182 endpoint arguments, google-beta 196;
+	// hashicorp/google 8.12.0 has 185 endpoint arguments, google-beta 199;
 	// gcloud 593.0.0 has 202 overrides.
-	if len(g) != 182 || len(b) != 196 || len(o) != 202 {
+	if len(g) != 185 || len(b) != 199 || len(o) != 202 {
 		t.Fatalf("inventories: %d google, %d google-beta, %d gcloud", len(g), len(b), len(o))
 	}
 	for _, a := range append(g, b...) {

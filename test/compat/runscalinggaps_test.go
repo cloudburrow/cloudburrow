@@ -4,11 +4,9 @@ package compat
 
 import (
 	"context"
-	_ "embed"
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -332,40 +330,25 @@ func TestRunServiceCPUOnlyScaling(t *testing.T) {
 	}
 }
 
-// scalingControlsProvider is the first hashicorp/google release whose
-// google_cloud_run_v2_service template.scaling has cpu_utilization and
-// concurrency_utilization: 8.4.0's has only min_instance_count and
-// max_instance_count (its provider schema, read 2026-11-18).
-const scalingControlsProvider = "8.5.0"
-
-//go:embed testdata/terraform-8.5.0/.terraform.lock.hcl
-var scalingControlsProviderLock []byte
-
 // covers: google.cloud.run.v2.Services/CreateService, google.cloud.run.v2.Services/UpdateService, google.cloud.run.v2.Services/GetService
 //
 // TestTerraformRunServiceScalingControls (#1802): Google's Terraform for
-// custom scaling controls (scaling-controls page), on hashicorp/google
-// 8.5.0: template.scaling cpu_utilization 0.7 and concurrency_utilization
+// custom scaling controls (scaling-controls page): template.scaling cpu_utilization 0.7 and concurrency_utilization
 // 0.8 apply, read back through the official client and plan clean;
 // concurrency_utilization 0, "scale only by CPU", changes them in place
-// and plans clean too.
+// and plans clean too. hashicorp/google 8.5.0 is the first release with
+// cpu_utilization and concurrency_utilization (8.4.0's schema has only
+// min_instance_count and max_instance_count, read 2026-11-18); the pin is
+// past it since #1578.
 func TestTerraformRunServiceScalingControls(t *testing.T) {
 	h := New(t)
 	scaleShardEndpoint(h, envScaleRun, EnvRun) // the scale shard only (#1821)
 	c := runClient(t, h)
 	m := newTFModule(t)
-	if err := os.WriteFile(filepath.Join(m.dir, ".terraform.lock.hcl"), scalingControlsProviderLock, 0o644); err != nil {
-		t.Fatal(err)
-	}
 	id := "tfsvcsc-" + strings.TrimPrefix(h.Project(), "cb-test-")
 	name := runParent(h) + "/services/" + id
 	module := func(cpu, concurrency string) string {
-		return fmt.Sprintf(`terraform {
-  required_providers {
-    google = { source = "hashicorp/google", version = %[5]q }
-  }
-}
-
+		return fmt.Sprintf(`
 resource "google_cloud_run_v2_service" "s" {
   project             = %[1]q
   name                = %[2]q
@@ -378,17 +361,13 @@ resource "google_cloud_run_v2_service" "s" {
       concurrency_utilization = %[4]s
     }
     containers {
-      image = %[6]q
+      image = %[5]q
     }
   }
 }
-`, h.Project(), id, cpu, concurrency, scalingControlsProvider, helloDigest)
+`, h.Project(), id, cpu, concurrency, helloDigest)
 	}
-	write := func(src string) {
-		if err := os.WriteFile(filepath.Join(m.dir, "main.tf"), []byte(src), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
+	write := m.write
 	check := func(when string, cpu, concurrency float32) {
 		t.Helper()
 		got, err := c.GetService(h.Context(), &runpb.GetServiceRequest{Name: name})

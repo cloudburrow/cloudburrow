@@ -1438,7 +1438,7 @@
         "digestNote": "SHA-256 of the versioned archive, computed on download 2026-11-19 (its tar, gunzipped: sha256 5f80cdf432eefca57f6e3b1755229ee7339c46a6de7937fab124ba32e6529574). Google publishes a checksum only for the unversioned google-cloud-cli-linux-x86_64.tar.gz. 593.0.0 replaced 586.0.0 for `gcloud alpha source-manager hooks` (#1927), which 586.0.0 does not have."
       },
       "hashicorpGoogleProvider": {
-        "version": "8.4.0",
+        "version": "8.12.0",
         "source": "https://github.com/hashicorp/terraform-provider-google",
         "registries": [
           "registry.terraform.io/hashicorp/google",
@@ -1447,7 +1447,7 @@
         "license": "MPL-2.0",
         "redistribution": "pull-only",
         "scope": "test-only",
-        "usedBy": "The Terraform and OpenTofu tests in test/compat: every module requires exactly this version (googleProviderVersion in test/compat/realtools_test.go) and inits against test/compat/testdata/terraform/.terraform.lock.hcl, except TestTerraformRunServiceScalingControls, which requires 8.5.0 (the first release with google_cloud_run_v2_service template.scaling cpu_utilization and concurrency_utilization, #1802) and inits against test/compat/testdata/terraform-8.5.0/.terraform.lock.hcl",
+        "usedBy": "The Terraform and OpenTofu tests in test/compat: every module requires exactly this version (googleProviderVersion in test/compat/realtools_test.go) and inits against test/compat/testdata/terraform/.terraform.lock.hcl. Bumped from 8.4.0 to 8.12.0 (2026-11-17, the latest on 2026-11-21) in #1578; internal/unserved's endpoint inventories were regenerated from its schema (design_center, gemini_data_analytics and saas_runtime are new, and refused).",
         "updateFeed": "github-releases",
         "verification": "lock-file-hashes",
         "digest": null,
