@@ -176,8 +176,14 @@ COMPAT_SHARDS="storage served run crossservice scale emulators memorystore sql s
 # Batch Operations' rewrite to a Cloud KMS key, Cloud Storage's Data Access
 # audit logs (Cloud Logging), Pub/Sub's BigQuery subscriptions and gcloud's
 # message storage policy (Pub/Sub with BigQuery and Service Usage), and
-# BigQuery and Firestore refused while disabled (Service Usage).
+# BigQuery and Firestore refused while disabled (Service Usage); Cloud
+# KMS Inventory's protected resources (#2053: a CMEK bucket and a BigQuery
+# dataset beside the key, through the client and gcloud), and Firestore's
+# and Cloud Tasks' metrics in Cloud Monitoring (#2050, Firestore or Cloud
+# Tasks with Monitoring), which no other shard serves together.
 COMPAT_CROSSSERVICE_TEST_NAMES="ArtifactRegistryCleanupPolicies
+  FirestoreDocumentMetrics FirestoreStreamMetrics GcloudKMSInventory
+  KMSInventoryCountsCMEKResources TasksQueueMetricsInCloudMonitoring
   GcloudPubSubTopicStoragePolicyUpdate GcloudStorageInsightsDatasetConfigs
   PubSubBigQuerySubscriptionPermissionDenied ServiceDisabledBigQuery
   ServiceDisabledFirestore StorageBatchOperationsRewriteToKMSKey
@@ -246,8 +252,11 @@ COMPAT_BROWSER_SQL_SHARD_TESTS='^Test(CloudSQL|BackupDR|PrivateCAKMS)'
 # document_ocr (#1733) need a -tags onnx build started with
 # -local-ai-embeddings (without it the console has no ai-embed screen and
 # the test skips) and EmbeddingGemma 2, which the compat suite's image and
-# audio tests download and load first: the localai shard's (#1985).
-COMPAT_BROWSER_LOCALAI_SHARD_TESTS='^Test(StudioManagesLocalModelsAndTestsEmbeddings|EmbeddingsPageEmbedsAnImage|EmbeddingsPageEmbedsAudioAndCloudStorage|EmbeddingsPageReadsAScannedPDFWithOCR)$'
+# audio tests download and load first: the localai shard's (#1985). So does
+# Speech-to-Text's workspace and playback (#2084), whose transcription needs
+# the local models (CLOUDBURROW_TEST_LOCALAI): its TestSpeech name matches
+# the run shard's pattern, which skips the localai shard's tests.
+COMPAT_BROWSER_LOCALAI_SHARD_TESTS='^Test(StudioManagesLocalModelsAndTestsEmbeddings|EmbeddingsPageEmbedsAnImage|EmbeddingsPageEmbedsAudioAndCloudStorage|EmbeddingsPageReadsAScannedPDFWithOCR|SpeechWorkspaceAndPlaybackThroughThePage)$'
 # Browser tests no shard runs: Functions' Edit, Download and Permissions builds a function from source with
 # Google's builder, as the compat suite's Functions tests do, so it runs only
 # when asked for (CLOUDBURROW_TEST_FUNCTIONS) on amd64 nodes.
@@ -412,7 +421,7 @@ compat_shard() {
         # The run shard's instance again, for COMPAT_CROSSSERVICE_TESTS only, with
         # the plain names of the services they read: COMPAT_RUN keeps every
         # other suite those names would select to its own shard.
-        TEST_VARS+=,STORAGE,STORAGE_BATCH,STORAGE_INSIGHTS,PUBSUB,BIGQUERY,FIRESTORE,SERVICEUSAGE,KMS,LOGGING,RESOURCEMANAGER
+        TEST_VARS+=,STORAGE,STORAGE_BATCH,STORAGE_INSIGHTS,PUBSUB,BIGQUERY,FIRESTORE,SERVICEUSAGE,KMS,LOGGING,RESOURCEMANAGER,MONITORING
         COMPAT_RUN=$COMPAT_CROSSSERVICE_TESTS
       else
         COMPAT_SKIP=$COMPAT_CROSSSERVICE_TESTS

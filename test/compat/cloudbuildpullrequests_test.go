@@ -36,6 +36,10 @@ import (
 func TestCloudBuildPullRequestTriggers(t *testing.T) {
 	h := New(t)
 	_ = runClient(t, h) // skips without CLOUDBURROW_TEST_RUN
+	// The external contributor's service account (ssmClientAs) is made in a
+	// project of its own: ask for Resource Manager before any build runs, so
+	// the test skips where it is not served instead of half way through.
+	shardEndpoint(h, "CLOUDBURROW_TEST_RUN_RESOURCEMANAGER", EnvResourceManager)
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("docker is required: builds run with the host's Docker")
 	}

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	urlpkg "net/url"
 	"strings"
 	"testing"
 
@@ -19,10 +20,12 @@ import (
 // ListHMACKeys, ACTIVE, for the service account the form named, and its
 // secret, 40 characters, is in the create response only: the client's Get
 // has none, and neither the screen's listing, the operations ledger, the
-// logs, the Request Log nor any action's response holds it. The ACTIVE key's
-// row offers no Delete, and a delete sent anyway is refused and changes
-// nothing; Deactivate makes the client read INACTIVE, the row then offers
-// Delete, and Delete makes the client read DELETED.
+// logs, the Request Log nor any action's response holds it. Interoperability
+// lists the service account with its key counts, and the account's page its
+// keys (#2047). The ACTIVE key's row offers no Delete, and a delete sent
+// anyway is refused and changes nothing; Deactivate makes the client read
+// INACTIVE, the row then offers Delete, and Delete makes the client read
+// DELETED, and the account is no longer listed.
 func TestConsoleStorageHMACKeys(t *testing.T) {
 	h := New(t)
 	addr := consoleAddr(t, h)
@@ -58,11 +61,29 @@ func TestConsoleStorageHMACKeys(t *testing.T) {
 			}
 		}
 		for _, r := range l.Items {
-			if r.Fields["Service account"] == sa {
+			if r.Name == sa {
 				rows = append(rows, r)
 			}
 		}
 		return summary, rows
+	}
+	// keys are the rows of the service account's page (#2047).
+	keys := func() []row {
+		t.Helper()
+		q := urlpkg.Values{"project": {project}, "name": {sa}}
+		code, body := consoleDo(t, addr, http.MethodGet, "/api/detail/storage-settings?"+q.Encode(), "")
+		later = append(later, body)
+		var d struct {
+			Unavailable string
+			Sections    []struct{ Listing struct{ Items []row } }
+		}
+		if err := json.Unmarshal([]byte(body), &d); code != http.StatusOK || err != nil {
+			t.Fatalf("the service account's page = %d (%v): %s", code, err, body)
+		}
+		if d.Unavailable != "" || len(d.Sections) != 1 {
+			return nil
+		}
+		return d.Sections[0].Listing.Items
 	}
 	offers := func(r row, id string) bool {
 		for _, a := range r.Actions {
@@ -74,7 +95,7 @@ func TestConsoleStorageHMACKeys(t *testing.T) {
 	}
 	act := func(name, action string) (int, string) {
 		t.Helper()
-		b, _ := json.Marshal(map[string]string{"Name": name, "Action": action})
+		b, _ := json.Marshal(map[string]any{"Path": []string{sa, name}, "Action": action})
 		code, body := consoleDo(t, addr, http.MethodPost, "/api/actions/storage-settings?project="+project, string(b))
 		later = append(later, body)
 		return code, body
@@ -120,8 +141,12 @@ func TestConsoleStorageHMACKeys(t *testing.T) {
 	}
 
 	_, rows := list()
-	if len(rows) != 1 || rows[0].Name != id || rows[0].Status != "ACTIVE" {
-		t.Fatalf("the screen lists %+v", rows)
+	if len(rows) != 1 || rows[0].Fields["HMAC keys"] != "1" || rows[0].Fields["Active keys"] != "1" {
+		t.Fatalf("Access keys for service accounts lists %+v; want %s with its one active key", rows, sa)
+	}
+	rows = keys()
+	if len(rows) != 1 || rows[0].Name != id || rows[0].Fields["State"] != "Active" {
+		t.Fatalf("the service account's page lists %+v", rows)
 	}
 	if offers(rows[0], "delete") || !offers(rows[0], "deactivate") {
 		t.Errorf("an ACTIVE key's row offers %+v; want Deactivate and no Delete", rows[0].Actions)
@@ -139,7 +164,7 @@ func TestConsoleStorageHMACKeys(t *testing.T) {
 	if st := state(id); st != storage.Inactive {
 		t.Errorf("after Deactivate from the console the client reads %s; want INACTIVE", st)
 	}
-	if _, rows = list(); len(rows) != 1 || rows[0].Status != "INACTIVE" || !offers(rows[0], "delete") {
+	if rows = keys(); len(rows) != 1 || rows[0].Fields["State"] != "Inactive" || !offers(rows[0], "delete") {
 		t.Errorf("the INACTIVE key's row = %+v; want Delete offered", rows)
 	}
 	if code, body := act(id, "delete"); code != http.StatusOK {
@@ -147,6 +172,9 @@ func TestConsoleStorageHMACKeys(t *testing.T) {
 	}
 	if st := state(id); st != storage.Deleted {
 		t.Errorf("after Delete from the console the client reads %s; want DELETED", st)
+	}
+	if _, rows = list(); len(rows) != 0 {
+		t.Errorf("a service account with no keys left is still listed: %+v", rows)
 	}
 
 	for _, path := range []string{"/api/operations?project=" + project, "/api/logs", "/api/requests"} {

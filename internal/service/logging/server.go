@@ -57,6 +57,18 @@ type Store struct {
 	tailID uint64
 }
 
+// nextInsertID is the insertId of an entry written without one; the
+// caller holds mu. Entries of one write share a timestamp, so they list in
+// insertId order: the sequence is zero-padded to a fixed width (13 base-36
+// digits hold any uint64), so the order of the IDs as strings is the order
+// they were written in. Unpadded, "cbzz" sorted after "cb100", and a page
+// walk listed the first entry of a write last.
+func (st *Store) nextInsertID() string {
+	st.seq++
+	id := strconv.FormatUint(st.seq, 36)
+	return "cb" + strings.Repeat("0", 13-len(id)) + id
+}
+
 // subscribe adds fn to the writers' notifications and returns its removal.
 func (s *Store) subscribe(fn func(*loggingpb.LogEntry)) (cancel func()) {
 	s.mu.Lock()
@@ -431,8 +443,7 @@ func (s *Server) WriteLogEntries(ctx context.Context, req *loggingpb.WriteLogEnt
 		s.store.mu.Lock()
 		for _, e := range out {
 			if e.GetInsertId() == "" {
-				s.store.seq++
-				e.InsertId = "cb" + strconv.FormatUint(s.store.seq, 36)
+				e.InsertId = s.store.nextInsertID()
 			}
 		}
 		s.store.mu.Unlock()

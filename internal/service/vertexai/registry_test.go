@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"cloud.google.com/go/aiplatform/apiv1/aiplatformpb"
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
@@ -77,6 +78,7 @@ func TestRegistryUploadDeployPredict(t *testing.T) {
 	run, art := &fakeRunner{}, &fakeArtifacts{}
 	state := filepath.Join(t.TempDir(), "registry.json")
 	s.SetRegistry(state, run, art)
+	joinRegistry(t, s)
 	ctx := context.Background()
 	ms, es, ps := &modelService{s: s}, &endpointService{s: s}, &predictionService{s: s}
 	parent := "projects/p/locations/us-central1"
@@ -200,6 +202,20 @@ func TestRegistryUploadDeployPredict(t *testing.T) {
 	}
 }
 
+// joinRegistry waits, when the test ends, for the registry's background
+// work: a DeployModel the test did not wait for still saves the state file,
+// and registered after t.TempDir, this runs before its removal.
+func joinRegistry(t *testing.T, s *Server) {
+	t.Helper()
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		if err := s.WaitRegistry(ctx); err != nil {
+			t.Errorf("the registry's background work did not end: %v", err)
+		}
+	})
+}
+
 func waitOp(t *testing.T, s *Server, name string) {
 	t.Helper()
 	op, err := (&operations{s: s}).WaitOperation(context.Background(), &longrunningpb.WaitOperationRequest{Name: name})
@@ -232,6 +248,7 @@ func TestRegistryExportImageAndPrebuilt(t *testing.T) {
 	s.SetEndpoints(nil, func() string { return "127.0.0.1:1" }, nil)
 	run, art, img := &fakeRunner{}, &fakeArtifacts{}, &fakeImages{held: map[string]bool{}}
 	s.SetRegistry(filepath.Join(t.TempDir(), "registry.json"), run, art)
+	joinRegistry(t, s)
 	ms, es := &modelService{s: s}, &endpointService{s: s}
 	ctx := context.Background()
 	parent := "projects/p/locations/us-central1"
