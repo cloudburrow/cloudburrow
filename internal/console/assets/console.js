@@ -568,6 +568,12 @@ const ROUTES = [
   // and a subject's Revoke sessions.
   { path: "/iam-admin/workforce-identity-pools", service: "iam-workforce-identity", icon: "iam", title: "Workforce Identity Federation", kind: "Workforce pool", section: "IAM & Admin",
     product: "iam", productTitle: "IAM & Admin" },
+  // IAM & Admin > Principal access boundary (#2057): the organization's
+  // principal access boundary policies, Create policy with a first
+  // boundary rule, a policy's rules and bindings, Add binding, Add
+  // boundary rule, Edit and Delete.
+  { path: "/iam-admin/principal-access-boundary", service: "iam-principal-access-boundary", icon: "iam", title: "Principal access boundary", kind: "Principal access boundary policy", section: "IAM & Admin",
+    product: "iam", productTitle: "IAM & Admin" },
   // Labels (#1864): the selected project's labels, Resource Manager's.
   { path: "/iam-admin/labels", service: "iam-labels", icon: "iam", title: "Labels", kind: "Label", section: "IAM & Admin",
     product: "iam", productTitle: "IAM & Admin" },

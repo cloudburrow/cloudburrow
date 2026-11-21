@@ -15,6 +15,7 @@ import (
 	ahpb "cloud.google.com/go/bigquery/analyticshub/apiv1/analyticshubpb"
 	iamadminpb "cloud.google.com/go/iam/admin/apiv1/adminpb"
 	iamv2pb "cloud.google.com/go/iam/apiv2/iampb"
+	iamv3pb "cloud.google.com/go/iam/apiv3/iampb"
 	"cloud.google.com/go/orgpolicy/apiv2/orgpolicypb"
 	rmpb "cloud.google.com/go/resourcemanager/apiv3/resourcemanagerpb"
 	"cloud.google.com/go/security/privateca/apiv1/privatecapb"
@@ -115,6 +116,8 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	rmpb.RegisterTagHoldsServer(srv, resourcemanager.NewTagHoldsServer(rmReg))
 	iamadminpb.RegisterIAMServer(srv, resourcemanager.NewIAMAdminServer(rmReg))
 	iamv2pb.RegisterPoliciesServer(srv, resourcemanager.NewPoliciesServer(rmReg))
+	iamv3pb.RegisterPrincipalAccessBoundaryPoliciesServer(srv, resourcemanager.NewPABServer(rmReg))
+	iamv3pb.RegisterPolicyBindingsServer(srv, resourcemanager.NewBindingsServer(rmReg))
 	orgpolicypb.RegisterOrgPolicyServer(srv, resourcemanager.NewOrgPolicyServer(rmReg))
 	schedStore := scheduler.NewStore(store.NewMemory())
 	scheduler.NewGRPCServer(schedStore, scheduler.NewRunner(schedStore, nil, nil, nil, time.Second), nil).Register(srv)

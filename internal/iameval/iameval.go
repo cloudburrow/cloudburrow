@@ -20,9 +20,10 @@
 // custom roles, and, for the basic roles Google's pages list without their
 // permissions, through basicGrants. Conditions are internal/iamcond's.
 //
-// Deny policies (IAM v2, #1886) are evaluated first (deny.go): a
-// permission a deny policy in the ancestry denies is refused whatever the
-// allow policies grant.
+// Principal access boundary policies (IAM v3, #2057) are evaluated first
+// (pab.go), then deny policies (IAM v2, #1886, deny.go): a resource outside
+// every boundary bound to the principal, or a permission a deny policy in
+// the ancestry denies, is refused whatever the allow policies grant.
 package iameval
 
 import (
@@ -141,6 +142,10 @@ type Decision struct {
 	// policy that applies.
 	Denied bool
 	Deny   []DenyPolicyResult
+	// Blocked is whether a principal access boundary policy blocks it
+	// (#2057, pab.go), Boundary each PAB policy bound to the principal.
+	Blocked  bool
+	Boundary []BoundaryResult
 }
 
 // Evaluator evaluates allow policies over a Source.
@@ -169,6 +174,9 @@ func (e *Evaluator) Check(req Request) Decision {
 	attrs := req.Attributes()
 	attrs.Tags, attrs.TagsKnown = e.tags(req)
 	var d Decision
+	// Google's order: principal access boundary eligibility, then deny
+	// policies, then allow policies (pab.go).
+	d.Blocked, d.Boundary = e.boundary(req)
 	d.Denied, d.Deny = e.deny(req, members, attrs)
 	for _, a := range e.Chain(req) {
 		pr := PolicyResult{Resource: a.Resource, Policy: a.Policy}
@@ -186,7 +194,7 @@ func (e *Evaluator) Check(req Request) Decision {
 		d.Allowed = d.Allowed || pr.Grants
 		d.Policies = append(d.Policies, pr)
 	}
-	d.Granted = d.Allowed && !d.Denied
+	d.Granted = d.Allowed && !d.Denied && !d.Blocked
 	return d
 }
 
@@ -210,11 +218,15 @@ func (e *Evaluator) tags(req Request) ([]iamcond.Tag, bool) {
 }
 
 // Denies is whether a deny policy denies req's permission to req's
-// principal, whatever the allow policies grant: what the instance's own
-// account, an owner of everything, is still refused (#1886).
+// principal, or a principal access boundary policy blocks it (#2057),
+// whatever the allow policies grant: what the instance's own account, an
+// owner of everything, is still refused (#1886).
 func (e *Evaluator) Denies(req Request) bool {
 	if req.Time.IsZero() {
 		req.Time = time.Now()
+	}
+	if blocked, _ := e.boundary(req); blocked {
+		return true
 	}
 	attrs := req.Attributes()
 	attrs.Tags, attrs.TagsKnown = e.tags(req)

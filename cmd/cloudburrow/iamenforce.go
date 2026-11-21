@@ -169,6 +169,20 @@ func (s registrySource) DenyPolicies(resource string) []*iamv2.Policy {
 	return reg.DenyPolicies(resource)
 }
 
+// BoundaryBindings are the principal access boundary policy bindings
+// whose target is set, with their policies (#2057).
+func (s registrySource) BoundaryBindings(set string) []iameval.Bound {
+	reg := s.registry()
+	if reg == nil {
+		return nil
+	}
+	return reg.BoundaryBindings(set)
+}
+
+// BoundaryOrganization is the instance's organization, whose principal set
+// holds its Workspace users and workforce pools (#2057).
+func (s registrySource) BoundaryOrganization() string { return resourcemanager.OrganizationName }
+
 // Tags are a resource's effective tags, which deny conditions read.
 func (s registrySource) Tags(full string) ([]iamcond.Tag, bool) {
 	reg := s.registry()

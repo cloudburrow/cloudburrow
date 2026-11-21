@@ -46,6 +46,9 @@ type selectN struct {
 	field string
 	pos   int
 	dot   int // the "." before field
+	// principal is a policy binding condition's attribute
+	// (CompilePrincipal).
+	principal bool
 }
 
 func (n *selectN) attr() string {
@@ -75,6 +78,12 @@ var attrTypes = map[string]ty{
 
 func (n *selectN) check() (ty, error) {
 	a := n.attr()
+	if n.principal {
+		if a == "principal.type" || a == "principal.subject" {
+			return tyString, nil
+		}
+		return "", fmt.Errorf("%s is not supported in a policy binding's condition, which can use only principal.type and principal.subject (column %d)", a, n.pos+1)
+	}
 	if t, ok := attrTypes[a]; ok {
 		return t, nil
 	}
@@ -103,6 +112,10 @@ func (n *selectN) eval(a *Attributes) (any, error) {
 			return time.Now().UTC(), nil
 		}
 		return a.RequestTime.UTC(), nil
+	case "principal.type":
+		s = a.PrincipalType
+	case "principal.subject":
+		s = a.PrincipalSubject
 	case "request.path":
 		s = a.RequestPath
 	case "request.host":
