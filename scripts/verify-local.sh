@@ -17,7 +17,8 @@
 #
 # Options:
 #   --shards A,B,...  the shards to run, in order; default every one:
-#                     storage,served,run,scale,emulators,memorystore,sql,acceptance,iam,localai
+#                     storage,served,run,crossservice,scale,emulators,memorystore,sql,
+#                     sqlreplicas,acceptance,iam,localai
 #                     (localai, #1985, needs make build-onnx's CLI, which it builds
 #                     unless --no-build, ONNXRUNTIME_LIB, and the pinned
 #                     generation model at CLOUDBURROW_LOCALAI_MODEL:

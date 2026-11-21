@@ -596,22 +596,32 @@ func (s *Server) anywhereCachesList(w http.ResponseWriter, r *http.Request) {
 	writeResponse(w, r, http.StatusOK, out)
 }
 
-// anywhereCachesPauseRE is anywhereCaches.pause's path under /storage/v1/.
-// Google removed the method from the discovery document in revision
-// 20261107 (google.golang.org/api v0.314.0, whose generated client no
-// longer has AnywhereCaches.Pause, and whose resume now "Resumes a disabled
-// Anywhere Cache instance", where 20261009's resumed "a paused or disabled"
-// one); the public document, revision 20261111, re-read 2026-11-18, still
-// has none. gcloud's anywhere-caches pause, the console's pause and the
-// docs' "Pause a cache" went with it. google.storage.control.v2 still has
-// PauseAnywhereCache (googleapis master, cloud.google.com/go/storage
-// v1.71.0) and still resumes "a disabled or paused" cache, and older JSON
-// clients still send this path, so it stays served, routed by its path
-// ahead of the discovery methods and out of methodStatus, as
-// objects.watchAll and channels.stop are (channels.go). What Google itself
-// now answers on this path is UNVERIFIED (2026-11-18): it can only be
-// measured against a live project (#1791).
+// anywhereCachesPauseRE is the path PauseAnywhereCache is served by under
+// /storage/v1/. Google removed anywhereCaches.pause from the JSON API's
+// discovery document in revision 20261107 (google.golang.org/api
+// v0.314.0), and revision 20261111 (v0.316.0's storage-api.json, read
+// 2026-11-20) still has none: insert, get, list, update, resume ("Resumes a
+// disabled Anywhere Cache instance") and disable only. gcloud's
+// anywhere-caches pause and the Anywhere Cache docs' pause went with it
+// (https://docs.cloud.google.com/storage/docs/anywhere-cache, read
+// 2026-11-20: states CREATING, RUNNING and DISABLED; disable and resume
+// only). google.storage.control.v2 still has PauseAnywhereCache
+// (cloud.google.com/go/storage v1.71.0: "Pauses an Anywhere Cache
+// instance"), so the method is gone from JSON only (#1791). The JSON API
+// answers this path as it answers any path its document does not bind (404
+// notFound), and only the gRPC transport's in-process request
+// (grpcOriginKey, grpc.go) reaches the handler.
 var anywhereCachesPauseRE = pathRE("b/{bucket}/anywhereCaches/{anywhereCacheId}/pause")
+
+// grpcOriginKey marks the JSON request grpc.go makes of a gRPC call: a
+// context value, which no HTTP caller can set.
+type grpcOriginKey struct{}
+
+// fromGRPC reports whether r is the gRPC transport's own request.
+func fromGRPC(r *http.Request) bool {
+	v, _ := r.Context().Value(grpcOriginKey{}).(bool)
+	return v
+}
 
 // anywhereCachesState is pause, resume or disable: from the states listed to
 // the next one.

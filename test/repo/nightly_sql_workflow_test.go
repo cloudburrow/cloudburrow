@@ -50,8 +50,11 @@ func TestNightlySQLEphemeralRunsNightlyAndByHandOnly(t *testing.T) {
 	}
 }
 
-// It runs the sql shard as scripts/compat-shards.sh defines it, on an
-// ephemeral instance, and the tests #1740 fixed must pass, not skip.
+// It runs the sql and sqlreplicas shards as scripts/compat-shards.sh
+// defines them, with their -run/-skip patterns and go test -timeout, each
+// on an ephemeral instance, and the tests #1740 fixed must pass, not skip.
+// Without sql's COMPAT_SKIP the replica tests ran in it too and the suite
+// passed its 60m deadline (#1813).
 func TestNightlySQLEphemeralRunsTheSQLShardEphemeral(t *testing.T) {
 	_, jobs := workflowJobs(t, nightlySQLWorkflow)
 	all := ""
@@ -59,13 +62,17 @@ func TestNightlySQLEphemeralRunsTheSQLShardEphemeral(t *testing.T) {
 		all += j
 	}
 	for _, want := range []string{
-		"SHARD: sql",
+		"shard: [sql, sqlreplicas]",
+		"SHARD: ${{ matrix.shard }}",
 		". scripts/compat-shards.sh",
 		`compat_shard "$SHARD"`,
 		"--mode ephemeral",
 		"grep -qE ' mode: +ephemeral$'",
 		"scripts/compat-env.sh --strict",
-		"go test -tags=compat -timeout 60m -v ./test/compat/...",
+		`SELECT_RUN=(); [ -n "$COMPAT_RUN" ] && SELECT_RUN=(-run "$COMPAT_RUN")`,
+		`[ -n "$COMPAT_SKIP" ] && SELECT_RUN+=(-skip "$COMPAT_SKIP")`,
+		`go test -tags=compat -timeout "$COMPAT_TIMEOUT" -v ${SELECT_RUN[@]+"${SELECT_RUN[@]}"} ./test/compat/...`,
+		"TestCloudSQLExternalMySQLPhysical",
 		"TestCloudSQLInstanceWrites",
 		"TestCloudSQLDemoteSkipReplicationSetup",
 		"TestCloudSQLDemotePostgres",

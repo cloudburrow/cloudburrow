@@ -109,7 +109,10 @@ func (g *grpcStorage) call(ctx context.Context, method, path string, q url.Value
 	if body != nil {
 		rd = bytes.NewReader(body)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, u, rd)
+	// Marked as gRPC's own, which a JSON caller cannot be: Storage
+	// Control's PauseAnywhereCache is served by a path the JSON API no
+	// longer routes (anywherecache.go).
+	req, err := http.NewRequestWithContext(context.WithValue(ctx, grpcOriginKey{}, true), method, u, rd)
 	if err != nil {
 		return nil, grpcstatus.Errorf(codes.Internal, "%v", err)
 	}

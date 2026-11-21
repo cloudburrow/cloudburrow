@@ -554,9 +554,15 @@ func (p *sqlProvisioner) physicalRestoreEphemeral(ctx context.Context, spec sqla
 	for {
 		out.Reset()
 		// mysqladmin ping succeeds once the server answers, even when it
-		// refuses the user.
+		// refuses the user. It pings over TCP, as mysqlRootEnv's clients
+		// do: on CI's runners the server listened on
+		// /var/lib/mysql/mysql.sock and the client's default socket,
+		// /var/run/mysqld/mysqld.sock, was missing, so a ping over it never
+		// answered and the sync waited out physicalStartTimeout on a
+		// server that was up a second after its restart (nightly runs
+		// 44562270227 and 44766672852, #1813).
 		err := p.execContainer(wctx, pod, server, nil, &out, "sh", "-c", "test ! -e /var/lib/mysql/"+physicalSwapMarker+
-			" && mysqladmin ping >/dev/null 2>&1")
+			" && mysqladmin -h127.0.0.1 -P3306 --protocol=TCP --connect-timeout=2 ping >/dev/null 2>&1")
 		if err == nil {
 			return nil
 		}

@@ -182,18 +182,29 @@ check in shape.
 ### The Cloud SQL ephemeral nightly
 
 `.github/workflows/nightly-sql-ephemeral.yml` ("Cloud SQL ephemeral nightly", #1752) runs the
-compat job's `sql` shard, as `scripts/compat-shards.sh` defines it, on an instance brought up with
+compat job's `sql` and `sqlreplicas` shards, as `scripts/compat-shards.sh` defines them (services,
+`-run`/`-skip` patterns and `go test -timeout`), each on an instance brought up with
 `--mode ephemeral`, nightly at 06:47 UTC and by hand (`gh workflow run nightly-sql-ephemeral.yml`).
 The compat job runs the shard on a persistent instance only, and a created Cloud SQL server keeps
 its data differently in ephemeral mode: on a volume of its own that goes with the instance's record
-(#1740). The run fails unless the whole suite passed and `TestCloudSQLInstanceWrites`,
-`TestCloudSQLDemoteSkipReplicationSetup`, `TestCloudSQLDemotePostgres` and
-`TestCloudSQLExternalPostgresPrimary`, the tests that failed only in this mode, passed rather than
-skipped. The restart probes are not run: they measure persistent mode first, which the compat job
+(#1740). The run fails unless the whole suite passed and `TestCloudSQLInstanceWrites` (sql),
+`TestCloudSQLDemoteSkipReplicationSetup`, `TestCloudSQLDemotePostgres`,
+`TestCloudSQLExternalPostgresPrimary` and `TestCloudSQLExternalMySQLPhysical` (sqlreplicas), the
+tests that failed only in this mode, passed rather than skipped. Run as one shard, without sql's
+`-skip`, the suite passed its 60m deadline (#1813). The restart probes are not run: they measure persistent mode first, which the compat job
 already does. It never runs on a pull request, a merge group or a push, it is not a required check,
 and nothing in it reaches Google. A red scheduled run, or one dispatched on main, opens a
 `workflow-red` issue through `report-red-runs.yml`. `test/repo/nightly_sql_workflow_test.go` keeps it
 in shape.
+
+### The crossservice shard
+
+The compat job's `crossservice` shard runs on the `run` shard's instance again. It runs only
+`COMPAT_CROSSSERVICE_TESTS` from `scripts/compat-shards.sh`, which the `run` shard skips: these are
+Eventarc's tests, Artifact Registry's cleanup policies, and the tests that need services that no
+other shard serves together. Until #2088 it was called `cross`, which was also the name of the
+cross-compile job (`make cross`, checks `cross (<target>)`). `test/repo`'s
+`TestCompatShardsAreNotNamedAsOtherJobs` now fails if a shard is named like another ci.yml job.
 
 ### The local AI shard
 
