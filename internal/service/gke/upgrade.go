@@ -281,6 +281,15 @@ func (s *Server) startPoolUpgradeLocked(p parsed, e *entry, np *containerpb.Node
 		zones = 1
 	}
 	kind, pool := e.kind, np.Name
+	// A cancelled blue-green upgrade to the same version resumes "at the
+	// intermediate phase it was paused" (re-read 2026-11-21:
+	// concepts/node-pool-upgrade-strategies): read that phase now, while
+	// s.mu is held, before the operation's goroutine rewrites it.
+	resume := containerpb.NodePool_UpdateInfo_BlueGreenInfo_CREATING_GREEN_POOL
+	if bgi := np.GetUpdateInfo().GetBlueGreenInfo(); bgi.GetGreenPoolVersion() == to.GKE &&
+		bgi.GetPhase() > resume && bgi.GetPhase() <= containerpb.NodePool_UpdateInfo_BlueGreenInfo_NODE_POOL_SOAKING {
+		resume = bgi.GetPhase()
+	}
 	soak := make(chan struct{})
 	e.soak = map[string]chan struct{}{pool: soak}
 	pause := make(chan struct{})
@@ -325,8 +334,8 @@ func (s *Server) startPoolUpgradeLocked(p parsed, e *entry, np *containerpb.Node
 			// "Blue-green upgrades continue until completion if they
 			// exceed a maintenance window" (node-pool-upgrade-strategies):
 			// only a cancel stops one. A resumed one keeps the green nodes
-			// it made.
-			return s.blueGreen(ctx, u, np, kind, pool, to, old, green, settings.GetBlueGreenSettings(), soak, pause, func() error { return stop(false) })
+			// it made and starts at the phase it was paused in.
+			return s.blueGreen(ctx, u, np, kind, pool, to, old, green, resume, settings.GetBlueGreenSettings(), soak, pause, func() error { return stop(false) })
 		}
 		return s.surge(ctx, u, kind, pool, to, old, zones, int(settings.GetMaxSurge()), int(settings.GetMaxUnavailable()), func() error { return stop(true) })
 	}, func(err error) {
@@ -448,9 +457,12 @@ func (s *Server) surge(ctx context.Context, u Upgrader, kind, pool string, to Ve
 
 // blueGreen makes the green nodes, cordons the blue ones, drains them in
 // batches, soaks the pool (CompleteNodePoolUpgrade ends it early) and
-// deletes the blue nodes.
+// deletes the blue nodes. It starts at phase from: a resumed upgrade skips
+// the phases it finished before it was cancelled, so it never reports an
+// earlier phase than the one it was paused in.
 func (s *Server) blueGreen(ctx context.Context, u Upgrader, np *containerpb.NodePool, kind, pool string, to Version,
-	blue []string, green int, bg *containerpb.BlueGreenSettings, soak, pause chan struct{}, stop func() error) error {
+	blue []string, green int, from containerpb.NodePool_UpdateInfo_BlueGreenInfo_Phase,
+	bg *containerpb.BlueGreenSettings, soak, pause chan struct{}, stop func() error) error {
 	total := len(blue)
 	phase := func(ph containerpb.NodePool_UpdateInfo_BlueGreenInfo_Phase, deletion string) {
 		s.mu.Lock()
@@ -460,50 +472,56 @@ func (s *Server) blueGreen(ctx context.Context, u Upgrader, np *containerpb.Node
 		s.mu.Unlock()
 		s.nodeProgress(ctx, pool, 0, total, "Phase: "+ph.String()+".")
 	}
-	phase(containerpb.NodePool_UpdateInfo_BlueGreenInfo_CREATING_GREEN_POOL, "")
-	for i := green; i < total; i++ {
-		if err := stop(); err != nil {
-			return err
-		}
-		if _, err := u.AddNode(ctx, kind, to.Image, pool); err != nil {
-			return status.Errorf(codes.Internal, "Creating the green pool failed: %v", err)
-		}
-	}
-	if err := stop(); err != nil {
-		return err
-	}
-	phase(containerpb.NodePool_UpdateInfo_BlueGreenInfo_CORDONING_BLUE_POOL, "")
-	for _, n := range blue {
-		if err := u.CordonNode(ctx, kind, n); err != nil {
-			return status.Errorf(codes.Internal, "Cordoning node %s failed: %v", n, err)
-		}
-	}
-	if err := stop(); err != nil {
-		return err
-	}
-	phase(containerpb.NodePool_UpdateInfo_BlueGreenInfo_DRAINING_BLUE_POOL, "")
-	rp := bg.GetStandardRolloutPolicy()
-	batch := total
-	if n := int(rp.GetBatchNodeCount()); n > 0 {
-		batch = n
-	} else if f := rp.GetBatchPercentage(); f > 0 {
-		batch = max(1, int(math.Ceil(float64(total)*float64(f))))
-	}
-	waited := time.Duration(0)
-	for i := 0; i < total; i += batch {
-		if i > 0 {
-			d := rp.GetBatchSoakDuration().AsDuration()
-			if err := sleep(ctx, d, nil, pause); err != nil {
+	if from <= containerpb.NodePool_UpdateInfo_BlueGreenInfo_CREATING_GREEN_POOL {
+		phase(containerpb.NodePool_UpdateInfo_BlueGreenInfo_CREATING_GREEN_POOL, "")
+		for i := green; i < total; i++ {
+			if err := stop(); err != nil {
 				return err
 			}
-			waited += d
+			if _, err := u.AddNode(ctx, kind, to.Image, pool); err != nil {
+				return status.Errorf(codes.Internal, "Creating the green pool failed: %v", err)
+			}
 		}
 		if err := stop(); err != nil {
 			return err
 		}
-		for _, n := range blue[i:min(i+batch, total)] {
-			if err := u.DrainNode(ctx, kind, n); err != nil {
-				return status.Errorf(codes.Internal, "Draining node %s failed: %v", n, err)
+	}
+	if from <= containerpb.NodePool_UpdateInfo_BlueGreenInfo_CORDONING_BLUE_POOL {
+		phase(containerpb.NodePool_UpdateInfo_BlueGreenInfo_CORDONING_BLUE_POOL, "")
+		for _, n := range blue {
+			if err := u.CordonNode(ctx, kind, n); err != nil {
+				return status.Errorf(codes.Internal, "Cordoning node %s failed: %v", n, err)
+			}
+		}
+		if err := stop(); err != nil {
+			return err
+		}
+	}
+	waited := time.Duration(0)
+	if from <= containerpb.NodePool_UpdateInfo_BlueGreenInfo_DRAINING_BLUE_POOL {
+		phase(containerpb.NodePool_UpdateInfo_BlueGreenInfo_DRAINING_BLUE_POOL, "")
+		rp := bg.GetStandardRolloutPolicy()
+		batch := total
+		if n := int(rp.GetBatchNodeCount()); n > 0 {
+			batch = n
+		} else if f := rp.GetBatchPercentage(); f > 0 {
+			batch = max(1, int(math.Ceil(float64(total)*float64(f))))
+		}
+		for i := 0; i < total; i += batch {
+			if i > 0 {
+				d := rp.GetBatchSoakDuration().AsDuration()
+				if err := sleep(ctx, d, nil, pause); err != nil {
+					return err
+				}
+				waited += d
+			}
+			if err := stop(); err != nil {
+				return err
+			}
+			for _, n := range blue[i:min(i+batch, total)] {
+				if err := u.DrainNode(ctx, kind, n); err != nil {
+					return status.Errorf(codes.Internal, "Draining node %s failed: %v", n, err)
+				}
 			}
 		}
 	}
