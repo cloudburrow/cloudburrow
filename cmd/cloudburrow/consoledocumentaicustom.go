@@ -20,7 +20,10 @@ package main
 // DocumentProcessorService, v1beta3 DocumentService), except the labels a
 // document is saved with: Google's labeling tool saves through a method
 // the public API does not have, so here the console calls the local
-// endpoint's LabelDatasetDocument in process.
+// endpoint's LabelDatasetDocument in process. Rechecked for #2097: v1beta3's
+// dataset has no updateDocument or batchUpdateDocuments, updateDataset
+// changes only the dataset's settings, and importDocuments always adds a
+// document under a new ID, so none of them edits a document's labels.
 
 import (
 	"context"
@@ -295,7 +298,7 @@ func docAIDocumentSelectActions() []console.Action {
 func (p docAIProcessorsProvider) buildActions(pr *documentaipb.Processor, kind string, sc *documentaipb.DocumentSchema,
 	vers []*documentaipb.ProcessorVersion) []console.Action {
 	imp := []console.Field{
-		{Name: "source", Label: "Source path", Type: "text", Required: true, Pattern: `^gs://[^\/]+(\/.*)?$`,
+		{Name: "source", Label: "Source path", Type: "text", Required: true, Browse: "storage-path", Pattern: `^gs://[^\/]+(\/.*)?$`,
 			Help: "gs://bucket/folder/ for every document under it, or gs://bucket/file.pdf; Document JSON is imported with its labels"},
 		{Name: "split", Label: "Data split", Type: "select", Options: []string{"DATASET_SPLIT_TRAIN", "DATASET_SPLIT_TEST",
 			"DATASET_SPLIT_UNASSIGNED", "auto"}, OptionLabels: map[string]string{"DATASET_SPLIT_TRAIN": "Training",
@@ -320,7 +323,7 @@ func (p docAIProcessorsProvider) buildActions(pr *documentaipb.Processor, kind s
 			{Name: "storage", Label: "Dataset location", Type: "radio", Options: []string{"managed", "unmanaged"},
 				OptionLabels: map[string]string{"managed": "Cloud Storage folder (managed)", "unmanaged": "Unmanaged (kept by Document AI)"},
 				Default:      "managed"},
-			{Name: "gcsPrefix", Label: "Cloud Storage folder", Type: "text", ShowWhen: "storage=managed", Pattern: `^(gs://[^\/]+(\/.*)?)?$`,
+			{Name: "gcsPrefix", Label: "Cloud Storage folder", Type: "text", ShowWhen: "storage=managed", Browse: "storage", Pattern: `^(gs://[^\/]+(\/.*)?)?$`,
 				Help: "gs://bucket/folder: each imported document is written there as Document JSON"}}},
 		{ID: "import-documents", Label: "Import documents", Submit: "Import", Fields: imp},
 		{ID: "filter-documents", Label: "Filter documents", Submit: "Filter", Fields: []console.Field{
@@ -392,7 +395,7 @@ func docAIEvaluateAction(vers []*documentaipb.ProcessorVersion) console.Action {
 	}
 	return console.Action{ID: "evaluate-version", Label: "Run new evaluation", Submit: "Evaluate", Fields: []console.Field{
 		{Name: "version", Label: "Version", Type: "select", Options: ids, OptionLabels: labels, Default: def, Required: true},
-		{Name: "documents", Label: "Test documents", Type: "text", Pattern: `^(gs://[^\/]+(\/.*)?)?$`,
+		{Name: "documents", Label: "Test documents", Type: "text", Browse: "storage", Pattern: `^(gs://[^\/]+(\/.*)?)?$`,
 			Help: "optional: gs://bucket/folder/ of labeled Document JSON; empty for the dataset's test split"}}}
 }
 

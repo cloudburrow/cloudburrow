@@ -693,9 +693,9 @@ func (p docAIProcessorsProvider) DetailActions(ctx context.Context, project stri
 		acts = append(acts, docAIEvaluateAction(vers))
 	}
 	batch := []console.Field{
-		{Name: "input", Label: "Source path", Type: "text", Required: true, Pattern: `^gs://[^\/]+(\/.*)?$`,
+		{Name: "input", Label: "Source path", Type: "text", Required: true, Browse: "storage-path", Pattern: `^gs://[^\/]+(\/.*)?$`,
 			Help: "gs://bucket/folder/ to process every document under it, or gs://bucket/file.pdf for one"},
-		{Name: "output", Label: "Destination path", Type: "text", Required: true, Pattern: `^gs://[^\/]+(\/.*)?$`,
+		{Name: "output", Label: "Destination path", Type: "text", Required: true, Browse: "storage", Pattern: `^gs://[^\/]+(\/.*)?$`,
 			Help: "gs://bucket/folder: each result is written under {operation ID}/{index}/"}}
 	// The version to process with, the default unless another is chosen,
 	// and the output's sharding (#1953).

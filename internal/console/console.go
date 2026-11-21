@@ -519,8 +519,12 @@ type Field struct {
 	// Google's Create service account derives the ID from the name.
 	DeriveFrom string `json:"deriveFrom,omitempty"`
 	// Browse names what the field's Browse button chooses from: "storage" is
-	// a bucket of this instance's Cloud Storage, filled in as gs://BUCKET/,
-	// as Google's Choose Destination does (#1845); "kms" is a symmetric key
+	// a bucket or folder of this instance's Cloud Storage, filled in as
+	// gs://BUCKET/ or gs://BUCKET/FOLDER/, as Google's Choose Destination and
+	// Select folder do (#1845, #2097); "storage-object" an object, filled in
+	// as gs://BUCKET/OBJECT (Select object); "storage-path" a folder or an
+	// object; "storage-bucket" a bucket, filled in as its bare name. All four
+	// open the one shared picker (console.js browseBuckets); "kms" is a symmetric key
 	// of this instance's Cloud KMS in the location the form's
 	// locationType, multiRegion and region fields hold, filled in as its
 	// resource name (#1881); "artifact-registry" is a standard

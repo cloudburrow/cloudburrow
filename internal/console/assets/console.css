@@ -2371,6 +2371,12 @@ svg.bq-chart { display: block; border: 1px solid var(--border); border-radius: v
 }
 .browse-row { display: flex; gap: 8px; align-items: center; }
 .browse-row > input { flex: 1; min-width: 0; }
+/* The Cloud Storage picker (#2097): Google's Select folder / Select object. */
+.browse-trail { margin: 8px 0; }
+.browse-filter { width: 100%; margin-bottom: 8px; }
+#browse-list { max-height: 50vh; overflow-y: auto; }
+.browse-open { flex: none; font-size: 20px; line-height: 1; }
+.fs-row-link[disabled] { cursor: default; color: var(--text-muted); }
 
 /* Ctrl+Space completions at a text control's cursor (#1846). */
 .completions { list-style: none; margin: 2px 0 0; padding: 4px 0; max-height: 220px; overflow-y: auto;
