@@ -611,6 +611,19 @@ const ROUTES = [
     product: "iam", productTitle: "IAM & Admin" },
   { path: "/iam-admin/sso-assignments", service: "iam-sso-assignments", icon: "iam", title: "SSO profile assignments", kind: "SSO profile assignment", section: "IAM & Admin",
     product: "iam", productTitle: "IAM & Admin" },
+  // Cloud Identity's directory (#2103): the Admin console's Directory >
+  // Users, Devices > Mobile & endpoints, Users > Invite users, Account >
+  // Policies and the allowlisted domains.
+  { path: "/iam-admin/users", service: "iam-users", icon: "iam", title: "Users", kind: "User", section: "IAM & Admin",
+    product: "iam", productTitle: "IAM & Admin" },
+  { path: "/iam-admin/devices", service: "iam-devices", icon: "iam", title: "Devices", kind: "Device", section: "IAM & Admin",
+    product: "iam", productTitle: "IAM & Admin" },
+  { path: "/iam-admin/user-invitations", service: "iam-user-invitations", icon: "iam", title: "User invitations", kind: "User invitation", section: "IAM & Admin",
+    product: "iam", productTitle: "IAM & Admin" },
+  { path: "/iam-admin/identity-policies", service: "iam-identity-policies", icon: "iam", title: "Policies", kind: "Policy", section: "IAM & Admin",
+    product: "iam", productTitle: "IAM & Admin" },
+  { path: "/iam-admin/allowlisted-domains", service: "iam-allowlisted-domains", icon: "iam", title: "Allowlisted domains", kind: "Allowlisted domain", section: "IAM & Admin",
+    product: "iam", productTitle: "IAM & Admin" },
   { path: "/iam-admin/essential-contacts", title: "Essential Contacts", service: null, requires: "iam", screen: "unavailable", icon: "iam", section: "IAM & Admin", product: "iam", productTitle: "IAM & Admin",
     unavailable: "Essential Contacts is the Essential Contacts API's, which CloudBurrow does not serve: a local instance sends no notifications." },
   { path: "/iam-admin/asset-inventory", title: "Asset Inventory", service: null, requires: "iam", screen: "unavailable", icon: "iam", section: "IAM & Admin", product: "iam", productTitle: "IAM & Admin",

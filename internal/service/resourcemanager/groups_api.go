@@ -24,8 +24,10 @@ import (
 // searchTransitiveGroups, searchDirectGroups, searchTransitiveMemberships,
 // getMembershipGraph and modifyMembershipRoles (groups_search.go); the
 // security settings (groupsecurity.go) and inbound SSO (inboundsso.go,
-// #1959). Devices, customers' user invitations, allowlisted domains and
-// the policies are refused 501.
+// #1959); dynamic and identity-mapped groups (#2103); devices
+// (devices.go), user invitations, policies and allowlisted domains
+// (cicustomer.go, #2103); and the Directory API's users the dynamic
+// groups read (directoryusers.go).
 
 const (
 	groupType            = "type.googleapis.com/google.apps.cloudidentity.groups.v1.Group"
@@ -73,7 +75,8 @@ func IsCloudIdentityPath(path string) bool {
 	if path == "/v1/groups" || strings.HasPrefix(path, "/v1/groups/") || strings.HasPrefix(path, "/v1/groups:") {
 		return true
 	}
-	for _, res := range []string{"inboundSamlSsoProfiles", "inboundOidcSsoProfiles", "inboundSsoAssignments"} {
+	for _, res := range []string{"inboundSamlSsoProfiles", "inboundOidcSsoProfiles", "inboundSsoAssignments",
+		"devices", "policies", "allowlistedDomains", "customers"} {
 		if path == "/v1/"+res || strings.HasPrefix(path, "/v1/"+res+"/") {
 			return true
 		}
@@ -83,9 +86,32 @@ func IsCloudIdentityPath(path string) bool {
 
 func ciTime(t time.Time) string { return t.UTC().Format(time.RFC3339Nano) }
 
+// dynamicQueries are a request's dynamicGroupMetadata queries.
+func dynamicQueries(md *ci.DynamicGroupMetadata) [][2]string {
+	if md == nil {
+		return nil
+	}
+	out := [][2]string{}
+	for _, q := range md.Queries {
+		if q != nil {
+			out = append(out, [2]string{q.ResourceType, q.Query})
+		}
+	}
+	return out
+}
+
 func groupJSON(g *Group, full bool) *ci.Group {
-	out := &ci.Group{Name: g.Name(), GroupKey: &ci.EntityKey{Id: g.Email}, Parent: CustomerName,
+	out := &ci.Group{Name: g.Name(), GroupKey: &ci.EntityKey{Id: g.Email, Namespace: g.Namespace}, Parent: CustomerName,
 		DisplayName: g.DisplayName, Labels: g.Labels}
+	if g.Namespace != "" {
+		out.Parent = g.Namespace
+	}
+	if g.Dynamic() {
+		out.DynamicGroupMetadata = &ci.DynamicGroupMetadata{
+			Queries: []*ci.DynamicGroupQuery{{ResourceType: resourceTypeUser, Query: g.DynamicQuery}},
+			// The memberships are computed at each read: up to date now.
+			Status: &ci.DynamicGroupStatus{Status: "UP_TO_DATE", StatusTime: ciTime(time.Now())}}
+	}
 	if full {
 		out.Description = g.Description
 		out.CreateTime, out.UpdateTime = ciTime(g.CreateTime), ciTime(g.UpdateTime)
@@ -94,7 +120,7 @@ func groupJSON(g *Group, full bool) *ci.Group {
 }
 
 func membershipJSON(g *Group, m GroupMember, full bool) *ci.Membership {
-	out := &ci.Membership{Name: MembershipName(g, m), PreferredMemberKey: &ci.EntityKey{Id: m.Email}, Type: m.Type}
+	out := &ci.Membership{Name: MembershipName(g, m), PreferredMemberKey: &ci.EntityKey{Id: m.Email, Namespace: m.Namespace}, Type: m.Type}
 	for _, r := range m.Roles {
 		role := &ci.MembershipRole{Name: r}
 		if r == "MEMBER" && m.ExpireTime != nil {
@@ -222,6 +248,7 @@ func (r *Registry) identityRoutes(rt *rest.Router) {
 		if _, ok := g.Labels[labelDynamic]; ok {
 			in.Dynamic = true
 		}
+		in.DynamicQueries = dynamicQueries(g.DynamicGroupMetadata)
 		initial := req.URL.Query().Get("initialGroupConfig")
 		out, err := r.CreateGroup(in)
 		if err != nil {
@@ -328,7 +355,8 @@ func (r *Registry) identityRoutes(rt *rest.Router) {
 			}
 		}
 		out, err := r.UpdateGroup("groups/"+req.PathValue("group"),
-			GroupInput{DisplayName: g.DisplayName, Description: g.Description, Labels: g.Labels}, mask)
+			GroupInput{DisplayName: g.DisplayName, Description: g.Description, Labels: g.Labels,
+				DynamicQueries: dynamicQueries(g.DynamicGroupMetadata)}, mask)
 		if err != nil {
 			return err
 		}
@@ -526,15 +554,9 @@ func (r *Registry) identityRoutes(rt *rest.Router) {
 		return doneOp(w, "", nil)
 	})
 	r.inboundSSORoutes(rt)
-	for _, res := range []string{"allowlistedDomains", "customers", "devices", "policies"} {
-		refuse := func(w http.ResponseWriter, req *http.Request) error {
-			return apierror.Unimplemented("Not implemented here: Cloud Identity's %s; its groups and memberships are served.", res)
-		}
-		for _, m := range []string{"GET", "POST", "PATCH", "DELETE"} {
-			rt.Handle(m+" /v1/"+res, refuse)
-			rt.Handle(m+" /v1/"+res+"/{rest...}", refuse)
-		}
-	}
+	r.deviceRoutes(rt)
+	r.customerRoutes(rt)
+	r.directoryRoutes(rt)
 	rt.Handle("POST /v1/groups/{group}/memberships/{membership}", func(w http.ResponseWriter, req *http.Request) error {
 		id, ok := strings.CutSuffix(req.PathValue("membership"), ":modifyMembershipRoles")
 		if !ok {

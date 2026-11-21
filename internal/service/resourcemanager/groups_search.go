@@ -141,7 +141,7 @@ func (r *Registry) SearchGroups(query string) ([]*Group, error) {
 		return nil, permissionDenied(sq.parent)
 	}
 	r.mu.Lock()
-	all, err := r.groupsLocked()
+	all, err := r.customerGroupsLocked()
 	r.mu.Unlock()
 	if err != nil {
 		return nil, err
@@ -401,6 +401,9 @@ func (r *Registry) ModifyMembershipRoles(name string, add []RoleChange, remove [
 	g, i, err := r.membershipFromNameLocked(name)
 	if err != nil {
 		return nil, GroupMember{}, err
+	}
+	if g.Dynamic() {
+		return nil, GroupMember{}, dynamicMembershipsRefused(g)
 	}
 	m := g.Members[i]
 	roles := slices.Clone(m.Roles)

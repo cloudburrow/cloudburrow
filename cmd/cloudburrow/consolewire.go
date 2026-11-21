@@ -203,6 +203,8 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		providers = append(providers, projectsProvider{registry: d.projects}, h, tagsProvider{registry: d.projects},
 			projectIAMProvider{registry: d.projects, iam: d.iam}, iamRolesProvider{registry: d.projects}, iamGroupsProvider{registry: d.projects},
 			iamSSOProfilesProvider{registry: d.projects}, iamSSOAssignmentsProvider{registry: d.projects},
+			ciUsersProvider{registry: d.projects}, ciDevicesProvider{registry: d.projects}, ciInvitationsProvider{registry: d.projects},
+			ciPoliciesProvider{registry: d.projects}, ciAllowlistProvider{registry: d.projects},
 			iamServiceAccountsProvider{registry: d.projects}, iamWorkloadIdentityProvider{registry: d.projects}, iamWorkforceIdentityProvider{registry: d.projects}, iamAuditProvider{registry: d.projects},
 			iamOrgPoliciesProvider{registry: d.projects}, iamLabelsProvider{registry: d.projects}, iamSettingsProvider{registry: d.projects})
 	}
