@@ -323,6 +323,38 @@ func (s iamEnforced) use(e *iameval.Enforcer) {
 			}
 			return a.ArtifactRegistry().GetIamPolicy
 		})
+		// Cloud Asset's analysis under a scope (#2112) lists them.
+		e.Resources[iameval.Run.Name] = func(ctx context.Context, project string) []iameval.ChildResource {
+			a := s.run.adapter.Load()
+			if a == nil {
+				return nil
+			}
+			var out []iameval.ChildResource
+			for _, n := range a.ProjectResourceNames(ctx, project) {
+				out = append(out, iameval.ChildResource{Name: n})
+			}
+			return out
+		}
+		e.Resources[iameval.Functions.Name] = func(_ context.Context, project string) []iameval.ChildResource {
+			if s.run.functions.Load() == nil {
+				return nil
+			}
+			var out []iameval.ChildResource
+			for _, f := range runadapter.Functions(project) {
+				out = append(out, iameval.ChildResource{Name: f.GetName()})
+			}
+			return out
+		}
+		e.Resources[iameval.ArtifactRegistry.Name] = func(_ context.Context, project string) []iameval.ChildResource {
+			if s.run.adapter.Load() == nil {
+				return nil
+			}
+			var out []iameval.ChildResource
+			for _, n := range runadapter.RepositoryNames(project) {
+				out = append(out, iameval.ChildResource{Name: n})
+			}
+			return out
+		}
 		s.run.interpose = append(s.run.interpose, runCheck, e.Interceptor(iameval.Functions), e.Interceptor(iameval.Eventarc),
 			e.Interceptor(iameval.ArtifactRegistry), e.Interceptor(iameval.CloudBuild))
 		run, functions := jsonEnforcer(e, iameval.Run, nil), jsonEnforcer(e, iameval.Functions, nil)

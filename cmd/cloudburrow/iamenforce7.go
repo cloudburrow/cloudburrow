@@ -44,6 +44,17 @@ func (s iamEnforced7) use(e *iameval.Enforcer) {
 			}
 			return api.IAMPolicy().GetIamPolicy
 		})
+		e.Resources[iameval.PrivateCA.Name] = func(_ context.Context, project string) []iameval.ChildResource {
+			api := s.privateCA.API()
+			if api == nil {
+				return nil
+			}
+			var out []iameval.ChildResource
+			for _, n := range api.PolicyResourceNames(project) {
+				out = append(out, iameval.ChildResource{Name: n})
+			}
+			return out
+		}
 	}
 	if s.gke != nil {
 		s.gke.interpose = append(s.gke.interpose, e.Interceptor(iameval.GKE))

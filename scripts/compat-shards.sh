@@ -181,10 +181,11 @@ COMPAT_SHARDS="storage served run crossservice scale emulators memorystore sql s
 # dataset beside the key, through the client and gcloud), and Firestore's
 # and Cloud Tasks' metrics in Cloud Monitoring (#2050, Firestore or Cloud
 # Tasks with Monitoring), and Cloud Asset's analyzeIamPolicyLongrunning to
-# BigQuery (#2112, Resource Manager with BigQuery), which no other shard
-# serves together.
+# BigQuery (#2112, Resource Manager with BigQuery), and its analysis of
+# Pub/Sub topics and Cloud Run services under a scope (#2112, Resource
+# Manager with Pub/Sub and Cloud Run), which no other shard serves together.
 COMPAT_CROSSSERVICE_TEST_NAMES="ArtifactRegistryCleanupPolicies
-  CloudAssetAnalyzeIamPolicyLongrunningBigQuery
+  CloudAssetAnalyzeIamPolicyLongrunningBigQuery CloudAssetAnalyzeIamPolicyServiceResources
   FirestoreDocumentMetrics FirestoreStreamMetrics GcloudKMSInventory
   KMSInventoryCountsCMEKResources TasksQueueMetricsInCloudMonitoring
   GcloudPubSubTopicStoragePolicyUpdate GcloudStorageInsightsDatasetConfigs

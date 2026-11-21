@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"cloud.google.com/go/asset/apiv1/assetpb"
@@ -25,6 +26,7 @@ import (
 	"google.golang.org/api/googleapi"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -53,11 +55,15 @@ import (
 // https://docs.cloud.google.com/asset-inventory/docs/reference/rest/v1/savedQueries,
 // https://docs.cloud.google.com/asset-inventory/docs/analyzing-iam-policy-longrunning-bigquery.
 //
-// The resources under a project are its service accounts and the
-// resources of the services that list theirs for the analysis
-// (Enforcer.Resources: Secret Manager's secrets, Cloud KMS's key rings and
-// keys, Cloud Tasks's queues) and its Cloud Storage buckets; other services'
-// resources are reached only through resourceSelector.
+// The resources under a project are every served resource that keeps an
+// allow policy: its service accounts, its Cloud Storage buckets, the
+// in-process services' (Enforcer.Resources: Secret Manager's secrets,
+// Cloud KMS's key rings and keys, Cloud Tasks's queues, Cloud Run's
+// services, jobs and worker pools, Cloud Run functions, Artifact Registry
+// repositories, Certificate Authority Service's CA pools and certificate
+// templates) and the in-cluster products' (assetlisting.go: Pub/Sub,
+// BigQuery, Spanner, Bigtable), by Cloud Asset Inventory's full resource
+// names.
 //
 // The BigQuery tables' columns are the API's JSON field names, as the
 // page's example queries read them (opName, requestTime, analysisId,
@@ -72,6 +78,11 @@ type assetOutputs struct {
 	// storage is the instance's Cloud Storage base URL, "" when it is not
 	// served.
 	storage func() string
+	// forwarded is an in-cluster product's forwarder address ("pubsub",
+	// "bigquery", "spanner", "bigtable"), "" when it is not served.
+	forwarded func(name string) string
+	mu        sync.Mutex
+	conns     map[string]*grpc.ClientConn
 }
 
 // storageBuckets are a project's buckets, read through the instance's
@@ -1031,6 +1042,12 @@ func (v *analysisInventory) projectResources(project string) []analysisChild {
 	for _, b := range v.a.out.storageBuckets(v.ctx, project) {
 		out = append(out, analysisChild{full: "//storage.googleapis.com/" + b.Name})
 	}
+	remote := make([]string, 0, len(assetRemotes))
+	for h := range assetRemotes {
+		remote = append(remote, h)
+	}
+	sort.Strings(remote)
+	out = append(out, v.a.out.remoteResources(v.ctx, project, remote)...)
 	if v.a.e != nil {
 		hosts := make([]string, 0, len(v.a.e.Resources))
 		for h := range v.a.e.Resources {
@@ -1103,6 +1120,9 @@ func (v *analysisInventory) Policy(full string) *iampolicy.Stored {
 	case "storage.googleapis.com":
 		return v.a.out.storagePolicy(v.ctx, name)
 	}
+	if p, ok := v.a.out.remotePolicy(v.ctx, host, name); ok {
+		return p
+	}
 	if v.a.e != nil {
 		if get := v.a.e.Policies[host]; get != nil {
 			return get(v.ctx, name)
@@ -1133,6 +1153,16 @@ func (v *analysisInventory) Chain(full string) ([]iameval.Attached, error) {
 	chain := v.a.e.Eval.Chain(req)
 	for i := range chain {
 		chain[i].Resource = fullName(chain[i].Resource)
+	}
+	if _, remote := assetRemotes[host]; remote {
+		// An in-cluster product's resource: its own policy and its
+		// parents' within the product, then the project's chain.
+		var own []iameval.Attached
+		for _, r := range remoteParents(name) {
+			p, _ := v.a.out.remotePolicy(v.ctx, host, r)
+			own = append(own, iameval.Attached{Resource: "//" + host + "/" + r, Policy: p})
+		}
+		chain = append(own, chain...)
 	}
 	return chain, nil
 }

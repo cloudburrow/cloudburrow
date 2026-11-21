@@ -950,7 +950,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// Cloud Asset's analysis (#2112) writes analyzeIamPolicyLongrunning's
 	// results to the instance's Cloud Storage and BigQuery.
 	assetOut := &assetOutputs{
-		bigquery: func() *netfwd.Forwarder { return forwarderFor(forwarders, "bigquery") },
+		bigquery:  func() *netfwd.Forwarder { return forwarderFor(forwarders, "bigquery") },
+		forwarded: func(name string) string { return forwardedAddr(forwarders, name) },
 		storage: func() string {
 			if !serviceEnabled(cfg, config.ServiceStorage) {
 				return ""
