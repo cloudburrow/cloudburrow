@@ -29,7 +29,9 @@ func TestLoggingFilterAppHub(t *testing.T) {
 	h := New(t)
 	clients := appHubClients(t, h) // skips without CLOUDBURROW_TEST_APPHUB
 	h.Endpoint(EnvRun)
-	logBase := "http://" + h.Endpoint(EnvLogging)
+	// The run shard serves App Hub and Cloud Run, and exports Cloud Logging
+	// as RUN_LOGGING.
+	logBase := "http://" + runShardEndpoint(h, "CLOUDBURROW_TEST_RUN_LOGGING", EnvLogging)
 	c := clients["grpc"]
 	ctx := h.Context()
 	project := h.Project()

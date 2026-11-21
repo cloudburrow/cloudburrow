@@ -272,7 +272,8 @@ func appHubLogEntryHasApp(t *testing.T, h *Harness, project, topicID, via, app s
 // another application's matches none.
 func appHubLogFilters(t *testing.T, h *Harness, project, logName, app, kind, id string) {
 	t.Helper()
-	base := "http://" + h.Endpoint(EnvLogging)
+	logAddr := runShardEndpoint(h, "CLOUDBURROW_TEST_RUN_LOGGING", EnvLogging)
+	base := "http://" + logAddr
 	var got struct{ Entries []json.RawMessage }
 	post := func(filter string) {
 		t.Helper()
@@ -301,7 +302,7 @@ func appHubLogFilters(t *testing.T, h *Harness, project, logName, app, kind, id 
 			t.Errorf("entries.list (REST) filter %s: %d entries, want %d", filter, len(got.Entries), want)
 		}
 		ctx := h.Context()
-		ac, err := logadmin.NewClient(ctx, "projects/"+project, option.WithEndpoint(h.Endpoint(EnvLogging)), option.WithoutAuthentication(),
+		ac, err := logadmin.NewClient(ctx, "projects/"+project, option.WithEndpoint(logAddr), option.WithoutAuthentication(),
 			option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
 		if err != nil {
 			t.Fatal(err)
