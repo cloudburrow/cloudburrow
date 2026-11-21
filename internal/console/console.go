@@ -2574,8 +2574,9 @@ func (s *Server) actAtPath(w http.ResponseWriter, r *http.Request, p Provider, p
 	}
 	offered := false
 	for _, a := range offers {
-		// A list action that takes a file goes to the upload route.
-		if a.ID == action && (len(path) > 0 || !takesFile(a)) {
+		// A list action that takes a file goes to the upload route, unless
+		// its file is one choice of several (requiresFile).
+		if a.ID == action && (len(path) > 0 || !requiresFile(a)) {
 			offered = true
 			break
 		}

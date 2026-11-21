@@ -7166,7 +7166,8 @@ function buildCreateForm(spec) {
     // The files chosen in "file" fields (#999), which are sent as parts of
     // their own rather than as values.
     files() {
-      return entries.filter((e) => e.field.type === "file" && e.control.files && e.control.files[0])
+      // A file field hidden by another's choice (visibleWhen) sends nothing.
+      return entries.filter((e) => e.field.type === "file" && !e.inactive && e.control.files && e.control.files[0])
         .map((e) => ({ name: e.field.name, file: e.control.files[0] }));
     },
     values() {

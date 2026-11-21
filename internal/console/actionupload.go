@@ -71,6 +71,20 @@ func takesFile(a Action) bool {
 	return false
 }
 
+// requiresFile reports whether an action's form always holds a file: a
+// file field that is required and shown whatever the other fields hold. An
+// action whose file field is shown only for one choice (Field.VisibleWhen),
+// as Speech-to-Text's New transcription takes a local upload or a Cloud
+// Storage file (#1930), is sent to /api/actions when no file is chosen.
+func requiresFile(a Action) bool {
+	for _, f := range a.Fields {
+		if f.Type == FileFieldType && f.Required && len(f.VisibleWhen) == 0 && f.ShowWhen == "" {
+			return true
+		}
+	}
+	return false
+}
+
 // listActions are a provider's list-screen actions, or none when it has
 // no ListActor. One that takes a file is drawn only for a FileActor, which
 // the upload route needs.

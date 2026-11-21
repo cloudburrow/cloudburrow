@@ -84,7 +84,7 @@ func TestSpeechAdaptationThroughThePage(t *testing.T) {
 }
 
 // TestSpeechBatchTranscriptionThroughThePage (#1930), in the run shard:
-// Transcriptions' Transcribe from Cloud Storage sends a gs:// file to
+// Transcriptions' New transcription with a Cloud storage file sends it to
 // BatchRecognize. A missing object is refused with BatchRecognize's
 // per-file NOT_FOUND; where the local models are available
 // (CLOUDBURROW_TEST_LOCALAI), the JFK clip uploaded with the official
@@ -126,9 +126,7 @@ func TestSpeechBatchTranscriptionThroughThePage(t *testing.T) {
 	p := open(t)
 	p.navigate("/speech/transcriptions" + q)
 	p.waitFor(settled)
-	p.waitFor(`(() => { const b = document.querySelector("#list-action-batch"); return !!b && b.getClientRects().length > 0; })()`)
-	p.run(chromedp.Click(chromedp.CSS("#list-action-batch")))
-	p.waitFor(`document.querySelector(".modal.is-open #f-uri") !== null`)
+	p.openCloudStorageTranscription()
 	p.setField(".modal.is-open #f-uri", "gs://"+bucket+"/missing.flac")
 	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	if msg := p.modalRefusal(); !strings.Contains(msg, "not found") {
@@ -153,7 +151,13 @@ func TestSpeechBatchTranscriptionThroughThePage(t *testing.T) {
 	if err := w.Close(); err != nil {
 		t.Fatalf("upload: %v", err)
 	}
-	rows := p.listAction("batch", map[string]string{"uri": "gs://" + bucket + "/jfk.flac"})
+	p.openCloudStorageTranscription()
+	p.setField(".modal.is-open #f-uri", "gs://"+bucket+"/jfk.flac")
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
+	p.waitFor(`document.querySelector("#action-result-table") !== null`)
+	var rows string
+	p.eval(`document.querySelector("#action-result-table").textContent`, &rows)
+	p.clickText(".modal.is-open .modal-actions button", "Close")
 	if !strings.Contains(strings.ToLower(rows), "your country") {
 		t.Errorf("Transcribe from Cloud Storage shows %q", rows)
 	}
@@ -205,9 +209,9 @@ func TestSpeechAdaptationScreensMeetWCAG(t *testing.T) {
 		_, _ = c.DeletePhraseSet(context.Background(), &speechpb.DeletePhraseSetRequest{Name: parent + "/phraseSets/a11y-set"})
 		_, _ = c.DeleteRecognizer(context.Background(), &speechpb.DeleteRecognizerRequest{Name: parent + "/recognizers/a11y-batch"})
 	})
-	batch := screen("transcribe from Cloud Storage dialog", "/speech/transcriptions", project)
-	batch.ready = settled + ` && document.querySelector("#list-action-batch") !== null`
-	batch.then = `document.querySelector("#list-action-batch").click()`
+	batch := screen("New transcription from Cloud storage dialog", "/speech/transcriptions", project)
+	batch.ready = settled + ` && document.querySelector("#list-action-transcribe") !== null`
+	batch.then = `document.querySelector("#list-action-transcribe").click()`
 	pages := listAndCreate("custom classes", "/speech/custom-classes", project)
 	pages = append(pages, screen("custom class", "/speech/custom-classes/a11y-class", project))
 	pages = append(pages, listAndCreate("phrase sets", "/speech/phrase-sets", project)...)

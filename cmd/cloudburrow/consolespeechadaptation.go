@@ -566,7 +566,8 @@ func (p speechPhraseSetsProvider) ActAt(ctx context.Context, project string, pat
 // batchRecognize sends one Cloud Storage file to BatchRecognize with a
 // recognizer's default config, its transcript inline or written under
 // output, and waits for it.
-func (s speechSvc) batchRecognize(ctx context.Context, recognizer, uri, output string) (*speechpb.BatchRecognizeFileResult, error) {
+func (s speechSvc) batchRecognize(ctx context.Context, recognizer, uri, output string, cfg *speechpb.RecognitionConfig,
+	mask *fieldmaskpb.FieldMask) (*speechpb.BatchRecognizeFileResult, error) {
 	oc := &speechpb.RecognitionOutputConfig{Output: &speechpb.RecognitionOutputConfig_InlineResponseConfig{
 		InlineResponseConfig: &speechpb.InlineOutputConfig{}}}
 	if output != "" {
@@ -576,6 +577,7 @@ func (s speechSvc) batchRecognize(ctx context.Context, recognizer, uri, output s
 	var res *speechpb.BatchRecognizeResponse
 	err := s.withClient(ctx, func(c *speech.Client) error {
 		op, err := c.BatchRecognize(ctx, &speechpb.BatchRecognizeRequest{Recognizer: recognizer, RecognitionOutputConfig: oc,
+			Config: cfg, ConfigMask: mask,
 			Files: []*speechpb.BatchRecognizeFileMetadata{{AudioSource: &speechpb.BatchRecognizeFileMetadata_Uri{Uri: uri}}}})
 		if err != nil {
 			return err
@@ -614,7 +616,8 @@ func (p speechTranscriptionsProvider) batch(ctx context.Context, project string,
 		return nil, err
 	}
 	uri, output := strings.TrimSpace(v["uri"]), strings.TrimSpace(v["output"])
-	fr, err := p.s.batchRecognize(ctx, r.GetName(), uri, output)
+	cfg, mask := speechOverrides(v)
+	fr, err := p.s.batchRecognize(ctx, r.GetName(), uri, output, cfg, mask)
 	if err != nil {
 		return nil, err
 	}
@@ -623,6 +626,7 @@ func (p speechTranscriptionsProvider) batch(ctx context.Context, project string,
 	p.held.next++
 	t := speechTranscription{id: "transcription-" + strconv.Itoa(p.held.next), project: p.s.project(project),
 		recognizer: lastSegment(r.GetName()), file: uri, text: out.Text, when: time.Now().UTC(), result: out}
+	t.model, t.language = effective(r, v)
 	if out.Text == "" && len(out.Items) > 0 {
 		t.text = "Written to " + out.Items[0].Fields["Output"]
 	}
@@ -633,8 +637,13 @@ func (p speechTranscriptionsProvider) batch(ctx context.Context, project string,
 
 // ActAtResult implements console.ResultActor: the batch transcription.
 func (p speechTranscriptionsProvider) ActAtResult(ctx context.Context, project string, path []string, action string, v map[string]string) (*console.Listing, error) {
-	if len(path) != 0 || action != "batch" {
-		return nil, p.ActAt(ctx, project, path, action, v)
+	// New transcription with a Cloud storage file; "batch" is its earlier
+	// name, kept for the API callers that used it.
+	if len(path) != 0 || (action != "batch" && action != "transcribe") {
+		return nil, fmt.Errorf("unknown action %q", action)
+	}
+	if action == "transcribe" && v["source"] != speechSourceGCS {
+		return nil, fmt.Errorf("New transcription with a Local upload takes an audio file")
 	}
 	return p.batch(ctx, project, v)
 }

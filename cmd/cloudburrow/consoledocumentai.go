@@ -611,10 +611,8 @@ func (p docAIProcessorsProvider) DetailActions(ctx context.Context, project stri
 	if err != nil {
 		return nil
 	}
-	acts := []console.Action{{ID: "upload-test", Label: "Upload test document", Submit: "Upload", Fields: []console.Field{
-		{Name: "file", Label: "Document", Type: console.FileFieldType, Required: true,
-			Help: "PDF, PNG, JPEG, GIF, TIFF, BMP or WebP, at most 40 MB and 15 pages"}}}}
 	vers, verr := p.d.versions(ctx, pr.GetName())
+	acts := []console.Action{docAIUploadTestAction(pr, vers, verr)}
 	if verr == nil {
 		acts = append(acts, docAIDefaultVersionAction(pr, vers))
 	}
@@ -641,6 +639,74 @@ func (p docAIProcessorsProvider) DetailActions(ctx context.Context, project stri
 	}
 	return append(acts, console.Action{ID: "delete", Label: "Delete processor", Destructive: true, Leaves: true,
 		Confirm: "the processor"})
+}
+
+// docAIUploadTestAction is Upload Test Document (#1930) with the options
+// Google's test panel sets on ProcessDocument: the processor version, the
+// pages, and the processor's own config: the layout parser's Edit Layout
+// Config (its chunk size,
+// https://docs.cloud.google.com/document-ai/docs/layout-parse-quickstart,
+// read 2026-11-20) and the OCR processor's symbols.
+func docAIUploadTestAction(pr *documentaipb.Processor, vers []*documentaipb.ProcessorVersion, verr error) console.Action {
+	fields := []console.Field{{Name: "file", Label: "Document", Type: console.FileFieldType, Required: true,
+		Help: "PDF, PNG, JPEG, GIF, TIFF, BMP or WebP, at most 40 MB and 15 pages"}}
+	if verr == nil {
+		def := docAIDefaultVersionAction(pr, vers).Fields[0]
+		fields = append(fields, console.Field{Name: "version", Label: "Processor version", Type: "select", Options: def.Options,
+			OptionLabels: def.OptionLabels, Default: def.Default, Section: "Process options",
+			Help: "the processor's default unless you choose another"})
+	}
+	fields = append(fields, console.Field{Name: "pages", Label: "Pages", Type: "text", Section: "Process options",
+		Pattern: `^\s*([0-9]+\s*(,\s*[0-9]+\s*)*)?$`, Help: "optional: the page numbers to process, such as 1,3; empty for every page"})
+	switch pr.GetType() {
+	case "LAYOUT_PARSER_PROCESSOR":
+		fields = append(fields, console.Field{Name: "chunkSize", Label: "Chunk size", Type: "number", Section: "Layout config",
+			Help: "optional: the most words in a chunk; empty for the parser's default"})
+	case "OCR_PROCESSOR":
+		fields = append(fields, console.Field{Name: "enableSymbol", Label: "Enable symbols", Type: "checkbox", Section: "OCR config",
+			Help: "each character a row of its own, with its box"})
+	}
+	return console.Action{ID: "upload-test", Label: "Upload test document", Submit: "Upload", Fields: fields}
+}
+
+// docAIProcessOptions are an Upload test document's options as
+// ProcessDocument takes them, and the processor or version it names.
+func docAIProcessOptions(pr *documentaipb.Processor, v map[string]string) (string, *documentaipb.ProcessOptions, error) {
+	name := pr.GetName()
+	if id := strings.TrimSpace(v["version"]); id != "" {
+		name += "/processorVersions/" + id
+	}
+	var opts *documentaipb.ProcessOptions
+	if ps := strings.TrimSpace(v["pages"]); ps != "" {
+		var pages []int32
+		for _, f := range strings.Split(ps, ",") {
+			n, err := strconv.Atoi(strings.TrimSpace(f))
+			if err != nil || n < 1 {
+				return "", nil, fmt.Errorf("pages are page numbers separated by commas, not %q", ps)
+			}
+			pages = append(pages, int32(n))
+		}
+		opts = &documentaipb.ProcessOptions{PageRange: &documentaipb.ProcessOptions_IndividualPageSelector_{
+			IndividualPageSelector: &documentaipb.ProcessOptions_IndividualPageSelector{Pages: pages}}}
+	}
+	ensure := func() *documentaipb.ProcessOptions {
+		if opts == nil {
+			opts = &documentaipb.ProcessOptions{}
+		}
+		return opts
+	}
+	if cs := strings.TrimSpace(v["chunkSize"]); cs != "" && pr.GetType() == "LAYOUT_PARSER_PROCESSOR" {
+		n, err := strconv.Atoi(cs)
+		if err != nil || n < 1 {
+			return "", nil, fmt.Errorf("the chunk size must be a positive number, not %q", cs)
+		}
+		ensure().LayoutConfig = &documentaipb.ProcessOptions_LayoutConfig{
+			ChunkingConfig: &documentaipb.ProcessOptions_LayoutConfig_ChunkingConfig{ChunkSize: int32(n)}}
+	}
+	if v["enableSymbol"] == "true" && pr.GetType() == "OCR_PROCESSOR" {
+		ensure().OcrConfig = &documentaipb.OcrConfig{EnableSymbol: true}
+	}
+	return name, opts, nil
 }
 
 // ActAtResult implements console.ResultActor: Batch process answers each
@@ -856,7 +922,7 @@ func docAIMimeType(f console.UploadedFile) string {
 
 // ActAtFile implements console.FileActor: Upload test document.
 func (p docAIProcessorsProvider) ActAtFile(ctx context.Context, project string, path []string, action string,
-	_ map[string]string, f console.UploadedFile) (*console.Listing, error) {
+	v map[string]string, f console.UploadedFile) (*console.Listing, error) {
 	if len(path) != 1 || action != "upload-test" {
 		return nil, fmt.Errorf("unknown action %q", action)
 	}
@@ -875,9 +941,13 @@ func (p docAIProcessorsProvider) ActAtFile(ctx context.Context, project string, 
 	if mt == "" {
 		return nil, fmt.Errorf("%s is not a file type Document AI reads: PDF, PNG, JPEG, GIF, TIFF, BMP or WebP", f.Name)
 	}
+	name, opts, err := docAIProcessOptions(pr, v)
+	if err != nil {
+		return nil, err
+	}
 	var doc *documentaipb.Document
 	err = p.d.withClient(ctx, func(c *documentai.DocumentProcessorClient) error {
-		r, err := c.ProcessDocument(ctx, &documentaipb.ProcessRequest{Name: pr.GetName(),
+		r, err := c.ProcessDocument(ctx, &documentaipb.ProcessRequest{Name: name, ProcessOptions: opts,
 			Source: &documentaipb.ProcessRequest_RawDocument{RawDocument: &documentaipb.RawDocument{Content: content, MimeType: mt}}})
 		doc = r.GetDocument()
 		return err
@@ -886,6 +956,17 @@ func (p docAIProcessorsProvider) ActAtFile(ctx context.Context, project string, 
 		return nil, err
 	}
 	return docAIResult(doc), nil
+}
+
+// docAILayoutBlocks are a document layout's blocks with the blocks nested
+// in each, depth first.
+func docAILayoutBlocks(in []*documentaipb.Document_DocumentLayout_DocumentLayoutBlock) []*documentaipb.Document_DocumentLayout_DocumentLayoutBlock {
+	var out []*documentaipb.Document_DocumentLayout_DocumentLayoutBlock
+	for _, b := range in {
+		out = append(out, b)
+		out = append(out, docAILayoutBlocks(b.GetTextBlock().GetBlocks())...)
+	}
+	return out
 }
 
 // docAIResult is a processed document as the test panel shows it: its text,
@@ -940,15 +1021,31 @@ func docAIResult(doc *documentaipb.Document) *console.Listing {
 		for _, b := range pg.GetLines() {
 			add(pg.GetPageNumber(), "Line", b.GetLayout())
 		}
+		for _, b := range pg.GetTokens() {
+			add(pg.GetPageNumber(), "Token", b.GetLayout())
+		}
+		for _, b := range pg.GetSymbols() {
+			add(pg.GetPageNumber(), "Symbol", b.GetLayout())
+		}
 	}
 	// The layout parser's blocks and chunks.
 	var lt bytes.Buffer
-	for _, b := range doc.GetDocumentLayout().GetBlocks() {
+	// The layout parser's blocks organized by their detected type, as
+	// Google's layout parser analysis page shows them, in reading order
+	// within each type.
+	blocks := docAILayoutBlocks(doc.GetDocumentLayout().GetBlocks())
+	sort.SliceStable(blocks, func(i, j int) bool {
+		return blocks[i].GetTextBlock().GetType() < blocks[j].GetTextBlock().GetType()
+	})
+	for _, b := range blocks {
 		tb := b.GetTextBlock()
 		out.Items = append(out.Items, console.Resource{Name: strconv.Itoa(len(out.Items) + 1), Fields: map[string]string{
 			"Page": strconv.Itoa(int(b.GetPageSpan().GetPageStart())), "Element": "Layout block (" + tb.GetType() + ")",
 			"Text": tb.GetText()}})
-		lt.WriteString(tb.GetText() + "\n\n")
+	}
+	// The text in reading order: the top-level blocks, each holding its own.
+	for _, b := range doc.GetDocumentLayout().GetBlocks() {
+		lt.WriteString(b.GetTextBlock().GetText() + "\n\n")
 	}
 	for _, c := range doc.GetChunkedDocument().GetChunks() {
 		out.Items = append(out.Items, console.Resource{Name: strconv.Itoa(len(out.Items) + 1), Fields: map[string]string{

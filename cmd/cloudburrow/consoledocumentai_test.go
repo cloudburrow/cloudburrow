@@ -192,8 +192,8 @@ func TestConsoleSpeechRecognizers(t *testing.T) {
 		propValue(cfg, "Automatic punctuation") != "On" || propValue(cfg, "Word timestamps") != "Off" {
 		t.Errorf("after Edit: %+v %+v", page.Summary, cfg)
 	}
-	if acts := tr.ListActions(ctx, "p1"); len(acts) != 2 || len(acts[0].Fields) != 2 || acts[0].Fields[0].Options[0] != "rec-one" ||
-		acts[1].ID != "batch" {
+	if acts := tr.ListActions(ctx, "p1"); len(acts) != 1 || acts[0].ID != "transcribe" || len(acts[0].Fields) != 7 ||
+		acts[0].Fields[4].Options[0] != "rec-one" {
 		t.Errorf("New transcription: %+v", acts)
 	}
 	if err := recs.ActAt(ctx, "p1", []string{"rec-one"}, "delete", nil); err != nil {

@@ -124,6 +124,37 @@ func (s speechSvc) recognizer(ctx context.Context, project, id string) (*speechp
 
 // recognize transcribes audio with a recognizer, its default config.
 func (s speechSvc) recognize(ctx context.Context, name string, f io.Reader) (*speechpb.RecognizeResponse, error) {
+	return s.recognizeWith(ctx, name, f, nil, nil)
+}
+
+// speechOverrides are New transcription's Transcription options over the
+// recognizer's default config (#1930): a Spoken language and a Model, each
+// sent through config_mask only when chosen, as Google's console sends what
+// its Transcription options page sets.
+func speechOverrides(v map[string]string) (*speechpb.RecognitionConfig, *fieldmaskpb.FieldMask) {
+	cfg, mask := &speechpb.RecognitionConfig{}, &fieldmaskpb.FieldMask{}
+	if m := strings.TrimSpace(v["model"]); m != "" {
+		cfg.Model = m
+		mask.Paths = append(mask.Paths, "model")
+	}
+	if l := strings.TrimSpace(v["language"]); l != "" {
+		for _, c := range strings.Split(l, ",") {
+			if c = strings.TrimSpace(c); c != "" {
+				cfg.LanguageCodes = append(cfg.LanguageCodes, c)
+			}
+		}
+		mask.Paths = append(mask.Paths, "language_codes")
+	}
+	if len(mask.Paths) == 0 {
+		return nil, nil
+	}
+	return cfg, mask
+}
+
+// recognizeWith transcribes audio with a recognizer, cfg's masked fields
+// over its default config.
+func (s speechSvc) recognizeWith(ctx context.Context, name string, f io.Reader, cfg *speechpb.RecognitionConfig,
+	mask *fieldmaskpb.FieldMask) (*speechpb.RecognizeResponse, error) {
 	audio, err := io.ReadAll(io.LimitReader(f, speechMaxAudio+1))
 	if err != nil {
 		return nil, err
@@ -134,7 +165,7 @@ func (s speechSvc) recognize(ctx context.Context, name string, f io.Reader) (*sp
 	var res *speechpb.RecognizeResponse
 	err = s.withClient(ctx, func(c *speech.Client) error {
 		var e error
-		res, e = c.Recognize(ctx, &speechpb.RecognizeRequest{Recognizer: name,
+		res, e = c.Recognize(ctx, &speechpb.RecognizeRequest{Recognizer: name, Config: cfg, ConfigMask: mask,
 			AudioSource: &speechpb.RecognizeRequest_Content{Content: audio}})
 		return e
 	})
@@ -449,8 +480,32 @@ func (p speechRecognizersProvider) ActAtFile(ctx context.Context, project string
 // speechTranscription is one transcription New transcription made.
 type speechTranscription struct {
 	id, project, recognizer, file, text string
-	when                                time.Time
-	result                              *console.Listing
+	// model and language are what transcribed it: the Transcription
+	// options' choices, or the recognizer's default config's.
+	model, language string
+	when            time.Time
+	result          *console.Listing
+}
+
+// speechSourceLocal and speechSourceGCS are New transcription's audio
+// sources, Google's Local upload and Cloud storage.
+const (
+	speechSourceLocal = "Local upload"
+	speechSourceGCS   = "Cloud storage"
+)
+
+// effective is the model and language a transcription with these options
+// used: the chosen ones, or the recognizer's.
+func effective(r *speechpb.Recognizer, v map[string]string) (model, language string) {
+	c := r.GetDefaultRecognitionConfig()
+	model, language = c.GetModel(), strings.Join(c.GetLanguageCodes(), ", ")
+	if m := strings.TrimSpace(v["model"]); m != "" {
+		model = m
+	}
+	if l := strings.TrimSpace(v["language"]); l != "" {
+		language = l
+	}
+	return model, language
 }
 
 // speechTranscriptions are this console's transcriptions, held in memory:
@@ -473,11 +528,11 @@ func (speechTranscriptionsProvider) ID() string    { return "speech-transcriptio
 func (speechTranscriptionsProvider) Title() string { return "Transcriptions" }
 
 func (p speechTranscriptionsProvider) List(_ context.Context, project string) (console.Listing, error) {
-	out := console.Listing{Columns: []string{"Recognizer", "Audio file", "Transcript", "Created"}, NameColumn: "Transcription",
-		Noun: "transcriptions", RowsOpenable: true,
-		Note: "New transcription sends uploaded audio to Recognize, or a Cloud Storage file to BatchRecognize (its transcript " +
-			"shown here or written under a gs:// prefix), with a recognizer's default config. The transcriptions made here are " +
-			"listed in this console's memory until the instance stops."}
+	out := console.Listing{Columns: []string{"Recognizer", "Model", "Language", "Audio file", "Transcript", "Created"},
+		NameColumn: "Transcription", Noun: "transcriptions", RowsOpenable: true,
+		Note: "New transcription sends a Local upload to Recognize, or a Cloud storage file to BatchRecognize (its transcript " +
+			"shown here or written under a gs:// prefix), with a recognizer's default config and the Transcription options " +
+			"chosen over it. The transcriptions made here are listed in this console's memory until the instance stops."}
 	p.held.mu.Lock()
 	defer p.held.mu.Unlock()
 	project = p.s.project(project)
@@ -491,7 +546,8 @@ func (p speechTranscriptionsProvider) List(_ context.Context, project string) (c
 			preview = string(r[:80]) + "…"
 		}
 		out.Items = append(out.Items, console.Resource{Name: t.id, Status: "Succeeded", Fields: map[string]string{
-			"Recognizer": t.recognizer, "Audio file": t.file, "Transcript": orDash(preview), "Created": t.when.Format(time.RFC3339)}})
+			"Recognizer": t.recognizer, "Model": orDash(t.model), "Language": orDash(t.language), "Audio file": t.file,
+			"Transcript": orDash(preview), "Created": t.when.Format(time.RFC3339)}})
 	}
 	out.AlwaysStatus = true
 	out.Total = len(out.Items)
@@ -515,27 +571,49 @@ func (p speechTranscriptionsProvider) ListActions(ctx context.Context, project s
 		return []console.Action{{ID: "create-recognizer", Label: "New transcription",
 			Href: "/speech/recognizers?project=" + url.QueryEscape(p.s.project(project))}}
 	}
-	return []console.Action{{ID: "transcribe", Label: "New transcription", Submit: "Transcribe", Fields: []console.Field{
-		{Name: "recognizer", Label: "Recognizer", Type: "select", Options: ids, Default: ids[0], Required: true, Section: "Transcription options",
-			Help: "its default recognition config transcribes the audio"},
-		{Name: "file", Label: "Audio file", Type: console.FileFieldType, Required: true, Section: "Audio configuration",
-			Help: "WAV, FLAC, MP3, OGG Opus or WebM Opus, at most 10 MB and one minute"},
-	}}, {ID: "batch", Label: "Transcribe from Cloud Storage", Submit: "Transcribe", Fields: []console.Field{
-		{Name: "recognizer", Label: "Recognizer", Type: "select", Options: ids, Default: ids[0], Required: true, Section: "Transcription options",
-			Help: "its default recognition config transcribes the audio"},
-		{Name: "uri", Label: "Audio file in Cloud Storage", Type: "text", Required: true, Section: "Audio configuration",
-			Pattern: `^gs://[^\/]+\/.+$`, Help: "gs://bucket/object, up to 30 minutes of audio, sent to BatchRecognize"},
-		{Name: "output", Label: "Output location", Type: "text", Section: "Output", Pattern: `^(gs://[^\/]+(\/.*)?)?$`,
-			Help: "a gs:// prefix the transcript is written under; empty to show it here"},
-	}}}
+	return []console.Action{newTranscriptionAction(ids)}
+}
+
+// newTranscriptionAction is Google's New Transcription (#1930), read from
+// https://docs.cloud.google.com/speech-to-text/docs/models/chirp-3 and
+// …/docs/migration (2026-11-20): its Audio configuration, a Local upload
+// or a Cloud storage file, then Continue to its Transcription options, the
+// Recognizer with a Spoken language and a Model over its default config,
+// and Submit. A Cloud storage file may have its transcript written under a
+// gs:// prefix. Google keeps the console's transcriptions in a workspace
+// bucket; these are kept in the console's memory.
+func newTranscriptionAction(ids []string) console.Action {
+	local := map[string]string{"source": speechSourceLocal}
+	gcs := map[string]string{"source": speechSourceGCS}
+	models := append([]string{""}, speechconfig.Models()...)
+	labels := map[string]string{"": "The recognizer's model"}
+	return console.Action{ID: "transcribe", Label: "New transcription", Title: "New transcription", Submit: "Submit",
+		Steps: "continue", Fields: []console.Field{
+			{Name: "source", Label: "Audio source", Type: "radio", Section: "Audio configuration", Default: speechSourceLocal,
+				Options: []string{speechSourceLocal, speechSourceGCS}},
+			{Name: "file", Label: "Audio file", Type: console.FileFieldType, Required: true, Section: "Audio configuration",
+				VisibleWhen: local, Help: "WAV, FLAC, MP3, OGG Opus or WebM Opus, at most 10 MB and one minute, sent to Recognize"},
+			{Name: "uri", Label: "Audio file in Cloud Storage", Type: "text", Required: true, Section: "Audio configuration",
+				VisibleWhen: gcs, Pattern: `^gs://[^\/]+\/.+$`, Help: "gs://bucket/object, up to 30 minutes of audio, sent to BatchRecognize"},
+			{Name: "output", Label: "Output location", Type: "text", Section: "Audio configuration", VisibleWhen: gcs,
+				Pattern: `^(gs://[^\/]+(\/.*)?)?$`, Help: "optional: a gs:// prefix the transcript is written under; empty to show it here"},
+			{Name: "recognizer", Label: "Recognizer", Type: "select", Options: ids, Default: ids[0], Required: true,
+				Section: "Transcription options", Help: "its default recognition config transcribes the audio"},
+			{Name: "language", Label: "Spoken language", Type: "text", Section: "Transcription options", Pattern: `^[A-Za-z0-9\-, ]*$`,
+				Help: "optional: a BCP-47 code such as en-US, or several separated by commas; empty for the recognizer's"},
+			{Name: "model", Label: "Model", Type: "select", Section: "Transcription options", Options: models, OptionLabels: labels},
+		}}
 }
 
 func (p speechTranscriptionsProvider) DetailActions(context.Context, string, []string) []console.Action {
 	return nil
 }
 
-func (p speechTranscriptionsProvider) ActAt(context.Context, string, []string, string, map[string]string) error {
-	return errors.New("New transcription takes an audio file")
+// ActAt implements console.PathActor: New transcription of a Cloud
+// storage file; a Local upload is ActAtFile's.
+func (p speechTranscriptionsProvider) ActAt(ctx context.Context, project string, path []string, action string, v map[string]string) error {
+	_, err := p.ActAtResult(ctx, project, path, action, v)
+	return err
 }
 
 // ActAtFile implements console.FileActor: New transcription.
@@ -548,15 +626,18 @@ func (p speechTranscriptionsProvider) ActAtFile(ctx context.Context, project str
 	if err != nil {
 		return nil, err
 	}
-	res, err := p.s.recognize(ctx, r.GetName(), f)
+	cfg, mask := speechOverrides(v)
+	res, err := p.s.recognizeWith(ctx, r.GetName(), f, cfg, mask)
 	if err != nil {
 		return nil, err
 	}
 	out := transcriptResult(res)
+	model, lang := effective(r, v)
 	p.held.mu.Lock()
 	p.held.next++
 	t := speechTranscription{id: "transcription-" + strconv.Itoa(p.held.next), project: p.s.project(project),
-		recognizer: lastSegment(r.GetName()), file: f.Name, text: out.Text, when: time.Now().UTC(), result: out}
+		recognizer: lastSegment(r.GetName()), file: f.Name, text: out.Text, model: model, language: lang,
+		when: time.Now().UTC(), result: out}
 	p.held.list = append(p.held.list, t)
 	p.held.mu.Unlock()
 	return out, nil
@@ -576,8 +657,11 @@ func (p speechTranscriptionsProvider) Detail(_ context.Context, project string, 
 		}
 		res := *t.result
 		res.Text = ""
-		return console.Detail{Summary: []console.Property{{Label: "Recognizer", Value: t.recognizer,
+		// Google's Transcription details page: the transcript, with what
+		// made it (#1930).
+		return console.Detail{Heading: "Transcription details", Title: t.id, Summary: []console.Property{{Label: "Recognizer", Value: t.recognizer,
 			Link: "/speech/recognizers/" + url.PathEscape(t.recognizer) + "?project=" + url.QueryEscape(t.project)},
+			{Label: "Model", Value: orDash(t.model)}, {Label: "Spoken language", Value: orDash(t.language)},
 			{Label: "Audio file", Value: t.file}, {Label: "Created", Value: t.when.Format(time.RFC3339)}},
 			Sections: []console.Section{{ID: "transcript", Label: "Transcript", Kind: console.KindText, Text: orDash(t.text)},
 				{ID: "results", Label: "Results", Listing: res}}}, nil

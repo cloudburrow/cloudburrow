@@ -2190,9 +2190,12 @@ var parityRows = []parityRow{
 			"row and on its page, and Delete; a processor's page with its Overview (Name, ID, Type, Prediction endpoint) and " +
 			"Upload test document, which sends the file to ProcessDocument and draws each page image it answers with the blocks, " +
 			"paragraphs and lines boxed over it, beside the extracted text and the elements' rows (confidence, bounding box), a " +
-			"row and its box lighting each other up, or the layout parser's blocks and chunks beside its text. The gallery is " +
-			"Google's cards under its category headings",
-		Tests: []string{"TestConsoleDocumentAIProcessors", "TestDocumentAIProcessorsThroughThePage"}},
+			"row and its box lighting each other up, or the layout parser's blocks (by detected type) and chunks beside its text; " +
+			"its Process options (the processor version, the pages) and the processor's own config (the OCR processor's symbols, " +
+			"its tokens and symbols then rows and boxes too; the layout parser's Edit Layout Config chunk size) sent as " +
+			"ProcessDocument's process_options (#1930). The gallery is Google's cards under its category headings",
+		Tests: []string{"TestConsoleDocumentAIProcessors", "TestConsoleDocumentAIUploadTestOptions", "TestDocAIProcessOptions",
+			"TestDocumentAIProcessorsThroughThePage", "TestDocumentAIUploadTestOptionsThroughThePage"}},
 	{Resource: "Document AI: processor versions", Service: "vertexai",
 		Methods: []string{"DocumentProcessorService/ListProcessorVersions", "DocumentProcessorService/GetProcessorVersion",
 			"DocumentProcessorService/SetDefaultProcessorVersion", "DocumentProcessorService/DeployProcessorVersion",
@@ -2220,13 +2223,16 @@ var parityRows = []parityRow{
 	{Resource: "Speech-to-Text: recognizers", Service: "vertexai",
 		Methods: []string{"Speech/CreateRecognizer", "Speech/GetRecognizer", "Speech/ListRecognizers", "Speech/UpdateRecognizer",
 			"Speech/DeleteRecognizer", "Speech/UndeleteRecognizer", "Speech/Recognize"},
-		Provider: "speech-recognizers", Offers: "Speech-to-Text's menu (#1930): Transcriptions (speech-transcriptions: New " +
-			"transcription, a recognizer and an audio file sent to Recognize, its transcript and results shown and kept in the " +
-			"console's memory, each with a page) and Recognizers (ListRecognizers with deleted ones: Recognizer ID, Display name, " +
+		Provider: "speech-recognizers", Offers: "Speech-to-Text's menu (#1930): Transcriptions (speech-transcriptions: Google's New " +
+			"transcription, its Audio configuration a Local upload sent to Recognize, then Continue to its Transcription options, " +
+			"the recognizer with a Spoken language and a Model over its default config through config_mask, ending in Submit; " +
+			"its transcript and results shown and kept in the console's memory, each with its Transcription details page naming " +
+			"the model and language) and Recognizers (ListRecognizers with deleted ones: Recognizer ID, Display name, " +
 			"Region, Model, Language, Status), Create recognizer (ID, region, display name, chirp, language, word timestamps, " +
 			"word-level confidence, automatic punctuation), a recognizer's page with its default recognition config, Edit " +
 			"(UpdateRecognizer), Transcribe (an uploaded audio file, its transcript), Delete, and Undelete on a deleted one",
-		Tests: []string{"TestConsoleSpeechRecognizers", "TestSpeechRecognizersThroughThePage"}},
+		Tests: []string{"TestConsoleSpeechRecognizers", "TestConsoleSpeechNewTranscription", "TestSpeechRecognizersThroughThePage",
+			"TestSpeechNewTranscriptionIsGooglesThroughThePage"}},
 	{Resource: "Speech-to-Text: encryption settings", Service: "vertexai",
 		Methods:  []string{"Speech/GetConfig", "Speech/UpdateConfig"},
 		Provider: "speech-recognizers", Offers: "Recognizers' Encryption settings (#1950): a region and a customer-managed " +
@@ -2235,10 +2241,12 @@ var parityRows = []parityRow{
 		Tests: []string{"TestConsoleSpeechEncryptionSettings"}},
 	{Resource: "Speech-to-Text: batch transcription", Service: "vertexai",
 		Methods:  []string{"Speech/BatchRecognize"},
-		Provider: "speech-transcriptions", Offers: "Transcriptions' Transcribe from Cloud Storage (#1930): a recognizer, a gs:// " +
-			"audio file and an optional gs:// output prefix sent to BatchRecognize; the transcript and results shown (inline) or " +
-			"the result object's gs:// URI, kept in the list with the uploads' transcriptions",
-		Tests: []string{"TestConsoleSpeechAdaptation", "TestSpeechBatchTranscriptionThroughThePage"}},
+		Provider: "speech-transcriptions", Offers: "Transcriptions' New transcription with a Cloud storage audio source (#1930): " +
+			"a gs:// audio file and an optional gs:// output prefix, then the Transcription options (recognizer, Spoken language, " +
+			"Model), sent to BatchRecognize; the transcript and results shown (inline) or the result object's gs:// URI, kept in " +
+			"the list with the uploads' transcriptions",
+		Tests: []string{"TestConsoleSpeechAdaptation", "TestConsoleSpeechNewTranscription", "TestSpeechBatchTranscriptionThroughThePage",
+			"TestSpeechNewTranscriptionIsGooglesThroughThePage"}},
 	{Resource: "Speech-to-Text: custom classes and phrase sets", Service: "vertexai",
 		Methods: []string{"Speech/CreateCustomClass", "Speech/GetCustomClass", "Speech/ListCustomClasses", "Speech/UpdateCustomClass",
 			"Speech/DeleteCustomClass", "Speech/UndeleteCustomClass", "Speech/CreatePhraseSet", "Speech/GetPhraseSet",
