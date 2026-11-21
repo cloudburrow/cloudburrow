@@ -31,14 +31,14 @@ import (
 // The pinned tool versions the inventories were taken from. They must equal
 // dependencies.json's realTools entries.
 const (
-	TerraformProviderVersion = "8.4.0"
+	TerraformProviderVersion = "8.12.0"
 	GcloudVersion            = "593.0.0"
 )
 
-//go:embed terraform-google-8.4.0.txt
+//go:embed terraform-google-8.12.0.txt
 var terraformGoogle string
 
-//go:embed terraform-google-beta-8.4.0.txt
+//go:embed terraform-google-beta-8.12.0.txt
 var terraformGoogleBeta string
 
 //go:embed gcloud-593.0.0.txt
@@ -46,9 +46,9 @@ var gcloudOverrides string
 
 // TerraformNoEnv are the endpoint arguments of the pinned providers that
 // read no GOOGLE_*_CUSTOM_ENDPOINT environment variable (measured in the
-// 8.4.0 binaries, #1975), so a refusal for one must be written in the
-// provider block. Every other argument's refusal is passed in the
-// environment.
+// 8.4.0 binaries, #1975, and again in the 8.12.0 ones, #1578), so a refusal
+// for one must be written in the provider block. Every other argument's
+// refusal is passed in the environment.
 var TerraformNoEnv = map[string]bool{
 	"billing_custom_endpoint": true, "cloud_resource_manager_custom_endpoint": true,
 	"core_billing_custom_endpoint": true, "iam_custom_endpoint": true,

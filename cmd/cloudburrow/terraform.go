@@ -795,7 +795,12 @@ func runTerraform(args []string, stdout, stderr io.Writer) error {
 	}
 
 	dir := moduleDir(theirs)
-	if bad := unpointed(dir, unpointedResources(cfg)); len(bad) != 0 && !offlineSubcommands[subcommand(theirs)] {
+	families := unpointedResources(cfg)
+	if intercept {
+		// The locations data sources it serves locally (#1578).
+		families = interceptUnlocked(cfg, families)
+	}
+	if bad := unpointed(dir, families); len(bad) != 0 && !offlineSubcommands[subcommand(theirs)] {
 		return fmt.Errorf("refusing to run %s %s: the module declares resources cloudburrow cannot point at this instance, "+
 			"which the provider would send to real Google:\n  %s", binary, subcommand(theirs), strings.Join(bad, "\n  "))
 	}

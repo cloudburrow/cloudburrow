@@ -737,8 +737,8 @@
           "test/compat/runnfsenv_test.go:114 TestRunNFSVolumesAndCloudRunEnv",
           "test/compat/runnfstools_test.go:108 TestConsoleRunNFSVolume",
           "test/compat/runnfstools_test.go:50 TestTerraformRunNFSVolume",
-          "test/compat/runscalinggaps_test.go:258 TestRunServiceCPUOnlyScaling",
-          "test/compat/runscalinggaps_test.go:352 TestTerraformRunServiceScalingControls",
+          "test/compat/runscalinggaps_test.go:256 TestRunServiceCPUOnlyScaling",
+          "test/compat/runscalinggaps_test.go:343 TestTerraformRunServiceScalingControls",
           "test/compat/runsecretcmek_test.go:28 TestRunMountsASecretUnderACustomerManagedKey",
           "test/compat/runserviceaccount_test.go:42 TestCloudRunWorkloadIsToldItsServiceAccount",
           "test/compat/runsettings_test.go:35 TestRunServiceStoredSettingsAndSubPath",
@@ -788,9 +788,9 @@
           "test/compat/runnfsenv_test.go:114 TestRunNFSVolumesAndCloudRunEnv",
           "test/compat/runnfstools_test.go:108 TestConsoleRunNFSVolume",
           "test/compat/runnfstools_test.go:50 TestTerraformRunNFSVolume",
-          "test/compat/runscalinggaps_test.go:121 TestRunServiceDisabledAnswersUnavailable",
-          "test/compat/runscalinggaps_test.go:258 TestRunServiceCPUOnlyScaling",
-          "test/compat/runscalinggaps_test.go:352 TestTerraformRunServiceScalingControls",
+          "test/compat/runscalinggaps_test.go:119 TestRunServiceDisabledAnswersUnavailable",
+          "test/compat/runscalinggaps_test.go:256 TestRunServiceCPUOnlyScaling",
+          "test/compat/runscalinggaps_test.go:343 TestTerraformRunServiceScalingControls",
           "test/compat/runserviceaccount_test.go:42 TestCloudRunWorkloadIsToldItsServiceAccount",
           "test/compat/runsettings_test.go:35 TestRunServiceStoredSettingsAndSubPath",
           "test/compat/runtraffic_test.go:26 TestRunTrafficSplitAndTags",
@@ -832,9 +832,9 @@
           "test/compat/run_test.go:227 TestRunUpdateService",
           "test/compat/run_test.go:320 TestRunUpdateServiceWithAMask",
           "test/compat/rundisabled_test.go:51 TestRunServiceDisabledByManualZero",
-          "test/compat/runscalinggaps_test.go:121 TestRunServiceDisabledAnswersUnavailable",
-          "test/compat/runscalinggaps_test.go:186 TestRunServiceManualSplitLeavesOneAtZero",
-          "test/compat/runscalinggaps_test.go:352 TestTerraformRunServiceScalingControls",
+          "test/compat/runscalinggaps_test.go:119 TestRunServiceDisabledAnswersUnavailable",
+          "test/compat/runscalinggaps_test.go:184 TestRunServiceManualSplitLeavesOneAtZero",
+          "test/compat/runscalinggaps_test.go:343 TestTerraformRunServiceScalingControls",
           "test/compat/runservicescaling_test.go:54 TestRunServiceLevelScaling",
           "test/compat/runtraffic_test.go:26 TestRunTrafficSplitAndTags",
           "test/compat/terraform_cicd_test.go:218 TestTerraformRunServiceCloudSQLVolume",
@@ -3309,7 +3309,8 @@
         "method": "run.projects.locations.list",
         "status": "Verified",
         "tests": [
-          "test/compat/runv1global_test.go:38 TestRunV1LocationsAndIAM"
+          "test/compat/runv1global_test.go:38 TestRunV1LocationsAndIAM",
+          "test/compat/terraform_hardcoded_test.go:217 TestTerraformLocationsIntercepted"
         ]
       },
       {
@@ -4493,7 +4494,8 @@
           "test/compat/listfilters1943_test.go:216 TestListFiltersPrivateCA",
           "test/compat/listfilters1943_test.go:97 TestListFiltersFunctions",
           "test/compat/memorystoreops_test.go:34 TestMemorystoreLocationsOperationsMaintenance",
-          "test/compat/schedulerlocations_test.go:23 TestSchedulerLocations"
+          "test/compat/schedulerlocations_test.go:23 TestSchedulerLocations",
+          "test/compat/terraform_hardcoded_test.go:217 TestTerraformLocationsIntercepted"
         ]
       },
       {
@@ -5904,7 +5906,8 @@
           "test/compat/listfilters1943_test.go:216 TestListFiltersPrivateCA",
           "test/compat/listfilters1943_test.go:97 TestListFiltersFunctions",
           "test/compat/memorystoreops_test.go:34 TestMemorystoreLocationsOperationsMaintenance",
-          "test/compat/schedulerlocations_test.go:23 TestSchedulerLocations"
+          "test/compat/schedulerlocations_test.go:23 TestSchedulerLocations",
+          "test/compat/terraform_hardcoded_test.go:217 TestTerraformLocationsIntercepted"
         ]
       },
       {
