@@ -204,6 +204,8 @@ func (f *Front) Server() *grpc.Server {
 				}
 				return "bigtableadmin.googleapis.com"
 			}),
+			// Fault rules (#2113), the host's.
+			faultgate.StreamInterceptor("bigtable"),
 			// IAM enforcement (#1879), on the call's first request.
 			f.gate.StreamInterceptor(func() any { return new(frame) },
 				func(v any) []byte { return *v.(*frame) },
@@ -223,7 +225,7 @@ func (f *Front) Serve(ctx context.Context, l net.Listener) error {
 	// so the Host and Origin checks are here (#1587). Pods name the
 	// Service; a kubelet probe the pod's address.
 	srv := &http.Server{
-		Handler:           hostguard.WrapService(frontready.Wrap(apienable.Gate(nil, "bigtableadmin.googleapis.com", sysparams.Wrap(f.gate.Wrap(faultgate.Gate("bigtable", f.httpHandler())), sysparams.Options{}), apienable.Options{ServiceOf: bigtableAPI}), f.addr), "bigtable"),
+		Handler:           hostguard.WrapService(frontready.Wrap(apienable.Gate(nil, "bigtableadmin.googleapis.com", sysparams.Wrap(f.gate.Wrap(f.httpHandler()), sysparams.Options{}), apienable.Options{ServiceOf: bigtableAPI}), f.addr), "bigtable"),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	grpcL, httpL := pubsubfront.Split(l)

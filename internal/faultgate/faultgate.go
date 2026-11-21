@@ -32,6 +32,11 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -313,4 +318,39 @@ func (f Faulter) Fault(method, resource string) (int, time.Duration, bool) {
 		status = d.HTTPStatus
 	}
 	return status, time.Duration(d.LatencyMs) * time.Millisecond, true
+}
+
+// StreamInterceptor applies the rules for service to a gRPC server's
+// calls, every one of which is a stream on a front that forwards unknown
+// services (the Pub/Sub and Bigtable fronts).
+func StreamInterceptor(service string) grpc.StreamServerInterceptor {
+	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		rem := current.Load()
+		if rem == nil {
+			return handler(srv, ss)
+		}
+		h := http.Header{}
+		if md, ok := metadata.FromIncomingContext(ss.Context()); ok {
+			for _, v := range md.Get("x-goog-request-params") {
+				h.Add("X-Goog-Request-Params", v)
+			}
+		}
+		d := rem.Decide(ss.Context(), Call{Service: service, Method: info.FullMethod, Resource: RoutedResource(h)})
+		if !d.Fault {
+			return handler(srv, ss)
+		}
+		if d.LatencyMs > 0 {
+			t := time.NewTimer(time.Duration(d.LatencyMs) * time.Millisecond)
+			select {
+			case <-t.C:
+			case <-ss.Context().Done():
+				t.Stop()
+				return status.FromContextError(ss.Context().Err()).Err()
+			}
+		}
+		if d.Code == 0 {
+			return handler(srv, ss)
+		}
+		return status.Error(codes.Code(d.Code), d.Message)
+	}
 }

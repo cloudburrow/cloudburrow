@@ -103,7 +103,7 @@ func TestFaultsInClusterFirestore(t *testing.T) {
 	if _, err := doc.Set(h.Context(), map[string]any{"n": 1}); err != nil {
 		t.Fatal(err)
 	}
-	clusterFault(t, h, "firestore", `{"service":"firestore","method":"GetDocument","project":"`+h.Project()+`","code":"PERMISSION_DENIED","count":1}`,
+	clusterFault(t, h, "firestore", `{"service":"firestore","method":"BatchGetDocuments","project":"`+h.Project()+`","code":"PERMISSION_DENIED","count":1}`,
 		codes.PermissionDenied, func() error {
 			_, err := c.Collection("faulted").Doc(doc.ID).Get(h.Context())
 			return err
