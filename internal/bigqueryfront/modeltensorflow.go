@@ -44,7 +44,7 @@ import (
 // --port-tfconvert through cloudburrow-host, the front's --tfconvert)
 // runs Google's tf.lite.TFLiteConverter.from_saved_model on its
 // serving_default signature in a local container (deploy/tfconvert,
-// `docker run --network none`), with TensorFlow Lite's builtin operators
+// on an --internal Docker network), with TensorFlow Lite's builtin operators
 // alone. The flatbuffer is kept with the model and runs on
 // internal/tflitemodel exactly as an imported TENSORFLOW_LITE model does
 // (modeltflite.go): its inputs and outputs are serving_default's.

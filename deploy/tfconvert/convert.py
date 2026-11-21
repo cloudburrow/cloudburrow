@@ -77,12 +77,27 @@ def convert():
     elif sparse_in:
         src, sparse = sparse_rewrite(fn, sparse_in)
     src = lower_sparse(src)
-    conv = tf.lite.TFLiteConverter.from_saved_model(src, signature_keys=["serving_default"])
-    conv.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
+    data, msg = None, None
     try:
-        data = conv.convert()
+        data = to_tflite(src)
     except Exception as e:  # noqa: BLE001
         msg = str(e).strip()
+        if any(m in msg for m in TENSOR_LIST_STATIC):
+            # A tf.while_loop that writes a TensorArray of a free batch
+            # (Keras's LSTM, GRU and SimpleRNN layers) lowers to builtins
+            # only when the batch is known. The front runs every model as a
+            # batch of one (modeltflite.go), so fixing it at 1 changes no
+            # answer.
+            try:
+                dst, shapes, fn1 = batch_of_one(src)
+                data1 = to_tflite(dst)
+                if not same_answers(data1, shapes, fn1):
+                    fail("convert", "the model's tf.while_loop writes a TensorArray of a free shape, which TensorFlow Lite's converter lowers "
+                         "only when it is known, and fixing the batch at one changes its answers")
+                data, msg = data1, None
+            except Exception as e2:  # noqa: BLE001
+                msg = str(e2).strip()
+    if data is None:
         lines = [l.strip() for l in msg.splitlines() if l.strip()]
         # The converter names the ops it has no builtin for on its
         # "Custom ops: ...", "Flex ops: ..." and "TF Select ops: ..." lines.
@@ -95,6 +110,118 @@ def convert():
         data = with_metadata(data, "cloudburrow_sparse_inputs", json.dumps(sparse, sort_keys=True).encode())
     with open("/out/model.tflite", "wb") as f:
         f.write(data)
+
+
+def to_tflite(src):
+    """The TensorFlow Lite flatbuffer of src's serving_default, of
+    TensorFlow Lite's builtin operators alone."""
+    import tensorflow as tf
+
+    conv = tf.lite.TFLiteConverter.from_saved_model(src, signature_keys=["serving_default"])
+    conv.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
+    return conv.convert()
+
+
+# What TFLiteConverter says of a TensorList (a TensorArray) whose element
+# shape is not known, as a tf.while_loop over a free batch writes one.
+TENSOR_LIST_STATIC = ("requires element_shape to be static", "Lowering tensor list ops is failed")
+
+
+def batch_of_one(src):
+    """Writes the SavedModel whose serving_default is src's with every
+    input's free first dimension fixed at 1 and the free first dimension
+    of each TensorList's element shape (a TensorArray's, as Keras's
+    recurrent layers write [batch, units]) fixed at 1 to match. Answers
+    its path, the input shapes it fixed and src's own function."""
+    import shutil
+
+    import tensorflow as tf
+    from tensorflow.core.protobuf import saved_model_pb2
+    from tensorflow.python.framework import tensor_util
+
+    patched = "/tmp/batch1_src"
+    shutil.copytree(src, patched)
+    pb = os.path.join(patched, "saved_model.pb")
+    sm = saved_model_pb2.SavedModel()
+    with open(pb, "rb") as f:
+        sm.ParseFromString(f.read())
+    for mg in sm.meta_graphs:
+        for nodes in [mg.graph_def.node] + [f.node_def for f in mg.graph_def.library.function]:
+            byname = {n.name: n for n in nodes}
+            for n in nodes:
+                if n.op not in TENSOR_LIST_SHAPED or len(n.input) <= TENSOR_LIST_SHAPED[n.op]:
+                    continue
+                c = byname.get(n.input[TENSOR_LIST_SHAPED[n.op]].split(":")[0])
+                if c is None or c.op != "Const":
+                    continue
+                v = tensor_util.MakeNdarray(c.attr["value"].tensor)
+                if v.ndim == 1 and len(v) >= 2 and v[0] == -1 and (v[1:] >= 0).all():
+                    v = v.copy()
+                    v[0] = 1
+                    c.attr["value"].tensor.CopyFrom(tensor_util.make_tensor_proto(v))
+    with open(pb, "wb") as f:
+        f.write(sm.SerializeToString())
+
+    module = tf.Module()
+    # The module holds the loaded model, whose variables and tables its
+    # function reads: a loaded object nothing refers to goes with them.
+    module.src = tf.saved_model.load(patched)
+    fn = module.src.signatures["serving_default"]
+    specs, shapes = {}, {}
+    for k, sp in fn.structured_input_signature[1].items():
+        dims = sp.shape.as_list() if sp.shape.rank is not None else None
+        if dims and dims[0] is None:
+            dims[0] = 1
+        shapes[k] = dims
+        specs[k] = tf.TensorSpec(dims, sp.dtype, name=k)
+    module.serve = tf.function(lambda **kw: fn(**kw)).get_concrete_function(**specs)
+    dst = "/tmp/batch1_model"
+    tf.saved_model.save(module, dst, signatures={"serving_default": module.serve})
+    loaded = tf.saved_model.load(src)
+    LOADED.append(loaded)
+    return dst, shapes, loaded.signatures["serving_default"]
+
+
+LOADED = []
+
+# The TensorList operators with an element_shape input, and its index.
+TENSOR_LIST_SHAPED = {"TensorListReserve": 0, "TensorListFromTensor": 1, "TensorListStack": 1, "TensorListGetItem": 2,
+                      "TensorListConcatV2": 1, "TensorListGather": 2}
+
+
+def same_answers(data, shapes, fn):
+    """Whether the flatbuffer answers what fn (TensorFlow itself) does for
+    a batch of one of seeded inputs: what batch_of_one fixed must change
+    no answer, or the model is refused rather than answered wrongly."""
+    import numpy as np
+    import tensorflow as tf
+
+    rng = np.random.default_rng(1775)
+    specs = fn.structured_input_signature[1]
+    feed = {}
+    for k, sp in specs.items():
+        dims = [d if d is not None else 1 for d in (shapes[k] or [])]
+        if sp.dtype == tf.string:
+            feed[k] = np.full(dims, b"", dtype=object)
+        elif sp.dtype.is_floating:
+            feed[k] = rng.normal(size=dims).astype(sp.dtype.as_numpy_dtype)
+        elif sp.dtype == tf.bool:
+            feed[k] = rng.integers(0, 2, size=dims).astype(bool)
+        else:
+            feed[k] = rng.integers(0, 3, size=dims).astype(sp.dtype.as_numpy_dtype)
+    want = {k: np.asarray(v.numpy()) for k, v in fn(**{k: tf.constant(v) for k, v in feed.items()}).items()}
+    run = tf.lite.Interpreter(model_content=data).get_signature_runner("serving_default")
+    got = run(**feed)
+    for k, w in want.items():
+        g = np.asarray(got.get(k))
+        if g.shape != w.shape and g.size != w.size:
+            return False
+        if w.dtype.kind == "f":
+            if not np.allclose(g.reshape(w.shape), w, rtol=1e-4, atol=1e-5):
+                return False
+        elif not (g.reshape(w.shape) == w).all():
+            return False
+    return True
 
 
 def coo_sparse_ports():

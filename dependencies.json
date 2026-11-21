@@ -16,21 +16,20 @@
     "bigqueryml": {
       "tfconvertBase": {
         "$comment": "deploy/tfconvert/Dockerfile builds FROM this digest (#1775): the TensorFlow SavedModel converter image the CLI builds locally on the first imported TENSORFLOW model.",
-        "image": "python:3.12-slim",
-        "digest": "sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b",
-        "license": "PSF-2.0 (CPython) and DFSG-free Debian packages (see /usr/share/doc/*/copyright)",
-        "redistribution": "not published: built locally by `cloudburrow up` (tag cloudburrow/tfconvert:<context hash>) and run with --network none",
+        "image": "tensorflow/tensorflow:2.20.0",
+        "digest": "sha256:6b0a7db409e62b7cf188ce72074c520af3e8c21f6d4d5b206f700520594dfb5a",
+        "license": "Apache-2.0 (TensorFlow) and the Ubuntu packages of its base (see /usr/share/doc/*/copyright)",
+        "redistribution": "not published: built locally by `cloudburrow up` (tag cloudburrow/tfconvert:<context hash>) and run on the --internal Docker network cloudburrow-tfconvert (no route out)",
         "updateFeed": "docker-hub-tag-list",
         "verification": "image-digest",
         "platforms": [
-          "linux/amd64",
-          "linux/arm64"
+          "linux/amd64"
         ],
-        "notes": "Multi-arch OCI index, resolved 2026-11-18. The Docker official python image, third-party: Google publishes no TensorFlow image for this Python on linux/arm64, and Google's own PyPI tensorflow wheel is what runs.",
-        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect python:3.12-slim`."
+        "notes": "Google's official TensorFlow image, resolved 2026-11-21; a single linux/amd64 manifest (Google publishes no arm64 one), so an arm64 host runs it under its Docker's amd64 emulation. TensorFlow 2.20.0 on Python 3.11.",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect tensorflow/tensorflow:2.20.0`."
       },
       "tensorflow": {
-        "$comment": "pip install tensorflow==2.20.0 in deploy/tfconvert/Dockerfile (#1775): Google's tf.lite.TFLiteConverter.from_saved_model converts imported SavedModels to TensorFlow Lite.",
+        "$comment": "TensorFlow 2.20.0 as the tensorflow/tensorflow:2.20.0 image deploy/tfconvert/Dockerfile builds FROM (#1775): Google's tf.lite.TFLiteConverter.from_saved_model converts imported SavedModels to TensorFlow Lite.",
         "version": "2.20.0",
         "source": "https://pypi.org/project/tensorflow/2.20.0/",
         "license": "Apache-2.0",

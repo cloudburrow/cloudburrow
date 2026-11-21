@@ -25,8 +25,8 @@ import (
 
 // TestBigQueryMLTensorFlowImportGenerated (#1775): imported TensorFlow
 // SavedModels, made by the test itself in CloudBurrow's pinned TensorFlow
-// converter image (deploy/tfconvert: TensorFlow 2.20.0 from PyPI, run
-// --network none; testdata/tensorflow/gen_import.py), uploaded to the
+// converter image (deploy/tfconvert: Google's tensorflow/tensorflow:2.20.0
+// by digest, run on an --internal network; testdata/tensorflow/gen_import.py), uploaded to the
 // instance's Cloud Storage and imported with CREATE MODEL …
 // OPTIONS(MODEL_TYPE='TENSORFLOW', MODEL_PATH='gs://…/*') through the
 // official bigquery and storage Go clients, as
@@ -94,7 +94,10 @@ func TestBigQueryMLTensorFlowImportGenerated(t *testing.T) {
 	// each SavedModel's directory 0755 whatever the umask, so on Linux,
 	// where a bind mount keeps the container's owner, t.TempDir's cleanup
 	// could not unlink the files of a directory nobody owns.
-	cmd := exec.CommandContext(bctx, "docker", "run", "--rm", "--network", "none", "--read-only", "--tmpfs", "/tmp",
+	if err := d.EnsureNetwork(bctx); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.CommandContext(bctx, "docker", "run", "--rm", "--network", tfconvert.Network, "--read-only", "--tmpfs", "/tmp",
 		"--user", fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()),
 		"-e", "HOME=/tmp", "-e", "TF_CPP_MIN_LOG_LEVEL=3", "-v", gen+":/w:ro", "-v", out+":/out",
 		"--entrypoint", "python3", img, "-I", "/w/gen_import.py", "/out")

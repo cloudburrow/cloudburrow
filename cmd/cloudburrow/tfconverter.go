@@ -24,7 +24,7 @@ func tfConverterEnabled(cfg config.Config) bool {
 
 // tfConverterService serves internal/tfconvert on --port-tfconvert: on
 // loopback, and to the BigQuery front through cloudburrow-host. Each
-// conversion is `docker run --network none` of the converter image
+// conversion is a `docker run` of the converter image, on an --internal network,
 // (deploy/tfconvert), built on the first import; the CLI itself runs no
 // TensorFlow and stays static.
 type tfConverterService struct {

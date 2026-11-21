@@ -57,7 +57,7 @@ func listOutput(code int32) bool {
 	switch code {
 	case opNonMaxSuppressionV4, opNonMaxSuppressionV5, opBidirectionalSequenceLSTM, opBidirectionalSequenceRNN,
 		opCallOnce, opHashtable, opHashtableFind, opHashtableImport, opHashtableSize, opVarHandle, opReadVariable, opAssignVariable,
-		opUnique, opHashtableLookup, opStablehloComposite, opDetectionPostProcess, opStablehloCase:
+		opUnique, opHashtableLookup, opStablehloComposite, opDetectionPostProcess, opStablehloCase, opStablehloRngBitGenerator:
 		return true
 	}
 	return false
@@ -89,6 +89,8 @@ func (m *Model) evalList(o op, a []*Tensor, n, depth int, st *runState) ([]*Tens
 		return m.call(k, a, depth, st)
 	case opStablehloCase:
 		return m.stablehloCase(o, a, depth, st)
+	case opStablehloRngBitGenerator: // rng.go
+		return rngBitGenerator(o, a, n)
 	}
 	return m.evalResource(o, a, depth, st) // resource.go
 }

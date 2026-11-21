@@ -6,8 +6,9 @@
 // published to the cluster through cloudburrow-host like the ONNX runner.
 // The front sends the SavedModel's files as a tar; the converter writes
 // them to a temporary directory and runs the converter image
-// (deploy/tfconvert: Google's tf.lite.TFLiteConverter.from_saved_model on
-// PyPI's tensorflow) with `docker run --network none`, and answers the
+// (deploy/tfconvert: Google's tf.lite.TFLiteConverter.from_saved_model in
+// Google's pinned tensorflow/tensorflow image) on an --internal Docker
+// network with no route out, and answers the
 // TensorFlow Lite flatbuffer, which internal/tflitemodel runs. The CLI
 // only shells out to docker: it stays static.
 package tfconvert
