@@ -2597,3 +2597,46 @@ func TestTheInfoPanelHasARowsTabsAndPropertyActionLinks(t *testing.T) {
 		t.Error("a refresh does not redraw the inspected row's panel, or a poll does")
 	}
 }
+
+// TestNoScreenIsDrawnBeforeTheConsoleBoots: the toolbar's links work from
+// the first paint, while main still reads the services, the operations and
+// the projects. A screen drawn by such a click was drawn again by main's own
+// route(), back through its loading state, under the user (main run
+// 44830404935, #2080: the Connect page's Format select was gone when the test
+// chose JSON). route() draws nothing until main has finished, and main
+// marks itself finished just before the one route() that draws the screen.
+func TestNoScreenIsDrawnBeforeTheConsoleBoots(t *testing.T) {
+	js := consoleAsset(t, "console.js")
+	start := strings.Index(js, "\nfunction route() {")
+	if start < 0 {
+		t.Fatal("console.js has no route()")
+	}
+	body := js[start:]
+	if end := strings.Index(body, "\n}\n"); end >= 0 {
+		body = body[:end]
+	}
+	guard := strings.Index(body, "if (!BOOTED) return")
+	if guard < 0 {
+		t.Fatal("route() draws a screen before main has finished booting")
+	}
+	if d := strings.Index(body, "dispatch("); d >= 0 && d < guard {
+		t.Error("route() dispatches before it checks that main has finished")
+	}
+	if strings.Count(js, "BOOTED = true") != 1 {
+		t.Fatal("BOOTED is not set exactly once")
+	}
+	mainStart := strings.Index(js, "\nasync function main() {")
+	if mainStart < 0 {
+		t.Fatal("console.js has no main()")
+	}
+	main := js[mainStart:]
+	if end := strings.Index(main, "\n}\n"); end >= 0 {
+		main = main[:end]
+	}
+	set := strings.Index(main, "BOOTED = true;")
+	projects := strings.Index(main, "await initProjects();")
+	last := strings.LastIndex(main, "route();")
+	if set < 0 || projects < 0 || last < 0 || !(projects < set && set < last) {
+		t.Error("main does not set BOOTED after resolving the projects and before its route()")
+	}
+}

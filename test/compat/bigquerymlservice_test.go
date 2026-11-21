@@ -382,6 +382,7 @@ func TestBigQueryMLTranscribe(t *testing.T) {
 		"audio/song.ogg":  {"audio/ogg", []byte("OggS\x00\x02 not really")},
 		"audio/notes.txt": {"text/plain", []byte("not audio at all")},
 		"stereo/call.wav": {"audio/wav", stereoCall(t)},
+		"wav/jfk.wav":     {"audio/wav", wav},
 	} {
 		w := bh.Object(name).NewWriter(ctx)
 		w.ContentType = o.ct
@@ -408,6 +409,15 @@ func TestBigQueryMLTranscribe(t *testing.T) {
 	if err := run(fmt.Sprintf("CREATE EXTERNAL TABLE `%s.stereo` WITH CONNECTION `%s` OPTIONS(object_metadata = 'SIMPLE', uris = ['gs://%s/stereo/*'])",
 		ds, conn, bh.BucketName())); err != nil {
 		t.Fatalf("CREATE EXTERNAL TABLE stereo: %v", err)
+	}
+	// The WAV alone, for the queries that read one row. ML.TRANSCRIBE
+	// transcribes every object of its TABLE before a WHERE sees them: over
+	// audio, a WHERE uri LIKE '%.wav' still transcribed all four files and
+	// dropped three, six clips of the fourteen that took the test past its
+	// ten minutes at about 50 s a clip in main run 44830404935 (#2080).
+	if err := run(fmt.Sprintf("CREATE EXTERNAL TABLE `%s.wav` WITH CONNECTION `%s` OPTIONS(object_metadata = 'SIMPLE', uris = ['gs://%s/wav/*'])",
+		ds, conn, bh.BucketName())); err != nil {
+		t.Fatalf("CREATE EXTERNAL TABLE wav: %v", err)
 	}
 	if err := run(fmt.Sprintf("CREATE MODEL `%s.refused` REMOTE WITH CONNECTION `%s` OPTIONS(REMOTE_SERVICE_TYPE = 'CLOUD_AI_SPEECH_TO_TEXT_V2', "+
 		"SPEECH_RECOGNIZER = 'projects/%s/locations/us/recognizers/none')", ds, conn, h.Project())); err == nil || !strings.Contains(err.Error(), "doesn't exist") {
@@ -475,9 +485,9 @@ func TestBigQueryMLTranscribe(t *testing.T) {
 
 	normRows := mlQueryIn(t, ctx, c, fmt.Sprintf("SELECT transcripts, ml_transcribe_status AS status, "+
 		"JSON_VALUE(ml_transcribe_result, '$.results[0].alternatives[0].transcript') AS first "+
-		`FROM ML.TRANSCRIBE(MODEL `+"`%s.speech`, TABLE `%s.audio`"+`, recognition_config => (JSON '{"language_codes": ["en-US"], "model": "chirp", `+
+		`FROM ML.TRANSCRIBE(MODEL `+"`%s.speech`, TABLE `%s.wav`"+`, recognition_config => (JSON '{"language_codes": ["en-US"], "model": "chirp", `+
 		`"auto_decoding_config": {}, "transcript_normalization": {"entries": [{"search": "COUNTRY", "replace": "nation"}, `+
-		`{"search": "your country", "replace": "never matched"}, {"search": "Ask", "replace": "ASK", "case_sensitive": true}]}}')) WHERE uri LIKE '%%.wav'`, ds, ds))
+		`{"search": "your country", "replace": "never matched"}, {"search": "Ask", "replace": "ASK", "case_sensitive": true}]}}'))`, ds, ds))
 	wantNorm := strings.ReplaceAll(strings.ReplaceAll(strings.ReplaceAll(text, "country", "nation"), "Country", "nation"), "Ask", "ASK")
 	if len(normRows) != 1 || normRows[0]["status"] != "" || normRows[0]["transcripts"] != wantNorm ||
 		strings.Contains(strings.ToLower(fmt.Sprint(normRows[0]["first"])), "country") || !strings.Contains(wantNorm, "nation") {
@@ -525,8 +535,8 @@ func TestBigQueryMLTranscribe(t *testing.T) {
 
 	recRows := mlQueryIn(t, ctx, c, fmt.Sprintf("SELECT uri, transcripts, ml_transcribe_status AS status, "+
 		"LAX_INT64(ml_transcribe_result.results[0].alternatives[0].words[1].start_offset.nanos) AS word_nanos "+
-		"FROM ML.TRANSCRIBE(MODEL `%s.speech_rec`, TABLE `%s.audio`) WHERE uri LIKE '%%.wav'", ds, ds))
-	if len(recRows) != 1 || recRows[0]["status"] != "" || recRows[0]["transcripts"] != text || recRows[0]["word_nanos"] == nil {
+		"FROM ML.TRANSCRIBE(MODEL `%s.speech_rec`, TABLE `%s.wav`)", ds, ds))
+	if len(recRows) != 1 || !strings.HasSuffix(fmt.Sprint(recRows[0]["uri"]), "/wav/jfk.wav") || recRows[0]["status"] != "" || recRows[0]["transcripts"] != text || recRows[0]["word_nanos"] == nil {
 		t.Errorf("ML.TRANSCRIBE with the recognizer: %v", recRows)
 	}
 
