@@ -74,11 +74,33 @@ func TestDataformThroughThePage(t *testing.T) {
 		t.Fatalf("the workspace reads back as %s", got)
 	}
 
+	// lastCompiled is the workspace's Last compiled, read back through the
+	// console API.
+	lastCompiled := func() string {
+		t.Helper()
+		var d struct {
+			Summary []struct{ Label, Value string }
+		}
+		if err := json.Unmarshal([]byte(detail(ws...)), &d); err != nil {
+			t.Fatal(err)
+		}
+		for _, s := range d.Summary {
+			if s.Label == "Last compiled" {
+				return s.Value
+			}
+		}
+		return ""
+	}
 	compile := func() {
 		t.Helper()
+		before := lastCompiled()
 		p.clickText(p.findAction("Compile"), "Compile")
-		p.waitForWithin(`document.querySelector(".modal") === null && document.querySelector("#view").textContent.includes("Last compiled") &&
-			!document.querySelector("#view").textContent.includes("Not compiled")`, 3*time.Minute)
+		for deadline := time.Now().Add(4 * time.Minute); lastCompiled() == before; time.Sleep(time.Second) {
+			if time.Now().After(deadline) {
+				t.Fatalf("Compile made no compilation result")
+			}
+		}
+		p.waitForWithin(`document.querySelector(".modal") === null`, time.Minute)
 	}
 	compile()
 	p.navigate(wsPath)
@@ -179,20 +201,23 @@ func TestDataformThroughThePage(t *testing.T) {
 			Listing struct{ Items []struct{ Name string } }
 		}
 	}
-	if err := json.Unmarshal([]byte(detail(repo, "releases", "prod")), &rel); err != nil {
-		t.Fatal(err)
-	}
 	manual := 0
-	for _, s := range rel.Sections {
-		if s.ID == "manual" {
-			manual = len(s.Listing.Items)
+	for deadline := time.Now().Add(3 * time.Minute); manual == 0 && time.Now().Before(deadline); time.Sleep(time.Second) {
+		if err := json.Unmarshal([]byte(detail(repo, "releases", "prod")), &rel); err != nil {
+			t.Fatal(err)
+		}
+		for _, s := range rel.Sections {
+			if s.ID == "manual" {
+				manual = len(s.Listing.Items)
+			}
 		}
 	}
 	if manual != 1 {
-		t.Errorf("New compilation made %d manual compilation results, want 1", manual)
+		t.Errorf("New compilation made %d manual compilation results, want 1: %s", manual, detail(repo, "releases", "prod"))
 	}
 	p.navigate(repoPath)
 	p.clickText(`#view [role="tab"]`, "Releases & Scheduling")
+	p.clickText(`#view [role="tab"]`, "Workflow configurations")
 	p.follow("hourly")
 	var workflowPath string
 	p.eval(`location.pathname + location.search`, &workflowPath)
