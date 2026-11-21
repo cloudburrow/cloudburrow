@@ -26,6 +26,9 @@ var serviceUsageAPIs = []struct {
 	// Manager port.
 	{"", serviceusage.API{Name: "cloudquotas.googleapis.com", Title: "Cloud Quotas API"}},
 	{"", serviceusage.API{Name: "siteverification.googleapis.com", Title: "Google Site Verification API"}},
+	// Cloud Billing and the Budget API (#2109), on the Resource Manager port.
+	{"", serviceusage.API{Name: "cloudbilling.googleapis.com", Title: "Cloud Billing API"}},
+	{"", serviceusage.API{Name: "billingbudgets.googleapis.com", Title: "Cloud Billing Budget API"}},
 	{config.ServiceStorage, serviceusage.API{Name: "storage.googleapis.com", Title: "Cloud Storage API"}},
 	// The Cloud Storage companion APIs (#1957), served with Cloud Storage.
 	{config.ServiceStorage, serviceusage.API{Name: "storagebatchoperations.googleapis.com", Title: "Storage Batch Operations API"}},

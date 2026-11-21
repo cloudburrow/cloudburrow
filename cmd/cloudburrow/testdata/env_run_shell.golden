@@ -3,6 +3,7 @@
 # None of this authenticates anything: CloudBurrow serves every caller,
 # and the credentials file exists only so tools that insist on having one
 # can run offline. See docs/credentials.md.
+export ="127.0.0.1:9007"  # Cloud Billing and Budget APIs, gRPC and REST, plaintext; read by no client library: pass it to option.WithEndpoint
 export CLOUDBURROW_APIKEYS_ENDPOINT="127.0.0.1:9029"  # the API Keys API v2, REST, plaintext; read by no client library: pass http://127.0.0.1:9029/ to option.WithEndpoint
 export CLOUDBURROW_DOMAIN="cloudburrow.localhost"  # services are named <service>.<namespace>.cloudburrow.localhost
 export CLOUDBURROW_INGRESS="http://127.0.0.1:9080"  # Cloud Run services are served here; see docs/networking.md
@@ -10,6 +11,7 @@ export CLOUDBURROW_RESOURCEMANAGER_ENDPOINT="127.0.0.1:9007"  # gRPC and REST, p
 export CLOUDBURROW_RUN_ENDPOINT="127.0.0.1:9004"  # gRPC, plaintext; read by no client library: give it to a channel in code
 export CLOUDBURROW_SERVICEUSAGE_ENDPOINT="127.0.0.1:9023"  # the Service Usage API v1, REST, plaintext; read by no client library: pass http://127.0.0.1:9023/ to option.WithEndpoint
 export CLOUDSDK_API_ENDPOINT_OVERRIDES_APIKEYS="http://127.0.0.1:9029/"  # read by gcloud; gcloud services api-keys
+export CLOUDSDK_API_ENDPOINT_OVERRIDES_CLOUDBILLING="http://127.0.0.1:9007/"  # read by gcloud billing accounts and projects; Cloud Billing is served on the Resource Manager port
 export CLOUDSDK_API_ENDPOINT_OVERRIDES_CLOUDRESOURCEMANAGER="http://127.0.0.1:9007/"  # read by gcloud; its projects commands use the v1 API, served here with v3
 export CLOUDSDK_API_ENDPOINT_OVERRIDES_IAMCREDENTIALS="http://127.0.0.1:9005/"  # read by gcloud for --impersonate-service-account (docs/credentials.md)
 export CLOUDSDK_API_ENDPOINT_OVERRIDES_SERVICEUSAGE="http://127.0.0.1:9023/"  # read by gcloud; gcloud services list, enable and disable

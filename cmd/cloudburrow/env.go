@@ -709,7 +709,14 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 			envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_CLOUDRESOURCEMANAGER", "http://" + rm + "/",
 				"read by gcloud; its projects commands use the v1 API, served here with v3"},
 			envVar{cliEndpointVar("resourcemanager"), rm,
-				"gRPC and REST, plaintext; read by no client library: pass it to option.WithEndpoint"})
+				"gRPC and REST, plaintext; read by no client library: pass it to option.WithEndpoint"},
+			// Cloud Billing and the Budget API (#2109), on the same port.
+			// gcloud billing budgets has no override (billingbudgets), so
+			// only the client libraries reach budgets here.
+			envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_CLOUDBILLING", "http://" + rm + "/",
+				"read by gcloud billing accounts and projects; Cloud Billing is served on the Resource Manager port"},
+			envVar{cliEndpointVar("billing"), rm,
+				"Cloud Billing and Budget APIs, gRPC and REST, plaintext; read by no client library: pass it to option.WithEndpoint"})
 	}
 
 	// Ingress is reported only when it is actually published, or a developer

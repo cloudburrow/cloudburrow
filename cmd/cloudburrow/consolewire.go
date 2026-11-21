@@ -27,6 +27,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/ratequota"
 	"github.com/cloudburrow/cloudburrow/internal/service/apikeys"
 	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
+	"github.com/cloudburrow/cloudburrow/internal/service/billing"
 	"github.com/cloudburrow/cloudburrow/internal/service/cloudquotas"
 	"github.com/cloudburrow/cloudburrow/internal/service/datatransfer"
 	"github.com/cloudburrow/cloudburrow/internal/service/monitoring"
@@ -89,6 +90,8 @@ type consoleDeps struct {
 	// Domain verification.
 	cloudQuotas *cloudquotas.Server
 	siteVerify  *siteverification.Server
+	// billing (#2109) backs the Billing pages.
+	billing *billing.Server
 	// authPlatform backs the OAuth consent screen and OAuth clients.
 	authPlatform *authplatform.Store
 	// requestMetrics are the request counters, which APIs & Services
@@ -399,6 +402,11 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	}
 	if enabled[config.ServiceScheduler] && d.scheduler != nil {
 		providers = append(providers, schedulerProvider{svc: d.scheduler, faults: d.faults, logs: d.logging})
+	}
+	// Billing (#2109): always served, on the Resource Manager port.
+	if d.billing != nil {
+		bc := billingConsole{srv: d.billing, catalog: billingCatalogRef, projects: d.projects}
+		providers = append(providers, billingAccountsProvider{bc}, billingProjectsProvider{bc}, billingBudgetsProvider{bc}, billingPricingProvider{bc})
 	}
 	// APIs & Services (#1352): always served, as projects are.
 	if d.serviceUsage != nil {

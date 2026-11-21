@@ -108,6 +108,7 @@ require (
 )
 
 require (
+	cloud.google.com/go/billing v1.28.1 // indirect
 	github.com/RoaringBitmap/roaring/v2 v2.26.0 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
 	github.com/apache/arrow/go/v15 v15.0.2 // indirect

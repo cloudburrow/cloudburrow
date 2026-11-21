@@ -9,6 +9,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/authplatform"
 	"github.com/cloudburrow/cloudburrow/internal/service/apikeys"
 	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
+	"github.com/cloudburrow/cloudburrow/internal/service/billing"
 	"github.com/cloudburrow/cloudburrow/internal/service/cloudquotas"
 	"github.com/cloudburrow/cloudburrow/internal/service/firebaserules"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
@@ -71,6 +72,8 @@ type adminDeps struct {
 	// Verification APIs (#2030).
 	cloudQuotas func() *cloudquotas.Server
 	siteVerify  func() *siteverification.Server
+	// billing is Cloud Billing and the Budget API (#2109).
+	billing func() *billing.Server
 	// authPlatform is Google Auth Platform's apps and clients (#2030).
 	authPlatform func() *authplatform.Store
 	// storageJobs is the Cloud Storage companion APIs (#1957), for their
@@ -199,6 +202,9 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 	if d.cloudQuotas != nil {
 		api.RegisterResetter(&cloudQuotasResetter{srv: d.cloudQuotas}, &siteVerificationResetter{srv: d.siteVerify},
 			&authPlatformResetter{store: d.authPlatform})
+	}
+	if d.billing != nil {
+		api.RegisterResetter(&billingResetter{srv: d.billing})
 	}
 	if d.firebaseRules != nil && firebaseRulesEnabled(cfg) {
 		// Each project's rulesets and releases (#2048).

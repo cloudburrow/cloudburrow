@@ -757,6 +757,17 @@ const ROUTES = [
   // cloudburrow commands of those names. Also reached from Settings and
   // utilities.
   { path: "/instance", service: null, screen: "instance", title: "Instance", section: "Management tools" },
+  // Billing (#2109), Google's Billing menu: Manage billing accounts, the
+  // projects' Account management, Budgets & alerts and Pricing. Every
+  // account is local: nothing asks for or shows payment details.
+  { path: "/billing", service: "billing", icon: "billing", title: "Manage billing accounts", navTitle: "Billing accounts", kind: "Billing account",
+    section: "Billing", product: "billing", productTitle: "Billing" },
+  { path: "/billing/projects", service: "billing-projects", icon: "billing", title: "Account management", kind: "Project",
+    section: "Billing", product: "billing", productTitle: "Billing" },
+  { path: "/billing/budgets", service: "billing-budgets", icon: "billing", title: "Budgets & alerts", kind: "Budget",
+    section: "Billing", product: "billing", productTitle: "Billing" },
+  { path: "/billing/pricing", service: "billing-pricing", icon: "billing", title: "Pricing", kind: "SKU",
+    section: "Billing", product: "billing", productTitle: "Billing" },
   // Pages of another product's service that Google's IAM & Admin menu
   // also lists (#1864). They come after the product's own routes, so a
   // lookup by service still finds Resource Manager's page, and `navAfter`
@@ -881,6 +892,7 @@ const ICONS = {
   // Tags: a tag with its hole.
   tags:      '<path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8" r="1.5"/>',
   // APIs & Services: braces around three calls (Connect has the plug).
+  billing: '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 10h18M7 15h4"/>',
   serviceusage: '<path d="M8 4H5v16h3M16 4h3v16h-3"/><path d="M9 12h.01M12 12h.01M15 12h.01" stroke-width="2.5"/>',
   iam:       '<circle cx="8" cy="8" r="3"/><path d="M3 19a5 5 0 0 1 10 0"/><circle cx="17" cy="13" r="2"/><path d="M17 15v5M17 18h2"/>',
   // Firestore: stacked documents.
@@ -910,6 +922,8 @@ const ICONS = {
 // like the product marks above. The category names are Google's product
 // taxonomy; the drawings are not Google's artwork.
 const CATEGORY_ICONS = {
+  // A card: billing accounts and budgets.
+  "Billing": '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 10h18M7 15h4"/>',
   // A lightning bolt: code that runs on demand.
   "Serverless computing": '<path d="M13 3L5 13h6l-1 8 8-10h-6z"/>',
   // A server rack: virtual machines.
