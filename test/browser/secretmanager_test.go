@@ -37,9 +37,10 @@ func secretsSDK(t *testing.T) *secretmanager.Client {
 }
 
 // TestSecretManagerConsoleParity (#1850), in the run shard, which serves
-// Secret Manager: the product's menu is Secret Manager, Regional secrets and
-// Settings; Create secret is one page in Google's sections, whose Secret
-// value is typed or read from Upload file, Set rotation period reveals the
+// Secret Manager: the product's menu is Secret Manager, Parameter Manager's
+// pages and Settings, the
+// regional secrets a tab of its page; Create secret is one page in Google's
+// sections, whose Secret value is typed or read from Upload file, Set rotation period reveals the
 // Rotation period list and Custom its own period, and Version aliases name
 // version 1, which the official client then reaches by its alias; the list
 // has Google's columns, and a row's Actions menu holds Add new version,
@@ -58,11 +59,19 @@ func TestSecretManagerConsoleParity(t *testing.T) {
 	t.Cleanup(func() { _ = c.DeleteSecret(context.Background(), &smpb.DeleteSecretRequest{Name: name}) })
 
 	p.navigate("/secrets?project=" + project)
-	p.waitFor(`document.querySelectorAll("#product-nav a").length >= 3`)
+	p.waitFor(`document.querySelectorAll("#product-nav a").length >= 2 && document.querySelector("#view .page-tabs") !== null`)
 	var menu string
 	p.eval(`[...document.querySelectorAll("#product-nav a")].map((a) => a.textContent.trim()).join("|")`, &menu)
-	if !strings.Contains(menu, "Secret Manager|Regional secrets|Settings") {
-		t.Errorf("Secret Manager's menu = %q; want Secret Manager, Regional secrets, Settings", menu)
+	// Parameter Manager is in the same menu where it is served, as on
+	// Google's (#2054, #2063).
+	if menu != "Secret Manager|Settings" && menu != "Secret Manager|Parameter Manager|Parameter templates|Settings" {
+		t.Errorf("Secret Manager's menu = %q; want Secret Manager, (Parameter Manager, Parameter templates,) Settings", menu)
+	}
+	// The regional secrets are a tab of the Secret Manager page (#1850).
+	var pageTabs string
+	p.eval(`[...document.querySelectorAll("#view .page-tabs .tab")].map((a) => a.textContent.trim()).join("|")`, &pageTabs)
+	if pageTabs != "Global secrets|Regional secrets" {
+		t.Errorf("Secret Manager's page tabs = %q; want Global secrets, Regional secrets", pageTabs)
 	}
 
 	// Create secret: one page, Google's sections, Upload file.

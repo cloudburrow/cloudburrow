@@ -48,14 +48,15 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 	config.ServiceCloudSQL:      {Providers: []string{"cloudsql", "cloudsql-instances", "cloudsql-backups"}},
 	config.ServiceBigQuery:      {Providers: []string{"bigquery", "bigquery-jobs", "bigquery-transfers", "bigquery-scheduled-queries", "bigquery-sharing"}},
 	config.ServiceScheduler:     {Providers: []string{"scheduler"}},
-	config.ServiceKMS:           {Providers: []string{"kms", "kms-ekm", "kms-autokey", "kms-inventory", "kms-hsm"}},
+	config.ServiceKMS:           {Providers: []string{"kms", "kms-ekm", "kms-autokey", "kms-config", "kms-inventory", "kms-hsm"}},
 	config.ServiceLogging:       {Providers: []string{"logging-metrics", "logging-sinks", "logging-exclusions", "logging-buckets", "logging-settings", "logging-saved-queries", "logging-log-scopes", "logging-analytics"}, Screen: "/logs"},
 	config.ServiceMemorystore:   {Providers: []string{"memorystore", "memorystore-clusters", "memorystore-valkey"}},
 	config.ServiceCloudSQLMySQL: {Providers: []string{"cloudsql-mysql", "cloudsql-instances", "cloudsql-backups"}},
 	config.ServiceBackupDR: {Providers: []string{"backupdr-overview", "backupdr-vaulted", "backupdr-plans", "backupdr-associations",
 		"backupdr", "backupdr-jobs"}},
-	config.ServicePrivateCA: {Providers: []string{"privateca", "privateca-templates"}},
-	config.ServiceWorkflows: {Providers: []string{"workflows"}},
+	config.ServicePrivateCA:        {Providers: []string{"privateca", "privateca-templates"}},
+	config.ServiceWorkflows:        {Providers: []string{"workflows"}},
+	config.ServiceParameterManager: {Providers: []string{"parametermanager", "parametermanager-templates"}},
 	// The Kubernetes Engine API (#1913): its clusters are on Kubernetes
 	// clusters, beside the instance's own.
 	config.ServiceGKE: {Providers: []string{"gkeclusters"}},
@@ -71,7 +72,7 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 // Speech-to-Text on the local AI endpoint (#1930), and CloudBurrow's own
 // cluster.
 var clusterScreens = []string{
-	"projects", "hierarchy", "tags", "iam", "iam-roles", "iam-groups", "iam-sso-profiles", "iam-sso-assignments", "iam-service-accounts", "iam-workload-identity", "iam-audit", "iam-orgpolicies", "iam-labels", "iam-settings", "serviceusage", "serviceusage-operations", "ai",
+	"projects", "hierarchy", "tags", "iam", "iam-roles", "iam-groups", "iam-sso-profiles", "iam-sso-assignments", "iam-service-accounts", "iam-workload-identity", "iam-workforce-identity", "iam-audit", "iam-orgpolicies", "iam-labels", "iam-settings", "serviceusage", "serviceusage-operations", "ai",
 	"documentai-overview", "documentai-gallery", "documentai", "speech-transcriptions", "speech-recognizers",
 	"speech-custom-classes", "speech-phrase-sets",
 	"workloads", "pods", "k8sservices", "jobs", "nodes", "k8sstorage", "events",
@@ -159,19 +160,20 @@ func coverageDeps(t *testing.T) consoleDeps {
 	}
 	projects := resourcemanager.New(store.NewMemory())
 	d := consoleDeps{
-		cfg:          cfg,
-		projects:     projects,
-		tasks:        &tasksService{},
-		secrets:      &secretsService{},
-		kms:          &kmsService{},
-		privateCA:    &privateCAService{},
-		monitoring:   &monitoringService{},
-		compute:      &computeService{},
-		dataTransfer: &dataTransferSvc{},
-		analyticsHub: &analyticsHubSvc{},
-		scheduler:    &schedulerService{},
-		logging:      &loggingService{},
-		workflows:    &workflowsService{},
+		cfg:              cfg,
+		projects:         projects,
+		tasks:            &tasksService{},
+		secrets:          &secretsService{},
+		kms:              &kmsService{},
+		privateCA:        &privateCAService{},
+		monitoring:       &monitoringService{},
+		compute:          &computeService{},
+		dataTransfer:     &dataTransferSvc{},
+		analyticsHub:     &analyticsHubSvc{},
+		scheduler:        &schedulerService{},
+		logging:          &loggingService{},
+		workflows:        &workflowsService{},
+		parameterManager: &parameterManagerService{},
 		// The APIs & Services page (#1352) reads the Service Usage server.
 		serviceUsage: newServiceUsageServer(cfg, projects, store.NewMemory()),
 		// The Backup and DR page (#1433) reads the Backup and DR server.

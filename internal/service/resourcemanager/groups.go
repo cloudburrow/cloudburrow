@@ -763,13 +763,18 @@ func InDomain(email string) bool {
 // directly or through nested groups, and domain:D when it is an account of
 // the instance's domain. All lower case.
 func (r *Registry) Principals(email string) []string {
-	if _, _, ok := wif.PoolOfPrincipal(strings.TrimSpace(email)); ok {
+	if wif.IsFederated(strings.TrimSpace(email)) {
 		// A federated subject (#1941): its principal:// identifier and
 		// the principalSet:// identifiers its last exchange mapped.
 		if r == nil {
 			return []string{strings.TrimSpace(email)}
 		}
 		return r.federatedPrincipals(strings.TrimSpace(email))
+	}
+	if l := strings.ToLower(strings.TrimSpace(email)); strings.HasPrefix(l, "principal://") {
+		// A resource's own identity, such as a Parameter Manager
+		// parameter's (#2054), is its own policy member.
+		return []string{strings.TrimSpace(email)}
 	}
 	email = normEmail(email)
 	if email == "" {

@@ -53,6 +53,7 @@ package firestoreadmin
 // Not served: a role on the database rather than its project.
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -66,6 +67,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 
 	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin/mql"
+	"github.com/cloudburrow/cloudburrow/internal/iamcheck"
 	"github.com/cloudburrow/cloudburrow/internal/iamcond"
 )
 
@@ -356,11 +358,22 @@ func (s *MongoServer) checkMongoIAM(mc *mongoConn, lname, name string, cmd bson.
 	}
 	project := strings.TrimPrefix(mc.db.name, "projects/")
 	project, _, _ = strings.Cut(project, "/")
-	perms := s.a.mongoPerms(mc.principal, project, mc.db.id)
 	var missing []string
-	for _, p := range mongoNeeds(lname, cmd) {
-		if !grants(perms, p) {
-			missing = append(missing, "datastore."+p)
+	if s.a.iamCheck.Enabled() && !strings.HasPrefix(mc.principal, userCredsPrefix) {
+		// With IAM enforcement on (#1879), a token connection's account
+		// is checked by the host's evaluator, as every other Firestore
+		// call is: the project's, folders' and organization's policies,
+		// groups, conditions and deny policies.
+		var err error
+		if missing, err = s.a.missingRemote(mc.principal, mc.db.name, mongoNeeds(lname, cmd)); err != nil {
+			return mql.Errorf(13, "Unauthorized", "not authorized on %s to execute command %s: the IAM check is unavailable: %v", mc.db.id, name, err)
+		}
+	} else {
+		perms := s.a.mongoPerms(mc.principal, project, mc.db.id)
+		for _, p := range mongoNeeds(lname, cmd) {
+			if !grants(perms, p) {
+				missing = append(missing, "datastore."+p)
+			}
 		}
 	}
 	if len(missing) > 0 {
@@ -369,4 +382,35 @@ func (s *MongoServer) checkMongoIAM(mc *mongoConn, lname, name string, cmd bson.
 			mc.db.id, name, mc.principal, strings.Join(missing, ", "), project)
 	}
 	return nil
+}
+
+// userCredsPrefix starts a user credentials principal (UserCredsPrincipal).
+const userCredsPrefix = "principal://firestore.googleapis.com/"
+
+// UseIAMCheck makes token connections' commands checked by the host's
+// evaluator (nil: by the pushed roles).
+func (a *Admin) UseIAMCheck(c *iamcheck.Client) { a.iamCheck = c }
+
+// missingRemote are the needs (without "datastore.") email lacks on the
+// database, as the host's evaluator decides, with their prefix.
+func (a *Admin) missingRemote(email, database string, needs []string) ([]string, error) {
+	if len(needs) == 0 {
+		return nil, nil
+	}
+	perms := make([]string, len(needs))
+	for i, p := range needs {
+		perms[i] = "datastore." + p
+	}
+	d, err := a.iamCheck.Check(context.Background(), iamcheck.Request{Signer: email, Service: "firestore.googleapis.com",
+		Permissions: perms, Resource: database, Type: "firestore.googleapis.com/Database"})
+	if err != nil {
+		return nil, err
+	}
+	var missing []string
+	for _, p := range perms {
+		if !d.Holds(p) {
+			missing = append(missing, p)
+		}
+	}
+	return missing, nil
 }

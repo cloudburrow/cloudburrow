@@ -41,9 +41,14 @@ var serviceUsageAPIs = []struct {
 	{config.ServiceRun, serviceusage.API{Name: "containerscanning.googleapis.com", Title: "Container Scanning API", Disabled: true}},
 	{config.ServiceSecrets, serviceusage.API{Name: "secretmanager.googleapis.com", Title: "Secret Manager API"}},
 	{config.ServiceKMS, serviceusage.API{Name: "cloudkms.googleapis.com", Title: "Cloud Key Management Service (KMS) API"}},
+	// The Inventory API (#2053), on Cloud KMS's port.
+	{config.ServiceKMS, serviceusage.API{Name: "kmsinventory.googleapis.com", Title: "KMS Inventory API"}},
 	{config.ServiceScheduler, serviceusage.API{Name: "cloudscheduler.googleapis.com", Title: "Cloud Scheduler API"}},
 	{config.ServiceLogging, serviceusage.API{Name: "logging.googleapis.com", Title: "Cloud Logging API"}},
+	// The Observability API's scopes (#2020), on the Logging port.
+	{config.ServiceLogging, serviceusage.API{Name: "observability.googleapis.com", Title: "Observability API"}},
 	{config.ServiceFirestore, serviceusage.API{Name: "firestore.googleapis.com", Title: "Cloud Firestore API"}},
+	{config.ServiceFirestore, serviceusage.API{Name: "firebaserules.googleapis.com", Title: "Firebase Rules API"}},
 	{config.ServiceDatastore, serviceusage.API{Name: "datastore.googleapis.com", Title: "Cloud Datastore API"}},
 	{config.ServiceBigtable, serviceusage.API{Name: "bigtable.googleapis.com", Title: "Cloud Bigtable API"}},
 	{config.ServiceBigtable, serviceusage.API{Name: "bigtableadmin.googleapis.com", Title: "Cloud Bigtable Admin API"}},
@@ -61,6 +66,7 @@ var serviceUsageAPIs = []struct {
 	{config.ServiceCompute, serviceusage.API{Name: "compute.googleapis.com", Title: "Compute Engine API"}},
 	{config.ServiceWorkflows, serviceusage.API{Name: "workflows.googleapis.com", Title: "Workflows API"}},
 	{config.ServiceWorkflows, serviceusage.API{Name: "workflowexecutions.googleapis.com", Title: "Workflow Executions API"}},
+	{config.ServiceParameterManager, serviceusage.API{Name: "parametermanager.googleapis.com", Title: "Parameter Manager API"}},
 }
 
 // serviceUsageCatalog splits serviceUsageAPIs into what this instance

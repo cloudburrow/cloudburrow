@@ -54,7 +54,9 @@ import (
 // storageProvider lists buckets through the Cloud Storage JSON API.
 // pubsub is the Pub/Sub emulator's address, for the topics a bucket
 // notification can publish to (#791); empty when Pub/Sub is not enabled.
-type storageProvider struct{ endpoint, pubsub string }
+// storageProvider is Cloud Storage's buckets. insights, when Storage
+// Insights is served, is its address, for a bucket's Inventory reports tab.
+type storageProvider struct{ endpoint, pubsub, insights string }
 
 func (storageProvider) ID() string    { return "storage" }
 func (storageProvider) Title() string { return "Cloud Storage" }
@@ -135,7 +137,10 @@ func (p pubsubProvider) List(ctx context.Context, project string) (console.Listi
 		}
 		items = append(items, topicRow(project, t))
 	}
-	return console.Listing{Columns: topicListColumns, NameColumn: "Topic name", Noun: "topics", Items: items, Total: len(items)}, nil
+	// Google's: select the topics, then the info panel's Permissions and
+	// Labels tabs (#1847).
+	return console.Listing{Columns: topicListColumns, NameColumn: "Topic name", Noun: "topics", Items: items, Total: len(items),
+		InfoOnSelect: true}, nil
 }
 
 // tasksProvider lists queues from the in-process Cloud Tasks store.
@@ -576,11 +581,19 @@ func (p runProvider) List(ctx context.Context, project string) (console.Listing,
 	}
 	items := make([]console.Resource, 0, len(svcs))
 	latest := p.runLatestCreated(ctx, svcs)
+	if project == "" {
+		project = p.defaultProject
+	}
+	// Deployed by: the Run API's last_modifier (#2049).
+	by := p.runLastModifiers(ctx, project)
 	for _, s := range svcs {
 		r := s.resource()
 		for k, v := range p.runGoogleFields(ctx, project, s, latest[s.Metadata.Name]) {
 			r.Fields[k] = v
 		}
+		// Every row's checkbox, for Delete and Copy (#1852).
+		r.Selectable = true
+		r.Fields["Deployed by"] = orDash(by[s.Metadata.Name])
 		items = append(items, r)
 	}
 	return console.Listing{
@@ -1087,15 +1100,22 @@ func (p runProvider) revisions(ctx context.Context, service string, svc *ksvcSta
 				"Reason": reason,
 				"Age":    shortAge(str(m, "creationTimestamp")),
 			},
-			// Delete revision, on a revision that serves no traffic (#785).
-			// The API refuses the serving one, so its row has no delete.
-			Actions: p.revisionActions(svc, name),
 		})
 	}
 	// Newest first: the revision someone is looking for is the one that just
 	// deployed.
 	sort.SliceStable(out.Items, func(i, j int) bool { return out.Items[i].Name > out.Items[j].Name })
 	out.Total = len(out.Items)
+	// Each row's ⋮ menu (#785, #1852): Manage traffic, Manage revision
+	// tags, and Delete on a revision that serves no traffic. The API
+	// refuses the serving one, so its row has no delete.
+	ids := make([]string, len(out.Items))
+	for i, r := range out.Items {
+		ids[i] = r.Name
+	}
+	for i := range out.Items {
+		out.Items[i].Actions = p.revisionActions(svc, out.Items[i].Name, ids)
+	}
 	return out
 }
 
@@ -3582,7 +3602,8 @@ func (p storageProvider) Detail(ctx context.Context, project string, path []stri
 			if !meta.hierarchical() {
 				protection.Actions = append([]console.Action{editVersioningAction(meta)}, protection.Actions...)
 			}
-			sections = append(sections, config, permissionsPlaceholder(meta), protection, lifecycleSection(meta))
+			sections = append(sections, config, permissionsPlaceholder(meta), protection, lifecycleSection(meta),
+				bucketObservability(), p.inventoryReportsSection(ctx, project, bucket))
 			// The Operations tab, on an HNS bucket always, and on any
 			// other once it has an operation, a bulk restore (#1279).
 			if ops := p.operationsSection(ctx, bucket); hns || len(ops.Listing.Items) > 0 || ops.Listing.Unavailable != "" {
@@ -3853,6 +3874,8 @@ func (p secretsProvider) Detail(_ context.Context, project string, path []string
 		NameColumn:   "Version",
 		Noun:         "versions",
 		AlwaysStatus: true,
+		// Google's Versions tab: select versions, then Actions (#1850).
+		SelectActions: secretVersionSelectActions(secret, st.Now()),
 	}
 	all, err := st.ListVersions(project, id)
 	if err != nil {
@@ -3873,10 +3896,10 @@ func (p secretsProvider) Detail(_ context.Context, project string, path []string
 			if a := aliases[v.Number]; len(a) > 0 {
 				va = strings.Join(a, ", ")
 			}
-			href := "/secrets/" + urlpkg.PathEscape(path[0]) + "/" + strconv.Itoa(v.Number) + "?reveal=1"
 			versions.Items = append(versions.Items, console.Resource{
-				Name:   fmt.Sprint(v.Number),
-				Status: string(v.State),
+				Name:       fmt.Sprint(v.Number),
+				Status:     string(v.State),
+				Selectable: true,
 				Fields: map[string]string{
 					"State":                     string(v.State),
 					"Aliases":                   va,
@@ -3884,7 +3907,7 @@ func (p secretsProvider) Detail(_ context.Context, project string, path []string
 					"Scheduled for destruction": scheduled,
 					"Destroyed":                 destroyed,
 				},
-				Actions: secretVersionRowActions(secret, v, st.Now(), href),
+				Actions: secretVersionRowActions(secret, v, st.Now()),
 			})
 		}
 		versions.Total = len(versions.Items)
@@ -3894,8 +3917,8 @@ func (p secretsProvider) Detail(_ context.Context, project string, path []string
 		// holds to anyone who opened a page. A value is shown only from the
 		// version's own page, only when asked for, and the asking is recorded.
 		versions.RowsOpenable = true
-		versions.Note = "Each version's Actions menu has View secret value, Disable, Enable and Destroy. " +
-			"Payloads are never included in this list."
+		versions.Note = "Select versions, then Disable, Enable or Destroy; each version's Actions menu has View secret value " +
+			"and what its state allows. Payloads are never included in this list."
 	}
 
 	return console.Detail{
@@ -3912,8 +3935,12 @@ func (p secretsProvider) Detail(_ context.Context, project string, path []string
 			{ID: "permissions", Kind: console.KindPermissions},
 			{ID: "logs", Label: "Logs", Kind: console.KindLogs},
 		},
+		// Google's Edit secret is a page ending in Update secret
+		// (https://docs.cloud.google.com/secret-manager/docs/edit-secrets).
 		Edit: &console.EditForm{
 			Label:  "Edit secret",
+			Submit: "Update secret",
+			Layout: console.EditLayoutPage,
 			Fields: secretOptionalFields(&secret),
 			Note: "Replication cannot be changed after a secret is created, so it is not offered here; " +
 				"Change encryption keys changes its customer-managed keys.",
@@ -4012,7 +4039,8 @@ func (p secretsProvider) DetailActions(_ context.Context, project string, path [
 		if err != nil {
 			return nil
 		}
-		return []console.Action{secretAddVersionAction(), secretAdvanceClockAction(), secretKeysAction(sec)}
+		return append([]console.Action{secretAddVersionAction(), secretAdvanceClockAction(), secretKeysAction(sec)},
+			secretVersionSelectActions(sec, st.Now())...)
 	case 2:
 		// What is offered depends on the version's current state. Enabling an
 		// enabled version and destroying a destroyed one are both buttons that
@@ -4026,20 +4054,9 @@ func (p secretsProvider) DetailActions(_ context.Context, project string, path [
 		if err != nil {
 			return nil
 		}
-		destroy := secretDestroyAction(sec, st.Now())
-		switch {
-		case v.State == secrets.StateEnabled:
-			return []console.Action{{ID: "disable", Label: "Disable"}, destroy}
-		case v.State == secrets.StateDisabled && !v.ScheduledDestroy.IsZero():
-			// Already scheduled: a second destroy is refused, and enabling
-			// or disabling cancels (#1278).
-			return []console.Action{{ID: "enable", Label: "Enable (cancels the destruction)"},
-				{ID: "disable", Label: "Keep disabled (cancels the destruction)"}}
-		case v.State == secrets.StateDisabled:
-			return []console.Action{{ID: "enable", Label: "Enable"}, destroy}
-		}
-		// Destroyed is terminal, so it offers nothing.
-		return nil
+		// Already scheduled: a second destroy is refused, and enabling or
+		// disabling cancels (#1278). Destroyed is terminal: nothing.
+		return secretVersionLifecycle(sec, v, st.Now())
 	}
 	return nil
 }
@@ -4069,6 +4086,8 @@ func (p secretsProvider) ActAt(_ context.Context, project string, path []string,
 	case "destroy":
 		_, err := st.DestroyVersion(project, id, path[1])
 		return err
+	case "disableversions", "enableversions", "destroyversions":
+		return actSecretVersions(st, project, id, strings.TrimSuffix(action, "versions"), values[secretVersionsField])
 	case actSecretKeys:
 		return setSecretKeys(st, project, id, values)
 	case actSecretAdvanceClock:
@@ -4350,6 +4369,10 @@ func (p secretsProvider) Create(_ context.Context, project string, values map[st
 		return "", err
 	}
 	id := strings.TrimSpace(values["secretId"])
+	secretType := strings.TrimSpace(values["secretType"])
+	if err := secrets.CheckSecretType(secretType); err != nil {
+		return "", err
+	}
 	if loc := strings.TrimSpace(values["location"]); loc != "" {
 		// A regional secret (#1519): no replication policy, and its one
 		// replica is its location.
@@ -4397,6 +4420,12 @@ func (p secretsProvider) Create(_ context.Context, project string, values map[st
 	if err := st.BindTags(sec.Name, tags); err != nil {
 		_ = st.DeleteSecret(project, id)
 		return "", fmt.Errorf("the tags were refused, so the secret was not created: %w", err)
+	}
+	if secretType != "" {
+		if _, err := st.SetSecretType(project, id, secretType); err != nil {
+			_ = st.DeleteSecret(project, id)
+			return "", fmt.Errorf("the secret type was refused, so the secret was not created: %w", err)
+		}
 	}
 	return sec.Name, nil
 }

@@ -15,6 +15,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/encoding/protojson"
 
+	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 	"github.com/cloudburrow/cloudburrow/internal/metrics"
@@ -36,9 +37,11 @@ type monitoringService struct {
 	tracing   *telemetry.Tracing
 	calls     grpctransport.Observer
 	interpose []grpc.UnaryServerInterceptor
-	requests  func(rest.Request)
-	server    *grpctransport.Server
-	api       *monitoring.Server
+	// wrapJSON wraps the JSON API (IAM enforcement, #1879); nil is none.
+	wrapJSON func(http.Handler) http.Handler
+	requests func(rest.Request)
+	server   *grpctransport.Server
+	api      *monitoring.Server
 	// logging is the instance's Cloud Logging, or nil; counters the request
 	// counters.
 	logging  *loggingService
@@ -47,9 +50,14 @@ type monitoringService struct {
 	// are sampled by whoever set them.
 	reqs *monitoring.RequestBuiltin
 	stop chan struct{}
+	// runStop ends the sampling of Cloud Run's metrics (#2049).
+	runStop chan struct{}
 	// pubsub is the instance's Pub/Sub tunnel, for Pub/Sub notification
 	// channels (#1964); nil, or nil from it, when Pub/Sub is not served.
 	pubsub func() *netfwd.Forwarder
+	// firestore is the Firestore front's host address, for Firestore's
+	// document metrics (#2048); nil when Firestore is not served.
+	firestore func() string
 	// cancel stops alert evaluation and uptime checks.
 	cancel context.CancelFunc
 }
@@ -107,6 +115,9 @@ func (s *monitoringService) Start(ctx context.Context) error {
 	if s.logging != nil {
 		api.AddBuiltin(monitoring.NewLogBuiltin(monitoringLogs{svc: s.logging}))
 	}
+	if s.firestore != nil {
+		api.AddBuiltin(monitoring.NewFirestoreBuiltin(monitoringFirestore{addr: s.firestore}))
+	}
 	if s.logging != nil {
 		api.SetLogMatcher(monitoringLogs{svc: s.logging})
 	}
@@ -123,6 +134,12 @@ func (s *monitoringService) Start(ctx context.Context) error {
 	evalCtx, cancel := context.WithCancel(context.Background())
 	s.cancel = cancel
 	api.StartEvaluating(evalCtx)
+	if serviceEnabled(s.cfg, config.ServiceRun) {
+		s.runStop = make(chan struct{})
+		go sampleRunMetrics(api, monitoringRun{kubeconfig: s.cfg.KubeconfigPath(), namespace: runadapter.WorkloadNamespace,
+			project: s.cfg.DefaultProject(), region: "us-central1"}, s.runStop)
+	}
+	setRunMetricsEndpoint(s.Addr)
 	if s.reqs != nil {
 		// up's request history (#1866), which it samples itself, shared
 		// with the APIs & Services charts.
@@ -153,6 +170,9 @@ func (s *monitoringService) Start(ctx context.Context) error {
 		s.server.Interpose(i)
 	}
 	var jsonAPI http.Handler = monitoring.NewRESTHandler(api)
+	if s.wrapJSON != nil {
+		jsonAPI = s.wrapJSON(jsonAPI)
+	}
 	if s.requests != nil {
 		jsonAPI = rest.Observe(jsonAPI, s.requests)
 	}
@@ -171,6 +191,10 @@ func (s *monitoringService) Stop(ctx context.Context) error {
 	if s.stop != nil {
 		close(s.stop)
 		s.stop = nil
+	}
+	if s.runStop != nil {
+		close(s.runStop)
+		s.runStop = nil
 	}
 	if s.server == nil {
 		return nil
@@ -357,4 +381,34 @@ func (s *requestSampler) Stop(context.Context) error {
 		s.stop = nil
 	}
 	return nil
+}
+
+// SinkVolumes is monitoring.LogVolumeSource over the instance's Cloud
+// Logging (#2021): what each of the project's sinks routed.
+func (l monitoringLogs) SinkVolumes(project string, from, to time.Time) []monitoring.SinkVolume {
+	api := l.api()
+	if api == nil {
+		return nil
+	}
+	vs := api.SinkVolumes("projects/"+project, from, to)
+	out := make([]monitoring.SinkVolume, 0, len(vs))
+	for _, v := range vs {
+		out = append(out, monitoring.SinkVolume{End: v.End, Sink: v.Sink[strings.LastIndex(v.Sink, "/")+1:], Destination: v.Destination,
+			Bytes: v.Bytes, Entries: v.Entries, Errors: v.Errors})
+	}
+	return out
+}
+
+// Ingested is what the project's log buckets took.
+func (l monitoringLogs) Ingested(project string, from, to time.Time) []monitoring.Ingestion {
+	api := l.api()
+	if api == nil {
+		return nil
+	}
+	vs := api.Ingested(project, from, to)
+	out := make([]monitoring.Ingestion, 0, len(vs))
+	for _, v := range vs {
+		out = append(out, monitoring.Ingestion{End: v.End, ResourceType: v.ResourceType, Bytes: v.Bytes})
+	}
+	return out
 }

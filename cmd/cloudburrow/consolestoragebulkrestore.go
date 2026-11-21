@@ -19,20 +19,29 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/console"
 )
 
-// bulkRestoreAction is Bulk restore deleted objects, on a bucket's page.
+// The restore job pane's sections, in Google's words.
+const (
+	restoreChoose  = "Choose which soft-deleted objects to restore"
+	restoreOptions = "Restore options"
+)
+
+// bulkRestoreAction is Create restore job, on a bucket's page and its row.
 func bulkRestoreAction() console.Action {
 	return console.Action{
-		ID: "bulkrestore", Label: "Create restore job",
+		// Google's restore job pane (#1843, use-soft-deleted-objects):
+		// "Choose which soft-deleted objects to restore", "Filter by glob
+		// pattern", Restore options, ending in Create.
+		ID: "bulkrestore", Label: "Create restore job", Submit: "Create",
 		Fields: []console.Field{
-			{Name: "matchGlobs", Label: "Match globs", Type: "text",
+			{Name: "matchGlobs", Label: "Filter by glob pattern", Type: "text", Section: restoreChoose,
 				Help: "Comma-separated globs in objects.list's matchGlob syntax (logs/**, *.png); empty restores every soft-deleted object."},
-			{Name: "softDeletedAfterTime", Label: "Deleted after", Type: "text",
+			{Name: "softDeletedAfterTime", Label: "Deleted after", Type: "text", Section: restoreChoose,
 				Help: "An RFC 3339 time (2026-10-15T00:00:00Z); empty for no lower bound."},
-			{Name: "softDeletedBeforeTime", Label: "Deleted before", Type: "text",
+			{Name: "softDeletedBeforeTime", Label: "Deleted before", Type: "text", Section: restoreChoose,
 				Help: "An RFC 3339 time; empty for no upper bound."},
-			{Name: "allowOverwrite", Label: "Allow overwrite", Type: "checkbox", Default: "false",
+			{Name: "allowOverwrite", Label: "Allow overwrite", Type: "checkbox", Default: "false", Section: restoreOptions,
 				Help: "Off, a name with a live object is skipped; on, the restored version replaces it."},
-			{Name: "copySourceAcl", Label: "Copy source ACL", Type: "checkbox", Default: "false",
+			{Name: "copySourceAcl", Label: "Copy source ACL", Type: "checkbox", Default: "false", Section: restoreOptions,
 				Help: "Keep each version's ACL; off, it takes the bucket's default object ACL."},
 		},
 	}

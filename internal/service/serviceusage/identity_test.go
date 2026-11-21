@@ -82,6 +82,7 @@ func TestGenerateServiceIdentityEveryEntry(t *testing.T) {
 		"bigquerydatatransfer.googleapis.com":   "gcp-sa-bigquerydatatransfer.iam.gserviceaccount.com",
 		"run.googleapis.com":                    "serverless-robot-prod.iam.gserviceaccount.com",
 		"firestore.googleapis.com":              "gcp-sa-firestore.iam.gserviceaccount.com",
+		"firebaserules.googleapis.com":          "firebase-rules.iam.gserviceaccount.com",
 		"bigtableadmin.googleapis.com":          "gcp-sa-bigtable.iam.gserviceaccount.com",
 		"spanner.googleapis.com":                "gcp-sa-spanner.iam.gserviceaccount.com",
 		"redis.googleapis.com":                  "cloud-redis.iam.gserviceaccount.com",
@@ -89,6 +90,7 @@ func TestGenerateServiceIdentityEveryEntry(t *testing.T) {
 		"apikeys.googleapis.com":                "gcp-sa-apikeys.iam.gserviceaccount.com",
 		"containeranalysis.googleapis.com":      "container-analysis.iam.gserviceaccount.com",
 		"containerscanning.googleapis.com":      "gcp-sa-containerscanning.iam.gserviceaccount.com",
+		"observability.googleapis.com":          "gcp-sa-observability.iam.gserviceaccount.com",
 		"logging.googleapis.com":                "",
 		"storageinsights.googleapis.com":        "gcp-sa-storageinsights.iam.gserviceaccount.com",
 		"storagetransfer.googleapis.com":        "",
@@ -104,7 +106,9 @@ func TestGenerateServiceIdentityEveryEntry(t *testing.T) {
 		"siteverification.googleapis.com":       "",
 		"analyticshub.googleapis.com":           "gcp-sa-analyticshub.iam.gserviceaccount.com",
 		"workflows.googleapis.com":              "gcp-sa-workflows.iam.gserviceaccount.com",
+		"parametermanager.googleapis.com":       "gcp-sa-pm.iam.gserviceaccount.com",
 		"workflowexecutions.googleapis.com":     "",
+		"kmsinventory.googleapis.com":           "",
 	}
 	if len(want) != len(serviceAgents)+len(noPrimaryAgent) {
 		t.Fatalf("want has %d services; the tables have %d", len(want), len(serviceAgents)+len(noPrimaryAgent))

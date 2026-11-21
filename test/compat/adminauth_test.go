@@ -82,7 +82,7 @@ func TestAdminAPIRequiresTheToken(t *testing.T) {
 	}
 	for _, c := range []struct{ method, path string }{
 		{"POST", "/admin/reset?project=" + h.Project()}, {"POST", "/admin/seed"}, {"GET", "/admin/events"},
-		{"POST", "/admin/state/export"}, {"GET", "/admin/faults"},
+		{"POST", "/admin/state/export"}, {"GET", "/admin/faults"}, {"PUT", "/admin/quotas"},
 	} {
 		if code := bare(c.method, c.path, ""); code != http.StatusUnauthorized {
 			t.Errorf("%s %s without the token = %d, want 401", c.method, c.path, code)

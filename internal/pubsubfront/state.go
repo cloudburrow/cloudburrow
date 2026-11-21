@@ -52,6 +52,10 @@ type savedState struct {
 	// StoragePolicies are the kept message storage policies, as
 	// protojson, by topic name (#2000).
 	StoragePolicies map[string]json.RawMessage `json:"storagePolicies,omitempty"`
+	// Exports are the kept export configurations, as protojson
+	// Subscriptions with only bigqueryConfig and cloudStorageConfig, by
+	// subscription name (#2051).
+	Exports map[string]json.RawMessage `json:"exports,omitempty"`
 	// LastActive is when each subscription was last active, by the front's
 	// clock; one with a streaming pull open is active as of the write.
 	LastActive map[string]time.Time `json:"lastActive,omitempty"`
@@ -124,6 +128,14 @@ func (f *Front) restore(b []byte) error {
 		}
 		storage[name] = p
 	}
+	exports := make(map[string]*pubsubpb.Subscription, len(s.Exports))
+	for name, raw := range s.Exports {
+		k := &pubsubpb.Subscription{}
+		if err := protojson.Unmarshal(raw, k); err != nil {
+			return fmt.Errorf("the export configuration of %s: %w", name, err)
+		}
+		exports[name] = k
+	}
 	detached := make(map[string]*pubsubpb.Subscription, len(s.Detached))
 	for name, raw := range s.Detached {
 		d := &pubsubpb.Subscription{}
@@ -173,6 +185,9 @@ func (f *Front) restore(b []byte) error {
 	}
 	for name, p := range storage {
 		f.storagePolicies[name] = p
+	}
+	for name, k := range exports {
+		f.exports[name] = k
 	}
 	for name, last := range s.LastActive {
 		f.subs[name] = &subState{last: last}
@@ -255,6 +270,15 @@ func (f *Front) save() error {
 		if s.StoragePolicies[name], err = protojson.Marshal(p); err != nil {
 			f.mu.Unlock()
 			return fmt.Errorf("encode the message storage policy of %s: %w", name, err)
+		}
+	}
+	if len(f.exports) > 0 {
+		s.Exports = make(map[string]json.RawMessage, len(f.exports))
+	}
+	for name, k := range f.exports {
+		if s.Exports[name], err = protojson.Marshal(k); err != nil {
+			f.mu.Unlock()
+			return fmt.Errorf("encode the export configuration of %s: %w", name, err)
 		}
 	}
 	if len(f.subs) > 0 {

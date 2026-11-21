@@ -41,6 +41,9 @@ type IssuedToken struct {
 	// signed by this instance's key).
 	Email   string    `json:"email,omitempty"`
 	Expires time.Time `json:"expires"`
+	// Issued is when it was minted (#2056: a workforce subject's revoked
+	// sessions); zero in a log written before it was kept.
+	Issued time.Time `json:"issued,omitempty"`
 }
 
 // issuedLog is the instance's minted tokens.
@@ -92,7 +95,8 @@ func (c *Credentials) issued() *issuedLog {
 // handed out, so a service that checks it already knows it when the
 // client first sends it.
 func (l *issuedLog) record(tok, email string, ttl time.Duration) {
-	it := IssuedToken{Hash: TokenHash(tok), Email: email, Expires: time.Now().Add(ttl)}
+	issued := time.Now()
+	it := IssuedToken{Hash: TokenHash(tok), Email: email, Expires: issued.Add(ttl), Issued: issued}
 	l.mu.Lock()
 	now := time.Now()
 	for h, t := range l.tokens {

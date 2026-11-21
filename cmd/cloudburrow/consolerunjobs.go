@@ -766,7 +766,8 @@ func runJobEditForm(job *runpb.Job) *console.EditForm {
 		note += " Variables with neither a value nor a secret (" + strings.Join(unknown, ", ") +
 			") cannot be shown, so the form cannot be saved while they are there."
 	}
-	return &console.EditForm{Label: runJobEditLabel, Fields: fields, Note: note}
+	// Google's form is submitted with Update (#1852).
+	return &console.EditForm{Label: runJobEditLabel, Fields: fields, Note: note, Submit: "Update"}
 }
 
 // --- detail pages -------------------------------------------------------

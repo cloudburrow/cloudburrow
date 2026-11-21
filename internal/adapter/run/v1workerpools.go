@@ -51,7 +51,7 @@ func (s *Server) v1ListWorkerPools(w http.ResponseWriter, r *http.Request) {
 	byName := map[string]*runv1.WorkerPool{}
 	var names []string
 	for _, loc := range locs {
-		resp, err := s.WorkerPools().ListWorkerPools(r.Context(), &runpb.ListWorkerPoolsRequest{Parent: "projects/" + sc.project + "/locations/" + loc, PageSize: 1000})
+		resp, err := v1Call(r.Context(), s.WorkerPools().ListWorkerPools, &runpb.ListWorkerPoolsRequest{Parent: "projects/" + sc.project + "/locations/" + loc, PageSize: 1000})
 		if err != nil {
 			v1Write(w, err, nil)
 			return
@@ -82,7 +82,7 @@ func (s *Server) v1GetWorkerPool(w http.ResponseWriter, r *http.Request) {
 		v1Write(w, err, nil)
 		return
 	}
-	wp, err := s.WorkerPools().GetWorkerPool(r.Context(), &runpb.GetWorkerPoolRequest{Name: name})
+	wp, err := v1Call(r.Context(), s.WorkerPools().GetWorkerPool, &runpb.GetWorkerPoolRequest{Name: name})
 	v1Write(w, err, toV1WorkerPool(wp))
 }
 
@@ -118,7 +118,7 @@ func (s *Server) v1CreateWorkerPool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	validateOnly := r.URL.Query().Get("dryRun") == "all"
-	if _, err := s.WorkerPools().CreateWorkerPool(r.Context(), &runpb.CreateWorkerPoolRequest{Parent: parent, WorkerPoolId: in.Metadata.Name,
+	if _, err := v1Call(r.Context(), s.WorkerPools().CreateWorkerPool, &runpb.CreateWorkerPoolRequest{Parent: parent, WorkerPoolId: in.Metadata.Name,
 		WorkerPool: wp, ValidateOnly: validateOnly}); err != nil {
 		v1Write(w, err, nil)
 		return
@@ -129,7 +129,7 @@ func (s *Server) v1CreateWorkerPool(w http.ResponseWriter, r *http.Request) {
 		v1Write(w, nil, toV1WorkerPool(wp))
 		return
 	}
-	got, err := s.WorkerPools().GetWorkerPool(r.Context(), &runpb.GetWorkerPoolRequest{Name: name})
+	got, err := v1Call(r.Context(), s.WorkerPools().GetWorkerPool, &runpb.GetWorkerPoolRequest{Name: name})
 	v1Write(w, err, toV1WorkerPool(got))
 }
 
@@ -161,7 +161,7 @@ func (s *Server) v1ReplaceWorkerPool(w http.ResponseWriter, r *http.Request) {
 	}
 	wp.Name, wp.Etag = name, in.Metadata.ResourceVersion
 	validateOnly := r.URL.Query().Get("dryRun") == "all"
-	if _, err := s.WorkerPools().UpdateWorkerPool(r.Context(), &runpb.UpdateWorkerPoolRequest{WorkerPool: wp, ValidateOnly: validateOnly}); err != nil {
+	if _, err := v1Call(r.Context(), s.WorkerPools().UpdateWorkerPool, &runpb.UpdateWorkerPoolRequest{WorkerPool: wp, ValidateOnly: validateOnly}); err != nil {
 		v1Write(w, err, nil)
 		return
 	}
@@ -169,7 +169,7 @@ func (s *Server) v1ReplaceWorkerPool(w http.ResponseWriter, r *http.Request) {
 		v1Write(w, nil, toV1WorkerPool(wp))
 		return
 	}
-	got, err := s.WorkerPools().GetWorkerPool(r.Context(), &runpb.GetWorkerPoolRequest{Name: name})
+	got, err := v1Call(r.Context(), s.WorkerPools().GetWorkerPool, &runpb.GetWorkerPoolRequest{Name: name})
 	v1Write(w, err, toV1WorkerPool(got))
 }
 
@@ -179,12 +179,12 @@ func (s *Server) v1DeleteWorkerPool(w http.ResponseWriter, r *http.Request) {
 		v1Write(w, err, nil)
 		return
 	}
-	wp, err := s.WorkerPools().GetWorkerPool(r.Context(), &runpb.GetWorkerPoolRequest{Name: name})
+	wp, err := v1Call(r.Context(), s.WorkerPools().GetWorkerPool, &runpb.GetWorkerPoolRequest{Name: name})
 	if err != nil {
 		v1Write(w, err, nil)
 		return
 	}
-	if _, err := s.WorkerPools().DeleteWorkerPool(r.Context(), &runpb.DeleteWorkerPoolRequest{Name: name,
+	if _, err := v1Call(r.Context(), s.WorkerPools().DeleteWorkerPool, &runpb.DeleteWorkerPoolRequest{Name: name,
 		ValidateOnly: r.URL.Query().Get("dryRun") == "all"}); err != nil {
 		v1Write(w, err, nil)
 		return

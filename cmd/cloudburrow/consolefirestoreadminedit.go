@@ -324,11 +324,13 @@ func (p firestoreDatabasesProvider) DetailActions(ctx context.Context, project s
 		}
 		// Bulk delete and Clone stay beside the title.
 		acts = append(acts, firestoreTransferActions()[2:]...)
+		// The Rules tab's Edit rules and Rules Playground (#2048).
+		acts = append(acts, p.rulesActions("")...)
 		if d.DatabaseEdition == adminpb.Database_ENTERPRISE {
 			acts = append(acts,
 				console.Action{ID: "runpipeline", Label: "Run pipeline", Fields: runPipelineFields()},
 				console.Action{ID: "explainquery", Label: "Query Explain (MongoDB)", Fields: explainQueryFields()},
-				console.Action{ID: "createcreds", Label: "Create user credentials", Fields: createCredsFields()})
+				addUserAction())
 		}
 		return acts
 	}
@@ -390,6 +392,9 @@ func (p firestoreDatabasesProvider) ActAt(ctx context.Context, project string, p
 	}
 	defer c.Close()
 	db := p.dbName(project, path[0])
+	if action == "editrules" && len(path) == 1 {
+		return p.publishRules(ctx, project, path[0], values["source"])
+	}
 	if action == editDisasterRecovery && len(path) == 1 {
 		return actDisasterRecovery(ctx, c, db, values)
 	}

@@ -915,8 +915,12 @@ func TestDestructiveActionsAskForTheName(t *testing.T) {
 	// it, the word delete or DELETE, or the button alone, which leaves
 	// focus on Cancel so one Enter does not delete.
 	// #1860: Cloud SQL's Delete backup asks for the word Delete.
-	if !strings.Contains(js, `if (style === "delete" || style === "DELETE" || style === "Delete") confirmWord = style;`) {
+	if !strings.Contains(js, `if (style === "delete" || style === "DELETE" || style === "Delete" || style === "Disable") confirmWord = style;`) {
 		t.Error("a delete confirmed by the word delete does not ask for that word")
+	}
+	// #2047: Delete HMAC key asks for the access ID's first 10 characters.
+	if !strings.Contains(js, `if (style === "prefix10") confirmWord = String(confirmWord).slice(0, 10);`) {
+		t.Error("a confirmation by the name's first 10 characters does not ask for them")
 	}
 	// #1860: an action's own dialog title, and a confirmation titled and
 	// styled as Google's, on click and after a form.
@@ -2534,8 +2538,8 @@ func TestComponentHealthIsReadNotLatched(t *testing.T) {
 // without claiming it cannot be undone.
 func TestAnActionThatChangesStateAsksForTheNameBack(t *testing.T) {
 	js := consoleAsset(t, "console.js")
-	form := functionBody(t, js, "function openActionForm(route, segments, action, onDone, title = null)")
-	for _, want := range []string{"if (action.confirm) {", "detail: action.confirm,", "confirmWord: name,", `consequence: "",`} {
+	form := functionBody(t, js, "function openActionForm(route, segments, action, onDone, title = null, host = null)")
+	for _, want := range []string{"if (action.confirm) {", "detail: action.confirm,", "confirmWord: action.confirmWord || name,", `consequence: "",`} {
 		if !strings.Contains(form, want) {
 			t.Errorf("openActionForm does not confirm an action carrying Confirm: missing %q", want)
 		}
@@ -2559,7 +2563,7 @@ func TestRowTargetsAndConfirmedActions(t *testing.T) {
 		"(item.target || []).length ? item.target",
 		"run: () => runAction(route, (item.target || []).length ? item.target : item.name, a, onDone),",
 		"detail: action.confirm || undefined,",
-		"confirmLabel: action.confirm ? action.label : undefined,",
+		"confirmLabel: action.confirm ? (action.submit || action.label) : undefined,",
 	} {
 		if !strings.Contains(js, want) {
 			t.Errorf("console.js is missing %q", want)
@@ -2690,5 +2694,57 @@ func TestNavigationAfterBootDraws(t *testing.T) {
 	follows("a link's click", routing)
 	if !strings.Contains(routing, `window.addEventListener("popstate", route);`) {
 		t.Error("Back and Forward (popstate) do not call route()")
+	}
+}
+
+// A section ShownIn another is no tab of its own but a choice in that
+// tab's Show list, which an old address naming it opens (#1843); and a
+// Scope held in View options is chosen in that dialog's radio buttons over
+// its column choices, applied by Save, not by a picker over the list.
+func TestShowListAndViewOptionsDialog(t *testing.T) {
+	js := consoleAsset(t, "console.js")
+	for _, want := range []string{
+		"const sections = allSections.filter((s) => !s.shownIn);",
+		"if (shownWanted) SHOW_CHOICES[shownWanted.shownIn] = shownWanted.showAs || shownWanted.label;",
+		"const shownHere = allSections.filter((sc) => sc.shownIn === section.id);",
+		"if (other) return drawListingSection(into, { ...other, uploadTo: null }, note, reload);",
+		`const SHOW_NONCURRENT = "Live and noncurrent objects";`,
+		"if (data.scope && !data.scope.viewOptions) header.push(scopePicker(",
+		"if (scope) return viewOptionsDialog({ service, columns, onChange, scope, reload, off });",
+		`el("button", { type: "submit", class: "primary", id: "view-options-save", text: "Save" })`,
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("console.js is missing %q", want)
+		}
+	}
+	if strings.Contains(js, "object-versions-toggle") {
+		t.Error("Show versions is still a checkbox beside Google's Show list")
+	}
+}
+
+// TestAnActionPageAndOptionsThatFollowAField (#1851): an action marked page
+// is drawn in the page's place at its address and keeps ?action= there; a
+// select with optionsBy relists from optionsFor when the field it follows
+// changes; a listing's hiddenColumns start off in Column display options.
+func TestAnActionPageAndOptionsThatFollowAField(t *testing.T) {
+	js := consoleAsset(t, "console.js")
+	run := functionBody(t, js, "async function runAction(route, target, action, onDone, row = NO_ROW, title = null)")
+	if !strings.Contains(run, `action.page && path`) || !strings.Contains(run, `to.searchParams.set("action", action.id)`) {
+		t.Error("runAction does not open a page action at its address")
+	}
+	form := functionBody(t, js, "function openActionForm(route, segments, action, onDone, title = null, host = null)")
+	for _, want := range []string{`close: () => navigate(host.back)`, `pageHeader(heading`, `class: "create-page is-single-page"`, `href: host.back, text: "Cancel"`} {
+		if !strings.Contains(form, want) {
+			t.Errorf("openActionForm's page lacks %s", want)
+		}
+	}
+	if !strings.Contains(js, `if (opened && opened.page) {`) {
+		t.Error("a detail page does not draw the page action its address names")
+	}
+	if !strings.Contains(js, `const by = entry.field.optionsBy;`) || !strings.Contains(js, `(entry.field.optionsFor || {})[valueText(other)]`) {
+		t.Error("a select does not follow its optionsBy field")
+	}
+	if !strings.Contains(js, `stored[service] : hiddenByDefault`) || !strings.Contains(js, `hiddenByDefault: data.hiddenColumns || []`) {
+		t.Error("a listing's hiddenColumns do not start off")
 	}
 }

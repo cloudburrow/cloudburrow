@@ -44,6 +44,9 @@ var serviceAgents = map[string]string{
 	"privateca.googleapis.com": "gcp-sa-privateca.iam.gserviceaccount.com",
 	// Workflows Service Agent, the primary agent of workflows.googleapis.com.
 	"workflows.googleapis.com": "gcp-sa-workflows.iam.gserviceaccount.com",
+	// Parameter Manager Service Agent, which uses a parameter's customer-managed
+	// key (docs.cloud.google.com/secret-manager/parameter-manager/docs/cmek).
+	"parametermanager.googleapis.com": "gcp-sa-pm.iam.gserviceaccount.com",
 	// Kubernetes Engine Service Agent, the primary agent of
 	// container.googleapis.com.
 	"container.googleapis.com": "container-engine-robot.iam.gserviceaccount.com",
@@ -78,7 +81,8 @@ var serviceAgents = map[string]string{
 	"run.googleapis.com": "serverless-robot-prod.iam.gserviceaccount.com",
 	// Cloud Firestore Service Agent (Firestore's, not Datastore's: no row
 	// names datastore.googleapis.com).
-	"firestore.googleapis.com": "gcp-sa-firestore.iam.gserviceaccount.com",
+	"firestore.googleapis.com":     "gcp-sa-firestore.iam.gserviceaccount.com",
+	"firebaserules.googleapis.com": "firebase-rules.iam.gserviceaccount.com",
 	// Cloud Bigtable Service Agent, primary for bigtableadmin.googleapis.com
 	// only; the data API bigtable.googleapis.com has none.
 	"bigtableadmin.googleapis.com": "gcp-sa-bigtable.iam.gserviceaccount.com",
@@ -96,12 +100,18 @@ var serviceAgents = map[string]string{
 	"storageinsights.googleapis.com": "gcp-sa-storageinsights.iam.gserviceaccount.com",
 	// Container Scanning Service Agent.
 	"containerscanning.googleapis.com": "gcp-sa-containerscanning.iam.gserviceaccount.com",
+	// Cloud Observability Service Account (#2020).
+	"observability.googleapis.com": "gcp-sa-observability.iam.gserviceaccount.com",
 }
 
 // noPrimaryAgent are the served services
 // https://cloud.google.com/iam/docs/service-agents gives no primary
 // service agent, so generateServiceIdentity names none for them.
 var noPrimaryAgent = map[string]string{
+	// The Inventory API's agent is the Cloud KMS organization service
+	// agent, granted roles/cloudkms.orgServiceAgent on an organization
+	// (view-key-usage), not a project's primary agent (#2053).
+	"kmsinventory.googleapis.com": "KMS Inventory",
 	// The Storage Transfer Service Service Agent (project-NUMBER@storage-
 	// transfer-service) is not primary; googleServiceAccounts.get names it
 	// (#1957).

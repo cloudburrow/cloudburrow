@@ -10,6 +10,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/apikeys"
 	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
 	"github.com/cloudburrow/cloudburrow/internal/service/cloudquotas"
+	"github.com/cloudburrow/cloudburrow/internal/service/firebaserules"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
 	"github.com/cloudburrow/cloudburrow/internal/service/siteverification"
@@ -86,6 +87,8 @@ type adminDeps struct {
 	analyticsHub *analyticsHubSvc
 	// workflows is Workflows (#1986), nil unless enabled.
 	workflows *workflowsService
+	// parameterManager is Parameter Manager (#2054), nil unless enabled.
+	parameterManager *parameterManagerService
 	// gke is the Kubernetes Engine API (#1913), nil unless enabled.
 	gke *gkeService
 	// monitoring is Cloud Monitoring (#1939), nil unless enabled.
@@ -94,6 +97,9 @@ type adminDeps struct {
 	compute *computeService
 	// dataTransfer is the BigQuery Data Transfer Service (#1948).
 	dataTransfer *dataTransferSvc
+	// firebaseRules is the Firebase Rules API (#2048), nil-returning
+	// unless Firestore is enabled.
+	firebaseRules func() *firebaserules.Server
 }
 
 // mountAdmin attaches the admin API to the control server.
@@ -194,6 +200,10 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 		api.RegisterResetter(&cloudQuotasResetter{srv: d.cloudQuotas}, &siteVerificationResetter{srv: d.siteVerify},
 			&authPlatformResetter{store: d.authPlatform})
 	}
+	if d.firebaseRules != nil && firebaseRulesEnabled(cfg) {
+		// Each project's rulesets and releases (#2048).
+		api.RegisterResetter(&firebaseRulesResetter{srv: d.firebaseRules})
+	}
 	if d.run != nil {
 		// Repositories and projects' settings (#1543), served beside Cloud Run.
 		api.RegisterResetter(artifactRegistryResetter{})
@@ -215,6 +225,9 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 	}
 	if d.workflows != nil {
 		api.RegisterResetter(&workflowsResetter{svc: d.workflows})
+	}
+	if d.parameterManager != nil {
+		api.RegisterResetter(&parameterManagerResetter{svc: d.parameterManager})
 	}
 	if d.monitoring != nil {
 		api.RegisterResetter(&monitoringResetter{svc: d.monitoring})

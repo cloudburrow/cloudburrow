@@ -59,10 +59,14 @@ func TestRESTPatchReadsTheMaskInTheURL(t *testing.T) {
 		t.Errorf("a URL mask with the deadline = %d, sent ?%s %s; want the deadline alone, in the body", code, call.query, call.body)
 	}
 
-	code, _ = fx.rest(t, http.MethodPatch, path+"?updateMask=bigqueryConfig",
+	// One that sets something is applied by the front (#2051), which the
+	// emulator refuses.
+	before := len(up.calls())
+	code, body = fx.rest(t, http.MethodPatch, path+"?updateMask=bigqueryConfig",
 		`{"subscription":{"bigqueryConfig":{"table":"p.d.t"}}}`)
-	if call, sent = last(); code != http.StatusOK || sent["updateMask"] != "bigquery_config" {
-		t.Errorf("a PATCH that sets a BigQuery export = %d, sent %s; want its path kept", code, call.body)
+	if bqc, _ := body["bigqueryConfig"].(map[string]any); code != http.StatusOK || bqc["table"] != "p.d.t" || len(up.calls()) != before {
+		t.Errorf("a PATCH that sets a BigQuery export = %d %v, %d emulator calls; want it applied by the front",
+			code, body, len(up.calls())-before)
 	}
 
 	code, _ = fx.rest(t, http.MethodPatch, path+"?updateMask=pushConfig",
@@ -71,7 +75,7 @@ func TestRESTPatchReadsTheMaskInTheURL(t *testing.T) {
 		t.Errorf("a URL mask naming pushConfig = %d, sent %s; want the relay's endpoint", code, call.body)
 	}
 
-	before := len(up.calls())
+	before = len(up.calls())
 	for _, q := range []string{
 		"?updateMask=expirationPolicy",                                     // 12h
 		"?updateMask=messageRetentionDuration&updateMask=expirationPolicy", // under the retention

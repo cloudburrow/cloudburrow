@@ -67,7 +67,7 @@ func (s *Server) v1ListInstances(w http.ResponseWriter, r *http.Request) {
 	byName := map[string]*runv1.Instance{}
 	var names []string
 	for _, loc := range locs {
-		resp, err := s.Instances().ListInstances(r.Context(), &runpb.ListInstancesRequest{Parent: "projects/" + sc.project + "/locations/" + loc, PageSize: 1000})
+		resp, err := v1Call(r.Context(), s.Instances().ListInstances, &runpb.ListInstancesRequest{Parent: "projects/" + sc.project + "/locations/" + loc, PageSize: 1000})
 		if err != nil {
 			v1Write(w, err, nil)
 			return
@@ -115,7 +115,7 @@ func (s *Server) v1GetInstance(w http.ResponseWriter, r *http.Request) {
 		v1Write(w, err, nil)
 		return
 	}
-	in, err := s.Instances().GetInstance(r.Context(), &runpb.GetInstanceRequest{Name: name})
+	in, err := v1Call(r.Context(), s.Instances().GetInstance, &runpb.GetInstanceRequest{Name: name})
 	v1Write(w, err, toV1Instance(in))
 }
 
@@ -153,7 +153,7 @@ func (s *Server) v1CreateInstance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	validateOnly := r.URL.Query().Get("dryRun") == "all"
-	if _, err := s.Instances().CreateInstance(r.Context(), &runpb.CreateInstanceRequest{Parent: parent, InstanceId: in.Metadata.Name,
+	if _, err := v1Call(r.Context(), s.Instances().CreateInstance, &runpb.CreateInstanceRequest{Parent: parent, InstanceId: in.Metadata.Name,
 		Instance: inst, ValidateOnly: validateOnly}); err != nil {
 		v1Write(w, err, nil)
 		return
@@ -164,7 +164,7 @@ func (s *Server) v1CreateInstance(w http.ResponseWriter, r *http.Request) {
 		v1Write(w, nil, toV1Instance(inst))
 		return
 	}
-	got, err := s.Instances().GetInstance(r.Context(), &runpb.GetInstanceRequest{Name: name})
+	got, err := v1Call(r.Context(), s.Instances().GetInstance, &runpb.GetInstanceRequest{Name: name})
 	v1Write(w, err, toV1Instance(got))
 }
 
@@ -205,12 +205,12 @@ func (s *Server) v1DeleteInstance(w http.ResponseWriter, r *http.Request) {
 		v1Write(w, err, nil)
 		return
 	}
-	in, err := s.Instances().GetInstance(r.Context(), &runpb.GetInstanceRequest{Name: name})
+	in, err := v1Call(r.Context(), s.Instances().GetInstance, &runpb.GetInstanceRequest{Name: name})
 	if err != nil {
 		v1Write(w, err, nil)
 		return
 	}
-	if _, err := s.Instances().DeleteInstance(r.Context(), &runpb.DeleteInstanceRequest{Name: name,
+	if _, err := v1Call(r.Context(), s.Instances().DeleteInstance, &runpb.DeleteInstanceRequest{Name: name,
 		ValidateOnly: r.URL.Query().Get("dryRun") == "all"}); err != nil {
 		v1Write(w, err, nil)
 		return
@@ -247,7 +247,7 @@ func (s *Server) v1StartStopInstance(w http.ResponseWriter, r *http.Request) {
 		v1Write(w, err, nil)
 		return
 	}
-	got, err := s.Instances().GetInstance(r.Context(), &runpb.GetInstanceRequest{Name: name})
+	got, err := v1Call(r.Context(), s.Instances().GetInstance, &runpb.GetInstanceRequest{Name: name})
 	v1Write(w, err, toV1Instance(got))
 }
 

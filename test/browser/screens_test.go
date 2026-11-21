@@ -50,9 +50,9 @@ func TestKMSCreateKeyRingThroughTheForm(t *testing.T) {
 	p.run(chromedp.SendKeys(chromedp.CSS(`#view #f-keyRingId`), "browser-ring"),
 		chromedp.Click(chromedp.CSS(`#view form.create-page button[type="submit"]`)))
 	p.waitFor(`location.pathname.startsWith("/kms/keyrings/") && location.pathname !== "/kms/keyrings/create" && ` +
-		`document.querySelector(".modal.is-open #f-cryptoKeyId") !== null`)
-	p.clickText(".modal.is-open .modal-actions button", "Cancel")
-	p.waitFor(`document.querySelector(".modal") === null`)
+		`location.search.includes("action=createkey") && document.querySelector("#view form.create-page #f-cryptoKeyId") !== null`)
+	p.clickText("#view form.create-page .form-actions a", "Cancel")
+	p.waitFor(`!location.search.includes("action=") && document.querySelector("#view form.create-page") === null`)
 	p.navigate("/kms/keyrings?project=" + project)
 	p.waitFor(fmt.Sprintf(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q))`, ring))
 	if posts := p.posts("/api/resources/kms"); len(posts) != 1 {

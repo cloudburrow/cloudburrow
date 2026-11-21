@@ -39,7 +39,8 @@ func TestTheKMSPortRegistersGooglesKMSServices(t *testing.T) {
 		got = append(got, s.GetName())
 	}
 	slices.Sort(got)
-	want := []string{"google.cloud.kms.v1.Autokey", "google.cloud.kms.v1.AutokeyAdmin", "google.cloud.kms.v1.EkmService", "google.cloud.kms.v1.HsmManagement",
+	want := []string{"google.cloud.kms.inventory.v1.KeyDashboardService", "google.cloud.kms.inventory.v1.KeyTrackingService",
+		"google.cloud.kms.v1.Autokey", "google.cloud.kms.v1.AutokeyAdmin", "google.cloud.kms.v1.EkmService", "google.cloud.kms.v1.HsmManagement",
 		"google.cloud.kms.v1.KeyManagementService", "google.cloud.location.Locations", "google.iam.v1.IAMPolicy", "google.longrunning.Operations",
 		"grpc.reflection.v1.ServerReflection", "grpc.reflection.v1alpha.ServerReflection"}
 	if !slices.Equal(got, want) {

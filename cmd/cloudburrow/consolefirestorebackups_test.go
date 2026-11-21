@@ -98,7 +98,7 @@ func TestConsoleFirestoreTransferAndBackups(t *testing.T) {
 		t.Fatal(err)
 	}
 	d, err := p.Detail(ctx, "p", at)
-	if err != nil || len(d.Sections) != 6 || len(fsSection(d, "schedules").Listing.Items) != 1 {
+	if err != nil || len(d.Sections) != 9 || len(fsSection(d, "schedules").Listing.Items) != 1 {
 		t.Fatalf("Detail = %+v, %v", d, err)
 	}
 	row := fsSection(d, "schedules").Listing.Items[0]

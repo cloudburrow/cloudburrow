@@ -288,6 +288,17 @@ func blankCheckDeps(t *testing.T) consoleDeps {
 	} else if _, err := d.projects.CreateServiceAccountKey(&adminpb.CreateServiceAccountKeyRequest{Name: sa.GetName()}); err != nil {
 		t.Fatal(err)
 	}
+	// A workforce pool (#2056), with an OIDC provider.
+	if _, err := d.projects.CreateWorkforcePool("blank-workforce", resourcemanager.WorkforcePool{Parent: resourcemanager.OrganizationName,
+		DisplayName: "Blank pool", Description: "Blank pool"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.projects.CreateWorkforcePoolProvider("blank-workforce", "blank-provider", resourcemanager.WorkforcePoolProvider{
+		DisplayName: "Blank provider", Description: "Blank provider", AttributeMapping: map[string]string{"google.subject": "assertion.sub"},
+		Oidc: &resourcemanager.WFOidc{IssuerURI: "https://idp.example.test", ClientID: "blank",
+			WebSsoConfig: &resourcemanager.WFWebSsoConfig{ResponseType: "ID_TOKEN", AssertionClaimsBehavior: "ONLY_ID_TOKEN_CLAIMS"}}}); err != nil {
+		t.Fatal(err)
+	}
 	// A workload identity pool (#1941), with an OIDC provider.
 	if _, err := d.projects.CreateWorkloadIdentityPool(blankProject, "blank-pool", resourcemanager.WorkloadIdentityPool{
 		DisplayName: "Blank pool", Description: "Blank pool"}); err != nil {
@@ -332,6 +343,11 @@ func blankCheckDeps(t *testing.T) consoleDeps {
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("upload %s: %s", name, resp.Status)
 		}
+	}
+	// An HMAC key, so Interoperability lists its service account (#2047).
+	if _, _, err := (storageSettingsProvider{endpoint: tunnels["storage"]}).CreateOneTime(ctx, blankProject,
+		map[string]string{"serviceAccountEmail": "blank@" + blankProject + ".iam.gserviceaccount.com"}); err != nil {
+		t.Fatal(err)
 	}
 
 	// Pub/Sub: a topic with a bare pull subscription, and a push one whose

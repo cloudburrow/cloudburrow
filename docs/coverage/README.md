@@ -22,12 +22,12 @@ Do not edit these files by hand.
 | [Cloud Functions v2](functions.md) | 8 | 8 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Functions v1](functionsv1.md) | 11 | 11 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Run v1 (Knative API)](runv1.md) | 76 | 76 | 0 | 0 | 0 | 0 | 0 | 0 |
-| [Cloud KMS](kms.md) | 63 | 63 | 0 | 0 | 0 | 0 | 0 | 90 |
+| [Cloud KMS](kms.md) | 66 | 66 | 0 | 0 | 0 | 0 | 0 | 90 |
 | [IAM (custom roles, service accounts, deny policies, organization policies)](iam.md) | 48 | 48 | 0 | 0 | 0 | 0 | 0 | 4 |
 | [Resource Manager v3 (Projects, Folders, Organizations, Tags)](resourcemanager.md) | 54 | 54 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Resource Manager v1 REST (projects, org policies; liens on v1 and v3)](resourcemanagerv1.md) | 38 | 38 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Scheduler](scheduler.md) | 10 | 10 | 0 | 0 | 0 | 0 | 0 | 0 |
-| [Cloud Logging](logging.md) | 43 | 43 | 0 | 0 | 0 | 0 | 0 | 0 |
+| [Cloud Logging](logging.md) | 43 | 43 | 0 | 0 | 0 | 0 | 0 | 2 |
 | [Vertex AI PredictionService](vertexai.md) | 91 | 83 | 0 | 7 | 1 | 0 | 0 | 0 |
 | [Speech-to-Text v1](speechv1.md) | 3 | 3 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Vertex AI PredictionService v1beta1](vertexaiv1beta1.md) | 17 | 5 | 0 | 0 | 12 | 0 | 0 | 0 |
@@ -45,14 +45,16 @@ Do not edit these files by hand.
 | [Cloud SQL Admin API (v1)](sqladmin.md) | 80 | 75 | 0 | 5 | 0 | 0 | 0 | 0 |
 | [Service Usage API (v1)](serviceusage.md) | 10 | 10 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [API Keys API (v2)](apikeys.md) | 9 | 9 | 0 | 0 | 0 | 0 | 0 | 0 |
+| [Firebase Rules API (v1)](firebaserules.md) | 11 | 11 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Compute Engine API (v1): VPC networking](compute.md) | 166 | 71 | 0 | 74 | 21 | 0 | 0 | 0 |
 | [Cloud Storage companion APIs (Batch Operations, Insights, Transfer v1)](storagejobs.md) | 50 | 50 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Backup and DR Service API (v1)](backupdr.md) | 61 | 46 | 0 | 15 | 0 | 0 | 0 | 0 |
 | [Cloud Identity API (v1)](cloudidentity.md) | 70 | 39 | 0 | 31 | 0 | 0 | 0 | 0 |
 | [Cloud Quotas API (v1)](cloudquotas.md) | 8 | 8 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Site Verification API (v1)](siteverification.md) | 7 | 7 | 0 | 0 | 0 | 0 | 0 | 0 |
-| [Workload Identity Federation (IAM v1 pools, STS v1)](workloadidentity.md) | 47 | 22 | 0 | 25 | 0 | 0 | 0 | 0 |
+| [Workload Identity Federation (IAM v1 pools, STS v1)](workloadidentity.md) | 88 | 63 | 0 | 25 | 0 | 0 | 0 | 0 |
 | [Certificate Authority Service (v1)](privateca.md) | 29 | 29 | 0 | 0 | 0 | 0 | 0 | 0 |
+| [Parameter Manager (v1)](parametermanager.md) | 22 | 22 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Workflows and Workflow Executions (v1)](workflows.md) | 10 | 10 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Kubernetes Engine API (v1)](gke.md) | 37 | 16 | 0 | 19 | 2 | 0 | 0 | 0 |
 | [BigQuery sharing (Analytics Hub) API (v1)](analyticshub.md) | 29 | 20 | 0 | 8 | 1 | 0 | 0 | 0 |

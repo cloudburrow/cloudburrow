@@ -161,6 +161,7 @@ func (s *Server) DeleteDashboard(_ context.Context, req *dashboardpb.DeleteDashb
 		return nil, apierror.NotFound("Requested entity was not found.")
 	}
 	delete(s.objects[kindDashboards], req.GetName())
+	delete(s.objects[kindDashboardSQL], req.GetName())
 	return &emptypb.Empty{}, s.save()
 }
 

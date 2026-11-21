@@ -359,13 +359,14 @@ input[type="datetime-local"]:focus-within {
   margin-bottom: 20px; padding-bottom: 16px; padding-top: 8px;
 }
 .page-header h1 { margin-bottom: 2px; }
-.page-header .subtitle { margin: 0; }
+/* A resource name under a title (#1851: a key ring's full name above Create key) wraps rather than widening a narrow page. */
+.page-header .subtitle { margin: 0; overflow-wrap: anywhere; }
 
 /* The title line (#1842): a back arrow where there is somewhere to go back
    to, the title, and the screen's own controls beside it, as Google's
    console puts "+ Create  Refresh" and "Edit  Delete" on the title's line. */
 .page-title-row { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 16px; min-height: 40px; }
-.page-title-row h1 { margin: 0; }
+.page-title-row h1 { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .page-header-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; flex: 1 1 auto; }
 .page-header-actions:empty { display: none; }
 .page-header-actions .info-toggle { margin-left: auto; }
@@ -447,6 +448,9 @@ button.primary.header-button[disabled], button.primary.header-button.is-busy[dis
   font-weight: 500; color: var(--accent); cursor: pointer;
 }
 .view-options-wrap { position: relative; }
+.view-options-group { border: 0; margin: 0 0 12px; padding: 0; }
+.view-options-group legend { padding: 4px 0 8px; font-weight: 500; }
+.view-options-group .view-options-item { padding: 6px 0; }
 .view-options-menu {
   position: absolute; top: 44px; right: 0; z-index: 30; min-width: 240px; max-height: 360px; overflow-y: auto;
   padding: 8px 0; background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow-menu);
@@ -2060,6 +2064,11 @@ dd.has-property-action { display: flex; flex-wrap: wrap; align-items: baseline; 
 .log-timeline-head h2, .log-results-head h2, .log-fields-head h2 { margin-right: auto; }
 .log-panes { display: grid; grid-template-columns: minmax(180px, 240px) minmax(0, 1fr); gap: 12px; align-items: start; }
 .log-fields h3 { font-size: var(--text-caption-size); color: var(--text-muted); margin: 12px 0 4px; }
+/* The Fields pane's sections (#2031): Pinned, System metadata and Frequent
+   fields, each a heading over its fields. */
+.log-fields h3.log-fields-subhead { font-size: var(--text-body-size); color: var(--text); margin: 16px 0 4px; font-weight: 500; }
+.log-fields h4 { font-size: var(--text-caption-size); color: var(--text-muted); margin: 10px 0 4px; font-weight: 500; overflow-wrap: anywhere; }
+.log-fields-note { margin: 4px 0 0; font-size: var(--text-caption-size); }
 .log-fields ul { list-style: none; margin: 0; padding: 0; }
 .log-field-value { display: flex; justify-content: space-between; gap: 8px; width: 100%; padding: 4px 6px;
   border: 0; background: none; color: var(--text); text-align: left; border-radius: var(--radius-control); cursor: pointer; }
@@ -2540,3 +2549,31 @@ svg.bq-chart { display: block; border: 1px solid var(--border); border-radius: v
 .apis-graph-option { display: block; padding: 4px 0; }
 .apis-charts { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(min(420px, 100%), 1fr)); }
 .apis-chart .explorer-chart { width: 100%; height: auto; }
+
+/* Logs Explorer round 3 (#1863): default summary fields hidden, a bar's
+   pop-up on the Timeline, the Timeline's range controls, pinned fields, the
+   Query library. */
+.hide-default-summary .log-default-summary { display: none; }
+.timeline-bars > .timeline-popup { flex: 1 1 0; min-width: 2px; height: 100%; display: flex; }
+.timeline-popup > .timeline-column {
+  width: 100%; padding: 0; background: none; border: 0; border-radius: 0; cursor: pointer;
+}
+.timeline-popup > .timeline-column:hover { background: var(--state-hover); }
+.timeline-popup > .timeline-column:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.timeline-popup > .overflow-menu { right: auto; left: 0; }
+.timeline-controls { margin-left: auto; }
+.log-fields-subhead { margin: 8px 0 0; font-size: var(--text-caption-size); color: var(--text-muted); }
+tr.log-entry.is-located { outline: 2px solid var(--accent); outline-offset: -2px; }
+.query-library-list { list-style: none; margin: 0; padding: 0; }
+.query-library-item { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.query-library-item .query-library-text { flex: 1 1 240px; min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.query-library-item h3, .query-library-item h4 { margin: 0; font-size: inherit; }
+.query-library-heading { margin: 16px 0 4px; font-size: var(--text-body-size); }
+.log-analytics-main { min-width: 0; }
+.log-analytics .log-view-list button, .log-analytics .log-view-list li { overflow-wrap: anywhere; word-break: break-all; text-align: left; }
+.log-analytics > * { min-width: 0; }
+/* `PROJECT_ID.LOCATION.BUCKET_ID.LOG_VIEW_ID` is one word wider than a
+   320px window: it breaks rather than scroll the page sideways. */
+.log-analytics p { overflow-wrap: anywhere; }
+.log-analytics-chart { margin-top: 16px; min-width: 0; }
+.log-analytics-chart h2 { font-size: var(--text-body-size); margin: 0 0 8px; }

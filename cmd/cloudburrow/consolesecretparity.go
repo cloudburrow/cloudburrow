@@ -60,10 +60,16 @@ func (secretsRegionalProvider) CreateTitle() string { return "Create regional se
 
 // Create makes a regional secret: the location is required here.
 func (p secretsRegionalProvider) Create(ctx context.Context, project string, values map[string]string) (string, error) {
-	if strings.TrimSpace(values["location"]) == "" {
-		return "", fmt.Errorf("a regional secret needs a location, such as us-central1")
+	loc := secretRegionalLocation(values)
+	if loc == "" {
+		return "", fmt.Errorf("a regional secret needs a location: a region such as us-central1, or a multi-region")
 	}
-	return p.secretsProvider.Create(ctx, project, values)
+	out := make(map[string]string, len(values))
+	for k, v := range values {
+		out[k] = v
+	}
+	out["location"] = loc
+	return p.secretsProvider.Create(ctx, project, out)
 }
 
 // The secrets list's columns, Google's order; the row menu is Actions.
@@ -251,15 +257,29 @@ func secretCreateFields(regional bool) []console.Field {
 			Help:    "Up to 255 characters: letters, digits, hyphens and underscores.",
 			Pattern: `^[A-Za-z0-9_\-]{1,255}$`},
 	}
-	if regional {
-		fields = append(fields, console.Field{Name: "location", Label: "Location", Type: "text", Required: true,
-			Pattern: `^[a-z]+-[a-z]+[0-9]+$`,
-			Help: "A region, such as us-central1. A regional secret's data stays in that location, as " +
-				"secretmanager.{location}.rep.googleapis.com serves it; its customer-managed key must be in that location."})
-	}
-	fields = append(fields,
+	fields = append(fields, secretTypeField(regional),
 		console.Field{Name: "payload", Label: "Secret value", Type: "textarea", Required: true, Upload: "Upload file",
 			Help: "Type the value or upload a text file, at most 64 KiB. It becomes version 1."})
+	if regional {
+		// "Choose the location where you want to store your regional
+		// secret": Region or Multi-region
+		// (https://docs.cloud.google.com/secret-manager/regional-secrets/create-regional-secret,
+		// read 2026-11-20); the multi-regions are us, eu, ca and in
+		// (https://docs.cloud.google.com/secret-manager/docs/locations).
+		fields = append(fields,
+			console.Field{Name: "locationType", Label: "Location type", Type: "radio", Section: "Location",
+				Options: []string{secretLocationRegion, secretLocationMulti}, Default: secretLocationRegion,
+				OptionLabels: map[string]string{
+					secretLocationRegion: "Region: stores the secret in a single region for minimal latency",
+					secretLocationMulti:  "Multi-region: replicates the secret across multiple locations for high availability"}},
+			console.Field{Name: "location", Label: "Region", Type: "text", Required: true, Section: "Location",
+				ShowWhen: "locationType=" + secretLocationRegion, Pattern: `^[a-z]+-[a-z]+[0-9]+$`,
+				Help: "A region, such as us-central1. A regional secret's data stays in that location, as " +
+					"secretmanager.{location}.rep.googleapis.com serves it; its customer-managed key must be in that location."},
+			console.Field{Name: "multiRegion", Label: "Multi-region", Type: "select", Section: "Location",
+				ShowWhen: "locationType=" + secretLocationMulti, Options: secretMultiRegions, Default: secretMultiRegions[0],
+				Help: "Its customer-managed key must be in the same multi-region."})
+	}
 	if !regional {
 		fields = append(fields,
 			console.Field{Name: "replication", Label: "Replication policy", Type: "radio", Section: "Replication policy",
@@ -292,6 +312,57 @@ func secretCreateFields(regional bool) []console.Field {
 	return fields
 }
 
+// The Location choices of Create regional secret.
+const (
+	secretLocationRegion = "region"
+	secretLocationMulti  = "multi-region"
+)
+
+// secretMultiRegions are the multi-regions of regional secrets.
+var secretMultiRegions = []string{"us", "eu", "ca", "in"}
+
+// secretRegionalLocation is Create regional secret's location: the Region
+// typed, or the Multi-region chosen.
+func secretRegionalLocation(values map[string]string) string {
+	if values["locationType"] == secretLocationMulti {
+		return strings.TrimSpace(values["multiRegion"])
+	}
+	return strings.TrimSpace(values["location"])
+}
+
+// The Secret type choices, in the docs' order: "Other DB credentials,
+// Access key, Certificate, Other", and on Create regional secret Cloud SQL
+// DB credentials first (https://docs.cloud.google.com/secret-manager/docs/creating-and-accessing-secrets,
+// https://docs.cloud.google.com/secret-manager/regional-secrets/create-regional-secret,
+// read 2026-11-20). The value is resources.proto's enum name.
+var secretTypeLabels = map[string]string{
+	"":                         "None",
+	"CLOUD_SQL_DB_CREDENTIALS": "Cloud SQL DB credentials",
+	"OTHER_DB_CREDENTIALS":     "Other DB credentials",
+	"ACCESS_KEY":               "Access key",
+	"CERTIFICATE":              "Certificate",
+	"OTHER":                    "Other",
+}
+
+// secretTypeField is Create secret's Secret type (Preview).
+func secretTypeField(regional bool) console.Field {
+	opts := []string{"", "OTHER_DB_CREDENTIALS", "ACCESS_KEY", "CERTIFICATE", "OTHER"}
+	if regional {
+		opts = append([]string{"", "CLOUD_SQL_DB_CREDENTIALS"}, opts[1:]...)
+	}
+	return console.Field{Name: "secretType", Label: "Secret type (Preview)", Type: "select",
+		Options: opts, OptionLabels: secretTypeLabels,
+		Help: "Optional. Categorizes the secret. It is set only when the secret is created and cannot be changed."}
+}
+
+// secretTypeText is a secret's type as the Overview shows it.
+func secretTypeText(t string) string {
+	if l, ok := secretTypeLabels[t]; ok {
+		return l
+	}
+	return t
+}
+
 // secretOptionalFields are the sections Create secret and Edit secret
 // share, after encryption: Rotation, Notifications, Expiration, Labels,
 // Annotations, Version aliases and Delayed destruction. sec gives an edit
@@ -300,6 +371,11 @@ func secretOptionalFields(sec *secrets.Secret) []console.Field {
 	sched := secretScheduleFields(sec)
 	next, period, ttl := sched[0], sched[1], sched[2]
 	next.Label, next.ShowWhen = "Starting on", "setRotation"
+	// A date and time picker, as Google's Starting on is (#1850): the
+	// browser's local time, sent as the RFC 3339 instant it names.
+	next.Type, next.Pattern = console.DateTimeFieldType, ""
+	next.Help = "When a SECRET_ROTATE message is first published to the secret's Pub/Sub topics, in your " +
+		"browser's time zone; at least 5 minutes from now. Secret Manager does not change the value: your subscriber adds the new version."
 	period.Label, period.ShowWhen = "Custom rotation period", "setRotation&rotationPreset="+secretRotationCustom
 	ttl.Label, ttl.ShowWhen = "Duration", "setDestroyDelay"
 	setRotation, preset := "false", secretRotationPresets[0].label
@@ -424,6 +500,7 @@ func secretOverview(sec secrets.Secret, versions int) console.Section {
 		{Heading: "General details", Properties: []console.Property{
 			{Label: "Resource name", Value: sec.Name, Copy: sec.Name},
 			{Label: "Created", Value: sec.Created.Format(time.RFC3339)},
+			{Label: "Secret type", Value: secretTypeText(sec.SecretType)},
 			{Label: "Versions", Value: strconv.Itoa(versions)},
 		}},
 		{Heading: "Replication", Properties: replicationProperties(sec)},
@@ -461,23 +538,119 @@ func secretVersionAliases(sec secrets.Secret) map[int][]string {
 	return out
 }
 
-// secretVersionRowActions are a version row's Actions menu: what its state
-// allows, and View secret value, which opens the version's page and shows
-// the value there (recorded as every reveal is).
-func secretVersionRowActions(sec secrets.Secret, v secrets.Version, now time.Time, href string) []console.Action {
-	destroy := secretDestroyAction(sec, now)
-	var out []console.Action
+// The selection field of the Versions tab's actions over checked versions.
+const secretVersionsField = "versions"
+
+// secretVersionAction is Disable, Enable or Destroy of secret versions with
+// Google's confirmation: "In the confirmation dialog that appears, click
+// Disable selected versions" (and Enable selected versions); Destroy's asks
+// to "enter the secret ID to confirm, and then click Destroy selected
+// versions" (https://docs.cloud.google.com/secret-manager/docs/disable-secret-version,
+// .../enable-secret-version, .../destroy-secret-version, read 2026-11-20).
+// The dialogs' titles and text are not in the docs
+// (UNVERIFIED, re-read 2026-11-20: the destroy-secret-version page). selection
+// makes it the Versions tab's action over the checked rows; otherwise it is
+// one version's, from its row's Actions menu or its own page.
+func secretVersionAction(verb string, sec secrets.Secret, now time.Time, selection bool) console.Action {
+	var a console.Action
+	switch verb {
+	case "disable":
+		a = console.Action{ID: "disable", Label: "Disable", Submit: "Disable selected versions",
+			ConfirmTitle: "Disable selected versions?", ConfirmStyle: console.DeleteConfirmClick,
+			Confirm: "A disabled version cannot be accessed until it is enabled again."}
+	case "enable":
+		a = console.Action{ID: "enable", Label: "Enable", Submit: "Enable selected versions",
+			ConfirmTitle: "Enable selected versions?", ConfirmStyle: console.DeleteConfirmClick,
+			Confirm: "An enabled version can be accessed again."}
+	case "destroy":
+		a = secretDestroyAction(sec, now)
+		a.Submit, a.ConfirmTitle = "Destroy selected versions", "Destroy selected versions?"
+		a.ConfirmWord = lastSegment(sec.Name)
+		if a.Confirm == "" {
+			a.Confirm = "A destroyed version's value is deleted permanently; the version stays listed as destroyed."
+		}
+	}
+	if selection {
+		a.ID += "versions"
+		a.SelectionField = secretVersionsField
+		a.Fields = []console.Field{{Name: secretVersionsField, Type: "hidden"}}
+	}
+	return a
+}
+
+// secretVersionSelectActions are the Versions tab's Actions over the
+// checked versions: Disable, Enable and Destroy.
+func secretVersionSelectActions(sec secrets.Secret, now time.Time) []console.Action {
+	return []console.Action{
+		secretVersionAction("disable", sec, now, true),
+		secretVersionAction("enable", sec, now, true),
+		secretVersionAction("destroy", sec, now, true),
+	}
+}
+
+// secretVersionLifecycle is what one version's state allows, each with
+// Google's confirmation. Enabling an enabled version and destroying a
+// destroyed one are buttons that exist only to fail, so neither is drawn;
+// a version scheduled for destruction is enabled or kept disabled, either
+// of which cancels the destruction (#1278).
+func secretVersionLifecycle(sec secrets.Secret, v secrets.Version, now time.Time) []console.Action {
+	disable := secretVersionAction("disable", sec, now, false)
+	enable := secretVersionAction("enable", sec, now, false)
+	destroy := secretVersionAction("destroy", sec, now, false)
 	switch {
 	case v.State == secrets.StateEnabled:
-		out = []console.Action{{ID: "disable", Label: "Disable"}, destroy}
+		return []console.Action{disable, destroy}
 	case v.State == secrets.StateDisabled && !v.ScheduledDestroy.IsZero():
-		out = []console.Action{{ID: "enable", Label: "Enable (cancels the destruction)"},
-			{ID: "disable", Label: "Keep disabled (cancels the destruction)"}}
+		enable.Label = "Enable (cancels the destruction)"
+		disable.Label, disable.Submit = "Keep disabled (cancels the destruction)", "Keep selected versions disabled"
+		return []console.Action{enable, disable}
 	case v.State == secrets.StateDisabled:
-		out = []console.Action{{ID: "enable", Label: "Enable"}, destroy}
+		return []console.Action{enable, destroy}
 	}
+	return nil
+}
+
+// secretVersionRowActions are a version row's Actions menu: View secret
+// value, which shows the value in a dialog ending in Done ("A dialog appears
+// displaying the value of the secret version. Click Done to exit the
+// dialog", https://docs.cloud.google.com/secret-manager/docs/access-secret-version,
+// read 2026-11-20), recorded as every reveal is, then what its state allows.
+func secretVersionRowActions(sec secrets.Secret, v secrets.Version, now time.Time) []console.Action {
+	out := secretVersionLifecycle(sec, v, now)
 	if v.State == secrets.StateEnabled {
-		out = append([]console.Action{{ID: "view-value", Label: "View secret value", Href: href}}, out...)
+		out = append([]console.Action{{ID: "view-value", Label: "View secret value", Reveal: true}}, out...)
 	}
 	return out
+}
+
+// actSecretVersions performs Disable, Enable or Destroy on the versions
+// checked on the Versions tab, one after another; the first refusal stops
+// it and names the version.
+func actSecretVersions(st *secrets.Store, project, id, verb, list string) error {
+	var numbers []string
+	for _, n := range strings.FieldsFunc(list, func(r rune) bool { return r == '\n' || r == ',' || r == '\r' }) {
+		if n = strings.TrimSpace(n); n != "" {
+			numbers = append(numbers, n)
+		}
+	}
+	if len(numbers) == 0 {
+		return fmt.Errorf("select at least one version")
+	}
+	for _, n := range numbers {
+		var err error
+		switch verb {
+		case "disable":
+			_, err = st.SetVersionState(project, id, n, secrets.StateDisabled)
+		case "enable":
+			_, err = st.SetVersionState(project, id, n, secrets.StateEnabled)
+		case "destroy":
+			_, err = st.DestroyVersion(project, id, n)
+		default:
+			return fmt.Errorf("unknown action %q", verb)
+		}
+		if err != nil {
+			return fmt.Errorf("version %s: %w", n, err)
+		}
+	}
+	return nil
 }

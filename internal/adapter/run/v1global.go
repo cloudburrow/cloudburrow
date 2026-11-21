@@ -118,7 +118,7 @@ func (s *Server) v1IAM(w http.ResponseWriter, r *http.Request, m []string) {
 	switch m[3] {
 	case "jobs":
 		srv = s.Jobs()
-		if _, err := s.Jobs().GetJob(r.Context(), &runpb.GetJobRequest{Name: name}); err != nil {
+		if _, err := v1Call(r.Context(), s.Jobs().GetJob, &runpb.GetJobRequest{Name: name}); err != nil {
 			v1Write(w, err, nil)
 			return
 		}
@@ -137,6 +137,10 @@ func (s *Server) v1IAM(w http.ResponseWriter, r *http.Request, m []string) {
 			v1Write(w, err, nil)
 			return
 		}
+	}
+	if err := v1CheckIAM(r.Context(), m[3], m[5], name); err != nil {
+		v1Write(w, err, nil)
+		return
 	}
 	var (
 		resp proto.Message

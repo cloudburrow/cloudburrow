@@ -42,6 +42,8 @@ type Server struct {
 	// interpose runs inside the observer and outside the handler: fault
 	// injection, whose code the observer then records.
 	interpose []grpc.UnaryServerInterceptor
+	// streamInterpose is interpose for streaming calls.
+	streamInterpose []grpc.StreamServerInterceptor
 	// http, when set, serves a JSON API on the same port: a request that is
 	// HTTP/2 with an application/grpc content type goes to gRPC, and
 	// everything else here.
@@ -85,6 +87,7 @@ func (s *Server) Register(fn func(*grpc.Server)) error {
 			stream = append(stream, StreamObserver(s.observe))
 		}
 		unary = append(unary, s.interpose...)
+		stream = append(stream, s.streamInterpose...)
 		if s.gate != nil {
 			unary = append(unary, apienable.UnaryInterceptor(s.gate, s.gateService))
 			stream = append(stream, apienable.StreamInterceptor(s.gate, s.gateService))
@@ -125,6 +128,14 @@ func (s *Server) Interpose(i grpc.UnaryServerInterceptor) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.interpose = append(s.interpose, i)
+}
+
+// InterposeStream adds a streaming interceptor where Interpose adds a
+// unary one. It must be called before Register.
+func (s *Server) InterposeStream(i grpc.StreamServerInterceptor) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.streamInterpose = append(s.streamInterpose, i)
 }
 
 // Gate refuses calls to service (its googleapis.com name) in a project

@@ -3,6 +3,7 @@ package metadata
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -37,9 +38,12 @@ import (
 //   - the token is opaque and lasts an hour; its account is the subject's
 //     principal:// identifier, which IAM checks (and the principalSet://
 //     identifiers its mapping gave, kept by the directory);
-//   - AWS, SAML and X.509 (mTLS) credentials, and Credential Access
-//     Boundary downscoping of a Google token, are not exchanged:
-//     501 with an OAuth error.
+//   - a SAML assertion (saml2, #2065) is verified against the provider's
+//     IdP metadata (internal/wif's saml.go) and mapped as assertion.subject
+//     and assertion.attributes; its SessionNotOnOrAfter bounds the token;
+//   - AWS and X.509 (mTLS) credentials, and Credential Access Boundary
+//     downscoping of a Google token, are not exchanged: 501 with an
+//     OAuth error.
 
 // FederationDirectory is what the STS needs of the IAM API's pools.
 type FederationDirectory interface {
@@ -67,12 +71,22 @@ func (c *Credentials) federation() FederationDirectory {
 
 // federatedLive reports whether a token minted for email may be used: an
 // account's always is; a federated subject's only while its pool is live.
-func (c *Credentials) federatedLive(email string) bool {
+func (c *Credentials) federatedLive(email string, issued time.Time) bool {
 	if !strings.HasPrefix(strings.ToLower(email), "principal://") {
 		return true
 	}
 	d := c.federation()
-	return d != nil && d.FederatedPrincipalActive(email)
+	if d == nil || !d.FederatedPrincipalActive(email) {
+		return false
+	}
+	// A workforce subject's sessions revoked after the token was issued
+	// (#2056, subjects.revokeSessions).
+	if sl, ok := d.(interface {
+		FederatedSessionLive(string, time.Time) bool
+	}); ok && !sl.FederatedSessionLive(email, issued) {
+		return false
+	}
+	return true
 }
 
 // Token types.
@@ -181,9 +195,10 @@ func (s *Server) sts(w http.ResponseWriter, r *http.Request) {
 		stsError(w, http.StatusBadRequest, "invalid_request", "Missing required parameter: subject_token_type.")
 		return
 	}
+	userProject := ""
 	if in.Options != "" {
 		var opts map[string]any
-		if json.Unmarshal([]byte(in.Options), &opts) != nil {
+		if len(in.Options) > 4<<20 || json.Unmarshal([]byte(in.Options), &opts) != nil {
 			stsError(w, http.StatusBadRequest, "invalid_request", "Invalid value for \"options\": it must be a JSON object.")
 			return
 		}
@@ -191,18 +206,28 @@ func (s *Server) sts(w http.ResponseWriter, r *http.Request) {
 			stsError(w, http.StatusNotImplemented, "invalid_request", "Credential Access Boundary (options.accessBoundary) is not implemented by CloudBurrow.")
 			return
 		}
+		if v, ok := opts["userProject"]; ok {
+			// The project for quota and billing (#2056): a project
+			// number or ID of at most 32 characters.
+			up, isString := v.(string)
+			if !isString || up == "" || len(up) > 32 {
+				stsError(w, http.StatusBadRequest, "invalid_request", "Invalid value for \"options.userProject\": it must be a project number or project ID of at most 32 characters.")
+				return
+			}
+			userProject = up
+		}
 	}
 	if in.ActorToken != "" {
 		stsError(w, http.StatusNotImplemented, "invalid_request", "actor_token (delegated actor tokens) is not implemented by CloudBurrow.")
 		return
 	}
 	switch in.SubjectTokenType {
-	case stsJWTType, stsIDTokenType:
+	case stsJWTType, stsIDTokenType, stsSAMLType:
 	case stsAccessTokenType:
 		stsError(w, http.StatusNotImplemented, "invalid_request", "Exchanging a Google access token (Credential Access Boundary) is not implemented by CloudBurrow.")
 		return
-	case stsAWSType, stsSAMLType, stsMTLSType:
-		stsError(w, http.StatusNotImplemented, "invalid_request", "Exchanging a "+in.SubjectTokenType+" credential is not implemented by CloudBurrow: only OIDC tokens are verified locally.")
+	case stsAWSType, stsMTLSType:
+		stsError(w, http.StatusNotImplemented, "invalid_request", "Exchanging a "+in.SubjectTokenType+" credential is not implemented by CloudBurrow: only OIDC tokens and SAML assertions are verified locally.")
 		return
 	default:
 		stsError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("Invalid value for \"subject_token_type\": %s.", in.SubjectTokenType))
@@ -212,39 +237,113 @@ func (s *Server) sts(w http.ResponseWriter, r *http.Request) {
 		stsError(w, http.StatusBadRequest, "invalid_request", "Missing required parameter: audience.")
 		return
 	}
-	if strings.Contains(in.Audience, "/workforcePools/") {
-		stsError(w, http.StatusNotImplemented, "invalid_request", "Workforce Identity Federation (workforcePools) is not implemented by CloudBurrow.")
-		return
-	}
 	p, ok := d.FederationProvider(in.Audience)
 	if !ok {
 		stsError(w, http.StatusBadRequest, "invalid_target", "The target service indicated by the \"audience\" parameters is invalid. "+
 			"This might either be because the pool or provider is disabled or deleted or because it doesn't exist.")
 		return
 	}
-	if p.Kind != wif.KindOIDC {
+	if p.Workforce && p.ProgrammaticDisabled {
+		// The pool's accessRestrictions.disableProgrammaticSignin (#2056).
+		stsError(w, http.StatusBadRequest, "invalid_request", "Programmatic sign-in is disabled for the workforce pool "+wif.WorkforcePoolName(p.Pool)+" (accessRestrictions.disableProgrammaticSignin).")
+		return
+	}
+	if userProject != "" {
+		if up, isDir := d.(interface{ FederationUserProject(string) bool }); isDir && !up.FederationUserProject(userProject) {
+			stsError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("Invalid value for \"options.userProject\": the project %s does not exist.", userProject))
+			return
+		}
+	}
+	wantKind := wif.KindOIDC
+	if in.SubjectTokenType == stsSAMLType {
+		wantKind = wif.KindSAML
+	}
+	if p.Kind != wantKind {
 		stsError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("Invalid value for \"subject_token_type\": %s is not supported by the %s provider %s.", in.SubjectTokenType, p.Kind, p.Name()))
 		return
 	}
 	now := time.Now()
-	attrs, err := s.exchangeOIDC(r.Context(), p, in.SubjectToken, now)
+	var attrs wif.Attributes
+	var session time.Time
+	if wantKind == wif.KindSAML {
+		attrs, session, err = exchangeSAML(p, in.SubjectToken, now)
+	} else {
+		attrs, err = s.exchangeOIDC(r.Context(), p, in.SubjectToken, now)
+	}
 	if err != nil {
 		stsError(w, http.StatusBadRequest, "invalid_grant", err.Error())
 		return
 	}
 	principal := wif.Principal(p.ProjectNumber, p.Pool, attrs.Subject)
-	if err := d.RecordFederatedPrincipal(principal, wif.Sets(p.ProjectNumber, p.Pool, attrs)); err != nil {
+	sets := wif.Sets(p.ProjectNumber, p.Pool, attrs)
+	ttl := FederatedTokenTTL
+	if p.Workforce {
+		// A workforce pool's subject (#2056), for the pool's session
+		// duration.
+		principal, sets = wif.WorkforcePrincipal(p.Pool, attrs.Subject), wif.WorkforceSets(p.Pool, attrs)
+		if p.SessionTTL > 0 {
+			ttl = p.SessionTTL
+		}
+		// A provider using SCIM (#2068): its tenant must be attached, and
+		// with ENABLED_FOR_USERS_GROUPS the subject provisioned.
+		if sc, ok := d.(interface {
+			WorkforceScimSignIn(pool, provider, subject string) error
+		}); ok {
+			if err := sc.WorkforceScimSignIn(p.Pool, p.ID, attrs.Subject); err != nil {
+				stsError(w, http.StatusBadRequest, "invalid_grant", err.Error())
+				return
+			}
+		}
+	}
+	if !session.IsZero() && session.Sub(now) < ttl {
+		// A SAML assertion's SessionNotOnOrAfter bounds the token
+		// (#2065), to the second.
+		ttl = session.Sub(now).Truncate(time.Second)
+		if ttl < time.Second {
+			ttl = time.Second
+		}
+	}
+	if err := d.RecordFederatedPrincipal(principal, sets); err != nil {
+		if errors.Is(err, wif.ErrSubjectDeleted) {
+			stsError(w, http.StatusBadRequest, "invalid_grant", err.Error())
+			return
+		}
 		stsError(w, http.StatusInternalServerError, "server_error", "record the federated principal: "+err.Error())
 		return
 	}
-	tok := s.creds.MintAccessTokenFor(principal, FederatedTokenTTL)
+	tok := s.creds.MintAccessTokenFor(principal, ttl)
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, map[string]any{
 		"access_token":      tok,
 		"issued_token_type": stsAccessTokenType,
 		"token_type":        "Bearer",
-		"expires_in":        int(FederatedTokenTTL.Seconds()),
+		"expires_in":        int(ttl.Seconds()),
 	})
+}
+
+// exchangeSAML verifies a base64 SAML response or assertion for p
+// (#2065, internal/wif's saml.go) and maps its attributes; session is its
+// SessionNotOnOrAfter, zero for none.
+func exchangeSAML(p wif.Provider, token string, now time.Time) (wif.Attributes, time.Time, error) {
+	md, err := wif.ParseSAMLMetadata(p.SAMLMetadata)
+	if err != nil {
+		return wif.Attributes{}, time.Time{}, err
+	}
+	a, err := wif.VerifySAML(token, md, p.DecryptionKeys, wif.SAMLExpect{Audience: p.SAMLAudience(), Recipients: p.SAMLRecipients()}, now)
+	if err != nil {
+		return wif.Attributes{}, time.Time{}, err
+	}
+	mapping := p.Mapping
+	if len(mapping) == 0 {
+		mapping = map[string]string{"google.subject": "assertion.subject"}
+	}
+	var attrs wif.Attributes
+	if p.Workforce {
+		attrs, err = wif.ApplyWorkforce(mapping, p.Condition, a.Map())
+	} else {
+		attrs, err = wif.Apply(mapping, p.Condition, a.Map())
+	}
+	return attrs, a.SessionNotOnOrAfter, err
 }
 
 // exchangeOIDC verifies an OIDC token for p and maps its attributes.
@@ -288,12 +387,18 @@ func (s *Server) exchangeOIDC(ctx context.Context, p wif.Provider, token string,
 			}
 		}
 	}
+	if !match && p.Workforce {
+		return wif.Attributes{}, fmt.Errorf("The audience in ID Token [%s] does not match the expected audience %s: a workforce provider's tokens are for its client ID.", strings.Join(auds, ", "), p.ClientID)
+	}
 	if !match {
 		return wif.Attributes{}, fmt.Errorf("The audience in ID Token [%s] does not match the expected audience %s.", strings.Join(auds, ", "), strings.Join(allowed, ", "))
 	}
 	mapping := p.Mapping
 	if len(mapping) == 0 {
 		mapping = map[string]string{"google.subject": "assertion.sub"}
+	}
+	if p.Workforce {
+		return wif.ApplyWorkforce(mapping, p.Condition, t.Assertion())
 	}
 	return wif.Apply(mapping, p.Condition, t.Assertion())
 }

@@ -198,6 +198,30 @@ jobs:
       - name: Rebuild and compare
         run: WORK="$RUNNER_TEMP/whisper-wasm" third_party/whisper-wasm/build.sh --check
 
+  # Rebuilds third_party/amr-wasm/amr.wasm from its pinned opencore-amr and
+  # wasi-sdk releases and fails unless the result matches the committed
+  # SHA-256 (#1799). Not in ci-green, so not a required check.
+  amr-wasm:
+    name: rebuild amr.wasm
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Rebuild and compare
+        run: WORK="$RUNNER_TEMP/amr-wasm" third_party/amr-wasm/build.sh --check
+
+  # Rebuilds third_party/rnnoise-wasm/rnnoise.wasm from its pinned RNNoise
+  # and wasi-sdk releases and fails unless the result matches the committed
+  # SHA-256 (#1799). Not in ci-green, so not a required check.
+  rnnoise-wasm:
+    name: rebuild rnnoise.wasm
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Rebuild and compare
+        run: WORK="$RUNNER_TEMP/rnnoise-wasm" third_party/rnnoise-wasm/build.sh --check
+
   check:
     name: check (${{ matrix.os }}, go ${{ matrix.go }})
     runs-on: ${{ matrix.os }}
@@ -1181,7 +1205,9 @@ jobs:
           # And Cloud Storage, which the Document AI batch, processor version
           # and evaluation pages and Speech-to-Text's batch transcription read
           # their output back through (#1930, #1953).
-          if [ "$SHARD" = run ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT,RUN_SERVICEUSAGE,WORKFLOWS,STORAGE; fi
+          # Cloud Monitoring's Cloud Run metrics, and the kubeconfig that
+          # port-forwards the gateway a service's URL is reached through (#2049).
+          if [ "$SHARD" = run ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT,RUN_SERVICEUSAGE,WORKFLOWS,STORAGE,MONITORING,KUBECONFIG; fi
           # The sql shard's read back through the Cloud SQL Admin API, the Backup
           # and DR Service and Secret Manager, which holds Run SQL's password.
           if [ "$SHARD" = sql ]; then BROWSER_VARS+=,SQLADMIN,BACKUPDR,SECRETS; fi

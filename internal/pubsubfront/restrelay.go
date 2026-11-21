@@ -139,8 +139,9 @@ func (f *Front) rewriteJSON(sub json.RawMessage) (json.RawMessage, bool) {
 	a, relayed := f.fromRelayJSON(sub)
 	b, kept := f.withPolicyJSON(a)
 	c, labelled := f.withLabelsJSON(b)
+	c, exported := f.withExportJSON(c)
 	d, stated := f.withExportStateJSON(c)
-	return d, relayed || kept || labelled || stated
+	return d, relayed || kept || labelled || exported || stated
 }
 
 // answersSubscriptions reports whether the emulator's answer to r is a
@@ -203,6 +204,9 @@ func (f *Front) restAnswer(resp *http.Response) error {
 				}
 				if p.storagePolicy != nil {
 					f.setStoragePolicy(name, p.storagePolicy)
+				}
+				if p.export != nil {
+					f.setExport(name, p.export)
 				}
 			}
 		}

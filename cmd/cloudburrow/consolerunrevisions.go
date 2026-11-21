@@ -43,15 +43,23 @@ func (s ksvcStatus) servingRevisions() map[string]bool {
 	return out
 }
 
-// revisionActions is what a revision of svc offers.
-// Manage revision tags on every revision of a service CloudBurrow created
-// (#1852), and Delete revision on one that serves no traffic.
-func (p runProvider) revisionActions(svc *ksvcStatus, revision string) []console.Action {
-	actions := p.tagsAction(svc, revision)
-	if actions == nil || svc.servingRevisions()[revision] {
+// revisionActions is what a revision of svc offers, in its row's ⋮ menu
+// and on its page: Manage traffic and Manage revision tags on every
+// revision of a service CloudBurrow created (#1852), and Delete on one that
+// serves no traffic, as Google's menu has "Delete" ("Click the three-dot
+// vertical ellipse to the left of the revision, then click Delete",
+// https://docs.cloud.google.com/run/docs/managing/revisions). revisions are
+// the service's, the choices of Manage traffic.
+func (p runProvider) revisionActions(svc *ksvcStatus, revision string, revisions []string) []console.Action {
+	tags := p.tagsAction(svc, revision)
+	if tags == nil {
+		return nil
+	}
+	actions := append(p.trafficAction(svc, revisions), tags...)
+	if svc.servingRevisions()[revision] {
 		return actions
 	}
-	return append(actions, console.Action{ID: runDeleteRevision, Label: "Delete revision", Destructive: true})
+	return append(actions, console.Action{ID: runDeleteRevision, Label: "Delete", Destructive: true})
 }
 
 // revisionIDs are the names of a service's revisions, newest first.
@@ -96,9 +104,12 @@ func (p runProvider) DetailActions(ctx context.Context, project string, path []s
 	if len(path) == 1 {
 		out := append(p.trafficAction(svc, p.revisionIDs(ctx, path[0], svc)), p.sourceActions()...)
 		out = append(append(out, p.domainActions(svc)...), p.triggerActions(ctx, project, svc)...)
+		if sec, ok := p.runFunctionSourceSection(ctx, project, svc); ok {
+			out = append(out, sec.Actions...)
+		}
 		return append(out, p.copyAction(svc)...)
 	}
-	return p.revisionActions(svc, path[1])
+	return p.revisionActions(svc, path[1], p.revisionIDs(ctx, path[0], svc))
 }
 
 // ActAt implements console.PathActor through the adapter's UpdateService
@@ -116,7 +127,10 @@ func (p runProvider) ActAt(ctx context.Context, project string, path []string, a
 		return p.actOnTriggers(ctx, project, serviceIDOf(path[0]), action, values)
 	}
 	if action == runWriteFunction && len(path) == 0 {
-		return p.writeFunctionInline(ctx, project, values)
+		return p.writeFunctionPlaceholder(ctx, project, values)
+	}
+	if (action == functionsEditSourceAction || action == functionsEditRuntimeAction) && len(path) == 1 {
+		return p.actOnFunctionSource(ctx, project, serviceIDOf(path[0]), action, values)
 	}
 	if action == runConnectRepo && len(path) == 0 {
 		if p.runEndpoint() == "" {
@@ -127,7 +141,8 @@ func (p runProvider) ActAt(ctx context.Context, project string, path []string, a
 	if action == runCopyService && len(path) == 1 {
 		return p.copyService(ctx, project, serviceIDOf(path[0]), values)
 	}
-	if action == runManageTraffic && len(path) == 1 {
+	// From the service's Revisions tab, or a revision's ⋮ menu (#1852).
+	if action == runManageTraffic && (len(path) == 1 || len(path) == 2) {
 		if p.runEndpoint() == "" {
 			return errors.New("the Cloud Run adapter is not running")
 		}

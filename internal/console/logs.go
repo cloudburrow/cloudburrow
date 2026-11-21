@@ -52,6 +52,26 @@ type Entry struct {
 	// what makes "click a failed operation to see its logs" possible.
 	OperationID string `json:"operationId,omitempty"`
 	Message     string `json:"message"`
+	// JSONPayload is a Cloud Logging entry's jsonPayload, its credentials
+	// redacted as Message's are (RedactJSON), or nil: what the query
+	// editor matches jsonPayload.* against and the Fields pane's Frequent
+	// fields count (#2031).
+	JSONPayload map[string]any `json:"jsonPayload,omitempty"`
+	// Labels are a Cloud Logging entry's user-defined labels, their values
+	// redacted as Message is, or nil: what the query editor matches
+	// labels.KEY against and the Fields pane's label dimensions (Workload /
+	// Service) count (#2032).
+	Labels map[string]string `json:"labels,omitempty"`
+}
+
+// RedactJSON is a JSON payload with Redact applied to its text, or nil when
+// what is left is not a JSON object.
+func RedactJSON(payload []byte) map[string]any {
+	var out map[string]any
+	if json.Unmarshal([]byte(Redact(string(payload))), &out) != nil {
+		return nil
+	}
+	return out
 }
 
 // OperationState is the lifecycle of a tracked operation.
@@ -447,8 +467,8 @@ func filterFrom(r *http.Request) Filter {
 }
 
 func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
-	if view := r.URL.Query().Get("view"); view != "" {
-		s.handleViewLogs(w, r, view)
+	if scopedRead(r) {
+		s.handleViewLogs(w, r)
 		return
 	}
 	filter := filterFrom(r)
@@ -632,13 +652,13 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if view := r.URL.Query().Get("view"); view != "" {
+	if scopedRead(r) {
 		if s.logViews == nil {
 			fmt.Fprintf(w, "event: failure\ndata: %s\n\n", mustJSON(map[string]string{"error": "Cloud Logging is not enabled on this instance"}))
 			flusher.Flush()
 			return
 		}
-		s.streamView(w, r, flusher, view)
+		s.streamView(w, r, flusher)
 		return
 	}
 

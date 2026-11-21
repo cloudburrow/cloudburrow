@@ -48,6 +48,14 @@ type loggingService struct {
 	// (#314), which is what `cloudburrow logs --service logging` reads
 	// (#587), then fault injection (#600), so the log sees injected faults.
 	interpose []grpc.UnaryServerInterceptor
+	// streamInterpose checks streaming calls (TailLogEntries' IAM
+	// enforcement, #1879).
+	streamInterpose []grpc.StreamServerInterceptor
+	// wrapJSON wraps the JSON API (IAM enforcement, #1879); nil is none.
+	wrapJSON func(http.Handler) http.Handler
+	// wrapExtra wraps the saved queries' and log scopes' JSON methods
+	// (IAM enforcement, #1879); nil is none.
+	wrapExtra func(http.Handler) http.Handler
 	// apiGate refuses calls in a project where the API is disabled
 	// (#1914); nil refuses none.
 	apiGate apienable.Decider
@@ -323,6 +331,9 @@ func (s *loggingService) Start(ctx context.Context) error {
 	for _, i := range s.interpose {
 		s.server.Interpose(i)
 	}
+	for _, i := range s.streamInterpose {
+		s.server.InterposeStream(i)
+	}
 	// One port for gRPC and JSON, as logging.googleapis.com (#591): the same
 	// server, transcoded, for REST clients and gcloud.
 	register := func(g grpc.ServiceRegistrar) {
@@ -331,19 +342,34 @@ func (s *loggingService) Start(ctx context.Context) error {
 		s.admin.RegisterViewIAM(g) // log views' IAM (#1519)
 	}
 	var jsonAPI http.Handler = logging.NewRESTHandler(register)
+	if s.wrapJSON != nil {
+		jsonAPI = s.wrapJSON(jsonAPI)
+	}
 	// The Logging clock (#1404), a CloudBurrow extension on the API's port.
 	transcoded := jsonAPI
+	// Saved queries and log scopes (#1519), which no published
+	// google.logging.v2 proto carries, so the transcoder cannot.
+	var extra http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.admin.ServeExtra(w, r) {
+			return
+		}
+		// The Observability API's scopes (#2020), observability.googleapis.com
+		// v1, whose _Default scope's logScope is the project's default log
+		// scope: served on this port, as gcloud-setup and the provider map it.
+		if s.admin.ServeObservability(w, r) {
+			return
+		}
+		transcoded.ServeHTTP(w, r)
+	})
+	if s.wrapExtra != nil {
+		extra = s.wrapExtra(extra)
+	}
 	jsonAPI = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == logging.ClockPath {
 			s.api.ServeClock(w, r)
 			return
 		}
-		// Saved queries and log scopes (#1519), which no published
-		// google.logging.v2 proto carries, so the transcoder cannot.
-		if s.admin.ServeExtra(w, r) {
-			return
-		}
-		transcoded.ServeHTTP(w, r)
+		extra.ServeHTTP(w, r)
 	})
 	if s.requests != nil {
 		jsonAPI = rest.Observe(jsonAPI, s.requests)

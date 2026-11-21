@@ -96,7 +96,7 @@ func TestPubSubDetachedSubscriptionEditThroughTheBrowser(t *testing.T) {
 	p.navigate("/pubsub/subscriptions?project=" + project)
 	p.clickText("#view tbody a", sub)
 	p.waitFor(`document.querySelector("#view").textContent.includes("it receives no messages")`)
-	p.waitFor(pageButton("Edit subscription"))
+	p.waitFor(pageButton("Edit"))
 	var offers bool
 	p.eval(pageButton("Create snapshot")+` || `+pageButton("Detach"), &offers)
 	if offers {
@@ -104,21 +104,21 @@ func TestPubSubDetachedSubscriptionEditThroughTheBrowser(t *testing.T) {
 	}
 
 	// Edit subscription on the detached subscription (#1446).
-	p.clickText("#view .page-actions button", "Edit subscription")
-	p.waitFor(`document.querySelector(".modal.is-open #f-ackDeadline") !== null`)
+	p.clickText("#view .page-actions button", "Edit")
+	p.waitFor(`document.querySelector("form.edit-page #f-ackDeadline") !== null`)
 	var topicDisabled bool
-	p.eval(`document.querySelector(".modal.is-open #f-topic").disabled`, &topicDisabled)
+	p.eval(`document.querySelector("form.edit-page #f-topic").disabled`, &topicDisabled)
 	if !topicDisabled {
 		t.Error("Edit subscription on a detached subscription lets its topic be changed")
 	}
 	set := func(id, v string) {
-		p.eval(fmt.Sprintf(`(() => { const f = document.querySelector(".modal.is-open #%s");
+		p.eval(fmt.Sprintf(`(() => { const f = document.querySelector("form.edit-page #%s");
 			f.value = %q; f.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`, id, v), nil)
 	}
 	set("f-ackDeadline", "45")
 	set("f-labels", "team=blue")
-	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
-	p.waitFor(`document.querySelector(".modal") === null`)
+	p.run(chromedp.Click(chromedp.CSS(`form.edit-page button[type="submit"]`)))
+	p.waitFor(`document.querySelector("form.edit-page") === null && document.querySelector("#view .page-actions") !== null`)
 	if sent := p.sent(http.MethodPatch, "/api/resources/pubsub-subscriptions"); len(sent) != 1 {
 		t.Errorf("the edit sent %d PATCHes, want 1: %v", len(sent), sent)
 	}

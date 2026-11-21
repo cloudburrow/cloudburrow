@@ -560,7 +560,18 @@ func checkView(v *loggingpb.LogView) error {
 	if len(v.GetFilter()) > maxFilterLen {
 		return apierror.InvalidArgument("filter is longer than %d characters", maxFilterLen)
 	}
-	return nil
+	return checkViewFilter(v.GetFilter())
+}
+
+// checkViewFilter refuses, as INVALID_ARGUMENT, a view filter outside what
+// log views take (#2028; logfilter's CheckView). compileWith's ancestors
+// only matter when the filter runs, so a stub stands in for the hierarchy.
+func checkViewFilter(filter string) error {
+	if strings.TrimSpace(filter) == "" {
+		return nil
+	}
+	_, err := compileWith(filter, func(parent) []parent { return nil })
+	return err
 }
 
 func (s configServer) ListViews(_ context.Context, req *loggingpb.ListViewsRequest) (*loggingpb.ListViewsResponse, error) {

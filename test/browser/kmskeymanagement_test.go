@@ -11,17 +11,16 @@ import (
 	kms "cloud.google.com/go/kms/apiv1"
 	"cloud.google.com/go/kms/apiv1/kmspb"
 	"github.com/chromedp/chromedp"
-	"github.com/chromedp/chromedp/kb"
 )
 
 // TestKMSKeyManagementIsGooglesFlow (#1851), in the run shard: Key
 // Management's menu is Google's (Key management, Autokey, EKM connections,
-// KMS config, Key inventory, then Single-tenant HSM), KMS config says it is
-// not available locally, Create key ring is a page that goes on to the
-// ring's Create key, whose form starts at Google's defaults; the key's page
-// has Overview, Permissions and Logs; Rotate makes version 2 primary; the
-// checked versions are disabled from the Overview's Disable; and Key
-// inventory lists the key.
+// KMS Controls, Key inventory, then Single-tenant HSM), KMS Controls lists
+// the project's Key Access Justifications configuration, Create key ring is a page that goes on to the
+// ring's Create key page, whose form starts at Google's defaults; the key's
+// page has Overview, Versions, Usage tracking, Permissions and Logs; Rotate, confirmed with
+// its button alone, makes version 2 primary; the checked versions are
+// disabled from the Versions tab's Disable; and Key inventory lists the key.
 func TestKMSKeyManagementIsGooglesFlow(t *testing.T) {
 	needService(t, "kms")
 	opts := kmsSDKOptions(t)
@@ -38,12 +37,12 @@ func TestKMSKeyManagementIsGooglesFlow(t *testing.T) {
 	p.waitFor(`document.querySelector("#product-nav a[aria-current=page]") !== null`)
 	var menu []string
 	p.eval(`[...document.querySelectorAll("#product-nav li a")].map((a) => a.textContent)`, &menu)
-	if got := strings.Join(menu, ","); !strings.HasPrefix(got, "Key management,Autokey,EKM connections,KMS config,Key inventory") {
+	if got := strings.Join(menu, ","); !strings.HasPrefix(got, "Key management,Autokey,EKM connections,KMS Controls,Key inventory") {
 		t.Errorf("Key Management's menu is %v", menu)
 	}
 
 	p.navigate("/kms/config?project=" + project)
-	p.waitFor(`document.querySelector("#view").textContent.includes("Not available locally") || document.querySelector("#view").textContent.includes("not available")`)
+	p.waitFor(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes("projects/` + project + `/kajPolicyConfig"))`)
 
 	// Create key ring, then Create key on the new ring.
 	p.navigate("/kms/keyrings?project=" + project)
@@ -58,22 +57,22 @@ func TestKMSKeyManagementIsGooglesFlow(t *testing.T) {
 	setField(p, "#view", "f-keyRingId", "browser-km")
 	setField(p, "#view", "f-location", "global")
 	p.run(chromedp.Click(chromedp.CSS(`#view button[type="submit"]`)))
-	p.waitFor(`document.querySelector(".modal.is-open #f-cryptoKeyId") !== null`)
+	p.waitFor(`document.querySelector("#view form.create-page #f-cryptoKeyId") !== null && location.search.includes("action=createkey")`)
 	var defaults struct{ Rotation, Material, Destroy, Level string }
-	p.eval(`(() => { const q = (s) => document.querySelector(".modal.is-open " + s).value;
+	p.eval(`(() => { const q = (s) => document.querySelector("#view form.create-page " + s).value;
 		return { Rotation: q("#f-rotationPeriod"), Material: q("#f-keyMaterial"), Destroy: q("#f-destroyScheduledDays"),
 		         Level: q("#f-protectionLevel") }; })()`, &defaults)
 	if defaults.Rotation != "90d" || defaults.Material != "generated" || defaults.Destroy != "30" || defaults.Level != "SOFTWARE" {
 		t.Errorf("Create key starts at %+v; want 90 days, Generated key, 30 days, Software", defaults)
 	}
 	var purposeWords string
-	p.eval(`document.querySelector('.modal.is-open #f-purpose option[value="ENCRYPT_DECRYPT"]').textContent`, &purposeWords)
+	p.eval(`document.querySelector('#view form.create-page #f-purpose option[value="ENCRYPT_DECRYPT"]').textContent`, &purposeWords)
 	if purposeWords != "Symmetric encrypt/decrypt" {
 		t.Errorf("Purpose shows ENCRYPT_DECRYPT as %q", purposeWords)
 	}
-	setField(p, ".modal.is-open", "f-cryptoKeyId", "k")
-	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
-	p.waitFor(`document.querySelector(".modal") === null`)
+	setField(p, "#view form.create-page", "f-cryptoKeyId", "k")
+	p.run(chromedp.Click(chromedp.CSS(`#view form.create-page button[type="submit"]`)))
+	p.waitFor(`!location.search.includes("action=") && [...document.querySelectorAll("#view tbody a")].some((a) => a.textContent === "k")`)
 	ring := "projects/" + project + "/locations/global/keyRings/browser-km"
 	key := ring + "/cryptoKeys/k"
 	k, err := c.GetCryptoKey(ctx, &kmspb.GetCryptoKeyRequest{Name: key})
@@ -81,31 +80,26 @@ func TestKMSKeyManagementIsGooglesFlow(t *testing.T) {
 		t.Fatalf("the key made on the page reads back as %v, %v; want a primary version and 90-day rotation", k, err)
 	}
 
-	// The key's page: Overview, Permissions, Logs; Rotate.
+	// The key's page: Overview, Versions, Permissions, Logs; Rotate.
 	p.clickText("#view tbody a", "k")
 	p.waitFor(`document.querySelector("#view .tab-strip .tab") !== null`)
 	var tabs []string
 	p.eval(`[...document.querySelectorAll("#view .tab-strip .tab")].map((b) => b.textContent)`, &tabs)
-	if strings.Join(tabs, ",") != "Overview,Permissions,Logs" {
+	if strings.Join(tabs, ",") != "Overview,Versions,Usage tracking,Permissions,Logs" {
 		t.Errorf("the key's tabs are %v", tabs)
 	}
-	confirm := func(word string) {
-		t.Helper()
-		p.waitFor(`document.activeElement === document.querySelector(".modal #confirm-input")`)
-		p.run(chromedp.SendKeys(chromedp.CSS(`.modal #confirm-input`), word), chromedp.KeyEvent(kb.Enter))
-		p.waitFor(`document.querySelector(".modal") === null`)
-	}
+	p.clickText("#view .tab-strip .tab", "Versions")
 	p.clickText("#view .page-actions button", "Rotate")
-	confirm("k")
+	kmsConfirmWithButton(t, p, "Rotate")
 	p.waitFor(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes("Primary") && r.querySelector("a") && r.querySelector("a").textContent === "2")`)
 	if k, _ := c.GetCryptoKey(ctx, &kmspb.GetCryptoKeyRequest{Name: key}); !strings.HasSuffix(k.GetPrimary().GetName(), "/2") {
 		t.Errorf("after Rotate the primary is %s", k.GetPrimary().GetName())
 	}
 
-	// Check version 1, then the Overview's Disable.
+	// Check version 1, then the Versions tab's Disable.
 	p.run(chromedp.Click(chromedp.CSS(`#view tbody input[aria-label="Select 1"]`)))
 	p.eval(`[...document.querySelectorAll("#view button")].find((b) => b.textContent === "Disable" && !b.closest(".page-actions") && !b.disabled).click()`, nil)
-	confirm("k")
+	kmsConfirmWithButton(t, p, "Disable")
 	p.waitFor(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes("DISABLED"))`)
 	if v, err := c.GetCryptoKeyVersion(ctx, &kmspb.GetCryptoKeyVersionRequest{Name: key + "/cryptoKeyVersions/1"}); err != nil ||
 		v.GetState() != kmspb.CryptoKeyVersion_DISABLED {

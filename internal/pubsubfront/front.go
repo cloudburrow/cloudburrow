@@ -234,6 +234,10 @@ type Front struct {
 	// which the emulator refuses to store (#2000, storagepolicy.go), by
 	// topic name.
 	storagePolicies map[string]*pubsubpb.MessageStoragePolicy
+	// exports are the export configurations UpdateSubscription set, which
+	// the emulator refuses to store (#2051, exportswitch.go), by
+	// subscription name: only BigqueryConfig and CloudStorageConfig are set.
+	exports map[string]*pubsubpb.Subscription
 	// iam are the IAM policies set on topics, subscriptions, snapshots and
 	// schemas (iam.go, #1367), by resource name: stored, never enforced.
 	iam map[string]iampolicy.Stored
@@ -321,7 +325,7 @@ func New(upstream string, logf func(format string, args ...any)) (*Front, error)
 		iam: map[string]iampolicy.Stored{}, detached: map[string]*pubsubpb.Subscription{},
 		snapshots: map[string]keptSnapshot{}, protoSchemas: map[string]*protoSchema{},
 		topicSchemas: map[string]*pubsubpb.SchemaSettings{}, defs: newDefinitions(),
-		storagePolicies: map[string]*pubsubpb.MessageStoragePolicy{}}, nil
+		storagePolicies: map[string]*pubsubpb.MessageStoragePolicy{}, exports: map[string]*pubsubpb.Subscription{}}, nil
 }
 
 // Close releases the connection to the emulator.
@@ -521,7 +525,9 @@ func (f *Front) forget(name string) {
 	_, keptSnapshot := f.snapshots[name]
 	_, keptTopicSchema := f.topicSchemas[name]
 	_, keptStorage := f.storagePolicies[name]
-	kept = f.dropIAMLocked(name) || kept || keptLabels || keptSnapshot || keptTopicSchema || keptStorage
+	_, keptExport := f.exports[name]
+	kept = f.dropIAMLocked(name) || kept || keptLabels || keptSnapshot || keptTopicSchema || keptStorage || keptExport
+	delete(f.exports, name)
 	delete(f.topicSchemas, name)
 	delete(f.storagePolicies, name)
 	delete(f.subs, name)
@@ -552,7 +558,9 @@ func (f *Front) dropKept(name string) {
 	_, kept := f.policies[name]
 	_, keptLabels := f.labels[name]
 	_, keptStorage := f.storagePolicies[name]
-	kept = f.dropIAMLocked(name) || kept || keptLabels || keptStorage
+	_, keptExport := f.exports[name]
+	kept = f.dropIAMLocked(name) || kept || keptLabels || keptStorage || keptExport
+	delete(f.exports, name)
 	delete(f.policies, name)
 	delete(f.labels, name)
 	delete(f.storagePolicies, name)
@@ -905,6 +913,9 @@ func (f *Front) handleUpdate(ctx context.Context, ss grpc.ServerStream, method s
 	if call.storagePolicy != nil {
 		f.setStoragePolicy(call.resource, call.storagePolicy)
 	}
+	if call.export != nil {
+		f.setExport(call.resource, call.export)
+	}
 	if call.schemaUpdate != nil {
 		call.schemaUpdate.apply(f)
 	}
@@ -980,6 +991,9 @@ type observed struct {
 	// storagePolicy is the message storage policy an UpdateTopic sets
 	// (never nil when it names one, #2000), kept once the rest succeeds.
 	storagePolicy *pubsubpb.MessageStoragePolicy
+	// export is the export configuration an UpdateSubscription sets
+	// (#2051, exportswitch.go), kept once the rest succeeds.
+	export *pubsubpb.Subscription
 	// topicSchema is the binding to a front-kept schema a CreateTopic
 	// names, kept once the emulator creates the topic.
 	topicSchema *pubsubpb.SchemaSettings
@@ -1179,7 +1193,7 @@ func (o *observed) request(fr frame) (frame, error) {
 		o.sub = r.GetSubscription().GetName()
 		o.resource = o.sub
 		o.f.touch(o.sub)
-		if err := o.f.checkUpdate(context.Background(), &r); err != nil {
+		if err := o.f.checkUpdate(o.context(), &r); err != nil {
 			return nil, err
 		}
 		changed := false
@@ -1193,6 +1207,12 @@ func (o *observed) request(fr frame) (frame, error) {
 		if masks(r.GetUpdateMask().GetPaths(), "labels") {
 			o.labels = updatedLabels(r.GetSubscription().GetLabels())
 			r.UpdateMask.Paths = without(r.GetUpdateMask().GetPaths(), "labels")
+			changed = true
+		}
+		// The export configs too (#2051, exportswitch.go).
+		if k, masked := o.f.exportUpdate(o.context(), &r); masked {
+			o.export = k
+			r.UpdateMask.Paths = withoutExports(r.GetUpdateMask().GetPaths())
 			changed = true
 		}
 		o.local = changed && len(r.GetUpdateMask().GetPaths()) == 0
@@ -1317,7 +1337,13 @@ func checkExactlyOnce(s *pubsubpb.Subscription) error {
 func (f *Front) subscription(ctx context.Context, name string) (*pubsubpb.Subscription, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	return f.admin.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: name})
+	s, err := f.admin.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: name})
+	if err != nil {
+		return nil, err
+	}
+	// The export configuration the front keeps for it (#2051).
+	f.withExport(s)
+	return s, nil
 }
 
 // checkUpdate refuses an update whose result Google refuses: labels that
@@ -1422,6 +1448,9 @@ func (o *observed) response(fr frame) frame {
 			return fr
 		}
 		changed := o.f.fromRelay(&s)
+		if m != "CreateSubscription" {
+			changed = o.f.withExport(&s) || changed
+		}
 		changed = o.f.withExportState(&s) || changed
 		if m == "CreateSubscription" {
 			// A new subscription: its policy and labels are the ones it was
@@ -1447,6 +1476,7 @@ func (o *observed) response(fr frame) frame {
 		changed := o.f.withDetached(o.project, &l)
 		for _, s := range l.GetSubscriptions() {
 			changed = o.f.fromRelay(s) || changed
+			changed = o.f.withExport(s) || changed
 			changed = o.f.withExportState(s) || changed
 			changed = o.f.withPolicy(s) || changed
 			changed = o.f.withLabels(s.GetName(), &s.Labels) || changed

@@ -90,6 +90,8 @@ func (p pubsubSnapshotsProvider) List(ctx context.Context, project string) (cons
 		Columns:    []string{"Snapshot ID", "Topic name", "Expiration"},
 		NameColumn: "Snapshot name",
 		Noun:       "snapshots",
+		// The info panel's Labels tab (#1847).
+		InfoOnSelect: true,
 	}
 	if project == "" {
 		out.Prompt = "Pub/Sub lists snapshots per project. Choose one in the toolbar."
@@ -114,7 +116,7 @@ func (p pubsubSnapshotsProvider) List(ctx context.Context, project string) (cons
 			"Snapshot ID": lastSegment(s.GetName()),
 			"Topic name":  s.GetTopic(),
 			"Expiration":  snapshotExpiry(s),
-		}})
+		}, Info: pubsubInfoTabs(s.GetLabels(), "snapshot", false)})
 	}
 	out.Total = len(out.Items)
 	if out.Total == 0 {
@@ -278,7 +280,7 @@ func (p pubsubSubscriptionsProvider) DetailActions(ctx context.Context, project 
 		return nil
 	}
 	if s.GetTopic() == deletedTopic || s.GetDetached() {
-		return []console.Action{advanceClockAction()}
+		return []console.Action{advanceClockAction(), pubsubLabelsAction(nil)}
 	}
 
 	actions := []console.Action{{ID: actCreateSnapshot, Label: "Create snapshot", Fields: []console.Field{{
@@ -332,7 +334,8 @@ func (p pubsubSubscriptionsProvider) DetailActions(ctx context.Context, project 
 				retained,
 		}},
 	})
-	return append(actions, advanceClockAction())
+	// The Subscriptions list's info panel Labels tab (#1847).
+	return append(actions, advanceClockAction(), pubsubLabelsAction(nil))
 }
 
 // ActAt implements console.PathActor.
@@ -343,6 +346,9 @@ func (p pubsubSubscriptionsProvider) ActAt(ctx context.Context, project string, 
 	sub := path[0]
 	if !strings.HasPrefix(sub, "projects/"+project+"/subscriptions/") {
 		return fmt.Errorf("%s is not a subscription of project %s", sub, project)
+	}
+	if action == actEditLabels {
+		return p.subscriptionSetLabels(ctx, project, sub, values)
 	}
 	c, err := p.topics().client(ctx, project)
 	if err != nil {

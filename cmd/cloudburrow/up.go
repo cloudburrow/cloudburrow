@@ -11,13 +11,17 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/iamcheck"
+	"github.com/cloudburrow/cloudburrow/internal/iameval"
 	"github.com/cloudburrow/cloudburrow/internal/metrics"
 	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 	"github.com/cloudburrow/cloudburrow/internal/resource"
 	"github.com/cloudburrow/cloudburrow/internal/service/apikeys"
 	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
 	"github.com/cloudburrow/cloudburrow/internal/service/cloudquotas"
+	"github.com/cloudburrow/cloudburrow/internal/service/firebaserules"
+	"github.com/cloudburrow/cloudburrow/internal/service/logging"
 	"github.com/cloudburrow/cloudburrow/internal/service/monitoring"
+	"github.com/cloudburrow/cloudburrow/internal/service/parametermanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
 	"github.com/cloudburrow/cloudburrow/internal/service/siteverification"
@@ -162,6 +166,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// Secure Source Manager names a review's or a pull request's author
 	// from the request's bearer token (#1927).
 	runadapter.SetSourceManagerCaller(func(bearer string) (string, bool) { return creds.TokenAccount(bearer, time.Now()) }, creds.Email)
+	// Cloud Logging's recent queries are the requesting user's (#2031).
+	logging.SetCallerResolver(func(bearer string) (string, bool) { return creds.TokenAccount(bearer, time.Now()) }, creds.Email)
 
 	coord := lifecycle.New(time.Duration(cfg.ShutdownTimeout))
 	control := lifecycle.NewControlServer(cfg.Endpoints.Control, coord)
@@ -181,7 +187,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	comps.SetEarlierStorage(&earlierStorage{kubeconfig: cfg.KubeconfigPath(), namespace: cfg.Cluster.Namespace,
 		instance: cfg.InstanceDir(), project: cfg.DefaultProject(), out: stdout})
 	if serviceEnabled(cfg, config.ServiceBigQuery) || serviceEnabled(cfg, config.ServiceStorage) ||
-		(cfg.IAMEnforced() && serviceEnabled(cfg, config.ServicePubSub)) {
+		(cfg.IAMEnforced() && (serviceEnabled(cfg, config.ServicePubSub) || serviceEnabled(cfg, config.ServiceRun))) {
 		// BigQuery's front reads a project's folders and organization
 		// from Resource Manager, through cloudburrow-host (#1392,
 		// INFORMATION_SCHEMA.JOBS_BY_FOLDER and JOBS_BY_ORGANIZATION),
@@ -190,7 +196,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		comps.SetResourceManager(fmt.Sprintf("%s.%s.svc.cluster.local:%d", ClusterHostService, cfg.Cluster.Namespace,
 			cfg.Endpoints.ResourceManager))
 		// With --iam-enforcement=on the storage server (and Pub/Sub's
-		// front) ask the host's evaluator there (#1879).
+		// front) ask the host's evaluator there (#1879), as Kourier does
+		// for run.routes.invoke, with or without storage and Pub/Sub.
 		comps.SetIAMCheck(cfg.IAMEnforced())
 	}
 	if serviceEnabled(cfg, config.ServicePubSub) && serviceEnabled(cfg, config.ServiceKMS) && cfg.Endpoints.KMS > 0 {
@@ -322,6 +329,13 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	secretsSvc.register(coord)
 	kmsSvc := newKMSService(cfg)
 	kmsSvc.register(coord)
+	if kmsSvc != nil {
+		// The Inventory API reads key usage from the products (#2053).
+		kmsSvc.inventorySources = &kmsInventoryWiring{cfg: cfg, secrets: secretsSvc,
+			storage:  func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") },
+			bigquery: func() *netfwd.Forwarder { return forwarderFor(forwarders, "bigquery") },
+			pubsub:   func() *netfwd.Forwarder { return forwarderFor(forwarders, "pubsub") }}
+	}
 	if secretsSvc != nil && kmsSvc != nil {
 		// A secret's customer-managed keys (#1453) are this instance's Cloud KMS.
 		secretsSvc.kms = kmsSvc.API
@@ -375,6 +389,22 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 	}
 	workflowsSvc.register(coord)
+	// Parameter Manager (#2054), in process; its versions' secret
+	// references are read through Secret Manager.
+	parameterManagerSvc := newParameterManagerService(cfg)
+	if parameterManagerSvc != nil {
+		parameterManagerSvc.secrets = secretsSvc
+	}
+	// The request quotas (#2063): Google's documented per-minute limits,
+	// those the configuration sets, and the admin API's overrides.
+	requestQuotas, err := newRequestQuotas(cfg)
+	if err != nil {
+		return err
+	}
+	if parameterManagerSvc != nil {
+		parameterManagerSvc.quotas = requestQuotas
+	}
+	parameterManagerSvc.register(coord)
 	// The Kubernetes Engine API (#1913), in process; its clusters are
 	// kind clusters of their own.
 	gkeSvc := newGKEService(cfg)
@@ -438,6 +468,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if serviceEnabled(cfg, config.ServicePubSub) {
 			monitoringSvc.pubsub = func() *netfwd.Forwarder { return forwarderFor(forwarders, "pubsub") }
 		}
+		// Firestore's document metrics, from its front's counts (#2048).
+		if serviceEnabled(cfg, config.ServiceFirestore) {
+			monitoringSvc.firestore = func() string { return forwardedAddr(forwarders, "firestore") }
+		}
 	}
 	monitoringSvc.register(coord)
 	if loggingSvc != nil {
@@ -490,6 +524,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if secretsSvc != nil {
 		// Secret.tags are Resource Manager's tag bindings (#1961).
 		secretsSvc.registry = func() *resourcemanager.Registry { return projectRegistry }
+		if parameterManagerSvc != nil {
+			parameterManagerSvc.registry = func() *resourcemanager.Registry { return projectRegistry }
+		}
 	}
 	if serviceEnabled(cfg, config.ServiceFirestore) {
 		// Firestore with MongoDB compatibility's token sign-in (#1738)
@@ -519,6 +556,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	var authPlatformRef *authplatform.Store
 	// And the Cloud Storage companion APIs (#1957).
 	var storageJobsRef *storageJobs
+	// And the Firebase Rules API (#2048).
+	var firebaseRulesRef *firebaserules.Server
 	// And the Cloud SQL Admin API and Backup and DR (#1541, #1542).
 	var sqlAdminRef *sqladmin.Server
 	var backupDRRef *backupdr.Server
@@ -536,29 +575,31 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	adminAPI := mountAdmin(control, recorder, cfg, adminDeps{
 		tasks: tasksSvc, secrets: secretsSvc, forwarders: forwarders,
-		kms:          kmsSvc,
-		mysql:        mysqlCreds,
-		scheduler:    schedulerSvc,
-		privateCA:    privateCASvc,
-		analyticsHub: analyticsHub,
-		workflows:    workflowsSvc,
-		gke:          gkeSvc,
-		monitoring:   monitoringSvc,
-		compute:      computeSvc,
-		dataTransfer: dataTransfer,
-		logging:      loggingSvc,
-		run:          runSvc,
-		memorystore:  memorystoreAdminSvc,
-		projects:     func() []string { return registered() },
-		registry:     func() *resourcemanager.Registry { return projectRegistry },
-		serviceUsage: func() *serviceusage.Server { return serviceUsageRef },
-		apiKeys:      func() *apikeys.Server { return apiKeysRef },
-		cloudQuotas:  func() *cloudquotas.Server { return cloudQuotasRef },
-		siteVerify:   func() *siteverification.Server { return siteVerificationRef },
-		authPlatform: func() *authplatform.Store { return authPlatformRef },
-		storageJobs:  func() *storageJobs { return storageJobsRef },
-		sqlAdmin:     func() *sqladmin.Server { return sqlAdminRef },
-		backupDR:     func() *backupdr.Server { return backupDRRef },
+		kms:              kmsSvc,
+		mysql:            mysqlCreds,
+		scheduler:        schedulerSvc,
+		privateCA:        privateCASvc,
+		analyticsHub:     analyticsHub,
+		workflows:        workflowsSvc,
+		parameterManager: parameterManagerSvc,
+		gke:              gkeSvc,
+		monitoring:       monitoringSvc,
+		compute:          computeSvc,
+		dataTransfer:     dataTransfer,
+		logging:          loggingSvc,
+		run:              runSvc,
+		memorystore:      memorystoreAdminSvc,
+		projects:         func() []string { return registered() },
+		registry:         func() *resourcemanager.Registry { return projectRegistry },
+		serviceUsage:     func() *serviceusage.Server { return serviceUsageRef },
+		apiKeys:          func() *apikeys.Server { return apiKeysRef },
+		cloudQuotas:      func() *cloudquotas.Server { return cloudQuotasRef },
+		siteVerify:       func() *siteverification.Server { return siteVerificationRef },
+		authPlatform:     func() *authplatform.Store { return authPlatformRef },
+		storageJobs:      func() *storageJobs { return storageJobsRef },
+		firebaseRules:    func() *firebaserules.Server { return firebaseRulesRef },
+		sqlAdmin:         func() *sqladmin.Server { return sqlAdminRef },
+		backupDR:         func() *backupdr.Server { return backupDRRef },
 		projectStore: func() store.Store {
 			if projectRegistry == nil {
 				return nil
@@ -590,6 +631,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// (#600), so the fault-injectable set is exactly the wiring. The builtin
 	// Cloud Storage server runs in the cluster, where a rule cannot reach it,
 	// so storage is not interposed and its rules stay refused.
+	adminAPI.SetQuotas(requestQuotas)
 	faults := adminAPI.Faults()
 	// One logger for the process, at --log-level (#314): the request log of
 	// every service CloudBurrow serves, and anything else that uses slog.
@@ -635,6 +677,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		workflowsSvc.calls = callEvents(recorder, requestMetrics, "workflows")
 		workflowsSvc.interpose = append(workflowsSvc.interpose, grpctransport.LogInterceptor(logger, "workflows"), faults.Interceptor("workflows"))
 		workflowsSvc.requests = requestEvents(recorder, requestMetrics, "workflows")
+	}
+	if parameterManagerSvc != nil {
+		parameterManagerSvc.tracing = tracing
+		parameterManagerSvc.calls = callEvents(recorder, requestMetrics, "parametermanager")
+		parameterManagerSvc.interpose = append(parameterManagerSvc.interpose, grpctransport.LogInterceptor(logger, "parametermanager"), faults.Interceptor("parametermanager"))
+		parameterManagerSvc.requests = requestEvents(recorder, requestMetrics, "parametermanager")
 	}
 	if dataTransfer != nil {
 		dataTransfer.tracing = tracing
@@ -737,7 +785,21 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// injection see a denied call as the client does. Off by default: the
 	// interceptors pass every call through until --iam-enforcement=on.
 	iamEnforcer := newIAMEnforcer(cfg, creds, func() *resourcemanager.Registry { return projectRegistry })
-	useIAMEnforcement(iamEnforcer, secretsSvc, kmsSvc, tasksSvc, analyticsHub, schedulerSvc, workflowsSvc)
+	useIAMEnforcement(iamEnforcer, secretsSvc, kmsSvc, tasksSvc, analyticsHub, schedulerSvc, workflowsSvc,
+		iamEnforced{logging: loggingSvc, monitoring: monitoringSvc, memorystore: memorystoreAdminSvc, run: runSvc})
+	iamEnforced7{privateCA: privateCASvc, gke: gkeSvc, compute: computeSvc, run: runSvc}.use(iamEnforcer)
+	iamEnforced8{compute: computeSvc}.use(iamEnforcer)
+	iamEnforced13{memorystore: memorystoreAdminSvc, gke: gkeSvc}.use(iamEnforcer)
+	useIAMEnforcement12Source(iamEnforcer, runSvc)
+	useIAMEnforcement12DataTransfer(iamEnforcer, dataTransfer)
+	// Parameter Manager (#2054): its callers' permissions, its parameters'
+	// principals' access to the secrets they reference, and its keys.
+	if parameterManagerSvc != nil {
+		parameterManagerSvc.enforcer = iamEnforcer
+		parameterManagerSvc.keys = cmekKeys(kmsSvc, iamEnforcer)
+		parameterManagerSvc.interpose = append(parameterManagerSvc.interpose, iamEnforcer.Interceptor(iameval.ParameterManager))
+		parameterManagerSvc.wrapJSON = jsonEnforcer(iamEnforcer, iameval.ParameterManager, parametermanager.Mixins())
+	}
 	// Log buckets' customer-managed keys (#1950).
 	if loggingSvc != nil {
 		keys := cmekKeys(kmsSvc, iamEnforcer)
@@ -908,6 +970,17 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// authorization code flow the metadata server's token endpoint serves.
 	authPlatformRef = authplatform.NewStore(projects.Backing(), resource.ProjectNumber)
 	metaSrv.WithOAuth(&authplatform.Endpoints{Store: authPlatformRef, User: creds.Email})
+	// IAM enforcement (#1879) of Resource Manager, IAM, deny and
+	// organization policies, on this port.
+	useIAMEnforcement11(iamEnforcer, rmSrv, func() *resourcemanager.Registry { return projects })
+	useIAMEnforcement12Tags(iamEnforcer, func() string {
+		if f := forwarderFor(forwarders, "storage"); f != nil {
+			return f.HostAddr()
+		}
+		return ""
+	}, func() *resourcemanager.Registry { return projects })
+	useIAMEnforcement12Identity(iamEnforcer, rmSrv, func() *resourcemanager.Registry { return projects })
+	useIAMEnforcementWorkforce(iamEnforcer, rmSrv)
 	coord.Register(rmSrv)
 	// A build's serviceAccount names an IAM account of this registry (#1854).
 	runadapter.UseServiceAccounts(func(name string) (string, bool, bool) {
@@ -934,6 +1007,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	// The API Keys API (#1915), each project's keys, in the same store.
 	apiKeysSrv := newAPIKeysServer(cfg, projects, projects.Backing())
+	// IAM enforcement (#1879) of Service Usage and API Keys.
+	iamEnforced7{serviceUsage: serviceUsageSrv, apiKeys: apiKeysSrv}.use(iamEnforcer)
+	iamEnforced8{serviceUsage: serviceUsageSrv, apiKeys: apiKeysSrv}.use(iamEnforcer)
 	if apiKeysSrv != nil {
 		apiKeysRef = apiKeysSrv
 		coord.Register(apiKeysSrv)
@@ -951,6 +1027,14 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		for _, s := range storageJobsSrv.servers() {
 			coord.Register(s)
 		}
+	}
+
+	// The Firebase Rules API (#2048), over the Firestore emulator's own
+	// rules evaluation.
+	firebaseRulesSrv := newFirebaseRulesServer(cfg, func() *netfwd.Forwarder { return forwarderFor(forwarders, "firestore") })
+	if firebaseRulesSrv != nil {
+		firebaseRulesRef = firebaseRulesSrv
+		coord.Register(firebaseRulesSrv)
 	}
 
 	// The Cloud SQL Admin API (#1301), over whichever database servers run.
@@ -975,6 +1059,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// minted, and the principal's cloudsql.instances.login.
 		if creds != nil {
 			sqlAdminSrv.UseIAM(sqlAdminIAM(creds, iamEnforcer))
+			// The Admin API's own methods (#1879).
+			sqlAdminSrv.Enforce = cloudSQLEnforcer(iamEnforcer)
 		}
 		// CUSTOMER_MANAGED_CAS_CA (#1834) has this instance's Certificate
 		// Authority Service issue the server certificates, in process.
@@ -1007,6 +1093,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// API is enabled in every project until someone disables it.
 	useAPIEnablement(serviceUsageSrv, rmSrv, apiGated{tasks: tasksSvc, run: runSvc, scheduler: schedulerSvc,
 		memorystore: memorystoreAdminSvc, logging: loggingSvc, kms: kmsSvc, secrets: secretsSvc, sqlAdmin: sqlAdminSrv, backupDR: backupDRSrv})
+	// IAM enforcement (#1879) of Backup and DR and the Cloud Storage
+	// companion APIs, inside the enablement gate.
+	useIAMEnforcementBackup(iamEnforcer, backupDRSrv, storageJobsSrv)
 	// API keys are checked where Google checks them (#1915).
 	defer useAPIKeys(apiKeysSrv, rmSrv)()
 
@@ -1044,6 +1133,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		localAISrv.SetSpeechState(filepath.Join(cfg.StateDir, "speech", "recognizers.json"))
 		// Their customer-managed keys (#1950), through Cloud KMS.
 		localAISrv.UseCMEK(cmekKeys(kmsSvc, iamEnforcer))
+		// IAM enforcement (#1879) of Vertex AI, Document AI, Speech-to-Text
+		// and Translation.
+		iamEnforced8{localAI: localAISrv}.use(iamEnforcer)
 	}
 	// The Model Registry and Endpoints (#1940): deployed models run as
 	// Cloud Run services; artifacts are copied in this Cloud Storage.
@@ -1084,27 +1176,29 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		projects: projects,
 		tasks:    tasksSvc, secrets: secretsSvc, forwarders: forwarders,
 		kms: kmsSvc, scheduler: schedulerSvc, run: runSvc, logging: loggingSvc,
-		memorystore:    memorystoreAdminSvc,
-		faults:         faults,
-		metaAddr:       metaSrv.Addr,
-		ingress:        ingressAddr,
-		mysql:          mysqlCreds,
-		serviceUsage:   serviceUsageSrv,
-		apiKeys:        apiKeysSrv,
-		cloudQuotas:    cloudQuotasRef,
-		siteVerify:     siteVerificationRef,
-		authPlatform:   authPlatformRef,
-		requestMetrics: requestMetrics,
-		requestHistory: requestHistory,
-		backupdr:       backupDRSrv,
-		sqlAdmin:       sqlAdminSrv,
-		privateCA:      privateCASvc,
-		analyticsHub:   analyticsHub,
-		workflows:      workflowsSvc,
-		gke:            gkeSvc,
-		monitoring:     monitoringSvc,
-		compute:        computeSvc,
-		dataTransfer:   dataTransfer,
+		memorystore:      memorystoreAdminSvc,
+		faults:           faults,
+		metaAddr:         metaSrv.Addr,
+		ingress:          ingressAddr,
+		mysql:            mysqlCreds,
+		serviceUsage:     serviceUsageSrv,
+		apiKeys:          apiKeysSrv,
+		cloudQuotas:      cloudQuotasRef,
+		siteVerify:       siteVerificationRef,
+		authPlatform:     authPlatformRef,
+		requestMetrics:   requestMetrics,
+		requestQuotas:    requestQuotas,
+		requestHistory:   requestHistory,
+		backupdr:         backupDRSrv,
+		sqlAdmin:         sqlAdminSrv,
+		privateCA:        privateCASvc,
+		analyticsHub:     analyticsHub,
+		workflows:        workflowsSvc,
+		parameterManager: parameterManagerSvc,
+		gke:              gkeSvc,
+		monitoring:       monitoringSvc,
+		compute:          computeSvc,
+		dataTransfer:     dataTransfer,
 	})
 	if consoleSrv != nil {
 		// The Request Log reads the same recorder /admin/events does.
@@ -1145,6 +1239,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// And its Log name picker lists ListLogs (#1554).
 		if l := loggingSvc.logNameLister(faults); l != nil {
 			consoleSrv.SetLogNameLister(l)
+		}
+		// And the Query library's Recent queries are the user's, through
+		// recentQueries.list (#2031).
+		if q := loggingSvc.recentQueries(); q != nil {
+			consoleSrv.SetRecentQueries(q)
 		}
 	}
 
@@ -1190,6 +1289,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if a := workflowsSvc.Addr(); a != "" {
 			live["workflows"] = a
 		}
+		if a := parameterManagerSvc.Addr(); a != "" {
+			live["parametermanager"] = a
+		}
 		if a := gkeSvc.Addr(); a != "" {
 			live["gke"] = a
 		}
@@ -1209,6 +1311,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			live["monitoring"] = a
 		}
 		storageJobsSrv.live(live)
+		if a := firebaseRulesSrv.Addr(); a != "" {
+			live["firebaserules"] = a
+		}
 		if backupDRSrv != nil && backupDRSrv.Addr() != "" {
 			live["backupdr"] = backupDRSrv.Addr()
 		}
@@ -1260,7 +1365,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		published := map[string]bool{"run": true, "tasks": true, "secretmanager": true, "kms": true,
 			"scheduler": true, "logging": true, "resourcemanager": true, "serviceusage": true, "apikeys": true, "metadata": true,
 			"storagebatchoperations": true, "storageinsights": true, "storagetransfer": true,
-			"sqladmin": true, "cloudsql-connector": true, "onnx": true, "tfconvert": true, "localai": true, "workflows": true}
+			"sqladmin": true, "cloudsql-connector": true, "onnx": true, "tfconvert": true, "localai": true, "workflows": true, "parametermanager": true}
 		if !runEnabled {
 			published = map[string]bool{"resourcemanager": true, "onnx": true, "tfconvert": true, "localai": true}
 			// The storage server reads IAM service accounts' certificates

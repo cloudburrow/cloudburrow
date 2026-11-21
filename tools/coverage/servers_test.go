@@ -17,6 +17,7 @@ import (
 	iamadminpb "cloud.google.com/go/iam/admin/apiv1/adminpb"
 	iamv2pb "cloud.google.com/go/iam/apiv2/iampb"
 	"cloud.google.com/go/orgpolicy/apiv2/orgpolicypb"
+	pmpb "cloud.google.com/go/parametermanager/apiv1/parametermanagerpb"
 	rmpb "cloud.google.com/go/resourcemanager/apiv3/resourcemanagerpb"
 	"cloud.google.com/go/security/privateca/apiv1/privatecapb"
 	"cloud.google.com/go/workflows/apiv1/workflowspb"
@@ -40,8 +41,10 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/datatransfer"
 	"github.com/cloudburrow/cloudburrow/internal/service/gke"
 	"github.com/cloudburrow/cloudburrow/internal/service/kms"
+	"github.com/cloudburrow/cloudburrow/internal/service/kmsinventory"
 	"github.com/cloudburrow/cloudburrow/internal/service/logging"
 	"github.com/cloudburrow/cloudburrow/internal/service/monitoring"
+	"github.com/cloudburrow/cloudburrow/internal/service/parametermanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/privateca"
 	"github.com/cloudburrow/cloudburrow/internal/service/redisadmin"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
@@ -71,6 +74,7 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	tasks.NewGRPCServer(tasks.NewStore(store.NewMemory())).Register(srv)
 	secrets.NewGRPCServer(secrets.NewStore(store.NewMemory())).Register(srv)
 	kms.NewServer(store.NewMemory()).Register(srv)
+	(&kmsinventory.Server{}).Register(srv)
 	// Certificate Authority Service alone: its IAM, Locations and
 	// Operations mixins are other services' rows, registered by them.
 	pca, err := privateca.NewServer("")
@@ -86,6 +90,13 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	}
 	workflowspb.RegisterWorkflowsServer(srv, wfs.Workflows())
 	executionspb.RegisterExecutionsServer(srv, wfs.Executions())
+	// Parameter Manager alone (#2054): its Locations mixin is another
+	// service's row.
+	pm, err := parametermanager.NewServer("", parametermanager.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pmpb.RegisterParameterManagerServer(srv, pm)
 	gkeSrv, err := gke.NewServer(nil, gke.Options{Versions: []gke.Version{{GKE: "1.36.4-gke.0", Image: "kindest/node:v1.36.4"}}})
 	if err != nil {
 		t.Fatal(err)
@@ -198,13 +209,16 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 		// TestEveryUnservedMethodIsNotImplemented checks its 501s over HTTP
 		// (internal/service/compute).
 		if strings.HasPrefix(m, "sql.") || strings.HasPrefix(m, "serviceusage.") || strings.HasPrefix(m, "apikeys.") || strings.HasPrefix(m, "backupdr.") ||
+			strings.HasPrefix(m, "firebaserules.") ||
 			strings.HasPrefix(m, "cloudidentity.") || strings.HasPrefix(m, "compute.") || strings.HasPrefix(m, "siteVerification.") ||
 			strings.HasPrefix(m, "storagebatchoperations.") ||
 			strings.HasPrefix(m, "storageinsights.") || strings.HasPrefix(m, "storagetransfer.") ||
 			// Workload Identity Federation's (#1941) is
 			// workloadidentity_methods.go's table, its 501s checked over
 			// HTTP by TestWorkloadIdentityUnservedAre501.
-			strings.HasPrefix(m, "iam.projects.locations.workloadIdentityPools.") || m == "sts.token" {
+			strings.HasPrefix(m, "iam.projects.locations.workloadIdentityPools.") || m == "sts.token" ||
+			// And Workforce Identity Federation's (#2056), by TestWorkforceSubjectsAndUnserved.
+			strings.HasPrefix(m, "iam.locations.workforcePools.") {
 			continue
 		}
 		// Cloud Run v1's is the adapter's method table, and

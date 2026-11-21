@@ -126,7 +126,7 @@ func TestCloudRunGooglePagesThroughTheBrowser(t *testing.T) {
 	}
 	p.eval(`(() => ({ Title: document.querySelector("#view h1").textContent,
 		Tabs: [...document.querySelectorAll("#view .tab-strip .tab")].map((n) => n.textContent) }))()`, &page)
-	want := "Metrics|SLOs|Logs|Revisions|Source|Triggers|Networking|Security|YAML"
+	want := "Metrics|SLOs|Logs|Revisions|Source|Triggers|Containers|Networking|Security|Scaling|YAML"
 	if page.Title != "Service details" || !strings.HasPrefix(strings.Join(page.Tabs, "|"), want) {
 		t.Errorf("the service page is %+v; want Service details with tabs %q first", page, want)
 	}

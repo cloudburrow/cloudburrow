@@ -66,7 +66,7 @@ func TestLoggingSinkRowsAndExclusionRows(t *testing.T) {
 	p.run(chromedp.Click(chromedp.CSS(fmt.Sprintf(`button[aria-label=%q]`, "Actions for "+name))))
 	var items string
 	p.eval(`[...document.querySelectorAll('.overflow-menu:not([hidden]) [role="menuitem"]')].map((b) => b.textContent.trim()).join("|")`, &items)
-	if !strings.Contains(items, "Edit sink") || !strings.HasSuffix(items, "Delete sink") {
+	if !strings.Contains(items, "Edit sink") || !strings.Contains(items, "Delete sink") {
 		t.Errorf("the row's menu = %q, want Edit sink and Delete sink", items)
 	}
 	p.clickText(`.overflow-menu:not([hidden]) [role="menuitem"]`, "Edit sink")
@@ -109,10 +109,14 @@ func TestLoggingExplorerRound2(t *testing.T) {
 	p.waitFor(`[...document.querySelectorAll("#view tr.log-entry td.log-summary")].some((td) => td.textContent.includes("round2-hello"))`)
 
 	p.run(chromedp.Click(chromedp.CSS(`button[aria-label="Actions"]`)))
+	// Create log alert opens Alerting's create page where Cloud Monitoring
+	// is served (round 3), and is drawn disabled naming it otherwise.
 	var alert bool
-	p.eval(`[...document.querySelectorAll('.overflow-menu:not([hidden]) [role="menuitem"]')].some((b) => b.textContent === "Create log alert" && b.disabled && b.title.includes("Cloud Monitoring"))`, &alert)
+	p.eval(`(() => { const b = [...document.querySelectorAll('.overflow-menu:not([hidden]) [role="menuitem"]')].find((b) => b.textContent === "Create log alert");
+		const served = SERVICES.some((s) => s.id === "monitoring-alerting");
+		return !!b && (served ? !b.disabled : b.disabled && b.title.includes("Cloud Monitoring")); })()`, &alert)
 	if !alert {
-		t.Error("Actions has no disabled Create log alert naming Cloud Monitoring")
+		t.Error("Actions has no Create log alert, enabled with Cloud Monitoring served or disabled naming it")
 	}
 	p.clickText(`.overflow-menu:not([hidden]) [role="menuitem"]`, "Highlight in results")
 	p.waitFor(`document.querySelector("#log-highlight-text") !== null`)

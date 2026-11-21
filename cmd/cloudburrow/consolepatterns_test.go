@@ -28,10 +28,14 @@ func createForms(t *testing.T) map[string][]console.Field {
 		"tasks/createtask": tasksCreateTaskFields(),
 		"tasks/edit": tasksQueueEditForm(tasks.Queue{Name: "projects/p/locations/l/queues/q",
 			RetryConfig: tasks.DefaultRetryConfig(), RateLimits: tasks.DefaultRateLimits()}).Fields,
-		"firestore/adddocument":  firestoreDocumentFields(),
-		"firestore/editfield":    firestoreEditFields("f", "number", "2.0"),
-		"datastore/createentity": datastoreEntityFields(),
-		"datastore/addproperty":  datastorePropertyFields(true, "", "", false),
+		// Create from a ZIP upload and Write a function (#1853): their name
+		// patterns are variables, which the literal scan cannot see.
+		"functions/create-function": functionsProvider{storage: true}.createAction().Fields,
+		"run/write-function":        writeFunctionLayout(functionsProvider{storage: true}.createAction()).Fields,
+		"firestore/adddocument":     firestoreDocumentFields(),
+		"firestore/editfield":       firestoreEditFields("f", "number", "2.0"),
+		"datastore/createentity":    datastoreEntityFields(),
+		"datastore/addproperty":     datastorePropertyFields(true, "", "", false),
 		// Subcollections, child entities and BigQuery tables (#854).
 		"firestore/startcollection": firestoreStartCollectionFields(),
 		"datastore/createchild":     datastoreChildFields(),

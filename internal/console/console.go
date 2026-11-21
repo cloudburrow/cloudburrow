@@ -121,6 +121,13 @@ type InfoTab struct {
 	// label. The page's DetailActions at that path must offer it (the
 	// server checks), marked Linked so it is not also a page button.
 	Form *Action `json:"form,omitempty"`
+	// Permissions draws the tab as the row's IAM policy, read and changed
+	// through the provider's PolicyEditor at the row's Target (or its
+	// name): Google's Pub/Sub Topics list, "select the topics ... If the
+	// info panel is hidden, click Show info panel. In the Permissions tab,
+	// click Add principal" (#1847). With several rows checked, Add principal
+	// grants the role on each of them.
+	Permissions bool `json:"permissions,omitempty"`
 }
 
 // Listing is a page of resources.
@@ -134,6 +141,15 @@ type Listing struct {
 	// up with two columns headed "Name": the implicit one and a field of the
 	// same label. The screen decides what its identifier is called.
 	NameColumn string `json:"nameColumn,omitempty"`
+	// NameAfter, when set, is the data column the name column is drawn
+	// after, for a list whose Google columns do not begin with the name:
+	// Cloud Run functions' leads with Environment, then Name (#1853).
+	// Empty, or a column not on screen, draws the name first.
+	NameAfter string `json:"nameAfter,omitempty"`
+	// HiddenColumns are the Columns off until the viewer turns them on in
+	// Column display options, as Google's Key inventory hides EKM via VPC
+	// connection by default (#1851).
+	HiddenColumns []string `json:"hiddenColumns,omitempty"`
 	// TableTitle heads the table, and names it, where Google's page titles
 	// its table apart from the page: Audit Logs' "Data Access audit logs
 	// configuration" (#1864). Empty draws no heading.
@@ -254,6 +270,10 @@ type Listing struct {
 	// over it, beside its text and rows: Document AI's Upload test
 	// document draws the layout it found on the document (#1930).
 	Pages []ResultPage `json:"pages,omitempty"`
+	// ColumnTypes are a query result's column types, by column name, as
+	// BigQuery names them (STRING, INTEGER, TIMESTAMP, …; REPEATED for an
+	// array), for the results' chart: Log Analytics' (#2021).
+	ColumnTypes map[string]string `json:"columnTypes,omitempty"`
 }
 
 // ResultPage is one page image of an action's answer, and its boxes.
@@ -364,6 +384,12 @@ type Field struct {
 	// default, and choosing to is a destructive act of its own.
 	Confirm     string `json:"confirm,omitempty"`
 	ConfirmWith string `json:"confirmWith,omitempty"`
+	// ConfirmValue, on a radio or select field with Confirm, is the choice
+	// that asks first: a submit with it chosen opens a prompt naming
+	// Confirm under ConfirmTitle, ended by Confirm with nothing typed, as
+	// Cloud KMS's Disable autokey asks after Submit (#2053).
+	ConfirmValue string `json:"confirmValue,omitempty"`
+	ConfirmTitle string `json:"confirmTitle,omitempty"`
 	// Options are the values a "select" field offers, in order; its value is
 	// one of them. A bucket notification's topic is chosen from the
 	// project's topics this way (#791), so the form cannot name one that
@@ -463,6 +489,13 @@ type Field struct {
 	// field is neither checked nor submitted. Cloud SQL's Database version
 	// lists the chosen engine's versions only (#1860).
 	VisibleWhen map[string]string `json:"visibleWhen,omitempty"`
+	// OptionsBy and OptionsFor, on a select, list only the options
+	// OptionsFor gives for the value the field OptionsBy names holds, the
+	// first of them chosen when the current one is not among them: Cloud
+	// KMS's Create key lists the chosen purpose's algorithms only (#1851).
+	// Options still lists every option, the field's whole range.
+	OptionsBy  string              `json:"optionsBy,omitempty"`
+	OptionsFor map[string][]string `json:"optionsFor,omitempty"`
 	// CheckedWhen, on a checkbox, checks it and holds it checked while
 	// another field of the form holds a value, in ShowWhen's "name=value"
 	// form ("a|b" for either): Memorystore's Security choice of IAM Auth or
@@ -918,7 +951,33 @@ type EditForm struct {
 	// that names it (Property.Edit), not from a button by the title:
 	// Google's tag key page has Edit next to Description (#1865).
 	Inline bool `json:"inline,omitempty"`
+	// Layout is EditLayoutPage for an edit that is a page of its own, as
+	// Google's Edit subscription is (#1847: "In the subscription details
+	// page, click Edit ... Click Update"): the page's Edit opens it at the
+	// resource's address with ?edit=1, drawn under its section headings as
+	// a one-page create form is, as Google's Edit secret page is too, ending
+	// in Update secret (#1850). Empty is a dialog. Page (#1862) is the
+	// older page edit, drawn under the resource's own header with no
+	// section headings; a form sets one or the other.
+	Layout string `json:"layout,omitempty"`
+	// Review, when set, makes Submit open a review of the change first:
+	// every field whose value differs from the one the form opened with,
+	// its current and its new value, sent only by the review's button,
+	// labelled Review. Google's Cloud Run service tabs end in View diff &
+	// redeploy, whose review ends in Deploy changes (#1852).
+	Review string `json:"review,omitempty"`
 }
+
+// DateTimeFieldType is a Field.Type drawn as the browser's date and time
+// picker (input type=datetime-local), as Google's Starting on is (#1850).
+// Its Default is an RFC 3339 time, shown in the browser's time zone, and
+// the value sent is the RFC 3339 instant chosen, in UTC. A plain
+// "datetime-local" field (Firestore's Clone from, Backup and DR's lock
+// date) is a UTC wall-clock time sent as typed.
+const DateTimeFieldType = "datetime-zoned"
+
+// EditLayoutPage is EditForm.Layout for an edit drawn as its own page.
+const EditLayoutPage = "page"
 
 // Property is one label/value pair on a resource's summary.
 type Property struct {
@@ -976,6 +1035,11 @@ const (
 	// provider's Studio: Spanner Studio on a database's page (#1859). The
 	// page then has no separate Query tab, the Studio's editor being it.
 	KindStudio SectionKind = "studio"
+	// KindAnalytics is a Log Analytics query's results drawn as the Log
+	// Analytics page draws them (#2032): a dashboard's opsAnalyticsQuery
+	// widget, its SQL run through Log Analytics. Listing holds the rows
+	// (with ColumnTypes) and Visualization says Bar, Line or Table.
+	KindAnalytics SectionKind = "analytics"
 )
 
 // Section is one aspect of a resource, rendered as a tab.
@@ -1023,6 +1087,9 @@ type Section struct {
 	StepEntries []StepEntryView `json:"stepEntries,omitempty"`
 	// Series is the content when Kind is KindChart.
 	Series []ChartSeries `json:"series,omitempty"`
+	// Visualization is how a KindAnalytics section draws its rows: Bar,
+	// Line or Table (#2032).
+	Visualization string `json:"visualization,omitempty"`
 	// Unavailable explains why this one section has no content, so a section
 	// that cannot be read shows its own error inside its own panel rather
 	// than an empty table claiming the resource holds nothing.
@@ -1050,6 +1117,16 @@ type Section struct {
 	// the page's Edit is (the provider's Editor): Google's service account
 	// Details tab has its Name box and Save (#1864). Its Label heads it.
 	Edit *EditForm `json:"edit,omitempty"`
+	// ShownIn, when set, is the ID of the tab that draws this section
+	// through its Show list instead of a tab of its own: Google's bucket
+	// Objects tab shows "Soft-deleted objects only" there, not on a
+	// Deleted objects tab (#1843). ShowAs is that choice's label.
+	ShownIn string `json:"shownIn,omitempty"`
+	ShowAs  string `json:"showAs,omitempty"`
+	// Show is the label of this tab's own content in its Show list, when
+	// another section is ShownIn it: "Live and noncurrent objects" on an
+	// object's Version history (#1843). Empty is "Live objects only".
+	Show string `json:"show,omitempty"`
 }
 
 // dropBlankProperties removes every Property whose Value is empty or
@@ -1270,6 +1347,20 @@ type DeleteLabeler interface {
 	DeleteLabel() string
 }
 
+// RowMenuOrderer orders a list row's menu (#1863): the row's action IDs,
+// with RowMenuEdit and RowMenuDelete for its Edit and Delete, as Google's
+// Log Router reads View sink details, Edit sink, Disable sink, Delete
+// sink, Troubleshoot sink. Items it does not name follow, in their order.
+type RowMenuOrderer interface {
+	RowMenuOrder() []string
+}
+
+// The RowMenuOrder names of a row's Edit and Delete.
+const (
+	RowMenuEdit   = "edit"
+	RowMenuDelete = "delete"
+)
+
 // RowEditLeader is a RowEditor whose rows' menus begin with Edit, as
 // Google's Triggers menu reads Edit, Disable, Delete (#1854).
 type RowEditLeader interface {
@@ -1339,6 +1430,13 @@ type Action struct {
 	// kind of resource rather than the one acted on: Cloud SQL's Stop asks
 	// "Stop database instance?" (#1860). Empty is "<Label> <name>?".
 	ConfirmTitle string `json:"confirmTitle,omitempty"`
+	// ConfirmWord is what a "name" confirmation asks to be typed back where
+	// it is not the last segment of the path acted on: a secret version's
+	// Destroy asks for the secret's ID, "enter the secret ID to confirm"
+	// (#1850), whether it is chosen from the version's row or checked on the
+	// secret's Versions tab; a key version row's Destroy asks for the key's
+	// name, as the key page's Destroy does (#2053).
+	ConfirmWord string `json:"confirmWord,omitempty"`
 	// Confirm is what performing the action changes or puts at stake, and
 	// asks for the resource's name back before anything is sent.
 	//
@@ -1375,6 +1473,16 @@ type Action struct {
 	// parameter, comma-separated: Roles' Create custom role from selection
 	// opens Create custom role with ?roles= (#2013).
 	Href string `json:"href,omitempty"`
+	// Terminal, when set, makes the action Google's Run in Cloud Shell: it
+	// opens the console's terminal (#781) and runs this command line in its
+	// active tab, as a Testing tab's test command runs (#2049). The action
+	// route never receives it.
+	Terminal string `json:"terminal,omitempty"`
+	// Then, when set, is the console route the form's action opens once it
+	// succeeds, each {field} in it replaced by the value submitted for that
+	// field: Write a function's Create lands on the function's Source tab,
+	// as Google's does (#1853).
+	Then string `json:"then,omitempty"`
 	// Button draws a row's action as a button on the row, before its
 	// menu, as Google's Triggers rows carry Run (#1854).
 	Button bool `json:"button,omitempty"`
@@ -1396,6 +1504,17 @@ type Action struct {
 	// it, not as a button of its own: a property's ActionText link (Upgrade
 	// beside an edition) or an info panel tab's Form (#1859).
 	Linked bool `json:"linked,omitempty"`
+	// Reveal makes the action show the value at its path through the
+	// provider's Revealer, in a dialog ending in Done, as Google's View
+	// secret value does from a version row's Actions menu (#1850). The
+	// action route never receives it; the reveal route records it.
+	Reveal bool `json:"reveal,omitempty"`
+	// Page draws the action's form as a page of its own at the resource
+	// page's address with ?action=<id>, under the action's Title (or
+	// Label), ending in its Submit (or Label) and Cancel, instead of a
+	// dialog: Cloud KMS's Create key is a page (#1851). Cancel and success
+	// return to the resource's page.
+	Page bool `json:"page,omitempty"`
 }
 
 // PathActor is a provider with actions on the resources inside a resource.
@@ -1594,6 +1713,8 @@ type Server struct {
 	// logNames lists a parent's log names, for the Logs Explorer's Log name
 	// picker (#1554).
 	logNames LogNameLister
+	// recentQueries are Cloud Logging's per-user recent queries (#2031).
+	recentQueries RecentQueries
 	// linter is the IAM API's LintPolicy, for the condition editor's Run
 	// Linter (#1756, iamlint.go); nil offers none.
 	linter PolicyLinter
@@ -1689,6 +1810,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/logs", s.handleLogs)
 	mux.HandleFunc("GET /api/logs/buckets", s.handleLogBuckets)
 	mux.HandleFunc("GET /api/logs/names", s.handleLogNames)
+	mux.HandleFunc("GET /api/logs/scopes", s.handleLogScopes)
+	mux.HandleFunc("GET /api/logs/recent-queries", s.handleRecentQueries)
+	mux.HandleFunc("POST /api/logs/recent-queries", s.handleRecentQueries)
 	mux.HandleFunc("DELETE /api/logs", s.handleDeleteLog)
 	mux.HandleFunc("GET /api/operations", s.handleOperations)
 	mux.HandleFunc("GET /api/instance", s.handleInstance)
@@ -1878,7 +2002,7 @@ func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
 			"id": p.ID(), "title": p.Title(),
 			"create": caps.Create, "delete": caps.Delete, "detail": caps.Detail,
 			"query": caps.Query, "edit": caps.Edit, "reveal": caps.Reveal,
-			"deleteLabel": caps.DeleteLabel, "deleteConfirm": caps.DeleteConfirm, "editRow": caps.EditRow, "editRowFirst": caps.EditRowFirst,
+			"deleteLabel": caps.DeleteLabel, "deleteConfirm": caps.DeleteConfirm, "editRow": caps.EditRow, "editRowFirst": caps.EditRowFirst, "rowMenuOrder": caps.RowMenuOrder,
 			"page": caps.Page, "scope": caps.Scope, "filters": caps.Filters,
 		})
 	}
@@ -2073,6 +2197,8 @@ type capabilities struct {
 	EditRow       string `json:"editRow,omitempty"`
 	// EditRowFirst puts the rows' Edit first in their menus (RowEditLeader).
 	EditRowFirst bool `json:"editRowFirst,omitempty"`
+	// RowMenuOrder is RowMenuOrderer's order of a row's menu.
+	RowMenuOrder []string `json:"rowMenuOrder,omitempty"`
 	// Detail means a row can be opened to show what is inside it.
 	Detail bool `json:"detail,omitempty"`
 	// Edit means a resource's detail page can offer an edit form. The form
@@ -2149,6 +2275,9 @@ type createForm struct {
 	Href string `json:"href,omitempty"`
 	// CommitStep is CreateCommitter's: the step whose Continue creates.
 	CommitStep int `json:"commitStep,omitempty"`
+	// Copies is CreateCopier's: the page opened with ?from= is the copy
+	// of that resource, its fields read from /api/createform/{service}.
+	Copies bool `json:"copies,omitempty"`
 }
 
 // ProjectCreateFormer is a Creator whose fields depend on the project, as
@@ -2159,11 +2288,38 @@ type ProjectCreateFormer interface {
 	CreateFormFor(ctx context.Context, project string) []Field
 }
 
-// handleCreateFormFor is a ProjectCreateFormer's fields for a project.
+// CreateCopier is a Creator whose create page opens as the copy of one of
+// its resources, named by the address's from parameter: Google's Services
+// list has Copy, which opens "the service copy page", the create form
+// holding the checked service's settings (#1852). CreateFormFrom is that
+// form; an error is why the resource cannot be copied.
+type CreateCopier interface {
+	Creator
+	CreateFormFrom(ctx context.Context, project, from string) ([]Field, error)
+}
+
+// handleCreateFormFor is a ProjectCreateFormer's fields for a project, or
+// a CreateCopier's for the copy of the resource named by from.
 func (s *Server) handleCreateFormFor(w http.ResponseWriter, r *http.Request) {
 	p, ok := s.providers[r.PathValue("service")]
 	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such service"})
+		return
+	}
+	if from := r.URL.Query().Get("from"); from != "" {
+		cc, ok := p.(CreateCopier)
+		if !ok {
+			writeJSON(w, http.StatusNotImplemented, map[string]string{"error": p.Title() + " has no copy form"})
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), budgetFor(p))
+		defer cancel()
+		fields, err := cc.CreateFormFrom(ctx, r.URL.Query().Get("project"), from)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": userMessage(err)})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"fields": fields})
 		return
 	}
 	pf, ok := p.(ProjectCreateFormer)
@@ -2211,6 +2367,9 @@ func (s *Server) capabilitiesOf(p Provider) capabilities {
 		if cc, ok := p.(CreateCommitter); ok {
 			c.Create.CommitStep = cc.CreateCommitStep()
 		}
+		if _, ok := p.(CreateCopier); ok {
+			c.Create.Copies = true
+		}
 		if ch, ok := p.(CreateHrefer); ok && ch.CreateHref() != "" {
 			c.Create.Href = ch.CreateHref()
 			c.Create.Page = true
@@ -2240,6 +2399,9 @@ func (s *Server) capabilitiesOf(p Provider) capabilities {
 	}
 	if rl, ok := p.(RowEditLeader); ok {
 		c.EditRowFirst = rl.RowEditFirst()
+	}
+	if ro, ok := p.(RowMenuOrderer); ok {
+		c.RowMenuOrder = ro.RowMenuOrder()
 	}
 	if re, ok := p.(RowEditor); ok {
 		c.EditRow = re.RowEditLabel()

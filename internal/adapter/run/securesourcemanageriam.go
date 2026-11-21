@@ -160,3 +160,8 @@ func (ssmRepoIAM) SetIamPolicy(_ context.Context, req *iampb.SetIamPolicyRequest
 func (ssmRepoIAM) TestIamPermissions(_ context.Context, req *iampb.TestIamPermissionsRequest) (*iampb.TestIamPermissionsResponse, error) {
 	return ssmTestPermissions("repositories", req)
 }
+
+// SourceManagerMixins are the JSON mixin rules on the API's paths (an
+// instance's IAMPolicy and the Operations mixin), for IAM enforcement's
+// matcher (#1879).
+func SourceManagerMixins() []*annotations.HttpRule { return ssmIAMMixins }

@@ -59,6 +59,7 @@ import (
 
 	apikeyssvc "github.com/cloudburrow/cloudburrow/internal/service/apikeys"
 	computesvc "github.com/cloudburrow/cloudburrow/internal/service/compute"
+	firebaserulessvc "github.com/cloudburrow/cloudburrow/internal/service/firebaserules"
 	rmsvc "github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	serviceusagesvc "github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
 	siteverificationsvc "github.com/cloudburrow/cloudburrow/internal/service/siteverification"
@@ -92,10 +93,12 @@ import (
 	_ "cloud.google.com/go/iam/apiv1/iampb"
 	_ "cloud.google.com/go/iam/apiv2/iampb"
 	_ "cloud.google.com/go/kms/apiv1/kmspb"
+	_ "cloud.google.com/go/kms/inventory/apiv1/inventorypb"
 	_ "cloud.google.com/go/logging/apiv2/loggingpb"
 	_ "cloud.google.com/go/memorystore/apiv1/memorystorepb"
 	_ "cloud.google.com/go/monitoring/apiv3/v2/monitoringpb"
 	_ "cloud.google.com/go/monitoring/dashboard/apiv1/dashboardpb"
+	_ "cloud.google.com/go/parametermanager/apiv1/parametermanagerpb"
 	_ "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	_ "cloud.google.com/go/redis/apiv1/redispb"
 	_ "cloud.google.com/go/redis/cluster/apiv1/clusterpb"
@@ -171,7 +174,9 @@ var areas = []area{
 	// as well, and both serve it, so the one registry status is true of both.
 	// EkmService, Autokey, AutokeyAdmin and HsmManagement since #1452.
 	{Key: "kms", Title: "Cloud KMS", Own: true, Services: []string{"google.cloud.kms.v1.KeyManagementService", "google.cloud.kms.v1.EkmService",
-		"google.cloud.kms.v1.Autokey", "google.cloud.kms.v1.AutokeyAdmin", "google.cloud.kms.v1.HsmManagement", "google.iam.v1.IAMPolicy", "google.cloud.location.Locations"},
+		"google.cloud.kms.v1.Autokey", "google.cloud.kms.v1.AutokeyAdmin", "google.cloud.kms.v1.HsmManagement", "google.iam.v1.IAMPolicy", "google.cloud.location.Locations",
+		// The Cloud KMS Inventory API (#2053), on the Cloud KMS port.
+		"google.cloud.kms.inventory.v1.KeyDashboardService", "google.cloud.kms.inventory.v1.KeyTrackingService"},
 		// DeleteKeyRing (#1595) is documented in the REST reference, but
 		// googleapis' service.proto has no RPC for it yet; it is served
 		// at the name Google's would have.
@@ -276,6 +281,10 @@ var areas = []area{
 	// Terraform call it. Its methods are the official generated client's
 	// (google.golang.org/api/apikeys/v2), from the server's own table.
 	{Key: "apikeys", Title: "API Keys API (v2)", Own: true, Methods: apikeysMethods()},
+	// The Firebase Rules API (#2048): CloudBurrow's own, JSON only, over
+	// the Firestore emulator. Its methods are the official generated
+	// client's (google.golang.org/api/firebaserules/v1).
+	{Key: "firebaserules", Title: "Firebase Rules API (v1)", Own: true, Methods: firebaserulessvc.Methods},
 	// The Compute Engine API's VPC networking (#1936), by discovery ID
 	// (google.golang.org/api/compute/v1), from the server's own table:
 	// the resources it serves, every one of their methods.
@@ -313,6 +322,9 @@ var areas = []area{
 	{Key: "privateca", Title: "Certificate Authority Service (v1)", Own: true, Services: []string{"google.cloud.security.privateca.v1.CertificateAuthorityService"}},
 	// Workflows and Workflow Executions (#1986): CloudBurrow's own, with
 	// an interpreter of the workflow syntax.
+	// Parameter Manager (#2054): CloudBurrow's own, gRPC and JSON on one
+	// port; its Locations mixin is another area's row.
+	{Key: "parametermanager", Title: "Parameter Manager (v1)", Own: true, Services: []string{"google.cloud.parametermanager.v1.ParameterManager"}},
 	{Key: "workflows", Title: "Workflows and Workflow Executions (v1)", Own: true,
 		Services: []string{"google.cloud.workflows.v1.Workflows", "google.cloud.workflows.executions.v1.Executions"}},
 	// The Kubernetes Engine API (#1913): CloudBurrow's own, gRPC and JSON
@@ -841,7 +853,7 @@ func loadRegistry(root string) (map[string]string, error) {
 	}
 	// The Cloud SQL Admin API's too (#1301), and Service Usage's (#1352).
 	// And Cloud Run v1's (#1533).
-	for _, statuses := range []map[string]bool{sqladminsvc.MethodStatuses(), serviceusagesvc.MethodStatuses(), apikeyssvc.MethodStatuses(), computesvc.MethodStatuses(), storagejobssvc.MethodStatuses(), backupdrStatuses, runadapter.V1MethodStatuses(),
+	for _, statuses := range []map[string]bool{sqladminsvc.MethodStatuses(), serviceusagesvc.MethodStatuses(), apikeyssvc.MethodStatuses(), firebaserulessvc.MethodStatuses(), computesvc.MethodStatuses(), storagejobssvc.MethodStatuses(), backupdrStatuses, runadapter.V1MethodStatuses(),
 		rmsvc.CloudIdentityMethodStatuses(), rmsvc.WorkloadIdentityMethodStatuses(), siteverificationsvc.MethodStatuses()} {
 		for id, isBuilt := range statuses {
 			if isBuilt {

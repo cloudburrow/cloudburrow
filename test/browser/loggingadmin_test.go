@@ -40,12 +40,16 @@ func TestLoggingAdminMetricsThroughTheBrowser(t *testing.T) {
 	// A form this long is a page of its own, /logs/metrics/create.
 	p.run(chromedp.WaitVisible(chromedp.CSS(`form.create-page #f-filter`)))
 	p.run(chromedp.SendKeys(chromedp.CSS(`form.create-page #f-name`), "browser-errors"))
-	setField("filter", "jsonPayload.x:y")
+	// A field LogEntry does not define is an error "detected before the
+	// query is used" (logging-query-language, Missing fields), which
+	// CreateLogMetric refuses as INVALID_ARGUMENT; jsonPayload.x:y, which
+	// this used before #2026, is in the language and is taken.
+	setField("filter", `resource.lables.zone = "a"`)
 	p.run(chromedp.Click(chromedp.CSS(`form.create-page button[type="submit"]`)))
 	p.waitFor(`!document.querySelector("form.create-page .form-error").hidden`)
 	var refusal string
 	p.eval(`document.querySelector("form.create-page .form-error").textContent`, &refusal)
-	if !strings.HasPrefix(refusal, "InvalidArgument: filter term") {
+	if !strings.HasPrefix(refusal, "InvalidArgument: ") || !strings.Contains(refusal, `field "resource.lables.zone" is not defined`) {
 		t.Errorf("a filter outside the grammar was refused with %q, want CreateLogMetric's INVALID_ARGUMENT", refusal)
 	}
 	p.forgive()

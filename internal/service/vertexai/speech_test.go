@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/localai"
 	"github.com/cloudburrow/cloudburrow/internal/speech"
@@ -44,11 +45,11 @@ func TestRecognizeRefusals(t *testing.T) {
 		{recognizePath, `{"config": {"model": "chirp", "languageCodes": ["en-US"], "autoDecodingConfig": {}}, "uri": "gs://b/o"}`, 400}, // no Cloud Storage
 		{recognizePath, `{"config": {"model": "medical_conversation", "languageCodes": ["en-US"], "autoDecodingConfig": {}}, "content": ""}`, 501},
 		// Ogg Opus is decoded since #1799: a stream that ends early is bad
-		// data; AMR has no local decoder.
+		// data; so is AMR (decoded since #1799) whose frame is cut.
 		{recognizePath, `{"config": {"model": "chirp", "languageCodes": ["en-US"], "autoDecodingConfig": {}}, "content": "` +
 			base64.StdEncoding.EncodeToString([]byte("OggS\x00\x02")) + `"}`, 400},
 		{recognizePath, `{"config": {"model": "chirp", "languageCodes": ["en-US"], "autoDecodingConfig": {}}, "content": "` +
-			base64.StdEncoding.EncodeToString([]byte("#!AMR\n\x3c")) + `"}`, 501},
+			base64.StdEncoding.EncodeToString([]byte("#!AMR\n\x3c")) + `"}`, 400},
 		// FLAC is decoded since #1799: a stream that ends early is bad data.
 		{recognizePath, `{"config": {"model": "chirp", "languageCodes": ["en-US"], "autoDecodingConfig": {}}, "content": "` +
 			base64.StdEncoding.EncodeToString([]byte("fLaC\x00\x00")) + `"}`, 400},
@@ -98,6 +99,18 @@ func TestRecognize(t *testing.T) {
 		`"resultEndOffset":"11s"`, `"word":"And"`, `"startOffset":"0.32s"`} {
 		if !strings.Contains(s, want) {
 			t.Errorf("response lacks %s: %s", want, s)
+		}
+	}
+}
+
+// TestProtoDuration: durations are written from their integer nanoseconds,
+// so a float's rounding never reaches protojson (2.97 s once was
+// "2.9699999999999998s", which the gRPC encoder refused).
+func TestProtoDuration(t *testing.T) {
+	for d, want := range map[time.Duration]string{2970 * time.Millisecond: "2.97s", 11 * time.Second: "11s", 0: "0s",
+		1500 * time.Millisecond: "1.5s", time.Nanosecond: "0.000000001s", -250 * time.Millisecond: "-0.25s"} {
+		if got := protoDuration(d); got != want {
+			t.Errorf("protoDuration(%v) = %q, want %q", d, got, want)
 		}
 	}
 }

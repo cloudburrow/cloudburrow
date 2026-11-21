@@ -24,6 +24,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/metrics"
 	"github.com/cloudburrow/cloudburrow/internal/modelgarden"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
+	"github.com/cloudburrow/cloudburrow/internal/ratequota"
 	"github.com/cloudburrow/cloudburrow/internal/service/apikeys"
 	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
 	"github.com/cloudburrow/cloudburrow/internal/service/cloudquotas"
@@ -96,6 +97,9 @@ type consoleDeps struct {
 	// requestHistory is their one-minute history per project, which the
 	// APIs & Services charts read over a time range (#1866).
 	requestHistory *monitoring.RequestBuiltin
+	// requestQuotas are the request quotas (#2063), which an API's Quotas
+	// & System Limits tab lists and edits.
+	requestQuotas *ratequota.Limiter
 	// backupdr is the Backup and DR Service (#1433), nil unless enabled.
 	backupdr *backupdr.Server
 	// privateCA is Certificate Authority Service (#1834), nil unless enabled.
@@ -104,6 +108,8 @@ type consoleDeps struct {
 	analyticsHub *analyticsHubSvc
 	// workflows is Workflows (#1986), nil unless enabled.
 	workflows *workflowsService
+	// parameterManager is Parameter Manager (#2054), nil unless enabled.
+	parameterManager *parameterManagerService
 	// gke is the Kubernetes Engine API (#1913), nil unless enabled.
 	gke *gkeService
 	// monitoring is Cloud Monitoring (#1939), nil unless enabled.
@@ -197,7 +203,7 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		providers = append(providers, projectsProvider{registry: d.projects}, h, tagsProvider{registry: d.projects},
 			projectIAMProvider{registry: d.projects, iam: d.iam}, iamRolesProvider{registry: d.projects}, iamGroupsProvider{registry: d.projects},
 			iamSSOProfilesProvider{registry: d.projects}, iamSSOAssignmentsProvider{registry: d.projects},
-			iamServiceAccountsProvider{registry: d.projects}, iamWorkloadIdentityProvider{registry: d.projects}, iamAuditProvider{registry: d.projects},
+			iamServiceAccountsProvider{registry: d.projects}, iamWorkloadIdentityProvider{registry: d.projects}, iamWorkforceIdentityProvider{registry: d.projects}, iamAuditProvider{registry: d.projects},
 			iamOrgPoliciesProvider{registry: d.projects}, iamLabelsProvider{registry: d.projects}, iamSettingsProvider{registry: d.projects})
 	}
 	if enabled[config.ServiceStorage] && storageAddr != "" {
@@ -210,6 +216,8 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		if enabled[config.ServicePubSub] {
 			sp.pubsub = pubsubAddr
 		}
+		// A bucket's Inventory reports tab (#1843) reads Storage Insights.
+		sp.insights = companionAddr(d.cfg, d.cfg.Endpoints.StorageInsights)
 		providers = append(providers, sp,
 			storageDeletedProvider{endpoint: storageAddr},
 			storageSettingsProvider{endpoint: storageAddr},
@@ -324,7 +332,7 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	// Cloud KMS and Cloud Scheduler run in this process too, so their screens
 	// read the objects their APIs serve rather than going through a tunnel.
 	if enabled[config.ServiceKMS] && d.kms != nil {
-		providers = append(providers, kmsProvider{svc: d.kms}, kmsEkmProvider{svc: d.kms}, kmsAutokeyProvider{svc: d.kms}, kmsInventoryProvider{svc: d.kms}, kmsHsmProvider{svc: d.kms})
+		providers = append(providers, kmsProvider{svc: d.kms}, kmsEkmProvider{svc: d.kms}, kmsAutokeyProvider{svc: d.kms}, kmsConfigProvider{svc: d.kms}, kmsInventoryProvider{svc: d.kms}, kmsHsmProvider{svc: d.kms})
 	}
 	// Certificate Authority Service (#1834) runs in this process too.
 	// BigQuery's Sharing (Analytics Hub) page (#1960).
@@ -333,6 +341,11 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	}
 	if enabled[config.ServicePrivateCA] && d.privateCA != nil {
 		providers = append(providers, privateCAProvider{svc: d.privateCA}, privateCATemplatesProvider{svc: d.privateCA})
+	}
+	// Parameter Manager (#2054), in process, under Secret Manager.
+	if enabled[config.ServiceParameterManager] && d.parameterManager != nil {
+		providers = append(providers, parameterManagerProvider{svc: d.parameterManager},
+			parameterTemplatesProvider{svc: d.parameterManager})
 	}
 	// Workflows (#1986), in process.
 	if enabled[config.ServiceWorkflows] && d.workflows != nil {
@@ -345,6 +358,9 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	}
 	// Cloud Monitoring (#1939) runs in this process too: Metrics explorer
 	// and Metrics management.
+	// A dashboard's Log Analytics chart runs its SQL through Log
+	// Analytics (#2032), set below where the instance serves it.
+	var runAnalytics func(ctx context.Context, project, sql string) (console.Listing, error)
 	if enabled[config.ServiceMonitoring] && d.monitoring != nil {
 		screen := monitoringScreen{api: monitoringAPIOf(d.monitoring)}
 		providers = append(providers, monitoringExplorerProvider{screen}, monitoringMetricsProvider{screen})
@@ -353,7 +369,12 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		admin := monitoringAdmin{api: monitoringServerOf(d.monitoring)}
 		providers = append(providers, monitoringAlertingProvider{admin}, monitoringIncidentsProvider{admin},
 			monitoringChannelsProvider{admin}, monitoringUptimeProvider{admin},
-			monitoringDashboardsProvider{monitoringAdmin: admin, metrics: screen}, monitoringGroupsProvider{admin},
+			monitoringDashboardsProvider{monitoringAdmin: admin, metrics: screen, analytics: func(ctx context.Context, project, sql string) (console.Listing, error) {
+				if runAnalytics == nil {
+					return console.Listing{}, errAnalyticsUnavailable
+				}
+				return runAnalytics(ctx, project, sql)
+			}}, monitoringGroupsProvider{admin},
 			monitoringServicesProvider{admin}, monitoringSnoozesProvider{admin})
 	}
 	// VPC network (#1936): the Compute Engine API's networks, subnets,
@@ -377,7 +398,7 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	}
 	// APIs & Services (#1352): always served, as projects are.
 	if d.serviceUsage != nil {
-		providers = append(providers, serviceUsageProvider{api: d.serviceUsage, metrics: d.requestMetrics, history: d.requestHistory, apiKeys: d.apiKeys, quotas: d.cloudQuotas, sites: d.siteVerify, auth: d.authPlatform, metaAddr: d.metaAddr}, serviceUsageOperationsProvider{api: d.serviceUsage})
+		providers = append(providers, serviceUsageProvider{api: d.serviceUsage, metrics: d.requestMetrics, history: d.requestHistory, apiKeys: d.apiKeys, quotas: d.cloudQuotas, requestQuotas: d.requestQuotas, sites: d.siteVerify, auth: d.authPlatform, metaAddr: d.metaAddr}, serviceUsageOperationsProvider{api: d.serviceUsage})
 	}
 	// Backup and DR (#1433), in process, restoring through Cloud SQL.
 	if enabled[config.ServiceBackupDR] && d.backupdr != nil {
@@ -393,16 +414,25 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	// Cloud Logging's admin screens, beside the Logs Explorer (#1226).
 	if enabled[config.ServiceLogging] && d.logging != nil {
 		screen := loggingAdminScreen{svc: d.logging, faults: d.faults}
-		providers = append(providers, loggingMetricsProvider{screen}, loggingSinksProvider{screen}, loggingExclusionsProvider{screen}, loggingBucketsProvider{screen},
+		if enabled[config.ServiceMonitoring] && d.monitoring != nil {
+			screen.monitoring = monitoringServerOf(d.monitoring)
+		}
+		metrics := loggingMetricsProvider{loggingAdminScreen: screen, monitoring: enabled[config.ServiceMonitoring] && d.monitoring != nil}
+		providers = append(providers, metrics, loggingSinksProvider{screen}, loggingExclusionsProvider{screen}, loggingBucketsProvider{screen},
 			loggingSettingsProvider{screen},
 			// Saved queries and log scopes (#1519).
-			loggingSavedQueriesProvider{screen}, loggingLogScopesProvider{screen})
+			loggingSavedQueriesProvider{screen},
+			loggingLogScopesProvider{loggingAdminScreen: screen})
 		// Log Analytics (#1863), over the buckets' linked datasets in the
 		// instance's BigQuery; without BigQuery the page says it is not
 		// available.
 		if addr := forwardedAddr(d.forwarders, string(config.ServiceBigQuery)); enabled[config.ServiceBigQuery] && addr != "" {
-			providers = append(providers, loggingAnalyticsProvider{screen,
-				bigqueryProvider{endpoint: addr, project: d.cfg.DefaultProject(), registry: d.projects}})
+			la := loggingAnalyticsProvider{screen,
+				bigqueryProvider{endpoint: addr, project: d.cfg.DefaultProject(), registry: d.projects}}
+			providers = append(providers, la)
+			runAnalytics = func(ctx context.Context, project, sql string) (console.Listing, error) {
+				return la.Query(ctx, project, nil, sql)
+			}
 		}
 	}
 	// The opt-in databases. Each had a working backend and no screen, which
@@ -418,7 +448,8 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		// call front serves (#1331).
 		{config.ServiceFirestore, func(a string) console.Provider {
 			return firestoreDatabasesProvider{endpoint: a, mongo: forwardedAddr(d.forwarders, "firestore-mongodb"),
-				mongoCA: filepath.Join(d.cfg.InstanceDir(), firestoreadmin.MongoCAFile)}
+				mongoCA: filepath.Join(d.cfg.InstanceDir(), firestoreadmin.MongoCAFile), projects: d.projects,
+				rules: firebaseRulesAddr(d.cfg)}
 		}},
 		// The Firestore Admin API lists the Datastore mode databases the
 		// page's database picker offers (#1883).
@@ -714,28 +745,29 @@ func trimForward(name string) string {
 // config ID, which reads as a placeholder; TestEveryServiceHasAHumanTitle
 // keeps the table complete.
 var serviceTitles = map[config.Service]string{
-	config.ServiceStorage:       "Cloud Storage",
-	config.ServicePubSub:        "Pub/Sub",
-	config.ServiceTasks:         "Cloud Tasks",
-	config.ServiceRun:           "Cloud Run",
-	config.ServiceSecrets:       "Secret Manager",
-	config.ServiceFirestore:     "Firestore",
-	config.ServiceDatastore:     "Datastore",
-	config.ServiceBigtable:      "Bigtable",
-	config.ServiceSpanner:       "Spanner",
-	config.ServiceCloudSQL:      "Cloud SQL for PostgreSQL",
-	config.ServiceBigQuery:      "BigQuery",
-	config.ServiceMemorystore:   "Memorystore",
-	config.ServiceCloudSQLMySQL: "Cloud SQL for MySQL",
-	config.ServiceScheduler:     "Cloud Scheduler",
-	config.ServiceLogging:       "Cloud Logging",
-	config.ServiceKMS:           "Cloud KMS",
-	config.ServiceBackupDR:      "Backup and DR",
-	config.ServicePrivateCA:     "Certificate Authority Service",
-	config.ServiceGKE:           "Kubernetes Engine",
-	config.ServiceMonitoring:    "Cloud Monitoring",
-	config.ServiceCompute:       "VPC network",
-	config.ServiceWorkflows:     "Workflows",
+	config.ServiceStorage:          "Cloud Storage",
+	config.ServicePubSub:           "Pub/Sub",
+	config.ServiceTasks:            "Cloud Tasks",
+	config.ServiceRun:              "Cloud Run",
+	config.ServiceSecrets:          "Secret Manager",
+	config.ServiceFirestore:        "Firestore",
+	config.ServiceDatastore:        "Datastore",
+	config.ServiceBigtable:         "Bigtable",
+	config.ServiceSpanner:          "Spanner",
+	config.ServiceCloudSQL:         "Cloud SQL for PostgreSQL",
+	config.ServiceBigQuery:         "BigQuery",
+	config.ServiceMemorystore:      "Memorystore",
+	config.ServiceCloudSQLMySQL:    "Cloud SQL for MySQL",
+	config.ServiceScheduler:        "Cloud Scheduler",
+	config.ServiceLogging:          "Cloud Logging",
+	config.ServiceKMS:              "Cloud KMS",
+	config.ServiceBackupDR:         "Backup and DR",
+	config.ServicePrivateCA:        "Certificate Authority Service",
+	config.ServiceGKE:              "Kubernetes Engine",
+	config.ServiceMonitoring:       "Cloud Monitoring",
+	config.ServiceCompute:          "VPC network",
+	config.ServiceWorkflows:        "Workflows",
+	config.ServiceParameterManager: "Parameter Manager",
 }
 
 func serviceTitle(s config.Service) string {

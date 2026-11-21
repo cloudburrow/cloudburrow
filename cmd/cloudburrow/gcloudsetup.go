@@ -61,6 +61,10 @@ var gcloudVerified = []gcloudEndpoint{
 	// Cloud KMS (#426): gcloud's apitools client appends v1/ itself, and
 	// TestGcloudKMS drives keyrings, keys and versions through it.
 	{config.ServiceKMS, "cloudkms", "/", false, false},
+	// The Cloud KMS Inventory API (#2053), on the Cloud KMS port; gcloud
+	// kms inventory appends v1/. TestGcloudKMSInventory drives list-keys,
+	// get-protected-resources-summary and search-protected-resources.
+	{config.ServiceKMS, "kmsinventory", "/", false, false},
 	// Secret Manager and Cloud Tasks (#590): JSON on the gRPC port, v1/ and
 	// v2/ appended by gcloud. TestGcloudSecrets drives secrets and versions;
 	// TestGcloudTasks drives queues and, since tasks are transcoded (#591),
@@ -74,6 +78,11 @@ var gcloudVerified = []gcloudEndpoint{
 	// and deletes logs.
 	{config.ServiceScheduler, "cloudscheduler", "/", false, false},
 	{config.ServiceLogging, "logging", "/", false, false},
+	// The Observability API (#2020): gcloud observability scopes describe
+	// and update call v1, which gcloud appends, served on the Logging port
+	// beside the log scopes a scope's logScope names. TestGcloudObservabilityScopes
+	// drives them.
+	{config.ServiceLogging, "observability", "/", false, false},
 	// Resource Manager (#682): gcloud's projects commands call the v1 REST
 	// API, served since #301 on the Resource Manager port beside v3.
 	// TestGcloudProjectsThroughGcloudSetup drives list, create, describe and
@@ -204,6 +213,10 @@ var gcloudVerified = []gcloudEndpoint{
 	// describe and list.
 	{config.ServiceWorkflows, "workflows", "/", false, false},
 	{config.ServiceWorkflows, "workflowexecutions", "/", false, false},
+	// Parameter Manager (#2054): gcloud parametermanager appends v1/, for
+	// global and regional parameters alike. TestGcloudParameterManager
+	// drives parameters, versions and render.
+	{config.ServiceParameterManager, "parametermanager", "/", false, false},
 	// Bigtable's admin REST API (#1440), on the Bigtable port beside gRPC;
 	// gcloud bigtable appends v2/. TestGcloudBigtableAppProfiles creates,
 	// lists, updates and deletes app profiles.
@@ -288,8 +301,8 @@ func gcloudPorts(cfg config.Config) map[config.Service]int {
 		config.ServiceBigtable: cfg.Endpoints.Bigtable, spannerRESTEndpoint: cfg.Endpoints.SpannerREST,
 		config.ServiceFirestore: cfg.Endpoints.Firestore, config.ServicePrivateCA: cfg.Endpoints.PrivateCA, config.ServiceDatastore: cfg.Endpoints.Datastore,
 		config.ServiceGKE: cfg.Endpoints.GKE, config.ServiceMonitoring: cfg.Endpoints.Monitoring, config.ServiceCompute: cfg.Endpoints.Compute,
-		config.ServiceWorkflows: cfg.Endpoints.Workflows,
-		localAIEndpoint:         cfg.Endpoints.LocalAI, storageTransferService: cfg.Endpoints.StorageTransfer,
+		config.ServiceWorkflows: cfg.Endpoints.Workflows, config.ServiceParameterManager: cfg.Endpoints.ParameterManager,
+		localAIEndpoint: cfg.Endpoints.LocalAI, storageTransferService: cfg.Endpoints.StorageTransfer,
 		storageBatchService: cfg.Endpoints.StorageBatchOperations, storageInsightsService: cfg.Endpoints.StorageInsights}
 }
 
@@ -311,6 +324,9 @@ func gcloudOverrideOn(cfg config.Config, v gcloudEndpoint) bool {
 	}
 	if v.service == config.ServiceWorkflows {
 		on = workflowsEnabled(cfg)
+	}
+	if v.service == config.ServiceParameterManager {
+		on = parameterManagerEnabled(cfg)
 	}
 	if v.service == localAIEndpoint {
 		on = serviceEnabled(cfg, config.ServiceRun)

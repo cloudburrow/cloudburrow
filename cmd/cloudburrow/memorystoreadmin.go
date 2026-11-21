@@ -56,6 +56,9 @@ type memorystoreAdminService struct {
 	storage   func() *netfwd.Forwarder
 	calls     grpctransport.Observer
 	interpose []grpc.UnaryServerInterceptor
+	// wrapRedisJSON and wrapValkeyJSON wrap the Redis and Redis Cluster
+	// JSON API and Valkey's (IAM enforcement, #1879); nil is none.
+	wrapRedisJSON, wrapValkeyJSON func(http.Handler) http.Handler
 	// apiGate refuses calls in a project where the API is disabled
 	// (#1914); nil refuses none.
 	apiGate  apienable.Decider
@@ -234,6 +237,12 @@ func (s *memorystoreAdminService) Start(ctx context.Context) error {
 	}
 	redisJSON := s.api.ClusterLabels(redisadmin.NewRESTHandler(register))
 	valkeyJSON := redisadmin.NewMemorystoreRESTHandler(registerValkey)
+	if s.wrapRedisJSON != nil {
+		redisJSON = s.wrapRedisJSON(redisJSON)
+	}
+	if s.wrapValkeyJSON != nil {
+		valkeyJSON = s.wrapValkeyJSON(valkeyJSON)
+	}
 	var jsonAPI http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, redisadmin.MaintenanceControlPath) {
 			// CloudBurrow's own maintenance control, not a Memorystore API (#1524).

@@ -370,8 +370,8 @@ func TestRunJobsCreateExecuteCancelAndDeleteThroughTheAPI(t *testing.T) {
 	if err != nil || d.Unavailable != "" {
 		t.Fatalf("job detail = %+v, %v", d, err)
 	}
-	if d.Edit == nil || d.Edit.Label != runJobEditLabel {
-		t.Errorf("the job page offers edit %+v", d.Edit)
+	if d.Edit == nil || d.Edit.Label != runJobEditLabel || d.Edit.Submit != "Update" {
+		t.Errorf("the job page offers edit %+v; want View and edit job configuration, submitted with Update", d.Edit)
 	}
 	var execs console.Listing
 	for _, s := range d.Sections {
@@ -673,10 +673,10 @@ func TestRunRevisionDeleteIsOfferedOnlyWhereTheAPIAccepts(t *testing.T) {
 		path []string
 		want []string
 	}{
-		{[]string{"api", "api-00001"}, []string{runManageTags, runDeleteRevision}},
-		// Manage revision tags on every revision (#1852); no delete on the
-		// serving one.
-		{[]string{"api", "api-00002"}, []string{runManageTags}},
+		{[]string{"api", "api-00001"}, []string{runManageTraffic, runManageTags, runDeleteRevision}},
+		// Manage traffic and Manage revision tags on every revision (#1852);
+		// no delete on the serving one.
+		{[]string{"api", "api-00002"}, []string{runManageTraffic, runManageTags}},
 		{[]string{"foreign", "foreign-00001"}, nil},
 		// A service's page offers Manage traffic (#1224), its domain
 		// mappings (#1450) and Copy (#1852), on one CloudBurrow owns.
@@ -691,8 +691,8 @@ func TestRunRevisionDeleteIsOfferedOnlyWhereTheAPIAccepts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a := p.revisionActions(svc, "api-00001"); len(a) != 2 || !a[1].Destructive || a[1].Label != "Delete revision" {
-		t.Errorf("the row action = %+v, want a destructive Delete revision", a)
+	if a := p.revisionActions(svc, "api-00001", nil); len(a) != 3 || !a[2].Destructive || a[2].Label != "Delete" {
+		t.Errorf("the row action = %+v, want Google's destructive Delete last", a)
 	}
 
 	if err := p.ActAt(ctx, "demo", []string{"api", "api-00001"}, runDeleteRevision, nil); err != nil {

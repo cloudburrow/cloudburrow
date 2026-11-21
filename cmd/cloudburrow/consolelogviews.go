@@ -15,6 +15,7 @@ import (
 
 	"cloud.google.com/go/logging/apiv2/loggingpb"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/cloudburrow/cloudburrow/internal/admin"
 	"github.com/cloudburrow/cloudburrow/internal/console"
@@ -42,7 +43,7 @@ func consoleEntry(e *loggingpb.LogEntry) console.Entry {
 	if rest, ok := strings.CutPrefix(e.GetLogName(), "projects/"); ok {
 		project, _, _ = strings.Cut(rest, "/")
 	}
-	return console.Entry{
+	out := console.Entry{
 		Timestamp: e.GetTimestamp().AsTime(),
 		Severity:  consoleSeverity(e.GetSeverity().String()),
 		Source:    console.LoggingSourcePrefix + e.GetLogName()[strings.LastIndex(e.GetLogName(), "/")+1:],
@@ -50,6 +51,22 @@ func consoleEntry(e *loggingpb.LogEntry) console.Entry {
 		Resource:  e.GetLogName(),
 		Message:   console.Redact(entryMessage(e)),
 	}
+	// The jsonPayload itself, for the query editor and the Fields pane's
+	// Frequent fields (#2031).
+	if p, ok := e.GetPayload().(*loggingpb.LogEntry_JsonPayload); ok {
+		if b, err := protojson.Marshal(p.JsonPayload); err == nil {
+			out.JSONPayload = console.RedactJSON(b)
+		}
+	}
+	// Its labels, for labels.KEY and the Fields pane's label dimensions
+	// (#2032).
+	if l := e.GetLabels(); len(l) > 0 {
+		out.Labels = make(map[string]string, len(l))
+		for k, v := range l {
+			out.Labels[k] = console.Redact(v)
+		}
+	}
+	return out
 }
 
 func (v consoleLogViews) Buckets(ctx context.Context, parent string) ([]console.LogBucketViews, error) {
@@ -83,13 +100,13 @@ func (v consoleLogViews) Buckets(ctx context.Context, parent string) ([]console.
 	return out, nil
 }
 
-func (v consoleLogViews) Read(ctx context.Context, view string, limit int) ([]console.Entry, error) {
+func (v consoleLogViews) Read(ctx context.Context, names []string, limit int) ([]console.Entry, error) {
 	// ListLogEntriesRequest has no name or parent, so the interceptor
 	// names no resource for it; neither does this.
 	if err := v.faults.Apply(ctx, "logging", loggingpb.LoggingServiceV2_ListLogEntries_FullMethodName, ""); err != nil {
 		return nil, err
 	}
-	resp, err := v.svc.api.ListLogEntries(ctx, &loggingpb.ListLogEntriesRequest{ResourceNames: []string{view},
+	resp, err := v.svc.api.ListLogEntries(ctx, &loggingpb.ListLogEntriesRequest{ResourceNames: names,
 		OrderBy: "timestamp desc", PageSize: int32(limit)})
 	if err != nil {
 		return nil, err
@@ -102,12 +119,35 @@ func (v consoleLogViews) Read(ctx context.Context, view string, limit int) ([]co
 	return out, nil
 }
 
-func (v consoleLogViews) Tail(ctx context.Context, view string, send func(console.Entry)) error {
+func (v consoleLogViews) Tail(ctx context.Context, names []string, send func(console.Entry)) error {
 	if err := v.faults.Apply(ctx, "logging", loggingpb.LoggingServiceV2_TailLogEntries_FullMethodName, ""); err != nil {
 		return err
 	}
 	return v.svc.api.TailLogEntries(&inProcessTail{ctx: ctx,
-		req: &loggingpb.TailLogEntriesRequest{ResourceNames: []string{view}}, send: send})
+		req: &loggingpb.TailLogEntriesRequest{ResourceNames: names}, send: send})
+}
+
+// LogScopes is the project's log scopes, _Default first, through
+// logScopes.list, and its default one through the Observability API's
+// scopes.get (#2020): what the Explorer's Refine scope offers and opens on.
+func (v consoleLogViews) LogScopes(_ context.Context, project string) (console.LogScopeSet, error) {
+	a := v.svc.Admin()
+	if a == nil {
+		return console.LogScopeSet{}, errors.New(loggingNotStarted)
+	}
+	all, err := loggingLogScopesProvider{loggingAdminScreen: loggingAdminScreen{svc: v.svc, faults: v.faults}}.scopes(project)
+	if err != nil {
+		return console.LogScopeSet{}, err
+	}
+	def, err := projectDefaultLogScope(a, project)
+	if err != nil {
+		return console.LogScopeSet{}, err
+	}
+	out := console.LogScopeSet{Default: def}
+	for _, s := range all {
+		out.Scopes = append(out.Scopes, console.LogScopeInfo{Name: s.Name, ResourceNames: s.ResourceNames, Description: s.Description})
+	}
+	return out, nil
 }
 
 // inProcessTail is a TailLogEntries stream whose one request is req and

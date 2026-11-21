@@ -131,7 +131,7 @@ func signAuthorizer(creds *metadata.Credentials, d serviceAccountDirectory) reso
 // (serviceAccount:EMAIL): itself, a group it is in (nested too) or its
 // domain (#1812).
 func (d serviceAccountDirectory) heldBy(m, member string) bool {
-	if _, _, ok := wif.PoolOfPrincipal(member); ok {
+	if wif.IsFederated(member) {
 		// A federated subject (#1941) holds what its principal:// or
 		// one of its principalSet:// identifiers is granted.
 		for _, p := range d.reg.Principals(member) {

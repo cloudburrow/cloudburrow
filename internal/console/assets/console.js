@@ -120,7 +120,12 @@ const AP_ROUTES = agentPlatformRoutes();
 
 // Kubernetes Engine's pages drawn as one page's tabs (#1857).
 const GKE_DISCOVERY = ["/kubernetes/gateways", "/kubernetes/services", "/kubernetes/ingress"];
+// Secret Manager's page tabs (#1850): the global secrets and Regional secrets.
+const SECRET_TABS = ["/secrets", "/secrets-regional"];
 const GKE_STORAGE = ["/kubernetes/storage", "/kubernetes/storage-classes"];
+// Cloud Logging's Settings and its Log Scopes tab (#2020), as Google's
+// Settings page has a Log Scopes tab (log-scope/create-and-manage).
+const LOGGING_SETTINGS = ["/logs/settings", "/logs/log-scopes"];
 
 
 const ROUTES = [
@@ -273,9 +278,8 @@ const ROUTES = [
   // database's own pages. `tabOf` makes a menu entry a tab of the database
   // being looked at ((default) elsewhere), so Indexes, Import/Export,
   // Disaster recovery and Time-to-live open that database's tab; each
-  // entry's own address leads to (default)'s. Security rules, Usage,
-  // Insights and Key Visualizer are in Google's place and say why they are
-  // not available. Databases is not under /firestore/, where it would
+  // entry's own address leads to (default)'s. Key Visualizer is in
+  // Google's place and says why it is not available. Databases is not under /firestore/, where it would
   // shadow a collection named "databases".
   { path: "/firestore-databases", service: "firestore-databases", icon: "firestore", title: "Databases", kind: "Database", section: "Databases",
     product: "firestore", productTitle: "Firestore" },
@@ -288,22 +292,20 @@ const ROUTES = [
     path: "/firestore-" + tab, service: "firestore-databases", icon: "firestore", title, section: "Databases",
     product: "firestore", productTitle: "Firestore", tabOf: { route: "/firestore-databases", tab },
     redirect: "/firestore-databases/(default)?tab=" + tab })),
-  { path: "/firestore-rules", screen: "unavailable", service: null, requires: "firestore-databases", icon: "firestore",
-    title: "Security rules", section: "Databases", product: "firestore", productTitle: "Firestore",
-    unavailable: "Firestore Security Rules are kept by the Firebase Rules API, which CloudBurrow does not serve. " +
-      "Server client libraries, which reach the local Firestore, ignore rules, as they do on Google's." },
-  { path: "/firestore-usage", screen: "unavailable", service: null, requires: "firestore-databases", icon: "firestore",
-    title: "Usage", section: "Databases", product: "firestore", productTitle: "Firestore",
-    unavailable: "Usage charts read Cloud Monitoring metrics, which CloudBurrow does not emulate. Each call to " +
-      "Firestore is in the console's Requests page." },
-  { path: "/firestore-insights", screen: "unavailable", service: null, requires: "firestore-databases", icon: "firestore",
-    title: "Insights", section: "Databases", product: "firestore", productTitle: "Firestore",
-    unavailable: "Query insights are gathered by Google's Firestore query statistics, which the local Firestore " +
-      "does not record. Query Explain is on an Enterprise database's page." },
+  // Security (rules), Usage and Insights are the database's Rules, Usage
+  // and Query insights tabs (#2048): the Firebase Rules API's released
+  // rules, and the front's document and query counts.
+  ...[["/firestore-rules", "rules", "Security"], ["/firestore-usage", "usage", "Usage"],
+    ["/firestore-insights", "insights", "Insights"]].map(([path, tab, title]) => ({
+    path, service: "firestore-databases", icon: "firestore", title, section: "Databases",
+    product: "firestore", productTitle: "Firestore", tabOf: { route: "/firestore-databases", tab },
+    redirect: "/firestore-databases/(default)?tab=" + tab })),
   { path: "/firestore-key-visualizer", screen: "unavailable", service: null, requires: "firestore-databases", icon: "firestore",
     title: "Key Visualizer", section: "Databases", product: "firestore", productTitle: "Firestore",
-    unavailable: "Key Visualizer draws Google's access-pattern heatmaps from its storage servers; the local " +
-      "Firestore keeps none." },
+    unavailable: "Key Visualizer scans are generated only for databases with more than 3,000 document operations " +
+      "in a minute, each covering two hours in 10-second segments over up to 1,000 key buckets of Google's storage " +
+      "servers. The local Firestore is one emulator process with no key ranges to bucket, so a heatmap would be " +
+      "invented; reads, writes and deletes are on the Usage tab." },
   { path: "/datastore", service: "datastore", title: "Datastore", section: "Databases" },
   // The project's Bigtable instances, with their clusters, app profiles and
   // IAM policy (#1358). First, as Google's Bigtable opens on its Instances list (#1858). Not under /bigtable/, where it would shadow a table.
@@ -499,15 +501,26 @@ const ROUTES = [
 
   // Secret Manager (#1850): Google's menu, Secret Manager (the global
   // secrets), Regional secrets and Settings.
-  { path: "/secrets", service: "secrets", title: "Secret Manager", navTitle: "Secret Manager", kind: "Secret",
+  // The global and regional secrets are two tabs of the Secret Manager
+  // page: "go to the Secret Manager page ... click the Regional secrets
+  // tab" (https://docs.cloud.google.com/secret-manager/regional-secrets/view-regional-secret-details,
+  // read 2026-11-20). The first tab's name is not in the docs (UNVERIFIED,
+  // re-read 2026-11-20: the same page).
+  { path: "/secrets", service: "secrets", title: "Secret Manager", navTitle: "Secret Manager", tabTitle: "Global secrets", kind: "Secret",
+    pageTabs: SECRET_TABS, section: "Security and identity", product: "secrets", productTitle: "Secret Manager" },
+  { path: "/secrets-regional", service: "secrets-regional", icon: "secrets", title: "Secret Manager", tabTitle: "Regional secrets", kind: "Secret",
+    navHidden: true, navAs: "/secrets", pageTabs: SECRET_TABS, section: "Security and identity", product: "secrets", productTitle: "Secret Manager" },
+  // Parameter Manager (#2054), in Secret Manager's menu as Google has it.
+  { path: "/secrets-parameters", service: "parametermanager", icon: "secrets", title: "Parameter Manager", kind: "Parameter",
     section: "Security and identity", product: "secrets", productTitle: "Secret Manager" },
-  { path: "/secrets-regional", service: "secrets-regional", icon: "secrets", title: "Regional secrets", kind: "Secret",
+  // Its Templates tab (#2063, in preview on Google).
+  { path: "/secrets-parameters/templates", service: "parametermanager-templates", icon: "secrets", title: "Parameter templates", kind: "Template",
     section: "Security and identity", product: "secrets", productTitle: "Secret Manager" },
   { path: "/secrets-settings", service: null, requires: "secrets", screen: "unavailable", icon: "secrets", title: "Settings",
     section: "Security and identity", product: "secrets", productTitle: "Secret Manager",
     unavailable: "Google's Secret Manager settings are the project's own Google Cloud configuration, which Google's documentation does not describe and a local instance does not hold. A secret's replication, encryption, rotation, expiration and destruction delay are set on the secret itself, with Create secret and Edit secret." },
   // Key Management (#1851), in Google's menu order: Key management (the key
-  // rings), Autokey, EKM connections, KMS config, Key inventory; then
+  // rings), Autokey, EKM connections, KMS Controls, Key inventory; then
   // CloudBurrow's Single-tenant HSM, whose instances Google manages with
   // gcloud only.
   { path: "/kms/keyrings", service: "kms", title: "Key management", navTitle: "Key management", kind: "Key ring",
@@ -518,9 +531,10 @@ const ROUTES = [
     product: "kms", productTitle: "Key Management" },
   { path: "/kms/ekm", service: "kms-ekm", icon: "kms", title: "EKM connections", kind: "EKM connection", section: "Security and identity",
     product: "kms", productTitle: "Key Management" },
-  { path: "/kms/config", title: "KMS config", service: null, requires: "kms", screen: "unavailable", icon: "kms",
-    section: "Security and identity", product: "kms", productTitle: "Key Management",
-    unavailable: "KMS config holds a project's and an organization's Cloud KMS settings, such as the default Key Access Justifications policy for new keys, which Google serves through an API CloudBurrow does not run. Autokey's configuration is on the Autokey page, the default EKM connection on EKM connections, and a key's own settings on its page." },
+  // KMS Controls (#2053): the default Key Access Justifications policy of
+  // the project, its folders and its organization.
+  { path: "/kms/config", service: "kms-config", icon: "kms", title: "KMS Controls", kind: "Configuration",
+    section: "Security and identity", product: "kms", productTitle: "Key Management" },
   { path: "/kms/inventory", service: "kms-inventory", icon: "kms", title: "Key inventory", section: "Security and identity",
     product: "kms", productTitle: "Key Management" },
   { path: "/kms/hsm", service: "kms-hsm", icon: "kms", title: "Single-tenant HSM", kind: "Single-tenant HSM instance", section: "Security and identity",
@@ -562,8 +576,12 @@ const ROUTES = [
   // provider, Add provider, Edit, Disable, Enable, Delete and Restore.
   { path: "/iam-admin/workload-identity-pools", service: "iam-workload-identity", icon: "iam", title: "Workload Identity Federation", kind: "Workload identity pool", section: "IAM & Admin",
     product: "iam", productTitle: "IAM & Admin" },
-  { path: "/iam-admin/workforce-identity-pools", title: "Workforce Identity Federation", service: null, requires: "iam", screen: "unavailable", icon: "iam", section: "IAM & Admin", product: "iam", productTitle: "IAM & Admin",
-    unavailable: "Workforce identity pools are the IAM API's locations.workforcePools, which CloudBurrow does not serve." },
+  // IAM & Admin > Workforce Identity Federation (#2056): the organization's
+  // workforce pools, a pool's providers and subjects, Create pool with a
+  // first provider, Add provider, Edit, Disable, Enable, Delete, Restore,
+  // and a subject's Revoke sessions.
+  { path: "/iam-admin/workforce-identity-pools", service: "iam-workforce-identity", icon: "iam", title: "Workforce Identity Federation", kind: "Workforce pool", section: "IAM & Admin",
+    product: "iam", productTitle: "IAM & Admin" },
   // Labels (#1864): the selected project's labels, Resource Manager's.
   { path: "/iam-admin/labels", service: "iam-labels", icon: "iam", title: "Labels", kind: "Label", section: "IAM & Admin",
     product: "iam", productTitle: "IAM & Admin" },
@@ -662,12 +680,14 @@ const ROUTES = [
   // Saved queries and log scopes (#1519).
   { path: "/logs/saved-queries", service: "logging-saved-queries", icon: "logs", title: "Saved queries", kind: "Saved query",
     section: "Operations", product: "logging", productTitle: "Cloud Logging" },
-  { path: "/logs/log-scopes", service: "logging-log-scopes", icon: "logs", title: "Log scopes", kind: "Log scope",
+  // Log Scopes is a tab of Settings (#2020), as on Google.
+  { path: "/logs/log-scopes", service: "logging-log-scopes", icon: "logs", title: "Settings", tabTitle: "Log Scopes", kind: "Log scope",
+    navHidden: true, navAs: "/logs/settings", pageTabs: LOGGING_SETTINGS,
     section: "Operations", product: "logging", productTitle: "Cloud Logging" },
   { path: "/logs/exclusions", service: "logging-exclusions", icon: "logs", title: "Exclusions", kind: "Exclusion",
     section: "Operations", product: "logging", productTitle: "Cloud Logging" },
   // Logging's Settings (#1311): GetSettings, UpdateSettings, GetCmekSettings.
-  { path: "/logs/settings",   service: "logging-settings",   icon: "logs", title: "Settings",
+  { path: "/logs/settings",   service: "logging-settings",   icon: "logs", title: "Settings", tabTitle: "Settings", pageTabs: LOGGING_SETTINGS,
     section: "Operations", product: "logging", productTitle: "Cloud Logging" },
   { path: "/activity", service: null, screen: "activity", title: "Activity",      section: "Operations" },
   { path: "/requests", service: null, screen: "requests", title: "Request Log",   section: "Operations" },
@@ -1039,6 +1059,44 @@ const setChildren = (node, ...children) => {
   node.replaceChildren(...children.flat().filter((c) => c !== null && c !== undefined && c !== false));
 };
 
+// keepingFocus runs redraw, which rebuilds part of root, and puts focus back
+// on the control that stands where the focused one stood (#2047).
+//
+// A list's poll, a sort, a pager or a chart's tick rebuilt its controls
+// under a keyboard user: the focused one left the document and focus fell
+// to <body>, so the next Tab started again from the top of the page.
+// Google's console keeps a reader's place across its refreshes. The control
+// is matched by what it is and says (its role, label and text, not an
+// arrow drawn beside it), and by which of the like ones it was.
+const FOCUSABLE = "a[href], button, input, select, textarea, summary, [tabindex]";
+const focusKey = (n) => {
+  const label = n.getAttribute("aria-label") || "";
+  const text = label ? "" : [...n.childNodes]
+    .filter((c) => !(c.nodeType === 1 && c.getAttribute("aria-hidden") === "true"))
+    .map((c) => c.textContent).join("").trim().slice(0, 120);
+  return [n.tagName, n.getAttribute("type") || "", n.getAttribute("role") || "", n.getAttribute("name") || "",
+    n.id, label, text].join("\u0001");
+};
+const keepingFocus = (root, redraw) => {
+  const was = document.activeElement;
+  if (!root || !was || was === document.body || !root.contains(was)) return redraw();
+  const key = focusKey(was);
+  const nth = [...root.querySelectorAll(FOCUSABLE)].filter((n) => focusKey(n) === key).indexOf(was);
+  const out = redraw();
+  const settle = () => {
+    // Focus the redraw moved on purpose stays where it was put.
+    if (document.activeElement && document.activeElement !== document.body) return;
+    // A node taken out and put back (a header kept across redraws) was
+    // still blurred by its removal.
+    const like = () => [...root.querySelectorAll(FOCUSABLE)].filter((n) => focusKey(n) === key);
+    const now = was.isConnected ? was : like()[Math.max(nth, 0)] || like().pop();
+    if (now) now.focus({ preventScroll: true });
+  };
+  if (out && typeof out.then === "function") return out.then((v) => { settle(); return v; });
+  settle();
+  return out;
+};
+
 // --- data ------------------------------------------------------------
 
 // Every call is bounded.
@@ -1264,7 +1322,7 @@ function renderOperations() {
 
   const ops = mergedOperations();
 
-  setChildren(list, ...ops.map((op) =>
+  keepingFocus(list, () => setChildren(list, ...ops.map((op) =>
     el("li", { class: SEEN_OPERATIONS.has(op.key) ? null : "is-unread" },
       // Running is not a warning. Rendering it in the same amber the tables
       // use for "Paused" said something had gone slightly wrong; a moving
@@ -1284,7 +1342,7 @@ function renderOperations() {
                         href: `/logs?operation=${encodeURIComponent(op.id)}`,
                         text: op.detail })
             : el("div", { class: "op-detail unavailable", text: op.detail }))
-        : null)));
+        : null))));
 
   if (empty) empty.hidden = ops.length > 0;
   if (stale) {
@@ -2293,7 +2351,11 @@ function statusIcon(status) {
 //   f.active()        whether anything is filtering
 //   f.clear()         drops every chip and the typed text
 //   f.input           the text box (input.filter)
-function filterBar({ noun, columns, onChange, extra = [] }) {
+//
+// valuesOf(column), when given, is the values a property can take: choosing
+// the property then lists them, and choosing one makes its chip, as Google's
+// "Filter services > Deployment type > Function" does (#1852).
+function filterBar({ noun, columns, onChange, extra = [], valuesOf = null }) {
   let chips = [];
   const input = el("input", {
     class: "filter", type: "search", placeholder: `Filter ${noun}`,
@@ -2312,14 +2374,38 @@ function filterBar({ noun, columns, onChange, extra = [] }) {
     return { column: null, value: text.trim() };
   };
   const closeMenu = () => { menu.hidden = true; input.setAttribute("aria-expanded", "false"); };
+  const addChip = (chip) => {
+    chips.push(chip);
+    input.value = "";
+    drawChips();
+    onChange();
+    announce(`Filter ${chip.column || ""} ${chip.value} added`);
+  };
+  // A property chosen and no value typed yet: the values it has.
+  const valuesMenu = () => {
+    const m = valuesOf && /^([^:]+):\s*$/.exec(input.value);
+    const column = m && columns().find((c) => c.toLowerCase() === m[1].trim().toLowerCase());
+    const values = column ? valuesOf(column) : [];
+    if (!values.length) return false;
+    setChildren(menu,
+      el("li", { class: "filter-menu-title", role: "presentation", text: column }),
+      ...values.map((v) => el("li", { role: "presentation" },
+        el("button", { type: "button", role: "option", class: "filter-menu-item", text: v,
+          onmousedown: (e) => e.preventDefault(),
+          onclick: () => { addChip({ column, value: v }); closeMenu(); input.focus(); } }))));
+    menu.hidden = false;
+    input.setAttribute("aria-expanded", "true");
+    return true;
+  };
   const openMenu = () => {
+    if (valuesMenu()) return;
     if (input.value.trim()) return closeMenu();
     setChildren(menu,
       el("li", { class: "filter-menu-title", role: "presentation", text: "Properties" }),
       ...columns().map((c) => el("li", { role: "presentation" },
         el("button", { type: "button", role: "option", class: "filter-menu-item", text: c,
           onmousedown: (e) => e.preventDefault(),
-          onclick: () => { input.value = `${c}: `; closeMenu(); input.focus(); } }))));
+          onclick: () => { input.value = `${c}: `; closeMenu(); input.focus(); valuesMenu(); } }))));
     menu.hidden = false;
     input.setAttribute("aria-expanded", "true");
   };
@@ -2336,7 +2422,7 @@ function filterBar({ noun, columns, onChange, extra = [] }) {
   input.addEventListener("focus", openMenu);
   input.addEventListener("click", openMenu);
   input.addEventListener("blur", () => setTimeout(closeMenu, 150));
-  input.addEventListener("input", () => { if (input.value.trim()) closeMenu(); else openMenu(); onChange(); });
+  input.addEventListener("input", () => { openMenu(); onChange(); });
   input.addEventListener("keydown", (e) => {
     if (e.key === "Escape") { closeMenu(); return; }
     if (e.key === "ArrowDown" && !menu.hidden) {
@@ -2349,11 +2435,7 @@ function filterBar({ noun, columns, onChange, extra = [] }) {
     e.preventDefault();
     const chip = parse(input.value);
     if (!chip.value) return;
-    chips.push(chip);
-    input.value = "";
-    drawChips();
-    onChange();
-    announce(`Filter ${chip.column || ""} ${chip.value} added`);
+    addChip(chip);
   });
   menu.addEventListener("keydown", (e) => {
     const items = [...menu.querySelectorAll("button")];
@@ -2390,9 +2472,12 @@ function filterBar({ noun, columns, onChange, extra = [] }) {
 // remembered per service. hidden() is the set of columns turned off.
 const COLUMNS_KEY = "cloudburrow.columns";
 
-function viewOptions({ service, columns, onChange }) {
+function viewOptions({ service, columns, onChange, scope = null, reload = null, hiddenByDefault = [] }) {
   const stored = readStored(COLUMNS_KEY, {}) || {};
-  let off = new Set(Array.isArray(stored[service]) ? stored[service] : []);
+  // Until the viewer chooses, the listing's HiddenColumns are off, as
+  // Google's Key inventory hides EKM via VPC connection (#1851).
+  let off = new Set(Array.isArray(stored[service]) ? stored[service] : hiddenByDefault);
+  if (scope) return viewOptionsDialog({ service, columns, onChange, scope, reload, off });
   const button = el("button", { type: "button", class: "icon-button view-options",
     "aria-label": "View options", title: "View options", "aria-haspopup": "true", "aria-expanded": "false",
     html: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M9 5v14M15 5v14"/></svg>' });
@@ -2432,6 +2517,67 @@ function viewOptions({ service, columns, onChange }) {
     node: el("div", { class: "view-options-wrap" }, button, panel),
     hidden: () => off,
   };
+}
+
+// viewOptionsDialog is View options where the list's scope is chosen in it
+// (Scope.ViewOptions, #1843): Google's Buckets page "Click View options.
+// Select Soft deleted buckets only. Click Save." A dialog with the scope's
+// choices as radio buttons over the column choices, applied by Save.
+function viewOptionsDialog({ service, columns, onChange, scope, reload, off }) {
+  const button = el("button", { type: "button", class: "secondary view-options view-options-text",
+    "aria-haspopup": "dialog", text: "View options" });
+  button.addEventListener("click", () => {
+    const { dialog, close } = openModal({ labelledBy: "view-options-title" });
+    const name = `view-options-${scope.key}`;
+    const radios = (scope.options || []).map((o) => {
+      const id = `${name}-${o.id}`;
+      return el("label", { class: "view-options-item", for: id },
+        el("input", { type: "radio", id, name, value: o.id, checked: o.id === scope.selected ? "checked" : null }),
+        el("span", { text: o.label || o.id }));
+    });
+    const boxes = columns().map((c) => {
+      const id = `vo-col-${c.replace(/[^A-Za-z0-9]+/g, "-")}`;
+      return el("label", { class: "view-options-item", for: id },
+        el("input", { type: "checkbox", id, value: c, checked: off.has(c) ? null : "checked" }),
+        el("span", { text: c }));
+    });
+    const save = (e) => {
+      e.preventDefault();
+      off.clear();
+      for (const b of boxes) {
+        const input = b.querySelector("input");
+        if (!input.checked) off.add(input.value);
+      }
+      const all = readStored(COLUMNS_KEY, {}) || {};
+      all[service] = [...off];
+      writeStored(COLUMNS_KEY, all);
+      const picked = (dialog.querySelector(`input[name="${name}"]:checked`) || {}).value || scope.selected;
+      close();
+      if (picked !== scope.selected) {
+        const params = new URLSearchParams(location.search);
+        if (picked && picked !== scope.default) params.set(scope.key, picked);
+        else params.delete(scope.key);
+        const qs = params.toString();
+        history.pushState(history.state, "", location.pathname + (qs ? `?${qs}` : ""));
+        if (reload) reload();
+        return;
+      }
+      onChange();
+    };
+    dialog.append(
+      el("form", { class: "modal-body", id: "view-options-dialog", onsubmit: save },
+        el("h2", { id: "view-options-title", text: "View options" }),
+        el("fieldset", { class: "view-options-group" },
+          el("legend", { text: scope.label && scope.label !== "View options" ? scope.label : "Show" }), ...radios),
+        el("fieldset", { class: "view-options-group" },
+          el("legend", { text: "Column display options" }), ...boxes),
+        el("div", { class: "modal-actions" },
+          el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }),
+          el("button", { type: "submit", class: "primary", id: "view-options-save", text: "Save" }))));
+    const first = dialog.querySelector("input");
+    if (first) first.focus();
+  });
+  return { node: el("div", { class: "view-options-wrap" }, button), hidden: () => off };
 }
 
 // A cancel is not a failure: the user stopped it.
@@ -2955,6 +3101,9 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   // Google's Spanner Instances list, "Select the checkbox for the instance.
   // The Info panel appears".
   const infoOnSelect = Boolean(opts.rowControls && data.infoOnSelect);
+  if (infoOnSelect) {
+    INFO_SELECTION = () => [...selected].map((n) => data.items.find((i) => i.name === n)).filter(Boolean);
+  }
   const selectable = Boolean(opts.rowControls && caps.delete) || selectActions.length > 0 || infoOnSelect;
   // Or a list screen's rows marked selectable: History's builds awaiting
   // approval, which its Approve takes (#1854). A top-level list's own
@@ -2986,7 +3135,9 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   // The data columns on screen: View options can turn any of them off
   // (#1842). The filter still reads the hidden ones, as Google's does.
   const chooser = opts.rowControls && route.service
-    ? viewOptions({ service: route.service, columns: allDataColumns, onChange: () => draw() })
+    ? viewOptions({ service: route.service, columns: allDataColumns, onChange: () => draw(),
+      scope: data.scope && data.scope.viewOptions ? data.scope : null, reload,
+      hiddenByDefault: data.hiddenColumns || [] })
     : null;
   const dataColumns = () => allDataColumns().filter((c) => !chooser || !chooser.hidden().has(c));
   const hasActions = () =>
@@ -2997,11 +3148,20 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   const hasStatus = () => Boolean(data.alwaysStatus || data.items.some((i) => i.status));
   // Status is the first column, as an icon, the way Google's lists draw it
   // (#1842); the row menu's column has no header text.
+  // The name column is first unless the listing puts it after a data
+  // column (Listing.NameAfter): Cloud Run functions' list leads with
+  // Environment, then Name (#1853). A hidden NameAfter column leaves it
+  // first.
+  const nameAfter = () => (data.nameAfter && dataColumns().includes(data.nameAfter) ? data.nameAfter : "");
+  const ordered = () => {
+    const cols = dataColumns();
+    const at = nameAfter() ? cols.indexOf(nameAfter()) + 1 : 0;
+    return [...cols.slice(0, at), nameColumn(), ...cols.slice(at)];
+  };
   const columns = () => [
     ...(selectable ? ["select"] : []),
     ...(hasStatus() ? ["Status"] : []),
-    nameColumn(),
-    ...dataColumns(),
+    ...ordered(),
     ...(hasActions() ? ["Actions"] : []),
   ];
 
@@ -3016,7 +3176,11 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   // location and getting nothing reads as "there are none". A chip names
   // one column (#1842).
   const filterColumns = () => [nameColumn(), ...allDataColumns(), ...(hasStatus() ? ["Status"] : [])];
-  const bar = filterBar({ noun, columns: filterColumns, onChange: () => { page = 0; draw(); } });
+  // A property's values, for the filter's menu (#1852): those the rows
+  // have, as Google's offers Deployment type's Container and Function.
+  const valuesOf = (column) => [...new Set(data.items.map((i) => valueOf(i, column))
+    .filter((v) => v && v !== "—" && v.length <= 40))].sort().slice(0, 20);
+  const bar = filterBar({ noun, columns: filterColumns, onChange: () => { page = 0; draw(); }, valuesOf });
   const matches = (item) => bar.matches((column) => column === null
     ? filterColumns().map((c) => valueOf(item, c))
     : valueOf(item, column));
@@ -3142,7 +3306,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
     // where Google's menu begins with it, as a trigger's Edit, Disable,
     // Delete (#1854).
     const edit = caps.editRow ? [{
-      label: caps.editRow,
+      key: "edit", label: caps.editRow,
       run: () => editFromRow(route, (item.opens || []).length ? item.opens : [item.name], refresh),
     }] : [];
     // A row's own buttons, before its menu: a trigger's Run (#1854).
@@ -3152,7 +3316,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
     const actions = [
       ...(caps.editRowFirst ? edit : []),
       ...(item.actions || []).filter((a) => !a.button && !a.panel).map((a) => ({
-        label: a.label, destructive: a.destructive,
+        key: a.id, label: a.label, destructive: a.destructive,
         // A row whose actions address a path of their own is named by its
         // row, not the path's last segment: a value inside a Datastore
         // property is addressed by its steps as JSON, [6,"when"], and its
@@ -3162,11 +3326,17 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
       })),
       ...(caps.editRowFirst ? [] : edit),
       ...(caps.delete ? [{
-        label: caps.deleteLabel || "Delete", destructive: true,
+        key: "delete", label: caps.deleteLabel || "Delete", destructive: true,
         run: () => deleteResource(route, item.name, refresh, rowBusy(item.name)),
       }] : []),
       ...(item.object ? objectActions(route, item, refresh, rowBusy(item.name)) : []),
     ];
+    // Google's order, where the provider gives it (#1863: Log Router's View
+    // sink details, Edit sink, Disable sink, Delete sink, Troubleshoot sink).
+    if ((caps.rowMenuOrder || []).length) {
+      const rank = (a) => { const i = caps.rowMenuOrder.indexOf(a.key); return i < 0 ? caps.rowMenuOrder.length : i; };
+      actions.sort((a, b) => rank(a) - rank(b));
+    }
     if (!actions.length && !buttons.length) return el("td", {});
     if (!actions.length) return el("td", { class: "row-actions" }, ...buttons);
     // Suppressed rather than merely ignored while the row is busy: a live
@@ -3183,7 +3353,8 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
     return el("td", { class: "row-actions" }, ...buttons, overflowMenu(actions, item.name));
   };
 
-  const draw = () => {
+  const draw = () => keepingFocus(view, drawNow);
+  const drawNow = () => {
     const rows = visibleRows();
     const total = rows.length;
     const pages = Math.max(1, Math.ceil(total / pageSize));
@@ -3196,8 +3367,10 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
     const childRows = (item) => (expanded.has(item.name) ? item.children || [] : []).map((child) => el("tr", { class: "child-row" },
       ...(selectable ? [el("td", { class: "select-cell" })] : []),
       ...(hasStatus() ? [el("td", { class: "status-cell" }, child.status ? statusIcon(child.status) : null)] : []),
-      el("td", { class: "child-name" }, child.name),
-      ...dataColumns().map((c) => el("td", { text: (child.fields || {})[c] || "" })),
+      // In the listing's column order, Name where ordered() puts it.
+      ...ordered().map((c) => (c === nameColumn()
+        ? el("td", { class: "child-name" }, child.name)
+        : el("td", { text: (child.fields || {})[c] || "" }))),
       ...(hasActions() ? [el("td", {})] : [])));
     const expander = (item) => {
       if (!(item.children || []).length) return null;
@@ -3248,15 +3421,15 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
               spinner(`${item.name} is being changed`)))
           : el("td", { class: "status-cell" }, statusIcon(item.status)));
       }
-      cells.push(el("td", {}, expander(item), item.link
+      const nameCell = el("td", {}, expander(item), item.link
         ? el("a", { href: item.link, text: item.name })
         : (item.opens || []).length
           ? el("a", { href: detailHref(route, item.opens), text: item.name })
         : caps.detail
           ? el("a", { href: detailHref(route, item.name), text: item.name })
-          : document.createTextNode(item.name)));
-      for (const c of dataColumns()) {
-        cells.push(el("td", { text: (item.fields || {})[c] || "—" }));
+          : document.createTextNode(item.name));
+      for (const c of ordered()) {
+        cells.push(c === nameColumn() ? nameCell : el("td", { text: (item.fields || {})[c] || "—" }));
       }
       if (hasActions()) cells.push(rowActionsCell(item));
       const row = el("tr", {
@@ -3500,12 +3673,19 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   const freshness = el("p", { class: "table-freshness unavailable", role: "status" });
 
   const drawFreshness = () => {
-    setChildren(freshness,
-      el("span", { text: staleBecause
-        ? `Last read ${relativeTime(readAt)} — refresh failed: ${staleBecause}`
-        : `Updated ${relativeTime(readAt)}` }));
+    const said = staleBecause
+      ? `Last read ${relativeTime(readAt)} — refresh failed: ${staleBecause}`
+      : `Updated ${relativeTime(readAt)}`;
+    // A live region rewritten with the same words is read out again.
+    if (freshness.textContent !== said) setChildren(freshness, el("span", { text: said }));
     freshness.classList.toggle("is-stale", Boolean(staleBecause));
   };
+
+  // The listing the table was last drawn from, as read. A poll that reads
+  // the same listing changes nothing on the page (#2047): Google's console
+  // does not rebuild a list nobody changed, and rebuilding it took the
+  // place of a keyboard user tabbing through it.
+  let drawnFrom = JSON.stringify(data);
 
   // quiet is the automatic poll: it must not raise a snackbar every interval
   // on an instance whose backend is down, and must not blank a table that
@@ -3515,6 +3695,14 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
     try {
       const fresh = await opts.refetch();
       if (fresh && Array.isArray(fresh.items)) {
+        const read = JSON.stringify(fresh);
+        if (quiet && read === drawnFrom) {
+          readAt = new Date();
+          staleBecause = "";
+          drawFreshness();
+          return;
+        }
+        drawnFrom = read;
         data = fresh;
         // A selection may name rows that no longer exist.
         const names = new Set(data.items.map((i) => i.name));
@@ -3643,7 +3831,14 @@ function openAskedListAction(route, data, onDone) {
   here.searchParams.delete("action");
   history.replaceState(history.state, "", here.pathname + here.search);
   const opened = (data.actions || []).find((a) => a.id === asked && !a.href);
-  if (opened) openActionForm(route, [], opened, onDone, data.noun || route.title);
+  if (!opened) return;
+  // One with nothing to fill in is performed as its button would be,
+  // confirmed first where it asks (#2047: Storage Intelligence's Disable).
+  if ((opened.fields || []).some((f) => f.type !== "hidden")) {
+    openActionForm(route, [], opened, onDone, data.noun || route.title);
+  } else {
+    runAction(route, [], opened, onDone, NO_ROW, data.noun || route.title);
+  }
 }
 
 // detailHref is the address of one row's contents.
@@ -3768,7 +3963,16 @@ async function renderDetail(view, route, resourcePath) {
   if (data.edit && data.edit.page && new URLSearchParams(location.search).get("edit") === "1") {
     return renderEditPage(view, route, segments, data, crumb);
   }
-  const sections = (data.sections || []).slice();
+  // Google's Edit subscription and Edit secret are pages (#1847, #1850):
+  // this resource's address with ?edit=1 draws it in place of the tabs.
+  if (data.edit && data.edit.layout === "page" && new URLSearchParams(location.search).get("edit") === "1") {
+    return renderLayoutEditPage(view, route, segments, data.edit, crumb);
+  }
+  // A section ShownIn another is drawn by that tab's Show list, not as a
+  // tab of its own (#1843): a bucket's soft-deleted objects are the
+  // Objects tab's "Soft-deleted objects only".
+  const allSections = (data.sections || []).slice();
+  const sections = allSections.filter((s) => !s.shownIn);
   // A Logs tab where Google's page has one (#1842, audit item 9): a Cloud
   // Run service's, job's and worker pool's, a function's, and a GKE
   // workload's, pod's, Service's and Job's ("Click the Logs tab to get the
@@ -3853,7 +4057,12 @@ async function renderDetail(view, route, resourcePath) {
   // address, which is the Studio's (#1861).
   const embedded = view.dataset.embedded === "true";
   const wanted = (embedded ? view.dataset.tab : new URLSearchParams(location.search).get("tab")) || data.openTab;
-  let current = Math.max(0, sections.findIndex((sec) => sec.id === wanted));
+  // An address naming a section ShownIn another opens that tab with the
+  // section chosen in its Show list: ?tab=deleted, a bucket's Deleted
+  // objects tab before #1843.
+  const shownWanted = allSections.find((sec) => sec.shownIn && sec.id === wanted);
+  if (shownWanted) SHOW_CHOICES[shownWanted.shownIn] = shownWanted.showAs || shownWanted.label;
+  let current = Math.max(0, sections.findIndex((sec) => sec.id === (shownWanted ? shownWanted.shownIn : wanted)));
 
   const panel = el("div", { class: "tab-panel", id: "detail-panel", role: "tabpanel" });
 
@@ -3961,6 +4170,8 @@ async function renderDetail(view, route, resourcePath) {
         return drawTextSection(panel, section, note);
       case "chart":
         return drawChartSection(panel, section, note);
+      case "analytics":
+        return drawAnalyticsSection(panel, section, note);
       case "logs":
         return drawLogsSection(panel, section, note);
       case "permissions":
@@ -4050,6 +4261,10 @@ async function renderDetail(view, route, resourcePath) {
   const drawListingSection = (into, section, note, reload) => {
     let list = section.listing || {};
     const noun = list.noun || section.label.toLowerCase();
+    // A tab's own summary cards over its rows: a key's Usage tracking
+    // tab draws its key usage summary over the protected resources (#2053).
+    const cards = listingSummary(list);
+    if (cards.length) note = note ? el("div", {}, note, ...cards) : el("div", {}, ...cards);
     // A workflow execution's Steps (#2004): the visualization panel of
     // the revision that ran, over the step entries' table.
     if (section.graph) {
@@ -4066,20 +4281,23 @@ async function renderDetail(view, route, resourcePath) {
     // An upload control where the provider says objects can land. It joins
     // the section's note, so it is drawn whether or not there are rows yet —
     // an empty bucket is exactly where the first upload happens.
-    if (section.uploadTo) {
-      const up = uploadControl(route, section.uploadTo, reload);
-      // Show versions (#853): the same place listed with every generation,
-      // live and noncurrent, from the storage server's versions=true.
-      up.append(versionsToggle(() => drawPanel()));
-      // Google's Show list (#1843): Soft-deleted objects only draws the
-      // bucket's soft-deleted objects, with Restore, in the Objects tab.
-      const softSection = sections.find((sc) => sc.id === "deleted");
-      if (softSection) up.append(objectsShowPicker(() => drawPanel()));
-      note = note ? el("div", {}, note, up) : up;
-      if (softSection && objectsShow === OBJECTS_SHOW_SOFT) {
-        return drawListingSection(into, { ...softSection, uploadTo: null }, note, reload);
+    // Google's Show list (#1843): on the Objects tab "Live objects only",
+    // "Live and noncurrent objects" (#853: every generation, from the
+    // storage server's versions=true) and "Soft-deleted objects only"; on
+    // any tab another section is ShownIn, this tab's own rows and each such
+    // section's, drawn in this tab.
+    const shownHere = allSections.filter((sc) => sc.shownIn === section.id);
+    if (section.uploadTo || shownHere.length) {
+      const show = showList(section, shownHere, () => drawPanel());
+      let bar = show.node;
+      if (section.uploadTo) {
+        bar = uploadControl(route, section.uploadTo, reload);
+        bar.append(show.node);
       }
-      if (readStored(VERSIONS_KEY, false)) return drawVersionsSection(into, section, note, reload);
+      note = note ? el("div", {}, note, bar) : bar;
+      const other = shownHere.find((sc) => (sc.showAs || sc.label) === show.choice);
+      if (other) return drawListingSection(into, { ...other, uploadTo: null }, note, reload);
+      if (section.uploadTo && show.choice === SHOW_NONCURRENT) return drawVersionsSection(into, section, note, reload);
     }
     if (!(list.items || []).length) {
       // The listing's own note, when it has one.
@@ -4469,7 +4687,9 @@ async function renderDetail(view, route, resourcePath) {
       setTimeout(() => revealValue(route, segments, data.reveal), 0);
     }
   }
-  DETAIL_EDIT = data.edit ? () => openEditForm(route, segments, data.edit, reloadPage) : null;
+  DETAIL_EDIT = !data.edit ? null : data.edit.layout === "page"
+    ? () => navigate(editPageHref())
+    : () => openEditForm(route, segments, data.edit, reloadPage);
   if (data.edit && data.edit.page) {
     const editHref = new URL(detailHref(route, segments), location.origin);
     editHref.searchParams.set("edit", "1");
@@ -4480,7 +4700,11 @@ async function renderDetail(view, route, resourcePath) {
   } else if (data.edit && !data.edit.inline) {
     pageActions.unshift(el("button", {
       class: "primary", text: data.edit.label || "Edit",
-      onclick: () => openEditForm(route, segments, data.edit, reloadPage),
+      // An edit that is a page of its own (EditForm.Layout, #1847) opens
+      // at this page's address with ?edit=1.
+      onclick: () => data.edit.layout === "page"
+        ? navigate(editPageHref())
+        : openEditForm(route, segments, data.edit, reloadPage),
     }));
   }
   // Beside the title, as Google's Edit and Delete are (#1842).
@@ -4498,6 +4722,16 @@ async function renderDetail(view, route, resourcePath) {
   // off the address, so a reload or Back does not open it again.
   const asked = new URLSearchParams(location.search).get("action");
   const opened = asked && (data.actions || []).find((a) => a.id === asked);
+  // One that is a page of its own (Action.Page, #1851) is drawn in the
+  // page's place and keeps its address, so a reload shows it again and
+  // Back returns to the resource's page.
+  if (opened && opened.page) {
+    const here = new URL(location.href);
+    here.searchParams.delete("action");
+    openActionForm(route, segments, opened, () => {}, data.title || null,
+      { view, back: here.pathname + here.search });
+    return;
+  }
   if (asked) {
     const here = new URL(location.href);
     here.searchParams.delete("action");
@@ -4507,7 +4741,11 @@ async function renderDetail(view, route, resourcePath) {
 }
 
 // openActionForm collects an action's inputs and then performs it.
-function openActionForm(route, segments, action, onDone, title = null) {
+//
+// With host ({ view, back }), the form is a page of its own in view
+// (Action.Page, #1851): headed by the action's title with a back arrow,
+// ending in its submit and Cancel, and leaving for back when done.
+function openActionForm(route, segments, action, onDone, title = null, host = null) {
   const name = title || segments[segments.length - 1];
   const fields = buildCreateForm({ label: action.label, fields: action.fields });
   // An action whose form is Google's steps (Action.Steps, #1858): Create
@@ -4519,10 +4757,12 @@ function openActionForm(route, segments, action, onDone, title = null) {
   const error = el("p", { class: "form-error", role: "alert", hidden: true });
   let submitting = false;
 
-  const { dialog, close } = openModal({
-    labelledBy: "action-title",
-    canClose: () => !submitting,
-  });
+  const { dialog, close } = host
+    ? { dialog: null, close: () => navigate(host.back) }
+    : openModal({
+      labelledBy: "action-title",
+      canClose: () => !submitting,
+    });
 
   const primary = el("button", {
     type: "submit",
@@ -4534,8 +4774,11 @@ function openActionForm(route, segments, action, onDone, title = null) {
 
   // A checked box that puts something at risk — Replace the destination —
   // asks first, and wants the thing at risk named back (#790).
-  const risky = (values) => (action.fields || []).find((f) =>
-    f.type === "checkbox" && f.confirm && values[f.name] === "true");
+  // A choice that puts something at risk — Disable autokey — asks too,
+  // with Google's Confirm and nothing typed (#2053).
+  const risky = (values) => (action.fields || []).find((f) => f.confirm &&
+    ((f.type === "checkbox" && !f.confirmValue && values[f.name] === "true") ||
+     (f.confirmValue && values[f.name] === f.confirmValue)));
 
   const submit = async (e) => {
     e.preventDefault();
@@ -4551,7 +4794,7 @@ function openActionForm(route, segments, action, onDone, title = null) {
         // Remove asks "Remove user account?" with nothing typed.
         title: action.confirmTitle || `${action.label}: ${name}?`,
         detail: action.confirm,
-        confirmWord: name,
+        confirmWord: action.confirmWord || name,
         confirmLabel: action.label,
         consequence: "",
         style: action.confirmStyle || "name",
@@ -4563,6 +4806,22 @@ function openActionForm(route, segments, action, onDone, title = null) {
       return;
     }
     const risk = risky(values);
+    if (risk && risk.confirmValue) {
+      // Cancelled, the form stays open with what was chosen.
+      await confirmDestructive({
+        title: risk.confirmTitle || `${action.label}?`,
+        detail: risk.confirm,
+        confirmWord: name,
+        confirmLabel: "Confirm",
+        consequence: "",
+        style: "confirm",
+        onConfirm: async () => {
+          const failure = await perform(values);
+          if (failure) throw failure;
+        },
+      });
+      return;
+    }
     if (risk) {
       const word = (values[risk.confirmWith] || "").trim() || name;
       // Cancelled, the form stays open with what was typed. Refused, the
@@ -4598,11 +4857,19 @@ function openActionForm(route, segments, action, onDone, title = null) {
       op.succeeded("", res.operation);
       submitting = false;
       notify(segments.length ? `${action.label} applied to ${name}` : `${action.label} done`);
+      // An action whose Google flow goes on to the resource it made
+      // (Action.Then): Write a function's Create lands on the function's
+      // Source tab (#1853).
+      if (action.then) {
+        close();
+        navigate(actionThen(action.then, values));
+        return null;
+      }
       onDone();
       // An action that answers with rows — a pull — keeps its dialog open to
       // show them. Closing it would be the pull done and its messages thrown
       // away, which for "Pull and ack" means gone for good.
-      if (res.result) {
+      if (res.result && !host) {
         setChildren(dialog, el("div", { class: "modal-body", id: "action-result" },
           el("h2", { id: "action-title", text: `${action.label}: ${name}` }),
           resultTable(res.result, { route, path: segments }),
@@ -4622,6 +4889,19 @@ function openActionForm(route, segments, action, onDone, title = null) {
     }
   };
 
+  if (host) {
+    const heading = action.title || action.label;
+    setChildren(host.view,
+      pageHeader(heading, segments.length ? name : null, { back: host.back, backLabel: `Back to ${name}` }),
+      el("form", { class: "create-page is-single-page", novalidate: true, onsubmit: submit, "aria-label": heading },
+        error,
+        ...actionSteps.nodes,
+        el("div", { class: "form-actions" }, primary,
+          el("a", { class: "button secondary", href: host.back, text: "Cancel" }))));
+    fields.focusFirst();
+    announce(`${heading} form`);
+    return;
+  }
   dialog.append(el("form", { class: "modal-body", novalidate: true, onsubmit: submit },
     // Google's title where it is not the action's label (Action.Title,
     // #1860): Cloud SQL's Create database opens "New database".
@@ -4632,6 +4912,16 @@ function openActionForm(route, segments, action, onDone, title = null) {
   fields.focusFirst();
 }
 
+// actionThen is an Action.Then route with each {field} replaced by the
+// value submitted for it, encoded as a path segment, and the project kept.
+function actionThen(then, values) {
+  const filled = then.replace(/\{([A-Za-z0-9_]+)\}/g, (_, k) => encodeURIComponent(values[k] || ""));
+  const url = new URL(filled, location.origin);
+  const project = new URLSearchParams(location.search).get("project");
+  if (project && !url.searchParams.has("project")) url.searchParams.set("project", project);
+  return url.pathname + url.search;
+}
+
 // listActionButtons are the list screen's own actions (#1289), on no
 // existing resource: Cloud Run's Create service from source. Each opens its
 // form and is sent with an empty path, which the upload route checks against
@@ -4640,7 +4930,9 @@ function listActionButtons(route, data, onDone) {
   // A list action the listing also offers on its selection (#1864) is
   // drawn once, as the selection's button.
   const onSelection = new Set((data.selectActions || []).map((a) => a.id));
-  return (data.actions || []).filter((a) => !onSelection.has(a.id)).map((a) => el("button", {
+  // A Linked one is opened from where the page links to it (#2047:
+  // Disable beside Storage Intelligence's Status), not as a button.
+  return (data.actions || []).filter((a) => !onSelection.has(a.id) && !a.linked).map((a) => el("button", {
     type: "button", class: "secondary", id: `list-action-${a.id}`, text: a.label,
     // One that is a link opens its page: the Datastore page's Indexes
     // (#1846).
@@ -5121,27 +5413,31 @@ const PREVIEW_IMAGES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
 // as the Cloud Storage console keeps it.
 const VERSIONS_KEY = "cloudburrow.storage.versions";
 
-// The Objects tab's Show list (#1843), for this page view.
-const OBJECTS_SHOW_LIVE = "Live objects only";
-const OBJECTS_SHOW_SOFT = "Soft-deleted objects only";
-let objectsShow = OBJECTS_SHOW_LIVE;
+// Google's Show list (#1843): a tab's own rows, or a section ShownIn it,
+// chosen for this page view per tab. On a bucket's Objects tab "Live and
+// noncurrent objects" is kept for the viewer across pages, as the Cloud
+// Storage console keeps it (#853).
+const SHOW_LIVE = "Live objects only";
+const SHOW_NONCURRENT = "Live and noncurrent objects";
+let SHOW_CHOICES = {};
 
-function objectsShowPicker(onChange) {
-  const select = el("select", { id: "objects-show", name: "show" },
-    ...[OBJECTS_SHOW_LIVE, OBJECTS_SHOW_SOFT].map((o) =>
-      el("option", { value: o, text: o, selected: o === objectsShow })));
-  select.addEventListener("change", () => { objectsShow = select.value; onChange(); });
-  return el("label", { class: "objects-show", for: "objects-show" }, "Show ", select);
-}
-
-function versionsToggle(onChange) {
-  const box = el("input", { type: "checkbox", id: "object-versions-toggle",
-    checked: readStored(VERSIONS_KEY, false) });
-  box.addEventListener("change", () => {
-    writeStored(VERSIONS_KEY, box.checked);
+function showList(section, shownHere, onChange) {
+  const own = section.show || SHOW_LIVE;
+  const options = [own, ...(section.uploadTo ? [SHOW_NONCURRENT] : []),
+    ...shownHere.map((sc) => sc.showAs || sc.label)];
+  let choice = SHOW_CHOICES[section.id];
+  if (!options.includes(choice)) {
+    choice = section.uploadTo && readStored(VERSIONS_KEY, false) ? SHOW_NONCURRENT : own;
+  }
+  const id = `${section.id}-show`;
+  const select = el("select", { id, name: "show" },
+    ...options.map((o) => el("option", { value: o, text: o, selected: o === choice })));
+  select.addEventListener("change", () => {
+    SHOW_CHOICES[section.id] = select.value;
+    if (section.uploadTo) writeStored(VERSIONS_KEY, select.value === SHOW_NONCURRENT);
     onChange();
   });
-  return el("label", { class: "versions-toggle", for: "object-versions-toggle" }, box, " Show versions");
+  return { node: el("label", { class: "objects-show", for: id }, "Show ", select), choice };
 }
 
 function objectQuery(path) {
@@ -5399,6 +5695,7 @@ async function editFromRow(route, segments, onDone) {
       url.searchParams.set("edit", "1");
       return navigate(url.pathname + url.search);
     }
+    if (data.edit.layout === "page") return navigate(editPageHref(detailHref(route, segments)));
     openEditForm(route, segments, data.edit, onDone);
   } catch (err) {
     notify(String(err.message), "error");
@@ -5412,6 +5709,13 @@ async function editFromRow(route, segments, onDone) {
 // differently from a create form would be a second form implementation to keep
 // in step with the first.
 function openEditForm(route, segments, spec, onDone) {
+  // An edit that is a page of its own (EditForm.Layout "page", #1850):
+  // Google's Edit secret page, ending in Update secret.
+  if (spec.layout === "page" && route && route.path) {
+    const to = new URL(detailHref(route, segments), location.origin);
+    to.searchParams.set("edit", "1");
+    return navigate(to.pathname + to.search);
+  }
   const name = segments[segments.length - 1];
   const fields = buildCreateForm(spec);
   const error = el("p", { class: "form-error", role: "alert", hidden: true });
@@ -5428,10 +5732,13 @@ function openEditForm(route, segments, spec, onDone) {
   const cancel = el("button", { type: "button", class: "secondary", text: "Cancel",
                                 onclick: () => close() });
 
+  const initial = fields.values();
   const submit = async (e) => {
     e.preventDefault();
     error.hidden = true;
     if (submitting || !fields.validate()) return;
+    // Google's View diff & redeploy (#1852): the changes, then Deploy changes.
+    if (spec.review && !(await reviewChanges(spec, initial, fields.values()))) return;
     submitting = true;
     primary.disabled = true;
     const op = recordOperation(`Update ${name}`);
@@ -5464,6 +5771,110 @@ function openEditForm(route, segments, spec, onDone) {
   fields.focusFirst();
 }
 
+// editPageHref is the address of a resource's edit page (EditForm.Layout
+// "page", #1847): its own page's address, here or at href, with ?edit=1.
+function editPageHref(href) {
+  const u = new URL(href || location.pathname + location.search, location.origin);
+  u.searchParams.delete("tab");
+  u.searchParams.set("edit", "1");
+  return u.pathname + u.search;
+}
+
+// renderLayoutEditPage draws an edit as a page of its own (#1847,
+// EditForm.Layout "page"), as Google's Edit subscription is: the resource's crumbs, then Edit, the form under
+// its section headings as a one-page create form draws it, and the form's
+// Submit ("Update") then Cancel at the bottom. Cancel and a saved change
+// go back to the resource's page.
+function renderLayoutEditPage(view, route, segments, spec, crumb) {
+  const name = segments[segments.length - 1];
+  const u = new URL(location.href);
+  u.searchParams.delete("edit");
+  const backHref = u.pathname + u.search;
+  const title = spec.title || spec.label || "Edit";
+  const nav = crumb.querySelector(".breadcrumb");
+  const last = nav.lastElementChild;
+  if (last && last.tagName === "SPAN") nav.replaceChild(el("a", { href: backHref, text: last.textContent }), last);
+  nav.append(el("span", { "aria-hidden": "true", text: "/" }), el("span", { text: title }));
+  const heading = crumb.querySelector("h1, h2");
+  heading.textContent = title;
+  const arrow = crumb.querySelector(".page-title-row a");
+  if (arrow) {
+    arrow.setAttribute("href", backHref);
+    arrow.setAttribute("aria-label", `Back to ${name}`);
+  }
+  const header = crumb.querySelector(".page-header-actions");
+  if (header) setChildren(header);
+  if (!crumb.querySelector(".resource-name")) heading.after(el("p", { class: "resource-name", text: name }));
+
+  const fields = buildCreateForm(spec);
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  const primary = el("button", { type: "submit", class: "primary", text: spec.submit || "Save" });
+  const cancel = el("a", { class: "button secondary", href: backHref, text: "Cancel" });
+  const submit = async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    if (!fields.validate()) return;
+    setBusy(primary, true);
+    const op = recordOperation(`Update ${name}`);
+    try {
+      const res = await send(
+        `/api/resources/${route.service}?project=${encodeURIComponent(currentProject())}`,
+        "PATCH", { Path: segments, Values: fields.values() });
+      op.succeeded("", res.operation);
+      notify(`Updated ${name}`);
+      announce(`Updated ${name}`);
+      navigate(backHref);
+    } catch (err) {
+      op.failed(err.message, err.operation);
+      setBusy(primary, false);
+      error.textContent = err.message;
+      error.hidden = false;
+    }
+  };
+  setChildren(view, crumb,
+    el("form", { class: "create-page is-single-page edit-page", novalidate: true, onsubmit: submit,
+                 "aria-label": `${title} ${name}` },
+      spec.note ? el("p", { class: "form-help", text: spec.note }) : null,
+      error,
+      ...fields.nodes,
+      el("div", { class: "form-actions" }, primary, cancel)));
+  fields.focusFirst();
+  announce(`${title} form`);
+}
+
+// reviewChanges is an edit form's review step (EditForm.Review, #1852):
+// Google's View diff & redeploy shows what the change makes different, and
+// Deploy changes sends it. It resolves true when the change is to be sent,
+// false when the dialog is cancelled, which leaves the form as it was.
+function reviewChanges(spec, before, after) {
+  const label = (name) => ((spec.fields || []).find((f) => f.name === name) || {}).label || name;
+  const shown = (v) => (v === undefined || v === "" ? "—" : String(v));
+  const changed = Object.keys(after).filter((k) => !k.startsWith("tab:") && shown(before[k]) !== shown(after[k]));
+  return new Promise((resolve) => {
+    let answer = false;
+    const { dialog, close } = openModal({ labelledBy: "review-title" });
+    dialog.addEventListener("cb-closed", () => resolve(answer));
+    const deploy = el("button", { type: "button", class: "primary", id: "review-deploy", text: spec.review,
+      onclick: () => { answer = true; close(); } });
+    const cancel = el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() });
+    dialog.append(el("div", { class: "modal-body" },
+      el("h2", { id: "review-title", text: spec.submit || "Review changes" }),
+      changed.length
+        ? el("div", { class: "table-wrap" }, el("table", { class: "table", id: "review-diff" },
+          el("caption", { class: "sr-only", text: "Changes to deploy" }),
+          el("thead", {}, el("tr", {},
+            el("th", { scope: "col", text: "Setting" }), el("th", { scope: "col", text: "Current" }),
+            el("th", { scope: "col", text: "New" }))),
+          el("tbody", {}, ...changed.map((k) => el("tr", {},
+            el("th", { scope: "row", text: label(k) }),
+            el("td", { class: "review-old", text: shown(before[k]) }),
+            el("td", { class: "review-new", text: shown(after[k]) }))))))
+        : el("p", { class: "form-help", id: "review-none", text: "No changes. Deploying creates a new revision with the same configuration." }),
+      el("div", { class: "modal-actions" }, cancel, deploy)));
+    deploy.focus();
+  });
+}
+
 // inlineEditForm is a section's own edit form (Section.Edit, #1864), sent
 // as the page's Edit is, through PATCH /api/resources/{service}.
 function inlineEditForm(route, segments, section, onDone) {
@@ -5474,10 +5885,12 @@ function inlineEditForm(route, segments, section, onDone) {
   const titleId = `inline-edit-${section.id}`;
   const primary = el("button", { type: "submit", class: "primary", id: `${titleId}-save`, text: spec.submit || "Save" });
   let submitting = false;
+  const initial = fields.values();
   const submit = async (e) => {
     e.preventDefault();
     error.hidden = true;
     if (submitting || !fields.validate()) return;
+    if (spec.review && !(await reviewChanges(spec, initial, fields.values()))) return;
     submitting = true;
     primary.disabled = true;
     const op = recordOperation(`Update ${name}`);
@@ -5644,7 +6057,8 @@ async function renderList(view, route) {
     header.push(...listingSummary(data));
   }
   if (data.serverFilter) header.push(serverFilterBox(data.serverFilter, () => renderList(view, route)));
-  if (data.scope) header.push(scopePicker(data.scope, () => renderList(view, route), (data.filters || []).map((f) => f.key)));
+  // A scope held in View options (#1843) is chosen in that dialog.
+  if (data.scope && !data.scope.viewOptions) header.push(scopePicker(data.scope, () => renderList(view, route), (data.filters || []).map((f) => f.key)));
   (data.filters || []).forEach((f, i, all) =>
     header.push(scopePicker(f, () => renderList(view, route), all.slice(i + 1).map((x) => x.key))));
 
@@ -6120,6 +6534,7 @@ function infoTabs(item, tabs, details, route, onDone) {
   });
   const draw = (tab) => {
     if (tab.id === "details") return setChildren(panel, ...details);
+    if (tab.permissions) return drawInfoPermissions(panel, item, tab, route);
     const shown = (tab.properties || []).length
       ? el("dl", { class: "info-fields" }, ...tab.properties.flatMap((p) => [
           el("dt", { text: p.label }), el("dd", { text: p.value })]))
@@ -6168,6 +6583,90 @@ function infoTabs(item, tabs, details, route, onDone) {
   };
   select(INFO_TAB, false);
   return el("div", { class: "info-tabbed" }, strip, panel);
+}
+
+// INFO_SELECTION answers the rows checked in the list the info panel
+// belongs to, so an info panel's Permissions tab can grant on each of them
+// (#1847: "To set roles for one or more topics, select the topics").
+let INFO_SELECTION = () => [];
+
+// drawInfoPanel's Permissions tab (InfoTab.Permissions, #1847): the row's
+// IAM policy, read through POST /api/permissions/{service} with Read, one
+// row per principal and role with Remove principal on each, under Add
+// principal. With several rows checked, Add principal grants the role on
+// each, each read and saved with its own etag.
+let INFO_PERMS_DRAW = 0;
+async function drawInfoPermissions(panel, item, tab, route) {
+  const mine = ++INFO_PERMS_DRAW;
+  const url = `/api/permissions/${route.service}?project=${encodeURIComponent(currentProject())}`;
+  const targetOf = (i) => ((i.target || []).length ? i.target : [i.name]);
+  const read = (i) => send(url, "POST", { Path: targetOf(i), Read: {} });
+  setChildren(panel, el("p", { class: "unavailable", text: "Reading the IAM policy…" }));
+  let section;
+  try {
+    section = await read(item);
+  } catch (err) {
+    if (mine !== INFO_PERMS_DRAW) return;
+    return setChildren(panel, el("p", { class: "form-error", role: "alert", text: err.message }));
+  }
+  if (mine !== INFO_PERMS_DRAW || !panel.isConnected) return;
+  if (!section.permissions || section.unavailable) {
+    return setChildren(panel, el("p", { class: "unavailable", text: section.unavailable || "This resource has no IAM policy to show." }));
+  }
+  const view = section.permissions;
+  const redraw = () => drawInfoPermissions(panel, item, tab, route);
+  const checked = INFO_SELECTION().filter((i) => i && i.info && i.info.some((t) => t.permissions));
+  const many = checked.length > 1 && checked.some((i) => i.name === item.name) ? checked : [item];
+  const label = many.length > 1 ? `${many.length} selected` : item.name;
+  // One Grant per checked row, each with the etag its own read gave.
+  const change = async (body) => {
+    if (!body.Grant || many.length === 1) return send(url, "POST", { Path: targetOf(item), Etag: view.etag, ...body });
+    let last = null;
+    for (const i of many) {
+      const own = i.name === item.name ? section : await read(i);
+      if (!own.permissions) throw new Error(`${i.name}: ${own.unavailable || "no IAM policy"}`);
+      last = await send(url, "POST", { Path: targetOf(i), Etag: own.permissions.etag, ...body });
+    }
+    return last;
+  };
+  const rows = (view.bindings || []).flatMap((b) => (b.members || []).map((m) =>
+    ({ member: m, role: b.role, conditional: b.conditional || null })))
+    .sort((a, b) => a.member.localeCompare(b.member) || a.role.localeCompare(b.role));
+  const add = el("button", { type: "button", class: "primary", id: "info-add-principal", text: "Add principal",
+    onclick: () => openGrantForm(view, label, change, redraw) });
+  setChildren(panel,
+    permissionsNote(view),
+    many.length > 1
+      ? el("p", { class: "form-help", id: "info-permissions-scope",
+          text: `Add principal grants the role on each of the ${many.length} checked rows. The principals below are ${item.name}'s.` })
+      : null,
+    el("div", { class: "action-bar" }, add),
+    rows.length
+      ? el("table", { id: "info-permissions", "aria-label": `Principals with roles on ${item.name}` },
+          el("thead", {}, el("tr", {}, el("th", { text: "Principal" }), el("th", { text: "Role" }),
+            el("th", {}, el("span", { class: "sr-only", text: "Actions" })))),
+          el("tbody", {}, ...rows.map((r) => el("tr", {},
+            el("td", { class: "mono", text: r.member }), el("td", { class: "mono", text: r.role }),
+            el("td", {}, el("button", { type: "button", class: "secondary danger", text: "Remove principal",
+              "aria-label": `Remove ${r.member} from ${r.role}`,
+              onclick: () => confirmDestructive({
+                title: `Remove ${r.member} from ${r.role}?`,
+                detail: `${r.member} will no longer be listed with ${r.role} on ${item.name}.`,
+                confirmWord: r.member, confirmLabel: "Remove", consequence: "",
+                onConfirm: async () => {
+                  const op = recordOperation(`Remove ${r.member} from ${r.role} on ${item.name}`);
+                  try {
+                    const res = await send(url, "POST", { Path: targetOf(item), Etag: view.etag,
+                      Remove: { Member: r.member, Role: r.role, Condition: r.conditional } });
+                    op.succeeded("", res.operation);
+                  } catch (err) {
+                    op.failed(err.message, err.operation);
+                    throw err;
+                  }
+                  notify(`Removed ${r.member} from ${r.role}`);
+                  redraw();
+                } }) }))))))
+      : el("p", { class: "unavailable", text: `No principal holds a role on ${item.name}. Add principal adds one.` }));
 }
 
 // openInfoPanelOn opens the info panel on one row, as a checkbox that opens
@@ -6314,11 +6813,15 @@ function queryPane(route, segments, spec, onDone) {
     if (writing) return executeWrite(statement);
     setBusy(run, true);
     const started = performance.now();
+    // The result, for a page that draws more from it: Log Analytics'
+    // chart (#2021). Null when the query failed.
+    let result = null;
     try {
       const data = await send(
         `/api/query/${route.service}?project=${encodeURIComponent(currentProject())}`,
         "POST", { Path: segments, Statement: statement });
       const listing = data.listing || {};
+      result = listing;
       const took = Math.round(performance.now() - started);
 
       if (!(listing.items || []).length) {
@@ -6342,7 +6845,7 @@ function queryPane(route, segments, spec, onDone) {
     } finally {
       setBusy(run, false);
     }
-    if (onDone) onDone();
+    if (onDone) onDone(result);
   };
 
   run.addEventListener("click", execute);
@@ -6569,13 +7072,16 @@ function buildCreateForm(spec) {
           // option as Google's console does (#1852, #1860).
           ...(f.options || []).map((o) => el("option", { value: o, text: (f.optionLabels || {})[o] || o || "None" })))
       : el("input", {
-          id, name: f.name, type: f.type || "text", required: f.required,
+          // A zoned date and time (#1850) is the browser's datetime-local
+          // picker; plain datetime-local fields stay UTC wall-clock times.
+          id, name: f.name, type: f.type === "datetime-zoned" ? "datetime-local" : (f.type || "text"), required: f.required,
           // `pattern` is only enforced on the text-like inputs. Attaching one
           // elsewhere would be a constraint nothing applies.
           pattern: isCheck || isArea ? null : (f.pattern || null),
         });
     if (isCheck) control.checked = f.default === "true" && !f.unavailable;
     else if (isSelect) control.value = f.default || (f.options || [])[0] || "";
+    else if (f.type === "datetime-zoned") control.value = localDateTime(f.default);
     else control.value = f.default || "";
     if (helpId) control.setAttribute("aria-describedby", helpId);
     // Ctrl+Space offers the field's completions at the cursor, as Google's
@@ -6816,6 +7322,25 @@ function buildCreateForm(spec) {
     show();
   }
 
+  // A select whose options follow another field (optionsBy, #1851):
+  // Cloud KMS's Create key lists the chosen purpose's algorithms only. The
+  // value is kept where the new list has it, otherwise the first is chosen.
+  for (const entry of entries) {
+    const by = entry.field.optionsBy;
+    const other = by && byName.get(by);
+    if (!other || entry.control.tagName !== "SELECT") continue;
+    const labels = entry.field.optionLabels || {};
+    const relist = () => {
+      const keep = entry.control.value;
+      const opts = (entry.field.optionsFor || {})[valueText(other)] || entry.field.options || [];
+      setChildren(entry.control, ...opts.map((o) => el("option", { value: o, text: labels[o] || o || "None" })));
+      entry.control.value = opts.includes(keep) ? keep : (opts[0] ?? "");
+      entry.control.dispatchEvent(new Event("change", { bubbles: true }));
+    };
+    other.control.addEventListener("change", relist);
+    relist();
+  }
+
   // A checkbox checked and held while another field holds a value
   // (checkedWhen, #1862): Memorystore's Security choice of IAM Auth or Token
   // Auth checks and locks Enable In-Transit Encryption (TLS), as Google's
@@ -6954,6 +7479,7 @@ function buildCreateForm(spec) {
     if (entry.isCheck) return entry.field.default === "true";
     if (entry.field.type === "select") return entry.field.default || (entry.field.options || [])[0] || "";
     if (entry.field.type === "map") return mapToLines(entry.field.default);
+    if (entry.field.type === "datetime-zoned") return localDateTime(entry.field.default);
     return entry.field.default || "";
   };
   const valueOf = (entry) => (entry.isCheck ? entry.control.checked : entry.control.value);
@@ -7007,10 +7533,31 @@ function buildCreateForm(spec) {
         .map((e) => {
           if (e.isCheck) return [e.field.name, String(e.control.checked)];
           if (e.field.type === "map") return [e.field.name, linesToMap(e.control.value)];
+          if (e.field.type === "datetime-zoned") return [e.field.name, instantOf(e.control.value)];
           return [e.field.name, e.control.value];
         })]);
     },
   };
+}
+
+// localDateTime is an RFC 3339 time as a datetime-local control's value,
+// in the browser's time zone (console.DateTimeFieldType, "datetime-zoned",
+// #1850); "" for
+// none or a value that is not a time.
+function localDateTime(rfc3339) {
+  if (!rfc3339) return "";
+  const d = new Date(rfc3339);
+  if (Number.isNaN(d.getTime())) return "";
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+// instantOf is a datetime-local control's value, the browser's local
+// time, as the RFC 3339 instant it names in UTC; "" stays "".
+function instantOf(local) {
+  if (!local) return "";
+  const d = new Date(local);
+  return Number.isNaN(d.getTime()) ? local : d.toISOString().replace(/\.000Z$/, "Z");
 }
 
 // uploadIntoTextarea is a textarea's Upload file control (Field.Upload,
@@ -7294,6 +7841,23 @@ function sourceFilesEntry(f, id, errorId, helpId) {
       sync();
       editor.focus();
     } });
+  // Rename file, as Google's editor's (#1853): the open file takes the
+  // name typed in the file name box, keeping its place and contents.
+  const rename = el("button", { type: "button", class: "secondary sourcefiles-rename", text: "Rename file",
+    onclick: () => {
+      const name = newName.value.trim();
+      if (!current || !name || files[name] !== undefined || name.startsWith("/") || name.split("/").includes("..")) {
+        newName.focus();
+        return;
+      }
+      files = Object.fromEntries(Object.entries(files).map(([k, v]) => [k === current ? name : k, v]));
+      current = name;
+      newName.value = "";
+      edited = true;
+      draw();
+      sync();
+      editor.focus();
+    } });
   const remove = el("button", { type: "button", class: "secondary sourcefiles-remove", text: "Delete file",
     onclick: () => {
       if (!current) return;
@@ -7321,7 +7885,7 @@ function sourceFilesEntry(f, id, errorId, helpId) {
     el("legend", { text: f.label }),
     el("div", { class: "sourcefiles-body" },
       el("div", { class: "sourcefiles-side" }, tabs,
-        el("div", { class: "sourcefiles-actions" }, newName, add, remove)),
+        el("div", { class: "sourcefiles-actions" }, newName, add, rename, remove)),
       editor),
     control, help, error);
   const entry = { field: Object.assign({}, f, { default: control.value }), control, node, error, helpId, errorId,
@@ -8820,6 +9384,16 @@ async function renderCreatePage(view, route) {
       notify(`The form's choices could not be read for ${project}: ${err.message}`, "error");
     }
   }
+  // The copy of a resource (#1852): Google's Services list's Copy opens
+  // the service copy page, the form holding the checked service's settings.
+  if (caps.create.copies && given.get("from")) {
+    try {
+      formFields = (await api(`/api/createform/${target.service}?project=${encodeURIComponent(project)}` +
+        `&from=${encodeURIComponent(given.get("from"))}`)).fields || formFields;
+    } catch (err) {
+      notify(`${given.get("from")} could not be copied: ${err.message}`, "error");
+    }
+  }
   const fields = buildCreateForm({ ...caps.create, fields: formFields.map((f) =>
     f.type !== "hidden" && f.name !== "project" && given.has(f.name) ? { ...f, default: given.get(f.name) } : f) });
   const error = el("p", { class: "form-error", role: "alert", hidden: true });
@@ -9189,7 +9763,11 @@ function notify(message, kind = "info") {
 // "confirm" for nothing typed, the dialog's button alone, as a Cloud Storage
 // bucket's or a Cloud Run service's does.
 function confirmDestructive({ title, detail, confirmWord, onConfirm, confirmLabel = "Delete", consequence = "This cannot be undone.", style = "name" }) {
-  if (style === "delete" || style === "DELETE" || style === "Delete") confirmWord = style;
+  // "Disable" for that word, as Storage Intelligence's Disable asks (#2047);
+  // "prefix10" for the name's first 10 characters, as Cloud Storage's
+  // Delete HMAC key asks for the access ID's.
+  if (style === "delete" || style === "DELETE" || style === "Delete" || style === "Disable") confirmWord = style;
+  if (style === "prefix10") confirmWord = String(confirmWord).slice(0, 10);
   const typed = style !== "confirm";
   return new Promise((settle) => {
     const error = el("p", { class: "form-error", role: "alert", hidden: true });
@@ -9418,7 +9996,19 @@ async function runAction(route, target, action, onDone, row = NO_ROW, title = nu
   // An action that is a link opens its page (#1847): a topic row's Create
   // subscription.
   if (action.href) return navigate(action.href);
+  // Run in Cloud Shell (#2049): the command, in the terminal's active tab.
+  if (action.terminal) return runInTerminal(action.terminal);
   const path = Array.isArray(target) ? target : null;
+  // View secret value from a version row (Action.Reveal, #1850): the
+  // value in a dialog ending in Done, through the recorded reveal route.
+  if (action.reveal) return revealValue(route, path || [target], action.label);
+  // An action that is a page of its own (Action.Page, #1851): Cloud KMS's
+  // Create key opens at the ring's address with ?action=createkey.
+  if (action.page && path && path.length) {
+    const to = new URL(detailHref(route, path), location.origin);
+    to.searchParams.set("action", action.id);
+    return navigate(to.pathname + to.search);
+  }
   // A page's own heading, when its last segment is an address no reader
   // recognises: a Datastore entity's encoded key (#875). A delete is
   // confirmed by typing back what the page is headed, not the address.
@@ -9481,8 +10071,10 @@ async function runAction(route, target, action, onDone, row = NO_ROW, title = nu
     // Cloud SQL's "Stop database instance?".
     title: action.confirmTitle || `${action.label} ${name}?`,
     detail: action.confirm || undefined,
-    confirmWord: name,
-    confirmLabel: action.confirm ? action.label : undefined,
+    // Action.ConfirmWord (#1850): a secret version's Destroy asks for the
+    // secret's ID, not the version's number.
+    confirmWord: action.confirmWord || name,
+    confirmLabel: action.confirm ? (action.submit || action.label) : undefined,
     consequence: action.destructive ? undefined : "",
     // As Google's console confirms this action (#1931): BigQuery's Delete
     // table asks for the word delete, a Datastore entity's Delete for
@@ -9579,9 +10171,31 @@ function route() {
 // CloudBurrow does not run (#1843): its place in the menu, and why.
 // Log Analytics (#1863), as Google's page: the Log views panel beside a
 // SQL editor whose FROM names a view as PROJECT_ID.LOCATION.BUCKET_ID.
-// LOG_VIEW_ID. The logging-analytics provider runs it over the bucket's
-// linked dataset in this instance's BigQuery; a view's name in the panel
-// puts Google's default query on it in the editor.
+// LOG_VIEW_ID. The logging-analytics provider runs it in this instance's
+// BigQuery, over the bucket's linked dataset when it has one and over the
+// bucket's entries directly when it has none (#2021); a view's name in the
+// panel puts Google's default query on it in the editor. The results are
+// a table and, as Google's page lets them be, a chart (#2021), drawn as
+// BigQuery's Visualization draws one, from the result's column types.
+// Recent queries (#2031): Cloud Logging keeps the user's last 10,000
+// unique queries over 30 days (recentQueries.list), the Logs Explorer's and
+// Log Analytics' each in the Query library's Recent tab of its own page.
+// Recording one never stands in the way of running it.
+// Kept only where the instance serves Cloud Logging, whose Saved queries
+// screen comes with it.
+const keepsRecentQueries = () => !!capabilityOf("logging-saved-queries").id;
+
+function recordRecentQuery(project, query, sql) {
+  if (!project || !query || !query.trim() || !keepsRecentQueries()) return;
+  send(`/api/logs/recent-queries?project=${encodeURIComponent(project)}`, "POST", { query: query.trim(), sql })
+    .catch(() => { /* the query still runs */ });
+}
+
+async function listRecentQueries(project, sql) {
+  const d = await api(`/api/logs/recent-queries?project=${encodeURIComponent(project)}&type=${sql ? "sql" : "logging"}`);
+  return d.recentQueries || [];
+}
+
 async function renderLogAnalytics(view, match) {
   const caps = capabilityOf("logging-analytics");
   if (!caps.id) return renderUnavailable(view, match);
@@ -9599,11 +10213,98 @@ async function renderLogAnalytics(view, match) {
   const views = data.items || [];
   // The query route asks for a resource: the page's is the project's log
   // views, which the statement itself names.
-  const pane = queryPane(route, ["log-views"], caps.query, () => {});
+  const chart = el("section", { class: "card log-analytics-chart", id: "log-analytics-chart", "aria-labelledby": "log-analytics-chart-title", hidden: true });
+  const chartTab = {};
+  // The statement whose results are drawn: what Save to dashboard saves.
+  let chartedSQL = "";
+  // Save to dashboard (#2031), as on Google's Log Analytics: the chart, or
+  // the table, to a new or existing custom dashboard of the project, a
+  // widget whose query is the statement (opsAnalyticsQuery).
+  const dashboardsServed = !!capabilityOf("monitoring-dashboards").id;
+  const openSaveToDashboard = async () => {
+    const { dialog, close } = openModal({ labelledBy: "la-dash-title" });
+    const error = el("p", { class: "form-error", role: "alert", hidden: true });
+    const choice = el("select", { id: "la-dash-choice" }, el("option", { value: "New dashboard", text: "New dashboard" }));
+    const name = el("input", { type: "text", id: "la-dash-name", required: true });
+    const nameRow = el("div", { class: "form-row" }, el("label", { for: "la-dash-name", text: "Dashboard name" }), name);
+    const title = el("input", { type: "text", id: "la-dash-chart-title", required: true, value: "Log Analytics chart" });
+    const kind = el("select", { id: "la-dash-kind" },
+      ...["Bar", "Line", "Table"].map((k) => el("option", { value: k, text: k === "Table" ? "Table" : `${k} chart` })));
+    kind.value = ((chartTab.viz || {}).type === "Line") ? "Line" : "Bar";
+    choice.addEventListener("change", () => {
+      nameRow.hidden = choice.value !== "New dashboard";
+      name.required = !nameRow.hidden;
+    });
+    const submit = el("button", { type: "submit", class: "primary", text: "Save" });
+    dialog.append(el("form", { class: "modal-body", onsubmit: async (e) => {
+        e.preventDefault();
+        error.hidden = true;
+        submit.disabled = true;
+        try {
+          await send(`/api/actions/logging-analytics?project=${encodeURIComponent(project)}`, "POST", {
+            Path: [], Action: "save-chart-to-dashboard", Values: { dashboard: choice.value, dashboardName: name.value.trim(),
+              title: title.value.trim(), kind: kind.value, sql: chartedSQL } });
+          const where = choice.value === "New dashboard" ? name.value.trim() : choice.selectedOptions[0].textContent;
+          close();
+          notify(`Saved ${title.value.trim()} to dashboard ${where}`);
+        } catch (err) {
+          error.textContent = err.message;
+          error.hidden = false;
+          submit.disabled = false;
+        }
+      } },
+      el("h2", { id: "la-dash-title", text: "Save to dashboard" }),
+      el("div", { class: "form-row" }, el("label", { for: "la-dash-choice", text: "Dashboard" }), choice),
+      nameRow,
+      el("div", { class: "form-row" }, el("label", { for: "la-dash-chart-title", text: "Chart title" }), title),
+      el("div", { class: "form-row" }, el("label", { for: "la-dash-kind", text: "Save as" }), kind),
+      el("p", { class: "unavailable", text: "The dashboard runs this query, as Cloud Monitoring keeps it: a widget whose query is the SQL (opsAnalyticsQuery)." }),
+      error,
+      el("div", { class: "modal-actions" },
+        el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }),
+        submit)));
+    name.focus();
+    try {
+      const list = await api(`/api/resources/monitoring-dashboards?project=${encodeURIComponent(project)}`);
+      for (const d of list.items || []) choice.append(el("option", { value: d.name, text: (d.fields || {})["Display name"] || d.name }));
+    } catch { /* New dashboard alone */ }
+  };
+  const saveToDashboard = el("button", { type: "button", class: "secondary", id: "log-analytics-save-dashboard",
+    text: "Save to dashboard", "aria-haspopup": "dialog",
+    disabled: dashboardsServed && project ? null : "disabled",
+    title: dashboardsServed ? (project ? "Save this chart to a custom dashboard" : "Choose a project: a dashboard is one project's")
+      : "Not available locally: a dashboard is Cloud Monitoring's, and this instance does not serve Cloud Monitoring.",
+    onclick: () => openSaveToDashboard() });
+  const drawResultChart = (listing) => {
+    if (!listing || !(listing.items || []).length) { chart.hidden = true; return; }
+    chartedSQL = editor.value.trim();
+    const res = analyticsResultSet(listing);
+    const draw = () => setChildren(chart,
+      el("div", { class: "log-fields-head" }, el("h2", { id: "log-analytics-chart-title", text: "Chart" }), saveToDashboard),
+      bqVisualization(res, chartTab, draw));
+    draw();
+    chart.hidden = false;
+  };
+  const pane = queryPane(route, ["log-views"], caps.query, drawResultChart);
   const editor = pane.querySelector("textarea.query-editor");
   editor.setAttribute("aria-label", "Query");
   const run = [...pane.querySelectorAll("button")].find((b) => b.textContent === "Run");
   if (run) run.textContent = "Run query";
+  // Each statement run is one of the user's recent queries (#2031).
+  if (run) run.addEventListener("click", () => { recordRecentQuery(project, editor.value, true); setTimeout(drawRecent, 500); });
+  const recentList = el("div", { id: "log-analytics-recent" });
+  const drawRecent = async () => {
+    if (!project || !keepsRecentQueries()) return setChildren(recentList);
+    let recent = [];
+    try { recent = await listRecentQueries(project, true); } catch { /* none shown */ }
+    setChildren(recentList, el("h2", { text: "Recent queries" }), recent.length
+      ? el("ul", { class: "log-view-list" }, ...recent.slice(0, 10).map((r) => el("li", {},
+          el("button", { type: "button", class: "link-button mono", text: r.query.replace(/\s+/g, " ").slice(0, 120),
+            title: "Put this query in the editor",
+            onclick: () => { editor.value = r.query; editor.dispatchEvent(new Event("input")); editor.focus(); } }),
+          el("span", { class: "unavailable", text: ` ${relativeTime(new Date(r.lastRunTime))}` }))))
+      : el("p", { class: "unavailable", text: "No recent queries. Each query you run is kept here for 30 days." }));
+  };
   const defaultQuery = (name) => "SELECT\n  timestamp, severity, log_name, resource.type, text_payload, json_payload\n" +
     `FROM\n  \`${name}\`\nORDER BY timestamp DESC\nLIMIT 1000`;
   if (!editor.value && views.length) {
@@ -9618,12 +10319,91 @@ async function renderLogAnalytics(view, match) {
           el("button", { type: "button", class: "link-button mono", text: v.name,
             title: `Query ${v.name}`,
             onclick: () => { editor.value = defaultQuery(v.name); editor.dispatchEvent(new Event("input")); editor.focus(); } }),
-          el("span", { class: "unavailable", text: ` Linked dataset: ${(v.fields || {})["Linked dataset in BigQuery"] || "—"}` }))))
+          el("span", { class: "unavailable", text: ` Linked dataset: ${(v.fields || {})["Linked dataset in BigQuery"] || "none needed"}` }))))
       : el("p", { class: "unavailable", text: data.prompt ||
-          "No bucket of this project is upgraded to use Log Analytics. Upgrade one in Logs Storage, and Create link to query it here." }));
-  setChildren(view, header, el("div", { class: "log-analytics" }, panel, pane));
+          "No bucket of this project is upgraded to use Log Analytics. Upgrade one in Logs Storage to query it here." }),
+    recentList);
+  setChildren(view, header, el("div", { class: "log-analytics" }, panel, el("div", { class: "log-analytics-main" }, pane, chart)));
+  drawRecent();
   announce("Log Analytics");
 }
+
+// LOG_QUERY_LIBRARY is the Query library's Queries provided by Google Cloud
+// tab (#2021): Google's sample queries, by product, as
+// docs.cloud.google.com/logging/docs/view/query-library-preview publishes
+// them (read 2026-11-20), for the products CloudBurrow serves. Upper-case
+// words such as BUCKET_NAME are Google's placeholders, to replace.
+const LOG_QUERY_LIBRARY = [
+  ["API enable and disable", [
+    ["Audit API enable logs", 'protoPayload.methodName="google.api.serviceusage.v1.ServiceUsage.EnableService"'],
+    ["Audit API disable logs", 'protoPayload.methodName="google.api.serviceusage.v1.ServiceUsage.DisableService"'],
+  ]],
+  ["BigQuery", [
+    ["BigQuery audit logs", 'resource.type= ("bigquery_dataset" OR "bigquery_project") AND logName:"cloudaudit.googleapis.com"'],
+    ["BigQuery audit logs for a project", 'resource.type="bigquery_project" AND logName:"cloudaudit.googleapis.com"'],
+    ["BigQuery audit logs for a dataset", 'resource.type="bigquery_dataset" AND logName:"cloudaudit.googleapis.com"'],
+    ["BigQuery dataset updates", 'resource.type="bigquery_dataset" AND log_id("cloudaudit.googleapis.com/activity") AND protoPayload.methodName= "google.cloud.bigquery.v2.DatasetService.UpdateDataset"'],
+    ["BigQuery jobs completed", 'resource.type="bigquery_project" AND log_id("cloudaudit.googleapis.com/data_access") AND protoPayload.methodName= ("google.cloud.bigquery.v2.JobService.InsertJob" OR "google.cloud.bigquery.v2.JobService.Query")'],
+    ["BigQuery quota exceeded", 'resource.type= ("bigquery_dataset" OR "bigquery_project") AND protoPayload.status.code=8 AND severity>=WARNING'],
+  ]],
+  ["Cloud Monitoring", [
+    ["Show all notification channel errors", 'resource.type="stackdriver_notification_channel" AND severity>=ERROR'],
+    ["Show logs written by the uptime resource", 'resource.type="uptime_url"'],
+    ["Alerting policy incident violations", 'log_id("monitoring.googleapis.com/Violation") AND labels.policy_id="POLICY_ID"'],
+  ]],
+  ["Cloud Run functions", [
+    ["Cloud Run functions errors", 'resource.type="cloud_function" AND log_id("cloudfunctions.googleapis.com/cloud-functions") AND severity>=ERROR'],
+    ["Cloud Run functions execution logs", 'resource.type="cloud_function" AND resource.labels.function_name="FUNCTION_NAME" AND resource.labels.region="REGION"'],
+    ["Cloud Run functions build logs", 'resource.type="build" AND resource.labels.build_id="BUILD_ID" AND log_id("cloudbuild")'],
+  ]],
+  ["Cloud Run", [
+    ["Cloud Run logs for a specific job", 'resource.type="cloud_run_job" AND resource.labels.job_name="JOB_NAME"'],
+    ["Cloud Run logs for a specific revision and service", 'resource.type="cloud_run_revision" AND resource.labels.service_name="SERVICE_NAME"'],
+  ]],
+  ["Cloud SQL", [
+    ["Cloud SQL audit logs", 'resource.type="cloudsql_database" AND resource.labels.database_id="DATABASE_ID" AND log_id("cloudaudit.googleapis.com/activity")'],
+    ["Cloud SQL instance deletion logs", 'resource.type="cloudsql_database" AND resource.labels.database_id="PROJECT_ID:INSTANCE_ID" AND protoPayload.methodName="cloudsql.instances.delete"'],
+    ["Cloud SQL MySQL error logs", 'resource.type="cloudsql_database" AND log_id("cloudsql.googleapis.com/mysql.err")'],
+    ["Cloud SQL Postgres-based databases", 'resource.type="cloudsql_database" AND resource.labels.database_id="DATABASE_ID" AND log_id("cloudsql.googleapis.com/postgres.log")'],
+    ["Cloud SQL SQL Server error logs", 'resource.type="cloudsql_database" AND log_id("cloudsql.googleapis.com/sqlserver.err")'],
+  ]],
+  ["Cloud Storage", [
+    ["Cloud Storage bucket logs", 'resource.type="gcs_bucket" AND resource.labels.bucket_name="BUCKET_NAME"'],
+    ["Cloud Storage bucket audit logs", 'resource.type="gcs_bucket" AND logName:"cloudaudit.googleapis.com"'],
+    ["Cloud Storage bucket creation logs", 'resource.type="gcs_bucket" AND log_id("cloudaudit.googleapis.com/activity") AND protoPayload.methodName="storage.buckets.create"'],
+    ["Cloud Storage bucket deletion logs", 'resource.type="gcs_bucket" AND log_id("cloudaudit.googleapis.com/activity") AND protoPayload.methodName="storage.buckets.delete"'],
+  ]],
+  ["Cloud Tasks", [
+    ["Cloud Tasks queue logs", 'resource.type="cloud_tasks_queue" AND resource.labels.queue_id="QUEUE_ID"'],
+  ]],
+  ["Compute Engine", [
+    ["Compute Engine Admin Activity logs", 'resource.type="gce_instance" AND log_id("cloudaudit.googleapis.com/activity")'],
+    ["Compute Engine VM syslogs", 'resource.type="gce_instance" AND log_id("syslog")'],
+    ["Compute Engine VM authlogs", 'resource.type="gce_instance" AND log_id("authlog")'],
+  ]],
+  ["Google Cloud Observability", [
+    ["Log sink activities", 'resource.type="logging_sink" AND log_id("cloudaudit.googleapis.com/activity")'],
+    ["Log-based metric create or update activities", 'resource.type="metric" AND log_id("cloudaudit.googleapis.com/activity") AND protoPayload.methodName:(UpdateLogMetric OR CreateLogMetric)'],
+    ["Uptime URL checks for a host", 'resource.type="uptime_url" AND resource.labels.host="URL"'],
+  ]],
+  ["Identity and Access Management", [
+    ["Service account creation logs", 'resource.type="service_account" AND log_id("cloudaudit.googleapis.com/activity") AND protoPayload.methodName="google.iam.admin.v1.CreateServiceAccount"'],
+    ["Service account creation key logs", 'resource.type="service_account" AND log_id("cloudaudit.googleapis.com/activity") AND protoPayload.methodName="google.iam.admin.v1.CreateServiceAccountKey"'],
+    ["Set access control policy logs", 'resource.type="project" AND log_id("cloudaudit.googleapis.com/activity") AND protoPayload.methodName="SetIamPolicy"'],
+    ["Resource creation, modification, or deletion", 'log_id("cloudaudit.googleapis.com/activity") AND protoPayload.methodName:("create" OR "delete" OR "update")'],
+  ]],
+  ["Kubernetes", [
+    ["Stdout container logs across all pods and containers in a cluster", 'resource.type="k8s_container" AND log_id("stdout")'],
+    ["Container error logs across all pods and containers in a cluster", 'resource.type="k8s_container" AND log_id("stderr") AND severity=ERROR'],
+    ["Container error logs for a pod with a specific name", 'resource.type="k8s_container" AND resource.labels.pod_name="POD_NAME" AND severity=ERROR'],
+    ["Container errors logs in the kube-system namespace", 'resource.type="k8s_container" AND resource.labels.namespace_name="kube-system" AND severity=ERROR'],
+    ["Kubernetes container logs", 'resource.type="k8s_container" AND resource.labels.container_name="CONTAINER_NAME"'],
+    ["Kubernetes events", 'resource.type="k8s_cluster" AND log_id("events")'],
+  ]],
+  ["Spanner", [
+    ["Cloud Spanner logs for a specific spanner instance", 'resource.type="spanner_instance" AND resource.labels.instance_id="SPANNER_INSTANCE"'],
+  ]],
+];
 
 function renderUnavailable(view, route) {
   setChildren(view, pageHeader(route.title, "Not available locally"),
@@ -11519,6 +12299,7 @@ function connectTerminal(tab) {
         break;
       case "session":
         attached = true;
+        tab.attached = ws;
         tab.id = m.id;
         saveTerminalTabs();
         tab.project = m.project || "";
@@ -11810,6 +12591,27 @@ async function openTerminal() {
   saveTerminalTabs();
   selectTerminalTab(TERMINAL.active);
   TERMINAL.tabs.forEach(connectTerminal);
+}
+
+// runInTerminal opens the terminal and runs a command line in its active
+// tab once that tab's shell is connected, as Google's Run in Cloud Shell
+// pastes a command into Cloud Shell and runs it (#2049).
+async function runInTerminal(command) {
+  await openTerminal();
+  const tab = TERMINAL.active;
+  if (!tab) return;
+  const deadline = Date.now() + 120000;
+  while (Date.now() < deadline) {
+    const ws = tab.socket;
+    if (ws && ws.readyState === WebSocket.OPEN && tab.attached === ws) {
+      ws.send(new TextEncoder().encode(command.replace(/\\\n\s*/g, "") + "\r"));
+      tab.term.focus();
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  terminalNotice(tab, "The terminal did not connect, so the command was not run.",
+    { label: "Try again", run: () => runInTerminal(command) });
 }
 
 function closeTerminal() {
@@ -12324,7 +13126,11 @@ async function renderMonitoring(view) {
 
     const gaps = samples.filter((s) => s.unavailable).length;
 
-    setChildren(view, ...header,
+    // Read before the page is rebuilt, so the rebuild is one step and focus
+    // is put back on the range button that had it (#2047).
+    const activity = await productActivity();
+    const requests = await requestCharts(samples);
+    keepingFocus(view, () => setChildren(view, ...header,
       rangeControl,
       gaps
         ? el("p", { class: "unavailable",
@@ -12371,8 +13177,8 @@ async function renderMonitoring(view) {
           // node run out of disk" asks about.
           foot: `Kubelet node filesystem · ${foot}`,
         })),
-      await productActivity(),
-      await requestCharts(samples),
+      activity,
+      requests,
       // Absence, stated. The alternative is a reader assuming these charts
       // are missing rather than impossible.
       el("div", { class: "card" },
@@ -12380,7 +13186,7 @@ async function renderMonitoring(view) {
         el("p", { class: "unavailable", text:
           "Cloud Run workloads' own request count and latency need Knative's " +
           "queue-proxy metrics, which are off in this instance (#181). Cost, quota " +
-          "and SLO data do not exist locally at all and are not approximated." })));
+          "and SLO data do not exist locally at all and are not approximated." }))));
   };
 
   await draw();
@@ -12500,19 +13306,23 @@ const LOG_SEVERITIES = ["DEFAULT", "DEBUG", "INFO", "NOTICE", "WARNING", "ERROR"
 // logQueryValue quotes a value for the Logging query language.
 const logQueryValue = (v) => JSON.stringify(String(v));
 
+// logFieldKey is a key as a field path names it: quoted unless it is an
+// identifier, as labels."k8s-pod/app" (#2032).
+const logFieldKey = (k) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(k) ? k : JSON.stringify(k);
+
 // logJSONTree draws an entry's LogEntry as Google's expanded entry does:
-// nested fields that fold, each value with Show matching entries and Hide
-// matching entries.
-function logJSONTree(value, path, onMatch) {
+// nested fields that fold, each value with Show matching entries, Hide
+// matching entries and Pin to Fields pane.
+function logJSONTree(value, path, onMatch, onPin) {
   if (value && typeof value === "object") {
     const keys = Object.keys(value).sort();
     return el("ul", { class: "log-json" }, ...keys.map((k) => {
       const child = value[k];
-      const p = path ? `${path}.${k}` : k;
+      const p = path ? `${path}.${logFieldKey(k)}` : logFieldKey(k);
       if (child && typeof child === "object") {
         return el("li", {}, el("details", { class: "log-json-node", open: true },
           el("summary", {}, el("span", { class: "log-json-key", text: k }), el("span", { text: ": {…}" })),
-          logJSONTree(child, p, onMatch)));
+          logJSONTree(child, p, onMatch, onPin)));
       }
       return el("li", { class: "log-json-leaf", "data-field": p },
         el("span", { class: "log-json-key", text: k }), el("span", { text: ": " }),
@@ -12520,6 +13330,7 @@ function logJSONTree(value, path, onMatch) {
         overflowMenu([
           { label: "Show matching entries", run: () => onMatch(`${p}=${logQueryValue(child)}`) },
           { label: "Hide matching entries", run: () => onMatch(`-${p}=${logQueryValue(child)}`) },
+          ...(onPin ? [{ label: "Pin to Fields pane", run: () => onPin(p) }] : []),
         ], `${p} ${child}`));
     }));
   }
@@ -12544,7 +13355,14 @@ async function renderLogs(view) {
   // views, of a project, folder, organization or billing account, read with
   // ListLogEntries and tailed with TailLogEntries, so the view's filter and
   // the bucket's retention apply.
-  let scope = ["project", "parent", "view"].includes(params.get("scope")) ? params.get("scope") : "all";
+  let scope = ["project", "parent", "view", "logScope"].includes(params.get("scope")) ? params.get("scope") : "all";
+  // Or a log scope (#2020), as Google's Refine scope picks one: its
+  // projects and log views, read together through ListLogEntries. When the
+  // address names no scope, the Explorer opens on the project's default log
+  // scope (the Observability API's _Default scope's logScope) once one has
+  // been set as default; with _Default the default, it opens on All sources
+  // as before, as _Default names only the project and pod lines carry none.
+  const scopeChosen = params.has("scope");
   // Followed from a failed operation in Activity. The server has always
   // supported the filter; the client simply never read it, so the one path
   // built to explain a failure landed on the unfiltered stream of the whole
@@ -12558,8 +13376,36 @@ async function renderLogs(view) {
     el("option", { value: "project", text: project ? `Project logs (${project})` : "Project logs",
                    disabled: project ? null : "disabled" }),
     el("option", { value: "parent", text: "A folder or organization" }),
-    el("option", { value: "view", text: "Through a log view" }));
+    el("option", { value: "view", text: "Through a log view" }),
+    el("option", { value: "logScope", text: "Log scope", disabled: project ? null : "disabled" }));
   scopeSelect.value = scope;
+
+  // The log scope picker: the project's log scopes, the default marked.
+  const logScopeSelect = el("select", { id: "log-scope-name", "aria-label": "Log scope" });
+  const logScopeNote = el("p", { class: "unavailable", id: "log-scope-note" });
+  let logScopes = { default: "", scopes: [] };
+  const drawLogScopeNote = (error) => {
+    if (error) return setChildren(logScopeNote, el("span", { text: error }));
+    const sc = logScopes.scopes.find((x) => x.name === logScopeSelect.value);
+    if (!sc) return setChildren(logScopeNote, el("span", { text: "No log scope chosen." }));
+    setChildren(logScopeNote, el("span", { text: `Searching ${sc.resourceNames.join(", ")}.` }));
+  };
+  const loadLogScopes = async (want) => {
+    if (!project) return false;
+    try {
+      logScopes = await api(`/api/logs/scopes?${new URLSearchParams({ project })}`);
+    } catch (err) {
+      logScopes = { default: "", scopes: [] };
+      drawLogScopeNote(err.message);
+      return false;
+    }
+    setChildren(logScopeSelect, ...logScopes.scopes.map((sc) => el("option", { value: sc.name,
+      text: sc.name.slice(sc.name.lastIndexOf("/") + 1) + (sc.name === logScopes.default ? " (default)" : "") })));
+    const pick = want && logScopes.scopes.some((x) => x.name === want) ? want : logScopes.default;
+    if (pick) logScopeSelect.value = pick;
+    drawLogScopeNote();
+    return true;
+  };
 
   // The view scope's pickers: whose buckets, which bucket, which view.
   const initialView = params.get("view") || "";
@@ -12577,6 +13423,8 @@ async function renderLogs(view) {
   const showViewControls = () => {
     viewControls.hidden = scope !== "view";
     viewNote.hidden = scope !== "view";
+    logScopeSelect.hidden = scope !== "logScope";
+    logScopeNote.hidden = scope !== "logScope";
   };
   const drawViewNote = (error) => {
     if (error) return setChildren(viewNote, el("span", { text: error }));
@@ -12656,7 +13504,7 @@ async function renderLogs(view) {
   const learnFields = (obj, prefix) => {
     if (!obj || typeof obj !== "object" || knownFields.size > 2000) return;
     for (const [k, v] of Object.entries(obj)) {
-      const path = prefix ? `${prefix}.${k}` : k;
+      const path = prefix ? `${prefix}.${logFieldKey(k)}` : logFieldKey(k);
       if (v && typeof v === "object" && !Array.isArray(v)) { learnFields(v, path); continue; }
       if (Array.isArray(v)) continue;
       if (!knownFields.has(path)) knownFields.set(path, new Set());
@@ -12719,11 +13567,17 @@ async function renderLogs(view) {
   // Summary fields (#1863), Google's Preferences > Manage summary fields:
   // custom fields drawn as chips at the start of each entry's summary,
   // optionally truncated; and Show summary chips. Per viewer.
+  // Recent queries (#2031): the user's, as Google keeps them, in Cloud
+  // Logging (recentQueries.list), each query run recorded there.
+  const rememberQuery = (query) => recordRecentQuery(project, query, false);
   const SUMMARY_KEY = "cloudburrow.logs.summary";
-  let summary = { fields: [], truncate: false, chars: 30, fromEnd: false, show: true };
+  let summary = { fields: [], truncate: false, chars: 30, fromEnd: false, show: true, defaults: true };
   try { summary = { ...summary, ...JSON.parse(readStored(SUMMARY_KEY, "{}")) }; } catch { /* the defaults */ }
   const saveSummary = () => writeStored(SUMMARY_KEY, JSON.stringify(summary));
-  const fieldValue = (entry, path) => path.split(".").map((k) => k.replace(/^"|"$/g, ""))
+  // A field's value in an entry; a quoted part of the path is one key,
+  // dots and all (labels."service.name", #2032).
+  const fieldValue = (entry, path) => (path.match(/"(?:[^"\\]|\\.)*"|[^.]+/g) || [])
+    .map((k) => { if (!k.startsWith('"')) return k; try { return JSON.parse(k); } catch { return k.slice(1, -1); } })
     .reduce((o, k) => (o && typeof o === "object" ? o[k] : undefined), entry.logEntry || {});
   const summaryChips = (entry) => {
     if (!summary.show) return [];
@@ -12854,40 +13708,140 @@ async function renderLogs(view) {
   // histogram and the rows can never disagree about what is being looked at.
   const timeline = el("div", { class: "card log-timeline", id: "log-timeline" });
   let timelineCollapsed = false;
-  // The Fields pane (#1863): the values of the entries the query matches,
-  // each with its count, as Google's Log fields pane lists them; choosing one
+  // The Fields pane (#1863, #2031): the values of the entries the query
+  // matches, each with its approximate count, as Google's Fields pane lists
+  // them in three sections (logs-explorer-interface, re-read 2026-11-20):
+  // Pinned, the fields pinned from an entry; System metadata, the entries
+  // broken down by Resource type and Severity, which are always there, and
+  // by Log name and Project ID; and Frequent fields, "the most frequent
+  // json_payload fields in the current query results". Choosing a value
   // adds its clause to the query and runs it.
-  const fieldsPane = el("aside", { class: "card log-fields", id: "log-fields", "aria-label": "Log fields" });
+  const fieldsPane = el("aside", { class: "card log-fields", id: "log-fields", "aria-label": "Fields" });
   const LOG_FIELD_GROUPS = [["resource.type", "Resource type"], ["severity", "Severity"],
     ["logName", "Log name"], ["resource.labels.project_id", "Project ID"]];
-  const drawFields = (entries) => {
-    const groups = LOG_FIELD_GROUPS.map(([path, label]) => {
-      const counts = new Map();
-      for (const e of entries) {
-        const v = path.split(".").reduce((o, k) => (o && typeof o === "object" ? o[k] : undefined), e.logEntry || {});
-        if (v !== undefined && v !== "") counts.set(v, (counts.get(v) || 0) + 1);
+  // The label dimensions (#2032): System metadata dimensions that appear
+  // only when the entries carry the labels they are made from
+  // (logs-explorer-interface, read 2026-11-20). Workload / Service is made
+  // from the k8s-pod/app label (a Kubernetes container's workload) and
+  // from service.name, each value adding the clause of the label it came
+  // from.
+  const LABEL_DIMENSIONS = [["Workload / Service", ['labels."k8s-pod/app"', 'labels."service.name"']]];
+  // How many json_payload fields Frequent fields lists, and values a field.
+  const FREQUENT_FIELDS = 10;
+  const FIELD_VALUES = 20;
+  // Pin to Fields pane (#1863): a field of an expanded entry gets a group of
+  // its own under Pinned, at the top of the pane. Per viewer.
+  const PINNED_FIELDS_KEY = "cloudburrow.logs.pinnedFields";
+  let pinnedFields = [];
+  try { pinnedFields = JSON.parse(readStored(PINNED_FIELDS_KEY, "[]")).filter((f) => typeof f === "string"); } catch { /* none */ }
+  let fieldEntries = [];
+  const pinField = (path) => {
+    if (!pinnedFields.includes(path)) pinnedFields.push(path);
+    writeStored(PINNED_FIELDS_KEY, JSON.stringify(pinnedFields));
+    drawFields(fieldEntries);
+    announce(`Pinned ${path} to the Fields pane`);
+  };
+  const unpinField = (path) => {
+    pinnedFields = pinnedFields.filter((f) => f !== path);
+    writeStored(PINNED_FIELDS_KEY, JSON.stringify(pinnedFields));
+    drawFields(fieldEntries);
+    announce(`Removed ${path} from the Fields pane`);
+  };
+  // jsonPayloadLeaves calls f with each scalar field of a JSON payload and
+  // its path, jsonPayload.a.b; a key that is not an identifier is quoted,
+  // as the query language takes it. Arrays are not walked: a field with an
+  // array index cannot be added (logs-explorer-interface).
+  const jsonPayloadLeaves = (v, path, f) => {
+    if (v === null || v === undefined) return;
+    if (Array.isArray(v)) return;
+    if (typeof v === "object") {
+      for (const [k, x] of Object.entries(v)) {
+        jsonPayloadLeaves(x, `${path}.${/^[A-Za-z_][A-Za-z0-9_]*$/.test(k) ? k : JSON.stringify(k)}`, f);
       }
-      return { path, label, values: [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 20) };
-    });
-    const types = groups[0].values.map(([v]) => v);
+      return;
+    }
+    f(path, v);
+  };
+  // A field's scalar value in an entry, or undefined.
+  const scalarValue = (e, path) => {
+    const v = fieldValue(e, path);
+    return v !== undefined && v !== "" && v !== null && typeof v !== "object" ? v : undefined;
+  };
+  const countValues = (entries, path) => {
+    const counts = new Map();
+    for (const e of entries) {
+      const v = scalarValue(e, path);
+      if (v !== undefined) counts.set(v, (counts.get(v) || 0) + 1);
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, FIELD_VALUES);
+  };
+  // A label dimension's values: each entry's from the first of the
+  // dimension's labels it carries, with that label's path.
+  const dimensionValues = (entries, paths) => {
+    const counts = new Map();
+    for (const e of entries) {
+      for (const path of paths) {
+        const v = scalarValue(e, path);
+        if (v === undefined) continue;
+        const key = JSON.stringify([path, v]);
+        counts.set(key, (counts.get(key) || 0) + 1);
+        break;
+      }
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, FIELD_VALUES)
+      .map(([k, n]) => { const [path, v] = JSON.parse(k); return [v, n, path]; });
+  };
+  const frequentFields = (entries) => {
+    const seen = new Map();
+    for (const e of entries) {
+      const payload = (e.logEntry || {}).jsonPayload;
+      if (!payload || typeof payload !== "object") continue;
+      const here = new Set();
+      jsonPayloadLeaves(payload, "jsonPayload", (path) => here.add(path));
+      for (const p of here) seen.set(p, (seen.get(p) || 0) + 1);
+    }
+    return [...seen.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).slice(0, FREQUENT_FIELDS).map(([p]) => p);
+  };
+  const fieldGroup = (g) => el("section", { class: "log-field-group" + (g.pinned ? " is-pinned" : ""), "data-field": g.path },
+    g.pinned
+      ? el("div", { class: "log-fields-head" }, el("h4", { class: "mono", text: g.label }),
+          el("button", { class: "link-button is-inline", text: "Remove", "aria-label": `Remove ${g.path} from the Fields pane`,
+            onclick: () => unpinField(g.path) }))
+      : el("h4", { class: g.mono ? "mono" : null, text: g.label }),
+    g.values.length
+      ? el("ul", {}, ...g.values.map(([v, n, at = g.path]) => el("li", {},
+          el("button", { class: "log-field-value", "data-value": String(v),
+            title: `Add ${at}=${logQueryValue(String(v))} to the query`,
+            onclick: () => { addClause(`${at}=${logQueryValue(String(v))}`); runQuery(); } },
+            el("span", { class: "mono", text: g.path === "logName" ? decodeURIComponent(String(v).slice(String(v).indexOf("/logs/") + 6)) : String(v) }),
+            el("span", { class: "log-field-count", "aria-label": `about ${n} entries`, text: String(n) })))))
+      : el("p", { class: "unavailable", text: "No values" }));
+  const drawFields = (entries) => {
+    fieldEntries = entries;
+    const pinned = pinnedFields.map((path) => ({ path, label: path, pinned: true, values: countValues(entries, path) }));
+    const system = LOG_FIELD_GROUPS.map(([path, label]) => ({ path, label, values: countValues(entries, path) }));
+    // After Resource type and Severity, each label dimension the entries
+    // carry values for (#2032).
+    const dimensions = LABEL_DIMENSIONS.map(([label, paths]) => ({ path: paths[0], label, values: dimensionValues(entries, paths) }))
+      .filter((g) => g.values.length);
+    system.splice(2, 0, ...dimensions);
+    const frequent = frequentFields(entries).map((path) => ({ path, label: path, mono: true, values: countValues(entries, path) }));
+    const types = system.find((g) => g.path === "resource.type").values.map(([v]) => v);
     const keep = resourceType.value;
     setChildren(resourceType, el("option", { value: "", text: "All resources" }),
       ...[...new Set([...types, ...(keep ? [keep] : [])])].sort().map((v) => el("option", { value: v, text: v })));
     resourceType.value = keep;
+    const section = (id, title, groups, empty) => el("section", { class: "log-fields-section", id, "aria-labelledby": `${id}-title` },
+      el("h3", { class: "log-fields-subhead", id: `${id}-title`, text: title }),
+      groups.length ? groups.map(fieldGroup) : el("p", { class: "unavailable", text: empty }));
     setChildren(fieldsPane,
-      el("div", { class: "log-fields-head" }, el("h2", { text: "Log fields" }),
+      el("div", { class: "log-fields-head" }, el("h2", { text: "Fields" }),
         el("button", { class: "link-button is-inline", text: "Clear", onclick: () => {
           queryEditor.value = ""; severity.value = ""; resourceType.value = ""; runQuery(); } })),
-      ...groups.map((g) => el("section", { class: "log-field-group", "data-field": g.path },
-        el("h3", { text: g.label }),
-        g.values.length
-          ? el("ul", {}, ...g.values.map(([v, n]) => el("li", {},
-              el("button", { class: "log-field-value", "data-value": v,
-                title: `Add ${g.path}=${logQueryValue(v)} to the query`,
-                onclick: () => { addClause(`${g.path}=${logQueryValue(v)}`); runQuery(); } },
-                el("span", { class: "mono", text: g.path === "logName" ? decodeURIComponent(v.slice(v.indexOf("/logs/") + 6)) : v }),
-                el("span", { class: "log-field-count", text: String(n) })))))
-          : el("p", { class: "unavailable", text: "No values" }))));
+      el("p", { class: "unavailable log-fields-note", text: "Approximate counts, over the entries the query read." }),
+      pinned.length ? section("log-fields-pinned", "Pinned", pinned, "") : null,
+      section("log-fields-system", "System metadata", system, ""),
+      section("log-fields-frequent", "Frequent fields", frequent, "No json_payload fields in the current query results."));
   };
 
   // The Timeline's drag handles (#1863): the start and end of the range,
@@ -12965,6 +13919,36 @@ async function renderLogs(view) {
     announce(pinned.has(id) ? "Pinned the log entry" : "Unpinned the log entry");
   };
 
+  // The range the query reads: the custom one, or the preset ending now.
+  const currentRange = () => {
+    if (timeRange.value === "custom" && customFrom) {
+      return [new Date(customFrom), customTo ? new Date(customTo) : new Date()];
+    }
+    const preset = LOG_TIME_RANGES.find(([v]) => v === timeRange.value) || LOG_TIME_RANGES[3];
+    return [new Date(Date.now() - preset[2] * 60000), new Date()];
+  };
+  const setRange = (from, to) => {
+    customFrom = from.toISOString();
+    customTo = to.toISOString();
+    timeRange.value = "custom";
+    runQuery();
+  };
+  // Scroll to time: the first result at or after the time, or the last.
+  const scrollToTime = (at, width) => {
+    const rowsNow = [...body.querySelectorAll("tr.log-entry")];
+    const end = at.getTime() + Math.max(width, 1000);
+    const row = rowsNow.find((r) => {
+      const t = new Date((r.logEntryData || {}).timestamp).getTime();
+      return t >= at.getTime() && t < end;
+    });
+    if (!row) return notify(`No result held at ${at.toLocaleTimeString()}`);
+    row.scrollIntoView({ block: "center" });
+    row.classList.add("is-located");
+    setTimeout(() => row.classList.remove("is-located"), 2000);
+    row.querySelector("button").focus();
+    announce(`Scrolled to ${at.toLocaleTimeString()}`);
+  };
+
   const drawTimeline = async () => {
     const query = filterQuery();
     query.set("limit", "1000");
@@ -12984,7 +13968,26 @@ async function renderLogs(view) {
       "aria-expanded": timelineCollapsed ? "false" : "true",
       text: timelineCollapsed ? "Expand timeline" : "Collapse timeline",
       onclick: () => { timelineCollapsed = !timelineCollapsed; drawTimeline(); } });
+    // Google's Timeline controls: Zoom-out and Zoom-in about the range's
+    // middle, and the backward and forward arrows sliding it by half its
+    // width (logs-explorer-interface, re-read 2026-11-20).
+    const rangeButton = (id, label, run) => el("button", { type: "button", class: "secondary", id, text: label, onclick: run });
+    const zoomBy = (factor) => {
+      const [from, to] = currentRange();
+      const mid = (from.getTime() + to.getTime()) / 2, half = Math.max(1000, (to - from) * factor / 2);
+      setRange(new Date(mid - half), new Date(Math.min(Date.now(), mid + half)));
+    };
+    const slide = (dir) => {
+      const [from, to] = currentRange();
+      const step = (to - from) / 2 * dir;
+      setRange(new Date(from.getTime() + step), new Date(to.getTime() + step));
+    };
     const head = el("div", { class: "log-timeline-head" }, el("h2", { text: "Timeline" }), collapse,
+      el("div", { class: "actions timeline-controls" },
+        rangeButton("timeline-back", "Backward", () => slide(-1)),
+        rangeButton("timeline-zoom-out", "Zoom out", () => zoomBy(2)),
+        rangeButton("timeline-zoom-in", "Zoom in", () => zoomBy(0.5)),
+        rangeButton("timeline-forward", "Forward", () => slide(1))),
       timeRange.value === "custom"
         ? el("button", { class: "link-button is-inline", text: "Jump to now", onclick: () => {
             timeRange.value = "1h"; runQuery(); } })
@@ -13000,21 +14003,28 @@ async function renderLogs(view) {
 
     setChildren(timeline,
       head,
-      el("div", { class: "timeline-bars", role: "img",
+      el("div", { class: "timeline-bars", role: "group",
         "aria-label": `${total} entries over ${first && last ? relativeTime(first) : "the retained window"}` +
                       `, ${errors} of them errors` },
         ...buckets.map((b) => {
           const counts = b.counts || {};
-          // Zoom to time: a column's click narrows the range to it.
-          const column = el("div", { class: "timeline-column",
-            title: `${new Date(b.at).toLocaleTimeString()} · ${b.total || 0} entries · click to zoom to time`,
-            onclick: () => {
-              customFrom = new Date(b.at).toISOString();
-              customTo = new Date(new Date(b.at).getTime() + Math.max(width, 1000)).toISOString();
-              timeRange.value = "custom";
-              runQuery();
-              announce(`Zoomed to ${new Date(b.at).toLocaleTimeString()}`);
-            } });
+          const at = new Date(b.at);
+          // A bar's pop-up, as Google's Timeline: Scroll to time brings the
+          // results to the bar's first entry, Zoom to time narrows the range
+          // to the bar.
+          const popup = overflowMenu([
+            { label: "Scroll to time", run: () => scrollToTime(at, width) },
+            { label: "Zoom to time", run: () => {
+              setRange(at, new Date(at.getTime() + Math.max(width, 1000)));
+              announce(`Zoomed to ${at.toLocaleTimeString()}`);
+            } },
+          ], `${at.toLocaleTimeString()}`);
+          popup.classList.add("timeline-popup");
+          const column = popup.querySelector(".overflow-trigger");
+          column.className = "timeline-column overflow-trigger";
+          column.setAttribute("aria-label", `${at.toLocaleTimeString()}, ${b.total || 0} entries`);
+          column.title = `${at.toLocaleTimeString()} · ${b.total || 0} entries`;
+          column.replaceChildren();
           // Stacked in severity order with the worst on top, so a column that
           // contains an error is unmistakable however few of them there are.
           for (const [name, state] of [["ERROR", "error"], ["WARNING", "warn"],
@@ -13028,7 +14038,7 @@ async function renderLogs(view) {
               style: `height: ${Math.max(2, (n / peak) * 100)}%`,
             }));
           }
-          return column;
+          return popup;
         })),
       timelineHandles(buckets, width),
       pinStrip,
@@ -13045,6 +14055,7 @@ async function renderLogs(view) {
     if (scope === "project" && project) query.set("project", project);
     if (scope === "parent" && parentInput.value.trim()) query.set("parent", parentInput.value.trim());
     if (scope === "view" && viewSelect.value) query.set("view", viewSelect.value);
+    if (scope === "logScope" && logScopeSelect.value) query.set("logScope", logScopeSelect.value);
     if (operation) query.set("operation", operation);
     if (source.value) query.set("source", source.value);
     if (resource.value) query.set("resource", resource.value);
@@ -13084,10 +14095,10 @@ async function renderLogs(view) {
     el("span", { text: "connecting…" }));
   const chips = el("div", { class: "filter-chips" });
   const body = el("tbody");
-  const table = el("table", {},
+  const table = el("table", { class: summary.defaults ? null : "hide-default-summary" },
     el("thead", {}, el("tr", {},
       el("th", { scope: "col" }, el("span", { class: "sr-only", text: "Expand" })),
-      LOG_COLUMNS.map((c) => el("th", { scope: "col", text: c })),
+      LOG_COLUMNS.map((c) => el("th", { scope: "col", text: c, class: c === "Resource" ? "log-default-summary" : null })),
       logDelete ? el("th", { scope: "col" }, el("span", { class: "sr-only", text: "Actions" })) : null)),
     body);
 
@@ -13161,18 +14172,24 @@ async function renderLogs(view) {
     else url.searchParams.delete("parent");
     if (next === "view" && viewSelect.value) url.searchParams.set("view", viewSelect.value);
     else url.searchParams.delete("view");
+    if (next === "logScope" && logScopeSelect.value) url.searchParams.set("logScope", logScopeSelect.value);
+    else url.searchParams.delete("logScope");
     history.replaceState({}, "", url);
     parentInput.hidden = next !== "parent";
     showViewControls();
     loadLogNames();
     connect();
     announce(next === "project" ? `Scoped to project ${project}`
-      : next === "parent" ? `Scoped to ${parentInput.value.trim() || "a folder or organization"}` : "Showing all sources");
+      : next === "parent" ? `Scoped to ${parentInput.value.trim() || "a folder or organization"}`
+      : next === "logScope" ? `Scoped to log scope ${logScopeSelect.value.slice(logScopeSelect.value.lastIndexOf("/") + 1)}`
+      : "Showing all sources");
   };
   scopeSelect.addEventListener("change", async () => {
     if (scopeSelect.value === "view" && !viewBuckets.length) await loadBuckets("");
+    if (scopeSelect.value === "logScope" && !logScopes.scopes.length) await loadLogScopes("");
     setScope(scopeSelect.value);
   });
+  logScopeSelect.addEventListener("change", () => { drawLogScopeNote(); setScope("logScope"); });
   parentInput.addEventListener("change", () => setScope("parent"));
   viewParentInput.addEventListener("change", async () => { await loadBuckets(""); setScope("view"); });
   bucketSelect.addEventListener("change", () => { fillViews(`${bucketSelect.value}/views/_AllLogs`); setScope("view"); });
@@ -13264,7 +14281,7 @@ async function renderLogs(view) {
         expand.setAttribute("aria-expanded", "false");
         return;
       }
-      const tree = logJSONTree(entry.logEntry || {}, "", onMatch);
+      const tree = logJSONTree(entry.logEntry || {}, "", onMatch, pinField);
       const setOpen = (open) => { for (const d of tree.querySelectorAll("details")) d.open = open; };
       detail = el("tr", { class: "log-detail" }, el("td", { colspan: String(columns) },
         el("div", { class: "log-detail-actions" },
@@ -13286,7 +14303,7 @@ async function renderLogs(view) {
       el("td", { class: "mono", text: new Date(entry.timestamp).toLocaleString() }),
       // Project and operation ride along in the title, so an entry that
       // carries them can be traced without a column per field.
-      el("td", { class: "mono", text: entry.resource || "—",
+      el("td", { class: "mono log-default-summary", text: entry.resource || "—",
                  title: [entry.project ? `project ${entry.project}` : "no project",
                          entry.operationId ? `operation ${entry.operationId}` : null]
                    .filter(Boolean).join(" · ") }),
@@ -13383,6 +14400,10 @@ async function renderLogs(view) {
       setStatus("choose a log view", "warn");
       return;
     }
+    if (scope === "logScope" && !logScopeSelect.value) {
+      setStatus("choose a log scope", "warn");
+      return;
+    }
 
     setStatus(attempt ? `reconnecting (attempt ${attempt})` : "connecting…", "warn");
     drawTimeline();
@@ -13445,11 +14466,17 @@ async function renderLogs(view) {
   // Run query: the editor, the menus and the time range, read once.
   const runQuery = () => {
     severity.value = (/^\s*severity\s*>=\s*(\w+)/m.exec(queryEditor.value) || [])[1] || "";
+    rememberQuery(queryEditor.value.trim());
     writeFilters();
     connect();
     announce("Query run");
   };
   const runButton = el("button", { class: "primary", id: "log-run-query", text: "Run query", onclick: runQuery });
+  // Save (#1863), in the Query pane as Google's: the Save query dialog.
+  const saveButton = el("button", { type: "button", class: "secondary", id: "log-save-query", text: "Save",
+    "aria-haspopup": "dialog", disabled: project ? null : "disabled",
+    title: project ? null : "Choose a project in the toolbar: a saved query belongs to one.",
+    onclick: () => openSaveQuery() });
   queryEditor.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); runQuery(); }
   });
@@ -13467,10 +14494,13 @@ async function renderLogs(view) {
   const queryActions = overflowMenu([
     { label: "Create metric", run: () => navigate(`/logs/metrics/create?${new URLSearchParams({ filter: queryEditor.value.trim() })}`) },
     { label: "Create sink", run: () => navigate(`/logs/sinks/create?${new URLSearchParams({ filter: queryEditor.value.trim() })}`) },
-    // Google's Create log alert makes a Cloud Monitoring alerting policy,
-    // which this instance does not serve (#1863).
-    { label: "Create log alert", run: () => {},
-      unavailable: "Not available locally: a log alert is a Cloud Monitoring alerting policy, and this instance does not serve Cloud Monitoring." },
+    // Google's Create log alert makes a Cloud Monitoring alerting policy
+    // whose condition is a log match on the query (#1863): Alerting's
+    // create page, its condition type and log filter given.
+    { label: "Create log alert",
+      run: () => navigate(`/monitoring/alerting/create?${new URLSearchParams({ conditionType: "log-match", logFilter: queryEditor.value.trim() })}`),
+      unavailable: SERVICES.some((sv) => sv.id === "monitoring-alerting") ? ""
+        : "Not available locally: a log alert is a Cloud Monitoring alerting policy, and this instance does not serve Cloud Monitoring." },
     { label: "Highlight in results", run: () => openHighlight() },
     { label: "Download", run: async () => {
       const query = filterQuery();
@@ -13528,10 +14558,16 @@ async function renderLogs(view) {
     const fromEnd = el("select", { id: "log-summary-from", "aria-label": "Truncate from" },
       el("option", { value: "start", text: "Show the beginning" }), el("option", { value: "end", text: "Show the end" }));
     fromEnd.value = summary.fromEnd ? "end" : "start";
+    // Hide or show default summary fields: here the Resource each entry is
+    // summarised under, beside its summary.
+    const defaults = el("input", { type: "checkbox", id: "log-summary-defaults" });
+    defaults.checked = summary.defaults !== false;
     drawList();
     dialog.append(el("form", { class: "modal-body", onsubmit: (e) => {
         e.preventDefault();
-        summary = { ...summary, fields, truncate: truncate.checked, chars: Math.max(1, +chars.value || 30), fromEnd: fromEnd.value === "end" };
+        summary = { ...summary, fields, truncate: truncate.checked, chars: Math.max(1, +chars.value || 30), fromEnd: fromEnd.value === "end",
+          defaults: defaults.checked };
+        table.classList.toggle("hide-default-summary", !summary.defaults);
         saveSummary(); redrawSummaries(); close(); announce("Summary fields applied"); } },
       el("h2", { id: "log-summary-title", text: "Manage summary fields" }),
       el("h3", { text: "Custom summary fields" }), list,
@@ -13539,6 +14575,8 @@ async function renderLogs(view) {
         el("label", { for: "log-summary-input", class: "sr-only", text: "Field name" }), input, options, add),
       el("div", { class: "check-line" }, truncate, el("label", { for: "log-summary-truncate", text: "Truncate custom summary fields" })),
       el("div", { class: "actions" }, chars, fromEnd),
+      el("h3", { text: "Hide or show default summary fields" }),
+      el("div", { class: "check-line" }, defaults, el("label", { for: "log-summary-defaults", text: "Show default summary fields (Resource)" })),
       el("div", { class: "modal-actions" },
         el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }),
         el("button", { type: "submit", class: "primary", text: "Apply" }))));
@@ -13552,11 +14590,202 @@ async function renderLogs(view) {
   ], "the query results' preferences");
   preferences.querySelector(".overflow-trigger").setAttribute("aria-label", "Preferences");
 
+  // The Query library (#1863), from building-queries and
+  // logs-explorer-interface (re-read 2026-11-20): Recent queries, Saved
+  // queries and Suggested queries, each with Run and Stream; a saved
+  // query's More options has Edit and Delete. Recent queries are the
+  // viewer's own, kept in this browser; saved queries are Cloud Logging's
+  // SavedQuery resources of the project (savedQueries.create, .patch,
+  // .delete); suggestions come from the entries the query has read.
+  const openQueryLibrary = async () => {
+    const { dialog, close } = openModal({ labelledBy: "log-library-title" });
+    const tabs = [["recent", "Recent queries"], ["saved", "Saved queries"], ["suggested", "Suggested queries"],
+      ["google", "Queries provided by Google Cloud"]];
+    let current = "recent";
+    const panel = el("div", { class: "query-library-panel", role: "tabpanel", id: "log-library-panel", tabindex: "0" });
+    const use = (q, stream) => {
+      queryEditor.value = q.query;
+      if (q.summary) { summary = { ...summary, ...q.summary }; saveSummary(); }
+      close();
+      runQuery();
+      if (stream && paused) pauseButton.click();
+    };
+    const item = (q, extra) => el("li", { class: "query-library-item" },
+      q.title ? el(q.level || "h3", { text: q.title }) : null,
+      el("span", { class: "mono query-library-text", text: q.query || "(empty query: every entry)" }),
+      el("button", { type: "button", class: "secondary", text: "Run", "aria-label": `Run ${q.title || q.query}`, onclick: () => use(q, false) }),
+      el("button", { type: "button", class: "secondary", text: "Stream", "aria-label": `Stream ${q.title || q.query}`, onclick: () => use(q, true) }),
+      extra || null);
+    const drawPanel = async () => {
+      for (const b of strip.querySelectorAll("[role=tab]")) {
+        const on = b.dataset.tab === current;
+        b.classList.toggle("is-selected", on);
+        b.setAttribute("aria-selected", on ? "true" : "false");
+        b.tabIndex = on ? 0 : -1;
+      }
+      panel.setAttribute("aria-labelledby", `log-library-tab-${current}`);
+      if (current === "recent") {
+        if (!keepsRecentQueries()) return setChildren(panel, el("p", { class: "unavailable", text: "Not available locally: recent queries are Cloud Logging's, and this instance does not serve Cloud Logging." }));
+        if (!project) return setChildren(panel, el("p", { class: "unavailable", text: "Choose a project in the toolbar: recent queries belong to one." }));
+        setChildren(panel, el("p", { class: "unavailable", text: "Loading recent queries…" }));
+        let recent;
+        try {
+          recent = await listRecentQueries(project, false);
+        } catch (err) {
+          return setChildren(panel, el("p", { class: "form-error", role: "alert", text: err.message }));
+        }
+        if (current !== "recent") return;
+        return setChildren(panel, recent.length
+          ? el("ul", { class: "query-library-list", id: "log-recent-queries" }, ...recent.map((r) => item({ query: r.query },
+              el("span", { class: "unavailable", text: `Last run ${relativeTime(new Date(r.lastRunTime))}` }))))
+          : el("p", { class: "unavailable", text: "No recent queries. Each query you run is kept here for 30 days." }));
+      }
+      if (current === "google") {
+        return setChildren(panel, ...LOG_QUERY_LIBRARY.map(([section, queries]) => el("section", { class: "query-library-section" },
+          el("h3", { class: "query-library-heading", text: section }),
+          el("ul", { class: "query-library-list" }, ...queries.map(([title, query]) => item({ title, query, level: "h4" }))))));
+      }
+      if (current === "suggested") {
+        const list = suggestedQueries();
+        return setChildren(panel, list.length
+          ? el("ul", { class: "query-library-list" }, ...list.map((q) => item(q)))
+          : el("p", { class: "unavailable", text: "No suggestions: run a query that reads entries first." }));
+      }
+      if (!project) return setChildren(panel, el("p", { class: "unavailable", text: "Choose a project in the toolbar: saved queries belong to one." }));
+      setChildren(panel, el("p", { class: "unavailable", text: "Loading saved queries…" }));
+      let saved;
+      try {
+        saved = ((await api(`/api/resources/logging-saved-queries?project=${encodeURIComponent(project)}`)).items || [])
+          .filter((r) => (r.fields || {}).kind !== "sql");
+      } catch (err) {
+        return setChildren(panel, el("p", { class: "form-error", role: "alert", text: err.message }));
+      }
+      setChildren(panel, saved.length
+        ? el("ul", { class: "query-library-list" }, ...saved.map((r) => {
+            const f = r.fields || {};
+            const q = { title: f["Display name"] || r.name, query: f.filter || "", summary: savedSummary(f) };
+            return item(q, overflowMenu([
+              { label: "Edit", run: () => { close(); openSaveQuery(r); } },
+              { label: "Delete", destructive: true, run: () => confirmDestructive({
+                title: `Delete saved query ${q.title}?`,
+                detail: "The saved query is deleted from Cloud Logging. No log entry is removed.",
+                confirmWord: q.title, confirmLabel: "Delete",
+                onConfirm: async () => {
+                  await send(`/api/resources/logging-saved-queries?project=${encodeURIComponent(project)}&name=${encodeURIComponent(r.name)}`, "DELETE");
+                  notify(`Deleted saved query ${q.title}`);
+                  drawPanel();
+                } }) },
+            ], `saved query ${q.title}`));
+          }))
+        : el("p", { class: "unavailable", text: "No saved queries in this project. Save a query from the Query pane." }));
+    };
+    const strip = el("div", { class: "tab-strip", role: "tablist", "aria-label": "Query library" },
+      ...tabs.map(([id, label]) => el("button", { type: "button", class: "tab", role: "tab", id: `log-library-tab-${id}`,
+        "data-tab": id, "aria-controls": "log-library-panel", text: label,
+        onclick: () => { current = id; drawPanel(); },
+        onkeydown: (e) => {
+          if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+          const i = tabs.findIndex(([t]) => t === current);
+          current = tabs[(i + (e.key === "ArrowRight" ? 1 : tabs.length - 1)) % tabs.length][0];
+          drawPanel();
+          strip.querySelector(`[data-tab="${current}"]`).focus();
+        } })));
+    dialog.append(el("div", { class: "modal-body" },
+      el("h2", { id: "log-library-title", text: "Query library" }),
+      strip, panel,
+      el("div", { class: "modal-actions" },
+        el("button", { type: "button", class: "secondary", text: "Close", onclick: () => close() }))));
+    await drawPanel();
+    strip.querySelector("[aria-selected=true]").focus();
+  };
+  // A saved query's summary fields, as the Explorer's preferences take them.
+  const savedSummary = (f) => {
+    const fields = (f.summaryFields || "").split(",").map((x) => x.trim()).filter(Boolean);
+    if (!fields.length) return null;
+    const start = +f.summaryFieldStart || 0, end = +f.summaryFieldEnd || 0;
+    return { fields, truncate: !!(start || end), chars: start || end || 30, fromEnd: !start && !!end };
+  };
+  const suggestedQueries = () => {
+    const out = [];
+    const sev = new Set(fieldEntries.map((e) => (e.logEntry || {}).severity));
+    if (["ERROR", "CRITICAL", "ALERT", "EMERGENCY"].some((v) => sev.has(v))) out.push({ title: "Errors", query: "severity>=ERROR" });
+    if (fieldEntries.some((e) => ((e.logEntry || {}).httpRequest || {}).status >= 400)) {
+      out.push({ title: "HTTP requests that failed", query: "httpRequest.status>=400" });
+    }
+    const types = new Map();
+    for (const e of fieldEntries) {
+      const t = ((e.logEntry || {}).resource || {}).type;
+      if (t) types.set(t, (types.get(t) || 0) + 1);
+    }
+    for (const [t] of [...types.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5)) {
+      out.push({ title: `Entries of ${t}`, query: `resource.type=${logQueryValue(t)}` });
+    }
+    return out;
+  };
+  // The Save query dialog, or a saved query's Edit: Name, Description,
+  // Include custom summary fields, Truncate summary fields, Share with
+  // project, then Save query (building-queries, re-read 2026-11-20).
+  const openSaveQuery = (existing) => {
+    const f = existing ? existing.fields || {} : {};
+    const { dialog, close } = openModal({ labelledBy: "log-save-title" });
+    const error = el("p", { class: "form-error", role: "alert", hidden: true });
+    const name = el("input", { type: "text", id: "log-save-name", required: true, value: existing ? f["Display name"] || "" : "" });
+    const description = el("input", { type: "text", id: "log-save-description", value: f.description || "" });
+    const text = el("textarea", { id: "log-save-query-text", class: "mono", rows: "3" });
+    text.value = existing ? f.filter || "" : queryEditor.value.trim();
+    const hasFields = existing ? !!f.summaryFields : summary.fields.length > 0;
+    const include = el("input", { type: "checkbox", id: "log-save-summary" });
+    include.checked = hasFields;
+    const truncate = el("input", { type: "checkbox", id: "log-save-truncate" });
+    truncate.checked = existing ? !!(+f.summaryFieldStart || +f.summaryFieldEnd) : summary.truncate;
+    const share = el("input", { type: "checkbox", id: "log-save-share" });
+    share.checked = f.visibility === "SHARED";
+    const fieldsNote = el("p", { class: "unavailable", id: "log-save-summary-note", text: summary.fields.length
+      ? `Custom summary fields: ${summary.fields.join(", ")}` : "No custom summary fields: add them in Preferences > Manage summary fields." });
+    const submit = el("button", { type: "submit", class: "primary", text: existing ? "Save" : "Save query" });
+    dialog.append(el("form", { class: "modal-body", onsubmit: async (e) => {
+        e.preventDefault();
+        error.hidden = true;
+        const fields = existing && !summary.fields.length ? (f.summaryFields || "") : summary.fields.join(",");
+        const chars = String(summary.chars || 30);
+        const values = { displayName: name.value.trim(), description: description.value.trim(), kind: "Logging query",
+          query: text.value.trim(), visibility: share.checked ? "SHARED" : "PRIVATE",
+          summaryFields: include.checked ? fields : "",
+          summaryFieldStart: include.checked && truncate.checked && !summary.fromEnd ? chars : "",
+          summaryFieldEnd: include.checked && truncate.checked && summary.fromEnd ? chars : "" };
+        submit.disabled = true;
+        try {
+          const base = `/api/resources/logging-saved-queries?project=${encodeURIComponent(project)}`;
+          if (existing) await send(base, "PATCH", { Path: [existing.name], Values: values });
+          else await send(base, "POST", { ...values, location: "global" });
+          close();
+          notify(existing ? `Saved query ${values.displayName} updated` : `Saved query ${values.displayName}`);
+        } catch (err) {
+          error.textContent = err.message;
+          error.hidden = false;
+          submit.disabled = false;
+        }
+      } },
+      el("h2", { id: "log-save-title", text: existing ? "Edit query" : "Save query" }),
+      el("label", { for: "log-save-name", text: "Name" }), name,
+      el("label", { for: "log-save-description", text: "Description (optional)" }), description,
+      el("label", { for: "log-save-query-text", text: "Query" }), text,
+      el("div", { class: "check-line" }, include, el("label", { for: "log-save-summary", text: "Include custom summary fields" })),
+      fieldsNote,
+      el("div", { class: "check-line" }, truncate, el("label", { for: "log-save-truncate", text: "Truncate summary fields" })),
+      el("div", { class: "check-line" }, share, el("label", { for: "log-save-share", text: "Share with project" })),
+      error,
+      el("div", { class: "modal-actions" },
+        el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }),
+        submit)));
+    name.focus();
+  };
+
   drawScope();
   const shareLink = el("button", { class: "secondary", text: "Share link",
     onclick: () => copy(location.href, "link to this query") });
-  const queryLibrary = el("a", { class: "button secondary", href: "/logs/saved-queries", text: "Query library",
-    onclick: (e) => { e.preventDefault(); navigate("/logs/saved-queries"); } });
+  const queryLibrary = el("button", { type: "button", class: "secondary", id: "log-query-library", text: "Query library",
+    "aria-haspopup": "dialog", onclick: () => openQueryLibrary() });
   setChildren(view,
     pageHeader("Logs Explorer",
       "Live from the local stack. Credentials are redacted before an entry is stored.",
@@ -13566,15 +14795,16 @@ async function renderLogs(view) {
           text: "Delete log is on the Cloud Logging entries (source logging/…) of the selected project. " +
                 "Pod logs and CloudBurrow's own request log are not held by the Logging API, so they cannot be deleted here." })
       : null,
-    el("div", { class: "actions log-toolbar" }, scopeSelect, parentInput, viewControls, timeRange,
+    el("div", { class: "actions log-toolbar" }, scopeSelect, parentInput, viewControls, logScopeSelect, timeRange,
        pauseButton, reconnectButton, status),
     viewNote,
+    logScopeNote,
     el("section", { class: "card log-query", "aria-label": "Query" },
       el("div", { class: "actions" }, contains, resourceType, logName, severity, source, resource),
       queryEditor,
       suggestions,
       queryError,
-      el("div", { class: "actions" }, runButton)),
+      el("div", { class: "actions" }, runButton, saveButton)),
     chips,
     timeline,
     el("div", { class: "log-panes" },
@@ -13585,6 +14815,21 @@ async function renderLogs(view) {
 
   showViewControls();
   if (scope === "view") await loadBuckets(initialView);
+  if (scope === "logScope") await loadLogScopes(params.get("logScope") || "");
+  // No scope in the address: open on the project's default log scope when
+  // one other than _Default has been set as default (#2020).
+  if (!scopeChosen && !operation && project && SERVICES.some((sv) => sv.id === "logging-log-scopes") && await loadLogScopes("") &&
+      logScopes.default && !logScopes.default.endsWith("/logScopes/_Default")) {
+    logScopeSelect.value = logScopes.default;
+    drawLogScopeNote();
+    scope = "logScope";
+    scopeSelect.value = scope;
+    const url = new URL(location.href);
+    url.searchParams.set("scope", scope);
+    url.searchParams.set("logScope", logScopes.default);
+    history.replaceState({}, "", url);
+  }
+  showViewControls();
   loadLogNames();
   connect();
   announce(operation ? `Logs Explorer opened, scoped to operation ${operation}`
@@ -16507,6 +17752,11 @@ async function renderFirestoreData(view, route) {
   }
   const selectedCol = colPath ? colPath.split("/").pop() : "";
   const startRoot = capabilityOf(route.service).create;
+  // An Enterprise database's Explorer: View more's Connect using MongoDB
+  // tools shows its base connection string (#1845, round 3).
+  const connection = parentDoc ? "" : await fsConnectionString(project, database);
+  const leftMenu = connection ? menuOf(`View more: ${database}`, [
+    { id: "connect", label: "Connect using MongoDB tools", run: () => fsConnectDialog(database, connection) }]) : null;
   const left = column("fs-collections", leftTitle, [
     el("button", { type: "button", class: "secondary", id: "fs-start-collection", text: "Start collection",
       onclick: () => parentDoc && leftStart
@@ -16517,7 +17767,8 @@ async function renderFirestoreData(view, route) {
         fsPanelGo(parentDoc ? [...P.slice(0, colEnd - 1), item.name] : [item.name]);
         redraw();
       })
-    : el("p", { class: "unavailable", text: parentDoc ? "This document has no subcollections." : "This database has no collections." }));
+    : el("p", { class: "unavailable", text: parentDoc ? "This document has no subcollections." : "This database has no collections." }),
+  leftMenu);
 
   const columns = [left];
   // Middle: the collection's documents, with its filter and its menu.
@@ -16621,6 +17872,37 @@ async function renderFirestoreData(view, route) {
       redraw();
     }, 10000);
   }
+}
+
+// fsConnectionString is a database's base connection string, which the
+// Databases screen shows on an Enterprise database's page, "" for any
+// other database. It is read once per database while the page is open.
+const FS_CONNECTION = new Map();
+async function fsConnectionString(project, database) {
+  const key = project + "|" + database;
+  if (!FS_CONNECTION.has(key)) {
+    FS_CONNECTION.set(key, api(`/api/detail/firestore-databases?project=${encodeURIComponent(project)}&name=${encodeURIComponent(database)}`)
+      .then((d) => ((d.summary || []).find((p) => p.label === "Connection string") || {}).value || "")
+      .catch(() => ""));
+  }
+  return FS_CONNECTION.get(key);
+}
+
+// fsConnectDialog is Google's Connect using MongoDB tools: the base
+// connection string, to which a driver adds a user's name and password
+// (https://firebase.google.com/docs/firestore/enterprise/connect).
+function fsConnectDialog(database, connection) {
+  const { dialog, close } = openModal({ labelledBy: "fs-connect-title" });
+  dialog.append(el("div", { class: "modal-body" },
+    el("h2", { id: "fs-connect-title", text: "Connect using MongoDB tools" }),
+    el("p", { class: "form-help", text: `The base connection string of ${database}. Add a user's name and password ` +
+      "(USERNAME:PASSWORD@ before the host, and &authMechanism=SCRAM-SHA-256) from its database's Security page." }),
+    el("label", { for: "fs-connect-string", text: "Connection string" }),
+    el("input", { type: "text", id: "fs-connect-string", readonly: true, value: connection }),
+    el("div", { class: "modal-actions" },
+      copyButton(connection, "connection string"),
+      el("button", { type: "button", class: "primary", text: "Close", onclick: () => close() }))));
+  dialog.querySelector("#fs-connect-string").focus();
 }
 
 function fsEditPath(redraw) {
@@ -18103,22 +19385,20 @@ const BQ_MEASURE_TYPES = ["INTEGER", "INT64", "FLOAT", "FLOAT64", "NUMERIC", "BI
 const BQ_DIMENSION_TYPES = [...BQ_MEASURE_TYPES, "TIMESTAMP", "DATE", "DATETIME", "TIME", "STRING"];
 const BQ_SERIES_COLOURS = ["#1a73e8", "#e8710a", "#188038", "#d93025", "#9334e6", "#12b5cb"];
 
-// bqVisualization is the Visualization tab: the chart of the result set,
-// drawn here as SVG from the rows the query returned, and the
-// Visualization configuration pane (Visualization type, Dimension,
-// Measures), prefilled from the schema and kept on the tab across runs.
-// The chart zooms, toggles its legend and downloads as a PNG.
-function bqVisualization(res, tab, save) {
+// bqVizDefaults fills viz (type, dimension, measures, legend, zoom) from
+// the result's schema, as Visualization prefills its configuration, and
+// gives the dimension and measure columns, or, when nothing can be
+// charted, the paragraph that says why (empty).
+function bqVizDefaults(res, viz) {
   const schema = (res.schema || []).filter((f) => (f.mode || "NULLABLE") !== "REPEATED");
   const dims = schema.filter((f) => BQ_DIMENSION_TYPES.includes(f.type));
   const measures = schema.filter((f) => BQ_MEASURE_TYPES.includes(f.type));
   const geo = schema.some((f) => f.type === "GEOGRAPHY");
   if (!dims.length || !measures.length) {
-    return el("p", { class: "unavailable", text: geo
+    return { empty: el("p", { class: "unavailable", text: geo
       ? "Not available locally: a GEOGRAPHY result is drawn on Google Maps' map, which CloudBurrow does not reach. Line, Bar and Scatter need a numeric measure."
-      : "There is nothing to chart: a chart needs a dimension column (a number, a date or time, or a string) and a numeric measure column." });
+      : "There is nothing to chart: a chart needs a dimension column (a number, a date or time, or a string) and a numeric measure column." }) };
   }
-  const viz = tab.viz || (tab.viz = {});
   if (!dims.some((f) => f.name === viz.dimension)) {
     const firstOther = dims.find((f) => !BQ_MEASURE_TYPES.includes(f.type)) || dims[0];
     viz.dimension = firstOther.name;
@@ -18131,6 +19411,19 @@ function bqVisualization(res, tab, save) {
   if (!["Bar", "Line", "Scatter"].includes(viz.type)) viz.type = "Bar";
   if (viz.legend === undefined) viz.legend = true;
   viz.zoom = viz.zoom || 1;
+  return { dims, measures };
+}
+
+// bqVisualization is the Visualization tab: the chart of the result set,
+// drawn here as SVG from the rows the query returned, and the
+// Visualization configuration pane (Visualization type, Dimension,
+// Measures), prefilled from the schema and kept on the tab across runs.
+// The chart zooms, toggles its legend and downloads as a PNG.
+function bqVisualization(res, tab, save) {
+  const viz = tab.viz || (tab.viz = {});
+  const fit = bqVizDefaults(res, viz);
+  if (!fit.dims) return fit.empty;
+  const { dims, measures } = fit;
 
   const chartHost = el("div", { class: "bq-chart-host" });
   const redraw = () => { save(); drawChart(); };
@@ -18165,95 +19458,7 @@ function bqVisualization(res, tab, save) {
       onclick: (e) => { viz.legend = !viz.legend; e.target.setAttribute("aria-pressed", String(viz.legend)); redraw(); } }),
     el("button", { type: "button", class: "secondary", text: "Download PNG", onclick: () => bqChartPNG(chartHost.querySelector("svg")) }));
 
-  const drawChart = () => {
-    const rows = res.rows || [];
-    const dimType = (dims.find((f) => f.name === viz.dimension) || {}).type;
-    const numericDim = BQ_MEASURE_TYPES.includes(dimType);
-    const timeDim = ["TIMESTAMP", "DATE", "DATETIME"].includes(dimType);
-    const xOf = (v) => numericDim ? Number(v) : timeDim ? Date.parse(String(v).replace(" UTC", "Z").replace(" ", "T")) : NaN;
-    const continuous = viz.type !== "Bar" && (numericDim || timeDim);
-    const points = rows.map((r) => ({ label: cellText(r[viz.dimension]), x: xOf(r[viz.dimension]),
-      ys: viz.measures.map((m) => (r[m] === null || r[m] === undefined ? NaN : Number(r[m]))) }))
-      .filter((p) => !continuous || Number.isFinite(p.x));
-    if (continuous) points.sort((a, b) => a.x - b.x);
-    // As wide as its column (once drawn), times the zoom.
-    const fit = chartHost.isConnected && chartHost.clientWidth > 0 ? Math.max(320, chartHost.clientWidth - 2) : 640;
-    const W = Math.round(fit * viz.zoom), H = 320, L = 56, R = 16, T = 16, B = 56;
-    const ys = points.flatMap((p) => p.ys).filter(Number.isFinite);
-    let yMin = Math.min(0, ...ys), yMax = Math.max(0, ...ys);
-    if (yMin === yMax) yMax = yMin + 1;
-    const sy = (v) => T + (H - T - B) * (1 - (v - yMin) / (yMax - yMin));
-    let sx;
-    if (continuous) {
-      const xs = points.map((p) => p.x);
-      const x0 = Math.min(...xs), x1 = Math.max(...xs);
-      sx = (p) => L + (W - L - R) * (x1 === x0 ? 0.5 : (p.x - x0) / (x1 - x0));
-    } else {
-      const step = (W - L - R) / Math.max(1, points.length);
-      sx = (p, i) => L + step * (i + 0.5);
-    }
-    const NS = "http://www.w3.org/2000/svg";
-    const svg = document.createElementNS(NS, "svg");
-    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
-    svg.setAttribute("width", String(W));
-    svg.setAttribute("height", String(H));
-    // Its own size, which the console's icon rules for svg would shrink.
-    svg.setAttribute("style", `width:${W}px;height:${H}px;max-width:none`);
-    svg.setAttribute("role", "img");
-    svg.setAttribute("class", "bq-chart");
-    svg.setAttribute("aria-label", `${viz.type} chart of ${viz.measures.join(", ")} by ${viz.dimension}, ${points.length} points`);
-    const add = (tag, attrs, text) => {
-      const n = document.createElementNS(NS, tag);
-      for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, String(v));
-      if (text !== undefined) n.textContent = text;
-      svg.append(n);
-      return n;
-    };
-    add("rect", { x: 0, y: 0, width: W, height: H, fill: "#ffffff" });
-    // Axes and four gridlines with their values.
-    for (let i = 0; i <= 4; i++) {
-      const v = yMin + (yMax - yMin) * i / 4;
-      add("line", { x1: L, x2: W - R, y1: sy(v), y2: sy(v), stroke: "#e0e0e0" });
-      add("text", { x: L - 6, y: sy(v) + 4, "text-anchor": "end", "font-size": 11, fill: "#5f6368" }, bqShortNumber(v));
-    }
-    add("line", { x1: L, x2: W - R, y1: sy(0), y2: sy(0), stroke: "#5f6368" });
-    const labelEvery = Math.max(1, Math.ceil(points.length / Math.floor((W - L - R) / 72)));
-    points.forEach((p, i) => {
-      if (i % labelEvery) return;
-      add("text", { x: sx(p, i), y: H - B + 16, "text-anchor": "middle", "font-size": 11, fill: "#5f6368" },
-        p.label.length > 14 ? p.label.slice(0, 13) + "…" : p.label);
-    });
-    add("text", { x: (L + W - R) / 2, y: H - 8, "text-anchor": "middle", "font-size": 12, fill: "#202124" }, viz.dimension);
-    const n = viz.measures.length;
-    viz.measures.forEach((m, k) => {
-      const colour = BQ_SERIES_COLOURS[k % BQ_SERIES_COLOURS.length];
-      if (viz.type === "Bar") {
-        const step = (W - L - R) / Math.max(1, points.length);
-        const bw = Math.max(1, (step * 0.8) / n);
-        points.forEach((p, i) => {
-          const v = p.ys[k];
-          if (!Number.isFinite(v)) return;
-          const x = sx(p, i) - (step * 0.8) / 2 + bw * k;
-          add("rect", { x, y: Math.min(sy(v), sy(0)), width: bw, height: Math.abs(sy(v) - sy(0)), fill: colour },
-          ).append(Object.assign(document.createElementNS(NS, "title"), { textContent: `${p.label}: ${m} ${v}` }));
-        });
-      } else {
-        const pts = points.map((p, i) => [sx(p, i), p.ys[k]]).filter(([, v]) => Number.isFinite(v));
-        if (viz.type === "Line" && pts.length > 1) {
-          add("polyline", { points: pts.map(([x, v]) => `${x},${sy(v)}`).join(" "), fill: "none", stroke: colour, "stroke-width": 2 });
-        }
-        pts.forEach(([x, v]) => add("circle", { cx: x, cy: sy(v), r: viz.type === "Scatter" ? 4 : 2.5, fill: colour }));
-      }
-    });
-    const legend = viz.legend
-      ? el("ul", { class: "bq-chart-legend" }, ...viz.measures.map((m, k) => el("li", {},
-          el("span", { class: "bq-swatch", style: `background:${BQ_SERIES_COLOURS[k % BQ_SERIES_COLOURS.length]}` }),
-          el("span", { text: " " + m }))))
-      : null;
-    setChildren(chartHost, el("div", { class: "bq-chart-scroll" }, svg), legend,
-      rows.length < res.totalRows
-        ? el("p", { class: "unavailable", text: `Charted from the ${rows.length} rows read of ${res.totalRows}.` }) : null);
-  };
+  const drawChart = () => bqDrawChart(chartHost, res, dims, viz);
   drawChart();
   requestAnimationFrame(() => { if (chartHost.isConnected) drawChart(); });
   return el("div", { class: "bq-viz" },
@@ -18263,6 +19468,140 @@ function bqVisualization(res, tab, save) {
       el("label", { for: "bq-viz-type", text: "Visualization type" }), typeSelect,
       el("label", { for: "bq-viz-dimension", text: "Dimension" }), dimSelect,
       measureBoxes));
+}
+
+// bqDrawChart draws viz's chart of the result's rows into chartHost, as
+// SVG: Visualization's, Log Analytics' and a dashboard's Log Analytics
+// chart's (#2032).
+function bqDrawChart(chartHost, res, dims, viz) {
+  const rows = res.rows || [];
+  const dimType = (dims.find((f) => f.name === viz.dimension) || {}).type;
+  const numericDim = BQ_MEASURE_TYPES.includes(dimType);
+  const timeDim = ["TIMESTAMP", "DATE", "DATETIME"].includes(dimType);
+  const xOf = (v) => numericDim ? Number(v) : timeDim ? Date.parse(String(v).replace(" UTC", "Z").replace(" ", "T")) : NaN;
+  const continuous = viz.type !== "Bar" && (numericDim || timeDim);
+  const points = rows.map((r) => ({ label: cellText(r[viz.dimension]), x: xOf(r[viz.dimension]),
+    ys: viz.measures.map((m) => (r[m] === null || r[m] === undefined ? NaN : Number(r[m]))) }))
+    .filter((p) => !continuous || Number.isFinite(p.x));
+  if (continuous) points.sort((a, b) => a.x - b.x);
+  // As wide as its column (once drawn), times the zoom.
+  const fit = chartHost.isConnected && chartHost.clientWidth > 0 ? Math.max(320, chartHost.clientWidth - 2) : 640;
+  const W = Math.round(fit * viz.zoom), H = 320, L = 56, R = 16, T = 16, B = 56;
+  const ys = points.flatMap((p) => p.ys).filter(Number.isFinite);
+  let yMin = Math.min(0, ...ys), yMax = Math.max(0, ...ys);
+  if (yMin === yMax) yMax = yMin + 1;
+  const sy = (v) => T + (H - T - B) * (1 - (v - yMin) / (yMax - yMin));
+  let sx;
+  if (continuous) {
+    const xs = points.map((p) => p.x);
+    const x0 = Math.min(...xs), x1 = Math.max(...xs);
+    sx = (p) => L + (W - L - R) * (x1 === x0 ? 0.5 : (p.x - x0) / (x1 - x0));
+  } else {
+    const step = (W - L - R) / Math.max(1, points.length);
+    sx = (p, i) => L + step * (i + 0.5);
+  }
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("width", String(W));
+  svg.setAttribute("height", String(H));
+  // Its own size, which the console's icon rules for svg would shrink.
+  svg.setAttribute("style", `width:${W}px;height:${H}px;max-width:none`);
+  svg.setAttribute("role", "img");
+  svg.setAttribute("class", "bq-chart");
+  svg.setAttribute("aria-label", `${viz.type} chart of ${viz.measures.join(", ")} by ${viz.dimension}, ${points.length} points`);
+  const add = (tag, attrs, text) => {
+    const n = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, String(v));
+    if (text !== undefined) n.textContent = text;
+    svg.append(n);
+    return n;
+  };
+  add("rect", { x: 0, y: 0, width: W, height: H, fill: "#ffffff" });
+  // Axes and four gridlines with their values.
+  for (let i = 0; i <= 4; i++) {
+    const v = yMin + (yMax - yMin) * i / 4;
+    add("line", { x1: L, x2: W - R, y1: sy(v), y2: sy(v), stroke: "#e0e0e0" });
+    add("text", { x: L - 6, y: sy(v) + 4, "text-anchor": "end", "font-size": 11, fill: "#5f6368" }, bqShortNumber(v));
+  }
+  add("line", { x1: L, x2: W - R, y1: sy(0), y2: sy(0), stroke: "#5f6368" });
+  const labelEvery = Math.max(1, Math.ceil(points.length / Math.floor((W - L - R) / 72)));
+  points.forEach((p, i) => {
+    if (i % labelEvery) return;
+    add("text", { x: sx(p, i), y: H - B + 16, "text-anchor": "middle", "font-size": 11, fill: "#5f6368" },
+      p.label.length > 14 ? p.label.slice(0, 13) + "…" : p.label);
+  });
+  add("text", { x: (L + W - R) / 2, y: H - 8, "text-anchor": "middle", "font-size": 12, fill: "#202124" }, viz.dimension);
+  const n = viz.measures.length;
+  viz.measures.forEach((m, k) => {
+    const colour = BQ_SERIES_COLOURS[k % BQ_SERIES_COLOURS.length];
+    if (viz.type === "Bar") {
+      const step = (W - L - R) / Math.max(1, points.length);
+      const bw = Math.max(1, (step * 0.8) / n);
+      points.forEach((p, i) => {
+        const v = p.ys[k];
+        if (!Number.isFinite(v)) return;
+        const x = sx(p, i) - (step * 0.8) / 2 + bw * k;
+        add("rect", { x, y: Math.min(sy(v), sy(0)), width: bw, height: Math.abs(sy(v) - sy(0)), fill: colour },
+        ).append(Object.assign(document.createElementNS(NS, "title"), { textContent: `${p.label}: ${m} ${v}` }));
+      });
+    } else {
+      const pts = points.map((p, i) => [sx(p, i), p.ys[k]]).filter(([, v]) => Number.isFinite(v));
+      if (viz.type === "Line" && pts.length > 1) {
+        add("polyline", { points: pts.map(([x, v]) => `${x},${sy(v)}`).join(" "), fill: "none", stroke: colour, "stroke-width": 2 });
+      }
+      pts.forEach(([x, v]) => add("circle", { cx: x, cy: sy(v), r: viz.type === "Scatter" ? 4 : 2.5, fill: colour }));
+    }
+  });
+  const legend = viz.legend
+    ? el("ul", { class: "bq-chart-legend" }, ...viz.measures.map((m, k) => el("li", {},
+        el("span", { class: "bq-swatch", style: `background:${BQ_SERIES_COLOURS[k % BQ_SERIES_COLOURS.length]}` }),
+        el("span", { text: " " + m }))))
+    : null;
+  setChildren(chartHost, el("div", { class: "bq-chart-scroll" }, svg), legend,
+    rows.length < res.totalRows
+      ? el("p", { class: "unavailable", text: `Charted from the ${rows.length} rows read of ${res.totalRows}.` }) : null);
+}
+
+// analyticsResultSet is a Log Analytics query's listing as a result set
+// the charts draw: its columns with their types, and its rows.
+function analyticsResultSet(listing) {
+  const types = listing.columnTypes || {};
+  const cols = [listing.nameColumn, ...(listing.columns || [])].filter(Boolean);
+  const res = {
+    schema: cols.map((c) => ({ name: c, type: types[c] === "REPEATED" ? "STRING" : (types[c] || "STRING"),
+      mode: types[c] === "REPEATED" ? "REPEATED" : "NULLABLE" })),
+    rows: (listing.items || []).map((it) => ({ [listing.nameColumn]: it.name, ...(it.fields || {}) })),
+  };
+  res.totalRows = res.rows.length;
+  return res;
+}
+
+// drawAnalyticsSection is a dashboard's Log Analytics chart (#2032): the
+// widget's SQL, run through Log Analytics by the provider, drawn as Log
+// Analytics draws its results' chart, with the chart's default
+// configuration (Google's dashboard keeps no custom chart configuration),
+// or as a table when the widget was saved as one.
+function drawAnalyticsSection(panel, section, note) {
+  const res = analyticsResultSet(section.listing || {});
+  const head = note || null;
+  if (!res.rows.length) {
+    return setChildren(panel, head, el("p", { class: "unavailable", text: "This query returned no results." }));
+  }
+  if (section.visualization === "Table") {
+    const cols = res.schema.map((f) => f.name);
+    return setChildren(panel, head, el("div", { class: "bq-results-scroll" }, el("table", { class: "bq-results-table analytics-widget-table" },
+      el("caption", { class: "sr-only", text: section.label }),
+      el("thead", {}, el("tr", {}, ...cols.map((c) => el("th", { scope: "col", text: c })))),
+      el("tbody", {}, ...res.rows.map((r) => el("tr", {}, ...cols.map((c) => el("td", { class: "mono", text: cellText(r[c]) }))))))));
+  }
+  const viz = { type: section.visualization === "Line" ? "Line" : "Bar" };
+  const fit = bqVizDefaults(res, viz);
+  if (!fit.dims) return setChildren(panel, head, fit.empty);
+  const host = el("div", { class: "bq-chart-host analytics-widget-chart" });
+  setChildren(panel, head, host);
+  bqDrawChart(host, res, fit.dims, viz);
+  requestAnimationFrame(() => { if (host.isConnected) bqDrawChart(host, res, fit.dims, viz); });
 }
 
 function cellText(v) {
@@ -20793,7 +22132,37 @@ async function renderAPIPage(view, name, tab) {
             el("td", { text: apisLatency(m.p50Ms, m) }), el("td", { text: apisLatency(m.p95Ms, m) })))
             : [el("tr", {}, el("td", { colspan: "5", text: "No calls yet." }))])))));
   } else if (tab === "quotas") {
-    setChildren(panel, quotasBlock(a.name, redraw));
+    // The Cloud Quotas API's quotas (#2030), then the per-minute request
+    // quotas this instance enforces for the API (#2063), as the project has
+    // them, each editable for the project.
+    const cloudQuotas = quotasBlock(a.name, redraw);
+    const quotas = data.requestQuotas || [];
+    const note = el("p", { class: "form-help", text: "Quotas are enforced by this CloudBurrow instance at Google's documented defaults; " +
+      "Edit quota changes one for this project while the instance runs (the configuration's requestQuotas and /admin/quotas set them too)." });
+    if (!quotas.length) {
+      setChildren(panel, cloudQuotas);
+    } else {
+      setChildren(panel, cloudQuotas, el("h2", { text: "Request quotas" }), note,
+        el("div", { class: "table-wrap" }, el("table", { class: "table", id: "api-request-quotas" },
+        el("caption", { class: "sr-only", text: `${a.title} quotas` }),
+        el("thead", {}, el("tr", {}, ...["Quota", "Metric", "Value", "Default", "Actions"].map((h) => el("th", { scope: "col", text: h })))),
+        el("tbody", {}, ...quotas.map((q) => el("tr", {},
+          el("td", { text: q.limitTitle }), el("td", { class: "mono", text: q.metric }),
+          el("td", { text: apisNumber(q.value) + (q.adjusted ? " (adjusted)" : "") }), el("td", { text: apisNumber(q.default) }),
+          el("td", {},
+            el("button", { type: "button", class: "link-button", text: "Edit quota", "aria-label": `Edit quota ${q.limitTitle}`,
+              onclick: () => mrForm({ id: "api-quota-edit", title: `Edit quota: ${q.limitTitle}`, label: "Submit request",
+                note: `Requests per minute for project ${project}. Calls past it in a minute are refused RESOURCE_EXHAUSTED (HTTP 429), as on Google.`,
+                fields: [{ name: "limit", label: "New value", type: "number", required: true, default: String(q.value) }],
+                submit: async (v) => {
+                  const op = recordOperation(`Edit quota ${q.metric} on ${project}`);
+                  try { await apisCall("setquota", { metric: q.metric, limit: v.limit }); op.succeeded(""); } catch (err) { op.failed(err.message); throw err; }
+                  notify(`${q.limitTitle} is ${v.limit}`);
+                  redraw();
+                } }) }),
+            q.adjusted ? el("button", { type: "button", class: "link-button", text: "Reset to default", "aria-label": `Reset ${q.limitTitle} to its default`,
+              onclick: async () => { await apisCall("resetquota", { metric: q.metric }); notify(`${q.limitTitle} is back to ${apisNumber(q.default)}`); redraw(); } }) : null)))))));
+    }
   } else {
     setChildren(panel, apisCredentialSections("api-credentials"));
   }

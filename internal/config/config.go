@@ -129,6 +129,11 @@ const (
 	// Google's workflow syntax whose http.* calls and connectors reach this
 	// instance's own endpoints only.
 	ServiceWorkflows Service = "workflows"
+	// ServiceParameterManager is Parameter Manager
+	// (parametermanager.googleapis.com, #2054), served in the CLI process
+	// on its own port; its versions' secret references are read through
+	// this instance's Secret Manager.
+	ServiceParameterManager Service = "parametermanager"
 )
 
 // AllServices lists the default services in a stable order, so startup
@@ -141,7 +146,7 @@ func AllServices() []Service {
 
 // OptionalServices lists the opt-in services, in a stable order.
 func OptionalServices() []Service {
-	return []Service{ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner, ServiceCloudSQL, ServiceBigQuery, ServiceMemorystore, ServiceCloudSQLMySQL, ServiceScheduler, ServiceLogging, ServiceKMS, ServiceBackupDR, ServicePrivateCA, ServiceGKE, ServiceMonitoring, ServiceCompute, ServiceWorkflows}
+	return []Service{ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner, ServiceCloudSQL, ServiceBigQuery, ServiceMemorystore, ServiceCloudSQLMySQL, ServiceScheduler, ServiceLogging, ServiceKMS, ServiceBackupDR, ServicePrivateCA, ServiceGKE, ServiceMonitoring, ServiceCompute, ServiceWorkflows, ServiceParameterManager}
 }
 
 // KnownServices lists every selectable service.
@@ -202,7 +207,7 @@ func (s Service) Persistence() Persistence {
 		// Key material is in Kubernetes Secrets, like Secret Manager's
 		// payloads, which the cluster keeps.
 		return PersistenceVolume
-	case ServiceStorage, ServiceTasks, ServiceSecrets, ServiceScheduler, ServiceBackupDR, ServicePrivateCA, ServiceGKE, ServiceMonitoring, ServiceCompute, ServiceWorkflows:
+	case ServiceStorage, ServiceTasks, ServiceSecrets, ServiceScheduler, ServiceBackupDR, ServicePrivateCA, ServiceGKE, ServiceMonitoring, ServiceCompute, ServiceWorkflows, ServiceParameterManager:
 		return PersistenceVolume
 	case ServiceRun:
 		// Workload definitions live in the Kubernetes API, which the cluster
@@ -377,6 +382,10 @@ type Endpoints struct {
 	// (bigquerydatatransfer.googleapis.com, #1948): gRPC and JSON on one
 	// port, served when BigQuery is.
 	DataTransfer int `json:"dataTransfer"`
+	// FirebaseRules is the host port of the Firebase Rules API
+	// (firebaserules.googleapis.com, #2048): REST, served when Firestore
+	// is, over the Firestore emulator's own rules evaluation.
+	FirebaseRules int `json:"firebaseRules"`
 	// AnalyticsHub is the host port of BigQuery sharing, formerly
 	// Analytics Hub (analyticshub.googleapis.com, #1960): gRPC and JSON on
 	// one port, served when BigQuery is.
@@ -386,6 +395,10 @@ type Endpoints struct {
 	// #1986): gRPC and JSON on one port, with the executions' callback
 	// endpoints.
 	Workflows int `json:"workflows"`
+	// ParameterManager is the host port of Parameter Manager
+	// (parametermanager.googleapis.com, #2054): gRPC and JSON on one port,
+	// global and regional parameters alike.
+	ParameterManager int `json:"parameterManager"`
 	// ONNX is the host port of the ONNX runner (#1711), which runs BigQuery
 	// ML's imported ONNX models for the BigQuery front, published to the
 	// cluster through cloudburrow-host. CloudBurrow's own API, not a
@@ -465,8 +478,10 @@ func (e *Endpoints) fields() []endpointField {
 		{"storageinsights", &e.StorageInsights},
 		{"storagetransfer", &e.StorageTransfer},
 		{"datatransfer", &e.DataTransfer},
+		{"firebaserules", &e.FirebaseRules},
 		{"analyticshub", &e.AnalyticsHub},
 		{"workflows", &e.Workflows},
+		{"parametermanager", &e.ParameterManager},
 		{"onnx", &e.ONNX},
 		{"tfconvert", &e.TFConvert},
 	}
@@ -544,6 +559,8 @@ func (e Endpoints) OptionalPort(s Service) int {
 		return e.Compute
 	case ServiceWorkflows:
 		return e.Workflows
+	case ServiceParameterManager:
+		return e.ParameterManager
 	default:
 		return 0
 	}
@@ -753,6 +770,14 @@ type Config struct {
 	// collections, which a soak read as growth.
 	BigQueryHeapMiB int `json:"bigQueryHeapMiB"`
 
+	// RequestQuotas sets per-minute request quotas for every project, by
+	// quota metric ("parametermanager.googleapis.com/read_requests": 600),
+	// in place of Google's documented defaults (#2063). A metric no
+	// enabled service enforces is refused at `up`; the admin API's
+	// /admin/quotas changes them, also for one project, while the
+	// instance runs.
+	RequestQuotas map[string]int64 `json:"requestQuotas,omitempty"`
+
 	// SeedFile is a seed document, the /admin/seed body, that `up` applies
 	// once the services start and before the instance reports ready (#286).
 	// Empty applies nothing.
@@ -886,10 +911,16 @@ func Default() Config {
 			// branches (BigQuery Data Transfer, the Storage companions,
 			// Workflows), so 9042.
 			AnalyticsHub: 9042,
+			// The Firebase Rules API (#2048), beside Firestore: the next
+			// free port after BigQuery sharing's 9042.
+			FirebaseRules: 9043,
 			// Workflows (#1986): after 9029-9037, which the API Keys API,
 			// Kubernetes Engine, Compute Engine, Monitoring and other open
 			// branches took.
 			Workflows: 9038,
+			// Parameter Manager (#2054): 9039 to 9046 are taken by open
+			// branches, so 9047.
+			ParameterManager: 9047,
 			// OS-assigned. The port is not what enables local AI —
 			// LocalAI.ModelPath is. A configured port with no model binds
 			// nothing, so there is no endpoint answering every request with
@@ -1157,6 +1188,12 @@ func (c *Config) Validate() error {
 		add("bigQueryHeapMiB", strconv.Itoa(h), fmt.Sprintf("must be 0 (no limit) or between %d and %d", MinEmulatorHeapMiB, MaxEmulatorHeapMiB))
 	}
 
+	for _, m := range sortedQuotaMetrics(c.RequestQuotas) {
+		if v := c.RequestQuotas[m]; v < 0 {
+			add("requestQuotas."+m, strconv.FormatInt(v, 10), "must be a count of requests per minute, 0 or more")
+		}
+	}
+
 	// Instance name. It becomes a cluster name and a label value, so its
 	// character set is not ours to choose.
 	switch {
@@ -1376,3 +1413,12 @@ const (
 
 // IAMEnforced reports whether served APIs check IAM permissions (#1879).
 func (c Config) IAMEnforced() bool { return c.IAMEnforcement == IAMEnforcementOn }
+
+func sortedQuotaMetrics(m map[string]int64) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}

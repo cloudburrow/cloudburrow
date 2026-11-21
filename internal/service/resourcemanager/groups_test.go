@@ -89,3 +89,13 @@ func TestCloudIdentityUnservedAre501(t *testing.T) {
 		}
 	}
 }
+
+// TestPrincipalsOfAResourceIdentity (#2054): a resource's own principal://
+// identity, a Parameter Manager parameter's, is its only policy member.
+func TestPrincipalsOfAResourceIdentity(t *testing.T) {
+	const p = "principal://parametermanager.googleapis.com/projects/1/uid/locations/global/parameters/abc"
+	var r *Registry
+	if got := r.Principals(p); len(got) != 1 || got[0] != p {
+		t.Fatalf("Principals(%q) = %v", p, got)
+	}
+}

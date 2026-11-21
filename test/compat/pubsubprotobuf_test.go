@@ -448,8 +448,9 @@ func TestConsolePubSubDetachAndProtobufSchema(t *testing.T) {
 	// Edit topic binds a topic to the PROTOCOL_BUFFER schema, BINARY, then
 	// clears it (#1446).
 	_, _, values = consolePubSubEditForm(t, addr, "pubsub", project, tn, "Edit topic")
+	values["useSchema"] = "true"
 	values["schema"] = "console-proto"
-	values["schemaEncoding"] = "BINARY"
+	values["schemaEncoding"] = "Binary"
 	if code, out := edit("pubsub", tn, values); code != http.StatusOK {
 		t.Fatalf("console Edit topic to the schema = %d: %s", code, out)
 	}
@@ -458,10 +459,10 @@ func TestConsolePubSubDetachAndProtobufSchema(t *testing.T) {
 		t.Errorf("after the console's Edit topic, GetTopic = %v, %v; want bound BINARY to %s", got, err, name)
 	}
 	_, _, values = consolePubSubEditForm(t, addr, "pubsub", project, tn, "Edit topic")
-	if values["schema"] != name || values["schemaEncoding"] != "BINARY" {
+	if values["useSchema"] != "true" || values["schema"] != name || values["schemaEncoding"] != "Binary" {
 		t.Errorf("Edit topic is prefilled %v; want the binding", values)
 	}
-	values["schema"] = ""
+	values["useSchema"] = "false"
 	if code, out := edit("pubsub", tn, values); code != http.StatusOK {
 		t.Fatalf("console Edit topic clearing the schema = %d: %s", code, out)
 	}

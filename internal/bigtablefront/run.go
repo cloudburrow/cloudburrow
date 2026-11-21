@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/cloudburrow/cloudburrow/internal/iamcheck"
 	"io"
 	"log"
 	"net"
@@ -27,6 +28,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// #1514): the pod's emptyDir.
 	stateDir := fs.String("state-dir", "", "directory the front keeps its state in")
 	resourceManager := fs.String("resourcemanager", "", "http://host:port of the host's Resource Manager, asked for organization policies (what `up` passes, #1890)")
+	iamCheck := fs.String("iam-check", "", "http://host:port of the host's IAM evaluator, which checks each call's caller when set (what `up --iam-enforcement=on` passes, #1879)")
 	if err := fs.Parse(args); err != nil {
 		return ErrUsage
 	}
@@ -47,6 +49,9 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	defer f.Close()
+	if *iamCheck != "" {
+		f.UseIAMCheck(&iamcheck.Client{Base: *iamCheck})
+	}
 	if *stateDir != "" {
 		if err := f.KeepState(ctx, *stateDir); err != nil {
 			return fmt.Errorf("the front's state: %w", err)

@@ -77,6 +77,10 @@ func (r *Registry) iamTargetLocked(resource string) (deleting bool, err error) {
 	case strings.HasPrefix(resource, "tagValues/"):
 		_, _, err := r.tagValueLocked(resource)
 		return false, err
+	case strings.HasPrefix(resource, wfResourcePrefix):
+		// A workforce pool, or one of its SCIM tenants (#2065,
+		// workforce_iam.go).
+		return r.wfIAMTarget(resource)
 	default:
 		return false, checkOrg(resource)
 	}
@@ -209,6 +213,10 @@ func heldOn(resource string, perms []string) *iampb.TestIamPermissionsResponse {
 		}
 		// On a service account, its own and its keys' permissions alone.
 		if isServiceAccountResource(resource) && !strings.HasPrefix(p, "iam.serviceAccounts.") && !strings.HasPrefix(p, "iam.serviceAccountKeys.") {
+			continue
+		}
+		// On a workforce pool, Workforce Identity Federation's (#2065).
+		if strings.HasPrefix(resource, wfResourcePrefix) && !strings.HasPrefix(p, "iam.workforcePool") {
 			continue
 		}
 		// On a tag key or value, the tag permissions alone can be held.

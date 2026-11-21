@@ -22,8 +22,8 @@ import (
 // official admin client and holds three cities written with the official
 // client. On its page, Run pipeline over the cities collection where pop >
 // 100, sorted by pop descending, lists the two larger cities in that
-// order; Create user credentials shows the generated password once, and
-// the User credentials tab lists the user, which ListUserCreds reads; Disable
+// order; Add User shows the generated password once, and the Security
+// tab (#1845) lists the user, which ListUserCreds reads; Disable
 // from its row's menu leaves it DISABLED, as GetUserCreds reads it.
 func TestFirestorePipelineAndUserCredsThroughThePage(t *testing.T) {
 	needService(t, "firestore")
@@ -71,18 +71,18 @@ func TestFirestorePipelineAndUserCredsThroughThePage(t *testing.T) {
 		t.Errorf("Run pipeline where pop > 100 by pop descending answers %q; want cities/la then cities/sf, not cities/tiny", rows)
 	}
 
-	rows = p.pageAction("Create user credentials", map[string]string{"userCredsId": "app-user"}, "")
+	rows = p.pageAction("Add User", map[string]string{"userCredsId": "app-user"}, "")
 	uc, err := ac.GetUserCreds(ctx, &adminpb.GetUserCredsRequest{Name: db + "/userCreds/app-user"})
 	if err != nil || uc.GetState() != adminpb.UserCreds_ENABLED {
-		t.Fatalf("after Create user credentials, GetUserCreds = %v, %v", uc, err)
+		t.Fatalf("after Add User, GetUserCreds = %v, %v", uc, err)
 	}
 	if !strings.Contains(rows, "app-user") || len(strings.TrimSpace(strings.ReplaceAll(rows, "app-user", ""))) < 8 {
-		t.Errorf("Create user credentials answers %q; want the user and its generated password", rows)
+		t.Errorf("Add User answers %q; want the user and its generated password", rows)
 	}
 
 	p.navigate("/firestore-databases/" + dbID + q)
 	p.waitFor(`document.querySelector("#tab-usercreds") !== null`)
-	p.clickText("#tab-usercreds", "User credentials")
+	p.clickText("#tab-usercreds", "Security")
 	p.cellMenu("app-user", "Disable")
 	for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(250 * time.Millisecond) {
 		uc, err = ac.GetUserCreds(ctx, &adminpb.GetUserCredsRequest{Name: db + "/userCreds/app-user"})

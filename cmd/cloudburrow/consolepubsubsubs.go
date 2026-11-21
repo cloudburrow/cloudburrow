@@ -39,6 +39,8 @@ func (p pubsubSubscriptionsProvider) List(ctx context.Context, project string) (
 		Columns:    subscriptionListColumns,
 		NameColumn: "Subscription name",
 		Noun:       "subscriptions",
+		// The info panel's Permissions and Labels tabs (#1847).
+		InfoOnSelect: true,
 	}
 	if project == "" {
 		out.Prompt = "Pub/Sub lists subscriptions per project. Choose one in the toolbar."

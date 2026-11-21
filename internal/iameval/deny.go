@@ -144,7 +144,11 @@ func cutLast(s, sep string) (string, string, bool) {
 // caller with members m (Members' keys): principal://goog/subject/EMAIL
 // for a user, principal://iam.googleapis.com/projects/-/serviceAccounts/EMAIL
 // for a service account, principalSet://goog/group/GROUP for each group,
-// and principalSet://goog/public:all for everyone. Lowercased.
+// principalSet://goog/cloudIdentityCustomerId/C for a member of a
+// customer's domain (DomainCustomers), and principalSet://goog/public:all
+// for everyone. Lowercased. A workforce pool's identifiers are never a
+// caller's: Workforce Identity Federation is not served (its token
+// exchange answers 501), so no caller is one.
 func denyIdentifiers(members map[string]bool) map[string]bool {
 	out := map[string]bool{"principalset://goog/public:all": true}
 	for m := range members {
@@ -155,6 +159,12 @@ func denyIdentifiers(members map[string]bool) map[string]bool {
 			out["principal://iam.googleapis.com/projects/-/serviceaccounts/"+strings.TrimPrefix(m, "serviceaccount:")] = true
 		case strings.HasPrefix(m, "group:"):
 			out["principalset://goog/group/"+strings.TrimPrefix(m, "group:")] = true
+		case strings.HasPrefix(m, "domain:"):
+			for d, c := range DomainCustomers {
+				if strings.EqualFold(d, strings.TrimPrefix(m, "domain:")) {
+					out["principalset://goog/cloudidentitycustomerid/"+strings.ToLower(c)] = true
+				}
+			}
 		case strings.HasPrefix(m, "principal://"), strings.HasPrefix(m, "principalset://"):
 			// A federated identity's (#1941) are the same in both.
 			out[m] = true

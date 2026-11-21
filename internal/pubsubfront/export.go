@@ -163,8 +163,15 @@ func (f *Front) exportSubs() map[string]*pubsubpb.Subscription {
 	defer f.mu.Unlock()
 	out := map[string]*pubsubpb.Subscription{}
 	for name, s := range f.defs.subs {
+		s = proto.Clone(s).(*pubsubpb.Subscription)
+		// The export configuration an update set (#2051) is the one
+		// delivered, not the emulator's.
+		if k, ok := f.exports[name]; ok {
+			k = proto.Clone(k).(*pubsubpb.Subscription)
+			s.BigqueryConfig, s.CloudStorageConfig = k.BigqueryConfig, k.CloudStorageConfig
+		}
 		if s.GetBigqueryConfig() != nil || s.GetCloudStorageConfig() != nil {
-			out[name] = proto.Clone(s).(*pubsubpb.Subscription)
+			out[name] = s
 		}
 	}
 	return out

@@ -144,15 +144,15 @@ func TestKMSTrustedKeyWrappingThroughThePage(t *testing.T) {
 	p.navigate("/kms/keyrings?project=" + project)
 	p.clickText("#view tbody a", ring)
 	p.clickText("#view .page-actions button", "Create key")
-	p.waitFor(`document.querySelector(".modal.is-open #f-cryptoKeyId") !== null`)
+	p.waitFor(`document.querySelector("#view form.create-page #f-cryptoKeyId") !== null`)
 	for _, f := range [][2]string{{"cryptoKeyId", "raw"}, {"protectionLevel", "HSM_SINGLE_TENANT"}, {"purpose", "RAW_ENCRYPT_DECRYPT"},
 		{"algorithm", "AES_256_GCM"}, {"cryptoKeyBackend", inst}, {"trustedWrappingEnabled", "true"}} {
-		setField(p, ".modal.is-open", "f-"+f[0], f[1])
+		setField(p, "#view form.create-page", "f-"+f[0], f[1])
 	}
-	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
-	p.waitFor(`document.querySelector(".modal") === null || [...document.querySelectorAll(".modal.is-open .form-error")].some((e) => !e.hidden && e.textContent)`)
+	p.run(chromedp.Click(chromedp.CSS(`#view form.create-page button[type="submit"]`)))
+	p.waitFor(`document.querySelector("#view form.create-page") === null || [...document.querySelectorAll("#view form.create-page .form-error")].some((e) => !e.hidden && e.textContent)`)
 	var refused string
-	p.eval(`[...document.querySelectorAll(".modal.is-open .form-error")].filter((e) => !e.hidden).map((e) => e.textContent).join(" ")`, &refused)
+	p.eval(`[...document.querySelectorAll("#view form.create-page .form-error")].filter((e) => !e.hidden).map((e) => e.textContent).join(" ")`, &refused)
 	if refused != "" {
 		t.Fatalf("Create key was refused: %s", refused)
 	}
@@ -167,6 +167,7 @@ func TestKMSTrustedKeyWrappingThroughThePage(t *testing.T) {
 	p.clickText("#view tbody a", ring)
 	p.clickText("#view tbody a", "raw")
 	p.waitFor(`location.pathname.includes("raw")`)
+	p.clickText("#view .tab-strip .tab", "Versions")
 	p.clickText("#view tbody a", "1")
 	p.waitFor(`document.querySelector("#view").textContent.includes("Trusted wrapping")`)
 	p.clickText("#view .page-actions button", "Export trusted-wrapped")

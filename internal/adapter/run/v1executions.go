@@ -108,7 +108,7 @@ func (s *Server) v1ReplaceJob(w http.ResponseWriter, r *http.Request) {
 	job.Etag = in.Metadata.ResourceVersion
 	delay := in.Spec.Template.Spec.DelayExecution
 	validateOnly := r.URL.Query().Get("dryRun") == "all"
-	op, err := s.Jobs().UpdateJob(r.Context(), &runpb.UpdateJobRequest{Job: job, ValidateOnly: validateOnly})
+	op, err := v1Call(r.Context(), s.Jobs().UpdateJob, &runpb.UpdateJobRequest{Job: job, ValidateOnly: validateOnly})
 	if err != nil {
 		v1Write(w, err, nil)
 		return
@@ -172,7 +172,7 @@ func (s *Server) v1RunJob(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	op, err := s.Jobs().RunJob(r.Context(), &runpb.RunJobRequest{Name: jobName, Overrides: overrides})
+	op, err := v1Call(r.Context(), s.Jobs().RunJob, &runpb.RunJobRequest{Name: jobName, Overrides: overrides})
 	if err != nil {
 		v1Write(w, err, nil)
 		return
@@ -235,7 +235,7 @@ func (s *Server) v1GetExecution(w http.ResponseWriter, r *http.Request) {
 
 // v1WriteExecution answers with an execution, its delayExecution too.
 func (s *Server) v1WriteExecution(w http.ResponseWriter, r *http.Request, name string) {
-	e, err := s.Executions().GetExecution(r.Context(), &runpb.GetExecutionRequest{Name: name})
+	e, err := v1Call(r.Context(), s.Executions().GetExecution, &runpb.GetExecutionRequest{Name: name})
 	if err != nil {
 		v1Write(w, err, nil)
 		return
@@ -250,12 +250,12 @@ func (s *Server) v1DeleteExecution(w http.ResponseWriter, r *http.Request) {
 		v1Write(w, err, nil)
 		return
 	}
-	e, err := s.Executions().GetExecution(r.Context(), &runpb.GetExecutionRequest{Name: name})
+	e, err := v1Call(r.Context(), s.Executions().GetExecution, &runpb.GetExecutionRequest{Name: name})
 	if err != nil {
 		v1Write(w, err, nil)
 		return
 	}
-	if _, err := s.Executions().DeleteExecution(r.Context(), &runpb.DeleteExecutionRequest{Name: name,
+	if _, err := v1Call(r.Context(), s.Executions().DeleteExecution, &runpb.DeleteExecutionRequest{Name: name,
 		ValidateOnly: r.URL.Query().Get("dryRun") == "all"}); err != nil {
 		v1Write(w, err, nil)
 		return
@@ -274,7 +274,7 @@ func (s *Server) v1CancelExecution(w http.ResponseWriter, r *http.Request) {
 		v1Write(w, err, nil)
 		return
 	}
-	if _, err := s.Executions().CancelExecution(r.Context(), &runpb.CancelExecutionRequest{Name: name}); err != nil {
+	if _, err := v1Call(r.Context(), s.Executions().CancelExecution, &runpb.CancelExecutionRequest{Name: name}); err != nil {
 		v1Write(w, err, nil)
 		return
 	}
@@ -287,7 +287,7 @@ func (s *Server) v1Executions(ctx context.Context, parent, job string) ([]*runpb
 	jobs := []string{parent + "/jobs/" + job}
 	if job == "" {
 		jobs = nil
-		resp, err := s.Jobs().ListJobs(ctx, &runpb.ListJobsRequest{Parent: parent, PageSize: 1000})
+		resp, err := v1Call(ctx, s.Jobs().ListJobs, &runpb.ListJobsRequest{Parent: parent, PageSize: 1000})
 		if err != nil {
 			return nil, err
 		}
@@ -299,7 +299,7 @@ func (s *Server) v1Executions(ctx context.Context, parent, job string) ([]*runpb
 	for _, j := range jobs {
 		token := ""
 		for {
-			resp, err := s.Executions().ListExecutions(ctx, &runpb.ListExecutionsRequest{Parent: j, PageSize: 1000, PageToken: token})
+			resp, err := v1Call(ctx, s.Executions().ListExecutions, &runpb.ListExecutionsRequest{Parent: j, PageSize: 1000, PageToken: token})
 			if err != nil {
 				if apierror.From(err).Code == codes.NotFound {
 					break
@@ -404,7 +404,7 @@ func (s *Server) v1GetTask(w http.ResponseWriter, r *http.Request) {
 		v1Write(w, err, nil)
 		return
 	}
-	t, err := s.Tasks().GetTask(r.Context(), &runpb.GetTaskRequest{Name: exec + "/tasks/" + id})
+	t, err := v1Call(r.Context(), s.Tasks().GetTask, &runpb.GetTaskRequest{Name: exec + "/tasks/" + id})
 	v1Write(w, err, toV1Task(t))
 }
 
@@ -444,7 +444,7 @@ func (s *Server) v1ListTasks(w http.ResponseWriter, r *http.Request) {
 	for i, e := range execs {
 		token := ""
 		for {
-			resp, err := s.Tasks().ListTasks(r.Context(), &runpb.ListTasksRequest{Parent: e, PageSize: 1000, PageToken: token})
+			resp, err := v1Call(r.Context(), s.Tasks().ListTasks, &runpb.ListTasksRequest{Parent: e, PageSize: 1000, PageToken: token})
 			if err != nil {
 				if apierror.From(err).Code == codes.NotFound {
 					break

@@ -105,6 +105,9 @@ func (p loggingBucketsProvider) view(ctx context.Context, name string) (*logging
 // ActAt implements console.PathActor through CreateView, UpdateView and
 // DeleteView, and CreateLink and DeleteLink (#1292).
 func (p loggingBucketsProvider) ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error {
+	if len(path) == 0 && action == usageAlertAction {
+		return p.createUsageAlert(ctx, project, values) // #2021
+	}
 	if len(path) == 0 {
 		return errors.New("no bucket named")
 	}

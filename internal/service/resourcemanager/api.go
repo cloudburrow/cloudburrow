@@ -560,6 +560,8 @@ type Server struct {
 	services []extraService
 	// unguarded are served before the Host check (HandleUnguarded).
 	unguarded []extraJSON
+	// wrapJSON wrap this port's own JSON APIs, not the extras (WrapJSON).
+	wrapJSON []func(http.Handler) http.Handler
 
 	mu   sync.Mutex
 	ln   net.Listener
@@ -627,6 +629,14 @@ func (s *Server) HandleService(pkg string, match func(*http.Request) bool, impls
 // not. It must be called before Start.
 func (s *Server) HandleUnguarded(match func(*http.Request) bool, h http.Handler) {
 	s.unguarded = append(s.unguarded, extraJSON{match: match, h: h})
+}
+
+// WrapJSON wraps the JSON APIs this port serves itself (Resource
+// Manager's, IAM's, deny and organization policies'), not those HandleJSON
+// adds, such as IAM enforcement's checks (#1879). It must be called before
+// Start.
+func (s *Server) WrapJSON(wrap func(http.Handler) http.Handler) {
+	s.wrapJSON = append(s.wrapJSON, wrap)
 }
 
 // Interpose adds a unary interceptor inside the call observer, such as the
@@ -713,13 +723,7 @@ func (s *Server) Start(ctx context.Context) error {
 	s.folders.v2Routes(router, ops)
 	s.tags.restRoutes(router)
 	s.projects.reg.identityRoutes(router)
-	var jsonAPI http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		for _, x := range extra {
-			if x.match(r) {
-				x.h.ServeHTTP(w, r)
-				return
-			}
-		}
+	var apis http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if isOrgPolicyPath(r.URL.Path) {
 			orgPolicyREST.ServeHTTP(w, r)
 			return
@@ -733,11 +737,35 @@ func (s *Server) Start(ctx context.Context) error {
 			s.projects.reg.ServeWorkloadIdentity(w, r)
 			return
 		}
+		if isWorkforcePath(r.URL.Path) {
+			// Workforce Identity Federation (#2056, workforce.go).
+			s.projects.reg.ServeWorkforceIdentity(w, r)
+			return
+		}
 		if isIAMAdminPath(r.URL.Path) {
 			iamREST.ServeHTTP(w, r)
 			return
 		}
 		router.ServeHTTP(w, r)
+	})
+	for _, wrap := range s.wrapJSON {
+		apis = wrap(apis)
+	}
+	var jsonAPI http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for _, x := range extra {
+			if x.match(r) {
+				x.h.ServeHTTP(w, r)
+				return
+			}
+		}
+		if IsScimPath(r.URL.Path) {
+			// A SCIM tenant's provisioning endpoint (#2068): authenticated
+			// by the tenant's SCIM tokens, not by Google credentials, so
+			// outside the IAM API's wrappers.
+			s.projects.reg.ServeScim(w, r)
+			return
+		}
+		apis.ServeHTTP(w, r)
 	})
 	if s.requests != nil {
 		jsonAPI = rest.Observe(jsonAPI, s.requests)

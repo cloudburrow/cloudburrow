@@ -64,6 +64,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/frontstate"
 	"github.com/cloudburrow/cloudburrow/internal/grpchttp"
+	"github.com/cloudburrow/cloudburrow/internal/iamcheck"
 	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 )
 
@@ -121,6 +122,9 @@ type Admin struct {
 	// mongoIAM is what a MongoDB token sign-in is checked against, as the
 	// host last pushed it (mongoiam.go, #1738); nil until it does.
 	mongoIAM *MongoIAM
+	// iamCheck, with `up --iam-enforcement=on`, is the host's evaluator,
+	// which token connections' commands are checked by (#1879).
+	iamCheck *iamcheck.Client
 	// mongoServer is the front's MongoDB server, for the console's
 	// Query Explain (mongoexplainhttp.go, #1738); nil when none runs.
 	mongoServer *MongoServer
@@ -143,6 +147,13 @@ type Admin struct {
 	// the state in memory alone.
 	state *frontstate.Store
 	logf  func(string, ...any)
+
+	// usage counts the documents calls through the front (usage.go, #2048).
+	usageOnce sync.Once
+	usage     *Usage
+	// rulesGate is the projects' Security Rules as last set (rulesgate.go,
+	// #2050); nil until the front serves.
+	rulesGate atomic.Pointer[rulesGate]
 }
 
 // New returns the API for the emulator at emulator (host:port).

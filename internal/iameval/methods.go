@@ -22,6 +22,40 @@ type Method struct {
 	// PermissionFor, when set, picks the permission by the resource
 	// (the IAMPolicy mixin, whose permission is the resource's type's).
 	PermissionFor func(resource string) string
+	// ActAs are the request's fields (dotted paths) naming a service
+	// account the call attaches to its resource: each one set needs
+	// iam.serviceAccounts.actAs on that account (actas.go).
+	ActAs []string
+	// ActAsQuery are JSON query parameters naming such an account (an
+	// email, or "serviceAccount:EMAIL"), for a field the gRPC request
+	// lacks (a Logging sink's customWriterIdentity).
+	ActAsQuery []string
+	// IfSet, when set, is a request field (a dotted path) whose presence
+	// needs IfSetPermission too, on the same resource (Cloud Run's RunJob
+	// with overrides).
+	IfSet, IfSetPermission string
+	// Optional is a resource field a request may leave empty, and is then
+	// not checked (a project created under no parent, IAM's ListRoles of
+	// the predefined roles).
+	Optional bool
+	// Extra are further checks the method's resource implies, which
+	// parentOf (the enforcer's ParentOf) may help name: a folder move's
+	// current parent, a tag binding's tag value and resource (round 11).
+	Extra func(resource string, parentOf func(string) string) []Check
+	// Filter, when set, is the response's repeated field of resources
+	// (each with a name): the call is not refused, and its answer keeps
+	// only the resources the caller holds Permission on (a search).
+	Filter string
+	// Also are further checks on other resources the request names: each
+	// field set needs its permission on the resource it names (Private
+	// CA's CreateCertificate with a certificate template).
+	Also []Also
+}
+
+// Also is a further check: Permission on the resource the request's Field
+// (a dotted path) names, when it is set.
+type Also struct {
+	Field, Permission string
 }
 
 // Service is one API's table: its methods by gRPC full method, the
@@ -40,6 +74,10 @@ type Service struct {
 	Types map[string]string
 	// Deny is the error a denied call gets.
 	Deny func(permission, resource string) error
+	// DenyActAs, when set, is the error a call without
+	// iam.serviceAccounts.actAs on account gets, in the service's own
+	// words; nil is Deny's.
+	DenyActAs func(account, resource string) error
 }
 
 // Type is resource.type for a resource name.
@@ -107,6 +145,7 @@ var Services = map[string]*Service{
 	"google.cloud.scheduler.v1.CloudScheduler":                  Scheduler,
 	"google.cloud.workflows.v1.Workflows":                       Workflows,
 	"google.cloud.workflows.executions.v1.Executions":           Workflows,
+	"google.cloud.parametermanager.v1.ParameterManager":         ParameterManager,
 }
 
 // ForMethod is the service and method row of a gRPC full method on the
@@ -234,23 +273,33 @@ var Tasks = &Service{
 	Name:              "cloudtasks.googleapis.com",
 	PolicyCollections: []string{"queues"},
 	Types:             map[string]string{"queues": "cloudtasks.googleapis.com/Queue", "tasks": "cloudtasks.googleapis.com/Task"},
-	Methods: sm(map[string][2]string{
-		"ListQueues":   {"cloudtasks.queues.list", "parent"},
-		"GetQueue":     {"cloudtasks.queues.get", "name"},
-		"CreateQueue":  {"cloudtasks.queues.create", "parent"},
-		"UpdateQueue":  {"cloudtasks.queues.update", "queue.name"},
-		"DeleteQueue":  {"cloudtasks.queues.delete", "name"},
-		"PurgeQueue":   {"cloudtasks.queues.purge", "name"},
-		"PauseQueue":   {"cloudtasks.queues.pause", "name"},
-		"ResumeQueue":  {"cloudtasks.queues.resume", "name"},
-		"GetIamPolicy": {"cloudtasks.queues.getIamPolicy", "resource"},
-		"SetIamPolicy": {"cloudtasks.queues.setIamPolicy", "resource"},
-		"ListTasks":    {"cloudtasks.tasks.list", "parent"},
-		"GetTask":      {"cloudtasks.tasks.get", "name"},
-		"CreateTask":   {"cloudtasks.tasks.create", "parent"},
-		"DeleteTask":   {"cloudtasks.tasks.delete", "name"},
-		"RunTask":      {"cloudtasks.tasks.run", "name"},
-	}, "/google.cloud.tasks.v2.CloudTasks/"),
+	Methods: func() map[string]Method {
+		m := sm(map[string][2]string{
+			"ListQueues":   {"cloudtasks.queues.list", "parent"},
+			"GetQueue":     {"cloudtasks.queues.get", "name"},
+			"CreateQueue":  {"cloudtasks.queues.create", "parent"},
+			"UpdateQueue":  {"cloudtasks.queues.update", "queue.name"},
+			"DeleteQueue":  {"cloudtasks.queues.delete", "name"},
+			"PurgeQueue":   {"cloudtasks.queues.purge", "name"},
+			"PauseQueue":   {"cloudtasks.queues.pause", "name"},
+			"ResumeQueue":  {"cloudtasks.queues.resume", "name"},
+			"GetIamPolicy": {"cloudtasks.queues.getIamPolicy", "resource"},
+			"SetIamPolicy": {"cloudtasks.queues.setIamPolicy", "resource"},
+			"ListTasks":    {"cloudtasks.tasks.list", "parent"},
+			"GetTask":      {"cloudtasks.tasks.get", "name"},
+			"CreateTask":   {"cloudtasks.tasks.create", "parent"},
+			"DeleteTask":   {"cloudtasks.tasks.delete", "name"},
+			"RunTask":      {"cloudtasks.tasks.run", "name"},
+		}, "/google.cloud.tasks.v2.CloudTasks/")
+		// A task's OIDC or OAuth token: "The caller must have
+		// iam.serviceAccounts.actAs permission for the service account"
+		// (https://docs.cloud.google.com/tasks/docs/reference/rest/v2/OidcToken,
+		// read 2026-11-20).
+		row := m["/google.cloud.tasks.v2.CloudTasks/CreateTask"]
+		row.ActAs = []string{"task.http_request.oauth_token.service_account_email", "task.http_request.oidc_token.service_account_email"}
+		m["/google.cloud.tasks.v2.CloudTasks/CreateTask"] = row
+		return m
+	}(),
 	Deny: func(permission, resource string) error {
 		return grpcDenied(fmt.Sprintf("The principal (user or service account) lacks IAM permission \"%s\" for the resource \"%s\" (or the resource may not exist).", permission, resource),
 			permission, resource, false)
@@ -359,6 +408,14 @@ var Scheduler = &Service{
 			"ResumeJob": {"cloudscheduler.jobs.enable", "name"},
 			"RunJob":    {"cloudscheduler.jobs.run", "name"},
 		}, "/google.cloud.scheduler.v1.CloudScheduler/")
+		// "The caller must have iam.serviceAccounts.actAs permission for
+		// the service account" of a job's OIDC or OAuth token (the Job
+		// reference, read 2026-11-20).
+		for _, k := range []string{"CreateJob", "UpdateJob"} {
+			row := m["/google.cloud.scheduler.v1.CloudScheduler/"+k]
+			row.ActAs = []string{"job.http_target.oauth_token.service_account_email", "job.http_target.oidc_token.service_account_email"}
+			m["/google.cloud.scheduler.v1.CloudScheduler/"+k] = row
+		}
 		for k, v := range sm(map[string][2]string{
 			"GetLocation":   {"cloudscheduler.locations.get", "name"},
 			"ListLocations": {"cloudscheduler.locations.list", "name"},
@@ -403,6 +460,15 @@ var Workflows = &Service{
 			"UpdateWorkflow":        {"workflows.workflows.update", "workflow.name"},
 			"ListWorkflowRevisions": {"workflows.workflows.listRevision", "name"},
 		}, "/google.cloud.workflows.v1.Workflows/")
+		// "Ensure that all principals who deploy or update workflows have
+		// permission to attach or act as the service account"
+		// (https://docs.cloud.google.com/workflows/docs/authentication,
+		// read 2026-11-20).
+		for _, k := range []string{"CreateWorkflow", "UpdateWorkflow"} {
+			row := m["/google.cloud.workflows.v1.Workflows/"+k]
+			row.ActAs = []string{"workflow.service_account"}
+			m["/google.cloud.workflows.v1.Workflows/"+k] = row
+		}
 		for prefix, rows := range map[string]map[string][2]string{
 			"/google.cloud.workflows.executions.v1.Executions/": {
 				"ListExecutions":  {"workflows.executions.list", "parent"},
@@ -496,4 +562,51 @@ func ServiceByHost(host string) *Service {
 		}
 	}
 	return nil
+}
+
+// ParameterManager is Parameter Manager's table (#2054): "Access control
+// with IAM" (https://docs.cloud.google.com/secret-manager/parameter-manager/docs/access-control,
+// read 2026-11-20) names the roles; their permissions are the IAM roles
+// catalogue's (parametermanager.parameters.* and
+// parametermanager.parameterVersions.*). Roles are granted on the project
+// only ("You can't grant IAM roles at a resource level for Parameter
+// Manager"), so no collection keeps its own policy. The denial's wording is
+// Secret Manager's (UNVERIFIED: Google's page gives none).
+// Docs re-read 2026-11-20, still unanswered: https://docs.cloud.google.com/secret-manager/parameter-manager/docs/access-control
+var ParameterManager = &Service{
+	Name: "parametermanager.googleapis.com",
+	Types: map[string]string{"parameters": "parametermanager.googleapis.com/Parameter",
+		"versions": "parametermanager.googleapis.com/ParameterVersion", "templates": "parametermanager.googleapis.com/Template"},
+	Methods: sm(map[string][2]string{
+		"ListParameters":         {"parametermanager.parameters.list", "parent"},
+		"GetParameter":           {"parametermanager.parameters.get", "name"},
+		"CreateParameter":        {"parametermanager.parameters.create", "parent"},
+		"UpdateParameter":        {"parametermanager.parameters.update", "parameter.name"},
+		"DeleteParameter":        {"parametermanager.parameters.delete", "name"},
+		"ListParameterVersions":  {"parametermanager.parameterVersions.list", "parent"},
+		"GetParameterVersion":    {"parametermanager.parameterVersions.get", "name"},
+		"CreateParameterVersion": {"parametermanager.parameterVersions.create", "parent"},
+		"UpdateParameterVersion": {"parametermanager.parameterVersions.update", "parameter_version.name"},
+		"DeleteParameterVersion": {"parametermanager.parameterVersions.delete", "name"},
+		"RenderParameterVersion": {"parametermanager.parameterVersions.render", "name"},
+		// Templates (#2063): "Render a parameter template version" names
+		// parametermanager.templateversions.render on the template version,
+		// and parameterversions.render on the parameter version, which the
+		// server checks itself; the rest follow the roles catalogue.
+		"ListTemplates":         {"parametermanager.templates.list", "parent"},
+		"GetTemplate":           {"parametermanager.templates.get", "name"},
+		"CreateTemplate":        {"parametermanager.templates.create", "parent"},
+		"UpdateTemplate":        {"parametermanager.templates.update", "template.name"},
+		"DeleteTemplate":        {"parametermanager.templates.delete", "name"},
+		"ListTemplateVersions":  {"parametermanager.templateVersions.list", "parent"},
+		"GetTemplateVersion":    {"parametermanager.templateVersions.get", "name"},
+		"CreateTemplateVersion": {"parametermanager.templateVersions.create", "parent"},
+		"UpdateTemplateVersion": {"parametermanager.templateVersions.update", "template_version.name"},
+		"DeleteTemplateVersion": {"parametermanager.templateVersions.delete", "name"},
+		"RenderTemplateVersion": {"parametermanager.templateVersions.render", "name"},
+	}, "/google.cloud.parametermanager.v1.ParameterManager/"),
+	Deny: func(permission, resource string) error {
+		return grpcDenied(fmt.Sprintf("Permission '%s' denied for resource '%s' (or it may not exist).", permission, resource),
+			permission, resource, true)
+	},
 }

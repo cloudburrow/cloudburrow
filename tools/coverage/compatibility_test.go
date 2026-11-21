@@ -73,6 +73,8 @@ var compatSections = map[string]string{
 	// #2030, on the Resource Manager port.
 	"cloudquotas":      "## Cloud Quotas — `google.api.cloudquotas.v1`",
 	"siteverification": "## Site Verification — `siteVerification` v1",
+	// The Firebase Rules API (#2048), named by whole discovery ID.
+	"firebaserules": "## Firebase Rules — `firebaserules.googleapis.com` v1",
 	// The Cloud Storage companion APIs (#1957), named by whole discovery ID.
 	"storagejobs": "## Cloud Storage companion APIs — Storage Batch Operations, Storage Insights, Storage Transfer Service",
 	// The Backup and DR Service (#1433), named by whole discovery ID.
@@ -82,8 +84,9 @@ var compatSections = map[string]string{
 	// Workload Identity Federation (#1941), named by whole discovery ID.
 	"workloadidentity": "## Workload Identity Federation — `iam.googleapis.com` v1 pools, `sts.googleapis.com` v1",
 	// Certificate Authority Service (#1834), named by gRPC method.
-	"privateca": "## Certificate Authority Service — `google.cloud.security.privateca.v1`",
-	"workflows": "## Workflows — `google.cloud.workflows.v1` and `google.cloud.workflows.executions.v1`",
+	"privateca":        "## Certificate Authority Service — `google.cloud.security.privateca.v1`",
+	"parametermanager": "## Parameter Manager — `google.cloud.parametermanager.v1`",
+	"workflows":        "## Workflows — `google.cloud.workflows.v1` and `google.cloud.workflows.executions.v1`",
 	// The Kubernetes Engine API (#1913), named by gRPC method.
 	"gke": "## Kubernetes Engine API — `google.container.v1`",
 	// BigQuery sharing (#1960), named by gRPC method.
@@ -184,7 +187,7 @@ func namedMethods(key, op string, report map[string]string) (ids, ambiguous []st
 	// Discovery-ID pages: BigQuery, the Cloud Run v1 API (#1293), the
 	// Cloud SQL Admin API (#1301), Resource Manager v1 REST (#1296) and
 	// Service Usage (#1352).
-	if key == "bigquery" || key == "runv1" || key == "sqladmin" || key == "resourcemanagerv1" || key == "serviceusage" || key == "apikeys" || key == "storagejobs" || key == "compute" || key == "backupdr" ||
+	if key == "bigquery" || key == "runv1" || key == "sqladmin" || key == "resourcemanagerv1" || key == "serviceusage" || key == "apikeys" || key == "firebaserules" || key == "storagejobs" || key == "compute" || key == "backupdr" ||
 		key == "cloudidentity" || key == "workloadidentity" || key == "siteverification" {
 		for _, tok := range storageToken.FindAllStringSubmatch(op, -1) {
 			if _, ok := report[tok[1]]; ok {

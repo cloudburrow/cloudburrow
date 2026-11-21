@@ -64,9 +64,13 @@
 # (UP_FLAGS) and runs only the enforcement tests (COMPAT_RUN,
 # ^TestIAMEnforcement), which skip on every other shard's instance, as
 # those run with enforcement off (#1879): Cloud Storage, Pub/Sub, Cloud
-# Tasks, Secret Manager, Cloud KMS, Cloud Run (for run.routes.invoke),
-# BigQuery (for Pub/Sub's BigQuery subscriptions, #1998), Cloud Scheduler
-# and Workflows.
+# Tasks, Secret Manager, Cloud KMS, Cloud Run (for run.routes.invoke,
+# iam.serviceAccounts.actAs and, since the sixth round, its admin API and
+# Cloud Functions, Artifact Registry and Cloud Build on its port), Cloud
+# Scheduler, Workflows, Cloud Logging, Cloud Monitoring, Memorystore, the
+# Cloud SQL Admin API, Certificate Authority Service, Kubernetes Engine,
+# Compute Engine, API Keys, Service Usage and BigQuery (for Pub/Sub's
+# BigQuery subscriptions, #1998).
 
 # An eleventh, crossservice (cross alone was the cross-compile job's
 # name in ci.yml), is the run shard's instance again for
@@ -104,6 +108,7 @@ COMPAT_LOCALAI_TEST_NAMES="
   BigQueryConnectionGroupMembers1812 BigQueryMLAnnotateImage
   BigQueryMLAnnotateImageDetections BigQueryMLAnnotateImageLabels
   BigQueryMLImportedONNXModel BigQueryMLProcessDocument
+  BigQueryMLTensorFlowImportGenerated
   BigQueryMLRemoteConnectionPermissions BigQueryMLRemoteDefaultConnection
   BigQueryMLRemoteGenerateEmbedding BigQueryMLRemoteGenerateText
   BigQueryMLRemoteGenerationOptions BigQueryMLTranscribe
@@ -148,7 +153,7 @@ COMPAT_LOCALAI_TEST_NAMES="
   GenerationNeverUsesApplicationDefaultCredentials
   RawPredictOnTheEmbeddingModel RawPredictOnTheGenerationModel
   SpeechAdaptationBoost SpeechAdaptationResources SpeechBatchRecognize
-  SpeechRecognizers SpeechStreamingRecognize SpeechV1
+  SpeechRecognitionFeatures1799 SpeechRecognizers SpeechStreamingRecognize SpeechV1
   StreamGenerateContentThroughTheOfficialSDK
   StreamGenerateContentThroughThePredictionClient
   StreamingPredictOnTheEmbeddingModel StreamingPredictOnTheGenerationModel
@@ -290,7 +295,9 @@ compat_shard() {
       # step alone is given MONITORING; and as PUBSUB_MONITORING for
       # TestMonitoringPubSubChannelAndVerification (#1966), which needs
       # Pub/Sub beside it, so the Monitoring suite stays in served.
-      SERVICES=storage,pubsub,tasks,secretmanager,scheduler,logging,privateca,kms,monitoring
+      # parametermanager (#2054), whose versions reference this shard's
+      # Secret Manager and whose keys are its Cloud KMS.
+      SERVICES=storage,pubsub,tasks,secretmanager,scheduler,logging,privateca,kms,monitoring,parametermanager
       # The hooks are the #285 fixtures (two ready.d scripts, the second
       # creating a bucket, and a shutdown.d script checked after stop), and
       # the seed file names tasks and storage.
@@ -308,7 +315,7 @@ compat_shard() {
       # Service Usage (#1352), always served, with the Terraform and gcloud
       # tests that need Cloud Storage beside it; and the API Keys API
       # (#1915), always served too.
-      TEST_VARS+=,STORAGE,CORS_ORIGIN,PUBSUB,TASKS,SECRETS,SCHEDULER,TOFU,RESOURCEMANAGER,SERVICEUSAGE,APIKEYS,STORAGE_BATCH,STORAGE_INSIGHTS,STORAGE_TRANSFER,TASKS_LOGGING,PUBSUB_MONITORING,CMEK_KMS
+      TEST_VARS+=,STORAGE,CORS_ORIGIN,PUBSUB,TASKS,SECRETS,SCHEDULER,TOFU,RESOURCEMANAGER,SERVICEUSAGE,APIKEYS,STORAGE_BATCH,STORAGE_INSIGHTS,STORAGE_TRANSFER,TASKS_LOGGING,PUBSUB_MONITORING,CMEK_KMS,PARAMETERMANAGER
       # The restart probes' fixtures, left just before stop so no
       # suite-level reset wipes them: Secret Manager (#483), a secret and a
       # version; Cloud Tasks and Cloud Scheduler (#596), a paused queue with
@@ -360,8 +367,10 @@ compat_shard() {
       # Workflows (#1986): its workflows call a Cloud Run service with
       # http.post and Cloud Storage and Pub/Sub through connectors.
       # Memorystore, as RUN_MEMORYSTORE_ADMIN, for the Redis instances'
-      # direct events (#1997).
-      SERVICES=run,secretmanager,tasks,storage,pubsub,firestore,datastore,gke,memorystore,kms,scheduler,logging,bigquery,cloudsql,cloudsql-mysql,workflows
+      # direct events (#1997). Cloud Monitoring, as the browser step's
+      # MONITORING only, for Cloud Run's request, latency and instance
+      # metrics on a service's and a function's Metrics tab (#2049).
+      SERVICES=run,secretmanager,tasks,storage,pubsub,firestore,datastore,gke,memorystore,kms,scheduler,logging,bigquery,cloudsql,cloudsql-mysql,workflows,monitoring
       # Cloud Run (#336). For the revisions that reach Storage and Pub/Sub
       # with no client options (#576) and call KMS, Scheduler and Logging
       # (#681), the RUN_* names, so those suites do not run a second time
@@ -439,14 +448,29 @@ compat_shard() {
       # minutes; the other suites ran with enforcement off in their shards.
       # BigQuery for BigQuery sharing's (Analytics Hub, #1989) and for the
       # Pub/Sub BigQuery subscriptions' writer roles (#1998), with the one
-      # project its emulator serves. Cloud Scheduler and Workflows since
-      # the fourth round.
-      SERVICES=storage,pubsub,tasks,secretmanager,kms,run,bigquery,scheduler,workflows
-      TEST_VARS+=,STORAGE,PUBSUB,TASKS,SECRETS,KMS,RUN,RESOURCEMANAGER,ANALYTICSHUB,BIGQUERY,BIGQUERY_PROJECT,SCHEDULER,WORKFLOWS,IAM_ENFORCEMENT
+      # project its emulator serves.
+      # Cloud Scheduler and Workflows since the fourth round; Cloud
+      # Logging, Cloud Monitoring, Memorystore and the Cloud SQL Admin API
+      # since the fifth; Certificate Authority Service, Kubernetes Engine
+      # (no cluster is made), Compute Engine, API Keys and Service Usage
+      # since the seventh; the local AI endpoint (Vertex AI, Document AI,
+      # Speech-to-Text, Translation), which Cloud Run starts with no
+      # model, since the eighth; Firestore, Spanner and Bigtable, whose
+      # fronts check each call, since the ninth; the Datastore API since
+      # the tenth; the BigQuery Data Transfer Service, Backup and DR and the Cloud
+      # Storage companion APIs since the twelfth; Parameter Manager for its
+      # renders as the parameter's identity (#2054); the Firebase Rules API,
+      # served with Firestore, whose releases govern client SDK calls,
+      # which IAM does not (#2048).
+      SERVICES=storage,pubsub,tasks,secretmanager,kms,run,bigquery,scheduler,workflows,logging,monitoring,memorystore,cloudsql,privateca,gke,compute,firestore,datastore,spanner,bigtable,backupdr,parametermanager
+      TEST_VARS+=,STORAGE,PUBSUB,TASKS,SECRETS,KMS,RUN,RESOURCEMANAGER,ANALYTICSHUB,BIGQUERY,BIGQUERY_PROJECT,SCHEDULER,WORKFLOWS,LOGGING,MONITORING,MEMORYSTORE_ADMIN,SQLADMIN,PRIVATECA,GKE,COMPUTE,APIKEYS,SERVICEUSAGE,LOCALAI,FIRESTORE,DATASTORE,SPANNER,BIGTABLE,DATATRANSFER,BACKUPDR,STORAGE_BATCH,STORAGE_INSIGHTS,STORAGE_TRANSFER,IAM_ENFORCEMENT,PARAMETERMANAGER,FIREBASERULES
       UP_FLAGS=(--iam-enforcement=on)
       # And Workload Identity Federation's federated principal reading a
-      # bucket, refused until it is granted (#1941), which needs enforcement.
-      COMPAT_RUN='^Test(IAMEnforcement|WorkloadIdentityFederationStorage$)' ;;
+      # bucket, refused until it is granted (#1941), and Workforce Identity
+      # Federation's (#2056), its SAML exchange read through Cloud Storage
+      # and its pools' own IAM policies (#2065), and SCIM-provisioned users and
+      # groups read through Cloud Storage (#2068), which need enforcement.
+      COMPAT_RUN='^Test(IAMEnforcement|WorkloadIdentityFederationStorage$|WorkforceIdentityFederationStorage$|WorkforceIdentityFederationSAML$|WorkforcePoolIAMPolicy$|WorkforceScimProvisioning$)' ;;
     localai)
       # The local AI tests (#1985): BigQuery and Cloud Storage for the AI
       # and ML functions' tables and object tables, Resource Manager (every
@@ -500,7 +524,8 @@ compat_shard() {
       # (#1881), so the KMS suite stays in served.
       # The BigQuery Data Transfer Service (#1948), served with BigQuery.
       # BigQuery sharing (Analytics Hub, #1960), served with BigQuery.
-      TEST_VARS+=,DATATRANSFER,ANALYTICSHUB,LOGGING_RESOURCEMANAGER,SPANNER,SPANNER_REST,DATASTORE,FIRESTORE,FIRESTORE_MONGODB,FIRESTORE_MONGODB_CA,FIRESTORE_RESOURCEMANAGER,BIGTABLE,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT,BIGQUERY_RESOURCEMANAGER,SINK_LOGGING,SINK_STORAGE,SINK_PUBSUB,FIRESTORE_STORAGE,BQML_STORAGE,CMEK_KMS
+      # The Firebase Rules API (#2048), served with Firestore.
+      TEST_VARS+=,DATATRANSFER,ANALYTICSHUB,FIREBASERULES,LOGGING_RESOURCEMANAGER,SPANNER,SPANNER_REST,DATASTORE,FIRESTORE,FIRESTORE_MONGODB,FIRESTORE_MONGODB_CA,FIRESTORE_RESOURCEMANAGER,BIGTABLE,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT,BIGQUERY_RESOURCEMANAGER,SINK_LOGGING,SINK_STORAGE,SINK_PUBSUB,FIRESTORE_STORAGE,BQML_STORAGE,CMEK_KMS
       # Firestore's probe documents and named database (#1636): written
       # alone, as a front-state reset in the suite forgets the database.
       SETUP_TESTS="TestFirestoreRestartSetup"

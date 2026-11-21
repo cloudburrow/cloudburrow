@@ -32,7 +32,7 @@ func loggingConsole(t *testing.T) (*httptest.Server, *loggingService) {
 	svc.api.UseAdmin(svc.admin)
 	screen := loggingAdminScreen{svc: svc}
 	srv := httptest.NewServer(console.New("127.0.0.1:0", nil,
-		loggingMetricsProvider{screen}, loggingSinksProvider{screen}, loggingExclusionsProvider{screen}, loggingBucketsProvider{screen},
+		loggingMetricsProvider{loggingAdminScreen: screen}, loggingSinksProvider{screen}, loggingExclusionsProvider{screen}, loggingBucketsProvider{screen},
 		loggingSettingsProvider{screen}).Handler())
 	t.Cleanup(srv.Close)
 	return srv, svc
@@ -75,7 +75,7 @@ func TestConsoleLoggingMetrics(t *testing.T) {
 		m.GetBucketOptions().GetLinearBuckets().GetNumFiniteBuckets() != 10 || m.GetLabelExtractors()["path"] != "EXTRACT(labels.path)" {
 		t.Fatalf("the API reads the distribution as %v, %v", m, err)
 	}
-	if code, out := consolePost(t, base, map[string]string{"name": "bad", "filter": "jsonPayload.x:y"}); code == http.StatusOK || !strings.Contains(out, "not supported") {
+	if code, out := consolePost(t, base, map[string]string{"name": "bad", "filter": "jsonPayload.x:("}); code == http.StatusOK || !strings.Contains(out, "Unparseable filter") {
 		t.Errorf("a filter the API refuses = %d %s; want its message", code, out)
 	}
 
@@ -98,7 +98,7 @@ func TestConsoleLoggingMetrics(t *testing.T) {
 	if m.GetFilter() != "severity>=WARNING" || !m.GetDisabled() {
 		t.Errorf("after edit the API reads %v", m)
 	}
-	if code, _ := consolePatch(t, edit, []string{"projects/proj-1/metrics/errors"}, map[string]string{"filter": "a OR b"}); code == http.StatusOK {
+	if code, _ := consolePatch(t, edit, []string{"projects/proj-1/metrics/errors"}, map[string]string{"filter": "a OR"}); code == http.StatusOK {
 		t.Error("an edit to a filter the API refuses succeeded")
 	}
 
@@ -277,27 +277,32 @@ func TestConsoleLoggingViews(t *testing.T) {
 		t.Errorf("_AllLogs row = %+v; want it listed with Permissions alone", r)
 	}
 
+	// A filter log views refuse (#2028) comes back with the API's refusal.
 	if code, out := consolePost(t, acts, map[string]any{"Path": []string{bucket}, "Action": viewCreate,
-		"Values": map[string]string{"id": "errors", "filter": `severity>=ERROR`, "description": "just errors"}}); code != http.StatusOK {
+		"Values": map[string]string{"id": "errors", "filter": `severity>=ERROR`}}); code != http.StatusBadRequest || !strings.Contains(out, "Invalid filter") {
+		t.Errorf("a view on severity = %d %s; want the API's INVALID_ARGUMENT", code, out)
+	}
+	if code, out := consolePost(t, acts, map[string]any{"Path": []string{bucket}, "Action": viewCreate,
+		"Values": map[string]string{"id": "errors", "filter": `LOG_ID("errors")`, "description": "just errors"}}); code != http.StatusOK {
 		t.Fatalf("create view = %d %s", code, out)
 	}
 	name := bucket + "/views/errors"
 	v, err := svc.admin.ConfigServer().GetView(ctx, &loggingpb.GetViewRequest{Name: name})
-	if err != nil || v.GetFilter() != "severity>=ERROR" || v.GetDescription() != "just errors" {
+	if err != nil || v.GetFilter() != `LOG_ID("errors")` || v.GetDescription() != "just errors" {
 		t.Fatalf("the API reads %v, %v", v, err)
 	}
 	d = console.Detail{}
 	getJSON200(t, detailURL(bucket), &d)
 	r := viewRow(d, "errors")
 	if r == nil || len(r.Actions) != 3 || r.Actions[0].ID != viewEdit || r.Actions[1].ID != viewDelete ||
-		r.Actions[2].ID != viewPermissions || r.Actions[0].Fields[0].Default != "severity>=ERROR" {
+		r.Actions[2].ID != viewPermissions || r.Actions[0].Fields[0].Default != `LOG_ID("errors")` {
 		t.Fatalf("the new view's row = %+v; want Edit with its filter, Delete and Permissions (#1519)", r)
 	}
 	if code, out := consolePost(t, acts, map[string]any{"Path": []string{bucket, "errors"}, "Action": viewEdit,
-		"Values": map[string]string{"filter": "severity>=WARNING", "description": "warnings"}}); code != http.StatusOK {
+		"Values": map[string]string{"filter": `LOG_ID("warnings")`, "description": "warnings"}}); code != http.StatusOK {
 		t.Fatalf("edit view = %d %s", code, out)
 	}
-	if v, _ := svc.admin.ConfigServer().GetView(ctx, &loggingpb.GetViewRequest{Name: name}); v.GetFilter() != "severity>=WARNING" || v.GetDescription() != "warnings" {
+	if v, _ := svc.admin.ConfigServer().GetView(ctx, &loggingpb.GetViewRequest{Name: name}); v.GetFilter() != `LOG_ID("warnings")` || v.GetDescription() != "warnings" {
 		t.Errorf("after edit the API reads %v", v)
 	}
 	if code, out := consolePost(t, acts, map[string]any{"Path": []string{bucket, "errors"}, "Action": viewDelete}); code != http.StatusOK {

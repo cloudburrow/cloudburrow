@@ -19,10 +19,14 @@ package main
 //   - Groups, Services (SLOs) and Snoozes, each with create and delete.
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
+	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -1092,6 +1096,54 @@ func (p monitoringUptimeProvider) Edit(ctx context.Context, project string, path
 type monitoringDashboardsProvider struct {
 	monitoringAdmin
 	metrics monitoringScreen
+	// analytics runs a Log Analytics chart's SQL through Log Analytics
+	// (#2032), or is nil where the instance does not serve it (no Cloud
+	// Logging or no BigQuery): the chart then says why it is not drawn.
+	analytics func(ctx context.Context, project, sql string) (console.Listing, error)
+}
+
+// analyticsUnavailable is why a Log Analytics chart is not drawn here.
+const analyticsUnavailable = "Not available locally: this chart's query is Log Analytics SQL, and this instance does not serve " +
+	"Log Analytics (it needs Cloud Logging and BigQuery)."
+
+var errAnalyticsUnavailable = errors.New(analyticsUnavailable)
+
+// analyticsVisualization is how a widget whose query is SQL is drawn: a
+// table for a timeSeriesTable, a line chart for a LINE data set, and
+// otherwise a bar chart, as Log Analytics saves them.
+func analyticsVisualization(w *dashboardpb.Widget) string {
+	if w.GetTimeSeriesTable() != nil {
+		return "Table"
+	}
+	for _, ds := range w.GetXyChart().GetDataSets() {
+		if ds.GetPlotType() == dashboardpb.XyChart_DataSet_LINE {
+			return "Line"
+		}
+	}
+	return "Bar"
+}
+
+// analyticsSection runs a widget's SQL through Log Analytics and draws its
+// results as Log Analytics does: a dashboard's chart of a saved query.
+func (p monitoringDashboardsProvider) analyticsSection(ctx context.Context, project, id, title string, w *dashboardpb.Widget, sqls []string) console.Section {
+	sec := console.Section{ID: id, Label: title, Group: "Charts", Kind: console.KindAnalytics,
+		Visualization: analyticsVisualization(w), Note: "Log Analytics query: " + strings.Join(sqls, "; ")}
+	if p.analytics == nil {
+		sec.Unavailable = analyticsUnavailable
+		return sec
+	}
+	// Log Analytics saves one query a widget; the first is drawn.
+	res, err := p.analytics(ctx, project, sqls[0])
+	if errors.Is(err, errAnalyticsUnavailable) {
+		sec.Unavailable = analyticsUnavailable
+		return sec
+	}
+	if err != nil {
+		sec.Unavailable = "The query failed: " + err.Error()
+		return sec
+	}
+	sec.Listing = res
+	return sec
 }
 
 func (monitoringDashboardsProvider) ID() string    { return "monitoring-dashboards" }
@@ -1303,6 +1355,14 @@ func (p monitoringDashboardsProvider) Detail(ctx context.Context, project string
 		return console.Detail{}, err
 	}
 	b, _ := protojson.MarshalOptions{Multiline: true, Indent: "  "}.Marshal(d)
+	// The JSON API's, which holds a Log Analytics chart's SQL (#2031).
+	if code, raw := s.CallDashboardsJSON(http.MethodGet, "/v1/"+d.GetName(), nil); code == http.StatusOK {
+		var pretty bytes.Buffer
+		if json.Indent(&pretty, raw, "", "  ") == nil {
+			b = pretty.Bytes()
+		}
+	}
+	sqls := s.DashboardSQL(d.GetName())
 	out := console.Detail{Title: d.GetDisplayName(), Summary: []console.Property{
 		{Label: "Name", Value: d.GetName()}, {Label: "Layout", Value: layoutName(d)}, {Label: "Etag", Value: d.GetEtag()},
 		{Label: "Labels", Value: orDash(labelsText(d.GetLabels()))},
@@ -1310,13 +1370,30 @@ func (p monitoringDashboardsProvider) Detail(ctx context.Context, project string
 		Note:   "The dashboard is replaced by this JSON; a change made elsewhere since this page was opened is refused (its etag).",
 		Fields: []console.Field{{Name: "json", Label: "Dashboard JSON", Type: "textarea", Required: true, Default: string(b)}}}}
 	widgets := console.Listing{Columns: []string{"Type", "Detail"}, NameColumn: "Widget", Noun: "widgets"}
+	prefixes := dashboardWidgetPaths(d)
 	for i, w := range dashboardWidgets(d) {
 		title := w.GetTitle()
 		if title == "" {
 			title = fmt.Sprintf("Widget %d", i+1)
 		}
 		detail := "—"
+		var sql []string
+		for path, q := range sqls {
+			if strings.HasPrefix(path, prefixes[i]) {
+				sql = append(sql, q)
+			}
+		}
+		sort.Strings(sql)
 		switch {
+		case len(sql) > 0:
+			// A Log Analytics chart (#2031): its query is SQL, which Log
+			// Analytics runs, and the dashboard draws its results (#2032).
+			sec := p.analyticsSection(ctx, project, fmt.Sprintf("chart-%d", i+1), title, w, sql)
+			out.Sections = append(out.Sections, sec)
+			detail = "Log Analytics query: " + strings.Join(sql, "; ")
+			if sec.Unavailable == "" {
+				detail += fmt.Sprintf(" (%d rows)", len(sec.Listing.Items))
+			}
 		case w.GetXyChart() != nil:
 			series, note := p.widgetSeries(ctx, project, w)
 			out.Sections = append(out.Sections, console.Section{ID: fmt.Sprintf("chart-%d", i+1), Label: title, Group: "Charts",
@@ -1348,8 +1425,56 @@ func (p monitoringDashboardsProvider) Edit(ctx context.Context, project string, 
 		return err
 	}
 	d.Name = "projects/" + project + "/dashboards/" + path[0]
-	_, err = s.UpdateDashboard(ctx, &dashboardpb.UpdateDashboardRequest{Dashboard: d})
-	return err
+	// Through the JSON API, which keeps a Log Analytics chart's SQL
+	// (#2031); dashboardFromJSON has checked the rest.
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(values["json"]), &raw); err != nil {
+		return fmt.Errorf("dashboard JSON: %v", err)
+	}
+	raw["name"] = d.Name
+	body, _ := json.Marshal(raw)
+	code, resp := s.CallDashboardsJSON(http.MethodPatch, "/v1/"+d.Name, body)
+	if code != http.StatusOK {
+		var e struct {
+			Error struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if json.Unmarshal(resp, &e) == nil && e.Error.Message != "" {
+			return errors.New(e.Error.Message)
+		}
+		return fmt.Errorf("HTTP %d", code)
+	}
+	return nil
+}
+
+// dashboardWidgetPaths are the places of dashboardWidgets(d) in the
+// dashboard's JSON, each ending in a slash.
+func dashboardWidgetPaths(d *dashboardpb.Dashboard) []string {
+	var out []string
+	switch l := d.GetLayout().(type) {
+	case *dashboardpb.Dashboard_GridLayout:
+		for i := range l.GridLayout.GetWidgets() {
+			out = append(out, fmt.Sprintf("gridLayout/widgets/%d/", i))
+		}
+	case *dashboardpb.Dashboard_MosaicLayout:
+		for i := range l.MosaicLayout.GetTiles() {
+			out = append(out, fmt.Sprintf("mosaicLayout/tiles/%d/widget/", i))
+		}
+	case *dashboardpb.Dashboard_RowLayout:
+		for r, row := range l.RowLayout.GetRows() {
+			for i := range row.GetWidgets() {
+				out = append(out, fmt.Sprintf("rowLayout/rows/%d/widgets/%d/", r, i))
+			}
+		}
+	case *dashboardpb.Dashboard_ColumnLayout:
+		for c, col := range l.ColumnLayout.GetColumns() {
+			for i := range col.GetWidgets() {
+				out = append(out, fmt.Sprintf("columnLayout/columns/%d/widgets/%d/", c, i))
+			}
+		}
+	}
+	return out
 }
 
 // ---- Groups ----

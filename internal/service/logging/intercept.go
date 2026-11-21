@@ -190,6 +190,16 @@ func serveSinkJSON(a *Admin, next http.Handler, w http.ResponseWriter, r *http.R
 		r = r.Clone(r.Context())
 		r.URL = &u
 	}
+	if q := r.URL.Query(); q.Has(CustomWriterParam) && r.Method != http.MethodGet && r.Method != http.MethodDelete {
+		// customWriterIdentity (writeridentity.go), which loggingpb's
+		// requests lack.
+		w := q.Get(CustomWriterParam)
+		q.Del(CustomWriterParam)
+		u := *r.URL
+		u.RawQuery = q.Encode()
+		r = r.Clone(context.WithValue(r.Context(), writerCtxKey{}, w))
+		r.URL = &u
+	}
 	if q := r.URL.Query(); q.Has("updateMask") {
 		// gcloud logging sinks update sends snake_case paths
 		// (destination,intercept_children), which Google accepts; the

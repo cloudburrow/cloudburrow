@@ -13,11 +13,13 @@
 package wif
 
 import (
+	"crypto/rsa"
 	"fmt"
 	"regexp"
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"cel.dev/cel-go/cel"
 	"cel.dev/cel-go/common/types"
@@ -119,10 +121,25 @@ func compile(src string) (cel.Program, error) {
 // ValidateMapping checks an attribute mapping as Google does on create and
 // update; the error's text is the INVALID_ARGUMENT message.
 func ValidateMapping(m map[string]string, requireSubject bool) error {
+	return validateMapping(m, requireSubject, false)
+}
+
+// ValidateWorkforceMapping checks a workforce pool provider's attribute
+// mapping (#2056): google.subject is required, and google.profile_photo
+// is a key too.
+func ValidateWorkforceMapping(m map[string]string) error {
+	if len(m) == 0 {
+		return fmt.Errorf("The attribute mapping is required and must include a mapping to google.subject")
+	}
+	return validateMapping(m, true, true)
+}
+
+func validateMapping(m map[string]string, requireSubject, workforce bool) error {
 	custom := 0
 	for k, v := range m {
 		switch {
-		case k == "google.subject", k == "google.groups", k == "google.display_name", k == "google.posix_username":
+		case k == "google.subject", k == "google.groups", k == "google.display_name", k == "google.posix_username",
+			workforce && k == "google.profile_photo":
 		case strings.HasPrefix(k, "attribute."):
 			name := strings.TrimPrefix(k, "attribute.")
 			if name == "" || len(name) > MaxAttributeKey || !customKey.MatchString(name) {
@@ -173,11 +190,31 @@ func ValidateCondition(src string) error {
 	return nil
 }
 
+// ErrSubjectDeleted is an exchange for a workforce pool subject deleted
+// less than 30 days ago (#2056).
+var ErrSubjectDeleted = fmt.Errorf("The workforce pool subject is deleted: its google.subject cannot exchange tokens until it is undeleted, or 30 days after it was deleted.")
+
 // ErrCondition is an assertion the attribute condition refuses.
 var ErrCondition = fmt.Errorf("The given credential is rejected by the attribute condition.")
 
 // Apply evaluates mapping over assertion, then condition over the result.
 func Apply(mapping map[string]string, condition string, assertion map[string]any) (Attributes, error) {
+	return apply(mapping, condition, assertion, MaxMappedBytes, 0)
+}
+
+// Workforce pool limits (#2056): the mapped attributes total at most 16
+// KB, and google.display_name at most 100 bytes.
+const (
+	MaxWorkforceMappedBytes = 16 * 1024
+	MaxDisplayNameBytes     = 100
+)
+
+// ApplyWorkforce is Apply with a workforce pool provider's limits.
+func ApplyWorkforce(mapping map[string]string, condition string, assertion map[string]any) (Attributes, error) {
+	return apply(mapping, condition, assertion, MaxWorkforceMappedBytes, MaxDisplayNameBytes)
+}
+
+func apply(mapping map[string]string, condition string, assertion map[string]any, maxMapped, maxDisplay int) (Attributes, error) {
 	out := Attributes{Custom: map[string][]string{}, Google: map[string]any{}}
 	attr := map[string]any{}
 	keys := make([]string, 0, len(mapping))
@@ -234,8 +271,11 @@ func Apply(mapping map[string]string, condition string, assertion map[string]any
 	if len(out.Subject) > MaxSubjectBytes {
 		return out, fmt.Errorf("The mapped attribute google.subject exceeds %d bytes", MaxSubjectBytes)
 	}
-	if size > MaxMappedBytes {
-		return out, fmt.Errorf("The total size of the mapped attributes exceeds %d bytes", MaxMappedBytes)
+	if size > maxMapped {
+		return out, fmt.Errorf("The total size of the mapped attributes exceeds %d bytes", maxMapped)
+	}
+	if maxDisplay > 0 && len(out.DisplayName) > maxDisplay {
+		return out, fmt.Errorf("The mapped attribute google.display_name exceeds %d bytes", maxDisplay)
 	}
 	if condition != "" {
 		prg, err := compile(condition)
@@ -338,6 +378,80 @@ func PoolOfPrincipal(member string) (projectNumber, pool string, ok bool) {
 	return parts[0], parts[4], true
 }
 
+// WorkforcePoolName is a workforce pool's resource name (#2056): pools
+// are global, under an organization that the name does not show.
+func WorkforcePoolName(pool string) string {
+	return "locations/global/workforcePools/" + pool
+}
+
+// WorkforcePrincipal is a workforce pool subject's principal://
+// identifier.
+func WorkforcePrincipal(pool, subject string) string {
+	return "principal://iam.googleapis.com/" + WorkforcePoolName(pool) + "/subject/" + subject
+}
+
+// WorkforceSets are the principalSet:// identifiers that name a workforce
+// identity with attrs: every identity in the pool, each of its groups and
+// each value of each custom attribute.
+func WorkforceSets(pool string, attrs Attributes) []string {
+	base := "principalSet://iam.googleapis.com/" + WorkforcePoolName(pool)
+	out := []string{base + "/*"}
+	for _, g := range attrs.Groups {
+		out = append(out, base+"/group/"+g)
+	}
+	names := make([]string, 0, len(attrs.Custom))
+	for n := range attrs.Custom {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		for _, v := range attrs.Custom[n] {
+			out = append(out, base+"/attribute."+n+"/"+v)
+		}
+	}
+	return out
+}
+
+// WorkforcePoolOfPrincipal is the workforce pool a
+// principal://iam.googleapis.com/locations/global/workforcePools/P/... or
+// principalSet:// identifier names, and for a principal:// its subject;
+// ok is false for any other member.
+func WorkforcePoolOfPrincipal(member string) (pool, subject string, ok bool) {
+	lower := strings.ToLower(member)
+	rest := ""
+	single := false
+	for _, p := range []string{"principal://iam.googleapis.com/locations/global/workforcepools/", "principalset://iam.googleapis.com/locations/global/workforcepools/"} {
+		if strings.HasPrefix(lower, p) {
+			rest, single, ok = member[len(p):], strings.HasPrefix(p, "principal:"), true
+		}
+	}
+	if !ok {
+		return "", "", false
+	}
+	pool, tail, found := strings.Cut(rest, "/")
+	if pool == "" || !found || tail == "" {
+		return "", "", false
+	}
+	if single {
+		sub, isSubject := strings.CutPrefix(tail, "subject/")
+		if !isSubject || sub == "" {
+			return "", "", false
+		}
+		return pool, sub, true
+	}
+	return pool, "", true
+}
+
+// IsFederated reports whether member is a workload or workforce identity
+// pool's principal:// or principalSet:// identifier.
+func IsFederated(member string) bool {
+	if _, _, ok := PoolOfPrincipal(member); ok {
+		return true
+	}
+	_, _, ok := WorkforcePoolOfPrincipal(member)
+	return ok
+}
+
 // Provider kinds.
 const (
 	KindOIDC = "oidc"
@@ -358,9 +472,39 @@ type Provider struct {
 	DiscoveryURI     string
 	Mapping          map[string]string
 	Condition        string
+	// Workforce is a workforce pool's provider (#2056): ProjectNumber is
+	// empty, the audience is ClientID, the token lasts SessionTTL and
+	// ProgrammaticDisabled refuses every exchange.
+	Workforce            bool
+	ClientID             string
+	SessionTTL           time.Duration
+	ProgrammaticDisabled bool
+	// SAMLMetadata is a SAML provider's IdP metadata document.
+	SAMLMetadata string
+	// DecryptionKeys are a SAML provider's live encryption keys (#2065).
+	DecryptionKeys []*rsa.PrivateKey
+}
+
+// SAMLAudience is the Audience a SAML assertion for p must name: its
+// name with an https: scheme.
+func (p Provider) SAMLAudience() string { return "https:" + p.Name() }
+
+// SAMLRecipients are the Recipients a workforce provider's assertion may
+// name: its sign-in callback (Google's ACS URL for the provider) and the
+// Security Token Service's token URL; a workload provider's are not
+// restricted (Google documents none).
+func (p Provider) SAMLRecipients() []string {
+	if !p.Workforce {
+		return nil
+	}
+	return []string{"https://auth.cloud.google/signin-callback/" + WorkforcePoolName(p.Pool) + "/providers/" + p.ID,
+		"https://sts.googleapis.com/v1/token"}
 }
 
 // Name is the provider's canonical resource name, //iam.googleapis.com/....
 func (p Provider) Name() string {
+	if p.Workforce {
+		return "//iam.googleapis.com/" + WorkforcePoolName(p.Pool) + "/providers/" + p.ID
+	}
 	return "//iam.googleapis.com/" + PoolName(p.ProjectNumber, p.Pool) + "/providers/" + p.ID
 }

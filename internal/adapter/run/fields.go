@@ -34,7 +34,6 @@ func droppedFieldGaps(svc *runpb.Service) []string {
 	add(svc.GetDefaultUriDisabled(), "defaultUriDisabled", "not mapped")
 	add(svc.GetIapEnabled(), "iapEnabled", "Identity-Aware Proxy does not exist locally")
 	add(svc.GetMultiRegionSettings() != nil, "multiRegionSettings", "there is one region locally")
-	add(svc.GetBuildConfig() != nil, "buildConfig", "source builds are not run by the Cloud Run adapter")
 	add(svc.GetThreatDetectionEnabled(), "threatDetectionEnabled", "not mapped")
 
 	t := svc.GetTemplate()
