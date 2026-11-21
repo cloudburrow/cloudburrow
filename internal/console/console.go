@@ -937,6 +937,12 @@ type EditForm struct {
 	// older page edit, drawn under the resource's own header with no
 	// section headings; a form sets one or the other.
 	Layout string `json:"layout,omitempty"`
+	// Review, when set, makes Submit open a review of the change first:
+	// every field whose value differs from the one the form opened with,
+	// its current and its new value, sent only by the review's button,
+	// labelled Review. Google's Cloud Run service tabs end in View diff &
+	// redeploy, whose review ends in Deploy changes (#1852).
+	Review string `json:"review,omitempty"`
 }
 
 // EditLayoutPage is EditForm.Layout for an edit drawn as its own page.
@@ -2210,6 +2216,9 @@ type createForm struct {
 	Href string `json:"href,omitempty"`
 	// CommitStep is CreateCommitter's: the step whose Continue creates.
 	CommitStep int `json:"commitStep,omitempty"`
+	// Copies is CreateCopier's: the page opened with ?from= is the copy
+	// of that resource, its fields read from /api/createform/{service}.
+	Copies bool `json:"copies,omitempty"`
 }
 
 // ProjectCreateFormer is a Creator whose fields depend on the project, as
@@ -2220,11 +2229,38 @@ type ProjectCreateFormer interface {
 	CreateFormFor(ctx context.Context, project string) []Field
 }
 
-// handleCreateFormFor is a ProjectCreateFormer's fields for a project.
+// CreateCopier is a Creator whose create page opens as the copy of one of
+// its resources, named by the address's from parameter: Google's Services
+// list has Copy, which opens "the service copy page", the create form
+// holding the checked service's settings (#1852). CreateFormFrom is that
+// form; an error is why the resource cannot be copied.
+type CreateCopier interface {
+	Creator
+	CreateFormFrom(ctx context.Context, project, from string) ([]Field, error)
+}
+
+// handleCreateFormFor is a ProjectCreateFormer's fields for a project, or
+// a CreateCopier's for the copy of the resource named by from.
 func (s *Server) handleCreateFormFor(w http.ResponseWriter, r *http.Request) {
 	p, ok := s.providers[r.PathValue("service")]
 	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such service"})
+		return
+	}
+	if from := r.URL.Query().Get("from"); from != "" {
+		cc, ok := p.(CreateCopier)
+		if !ok {
+			writeJSON(w, http.StatusNotImplemented, map[string]string{"error": p.Title() + " has no copy form"})
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), budgetFor(p))
+		defer cancel()
+		fields, err := cc.CreateFormFrom(ctx, r.URL.Query().Get("project"), from)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": userMessage(err)})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"fields": fields})
 		return
 	}
 	pf, ok := p.(ProjectCreateFormer)
@@ -2271,6 +2307,9 @@ func (s *Server) capabilitiesOf(p Provider) capabilities {
 		}
 		if cc, ok := p.(CreateCommitter); ok {
 			c.Create.CommitStep = cc.CreateCommitStep()
+		}
+		if _, ok := p.(CreateCopier); ok {
+			c.Create.Copies = true
 		}
 		if ch, ok := p.(CreateHrefer); ok && ch.CreateHref() != "" {
 			c.Create.Href = ch.CreateHref()

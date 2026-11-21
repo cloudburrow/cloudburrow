@@ -267,6 +267,10 @@ func (p runProvider) runServiceSections(ctx context.Context, project, name strin
 	runRevisionTraffic(&revisions.Listing, svc)
 	domains := p.domainsSection(ctx, project, serviceIDOf(name))
 	domains.Actions = p.domainActions(svc)
+	// Containers and Scaling, and the Networking and Security tabs' forms,
+	// each ending in View diff & redeploy (#1852).
+	networking, security := p.runNetworkingSection(svc), p.runSecuritySection(ctx, project, svc)
+	containers, scaling := runEditTabs(p.editForm(ctx, name, svc), &networking, &security)
 	return []console.Section{
 		runNotLocal("metrics", "Metrics", "Request count, latency, container instance count and the other "+
 			"Cloud Run metrics are Cloud Monitoring's, which CloudBurrow does not run. Each request a "+
@@ -277,8 +281,10 @@ func (p runProvider) runServiceSections(ctx context.Context, project, name strin
 		revisions,
 		p.runSourceSection(svc),
 		p.triggersSection(ctx, project, svc),
-		p.runNetworkingSection(svc),
-		p.runSecuritySection(ctx, project, svc),
+		containers,
+		networking,
+		security,
+		scaling,
 		p.runYAMLSection(ctx, project, svc),
 		runConfiguration(svc, p.defaultProject),
 		domains,
@@ -346,7 +352,7 @@ func (p runProvider) runNetworkingSection(svc *ksvcStatus) console.Section {
 	return console.Section{ID: "networking", Label: "Networking", Kind: console.KindProperties,
 		Groups: []console.PropertyGroup{{Properties: props}},
 		Note: "Only INGRESS_TRAFFIC_ALL is mapped: every service is reachable from the host and the cluster. " +
-			"A VPC connector and egress are stored, without effect. Change them with Edit and deploy new revision."}
+			"A VPC connector and egress are stored, without effect. Change them here, then View diff & redeploy."}
 }
 
 // runSecuritySection is the Security tab.
@@ -361,7 +367,7 @@ func (p runProvider) runSecuritySection(ctx context.Context, project string, svc
 		Groups: []console.PropertyGroup{{Properties: props}},
 		Note: "Authentication is the service's IAM policy (allUsers holding roles/run.invoker is public access), " +
 			"changed on the Permissions tab; it is stored, not enforced. The service account and encryption key " +
-			"are the revision's, changed with Edit and deploy new revision."}
+			"are the revision's, changed here, then View diff & redeploy."}
 }
 
 // runYAMLSection is the YAML tab: the service as the Cloud Run Admin API v1

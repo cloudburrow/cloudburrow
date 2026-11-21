@@ -586,6 +586,8 @@ func (p runProvider) List(ctx context.Context, project string) (console.Listing,
 		for k, v := range p.runGoogleFields(ctx, project, s, latest[s.Metadata.Name]) {
 			r.Fields[k] = v
 		}
+		// Every row's checkbox, for Delete and Copy (#1852).
+		r.Selectable = true
 		items = append(items, r)
 	}
 	return console.Listing{
@@ -1092,15 +1094,22 @@ func (p runProvider) revisions(ctx context.Context, service string, svc *ksvcSta
 				"Reason": reason,
 				"Age":    shortAge(str(m, "creationTimestamp")),
 			},
-			// Delete revision, on a revision that serves no traffic (#785).
-			// The API refuses the serving one, so its row has no delete.
-			Actions: p.revisionActions(svc, name),
 		})
 	}
 	// Newest first: the revision someone is looking for is the one that just
 	// deployed.
 	sort.SliceStable(out.Items, func(i, j int) bool { return out.Items[i].Name > out.Items[j].Name })
 	out.Total = len(out.Items)
+	// Each row's ⋮ menu (#785, #1852): Manage traffic, Manage revision
+	// tags, and Delete on a revision that serves no traffic. The API
+	// refuses the serving one, so its row has no delete.
+	ids := make([]string, len(out.Items))
+	for i, r := range out.Items {
+		ids[i] = r.Name
+	}
+	for i := range out.Items {
+		out.Items[i].Actions = p.revisionActions(svc, out.Items[i].Name, ids)
+	}
 	return out
 }
 
