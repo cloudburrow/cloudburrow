@@ -6,12 +6,35 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"sync/atomic"
+
+	"cloud.google.com/go/logging/apiv2/loggingpb"
 )
 
 // AppHubOf is the output-only LogEntry.apphub (#2096) of an entry with
 // the monitored resource resourceType and labels, as its JSON nests it;
 // nil for none.
 type AppHubOf func(resourceType string, labels map[string]string) map[string]any
+
+// filterAppHub is the instance's AppHubOf for filters: SetAppHub.
+var filterAppHub atomic.Pointer[AppHubOf]
+
+// SetAppHub makes every Logging filter (entries.list, tail, sinks,
+// exclusions, log views, log-based metrics, copy) see an entry's apphub,
+// so apphub.application.id="x" matches the entries of the resources
+// application x registers, as Google's query language documents for the
+// output-only LogEntry field. Docs re-read 2026-11-21:
+// https://docs.cloud.google.com/logging/docs/view/logging-query-language.
+func SetAppHub(of AppHubOf) { filterAppHub.Store(&of) }
+
+// entryAppHub is e's apphub for a filter; nil for none.
+func entryAppHub(e *loggingpb.LogEntry) map[string]any {
+	of := filterAppHub.Load()
+	if of == nil || *of == nil || e.GetResource() == nil {
+		return nil
+	}
+	return (*of)(e.GetResource().GetType(), e.GetResource().GetLabels())
+}
 
 // entriesListPath is ListLogEntries' JSON binding.
 const entriesListPath = "/v2/entries:list"

@@ -15214,9 +15214,17 @@ async function renderLogs(view) {
   // from. Application is made from the App Hub application ID label
   // apphub.application.id, and Workload / Service from apphub.workload.id
   // and apphub.service.id too: the entry's apphub, which the instance
-  // fills in for a resource registered to an application (#2096).
-  const LABEL_DIMENSIONS = [["Application", ["apphub.application.id"]],
-    ["Workload / Service", ["apphub.workload.id", "apphub.service.id", 'labels."k8s-pod/app"', 'labels."service.name"']]];
+  // fills in for a resource registered to an application (#2096). Google
+  // lists Workload / Service, then Application, and makes Workload /
+  // Service from resource.labels.namespace_name too, and, while the query
+  // is filtered by the Audited Resource type, from resource.labels.service
+  // (logs-explorer-interface, re-read 2026-11-21).
+  const LABEL_DIMENSIONS = [
+    ["Workload / Service", ["apphub.workload.id", "apphub.service.id", 'labels."k8s-pod/app"', 'labels."service.name"', "resource.labels.namespace_name"]],
+    ["Application", ["apphub.application.id"]]];
+  const AUDITED_SERVICE = "resource.labels.service";
+  const auditedFilter = () => resourceType.value === "audited_resource" ||
+    /(^|[\s(])resource\.type\s*=\s*"?audited_resource"?(?![\w-])/.test(queryEditor.value);
   // How many json_payload fields Frequent fields lists, and values a field.
   const FREQUENT_FIELDS = 10;
   const FIELD_VALUES = 20;
@@ -15313,7 +15321,9 @@ async function renderLogs(view) {
     const system = LOG_FIELD_GROUPS.map(([path, label]) => ({ path, label, values: countValues(entries, path) }));
     // After Resource type and Severity, each label dimension the entries
     // carry values for (#2032).
-    const dimensions = LABEL_DIMENSIONS.map(([label, paths]) => ({ path: paths[0], label, values: dimensionValues(entries, paths) }))
+    const audited = auditedFilter();
+    const dimensions = LABEL_DIMENSIONS.map(([label, paths]) => [label, audited && label === "Workload / Service" ? [...paths, AUDITED_SERVICE] : paths])
+      .map(([label, paths]) => ({ path: paths[0], label, values: dimensionValues(entries, paths) }))
       .filter((g) => g.values.length);
     system.splice(2, 0, ...dimensions);
     const frequent = frequentFields(entries).map((path) => ({ path, label: path, mono: true, values: countValues(entries, path) }));

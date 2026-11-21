@@ -355,6 +355,10 @@ func (s *loggingService) Start(ctx context.Context) error {
 	// entries.list's output-only apphub (#2096), from App Hub's
 	// registrations.
 	jsonAPI = logging.WithAppHub(jsonAPI, s.appHub)
+	// ... and its filters match apphub.* (#2096).
+	if s.appHub != nil {
+		logging.SetAppHub(s.appHub)
+	}
 	if s.wrapJSON != nil {
 		jsonAPI = s.wrapJSON(jsonAPI)
 	}

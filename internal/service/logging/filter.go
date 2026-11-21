@@ -137,6 +137,9 @@ func (r *entryRecord) Field(name string) (any, bool) {
 			return nil, false
 		}
 		return e.GetJsonPayload().AsMap(), true
+	case "apphub":
+		a := entryAppHub(e)
+		return a, a != nil
 	}
 	v, ok := r.Root()[name]
 	return v, ok
@@ -158,6 +161,9 @@ func (r *entryRecord) Root() map[string]any {
 	_ = json.Unmarshal(b, &m)
 	if pp := r.e.GetProtoPayload(); err != nil && pp != nil {
 		m["protoPayload"] = map[string]any{"@type": pp.GetTypeUrl()}
+	}
+	if a := entryAppHub(r.e); a != nil {
+		m["apphub"] = a
 	}
 	r.root = m
 	return m

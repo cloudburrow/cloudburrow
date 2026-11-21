@@ -250,6 +250,8 @@ func (p appHubProvider) Detail(ctx context.Context, project string, path []strin
 // its own region's, or every location's for a global one; as options
 // "service|NAME" and "workload|NAME", labelled by resource URI.
 func registrable(ctx context.Context, s *apphub.Server, app *apphubpb.Application) ([]string, map[string]string) {
+	// Every location from one discovery of each project.
+	ctx = apphub.WithDiscoveryMemo(ctx)
 	m := strings.Split(app.GetName(), "/")
 	host, loc := m[1], m[3]
 	locs := []string{loc}
@@ -399,6 +401,8 @@ func (p appHubDiscoveredProvider) List(ctx context.Context, project string) (con
 		listing.Prompt = "App Hub discovers the services and workloads of a host project's boundary. Choose the host project in the toolbar."
 		return listing, nil
 	}
+	// Every location from one discovery of each project.
+	ctx = apphub.WithDiscoveryMemo(ctx)
 	registered := map[string]string{}
 	for _, loc := range apphub.Locations() {
 		apps, err := s.ListApplications(ctx, &apphubpb.ListApplicationsRequest{Parent: "projects/" + project + "/locations/" + loc, PageSize: 1000})
