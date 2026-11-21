@@ -4562,9 +4562,9 @@
   },
   {
     "Key": "iam",
-    "Title": "IAM (custom roles, service accounts, deny policies, organization policies)",
+    "Title": "IAM (custom roles, service accounts, deny policies, principal access boundary policies, organization policies)",
     "counts": {
-      "Verified": 48
+      "Verified": 60
     },
     "rows": [
       {
@@ -4969,6 +4969,90 @@
         "status": "Verified",
         "tests": [
           "test/compat/iamdenypolicies1886_test.go:50 TestIAMEnforcementDenyPolicies"
+        ]
+      },
+      {
+        "method": "google.iam.v3.PolicyBindings/CreatePolicyBinding",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iampab2057_test.go:34 TestIAMEnforcementPrincipalAccessBoundary"
+        ]
+      },
+      {
+        "method": "google.iam.v3.PolicyBindings/DeletePolicyBinding",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iampab2057_test.go:34 TestIAMEnforcementPrincipalAccessBoundary"
+        ]
+      },
+      {
+        "method": "google.iam.v3.PolicyBindings/GetPolicyBinding",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iampab2057_test.go:34 TestIAMEnforcementPrincipalAccessBoundary"
+        ]
+      },
+      {
+        "method": "google.iam.v3.PolicyBindings/ListPolicyBindings",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iampab2057_test.go:34 TestIAMEnforcementPrincipalAccessBoundary"
+        ]
+      },
+      {
+        "method": "google.iam.v3.PolicyBindings/SearchTargetPolicyBindings",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iampab2057_test.go:34 TestIAMEnforcementPrincipalAccessBoundary"
+        ]
+      },
+      {
+        "method": "google.iam.v3.PolicyBindings/UpdatePolicyBinding",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iampab2057_test.go:34 TestIAMEnforcementPrincipalAccessBoundary"
+        ]
+      },
+      {
+        "method": "google.iam.v3.PrincipalAccessBoundaryPolicies/CreatePrincipalAccessBoundaryPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iampab2057_test.go:34 TestIAMEnforcementPrincipalAccessBoundary"
+        ]
+      },
+      {
+        "method": "google.iam.v3.PrincipalAccessBoundaryPolicies/DeletePrincipalAccessBoundaryPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iampab2057_test.go:34 TestIAMEnforcementPrincipalAccessBoundary"
+        ]
+      },
+      {
+        "method": "google.iam.v3.PrincipalAccessBoundaryPolicies/GetPrincipalAccessBoundaryPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iampab2057_test.go:34 TestIAMEnforcementPrincipalAccessBoundary"
+        ]
+      },
+      {
+        "method": "google.iam.v3.PrincipalAccessBoundaryPolicies/ListPrincipalAccessBoundaryPolicies",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iampab2057_test.go:34 TestIAMEnforcementPrincipalAccessBoundary"
+        ]
+      },
+      {
+        "method": "google.iam.v3.PrincipalAccessBoundaryPolicies/SearchPrincipalAccessBoundaryPolicyBindings",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iampab2057_test.go:34 TestIAMEnforcementPrincipalAccessBoundary"
+        ]
+      },
+      {
+        "method": "google.iam.v3.PrincipalAccessBoundaryPolicies/UpdatePrincipalAccessBoundaryPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iampab2057_test.go:34 TestIAMEnforcementPrincipalAccessBoundary"
         ]
       }
     ]

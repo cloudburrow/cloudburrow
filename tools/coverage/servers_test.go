@@ -16,6 +16,7 @@ import (
 	"cloud.google.com/go/cloudquotas/apiv1/cloudquotaspb"
 	iamadminpb "cloud.google.com/go/iam/admin/apiv1/adminpb"
 	iamv2pb "cloud.google.com/go/iam/apiv2/iampb"
+	iamv3pb "cloud.google.com/go/iam/apiv3/iampb"
 	"cloud.google.com/go/orgpolicy/apiv2/orgpolicypb"
 	pmpb "cloud.google.com/go/parametermanager/apiv1/parametermanagerpb"
 	rmpb "cloud.google.com/go/resourcemanager/apiv3/resourcemanagerpb"
@@ -128,6 +129,8 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	rmpb.RegisterTagHoldsServer(srv, resourcemanager.NewTagHoldsServer(rmReg))
 	iamadminpb.RegisterIAMServer(srv, resourcemanager.NewIAMAdminServer(rmReg))
 	iamv2pb.RegisterPoliciesServer(srv, resourcemanager.NewPoliciesServer(rmReg))
+	iamv3pb.RegisterPrincipalAccessBoundaryPoliciesServer(srv, resourcemanager.NewPABServer(rmReg))
+	iamv3pb.RegisterPolicyBindingsServer(srv, resourcemanager.NewBindingsServer(rmReg))
 	orgpolicypb.RegisterOrgPolicyServer(srv, resourcemanager.NewOrgPolicyServer(rmReg))
 	quotas := cloudquotas.NewServer(store.NewMemory(), nil, nil)
 	cloudquotaspb.RegisterCloudQuotasServer(srv, quotas)

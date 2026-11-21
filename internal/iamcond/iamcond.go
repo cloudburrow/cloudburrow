@@ -84,6 +84,11 @@ type Attributes struct {
 	// RequestPath and RequestHost are an IAP request's URL path and host.
 	RequestPath string
 	RequestHost string
+	// PrincipalType and PrincipalSubject are a Principal Access Boundary
+	// policy binding's attributes (CompilePrincipal): the principal's type
+	// (iam.googleapis.com/ServiceAccount, ...) and its subject.
+	PrincipalType    string
+	PrincipalSubject string
 	// AccessLevels are the Access Context Manager levels an IAP request
 	// satisfies; nil when the request is not IAP's.
 	AccessLevels []string
@@ -136,6 +141,35 @@ func Compile(src string) (*Expr, error) {
 	}
 	if pos, ok := drgDefault(n); ok {
 		return nil, fmt.Errorf("api.getAttribute('iam.googleapis.com/modifiedGrantsByRole', ...)'s default must be [] (column %d)", pos+1)
+	}
+	return &Expr{root: n}, nil
+}
+
+// Principal Access Boundary binding conditions' limits
+// (https://docs.cloud.google.com/iam/docs/reference/rest/v3/organizations.locations.policyBindings,
+// read 2026-11-20): 1 to 10 subexpressions joined by ||, && or !, and at
+// most 250 characters.
+const (
+	MaxPrincipalLogicalOperators = 10
+	MaxPrincipalConditionLength  = 250
+)
+
+// CompilePrincipal parses and type-checks a policy binding's condition,
+// which may read principal.type and principal.subject only.
+func CompilePrincipal(src string) (*Expr, error) {
+	if n := len([]rune(src)); n > MaxPrincipalConditionLength {
+		return nil, fmt.Errorf("the expression has %d characters; a policy binding's condition allows at most %d", n, MaxPrincipalConditionLength)
+	}
+	p := &parser{src: src, principal: true}
+	n, err := p.parse()
+	if err != nil {
+		return nil, err
+	}
+	if p.logical > MaxPrincipalLogicalOperators {
+		return nil, fmt.Errorf("the expression has %d logical operators; a policy binding's condition allows at most %d", p.logical, MaxPrincipalLogicalOperators)
+	}
+	if err := checkBool(n); err != nil {
+		return nil, err
 	}
 	return &Expr{root: n}, nil
 }
@@ -318,6 +352,10 @@ type parser struct {
 	toks    []token
 	i       int
 	logical int
+	// principal is a Principal Access Boundary binding's condition
+	// (CompilePrincipal), which reads principal.type and principal.subject
+	// only.
+	principal bool
 }
 
 func (p *parser) lex() error {
@@ -560,7 +598,7 @@ func (p *parser) parsePostfix() (node, error) {
 			x = &call{fn: t.text, recv: x, args: args, pos: t.pos, open: open}
 			continue
 		}
-		x = &selectN{x: x, field: t.text, pos: t.pos, dot: dot}
+		x = &selectN{x: x, field: t.text, pos: t.pos, dot: dot, principal: p.principal}
 	}
 	return x, nil
 }

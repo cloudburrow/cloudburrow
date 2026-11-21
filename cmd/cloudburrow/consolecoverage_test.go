@@ -72,7 +72,7 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 // Speech-to-Text on the local AI endpoint (#1930), and CloudBurrow's own
 // cluster.
 var clusterScreens = []string{
-	"projects", "hierarchy", "tags", "iam", "iam-roles", "iam-groups", "iam-sso-profiles", "iam-sso-assignments", "iam-service-accounts", "iam-workload-identity", "iam-workforce-identity", "iam-audit", "iam-orgpolicies", "iam-labels", "iam-settings", "serviceusage", "serviceusage-operations", "ai",
+	"projects", "hierarchy", "tags", "iam", "iam-roles", "iam-groups", "iam-sso-profiles", "iam-sso-assignments", "iam-service-accounts", "iam-workload-identity", "iam-workforce-identity", "iam-principal-access-boundary", "iam-audit", "iam-orgpolicies", "iam-labels", "iam-settings", "serviceusage", "serviceusage-operations", "ai",
 	"documentai-overview", "documentai-gallery", "documentai", "speech-transcriptions", "speech-recognizers",
 	"speech-custom-classes", "speech-phrase-sets",
 	"workloads", "pods", "k8sservices", "jobs", "nodes", "k8sstorage", "events",

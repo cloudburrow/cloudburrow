@@ -14,6 +14,7 @@ import (
 
 	"cloud.google.com/go/iam/admin/apiv1/adminpb"
 	iamv2 "cloud.google.com/go/iam/apiv2/iampb"
+	iamv3 "cloud.google.com/go/iam/apiv3/iampb"
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
 	"cloud.google.com/go/orgpolicy/apiv2/orgpolicypb"
 	rmpb "cloud.google.com/go/resourcemanager/apiv3/resourcemanagerpb"
@@ -698,6 +699,19 @@ func (s *Server) Start(ctx context.Context) error {
 		Pattern:  &annotations.HttpRule_Get{Get: "/v2/{name=policies/*/*/*/operations/*}"}}}}
 	iamV2REST.RegisterService(&iamv2.Policies_ServiceDesc, policies)
 	iamV2REST.RegisterService(&longrunningpb.Operations_ServiceDesc, OperationsServer{})
+	// IAM v3 principal access boundary policies and policy bindings
+	// (#2057, pab.go), and their operations.
+	pab, bindings := NewPABServer(s.projects.reg), NewBindingsServer(s.projects.reg)
+	iamv3.RegisterPrincipalAccessBoundaryPoliciesServer(g, pab)
+	iamv3.RegisterPolicyBindingsServer(g, bindings)
+	iamV3REST := &rest.Transcoder{Packages: []string{"google.iam.v3"}}
+	for _, coll := range []string{"projects", "folders", "organizations"} {
+		iamV3REST.Mixins = append(iamV3REST.Mixins, &annotations.HttpRule{Selector: "google.longrunning.Operations.GetOperation",
+			Pattern: &annotations.HttpRule_Get{Get: "/v3/{name=" + coll + "/*/locations/*/operations/*}"}})
+	}
+	iamV3REST.RegisterService(&iamv3.PrincipalAccessBoundaryPolicies_ServiceDesc, pab)
+	iamV3REST.RegisterService(&iamv3.PolicyBindings_ServiceDesc, bindings)
+	iamV3REST.RegisterService(&longrunningpb.Operations_ServiceDesc, OperationsServer{})
 	// The Organization Policy API v2 (#1890, orgpolicyv2.go).
 	orgPolicy := NewOrgPolicyServer(s.projects.reg)
 	orgpolicypb.RegisterOrgPolicyServer(g, orgPolicy)
@@ -730,6 +744,10 @@ func (s *Server) Start(ctx context.Context) error {
 		}
 		if isIAMv2Path(r.URL.Path) {
 			iamV2REST.ServeHTTP(w, r)
+			return
+		}
+		if isIAMv3Path(r.URL.Path) {
+			iamV3REST.ServeHTTP(w, r)
 			return
 		}
 		if isWIFPath(r.URL.Path) {
