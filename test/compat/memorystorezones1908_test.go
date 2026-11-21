@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -23,7 +24,8 @@ import (
 func nodeZones(t *testing.T, ctx context.Context, rc *redis.ClusterClient, nodes int) []string {
 	t.Helper()
 	// A replica is in CLUSTER SLOTS once it has synced with its primary.
-	for deadline := time.Now().Add(2 * time.Minute); ; time.Sleep(time.Second) {
+	deadline := time.Now().Add(2 * time.Minute)
+	for ; ; time.Sleep(time.Second) {
 		listed := 0
 		if slots, err := rc.ClusterSlots(ctx).Result(); err == nil {
 			for _, sl := range slots {
@@ -37,29 +39,40 @@ func nodeZones(t *testing.T, ctx context.Context, rc *redis.ClusterClient, nodes
 			t.Fatalf("CLUSTER SLOTS lists %d nodes, want %d", listed, nodes)
 		}
 	}
-	rc.ReloadState(ctx)
-	var zones []string
-	each := func(ctx context.Context, c *redis.Client) error {
-		v, err := c.Do(ctx, "HELLO", "3").Result()
-		if err != nil {
-			return err
-		}
-		s := fmt.Sprint(v)
-		i := strings.Index(s, "availability_zone:")
-		if i < 0 {
-			zones = append(zones, "")
+	// ForEachMaster and ForEachSlave call each node in its own goroutine,
+	// so the zones are gathered under a lock; and the client's view of the
+	// nodes is reloaded in the background (ReloadState is lazy), so it may
+	// still miss a replica: ask again until every node has answered.
+	for {
+		rc.ReloadState(ctx)
+		var mu sync.Mutex
+		var zones []string
+		each := func(ctx context.Context, c *redis.Client) error {
+			v, err := c.Do(ctx, "HELLO", "3").Result()
+			if err != nil {
+				return err
+			}
+			s := fmt.Sprint(v)
+			z := ""
+			if i := strings.Index(s, "availability_zone:"); i >= 0 {
+				z = strings.Fields(s[i+len("availability_zone:"):])[0]
+			}
+			mu.Lock()
+			zones = append(zones, z)
+			mu.Unlock()
 			return nil
 		}
-		zones = append(zones, strings.Fields(s[i+len("availability_zone:"):])[0])
-		return nil
+		if err := rc.ForEachMaster(ctx, each); err != nil {
+			t.Fatal(err)
+		}
+		if err := rc.ForEachSlave(ctx, each); err != nil {
+			t.Fatal(err)
+		}
+		if len(zones) >= nodes || time.Now().After(deadline) {
+			return zones
+		}
+		time.Sleep(time.Second)
 	}
-	if err := rc.ForEachMaster(ctx, each); err != nil {
-		t.Fatal(err)
-	}
-	if err := rc.ForEachSlave(ctx, each); err != nil {
-		t.Fatal(err)
-	}
-	return zones
 }
 
 // covers: google.cloud.redis.cluster.v1.CloudRedisCluster/CreateCluster, google.cloud.redis.cluster.v1.CloudRedisCluster/UpdateCluster, google.cloud.memorystore.v1.Memorystore/CreateInstance, google.cloud.memorystore.v1.Memorystore/GetInstance, google.cloud.memorystore.v1.Memorystore/UpdateInstance
