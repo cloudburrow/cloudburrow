@@ -42,6 +42,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/apienable"
 	"github.com/cloudburrow/cloudburrow/internal/calllog"
+	"github.com/cloudburrow/cloudburrow/internal/faultgate"
 	"github.com/cloudburrow/cloudburrow/internal/frontready"
 	"github.com/cloudburrow/cloudburrow/internal/frontstate"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
@@ -132,6 +133,8 @@ func New(upstream string, logf func(format string, args ...any)) (*Front, error)
 		return sql.checkViewQuery(ctx, instance, query)
 	}
 	f.bundles = &schemaBundles{upstream: conn, byName: map[string]*btapb.SchemaBundle{}}
+	sql.bundles = f.bundles
+	f.bundles.usedBy = f.sqlViews.usingBundle
 	f.tableIAM = &tableIAM{upstream: conn, policies: map[string]*iampolicy.Stored{}, views: f.views, copies: f.copies, bundles: f.bundles}
 	for _, ms := range []map[string]method{f.tableIAM.methods(), f.copies.methods(), f.viewMethods(),
 		f.sqlViews.methods(f.copies.op), f.bundles.methods(f.copies.op),
@@ -220,7 +223,7 @@ func (f *Front) Serve(ctx context.Context, l net.Listener) error {
 	// so the Host and Origin checks are here (#1587). Pods name the
 	// Service; a kubelet probe the pod's address.
 	srv := &http.Server{
-		Handler:           hostguard.WrapService(frontready.Wrap(apienable.Gate(nil, "bigtableadmin.googleapis.com", sysparams.Wrap(f.gate.Wrap(f.httpHandler()), sysparams.Options{}), apienable.Options{ServiceOf: bigtableAPI}), f.addr), "bigtable"),
+		Handler:           hostguard.WrapService(frontready.Wrap(apienable.Gate(nil, "bigtableadmin.googleapis.com", sysparams.Wrap(f.gate.Wrap(faultgate.Gate("bigtable", f.httpHandler())), sysparams.Options{}), apienable.Options{ServiceOf: bigtableAPI}), f.addr), "bigtable"),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	grpcL, httpL := pubsubfront.Split(l)

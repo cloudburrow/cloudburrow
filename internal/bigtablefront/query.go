@@ -56,7 +56,10 @@ type sqlFront struct {
 	// keys is the tables' row key schemas, which the fields of the key
 	// are read by (rowkeyschema.go, #1900).
 	keys *rowKeySchemas
-	now  func() time.Time
+	// bundles is the tables' schema bundles, which PROTO columns are
+	// read with (sqlproto.go, #2113).
+	bundles *schemaBundles
+	now     func() time.Time
 }
 
 func (q *sqlFront) methods() map[string]method {
@@ -139,7 +142,7 @@ func (q *sqlFront) source(ctx context.Context, instance string, qu *query, param
 		if err != nil {
 			return nil, fmt.Errorf("%s %s: %w", noun, qu.from, err)
 		}
-		src := &source{}
+		src := &source{protos: p.src.protos}
 		for _, c := range p.cols {
 			src.cols = append(src.cols, column{c.GetName(), c.GetType()})
 		}
@@ -175,6 +178,10 @@ func (q *sqlFront) source(ctx context.Context, instance string, qu *query, param
 		rks = q.keys.get(instance + "/tables/" + qu.from)
 	}
 	src := &source{cols: cols, refused: refused}
+	if q.bundles != nil {
+		table := instance + "/tables/" + qu.from
+		src.protos = newProtoCatalog(table, q.bundles.descriptors(table))
+	}
 	if rks != nil {
 		// The key's fields follow _key, now a pseudocolumn, and come
 		// before the families.

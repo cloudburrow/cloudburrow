@@ -93,6 +93,9 @@ func kind(t *btpb.Type) string {
 		if isGeography(t) {
 			return "GEOGRAPHY"
 		}
+		return protoKind(t)
+	case *btpb.Type_EnumType:
+		return protoKind(t)
 	case *btpb.Type_ArrayType:
 		return "ARRAY<" + kind(k.ArrayType.GetElementType()) + ">"
 	case *btpb.Type_MapType:
@@ -172,6 +175,8 @@ type scope struct {
 	// locals are the aliases of the lambdas around the expression, the
 	// innermost last (sqllambda.go).
 	locals []column
+	// protos is the FROM table's schema bundles (sqlproto.go).
+	protos *protoCatalog
 }
 
 type env struct {
@@ -214,6 +219,9 @@ func (p *param) check(s *scope) (*btpb.Type, error) {
 	t, ok := s.params[p.name]
 	if !ok {
 		return nil, fmt.Errorf("Query parameter '%s' not found", p.name)
+	}
+	if err := s.protos.checkType(t); err != nil {
+		return nil, fmt.Errorf("Query parameter '%s': %w", p.name, err)
 	}
 	p.t = t
 	return t, nil
@@ -334,12 +342,26 @@ type field struct {
 	x    expr
 	name string
 	idx  int
+	pf   *protoField // a message's field (sqlproto.go)
 }
 
 func (f *field) check(s *scope) (*btpb.Type, error) {
 	xt, err := f.x.check(s)
 	if err != nil {
 		return nil, err
+	}
+	if isProtoMsg(xt) {
+		md, err := s.protos.message(xt)
+		if err != nil {
+			return nil, err
+		}
+		if f.pf, err = lookupField(md, f.name); err != nil {
+			return nil, err
+		}
+		if f.pf.has {
+			return boolType, nil
+		}
+		return fieldType(xt.GetProtoType().GetSchemaBundleId(), f.pf.fd), nil
 	}
 	st, ok := xt.GetKind().(*btpb.Type_StructType)
 	if !ok {
@@ -357,6 +379,9 @@ func (f *field) eval(e *env) (any, error) {
 	x, err := f.x.eval(e)
 	if err != nil || x == nil {
 		return nil, err
+	}
+	if f.pf != nil {
+		return f.pf.read(asBytes(x))
 	}
 	return x.([]any)[f.idx], nil
 }
@@ -532,6 +557,21 @@ func (b *binaryOp) check(s *scope) (*btpb.Type, error) {
 	if r, ok := b.r.(*literal); ok && r.t == nil {
 		rt = lt
 	}
+	// A string literal compared with an enum is the enum value it names.
+	var ok bool
+	if isProtoEnum(lt) && !isProtoEnum(rt) {
+		if b.r, ok, err = coerceEnumLiteral(s.protos, b.r, lt); err != nil {
+			return nil, err
+		} else if ok {
+			rt = lt
+		}
+	} else if isProtoEnum(rt) && !isProtoEnum(lt) {
+		if b.l, ok, err = coerceEnumLiteral(s.protos, b.l, rt); err != nil {
+			return nil, err
+		} else if ok {
+			lt = rt
+		}
+	}
 	bad := func() (*btpb.Type, error) {
 		return nil, fmt.Errorf("No matching signature for operator %s for argument types: %s, %s", b.op, kind(lt), kind(rt))
 	}
@@ -542,7 +582,7 @@ func (b *binaryOp) check(s *scope) (*btpb.Type, error) {
 		}
 		b.t = boolType
 	case "=", "!=", "<", "<=", ">", ">=":
-		if _, ok := unify(lt, rt); !ok || isKind(lt, "MAP<", "STRUCT<", "GEOGRAPHY") || (b.op != "=" && b.op != "!=" && isKind(lt, "ARRAY<")) {
+		if _, ok := unify(lt, rt); !ok || isKind(lt, "MAP<", "STRUCT<", "GEOGRAPHY") || isProtoMsg(lt) || (b.op != "=" && b.op != "!=" && isKind(lt, "ARRAY<")) {
 			return bad()
 		}
 		b.t = boolType
@@ -1158,7 +1198,7 @@ func groupKey(v any) string {
 
 // groupable is whether GROUP BY and DISTINCT take a value of type t.
 func groupable(t *btpb.Type) bool {
-	return !isKind(t, "MAP<", "GEOGRAPHY", "FLOAT32", "FLOAT64") && (!isKind(t, "ARRAY<") || groupable(t.GetArrayType().GetElementType())) &&
+	return !isKind(t, "MAP<", "GEOGRAPHY", "FLOAT32", "FLOAT64") && !isProtoMsg(t) && (!isKind(t, "ARRAY<") || groupable(t.GetArrayType().GetElementType())) &&
 		(!isKind(t, "STRUCT<") || func() bool {
 			for _, f := range t.GetStructType().GetFields() {
 				if !groupable(f.GetType()) {

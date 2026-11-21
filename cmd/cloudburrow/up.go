@@ -8,6 +8,7 @@ import (
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/authplatform"
 	"github.com/cloudburrow/cloudburrow/internal/egress"
+	"github.com/cloudburrow/cloudburrow/internal/faultgate"
 	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/iamcheck"
@@ -945,6 +946,17 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	rmSrv.ServerOptions(tracing.ServerOptions()...)
 	rmSrv.Interpose(grpctransport.LogInterceptor(logger, "resourcemanager"))
 	rmSrv.Interpose(faults.Interceptor("resourcemanager"))
+	// Fault rules (#2113) reach the servers in the cluster, whose fronts
+	// ask the host for them on this port (internal/faultgate), so their
+	// services' rules are accepted.
+	rmSrv.HandleJSON(func(r *http.Request) bool { return faultgate.IsPath(r.URL.Path) }, faultgate.Handler(faults))
+	for _, s := range cfg.EnabledServices() {
+		switch s {
+		case config.ServicePubSub, config.ServiceBigtable, config.ServiceSpanner, config.ServiceFirestore,
+			config.ServiceDatastore, config.ServiceStorage:
+			faults.InterposeRemote(string(s))
+		}
+	}
 	// Policy Troubleshooter and Policy Analyzer (#1879) on the same port,
 	// over the enforcement's evaluator.
 	rmSrv.HandleJSON(isIAMAnalysisPath, iamAnalysis{e: iamEnforcer})
