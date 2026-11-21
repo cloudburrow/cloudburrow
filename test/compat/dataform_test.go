@@ -338,7 +338,7 @@ func dataformProject(ctx context.Context, t *testing.T, c *dataform.Client, ws, 
 	dataformWrite(ctx, t, c, ws, "definitions/bad.sqlx", "config { type: \"assertion\" }\nselect * from ${ref(\"x\")} where a = 1\n")
 }
 
-// Not yet run: covers left out until it passes (#2105).
+// covers: google.cloud.dataform.v1.Dataform/CommitWorkspaceChanges, google.cloud.dataform.v1.Dataform/CreateCompilationResult, google.cloud.dataform.v1.Dataform/CreateReleaseConfig, google.cloud.dataform.v1.Dataform/CreateRepository, google.cloud.dataform.v1.Dataform/CreateWorkflowConfig, google.cloud.dataform.v1.Dataform/CreateWorkflowInvocation, google.cloud.dataform.v1.Dataform/CreateWorkspace, google.cloud.dataform.v1.Dataform/DeleteReleaseConfig, google.cloud.dataform.v1.Dataform/DeleteRepository, google.cloud.dataform.v1.Dataform/DeleteWorkflowConfig, google.cloud.dataform.v1.Dataform/DeleteWorkflowInvocation, google.cloud.dataform.v1.Dataform/GetCompilationResult, google.cloud.dataform.v1.Dataform/GetReleaseConfig, google.cloud.dataform.v1.Dataform/GetWorkflowConfig, google.cloud.dataform.v1.Dataform/GetWorkspace, google.cloud.dataform.v1.Dataform/ListCompilationResults, google.cloud.dataform.v1.Dataform/ListReleaseConfigs, google.cloud.dataform.v1.Dataform/ListWorkflowConfigs, google.cloud.dataform.v1.Dataform/ListWorkflowInvocations, google.cloud.dataform.v1.Dataform/PushGitCommits, google.cloud.dataform.v1.Dataform/QueryCompilationResultActions, google.cloud.dataform.v1.Dataform/RemoveFile, google.cloud.dataform.v1.Dataform/UpdateReleaseConfig, google.cloud.dataform.v1.Dataform/UpdateWorkflowConfig, google.cloud.dataform.v1.Dataform/WriteFile, google.cloud.dataform.v1.Dataform/GetWorkflowInvocation, google.cloud.dataform.v1.Dataform/QueryWorkflowInvocationActions
 //
 // TestDataformCompileAndInvoke (#2105): a workspace's definitions/x.sqlx
 // and its neighbours compile with Dataform core into a table, a view, an
@@ -603,7 +603,7 @@ func TestDataformCompileAndInvoke(t *testing.T) {
 	}
 }
 
-// Not yet run: covers left out until it passes (#2105).
+// covers: google.cloud.dataform.v1.Dataform/CommitWorkspaceChanges, google.cloud.dataform.v1.Dataform/ComputeRepositoryAccessTokenStatus, google.cloud.dataform.v1.Dataform/CreateRepository, google.cloud.dataform.v1.Dataform/CreateWorkspace, google.cloud.dataform.v1.Dataform/DeleteRepository, google.cloud.dataform.v1.Dataform/FetchRemoteBranches, google.cloud.dataform.v1.Dataform/FetchRepositoryHistory, google.cloud.dataform.v1.Dataform/PullGitCommits, google.cloud.dataform.v1.Dataform/PushGitCommits
 //
 // TestDataformSecureSourceManagerRemote (#2105): a repository whose git
 // remote is a Secure Source Manager repository of this instance, with its

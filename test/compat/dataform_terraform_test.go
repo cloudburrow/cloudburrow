@@ -12,7 +12,7 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// Not yet run: covers left out until it passes (#2105).
+// covers: google.cloud.dataform.v1.Dataform/CreateRepository, google.cloud.dataform.v1.Dataform/GetRepository, google.cloud.dataform.v1.Dataform/UpdateRepository, google.cloud.dataform.v1.Dataform/DeleteRepository
 //
 // TestTerraformDataformRepository (#2105): hashicorp/google's
 // google_dataform_repository through `cloudburrow terraform`
