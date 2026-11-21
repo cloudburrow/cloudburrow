@@ -67,7 +67,8 @@ func TestObservabilityScopes(t *testing.T) {
 	for p, want := range map[string]int{
 		"/v1/projects/proj-1/locations/us-central1/scopes/_Default": http.StatusBadRequest,
 		"/v1/projects/proj-1/locations/global/scopes/other":         http.StatusNotFound,
-		"/v1/projects/proj-1/locations/global/settings":             http.StatusNotImplemented,
+		"/v1/projects/proj-1/locations/global/settings":             http.StatusOK, // served since #2117
+		"/v1/projects/proj-1/locations/global/widgets":              http.StatusNotFound,
 	} {
 		if code, _ := a.CallObservability(http.MethodGet, p, nil); code != want {
 			t.Errorf("GET %s = %d; want %d", p, code, want)

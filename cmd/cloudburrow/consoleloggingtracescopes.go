@@ -10,8 +10,8 @@ package main
 // is a tab of Logging's Settings, over the Observability API's
 // projects.locations.traceScopes the Logging port serves, in process.
 //
-// CloudBurrow serves no Cloud Trace, so a trace scope changes no search:
-// the tab says so.
+// With --services trace (#2118) the Trace explorer searches the projects
+// of the scope it is given, the default one first.
 
 import (
 	"context"
@@ -32,7 +32,7 @@ type loggingTraceScopesProvider struct {
 func (loggingTraceScopesProvider) ID() string    { return "logging-trace-scopes" }
 func (loggingTraceScopesProvider) Title() string { return "Trace Scopes" }
 
-const traceScopeNote = "The default trace scope is the one the Trace Explorer searches. CloudBurrow serves no Cloud Trace, so a trace scope is kept and changes no search."
+const traceScopeNote = "The default trace scope is the one the Trace explorer opens on: it searches the spans of every project the scope names."
 
 func traceScopesPath(project string) string {
 	return "/v1/projects/" + url.PathEscape(project) + "/locations/global/traceScopes"

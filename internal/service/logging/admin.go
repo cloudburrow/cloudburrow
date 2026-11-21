@@ -101,6 +101,9 @@ type Admin struct {
 	// keys are log buckets' customer-managed keys (cmek.go, #1950), read
 	// without mu: a read of a linked bucket holds it.
 	keys atomic.Pointer[cmek.Keys]
+	// reprovisioned is what reprovisioning a project's _Trace observability
+	// bucket does to its spans (obsresources.go, #2117), or nil.
+	reprovisioned func(project string)
 }
 
 // NewAdmin returns the admin services over db.

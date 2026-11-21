@@ -6354,7 +6354,7 @@
           "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",
           "test/compat/logginganalyticsviews_test.go:191 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
-          "test/compat/observability2020_test.go:44 TestObservabilityDefaultLogScope"
+          "test/compat/observability2020_test.go:45 TestObservabilityDefaultLogScope"
         ]
       },
       {
@@ -17027,6 +17027,335 @@
     ]
   },
   {
+    "Key": "observability",
+    "Title": "Observability API (v1)",
+    "counts": {
+      "Verified": 45
+    },
+    "rows": [
+      {
+        "method": "observability.folders.locations.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/observability2117_test.go:482 TestObservabilityParents2117"
+        ]
+      },
+      {
+        "method": "observability.folders.locations.getSettings",
+        "status": "Verified",
+        "tests": [
+          "test/compat/observability2117_test.go:482 TestObservabilityParents2117"
+        ]
+      },
+      {
+        "method": "observability.folders.locations.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/observability2117_test.go:482 TestObservabilityParents2117"
+        ]
+      },
+      {
+        "method": "observability.folders.locations.operations.cancel",
+        "status": "Verified",
+        "tests": [
+          "test/compat/observability2117_test.go:482 TestObservabilityParents2117"
+        ]
+      },
+      {
+        "method": "observability.folders.locations.operations.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/observability2117_test.go:482 TestObservabilityParents2117"
+        ]
+      },
+      {
+        "method": "observability.folders.locations.operations.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/observability2117_test.go:482 TestObservabilityParents2117"
+        ]
+      },
+      {
+        "method": "observability.folders.locations.operations.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/observability2117_test.go:482 TestObservabilityParents2117"
+        ]
+      },
+      {
+        "method": "observability.folders.locations.updateSettings",
+        "status": "Verified",
+        "tests": [
+          "test/compat/observability2117_test.go:482 TestObservabilityParents2117"
+        ]
+      },
+      {
+        "method": "observability.organizations.locations.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/observability2117_test.go:482 TestObservabilityParents2117"
+        ]
+      },
+      {
+        "method": "observability.organizations.locations.getSettings",
+        "status": "Verified",
+        "tests": [
+          "test/compat/observability2117_test.go:482 TestObservabilityParents2117"
+        ]
+      },
+      {
+        "method": "observability.organizations.locations.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/observability2117_test.go:482 TestObservabilityParents2117"
+        ]
+      },
+      {
+        "method": "observability.organizations.locations.operations.cancel",
+        "status": "Verified",
+        "tests": [
+          "test/compat/observability2117_test.go:482 TestObservabilityParents2117"
+        ]
+      },
+      {
+        "method": "observability.organizations.locations.operations.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/observability2117_test.go:482 TestObservabilityParents2117"
+        ]
+      },
+      {
+        "method": "observability.organizations.locations.operations.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/observability2117_test.go:482 TestObservabilityParents2117"
+        ]
+      },
+      {
+        "method": "observability.organizations.locations.operations.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/observability2117_test.go:482 TestObservabilityParents2117"
+        ]
+      },
+      {
+        "method": "observability.organizations.locations.updateSettings",
+        "status": "Verified",
+        "tests": [
+          "test/compat/observability2117_test.go:482 TestObservabilityParents2117"
+        ]
+      },
+      {
+        "method": "observability.projects.locations.buckets.create",
+        "status": "Verified",
+        "tests": [
+          "test/compat/observability2117_test.go:173 TestObservabilityBuckets2117",
+          "test/compat/observability2117_test.go:81 TestObservabilitySettings2117"
+        ]
+      },
+      {
+        "method": "observability.projects.locations.buckets.datasets.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/observability2117_test.go:173 TestObservabilityBuckets2117"
+        ]
+      },
+      {
+        "method": "observability.projects.locations.buckets.datasets.links.create",
+        "status": "Verified",
+        "tests": [
+          "test/compat/observability2117_test.go:301 TestObservabilityLinks2117"
+        ]
+      },
+      {
+        "method": "observability.projects.locations.buckets.datasets.links.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/observability2117_test.go:301 TestObservabilityLinks2117"
+        ]
+      },
+      {
+        "method": "observability.projects.locations.buckets.datasets.links.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/observability2117_test.go:301 TestObservabilityLinks2117"
+        ]
+      },
+      {
+        "method": "observability.projects.locations.buckets.datasets.links.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/observability2117_test.go:173 TestObservabilityBuckets2117",
+          "test/compat/observability2117_test.go:301 TestObservabilityLinks2117"
+        ]
+      },
+      {
+        "method": "observability.projects.locations.buckets.datasets.links.patch",
+        "status": "Verified",
+        "tests": [
+          "test/compat/observability2117_test.go:301 TestObservabilityLinks2117"
+        ]
+      },
+      {
+        "method": "observability.projects.locations.buckets.datasets.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/observability2117_test.go:173 TestObservabilityBuckets2117"
+        ]
+      },
+      {
+        "method": "observability.projects.locations.buckets.datasets.views.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/observability2117_test.go:173 TestObservabilityBuckets2117"
+        ]
+      },
+      {
+        "method": "observability.projects.locations.buckets.datasets.views.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/observability2117_test.go:173 TestObservabilityBuckets2117"
+        ]
+      },
+      {
+        "method": "observability.projects.locations.buckets.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/observability2117_test.go:173 TestObservabilityBuckets2117"
+        ]
+      },
+      {
+        "method": "observability.projects.locations.buckets.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/observability2117_test.go:173 TestObservabilityBuckets2117",
+          "test/compat/observability2117_test.go:301 TestObservabilityLinks2117"
+        ]
+      },
+      {
+        "method": "observability.projects.locations.buckets.patch",
+        "status": "Verified",
+        "tests": [
+          "test/compat/observability2117_test.go:173 TestObservabilityBuckets2117"
+        ]
+      },
+      {
+        "method": "observability.projects.locations.buckets.reprovision",
+        "status": "Verified",
+        "tests": [
+          "test/compat/observability2117_test.go:173 TestObservabilityBuckets2117"
+        ]
+      },
+      {
+        "method": "observability.projects.locations.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/observability2117_test.go:482 TestObservabilityParents2117"
+        ]
+      },
+      {
+        "method": "observability.projects.locations.getSettings",
+        "status": "Verified",
+        "tests": [
+          "test/compat/observability2117_test.go:81 TestObservabilitySettings2117"
+        ]
+      },
+      {
+        "method": "observability.projects.locations.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/observability2117_test.go:482 TestObservabilityParents2117"
+        ]
+      },
+      {
+        "method": "observability.projects.locations.operations.cancel",
+        "status": "Verified",
+        "tests": [
+          "test/compat/observability2117_test.go:482 TestObservabilityParents2117"
+        ]
+      },
+      {
+        "method": "observability.projects.locations.operations.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/observability2117_test.go:81 TestObservabilitySettings2117"
+        ]
+      },
+      {
+        "method": "observability.projects.locations.operations.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/observability2117_test.go:81 TestObservabilitySettings2117"
+        ]
+      },
+      {
+        "method": "observability.projects.locations.operations.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/observability2117_test.go:81 TestObservabilitySettings2117"
+        ]
+      },
+      {
+        "method": "observability.projects.locations.scopes.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/logging2108_test.go:272 TestObservabilityTraceScopes",
+          "test/compat/observability2020_test.go:45 TestObservabilityDefaultLogScope"
+        ]
+      },
+      {
+        "method": "observability.projects.locations.scopes.patch",
+        "status": "Verified",
+        "tests": [
+          "test/compat/logging2108_test.go:272 TestObservabilityTraceScopes",
+          "test/compat/observability2020_test.go:45 TestObservabilityDefaultLogScope"
+        ]
+      },
+      {
+        "method": "observability.projects.locations.traceScopes.create",
+        "status": "Verified",
+        "tests": [
+          "test/compat/logging2108_test.go:272 TestObservabilityTraceScopes"
+        ]
+      },
+      {
+        "method": "observability.projects.locations.traceScopes.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/logging2108_test.go:272 TestObservabilityTraceScopes"
+        ]
+      },
+      {
+        "method": "observability.projects.locations.traceScopes.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/logging2108_test.go:272 TestObservabilityTraceScopes"
+        ]
+      },
+      {
+        "method": "observability.projects.locations.traceScopes.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/logging2108_test.go:272 TestObservabilityTraceScopes"
+        ]
+      },
+      {
+        "method": "observability.projects.locations.traceScopes.patch",
+        "status": "Verified",
+        "tests": [
+          "test/compat/logging2108_test.go:272 TestObservabilityTraceScopes"
+        ]
+      },
+      {
+        "method": "observability.projects.locations.updateSettings",
+        "status": "Verified",
+        "tests": [
+          "test/compat/observability2117_test.go:81 TestObservabilitySettings2117"
+        ]
+      }
+    ]
+  },
+  {
     "Key": "workloadidentity",
     "Title": "Workload Identity Federation (IAM v1 pools, STS v1)",
     "counts": {
@@ -18073,6 +18402,50 @@
         "status": "Verified",
         "tests": [
           "test/compat/parametermanager2063_test.go:33 TestParameterManagerTemplates"
+        ]
+      }
+    ]
+  },
+  {
+    "Key": "trace",
+    "Title": "Cloud Trace API (v1 and v2)",
+    "counts": {
+      "Verified": 5
+    },
+    "rows": [
+      {
+        "method": "google.devtools.cloudtrace.v1.TraceService/GetTrace",
+        "status": "Verified",
+        "tests": [
+          "test/compat/trace2118_test.go:124 TestCloudTraceWriteV2ReadV1"
+        ]
+      },
+      {
+        "method": "google.devtools.cloudtrace.v1.TraceService/ListTraces",
+        "status": "Verified",
+        "tests": [
+          "test/compat/trace2118_test.go:124 TestCloudTraceWriteV2ReadV1"
+        ]
+      },
+      {
+        "method": "google.devtools.cloudtrace.v1.TraceService/PatchTraces",
+        "status": "Verified",
+        "tests": [
+          "test/compat/trace2118_test.go:124 TestCloudTraceWriteV2ReadV1"
+        ]
+      },
+      {
+        "method": "google.devtools.cloudtrace.v2.TraceService/BatchWriteSpans",
+        "status": "Verified",
+        "tests": [
+          "test/compat/trace2118_test.go:124 TestCloudTraceWriteV2ReadV1"
+        ]
+      },
+      {
+        "method": "google.devtools.cloudtrace.v2.TraceService/CreateSpan",
+        "status": "Verified",
+        "tests": [
+          "test/compat/trace2118_test.go:124 TestCloudTraceWriteV2ReadV1"
         ]
       }
     ]

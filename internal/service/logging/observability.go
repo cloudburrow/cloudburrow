@@ -71,9 +71,14 @@ func defaultObservabilityScope(project string) ObservabilityScope {
 	}
 }
 
-// ServeObservability serves an Observability API scopes request and reports
-// true, or reports false for any other path.
+// ServeObservability serves an Observability API request and reports true,
+// or reports false for any other path.
 func (a *Admin) ServeObservability(w http.ResponseWriter, r *http.Request) bool {
+	// Settings, operations, locations, buckets, datasets, views and links
+	// (obsresources.go, #2117).
+	if a.serveObsResources(w, r) {
+		return true
+	}
 	path, ok := strings.CutPrefix(r.URL.Path, "/v1/projects/")
 	if !ok {
 		return false
@@ -93,9 +98,7 @@ func (a *Admin) ServeObservability(w http.ResponseWriter, r *http.Request) bool 
 		return true
 	}
 	if len(parts) != 5 || parts[3] != "scopes" {
-		// The Observability API's other collections (buckets, datasets,
-		// links, views, settings, operations) are not served.
-		rest.WriteError(w, apierror.Unimplemented("the Observability API serves only projects.locations.scopes and traceScopes here, not %s", r.URL.Path))
+		rest.WriteError(w, apierror.NotFound("no Observability API method answers %s %s", r.Method, r.URL.Path))
 		return true
 	}
 	if err := a.serveObservability(w, r, parts[0], parts[2], parts[4]); err != nil {

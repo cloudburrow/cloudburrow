@@ -73,6 +73,8 @@ var compatSections = map[string]string{
 	// #2030, on the Resource Manager port.
 	"cloudquotas":      "## Cloud Quotas — `google.api.cloudquotas.v1`",
 	"siteverification": "## Site Verification — `siteVerification` v1",
+	// The Observability API (#2117), named by discovery ID.
+	"observability": "## Observability API — `observability` v1",
 	// The Firebase Rules API (#2048), named by whole discovery ID.
 	"firebaserules": "## Firebase Rules — `firebaserules.googleapis.com` v1",
 	// The Cloud Storage companion APIs (#1957), named by whole discovery ID.
@@ -86,6 +88,7 @@ var compatSections = map[string]string{
 	// Certificate Authority Service (#1834), named by gRPC method.
 	"privateca":        "## Certificate Authority Service — `google.cloud.security.privateca.v1`",
 	"parametermanager": "## Parameter Manager — `google.cloud.parametermanager.v1`",
+	"trace":            "## Cloud Trace — `google.devtools.cloudtrace.v1` and `v2`",
 	"workflows":        "## Workflows — `google.cloud.workflows.v1` and `google.cloud.workflows.executions.v1`",
 	// The Kubernetes Engine API (#1913), named by gRPC method.
 	"gke": "## Kubernetes Engine API — `google.container.v1`",
@@ -188,7 +191,7 @@ func namedMethods(key, op string, report map[string]string) (ids, ambiguous []st
 	// Cloud SQL Admin API (#1301), Resource Manager v1 REST (#1296) and
 	// Service Usage (#1352).
 	if key == "bigquery" || key == "runv1" || key == "sqladmin" || key == "resourcemanagerv1" || key == "serviceusage" || key == "apikeys" || key == "firebaserules" || key == "storagejobs" || key == "compute" || key == "backupdr" ||
-		key == "cloudidentity" || key == "workloadidentity" || key == "siteverification" {
+		key == "cloudidentity" || key == "workloadidentity" || key == "siteverification" || key == "observability" {
 		for _, tok := range storageToken.FindAllStringSubmatch(op, -1) {
 			if _, ok := report[tok[1]]; ok {
 				ids = append(ids, tok[1])

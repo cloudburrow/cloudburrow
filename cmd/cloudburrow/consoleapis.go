@@ -43,6 +43,8 @@ var apiLibrary = map[string]apiLibraryInfo{
 	"run.googleapis.com":                  {"Compute", "Deploys and manages containerized services and jobs.", "run"},
 	"secretmanager.googleapis.com":        {"Security", "Stores API keys, passwords, certificates and other sensitive data.", "secretmanager"},
 	"parametermanager.googleapis.com":     {"Security", "Stores, versions and renders configuration parameters, in plain text, JSON or YAML, with references to Secret Manager secrets.", "parametermanager"},
+	"cloudtrace.googleapis.com":           {"Management tools", "Sends application latency data to Cloud Trace for viewing, and reads traces back.", "trace"},
+	"telemetry.googleapis.com":            {"Management tools", "Ingests OpenTelemetry (OTLP) traces into Cloud Trace.", "trace"},
 	"cloudkms.googleapis.com":             {"Security", "Manages cryptographic keys and performs operations with them.", "kms"},
 	"kmsinventory.googleapis.com":         {"Security", "Reports which resources Cloud KMS keys protect.", "kms"},
 	"cloudscheduler.googleapis.com":       {"Developer tools", "Runs jobs on a schedule: HTTP targets, Pub/Sub topics and App Engine.", "scheduler"},

@@ -125,7 +125,7 @@ const SECRET_TABS = ["/secrets", "/secrets-regional"];
 const GKE_STORAGE = ["/kubernetes/storage", "/kubernetes/storage-classes"];
 // Cloud Logging's Settings and its Log Scopes tab (#2020), as Google's
 // Settings page has a Log Scopes tab (log-scope/create-and-manage).
-const LOGGING_SETTINGS = ["/logs/settings", "/logs/log-scopes", "/logs/trace-scopes"];
+const LOGGING_SETTINGS = ["/logs/settings", "/logs/log-scopes", "/logs/trace-scopes", "/logs/observability-settings", "/logs/observability-buckets"];
 
 
 const ROUTES = [
@@ -623,6 +623,10 @@ const ROUTES = [
   { path: "/iam-admin/principal-access-boundary", title: "Principal Access Boundary", service: null, requires: "iam", screen: "unavailable", icon: "iam", section: "IAM & Admin", product: "iam", productTitle: "IAM & Admin",
     unavailable: "Principal access boundary policies are the IAM v3 API's, which CloudBurrow does not serve." },
 
+  // Cloud Trace (#2118): Trace Explorer and its trace details, over the
+  // Cloud Trace server this instance runs.
+  { path: "/traces/explorer", service: "trace-explorer", screen: "trace-explorer", icon: "monitoring",
+    title: "Trace explorer", section: "Operations", product: "trace", productTitle: "Trace" },
   { path: "/monitoring", service: null, screen: "monitoring", title: "Monitoring", section: "Operations",
     product: "monitoring", productTitle: "Monitoring" },
   // Cloud Monitoring's Metrics explorer and Metrics management (#1939),
@@ -686,6 +690,13 @@ const ROUTES = [
     section: "Operations", product: "logging", productTitle: "Cloud Logging" },
   // Trace Scopes (#2108), the Observability API's trace scopes, beside it.
   { path: "/logs/trace-scopes", service: "logging-trace-scopes", icon: "logs", title: "Settings", tabTitle: "Trace Scopes", kind: "Trace scope",
+    navHidden: true, navAs: "/logs/settings", pageTabs: LOGGING_SETTINGS,
+    section: "Operations", product: "logging", productTitle: "Cloud Logging" },
+  // The Observability API's settings and buckets (#2117), beside them.
+  { path: "/logs/observability-settings", service: "observability-settings", icon: "logs", title: "Settings", tabTitle: "Observability Settings", kind: "Observability settings",
+    navHidden: true, navAs: "/logs/settings", pageTabs: LOGGING_SETTINGS,
+    section: "Operations", product: "logging", productTitle: "Cloud Logging" },
+  { path: "/logs/observability-buckets", service: "observability-buckets", icon: "logs", title: "Settings", tabTitle: "Observability Buckets", kind: "Observability bucket",
     navHidden: true, navAs: "/logs/settings", pageTabs: LOGGING_SETTINGS,
     section: "Operations", product: "logging", productTitle: "Cloud Logging" },
   { path: "/logs/exclusions", service: "logging-exclusions", icon: "logs", title: "Exclusions", kind: "Exclusion",
@@ -11357,6 +11368,7 @@ function dispatch(view) {
   if (match.screen === "instance") return renderInstance(view);
   if (match.screen === "monitoring") return renderMonitoring(view);
   if (match.screen === "metrics-explorer") return renderMetricsExplorer(view, match);
+  if (match.screen === "trace-explorer") return renderTraceExplorer(view, match);
   if (match.screen === "logs") return renderLogs(view);
   if (match.screen === "logs-dashboard") return renderLogsDashboard(view);
   if (match.screen === "log-analytics") return renderLogAnalytics(view, match);
@@ -13906,6 +13918,315 @@ async function renderMetricsExplorer(view, match) {
   run();
 }
 
+// --- Trace Explorer (#2118) ----------------------------------------------
+//
+// Google's page (docs.cloud.google.com/trace/docs/finding-traces): the
+// toolbar's trace scope, time range and Trace ID; the Span filters pane and
+// the Filter bar; a chart of the spans' durations over time; the Spans
+// table. Selecting a span opens the trace's details
+// (docs.cloud.google.com/trace/docs/viewing-details): the timeline of its
+// spans with their latency bars, and the selected span's Attributes, Logs &
+// Events and Metadata & Links tabs. Each search is one server query.
+
+const TRACE_RANGES = [
+  { label: "1 hour", seconds: 3600 }, { label: "6 hours", seconds: 21600 }, { label: "1 day", seconds: 86400 },
+  { label: "7 days", seconds: 604800 }, { label: "30 days", seconds: 2592000 },
+];
+
+// traceDetailsLink is the Logs Explorer's link from an entry with a trace
+// to its trace details, or nothing.
+function traceDetailsLink(le) {
+  const m = /^projects\/([^/]+)\/traces\/([0-9a-fA-F]{32})$/.exec(le.trace || "");
+  if (!m || !capabilityOf("trace-explorer").id) return null;
+  // The project the entry's trace names opens the page, as the trace's.
+  const q = new URLSearchParams({ project: m[1], trace: m[2].toLowerCase(), traceProject: m[1] });
+  if (le.spanId) q.set("span", String(le.spanId).toLowerCase());
+  return el("a", { class: "link-button is-inline", href: `/traces/explorer?${q.toString()}`, text: "View trace details" });
+}
+
+// traceChart is the spans' durations over their start times, errors in red.
+function traceChart(rows) {
+  const NS = "http://www.w3.org/2000/svg";
+  const W = 720, H = 220, L = 56, R = 12, T = 12, B = 28;
+  const pts = rows.map((r) => ({ t: Number((r.fields || {}).startMs), v: Number((r.fields || {})["Duration (ms)"]),
+    err: (r.fields || {}).Status === "Error", name: r.name })).filter((p) => Number.isFinite(p.t) && Number.isFinite(p.v));
+  if (!pts.length) return el("p", { class: "unavailable", text: "No spans in the selected time range." });
+  let tMin = Math.min(...pts.map((p) => p.t)), tMax = Math.max(...pts.map((p) => p.t));
+  if (tMax === tMin) { tMin -= 30000; tMax += 30000; }
+  let yMax = Math.max(...pts.map((p) => p.v));
+  if (yMax <= 0) yMax = 1;
+  const sx = (t) => L + (t - tMin) / (tMax - tMin) * (W - L - R);
+  const sy = (v) => T + (1 - v / yMax) * (H - T - B);
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("class", "explorer-chart trace-chart");
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", `Span duration over time: ${pts.length} spans, the longest ${yMax} ms`);
+  const add = (tag, attrs, text) => {
+    const n = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, String(v));
+    if (text !== undefined) n.textContent = text;
+    svg.append(n);
+    return n;
+  };
+  for (let i = 0; i <= 4; i++) {
+    const v = yMax * i / 4;
+    add("line", { x1: L, x2: W - R, y1: sy(v), y2: sy(v), class: "explorer-grid" });
+    add("text", { x: L - 6, y: sy(v) + 4, "text-anchor": "end", "font-size": 11, class: "explorer-axis" }, `${bqShortNumber(v)} ms`);
+  }
+  for (let i = 0; i <= 4; i++) {
+    const t = tMin + (tMax - tMin) * i / 4;
+    add("text", { x: sx(t), y: H - 8, "text-anchor": "middle", "font-size": 11, class: "explorer-axis" },
+      new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+  }
+  for (const p of pts) {
+    add("circle", { cx: sx(p.t), cy: sy(p.v), r: 3.5, class: p.err ? "trace-point is-error" : "trace-point" })
+      .append(Object.assign(document.createElementNS(NS, "title"),
+        { textContent: `${p.name}: ${p.v} ms at ${new Date(p.t).toLocaleString()}` }));
+  }
+  return svg;
+}
+
+async function renderTraceExplorer(view, match) {
+  const caps = capabilityOf("trace-explorer");
+  if (!caps.id) return renderUnavailable(view, { ...match, unavailable:
+    "Trace explorer reads Cloud Trace, which this instance does not serve. Start it with --services including trace." });
+  const project = currentProject();
+  const header = pageHeader("Trace explorer", project ? `Project ${project}` : "All projects");
+  setChildren(view, header, loadingState(3, { what: "trace scopes" }));
+  let scopes;
+  try {
+    scopes = await api(`/api/resources/trace-explorer?project=${encodeURIComponent(project)}`);
+  } catch (err) {
+    return setChildren(view, header, errorState("Trace explorer unavailable", String(err.message),
+      () => renderTraceExplorer(view, match)));
+  }
+  if (scopes.prompt) return setChildren(view, header, emptyState("Choose a project", scopes.prompt));
+  const params = new URLSearchParams(location.search);
+  const query = (path, values) => send(`/api/query/trace-explorer?project=${encodeURIComponent(project)}`, "POST",
+    { Path: [path], Values: values }).then((r) => r.listing || {});
+
+  const scopeItems = scopes.items || [];
+  const wantScope = params.get("scope") || (scopeItems.find((s) => (s.fields || {}).Default) || scopeItems[0] || {}).name || "";
+  const scopeSelect = el("select", { id: "trace-scope", "aria-label": "Trace scope" },
+    ...scopeItems.map((s) => el("option", { value: s.name, selected: s.name === wantScope,
+      text: `${s.name.split("/").pop()}${(s.fields || {}).Default ? " (default)" : ""} — ${(s.fields || {}).Resources || ""}` })));
+  let range = Number(params.get("range") || 86400);
+  const rangeGroup = el("div", { class: "actions", role: "group", "aria-label": "Time range" });
+  const drawRanges = () => setChildren(rangeGroup, ...TRACE_RANGES.map((r) => el("button", {
+    type: "button", class: r.seconds === range ? "primary" : "secondary", "aria-pressed": String(r.seconds === range),
+    text: r.label, onclick: () => { range = r.seconds; drawRanges(); run(); } })));
+  drawRanges();
+  const traceIdInput = el("input", { id: "trace-id", type: "text", class: "mono", "aria-label": "Trace ID",
+    placeholder: "Trace ID", value: params.get("trace") || "" });
+  const traceIdGo = el("button", { type: "button", class: "secondary", text: "Open trace",
+    onclick: () => openTrace(traceIdInput.value.trim(), params.get("traceProject") || "", "") });
+
+  const input = (id, label, placeholder, value) => el("input", { id, type: "text", "aria-label": label, placeholder, value: value || "" });
+  const select = (id, label, options, value) => el("select", { id, "aria-label": label },
+    ...options.map(([v, l]) => el("option", { value: v, text: l, selected: v === value })));
+  const serviceInput = input("trace-service", "Service name", "checkout", params.get("service"));
+  const nameInput = input("trace-span-name", "Span name", "GET /cart", params.get("spanName"));
+  const statusSelect = select("trace-status", "Span status", [["", "Any"], ["OK", "OK"], ["Error", "Error"]], params.get("status") || "");
+  const minInput = el("input", { id: "trace-min-duration", type: "number", min: "0", "aria-label": "Minimum duration (ms)",
+    value: params.get("minDuration") || "" });
+  const kindSelect = select("trace-kind", "Span kind", [["", "Any"], ["SERVER", "Server"], ["CLIENT", "Client"],
+    ["INTERNAL", "Internal"], ["PRODUCER", "Producer"], ["CONSUMER", "Consumer"], ["UNSPECIFIED", "Unspecified"]], params.get("kind") || "");
+  const filterInput = el("input", { id: "trace-filter", type: "text", class: "mono", "aria-label": "Filter",
+    placeholder: "+root:/api latency:100ms method:GET", value: params.get("filter") || "" });
+  const apply = el("button", { type: "button", class: "primary", text: "Run query" });
+  filterInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); run(); } });
+  const field = (label, control, help) => el("div", { class: "explorer-field" },
+    el("label", { for: control.id, text: label }), control, help ? el("p", { class: "field-help", text: help }) : null);
+
+  const chartHost = el("div", { class: "explorer-chart-host", "aria-live": "polite" });
+  const tableHost = el("div", { class: "explorer-table-host" });
+  const detailsHost = el("section", { class: "card trace-details", id: "trace-details", "aria-label": "Trace details", hidden: true });
+
+  let lastSpans = [];
+  let sortCol = "Start time", sortDesc = true;
+  function drawTable() {
+    const cols = ["Start time", "Span name", "Service", "Duration (ms)", "Status", "Span kind", "Trace ID", "Project"];
+    const val = (r, c) => c === "Span name" ? r.name : (r.fields || {})[c] || "";
+    const rows = [...lastSpans].sort((a, b) => {
+      const x = val(a, sortCol), y = val(b, sortCol);
+      const n = sortCol === "Duration (ms)" ? Number(x) - Number(y) : String(x).localeCompare(String(y));
+      return sortDesc ? -n : n;
+    });
+    setChildren(tableHost, rows.length
+      ? el("div", { class: "table-wrap explorer-table-wrap" }, el("table", { class: "explorer-table", "aria-label": "Spans" },
+          el("thead", {}, el("tr", {}, ...cols.map((c) => el("th", { scope: "col",
+            "aria-sort": c === sortCol ? (sortDesc ? "descending" : "ascending") : "none" },
+            el("button", { type: "button", class: "link-button is-inline", text: c,
+              onclick: () => { if (sortCol === c) sortDesc = !sortDesc; else { sortCol = c; sortDesc = false; } drawTable(); } }))))),
+          el("tbody", {}, ...rows.map((r) => el("tr", {},
+            el("td", { class: "mono", text: new Date(r.fields["Start time"]).toLocaleString() }),
+            el("td", {}, el("button", { type: "button", class: "link-button is-inline", text: r.name,
+              "aria-label": `Open trace ${r.fields["Trace ID"]} at span ${r.name}`,
+              onclick: () => openTrace(r.fields["Trace ID"], r.fields.Project, r.fields["Span ID"]) })),
+            el("td", { text: r.fields.Service }),
+            el("td", { text: r.fields["Duration (ms)"] }),
+            el("td", {}, el("span", { class: "status", "data-state": r.fields.Status === "Error" ? "error" : "ok" },
+              el("span", { text: r.fields.Status }))),
+            el("td", { text: r.fields["Span kind"] }),
+            el("td", { class: "mono", text: r.fields["Trace ID"] }),
+            el("td", { text: r.fields.Project }))))))
+      : el("p", { class: "unavailable", text: "No spans match." }));
+  }
+
+  async function run() {
+    const values = { scope: scopeSelect.value, range: String(range), filter: filterInput.value, service: serviceInput.value,
+      spanName: nameInput.value, status: statusSelect.value, minDuration: minInput.value, kind: kindSelect.value };
+    const q = new URLSearchParams(location.search);
+    for (const [k, v] of Object.entries(values)) { if (v) q.set(k, v); else q.delete(k); }
+    history.replaceState(history.state, "", location.pathname + "?" + q.toString());
+    setChildren(chartHost, loadingState(2, { what: "spans" }));
+    let data;
+    try {
+      data = await query("spans", values);
+    } catch (err) {
+      setChildren(chartHost, errorState("Spans unavailable", String(err.message), run));
+      setChildren(tableHost);
+      return;
+    }
+    lastSpans = data.items || [];
+    const shown = lastSpans.length, total = data.total || shown;
+    setChildren(chartHost,
+      el("div", { class: "chart-head" }, el("h2", { text: "Span duration" }),
+        el("span", { class: "chart-now", text: total > shown ? `${shown} of ${total} spans` : `${shown} spans` })),
+      traceChart(lastSpans),
+      data.note ? el("p", { class: "chart-foot unavailable mono", text: data.note }) : null);
+    drawTable();
+    announce(`Trace explorer: ${shown} spans`);
+  }
+  apply.addEventListener("click", run);
+  scopeSelect.addEventListener("change", run);
+
+  async function openTrace(id, traceProject, spanId) {
+    if (!id) return;
+    const q = new URLSearchParams(location.search);
+    q.set("trace", id);
+    if (traceProject) q.set("traceProject", traceProject); else q.delete("traceProject");
+    if (spanId) q.set("span", spanId); else q.delete("span");
+    history.replaceState(history.state, "", location.pathname + "?" + q.toString());
+    detailsHost.hidden = false;
+    setChildren(detailsHost, loadingState(2, { what: "trace" }));
+    let data;
+    try {
+      data = await query("trace", { trace: id, traceProject, scope: scopeSelect.value });
+    } catch (err) {
+      setChildren(detailsHost, el("h2", { text: "Trace details" }),
+        errorState("Trace unavailable", String(err.message), () => openTrace(id, traceProject, spanId)));
+      return;
+    }
+    drawDetails(data, spanId);
+    detailsHost.scrollIntoView({ block: "nearest" });
+  }
+
+  function drawDetails(data, selectedId) {
+    const spans = data.items || [];
+    const total = Math.max(1, ...spans.map((s) => Number(s.fields["Start (ms)"]) + Number(s.fields["Duration (ms)"])));
+    let selected = spans.find((s) => s.fields["Span ID"] === selectedId) || spans[0];
+    const panel = el("div", { class: "trace-span-panel" });
+    const rows = spans.map((s) => {
+      const f = s.fields;
+      let evs = [];
+      try { evs = JSON.parse(f.events || "[]") || []; } catch { evs = []; }
+      const left = Number(f["Start (ms)"]) / total * 100, width = Math.max(0.5, Number(f["Duration (ms)"]) / total * 100);
+      const bar = el("div", { class: "trace-bar-track" },
+        el("span", { class: "trace-bar" + (f.Status.startsWith("Error") ? " is-error" : ""), style: `left:${left}%;width:${width}%` },
+          evs.length ? el("span", { class: "trace-bar-dot", title: `${evs.length} log entries and events` }) : null));
+      const row = el("tr", { class: "trace-row" + (s === selected ? " is-selected" : "") },
+        el("td", { style: `padding-left:${8 + Number(f.depth) * 16}px` },
+          el("button", { type: "button", class: "link-button is-inline", text: s.name, "aria-pressed": String(s === selected),
+            "aria-label": `Select span ${s.name} (${f["Span ID"]})`, onclick: () => { selected = s; drawDetails(data, f["Span ID"]); } }),
+          el("span", { class: "trace-span-id mono", text: ` ${f["Span ID"]}` })),
+        el("td", { text: f.Service }),
+        el("td", { class: "trace-bar-cell" }, bar),
+        el("td", { text: `${f["Duration (ms)"]} ms` + (evs.length ? ` · ${evs.length} ${evs.length === 1 ? "entry" : "entries"}` : "") }));
+      return row;
+    });
+    const tabs = [["attributes", "Attributes"], ["logs", "Logs & Events"], ["metadata", "Metadata & Links"]];
+    let tab = "attributes";
+    const tabButtons = tabs.map(([id, label]) => el("button", { type: "button", role: "tab", class: "tab", id: `trace-tab-${id}`,
+      "aria-controls": "trace-tab-panel", text: label, onclick: () => { tab = id; drawPanel(); } }));
+    const tabPanel = el("div", { id: "trace-tab-panel", role: "tabpanel" });
+    const kv = (pairs, label) => pairs.length
+      ? el("div", { class: "table-wrap" }, el("table", { class: "explorer-table trace-kv", "aria-label": label },
+          el("thead", {}, el("tr", {}, el("th", { scope: "col", text: "Key" }), el("th", { scope: "col", text: "Value" }))),
+          el("tbody", {},
+            ...pairs.map(([k, v]) => el("tr", {}, el("th", { scope: "row", class: "mono", text: k }), el("td", { class: "mono", text: v }))))))
+      : el("p", { class: "unavailable", text: "None." });
+    function drawPanel() {
+      tabButtons.forEach((b, i) => {
+        const on = tabs[i][0] === tab;
+        b.setAttribute("aria-selected", on ? "true" : "false");
+        b.setAttribute("tabindex", on ? "0" : "-1");
+        b.classList.toggle("is-selected", on);
+      });
+      tabPanel.setAttribute("aria-labelledby", `trace-tab-${tab}`);
+      if (!selected) return setChildren(tabPanel, el("p", { class: "unavailable", text: "No span." }));
+      const f = selected.fields;
+      if (tab === "attributes") {
+        let attrs = {};
+        try { attrs = JSON.parse(f.attributes || "{}") || {}; } catch { attrs = {}; }
+        setChildren(tabPanel, kv(Object.entries(attrs).sort(([a], [b]) => a.localeCompare(b)), "Span attributes"));
+      } else if (tab === "logs") {
+        let evs = [];
+        try { evs = JSON.parse(f.events || "[]") || []; } catch { evs = []; }
+        setChildren(tabPanel, evs.length
+          ? el("ul", { class: "trace-events" }, ...evs.map((e) => el("li", { class: "trace-event" },
+              el("span", { class: "mono", text: new Date(e.time).toLocaleString() }), " ",
+              el("span", { class: "status", "data-state": e.kind === "log" && /ERROR|CRITICAL|ALERT|EMERGENCY/.test(e.severity || "") ? "error" : "ok" },
+                el("span", { text: e.kind === "log" ? (e.severity || "LOG") : "Event" })), " ",
+              el("span", { text: e.text }))))
+          : el("p", { class: "unavailable", text: "No log entries or events for this span." }));
+      } else {
+        setChildren(tabPanel, kv([["Span ID", f["Span ID"]], ["Parent span ID", f["Parent span ID"]], ["Trace ID", f["Trace ID"]],
+          ["Project ID", f.Project], ["Start time", f["Start time"]], ["End time", f["End time"]], ["Span kind", f["Span kind"]],
+          ["Status", f.Status], ["Instrumentation scope", f["Instrumentation scope"]], ["Links", f.Links]], "Span metadata"));
+      }
+    }
+    drawPanel();
+    setChildren(detailsHost,
+      el("div", { class: "chart-head" }, el("h2", { text: "Trace details" }),
+        el("button", { type: "button", class: "secondary", text: "Close", onclick: () => {
+          detailsHost.hidden = true;
+          const q = new URLSearchParams(location.search);
+          for (const k of ["trace", "traceProject", "span"]) q.delete(k);
+          history.replaceState(history.state, "", location.pathname + "?" + q.toString());
+        } })),
+      data.note ? el("p", { class: "mono", text: data.note }) : null,
+      el("div", { class: "table-wrap" }, el("table", { class: "explorer-table trace-timeline", "aria-label": "Timeline" },
+        el("thead", {}, el("tr", {}, ...["Name", "Service", "Latency", "Duration"].map((c) => el("th", { scope: "col", text: c })))),
+        el("tbody", {}, ...rows))),
+      el("div", { class: "tab-strip", role: "tablist", "aria-label": "Span details" }, ...tabButtons),
+      tabPanel);
+    announce(`Trace details: ${spans.length} spans`);
+  }
+
+  setChildren(view, header,
+    el("div", { class: "explorer-toolbar trace-toolbar" },
+      field("Trace scope", scopeSelect), rangeGroup,
+      el("div", { class: "trace-id-lookup" }, field("Trace ID", traceIdInput), traceIdGo)),
+    el("div", { class: "explorer" },
+      el("aside", { class: "card explorer-builder", "aria-label": "Span filters" },
+        el("h2", { text: "Span filters" }),
+        field("Service name", serviceInput, "The OpenTelemetry service, service.name."),
+        field("Span name", nameInput),
+        field("Span status", statusSelect),
+        field("Minimum duration (ms)", minInput),
+        field("Span kind", kindSelect),
+        el("h2", { text: "Filter" }),
+        field("Filter", filterInput, "root:, span:, latency:, label:KEY, KEY:VALUE; + for exact, ^ for the root span."),
+        apply),
+      el("section", { class: "card explorer-results", "aria-label": "Spans" }, chartHost, tableHost)),
+    detailsHost);
+  announce("Trace explorer");
+  await run();
+  if (params.get("trace")) openTrace(params.get("trace"), params.get("traceProject") || "", params.get("span") || "");
+}
+
 async function renderMonitoring(view) {
   const header = [pageHeader("Monitoring",
     "Charts over the readings this instance has taken since it started.")];
@@ -15135,6 +15456,7 @@ async function renderLogs(view) {
           el("button", { class: "link-button is-inline", text: "Expand nested fields", onclick: () => setOpen(true) }),
           el("button", { class: "link-button is-inline", text: "Collapse nested fields", onclick: () => setOpen(false) }),
           el("button", { class: "link-button is-inline", text: "Copy link", onclick: () => copy(entryLink(entry), "link to the entry") }),
+          traceDetailsLink(entry.logEntry || {}),
           el("button", { class: "link-button is-inline", text: "Copy as JSON",
             onclick: () => copy(JSON.stringify(entry.logEntry || {}, null, 2), "entry as JSON") })),
         tree));

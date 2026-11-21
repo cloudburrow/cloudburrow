@@ -51,6 +51,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/scheduler"
 	"github.com/cloudburrow/cloudburrow/internal/service/secrets"
 	"github.com/cloudburrow/cloudburrow/internal/service/tasks"
+	"github.com/cloudburrow/cloudburrow/internal/service/trace"
 	"github.com/cloudburrow/cloudburrow/internal/service/vertexai"
 	"github.com/cloudburrow/cloudburrow/internal/service/workflows"
 	"github.com/cloudburrow/cloudburrow/internal/store"
@@ -97,6 +98,12 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 		t.Fatal(err)
 	}
 	pmpb.RegisterParameterManagerServer(srv, pm)
+	// Cloud Trace (#2118): v1 and v2.
+	tr, err := trace.NewServer("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr.RegisterCloudTrace(srv)
 	gkeSrv, err := gke.NewServer(nil, gke.Options{Versions: []gke.Version{{GKE: "1.36.4-gke.0", Image: "kindest/node:v1.36.4"}}})
 	if err != nil {
 		t.Fatal(err)
@@ -211,6 +218,8 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 		if strings.HasPrefix(m, "sql.") || strings.HasPrefix(m, "serviceusage.") || strings.HasPrefix(m, "apikeys.") || strings.HasPrefix(m, "backupdr.") ||
 			strings.HasPrefix(m, "firebaserules.") ||
 			strings.HasPrefix(m, "cloudidentity.") || strings.HasPrefix(m, "compute.") || strings.HasPrefix(m, "siteVerification.") ||
+			// The Observability API's (#2117) is logging.ObservabilityMethodStatuses.
+			strings.HasPrefix(m, "observability.") ||
 			strings.HasPrefix(m, "storagebatchoperations.") ||
 			strings.HasPrefix(m, "storageinsights.") || strings.HasPrefix(m, "storagetransfer.") ||
 			// Workload Identity Federation's (#1941) is

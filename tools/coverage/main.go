@@ -54,12 +54,14 @@ import (
 	bqv2 "google.golang.org/api/bigquery/v2"
 	bqconnection "google.golang.org/api/bigqueryconnection/v1"
 	crmv1 "google.golang.org/api/cloudresourcemanager/v1"
+	observabilityv1 "google.golang.org/api/observability/v1"
 	runv1 "google.golang.org/api/run/v1"
 	sitev1 "google.golang.org/api/siteverification/v1"
 
 	apikeyssvc "github.com/cloudburrow/cloudburrow/internal/service/apikeys"
 	computesvc "github.com/cloudburrow/cloudburrow/internal/service/compute"
 	firebaserulessvc "github.com/cloudburrow/cloudburrow/internal/service/firebaserules"
+	loggingsvc "github.com/cloudburrow/cloudburrow/internal/service/logging"
 	rmsvc "github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	serviceusagesvc "github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
 	siteverificationsvc "github.com/cloudburrow/cloudburrow/internal/service/siteverification"
@@ -113,6 +115,8 @@ import (
 	_ "cloud.google.com/go/spanner/apiv1/spannerpb"
 	_ "cloud.google.com/go/speech/apiv1/speechpb"
 	_ "cloud.google.com/go/speech/apiv2/speechpb"
+	_ "cloud.google.com/go/trace/apiv1/tracepb"
+	_ "cloud.google.com/go/trace/apiv2/tracepb"
 	_ "cloud.google.com/go/workflows/apiv1/workflowspb"
 	_ "cloud.google.com/go/workflows/executions/apiv1/executionspb"
 	_ "google.golang.org/genproto/googleapis/cloud/location"
@@ -310,6 +314,10 @@ var areas = []area{
 	// Resource Manager's port. Its methods are the official generated
 	// client's (google.golang.org/api/siteverification/v1).
 	{Key: "siteverification", Title: "Site Verification API (v1)", Own: true, Methods: discoveryMethods("siteVerification", reflect.TypeOf(sitev1.Service{}))},
+	// The Observability API (#2020, #2108, #2117): CloudBurrow's own, JSON
+	// only, on the Logging port. Its methods are the official generated
+	// client's (google.golang.org/api/observability/v1).
+	{Key: "observability", Title: "Observability API (v1)", Own: true, Methods: discoveryMethods("observability", reflect.TypeOf(observabilityv1.Service{}))},
 	// Workload Identity Federation (#1941): the IAM API's workload
 	// identity pools, JSON only, on Resource Manager's port, and the
 	// Security Token Service's token method on the metadata port. Its
@@ -325,6 +333,10 @@ var areas = []area{
 	// Parameter Manager (#2054): CloudBurrow's own, gRPC and JSON on one
 	// port; its Locations mixin is another area's row.
 	{Key: "parametermanager", Title: "Parameter Manager (v1)", Own: true, Services: []string{"google.cloud.parametermanager.v1.ParameterManager"}},
+	// Cloud Trace (#2118): CloudBurrow's own, v1 and v2 gRPC and JSON on
+	// one port, beside OTLP's ingestion (not a googleapis service).
+	{Key: "trace", Title: "Cloud Trace API (v1 and v2)", Own: true,
+		Services: []string{"google.devtools.cloudtrace.v1.TraceService", "google.devtools.cloudtrace.v2.TraceService"}},
 	{Key: "workflows", Title: "Workflows and Workflow Executions (v1)", Own: true,
 		Services: []string{"google.cloud.workflows.v1.Workflows", "google.cloud.workflows.executions.v1.Executions"}},
 	// The Kubernetes Engine API (#1913): CloudBurrow's own, gRPC and JSON
@@ -854,7 +866,7 @@ func loadRegistry(root string) (map[string]string, error) {
 	// The Cloud SQL Admin API's too (#1301), and Service Usage's (#1352).
 	// And Cloud Run v1's (#1533).
 	for _, statuses := range []map[string]bool{sqladminsvc.MethodStatuses(), serviceusagesvc.MethodStatuses(), apikeyssvc.MethodStatuses(), firebaserulessvc.MethodStatuses(), computesvc.MethodStatuses(), storagejobssvc.MethodStatuses(), backupdrStatuses, runadapter.V1MethodStatuses(),
-		rmsvc.CloudIdentityMethodStatuses(), rmsvc.WorkloadIdentityMethodStatuses(), siteverificationsvc.MethodStatuses()} {
+		rmsvc.CloudIdentityMethodStatuses(), rmsvc.WorkloadIdentityMethodStatuses(), siteverificationsvc.MethodStatuses(), loggingsvc.ObservabilityMethodStatuses()} {
 		for id, isBuilt := range statuses {
 			if isBuilt {
 				r[id] = regImplemented

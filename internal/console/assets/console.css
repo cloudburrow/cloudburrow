@@ -2136,6 +2136,23 @@ dd.has-property-action { display: flex; flex-wrap: wrap; align-items: baseline; 
 .explorer-table th, .explorer-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); word-break: break-word; }
 @media (max-width: 720px) { .explorer { grid-template-columns: minmax(0, 1fr); } }
 
+/* Trace Explorer (#2118): the toolbar, the span chart, and the trace
+   details' timeline of latency bars, as Google's page draws them. */
+.trace-toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+.trace-id-lookup { display: flex; gap: 8px; align-items: end; }
+.trace-point { fill: var(--accent, #1a73e8); opacity: 0.8; }
+.trace-point.is-error { fill: var(--error); }
+.trace-details { margin-top: 16px; }
+.trace-timeline td { vertical-align: middle; }
+.trace-bar-cell { width: 45%; min-width: 120px; }
+.trace-bar-track { position: relative; height: 12px; background: var(--border); border-radius: 2px; }
+.trace-bar { position: absolute; top: 0; height: 12px; background: #1a73e8; border-radius: 2px; }
+.trace-bar.is-error { background: var(--error); }
+.trace-bar-dot { position: absolute; right: -4px; top: 2px; width: 8px; height: 8px; border-radius: 50%; background: var(--text, #202124); border: 1px solid #fff; }
+.trace-row.is-selected { background: var(--surface-2, rgba(26, 115, 232, 0.08)); }
+.trace-span-id { color: var(--text-muted); font-size: 0.85em; }
+.trace-events { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+
 /* A repeatable group of fields (Field.Group, #1863): a row per exclusion filter. */
 .group-rows { display: grid; gap: 8px; margin-bottom: 8px; }
 .group-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; padding: 8px; border: 1px solid var(--border, var(--text-muted)); border-radius: var(--radius-control); }
@@ -2674,3 +2691,5 @@ tr.log-entry.is-located { outline: 2px solid var(--accent); outline-offset: -2px
 .card-filter { width: min(360px, 100%); }
 .row-delete-icon svg { fill: none; stroke: currentColor; stroke-width: 1.6; }
 .listing-summary:has(> .card-pin) > h2 { padding-right: 40px; }
+.trace-kv td, .trace-kv th { overflow-wrap: anywhere; word-break: break-word; }
+.trace-kv { table-layout: fixed; width: 100%; }

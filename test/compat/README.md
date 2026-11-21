@@ -98,6 +98,7 @@ Set by `scripts/compat-env.sh` from a running instance:
 | `CLOUDBURROW_TEST_RUN_GKE` | as `GKE` | the Eventarc GKE destination (#1877), on the run shard |
 | `CLOUDBURROW_TEST_RUN_MEMORYSTORE_ADMIN` | as `MEMORYSTORE_ADMIN` | the Eventarc Memorystore for Redis direct events (#1997), on the run shard |
 | `CLOUDBURROW_TEST_RUN_KMS`, `CLOUDBURROW_TEST_RUN_SCHEDULER`, `CLOUDBURROW_TEST_RUN_LOGGING` | as `KMS`, `SCHEDULER` and `LOGGING` | the Cloud Run revision tests; see below |
+| `CLOUDBURROW_TEST_RUN_TRACE` | as `TRACE` | `TestCloudRunRequestTraces` (#2118): the run shard's Cloud Trace, which Knative's request spans are exported to |
 | `CLOUDBURROW_TEST_RUN_LOCALAI` | as `LOCALAI`: the local Vertex AI endpoint, which Cloud Run starts without a model | the run shard's Document AI and Speech-to-Text customer-managed key tests (#1972), with `RUN_KMS` |
 | `CLOUDBURROW_TEST_TASKS_LOGGING` | as `LOGGING` | the Cloud Tasks dispatch log (#1256), in the storage shard, so the Logging tests stay in served |
 | `CLOUDBURROW_TEST_PUBSUB_MONITORING` | as `MONITORING` | the Pub/Sub notification channel test (#1966), in the storage shard beside its Pub/Sub, so the Monitoring tests stay in served |
@@ -146,6 +147,7 @@ Set by `scripts/compat-env.sh` from a running instance:
 | `CLOUDBURROW_TEST_ANALYTICSHUB` | `CLOUDBURROW_ANALYTICSHUB_ENDPOINT` | BigQuery sharing, formerly Analytics Hub (#1960), served with `bigquery`; gRPC and JSON on one port; its subscriptions make linked datasets in the instance's BigQuery |
 | `CLOUDBURROW_TEST_PRIVATECA` | `CLOUDBURROW_PRIVATECA_ENDPOINT` | Certificate Authority Service (#1834), `--services privateca`; gRPC and JSON on one port |
 | `CLOUDBURROW_TEST_WORKFLOWS` | `CLOUDBURROW_WORKFLOWS_ENDPOINT` | Workflows and Workflow Executions (#1986), `--services workflows`; gRPC and JSON on one port; run in the run shard, beside the Cloud Run, Cloud Storage and Pub/Sub its workflows call |
+| `CLOUDBURROW_TEST_TRACE` | `CLOUDBURROW_TRACE_ENDPOINT` | Cloud Trace (#2118), `--services trace`; the Cloud Trace API v1 and v2, gRPC and JSON, and OTLP trace ingestion (OTLP/gRPC and `POST /v1/traces`) on one port; run in the served shard beside Cloud Logging |
 | `CLOUDBURROW_TEST_PARAMETERMANAGER` | `CLOUDBURROW_PARAMETERMANAGER_ENDPOINT` | Parameter Manager (#2054), `--services parametermanager`; gRPC and JSON on one port; run in the storage shard beside the Secret Manager and Cloud KMS its renders and keys use, and its IAM test in the iam shard |
 | `CLOUDBURROW_TEST_MONITORING` | `CLOUDBURROW_MONITORING_ENDPOINT` | Cloud Monitoring (#1939), `--services monitoring`; gRPC and JSON on one port |
 | `CLOUDBURROW_TEST_CLOUDSQL_CONNECTOR` | `CLOUDBURROW_CLOUDSQL_CONNECTOR_ENDPOINT` | the Cloud SQL connectors' TLS listener (#1364); `TestCloudSQLConnectorDialsBothServers` redirects the connector's dial of port 3307 to it only when an instance was started with `--cloudsql-connector` on another port |

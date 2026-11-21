@@ -72,6 +72,7 @@ func TestGenerateServiceIdentityEveryEntry(t *testing.T) {
 		"privateca.googleapis.com":              "gcp-sa-privateca.iam.gserviceaccount.com",
 		"container.googleapis.com":              "container-engine-robot.iam.gserviceaccount.com",
 		"monitoring.googleapis.com":             "gcp-sa-monitoring-notification.iam.gserviceaccount.com",
+		"cloudtrace.googleapis.com":             "gcp-sa-cloud-trace.iam.gserviceaccount.com",
 		"compute.googleapis.com":                "compute-system.iam.gserviceaccount.com",
 		"cloudkms.googleapis.com":               "gcp-sa-ekms.iam.gserviceaccount.com",
 		"pubsub.googleapis.com":                 "gcp-sa-pubsub.iam.gserviceaccount.com",
@@ -109,6 +110,7 @@ func TestGenerateServiceIdentityEveryEntry(t *testing.T) {
 		"parametermanager.googleapis.com":       "gcp-sa-pm.iam.gserviceaccount.com",
 		"workflowexecutions.googleapis.com":     "",
 		"kmsinventory.googleapis.com":           "",
+		"telemetry.googleapis.com":              "",
 	}
 	if len(want) != len(serviceAgents)+len(noPrimaryAgent) {
 		t.Fatalf("want has %d services; the tables have %d", len(want), len(serviceAgents)+len(noPrimaryAgent))
