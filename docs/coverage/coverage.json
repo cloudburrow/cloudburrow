@@ -18260,9 +18260,8 @@
     "Key": "gke",
     "Title": "Kubernetes Engine API (v1)",
     "counts": {
-      "Implemented": 2,
-      "Unimplemented": 16,
-      "Verified": 19
+      "Implemented": 1,
+      "Verified": 36
     },
     "rows": [
       {
@@ -18275,18 +18274,27 @@
       },
       {
         "method": "google.container.v1.ClusterManager/CheckAutopilotCompatibility",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkesettings_test.go:331 TestGcloudContainerClusterSettings",
+          "test/compat/gkesettings_test.go:57 TestGKEClusterSettings"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/CompleteControlPlaneUpgrade",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkemethods_test.go:272 TestGKERollbackSafeUpgrade",
+          "test/compat/gkemethods_test.go:393 TestGcloudContainerRotationLocationsAndUpgradeInfo"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/CompleteIPRotation",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkemethods_test.go:393 TestGcloudContainerRotationLocationsAndUpgradeInfo",
+          "test/compat/gkemethods_test.go:94 TestGKERotationLocationsAndUpgradeInfo"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/CompleteNodePoolUpgrade",
@@ -18329,13 +18337,19 @@
       },
       {
         "method": "google.container.v1.ClusterManager/FetchClusterUpgradeInfo",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkemethods_test.go:393 TestGcloudContainerRotationLocationsAndUpgradeInfo",
+          "test/compat/gkemethods_test.go:94 TestGKERotationLocationsAndUpgradeInfo"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/FetchNodePoolUpgradeInfo",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkemethods_test.go:393 TestGcloudContainerRotationLocationsAndUpgradeInfo",
+          "test/compat/gkemethods_test.go:94 TestGKERotationLocationsAndUpgradeInfo"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/GetCluster",
@@ -18348,8 +18362,10 @@
       },
       {
         "method": "google.container.v1.ClusterManager/GetJSONWebKeys",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkesettings_test.go:57 TestGKEClusterSettings"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/GetNodePool",
@@ -18400,8 +18416,11 @@
       },
       {
         "method": "google.container.v1.ClusterManager/ListUsableSubnetworks",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkesettings_test.go:331 TestGcloudContainerClusterSettings",
+          "test/compat/gkesettings_test.go:57 TestGKEClusterSettings"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/RollbackNodePoolUpgrade",
@@ -18412,8 +18431,10 @@
       },
       {
         "method": "google.container.v1.ClusterManager/SetAddonsConfig",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkesettings_test.go:57 TestGKEClusterSettings"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/SetLabels",
@@ -18425,18 +18446,27 @@
       },
       {
         "method": "google.container.v1.ClusterManager/SetLegacyAbac",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkesettings_test.go:331 TestGcloudContainerClusterSettings",
+          "test/compat/gkesettings_test.go:57 TestGKEClusterSettings"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/SetLocations",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkemethods_test.go:393 TestGcloudContainerRotationLocationsAndUpgradeInfo",
+          "test/compat/gkemethods_test.go:94 TestGKERotationLocationsAndUpgradeInfo"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/SetLoggingService",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gketelemetry_test.go:257 TestGcloudContainerClusterLoggingAndMonitoring",
+          "test/compat/gketelemetry_test.go:95 TestGKELoggingAndMonitoring"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/SetMaintenancePolicy",
@@ -18448,28 +18478,41 @@
       },
       {
         "method": "google.container.v1.ClusterManager/SetMasterAuth",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkesettings_test.go:57 TestGKEClusterSettings"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/SetMonitoringService",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gketelemetry_test.go:257 TestGcloudContainerClusterLoggingAndMonitoring",
+          "test/compat/gketelemetry_test.go:95 TestGKELoggingAndMonitoring"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/SetNetworkPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkesettings_test.go:331 TestGcloudContainerClusterSettings",
+          "test/compat/gkesettings_test.go:57 TestGKEClusterSettings"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/SetNodePoolAutoscaling",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkesettings_test.go:57 TestGKEClusterSettings"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/SetNodePoolManagement",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkesettings_test.go:331 TestGcloudContainerClusterSettings",
+          "test/compat/gkesettings_test.go:57 TestGKEClusterSettings"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/SetNodePoolSize",
@@ -18481,8 +18524,11 @@
       },
       {
         "method": "google.container.v1.ClusterManager/StartIPRotation",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkemethods_test.go:393 TestGcloudContainerRotationLocationsAndUpgradeInfo",
+          "test/compat/gkemethods_test.go:94 TestGKERotationLocationsAndUpgradeInfo"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/UpdateCluster",

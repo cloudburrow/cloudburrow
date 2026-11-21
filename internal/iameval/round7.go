@@ -273,6 +273,13 @@ var GKE = &Service{
 				"GetOperation":    {"container.operations.get", "name|project_id"},
 				"ListOperations":  {"container.operations.list", "parent|project_id"},
 				"CancelOperation": {"container.clusters.update", "name|project_id"},
+				// #2100.
+				"SetLegacyAbac":               {"container.clusters.update", "name|project_id"},
+				"SetNetworkPolicy":            {"container.clusters.update", "name|project_id"},
+				"SetAddonsConfig":             {"container.clusters.update", "name|project_id"},
+				"SetNodePoolAutoscaling":      {"container.clusters.update", "name|project_id"},
+				"SetNodePoolManagement":       {"container.clusters.update", "name|project_id"},
+				"CheckAutopilotCompatibility": {"container.clusters.get", "name"},
 			},
 		})
 		row := m["/google.container.v1.ClusterManager/CreateCluster"]
