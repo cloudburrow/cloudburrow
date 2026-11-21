@@ -52,7 +52,7 @@ Do not edit these files by hand.
 | [Cloud Identity API (v1)](cloudidentity.md) | 70 | 39 | 0 | 31 | 0 | 0 | 0 | 0 |
 | [Cloud Quotas API (v1)](cloudquotas.md) | 8 | 8 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Site Verification API (v1)](siteverification.md) | 7 | 7 | 0 | 0 | 0 | 0 | 0 | 0 |
-| [Workload Identity Federation (IAM v1 pools, STS v1)](workloadidentity.md) | 47 | 22 | 0 | 25 | 0 | 0 | 0 | 0 |
+| [Workload Identity Federation (IAM v1 pools, STS v1)](workloadidentity.md) | 88 | 63 | 0 | 25 | 0 | 0 | 0 | 0 |
 | [Certificate Authority Service (v1)](privateca.md) | 29 | 29 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Parameter Manager (v1)](parametermanager.md) | 22 | 22 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Workflows and Workflow Executions (v1)](workflows.md) | 10 | 10 | 0 | 0 | 0 | 0 | 0 | 0 |

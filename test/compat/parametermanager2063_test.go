@@ -208,7 +208,9 @@ func TestParameterManagerTags(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		t.Cleanup(func() { _, _ = tc.keys.DeleteTagKey(context.Background(), &rmpb.DeleteTagKeyRequest{Name: k.GetName()}) })
+		t.Cleanup(func() {
+			_, _ = tc.keys.DeleteTagKey(context.Background(), &rmpb.DeleteTagKeyRequest{Name: k.GetName()})
+		})
 		return k
 	}
 	mkValue := func(k *rmpb.TagKey, short string) *rmpb.TagValue {
@@ -220,7 +222,9 @@ func TestParameterManagerTags(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		t.Cleanup(func() { _, _ = tc.values.DeleteTagValue(context.Background(), &rmpb.DeleteTagValueRequest{Name: v.GetName()}) })
+		t.Cleanup(func() {
+			_, _ = tc.values.DeleteTagValue(context.Background(), &rmpb.DeleteTagValueRequest{Name: v.GetName()})
+		})
 		return v
 	}
 	env := mkKey(v1ID(h, "penv-"))
