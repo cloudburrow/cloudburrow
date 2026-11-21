@@ -252,8 +252,10 @@ func StripPunctuation(text string) string {
 }
 
 // Unserved is the 501 of a feature the table allows but CloudBurrow cannot
-// serve locally: speaker diarization (no permissive local model,
-// docs/compatibility.md). Callers ask it after CheckV2 or CheckV1.
+// serve locally: speaker diarization, which chirp_3 offers. Google
+// publishes no speaker model, and the permissive ones (WeSpeaker, 3D-Speaker)
+// need ONNX Runtime, which the static CLI lacks (docs/gaps.md, #2131).
+// Callers ask it after CheckV2 or CheckV1.
 func (c Config) Unserved() error {
 	if c.Diarization {
 		return fmt.Errorf("Not implemented here: features.diarizationConfig of Speech-to-Text: CloudBurrow transcribes locally with whisper.cpp, " +

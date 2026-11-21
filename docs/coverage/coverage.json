@@ -7057,14 +7057,14 @@
           "test/compat/speech_test.go:80 TestSpeechRecognizers",
           "test/compat/speechfeatures_test.go:62 TestSpeechRecognitionFeatures1799",
           "test/compat/speechmatrix2127_test.go:46 TestSpeechFeatureMatrix2127",
-          "test/compat/speechstream_test.go:58 TestSpeechAdaptationBoost"
+          "test/compat/speechstream_test.go:59 TestSpeechAdaptationBoost"
         ]
       },
       {
         "method": "google.cloud.speech.v2.Speech/StreamingRecognize",
         "status": "Verified",
         "tests": [
-          "test/compat/speechstream_test.go:137 TestSpeechStreamingRecognize"
+          "test/compat/speechstream_test.go:138 TestSpeechStreamingRecognize"
         ]
       },
       {
@@ -7259,7 +7259,7 @@
         "method": "google.cloud.speech.v1.Speech/LongRunningRecognize",
         "status": "Verified",
         "tests": [
-          "test/compat/speechstream_test.go:229 TestSpeechV1"
+          "test/compat/speechstream_test.go:230 TestSpeechV1"
         ]
       },
       {
@@ -7268,14 +7268,14 @@
         "tests": [
           "test/compat/speechfeatures_test.go:62 TestSpeechRecognitionFeatures1799",
           "test/compat/speechmatrix2127_test.go:46 TestSpeechFeatureMatrix2127",
-          "test/compat/speechstream_test.go:229 TestSpeechV1"
+          "test/compat/speechstream_test.go:230 TestSpeechV1"
         ]
       },
       {
         "method": "google.cloud.speech.v1.Speech/StreamingRecognize",
         "status": "Verified",
         "tests": [
-          "test/compat/speechstream_test.go:229 TestSpeechV1"
+          "test/compat/speechstream_test.go:230 TestSpeechV1"
         ]
       }
     ]
