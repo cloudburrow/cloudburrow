@@ -28,6 +28,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/ocr"
 	"github.com/cloudburrow/cloudburrow/internal/service/vertexai"
 	"github.com/cloudburrow/cloudburrow/internal/speech"
+	"github.com/cloudburrow/cloudburrow/internal/syntaxnet"
 )
 
 // buildLocalAI returns the local generation endpoint, or nil when no model is
@@ -212,6 +213,25 @@ func attachLabelModel(cfg config.Config) {
 	imagelabel.SetSource(pinned(localai.EfficientNetLite0, "LABEL_DETECTION"))
 	imagedetect.SetObjectSource(pinned(localai.EfficientDetLite0, "OBJECT_LOCALIZATION"))
 	imagedetect.SetFaceSource(pinned(localai.BlazeFaceShortRange, "FACE_DETECTION"))
+	attachSyntaxModel(cache)
+}
+
+// attachSyntaxModel lets Natural Language's analyzeSyntax parse English
+// (#1799): SyntaxNet's Parsey McParseface is fetched from Google's
+// tensorflow/models repository the first time a text is parsed, into
+// <state-dir>/models, and checked against its pinned SHA-256s.
+func attachSyntaxModel(cache localai.Cache) {
+	m := localai.ParseyMcParseface
+	syntaxnet.SetSource(func(ctx context.Context) (string, error) {
+		if cache.VerifyPinned(m) != nil {
+			fmt.Fprintf(os.Stderr, "fetching SyntaxNet's Parsey McParseface (tensorflow/models @ %s, Apache-2.0) for analyzeSyntax...\n",
+				m.Pin.Revision[:12])
+			if err := cache.FetchPinned(ctx, m, nil); err != nil {
+				return "", err
+			}
+		}
+		return cache.PinnedDir(m), nil
+	})
 }
 
 func attachEmbedder(srv *vertexai.Server, cfg config.Config) {

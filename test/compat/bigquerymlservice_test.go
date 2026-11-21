@@ -773,7 +773,8 @@ func TestBigQueryMLTranslate(t *testing.T) {
 // INVALID_ARGUMENT; flatten_json_output TRUE answers the page's columns;
 // encoding_type UTF8 answers byte offsets; a second run answers the same
 // JSON; a NULL text has no result. Without one (an instance without
-// --local-ai-model), 501. ANALYZE_SYNTAX is 501 either way, and an
+// --local-ai-model), 501. ANALYZE_SYNTAX runs SyntaxNet's Parsey McParseface
+// locally either way and answers analyzing-syntax's sample tokens; an
 // undocumented option (MODERATE_TEXT), encoding_type with CLASSIFY_TEXT, an
 // input without text_content and another function of the model are
 // refused before anything is sent.
@@ -945,9 +946,60 @@ func TestBigQueryMLUnderstandText(t *testing.T) {
 		}
 	}
 
-	if err := run(fmt.Sprintf("SELECT * FROM ML.UNDERSTAND_TEXT(MODEL `%[1]s.nl`, (SELECT comment AS text_content FROM `%[1]s.comments`), STRUCT('ANALYZE_SYNTAX' AS nlu_option))", ds)); err == nil ||
-		!strings.Contains(err.Error(), "Not implemented here") {
-		t.Errorf("ANALYZE_SYNTAX: %v", err)
+	// ANALYZE_SYNTAX runs SyntaxNet's Parsey McParseface locally, with or
+	// without a local Gemma model: analyzing-syntax's sample text answers
+	// the page's sample tokens.
+	const sample = "Google, headquartered in Mountain View, unveiled the new Android phone at the Consumer Electronic Show.  " +
+		"Sundar Pichai said in his keynote that users love their new Android phones."
+	syn := understand("ANALYZE_SYNTAX", "(SELECT '"+sample+"' AS text_content)", ", 'UTF8' AS encoding_type")
+	if len(syn) != 1 || syn[0]["ml_understand_text_status"] != "" {
+		t.Fatalf("ANALYZE_SYNTAX: %v", syn)
+	}
+	var res struct {
+		Language  string `json:"language"`
+		Sentences []struct {
+			Text struct {
+				Content     string `json:"content"`
+				BeginOffset int    `json:"begin_offset"`
+			} `json:"text"`
+		} `json:"sentences"`
+		Tokens []struct {
+			Text struct {
+				Content     string `json:"content"`
+				BeginOffset int    `json:"begin_offset"`
+			} `json:"text"`
+			PartOfSpeech   map[string]string `json:"part_of_speech"`
+			DependencyEdge struct {
+				HeadTokenIndex int    `json:"head_token_index"`
+				Label          string `json:"label"`
+			} `json:"dependency_edge"`
+			Lemma string `json:"lemma"`
+		} `json:"tokens"`
+	}
+	if err := json.Unmarshal([]byte(fmt.Sprint(syn[0]["result"])), &res); err != nil {
+		t.Fatalf("ANALYZE_SYNTAX result %v: %v", syn[0]["result"], err)
+	}
+	if res.Language != "en" || len(res.Sentences) != 2 || res.Sentences[1].Text.BeginOffset != 105 || len(res.Tokens) != 32 {
+		t.Fatalf("ANALYZE_SYNTAX: %s", syn[0]["result"])
+	}
+	g, dot := res.Tokens[0], res.Tokens[31]
+	if g.Text.Content != "Google" || g.PartOfSpeech["tag"] != "NOUN" || g.PartOfSpeech["number"] != "SINGULAR" || g.PartOfSpeech["proper"] != "PROPER" ||
+		g.DependencyEdge.HeadTokenIndex != 7 || g.DependencyEdge.Label != "NSUBJ" || g.Lemma != "Google" {
+		t.Errorf("ANALYZE_SYNTAX token 0: %+v", g)
+	}
+	if dot.Text.Content != "." || dot.Text.BeginOffset != 179 || dot.PartOfSpeech["tag"] != "PUNCT" || dot.DependencyEdge.HeadTokenIndex != 20 ||
+		dot.DependencyEdge.Label != "P" || dot.Lemma != "." {
+		t.Errorf("ANALYZE_SYNTAX last token: %+v", dot)
+	}
+	if v := res.Tokens[7]; v.Text.Content != "unveiled" || v.DependencyEdge.Label != "ROOT" || v.DependencyEdge.HeadTokenIndex != 7 ||
+		v.PartOfSpeech["tag"] != "VERB" || v.PartOfSpeech["tense"] != "PAST" || v.Lemma != "unveil" {
+		t.Errorf("ANALYZE_SYNTAX token 7: %+v", v)
+	}
+	flatSyn := mlQuery(t, h, c, fmt.Sprintf("SELECT language, ARRAY_LENGTH(JSON_QUERY_ARRAY(tokens)) AS n, ml_understand_text_status AS status "+
+		"FROM ML.UNDERSTAND_TEXT(MODEL `%[1]s.nl`, (SELECT comment AS text_content FROM `%[1]s.comments`), "+
+		"STRUCT('analyze_syntax' AS nlu_option, TRUE AS flatten_json_output))", ds))
+	if len(flatSyn) != 1 || flatSyn[0]["language"] != "en" || fmt.Sprint(flatSyn[0]["n"]) != "17" || flatSyn[0]["status"] != "" {
+		t.Errorf("ANALYZE_SYNTAX flattened: %v", flatSyn)
 	}
 	for name, sql := range map[string]string{
 		"no option":       "TABLE `%[1]s.reviews`, STRUCT(TRUE AS flatten_json_output)",

@@ -140,6 +140,14 @@ mediapipe/tasks/cc/text/language_detector/custom_ops), Copyright 2023 The
 MediaPipe Authors, under the Apache License, Version 2.0;
 third_party/mediapipe-langid/PROVENANCE.md records the source and digest.
 
+internal/syntaxnet runs SyntaxNet's Parsey McParseface tagger and parser
+(https://github.com/tensorflow/models, research/syntaxnet, tag v1.13.0),
+Copyright 2016 Google Inc., under the Apache License, Version 2.0: its feature
+definitions, arc-standard and tagger transitions, beam search and English
+tokenization rules are reimplemented in Go from SyntaxNet's sources, and the
+model files are not embedded but fetched at run time from that repository and
+checked against the SHA-256s pinned in internal/localai/syntaxparser.go.
+
 The binary embeds a holiday calendar (internal/bigqueryfront/holidaycal.tsv.gz)
 generated from the holidays package 0.84 (https://github.com/vacanza/holidays),
 Copyright (c) Vacanza Team and individual contributors, Copyright (c)
