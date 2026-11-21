@@ -7,9 +7,19 @@
 // Read from Google's public docs on 2026-11-20:
 // https://docs.cloud.google.com/docs/quotas/reference/rest and
 // https://docs.cloud.google.com/docs/quotas/implement-common-use-cases.
-// Only projects are containers here: folder and organization quotas are
-// not described by any API this instance serves, so their parents answer
-// UNIMPLEMENTED.
+//
+// Folders and organizations are containers too (#2102), as Google's
+// reference names them: folders/{n}/locations/global and
+// organizations/{n}/locations/global. Under each, ListQuotaInfos lists the
+// quotas whose containerType is that level (IAM's organization quotas; no
+// served API documents a folder quota, so a folder lists none), and
+// ListQuotaPreferences lists the container's own preferences, not those of
+// the projects under it, as the reference says. A folder's or
+// organization's quota counts the usage of everything under it (Google's
+// Cloud Quotas overview); a preference there does not change a project's
+// quotas, which are separate quotas. The quota adjuster's enablement is
+// inherited: a container with none set reads its nearest ancestor's, with
+// inherited and inheritedFrom set, or "default".
 package cloudquotas
 
 import (
@@ -46,6 +56,14 @@ type Projects interface {
 	Resolve(idOrNumber string) (string, error)
 }
 
+// Hierarchy is the resource hierarchy: Parent is the parent of
+// projects/{id}, folders/{n} or organizations/{n} (folders/{n} or
+// organizations/{n}, "" for none), and an error when the container does
+// not exist.
+type Hierarchy interface {
+	Parent(container string) (string, error)
+}
+
 // Served says whether the instance serves an API, so its quotas are listed.
 type Served func(service string) bool
 
@@ -56,6 +74,10 @@ type Server struct {
 	projects Projects
 	served   Served
 	now      func() time.Time
+	// Hierarchy checks folders and organizations and walks up from a
+	// container for the quota adjuster's inheritance; nil takes every
+	// folder and organization, each with no parent.
+	Hierarchy Hierarchy
 
 	mu sync.Mutex
 }
@@ -164,31 +186,48 @@ func (s *Server) ResetProject(project string) error {
 	return nil
 }
 
-// container parses "projects/{p}/locations/{l}" and returns the project ID
-// and the canonical parent, named by project number as Google names it.
-func (s *Server) container(parent string) (project, canonical string, err error) {
+// container parses "{projects|folders|organizations}/{id}/locations/{l}"
+// and returns the store key (a project's ID, or folders/{n} and
+// organizations/{n}), the canonical parent (a project named by number, as
+// Google names it) and the container's level.
+func (s *Server) container(parent string) (key, canonical string, level Container, err error) {
 	p := strings.Split(parent, "/")
 	if len(p) != 4 || p[2] != "locations" || p[1] == "" || p[3] == "" {
-		return "", "", status.Errorf(codes.InvalidArgument, "invalid parent %q: want projects/{project}/locations/global", parent)
+		return "", "", 0, status.Errorf(codes.InvalidArgument, "invalid parent %q: want projects/{project}/locations/global", parent)
 	}
 	switch p[0] {
 	case "projects":
-	case "folders", "organizations":
-		return "", "", status.Errorf(codes.Unimplemented, "CloudBurrow describes project quotas only; %s quotas are not served", strings.TrimSuffix(p[0], "s"))
+		level = ContainerProject
+	case "folders":
+		level = ContainerFolder
+	case "organizations":
+		level = ContainerOrganization
 	default:
-		return "", "", status.Errorf(codes.InvalidArgument, "invalid parent %q", parent)
+		return "", "", 0, status.Errorf(codes.InvalidArgument, "invalid parent %q", parent)
 	}
 	if p[3] != "global" {
-		return "", "", status.Errorf(codes.InvalidArgument, "location %q is not supported; Cloud Quotas resources are in location global", p[3])
+		return "", "", 0, status.Errorf(codes.InvalidArgument, "location %q is not supported; Cloud Quotas resources are in location global", p[3])
+	}
+	if level != ContainerProject {
+		if _, err := strconv.ParseUint(p[1], 10, 64); err != nil {
+			return "", "", 0, status.Errorf(codes.InvalidArgument, "invalid parent %q: a %s is named by its number", parent, strings.TrimSuffix(p[0], "s"))
+		}
+		name := p[0] + "/" + p[1]
+		if s.Hierarchy != nil {
+			if _, err := s.Hierarchy.Parent(name); err != nil {
+				return "", "", 0, status.Errorf(codes.PermissionDenied, "Permission denied on resource %s %s (or it may not exist).", strings.TrimSuffix(p[0], "s"), p[1])
+			}
+		}
+		return name, name + "/locations/global", level, nil
 	}
 	id := p[1]
 	if s.projects != nil {
 		id, err = s.projects.Resolve(p[1])
 		if err != nil {
-			return "", "", status.Errorf(codes.PermissionDenied, "Permission denied on resource project %s (or it may not exist).", p[1])
+			return "", "", 0, status.Errorf(codes.PermissionDenied, "Permission denied on resource project %s (or it may not exist).", p[1])
 		}
 	}
-	return id, "projects/" + strconv.FormatInt(resource.ProjectNumber(id), 10) + "/locations/global", nil
+	return id, "projects/" + strconv.FormatInt(resource.ProjectNumber(id), 10) + "/locations/global", level, nil
 }
 
 func (s *Server) listed(service string) bool { return s.served == nil || s.served(service) }
@@ -232,7 +271,7 @@ func info(canonical string, q Quota, prefs []*pb.QuotaPreference) *pb.QuotaInfo 
 		Service:           q.Service,
 		IsPrecise:         true,
 		RefreshInterval:   q.RefreshInterval,
-		ContainerType:     pb.QuotaInfo_PROJECT,
+		ContainerType:     q.Container.containerType(),
 		Dimensions:        append([]string(nil), q.Dimensions...),
 		MetricDisplayName: q.MetricDisplayName,
 		QuotaDisplayName:  q.QuotaDisplayName,
@@ -248,6 +287,16 @@ func info(canonical string, q Quota, prefs []*pb.QuotaPreference) *pb.QuotaInfo 
 	}
 }
 
+func (c Container) containerType() pb.QuotaInfo_ContainerType {
+	switch c {
+	case ContainerFolder:
+		return pb.QuotaInfo_FOLDER
+	case ContainerOrganization:
+		return pb.QuotaInfo_ORGANIZATION
+	}
+	return pb.QuotaInfo_PROJECT
+}
+
 func pageSize(n int32) int {
 	if n <= 0 || n > 1000 {
 		return 1000
@@ -261,7 +310,7 @@ func (s *Server) ListQuotaInfos(_ context.Context, req *pb.ListQuotaInfosRequest
 	if !ok || service == "" || strings.Contains(service, "/") {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid parent %q: want projects/{project}/locations/global/services/{service}", req.GetParent())
 	}
-	project, canonical, err := s.container(parent)
+	project, canonical, level, err := s.container(parent)
 	if err != nil {
 		return nil, err
 	}
@@ -277,7 +326,7 @@ func (s *Server) ListQuotaInfos(_ context.Context, req *pb.ListQuotaInfosRequest
 	var ids []string
 	if s.listed(service) {
 		for _, q := range Catalog {
-			if q.Service == service {
+			if q.Service == service && q.Container == level {
 				byID[q.QuotaID] = info(canonical, q, prefs)
 				ids = append(ids, q.QuotaID)
 			}
@@ -302,12 +351,12 @@ func (s *Server) GetQuotaInfo(_ context.Context, req *pb.GetQuotaInfoRequest) (*
 	if !ok || !ok2 || service == "" || quotaID == "" {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid name %q", req.GetName())
 	}
-	project, canonical, err := s.container(parent)
+	project, canonical, level, err := s.container(parent)
 	if err != nil {
 		return nil, err
 	}
 	q, found := lookup(service, quotaID)
-	if !found || !s.listed(service) {
+	if !found || !s.listed(service) || q.Container != level {
 		return nil, status.Errorf(codes.NotFound, "QuotaInfo %s not found", req.GetName())
 	}
 	st, err := s.load(project)
@@ -335,7 +384,7 @@ func splitPreference(name string) (parent, id string, err error) {
 // service, quota_id (quotaId), reconciling and dimensions.region terms
 // joined by AND; order_by takes a field and desc.
 func (s *Server) ListQuotaPreferences(_ context.Context, req *pb.ListQuotaPreferencesRequest) (*pb.ListQuotaPreferencesResponse, error) {
-	project, canonical, err := s.container(req.GetParent())
+	project, canonical, _, err := s.container(req.GetParent())
 	if err != nil {
 		return nil, err
 	}
@@ -468,7 +517,7 @@ func (s *Server) GetQuotaPreference(_ context.Context, req *pb.GetQuotaPreferenc
 	if err != nil {
 		return nil, err
 	}
-	project, canonical, err := s.container(parent)
+	project, canonical, _, err := s.container(parent)
 	if err != nil {
 		return nil, err
 	}
@@ -490,7 +539,7 @@ func (s *Server) GetQuotaPreference(_ context.Context, req *pb.GetQuotaPreferenc
 
 // CreateQuotaPreference creates a preference and grants it.
 func (s *Server) CreateQuotaPreference(_ context.Context, req *pb.CreateQuotaPreferenceRequest) (*pb.QuotaPreference, error) {
-	project, canonical, err := s.container(req.GetParent())
+	project, canonical, level, err := s.container(req.GetParent())
 	if err != nil {
 		return nil, err
 	}
@@ -512,7 +561,7 @@ func (s *Server) CreateQuotaPreference(_ context.Context, req *pb.CreateQuotaPre
 	if _, dup := st.Preferences[id]; dup {
 		return nil, status.Errorf(codes.AlreadyExists, "QuotaPreference %s/quotaPreferences/%s already exists", canonical, id)
 	}
-	p, err := s.grant(project, nil, req.GetQuotaPreference(), req.GetIgnoreSafetyChecks())
+	p, err := s.grant(project, level, nil, req.GetQuotaPreference(), req.GetIgnoreSafetyChecks())
 	if err != nil {
 		return nil, err
 	}
@@ -539,7 +588,7 @@ func (s *Server) UpdateQuotaPreference(_ context.Context, req *pb.UpdateQuotaPre
 	if !preferenceID.MatchString(id) {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid quota preference id %q", id)
 	}
-	project, canonical, err := s.container(parent)
+	project, canonical, level, err := s.container(parent)
 	if err != nil {
 		return nil, err
 	}
@@ -595,7 +644,7 @@ func (s *Server) UpdateQuotaPreference(_ context.Context, req *pb.UpdateQuotaPre
 			}
 		}
 	}
-	p, err := s.grant(project, old, merged, req.GetIgnoreSafetyChecks())
+	p, err := s.grant(project, level, old, merged, req.GetIgnoreSafetyChecks())
 	if err != nil {
 		return nil, err
 	}
@@ -625,7 +674,7 @@ func etag(p *pb.QuotaPreference) string {
 // grant validates a preference against its quota and the safety checks,
 // and grants it: the value is applied at once (a local instance has no
 // review), so reconciling is false and granted_value is the preferred one.
-func (s *Server) grant(project string, old, p *pb.QuotaPreference, ignore []pb.QuotaSafetyCheck) (*pb.QuotaPreference, error) {
+func (s *Server) grant(project string, level Container, old, p *pb.QuotaPreference, ignore []pb.QuotaSafetyCheck) (*pb.QuotaPreference, error) {
 	if p == nil || p.GetQuotaConfig() == nil {
 		return nil, status.Errorf(codes.InvalidArgument, "quota_preference.quota_config is required")
 	}
@@ -635,6 +684,10 @@ func (s *Server) grant(project string, old, p *pb.QuotaPreference, ignore []pb.Q
 	q, ok := lookup(p.GetService(), p.GetQuotaId())
 	if !ok || !s.listed(p.GetService()) {
 		return nil, status.Errorf(codes.InvalidArgument, "the quota %s of %s does not exist", p.GetQuotaId(), p.GetService())
+	}
+	if q.Container != level {
+		return nil, status.Errorf(codes.InvalidArgument, "the quota %s of %s applies to a %s: set its preference under %s/{id}/locations/global",
+			q.QuotaID, q.Service, strings.TrimSuffix(q.Container.Collection(), "s"), q.Container.Collection())
 	}
 	if q.Fixed {
 		return nil, status.Errorf(codes.InvalidArgument, "the quota %s of %s is fixed and cannot be adjusted", q.QuotaID, q.Service)
@@ -699,7 +752,9 @@ func containsCheck(xs []pb.QuotaSafetyCheck, x pb.QuotaSafetyCheck) bool {
 }
 
 // Value is quotalimit.Source: a granted preference's value for the
-// dimensions, the most specific first (a region's, then the project's).
+// dimensions, the most specific first (a region's, then the container's).
+// project is a project ID, or folders/{n} or organizations/{n} for a
+// folder's or organization's quota.
 func (s *Server) Value(project, service, quotaID string, dims map[string]string) (int64, bool) {
 	st, err := s.load(project)
 	if err != nil {
@@ -731,7 +786,13 @@ func (s *Server) Value(project, service, quotaID string, dims map[string]string)
 
 // Preferences is a project's preferences, for the console.
 func (s *Server) Preferences(project string) ([]*pb.QuotaPreference, error) {
-	_, canonical, err := s.container("projects/" + project + "/locations/global")
+	return s.PreferencesOf("projects/" + project)
+}
+
+// PreferencesOf is a container's own preferences (projects/{id},
+// folders/{n} or organizations/{n}), for the console.
+func (s *Server) PreferencesOf(container string) ([]*pb.QuotaPreference, error) {
+	_, canonical, _, err := s.container(container + "/locations/global")
 	if err != nil {
 		return nil, err
 	}
@@ -755,7 +816,40 @@ func adjusterProject(s *Server, name string) (string, string, error) {
 	if !ok {
 		return "", "", status.Errorf(codes.InvalidArgument, "invalid name %q: want projects/{project}/locations/global/quotaAdjusterSettings", name)
 	}
-	return s.container(parent)
+	key, canonical, _, err := s.container(parent)
+	return key, canonical, err
+}
+
+// inherited is the nearest ancestor of a container (its store key) whose
+// quota adjuster enablement is set, and that enablement; "default" and
+// DISABLED when none is, as Google's inheritedFrom documents.
+func (a adjuster) inherited(key string) (string, pb.QuotaAdjusterSettings_Enablement, error) {
+	if a.s.Hierarchy == nil {
+		return "default", pb.QuotaAdjusterSettings_DISABLED, nil
+	}
+	name := key
+	if !strings.HasPrefix(key, "folders/") && !strings.HasPrefix(key, "organizations/") {
+		name = "projects/" + key
+	}
+	for i := 0; i < 16; i++ {
+		parent, err := a.s.Hierarchy.Parent(name)
+		if err != nil || parent == "" {
+			break
+		}
+		st, err := a.s.load(parent)
+		if err != nil {
+			return "", 0, err
+		}
+		if len(st.Adjuster) > 0 {
+			set := &pb.QuotaAdjusterSettings{}
+			if err := protojson.Unmarshal(st.Adjuster, set); err != nil {
+				return "", 0, err
+			}
+			return parent, set.GetEnablement(), nil
+		}
+		name = parent
+	}
+	return "default", pb.QuotaAdjusterSettings_DISABLED, nil
 }
 
 func (a adjuster) GetQuotaAdjusterSettings(_ context.Context, req *pb.GetQuotaAdjusterSettingsRequest) (*pb.QuotaAdjusterSettings, error) {
@@ -772,6 +866,12 @@ func (a adjuster) GetQuotaAdjusterSettings(_ context.Context, req *pb.GetQuotaAd
 		if err := protojson.Unmarshal(st.Adjuster, out); err != nil {
 			return nil, err
 		}
+	} else {
+		from, en, err := a.inherited(project)
+		if err != nil {
+			return nil, err
+		}
+		out.Enablement, out.Inherited, out.InheritedFrom = en, true, from
 	}
 	out.Name = canonical + "/quotaAdjusterSettings"
 	return out, nil

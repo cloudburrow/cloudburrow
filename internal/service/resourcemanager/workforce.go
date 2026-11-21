@@ -39,6 +39,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -46,9 +47,20 @@ import (
 	"strings"
 	"time"
 
+	"google.golang.org/grpc/codes"
+
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/quotalimit"
 	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
 	"github.com/cloudburrow/cloudburrow/internal/wif"
+)
+
+// WorkforcePoolQuotaID is IAM's "Number of workforce identity pools"
+// quota in the Cloud Quotas API, an organization-level quota (#2102):
+// Google's IAM quotas page documents 100 per organization, adjustable.
+const (
+	WorkforcePoolQuotaID = "WORKFORCE-POOL-COUNT-per-organization"
+	maxWorkforcePools    = 100
 )
 
 const (
@@ -286,6 +298,16 @@ func (r *Registry) CreateWorkforcePool(id string, in WorkforcePool) (WorkforcePo
 	if r.wfLoad(wfPoolKey(id)) != nil {
 		return in, apierror.AlreadyExists("Requested entity already exists")
 	}
+	// The organization's Cloud Quotas preference for the pool count, when
+	// one is granted (#2102), else Google's default of 100.
+	live, err := r.liveWorkforcePoolsLocked(in.Parent)
+	if err != nil {
+		return in, err
+	}
+	if limit := quotalimit.Limit(in.Parent, ServiceAccountQuotaService, WorkforcePoolQuotaID, nil, maxWorkforcePools); live >= limit {
+		return in, &apierror.Error{Code: codes.ResourceExhausted, Reason: "rateLimitExceeded",
+			Message: fmt.Sprintf("Quota exceeded for quota metric 'Number of workforce identity pools' of service 'iam.googleapis.com' for consumer '%s': the limit is %d.", in.Parent, limit)}
+	}
 	v := WorkforcePool{Parent: in.Parent, DisplayName: in.DisplayName, Description: in.Description, Disabled: in.Disabled,
 		SessionDuration: in.SessionDuration, AccessRestrictions: in.AccessRestrictions}
 	rec := &wfRecord{Pool: id, PoolV: &v, CreateTime: r.now().UTC()}
@@ -294,6 +316,28 @@ func (r *Registry) CreateWorkforcePool(id string, in WorkforcePool) (WorkforcePo
 	}
 	r.wfStamp(rec)
 	return *rec.PoolV, nil
+}
+
+// LiveWorkforcePools counts an organization's pools that are not deleted:
+// the usage of its workforce pool quota (#2102).
+func (r *Registry) LiveWorkforcePools(parent string) (int64, error) {
+	wifMu.Lock()
+	defer wifMu.Unlock()
+	return r.liveWorkforcePoolsLocked(parent)
+}
+
+func (r *Registry) liveWorkforcePoolsLocked(parent string) (int64, error) {
+	keys, err := r.st.List(wfPoolPrefix)
+	if err != nil {
+		return 0, apierror.Internal(err, "list pools")
+	}
+	var n int64
+	for _, k := range keys {
+		if rec := r.wfLoad(k); rec != nil && rec.PoolV != nil && rec.PoolV.Parent == parent && !rec.Deleted {
+			n++
+		}
+	}
+	return n, nil
 }
 
 func (r *Registry) wfPool(id string) (*wfRecord, error) {

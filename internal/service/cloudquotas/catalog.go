@@ -25,6 +25,33 @@ type Quota struct {
 	Enforced bool
 	// Source is the Google page the default and the names were read from.
 	Source string
+	// Container is the level of the resource hierarchy the quota applies
+	// to: ContainerProject (the zero value), ContainerFolder or
+	// ContainerOrganization. A folder's or organization's quota counts the
+	// usage of everything under it (Google's Cloud Quotas overview), and is
+	// read and adjusted under folders/{n} or organizations/{n} only.
+	Container Container
+}
+
+// Container is a level of the resource hierarchy a quota applies to.
+type Container int
+
+// The levels Google documents (QuotaInfo.ContainerType).
+const (
+	ContainerProject Container = iota
+	ContainerFolder
+	ContainerOrganization
+)
+
+// Collection is the level's collection in a resource name.
+func (c Container) Collection() string {
+	switch c {
+	case ContainerFolder:
+		return "folders"
+	case ContainerOrganization:
+		return "organizations"
+	}
+	return "projects"
 }
 
 // Catalog is every quota CloudBurrow describes (#2030). The defaults and
@@ -76,4 +103,40 @@ var Catalog = []Quota{
 		QuotaDisplayName: "Workflows per project", MetricUnit: "1/{project}", Default: 10000, Fixed: true, Enforced: true,
 		Source: "https://docs.cloud.google.com/workflows/quotas",
 	},
+	// Organization-level quotas (#2102): IAM's quotas page lists these per
+	// organization, read 2026-11-21.
+	{
+		Service: "iam.googleapis.com", QuotaID: WorkforcePoolQuotaID,
+		Metric: "iam.googleapis.com/workforce_pools", MetricDisplayName: "Number of workforce identity pools",
+		QuotaDisplayName: "Workforce identity pools per organization", MetricUnit: "1/{organization}", Default: 100, Enforced: true,
+		Container: ContainerOrganization, Source: "https://docs.cloud.google.com/iam/quotas",
+	},
+	{
+		Service: "iam.googleapis.com", QuotaID: "WORKFORCE-POOL-CREATE-DELETE-REQUESTS-per-minute-per-organization",
+		Metric: "iam.googleapis.com/workforce_pool_create_delete_requests", MetricDisplayName: "Workforce Identity Federation create/delete/undelete requests",
+		QuotaDisplayName: "Create/delete/undelete requests per minute per organization", MetricUnit: "1/min/{organization}", Default: 60, RefreshInterval: "minute",
+		Container: ContainerOrganization, Source: "https://docs.cloud.google.com/iam/quotas",
+	},
+	{
+		Service: "iam.googleapis.com", QuotaID: "WORKFORCE-POOL-READ-REQUESTS-per-minute-per-organization",
+		Metric: "iam.googleapis.com/workforce_pool_read_requests", MetricDisplayName: "Workforce Identity Federation read requests",
+		QuotaDisplayName: "Read requests per minute per organization", MetricUnit: "1/min/{organization}", Default: 120, RefreshInterval: "minute",
+		Container: ContainerOrganization, Source: "https://docs.cloud.google.com/iam/quotas",
+	},
+	{
+		Service: "iam.googleapis.com", QuotaID: "WORKFORCE-POOL-UPDATE-REQUESTS-per-minute-per-organization",
+		Metric: "iam.googleapis.com/workforce_pool_update_requests", MetricDisplayName: "Workforce Identity Federation update requests",
+		QuotaDisplayName: "Update requests per minute per organization", MetricUnit: "1/min/{organization}", Default: 120, RefreshInterval: "minute",
+		Container: ContainerOrganization, Source: "https://docs.cloud.google.com/iam/quotas",
+	},
+	{
+		Service: "iam.googleapis.com", QuotaID: "CUSTOM-ROLES-per-organization",
+		Metric: "iam.googleapis.com/organization_custom_roles", MetricDisplayName: "Custom roles for an organization",
+		QuotaDisplayName: "Custom roles per organization", MetricUnit: "1/{organization}", Default: 300, Fixed: true, Enforced: true,
+		Container: ContainerOrganization, Source: "https://docs.cloud.google.com/iam/quotas",
+	},
 }
+
+// WorkforcePoolQuotaID is the organization's workforce pool count, the
+// limit IAM's CreateWorkforcePool enforces (#2102).
+const WorkforcePoolQuotaID = "WORKFORCE-POOL-COUNT-per-organization"

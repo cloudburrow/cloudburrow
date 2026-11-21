@@ -10485,7 +10485,7 @@ function currentProject() {
 // does not work at the folder's or organization's level drops the choice,
 // so the toolbar always names what the page reads.
 const RESOURCE_SCOPE_KEYS = ["folder", "organizationId"];
-const RESOURCE_SCOPED_PATHS = ["/iam-admin/iam", "/iam-admin/orgpolicies", "/iam-admin/tags", "/tags"];
+const RESOURCE_SCOPED_PATHS = ["/iam-admin/iam", "/iam-admin/orgpolicies", "/iam-admin/tags", "/tags", "/iam-admin/quotas"];
 const resourceScopedPath = (pathname) => RESOURCE_SCOPED_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/"));
 // RESOURCE_NAMES are the folders' and the organization's display names, as
 // the picker last read them: "folder:N" and "organization:N".
@@ -23074,6 +23074,9 @@ function quotasBlock(service, redraw) {
   const box = el("div", { id }, loadingState(3, { what: "quotas" }));
   const filter = el("input", { type: "search", class: "filter", id: `${id}-filter`, placeholder: "Filter", "aria-label": "Filter quotas and system limits" });
   let rows = [];
+  // scopeKind is the level the page reads (#2102): the project, or the
+  // folder or organization chosen in the toolbar.
+  let scopeKind = "project";
   const dims = (d) => Object.keys(d || {}).length ? Object.entries(d).map(([k, v]) => `${k}: ${v}`).join(", ") : "";
   const draw = () => {
     const q = filter.value.trim().toLowerCase();
@@ -23091,14 +23094,17 @@ function quotasBlock(service, redraw) {
         el("td", {}, r.adjustable ? el("button", { type: "button", class: "secondary", text: "Edit quota",
           "aria-label": `Edit quota ${r.name}${dims(r.dimensions) ? " " + dims(r.dimensions) : ""}`,
           onclick: () => quotaEdit(r, reload) }) : null)))
-        : [el("tr", {}, el("td", { colspan: String(head.length), text: rows.length ? "No quota matches the filter." : "This API has no quota CloudBurrow describes." }))])));
+        : [el("tr", {}, el("td", { colspan: String(head.length), text: rows.length ? "No quota matches the filter." : (scopeKind === "folder"
+          ? "No API this instance serves documents a folder-level quota." : "This API has no quota CloudBurrow describes.") }))])));
   };
   const table = el("table", { class: "table", id: `${id}-table` });
   const reload = async () => {
     try {
       const data = await apisCall("quotas", { service: service || "" });
       rows = data.quotas || [];
-      setChildren(box, el("p", { class: "form-help", text: "The Cloud Quotas API's quotas for this project, with Google's documented defaults. " +
+      scopeKind = (data.scope || "").startsWith("organizations/") ? "organization" : (data.scope || "").startsWith("folders/") ? "folder" : "project";
+      setChildren(box, el("p", { class: "form-help", text: `The Cloud Quotas API's quotas for this ${scopeKind}, with Google's documented defaults. ` +
+        (scopeKind === "project" ? "" : `A ${scopeKind}'s quota counts the usage of everything under it; the projects' own quotas are on each project's page. `) +
         "A quota marked Enforced locally refuses calls past its value, so a granted preference changes what the API allows; the others are described, not applied." }),
         el("div", { class: "filter-bar" }, filter), el("div", { class: "table-wrap" }, table));
       draw();
@@ -23133,7 +23139,8 @@ function quotaEdit(r, after) {
 async function renderQuotasPage(view) {
   const project = currentProject();
   if (!project) return apisNeedProject(view, "Quotas & System Limits");
-  setChildren(view, pageHeader("Quotas & System Limits", `Project ${project}`), quotasBlock("", () => renderQuotasPage(view)));
+  const res = currentResource();
+  setChildren(view, pageHeader("Quotas & System Limits", res ? resourceLabel(res) : `Project ${project}`), quotasBlock("", () => renderQuotasPage(view)));
   announce("Quotas & System Limits");
 }
 
