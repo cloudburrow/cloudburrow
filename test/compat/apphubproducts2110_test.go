@@ -15,11 +15,15 @@ import (
 
 	"cloud.google.com/go/apphub/apiv1/apphubpb"
 	"cloud.google.com/go/cloudtasks/apiv2/cloudtaskspb"
+	"cloud.google.com/go/logging/logadmin"
 	"cloud.google.com/go/pubsub/v2"
 	"cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	"cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
 	"cloud.google.com/go/storage"
 	"google.golang.org/api/iterator"
+	"google.golang.org/api/option"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 // TestAppHubDiscoversOtherProducts (#2110, round 3), with the official
@@ -247,5 +251,67 @@ func appHubLogEntryHasApp(t *testing.T, h *Harness, project, topicID, via, app s
 	if a.Application.ID != app || a.Application.Location != "global" || a.Application.Container != "projects/"+project ||
 		a.Service == nil || a.Service.ID != "topic" {
 		t.Errorf("apphub = %+v; want application %s in global of projects/%s, service topic", a, app, project)
+	}
+
+	appHubLogFilters(t, h, project, logName, app, "service", "topic")
+}
+
+// appHubLogFilters (#2096): the Logging API's own filter on apphub.*, over
+// REST and with the official client over gRPC. The query language takes
+// every LogEntry field, so the registered resource's entry in logName is
+// the one apphub.application.id="APP" and apphub.KIND.id="ID" match;
+// another application's matches none.
+func appHubLogFilters(t *testing.T, h *Harness, project, logName, app, kind, id string) {
+	t.Helper()
+	base := "http://" + h.Endpoint(EnvLogging)
+	var got struct{ Entries []json.RawMessage }
+	post := func(filter string) {
+		t.Helper()
+		b, _ := json.Marshal(map[string]any{"resourceNames": []string{"projects/" + project}, "filter": filter})
+		resp, err := http.Post(base+"/v2/entries:list", "application/json", bytes.NewReader(b))
+		if err != nil {
+			t.Fatalf("entries.list: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("entries.list %s: %s", filter, resp.Status)
+		}
+		got.Entries = nil
+		if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for filter, want := range map[string]int{
+		fmt.Sprintf("logName=%q AND apphub.application.id=%q", logName, app):   1,
+		fmt.Sprintf("logName=%q AND apphub.%s.id=%q", logName, kind, id):       1,
+		fmt.Sprintf("logName=%q AND apphub.application.id=\"other\"", logName): 0,
+		fmt.Sprintf("logName=%q AND NOT apphub.application.id:*", logName):     0,
+	} {
+		post(filter)
+		if len(got.Entries) != want {
+			t.Errorf("entries.list (REST) filter %s: %d entries, want %d", filter, len(got.Entries), want)
+		}
+		ctx := h.Context()
+		ac, err := logadmin.NewClient(ctx, "projects/"+project, option.WithEndpoint(h.Endpoint(EnvLogging)), option.WithoutAuthentication(),
+			option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
+		if err != nil {
+			t.Fatal(err)
+		}
+		n := 0
+		it := ac.Entries(ctx, logadmin.Filter(filter))
+		for {
+			_, err := it.Next()
+			if err == iterator.Done {
+				break
+			}
+			if err != nil {
+				t.Fatalf("entries.list (gRPC) filter %s: %v", filter, err)
+			}
+			n++
+		}
+		_ = ac.Close()
+		if n != want {
+			t.Errorf("entries.list (gRPC) filter %s: %d entries, want %d", filter, n, want)
+		}
 	}
 }

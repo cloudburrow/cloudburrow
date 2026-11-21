@@ -7,6 +7,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"cloud.google.com/go/logging/apiv2/loggingpb"
+	"google.golang.org/genproto/googleapis/api/monitoredres"
 )
 
 func TestWithAppHub(t *testing.T) {
@@ -45,5 +48,36 @@ func TestWithAppHub(t *testing.T) {
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v2/projects/p/logs", nil))
 	if strings.Contains(rec.Body.String(), "apphub") {
 		t.Errorf("another call was changed: %s", rec.Body.String())
+	}
+}
+
+// Filters match an entry's apphub (#2096): entries.list with
+// apphub.application.id="app" returns the registered resource's entries.
+func TestFilterAppHub(t *testing.T) {
+	SetAppHub(func(typ string, labels map[string]string) map[string]any {
+		if typ == "pubsub_topic" && labels["topic_id"] == "t" {
+			return map[string]any{"application": map[string]any{"container": "projects/p", "location": "global", "id": "app"},
+				"service": map[string]any{"id": "topic"}}
+		}
+		return nil
+	})
+	t.Cleanup(func() { SetAppHub(nil) })
+	in := &loggingpb.LogEntry{LogName: "projects/p/logs/a", Resource: &monitoredres.MonitoredResource{Type: "pubsub_topic", Labels: map[string]string{"project_id": "p", "topic_id": "t"}}}
+	out := &loggingpb.LogEntry{LogName: "projects/p/logs/a", Resource: &monitoredres.MonitoredResource{Type: "pubsub_topic", Labels: map[string]string{"project_id": "p", "topic_id": "u"}}}
+	for filter, want := range map[string][2]bool{
+		`apphub.application.id="app"`:              {true, false},
+		`apphub.service.id="topic"`:                {true, false},
+		`apphub.application.location="global"`:     {true, false},
+		`apphub.workload.id:*`:                     {false, false},
+		`NOT apphub.application.id="app"`:          {false, true},
+		`"projects/p" AND apphub.application.id:*`: {true, false},
+	} {
+		match, err := compile(filter)
+		if err != nil {
+			t.Fatalf("%s: %v", filter, err)
+		}
+		if got := [2]bool{match(in), match(out)}; got != want {
+			t.Errorf("%s matches %v; want %v", filter, got, want)
+		}
 	}
 }
