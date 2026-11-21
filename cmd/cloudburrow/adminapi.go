@@ -92,6 +92,8 @@ type adminDeps struct {
 	workflows *workflowsService
 	// parameterManager is Parameter Manager (#2054), nil unless enabled.
 	parameterManager *parameterManagerService
+	// dataform is Dataform (#2105), nil unless enabled.
+	dataform *dataformService
 	// gke is the Kubernetes Engine API (#1913), nil unless enabled.
 	gke *gkeService
 	// monitoring is Cloud Monitoring (#1939), nil unless enabled.
@@ -234,6 +236,9 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 	}
 	if d.parameterManager != nil {
 		api.RegisterResetter(&parameterManagerResetter{svc: d.parameterManager})
+	}
+	if d.dataform != nil {
+		api.RegisterResetter(&dataformResetter{svc: d.dataform})
 	}
 	if d.monitoring != nil {
 		api.RegisterResetter(&monitoringResetter{svc: d.monitoring})

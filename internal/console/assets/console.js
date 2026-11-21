@@ -399,9 +399,15 @@ const ROUTES = [
   // and subscriptions.
   { path: "/bigquery-sharing", service: "bigquery-sharing", icon: "bigquery", title: "Analytics Hub", kind: "Exchange",
     section: "Databases", product: "bigquery", productTitle: "BigQuery" },
-  { path: "/bigquery-dataform", service: null, requires: "bigquery", screen: "unavailable", icon: "bigquery", title: "Dataform",
-    section: "Databases", product: "bigquery", productTitle: "BigQuery",
-    unavailable: "Dataform repositories and workflows are the Dataform API's, which CloudBurrow does not run." },
+  // Dataform (#2105): repositories, their workspaces' editor, releases,
+  // workflow configurations and execution logs, in Google's place.
+  { path: "/bigquery-dataform", service: "dataform", icon: "bigquery", title: "Dataform", kind: "Repository",
+    section: "Databases", product: "bigquery", productTitle: "BigQuery" },
+  // Dataform's folders and team folders, and its project settings (#2094).
+  { path: "/bigquery-dataform-folders", service: "dataform-folders", icon: "bigquery", title: "Dataform folders", kind: "Folder",
+    section: "Databases", product: "bigquery", productTitle: "BigQuery" },
+  { path: "/bigquery-dataform-settings", service: "dataform-settings", icon: "bigquery", title: "Dataform settings", kind: "Configuration",
+    section: "Databases", product: "bigquery", productTitle: "BigQuery" },
   { path: "/bigquery-partner-center", service: null, requires: "bigquery", screen: "unavailable", icon: "bigquery", title: "Partner Center",
     section: "Databases", product: "bigquery", productTitle: "BigQuery",
     unavailable: "Partner Center lists Google Cloud partners' solutions, which a local instance does not hold." },
@@ -19162,12 +19168,12 @@ function diagnoseCard(data) {
 const BQ_STUDIO_STARS = "cloudburrow.bigquery.stars";
 const BQ_STUDIO_TABS = "cloudburrow.bigquery.tabs";
 const BQ_STUDIO_RECENT = "cloudburrow.bigquery.recent";
-const BQ_SAVED_NOTE = "CloudBurrow-only: Google keeps a saved query as a Dataform code asset, which CloudBurrow does not serve. " +
+const BQ_SAVED_NOTE = "CloudBurrow-only: Google keeps a saved query as a Dataform code asset, which Studio does not yet keep in CloudBurrow's Dataform (#2105). " +
   "This one is kept in the instance's state directory, listed under Queries in the Explorer, and reachable by no API.";
 const BQ_UNAVAILABLE_SCHEDULE = "Not available locally: a scheduled query is a BigQuery Data Transfer Service transfer, " +
   "which CloudBurrow does not run.";
 const BQ_UNAVAILABLE_PERMISSIONS = "Not available locally: a saved query's permissions (Code Owner, Code Editor, Code Viewer) " +
-  "are Dataform's IAM, which CloudBurrow does not serve. Copy link shares it with anyone using this instance.";
+  "are Dataform's IAM, which Studio does not yet reach. Copy link shares it with anyone using this instance.";
 
 const bqStudioCall = (call, body = {}) =>
   send(`/api/studio/bigquery?call=${encodeURIComponent(call)}&project=${encodeURIComponent(currentProject())}`,
@@ -19187,8 +19193,8 @@ function bqReadTabs() {
 }
 
 function bqWriteTabs(tabs) {
-  try { sessionStorage.setItem(BQ_STUDIO_TABS, JSON.stringify(tabs.map(({ id, kind, title, query, settings, path, savedId, preview, subtab, viz, pane, selected }) =>
-    ({ id, kind, title, query, settings, path, savedId, preview, subtab, viz, pane, selected })))); } catch { /* not kept */ }
+  try { sessionStorage.setItem(BQ_STUDIO_TABS, JSON.stringify(tabs.map(({ id, kind, title, query, settings, path, savedId, preview, subtab, viz, pane, selected, resourceKind, repo, workspace, file }) =>
+    ({ id, kind, title, query, settings, path, savedId, preview, subtab, viz, pane, selected, resourceKind, repo, workspace, file })))); } catch { /* not kept */ }
 }
 
 // bqRecent are the ten resources most recently opened, newest first, for
@@ -19432,7 +19438,7 @@ function renderBigQueryStudio(view) {
 
   const loadSaved = async () => {
     try {
-      saved = (await bqStudioCall("savedqueries")).queries || [];
+      saved = (await bqSavedCall("savedqueries")).queries || [];
     } catch (err) {
       saved = [];
       notify(`Saved queries: ${err.message}`, "error");
@@ -19477,11 +19483,39 @@ function renderBigQueryStudio(view) {
     select(tab);
   };
   // openSaved opens a saved query in its tab, or the tab it is open in.
-  const openSaved = (sq) => {
-    bqRemember({ kind: "query", savedId: sq.id, title: sq.name });
+  const openSaved = async (sq) => {
+    bqRemember({ kind: sq.kind && sq.kind !== "sql" ? sq.kind : "query", savedId: sq.id, title: sq.name });
     const open = tabs.find((t) => t.savedId === sq.id);
     if (open) return select(open);
-    select(newTab(sq.query, sq.name, { savedId: sq.id }));
+    try { await bqLoadAsset(sq); } catch (err) { notify(err.message, "error"); return; }
+    const kind = sq.kind === "notebook" ? "notebook" : sq.kind === "data_canvas" ? "canvas" : "query";
+    select(newTab(sq.query, sq.name, { savedId: sq.id, kind }));
+  };
+  // openAsset opens a new notebook or data canvas tab (a template, or a
+  // version opened from Version history).
+  const openAsset = (kind, content = "", title = null) => {
+    const k = kind === "notebook" ? "notebook" : "canvas";
+    const n = tabs.filter((t) => t.kind === k && !t.savedId).length + 1;
+    const base = k === "notebook" ? "Untitled notebook" : "Untitled data canvas";
+    select(newTab(content, title || (n === 1 ? base : `${base} ${n}`), { kind: k }));
+  };
+  // openRepoFile opens a workspace file from Source control.
+  const openRepoFile = (repo, workspace, file) => {
+    const open = tabs.find((t) => t.kind === "repofile" && t.repo === repo && t.workspace === workspace && t.file === file);
+    if (open) return select(open);
+    const tab = { id: ++counter, kind: "repofile", title: file.split("/").pop(), repo, workspace, file, pane: active };
+    tabs.push(tab);
+    select(tab);
+  };
+  // reopenClosed is Recent tabs: a closed tab opens again.
+  const reopenClosed = (c) => {
+    writeStored(BQ_STUDIO_CLOSED, bqClosedTabs().filter((x) => x.closed !== c.closed));
+    if (c.kind === "resource") return openResource(c.path, c.resourceKind, true);
+    if (c.kind === "jobs") return openJobs();
+    const tab = { ...c, id: ++counter, pane: active, preview: false };
+    delete tab.closed;
+    tabs.push(tab);
+    select(tab);
   };
   // openResource opens a dataset, table, view, routine or model in a tab:
   // in the preview tab unless keep, as a click in Google's Explorer does.
@@ -19500,7 +19534,16 @@ function renderBigQueryStudio(view) {
     select(tab);
   };
 
+  // bqAssetMenu is a Dataform asset's Version history and Manage
+  // permissions (a CloudBurrow-only record has neither, and says why).
+  const bqAssetMenu = (sq) => sq.dataform ? [
+    { label: "Version history", run: () => bqVersionHistory(sq, (content, title) => (sq.kind === "sql" ? openQuery(content, title) : openAsset(sq.kind, content, title))) },
+    { label: "Manage permissions", run: () => bqManagePermissions(sq) },
+  ] : [{ label: "Manage permissions", disabled: true, title: BQ_UNAVAILABLE_PERMISSIONS, run: () => {} }];
   const drawTree = () => {
+    // The Files and Source control panes draw their own lists in the body.
+    if (pane === "files") return drawFiles();
+    if (pane === "source") return;
     if (!tree) return;
     const stars = bqStars();
     const q = search.value.trim().toLowerCase();
@@ -19557,9 +19600,25 @@ function renderBigQueryStudio(view) {
       node(`${proj}.queries.${sq.id}`, sq.name, "query", 3, [
         { label: "Open", run: () => openSaved(sq) },
         { label: "Copy link", run: () => bqCopy(bqSavedLink(sq.id), "the link to this saved query") },
-        { label: "Manage permissions", disabled: true, title: BQ_UNAVAILABLE_PERMISSIONS, run: () => {} },
+        ...bqAssetMenu(sq),
         { label: "Delete", danger: true, run: () => bqDeleteSaved(sq, async () => { await loadSaved(); drawTree(); }) },
       ], null, "/bigquery-studio?" + new URLSearchParams({ project: proj, savedQuery: sq.id }), () => openSaved(sq)));
+    // Notebooks and Data canvases, Dataform's code assets as Google's
+    // Explorer lists them.
+    const assetNode = (kind, label, empty) => {
+      if (pane === "data" || !bqDataformOn()) return null;
+      const items = BQ_FILES.filter((e) => e.kind === kind).map(bqAssetQuery).filter((sq) => matches(`${proj}.${kind}.${sq.id}`, sq.name));
+      if ((q || onlyStarred) && !items.length) return null;
+      return node(`${proj}.${kind}`, label, "folder", 2, null, items.length ? items.map((sq) => node(`${proj}.${kind}.${sq.id}`, sq.name, "query", 3, [
+        { label: "Open", run: () => openSaved(sq) },
+        { label: "Copy link", run: () => bqCopy(bqSavedLink(sq.id), "the link") },
+        ...bqAssetMenu(sq),
+        { label: "Delete", danger: true, run: () => bqDeleteSaved(sq, async () => { await loadSaved(); drawTree(); }) },
+      ], null, "/bigquery-studio?" + new URLSearchParams({ project: proj, savedQuery: sq.id }), () => openSaved(sq)))
+        : [el("li", { class: "bq-node-empty unavailable", text: empty })]);
+    };
+    const notebooksNode = assetNode("notebook", "Notebooks", "No notebooks. Create one from Home, Create new.");
+    const canvasesNode = assetNode("data_canvas", "Data canvases", "No data canvases. Create one from Home, Create new.");
     // The Data pane lists the data hierarchy only: "Code assets aren't
     // listed in the Data pane" (bigquery-web-ui).
     const queriesNode = pane === "data" ? null : (!q && !onlyStarred) || queryKids.length
@@ -19608,7 +19667,7 @@ function renderBigQueryStudio(view) {
       { label: "Create dataset", run: () => bqCreateDataset(() => loadExplorer()) },
       { label: "Refresh contents", run: () => loadExplorer() },
       { label: "Copy ID", run: () => bqCopy(proj, "ID") },
-    ], [queriesNode, ...dsNodes].filter(Boolean), "/bigquery");
+    ], [queriesNode, notebooksNode, canvasesNode, ...dsNodes].filter(Boolean), "/bigquery");
     setChildren(explorerBody,
       el("ul", { class: "bq-tree", role: "tree", "aria-label": pane === "data" ? "Data" : "Explorer" }, projectNode),
       tree.datasets.length ? null
@@ -19621,8 +19680,9 @@ function renderBigQueryStudio(view) {
   // CloudBurrow saved query is a record of its own (above), with no folder.
   const drawFiles = () => {
     const proj = tree ? tree.project : project;
+    if (bqDataformOn()) return drawDataformFiles(proj);
     setChildren(explorerBody,
-      el("p", { class: "unavailable bq-files-note", text: BQ_SAVED_NOTE + " Folders and notebooks are Dataform's, which is not served." }),
+      el("p", { class: "unavailable bq-files-note", text: BQ_SAVED_NOTE + " Folders, notebooks and data canvases are Dataform's, which this instance does not serve." }),
       saved.length
         ? el("ul", { class: "bq-files", "aria-label": "Saved queries" }, ...saved.map((sq) => el("li", { class: "bq-node-row" },
             el("a", { class: "bq-node-name", href: "/bigquery-studio?" + new URLSearchParams({ project: proj, savedQuery: sq.id }),
@@ -19633,6 +19693,133 @@ function renderBigQueryStudio(view) {
               { label: "Delete", danger: true, run: () => bqDeleteSaved(sq, async () => { await loadSaved(); drawPane(); }) },
             ]))))
         : el("p", { class: "unavailable", text: "No saved queries. Save a query from its tab." }));
+  };
+
+  // drawDataformFiles is the Files pane over Dataform: the user's root
+  // folder, its folders and team folders, and the saved queries, notebooks
+  // and data canvases in each, with Create folder and each item's View
+  // actions (Open, Rename, Move to folder, Version history, Manage
+  // permissions, Delete).
+  const filesOpen = new Set([""]);
+  const drawDataformFiles = (proj) => {
+    const folders = BQ_FILES.filter((e) => e.kind === "folder" || e.kind === "teamfolder");
+    const refresh = async () => { await loadSaved(); drawFiles(); };
+    const createFolder = async (parent, location) => {
+      const v = await bqAssetDialog("Create folder", { withRegion: !parent });
+      if (!v) return;
+      try { await bqDfCall("createfolder", { displayName: v.name, location: location || v.region, parent }); notify(`Created folder ${v.name}`); await refresh(); } catch (err) { notify(err.message, "error"); }
+    };
+    const rename = async (e) => {
+      const v = await bqAssetDialog(`Rename ${e.displayName}`, { name: e.displayName, withRegion: false });
+      if (!v) return;
+      try { await bqDfCall("rename", { name: e.name, displayName: v.name }); await refresh(); } catch (err) { notify(err.message, "error"); }
+    };
+    const move = async (e) => {
+      const targets = folders.filter((f) => f.location === e.location);
+      const { dialog, close } = openModal({ labelledBy: "bq-move-title" });
+      const pick = el("select", { id: "bq-move-folder" }, el("option", { value: "", text: "Your root folder" }),
+        ...targets.map((f) => el("option", { value: f.name, text: f.displayName })));
+      pick.value = e.parent || "";
+      dialog.append(el("form", { class: "modal-body", onsubmit: async (ev) => {
+        ev.preventDefault();
+        try { await bqDfCall("move", { name: e.name, parent: pick.value }); close(); await refresh(); } catch (err) { notify(err.message, "error"); }
+      } }, el("h2", { id: "bq-move-title", text: `Move ${e.displayName}` }),
+        el("label", { for: "bq-move-folder", text: "Folder" }), pick,
+        el("p", { class: "form-help", text: `A folder of the same region, ${e.location}.` }),
+        el("div", { class: "modal-actions" }, el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }),
+          el("button", { type: "submit", class: "primary", text: "Move" }))));
+      pick.focus();
+    };
+    const row = (e, level) => {
+      const isFolder = e.kind === "folder" || e.kind === "teamfolder";
+      const kids = isFolder ? BQ_FILES.filter((x) => x.parent === e.name) : null;
+      const open = isFolder && filesOpen.has(e.name);
+      const sq = isFolder ? null : bqAssetQuery(e);
+      const items = isFolder ? [
+        { label: "Create folder", run: () => createFolder(e.name, e.location) },
+        e.kind === "folder" ? { label: "Rename", run: () => rename(e) } : null,
+        { label: "Manage permissions", run: () => bqManagePermissions({ id: e.name, name: e.displayName }) },
+        { label: "Delete", danger: true, run: async () => {
+          await confirmDestructive({ title: "Delete folder?", detail: e.displayName, confirmWord: e.displayName,
+            consequence: "Everything in it is deleted with it. This cannot be undone.", onConfirm: () => bqDfCall("deletefolder", { name: e.name }) });
+          await refresh();
+        } },
+      ].filter(Boolean) : [
+        { label: "Open", run: () => openSaved(sq) },
+        { label: "Rename", run: () => rename(e) },
+        { label: "Move to folder", run: () => move(e) },
+        { label: "Copy link", run: () => bqCopy(bqSavedLink(e.name), "the link") },
+        ...bqAssetMenu(sq),
+        { label: "Delete", danger: true, run: () => bqDeleteSaved(sq, refresh) },
+      ];
+      const label = isFolder ? e.displayName : e.displayName;
+      return el("li", { role: "treeitem", "aria-level": String(level), "aria-expanded": isFolder ? String(open) : null, class: "bq-node bq-file-" + e.kind, "data-file": e.name },
+        el("div", { class: "bq-node-row", style: `padding-left:${(level - 1) * 16}px` },
+          isFolder ? el("button", { type: "button", class: "icon-button bq-twisty", "aria-label": (open ? "Collapse " : "Expand ") + label,
+            html: open ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>' : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>',
+            onclick: () => { if (open) filesOpen.delete(e.name); else filesOpen.add(e.name); drawFiles(); } }) : el("span", { class: "bq-twisty-space" }),
+          isFolder ? el("span", { class: "bq-node-name", text: label })
+            : el("a", { class: "bq-node-name", href: "/bigquery-studio?" + new URLSearchParams({ project: proj, savedQuery: e.name }), text: label,
+                onclick: (ev) => { if (ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey) return; ev.preventDefault(); openSaved(sq); } }),
+          el("span", { class: "unavailable bq-file-kind", text: " " + (e.kind === "teamfolder" ? "team folder" : e.kind === "folder" ? "" : BQ_ASSET_KIND[e.kind]) }),
+          bqMenu(`View actions for ${label}`, items)),
+        open && kids.length ? el("ul", { role: "group" }, ...kids.map((k) => row(k, level + 1))) : null);
+    };
+    const roots = BQ_FILES.filter((e) => !e.parent);
+    setChildren(explorerBody,
+      el("div", { class: "bq-files-tools" },
+        el("button", { type: "button", class: "secondary", text: "+ Create folder", onclick: () => createFolder("", "") }),
+        el("button", { type: "button", class: "secondary", text: "Refresh", onclick: () => refresh() })),
+      el("p", { class: "unavailable bq-files-note", text: BQ_DATAFORM_NOTE }),
+      el("ul", { class: "bq-tree bq-files", role: "tree", "aria-label": "Files" },
+        el("li", { role: "treeitem", "aria-level": "1", "aria-expanded": "true", class: "bq-node" },
+          el("div", { class: "bq-node-row" }, el("span", { class: "bq-node-name", text: proj })),
+          roots.length ? el("ul", { role: "group" }, ...roots.map((e) => row(e, 2)))
+            : el("p", { class: "unavailable", text: "No folders or code assets yet. Save a query, notebook or data canvas." }))));
+  };
+
+  // drawSource is Source control: the project's Dataform repositories,
+  // each workspace and its files, a file opening in a tab.
+  const sourceOpen = new Set();
+  const drawSource = async (host) => {
+    if (!bqDataformOn()) {
+      setChildren(host, el("p", { class: "unavailable", text: "Not available locally: Source control keeps code in Dataform repositories, and this instance does not serve Dataform." }));
+      return;
+    }
+    setChildren(host, spinner("Loading repositories"));
+    try {
+      const { repositories } = await bqDfCall("repositories");
+      const files = {};
+      const draw = () => setChildren(host,
+        el("p", { class: "unavailable", text: "Dataform repositories of this project. Create one, its workspaces, commits and pushes on BigQuery's Dataform page." }),
+        el("a", { class: "button secondary", href: "/bigquery-dataform" + scopeSearch(), text: "Open Dataform" }),
+        repositories.length ? el("ul", { class: "bq-tree", role: "tree", "aria-label": "Repositories" }, ...repositories.map((r) => {
+          const id = r.name.split("/").pop();
+          return el("li", { role: "treeitem", "aria-level": "1", "aria-expanded": "true", class: "bq-node" },
+            el("div", { class: "bq-node-row" }, el("span", { class: "bq-node-name", text: id }), el("span", { class: "unavailable", text: ` ${r.location}${r.remote ? " · " + r.remote : ""}` })),
+            el("ul", { role: "group" }, ...(r.workspaces.length ? r.workspaces.map((w) => {
+              const key = r.name + "|" + w;
+              const open = sourceOpen.has(key);
+              return el("li", { role: "treeitem", "aria-level": "2", "aria-expanded": String(open), class: "bq-node" },
+                el("div", { class: "bq-node-row", style: "padding-left:16px" },
+                  el("button", { type: "button", class: "icon-button bq-twisty", "aria-label": (open ? "Collapse " : "Expand ") + w,
+                    html: open ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>' : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>',
+                    onclick: async () => {
+                      if (open) { sourceOpen.delete(key); draw(); return; }
+                      sourceOpen.add(key);
+                      try { files[key] = (await bqDfCall("repofiles", { name: r.name, workspace: w })).files; } catch (err) { notify(err.message, "error"); files[key] = []; }
+                      draw();
+                    } }),
+                  el("span", { class: "bq-node-name", text: w })),
+                open ? el("ul", { role: "group" }, ...(files[key] || []).map((f) => el("li", { role: "treeitem", "aria-level": "3", class: "bq-node" },
+                  el("div", { class: "bq-node-row", style: "padding-left:32px" },
+                    el("button", { type: "button", class: "link-button bq-node-name", text: f, onclick: () => openRepoFile(r.name, w, f) }))))) : null);
+            }) : [el("li", { class: "bq-node-empty unavailable", text: "No development workspaces." })])));
+        })) : el("p", { class: "unavailable", text: "No Dataform repositories in this project." }));
+      draw();
+    } catch (err) {
+      setChildren(host, el("p", { class: "form-error", role: "alert", text: err.message }));
+    }
   };
 
   // drawPane draws the left pane's chosen tab, in Google's order:
@@ -19663,9 +19850,9 @@ function renderBigQueryStudio(view) {
                          onclick: () => bqCreateDataset(() => loadExplorer()) })
         : null);
     if (pane === "source") {
-      setChildren(paneHost, head, el("p", { class: "unavailable", text:
-        "Not available locally: Source control keeps code assets in a Git repository through Dataform, which CloudBurrow does not serve. " +
-        "Saved queries are listed under Files." }));
+      const host = el("div", { class: "bq-source" });
+      setChildren(paneHost, head, host);
+      drawSource(host);
       return;
     }
     if (pane === "files") {
@@ -19685,6 +19872,7 @@ function renderBigQueryStudio(view) {
   starredOnly.addEventListener("change", drawTree);
 
   const closeTab = (t) => {
+    bqRememberClosed(t);
     const side = t.pane;
     tabs.splice(tabs.indexOf(t), 1);
     if (!tabs.length) { active = "left"; openHome(); return; }
@@ -19786,13 +19974,21 @@ function renderBigQueryStudio(view) {
         onclick: () => closeTab(t),
       }))),
       el("button", { type: "button", class: "secondary bq-new-query", text: "SQL query",
-        "aria-label": "SQL query: open a new query tab", onclick: () => { active = side; openQuery(""); } }));
+        "aria-label": "SQL query: open a new query tab", onclick: () => { active = side; openQuery(""); } }),
+      (() => {
+        const closed = bqClosedTabs();
+        const m = bqMenu("Recent tabs", closed.length ? closed.map((c) => ({ label: `${c.title}`, title: `Closed ${c.closed}`, run: () => { active = side; reopenClosed(c); } }))
+          : [{ label: "No recently closed tabs", disabled: true, run: () => {} }]);
+        bqMenuButton(m, "Recent tabs", "Recent tabs: reopen a closed tab");
+        m.classList.add("bq-recent-tabs");
+        return m;
+      })());
     if (!current) { setChildren(panel); return; }
     panel.setAttribute("aria-labelledby", `bq-tab-${current.id}`);
     const kind = current.kind || "query";
     if (kind === "home") {
       setChildren(panel, bqHomeTab({
-        tree: () => tree, openQuery, openResource, openSaved, saved: () => saved,
+        tree: () => tree, openQuery, openResource, openSaved, saved: () => saved, openAsset,
         createDataset: () => bqCreateDataset(() => loadExplorer()),
         createTable: (ds) => bqDetailAction([ds], "createtable", loadExplorer, true),
         loadFile: (ds) => bqDetailAction([ds], "loadfile", loadExplorer, true),
@@ -19800,6 +19996,12 @@ function renderBigQueryStudio(view) {
     } else if (kind === "jobs") {
       setChildren(panel, history);
       drawHistory();
+    } else if (kind === "notebook" || kind === "canvas") {
+      const assetCtx = { save: () => bqWriteTabs(tabs), tree: () => tree, openAsset,
+        onSaved: async () => { await loadSaved(); if (pane === "files") drawFiles(); else drawTree(); drawTabs(); } };
+      setChildren(panel, kind === "notebook" ? bqNotebookTab(current, assetCtx) : bqCanvasTab(current, assetCtx));
+    } else if (kind === "repofile") {
+      setChildren(panel, bqRepoFileTab(current));
     } else if (kind === "resource") {
       const host = el("div", { class: "bq-resource-tab", "data-embedded": "true" });
       if (current.subtab) host.dataset.tab = current.subtab;
@@ -19809,7 +20011,7 @@ function renderBigQueryStudio(view) {
       renderDetail(host, ROUTES.find((r) => r.path === "/bigquery"), current.path);
     } else {
       setChildren(panel, bqQueryTab(current, {
-        save: () => bqWriteTabs(tabs),
+        save: () => bqWriteTabs(tabs), openQuery,
         onRan: () => {},
         saved: () => saved,
         onSaved: async (sq) => {
@@ -19866,7 +20068,8 @@ function renderBigQueryStudio(view) {
   loadExplorer().then(() => {
     // A link to a saved query (Copy link) opens it once the list is read.
     if (linkedSaved) {
-      const sq = saved.find((x) => x.id === linkedSaved);
+      const asset = BQ_FILES.find((e) => e.name === linkedSaved && BQ_ASSET_KIND[e.kind]);
+      const sq = saved.find((x) => x.id === linkedSaved) || (asset ? bqAssetQuery(asset) : null);
       if (sq) openSaved(sq);
       else notify(`No saved query ${linkedSaved} in ${project}`, "error");
     }
@@ -19886,7 +20089,7 @@ function bqSavedLink(id) {
 async function bqDeleteSaved(sq, onDone) {
   await confirmDestructive({
     title: "Delete saved query?", detail: sq.name, confirmWord: sq.name,
-    onConfirm: () => bqStudioCall("deletequery", { id: sq.id }),
+    onConfirm: () => bqSavedCall("deletequery", { id: sq.id }),
   });
   onDone();
 }
@@ -19900,7 +20103,8 @@ function bqHomeTab(ctx) {
     type: "button", class: "secondary bq-home-action", text: label, disabled: why ? true : null,
     title: why, "aria-description": why, onclick: why ? null : run,
   });
-  const notebook = "Not available locally: notebooks are Colab Enterprise's, which CloudBurrow does not run.";
+  const notebook = bqDataformOn() ? null : BQ_NO_DATAFORM;
+  const spark = "Not available locally: an Apache Spark notebook runs on Serverless for Apache Spark, which CloudBurrow does not run.";
   // A dataset chooser for Create new's Table and Add your own data's
   // Load from a file, which act on a dataset.
   // The datasets arrive with the Explorer, after the tab is drawn: refresh
@@ -19930,17 +20134,17 @@ function bqHomeTab(ctx) {
   const home = el("div", { class: "bq-home" },
     el("h2", { class: "bq-home-title", text: "Welcome to BigQuery Studio" }),
     card("Check out what's new in Studio",
-      el("p", { class: "unavailable", text: "Not available locally: Google's list of new Studio features is not shipped with CloudBurrow. " +
-        "This Studio has the Explorer, SQL query tabs with Query settings, saved queries, query results with a Visualization, " +
-        "resource tabs and job history." })),
+      el("ul", { class: "bq-home-whatsnew" }, ...BQ_WHATS_NEW.map(([title, text]) => el("li", {}, el("strong", { text: title + ": " }), el("span", { text })))),
+      el("p", {}, el("a", { href: "https://docs.cloud.google.com/bigquery/docs/release-notes", target: "_blank", rel: "noopener", text: "BigQuery release notes" }),
+        el("span", { class: "unavailable", text: " (Google's list; this one is what this Studio serves)." }))),
     card("Create new",
       el("div", { class: "bq-home-actions" },
         action("SQL query", () => ctx.openQuery("")),
-        action("Notebook", null, notebook),
-        action("Apache Spark notebook", null, notebook),
-        action("Data canvas", null, "Not available locally: data canvas is a Gemini in BigQuery feature, which CloudBurrow does not run."),
-        action("Data preparation", null, "Not available locally: data preparation files are Dataform's, which CloudBurrow does not serve."),
-        action("Pipeline", null, "Not available locally: pipelines are Dataform's, which CloudBurrow does not serve."),
+        action("Notebook", () => ctx.openAsset("notebook", bqNotebookDoc([])), notebook),
+        action("Apache Spark notebook", null, spark),
+        action("Data canvas", () => ctx.openAsset("data_canvas", ""), notebook),
+        action("Data preparation", null, "Not available locally: data preparation files are Dataform's, which CloudBurrow's Dataform does not run."),
+        action("Pipeline", null, "Not available locally: pipelines are Dataform's, which Studio does not yet reach (#2105)."),
         tableButton),
       dsLabel),
     card("Recent",
@@ -19948,15 +20152,19 @@ function bqHomeTab(ctx) {
         ? el("ul", { class: "bq-home-recent" }, ...recent.map((r) => el("li", {},
             el("button", { type: "button", class: "link-button", text: r.title, onclick: () => {
               if (r.path) return ctx.openResource(r.path, r.kind);
-              const sq = ctx.saved().find((x) => x.id === r.savedId);
+              const asset = BQ_FILES.find((e) => e.name === r.savedId && BQ_ASSET_KIND[e.kind]);
+              const sq = ctx.saved().find((x) => x.id === r.savedId) || (asset ? bqAssetQuery(asset) : null);
               if (sq) ctx.openSaved(sq); else notify(`The saved query ${r.title} is gone`, "error");
             } }),
-            el("span", { class: "unavailable", text: " " + (r.kind === "query" ? "saved query" : r.kind) }))))
+            el("span", { class: "unavailable", text: " " + (r.kind === "query" ? "saved query" : BQ_ASSET_KIND[r.kind] || r.kind) }))))
         : el("p", { class: "unavailable", text: "The tables, saved queries, models and routines you open are listed here." })),
     card("Try with templates",
       el("ul", { class: "bq-home-templates" }, ...templates.map(([title, sql]) => el("li", {},
         el("button", { type: "button", class: "link-button", text: title, onclick: () => ctx.openQuery(sql, title) })))),
-      el("p", { class: "unavailable", text: "Google's templates over its public datasets are not available locally; these run against this instance." })),
+      el("ul", { class: "bq-home-templates" }, ...BQ_NOTEBOOK_TEMPLATES.slice(1).map(([title, cells]) => el("li", {},
+        el("button", { type: "button", class: "link-button", text: `Notebook: ${title}`, disabled: notebook ? true : null, title: notebook,
+          onclick: () => ctx.openAsset("notebook", bqNotebookDoc(cells), title) })))),
+      el("p", { class: "unavailable", text: "Google's templates query bigquery-public-data, which a local instance does not hold; these query this instance's own data." })),
     card("Add your own data",
       el("div", { class: "bq-home-actions" },
         action("Create dataset", () => ctx.createDataset()),
@@ -19965,6 +20173,588 @@ function bqHomeTab(ctx) {
   home.bqRefresh = refresh;
   return home;
 }
+
+// --- BigQuery Studio's code assets over Dataform (#2094) ------------------
+//
+// With Dataform served, Studio keeps saved queries, notebooks and data
+// canvases as Google does: each a Dataform repository labelled
+// single-file-asset-type, in Dataform folders and team folders, every save
+// a commit (Version history), shared through the repository's IAM policy
+// with Code Owner, Code Editor and Code Viewer
+// (https://docs.cloud.google.com/bigquery/docs/work-with-saved-queries,
+// https://docs.cloud.google.com/dataform/docs/manage-repository). The calls
+// are POST /api/studio/dataform (cmd/cloudburrow/consolebigqueryassets.go).
+// Without Dataform, saved queries are the CloudBurrow-only record above and
+// notebooks and canvases say Dataform is needed, as Google's Studio needs
+// the Dataform API.
+
+const BQ_DATAFORM_NOTE = "Kept in this instance's Dataform as a code asset: a repository labelled single-file-asset-type, as Google keeps it, " +
+  "with its Version history and permissions.";
+const BQ_NO_DATAFORM = "Saving notebooks and data canvases needs the Dataform API, which this instance does not serve " +
+  "(start it with --services including dataform).";
+const BQ_NO_RUNTIME = "Not available locally: Python runs on a Colab Enterprise runtime, which CloudBurrow does not serve. " +
+  "SQL cells (%%bigquery) run against this instance's BigQuery.";
+const BQ_ASSET_KIND = { sql: "saved query", notebook: "notebook", data_canvas: "data canvas" };
+const BQ_STUDIO_CLOSED = "cloudburrow.bigquery.closed";
+
+const bqDataformOn = () => !!capabilityOf("dataform").id;
+const bqSavedNote = () => (bqDataformOn() ? BQ_DATAFORM_NOTE : BQ_SAVED_NOTE);
+const bqDfCall = (call, body = {}) =>
+  send(`/api/studio/dataform?call=${encodeURIComponent(call)}&project=${encodeURIComponent(currentProject())}`, "POST", body);
+
+// bqAssetQuery is a Dataform code asset as the saved-query code reads one.
+const bqAssetQuery = (e) => ({ id: e.name, name: e.displayName, kind: e.kind, parent: e.parent || "",
+  location: e.location, dataform: true, query: e.content });
+
+// BQ_FILES is the last Files listing (folders, team folders, assets).
+let BQ_FILES = [];
+
+// bqSavedCall is the saved-query calls, in Dataform when it is served (the
+// CloudBurrow-only records are moved into it the first time Studio lists
+// them), in the instance's record otherwise.
+async function bqSavedCall(call, body = {}) {
+  if (!bqDataformOn()) return bqStudioCall(call, body);
+  if (call === "savedqueries") {
+    try {
+      const legacy = (await bqStudioCall("savedqueries")).queries || [];
+      for (const q of legacy) {
+        await bqDfCall("save", { kind: "sql", displayName: q.name, location: q.region || "", content: q.query });
+        await bqStudioCall("deletequery", { id: q.id });
+      }
+    } catch { /* the record is optional */ }
+    const files = await bqDfCall("files");
+    BQ_FILES = files.entries || [];
+    return { queries: BQ_FILES.filter((e) => e.kind === "sql").map(bqAssetQuery) };
+  }
+  if (call === "savequery") {
+    const out = await bqDfCall("save", { name: body.id || "", kind: "sql", displayName: body.name,
+      location: body.region || "", parent: body.parent || "", content: body.query });
+    return bqAssetQuery({ ...out, content: body.query });
+  }
+  if (call === "deletequery") return bqDfCall("delete", { name: body.id });
+  return bqStudioCall(call, body);
+}
+
+// bqLoadAsset fills a Dataform asset's content before it opens.
+async function bqLoadAsset(sq) {
+  if (!sq.dataform || sq.query !== undefined) return sq;
+  const a = await bqDfCall("read", { name: sq.id });
+  sq.query = a.content;
+  return sq;
+}
+
+// bqVersionHistory is Version history: the asset's versions, newest
+// first, each with View actions > Open as new query (or notebook, canvas).
+async function bqVersionHistory(sq, openVersion) {
+  const { dialog, close } = openModal({ labelledBy: "bq-history-title" });
+  const body = el("div", { class: "bq-version-list" }, spinner("Loading version history"));
+  dialog.append(el("div", { class: "modal-body is-wide" },
+    el("h2", { id: "bq-history-title", text: `Version history: ${sq.name}` }), body,
+    el("div", { class: "modal-actions" }, el("button", { type: "button", class: "secondary", text: "Close", onclick: () => close() }))));
+  try {
+    const { versions } = await bqDfCall("history", { name: sq.id });
+    setChildren(body, el("table", { class: "bq-history-table" },
+      el("thead", {}, el("tr", {}, ...["Version", "Saved", "By", ""].map((h) => el("th", { scope: "col", text: h })))),
+      el("tbody", {}, ...versions.map((v, i) => el("tr", {},
+        el("td", { class: "mono", text: `${versions.length - i} (${v.commit.slice(0, 7)})` }), el("td", { text: v.time }), el("td", { text: v.author }),
+        el("td", {}, bqMenu(`View actions for version ${versions.length - i}`, [
+          { label: sq.kind === "sql" ? "Open as new query" : `Open as new ${BQ_ASSET_KIND[sq.kind]}`, run: async () => {
+            try {
+              const a = await bqDfCall("read", { name: sq.id, commit: v.commit });
+              close();
+              openVersion(a.content, `${sq.name} (version ${versions.length - i})`);
+            } catch (err) { notify(err.message, "error"); }
+          } },
+        ])))))));
+  } catch (err) {
+    setChildren(body, el("p", { class: "form-error", role: "alert", text: err.message }));
+  }
+}
+
+// bqManagePermissions is Share > Manage permissions: Add user/group with
+// New principals and a Role (Code Owner, Code Editor, Code Viewer), and
+// each principal's removal, on the asset's repository's IAM policy.
+async function bqManagePermissions(sq) {
+  const { dialog, close } = openModal({ labelledBy: "bq-perm-title" });
+  const list = el("div", { class: "bq-perm-list" }, spinner("Loading permissions"));
+  const who = el("input", { type: "text", id: "bq-perm-member", placeholder: "user:ana@example.com" });
+  const role = el("select", { id: "bq-perm-role" }, ...[["roles/dataform.codeOwner", "Code Owner"], ["roles/dataform.codeEditor", "Code Editor"],
+    ["roles/dataform.codeViewer", "Code Viewer"]].map(([v, t]) => el("option", { value: v, text: t })));
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  const draw = (pol) => setChildren(list,
+    el("p", { class: "unavailable", text: pol.note }),
+    pol.bindings.length ? el("table", { class: "bq-history-table" },
+      el("thead", {}, el("tr", {}, ...["Principal", "Role", ""].map((h) => el("th", { scope: "col", text: h })))),
+      el("tbody", {}, ...pol.bindings.flatMap((b) => b.members.map((m) => el("tr", {},
+        el("td", { text: m }), el("td", { text: b.title }),
+        el("td", {}, el("button", { type: "button", class: "secondary", text: "Remove", "aria-label": `Remove ${m} from ${b.title}`,
+          onclick: async () => { try { draw(await bqDfCall("revoke", { name: sq.id, role: b.role, member: m })); } catch (err) { notify(err.message, "error"); } } })))))))
+      : el("p", { text: "No principals have a role on it yet." }));
+  const add = el("button", { type: "submit", class: "primary", text: "Save" });
+  dialog.append(el("form", { class: "modal-body", novalidate: true, onsubmit: async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    setBusy(add, true);
+    try {
+      draw(await bqDfCall("grant", { name: sq.id, role: role.value, member: who.value }));
+      who.value = "";
+      announce("Access granted");
+    } catch (err) {
+      error.textContent = err.message;
+      error.hidden = false;
+    } finally { setBusy(add, false); }
+  } },
+    el("h2", { id: "bq-perm-title", text: `Manage permissions: ${sq.name}` }),
+    list,
+    el("h3", { text: "Add user/group" }), error,
+    el("label", { for: "bq-perm-member", text: "New principals" }), who,
+    el("label", { for: "bq-perm-role", text: "Role" }), role,
+    el("p", { class: "form-help", text: "To run it, a principal also needs BigQuery User (roles/bigquery.user) on the project." }),
+    el("div", { class: "modal-actions" }, el("button", { type: "button", class: "secondary", text: "Close", onclick: () => close() }), add)));
+  try { draw(await bqDfCall("getiam", { name: sq.id })); } catch (err) { setChildren(list, el("p", { class: "form-error", role: "alert", text: err.message })); }
+}
+
+// bqAssetDialog asks for a code asset's name (and, new, its region and
+// folder) and settles with the values, or null when cancelled.
+function bqAssetDialog(title, { name = "", withRegion = true, folders = [] } = {}) {
+  return new Promise((settle) => {
+    let result = null;
+    const { dialog, close } = openModal({ labelledBy: "bq-asset-title" });
+    const input = el("input", { type: "text", id: "bq-asset-name", value: name, required: true, maxlength: "256" });
+    const region = el("select", { id: "bq-asset-region" }, ...["us-central1", ...BQ_LOCATIONS.filter((l) => l !== "us-central1" && l === l.toLowerCase())]
+      .map((r) => el("option", { value: r, text: r })));
+    const folder = el("select", { id: "bq-asset-folder" }, el("option", { value: "", text: "Your root folder" }),
+      ...folders.map((f) => el("option", { value: f.name, text: `${f.displayName} (${f.location})` })));
+    const error = el("p", { class: "form-error", role: "alert", hidden: true });
+    dialog.append(el("form", { class: "modal-body", novalidate: true, onsubmit: (e) => {
+      e.preventDefault();
+      if (!input.value.trim()) { error.textContent = "A name is required."; error.hidden = false; return; }
+      const f = folders.find((x) => x.name === folder.value);
+      result = { name: input.value.trim(), region: f ? f.location : region.value, parent: folder.value };
+      close();
+    } },
+      el("h2", { id: "bq-asset-title", text: title }), error,
+      el("label", { for: "bq-asset-name", text: "Name" }), input,
+      withRegion ? el("label", { for: "bq-asset-region", text: "Region" }) : null, withRegion ? region : null,
+      withRegion && folders.length ? el("label", { for: "bq-asset-folder", text: "Folder" }) : null, withRegion && folders.length ? folder : null,
+      el("div", { class: "modal-actions" },
+        el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }),
+        el("button", { type: "submit", class: "primary", text: "Save" }))));
+    dialog.addEventListener("cb-closed", () => settle(result));
+    input.focus();
+  });
+}
+
+// bqSaveAsset saves a notebook's or canvas's content: a new asset after
+// the name dialog, or a new version of the tab's.
+async function bqSaveAsset(tab, kind, content, onSaved) {
+  if (!bqDataformOn()) { notify(BQ_NO_DATAFORM, "error"); return null; }
+  try {
+    let body = { name: tab.savedId || "", kind, content };
+    if (!tab.savedId) {
+      const v = await bqAssetDialog(`Save ${BQ_ASSET_KIND[kind]}`, { name: tab.title.startsWith("Untitled") ? "" : tab.title,
+        folders: BQ_FILES.filter((e) => e.kind === "folder" || e.kind === "teamfolder") });
+      if (!v) return null;
+      body = { ...body, displayName: v.name, location: v.region, parent: v.parent };
+    }
+    const out = await bqDfCall("save", body);
+    tab.savedId = out.name;
+    tab.title = out.displayName;
+    notify(`Saved ${out.displayName}`);
+    if (onSaved) await onSaved(bqAssetQuery({ ...out, content }));
+    return out;
+  } catch (err) {
+    notify(`Save failed: ${err.message}`, "error");
+    return null;
+  }
+}
+
+// bqLocalModel asks the instance's local model (the Agent Studio relay,
+// /api/ai/playground) for a one-shot answer. Data canvas's natural
+// language steps use it; Google's use Gemini in BigQuery, which
+// CloudBurrow does not run, so these answers are the local model's.
+async function bqLocalModel(prompt) {
+  if (!capabilityOf("playground").id) {
+    throw new Error("Natural language needs this instance's local model, which is not configured (Gemini in BigQuery is not run locally).");
+  }
+  const res = await send("/api/ai/playground", "POST", { prompt, stream: false });
+  const parts = (((res.candidates || [])[0] || {}).content || {}).parts || [];
+  return parts.map((p) => p.text || "").join("").trim();
+}
+
+// bqSqlOf takes the SQL out of a model's answer (a fenced block or the
+// whole text).
+function bqSqlOf(text) {
+  const m = /```(?:sql)?\s*([\s\S]*?)```/i.exec(text);
+  return (m ? m[1] : text).trim();
+}
+
+// bqSchemaText is a table list for a prompt: each table and its columns.
+function bqSchemaText(tables) {
+  return tables.map((t) => `${t.ref}(${(t.schema || []).map((f) => `${f.name} ${f.type}`).join(", ")})`).join("\n");
+}
+
+// --- Notebooks -------------------------------------------------------------
+//
+// A notebook tab, as Google's Colab Enterprise notebook in Studio draws it:
+// Connect, + Code and + Text, Run all, Save and Version history over cells.
+// Kept as an .ipynb document in its Dataform asset. A code cell that starts
+// with %%bigquery is a SQL cell and runs against this instance's BigQuery
+// (its rows below it); any other code cell is Python, which needs a Colab
+// Enterprise runtime CloudBurrow does not serve, so it is kept and shown,
+// not run.
+
+const BQ_NOTEBOOK_TEMPLATES = [
+  ["Empty notebook", []],
+  ["BigQuery template", [
+    ["markdown", "# Explore a table\nRun the SQL cells against this instance's BigQuery. Python cells need a Colab Enterprise runtime."],
+    ["code", "%%bigquery\nSELECT table_schema, table_name, table_type\nFROM `region-us`.INFORMATION_SCHEMA.TABLES\nORDER BY table_schema, table_name"],
+    ["code", "%%bigquery\nSELECT CURRENT_DATE() AS today, SESSION_USER() AS user"],
+  ]],
+];
+
+function bqNotebookDoc(cells) {
+  return JSON.stringify({ nbformat: 4, nbformat_minor: 5, metadata: { kernelspec: { name: "python3", display_name: "Python 3" } },
+    cells: cells.map(([cell_type, source]) => ({ cell_type, source, metadata: {}, ...(cell_type === "code" ? { outputs: [], execution_count: null } : {}) })) }, null, 1);
+}
+
+function bqNotebookTab(tab, ctx) {
+  let doc;
+  try { doc = JSON.parse(tab.query || ""); } catch { doc = JSON.parse(bqNotebookDoc([])); }
+  if (!Array.isArray(doc.cells)) doc.cells = [];
+  const text = (c) => (Array.isArray(c.source) ? c.source.join("") : String(c.source || ""));
+  const keep = () => { tab.query = JSON.stringify(doc, null, 1); ctx.save(); };
+  const cellsHost = el("ol", { class: "bq-nb-cells", "aria-label": "Cells" });
+  const isSql = (c) => c.cell_type === "code" && /^\s*%%bigquery\b/.test(text(c));
+  const runCell = async (c, out) => {
+    if (c.cell_type !== "code") return;
+    if (!isSql(c)) { setChildren(out, el("p", { class: "unavailable", text: BQ_NO_RUNTIME })); return; }
+    const sql = text(c).replace(/^\s*%%bigquery[^\n]*\n?/, "");
+    setChildren(out, spinner("Running cell"));
+    try {
+      const res = await bqStudioCall("query", { query: sql, legacySql: false, priority: "INTERACTIVE" });
+      if (res.confirm) { setChildren(out, el("p", { class: "unavailable", text: "A statement that changes data runs from a SQL query tab, which asks first." })); return; }
+      const cols = (res.schema || []).map((f) => f.name);
+      setChildren(out, el("p", { class: "unavailable", text: `${res.totalRows} rows` }),
+        el("div", { class: "table-scroll" }, el("table", { class: "bq-nb-table" },
+          el("thead", {}, el("tr", {}, ...cols.map((h) => el("th", { scope: "col", text: h })))),
+          el("tbody", {}, ...(res.rows || []).slice(0, 100).map((r) => el("tr", {}, ...cols.map((k) => el("td", { text: cellText(r[k]) }))))))));
+      c.outputs = [{ output_type: "execute_result", data: { "text/plain": `${res.totalRows} rows` }, metadata: {}, execution_count: null }];
+      keep();
+    } catch (err) {
+      setChildren(out, el("p", { class: "form-error", role: "alert", text: err.message }));
+    }
+  };
+  const draw = () => setChildren(cellsHost, ...doc.cells.map((c, i) => {
+    const area = el("textarea", { class: "query-editor mono bq-nb-source", rows: String(Math.max(3, text(c).split("\n").length)),
+      spellcheck: "false", "aria-label": `Cell ${i + 1}, ${c.cell_type === "markdown" ? "text" : isSql(c) ? "SQL" : "Python"}` });
+    area.value = text(c);
+    const out = el("div", { class: "bq-nb-output", role: "status" });
+    area.addEventListener("input", () => { c.source = area.value; keep(); });
+    return el("li", { class: "bq-nb-cell bq-nb-" + c.cell_type },
+      el("div", { class: "bq-nb-cell-bar" },
+        el("span", { class: "unavailable", text: c.cell_type === "markdown" ? "Text" : isSql(c) ? "SQL (%%bigquery)" : "Python" }),
+        c.cell_type === "code" ? el("button", { type: "button", class: "secondary", text: "Run cell", "aria-label": `Run cell ${i + 1}`, onclick: () => runCell(c, out) }) : null,
+        el("button", { type: "button", class: "secondary", text: "Delete cell", "aria-label": `Delete cell ${i + 1}`, onclick: () => { doc.cells.splice(i, 1); keep(); draw(); } })),
+      area, out);
+  }));
+  const addCell = (type, source) => { doc.cells.push({ cell_type: type, source, metadata: {}, ...(type === "code" ? { outputs: [], execution_count: null } : {}) }); keep(); draw(); };
+  const runAll = async () => {
+    const outs = [...cellsHost.querySelectorAll(".bq-nb-output")];
+    for (let i = 0; i < doc.cells.length; i++) await runCell(doc.cells[i], outs[i]);
+    announce("Run all finished");
+  };
+  draw();
+  const toolbar = el("div", { class: "bq-toolbar", role: "toolbar", "aria-label": "Notebook actions" },
+    el("button", { type: "button", class: "secondary", text: "Connect", disabled: true, title: BQ_NO_RUNTIME, "aria-description": BQ_NO_RUNTIME }),
+    el("button", { type: "button", class: "secondary", text: "+ Code", onclick: () => addCell("code", "") }),
+    el("button", { type: "button", class: "secondary", text: "+ SQL", onclick: () => addCell("code", "%%bigquery\n") }),
+    el("button", { type: "button", class: "secondary", text: "+ Text", onclick: () => addCell("markdown", "") }),
+    el("button", { type: "button", class: "primary", text: "Run all", onclick: runAll }),
+    el("button", { type: "button", class: "secondary", text: "Save", onclick: () => bqSaveAsset(tab, "notebook", tab.query || bqNotebookDoc([]), ctx.onSaved) }),
+    el("button", { type: "button", class: "secondary", text: "Version history", disabled: tab.savedId ? null : true,
+      title: tab.savedId ? null : "Save the notebook first", onclick: () => bqVersionHistory({ id: tab.savedId, name: tab.title, kind: "notebook" }, (content, title) => ctx.openAsset("notebook", content, title)) }),
+    tab.savedId ? el("button", { type: "button", class: "secondary", text: "Share", onclick: () => bqManagePermissions({ id: tab.savedId, name: tab.title }) }) : null);
+  return el("div", { class: "bq-notebook" }, toolbar,
+    el("p", { class: "unavailable bq-hint", text: BQ_NO_RUNTIME + " " + (bqDataformOn() ? BQ_DATAFORM_NOTE : BQ_NO_DATAFORM) }),
+    cellsHost);
+}
+
+// --- Data canvas -----------------------------------------------------------
+//
+// A data canvas tab, in Google's nodes
+// (https://docs.cloud.google.com/bigquery/docs/data-canvas, read
+// 2026-11-21): Search (tables of this project by name, or by a natural
+// language question the local model answers), Table (schema and preview,
+// with Query these results, Join and Visualize), SQL (written, or
+// generated from a prompt by the local model, then Run), Visualization
+// (bar, line, pie or scatter of a parent's result) and Text. Each node
+// lists its parents, so the canvas is a directed graph, saved as JSON in
+// its Dataform asset. Google's natural language steps are Gemini in
+// BigQuery's; here they are the instance's local model, and unverified
+// against Google's.
+
+function bqCanvasTab(tab, ctx) {
+  let doc;
+  try { doc = JSON.parse(tab.query || ""); } catch { doc = null; }
+  if (!doc || !Array.isArray(doc.nodes)) doc = { nodes: [] };
+  let next = doc.nodes.reduce((n, x) => Math.max(n, x.id), 0);
+  const results = {};
+  const keep = () => { tab.query = JSON.stringify(doc); ctx.save(); };
+  const host = el("ol", { class: "bq-canvas-nodes", "aria-label": "Canvas nodes" });
+  const byId = (id) => doc.nodes.find((n) => n.id === id);
+  const add = (node) => { node.id = ++next; node.parents = node.parents || []; doc.nodes.push(node); keep(); draw(); return node; };
+  const tables = () => {
+    const t = ctx.tree();
+    if (!t) return [];
+    return t.datasets.flatMap((ds) => ds.tables.filter((x) => x.type !== "MODEL").map((x) => ({ ref: `${t.project}.${ds.id}.${x.id}`, dataset: ds.id, id: x.id })));
+  };
+  const sqlOf = (n) => (n.type === "table" ? `SELECT * FROM \`${n.ref}\`` : n.sql || "");
+  const runNode = async (n, out) => {
+    setChildren(out, spinner("Running"));
+    try {
+      const res = await bqStudioCall("query", { query: n.type === "table" ? `${sqlOf(n)} LIMIT 100` : sqlOf(n), legacySql: false, priority: "INTERACTIVE" });
+      if (res.confirm) { setChildren(out, el("p", { class: "unavailable", text: "A statement that changes data runs from a SQL query tab, which asks first." })); return; }
+      results[n.id] = res;
+      drawResult(n, out);
+    } catch (err) {
+      setChildren(out, el("p", { class: "form-error", role: "alert", text: err.message }));
+    }
+  };
+  const drawResult = (n, out) => {
+    const res = results[n.id];
+    if (!res) return;
+    const cols = (res.schema || []).map((f) => f.name);
+    setChildren(out,
+      n.type === "table" ? el("p", { class: "unavailable", text: "Schema: " + (res.schema || []).map((f) => `${f.name} ${f.type}`).join(", ") }) : null,
+      el("div", { class: "table-scroll" }, el("table", { class: "bq-nb-table" },
+        el("thead", {}, el("tr", {}, ...cols.map((h) => el("th", { scope: "col", text: h })))),
+        el("tbody", {}, ...(res.rows || []).slice(0, 20).map((r) => el("tr", {}, ...cols.map((k) => el("td", { text: cellText(r[k]) }))))))));
+  };
+  const nodeTitle = (n) => ({ search: "Search", table: "Table", sql: "SQL", viz: "Visualization", text: "Text" })[n.type] + ` ${n.id}`;
+  const nodeActions = (n, out) => {
+    if (!["table", "sql"].includes(n.type)) return null;
+    return el("div", { class: "bq-canvas-actions" },
+      el("button", { type: "button", class: "secondary", text: "Run", "aria-label": `Run ${nodeTitle(n)}`, onclick: () => runNode(n, out) }),
+      el("button", { type: "button", class: "secondary", text: "Query these results", "aria-label": `Query these results of ${nodeTitle(n)}`,
+        onclick: () => add({ type: "sql", parents: [n.id], sql: `SELECT *\nFROM (\n${sqlOf(n)}\n)\nLIMIT 1000` }) }),
+      el("button", { type: "button", class: "secondary", text: "Join", "aria-label": `Join ${nodeTitle(n)}`, onclick: () => joinFrom(n) }),
+      el("button", { type: "button", class: "secondary", text: "Visualize", "aria-label": `Visualize ${nodeTitle(n)}`,
+        onclick: () => add({ type: "viz", parents: [n.id], chart: "Bar" }) }));
+  };
+  const joinFrom = (n) => {
+    const others = doc.nodes.filter((x) => x.type === "table" && x.id !== n.id);
+    if (!others.length) { notify("Join needs a second table on the canvas: add one from a Search node.", "error"); return; }
+    const o = others[0];
+    add({ type: "sql", parents: [n.id, o.id], prompt: "", sql: `SELECT *\nFROM (${sqlOf(n)}) AS a\nJOIN (${sqlOf(o)}) AS b\nON a.<column> = b.<column>` });
+  };
+  const drawNode = (n) => {
+    const out = el("div", { class: "bq-nb-output", role: "status" });
+    const parents = n.parents.map(byId).filter(Boolean);
+    const body = [];
+    if (n.type === "search") {
+      const q = el("input", { type: "search", id: `bq-canvas-q-${n.id}`, value: n.query || "", "aria-label": `Search ${n.id}: tables to find` });
+      const list = el("ul", { class: "bq-canvas-found" });
+      const show = (refs) => setChildren(list, ...(refs.length ? refs.map((t) => el("li", {}, el("span", { class: "mono", text: t.ref + " " }),
+        el("button", { type: "button", class: "secondary", text: "Add to canvas", "aria-label": `Add ${t.ref} to canvas`,
+          onclick: () => add({ type: "table", parents: [n.id], ref: t.ref }) })))
+        : [el("li", { class: "unavailable", text: "No tables match." })]));
+      const find = () => { n.query = q.value; keep(); const w = q.value.toLowerCase().split(/\s+/).filter(Boolean); show(tables().filter((t) => w.every((x) => t.ref.toLowerCase().includes(x)))); };
+      const ask = async () => {
+        n.query = q.value; keep();
+        setChildren(list, spinner("Asking the local model"));
+        try {
+          const all = tables();
+          const answer = await bqLocalModel(`Which of these BigQuery tables answer: "${q.value}"? Reply with the table names only, one per line.\n${all.map((t) => t.ref).join("\n")}`);
+          show(all.filter((t) => answer.includes(t.ref) || answer.includes(t.id)));
+        } catch (err) { setChildren(list, el("li", { class: "form-error", role: "alert", text: err.message })); }
+      };
+      body.push(el("div", { class: "bq-canvas-row" }, q,
+        el("button", { type: "button", class: "secondary", text: "Search", onclick: find }),
+        el("button", { type: "button", class: "secondary", text: "Ask in natural language", onclick: ask })), list);
+    } else if (n.type === "table") {
+      body.push(el("p", { class: "mono", text: n.ref }));
+    } else if (n.type === "sql") {
+      const prompt = el("input", { type: "text", id: `bq-canvas-p-${n.id}`, value: n.prompt || "", "aria-label": `SQL ${n.id}: prompt`,
+        placeholder: parents.length > 1 ? "Join on address" : "Describe the query" });
+      const area = el("textarea", { class: "query-editor mono", rows: "6", spellcheck: "false", "aria-label": `SQL ${n.id}: query` });
+      area.value = n.sql || "";
+      area.addEventListener("input", () => { n.sql = area.value; keep(); });
+      const generate = async () => {
+        n.prompt = prompt.value; keep();
+        try {
+          const ctxTables = parents.filter((p) => p.type === "table").map((p) => ({ ref: p.ref, schema: (results[p.id] || {}).schema }));
+          const answer = await bqLocalModel(`Write one GoogleSQL query for BigQuery. Tables:\n${bqSchemaText(ctxTables.length ? ctxTables : tables())}\nRequest: ${prompt.value}\nAnswer with the SQL only.`);
+          area.value = bqSqlOf(answer);
+          n.sql = area.value; keep();
+          announce("SQL generated by the local model: check it before you run it");
+        } catch (err) { notify(err.message, "error"); }
+      };
+      body.push(el("div", { class: "bq-canvas-row" }, prompt, el("button", { type: "button", class: "secondary", text: "Generate", onclick: generate })), area);
+    } else if (n.type === "viz") {
+      const chart = el("select", { id: `bq-canvas-c-${n.id}`, "aria-label": `Visualization ${n.id}: chart type`,
+        onchange: (e) => { n.chart = e.target.value; keep(); draw(); } },
+        ...["Bar", "Line", "Scatter"].map((t) => { const o = el("option", { value: t, text: t }); o.selected = t === n.chart; return o; }));
+      const chartHost = el("div", { class: "bq-chart-host" });
+      const parent = parents[0];
+      const drawIt = () => {
+        const res = parent && results[parent.id];
+        if (!res) { setChildren(chartHost, el("p", { class: "unavailable", text: "Run the parent node to chart its result." })); return; }
+        const viz = { type: n.chart || "Bar" };
+        const fit = bqVizDefaults(res, viz);
+        if (!fit.dims) { setChildren(chartHost, fit.empty); return; }
+        viz.type = n.chart || "Bar";
+        bqDrawChart(chartHost, res, fit.dims, viz);
+      };
+      body.push(el("div", { class: "bq-canvas-row" }, chart,
+        el("button", { type: "button", class: "secondary", text: "Draw", onclick: drawIt }),
+        el("button", { type: "button", class: "secondary", text: "Export as PNG", onclick: () => bqChartPNG(chartHost.querySelector("svg")) })), chartHost);
+      requestAnimationFrame(drawIt);
+    } else {
+      const area = el("textarea", { class: "query-editor", rows: "3", "aria-label": `Text ${n.id}` });
+      area.value = n.text || "";
+      area.addEventListener("input", () => { n.text = area.value; keep(); });
+      body.push(area);
+    }
+    const node = el("li", { class: "bq-canvas-node bq-canvas-" + n.type, "data-node": String(n.id) },
+      el("div", { class: "bq-nb-cell-bar" }, el("h3", { text: nodeTitle(n) }),
+        parents.length ? el("span", { class: "unavailable", text: "from " + parents.map(nodeTitle).join(" and ") }) : null,
+        el("button", { type: "button", class: "secondary", text: "Delete", "aria-label": `Delete ${nodeTitle(n)}`, onclick: () => {
+          doc.nodes = doc.nodes.filter((x) => x.id !== n.id);
+          for (const x of doc.nodes) x.parents = x.parents.filter((p) => p !== n.id);
+          keep(); draw();
+        } })),
+      ...body, nodeActions(n, out), out);
+    drawResult(n, out);
+    return node;
+  };
+  const draw = () => setChildren(host, ...(doc.nodes.length ? doc.nodes.map(drawNode)
+    : [el("li", { class: "unavailable", text: "Start with a Search, SQL or Text node from the toolbar." })]));
+  draw();
+  const toolbar = el("div", { class: "bq-toolbar", role: "toolbar", "aria-label": "Data canvas actions" },
+    el("button", { type: "button", class: "secondary", text: "Search", "aria-label": "Add a Search node", onclick: () => add({ type: "search" }) }),
+    el("button", { type: "button", class: "secondary", text: "SQL", "aria-label": "Add a SQL node", onclick: () => add({ type: "sql", sql: "" }) }),
+    el("button", { type: "button", class: "secondary", text: "Text", "aria-label": "Add a Text node", onclick: () => add({ type: "text" }) }),
+    el("button", { type: "button", class: "primary", text: "Save", onclick: () => bqSaveAsset(tab, "data_canvas", tab.query || JSON.stringify(doc), ctx.onSaved) }),
+    el("button", { type: "button", class: "secondary", text: "Version history", disabled: tab.savedId ? null : true,
+      title: tab.savedId ? null : "Save the canvas first", onclick: () => bqVersionHistory({ id: tab.savedId, name: tab.title, kind: "data_canvas" }, (content, title) => ctx.openAsset("data_canvas", content, title)) }),
+    tab.savedId ? el("button", { type: "button", class: "secondary", text: "Share", onclick: () => bqManagePermissions({ id: tab.savedId, name: tab.title }) }) : null);
+  return el("div", { class: "bq-canvas" }, toolbar,
+    el("p", { class: "unavailable bq-hint", text: "Natural language (Ask in natural language, Generate) uses this instance's local model; Google's uses Gemini in BigQuery, which is not run locally, so its answers are unverified against Google's. " +
+      (bqDataformOn() ? BQ_DATAFORM_NOTE : BQ_NO_DATAFORM) }),
+    host);
+}
+
+// bqRepoFileTab is a file of a Dataform repository's workspace opened from
+// Source control: its editor, Save (WriteFile) and the workspace in the
+// Dataform page for Commit and Push.
+function bqRepoFileTab(tab) {
+  const editor = el("textarea", { class: "query-editor mono bq-editor", rows: "16", spellcheck: "false", "aria-label": `Edit ${tab.file}` });
+  const status = el("p", { class: "unavailable", role: "status" }, spinner("Loading the file"));
+  const ref = { name: tab.repo, workspace: tab.workspace, path: tab.file };
+  bqDfCall("readrepofile", ref).then((r) => { editor.value = r.content; status.textContent = ""; })
+    .catch((err) => { status.className = "form-error"; status.textContent = err.message; });
+  const wsPath = "/bigquery-dataform/" + [tab.repo, "workspaces", tab.workspace].map(encodeURIComponent).join("/") + scopeSearch();
+  return el("div", { class: "bq-query-tab" },
+    el("div", { class: "bq-toolbar", role: "toolbar", "aria-label": "File actions" },
+      el("button", { type: "button", class: "primary", text: "Save", onclick: async () => {
+        try { await bqDfCall("writerepofile", { ...ref, content: editor.value }); notify(`Saved ${tab.file} in workspace ${tab.workspace}`); } catch (err) { notify(err.message, "error"); }
+      } }),
+      el("a", { class: "button secondary", href: wsPath, text: "Open workspace in Dataform" })),
+    el("p", { class: "unavailable bq-hint", text: `${tab.repo.split("/").pop()} › ${tab.workspace} › ${tab.file}. Commit and push from the workspace in Dataform.` }),
+    status, editor);
+}
+
+// bqClosedTabs are the tabs closed in this browser, newest first: Recent
+// tabs in the details pane reopens them
+// (https://docs.cloud.google.com/bigquery/docs/bigquery-web-ui).
+function bqClosedTabs() {
+  const r = readStored(BQ_STUDIO_CLOSED, []);
+  return Array.isArray(r) ? r : [];
+}
+
+function bqRememberClosed(t) {
+  if (t.kind === "home") return;
+  const { kind, title, query, settings, path, savedId, resourceKind, repo, workspace, file } = t;
+  writeStored(BQ_STUDIO_CLOSED, [{ kind, title, query, settings, path, savedId, resourceKind, repo, workspace, file, closed: new Date().toISOString() },
+    ...bqClosedTabs()].slice(0, 20));
+}
+
+// --- Map --------------------------------------------------------------------
+//
+// The Map visualization of a GEOGRAPHY column: each row's WKT (POINT,
+// LINESTRING, POLYGON and their MULTI forms) drawn on longitude and
+// latitude, with a graticule. Google draws it over a Google Maps base map,
+// which CloudBurrow does not reach, so there is no base map here. Google's
+// limits apply: 20,000 features, 1,000,000 vertices.
+
+function bqParseWKT(s) {
+  const text = String(s || "").trim();
+  const m = /^(MULTI)?(POINT|LINESTRING|POLYGON)\s*(.*)$/i.exec(text);
+  if (!m) {
+    const g = /^GEOMETRYCOLLECTION\s*\((.*)\)$/i.exec(text);
+    if (!g) return [];
+    return g[1].split(/,(?=\s*(?:MULTI)?(?:POINT|LINESTRING|POLYGON))/i).flatMap(bqParseWKT);
+  }
+  const kind = m[2].toUpperCase();
+  const coords = (str) => str.replace(/[()]/g, " ").trim().split(/\s*,\s*/).filter(Boolean)
+    .map((p) => p.trim().split(/\s+/).map(Number)).filter((p) => p.length >= 2 && p.every(Number.isFinite));
+  const body = m[3].trim().replace(/^\(/, "").replace(/\)$/, "");
+  if (kind === "POINT") return coords(body).map((c) => ({ type: "point", coords: [c] }));
+  if (kind === "LINESTRING") {
+    if (!m[1]) return [{ type: "line", coords: coords(body) }];
+    return body.split(/\)\s*,\s*\(/).map((part) => ({ type: "line", coords: coords(part) }));
+  }
+  // POLYGON (outer ring and holes) or MULTIPOLYGON (polygons of rings).
+  const polys = m[1] ? body.split(/\)\)\s*,\s*\(\(/) : [body];
+  return polys.map((p) => ({ type: "polygon", rings: p.split(/\)\s*,\s*\(/).map(coords) }));
+}
+
+function bqDrawMap(host, res, column) {
+  const rows = res.rows || [];
+  const features = rows.flatMap((r) => bqParseWKT(r[column]));
+  const vertices = features.reduce((n, f) => n + (f.coords ? f.coords.length : f.rings.reduce((a, r) => a + r.length, 0)), 0);
+  if (features.length > 20000 || vertices > 1000000) {
+    setChildren(host, el("p", { class: "form-error", role: "alert", text: "The map is limited to 20,000 features or 1 million vertices." }));
+    return;
+  }
+  const all = features.flatMap((f) => f.coords || f.rings.flat());
+  let [x0, x1, y0, y1] = all.length ? [Math.min(...all.map((c) => c[0])), Math.max(...all.map((c) => c[0])), Math.min(...all.map((c) => c[1])), Math.max(...all.map((c) => c[1]))] : [-180, 180, -90, 90];
+  const pad = Math.max(1, (x1 - x0) * 0.1, (y1 - y0) * 0.1);
+  x0 -= pad; x1 += pad; y0 -= pad; y1 += pad;
+  const W = Math.max(320, host.clientWidth - 2 || 640), H = 360;
+  const scale = Math.min(W / (x1 - x0), H / (y1 - y0));
+  const sx = (x) => (x - x0) * scale + (W - (x1 - x0) * scale) / 2;
+  const sy = (y) => H - ((y - y0) * scale + (H - (y1 - y0) * scale) / 2);
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("style", `width:${W}px;height:${H}px;max-width:none`);
+  svg.setAttribute("role", "img");
+  svg.setAttribute("class", "bq-chart bq-map");
+  svg.setAttribute("aria-label", `Map of ${column}: ${features.length} features`);
+  const add = (tag, attrs) => { const n = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, String(v)); svg.append(n); return n; };
+  add("rect", { x: 0, y: 0, width: W, height: H, fill: "#f1f3f4" });
+  const step = [1, 2, 5, 10, 15, 30, 45, 90].find((s) => (x1 - x0) / s <= 8) || 90;
+  for (let x = Math.ceil(x0 / step) * step; x <= x1; x += step) add("line", { x1: sx(x), x2: sx(x), y1: 0, y2: H, stroke: "#dadce0" });
+  for (let y = Math.ceil(y0 / step) * step; y <= y1; y += step) add("line", { x1: 0, x2: W, y1: sy(y), y2: sy(y), stroke: "#dadce0" });
+  const path = (cs) => cs.map((c, i) => `${i ? "L" : "M"}${sx(c[0]).toFixed(1)},${sy(c[1]).toFixed(1)}`).join("");
+  for (const f of features) {
+    if (f.type === "point") add("circle", { cx: sx(f.coords[0][0]), cy: sy(f.coords[0][1]), r: 4, fill: "#1a73e8", stroke: "#ffffff" });
+    else if (f.type === "line") add("path", { d: path(f.coords), fill: "none", stroke: "#1a73e8", "stroke-width": 2 });
+    else add("path", { d: f.rings.map((r) => path(r) + "Z").join(""), fill: "rgba(26,115,232,0.25)", stroke: "#1a73e8", "fill-rule": "evenodd" });
+  }
+  setChildren(host, svg, el("p", { class: "unavailable", text: `${features.length} features. No base map: Google draws one from Google Maps, which CloudBurrow does not reach.` }));
+}
+
+// BQ_WHATS_NEW is Check out what's new in Studio: what this Studio serves,
+// newest first, with Google's own list linked.
+const BQ_WHATS_NEW = [
+  ["Notebooks and data canvases", "kept in Dataform as code assets, with Version history and Manage permissions"],
+  ["Files and Source control", "Dataform folders and team folders, and Dataform repositories' workspaces"],
+  ["Recent tabs", "reopen a tab you closed from the tab strip"],
+  ["Map", "GEOGRAPHY results drawn in the Visualization tab"],
+];
 
 // bqQueryTab is one SQL query tab: the toolbar, the editor and its
 // validator, and Query results. A tab opened from a saved query carries
@@ -20045,8 +20835,8 @@ function bqQueryTab(tab, ctx) {
     const current = asNew ? null : savedOne();
     if (current) {
       try {
-        const sq = await bqStudioCall("savequery", { id: current.id, name: current.name, query: editor.value });
-        notify(`Saved ${sq.name}, version ${sq.version}`);
+        const sq = await bqSavedCall("savequery", { id: current.id, name: current.name, query: editor.value });
+        notify(sq.version ? `Saved ${sq.name}, version ${sq.version}` : `Saved ${sq.name}, a new version`);
         await ctx.onSaved(sq);
       } catch (err) {
         notify(`Save query failed: ${err.message}`, "error");
@@ -20069,6 +20859,9 @@ function bqQueryTab(tab, ctx) {
   const saveMenu = bqMenu("Save", [
     { label: "Save query", run: () => saveQuery(false) },
     { label: "Save query as", run: () => saveQuery(true) },
+    tab.savedId && bqDataformOn()
+      ? { label: "Version history", run: () => bqVersionHistory({ id: tab.savedId, name: tab.title, kind: "sql" }, (content, title) => ctx.openQuery(content, title)) }
+      : { label: "Version history", disabled: true, title: bqDataformOn() ? "Save the query first." : BQ_SAVED_NOTE, run: () => {} },
   ]);
   bqMenuButton(saveMenu, "Save", "Save");
 
@@ -20080,7 +20873,9 @@ function bqQueryTab(tab, ctx) {
       url.searchParams.set("query", editor.value);
       bqCopy(url.toString(), "the link to this query");
     } },
-    { label: "Manage permissions", disabled: true, title: BQ_UNAVAILABLE_PERMISSIONS, run: () => {} },
+    tab.savedId && bqDataformOn()
+      ? { label: "Manage permissions", run: () => bqManagePermissions({ id: tab.savedId, name: tab.title }) }
+      : { label: "Manage permissions", disabled: true, title: bqDataformOn() ? "Save the query first: permissions are on a saved query." : BQ_UNAVAILABLE_PERMISSIONS, run: () => {} },
   ]);
   bqMenuButton(share, "Share", "Share");
 
@@ -20105,7 +20900,7 @@ function bqQueryTab(tab, ctx) {
   return el("div", { class: "bq-query-tab" },
     toolbar, editor, validator,
     el("p", { class: "unavailable bq-hint",
-      text: (tab.savedId ? BQ_SAVED_NOTE + " " : "") +
+      text: (tab.savedId ? bqSavedNote() + " " : "") +
         "Schedule is not available locally (the Data Transfer Service is not run). ⌘/Ctrl + Enter runs; ⌘/Ctrl + S saves." }),
     results);
 }
@@ -20133,12 +20928,17 @@ function bqSaveDialog(title, name, query) {
       ...regions.map((r) => el("option", { value: r, text: r || "Default" })));
     const error = el("p", { class: "form-error", role: "alert", hidden: true });
     const primary = el("button", { type: "submit", class: "primary", text: "Save" });
+    // A Dataform-kept query goes in a folder (of its region) too.
+    const folders = bqDataformOn() ? BQ_FILES.filter((f) => f.kind === "folder" || f.kind === "teamfolder") : [];
+    const folder = el("select", { id: "bq-save-folder" }, el("option", { value: "", text: "Your root folder" }),
+      ...folders.map((f) => el("option", { value: f.name, text: `${f.displayName} (${f.location})` })));
+    folder.addEventListener("change", () => { const f = folders.find((x) => x.name === folder.value); if (f) region.value = f.location; });
     dialog.append(el("form", { class: "modal-body", novalidate: true, onsubmit: async (e) => {
       e.preventDefault();
       if (!input.value.trim()) { error.textContent = "A saved query needs a name."; error.hidden = false; return; }
       setBusy(primary, true);
       try {
-        result = await bqStudioCall("savequery", { name: input.value, region: region.value, query });
+        result = await bqSavedCall("savequery", { name: input.value, region: region.value, query, parent: folder.value });
         close();
       } catch (err) {
         setBusy(primary, false);
@@ -20151,7 +20951,8 @@ function bqSaveDialog(title, name, query) {
       el("label", { for: "bq-save-name", text: "Name" }), input,
       el("label", { for: "bq-save-region", text: "Region" }), region,
       el("p", { class: "form-help", text: "Optional. A saved query's region cannot be changed after it is created." }),
-      el("p", { class: "unavailable", text: BQ_SAVED_NOTE }),
+      folders.length ? el("label", { for: "bq-save-folder", text: "Folder" }) : null, folders.length ? folder : null,
+      el("p", { class: "unavailable", text: bqSavedNote() }),
       el("div", { class: "modal-actions" },
         el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }), primary)));
     dialog.addEventListener("cb-closed", () => settle(result));
@@ -20309,11 +21110,21 @@ function bqVizDefaults(res, viz) {
   const schema = (res.schema || []).filter((f) => (f.mode || "NULLABLE") !== "REPEATED");
   const dims = schema.filter((f) => BQ_DIMENSION_TYPES.includes(f.type));
   const measures = schema.filter((f) => BQ_MEASURE_TYPES.includes(f.type));
-  const geo = schema.some((f) => f.type === "GEOGRAPHY");
+  const geos = (res.schema || []).filter((f) => f.type === "GEOGRAPHY");
+  // The Map is offered "only if your query results contain a GEOGRAPHY
+  // column" (bigquery-web-ui), and is the only chart of one without a
+  // measure.
+  if (geos.length && (!dims.length || !measures.length || viz.type === "Map")) {
+    viz.type = "Map";
+    if (!geos.some((f) => f.name === viz.geography)) viz.geography = geos[0].name;
+    viz.measures = viz.measures || [];
+    if (viz.legend === undefined) viz.legend = true;
+    viz.zoom = viz.zoom || 1;
+    return { dims, measures, geos };
+  }
   if (!dims.length || !measures.length) {
-    return { empty: el("p", { class: "unavailable", text: geo
-      ? "Not available locally: a GEOGRAPHY result is drawn on Google Maps' map, which CloudBurrow does not reach. Line, Bar and Scatter need a numeric measure."
-      : "There is nothing to chart: a chart needs a dimension column (a number, a date or time, or a string) and a numeric measure column." }) };
+    return { empty: el("p", { class: "unavailable", text:
+      "There is nothing to chart: a chart needs a dimension column (a number, a date or time, or a string) and a numeric measure column." }) };
   }
   if (!dims.some((f) => f.name === viz.dimension)) {
     const firstOther = dims.find((f) => !BQ_MEASURE_TYPES.includes(f.type)) || dims[0];
@@ -20340,15 +21151,20 @@ function bqVisualization(res, tab, save) {
   const fit = bqVizDefaults(res, viz);
   if (!fit.dims) return fit.empty;
   const { dims, measures } = fit;
+  const geos = ((res.schema || []).filter((f) => f.type === "GEOGRAPHY"));
 
   const chartHost = el("div", { class: "bq-chart-host" });
   const redraw = () => { save(); drawChart(); };
   const typeSelect = el("select", { id: "bq-viz-type", onchange: (e) => { viz.type = e.target.value; redraw(); } },
     ...["Bar", "Line", "Scatter", "Map"].map((t) => {
       const o = el("option", { value: t, text: t });
-      if (t === "Map") {
+      if (t === "Map" && !geos.length) {
         o.disabled = true;
-        o.title = "Not available locally: a map is drawn on Google Maps, which CloudBurrow does not reach.";
+        o.title = "The Map needs a GEOGRAPHY column in the results.";
+      }
+      if (t !== "Map" && (!dims.length || !measures.length)) {
+        o.disabled = true;
+        o.title = "Bar, Line and Scatter need a dimension and a numeric measure.";
       }
       o.selected = t === viz.type;
       return o;
@@ -20374,7 +21190,13 @@ function bqVisualization(res, tab, save) {
       onclick: (e) => { viz.legend = !viz.legend; e.target.setAttribute("aria-pressed", String(viz.legend)); redraw(); } }),
     el("button", { type: "button", class: "secondary", text: "Download PNG", onclick: () => bqChartPNG(chartHost.querySelector("svg")) }));
 
-  const drawChart = () => bqDrawChart(chartHost, res, dims, viz);
+  const geoSelect = el("select", { id: "bq-viz-geography", onchange: (e) => { viz.geography = e.target.value; redraw(); } },
+    ...geos.map((f) => { const o = el("option", { value: f.name, text: f.name }); o.selected = f.name === viz.geography; return o; }));
+  const drawChart = () => {
+    if (viz.type === "Map") return bqDrawMap(chartHost, res, viz.geography || (geos[0] || {}).name);
+    bqVizDefaults(res, viz);
+    return bqDrawChart(chartHost, res, dims, viz);
+  };
   drawChart();
   requestAnimationFrame(() => { if (chartHost.isConnected) drawChart(); });
   return el("div", { class: "bq-viz" },
@@ -20382,8 +21204,9 @@ function bqVisualization(res, tab, save) {
     el("aside", { class: "bq-viz-config", "aria-label": "Visualization configuration" },
       el("h3", { text: "Visualization configuration" }),
       el("label", { for: "bq-viz-type", text: "Visualization type" }), typeSelect,
-      el("label", { for: "bq-viz-dimension", text: "Dimension" }), dimSelect,
-      measureBoxes));
+      geos.length ? el("label", { for: "bq-viz-geography", text: "Geography column" }) : null, geos.length ? geoSelect : null,
+      dims.length && measures.length ? el("label", { for: "bq-viz-dimension", text: "Dimension" }) : null, dims.length && measures.length ? dimSelect : null,
+      dims.length && measures.length ? measureBoxes : null));
 }
 
 // bqDrawChart draws viz's chart of the result's rows into chartHost, as

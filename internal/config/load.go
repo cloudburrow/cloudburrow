@@ -216,6 +216,7 @@ type rawFlags struct {
 	firebaseRules    int
 	workflows        int
 	parameterManager int
+	dataform         int
 	onnx             int
 	tfconvert        int
 	firestore        int
@@ -309,6 +310,7 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.IntVar(&r.firebaseRules, "port-firebaserules", 0, "Firebase Rules API host port, served with Firestore (0 = OS-assigned; default 9043)")
 	fs.IntVar(&r.workflows, "port-workflows", 0, "Workflows and Workflow Executions API host port (0 = OS-assigned; default 9038)")
 	fs.IntVar(&r.parameterManager, "port-parametermanager", 0, "Parameter Manager API host port (0 = OS-assigned; default 9047)")
+	fs.IntVar(&r.dataform, "port-dataform", 0, "Dataform API host port (0 = OS-assigned; default 9058)")
 	fs.IntVar(&r.onnx, "port-onnx", 0, "ONNX runner host port, for BigQuery ML's imported ONNX models in the onnx build (0 = OS-assigned; default 9025)")
 	fs.IntVar(&r.tfconvert, "port-tfconvert", 0, "TensorFlow SavedModel converter host port, for BigQuery ML's imported TENSORFLOW models (0 = OS-assigned; default 9027)")
 	fs.IntVar(&r.firestore, "port-firestore", 0, "Firestore emulator host port (0 = OS-assigned; default 9010)")
@@ -528,6 +530,7 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 		{"PORT_FIREBASERULES", &cfg.Endpoints.FirebaseRules},
 		{"PORT_WORKFLOWS", &cfg.Endpoints.Workflows},
 		{"PORT_PARAMETERMANAGER", &cfg.Endpoints.ParameterManager},
+		{"PORT_DATAFORM", &cfg.Endpoints.Dataform},
 		{"PORT_ONNX", &cfg.Endpoints.ONNX},
 		{"PORT_TFCONVERT", &cfg.Endpoints.TFConvert},
 		{"PORT_FIRESTORE", &cfg.Endpoints.Firestore},
@@ -687,6 +690,7 @@ func applyFlags(cfg *Config, raw *rawFlags, set map[string]bool) {
 		{"port-firebaserules", raw.firebaseRules, &cfg.Endpoints.FirebaseRules},
 		{"port-workflows", raw.workflows, &cfg.Endpoints.Workflows},
 		{"port-parametermanager", raw.parameterManager, &cfg.Endpoints.ParameterManager},
+		{"port-dataform", raw.dataform, &cfg.Endpoints.Dataform},
 		{"port-onnx", raw.onnx, &cfg.Endpoints.ONNX},
 		{"port-tfconvert", raw.tfconvert, &cfg.Endpoints.TFConvert},
 		{"port-firestore", raw.firestore, &cfg.Endpoints.Firestore},

@@ -603,6 +603,14 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 				"Parameter Manager v1, global and regional, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint"})
 	}
 
+	// Dataform (#2105): the Go client, and Terraform's
+	// google_dataform_repository through dataform_custom_endpoint.
+	if dataformEnabled(cfg) && cfg.Endpoints.Dataform != 0 {
+		vars = append(vars,
+			envVar{cliEndpointVar("dataform"), addr(cfg.Endpoints.Dataform),
+				"Dataform v1, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint"})
+	}
+
 	// The Kubernetes Engine API (#1913): gcloud container clusters and
 	// node-pools, and Terraform's google_container_* through
 	// container_custom_endpoint.
@@ -849,6 +857,7 @@ func withLivePorts(cfg config.Config, live map[string]string) config.Config {
 		"analyticshub":           &e.AnalyticsHub,
 		"workflows":              &e.Workflows,
 		"parametermanager":       &e.ParameterManager,
+		"dataform":               &e.Dataform,
 		// The local AI endpoint, which serves Vertex AI's Model Registry
 		// and Endpoints (#1940) to gcloud-setup and terraform, and Document
 		// AI (#1953), which terraform points document_ai_custom_endpoint at.

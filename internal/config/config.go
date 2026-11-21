@@ -134,6 +134,11 @@ const (
 	// on its own port; its versions' secret references are read through
 	// this instance's Secret Manager.
 	ServiceParameterManager Service = "parametermanager"
+	// ServiceDataform is Dataform (dataform.googleapis.com, #2105), served
+	// in the CLI process on its own port; its invocations run on this
+	// instance's BigQuery and its git remotes are its Secure Source
+	// Manager repositories.
+	ServiceDataform Service = "dataform"
 )
 
 // AllServices lists the default services in a stable order, so startup
@@ -146,7 +151,7 @@ func AllServices() []Service {
 
 // OptionalServices lists the opt-in services, in a stable order.
 func OptionalServices() []Service {
-	return []Service{ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner, ServiceCloudSQL, ServiceBigQuery, ServiceMemorystore, ServiceCloudSQLMySQL, ServiceScheduler, ServiceLogging, ServiceKMS, ServiceBackupDR, ServicePrivateCA, ServiceGKE, ServiceMonitoring, ServiceCompute, ServiceWorkflows, ServiceParameterManager}
+	return []Service{ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner, ServiceCloudSQL, ServiceBigQuery, ServiceMemorystore, ServiceCloudSQLMySQL, ServiceScheduler, ServiceLogging, ServiceKMS, ServiceBackupDR, ServicePrivateCA, ServiceGKE, ServiceMonitoring, ServiceCompute, ServiceWorkflows, ServiceParameterManager, ServiceDataform}
 }
 
 // KnownServices lists every selectable service.
@@ -207,7 +212,7 @@ func (s Service) Persistence() Persistence {
 		// Key material is in Kubernetes Secrets, like Secret Manager's
 		// payloads, which the cluster keeps.
 		return PersistenceVolume
-	case ServiceStorage, ServiceTasks, ServiceSecrets, ServiceScheduler, ServiceBackupDR, ServicePrivateCA, ServiceGKE, ServiceMonitoring, ServiceCompute, ServiceWorkflows, ServiceParameterManager:
+	case ServiceStorage, ServiceTasks, ServiceSecrets, ServiceScheduler, ServiceBackupDR, ServicePrivateCA, ServiceGKE, ServiceMonitoring, ServiceCompute, ServiceWorkflows, ServiceParameterManager, ServiceDataform:
 		return PersistenceVolume
 	case ServiceRun:
 		// Workload definitions live in the Kubernetes API, which the cluster
@@ -399,6 +404,9 @@ type Endpoints struct {
 	// (parametermanager.googleapis.com, #2054): gRPC and JSON on one port,
 	// global and regional parameters alike.
 	ParameterManager int `json:"parameterManager"`
+	// Dataform is the host port of Dataform (dataform.googleapis.com,
+	// #2105): gRPC and JSON on one port.
+	Dataform int `json:"dataform"`
 	// ONNX is the host port of the ONNX runner (#1711), which runs BigQuery
 	// ML's imported ONNX models for the BigQuery front, published to the
 	// cluster through cloudburrow-host. CloudBurrow's own API, not a
@@ -482,6 +490,7 @@ func (e *Endpoints) fields() []endpointField {
 		{"analyticshub", &e.AnalyticsHub},
 		{"workflows", &e.Workflows},
 		{"parametermanager", &e.ParameterManager},
+		{"dataform", &e.Dataform},
 		{"onnx", &e.ONNX},
 		{"tfconvert", &e.TFConvert},
 	}
@@ -561,6 +570,8 @@ func (e Endpoints) OptionalPort(s Service) int {
 		return e.Workflows
 	case ServiceParameterManager:
 		return e.ParameterManager
+	case ServiceDataform:
+		return e.Dataform
 	default:
 		return 0
 	}
@@ -928,6 +939,8 @@ func Default() Config {
 			// Parameter Manager (#2054): 9039 to 9046 are taken by open
 			// branches, so 9047.
 			ParameterManager: 9047,
+			// Dataform (#2105): 9048 to 9057 are left to open branches.
+			Dataform: 9058,
 			// OS-assigned. The port is not what enables local AI —
 			// LocalAI.ModelPath is. A configured port with no model binds
 			// nothing, so there is no endpoint answering every request with

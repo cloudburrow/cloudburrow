@@ -109,6 +109,8 @@ type consoleDeps struct {
 	workflows *workflowsService
 	// parameterManager is Parameter Manager (#2054), nil unless enabled.
 	parameterManager *parameterManagerService
+	// dataform is Dataform (#2105), nil unless enabled.
+	dataform *dataformService
 	// gke is the Kubernetes Engine API (#1913), nil unless enabled.
 	gke *gkeService
 	// monitoring is Cloud Monitoring (#1939), nil unless enabled.
@@ -349,6 +351,11 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	if enabled[config.ServiceParameterManager] && d.parameterManager != nil {
 		providers = append(providers, parameterManagerProvider{svc: d.parameterManager},
 			parameterTemplatesProvider{svc: d.parameterManager})
+	}
+	// Dataform (#2105), in process, under BigQuery.
+	if enabled[config.ServiceDataform] && d.dataform != nil {
+		df := dataformProvider{svc: d.dataform}
+		providers = append(providers, df, dataformFoldersProvider{df: df}, dataformSettingsProvider{df: df})
 	}
 	// Workflows (#1986), in process.
 	if enabled[config.ServiceWorkflows] && d.workflows != nil {
@@ -788,6 +795,7 @@ var serviceTitles = map[config.Service]string{
 	config.ServiceCompute:          "VPC network",
 	config.ServiceWorkflows:        "Workflows",
 	config.ServiceParameterManager: "Parameter Manager",
+	config.ServiceDataform:         "Dataform",
 }
 
 func serviceTitle(s config.Service) string {

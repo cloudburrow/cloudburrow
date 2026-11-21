@@ -45,7 +45,7 @@ func TestBigQueryStudioExplorerEditorAndHistory(t *testing.T) {
 	var menu []string
 	p.eval(`[...document.querySelectorAll("#product-nav li a")].map((a) => a.textContent)`, &menu)
 	want := []string{"Studio", "Search", "Datasets", "Job history", "Data transfers", "Scheduled queries",
-		"Analytics Hub", "Dataform", "Partner Center", "Settings"}
+		"Analytics Hub", "Dataform", "Dataform folders", "Dataform settings", "Partner Center", "Settings"}
 	if strings.Join(menu, "|") != strings.Join(want, "|") {
 		t.Errorf("BigQuery's menu is %q, want %q", menu, want)
 	}
@@ -212,13 +212,13 @@ func TestBigQueryStudioExplorerEditorAndHistory(t *testing.T) {
 		document.querySelector(".bq-editor").value.includes("ORDER BY id")`)
 
 	// A page CloudBurrow does not serve, in Google's place.
-	// (Analytics Hub is served since #1960; Dataform is not.)
-	p.navigate("/bigquery-dataform" + q)
+	// (Analytics Hub is served since #1960, Dataform since #2105.)
+	p.navigate("/bigquery-partner-center" + q)
 	p.waitFor(`document.querySelector("#view .state h2") !== null`)
 	var unavailable string
 	p.eval(`document.querySelector("#view .state").textContent`, &unavailable)
 	if !strings.Contains(unavailable, "Not available locally") {
-		t.Errorf("Dataform says %q", unavailable)
+		t.Errorf("Partner Center says %q", unavailable)
 	}
 
 	// The table's tabs, in Google's order.

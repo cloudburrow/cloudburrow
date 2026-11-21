@@ -101,6 +101,7 @@ var targetEndpoints = []targetEndpoint{
 	{"FIREBASERULES", envKey("CLOUDBURROW_FIREBASERULES_ENDPOINT")},
 	{"WORKFLOWS", envKey("CLOUDBURROW_WORKFLOWS_ENDPOINT")},
 	{"PARAMETERMANAGER", envKey("CLOUDBURROW_PARAMETERMANAGER_ENDPOINT")},
+	{"DATAFORM", envKey("CLOUDBURROW_DATAFORM_ENDPOINT")},
 }
 
 // normalizeEndpoint reduces an address to host:port, so that
