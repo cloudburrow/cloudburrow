@@ -91,7 +91,7 @@ func subscriptionExpiryGroup(s *pubsubpb.Subscription, a subscriptionActivity) c
 		expires = ttl > 0
 	}
 	if expires {
-		add("Expiration period", formatPubSubDuration(durationpb.New(ttl)))
+		add("Expiration period", durationWords(durationpb.New(ttl)))
 	} else {
 		add("Expiration period", "Never expires")
 	}

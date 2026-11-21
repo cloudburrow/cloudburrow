@@ -73,8 +73,8 @@ func TestPubSubSubscriptionPageShowsIdleTimeAndExpiry(t *testing.T) {
 		t.Fatal(err)
 	}
 	g := expiryGroup(t, d)
-	if g["Expiration period"] != "2d" || g["Idle for"] != "8h" {
-		t.Errorf("the Expiration group is %v; want 2d, idle 8h", g)
+	if g["Expiration period"] != "2 days" || g["Idle for"] != "8h" {
+		t.Errorf("the Expiration group is %v; want 2 days, idle 8h", g)
 	}
 	when := g["Deleted by expiration"]
 	at, err := time.Parse(time.RFC3339, strings.Fields(when)[0])
@@ -106,7 +106,7 @@ func TestPubSubSubscriptionPageShowsIdleTimeAndExpiry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if g := expiryGroup(t, d); g["Expiration period"] != "31d" || !strings.Contains(g["Idle for"], "no CloudBurrow front") ||
+	if g := expiryGroup(t, d); g["Expiration period"] != "31 days" || !strings.Contains(g["Idle for"], "no CloudBurrow front") ||
 		g["Deleted by expiration"] != "" {
 		t.Errorf("without the front the group is %v; want Google's default and the idle time unknown", g)
 	}
