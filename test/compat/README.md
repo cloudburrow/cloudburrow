@@ -142,6 +142,7 @@ Set by `scripts/compat-env.sh` from a running instance:
 | `CLOUDBURROW_TEST_COMPUTE` | `CLOUDBURROW_COMPUTE_ENDPOINT` | the Compute Engine API's VPC networking (#1936), `--services compute`; JSON under `/compute/v1/`, in process |
 | `CLOUDBURROW_TEST_GKE` | `CLOUDBURROW_GKE_ENDPOINT` | the Kubernetes Engine API (#1913), `--services gke`; gRPC and JSON on one port; its clusters are kind clusters, so it needs Docker, kind and kubectl |
 | `CLOUDBURROW_TEST_DATATRANSFER` | `CLOUDBURROW_DATATRANSFER_ENDPOINT` | the BigQuery Data Transfer Service (#1948), served with `bigquery`; gRPC and JSON on one port |
+| `CLOUDBURROW_TEST_FIREBASERULES` | `CLOUDBURROW_FIREBASERULES_ENDPOINT` | the Firebase Rules API v1 (#2048), served with `firestore`; JSON, and Terraform's `google_firebaserules_ruleset` and `_release` |
 | `CLOUDBURROW_TEST_ANALYTICSHUB` | `CLOUDBURROW_ANALYTICSHUB_ENDPOINT` | BigQuery sharing, formerly Analytics Hub (#1960), served with `bigquery`; gRPC and JSON on one port; its subscriptions make linked datasets in the instance's BigQuery |
 | `CLOUDBURROW_TEST_PRIVATECA` | `CLOUDBURROW_PRIVATECA_ENDPOINT` | Certificate Authority Service (#1834), `--services privateca`; gRPC and JSON on one port |
 | `CLOUDBURROW_TEST_WORKFLOWS` | `CLOUDBURROW_WORKFLOWS_ENDPOINT` | Workflows and Workflow Executions (#1986), `--services workflows`; gRPC and JSON on one port; run in the run shard, beside the Cloud Run, Cloud Storage and Pub/Sub its workflows call |

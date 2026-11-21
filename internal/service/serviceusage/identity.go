@@ -78,7 +78,8 @@ var serviceAgents = map[string]string{
 	"run.googleapis.com": "serverless-robot-prod.iam.gserviceaccount.com",
 	// Cloud Firestore Service Agent (Firestore's, not Datastore's: no row
 	// names datastore.googleapis.com).
-	"firestore.googleapis.com": "gcp-sa-firestore.iam.gserviceaccount.com",
+	"firestore.googleapis.com":     "gcp-sa-firestore.iam.gserviceaccount.com",
+	"firebaserules.googleapis.com": "firebase-rules.iam.gserviceaccount.com",
 	// Cloud Bigtable Service Agent, primary for bigtableadmin.googleapis.com
 	// only; the data API bigtable.googleapis.com has none.
 	"bigtableadmin.googleapis.com": "gcp-sa-bigtable.iam.gserviceaccount.com",

@@ -213,6 +213,7 @@ type rawFlags struct {
 	storageInsights  int
 	storageTransfer  int
 	dataTransfer     int
+	firebaseRules    int
 	workflows        int
 	onnx             int
 	tfconvert        int
@@ -304,6 +305,7 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.IntVar(&r.monitoring, "port-monitoring", 0, "Cloud Monitoring API host port (0 = OS-assigned; default 9033)")
 	fs.IntVar(&r.compute, "port-compute", 0, "Compute Engine API (VPC networking) host port (0 = OS-assigned; default 9031)")
 	fs.IntVar(&r.dataTransfer, "port-datatransfer", 0, "BigQuery Data Transfer Service host port (0 = OS-assigned; default 9034)")
+	fs.IntVar(&r.firebaseRules, "port-firebaserules", 0, "Firebase Rules API host port, served with Firestore (0 = OS-assigned; default 9043)")
 	fs.IntVar(&r.workflows, "port-workflows", 0, "Workflows and Workflow Executions API host port (0 = OS-assigned; default 9038)")
 	fs.IntVar(&r.onnx, "port-onnx", 0, "ONNX runner host port, for BigQuery ML's imported ONNX models in the onnx build (0 = OS-assigned; default 9025)")
 	fs.IntVar(&r.tfconvert, "port-tfconvert", 0, "TensorFlow SavedModel converter host port, for BigQuery ML's imported TENSORFLOW models (0 = OS-assigned; default 9027)")
@@ -521,6 +523,7 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 		{"PORT_STORAGEINSIGHTS", &cfg.Endpoints.StorageInsights},
 		{"PORT_STORAGETRANSFER", &cfg.Endpoints.StorageTransfer},
 		{"PORT_DATATRANSFER", &cfg.Endpoints.DataTransfer},
+		{"PORT_FIREBASERULES", &cfg.Endpoints.FirebaseRules},
 		{"PORT_WORKFLOWS", &cfg.Endpoints.Workflows},
 		{"PORT_ONNX", &cfg.Endpoints.ONNX},
 		{"PORT_TFCONVERT", &cfg.Endpoints.TFConvert},
@@ -678,6 +681,7 @@ func applyFlags(cfg *Config, raw *rawFlags, set map[string]bool) {
 		{"port-storageinsights", raw.storageInsights, &cfg.Endpoints.StorageInsights},
 		{"port-storagetransfer", raw.storageTransfer, &cfg.Endpoints.StorageTransfer},
 		{"port-datatransfer", raw.dataTransfer, &cfg.Endpoints.DataTransfer},
+		{"port-firebaserules", raw.firebaseRules, &cfg.Endpoints.FirebaseRules},
 		{"port-workflows", raw.workflows, &cfg.Endpoints.Workflows},
 		{"port-onnx", raw.onnx, &cfg.Endpoints.ONNX},
 		{"port-tfconvert", raw.tfconvert, &cfg.Endpoints.TFConvert},

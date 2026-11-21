@@ -22,8 +22,9 @@ import (
 // emulators shard:
 //   - Firestore's menu is Google's: Databases first, then Data, Query
 //     builder, Indexes, Import/Export, Disaster recovery, Time-to-live,
-//     Security rules, Usage, Insights and Key Visualizer, the last four
-//     saying they are not available locally;
+//     Security, Usage, Insights and Key Visualizer, the last saying it
+//     is not available locally (Security, Usage and Insights are the
+//     database's tabs, #2048);
 //   - Time-to-live in the menu opens (default)'s Time-to-live tab, whose
 //     Create Policy makes the policy GetField reads, offset and all;
 //   - Create a Firestore database is a page: Datastore mode and a Cloud KMS
@@ -53,11 +54,11 @@ func TestFirestorePagesMatchGooglesConsoleThroughTheBrowser(t *testing.T) {
 	p.waitFor(`document.querySelectorAll("#product-nav-pages a").length >= 11`)
 	var menu []string
 	p.eval(`[...document.querySelectorAll("#product-nav-pages a")].map((a) => a.textContent.trim())`, &menu)
-	want := "Databases,Data,Query builder,Indexes,Import/Export,Disaster recovery,Time-to-live,Security rules,Usage,Insights,Key Visualizer"
+	want := "Databases,Data,Query builder,Indexes,Import/Export,Disaster recovery,Time-to-live,Security,Usage,Insights,Key Visualizer"
 	if got := strings.Join(menu, ","); got != want {
 		t.Errorf("the Firestore menu reads %s, want %s", got, want)
 	}
-	p.navigate("/firestore-rules" + q)
+	p.navigate("/firestore-key-visualizer" + q)
 	p.waitFor(`document.querySelector("#view").textContent.includes("Not available locally")`)
 
 	// Time-to-live, from the menu, opens the database's tab.

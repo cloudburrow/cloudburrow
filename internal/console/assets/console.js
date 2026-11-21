@@ -276,9 +276,8 @@ const ROUTES = [
   // database's own pages. `tabOf` makes a menu entry a tab of the database
   // being looked at ((default) elsewhere), so Indexes, Import/Export,
   // Disaster recovery and Time-to-live open that database's tab; each
-  // entry's own address leads to (default)'s. Security rules, Usage,
-  // Insights and Key Visualizer are in Google's place and say why they are
-  // not available. Databases is not under /firestore/, where it would
+  // entry's own address leads to (default)'s. Key Visualizer is in
+  // Google's place and says why it is not available. Databases is not under /firestore/, where it would
   // shadow a collection named "databases".
   { path: "/firestore-databases", service: "firestore-databases", icon: "firestore", title: "Databases", kind: "Database", section: "Databases",
     product: "firestore", productTitle: "Firestore" },
@@ -291,22 +290,20 @@ const ROUTES = [
     path: "/firestore-" + tab, service: "firestore-databases", icon: "firestore", title, section: "Databases",
     product: "firestore", productTitle: "Firestore", tabOf: { route: "/firestore-databases", tab },
     redirect: "/firestore-databases/(default)?tab=" + tab })),
-  { path: "/firestore-rules", screen: "unavailable", service: null, requires: "firestore-databases", icon: "firestore",
-    title: "Security rules", section: "Databases", product: "firestore", productTitle: "Firestore",
-    unavailable: "Firestore Security Rules are kept by the Firebase Rules API, which CloudBurrow does not serve. " +
-      "Server client libraries, which reach the local Firestore, ignore rules, as they do on Google's." },
-  { path: "/firestore-usage", screen: "unavailable", service: null, requires: "firestore-databases", icon: "firestore",
-    title: "Usage", section: "Databases", product: "firestore", productTitle: "Firestore",
-    unavailable: "Usage charts read Cloud Monitoring metrics, which CloudBurrow does not emulate. Each call to " +
-      "Firestore is in the console's Requests page." },
-  { path: "/firestore-insights", screen: "unavailable", service: null, requires: "firestore-databases", icon: "firestore",
-    title: "Insights", section: "Databases", product: "firestore", productTitle: "Firestore",
-    unavailable: "Query insights are gathered by Google's Firestore query statistics, which the local Firestore " +
-      "does not record. Query Explain is on an Enterprise database's page." },
+  // Security (rules), Usage and Insights are the database's Rules, Usage
+  // and Query insights tabs (#2048): the Firebase Rules API's released
+  // rules, and the front's document and query counts.
+  ...[["/firestore-rules", "rules", "Security"], ["/firestore-usage", "usage", "Usage"],
+    ["/firestore-insights", "insights", "Insights"]].map(([path, tab, title]) => ({
+    path, service: "firestore-databases", icon: "firestore", title, section: "Databases",
+    product: "firestore", productTitle: "Firestore", tabOf: { route: "/firestore-databases", tab },
+    redirect: "/firestore-databases/(default)?tab=" + tab })),
   { path: "/firestore-key-visualizer", screen: "unavailable", service: null, requires: "firestore-databases", icon: "firestore",
     title: "Key Visualizer", section: "Databases", product: "firestore", productTitle: "Firestore",
-    unavailable: "Key Visualizer draws Google's access-pattern heatmaps from its storage servers; the local " +
-      "Firestore keeps none." },
+    unavailable: "Key Visualizer scans are generated only for databases with more than 3,000 document operations " +
+      "in a minute, each covering two hours in 10-second segments over up to 1,000 key buckets of Google's storage " +
+      "servers. The local Firestore is one emulator process with no key ranges to bucket, so a heatmap would be " +
+      "invented; reads, writes and deletes are on the Usage tab." },
   { path: "/datastore", service: "datastore", title: "Datastore", section: "Databases" },
   // The project's Bigtable instances, with their clusters, app profiles and
   // IAM policy (#1358). First, as Google's Bigtable opens on its Instances list (#1858). Not under /bigtable/, where it would shadow a table.
@@ -17306,6 +17303,11 @@ async function renderFirestoreData(view, route) {
   }
   const selectedCol = colPath ? colPath.split("/").pop() : "";
   const startRoot = capabilityOf(route.service).create;
+  // An Enterprise database's Explorer: View more's Connect using MongoDB
+  // tools shows its base connection string (#1845, round 3).
+  const connection = parentDoc ? "" : await fsConnectionString(project, database);
+  const leftMenu = connection ? menuOf(`View more: ${database}`, [
+    { id: "connect", label: "Connect using MongoDB tools", run: () => fsConnectDialog(database, connection) }]) : null;
   const left = column("fs-collections", leftTitle, [
     el("button", { type: "button", class: "secondary", id: "fs-start-collection", text: "Start collection",
       onclick: () => parentDoc && leftStart
@@ -17316,7 +17318,8 @@ async function renderFirestoreData(view, route) {
         fsPanelGo(parentDoc ? [...P.slice(0, colEnd - 1), item.name] : [item.name]);
         redraw();
       })
-    : el("p", { class: "unavailable", text: parentDoc ? "This document has no subcollections." : "This database has no collections." }));
+    : el("p", { class: "unavailable", text: parentDoc ? "This document has no subcollections." : "This database has no collections." }),
+  leftMenu);
 
   const columns = [left];
   // Middle: the collection's documents, with its filter and its menu.
@@ -17420,6 +17423,37 @@ async function renderFirestoreData(view, route) {
       redraw();
     }, 10000);
   }
+}
+
+// fsConnectionString is a database's base connection string, which the
+// Databases screen shows on an Enterprise database's page, "" for any
+// other database. It is read once per database while the page is open.
+const FS_CONNECTION = new Map();
+async function fsConnectionString(project, database) {
+  const key = project + "|" + database;
+  if (!FS_CONNECTION.has(key)) {
+    FS_CONNECTION.set(key, api(`/api/detail/firestore-databases?project=${encodeURIComponent(project)}&name=${encodeURIComponent(database)}`)
+      .then((d) => ((d.summary || []).find((p) => p.label === "Connection string") || {}).value || "")
+      .catch(() => ""));
+  }
+  return FS_CONNECTION.get(key);
+}
+
+// fsConnectDialog is Google's Connect using MongoDB tools: the base
+// connection string, to which a driver adds a user's name and password
+// (https://firebase.google.com/docs/firestore/enterprise/connect).
+function fsConnectDialog(database, connection) {
+  const { dialog, close } = openModal({ labelledBy: "fs-connect-title" });
+  dialog.append(el("div", { class: "modal-body" },
+    el("h2", { id: "fs-connect-title", text: "Connect using MongoDB tools" }),
+    el("p", { class: "form-help", text: `The base connection string of ${database}. Add a user's name and password ` +
+      "(USERNAME:PASSWORD@ before the host, and &authMechanism=SCRAM-SHA-256) from its database's Security page." }),
+    el("label", { for: "fs-connect-string", text: "Connection string" }),
+    el("input", { type: "text", id: "fs-connect-string", readonly: true, value: connection }),
+    el("div", { class: "modal-actions" },
+      copyButton(connection, "connection string"),
+      el("button", { type: "button", class: "primary", text: "Close", onclick: () => close() }))));
+  dialog.querySelector("#fs-connect-string").focus();
 }
 
 function fsEditPath(redraw) {

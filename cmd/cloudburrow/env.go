@@ -632,6 +632,16 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 			envVar{cliEndpointVar("datatransfer"), dt,
 				"the BigQuery Data Transfer Service v1, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint"})
 	}
+	// The Firebase Rules API (#2048), beside Firestore: Terraform's
+	// google_firebaserules_ruleset and _release through
+	// firebaserules_custom_endpoint. No gcloud command calls the API;
+	// gcloud-setup's refusal keeps its firebaserules property local.
+	if firebaseRulesEnabled(cfg) && cfg.Endpoints.FirebaseRules != 0 {
+		fr := addr(cfg.Endpoints.FirebaseRules)
+		vars = append(vars,
+			envVar{cliEndpointVar("firebaserules"), fr,
+				"the Firebase Rules API v1, REST, plaintext; read by no client library: pass http://" + fr + "/ to option.WithEndpoint"})
+	}
 
 	// Service Usage (#1352): gcloud services, and Terraform's
 	// google_project_service through service_usage_custom_endpoint.
@@ -817,6 +827,7 @@ func withLivePorts(cfg config.Config, live map[string]string) config.Config {
 		"gke":                    &e.GKE,
 		"monitoring":             &e.Monitoring,
 		"datatransfer":           &e.DataTransfer,
+		"firebaserules":          &e.FirebaseRules,
 		"compute":                &e.Compute,
 		"analyticshub":           &e.AnalyticsHub,
 		"workflows":              &e.Workflows,

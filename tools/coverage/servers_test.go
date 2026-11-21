@@ -198,6 +198,7 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 		// TestEveryUnservedMethodIsNotImplemented checks its 501s over HTTP
 		// (internal/service/compute).
 		if strings.HasPrefix(m, "sql.") || strings.HasPrefix(m, "serviceusage.") || strings.HasPrefix(m, "apikeys.") || strings.HasPrefix(m, "backupdr.") ||
+			strings.HasPrefix(m, "firebaserules.") ||
 			strings.HasPrefix(m, "cloudidentity.") || strings.HasPrefix(m, "compute.") || strings.HasPrefix(m, "siteVerification.") ||
 			strings.HasPrefix(m, "storagebatchoperations.") ||
 			strings.HasPrefix(m, "storageinsights.") || strings.HasPrefix(m, "storagetransfer.") ||

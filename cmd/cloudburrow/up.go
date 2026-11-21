@@ -17,6 +17,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/apikeys"
 	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
 	"github.com/cloudburrow/cloudburrow/internal/service/cloudquotas"
+	"github.com/cloudburrow/cloudburrow/internal/service/firebaserules"
 	"github.com/cloudburrow/cloudburrow/internal/service/logging"
 	"github.com/cloudburrow/cloudburrow/internal/service/monitoring"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
@@ -442,6 +443,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if serviceEnabled(cfg, config.ServicePubSub) {
 			monitoringSvc.pubsub = func() *netfwd.Forwarder { return forwarderFor(forwarders, "pubsub") }
 		}
+		// Firestore's document metrics, from its front's counts (#2048).
+		if serviceEnabled(cfg, config.ServiceFirestore) {
+			monitoringSvc.firestore = func() string { return forwardedAddr(forwarders, "firestore") }
+		}
 	}
 	monitoringSvc.register(coord)
 	if loggingSvc != nil {
@@ -523,6 +528,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	var authPlatformRef *authplatform.Store
 	// And the Cloud Storage companion APIs (#1957).
 	var storageJobsRef *storageJobs
+	// And the Firebase Rules API (#2048).
+	var firebaseRulesRef *firebaserules.Server
 	// And the Cloud SQL Admin API and Backup and DR (#1541, #1542).
 	var sqlAdminRef *sqladmin.Server
 	var backupDRRef *backupdr.Server
@@ -540,29 +547,30 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	adminAPI := mountAdmin(control, recorder, cfg, adminDeps{
 		tasks: tasksSvc, secrets: secretsSvc, forwarders: forwarders,
-		kms:          kmsSvc,
-		mysql:        mysqlCreds,
-		scheduler:    schedulerSvc,
-		privateCA:    privateCASvc,
-		analyticsHub: analyticsHub,
-		workflows:    workflowsSvc,
-		gke:          gkeSvc,
-		monitoring:   monitoringSvc,
-		compute:      computeSvc,
-		dataTransfer: dataTransfer,
-		logging:      loggingSvc,
-		run:          runSvc,
-		memorystore:  memorystoreAdminSvc,
-		projects:     func() []string { return registered() },
-		registry:     func() *resourcemanager.Registry { return projectRegistry },
-		serviceUsage: func() *serviceusage.Server { return serviceUsageRef },
-		apiKeys:      func() *apikeys.Server { return apiKeysRef },
-		cloudQuotas:  func() *cloudquotas.Server { return cloudQuotasRef },
-		siteVerify:   func() *siteverification.Server { return siteVerificationRef },
-		authPlatform: func() *authplatform.Store { return authPlatformRef },
-		storageJobs:  func() *storageJobs { return storageJobsRef },
-		sqlAdmin:     func() *sqladmin.Server { return sqlAdminRef },
-		backupDR:     func() *backupdr.Server { return backupDRRef },
+		kms:           kmsSvc,
+		mysql:         mysqlCreds,
+		scheduler:     schedulerSvc,
+		privateCA:     privateCASvc,
+		analyticsHub:  analyticsHub,
+		workflows:     workflowsSvc,
+		gke:           gkeSvc,
+		monitoring:    monitoringSvc,
+		compute:       computeSvc,
+		dataTransfer:  dataTransfer,
+		logging:       loggingSvc,
+		run:           runSvc,
+		memorystore:   memorystoreAdminSvc,
+		projects:      func() []string { return registered() },
+		registry:      func() *resourcemanager.Registry { return projectRegistry },
+		serviceUsage:  func() *serviceusage.Server { return serviceUsageRef },
+		apiKeys:       func() *apikeys.Server { return apiKeysRef },
+		cloudQuotas:   func() *cloudquotas.Server { return cloudQuotasRef },
+		siteVerify:    func() *siteverification.Server { return siteVerificationRef },
+		authPlatform:  func() *authplatform.Store { return authPlatformRef },
+		storageJobs:   func() *storageJobs { return storageJobsRef },
+		firebaseRules: func() *firebaserules.Server { return firebaseRulesRef },
+		sqlAdmin:      func() *sqladmin.Server { return sqlAdminRef },
+		backupDR:      func() *backupdr.Server { return backupDRRef },
 		projectStore: func() store.Store {
 			if projectRegistry == nil {
 				return nil
@@ -977,6 +985,14 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 	}
 
+	// The Firebase Rules API (#2048), over the Firestore emulator's own
+	// rules evaluation.
+	firebaseRulesSrv := newFirebaseRulesServer(cfg, func() *netfwd.Forwarder { return forwarderFor(forwarders, "firestore") })
+	if firebaseRulesSrv != nil {
+		firebaseRulesRef = firebaseRulesSrv
+		coord.Register(firebaseRulesSrv)
+	}
+
 	// The Cloud SQL Admin API (#1301), over whichever database servers run.
 	sqlAdminSrv := newSQLAdminServer(cfg, forwarders, mysqlCreds, stderr)
 	if sqlAdminSrv != nil {
@@ -1246,6 +1262,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			live["monitoring"] = a
 		}
 		storageJobsSrv.live(live)
+		if a := firebaseRulesSrv.Addr(); a != "" {
+			live["firebaserules"] = a
+		}
 		if backupDRSrv != nil && backupDRSrv.Addr() != "" {
 			live["backupdr"] = backupDRSrv.Addr()
 		}

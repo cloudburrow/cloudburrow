@@ -82,6 +82,7 @@ func TestGenerateServiceIdentityEveryEntry(t *testing.T) {
 		"bigquerydatatransfer.googleapis.com":   "gcp-sa-bigquerydatatransfer.iam.gserviceaccount.com",
 		"run.googleapis.com":                    "serverless-robot-prod.iam.gserviceaccount.com",
 		"firestore.googleapis.com":              "gcp-sa-firestore.iam.gserviceaccount.com",
+		"firebaserules.googleapis.com":          "firebase-rules.iam.gserviceaccount.com",
 		"bigtableadmin.googleapis.com":          "gcp-sa-bigtable.iam.gserviceaccount.com",
 		"spanner.googleapis.com":                "gcp-sa-spanner.iam.gserviceaccount.com",
 		"redis.googleapis.com":                  "cloud-redis.iam.gserviceaccount.com",

@@ -425,8 +425,9 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			gate.PassAs = "owner"
 		}
 	}
+	var fa *firestoreadmin.Admin
 	if *firestoreAdmin {
-		fa := firestoreadmin.New(*upstream)
+		fa = firestoreadmin.New(*upstream)
 		if gate != nil {
 			gate.Services = append(gate.Services, iamgate.Firestore)
 			gate.PassAs = "owner"
@@ -534,6 +535,14 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if docs != nil {
 			h = docs.Wrap(h)
 		}
+		if fa != nil {
+			// Reads, writes, deletes and query statistics (#2048), then
+			// who Security Rules apply to: server libraries' calls are
+			// sent as the emulator's owner.
+			h = firestoreadmin.ClientAuth(fa.Usage().Wrap(h))
+		}
+		// The IAM gate outermost: it reads the caller's own bearer token
+		// before ClientAuth or PassAs rewrites it.
 		h = gate.Wrap(h)
 		servers = append(servers, Server(h, logger.Printf, *service))
 		logger.Printf("call front: serving %s for the emulator at %s", l.Addr(), p[1])

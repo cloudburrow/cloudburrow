@@ -377,6 +377,10 @@ type Endpoints struct {
 	// (bigquerydatatransfer.googleapis.com, #1948): gRPC and JSON on one
 	// port, served when BigQuery is.
 	DataTransfer int `json:"dataTransfer"`
+	// FirebaseRules is the host port of the Firebase Rules API
+	// (firebaserules.googleapis.com, #2048): REST, served when Firestore
+	// is, over the Firestore emulator's own rules evaluation.
+	FirebaseRules int `json:"firebaseRules"`
 	// AnalyticsHub is the host port of BigQuery sharing, formerly
 	// Analytics Hub (analyticshub.googleapis.com, #1960): gRPC and JSON on
 	// one port, served when BigQuery is.
@@ -465,6 +469,7 @@ func (e *Endpoints) fields() []endpointField {
 		{"storageinsights", &e.StorageInsights},
 		{"storagetransfer", &e.StorageTransfer},
 		{"datatransfer", &e.DataTransfer},
+		{"firebaserules", &e.FirebaseRules},
 		{"analyticshub", &e.AnalyticsHub},
 		{"workflows", &e.Workflows},
 		{"onnx", &e.ONNX},
@@ -886,6 +891,9 @@ func Default() Config {
 			// branches (BigQuery Data Transfer, the Storage companions,
 			// Workflows), so 9042.
 			AnalyticsHub: 9042,
+			// The Firebase Rules API (#2048), beside Firestore: the next
+			// free port after BigQuery sharing's 9042.
+			FirebaseRules: 9043,
 			// Workflows (#1986): after 9029-9037, which the API Keys API,
 			// Kubernetes Engine, Compute Engine, Monitoring and other open
 			// branches took.
