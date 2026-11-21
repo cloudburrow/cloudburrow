@@ -6,7 +6,6 @@ import (
 	"regexp"
 	"strings"
 
-	dfpb "cloud.google.com/go/dataform/apiv1/dataformpb"
 	longrunningpb "cloud.google.com/go/longrunning/autogen/longrunningpb"
 	"google.golang.org/genproto/googleapis/api/annotations"
 	locationpb "google.golang.org/genproto/googleapis/cloud/location"
@@ -22,7 +21,7 @@ import (
 
 // Register serves the API, its operations and its locations on g.
 func (s *Server) Register(g grpc.ServiceRegistrar) {
-	dfpb.RegisterDataformServer(g, s)
+	g.RegisterService(s.keyedDesc(), s)
 	longrunningpb.RegisterOperationsServer(g, &operations{s: s})
 	locations.Register(g, &locationsServer{})
 }

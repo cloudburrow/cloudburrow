@@ -26,8 +26,13 @@ func checkInvocationConfig(c *dfpb.InvocationConfig) error {
 	if c.GetEndUserAuthConfig() != nil {
 		return apierror.Unimplemented("invocation_config.end_user_auth_config is not served by CloudBurrow")
 	}
-	if c.GetExecutionMode() != dfpb.InvocationConfig_EXECUTION_MODE_UNSPECIFIED {
-		return apierror.Unimplemented("invocation_config.execution_mode is not served by CloudBurrow")
+	// DEFAULT "runs all actions except unit tests. Same as
+	// ALL_EXCEPT_UNIT_TESTS", which is what every invocation here does.
+	// UNIT_TESTS_ONLY would run the project's unit tests, which a
+	// compilation result carries as no action and an invocation reports in
+	// no field Google documents.
+	if c.GetExecutionMode() == dfpb.InvocationConfig_UNIT_TESTS_ONLY {
+		return apierror.Unimplemented("invocation_config.execution_mode UNIT_TESTS_ONLY is not served by CloudBurrow: unit tests are not run")
 	}
 	if n := c.ConcurrentActionsLimit; n != nil && *n < 0 {
 		return apierror.InvalidArgument("invocation_config.concurrent_actions_limit must not be negative")

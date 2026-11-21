@@ -420,6 +420,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 				}
 				return ""
 			}
+			dataformSvc.runAddr = runSvc.Addr
 		}
 	}
 	dataformSvc.register(coord)
@@ -831,6 +832,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		parameterManagerSvc.keys = cmekKeys(kmsSvc, iamEnforcer)
 		parameterManagerSvc.interpose = append(parameterManagerSvc.interpose, iamEnforcer.Interceptor(iameval.ParameterManager))
 		parameterManagerSvc.wrapJSON = jsonEnforcer(iamEnforcer, iameval.ParameterManager, parametermanager.Mixins())
+	}
+	// Dataform repositories' customer-managed keys (#2105).
+	if dataformSvc != nil {
+		dataformSvc.keys = cmekKeys(kmsSvc, iamEnforcer)
 	}
 	// Log buckets' customer-managed keys (#1950).
 	if loggingSvc != nil {
