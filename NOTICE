@@ -27,6 +27,10 @@ The binary is linked with SLH-DSA code from Cloudflare's CIRCL
 the BSD 3-Clause License, copied with one added function into
 third_party/circl-slhdsa/, whose LICENSE and PROVENANCE.md say so.
 
+The binary is linked with Google's license classifier,
+github.com/google/licensecheck v0.3.1, Copyright (c) 2019 The Go Authors,
+under the BSD 3-Clause License.
+
 The binary is linked with github.com/creack/pty, Copyright (c) 2011 Keith
 Rarick, under the MIT License.
 

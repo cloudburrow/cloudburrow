@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -164,6 +165,11 @@ func Scan(ctx context.Context, d Dir, archive string) (*Result, error) {
 	r := &Result{}
 	if err := json.Unmarshal(b, r); err != nil {
 		return nil, fmt.Errorf("osv-scanner result: %w", err)
+	}
+	// Offline, the scanner reads no language package's license (it asks
+	// deps.dev for those): they are read from the image itself (#2072).
+	if err := AddLocalLicenses(r, archive); err != nil {
+		slog.Warn("Artifact Analysis could not read the image's package licenses", "err", err)
 	}
 	return r, nil
 }
