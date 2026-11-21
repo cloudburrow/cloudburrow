@@ -55,6 +55,16 @@ func NewMatcher(services []string, mixins []*annotations.HttpRule) *Matcher {
 // the field paths its path sets, by their unescaped values; ok is false
 // when no rule binds it.
 func (m *Matcher) Match(r *http.Request) (fullMethod string, fields map[string]string, ok bool) {
+	rt, fields, ok := m.MatchRoute(r)
+	if !ok {
+		return "", nil, false
+	}
+	return "/" + rt.Service + "/" + rt.MethodName, fields, true
+}
+
+// MatchRoute is Match's route, whose Body names the request field a JSON
+// body sets.
+func (m *Matcher) MatchRoute(r *http.Request) (route Route, fields map[string]string, ok bool) {
 	path := r.URL.EscapedPath()
 	for _, p := range []string{path, strings.ReplaceAll(path, ":", "%3A")} {
 		for i := range m.routes {
@@ -74,8 +84,8 @@ func (m *Matcher) Match(r *http.Request) (fullMethod string, fields map[string]s
 					fields[v] = caps[k+1]
 				}
 			}
-			return "/" + rt.Service + "/" + rt.MethodName, fields, true
+			return *rt, fields, true
 		}
 	}
-	return "", nil, false
+	return Route{}, nil, false
 }

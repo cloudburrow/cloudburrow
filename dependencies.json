@@ -782,6 +782,13 @@
         "verification": "go.sum",
         "notes": "The console terminal (#781): internal/k8s starts `kubectl exec -it` on a pseudo-terminal, which kubectl requires before it allocates one in the container, as the session leader so a resize reaches it as SIGWINCH. golang.org/x/sys has no call that opens one."
       },
+      "goXMLDSig": {
+        "module": "github.com/russellhaering/goxmldsig",
+        "version": "v1.6.1",
+        "license": "Apache-2.0",
+        "verification": "go.sum",
+        "notes": "The Security Token Service's SAML exchange (#2065, internal/wif/saml.go): verifies a SAML 2.0 response's or assertion's enveloped XML signature (exclusive C14N, XML-DSig) against the signing certificates of a workload or workforce pool provider's IdP metadata. Google publishes no XML-DSig library for Go. Pure Go, no cgo. It brings github.com/beevik/etree v1.7.0 (BSD-2-Clause), the XML tree it signs and walks, and github.com/jonboulle/clockwork v0.5.0 (Apache-2.0), indirect. internal/wif/samltest also signs test assertions with it, with keys generated in memory."
+      },
       "goPrometheus": {
         "module": "github.com/prometheus/prometheus",
         "version": "v0.316.0",

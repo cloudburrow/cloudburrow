@@ -613,3 +613,9 @@ func (c *CA) GetVulnerabilityOccurrencesSummary(_ context.Context, req *capb.Get
 	})
 	return out, nil
 }
+
+// IAMPolicy is a note's or an occurrence's stored policy, for IAM
+// enforcement (#1879), which applies it.
+func (s *Server) IAMPolicy(ctx context.Context, req *iampb.GetIamPolicyRequest) (*iampb.Policy, error) {
+	return (&CA{st: s.st}).GetIamPolicy(ctx, req)
+}

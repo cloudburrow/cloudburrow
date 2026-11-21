@@ -258,6 +258,9 @@ func init() {
 	}
 }
 
+// Mixins are the JSON API's Locations, Operations and IAMPolicy bindings.
+func Mixins() []*annotations.HttpRule { return mixins }
+
 // Transcoder is the JSON API's configuration, with nothing registered.
 func Transcoder() *rest.Transcoder {
 	return &rest.Transcoder{Packages: []string{"google.cloud.security.privateca.v1"}, Mixins: mixins, SnakeCaseMasks: true}

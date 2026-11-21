@@ -50,9 +50,11 @@ type dataTransferSvc struct {
 	tracing   *telemetry.Tracing
 	calls     grpctransport.Observer
 	interpose []grpc.UnaryServerInterceptor
-	requests  func(rest.Request)
-	bigquery  func() *netfwd.Forwarder
-	pubsub    func() *netfwd.Forwarder
+	// wrapJSON, when set, wraps the JSON API (IAM enforcement, #1879).
+	wrapJSON func(http.Handler) http.Handler
+	requests func(rest.Request)
+	bigquery func() *netfwd.Forwarder
+	pubsub   func() *netfwd.Forwarder
 	// registry is the project registry, which names a project by number.
 	registry func() *resourcemanager.Registry
 
@@ -138,6 +140,9 @@ func (s *dataTransferSvc) Start(ctx context.Context) error {
 	locations := &datatransfer.LocationsServer{}
 	register := func(g grpc.ServiceRegistrar) { api.Register(g); locations.Register(g) }
 	var jsonAPI http.Handler = datatransfer.NewRESTHandler(register)
+	if s.wrapJSON != nil {
+		jsonAPI = s.wrapJSON(jsonAPI)
+	}
 	if s.requests != nil {
 		jsonAPI = rest.Observe(jsonAPI, s.requests)
 	}

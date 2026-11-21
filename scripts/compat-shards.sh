@@ -64,9 +64,13 @@
 # (UP_FLAGS) and runs only the enforcement tests (COMPAT_RUN,
 # ^TestIAMEnforcement), which skip on every other shard's instance, as
 # those run with enforcement off (#1879): Cloud Storage, Pub/Sub, Cloud
-# Tasks, Secret Manager, Cloud KMS, Cloud Run (for run.routes.invoke),
-# BigQuery (for Pub/Sub's BigQuery subscriptions, #1998), Cloud Scheduler
-# and Workflows.
+# Tasks, Secret Manager, Cloud KMS, Cloud Run (for run.routes.invoke,
+# iam.serviceAccounts.actAs and, since the sixth round, its admin API and
+# Cloud Functions, Artifact Registry and Cloud Build on its port), Cloud
+# Scheduler, Workflows, Cloud Logging, Cloud Monitoring, Memorystore, the
+# Cloud SQL Admin API, Certificate Authority Service, Kubernetes Engine,
+# Compute Engine, API Keys, Service Usage and BigQuery (for Pub/Sub's
+# BigQuery subscriptions, #1998).
 
 # An eleventh, cross, is the run shard's instance again for
 # COMPAT_CROSS_TESTS, which the run shard skips: Eventarc's tests and
@@ -438,14 +442,26 @@ compat_shard() {
       # minutes; the other suites ran with enforcement off in their shards.
       # BigQuery for BigQuery sharing's (Analytics Hub, #1989) and for the
       # Pub/Sub BigQuery subscriptions' writer roles (#1998), with the one
-      # project its emulator serves. Cloud Scheduler and Workflows since
-      # the fourth round.
-      SERVICES=storage,pubsub,tasks,secretmanager,kms,run,bigquery,scheduler,workflows
-      TEST_VARS+=,STORAGE,PUBSUB,TASKS,SECRETS,KMS,RUN,RESOURCEMANAGER,ANALYTICSHUB,BIGQUERY,BIGQUERY_PROJECT,SCHEDULER,WORKFLOWS,IAM_ENFORCEMENT
+      # project its emulator serves.
+      # Cloud Scheduler and Workflows since the fourth round; Cloud
+      # Logging, Cloud Monitoring, Memorystore and the Cloud SQL Admin API
+      # since the fifth; Certificate Authority Service, Kubernetes Engine
+      # (no cluster is made), Compute Engine, API Keys and Service Usage
+      # since the seventh; the local AI endpoint (Vertex AI, Document AI,
+      # Speech-to-Text, Translation), which Cloud Run starts with no
+      # model, since the eighth; Firestore, Spanner and Bigtable, whose
+      # fronts check each call, since the ninth; the Datastore API since
+      # the tenth; the BigQuery Data Transfer Service, Backup and DR and the Cloud
+      # Storage companion APIs since the twelfth.
+      SERVICES=storage,pubsub,tasks,secretmanager,kms,run,bigquery,scheduler,workflows,logging,monitoring,memorystore,cloudsql,privateca,gke,compute,firestore,datastore,spanner,bigtable,backupdr
+      TEST_VARS+=,STORAGE,PUBSUB,TASKS,SECRETS,KMS,RUN,RESOURCEMANAGER,ANALYTICSHUB,BIGQUERY,BIGQUERY_PROJECT,SCHEDULER,WORKFLOWS,LOGGING,MONITORING,MEMORYSTORE_ADMIN,SQLADMIN,PRIVATECA,GKE,COMPUTE,APIKEYS,SERVICEUSAGE,LOCALAI,FIRESTORE,DATASTORE,SPANNER,BIGTABLE,DATATRANSFER,BACKUPDR,STORAGE_BATCH,STORAGE_INSIGHTS,STORAGE_TRANSFER,IAM_ENFORCEMENT
       UP_FLAGS=(--iam-enforcement=on)
       # And Workload Identity Federation's federated principal reading a
-      # bucket, refused until it is granted (#1941), which needs enforcement.
-      COMPAT_RUN='^Test(IAMEnforcement|WorkloadIdentityFederationStorage$)' ;;
+      # bucket, refused until it is granted (#1941), and Workforce Identity
+      # Federation's (#2056), its SAML exchange read through Cloud Storage
+      # and its pools' own IAM policies (#2065), and SCIM-provisioned users and
+      # groups read through Cloud Storage (#2068), which need enforcement.
+      COMPAT_RUN='^Test(IAMEnforcement|WorkloadIdentityFederationStorage$|WorkforceIdentityFederationStorage$|WorkforceIdentityFederationSAML$|WorkforcePoolIAMPolicy$|WorkforceScimProvisioning$)' ;;
     localai)
       # The local AI tests (#1985): BigQuery and Cloud Storage for the AI
       # and ML functions' tables and object tables, Resource Manager (every

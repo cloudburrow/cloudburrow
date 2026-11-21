@@ -43,6 +43,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/frontready"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/iamcheck"
+	"github.com/cloudburrow/cloudburrow/internal/iamgate"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 	"github.com/cloudburrow/cloudburrow/internal/queryfront"
@@ -301,7 +302,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	firestoreAdminAddr := fs.String("firestore-admin-addr", "", "the Firestore front (host:port), whose Admin API says which databases the Datastore API serves (with --datastore-databases)")
 	datastoreAddr := fs.String("datastore", "", "the Datastore front (host:port), which clears a deleted Datastore mode database's entities (with --firestore-admin)")
 	kmsAddr := fs.String("kms", "", "the instance's Cloud KMS (host:port, gRPC), which customer-managed keys are checked against (with --firestore-admin or --spanner-instances)")
-	iamCheck := fs.String("iam-check", "", "http://host:port of the host's IAM evaluator, which checks the Spanner service agent's use of a customer-managed key (with --spanner-instances and --kms; what `up --iam-enforcement=on` passes, #1950)")
+	iamCheck := fs.String("iam-check", "", "http://host:port of the host's IAM evaluator, which checks each Firestore (with --firestore-admin), Datastore (with --datastore-databases) or Spanner (with --spanner-instances) call's caller, and the Spanner service agent's use of a customer-managed key (with --kms; what `up --iam-enforcement=on` passes, #1879, #1950)")
 	queries := fs.String("queries", "", "answer the query RPCs the emulator does not serve: datastore (RunAggregationQuery) or firestore (PartitionQuery)")
 	if err := fs.Parse(args); err != nil {
 		return ErrUsage
@@ -318,8 +319,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		fmt.Fprintln(stderr, "call-front: --datastore needs --firestore-admin, and --kms --firestore-admin or --spanner-instances")
 		return ErrUsage
 	}
-	if *iamCheck != "" && (!*spannerInstances || *kmsAddr == "") {
-		fmt.Fprintln(stderr, "call-front: --iam-check needs --spanner-instances and --kms")
+	if *iamCheck != "" && !*spannerInstances && !*firestoreAdmin && !*datastoreDBs {
+		fmt.Fprintln(stderr, "call-front: --iam-check needs --spanner-instances, --firestore-admin or --datastore-databases")
 		return ErrUsage
 	}
 	if *firestoreAdminAddr != "" && !*datastoreDBs {
@@ -410,8 +411,29 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// the instance's Cloud Storage, and indexes.
 		icpts = append(icpts, dbs, newDatastoreAdmin(dbs, *storage))
 	}
+	// IAM enforcement (#1879): each Firestore or Spanner call is checked
+	// by the host's evaluator before any intercept or the emulator sees
+	// it (internal/iamgate).
+	var gate *iamgate.Gate
+	if *iamCheck != "" {
+		gate = &iamgate.Gate{Client: &iamcheck.Client{Base: *iamCheck}}
+		if *datastoreDBs {
+			// The Datastore API and its Admin API (Datastore mode);
+			// the emulator, Firestore's in Datastore mode, reads a
+			// bearer token as Firestore's does.
+			gate.Services = append(gate.Services, iamgate.Datastore)
+			gate.PassAs = "owner"
+		}
+	}
 	if *firestoreAdmin {
 		fa := firestoreadmin.New(*upstream)
+		if gate != nil {
+			gate.Services = append(gate.Services, iamgate.Firestore)
+			gate.PassAs = "owner"
+			// Firestore with MongoDB compatibility's token connections
+			// are checked by the same evaluator.
+			fa.UseIAMCheck(gate.Client)
+		}
 		fa.SetStorage(*storage)
 		fa.SetDatastore(*datastoreAddr)
 		if err := fa.SetKMS(*kmsAddr); err != nil {
@@ -482,6 +504,10 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			defer conn.Close()
 			si.UseKeys(cmek.Keys{KMS: func() cmek.KMS { return k }, Check: cmek.Remote(&iamcheck.Client{Base: *iamCheck})})
 		}
+		if gate != nil {
+			gate.Services = append(gate.Services, iamgate.Spanner)
+			gate.Own = si.OwnPolicies
+		}
 		if *stateDir != "" {
 			if err := si.KeepState(ctx, *stateDir, logger.Printf); err != nil {
 				return fmt.Errorf("the Spanner front's state: %w", err)
@@ -508,6 +534,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if docs != nil {
 			h = docs.Wrap(h)
 		}
+		h = gate.Wrap(h)
 		servers = append(servers, Server(h, logger.Printf, *service))
 		logger.Printf("call front: serving %s for the emulator at %s", l.Addr(), p[1])
 	}

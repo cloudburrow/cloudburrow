@@ -1,8 +1,10 @@
 package iameval
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -52,6 +54,26 @@ type Enforcer struct {
 	// OwnerEmail is the instance's own account, whom a request with no
 	// bearer token is served as: deny policies apply to it too (#1886).
 	OwnerEmail string
+	// Scopes resolve a service's resource names, by service host, where
+	// the name alone does not say what policies apply (round 11).
+	Scopes map[string]func(resource string) Scope
+	// ParentOf is a project's or folder's current parent ("folders/N",
+	// "organizations/N"), "" for none or an unknown one.
+	ParentOf func(resource string) string
+}
+
+// Scope is what applies to a resource whose name does not say.
+type Scope struct {
+	// Resource is the name its policies are kept under, "" for the name
+	// as given.
+	Resource string
+	// Own, when set, are the service's own policy resources that apply,
+	// the deepest first, in place of the service's PolicyCollections'.
+	Own []string
+	// Parent is the hierarchy resource ("projects/P", "folders/N",
+	// "organizations/N") whose ancestry applies above it, "" for the one
+	// its name shows.
+	Parent string
 }
 
 // email is the account c is checked as.
@@ -92,7 +114,7 @@ func (e *Enforcer) Interceptor(svc *Service) grpc.UnaryServerInterceptor {
 		if e == nil || e.On == nil || !e.On() {
 			return handler(ctx, req)
 		}
-		if strings.HasSuffix(info.FullMethod, "/TestIamPermissions") {
+		if strings.HasSuffix(info.FullMethod, "/TestIamPermissions") && svc.answersTestIAM(info.FullMethod) {
 			return e.testPermissions(ctx, svc, req, handler)
 		}
 		_, m := ForMethod(svc, info.FullMethod)
@@ -103,8 +125,37 @@ func (e *Enforcer) Interceptor(svc *Service) grpc.UnaryServerInterceptor {
 		if !ok {
 			return handler(ctx, req)
 		}
-		resource := field(msg.ProtoReflect(), m.Field)
-		if err := e.Authorize(ctx, svc, bearer(ctx), m.PermissionOf(resource), resource); err != nil {
+		if m.Filter != "" {
+			return e.filterGRPC(ctx, svc, m, req, handler)
+		}
+		resources := fieldValues(msg.ProtoReflect(), m.Field)
+		for _, resource := range resources {
+			if resource == "" && m.Optional {
+				continue
+			}
+			if err := e.Authorize(ctx, svc, bearer(ctx), m.PermissionOf(resource), resource); err != nil {
+				return nil, err
+			}
+		}
+		resource := resources[0]
+		if m.IfSet != "" && hasField(msg.ProtoReflect(), m.IfSet) {
+			if err := e.Authorize(ctx, svc, bearer(ctx), m.IfSetPermission, resource); err != nil {
+				return nil, err
+			}
+		}
+		for _, a := range m.Also {
+			for _, r := range actAsFields(msg.ProtoReflect(), []string{a.Field}) {
+				if err := e.Authorize(ctx, svc, bearer(ctx), a.Permission, r); err != nil {
+					return nil, err
+				}
+			}
+		}
+		for _, account := range actAsFields(msg.ProtoReflect(), m.ActAs) {
+			if err := e.AuthorizeActAs(ctx, svc, bearer(ctx), Project(resource), account); err != nil {
+				return nil, err
+			}
+		}
+		if err := e.extra(ctx, svc, m, bearer(ctx), resource); err != nil {
 			return nil, err
 		}
 		return handler(ctx, req)
@@ -165,12 +216,39 @@ func (e *Enforcer) Authorize(ctx context.Context, svc *Service, bearer, permissi
 // Request is the check of permission on resource in svc for email, with
 // the service's own policies on the resource and its parents.
 func (e *Enforcer) Request(ctx context.Context, svc *Service, email, permission, resource string) Request {
+	own, parent := svc.PolicyResources(resource), ""
+	if f := e.Scopes[svc.Name]; f != nil {
+		// A name its policies are not kept under (a service account by
+		// "projects/-", a tag value), or whose ancestry its name does
+		// not show (#1879, round 11).
+		sc := f(resource)
+		if sc.Resource != "" {
+			resource = sc.Resource
+			own = svc.PolicyResources(resource)
+		}
+		if sc.Own != nil {
+			own = sc.Own
+		}
+		parent = sc.Parent
+	}
 	req := Request{Email: email, Permission: permission, Resource: resource, Type: svc.Type(resource),
 		Service: svc.Name, Project: Project(resource), Time: e.now()}
+	if parent != "" {
+		req.Project = Project(parent)
+	}
 	if get := e.Policies[svc.Name]; get != nil {
-		for _, r := range svc.PolicyResources(resource) {
+		for _, r := range own {
 			req.Own = append(req.Own, Attached{Resource: "//" + svc.Name + "/" + r, Policy: get(ctx, r)})
 		}
+	}
+	if req.Project == "" && e.Eval != nil {
+		// A folder's, the organization's or a billing account's resource:
+		// its root's policy and the root's ancestors' apply (#1879).
+		root := resource
+		if parent != "" {
+			root = parent
+		}
+		req.Own = append(req.Own, e.Eval.hierarchyPolicies(root)...)
 	}
 	return req
 }
@@ -217,6 +295,10 @@ func bearer(ctx context.Context) string {
 	return ""
 }
 
+// IncomingBearer is the bearer token of a call's incoming gRPC metadata,
+// "" for none.
+func IncomingBearer(ctx context.Context) string { return bearer(ctx) }
+
 // Bearer is an Authorization header's bearer token, "" for none.
 func Bearer(header string) string {
 	t, _ := cutBearer(header)
@@ -261,12 +343,13 @@ func (e *Enforcer) HTTP(svc *Service, m *rest.Matcher, next http.Handler) http.H
 			next.ServeHTTP(w, r)
 			return
 		}
-		full, fields, ok := m.Match(r)
+		route, fields, ok := m.MatchRoute(r)
+		full := "/" + route.Service + "/" + route.MethodName
 		if !ok {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if strings.HasSuffix(full, "/TestIamPermissions") {
+		if strings.HasSuffix(full, "/TestIamPermissions") && svc.answersTestIAM(full) {
 			e.testPermissionsJSON(w, r, svc, fields["resource"], next)
 			return
 		}
@@ -275,8 +358,57 @@ func (e *Enforcer) HTTP(svc *Service, m *rest.Matcher, next http.Handler) http.H
 			next.ServeHTTP(w, r)
 			return
 		}
-		resource := fields[row.Field]
-		if err := e.Authorize(r.Context(), svc, Bearer(r.Header.Get("Authorization")), row.PermissionOf(resource), resource); err != nil {
+		if row.Filter != "" {
+			e.filterJSON(w, r, svc, row, next)
+			return
+		}
+		var raw []byte
+		if route.Body != "" && r.Body != nil {
+			b, err := io.ReadAll(io.LimitReader(r.Body, 64<<20))
+			_ = r.Body.Close()
+			r.Body = io.NopCloser(bytes.NewReader(b))
+			if err == nil {
+				raw = b
+			}
+		}
+		resources := jsonResources(fields, raw, route.Body, row.Field)
+		for _, resource := range resources {
+			if resource == "" && row.Optional {
+				continue
+			}
+			if err := e.Authorize(r.Context(), svc, Bearer(r.Header.Get("Authorization")), row.PermissionOf(resource), resource); err != nil {
+				WriteJSONStatus(w, err)
+				return
+			}
+		}
+		resource := resources[0]
+		if row.IfSet != "" && jsonHas(raw, route.Body, row.IfSet) {
+			if err := e.Authorize(r.Context(), svc, Bearer(r.Header.Get("Authorization")), row.IfSetPermission, resource); err != nil {
+				WriteJSONStatus(w, err)
+				return
+			}
+		}
+		for _, a := range row.Also {
+			for _, res := range jsonActAs(raw, route.Body, []string{a.Field}) {
+				if err := e.Authorize(r.Context(), svc, Bearer(r.Header.Get("Authorization")), a.Permission, res); err != nil {
+					WriteJSONStatus(w, err)
+					return
+				}
+			}
+		}
+		accounts := jsonActAs(raw, route.Body, row.ActAs)
+		for _, q := range row.ActAsQuery {
+			if v := strings.TrimPrefix(r.URL.Query().Get(q), "serviceAccount:"); v != "" {
+				accounts = append(accounts, v)
+			}
+		}
+		for _, account := range accounts {
+			if err := e.AuthorizeActAs(r.Context(), svc, Bearer(r.Header.Get("Authorization")), Project(resource), account); err != nil {
+				WriteJSONStatus(w, err)
+				return
+			}
+		}
+		if err := e.extra(r.Context(), svc, row, Bearer(r.Header.Get("Authorization")), resource); err != nil {
 			WriteJSONStatus(w, err)
 			return
 		}
@@ -378,4 +510,87 @@ func (e *Enforcer) HTTPPaths(svc *Service, methods []JSONMethod, next http.Handl
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// checksPolicies is whether svc's table checks its IAM policy methods,
+// and so answers TestIamPermissions with what the caller holds: a table
+// that checks only actAs (Cloud Run's, Cloud Functions') leaves its IAM
+// methods as they were.
+func (s *Service) checksPolicies() bool {
+	for full := range s.Methods {
+		if strings.HasSuffix(full, "/GetIamPolicy") {
+			return true
+		}
+	}
+	return false
+}
+
+// answersTestIAM is whether svc's table answers a TestIamPermissions call
+// of full with what the caller holds: its own service's method, or the
+// IAMPolicy mixin's when the table checks that mixin's methods. Several
+// APIs share a port (Cloud Run's serves Cloud Functions, Artifact Registry
+// and Cloud Build), so each table answers only its own.
+func (s *Service) answersTestIAM(full string) bool {
+	if !s.checksPolicies() {
+		return false
+	}
+	service, _, _ := strings.Cut(strings.TrimPrefix(full, "/"), "/")
+	if service == "google.iam.v1.IAMPolicy" {
+		_, ok := s.Methods["/google.iam.v1.IAMPolicy/GetIamPolicy"]
+		return ok
+	}
+	return Services[service] == s
+}
+
+// hasField is whether m sets the message field at the dotted path.
+func hasField(m protoreflect.Message, path string) bool {
+	parts := strings.Split(path, ".")
+	for i, p := range parts {
+		fd := m.Descriptor().Fields().ByName(protoreflect.Name(p))
+		if fd == nil || !m.Has(fd) {
+			return false
+		}
+		if i == len(parts)-1 {
+			return true
+		}
+		if fd.Kind() != protoreflect.MessageKind || fd.IsList() || fd.IsMap() {
+			return false
+		}
+		m = m.Get(fd).Message()
+	}
+	return false
+}
+
+// jsonHas is whether a JSON request's body sets the field at path, a
+// request field path as jsonActAs reads it.
+func jsonHas(raw []byte, body, path string) bool {
+	if body == "" || len(raw) == 0 {
+		return false
+	}
+	var doc any
+	if json.Unmarshal(raw, &doc) != nil {
+		return false
+	}
+	parts := strings.Split(path, ".")
+	if body != "*" {
+		if parts[0] != body {
+			return false
+		}
+		parts = parts[1:]
+	}
+	for _, p := range parts {
+		m, ok := doc.(map[string]any)
+		if !ok {
+			return false
+		}
+		v, ok := m[lowerCamel(p)]
+		if !ok {
+			v, ok = m[p]
+		}
+		if !ok || v == nil {
+			return false
+		}
+		doc = v
+	}
+	return true
 }

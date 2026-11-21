@@ -200,12 +200,18 @@ type Server struct {
 	// to the store key it is under; nil until first built.
 	byString map[string]string
 	ops      map[string]map[string]any
+	// opProjects is each operation's project, which IAM enforcement
+	// checks operations.get on (#1879).
+	opProjects map[string]string
 
 	srv *http.Server
 	ln  net.Listener
 	// Observe, if set, is called once per request with the method name and
 	// the answer's HTTP status.
 	Observe func(method string, code int)
+	// Wrap, if set before Start, wraps the API's handler (IAM
+	// enforcement, #1879).
+	Wrap func(http.Handler) http.Handler
 }
 
 // NewServer serves at addr once started, keeping keys in st.
@@ -222,7 +228,11 @@ func (s *Server) Start(context.Context) error {
 		return fmt.Errorf("apikeys: listen on %s: %w", s.addr, err)
 	}
 	s.ln = ln
-	s.srv = &http.Server{Handler: hostguard.Wrap(sysparams.Wrap(s, sysparams.Options{})), ReadHeaderTimeout: 10 * time.Second}
+	var h http.Handler = s
+	if s.Wrap != nil {
+		h = s.Wrap(h)
+	}
+	s.srv = &http.Server{Handler: hostguard.Wrap(sysparams.Wrap(h, sysparams.Options{})), ReadHeaderTimeout: 10 * time.Second}
 	go func() { _ = s.srv.Serve(ln) }()
 	return nil
 }
@@ -1074,8 +1084,39 @@ func (s *Server) done(k *Key, withKeyString bool) map[string]any {
 	op := map[string]any{"name": name, "done": true, "response": resp}
 	s.mu.Lock()
 	s.ops[name] = op
+	if s.opProjects == nil {
+		s.opProjects = map[string]string{}
+	}
+	s.opProjects[name] = k.Project
 	s.mu.Unlock()
 	return op
+}
+
+// OperationProject is the project of the operation name made, "" for an
+// operation this server did not make (IAM enforcement, #1879).
+func (s *Server) OperationProject(name string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.opProjects[name]
+}
+
+// KeyProject is the project of the key whose key string is keyString,
+// ok false for none (IAM enforcement of keys.lookupKey, #1879).
+func (s *Server) KeyProject(keyString string) (project string, ok bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.index() != nil {
+		return "", false
+	}
+	sk, found := s.byString[keyString]
+	if !found {
+		return "", false
+	}
+	k, err := s.load(sk)
+	if err != nil {
+		return "", false
+	}
+	return k.Project, true
 }
 
 func (s *Server) operation(name string) (any, error) {
@@ -1113,6 +1154,7 @@ func (s *Server) ResetProject(project string) error {
 	for n := range s.ops {
 		if strings.HasPrefix(n, opPrefix) {
 			delete(s.ops, n)
+			delete(s.opProjects, n)
 		}
 	}
 	return nil

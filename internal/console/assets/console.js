@@ -565,8 +565,12 @@ const ROUTES = [
   // provider, Add provider, Edit, Disable, Enable, Delete and Restore.
   { path: "/iam-admin/workload-identity-pools", service: "iam-workload-identity", icon: "iam", title: "Workload Identity Federation", kind: "Workload identity pool", section: "IAM & Admin",
     product: "iam", productTitle: "IAM & Admin" },
-  { path: "/iam-admin/workforce-identity-pools", title: "Workforce Identity Federation", service: null, requires: "iam", screen: "unavailable", icon: "iam", section: "IAM & Admin", product: "iam", productTitle: "IAM & Admin",
-    unavailable: "Workforce identity pools are the IAM API's locations.workforcePools, which CloudBurrow does not serve." },
+  // IAM & Admin > Workforce Identity Federation (#2056): the organization's
+  // workforce pools, a pool's providers and subjects, Create pool with a
+  // first provider, Add provider, Edit, Disable, Enable, Delete, Restore,
+  // and a subject's Revoke sessions.
+  { path: "/iam-admin/workforce-identity-pools", service: "iam-workforce-identity", icon: "iam", title: "Workforce Identity Federation", kind: "Workforce pool", section: "IAM & Admin",
+    product: "iam", productTitle: "IAM & Admin" },
   // Labels (#1864): the selected project's labels, Resource Manager's.
   { path: "/iam-admin/labels", service: "iam-labels", icon: "iam", title: "Labels", kind: "Label", section: "IAM & Admin",
     product: "iam", productTitle: "IAM & Admin" },

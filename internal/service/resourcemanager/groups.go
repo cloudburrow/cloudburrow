@@ -763,7 +763,7 @@ func InDomain(email string) bool {
 // directly or through nested groups, and domain:D when it is an account of
 // the instance's domain. All lower case.
 func (r *Registry) Principals(email string) []string {
-	if _, _, ok := wif.PoolOfPrincipal(strings.TrimSpace(email)); ok {
+	if wif.IsFederated(strings.TrimSpace(email)) {
 		// A federated subject (#1941): its principal:// identifier and
 		// the principalSet:// identifiers its last exchange mapped.
 		if r == nil {

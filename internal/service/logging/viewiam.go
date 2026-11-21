@@ -37,6 +37,12 @@ func (a *Admin) RegisterViewIAM(g grpc.ServiceRegistrar) {
 	iampb.RegisterIAMPolicyServer(g, viewIAMServer{a: a})
 }
 
+// ViewIAMPolicy is a log view's policy, as GetIamPolicy answers it: what
+// IAM enforcement reads of a view (#1879).
+func (a *Admin) ViewIAMPolicy(ctx context.Context, req *iampb.GetIamPolicyRequest) (*iampb.Policy, error) {
+	return viewIAMServer{a: a}.GetIamPolicy(ctx, req)
+}
+
 // viewIAMKey is where a view's policy is kept: apart from the views, so a
 // listing of them never meets it.
 func viewIAMKey(b bucketRef, id string) string {

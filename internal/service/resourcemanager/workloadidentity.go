@@ -176,6 +176,9 @@ type wifRecord struct {
 	PoolV      *WorkloadIdentityPool            `json:"poolValue,omitempty"`
 	ProviderV  *WorkloadIdentityPoolProvider    `json:"providerValue,omitempty"`
 	KeyV       *WorkloadIdentityPoolProviderKey `json:"keyValue,omitempty"`
+	// PrivateKey is a key's PKCS #8 private key, which decrypts SAML
+	// assertions (#2065) and is never rendered.
+	PrivateKey []byte `json:"privateKey,omitempty"`
 }
 
 var wifMu sync.Mutex
@@ -833,8 +836,38 @@ func (r *Registry) CreateWorkloadIdentityPoolProviderKey(project, pool, prov, id
 	if err := checkWIFID("key", id, false); err != nil {
 		return in, err
 	}
+	if _, err := newProviderKeySpec(in); err != nil {
+		return in, err
+	}
+	wifMu.Lock()
+	defer wifMu.Unlock()
+	pr, err := r.wifProvider(project, pool, prov)
+	if err != nil {
+		return in, err
+	}
+	if pr.Deleted {
+		return in, apierror.FailedPrecondition("The workload identity pool provider is deleted.")
+	}
+	if r.wifLoad(wifKeyKey(project, pool, prov, id)) != nil {
+		return in, apierror.AlreadyExists("Requested entity already exists")
+	}
+	v, priv, err := newProviderKey(r.now(), id, in)
+	if err != nil {
+		return in, err
+	}
+	rec := &wifRecord{Project: project, Pool: pool, Provider: prov, Key: id, KeyV: &v, PrivateKey: priv}
+	if err := r.wifSave(wifKeyKey(project, pool, prov, id), rec); err != nil {
+		return in, err
+	}
+	r.wifStamp(rec)
+	return *rec.KeyV, nil
+}
+
+// newProviderKeySpec checks a key request: use ENCRYPTION and an RSA key
+// spec; the answer is the key's size in bits.
+func newProviderKeySpec(in WorkloadIdentityPoolProviderKey) (int, error) {
 	if in.Use != "ENCRYPTION" {
-		return in, apierror.InvalidArgument("use must be ENCRYPTION.")
+		return 0, apierror.InvalidArgument("use must be ENCRYPTION.")
 	}
 	bits := 0
 	spec := ""
@@ -849,41 +882,40 @@ func (r *Registry) CreateWorkloadIdentityPoolProviderKey(project, pool, prov, id
 	case "RSA_4096":
 		bits = 4096
 	default:
-		return in, apierror.InvalidArgument("key_data.key_spec must be RSA_2048, RSA_3072 or RSA_4096.")
+		return 0, apierror.InvalidArgument("key_data.key_spec must be RSA_2048, RSA_3072 or RSA_4096.")
 	}
-	wifMu.Lock()
-	defer wifMu.Unlock()
-	pr, err := r.wifProvider(project, pool, prov)
+	return bits, nil
+}
+
+// newProviderKey makes a provider's encryption key pair, certified for
+// ten years; the API renders its public certificate, and the record keeps
+// its PKCS #8 private key for decrypting SAML assertions (#2065).
+func newProviderKey(at time.Time, id string, in WorkloadIdentityPoolProviderKey) (WorkloadIdentityPoolProviderKey, []byte, error) {
+	bits, err := newProviderKeySpec(in)
 	if err != nil {
-		return in, err
+		return in, nil, err
 	}
-	if pr.Deleted {
-		return in, apierror.FailedPrecondition("The workload identity pool provider is deleted.")
-	}
-	if r.wifLoad(wifKeyKey(project, pool, prov, id)) != nil {
-		return in, apierror.AlreadyExists("Requested entity already exists")
-	}
+	spec := in.KeyData.KeySpec
 	key, err := rsa.GenerateKey(rand.Reader, bits)
 	if err != nil {
-		return in, apierror.Internal(err, "generate key")
+		return in, nil, apierror.Internal(err, "generate key")
 	}
-	now := r.now().UTC().Truncate(time.Second)
+	now := at.UTC().Truncate(time.Second)
 	serial, _ := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 62))
 	tmpl := &x509.Certificate{SerialNumber: serial, Subject: pkix.Name{CommonName: id},
 		NotBefore: now, NotAfter: now.AddDate(10, 0, 0), KeyUsage: x509.KeyUsageKeyEncipherment}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
 	if err != nil {
-		return in, apierror.Internal(err, "certify key")
+		return in, nil, apierror.Internal(err, "certify key")
+	}
+	priv, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		return in, nil, apierror.Internal(err, "encode key")
 	}
 	v := WorkloadIdentityPoolProviderKey{Use: "ENCRYPTION", KeyData: &WIFKeyData{Format: "RSA_X509_PEM", KeySpec: spec,
 		NotBeforeTime: tmpl.NotBefore.Format(time.RFC3339), NotAfterTime: tmpl.NotAfter.Format(time.RFC3339),
 		Key: string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))}}
-	rec := &wifRecord{Project: project, Pool: pool, Provider: prov, Key: id, KeyV: &v}
-	if err := r.wifSave(wifKeyKey(project, pool, prov, id), rec); err != nil {
-		return in, err
-	}
-	r.wifStamp(rec)
-	return *rec.KeyV, nil
+	return v, priv, nil
 }
 
 func (r *Registry) wifKey(project, pool, prov, id string) (*wifRecord, error) {
@@ -958,6 +990,10 @@ func (r *Registry) setKeyDeleted(project, pool, prov, id string, deleted bool) (
 // no provider, or its pool or itself is deleted or disabled: Google's
 // invalid_target.
 func (r *Registry) FederationProvider(audience string) (wif.Provider, bool) {
+	if strings.Contains(audience, "/workforcePools/") {
+		// A workforce pool's provider (#2056, workforce.go).
+		return r.workforceProvider(audience)
+	}
 	rest := strings.TrimPrefix(strings.TrimPrefix(audience, "https:"), "//iam.googleapis.com/")
 	parts := strings.Split(rest, "/")
 	if len(parts) != 8 || parts[0] != "projects" || parts[2] != "locations" || parts[3] != "global" ||
@@ -989,10 +1025,41 @@ func (r *Registry) FederationProvider(audience string) (wif.Provider, bool) {
 		out.Kind = wif.KindAWS
 	case v.Saml != nil:
 		out.Kind = wif.KindSAML
+		out.SAMLMetadata = v.Saml.IdpMetadataXML
+		out.DecryptionKeys = r.liveDecryptionKeys(wifKeyPrefix + project + "/" + parts[5] + "/" + parts[7] + "/")
 	case v.X509 != nil:
 		out.Kind = wif.KindX509
 	}
 	return out, true
+}
+
+// liveDecryptionKeys are the private keys of the provider keys under
+// prefix that are not deleted (#2065). The caller holds wifMu.
+func (r *Registry) liveDecryptionKeys(prefix string) []*rsa.PrivateKey {
+	names, err := r.st.List(prefix)
+	if err != nil {
+		return nil
+	}
+	sort.Strings(names)
+	var out []*rsa.PrivateKey
+	for _, n := range names {
+		b, err := r.st.Get(n)
+		if err != nil {
+			continue
+		}
+		var rec struct {
+			Deleted    bool   `json:"deleted"`
+			PrivateKey []byte `json:"privateKey"`
+		}
+		if json.Unmarshal(b, &rec) != nil || rec.Deleted || len(rec.PrivateKey) == 0 {
+			continue
+		}
+		k, err := x509.ParsePKCS8PrivateKey(rec.PrivateKey)
+		if rk, ok := k.(*rsa.PrivateKey); err == nil && ok {
+			out = append(out, rk)
+		}
+	}
+	return out
 }
 
 type wifPrincipalRecord struct {
@@ -1008,6 +1075,13 @@ func wifPrincipalKey(principal string) string {
 // RecordFederatedPrincipal keeps the principalSet:// identifiers a
 // federated subject's latest exchange gave it, which Principals reports.
 func (r *Registry) RecordFederatedPrincipal(principal string, sets []string) error {
+	if pool, subject, ok := wif.WorkforcePoolOfPrincipal(principal); ok && subject != "" {
+		// A workforce pool's subject (#2056) is made by its first
+		// exchange; a deleted one exchanges nothing.
+		if err := r.recordWorkforceSubject(pool, subject); err != nil {
+			return err
+		}
+	}
 	b, err := json.Marshal(wifPrincipalRecord{Principal: principal, Sets: sets})
 	if err != nil {
 		return err
@@ -1029,12 +1103,20 @@ func (r *Registry) federatedPrincipals(principal string) []string {
 			out = append(out, rec.Sets...)
 		}
 	}
-	return out
+	// SCIM's groups and attributes for a workforce subject (#2068).
+	sets, ok := r.scimAdjustSets(principal, out[1:])
+	if !ok {
+		return nil
+	}
+	return append([]string{principal}, sets...)
 }
 
 // FederatedPrincipalActive reports whether a principal:// identifier's
 // pool exists and is neither deleted nor disabled.
 func (r *Registry) FederatedPrincipalActive(principal string) bool {
+	if _, _, ok := wif.WorkforcePoolOfPrincipal(principal); ok {
+		return r.workforcePrincipalActive(principal)
+	}
 	number, pool, ok := wif.PoolOfPrincipal(principal)
 	if !ok {
 		return false

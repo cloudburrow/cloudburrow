@@ -38,8 +38,10 @@ type gkeService struct {
 	calls     grpctransport.Observer
 	interpose []grpc.UnaryServerInterceptor
 	requests  func(rest.Request)
-	server    *grpctransport.Server
-	api       *gke.Server
+	// wrapJSON wraps the JSON API (IAM enforcement, #1879); nil is none.
+	wrapJSON func(http.Handler) http.Handler
+	server   *grpctransport.Server
+	api      *gke.Server
 	// networks are Compute Engine's (#1936), nil without compute.
 	networks func() gke.Networks
 }
@@ -158,6 +160,9 @@ func (s *gkeService) Start(ctx context.Context) error {
 		s.server.Interpose(i)
 	}
 	var jsonAPI http.Handler = gke.NewRESTHandler(api)
+	if s.wrapJSON != nil {
+		jsonAPI = s.wrapJSON(jsonAPI)
+	}
 	if s.requests != nil {
 		jsonAPI = rest.Observe(jsonAPI, s.requests)
 	}

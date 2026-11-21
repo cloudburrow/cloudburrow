@@ -33,6 +33,8 @@ import (
 type computeService struct {
 	cfg      config.Config
 	requests func(rest.Request)
+	// wrapJSON wraps the API (IAM enforcement, #1879); nil is none.
+	wrapJSON func(http.Handler) http.Handler
 	gke      *gkeService
 	api      *compute.Server
 	// vms runs the VM instances (#1963); guestBase and metadataHost are
@@ -106,6 +108,9 @@ func (s *computeService) Start(ctx context.Context) error {
 	}
 	s.ln = ln
 	var h http.Handler = api
+	if s.wrapJSON != nil {
+		h = s.wrapJSON(h)
+	}
 	if s.requests != nil {
 		h = rest.Observe(h, s.requests)
 	}

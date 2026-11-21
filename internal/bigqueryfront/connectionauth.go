@@ -161,7 +161,7 @@ func (f front) checkConnectionUse(ctx context.Context, connProject, project stri
 			return code, msg
 		}
 	}
-	caller := f.members(ctx, "serviceAccount:"+callerIdentity(project))
+	caller := f.members(ctx, callerMemberOf(ctx, project))
 	if !bindingsGrant(cn.bindings(), caller, permConnectionsUse) && !bindingsGrant(connProj, caller, permConnectionsUse) {
 		return 403, fmt.Sprintf("Access Denied: Connection %s: Permission %s denied on connection %s (or it may not exist).",
 			cn.name(), permConnectionsUse, cn.name())
@@ -309,4 +309,18 @@ func (f front) members(ctx context.Context, member string) []string {
 		q.Set("pageToken", resp.NextPageToken)
 	}
 	return out
+}
+
+// callerMemberOf is the policy member a remote model's caller is checked
+// as: the account of the request's minted token (iamcheck.go's caller,
+// #1879), else the one identity the front takes every other caller to be.
+func callerMemberOf(ctx context.Context, project string) string {
+	email := mintedCaller(ctx)
+	switch {
+	case email == "":
+		return "serviceAccount:" + callerIdentity(project)
+	case strings.HasSuffix(email, ".gserviceaccount.com"):
+		return "serviceAccount:" + email
+	}
+	return "user:" + email
 }

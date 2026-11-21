@@ -45,6 +45,8 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/frontready"
 	"github.com/cloudburrow/cloudburrow/internal/frontstate"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
+	"github.com/cloudburrow/cloudburrow/internal/iamcheck"
+	"github.com/cloudburrow/cloudburrow/internal/iamgate"
 	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
 	"github.com/cloudburrow/cloudburrow/internal/pubsubfront"
 	"github.com/cloudburrow/cloudburrow/internal/sysparams"
@@ -75,6 +77,9 @@ type Front struct {
 	// (#1331), and served is its methods.
 	instances *instances
 	tableIAM  *tableIAM
+	// gate checks each call's caller with `up --iam-enforcement=on`
+	// (#1879, internal/iamgate); nil checks nothing.
+	gate *iamgate.Gate
 	// copies is the backups and snapshots, views the authorized views
 	// (#1499).
 	copies   *copies
@@ -195,7 +200,11 @@ func (f *Front) Server() *grpc.Server {
 					return "bigtable.googleapis.com"
 				}
 				return "bigtableadmin.googleapis.com"
-			})),
+			}),
+			// IAM enforcement (#1879), on the call's first request.
+			f.gate.StreamInterceptor(func() any { return new(frame) },
+				func(v any) []byte { return *v.(*frame) },
+				func(b []byte, v any) error { return rawCodec{}.Unmarshal(b, v) })),
 		grpc.MaxRecvMsgSize(math.MaxInt32), grpc.MaxSendMsgSize(math.MaxInt32),
 		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{MinTime: 10 * time.Second, PermitWithoutStream: true}),
 	)
@@ -211,7 +220,7 @@ func (f *Front) Serve(ctx context.Context, l net.Listener) error {
 	// so the Host and Origin checks are here (#1587). Pods name the
 	// Service; a kubelet probe the pod's address.
 	srv := &http.Server{
-		Handler:           hostguard.WrapService(frontready.Wrap(apienable.Gate(nil, "bigtableadmin.googleapis.com", sysparams.Wrap(f.httpHandler(), sysparams.Options{}), apienable.Options{ServiceOf: bigtableAPI}), f.addr), "bigtable"),
+		Handler:           hostguard.WrapService(frontready.Wrap(apienable.Gate(nil, "bigtableadmin.googleapis.com", sysparams.Wrap(f.gate.Wrap(f.httpHandler()), sysparams.Options{}), apienable.Options{ServiceOf: bigtableAPI}), f.addr), "bigtable"),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	grpcL, httpL := pubsubfront.Split(l)
@@ -529,4 +538,46 @@ func bigtableAPI(r *http.Request) string {
 		return "bigtable.googleapis.com"
 	}
 	return ""
+}
+
+// UseIAMCheck makes the front check each call's caller with the host's
+// evaluator (#1879): the permission Bigtable's references name, on the
+// resource the request names (iamgate.Bigtable), with the table's, view's
+// or backup's own policy and its instance's.
+func (f *Front) UseIAMCheck(c *iamcheck.Client) {
+	if !c.Enabled() {
+		f.gate = nil
+		return
+	}
+	f.gate = &iamgate.Gate{Client: c, Services: []*iamgate.Service{iamgate.Bigtable}, Own: f.ownPolicies}
+}
+
+// ownPolicies are resource's own policy and its instance's.
+func (f *Front) ownPolicies(resource string) []iamcheck.Policy {
+	const svc = "//bigtableadmin.googleapis.com/"
+	var out []iamcheck.Policy
+	inst := iamgate.Prefix(resource, 2)
+	if resource != inst && f.tableIAM != nil {
+		f.tableIAM.mu.Lock()
+		p := f.tableIAM.policies[resource]
+		if p == nil {
+			// An authorized view's or a backup's table: its policy too.
+			if t := iamgate.Prefix(resource, 3); t != resource && strings.Contains(t, "/tables/") {
+				out = append(out, iamcheck.Policy{Resource: svc + resource})
+				resource, p = t, f.tableIAM.policies[t]
+			}
+		}
+		f.tableIAM.mu.Unlock()
+		out = append(out, iamcheck.Policy{Resource: svc + resource, Policy: p})
+	}
+	if inst != "" && f.instances != nil {
+		f.instances.mu.Lock()
+		var p *iampolicy.Stored
+		if in, ok := f.instances.byNm[inst]; ok {
+			p = in.policy
+		}
+		f.instances.mu.Unlock()
+		out = append(out, iamcheck.Policy{Resource: svc + inst, Policy: p})
+	}
+	return out
 }

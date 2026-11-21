@@ -204,7 +204,9 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 			// Workload Identity Federation's (#1941) is
 			// workloadidentity_methods.go's table, its 501s checked over
 			// HTTP by TestWorkloadIdentityUnservedAre501.
-			strings.HasPrefix(m, "iam.projects.locations.workloadIdentityPools.") || m == "sts.token" {
+			strings.HasPrefix(m, "iam.projects.locations.workloadIdentityPools.") || m == "sts.token" ||
+			// And Workforce Identity Federation's (#2056), by TestWorkforceSubjectsAndUnserved.
+			strings.HasPrefix(m, "iam.locations.workforcePools.") {
 			continue
 		}
 		// Cloud Run v1's is the adapter's method table, and
