@@ -68,8 +68,11 @@ func (p sourceManagerProvider) repositoryDetail(ctx context.Context, project str
 		{Label: "Created", Value: stampAge(r.GetCreateTime())}, {Label: "Updated", Value: stampAge(r.GetUpdateTime())}})}
 
 	d.Sections = append(d.Sections, p.codeSection(ctx, in, r, branch, ""))
+	if bs, _ := runadapter.SourceManagerBranches(ctx, r.GetName()); len(bs) > 0 {
+		d.Sections = append(d.Sections, historySection(ctx, in, r, branch, ""))
+	}
 	d.Sections = append(d.Sections, p.branchesSection(ctx, in, r), p.tagsSection(ctx, in, r))
-	d.Sections = append(d.Sections, p.issuesSection(ctx, in, r))
+	d.Sections = append(d.Sections, p.issuesSection(ctx, in, r), labelsSection(r), milestonesSection(r))
 	d.Sections = append(d.Sections, p.pullsSection(ctx, in, r))
 	d.Sections = append(d.Sections, p.triggersSection(ctx, r, branch), p.linksSection(project, in, r), p.buildsSection(ctx, project, r),
 		console.Section{ID: "permissions", Kind: console.KindPermissions}, p.settingsSection(ctx, r))
@@ -105,6 +108,7 @@ func (p sourceManagerProvider) codeSection(ctx context.Context, in *ssmpb.Instan
 	if len(branches) == 0 {
 		return console.Section{ID: "code", Label: "Code", Kind: console.KindText, Text: pushHelp(r)}
 	}
+	sec.Refs = p.refPicker(ctx, in, r, ref, dir)
 	entries, err := p.tree(ctx, r.GetName(), ref)
 	if err != nil {
 		sec.Unavailable = consoleErr(err)
@@ -165,7 +169,7 @@ func (p sourceManagerProvider) codeDetail(ctx context.Context, in *ssmpb.Instanc
 	d := console.Detail{Title: orRoot(file, lastSegment(r.GetName())), Trail: trail,
 		Summary: []console.Property{{Label: "Ref", Value: ref}, {Label: "Path", Value: "/" + file}}}
 	if file == "" {
-		d.Sections = []console.Section{p.codeSection(ctx, in, r, ref, "")}
+		d.Sections = []console.Section{p.codeSection(ctx, in, r, ref, ""), historySection(ctx, in, r, ref, "")}
 		return d, nil
 	}
 	entries, err := p.tree(ctx, r.GetName(), ref)
@@ -177,7 +181,7 @@ func (p sourceManagerProvider) codeDetail(ctx context.Context, in *ssmpb.Instanc
 			continue
 		}
 		if e.GetType() == ssmpb.TreeEntry_TREE {
-			d.Sections = []console.Section{p.codeSection(ctx, in, r, ref, file)}
+			d.Sections = []console.Section{p.codeSection(ctx, in, r, ref, file), historySection(ctx, in, r, ref, file)}
 			return d, nil
 		}
 		d.Summary = append(d.Summary, console.Property{Label: "Size", Value: fmt.Sprint(e.GetSize()) + " bytes"},
@@ -192,8 +196,15 @@ func (p sourceManagerProvider) codeDetail(ctx context.Context, in *ssmpb.Instanc
 			sec.Text = "This is a binary file."
 		} else {
 			sec.Text, content = text, text
+			// The code view highlights the file's syntax, and Blame shows
+			// the commit that last changed each line (#2071).
+			sec.Language = ssmLanguage(file)
+			if bl, err := runadapter.SourceManagerBlame(ctx, r.GetName(), ref, file); err == nil {
+				sec.Blame = blameRuns(in, lastSegment(r.GetName()), bl)
+			}
 		}
-		d.Sections = []console.Section{sec}
+		sec.Refs = p.refPicker(ctx, in, r, ref, file)
+		d.Sections = []console.Section{sec, historySection(ctx, in, r, ref, file)}
 		if path.Base(file) == runadapter.SourceManagerCodeOwnersFile && content != "" {
 			d.Sections = append(d.Sections, p.codeOwnersFileSection(ctx, r.GetName(), ref, file, content))
 		}
@@ -284,11 +295,21 @@ func newIssueAction() console.Action {
 // issuesSection is the Issues tab: open issues first, newest first.
 func (p sourceManagerProvider) issuesSection(ctx context.Context, in *ssmpb.Instance, r *ssmpb.Repository) console.Section {
 	sec := console.Section{ID: "issues", Label: "Issues", Actions: []console.Action{newIssueAction()}, Listing: console.Listing{
-		Columns: []string{"Title", "Created", "Updated"}, NameColumn: "Issue", Noun: "issues", AlwaysStatus: true}}
+		Columns: []string{"Title", "Labels", "Milestone", "Assignees", "Created", "Updated"}, NameColumn: "Issue", Noun: "issues", AlwaysStatus: true,
+		Sorts: ssmSorts()}}
+	labels, _ := runadapter.SourceManagerLabels(r.GetName())
+	milestones, _ := runadapter.SourceManagerMilestones(r.GetName())
+	sec.Listing.Menus = issueMenus(labels, milestones, sortedIssueAssignees(r.GetName(), "issues"))
+	meta := runadapter.SourceManagerIssueMetaAll(r.GetName(), "issues")
 	is, err := p.issues(ctx, r.GetName())
 	if err != nil {
 		sec.Unavailable = consoleErr(err)
 	}
+	var names []string
+	for _, x := range is {
+		names = append(names, x.GetName())
+	}
+	authors := runadapter.SourceManagerAuthors(names...)
 	sort.SliceStable(is, func(i, j int) bool {
 		if oi, oj := is[i].GetState() == ssmpb.Issue_OPEN, is[j].GetState() == ssmpb.Issue_OPEN; oi != oj {
 			return oi
@@ -296,9 +317,14 @@ func (p sourceManagerProvider) issuesSection(ctx context.Context, in *ssmpb.Inst
 		return ssmNumber(is[i].GetName()) > ssmNumber(is[j].GetName())
 	})
 	for _, x := range is {
+		m := meta[x.GetName()]
+		fields := map[string]string{"Title": x.GetTitle(), "Labels": orDash(strings.Join(m.Labels, ", ")), "Milestone": orDash(m.Milestone),
+			"Assignees": orDash(strings.Join(m.Assignees, ", ")), "Created": stampAge(x.GetCreateTime()), "Updated": stampAge(x.GetUpdateTime())}
+		sortFields(fields, x.GetName(), x.GetCreateTime(), x.GetUpdateTime())
+		typeField(fields, authors[x.GetName()], m)
 		sec.Listing.Items = append(sec.Listing.Items, console.Resource{Name: lastSegment(x.GetName()), Status: stateWord(x.GetState().String()),
 			Opens:  repoPath(in, lastSegment(r.GetName()), ssmIssuesSegment, lastSegment(x.GetName())),
-			Fields: map[string]string{"Title": x.GetTitle(), "Created": stampAge(x.GetCreateTime()), "Updated": stampAge(x.GetUpdateTime())}})
+			Fields: fields})
 	}
 	sec.Listing.Total = len(sec.Listing.Items)
 	return sec
@@ -326,6 +352,8 @@ func (p sourceManagerProvider) issueDetail(ctx context.Context, in *ssmpb.Instan
 		Summary: dropDashes([]console.Property{{Label: "State", Value: stateWord(x.GetState().String())},
 			{Label: "Created", Value: stampAge(x.GetCreateTime())}, {Label: "Updated", Value: stampAge(x.GetUpdateTime())},
 			{Label: "Closed", Value: closedAge(x.GetCloseTime())}})}
+	// Labels, Milestones and Assignees, each with its gear (#2071).
+	d.Summary = append(d.Summary, issueMetaSummary(runadapter.SourceManagerIssueMetaOf(name)[name], false)...)
 	body := x.GetBody()
 	if strings.TrimSpace(body) == "" {
 		body = "No description provided."
@@ -464,7 +492,12 @@ func (p sourceManagerProvider) tagsSection(ctx context.Context, in *ssmpb.Instan
 // Google's has no Pull requests tab.
 func (p sourceManagerProvider) pullsSection(ctx context.Context, in *ssmpb.Instance, r *ssmpb.Repository) console.Section {
 	sec := console.Section{ID: "pulls", Label: "Pull requests", Listing: console.Listing{
-		Columns: []string{"Title", "Branches", "Created", "Updated"}, NameColumn: "Pull request", Noun: "pull requests", AlwaysStatus: true}}
+		Columns: []string{"Title", "Branches", "Labels", "Milestone", "Assignees", "Created", "Updated"}, NameColumn: "Pull request", Noun: "pull requests", AlwaysStatus: true,
+		Sorts: ssmSorts()}}
+	labels, _ := runadapter.SourceManagerLabels(r.GetName())
+	milestones, _ := runadapter.SourceManagerMilestones(r.GetName())
+	sec.Listing.Menus = issueMenus(labels, milestones, sortedIssueAssignees(r.GetName(), "pullRequests"))
+	meta := runadapter.SourceManagerIssueMetaAll(r.GetName(), "pullRequests")
 	if names := p.branchNames(ctx, r.GetName()); len(names) > 0 {
 		sec.Actions = []console.Action{newPullAction(names, ssmDefaultBranch(r))}
 	} else {
@@ -474,6 +507,11 @@ func (p sourceManagerProvider) pullsSection(ctx context.Context, in *ssmpb.Insta
 	if err != nil {
 		sec.Unavailable = consoleErr(err)
 	}
+	var names []string
+	for _, pr := range prs {
+		names = append(names, pr.GetName())
+	}
+	authors := runadapter.SourceManagerAuthors(names...)
 	sort.SliceStable(prs, func(i, j int) bool {
 		if oi, oj := prs[i].GetState() == ssmpb.PullRequest_OPEN, prs[j].GetState() == ssmpb.PullRequest_OPEN; oi != oj {
 			return oi
@@ -481,10 +519,14 @@ func (p sourceManagerProvider) pullsSection(ctx context.Context, in *ssmpb.Insta
 		return ssmNumber(prs[i].GetName()) > ssmNumber(prs[j].GetName())
 	})
 	for _, pr := range prs {
+		m := meta[pr.GetName()]
+		fields := map[string]string{"Title": pr.GetTitle(), "Branches": pr.GetHead().GetRef() + " → " + pr.GetBase().GetRef(),
+			"Labels": orDash(strings.Join(m.Labels, ", ")), "Milestone": orDash(m.Milestone), "Assignees": orDash(strings.Join(m.Assignees, ", ")),
+			"Created": stampAge(pr.GetCreateTime()), "Updated": stampAge(pr.GetUpdateTime())}
+		sortFields(fields, pr.GetName(), pr.GetCreateTime(), pr.GetUpdateTime())
+		typeField(fields, authors[pr.GetName()], m)
 		sec.Listing.Items = append(sec.Listing.Items, console.Resource{Name: lastSegment(pr.GetName()), Status: stateWord(pr.GetState().String()),
-			Opens: repoPath(in, lastSegment(r.GetName()), ssmPullsSegment, lastSegment(pr.GetName())),
-			Fields: map[string]string{"Title": pr.GetTitle(), "Branches": pr.GetHead().GetRef() + " → " + pr.GetBase().GetRef(),
-				"Created": stampAge(pr.GetCreateTime()), "Updated": stampAge(pr.GetUpdateTime())}})
+			Opens: repoPath(in, lastSegment(r.GetName()), ssmPullsSegment, lastSegment(pr.GetName())), Fields: fields})
 	}
 	sec.Listing.Total = len(sec.Listing.Items)
 	return sec
@@ -521,11 +563,17 @@ func (p sourceManagerProvider) pullDetail(ctx context.Context, in *ssmpb.Instanc
 	all := conv.Actions
 	conv.Actions = append([]console.Action{all[0]}, all[2:]...)
 	fileActs := all[1:]
+	// Reviewers, Labels, Milestones, Assignees and a Due date, each with
+	// its gear (#2071).
+	d.Summary = append(d.Summary, issueMetaSummary(runadapter.SourceManagerIssueMetaOf(name)[name], true)...)
 	co, coErr := runadapter.SourceManagerCodeOwners(ctx, name)
 	if line := codeOwnersSummary(co, coErr); line != "" {
 		d.Summary = append(d.Summary, console.Property{Label: "Code owners", Value: line})
 	}
-	d.Sections = []console.Section{conv, filesSection(diffs, derr, cms, fileActs), codeOwnersSection(co, coErr)}
+	if pr.GetState() == ssmpb.PullRequest_OPEN {
+		fileActs = append(fileActs, discardReviewAction())
+	}
+	d.Sections = []console.Section{conv, diffSection(name, diffs, derr, cms, fileActs, pr.GetState() == ssmpb.PullRequest_OPEN), codeOwnersSection(co, coErr)}
 	return d, nil
 }
 
@@ -728,6 +776,8 @@ func (p sourceManagerProvider) repoActions(ctx context.Context, project string, 
 		if names := p.branchNames(ctx, r.GetName()); len(names) > 0 {
 			acts = append(acts, newPullAction(names, ssmDefaultBranch(r)))
 		}
+		acts = append(acts, labelAction("new-label", "New label", "Create label", runadapter.SourceManagerLabel{Color: "#1a73e8"}),
+			milestoneAction("new-milestone", "New milestone", "Create milestone", runadapter.SourceManagerMilestone{}))
 		acts = append(acts, addBranchRuleAction(), addHookAction(), ssmEditRepositoryAction(r),
 			console.Action{ID: "delete-repo", Label: "Delete repository", Destructive: true, Leaves: true,
 				Confirm: "the repository and every commit pushed to it"})
@@ -745,6 +795,7 @@ func (p sourceManagerProvider) repoActions(ctx context.Context, project string, 
 		} else {
 			acts = append(acts, console.Action{ID: "reopen-issue", Label: "Reopen issue"})
 		}
+		acts = append(acts, issueMetaActions(r.GetName(), runadapter.SourceManagerIssueMetaOf(x.GetName())[x.GetName()], false)...)
 		return append(acts, console.Action{ID: "delete-issue", Label: "Delete issue", Destructive: true, Leaves: true, Confirm: "the issue and its comments"})
 	case len(apath) == 5 && apath[2] == ssmIssuesSegment:
 		var body string
@@ -766,11 +817,11 @@ func (p sourceManagerProvider) repoActions(ctx context.Context, project string, 
 		switch pr.GetState() {
 		case ssmpb.PullRequest_OPEN:
 			acts = append(acts, console.Action{ID: "merge-pull", Label: "Merge pull request"},
-				console.Action{ID: "close-pull", Label: "Close pull request"})
+				console.Action{ID: "close-pull", Label: "Close pull request"}, startReviewAction(diffNames(diffs)), discardReviewAction())
 		case ssmpb.PullRequest_CLOSED:
 			acts = append(acts, console.Action{ID: "reopen-pull", Label: "Reopen pull request"})
 		}
-		return acts
+		return append(acts, issueMetaActions(r.GetName(), runadapter.SourceManagerIssueMetaOf(pr.GetName())[pr.GetName()], true)...)
 	case len(apath) == 5 && apath[2] == ssmPullsSegment:
 		var cm *ssmpb.PullRequestComment
 		if p.withClient(ctx, func(c *securesourcemanager.Client) error {
@@ -783,6 +834,8 @@ func (p sourceManagerProvider) repoActions(ctx context.Context, project string, 
 		return prCommentRowActions(cm)
 	case len(apath) == 4 && apath[2] == ssmHooksSegment:
 		return p.hookActions(ctx, r.GetName()+"/hooks/"+apath[3])
+	case len(apath) == 4 && (apath[2] == ssmLabelsSegment || apath[2] == ssmMilestonesSegment):
+		return labelMilestoneRowActions(r, apath)
 	case len(apath) == 4 && apath[2] == ssmBranchRulesSegment:
 		var br *ssmpb.BranchRule
 		if p.withClient(ctx, func(c *securesourcemanager.Client) error {
@@ -800,6 +853,22 @@ func (p sourceManagerProvider) repoActions(ctx context.Context, project string, 
 // repoAct performs an action of a repository's page or a page inside it.
 func (p sourceManagerProvider) repoAct(ctx context.Context, in *ssmpb.Instance, apath []string, action string, v map[string]string) error {
 	repo := p.repoName(in, apath[1])
+	if ok, err := labelMilestoneAct(repo, apath, action, v); ok {
+		return err
+	}
+	if len(apath) == 4 && apath[2] == ssmIssuesSegment {
+		if ok, err := issueMetaAct(repo+"/issues/"+apath[3], action, v); ok {
+			return err
+		}
+	}
+	if len(apath) == 4 && apath[2] == ssmPullsSegment {
+		if ok, err := pendingAct(repo+"/pullRequests/"+apath[3], action, v); ok {
+			return err
+		}
+		if ok, err := issueMetaAct(repo+"/pullRequests/"+apath[3], action, v); ok {
+			return err
+		}
+	}
 	return p.withClient(ctx, func(c *securesourcemanager.Client) error {
 		switch {
 		case len(apath) == 2 && action == "edit-description":
@@ -838,12 +907,23 @@ func (p sourceManagerProvider) repoAct(ctx context.Context, in *ssmpb.Instance, 
 			if err != nil {
 				return err
 			}
+			hook := repo + "/hooks/" + strings.TrimSpace(v["id"])
+			if v["serviceAccountAuth"] == "true" {
+				if err := ssmCanAuthenticate(ctx, c, hook); err != nil {
+					return err
+				}
+			}
 			op, err := c.CreateHook(ctx, &ssmpb.CreateHookRequest{Parent: repo, HookId: strings.TrimSpace(v["id"]), Hook: h})
 			if err != nil {
 				return err
 			}
-			_, err = op.Wait(ctx)
-			return err
+			if _, err = op.Wait(ctx); err != nil {
+				return err
+			}
+			if v["serviceAccountAuth"] == "true" {
+				return runadapter.SetSourceManagerHookServiceAccountAuth(hook, true)
+			}
+			return nil
 		case len(apath) == 4 && apath[2] == ssmHooksSegment:
 			return hookAct(ctx, c, repo+"/hooks/"+apath[3], action, v)
 		case len(apath) == 5 && apath[2] == ssmPullsSegment:

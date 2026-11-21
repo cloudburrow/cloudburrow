@@ -311,6 +311,12 @@ type Listing struct {
 	// BigQuery names them (STRING, INTEGER, TIMESTAMP, …; REPEATED for an
 	// array), for the results' chart: Log Analytics' (#2021).
 	ColumnTypes map[string]string `json:"columnTypes,omitempty"`
+	// Sorts are the listing's Sort menu, and Menus its filter menus,
+	// drawn over the rows of a page's tab (#2071): Secure Source
+	// Manager's Issues and Pull requests tabs. The first sort is the
+	// order the rows came in.
+	Sorts []ListSort `json:"sorts,omitempty"`
+	Menus []ListMenu `json:"menus,omitempty"`
 }
 
 // ResultPage is one page image of an action's answer, and its boxes.
@@ -1093,6 +1099,8 @@ const (
 	// widget, its SQL run through Log Analytics. Listing holds the rows
 	// (with ColumnTypes) and Visualization says Bar, Line or Table.
 	KindAnalytics SectionKind = "analytics"
+	// KindDiff is a pull request's changed files (Section.Diff, #2071).
+	KindDiff SectionKind = "diff"
 )
 
 // Section is one aspect of a resource, rendered as a tab.
@@ -1184,6 +1192,108 @@ type Section struct {
 	// the Vulnerabilities tab's Layer bar lists each layer with
 	// vulnerabilities, ShownIn it, after Show "All layers" (#2066).
 	ShowLabel string `json:"showLabel,omitempty"`
+	// Refs is the branch and tag selector drawn over the section, as
+	// Secure Source Manager's code view has one (#2071): choosing a ref
+	// opens its path.
+	Refs *RefPicker `json:"refs,omitempty"`
+	// Blame, on a KindText section with a Language (a file's content), is
+	// the commit that last changed each line, which the Blame button
+	// draws beside the lines (#2071).
+	Blame []BlameLine `json:"blame,omitempty"`
+	// Diff is the content when Kind is KindDiff.
+	Diff *DiffView `json:"diff,omitempty"`
+}
+
+// RefPicker is a branch and tag selector: the ref shown, and each
+// branch's and tag's page.
+type RefPicker struct {
+	Current  string      `json:"current"`
+	Branches []RefOption `json:"branches,omitempty"`
+	Tags     []RefOption `json:"tags,omitempty"`
+}
+
+// RefOption is one ref a RefPicker opens.
+type RefOption struct {
+	Name string   `json:"name"`
+	Path []string `json:"path"`
+}
+
+// BlameLine is the commit that last changed a line of a file, from Line
+// for Count lines.
+type BlameLine struct {
+	Line    int      `json:"line"`
+	Count   int      `json:"count"`
+	Commit  string   `json:"commit"`
+	Author  string   `json:"author"`
+	When    string   `json:"when"`
+	Summary string   `json:"summary"`
+	Opens   []string `json:"opens,omitempty"`
+}
+
+// DiffView is a pull request's Files changed drawn as Secure Source
+// Manager's web interface draws it (#2071): each file's lines, old and new
+// numbered, with the Whitespace, Split view/Unified view and diff options
+// menus, a plus icon beside each line that comments on it, and the code
+// comments under their lines. A comment is sent as the page's action
+// CommentAction (a single comment) or StartAction (kept for a review,
+// shown Pending until ReviewAction sends them), with the values path,
+// line (negative on the old side) and lineBody.
+type DiffView struct {
+	Files         []DiffFile `json:"files"`
+	CommentAction string     `json:"commentAction,omitempty"`
+	StartAction   string     `json:"startAction,omitempty"`
+	ReviewAction  string     `json:"reviewAction,omitempty"`
+	// Pending is how many of the viewer's comments wait for their review.
+	Pending int `json:"pending,omitempty"`
+}
+
+// DiffFile is one changed file of a DiffView.
+type DiffFile struct {
+	Name     string        `json:"name"`
+	Action   string        `json:"action"`
+	Lines    []DiffLine    `json:"lines"`
+	Comments []DiffComment `json:"comments,omitempty"`
+}
+
+// DiffLine is one line of a DiffFile: Kind is " " (context), "+", "-" or
+// "@" (a hunk header, Text its header); Old and New are its line numbers
+// on each side, 0 where it has none.
+type DiffLine struct {
+	Kind string `json:"kind"`
+	Old  int    `json:"old,omitempty"`
+	New  int    `json:"new,omitempty"`
+	Text string `json:"text"`
+}
+
+// DiffComment is a code comment on a DiffFile's line (negative on the old
+// side).
+type DiffComment struct {
+	ID      string `json:"id"`
+	Line    int64  `json:"line"`
+	Author  string `json:"author,omitempty"`
+	Body    string `json:"body"`
+	State   string `json:"state,omitempty"`
+	Pending bool   `json:"pending,omitempty"`
+}
+
+// ListSort is one choice of a listing's Sort menu: rows ordered by the
+// Fields value Key (compared as text: an RFC 3339 time, a zero-padded
+// number), descending when Desc (#2071).
+type ListSort struct {
+	Label string `json:"label"`
+	Key   string `json:"key"`
+	Desc  bool   `json:"desc,omitempty"`
+}
+
+// ListMenu is one of a listing's filter menus, over the Fields value Key,
+// a comma-separated list: choosing an option keeps the rows whose list
+// holds it (#2071). With Toggle it is a button instead, keeping the rows
+// whose list holds Toggle: Secure Source Manager's Assigned to me.
+type ListMenu struct {
+	Label   string   `json:"label"`
+	Key     string   `json:"key"`
+	Options []string `json:"options,omitempty"`
+	Toggle  string   `json:"toggle,omitempty"`
 }
 
 // dropBlankProperties removes every Property whose Value is empty or
@@ -1613,8 +1723,9 @@ type Action struct {
 	// Page draws the action's form as a page of its own at the resource
 	// page's address with ?action=<id>, under the action's Title (or
 	// Label), ending in its Submit (or Label) and Cancel, instead of a
-	// dialog: Cloud KMS's Create key is a page (#1851). Cancel and success
-	// return to the resource's page.
+	// dialog: Cloud KMS's Create key is a page (#1851), as Google's Secure
+	// Source Manager web interface has Create repository (#1856). Cancel
+	// and success return to the resource's page, or to Opens'.
 	Page bool `json:"page,omitempty"`
 	// Menu, on a Section's action, draws it in the ellipsis menu at the
 	// top of the tab instead of as a button there, as Google's Cloud Tasks
@@ -1622,6 +1733,10 @@ type Action struct {
 	// menu is the row menus' own: Escape closes it and gives focus back to
 	// its trigger. Any provider's tab may use it.
 	Menu bool `json:"menu,omitempty"`
+	// Opens, on a Page action, names the field whose value is the ID of
+	// the row the action made, which the console opens when it is done:
+	// Create repository goes on to the new repository's page.
+	Opens string `json:"opens,omitempty"`
 }
 
 // PathActor is a provider with actions on the resources inside a resource.

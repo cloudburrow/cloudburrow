@@ -1648,6 +1648,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/securesourcemanager_test.go:36 TestSecureSourceManagerPushTrigger",
+          "test/compat/securesourcemanagerprivate_test.go:29 TestSecureSourceManagerPrivateInstance",
           "test/compat/terraform_batch11_run_test.go:164 TestTerraformSecureSourceManagerIAM"
         ]
       },
@@ -1686,6 +1687,7 @@
         "tests": [
           "test/compat/iamenforcementround12_1879_test.go:265 TestIAMEnforcementSourceManagerGit",
           "test/compat/securesourcemanager_test.go:36 TestSecureSourceManagerPushTrigger",
+          "test/compat/securesourcemanagertemplates_test.go:29 TestSecureSourceManagerInitialConfig",
           "test/compat/terraform_batch11_run_test.go:164 TestTerraformSecureSourceManagerIAM"
         ]
       },

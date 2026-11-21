@@ -17,7 +17,8 @@ package main
 //     it), and Review sends the review: its summary with Approve, Comment
 //     or Request changes, and an optional line comment with it, in one
 //     BatchCreatePullRequestComments;
-//   - Files changed shows each file's patch and the code comments on it;
+//   - Files changed shows each file's lines and the code comments on them
+//     (consolesourcemanagercode.go, #2071);
 //   - Settings › Webhooks lists the repository's hooks (Hook ID, Target URL,
 //     Trigger on, Branch filter, Active); Add webhook, Edit and Delete; a
 //     hook's page has Test delivery and its Recent deliveries.
@@ -226,42 +227,6 @@ func prCommentActions(pr *ssmpb.PullRequest, files []string) []console.Action {
 	return acts
 }
 
-// filesSection is Files changed: each file's patch, then the code comments
-// on it.
-func filesSection(diffs []*ssmpb.FileDiff, err error, cms []*ssmpb.PullRequestComment, acts []console.Action) console.Section {
-	files := console.Section{ID: "files", Label: "Files changed", Kind: console.KindText, Actions: acts}
-	if err != nil {
-		files.Unavailable = consoleErr(err)
-		return files
-	}
-	if len(diffs) == 0 {
-		files.Text = "No files changed."
-		return files
-	}
-	var out []string
-	for _, fd := range diffs {
-		text := fmt.Sprintf("%s (%s)\n%s", fd.GetName(), strings.ToLower(fd.GetAction().String()), fd.GetPatch())
-		var notes []string
-		for _, cm := range cms {
-			cd := cm.GetCode()
-			if cd == nil || cd.GetPosition().GetPath() != fd.GetName() {
-				continue
-			}
-			state := "unresolved"
-			if cd.GetResolved() {
-				state = "resolved"
-			}
-			notes = append(notes, fmt.Sprintf("  #%s %s (%s): %s", lastSegment(cm.GetName()), ssmPosition(cd.GetPosition()), state, cd.GetBody()))
-		}
-		if len(notes) > 0 {
-			text = strings.TrimRight(text, "\n") + "\nComments on " + fd.GetName() + ":\n" + strings.Join(notes, "\n") + "\n"
-		}
-		out = append(out, text)
-	}
-	files.Text = strings.Join(out, "\n")
-	return files
-}
-
 // fileDiffs are a pull request's changed files.
 func (p sourceManagerProvider) fileDiffs(ctx context.Context, name string) ([]*ssmpb.FileDiff, error) {
 	var out []*ssmpb.FileDiff
@@ -331,6 +296,9 @@ func prCommentAct(ctx context.Context, c *securesourcemanager.Client, name, acti
 		if err != nil {
 			return true, err
 		}
+		// The comments the plus icon's Start review kept Pending go
+		// with the review (#2071).
+		reqs = append(reqs, pendingRequests(name)...)
 		if code != nil {
 			reqs = append(reqs, &ssmpb.CreatePullRequestCommentRequest{Parent: name, PullRequestComment: code})
 		}
@@ -338,7 +306,9 @@ func prCommentAct(ctx context.Context, c *securesourcemanager.Client, name, acti
 		if err != nil {
 			return true, err
 		}
-		_, err = op.Wait(ctx)
+		if _, err = op.Wait(ctx); err == nil {
+			runadapter.DeleteSourceManagerPendingComments(name, runadapter.SourceManagerConsoleAccount())
+		}
 		return true, err
 	default:
 		return false, nil
@@ -478,6 +448,11 @@ func hookFields(h *ssmpb.Hook, edit bool) []console.Field {
 	f := []console.Field{
 		{Name: "targetUri", Label: "Target URL", Type: "text", Required: true, Default: h.GetTargetUri(), Pattern: "^https?://.+"},
 		{Name: "sensitiveQueryString", Label: "Sensitive query string", Type: "password", Help: sqHelp},
+		// Enable service account authentication (#2071): each delivery
+		// carries an ID token of the repository's service account.
+		{Name: "serviceAccountAuth", Label: "Enable service account authentication", Type: "checkbox",
+			Default: strconv.FormatBool(runadapter.SourceManagerHookServiceAccountAuth(h.GetName())),
+			Help:    "Each request carries an ID token of the repository's service account, for the target URL. Use it or the sensitive query string."},
 	}
 	for _, ef := range hookEventFields {
 		f = append(f, console.Field{Name: ef.name, Label: ssmHookEventWords[ef.event], Type: "checkbox", Section: sec, Default: strconv.FormatBool(has[ef.event])})
@@ -515,6 +490,9 @@ func hookFrom(v map[string]string) (*ssmpb.Hook, error) {
 	}
 	if len(h.Events) == 0 {
 		return nil, fmt.Errorf("trigger on: choose at least one event")
+	}
+	if v["serviceAccountAuth"] == "true" && h.SensitiveQueryString != "" {
+		return nil, fmt.Errorf("authentication: use the sensitive query string or service account authentication, not both")
 	}
 	if bf := strings.TrimSpace(v["branchFilter"]); bf != "" && v["onPush"] == "true" {
 		h.PushOption = &ssmpb.Hook_PushOption{BranchFilter: bf}
@@ -572,6 +550,7 @@ func (p sourceManagerProvider) hookDetail(ctx context.Context, in *ssmpb.Instanc
 		{Label: "Webhooks", Path: hpath[:3]}, {Label: hpath[3]}},
 		Summary: dropDashes([]console.Property{{Label: "Hook ID", Value: hpath[3]}, {Label: "Target URL", Value: h.GetTargetUri()},
 			{Label: "Sensitive query string", Value: sq}, {Label: "Trigger on", Value: hookEvents(h)}, {Label: "Branch filter", Value: bf},
+			{Label: "Service account authentication", Value: ssmEnabledWord(runadapter.SourceManagerHookServiceAccountAuth(name))},
 			{Label: "Active", Value: st}, {Label: "Created", Value: stampAge(h.GetCreateTime())}, {Label: "Updated", Value: stampAge(h.GetUpdateTime())}})}
 	del := console.Section{ID: "deliveries", Label: "Recent deliveries", Listing: console.Listing{
 		Columns: []string{"Event", "Response", "Delivered"}, NameColumn: "Delivery", Noun: "deliveries", AlwaysStatus: true},
@@ -616,12 +595,20 @@ func hookAct(ctx context.Context, c *securesourcemanager.Client, name, action st
 		if h.GetSensitiveQueryString() != "" {
 			paths = append(paths, "sensitive_query_string")
 		}
+		if v["serviceAccountAuth"] == "true" {
+			// Checked before the change, so a refusal changes nothing.
+			if err := ssmCanAuthenticate(ctx, c, name); err != nil {
+				return err
+			}
+		}
 		op, err := c.UpdateHook(ctx, &ssmpb.UpdateHookRequest{Hook: h, UpdateMask: &fieldmaskpb.FieldMask{Paths: paths}})
 		if err != nil {
 			return err
 		}
-		_, err = op.Wait(ctx)
-		return err
+		if _, err = op.Wait(ctx); err != nil {
+			return err
+		}
+		return runadapter.SetSourceManagerHookServiceAccountAuth(name, v["serviceAccountAuth"] == "true")
 	case "test-hook":
 		return runadapter.SourceManagerTestDelivery(ctx, name)
 	case "delete-hook":
@@ -632,4 +619,24 @@ func hookAct(ctx context.Context, c *securesourcemanager.Client, name, action st
 		return op.Wait(ctx)
 	}
 	return fmt.Errorf("unknown action %q", action)
+}
+
+func ssmEnabledWord(on bool) string {
+	if on {
+		return "Enabled"
+	}
+	return "Disabled"
+}
+
+// ssmCanAuthenticate refuses service account authentication for a hook
+// whose repository has no service account.
+func ssmCanAuthenticate(ctx context.Context, c *securesourcemanager.Client, hook string) error {
+	r, err := c.GetRepository(ctx, &ssmpb.GetRepositoryRequest{Name: hook[:strings.Index(hook, "/hooks/")]})
+	if err != nil {
+		return err
+	}
+	if r.GetServiceAccount() == "" {
+		return fmt.Errorf("service account authentication needs the repository's service account: %s has none (Create repository's Service account)", lastSegment(r.GetName()))
+	}
+	return nil
 }

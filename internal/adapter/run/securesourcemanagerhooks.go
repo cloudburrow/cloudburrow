@@ -340,6 +340,7 @@ func (m *SecureSourceManagerServer) DeleteHook(_ context.Context, req *ssmpb.Del
 		return nil, err
 	}
 	delete(ssmState.hooks, h.GetName())
+	delete(ssmExtra.HookAuth, h.GetName())
 	delete(ssmState.hookSecrets, h.GetName())
 	saveSSMLocked()
 	ssmState.mu.Unlock()
@@ -426,6 +427,17 @@ func deliver(ctx context.Context, t ssmTarget, event string, payload any) Source
 	if err != nil {
 		d.Err = err.Error()
 		return d
+	}
+	// Enable service account authentication (#2071): the repository
+	// service account's ID token for the target.
+	auth, err := ssmHookAuthorization(t.name, t.url)
+	if err != nil {
+		d.Err = err.Error()
+		return d
+	}
+	if auth != "" {
+		req.Header.Set("Authorization", auth)
+		d.Request = strings.Replace(d.Request, "\nContent-Type:", "\nAuthorization: Bearer <ID token>\nContent-Type:", 1)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-SecureSourceManager-Delivery", d.ID)

@@ -3939,6 +3939,72 @@ function openAskedListAction(route, data, onDone) {
 //
 // Readable as text, which docs/console-parity.md section 5 requires, and
 // deep-linkable at any depth: /cloudsql/cloudburrow/widgets is a table.
+// A listing's Sort and filter menus (Listing.Sorts, Listing.Menus, #2071):
+// the choices live in the address as {section}-sort and
+// {section}-{key}, a toggle's as {section}-mine.
+function listMenuParam(section, key) { return `${section.id}-${key.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`; }
+
+function listMenuValue(section, key) { return new URLSearchParams(location.search).get(listMenuParam(section, key)) || ""; }
+
+function setListMenuValue(section, key, value) {
+  const url = new URL(location.href);
+  if (value) url.searchParams.set(listMenuParam(section, key), value);
+  else url.searchParams.delete(listMenuParam(section, key));
+  history.replaceState({}, "", url);
+}
+
+// arrangeListing is a listing's rows filtered by its menus' choices and
+// ordered by its Sort's.
+function arrangeListing(section, list) {
+  if (!list) return list;
+  const holds = (item, key, value) => (item.fields || {})[key] && (item.fields[key] || "").split(",").map((v) => v.trim()).includes(value);
+  let items = [...(list.items || [])];
+  for (const m of list.menus || []) {
+    const chosen = m.toggle ? (listMenuValue(section, "mine") ? m.toggle : "") : listMenuValue(section, m.label);
+    if (chosen) items = items.filter((it) => holds(it, m.key, chosen));
+  }
+  const sorts = list.sorts || [];
+  const sort = sorts.find((x) => x.label === listMenuValue(section, "sort"));
+  if (sort) {
+    items.sort((a, b) => {
+      const x = (a.fields || {})[sort.key] || "", y = (b.fields || {})[sort.key] || "";
+      return (sort.desc ? -1 : 1) * (x < y ? -1 : x > y ? 1 : 0);
+    });
+  }
+  return { ...list, items, total: items.length };
+}
+
+// listMenusBar draws the menus; a change redraws the tab through redraw
+// and gives the menu its focus back.
+function listMenusBar(section, list, redraw) {
+  const again = (id) => { redraw(); const c = document.getElementById(id); if (c) c.focus(); };
+  const controls = [];
+  for (const m of list.menus || []) {
+    if (m.toggle) {
+      const id = `${section.id}-menu-mine`;
+      const on = !!listMenuValue(section, "mine");
+      controls.push(el("button", { type: "button", id, class: "secondary list-menu-toggle", "aria-pressed": on ? "true" : "false",
+        text: m.label, onclick: () => { setListMenuValue(section, "mine", on ? "" : "1"); again(id); announce(`${m.label} ${on ? "off" : "on"}`); } }));
+      continue;
+    }
+    const id = `${section.id}-menu-${listMenuParam(section, m.label)}`;
+    const select = el("select", { id, class: "list-menu" },
+      el("option", { value: "", text: `All` }),
+      ...(m.options || []).map((o) => el("option", { value: o, text: o })));
+    select.value = listMenuValue(section, m.label);
+    select.addEventListener("change", () => { setListMenuValue(section, m.label, select.value); again(id); });
+    controls.push(el("label", { class: "list-menu-label", for: id }, el("span", { text: m.label }), select));
+  }
+  if ((list.sorts || []).length) {
+    const id = `${section.id}-menu-sort`;
+    const select = el("select", { id, class: "list-menu" }, ...list.sorts.map((x) => el("option", { value: x.label, text: x.label })));
+    select.value = listMenuValue(section, "sort") || list.sorts[0].label;
+    select.addEventListener("change", () => { setListMenuValue(section, "sort", select.value); again(id); });
+    controls.push(el("label", { class: "list-menu-label", for: id }, el("span", { text: "Sort" }), select));
+  }
+  return el("div", { class: "list-menus", role: "group", "aria-label": `${section.label} filters and sort` }, ...controls);
+}
+
 function detailHref(route, path) {
   const segments = Array.isArray(path) ? path : [path];
   const url = new URL(
@@ -4265,7 +4331,14 @@ async function renderDetail(view, route, resourcePath) {
     // The provider says what the section holds. Inferring it from whichever
     // field happened to be populated would put the decision in the client,
     // and an empty one would be indistinguishable from a table with no rows.
+    // A branch and tag selector over the tab (#2071): the code view's.
+    if (section.refs) {
+      const picker = refPicker(route, section.refs);
+      note = note ? el("div", {}, picker, note) : picker;
+    }
     switch (section.kind) {
+      case "diff":
+        return setChildren(panel, note, drawDiffView(route, segments, section, reload));
       case "properties":
         return drawPropertiesSection(panel, section, note);
       case "text":
@@ -4373,6 +4446,20 @@ async function renderDetail(view, route, resourcePath) {
   const drawListingSection = (into, section, note, reload) => {
     let list = section.listing || {};
     const noun = list.noun || section.label.toLowerCase();
+    // A tab's Sort menu and filter menus (#2071): Secure Source Manager's
+    // Issues tab has Labels, Milestones, Assignee, Assigned to me and
+    // Sort. The choices are kept in the address, so a reload keeps them.
+    if ((list.sorts || []).length || (list.menus || []).length) {
+      // The redraw starts from the note as it came, not the one the bar
+      // joins below, or each change would add another bar.
+      const given = note;
+      const bar = listMenusBar(section, list, () => drawListingSection(into, section, given, reload));
+      list = arrangeListing(section, list);
+      note = note ? el("div", {}, note, bar) : bar;
+      if (!(list.items || []).length && (section.listing.items || []).length) {
+        return setChildren(into, note, emptyState(`No ${noun} match`, "Clear a menu's choice to see the others."));
+      }
+    }
     // A tab's own summary cards over its rows: a key's Usage tracking
     // tab draws its key usage summary over the protected resources (#2053).
     const cards = listingSummary(list);
@@ -4435,7 +4522,7 @@ async function renderDetail(view, route, resourcePath) {
       refetch: async () => {
         const fresh = await api(path);
         const same = (fresh.sections || []).find((sec) => sec.id === section.id);
-        return same ? linked(same.listing) : null;
+        return same ? linked(arrangeListing(section, same.listing)) : null;
       },
     });
   };
@@ -4586,6 +4673,10 @@ async function renderDetail(view, route, resourcePath) {
     if (!section.text) {
       return setChildren(into, note,
         emptyState(`No ${section.label.toLowerCase()}`, `${name} reports none.`));
+    }
+    // A file's content (#2071): numbered, highlighted, with Blame.
+    if (section.language && section.language !== "workflows") {
+      return setChildren(into, note, codeView(route, section, name));
     }
     // A workflow's source (#2004), highlighted beside its graph.
     if (section.language === "workflows") {
@@ -4985,6 +5076,12 @@ function openActionForm(route, segments, action, onDone, title = null, host = nu
         navigate(actionThen(action.then, values));
         return null;
       }
+      // A page action that made a row goes on to it (Action.Opens, #1856):
+      // the web interface's Create repository opens the new repository.
+      if (host && action.opens && values[action.opens]) {
+        navigate(detailHref(route, [...segments, values[action.opens]]));
+        return null;
+      }
       onDone();
       // An action that answers with rows — a pull — keeps its dialog open to
       // show them. Closing it would be the pull done and its messages thrown
@@ -5011,9 +5108,24 @@ function openActionForm(route, segments, action, onDone, title = null, host = nu
 
   if (host) {
     const heading = action.title || action.label;
-    setChildren(host.view,
-      pageHeader(heading, segments.length ? name : null, { back: host.back, backLabel: `Back to ${name}` }),
-      el("form", { class: "create-page is-single-page", novalidate: true, onsubmit: submit, "aria-label": heading },
+    const header = pageHeader(heading, segments.length ? name : null, { back: host.back, backLabel: `Back to ${name}` });
+    // The page's crumbs back to the resource it is on, as Secure Source
+    // Manager's Create repository has (#1856).
+    if (segments.length) {
+      const list = new URL(route.path, location.origin);
+      const project = currentProject();
+      if (project) list.searchParams.set("project", project);
+      carryScope(list, route.service);
+      const trail = [el("a", { href: list.pathname + list.search, text: route.crumb || route.title })];
+      segments.forEach((sg, i) => {
+        trail.push(el("span", { "aria-hidden": "true", text: "/" }));
+        trail.push(el("a", { href: detailHref(route, segments.slice(0, i + 1)), text: sg }));
+      });
+      trail.push(el("span", { "aria-hidden": "true", text: "/" }), el("span", { text: heading }));
+      header.prepend(el("nav", { class: "breadcrumb", "aria-label": "Breadcrumb" }, ...trail));
+    }
+    setChildren(host.view, header,
+      el("form", { class: "create-page is-single-page", id: "action-page-form", novalidate: true, onsubmit: submit, "aria-label": heading },
         error,
         ...actionSteps.nodes,
         el("div", { class: "form-actions" }, primary,
@@ -8101,6 +8213,353 @@ function sourceFilesEntry(f, id, errorId, helpId) {
   const entry = { field: Object.assign({}, f, { default: control.value }), control, node, error, helpId, errorId,
                   isCheck: false, follow, focus: () => editor.focus() };
   return entry;
+}
+
+// --- Secure Source Manager's code view and Files changed (#2071) ----------
+//
+// The web interface's code view: a branch and tag selector over the tree
+// (Section.Refs), a file's lines numbered with their syntax highlighted by
+// its language (Section.Language), and Blame (Section.Blame), the commit
+// that last changed each line beside it. Files changed (Section.Diff) is
+// each file's lines with the Whitespace, Split view/Unified view and diff
+// options menus, a plus icon beside each line that opens a comment form
+// (Add single comment, Start review: Google's "click the plus icon next to
+// the line you want to comment on, click Start review"), and the comments
+// under their lines, pending ones marked Pending until Review sends them.
+
+// refPicker is a branch and tag selector: choosing a ref opens its path.
+function refPicker(route, refs, label) {
+  const id = "ref-picker";
+  const select = el("select", { id, class: "ref-picker" },
+    (refs.branches || []).length ? el("optgroup", { label: "Branches" },
+      ...refs.branches.map((r) => el("option", { value: `b:${r.name}`, text: r.name }))) : null,
+    (refs.tags || []).length ? el("optgroup", { label: "Tags" },
+      ...refs.tags.map((r) => el("option", { value: `t:${r.name}`, text: r.name }))) : null);
+  const all = [...(refs.branches || []).map((r) => [`b:${r.name}`, r]), ...(refs.tags || []).map((r) => [`t:${r.name}`, r])];
+  const current = all.find(([, r]) => r.name === refs.current);
+  if (current) select.value = current[0];
+  else select.prepend(el("option", { value: "", text: refs.current.length > 12 ? refs.current.slice(0, 7) : refs.current, selected: "selected" }));
+  select.addEventListener("change", () => {
+    const hit = all.find(([k]) => k === select.value);
+    if (hit) navigate(detailHref(route, hit[1].path));
+  });
+  return el("div", { class: "ref-picker-row" }, el("label", { for: id, text: label || "Branch or tag" }), select);
+}
+
+// CODE_KEYWORDS are the words codeTokens draws as keywords, by language.
+const CODE_KEYWORDS = (() => {
+  const w = (s) => new Set(s.split(" "));
+  const cLike = "if else for while do switch case default break continue return goto struct union enum typedef sizeof static const extern void int char long short float double unsigned signed";
+  return {
+    go: w("break case chan const continue default defer else fallthrough for func go goto if import interface map package range return select struct switch type var nil true false iota"),
+    javascript: w("async await break case catch class const continue debugger default delete do else export extends finally for from function if import in instanceof let new of return static super switch this throw try typeof var void while with yield null undefined true false"),
+    typescript: w("async await break case catch class const continue default delete do else enum export extends finally for from function if implements import in instanceof interface let new of private protected public readonly return static super switch this throw try type typeof var void while yield null undefined true false"),
+    python: w("False None True and as assert async await break class continue def del elif else except finally for from global if import in is lambda nonlocal not or pass raise return try while with yield self"),
+    java: w("abstract boolean break byte case catch char class const continue default do double else enum extends final finally float for if implements import instanceof int interface long native new package private protected public return short static super switch synchronized this throw throws try void volatile while null true false var record"),
+    kotlin: w("as break class continue do else false for fun if in interface is null object package return super this throw true try typealias val var when while import override private public internal data"),
+    c: w(cLike + " include define ifdef ifndef endif"),
+    cpp: w(cLike + " class namespace template typename public private protected virtual new delete this nullptr true false using auto include"),
+    csharp: w("abstract as bool break byte case catch class const continue default do double else enum false finally for foreach if in int interface internal is namespace new null object out override private protected public readonly ref return static string struct switch this throw true try using var virtual void while async await"),
+    rust: w("as async await break const continue crate else enum extern false fn for if impl in let loop match mod move mut pub ref return self Self static struct super trait true type unsafe use where while"),
+    ruby: w("alias and begin break case class def defined do else elsif end ensure false for if in module next nil not or redo rescue retry return self super then true undef unless until when while yield require"),
+    php: w("abstract and array as break case catch class clone const continue declare default do echo else elseif empty endif extends final for foreach function global if implements include interface isset namespace new null private protected public require return static switch throw trait try use var while true false"),
+    swift: w("class deinit enum extension func import init let protocol struct subscript typealias var break case continue default do else fallthrough for guard if in repeat return switch where while as false is nil self super throw throws true try"),
+    scala: w("abstract case catch class def do else extends false final finally for if implicit import lazy match new null object override package private protected return sealed super this throw trait try true type val var while with yield"),
+    dart: w("abstract as async await break case catch class const continue default do else enum extends false final finally for if import in is new null return static super switch this throw true try var void while"),
+    shell: w("if then else elif fi for while do done case esac in function return export local set unset echo exit"),
+    sql: w("select from where and or not insert into values update set delete create table drop alter join left right inner outer on group by order having limit as null is in like distinct union all primary key"),
+    proto: w("syntax package import option message enum service rpc returns repeated optional map oneof reserved true false"),
+    hcl: w("resource data variable output module provider locals terraform true false null for in if"),
+    dockerfile: w("FROM RUN CMD LABEL EXPOSE ENV ADD COPY ENTRYPOINT VOLUME USER WORKDIR ARG ONBUILD STOPSIGNAL HEALTHCHECK SHELL AS"),
+    yaml: w("true false null yes no"), json: w("true false null"), toml: w("true false"),
+  };
+})();
+
+// CODE_COMMENTS are a language's line comment and block comment marks.
+const CODE_COMMENTS = {
+  python: ["#"], ruby: ["#"], shell: ["#"], yaml: ["#"], toml: ["#"], dockerfile: ["#"], makefile: ["#"], hcl: ["#", "/*", "*/"],
+  sql: ["--", "/*", "*/"], html: [null, "<!--", "-->"], css: [null, "/*", "*/"], markdown: [null], json: [null], text: [null],
+};
+
+// codeTokens splits one line into highlighted spans: comments, strings,
+// numbers and keywords. state carries an open block comment over lines.
+function codeTokens(line, lang, state) {
+  const out = [];
+  const [lineMark, open, close] = CODE_COMMENTS[lang] || ["//", "/*", "*/"];
+  const kws = CODE_KEYWORDS[lang] || new Set();
+  const ci = lang === "sql";
+  let plain = "";
+  const flush = () => { if (plain) out.push(document.createTextNode(plain)); plain = ""; };
+  const push = (cls, s) => { flush(); out.push(el("span", { class: cls, text: s })); };
+  if (lang === "text" || lang === "markdown") return [document.createTextNode(line)];
+  let i = 0;
+  if (state.inBlock) {
+    const end = line.indexOf(close);
+    if (end < 0) return [el("span", { class: "tok-comment", text: line })];
+    push("tok-comment", line.slice(0, end + close.length));
+    i = end + close.length;
+    state.inBlock = false;
+  }
+  while (i < line.length) {
+    const rest = line.slice(i);
+    if (lineMark && rest.startsWith(lineMark) && (lineMark !== "#" || i === 0 || /\s/.test(line[i - 1]))) {
+      push("tok-comment", rest); return out;
+    }
+    if (open && rest.startsWith(open)) {
+      const end = rest.indexOf(close, open.length);
+      if (end < 0) { push("tok-comment", rest); state.inBlock = true; return out; }
+      push("tok-comment", rest.slice(0, end + close.length)); i += end + close.length; continue;
+    }
+    const c = line[i];
+    if (c === '"' || c === "'" || c === "`") {
+      let j = i + 1;
+      for (; j < line.length && line[j] !== c; j++) if (line[j] === "\\") j++;
+      push("tok-str", line.slice(i, j + 1)); i = j + 1; continue;
+    }
+    const num = /^(0x[0-9a-fA-F_]+|\d[\d_]*(\.\d+)?([eE][+-]?\d+)?)\b/.exec(rest);
+    if (num && (i === 0 || !/[\w$]/.test(line[i - 1]))) { push("tok-num", num[0]); i += num[0].length; continue; }
+    const word = /^[A-Za-z_$][\w$]*/.exec(rest);
+    if (word) {
+      if (kws.has(ci ? word[0].toLowerCase() : word[0])) push("tok-kw", word[0]);
+      else plain += word[0];
+      i += word[0].length; continue;
+    }
+    plain += c; i++;
+  }
+  flush();
+  return out;
+}
+
+// codeView is a file's content: its lines numbered and highlighted, and
+// Blame, a toggle that draws each run of lines' commit beside them.
+function codeView(route, section, name) {
+  const lines = section.text.replace(/\n$/, "").split("\n");
+  const state = { inBlock: false };
+  const highlighted = lines.map((l) => codeTokens(l, section.language, state));
+  const blameAt = new Map();
+  for (const b of section.blame || []) blameAt.set(b.line, b);
+  const table = el("table", { class: "code-view", "aria-label": `${section.label}, ${lines.length} lines, ${section.language}` });
+  let blameOn = new URLSearchParams(location.search).get("blame") === "1";
+  const draw = () => {
+    const rows = lines.map((_, n) => {
+      const ln = n + 1;
+      const cells = [];
+      if (blameOn) {
+        const b = blameAt.get(ln);
+        cells.push(b
+          ? el("td", { class: "code-blame", rowspan: String(b.count) },
+            el("a", { href: detailHref(route, b.opens), class: "mono", text: b.commit, title: b.summary }),
+            el("span", { text: ` ${b.author}` }), el("span", { class: "form-help", text: ` ${b.summary}` }))
+          : null);
+      }
+      cells.push(el("td", { class: "code-line-number mono", text: String(ln) }),
+        el("td", { class: "code-line mono" }, ...highlighted[n]));
+      return el("tr", { id: `L${ln}` }, ...cells.filter(Boolean));
+    });
+    setChildren(table, el("caption", { class: "sr-only", text: `${section.label}${blameOn ? ", with blame" : ""}` }),
+      el("thead", { class: "sr-only" }, el("tr", {},
+        blameOn ? el("th", { scope: "col", text: "Commit" }) : null,
+        el("th", { scope: "col", text: "Line" }), el("th", { scope: "col", text: "Code" }))),
+      el("tbody", {}, ...rows));
+  };
+  const blame = (section.blame || []).length ? el("button", { type: "button", class: "secondary", id: "code-blame-toggle",
+    "aria-pressed": blameOn ? "true" : "false", text: "Blame",
+    onclick: () => {
+      blameOn = !blameOn;
+      blame.setAttribute("aria-pressed", blameOn ? "true" : "false");
+      const url = new URL(location.href);
+      if (blameOn) url.searchParams.set("blame", "1"); else url.searchParams.delete("blame");
+      history.replaceState({}, "", url);
+      draw();
+      announce(blameOn ? "Blame shown" : "Blame hidden");
+    } }) : null;
+  draw();
+  return el("div", { class: "card text-section code-file" },
+    el("div", { class: "text-actions" }, blame, copyButton(section.text, `${section.label} for ${name}`)),
+    el("div", { class: "code-scroll", tabindex: "0", role: "region", "aria-label": `${section.label} content` }, table));
+}
+
+// diffPairs is a file's lines for Split view: context on both sides, and
+// each run of removed lines beside the added run after it.
+function diffPairs(lines) {
+  const out = [];
+  for (let i = 0; i < lines.length;) {
+    const l = lines[i];
+    if (l.kind !== "-" && l.kind !== "+") { out.push([l, l]); i++; continue; }
+    const del = [], add = [];
+    while (i < lines.length && lines[i].kind === "-") del.push(lines[i++]);
+    while (i < lines.length && lines[i].kind === "+") add.push(lines[i++]);
+    for (let k = 0; k < Math.max(del.length, add.length); k++) out.push([del[k] || null, add[k] || null]);
+  }
+  return out;
+}
+
+// diffIgnoringWhitespace folds a removed line and the added line paired
+// with it into one context line when they differ only in whitespace.
+function diffIgnoringWhitespace(lines) {
+  const out = [];
+  for (const [a, b] of diffPairs(lines)) {
+    if (a && b && a === b) { out.push(a); continue; }
+    if (a && b && a.kind === "-" && b.kind === "+" && a.text.replace(/\s+/g, "") === b.text.replace(/\s+/g, "")) {
+      out.push({ kind: " ", old: a.old, new: b.new, text: b.text });
+      continue;
+    }
+    if (a) out.push(a);
+    if (b) out.push(b);
+  }
+  // Removed lines first within a change, as the patch has them.
+  return out;
+}
+
+// drawDiffView is Files changed (Section.Diff).
+function drawDiffView(route, segments, section, reload) {
+  const view = section.diff;
+  const param = (k) => new URLSearchParams(location.search).get(k);
+  const setParam = (k, v) => {
+    const url = new URL(location.href);
+    if (v) url.searchParams.set(k, v); else url.searchParams.delete(k);
+    history.replaceState({}, "", url);
+  };
+  let split = param("diff-view") === "split";
+  let ignoreWs = param("whitespace") === "ignore";
+  const collapsed = new Set();
+  const body = el("div", { class: "diff-files" });
+  const post = async (action, values, label) => {
+    const op = recordOperation(label);
+    try {
+      const res = await send(`/api/actions/${route.service}?project=${encodeURIComponent(currentProject())}`, "POST",
+        { Path: segments, Action: action, Values: values });
+      op.succeeded("", res.operation);
+      notify(label);
+      reload();
+    } catch (err) {
+      op.failed(err.message, err.operation);
+      throw err;
+    }
+  };
+  // The form the plus icon opens under a line.
+  const commentForm = (file, line, onCancel) => {
+    const id = `diff-comment-${file.name.replace(/[^A-Za-z0-9]/g, "-")}-${line < 0 ? "o" : "n"}${Math.abs(line)}`;
+    const text = el("textarea", { id, rows: "3", class: "diff-comment-text" });
+    const err = el("p", { class: "form-field-error", role: "alert", hidden: true });
+    const sendAs = (action, label) => async () => {
+      if (!text.value.trim()) { err.hidden = false; err.textContent = "Write a comment first."; text.focus(); return; }
+      try {
+        await post(action, { path: file.name, line: String(line), lineBody: text.value }, label);
+      } catch (e) { err.hidden = false; err.textContent = e.message; }
+    };
+    const where = line < 0 ? `old line ${-line}` : `line ${line}`;
+    const buttons = [el("button", { type: "button", class: "secondary", text: "Add single comment",
+      onclick: sendAs(view.commentAction, `Comment on ${file.name} ${where}`) })];
+    if (view.startAction) {
+      buttons.push(el("button", { type: "button", class: "primary", text: view.pending ? "Add comment" : "Start review",
+        onclick: sendAs(view.startAction, view.pending ? `Added a pending comment on ${file.name} ${where}` : `Started a review with ${file.name} ${where}`) }));
+    }
+    buttons.push(el("button", { type: "button", class: "secondary", text: "Cancel", onclick: onCancel }));
+    const form = el("div", { class: "diff-comment-form" },
+      el("label", { for: id, text: `Comment on ${file.name}, ${where}` }), text,
+      el("p", { class: "form-help", text: "Comments support styling with markdown." }), err,
+      el("div", { class: "action-bar" }, ...buttons));
+    setTimeout(() => text.focus(), 0);
+    return form;
+  };
+  const commentsAt = (file, line) => (file.comments || []).filter((c) => c.line === line);
+  const commentRow = (cols, comments) => el("tr", { class: "diff-comments" }, el("td", { colspan: String(cols) },
+    ...comments.map((c) => el("div", { class: "diff-comment" + (c.pending ? " is-pending" : "") },
+      el("span", { class: "status-chip", text: c.state || "" }), el("span", { class: "mono", text: ` #${c.id} ` }),
+      el("span", { text: c.body })))));
+  const drawFile = (file) => {
+    const lines = ignoreWs ? diffIgnoringWhitespace(file.lines || []) : (file.lines || []);
+    const fid = `diff-file-${file.name.replace(/[^A-Za-z0-9]/g, "-")}`;
+    const open = !collapsed.has(file.name);
+    const toggle = el("button", { type: "button", class: "icon-button diff-file-toggle", "aria-expanded": open ? "true" : "false",
+      "aria-controls": `${fid}-body`, "aria-label": `${open ? "Collapse" : "Expand"} ${file.name}`, text: open ? "▾" : "▸",
+      onclick: () => { if (open) collapsed.add(file.name); else collapsed.delete(file.name); draw(); document.getElementById(`${fid}-toggle`)?.focus(); } });
+    toggle.id = `${fid}-toggle`;
+    const cols = split ? 6 : 4;
+    const table = el("table", { class: "diff-table" + (split ? " is-split" : ""), id: `${fid}-body`, hidden: open ? null : "hidden",
+      "aria-label": `Changes to ${file.name}` });
+    const rows = [];
+    const plus = (line, label, row) => el("button", { type: "button", class: "diff-plus", "aria-label": `Add a comment on ${label} of ${file.name}`,
+      title: "Add a comment", text: "+",
+      onclick: () => {
+        const existing = row.nextElementSibling;
+        if (existing && existing.classList.contains("diff-form-row")) { existing.remove(); return; }
+        const formRow = el("tr", { class: "diff-form-row" });
+        formRow.append(el("td", { colspan: String(cols) }, commentForm(file, line, () => { formRow.remove(); })));
+        row.after(formRow);
+      } });
+    const numCell = (n) => el("td", { class: "diff-num mono", text: n ? String(n) : "" });
+    const kindClass = (l) => (l ? (l.kind === "+" ? "is-add" : l.kind === "-" ? "is-del" : l.kind === "@" ? "is-hunk" : "") : "is-empty");
+    const codeCell = (l) => el("td", { class: `diff-code mono ${kindClass(l)}` },
+      l ? el("span", { class: "diff-sign", "aria-hidden": "true", text: l.kind === "@" ? "" : l.kind }) : null,
+      l ? document.createTextNode(l.text) : null);
+    if (!split) {
+      for (const l of lines) {
+        const row = el("tr", { class: `diff-row ${kindClass(l)}` });
+        const at = l.kind === "-" ? -l.old : l.new;
+        const label = l.kind === "-" ? `old line ${l.old}` : `line ${l.new}`;
+        row.append(el("td", { class: "diff-plus-cell" }, l.kind === "@" ? null : plus(at, label, row)), numCell(l.old), numCell(l.new), codeCell(l));
+        rows.push(row);
+        const cs = l.kind === "@" ? [] : commentsAt(file, at);
+        if (cs.length) rows.push(commentRow(cols, cs));
+      }
+    } else {
+      for (const [a, b] of diffPairs(lines)) {
+        const row = el("tr", { class: "diff-row" });
+        const left = a && a.kind !== "+" ? a : null, right = b && b.kind !== "-" ? b : null;
+        if (a && a.kind === "@") {
+          row.append(el("td", {}), el("td", { class: "diff-code mono is-hunk", colspan: "5", text: a.text }));
+          rows.push(row); continue;
+        }
+        row.append(el("td", { class: "diff-plus-cell" }, left ? plus(-left.old, `old line ${left.old}`, row) : null), numCell(left && left.old), codeCell(left),
+          el("td", { class: "diff-plus-cell" }, right ? plus(right.new, `line ${right.new}`, row) : null), numCell(right && right.new), codeCell(right));
+        rows.push(row);
+        const cs = [...(left ? commentsAt(file, -left.old) : []), ...(right && right.new ? commentsAt(file, right.new) : [])];
+        if (cs.length) rows.push(commentRow(cols, cs));
+      }
+    }
+    setChildren(table, el("thead", { class: "sr-only" }, el("tr", {},
+      ...(split ? ["Comment", "Old line", "Old", "Comment", "New line", "New"] : ["Comment", "Old line", "New line", "Change"]).map((h) =>
+        el("th", { scope: "col", text: h })))), el("tbody", {}, ...rows));
+    const n = (file.comments || []).length;
+    return el("section", { class: "card diff-file", "aria-labelledby": `${fid}-name` },
+      el("div", { class: "diff-file-head" }, toggle,
+        el("h3", { class: "mono diff-file-name", id: `${fid}-name`, text: file.name }),
+        el("span", { class: "status-chip", text: file.action }),
+        n ? el("span", { class: "form-help", text: ` ${n} comment${n === 1 ? "" : "s"}` }) : null),
+      table);
+  };
+  const draw = () => setChildren(body, ...view.files.map(drawFile));
+  // The menus over the files: Whitespace, Split view/Unified view, diff
+  // options.
+  const ws = el("select", { id: "diff-whitespace" },
+    el("option", { value: "", text: "Show all whitespace changes" }),
+    el("option", { value: "ignore", text: "Ignore whitespace changes" }));
+  ws.value = ignoreWs ? "ignore" : "";
+  ws.addEventListener("change", () => { ignoreWs = ws.value === "ignore"; setParam("whitespace", ws.value); draw(); announce(ws.selectedOptions[0].text); });
+  const viewToggle = el("button", { type: "button", class: "secondary", id: "diff-view-toggle", text: split ? "Unified view" : "Split view",
+    onclick: () => {
+      split = !split;
+      setParam("diff-view", split ? "split" : "");
+      viewToggle.textContent = split ? "Unified view" : "Split view";
+      draw();
+      announce(split ? "Split view" : "Unified view");
+    } });
+  const options = overflowMenu([
+    { label: "Expand all files", run: () => { collapsed.clear(); draw(); announce("Every file expanded"); } },
+    { label: "Collapse all files", run: () => { view.files.forEach((f) => collapsed.add(f.name)); draw(); announce("Every file collapsed"); } },
+  ], "diff options");
+  options.classList.add("diff-options");
+  const pending = view.pending
+    ? el("span", { class: "status-chip diff-pending", text: `${view.pending} pending comment${view.pending === 1 ? "" : "s"}: Review sends them` })
+    : null;
+  draw();
+  return el("div", { class: "diff-view" },
+    el("div", { class: "diff-toolbar", role: "group", "aria-label": "Files changed options" },
+      el("label", { for: "diff-whitespace", text: "Whitespace" }), ws, viewToggle,
+      el("span", { class: "diff-options-label", text: "diff options" }), options, pending),
+    body);
 }
 
 // --- Workflows' source editor and graph (#2004) ---------------------------

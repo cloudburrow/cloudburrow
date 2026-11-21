@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -59,15 +60,43 @@ func TestConsoleSourceManagerInstancesAndRepositories(t *testing.T) {
 	if err != nil || l.Unavailable != "" || len(l.Items) != 1 || l.Items[0].Name != "inst" || l.Items[0].Status != "Active" || !l.RowsOpenable {
 		t.Fatalf("the Instances list = %+v, %v", l, err)
 	}
-	if _, f := p.CreateForm(); len(f) != 6 || f[1].Type != "select" || f[3].Unavailable == "" || f[5].ShowWhen != "encryption=cmek" {
+	if _, f := p.CreateForm(); len(f) != 7 || f[1].Type != "select" || f[3].Name != "private" || f[3].Unavailable != "" ||
+		f[4].Name != "caPool" || f[4].ShowWhen != "private" || f[6].ShowWhen != "encryption=cmek" {
 		t.Errorf("Create instance's fields = %+v", f)
 	}
-	if _, err := p.Create(ctx, "", map[string]string{"name": "x", "region": "us-central1", "private": "true"}); err == nil {
-		t.Error("Create instance made a private instance")
+	// Private instance (#1856): a Private Service Connect instance with its
+	// CA pool, whose page shows its service attachments.
+	if _, err := p.Create(ctx, "", map[string]string{"name": "priv", "region": "us-central1", "private": "true", "caPool": "pool"}); err == nil {
+		t.Error("Create instance took a CA pool that is not a resource name")
+	}
+	if _, err := p.Create(ctx, "", map[string]string{"name": "priv", "region": "us-central1", "private": "true",
+		"caPool": "projects/console-ssm/locations/us-central1/caPools/web"}); err != nil {
+		t.Fatal(err)
+	}
+	pd, err := p.Detail(ctx, "", []string{"priv"})
+	if err != nil || pd.Unavailable != "" {
+		t.Fatalf("the private instance's page = %+v, %v", pd, err)
+	}
+	pprops := map[string]string{}
+	for _, pr := range pd.Summary {
+		pprops[pr.Label] = pr.Value
+	}
+	if !strings.HasPrefix(pprops["Private instance"], "Yes") || pprops["CA pool"] != "projects/console-ssm/locations/us-central1/caPools/web" ||
+		!strings.HasSuffix(pprops["HTTP service attachment"], "/serviceAttachments/priv-http") ||
+		!strings.HasSuffix(pprops["SSH service attachment"], "/serviceAttachments/priv-ssh") {
+		t.Errorf("the private instance's page = %v", pprops)
+	}
+	if err := p.Delete(ctx, "", "priv"); err != nil {
+		t.Fatal(err)
 	}
 	acts := p.DetailActions(ctx, "", []string{"inst"})
 	if len(acts) != 2 || acts[0].ID != "create-repo" || acts[1].ID != "create-connection" {
 		t.Fatalf("the instance's actions = %+v", acts)
+	}
+	// Create repository is the web interface's page of its own, going on to
+	// the new repository (#1856).
+	if a := acts[0]; !a.Page || a.Opens != "id" || a.Title != "Create repository" || a.Submit != "Create repository" {
+		t.Errorf("Create repository = %+v; want a page opening the repository it makes", a)
 	}
 	if err := p.ActAt(ctx, "", []string{"inst"}, "create-repo", map[string]string{"id": "app", "description": "first", "branch": "main"}); err != nil {
 		t.Fatal(err)
@@ -177,7 +206,7 @@ func TestConsoleSourceManagerInstancesAndRepositories(t *testing.T) {
 	if !linked {
 		t.Error("the repository's page does not list the link")
 	}
-	if acts := p.DetailActions(ctx, "", []string{"inst", "app"}); len(acts) != 8 || acts[7].ID != "delete-link" {
+	if acts := p.DetailActions(ctx, "", []string{"inst", "app"}); len(acts) != 10 || acts[9].ID != "delete-link" {
 		t.Errorf("the linked repository's actions = %+v", acts)
 	}
 	if err := p.ActAt(ctx, "", []string{"inst", "app"}, "delete-link", map[string]string{"link": link}); err != nil {
@@ -188,7 +217,7 @@ func TestConsoleSourceManagerInstancesAndRepositories(t *testing.T) {
 	}
 
 	acts = p.DetailActions(ctx, "", []string{"inst", "app"})
-	if ids := ssmActionIDs(acts); ids != "new-issue new-pull add-branch-rule add-hook edit-description delete-repo" || acts[4].Fields[0].Default != "first" || !acts[5].Leaves {
+	if ids := ssmActionIDs(acts); ids != "new-issue new-pull new-label new-milestone add-branch-rule add-hook edit-description delete-repo" || acts[6].Fields[0].Default != "first" || !acts[7].Leaves {
 		t.Fatalf("the repository's actions = %+v", acts)
 	}
 	if err := p.ActAt(ctx, "", []string{"inst", "app"}, "edit-description", map[string]string{"description": "second"}); err != nil {
@@ -297,7 +326,7 @@ func testSourceManagerRepositoryPages(t *testing.T, ctx context.Context, p sourc
 		s["comments"].Listing.Items[0].Fields["Comment"] != "me too" {
 		t.Errorf("the issue's page = %+v", d)
 	}
-	if ids := ssmActionIDs(p.DetailActions(ctx, "", ip)); ids != "add-comment edit-issue reopen-issue delete-issue" {
+	if ids := ssmActionIDs(p.DetailActions(ctx, "", ip)); ids != "add-comment edit-issue reopen-issue set-labels set-milestone set-assignees delete-issue" {
 		t.Errorf("a closed issue's actions = %s", ids)
 	}
 	if err := p.ActAt(ctx, "", ip, "reopen-issue", nil); err != nil {
@@ -323,7 +352,7 @@ func testSourceManagerRepositoryPages(t *testing.T, ctx context.Context, p sourc
 	if len(prs) != 1 || prs[0].Fields["Branches"] != "feature → main" || prs[0].Status != "Open" {
 		t.Fatalf("the Pull requests tab = %+v (%s)", prs, secs["pulls"].Unavailable)
 	}
-	if _, s := sections(prs[0].Opens...); !strings.Contains(s["files"].Text, "README.md") || !strings.Contains(s["files"].Text, "+# app") {
+	if _, s := sections(prs[0].Opens...); !strings.Contains(ssmDiffText(s["files"]), "README.md (added)") || !strings.Contains(ssmDiffText(s["files"]), "+1 # app") {
 		t.Errorf("Files changed = %+v", s["files"])
 	}
 	testSourceManagerReviews(t, ctx, p, prs[0].Opens, sections)
@@ -470,8 +499,8 @@ func testSourceManagerReviews(t *testing.T, ctx context.Context, p sourceManager
 		byType["Review"].Status != "Commented" || byType["Code comment"].Fields["File"] != "README.md:1" || byType["Code comment"].Status != "Unresolved" {
 		t.Fatalf("the Conversation tab = %+v (%s)", conv, s["conversation"].Unavailable)
 	}
-	if !strings.Contains(s["files"].Text, "Comments on README.md:") || !strings.Contains(s["files"].Text, "a title?") {
-		t.Errorf("Files changed does not show the line comments: %s", s["files"].Text)
+	if txt := ssmDiffText(s["files"]); !strings.Contains(txt, "Unresolved: a title?") || !strings.HasPrefix(txt, "README.md (") {
+		t.Errorf("Files changed does not show the line comments: %s", txt)
 	}
 	code := append(append([]string{}, pp...), byType["Code comment"].Name)
 	if ids := ssmActionIDs(p.DetailActions(ctx, "", code)); ids != "reply-comment resolve-comment edit-pr-comment delete-pr-comment" {
@@ -575,4 +604,27 @@ func testSourceManagerWebhooks(t *testing.T, ctx context.Context, p sourceManage
 	if h := webhooks().Listing.Items; len(h) != 0 {
 		t.Errorf("the Webhooks tab after Delete = %+v", h)
 	}
+}
+
+// ssmDiffText is a Files changed view as text: each file's name and
+// action, its lines as KIND NUMBER TEXT, and its comments by line.
+func ssmDiffText(sec console.Section) string {
+	if sec.Diff == nil {
+		return sec.Text
+	}
+	var b strings.Builder
+	for _, f := range sec.Diff.Files {
+		fmt.Fprintf(&b, "%s (%s)\n", f.Name, f.Action)
+		for _, l := range f.Lines {
+			n := l.New
+			if l.Kind == "-" {
+				n = l.Old
+			}
+			fmt.Fprintf(&b, "%s%d %s\n", l.Kind, n, l.Text)
+		}
+		for _, c := range f.Comments {
+			fmt.Fprintf(&b, "line %d comment %s %s: %s\n", c.Line, c.ID, c.State, c.Body)
+		}
+	}
+	return b.String()
 }

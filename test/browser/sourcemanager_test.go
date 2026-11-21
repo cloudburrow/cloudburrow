@@ -51,16 +51,11 @@ func TestCloudRunSourceManagerThroughThePage(t *testing.T) {
 	p.navigate("/secure-source-manager?project=" + project)
 	p.clickText("#view tbody a", inst)
 	p.waitFor(fmt.Sprintf(`location.pathname === %q`, "/secure-source-manager/"+inst))
-	p.pageAction("Create repository", map[string]string{"id": "web", "description": "from the browser"}, "")
+	ssmCreateRepositoryPage(p, inst, map[string]string{"id": "web", "description": "from the browser"})
 	r, err := c.GetRepository(ctx, &ssmpb.GetRepositoryRequest{Name: repo})
 	if err != nil || r.GetDescription() != "from the browser" {
 		t.Fatalf("GetRepository after Create repository = %v, %v", r, err)
 	}
-	// The snackbar Create repository raised sits over the table's last row.
-	p.eval(`document.querySelectorAll(".snackbar-close").forEach((b) => b.click()); true`, nil)
-	p.waitFor(`document.querySelector(".snackbar") === null`)
-	p.clickText("#view tbody a", "web")
-	p.waitFor(`location.pathname.endsWith("/web")`)
 	p.waitFor(fmt.Sprintf(`document.querySelector("#view").textContent.includes(%q)`, r.GetUris().GetGitHttps()))
 	p.pageAction("Edit description", map[string]string{"description": "edited in the browser"}, "")
 	if r, err := c.GetRepository(ctx, &ssmpb.GetRepositoryRequest{Name: repo}); err != nil || r.GetDescription() != "edited in the browser" {

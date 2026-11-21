@@ -2831,3 +2831,27 @@ func TestSidePanelsLayerBarBarsAndRepositoryBrowse(t *testing.T) {
 		}
 	}
 }
+
+// An Action with Page set draws its form at the page's own address with
+// ?action=ID instead of in a dialog, as Google's Secure Source Manager web
+// interface has Create repository as a page (#1856, on #1851's page
+// actions); Opens names the field whose value is the row it made, which
+// the console then opens.
+func TestAnActionCanBeAPage(t *testing.T) {
+	b, err := json.Marshal(Action{ID: "create-repo", Label: "Create repository", Page: true, Opens: "id"})
+	if err != nil || !strings.Contains(string(b), `"page":true`) || !strings.Contains(string(b), `"opens":"id"`) {
+		t.Errorf("Action.Page and Opens marshal as %s, %v", b, err)
+	}
+	js := consoleAsset(t, "console.js")
+	for _, want := range []string{
+		`if (host && action.opens && values[action.opens]) {`,
+		"navigate(detailHref(route, [...segments, values[action.opens]]));",
+		`el("form", { class: "create-page is-single-page", id: "action-page-form", novalidate: true, onsubmit: submit, "aria-label": heading },`,
+		`header.prepend(el("nav", { class: "breadcrumb", "aria-label": "Breadcrumb" }, ...trail));`,
+		`"POST", { Path: segments, Action: action.id, Values: values });`,
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("console.js is missing %q", want)
+		}
+	}
+}

@@ -160,3 +160,13 @@ verifies the XML signatures of SAML assertions (#2065), under the Apache
 License, Version 2.0, and with its dependencies github.com/beevik/etree
 v1.7.0, Copyright 2015-2024 Brett Vickers, under the BSD 2-Clause License,
 and github.com/jonboulle/clockwork v0.5.0 (Apache License, Version 2.0).
+
+The binary embeds Secure Source Manager's repository initialization
+templates (internal/adapter/run/ssmtemplates.tar.gz): .gitignore templates
+from github/gitignore (https://github.com/github/gitignore, commit
+b71db924d35085e481ad7c7ad8a7435b8d8b3016), dedicated to the public domain
+under CC0 1.0 Universal, and licence texts from the SPDX License List
+(https://github.com/spdx/license-list-data, v3.29.0), the SPDX License List
+being made available by the Linux Foundation and its contributors under the
+Creative Commons Attribution 3.0 licence; the sources' digests are in
+third_party/ssm-templates/.

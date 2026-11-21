@@ -306,6 +306,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// Each Cloud Run workload is told its own service account (#1388).
 		metaSrv.WithAccounts(runSvc.metadataAccount)
 		runSvc.storage = func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") }
+		runSvc.tokens = creds
 		// Functions' event triggers (#1414) deliver through Pub/Sub.
 		if serviceEnabled(cfg, config.ServicePubSub) {
 			runSvc.events = &eventsConfig{

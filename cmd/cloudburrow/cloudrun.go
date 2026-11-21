@@ -32,6 +32,10 @@ import (
 // Like Cloud Tasks it runs in the CLI process, because the adapter is ours
 // even though the execution engine is the cluster's.
 type runService struct {
+	// tokens mints the instance's ID tokens whatever the services:
+	// a Secure Source Manager webhook's service account authentication
+	// (#2071) needs no Pub/Sub, as the events' tokens do.
+	tokens runadapter.IDTokenMinter
 	// stepMetadata is where a build step reaches the metadata server
 	// (#1854), IP:port, or "": set once cloudburrow-host is known.
 	stepMetadata func() string
@@ -317,6 +321,9 @@ func (r *runService) Start(ctx context.Context) error {
 	// (its v1 paths are Artifact Registry's), and its repositories' git URLs,
 	// whose pushes run the triggers file's builds.
 	ssm := adapter.SecureSourceManager(func() string { return hostURL(r.server.Addr()) })
+	// A webhook's service account authentication (#2071) sends ID tokens
+	// signed by the instance's own key.
+	ssm.WithTokens(r.tokens)
 	// Developer Connect (#1546): connections to that Secure Source Manager
 	// and links to its repositories, under /developerconnect/v1/.
 	devConnect := adapter.DeveloperConnect()
