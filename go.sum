@@ -84,6 +84,8 @@ cloud.google.com/go/apigateway v1.13.0/go.mod h1:pvEpOuuOIw2ev9VCcOyVkDXHHL4lvgM
 cloud.google.com/go/apigeeconnect v1.12.0/go.mod h1:mYJekCKZHc2ia5yZX5lwtexTn9CzsOfb6+sh/2hi42Q=
 cloud.google.com/go/apigeeregistry v1.1.0/go.mod h1:4ZFhQlxMuyfDMz9ORDSV8FPZtf2yPQkKjigsFtrrE4Y=
 cloud.google.com/go/appengine v1.15.0/go.mod h1:/8gGZsOX5GDjOo4mAWk8IV59p2991dxTbEtKIlhDjzU=
+cloud.google.com/go/apphub v1.4.1 h1:TYIB06lS5bNCsDgq1TD/rLi/4QbtoqwMkInf3OjWeXk=
+cloud.google.com/go/apphub v1.4.1/go.mod h1:EiaGXETH27p83GZy3rDvAfehJ3EP/IoWhyBi4/4XqbI=
 cloud.google.com/go/area120 v0.15.0/go.mod h1:jD1fw9W4xxIZMY68g7PpbCPleoeGddFs5jPcdhfg3+Y=
 cloud.google.com/go/artifactregistry v1.26.0/go.mod h1:c5FPi5GtDBP+OAr5kKhCBNQDT9ZgAyobXQjekx93VWs=
 cloud.google.com/go/artifactregistry v1.27.0 h1:EBgdk9sXNAVyWJ3hnTmWRdlmKhGDKCjkJbLoF3EsyWE=

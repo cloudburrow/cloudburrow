@@ -602,6 +602,15 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 			envVar{cliEndpointVar("parametermanager"), pm,
 				"Parameter Manager v1, global and regional, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint"})
 	}
+	// App Hub (#2110): gcloud apphub, the Go client, and Terraform's
+	// google_apphub_* through apphub_custom_endpoint.
+	if appHubEnabled(cfg) && cfg.Endpoints.AppHub != 0 {
+		ah := addr(cfg.Endpoints.AppHub)
+		vars = append(vars,
+			envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_APPHUB", "http://" + ah + "/", "read by gcloud; gcloud apphub"},
+			envVar{cliEndpointVar("apphub"), ah,
+				"App Hub v1, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint"})
+	}
 
 	// The Kubernetes Engine API (#1913): gcloud container clusters and
 	// node-pools, and Terraform's google_container_* through
@@ -842,6 +851,7 @@ func withLivePorts(cfg config.Config, live map[string]string) config.Config {
 		"analyticshub":           &e.AnalyticsHub,
 		"workflows":              &e.Workflows,
 		"parametermanager":       &e.ParameterManager,
+		"apphub":                 &e.AppHub,
 		// The local AI endpoint, which serves Vertex AI's Model Registry
 		// and Endpoints (#1940) to gcloud-setup and terraform, and Document
 		// AI (#1953), which terraform points document_ai_custom_endpoint at.

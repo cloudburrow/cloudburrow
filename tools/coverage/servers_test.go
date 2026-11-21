@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	apphubpb "cloud.google.com/go/apphub/apiv1/apphubpb"
 	ahpb "cloud.google.com/go/bigquery/analyticshub/apiv1/analyticshubpb"
 	"cloud.google.com/go/cloudquotas/apiv1/cloudquotaspb"
 	iamadminpb "cloud.google.com/go/iam/admin/apiv1/adminpb"
@@ -37,6 +38,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/modelgarden"
 	"github.com/cloudburrow/cloudburrow/internal/sched"
 	"github.com/cloudburrow/cloudburrow/internal/service/analyticshub"
+	"github.com/cloudburrow/cloudburrow/internal/service/apphub"
 	"github.com/cloudburrow/cloudburrow/internal/service/cloudquotas"
 	"github.com/cloudburrow/cloudburrow/internal/service/datatransfer"
 	"github.com/cloudburrow/cloudburrow/internal/service/gke"
@@ -97,6 +99,12 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 		t.Fatal(err)
 	}
 	pmpb.RegisterParameterManagerServer(srv, pm)
+	// App Hub alone (#2110): its mixins are other services' rows.
+	ah, err := apphub.NewServer("", apphub.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	apphubpb.RegisterAppHubServer(srv, ah)
 	gkeSrv, err := gke.NewServer(nil, gke.Options{Versions: []gke.Version{{GKE: "1.36.4-gke.0", Image: "kindest/node:v1.36.4"}}})
 	if err != nil {
 		t.Fatal(err)

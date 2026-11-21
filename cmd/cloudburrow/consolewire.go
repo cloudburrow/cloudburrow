@@ -110,6 +110,8 @@ type consoleDeps struct {
 	workflows *workflowsService
 	// parameterManager is Parameter Manager (#2054), nil unless enabled.
 	parameterManager *parameterManagerService
+	// appHub is App Hub (#2110), nil unless enabled.
+	appHub *appHubService
 	// gke is the Kubernetes Engine API (#1913), nil unless enabled.
 	gke *gkeService
 	// monitoring is Cloud Monitoring (#1939), nil unless enabled.
@@ -350,6 +352,11 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	if enabled[config.ServiceParameterManager] && d.parameterManager != nil {
 		providers = append(providers, parameterManagerProvider{svc: d.parameterManager},
 			parameterTemplatesProvider{svc: d.parameterManager})
+	}
+	// App Hub (#2110), in process: Applications, Services and workloads,
+	// Settings.
+	if enabled[config.ServiceAppHub] && d.appHub != nil {
+		providers = append(providers, appHubProvider{svc: d.appHub}, appHubDiscoveredProvider{svc: d.appHub}, appHubSettingsProvider{svc: d.appHub})
 	}
 	// Workflows (#1986), in process.
 	if enabled[config.ServiceWorkflows] && d.workflows != nil {
@@ -784,6 +791,7 @@ var serviceTitles = map[config.Service]string{
 	config.ServiceCompute:          "VPC network",
 	config.ServiceWorkflows:        "Workflows",
 	config.ServiceParameterManager: "Parameter Manager",
+	config.ServiceAppHub:           "App Hub",
 }
 
 func serviceTitle(s config.Service) string {

@@ -70,6 +70,7 @@ import (
 
 	_ "cloud.google.com/go/aiplatform/apiv1/aiplatformpb"
 	_ "cloud.google.com/go/aiplatform/apiv1beta1/aiplatformpb"
+	_ "cloud.google.com/go/apphub/apiv1/apphubpb"
 	_ "cloud.google.com/go/artifactregistry/apiv1/artifactregistrypb"
 	_ "cloud.google.com/go/bigquery/analyticshub/apiv1/analyticshubpb"
 	_ "cloud.google.com/go/bigquery/datatransfer/apiv1/datatransferpb"
@@ -325,6 +326,9 @@ var areas = []area{
 	// Parameter Manager (#2054): CloudBurrow's own, gRPC and JSON on one
 	// port; its Locations mixin is another area's row.
 	{Key: "parametermanager", Title: "Parameter Manager (v1)", Own: true, Services: []string{"google.cloud.parametermanager.v1.ParameterManager"}},
+	// App Hub (#2110): CloudBurrow's own, gRPC and JSON on one port; its
+	// Locations, Operations and IAM mixins are other areas' rows.
+	{Key: "apphub", Title: "App Hub (v1)", Own: true, Services: []string{"google.cloud.apphub.v1.AppHub"}},
 	{Key: "workflows", Title: "Workflows and Workflow Executions (v1)", Own: true,
 		Services: []string{"google.cloud.workflows.v1.Workflows", "google.cloud.workflows.executions.v1.Executions"}},
 	// The Kubernetes Engine API (#1913): CloudBurrow's own, gRPC and JSON

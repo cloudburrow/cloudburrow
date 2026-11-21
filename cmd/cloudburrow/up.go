@@ -420,6 +420,14 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	computeSvc.register(coord)
 	gkeSvc.register(coord)
+	// App Hub (#2110), in process; it discovers Cloud Run's services and
+	// jobs and Kubernetes Engine's clusters.
+	appHubSvc := newAppHubService(cfg)
+	if appHubSvc != nil {
+		appHubSvc.run = runSvc
+		appHubSvc.gke = gkeSvc
+	}
+	appHubSvc.register(coord)
 	if gkeSvc != nil && runSvc != nil && runSvc.events != nil {
 		// Eventarc's GKE destinations (#1877) reach its clusters' services.
 		runSvc.events.gke = gkeSvc.clusterAccess
@@ -523,6 +531,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// reads it through this at reset time.
 	var registered func() []string = func() []string { return nil }
 	var projectRegistry *resourcemanager.Registry
+	if appHubSvc != nil {
+		appHubSvc.registry = func() *resourcemanager.Registry { return projectRegistry }
+	}
 	if dataTransfer != nil {
 		dataTransfer.registry = func() *resourcemanager.Registry { return projectRegistry }
 	}
@@ -590,6 +601,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		analyticsHub:     analyticsHub,
 		workflows:        workflowsSvc,
 		parameterManager: parameterManagerSvc,
+		appHub:           appHubSvc,
 		gke:              gkeSvc,
 		monitoring:       monitoringSvc,
 		compute:          computeSvc,
@@ -685,6 +697,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		workflowsSvc.calls = callEvents(recorder, requestMetrics, "workflows")
 		workflowsSvc.interpose = append(workflowsSvc.interpose, grpctransport.LogInterceptor(logger, "workflows"), faults.Interceptor("workflows"))
 		workflowsSvc.requests = requestEvents(recorder, requestMetrics, "workflows")
+	}
+	if appHubSvc != nil {
+		appHubSvc.tracing = tracing
+		appHubSvc.calls = callEvents(recorder, requestMetrics, "apphub")
+		appHubSvc.interpose = append(appHubSvc.interpose, grpctransport.LogInterceptor(logger, "apphub"), faults.Interceptor("apphub"))
+		appHubSvc.requests = requestEvents(recorder, requestMetrics, "apphub")
 	}
 	if parameterManagerSvc != nil {
 		parameterManagerSvc.tracing = tracing
@@ -1211,6 +1229,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		analyticsHub:     analyticsHub,
 		workflows:        workflowsSvc,
 		parameterManager: parameterManagerSvc,
+		appHub:           appHubSvc,
 		gke:              gkeSvc,
 		monitoring:       monitoringSvc,
 		compute:          computeSvc,
@@ -1308,6 +1327,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if a := parameterManagerSvc.Addr(); a != "" {
 			live["parametermanager"] = a
 		}
+		if a := appHubSvc.Addr(); a != "" {
+			live["apphub"] = a
+		}
 		if a := gkeSvc.Addr(); a != "" {
 			live["gke"] = a
 		}
@@ -1381,7 +1403,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		published := map[string]bool{"run": true, "tasks": true, "secretmanager": true, "kms": true,
 			"scheduler": true, "logging": true, "resourcemanager": true, "serviceusage": true, "apikeys": true, "metadata": true,
 			"storagebatchoperations": true, "storageinsights": true, "storagetransfer": true,
-			"sqladmin": true, "cloudsql-connector": true, "onnx": true, "tfconvert": true, "localai": true, "workflows": true, "parametermanager": true}
+			"sqladmin": true, "cloudsql-connector": true, "onnx": true, "tfconvert": true, "localai": true, "workflows": true, "parametermanager": true, "apphub": true}
 		if !runEnabled {
 			published = map[string]bool{"resourcemanager": true, "onnx": true, "tfconvert": true, "localai": true}
 			// The storage server reads IAM service accounts' certificates

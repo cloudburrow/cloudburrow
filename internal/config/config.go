@@ -134,6 +134,10 @@ const (
 	// on its own port; its versions' secret references are read through
 	// this instance's Secret Manager.
 	ServiceParameterManager Service = "parametermanager"
+	// ServiceAppHub is App Hub (apphub.googleapis.com, #2110), served in
+	// the CLI process on its own port; it discovers the instance's Cloud Run
+	// services and jobs and Kubernetes Engine clusters.
+	ServiceAppHub Service = "apphub"
 )
 
 // AllServices lists the default services in a stable order, so startup
@@ -146,7 +150,7 @@ func AllServices() []Service {
 
 // OptionalServices lists the opt-in services, in a stable order.
 func OptionalServices() []Service {
-	return []Service{ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner, ServiceCloudSQL, ServiceBigQuery, ServiceMemorystore, ServiceCloudSQLMySQL, ServiceScheduler, ServiceLogging, ServiceKMS, ServiceBackupDR, ServicePrivateCA, ServiceGKE, ServiceMonitoring, ServiceCompute, ServiceWorkflows, ServiceParameterManager}
+	return []Service{ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner, ServiceCloudSQL, ServiceBigQuery, ServiceMemorystore, ServiceCloudSQLMySQL, ServiceScheduler, ServiceLogging, ServiceKMS, ServiceBackupDR, ServicePrivateCA, ServiceGKE, ServiceMonitoring, ServiceCompute, ServiceWorkflows, ServiceParameterManager, ServiceAppHub}
 }
 
 // KnownServices lists every selectable service.
@@ -207,7 +211,7 @@ func (s Service) Persistence() Persistence {
 		// Key material is in Kubernetes Secrets, like Secret Manager's
 		// payloads, which the cluster keeps.
 		return PersistenceVolume
-	case ServiceStorage, ServiceTasks, ServiceSecrets, ServiceScheduler, ServiceBackupDR, ServicePrivateCA, ServiceGKE, ServiceMonitoring, ServiceCompute, ServiceWorkflows, ServiceParameterManager:
+	case ServiceStorage, ServiceTasks, ServiceSecrets, ServiceScheduler, ServiceBackupDR, ServicePrivateCA, ServiceGKE, ServiceMonitoring, ServiceCompute, ServiceWorkflows, ServiceParameterManager, ServiceAppHub:
 		return PersistenceVolume
 	case ServiceRun:
 		// Workload definitions live in the Kubernetes API, which the cluster
@@ -399,6 +403,9 @@ type Endpoints struct {
 	// (parametermanager.googleapis.com, #2054): gRPC and JSON on one port,
 	// global and regional parameters alike.
 	ParameterManager int `json:"parameterManager"`
+	// AppHub is the host port of App Hub (apphub.googleapis.com, #2110):
+	// gRPC and JSON on one port.
+	AppHub int `json:"appHub"`
 	// ONNX is the host port of the ONNX runner (#1711), which runs BigQuery
 	// ML's imported ONNX models for the BigQuery front, published to the
 	// cluster through cloudburrow-host. CloudBurrow's own API, not a
@@ -482,6 +489,7 @@ func (e *Endpoints) fields() []endpointField {
 		{"analyticshub", &e.AnalyticsHub},
 		{"workflows", &e.Workflows},
 		{"parametermanager", &e.ParameterManager},
+		{"apphub", &e.AppHub},
 		{"onnx", &e.ONNX},
 		{"tfconvert", &e.TFConvert},
 	}
@@ -561,6 +569,8 @@ func (e Endpoints) OptionalPort(s Service) int {
 		return e.Workflows
 	case ServiceParameterManager:
 		return e.ParameterManager
+	case ServiceAppHub:
+		return e.AppHub
 	default:
 		return 0
 	}
@@ -928,6 +938,8 @@ func Default() Config {
 			// Parameter Manager (#2054): 9039 to 9046 are taken by open
 			// branches, so 9047.
 			ParameterManager: 9047,
+			// App Hub (#2110): the next free port.
+			AppHub: 9048,
 			// OS-assigned. The port is not what enables local AI —
 			// LocalAI.ModelPath is. A configured port with no model binds
 			// nothing, so there is no endpoint answering every request with
