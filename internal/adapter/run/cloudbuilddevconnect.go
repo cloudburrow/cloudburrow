@@ -37,10 +37,8 @@ import (
 // that build (#1955, cloudbuildtriggerfilter.go). RunBuildTrigger runs one
 // at the head of source.branchName (or tagName, or commitSha), else of the
 // repository's default branch, unfiltered.
-// Pull request filters are refused (#1854): this instance's Secure Source
-// Manager serves no pull requests (CreatePullRequest, MergePullRequest and
-// the other pull request methods are UNIMPLEMENTED), so no pull request
-// event can ever happen.
+// A pullRequest filter instead builds the repository's pull requests
+// (#2077, cloudbuildpullrequests.go).
 
 var devConnectLinkRE = regexp.MustCompile(`^projects/[^/]+/locations/[^/]+/connections/[^/]+/gitRepositoryLinks/[^/]+$`)
 
@@ -52,8 +50,20 @@ func devConnectEventError(rc *cbpb.RepositoryEventConfig) error {
 			"git repository link (projects/PROJECT/locations/LOCATION/connections/CONNECTION/gitRepositoryLinks/LINK) "+
 			"of this instance's Secure Source Manager; %q is not one", rc.GetRepository())
 	}
-	if rc.GetPullRequest() != nil {
-		return apierror.Unimplemented("BuildTrigger field repositoryEventConfig.pullRequest is not supported: this instance's Secure Source Manager serves no pull requests (its pull request methods are UNIMPLEMENTED)")
+	if pr := rc.GetPullRequest(); pr != nil {
+		if pr.GetBranch() == "" {
+			return apierror.InvalidArgument("invalid trigger: repositoryEventConfig.pullRequest needs a branch regex")
+		}
+		if _, err := regexp.Compile(pr.GetBranch()); err != nil {
+			return apierror.InvalidArgument("invalid trigger: pull request filter %q is not RE2: %v", pr.GetBranch(), err)
+		}
+		if _, ok := cbpb.PullRequestFilter_CommentControl_name[int32(pr.GetCommentControl())]; !ok {
+			return apierror.InvalidArgument("invalid trigger: unknown pullRequest.commentControl %d", pr.GetCommentControl())
+		}
+		if _, err := devConnectLinkRepo(rc.GetRepository()); err != nil {
+			return apierror.FailedPrecondition("invalid trigger: %v", err)
+		}
+		return nil
 	}
 	push := rc.GetPush()
 	if push == nil || (push.GetBranch() == "" && push.GetTag() == "") {

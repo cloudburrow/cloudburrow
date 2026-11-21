@@ -70,7 +70,8 @@ func TestConsoleBuildBulkApproveRowRunAndDashboardCards(t *testing.T) {
 		ids = append(ids, it.Name)
 	}
 	sel := b.ListSelectActions(ctx, "")
-	if len(ids) != 2 || len(sel) != 1 || sel[0].ID != "approve-selected" || sel[0].SelectionField != "builds" {
+	if len(ids) != 2 || len(sel) != 2 || sel[0].ID != "approve-selected" || sel[0].SelectionField != "builds" ||
+		sel[1].ID != "reject-selected" || sel[1].Label != "Reject" {
 		t.Fatalf("History = %v, its selection actions %+v", ids, sel)
 	}
 	if err := b.ActAt(ctx, "", nil, "approve-selected", map[string]string{"builds": "nope"}); err == nil {

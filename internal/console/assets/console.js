@@ -2544,11 +2544,17 @@ function checkTreeFilter({ tree, onChange }) {
 // "View options" / "Column display options": a checkbox per data column,
 // remembered per service. hidden() is the set of columns turned off.
 const COLUMNS_KEY = "cloudburrow.columns";
+// CARD_PINS_KEY keeps a SummaryOnly screen's pinned cards (#1854), and
+// cardFilterText what its card filter holds across its polls.
+const CARD_PINS_KEY = "cloudburrow.cardpins";
+const cardFilterText = new Map();
 
-function viewOptions({ service, columns, onChange, scope = null, reload = null, hiddenByDefault = [] }) {
+function viewOptions({ service, columns, onChange, scope = null, reload = null, hiddenByDefault = [], optional = [] }) {
   const stored = readStored(COLUMNS_KEY, {}) || {};
   // Until the viewer chooses, the listing's HiddenColumns are off, as
-  // Google's Key inventory hides EKM via VPC connection (#1851).
+  // Google's Key inventory hides EKM via VPC connection (#1851), and so is
+  // a column offered only on request (Listing.OptionalColumns, #1854).
+  hiddenByDefault = [...hiddenByDefault, ...(optional || [])];
   let off = new Set(Array.isArray(stored[service]) ? stored[service] : hiddenByDefault);
   if (scope) return viewOptionsDialog({ service, columns, onChange, scope, reload, off });
   const button = el("button", { type: "button", class: "icon-button view-options",
@@ -3212,9 +3218,10 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   const chooser = opts.rowControls && route.service
     ? viewOptions({ service: route.service, columns: allDataColumns, onChange: () => draw(),
       scope: data.scope && data.scope.viewOptions ? data.scope : null, reload,
-      hiddenByDefault: data.hiddenColumns || [] })
+      hiddenByDefault: data.hiddenColumns || [], optional: data.optionalColumns })
     : null;
-  const dataColumns = () => allDataColumns().filter((c) => !chooser || !chooser.hidden().has(c));
+  const dataColumns = () => allDataColumns().filter((c) => chooser
+    ? !chooser.hidden().has(c) : !(data.optionalColumns || []).includes(c));
   const hasActions = () =>
     data.items.some((i) => (i.actions || []).some((a) => !a.panel) || i.object || i.panel) || caps.delete;
   // Declared by the provider, or inferred from the rows that happen to be
@@ -3415,7 +3422,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
           (item.actsOn || []).length ? item.name : null),
       })),
       ...(caps.editRowFirst ? [] : edit),
-      ...(caps.delete ? [{
+      ...(caps.delete && !caps.deleteIcon ? [{
         key: "delete", label: caps.deleteLabel || "Delete", destructive: true,
         run: () => deleteResource(route, item.name, refresh, rowBusy(item.name)),
       }] : []),
@@ -3426,6 +3433,15 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
     if ((caps.rowMenuOrder || []).length) {
       const rank = (a) => { const i = caps.rowMenuOrder.indexOf(a.key); return i < 0 ? caps.rowMenuOrder.length : i; };
       actions.sort((a, b) => rank(a) - rank(b));
+    }
+    // Delete as a trash icon on the row (RowDeleteIconer), as Google's
+    // private pools list draws it (#1854).
+    if (caps.delete && caps.deleteIcon) {
+      buttons.push(el("button", { type: "button", class: "icon-button row-delete-icon",
+        disabled: busy ? "disabled" : null,
+        "aria-label": `${caps.deleteLabel || "Delete"} ${item.name}`, title: caps.deleteLabel || "Delete",
+        onclick: () => deleteResource(route, item.name, refresh, rowBusy(item.name)),
+        html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 7h12M9 7V5h6v2M8 7l1 12h6l1-12M10.5 10v6M13.5 10v6"/></svg>' }));
     }
     if (!actions.length && !buttons.length) return el("td", {});
     if (!actions.length) return el("td", { class: "row-actions" }, ...buttons);
@@ -6412,15 +6428,61 @@ async function renderList(view, route) {
     // Cards under section headings, when the provider names them, as
     // Document AI's Processor gallery groups its types (#1930).
     const cards = listingSummary(data), groups = (data.summary || []).filter((g) => (g.properties || []).length);
-    const runs = [];
-    groups.forEach((g, i) => {
-      if (!runs.length || g.section) runs.push({ section: g.section || "", cards: [] });
-      runs[runs.length - 1].cards.push(cards[i]);
-    });
-    setChildren(view, ...header, noteBanner(data.note),
-      ...runs.flatMap((r) => [
+    // A card with a Pin key can be pinned to the top (#1854), the pins
+    // the viewer's own; Filter narrows the cards by what is typed.
+    const pinKey = `${CARD_PINS_KEY}.${route.service}`;
+    const pins = new Set(readStored(pinKey, []) || []);
+    const filterBox = data.cardFilter ? el("input", { type: "search", class: "card-filter", id: "card-filter",
+      "aria-label": data.cardFilter, placeholder: data.cardFilter }) : null;
+    const typed = cardFilterText.get(route.service) || "";
+    if (filterBox) filterBox.value = typed;
+    const drawCards = () => {
+      const want = filterBox ? filterBox.value.trim().toLowerCase() : "";
+      const shown = groups.map((g, i) => ({ g, card: cards[i], i }))
+        // A card with no Filter text (a banner) stays whatever is typed.
+        .filter(({ g }) => !want || !g.filter || g.filter.toLowerCase().includes(want));
+      for (const { g, card } of shown) {
+        const old = card.querySelector(".card-pin");
+        if (old) old.remove();
+        if (!g.pin) continue;
+        const on = pins.has(g.pin);
+        card.classList.toggle("is-pinned", on);
+        card.prepend(el("button", { type: "button", class: "icon-button card-pin", "aria-pressed": on ? "true" : "false",
+          "aria-label": `Pin ${g.heading || g.pin}`, title: on ? "Unpin" : "Pin",
+          html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l-1 6 3 3v2H7v-2l3-3zM12 14v7"/></svg>',
+          onclick: () => {
+            if (pins.has(g.pin)) pins.delete(g.pin); else pins.add(g.pin);
+            writeStored(pinKey, [...pins]);
+            keepingFocus(view, drawCards);
+            announce(`${g.heading || g.pin} ${pins.has(g.pin) ? "pinned" : "unpinned"}`);
+          } }));
+      }
+      // Pinned cards first, in their own order; then the rest in theirs.
+      shown.sort((a, b) => (pins.has(b.g.pin) ? 1 : 0) - (pins.has(a.g.pin) ? 1 : 0) || a.i - b.i);
+      const runs = [];
+      shown.forEach(({ g, card }, n) => {
+        const pinned = g.pin && pins.has(g.pin);
+        if (!runs.length || (!pinned && g.section) || (n > 0 && !pinned && shown[n - 1].g.pin && pins.has(shown[n - 1].g.pin)))
+          runs.push({ section: pinned ? "" : g.section || "", cards: [] });
+        runs[runs.length - 1].cards.push(card);
+      });
+      setChildren(cardsHolder, ...(shown.length ? runs.flatMap((r) => [
         r.section ? el("h2", { class: "summary-section", text: r.section }) : null,
-        el("div", { class: "summary-cards" }, ...r.cards)]).filter(Boolean));
+        el("div", { class: "summary-cards" }, ...r.cards)]).filter(Boolean)
+        : [emptyState(`No ${noun} match the filter`, "Change or clear the filter to see more.")]));
+      return shown.length;
+    };
+    const cardsHolder = el("div", { class: "summary-card-runs" });
+    if (filterBox) filterBox.addEventListener("input", () => {
+      cardFilterText.set(route.service, filterBox.value);
+      const n = drawCards();
+      announce(`${n} ${noun} shown`);
+    });
+    drawCards();
+    setChildren(view, ...header, noteBanner(data.note),
+      filterBox ? el("div", { class: "card-filter-bar" },
+        el("label", { for: "card-filter", class: "sr-only", text: data.cardFilter }), filterBox) : null,
+      cardsHolder);
     announce(`${data.summary.length} ${noun} loaded`);
     return;
   }
@@ -6499,6 +6561,7 @@ function serverFilterBox(spec, reload) {
 let DETAIL_EDIT = null;
 
 function propertyValue(prop) {
+  if (prop.chart && (prop.chart.bars || []).length) return el("dd", {}, barChart(prop));
   const value = prop.link ? el("a", { href: prop.link, text: prop.value }) : prop.value;
   // A link beside the value that opens one of the page's actions, as
   // Google's Upgrade beside a Spanner instance's edition (#1859): the page's
@@ -6523,6 +6586,27 @@ function propertyValue(prop) {
   button.textContent = prop.copy;
   button.classList.add("property-copy");
   return el("dd", { class: "has-copy" }, el("span", { class: "property-copy-value" }, value), button);
+}
+
+// barChart draws a Property's Chart (#1854): a Cloud Build Dashboard card's
+// Build history, a bar per build, each telling its outcome, duration and
+// time when hovered or focused, as Google's does on hover. The bars are a
+// list a screen reader reads; the property's value is its summary.
+function barChart(prop) {
+  const max = Math.max(...prop.chart.bars.map((b) => b.value), 0) || 1;
+  const tip = el("span", { class: "bar-chart-tip", "aria-hidden": "true" });
+  const show = (b) => { tip.textContent = b.label; };
+  const bars = prop.chart.bars.map((b) => {
+    const style = `height:${Math.max(6, Math.round((b.value / max) * 100))}%`;
+    const bar = b.link
+      ? el("a", { class: `bar-chart-bar is-${b.status || "none"}`, href: b.link, style, "aria-label": b.label, title: b.label })
+      : el("span", { class: `bar-chart-bar is-${b.status || "none"}`, tabindex: "0", role: "img", style, "aria-label": b.label, title: b.label });
+    bar.addEventListener("mouseenter", () => show(b));
+    bar.addEventListener("focus", () => show(b));
+    return el("li", {}, bar);
+  });
+  return el("div", { class: "bar-chart" },
+    el("ul", { class: "bar-chart-bars", "aria-label": `${prop.label}: ${prop.value}` }, ...bars), tip);
 }
 
 // listingSummary draws a listing's summary groups as the same property cards
@@ -7584,6 +7668,39 @@ function buildCreateForm(spec) {
     if (!other || !entry.follow) continue;
     other.control.addEventListener("change", () => entry.follow(other.control.value));
     entry.follow(other.control.value);
+  }
+
+  // A select whose options follow other fields (optionsWhen, #2073):
+  // Create private pool's Series and Machine type offer the chosen
+  // region's. The first condition that holds gives the options, else the
+  // field's own; a choice no longer offered moves to the first that is,
+  // and the change is announced so the fields that follow it follow too.
+  const holds = (cond) => cond.split("&").every((t) => {
+    const [name, choice] = t.split("=");
+    const other = byName.get(name);
+    if (!other) return false;
+    if (choice === undefined) return other.isCheck ? other.control.checked : !!other.control.value;
+    return choice.split("|").includes(other.control.value);
+  });
+  for (const entry of entries) {
+    const f = entry.field;
+    if (!(f.optionsWhen || []).length || entry.control.tagName !== "SELECT") continue;
+    const refresh = () => {
+      const match = f.optionsWhen.find((o) => holds(o.when));
+      const options = (match ? match.options : f.options) || [];
+      const before = entry.control.value;
+      const now = [...entry.control.options].map((o) => o.value);
+      if (now.length === options.length && now.every((v, i) => v === options[i])) return;
+      setChildren(entry.control, ...options.map((o) => el("option", { value: o, text: (f.optionLabels || {})[o] || o || "None" })));
+      entry.control.value = options.includes(before) ? before : (options.includes(f.default) ? f.default : (options[0] || ""));
+      if (entry.control.value !== before) entry.control.dispatchEvent(new Event("change"));
+    };
+    const names = new Set(f.optionsWhen.flatMap((o) => o.when.split("&").map((t) => t.split("=")[0])));
+    for (const n of names) {
+      const other = byName.get(n);
+      if (other) other.control.addEventListener("change", refresh);
+    }
+    refresh();
   }
 
   // A field shown only while another holds a value (#1847): "name" for a

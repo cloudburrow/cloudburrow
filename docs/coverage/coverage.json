@@ -1432,6 +1432,7 @@
           "test/compat/cloudbuildcreate_test.go:45 TestCloudBuildCreateBuild",
           "test/compat/cloudbuilddefaultlogs_test.go:132 TestGcloudBuildsSubmitDefaultLogsBucket",
           "test/compat/cloudbuilddefaultlogs_test.go:47 TestCloudBuildDefaultLogsBucket",
+          "test/compat/cloudbuilddeps_test.go:41 TestCloudBuildGitDependencies",
           "test/compat/cloudbuildsecrets_test.go:231 TestGcloudBuildsSecretsAndScript",
           "test/compat/cloudbuildsecrets_test.go:87 TestCloudBuildSecretsScriptAndAllowFailure",
           "test/compat/cloudbuildserviceaccount_test.go:92 TestCloudBuildServiceAccount",
@@ -1448,6 +1449,7 @@
           "test/compat/cloudbuildapproval_test.go:308 TestTerraformCloudBuildTriggerApproval",
           "test/compat/cloudbuildpubsub_test.go:108 TestTerraformCloudBuildPubsubTrigger",
           "test/compat/cloudbuildpubsub_test.go:31 TestCloudBuildPubsubTrigger",
+          "test/compat/cloudbuildpullrequests_test.go:36 TestCloudBuildPullRequestTriggers",
           "test/compat/cloudbuildserviceaccount_test.go:92 TestCloudBuildServiceAccount",
           "test/compat/cloudbuildssm_test.go:183 TestCloudBuildSourceManagerTriggerFilters",
           "test/compat/cloudbuildssm_test.go:455 TestTerraformCloudBuildSourceManagerTrigger",
@@ -1460,6 +1462,7 @@
         "method": "google.devtools.cloudbuild.v1.CloudBuild/CreateWorkerPool",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudbuilddeps_test.go:182 TestCloudBuildWorkerPoolMachineTypes",
           "test/compat/cloudbuildtriggers_test.go:75 TestCloudBuildTriggersAndWorkerPools",
           "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
         ]
@@ -1493,6 +1496,7 @@
           "test/compat/cloudbuildcreate_test.go:182 TestGcloudBuildsSubmit",
           "test/compat/cloudbuildcreate_test.go:45 TestCloudBuildCreateBuild",
           "test/compat/cloudbuilddefaultlogs_test.go:132 TestGcloudBuildsSubmitDefaultLogsBucket",
+          "test/compat/cloudbuilddeps_test.go:41 TestCloudBuildGitDependencies",
           "test/compat/cloudbuildsecrets_test.go:231 TestGcloudBuildsSecretsAndScript",
           "test/compat/cloudbuildsecrets_test.go:87 TestCloudBuildSecretsScriptAndAllowFailure",
           "test/compat/cloudbuildserviceaccount_test.go:92 TestCloudBuildServiceAccount",
@@ -1538,6 +1542,7 @@
         "method": "google.devtools.cloudbuild.v1.CloudBuild/ListBuilds",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudbuildpullrequests_test.go:36 TestCloudBuildPullRequestTriggers",
           "test/compat/cloudbuildssm_test.go:183 TestCloudBuildSourceManagerTriggerFilters",
           "test/compat/cloudbuildsteps_test.go:220 TestGcloudBuildsStepsAndList",
           "test/compat/cloudbuildsteps_test.go:283 TestCloudBuildHostStepsOff",
@@ -1595,6 +1600,7 @@
         "method": "google.devtools.cloudbuild.v1.CloudBuild/UpdateWorkerPool",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudbuilddeps_test.go:182 TestCloudBuildWorkerPoolMachineTypes",
           "test/compat/cloudbuildtriggers_test.go:75 TestCloudBuildTriggersAndWorkerPools",
           "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
         ]
@@ -1671,6 +1677,7 @@
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/CreatePullRequest",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudbuildpullrequests_test.go:36 TestCloudBuildPullRequestTriggers",
           "test/compat/securesourcemanagercontent_test.go:249 TestSecureSourceManagerPullRequestsAndBranchRules"
         ]
       },
@@ -1678,6 +1685,7 @@
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/CreatePullRequestComment",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudbuildpullrequests_test.go:36 TestCloudBuildPullRequestTriggers",
           "test/compat/securesourcemanagerreviews_test.go:128 TestSecureSourceManagerReviewsAndHooks"
         ]
       },
@@ -2023,7 +2031,7 @@
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/CreateGitRepositoryLink",
         "status": "Verified",
         "tests": [
-          "test/compat/developerconnect_test.go:49 TestDeveloperConnectSourceManagerTrigger",
+          "test/compat/developerconnect_test.go:47 TestDeveloperConnectSourceManagerTrigger",
           "test/compat/terraform_developerconnect_test.go:31 TestTerraformDeveloperConnect"
         ]
       },
@@ -2045,7 +2053,7 @@
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/DeleteGitRepositoryLink",
         "status": "Verified",
         "tests": [
-          "test/compat/developerconnect_test.go:49 TestDeveloperConnectSourceManagerTrigger",
+          "test/compat/developerconnect_test.go:47 TestDeveloperConnectSourceManagerTrigger",
           "test/compat/terraform_developerconnect_test.go:31 TestTerraformDeveloperConnect"
         ]
       },
@@ -2073,14 +2081,14 @@
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/FetchGitRefs",
         "status": "Verified",
         "tests": [
-          "test/compat/developerconnect_test.go:49 TestDeveloperConnectSourceManagerTrigger"
+          "test/compat/developerconnect_test.go:47 TestDeveloperConnectSourceManagerTrigger"
         ]
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/FetchLinkableGitRepositories",
         "status": "Verified",
         "tests": [
-          "test/compat/developerconnect_test.go:49 TestDeveloperConnectSourceManagerTrigger"
+          "test/compat/developerconnect_test.go:47 TestDeveloperConnectSourceManagerTrigger"
         ]
       },
       {
@@ -2125,7 +2133,7 @@
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/GetGitRepositoryLink",
         "status": "Verified",
         "tests": [
-          "test/compat/developerconnect_test.go:49 TestDeveloperConnectSourceManagerTrigger",
+          "test/compat/developerconnect_test.go:47 TestDeveloperConnectSourceManagerTrigger",
           "test/compat/terraform_developerconnect_test.go:31 TestTerraformDeveloperConnect"
         ]
       },
@@ -2146,7 +2154,7 @@
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/ListGitRepositoryLinks",
         "status": "Verified",
         "tests": [
-          "test/compat/developerconnect_test.go:49 TestDeveloperConnectSourceManagerTrigger"
+          "test/compat/developerconnect_test.go:47 TestDeveloperConnectSourceManagerTrigger"
         ]
       },
       {
@@ -2168,7 +2176,7 @@
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/UpdateConnection",
         "status": "Verified",
         "tests": [
-          "test/compat/developerconnect_test.go:49 TestDeveloperConnectSourceManagerTrigger",
+          "test/compat/developerconnect_test.go:47 TestDeveloperConnectSourceManagerTrigger",
           "test/compat/terraform_developerconnect_test.go:31 TestTerraformDeveloperConnect"
         ]
       }
