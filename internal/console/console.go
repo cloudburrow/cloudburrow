@@ -284,6 +284,12 @@ type Listing struct {
 	// page has Namespace and Kind (#1846). A Filterer's screens carry
 	// them on every request; choosing one clears those after it.
 	Filters []*Scope `json:"filters,omitempty"`
+	// CheckTree, when set, is the list's filter in place of the shared
+	// filter bar: a tree of checkboxes, each group's children under it, as
+	// Google's Kubernetes Engine Object Browser filters by API group and
+	// Resource Kind (#2070). A row is shown while its Column value's group
+	// and its ChildColumn value are both checked; every box starts checked.
+	CheckTree *CheckTree `json:"checkTree,omitempty"`
 	// Tabs, when set, draw the list screen as tabs, as Google's Cloud
 	// Storage Settings page has Project access and Interoperability (#1843):
 	// the tab whose ID is ListTab holds the rows, with the screen's create
@@ -1274,6 +1280,28 @@ type ChartSeries struct {
 	// scale to the data.
 	Max    float64      `json:"max,omitempty"`
 	Points []ChartPoint `json:"points"`
+	// Unavailable, when set, is why this metric has no readings, drawn in
+	// the chart's place (#2070: a workload's Disk where the kubelet reports
+	// no ephemeral storage for its pods), so a missing metric is said, not
+	// drawn as an empty or invented line.
+	Unavailable string `json:"unavailable,omitempty"`
+}
+
+// CheckTree is a list screen's checkbox tree filter (Listing.CheckTree).
+type CheckTree struct {
+	// Label names the tree for assistive technology: "API groups".
+	Label string `json:"label"`
+	// Column is the column a row's group is read from, ChildColumn the
+	// column its child is: "API group" and "Kind".
+	Column      string          `json:"column"`
+	ChildColumn string          `json:"childColumn"`
+	Groups      []CheckTreeNode `json:"groups"`
+}
+
+// CheckTreeNode is one group of a CheckTree and the children under it.
+type CheckTreeNode struct {
+	Label    string   `json:"label"`
+	Children []string `json:"children,omitempty"`
 }
 
 // ChartPoint is one reading. Value is nil where no reading was taken.
@@ -3242,8 +3270,12 @@ type PodMetrics struct {
 	CPUCoreNanoSeconds uint64  `json:"cpuCoreNanoSeconds,omitempty"`
 	// MemoryWorkingSetBytes is the working set, which is what the kubelet
 	// itself uses for eviction decisions.
-	MemoryWorkingSetBytes int64  `json:"memoryWorkingSetBytes"`
-	At                    string `json:"at,omitempty"`
+	MemoryWorkingSetBytes int64 `json:"memoryWorkingSetBytes"`
+	// EphemeralStorageUsedBytes is the pod's ephemeral storage in use (its
+	// containers' writable layers, logs and emptyDir volumes), as the
+	// kubelet's summary reports it; zero where it reported none (#2070).
+	EphemeralStorageUsedBytes int64  `json:"ephemeralStorageUsedBytes,omitempty"`
+	At                        string `json:"at,omitempty"`
 }
 
 // Key identifies a pod across reads.

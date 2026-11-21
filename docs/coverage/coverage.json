@@ -18138,15 +18138,16 @@
     "Title": "Kubernetes Engine API (v1)",
     "counts": {
       "Implemented": 2,
-      "Unimplemented": 19,
-      "Verified": 16
+      "Unimplemented": 16,
+      "Verified": 19
     },
     "rows": [
       {
         "method": "google.container.v1.ClusterManager/CancelOperation",
         "status": "Verified",
         "tests": [
-          "test/compat/gke_test.go:125 TestGKEClustersNodePoolsAndOperations"
+          "test/compat/gke_test.go:125 TestGKEClustersNodePoolsAndOperations",
+          "test/compat/gkerollback_test.go:128 TestGKERollbackNodePoolUpgrade"
         ]
       },
       {
@@ -18166,8 +18167,8 @@
       },
       {
         "method": "google.container.v1.ClusterManager/CompleteNodePoolUpgrade",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "google.container.v1.ClusterManager/CreateCluster",
@@ -18281,8 +18282,10 @@
       },
       {
         "method": "google.container.v1.ClusterManager/RollbackNodePoolUpgrade",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkerollback_test.go:128 TestGKERollbackNodePoolUpgrade"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/SetAddonsConfig",
@@ -18314,8 +18317,11 @@
       },
       {
         "method": "google.container.v1.ClusterManager/SetMaintenancePolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkerollback_test.go:261 TestGKEAutoUpgradePausesPastItsWindow",
+          "test/compat/gkeupgrade_test.go:172 TestGKEUpgradeMasterThenNodePool"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/SetMasterAuth",
@@ -18364,8 +18370,10 @@
       },
       {
         "method": "google.container.v1.ClusterManager/UpdateMaster",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkeupgrade_test.go:172 TestGKEUpgradeMasterThenNodePool"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/UpdateNodePool",

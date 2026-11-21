@@ -152,6 +152,12 @@ func (s *Server) newPool(np *containerpb.NodePool, zones []string, version Versi
 	if out.Management == nil {
 		out.Management = &containerpb.NodeManagement{AutoUpgrade: true, AutoRepair: true}
 	}
+	if err := checkUpgradeSettings(out.UpgradeSettings); err != nil {
+		return nil, err
+	}
+	if out.UpgradeSettings == nil {
+		out.UpgradeSettings = defaultUpgradeSettings()
+	}
 	out.Status = containerpb.NodePool_PROVISIONING
 	return out, nil
 }
@@ -225,6 +231,12 @@ func (s *Server) CreateCluster(_ context.Context, req *containerpb.CreateCluster
 	if err := s.checkClusterVPC(c, p.project, p.location); err != nil {
 		return nil, err
 	}
+	if c.MaintenancePolicy != nil {
+		if err := s.checkMaintenancePolicy(c.MaintenancePolicy); err != nil {
+			return nil, err
+		}
+		c.MaintenancePolicy.ResourceVersion = shortHash(in.GetName() + s.stamp())
+	}
 	if err := s.checkDisk(); err != nil {
 		return nil, err
 	}
@@ -249,7 +261,7 @@ func (s *Server) CreateCluster(_ context.Context, req *containerpb.CreateCluster
 	c.Status = containerpb.Cluster_PROVISIONING
 	c.InitialClusterVersion = version.GKE
 	c.CurrentMasterVersion = version.GKE
-	c.CurrentNodeVersion = version.GKE
+	c.CurrentNodeVersion = oldestNodeVersion(c)
 	if c.Network == "" {
 		c.Network = "default"
 	}
@@ -312,7 +324,9 @@ func (s *Server) CreateCluster(_ context.Context, req *containerpb.CreateCluster
 		e.access = access
 		s.mu.Unlock()
 		for _, np := range pools {
-			if err := s.backend.Resize(ctx, kind, version.Image, np.Name, poolNodes(np, len(np.Locations))); err != nil {
+			// A pool made on an older version than the control plane's
+			// (node_pools[].version) runs that version's nodes.
+			if err := s.backend.Resize(ctx, kind, s.NodeImage(np.Version), np.Name, poolNodes(np, len(np.Locations))); err != nil {
 				return status.Errorf(codes.Internal, "Adding node pool %q's nodes failed: %v", np.Name, err)
 			}
 		}
@@ -506,25 +520,57 @@ func (s *Server) UpdateCluster(_ context.Context, req *containerpb.UpdateCluster
 		if err != nil {
 			return nil, err
 		}
-		if sv.GKE != c.CurrentMasterVersion {
-			// Only one version is served per node image; upgrading
-			// across images would need a new local cluster.
-			return nil, status.Errorf(codes.Unimplemented, "Upgrading to %s is not available locally.", sv.GKE)
-		}
 		typ = containerpb.Operation_UPGRADE_MASTER
+		if sv.GKE != c.CurrentMasterVersion {
+			// A real upgrade replaces the control plane's version: it is
+			// the only change of its operation, as Google runs it.
+			if len(set) > 1 {
+				return nil, status.Error(codes.InvalidArgument, "desired_master_version must be the only field of an update that upgrades the control plane.")
+			}
+			if err := checkMasterUpgrade(c, sv); err != nil {
+				return nil, err
+			}
+			up, err := s.upgrader()
+			if err != nil {
+				return nil, err
+			}
+			return s.startMasterUpgradeLocked(p, e, sv, up), nil
+		}
 	}
 	if v := u.GetDesiredNodeVersion(); v != "" {
-		sv, err := s.resolveVersion("Node version", v)
+		sv, err := s.resolveNodeVersion(c, v)
 		if err != nil {
 			return nil, err
 		}
-		if sv.GKE != c.CurrentNodeVersion {
-			return nil, status.Errorf(codes.Unimplemented, "Upgrading nodes to %s is not available locally.", sv.GKE)
+		// desired_node_pool_id is required with more than one pool
+		// (documented on the field).
+		id := u.GetDesiredNodePoolId()
+		if id == "" || id == "-" {
+			if len(c.NodePools) != 1 {
+				return nil, status.Error(codes.InvalidArgument, "desired_node_pool_id is required when the cluster has more than one node pool.")
+			}
+			id = c.NodePools[0].Name
 		}
-		if id := u.GetDesiredNodePoolId(); id != "" && id != "-" && findPool(c, id) == nil {
+		np := findPool(c, id)
+		if np == nil {
 			return nil, notFound(resourceName(p.project, p.location, p.cluster) + "/nodePools/" + id)
 		}
 		typ = containerpb.Operation_UPGRADE_NODES
+		if sv.GKE != np.Version {
+			if err := autopilotRefusal(e); err != nil {
+				return nil, err
+			}
+			if err := checkNodeUpgrade(c, sv); err != nil {
+				return nil, err
+			}
+			up, err := s.upgrader()
+			if err != nil {
+				return nil, err
+			}
+			pp := p
+			pp.pool = np.Name
+			return s.startPoolUpgradeLocked(pp, e, np, sv, up, false), nil
+		}
 	}
 	if t := u.GetDesiredImageType(); t != "" {
 		if !validImageType(t) {

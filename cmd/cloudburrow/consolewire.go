@@ -548,7 +548,7 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	cluster, own := d.cfg.ClusterName(), d.cfg.Cluster.Namespace
 	providers = append(providers,
 		gkeClustersProvider{name: cluster, kubeconfig: kubeconfig, own: own, svc: d.gke, gkeDir: gkeDir(d.cfg)},
-		gkeWorkloads(kubeconfig, cluster, own),
+		gkeWorkloads(kubeconfig, cluster, own).withSeries(series),
 		podsProvider(kubeconfig, metrics, series),
 		gkeServices(kubeconfig, cluster, own),
 		jobsProvider(kubeconfig),

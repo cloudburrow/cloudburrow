@@ -369,7 +369,8 @@ func (p *tab) rowAction(tab, row, label string, values map[string]string, confir
 		p.waitFor(`document.querySelector(".modal.is-open form") !== null`)
 		for id, v := range values {
 			p.eval(fmt.Sprintf(`(() => { const f = document.querySelector(".modal.is-open #f-%s");
-				f.value = %q; f.dispatchEvent(new Event("input", { bubbles: true })); f.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`, id, v), nil)
+				if (f.type === "checkbox") { f.checked = %q === "true"; f.dispatchEvent(new Event("change", { bubbles: true })); return true; }
+				f.value = %q; f.dispatchEvent(new Event("input", { bubbles: true })); f.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`, id, v, v), nil)
 		}
 		p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	}

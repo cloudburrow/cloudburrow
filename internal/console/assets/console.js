@@ -2467,6 +2467,79 @@ function filterBar({ noun, columns, onChange, extra = [], valuesOf = null }) {
   };
 }
 
+// checkTreeFilter is a list's checkbox tree in place of the filter bar
+// (Listing.CheckTree, #2070): Google's Object Browser filters "by specific
+// API groups and Resource Kinds". Each group is a checkbox, mixed while
+// only some of its kinds are checked, with a disclosure button showing its
+// kinds, each a checkbox of its own. Every box starts checked. It answers
+// as filterBar does, so the table draws, empties and clears the same way.
+let checkTreeSeq = 0;
+function checkTreeFilter({ tree, onChange }) {
+  const off = new Set(); // "group\u0000kind" of each unchecked kind
+  const key = (g, k) => `${g}\u0000${k}`;
+  const groupBoxes = [];
+  const sync = () => {
+    for (const { box, group } of groupBoxes) {
+      const kids = group.children || [];
+      const unchecked = kids.filter((k) => off.has(key(group.label, k))).length;
+      box.checked = kids.length ? unchecked < kids.length : !off.has(key(group.label, ""));
+      box.indeterminate = kids.length > 0 && unchecked > 0 && unchecked < kids.length;
+    }
+  };
+  const kidBoxes = [];
+  const list = el("ul", { class: "check-tree-groups" }, ...(tree.groups || []).map((group) => {
+    const id = `check-tree-${++checkTreeSeq}`;
+    const kids = group.children || [];
+    const box = el("input", { type: "checkbox", checked: "checked",
+      onchange: () => {
+        if (kids.length) kids.forEach((k) => (box.checked ? off.delete(key(group.label, k)) : off.add(key(group.label, k))));
+        else if (box.checked) off.delete(key(group.label, ""));
+        else off.add(key(group.label, ""));
+        kidBoxes.forEach((kb) => { kb.box.checked = !off.has(key(kb.group, kb.kind)); });
+        sync(); onChange();
+      } });
+    groupBoxes.push({ box, group });
+    const kidList = el("ul", { class: "check-tree-kinds", id, hidden: true }, ...kids.map((kind) => {
+      const kb = el("input", { type: "checkbox", checked: "checked",
+        onchange: () => {
+          if (kb.checked) off.delete(key(group.label, kind)); else off.add(key(group.label, kind));
+          sync(); onChange();
+        } });
+      kidBoxes.push({ box: kb, group: group.label, kind });
+      return el("li", {}, el("label", { class: "check-tree-label" }, kb, el("span", { text: kind })));
+    }));
+    const toggle = kids.length ? el("button", { type: "button", class: "icon-button check-tree-toggle",
+      "aria-expanded": "false", "aria-controls": id, "aria-label": `Show the kinds in ${group.label}`,
+      html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>',
+      onclick: () => {
+        const open = toggle.getAttribute("aria-expanded") !== "true";
+        toggle.setAttribute("aria-expanded", open ? "true" : "false");
+        toggle.setAttribute("aria-label", `${open ? "Hide" : "Show"} the kinds in ${group.label}`);
+        kidList.hidden = !open;
+      } }) : el("span", { class: "check-tree-spacer", "aria-hidden": "true" });
+    return el("li", {},
+      el("div", { class: "check-tree-row" }, toggle,
+        el("label", { class: "check-tree-label" }, box, el("span", { text: group.label }))),
+      kidList);
+  }));
+  const node = el("fieldset", { class: "check-tree" },
+    el("legend", { text: tree.label || "Filter" }), list);
+  return {
+    node,
+    chips: null,
+    matches: (get) => {
+      const g = String(get(tree.column) || ""), k = String(get(tree.childColumn) || "");
+      return !off.has(key(g, k)) && !off.has(key(g, ""));
+    },
+    active: () => off.size > 0,
+    text: () => {
+      const n = off.size;
+      return `${n} unchecked ${n === 1 ? "kind" : "kinds"} in ${tree.label || "the filter"}`;
+    },
+    clear: () => { off.clear(); kidBoxes.forEach((kb) => { kb.box.checked = true; }); sync(); },
+  };
+}
+
 // viewOptions is the column chooser beside the filter (#1842), Google's
 // "View options" / "Column display options": a checkbox per data column,
 // remembered per service. hidden() is the set of columns turned off.
@@ -2710,8 +2783,10 @@ function sparkline(points, opts = {}) {
 // Both are on screen rather than assumed: a chart that does not say what it
 // covers or where the numbers came from is a picture, not a measurement.
 function chartCard(title, points, opts = {}) {
-  const readings = points.filter((p) => p.value !== null && p.value !== undefined);
-  const body = readings.length < 2
+  const readings = (points || []).filter((p) => p.value !== null && p.value !== undefined);
+  const body = opts.unavailable
+    ? el("p", { class: "unavailable", text: opts.unavailable })
+    : readings.length < 2
     ? el("p", { class: "unavailable",
         text: readings.length === 1
           ? "Not enough history yet — one reading so far."
@@ -3180,7 +3255,10 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   // have, as Google's offers Deployment type's Container and Function.
   const valuesOf = (column) => [...new Set(data.items.map((i) => valueOf(i, column))
     .filter((v) => v && v !== "—" && v.length <= 40))].sort().slice(0, 20);
-  const bar = filterBar({ noun, columns: filterColumns, onChange: () => { page = 0; draw(); }, valuesOf });
+  // Object Browser's API group and kind tree in place of the bar (#2070).
+  const bar = data.checkTree
+    ? checkTreeFilter({ tree: data.checkTree, onChange: () => { page = 0; draw(); } })
+    : filterBar({ noun, columns: filterColumns, onChange: () => { page = 0; draw(); }, valuesOf });
   const matches = (item) => bar.matches((column) => column === null
     ? filterColumns().map((c) => valueOf(item, c))
     : valueOf(item, column));
@@ -3326,6 +3404,9 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
       ...(caps.editRowFirst ? edit : []),
       ...(item.actions || []).filter((a) => !a.button && !a.panel).map((a) => ({
         key: a.id, label: a.label, destructive: a.destructive,
+        // An action the row cannot take here is drawn disabled with its
+        // reason, as on a page (#1857: a node pool's Upgrade).
+        unavailable: a.unavailable,
         // A row whose actions address a path of their own is named by its
         // row, not the path's last segment: a value inside a Datastore
         // property is addressed by its steps as JSON, [6,"when"], and its
@@ -3501,7 +3582,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
       const state = bar.active()
         ? el("div", { class: "state state-inline" },
             el("h2", { text: `No matching ${noun}` }),
-            el("p", { text: `Nothing matches “${query}”.` }),
+            el("p", { text: data.checkTree ? `Nothing matches: ${query}.` : `Nothing matches “${query}”.` }),
             el("button", {
               class: "secondary", text: "Clear filter",
               onclick: () => { bar.clear(); page = 0; draw(); },
@@ -3819,7 +3900,10 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
           : null)
       : el("div", { class: "action-bar" }, ...selectionButtons,
           selectActions.length ? selectionLabel : null, refreshControl),
-    el("div", { class: "filter-bar" }, bar.node, chooser ? chooser.node : null, freshness),
+    // A checkbox tree (#2070) is too tall for the sticky bar: it goes
+    // above it, and the bar keeps the column chooser and freshness.
+    data.checkTree ? bar.node : null,
+    el("div", { class: "filter-bar" }, data.checkTree ? null : bar.node, chooser ? chooser.node : null, freshness),
     bar.chips,
     // Listing.TableTitle (#1864): the table's own heading, as Google's
     // Audit Logs titles its table "Data Access audit logs configuration".
@@ -4519,17 +4603,20 @@ async function renderDetail(view, route, resourcePath) {
   };
 
   const drawChartSection = (into, section, note) => {
-    const series = (section.series || []).filter((sv) => (sv.points || []).length);
+    // A metric the server says is unavailable keeps its card, saying why
+    // (#2070: a workload's Disk where the kubelet reports none).
+    const series = (section.series || []).filter((sv) => (sv.points || []).length || sv.unavailable);
     if (!series.length) {
       return setChildren(into, note,
         emptyState("No readings yet",
           "This instance has taken no measurements for this resource yet."));
     }
     setChildren(into, note, el("div", { class: "charts" }, ...series.map((sv) =>
-      chartCard(sv.label, sv.points, {
+      chartCard(sv.label, sv.points || [], {
         label: `${sv.label} for ${name}`,
         max: sv.max || undefined,
         foot: sv.unit ? `Measured in ${sv.unit}` : "",
+        unavailable: sv.unavailable,
       }))));
   };
 
@@ -7609,7 +7696,13 @@ function buildCreateForm(spec) {
     // Escape handler never hears the key (#700, measured in #765's CI).
     focusFirst() {
       const e = entries.find((x) => !x.control.disabled);
-      if (e) (e.focus || (() => e.control.focus()))();
+      if (e) { (e.focus || (() => e.control.focus()))(); return; }
+      // Every field immutable, as a GKE cluster's Connect shows only its
+      // command (#1857): focus the dialog's first button, so focus is in
+      // the dialog and Escape reaches it.
+      const at = entries.length && entries[0].node && entries[0].node.closest ? entries[0].node.closest(".modal") : null;
+      const b = at && at.querySelector("button:not([disabled])");
+      if (b) b.focus();
     },
     // Anything the user changed away from what the form offered. A form
     // holding only its own defaults has nothing to lose.

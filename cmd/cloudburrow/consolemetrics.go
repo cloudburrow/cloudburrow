@@ -72,12 +72,13 @@ func clusterMetrics(kubeconfig string) console.MetricsSource {
 						continue
 					}
 					m.Pods = append(m.Pods, console.PodMetrics{
-						Namespace:             pod.PodRef.Namespace,
-						Name:                  pod.PodRef.Name,
-						CPUUsedCores:          pod.CPU.UsageNanoCores / 1e9,
-						CPUCoreNanoSeconds:    pod.CPU.UsageCoreNanoSeconds,
-						MemoryWorkingSetBytes: pod.Memory.WorkingSetBytes,
-						At:                    pod.CPU.Time,
+						Namespace:                 pod.PodRef.Namespace,
+						Name:                      pod.PodRef.Name,
+						CPUUsedCores:              pod.CPU.UsageNanoCores / 1e9,
+						CPUCoreNanoSeconds:        pod.CPU.UsageCoreNanoSeconds,
+						MemoryWorkingSetBytes:     pod.Memory.WorkingSetBytes,
+						EphemeralStorageUsedBytes: pod.EphemeralStorage.UsedBytes,
+						At:                        pod.CPU.Time,
 					})
 				}
 			}
@@ -120,6 +121,11 @@ type kubeletSummary struct {
 		} `json:"podRef"`
 		CPU    kubeletCPU    `json:"cpu"`
 		Memory kubeletMemory `json:"memory"`
+		// The pod's ephemeral storage: its containers' writable layers,
+		// logs and emptyDir volumes (#2070, a workload's Disk chart).
+		EphemeralStorage struct {
+			UsedBytes int64 `json:"usedBytes"`
+		} `json:"ephemeral-storage"`
 	} `json:"pods"`
 }
 

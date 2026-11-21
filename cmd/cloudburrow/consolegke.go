@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"regexp"
 	"sort"
@@ -72,7 +73,12 @@ type gkeObjects struct {
 
 // gkeWorkloadsProvider is Workloads, the one Kubernetes object screen with a
 // create: Deploy.
-type gkeWorkloadsProvider struct{ gkeObjects }
+type gkeWorkloadsProvider struct {
+	gkeObjects
+	// series is the kubelet readings the Overview tab's utilization charts
+	// sum (#2070); nil where the instance keeps none.
+	series *console.Series
+}
 
 func (p gkeObjects) ScopeKey() string     { return gkeClusterScope }
 func (p gkeObjects) FilterKeys() []string { return []string{gkeSystemFilter} }
@@ -211,9 +217,23 @@ func gkeDetailsTabs(d console.Detail, _ map[string]any) console.Detail {
 func gkeWorkloads(kubeconfig, cluster, own string) gkeWorkloadsProvider {
 	base := workloadsProvider(kubeconfig)
 	base.kind = "deployments,statefulsets,daemonsets,replicasets,jobs,cronjobs"
+	var gkeWorkloadRow func(item map[string]any) (console.Resource, bool)
 	base.columns = []string{"Type", "Pods", "Namespace"}
 	inner := base.row
 	base.row = func(item map[string]any) (console.Resource, bool) {
+		r, ok := gkeWorkloadRow(item)
+		if ok {
+			// Each row's menu has the workload's actions (#1857).
+			w := gkeWorkloadOf(item)
+			r.Target = []string{r.Name}
+			r.Actions = w.actions(gkeSystemNamespace(w.ns, own))
+			// Checked for the list's Delete (#2070); a system object
+			// checked is refused with the reason, as its row's Delete is.
+			r.Selectable = true
+		}
+		return r, ok
+	}
+	gkeWorkloadRow = func(item map[string]any) (console.Resource, bool) {
 		kind := str(item, "kind")
 		if kind == "Job" || kind == "CronJob" {
 			// A Job a CronJob made is the CronJob's run, not a workload of
@@ -245,7 +265,7 @@ func gkeWorkloads(kubeconfig, cluster, own string) gkeWorkloadsProvider {
 		}
 		return inDetail(item)
 	}
-	return gkeWorkloadsProvider{gkeObjects{kubeProvider: base, cluster: cluster, ownNamespace: own, tabs: gkeWorkloadTabs}}
+	return gkeWorkloadsProvider{gkeObjects: gkeObjects{kubeProvider: base, cluster: cluster, ownNamespace: own, tabs: gkeWorkloadTabs}}
 }
 
 // gkeKindLabel is the Type column's wording: Deployment, Stateful Set,
@@ -701,7 +721,9 @@ func gkeCores(q string) float64 {
 }
 
 // gkeCoresText is a core count as Google's Total vCPUs shows it.
-func gkeCoresText(c float64) string { return strconv.FormatFloat(c, 'f', -1, 64) }
+// Summed millicores are rounded to them, so 0.85 + 0.1 is not
+// 0.9500000000000001.
+func gkeCoresText(c float64) string { return strconv.FormatFloat(math.Round(c*1000)/1000, 'f', -1, 64) }
 
 // gkeBytes reads a Kubernetes memory quantity ("16336332Ki", "2Gi", "1G").
 func gkeBytes(q string) int64 {
@@ -750,7 +772,7 @@ func (p gkeClustersProvider) List(ctx context.Context, project string) (console.
 		items := []console.Resource{row}
 		for _, c := range p.served(ctx, project) {
 			if c.GetName() != p.name {
-				items = append(items, p.servedRow(c))
+				items = append(items, p.servedRow(ctx, project, c))
 			}
 		}
 		return console.Listing{Columns: columns, Items: items, Total: len(items), AlwaysStatus: true, Noun: "clusters",
@@ -794,43 +816,8 @@ func (p gkeClustersProvider) Detail(ctx context.Context, project string, path []
 	details := console.Section{ID: "details", Label: "Details", Kind: console.KindProperties,
 		Groups: []console.PropertyGroup{basics, networking}}
 
-	nodes := console.Listing{Columns: []string{"Roles", "CPU requested", "CPU allocatable", "Memory allocatable", "Storage allocatable", "Version"},
-		NameColumn: "Name", Noun: "nodes", AlwaysStatus: true, Unavailable: f.unavailable}
-	for _, n := range f.nodes {
-		m := meta(n)
-		alloc := stringMap(nested(n, "status")["allocatable"])
-		nodes.Items = append(nodes.Items, console.Resource{
-			Name: str(m, "name"), Status: nodeStatus(n), Link: "/kubernetes/nodes/" + str(m, "name"),
-			Fields: map[string]string{
-				"Roles": nodeRoles(m), "CPU requested": p.cpuRequested(ctx, str(m, "name")),
-				"CPU allocatable": alloc["cpu"], "Memory allocatable": alloc["memory"],
-				"Storage allocatable": alloc["ephemeral-storage"],
-				"Version":             str(nested(n, "status", "nodeInfo"), "kubeletVersion"),
-			},
-		})
-	}
-	nodes.Total = len(nodes.Items)
-
-	storage := console.Listing{Columns: []string{"Status", "Claim", "Capacity", "Storage class"}, NameColumn: "Persistent volume", Noun: "persistent volumes"}
-	if raw, err := kubectlJSON(ctx, p.kubeconfig, "", "persistentvolumes"); err != nil {
-		storage.Unavailable = err.Error()
-	} else {
-		var list struct {
-			Items []map[string]any `json:"items"`
-		}
-		_ = json.Unmarshal(raw, &list)
-		for _, pv := range list.Items {
-			claim := nested(pv, "spec", "claimRef")
-			storage.Items = append(storage.Items, console.Resource{Name: str(meta(pv), "name"), Fields: map[string]string{
-				"Status": str(nested(pv, "status"), "phase"), "Claim": strings.Trim(str(claim, "namespace")+"/"+str(claim, "name"), "/"),
-				"Capacity": stringMap(nested(pv, "spec")["capacity"])["storage"], "Storage class": str(nested(pv, "spec"), "storageClassName"),
-			}})
-		}
-		storage.Total = len(storage.Items)
-		if storage.Total == 0 {
-			storage.Note = "No persistent volume is provisioned. Claims and storage classes are on the Storage page."
-		}
-	}
+	nodes := gkeNodesListing(ctx, p.kubeconfig, f, "/kubernetes/nodes/")
+	storage := gkeVolumesListing(ctx, p.kubeconfig)
 
 	return console.Detail{
 		Summary: stored(
@@ -848,10 +835,63 @@ func (p gkeClustersProvider) Detail(ctx context.Context, project string, path []
 	}, nil
 }
 
-// cpuRequested sums the CPU requests of the pods on a node, Google's Nodes
-// tab's "CPU requested".
-func (p gkeClustersProvider) cpuRequested(ctx context.Context, node string) string {
-	raw, err := kubeRunner(p.kubeconfig, "").Do(ctx, "", "get", "pods", "--all-namespaces", "-o", "json",
+// gkeNodesListing is a cluster's Nodes tab's nodes, as Google's: each
+// node's status, roles, CPU requested, allocatable CPU, memory and storage
+// and version. link, when set, prefixes a node's page.
+func gkeNodesListing(ctx context.Context, kubeconfig string, f gkeClusterFacts, link string) console.Listing {
+	nodes := console.Listing{Columns: []string{"Roles", "CPU requested", "CPU allocatable", "Memory allocatable", "Storage allocatable", "Version"},
+		NameColumn: "Name", Noun: "nodes", AlwaysStatus: true, Unavailable: f.unavailable}
+	for _, n := range f.nodes {
+		m := meta(n)
+		alloc := stringMap(nested(n, "status")["allocatable"])
+		r := console.Resource{
+			Name: str(m, "name"), Status: nodeStatus(n),
+			Fields: map[string]string{
+				"Roles": nodeRoles(m), "CPU requested": gkeCPURequested(ctx, kubeconfig, str(m, "name")),
+				"CPU allocatable": alloc["cpu"], "Memory allocatable": alloc["memory"],
+				"Storage allocatable": alloc["ephemeral-storage"],
+				"Version":             str(nested(n, "status", "nodeInfo"), "kubeletVersion"),
+			},
+		}
+		if link != "" {
+			r.Link = link + str(m, "name")
+		}
+		nodes.Items = append(nodes.Items, r)
+	}
+	nodes.Total = len(nodes.Items)
+	return nodes
+}
+
+// gkeVolumesListing is a cluster's Storage tab: its persistent volumes.
+func gkeVolumesListing(ctx context.Context, kubeconfig string) console.Listing {
+	storage := console.Listing{Columns: []string{"Status", "Claim", "Capacity", "Storage class"}, NameColumn: "Persistent volume", Noun: "persistent volumes"}
+	raw, err := kubectlJSON(ctx, kubeconfig, "", "persistentvolumes")
+	if err != nil {
+		storage.Unavailable = err.Error()
+		return storage
+	}
+	var list struct {
+		Items []map[string]any `json:"items"`
+	}
+	_ = json.Unmarshal(raw, &list)
+	for _, pv := range list.Items {
+		claim := nested(pv, "spec", "claimRef")
+		storage.Items = append(storage.Items, console.Resource{Name: str(meta(pv), "name"), Fields: map[string]string{
+			"Status": str(nested(pv, "status"), "phase"), "Claim": strings.Trim(str(claim, "namespace")+"/"+str(claim, "name"), "/"),
+			"Capacity": stringMap(nested(pv, "spec")["capacity"])["storage"], "Storage class": str(nested(pv, "spec"), "storageClassName"),
+		}})
+	}
+	storage.Total = len(storage.Items)
+	if storage.Total == 0 {
+		storage.Note = "No persistent volume is provisioned. Claims and storage classes are on the Storage page."
+	}
+	return storage
+}
+
+// gkeCPURequested sums the CPU requests of the pods on a node, Google's
+// Nodes tab's "CPU requested".
+func gkeCPURequested(ctx context.Context, kubeconfig, node string) string {
+	raw, err := kubeRunner(kubeconfig, "").Do(ctx, "", "get", "pods", "--all-namespaces", "-o", "json",
 		"--field-selector=spec.nodeName="+node)
 	if err != nil {
 		return "—"
@@ -975,6 +1015,15 @@ func (p gkeClustersProvider) CreateForm() (string, []console.Field) {
 		{Name: "subnet", Label: "Node subnet", Type: "text", Default: "default", Section: "Networking"},
 		{Name: "nodes", Label: "Number of nodes", Type: "text", Default: "3", Section: "Node pools: default-pool", ShowWhen: "mode=Standard", Pattern: `^[0-9]+$`},
 		{Name: "machine", Label: "Machine type", Type: "text", Default: "e2-medium", Section: "Node pools: default-pool", ShowWhen: "mode=Standard"},
+		{Name: "pools", Label: "More node pools", Type: console.GroupFieldType, Section: "Node pools", ShowWhen: "mode=Standard",
+			AddLabel: "Add node pool", RemoveLabel: "Remove node pool",
+			Help: "Google's Create cluster lists default-pool and lets you add more before Create; each is made with the cluster.",
+			Group: []console.Field{
+				{Name: "name", Label: "Name", Type: "text", Pattern: `^[a-z]([a-z0-9\-]{0,38}[a-z0-9])?$`},
+				{Name: "nodes", Label: "Number of nodes", Type: "text", Default: "1", Pattern: `^[0-9]+$`},
+				{Name: "machine", Label: "Machine type", Type: "text", Default: "e2-medium"},
+				{Name: "image", Label: "Image type", Type: "select", Options: gkeImageTypes, Default: gkeImageTypes[0]},
+			}},
 		{Name: "clientCert", Label: "Issue a client certificate", Type: "checkbox", Section: "Security",
 			Help: "The legacy admin client certificate, in the cluster's masterAuth: what kubectl authenticates with locally, since gke-gcloud-auth-plugin mints Google tokens."},
 	}
@@ -1069,7 +1118,39 @@ func (p gkeObjectBrowser) List(ctx context.Context, _ string) (console.Listing, 
 	}
 	sort.SliceStable(l.Items, func(i, j int) bool { return l.Items[i].Fields["API group"] < l.Items[j].Fields["API group"] })
 	l.Total = len(l.Items)
+	l.CheckTree = gkeAPIGroupTree(l.Items)
 	return l, nil
+}
+
+// gkeAPIGroupTree is Object Browser's filter (#2070): each API group a
+// checkbox with its resource kinds under it, as "You can list and filter
+// resources by specific API groups and Resource Kinds"
+// (https://docs.cloud.google.com/kubernetes-engine/docs/concepts/dashboards,
+// re-read 2026-11-20), in place of the shared filter bar. The groups are
+// in the list's order, core first; each group's kinds sorted.
+func gkeAPIGroupTree(items []console.Resource) *console.CheckTree {
+	t := &console.CheckTree{Label: "API groups", Column: "API group", ChildColumn: "Kind"}
+	at := map[string]int{}
+	kinds := map[string]map[string]bool{}
+	for _, r := range items {
+		g, k := r.Fields["API group"], r.Fields["Kind"]
+		if _, ok := at[g]; !ok {
+			at[g] = len(t.Groups)
+			t.Groups = append(t.Groups, console.CheckTreeNode{Label: g})
+			kinds[g] = map[string]bool{}
+		}
+		if k != "" && !kinds[g][k] {
+			kinds[g][k] = true
+			t.Groups[at[g]].Children = append(t.Groups[at[g]].Children, k)
+		}
+	}
+	// core is the API group Kubernetes' own kinds are in: first, as the
+	// tree's root group.
+	sort.SliceStable(t.Groups, func(i, j int) bool { return t.Groups[i].Label == "core" && t.Groups[j].Label != "core" })
+	for i := range t.Groups {
+		sort.Strings(t.Groups[i].Children)
+	}
+	return t
 }
 
 func (p gkeObjectBrowser) CanDrill() bool { return true }

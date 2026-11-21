@@ -71,6 +71,17 @@
         "digest": "sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed",
         "notes": "kind v0.33.0 publishes v1.34.11, v1.35.8, v1.36.4, v1.37.0. Chosen above Knative's enforced minimum without being newest. Digest resolved and pinned by #26/#28.",
         "skipDiscovery": "Version tracks Kubernetes, not the kind release that publishes it, so the source repository's tags are not comparable. Upgraded together with kind using the node images listed in that release's notes."
+      },
+      "gkePreviousNodeImage": {
+        "image": "kindest/node",
+        "version": "v1.35.8",
+        "source": "https://github.com/kubernetes-sigs/kind",
+        "license": "Apache-2.0",
+        "updateFeed": "kind-release-notes",
+        "verification": "image-digest",
+        "digest": "sha256:07b2536e30b803ed61d1677a79df6115f798ce64c80f9e22f6ed45afd09323c0",
+        "notes": "The Kubernetes Engine API's second served version (#2069), one minor below kubernetesNodeImage, so clusters can be made on it and upgraded to the default. Digest from kind v0.33.0's release notes. Pulled only when a cluster is made on it.",
+        "skipDiscovery": "Moves with kubernetesNodeImage: always the kind release's node image one minor below it."
       }
     },
     "serving": {
