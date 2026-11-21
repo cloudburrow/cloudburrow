@@ -2299,9 +2299,13 @@ var parityRows = []parityRow{
 		Tests: []string{"TestConsoleDocumentAIProcessors", "TestDocumentAIProcessorVersionsAndEvaluationsThroughThePage"}},
 	{Resource: "Document AI: training and evaluation runs", Service: "vertexai",
 		Methods: []string{"DocumentProcessorService/TrainProcessorVersion", "DocumentProcessorService/EvaluateProcessorVersion"},
-		Excluded: "TrainProcessorVersion and EvaluateProcessorVersion train and score versions of custom extractors, classifiers " +
-			"and splitters on a labeled dataset, none of which is served; for the served types they are only ever refused, and " +
-			"Google's console offers neither for them"},
+		Issue:   2124},
+	// The custom processors' datasets (#2106): the Build tab is #2124.
+	{Resource: "Document AI v1beta3: datasets", Service: "documentaiv1beta3",
+		Methods: []string{"DocumentService/UpdateDataset", "DocumentService/ImportDocuments", "DocumentService/GetDocument",
+			"DocumentService/ListDocuments", "DocumentService/BatchDeleteDocuments", "DocumentService/GetDatasetSchema",
+			"DocumentService/UpdateDatasetSchema"},
+		Issue: 2124},
 	{Resource: "Speech-to-Text: recognizers", Service: "vertexai",
 		Methods: []string{"Speech/CreateRecognizer", "Speech/GetRecognizer", "Speech/ListRecognizers", "Speech/UpdateRecognizer",
 			"Speech/DeleteRecognizer", "Speech/UndeleteRecognizer", "Speech/Recognize"},
@@ -2349,6 +2353,12 @@ var parityRows = []parityRow{
 		Methods: []string{"Speech/Recognize", "Speech/LongRunningRecognize", "Speech/StreamingRecognize"},
 		Excluded: "v1's API for existing clients (#1930): the same local recognition the console's Transcriptions offer through " +
 			"v2 (Recognize and BatchRecognize), as Google's console offers it only through v2's recognizers"},
+	{Resource: "Speech-to-Text v1 Adaptation: phrase sets and custom classes", Service: "speechv1",
+		Methods: []string{"Adaptation/CreatePhraseSet", "Adaptation/GetPhraseSet", "Adaptation/ListPhraseSet", "Adaptation/UpdatePhraseSet",
+			"Adaptation/DeletePhraseSet", "Adaptation/CreateCustomClass", "Adaptation/GetCustomClass", "Adaptation/ListCustomClasses",
+			"Adaptation/UpdateCustomClass", "Adaptation/DeleteCustomClass"},
+		Excluded: "v1's adaptation API for existing clients (#2106): the console's Custom classes and Phrase sets pages manage " +
+			"v2's resources, as Google's console offers model adaptation only through v2"},
 	{Resource: "Starting the instance",
 		Commands: []string{"up"},
 		Excluded: "starts the process that serves the console, so the console cannot exist before it"},

@@ -152,7 +152,9 @@ var DocumentAI = &Service{
 	Deny: newerDenyOf,
 }
 
-// Speech is Speech-to-Text v2's table: its RPC reference
+// Speech is Speech-to-Text v2's table, with v1's Adaptation (#2106,
+// https://docs.cloud.google.com/speech-to-text/docs/reference/rpc/google.cloud.speech.v1,
+// re-read 2026-11-21): its RPC reference
 // (https://docs.cloud.google.com/speech-to-text/docs/reference/rpc/google.cloud.speech.v2,
 // and "Speech-to-Text audit logging", read 2026-11-20).
 var Speech = &Service{
@@ -175,7 +177,20 @@ var Speech = &Service{
 		r["ListRecognizers"] = [2]string{"speech.recognizers.list", "parent"}
 		r["ListCustomClasses"] = [2]string{"speech.customClasses.list", "parent"}
 		r["ListPhraseSets"] = [2]string{"speech.phraseSets.list", "parent"}
-		return sm(r, "/google.cloud.speech.v2.Speech/")
+		m := sm(r, "/google.cloud.speech.v2.Speech/")
+		// v1's Adaptation (#2106): the v1 RPC reference's permissions.
+		v1 := map[string][2]string{"ListPhraseSet": {"speech.phraseSets.list", "parent"}, "ListCustomClasses": {"speech.customClasses.list", "parent"}}
+		for kind, plural := range map[string][2]string{"CustomClass": {"customClasses", "custom_class"}, "PhraseSet": {"phraseSets", "phrase_set"}} {
+			perm := "speech." + plural[0] + "."
+			v1["Create"+kind] = [2]string{perm + "create", "parent"}
+			v1["Get"+kind] = [2]string{perm + "get", "name"}
+			v1["Update"+kind] = [2]string{perm + "update", plural[1] + ".name"}
+			v1["Delete"+kind] = [2]string{perm + "delete", "name"}
+		}
+		for k, x := range sm(v1, "/google.cloud.speech.v1.Adaptation/") {
+			m[k] = x
+		}
+		return m
 	}(),
 	Deny: newerDenyOf,
 }

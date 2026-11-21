@@ -73,6 +73,11 @@ func (s *Server) batchProcess(ctx context.Context, req *documentaipb.BatchProces
 	if err := s.docAIKeyUsable(ctx, p); err != nil {
 		return nil, err
 	}
+	if isCustomType(p.GetType()) {
+		if err := s.customReady(p); err != nil {
+			return nil, err
+		}
+	}
 	if req.GetSkipHumanReview() {
 		review.StateMessage = humanReviewSkippedByRequest
 	}
@@ -223,6 +228,11 @@ func (s *Server) batchOne(ctx context.Context, p *documentaipb.Processor, opts *
 	doc, err := readDocument(ctx, p, content, mt, opts, docAIBatchMaxPages, false)
 	if err != nil {
 		return err
+	}
+	if isCustomType(p.GetType()) {
+		if err := s.applyCustom(p, doc); err != nil {
+			return err
+		}
 	}
 	base := path.Base(object)
 	if i := strings.LastIndex(base, "."); i > 0 {

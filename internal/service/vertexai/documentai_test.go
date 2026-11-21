@@ -41,8 +41,9 @@ func TestDocumentAIProcessors(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "processors.json")
 	d := newDocAI(t, file)
 	types, err := d.FetchProcessorTypes(ctx, &documentaipb.FetchProcessorTypesRequest{Parent: docAIParentUS})
-	if err != nil || len(types.GetProcessorTypes()) != 2 || types.ProcessorTypes[0].GetType() != "LAYOUT_PARSER_PROCESSOR" ||
-		types.ProcessorTypes[1].GetName() != docAIParentUS+"/processorTypes/OCR_PROCESSOR" || !types.ProcessorTypes[1].GetAllowCreation() {
+	if err != nil || len(types.GetProcessorTypes()) != 5 || types.ProcessorTypes[3].GetType() != "LAYOUT_PARSER_PROCESSOR" ||
+		types.ProcessorTypes[4].GetName() != docAIParentUS+"/processorTypes/OCR_PROCESSOR" || !types.ProcessorTypes[4].GetAllowCreation() ||
+		types.ProcessorTypes[0].GetType() != "CUSTOM_CLASSIFICATION_PROCESSOR" {
 		t.Fatalf("FetchProcessorTypes: %v %v", types, err)
 	}
 	if _, err := d.FetchProcessorTypes(ctx, &documentaipb.FetchProcessorTypesRequest{Parent: "projects/p1/locations/mars"}); code(err) != codes.InvalidArgument {

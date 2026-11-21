@@ -6799,14 +6799,16 @@
         "method": "google.cloud.documentai.v1.DocumentProcessorService/DeleteProcessorVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/documentai_test.go:276 TestDocumentAIProcessorVersions"
+          "test/compat/documentai_test.go:276 TestDocumentAIProcessorVersions",
+          "test/compat/documentaicustom2106_test.go:97 TestDocumentAICustomProcessorsThroughTheOfficialClients"
         ]
       },
       {
         "method": "google.cloud.documentai.v1.DocumentProcessorService/DeployProcessorVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/documentai_test.go:276 TestDocumentAIProcessorVersions"
+          "test/compat/documentai_test.go:276 TestDocumentAIProcessorVersions",
+          "test/compat/documentaicustom2106_test.go:97 TestDocumentAICustomProcessorsThroughTheOfficialClients"
         ]
       },
       {
@@ -6827,7 +6829,8 @@
         "method": "google.cloud.documentai.v1.DocumentProcessorService/EvaluateProcessorVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/documentai1953_test.go:29 TestDocumentAIEvaluationsAndReview"
+          "test/compat/documentai1953_test.go:29 TestDocumentAIEvaluationsAndReview",
+          "test/compat/documentaicustom2106_test.go:97 TestDocumentAICustomProcessorsThroughTheOfficialClients"
         ]
       },
       {
@@ -6841,7 +6844,8 @@
         "method": "google.cloud.documentai.v1.DocumentProcessorService/GetEvaluation",
         "status": "Verified",
         "tests": [
-          "test/compat/documentai1953_test.go:29 TestDocumentAIEvaluationsAndReview"
+          "test/compat/documentai1953_test.go:29 TestDocumentAIEvaluationsAndReview",
+          "test/compat/documentaicustom2106_test.go:97 TestDocumentAICustomProcessorsThroughTheOfficialClients"
         ]
       },
       {
@@ -6871,7 +6875,8 @@
         "method": "google.cloud.documentai.v1.DocumentProcessorService/ListEvaluations",
         "status": "Verified",
         "tests": [
-          "test/compat/documentai1953_test.go:29 TestDocumentAIEvaluationsAndReview"
+          "test/compat/documentai1953_test.go:29 TestDocumentAIEvaluationsAndReview",
+          "test/compat/documentaicustom2106_test.go:97 TestDocumentAICustomProcessorsThroughTheOfficialClients"
         ]
       },
       {
@@ -6901,7 +6906,8 @@
         "tests": [
           "test/compat/documentai1953_test.go:69 TestDocumentAIBatchShardsAndFieldMask",
           "test/compat/documentai_test.go:72 TestDocumentAIProcessors",
-          "test/compat/documentaicmek1950_test.go:67 TestDocumentAICMEK"
+          "test/compat/documentaicmek1950_test.go:67 TestDocumentAICMEK",
+          "test/compat/documentaicustom2106_test.go:97 TestDocumentAICustomProcessorsThroughTheOfficialClients"
         ]
       },
       {
@@ -6914,21 +6920,24 @@
         "status": "Verified",
         "tests": [
           "test/compat/documentai1953_test.go:200 TestTerraformDocumentAIProcessorDefaultVersion",
-          "test/compat/documentai_test.go:276 TestDocumentAIProcessorVersions"
+          "test/compat/documentai_test.go:276 TestDocumentAIProcessorVersions",
+          "test/compat/documentaicustom2106_test.go:97 TestDocumentAICustomProcessorsThroughTheOfficialClients"
         ]
       },
       {
         "method": "google.cloud.documentai.v1.DocumentProcessorService/TrainProcessorVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/documentai_test.go:276 TestDocumentAIProcessorVersions"
+          "test/compat/documentai_test.go:276 TestDocumentAIProcessorVersions",
+          "test/compat/documentaicustom2106_test.go:97 TestDocumentAICustomProcessorsThroughTheOfficialClients"
         ]
       },
       {
         "method": "google.cloud.documentai.v1.DocumentProcessorService/UndeployProcessorVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/documentai_test.go:276 TestDocumentAIProcessorVersions"
+          "test/compat/documentai_test.go:276 TestDocumentAIProcessorVersions",
+          "test/compat/documentaicustom2106_test.go:97 TestDocumentAICustomProcessorsThroughTheOfficialClients"
         ]
       },
       {
@@ -7103,12 +7112,140 @@
     ]
   },
   {
+    "Key": "documentaiv1beta3",
+    "Title": "Document AI v1beta3 datasets",
+    "counts": {
+      "Verified": 7
+    },
+    "rows": [
+      {
+        "method": "google.cloud.documentai.v1beta3.DocumentService/BatchDeleteDocuments",
+        "status": "Verified",
+        "tests": [
+          "test/compat/documentaicustom2106_test.go:97 TestDocumentAICustomProcessorsThroughTheOfficialClients"
+        ]
+      },
+      {
+        "method": "google.cloud.documentai.v1beta3.DocumentService/GetDatasetSchema",
+        "status": "Verified",
+        "tests": [
+          "test/compat/documentaicustom2106_test.go:97 TestDocumentAICustomProcessorsThroughTheOfficialClients"
+        ]
+      },
+      {
+        "method": "google.cloud.documentai.v1beta3.DocumentService/GetDocument",
+        "status": "Verified",
+        "tests": [
+          "test/compat/documentaicustom2106_test.go:97 TestDocumentAICustomProcessorsThroughTheOfficialClients"
+        ]
+      },
+      {
+        "method": "google.cloud.documentai.v1beta3.DocumentService/ImportDocuments",
+        "status": "Verified",
+        "tests": [
+          "test/compat/documentaicustom2106_test.go:97 TestDocumentAICustomProcessorsThroughTheOfficialClients"
+        ]
+      },
+      {
+        "method": "google.cloud.documentai.v1beta3.DocumentService/ListDocuments",
+        "status": "Verified",
+        "tests": [
+          "test/compat/documentaicustom2106_test.go:97 TestDocumentAICustomProcessorsThroughTheOfficialClients"
+        ]
+      },
+      {
+        "method": "google.cloud.documentai.v1beta3.DocumentService/UpdateDataset",
+        "status": "Verified",
+        "tests": [
+          "test/compat/documentaicustom2106_test.go:97 TestDocumentAICustomProcessorsThroughTheOfficialClients"
+        ]
+      },
+      {
+        "method": "google.cloud.documentai.v1beta3.DocumentService/UpdateDatasetSchema",
+        "status": "Verified",
+        "tests": [
+          "test/compat/documentaicustom2106_test.go:97 TestDocumentAICustomProcessorsThroughTheOfficialClients"
+        ]
+      }
+    ]
+  },
+  {
     "Key": "speechv1",
     "Title": "Speech-to-Text v1",
     "counts": {
-      "Verified": 3
+      "Verified": 13
     },
     "rows": [
+      {
+        "method": "google.cloud.speech.v1.Adaptation/CreateCustomClass",
+        "status": "Verified",
+        "tests": [
+          "test/compat/speechv1adaptation2106_test.go:33 TestSpeechV1AdaptationResources"
+        ]
+      },
+      {
+        "method": "google.cloud.speech.v1.Adaptation/CreatePhraseSet",
+        "status": "Verified",
+        "tests": [
+          "test/compat/speechv1adaptation2106_test.go:33 TestSpeechV1AdaptationResources"
+        ]
+      },
+      {
+        "method": "google.cloud.speech.v1.Adaptation/DeleteCustomClass",
+        "status": "Verified",
+        "tests": [
+          "test/compat/speechv1adaptation2106_test.go:33 TestSpeechV1AdaptationResources"
+        ]
+      },
+      {
+        "method": "google.cloud.speech.v1.Adaptation/DeletePhraseSet",
+        "status": "Verified",
+        "tests": [
+          "test/compat/speechv1adaptation2106_test.go:33 TestSpeechV1AdaptationResources"
+        ]
+      },
+      {
+        "method": "google.cloud.speech.v1.Adaptation/GetCustomClass",
+        "status": "Verified",
+        "tests": [
+          "test/compat/speechv1adaptation2106_test.go:33 TestSpeechV1AdaptationResources"
+        ]
+      },
+      {
+        "method": "google.cloud.speech.v1.Adaptation/GetPhraseSet",
+        "status": "Verified",
+        "tests": [
+          "test/compat/speechv1adaptation2106_test.go:33 TestSpeechV1AdaptationResources"
+        ]
+      },
+      {
+        "method": "google.cloud.speech.v1.Adaptation/ListCustomClasses",
+        "status": "Verified",
+        "tests": [
+          "test/compat/speechv1adaptation2106_test.go:33 TestSpeechV1AdaptationResources"
+        ]
+      },
+      {
+        "method": "google.cloud.speech.v1.Adaptation/ListPhraseSet",
+        "status": "Verified",
+        "tests": [
+          "test/compat/speechv1adaptation2106_test.go:33 TestSpeechV1AdaptationResources"
+        ]
+      },
+      {
+        "method": "google.cloud.speech.v1.Adaptation/UpdateCustomClass",
+        "status": "Verified",
+        "tests": [
+          "test/compat/speechv1adaptation2106_test.go:33 TestSpeechV1AdaptationResources"
+        ]
+      },
+      {
+        "method": "google.cloud.speech.v1.Adaptation/UpdatePhraseSet",
+        "status": "Verified",
+        "tests": [
+          "test/compat/speechv1adaptation2106_test.go:33 TestSpeechV1AdaptationResources"
+        ]
+      },
       {
         "method": "google.cloud.speech.v1.Speech/LongRunningRecognize",
         "status": "Verified",
