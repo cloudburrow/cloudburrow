@@ -118,15 +118,13 @@ func TestSpeechBatchTranscriptionThroughThePage(t *testing.T) {
 	if err := bh.Create(ctx, project, nil); err != nil {
 		t.Fatalf("create bucket: %v", err)
 	}
-	t.Cleanup(func() {
-		_ = bh.Object("jfk.flac").Delete(context.Background())
-		_ = bh.Delete(context.Background())
-	})
+	// New transcription writes its workspace's transcriptions/ there too (#2084).
+	emptyBucketAtEnd(t, sc, bucket)
 
 	p := open(t)
 	p.navigate("/speech/transcriptions" + q)
 	p.waitFor(settled)
-	p.openCloudStorageTranscription()
+	p.openCloudStorageTranscription(bucket)
 	p.setField(".modal.is-open #f-uri", "gs://"+bucket+"/missing.flac")
 	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	if msg := p.modalRefusal(); !strings.Contains(msg, "not found") {
@@ -151,18 +149,19 @@ func TestSpeechBatchTranscriptionThroughThePage(t *testing.T) {
 	if err := w.Close(); err != nil {
 		t.Fatalf("upload: %v", err)
 	}
-	p.openCloudStorageTranscription()
+	p.openCloudStorageTranscription(bucket)
 	p.setField(".modal.is-open #f-uri", "gs://"+bucket+"/jfk.flac")
 	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
-	p.waitFor(`document.querySelector("#action-result-table") !== null`)
+	// Submit opens the transcription's Transcription details (#2084).
+	p.waitForWithin(`location.pathname.startsWith("/speech/transcriptions/transcription-") && document.querySelector("#media-text") !== null`, 3*time.Minute)
 	var rows string
-	p.eval(`document.querySelector("#action-result-table").textContent`, &rows)
-	p.clickText(".modal.is-open .modal-actions button", "Close")
+	p.eval(`document.querySelector("#view").textContent`, &rows)
 	if !strings.Contains(strings.ToLower(rows), "your country") {
 		t.Errorf("Transcribe from Cloud Storage shows %q", rows)
 	}
 	p.navigate("/speech/transcriptions" + q)
-	p.waitFor(rowReady("gs://" + bucket + "/jfk.flac"))
+	// Listed from its workspace, the audio bucket (#2084).
+	p.waitFor(rowReady(bucket) + " && " + rowReady("jfk.flac"))
 }
 
 // TestSpeechAdaptationScreensMeetWCAG (#1930): Custom classes and Phrase

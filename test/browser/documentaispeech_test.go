@@ -256,7 +256,9 @@ func (p *tab) documentFileAction(label, file string) (text, rows string, boxes i
 	p.waitFor(`document.querySelector(".modal.is-open #f-file") !== null`)
 	p.run(chromedp.SetUploadFiles(chromedp.CSS(`.modal.is-open #f-file`), []string{file}))
 	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
-	p.waitFor(`document.querySelector("#action-result-text") !== null ||
+	// The result opens its analysis page, a page of its own (#2084).
+	p.waitFor(`(location.pathname.includes("/analysis/") && document.querySelector("#view #action-result-text") !== null &&
+		[...document.querySelectorAll("#view .result-page img")].every((i) => i.complete)) ||
 		[...document.querySelectorAll(".modal.is-open .form-error")].some((e) => !e.hidden && e.textContent)`)
 	var res struct {
 		Text, Rows, Error string
@@ -264,17 +266,17 @@ func (p *tab) documentFileAction(label, file string) (text, rows string, boxes i
 	}
 	p.eval(`(() => { const x = document.querySelector("#action-result-text"), t = document.querySelector("#action-result-table");
 		const e = [...document.querySelectorAll(".modal.is-open .form-error")].filter((e) => !e.hidden).map((e) => e.textContent).join(" ");
-		const imgs = [...document.querySelectorAll(".modal.is-open .result-page img")].filter((i) => i.complete && i.naturalWidth > 0);
+		const imgs = [...document.querySelectorAll("#view .result-page img")].filter((i) => i.complete && i.naturalWidth > 0);
 		return { Text: x ? x.textContent : "", Rows: t ? t.textContent : "", Error: e,
-			Boxes: document.querySelectorAll(".modal.is-open .result-box").length, Images: imgs.length }; })()`, &res)
+			Boxes: document.querySelectorAll("#view .result-box").length, Images: imgs.length }; })()`, &res)
 	if res.Error != "" {
 		p.t.Fatalf("%s was refused: %s", label, res.Error)
 	}
 	if res.Images == 0 {
 		p.t.Errorf("%s drew no page image", label)
 	}
-	p.clickText(".modal.is-open .modal-actions button", "Close")
-	p.waitFor(`document.querySelector(".modal") === null`)
+	p.eval(`history.back(), true`, nil)
+	p.waitFor(`!location.pathname.includes("/analysis/") && ` + settled)
 	return res.Text, res.Rows, res.Boxes
 }
 
@@ -335,7 +337,17 @@ func TestSpeechRecognizersThroughThePage(t *testing.T) {
 		}
 		p.navigate("/speech/transcriptions" + q)
 		p.waitFor(settled)
-		text, _ = p.fileAction("New transcription", clip)
+		// New transcription saves to a workspace and opens its
+		// Transcription details (#2084).
+		sc, _ := storageSDK(t)
+		emptyBucketAtEnd(t, sc, project+"-rec-ws")
+		p.clickText("#view button[id^=\"list-action-\"]", "New transcription")
+		p.waitFor(`document.querySelector(".modal.is-open #f-file") !== null`)
+		p.chooseWorkspace(project + "-rec-ws")
+		p.run(chromedp.SetUploadFiles(chromedp.CSS(`.modal.is-open #f-file`), []string{clip}))
+		p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
+		p.waitForWithin(`location.pathname.startsWith("/speech/transcriptions/transcription-") && document.querySelector("#media-text") !== null`, 3*time.Minute)
+		p.eval(`document.querySelector("#media-text").textContent`, &text)
 		if !strings.Contains(strings.ToLower(text), "your country") {
 			t.Errorf("New transcription shows %q", text)
 		}

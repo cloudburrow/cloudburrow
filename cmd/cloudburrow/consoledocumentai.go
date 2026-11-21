@@ -408,7 +408,12 @@ func (p docAIGalleryProvider) ActAtResult(ctx context.Context, project string, p
 // --- My processors ------------------------------------------------------------
 
 // docAIProcessorsProvider is My processors.
-type docAIProcessorsProvider struct{ d docAI }
+type docAIProcessorsProvider struct {
+	d docAI
+	// analyses are Upload test document's results, each opened as a page
+	// of its own (#2084). Nil answers them in the dialog.
+	analyses *docAIAnalyses
+}
 
 func (docAIProcessorsProvider) ID() string    { return "documentai" }
 func (docAIProcessorsProvider) Title() string { return "My processors" }
@@ -518,6 +523,9 @@ func (p docAIProcessorsProvider) predictionEndpoint(pr *documentaipb.Processor) 
 
 // Detail implements console.Driller: a processor's page.
 func (p docAIProcessorsProvider) Detail(ctx context.Context, project string, path []string) (console.Detail, error) {
+	if len(path) == 3 && path[1] == docAIAnalysisSegment {
+		return p.analysisDetail(project, path[0], path[2]), nil
+	}
 	if len(path) > 1 {
 		return console.DeeperThan(1, path), nil
 	}
@@ -955,7 +963,11 @@ func (p docAIProcessorsProvider) ActAtFile(ctx context.Context, project string, 
 	if err != nil {
 		return nil, err
 	}
-	return docAIResult(doc), nil
+	out := docAIResult(doc)
+	if p.analyses != nil {
+		out.Open = p.analyses.add(p.d.project(project), lastSegment(pr.GetName()), pr.GetType(), f.Name, name, out)
+	}
+	return out, nil
 }
 
 // docAILayoutBlocks are a document layout's blocks with the blocks nested

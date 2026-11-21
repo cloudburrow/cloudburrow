@@ -616,6 +616,9 @@ func (p speechTranscriptionsProvider) batch(ctx context.Context, project string,
 		return nil, err
 	}
 	uri, output := strings.TrimSpace(v["uri"]), strings.TrimSpace(v["output"])
+	if p.ws.served() && v["source"] == speechSourceGCS {
+		return p.batchToWorkspace(ctx, project, r, v, uri, output)
+	}
 	cfg, mask := speechOverrides(v)
 	fr, err := p.s.batchRecognize(ctx, r.GetName(), uri, output, cfg, mask)
 	if err != nil {

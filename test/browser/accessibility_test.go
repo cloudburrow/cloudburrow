@@ -410,7 +410,7 @@ func TestContrastInBothThemes(t *testing.T) {
 const tagControlsJS = `(() => {
   const out = [];
   let n = 0;
-  for (const a of document.querySelectorAll("a[href], button, input, select, textarea, summary, [tabindex]")) {
+  for (const a of document.querySelectorAll("a[href], button, input, select, textarea, summary, [tabindex], audio[controls], video[controls]")) {
     if (a.matches(":disabled, [tabindex='-1']") || a.closest("[hidden], [inert]")) continue;
     if (a.type === "radio" && !a.checked && document.querySelector('input[type=radio][name="' + a.name + '"]:checked')) continue;
     const s = getComputedStyle(a), r = a.getBoundingClientRect();

@@ -508,10 +508,9 @@ func effective(r *speechpb.Recognizer, v map[string]string) (model, language str
 	return model, language
 }
 
-// speechTranscriptions are this console's transcriptions, held in memory:
-// Recognize keeps nothing, and Google's list of stored transcriptions is
-// batch recognition's (BatchRecognize to Cloud Storage), which is not
-// served.
+// speechTranscriptions are this console's transcriptions, held in memory
+// when the instance serves no Cloud Storage to keep a workspace in
+// (consolespeechworkspace.go, #2084): Recognize keeps nothing.
 type speechTranscriptions struct {
 	mu   sync.Mutex
 	next int
@@ -522,12 +521,19 @@ type speechTranscriptions struct {
 type speechTranscriptionsProvider struct {
 	s    speechSvc
 	held *speechTranscriptions
+	// ws is the served Cloud Storage New transcription saves to, in a
+	// workspace (#2084). Without Cloud Storage the transcriptions are held
+	// in memory.
+	ws speechWorkspaces
 }
 
 func (speechTranscriptionsProvider) ID() string    { return "speech-transcriptions" }
 func (speechTranscriptionsProvider) Title() string { return "Transcriptions" }
 
-func (p speechTranscriptionsProvider) List(_ context.Context, project string) (console.Listing, error) {
+func (p speechTranscriptionsProvider) List(ctx context.Context, project string) (console.Listing, error) {
+	if p.ws.served() {
+		return p.listWorkspaces(ctx, project)
+	}
 	out := console.Listing{Columns: []string{"Recognizer", "Model", "Language", "Audio file", "Transcript", "Created"},
 		NameColumn: "Transcription", Noun: "transcriptions", RowsOpenable: true,
 		Note: "New transcription sends a Local upload to Recognize, or a Cloud storage file to BatchRecognize (its transcript " +
@@ -571,7 +577,15 @@ func (p speechTranscriptionsProvider) ListActions(ctx context.Context, project s
 		return []console.Action{{ID: "create-recognizer", Label: "New transcription",
 			Href: "/speech/recognizers?project=" + url.QueryEscape(p.s.project(project))}}
 	}
-	return []console.Action{newTranscriptionAction(ids)}
+	a := newTranscriptionAction(ids)
+	if p.ws.served() {
+		ws, err := p.ws.list(ctx, p.s.project(project))
+		if err != nil {
+			return nil
+		}
+		a.Fields = append(workspaceFields(ws), a.Fields...)
+	}
+	return []console.Action{a}
 }
 
 // newTranscriptionAction is Google's New Transcription (#1930), read from
@@ -581,7 +595,8 @@ func (p speechTranscriptionsProvider) ListActions(ctx context.Context, project s
 // Recognizer with a Spoken language and a Model over its default config,
 // and Submit. A Cloud storage file may have its transcript written under a
 // gs:// prefix. Google keeps the console's transcriptions in a workspace
-// bucket; these are kept in the console's memory.
+// bucket: with Cloud Storage served, its Workspace fields come first
+// (workspaceFields, #2084).
 func newTranscriptionAction(ids []string) console.Action {
 	local := map[string]string{"source": speechSourceLocal}
 	gcs := map[string]string{"source": speechSourceGCS}
@@ -626,6 +641,9 @@ func (p speechTranscriptionsProvider) ActAtFile(ctx context.Context, project str
 	if err != nil {
 		return nil, err
 	}
+	if p.ws.served() {
+		return p.transcribeToWorkspace(ctx, project, r, v, f)
+	}
 	cfg, mask := speechOverrides(v)
 	res, err := p.s.recognizeWith(ctx, r.GetName(), f, cfg, mask)
 	if err != nil {
@@ -645,9 +663,12 @@ func (p speechTranscriptionsProvider) ActAtFile(ctx context.Context, project str
 
 // Detail implements console.Driller: a transcription's page, its
 // transcript and results.
-func (p speechTranscriptionsProvider) Detail(_ context.Context, project string, path []string) (console.Detail, error) {
+func (p speechTranscriptionsProvider) Detail(ctx context.Context, project string, path []string) (console.Detail, error) {
 	if len(path) > 1 {
 		return console.DeeperThan(1, path), nil
+	}
+	if p.ws.served() {
+		return p.workspaceDetail(ctx, project, path[0])
 	}
 	p.held.mu.Lock()
 	defer p.held.mu.Unlock()

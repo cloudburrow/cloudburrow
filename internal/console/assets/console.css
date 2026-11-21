@@ -2425,6 +2425,13 @@ svg.bq-chart { display: block; border: 1px solid var(--border); border-radius: v
    document, its page images with the layout's boxes, beside its text and
    rows. Side by side when there is room, stacked in a narrow window. */
 .modal:has(.result-doc) { max-width: min(1280px, calc(100vw - 32px)); width: 100%; }
+.media-section .media-player { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+.media-section audio { width: 100%; max-width: 640px; }
+/* The player's controls are in the browser's own shadow tree, where the
+   rule above does not reach: the host shows focus while any of them holds it. */
+.media-section audio:focus, .media-section audio:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.result-section { overflow-x: auto; }
+.result-section .result-pages, .result-section .result-side { max-height: none; }
 .result-doc { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
 .result-pages { flex: 1 1 320px; min-width: 0; max-height: 70vh; overflow: auto; }
 .result-side { flex: 1 1 320px; min-width: 0; max-height: 70vh; overflow: auto; }

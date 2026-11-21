@@ -254,6 +254,11 @@ type Listing struct {
 	// over it, beside its text and rows: Document AI's Upload test
 	// document draws the layout it found on the document (#1930).
 	Pages []ResultPage `json:"pages,omitempty"`
+	// Open, on an action's answer, is a console route the page goes to
+	// instead of showing the answer in a dialog: Document AI's Upload test
+	// document opens its analysis page, as Google's opens the layout
+	// parser analysis page (#2084).
+	Open string `json:"open,omitempty"`
 }
 
 // ResultPage is one page image of an action's answer, and its boxes.
@@ -977,7 +982,24 @@ const (
 	// provider's Studio: Spanner Studio on a database's page (#1859). The
 	// page then has no separate Query tab, the Studio's editor being it.
 	KindStudio SectionKind = "studio"
+	// KindMedia is a player for Media, an audio object of the instance's
+	// Cloud Storage: a Speech-to-Text transcription's audio, which Google's
+	// Transcription details page plays in the browser (#2084).
+	KindMedia SectionKind = "media"
+	// KindResult is an action's answer, its Listing, drawn as the action's
+	// result dialog draws it (page images with their boxes beside the text
+	// and rows), on a page of its own: Document AI's analysis page (#2084).
+	KindResult SectionKind = "result"
 )
+
+// Media is a KindMedia section's player: Src is the console's own media
+// route for the object, Type its audio type, and Label what the player is
+// named for a screen reader.
+type Media struct {
+	Src   string `json:"src"`
+	Type  string `json:"type,omitempty"`
+	Label string `json:"label"`
+}
 
 // Section is one aspect of a resource, rendered as a tab.
 //
@@ -1024,6 +1046,8 @@ type Section struct {
 	StepEntries []StepEntryView `json:"stepEntries,omitempty"`
 	// Series is the content when Kind is KindChart.
 	Series []ChartSeries `json:"series,omitempty"`
+	// Media is the content when Kind is KindMedia.
+	Media *Media `json:"media,omitempty"`
 	// Unavailable explains why this one section has no content, so a section
 	// that cannot be read shows its own error inside its own panel rather
 	// than an empty table claiming the resource holds nothing.
@@ -1763,6 +1787,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/objects/{service}/upload", s.handleUpload)
 	mux.HandleFunc("GET /api/objects/{service}/download", s.handleDownload)
 	mux.HandleFunc("GET /api/objects/{service}/preview", s.handlePreview)
+	mux.HandleFunc("GET /api/objects/{service}/media", s.handleMedia)
 	mux.HandleFunc("GET /api/objects/{service}/versions", s.handleVersions)
 	mux.HandleFunc("DELETE /api/objects/{service}", s.handleDeleteObject)
 	mux.HandleFunc("GET /api/terminal", s.handleTerminalStatus)

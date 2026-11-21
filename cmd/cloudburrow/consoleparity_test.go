@@ -2193,9 +2193,12 @@ var parityRows = []parityRow{
 			"row and its box lighting each other up, or the layout parser's blocks (by detected type) and chunks beside its text; " +
 			"its Process options (the processor version, the pages) and the processor's own config (the OCR processor's symbols, " +
 			"its tokens and symbols then rows and boxes too; the layout parser's Edit Layout Config chunk size) sent as " +
-			"ProcessDocument's process_options (#1930). The gallery is Google's cards under its category headings",
+			"ProcessDocument's process_options (#1930). The result opens Google's analysis page, a page of its own under the " +
+			"processor (analysis/{id}): the document view, and the layout parser's Chunks tab, with a breadcrumb back (#2084). " +
+			"The gallery is Google's cards under its category headings",
 		Tests: []string{"TestConsoleDocumentAIProcessors", "TestConsoleDocumentAIUploadTestOptions", "TestDocAIProcessOptions",
-			"TestDocumentAIProcessorsThroughThePage", "TestDocumentAIUploadTestOptionsThroughThePage"}},
+			"TestConsoleDocumentAIAnalysisPage", "TestDocumentAIProcessorsThroughThePage", "TestDocumentAIUploadTestOptionsThroughThePage",
+			"TestDocumentAIAnalysisPageThroughThePage"}},
 	{Resource: "Document AI: processor versions", Service: "vertexai",
 		Methods: []string{"DocumentProcessorService/ListProcessorVersions", "DocumentProcessorService/GetProcessorVersion",
 			"DocumentProcessorService/SetDefaultProcessorVersion", "DocumentProcessorService/DeployProcessorVersion",
@@ -2226,13 +2229,15 @@ var parityRows = []parityRow{
 		Provider: "speech-recognizers", Offers: "Speech-to-Text's menu (#1930): Transcriptions (speech-transcriptions: Google's New " +
 			"transcription, its Audio configuration a Local upload sent to Recognize, then Continue to its Transcription options, " +
 			"the recognizer with a Spoken language and a Model over its default config through config_mask, ending in Submit; " +
-			"its transcript and results shown and kept in the console's memory, each with its Transcription details page naming " +
-			"the model and language) and Recognizers (ListRecognizers with deleted ones: Recognizer ID, Display name, " +
+			"the audio, transcript and metadata written to a workspace, a Cloud Storage bucket chosen or made with Workspace > " +
+			"New workspace (#2084), and listed from it, each with its Transcription details page naming the model and language " +
+			"and playing the stored audio object in the browser) and Recognizers (ListRecognizers with deleted ones: Recognizer ID, Display name, " +
 			"Region, Model, Language, Status), Create recognizer (ID, region, display name, chirp, language, word timestamps, " +
 			"word-level confidence, automatic punctuation), a recognizer's page with its default recognition config, Edit " +
 			"(UpdateRecognizer), Transcribe (an uploaded audio file, its transcript), Delete, and Undelete on a deleted one",
-		Tests: []string{"TestConsoleSpeechRecognizers", "TestConsoleSpeechNewTranscription", "TestSpeechRecognizersThroughThePage",
-			"TestSpeechNewTranscriptionIsGooglesThroughThePage"}},
+		Tests: []string{"TestConsoleSpeechRecognizers", "TestConsoleSpeechNewTranscription", "TestConsoleSpeechWorkspaces",
+			"TestMediaPlaysAudioOnly", "TestSpeechRecognizersThroughThePage", "TestSpeechNewTranscriptionIsGooglesThroughThePage",
+			"TestSpeechWorkspaceAndPlaybackThroughThePage"}},
 	{Resource: "Speech-to-Text: encryption settings", Service: "vertexai",
 		Methods:  []string{"Speech/GetConfig", "Speech/UpdateConfig"},
 		Provider: "speech-recognizers", Offers: "Recognizers' Encryption settings (#1950): a region and a customer-managed " +
@@ -2243,10 +2248,11 @@ var parityRows = []parityRow{
 		Methods:  []string{"Speech/BatchRecognize"},
 		Provider: "speech-transcriptions", Offers: "Transcriptions' New transcription with a Cloud storage audio source (#1930): " +
 			"a gs:// audio file and an optional gs:// output prefix, then the Transcription options (recognizer, Spoken language, " +
-			"Model), sent to BatchRecognize; the transcript and results shown (inline) or the result object's gs:// URI, kept in " +
-			"the list with the uploads' transcriptions",
-		Tests: []string{"TestConsoleSpeechAdaptation", "TestConsoleSpeechNewTranscription", "TestSpeechBatchTranscriptionThroughThePage",
-			"TestSpeechNewTranscriptionIsGooglesThroughThePage"}},
+			"Model), sent to BatchRecognize; its transcript written to the chosen workspace beside the metadata naming the file " +
+			"(#2084), and Transcription details playing the file's own object; with an output prefix, the result object's gs:// URI",
+		Tests: []string{"TestConsoleSpeechAdaptation", "TestConsoleSpeechNewTranscription", "TestConsoleSpeechWorkspaces",
+			"TestSpeechBatchTranscriptionThroughThePage", "TestSpeechNewTranscriptionIsGooglesThroughThePage",
+			"TestSpeechWorkspaceAndPlaybackThroughThePage"}},
 	{Resource: "Speech-to-Text: custom classes and phrase sets", Service: "vertexai",
 		Methods: []string{"Speech/CreateCustomClass", "Speech/GetCustomClass", "Speech/ListCustomClasses", "Speech/UpdateCustomClass",
 			"Speech/DeleteCustomClass", "Speech/UndeleteCustomClass", "Speech/CreatePhraseSet", "Speech/GetPhraseSet",

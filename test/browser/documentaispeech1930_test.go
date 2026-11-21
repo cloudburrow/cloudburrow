@@ -18,8 +18,9 @@ import (
 )
 
 // openCloudStorageTranscription opens Transcriptions' New transcription
-// and chooses Google's Cloud storage audio source (#1930).
-func (p *tab) openCloudStorageTranscription() {
+// and chooses Google's Cloud storage audio source (#1930), and workspace as
+// its Workspace (#2084).
+func (p *tab) openCloudStorageTranscription(workspace string) {
 	p.t.Helper()
 	p.waitFor(`document.querySelector(".modal") === null`)
 	p.waitFor(`(() => { const b = document.querySelector("#list-action-transcribe"); return !!b && b.getClientRects().length > 0; })()`)
@@ -27,6 +28,7 @@ func (p *tab) openCloudStorageTranscription() {
 	p.waitFor(`document.querySelector('.modal.is-open input[name="f-source-choice"][value="Cloud storage"]') !== null`)
 	p.eval(`(() => { document.querySelector('.modal.is-open input[name="f-source-choice"][value="Cloud storage"]').click(); return true; })()`, nil)
 	p.waitFor(`document.querySelector(".modal.is-open #f-uri").getClientRects().length > 0`)
+	p.chooseWorkspace(workspace)
 }
 
 // TestSpeechNewTranscriptionIsGooglesThroughThePage (#1930), in the run shard
@@ -89,6 +91,7 @@ func TestSpeechNewTranscriptionIsGooglesThroughThePage(t *testing.T) {
 	p.eval(`(() => { document.querySelector('.modal.is-open input[name="f-source-choice"][value="Cloud storage"]').click(); return true; })()`, nil)
 	p.waitFor(`document.querySelector(".modal.is-open #f-uri").getClientRects().length > 0`)
 	p.setField(".modal.is-open #f-uri", "gs://"+bucket+"/missing.flac")
+	p.chooseWorkspace(bucket)
 	p.clickText(".modal.is-open .create-step-continue button", "Continue")
 	p.waitFor(`document.querySelector(".modal.is-open #f-recognizer").getClientRects().length > 0`)
 	p.eval(read, &form)
@@ -153,18 +156,19 @@ func TestDocumentAIUploadTestOptionsThroughThePage(t *testing.T) {
 	p.setField(".modal.is-open #f-pages", "1")
 	p.eval(`(() => { const b = document.querySelector(".modal.is-open #f-enableSymbol"); if (!b.checked) b.click(); return true; })()`, nil)
 	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
-	p.waitFor(`document.querySelector("#action-result-table") !== null ||
+	// The result opens its analysis page (#2084).
+	p.waitFor(`location.pathname.includes("/analysis/") ||
 		[...document.querySelectorAll(".modal.is-open .form-error")].some((e) => !e.hidden && e.textContent)`)
+	p.waitFor(`document.querySelector("#action-result-table") !== null || document.querySelector(".modal.is-open") !== null`)
 	var res struct {
 		Rows  string
 		Boxes int
 	}
 	p.eval(`(() => ({ Rows: (document.querySelector("#action-result-table") || {}).textContent || "",
-		Boxes: document.querySelectorAll(".modal.is-open .result-box").length }))()`, &res)
+		Boxes: document.querySelectorAll("#view .result-box").length }))()`, &res)
 	if !strings.Contains(res.Rows, "Token") || !strings.Contains(res.Rows, "Symbol") || res.Boxes == 0 {
 		t.Errorf("with symbols, the result has %d boxes and rows %.200q", res.Boxes, res.Rows)
 	}
-	p.clickText(".modal.is-open .modal-actions button", "Close")
 }
 
 // TestDocumentAIAndSpeechRound3MeetWCAG (#1930): Upload test document's
@@ -219,7 +223,11 @@ func TestDocumentAIAndSpeechRound3MeetWCAG(t *testing.T) {
 	options.then = `document.querySelector("#list-action-transcribe").click();
 		const step = () => { const r = document.querySelector('.modal.is-open input[name="f-source-choice"][value="Cloud storage"]');
 			if (!r) return setTimeout(step, 10);
-			r.click(); document.querySelector(".modal.is-open .create-step-continue button").click(); };
+			r.click();
+			const m = document.querySelector(".modal.is-open"), set = (s, v) => { const f = m.querySelector(s);
+				f.value = v; f.dispatchEvent(new Event("input", { bubbles: true })); f.dispatchEvent(new Event("change", { bubbles: true })); };
+			set("#f-uri", "gs://a11y-audio/a.flac"); set("#f-workspace", "New workspace"); set("#f-workspaceBucket", "a11y-workspace");
+			m.querySelector(".create-step-continue button").click(); };
 		step()`
 	auditScreens(t, []a11yPage{upload, options})
 }
