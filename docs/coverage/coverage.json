@@ -1799,7 +1799,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/iamenforcementround12_source_1879_test.go:55 TestIAMEnforcementSecureSourceManager",
-          "test/compat/securesourcemanager_test.go:36 TestSecureSourceManagerPushTrigger"
+          "test/compat/securesourcemanager_test.go:36 TestSecureSourceManagerPushTrigger",
+          "test/compat/securesourcemanagerprivate_test.go:29 TestSecureSourceManagerPrivateInstance"
         ]
       },
       {
@@ -2023,7 +2024,7 @@
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/CreateConnection",
         "status": "Verified",
         "tests": [
-          "test/compat/developerconnect_test.go:49 TestDeveloperConnectSourceManagerTrigger",
+          "test/compat/developerconnect_test.go:47 TestDeveloperConnectSourceManagerTrigger",
           "test/compat/iamenforcementround12_source_1879_test.go:172 TestIAMEnforcementDeveloperConnect"
         ]
       },
@@ -2044,7 +2045,7 @@
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/DeleteConnection",
         "status": "Verified",
         "tests": [
-          "test/compat/developerconnect_test.go:49 TestDeveloperConnectSourceManagerTrigger",
+          "test/compat/developerconnect_test.go:47 TestDeveloperConnectSourceManagerTrigger",
           "test/compat/iamenforcementround12_source_1879_test.go:172 TestIAMEnforcementDeveloperConnect",
           "test/compat/terraform_developerconnect_test.go:31 TestTerraformDeveloperConnect"
         ]
@@ -2124,7 +2125,7 @@
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/GetConnection",
         "status": "Verified",
         "tests": [
-          "test/compat/developerconnect_test.go:49 TestDeveloperConnectSourceManagerTrigger",
+          "test/compat/developerconnect_test.go:47 TestDeveloperConnectSourceManagerTrigger",
           "test/compat/iamenforcementround12_source_1879_test.go:172 TestIAMEnforcementDeveloperConnect",
           "test/compat/terraform_developerconnect_test.go:31 TestTerraformDeveloperConnect"
         ]
@@ -2146,7 +2147,7 @@
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/ListConnections",
         "status": "Verified",
         "tests": [
-          "test/compat/developerconnect_test.go:49 TestDeveloperConnectSourceManagerTrigger",
+          "test/compat/developerconnect_test.go:47 TestDeveloperConnectSourceManagerTrigger",
           "test/compat/iamenforcementround12_source_1879_test.go:172 TestIAMEnforcementDeveloperConnect"
         ]
       },
@@ -16382,6 +16383,8 @@
           "test/compat/backupdr_cli_test.go:36 TestGcloudBackupDR",
           "test/compat/backupdr_cli_test.go:91 TestTerraformBackupDR",
           "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
+          "test/compat/backupdrcompute_test.go:305 TestGcloudBackupDRRestoreDisk",
+          "test/compat/backupdrcompute_test.go:368 TestGcloudBackupDRRestoreCompute",
           "test/compat/iamenforcementround12_backup_1879_test.go:52 TestIAMEnforcementBackupDR",
           "test/compat/terraform_batch8_test.go:279 TestTerraformBackupDRVaultAndPlanUpdates"
         ]
