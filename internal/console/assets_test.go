@@ -2539,7 +2539,7 @@ func TestComponentHealthIsReadNotLatched(t *testing.T) {
 func TestAnActionThatChangesStateAsksForTheNameBack(t *testing.T) {
 	js := consoleAsset(t, "console.js")
 	form := functionBody(t, js, "function openActionForm(route, segments, action, onDone, title = null)")
-	for _, want := range []string{"if (action.confirm) {", "detail: action.confirm,", "confirmWord: name,", `consequence: "",`} {
+	for _, want := range []string{"if (action.confirm) {", "detail: action.confirm,", "confirmWord: action.confirmWord || name,", `consequence: "",`} {
 		if !strings.Contains(form, want) {
 			t.Errorf("openActionForm does not confirm an action carrying Confirm: missing %q", want)
 		}

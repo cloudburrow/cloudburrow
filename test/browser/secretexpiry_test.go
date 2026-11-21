@@ -45,16 +45,17 @@ func TestSecretManagerExpiryThroughTheForms(t *testing.T) {
 	}
 
 	p.clickText("#view tbody a", name)
+	// Edit secret is a page ending in Update secret (#1850).
 	p.clickText("#view .page-actions button", "Edit secret")
-	p.waitFor(`document.querySelector(".modal.is-open #f-expireTime") !== null`)
+	p.waitFor(`document.querySelector("#view form.create-page #f-expireTime") !== null`)
 	var prefilled string
-	p.eval(`document.querySelector(".modal #f-expireTime").value`, &prefilled)
+	p.eval(`document.querySelector("#view #f-expireTime").value`, &prefilled)
 	if prefilled != got["expireTime"] {
 		t.Errorf("Edit secret is prefilled with expire time %q, want %q", prefilled, got["expireTime"])
 	}
-	setField(p, ".modal", "f-expireTime", "")
-	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
-	p.waitFor(`document.querySelector(".modal") === null`)
+	setField(p, "#view", "f-expireTime", "")
+	p.clickText(`#view form.create-page button[type="submit"]`, "Update secret")
+	p.waitFor(`!location.search.includes("edit=1") && document.querySelector("#view form.create-page") === null`)
 	if got := editDefaults(t, "secrets", project, name); got["Expiration time"] != "Never" || got["expireTime"] != "" {
 		t.Errorf("after clearing in Edit secret the secret reads expire time %q, form %q", got["Expiration time"], got["expireTime"])
 	}

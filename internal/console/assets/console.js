@@ -120,6 +120,8 @@ const AP_ROUTES = agentPlatformRoutes();
 
 // Kubernetes Engine's pages drawn as one page's tabs (#1857).
 const GKE_DISCOVERY = ["/kubernetes/gateways", "/kubernetes/services", "/kubernetes/ingress"];
+// Secret Manager's page tabs (#1850): the global secrets and Regional secrets.
+const SECRET_TABS = ["/secrets", "/secrets-regional"];
 const GKE_STORAGE = ["/kubernetes/storage", "/kubernetes/storage-classes"];
 // Cloud Logging's Settings and its Log Scopes tab (#2020), as Google's
 // Settings page has a Log Scopes tab (log-scope/create-and-manage).
@@ -499,10 +501,15 @@ const ROUTES = [
 
   // Secret Manager (#1850): Google's menu, Secret Manager (the global
   // secrets), Regional secrets and Settings.
-  { path: "/secrets", service: "secrets", title: "Secret Manager", navTitle: "Secret Manager", kind: "Secret",
-    section: "Security and identity", product: "secrets", productTitle: "Secret Manager" },
-  { path: "/secrets-regional", service: "secrets-regional", icon: "secrets", title: "Regional secrets", kind: "Secret",
-    section: "Security and identity", product: "secrets", productTitle: "Secret Manager" },
+  // The global and regional secrets are two tabs of the Secret Manager
+  // page: "go to the Secret Manager page ... click the Regional secrets
+  // tab" (https://docs.cloud.google.com/secret-manager/regional-secrets/view-regional-secret-details,
+  // read 2026-11-20). The first tab's name is not in the docs (UNVERIFIED,
+  // re-read 2026-11-20: the same page).
+  { path: "/secrets", service: "secrets", title: "Secret Manager", navTitle: "Secret Manager", tabTitle: "Global secrets", kind: "Secret",
+    pageTabs: SECRET_TABS, section: "Security and identity", product: "secrets", productTitle: "Secret Manager" },
+  { path: "/secrets-regional", service: "secrets-regional", icon: "secrets", title: "Secret Manager", tabTitle: "Regional secrets", kind: "Secret",
+    navHidden: true, navAs: "/secrets", pageTabs: SECRET_TABS, section: "Security and identity", product: "secrets", productTitle: "Secret Manager" },
   { path: "/secrets-settings", service: null, requires: "secrets", screen: "unavailable", icon: "secrets", title: "Settings",
     section: "Security and identity", product: "secrets", productTitle: "Secret Manager",
     unavailable: "Google's Secret Manager settings are the project's own Google Cloud configuration, which Google's documentation does not describe and a local instance does not hold. A secret's replication, encryption, rotation, expiration and destruction delay are set on the secret itself, with Create secret and Edit secret." },
@@ -3946,8 +3953,8 @@ async function renderDetail(view, route, resourcePath) {
   if (data.edit && data.edit.page && new URLSearchParams(location.search).get("edit") === "1") {
     return renderEditPage(view, route, segments, data, crumb);
   }
-  // Google's Edit subscription is a page (#1847): this resource's address
-  // with ?edit=1 draws it in place of the tabs.
+  // Google's Edit subscription and Edit secret are pages (#1847, #1850):
+  // this resource's address with ?edit=1 draws it in place of the tabs.
   if (data.edit && data.edit.layout === "page" && new URLSearchParams(location.search).get("edit") === "1") {
     return renderLayoutEditPage(view, route, segments, data.edit, crumb);
   }
@@ -4754,7 +4761,7 @@ function openActionForm(route, segments, action, onDone, title = null) {
         // Remove asks "Remove user account?" with nothing typed.
         title: action.confirmTitle || `${action.label}: ${name}?`,
         detail: action.confirm,
-        confirmWord: name,
+        confirmWord: action.confirmWord || name,
         confirmLabel: action.label,
         consequence: "",
         style: action.confirmStyle || "name",
@@ -5640,6 +5647,13 @@ async function editFromRow(route, segments, onDone) {
 // differently from a create form would be a second form implementation to keep
 // in step with the first.
 function openEditForm(route, segments, spec, onDone) {
+  // An edit that is a page of its own (EditForm.Layout "page", #1850):
+  // Google's Edit secret page, ending in Update secret.
+  if (spec.layout === "page" && route && route.path) {
+    const to = new URL(detailHref(route, segments), location.origin);
+    to.searchParams.set("edit", "1");
+    return navigate(to.pathname + to.search);
+  }
   const name = segments[segments.length - 1];
   const fields = buildCreateForm(spec);
   const error = el("p", { class: "form-error", role: "alert", hidden: true });
@@ -7003,6 +7017,7 @@ function buildCreateForm(spec) {
         });
     if (isCheck) control.checked = f.default === "true" && !f.unavailable;
     else if (isSelect) control.value = f.default || (f.options || [])[0] || "";
+    else if (f.type === "datetime-local") control.value = localDateTime(f.default);
     else control.value = f.default || "";
     if (helpId) control.setAttribute("aria-describedby", helpId);
     // Ctrl+Space offers the field's completions at the cursor, as Google's
@@ -7381,6 +7396,7 @@ function buildCreateForm(spec) {
     if (entry.isCheck) return entry.field.default === "true";
     if (entry.field.type === "select") return entry.field.default || (entry.field.options || [])[0] || "";
     if (entry.field.type === "map") return mapToLines(entry.field.default);
+    if (entry.field.type === "datetime-local") return localDateTime(entry.field.default);
     return entry.field.default || "";
   };
   const valueOf = (entry) => (entry.isCheck ? entry.control.checked : entry.control.value);
@@ -7434,10 +7450,30 @@ function buildCreateForm(spec) {
         .map((e) => {
           if (e.isCheck) return [e.field.name, String(e.control.checked)];
           if (e.field.type === "map") return [e.field.name, linesToMap(e.control.value)];
+          if (e.field.type === "datetime-local") return [e.field.name, instantOf(e.control.value)];
           return [e.field.name, e.control.value];
         })]);
     },
   };
+}
+
+// localDateTime is an RFC 3339 time as a datetime-local control's value,
+// in the browser's time zone (console.DateTimeFieldType, #1850); "" for
+// none or a value that is not a time.
+function localDateTime(rfc3339) {
+  if (!rfc3339) return "";
+  const d = new Date(rfc3339);
+  if (Number.isNaN(d.getTime())) return "";
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+// instantOf is a datetime-local control's value, the browser's local
+// time, as the RFC 3339 instant it names in UTC; "" stays "".
+function instantOf(local) {
+  if (!local) return "";
+  const d = new Date(local);
+  return Number.isNaN(d.getTime()) ? local : d.toISOString().replace(/\.000Z$/, "Z");
 }
 
 // uploadIntoTextarea is a textarea's Upload file control (Field.Upload,
@@ -9879,6 +9915,9 @@ async function runAction(route, target, action, onDone, row = NO_ROW, title = nu
   // Run in Cloud Shell (#2049): the command, in the terminal's active tab.
   if (action.terminal) return runInTerminal(action.terminal);
   const path = Array.isArray(target) ? target : null;
+  // View secret value from a version row (Action.Reveal, #1850): the
+  // value in a dialog ending in Done, through the recorded reveal route.
+  if (action.reveal) return revealValue(route, path || [target], action.label);
   // A page's own heading, when its last segment is an address no reader
   // recognises: a Datastore entity's encoded key (#875). A delete is
   // confirmed by typing back what the page is headed, not the address.
@@ -9941,7 +9980,9 @@ async function runAction(route, target, action, onDone, row = NO_ROW, title = nu
     // Cloud SQL's "Stop database instance?".
     title: action.confirmTitle || `${action.label} ${name}?`,
     detail: action.confirm || undefined,
-    confirmWord: name,
+    // Action.ConfirmWord (#1850): a secret version's Destroy asks for the
+    // secret's ID, not the version's number.
+    confirmWord: action.confirmWord || name,
     confirmLabel: action.confirm ? (action.submit || action.label) : undefined,
     consequence: action.destructive ? undefined : "",
     // As Google's console confirms this action (#1931): BigQuery's Delete

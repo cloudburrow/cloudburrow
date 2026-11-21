@@ -39,8 +39,9 @@ func TestConsoleSecretParity(t *testing.T) {
 	if got := strings.Join(sections, ","); got != want {
 		t.Errorf("Create secret sections = %s\nwant %s", got, want)
 	}
-	if fields[1].Name != "payload" || fields[1].Upload != "Upload file" {
-		t.Errorf("the second field is %+v; want the Secret value with Upload file", fields[1])
+	if fields[1].Name != "secretType" || fields[2].Name != "payload" || fields[2].Upload != "Upload file" {
+		t.Errorf("the second and third fields are %s, %s; want the Secret type, then the Secret value with Upload file",
+			fields[1].Name, fields[2].Name)
 	}
 
 	name, err := p.Create(ctx, "demo", map[string]string{"secretId": "s", "payload": "one",
@@ -141,8 +142,8 @@ func TestConsoleSecretParity(t *testing.T) {
 	if _, err := r.Create(ctx, "demo", map[string]string{"secretId": "g", "payload": "x"}); err == nil {
 		t.Error("Create regional secret without a location was accepted")
 	}
-	if _, f := r.CreateForm(); f[1].Name != "location" {
-		t.Errorf("Create regional secret's second field is %s", f[1].Name)
+	if _, f := r.CreateForm(); f[1].Name != "secretType" || f[3].Name != "locationType" || f[3].Section != "Location" {
+		t.Errorf("Create regional secret's fields 2 and 4 are %s, %s", f[1].Name, f[3].Name)
 	}
 }
 

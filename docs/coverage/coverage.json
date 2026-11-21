@@ -262,6 +262,7 @@
           "test/compat/secrettags1961_test.go:157 TestTerraformSecretTags",
           "test/compat/secrettags1961_test.go:31 TestSecretManagerTagsAndAliasesAtCreation",
           "test/compat/secrettopics_test.go:33 TestSecretManagerTopicNotifications",
+          "test/compat/secrettype_test.go:21 TestSecretManagerSecretType",
           "test/compat/sysparams1954_test.go:180 TestSystemParametersSecretManager",
           "test/compat/terraform_batch11_test.go:479 TestTerraformRegionalSecretIAM",
           "test/compat/terraform_batch4_test.go:215 TestTerraformSecretVersionDeletionPolicy",
@@ -360,6 +361,7 @@
           "test/compat/secretschedule_test.go:53 TestSecretManagerRotationAndDelayedDestroy",
           "test/compat/secrettags1961_test.go:31 TestSecretManagerTagsAndAliasesAtCreation",
           "test/compat/secrettopics_test.go:33 TestSecretManagerTopicNotifications",
+          "test/compat/secrettype_test.go:21 TestSecretManagerSecretType",
           "test/compat/sysparams1954_test.go:180 TestSystemParametersSecretManager",
           "test/compat/terraform_batch6_test.go:477 TestTerraformDataSources",
           "test/compat/terraform_batch8_test.go:171 TestTerraformSecretManagerSecretIAM",
@@ -459,6 +461,7 @@
           "test/compat/secrets_test.go:361 TestSecretUpdateAppliesOnlyTheMask",
           "test/compat/secretschedule_test.go:53 TestSecretManagerRotationAndDelayedDestroy",
           "test/compat/secrettopics_test.go:33 TestSecretManagerTopicNotifications",
+          "test/compat/secrettype_test.go:21 TestSecretManagerSecretType",
           "test/compat/terraform_secrets_test.go:21 TestTerraformSecretLabelChangeInPlace",
           "test/compat/terraform_tasks_secrets_test.go:113 TestTerraformSecretRotationAndTopics"
         ]
