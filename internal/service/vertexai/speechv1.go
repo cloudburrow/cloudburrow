@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -40,9 +41,21 @@ import (
 //     stored custom classes (v1's Adaptation service, speechv1adaptation.go,
 //     #2106) are applied as v2's adaptation (speechbias.go); abnf_grammar
 //     is UNIMPLEMENTED, as are
-//     alternative_language_codes, enable_separate_recognition_per_channel,
-//     diarization and transcript_normalization (spoken punctuation and emojis
-//     and the profanity filter are v2's, #1799).
+//     alternative_language_codes and transcript_normalization (spoken
+//     punctuation and emojis and the profanity filter are v2's, #1799);
+//     diarization is speechdiarize.go's.
+//   - audio_channel_count and enable_separate_recognition_per_channel
+//     (https://docs.cloud.google.com/speech-to-text/docs/reference/rpc/google.cloud.speech.v1,
+//     read 2026-11-21): "Valid values for LINEAR16, OGG_OPUS and FLAC are
+//     1-8. Valid value for MULAW, AMR, AMR_WB and SPEEX_WITH_HEADER_BYTE is
+//     only 1"; "We only recognize the first channel by default". With the
+//     flag "set to true explicitly and audio_channel_count > 1", each
+//     channel is recognized on its own (v2's SEPARATE_RECOGNITION_PER_CHANNEL,
+//     transcribeEachChannel), each result carrying its channel_tag, 1 to N,
+//     in Recognize, LongRunningRecognize and StreamingRecognize, and
+//     diarized on its own; it is "billed cumulatively for all channels
+//     recognized", Recognize's and LongRunningRecognize's total_billed_time
+//     counting each channel.
 //   - Recognize reads at most a minute of audio ("Sync input too long. For
 //     audio longer than 1 min use LongRunningRecognize with a 'uri'
 //     parameter."), from content or a gs:// uri of this instance's Cloud
@@ -50,11 +63,18 @@ import (
 //     in the background, with LongRunningRecognizeMetadata's progress;
 //     its output_config (a transcript written to Cloud Storage) is
 //     UNIMPLEMENTED.
-//   - StreamingRecognize is speechstream.go's, with v1's single_utterance.
+//   - StreamingRecognize is speechstream.go's, with v1's single_utterance;
+//     per channel, each channel is endpointed and recognized on its own.
 //
 // UNVERIFIED (re-read 2026-11-19: https://docs.cloud.google.com/speech-to-text/docs/reference/rpc/google.cloud.speech.v1,
 // which does not say): the model mapping (each is the same local whisper model), and
-// the texts of the errors other than Google's quoted one.
+// the texts of the errors other than Google's quoted one; with separate
+// recognition per channel, the order of the channels' results (by end,
+// then channel), that diarization's last result is one a channel (each
+// with that channel's words and channel_tag), that a stream's voice
+// activity events and single_utterance are each channel's, and that a
+// WAV or FLAC header's channel count is read rather than checked against
+// audio_channel_count.
 
 const v1SyncMaxSeconds = 60
 
@@ -96,8 +116,6 @@ func v1Config(c *speechv1pb.RecognitionConfig) (json.RawMessage, error) {
 		return nil, apierror.InvalidArgument("RecognitionConfig.language_code is required")
 	case len(c.GetAlternativeLanguageCodes()) > 0:
 		return nil, unimpl("alternative_language_codes")
-	case c.GetEnableSeparateRecognitionPerChannel():
-		return nil, unimpl("enable_separate_recognition_per_channel")
 	case c.GetTranscriptNormalization() != nil:
 		return nil, unimpl("transcript_normalization")
 	case len(c.GetAdaptation().GetPhraseSetReferences()) > 0:
@@ -120,6 +138,19 @@ func v1Config(c *speechv1pb.RecognitionConfig) (json.RawMessage, error) {
 		return nil, unimpl("the model " + m)
 	}
 	enc := c.GetEncoding()
+	n := c.GetAudioChannelCount()
+	switch enc {
+	case speechv1pb.RecognitionConfig_MULAW, speechv1pb.RecognitionConfig_AMR, speechv1pb.RecognitionConfig_AMR_WB,
+		speechv1pb.RecognitionConfig_SPEEX_WITH_HEADER_BYTE:
+		if n > 1 {
+			return nil, apierror.InvalidArgument("audio_channel_count %d is invalid for %s: the only valid value is 1", n, enc)
+		}
+	default:
+		if n < 0 || n > 8 {
+			return nil, apierror.InvalidArgument("audio_channel_count %d is invalid: valid values are 1-8", n)
+		}
+	}
+	perChannel := c.GetEnableSeparateRecognitionPerChannel() && n > 1
 	switch enc {
 	case speechv1pb.RecognitionConfig_ENCODING_UNSPECIFIED:
 		out["autoDecodingConfig"] = map[string]any{}
@@ -160,6 +191,9 @@ func v1Config(c *speechv1pb.RecognitionConfig) (json.RawMessage, error) {
 		return nil, apierror.Unimplemented("Not implemented here: %s audio has no local decoder in CloudBurrow, and it never calls Google", enc)
 	}
 	features := map[string]any{}
+	if perChannel {
+		features["multiChannelMode"] = "SEPARATE_RECOGNITION_PER_CHANNEL"
+	}
 	if c.GetEnableWordTimeOffsets() {
 		features["enableWordTimeOffsets"] = true
 	}
@@ -324,13 +358,27 @@ func v1Results(res speech.Result, cfg speechconfig.Config) []*speechv1pb.SpeechR
 	var out []*speechv1pb.SpeechRecognitionResult
 	for _, seg := range res.Segments {
 		out = append(out, &speechv1pb.SpeechRecognitionResult{Alternatives: []*speechv1pb.SpeechRecognitionAlternative{v1Alternative([]speech.Segment{seg}, cfg)},
-			ResultEndTime: durationpb.New(seg.End), LanguageCode: code})
+			ResultEndTime: durationpb.New(seg.End), LanguageCode: code, ChannelTag: int32(seg.Channel)})
 	}
-	if cfg.Diarization && len(res.Segments) > 0 {
-		// The speakers, in one last result of every word (speechdiarize.go).
-		last := &speechv1pb.SpeechRecognitionAlternative{Words: v1SpeakerWords(res.Segments, cfg)}
+	if !cfg.Diarization || len(res.Segments) == 0 {
+		return out
+	}
+	// The speakers, in one last result of every word (speechdiarize.go):
+	// per channel, one a channel, in channel order.
+	byChannel := map[int][]speech.Segment{}
+	var channels []int
+	for _, seg := range res.Segments {
+		if _, ok := byChannel[seg.Channel]; !ok {
+			channels = append(channels, seg.Channel)
+		}
+		byChannel[seg.Channel] = append(byChannel[seg.Channel], seg)
+	}
+	sort.Ints(channels)
+	for _, ch := range channels {
+		segs := byChannel[ch]
+		last := &speechv1pb.SpeechRecognitionAlternative{Words: v1SpeakerWords(segs, cfg)}
 		out = append(out, &speechv1pb.SpeechRecognitionResult{Alternatives: []*speechv1pb.SpeechRecognitionAlternative{last},
-			ResultEndTime: durationpb.New(res.Segments[len(res.Segments)-1].End), LanguageCode: code})
+			ResultEndTime: durationpb.New(segs[len(segs)-1].End), LanguageCode: code, ChannelTag: int32(ch)})
 	}
 	return out
 }
@@ -369,8 +417,23 @@ func (s *Server) v1Audio(ctx context.Context, a *speechv1pb.RecognitionAudio, li
 	return a.GetContent(), nil
 }
 
-// v1Transcribe decodes and transcribes audio of at most maxSeconds.
+// v1Transcribe decodes and transcribes audio of at most maxSeconds (a
+// channel's, per channel).
 func (s *Server) v1Transcribe(ctx context.Context, cfg speechconfig.Config, opt speech.Options, data []byte, maxSeconds int, tooLong string) (speech.Result, []float32, error) {
+	if cfg.PerChannel {
+		chans, err := speech.DecodeChannelsMax(cfg.Decoding, data, maxSeconds)
+		switch {
+		case errors.Is(err, speech.ErrTooLong):
+			return speech.Result{}, nil, apierror.InvalidArgument("%s", tooLong)
+		case err != nil:
+			return speech.Result{}, nil, decodeError(err)
+		}
+		if err := s.checkStreamLanguage(ctx, cfg); err != nil {
+			return speech.Result{}, nil, err
+		}
+		res, samples, _, err := transcribeEachChannel(ctx, cfg, opt, chans)
+		return res, samples, err
+	}
 	samples, err := speech.DecodeMax(cfg.Decoding, data, maxSeconds)
 	switch {
 	case errors.Is(err, speech.ErrTooLong):
@@ -482,9 +545,9 @@ func (v *speechV1Service) StreamingRecognize(stream speechv1pb.Speech_StreamingR
 		}
 		return req.GetAudioContent(), nil
 	}
-	// said are the stream's final segments so far, which diarization
-	// labels again at each final result (speechdiarize.go).
-	var said []speech.Segment
+	// said are the stream's final segments so far, a channel's per channel,
+	// which diarization labels again at each final result (speechdiarize.go).
+	said := map[int][]speech.Segment{}
 	err = runStream(stream.Context(), st, recv, func(ev streamEvent) error {
 		out := &speechv1pb.StreamingRecognizeResponse{}
 		switch ev.kind {
@@ -496,16 +559,16 @@ func (v *speechV1Service) StreamingRecognize(stream speechv1pb.Speech_StreamingR
 			out.SpeechEventType, out.SpeechEventTime = speechv1pb.StreamingRecognizeResponse_END_OF_SINGLE_UTTERANCE, durationpb.New(ev.offset)
 		case evResult:
 			r := &speechv1pb.StreamingRecognitionResult{IsFinal: ev.final, ResultEndTime: durationpb.New(ev.offset), LanguageCode: ev.language,
-				Alternatives: []*speechv1pb.SpeechRecognitionAlternative{v1Alternative(ev.segs, cfg)}}
+				Alternatives: []*speechv1pb.SpeechRecognitionAlternative{v1Alternative(ev.segs, cfg)}, ChannelTag: int32(ev.channel)}
 			if !ev.final {
 				r.Stability = streamInterimStability
 			}
 			if cfg.Diarization && ev.final {
-				said = append(said, ev.segs...)
-				if err := diarizeSegments(stream.Context(), ev.samples, said, cfg); err != nil {
+				said[ev.channel] = append(said[ev.channel], ev.segs...)
+				if err := diarizeSegments(stream.Context(), ev.samples, said[ev.channel], cfg); err != nil {
 					return err
 				}
-				r.Alternatives[0].Words = v1SpeakerWords(said, cfg)
+				r.Alternatives[0].Words = v1SpeakerWords(said[ev.channel], cfg)
 			}
 			out.Results = []*speechv1pb.StreamingRecognitionResult{r}
 			out.TotalBilledTime = durationpb.New(time.Duration(math.Ceil(ev.offset.Seconds())) * time.Second)
