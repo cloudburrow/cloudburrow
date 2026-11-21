@@ -144,14 +144,26 @@ func computeDeny(permission, resource string) error {
 // firewall patch's compute.networks.updatePolicy, natIP's
 // compute.addresses.use and an INTERNAL address's createInternal are the
 // thirteenth round's (cmd/cloudburrow/iamenforce13.go).
-// Compute keeps no resource-level policies on what is served, so the
-// project's and its ancestors' apply. Public images (debian-cloud,
+// VM instances, disks, snapshots and subnetworks keep their own allow
+// policies (#2112, internal/service/compute/iam.go), which apply beside
+// the project's and its ancestors'; nothing else served keeps one. Their
+// getIamPolicy and setIamPolicy are compute.<collection>.getIamPolicy and
+// setIamPolicy on the resource, and testIamPermissions answers what the
+// caller holds (ComputeIAMTest). Public images (debian-cloud,
 // ubuntu-os-cloud, rocky-linux-cloud) are readable by every caller, as
 // Google's are (the caller's wrapper skips them).
 var Compute = &Service{
 	Name: "compute.googleapis.com",
 	Deny: computeDeny,
+	Types: map[string]string{"instances": "compute.googleapis.com/Instance", "disks": "compute.googleapis.com/Disk",
+		"snapshots": "compute.googleapis.com/Snapshot", "subnetworks": "compute.googleapis.com/Subnetwork"},
+	PolicyCollections: []string{"instances", "disks", "snapshots", "subnetworks"},
 }
+
+// ComputeIAMTest is the resource a Compute testIamPermissions call names
+// (an instance's, disk's, snapshot's or subnetwork's), "" for any other
+// path.
+var ComputeIAMTest = regexp.MustCompile(`^/compute/v1/(projects/[^/]+/(?:zones/[^/]+/(?:instances|disks)|global/snapshots|regions/[^/]+/subnetworks)/[^/]+)/testIamPermissions$`)
 
 // ComputeJSON are Compute's served methods by path, under /compute/v1/:
 // the group each pattern captures is the resource checked, the project
@@ -200,6 +212,13 @@ var ComputeJSON = func() []JSONMethod {
 	}
 	coll(zone, "instances", "instances", true, instanceVerbs)
 	add("GET", `(`+p+zone+`/instances/[^/]+)/serialPort`, "compute.instances.getSerialPortOutput")
+	// The allow policies of the resources that keep one (#2112).
+	for scope, kind := range map[string]string{zone + "/instances": "instances", zone + "/disks": "disks",
+		global + "/snapshots": "snapshots", region + "/subnetworks": "subnetworks"} {
+		one := `(` + p + scope + `/[^/]+)`
+		add("GET", one+`/getIamPolicy`, "compute."+kind+".getIamPolicy")
+		add("POST", one+`/setIamPolicy`, "compute."+kind+".setIamPolicy")
+	}
 	// Operations: get, wait and delete on the operation, list on the
 	// project (aggregatedList is globalOperations.list).
 	for scope, kind := range map[string]string{global: "globalOperations", region: "regionOperations", zone: "zoneOperations"} {

@@ -34,6 +34,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/callfront"
 	"github.com/cloudburrow/cloudburrow/internal/debugpprof"
 	"github.com/cloudburrow/cloudburrow/internal/pubsubfront"
+	"github.com/cloudburrow/cloudburrow/internal/rediscmek"
 	"github.com/cloudburrow/cloudburrow/internal/redistlsfront"
 	"github.com/cloudburrow/cloudburrow/internal/storageserver"
 	"github.com/cloudburrow/cloudburrow/internal/supervisor"
@@ -94,6 +95,17 @@ func main() {
 		if err := redistlsfront.Run(ctx, os.Args[2:], os.Stdout, os.Stderr); err != nil {
 			if !errors.Is(err, redistlsfront.ErrUsage) {
 				fmt.Fprintln(os.Stderr, "cloudburrow-storage redis-tls-front:", err)
+			}
+			os.Exit(2)
+		}
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "memorystore-cmek" {
+		// A Memorystore for Redis server's persistence files, sealed with
+		// its customer-managed key (#2113).
+		if err := rediscmek.Run(ctx, os.Args[2:], os.Stdout, os.Stderr); err != nil {
+			if !errors.Is(err, rediscmek.ErrUsage) {
+				fmt.Fprintln(os.Stderr, "cloudburrow-storage memorystore-cmek:", err)
 			}
 			os.Exit(2)
 		}

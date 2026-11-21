@@ -119,7 +119,7 @@ func (q *sqlFront) unpackSource(ctx context.Context, instance string, qu *query,
 	if err != nil {
 		return nil, err
 	}
-	src := &source{}
+	src := &source{protos: in.src.protos}
 	kinds := make([]int, len(in.cols))
 	for i, c := range in.cols {
 		var t *btpb.Type

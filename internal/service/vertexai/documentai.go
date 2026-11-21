@@ -96,13 +96,17 @@ type docAIType struct {
 var docAITypes = map[string]docAIType{
 	"OCR_PROCESSOR":           {category: "OCR", version: "pretrained-ocr-v2.0-2023-06-02"},
 	"LAYOUT_PARSER_PROCESSOR": {category: "GENERAL", version: "pretrained-layout-parser-v1.0-2024-06-03"},
+	// The custom processors (#2106, documentaicustom.go) have no version
+	// until one is trained.
+	"CUSTOM_EXTRACTION_PROCESSOR":     {category: "CUSTOM"},
+	"CUSTOM_CLASSIFICATION_PROCESSOR": {category: "CUSTOM"},
+	"CUSTOM_SPLITTING_PROCESSOR":      {category: "CUSTOM"},
 }
 
 // docAIUnserved are Google's other processor types, which have no local
 // model.
 var docAIUnserved = map[string]bool{
-	"FORM_PARSER_PROCESSOR": true, "INVOICE_PROCESSOR": true, "EXPENSE_PROCESSOR": true, "CUSTOM_EXTRACTION_PROCESSOR": true,
-	"CUSTOM_CLASSIFICATION_PROCESSOR": true, "CUSTOM_SPLITTING_PROCESSOR": true, "SUMMARIZER_PROCESSOR": true,
+	"FORM_PARSER_PROCESSOR": true, "INVOICE_PROCESSOR": true, "EXPENSE_PROCESSOR": true, "SUMMARIZER_PROCESSOR": true,
 	"ID_PROOFING_PROCESSOR": true, "US_DRIVER_LICENSE_PROCESSOR": true, "US_PASSPORT_PROCESSOR": true,
 	"UTILITY_PROCESSOR": true, "BANK_STATEMENT_PROCESSOR": true, "PAYSTUB_PROCESSOR": true, "W2_PROCESSOR": true,
 	"FORM_W9_PROCESSOR": true, "LENDING_DOCUMENT_SPLIT_PROCESSOR": true, "PROCUREMENT_DOCUMENT_SPLIT_PROCESSOR": true,
@@ -126,6 +130,9 @@ type docAIStore struct {
 	// keys are the data keys of the processors with a customer-managed
 	// key (#1950), wrapped by it, kept in processorkeys.json beside file.
 	keys map[string]cmek.Sealed
+	// custom are the custom processors' datasets and trained versions
+	// (#2106), kept in custom.json beside file.
+	custom map[string]*customProcessor
 }
 
 // keysFile is where the processors' wrapped data keys are kept.
@@ -143,6 +150,7 @@ func (s *Server) SetDocumentAIState(file string) {
 	defer s.mu.Unlock()
 	s.docai = &docAIStore{file: file, processors: map[string]*documentaipb.Processor{}}
 	s.docai.keys = readSealed(s.docai.keysFile())
+	s.docai.loadCustom()
 	if b, err := os.ReadFile(file); err == nil {
 		var p documentaipb.ListProcessorsResponse
 		if protojson.Unmarshal(b, &p) == nil {
@@ -156,7 +164,7 @@ func (s *Server) SetDocumentAIState(file string) {
 // docAI returns the store, made in memory when none was set.
 func (s *Server) docAI() *docAIStore {
 	if s.docai == nil {
-		s.docai = &docAIStore{processors: map[string]*documentaipb.Processor{}, keys: map[string]cmek.Sealed{}}
+		s.docai = &docAIStore{processors: map[string]*documentaipb.Processor{}, keys: map[string]cmek.Sealed{}, custom: map[string]*customProcessor{}}
 	}
 	if s.ops == nil {
 		s.ops = lro.NewStore(nil)
@@ -306,7 +314,10 @@ func (d *documentAIService) CreateProcessor(ctx context.Context, req *documentai
 	_, _ = rand.Read(id)
 	name := req.GetParent() + "/processors/" + hex.EncodeToString(id)
 	p := &documentaipb.Processor{Name: name, Type: t, DisplayName: in.GetDisplayName(), State: documentaipb.Processor_ENABLED,
-		DefaultProcessorVersion: name + "/processorVersions/" + dt.version, CreateTime: timestamppb.Now()}
+		CreateTime: timestamppb.Now()}
+	if dt.version != "" {
+		p.DefaultProcessorVersion = name + "/processorVersions/" + dt.version
+	}
 	var sealed cmek.Sealed
 	if key := in.GetKmsKeyName(); key != "" {
 		var err error
@@ -356,7 +367,15 @@ func (s *Server) processor(name string) (*documentaipb.Processor, error) {
 	if !ok {
 		return nil, apierror.NotFound("Processor %s not found", pname)
 	}
-	if hasVersion {
+	if hasVersion && isCustomType(p.GetType()) {
+		s.mu.Lock()
+		v := s.docAI().customOf(pname).version(name)
+		s.mu.Unlock()
+		if v == nil || strings.Contains(version, "/") {
+			return nil, apierror.NotFound("Processor version %s not found", name)
+		}
+		p.DefaultProcessorVersion = name
+	} else if hasVersion {
 		id := resolveVersion(p.GetType(), version)
 		if id == "" {
 			return nil, apierror.NotFound("Processor version %s not found", name)
@@ -428,6 +447,10 @@ func (d *documentAIService) DeleteProcessor(_ context.Context, req *documentaipb
 	return d.processorOp(req.GetName(), func(st *docAIStore, p *documentaipb.Processor) error {
 		delete(st.processors, p.GetName())
 		delete(st.keys, p.GetName())
+		if st.custom[p.GetName()] != nil {
+			delete(st.custom, p.GetName())
+			st.saveCustom()
+		}
 		return nil
 	}, func(c *documentaipb.CommonOperationMetadata) any {
 		return &documentaipb.DeleteProcessorMetadata{CommonMetadata: c}
@@ -476,6 +499,11 @@ func (s *Server) processDocument(ctx context.Context, req *documentaipb.ProcessR
 	}
 	if err := s.docAIKeyUsable(ctx, p); err != nil {
 		return nil, err
+	}
+	if isCustomType(p.GetType()) {
+		if err := s.customReady(p); err != nil {
+			return nil, err
+		}
 	}
 	if req.GetFieldMask() != nil {
 		if err := checkDocumentMask(req.GetFieldMask()); err != nil {
@@ -545,6 +573,11 @@ func (s *Server) processDocument(ctx context.Context, req *documentaipb.ProcessR
 	doc, err := readDocument(ctx, p, content, mimeType, opts, limit, req.GetImagelessMode())
 	if err != nil {
 		return nil, err
+	}
+	if isCustomType(p.GetType()) {
+		if err := s.applyCustom(ctx, p, doc); err != nil {
+			return nil, err
+		}
 	}
 	maskDocument(doc, req.GetFieldMask())
 	return doc, nil

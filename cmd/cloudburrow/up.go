@@ -8,6 +8,7 @@ import (
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/authplatform"
 	"github.com/cloudburrow/cloudburrow/internal/egress"
+	"github.com/cloudburrow/cloudburrow/internal/faultgate"
 	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/iamcheck"
@@ -226,6 +227,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// converts BigQuery ML's imported TENSORFLOW models (#1775).
 		comps.SetTFConverter(fmt.Sprintf("%s.%s.svc.cluster.local:%d", ClusterHostService, cfg.Cluster.Namespace,
 			cfg.Endpoints.TFConvert))
+	}
+	if sparkRunnerEnabled(cfg) && cfg.Endpoints.Spark > 0 {
+		// The Spark procedure runner, through cloudburrow-host, runs
+		// BigQuery's stored procedures for Apache Spark (#2104).
+		comps.SetSparkRunner(fmt.Sprintf("%s.%s.svc.cluster.local:%d", ClusterHostService, cfg.Cluster.Namespace,
+			cfg.Endpoints.Spark))
 	}
 	if serviceEnabled(cfg, config.ServiceBigQuery) && localAIServed(cfg) {
 		if err := pinLocalAIPort(&cfg); err != nil {
@@ -491,6 +498,14 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// Explorer.
 	appHubSvc.useLogging(loggingSvc)
 	loggingSvc.register(coord)
+	// Cloud Trace (#2118), in process: the Cloud Trace API v1 and v2 and
+	// OTLP trace ingestion on one port,
+	// after the Cloud Logging whose _Trace bucket takes its spans (#2117).
+	traceSvc := newTraceService(cfg)
+	if traceSvc != nil {
+		traceSvc.logging = loggingSvc
+	}
+	traceSvc.register(coord)
 	// Cloud Monitoring (#1939), in process: log-based metrics' values come
 	// from this instance's Cloud Logging, request metrics from its counters.
 	monitoringSvc := newMonitoringService(cfg)
@@ -636,6 +651,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		parameterManager: parameterManagerSvc,
 		dataform:         dataformSvc,
 		appHub:           appHubSvc,
+		trace:            traceSvc,
 		gke:              gkeSvc,
 		monitoring:       monitoringSvc,
 		compute:          computeSvc,
@@ -751,6 +767,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		dataformSvc.interpose = append(dataformSvc.interpose, grpctransport.LogInterceptor(logger, "dataform"), faults.Interceptor("dataform"))
 		dataformSvc.requests = requestEvents(recorder, requestMetrics, "dataform")
 	}
+	if traceSvc != nil {
+		traceSvc.calls = callEvents(recorder, requestMetrics, "trace")
+		traceSvc.interpose = append(traceSvc.interpose, grpctransport.LogInterceptor(logger, "trace"), faults.Interceptor("trace"))
+		traceSvc.requests = requestEvents(recorder, requestMetrics, "trace")
+	}
 	if dataTransfer != nil {
 		dataTransfer.tracing = tracing
 		dataTransfer.calls = callEvents(recorder, requestMetrics, "datatransfer")
@@ -852,6 +873,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// injection see a denied call as the client does. Off by default: the
 	// interceptors pass every call through until --iam-enforcement=on.
 	iamEnforcer := newIAMEnforcer(cfg, creds, func() *resourcemanager.Registry { return projectRegistry })
+	// The Docker registry's token auth, checked by the same evaluator (#2111).
+	useRegistryAuth(iamEnforcer, creds)
+	defer runadapter.UseRegistryAuth(nil)
 	useIAMEnforcement(iamEnforcer, secretsSvc, kmsSvc, tasksSvc, analyticsHub, schedulerSvc, workflowsSvc,
 		iamEnforced{logging: loggingSvc, monitoring: monitoringSvc, memorystore: memorystoreAdminSvc, run: runSvc})
 	iamEnforced7{privateCA: privateCASvc, gke: gkeSvc, compute: computeSvc, run: runSvc}.use(iamEnforcer)
@@ -1011,9 +1035,37 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	rmSrv.ServerOptions(tracing.ServerOptions()...)
 	rmSrv.Interpose(grpctransport.LogInterceptor(logger, "resourcemanager"))
 	rmSrv.Interpose(faults.Interceptor("resourcemanager"))
+	// Fault rules (#2113) reach the servers in the cluster, whose fronts
+	// ask the host for them on this port (internal/faultgate), so their
+	// services' rules are accepted.
+	rmSrv.HandleJSON(func(r *http.Request) bool { return faultgate.IsPath(r.URL.Path) }, faultgate.Handler(faults))
+	for _, s := range cfg.EnabledServices() {
+		switch s {
+		case config.ServicePubSub, config.ServiceBigtable, config.ServiceSpanner, config.ServiceFirestore,
+			config.ServiceDatastore, config.ServiceStorage:
+			faults.InterposeRemote(string(s))
+		}
+	}
 	// Policy Troubleshooter and Policy Analyzer (#1879) on the same port,
 	// over the enforcement's evaluator.
-	rmSrv.HandleJSON(isIAMAnalysisPath, iamAnalysis{e: iamEnforcer})
+	// Cloud Asset's analysis (#2112) writes analyzeIamPolicyLongrunning's
+	// results to the instance's Cloud Storage and BigQuery.
+	assetOut := &assetOutputs{
+		bigquery:  func() *netfwd.Forwarder { return forwarderFor(forwarders, "bigquery") },
+		forwarded: func(name string) string { return forwardedAddr(forwarders, name) },
+		storage: func() string {
+			if !serviceEnabled(cfg, config.ServiceStorage) {
+				return ""
+			}
+			return storageSourceFetcher{cfg: cfg, addr: func() string {
+				if f := forwarderFor(forwarders, "storage"); f != nil {
+					return f.HostAddr()
+				}
+				return ""
+			}}.base()
+		},
+	}
+	rmSrv.HandleJSON(isIAMAnalysisPath, iamAnalysis{e: iamEnforcer, reg: func() *resourcemanager.Registry { return projects }, out: assetOut})
 	// The in-cluster servers' checks (Cloud Storage, Pub/Sub's front,
 	// internal/iamcheck), through cloudburrow-host, so every decision is
 	// this evaluator's.
@@ -1216,6 +1268,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if localAISrv != nil {
 		localAISrv.SetDocumentAIState(filepath.Join(cfg.StateDir, "documentai", "processors.json"))
 		localAISrv.SetSpeechState(filepath.Join(cfg.StateDir, "speech", "recognizers.json"))
+		// Vertex AI's cached contents (#2107), until they expire.
+		localAISrv.SetCachedContentState(filepath.Join(cfg.StateDir, "vertexai", "cachedcontents.json"))
 		// Their customer-managed keys (#1950), through Cloud KMS.
 		localAISrv.UseCMEK(cmekKeys(kmsSvc, iamEnforcer))
 		// IAM enforcement (#1879) of Vertex AI, Document AI, Speech-to-Text
@@ -1247,6 +1301,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}})
 	}
 
+	// multimodalembedding@001's AVI, FLV, MPEG and WMV video (#1651).
+	if localAISrv != nil {
+		localAISrv.SetVideoDecoder(newVideoDecoder(stdout))
+	}
+
 	// One manager of the local AI models for the console's Local models
 	// page and /admin/local-models (#1396), so a download started on one is
 	// the download the other reports.
@@ -1256,7 +1315,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// The console reads through the objects above rather than owning any of
 	// them, so it cannot answer from a store of its own.
 	consoleSrv := buildConsole(consoleDeps{
-		cfg: cfg, iam: iamEnforcer, coord: coord, cluster: clusterComp, localAI: localAISrv, localModels: localModels,
+		cfg: cfg, iam: iamEnforcer, assetOut: assetOut, coord: coord, cluster: clusterComp, localAI: localAISrv, localModels: localModels,
 		hfModels: hfModels, garden: garden,
 		projects: projects,
 		tasks:    tasksSvc, secrets: secretsSvc, forwarders: forwarders,
@@ -1282,6 +1341,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		parameterManager: parameterManagerSvc,
 		dataform:         dataformSvc,
 		appHub:           appHubSvc,
+		trace:            traceSvc,
 		gke:              gkeSvc,
 		monitoring:       monitoringSvc,
 		compute:          computeSvc,
@@ -1348,6 +1408,25 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if tfConverter != nil {
 		coord.Register(tfConverter)
 	}
+	// The Spark procedure runner (#2104), for BigQuery's front.
+	sparkRunner := newSparkRunner(cfg, stdout, boundAddrs, func(email string) (string, error) {
+		// An invoker's custom service account (#2104): one that exists
+		// and is enabled, as IAM Credentials mints for.
+		if projectRegistry != nil {
+			a, ok := projectRegistry.ServiceAccountByName(email)
+			switch {
+			case !ok:
+				return "", fmt.Errorf("Service account %s does not exist", email)
+			case a.Disabled:
+				return "", fmt.Errorf("Service account %s is disabled", email)
+			}
+			email = a.Email
+		}
+		return creds.MintAccessTokenFor(email, metadata.TokenTTL), nil
+	}, cmekKeys(kmsSvc, iamEnforcer).Usable)
+	if sparkRunner != nil {
+		coord.Register(sparkRunner)
+	}
 
 	// hostComp publishes the CLI-hosted services to the cluster (#575); nil
 	// without Cloud Run or BigQuery.
@@ -1384,6 +1463,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 		if a := appHubSvc.Addr(); a != "" {
 			live["apphub"] = a
+		}
+		if a := traceSvc.Addr(); a != "" {
+			live["trace"] = a
 		}
 		if a := gkeSvc.Addr(); a != "" {
 			live["gke"] = a
@@ -1431,6 +1513,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if a := tfConverter.Addr(); a != "" {
 			live["tfconvert"] = a
 		}
+		if a := sparkRunner.Addr(); a != "" {
+			live["spark"] = a
+		}
 		if localAISrv != nil && localAISrv.Addr() != "" {
 			live["localai"] = localAISrv.Addr()
 		}
@@ -1452,15 +1537,15 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// verify the URLs those accounts sign (#1787).
 	runEnabled := serviceEnabled(cfg, config.ServiceRun)
 	pubsubKMS := serviceEnabled(cfg, config.ServicePubSub) && serviceEnabled(cfg, config.ServiceKMS)
-	if runEnabled || serviceEnabled(cfg, config.ServiceBigQuery) || serviceEnabled(cfg, config.ServiceStorage) || pubsubKMS || firestoreKMS(cfg) || spannerKMS(cfg) || computeEnabled(cfg) {
+	if runEnabled || serviceEnabled(cfg, config.ServiceBigQuery) || serviceEnabled(cfg, config.ServiceStorage) || pubsubKMS || firestoreKMS(cfg) || spannerKMS(cfg) || memorystoreCMEK(cfg) || computeEnabled(cfg) {
 		// The Cloud SQL Admin API and its connector are published for Cloud
 		// SQL volumes (#1346): the Auth Proxy a revision runs reaches both.
 		published := map[string]bool{"run": true, "tasks": true, "secretmanager": true, "kms": true,
 			"scheduler": true, "logging": true, "resourcemanager": true, "serviceusage": true, "apikeys": true, "metadata": true,
 			"storagebatchoperations": true, "storageinsights": true, "storagetransfer": true,
-			"sqladmin": true, "cloudsql-connector": true, "onnx": true, "tfconvert": true, "localai": true, "workflows": true, "parametermanager": true, "dataform": true, "apphub": true}
+			"sqladmin": true, "cloudsql-connector": true, "onnx": true, "tfconvert": true, "spark": true, "localai": true, "workflows": true, "parametermanager": true, "dataform": true, "apphub": true, "trace": true}
 		if !runEnabled {
-			published = map[string]bool{"resourcemanager": true, "onnx": true, "tfconvert": true, "localai": true}
+			published = map[string]bool{"resourcemanager": true, "onnx": true, "tfconvert": true, "spark": true, "localai": true}
 			// The storage server reads IAM service accounts' certificates
 			// from the metadata server (#1787).
 			if serviceEnabled(cfg, config.ServiceStorage) {
@@ -1477,6 +1562,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			// Cloud Storage (#1938) and Spanner (#1950) encrypt with
 			// customer-managed keys.
 			if storageKMS(cfg) || spannerKMS(cfg) {
+				published["kms"] = true
+			}
+			// A CMEK Memorystore server's pod unwraps its data key (#2113).
+			if memorystoreCMEK(cfg) {
 				published["kms"] = true
 			}
 		}
@@ -1499,6 +1588,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			// A revision's and a task's output in Cloud Logging, as Google
 			// writes it (#1298), while Logging is served too.
 			newRunLogFeeder(cfg.KubeconfigPath(), cfg.ClusterName()+"-control-plane", loggingSvc).register(coord)
+			// Each request to a revision a span in Cloud Trace, and a
+			// traceparent for the container (#2118), while Cloud Trace is
+			// served.
+			coord.Register(&runTracing{cfg: cfg, host: hostComp, out: stdout, trace: traceSvc})
 		}
 	}
 	// Every revision and job task is given the in-cluster addresses (#576):
@@ -1513,6 +1606,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			return ""
 		}
 		computeSvc.metadataHost = func() string { return hostComp.InCluster("metadata") }
+	}
+	if memorystoreAdminSvc != nil && kmsSvc != nil {
+		// A CMEK Memorystore server's pod unwraps its data key with Cloud
+		// KMS, through cloudburrow-host (#2113).
+		memorystoreAdminSvc.kmsInCluster = func() string { return hostComp.InCluster("kms") }
 	}
 	if runSvc != nil {
 		// A build step reaches the metadata server as its build's account (#1854).

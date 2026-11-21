@@ -68,6 +68,8 @@ var DeleteConfirmRules = map[string]DeleteConfirmRule{
 	"tags": unverified,
 	// UNVERIFIED: Google's Analytics Hub docs describe no dialog for deleting a data exchange (docs re-read 2026-11-20: https://docs.cloud.google.com/bigquery/docs/analytics-hub-manage-exchanges)
 	"bigquery-sharing": unverified,
+	// More actions > Delete, then enter delete to confirm (docs read 2026-11-21).
+	"bigquery-clean-rooms": {Style: DeleteConfirmWord, Source: "https://docs.cloud.google.com/bigquery/docs/data-clean-rooms", Verified: true},
 	// UNVERIFIED: "Select the checkbox for the roles ... click Delete." No dialog described (docs re-read 2026-11-19).
 	"iam-roles": unverified,
 	// "Confirm that you want to delete the group by clicking Confirm in the confirmation dialog."
@@ -75,6 +77,13 @@ var DeleteConfirmRules = map[string]DeleteConfirmRule{
 	// UNVERIFIED: no console steps for deleting an SSO profile or an assignment (https://knowledge.workspace.google.com/admin/apps/setting-up-sso re-read 2026-11-20)
 	"iam-sso-profiles":    unverified,
 	"iam-sso-assignments": unverified,
+	// UNVERIFIED (re-read 2026-11-21): the Admin console's Delete user,
+	// Delete device, a policy's and an allowlisted domain's removal
+	// describe no typed confirmation (https://knowledge.workspace.google.com/admin).
+	"iam-users":               unverified,
+	"iam-devices":             unverified,
+	"iam-identity-policies":   unverified,
+	"iam-allowlisted-domains": unverified,
 	// UNVERIFIED: "Select the service account ... click Delete." No dialog described (docs re-read 2026-11-19).
 	"iam-service-accounts": unverified,
 	// a label is removed with its delete icon, then Save: nothing typed.

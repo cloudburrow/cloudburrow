@@ -10,6 +10,7 @@ import (
 	"cloud.google.com/go/aiplatform/apiv1/aiplatformpb"
 	betapb "cloud.google.com/go/aiplatform/apiv1beta1/aiplatformpb"
 	"cloud.google.com/go/documentai/apiv1/documentaipb"
+	documentaibetapb "cloud.google.com/go/documentai/apiv1beta3/documentaipb"
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
 	speechv1pb "cloud.google.com/go/speech/apiv1/speechpb"
 	"cloud.google.com/go/speech/apiv2/speechpb"
@@ -68,13 +69,22 @@ func (s *Server) RegisterGRPC(srv *grpc.Server) {
 	betapb.RegisterPredictionServiceServer(srv, &betaPrediction{s: s})
 	// Document AI's processors (documentai.go, #1799).
 	documentaipb.RegisterDocumentProcessorServiceServer(srv, &documentAIService{s: s})
+	// Its custom processors' datasets, v1beta3's DocumentService
+	// (documentaidataset.go, #2106).
+	documentaibetapb.RegisterDocumentServiceServer(srv, &documentService{s: s})
 	// Speech-to-Text's recognizers (speechrecognizers.go, #1799).
 	speechpb.RegisterSpeechServer(srv, &speechService{s: s})
 	// Speech-to-Text v1's Recognize, LongRunningRecognize and
 	// StreamingRecognize (speechv1.go, #1930).
 	speechv1pb.RegisterSpeechServer(srv, &speechV1Service{s: s})
+	// v1's Adaptation: phrase sets and custom classes (speechv1adaptation.go,
+	// #2106).
+	speechv1pb.RegisterAdaptationServer(srv, &speechV1AdaptationService{s: s})
 	// countTokens and computeTokens (#1937, tokens.go).
 	s.registerTokens(srv)
+	// Context caching (cachedcontent.go, #2107).
+	aiplatformpb.RegisterGenAiCacheServiceServer(srv, &cacheService{s: s})
+	betapb.RegisterGenAiCacheServiceServer(srv, &betaCacheService{s: s})
 }
 
 // grpcError renders err as a status: an *apierror.Error keeps its code, a

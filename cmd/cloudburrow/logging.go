@@ -355,6 +355,10 @@ func (s *loggingService) Start(ctx context.Context) error {
 	// entries.list's output-only apphub (#2096), from App Hub's
 	// registrations.
 	jsonAPI = logging.WithAppHub(jsonAPI, s.appHub)
+	// ... and its filters match apphub.* (#2096).
+	if s.appHub != nil {
+		logging.SetAppHub(s.appHub)
+	}
 	if s.wrapJSON != nil {
 		jsonAPI = s.wrapJSON(jsonAPI)
 	}
@@ -388,7 +392,13 @@ func (s *loggingService) Start(ctx context.Context) error {
 		jsonAPI = rest.Observe(jsonAPI, s.requests)
 	}
 	s.server.ServeHTTP(jsonAPI)
-	if err := s.server.Register(func(g *grpc.Server) { register(g) }); err != nil {
+	// On gRPC the Observability API (#2117), observability.googleapis.com
+	// v1, with its Locations and Operations mixins, beside Logging's.
+	if err := s.server.Register(func(g *grpc.Server) {
+		s.api.Register(g)
+		s.admin.RegisterGRPC(g)
+		s.admin.RegisterViewIAM(g)
+	}); err != nil {
 		return err
 	}
 	return s.server.Start(ctx)

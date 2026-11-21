@@ -103,6 +103,8 @@ var gcloudVerified = []gcloudEndpoint{
 	// v2alpha1 iam:troubleshoot, served on the Resource Manager port.
 	// TestGcloudPolicyTroubleshoot drives a denied and a granted check.
 	{resourceManagerService, "policytroubleshooter", "/", true, false},
+	// Cloud Asset Inventory's IAM policy analysis (#2112).
+	{resourceManagerService, "cloudasset", "/", true, false},
 	// The Organization Policy API v2 (#1890): gcloud org-policies calls
 	// orgpolicy.googleapis.com v2, served on the Resource Manager port.
 	// TestGcloudOrgPolicies drives set-policy, describe (--effective),

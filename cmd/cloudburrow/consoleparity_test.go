@@ -68,6 +68,12 @@ type parityRow struct {
 	Issue int
 }
 
+// cacheOffers is Studio's Context caching card (#2121).
+const cacheOffers = "Studio: Context caching creates a cache from the prompt (the conversation, this turn and the System instructions) with a name and TTL, " +
+	"lists the caches with their tokens and expiry, updates a cache's TTL, deletes it, and Use cache sends it as the requests' cachedContent " +
+	"(the usage line shows the cached tokens); Model settings' Number of responses (candidateCount) shows each response, and Thinking " +
+	"(Thinking budget Off, Auto or Manual, Include thoughts) sends thinkingConfig and shows the thoughts apart (#2121)"
+
 var parityRows = []parityRow{
 	// VPC network (#1936): the Compute Engine API's networking.
 	{Resource: "VPC networks", Service: "compute",
@@ -81,6 +87,13 @@ var parityRows = []parityRow{
 			"compute.subnetworks.patch", "compute.subnetworks.delete", "compute.subnetworks.expandIpCidrRange", "compute.subnetworks.setPrivateIpGoogleAccess"},
 		Provider: "vpc-networks", Offers: "a network's Subnets tab: each subnet's region, primary and secondary IPv4 ranges, gateway and Private Google Access; Add subnet (name, description, region, IPv4 range, secondary IPv4 ranges, Private Google Access); on each subnet's row and page Expand IP range, Edit secondary IPv4 ranges, Private Google Access and Delete subnet, each refusal (an overlapping or reserved range, a smaller range, a subnet in use) the API's own (#1936)",
 		Tests: []string{"TestConsoleVPCNetworksAndSubnets", "TestVPCNetworkThroughTheBrowser"}},
+	{Resource: "Compute Engine allow policies", Service: "compute",
+		Methods: []string{"compute.subnetworks.getIamPolicy", "compute.subnetworks.setIamPolicy", "compute.subnetworks.testIamPermissions",
+			"compute.instances.getIamPolicy", "compute.instances.setIamPolicy", "compute.instances.testIamPermissions",
+			"compute.disks.getIamPolicy", "compute.disks.setIamPolicy", "compute.disks.testIamPermissions",
+			"compute.snapshots.getIamPolicy", "compute.snapshots.setIamPolicy", "compute.snapshots.testIamPermissions"},
+		Provider: "compute-instances", Offers: "Google's Permissions panel (#2125): on VM instances, check rows and click Permissions; on Disks and Snapshots, check a row and the info panel's Permissions tab; each lists the principals and roles, with Add principal (a role, and a condition) on every checked row and Remove principal; an instance's, a disk's and a subnet's page has a Permissions tab; each read and change is the resource's own getIamPolicy and setIamPolicy with the etag the page read, and testIamPermissions",
+		Tests: []string{"TestConsoleComputePermissions", "TestComputePermissionsThroughTheBrowser"}},
 	{Resource: "VPC firewall rules", Service: "compute",
 		Methods: []string{"compute.firewalls.insert", "compute.firewalls.get", "compute.firewalls.list", "compute.firewalls.patch",
 			"compute.firewalls.update", "compute.firewalls.delete"},
@@ -259,11 +272,11 @@ var parityRows = []parityRow{
 		Tests: []string{"TestEventarcAdvancedConsoleForms", "TestEventarcAdvancedEditAndPublish", "TestEventarcAdvancedPagesThroughTheBrowser", "TestEventarcAdvancedDeliveryThroughTheBrowser"}},
 	{Resource: "Eventarc pipelines", Service: "eventarc",
 		Methods:  []string{"Eventarc/CreatePipeline", "Eventarc/GetPipeline", "Eventarc/ListPipelines", "Eventarc/UpdatePipeline", "Eventarc/DeletePipeline"},
-		Provider: "eventarc-pipelines", Offers: "Eventarc's Pipelines page (/eventarc/pipelines, #1947): every pipeline (region, destination, input format, created), Create pipeline (destination HTTP endpoint with network attachment and Google OIDC account, Pub/Sub topic, message bus or Workflows; input and output payload formats JSON, Avro or Protobuf with their schemas; a CEL transformation; retry policy; log severity; Cloud KMS key; labels), the pipeline's page, Edit, as Google's Pipeline details pane has it (every setting but its name and region, prefilled, ending in Save: UpdatePipeline, #2006) and Delete",
-		Tests: []string{"TestEventarcAdvancedConsoleForms", "TestEventarcAdvancedEditAndPublish", "TestEventarcAdvancedPagesThroughTheBrowser", "TestEventarcAdvancedDeliveryThroughTheBrowser"}},
+		Provider: "eventarc-pipelines", Offers: "Eventarc's Pipelines page (/eventarc/pipelines, #1947): every pipeline (region, destination, input format, created), Create pipeline as Google's one page (#2098): Pipeline details (display name, log severity, retry policy, Cloud KMS key, labels), Enrollments (Add an enrollment: name, the project's bus, CEL expression, each made with the pipeline), Event mediation (Apply a transformation: inbound format JSON, Avro or Protobuf with its schema, a CEL transformation) and Destination (Destination type HTTP endpoint with network attachment, Eventarc Advanced bus, Workflows, Pub/Sub topic, Cloud Run service (via HTTP) picked by name with a relative URL path, Cloud Run job (via HTTP) picked by name, run through jobs.run; outbound format; message binding; Enable authentication, OAuth token or OIDC token, with scope or audience and the service account), the pipeline's page, Edit, as Google's Pipeline details pane has it (every setting but its name and region, prefilled, ending in Save: UpdatePipeline, #2006) and Delete",
+		Tests: []string{"TestEventarcAdvancedConsoleForms", "TestEventarcAdvancedEditAndPublish", "TestEventarcCreatePipelineIsGooglesPage", "TestEventarcAdvancedPagesThroughTheBrowser", "TestEventarcAdvancedDeliveryThroughTheBrowser", "TestEventarcCreatePipelineWithEnrollmentsAndCloudRun"}},
 	{Resource: "Eventarc enrollments", Service: "eventarc",
 		Methods:  []string{"Eventarc/CreateEnrollment", "Eventarc/GetEnrollment", "Eventarc/ListEnrollments", "Eventarc/UpdateEnrollment", "Eventarc/DeleteEnrollment"},
-		Provider: "eventarc-enrollments", Offers: "Eventarc's Enrollments page (/eventarc/enrollments, #1947): every enrollment (region, message bus, CEL match, destination pipeline, created), Create enrollment (name, region, the project's buses and pipelines, CEL expression, labels), its page, Edit (CEL expression, pipeline, labels) and Delete",
+		Provider: "eventarc-enrollments", Offers: "Eventarc's Enrollments page (/eventarc/enrollments, #1947): every enrollment (region, message bus, CEL match, destination pipeline, created), Create enrollment (name, region, the project's buses and pipelines, CEL expression, labels), and Create pipeline's Add an enrollment (#2098), its page, Edit (CEL expression, pipeline, labels) and Delete",
 		Tests: []string{"TestEventarcAdvancedConsoleForms", "TestEventarcAdvancedPagesThroughTheBrowser"}},
 	{Resource: "Eventarc Google API sources", Service: "eventarc",
 		Methods:  []string{"Eventarc/CreateGoogleApiSource", "Eventarc/GetGoogleApiSource", "Eventarc/ListGoogleApiSources", "Eventarc/UpdateGoogleApiSource", "Eventarc/DeleteGoogleApiSource"},
@@ -411,6 +424,17 @@ var parityRows = []parityRow{
 	{Resource: "App Hub extended metadata schemas", Service: "apphub",
 		Methods:  []string{"AppHub/ListExtendedMetadataSchemas", "AppHub/GetExtendedMetadataSchema"},
 		Excluded: "the schemas describe the extended metadata that agents and MCP servers carry; no resource this instance discovers is one, so there is no extended metadata for a page to show"},
+	// BigQuery sharing's data clean rooms and query templates (#2101)
+	{Resource: "Data clean rooms", Service: "analyticshub",
+		Methods:  []string{"AnalyticsHubService/SubscribeDataExchange"},
+		Provider: "bigquery-clean-rooms", Offers: "BigQuery's Data clean rooms page (/bigquery-clean-rooms): the project's clean rooms; Create clean room (ID, name, location, primary contact, description, Subscriber Email Logging); a clean room's Details, Listings, Templates and Subscriptions tabs; Add data (dataset, table or view, columns, view name, an aggregation threshold, differential privacy or list overlap analysis rule, query result egress), which makes the view and lists it; Subscribe (destination project, subscription, linked dataset); Edit clean room details; Delete listing; Delete",
+		Tests: []string{"TestConsoleCleanRoomTemplates", "TestBigQueryCleanRoomsThroughThePage"}},
+	{Resource: "Data clean room query templates", Service: "analyticshub",
+		Methods: []string{"AnalyticsHubService/CreateQueryTemplate", "AnalyticsHubService/GetQueryTemplate", "AnalyticsHubService/ListQueryTemplates",
+			"AnalyticsHubService/UpdateQueryTemplate", "AnalyticsHubService/DeleteQueryTemplate", "AnalyticsHubService/SubmitQueryTemplate",
+			"AnalyticsHubService/ApproveQueryTemplate"},
+		Provider: "bigquery-clean-rooms", Offers: "A clean room's Templates tab (display name, Approval Status, description, primary contact, last modified); Create Template (ID, display name, description, primary contact, query); Edit template and Delete template of a draft; Submit for review; Approve (template location), which makes the table-valued function in the approver's dataset and lists it",
+		Tests: []string{"TestConsoleCleanRoomTemplates", "TestBigQueryCleanRoomsThroughThePage"}},
 	{Resource: "Parameter Manager parameters", Service: "parametermanager",
 		Methods: []string{"ParameterManager/CreateParameter", "ParameterManager/GetParameter", "ParameterManager/ListParameters",
 			"ParameterManager/UpdateParameter", "ParameterManager/DeleteParameter"},
@@ -529,6 +553,14 @@ var parityRows = []parityRow{
 			"CertificateAuthorityService/ListCertificates", "CertificateAuthorityService/RevokeCertificate", "CertificateAuthorityService/UpdateCertificate"},
 		Provider: "privateca", Offers: "Request certificate from a CSR, and from a config (common name or a subject RDN sequence, DNS names, custom SANs as OID=text otherNames and a subject key ID, #1961, public key, extended key usage), on a pool's page, with the validity, the subject mode (DEFAULT, RDN_SEQUENCE, REFLECTED_SPIFFE), a requested not-before time and an optional issuing CA; a certificate's page with its subject, SANs, serial, subject mode, validity, revocation, PEM and chain; Revoke (with a reason) and Edit labels",
 		Tests: []string{"TestConsolePrivateCAPoolsCAsAndCertificates", "TestConsolePrivateCACustomSANsAndSubjectKeyID", "TestPrivateCAThroughThePage"}},
+	// Cloud Trace (#2118)
+	{Resource: "Cloud Trace traces", Service: "trace",
+		Methods:  []string{"TraceService/ListTraces", "TraceService/GetTrace"},
+		Provider: "trace-explorer", Offers: "Trace explorer page (/traces/explorer): the trace scope (every project it names is searched), the time range and Trace ID; Span filters (service name, span name, span status, minimum duration, span kind) and the Filter bar in the trace filter language; the latency heatmap (a cell selects its spans) and the Chart view's Span duration (percentile) and Span rate; the Spans table (start time, span name, service, duration, status, kind, trace ID, project), sortable, and the Grouped table (service and span name, Spans, Errors, Average, P50, P95, P99); Trace details with the timeline of latency bars (a dot where a log entry or event is attached) or the Graph, and Find in Trace and the selected span's Attributes, Logs & Events (the trace's log entries from Cloud Logging, and its annotations) and Metadata & Links; the Logs Explorer's View trace details on an entry with a trace",
+		Tests: []string{"TestConsoleTraceExplorer", "TestConsoleTraceHeatmapAndGrouped", "TestTraceExplorerThroughThePage"}},
+	{Resource: "Cloud Trace writes", Service: "trace",
+		Methods:  []string{"TraceService/BatchWriteSpans", "TraceService/CreateSpan", "TraceService/PatchTraces"},
+		Excluded: "spans are written by the application's own client (a client library, or OpenTelemetry's exporter through the Telemetry API); Google's console has no page that writes one, and Trace explorer shows what was written"},
 	// Cloud Monitoring (#1939)
 	{Resource: "Cloud Monitoring metric descriptors", Service: "monitoring",
 		Methods:  []string{"MetricService/ListMetricDescriptors", "MetricService/CreateMetricDescriptor", "MetricService/DeleteMetricDescriptor"},
@@ -928,8 +960,9 @@ var parityRows = []parityRow{
 	{Resource: "Quotas & System Limits", Service: "cloudquotas",
 		Methods: []string{"CloudQuotas/ListQuotaInfos", "CloudQuotas/GetQuotaInfo", "CloudQuotas/ListQuotaPreferences", "CloudQuotas/GetQuotaPreference",
 			"CloudQuotas/CreateQuotaPreference", "CloudQuotas/UpdateQuotaPreference"},
-		Provider: "serviceusage", Offers: "IAM & Admin > Quotas & System Limits and each API's Quotas & System Limits tab (#2030): Type, Service, Name and metric, Dimensions, Value (with the default when a preference changed it), Adjustable and Enforced locally, with Edit quotas (New value, Region, Request description; Submit request), granted at once and refused by Google's safety checks",
-		Tests: []string{"TestCloudQuotasLifecycle", "TestCloudQuotasPreferenceIsEnforced", "TestQuotasThroughThePage"}},
+		Provider: "serviceusage", Offers: "IAM & Admin > Quotas & System Limits and each API's Quotas & System Limits tab (#2030): Type, Service, Name and metric, Dimensions, Value (with the default when a preference changed it), Adjustable and Enforced locally, with Edit quotas (New value, Region, Request description; Submit request), granted at once and refused by Google's safety checks; with the organization or a folder chosen in the toolbar, that container's quotas and preferences (#2102)",
+		Tests: []string{"TestCloudQuotasLifecycle", "TestCloudQuotasPreferenceIsEnforced", "TestQuotasThroughThePage",
+			"TestCloudQuotasFolderAndOrganizationParents", "TestCloudQuotasOrganizationPreferenceIsEnforced", "TestQuotasAtTheOrganizationThroughThePage", "TestConsoleQuotasAtTheOrganization"}},
 	{Resource: "Billing accounts", Service: "billing",
 		Methods: []string{"CloudBilling/ListBillingAccounts", "CloudBilling/GetBillingAccount", "CloudBilling/CreateBillingAccount",
 			"CloudBilling/UpdateBillingAccount", "CloudBilling/GetIamPolicy", "CloudBilling/SetIamPolicy"},
@@ -961,6 +994,42 @@ var parityRows = []parityRow{
 	{Resource: "Verified site owners", Service: "siteverification",
 		Methods:  []string{"siteVerification.webResource.get", "siteVerification.webResource.update", "siteVerification.webResource.patch"},
 		Excluded: "reading one verified site and changing its owners, which Google's Cloud console does not offer (Search Console does): the Domain verification page lists each site with its owners"},
+	// The Observability API (#2020, #2108, #2117), on the Logging port.
+	{Resource: "Observability scopes", Service: "observability",
+		Methods:  []string{"observability.projects.locations.scopes.get", "observability.projects.locations.scopes.patch"},
+		Provider: "logging-log-scopes", Offers: "Logging Settings' Log Scopes tab: Set as default sets the scope's logScope (#2020), and the Trace Scopes tab's Set as default its traceScope (#2108); the Logs Explorer opens on the default log scope",
+		Tests: []string{"TestConsoleTraceScopes", "TestLoggingLogScopesTabAndExplorer"}},
+	{Resource: "Observability trace scopes", Service: "observability",
+		Methods: []string{"observability.projects.locations.traceScopes.create", "observability.projects.locations.traceScopes.get", "observability.projects.locations.traceScopes.list",
+			"observability.projects.locations.traceScopes.patch", "observability.projects.locations.traceScopes.delete"},
+		Provider: "logging-trace-scopes", Offers: "Logging Settings' Trace Scopes tab (#2108): Name, Description, Type and Resources, the default marked; Create trace scope (Add projects, name, description), Edit scope, Delete scope and Set as default; _Default greyed out for Edit and Delete",
+		Tests: []string{"TestConsoleTraceScopes", "TestLoggingRequiredBucketCustomIndexesAndTraceScopesThroughTheBrowser"}},
+	{Resource: "Observability settings", Service: "observability",
+		Methods:  []string{"observability.projects.locations.getSettings", "observability.projects.locations.updateSettings"},
+		Provider: "observability-settings", Offers: "Logging Settings' Observability Settings tab (#2117): the project's default storage location, its default KMS key and the service account; Edit settings sets the default storage location (a select of the supported locations) and that location's default key",
+		Tests: []string{"TestConsoleObservabilitySettingsAndBuckets", "TestObservabilitySettings2117"}},
+	{Resource: "Observability buckets, datasets, views and links", Service: "observability",
+		Methods: []string{"observability.projects.locations.buckets.create", "observability.projects.locations.buckets.get", "observability.projects.locations.buckets.list",
+			"observability.projects.locations.buckets.patch", "observability.projects.locations.buckets.reprovision",
+			"observability.projects.locations.buckets.datasets.get", "observability.projects.locations.buckets.datasets.list",
+			"observability.projects.locations.buckets.datasets.views.get", "observability.projects.locations.buckets.datasets.views.list",
+			"observability.projects.locations.buckets.datasets.links.create", "observability.projects.locations.buckets.datasets.links.get",
+			"observability.projects.locations.buckets.datasets.links.list", "observability.projects.locations.buckets.datasets.links.patch",
+			"observability.projects.locations.buckets.datasets.links.delete"},
+		Provider: "observability-buckets", Offers: "Logging Settings' Observability Buckets tab (#2117): the project's buckets with Location, Display name, Description and KMS key; Create bucket (ID, _Trace by default; location; display name; description; KMS key); a bucket's page with its Spans dataset, _AllSpans view and linked BigQuery dataset; Edit bucket (display name, description, key, and the linked dataset's name and description, which creates, updates or removes the link); Reprovision, confirmed",
+		Tests: []string{"TestConsoleObservabilitySettingsAndBuckets", "TestObservabilityBuckets2117", "TestObservabilityLinks2117"}},
+	{Resource: "Observability folder and organization settings", Service: "observability",
+		Methods: []string{"observability.folders.locations.getSettings", "observability.folders.locations.updateSettings",
+			"observability.organizations.locations.getSettings", "observability.organizations.locations.updateSettings"},
+		Excluded: "a folder's or organization's Observability settings, which Google documents through gcloud and the API only (set-defaults-for-observability-buckets has no console steps); they set the defaults of the projects under them, whose own settings the Observability Settings tab shows"},
+	{Resource: "Observability operations and locations", Service: "observability",
+		Methods: []string{"observability.projects.locations.operations.get", "observability.projects.locations.operations.list", "observability.projects.locations.operations.delete",
+			"observability.projects.locations.operations.cancel", "observability.folders.locations.operations.get", "observability.folders.locations.operations.list",
+			"observability.folders.locations.operations.delete", "observability.folders.locations.operations.cancel", "observability.organizations.locations.operations.get",
+			"observability.organizations.locations.operations.list", "observability.organizations.locations.operations.delete", "observability.organizations.locations.operations.cancel",
+			"observability.projects.locations.get", "observability.projects.locations.list", "observability.folders.locations.get", "observability.folders.locations.list",
+			"observability.organizations.locations.get", "observability.organizations.locations.list"},
+		Excluded: "every Observability operation is done when its call returns, so the page shows the change made or refused, and there is nothing to poll or cancel; the locations are the Location select of Create bucket and Edit settings"},
 	{Resource: "API key lookups and operations", Service: "apikeys",
 		Methods:  []string{"apikeys.keys.lookupKey", "apikeys.operations.get"},
 		Excluded: "finding the project that owns a key string, which Google's console does not offer, and the poll of an operation that is already done when the call returns"},
@@ -1149,6 +1218,33 @@ var parityRows = []parityRow{
 			"cloudidentity.inboundSsoAssignments.patch", "cloudidentity.inboundSsoAssignments.delete"},
 		Provider: "iam-sso-assignments", Offers: "IAM & Admin > SSO profile assignments (#1959), the Admin console's Manage SSO profile assignments: groups' assignments in priority order and organizational units', Assign SSO profile (a group with its priority, or an org unit; a SAML or OIDC profile, None or the legacy profile; whether to redirect to the IdP), an assignment's page, Edit assignment (profile, redirect, a group's priority, the others shifting), Delete",
 		Tests: []string{"TestConsoleIAMSSO1959", "TestNoDetailShowsABlankProperty"}},
+	{Resource: "Cloud Identity devices", Service: "cloudidentity",
+		Methods: []string{"cloudidentity.devices.create", "cloudidentity.devices.get", "cloudidentity.devices.list", "cloudidentity.devices.wipe",
+			"cloudidentity.devices.cancelWipe", "cloudidentity.devices.delete", "cloudidentity.devices.deviceUsers.get", "cloudidentity.devices.deviceUsers.list",
+			"cloudidentity.devices.deviceUsers.approve", "cloudidentity.devices.deviceUsers.block", "cloudidentity.devices.deviceUsers.wipe",
+			"cloudidentity.devices.deviceUsers.cancelWipe", "cloudidentity.devices.deviceUsers.delete", "cloudidentity.devices.deviceUsers.clientStates.get",
+			"cloudidentity.devices.deviceUsers.clientStates.list"},
+		Provider: "iam-devices", Offers: "IAM & Admin > Devices (#2103), the Admin console's Devices > Mobile & endpoints: the devices with type, serial number, model, ownership, users and last sync, Add company-owned device (serial number, type, asset tag), a device's page with its details and users, Wipe device, Cancel wipe, Delete device; a user row's Approve, Block, Wipe account, Cancel wipe and Remove account; a device user's page with its client states",
+		Tests: []string{"TestConsoleCloudIdentity2103", "TestNoDetailShowsABlankProperty"}},
+	{Resource: "Cloud Identity user invitations", Service: "cloudidentity",
+		Methods:  []string{"cloudidentity.customers.userinvitations.list", "cloudidentity.customers.userinvitations.send", "cloudidentity.customers.userinvitations.cancel"},
+		Provider: "iam-user-invitations", Offers: "IAM & Admin > User invitations (#2103): the invitations with their state, emails sent and update time, Invite user (Send invitation), a row's Resend invitation and Cancel invitation",
+		Tests: []string{"TestConsoleCloudIdentity2103"}},
+	{Resource: "Cloud Identity policies", Service: "cloudidentity",
+		Methods:  []string{"cloudidentity.policies.create", "cloudidentity.policies.get", "cloudidentity.policies.list", "cloudidentity.policies.patch", "cloudidentity.policies.delete"},
+		Provider: "iam-identity-policies", Offers: "IAM & Admin > Policies (#2103): the Policy API's policies with their setting, org unit, group, sort order and type, Create policy, a policy's page, Edit value, Delete",
+		Tests: []string{"TestConsoleCloudIdentity2103", "TestNoDetailShowsABlankProperty"}},
+	{Resource: "Cloud Identity allowlisted domains", Service: "cloudidentity",
+		Methods:  []string{"cloudidentity.allowlistedDomains.create", "cloudidentity.allowlistedDomains.list", "cloudidentity.allowlistedDomains.delete"},
+		Provider: "iam-allowlisted-domains", Offers: "IAM & Admin > Allowlisted domains (#2103): the domains, Add domain, Delete",
+		Tests: []string{"TestConsoleCloudIdentity2103"}},
+	{Resource: "Cloud Identity device-side and lookup calls", Service: "cloudidentity",
+		Methods: []string{"cloudidentity.devices.deviceUsers.lookup", "cloudidentity.devices.deviceUsers.clientStates.patch",
+			"cloudidentity.customers.userinvitations.get", "cloudidentity.customers.userinvitations.isInvitableUser", "cloudidentity.allowlistedDomains.get"},
+		Excluded: "lookup is the end user's own call, made by an app on the device with the user's credentials, and clientStates.patch a BeyondCorp partner's, neither an admin's: Google's Admin console has no surface for them, and the device's page shows the client states they wrote; an invitation's and an allowlisted domain's get return no more than their list rows show, and isInvitableUser is what the User invitations list already answers (its rows are the invitable accounts the customer has been told of)"},
+	{Resource: "Directory API users", Service: "cloudidentity",
+		Provider: "iam-users", Offers: "IAM & Admin > Users (#2103), the Admin console's Directory > Users: the users with name, department, title, org unit path and status, Add new user (name, primary email, password, department, job title, cost center, city, org unit), a user's page with its details, groups (dynamic ones included) and JSON, Edit user, Delete",
+		Tests: []string{"TestConsoleCloudIdentity2103", "TestNoDetailShowsABlankProperty"}},
 	{Resource: "Cloud Identity membership checks", Service: "cloudidentity",
 		Methods:  []string{"cloudidentity.groups.memberships.get", "cloudidentity.groups.memberships.checkTransitiveMembership"},
 		Excluded: "one membership's read, which the group's Members list shows, and a yes/no transitive check, which a group's Member of section answers for a nested group and IAM applies to every policy (#1812)"},
@@ -1404,10 +1500,10 @@ var parityRows = []parityRow{
 		Tests: []string{"TestConsoleLogNamePicker", "TestLogNamesRoute", "TestLogsExplorerLogNamePicker"}},
 	{Resource: "Cloud Logging entries", Service: "logging",
 		Methods: []string{"LoggingServiceV2/ListLogEntries"},
-		Screen:  "/logs", Offers: "Logs Explorer as Google lays it out (#1863): Refine scope, the time-range picker, the query pane (Search all fields, the Resource, Log name and Severity menus, the query editor in the Logging query language and Run query), the Timeline (Collapse timeline, Zoom in, Zoom out, Backward, Forward, and each bar's pop-up with Scroll to time and Zoom to time), the Fields pane (Pinned, System metadata and Frequent fields, the entries' json_payload fields, #2031; System metadata's Workload / Service from the entries' labels, #2032) with approximate value counts and fields pinned to it, Query results whose entries expand to their LogEntry fields (Expand nested fields, Copy link, Copy as JSON, Show matching entries, Hide matching entries, Pin to Fields pane) and the Actions menu (Create metric, Create sink and Create log alert with the query as their filter, Download); Save in the query pane and the Query library (Recent queries, the user's through recentQueries.list (#2031), Saved queries with Edit and Delete, Suggested queries, each with Run and Stream) over Cloud Logging's saved queries (#1863 round 3); entries under source `logging/<log>`, filters in the URL; scoped to a folder or organization, its own entries (#1395); or Through a log view: a bucket and view of a project, folder, organization or billing account, read with the view's filter and the bucket's retention applied, the note naming both (#1410)",
+		Screen:  "/logs", Offers: "Logs Explorer as Google lays it out (#1863): Refine scope, the time-range picker, the query pane (Search all fields, the Resource, Log name and Severity menus, the query editor in the Logging query language and Run query), the Timeline (Collapse timeline, Zoom in, Zoom out, Backward, Forward, and each bar's pop-up with Scroll to time and Zoom to time), the Fields pane (Pinned, System metadata and Frequent fields, the entries' json_payload fields, #2031; System metadata's Workload / Service from the entries' labels, #2032, then Application from their App Hub metadata, #2096) with approximate value counts and fields pinned to it, Query results whose entries expand to their LogEntry fields (Expand nested fields, Copy link, Copy as JSON, Show matching entries, Hide matching entries, Pin to Fields pane) and the Actions menu (Create metric, Create sink and Create log alert with the query as their filter, Download); Save in the query pane and the Query library (Recent queries, the user's through recentQueries.list (#2031), Saved queries with Edit and Delete, Suggested queries, each with Run and Stream) over Cloud Logging's saved queries (#1863 round 3); entries under source `logging/<log>`, filters in the URL; scoped to a folder or organization, its own entries (#1395); or Through a log view: a bucket and view of a project, folder, organization or billing account, read with the view's filter and the bucket's retention applied, the note naming both (#1410)",
 		Tests: []string{"TestLoggingWriteAndRead", "TestFiltersNarrowTheView", "TestGcloudLoggingFolderAndOrganizationSinks", "TestParentScopeShowsThatParentsOwnEntries",
 			"TestConsoleLogExplorerThroughView", "TestConsoleLogsExplorerThroughView", "TestLogsExplorerThroughViewAndParentPicker",
-			"TestCompileQuery", "TestQueryMatchesEntryLabels", "TestLoggingConsoleRound6", "TestLoggingExplorerAsGoogleLaysItOut", "TestLoggingExplorerRound3", "TestConsoleSavedQueryLibrary"}},
+			"TestCompileQuery", "TestQueryMatchesEntryLabels", "TestLoggingConsoleRound6", "TestLoggingExplorerAsGoogleLaysItOut", "TestLoggingExplorerRound3", "TestConsoleSavedQueryLibrary", "TestLoggingAppHubDimensions", "TestCompileQueryAppHub"}},
 	{Resource: "Cloud Logging tail", Service: "logging",
 		Methods: []string{"LoggingServiceV2/TailLogEntries"},
 		Screen:  "/logs", Offers: "Logs Explorer's Stream logs / Stop stream (#1215, #1863): a query's results, then each entry as it is written while streaming, those written while stopped shown when streaming starts again; through a log view, the view's own TailLogEntries (#1410)",
@@ -2289,15 +2385,19 @@ var parityRows = []parityRow{
 			"the chat sends every earlier turn as contents with the System instructions, Function calling's declarations and mode (AUTO, ANY, NONE, VALIDATED) as tools and toolConfig, " +
 			"shows a returned functionCall and sends the user's functionResponse turn, sends Insert Media's uploaded image as inlineData or a gs:// object as fileData, " +
 			"applies Model settings (Temperature, Output token limit, Add stop sequence; Advanced: Top-K, Top-P, Seed, frequency and presence penalty; Output format), " +
-			"shows the response's usageMetadata, and Get code writes the request as Python or curl (#1962)",
+			"shows the response's usageMetadata, and Get code writes the request as Python or curl (#1962); " +
+			"Advanced's Log probabilities switch sends responseLogprobs and its Top candidates (1 to 20, enabled only with the switch) logprobs, " +
+			"and the response shows avgLogprobs and each chosen token with its log probability, probability and the step's top candidates (#2122)",
 		Tests: []string{"TestPlaygroundStreamSwitchPicksTheMethod", "TestPlaygroundRelaysTheConversation", "TestAgentStudioChatToolsImagesTokensAndCode",
 			"TestPlaygroundSupportedOptionsAreHonoured", "TestStreamGenerateContentThroughThePredictionClient", "TestGRPCGenerateContentMatchesTheJSONRoute",
 			"TestGenerateContentMultiTurnChatThroughTheOfficialSDK", "TestGenerateContentFunctionCallingRoundTripThroughTheOfficialSDK",
-			"TestGenerateContentImagePartThroughTheOfficialSDK"}},
+			"TestGenerateContentImagePartThroughTheOfficialSDK", "TestAgentStudioLogProbabilities",
+			"TestGenerateContentLogprobsTopCandidatesThroughTheOfficialSDK"}},
 	{Resource: "Vertex AI PredictionService: StreamGenerateContent", Service: "vertexai",
 		Methods: []string{"PredictionService/StreamGenerateContent"},
-		Screen:  "/agent-platform/studio", Offers: "Playground: Stream on (the default) sends streamGenerateContent, which StreamGenerateContent serves from the same code, and shows each chunk as it arrives (#1257)",
-		Tests: []string{"TestPlaygroundGeneratesThroughTheRealAPIPath", "TestPlaygroundStreamSwitchPicksTheMethod",
+		Screen:  "/agent-platform/studio", Offers: "Playground: Stream on (the default) sends streamGenerateContent, which StreamGenerateContent serves from the same code, and shows each chunk as it arrives (#1257); " +
+			"with Log probabilities on, the chunks' steps are gathered into one table (#2122)",
+		Tests: []string{"TestPlaygroundGeneratesThroughTheRealAPIPath", "TestPlaygroundStreamSwitchPicksTheMethod", "TestAgentStudioLogProbabilities",
 			"TestStreamGenerateContentThroughThePredictionClient", "TestGRPCStreamGenerateContentEmitsOneMessagePerChunk"}},
 	// Streaming and direct predict (#1285) carry the same requests in another
 	// framing, served by the same code.
@@ -2344,6 +2444,19 @@ var parityRows = []parityRow{
 		Screen:  "/agent-platform/studio", Offers: "Studio: the \"<count> tokens\" indicator is countTokens of the conversation, System instructions, declarations and prompt as it is typed; " +
 			"clicking it opens the prompt tokenizer, computeTokens' tokens (Token ID to text) and IDs (Token ID) of the prompt (#1962)",
 		Tests: []string{"TestPlaygroundRelaysTokenCounts", "TestAgentStudioChatToolsImagesTokensAndCode", "TestCountTokensAndComputeTokensThroughTheOfficialSDK"}},
+	// Context caching (#2107), on Studio's Context caching card (#2121):
+	// the screen relays v1beta1's cachedContents routes, which run v1's
+	// handlers.
+	{Resource: "Vertex AI GenAiCacheService: cached contents", Service: "vertexai",
+		Methods: []string{"GenAiCacheService/CreateCachedContent", "GenAiCacheService/GetCachedContent", "GenAiCacheService/ListCachedContents",
+			"GenAiCacheService/UpdateCachedContent", "GenAiCacheService/DeleteCachedContent"},
+		Screen: "/agent-platform/studio", Offers: cacheOffers,
+		Tests: []string{"TestPlaygroundRelaysContextCaching", "TestAgentStudioResponsesThinkingAndContextCaching", "TestCachedContentsThroughTheOfficialSDK"}},
+	{Resource: "Vertex AI GenAiCacheService v1beta1: cached contents", Service: "vertexaiv1beta1",
+		Methods: []string{"GenAiCacheService/CreateCachedContent", "GenAiCacheService/GetCachedContent", "GenAiCacheService/ListCachedContents",
+			"GenAiCacheService/UpdateCachedContent", "GenAiCacheService/DeleteCachedContent"},
+		Screen: "/agent-platform/studio", Offers: cacheOffers,
+		Tests: []string{"TestPlaygroundRelaysContextCaching", "TestAgentStudioResponsesThinkingAndContextCaching", "TestCachedContentsThroughTheOfficialSDK"}},
 	// v1beta1 serves v1's methods by converting to them (#1937): the console
 	// reaches the same handlers through the v1 rows above.
 	{Resource: "Vertex AI PredictionService v1beta1: v1's methods", Service: "vertexaiv1beta1",
@@ -2422,18 +2535,37 @@ var parityRows = []parityRow{
 		Methods:  []string{"DocumentProcessorService/BatchProcessDocuments"},
 		Provider: "documentai", Offers: "A processor's Batch process (#1930): a gs:// source (a folder, or one document) and a gs:// " +
 			"destination sent to BatchProcessDocuments, with the processor version to use and an optional pages per shard (#1953), " +
-			"waited on, and each document's status and the folder its Document (or its shards) was written to shown",
-		Tests: []string{"TestConsoleDocumentAIProcessors", "TestDocumentAIBatchProcessThroughThePage"}},
+			"waited on, and each document's status and the folder its Document (or its shards) was written to shown; each path " +
+			"chosen with Browse, the shared Cloud Storage picker (Google's Select folder or object, #2097)",
+		Tests: []string{"TestConsoleDocumentAIProcessors", "TestConsoleDocumentAISpeechStorageBrowse", "TestDocumentAIBatchProcessThroughThePage",
+			"TestStoragePickerThroughDocumentAIAndSpeech"}},
 	{Resource: "Document AI: evaluations", Service: "vertexai",
 		Methods:  []string{"DocumentProcessorService/ListEvaluations", "DocumentProcessorService/GetEvaluation"},
 		Provider: "documentai", Offers: "A processor's Evaluate & test tab (#1953): ListEvaluations of the default version, which " +
 			"no served type has, and why (evaluation measures a custom processor's entities against a labeled dataset)",
 		Tests: []string{"TestConsoleDocumentAIProcessors", "TestDocumentAIProcessorVersionsAndEvaluationsThroughThePage"}},
 	{Resource: "Document AI: training and evaluation runs", Service: "vertexai",
-		Methods: []string{"DocumentProcessorService/TrainProcessorVersion", "DocumentProcessorService/EvaluateProcessorVersion"},
-		Excluded: "TrainProcessorVersion and EvaluateProcessorVersion train and score versions of custom extractors, classifiers " +
-			"and splitters on a labeled dataset, none of which is served; for the served types they are only ever refused, and " +
-			"Google's console offers neither for them"},
+		Methods:  []string{"DocumentProcessorService/TrainProcessorVersion", "DocumentProcessorService/EvaluateProcessorVersion"},
+		Provider: "documentai", Offers: "A custom processor's Build tab (#2124): Create new version (a name, an optional base version " +
+			"to uptrain) sent to TrainProcessorVersion and answered with the version, its model and its scores; Evaluate & test lists " +
+			"every version's evaluations and Run new evaluation sends EvaluateProcessorVersion (the test split, or gs:// documents) and " +
+			"opens the evaluation's page: precision, recall and F1 for all labels and each label, at the optimal or a chosen " +
+			"confidence threshold, and every threshold's scores; Deploy & use deploys, undeploys, deletes and sets the default",
+		Tests: []string{"TestConsoleDocumentAICustomProcessors", "TestDocumentAICustomExtractorBuildTrainEvaluateThroughThePage"}},
+	// The custom processors' datasets (#2106), in the Get started and
+	// Build tabs and the labeling page (#2124).
+	{Resource: "Document AI v1beta3: datasets", Service: "documentaiv1beta3",
+		Methods: []string{"DocumentService/UpdateDataset", "DocumentService/ImportDocuments", "DocumentService/GetDocument",
+			"DocumentService/ListDocuments", "DocumentService/BatchDeleteDocuments", "DocumentService/GetDatasetSchema",
+			"DocumentService/UpdateDatasetSchema"},
+		Provider: "documentai", Offers: "A custom processor's Get started tab (#2124): the schema's fields (Create new field with its " +
+			"data type and occurrence, Delete, Edit document prompt: UpdateDatasetSchema); Build: Configure dataset (a Cloud Storage " +
+			"folder or unmanaged: UpdateDataset), Import documents (a gs:// folder or file, a data split or auto-split, a document type: " +
+			"ImportDocuments), the documents with their split and labeling state (ListDocuments), Filter documents, Assign to training " +
+			"or test, and Delete (BatchDeleteDocuments); a document's labeling page (GetDocument) draws its pages with its labels boxed, " +
+			"and a box drawn over a page labels the words in it; Import documents' source chosen with the Cloud Storage picker (#2097)",
+		Tests: []string{"TestConsoleDocumentAICustomProcessors", "TestDocumentAICustomExtractorBuildTrainEvaluateThroughThePage",
+			"TestStoragePickerThroughDocumentAIAndSpeech"}},
 	{Resource: "Speech-to-Text: recognizers", Service: "vertexai",
 		Methods: []string{"Speech/CreateRecognizer", "Speech/GetRecognizer", "Speech/ListRecognizers", "Speech/UpdateRecognizer",
 			"Speech/DeleteRecognizer", "Speech/UndeleteRecognizer", "Speech/Recognize"},
@@ -2460,10 +2592,11 @@ var parityRows = []parityRow{
 		Provider: "speech-transcriptions", Offers: "Transcriptions' New transcription with a Cloud storage audio source (#1930): " +
 			"a gs:// audio file and an optional gs:// output prefix, then the Transcription options (recognizer, Spoken language, " +
 			"Model), sent to BatchRecognize; its transcript written to the chosen workspace beside the metadata naming the file " +
-			"(#2084), and Transcription details playing the file's own object; with an output prefix, the result object's gs:// URI",
+			"(#2084), and Transcription details playing the file's own object; with an output prefix, the result object's gs:// URI; " +
+			"the file, the output folder and New workspace's bucket chosen with the Cloud Storage picker (#2097)",
 		Tests: []string{"TestConsoleSpeechAdaptation", "TestConsoleSpeechNewTranscription", "TestConsoleSpeechWorkspaces",
 			"TestSpeechBatchTranscriptionThroughThePage", "TestSpeechNewTranscriptionIsGooglesThroughThePage",
-			"TestSpeechWorkspaceAndPlaybackThroughThePage"}},
+			"TestSpeechWorkspaceAndPlaybackThroughThePage", "TestStoragePickerThroughDocumentAIAndSpeech"}},
 	{Resource: "Speech-to-Text: custom classes and phrase sets", Service: "vertexai",
 		Methods: []string{"Speech/CreateCustomClass", "Speech/GetCustomClass", "Speech/ListCustomClasses", "Speech/UpdateCustomClass",
 			"Speech/DeleteCustomClass", "Speech/UndeleteCustomClass", "Speech/CreatePhraseSet", "Speech/GetPhraseSet",
@@ -2481,6 +2614,12 @@ var parityRows = []parityRow{
 		Methods: []string{"Speech/Recognize", "Speech/LongRunningRecognize", "Speech/StreamingRecognize"},
 		Excluded: "v1's API for existing clients (#1930): the same local recognition the console's Transcriptions offer through " +
 			"v2 (Recognize and BatchRecognize), as Google's console offers it only through v2's recognizers"},
+	{Resource: "Speech-to-Text v1 Adaptation: phrase sets and custom classes", Service: "speechv1",
+		Methods: []string{"Adaptation/CreatePhraseSet", "Adaptation/GetPhraseSet", "Adaptation/ListPhraseSet", "Adaptation/UpdatePhraseSet",
+			"Adaptation/DeletePhraseSet", "Adaptation/CreateCustomClass", "Adaptation/GetCustomClass", "Adaptation/ListCustomClasses",
+			"Adaptation/UpdateCustomClass", "Adaptation/DeleteCustomClass"},
+		Excluded: "v1's adaptation API for existing clients (#2106): the console's Custom classes and Phrase sets pages manage " +
+			"v2's resources, as Google's console offers model adaptation only through v2"},
 	{Resource: "Starting the instance",
 		Commands: []string{"up"},
 		Excluded: "starts the process that serves the console, so the console cannot exist before it"},

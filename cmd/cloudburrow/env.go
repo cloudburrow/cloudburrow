@@ -619,6 +619,19 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 			envVar{cliEndpointVar("dataform"), addr(cfg.Endpoints.Dataform),
 				"Dataform v1, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint"})
 	}
+	// Cloud Trace (#2118): the Cloud Trace API v1 and v2 for the Go client
+	// and gcloud, and the Telemetry API's OTLP trace ingestion on the same
+	// port, for OpenTelemetry's OTLP exporters (OTLP/gRPC at the root,
+	// OTLP/HTTP at /v1/traces).
+	if traceEnabled(cfg) && cfg.Endpoints.Trace != 0 {
+		tr := addr(cfg.Endpoints.Trace)
+		vars = append(vars,
+			envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_CLOUDTRACE", "http://" + tr + "/", "read by gcloud; gcloud's Cloud Trace commands"},
+			envVar{cliEndpointVar("trace"), tr,
+				"Cloud Trace API v1 and v2, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint"},
+			envVar{"CLOUDBURROW_TELEMETRY_ENDPOINT", "http://" + tr,
+				"the Telemetry API's OTLP trace ingestion (telemetry.googleapis.com); set OTEL_EXPORTER_OTLP_ENDPOINT to it, with OTEL_EXPORTER_OTLP_INSECURE=true for gRPC"})
+	}
 
 	// The Kubernetes Engine API (#1913): gcloud container clusters and
 	// node-pools, and Terraform's google_container_* through
@@ -868,12 +881,14 @@ func withLivePorts(cfg config.Config, live map[string]string) config.Config {
 		"parametermanager":       &e.ParameterManager,
 		"dataform":               &e.Dataform,
 		"apphub":                 &e.AppHub,
+		"trace":                  &e.Trace,
 		// The local AI endpoint, which serves Vertex AI's Model Registry
 		// and Endpoints (#1940) to gcloud-setup and terraform, and Document
 		// AI (#1953), which terraform points document_ai_custom_endpoint at.
 		"localai":   &e.LocalAI,
 		"onnx":      &e.ONNX,
 		"tfconvert": &e.TFConvert,
+		"spark":     &e.Spark,
 		// The ingress gateway, which kind publishes where `up` configured
 		// it: without this, `env --name x` for an instance started with
 		// --port-base exported the default ingress port (#863).

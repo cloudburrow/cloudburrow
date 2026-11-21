@@ -434,8 +434,14 @@ func (f front) ddlWithOptions(w http.ResponseWriter, r *http.Request, q queryOpt
 	}
 	if d.iceberg() { // #1427, iceberg.go
 		if msg := f.icebergColumnsOf(r, q, d); msg != "" {
-			writeError(w, http.StatusNotImplemented, "notImplemented", msg)
+			writeError(w, http.StatusBadRequest, "invalidQuery", msg)
 			return
+		}
+		if d.connection == "DEFAULT" { // #2104, the default connection made and granted
+			if code, msg := f.ensureIcebergDefault(r, ds, d.storageURI()); code != 0 {
+				writeError(w, code, map[int]string{400: "invalid", 403: "accessDenied", 404: "notFound", 500: "internalError"}[code], msg)
+				return
+			}
 		}
 	}
 	expiration, set, status, body := f.expirationMillis(r, q, d.expiration)

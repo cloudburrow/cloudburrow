@@ -40,6 +40,9 @@ type Handler struct {
 	// repository holds nothing: a manifest, blob or tag list is read from
 	// the first upstream that has it, and pushes are refused.
 	Virtual func(Repo) (upstreams []Repo, ok bool)
+	// Auth, when set, is the registry's token auth (#2111, auth.go);
+	// without it no credential is asked for or checked.
+	Auth *Auth
 }
 
 // virtual is a virtual repository's upstreams; ok is false for any other.
@@ -135,6 +138,7 @@ var (
 	uploadPath   = regexp.MustCompile(`^/v2/(.+)/blobs/uploads/([^/]*)$`)
 	blobPath     = regexp.MustCompile(`^/v2/(.+)/blobs/([^/]+)$`)
 	tagsPath     = regexp.MustCompile(`^/v2/(.+)/tags/list$`)
+	referrerPath = regexp.MustCompile(`^/v2/(.+)/referrers/([^/]+)$`)
 )
 
 func (h *Handler) fail(w http.ResponseWriter, status int, code, msg string) {
@@ -184,13 +188,14 @@ func (h *Handler) failErr(w http.ResponseWriter, err error) {
 // Run's REST API shares the /v2/ prefix on the same port, under
 // /v2/projects/{project}/locations/, and is never one of these.
 func IsRegistryPath(p string) bool {
-	if p == "/v2" || p == "/v2/" || p == "/v2/_catalog" {
+	if p == "/v2" || p == "/v2/" || p == "/v2/_catalog" || p == TokenPath {
 		return true
 	}
 	if parts := strings.SplitN(p, "/", 6); len(parts) >= 5 && parts[2] == "projects" && parts[4] == "locations" {
 		return false
 	}
-	return manifestPath.MatchString(p) || uploadPath.MatchString(p) || blobPath.MatchString(p) || tagsPath.MatchString(p)
+	return manifestPath.MatchString(p) || uploadPath.MatchString(p) || blobPath.MatchString(p) || tagsPath.MatchString(p) ||
+		referrerPath.MatchString(p)
 }
 
 // location is the request's location: its host's, or containerd's ns
@@ -218,11 +223,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Docker-Distribution-API-Version", "registry/2.0")
 	p := r.URL.Path
 	if p == "/v2" || p == "/v2/" {
-		// No authentication is required: CloudBurrow authenticates
-		// nothing, and a client that sends the credential helper's token
-		// is answered all the same.
+		// With Auth, a client sending no credentials is asked for a
+		// token, as Google's registry asks, so docker login and the
+		// credential helpers send theirs (#2111).
+		if !h.ping(w, r) {
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, "{}")
+		return
+	}
+	if p == TokenPath {
+		h.token(w, r)
 		return
 	}
 	if p == "/v2/_catalog" {
@@ -230,23 +242,54 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if m := tagsPath.FindStringSubmatch(p); m != nil {
-		h.withRepo(w, r, m[1], func(repo Repo, image string) { h.tags(w, r, repo, image, m[1]) })
+		h.withRepo(w, r, m[1], func(repo Repo, image string) {
+			if h.authorize(w, r, repo, m[1], PermissionDownload) {
+				h.tags(w, r, repo, image, m[1])
+			}
+		})
+		return
+	}
+	if m := referrerPath.FindStringSubmatch(p); m != nil {
+		h.withRepo(w, r, m[1], func(repo Repo, image string) {
+			if h.authorize(w, r, repo, m[1], PermissionDownload) {
+				h.referrers(w, r, repo, image, m[2])
+			}
+		})
 		return
 	}
 	if m := manifestPath.FindStringSubmatch(p); m != nil {
-		h.withRepo(w, r, m[1], func(repo Repo, image string) { h.manifest(w, r, repo, image, m[1], m[2]) })
+		h.withRepo(w, r, m[1], func(repo Repo, image string) {
+			perm := pushPermission(r)
+			if r.Method == http.MethodDelete {
+				perm = PermissionDeleteTag
+				if ValidDigest(m[2]) {
+					perm = PermissionDeleteVer
+				}
+			}
+			if h.authorize(w, r, repo, m[1], perm) {
+				h.manifest(w, r, repo, image, m[1], m[2])
+			}
+		})
 		return
 	}
 	if m := uploadPath.FindStringSubmatch(p); m != nil {
 		h.withRepo(w, r, m[1], func(repo Repo, image string) {
-			if !h.readOnly(w, repo) {
+			if h.authorize(w, r, repo, m[1], PermissionUpload) && !h.readOnly(w, repo) {
 				h.upload(w, r, repo, m[1], m[2])
 			}
 		})
 		return
 	}
 	if m := blobPath.FindStringSubmatch(p); m != nil {
-		h.withRepo(w, r, m[1], func(repo Repo, image string) { h.blob(w, r, repo, m[2]) })
+		h.withRepo(w, r, m[1], func(repo Repo, image string) {
+			perm := pushPermission(r)
+			if r.Method == http.MethodDelete {
+				perm = PermissionDeleteVer
+			}
+			if h.authorize(w, r, repo, m[1], perm) {
+				h.blob(w, r, repo, m[2])
+			}
+		})
 		return
 	}
 	h.fail(w, http.StatusNotFound, "NAME_UNKNOWN", "repository name not known to registry")
@@ -294,7 +337,7 @@ func (h *Handler) catalog(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, http.StatusMethodNotAllowed, "UNSUPPORTED", "method not allowed")
 		return
 	}
-	all := h.Store.Catalog(location(r))
+	all := h.readableCatalog(r, h.Store.Catalog(location(r)))
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"repositories": page(w, r, all)})
 }
@@ -364,6 +407,11 @@ func (h *Handler) manifest(w http.ResponseWriter, r *http.Request, repo Repo, im
 		}
 		w.Header().Set("Location", "/v2/"+name+"/manifests/"+d)
 		w.Header().Set("Docker-Content-Digest", d)
+		if sub := SubjectOf(b); sub != "" {
+			// The registry serves the referrers API, so it says it
+			// processed the subject (OCI distribution 1.1).
+			w.Header().Set("OCI-Subject", sub)
+		}
 		w.WriteHeader(http.StatusCreated)
 	case http.MethodDelete:
 		var err error
@@ -430,7 +478,7 @@ func (h *Handler) upload(w http.ResponseWriter, r *http.Request, repo Repo, name
 	case r.Method == http.MethodPost && id == "":
 		// A cross-repository mount succeeds whenever the blob is stored:
 		// blobs are shared by digest.
-		if mount := q.Get("mount"); mount != "" {
+		if mount := q.Get("mount"); mount != "" && h.mountReadable(r, q.Get("from")) {
 			if _, err := h.Store.RepoBlobSize(repo, mount); err == nil {
 				h.blobCreated(w, name, mount)
 				return

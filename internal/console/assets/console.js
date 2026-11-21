@@ -125,7 +125,7 @@ const SECRET_TABS = ["/secrets", "/secrets-regional"];
 const GKE_STORAGE = ["/kubernetes/storage", "/kubernetes/storage-classes"];
 // Cloud Logging's Settings and its Log Scopes tab (#2020), as Google's
 // Settings page has a Log Scopes tab (log-scope/create-and-manage).
-const LOGGING_SETTINGS = ["/logs/settings", "/logs/log-scopes", "/logs/trace-scopes"];
+const LOGGING_SETTINGS = ["/logs/settings", "/logs/log-scopes", "/logs/trace-scopes", "/logs/observability-settings", "/logs/observability-buckets"];
 
 
 const ROUTES = [
@@ -399,6 +399,10 @@ const ROUTES = [
   // and subscriptions.
   { path: "/bigquery-sharing", service: "bigquery-sharing", icon: "bigquery", title: "Analytics Hub", kind: "Exchange",
     section: "Databases", product: "bigquery", productTitle: "BigQuery" },
+  // Data clean rooms and their query templates (#2101), beside it as
+  // BigQuery sharing has them.
+  { path: "/bigquery-clean-rooms", service: "bigquery-clean-rooms", icon: "bigquery", title: "Data clean rooms", kind: "Clean room",
+    section: "Databases", product: "bigquery", productTitle: "BigQuery" },
   // Dataform (#2105): repositories, their workspaces' editor, releases,
   // workflow configurations and execution logs, in Google's place.
   { path: "/bigquery-dataform", service: "dataform", icon: "bigquery", title: "Dataform", kind: "Repository",
@@ -623,6 +627,19 @@ const ROUTES = [
     product: "iam", productTitle: "IAM & Admin" },
   { path: "/iam-admin/sso-assignments", service: "iam-sso-assignments", icon: "iam", title: "SSO profile assignments", kind: "SSO profile assignment", section: "IAM & Admin",
     product: "iam", productTitle: "IAM & Admin" },
+  // Cloud Identity's directory (#2103): the Admin console's Directory >
+  // Users, Devices > Mobile & endpoints, Users > Invite users, Account >
+  // Policies and the allowlisted domains.
+  { path: "/iam-admin/users", service: "iam-users", icon: "iam", title: "Users", kind: "User", section: "IAM & Admin",
+    product: "iam", productTitle: "IAM & Admin" },
+  { path: "/iam-admin/devices", service: "iam-devices", icon: "iam", title: "Devices", kind: "Device", section: "IAM & Admin",
+    product: "iam", productTitle: "IAM & Admin" },
+  { path: "/iam-admin/user-invitations", service: "iam-user-invitations", icon: "iam", title: "User invitations", kind: "User invitation", section: "IAM & Admin",
+    product: "iam", productTitle: "IAM & Admin" },
+  { path: "/iam-admin/identity-policies", service: "iam-identity-policies", icon: "iam", title: "Policies", kind: "Policy", section: "IAM & Admin",
+    product: "iam", productTitle: "IAM & Admin" },
+  { path: "/iam-admin/allowlisted-domains", service: "iam-allowlisted-domains", icon: "iam", title: "Allowlisted domains", kind: "Allowlisted domain", section: "IAM & Admin",
+    product: "iam", productTitle: "IAM & Admin" },
   { path: "/iam-admin/essential-contacts", title: "Essential Contacts", service: null, requires: "iam", screen: "unavailable", icon: "iam", section: "IAM & Admin", product: "iam", productTitle: "IAM & Admin",
     unavailable: "Essential Contacts is the Essential Contacts API's, which CloudBurrow does not serve: a local instance sends no notifications." },
   { path: "/iam-admin/asset-inventory", title: "Asset Inventory", service: null, requires: "iam", screen: "unavailable", icon: "iam", section: "IAM & Admin", product: "iam", productTitle: "IAM & Admin",
@@ -644,6 +661,10 @@ const ROUTES = [
   { path: "/apphub/settings", service: "apphub-settings", icon: "apphub", title: "Settings", kind: "Service project attachment",
     section: "Operations", product: "apphub", productTitle: "App Hub" },
 
+  // Cloud Trace (#2118): Trace Explorer and its trace details, over the
+  // Cloud Trace server this instance runs.
+  { path: "/traces/explorer", service: "trace-explorer", screen: "trace-explorer", icon: "monitoring",
+    title: "Trace explorer", section: "Operations", product: "trace", productTitle: "Trace" },
   { path: "/monitoring", service: null, screen: "monitoring", title: "Monitoring", section: "Operations",
     product: "monitoring", productTitle: "Monitoring" },
   // Cloud Monitoring's Metrics explorer and Metrics management (#1939),
@@ -707,6 +728,13 @@ const ROUTES = [
     section: "Operations", product: "logging", productTitle: "Cloud Logging" },
   // Trace Scopes (#2108), the Observability API's trace scopes, beside it.
   { path: "/logs/trace-scopes", service: "logging-trace-scopes", icon: "logs", title: "Settings", tabTitle: "Trace Scopes", kind: "Trace scope",
+    navHidden: true, navAs: "/logs/settings", pageTabs: LOGGING_SETTINGS,
+    section: "Operations", product: "logging", productTitle: "Cloud Logging" },
+  // The Observability API's settings and buckets (#2117), beside them.
+  { path: "/logs/observability-settings", service: "observability-settings", icon: "logs", title: "Settings", tabTitle: "Observability Settings", kind: "Observability settings",
+    navHidden: true, navAs: "/logs/settings", pageTabs: LOGGING_SETTINGS,
+    section: "Operations", product: "logging", productTitle: "Cloud Logging" },
+  { path: "/logs/observability-buckets", service: "observability-buckets", icon: "logs", title: "Settings", tabTitle: "Observability Buckets", kind: "Observability bucket",
     navHidden: true, navAs: "/logs/settings", pageTabs: LOGGING_SETTINGS,
     section: "Operations", product: "logging", productTitle: "Cloud Logging" },
   { path: "/logs/exclusions", service: "logging-exclusions", icon: "logs", title: "Exclusions", kind: "Exclusion",
@@ -3230,10 +3258,14 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   // Google's Spanner Instances list, "Select the checkbox for the instance.
   // The Info panel appears".
   const infoOnSelect = Boolean(opts.rowControls && data.infoOnSelect);
-  if (infoOnSelect) {
+  // Or a Permissions button over the checked rows (#2125): Google's VM
+  // instances list, "Select the checkbox next to each resource ... For a
+  // VM instance, click Permissions".
+  const permissionsButton = Boolean(opts.rowControls && data.permissionsButton);
+  if (infoOnSelect || permissionsButton) {
     INFO_SELECTION = () => [...selected].map((n) => data.items.find((i) => i.name === n)).filter(Boolean);
   }
-  const selectable = Boolean(opts.rowControls && caps.delete) || selectActions.length > 0 || infoOnSelect;
+  const selectable = Boolean(opts.rowControls && caps.delete) || selectActions.length > 0 || infoOnSelect || permissionsButton;
   // Or a list screen's rows marked selectable: History's builds awaiting
   // approval, which its Approve takes (#1854). A top-level list's own
   // selection actions take any of its rows (#1864).
@@ -3357,6 +3389,18 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
       runAction(route, opts.pagePath || [], { ...a, fields }, () => reload(), NO_ROW, what);
     },
   }));
+  if (permissionsButton) {
+    selectionButtons.push(el("button", {
+      class: "secondary", id: "list-permissions", text: "Permissions", disabled: "disabled",
+      onclick: () => {
+        const first = data.items.find((i) => selected.has(i.name));
+        if (!first) return;
+        INFO_TAB = "permissions";
+        inspected = first.name;
+        openInfoPanelOn(first, dataColumns(), route, refresh);
+      },
+    }));
+  }
 
   const visibleRows = () => {
     let rows = data.items.filter((i) => matches(i));
@@ -3960,7 +4004,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
               // (#1854); Delete only where the rows can be deleted.
               ...selectionButtons,
               caps.delete ? bulk : null,
-              caps.delete || selectActions.length ? selectionLabel : null)
+              caps.delete || selectActions.length || permissionsButton ? selectionLabel : null)
           : null)
       : el("div", { class: "action-bar" }, ...selectionButtons,
           selectActions.length ? selectionLabel : null, refreshControl),
@@ -4413,13 +4457,26 @@ async function renderDetail(view, route, resourcePath) {
         return drawAnalyticsSection(panel, section, note);
       case "media":
         return drawMediaSection(panel, section, note);
-      case "result":
+      case "result": {
         // An action's answer on a page of its own (#2084): Document AI's
         // analysis page, drawn as its result dialog draws it.
         // Its own region scrolls sideways, never the page, and is
         // reachable from the keyboard to be scrolled.
-        return setChildren(panel, note, el("div", { class: "card result-section", role: "region", tabindex: "0",
-          "aria-label": section.label }, resultTable(section.listing || {})));
+        const card = el("div", { class: "card result-section", role: "region", tabindex: "0",
+          "aria-label": section.label }, resultTable(section.listing || {}));
+        // Section.LabelAction (#2124): a box drawn over a page opens the
+        // labeling action with the page and the box filled in, as
+        // Document AI's bounding box tool asks which field the box is.
+        const labelAction = section.labelAction && (section.actions || []).find((a) => a.id === section.labelAction);
+        if (labelAction) {
+          card.querySelectorAll(".result-page-frame").forEach((frame, i) =>
+            drawLabelBox(frame, Number(((frame.querySelector("img") || {}).alt || "").replace(/\D+/g, "")) || i + 1, (box) => runAction(route, segments, {
+              ...labelAction,
+              fields: (labelAction.fields || []).map((f) => (f.name in box ? { ...f, default: box[f.name] } : f)),
+            }, reload, NO_ROW, data.title || null)));
+        }
+        return setChildren(panel, note, card);
+      }
       case "logs":
         return drawLogsSection(panel, section, note);
       case "permissions":
@@ -5772,6 +5829,49 @@ function resultRows(listing, cols, items, acts, rowButtons) {
       }
       return tr;
     })));
+}
+
+// drawLabelBox lets a pointer draw a box over a page frame (#2124): on
+// release, done gets the page and the box in fractions of the page, as
+// strings, for the labeling form. The form's own fields take the same
+// values from the keyboard.
+function drawLabelBox(frame, page, done) {
+  frame.classList.add("is-labeling");
+  let start = null;
+  let band = null;
+  const at = (e) => {
+    const r = frame.getBoundingClientRect();
+    return { x: Math.min(Math.max((e.clientX - r.left) / r.width, 0), 1), y: Math.min(Math.max((e.clientY - r.top) / r.height, 0), 1) };
+  };
+  const place = (a, b) => {
+    const pct = (v) => `${(v * 100).toFixed(3)}%`;
+    band.style.left = pct(Math.min(a.x, b.x));
+    band.style.top = pct(Math.min(a.y, b.y));
+    band.style.width = pct(Math.abs(a.x - b.x));
+    band.style.height = pct(Math.abs(a.y - b.y));
+  };
+  frame.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    start = at(e);
+    band = el("div", { class: "result-box kind-drawing", "aria-hidden": "true" });
+    frame.append(band);
+    place(start, start);
+    try { frame.setPointerCapture(e.pointerId); } catch { /* a pointer the page did not see start */ }
+  });
+  frame.addEventListener("pointermove", (e) => { if (start) place(start, at(e)); });
+  frame.addEventListener("pointerup", (e) => {
+    if (!start) return;
+    const end = at(e);
+    const a = start;
+    start = null;
+    band.remove();
+    const w = Math.abs(a.x - end.x);
+    const h = Math.abs(a.y - end.y);
+    if (w < 0.005 || h < 0.005) return;
+    const f = (v) => v.toFixed(4);
+    done({ page: String(page), x: f(Math.min(a.x, end.x)), y: f(Math.min(a.y, end.y)), w: f(w), h: f(h), value: "" });
+  });
 }
 
 // resultPage is a page image with its boxes over it; a box lights its row.
@@ -7635,9 +7735,10 @@ function buildCreateForm(spec) {
       : el("div", { class: "form-row" }, label,
           // Browse (#1845): a gs:// field chooses a bucket of this
           // instance's Cloud Storage, as Google's Choose Destination does.
-          f.browse === "storage" ? el("div", { class: "browse-row" }, control,
+          // Its folders and objects too (#2097), per Field.Browse.
+          /^storage(-object|-path|-bucket)?$/.test(f.browse || "") ? el("div", { class: "browse-row" }, control,
             el("button", { type: "button", class: "secondary", id: `browse-${f.name}`, text: "Browse",
-              onclick: () => browseBuckets(control) }))
+              "aria-label": `Browse Cloud Storage for ${f.label}`, onclick: () => browseBuckets(control, f.browse) }))
           // A Cloud KMS key field (#1881) chooses an ENCRYPT_DECRYPT key of
           // this instance's Cloud KMS in the location the form's own
           // location fields hold, as Google's key picker does.
@@ -10526,7 +10627,7 @@ function currentProject() {
 // does not work at the folder's or organization's level drops the choice,
 // so the toolbar always names what the page reads.
 const RESOURCE_SCOPE_KEYS = ["folder", "organizationId"];
-const RESOURCE_SCOPED_PATHS = ["/iam-admin/iam", "/iam-admin/orgpolicies", "/iam-admin/tags", "/tags"];
+const RESOURCE_SCOPED_PATHS = ["/iam-admin/iam", "/iam-admin/orgpolicies", "/iam-admin/tags", "/tags", "/iam-admin/quotas"];
 const resourceScopedPath = (pathname) => RESOURCE_SCOPED_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/"));
 // RESOURCE_NAMES are the folders' and the organization's display names, as
 // the picker last read them: "folder:N" and "organization:N".
@@ -11394,6 +11495,7 @@ function dispatch(view) {
   if (match.screen === "instance") return renderInstance(view);
   if (match.screen === "monitoring") return renderMonitoring(view);
   if (match.screen === "metrics-explorer") return renderMetricsExplorer(view, match);
+  if (match.screen === "trace-explorer") return renderTraceExplorer(view, match);
   if (match.screen === "logs") return renderLogs(view);
   if (match.screen === "logs-dashboard") return renderLogsDashboard(view);
   if (match.screen === "log-analytics") return renderLogAnalytics(view, match);
@@ -13943,6 +14045,597 @@ async function renderMetricsExplorer(view, match) {
   run();
 }
 
+// --- Trace Explorer (#2118) ----------------------------------------------
+//
+// Google's page (docs.cloud.google.com/trace/docs/finding-traces): the
+// toolbar's trace scope, time range and Trace ID; the Span filters pane and
+// the Filter bar; the latency heatmap, whose cells select their spans, and
+// the Chart view menu's Span duration (percentile) and Span rate; the Spans
+// and Grouped tables. Selecting a span opens the trace's details
+// (docs.cloud.google.com/trace/docs/viewing-details): the timeline of its
+// spans with their latency bars, or the Graph of its call hierarchy; Find
+// in Trace; and the selected span's Attributes, Logs & Events and Metadata
+// & Links tabs.
+
+const TRACE_RANGES = [
+  { label: "1 hour", seconds: 3600 }, { label: "6 hours", seconds: 21600 }, { label: "1 day", seconds: 86400 },
+  { label: "7 days", seconds: 604800 }, { label: "30 days", seconds: 2592000 },
+];
+
+// traceDetailsLink is the Logs Explorer's link from an entry with a trace
+// to its trace details, or nothing.
+function traceDetailsLink(le) {
+  const m = /^projects\/([^/]+)\/traces\/([0-9a-fA-F]{32})$/.exec(le.trace || "");
+  if (!m || !capabilityOf("trace-explorer").id) return null;
+  // The project the entry's trace names opens the page, as the trace's.
+  const q = new URLSearchParams({ project: m[1], trace: m[2].toLowerCase(), traceProject: m[1] });
+  if (le.spanId) q.set("span", String(le.spanId).toLowerCase());
+  return el("a", { class: "link-button is-inline", href: `/traces/explorer?${q.toString()}`, text: "View trace details" });
+}
+
+// svgEl makes an SVG element with attributes, and text when given.
+function traceSvg(tag, attrs, text) {
+  const n = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for (const [k, v] of Object.entries(attrs || {})) n.setAttribute(k, String(v));
+  if (text !== undefined) n.textContent = text;
+  return n;
+}
+
+function traceTime(ms) { return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }); }
+
+// traceLatencyLabel is a latency edge in ms as an axis label.
+function traceLatencyLabel(ms) {
+  const v = Number(ms);
+  return v >= 1000 ? `${bqShortNumber(v / 1000)} s` : `${bqShortNumber(v)} ms`;
+}
+
+// traceHeatmap draws the spans by start time (x) and latency (y): "The
+// heatmap uses color to represent the number of spans in a cell. A cell
+// with many spans has a darker color than one with few spans." Each cell
+// with spans is a button: selecting it narrows the tables to its spans.
+function traceHeatmap(data, selected, onSelect) {
+  const cells = (data.items || []).filter((i) => i.name === "cell");
+  const intervals = (data.items || []).filter((i) => i.name === "interval");
+  if (!cells.length) return el("p", { class: "unavailable", text: "No spans in the selected time range." });
+  const edges = String(data.note || "").split(",").map(Number);
+  const rows = edges.length;
+  const t0 = Number(intervals[0].fields.t0), t1 = Number(intervals[intervals.length - 1].fields.t1);
+  const W = 720, H = 260, L = 64, R = 12, T = 12, B = 28;
+  const cw = (W - L - R) / intervals.length, rh = (H - T - B) / rows;
+  const maxCount = Math.max(...cells.map((c) => Number(c.fields.count)));
+  const svg = traceSvg("svg", { viewBox: `0 0 ${W} ${H}`, class: "explorer-chart trace-heatmap", role: "group",
+    "aria-label": `Latency heatmap: ${data.total} spans; select a cell to list its spans` });
+  for (let r = 0; r <= rows; r += 2) {
+    const y = H - B - r * rh;
+    svg.append(traceSvg("line", { x1: L, x2: W - R, y1: y, y2: y, class: "explorer-grid" }));
+    if (r < rows) svg.append(traceSvg("text", { x: L - 6, y: y + 4, "text-anchor": "end", "font-size": 11, class: "explorer-axis" }, traceLatencyLabel(edges[r])));
+  }
+  for (let i = 0; i <= 4; i++) {
+    const t = t0 + (t1 - t0) * i / 4;
+    svg.append(traceSvg("text", { x: L + (W - L - R) * i / 4, y: H - 8, "text-anchor": "middle", "font-size": 11, class: "explorer-axis" }, traceTime(t)));
+  }
+  for (const c of cells) {
+    const f = c.fields, n = Number(f.count);
+    const col = Math.round((Number(f.t0) - t0) / ((t1 - t0) / intervals.length));
+    const row = Number(f.row);
+    const level = Math.max(1, Math.ceil(n / maxCount * 5));
+    const isSel = selected && selected.cellStart === f.t0 && selected.minDuration === f.lo;
+    const range = f.hi ? `${traceLatencyLabel(f.lo)} to ${traceLatencyLabel(f.hi)}` : `over ${traceLatencyLabel(f.lo)}`;
+    const label = `${n} ${n === 1 ? "span" : "spans"}, ${new Date(Number(f.t0)).toLocaleString()} to ${traceTime(Number(f.t1))}, latency ${range}`;
+    const rect = traceSvg("rect", { x: L + col * cw + 0.5, y: H - B - (row + 1) * rh + 0.5, width: Math.max(1, cw - 1), height: Math.max(1, rh - 1),
+      class: `trace-cell level-${level}` + (isSel ? " is-selected" : ""), tabindex: 0, role: "button", "aria-pressed": String(!!isSel), "aria-label": label,
+      "data-count": n });
+    rect.append(traceSvg("title", {}, label));
+    const pick = () => onSelect({ cellStart: f.t0, cellEnd: f.t1, minDuration: f.lo, maxDuration: f.hi, label });
+    rect.addEventListener("click", pick);
+    rect.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } });
+    svg.append(rect);
+  }
+  const legend = el("div", { class: "trace-heatmap-legend", "aria-hidden": "true" },
+    el("span", { text: "Fewer spans" }), ...[1, 2, 3, 4, 5].map((l) => el("span", { class: `trace-swatch level-${l}` })), el("span", { text: "More spans" }));
+  return el("div", { class: "trace-heatmap-host" }, svg, legend);
+}
+
+// traceSeries draws the Chart view's lines over the heatmap's intervals:
+// Span duration (percentile) "the 50th, 90th, 95th and 99th percentiles",
+// or Span rate, OK and error spans a second.
+function traceSeries(data, view) {
+  const intervals = (data.items || []).filter((i) => i.name === "interval");
+  if (!intervals.length || !data.total) return el("p", { class: "unavailable", text: "No spans in the selected time range." });
+  const series = view === "rate"
+    ? [["okRate", "OK", "trace-line-ok"], ["errorRate", "Error", "trace-line-error"]]
+    : [["p50", "50th percentile", "trace-line-p50"], ["p90", "90th percentile", "trace-line-p90"],
+       ["p95", "95th percentile", "trace-line-p95"], ["p99", "99th percentile", "trace-line-p99"]];
+  const W = 720, H = 240, L = 64, R = 12, T = 12, B = 28;
+  const xs = intervals.map((i) => (Number(i.fields.t0) + Number(i.fields.t1)) / 2);
+  const tMin = Number(intervals[0].fields.t0), tMax = Number(intervals[intervals.length - 1].fields.t1);
+  let yMax = Math.max(...intervals.flatMap((i) => series.map(([k]) => Number(i.fields[k]) || 0)));
+  if (!(yMax > 0)) yMax = 1;
+  const sx = (t) => L + (t - tMin) / (tMax - tMin) * (W - L - R), sy = (v) => T + (1 - v / yMax) * (H - T - B);
+  const unit = view === "rate" ? "/s" : " ms";
+  const title = view === "rate" ? "Span rate" : "Span duration (percentile)";
+  const svg = traceSvg("svg", { viewBox: `0 0 ${W} ${H}`, class: "explorer-chart trace-series", role: "img",
+    "aria-label": `${title}: ${series.map(([, l]) => l).join(", ")}; the highest ${bqShortNumber(yMax)}${unit}` });
+  for (let i = 0; i <= 4; i++) {
+    const v = yMax * i / 4;
+    svg.append(traceSvg("line", { x1: L, x2: W - R, y1: sy(v), y2: sy(v), class: "explorer-grid" }));
+    svg.append(traceSvg("text", { x: L - 6, y: sy(v) + 4, "text-anchor": "end", "font-size": 11, class: "explorer-axis" }, `${bqShortNumber(v)}${unit}`));
+  }
+  for (let i = 0; i <= 4; i++) {
+    const t = tMin + (tMax - tMin) * i / 4;
+    svg.append(traceSvg("text", { x: sx(t), y: H - 8, "text-anchor": "middle", "font-size": 11, class: "explorer-axis" }, traceTime(t)));
+  }
+  for (const [k, , cls] of series) {
+    const pts = intervals.map((iv, i) => (view === "rate" || Number(iv.fields.count) > 0) ? `${sx(xs[i]).toFixed(1)},${sy(Number(iv.fields[k]) || 0).toFixed(1)}` : null).filter(Boolean);
+    svg.append(traceSvg("polyline", { points: pts.join(" "), class: `trace-line ${cls}`, fill: "none" }));
+  }
+  const legend = el("ul", { class: "trace-series-legend" },
+    ...series.map(([, l, cls]) => el("li", {}, el("span", { class: `trace-key ${cls}`, "aria-hidden": "true" }), el("span", { text: l }))));
+  return el("div", { class: "trace-series-host" }, svg, legend);
+}
+
+// traceMatch reports whether Find in Trace's text is in a span's Name,
+// Service/workload or Attributes: "Search applies only to the span name,
+// service or workload name, and attributes fields", case-insensitive plain
+// text.
+function traceMatch(span, needle) {
+  if (!needle) return false;
+  const n = needle.toLowerCase(), f = span.fields || {};
+  if (String(span.name).toLowerCase().includes(n) || String(f.Service || "").toLowerCase().includes(n)) return true;
+  let attrs = {};
+  try { attrs = JSON.parse(f.attributes || "{}") || {}; } catch { attrs = {}; }
+  return Object.entries(attrs).some(([k, v]) => `${k}: ${v}`.toLowerCase().includes(n));
+}
+
+// traceMarked is text with Find in Trace's matches marked.
+function traceMarked(text, needle) {
+  const s = String(text);
+  if (!needle) return [s];
+  const out = [], low = s.toLowerCase(), n = needle.toLowerCase();
+  let i = 0;
+  for (let j = low.indexOf(n); j >= 0; j = low.indexOf(n, i)) {
+    if (j > i) out.push(s.slice(i, j));
+    out.push(el("mark", { class: "trace-find-mark", text: s.slice(j, j + n.length) }));
+    i = j + n.length;
+  }
+  if (i < s.length) out.push(s.slice(i));
+  return out;
+}
+
+// traceGraph is the trace's call hierarchy "as a directed acyclic graph
+// (DAG)": "the name and latency appear with each element", coloured by
+// status; the scroll wheel resizes it. Each node selects its span.
+function traceGraph(spans, selected, needle, onSelect) {
+  const NW = 180, NH = 40, GX = 40, GY = 16;
+  const ids = new Set(spans.map((s) => s.fields["Span ID"]));
+  let row = 0;
+  const pos = new Map();
+  for (const s of spans) { // depth first already, from the server
+    pos.set(s.fields["Span ID"], { x: Number(s.fields.depth) * (NW + GX) + 8, y: row++ * (NH + GY) + 8 });
+  }
+  const W = Math.max(...[...pos.values()].map((p) => p.x)) + NW + 16, H = row * (NH + GY) + 16;
+  const svg = traceSvg("svg", { viewBox: `0 0 ${W} ${H}`, class: "trace-graph", role: "group", width: W, height: H,
+    "aria-label": `Graph of ${spans.length} spans; the scroll wheel resizes it` });
+  for (const s of spans) {
+    const par = s.fields["Parent span ID"];
+    if (!ids.has(par)) continue;
+    const a = pos.get(par), b = pos.get(s.fields["Span ID"]);
+    svg.append(traceSvg("path", { d: `M${a.x + 16},${a.y + NH} V${b.y + NH / 2} H${b.x}`, class: "trace-edge", fill: "none" }));
+  }
+  for (const s of spans) {
+    const p = pos.get(s.fields["Span ID"]);
+    const err = String(s.fields.Status || "").startsWith("Error");
+    const hit = traceMatch(s, needle);
+    const g = traceSvg("g", { class: "trace-node" + (err ? " is-error" : "") + (s === selected ? " is-selected" : "") + (hit ? " is-match" : ""),
+      transform: `translate(${p.x},${p.y})`, tabindex: 0, role: "button", "aria-pressed": String(s === selected),
+      "aria-label": `Select span ${s.name}, ${s.fields["Duration (ms)"]} ms${err ? ", error" : ""}${hit ? ", matches Find in Trace" : ""}` });
+    g.append(traceSvg("rect", { width: NW, height: NH, rx: 4 }));
+    const name = s.name.length > 24 ? s.name.slice(0, 23) + "…" : s.name;
+    g.append(traceSvg("text", { x: 8, y: 16, class: "trace-node-name" }, name));
+    g.append(traceSvg("text", { x: 8, y: 32, class: "trace-node-latency" }, `${s.fields["Duration (ms)"]} ms`));
+    g.append(traceSvg("title", {}, `${s.name} (${s.fields.Service}): ${s.fields["Duration (ms)"]} ms`));
+    g.addEventListener("click", () => onSelect(s));
+    g.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(s); } });
+    svg.append(g);
+  }
+  let scale = 1;
+  const host = el("div", { class: "trace-graph-host" }, svg);
+  host.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    scale = Math.min(3, Math.max(0.3, scale * (e.deltaY < 0 ? 1.1 : 0.9)));
+    svg.setAttribute("width", String(W * scale));
+    svg.setAttribute("height", String(H * scale));
+  }, { passive: false });
+  return host;
+}
+
+async function renderTraceExplorer(view, match) {
+  const caps = capabilityOf("trace-explorer");
+  if (!caps.id) return renderUnavailable(view, { ...match, unavailable:
+    "Trace explorer reads Cloud Trace, which this instance does not serve. Start it with --services including trace." });
+  const project = currentProject();
+  const header = pageHeader("Trace explorer", project ? `Project ${project}` : "All projects");
+  setChildren(view, header, loadingState(3, { what: "trace scopes" }));
+  let scopes;
+  try {
+    scopes = await api(`/api/resources/trace-explorer?project=${encodeURIComponent(project)}`);
+  } catch (err) {
+    return setChildren(view, header, errorState("Trace explorer unavailable", String(err.message),
+      () => renderTraceExplorer(view, match)));
+  }
+  if (scopes.prompt) return setChildren(view, header, emptyState("Choose a project", scopes.prompt));
+  const params = new URLSearchParams(location.search);
+  const query = (path, values) => send(`/api/query/trace-explorer?project=${encodeURIComponent(project)}`, "POST",
+    { Path: [path], Values: values }).then((r) => r.listing || {});
+
+  const scopeItems = scopes.items || [];
+  const wantScope = params.get("scope") || (scopeItems.find((s) => (s.fields || {}).Default) || scopeItems[0] || {}).name || "";
+  const scopeSelect = el("select", { id: "trace-scope", "aria-label": "Trace scope" },
+    ...scopeItems.map((s) => el("option", { value: s.name, selected: s.name === wantScope,
+      text: `${s.name.split("/").pop()}${(s.fields || {}).Default ? " (default)" : ""} — ${(s.fields || {}).Resources || ""}` })));
+  let range = Number(params.get("range") || 86400);
+  const rangeGroup = el("div", { class: "actions", role: "group", "aria-label": "Time range" });
+  const drawRanges = () => setChildren(rangeGroup, ...TRACE_RANGES.map((r) => el("button", {
+    type: "button", class: r.seconds === range ? "primary" : "secondary", "aria-pressed": String(r.seconds === range),
+    text: r.label, onclick: () => { range = r.seconds; drawRanges(); run(); } })));
+  drawRanges();
+  const traceIdInput = el("input", { id: "trace-id", type: "text", class: "mono", "aria-label": "Trace ID",
+    placeholder: "Trace ID", value: params.get("trace") || "" });
+  const traceIdGo = el("button", { type: "button", class: "secondary", text: "Open trace",
+    onclick: () => openTrace(traceIdInput.value.trim(), params.get("traceProject") || "", "") });
+
+  const input = (id, label, placeholder, value) => el("input", { id, type: "text", "aria-label": label, placeholder, value: value || "" });
+  const select = (id, label, options, value) => el("select", { id, "aria-label": label },
+    ...options.map(([v, l]) => el("option", { value: v, text: l, selected: v === value })));
+  const serviceInput = input("trace-service", "Service name", "checkout", params.get("service"));
+  const nameInput = input("trace-span-name", "Span name", "GET /cart", params.get("spanName"));
+  const statusSelect = select("trace-status", "Span status", [["", "Any"], ["OK", "OK"], ["Error", "Error"]], params.get("status") || "");
+  const minInput = el("input", { id: "trace-min-duration", type: "number", min: "0", "aria-label": "Minimum duration (ms)",
+    value: params.get("minDuration") || "" });
+  const kindSelect = select("trace-kind", "Span kind", [["", "Any"], ["SERVER", "Server"], ["CLIENT", "Client"],
+    ["INTERNAL", "Internal"], ["PRODUCER", "Producer"], ["CONSUMER", "Consumer"], ["UNSPECIFIED", "Unspecified"]], params.get("kind") || "");
+  const filterInput = el("input", { id: "trace-filter", type: "text", class: "mono", "aria-label": "Filter",
+    placeholder: "+root:/api latency:100ms method:GET", value: params.get("filter") || "" });
+  const apply = el("button", { type: "button", class: "primary", text: "Run query" });
+  filterInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); run(); } });
+  const field = (label, control, help) => el("div", { class: "explorer-field" },
+    el("label", { for: control.id, text: label }), control, help ? el("p", { class: "field-help", text: help }) : null);
+
+  // The Chart view menu. UNVERIFIED (docs re-read 2026-11-21:
+  // https://docs.cloud.google.com/trace/docs/finding-traces): Google names
+  // the menu's Span duration (percentile) and Span rate, and the heatmap
+  // apart from it; here the heatmap is the menu's first, default, view.
+  let chartView = params.get("chart") || "heatmap";
+  const chartSelect = select("trace-chart-view", "Chart view", [["heatmap", "Heatmap"], ["percentile", "Span duration (percentile)"],
+    ["rate", "Span rate"]], chartView);
+  const chartHost = el("div", { class: "explorer-chart-host", "aria-live": "polite" });
+  const selectionHost = el("div", { class: "trace-selection" });
+  const tableHost = el("div", { class: "explorer-table-host" });
+  const detailsHost = el("section", { class: "card trace-details", id: "trace-details", "aria-label": "Trace details", hidden: true });
+
+  // The tables: "Spans" and "Grouped".
+  let tableTab = params.get("table") === "grouped" ? "grouped" : "spans";
+  const tableTabs = [["spans", "Spans"], ["grouped", "Grouped"]].map(([id, label]) => el("button", {
+    type: "button", role: "tab", class: "tab", id: `trace-table-tab-${id}`, "aria-controls": "trace-table-panel", text: label,
+    onclick: () => { tableTab = id; drawTable(); } }));
+  const tablePanel = el("div", { id: "trace-table-panel", role: "tabpanel" }, tableHost);
+
+  let lastSpans = [], lastGroups = [], lastHeatmap = {}, selection = null, lastTotals = { spans: 0, groups: 0 };
+  let sortCol = "Start time", sortDesc = true, groupSort = "Spans", groupDesc = true;
+  const sortHead = (c, cur, desc, set) => el("th", { scope: "col", "aria-sort": c === cur ? (desc ? "descending" : "ascending") : "none" },
+    el("button", { type: "button", class: "link-button is-inline", text: c, onclick: () => set(c) }));
+  function drawSpans() {
+    const cols = ["Start time", "Span name", "Service", "Duration (ms)", "Status", "Span kind", "Trace ID", "Project"];
+    const val = (r, c) => c === "Span name" ? r.name : (r.fields || {})[c] || "";
+    const rows = [...lastSpans].sort((a, b) => {
+      const x = val(a, sortCol), y = val(b, sortCol);
+      const n = sortCol === "Duration (ms)" ? Number(x) - Number(y) : String(x).localeCompare(String(y));
+      return sortDesc ? -n : n;
+    });
+    const set = (c) => { if (sortCol === c) sortDesc = !sortDesc; else { sortCol = c; sortDesc = false; } drawTable(); };
+    setChildren(tableHost, rows.length
+      ? el("div", { class: "table-wrap explorer-table-wrap" }, el("table", { class: "explorer-table trace-spans", "aria-label": "Spans" },
+          el("thead", {}, el("tr", {}, ...cols.map((c) => sortHead(c, sortCol, sortDesc, set)))),
+          el("tbody", {}, ...rows.map((r) => el("tr", {},
+            el("td", { class: "mono", text: new Date(r.fields["Start time"]).toLocaleString() }),
+            el("td", {}, el("button", { type: "button", class: "link-button is-inline", text: r.name,
+              "aria-label": `Open trace ${r.fields["Trace ID"]} at span ${r.name}`,
+              onclick: () => openTrace(r.fields["Trace ID"], r.fields.Project, r.fields["Span ID"]) })),
+            el("td", { text: r.fields.Service }),
+            el("td", { text: r.fields["Duration (ms)"] }),
+            el("td", {}, el("span", { class: "status", "data-state": r.fields.Status === "Error" ? "error" : "ok" },
+              el("span", { text: r.fields.Status }))),
+            el("td", { text: r.fields["Span kind"] }),
+            el("td", { class: "mono", text: r.fields["Trace ID"] }),
+            el("td", { text: r.fields.Project }))))))
+      : el("p", { class: "unavailable", text: "No spans match." }));
+  }
+  function drawGroups() {
+    const cols = ["Span name", "Service/workload", "Spans", "Errors", "Average (ms)", "P50 (ms)", "P95 (ms)", "P99 (ms)"];
+    const val = (r, c) => c === "Span name" ? r.name : (r.fields || {})[c] || "";
+    const numeric = (c) => !["Span name", "Service/workload"].includes(c);
+    const rows = [...lastGroups].sort((a, b) => {
+      const x = val(a, groupSort), y = val(b, groupSort);
+      const n = numeric(groupSort) ? Number(x) - Number(y) : String(x).localeCompare(String(y));
+      return groupDesc ? -n : n;
+    });
+    const set = (c) => { if (groupSort === c) groupDesc = !groupDesc; else { groupSort = c; groupDesc = false; } drawTable(); };
+    setChildren(tableHost, rows.length
+      ? el("div", { class: "table-wrap explorer-table-wrap" }, el("table", { class: "explorer-table trace-groups", "aria-label": "Grouped spans" },
+          el("thead", {}, el("tr", {}, ...cols.map((c) => sortHead(c, groupSort, groupDesc, set)))),
+          el("tbody", {}, ...rows.map((r) => el("tr", {},
+            el("td", {}, el("button", { type: "button", class: "link-button is-inline", text: r.name,
+              "aria-label": `Open the slowest ${r.name} span of ${r.fields["Service/workload"]}`,
+              onclick: () => openTrace(r.fields["Trace ID"], r.fields.Project, r.fields["Span ID"]) })),
+            ...cols.slice(1).map((c) => el("td", { text: r.fields[c] })))))))
+      : el("p", { class: "unavailable", text: "No spans match." }));
+  }
+  function drawTable() {
+    tableTabs.forEach((b, i) => {
+      const on = (i === 0 ? "spans" : "grouped") === tableTab;
+      b.setAttribute("aria-selected", on ? "true" : "false");
+      b.setAttribute("tabindex", on ? "0" : "-1");
+      b.classList.toggle("is-selected", on);
+    });
+    tablePanel.setAttribute("aria-labelledby", `trace-table-tab-${tableTab}`);
+    const q = new URLSearchParams(location.search);
+    if (tableTab === "grouped") q.set("table", "grouped"); else q.delete("table");
+    history.replaceState(history.state, "", location.pathname + "?" + q.toString());
+    if (tableTab === "grouped") drawGroups(); else drawSpans();
+  }
+  function drawChart() {
+    const total = lastHeatmap.total || 0;
+    setChildren(chartHost,
+      el("div", { class: "chart-head" }, el("h2", { text: chartView === "heatmap" ? "Latency heatmap" : chartView === "rate" ? "Span rate" : "Span duration (percentile)" }),
+        el("span", { class: "chart-now", text: `${total} ${total === 1 ? "span" : "spans"}` })),
+      chartView === "heatmap" ? traceHeatmap(lastHeatmap, selection, selectCell) : traceSeries(lastHeatmap, chartView));
+  }
+  function drawSelection() {
+    setChildren(selectionHost, selection
+      ? el("div", { class: "trace-selection-chip", role: "status" },
+          el("span", { text: `Selected cell: ${selection.label}` }),
+          el("button", { type: "button", class: "secondary", text: "Clear selection", onclick: () => { selection = null; drawChart(); drawSelection(); runTables(); } }))
+      : null);
+  }
+  function selectCell(cell) {
+    selection = cell;
+    drawChart();
+    drawSelection();
+    runTables();
+  }
+  const baseValues = () => ({ scope: scopeSelect.value, range: String(range), filter: filterInput.value, service: serviceInput.value,
+    spanName: nameInput.value, status: statusSelect.value, minDuration: minInput.value, kind: kindSelect.value });
+  async function runTables() {
+    const values = baseValues();
+    if (selection) {
+      values.cellStart = selection.cellStart;
+      values.cellEnd = selection.cellEnd;
+      if (!values.minDuration || Number(selection.minDuration) > Number(values.minDuration)) values.minDuration = selection.minDuration;
+      if (selection.maxDuration) values.maxDuration = selection.maxDuration;
+    }
+    setChildren(tableHost, loadingState(2, { what: "spans" }));
+    let spans, groups;
+    try {
+      [spans, groups] = await Promise.all([query("spans", values), query("grouped", values)]);
+    } catch (err) {
+      setChildren(tableHost, errorState("Spans unavailable", String(err.message), runTables));
+      return;
+    }
+    lastSpans = spans.items || [];
+    lastGroups = groups.items || [];
+    lastTotals = { spans: spans.total || lastSpans.length, groups: groups.total || lastGroups.length };
+    drawTable();
+    announce(`Trace explorer: ${lastSpans.length} spans in ${lastGroups.length} groups`);
+  }
+  async function run() {
+    const values = baseValues();
+    const q = new URLSearchParams(location.search);
+    for (const [k, v] of Object.entries(values)) { if (v) q.set(k, v); else q.delete(k); }
+    history.replaceState(history.state, "", location.pathname + "?" + q.toString());
+    selection = null;
+    drawSelection();
+    setChildren(chartHost, loadingState(2, { what: "spans" }));
+    try {
+      lastHeatmap = await query("heatmap", values);
+    } catch (err) {
+      setChildren(chartHost, errorState("Spans unavailable", String(err.message), run));
+      setChildren(tableHost);
+      return;
+    }
+    drawChart();
+    await runTables();
+  }
+  apply.addEventListener("click", run);
+  scopeSelect.addEventListener("change", run);
+  chartSelect.addEventListener("change", () => {
+    chartView = chartSelect.value;
+    const q = new URLSearchParams(location.search);
+    if (chartView !== "heatmap") q.set("chart", chartView); else q.delete("chart");
+    history.replaceState(history.state, "", location.pathname + "?" + q.toString());
+    drawChart();
+  });
+
+  async function openTrace(id, traceProject, spanId) {
+    if (!id) return;
+    const q = new URLSearchParams(location.search);
+    q.set("trace", id);
+    if (traceProject) q.set("traceProject", traceProject); else q.delete("traceProject");
+    if (spanId) q.set("span", spanId); else q.delete("span");
+    history.replaceState(history.state, "", location.pathname + "?" + q.toString());
+    detailsHost.hidden = false;
+    setChildren(detailsHost, loadingState(2, { what: "trace" }));
+    let data;
+    try {
+      data = await query("trace", { trace: id, traceProject, scope: scopeSelect.value });
+    } catch (err) {
+      setChildren(detailsHost, el("h2", { text: "Trace details" }),
+        errorState("Trace unavailable", String(err.message), () => openTrace(id, traceProject, spanId)));
+      return;
+    }
+    detailsView = params.get("view") === "graph" ? "graph" : detailsView;
+    findText = "";
+    drawDetails(data, spanId);
+    detailsHost.scrollIntoView({ block: "nearest" });
+  }
+
+  // The details' view (Timeline, or Graph) and Find in Trace's text, kept
+  // while another span is selected.
+  let detailsView = "timeline", findText = "", findIndex = 0;
+  function drawDetails(data, selectedId, focusFind) {
+    const spans = data.items || [];
+    const total = Math.max(1, ...spans.map((s) => Number(s.fields["Start (ms)"]) + Number(s.fields["Duration (ms)"])));
+    let selected = spans.find((s) => s.fields["Span ID"] === selectedId) || spans[0];
+    const matches = spans.filter((s) => traceMatch(s, findText));
+    if (findIndex >= matches.length) findIndex = 0;
+    const select = (s) => drawDetails(data, s.fields["Span ID"]);
+    const rows = spans.map((s) => {
+      const f = s.fields;
+      let evs = [];
+      try { evs = JSON.parse(f.events || "[]") || []; } catch { evs = []; }
+      const left = Number(f["Start (ms)"]) / total * 100, width = Math.max(0.5, Number(f["Duration (ms)"]) / total * 100);
+      const bar = el("div", { class: "trace-bar-track" },
+        el("span", { class: "trace-bar" + (f.Status.startsWith("Error") ? " is-error" : ""), style: `left:${left}%;width:${width}%` },
+          evs.length ? el("span", { class: "trace-bar-dot", title: `${evs.length} log entries and events` }) : null));
+      const hit = traceMatch(s, findText);
+      const current = hit && matches[findIndex] === s;
+      return el("tr", { class: "trace-row" + (s === selected ? " is-selected" : "") + (hit ? " is-match" : "") + (current ? " is-current-match" : "") },
+        el("td", { style: `padding-left:${8 + Number(f.depth) * 16}px` },
+          el("button", { type: "button", class: "link-button is-inline", "aria-pressed": String(s === selected),
+            "aria-label": `Select span ${s.name} (${f["Span ID"]})${hit ? ", matches Find in Trace" : ""}`, onclick: () => select(s) },
+            ...traceMarked(s.name, findText)),
+          el("span", { class: "trace-span-id mono", text: ` ${f["Span ID"]}` })),
+        el("td", {}, ...traceMarked(f.Service, findText)),
+        el("td", { class: "trace-bar-cell" }, bar),
+        el("td", { text: `${f["Duration (ms)"]} ms` + (evs.length ? ` · ${evs.length} ${evs.length === 1 ? "entry" : "entries"}` : "") }));
+    });
+    const tabs = [["attributes", "Attributes"], ["logs", "Logs & Events"], ["metadata", "Metadata & Links"]];
+    let tab = "attributes";
+    const tabButtons = tabs.map(([id, label]) => el("button", { type: "button", role: "tab", class: "tab", id: `trace-tab-${id}`,
+      "aria-controls": "trace-tab-panel", text: label, onclick: () => { tab = id; drawPanel(); } }));
+    const tabPanel = el("div", { id: "trace-tab-panel", role: "tabpanel" });
+    const kv = (pairs, label, mark) => pairs.length
+      ? el("div", { class: "table-wrap" }, el("table", { class: "explorer-table trace-kv", "aria-label": label },
+          el("thead", {}, el("tr", {}, el("th", { scope: "col", text: "Key" }), el("th", { scope: "col", text: "Value" }))),
+          el("tbody", {},
+            ...pairs.map(([k, v]) => el("tr", { class: mark && `${k}: ${v}`.toLowerCase().includes(findText.toLowerCase()) ? "is-match" : "" },
+              el("th", { scope: "row", class: "mono" }, ...(mark ? traceMarked(k, findText) : [k])),
+              el("td", { class: "mono" }, ...(mark ? traceMarked(v, findText) : [v])))))))
+      : el("p", { class: "unavailable", text: "None." });
+    function drawPanel() {
+      tabButtons.forEach((b, i) => {
+        const on = tabs[i][0] === tab;
+        b.setAttribute("aria-selected", on ? "true" : "false");
+        b.setAttribute("tabindex", on ? "0" : "-1");
+        b.classList.toggle("is-selected", on);
+      });
+      tabPanel.setAttribute("aria-labelledby", `trace-tab-${tab}`);
+      if (!selected) return setChildren(tabPanel, el("p", { class: "unavailable", text: "No span." }));
+      const f = selected.fields;
+      if (tab === "attributes") {
+        let attrs = {};
+        try { attrs = JSON.parse(f.attributes || "{}") || {}; } catch { attrs = {}; }
+        setChildren(tabPanel, kv(Object.entries(attrs).sort(([a], [b]) => a.localeCompare(b)), "Span attributes", !!findText));
+      } else if (tab === "logs") {
+        let evs = [];
+        try { evs = JSON.parse(f.events || "[]") || []; } catch { evs = []; }
+        setChildren(tabPanel, evs.length
+          ? el("ul", { class: "trace-events" }, ...evs.map((e) => el("li", { class: "trace-event" },
+              el("span", { class: "mono", text: new Date(e.time).toLocaleString() }), " ",
+              el("span", { class: "status", "data-state": e.kind === "log" && /ERROR|CRITICAL|ALERT|EMERGENCY/.test(e.severity || "") ? "error" : "ok" },
+                el("span", { text: e.kind === "log" ? (e.severity || "LOG") : "Event" })), " ",
+              el("span", { text: e.text }))))
+          : el("p", { class: "unavailable", text: "No log entries or events for this span." }));
+      } else {
+        setChildren(tabPanel, kv([["Span ID", f["Span ID"]], ["Parent span ID", f["Parent span ID"]], ["Trace ID", f["Trace ID"]],
+          ["Project ID", f.Project], ["Start time", f["Start time"]], ["End time", f["End time"]], ["Span kind", f["Span kind"]],
+          ["Status", f.Status], ["Instrumentation scope", f["Instrumentation scope"]], ["Links", f.Links]], "Span metadata", false));
+      }
+    }
+    drawPanel();
+
+    // The toolbar: Timeline or Graph, and Find in Trace.
+    const viewGroup = el("div", { class: "actions", role: "group", "aria-label": "Trace view" },
+      ...[["timeline", "Timeline"], ["graph", "Graph"]].map(([id, label]) => el("button", {
+        type: "button", class: id === detailsView ? "primary" : "secondary", "aria-pressed": String(id === detailsView), text: label,
+        onclick: () => {
+          detailsView = id;
+          const q = new URLSearchParams(location.search);
+          if (id === "graph") q.set("view", "graph"); else q.delete("view");
+          history.replaceState(history.state, "", location.pathname + "?" + q.toString());
+          drawDetails(data, selected && selected.fields["Span ID"]);
+        } })));
+    const findInput = el("input", { id: "trace-find", type: "search", "aria-label": "Find in Trace", placeholder: "Find in Trace",
+      value: findText, "aria-describedby": "trace-find-count" });
+    const go = (step) => {
+      if (!matches.length) return;
+      findIndex = (findIndex + step + matches.length) % matches.length;
+      drawDetails(data, matches[findIndex].fields["Span ID"]);
+    };
+    findInput.addEventListener("input", () => {
+      findText = findInput.value.trim();
+      findIndex = 0;
+      const first = spans.find((s) => traceMatch(s, findText));
+      drawDetails(data, first ? first.fields["Span ID"] : selected && selected.fields["Span ID"], true);
+    });
+    findInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); go(e.shiftKey ? -1 : 1); } });
+    const countText = !findText ? "" : matches.length ? `${findIndex + 1} of ${matches.length} matches` : "No matches";
+    const findBar = el("div", { class: "trace-find", role: "search", "aria-label": "Find in Trace" },
+      el("label", { for: "trace-find", text: "Find in Trace" }), findInput,
+      el("span", { id: "trace-find-count", class: "trace-find-count", "aria-live": "polite", text: countText }),
+      el("button", { type: "button", class: "secondary", text: "Previous", disabled: matches.length < 2, onclick: () => go(-1) }),
+      el("button", { type: "button", class: "secondary", text: "Next", disabled: matches.length < 2, onclick: () => go(1) }));
+
+    const body = detailsView === "graph"
+      ? traceGraph(spans, selected, findText, select)
+      : el("div", { class: "table-wrap" }, el("table", { class: "explorer-table trace-timeline", "aria-label": "Timeline" },
+          el("thead", {}, el("tr", {}, ...["Name", "Service/workload", "Latency", "Duration"].map((c) => el("th", { scope: "col", text: c })))),
+          el("tbody", {}, ...rows)));
+    setChildren(detailsHost,
+      el("div", { class: "chart-head" }, el("h2", { text: "Trace details" }),
+        el("button", { type: "button", class: "secondary", text: "Close", onclick: () => {
+          detailsHost.hidden = true;
+          const q = new URLSearchParams(location.search);
+          for (const k of ["trace", "traceProject", "span", "view"]) q.delete(k);
+          history.replaceState(history.state, "", location.pathname + "?" + q.toString());
+        } })),
+      data.note ? el("p", { class: "mono", text: data.note }) : null,
+      el("div", { class: "trace-details-toolbar" }, viewGroup, findBar),
+      body,
+      el("div", { class: "tab-strip", role: "tablist", "aria-label": "Span details" }, ...tabButtons),
+      tabPanel);
+    if (focusFind) {
+      const f = document.getElementById("trace-find");
+      if (f) { f.focus(); f.setSelectionRange(f.value.length, f.value.length); }
+    }
+    announce(findText ? `Find in Trace: ${countText}` : `Trace details: ${spans.length} spans`);
+  }
+
+  setChildren(view, header,
+    el("div", { class: "explorer-toolbar trace-toolbar" },
+      field("Trace scope", scopeSelect), rangeGroup,
+      el("div", { class: "trace-id-lookup" }, field("Trace ID", traceIdInput), traceIdGo)),
+    el("div", { class: "explorer" },
+      el("aside", { class: "card explorer-builder", "aria-label": "Span filters" },
+        el("h2", { text: "Span filters" }),
+        field("Service name", serviceInput, "The OpenTelemetry service, service.name."),
+        field("Span name", nameInput),
+        field("Span status", statusSelect),
+        field("Minimum duration (ms)", minInput),
+        field("Span kind", kindSelect),
+        el("h2", { text: "Filter" }),
+        field("Filter", filterInput, "root:, span:, latency:, label:KEY, KEY:VALUE; + for exact, ^ for the root span."),
+        apply),
+      el("section", { class: "card explorer-results", "aria-label": "Spans" },
+        el("div", { class: "trace-chart-toolbar" }, field("Chart view", chartSelect)),
+        chartHost, selectionHost,
+        el("div", { class: "tab-strip", role: "tablist", "aria-label": "Span tables" }, ...tableTabs),
+        tablePanel)),
+    detailsHost);
+  announce("Trace explorer");
+  await run();
+  if (params.get("trace")) openTrace(params.get("trace"), params.get("traceProject") || "", params.get("span") || "");
+}
+
 async function renderMonitoring(view) {
   const header = [pageHeader("Monitoring",
     "Charts over the readings this instance has taken since it started.")];
@@ -14611,9 +15304,17 @@ async function renderLogs(view) {
   // from. Application is made from the App Hub application ID label
   // apphub.application.id, and Workload / Service from apphub.workload.id
   // and apphub.service.id too: the entry's apphub, which the instance
-  // fills in for a resource registered to an application (#2096).
-  const LABEL_DIMENSIONS = [["Application", ["apphub.application.id"]],
-    ["Workload / Service", ["apphub.workload.id", "apphub.service.id", 'labels."k8s-pod/app"', 'labels."service.name"']]];
+  // fills in for a resource registered to an application (#2096). Google
+  // lists Workload / Service, then Application, and makes Workload /
+  // Service from resource.labels.namespace_name too, and, while the query
+  // is filtered by the Audited Resource type, from resource.labels.service
+  // (logs-explorer-interface, re-read 2026-11-21).
+  const LABEL_DIMENSIONS = [
+    ["Workload / Service", ["apphub.workload.id", "apphub.service.id", 'labels."k8s-pod/app"', 'labels."service.name"', "resource.labels.namespace_name"]],
+    ["Application", ["apphub.application.id"]]];
+  const AUDITED_SERVICE = "resource.labels.service";
+  const auditedFilter = () => resourceType.value === "audited_resource" ||
+    /(^|[\s(])resource\.type\s*=\s*"?audited_resource"?(?![\w-])/.test(queryEditor.value);
   // How many json_payload fields Frequent fields lists, and values a field.
   const FREQUENT_FIELDS = 10;
   const FIELD_VALUES = 20;
@@ -14710,7 +15411,9 @@ async function renderLogs(view) {
     const system = LOG_FIELD_GROUPS.map(([path, label]) => ({ path, label, values: countValues(entries, path) }));
     // After Resource type and Severity, each label dimension the entries
     // carry values for (#2032).
-    const dimensions = LABEL_DIMENSIONS.map(([label, paths]) => ({ path: paths[0], label, values: dimensionValues(entries, paths) }))
+    const audited = auditedFilter();
+    const dimensions = LABEL_DIMENSIONS.map(([label, paths]) => [label, audited && label === "Workload / Service" ? [...paths, AUDITED_SERVICE] : paths])
+      .map(([label, paths]) => ({ path: paths[0], label, values: dimensionValues(entries, paths) }))
       .filter((g) => g.values.length);
     system.splice(2, 0, ...dimensions);
     const frequent = frequentFields(entries).map((path) => ({ path, label: path, mono: true, values: countValues(entries, path) }));
@@ -15176,6 +15879,7 @@ async function renderLogs(view) {
           el("button", { class: "link-button is-inline", text: "Expand nested fields", onclick: () => setOpen(true) }),
           el("button", { class: "link-button is-inline", text: "Collapse nested fields", onclick: () => setOpen(false) }),
           el("button", { class: "link-button is-inline", text: "Copy link", onclick: () => copy(entryLink(entry), "link to the entry") }),
+          traceDetailsLink(entry.logEntry || {}),
           el("button", { class: "link-button is-inline", text: "Copy as JSON",
             onclick: () => copy(JSON.stringify(entry.logEntry || {}, null, 2), "entry as JSON") })),
         tree));
@@ -15918,6 +16622,8 @@ let PLAYGROUND_CHAT = [];
 let PLAYGROUND_SYSTEM = "";
 let PLAYGROUND_TOOLS = "";
 let PLAYGROUND_TOOL_MODE = "AUTO";
+// The context cache the requests name (cachedContent, #2121), or "".
+let PLAYGROUND_CACHE = "";
 
 // The image types Agent Studio's Insert Media takes for Gemini (Google's
 // image understanding page: image/png, image/jpeg, image/webp, image/heic,
@@ -15969,9 +16675,11 @@ function playgroundCode(lang, status, body) {
   const gc = body.generationConfig || {};
   const snake = { maxOutputTokens: "max_output_tokens", topP: "top_p", topK: "top_k", stopSequences: "stop_sequences",
     presencePenalty: "presence_penalty", frequencyPenalty: "frequency_penalty", responseMimeType: "response_mime_type",
-    responseSchema: "response_schema" };
+    responseSchema: "response_schema", candidateCount: "candidate_count", thinkingConfig: "thinking_config",
+    responseLogprobs: "response_logprobs" };
   for (const [k, v] of Object.entries(gc)) cfg[snake[k] || k] = v;
   if (body.systemInstruction) cfg.system_instruction = body.systemInstruction;
+  if (body.cachedContent) cfg.cached_content = body.cachedContent;
   if (body.tools) cfg.tools = body.tools;
   if (body.toolConfig) cfg.tool_config = { function_calling_config: body.toolConfig.functionCallingConfig };
   const py = (v) => JSON.stringify(v, null, 4).replace(/\btrue\b/g, "True").replace(/\bfalse\b/g, "False").replace(/\bnull\b/g, "None");
@@ -16012,6 +16720,32 @@ function playgroundDisclosure(id, label, ...children) {
     button.setAttribute("aria-expanded", String(!body.hidden));
   });
   return el("div", { class: "pg-section" }, button, body);
+}
+
+// playgroundLogprobs draws one response's logprobsResult (#2122): its
+// avgLogprobs, then a row per decode step with the chosen token, its log
+// probability and probability, and the step's top candidates, most probable
+// first, as the API returns them. A streamed answer's avgLogprobs is the
+// mean of its chunks' steps (each chunk reports its own).
+function playgroundLogprobs(i, s, many) {
+  const fmt = (v) => Number(v).toFixed(4);
+  const pct = (v) => (Math.exp(v) * 100).toFixed(2) + "%";
+  const tok = (c) => JSON.stringify(c.token ?? "");
+  const avg = s.avg.length === 1 ? s.avg[0]
+    : s.chosen.length ? s.chosen.reduce((a, c) => a + (c.logProbability || 0), 0) / s.chosen.length : null;
+  const label = many ? `Response ${i + 1}` : "Response";
+  const rows = s.chosen.map((c, n) => el("tr", {},
+    el("td", { class: "mono", text: String(n + 1) }),
+    el("td", { class: "mono", text: tok(c) }),
+    el("td", { class: "mono", text: fmt(c.logProbability || 0) }),
+    el("td", { class: "mono", text: pct(c.logProbability || 0) }),
+    el("td", { class: "mono", text: (s.top[n]?.candidates || []).map((t) => `${tok(t)} ${fmt(t.logProbability || 0)}`).join(", ") || "—" })));
+  return el("section", { class: "pg-logprobs", id: "pg-logprobs-" + i, "aria-label": `${label} log probabilities` },
+    ...(many ? [el("h5", { text: label })] : []),
+    el("p", { id: "pg-avg-logprobs-" + i, text: `Average log probability (avgLogprobs): ${avg === null ? "—" : fmt(avg)}` }),
+    el("div", { class: "table-wrap" }, el("table", { "aria-label": `${label}: chosen tokens and top candidates` },
+      el("thead", {}, el("tr", {}, ["Step", "Chosen token", "Log probability", "Probability", "Top candidates"].map((h) => el("th", { scope: "col", text: h })))),
+      el("tbody", { id: "pg-logprobs-rows-" + i }, ...rows))));
 }
 
 async function renderPlayground(view) {
@@ -16081,6 +16815,54 @@ async function renderPlayground(view) {
     placeholder: '{"type":"BOOLEAN"}' });
   const jsonOut = el("input", { type: "checkbox", id: "pg-opt-json" });
 
+  // Number of responses (candidateCount, 1 to 8, #2121): more than one is
+  // generateContent only, as Vertex documents, so the page sends it unary.
+  const candidates = optInput("candidateCount", "Number of responses", { type: "number", step: "1", min: "1", max: "8",
+    placeholder: "1", "aria-describedby": "pg-candidates-help" });
+  const candidatesHelp = el("p", { id: "pg-candidates-help", class: "unavailable",
+    text: "More than one response is sent with generateContent (not streamed)." });
+  // Thinking (thinkingConfig, #2121): Google's Thinking budget (Off, Auto,
+  // Manual with a token budget) and Include thoughts.
+  const thinkMode = el("select", { id: "pg-thinking-mode" },
+    el("option", { value: "off", text: "Off" }), el("option", { value: "auto", text: "Auto" }),
+    el("option", { value: "manual", text: "Manual" }));
+  const thinkBudget = el("input", { type: "number", id: "pg-thinking-budget", step: "1", min: "1", value: "1024" });
+  const thinkBudgetField = el("label", { for: "pg-thinking-budget", class: "pg-field" },
+    el("span", { text: "Budget (tokens)" }), thinkBudget);
+  const thoughts = el("input", { type: "checkbox", id: "pg-include-thoughts" });
+  const syncThinking = () => {
+    thinkBudgetField.hidden = thinkMode.value !== "manual";
+    thoughts.disabled = thinkMode.value === "off";
+    if (thoughts.disabled) thoughts.checked = false;
+  };
+  thinkMode.addEventListener("change", syncThinking);
+  syncThinking();
+
+  // Log probabilities (responseLogprobs, #2122) and Top candidates
+  // (logprobs, 1 to 20, which the API takes only with responseLogprobs, so
+  // the number is enabled only with the switch). Google's pages document
+  // no console control for these, so the labels are the inference
+  // reference's ("log probabilities", "top candidate tokens"), under
+  // Advanced beside the sampler (UNVERIFIED, re-read 2026-11-21:
+  // https://docs.cloud.google.com/vertex-ai/generative-ai/docs/model-reference/inference).
+  const lpOn = el("input", { type: "checkbox", role: "switch", id: "pg-logprobs" });
+  const lpTop = el("input", { type: "number", id: "pg-logprobs-top", step: "1", min: "1", max: "20", placeholder: "None",
+    "aria-describedby": "pg-logprobs-help" });
+  const lpHelp = el("p", { id: "pg-logprobs-help", class: "unavailable",
+    text: "Return each chosen token's log probability; Top candidates (1 to 20) also returns that many most probable tokens per step." });
+  const syncLogprobs = () => {
+    lpTop.disabled = !lpOn.checked;
+    if (lpTop.disabled) lpTop.value = "";
+  };
+  lpOn.addEventListener("change", syncLogprobs);
+  syncLogprobs();
+  const lpFields = supported.has("responseLogprobs") ? [
+    el("label", { for: "pg-logprobs", class: "pg-check", title: "responseLogprobs: each chosen token's log probability" },
+      lpOn, " Log probabilities"),
+    ...(supported.has("logprobs") ? [el("label", { for: "pg-logprobs-top", class: "pg-field" },
+      el("span", { text: "Top candidates" }), lpTop)] : []),
+    lpHelp] : [];
+
   // Function calling (#1962): the declarations as the API takes them, a
   // JSON array of FunctionDeclaration, and the mode (AUTO, ANY, NONE,
   // VALIDATED: Google's function calling page). Agent Studio lists
@@ -16123,8 +16905,14 @@ async function renderPlayground(view) {
     el("h2", { id: "pg-settings-h", text: "Model settings" }),
     el("p", { class: "pg-field" }, el("span", { text: "Model" }), el("span", { class: "mono", text: status.model })),
     ...basic.map((o) => o.field),
+    ...(supported.has("candidateCount") ? [candidates.field, candidatesHelp] : []),
     ...(supported.has("stopSequences") ? [stops.field] : []),
-    playgroundDisclosure("pg-advanced", "Advanced", ...advanced.map((o) => o.field)),
+    ...(supported.has("thinkingConfig") ? [playgroundDisclosure("pg-thinking", "Thinking",
+      el("label", { for: "pg-thinking-mode", class: "pg-field" }, el("span", { text: "Thinking budget" }), thinkMode),
+      thinkBudgetField,
+      el("label", { for: "pg-include-thoughts", class: "pg-check", title: "includeThoughts: the model's thoughts come back as parts marked thought" },
+        thoughts, " Include thoughts"))] : []),
+    playgroundDisclosure("pg-advanced", "Advanced", ...advanced.map((o) => o.field), ...lpFields),
     ...(supported.has("responseMimeType") ? [playgroundDisclosure("pg-output-format", "Output format",
       el("label", { for: "pg-opt-json", class: "pg-check", title: "responseMimeType application/json; the schema, if given, constrains the answer" },
         jsonOut, " JSON (application/json)"),
@@ -16141,6 +16929,17 @@ async function renderPlayground(view) {
     }
     const st = stops.input.value.split(",").map((x) => x.trim()).filter((x) => x);
     if (st.length) cfg.stopSequences = st;
+    const n = candidates.input.value.trim();
+    if (supported.has("candidateCount") && n !== "" && Number(n) !== 1) cfg.candidateCount = Number(n);
+    if (supported.has("thinkingConfig") && thinkMode.value !== "off") {
+      cfg.thinkingConfig = { thinkingBudget: thinkMode.value === "auto" ? -1 : Number(thinkBudget.value) };
+      if (thoughts.checked) cfg.thinkingConfig.includeThoughts = true;
+    }
+    if (supported.has("responseLogprobs") && lpOn.checked) {
+      cfg.responseLogprobs = true;
+      const k = lpTop.value.trim();
+      if (supported.has("logprobs") && k !== "") cfg.logprobs = Number(k);
+    }
     if (jsonOut.checked) {
       cfg.responseMimeType = "application/json";
       const sc = schema.value.trim();
@@ -16268,8 +17067,12 @@ async function renderPlayground(view) {
     const contents = PLAYGROUND_CHAT.concat(pending && pending.length ? [{ role: "user", parts: pending }] : []).map(playgroundStrip);
     const body = { contents };
     const si = system.value.trim();
-    if (si) body.systemInstruction = { parts: [{ text: si }] };
-    if (fcOn.checked && decls.value.trim()) {
+    // A request that names a cache takes its system instruction and tools
+    // from the cache: Vertex refuses them alongside one.
+    const cache = PLAYGROUND_CACHE;
+    if (cache) body.cachedContent = cache;
+    if (si && !cache) body.systemInstruction = { parts: [{ text: si }] };
+    if (fcOn.checked && decls.value.trim() && !cache) {
       body.tools = [{ functionDeclarations: JSON.parse(decls.value) }];
       body.toolConfig = { functionCallingConfig: { mode: mode.value } };
     }
@@ -16371,6 +17174,100 @@ async function renderPlayground(view) {
     if (open) drawCode();
   });
 
+  // --- Context caching (cachedContents, #2121) ------------------------
+  // Create a cache from the prompt (the conversation, this turn and the
+  // system instructions), list the caches with their tokens and expiry,
+  // update a cache's TTL, delete it, and pick one for the requests.
+  const cacheName = el("input", { type: "text", id: "pg-cache-name", placeholder: "my-cache" });
+  const cacheTTL = el("input", { type: "number", id: "pg-cache-ttl", min: "1", step: "1", value: "60" });
+  const cacheCreate = el("button", { type: "button", id: "pg-cache-create", text: "Create cache from prompt" });
+  const cacheUse = el("select", { id: "pg-cache-use" }, el("option", { value: "", text: "None" }));
+  const cacheBody = el("tbody", { id: "pg-cache-rows" });
+  const cacheStatus = el("p", { id: "pg-cache-status", class: "unavailable", role: "status" });
+  const cacheCall = async (method, query, body) => {
+    const resp = await fetch("/api/ai/playground/caches" + query, { method,
+      headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+    const text = await resp.text();
+    if (!resp.ok) throw new Error(errorMessageOf(text) || `HTTP ${resp.status}`);
+    return text ? JSON.parse(text) : {};
+  };
+  const cacheID = (name) => name.split("/").pop();
+  const loadCaches = async () => {
+    let list = [];
+    try { list = (await cacheCall("GET", "")).cachedContents || []; } catch (err) {
+      cacheStatus.textContent = "Listing caches failed: " + err.message; return;
+    }
+    if (PLAYGROUND_CACHE && !list.some((c) => c.name === PLAYGROUND_CACHE)) PLAYGROUND_CACHE = "";
+    setChildren(cacheUse, el("option", { value: "", text: "None" }),
+      ...list.map((c) => el("option", { value: c.name, text: c.displayName || cacheID(c.name) })));
+    cacheUse.value = PLAYGROUND_CACHE;
+    cacheBody.replaceChildren();
+    if (!list.length) {
+      cacheBody.append(el("tr", {}, el("td", { colspan: "5", class: "unavailable", text: "No caches. Create one from the prompt." })));
+    }
+    for (const c of list) {
+      const id = cacheID(c.name);
+      const ttl = el("input", { type: "number", min: "1", step: "1", value: "60", id: "pg-cache-ttl-" + id,
+        "aria-label": `New TTL in minutes for ${c.displayName || id}` });
+      const update = el("button", { type: "button", class: "secondary", text: "Update TTL", "aria-label": `Update TTL of ${c.displayName || id}`,
+        onclick: async () => {
+          try {
+            await cacheCall("PATCH", `?id=${encodeURIComponent(id)}&updateMask=ttl`, { ttl: `${Number(ttl.value) * 60}s` });
+            announce("TTL updated"); cacheStatus.textContent = `Updated ${c.displayName || id}`; loadCaches();
+          } catch (err) { cacheStatus.textContent = "Update failed: " + err.message; }
+        } });
+      const del = el("button", { type: "button", class: "secondary", text: "Delete", "aria-label": `Delete ${c.displayName || id}`,
+        onclick: async () => {
+          try {
+            await cacheCall("DELETE", `?id=${encodeURIComponent(id)}`);
+            if (PLAYGROUND_CACHE === c.name) PLAYGROUND_CACHE = "";
+            announce("Cache deleted"); cacheStatus.textContent = `Deleted ${c.displayName || id}`; loadCaches(); countSoon();
+          } catch (err) { cacheStatus.textContent = "Delete failed: " + err.message; }
+        } });
+      cacheBody.append(el("tr", { "data-cache": c.name },
+        el("td", {}, el("span", { text: c.displayName || "—" }), el("br"), el("span", { class: "mono", text: id })),
+        el("td", { class: "mono", text: String(c.usageMetadata?.totalTokenCount ?? "—") }),
+        el("td", { class: "mono", text: c.expireTime ? new Date(c.expireTime).toLocaleString() : "—" }),
+        el("td", {}, ttl), el("td", {}, el("div", { class: "card-actions" }, update, del))));
+    }
+  };
+  cacheUse.addEventListener("change", () => {
+    PLAYGROUND_CACHE = cacheUse.value;
+    cacheStatus.textContent = PLAYGROUND_CACHE ? "Requests use this cache; its system instructions and tools replace the page's." : "";
+    countSoon();
+  });
+  cacheCreate.addEventListener("click", async () => {
+    const parts = turnParts();
+    const contents = PLAYGROUND_CHAT.concat(parts.length ? [{ role: "user", parts }] : []).map(playgroundStrip);
+    if (!contents.length) { announce("A prompt is required"); prompt.focus(); return; }
+    const body = { contents, ttl: `${Number(cacheTTL.value || 60) * 60}s` };
+    if (cacheName.value.trim()) body.displayName = cacheName.value.trim();
+    const si = system.value.trim();
+    if (si) body.systemInstruction = { parts: [{ text: si }] };
+    cacheCreate.disabled = true;
+    cacheStatus.textContent = "Creating…";
+    try {
+      const made = await cacheCall("POST", "", body);
+      cacheStatus.textContent = `Created ${made.displayName || cacheID(made.name || "")} (${made.usageMetadata?.totalTokenCount ?? "?"} tokens)`;
+      announce("Cache created");
+      await loadCaches();
+    } catch (err) { cacheStatus.textContent = "Create failed: " + err.message; }
+    finally { cacheCreate.disabled = false; }
+  });
+  const cacheCard = el("section", { class: "card", id: "pg-cache", "aria-labelledby": "pg-cache-h" },
+    el("h2", { id: "pg-cache-h", text: "Context caching" }),
+    el("p", { class: "unavailable", text: "A cache holds the prompt's contents and system instructions for reuse (at least 2,048 tokens). A request that uses one sends only its new turn." }),
+    el("div", { class: "pg-stack" },
+      el("label", { for: "pg-cache-name", class: "pg-field" }, el("span", { text: "Cache name" }), cacheName),
+      el("label", { for: "pg-cache-ttl", class: "pg-field" }, el("span", { text: "TTL (minutes)" }), cacheTTL),
+      el("div", { class: "card-actions" }, cacheCreate),
+      el("label", { for: "pg-cache-use", class: "pg-field" }, el("span", { text: "Use cache" }), cacheUse)),
+    cacheStatus,
+    el("div", { class: "table-wrap" }, el("table", { "aria-label": "Context caches" },
+      el("thead", {}, el("tr", {}, ["Cache", "Tokens", "Expires", "New TTL (minutes)", "Actions"].map((c) => el("th", { scope: "col", text: c })))),
+      cacheBody)));
+  loadCaches();
+
   const send = el("button", { type: "button", id: "pg-submit", text: "Submit" });
   const cancel = el("button", { type: "button", class: "secondary", text: "Cancel", disabled: "disabled" });
   const clear = el("button", { type: "button", class: "secondary", id: "pg-clear", text: "Clear conversation" });
@@ -16386,6 +17283,13 @@ async function renderPlayground(view) {
   const timing = el("span", { class: "unavailable", text: "" });
   const usage = el("p", { id: "pg-usage", class: "unavailable" });
   const output = el("pre", { class: "mono pg-output", id: "pg-output", "aria-live": "polite", "aria-label": "Response" });
+  const thoughtsOut = el("pre", { class: "mono pg-output", id: "pg-thoughts", tabindex: "0", "aria-labelledby": "pg-thoughts-h" });
+  const thoughtsSection = el("div", { id: "pg-thoughts-section" }, el("h4", { id: "pg-thoughts-h", text: "Thoughts" }), thoughtsOut);
+  thoughtsSection.hidden = true;
+  const candidatesOut = el("div", { id: "pg-candidates", class: "pg-stack" });
+  candidatesOut.hidden = true;
+  const logprobsOut = el("div", { id: "pg-logprobs-out", class: "pg-stack" });
+  logprobsOut.hidden = true;
   const historyBody = el("tbody");
 
   const refused = el("details", { class: "card" },
@@ -16432,7 +17336,7 @@ async function renderPlayground(view) {
     send.disabled = true;
     cancel.disabled = false;
 
-    const streaming = stream.checked;
+    const streaming = stream.checked && !(body.generationConfig && body.generationConfig.candidateCount > 1);
     const rawBody = raw.checked;
     const controller = new AbortController();
     PLAYGROUND_ABORT = controller;
@@ -16443,9 +17347,41 @@ async function renderPlayground(view) {
     let text = "";
     const calls = [];
     let meta = null;
+    let thought = "";
+    thoughtsOut.textContent = "";
+    thoughtsSection.hidden = true;
+    candidatesOut.replaceChildren();
+    candidatesOut.hidden = true;
+    logprobsOut.replaceChildren();
+    logprobsOut.hidden = true;
+    // Each response's logprobsResult, gathered over the stream's chunks
+    // (every chunk carries its own tokens' steps).
+    const scores = [];
     const take = (event) => {
       if (event.usageMetadata) meta = event.usageMetadata;
-      for (const p of event.candidates?.[0]?.content?.parts || []) {
+      const all = event.candidates || [];
+      all.forEach((c, i) => {
+        if (!c.logprobsResult && c.avgLogprobs === undefined) return;
+        const s = scores[c.index ?? i] || (scores[c.index ?? i] = { chosen: [], top: [], avg: [] });
+        s.chosen.push(...(c.logprobsResult?.chosenCandidates || []));
+        s.top.push(...(c.logprobsResult?.topCandidates || []));
+        if (c.avgLogprobs !== undefined) s.avg.push(c.avgLogprobs);
+      });
+      if (all.length > 1) {
+        // Number of responses: each candidate under its own heading;
+        // the first one continues the conversation.
+        candidatesOut.hidden = false;
+        candidatesOut.append(...all.map((c, i) => el("section", { class: "pg-candidate", "aria-labelledby": "pg-candidate-h-" + i },
+          el("h4", { id: "pg-candidate-h-" + i, text: `Response ${i + 1}` }),
+          el("pre", { class: "mono pg-output", id: "pg-candidate-" + i, tabindex: "0",
+            text: (c.content?.parts || []).filter((p) => p.text && !p.thought).map((p) => p.text).join("") }))));
+      }
+      for (const p of all[0]?.content?.parts || []) {
+        if (p.thought) {
+          // Thoughts are shown apart from the answer (includeThoughts).
+          if (p.text) { thought += p.text; thoughtsOut.textContent += p.text; thoughtsSection.hidden = false; }
+          continue;
+        }
         if (p.functionCall) calls.push(p.functionCall);
         if (p.text) {
           if (firstAt === null) firstAt = performance.now();
@@ -16513,7 +17449,15 @@ async function renderPlayground(view) {
       cancel.disabled = true;
       PLAYGROUND_ABORT = null;
       if (meta) {
-        usage.textContent = `Tokens: prompt ${meta.promptTokenCount ?? "—"} · response ${meta.candidatesTokenCount ?? "—"} · total ${meta.totalTokenCount ?? "—"} (usageMetadata)`;
+        usage.textContent = `Tokens: prompt ${meta.promptTokenCount ?? "—"} · response ${meta.candidatesTokenCount ?? "—"}` +
+          (meta.thoughtsTokenCount ? ` · thoughts ${meta.thoughtsTokenCount}` : "") +
+          (meta.cachedContentTokenCount ? ` · cached ${meta.cachedContentTokenCount}` : "") +
+          ` · total ${meta.totalTokenCount ?? "—"} (usageMetadata)`;
+      }
+      if (scores.length) {
+        logprobsOut.hidden = false;
+        logprobsOut.append(el("h4", { id: "pg-logprobs-h", text: "Log probabilities" }),
+          ...scores.map((s, i) => s ? playgroundLogprobs(i, s, scores.length > 1) : null).filter((x) => x));
       }
       if (ok) {
         // The turn and its answer join the conversation; the prompt box
@@ -16561,8 +17505,9 @@ async function renderPlayground(view) {
           el("div", { class: "card-actions" }, send, cancel, tokens, getCode, clear, timing),
           tokenizer,
           el("h3", { id: "pg-response-h", text: "Response" }),
-          output, usage),
-        codePane),
+          thoughtsSection, output, candidatesOut, logprobsOut, usage),
+        codePane,
+        cacheCard),
       settings),
     el("div", { class: "card" },
       el("h2", { text: "This session" }),
@@ -18437,34 +19382,144 @@ async function requestCharts(samples = []) {
       : null);
 }
 
-// browseBuckets is a gs:// field's Browse (#1845): the project's buckets in
-// this instance's Cloud Storage, one of which fills the field as
-// gs://BUCKET/. It is drawn over the form it was opened from.
-async function browseBuckets(control) {
+// browseBuckets is the shared Cloud Storage picker behind a gs:// field's
+// Browse (#1845, #2097), laid out as Google's Select folder and Select
+// object dialogs are: a breadcrumb from Buckets down to the folder shown, a
+// Filter over its rows, the buckets or the folders and objects directly in
+// it (a bucket or folder row opens with its chevron, and its name chooses
+// it), and Select and Cancel. What it chooses depends on the field's
+// Browse: "storage" a bucket or folder (gs://BUCKET/ or gs://BUCKET/FOLDER/,
+// Batch process's Destination path, Speech's Output location), "storage-
+// object" an object (gs://BUCKET/OBJECT, Speech's Audio file), "storage-
+// path" either (Document AI's Source path, which takes a folder or one
+// file) and "storage-bucket" a bucket's bare name (Speech's New Workspace).
+// Select with nothing chosen takes the folder shown, where a folder can be
+// chosen. Folders and objects are read from the bucket page's own Objects
+// listing (/api/detail/storage), so the picker lists what the bucket's
+// page does, managed and hierarchical-namespace folders included.
+async function browseBuckets(control, mode = "storage") {
+  const wantObject = mode === "storage-object" || mode === "storage-path";
+  const wantFolder = mode === "storage" || mode === "storage-path";
+  const bucketOnly = mode === "storage-bucket";
+  const title = mode === "storage-object" ? "Select object" : mode === "storage-path" ? "Select folder or object"
+    : bucketOnly ? "Select bucket" : "Select folder";
   const { dialog, close } = openModal({ labelledBy: "browse-title" });
-  const body = el("div", { class: "browse-list" }, loadingState(3, { what: "buckets" }));
+  const trail = el("nav", { class: "breadcrumb browse-trail", "aria-label": "Location" });
+  const filter = el("input", { type: "search", id: "browse-filter", class: "browse-filter", placeholder: "Filter",
+    "aria-label": "Filter by name" });
+  const body = el("div", { class: "browse-list", id: "browse-list" });
+  const status = el("p", { class: "form-help", id: "browse-chosen", "aria-live": "polite" });
+  const select = el("button", { type: "button", id: "browse-select", text: "Select" });
   dialog.append(el("div", { class: "modal-body" },
-    el("h2", { id: "browse-title", text: "Select a bucket" }),
-    body,
+    el("h2", { id: "browse-title", text: title }),
+    trail, filter, body, status,
     el("div", { class: "modal-actions" },
-      el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }))));
-  try {
-    const list = await api(`/api/resources/storage?project=${encodeURIComponent(currentProject())}`);
-    const items = list.items || [];
-    if (list.unavailable || list.prompt) return setChildren(body, el("p", { class: "form-error", text: list.unavailable || list.prompt }));
-    if (!items.length) return setChildren(body, el("p", { class: "unavailable", text: "This project has no buckets. Create one in Cloud Storage first." }));
-    setChildren(body, el("ul", { class: "fs-rows", role: "list" }, ...items.map((b) => el("li", { class: "fs-row" },
-      el("button", { type: "button", class: "fs-row-link", text: b.name, onclick: () => {
-        control.value = `gs://${b.name}/`;
-        control.dispatchEvent(new Event("input", { bubbles: true }));
-        control.dispatchEvent(new Event("change", { bubbles: true }));
-        close();
-        control.focus();
-      } })))));
-    body.querySelector("button").focus();
-  } catch (err) {
-    setChildren(body, el("p", { class: "form-error", text: `Cloud Storage cannot be read: ${err.message}` }));
-  }
+      el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }),
+      select)));
+  const project = currentProject();
+  // where is the bucket then the folder's segments; [] is the bucket list.
+  let where = [];
+  let rows = [];
+  let chosen = null;
+  const uriOf = (segs, object) => object !== undefined
+    ? `gs://${segs[0]}/${object}`
+    : `gs://${segs[0]}/${segs.slice(1).map((s) => s + "/").join("")}`;
+  const valueOf = (c) => bucketOnly ? c.segs[0] : c.uri;
+  const canChooseHere = () => where.length > 0 && wantFolder;
+  const refreshSelect = () => {
+    const pick = chosen || (canChooseHere() ? { uri: uriOf(where), segs: where } : null);
+    select.disabled = !pick;
+    status.textContent = pick ? `Selected: ${valueOf(pick)}` : (wantObject ? "Choose an object." : "Choose a bucket or folder.");
+  };
+  const commit = () => {
+    const pick = chosen || (canChooseHere() ? { uri: uriOf(where), segs: where } : null);
+    if (!pick) return;
+    control.value = valueOf(pick);
+    control.dispatchEvent(new Event("input", { bubbles: true }));
+    control.dispatchEvent(new Event("change", { bubbles: true }));
+    close();
+    control.focus();
+  };
+  select.addEventListener("click", commit);
+  const drawTrail = () => {
+    const nodes = [where.length
+      ? el("a", { href: "#", text: "Buckets", onclick: (e) => { e.preventDefault(); go([]); } })
+      : el("span", { text: "Buckets", "aria-current": "location" })];
+    where.forEach((s, i) => {
+      nodes.push(el("span", { "aria-hidden": "true", text: "/" }));
+      nodes.push(i === where.length - 1
+        ? el("span", { text: s, "aria-current": "location" })
+        : el("a", { href: "#", text: s, onclick: (e) => { e.preventDefault(); go(where.slice(0, i + 1)); } }));
+    });
+    setChildren(trail, ...nodes);
+  };
+  const drawRows = () => {
+    const q = filter.value.trim().toLowerCase();
+    const shown = rows.filter((r) => !q || r.label.toLowerCase().includes(q));
+    if (!shown.length) {
+      return setChildren(body, el("p", { class: "unavailable", text: rows.length ? "No rows match the filter."
+        : where.length ? "This folder is empty." : "This project has no buckets. Create one in Cloud Storage first." }));
+    }
+    setChildren(body, el("ul", { class: "fs-rows", role: "list" }, ...shown.map((r) => {
+      const selectable = r.kind === "object" ? wantObject : (r.kind === "bucket" ? !wantObject || wantFolder || bucketOnly : wantFolder);
+      const isChosen = chosen && chosen.uri === r.uri;
+      return el("li", { class: "fs-row" + (isChosen ? " is-selected" : "") },
+        el("button", { type: "button", class: "fs-row-link", text: r.label, "aria-pressed": isChosen ? "true" : "false",
+          disabled: !selectable && r.kind === "object",
+          title: r.kind === "object" ? r.type || "Object" : r.kind === "bucket" ? "Bucket" : "Folder",
+          onclick: () => {
+            if (!selectable) return go(r.segs);
+            chosen = isChosen ? null : r;
+            drawRows();
+            refreshSelect();
+            [...body.querySelectorAll(".fs-row-link")].find((b) => b.textContent === r.label)?.focus();
+          },
+          ondblclick: () => { if (r.kind !== "object" && !bucketOnly) go(r.segs); else if (selectable) { chosen = r; commit(); } } }),
+        r.kind !== "object" && !bucketOnly
+          ? el("button", { type: "button", class: "icon-button browse-open", "aria-label": `Open ${r.label}`, text: "›",
+              onclick: () => go(r.segs) })
+          : null);
+    })));
+  };
+  const go = async (segs) => {
+    where = segs;
+    chosen = null;
+    filter.value = "";
+    drawTrail();
+    refreshSelect();
+    setChildren(body, loadingState(3, { what: segs.length ? "objects" : "buckets" }));
+    try {
+      if (!segs.length) {
+        const list = await api(`/api/resources/storage?project=${encodeURIComponent(project)}`);
+        if (list.unavailable || list.prompt) return setChildren(body, el("p", { class: "form-error", text: list.unavailable || list.prompt }));
+        rows = (list.items || []).map((b) => ({ kind: "bucket", label: b.name, segs: [b.name], uri: `gs://${b.name}/` }));
+      } else {
+        const d = await api(`/api/detail/storage?project=${encodeURIComponent(project)}` +
+          segs.map((s) => `&name=${encodeURIComponent(s)}`).join(""));
+        const objects = (d.sections || []).find((s) => s.id === "objects");
+        const listing = objects && objects.listing;
+        if (d.unavailable || !listing) return setChildren(body, el("p", { class: "form-error", text: d.unavailable || "The folder cannot be listed." }));
+        if (listing.unavailable) return setChildren(body, el("p", { class: "form-error", text: listing.unavailable }));
+        rows = (listing.items || []).map((it) => {
+          if (it.object && it.object.length === 2) {
+            return { kind: "object", label: it.name, uri: uriOf(segs, it.object[1]), segs, type: (it.fields || {}).Type };
+          }
+          const leaf = it.name.replace(/\/$/, "");
+          const sub = [...segs, leaf];
+          return { kind: "folder", label: it.name, segs: sub, uri: uriOf(sub) };
+        });
+      }
+      drawRows();
+      if (where === segs) body.querySelector("button")?.focus();
+    } catch (err) {
+      setChildren(body, el("p", { class: "form-error", text: `Cloud Storage cannot be read: ${err.message}` }));
+    }
+  };
+  filter.addEventListener("input", drawRows);
+  // A field that already names a place opens there.
+  const m = /^gs:\/\/([^/]+)\/?(.*)$/.exec(control.value.trim());
+  const start = m && !bucketOnly ? [m[1], ...m[2].split("/").slice(0, -1).filter(Boolean)] : [];
+  await go(start);
 }
 
 // formKMSLocation is the Cloud KMS location of the location a create
@@ -22259,55 +23314,208 @@ function renderIAMTroubleshooter(view) {
   if (asked.get("principal") && asked.get("resource") && asked.get("permission")) submit(new Event("submit"));
 }
 
-// renderIAMAnalyzer is Policy Analyzer (#1879): who has what in the
-// project's policies and its ancestors', by principal, permission or role.
+// analyzerFormModal is Policy Analyzer's Save query and Export dialogs: a
+// form, and onSubmit's error shown in it.
+function analyzerFormModal({ title, submitLabel, fields: specs, onSubmit }) {
+  const fields = buildCreateForm({ label: title, fields: specs });
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  let submitting = false;
+  const { dialog, close } = openModal({ labelledBy: "analyzer-modal-title", canClose: () => !submitting });
+  const primary = el("button", { type: "submit", class: "primary", text: submitLabel });
+  const cancel = el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() });
+  const submit = async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    if (submitting || !fields.validate()) return;
+    submitting = true;
+    primary.disabled = true;
+    try {
+      await onSubmit(fields.values());
+      submitting = false;
+      close();
+      return;
+    } catch (err) {
+      error.textContent = err.message;
+      error.hidden = false;
+    }
+    submitting = false;
+    primary.disabled = false;
+  };
+  dialog.append(el("form", { class: "modal-body", novalidate: true, onsubmit: submit },
+    el("h2", { id: "analyzer-modal-title", text: title }), error, ...fields.nodes,
+    el("div", { class: "modal-actions" }, cancel, primary)));
+  fields.focusFirst();
+}
+
+// renderIAMAnalyzer is Policy Analyzer (#1879, #2112), in Google's
+// layout: the Analyze policies tab's custom query (a scope; a principal,
+// resource, role or permission; the Advanced options: list resources
+// within, list users inside groups, list permissions inside roles,
+// service account impersonation, an access time and the relationship
+// edges), then Run query, Save query and Export (analyzeIamPolicyLongrunning
+// to Cloud Storage or BigQuery); and the Saved queries tab.
 function renderIAMAnalyzer(view) {
   const project = currentProject();
   const note = el("div", { id: "iam-enforcement-note" });
-  const fields = buildCreateForm({ label: "Analyze", fields: [
+  const fields = buildCreateForm({ label: "Custom query", fields: [
     { name: "scope", label: "Scope", default: project ? `projects/${project}` : "", required: true,
-      help: "projects/PROJECT_ID, folders/NUMBER or organizations/NUMBER." },
-    { name: "identity", label: "Principal", help: "Such as serviceAccount:worker@my-project.iam.gserviceaccount.com, user:… or group:…" },
-    { name: "permissions", label: "Permissions", help: "Comma-separated, such as secretmanager.versions.access." },
+      help: "projects/PROJECT_ID, folders/NUMBER or organizations/NUMBER: only the policies of the scope and its descendants are analyzed." },
+    { name: "identity", label: "Principal", help: "Such as user:ann@example.com, group:admins@example.com or serviceAccount:worker@my-project.iam.gserviceaccount.com." },
+    { name: "resource", label: "Resource", help: "A full resource name, such as //cloudresourcemanager.googleapis.com/projects/my-project." },
     { name: "roles", label: "Roles", help: "Comma-separated, such as roles/secretmanager.secretAccessor." },
-    { name: "resource", label: "Resource", help: "A full resource name, to include its own policies." },
+    { name: "permissions", label: "Permissions", help: "Comma-separated, such as secretmanager.versions.access." },
+    { name: "expandResources", label: "List resources within resource(s) matching your query", type: "checkbox" },
+    { name: "expandGroups", label: "List individual users inside groups", type: "checkbox" },
+    { name: "expandRoles", label: "List permissions inside roles", type: "checkbox" },
+    { name: "analyzeServiceAccountImpersonation", label: "Analyze service account impersonation", type: "checkbox" },
+    { name: "outputResourceEdges", label: "Show resource relationships", type: "checkbox" },
+    { name: "outputGroupEdges", label: "Show group membership relationships", type: "checkbox" },
+    { name: "accessTime", label: "Return only those policies that would apply at a specific time (UTC)", type: "datetime-local",
+      help: "Evaluates conditions on request.time at this time, which must be in the future." },
   ] });
   const error = el("p", { class: "form-error", role: "alert", hidden: true });
   const results = el("div", { id: "analyze-result", "aria-live": "polite" });
-  const run = el("button", { type: "submit", class: "primary", id: "analyze-run", text: "Analyze" });
+  const run = el("button", { type: "submit", class: "primary", id: "analyze-run", text: "Run query" });
+  const save = el("button", { type: "button", id: "analyze-save", text: "Save query" });
+  const exp = el("button", { type: "button", id: "analyze-export", text: "Export" });
   const list = (v) => (v || "").split(/[\s,]+/).map((x) => x.trim()).filter(Boolean);
+  const on = (x) => x === true || x === "true" || x === "on";
+  const query = () => {
+    const v = fields.values();
+    return { scope: v.scope, identity: v.identity, permissions: list(v.permissions), roles: list(v.roles), resource: v.resource,
+      expandGroups: on(v.expandGroups), expandRoles: on(v.expandRoles), expandResources: on(v.expandResources),
+      analyzeServiceAccountImpersonation: on(v.analyzeServiceAccountImpersonation),
+      outputResourceEdges: on(v.outputResourceEdges), outputGroupEdges: on(v.outputGroupEdges),
+      accessTime: v.accessTime ? new Date(v.accessTime + "Z").toISOString() : "" };
+  };
+  const fail = (err) => { error.textContent = err.message; error.hidden = false; };
+  const table = (id, analysis) => {
+    const res = (analysis || {}).analysisResults || [];
+    if (!res.length) return el("p", { class: "unavailable", id: id + "-empty", text: "No results match the query." });
+    const rows = [];
+    for (const x of res) {
+      for (const acl of x.accessControlLists || []) {
+        rows.push(el("tr", {},
+          el("td", { class: "mono", text: ((x.identityList || {}).identities || []).map((i) => i.name).join(", ") }),
+          el("td", { class: "mono", text: (acl.resources || []).map((r) => r.fullResourceName).join(", ") }),
+          el("td", { class: "mono", text: (acl.accesses || []).map((a) => a.permission || a.role).join(", ") }),
+          el("td", { class: "mono", text: `${x.iamBinding.role} on ${x.attachedResourceFullName}` }),
+          el("td", { class: "mono", text: x.iamBinding.condition ? `${x.iamBinding.condition.expression} (${(acl.conditionEvaluation || {}).evaluationValue || ""})` : "" }),
+          el("td", { class: "mono", text: [...((x.identityList || {}).groupEdges || []), ...(acl.resourceEdges || [])].map((e) => `${e.sourceNode} → ${e.targetNode}`).join("; ") })));
+      }
+    }
+    return el("table", { class: "table", id },
+      el("caption", { class: "visually-hidden", text: "Policy analysis results" }),
+      el("thead", {}, el("tr", {}, ...["Principal", "Resource", "Role / permission", "Policy binding", "Condition", "Relationships"].map((h) => el("th", { scope: "col", text: h })))),
+      el("tbody", {}, ...rows));
+  };
   const submit = async (e) => {
     e.preventDefault();
     error.hidden = true;
     if (!fields.validate()) return;
-    const v = fields.values();
     run.disabled = true;
     try {
-      const r = await iamCall("analyze", { scope: v.scope, identity: v.identity, permissions: list(v.permissions), roles: list(v.roles), resource: v.resource });
-      const res = (r.mainAnalysis || {}).analysisResults || [];
-      setChildren(results, res.length ? el("table", { class: "table", id: "analyze-table" },
-        el("thead", {}, el("tr", {}, ...["Policy", "Role", "Principals", "Access", "Condition"].map((h) => el("th", { text: h })))),
-        el("tbody", {}, ...res.map((x) => {
-          const acl = (x.accessControlLists || [])[0] || {};
-          return el("tr", {},
-            el("td", { class: "mono", text: x.attachedResourceFullName }),
-            el("td", { class: "mono", text: x.iamBinding.role }),
-            el("td", { class: "mono", text: ((x.identityList || {}).identities || []).map((i) => i.name).join(", ") }),
-            el("td", { class: "mono", text: (acl.accesses || []).map((a) => a.permission || a.role).join(", ") }),
-            el("td", { class: "mono", text: x.iamBinding.condition ? `${x.iamBinding.condition.expression} (${(acl.conditionEvaluation || {}).evaluationValue || ""})` : "" }));
-        }))) : el("p", { class: "unavailable", id: "analyze-empty", text: "No binding matches the query." }));
-      announce(`${res.length} results`);
+      const r = await iamCall("analyze", query());
+      const sa = r.serviceAccountImpersonationAnalysis || [];
+      setChildren(results,
+        el("h2", { text: "Query results" }),
+        r.fullyExplored === false ? noteBanner("The results are incomplete: an expansion reached its limit.", "analyze-incomplete") : null,
+        table("analyze-table", r.mainAnalysis),
+        ...(sa.length ? [el("h3", { text: "Access through service account impersonation" }),
+          ...sa.map((a, i) => table(`analyze-impersonation-${i}`, a))] : []));
+      announce(`${((r.mainAnalysis || {}).analysisResults || []).length} results`);
     } catch (err) {
       setChildren(results);
-      error.textContent = err.message;
-      error.hidden = false;
+      fail(err);
     }
     run.disabled = false;
   };
-  setChildren(view, pageHeader("Policy Analyzer", ""), note,
-    el("p", { class: "subtitle", text: "Find which bindings give a principal, a permission or a role, in the scope's policies and its ancestors'." }),
-    el("form", { class: "card", novalidate: true, onsubmit: submit }, error, ...fields.nodes, el("div", { class: "modal-actions" }, run)),
+  save.addEventListener("click", () => {
+    error.hidden = true;
+    if (!fields.validate()) return;
+    analyzerFormModal({ title: "Save query", submitLabel: "Save", fields: [
+      { name: "id", label: "Query ID", required: true, pattern: "[a-z0-9\\-]{4,63}", help: "4 to 63 lowercase letters, digits and hyphens." },
+      { name: "description", label: "Description" },
+    ], onSubmit: async (v) => {
+      await iamCall("saved-create", { ...query(), id: v.id, description: v.description });
+      announce("Query saved");
+    } });
+  });
+  exp.addEventListener("click", () => {
+    error.hidden = true;
+    if (!fields.validate()) return;
+    analyzerFormModal({ title: "Export query results", submitLabel: "Export", fields: [
+      { name: "destination", label: "Destination", type: "select", options: ["bigquery", "gcs"], optionLabels: { bigquery: "BigQuery", gcs: "Cloud Storage" } },
+      { name: "dataset", label: "BigQuery dataset", help: "projects/PROJECT_ID/datasets/DATASET_ID" },
+      { name: "tablePrefix", label: "Table prefix", help: "The tables are PREFIX_analysis and PREFIX_analysis_result." },
+      { name: "partitionKey", label: "Partition", type: "select", options: ["", "REQUEST_TIME"], optionLabels: { "": "None", REQUEST_TIME: "By request time" } },
+      { name: "writeDisposition", label: "If the table exists", type: "select", options: ["WRITE_APPEND", "WRITE_TRUNCATE", "WRITE_EMPTY"],
+        optionLabels: { WRITE_APPEND: "Append", WRITE_TRUNCATE: "Overwrite", WRITE_EMPTY: "Write if empty" } },
+      { name: "gcsUri", label: "Cloud Storage URI", help: "gs://BUCKET/OBJECT" },
+    ], onSubmit: async (v) => {
+      const body = { ...query(), ...(v.destination === "gcs" ? { gcsUri: v.gcsUri } :
+        { dataset: v.dataset, tablePrefix: v.tablePrefix, partitionKey: v.partitionKey, writeDisposition: v.writeDisposition }) };
+      let op = await iamCall("analyze-export", body);
+      for (let i = 0; i < 60 && !op.done; i++) {
+        await new Promise((ok) => setTimeout(ok, 1000));
+        op = await iamCall("analyze-operation", { name: op.name });
+      }
+      if (op.error) throw new Error(op.error.message);
+      setChildren(results, el("p", { id: "analyze-export-done", class: "subtitle",
+        text: op.done ? `Export finished: ${op.name}` : `Export running: ${op.name}` }));
+      announce(op.done ? "Export finished" : "Export running");
+    } });
+  });
+  const analyzePanel = el("div", { id: "analyzer-analyze", role: "tabpanel", "aria-labelledby": "analyzer-tab-analyze" },
+    el("p", { class: "subtitle", text: "Find out which principals have what access to which resources, from the allow policies of the scope and its descendants." }),
+    el("form", { class: "card", novalidate: true, onsubmit: submit }, error, ...fields.nodes, el("div", { class: "modal-actions" }, run, save, exp)),
     results);
+  const savedPanel = el("div", { id: "analyzer-saved", role: "tabpanel", "aria-labelledby": "analyzer-tab-saved", hidden: true });
+  const loadSaved = async () => {
+    try {
+      const r = await iamCall("saved-list", { scope: fields.values().scope });
+      const qs = r.savedQueries || [];
+      setChildren(savedPanel, qs.length ? el("table", { class: "table", id: "saved-queries-table" },
+        el("caption", { class: "visually-hidden", text: "Saved queries" }),
+        el("thead", {}, el("tr", {}, ...["Name", "Description", "Created by", "Last updated", "Actions"].map((h) => el("th", { scope: "col", text: h })))),
+        el("tbody", {}, ...qs.map((q) => el("tr", { "data-name": q.name },
+          el("td", { class: "mono", text: q.name.split("/").pop() }),
+          el("td", { text: q.description || "" }),
+          el("td", { text: q.creator || "" }),
+          el("td", { text: q.lastUpdateTime || "" }),
+          el("td", {},
+            el("button", { type: "button", class: "link", text: "Run", "aria-label": `Run ${q.name.split("/").pop()}`, onclick: async () => {
+              select("analyze");
+              try {
+                const r = await iamCall("analyze", { scope: fields.values().scope, savedQuery: q.name });
+                setChildren(results, el("h2", { text: "Query results" }), table("analyze-table", r.mainAnalysis));
+              } catch (err) { fail(err); }
+            } }),
+            el("button", { type: "button", class: "link", text: "Delete", "aria-label": `Delete ${q.name.split("/").pop()}`, onclick: async () => {
+              await iamCall("saved-delete", { name: q.name });
+              loadSaved();
+            } })))))) : el("p", { class: "unavailable", id: "saved-queries-empty", text: "No saved queries in this scope." }));
+    } catch (err) {
+      setChildren(savedPanel, el("p", { class: "form-error", role: "alert", text: err.message }));
+    }
+  };
+  const tabs = {};
+  const select = (which) => {
+    for (const [k, t] of Object.entries(tabs)) {
+      t.setAttribute("aria-selected", String(k === which));
+      t.classList.toggle("is-active", k === which);
+      t.tabIndex = k === which ? 0 : -1;
+    }
+    analyzePanel.hidden = which !== "analyze";
+    savedPanel.hidden = which !== "saved";
+    if (which === "saved") loadSaved();
+  };
+  tabs.analyze = el("button", { type: "button", class: "tab", role: "tab", id: "analyzer-tab-analyze", "aria-controls": "analyzer-analyze", text: "Analyze policies", onclick: () => select("analyze") });
+  tabs.saved = el("button", { type: "button", class: "tab", role: "tab", id: "analyzer-tab-saved", "aria-controls": "analyzer-saved", text: "Saved queries", onclick: () => select("saved") });
+  setChildren(view, pageHeader("Policy Analyzer", ""), note,
+    el("div", { class: "tab-strip", role: "tablist", "aria-label": "Policy Analyzer tabs" }, tabs.analyze, tabs.saved),
+    analyzePanel, savedPanel);
+  select("analyze");
   iamEnforcementNote(note);
   announce("Policy Analyzer");
   fields.focusFirst();
@@ -23946,6 +25154,9 @@ function quotasBlock(service, redraw) {
   const box = el("div", { id }, loadingState(3, { what: "quotas" }));
   const filter = el("input", { type: "search", class: "filter", id: `${id}-filter`, placeholder: "Filter", "aria-label": "Filter quotas and system limits" });
   let rows = [];
+  // scopeKind is the level the page reads (#2102): the project, or the
+  // folder or organization chosen in the toolbar.
+  let scopeKind = "project";
   const dims = (d) => Object.keys(d || {}).length ? Object.entries(d).map(([k, v]) => `${k}: ${v}`).join(", ") : "";
   const draw = () => {
     const q = filter.value.trim().toLowerCase();
@@ -23963,14 +25174,17 @@ function quotasBlock(service, redraw) {
         el("td", {}, r.adjustable ? el("button", { type: "button", class: "secondary", text: "Edit quota",
           "aria-label": `Edit quota ${r.name}${dims(r.dimensions) ? " " + dims(r.dimensions) : ""}`,
           onclick: () => quotaEdit(r, reload) }) : null)))
-        : [el("tr", {}, el("td", { colspan: String(head.length), text: rows.length ? "No quota matches the filter." : "This API has no quota CloudBurrow describes." }))])));
+        : [el("tr", {}, el("td", { colspan: String(head.length), text: rows.length ? "No quota matches the filter." : (scopeKind === "folder"
+          ? "No API this instance serves documents a folder-level quota." : "This API has no quota CloudBurrow describes.") }))])));
   };
   const table = el("table", { class: "table", id: `${id}-table` });
   const reload = async () => {
     try {
       const data = await apisCall("quotas", { service: service || "" });
       rows = data.quotas || [];
-      setChildren(box, el("p", { class: "form-help", text: "The Cloud Quotas API's quotas for this project, with Google's documented defaults. " +
+      scopeKind = (data.scope || "").startsWith("organizations/") ? "organization" : (data.scope || "").startsWith("folders/") ? "folder" : "project";
+      setChildren(box, el("p", { class: "form-help", text: `The Cloud Quotas API's quotas for this ${scopeKind}, with Google's documented defaults. ` +
+        (scopeKind === "project" ? "" : `A ${scopeKind}'s quota counts the usage of everything under it; the projects' own quotas are on each project's page. `) +
         "A quota marked Enforced locally refuses calls past its value, so a granted preference changes what the API allows; the others are described, not applied." }),
         el("div", { class: "filter-bar" }, filter), el("div", { class: "table-wrap" }, table));
       draw();
@@ -24005,7 +25219,8 @@ function quotaEdit(r, after) {
 async function renderQuotasPage(view) {
   const project = currentProject();
   if (!project) return apisNeedProject(view, "Quotas & System Limits");
-  setChildren(view, pageHeader("Quotas & System Limits", `Project ${project}`), quotasBlock("", () => renderQuotasPage(view)));
+  const res = currentResource();
+  setChildren(view, pageHeader("Quotas & System Limits", res ? resourceLabel(res) : `Project ${project}`), quotasBlock("", () => renderQuotasPage(view)));
   announce("Quotas & System Limits");
 }
 

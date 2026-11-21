@@ -24,9 +24,11 @@ import (
 // data that are stored in persistent storage": the instance's kept
 // metadata of its AUTH string and of in-transit encryption (the CA's
 // private key) is kept sealed with the data key (AES-GCM), never in the
-// clear; and the server's RDB snapshots on its volume are served only
-// while the key can be used. Exports are not: Memorystore protects an
-// export with the destination bucket's own CMEK.
+// clear; and the server's RDB snapshots and AOF are on its volume only
+// sealed with it, by the keeper its pod runs the server under, which asks
+// Cloud KMS to unwrap the data key (internal/rediscmek, #2113). Exports
+// are not: Memorystore protects an export with the destination bucket's
+// own CMEK.
 //
 // The key is checked, by unwrapping the data key, when the instance is
 // created, when CloudBurrow starts it again, and every keyEvery. If the

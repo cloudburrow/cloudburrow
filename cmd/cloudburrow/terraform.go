@@ -126,6 +126,11 @@ var terraformEndpoints = []terraformEndpoint{
 	// JSON API on the gRPC port (#591), against the metrics, sinks and
 	// exclusions #1226 serves. Buckets, views, links and settings stay 501.
 	{config.ServiceLogging, "logging_custom_endpoint", "GOOGLE_LOGGING_CUSTOM_ENDPOINT", "/v2/", true, ""},
+	// The Observability API (#2117), observability.googleapis.com v1 on the
+	// Logging port: google_observability_project_settings, _folder_settings,
+	// _organization_settings, _bucket, _link and _trace_scope apply, plan
+	// clean, update and destroy in TestTerraformObservability2117.
+	{config.ServiceLogging, "observability_custom_endpoint", "GOOGLE_OBSERVABILITY_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	// google_project (#301): Resource Manager v1, and the Cloud Billing read
 	// the provider makes on every refresh, both served on the Resource
 	// Manager port.
@@ -790,7 +795,12 @@ func runTerraform(args []string, stdout, stderr io.Writer) error {
 	}
 
 	dir := moduleDir(theirs)
-	if bad := unpointed(dir, unpointedResources(cfg)); len(bad) != 0 && !offlineSubcommands[subcommand(theirs)] {
+	families := unpointedResources(cfg)
+	if intercept {
+		// The locations data sources it serves locally (#1578).
+		families = interceptUnlocked(cfg, families)
+	}
+	if bad := unpointed(dir, families); len(bad) != 0 && !offlineSubcommands[subcommand(theirs)] {
 		return fmt.Errorf("refusing to run %s %s: the module declares resources cloudburrow cannot point at this instance, "+
 			"which the provider would send to real Google:\n  %s", binary, subcommand(theirs), strings.Join(bad, "\n  "))
 	}

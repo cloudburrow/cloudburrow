@@ -102,6 +102,12 @@ func (s *Server) processorVersion(name string) (*documentaipb.Processor, docAIVe
 	if err != nil {
 		return nil, docAIVersion{}, err
 	}
+	if isCustomType(p.GetType()) {
+		if _, err := s.customVersionProto(name); err != nil {
+			return nil, docAIVersion{}, err
+		}
+		return p, docAIVersion{id: id}, nil
+	}
 	rid := resolveVersion(p.GetType(), id)
 	for _, v := range docAIVersions[p.GetType()] {
 		if v.id == rid {
@@ -118,6 +124,10 @@ func (d *documentAIService) GetProcessorVersion(ctx context.Context, req *docume
 	}
 	if err := d.s.docAIKeyUsable(ctx, p); err != nil {
 		return nil, grpcError(err)
+	}
+	if isCustomType(p.GetType()) {
+		pv, err := d.s.customVersionProto(req.GetName())
+		return pv, grpcError(err)
 	}
 	return d.s.withKey(versionProto(p, v), p), nil
 }
@@ -136,6 +146,20 @@ func (d *documentAIService) ListProcessorVersions(ctx context.Context, req *docu
 	var all []*documentaipb.ProcessorVersion
 	for _, v := range docAIVersions[p.GetType()] {
 		all = append(all, d.s.withKey(versionProto(p, v), p))
+	}
+	if isCustomType(p.GetType()) {
+		d.s.mu.Lock()
+		for _, v := range d.s.docAI().customOf(p.GetName()).Versions {
+			all = append(all, cloneVersion(v.Proto))
+		}
+		d.s.mu.Unlock()
+		// Newest first.
+		sort.SliceStable(all, func(i, j int) bool { return all[i].GetCreateTime().AsTime().After(all[j].GetCreateTime().AsTime()) })
+		page, next, err := docAIPage(all, req.GetPageSize(), req.GetPageToken())
+		if err != nil {
+			return nil, grpcError(err)
+		}
+		return &documentaipb.ListProcessorVersionsResponse{ProcessorVersions: page, NextPageToken: next}, nil
 	}
 	// Newest first, as the console lists them.
 	sort.SliceStable(all, func(i, j int) bool { return all[i].GetName() > all[j].GetName() })
@@ -159,15 +183,45 @@ func (d *documentAIService) pretrainedRefusal(name, what string) error {
 	return apierror.FailedPrecondition("Cannot %s processor version %s: it is a pretrained processor version", what, full)
 }
 
+// customName reports whether name is a version of a custom processor.
+func (d *documentAIService) customName(name string) (bool, error) {
+	p, _, err := d.s.processorVersion(name)
+	if err != nil {
+		return false, err
+	}
+	return isCustomType(p.GetType()), nil
+}
+
 func (d *documentAIService) DeployProcessorVersion(_ context.Context, req *documentaipb.DeployProcessorVersionRequest) (*longrunningpb.Operation, error) {
+	if custom, err := d.customName(req.GetName()); err != nil || custom {
+		if err != nil {
+			return nil, grpcError(err)
+		}
+		op, err := d.deployCustom(req.GetName(), true)
+		return op, grpcError(err)
+	}
 	return nil, grpcError(d.pretrainedRefusal(req.GetName(), "deploy"))
 }
 
 func (d *documentAIService) UndeployProcessorVersion(_ context.Context, req *documentaipb.UndeployProcessorVersionRequest) (*longrunningpb.Operation, error) {
+	if custom, err := d.customName(req.GetName()); err != nil || custom {
+		if err != nil {
+			return nil, grpcError(err)
+		}
+		op, err := d.deployCustom(req.GetName(), false)
+		return op, grpcError(err)
+	}
 	return nil, grpcError(d.pretrainedRefusal(req.GetName(), "undeploy"))
 }
 
 func (d *documentAIService) DeleteProcessorVersion(_ context.Context, req *documentaipb.DeleteProcessorVersionRequest) (*longrunningpb.Operation, error) {
+	if custom, err := d.customName(req.GetName()); err != nil || custom {
+		if err != nil {
+			return nil, grpcError(err)
+		}
+		op, err := d.deleteCustom(req.GetName())
+		return op, grpcError(err)
+	}
 	return nil, grpcError(d.pretrainedRefusal(req.GetName(), "delete"))
 }
 
@@ -180,9 +234,18 @@ func (d *documentAIService) SetDefaultProcessorVersion(_ context.Context, req *d
 		return nil, grpcError(apierror.InvalidArgument("default_processor_version %s is not a version of processor %s",
 			req.GetDefaultProcessorVersion(), req.GetProcessor()))
 	}
-	_, v, err := d.s.processorVersion(req.GetDefaultProcessorVersion())
+	vp, v, err := d.s.processorVersion(req.GetDefaultProcessorVersion())
 	if err != nil {
 		return nil, grpcError(err)
+	}
+	if isCustomType(vp.GetType()) {
+		pv, err := d.s.customVersionProto(req.GetDefaultProcessorVersion())
+		if err != nil {
+			return nil, grpcError(err)
+		}
+		if pv.GetState() != documentaipb.ProcessorVersion_DEPLOYED {
+			return nil, grpcError(apierror.FailedPrecondition("Processor version %s is not deployed: deploy it before making it the default", pv.GetName()))
+		}
 	}
 	return d.processorOp(req.GetProcessor(), func(_ *docAIStore, p *documentaipb.Processor) error {
 		p.DefaultProcessorVersion = p.GetName() + "/processorVersions/" + v.id
@@ -192,10 +255,17 @@ func (d *documentAIService) SetDefaultProcessorVersion(_ context.Context, req *d
 	}, &documentaipb.SetDefaultProcessorVersionResponse{})
 }
 
-func (d *documentAIService) TrainProcessorVersion(_ context.Context, req *documentaipb.TrainProcessorVersionRequest) (*longrunningpb.Operation, error) {
+func (d *documentAIService) TrainProcessorVersion(ctx context.Context, req *documentaipb.TrainProcessorVersionRequest) (*longrunningpb.Operation, error) {
+	if strings.Contains(req.GetParent(), "/processorVersions/") {
+		return nil, grpcError(apierror.InvalidArgument("parent %q is not a processor", req.GetParent()))
+	}
 	p, err := d.s.processor(req.GetParent())
 	if err != nil {
 		return nil, grpcError(err)
+	}
+	if isCustomType(p.GetType()) {
+		op, err := d.trainCustom(ctx, p, req)
+		return op, grpcError(err)
 	}
 	return nil, grpcError(apierror.InvalidArgument("Processor type %s does not support training: "+
 		"training creates versions of custom extractors, classifiers and splitters", p.GetType()))

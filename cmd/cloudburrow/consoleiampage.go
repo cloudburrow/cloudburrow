@@ -110,7 +110,7 @@ func (p projectIAMProvider) StudioCall(ctx context.Context, project, call string
 		return p.pageRoles(project)
 	case "deny-list", "deny-get", "deny-create", "deny-update", "deny-delete":
 		return p.denyCall(project, selp, call, body)
-	case "troubleshoot", "analyze", "enforcement":
+	case "troubleshoot", "analyze", "enforcement", "analyze-export", "analyze-operation", "saved-list", "saved-create", "saved-delete":
 		return p.analysisCall(ctx, project, call, body)
 	case "change":
 		var c iamPageChange

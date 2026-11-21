@@ -259,6 +259,8 @@ func TestLoggingCustomIndexes(t *testing.T) {
 	}
 }
 
+// covers: observability.projects.locations.traceScopes.create, observability.projects.locations.traceScopes.get, observability.projects.locations.traceScopes.list, observability.projects.locations.traceScopes.patch, observability.projects.locations.traceScopes.delete, observability.projects.locations.scopes.patch, observability.projects.locations.scopes.get
+//
 // TestObservabilityTraceScopes (#2108), through Google's generated
 // Observability v1 client (Google publishes no other Go client for it):
 // _Default holds the project and can't be changed or deleted; a trace scope

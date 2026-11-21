@@ -60,7 +60,19 @@ type Enforcer struct {
 	// ParentOf is a project's or folder's current parent ("folders/N",
 	// "organizations/N"), "" for none or an unknown one.
 	ParentOf func(resource string) string
+	// Resources list each service's resources of a project, by service
+	// host, for Cloud Asset's policy analysis (#2112).
+	Resources map[string]ResourceLister
 }
+
+// ChildResource is one resource a ResourceLister lists: its name as its
+// service names it, and its parent's, "" for the project.
+type ChildResource struct {
+	Name, Parent string
+}
+
+// ResourceLister lists a service's resources of a project.
+type ResourceLister func(ctx context.Context, project string) []ChildResource
 
 // Scope is what applies to a resource whose name does not say.
 type Scope struct {

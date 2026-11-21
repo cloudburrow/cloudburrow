@@ -27,20 +27,30 @@ import (
 // private key) are kept sealed with the data key (AES-GCM), never in the
 // clear; each backup's RDB files are sealed with it too, the backup
 // keeping the wrapped data key, so a backup of a CMEK cluster is readable
-// (restored, exported) only while the key can be used. What it does not:
+// (restored, exported) only while the key can be used; and each node's
+// persistence files are on its volume only sealed with it, as an
+// instance's are (internal/rediscmek, #2113). What it does not:
 // a node's data in memory, which Valkey serves to its clients as it is;
 // an export, which Memorystore writes to the bucket as plain RDB files
 // that the bucket's own encryption protects; and the cluster's record
 // beside those secrets (its shape, labels, configs).
 //
 // The key is checked every keyEvery. Once it cannot be used (disabled,
-// destroyed, its version disabled), the cluster is suspended, as a
-// Memorystore for Redis instance (#1463) and a Cloud SQL instance (#1538)
-// are: no ACTIVE state (STATE_UNSPECIFIED), encryption_info's
-// kms_key_primary_state says why, and its nodes are stopped, their data
-// first kept as RDB files sealed with the data key, so no client reaches
-// it. Once the key can be used again the cluster resumes on its own: new
-// nodes are formed (UPDATING) and the data loaded into them, then ACTIVE.
+// destroyed, its version disabled), the cluster keeps serving reads and
+// writes, as Memorystore documents (#2113; docs read 2026-11-21,
+// https://docs.cloud.google.com/memorystore/docs/cluster/about-cmek and
+// https://docs.cloud.google.com/memorystore/docs/valkey/about-cmek):
+// encryption_info's kms_key_primary_state says why; its persistence is
+// deactivated (persistenceOff), so nothing more is written to persistent
+// storage and what is there stays sealed; on-demand and automated
+// backups are refused, and so are updates of persistence_config and
+// automated_backup_config. Once the key can be used again an update like a
+// maintenance one (UPDATING, then ACTIVE) re-enables persistence
+// (persistenceOn). A cluster whose key cannot be used when CloudBurrow
+// starts it again cannot open its kept secrets, and is suspended: no
+// ACTIVE state (STATE_UNSPECIFIED) and no nodes, its data kept sealed,
+// until the key can be used again and new nodes are formed (UPDATING) and
+// the data loaded into them, then ACTIVE.
 
 // clusterSealed is what a CMEK cluster keeps sealed with its data key.
 type clusterSealed struct {
@@ -211,15 +221,20 @@ func (c *clusters) checkKeys(ctx context.Context) {
 		}
 		r.KeyChecked = c.now()
 		if err != nil {
+			lost := r.KeyState == ""
 			r.KeyState = keyState(err)
-			if !r.suspended {
-				c.suspendCluster(r, "suspended: its kms_key "+tg.key+" cannot be used: "+keyError(tg.key, err).(*apierror.Error).Message)
+			if lost && !r.suspended {
+				c.persistenceOff(r)
 			}
 			c.mu.Unlock()
 			continue
 		}
+		back := r.KeyState != ""
 		r.KeyState = ""
 		if !r.suspended {
+			if back {
+				c.persistenceOn(r)
+			}
 			c.mu.Unlock()
 			continue
 		}
@@ -231,6 +246,72 @@ func (c *clusters) checkKeys(ctx context.Context) {
 		c.resumeCluster(r)
 		c.mu.Unlock()
 	}
+}
+
+// errKeyUnavailable refuses what Memorystore refuses while a cluster's or
+// a Valkey instance's kms_key primary version cannot be used (#2113):
+// backups, and updates of persistence and automated backups.
+func errKeyUnavailable(r *clusterRecord) error {
+	return apierror.FailedPrecondition("the kms_key %s's primary version is %s: backups, and updates of persistence_config and automated_backup_config, "+
+		"wait until it is enabled or restored", r.KmsKey, r.KeyState)
+}
+
+// persistenceOff is Memorystore's answer to a cluster's or a Valkey
+// instance's kms_key that can no longer be used (#2113): it keeps serving
+// reads and writes, but its persistence is deactivated, so nothing more is
+// written to persistent storage, while what is there stays sealed with the
+// data key, which each node's keeper no longer has once its own Cloud KMS
+// check fails (internal/rediscmek). Call with mu held.
+func (c *clusters) persistenceOff(r *clusterRecord) {
+	c.busy[r.Name] = "kms-key"
+	snap := *r
+	nodes := append([]*clusterNode(nil), r.Nodes...)
+	go func() {
+		ctx, cancel := context.WithTimeout(c.bg, clusterWait)
+		defer cancel()
+		for _, n := range nodes {
+			if err := c.do(ctx, &snap, n, "CONFIG", "SET", "appendonly", "no", "save", ""); err != nil {
+				log.Printf("memorystore: %s: deactivate persistence: %v", snap.Name, err)
+			}
+		}
+		c.mu.Lock()
+		delete(c.busy, snap.Name)
+		c.mu.Unlock()
+	}()
+}
+
+// persistenceOn re-enables the persistence of a cluster or Valkey instance
+// whose kms_key can be used again, by an update like a maintenance one
+// (UPDATING, then ACTIVE), as Memorystore does (#2113): the
+// persistence_config's settings are set on every node again, and the
+// files written anew (an AOF rewrite, or an RDB snapshot). Call with mu
+// held.
+func (c *clusters) persistenceOn(r *clusterRecord) {
+	c.busy[r.Name] = "kms-key"
+	r.state, r.message = clusterpb.Cluster_UPDATING, "the kms_key can be used again: re-enabling persistence"
+	snap := *r
+	nodes := append([]*clusterNode(nil), r.Nodes...)
+	settings := r.persistenceSettings()
+	go func() {
+		ctx, cancel := context.WithTimeout(c.bg, clusterWait)
+		defer cancel()
+		for _, n := range nodes {
+			for _, kv := range settings {
+				if err := c.do(ctx, &snap, n, "CONFIG", "SET", kv[0], kv[1]); err != nil {
+					log.Printf("memorystore: %s: re-enable persistence: %v", snap.Name, err)
+				}
+				if kv[0] == "save" && kv[1] != "" {
+					_ = c.do(ctx, &snap, n, "BGSAVE")
+				}
+			}
+		}
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		delete(c.busy, snap.Name)
+		if live := c.byName[snap.Name]; live != nil && live.state == clusterpb.Cluster_UPDATING {
+			live.state, live.message = clusterpb.Cluster_ACTIVE, ""
+		}
+	}()
 }
 
 // suspendCluster keeps r's data sealed and stops its nodes. Call with mu

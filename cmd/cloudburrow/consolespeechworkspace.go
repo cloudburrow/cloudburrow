@@ -369,7 +369,7 @@ func workspaceFields(ws []string) []console.Field {
 	return []console.Field{
 		{Name: "workspace", Label: "Workspace", Type: "select", Options: opts, Default: opts[0], Required: true,
 			Section: "Audio configuration", Help: "the Cloud Storage bucket the audio and transcript are kept in"},
-		{Name: "workspaceBucket", Label: "Workspace bucket", Type: "text", Required: true, Section: "Audio configuration",
+		{Name: "workspaceBucket", Label: "Workspace bucket", Type: "text", Required: true, Section: "Audio configuration", Browse: "storage-bucket",
 			VisibleWhen: map[string]string{"workspace": speechNewWorkspace}, Pattern: speechBucketPattern.String(),
 			Help: "a bucket of this instance's Cloud Storage: created when it does not exist, then made a workspace"},
 	}

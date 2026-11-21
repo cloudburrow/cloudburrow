@@ -145,3 +145,27 @@ func TestResponseSchemaBecomesAJSONSchemaConstraint(t *testing.T) {
 		t.Errorf("JSON without a runner: %d %s", code, body)
 	}
 }
+
+// TestSamplingDefaultsAreGooglesForUnsetFields: a request that leaves the
+// sampler unset gets Gemma 4's documented temperature 1.0, topP 0.95 and topK
+// 64 and a random seed (#2107), and one that sets them keeps its own values,
+// so temperature 0 stays greedy.
+func TestSamplingDefaultsAreGooglesForUnsetFields(t *testing.T) {
+	got := runnerFlags(withSamplingDefaults(Request{}))
+	if len(got) != 4 || got[0] != "--sampler_temperature=1" || got[1] != "--sampler_top_p=0.95" ||
+		got[2] != "--sampler_top_k=64" || !strings.HasPrefix(got[3], "--sampler_seed=") {
+		t.Errorf("defaults = %q", got)
+	}
+	seeds := map[int32]bool{}
+	for i := 0; i < 8; i++ {
+		seeds[*withSamplingDefaults(Request{}).Seed] = true
+	}
+	if len(seeds) < 2 {
+		t.Errorf("unseeded requests share one seed: %v", seeds)
+	}
+	zero, k, s := float32(0), int32(1), int32(5)
+	r := withSamplingDefaults(Request{Temperature: &zero, TopK: &k, Seed: &s})
+	if *r.Temperature != 0 || *r.TopK != 1 || *r.Seed != 5 || *r.TopP != defaultTopP {
+		t.Errorf("own values not kept: %+v", r)
+	}
+}

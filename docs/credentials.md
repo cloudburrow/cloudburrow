@@ -323,23 +323,33 @@ branch) lists the table's row access policies at a literal
 the table. No provider setting moves it: not `big_query_custom_endpoint`, not `universe_domain`
 (it only rewrites the default base paths), not any `GOOGLE_*` variable, and the provider's HTTP
 client rewrites no hosts. It ignores that call's error, so without help the plan goes ahead in
-place, where Google's would replace a table with row access policies. With the flag, for every
-subcommand but `init`:
+place, where Google's would replace a table with row access policies. The data sources
+`google_cloud_run_locations` and `google_artifact_registry_locations` list at literal
+`https://run.googleapis.com/v1/projects/{project}/locations` and
+`https://artifactregistry.googleapis.com/v1/projects/{project}/locations` (8.4.0 to 8.12.0 and main,
+re-read 2026-11-21), so without the flag the wrapper refuses a module declaring either. With the
+flag, for every subcommand but `init`:
 
 ```sh
 cloudburrow terraform --intercept-hardcoded -- plan
 ```
 
-- the wrapper mints, in memory, an ephemeral CA (valid one day, name-constrained to
-  `bigquery.googleapis.com`) and a leaf for that host. Only the CA **certificate** is written, to
+- the wrapper mints, in memory, an ephemeral CA (valid one day, name-constrained to the
+  intercepted hosts the instance serves: `bigquery.googleapis.com` with BigQuery,
+  `run.googleapis.com` and `artifactregistry.googleapis.com` with the Run port) and a leaf for
+  them. Only the CA **certificate** is written, to
   a `terraform-intercept-*` directory in the instance's state directory, removed when the run
   ends. Neither private key is written or printed, and nothing is installed in a keychain or
   system trust store.
-- it starts an HTTPS proxy on loopback that accepts `CONNECT bigquery.googleapis.com:443` alone,
+- it starts an HTTPS proxy on loopback that accepts `CONNECT` to those hosts on 443 alone,
   terminates TLS there and sends each `/bigquery/v2/` request, path unchanged, to the instance's
-  BigQuery front. Any other host, port, path or plain proxy request is refused 403: nothing is
-  forwarded to the internet. The run ends with a line naming how many requests it served and what
-  it refused.
+  BigQuery front, each `run.googleapis.com/v1/projects/` request, path unchanged, to the Run port
+  (Cloud Run v1's locations list), and each `artifactregistry.googleapis.com/v1/projects/` request
+  to the Run port under `/artifactregistry` (Artifact Registry's own, as the Run port's plain
+  `/v1/projects/{p}/locations` is Cloud Run's). Any other host, port, path or plain proxy request
+  is refused 403: nothing is forwarded to the internet. The run ends with a line per host naming how
+  many requests it served, and one naming what it refused. The two locations data sources are then
+  no longer refused; `google_iam_testable_permissions` (IAM is not served) still is.
 - only the Terraform process gets `HTTPS_PROXY`/`HTTP_PROXY` (that proxy), `NO_PROXY` reset to
   loopback, `SSL_CERT_FILE`/`SSL_CERT_DIR` (that CA alone) and
   `GODEBUG=x509sslcertoverrideplatform=1`.
@@ -347,7 +357,8 @@ cloudburrow terraform --intercept-hardcoded -- plan
 Linux honours `SSL_CERT_FILE` with every Go. On macOS only a provider built with Go 1.27 or later
 does; the released providers through 8.12.0 are built with Go 1.26, so there the wrapper warns, the
 call fails its TLS check (still locally) and the plan behaves as without the flag.
-`TestTerraformBigQueryTableDropColumnIntercepted` (emulators shard) covers it.
+`TestTerraformBigQueryTableDropColumnIntercepted` (emulators shard) and
+`TestTerraformLocationsIntercepted` (run shard) cover it.
 
 The original manual run, full create/read/destroy against the `hashicorp/google` provider:
 
@@ -388,7 +399,7 @@ eval "$(cloudburrow gcloud-teardown)"  # unset CLOUDSDK_ACTIVE_CONFIG_NAME
 gcloud's configuration directory (`CLOUDSDK_CONFIG`, or `~/.config/gcloud`). It sets
 `core/project`, turns on `auth/disable_credentials` and names the ADC fixture. It writes
 `api_endpoint_overrides` **only** for the services whose gcloud use is Verified below.
-Overrides written: `storage`, `pubsub`, `cloudkms`, `kmsinventory`, `secretmanager`, `cloudtasks`, `cloudscheduler`, `logging`, `observability`, `run`, `artifactregistry`, `cloudbuild`, `cloudfunctions`, `securesourcemanager`, `cloudresourcemanager`, `iam`, `cloudidentity`, `policytroubleshooter`, `orgpolicy`, `cloudquotas`, `cloudbilling`, `serviceusage`, `parametermanager`, `apphub`, `apikeys`, `transfer`, `storagebatchoperations`, `storageinsights`, `sql`, `redis`, `memorystore`, `bigtableadmin`, `spanner`, `firestore`, `datastore`, `developerconnect`, `eventarc`, `eventarcpublishing`, `containeranalysis`, `privateca`, `container`, `monitoring`, `compute`, `backupdr`, `workflows`, `workflowexecutions` and `aiplatform` (`kmsinventory` since #2053, the Cloud KMS Inventory API at the Cloud KMS port, with `kms`, driven by `TestGcloudKMSInventory`; `workflows` and `workflowexecutions`, Workflows and Workflow Executions on one port, with `workflows`, #1986; `compute`, the Compute Engine API's VPC networking at `/compute/v1/` on its port, with `compute`, #1936; `container`, the Kubernetes Engine API, with `gke`, #1913; `privateca`, Certificate Authority Service, with `privateca`, #1834; `monitoring`, Cloud Monitoring, with `monitoring`, #1964; `backupdr`, the Backup and DR Service, with `backupdr` and a Cloud SQL service, #1433)
+Overrides written: `storage`, `pubsub`, `cloudkms`, `kmsinventory`, `secretmanager`, `cloudtasks`, `cloudscheduler`, `logging`, `observability`, `run`, `artifactregistry`, `cloudbuild`, `cloudfunctions`, `securesourcemanager`, `cloudresourcemanager`, `iam`, `cloudidentity`, `policytroubleshooter`, `cloudasset`, `orgpolicy`, `cloudquotas`, `cloudbilling`, `serviceusage`, `parametermanager`, `apphub`, `apikeys`, `transfer`, `storagebatchoperations`, `storageinsights`, `sql`, `redis`, `memorystore`, `bigtableadmin`, `spanner`, `firestore`, `datastore`, `developerconnect`, `eventarc`, `eventarcpublishing`, `containeranalysis`, `privateca`, `container`, `monitoring`, `compute`, `backupdr`, `workflows`, `workflowexecutions` and `aiplatform` (`kmsinventory` since #2053, the Cloud KMS Inventory API at the Cloud KMS port, with `kms`, driven by `TestGcloudKMSInventory`; `workflows` and `workflowexecutions`, Workflows and Workflow Executions on one port, with `workflows`, #1986; `compute`, the Compute Engine API's VPC networking at `/compute/v1/` on its port, with `compute`, #1936; `container`, the Kubernetes Engine API, with `gke`, #1913; `privateca`, Certificate Authority Service, with `privateca`, #1834; `monitoring`, Cloud Monitoring, with `monitoring`, #1964; `backupdr`, the Backup and DR Service, with `backupdr` and a Cloud SQL service, #1433)
 (written whatever `--services` selects, since Resource Manager and Service Usage are always served; `sql` with either Cloud SQL service; `redis`, the Memorystore admin API, and `memorystore`, its Memorystore for Valkey JSON under `/memorystore/` (#1519), with `memorystore`; `bigtableadmin`, Bigtable's admin REST API on the Bigtable port, with `bigtable`, #1440; `spanner`, Spanner's admin REST port, with `spanner`, and `firestore`, the Firestore Admin API on the Firestore port, with `firestore`, #1461). `run` (#1293) is
 `http://run.localhost:<port>/` on a loopback bind: gcloud run calls `{region}-{host}` for a
 command given `--region`, and `us-central1-run.localhost` is still loopback. `cloudresourcemanager`

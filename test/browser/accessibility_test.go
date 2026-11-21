@@ -97,7 +97,9 @@ func (f a11yFixture) pages() []a11yPage {
 		{"requests", "/requests" + q, settled, ""},
 		{"connect", "/connect" + q, settled, ""},
 		{"settings panel", "/" + q, settled, `document.querySelector("#settings").click()`},
-		{"project picker", "/" + q, settled, `document.querySelector("#project-button").click()`},
+		// The picker reads the project list before it opens, so the audit
+		// waits for it to open rather than for two frames after the click.
+		{"project picker", "/" + q, settled, `document.querySelector("#project-button").click(); await overlayOpened("#project-panel")`},
 		{"row menu", "/pubsub/topics" + q, rowReady(f.topic),
 			`document.querySelector("#view tbody tr .overflow-trigger").click()`},
 		{"delete dialog", "/storage/browser" + q, rowReady(f.bucket),
@@ -130,7 +132,7 @@ func (p *tab) show(pg a11yPage) {
 	p.navigate(pg.path)
 	p.waitFor(pg.ready)
 	if pg.then != "" {
-		p.eval(`(() => { `+pg.then+`; return true; })()`, nil)
+		p.eval(`(async () => { `+overlayOpenedJS+pg.then+`; return true; })()`, nil, awaitPromise)
 	}
 	// A dialog the action opens after a fetch (Spanner's Upgrade link goes
 	// to the page's own address with ?action=, which opens Update edition
@@ -148,7 +150,35 @@ func (p *tab) show(pg a11yPage) {
 	// pass before its transition, if any, is looked for.
 	p.eval(`new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(true))))`, nil, awaitPromise)
 	p.waitFor(`document.getAnimations().every((a) => a.playState !== "running" || a.effect.getTiming().iterations === Infinity)`)
+	// An overlay is drawn at opacity 0 from the moment it is unhidden until
+	// the frame that adds is-open, with or without a transition: with motion
+	// reduced there is no animation to wait for, and an audit in that frame
+	// read every row of the project picker as white on white (main CI run
+	// 44891736706). Every overlay that is showing is fully open first.
+	p.waitFor(overlaysSettled)
 }
+
+// overlaysSettled is true once every overlay that is not hidden is open
+// and fully opaque, rather than in the frame before is-open or fading.
+const overlaysSettled = `[...document.querySelectorAll(".panel, .picker-panel, .nav-flyout, .modal")].every((n) =>
+	n.hidden || n.classList.contains("is-closing") || (n.classList.contains("is-open") && getComputedStyle(n).opacity === "1"))`
+
+// overlayOpenedJS defines overlayOpened(selector) for an a11yPage's action:
+// a promise that resolves once the overlay an asynchronous action opens (the
+// project picker reads its list first) is shown, open and fully opaque, and
+// rejects after 10 s, so the audit never reads a page whose overlay has not
+// opened yet as passing.
+const overlayOpenedJS = `const overlayOpened = (sel) => new Promise((resolve, reject) => {
+	const end = Date.now() + 10000;
+	const look = () => {
+		const n = document.querySelector(sel);
+		if (n && !n.hidden && n.classList.contains("is-open") && getComputedStyle(n).opacity === "1") return resolve(true);
+		if (Date.now() > end) return reject(new Error(sel + " did not open"));
+		setTimeout(look, 20);
+	};
+	look();
+});
+`
 
 // interactiveRoles are the ARIA roles a user operates, so each needs a name
 // (WCAG 4.1.2).

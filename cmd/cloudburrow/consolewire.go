@@ -46,8 +46,10 @@ type consoleDeps struct {
 	cfg config.Config
 	// iam is the IAM evaluator Policy Troubleshooter and Policy Analyzer
 	// answer from (#1879); nil leaves those pages without answers.
-	iam     *iameval.Enforcer
-	localAI *vertexai.Server
+	iam *iameval.Enforcer
+	// assetOut are Cloud Asset's analysis destinations (#2112).
+	assetOut *assetOutputs
+	localAI  *vertexai.Server
 	// localModels manages the local AI models, shared with the admin API
 	// (#1396); nil makes one for the console alone.
 	localModels *localai.Manager
@@ -113,6 +115,8 @@ type consoleDeps struct {
 	dataform *dataformService
 	// appHub is App Hub (#2110), nil unless enabled.
 	appHub *appHubService
+	// trace is Cloud Trace (#2118), nil unless enabled.
+	trace *traceService
 	// gke is the Kubernetes Engine API (#1913), nil unless enabled.
 	gke *gkeService
 	// monitoring is Cloud Monitoring (#1939), nil unless enabled.
@@ -204,8 +208,10 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			h.sinks = &loggingAdminScreen{svc: d.logging, faults: d.faults}
 		}
 		providers = append(providers, projectsProvider{registry: d.projects}, h, tagsProvider{registry: d.projects},
-			projectIAMProvider{registry: d.projects, iam: d.iam}, iamRolesProvider{registry: d.projects}, iamGroupsProvider{registry: d.projects},
+			projectIAMProvider{registry: d.projects, iam: d.iam, assetOut: d.assetOut}, iamRolesProvider{registry: d.projects}, iamGroupsProvider{registry: d.projects},
 			iamSSOProfilesProvider{registry: d.projects}, iamSSOAssignmentsProvider{registry: d.projects},
+			ciUsersProvider{registry: d.projects}, ciDevicesProvider{registry: d.projects}, ciInvitationsProvider{registry: d.projects},
+			ciPoliciesProvider{registry: d.projects}, ciAllowlistProvider{registry: d.projects},
 			iamServiceAccountsProvider{registry: d.projects}, iamWorkloadIdentityProvider{registry: d.projects}, iamWorkforceIdentityProvider{registry: d.projects}, iamPABProvider{registry: d.projects}, iamAuditProvider{registry: d.projects},
 			iamOrgPoliciesProvider{registry: d.projects}, iamLabelsProvider{registry: d.projects}, iamSettingsProvider{registry: d.projects})
 	}
@@ -344,7 +350,7 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	// Certificate Authority Service (#1834) runs in this process too.
 	// BigQuery's Sharing (Analytics Hub) page (#1960).
 	if d.analyticsHub != nil {
-		providers = append(providers, analyticsHubProvider{svc: d.analyticsHub})
+		providers = append(providers, analyticsHubProvider{svc: d.analyticsHub}, cleanRoomsProvider{svc: d.analyticsHub}) // clean rooms: #2101
 	}
 	if enabled[config.ServicePrivateCA] && d.privateCA != nil {
 		providers = append(providers, privateCAProvider{svc: d.privateCA}, privateCATemplatesProvider{svc: d.privateCA})
@@ -372,6 +378,15 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			wp.scheduler = d.scheduler
 		}
 		providers = append(providers, wp)
+	}
+	// Cloud Trace (#2118), in process: the Trace Explorer and its trace
+	// details, whose trace scopes and log entries are Cloud Logging's.
+	if enabled[config.ServiceTrace] && d.trace != nil {
+		tp := traceExplorerProvider{svc: d.trace}
+		if enabled[config.ServiceLogging] {
+			tp.logging = d.logging
+		}
+		providers = append(providers, tp)
 	}
 	// Cloud Monitoring (#1939) runs in this process too: Metrics explorer
 	// and Metrics management.
@@ -450,7 +465,10 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			loggingSavedQueriesProvider{screen},
 			loggingLogScopesProvider{loggingAdminScreen: screen},
 			// Trace scopes (#2108), a tab of Settings beside Log Scopes.
-			loggingTraceScopesProvider{loggingAdminScreen: screen})
+			loggingTraceScopesProvider{loggingAdminScreen: screen},
+			// The Observability API's settings and buckets (#2117), tabs
+			// of Settings too.
+			observabilitySettingsProvider{screen}, observabilityBucketsProvider{screen})
 		// Log Analytics (#1863), over the buckets' linked datasets in the
 		// instance's BigQuery; without BigQuery the page says it is not
 		// available.
@@ -566,7 +584,7 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			transcriptions.ws = speechWorkspaces{storage: storageProvider{endpoint: storageAddr}}
 		}
 		providers = append(providers, docAIOverviewProvider{d: docs}, docAIGalleryProvider{d: docs},
-			docAIProcessorsProvider{d: docs, analyses: &docAIAnalyses{}},
+			docAIProcessorsProvider{d: docs, analyses: &docAIAnalyses{}, labels: d.localAI},
 			transcriptions, speechRecognizersProvider{s: sp},
 			speechCustomClassesProvider{s: sp}, speechPhraseSetsProvider{s: sp})
 	}
@@ -806,6 +824,7 @@ var serviceTitles = map[config.Service]string{
 	config.ServiceParameterManager: "Parameter Manager",
 	config.ServiceDataform:         "Dataform",
 	config.ServiceAppHub:           "App Hub",
+	config.ServiceTrace:            "Cloud Trace",
 }
 
 func serviceTitle(s config.Service) string {

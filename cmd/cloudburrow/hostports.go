@@ -89,6 +89,10 @@ func hostPorts(cfg config.Config) map[string]int {
 		// The TensorFlow SavedModel converter (#1775).
 		ports["tfconvert"] = e.TFConvert
 	}
+	if sparkRunnerEnabled(cfg) {
+		// The Spark procedure runner (#2104).
+		ports["spark"] = e.Spark
+	}
 	for name, port := range ports {
 		// 0 is OS-assigned; a negative console port disables the console.
 		if port <= 0 {

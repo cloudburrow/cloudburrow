@@ -292,6 +292,11 @@ func (c *clusters) startBackup(r *clusterRecord, id string, ttl time.Duration, a
 	if _, pending := c.busy[r.Name]; pending || r.state.String() != "ACTIVE" {
 		return nil, apierror.FailedPrecondition("%s %s is %s or has an operation in progress: it is backed up only when ACTIVE", kind, r.Name, r.state)
 	}
+	if r.KeyState != "" {
+		// No on-demand or automated backup while the key's primary
+		// version cannot be used (#2113).
+		return nil, errKeyUnavailable(r)
+	}
 	if id == "" {
 		id = c.now().UTC().Format("20060102150405")
 	}
