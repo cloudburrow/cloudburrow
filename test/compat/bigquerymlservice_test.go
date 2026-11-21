@@ -351,6 +351,10 @@ func TestBigQueryMLTranscribe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	spoken, err := os.ReadFile("../../internal/speech/testdata/spoken.wav")
+	if err != nil {
+		t.Fatal(err)
+	}
 	id := strings.ReplaceAll(h.Project(), "-", "_") + "_speech"
 	cn, err := cc.CreateConnection(ctx, &connectionpb.CreateConnectionRequest{Parent: "projects/" + project + "/locations/us", ConnectionId: id,
 		Connection: &connectionpb.Connection{Properties: &connectionpb.Connection_CloudResource{CloudResource: &connectionpb.CloudResourceProperties{}}}})
@@ -383,6 +387,7 @@ func TestBigQueryMLTranscribe(t *testing.T) {
 		"audio/notes.txt": {"text/plain", []byte("not audio at all")},
 		"stereo/call.wav": {"audio/wav", stereoCall(t)},
 		"wav/jfk.wav":     {"audio/wav", wav},
+		"spoken/clip.wav": {"audio/wav", spoken},
 	} {
 		w := bh.Object(name).NewWriter(ctx)
 		w.ContentType = o.ct
@@ -418,6 +423,10 @@ func TestBigQueryMLTranscribe(t *testing.T) {
 	if err := run(fmt.Sprintf("CREATE EXTERNAL TABLE `%s.wav` WITH CONNECTION `%s` OPTIONS(object_metadata = 'SIMPLE', uris = ['gs://%s/wav/*'])",
 		ds, conn, bh.BucketName())); err != nil {
 		t.Fatalf("CREATE EXTERNAL TABLE wav: %v", err)
+	}
+	if err := run(fmt.Sprintf("CREATE EXTERNAL TABLE `%s.spoken` WITH CONNECTION `%s` OPTIONS(object_metadata = 'SIMPLE', uris = ['gs://%s/spoken/*'])",
+		ds, conn, bh.BucketName())); err != nil {
+		t.Fatalf("CREATE EXTERNAL TABLE spoken: %v", err)
 	}
 	if err := run(fmt.Sprintf("CREATE MODEL `%s.refused` REMOTE WITH CONNECTION `%s` OPTIONS(REMOTE_SERVICE_TYPE = 'CLOUD_AI_SPEECH_TO_TEXT_V2', "+
 		"SPEECH_RECOGNIZER = 'projects/%s/locations/us/recognizers/none')", ds, conn, h.Project())); err == nil || !strings.Contains(err.Error(), "doesn't exist") {
@@ -533,6 +542,20 @@ func TestBigQueryMLTranscribe(t *testing.T) {
 		t.Errorf("per-channel transcripts: %q", text)
 	}
 
+	// The profanity filter and spoken punctuation and emojis (#1799):
+	// "Hello comma this shit is great exclamation mark thumbs up" as
+	// "s***", "!" and 👍 (speechconfig's Format).
+	spRows := mlQueryIn(t, ctx, c, fmt.Sprintf("SELECT transcripts, ml_transcribe_status AS status "+
+		`FROM ML.TRANSCRIBE(MODEL `+"`%s.speech`, TABLE `%s.spoken`"+`, recognition_config => (JSON '{"language_codes": ["en-US"], "model": "chirp", `+
+		`"auto_decoding_config": {}, "features": {"profanity_filter": true, "enable_spoken_punctuation": true, "enable_spoken_emojis": true}}'))`, ds, ds))
+	if len(spRows) != 1 || spRows[0]["status"] != "" {
+		t.Fatalf("spoken rows: %v", spRows)
+	}
+	if text, _ := spRows[0]["transcripts"].(string); !strings.Contains(text, "s***") || strings.Contains(strings.ToLower(text), "shit") ||
+		!strings.Contains(text, "!") || !strings.Contains(text, "👍") || strings.Contains(strings.ToLower(text), "exclamation") {
+		t.Errorf("profanity filter and spoken punctuation and emojis: %q", text)
+	}
+
 	recRows := mlQueryIn(t, ctx, c, fmt.Sprintf("SELECT uri, transcripts, ml_transcribe_status AS status, "+
 		"LAX_INT64(ml_transcribe_result.results[0].alternatives[0].words[1].start_offset.nanos) AS word_nanos "+
 		"FROM ML.TRANSCRIBE(MODEL `%s.speech_rec`, TABLE `%s.wav`)", ds, ds))
@@ -543,7 +566,7 @@ func TestBigQueryMLTranscribe(t *testing.T) {
 	for cfg, want := range map[string]string{
 		"": "requires recognition_config",
 		`, recognition_config => (JSON '{"language_codes": ["en-US"], "model": "long", "auto_decoding_config": {}}')`:                                                               "chirp",
-		`, recognition_config => (JSON '{"language_codes": ["en-US"], "model": "chirp", "auto_decoding_config": {}, "features": {"profanity_filter": true}}')`:                      "Not implemented here",
+		`, recognition_config => (JSON '{"language_codes": ["en-US"], "model": "chirp", "auto_decoding_config": {}, "features": {"diarization_config": {}}}')`:                      "Not implemented here",
 		`, recognition_config => (JSON '{"language_codes": ["en-US"], "model": "chirp", "auto_decoding_config": {}, "transcript_normalization": {"entries": [{"replace": "x"}]}}')`: "search is empty",
 	} {
 		if err := run(fmt.Sprintf("SELECT * FROM ML.TRANSCRIBE(MODEL `%s.speech`, TABLE `%s.audio`%s)", ds, ds, cfg)); err == nil || !strings.Contains(err.Error(), want) {

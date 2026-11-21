@@ -338,7 +338,8 @@ func TestSpeechV1Config(t *testing.T) {
 		want codes.Code
 	}{
 		{"no language", &speechv1pb.RecognitionConfig{}, codes.InvalidArgument},
-		{"amr", &speechv1pb.RecognitionConfig{LanguageCode: "en-US", Encoding: speechv1pb.RecognitionConfig_AMR}, codes.Unimplemented},
+		{"amr at 16 kHz", &speechv1pb.RecognitionConfig{LanguageCode: "en-US", Encoding: speechv1pb.RecognitionConfig_AMR, SampleRateHertz: 16000}, codes.InvalidArgument},
+		{"speex", &speechv1pb.RecognitionConfig{LanguageCode: "en-US", Encoding: speechv1pb.RecognitionConfig_SPEEX_WITH_HEADER_BYTE}, codes.Unimplemented},
 		{"opus rate", &speechv1pb.RecognitionConfig{LanguageCode: "en-US", Encoding: speechv1pb.RecognitionConfig_OGG_OPUS, SampleRateHertz: 44100}, codes.InvalidArgument},
 		{"medical", &speechv1pb.RecognitionConfig{LanguageCode: "en-US", Model: "medical_dictation"}, codes.Unimplemented},
 		{"alternatives", &speechv1pb.RecognitionConfig{LanguageCode: "en-US", AlternativeLanguageCodes: []string{"de-DE"}}, codes.Unimplemented},

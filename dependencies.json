@@ -857,6 +857,23 @@
         "digest": "sha256:7db4f23dfe1ad8966b050b419a865da451143fd43eb6b606a256aadeeb1e5417",
         "notes": "BigQuery ML.TRANSLATE's DETECT_LANGUAGE and TRANSLATE_TEXT's detected_language_code (#1799, internal/langid): Google's MediaPipe Language Detector (Learn2Compress and Google Research, Apache-2.0 per its model card, https://storage.googleapis.com/mediapipe-assets/LanguageDetector%20Model%20Card.pdf; 110 languages, the label set of CLD3), as linked from https://ai.google.dev/edge/mediapipe/solutions/text/language_detector. Embedded (315294 bytes, third_party/mediapipe-langid), run in pure Go on internal/tflitemodel with Go ports of MediaPipe's NGramHash and KmeansEmbeddingLookup custom operators (mediapipe/tasks/cc/text/language_detector/custom_ops, Apache-2.0), so no cgo and no download at run time (third_party/mediapipe-langid/PROVENANCE.md)."
       },
+      "amrWasm": {
+        "version": "0.1.6",
+        "source": "https://sourceforge.net/projects/opencore-amr/",
+        "license": "Apache-2.0",
+        "verification": "release-checksum",
+        "digest": "sha256:483eb4061088e2b34b358e47540b5d495a96cd468e361050fae615b1809dc4a1",
+        "skipDiscovery": "A SourceForge release, not a GitHub release depcheck can compare; re-pinned by hand.",
+        "notes": "Speech-to-Text's AMR and AMR_WB audio, for Recognize, BatchRecognize, StreamingRecognize, v1 and ML.TRANSCRIBE (#1799, internal/speech/amr.go): opencore-amr's AMR-NB and AMR-WB decoders (Android OpenCORE, Apache-2.0), compiled as C by third_party/amr-wasm/build.sh with wasi-sdk 34 (the same pinned archives as whisperWasm; linked in: wasi-libc and musl MIT) to a WASI module run on wazero, so no cgo. FFmpeg's AMR decoders are LGPL and never linked. The module's SHA-256 is in amr.wasm.sha256 and CI's amr-wasm job rebuilds it (third_party/amr-wasm/PROVENANCE.md)."
+      },
+      "rnnoiseWasm": {
+        "version": "0.2",
+        "source": "https://github.com/xiph/rnnoise",
+        "license": "BSD-3-Clause",
+        "verification": "release-checksum",
+        "digest": "sha256:90fce4b00b9ff24c08dbfe31b82ffd43bae383d85c5535676d28b0a2b11c0d37",
+        "notes": "Speech-to-Text's denoiserConfig.denoiseAudio (#1799, internal/speech/denoise.go): Xiph's RNNoise and its built-in model (BSD-3-Clause), the v0.2 release asset rnnoise-0.2.tar.gz, compiled by third_party/rnnoise-wasm/build.sh with wasi-sdk 34 (linked in: wasi-libc and musl MIT) to a WASI module run on wazero, so no cgo. Google publishes no local denoiser. The module's SHA-256 is in rnnoise.wasm.sha256 and CI's rnnoise-wasm job rebuilds it (third_party/rnnoise-wasm/PROVENANCE.md)."
+      },
       "whisperWasm": {
         "version": "1.9.5",
         "source": "https://github.com/ggml-org/whisper.cpp",
@@ -1147,6 +1164,20 @@
           "bazelisk-linux-arm64": "sha256:4c8d966e40ac2c4efcc7f1a5a5cceef2c0a2f16b957e791fa7a867cce31e8fcb"
         },
         "notes": "The release publishes no checksum file and its assets carry no GitHub digest, so these are SHA-256s of the two release assets, downloaded (not run) on 2026-09-27. A new version needs the Dockerfile's sums and these updated together. Bazelisk then fetches bazel 7.6.1 per the LiteRT-LM repo's .bazelversion; that download is not checksummed here."
+      },
+      "speechSpokenInventories": {
+        "$comment": "Google's spoken punctuation and spoken emoji inventories (#1799), the data of https://docs.cloud.google.com/speech-to-text/docs/spoken-punctuation and .../spoken-emoji, converted to internal/speechconfig/data/spoken_punctuation.tsv and spoken_emoji.tsv.gz (locale, symbol, |-separated forms).",
+        "source": "https://docs.cloud.google.com/speech-to-text/docs/common/spoken_punctuation_inventories.json and https://docs.cloud.google.com/speech-to-text/docs/common/spoken_emoji_inventories.json",
+        "publisher": "Google (Cloud Speech-to-Text documentation)",
+        "license": "CC-BY-4.0 (Google Cloud documentation content)",
+        "redistribution": "vendored as data in internal/speechconfig/data, attributed in internal/speechconfig/spoken.go",
+        "verification": "sha256",
+        "sha256": {
+          "spoken_punctuation_inventories.json": "b7bafeb309921c9f94ef817c3bd9a740b2e723af2aa28489b8bcd9eb2244f070",
+          "spoken_emoji_inventories.json": "71db9c9ed8ff5aa505ce32bb4dd24032c0736b4737f4ed84e0e693634fa414df"
+        },
+        "fetched": "2026-11-20",
+        "skipDiscovery": "Documentation data files, not a release: re-fetch and re-convert when the pages change."
       },
       "runtimeImage": {
         "$comment": "The litertLM runtime above, built from deploy/litert-lm and published by CloudBurrow's own release workflow (#602).",
