@@ -690,8 +690,13 @@ func returnType(def map[string]any) string {
 
 // argumentType is an argument's type, ANY TYPE for a templated one.
 func argumentType(a map[string]any) string {
-	if strings.EqualFold(str(a, "argumentKind"), "ANY_TYPE") {
+	switch strings.ToUpper(str(a, "argumentKind")) {
+	case "ANY_TYPE":
 		return "ANY TYPE"
+	case "ANY_TABLE": // #2120
+		return "ANY TABLE"
+	case "FIXED_TABLE":
+		return tableTypeSQL(a["tableType"])
 	}
 	dt, _ := a["dataType"].(map[string]any)
 	return standardType(dt)

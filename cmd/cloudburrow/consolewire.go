@@ -346,7 +346,7 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	// Certificate Authority Service (#1834) runs in this process too.
 	// BigQuery's Sharing (Analytics Hub) page (#1960).
 	if d.analyticsHub != nil {
-		providers = append(providers, analyticsHubProvider{svc: d.analyticsHub})
+		providers = append(providers, analyticsHubProvider{svc: d.analyticsHub}, cleanRoomsProvider{svc: d.analyticsHub}) // clean rooms: #2101
 	}
 	if enabled[config.ServicePrivateCA] && d.privateCA != nil {
 		providers = append(providers, privateCAProvider{svc: d.privateCA}, privateCATemplatesProvider{svc: d.privateCA})

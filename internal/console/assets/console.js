@@ -399,6 +399,10 @@ const ROUTES = [
   // and subscriptions.
   { path: "/bigquery-sharing", service: "bigquery-sharing", icon: "bigquery", title: "Analytics Hub", kind: "Exchange",
     section: "Databases", product: "bigquery", productTitle: "BigQuery" },
+  // Data clean rooms and their query templates (#2101), beside it as
+  // BigQuery sharing has them.
+  { path: "/bigquery-clean-rooms", service: "bigquery-clean-rooms", icon: "bigquery", title: "Data clean rooms", kind: "Clean room",
+    section: "Databases", product: "bigquery", productTitle: "BigQuery" },
   // Dataform (#2105): repositories, their workspaces' editor, releases,
   // workflow configurations and execution logs, in Google's place.
   { path: "/bigquery-dataform", service: "dataform", icon: "bigquery", title: "Dataform", kind: "Repository",

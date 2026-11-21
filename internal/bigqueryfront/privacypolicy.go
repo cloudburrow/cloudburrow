@@ -183,6 +183,9 @@ type privacyRead struct {
 	name    string // dataset.table, as BigQuery's errors name it
 	pol     privacyPolicy
 	columns map[string]bool // its columns, lower case
+	// srcProject and srcDataset hold a linked dataset's shared view,
+	// whose policy this is (#2101): its budget is the shared view's.
+	srcProject, srcDataset string
 }
 
 // privacyCheckedKey marks a request whose query the front rewrote by the
@@ -610,12 +613,13 @@ func rewriteAggregationThreshold(sql string, s []token, at *privacyRead) (out, m
 		if threshold == 0 {
 			threshold = at.pol.threshold
 		} else if threshold < at.pol.threshold {
-			return bad(fmt.Sprintf("The threshold for the query (%d) must be equal to or greater than the threshold "+
-				"for %s (%d)", threshold, at.name, at.pol.threshold))
+			// The clause's documented error (query-syntax#agg_threshold_clause,
+			// "-- Error: Aggregation threshold is too low.", read 2026-11-21).
+			return bad("Aggregation threshold is too low.")
 		}
 		if unitName != "" && !strings.EqualFold(unitName, at.pol.unit) {
-			return bad(fmt.Sprintf("The privacy_unit_column of the query (%s) must match the privacy_unit_column of %s (%s)",
-				unitText, at.name, at.pol.unit))
+			// "-- Error: Can't override the privacy unit column set in view."
+			return bad("Can't override the privacy unit column set in view.")
 		}
 		unitName = at.pol.unit
 		unitRef = quotePath([]string{readAlias(at.tr)}) + "." + quotePath([]string{at.pol.unit})

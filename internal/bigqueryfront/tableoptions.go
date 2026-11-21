@@ -543,6 +543,14 @@ func (f front) checkReads(w http.ResponseWriter, r *http.Request, q queryOptions
 	seen := map[string]bool{}
 	var prot []privacyRead
 	for _, tr := range reads {
+		if _, ok := f.hubLink(tr.dataset); ok {
+			// A linked dataset's table is its shared table or view, whose
+			// analysis rules hold (#2101, hublinks.go).
+			if done := f.checkHubRead(w, r, q, insert, tr, checked, clause, &prot); done {
+				return true
+			}
+			continue
+		}
 		key := streamKey(project, tr.dataset, tr.table)
 		if !f.tables.watched(key) {
 			if !checked && f.tables.anyWatched() {
