@@ -247,9 +247,16 @@ resource "google_logging_folder_settings" "f" {
 // destroyed: the sink and exclusion are NOT_FOUND and _Default stays. The
 // billing account is a subaccount Cloud Billing holds (#2109): Logging
 // checks it exists.
+// envStorageLogging is Cloud Logging as the storage shard exports it
+// (STORAGE_LOGGING), for TestTerraformLoggingBillingAccount alone.
+const envStorageLogging = "CLOUDBURROW_TEST_STORAGE_LOGGING"
+
 // covers: google.logging.v2.ConfigServiceV2/CreateSink, google.logging.v2.ConfigServiceV2/GetSink, google.logging.v2.ConfigServiceV2/UpdateSink, google.logging.v2.ConfigServiceV2/DeleteSink, google.logging.v2.ConfigServiceV2/CreateExclusion, google.logging.v2.ConfigServiceV2/GetExclusion, google.logging.v2.ConfigServiceV2/UpdateExclusion, google.logging.v2.ConfigServiceV2/DeleteExclusion, google.logging.v2.ConfigServiceV2/GetBucket, google.logging.v2.ConfigServiceV2/UpdateBucket
 func TestTerraformLoggingBillingAccount(t *testing.T) {
 	h := New(t)
+	// The storage shard's Cloud Logging, under its own name, beside its
+	// OpenTofu and Resource Manager, so the Logging suite stays in served.
+	shardEndpoint(h, envStorageLogging, EnvLogging)
 	config := loggingConfigClient(t, h)
 	ctx := h.Context()
 	account := billingSubaccount(t, h, "terraform logging")

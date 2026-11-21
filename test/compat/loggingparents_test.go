@@ -254,6 +254,9 @@ func TestLoggingFolderOrganizationAndBillingParents(t *testing.T) {
 
 	// A billing account Cloud Billing holds (#2109): stored, with no
 	// children; one it does not hold is NOT_FOUND.
+	// Resource Manager under the served shard's own name, so this part runs
+	// there, beside its Cloud Logging.
+	shardEndpoint(h, envLoggingResourceManager, EnvResourceManager)
 	ba := billingSubaccount(t, h, "logging parents")
 	_, err = cc.CreateSink(ctx, &loggingpb.CreateSinkRequest{Parent: "billingAccounts/0A0B0C-0D0E0F-FFFFFF", Sink: &loggingpb.LogSink{Name: "b", Destination: "storage.googleapis.com/some-bucket"}})
 	wantLoggingCode(t, "a sink of a billing account that does not exist", err, codes.NotFound)

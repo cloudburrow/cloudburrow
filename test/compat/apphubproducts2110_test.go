@@ -37,7 +37,15 @@ import (
 func TestAppHubDiscoversOtherProducts(t *testing.T) {
 	h := New(t)
 	clients := appHubClients(t, h)
-	pubsubAddr := h.Endpoint(EnvPubSub)
+	// The run shard, which serves App Hub, exports Pub/Sub, Cloud Storage
+	// and Cloud Logging under its own RUN_* names, so it does not run their
+	// suites a second time; shardEndpoint exports each under its ordinary
+	// name for this test only.
+	pubsubAddr := shardEndpoint(h, "CLOUDBURROW_TEST_RUN_PUBSUB", EnvPubSub)
+	shardEndpoint(h, "CLOUDBURROW_TEST_RUN_STORAGE", EnvStorage)
+	if runShardEndpointIfSet(h, "CLOUDBURROW_TEST_RUN_LOGGING", EnvLogging) != "" {
+		shardEndpoint(h, "CLOUDBURROW_TEST_RUN_LOGGING", EnvLogging)
+	}
 	sc := storageClient(t, h)
 	sm := secretsClientWith(t, h)
 	tc := tasksClient(t, h)

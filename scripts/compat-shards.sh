@@ -323,10 +323,12 @@ compat_shard() {
       # one instance, so its tests run here.
       # Cloud Logging as TASKS_LOGGING (#1256): only the Cloud Tasks
       # dispatch log test reads it, so the Logging tests run in served.
+      # And as STORAGE_LOGGING for TestTerraformLoggingBillingAccount
+      # (#2109), which needs OpenTofu and Resource Manager beside it.
       # Service Usage (#1352), always served, with the Terraform and gcloud
       # tests that need Cloud Storage beside it; and the API Keys API
       # (#1915), always served too.
-      TEST_VARS+=,STORAGE,CORS_ORIGIN,PUBSUB,TASKS,SECRETS,SCHEDULER,TOFU,RESOURCEMANAGER,SERVICEUSAGE,APIKEYS,STORAGE_BATCH,STORAGE_INSIGHTS,STORAGE_TRANSFER,TASKS_LOGGING,PUBSUB_MONITORING,CMEK_KMS,PARAMETERMANAGER
+      TEST_VARS+=,STORAGE,CORS_ORIGIN,PUBSUB,TASKS,SECRETS,SCHEDULER,TOFU,RESOURCEMANAGER,SERVICEUSAGE,APIKEYS,STORAGE_BATCH,STORAGE_INSIGHTS,STORAGE_TRANSFER,TASKS_LOGGING,STORAGE_LOGGING,PUBSUB_MONITORING,CMEK_KMS,PARAMETERMANAGER
       # The restart probes' fixtures, left just before stop so no
       # suite-level reset wipes them: Secret Manager (#483), a secret and a
       # version; Cloud Tasks and Cloud Scheduler (#596), a paused queue with

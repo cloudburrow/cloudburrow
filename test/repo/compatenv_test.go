@@ -411,6 +411,7 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 		"FIRESTORE_MONGODB":        "127.0.0.1:9026",
 		"FIRESTORE_MONGODB_CA":     "/state/ct/firestore-mongodb-ca.pem",
 		"SINK_LOGGING":             "127.0.0.1:9009",
+		"STORAGE_LOGGING":          "127.0.0.1:9009",
 		"SINK_STORAGE":             "http://127.0.0.1:50003",
 		"SINK_PUBSUB":              "127.0.0.1:50004",
 		"FIRESTORE_STORAGE":        "http://127.0.0.1:50003",
