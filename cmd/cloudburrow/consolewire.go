@@ -24,6 +24,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/metrics"
 	"github.com/cloudburrow/cloudburrow/internal/modelgarden"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
+	"github.com/cloudburrow/cloudburrow/internal/ratequota"
 	"github.com/cloudburrow/cloudburrow/internal/service/apikeys"
 	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
 	"github.com/cloudburrow/cloudburrow/internal/service/cloudquotas"
@@ -96,6 +97,9 @@ type consoleDeps struct {
 	// requestHistory is their one-minute history per project, which the
 	// APIs & Services charts read over a time range (#1866).
 	requestHistory *monitoring.RequestBuiltin
+	// requestQuotas are the request quotas (#2063), which an API's Quotas
+	// & System Limits tab lists and edits.
+	requestQuotas *ratequota.Limiter
 	// backupdr is the Backup and DR Service (#1433), nil unless enabled.
 	backupdr *backupdr.Server
 	// privateCA is Certificate Authority Service (#1834), nil unless enabled.
@@ -104,6 +108,8 @@ type consoleDeps struct {
 	analyticsHub *analyticsHubSvc
 	// workflows is Workflows (#1986), nil unless enabled.
 	workflows *workflowsService
+	// parameterManager is Parameter Manager (#2054), nil unless enabled.
+	parameterManager *parameterManagerService
 	// gke is the Kubernetes Engine API (#1913), nil unless enabled.
 	gke *gkeService
 	// monitoring is Cloud Monitoring (#1939), nil unless enabled.
@@ -336,6 +342,11 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	if enabled[config.ServicePrivateCA] && d.privateCA != nil {
 		providers = append(providers, privateCAProvider{svc: d.privateCA}, privateCATemplatesProvider{svc: d.privateCA})
 	}
+	// Parameter Manager (#2054), in process, under Secret Manager.
+	if enabled[config.ServiceParameterManager] && d.parameterManager != nil {
+		providers = append(providers, parameterManagerProvider{svc: d.parameterManager},
+			parameterTemplatesProvider{svc: d.parameterManager})
+	}
 	// Workflows (#1986), in process.
 	if enabled[config.ServiceWorkflows] && d.workflows != nil {
 		wp := workflowsProvider{svc: d.workflows, logs: d.logging, eventarc: workflowsEventarc}
@@ -387,7 +398,7 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	}
 	// APIs & Services (#1352): always served, as projects are.
 	if d.serviceUsage != nil {
-		providers = append(providers, serviceUsageProvider{api: d.serviceUsage, metrics: d.requestMetrics, history: d.requestHistory, apiKeys: d.apiKeys, quotas: d.cloudQuotas, sites: d.siteVerify, auth: d.authPlatform, metaAddr: d.metaAddr}, serviceUsageOperationsProvider{api: d.serviceUsage})
+		providers = append(providers, serviceUsageProvider{api: d.serviceUsage, metrics: d.requestMetrics, history: d.requestHistory, apiKeys: d.apiKeys, quotas: d.cloudQuotas, requestQuotas: d.requestQuotas, sites: d.siteVerify, auth: d.authPlatform, metaAddr: d.metaAddr}, serviceUsageOperationsProvider{api: d.serviceUsage})
 	}
 	// Backup and DR (#1433), in process, restoring through Cloud SQL.
 	if enabled[config.ServiceBackupDR] && d.backupdr != nil {
@@ -734,28 +745,29 @@ func trimForward(name string) string {
 // config ID, which reads as a placeholder; TestEveryServiceHasAHumanTitle
 // keeps the table complete.
 var serviceTitles = map[config.Service]string{
-	config.ServiceStorage:       "Cloud Storage",
-	config.ServicePubSub:        "Pub/Sub",
-	config.ServiceTasks:         "Cloud Tasks",
-	config.ServiceRun:           "Cloud Run",
-	config.ServiceSecrets:       "Secret Manager",
-	config.ServiceFirestore:     "Firestore",
-	config.ServiceDatastore:     "Datastore",
-	config.ServiceBigtable:      "Bigtable",
-	config.ServiceSpanner:       "Spanner",
-	config.ServiceCloudSQL:      "Cloud SQL for PostgreSQL",
-	config.ServiceBigQuery:      "BigQuery",
-	config.ServiceMemorystore:   "Memorystore",
-	config.ServiceCloudSQLMySQL: "Cloud SQL for MySQL",
-	config.ServiceScheduler:     "Cloud Scheduler",
-	config.ServiceLogging:       "Cloud Logging",
-	config.ServiceKMS:           "Cloud KMS",
-	config.ServiceBackupDR:      "Backup and DR",
-	config.ServicePrivateCA:     "Certificate Authority Service",
-	config.ServiceGKE:           "Kubernetes Engine",
-	config.ServiceMonitoring:    "Cloud Monitoring",
-	config.ServiceCompute:       "VPC network",
-	config.ServiceWorkflows:     "Workflows",
+	config.ServiceStorage:          "Cloud Storage",
+	config.ServicePubSub:           "Pub/Sub",
+	config.ServiceTasks:            "Cloud Tasks",
+	config.ServiceRun:              "Cloud Run",
+	config.ServiceSecrets:          "Secret Manager",
+	config.ServiceFirestore:        "Firestore",
+	config.ServiceDatastore:        "Datastore",
+	config.ServiceBigtable:         "Bigtable",
+	config.ServiceSpanner:          "Spanner",
+	config.ServiceCloudSQL:         "Cloud SQL for PostgreSQL",
+	config.ServiceBigQuery:         "BigQuery",
+	config.ServiceMemorystore:      "Memorystore",
+	config.ServiceCloudSQLMySQL:    "Cloud SQL for MySQL",
+	config.ServiceScheduler:        "Cloud Scheduler",
+	config.ServiceLogging:          "Cloud Logging",
+	config.ServiceKMS:              "Cloud KMS",
+	config.ServiceBackupDR:         "Backup and DR",
+	config.ServicePrivateCA:        "Certificate Authority Service",
+	config.ServiceGKE:              "Kubernetes Engine",
+	config.ServiceMonitoring:       "Cloud Monitoring",
+	config.ServiceCompute:          "VPC network",
+	config.ServiceWorkflows:        "Workflows",
+	config.ServiceParameterManager: "Parameter Manager",
 }
 
 func serviceTitle(s config.Service) string {

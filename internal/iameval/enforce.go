@@ -213,6 +213,13 @@ func (e *Enforcer) Authorize(ctx context.Context, svc *Service, bearer, permissi
 	return svc.Deny(permission, resource)
 }
 
+// AuthorizeCaller is Authorize for the caller of the call in ctx, whose
+// bearer token its incoming metadata carries (the JSON transcoder copies
+// the Authorization header there too).
+func (e *Enforcer) AuthorizeCaller(ctx context.Context, svc *Service, permission, resource string) error {
+	return e.Authorize(ctx, svc, bearer(ctx), permission, resource)
+}
+
 // Request is the check of permission on resource in svc for email, with
 // the service's own policies on the resource and its parents.
 func (e *Enforcer) Request(ctx context.Context, svc *Service, email, permission, resource string) Request {

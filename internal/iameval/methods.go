@@ -145,6 +145,7 @@ var Services = map[string]*Service{
 	"google.cloud.scheduler.v1.CloudScheduler":                  Scheduler,
 	"google.cloud.workflows.v1.Workflows":                       Workflows,
 	"google.cloud.workflows.executions.v1.Executions":           Workflows,
+	"google.cloud.parametermanager.v1.ParameterManager":         ParameterManager,
 }
 
 // ForMethod is the service and method row of a gRPC full method on the
@@ -561,4 +562,51 @@ func ServiceByHost(host string) *Service {
 		}
 	}
 	return nil
+}
+
+// ParameterManager is Parameter Manager's table (#2054): "Access control
+// with IAM" (https://docs.cloud.google.com/secret-manager/parameter-manager/docs/access-control,
+// read 2026-11-20) names the roles; their permissions are the IAM roles
+// catalogue's (parametermanager.parameters.* and
+// parametermanager.parameterVersions.*). Roles are granted on the project
+// only ("You can't grant IAM roles at a resource level for Parameter
+// Manager"), so no collection keeps its own policy. The denial's wording is
+// Secret Manager's (UNVERIFIED: Google's page gives none).
+// Docs re-read 2026-11-20, still unanswered: https://docs.cloud.google.com/secret-manager/parameter-manager/docs/access-control
+var ParameterManager = &Service{
+	Name: "parametermanager.googleapis.com",
+	Types: map[string]string{"parameters": "parametermanager.googleapis.com/Parameter",
+		"versions": "parametermanager.googleapis.com/ParameterVersion", "templates": "parametermanager.googleapis.com/Template"},
+	Methods: sm(map[string][2]string{
+		"ListParameters":         {"parametermanager.parameters.list", "parent"},
+		"GetParameter":           {"parametermanager.parameters.get", "name"},
+		"CreateParameter":        {"parametermanager.parameters.create", "parent"},
+		"UpdateParameter":        {"parametermanager.parameters.update", "parameter.name"},
+		"DeleteParameter":        {"parametermanager.parameters.delete", "name"},
+		"ListParameterVersions":  {"parametermanager.parameterVersions.list", "parent"},
+		"GetParameterVersion":    {"parametermanager.parameterVersions.get", "name"},
+		"CreateParameterVersion": {"parametermanager.parameterVersions.create", "parent"},
+		"UpdateParameterVersion": {"parametermanager.parameterVersions.update", "parameter_version.name"},
+		"DeleteParameterVersion": {"parametermanager.parameterVersions.delete", "name"},
+		"RenderParameterVersion": {"parametermanager.parameterVersions.render", "name"},
+		// Templates (#2063): "Render a parameter template version" names
+		// parametermanager.templateversions.render on the template version,
+		// and parameterversions.render on the parameter version, which the
+		// server checks itself; the rest follow the roles catalogue.
+		"ListTemplates":         {"parametermanager.templates.list", "parent"},
+		"GetTemplate":           {"parametermanager.templates.get", "name"},
+		"CreateTemplate":        {"parametermanager.templates.create", "parent"},
+		"UpdateTemplate":        {"parametermanager.templates.update", "template.name"},
+		"DeleteTemplate":        {"parametermanager.templates.delete", "name"},
+		"ListTemplateVersions":  {"parametermanager.templateVersions.list", "parent"},
+		"GetTemplateVersion":    {"parametermanager.templateVersions.get", "name"},
+		"CreateTemplateVersion": {"parametermanager.templateVersions.create", "parent"},
+		"UpdateTemplateVersion": {"parametermanager.templateVersions.update", "template_version.name"},
+		"DeleteTemplateVersion": {"parametermanager.templateVersions.delete", "name"},
+		"RenderTemplateVersion": {"parametermanager.templateVersions.render", "name"},
+	}, "/google.cloud.parametermanager.v1.ParameterManager/"),
+	Deny: func(permission, resource string) error {
+		return grpcDenied(fmt.Sprintf("Permission '%s' denied for resource '%s' (or it may not exist).", permission, resource),
+			permission, resource, true)
+	},
 }

@@ -17,6 +17,7 @@ import (
 	iamadminpb "cloud.google.com/go/iam/admin/apiv1/adminpb"
 	iamv2pb "cloud.google.com/go/iam/apiv2/iampb"
 	"cloud.google.com/go/orgpolicy/apiv2/orgpolicypb"
+	pmpb "cloud.google.com/go/parametermanager/apiv1/parametermanagerpb"
 	rmpb "cloud.google.com/go/resourcemanager/apiv3/resourcemanagerpb"
 	"cloud.google.com/go/security/privateca/apiv1/privatecapb"
 	"cloud.google.com/go/workflows/apiv1/workflowspb"
@@ -43,6 +44,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/kmsinventory"
 	"github.com/cloudburrow/cloudburrow/internal/service/logging"
 	"github.com/cloudburrow/cloudburrow/internal/service/monitoring"
+	"github.com/cloudburrow/cloudburrow/internal/service/parametermanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/privateca"
 	"github.com/cloudburrow/cloudburrow/internal/service/redisadmin"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
@@ -88,6 +90,13 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	}
 	workflowspb.RegisterWorkflowsServer(srv, wfs.Workflows())
 	executionspb.RegisterExecutionsServer(srv, wfs.Executions())
+	// Parameter Manager alone (#2054): its Locations mixin is another
+	// service's row.
+	pm, err := parametermanager.NewServer("", parametermanager.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pmpb.RegisterParameterManagerServer(srv, pm)
 	gkeSrv, err := gke.NewServer(nil, gke.Options{Versions: []gke.Version{{GKE: "1.36.4-gke.0", Image: "kindest/node:v1.36.4"}}})
 	if err != nil {
 		t.Fatal(err)

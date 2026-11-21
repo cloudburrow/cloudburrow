@@ -87,6 +87,8 @@ type adminDeps struct {
 	analyticsHub *analyticsHubSvc
 	// workflows is Workflows (#1986), nil unless enabled.
 	workflows *workflowsService
+	// parameterManager is Parameter Manager (#2054), nil unless enabled.
+	parameterManager *parameterManagerService
 	// gke is the Kubernetes Engine API (#1913), nil unless enabled.
 	gke *gkeService
 	// monitoring is Cloud Monitoring (#1939), nil unless enabled.
@@ -223,6 +225,9 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 	}
 	if d.workflows != nil {
 		api.RegisterResetter(&workflowsResetter{svc: d.workflows})
+	}
+	if d.parameterManager != nil {
+		api.RegisterResetter(&parameterManagerResetter{svc: d.parameterManager})
 	}
 	if d.monitoring != nil {
 		api.RegisterResetter(&monitoringResetter{svc: d.monitoring})
