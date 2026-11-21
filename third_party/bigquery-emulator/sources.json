@@ -1,5 +1,5 @@
 {
-  "$comment": "What tools/bqengine builds (#1061): goccy/bigquery-emulator at emulator.version, with the modules in patched (the emulator among them) replaced by copies of their pinned versions with CloudBurrow's patches applied. Each sum is the module's go.sum h1: hash; the build checks the download and the module cache's files against it. dependencies.json's bigqueryEmulator entry records the same pins, and a test holds the two together. PROVENANCE.md says where each patch came from.",
+  "$comment": "What tools/bqengine builds (#1061): goccy/bigquery-emulator at emulator.version, with the modules in patched (the emulator among them) replaced by copies of their pinned versions with CloudBurrow's patches applied. Each sum is the module's go.sum h1: hash; the build checks the download and the module cache's files against it. dependencies.json's bigqueryEmulator entry records the same pins, and a test holds the two together. After a module's patches, the rewrites named in its rewrites run on its files (tools/bqengine, keepalive.go: changes to generated code too wide for a patch, #2134). PROVENANCE.md says where each patch and rewrite came from.",
   "emulator": {
     "path": "github.com/goccy/bigquery-emulator",
     "version": "v0.8.1",
@@ -142,7 +142,7 @@
         "patches/googlesqlite/0103-catalog-sync-on-an-older-snapshot.patch",
         "patches/googlesqlite/0104-new-columns-in-the-catalog.patch",
         "patches/googlesqlite/0106-ten-thousand-columns.patch",
-        "patches/googlesqlite/0107-handles-kept-alive-through-their-call.patch"
+        "patches/googlesqlite/0107-spec-case-watchdog.patch"
       ]
     },
     {
@@ -154,7 +154,14 @@
       "patches": [
         "patches/go-googlesql/0001-unsigned-wasm-addresses.patch",
         "patches/go-googlesql/0002-utc-time-zone.patch",
-        "patches/go-googlesql/0003-annotated-type-argument.patch"
+        "patches/go-googlesql/0003-annotated-type-argument.patch",
+        "patches/go-googlesql/0108-handles-kept-alive-through-their-call.patch"
+      ],
+      "rewrites": [
+        {
+          "name": "handle-keepalive",
+          "path": "googlesql.go"
+        }
       ]
     },
     {

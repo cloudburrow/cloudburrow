@@ -1,0 +1,270 @@
+CloudBurrow patch 108 to github.com/goccy/go-googlesql v0.3.0
+(cloudburrow/cloudburrow#2134).
+
+The bug: a generated method copies the C++ pointers of its receiver and
+handle arguments into its request, then calls invokeMethod, which waits
+for the module's lock. A handle whose last Go use was that copy could be
+finalized, and its C++ object freed in the engine's WebAssembly memory,
+before the call read it. On main CI (run 44954090598) googlesqlite's
+newSimpleCatalog passed its LanguageOptions inside BuiltinFunctionOptions
+to AddGoogleSQLFunctions2, which then spun forever in the analyzer.
+
+The fix is not in this patch: it is tools/bqengine's handle-keepalive
+rewrite of googlesql.go (sources.json "rewrites", keepalive.go), run after
+the patches, which changes every generated method too wide a change for a
+patch. Every method keeps its receiver and each argument that can hold a
+handle (an options struct keeps the handles in it) alive until its call
+has returned, and each finalizer is on the struct that holds the C++
+pointer, which a base class's method has as its receiver.
+
+This patch adds two test hooks to googlesql.go, testHookBeforeCall (in
+invokeMethod, after marshalling and before the call) and testHookInvoke
+(every request, frees included), and keepalive_test.go, which forces a
+collection and runs the pending finalizers in that gap, and fails if the
+handle's free reached the module before the call: for a receiver, a base
+class's receiver, an argument and a handle in an options struct. All four
+fail without the rewrite; the base class's also with the KeepAlives alone.
+
+Licence: a modification of goccy/go-googlesql, which is under the MIT
+License, Copyright (c) 2026 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/go-googlesql.LICENSE). This patch
+is offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+--- a/googlesql.go
++++ b/googlesql.go
+@@ -13,6 +13,7 @@
+ 	"strconv"
+ 	"strings"
+ 	"sync"
++	"sync/atomic"
+ 
+ 	"github.com/goccy/googlesqlwasm2go"
+ 	"github.com/goccy/googlesqlwasm2go/base"
+@@ -610,6 +611,9 @@
+ // restores the mutable wasm globals so a mid-call panic does not leak
+ // an abandoned C++ activation frame.
+ func (m *Module) invoke(serviceID, methodID int32, req []byte, call func(*base.Module, int32, int32) (int64, error)) ([]byte, error) {
++	if hook := testHookInvoke.Load(); hook != nil {
++		(*hook)(serviceID, methodID, req)
++	}
+ 	m.mu.Lock()
+ 	defer m.mu.Unlock()
+ 	var reqPtr, reqLen int32
+@@ -676,10 +680,27 @@
+ 	return "", nil
+ }
+ 
++// CloudBurrow patch (cloudburrow/cloudburrow#2134): test hooks.
++// testHookBeforeCall runs in invokeMethod after a method has marshalled
++// its request and before the call waits for the module's lock: the gap in
++// which a handle no longer used by Go could be finalized and freed. An
++// error it returns is the call's, which is then not made.
++// testHookInvoke sees every request the module runs, frees included.
++// Only keepalive_test.go sets them.
++var (
++	testHookBeforeCall atomic.Pointer[func(svc, mid int32, req []byte) error]
++	testHookInvoke     atomic.Pointer[func(svc, mid int32, req []byte)]
++)
++
+ // invokeMethod fans the wasm call out into the runtime, then folds in
+ // the (very common) pbExtractError check on the response. call is the
+ // per-export wasm2go.Inv_<svc>_<mt> entry point.
+ func invokeMethod(svc, mid int32, req []byte, call func(*base.Module, int32, int32) (int64, error)) ([]byte, error) {
++	if hook := testHookBeforeCall.Load(); hook != nil {
++		if err := (*hook)(svc, mid, req); err != nil {
++			return nil, err
++		}
++	}
+ 	resp, err := module().invoke(svc, mid, req, call)
+ 	if err != nil {
+ 		return nil, err
+--- /dev/null
++++ b/keepalive_test.go
+@@ -0,0 +1,186 @@
++package googlesql
++
++// CloudBurrow patch (cloudburrow/cloudburrow#2134): a generated method
++// copies its handles' C++ pointers into its request and then waits for the
++// module's lock; a handle with no Go use after that copy could be
++// finalized in between, and its C++ object freed, before the call read
++// it. CloudBurrow's build rewrites the bindings (tools/bqengine,
++// keepalive.go) so that every method keeps its receiver and its handle
++// arguments alive until its call has returned, with each finalizer on the
++// struct that holds the pointer. These tests force a collection in that
++// gap, through testHookBeforeCall, and fail if the handle's free reached
++// the module before the call did.
++
++import (
++	"bytes"
++	"errors"
++	"runtime"
++	"sync/atomic"
++	"testing"
++	"time"
++)
++
++// gcSentinel has a pointer, so it is never tiny-allocated (a tiny object's
++// finalizer may never run).
++type gcSentinel struct {
++	p *int
++	_ [16]byte
++}
++
++// collectAndFinalize runs the garbage collector until the finalizers
++// queued by its first cycle have run: the runtime runs finalizers on one
++// goroutine, a cycle's queue before the next's, so once a sentinel queued
++// by a later cycle has been finalized, every earlier one has been too.
++func collectAndFinalize(t *testing.T) {
++	t.Helper()
++	runtime.GC()
++	for i := 0; i < 2; i++ {
++		done := make(chan struct{})
++		s := &gcSentinel{}
++		runtime.SetFinalizer(s, func(*gcSentinel) { close(done) })
++		s = nil
++		runtime.GC()
++		select {
++		case <-done:
++		case <-time.After(10 * time.Second):
++			t.Fatalf("a sentinel's finalizer did not run within 10s")
++		}
++	}
++}
++
++var errFreedBeforeCall = errors.New("the handle was freed before the call that reads it ran")
++
++// freedMidCall arms the hooks for the next call whose request carries the
++// C++ pointer ptr: in the gap before it runs, the collector runs and
++// every pending finalizer with it, and if a request freeing ptr reached
++// the module meanwhile, the call is not made and returns
++// errFreedBeforeCall. ptr is all it holds of the handle.
++func freedMidCall(t *testing.T, ptr uint64) (hooked *atomic.Bool) {
++	t.Helper()
++	if ptr == 0 {
++		t.Fatal("the handle has no C++ object")
++	}
++	// A handle travels as the submessage {1: ptr}; its free's request is
++	// that alone.
++	field := pbAppendUint64(nil, 1, ptr)
++	freeReq := pbAppendHandle(nil, 1, ptr)
++	var armed, waiting, freed atomic.Bool
++	hooked = new(atomic.Bool)
++	armed.Store(true)
++	before := func(_, _ int32, req []byte) error {
++		if !bytes.Contains(req, field) || !armed.CompareAndSwap(true, false) {
++			return nil
++		}
++		hooked.Store(true)
++		// While the method waits here, any request carrying ptr alone
++		// is a free: the method's own request has not been sent.
++		waiting.Store(true)
++		collectAndFinalize(t)
++		waiting.Store(false)
++		if freed.Load() {
++			return errFreedBeforeCall
++		}
++		return nil
++	}
++	invoke := func(_, _ int32, req []byte) {
++		if waiting.Load() && bytes.Equal(req, freeReq) {
++			freed.Store(true)
++		}
++	}
++	testHookBeforeCall.Store(&before)
++	testHookInvoke.Store(&invoke)
++	t.Cleanup(func() {
++		testHookBeforeCall.Store(nil)
++		testHookInvoke.Store(nil)
++	})
++	return hooked
++}
++
++func mustNoErr(t *testing.T, what string, err error) {
++	t.Helper()
++	if err != nil {
++		t.Fatalf("%s: %v", what, err)
++	}
++}
++
++func checkCall(t *testing.T, hooked *atomic.Bool, err error) {
++	t.Helper()
++	if !hooked.Load() {
++		t.Fatal("the hook never saw the call: the test does not test the gap")
++	}
++	if errors.Is(err, errFreedBeforeCall) {
++		t.Fatal(err)
++	}
++	if err != nil {
++		t.Fatalf("call: %v", err)
++	}
++}
++
++// newLanguageOptionsPtr returns a LanguageOptions that only the caller
++// holds, and its C++ pointer.
++func newLanguageOptionsPtr(t *testing.T) (*LanguageOptions, uint64) {
++	t.Helper()
++	lo, err := NewLanguageOptions()
++	mustNoErr(t, "NewLanguageOptions", err)
++	return lo, lo.ptr
++}
++
++// The receiver, whose class has the pointer itself.
++func TestKeepAliveReceiver(t *testing.T) {
++	ensureInit(t)
++	lo, ptr := newLanguageOptionsPtr(t)
++	hooked := freedMidCall(t, ptr)
++	err := lo.EnableMaximumLanguageFeatures() // lo's last use
++	checkCall(t, hooked, err)
++}
++
++// A receiver of a base class's method: FullName is Catalog's, and the
++// SimpleCatalog wrapper that embeds it is not the receiver.
++func TestKeepAliveBaseClassReceiver(t *testing.T) {
++	ensureInit(t)
++	tf, err := NewTypeFactory()
++	mustNoErr(t, "NewTypeFactory", err)
++	c, err := NewSimpleCatalog("keepalive", tf)
++	mustNoErr(t, "NewSimpleCatalog", err)
++	// What c.FullName() passes: the receiver is the embedded wrapper, and
++	// c has no use after this.
++	cat := c.EnumerableCatalog.Catalog
++	hooked := freedMidCall(t, cat.ptr)
++	_, err = cat.FullName()
++	checkCall(t, hooked, err)
++	runtime.KeepAlive(tf)
++}
++
++// A handle argument.
++func TestKeepAliveArgument(t *testing.T) {
++	ensureInit(t)
++	tf, err := NewTypeFactory()
++	mustNoErr(t, "NewTypeFactory", err)
++	i64, err := tf.GetInt64()
++	mustNoErr(t, "GetInt64", err)
++	at, err := tf.MakeArrayType(i64)
++	mustNoErr(t, "MakeArrayType", err)
++	lo, ptr := newLanguageOptionsPtr(t)
++	hooked := freedMidCall(t, ptr)
++	_, err = at.IsSupportedType(lo) // lo's last use
++	checkCall(t, hooked, err)
++	runtime.KeepAlive(at)
++	runtime.KeepAlive(tf)
++}
++
++// A handle inside an options struct: newSimpleCatalog's LanguageOptions
++// in googlesqlite, which hung main CI (#2134).
++func TestKeepAliveHandleInOptions(t *testing.T) {
++	ensureInit(t)
++	tf, err := NewTypeFactory()
++	mustNoErr(t, "NewTypeFactory", err)
++	c, err := NewSimpleCatalog("keepalive", tf)
++	mustNoErr(t, "NewSimpleCatalog", err)
++	lo, ptr := newLanguageOptionsPtr(t)
++	mustNoErr(t, "EnableMaximumLanguageFeatures", lo.EnableMaximumLanguageFeatures())
++	hooked := freedMidCall(t, ptr)
++	err = c.AddGoogleSQLFunctions2(&BuiltinFunctionOptions{LanguageOptions: lo}) // lo's last use
++	checkCall(t, hooked, err)
++	runtime.KeepAlive(c)
++	runtime.KeepAlive(tf)
++}
