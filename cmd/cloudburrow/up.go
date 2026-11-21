@@ -947,7 +947,23 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	rmSrv.Interpose(faults.Interceptor("resourcemanager"))
 	// Policy Troubleshooter and Policy Analyzer (#1879) on the same port,
 	// over the enforcement's evaluator.
-	rmSrv.HandleJSON(isIAMAnalysisPath, iamAnalysis{e: iamEnforcer})
+	// Cloud Asset's analysis (#2112) writes analyzeIamPolicyLongrunning's
+	// results to the instance's Cloud Storage and BigQuery.
+	assetOut := &assetOutputs{
+		bigquery: func() *netfwd.Forwarder { return forwarderFor(forwarders, "bigquery") },
+		storage: func() string {
+			if !serviceEnabled(cfg, config.ServiceStorage) {
+				return ""
+			}
+			return storageSourceFetcher{cfg: cfg, addr: func() string {
+				if f := forwarderFor(forwarders, "storage"); f != nil {
+					return f.HostAddr()
+				}
+				return ""
+			}}.base()
+		},
+	}
+	rmSrv.HandleJSON(isIAMAnalysisPath, iamAnalysis{e: iamEnforcer, reg: func() *resourcemanager.Registry { return projects }, out: assetOut})
 	// The in-cluster servers' checks (Cloud Storage, Pub/Sub's front,
 	// internal/iamcheck), through cloudburrow-host, so every decision is
 	// this evaluator's.
@@ -1187,7 +1203,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// The console reads through the objects above rather than owning any of
 	// them, so it cannot answer from a store of its own.
 	consoleSrv := buildConsole(consoleDeps{
-		cfg: cfg, iam: iamEnforcer, coord: coord, cluster: clusterComp, localAI: localAISrv, localModels: localModels,
+		cfg: cfg, iam: iamEnforcer, assetOut: assetOut, coord: coord, cluster: clusterComp, localAI: localAISrv, localModels: localModels,
 		hfModels: hfModels, garden: garden,
 		projects: projects,
 		tasks:    tasksSvc, secrets: secretsSvc, forwarders: forwarders,

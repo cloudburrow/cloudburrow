@@ -7,6 +7,7 @@ require (
 	cloud.google.com/go v0.123.0
 	cloud.google.com/go/aiplatform v1.127.0
 	cloud.google.com/go/artifactregistry v1.27.0
+	cloud.google.com/go/asset v1.30.1
 	cloud.google.com/go/auth v0.24.1
 	cloud.google.com/go/backupdr v1.18.0
 	cloud.google.com/go/bigquery v1.85.0
@@ -108,6 +109,8 @@ require (
 )
 
 require (
+	cloud.google.com/go/accesscontextmanager v1.15.0 // indirect
+	cloud.google.com/go/osconfig v1.22.0 // indirect
 	github.com/RoaringBitmap/roaring/v2 v2.26.0 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
 	github.com/apache/arrow/go/v15 v15.0.2 // indirect

@@ -10,6 +10,7 @@ import (
 	ahpb "cloud.google.com/go/bigquery/analyticshub/apiv1/analyticshubpb"
 	"cloud.google.com/go/iam/apiv1/iampb"
 	iamv2 "cloud.google.com/go/iam/apiv2/iampb"
+	"cloud.google.com/go/kms/apiv1/kmspb"
 	"google.golang.org/genproto/googleapis/api/annotations"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -224,6 +225,7 @@ func newIAMEnforcer(cfg config.Config, creds *metadata.Credentials, reg func() *
 			},
 		},
 		OwnerEmail: owner,
+		Resources:  map[string]iameval.ResourceLister{},
 	}
 }
 
@@ -398,6 +400,18 @@ func useIAMEnforcement(e *iameval.Enforcer, secretsSvc *secretsService, kmsSvc *
 			}
 			return secrets.NewGRPCServer(st).GetIamPolicy
 		})
+		e.Resources[iameval.SecretManager.Name] = func(_ context.Context, project string) []iameval.ChildResource {
+			st := secretsSvc.Store()
+			if st == nil {
+				return nil
+			}
+			list, _ := st.ListSecrets(project)
+			out := make([]iameval.ChildResource, 0, len(list))
+			for _, x := range list {
+				out = append(out, iameval.ChildResource{Name: x.Name})
+			}
+			return out
+		}
 	}
 	if kmsSvc != nil {
 		kmsSvc.interpose = append(kmsSvc.interpose, e.Interceptor(iameval.KMS))
@@ -409,6 +423,25 @@ func useIAMEnforcement(e *iameval.Enforcer, secretsSvc *secretsService, kmsSvc *
 			}
 			return api.IAMPolicy().GetIamPolicy
 		})
+		e.Resources[iameval.KMS.Name] = func(ctx context.Context, project string) []iameval.ChildResource {
+			api := kmsSvc.API()
+			if api == nil {
+				return nil
+			}
+			rings, _ := api.KeyRingsInProject(project)
+			var out []iameval.ChildResource
+			for _, r := range rings {
+				out = append(out, iameval.ChildResource{Name: r.GetName()})
+				keys, err := api.ListCryptoKeys(ctx, &kmspb.ListCryptoKeysRequest{Parent: r.GetName(), PageSize: 1000})
+				if err != nil {
+					continue
+				}
+				for _, k := range keys.GetCryptoKeys() {
+					out = append(out, iameval.ChildResource{Name: k.GetName(), Parent: r.GetName()})
+				}
+			}
+			return out
+		}
 	}
 	if tasksSvc != nil {
 		tasksSvc.interpose = append(tasksSvc.interpose, e.Interceptor(iameval.Tasks))
@@ -420,6 +453,20 @@ func useIAMEnforcement(e *iameval.Enforcer, secretsSvc *secretsService, kmsSvc *
 			}
 			return tasks.NewGRPCServer(st).GetIamPolicy
 		})
+		e.Resources[iameval.Tasks.Name] = func(_ context.Context, project string) []iameval.ChildResource {
+			st := tasksSvc.Store()
+			if st == nil {
+				return nil
+			}
+			all, _ := st.AllQueues()
+			var out []iameval.ChildResource
+			for _, q := range all {
+				if strings.HasPrefix(q.Name, "projects/"+project+"/") {
+					out = append(out, iameval.ChildResource{Name: q.Name})
+				}
+			}
+			return out
+		}
 	}
 }
 

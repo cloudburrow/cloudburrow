@@ -9,13 +9,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 
-	asset "google.golang.org/api/cloudasset/v1"
 	ptv1 "google.golang.org/api/policytroubleshooter/v1"
 	pt "google.golang.org/api/policytroubleshooter/v3"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -24,6 +21,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/iameval"
 	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
+	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 )
 
 // Policy Troubleshooter v3's iam:troubleshoot and Cloud Asset's
@@ -64,12 +62,16 @@ var troubleshootV1Paths = []string{"/v1/iam:troubleshoot", "/v2alpha1/iam:troubl
 
 // isIAMAnalysisPath is whether r is one of the two methods.
 func isIAMAnalysisPath(r *http.Request) bool {
-	return r.URL.Path == troubleshootPath || slices.Contains(troubleshootV1Paths, r.URL.Path) ||
-		strings.HasSuffix(r.URL.Path, ":analyzeIamPolicy")
+	return r.URL.Path == troubleshootPath || slices.Contains(troubleshootV1Paths, r.URL.Path) || isAssetPath(r)
 }
 
-// iamAnalysis serves both methods over e.
-type iamAnalysis struct{ e *iameval.Enforcer }
+// iamAnalysis serves the methods over e, and Cloud Asset's analysis
+// (assetanalysis.go, #2112) over reg and out.
+type iamAnalysis struct {
+	e   *iameval.Enforcer
+	reg func() *resourcemanager.Registry
+	out *assetOutputs
+}
 
 func (a iamAnalysis) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
@@ -77,8 +79,8 @@ func (a iamAnalysis) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.troubleshoot(w, r)
 	case slices.Contains(troubleshootV1Paths, r.URL.Path) && r.Method == http.MethodPost:
 		a.troubleshootV1(w, r)
-	case strings.HasPrefix(r.URL.Path, "/v1/") && strings.HasSuffix(r.URL.Path, ":analyzeIamPolicy") && r.Method == http.MethodGet:
-		a.analyze(w, r)
+	case isAssetPath(r):
+		a.serveAsset(w, r)
 	default:
 		apierror.WriteJSON(w, apierror.NotFound("%s %s is not served", r.Method, r.URL.Path))
 	}
@@ -452,123 +454,6 @@ func ptPolicy(s *iampolicy.Stored) *pt.GoogleIamV1Policy {
 	return p
 }
 
-func (a iamAnalysis) analyze(w http.ResponseWriter, r *http.Request) {
-	scope := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/v1/"), ":analyzeIamPolicy")
-	if !(strings.HasPrefix(scope, "projects/") || strings.HasPrefix(scope, "folders/") || strings.HasPrefix(scope, "organizations/")) ||
-		strings.Count(scope, "/") != 1 {
-		apierror.WriteJSON(w, apierror.InvalidArgument("scope %q must be projects/{PROJECT_ID}, projects/{PROJECT_NUMBER}, folders/{FOLDER_NUMBER} or organizations/{ORGANIZATION_NUMBER}", scope))
-		return
-	}
-	q := r.URL.Query()
-	identity := strings.TrimSpace(q.Get("analysisQuery.identitySelector.identity"))
-	perms := q["analysisQuery.accessSelector.permissions"]
-	roles := q["analysisQuery.accessSelector.roles"]
-	fullResource := q.Get("analysisQuery.resourceSelector.fullResourceName")
-	if identity == "" && len(perms) == 0 && len(roles) == 0 && fullResource == "" {
-		apierror.WriteJSON(w, apierror.InvalidArgument("At least one of resource selector, identity selector or access selector must be specified."))
-		return
-	}
-	at := time.Now()
-	if v := q.Get("analysisQuery.conditionContext.accessTime"); v != "" {
-		p, err := time.Parse(time.RFC3339Nano, v)
-		if err != nil {
-			apierror.WriteJSON(w, apierror.InvalidArgument("analysis_query.condition_context.access_time: %v", err))
-			return
-		}
-		at = p
-	}
-	var chain []iameval.Attached
-	resourceName := crmPrefix + scope
-	condReq := iameval.Request{Resource: scope, Time: at}
-	if fullResource != "" {
-		req, err := a.requestFor(r.Context(), "", "", fullResource, at)
-		if err != nil {
-			apierror.WriteJSON(w, err)
-			return
-		}
-		chain, resourceName, condReq = a.e.Eval.Chain(req), fullResource, req
-	} else if strings.HasPrefix(scope, "projects/") {
-		chain = a.e.Eval.Chain(iameval.Request{Project: strings.TrimPrefix(scope, "projects/")})
-	} else {
-		chain = []iameval.Attached{{Resource: scope, Policy: a.e.Eval.Source.Policy(scope)}}
-	}
-	// The identity's members: an email given as user:, serviceAccount:,
-	// group: or domain:, matched through its groups and domain.
-	idMembers := map[string]bool{}
-	if identity != "" {
-		kind, email, _ := strings.Cut(identity, ":")
-		switch strings.ToLower(kind) {
-		case "user", "serviceaccount":
-			for _, m := range a.e.Eval.Members(email) {
-				idMembers[m] = true
-			}
-		default:
-			idMembers[strings.ToLower(identity)] = true
-		}
-	}
-	main := &asset.IamPolicyAnalysis{FullyExplored: true, AnalysisQuery: &asset.IamPolicyAnalysisQuery{Scope: scope}}
-	if identity != "" {
-		main.AnalysisQuery.IdentitySelector = &asset.IdentitySelector{Identity: identity}
-	}
-	if len(perms) > 0 || len(roles) > 0 {
-		main.AnalysisQuery.AccessSelector = &asset.AccessSelector{Permissions: perms, Roles: roles}
-	}
-	if fullResource != "" {
-		main.AnalysisQuery.ResourceSelector = &asset.ResourceSelector{FullResourceName: fullResource}
-	}
-	for _, p := range chain {
-		if p.Policy == nil {
-			continue
-		}
-		for _, b := range p.Policy.Bindings {
-			var matched []string
-			for _, m := range b.Members {
-				if identity == "" || idMembers[strings.ToLower(strings.TrimSpace(m))] {
-					matched = append(matched, m)
-				}
-			}
-			if len(matched) == 0 {
-				continue
-			}
-			var accesses []*asset.GoogleCloudAssetV1Access
-			for _, perm := range perms {
-				if a.e.Eval.RoleGrants(b.Role, perm, "") {
-					accesses = append(accesses, &asset.GoogleCloudAssetV1Access{Permission: perm})
-				}
-			}
-			if slices.Contains(roles, b.Role) {
-				accesses = append(accesses, &asset.GoogleCloudAssetV1Access{Role: b.Role})
-			}
-			if len(perms) == 0 && len(roles) == 0 {
-				accesses = append(accesses, &asset.GoogleCloudAssetV1Access{Role: b.Role})
-			}
-			if len(accesses) == 0 {
-				continue
-			}
-			acl := &asset.GoogleCloudAssetV1AccessControlList{Accesses: accesses,
-				Resources: []*asset.GoogleCloudAssetV1Resource{{FullResourceName: resourceName}}}
-			ab := &asset.Binding{Role: b.Role, Members: b.Members}
-			if c := b.Condition; c != nil {
-				ab.Condition = &asset.Expr{Title: c.Title, Description: c.Description, Expression: c.Expression}
-				eval := "FALSE"
-				if b.Grants(condReq.Attributes()) {
-					eval = "TRUE"
-				}
-				acl.ConditionEvaluation = &asset.ConditionEvaluation{EvaluationValue: eval}
-			}
-			sort.Strings(matched)
-			ids := &asset.GoogleCloudAssetV1IdentityList{}
-			for _, m := range matched {
-				ids.Identities = append(ids.Identities, &asset.GoogleCloudAssetV1Identity{Name: m})
-			}
-			main.AnalysisResults = append(main.AnalysisResults, &asset.IamPolicyAnalysisResult{
-				AttachedResourceFullName: fullName(p.Resource), IamBinding: ab, FullyExplored: true,
-				AccessControlLists: []*asset.GoogleCloudAssetV1AccessControlList{acl}, IdentityList: ids})
-		}
-	}
-	writeIAMJSON(w, &asset.AnalyzeIamPolicyResponse{MainAnalysis: main, FullyExplored: true})
-}
-
 func writeIAMJSON(w http.ResponseWriter, v any) {
 	b, err := json.Marshal(v)
 	if err != nil {
@@ -593,6 +478,7 @@ type consoleAnalyze struct {
 	Permissions []string `json:"permissions"`
 	Roles       []string `json:"roles"`
 	Resource    string   `json:"resource"`
+	consoleAnalyzeOptions
 }
 
 // analysisCall answers the console's Policy Troubleshooter and Policy
@@ -619,31 +505,13 @@ func (p projectIAMProvider) analysisCall(ctx context.Context, project, call stri
 			Principal: in.Principal, FullResourceName: in.Resource, Permission: in.Permission}})
 		r = httptest.NewRequestWithContext(ctx, http.MethodPost, troubleshootPath, bytes.NewReader(b))
 	default:
-		var in consoleAnalyze
-		if err := json.Unmarshal(body, &in); err != nil {
-			return nil, fmt.Errorf("malformed request: %v", err)
+		var err error
+		if r, err = consoleAssetRequest(ctx, project, call, body); err != nil {
+			return nil, err
 		}
-		scope := in.Scope
-		if scope == "" {
-			scope = "projects/" + project
-		}
-		q := url.Values{}
-		if in.Identity != "" {
-			q.Set("analysisQuery.identitySelector.identity", in.Identity)
-		}
-		for _, x := range in.Permissions {
-			q.Add("analysisQuery.accessSelector.permissions", x)
-		}
-		for _, x := range in.Roles {
-			q.Add("analysisQuery.accessSelector.roles", x)
-		}
-		if in.Resource != "" {
-			q.Set("analysisQuery.resourceSelector.fullResourceName", in.Resource)
-		}
-		r = httptest.NewRequestWithContext(ctx, http.MethodGet, "/v1/"+scope+":analyzeIamPolicy?"+q.Encode(), nil)
 	}
 	w := httptest.NewRecorder()
-	iamAnalysis{e: p.iam}.ServeHTTP(w, r)
+	iamAnalysis{e: p.iam, reg: func() *resourcemanager.Registry { return p.registry }, out: p.assetOut}.ServeHTTP(w, r)
 	var out any
 	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
 		return nil, err

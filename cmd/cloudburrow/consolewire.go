@@ -46,8 +46,10 @@ type consoleDeps struct {
 	cfg config.Config
 	// iam is the IAM evaluator Policy Troubleshooter and Policy Analyzer
 	// answer from (#1879); nil leaves those pages without answers.
-	iam     *iameval.Enforcer
-	localAI *vertexai.Server
+	iam *iameval.Enforcer
+	// assetOut are Cloud Asset's analysis destinations (#2112).
+	assetOut *assetOutputs
+	localAI  *vertexai.Server
 	// localModels manages the local AI models, shared with the admin API
 	// (#1396); nil makes one for the console alone.
 	localModels *localai.Manager
@@ -201,7 +203,7 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			h.sinks = &loggingAdminScreen{svc: d.logging, faults: d.faults}
 		}
 		providers = append(providers, projectsProvider{registry: d.projects}, h, tagsProvider{registry: d.projects},
-			projectIAMProvider{registry: d.projects, iam: d.iam}, iamRolesProvider{registry: d.projects}, iamGroupsProvider{registry: d.projects},
+			projectIAMProvider{registry: d.projects, iam: d.iam, assetOut: d.assetOut}, iamRolesProvider{registry: d.projects}, iamGroupsProvider{registry: d.projects},
 			iamSSOProfilesProvider{registry: d.projects}, iamSSOAssignmentsProvider{registry: d.projects},
 			iamServiceAccountsProvider{registry: d.projects}, iamWorkloadIdentityProvider{registry: d.projects}, iamWorkforceIdentityProvider{registry: d.projects}, iamAuditProvider{registry: d.projects},
 			iamOrgPoliciesProvider{registry: d.projects}, iamLabelsProvider{registry: d.projects}, iamSettingsProvider{registry: d.projects})
