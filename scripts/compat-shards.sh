@@ -123,6 +123,7 @@ COMPAT_LOCALAI_TEST_NAMES="
   ConsoleLocalModelsUnloadDeleteDownloadLoad
   CountTokensAndComputeTokensThroughTheOfficialSDK DocumentAIBatchProcess
   DocumentAIBatchShardsAndFieldMask DocumentAICustomProcessorsThroughTheOfficialClients
+  DocumentAICustomSplitterThroughTheOfficialClient
   DocumentAIEvaluationsAndReview
   DocumentAIProcessorVersions DocumentAIProcessors
   TerraformDocumentAIProcessorDefaultVersion
