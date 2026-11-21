@@ -72,6 +72,7 @@ func workloadProperties(r Resource) *apphubpb.WorkloadProperties {
 // location (UNVERIFIED: whether a global listing also holds the regional
 // ones; Terraform's google_apphub_discovered_service example looks a
 // regional forwarding rule up in its region).
+// Docs re-read 2026-11-21: https://docs.cloud.google.com/app-hub/docs/key-concepts.
 func (s *Server) inLocation(ctx context.Context, host, loc string, workloads bool) ([]Resource, error) {
 	all, err := s.discovered(ctx, host)
 	if err != nil {
@@ -143,6 +144,7 @@ func (s *Server) GetDiscoveredService(ctx context.Context, req *apphubpb.GetDisc
 // LookupDiscoveredService finds a discovered service by its resource URI:
 // the response is empty when there is none (UNVERIFIED: as
 // lookupServiceProjectAttachment documents it).
+// Docs re-read 2026-11-21: https://docs.cloud.google.com/app-hub/docs/reference/rest/v1/projects.locations.discoveredServices/lookup.
 func (s *Server) LookupDiscoveredService(ctx context.Context, req *apphubpb.LookupDiscoveredServiceRequest) (*apphubpb.LookupDiscoveredServiceResponse, error) {
 	host, loc, err := checkParent("parent", req.GetParent())
 	if err != nil {

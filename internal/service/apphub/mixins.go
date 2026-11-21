@@ -36,6 +36,7 @@ func (s *Server) Register(g grpc.ServiceRegistrar) {
 // The schemas Google's "Extended metadata schemas" page defines
 // (docs.cloud.google.com/app-hub/docs/metadata-schemas, read 2026-11-21),
 // copied from it. It gives no schema version: 1 is UNVERIFIED.
+// Docs re-read 2026-11-21: https://docs.cloud.google.com/app-hub/docs/metadata-schemas.
 //
 //go:embed schemas/*.json
 var schemaFiles embed.FS
@@ -296,6 +297,7 @@ func (s *Server) RefsFor(uri string) []Ref {
 // filters name them (apphub_application_location, apphub_application_id,
 // apphub_service_id); the workload's label, by the same pattern, is
 // UNVERIFIED (the labels reference was not read).
+// Docs re-read 2026-11-21: https://docs.cloud.google.com/app-hub/docs/key-concepts.
 func (r Ref) Labels() map[string]string {
 	out := map[string]string{"apphub_application_location": r.Location, "apphub_application_id": r.ApplicationID}
 	if r.ServiceID != "" {
@@ -344,5 +346,5 @@ func Transcoder() *rest.Transcoder {
 func NewRESTHandler(s *Server) http.Handler {
 	t := Transcoder()
 	s.Register(t)
-	return t
+	return restScopeNames(t)
 }

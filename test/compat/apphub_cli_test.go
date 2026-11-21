@@ -17,8 +17,9 @@ import (
 // override alone, attaches the project as a service project, looks a
 // deployed Cloud Run service up among the discovered services, creates a
 // global application with attributes, registers the service, lists and
-// describes them, and deletes and removes everything; the official client
-// reads back what gcloud made.
+// describes them, does the same with a MULTI_REGIONAL application in us,
+// and deletes and removes everything; the official client reads back what
+// gcloud made.
 func TestGcloudAppHub(t *testing.T) {
 	h := New(t)
 	c := appHubClients(t, h)["grpc"] // skips without CLOUDBURROW_TEST_APPHUB
@@ -67,6 +68,16 @@ func TestGcloudAppHub(t *testing.T) {
 	}
 	run("applications", "services", "delete", "hello", "--application", app, "--location", "global")
 	run("applications", "delete", app, "--location", "global")
+	// A multi-regional application in us, which registers the us-central1
+	// service (global-regional-applications).
+	mr := fmt.Sprintf("gc-mr-%d", suffix)
+	run("applications", "create", mr, "--location", "us", "--scope-type", "MULTI_REGIONAL")
+	if out := run("applications", "describe", mr, "--location", "us", "--format", "value(scope.type)"); !strings.Contains(out, "MULTI_REGIONAL") {
+		t.Errorf("gcloud apphub applications describe of a multi-regional application: %s", out)
+	}
+	run("applications", "services", "create", "hello", "--application", mr, "--location", "us", "--discovered-service", disc)
+	run("applications", "services", "delete", "hello", "--application", mr, "--location", "us")
+	run("applications", "delete", mr, "--location", "us")
 	if _, err := c.GetApplication(ctx, &apphubpb.GetApplicationRequest{Name: name}); pmCode(err) != codes.NotFound {
 		t.Errorf("after gcloud delete: %v, want NOT_FOUND", err)
 	}

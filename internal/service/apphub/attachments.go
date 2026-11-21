@@ -77,6 +77,7 @@ func (s *Server) CreateServiceProjectAttachment(_ context.Context, req *apphubpb
 	}
 	// "A service project can only be connected to one host project at a
 	// time" (key-concepts). The code is UNVERIFIED.
+	// Docs re-read 2026-11-21: https://docs.cloud.google.com/app-hub/docs/key-concepts.
 	if other := s.attachmentOf(id); other != nil {
 		return nil, apierror.AlreadyExists("project %s is already attached to host project %s", id, strings.Split(other.GetName(), "/")[1])
 	}
@@ -191,6 +192,7 @@ func (s *Server) boundary(project, name string) *apphubpb.Boundary {
 			// boundary is the folder's, set by the app-management
 			// capability. crm_node names the folder (UNVERIFIED: the
 			// proto's format names projects only).
+			// Docs re-read 2026-11-21: https://docs.cloud.google.com/app-hub/docs/set-up-app-hub.
 			return &apphubpb.Boundary{Name: name, Type: apphubpb.Boundary_MANAGED_AUTOMATIC,
 				Scope: &apphubpb.Boundary_CrmNode{CrmNode: f}}
 		}
@@ -200,6 +202,7 @@ func (s *Server) boundary(project, name string) *apphubpb.Boundary {
 	}
 	// A host project whose service projects are attached by hand
 	// (UNVERIFIED: the type a project that never set one answers).
+	// Docs re-read 2026-11-21: https://docs.cloud.google.com/app-hub/docs/key-concepts.
 	return &apphubpb.Boundary{Name: name, Type: apphubpb.Boundary_MANUAL}
 }
 
@@ -250,6 +253,7 @@ func (s *Server) UpdateBoundary(_ context.Context, req *apphubpb.UpdateBoundaryR
 		if s.opts.Projects != nil {
 			// Answered by number, as a service project attachment's
 			// service_project is (UNVERIFIED for crm_node).
+			// Docs re-read 2026-11-21: https://docs.cloud.google.com/app-hub/docs/reference/rest/v1/projects.locations/updateBoundary.
 			node = "projects/" + strconv.FormatInt(nnum, 10)
 		}
 	}

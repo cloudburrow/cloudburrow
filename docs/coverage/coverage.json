@@ -18073,217 +18073,217 @@
         "method": "google.cloud.apphub.v1.AppHub/CreateApplication",
         "status": "Verified",
         "tests": [
-          "test/compat/apphub_test.go:95 TestAppHubLifecycle"
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
         ]
       },
       {
         "method": "google.cloud.apphub.v1.AppHub/CreateService",
         "status": "Verified",
         "tests": [
-          "test/compat/apphub_test.go:95 TestAppHubLifecycle"
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
         ]
       },
       {
         "method": "google.cloud.apphub.v1.AppHub/CreateServiceProjectAttachment",
         "status": "Verified",
         "tests": [
-          "test/compat/apphub_test.go:95 TestAppHubLifecycle"
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
         ]
       },
       {
         "method": "google.cloud.apphub.v1.AppHub/CreateWorkload",
         "status": "Verified",
         "tests": [
-          "test/compat/apphub_test.go:95 TestAppHubLifecycle"
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
         ]
       },
       {
         "method": "google.cloud.apphub.v1.AppHub/DeleteApplication",
         "status": "Verified",
         "tests": [
-          "test/compat/apphub_test.go:95 TestAppHubLifecycle"
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
         ]
       },
       {
         "method": "google.cloud.apphub.v1.AppHub/DeleteService",
         "status": "Verified",
         "tests": [
-          "test/compat/apphub_test.go:95 TestAppHubLifecycle"
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
         ]
       },
       {
         "method": "google.cloud.apphub.v1.AppHub/DeleteServiceProjectAttachment",
         "status": "Verified",
         "tests": [
-          "test/compat/apphub_test.go:95 TestAppHubLifecycle"
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
         ]
       },
       {
         "method": "google.cloud.apphub.v1.AppHub/DeleteWorkload",
         "status": "Verified",
         "tests": [
-          "test/compat/apphub_test.go:95 TestAppHubLifecycle"
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
         ]
       },
       {
         "method": "google.cloud.apphub.v1.AppHub/DetachServiceProjectAttachment",
         "status": "Verified",
         "tests": [
-          "test/compat/apphub_test.go:95 TestAppHubLifecycle"
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
         ]
       },
       {
         "method": "google.cloud.apphub.v1.AppHub/GetApplication",
         "status": "Verified",
         "tests": [
-          "test/compat/apphub_test.go:95 TestAppHubLifecycle"
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
         ]
       },
       {
         "method": "google.cloud.apphub.v1.AppHub/GetBoundary",
         "status": "Verified",
         "tests": [
-          "test/compat/apphub_test.go:95 TestAppHubLifecycle"
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
         ]
       },
       {
         "method": "google.cloud.apphub.v1.AppHub/GetDiscoveredService",
         "status": "Verified",
         "tests": [
-          "test/compat/apphub_test.go:95 TestAppHubLifecycle"
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
         ]
       },
       {
         "method": "google.cloud.apphub.v1.AppHub/GetDiscoveredWorkload",
         "status": "Verified",
         "tests": [
-          "test/compat/apphub_test.go:95 TestAppHubLifecycle"
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
         ]
       },
       {
         "method": "google.cloud.apphub.v1.AppHub/GetExtendedMetadataSchema",
         "status": "Verified",
         "tests": [
-          "test/compat/apphub_test.go:95 TestAppHubLifecycle"
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
         ]
       },
       {
         "method": "google.cloud.apphub.v1.AppHub/GetService",
         "status": "Verified",
         "tests": [
-          "test/compat/apphub_test.go:95 TestAppHubLifecycle"
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
         ]
       },
       {
         "method": "google.cloud.apphub.v1.AppHub/GetServiceProjectAttachment",
         "status": "Verified",
         "tests": [
-          "test/compat/apphub_test.go:95 TestAppHubLifecycle"
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
         ]
       },
       {
         "method": "google.cloud.apphub.v1.AppHub/GetWorkload",
         "status": "Verified",
         "tests": [
-          "test/compat/apphub_test.go:95 TestAppHubLifecycle"
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
         ]
       },
       {
         "method": "google.cloud.apphub.v1.AppHub/ListApplications",
         "status": "Verified",
         "tests": [
-          "test/compat/apphub_test.go:95 TestAppHubLifecycle"
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
         ]
       },
       {
         "method": "google.cloud.apphub.v1.AppHub/ListDiscoveredServices",
         "status": "Verified",
         "tests": [
-          "test/compat/apphub_test.go:95 TestAppHubLifecycle"
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
         ]
       },
       {
         "method": "google.cloud.apphub.v1.AppHub/ListDiscoveredWorkloads",
         "status": "Verified",
         "tests": [
-          "test/compat/apphub_test.go:95 TestAppHubLifecycle"
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
         ]
       },
       {
         "method": "google.cloud.apphub.v1.AppHub/ListExtendedMetadataSchemas",
         "status": "Verified",
         "tests": [
-          "test/compat/apphub_test.go:95 TestAppHubLifecycle"
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
         ]
       },
       {
         "method": "google.cloud.apphub.v1.AppHub/ListServiceProjectAttachments",
         "status": "Verified",
         "tests": [
-          "test/compat/apphub_test.go:95 TestAppHubLifecycle"
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
         ]
       },
       {
         "method": "google.cloud.apphub.v1.AppHub/ListServices",
         "status": "Verified",
         "tests": [
-          "test/compat/apphub_test.go:95 TestAppHubLifecycle"
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
         ]
       },
       {
         "method": "google.cloud.apphub.v1.AppHub/ListWorkloads",
         "status": "Verified",
         "tests": [
-          "test/compat/apphub_test.go:95 TestAppHubLifecycle"
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
         ]
       },
       {
         "method": "google.cloud.apphub.v1.AppHub/LookupDiscoveredService",
         "status": "Verified",
         "tests": [
-          "test/compat/apphub_test.go:95 TestAppHubLifecycle"
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
         ]
       },
       {
         "method": "google.cloud.apphub.v1.AppHub/LookupDiscoveredWorkload",
         "status": "Verified",
         "tests": [
-          "test/compat/apphub_test.go:95 TestAppHubLifecycle"
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
         ]
       },
       {
         "method": "google.cloud.apphub.v1.AppHub/LookupServiceProjectAttachment",
         "status": "Verified",
         "tests": [
-          "test/compat/apphub_test.go:95 TestAppHubLifecycle"
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
         ]
       },
       {
         "method": "google.cloud.apphub.v1.AppHub/UpdateApplication",
         "status": "Verified",
         "tests": [
-          "test/compat/apphub_test.go:95 TestAppHubLifecycle"
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
         ]
       },
       {
         "method": "google.cloud.apphub.v1.AppHub/UpdateBoundary",
         "status": "Verified",
         "tests": [
-          "test/compat/apphub_test.go:95 TestAppHubLifecycle"
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
         ]
       },
       {
         "method": "google.cloud.apphub.v1.AppHub/UpdateService",
         "status": "Verified",
         "tests": [
-          "test/compat/apphub_test.go:95 TestAppHubLifecycle"
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
         ]
       },
       {
         "method": "google.cloud.apphub.v1.AppHub/UpdateWorkload",
         "status": "Verified",
         "tests": [
-          "test/compat/apphub_test.go:95 TestAppHubLifecycle"
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
         ]
       }
     ]

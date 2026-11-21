@@ -35,18 +35,23 @@ func (s *Server) CreateApplication(_ context.Context, req *apphubpb.CreateApplic
 	}
 	in := req.GetApplication()
 	// The scope is required and immutable; a GLOBAL application lives in
-	// global and a REGIONAL one in a region (global-regional-applications).
+	// global, a MULTI_REGIONAL one in a multi-region (us or eu) and a
+	// REGIONAL one in a region (global-regional-applications, locations).
 	switch in.GetScope().GetType() {
 	case apphubpb.Scope_GLOBAL:
 		if loc != "global" {
 			return nil, apierror.InvalidArgument("an application with scope GLOBAL must be created in the global location, not %q", loc)
 		}
+	case ScopeMultiRegional:
+		if !isMultiRegion(loc) {
+			return nil, apierror.InvalidArgument("an application with scope MULTI_REGIONAL must be created in a multi-region (us or eu), not %q", loc)
+		}
 	case apphubpb.Scope_REGIONAL:
-		if loc == "global" {
-			return nil, apierror.InvalidArgument("an application with scope REGIONAL must be created in a region, not global")
+		if !isRegion(loc) {
+			return nil, apierror.InvalidArgument("an application with scope REGIONAL must be created in a region, not %q", loc)
 		}
 	default:
-		return nil, apierror.InvalidArgument("application.scope.type is required: GLOBAL or REGIONAL")
+		return nil, apierror.InvalidArgument("application.scope.type is required: GLOBAL, MULTI_REGIONAL or REGIONAL")
 	}
 	if err := checkText("application", in.GetDisplayName(), in.GetDescription()); err != nil {
 		return nil, err
@@ -155,6 +160,7 @@ func parentOf(name, sep string) string {
 // DeleteApplication deletes an application with no registered services
 // or workloads (UNVERIFIED: the docs do not say whether Google refuses one
 // that has them, or unregisters them).
+// Docs re-read 2026-11-21: https://docs.cloud.google.com/app-hub/docs/key-concepts.
 func (s *Server) DeleteApplication(_ context.Context, req *apphubpb.DeleteApplicationRequest) (*longrunningpb.Operation, error) {
 	if err := checkRequestID(req.GetRequestId()); err != nil {
 		return nil, err

@@ -16,12 +16,21 @@ import (
 // longer in the host's boundary answers DETACHED (key-concepts).
 
 // checkRegistration checks a discovered resource in disLoc may be
-// registered to app: a REGIONAL application registers its own region's
-// resources only (global-regional-applications).
+// registered to app (global-regional-applications): a REGIONAL
+// application registers its own region's resources only; a MULTI_REGIONAL
+// one its multi-region's and its constituent regions', never a global
+// one's; a GLOBAL one any.
 func checkRegistration(app *apphubpb.Application, disLoc string) error {
 	m := appRE.FindStringSubmatch(app.GetName())
-	if app.GetScope().GetType() == apphubpb.Scope_REGIONAL && disLoc != m[2] {
-		return apierror.InvalidArgument("regional application %s can only register resources in %s, not %s", app.GetName(), m[2], disLoc)
+	switch app.GetScope().GetType() {
+	case apphubpb.Scope_REGIONAL:
+		if disLoc != m[2] {
+			return apierror.InvalidArgument("regional application %s can only register resources in %s, not %s", app.GetName(), m[2], disLoc)
+		}
+	case ScopeMultiRegional:
+		if !InMultiRegion(m[2], disLoc) {
+			return apierror.InvalidArgument("multi-regional application %s can only register resources in the %s multi-region or its regions, not %s", app.GetName(), m[2], disLoc)
+		}
 	}
 	return nil
 }
@@ -83,6 +92,7 @@ func (s *Server) CreateService(ctx context.Context, req *apphubpb.CreateServiceR
 		}
 		// An EXCLUSIVE service is registered to one application at a time
 		// (key-concepts). The code is UNVERIFIED.
+		// Docs re-read 2026-11-21: https://docs.cloud.google.com/app-hub/docs/key-concepts.
 		if !r.Shared {
 			return nil, apierror.AlreadyExists("discovered service %s is already registered as %s", disName, k)
 		}
@@ -279,6 +289,7 @@ func (s *Server) CreateWorkload(ctx context.Context, req *apphubpb.CreateWorkloa
 			// A workload is registered to one application at a time
 			// (UNVERIFIED: supported-resources gives workloads no
 			// registration type).
+			// Docs re-read 2026-11-21: https://docs.cloud.google.com/app-hub/docs/supported-resources.
 			return nil, apierror.AlreadyExists("discovered workload %s is already registered as %s", disName, k)
 		}
 	}

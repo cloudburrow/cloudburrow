@@ -137,6 +137,8 @@ func scopeLabel(t apphubpb.Scope_Type) string {
 		return "Global"
 	case apphubpb.Scope_REGIONAL:
 		return "Regional"
+	case apphub.ScopeMultiRegional:
+		return "Multi-regional"
 	}
 	return "-"
 }
@@ -144,9 +146,10 @@ func scopeLabel(t apphubpb.Scope_Type) string {
 func (p appHubProvider) CreateForm() (string, []console.Field) {
 	const details, attrs = "Application details", "Attributes"
 	fields := []console.Field{
-		{Name: "scope", Label: "Application scope", Type: "radio", Default: "GLOBAL", Section: details, Options: []string{"GLOBAL", "REGIONAL"},
-			OptionLabels: map[string]string{"GLOBAL": "Global", "REGIONAL": "Regional"},
-			Help:         "A global application can hold resources from any location; a regional one only its own region's."},
+		{Name: "scope", Label: "Application scope", Type: "radio", Default: "GLOBAL", Section: details, Options: []string{"GLOBAL", "MULTI_REGIONAL", "REGIONAL"},
+			OptionLabels: map[string]string{"GLOBAL": "Global", "MULTI_REGIONAL": "Multi-regional", "REGIONAL": "Regional"},
+			Help:         "A global application can hold resources from any location; a multi-regional one its multi-region's and its regions'; a regional one only its own region's."},
+		{Name: "multiRegion", Label: "Multi-region", Type: "select", Section: details, ShowWhen: "scope=MULTI_REGIONAL", Options: apphub.MultiRegions, Default: "us"},
 		{Name: "region", Label: "Region", Type: "select", Section: details, ShowWhen: "scope=REGIONAL", Options: apphub.Regions, Default: "us-central1"},
 		{Name: "applicationId", Label: "Application name", Type: "text", Required: true, Section: details, Pattern: `^[a-z]([a-z0-9\-]{0,61}[a-z0-9])?$`,
 			Help: "Lower-case letters, numbers and hyphens, starting with a letter; at most 63 characters."},
@@ -165,8 +168,11 @@ func (p appHubProvider) Create(ctx context.Context, project string, values map[s
 		return "", fmt.Errorf("choose a project before creating an application")
 	}
 	scope, loc := apphubpb.Scope_GLOBAL, "global"
-	if values["scope"] == "REGIONAL" {
+	switch values["scope"] {
+	case "REGIONAL":
 		scope, loc = apphubpb.Scope_REGIONAL, strings.TrimSpace(values["region"])
+	case "MULTI_REGIONAL":
+		scope, loc = apphub.ScopeMultiRegional, strings.TrimSpace(values["multiRegion"])
 	}
 	parent := "projects/" + project + "/locations/" + loc
 	id := strings.TrimSpace(values["applicationId"])
@@ -247,8 +253,16 @@ func registrable(ctx context.Context, s *apphub.Server, app *apphubpb.Applicatio
 	m := strings.Split(app.GetName(), "/")
 	host, loc := m[1], m[3]
 	locs := []string{loc}
-	if app.GetScope().GetType() == apphubpb.Scope_GLOBAL {
+	switch app.GetScope().GetType() {
+	case apphubpb.Scope_GLOBAL:
 		locs = apphub.Locations()
+	case apphub.ScopeMultiRegional:
+		locs = nil
+		for _, l := range apphub.Locations() {
+			if apphub.InMultiRegion(loc, l) {
+				locs = append(locs, l)
+			}
+		}
 	}
 	var opts []string
 	labels := map[string]string{}
@@ -292,6 +306,10 @@ func (p appHubProvider) DetailActions(ctx context.Context, project string, path 
 		{ID: "edit", Label: "Edit", Fields: append([]console.Field{
 			{Name: "displayName", Label: "Display name", Type: "text", Default: a.GetDisplayName()},
 			{Name: "description", Label: "Description", Type: "textarea", Default: a.GetDescription()}}, appHubAttributeFields(a.GetAttributes(), "")...)},
+		{ID: "edit-component", Label: "Edit service/workload", Fields: append([]console.Field{
+			{Name: "name", Label: "Service or workload name", Type: "text", Required: true},
+			{Name: "displayName", Label: "Display name", Type: "text"},
+			{Name: "description", Label: "Description", Type: "textarea"}}, appHubAttributeFields(nil, "")...)},
 		{ID: "unregister", Label: "Unregister", Destructive: true, Fields: []console.Field{
 			{Name: "name", Label: "Service or workload name", Type: "text", Required: true}}, Confirm: "The service or workload goes back to discovered."},
 		{ID: "delete", Label: "Delete", Destructive: true, Leaves: true, Confirm: "An application can be deleted once its services and workloads are unregistered."},
@@ -329,6 +347,25 @@ func (p appHubProvider) ActAt(ctx context.Context, project string, path []string
 		_, err = s.UpdateApplication(ctx, &apphubpb.UpdateApplicationRequest{Application: &apphubpb.Application{Name: a.GetName(),
 			DisplayName: values["displayName"], Description: values["description"], Attributes: appHubAttributes(values)},
 			UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"display_name", "description", "attributes"}}})
+		return err
+	case "edit-component":
+		n := strings.TrimSpace(values["name"])
+		mask := &fieldmaskpb.FieldMask{Paths: []string{"display_name", "description", "attributes"}}
+		if v, err := s.GetService(ctx, &apphubpb.GetServiceRequest{Name: a.GetName() + "/services/" + n}); err == nil {
+			attrs := appHubAttributes(values)
+			if v.GetServiceProperties().GetRegistrationType().GetType() == apphubpb.RegistrationType_SHARED {
+				mask.Paths, attrs = mask.Paths[:2], nil
+			}
+			_, err = s.UpdateService(ctx, &apphubpb.UpdateServiceRequest{Service: &apphubpb.Service{Name: v.GetName(),
+				DisplayName: values["displayName"], Description: values["description"], Attributes: attrs}, UpdateMask: mask})
+			return err
+		}
+		w, err := s.GetWorkload(ctx, &apphubpb.GetWorkloadRequest{Name: a.GetName() + "/workloads/" + n})
+		if err != nil {
+			return err
+		}
+		_, err = s.UpdateWorkload(ctx, &apphubpb.UpdateWorkloadRequest{Workload: &apphubpb.Workload{Name: w.GetName(),
+			DisplayName: values["displayName"], Description: values["description"], Attributes: appHubAttributes(values)}, UpdateMask: mask})
 		return err
 	case "unregister":
 		n := strings.TrimSpace(values["name"])
@@ -395,7 +432,7 @@ func (p appHubDiscoveredProvider) List(ctx context.Context, project string) (con
 		}
 		for _, d := range ds.GetDiscoveredServices() {
 			pr := d.GetServiceProperties()
-			listing.Items = append(listing.Items, console.Resource{Name: d.GetServiceReference().GetUri(), Fields: map[string]string{
+			listing.Items = append(listing.Items, console.Resource{Name: d.GetServiceReference().GetUri(), Opens: []string{d.GetName()}, Fields: map[string]string{
 				"Type": "Service", "Location": pr.GetLocation(), "Project": strings.TrimPrefix(pr.GetGcpProject(), "projects/"),
 				"Registration type": strings.Title(strings.ToLower(pr.GetRegistrationType().GetType().String())), "Status": status(d.GetName())}})
 		}
@@ -405,13 +442,53 @@ func (p appHubDiscoveredProvider) List(ctx context.Context, project string) (con
 		}
 		for _, d := range dw.GetDiscoveredWorkloads() {
 			pr := d.GetWorkloadProperties()
-			listing.Items = append(listing.Items, console.Resource{Name: d.GetWorkloadReference().GetUri(), Fields: map[string]string{
+			listing.Items = append(listing.Items, console.Resource{Name: d.GetWorkloadReference().GetUri(), Opens: []string{d.GetName()}, Fields: map[string]string{
 				"Type": "Workload", "Location": pr.GetLocation(), "Project": strings.TrimPrefix(pr.GetGcpProject(), "projects/"),
 				"Registration type": "-", "Status": status(d.GetName())}})
 		}
 	}
 	listing.Total = len(listing.Items)
 	return listing, nil
+}
+
+// Detail is a discovered service's or workload's page: its resource URI,
+// project, location, zone, registration type and identity.
+func (p appHubDiscoveredProvider) Detail(ctx context.Context, project string, path []string) (console.Detail, error) {
+	if len(path) != 1 {
+		return console.DeeperThan(1, path), nil
+	}
+	s, err := appHubAPI(p.svc)
+	if err != nil {
+		return console.Detail{}, err
+	}
+	if err := kmsOwned(project, path[0]); err != nil {
+		return console.Detail{Unavailable: consoleErr(err)}, nil
+	}
+	var props []console.Property
+	if strings.Contains(path[0], "/discoveredWorkloads/") {
+		d, err := s.GetDiscoveredWorkload(ctx, &apphubpb.GetDiscoveredWorkloadRequest{Name: path[0]})
+		if err != nil {
+			return console.Detail{Unavailable: "cannot read the discovered workload: " + consoleErr(err)}, nil
+		}
+		pr := d.GetWorkloadProperties()
+		props = []console.Property{{Label: "Resource name", Value: d.GetName()}, {Label: "Type", Value: "Workload"},
+			{Label: "Resource", Value: d.GetWorkloadReference().GetUri()}, {Label: "Project", Value: pr.GetGcpProject()},
+			{Label: "Location", Value: pr.GetLocation()}, {Label: "Zone", Value: kmsOrDash(pr.GetZone())},
+			{Label: "Identity", Value: kmsOrDash(pr.GetIdentity().GetPrincipal())}}
+	} else {
+		d, err := s.GetDiscoveredService(ctx, &apphubpb.GetDiscoveredServiceRequest{Name: path[0]})
+		if err != nil {
+			return console.Detail{Unavailable: "cannot read the discovered service: " + consoleErr(err)}, nil
+		}
+		pr := d.GetServiceProperties()
+		props = []console.Property{{Label: "Resource name", Value: d.GetName()}, {Label: "Type", Value: "Service"},
+			{Label: "Resource", Value: d.GetServiceReference().GetUri()}, {Label: "Project", Value: pr.GetGcpProject()},
+			{Label: "Location", Value: pr.GetLocation()}, {Label: "Zone", Value: kmsOrDash(pr.GetZone())},
+			{Label: "Registration type", Value: strings.Title(strings.ToLower(pr.GetRegistrationType().GetType().String()))},
+			{Label: "Identity", Value: kmsOrDash(pr.GetIdentity().GetPrincipal())}}
+	}
+	return console.Detail{Sections: []console.Section{{ID: "details", Label: "Details", Kind: console.KindProperties,
+		Groups: []console.PropertyGroup{{Heading: "Discovered resource", Properties: props}}}}}, nil
 }
 
 // ---- Settings: service projects ----
@@ -442,6 +519,38 @@ func (p appHubSettingsProvider) List(ctx context.Context, project string) (conso
 	listing.Total = len(listing.Items)
 	listing.RowsOpenable = true
 	return listing, nil
+}
+
+// ListActions are the Settings page's own: Edit boundary (the host
+// project's boundary, GetBoundary and UpdateBoundary), and Detach from host
+// project, which the project in the toolbar calls as a service project
+// (LookupServiceProjectAttachment and DetachServiceProjectAttachment).
+func (p appHubSettingsProvider) ListActions(ctx context.Context, project string) []console.Action {
+	s, err := appHubAPI(p.svc)
+	if err != nil || project == "" {
+		return nil
+	}
+	global := "projects/" + project + "/locations/global"
+	boundary := console.Action{ID: "boundary", Label: "Edit boundary", Fields: []console.Field{{Name: "crmNode", Label: "Boundary project", Type: "text",
+		Help: "projects/{project ID or number} whose resources this host project discovers (an automatic boundary); empty attaches service projects by hand."}}}
+	if b, err := s.GetBoundary(ctx, &apphubpb.GetBoundaryRequest{Name: global + "/boundary"}); err != nil {
+		boundary.Unavailable = "cannot read the boundary: " + consoleErr(err)
+	} else {
+		boundary.Fields[0].Default = b.GetCrmNode()
+		boundary.Fields[0].Help += " Now " + strings.ToLower(b.GetType().String()) + "."
+		if b.GetType() == apphubpb.Boundary_MANAGED_AUTOMATIC {
+			boundary.Unavailable = "This is an app-enabled folder's management project: its boundary is the folder's."
+		}
+	}
+	detach := console.Action{ID: "detach-self", Label: "Detach from host project", Destructive: true}
+	if l, err := s.LookupServiceProjectAttachment(ctx, &apphubpb.LookupServiceProjectAttachmentRequest{Name: global}); err != nil {
+		detach.Unavailable = "cannot look the project up: " + consoleErr(err)
+	} else if a := l.GetServiceProjectAttachment(); a == nil {
+		detach.Unavailable = project + " is not attached to a host project."
+	} else {
+		detach.Confirm = project + " leaves host project " + strings.Split(a.GetName(), "/")[1] + "; its services and workloads registered there become detached."
+	}
+	return []console.Action{boundary, detach}
 }
 
 func (p appHubSettingsProvider) CreateForm() (string, []console.Field) {
@@ -493,10 +602,22 @@ func (p appHubSettingsProvider) DetailActions(context.Context, string, []string)
 		Confirm: "The project's resources leave the boundary; services and workloads registered from it become detached."}}
 }
 
-func (p appHubSettingsProvider) ActAt(ctx context.Context, project string, path []string, action string, _ map[string]string) error {
+func (p appHubSettingsProvider) ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error {
 	s, err := appHubAPI(p.svc)
 	if err != nil {
 		return err
+	}
+	if len(path) == 0 && project != "" {
+		global := "projects/" + project + "/locations/global"
+		switch action {
+		case "boundary":
+			_, err = s.UpdateBoundary(ctx, &apphubpb.UpdateBoundaryRequest{Boundary: &apphubpb.Boundary{Name: global + "/boundary",
+				Scope: &apphubpb.Boundary_CrmNode{CrmNode: strings.TrimSpace(values["crmNode"])}}, UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"crm_node"}}})
+			return err
+		case "detach-self":
+			_, err = s.DetachServiceProjectAttachment(ctx, &apphubpb.DetachServiceProjectAttachmentRequest{Name: global})
+			return err
+		}
 	}
 	if len(path) != 1 || action != "detach" {
 		return fmt.Errorf("unknown action %q", action)
@@ -514,5 +635,7 @@ var (
 	_ console.PathActor = appHubProvider{}
 	_ console.Creator   = appHubSettingsProvider{}
 	_ console.Driller   = appHubSettingsProvider{}
+	_ console.ListActor = appHubSettingsProvider{}
+	_ console.Driller   = appHubDiscoveredProvider{}
 	_ console.PathActor = appHubSettingsProvider{}
 )

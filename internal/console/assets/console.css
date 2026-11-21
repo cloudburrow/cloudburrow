@@ -665,7 +665,8 @@ td a { color: var(--accent); }
 .state { padding: 40px 24px; text-align: center; border: 1px solid var(--border);
          border-radius: var(--radius); background: var(--surface); }
 .state h2 { font-size: var(--text-heading-size); font-weight: 500; margin: 0 0 6px; }
-.state p { color: var(--text-muted); margin: 0 0 16px; }
+/* An empty state names its resource ("projects/P/locations/global/applications/A reports no ..."): wrap it rather than widen a narrow page. */
+.state p { color: var(--text-muted); margin: 0 0 16px; overflow-wrap: anywhere; }
 .state.error { border-color: var(--error); }
 .state.error h2 { color: var(--error); }
 .state pre { text-align: left; font-family: var(--mono); font-size: var(--text-caption-size);

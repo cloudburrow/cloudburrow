@@ -35,6 +35,7 @@
 //     proto).
 //
 // What the docs leave unsaid is marked UNVERIFIED where it is decided.
+// Docs re-read 2026-11-21: https://docs.cloud.google.com/app-hub/docs/key-concepts.
 package apphub
 
 import (
@@ -176,6 +177,7 @@ var (
 	// letters, digits and hyphens, starting with a letter, at most 63
 	// (UNVERIFIED: the docs give no rule; Google's examples, such as
 	// my-app, fit it).
+	// Docs re-read 2026-11-21: https://docs.cloud.google.com/app-hub/docs/key-concepts.
 	idRE      = regexp.MustCompile(`^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$`)
 	projectID = regexp.MustCompile(`^[a-z][a-z0-9-]{4,28}[a-z0-9]$`)
 	emailRE   = regexp.MustCompile(`^[^@\s]+@[^@\s]+$`)
@@ -202,8 +204,43 @@ var Regions = []string{
 	"us-west1", "us-west2", "us-west3", "us-west4",
 }
 
-// Locations are global and the regions.
-func Locations() []string { return append([]string{"global"}, Regions...) }
+// MultiRegions are the multi-regions a MULTI_REGIONAL application lives in
+// ("us": "Data centers in the United States (us-* regions)"; "eu": "Data
+// centers within member states of the European Union", the locations
+// page).
+var MultiRegions = []string{"eu", "us"}
+
+// euRegions are the regions of Regions in member states of the European
+// Union: Warsaw, Finland, Stockholm, Madrid, Belgium, Frankfurt, the
+// Netherlands, Milan, Paris, Berlin and Turin (not London or Zurich).
+var euRegions = map[string]bool{"europe-central2": true, "europe-north1": true, "europe-north2": true,
+	"europe-southwest1": true, "europe-west1": true, "europe-west3": true, "europe-west4": true,
+	"europe-west8": true, "europe-west9": true, "europe-west10": true, "europe-west12": true}
+
+// InMultiRegion is whether loc is multi or one of its constituent regions.
+func InMultiRegion(multi, loc string) bool {
+	switch multi {
+	case "us":
+		return loc == "us" || strings.HasPrefix(loc, "us-")
+	case "eu":
+		return loc == "eu" || euRegions[loc]
+	}
+	return false
+}
+
+// ScopeMultiRegional is Scope.Type MULTI_REGIONAL = 3, which googleapis
+// added on 2026-11-16 (google/cloud/apphub/v1/application.proto) and no
+// release of cloud.google.com/go/apphub carries yet (v1.4.1 stops at
+// GLOBAL). Proto3 enums are open, so the value travels over gRPC as is;
+// the JSON API names it through restScopeNames.
+const ScopeMultiRegional = apphubpb.Scope_Type(3)
+
+func isMultiRegion(loc string) bool { return loc == "eu" || loc == "us" }
+
+// Locations are global, the multi-regions and the regions.
+func Locations() []string {
+	return append(append([]string{"global"}, MultiRegions...), Regions...)
+}
 
 func isRegion(loc string) bool {
 	for _, r := range Regions {
@@ -214,7 +251,7 @@ func isRegion(loc string) bool {
 	return false
 }
 
-func validLocation(loc string) bool { return loc == "global" || isRegion(loc) }
+func validLocation(loc string) bool { return loc == "global" || isMultiRegion(loc) || isRegion(loc) }
 
 // checkParent is a parent's project and location.
 func checkParent(field, parent string) (string, string, error) {

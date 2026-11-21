@@ -2,17 +2,22 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net"
 	"net/http"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"cloud.google.com/go/container/apiv1/containerpb"
+	"cloud.google.com/go/iam/apiv1/iampb"
 	"google.golang.org/grpc"
 
+	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/iameval"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 	"github.com/cloudburrow/cloudburrow/internal/service/apphub"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
@@ -132,17 +137,22 @@ func (s *appHubService) discover(ctx context.Context, project string) ([]apphub.
 	var out []apphub.Resource
 	if s.run != nil {
 		if a := s.run.adapter.Load(); a != nil {
-			services, jobs, err := a.Names(ctx)
+			services, jobs, pools, err := a.Names(ctx)
 			if err != nil {
 				return nil, err
 			}
 			for _, n := range services {
-				if r, ok := runResource(n, project, false); ok {
+				if r, ok := runResource(n, project, "services"); ok {
 					out = append(out, r)
 				}
 			}
 			for _, n := range jobs {
-				if r, ok := runResource(n, project, true); ok {
+				if r, ok := runResource(n, project, "jobs"); ok {
+					out = append(out, r)
+				}
+			}
+			for _, n := range pools {
+				if r, ok := runResource(n, project, "workerPools"); ok {
 					out = append(out, r)
 				}
 			}
@@ -159,25 +169,101 @@ func (s *appHubService) discover(ctx context.Context, project string) ([]apphub.
 				// A zonal cluster: its region, and its zone.
 				zone, loc = loc, loc[:strings.LastIndex(loc, "-")]
 			}
-			out = append(out, apphub.Resource{URI: "//container.googleapis.com/projects/" + project + "/locations/" + c.GetLocation() + "/clusters/" + c.GetName(),
-				Project: project, Location: loc, Zone: zone, Shared: true})
+			cluster := "//container.googleapis.com/projects/" + project + "/locations/" + c.GetLocation() + "/clusters/" + c.GetName()
+			out = append(out, apphub.Resource{URI: cluster, Project: project, Location: loc, Zone: zone, Shared: true})
+			if c.GetStatus() == containerpb.Cluster_RUNNING {
+				out = append(out, s.inCluster(ctx, "projects/"+project+"/locations/"+c.GetLocation()+"/clusters/"+c.GetName(), cluster, project, loc, zone)...)
+			}
 		}
 	}
 	return out, nil
 }
 
-// runResource is the App Hub resource of a Cloud Run service or job name
-// (projects/P/locations/L/services/S or .../jobs/J) in project.
-func runResource(name, project string, job bool) (apphub.Resource, bool) {
+// runResource is the App Hub resource of a Cloud Run service, job or
+// worker pool name (projects/P/locations/L/{kind}/N) in project: a service
+// is a service, a job and a worker pool workloads (supported-resources).
+func runResource(name, project, kind string) (apphub.Resource, bool) {
 	p := strings.Split(name, "/")
-	kind := "services"
-	if job {
-		kind = "jobs"
-	}
 	if len(p) != 6 || p[0] != "projects" || p[1] != project || p[2] != "locations" || p[4] != kind {
 		return apphub.Resource{}, false
 	}
-	return apphub.Resource{Workload: job, URI: "//run.googleapis.com/" + name, Project: project, Location: p[3]}, true
+	return apphub.Resource{Workload: kind != "services", URI: "//run.googleapis.com/" + name, Project: project, Location: p[3]}, true
+}
+
+// appHubK8sKinds are the Kubernetes objects of a GKE cluster that
+// supported-resources lists, with the collection path of each one's URI
+// under //container.googleapis.com/.../clusters/C/k8s/namespaces/N/:
+// Services, Ingresses and Gateways as services, Deployments,
+// StatefulSets, DaemonSets and CronJobs as workloads.
+var appHubK8sKinds = []struct {
+	list, uri string
+	workload  bool
+}{
+	{"/api/v1/services", "services", false},
+	{"/apis/networking.k8s.io/v1/ingresses", "networking.k8s.io/ingresses", false},
+	{"/apis/gateway.networking.k8s.io/v1/gateways", "apis/gateway.networking.k8s.io/gateways", false},
+	{"/apis/apps/v1/deployments", "apps/deployments", true},
+	{"/apis/apps/v1/statefulsets", "apps/statefulsets", true},
+	{"/apis/apps/v1/daemonsets", "apps/daemonsets", true},
+	{"/apis/batch/v1/cronjobs", "batch/cronjobs", true},
+}
+
+// appHubSystemNamespace is a namespace whose objects are the cluster's own,
+// not the user's: Kubernetes' kube-*, and GKE's gke-* and gmp-*, and
+// kind's local-path-storage (UNVERIFIED: supported-resources does not say
+// which namespaces App Hub skips).
+// Docs re-read 2026-11-21: https://docs.cloud.google.com/app-hub/docs/supported-resources.
+func appHubSystemNamespace(ns string) bool {
+	return strings.HasPrefix(ns, "kube-") || strings.HasPrefix(ns, "gke-") || strings.HasPrefix(ns, "gmp-") || ns == "local-path-storage"
+}
+
+// inCluster lists a running cluster's Kubernetes objects of the supported
+// kinds, through its API server as its client certificate. The default
+// namespace's kubernetes Service, the API server's own, is not the
+// user's and is left out (UNVERIFIED). A cluster whose API does not
+// answer contributes none, and a kind it does not serve (no Gateway API)
+// is skipped.
+// Docs re-read 2026-11-21: https://docs.cloud.google.com/app-hub/docs/supported-resources.
+func (s *appHubService) inCluster(ctx context.Context, name, cluster, project, loc, zone string) []apphub.Resource {
+	a, ok := s.gke.clusterAccess(name)
+	if !ok {
+		return nil
+	}
+	hc, err := runadapter.GKEClient(a)
+	if err != nil {
+		return nil
+	}
+	hc.Timeout = 10 * time.Second
+	var out []apphub.Resource
+	for _, k := range appHubK8sKinds {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+a.Endpoint+k.list, nil)
+		if err != nil {
+			continue
+		}
+		resp, err := hc.Do(req)
+		if err != nil {
+			return out
+		}
+		var l struct {
+			Items []struct {
+				Metadata struct{ Name, Namespace string } `json:"metadata"`
+			} `json:"items"`
+		}
+		err = json.NewDecoder(resp.Body).Decode(&l)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK || err != nil {
+			continue
+		}
+		for _, it := range l.Items {
+			ns, n := it.Metadata.Namespace, it.Metadata.Name
+			if appHubSystemNamespace(ns) || ns == "default" && n == "kubernetes" && k.uri == "services" {
+				continue
+			}
+			out = append(out, apphub.Resource{Workload: k.workload, URI: cluster + "/k8s/namespaces/" + ns + "/" + k.uri + "/" + n,
+				Project: project, Location: loc, Zone: zone})
+		}
+	}
+	return out
 }
 
 // appHubProjects resolves App Hub's projects and app-enabled folders
@@ -271,4 +357,22 @@ func (r *appHubResetter) ResetProject(_ context.Context, project string) error {
 		return errors.New("App Hub has not started")
 	}
 	return api.ResetProject(project)
+}
+
+// useIAMEnforcementAppHub checks App Hub's callers (#2110): each method's
+// documented permissions (iameval.AppHub), over gRPC and JSON, with its
+// applications' own policies.
+func useIAMEnforcementAppHub(e *iameval.Enforcer, s *appHubService) {
+	if s == nil {
+		return
+	}
+	s.interpose = append(s.interpose, e.Interceptor(iameval.AppHub))
+	s.wrapJSON = jsonEnforcer(e, iameval.AppHub, apphub.Mixins())
+	e.Policies[iameval.AppHub.Name] = iameval.GRPCPolicyGetter(func() func(context.Context, *iampb.GetIamPolicyRequest) (*iampb.Policy, error) {
+		api := s.API()
+		if api == nil {
+			return nil
+		}
+		return api.IAMPolicy().GetIamPolicy
+	})
 }
