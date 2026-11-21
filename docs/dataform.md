@@ -27,6 +27,17 @@ c, err := dataform.NewClient(ctx, option.WithEndpoint(os.Getenv("CLOUDBURROW_DAT
   repository's `uris.git_https` and the token's Secret Manager version. A
   repository without a remote keeps its own git repository.
 
+- **Customer-managed keys**: a repository's `kms_key_name` (or the
+  region's `default_kms_key_name` in `UpdateConfig`) is a key of the
+  instance's Cloud KMS (`--services kms`) in the repository's region. While
+  its version is disabled or destroyed, calls on the repository's data are
+  refused; the repository itself stays readable.
+- **Developer Connect links**: `git_remote_settings.git_repository_link`
+  may name a link of the instance's Developer Connect (Cloud Run's port) to
+  the Secure Source Manager repository; its read-write token then
+  authenticates the remote instead of a Secret Manager token.
+- **Cancelling** an invocation stops the running action's BigQuery job.
+
 Docker and git are required on the host. Files live in the instance's
 directory (`dataform/`); an ephemeral instance drops them at `up`.
 

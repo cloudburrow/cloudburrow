@@ -64,6 +64,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/cmek"
 	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
 	"github.com/cloudburrow/cloudburrow/internal/locations"
 )
@@ -111,6 +112,12 @@ type Options struct {
 	// AccessSecret reads a Secret Manager secret version's payload; nil
 	// when Secret Manager is not served.
 	AccessSecret func(ctx context.Context, name string) ([]byte, error)
+	// Keys are the customer-managed keys: the instance's Cloud KMS.
+	Keys cmek.Keys
+	// LinkToken fetches a read-write token for a Developer Connect git
+	// repository link (projects/*/locations/*/connections/*/gitRepositoryLinks/*);
+	// nil when Developer Connect is not served.
+	LinkToken func(ctx context.Context, link string) (string, error)
 	// Now is the clock; nil is time.Now.
 	Now func() time.Time
 }
@@ -133,6 +140,9 @@ type Server struct {
 	configs      map[string]*dfpb.Config
 	policies     map[string]*iampolicy.Stored
 	ops          map[string]*longrunningpb.Operation
+	// sealed are the data keys of repositories with a customer-managed
+	// key, by repository name (cmek.go).
+	sealed map[string]cmek.Sealed
 	// locks serialize git work on one repository or workspace directory.
 	locks map[string]*sync.Mutex
 	// cancels stop running invocations.
@@ -182,6 +192,7 @@ func (s *Server) clear() {
 	s.configs = map[string]*dfpb.Config{}
 	s.policies = map[string]*iampolicy.Stored{}
 	s.ops = map[string]*longrunningpb.Operation{}
+	s.sealed = map[string]cmek.Sealed{}
 	if s.locks == nil {
 		s.locks = map[string]*sync.Mutex{}
 	}
@@ -226,6 +237,7 @@ func (s *Server) ResetProject(project string) error {
 		if in(k) {
 			_ = os.RemoveAll(s.repoDir(k))
 			delete(s.repos, k)
+			delete(s.sealed, k)
 		}
 	}
 	for k := range s.workspaces {
@@ -267,6 +279,7 @@ type stateFile struct {
 	TeamFolders    []json.RawMessage            `json:"teamFolders,omitempty"`
 	Configs        []json.RawMessage            `json:"configs,omitempty"`
 	Policies       map[string]*iampolicy.Stored `json:"policies,omitempty"`
+	Keys           map[string]cmek.Sealed       `json:"keys,omitempty"`
 }
 
 type storedCompilation struct {
@@ -327,6 +340,7 @@ func (s *Server) save() error {
 		TeamFolders:    marshalAll(s.teamFolders),
 		Configs:        marshalAll(s.configs),
 		Policies:       s.policies,
+		Keys:           s.sealed,
 	}
 	for _, k := range sortedKeys(s.compilations) {
 		c := s.compilations[k]
@@ -422,6 +436,9 @@ func (s *Server) load() error {
 	if st.Policies != nil {
 		s.policies = st.Policies
 	}
+	if st.Keys != nil {
+		s.sealed = st.Keys
+	}
 	return nil
 }
 
@@ -437,6 +454,7 @@ var (
 	invocationRE   = regexp.MustCompile(`^(projects/[^/]+/locations/[^/]+/repositories/[^/]+)/workflowInvocations/([^/]+)$`)
 	folderRE       = regexp.MustCompile(`^(projects/[^/]+/locations/[^/]+)/folders/([^/]+)$`)
 	teamFolderRE   = regexp.MustCompile(`^(projects/[^/]+/locations/[^/]+)/teamFolders/([^/]+)$`)
+	gitLinkRE      = regexp.MustCompile(`^projects/[^/]+/locations/[^/]+/connections/[^/]+/gitRepositoryLinks/[^/]+$`)
 	configRE       = regexp.MustCompile(`^(projects/[^/]+/locations/[^/]+)/config$`)
 	operationRE    = regexp.MustCompile(`^(projects/[^/]+/locations/[^/]+)/operations/([^/]+)$`)
 	resourceIDRE   = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,63}$`)
@@ -617,6 +635,16 @@ func (s *Server) CreateRepository(ctx context.Context, req *dfpb.CreateRepositor
 		return nil, err
 	}
 	name := req.GetParent() + "/repositories/" + req.GetRepositoryId()
+	m := repoPrefixRE.FindStringSubmatch(name)
+	var sealed *cmek.Sealed
+	if key := s.repositoryKey(r, m[1], m[2]); key != "" {
+		sl, err := s.sealRepository(ctx, name, key)
+		if err != nil {
+			return nil, err
+		}
+		r.KmsKeyName = key
+		sealed = &sl
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.repos[name]; ok {
@@ -628,6 +656,10 @@ func (s *Server) CreateRepository(ctx context.Context, req *dfpb.CreateRepositor
 	r.Name = name
 	r.CreateTime = s.now()
 	r.DataEncryptionState = nil
+	if sealed != nil {
+		r.DataEncryptionState = &dfpb.DataEncryptionState{KmsKeyVersionName: sealed.KeyVersion}
+		s.sealed[name] = *sealed
+	}
 	r.InternalMetadata = nil
 	s.setTeamFolder(r)
 	if gr := r.GetGitRemoteSettings(); gr != nil {
@@ -650,7 +682,6 @@ func (s *Server) checkRepository(ctx context.Context, r *dfpb.Repository) error 
 		if !kmsKeyRE.MatchString(r.GetKmsKeyName()) {
 			return apierror.InvalidArgument("kms_key_name %q must be projects/*/locations/*/keyRings/*/cryptoKeys/*", r.GetKmsKeyName())
 		}
-		return apierror.Unimplemented("customer-managed encryption keys for Dataform repositories are not served by CloudBurrow")
 	}
 	if v := r.GetNpmrcEnvironmentVariablesSecretVersion(); v != "" && !secretVersRE.MatchString(v) {
 		return apierror.InvalidArgument("npmrc_environment_variables_secret_version %q must be projects/*/secrets/*/versions/*", v)
@@ -668,8 +699,18 @@ func (s *Server) checkRepository(ctx context.Context, r *dfpb.Repository) error 
 	if gr.GetSshAuthenticationConfig() != nil {
 		return apierror.Unimplemented("SSH git remotes are not served by CloudBurrow: use the Secure Source Manager repository's HTTPS URL and an access token")
 	}
-	if gr.GitRepositoryLink != nil && gr.GetGitRepositoryLink() != "" {
-		return apierror.Unimplemented("Developer Connect git repository links for Dataform repositories are not served by CloudBurrow")
+	if link := gr.GetGitRepositoryLink(); link != "" {
+		// "Resource name for the GitRepositoryLink used for machine
+		// credentials": the link's read-write token authenticates git.
+		if !gitLinkRE.MatchString(link) {
+			return apierror.InvalidArgument("git_remote_settings.git_repository_link %q must be projects/*/locations/*/connections/*/gitRepositoryLinks/*", link)
+		}
+		if s.opts.LinkToken == nil {
+			return apierror.FailedPrecondition("git_remote_settings.git_repository_link %s: Developer Connect is not served on this instance", link)
+		}
+		if _, err := s.opts.LinkToken(ctx, link); err != nil {
+			return apierror.InvalidArgument("git_remote_settings.git_repository_link %s: %v", link, err)
+		}
 	}
 	if gr.GetUrl() == "" {
 		return apierror.InvalidArgument("git_remote_settings.url is required")
@@ -831,7 +872,11 @@ func (s *Server) UpdateRepository(ctx context.Context, req *dfpb.UpdateRepositor
 		case "set_authenticated_user_admin":
 			next.SetAuthenticatedUserAdmin = in.GetSetAuthenticatedUserAdmin()
 		case "kms_key_name":
-			next.KmsKeyName = in.GetKmsKeyName()
+			// "It is not possible to add or update the encryption key
+			// after the repository is created."
+			if in.GetKmsKeyName() != cur.GetKmsKeyName() {
+				return nil, apierror.InvalidArgument("kms_key_name cannot be added or changed after the repository is created")
+			}
 		case "containing_folder":
 			return nil, apierror.InvalidArgument("containing_folder can only be changed with MoveRepository")
 		default:
@@ -917,6 +962,7 @@ func (s *Server) deleteRepoLocked(name string, force bool) error {
 	dropIn(s.policies, func(k string) bool { return k == name || in(k) })
 	_ = os.RemoveAll(s.repoDir(name))
 	delete(s.repos, name)
+	delete(s.sealed, name)
 	return nil
 }
 
@@ -1538,10 +1584,17 @@ func (s *Server) UpdateConfig(ctx context.Context, req *dfpb.UpdateConfigRequest
 			return nil, apierror.InvalidArgument("update_mask path %q is not a field of Config that can be updated", p)
 		}
 		if k := in.GetDefaultKmsKeyName(); k != "" {
-			if !kmsKeyRE.MatchString(k) {
-				return nil, apierror.InvalidArgument("default_kms_key_name %q must be projects/*/locations/*/keyRings/*/cryptoKeys/*", k)
+			m := configRE.FindStringSubmatch(cur.GetName())
+			loc := m[1][strings.LastIndex(m[1], "/")+1:]
+			if err := cmek.CheckName("default_kms_key_name", k, loc); err != nil {
+				return nil, keyError("default_kms_key_name", err)
 			}
-			return nil, apierror.Unimplemented("customer-managed encryption keys for Dataform are not served by CloudBurrow")
+			project := strings.Split(cur.GetName(), "/")[1]
+			if err := s.opts.Keys.Usable(ctx, project, cmek.ServiceAgent(project, agentDomain), k); err != nil {
+				return nil, keyError("default_kms_key_name cannot be used", err)
+			}
+			cur.DefaultKmsKeyName = k
+			continue
 		}
 		cur.DefaultKmsKeyName = ""
 	}

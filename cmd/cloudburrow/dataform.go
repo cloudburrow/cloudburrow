@@ -18,12 +18,16 @@ import (
 	"time"
 
 	"cloud.google.com/go/bigquery"
+	developerconnect "cloud.google.com/go/developerconnect/apiv1"
+	dcpb "cloud.google.com/go/developerconnect/apiv1/developerconnectpb"
 	"cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
 	"google.golang.org/api/googleapi"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 
+	"github.com/cloudburrow/cloudburrow/internal/cmek"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
@@ -61,6 +65,11 @@ type dataformService struct {
 	bigquery  func() *netfwd.Forwarder
 	secrets   *secretsService
 	gitBase   func() string
+	// runAddr is Cloud Run's port, which serves Developer Connect: a
+	// repository's git_repository_link gets its tokens there.
+	runAddr func() string
+	// keys are the customer-managed keys (the instance's Cloud KMS).
+	keys cmek.Keys
 
 	server *grpctransport.Server
 	api    *dataform.Server
@@ -121,6 +130,10 @@ func (s *dataformService) Start(ctx context.Context) error {
 		Runner:    &dataformDocker{dir: filepath.Join(data, "node")},
 		Warehouse: dataformBigQuery{tunnel: s.bigquery},
 		GitBase:   s.gitBase,
+		Keys:      s.keys,
+	}
+	if s.runAddr != nil {
+		opts.LinkToken = s.linkToken
 	}
 	if s.secrets != nil {
 		opts.AccessSecret = s.accessSecret
@@ -159,6 +172,27 @@ func (s *dataformService) Start(ctx context.Context) error {
 		api.RunSchedules(rctx, 15*time.Second)
 	}()
 	return nil
+}
+
+// linkToken is a Developer Connect git repository link's read-write
+// token, fetched as a client would (FetchReadWriteToken) from the
+// Developer Connect Cloud Run's port serves.
+func (s *dataformService) linkToken(ctx context.Context, link string) (string, error) {
+	addr := s.runAddr()
+	if addr == "" {
+		return "", errors.New("Developer Connect is not served on this instance")
+	}
+	c, err := developerconnect.NewClient(ctx, option.WithEndpoint(addr), option.WithoutAuthentication(),
+		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = c.Close() }()
+	resp, err := c.FetchReadWriteToken(ctx, &dcpb.FetchReadWriteTokenRequest{GitRepositoryLink: link})
+	if err != nil {
+		return "", err
+	}
+	return resp.GetToken(), nil
 }
 
 func (s *dataformService) accessSecret(ctx context.Context, name string) ([]byte, error) {
@@ -411,12 +445,32 @@ func (b dataformBigQuery) query(ctx context.Context, project, location, sql stri
 	defer c.Close()
 	q := c.Query(sql)
 	q.Location = location
+	// The job's ID is chosen here, so a cancelled invocation can stop the
+	// job even when jobs.insert had not answered yet.
+	q.JobID = "dataform_" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	stop := func() {
+		// CancelWorkflowInvocation: the action's job is stopped too
+		// (jobs.cancel), not left running.
+		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		if j, err := c.JobFromIDLocation(cctx, q.JobID, location); err == nil {
+			_ = j.Cancel(cctx)
+			_, _ = j.Wait(cctx)
+		}
+	}
 	job, err := q.Run(ctx)
 	if err != nil {
-		return nil, nil, err
+		if ctx.Err() != nil {
+			stop()
+			job, _ = c.JobFromIDLocation(context.WithoutCancel(ctx), q.JobID, location)
+		}
+		return job, nil, err
 	}
 	st, err := job.Wait(ctx)
 	if err != nil {
+		if ctx.Err() != nil {
+			stop()
+		}
 		return job, nil, err
 	}
 	if err := st.Err(); err != nil {

@@ -773,7 +773,12 @@ func (s *Server) fireDue(ctx context.Context, from, to time.Time) {
 	s.mu.Unlock()
 	for _, rc := range releases {
 		repo := releaseRE.FindStringSubmatch(rc.GetName())[1]
-		res, err := s.compile(ctx, repo, &dfpb.CompilationResult{Source: &dfpb.CompilationResult_ReleaseConfig{ReleaseConfig: rc.GetName()}})
+		// A scheduled release reads the repository's data, as a call does.
+		var res *dfpb.CompilationResult
+		err := s.checkKey(ctx, repo)
+		if err == nil {
+			res, err = s.compile(ctx, repo, &dfpb.CompilationResult{Source: &dfpb.CompilationResult_ReleaseConfig{ReleaseConfig: rc.GetName()}})
+		}
 		rec := &dfpb.ReleaseConfig_ScheduledReleaseRecord{ReleaseTime: timestamppb.New(to)}
 		if err != nil {
 			rec.Result = &dfpb.ReleaseConfig_ScheduledReleaseRecord_ErrorStatus{ErrorStatus: apierror.From(err).GRPCStatus().Proto()}
@@ -795,8 +800,12 @@ func (s *Server) fireDue(ctx context.Context, from, to time.Time) {
 	}
 	for _, w := range workflows {
 		repo := workflowRE.FindStringSubmatch(w.GetName())[1]
-		inv, err := s.CreateWorkflowInvocation(ctx, &dfpb.CreateWorkflowInvocationRequest{Parent: repo,
-			WorkflowInvocation: &dfpb.WorkflowInvocation{CompilationSource: &dfpb.WorkflowInvocation_WorkflowConfig{WorkflowConfig: w.GetName()}}})
+		var inv *dfpb.WorkflowInvocation
+		err := s.checkKey(ctx, repo)
+		if err == nil {
+			inv, err = s.CreateWorkflowInvocation(ctx, &dfpb.CreateWorkflowInvocationRequest{Parent: repo,
+				WorkflowInvocation: &dfpb.WorkflowInvocation{CompilationSource: &dfpb.WorkflowInvocation_WorkflowConfig{WorkflowConfig: w.GetName()}}})
+		}
 		rec := &dfpb.WorkflowConfig_ScheduledExecutionRecord{ExecutionTime: timestamppb.New(to)}
 		if err != nil {
 			rec.Result = &dfpb.WorkflowConfig_ScheduledExecutionRecord_ErrorStatus{ErrorStatus: apierror.From(err).GRPCStatus().Proto()}

@@ -95,7 +95,13 @@ func (s *Server) remoteOf(ctx context.Context, name string) (remote, error) {
 		return remote{}, err
 	}
 	rm := remote{url: gr.GetUrl(), branch: gr.GetDefaultBranch()}
-	if v := gr.GetAuthenticationTokenSecretVersion(); v != "" {
+	if link := gr.GetGitRepositoryLink(); link != "" {
+		tok, err := s.linkToken(ctx, link)
+		if err != nil {
+			return remote{}, apierror.FailedPrecondition("git remote access token of %s: %v", link, err)
+		}
+		rm.conf = []string{"http.extraHeader=Authorization: Bearer " + tok}
+	} else if v := gr.GetAuthenticationTokenSecretVersion(); v != "" {
 		tok, err := s.secret(ctx, v)
 		if err != nil {
 			return remote{}, apierror.FailedPrecondition("git remote access token %s: %v", v, err)
@@ -103,6 +109,14 @@ func (s *Server) remoteOf(ctx context.Context, name string) (remote, error) {
 		rm.conf = []string{"http.extraHeader=Authorization: Bearer " + strings.TrimSpace(string(tok))}
 	}
 	return rm, nil
+}
+
+// linkToken is a Developer Connect git repository link's read-write token.
+func (s *Server) linkToken(ctx context.Context, link string) (string, error) {
+	if s.opts.LinkToken == nil {
+		return "", errors.New("Developer Connect is not served on this instance")
+	}
+	return s.opts.LinkToken(ctx, link)
 }
 
 func (s *Server) secret(ctx context.Context, name string) ([]byte, error) {
@@ -377,10 +391,13 @@ func (s *Server) ComputeRepositoryAccessTokenStatus(ctx context.Context, req *df
 	out := func(st dfpb.ComputeRepositoryAccessTokenStatusResponse_TokenStatus) (*dfpb.ComputeRepositoryAccessTokenStatusResponse, error) {
 		return &dfpb.ComputeRepositoryAccessTokenStatusResponse{TokenStatus: st}, nil
 	}
-	if gr.GetAuthenticationTokenSecretVersion() == "" {
+	if link := gr.GetGitRepositoryLink(); link != "" {
+		if _, err := s.linkToken(ctx, link); err != nil {
+			return out(dfpb.ComputeRepositoryAccessTokenStatusResponse_NOT_FOUND)
+		}
+	} else if gr.GetAuthenticationTokenSecretVersion() == "" {
 		return out(dfpb.ComputeRepositoryAccessTokenStatusResponse_NOT_FOUND)
-	}
-	if _, err := s.secret(ctx, gr.GetAuthenticationTokenSecretVersion()); err != nil {
+	} else if _, err := s.secret(ctx, gr.GetAuthenticationTokenSecretVersion()); err != nil {
 		if apierror.From(err).Code == 7 {
 			return out(dfpb.ComputeRepositoryAccessTokenStatusResponse_PERMISSION_DENIED)
 		}

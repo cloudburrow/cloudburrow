@@ -18066,14 +18066,16 @@
     "Key": "dataform",
     "Title": "Dataform (v1)",
     "counts": {
-      "Implemented": 3,
-      "Verified": 71
+      "Implemented": 1,
+      "Verified": 73
     },
     "rows": [
       {
         "method": "google.cloud.dataform.v1.Dataform/CancelWorkflowInvocation",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataformkeys_test.go:39 TestDataformLongRunningCompileAndCancel"
+        ]
       },
       {
         "method": "google.cloud.dataform.v1.Dataform/CommitRepositoryChanges",
@@ -18107,8 +18109,10 @@
       },
       {
         "method": "google.cloud.dataform.v1.Dataform/CreateCompilationResultLongRunning",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataformkeys_test.go:39 TestDataformLongRunningCompileAndCancel"
+        ]
       },
       {
         "method": "google.cloud.dataform.v1.Dataform/CreateFolder",
@@ -18277,7 +18281,8 @@
         "method": "google.cloud.dataform.v1.Dataform/GetConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/dataform_test.go:723 TestDataformFoldersAndConfig"
+          "test/compat/dataform_test.go:723 TestDataformFoldersAndConfig",
+          "test/compat/dataformkeys_test.go:147 TestDataformCustomerManagedKey"
         ]
       },
       {
@@ -18554,7 +18559,8 @@
         "method": "google.cloud.dataform.v1.Dataform/UpdateConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/dataform_test.go:723 TestDataformFoldersAndConfig"
+          "test/compat/dataform_test.go:723 TestDataformFoldersAndConfig",
+          "test/compat/dataformkeys_test.go:147 TestDataformCustomerManagedKey"
         ]
       },
       {
