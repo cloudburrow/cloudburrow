@@ -3189,10 +3189,14 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   // Google's Spanner Instances list, "Select the checkbox for the instance.
   // The Info panel appears".
   const infoOnSelect = Boolean(opts.rowControls && data.infoOnSelect);
-  if (infoOnSelect) {
+  // Or a Permissions button over the checked rows (#2125): Google's VM
+  // instances list, "Select the checkbox next to each resource ... For a
+  // VM instance, click Permissions".
+  const permissionsButton = Boolean(opts.rowControls && data.permissionsButton);
+  if (infoOnSelect || permissionsButton) {
     INFO_SELECTION = () => [...selected].map((n) => data.items.find((i) => i.name === n)).filter(Boolean);
   }
-  const selectable = Boolean(opts.rowControls && caps.delete) || selectActions.length > 0 || infoOnSelect;
+  const selectable = Boolean(opts.rowControls && caps.delete) || selectActions.length > 0 || infoOnSelect || permissionsButton;
   // Or a list screen's rows marked selectable: History's builds awaiting
   // approval, which its Approve takes (#1854). A top-level list's own
   // selection actions take any of its rows (#1864).
@@ -3316,6 +3320,18 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
       runAction(route, opts.pagePath || [], { ...a, fields }, () => reload(), NO_ROW, what);
     },
   }));
+  if (permissionsButton) {
+    selectionButtons.push(el("button", {
+      class: "secondary", id: "list-permissions", text: "Permissions", disabled: "disabled",
+      onclick: () => {
+        const first = data.items.find((i) => selected.has(i.name));
+        if (!first) return;
+        INFO_TAB = "permissions";
+        inspected = first.name;
+        openInfoPanelOn(first, dataColumns(), route, refresh);
+      },
+    }));
+  }
 
   const visibleRows = () => {
     let rows = data.items.filter((i) => matches(i));
@@ -3919,7 +3935,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
               // (#1854); Delete only where the rows can be deleted.
               ...selectionButtons,
               caps.delete ? bulk : null,
-              caps.delete || selectActions.length ? selectionLabel : null)
+              caps.delete || selectActions.length || permissionsButton ? selectionLabel : null)
           : null)
       : el("div", { class: "action-bar" }, ...selectionButtons,
           selectActions.length ? selectionLabel : null, refreshControl),
