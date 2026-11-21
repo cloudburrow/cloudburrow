@@ -4370,6 +4370,15 @@ async function renderDetail(view, route, resourcePath) {
         return drawChartSection(panel, section, note);
       case "analytics":
         return drawAnalyticsSection(panel, section, note);
+      case "media":
+        return drawMediaSection(panel, section, note);
+      case "result":
+        // An action's answer on a page of its own (#2084): Document AI's
+        // analysis page, drawn as its result dialog draws it.
+        // Its own region scrolls sideways, never the page, and is
+        // reachable from the keyboard to be scrolled.
+        return setChildren(panel, note, el("div", { class: "card result-section", role: "region", tabindex: "0",
+          "aria-label": section.label }, resultTable(section.listing || {})));
       case "logs":
         return drawLogsSection(panel, section, note);
       case "permissions":
@@ -4716,6 +4725,33 @@ async function renderDetail(view, route, resourcePath) {
         el("pre", { class: "mono", text: section.text })));
   };
 
+  // A player for an audio object (#2084): a Speech-to-Text transcription's
+  // audio, which Google's Transcription details page plays in the browser,
+  // with the transcript under it. The browser's own controls, which are
+  // reachable and operable from the keyboard.
+  const drawMediaSection = (into, section, note) => {
+    const m = section.media;
+    if (!m || !m.src) {
+      return setChildren(into, note, emptyState("No audio", `${name} keeps no audio to play.`));
+    }
+    const status = el("p", { class: "form-help", id: "media-status", role: "status" });
+    const audio = el("audio", { id: "media-player", controls: "", preload: "metadata", "aria-label": m.label,
+      "aria-describedby": "media-status" },
+      el("source", { src: m.src, ...(m.type ? { type: m.type } : {}) }));
+    const failed = () => { status.textContent = "The audio could not be played: the object is missing or is not audio this browser plays."; };
+    audio.addEventListener("error", failed);
+    audio.querySelector("source").addEventListener("error", failed);
+    audio.addEventListener("loadedmetadata", () => {
+      if (Number.isFinite(audio.duration)) status.textContent = `${m.label}, ${audio.duration.toFixed(1)} seconds`;
+    });
+    setChildren(into, note,
+      el("div", { class: "card media-section" },
+        el("div", { class: "media-player" }, audio, status),
+        section.text ? el("div", { class: "text-section" },
+          el("div", { class: "text-actions" }, copyButton(section.text, `${section.label} for ${name}`)),
+          el("pre", { class: "mono result-text", id: "media-text", tabindex: "0", "aria-label": section.label, text: section.text })) : null));
+  };
+
   const drawChartSection = (into, section, note) => {
     // A metric the server says is unavailable keeps its card, saying why
     // (#2070: a workload's Disk where the kubelet reports none).
@@ -4925,6 +4961,8 @@ async function renderDetail(view, route, resourcePath) {
     ? () => navigate(editPageHref())
     : () => openEditForm(route, segments, data.edit, reloadPage);
   if (data.edit && data.edit.page) {
+    // An edit form with a page of its own (EditForm.Page, #1855, #1862):
+    // Google's Edit Repository and Edit Redis instance open a page.
     const editHref = new URL(detailHref(route, segments), location.origin);
     editHref.searchParams.set("edit", "1");
     pageActions.unshift(el("a", {
@@ -5103,6 +5141,15 @@ function openActionForm(route, segments, action, onDone, title = null, host = nu
       // the web interface's Create repository opens the new repository.
       if (host && action.opens && values[action.opens]) {
         navigate(detailHref(route, [...segments, values[action.opens]]));
+        return null;
+      }
+      // An answer with a page of its own opens it (#2084): Document AI's
+      // Upload test document its analysis page, New transcription its
+      // Transcription details. The page left is not redrawn, which would
+      // race the one opened.
+      if (res.result && res.result.open) {
+        close();
+        navigate(res.result.open);
         return null;
       }
       onDone();
@@ -7961,7 +8008,8 @@ function buildCreateForm(spec) {
     // The files chosen in "file" fields (#999), which are sent as parts of
     // their own rather than as values.
     files() {
-      return entries.filter((e) => e.field.type === "file" && e.control.files && e.control.files[0])
+      // A file field hidden by another's choice (visibleWhen) sends nothing.
+      return entries.filter((e) => e.field.type === "file" && !e.inactive && e.control.files && e.control.files[0])
         .map((e) => ({ name: e.field.name, file: e.control.files[0] }));
     },
     values() {

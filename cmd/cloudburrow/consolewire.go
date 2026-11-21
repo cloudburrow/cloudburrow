@@ -538,8 +538,16 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	if d.localAI != nil {
 		docs := docAI{defaultProject: d.cfg.DefaultProject(), addr: d.localAI.Addr}
 		sp := speechSvc{defaultProject: d.cfg.DefaultProject(), addr: d.localAI.Addr}
-		providers = append(providers, docAIOverviewProvider{d: docs}, docAIGalleryProvider{d: docs}, docAIProcessorsProvider{d: docs},
-			speechTranscriptionsProvider{s: sp, held: &speechTranscriptions{}}, speechRecognizersProvider{s: sp},
+		// New transcription saves to a workspace, a bucket of the served
+		// Cloud Storage, as Google's does (#2084); Upload test document
+		// opens its analysis page.
+		transcriptions := speechTranscriptionsProvider{s: sp, held: &speechTranscriptions{}}
+		if enabled[config.ServiceStorage] && storageAddr != "" {
+			transcriptions.ws = speechWorkspaces{storage: storageProvider{endpoint: storageAddr}}
+		}
+		providers = append(providers, docAIOverviewProvider{d: docs}, docAIGalleryProvider{d: docs},
+			docAIProcessorsProvider{d: docs, analyses: &docAIAnalyses{}},
+			transcriptions, speechRecognizersProvider{s: sp},
 			speechCustomClassesProvider{s: sp}, speechPhraseSetsProvider{s: sp})
 	}
 
