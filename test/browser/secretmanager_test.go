@@ -62,9 +62,10 @@ func TestSecretManagerConsoleParity(t *testing.T) {
 	p.waitFor(`document.querySelectorAll("#product-nav a").length >= 2 && document.querySelector("#view .page-tabs") !== null`)
 	var menu string
 	p.eval(`[...document.querySelectorAll("#product-nav a")].map((a) => a.textContent.trim()).join("|")`, &menu)
-	// Parameter Manager is in the same menu, as on Google's (#2054, #2063).
-	if menu != "Secret Manager|Parameter Manager|Parameter templates|Settings" {
-		t.Errorf("Secret Manager's menu = %q; want Secret Manager, Parameter Manager, Parameter templates, Settings", menu)
+	// Parameter Manager is in the same menu where it is served, as on
+	// Google's (#2054, #2063).
+	if menu != "Secret Manager|Settings" && menu != "Secret Manager|Parameter Manager|Parameter templates|Settings" {
+		t.Errorf("Secret Manager's menu = %q; want Secret Manager, (Parameter Manager, Parameter templates,) Settings", menu)
 	}
 	// The regional secrets are a tab of the Secret Manager page (#1850).
 	var pageTabs string
