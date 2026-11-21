@@ -137,8 +137,8 @@ func TestPubSubCreateOptionsThroughTheForms(t *testing.T) {
 	setField(p, "#view", "f-retentionDays", "2")
 	p.run(chromedp.Click(chromedp.CSS(`#view button[type="submit"]`)))
 	p.waitFor(`location.pathname === "/pubsub/topics"`)
-	if got := editDefaults(t, "pubsub", project, topic)["messageRetention"]; got != "2d" {
-		t.Errorf("the topic created in the browser reads a retention of %q; want 2d", got)
+	if got := editDefaults(t, "pubsub", project, topic); got["enableRetention"] != "true" || got["retentionDays"] != "2" {
+		t.Errorf("the topic created in the browser reads a retention of %v; want 2 days on Edit topic", got)
 	}
 
 	// The topic's row menu opens Create subscription with the topic.
@@ -206,8 +206,8 @@ func TestPubSubCreateOptionsThroughTheForms(t *testing.T) {
 	submit()
 	p.waitFor(`location.pathname === "/pubsub/subscriptions"`)
 	got := editDefaults(t, "pubsub-subscriptions", project, sub)
-	if got["filter"] != `attributes.region = "eu"` || got["messageOrdering"] != "Yes" || got["exactlyOnce"] != "true" ||
-		got["expiration"] != "2d" || got["minBackoff"] != "10s" || got["maxBackoff"] != "10m0s" {
+	if got["filter"] != `attributes.region = "eu"` || got["messageOrdering"] != "true" || got["exactlyOnce"] != "true" ||
+		got["expirationDays"] != "2" || got["minBackoff"] != "10" || got["maxBackoff"] != "600" {
 		t.Errorf("the subscription created in the browser reads %v", got)
 	}
 }
