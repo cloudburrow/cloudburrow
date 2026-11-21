@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net/http"
 	"strings"
 	"sync"
@@ -64,6 +65,13 @@ type Server struct {
 	// keys are Document AI's and Speech-to-Text's customer-managed keys
 	// (cmek.go, #1950), set by UseCMEK.
 	keys atomic.Pointer[cmek.Keys]
+
+	// caches are the cached contents (cachedcontent.go, #2107), served over
+	// gRPC and through cacheTranscoder.
+	cacheOnce       sync.Once
+	caches          *cacheStore
+	cacheRESTOnce   sync.Once
+	cacheTranscoder *rest.Transcoder
 }
 
 // NewServer returns a server. A nil generator is valid and makes every
@@ -117,6 +125,12 @@ func (s *Server) Handler() http.Handler {
 	// ML.UNDERSTAND_TEXT (language.go, #1799).
 	for _, v := range []string{"analyzeEntities", "analyzeEntitySentiment", "analyzeSentiment", "analyzeSyntax", "classifyText", "annotateText", "moderateText"} {
 		mux.HandleFunc("POST /v1/documents:"+v, s.language)
+	}
+	// Context caching's cachedContents, v1 and v1beta1 (cachedcontent.go,
+	// #2107).
+	for _, v := range []string{"v1", APIVersion} {
+		mux.Handle("/"+v+"/projects/{project}/locations/{location}/cachedContents", http.HandlerFunc(s.serveCacheREST))
+		mux.Handle("/"+v+"/projects/{project}/locations/{location}/cachedContents/{id}", http.HandlerFunc(s.serveCacheREST))
 	}
 	// Model Garden's OpenAI-compatible path on its endpoints (#1840).
 	mux.HandleFunc("POST /v1beta1/projects/{project}/locations/{location}/endpoints/{endpoint}/chat/completions", s.chatCompletionsREST)
@@ -246,41 +260,90 @@ func (s *Server) generate(w http.ResponseWriter, r *http.Request, requested stri
 	s.writeStream(w, r, model, chunks, errFn)
 }
 
-// startGeneration resolves the model, decodes and validates the JSON request
-// and starts the generator. It is the one entry point for the JSON routes and
-// the gRPC PredictionService, unary and streaming alike, so every transport
-// resolves, refuses and honours the same fields the same way.
-func (s *Server) startGeneration(ctx context.Context, requested string, body io.Reader) (string, <-chan Chunk, func() error, error) {
+// prepared is a resolved, decoded and validated request, ready to run.
+type prepared struct {
+	model string
+	req   *GenerateContentRequest
+	greq  Request
+	// cached is the cachedContent the request named, expanded into req
+	// (cachedcontent.go, #2107); nil without one.
+	cached *cacheUse
+}
+
+// prepare resolves the model, decodes the JSON request, expands the cached
+// content it names and validates the result. It is the one entry point for
+// the JSON routes and the gRPC PredictionService, unary and streaming alike,
+// so every transport resolves, refuses and honours the same fields the same
+// way.
+func (s *Server) prepare(ctx context.Context, requested string, body io.Reader) (*prepared, error) {
 	model, err := s.resolveModel(requested)
 	if err != nil {
-		return "", nil, nil, err
+		return nil, err
 	}
-	req, err := decodeRequest(body, honoursOptions(s.gen))
+	options := honoursOptions(s.gen)
+	req, err := decodeBody(body)
 	if err != nil {
-		return "", nil, nil, err
+		return nil, err
+	}
+	cached, err := s.expandCachedContent(ctx, req, model)
+	if err != nil {
+		return nil, err
+	}
+	if err := validate(req, options); err != nil {
+		return nil, err
 	}
 	greq := generatorRequest(req)
-	if honoursOptions(s.gen) {
+	if options {
 		if greq.Conversation, greq.Vision, err = toRunner(ctx, req, s.objects); err != nil {
-			return "", nil, nil, err
+			return nil, err
 		}
 	}
+	return &prepared{model: model, req: req, greq: greq, cached: cached}, nil
+}
+
+// run starts one generation of a prepared request.
+func (s *Server) run(ctx context.Context, p *prepared, greq Request) (<-chan Chunk, func() error, error) {
 	// The generation runs under its own context so a stop sequence can end
 	// it without ending the request.
 	gctx, cancel := context.WithCancel(ctx)
 	chunks, errFn, err := s.gen.Generate(gctx, greq)
 	if err != nil {
 		cancel()
-		return "", nil, nil, apierror.Internal(err, "starting the local runtime failed")
+		return nil, nil, apierror.Internal(err, "starting the local runtime failed")
 	}
 	var stops []string
-	if req.GenerationConfig != nil {
-		stops = req.GenerationConfig.StopSequences
+	if p.req.GenerationConfig != nil {
+		stops = p.req.GenerationConfig.StopSequences
 	}
 	if greq.Vision {
 		chunks = markImages(chunks)
 	}
-	return model, applyStops(ctx, cancel, chunks, stops), errFn, nil
+	_, _, include := p.req.GenerationConfig.thinking()
+	if p.cached != nil || !include {
+		chunks = annotateUsage(chunks, p.cached, include)
+	}
+	return applyStops(ctx, cancel, chunks, stops), errFn, nil
+}
+
+// startGeneration prepares a request and starts its one generation, for the
+// streaming routes. candidateCount > 1 is refused there, as Vertex AI
+// documents it: "Specifying multiple candidates is a Preview feature that
+// works with generateContent (streamGenerateContent is not supported)"
+// (content-generation-parameters, re-read 2026-11-21).
+func (s *Server) startGeneration(ctx context.Context, requested string, body io.Reader) (string, <-chan Chunk, func() error, error) {
+	p, err := s.prepare(ctx, requested, body)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	if n := p.req.GenerationConfig.candidates(); n > 1 {
+		return "", nil, nil, apierror.InvalidArgument(
+			"Unable to submit request because candidateCount is %d; multiple candidates are supported by generateContent only, not streamGenerateContent", n)
+	}
+	chunks, errFn, err := s.run(ctx, p, p.greq)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	return p.model, chunks, errFn, nil
 }
 
 // markImages flags the usage of a prompt with images, whose per-modality
@@ -301,15 +364,109 @@ func markImages(in <-chan Chunk) <-chan Chunk {
 	return out
 }
 
+// annotateUsage adds the cached content's token count to the usage, and drops
+// the thoughts unless includeThoughts asked for them (their tokens are
+// counted either way).
+func annotateUsage(in <-chan Chunk, cached *cacheUse, include bool) <-chan Chunk {
+	out := make(chan Chunk)
+	go func() {
+		defer close(out)
+		for c := range in {
+			if c.Usage != nil && cached != nil {
+				u := *c.Usage
+				u.CachedTokens = cached.tokens
+				u.CachedImages = cached.images
+				c.Usage = &u
+			}
+			if c.Thought != "" && !include {
+				if c.Text == "" && c.Usage == nil && len(c.ToolCalls) == 0 && !c.Last {
+					continue
+				}
+				c.Thought = ""
+			}
+			out <- c
+		}
+	}()
+	return out
+}
+
+// candidateSeed is candidate i's seed: the request's seed plus i, so a
+// seeded request is repeatable candidate by candidate, or a fresh random
+// seed for each when the request sets none, so the candidates are
+// independent samples rather than one sample repeated.
+func candidateSeed(seed *int32, i int) *int32 {
+	var v int32
+	if seed != nil {
+		v = *seed + int32(i)
+	} else {
+		v = rand.Int32()
+	}
+	return &v
+}
+
 // generateUnary serves one generateContent, for the JSON route and the gRPC
 // PredictionService alike, so the two answer the same request the same way.
-// body is the JSON request; the stream is assembled into one response.
+// body is the JSON request; each candidate's stream is assembled into one
+// response. candidateCount N runs N independent generations, one after
+// another (the runtime is one model in one process), each its own sample
+// (candidateSeed); the prompt is counted once and the candidates' tokens
+// summed, as Vertex bills them ("charged for the output tokens of all
+// candidates, but are only charged once for the input tokens").
 func (s *Server) generateUnary(ctx context.Context, requested string, body io.Reader) (*GenerateContentResponse, error) {
-	model, chunks, errFn, err := s.startGeneration(ctx, requested, body)
+	p, err := s.prepare(ctx, requested, body)
 	if err != nil {
 		return nil, err
 	}
-	var text strings.Builder
+	n := p.req.GenerationConfig.candidates()
+	var resp *GenerateContentResponse
+	var total *Usage
+	for i := 0; i < n; i++ {
+		greq := p.greq
+		if n > 1 {
+			greq.Seed = candidateSeed(p.greq.Seed, i)
+		}
+		chunks, errFn, err := s.run(ctx, p, greq)
+		if err != nil {
+			return nil, err
+		}
+		r, usage, err := collectCandidate(ctx, p.model, chunks, errFn)
+		if err != nil {
+			return nil, err
+		}
+		r.Candidates[0].Index = int32(i)
+		total = addUsage(total, usage)
+		if resp == nil {
+			resp = r
+			continue
+		}
+		resp.Candidates = append(resp.Candidates, r.Candidates[0])
+	}
+	resp.UsageMetadata = total.metadata()
+	return resp, nil
+}
+
+// addUsage sums the candidates' decoded tokens over one prompt.
+func addUsage(total, u *Usage) *Usage {
+	if total == nil || u == nil {
+		if u == nil {
+			return total
+		}
+		c := *u
+		return &c
+	}
+	switch {
+	case total.CandidateTokens < 0 || u.CandidateTokens < 0:
+		total.CandidateTokens = -1
+	default:
+		total.CandidateTokens += u.CandidateTokens
+	}
+	total.ThoughtTokens += u.ThoughtTokens
+	return total
+}
+
+// collectCandidate assembles one generation's stream into a one-candidate response.
+func collectCandidate(ctx context.Context, model string, chunks <-chan Chunk, errFn func() error) (*GenerateContentResponse, *Usage, error) {
+	var text, thought strings.Builder
 	var calls []FunctionCall
 	var usage *Usage
 	finish := FinishReasonStop
@@ -322,13 +479,14 @@ func (s *Server) generateUnary(ctx context.Context, requested string, body io.Re
 			continue
 		}
 		text.WriteString(c.Text)
+		thought.WriteString(c.Thought)
 		calls = append(calls, c.ToolCalls...)
 	}
 	if err := generationError(ctx, errFn); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if ctx.Err() != nil {
-		return nil, ctx.Err()
+		return nil, nil, ctx.Err()
 	}
 	t := strings.TrimRight(text.String(), "\n")
 	if len(calls) > 0 {
@@ -336,7 +494,7 @@ func (s *Server) generateUnary(ctx context.Context, requested string, body io.Re
 		// alone is answered as Gemini answers one, with no text part.
 		t = strings.TrimSpace(t)
 	}
-	return candidateResponse(model, t, calls, finish, usage), nil
+	return thoughtResponse(model, strings.TrimSpace(thought.String()), t, calls, finish, usage), usage, nil
 }
 
 // chunkResponse frames one streamed chunk, or returns nil for a chunk that
@@ -351,6 +509,9 @@ func chunkResponse(model string, c Chunk) *GenerateContentResponse {
 	switch {
 	case c.Last:
 		return candidateResponse(model, "", nil, c.FinishReason, c.Usage)
+	case c.Thought != "":
+		return &GenerateContentResponse{Candidates: []Candidate{{
+			Content: Content{Role: "model", Parts: []Part{{Text: c.Thought, Thought: ptr(true)}}}}}, ModelVersion: model}
 	case len(c.ToolCalls) > 0:
 		return candidateResponse(model, "", c.ToolCalls, "", nil)
 	case c.Usage != nil && c.Text == "":
@@ -437,4 +598,9 @@ func (s *Server) Model() string {
 		return ""
 	}
 	return s.gen.Model()
+}
+
+// serveCacheREST serves the cachedContents paths through their transcoder.
+func (s *Server) serveCacheREST(w http.ResponseWriter, r *http.Request) {
+	s.cacheREST().ServeHTTP(w, r)
 }

@@ -1147,6 +1147,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if localAISrv != nil {
 		localAISrv.SetDocumentAIState(filepath.Join(cfg.StateDir, "documentai", "processors.json"))
 		localAISrv.SetSpeechState(filepath.Join(cfg.StateDir, "speech", "recognizers.json"))
+		// Vertex AI's cached contents (#2107), until they expire.
+		localAISrv.SetCachedContentState(filepath.Join(cfg.StateDir, "vertexai", "cachedcontents.json"))
 		// Their customer-managed keys (#1950), through Cloud KMS.
 		localAISrv.UseCMEK(cmekKeys(kmsSvc, iamEnforcer))
 		// IAM enforcement (#1879) of Vertex AI, Document AI, Speech-to-Text

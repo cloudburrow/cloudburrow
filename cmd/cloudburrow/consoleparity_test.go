@@ -2212,6 +2212,15 @@ var parityRows = []parityRow{
 		Screen:  "/agent-platform/studio", Offers: "Studio: the \"<count> tokens\" indicator is countTokens of the conversation, System instructions, declarations and prompt as it is typed; " +
 			"clicking it opens the prompt tokenizer, computeTokens' tokens (Token ID to text) and IDs (Token ID) of the prompt (#1962)",
 		Tests: []string{"TestPlaygroundRelaysTokenCounts", "TestAgentStudioChatToolsImagesTokensAndCode", "TestCountTokensAndComputeTokensThroughTheOfficialSDK"}},
+	// Context caching (#2107): no console surface yet.
+	{Resource: "Vertex AI GenAiCacheService: cached contents", Service: "vertexai",
+		Methods: []string{"GenAiCacheService/CreateCachedContent", "GenAiCacheService/GetCachedContent", "GenAiCacheService/ListCachedContents",
+			"GenAiCacheService/UpdateCachedContent", "GenAiCacheService/DeleteCachedContent"},
+		Issue: 2121},
+	{Resource: "Vertex AI GenAiCacheService v1beta1: cached contents", Service: "vertexaiv1beta1",
+		Methods: []string{"GenAiCacheService/CreateCachedContent", "GenAiCacheService/GetCachedContent", "GenAiCacheService/ListCachedContents",
+			"GenAiCacheService/UpdateCachedContent", "GenAiCacheService/DeleteCachedContent"},
+		Issue: 2121},
 	// v1beta1 serves v1's methods by converting to them (#1937): the console
 	// reaches the same handlers through the v1 rows above.
 	{Resource: "Vertex AI PredictionService v1beta1: v1's methods", Service: "vertexaiv1beta1",

@@ -42,6 +42,12 @@
 //                               RepetitionPenaltyConfig (OpenAI semantics)
 //   --vision_backend=cpu        load the model's vision encoder (image parts)
 //   --request_stdin             read a whole conversation from standard input
+//   --enable_thinking=B         set the conversation's ThinkingConfig (#2107):
+//                               the model's own thinking mode (Gemma 4's
+//                               template injects <|think|>), its thought
+//                               channel streamed as {"thought":"..."} lines
+//   --thinking_budget=N         the thinking token budget, -1 unlimited
+//                               (LiteRT-LM's ThinkingBudgetConstraint)
 //
 // With --request_stdin the runner takes one JSON object on standard input
 // (#1937) instead of --input_prompt:
@@ -59,7 +65,11 @@
 //                                   preface, tools and image tokens included
 //   {"text":"..."}                  each decoded chunk
 //   {"tool_calls":[...]}            parsed calls, arguments as JSON objects
+//   {"thought":"..."}               thought channel text (--enable_thinking)
 // and with count_only only the first line is written and nothing decodes.
+// With thinking on, standard error also gets
+//   cloudburrow_generate: thought_tokens=N
+// the model's tokenizer's count of the thought channel's text.
 // With "compute" the model's tokenizer splits each text (no template) and the
 // one line written is {"compute":[{"ids":[...],"tokens":["<base64>",...]}]},
 // each token the bytes its id decodes to.
@@ -120,6 +130,10 @@ ABSL_FLAG(std::string, constraint_json_schema, "",
           "Constrain the output to JSON valid against this JSON schema.");
 ABSL_FLAG(bool, request_stdin, false,
           "Read the conversation as JSON from standard input (#1937).");
+ABSL_FLAG(std::optional<bool>, enable_thinking, std::nullopt,
+          "Set the conversation's thinking mode (#2107).");
+ABSL_FLAG(int, thinking_budget, -1,
+          "Thinking token budget when thinking is enabled; -1 is unlimited.");
 
 namespace {
 
@@ -130,6 +144,7 @@ using ::litert::lm::EngineSettings;
 using ::litert::lm::Message;
 using ::litert::lm::ModelAssets;
 using ::litert::lm::OptionalArgs;
+using ::litert::lm::ThinkingConfig;
 using ::litert::lm::ToolChoice;
 using ::litert::lm::proto::SamplerParameters;
 using ::nlohmann::json;
@@ -347,6 +362,11 @@ absl::Status Run(int argc, char** argv) {
     }
     builder.SetPreface(preface);
   }
+  const std::optional<bool> thinking = absl::GetFlag(FLAGS_enable_thinking);
+  if (thinking.has_value()) {
+    builder.SetThinkingConfig(
+        ThinkingConfig(*thinking, absl::GetFlag(FLAGS_thinking_budget)));
+  }
   if (!regex.empty() || !schema.empty() || has_tools) {
     // Without a provider the conversation drops decoding_constraint silently.
     builder.SetConstraintProviderConfig(litert::lm::LlGuidanceConfig());
@@ -382,6 +402,7 @@ absl::Status Run(int argc, char** argv) {
   }
 
   absl::Status failure = absl::OkStatus();
+  std::string thought_text;
   Message message;
   if (request_stdin) {
     message = request["message"];
@@ -398,7 +419,7 @@ absl::Status Run(int argc, char** argv) {
   }
   ABSL_RETURN_IF_ERROR(conversation->SendMessageAsync(
       message,
-      [&failure, request_stdin](absl::StatusOr<Message> message) {
+      [&failure, &thought_text, request_stdin](absl::StatusOr<Message> message) {
         if (!message.ok()) {
           failure = message.status();
           return;
@@ -407,6 +428,16 @@ absl::Status Run(int argc, char** argv) {
           return;
         }
         if (request_stdin) {
+          if (message->contains("channels") &&
+              (*message)["channels"].is_object()) {
+            for (const auto& [name, text] : (*message)["channels"].items()) {
+              if (name == "thought" && text.is_string() &&
+                  !text.get<std::string>().empty()) {
+                thought_text += text.get<std::string>();
+                JsonLine({{"thought", text.get<std::string>()}});
+              }
+            }
+          }
           if (message->contains("content") &&
               (*message)["content"].is_array()) {
             for (const auto& part : (*message)["content"]) {
@@ -442,6 +473,17 @@ absl::Status Run(int argc, char** argv) {
       }
     }
     std::cerr << "cloudburrow_generate: decoded_tokens=" << decoded
+              << std::endl;
+  }
+  if (thinking.value_or(false)) {
+    int thought_tokens = 0;
+    if (!thought_text.empty()) {
+      auto& tokenizer =
+          const_cast<litert::support::Tokenizer&>(engine->GetTokenizer());
+      auto ids = tokenizer.TextToTokenIds(thought_text);
+      if (ids.ok()) thought_tokens = static_cast<int>(ids->size());
+    }
+    std::cerr << "cloudburrow_generate: thought_tokens=" << thought_tokens
               << std::endl;
   }
   return absl::OkStatus();

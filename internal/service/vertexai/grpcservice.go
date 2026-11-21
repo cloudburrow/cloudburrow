@@ -75,6 +75,9 @@ func (s *Server) RegisterGRPC(srv *grpc.Server) {
 	speechv1pb.RegisterSpeechServer(srv, &speechV1Service{s: s})
 	// countTokens and computeTokens (#1937, tokens.go).
 	s.registerTokens(srv)
+	// Context caching (cachedcontent.go, #2107).
+	aiplatformpb.RegisterGenAiCacheServiceServer(srv, &cacheService{s: s})
+	betapb.RegisterGenAiCacheServiceServer(srv, &betaCacheService{s: s})
 }
 
 // grpcError renders err as a status: an *apierror.Error keeps its code, a

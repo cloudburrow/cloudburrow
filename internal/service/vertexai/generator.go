@@ -8,6 +8,9 @@ import (
 // Chunk is one increment of generated text.
 type Chunk struct {
 	Text string
+	// Thought is text of the model's thought channel (thinkingConfig,
+	// #2107).
+	Thought string
 	// ToolCalls are function calls the model made, parsed by the runtime
 	// from the model's native tool-call syntax (#1937).
 	ToolCalls []FunctionCall
@@ -27,6 +30,13 @@ type Usage struct {
 	// Images marks a prompt with image tokens, whose per-modality split the
 	// runtime does not report.
 	Images bool
+	// ThoughtTokens are the decoded tokens of the model's thoughts, part of
+	// CandidateTokens as the engine counts them (#2107).
+	ThoughtTokens int
+	// CachedTokens are the cached content's tokens, part of PromptTokens
+	// (cachedContent, #2107); CachedImages marks a cache holding images.
+	CachedTokens int
+	CachedImages bool
 }
 
 // Generator produces text for a prompt.
@@ -67,6 +77,10 @@ type Request struct {
 	// RepetitionPenaltyConfig (#1937).
 	PresencePenalty  *float32
 	FrequencyPenalty *float32
+	// Thinking, when set, is the model's thinking mode on or off, with
+	// ThinkingBudget its token budget (-1 unlimited) (#2107).
+	Thinking       *bool
+	ThinkingBudget int32
 
 	// Conversation, when set, is the whole request in LiteRT-LM's message
 	// format (#1937, conversation.go), sent to cloudburrow_generate on

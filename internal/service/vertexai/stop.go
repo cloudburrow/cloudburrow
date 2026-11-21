@@ -39,7 +39,9 @@ func applyStops(ctx context.Context, cancel context.CancelFunc, in <-chan Chunk,
 		var pending string
 		var usage *Usage // the prompt's count, for a generation cut short
 		for c := range in {
-			if !c.Last && (c.Usage != nil || len(c.ToolCalls) > 0) {
+			// Thoughts pass through: stop sequences end the answer, not
+			// the thinking before it (#2107).
+			if !c.Last && (c.Usage != nil || len(c.ToolCalls) > 0 || c.Thought != "") {
 				// Not text: the held text goes first, then the chunk as is.
 				if c.Usage != nil {
 					usage = c.Usage

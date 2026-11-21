@@ -361,7 +361,6 @@ func TestPlaygroundRefusalsMatchTheAPI(t *testing.T) {
 
 	// Each refused name paired with a request that exercises it.
 	bodies := map[string]string{
-		"candidateCount": `{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"candidateCount":2}}`,
 		"safetySettings": `{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"safetySettings":[{}]}`,
 	}
 

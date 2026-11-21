@@ -141,6 +141,12 @@ func runnerFlags(req Request) []string {
 	if req.FrequencyPenalty != nil {
 		out = append(out, "--frequency_penalty="+f32(*req.FrequencyPenalty))
 	}
+	if req.Thinking != nil {
+		out = append(out, "--enable_thinking="+strconv.FormatBool(*req.Thinking))
+		if *req.Thinking {
+			out = append(out, "--thinking_budget="+strconv.Itoa(int(req.ThinkingBudget)))
+		}
+	}
 	if req.Conversation != nil {
 		out = append(out, "--request_stdin")
 		if req.Vision {
@@ -155,13 +161,20 @@ func runnerFlags(req Request) []string {
 // decodedMarker is cloudburrow_generate's last line on standard error.
 const decodedMarker = "cloudburrow_generate: decoded_tokens="
 
+// thoughtMarker is cloudburrow_generate's count of the thought channel's
+// tokens, written with thinking on (#2107).
+const thoughtMarker = "cloudburrow_generate: thought_tokens="
+
 // decodedTokens is the count cloudburrow_generate reported, or -1.
-func decodedTokens(stderr string) int {
-	i := strings.LastIndex(stderr, decodedMarker)
+func decodedTokens(stderr string) int { return markerCount(stderr, decodedMarker) }
+
+// markerCount is the number after the last marker on standard error, or -1.
+func markerCount(stderr, marker string) int {
+	i := strings.LastIndex(stderr, marker)
 	if i < 0 {
 		return -1
 	}
-	rest := stderr[i+len(decodedMarker):]
+	rest := stderr[i+len(marker):]
 	if j := strings.IndexAny(rest, "\r\n"); j >= 0 {
 		rest = rest[:j]
 	}
@@ -283,6 +296,9 @@ func (g *ExecGenerator) Generate(ctx context.Context, req Request) (<-chan Chunk
 		if conversation && usage.PromptTokens >= 0 {
 			u := *usage
 			u.CandidateTokens = decoded
+			if t := markerCount(stderr.String(), thoughtMarker); t > 0 && decoded >= 0 {
+				u.ThoughtTokens = min(t, decoded)
+			}
 			last = &u
 		}
 		select {
@@ -298,6 +314,7 @@ func (g *ExecGenerator) Generate(ctx context.Context, req Request) (<-chan Chunk
 type runnerLine struct {
 	PromptTokens *int              `json:"prompt_tokens"`
 	Text         *string           `json:"text"`
+	Thought      *string           `json:"thought"`
 	ToolCalls    []json.RawMessage `json:"tool_calls"`
 	Compute      []struct {
 		IDs    []int64  `json:"ids"`
@@ -325,6 +342,8 @@ func streamJSONLines(ctx context.Context, r io.Reader, out chan<- Chunk, usage *
 			c.Usage = &u
 		case l.Text != nil:
 			c.Text = *l.Text
+		case l.Thought != nil:
+			c.Thought = *l.Thought
 		case len(l.ToolCalls) > 0:
 			c.ToolCalls = parseToolCalls(l.ToolCalls)
 		default:

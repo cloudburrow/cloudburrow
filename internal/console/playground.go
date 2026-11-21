@@ -103,8 +103,11 @@ type PlaygroundStatus struct {
 // is absent with a reason reads as a decision. The API is the authority and
 // TestPlaygroundRefusalsMatchTheAPI holds these in step with it. Since #1937
 // the runtime serves system instructions, multi-turn chat, function calling
-// and token counts, which the screen offers (#1962).
-var refusedOptions = []string{"candidateCount", "safetySettings"}
+// and token counts, which the screen offers (#1962). candidateCount,
+// thinkingConfig and cachedContent are served since #2107; the screen does
+// not offer them yet (#2107's console follow-up), and the API does not
+// refuse them, so they are not listed here.
+var refusedOptions = []string{"safetySettings"}
 
 // supportedOptions are the generationConfig fields the screen offers: the
 // runtime's cloudburrow_generate applies the sampler, the token limit, the

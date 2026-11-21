@@ -115,6 +115,7 @@ COMPAT_LOCALAI_TEST_NAMES="
   BigQueryMLTranslate BigQueryMLUnderstandText
   BigQueryObjectRefAIFunctions BigQueryObjectRefEmbeddingsAndSearch
   BigQueryVectorSearchAutonomousEmbeddings
+  CachedContentsThroughTheOfficialSDK
   ConsoleEmbeddingsPlaygroundMatchesTheOfficialSDK
   ConsoleLocalModelsLoadEmbedUnload
   ConsoleLocalModelsUnloadDeleteDownloadLoad
@@ -146,9 +147,11 @@ COMPAT_LOCALAI_TEST_NAMES="
   EmbedContentThroughThePredictionClient
   EmbeddingGemmaThroughTheOfficialSDK
   EmbeddingGemmaThroughThePredictionClient
+  GenerateContentCandidateCountThroughTheOfficialSDK
   GenerateContentFunctionCallingRoundTripThroughTheOfficialSDK
   GenerateContentImagePartThroughTheOfficialSDK
   GenerateContentMultiTurnChatThroughTheOfficialSDK
+  GenerateContentThinkingConfigThroughTheOfficialSDK
   GenerateContentThroughTheOfficialSDK
   GenerationNeverUsesApplicationDefaultCredentials
   RawPredictOnTheEmbeddingModel RawPredictOnTheGenerationModel
