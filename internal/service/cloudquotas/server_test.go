@@ -2,6 +2,7 @@ package cloudquotas
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -11,6 +12,7 @@ import (
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/cloudburrow/cloudburrow/internal/quotalimit"
+	"github.com/cloudburrow/cloudburrow/internal/resource"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 )
 
@@ -193,7 +195,9 @@ func (h fakeHierarchy) Parent(c string) (string, error) {
 // quota applies to, and the quota adjuster's inherited enablement.
 func TestFolderAndOrganizationParents(t *testing.T) {
 	ctx := context.Background()
-	s := NewServer(store.NewMemory(), nil, nil)
+	// A projects registry, as the CLI wires: an organization's value must
+	// not be resolved as a project.
+	s := NewServer(store.NewMemory(), onlyP1{}, nil)
 	s.Hierarchy = fakeHierarchy{"organizations/1": "", "folders/2": "organizations/1", "projects/p1": "folders/2"}
 	const org, folder = "organizations/1/locations/global", "folders/2/locations/global"
 	infos, err := s.ListQuotaInfos(ctx, &pb.ListQuotaInfosRequest{Parent: org + "/services/iam.googleapis.com"})
@@ -259,4 +263,14 @@ func TestFolderAndOrganizationParents(t *testing.T) {
 	if a.GetInherited() || a.GetInheritedFrom() != "" {
 		t.Errorf("set on the folder = %v", a)
 	}
+}
+
+// onlyP1 knows one project, p1.
+type onlyP1 struct{}
+
+func (onlyP1) Resolve(p string) (string, error) {
+	if p == "p1" || p == strconv.FormatInt(resource.ProjectNumber("p1"), 10) {
+		return "p1", nil
+	}
+	return "", status.Error(codes.NotFound, p)
 }

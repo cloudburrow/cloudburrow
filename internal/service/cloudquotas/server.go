@@ -804,10 +804,14 @@ func containsCheck(xs []pb.QuotaSafetyCheck, x pb.QuotaSafetyCheck) bool {
 // project is a project ID, or folders/{n} or organizations/{n} for a
 // folder's or organization's quota.
 func (s *Server) Value(project, service, quotaID string, dims map[string]string) (int64, bool) {
-	// A request quota is charged to a project by ID or by number.
-	project, err := s.resolve(project)
-	if err != nil {
-		return 0, false
+	// A request quota is charged to a project by ID or by number; a folder's
+	// or an organization's quota (#2102) by its store key, folders/{n} or
+	// organizations/{n}, which names no project.
+	if !strings.HasPrefix(project, "folders/") && !strings.HasPrefix(project, "organizations/") {
+		var err error
+		if project, err = s.resolve(project); err != nil {
+			return 0, false
+		}
 	}
 	st, err := s.load(project)
 	if err != nil {
