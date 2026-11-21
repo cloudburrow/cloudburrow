@@ -26,7 +26,8 @@ package iameval
 // parent account's (a subaccount's) and its organization's above it.
 // Google's wording of a denial is UNVERIFIED (the reference pages give
 // none): "The caller does not have permission", its generic
-// PERMISSION_DENIED message.
+// PERMISSION_DENIED message (docs re-read 2026-11-21, #2109:
+// https://docs.cloud.google.com/billing/docs/reference/rest/v1).
 var Billing = &Service{
 	Name:    "cloudbilling.googleapis.com",
 	Types:   map[string]string{"billingAccounts": "cloudbilling.googleapis.com/BillingAccount"},
