@@ -40,10 +40,31 @@ package bigqueryfront
 // bigquery.googleapis.com/SparkJob), which name its entries in the
 // instance's Cloud Logging. A failed application fails the CALL.
 //
-// Not carried out (501): EXTERNAL SECURITY INVOKER (a custom service
-// account), container_image (a custom container), and runtime versions
-// whose Spark is not 3.5 (3.0 and 4.0); the served ones are 1.2, 2.2 (the
-// default) and 2.3, whose Spark is the pinned 3.5 image's.
+// EXTERNAL SECURITY INVOKER: "The procedure to be executed with the
+// privileges of the user that calls it" (the DDL reference), or of the
+// custom service account the caller set first with SET
+// @@spark_proc_properties.service_account (the page's "Use a custom service
+// account"). The job's BigQuery connector then sends the caller's own
+// token (one the instance minted: the front's IAM check, iamcheck.go,
+// holds it to the caller's permissions), or a token the runner mints for
+// that service account, so the job's reads and writes are checked as that
+// identity's; a DEFINER procedure (the default) runs as its connection's
+// service account. The routine's securityMode is INVOKER.
+// @@spark_proc_properties also takes staging_bucket, staging_dataset_id
+// (the connector's materializationDataset) and kms_key_name.
+//
+// container_image: an Artifact Registry image of the instance's own
+// registry, run with the runtime's Spark and Java mounted into it as
+// Google's custom containers guide documents (internal/sparkproc's
+// customimage.go). runtime_version: 1.2, 2.2 (the default) and 2.3 run
+// Spark 3.5, 3.0 Spark 4.0 and 4.0 Spark 4.2, as Managed Service for
+// Apache Spark's runtime pages list them, each on its pinned apache/spark
+// image and BigQuery connector (cmd/cloudburrow/sparkrunner.go).
+//
+// OUT and INOUT values of every type the page's table maps (ARRAY and
+// STRUCT among them, a list and a dict); "the built-in library supports
+// most of the BigQuery data types except INTERVAL, GEOGRAPHY, NUMERIC, and
+// BIGNUMERIC", so an argument of those types is refused when it is made.
 
 import (
 	"context"
@@ -72,6 +93,8 @@ type sparkDef struct {
 	Connection []string          `json:"connection"` // project, location, id
 	Options    map[string]any    `json:"options"`    // sparkOptions
 	Properties map[string]string `json:"properties,omitempty"`
+	// Invoker is EXTERNAL SECURITY INVOKER.
+	Invoker bool `json:"invoker,omitempty"`
 }
 
 const (
@@ -79,8 +102,17 @@ const (
 	sparkResourceType       = "bigquery.googleapis.com/SparkJob"
 )
 
-// sparkRuntimes are the served runtime versions: those whose Spark is 3.5.
-var sparkRuntimes = map[string]bool{"1.2": true, "2.2": true, "2.3": true}
+// sparkRuntimes are the runtime versions Managed Service for Apache Spark
+// supports (https://docs.cloud.google.com/managed-spark/docs/concepts/versions/serverless-versions,
+// re-read 2026-11-21), every one served.
+var sparkRuntimes = map[string]bool{"1.2": true, "2.2": true, "2.3": true, "3.0": true, "4.0": true}
+
+// sparkProcProperties are the fields of @@spark_proc_properties the page
+// sets before a CALL.
+var sparkProcProperties = map[string]bool{"service_account": true, "staging_bucket": true, "staging_dataset_id": true, "kms_key_name": true}
+
+// sparkUnsupportedTypes are the types the built-in library does not map.
+var sparkUnsupportedTypes = []string{"INTERVAL", "GEOGRAPHY", "NUMERIC", "BIGNUMERIC"}
 
 // sparkHeader is a Spark CREATE PROCEDURE, read.
 type sparkHeader struct {
@@ -334,21 +366,21 @@ func (s *scriptRun) createSparkProc(n scriptNode) *scriptFlow {
 	if len(bad) > 0 {
 		return fail("Invalid value: Invalid properties: Attempted to set unsupported properties: [" + strings.Join(bad, ", ") + "]")
 	}
-	switch rv := opt("runtime_version"); {
-	case h.invoker:
-		s.notImpl = "Not implemented here: EXTERNAL SECURITY INVOKER (a stored procedure for Apache Spark that runs as a custom " +
-			"service account). CloudBurrow runs Spark procedures as their connection's service account. Nothing more was run."
-		return &scriptFlow{}
-	case opt("container_image") != "":
-		s.notImpl = "Not implemented here: container_image (a custom container for a stored procedure for Apache Spark). " +
-			"CloudBurrow runs Spark procedures in its pinned Apache Spark 3.5 image. Nothing more was run."
-		return &scriptFlow{}
-	case rv != "" && !sparkRuntimes[sparkRuntimeMinor(rv)]:
-		if m := sparkRuntimeMinor(rv); m == "3.0" || m == "4.0" {
-			s.notImpl = "Not implemented here: runtime_version " + rv + " (Apache Spark 4). CloudBurrow runs stored procedures for " +
-				"Apache Spark on Spark 3.5: runtime versions 1.2, 2.2 and 2.3. Nothing more was run."
-			return &scriptFlow{}
+	if img := opt("container_image"); img != "" {
+		host, rest, _ := strings.Cut(img, "/")
+		if !strings.HasSuffix(host, "-docker.pkg.dev") || strings.Count(rest, "/") < 2 {
+			return fail("Invalid container_image " + img + ": it is the path of an image in Artifact Registry, " +
+				"LOCATION-docker.pkg.dev/PROJECT/REPOSITORY/IMAGE")
 		}
+	}
+	for _, a := range h.args {
+		if bad := sparkUnsupportedType(a.Type); bad != "" {
+			return fail("Argument " + a.Name + " has type " + a.Type + ": stored procedures for Apache Spark do not support the " + bad +
+				" type (the built-in library supports most of the BigQuery data types except INTERVAL, GEOGRAPHY, NUMERIC, and BIGNUMERIC)")
+		}
+	}
+	switch rv := opt("runtime_version"); {
+	case rv != "" && !sparkRuntimes[sparkRuntimeMinor(rv)]:
 		return fail("Invalid runtime_version " + rv + ": the supported runtime versions are 1.2, 2.2, 2.3, 3.0 and 4.0")
 	case s.f.spark == nil:
 		s.notImpl = "Not implemented here: stored procedures for Apache Spark need the CLI's Spark runner, which this BigQuery " +
@@ -392,7 +424,8 @@ func (s *scriptRun) createSparkProc(n scriptNode) *scriptFlow {
 		return failWith(http.StatusConflict, "duplicate", "Already Exists: Routine "+project+":"+p[0]+"."+p[1], text)
 	}
 	spark := map[string]any{"connection": "projects/" + h.connection[0] + "/locations/" + strings.ToLower(h.connection[1]) + "/connections/" + h.connection[2]}
-	for name, field := range map[string]string{"runtime_version": "runtimeVersion", "main_file_uri": "mainFileUri", "main_class": "mainClass"} {
+	for name, field := range map[string]string{"runtime_version": "runtimeVersion", "main_file_uri": "mainFileUri", "main_class": "mainClass",
+		"container_image": "containerImage"} {
 		if v := opt(name); v != "" {
 			spark[field] = v
 		}
@@ -413,6 +446,9 @@ func (s *scriptRun) createSparkProc(n scriptNode) *scriptFlow {
 	}
 	if h.hasCode {
 		routine["definitionBody"] = h.code
+	}
+	if h.invoker {
+		routine["securityMode"] = "INVOKER"
 	}
 	if old, ok := s.f.functions.proc(project, p); ok {
 		if c, ok := old.Routine["creationTime"]; ok {
@@ -439,7 +475,7 @@ func (s *scriptRun) createSparkProc(n scriptNode) *scriptFlow {
 		return s.assigned()
 	}
 	s.f.functions.setProc(project, p, storedProc{Routine: routine, Args: h.args,
-		Spark: &sparkDef{Language: lang, Code: h.code, Connection: h.connection, Options: spark, Properties: props}})
+		Spark: &sparkDef{Language: lang, Code: h.code, Connection: h.connection, Options: spark, Properties: props, Invoker: h.invoker}})
 	return s.assigned()
 }
 
@@ -495,7 +531,32 @@ func (s *scriptRun) callSpark(proc storedProc, path []string, project string, sc
 	}
 	sa := cn.sparkServiceAccount()
 	job := sparkproc.Job{Project: project, Location: strings.ToLower(cn.Location), Procedure: project + "." + path[0] + "." + path[1],
-		Language: def.Language, Code: def.Code, Properties: def.Properties, ServiceAccount: sa, Params: map[string]string{}}
+		Language: def.Language, Code: def.Code, Properties: def.Properties, ServiceAccount: sa, Params: map[string]string{},
+		Types: map[string]string{}}
+	job.RuntimeVersion, _ = def.Options["runtimeVersion"].(string)
+	job.RuntimeVersion = sparkRuntimeMinor(job.RuntimeVersion)
+	job.ContainerImage, _ = def.Options["containerImage"].(string)
+	if def.Invoker {
+		// The caller's privileges: the custom service account it set,
+		// else its own token when the instance minted it (an unminted
+		// caller is the instance's own account, as everywhere).
+		switch custom := s.sparkProps["service_account"]; {
+		case custom != "":
+			job.RunAs, job.ServiceAccount = custom, custom
+		case mintedCaller(s.r.Context()) != "":
+			job.ServiceAccount = mintedCaller(s.r.Context())
+			job.AccessToken = strings.TrimSpace(strings.TrimPrefix(s.r.Header.Get("Authorization"), "Bearer "))
+		default:
+			job.ServiceAccount = callerIdentity(project)
+		}
+	}
+	if d := s.sparkProps["staging_dataset_id"]; d != "" {
+		props := map[string]string{"spark.datasource.bigquery.materializationDataset": d}
+		for k, v := range job.Properties {
+			props[k] = v
+		}
+		job.Properties = props
+	}
 	read := func(uri string) (sparkproc.File, *scriptFlow) {
 		if s.f.storage == nil {
 			s.notImpl = "Not implemented here: a stored procedure for Apache Spark reads its files from the instance's Cloud Storage, " +
@@ -562,6 +623,9 @@ func (s *scriptRun) callSpark(proc storedProc, path []string, project string, sc
 		}
 		job.Params[a.Name] = unquoteLiteral(v.lit)
 	}
+	for _, a := range proc.Args {
+		job.Types[a.Name] = a.Type
+	}
 	// The CALL's child job, whose statistics are the Spark job's.
 	rec, flow := s.sendStatement("SELECT 1 AS spark_procedure")
 	if flow != nil {
@@ -627,21 +691,237 @@ func (s *scriptRun) callSpark(proc storedProc, path []string, project string, sc
 }
 
 // sparkOutValue is an OUT argument's JSON value as a value of typ:
-// "TIME and DATETIME values are returned in UTC".
+// "TIME and DATETIME values are returned in UTC" (the runner's library
+// writes them so).
 func (s *scriptRun) sparkOutValue(raw, typ string) (scriptVar, *scriptFlow) {
-	if strings.TrimSpace(raw) == "null" {
-		return scriptVar{typ, "CAST(NULL AS " + typ + ")"}, nil
-	}
-	upper := strings.ToUpper(strings.TrimSpace(typ))
-	expr := "JSON_VALUE(" + sqlString(raw) + ")"
-	switch {
-	case strings.HasPrefix(upper, "ARRAY") || strings.HasPrefix(upper, "STRUCT"):
-		s.notImpl = "Not implemented here: an OUT argument of type " + typ + " of a stored procedure for Apache Spark. Nothing more was run."
-		return scriptVar{}, &scriptFlow{}
-	case upper == "JSON":
-		expr = "PARSE_JSON(" + sqlString(raw) + ")"
+	expr, err := sparkOutExpr(raw, typ)
+	if err != nil {
+		return scriptVar{}, failWith(http.StatusBadRequest, "invalidQuery", "The OUT argument of type "+typ+
+			" of the stored procedure for Apache Spark cannot be read: "+err.Error(), "")
 	}
 	return s.evaluate(expr, typ)
+}
+
+// sparkOutExpr is the GoogleSQL expression of raw, a JSON value, as a
+// value of typ: an ARRAY a list, a STRUCT a dict (or a list, by field
+// position), BYTES base64, the times ISO 8601 strings.
+func sparkOutExpr(raw, typ string) (string, error) {
+	toks, ok := lex(typ)
+	if !ok {
+		return "", fmt.Errorf("the type %s cannot be read", typ)
+	}
+	t, _ := sqlTypeAt(toks, 0)
+	if t == nil {
+		return "", fmt.Errorf("the type %s cannot be read", typ)
+	}
+	dec := json.NewDecoder(strings.NewReader(raw))
+	dec.UseNumber()
+	var v any
+	if err := dec.Decode(&v); err != nil {
+		return "", err
+	}
+	return sparkValueExpr(v, t)
+}
+
+// sparkTypeText is a parsed type's GoogleSQL text.
+func sparkTypeText(t map[string]any) string {
+	kind, _ := t["typeKind"].(string)
+	switch kind {
+	case "ARRAY":
+		e, _ := t["arrayElementType"].(map[string]any)
+		return "ARRAY<" + sparkTypeText(e) + ">"
+	case "STRUCT":
+		var parts []string
+		for _, f := range sparkFields(t) {
+			ft, _ := f["type"].(map[string]any)
+			n, _ := f["name"].(string)
+			if n != "" {
+				n = "`" + n + "` "
+			}
+			parts = append(parts, n+sparkTypeText(ft))
+		}
+		return "STRUCT<" + strings.Join(parts, ", ") + ">"
+	case "RANGE":
+		e, _ := t["rangeElementType"].(map[string]any)
+		return "RANGE<" + sparkTypeText(e) + ">"
+	}
+	return kind
+}
+
+// sparkFields are a STRUCT type's fields.
+func sparkFields(t map[string]any) []map[string]any {
+	st, _ := t["structType"].(map[string]any)
+	switch fs := st["fields"].(type) {
+	case []map[string]any:
+		return fs
+	case []any:
+		var out []map[string]any
+		for _, x := range fs {
+			if f, ok := x.(map[string]any); ok {
+				out = append(out, f)
+			}
+		}
+		return out
+	}
+	return nil
+}
+
+// sparkValueExpr is v as an expression of type t.
+func sparkValueExpr(v any, t map[string]any) (string, error) {
+	text := sparkTypeText(t)
+	if v == nil {
+		return "CAST(NULL AS " + text + ")", nil
+	}
+	kind, _ := t["typeKind"].(string)
+	switch kind {
+	case "ARRAY":
+		list, ok := v.([]any)
+		if !ok {
+			return "", fmt.Errorf("an ARRAY value is a list, not %s", sparkJSONKind(v))
+		}
+		e, _ := t["arrayElementType"].(map[string]any)
+		parts := make([]string, 0, len(list))
+		for _, x := range list {
+			p, err := sparkValueExpr(x, e)
+			if err != nil {
+				return "", err
+			}
+			parts = append(parts, p)
+		}
+		return text + "[" + strings.Join(parts, ", ") + "]", nil
+	case "STRUCT":
+		fields := sparkFields(t)
+		parts := make([]string, 0, len(fields))
+		for i, f := range fields {
+			ft, _ := f["type"].(map[string]any)
+			n, _ := f["name"].(string)
+			var x any
+			switch val := v.(type) {
+			case map[string]any:
+				x = val[n]
+				if x == nil {
+					for k, y := range val {
+						if strings.EqualFold(k, n) {
+							x = y
+						}
+					}
+				}
+			case []any:
+				if i < len(val) {
+					x = val[i]
+				}
+			default:
+				return "", fmt.Errorf("a STRUCT value is a dict, not %s", sparkJSONKind(v))
+			}
+			p, err := sparkValueExpr(x, ft)
+			if err != nil {
+				return "", err
+			}
+			parts = append(parts, p)
+		}
+		return text + "(" + strings.Join(parts, ", ") + ")", nil
+	case "JSON":
+		b, err := json.Marshal(v)
+		if err != nil {
+			return "", err
+		}
+		return "PARSE_JSON(" + sqlString(string(b)) + ")", nil
+	case "BOOL":
+		b, ok := v.(bool)
+		if !ok {
+			return "", fmt.Errorf("a BOOL value is true or false, not %s", sparkJSONKind(v))
+		}
+		return strings.ToUpper(strconv.FormatBool(b)), nil
+	case "BYTES":
+		str, ok := v.(string)
+		if !ok {
+			return "", fmt.Errorf("a BYTES value is bytes, not %s", sparkJSONKind(v))
+		}
+		return "FROM_BASE64(" + sqlString(str) + ")", nil
+	case "STRING":
+		if str, ok := v.(string); ok {
+			return sqlString(str), nil
+		}
+	}
+	switch val := v.(type) {
+	case json.Number:
+		return "CAST(" + sqlString(val.String()) + " AS " + text + ")", nil
+	case string:
+		return "CAST(" + sqlString(val) + " AS " + text + ")", nil
+	case bool:
+		return "CAST(" + strings.ToUpper(strconv.FormatBool(val)) + " AS " + text + ")", nil
+	}
+	return "", fmt.Errorf("a %s value is not %s", text, sparkJSONKind(v))
+}
+
+// sparkJSONKind names a decoded JSON value's kind.
+func sparkJSONKind(v any) string {
+	switch v.(type) {
+	case []any:
+		return "a list"
+	case map[string]any:
+		return "a dict"
+	case string:
+		return "a string"
+	case json.Number:
+		return "a number"
+	case bool:
+		return "a bool"
+	}
+	return "null"
+}
+
+// sparkUnsupportedType is the first of the types the built-in library
+// does not map that typ is or holds, or "".
+func sparkUnsupportedType(typ string) string {
+	toks, ok := lex(typ)
+	if !ok {
+		return ""
+	}
+	for _, x := range toks {
+		if x.kind != tokWord {
+			continue
+		}
+		u := strings.ToUpper(x.text)
+		if alias, ok := typeAliases[u]; ok {
+			u = alias
+		}
+		for _, bad := range sparkUnsupportedTypes {
+			if u == bad {
+				return bad
+			}
+		}
+	}
+	return ""
+}
+
+// setSparkProcProperty carries out SET @@spark_proc_properties.<field> =
+// expr, which the page runs before a CALL.
+func (s *scriptRun) setSparkProcProperty(toks []token) *scriptFlow {
+	body := toks[1:]
+	stmt := s.text(toks)
+	if len(body) < 7 || !body[1].punct("@") || !body[2].is("spark_proc_properties") || !body[3].punct(".") || !body[5].punct("=") {
+		return &scriptFlow{failed: true, status: http.StatusBadRequest, msg: "Syntax error: SET @@spark_proc_properties.<field> = <value>", text: stmt}
+	}
+	field := strings.ToLower(body[4].text)
+	if !sparkProcProperties[field] {
+		return &scriptFlow{failed: true, status: http.StatusBadRequest, msg: "Invalid system variable @@spark_proc_properties." + body[4].text +
+			": it has the fields service_account, staging_bucket, staging_dataset_id and kms_key_name", text: stmt}
+	}
+	s.place(body[6:])
+	v, flow := s.evaluate(s.text(body[6:]), "STRING")
+	if flow != nil {
+		return flow
+	}
+	val := ""
+	if lit := strings.TrimSpace(v.lit); lit != "" && !strings.HasPrefix(strings.ToUpper(lit), "CAST(NULL") && !strings.EqualFold(lit, "NULL") {
+		val = unquoteLiteral(lit)
+	}
+	if s.sparkProps == nil {
+		s.sparkProps = map[string]string{}
+	}
+	s.sparkProps[field] = val
+	return s.assigned()
 }
 
 // loneSparkProc is sql's one statement when it is a CREATE PROCEDURE of a

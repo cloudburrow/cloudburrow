@@ -54,20 +54,35 @@ type LogEntry struct {
 	Time      time.Time
 }
 
+// Runtime is one runtime version's Spark: the official apache/spark
+// image of its Spark and Java, by digest, and Google's BigQuery connector
+// for that Spark.
+type Runtime struct {
+	Image string
+	// Connector returns the connector jar's path on the host, fetching
+	// it on the first use.
+	Connector func(ctx context.Context) (string, error)
+}
+
 // Docker runs jobs in the Spark image.
 type Docker struct {
-	// Image is the apache/spark image, by digest.
-	Image string
-	// Connector returns the BigQuery connector jar's path on the host,
-	// fetching it on the first use.
-	Connector func(ctx context.Context) (string, error)
+	// Runtimes are the served runtime versions (MAJOR.MINOR); Default
+	// the one a procedure with no runtime_version runs on.
+	Runtimes map[string]Runtime
+	Default  string
 	// BigQuery and Storage are the instance's BigQuery REST and Storage
-	// API addresses on the host (host:port), live at each run.
-	BigQuery, Storage func() string
+	// API addresses on the host (host:port), live at each run; Registry
+	// its Artifact Registry's (the Docker registry a container_image is
+	// read from), or nil.
+	BigQuery, Storage, Registry func() string
+	// Mint mints a token of the instance for a service account that
+	// exists, for a job's RunAs; nil refuses RunAs.
+	Mint func(email string) (string, error)
 	// Instance labels the containers and networks made.
 	Instance string
-	// Tmp holds each job's directory ("": the system's).
-	Tmp string
+	// Tmp holds each job's directory ("": the system's); Cache the Spark
+	// and Java trees a custom container is given ("": under Tmp).
+	Tmp, Cache string
 	// Log receives each line of output; Logf the runner's own notes.
 	Log  func(LogEntry)
 	Logf func(format string, args ...any)
@@ -75,6 +90,7 @@ type Docker struct {
 	once      sync.Once
 	desktop   bool
 	desktopOK error
+	treeMu    sync.Mutex
 }
 
 func (d *Docker) logf(format string, args ...any) {
@@ -85,18 +101,62 @@ func (d *Docker) logf(format string, args ...any) {
 
 var nameSafe = regexp.MustCompile(`[^a-z0-9-]+`)
 
+// runtime is the job's runtime: its runtime_version's MAJOR.MINOR, or
+// the default.
+func (d *Docker) runtime(job Job) (Runtime, string, bool) {
+	v := job.RuntimeVersion
+	if v == "" {
+		v = d.Default
+	}
+	if parts := strings.Split(v, "."); len(parts) > 2 {
+		v = parts[0] + "." + parts[1]
+	}
+	rt, ok := d.Runtimes[v]
+	return rt, v, ok && rt.Image != "" && rt.Connector != nil
+}
+
 // Run runs job to its end.
 func (d *Docker) Run(ctx context.Context, job Job) (Result, error) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		return Result{}, &Unavailable{Msg: "docker is not on PATH: stored procedures for Apache Spark run in a local Spark container"}
 	}
-	jar, err := d.Connector(ctx)
+	rt, version, ok := d.runtime(job)
+	if !ok {
+		return Result{}, &Unavailable{Msg: "the Spark runner serves no runtime version " + version}
+	}
+	jar, err := rt.Connector(ctx)
 	if err != nil {
 		return Result{}, &Unavailable{Msg: "the BigQuery connector for Spark is not available: " + err.Error()}
 	}
 	rest, storage := d.BigQuery(), d.Storage()
 	if rest == "" || storage == "" {
 		return Result{}, &Unavailable{Msg: "the instance's BigQuery REST and Storage API ports are not live"}
+	}
+	token := accessToken
+	switch {
+	case job.RunAs != "":
+		if d.Mint == nil {
+			return Result{}, &Unavailable{Msg: "the Spark runner cannot mint a token for " + job.RunAs}
+		}
+		tok, err := d.Mint(job.RunAs)
+		if err != nil {
+			return Result{Failed: true, Message: err.Error()}, nil
+		}
+		token = tok
+	case job.AccessToken != "":
+		token = job.AccessToken
+	}
+	var custom *customImage
+	if job.ContainerImage != "" {
+		ci, err := d.customImage(ctx, job.ContainerImage, rt.Image)
+		if err != nil {
+			var u *Unavailable
+			if errors.As(err, &u) {
+				return Result{}, err
+			}
+			return Result{Failed: true, Message: err.Error()}, nil
+		}
+		custom = ci
 	}
 	dir, err := os.MkdirTemp(d.Tmp, "cb-spark-")
 	if err != nil {
@@ -105,6 +165,9 @@ func (d *Docker) Run(ctx context.Context, job Job) (Result, error) {
 	defer os.RemoveAll(dir)
 	args, err := writeJob(dir, job)
 	if err != nil {
+		return Result{}, err
+	}
+	if err := writeToken(dir, token); err != nil {
 		return Result{}, err
 	}
 	if err := writeTLS(filepath.Join(dir, "tls")); err != nil {
@@ -146,7 +209,7 @@ func (d *Docker) Run(ctx context.Context, job Job) (Result, error) {
 	if !d.desktop {
 		relayArgs = append(relayArgs, "--add-host", "host.docker.internal:host-gateway")
 	}
-	relayArgs = append(relayArgs, d.Image, "/cb/relay.py", restTarget, storageTarget)
+	relayArgs = append(relayArgs, rt.Image, "/cb/relay.py", restTarget, storageTarget)
 	if out, err := d.docker(ctx, relayArgs...); err != nil {
 		return Result{}, &Unavailable{Msg: "start the Spark job's relay: " + out}
 	}
@@ -160,8 +223,31 @@ func (d *Docker) Run(ctx context.Context, job Job) (Result, error) {
 
 	run := []string{"run", "--name", spark, "--label", label, "--network", network,
 		"-v", dir + ":/cb", "-v", jar + ":/cb-connector/spark-bigquery.jar:ro",
-		"-e", "CB_SPARK_OUT=/cb/out/params.json", "-e", "PYTHONPATH=/cb/lib",
-		"-e", "PYSPARK_PYTHON=python3", "--entrypoint", "/bin/bash"}
+		"-e", "CB_SPARK_OUT=/cb/out/params.json", "-e", "CB_SPARK_TYPES=/cb/types.json"}
+	image, conf := rt.Image, map[string]string{}
+	pythonPath := "/cb/lib"
+	if custom != nil && custom.env["PYTHONPATH"] != "" {
+		pythonPath += ":" + custom.env["PYTHONPATH"] // the image's packages too
+	}
+	run = append(run, "-e", "PYTHONPATH="+pythonPath)
+	if custom != nil {
+		// As Google's runtime does: Spark at /usr/lib/spark and the
+		// runtime's Java mounted into the image, which holds neither, run
+		// as the spark user (UID and GID 1099); the image's own
+		// PYSPARK_PYTHON wins, and its SPARK_EXTRA_CLASSPATH is on the
+		// driver's and executors' class path.
+		image = custom.ref
+		run = append(run, "--user", "1099:1099", "-v", custom.spark+":/usr/lib/spark:ro", "-v", custom.java+":"+customJavaHome+":ro",
+			"-e", "JAVA_HOME="+customJavaHome, "-e", "SPARK_HOME=/usr/lib/spark", "-e", "SPARK_CONF_DIR=/etc/spark/conf", "-e", "HOME=/tmp")
+		if custom.env["PYSPARK_PYTHON"] == "" {
+			run = append(run, "-e", "PYSPARK_PYTHON=python3")
+		}
+		if cp := custom.env["SPARK_EXTRA_CLASSPATH"]; cp != "" {
+			conf["spark.driver.extraClassPath"], conf["spark.executor.extraClassPath"] = cp, cp
+		}
+	} else {
+		run = append(run, "-e", "PYSPARK_PYTHON=python3")
+	}
 	names := make([]string, 0, len(job.Params))
 	for name := range job.Params {
 		names = append(names, name)
@@ -170,9 +256,9 @@ func (d *Docker) Run(ctx context.Context, job Job) (Result, error) {
 	for _, name := range names {
 		run = append(run, "-e", "BIGQUERY_PROC_PARAM."+name+"="+job.Params[name])
 	}
-	run = append(run, d.Image, "/cb/run.sh")
-	run = append(run, submitArgs(job, args)...)
-	d.logf("spark: running %s (%s) in %s", job.Procedure, job.SparkJobID, d.Image)
+	run = append(run, "--entrypoint", "/bin/bash", image, "/cb/run.sh")
+	run = append(run, submitArgs(job, args, token, conf)...)
+	d.logf("spark: running %s (%s) on runtime %s in %s", job.Procedure, job.SparkJobID, version, image)
 	defer func() { _, _ = d.docker(context.Background(), "rm", "-f", "-v", spark) }()
 	cmd := exec.CommandContext(ctx, "docker", run...)
 	stdout, err := cmd.StdoutPipe()
@@ -306,7 +392,8 @@ var pyError = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.]*(Error|Exception|Exit|
 
 // failure is a failed application's error from its last lines: a Python
 // traceback's last line (for py4j's, the Java exception it carries, on
-// the line after), or else the last ERROR line.
+// the line after), or the JVM's uncaught exception, or else the last
+// ERROR line.
 func failure(lines []string) string {
 	for i := len(lines) - 1; i >= 0; i-- {
 		l := strings.TrimRight(lines[i], " \t")
@@ -319,6 +406,11 @@ func failure(lines []string) string {
 			}
 		}
 		return l
+	}
+	for i := len(lines) - 1; i >= 0; i-- {
+		if _, ex, ok := strings.Cut(lines[i], `Exception in thread "main" `); ok {
+			return strings.TrimSpace(ex)
+		}
 	}
 	for i := len(lines) - 1; i >= 0; i-- {
 		if l := strings.TrimSpace(lines[i]); strings.Contains(l, " ERROR ") {
@@ -359,6 +451,10 @@ func writeJob(dir string, job Job) (jobArgs, error) {
 		}
 	}
 	if err := os.MkdirAll(filepath.Join(dir, "out"), 0o777); err != nil {
+		return a, err
+	}
+	types, _ := json.Marshal(job.Types)
+	if _, err := put("types.json", types); err != nil {
 		return a, err
 	}
 	var err error
@@ -404,9 +500,11 @@ func safeBase(s string) string {
 	return s
 }
 
-// submitArgs are spark-submit's arguments for job.
-func submitArgs(job Job, a jobArgs) []string {
-	args := []string{"--master", "local[*]", "--name", job.SparkJobID,
+// submitArgs are spark-submit's arguments for job: the connector sends
+// token, and extra are Spark properties the procedure's own override.
+func submitArgs(job Job, a jobArgs, token string, extra map[string]string) []string {
+	// The token is in a properties file, never on a command line.
+	args := []string{"--master", "local[*]", "--name", job.SparkJobID, "--properties-file", "/cb/token/spark.conf",
 		"--driver-java-options", "-Djavax.net.ssl.trustStore=/tmp/cb-trust.jks -Djavax.net.ssl.trustStorePassword=changeit",
 		"--jars", strings.Join(append([]string{"/cb-connector/spark-bigquery.jar"}, a.jars...), ",")}
 	if len(a.pyFiles) > 0 {
@@ -421,10 +519,12 @@ func submitArgs(job Job, a jobArgs) []string {
 	conf := map[string]string{
 		"spark.datasource.bigquery.bigQueryHttpEndpoint":        "http://" + restHost + ":" + restPort,
 		"spark.datasource.bigquery.bigQueryStorageGrpcEndpoint": storageHost + ":" + storagePort,
-		"spark.datasource.bigquery.gcpAccessToken":              accessToken,
 		"spark.datasource.bigquery.parentProject":               job.Project,
 		"spark.datasource.bigquery.project":                     job.Project,
 		"spark.ui.enabled":                                      "false",
+	}
+	for k, v := range extra {
+		conf[k] = v
 	}
 	for k, v := range job.Properties {
 		conf[k] = v
@@ -445,6 +545,16 @@ func submitArgs(job Job, a jobArgs) []string {
 		}
 	}
 	return append(args, a.main)
+}
+
+// writeToken writes the connector's token as the application's
+// properties file (--properties-file), so it is never on a command line.
+func writeToken(dir, token string) error {
+	p := filepath.Join(dir, "token")
+	if err := os.MkdirAll(p, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(p, "spark.conf"), []byte("spark.datasource.bigquery.gcpAccessToken "+token+"\n"), 0o644)
 }
 
 // writeTLS writes a CA made for the run and the relay's certificate of

@@ -23,17 +23,49 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/sparkproc"
 )
 
-// The Spark runtime of BigQuery's stored procedures for Apache Spark
-// (#2104), pinned in dependencies.json (components.bigquerySpark): the
-// official apache/spark image of Spark 3.5, the Spark of the Managed
-// Service for Apache Spark runtimes 1.2, 2.2 (the default) and 2.3, and
-// Google's BigQuery connector for Spark 3.5 from Maven Central.
-const (
-	sparkImage           = "apache/spark@sha256:f3d6eaa8bab8ec2e38f3c3918a5b2f8b253c95bcb19f9e87ad0e0cdacf9df2d5"
-	sparkConnectorURL    = "https://repo1.maven.org/maven2/com/google/cloud/spark/spark-3.5-bigquery/0.46.2/spark-3.5-bigquery-0.46.2.jar"
-	sparkConnectorSHA256 = "817aafccd47b4756f7ae5bb51b509d5642140ead0fb3da06f1a20c24e9baa0ac"
-	sparkConnectorFile   = "spark-3.5-bigquery-0.46.2.jar"
+// sparkRuntime is one runtime version of BigQuery's stored procedures for
+// Apache Spark (#2104), pinned in dependencies.json
+// (components.bigqueryml.spark*): the official apache/spark image of the
+// Spark and Java of that Managed Service for Apache Spark runtime, and
+// Google's BigQuery connector for that Spark from Maven Central.
+type sparkRuntime struct {
+	image                       string
+	connectorURL, connectorSHA  string
+	connectorFile, sparkVersion string
+}
+
+// sparkRuntimes are the runtime versions, as Managed Service for Apache
+// Spark's runtime pages list their components (re-read 2026-11-21:
+// https://docs.cloud.google.com/managed-spark/docs/concepts/versions/spark-runtime-2.3
+// and its 1.2, 2.2, 3.0 and 4.0 pages): 1.2, 2.2 (the default) and 2.3 run
+// Spark 3.5 on Java 17; 3.0 Spark 4.0.1 on Java 21; 4.0 Spark 4.2.0 on
+// Java 25.
+var (
+	spark35Runtime = sparkRuntime{
+		image:         "apache/spark@sha256:f3d6eaa8bab8ec2e38f3c3918a5b2f8b253c95bcb19f9e87ad0e0cdacf9df2d5", // 3.5.9-scala2.12-java17-python3-ubuntu
+		connectorURL:  "https://repo1.maven.org/maven2/com/google/cloud/spark/spark-3.5-bigquery/0.46.2/spark-3.5-bigquery-0.46.2.jar",
+		connectorSHA:  "817aafccd47b4756f7ae5bb51b509d5642140ead0fb3da06f1a20c24e9baa0ac",
+		connectorFile: "spark-3.5-bigquery-0.46.2.jar", sparkVersion: "3.5",
+	}
+	spark40Runtime = sparkRuntime{
+		image:         "apache/spark@sha256:fb5c5e61e7bb1be94b7f3a31afe1f73c5b4d20b6008f4ffa7278fc085da08a9e", // 4.0.1-scala2.13-java21-python3-ubuntu
+		connectorURL:  "https://repo1.maven.org/maven2/com/google/cloud/spark/spark-4.0-bigquery/0.46.2/spark-4.0-bigquery-0.46.2.jar",
+		connectorSHA:  "b09c4455875d7811971796091371d4dda646029b349c35ef95f578f133607e0e",
+		connectorFile: "spark-4.0-bigquery-0.46.2.jar", sparkVersion: "4.0",
+	}
+	spark42Runtime = sparkRuntime{
+		image:         "apache/spark@sha256:0a8fa37711b6afe90a1bfe4427a6415b0f315f51f6957ca1bee77d255ebb9e86", // 4.2.0-scala2.13-java25-python3-ubuntu
+		connectorURL:  "https://repo1.maven.org/maven2/com/google/cloud/spark/spark-4.2-bigquery/0.46.2/spark-4.2-bigquery-0.46.2.jar",
+		connectorSHA:  "45778166a2ebdf1a0e2d758fc0970ff65673f026bc3cb9014dcc242fcba00977",
+		connectorFile: "spark-4.2-bigquery-0.46.2.jar", sparkVersion: "4.2",
+	}
+	sparkRuntimes = map[string]sparkRuntime{"1.2": spark35Runtime, "2.2": spark35Runtime, "2.3": spark35Runtime,
+		"3.0": spark40Runtime, "4.0": spark42Runtime}
 )
+
+// sparkDefaultRuntime is the runtime a procedure with no runtime_version
+// runs on: the default version.
+const sparkDefaultRuntime = "2.2"
 
 // sparkRunnerEnabled is whether `up` serves the Spark procedure runner:
 // with BigQuery enabled, whose front runs the procedures on it.
@@ -51,9 +83,11 @@ type sparkRunnerService struct {
 }
 
 // newSparkRunner is the runner, or nil when sparkRunnerEnabled is false.
-// live is the instance's bound addresses (BigQuery's, its Storage API's
-// and Cloud Logging's), read at each run.
-func newSparkRunner(cfg config.Config, out io.Writer, live func() map[string]string) *sparkRunnerService {
+// live is the instance's bound addresses (BigQuery's, its Storage API's,
+// Cloud Logging's and the Artifact Registry's, the Run port), read at each
+// run. mint mints the instance's token for a service account, for an
+// invoker's @@spark_proc_properties.service_account.
+func newSparkRunner(cfg config.Config, out io.Writer, live func() map[string]string, mint func(email string) (string, error)) *sparkRunnerService {
 	if !sparkRunnerEnabled(cfg) {
 		return nil
 	}
@@ -62,36 +96,44 @@ func newSparkRunner(cfg config.Config, out io.Writer, live func() map[string]str
 	addr := func(name string) func() string {
 		return func() string { return live()[name] }
 	}
-	d := &sparkproc.Docker{
-		Image:    sparkImage,
-		BigQuery: addr("bigquery"),
-		Storage:  addr("bigquery-storage"),
-		Instance: cfg.Name,
-		Logf:     func(format string, args ...any) { fmt.Fprintf(out, "cloudburrow: "+format+"\n", args...) },
-		Log:      sparkLogger(func() string { return live()["logging"] }),
-		Connector: func(ctx context.Context) (string, error) {
+	runtimes := map[string]sparkproc.Runtime{}
+	for v, rt := range sparkRuntimes {
+		rt := rt
+		runtimes[v] = sparkproc.Runtime{Image: rt.image, Connector: func(ctx context.Context) (string, error) {
 			mu.Lock()
 			defer mu.Unlock()
-			return fetchSparkConnector(ctx, cache, out)
-		},
+			return fetchSparkConnector(ctx, cache, rt, out)
+		}}
+	}
+	d := &sparkproc.Docker{
+		Runtimes: runtimes,
+		Default:  sparkDefaultRuntime,
+		BigQuery: addr("bigquery"),
+		Storage:  addr("bigquery-storage"),
+		Registry: addr("run"),
+		Mint:     mint,
+		Instance: cfg.Name,
+		Cache:    cache,
+		Logf:     func(format string, args ...any) { fmt.Fprintf(out, "cloudburrow: "+format+"\n", args...) },
+		Log:      sparkLogger(func() string { return live()["logging"] }),
 	}
 	return &sparkRunnerService{addr: net.JoinHostPort(cfg.BindAddress, strconv.Itoa(cfg.Endpoints.Spark)), h: sparkproc.NewServer(d)}
 }
 
-// fetchSparkConnector is the connector jar in dir, fetched from Maven
+// fetchSparkConnector is rt's connector jar in dir, fetched from Maven
 // Central and checked against its pin on the first use.
-func fetchSparkConnector(ctx context.Context, dir string, out io.Writer) (string, error) {
-	p := filepath.Join(dir, sparkConnectorFile)
+func fetchSparkConnector(ctx context.Context, dir string, rt sparkRuntime, out io.Writer) (string, error) {
+	p := filepath.Join(dir, rt.connectorFile)
 	if b, err := os.ReadFile(p); err == nil {
-		if sum := sha256.Sum256(b); hex.EncodeToString(sum[:]) == sparkConnectorSHA256 {
+		if sum := sha256.Sum256(b); hex.EncodeToString(sum[:]) == rt.connectorSHA {
 			return p, nil
 		}
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
-	fmt.Fprintf(out, "cloudburrow: fetching the BigQuery connector for Spark (%s)\n", sparkConnectorURL)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, sparkConnectorURL, nil)
+	fmt.Fprintf(out, "cloudburrow: fetching the BigQuery connector for Spark %s (%s)\n", rt.sparkVersion, rt.connectorURL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rt.connectorURL, nil)
 	if err != nil {
 		return "", err
 	}
@@ -101,14 +143,14 @@ func fetchSparkConnector(ctx context.Context, dir string, out io.Writer) (string
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("%s answered %s", sparkConnectorURL, resp.Status)
+		return "", fmt.Errorf("%s answered %s", rt.connectorURL, resp.Status)
 	}
 	b, err := io.ReadAll(io.LimitReader(resp.Body, 256<<20))
 	if err != nil {
 		return "", err
 	}
-	if sum := sha256.Sum256(b); hex.EncodeToString(sum[:]) != sparkConnectorSHA256 {
-		return "", fmt.Errorf("%s: SHA-256 %x, want the pinned %s", sparkConnectorURL, sum, sparkConnectorSHA256)
+	if sum := sha256.Sum256(b); hex.EncodeToString(sum[:]) != rt.connectorSHA {
+		return "", fmt.Errorf("%s: SHA-256 %x, want the pinned %s", rt.connectorURL, sum, rt.connectorSHA)
 	}
 	tmp := p + ".tmp"
 	if err := os.WriteFile(tmp, b, 0o644); err != nil {

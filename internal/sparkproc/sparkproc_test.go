@@ -16,7 +16,10 @@ type fakeEngine struct {
 	err error
 }
 
-func (f *fakeEngine) Run(_ context.Context, job Job) (Result, error) { f.got = job; return f.res, f.err }
+func (f *fakeEngine) Run(_ context.Context, job Job) (Result, error) {
+	f.got = job
+	return f.res, f.err
+}
 
 // TestClientServer: a job and its result cross the runner's HTTP API; a
 // runner that cannot run Spark answers an *Unavailable.
@@ -61,17 +64,26 @@ func TestWriteJobAndSubmitArgs(t *testing.T) {
 			t.Errorf("%s: %v", rel, err)
 		}
 	}
-	args := strings.Join(submitArgs(job, a), " ")
+	args := strings.Join(submitArgs(job, a, "secret-tok-123", map[string]string{"spark.cb.marker": "overridden", "spark.cb.extra": "x"}), " ")
 	for _, want := range []string{"--master local[*]", "--py-files /cb/py/0/h.py", "--conf spark.cb.marker=m1",
 		"bigQueryStorageGrpcEndpoint=bigquerystorage.cloudburrow.internal:8443", "bigQueryHttpEndpoint=http://host.docker.internal:8080",
-		"--jars /cb-connector/spark-bigquery.jar", "/cb/main/main.py"} {
+		"--jars /cb-connector/spark-bigquery.jar", "/cb/main/main.py", "--conf spark.cb.extra=x", "--properties-file /cb/token/spark.conf"} {
 		if !strings.Contains(args, want) {
 			t.Errorf("spark-submit %s: no %q", args, want)
 		}
 	}
+	if strings.Contains(args, "secret-tok-123") {
+		t.Errorf("spark-submit %s: the token is on the command line", args)
+	}
+	if err := writeToken(dir, "tok"); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "token", "spark.conf")); string(b) != "spark.datasource.bigquery.gcpAccessToken tok\n" {
+		t.Errorf("token file %q", b)
+	}
 	jar := Job{SparkJobID: "j", Language: "JAVA", MainClass: "com.example.Main", Jars: []File{{URI: "gs://b/app.jar", Data: []byte("j")}}}
 	a, _ = writeJob(t.TempDir(), jar)
-	if args := submitArgs(jar, a); args[len(args)-1] != "/cb/jars/0/app.jar" || !strings.Contains(strings.Join(args, " "), "--class com.example.Main") {
+	if args := submitArgs(jar, a, accessToken, nil); args[len(args)-1] != "/cb/jars/0/app.jar" || !strings.Contains(strings.Join(args, " "), "--class com.example.Main") {
 		t.Errorf("java: %v", args)
 	}
 	if err := writeTLS(filepath.Join(dir, "tls")); err != nil {
@@ -92,7 +104,36 @@ func TestFailure(t *testing.T) {
 	if got := failure(java); got != "com.example.BigQueryException: 404 Not Found" {
 		t.Errorf("py4j: %q", got)
 	}
+	jvm := []string{`Exception in thread "main" org.apache.hadoop.security.KerberosAuthException: failure to login`, "\tat x.y(Z.java:1)"}
+	if got := failure(jvm); got != "org.apache.hadoop.security.KerberosAuthException: failure to login" {
+		t.Errorf("jvm: %q", got)
+	}
 	if got := failure(nil); got == "" {
 		t.Error("no lines: empty")
+	}
+}
+
+// TestRuntimeAndRegistryPath: a job's runtime is its runtime_version's
+// MAJOR.MINOR or the default; container_image is an Artifact Registry
+// path.
+func TestRuntimeAndRegistryPath(t *testing.T) {
+	conn := func(context.Context) (string, error) { return "", nil }
+	d := &Docker{Default: "2.2", Runtimes: map[string]Runtime{"2.2": {Image: "a", Connector: conn}, "3.0": {Image: "b", Connector: conn}}}
+	for _, tc := range []struct{ v, want string }{{"", "a"}, {"3.0", "b"}, {"2.2.30", "a"}} {
+		rt, _, ok := d.runtime(Job{RuntimeVersion: tc.v})
+		if !ok || rt.Image != tc.want {
+			t.Errorf("runtime %q: %+v %v, want %s", tc.v, rt, ok, tc.want)
+		}
+	}
+	if _, _, ok := d.runtime(Job{RuntimeVersion: "9.9"}); ok {
+		t.Error("runtime 9.9 served")
+	}
+	if loc, rest, err := registryPath("us-docker.pkg.dev/p/r/img:1"); err != nil || loc != "us" || rest != "p/r/img:1" {
+		t.Errorf("registryPath: %q %q %v", loc, rest, err)
+	}
+	for _, bad := range []string{"docker.io/library/python:3", "us-docker.pkg.dev/p/img", "gcr.io/p/r/i"} {
+		if _, _, err := registryPath(bad); err == nil || !strings.Contains(err.Error(), "cannot fetch containers from other registries") {
+			t.Errorf("registryPath(%s): %v", bad, err)
+		}
 	}
 }

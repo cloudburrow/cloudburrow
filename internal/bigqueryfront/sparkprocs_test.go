@@ -110,3 +110,60 @@ func TestParseViewColumnOptions(t *testing.T) {
 		}
 	}
 }
+
+// TestSparkOutExpr (#2104): an OUT argument's JSON value, as the runner's
+// library writes it, is an expression of the argument's type: an ARRAY of
+// STRUCTs from a list of dicts (the page's example), BYTES from base64,
+// JSON parsed, NULL cast.
+func TestSparkOutExpr(t *testing.T) {
+	for _, tc := range []struct{ raw, typ, want string }{
+		{`[{"a": 2, "b": "dd"}, {"a": 3, "b": null}]`, "ARRAY<STRUCT<a INT64, b STRING>>",
+			"ARRAY<STRUCT<`a` INT64, `b` STRING>>[STRUCT<`a` INT64, `b` STRING>(CAST('2' AS INT64), 'dd'), STRUCT<`a` INT64, `b` STRING>(CAST('3' AS INT64), CAST(NULL AS STRING))]"},
+		{`{"x": [1.5], "y": {"z": true}}`, "STRUCT<x ARRAY<FLOAT64>, y STRUCT<z BOOL>>",
+			"STRUCT<`x` ARRAY<FLOAT64>, `y` STRUCT<`z` BOOL>>(ARRAY<FLOAT64>[CAST('1.5' AS FLOAT64)], STRUCT<`z` BOOL>(TRUE))"},
+		{`"aGk="`, "BYTES", "FROM_BASE64('aGk=')"},
+		{`{"k": [1]}`, "JSON", `PARSE_JSON('{"k":[1]}')`},
+		{`null`, "ARRAY<INT64>", "CAST(NULL AS ARRAY<INT64>)"},
+		{`"2026-11-21T10:00:00"`, "DATETIME", "CAST('2026-11-21T10:00:00' AS DATETIME)"},
+		{`[1, "x"]`, "STRUCT<INT64, STRING>", "STRUCT<INT64, STRING>(CAST('1' AS INT64), 'x')"},
+	} {
+		got, err := sparkOutExpr(tc.raw, tc.typ)
+		if err != nil || got != tc.want {
+			t.Errorf("%s as %s: %s, %v\nwant %s", tc.raw, tc.typ, got, err, tc.want)
+		}
+	}
+	if _, err := sparkOutExpr(`{"a": 1}`, "ARRAY<INT64>"); err == nil {
+		t.Error("a dict taken as an ARRAY")
+	}
+	for typ, want := range map[string]string{"NUMERIC": "NUMERIC", "ARRAY<STRUCT<g GEOGRAPHY>>": "GEOGRAPHY", "DECIMAL": "NUMERIC", "STRING": ""} {
+		if got := sparkUnsupportedType(typ); got != want {
+			t.Errorf("sparkUnsupportedType(%s) = %q, want %q", typ, got, want)
+		}
+	}
+}
+
+// TestOwnQueryResults (#2104): a minted caller's query's destination
+// table is that caller's to read, and no one else's.
+func TestOwnQueryResults(t *testing.T) {
+	s := &iamState{}
+	s.recordResults([]byte(`{"configuration":{"query":{"destinationTable":{"projectId":"p","datasetId":"_anon","tableId":"t1"}}}}`), "a@x.iam.gserviceaccount.com")
+	s.recordResults([]byte(`{"configuration":{"load":{}}}`), "a@x.iam.gserviceaccount.com")
+	ref := tableRef{ProjectID: "p", DatasetID: "_anon", TableID: "t1"}
+	if !s.ownsResults("a@x.iam.gserviceaccount.com", ref) {
+		t.Error("the creator may not read its results")
+	}
+	if s.ownsResults("b@x.iam.gserviceaccount.com", ref) || s.ownsResults("", ref) {
+		t.Error("another caller may read them")
+	}
+}
+
+// TestSetSparkProcProperties (#2104): SET @@spark_proc_properties.<field>
+// is read by the script, an unknown field refused.
+func TestSetSparkProcProperties(t *testing.T) {
+	sql := "SET @@spark_proc_properties.nope = 'x'"
+	s := &scriptRun{sql: sql, scopes: []map[string]scriptVar{{}}}
+	toks, _ := lex(sql)
+	if flow := s.set(toks); flow == nil || !flow.failed || !strings.Contains(flow.msg, "spark_proc_properties.nope") {
+		t.Errorf("unknown field: %+v", flow)
+	}
+}

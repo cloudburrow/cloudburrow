@@ -989,6 +989,7 @@
           "test/compat/artifactregistrygo_test.go:147 TestArtifactRegistryKfpRepository",
           "test/compat/artifactregistrygo_test.go:59 TestArtifactRegistryGoRepository",
           "test/compat/artifactregistryvirtualdocker_test.go:24 TestArtifactRegistryVirtualDockerRepository",
+          "test/compat/bigquerysparkprocs3_2104_test.go:210 TestBigQuerySparkProcedureContainerImage",
           "test/compat/gclouddeploysource_test.go:89 TestSourceDeployArtifactRegistryAndCloudBuild",
           "test/compat/orgpolicycustom1895_artifactregistry_test.go:22 TestOrgPolicyCustomConstraintsArtifactRegistry",
           "test/compat/terraform_batch11_run_test.go:37 TestTerraformArtifactRegistryProjectConfigAndRepositories",
@@ -11911,7 +11912,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigquerymethods_test.go:177 TestBigQueryDatasetUpdatesAreSaved",
-          "test/compat/bigqueryobjectprivileges_test.go:26 TestBigQueryObjectPrivilegesAndSchemataLinks"
+          "test/compat/bigqueryobjectprivileges_test.go:26 TestBigQueryObjectPrivilegesAndSchemataLinks",
+          "test/compat/bigquerysparkprocs3_2104_test.go:313 TestBigQuerySparkProcedureInvoker"
         ]
       },
       {
@@ -12222,6 +12224,9 @@
           "test/compat/bigqueryscriptpartition1512_test.go:29 TestBigQueryScriptCreateTableKeepsPartitioning",
           "test/compat/bigquerysilent_test.go:511 TestBigQueryExecuteImmediateInTurn",
           "test/compat/bigquerysparkprocs2104_test.go:125 TestBigQuerySparkStoredProcedures",
+          "test/compat/bigquerysparkprocs3_2104_test.go:210 TestBigQuerySparkProcedureContainerImage",
+          "test/compat/bigquerysparkprocs3_2104_test.go:313 TestBigQuerySparkProcedureInvoker",
+          "test/compat/bigquerysparkprocs3_2104_test.go:87 TestBigQuerySparkProcedureRuntimesAndTypes",
           "test/compat/bigquerystoragebytes_test.go:29 TestBigQueryPartitionsBytesAndWriteTimes",
           "test/compat/bigquerystoragephysical_test.go:30 TestBigQueryTableStoragePhysicalAndJobColumns",
           "test/compat/bigquerystreamdml_test.go:54 TestBigQueryDMLOfRecentlyStreamedRows",
@@ -12525,6 +12530,9 @@
           "test/compat/bigqueryscriptpartition1512_test.go:29 TestBigQueryScriptCreateTableKeepsPartitioning",
           "test/compat/bigquerysilent_test.go:511 TestBigQueryExecuteImmediateInTurn",
           "test/compat/bigquerysparkprocs2104_test.go:125 TestBigQuerySparkStoredProcedures",
+          "test/compat/bigquerysparkprocs3_2104_test.go:210 TestBigQuerySparkProcedureContainerImage",
+          "test/compat/bigquerysparkprocs3_2104_test.go:313 TestBigQuerySparkProcedureInvoker",
+          "test/compat/bigquerysparkprocs3_2104_test.go:87 TestBigQuerySparkProcedureRuntimesAndTypes",
           "test/compat/bigquerystoragebytes_test.go:29 TestBigQueryPartitionsBytesAndWriteTimes",
           "test/compat/bigquerystoragephysical_test.go:30 TestBigQueryTableStoragePhysicalAndJobColumns",
           "test/compat/bigquerystoragesplit_test.go:31 TestBigQueryStorageReadSplitAndRestart",
@@ -12680,6 +12688,9 @@
           "test/compat/bigqueryroutines_test.go:144 TestConsoleBigQueryRoutines",
           "test/compat/bigqueryroutines_test.go:29 TestBigQueryRoutinesListGetDelete",
           "test/compat/bigquerysparkprocs2104_test.go:125 TestBigQuerySparkStoredProcedures",
+          "test/compat/bigquerysparkprocs3_2104_test.go:210 TestBigQuerySparkProcedureContainerImage",
+          "test/compat/bigquerysparkprocs3_2104_test.go:313 TestBigQuerySparkProcedureInvoker",
+          "test/compat/bigquerysparkprocs3_2104_test.go:87 TestBigQuerySparkProcedureRuntimesAndTypes",
           "test/compat/bigquerytimes_test.go:22 TestBigQueryResourceTimesInMilliseconds",
           "test/compat/bigqueryundeleteroutines_test.go:43 TestBigQueryUndeleteKeepsRoutinesAndModels",
           "test/compat/bqsparkprocs2104_test.go:23 TestBqSparkStoredProcedure",

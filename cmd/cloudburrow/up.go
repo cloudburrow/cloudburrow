@@ -1284,7 +1284,21 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		coord.Register(tfConverter)
 	}
 	// The Spark procedure runner (#2104), for BigQuery's front.
-	sparkRunner := newSparkRunner(cfg, stdout, boundAddrs)
+	sparkRunner := newSparkRunner(cfg, stdout, boundAddrs, func(email string) (string, error) {
+		// An invoker's custom service account (#2104): one that exists
+		// and is enabled, as IAM Credentials mints for.
+		if projectRegistry != nil {
+			a, ok := projectRegistry.ServiceAccountByName(email)
+			switch {
+			case !ok:
+				return "", fmt.Errorf("Service account %s does not exist", email)
+			case a.Disabled:
+				return "", fmt.Errorf("Service account %s is disabled", email)
+			}
+			email = a.Email
+		}
+		return creds.MintAccessTokenFor(email, metadata.TokenTTL), nil
+	})
 	if sparkRunner != nil {
 		coord.Register(sparkRunner)
 	}

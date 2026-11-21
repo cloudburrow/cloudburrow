@@ -276,6 +276,7 @@ compat_shard() {
   # The localai shard's switches, unset for every other shard: verify-local.sh
   # runs the shards one after another in one shell.
   unset CLOUDBURROW_TEST_ONNX CLOUDBURROW_TEST_VISION_LABELS CLOUDBURROW_TEST_VISION_DETECT
+  unset CLOUDBURROW_TEST_SPARK
   # What every instance has, whatever its services: the ADC fixture
   # (#346), the instance's own kubeconfig and kind cluster (#346, never
   # the default kubeconfig), the admin API, the metadata server (#303),
@@ -472,6 +473,20 @@ compat_shard() {
       # and its pools' own IAM policies (#2065), and SCIM-provisioned users and
       # groups read through Cloud Storage (#2068), which need enforcement.
       COMPAT_RUN='^Test(IAMEnforcement|WorkloadIdentityFederationStorage$|WorkforceIdentityFederationStorage$|WorkforceIdentityFederationSAML$|WorkforcePoolIAMPolicy$|WorkforceScimProvisioning$)' ;;
+    spark)
+      # BigQuery's stored procedures for Apache Spark (#2104), nightly only
+      # (nightly-sql-ephemeral.yml's spark job), not one of ci.yml's
+      # COMPAT_SHARDS: spark-submit runs in the pinned apache/spark images
+      # (one per Spark of the runtime versions) with Google's BigQuery
+      # connector from Maven Central. Cloud Storage for the procedures'
+      # files, Cloud Logging for their output, Cloud Run for the Artifact
+      # Registry a container_image is read from, and Resource Manager and
+      # the metadata server for the invoker's minted tokens.
+      SERVICES=bigquery,storage,logging,run
+      TEST_VARS+=,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT,BIGQUERY_RESOURCEMANAGER,RESOURCEMANAGER,STORAGE,LOGGING,RUN,GCLOUD
+      export CLOUDBURROW_TEST_SPARK=1
+      COMPAT_RUN='^Test(BigQuerySpark|BqSpark)'
+      COMPAT_TIMEOUT=150m ;;
     localai)
       # The local AI tests (#1985): BigQuery and Cloud Storage for the AI
       # and ML functions' tables and object tables, Resource Manager (every

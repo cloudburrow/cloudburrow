@@ -118,8 +118,8 @@ except Exception:
 // loggingInfo) whose filter finds the driver's output in Cloud Logging;
 // a failing procedure fails its CALL. The documented refusals: no engine,
 // inline code with main_file_uri, a YARN property (the page's own error),
-// a connection that is not a Spark one; runtime 4.0 and container_image
-// are 501.
+// a connection that is not a Spark one, a runtime version Google does
+// not list, a container_image outside Artifact Registry.
 //
 // covers: bigquery.jobs.query, bigquery.jobs.insert, bigquery.jobs.get, bigquery.jobs.list, bigquery.routines.get, google.logging.v2.LoggingServiceV2/ListLogEntries
 func TestBigQuerySparkStoredProcedures(t *testing.T) {
@@ -301,8 +301,8 @@ ctx.label = helper.label(n) + ":" + spark.conf.get("spark.cb.marker")
 		{fmt.Sprintf("CREATE PROCEDURE `%s.x2`() WITH CONNECTION `%s` OPTIONS(engine=\"SPARK\", main_file_uri=\"gs://%s/spark/main.py\") LANGUAGE PYTHON AS r'print(1)'", ds, conn, b), "main_file_uri"},
 		{fmt.Sprintf("CREATE PROCEDURE `%s.x3`() WITH CONNECTION `%s` OPTIONS(engine=\"SPARK\", main_file_uri=\"gs://%s/spark/main.py\", "+
 			"properties=[(\"spark.executor.instances\", \"3\"), (\"spark.yarn.am.memory\", \"3g\")]) LANGUAGE PYTHON", ds, conn, b), "[spark:spark.yarn.am.memory]"},
-		{fmt.Sprintf("CREATE PROCEDURE `%s.x4`() WITH CONNECTION `%s` OPTIONS(engine=\"SPARK\", runtime_version=\"4.0\") LANGUAGE PYTHON AS r'print(1)'", ds, conn), "Not implemented"},
-		{fmt.Sprintf("CREATE PROCEDURE `%s.x5`() WITH CONNECTION `%s` OPTIONS(engine=\"SPARK\", container_image=\"us-docker.pkg.dev/p/r/i\") LANGUAGE PYTHON AS r'print(1)'", ds, conn), "Not implemented"},
+		{fmt.Sprintf("CREATE PROCEDURE `%s.x4`() WITH CONNECTION `%s` OPTIONS(engine=\"SPARK\", runtime_version=\"5.0\") LANGUAGE PYTHON AS r'print(1)'", ds, conn), "runtime_version"},
+		{fmt.Sprintf("CREATE PROCEDURE `%s.x5`() WITH CONNECTION `%s` OPTIONS(engine=\"SPARK\", container_image=\"gcr.io/p/i\") LANGUAGE PYTHON AS r'print(1)'", ds, conn), "Artifact Registry"},
 		{fmt.Sprintf("CREATE PROCEDURE `%s.x6`() WITH CONNECTION `%s` OPTIONS(engine=\"SPARK\", main_class=\"com.example.Main\") LANGUAGE PYTHON AS r'print(1)'", ds, conn), "main_class"},
 	} {
 		if err := mlRunIn(ctx, c, tc.sql); err == nil || !strings.Contains(err.Error(), tc.want) {

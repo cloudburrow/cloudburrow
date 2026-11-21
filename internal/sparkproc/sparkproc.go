@@ -63,9 +63,29 @@ type Job struct {
 	// and INOUT arguments' names, which a PySpark procedure sets.
 	Params map[string]string `json:"params,omitempty"`
 	Out    []string          `json:"out,omitempty"`
+	// Types are the arguments' GoogleSQL types, by name, which the
+	// procedure's SparkProcParamContext converts their values to Python's
+	// types by (BIGQUERY_PROC_PARAM's values are JSON).
+	Types map[string]string `json:"types,omitempty"`
 	// ServiceAccount is the identity the procedure runs as (the
-	// connection's), written in its log entries' labels.
+	// connection's, or the invoker's), written in its log entries' labels.
 	ServiceAccount string `json:"serviceAccount,omitempty"`
+	// RuntimeVersion is the procedure's runtime_version (MAJOR.MINOR, ""
+	// for the default), which picks the Spark image and connector.
+	RuntimeVersion string `json:"runtimeVersion,omitempty"`
+	// ContainerImage is the procedure's container_image, an Artifact
+	// Registry path ({location}-docker.pkg.dev/P/R/IMAGE[:TAG|@DIGEST])
+	// of the instance's own registry, or "".
+	ContainerImage string `json:"containerImage,omitempty"`
+	// AccessToken is the token the BigQuery connector sends: an
+	// EXTERNAL SECURITY INVOKER procedure's caller's, so the instance
+	// checks the job's reads and writes as the caller's ("" for the fixed
+	// token of the instance's own account). RunAs, when set, is the
+	// service account an invoker set with
+	// @@spark_proc_properties.service_account: the runner mints a token
+	// of the instance for it, and the job runs as that account.
+	AccessToken string `json:"accessToken,omitempty"`
+	RunAs       string `json:"runAs,omitempty"`
 }
 
 // File is one Cloud Storage object of a job, by its gs:// URI.
