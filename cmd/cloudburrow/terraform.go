@@ -406,6 +406,12 @@ func terraformProvider(cfg config.Config, override bool) (string, []config.Servi
 // environment (terraformRefusalEnv), which a provider of another version
 // ignores where it has no such argument, rather than failing on it.
 func terraformProviderBlock(cfg config.Config, name string, override bool, set []terraformURL) string {
+	return terraformProviderBlockAuth(cfg, name, override, set, terraformOwnerAuth)
+}
+
+// terraformProviderBlockAuth is terraformProviderBlock with auth as the
+// provider's credentials (terraformauth.go).
+func terraformProviderBlockAuth(cfg config.Config, name string, override bool, set []terraformURL, auth terraformAuth) string {
 	has := map[string]bool{}
 	for _, a := range unserved.TerraformEndpoints(name == "google-beta") {
 		has[a] = true
@@ -413,11 +419,19 @@ func terraformProviderBlock(cfg config.Config, name string, override bool, set [
 	var b strings.Builder
 	fmt.Fprintf(&b, "provider %q {\n", name)
 	fmt.Fprintf(&b, "  project      = %q\n", cfg.DefaultProject())
-	fmt.Fprintf(&b, "  access_token = %q\n", terraformAccessToken)
-	if override {
-		// An override merges into the module's own block, and the provider
-		// refuses credentials alongside access_token.
-		b.WriteString("  credentials  = null\n")
+	if auth.credentials != "" {
+		fmt.Fprintf(&b, "  credentials  = %q\n", auth.credentials)
+		if override {
+			// The provider refuses access_token alongside credentials.
+			b.WriteString("  access_token = null\n")
+		}
+	} else {
+		fmt.Fprintf(&b, "  access_token = %q\n", auth.accessToken)
+		if override {
+			// An override merges into the module's own block, and the provider
+			// refuses credentials alongside access_token.
+			b.WriteString("  credentials  = null\n")
+		}
 	}
 	for _, e := range set {
 		if name == "google" || has[e.attr] {
@@ -660,6 +674,12 @@ func moduleDeclaresProvider(dir, name string) bool {
 // written; google-beta only when the module uses it (#1975: before, a
 // google-beta resource got no endpoint at all and went to real Google).
 func terraformProviderFiles(cfg config.Config, dir string) (map[string]string, []config.Service) {
+	return terraformProviderFilesAuth(cfg, dir, terraformOwnerAuth)
+}
+
+// terraformProviderFilesAuth is terraformProviderFiles with auth as the
+// providers' credentials.
+func terraformProviderFilesAuth(cfg config.Config, dir string, auth terraformAuth) (map[string]string, []config.Service) {
 	set, skipped := terraformSettings(cfg)
 	providers := []string{"google"}
 	if moduleUsesGoogleBeta(dir) {
@@ -668,9 +688,9 @@ func terraformProviderFiles(cfg config.Config, dir string) (map[string]string, [
 	var plain, over strings.Builder
 	for _, p := range providers {
 		if moduleDeclaresProvider(dir, p) {
-			over.WriteString(terraformProviderBlock(cfg, p, true, set))
+			over.WriteString(terraformProviderBlockAuth(cfg, p, true, set, auth))
 		} else {
-			plain.WriteString(terraformProviderBlock(cfg, p, false, set))
+			plain.WriteString(terraformProviderBlockAuth(cfg, p, false, set, auth))
 		}
 	}
 	head := fmt.Sprintf("%s\n# Instance %q.\n", generatedMarker, cfg.Name)
@@ -738,11 +758,13 @@ func runTerraform(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	enforced := cfg.IAMEnforced()
 	if info, ok := running(cfg); ok {
 		// The services the instance serves, as `env` takes them (#652):
 		// `--name x` alone would otherwise give the default services, and
 		// an opt-in one such as BigQuery would get no endpoint (#1236).
 		cfg = withLivePorts(servedConfig(cfg, info, true), info.Endpoints)
+		enforced = info.IAMEnforcement == config.IAMEnforcementOn
 	}
 
 	dir := moduleDir(theirs)
@@ -750,7 +772,18 @@ func runTerraform(args []string, stdout, stderr io.Writer) error {
 		return fmt.Errorf("refusing to run %s %s: the module declares resources cloudburrow cannot point at this instance, "+
 			"which the provider would send to real Google:\n  %s", binary, subcommand(theirs), strings.Join(bad, "\n  "))
 	}
-	files, skipped := terraformProviderFiles(cfg, dir)
+	// Under --iam-enforcement the provider signs in as a principal this
+	// instance knows (terraformauth.go); otherwise as "owner".
+	auth := terraformOwnerAuth
+	if enforced && !offlineSubcommands[subcommand(theirs)] {
+		a, cleanup, err := terraformEnforcedAuth(cfg, dir, os.Getenv)
+		if err != nil {
+			return err
+		}
+		defer cleanup()
+		auth = a
+	}
+	files, skipped := terraformProviderFilesAuth(cfg, dir, auth)
 	for name := range files {
 		path := filepath.Join(dir, name)
 		if b, err := os.ReadFile(path); err == nil && !strings.HasPrefix(string(b), generatedMarker) {
