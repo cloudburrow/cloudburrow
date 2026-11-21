@@ -207,7 +207,8 @@ COMPAT_SQL_REPLICA_TESTS='^Test[A-Za-z]*SQL[A-Za-z0-9]*(HighAvailability|Replica
 # (TestDocumentAI*, TestSpeech*, #1930), served by the local AI
 # endpoint Cloud Run starts, and Workflows' (TestWorkflows*, #1986), whose
 # instance is the run shard's, and Dataform's (TestDataform*, #2105), whose
-# invocations run on its BigQuery; the BigQuery,
+# invocations run on its BigQuery, and App Hub's (TestAppHub*, #2110), served
+# only by the run shard's instance; the BigQuery,
 # Firestore, Datastore (#854) and Spanner screens and the Bigtable screen's
 # actions (#1198) only by the emulators shard's; the Memorystore screens
 # only by the memorystore shard's (#1568); and the Cloud SQL screens, MySQL
@@ -244,7 +245,7 @@ COMPAT_SQL_REPLICA_TESTS='^Test[A-Za-z]*SQL[A-Za-z0-9]*(HighAvailability|Replica
 COMPAT_BROWSER_SHARDS="storage served run emulators memorystore sql localai"
 COMPAT_BROWSER_SERVED_SHARD_TESTS='^Test(GKEServed|KubernetesEnginePages|VPCNetwork|ComputeEngine)'
 COMPAT_BROWSER_SERVED_ONLY_TESTS='^Test(GKEServed|VPCNetwork|ComputeEngine)'
-COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|LoggingAdmin|SecretManager|Eventarc|DocumentAI|Speech|Workflows|ModelRegistry|Dataform)'
+COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|LoggingAdmin|SecretManager|Eventarc|DocumentAI|Speech|Workflows|ModelRegistry|Dataform|AppHub)'
 COMPAT_BROWSER_EMULATORS_SHARD_TESTS='^Test(BigQuery|Firestore|Datastore|Bigtable|Spanner)'
 COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS='^TestMemorystore'
 COMPAT_BROWSER_SQL_SHARD_TESTS='^Test(CloudSQL|BackupDR|PrivateCAKMS)'
