@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/logging/apiv2/loggingpb"
+	"google.golang.org/grpc/status"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 )
@@ -37,9 +38,12 @@ const (
 //
 // Not modelled: suppression_info. CloudBurrow never rate-limits or drops a
 // tail, so there is nothing to report. Later requests on the stream are
-// read and ignored. The stream ends when the client cancels it or the
-// server stops; the client closing its send side does not end it, since
-// the tail has nothing more to receive but still has entries to send.
+// read and ignored. The stream ends when the client cancels it, its
+// deadline passes or the server stops, with CANCELLED or DEADLINE_EXCEEDED
+// as on Google, never OK: a client reading the stream at its deadline would
+// otherwise be told the tail had ended (io.EOF) when the server's deadline
+// fired first. The client closing its send side does not end it, since the
+// tail has nothing more to receive but still has entries to send.
 func (s *Server) TailLogEntries(stream loggingpb.LoggingServiceV2_TailLogEntriesServer) error {
 	req, err := stream.Recv()
 	if err != nil {
@@ -91,7 +95,6 @@ func (s *Server) tailSpec(req *loggingpb.TailLogEntriesRequest) ([]source, pred,
 
 // tail streams what sources hold and match passes, written from now on.
 func (s *Server) tail(stream loggingpb.LoggingServiceV2_TailLogEntriesServer, sources []source, match pred, window time.Duration) error {
-
 	ctx := stream.Context()
 	var mu sync.Mutex
 	var pending []*loggingpb.LogEntry
@@ -147,10 +150,11 @@ func (s *Server) tail(stream loggingpb.LoggingServiceV2_TailLogEntriesServer, so
 		sort.SliceStable(out, func(i, j int) bool { return cursorOf(out[i]).compare(cursorOf(out[j])) < 0 })
 		return stream.Send(&loggingpb.TailLogEntriesResponse{Entries: out})
 	}
+	ended := func() error { return status.FromContextError(ctx.Err()).Err() }
 	for {
 		select {
 		case <-ctx.Done():
-			return nil
+			return ended()
 		case err := <-broken:
 			return err
 		case <-wake:
@@ -162,7 +166,7 @@ func (s *Server) tail(stream loggingpb.LoggingServiceV2_TailLogEntriesServer, so
 			select {
 			case <-ctx.Done():
 				t.Stop()
-				return nil
+				return ended()
 			case <-t.C:
 			}
 		}

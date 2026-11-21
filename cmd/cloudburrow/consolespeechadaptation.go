@@ -582,7 +582,7 @@ func (s speechSvc) batchRecognize(ctx context.Context, recognizer, uri, output s
 		if err != nil {
 			return err
 		}
-		res, err = op.Wait(ctx)
+		res, err = waitBatchRecognize(ctx, op)
 		return err
 	})
 	if err != nil {
@@ -593,6 +593,33 @@ func (s speechSvc) batchRecognize(ctx context.Context, recognizer, uri, output s
 		return nil, fmt.Errorf("%s: %s", uri, e.GetMessage())
 	}
 	return fr, nil
+}
+
+// batchRecognizePoll is how often the page's batch transcription asks
+// for its operation.
+const batchRecognizePoll = 500 * time.Millisecond
+
+// waitBatchRecognize polls a BatchRecognize operation until it is done, at
+// batchRecognizePoll. The client library's Wait doubles its pause between
+// polls up to a minute, so the page, which waits on the answer, was shown a
+// finished transcription up to a minute late: an 11 s clip Recognize
+// answered in 22 s took 35-54 s through BatchRecognize on a laptop, 22.5 s
+// polled at this rate, and main CI 44941828292's
+// TestSpeechWorkspaceAndPlaybackThroughThePage ran out of time waiting.
+func waitBatchRecognize(ctx context.Context, op *speech.BatchRecognizeOperation) (*speechpb.BatchRecognizeResponse, error) {
+	t := time.NewTicker(batchRecognizePoll)
+	defer t.Stop()
+	for {
+		res, err := op.Poll(ctx)
+		if err != nil || op.Done() {
+			return res, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-t.C:
+		}
+	}
 }
 
 // batchResult is a batch transcription's file result as the pages show it.

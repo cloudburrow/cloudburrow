@@ -371,9 +371,25 @@ func open(t *testing.T) *tab {
 	return openAt(t, endpoint(t, envConsole))
 }
 
+// tabLimit is how long a tab lives: every action of a test shares it.
+const tabLimit = 3 * time.Minute
+
+// openWithin is open with a tab that lives for limit instead of tabLimit,
+// for a test whose waits on long-running work add up to more than it.
+func openWithin(t *testing.T, limit time.Duration) *tab {
+	t.Helper()
+	refuseCloudCredentials(t)
+	return openAtWithin(t, endpoint(t, envConsole), limit)
+}
+
 // openAt is open on the console at consoleAddr, a loopback host:port: a
 // console the test serves itself, in process (#1576).
 func openAt(t *testing.T, consoleAddr string) *tab {
+	t.Helper()
+	return openAtWithin(t, consoleAddr, tabLimit)
+}
+
+func openAtWithin(t *testing.T, consoleAddr string, limit time.Duration) *tab {
 	t.Helper()
 	refuseCloudCredentials(t)
 	p := &tab{t: t, origin: "http://" + consoleAddr}
@@ -421,7 +437,7 @@ func openAt(t *testing.T, consoleAddr string) *tab {
 	t.Cleanup(cancelAlloc)
 	ctx, cancelTab := chromedp.NewContext(allocCtx)
 	t.Cleanup(cancelTab)
-	ctx, cancelTimeout := context.WithTimeout(ctx, 3*time.Minute)
+	ctx, cancelTimeout := context.WithTimeout(ctx, limit)
 	t.Cleanup(cancelTimeout)
 	p.ctx = ctx
 
