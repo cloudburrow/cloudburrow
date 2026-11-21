@@ -17,6 +17,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/resource"
 	"github.com/cloudburrow/cloudburrow/internal/service/apikeys"
 	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
+	"github.com/cloudburrow/cloudburrow/internal/service/billing"
 	"github.com/cloudburrow/cloudburrow/internal/service/cloudquotas"
 	"github.com/cloudburrow/cloudburrow/internal/service/firebaserules"
 	"github.com/cloudburrow/cloudburrow/internal/service/logging"
@@ -568,6 +569,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// And the Cloud Quotas and Site Verification APIs (#2030).
 	var cloudQuotasRef *cloudquotas.Server
 	var siteVerificationRef *siteverification.Server
+	// And Cloud Billing and the Budget API (#2109).
+	var billingRef *billing.Server
 	var authPlatformRef *authplatform.Store
 	// And the Cloud Storage companion APIs (#1957).
 	var storageJobsRef *storageJobs
@@ -610,6 +613,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		apiKeys:          func() *apikeys.Server { return apiKeysRef },
 		cloudQuotas:      func() *cloudquotas.Server { return cloudQuotasRef },
 		siteVerify:       func() *siteverification.Server { return siteVerificationRef },
+		billing:          func() *billing.Server { return billingRef },
 		authPlatform:     func() *authplatform.Store { return authPlatformRef },
 		storageJobs:      func() *storageJobs { return storageJobsRef },
 		firebaseRules:    func() *firebaserules.Server { return firebaseRulesRef },
@@ -981,6 +985,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// same port, in the registry's store.
 	cloudQuotasRef, siteVerificationRef = serveCloudQuotas(rmSrv, projects, func() *serviceusage.Server { return serviceUsageRef }, requestQuotas,
 		creds.Email, func(bearer string) (string, bool) { return creds.TokenAccount(bearer, time.Now()) })
+	// Cloud Billing and the Budget API (#2109), on the same port.
+	billingRef = serveBilling(ctx, rmSrv, projects, func() *serviceusage.Server { return serviceUsageRef }, iamEnforcer,
+		func() *netfwd.Forwarder { return forwarderFor(forwarders, "pubsub") })
 	// Google Auth Platform's app and OAuth clients (#2030), whose
 	// authorization code flow the metadata server's token endpoint serves.
 	authPlatformRef = authplatform.NewStore(projects.Backing(), resource.ProjectNumber)
@@ -1208,6 +1215,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		apiKeys:          apiKeysSrv,
 		cloudQuotas:      cloudQuotasRef,
 		siteVerify:       siteVerificationRef,
+		billing:          billingRef,
 		authPlatform:     authPlatformRef,
 		requestMetrics:   requestMetrics,
 		requestHistory:   requestHistory,

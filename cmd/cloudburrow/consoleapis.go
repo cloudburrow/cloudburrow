@@ -35,6 +35,8 @@ var apiLibrary = map[string]apiLibraryInfo{
 	"apikeys.googleapis.com":              {"Security", "Manages the API keys of a project and their restrictions.", ""},
 	"cloudquotas.googleapis.com":          {"Management tools", "Lists the quotas of the APIs a project uses and adjusts them with quota preferences.", ""},
 	"siteverification.googleapis.com":     {"Developer tools", "Verifies that you own a website or a domain, and lists what you have verified.", ""},
+	"cloudbilling.googleapis.com":         {"Management tools", "Manages billing accounts, links projects to them and lists the services and SKUs of the pricing catalog.", ""},
+	"billingbudgets.googleapis.com":       {"Management tools", "Creates and manages budgets and their alert thresholds for a billing account.", ""},
 	"storage.googleapis.com":              {"Storage", "Stores and retrieves objects in buckets.", "storage"},
 	"pubsub.googleapis.com":               {"Big data", "Sends and receives messages between independent applications.", "pubsub"},
 	"cloudtasks.googleapis.com":           {"Developer tools", "Manages the execution of large numbers of distributed requests.", "tasks"},

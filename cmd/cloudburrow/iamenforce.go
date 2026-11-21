@@ -98,22 +98,23 @@ func (s registrySource) Ancestry(project string) []string {
 
 // HierarchyAncestry is a folder's, the organization's or a billing
 // account's ancestry (#1879): a folder, its parent folders and the
-// organization; the organization alone; a billing account and the
-// organization, as "the billing account inherits IAM permissions from its
-// parent organization" (https://docs.cloud.google.com/billing/docs/how-to/billing-access,
-// read 2026-11-20). Cloud Billing is not served, so nothing here keeps a
-// billing account's own policy, and every billing account is taken to be
-// the instance's organization's (UNVERIFIED for an account Google holds
-// under no organization, re-read 2026-11-20).
+// organization; the organization alone; a billing account as Cloud
+// Billing holds it (#2109): itself, a subaccount's parent account, and
+// the organization it belongs to, as "the billing account inherits IAM
+// permissions from its parent organization" (https://docs.cloud.google.com/billing/docs/how-to/billing-access,
+// read 2026-11-21). An account Cloud Billing does not hold has none.
 func (s registrySource) HierarchyAncestry(root string) []string {
 	reg := s.registry()
 	switch {
+	case strings.HasPrefix(root, "billingAccounts/"):
+		if b := billingAccounts.Load(); b != nil {
+			return b.Ancestry(root)
+		}
+		return nil
 	case reg == nil:
 		return nil
 	case root == resourcemanager.OrganizationName:
 		return []string{root}
-	case strings.HasPrefix(root, "billingAccounts/"):
-		return []string{root, resourcemanager.OrganizationName}
 	case !strings.HasPrefix(root, "folders/"):
 		return nil
 	}
@@ -133,6 +134,13 @@ func (s registrySource) HierarchyAncestry(root string) []string {
 }
 
 func (s registrySource) Policy(resource string) *iampolicy.Stored {
+	if strings.HasPrefix(resource, "billingAccounts/") && !strings.Contains(strings.TrimPrefix(resource, "billingAccounts/"), "/") {
+		// A billing account's own policy, as Cloud Billing keeps it.
+		if b := billingAccounts.Load(); b != nil {
+			return b.Policy(resource)
+		}
+		return nil
+	}
 	reg := s.registry()
 	if reg == nil {
 		return nil

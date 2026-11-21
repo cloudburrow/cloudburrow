@@ -13,6 +13,8 @@ import (
 	"time"
 
 	ahpb "cloud.google.com/go/bigquery/analyticshub/apiv1/analyticshubpb"
+	"cloud.google.com/go/billing/apiv1/billingpb"
+	"cloud.google.com/go/billing/budgets/apiv1/budgetspb"
 	"cloud.google.com/go/cloudquotas/apiv1/cloudquotaspb"
 	iamadminpb "cloud.google.com/go/iam/admin/apiv1/adminpb"
 	iamv2pb "cloud.google.com/go/iam/apiv2/iampb"
@@ -38,6 +40,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/modelgarden"
 	"github.com/cloudburrow/cloudburrow/internal/sched"
 	"github.com/cloudburrow/cloudburrow/internal/service/analyticshub"
+	"github.com/cloudburrow/cloudburrow/internal/service/billing"
 	"github.com/cloudburrow/cloudburrow/internal/service/cloudquotas"
 	"github.com/cloudburrow/cloudburrow/internal/service/datatransfer"
 	"github.com/cloudburrow/cloudburrow/internal/service/gke"
@@ -132,6 +135,10 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	iamv3pb.RegisterPrincipalAccessBoundaryPoliciesServer(srv, resourcemanager.NewPABServer(rmReg))
 	iamv3pb.RegisterPolicyBindingsServer(srv, resourcemanager.NewBindingsServer(rmReg))
 	orgpolicypb.RegisterOrgPolicyServer(srv, resourcemanager.NewOrgPolicyServer(rmReg))
+	bill := billing.NewServer(store.NewMemory(), nil, "organizations/1")
+	billingpb.RegisterCloudBillingServer(srv, bill)
+	billingpb.RegisterCloudCatalogServer(srv, &billing.Catalog{})
+	budgetspb.RegisterBudgetServiceServer(srv, bill.Budgets())
 	quotas := cloudquotas.NewServer(store.NewMemory(), nil, nil)
 	cloudquotaspb.RegisterCloudQuotasServer(srv, quotas)
 	cloudquotaspb.RegisterQuotaAdjusterSettingsManagerServer(srv, quotas.Adjuster())

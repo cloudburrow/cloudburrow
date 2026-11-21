@@ -113,6 +113,13 @@ var gcloudVerified = []gcloudEndpoint{
 	// TestGcloudQuotas drives info list and describe and preferences
 	// create, describe, list and update.
 	{resourceManagerService, "cloudquotas", "/", true, false},
+	// Cloud Billing (#2109): gcloud billing accounts and projects call
+	// cloudbilling v1 on the Resource Manager port. TestGcloudBilling
+	// drives accounts list, describe and get-iam-policy, and projects
+	// link, describe, list and unlink. gcloud billing budgets calls
+	// billingbudgets, which gcloud 593.0.0 has no override for
+	// (unserved.GcloudUnoverridable), so no configuration points it here.
+	{resourceManagerService, "cloudbilling", "/", true, false},
 	// Service Usage (#1352): gcloud services list, enable and disable call
 	// v1, which gcloud appends. TestGcloudServices drives them.
 	{serviceUsageService, "serviceusage", "/", true, false},

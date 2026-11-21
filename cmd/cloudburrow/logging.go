@@ -139,8 +139,16 @@ func (h loggingHierarchy) Exists(name string) error {
 	case strings.HasPrefix(name, "folders/"):
 		_, err := h.reg.Folder(name)
 		return err
+	case strings.HasPrefix(name, "billingAccounts/"):
+		// A billing account Cloud Billing holds (#2109).
+		b := billingAccounts.Load()
+		if b == nil {
+			return fmt.Errorf("%s: Cloud Billing is not served", name)
+		}
+		_, err := b.Account(name)
+		return err
 	}
-	return fmt.Errorf("%s is not a folder or the organization %s", name, resourcemanager.OrganizationName)
+	return fmt.Errorf("%s is not a folder, a billing account or the organization %s", name, resourcemanager.OrganizationName)
 }
 
 func (h loggingHierarchy) Ancestors(name string) ([]string, error) {

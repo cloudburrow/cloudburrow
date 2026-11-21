@@ -155,6 +155,8 @@ cloud.google.com/go/bigtable v1.47.0/go.mod h1:GUM6PdkG3rrDse9kugqvX5+ktwo3ldfLt
 cloud.google.com/go/bigtable v1.58.0 h1:fkf7bI0DBkKN85uRrfEEpkbufSc48b4PVIZCRud3xRk=
 cloud.google.com/go/bigtable v1.58.0/go.mod h1:fZ/QM3mBog9JYJ5KV1z2xqv2+vfHGvoazGJllGQClds=
 cloud.google.com/go/billing v1.26.0/go.mod h1:axqDO1uHegh7u5qngkTfqN1djAeLGsWAFAblERgmgEk=
+cloud.google.com/go/billing v1.28.1 h1:NYO8hmjuuB4KjGmf+0oQDvVY42WenHWPJbE41FMdVPw=
+cloud.google.com/go/billing v1.28.1/go.mod h1:R/wsa4kNdgNKudxRUIt3LwZsoJVMx/vIu/1+jJgZY3w=
 cloud.google.com/go/binaryauthorization v1.16.0/go.mod h1:E+iC5Avu4pdItdzGiSGHnh6TfQrl+KmPxDDg/T/VuHs=
 cloud.google.com/go/certificatemanager v1.15.0/go.mod h1:8dfGG2/TbUpCNqsCF/TIMOGV0OVvU6nhkZWTU4MmCXU=
 cloud.google.com/go/channel v1.27.0/go.mod h1:9ekufBLXuQ6j1oyqtDSIp29qWU5EwCi8WUi9qkLn3MA=

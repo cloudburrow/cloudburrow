@@ -141,6 +141,10 @@ var noPrimaryAgent = map[string]string{
 	// (read 2026-11-20, #2030).
 	"cloudquotas.googleapis.com":      "Cloud Quotas",
 	"siteverification.googleapis.com": "Site Verification",
+	// Cloud Billing and its Budget API have no project-level primary
+	// service agent (#2109).
+	"cloudbilling.googleapis.com":   "Cloud Billing",
+	"billingbudgets.googleapis.com": "Cloud Billing Budget",
 }
 
 // ServiceAgent is the email of svc's primary service agent in project, or

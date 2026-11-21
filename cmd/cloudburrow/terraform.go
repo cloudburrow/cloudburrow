@@ -244,7 +244,16 @@ var terraformEndpoints = []terraformEndpoint{
 	// reaches Google.
 	{resourceManagerEndpoint, "iam_custom_endpoint", "GOOGLE_IAM_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	{resourceManagerEndpoint, "iam_beta_custom_endpoint", "GOOGLE_IAM_BETA_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	// Cloud Billing and the Budget API (#2109), on the Resource Manager
+	// port: google_billing_project_info's base is core_billing's,
+	// google_billing_budget's billing's (billingbudgets.googleapis.com),
+	// google_project's billing read cloud_billing's.
+	// TestTerraformBillingProjectInfoAndBudget applies both, plans clean,
+	// updates the budget in place and destroys them.
 	{resourceManagerEndpoint, "cloud_billing_custom_endpoint", "GOOGLE_CLOUD_BILLING_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	{resourceManagerEndpoint, "core_billing_custom_endpoint", "GOOGLE_CORE_BILLING_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	{resourceManagerEndpoint, "billing_custom_endpoint", "GOOGLE_BILLING_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	{resourceManagerEndpoint, "billing_budgets_custom_endpoint", "GOOGLE_BILLING_BUDGETS_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	// google_cloud_quotas_quota_preference and the Site Verification
 	// resources (#2030), on the Resource Manager port.
 	// TestTerraformCloudQuotasPreference and TestTerraformSiteVerification

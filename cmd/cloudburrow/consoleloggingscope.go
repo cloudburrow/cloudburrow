@@ -9,11 +9,10 @@ package main
 // (#1360), and every read and change on the screen addresses it.
 //
 // The picker offers the toolbar's project, the organization and the folders
-// Resource Manager holds, and the billing accounts Logging holds anything
-// for: Cloud Billing is not served, so nothing else names one. Any other
-// billing account is reached by naming it in the address,
-// ?parent=billingAccounts/XXXXXX-XXXXXX-XXXXXX, and the picker then offers
-// it too.
+// Resource Manager holds, and the billing accounts Cloud Billing holds
+// (#2109) or Logging holds anything for. Another billing account is reached
+// by naming it in the address, ?parent=billingAccounts/XXXXXX-XXXXXX-XXXXXX,
+// and Logging answers NOT_FOUND for one Cloud Billing does not hold.
 
 import (
 	"context"
@@ -89,10 +88,24 @@ func (p loggingAdminScreen) bucketScope(ctx context.Context, project string) *co
 			}
 		}
 	}
-	if p.svc.api != nil {
-		for _, b := range p.svc.api.BillingAccounts() {
-			sc.Options = append(sc.Options, console.ScopeOption{ID: b, Label: "Billing account " + strings.TrimPrefix(b, "billingAccounts/")})
+	var accounts []string
+	if b := billingAccounts.Load(); b != nil {
+		if list, err := b.Accounts(); err == nil {
+			for _, a := range list {
+				accounts = append(accounts, a.GetName())
+			}
 		}
+	}
+	if p.svc.api != nil {
+		accounts = append(accounts, p.svc.api.BillingAccounts()...)
+	}
+	seen := map[string]bool{}
+	for _, b := range accounts {
+		if seen[b] {
+			continue
+		}
+		seen[b] = true
+		sc.Options = append(sc.Options, console.ScopeOption{ID: b, Label: "Billing account " + strings.TrimPrefix(b, "billingAccounts/")})
 	}
 	sc.Selected = sc.Default
 	if v, err := bucketParent(ctx, project); err == nil {
