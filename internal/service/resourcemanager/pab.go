@@ -32,14 +32,17 @@ package resourcemanager
 //     (metadata google.iam.v3.OperationMetadata), which operations.get
 //     reads back; validateOnly validates and stores nothing;
 //   - deleting a policy that is bound is FAILED_PRECONDITION unless force
-//     is set, which deletes its bindings too (UNVERIFIED: the reference
-//     says only that force deletes "even if the policy is referenced in
-//     policy bindings", re-read 2026-11-20);
+//     is set, which deletes its bindings too: "To delete the policy and all
+//     associated bindings, select the Forcefully delete policy checkbox"
+//     (https://docs.cloud.google.com/iam/docs/principal-access-boundary-policies-remove,
+//     re-read 2026-11-20);
 //   - an etag that is not the stored one is ABORTED, as it is for IAM v2.
 //
 // Access policies (policyKind ACCESS, target.resource) are not served: 501.
 // The wording of the INVALID_ARGUMENT, NOT_FOUND and FAILED_PRECONDITION
-// messages is UNVERIFIED: Google's pages do not quote them.
+// messages is UNVERIFIED: Google's pages do not quote them (re-read
+// 2026-11-20: the v3 reference, and the removal page, which says only that
+// the request "fails").
 
 import (
 	"context"

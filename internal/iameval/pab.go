@@ -25,15 +25,22 @@ package iameval
 // organization's; a workload pool's in the pool's and in its project's,
 // folders' and organization's; a service account in its project's, folders'
 // and organization's; a user of a Google Workspace domain (DomainCustomers)
-// in the domain's set (//iam.googleapis.com/locations/global/workspace/ID,
-// the ID taken to be the customer ID: UNVERIFIED, re-read 2026-11-20) and
-// the organization's.
+// in the domain's set and the organization's. The Workspace set is
+// "//iam.googleapis.com/locations/global/workspace/CUSTOMER_ID", the
+// Workspace's customer ID (directoryCustomerId), as the same page gives
+// its format (re-read 2026-11-20).
 //
-// Evaluation order, as "Policy types" gives it
-// (https://docs.cloud.google.com/iam/docs/policy-types, read 2026-11-20):
-// IAM checks PAB eligibility first, then deny policies, then allow
-// policies; it evaluates them all and compiles the result, so a block by
-// any of the first two refuses whatever the allow policies grant.
+// Evaluation order, as "Policy types" gives it under "Policy evaluation"
+// (https://docs.cloud.google.com/iam/docs/policy-types, re-read 2026-11-20;
+// the IAM docs have no separate "Policy evaluation" page, and "Principal
+// access boundary policies" states no order): "In reality, IAM evaluates
+// all policy types simultaneously, then compiles the results ... it can be
+// helpful to think of this policy evaluation taking place in the following
+// stages", "Stage 1: Principal Access Boundary policies", "Stage 2: Deny
+// policies and UAP deny rules", "Stage 3: Allow policies and UAP allow
+// rules". PAB comes before deny, not after it; as all are evaluated and
+// any refusal refuses, the order changes no decision, only how
+// Policy Troubleshooter presents it.
 //
 // The permissions each enforcement version can block are Google's "Permissions
 // that Principal Access Boundary policies can block"
@@ -219,8 +226,11 @@ type BoundaryResult struct {
 	// permission.
 	Blockable bool
 	// Resource is the rule resource that makes the checked resource
-	// eligible, "" for none.
+	// eligible, "" for none (or when the policy is not enforced).
 	Resource string
+	// Includes is, for each resource the policy's rules list, whether it
+	// is the checked resource or one of its ancestors, enforced or not.
+	Includes map[string]bool
 	// State is PABAllowed, PABNotAllowed or PABNotEnforced.
 	State string
 }
@@ -360,6 +370,12 @@ func (e *Evaluator) boundary(req Request) (bool, []BoundaryResult) {
 				}
 			}
 			r.Blockable = PABBlockable(req.Permission, b.Policy.GetDetails().GetEnforcementVersion())
+			r.Includes = map[string]bool{}
+			for _, rule := range b.Policy.GetDetails().GetRules() {
+				for _, res := range rule.GetResources() {
+					r.Includes[res] = anc[e.canonicalHierarchy(res)]
+				}
+			}
 			if r.Condition == denyCondFalse || !r.Blockable {
 				out = append(out, r)
 				continue
@@ -370,7 +386,7 @@ func (e *Evaluator) boundary(req Request) (bool, []BoundaryResult) {
 					continue
 				}
 				for _, res := range rule.GetResources() {
-					if r.Resource == "" && anc[e.canonicalHierarchy(res)] {
+					if r.Resource == "" && r.Includes[res] {
 						r.Resource = res
 					}
 				}

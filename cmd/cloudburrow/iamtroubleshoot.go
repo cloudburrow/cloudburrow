@@ -53,8 +53,9 @@ import (
 // https://docs.cloud.google.com/asset-inventory/docs/analyzing-iam-policy).
 
 const (
-	troubleshootPath = "/v3/iam:troubleshoot"
-	crmPrefix        = "//cloudresourcemanager.googleapis.com/"
+	troubleshootPath     = "/v3/iam:troubleshoot"
+	troubleshootBetaPath = "/v3beta/iam:troubleshoot"
+	crmPrefix            = "//cloudresourcemanager.googleapis.com/"
 )
 
 // troubleshootV1Paths are v1's and v2alpha1's iam:troubleshoot, one shape:
@@ -64,7 +65,7 @@ var troubleshootV1Paths = []string{"/v1/iam:troubleshoot", "/v2alpha1/iam:troubl
 
 // isIAMAnalysisPath is whether r is one of the two methods.
 func isIAMAnalysisPath(r *http.Request) bool {
-	return r.URL.Path == troubleshootPath || slices.Contains(troubleshootV1Paths, r.URL.Path) ||
+	return r.URL.Path == troubleshootPath || r.URL.Path == troubleshootBetaPath || slices.Contains(troubleshootV1Paths, r.URL.Path) ||
 		strings.HasSuffix(r.URL.Path, ":analyzeIamPolicy")
 }
 
@@ -74,7 +75,9 @@ type iamAnalysis struct{ e *iameval.Enforcer }
 func (a iamAnalysis) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.URL.Path == troubleshootPath && r.Method == http.MethodPost:
-		a.troubleshoot(w, r)
+		a.troubleshoot(w, r, false)
+	case r.URL.Path == troubleshootBetaPath && r.Method == http.MethodPost:
+		a.troubleshoot(w, r, true)
 	case slices.Contains(troubleshootV1Paths, r.URL.Path) && r.Method == http.MethodPost:
 		a.troubleshootV1(w, r)
 	case strings.HasPrefix(r.URL.Path, "/v1/") && strings.HasSuffix(r.URL.Path, ":analyzeIamPolicy") && r.Method == http.MethodGet:
@@ -119,7 +122,13 @@ func fullName(resource string) string {
 	return crmPrefix + resource
 }
 
-func (a iamAnalysis) troubleshoot(w http.ResponseWriter, r *http.Request) {
+// troubleshoot is v3's iam:troubleshoot and, with beta, v3beta's, which
+// adds pabPolicyExplanation (#2057): Google documents the principal access
+// boundary explanation in v3beta only ("To troubleshoot access based on
+// allow, deny, and principal access boundary policies, use the version
+// beta", https://docs.cloud.google.com/iam/docs/troubleshooting-access,
+// read 2026-11-20); v3's response has no such field.
+func (a iamAnalysis) troubleshoot(w http.ResponseWriter, r *http.Request, beta bool) {
 	var in pt.GoogleCloudPolicytroubleshooterIamV3TroubleshootIamPolicyRequest
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		apierror.WriteJSON(w, apierror.InvalidArgument("Invalid JSON payload received. %v", err))
@@ -186,7 +195,11 @@ func (a iamAnalysis) troubleshoot(w http.ResponseWriter, r *http.Request) {
 		}
 		out.AllowPolicyExplanation.ExplainedPolicies = append(out.AllowPolicyExplanation.ExplainedPolicies, ep)
 	}
-	writeIAMJSON(w, out)
+	if !beta {
+		writeIAMJSON(w, out)
+		return
+	}
+	writeIAMJSON(w, withPAB(out, ptPAB(d)))
 }
 
 // troubleshootV1 is v1's and v2alpha1's iam:troubleshoot: one access
@@ -617,7 +630,7 @@ func (p projectIAMProvider) analysisCall(ctx context.Context, project, call stri
 		}
 		b, _ := json.Marshal(pt.GoogleCloudPolicytroubleshooterIamV3TroubleshootIamPolicyRequest{AccessTuple: &pt.GoogleCloudPolicytroubleshooterIamV3AccessTuple{
 			Principal: in.Principal, FullResourceName: in.Resource, Permission: in.Permission}})
-		r = httptest.NewRequestWithContext(ctx, http.MethodPost, troubleshootPath, bytes.NewReader(b))
+		r = httptest.NewRequestWithContext(ctx, http.MethodPost, troubleshootBetaPath, bytes.NewReader(b))
 	default:
 		var in consoleAnalyze
 		if err := json.Unmarshal(body, &in); err != nil {

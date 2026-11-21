@@ -18784,17 +18784,22 @@ function iamEnforcementNote(into) {
 }
 
 // renderIAMTroubleshooter is Policy Troubleshooter (#1879): a principal, a
-// resource and a permission in; whether the principal has it, and each
-// allow policy's bindings with why each grants it or not.
+// resource and a permission in; whether the principal has it, each
+// principal access boundary policy bound to it (#2057, v3beta's
+// pabPolicyExplanation), whether a deny policy denies it, and each allow
+// policy's bindings with why each grants it or not.
 function renderIAMTroubleshooter(view) {
   const project = currentProject();
   const note = el("div", { id: "iam-enforcement-note" });
+  // ?principal=&resource=&permission= fill the form and check at once, so
+  // a check can be linked to.
+  const asked = new URLSearchParams(location.search);
   const fields = buildCreateForm({ label: "Troubleshoot access", fields: [
-    { name: "principal", label: "Principal email", required: true,
+    { name: "principal", label: "Principal email", required: true, default: asked.get("principal") || "",
       help: "The email of a user or service account, such as worker@my-project.iam.gserviceaccount.com." },
-    { name: "resource", label: "Resource", required: true, default: project ? `//cloudresourcemanager.googleapis.com/projects/${project}` : "",
+    { name: "resource", label: "Resource", required: true, default: asked.get("resource") || (project ? `//cloudresourcemanager.googleapis.com/projects/${project}` : ""),
       help: "A full resource name, such as //secretmanager.googleapis.com/projects/my-project/secrets/my-secret." },
-    { name: "permission", label: "Permission", required: true, help: "Such as secretmanager.versions.access." },
+    { name: "permission", label: "Permission", required: true, default: asked.get("permission") || "", help: "Such as secretmanager.versions.access." },
   ] });
   const error = el("p", { class: "form-error", role: "alert", hidden: true });
   const results = el("div", { id: "troubleshoot-result", "aria-live": "polite" });
@@ -18820,12 +18825,42 @@ function renderIAMTroubleshooter(view) {
             el("td", { text: b.allowAccessState === "ALLOW_ACCESS_STATE_GRANTED" ? "Grants access" : "Does not grant" })));
         }
       }
+      const denied = ((r.denyPolicyExplanation || {}).denyAccessState) === "DENY_ACCESS_STATE_DENIED";
+      const pab = r.pabPolicyExplanation || {};
+      const pabState = { PAB_ACCESS_STATE_ALLOWED: "Allows access", PAB_ACCESS_STATE_NOT_ALLOWED: "Blocks access", PAB_ACCESS_STATE_NOT_ENFORCED: "Not enforced" };
+      const pabRows = (pab.explainedBindingsAndPolicies || []).map((e) => {
+        const b = (e.explainedPolicyBinding || {}).policyBinding || {};
+        const p = e.explainedPolicy || {};
+        const c = (e.explainedPolicyBinding || {}).conditionExplanation;
+        const resources = (p.explainedRules || []).flatMap((x) => x.explainedResources || [])
+          .map((x) => `${x.resource} (${x.resourceInclusionState === "RESOURCE_INCLUSION_STATE_INCLUDED" ? "includes the resource" : "does not include it"})`);
+        return el("tr", {},
+          el("td", { class: "mono", text: (p.policy || {}).name || b.policy || "" }),
+          el("td", { class: "mono", text: b.name || "" }),
+          el("td", { class: "mono", text: (b.target || {}).principalSet || "" }),
+          el("td", { class: "mono", text: b.condition ? `${b.condition.expression} (${c && c.value === true ? "true" : c && c.value === false ? "false" : "not evaluable"})` : "" }),
+          el("td", { text: p.policyVersion ? `${p.policyVersion.version}${p.policyVersion.enforcementState === "PAB_POLICY_ENFORCEMENT_STATE_ENFORCED" ? "" : " (cannot block this permission)"}` : "" }),
+          el("td", { class: "mono", text: resources.join(", ") }),
+          el("td", { text: pabState[e.bindingAndPolicyAccessState] || e.bindingAndPolicyAccessState }));
+      });
+      const blocked = pab.principalAccessBoundaryAccessState === "PAB_ACCESS_STATE_NOT_ALLOWED";
+      const why = blocked ? "A principal access boundary policy blocks it." : denied ? "A deny policy denies it." : "";
       setChildren(results,
         el("h2", { id: "troubleshoot-verdict", text: granted ? "Access granted" : "Access not granted" }),
-        el("p", { class: "subtitle", text: `${fields.values().principal} ${granted ? "has" : "does not have"} ${fields.values().permission} on ${fields.values().resource}. No deny policy applies: deny policies are not stored locally.` }),
-        rows.length ? el("table", { class: "table", id: "troubleshoot-bindings" },
-          el("thead", {}, el("tr", {}, ...["Policy", "Role", "Role has permission", "Principal included", "Condition", "Result"].map((h) => el("th", { text: h })))),
-          el("tbody", {}, ...rows)) : el("p", { class: "unavailable", text: "No allow policy on the resource or its ancestors has a binding." }));
+        el("p", { class: "subtitle", text: `${fields.values().principal} ${granted ? "has" : "does not have"} ${fields.values().permission} on ${fields.values().resource}. ${why}`.trim() }),
+        el("h3", { text: "Principal access boundary policies" }),
+        el("p", { id: "troubleshoot-pab-state", text: pabRows.length ? `Principal access boundary: ${pabState[pab.principalAccessBoundaryAccessState] || pab.principalAccessBoundaryAccessState}.` : "The principal is not subject to any principal access boundary policy." }),
+        pabRows.length ? el("div", { class: "table-wrap", tabindex: "0", role: "region", "aria-label": "Principal access boundary policies" },
+          el("table", { class: "table", id: "troubleshoot-pab" },
+            el("thead", {}, el("tr", {}, ...["Policy", "Binding", "Principal set", "Condition", "Enforcement version", "Resources", "Result"].map((h) => el("th", { text: h })))),
+            el("tbody", {}, ...pabRows))) : null,
+        el("h3", { text: "Deny policies" }),
+        el("p", { id: "troubleshoot-deny-state", text: denied ? "A deny policy denies the permission." : "No deny policy denies the permission." }),
+        el("h3", { text: "Allow policies" }),
+        rows.length ? el("div", { class: "table-wrap", tabindex: "0", role: "region", "aria-label": "Allow policies" },
+          el("table", { class: "table", id: "troubleshoot-bindings" },
+            el("thead", {}, el("tr", {}, ...["Policy", "Role", "Role has permission", "Principal included", "Condition", "Result"].map((h) => el("th", { text: h })))),
+            el("tbody", {}, ...rows))) : el("p", { class: "unavailable", text: "No allow policy on the resource or its ancestors has a binding." }));
       announce(granted ? "Access granted" : "Access not granted");
     } catch (err) {
       setChildren(results);
@@ -18835,12 +18870,13 @@ function renderIAMTroubleshooter(view) {
     check.disabled = false;
   };
   setChildren(view, pageHeader("Policy Troubleshooter", ""), note,
-    el("p", { class: "subtitle", text: "Check whether a principal has a permission on a resource, and which allow policies decide it." }),
+    el("p", { class: "subtitle", text: "Check whether a principal has a permission on a resource, and which principal access boundary, deny and allow policies decide it." }),
     el("form", { class: "card", novalidate: true, onsubmit: submit }, error, ...fields.nodes, el("div", { class: "modal-actions" }, check)),
     results);
   iamEnforcementNote(note);
   announce("Policy Troubleshooter");
   fields.focusFirst();
+  if (asked.get("principal") && asked.get("resource") && asked.get("permission")) submit(new Event("submit"));
 }
 
 // renderIAMAnalyzer is Policy Analyzer (#1879): who has what in the
