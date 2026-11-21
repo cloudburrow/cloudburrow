@@ -164,10 +164,10 @@ func TestDocumentAIProcess(t *testing.T) {
 	}
 	all := ""
 	for i, c := range chunks {
-		if c.GetChunkId() != fmt.Sprintf("c%d", i+1) || len(c.GetSourceBlockIds()) == 0 || c.GetPageSpan().GetPageEnd() != 1 {
+		if c.GetChunkId() != fmt.Sprintf("c%d", i+1) || len(c.GetSourceBlockIds()) != 0 || c.GetPageSpan().GetPageEnd() != 1 {
 			t.Errorf("chunk %d: %v", i, c)
 		}
-		if n := len(strings.Fields(c.GetContent())); n > 20 && len(c.GetSourceBlockIds()) > 1 {
+		if n := len(strings.Fields(c.GetContent())); n > 20 {
 			t.Errorf("chunk %d has %d words over 20", i, n)
 		}
 		all += c.GetContent() + "\n\n"
@@ -178,7 +178,7 @@ func TestDocumentAIProcess(t *testing.T) {
 
 	for name, req := range map[string]*documentaipb.ProcessRequest{
 		"ocr_config on the layout parser": {Name: layout.GetName(), Source: raw, ProcessOptions: &documentaipb.ProcessOptions{OcrConfig: &documentaipb.OcrConfig{}}},
-		"html":                            {Name: layout.GetName(), Source: &documentaipb.ProcessRequest_RawDocument{RawDocument: &documentaipb.RawDocument{Content: []byte("<p>x"), MimeType: "text/html"}}},
+		"html on the OCR processor":       {Name: ocrP.GetName(), Source: &documentaipb.ProcessRequest_RawDocument{RawDocument: &documentaipb.RawDocument{Content: []byte("<p>x"), MimeType: "text/html"}}},
 		"no document":                     {Name: ocrP.GetName()},
 		"bad image":                       {Name: ocrP.GetName(), Source: &documentaipb.ProcessRequest_RawDocument{RawDocument: &documentaipb.RawDocument{Content: []byte("nope"), MimeType: "image/png"}}},
 		"other version":                   {Name: ocrP.GetName() + "/processorVersions/rc", Source: raw},
@@ -186,7 +186,7 @@ func TestDocumentAIProcess(t *testing.T) {
 		"page out of range": {Name: ocrP.GetName(), Source: raw, ProcessOptions: &documentaipb.ProcessOptions{PageRange: &documentaipb.ProcessOptions_IndividualPageSelector_{
 			IndividualPageSelector: &documentaipb.ProcessOptions_IndividualPageSelector{Pages: []int32{2}}}}},
 	} {
-		want := map[string]codes.Code{"html": codes.Unimplemented, "native pdf parsing": codes.Unimplemented, "other version": codes.NotFound}[name]
+		want := map[string]codes.Code{"native pdf parsing": codes.Unimplemented, "other version": codes.NotFound}[name]
 		if want == 0 {
 			want = codes.InvalidArgument
 		}

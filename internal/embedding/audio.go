@@ -407,7 +407,7 @@ func decodeWAVMP3(data []byte) (wav, error) {
 	if err != nil {
 		return wav{}, fmt.Errorf("its MP3 data: %v", err)
 	}
-	pcm, rate, err := decodeMP3PCM(data)
+	pcm, rate, err := decodeMP3PCM(data, MaxAudioSeconds)
 	if err != nil {
 		var long *tooLongError
 		if errors.As(err, &long) {

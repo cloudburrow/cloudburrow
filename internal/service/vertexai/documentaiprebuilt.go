@@ -2,6 +2,7 @@ package vertexai
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"image"
 	"math"
@@ -9,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"cloud.google.com/go/documentai/apiv1/documentaipb"
@@ -55,7 +57,7 @@ import (
 //
 // UNVERIFIED (re-read 2026-11-21: the pages document what is extracted, not
 // how well): the quality of every answer, which is a small local model's,
-// not Google's; the confidences (the model's own); the version IDs other
+// not Google's; the confidences (the Form Parser's the model's own, the extractors' their anchors' OCR confidence); the version IDs other
 // than the W2 Parser's; that a checkbox's fieldValue has no box (Tesseract
 // does not find checkboxes, only the model's reading of their text);
 // the US Driver License Parser's Portrait, which is not extracted; Google's
@@ -230,6 +232,27 @@ func segment(a *documentaipb.Document_TextAnchor) (int, int) {
 		return 0, 0
 	}
 	return int(segs[0].GetStartIndex()), int(segs[len(segs)-1].GetEndIndex())
+}
+
+// lineAround is the span of the line holding [st, en) with the lines
+// before and after it.
+func (d *docRunes) lineAround(st, en int) (int, int) {
+	from, to := st, en
+	for n := 0; from > 0; from-- {
+		if d.text[from-1] == '\n' {
+			if n++; n == 2 {
+				break
+			}
+		}
+	}
+	for n := 0; to < len(d.text); to++ {
+		if d.text[to] == '\n' {
+			if n++; n == 2 {
+				break
+			}
+		}
+	}
+	return from, to
 }
 
 // pageOf is the index of the page whose text holds offset at.
@@ -480,123 +503,248 @@ func numberEntities(ents []*documentaipb.Document_Entity) {
 
 // --- specialized extractors -----------------------------------------------
 
+// docAIGenParallel is how many pages the extractors read at once, each a
+// request to the local model.
+const docAIGenParallel = 4
+
+// prebuiltAnswer is what the model answers for one page: each top-level
+// field's value, and each repeated item's fields, by short name.
+type prebuiltAnswer struct {
+	values map[string]string
+	items  []prebuiltItem
+}
+
+type prebuiltItem struct {
+	typ    string
+	fields map[string]string
+}
+
+// extractPrebuilt is a specialized extractor (#1799): the document's pages
+// are read at once, docAIGenParallel at a time, each one request to the
+// local model, so a long document takes about as long as its slowest
+// pages. The model answers a compact JSON object keyed by field name, the
+// values alone: the time is the tokens it writes, and naming each value's
+// type and confidence tripled them (an Invoice Parser answer took over a
+// minute, BigQuery's ML.PROCESS_DOCUMENT allows 120 seconds). Each value's
+// confidence is the OCR confidence of the tokens it is anchored to, lower
+// when the anchor is not exact. A top-level field is the first page's
+// that answers it; repeated items keep page order.
 func (s *Server) extractPrebuilt(ctx context.Context, fields []prebuiltField, doc *documentaipb.Document) error {
 	d := newDocRunes(doc)
 	if strings.TrimSpace(doc.GetText()) == "" {
 		return nil
 	}
-	var top, parents, children []string
 	kinds := map[string]string{}
-	var b strings.Builder
-	b.WriteString("Extract the fields below from the document, as OCR read it. Answer each field's value exactly as it is written in the " +
-		"document, and your confidence from 0 to 1 that it is right. Leave out a field the document does not have. Answer each " +
-		"repeated item (such as each line item) as one item, with its own fields. Answer minified JSON on one line.\n\nFields:\n")
+	var top []string
+	var groups []string
+	str := map[string]any{"type": []string{"string", "null"}}
+	props := map[string]any{}
+	var required []string
 	for _, fl := range fields {
+		required = append(required, fl.name)
 		if fl.children == nil {
 			top = append(top, fl.name)
 			kinds[fl.name] = fl.kind
-			fmt.Fprintf(&b, "- %s\n", fl.name)
+			props[fl.name] = str
 			continue
 		}
-		parents = append(parents, fl.name)
+		child := map[string]any{}
 		var names []string
 		for _, c := range fl.children {
-			children = append(children, c.name)
+			short := strings.TrimPrefix(c.name, fl.name+"/")
 			kinds[c.name] = c.kind
-			names = append(names, c.name)
+			child[short] = str
+			names = append(names, short)
 		}
-		fmt.Fprintf(&b, "- items of type %s, each with the fields %s\n", fl.name, strings.Join(names, ", "))
+		props[fl.name] = map[string]any{"type": "array", "maxItems": formMaxItems,
+			"items": map[string]any{"type": "object", "properties": child, "additionalProperties": false}}
+		groups = append(groups, fmt.Sprintf("%s (a list: one object for each, with %s)", fl.name, strings.Join(names, ", ")))
 	}
-	b.WriteString("\nDocument:\n" + cutText(doc.GetText(), docAIGenChars) + "\n\nAnswer:\n")
-	str := map[string]any{"type": "string"}
-	obj := func(props map[string]any, req ...string) map[string]any {
-		return map[string]any{"type": "object", "properties": props, "required": req, "additionalProperties": false}
+	// Every field is required and may be null: the model then weighs each
+	// one in turn (left optional, it stopped after a few).
+	sort.Strings(required)
+	schema := map[string]any{"type": "object", "properties": props, "required": required, "additionalProperties": false}
+	head := "Extract fields from the document below, as OCR read it. Answer minified JSON on one line: an object with every field below, " +
+		"each the value copied exactly as the document writes it (with any currency symbol), or null where the document does not state it; " +
+		"never guess.\n\nFields: " + strings.Join(top, ", ")
+	if len(groups) > 0 {
+		head += "\nRepeated items: " + strings.Join(groups, "; ")
 	}
-	// The bounds keep greedy decoding from repeating an item until its
-	// token limit: a top-level field once, at most formMaxItems items.
-	props := map[string]any{"entities": map[string]any{"type": "array", "maxItems": len(top), "items": obj(map[string]any{"type": map[string]any{"enum": top},
-		"value": str, "confidence": confSchema()}, "type", "value", "confidence")}}
-	req := []string{"entities"}
-	if len(parents) > 0 {
-		child := obj(map[string]any{"type": map[string]any{"enum": children}, "value": str, "confidence": confSchema()}, "type", "value", "confidence")
-		most := 0
-		for _, fl := range fields {
-			most = max(most, len(fl.children))
+
+	// The pages' texts: each page alone, or the whole text when the
+	// Document has no pages.
+	type piece struct{ from, to int }
+	var pieces []piece
+	for _, sp := range d.spans {
+		if strings.TrimSpace(string(d.text[sp[0]:sp[1]])) != "" {
+			pieces = append(pieces, piece{sp[0], sp[1]})
 		}
-		props["items"] = map[string]any{"type": "array", "maxItems": formMaxItems, "items": obj(map[string]any{"type": map[string]any{"enum": parents},
-			"fields": map[string]any{"type": "array", "items": child, "maxItems": most}}, "type", "fields")}
-		req = append(req, "items")
 	}
-	type val struct {
-		Type       string  `json:"type"`
-		Value      string  `json:"value"`
-		Confidence float64 `json:"confidence"`
+	if len(pieces) == 0 {
+		pieces = []piece{{0, len(d.text)}}
 	}
-	var got struct {
-		Entities []val `json:"entities"`
-		Items    []struct {
-			Type   string `json:"type"`
-			Fields []val  `json:"fields"`
-		} `json:"items"`
+	answers := make([]prebuiltAnswer, len(pieces))
+	errs := make([]error, len(pieces))
+	sem := make(chan struct{}, docAIGenParallel)
+	var wg sync.WaitGroup
+	for i, pc := range pieces {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				errs[i] = ctx.Err()
+				return
+			}
+			defer func() { <-sem }()
+			prompt := head + "\n\nDocument:\n" + cutText(string(d.text[pc.from:pc.to]), docAIGenChars) + "\n\nAnswer:\n"
+			var raw map[string]json.RawMessage
+			if err := s.genJSON(ctx, prompt, schema, &raw); err != nil {
+				errs[i] = err
+				return
+			}
+			answers[i] = decodePrebuilt(raw, fields)
+		}()
 	}
-	if err := s.genJSON(ctx, b.String(), obj(props, req...), &got); err != nil {
-		return err
+	wg.Wait()
+	for _, err := range errs {
+		if err != nil {
+			return err
+		}
 	}
-	seen := map[string]bool{}
-	make1 := func(v val, from int) *documentaipb.Document_Entity {
-		st, en, ok := d.find(v.Value, from, len(d.text))
-		if !ok && from > 0 {
-			st, en, ok = d.find(v.Value, 0, len(d.text))
+
+	// make1 anchors value between from and to, else anywhere unless
+	// strict.
+	make1 := func(typ, value string, from, to int, strict bool) *documentaipb.Document_Entity {
+		if strings.TrimSpace(value) == "" {
+			return nil
+		}
+		st, en, ok := d.find(value, from, to)
+		if !ok && !strict && (from > 0 || to < len(d.text)) {
+			st, en, ok = d.find(value, 0, len(d.text))
 		}
 		if !ok {
 			return nil
 		}
-		e := d.entity(v.Type, st, en, v.Confidence)
-		normalizeEntity(e, kinds[v.Type])
+		if kinds[typ] == "money" && st > 0 && strings.ContainsRune("$€£¥₹", d.text[st-1]) {
+			st-- // the amount's currency symbol
+			value = string(d.text[st:en])
+		}
+		conf := 0.9
+		if pg := d.pageOf(st); pg >= 0 {
+			if _, c, ok := d.box(pg, st, en); ok {
+				conf = c
+			}
+		}
+		if string(d.text[st:en]) != strings.TrimSpace(value) {
+			conf *= 0.9 // anchored ignoring case or spacing
+		}
+		e := d.entity(typ, st, en, conf)
+		normalizeEntity(e, kinds[typ])
 		return e
 	}
-	for _, v := range got.Entities {
-		if seen[v.Type] || strings.TrimSpace(v.Value) == "" {
-			continue
-		}
-		if e := make1(v, 0); e != nil {
-			seen[v.Type] = true
-			doc.Entities = append(doc.Entities, e)
+	seen := map[string]bool{}
+	for i, a := range answers {
+		for _, name := range top {
+			if seen[name] {
+				continue
+			}
+			if e := make1(name, a.values[name], pieces[i].from, pieces[i].to, false); e != nil {
+				seen[name] = true
+				doc.Entities = append(doc.Entities, e)
+			}
 		}
 	}
-	cur := 0
-	for _, it := range got.Items {
-		var props []*documentaipb.Document_Entity
-		st, en := len(d.text), 0
-		conf := 0.0
-		for _, v := range it.Fields {
-			if !strings.HasPrefix(v.Type, it.Type+"/") || strings.TrimSpace(v.Value) == "" {
+	for i, a := range answers {
+		cur := pieces[i].from
+		for _, it := range a.items {
+			var props []*documentaipb.Document_Entity
+			st, en := len(d.text), 0
+			conf := 0.0
+			// The item's longest value is anchored first, after the item
+			// before; its other values only on the lines around it, so a
+			// short value ("1") is not anchored elsewhere in the page.
+			var children []prebuiltField
+			for _, fl := range fields {
+				if fl.name == it.typ {
+					children = append(children, fl.children...)
+				}
+			}
+			short := func(c prebuiltField) string { return it.fields[strings.TrimPrefix(c.name, it.typ+"/")] }
+			sort.SliceStable(children, func(i, j int) bool { return len(short(children[i])) > len(short(children[j])) })
+			from, to := cur, pieces[i].to
+			for k, c := range children {
+				e := make1(c.name, short(c), from, to, k > 0)
+				if e == nil {
+					if k == 0 {
+						break
+					}
+					continue
+				}
+				es, ee := segment(e.GetTextAnchor())
+				if k == 0 {
+					from, to = d.lineAround(es, ee)
+				}
+				st, en = min(st, es), max(en, ee)
+				conf += float64(e.GetConfidence())
+				props = append(props, e)
+			}
+			if len(props) == 0 {
 				continue
 			}
-			e := make1(v, cur)
-			if e == nil {
-				continue
-			}
-			es, ee := segment(e.GetTextAnchor())
-			st, en = min(st, es), max(en, ee)
-			conf += float64(e.GetConfidence())
-			props = append(props, e)
+			sort.SliceStable(props, func(i, j int) bool {
+				a, _ := segment(props[i].GetTextAnchor())
+				b, _ := segment(props[j].GetTextAnchor())
+				return a < b
+			})
+			cur = en
+			parent := d.entity(it.typ, st, en, conf/float64(len(props)))
+			parent.Properties = props
+			doc.Entities = append(doc.Entities, parent)
 		}
-		if len(props) == 0 {
-			continue
-		}
-		sort.SliceStable(props, func(i, j int) bool {
-			a, _ := segment(props[i].GetTextAnchor())
-			b, _ := segment(props[j].GetTextAnchor())
-			return a < b
-		})
-		cur = en
-		parent := d.entity(it.Type, st, en, conf/float64(len(props)))
-		parent.Properties = props
-		doc.Entities = append(doc.Entities, parent)
 	}
 	numberEntities(doc.Entities)
 	return nil
+}
+
+// decodePrebuilt reads the model's answer object: a string for each
+// top-level field, a list of objects of strings for each repeated one.
+// A value of another JSON type is read as its text.
+func decodePrebuilt(raw map[string]json.RawMessage, fields []prebuiltField) prebuiltAnswer {
+	text := func(m json.RawMessage) string {
+		var s string
+		if json.Unmarshal(m, &s) == nil {
+			return s
+		}
+		if string(m) == "null" {
+			return ""
+		}
+		return string(m)
+	}
+	a := prebuiltAnswer{values: map[string]string{}}
+	for _, fl := range fields {
+		m, ok := raw[fl.name]
+		if !ok {
+			continue
+		}
+		if fl.children == nil {
+			a.values[fl.name] = text(m)
+			continue
+		}
+		var items []map[string]json.RawMessage
+		if json.Unmarshal(m, &items) != nil {
+			continue
+		}
+		for _, it := range items {
+			pi := prebuiltItem{typ: fl.name, fields: map[string]string{}}
+			for k, v := range it {
+				pi.fields[k] = text(v)
+			}
+			a.items = append(a.items, pi)
+		}
+	}
+	return a
 }
 
 var amountRE = regexp.MustCompile(`-?\d[\d,. ]*`)

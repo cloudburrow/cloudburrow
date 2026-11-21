@@ -162,8 +162,11 @@ func visionObjectTable(t *testing.T, h *Harness, extra ...map[string][]byte) (*b
 	for name, data := range objects {
 		w := bh.Object(name).NewWriter(ctx)
 		w.ContentType = "image/png"
-		if strings.HasSuffix(name, ".pdf") {
+		switch {
+		case strings.HasSuffix(name, ".pdf"):
 			w.ContentType = "application/pdf"
+		case strings.HasSuffix(name, ".docx"):
+			w.ContentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 		}
 		if _, err := w.Write(data); err != nil {
 			t.Fatal(err)
@@ -569,7 +572,7 @@ func TestBigQueryMLTranscribe(t *testing.T) {
 	for cfg, want := range map[string]string{
 		"": "requires recognition_config",
 		`, recognition_config => (JSON '{"language_codes": ["en-US"], "model": "long", "auto_decoding_config": {}}')`:                                                               "chirp",
-		`, recognition_config => (JSON '{"language_codes": ["en-US"], "model": "chirp", "auto_decoding_config": {}, "features": {"diarization_config": {}}}')`:                      "Not implemented here",
+		`, recognition_config => (JSON '{"language_codes": ["en-US"], "model": "chirp", "auto_decoding_config": {}, "features": {"diarization_config": {}}}')`:                      "does not support feature: speaker_diarization",
 		`, recognition_config => (JSON '{"language_codes": ["en-US"], "model": "chirp", "auto_decoding_config": {}, "transcript_normalization": {"entries": [{"replace": "x"}]}}')`: "search is empty",
 	} {
 		if err := run(fmt.Sprintf("SELECT * FROM ML.TRANSCRIBE(MODEL `%s.speech`, TABLE `%s.audio`%s)", ds, ds, cfg)); err == nil || !strings.Contains(err.Error(), want) {

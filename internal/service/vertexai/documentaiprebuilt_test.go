@@ -115,23 +115,27 @@ func TestDocumentAIFormParser(t *testing.T) {
 
 // TestDocumentAISpecializedExtractor (#1799): an Invoice Parser's answer:
 // top-level fields anchored and normalized (a date, an amount), a line
-// item with its properties, values not in the text dropped; the version's
+// item with its properties (one anchored ignoring case, so less
+// confident), values not in the text dropped; the version's
 // schema names the documented types.
 func TestDocumentAISpecializedExtractor(t *testing.T) {
 	ctx := context.Background()
 	d := newDocAI(t, t.TempDir()+"/processors.json")
 	gen := &docGen{answer: func(p, schema string) string {
-		return `{"entities":[{"type":"invoice_id","value":"INV-42","confidence":0.9},{"type":"invoice_date","value":"2026-03-14","confidence":0.9},` +
-			`{"type":"total_amount","value":"$1,234.50","confidence":0.8},{"type":"supplier_name","value":"Not There Inc","confidence":0.7}],` +
-			`"items":[{"type":"line_item","fields":[{"type":"line_item/description","value":"Widgets","confidence":0.9},` +
-			`{"type":"line_item/amount","value":"$1,234.50","confidence":0.9}]}]}`
+		if !strings.Contains(schema, `"line_item":{"items":{"additionalProperties":false,"properties":{"amount":{"type":["string","null"]}`) ||
+			!strings.Contains(schema, `"required":["amount_paid_since_last_invoice",`) || !strings.Contains(schema, `"x-guidance":{"whitespace_flexible":false}`) {
+			t.Errorf("schema: %s", schema)
+		}
+		return `{"carrier":null,"invoice_date":"2026-03-14","invoice_id":"INV-42","line_item":[{"amount":"1,234.50","description":"widgets","unit":null}],` +
+			`"supplier_name":"Not There Inc","total_amount":"$1,234.50"}`
 	}}
 	d.s.gen = gen
 	doc := wordDoc("Invoice INV-42\nDate 2026-03-14\nWidgets $1,234.50\nTotal $1,234.50\n")
 	if err := d.s.applyPrebuilt(ctx, "INVOICE_PROCESSOR", doc); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(gen.prompts[0], "line_item/unit_price") || !strings.Contains(gen.prompts[0], "invoice_id") {
+	if !strings.Contains(gen.prompts[0], "line_item (a list: one object for each, with amount, description") || !strings.Contains(gen.prompts[0], "invoice_id") ||
+		len(gen.prompts) != 1 {
 		t.Errorf("prompt: %q", gen.prompts[0])
 	}
 	byType := map[string]*documentaipb.Document_Entity{}
@@ -148,7 +152,8 @@ func TestDocumentAISpecializedExtractor(t *testing.T) {
 		t.Errorf("money: %v", m)
 	}
 	li := byType["line_item"]
-	if len(li.GetProperties()) != 2 || li.GetMentionText() != "Widgets $1,234.50" || li.GetProperties()[0].GetType() != "line_item/description" {
+	if len(li.GetProperties()) != 2 || li.GetMentionText() != "Widgets $1,234.50" || li.GetProperties()[0].GetType() != "line_item/description" ||
+		li.GetProperties()[0].GetConfidence() >= byType["invoice_id"].GetConfidence() {
 		t.Errorf("line item: %v", li)
 	}
 	sc := prebuiltSchema("INVOICE_PROCESSOR")

@@ -48,7 +48,11 @@ import (
 //     AMR encoding too; AMR at 16000 Hz is INVALID_ARGUMENT.
 //   - denoiserConfig.denoiseAudio (RNNoise in WebAssembly): JFK's sample
 //     with seeded white noise added, denoised first, reads the sentence;
-//     a non-zero snrThreshold and diarizationConfig stay UNIMPLEMENTED.
+//     snrThreshold (#1799) silences the half-second windows whose
+//     signal-to-noise ratio is below it: at 1 the sentence is still read,
+//     at 1000 none of it is. diarizationConfig is INVALID_ARGUMENT on
+//     chirp_2 (no diarization in the supported languages table) and stays
+//     UNIMPLEMENTED on chirp_3.
 //
 // Speech-to-Text v1's Recognize (cloud.google.com/go/speech/apiv1) takes
 // enable_spoken_punctuation, enable_spoken_emojis and profanity_filter too.
@@ -226,16 +230,30 @@ func TestSpeechRecognitionFeatures1799(t *testing.T) {
 		t.Errorf("denoised: %q", text)
 	}
 
-	// Still not served.
-	for name, cfg := range map[string]*speechv2pb.RecognitionConfig{
-		"diarization": {Model: "chirp_3", LanguageCodes: []string{"en-US"}, DecodingConfig: auto,
-			Features: &speechv2pb.RecognitionFeatures{DiarizationConfig: &speechv2pb.SpeakerDiarizationConfig{}}},
-		"denoiser": {Model: "chirp_2", LanguageCodes: []string{"en-US"}, DecodingConfig: auto,
-			DenoiserConfig: &speechv2pb.DenoiserConfig{DenoiseAudio: true, SnrThreshold: 20}},
-	} {
+	// snrThreshold: a low one keeps the speech, the documented top one
+	// silences it all.
+	for _, snr := range []float32{1, 1000} {
+		res, err = g.Recognize(ctx, &speechv2pb.RecognizeRequest{Recognizer: recognizer("us-central1"), AudioSource: &speechv2pb.RecognizeRequest_Content{Content: noisyJFK(t)},
+			Config: &speechv2pb.RecognitionConfig{Model: "chirp_2", LanguageCodes: []string{"en-US"}, DecodingConfig: auto,
+				DenoiserConfig: &speechv2pb.DenoiserConfig{DenoiseAudio: true, SnrThreshold: snr}}})
+		if err != nil {
+			t.Errorf("Recognize with snrThreshold %v: %v", snr, err)
+			continue
+		}
+		text := strings.ToLower(transcript(res))
+		t.Logf("snrThreshold %v (recorded): %q", snr, text)
+		if heard := strings.Contains(text, "your country"); heard != (snr == 1) {
+			t.Errorf("snrThreshold %v: %q", snr, text)
+		}
+	}
+
+	// Diarization: not a feature of chirp_2; chirp_3's not served.
+	for model, want := range map[string]codes.Code{"chirp_2": codes.InvalidArgument, "chirp_3": codes.Unimplemented} {
+		cfg := &speechv2pb.RecognitionConfig{Model: model, LanguageCodes: []string{"en-US"}, DecodingConfig: auto,
+			Features: &speechv2pb.RecognitionFeatures{DiarizationConfig: &speechv2pb.SpeakerDiarizationConfig{}}}
 		if _, err := g.Recognize(ctx, &speechv2pb.RecognizeRequest{Recognizer: recognizer("us-central1"), Config: cfg,
-			AudioSource: &speechv2pb.RecognizeRequest_Content{Content: spoken}}); status.Code(err) != codes.Unimplemented {
-			t.Errorf("%s: %v, want Unimplemented", name, err)
+			AudioSource: &speechv2pb.RecognizeRequest_Content{Content: spoken}}); status.Code(err) != want {
+			t.Errorf("diarization on %s: %v, want %v", model, err, want)
 		}
 	}
 }

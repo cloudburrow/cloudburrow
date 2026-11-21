@@ -73,7 +73,7 @@ func DecodeMax(d speechconfig.Decoding, data []byte, maxSeconds int) ([]float32,
 		}
 	}
 	switch format {
-	case "WAV", "LINEAR16", "MULAW", "ALAW", "FLAC", "OGG_OPUS", "WEBM_OPUS", "AMR", "AMR_WB":
+	case "WAV", "LINEAR16", "MULAW", "ALAW", "FLAC", "OGG_OPUS", "WEBM_OPUS", "AMR", "AMR_WB", "MP3", "MP4_AAC", "M4A_AAC", "MOV_AAC":
 		// MultiChannelMode's default: "If the audio contains multiple
 		// channels, only the first channel will be transcribed; other
 		// channels will be ignored" (the v2 reference, read 2026-11-20).
@@ -86,43 +86,16 @@ func DecodeMax(d speechconfig.Decoding, data []byte, maxSeconds int) ([]float32,
 		}
 		return chans[0], nil
 	}
-	var (
-		mono []float32
-		err  error
-	)
-	switch format {
-	case "MP3":
-		mono, err = embedding.DecodeAudio("audio/mpeg", data)
-	case "MP4_AAC", "M4A_AAC", "MOV_AAC":
-		mt := "video/mp4"
-		if format == "MOV_AAC" {
-			mt = "video/quicktime"
-		}
-		mono, err = embedding.DecodeVideoAudio(mt, data, embedding.VideoOptions{})
-		if err == nil && mono == nil {
-			err = errors.New("the file has no audio track")
-		}
-	default:
-		return nil, unsupported(format)
-	}
-	if embedding.IsTooLong(err) {
-		return nil, fmt.Errorf("%w: %s audio longer than %d seconds: CloudBurrow's MP3 and AAC decoders stop there "+
-			"(WAV and headerless audio are read up to %d minutes)", ErrUnsupported, format, embedding.MaxAudioSeconds, maxSeconds/60)
-	}
-	if err != nil {
-		return nil, err
-	}
-	if len(mono) > maxSeconds*SampleRate {
-		return nil, ErrTooLong
-	}
-	return mono, nil
+	return nil, unsupported(format)
 }
 
 // DecodeChannelsMax decodes audio as DecodeMax does but keeps each channel
 // apart, for SEPARATE_RECOGNITION_PER_CHANNEL (#1799): each channel's
-// samples at SampleRate. WAV, headerless LINEAR16, MULAW and ALAW, FLAC
-// and Opus in Ogg or WebM are read per channel; MP3 and AAC, whose
-// decoders here mix to mono, are ErrUnsupported.
+// samples at SampleRate. WAV, headerless LINEAR16, MULAW and ALAW, FLAC,
+// Opus in Ogg or WebM, MP3, and AAC (or any other audio track) in MP4, M4A
+// or MOV are read per channel, up to maxSeconds (#1799: MP3 and AAC were
+// mixed to mono and stopped at embedding's 180 seconds); AMR and AC-3 are
+// one channel.
 func DecodeChannelsMax(d speechconfig.Decoding, data []byte, maxSeconds int) ([][]float32, error) {
 	if len(data) == 0 {
 		return nil, errors.New("the audio is empty")
@@ -162,9 +135,23 @@ func DecodeChannelsMax(d speechconfig.Decoding, data []byte, maxSeconds int) ([]
 	case "AMR", "AMR_WB":
 		pcm, rate, err = amrPCM(data, format == "AMR_WB", maxSeconds)
 		channels = 1
-	case "MP3", "MP4_AAC", "M4A_AAC", "MOV_AAC":
-		return nil, fmt.Errorf("%w: recognising each channel of %s audio: CloudBurrow's MP3 and AAC decoders mix to mono "+
-			"(WAV, headerless audio, FLAC and Opus are read per channel)", ErrUnsupported, format)
+	case "MP3":
+		pcm, channels, rate, err = embedding.DecodeMP3Channels(data, maxSeconds)
+		if embedding.IsTooLong(err) {
+			return nil, ErrTooLong
+		}
+	case "MP4_AAC", "M4A_AAC", "MOV_AAC":
+		mt := "video/mp4"
+		if format == "MOV_AAC" {
+			mt = "video/quicktime"
+		}
+		pcm, channels, rate, err = embedding.DecodeVideoAudioChannels(mt, data, maxSeconds)
+		if embedding.IsTooLong(err) {
+			return nil, ErrTooLong
+		}
+		if err == nil && pcm == nil {
+			err = errors.New("the file has no audio track")
+		}
 	default:
 		return nil, unsupported(format)
 	}

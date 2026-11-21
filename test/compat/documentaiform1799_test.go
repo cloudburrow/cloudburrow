@@ -25,8 +25,6 @@ var formGenericTypes = map[string]bool{"email": true, "phone": true, "url": true
 var (
 	sampleForm = textPDF([]string{"APPLICATION FORM", "Name: Jane Doe", "Email: jane.doe@example.com", "Phone: 555-0142",
 		"Date of birth: 1990-04-12", "City: Springfield", "", "Item  Quantity  Price", "Apples  3  4.50", "Pears  5  2.25"})
-	sampleLicense = textPDF([]string{"CALIFORNIA DRIVER LICENSE", "DL D7654321", "Family Name: DOE", "Given Names: JANE",
-		"Date Of Birth: 04/12/1990", "Expiration Date: 04/12/2031"})
 	sampleInvoice = textPDF([]string{"ACME SUPPLIES LTD", "INVOICE", "Invoice number: INV-2026-0417", "Invoice date: 2026-03-14",
 		"Bill to: Jane Doe", "Widgets  2  $600.00", "Gadgets  1  $34.50", "Total: $634.50"})
 )
@@ -181,10 +179,18 @@ func TestDocumentAIFormParserAndExtractors(t *testing.T) {
 	if !schema["invoice_id"] || !schema["line_item/amount"] {
 		t.Fatalf("Invoice Parser schema: %v", v.GetDocumentSchema())
 	}
+	invStart := time.Now()
 	resp, err = r.ProcessDocument(ctx, &documentaipb.ProcessRequest{Name: inv.GetName(),
 		Source: &documentaipb.ProcessRequest_RawDocument{RawDocument: &documentaipb.RawDocument{Content: sampleInvoice, MimeType: "application/pdf"}}})
 	if err != nil {
 		t.Fatalf("ProcessDocument (Invoice Parser): %v", err)
+	}
+	// Within BigQuery's 120 seconds a request, which ML.PROCESS_DOCUMENT
+	// allows (TestBigQueryMLProcessDocumentLongPDF runs it there).
+	if took := time.Since(invStart); took > 100*time.Second {
+		t.Errorf("Invoice Parser answered in %v, too close to ML.PROCESS_DOCUMENT's 120 s", took.Round(time.Second))
+	} else {
+		t.Logf("Invoice Parser answered in %v", took.Round(time.Second))
 	}
 	doc = resp.GetDocument()
 	id := false
@@ -224,11 +230,11 @@ func longPDF(n int) []byte {
 // over Document AI's online limit of 15, as BigQuery's documented limit of
 // 130 pages allows: the layout parser's blocks reach page 24; a 131-page
 // PDF is its row's error; Document AI's own processDocument of the 24-page
-// PDF is still INVALID_ARGUMENT. Where the local generation model runs, a
-// model over the US Driver License Parser (the extractor with the fewest
-// fields, so the local model answers within BigQuery's 120 seconds) adds
-// the processor fields, a column a top-level entity type ("Family Name" as
-// Family_Name).
+// PDF is still INVALID_ARGUMENT; a DOCX row is read by the Layout Parser
+// as Document AI reads it. Where the local generation model runs, a model
+// over the Invoice Parser (its 35 fields and 2 repeated types answered
+// within BigQuery's 120 seconds) adds the processor fields, a column a
+// top-level entity type (invoice_id, total_amount, supplier_name).
 //
 // covers: google.cloud.documentai.v1.DocumentProcessorService/ProcessDocument
 func TestBigQueryMLProcessDocumentLongPDF(t *testing.T) {
@@ -238,7 +244,8 @@ func TestBigQueryMLProcessDocumentLongPDF(t *testing.T) {
 	}
 	g, _ := documentAIClients(t, h)
 	long := longPDF(24)
-	c, ds, id := visionObjectTable(t, h, map[string][]byte{"img/long.pdf": long, "img/toolong.pdf": longPDF(131), "img/license.pdf": sampleLicense})
+	c, ds, id := visionObjectTable(t, h, map[string][]byte{"img/long.pdf": long, "img/toolong.pdf": longPDF(131), "img/invoice.pdf": sampleInvoice,
+		"img/policy.docx": sampleDOCX(t)})
 	conn := c.Project() + ".us." + id
 	layout := createDocumentProcessor(t, h, g, c.Project(), "LAYOUT_PARSER_PROCESSOR")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
@@ -275,20 +282,33 @@ func TestBigQueryMLProcessDocumentLongPDF(t *testing.T) {
 		t.Errorf("131-page row: %v", tl)
 	}
 
+	// A DOCX object: its headings and table, as the Layout Parser reads it.
+	rows = mlQueryIn(t, ctx, c, fmt.Sprintf("SELECT ml_process_document_status AS status, content_type, "+
+		"JSON_VALUE(ml_process_document_result, '$.documentLayout.blocks[1].textBlock.text') AS title, "+
+		"JSON_VALUE(ml_process_document_result, '$.documentLayout.blocks[1].textBlock.blocks[0].textBlock.type') AS heading, "+
+		"JSON_VALUE(ml_process_document_result, '$.chunkedDocument.chunks[0].content') AS chunk "+
+		"FROM ML.PROCESS_DOCUMENT(MODEL `%s.layout`, (SELECT uri, content_type FROM `%s.images` WHERE uri LIKE '%%.docx'), "+
+		"PROCESS_OPTIONS => (JSON '{\"layout_config\": {\"chunking_config\": {\"chunk_size\": 100, \"include_ancestor_headings\": true}}}'))", ds, ds))
+	if len(rows) != 1 || rows[0]["status"] != "" || rows[0]["title"] != "Staff handbook" || rows[0]["heading"] != "heading-1" ||
+		!strings.HasPrefix(fmt.Sprint(rows[0]["chunk"]), "Staff handbook\nAnnual leave\n") {
+		t.Errorf("DOCX row: %v", rows)
+	}
+
 	// The processor fields, where the extractors are served.
-	dl := generativeProcessor(t, h, c.Project(), "US_DRIVER_LICENSE_PROCESSOR")
-	if dl == nil {
+	inv := generativeProcessor(t, h, c.Project(), "INVOICE_PROCESSOR")
+	if inv == nil {
 		return
 	}
-	if err := mlRunIn(ctx, c, fmt.Sprintf("CREATE MODEL `%s.licenses` REMOTE WITH CONNECTION `%s` OPTIONS(REMOTE_SERVICE_TYPE = 'CLOUD_AI_DOCUMENT_V1', DOCUMENT_PROCESSOR = '%s')",
-		ds, conn, dl.GetName())); err != nil {
-		t.Fatalf("CREATE MODEL over the US Driver License Parser: %v", err)
+	if err := mlRunIn(ctx, c, fmt.Sprintf("CREATE MODEL `%s.invoices` REMOTE WITH CONNECTION `%s` OPTIONS(REMOTE_SERVICE_TYPE = 'CLOUD_AI_DOCUMENT_V1', DOCUMENT_PROCESSOR = '%s')",
+		ds, conn, inv.GetName())); err != nil {
+		t.Fatalf("CREATE MODEL over the Invoice Parser: %v", err)
 	}
 	start = time.Now()
-	rows = mlQueryIn(t, ctx, c, fmt.Sprintf("SELECT uri, ml_process_document_status AS status, Family_Name, Document_Id, Date_Of_Birth "+
-		"FROM ML.PROCESS_DOCUMENT(MODEL `%s.licenses`, (SELECT uri, content_type FROM `%s.images` WHERE uri LIKE '%%license.pdf'))", ds, ds))
-	t.Logf("license row (recorded) in %v: %v", time.Since(start).Round(time.Second), rows)
-	if len(rows) != 1 || rows[0]["status"] != "" || !strings.Contains(fmt.Sprint(rows[0]["Family_Name"]), "DOE") {
-		t.Errorf("license row: %v", rows)
+	rows = mlQueryIn(t, ctx, c, fmt.Sprintf("SELECT uri, ml_process_document_status AS status, invoice_id, invoice_date, total_amount, supplier_name "+
+		"FROM ML.PROCESS_DOCUMENT(MODEL `%s.invoices`, (SELECT uri, content_type FROM `%s.images` WHERE uri LIKE '%%invoice.pdf'))", ds, ds))
+	t.Logf("invoice row (recorded) in %v: %v", time.Since(start).Round(time.Second), rows)
+	if len(rows) != 1 || rows[0]["status"] != "" || !strings.Contains(strings.ReplaceAll(fmt.Sprint(rows[0]["invoice_id"]), " ", ""), "INV-2026-0417") ||
+		!strings.Contains(fmt.Sprint(rows[0]["total_amount"]), "634.50") {
+		t.Errorf("invoice row: %v", rows)
 	}
 }

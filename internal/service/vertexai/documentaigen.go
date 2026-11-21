@@ -147,7 +147,16 @@ func keepShots(m *docModel, docs []*documentaipb.Document) {
 
 // genJSON asks the local model for JSON valid against schema, greedily.
 func (s *Server) genJSON(ctx context.Context, prompt string, schema map[string]any, out any) error {
-	sb, _ := json.Marshal(schema)
+	// No whitespace between JSON tokens: with it allowed, the model can
+	// write whitespace after the last value until its token limit (an
+	// Invoice Parser answer took 100 s instead of 11, #1799). llguidance,
+	// the runtime's constrained decoder, reads this from the schema.
+	strict := make(map[string]any, len(schema)+1)
+	for k, v := range schema {
+		strict[k] = v
+	}
+	strict["x-guidance"] = map[string]any{"whitespace_flexible": false}
+	sb, _ := json.Marshal(strict)
 	zero, one := float32(0), float32(1)
 	gr := GenerateContentRequest{
 		Contents:         []Content{{Role: "user", Parts: []Part{{Text: prompt}}}},

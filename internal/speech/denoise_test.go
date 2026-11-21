@@ -82,3 +82,29 @@ func TestDenoise(t *testing.T) {
 		t.Errorf("no samples: %v %v", empty, err)
 	}
 }
+
+// TestFilterSNR (#1799): a window whose kept signal is below threshold
+// times the removed noise's power is silenced; one above it, or with no
+// noise, passes; threshold 0 filters nothing.
+func TestFilterSNR(t *testing.T) {
+	n := 2 * snrWindow
+	orig, clean := make([]float32, n), make([]float32, n)
+	for i := range orig {
+		clean[i] = 0.5
+		noise := float32(0.05) // first window: SNR 100
+		if i >= snrWindow {
+			noise = 0.25 // second: SNR 4
+		}
+		orig[i] = clean[i] + noise
+	}
+	out := FilterSNR(orig, orig, clean, 10)
+	if out[0] != orig[0] || out[snrWindow-1] != orig[0] || out[snrWindow] != 0 || out[n-1] != 0 {
+		t.Errorf("threshold 10: %v %v %v", out[0], out[snrWindow], out[n-1])
+	}
+	if out := FilterSNR(orig, orig, clean, 0); out[n-1] != orig[n-1] {
+		t.Error("threshold 0 filtered")
+	}
+	if out := FilterSNR(clean, clean, clean, 1000); out[0] != clean[0] {
+		t.Error("a window with no noise was filtered")
+	}
+}

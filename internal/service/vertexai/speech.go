@@ -304,15 +304,21 @@ func transcribeBestFit(ctx context.Context, samples []float32, opt speech.Option
 
 // denoise is samples denoised when the config's denoiserConfig asks for it
 // (denoiseAudio, #1799; internal/speech's Denoise, RNNoise).
+// A snrThreshold silences the windows whose signal-to-noise ratio is
+// below it (speech.FilterSNR), denoised or not.
 func denoise(ctx context.Context, cfg speechconfig.Config, samples []float32) ([]float32, error) {
-	if !cfg.Denoise {
+	if !cfg.Denoise && cfg.SNRThreshold <= 0 {
 		return samples, nil
 	}
-	out, err := speech.Denoise(ctx, samples)
+	clean, err := speech.Denoise(ctx, samples)
 	if err != nil {
 		return nil, apierror.Internal(err, "denoising the audio failed: %v", err)
 	}
-	return out, nil
+	out := samples
+	if cfg.Denoise {
+		out = clean
+	}
+	return speech.FilterSNR(out, samples, clean, cfg.SNRThreshold), nil
 }
 
 // resultLanguage is the language code results are labelled with: the
