@@ -34,10 +34,11 @@ import (
 //   - model: "" (default), default, latest_long, video and phone_call read
 //     as v2's long and telephony, latest_short and command_and_search as
 //     short; medical models are UNIMPLEMENTED. use_enhanced is accepted.
-//   - speech_contexts (phrases with a boost) and adaptation's inline
-//     phrase_sets and custom_classes are applied as v2's adaptation
-//     (speechbias.go); adaptation's phrase_set_references and abnf_grammar
-//     are UNIMPLEMENTED (v1's Adaptation service is not served), as are
+//   - speech_contexts (phrases with a boost), adaptation's inline
+//     phrase_sets and custom_classes, and its phrase_set_references and
+//     stored custom classes (v1's Adaptation service, speechv1adaptation.go,
+//     #2106) are applied as v2's adaptation (speechbias.go); abnf_grammar
+//     is UNIMPLEMENTED, as are
 //     alternative_language_codes, enable_separate_recognition_per_channel,
 //     diarization and transcript_normalization (spoken punctuation and emojis
 //     and the profanity filter are v2's, #1799).
@@ -82,7 +83,8 @@ func v1Config(c *speechv1pb.RecognitionConfig) (json.RawMessage, error) {
 	case c.GetTranscriptNormalization() != nil:
 		return nil, unimpl("transcript_normalization")
 	case len(c.GetAdaptation().GetPhraseSetReferences()) > 0:
-		return nil, unimpl("adaptation.phrase_set_references (v1's Adaptation service is not served; send the phrase sets inline)")
+		// v1Resolve replaces them with the stored sets.
+		return nil, apierror.InvalidArgument("adaptation.phrase_set_references were not resolved")
 	case c.GetAdaptation().GetAbnfGrammar() != nil:
 		return nil, unimpl("adaptation.abnf_grammar")
 	}
@@ -213,6 +215,10 @@ func v1Config(c *speechv1pb.RecognitionConfig) (json.RawMessage, error) {
 
 // v1Checked maps and checks a v1 config.
 func (s *Server) v1Checked(c *speechv1pb.RecognitionConfig) (speechconfig.Config, speech.Options, error) {
+	c, err := s.v1Resolve(c)
+	if err != nil {
+		return speechconfig.Config{}, speech.Options{}, err
+	}
 	raw, err := v1Config(c)
 	if err != nil {
 		return speechconfig.Config{}, speech.Options{}, err

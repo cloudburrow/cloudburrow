@@ -2469,6 +2469,11 @@ svg.bq-chart { display: block; border: 1px solid var(--border); border-radius: v
 .result-box.kind-paragraph { border-color: #188038; }
 .result-box.kind-line { border-color: #e37400; }
 .result-box.is-lit { background: rgba(26, 115, 232, 0.25); border-width: 2.5px; }
+/* Document AI's labeling tool (#2124): labels in purple, the box being drawn dashed, and a crosshair over a page to label. */
+.result-box.kind-label { border-color: #9334e6; background: rgba(147, 52, 230, 0.08); }
+.result-box.kind-drawing { border: 2px dashed #9334e6; pointer-events: none; }
+.result-page-frame.is-labeling { cursor: crosshair; touch-action: none; user-select: none; }
+.result-page-frame.is-labeling img { pointer-events: none; }
 #action-result-table tr.is-lit { background: var(--nav-selected); }
 
 /* Workflows' source editor and graph (#2004): the source on the left, its

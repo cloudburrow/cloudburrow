@@ -119,7 +119,8 @@ COMPAT_LOCALAI_TEST_NAMES="
   ConsoleLocalModelsLoadEmbedUnload
   ConsoleLocalModelsUnloadDeleteDownloadLoad
   CountTokensAndComputeTokensThroughTheOfficialSDK DocumentAIBatchProcess
-  DocumentAIBatchShardsAndFieldMask DocumentAIEvaluationsAndReview
+  DocumentAIBatchShardsAndFieldMask DocumentAICustomProcessorsThroughTheOfficialClients
+  DocumentAIEvaluationsAndReview
   DocumentAIProcessorVersions DocumentAIProcessors
   TerraformDocumentAIProcessorDefaultVersion
   EmbedContentEmbeds16KVideoThroughThePredictionClient
@@ -154,6 +155,7 @@ COMPAT_LOCALAI_TEST_NAMES="
   RawPredictOnTheEmbeddingModel RawPredictOnTheGenerationModel
   SpeechAdaptationBoost SpeechAdaptationResources SpeechBatchRecognize
   SpeechRecognitionFeatures1799 SpeechRecognizers SpeechStreamingRecognize SpeechV1
+  SpeechV1AdaptationResources
   StreamGenerateContentThroughTheOfficialSDK
   StreamGenerateContentThroughThePredictionClient
   StreamingPredictOnTheEmbeddingModel StreamingPredictOnTheGenerationModel

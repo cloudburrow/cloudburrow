@@ -343,7 +343,7 @@ func TestSpeechV1Config(t *testing.T) {
 		{"opus rate", &speechv1pb.RecognitionConfig{LanguageCode: "en-US", Encoding: speechv1pb.RecognitionConfig_OGG_OPUS, SampleRateHertz: 44100}, codes.InvalidArgument},
 		{"medical", &speechv1pb.RecognitionConfig{LanguageCode: "en-US", Model: "medical_dictation"}, codes.Unimplemented},
 		{"alternatives", &speechv1pb.RecognitionConfig{LanguageCode: "en-US", AlternativeLanguageCodes: []string{"de-DE"}}, codes.Unimplemented},
-		{"references", &speechv1pb.RecognitionConfig{LanguageCode: "en-US", Adaptation: &speechv1pb.SpeechAdaptation{PhraseSetReferences: []string{"x"}}}, codes.Unimplemented},
+		{"references", &speechv1pb.RecognitionConfig{LanguageCode: "en-US", Adaptation: &speechv1pb.SpeechAdaptation{PhraseSetReferences: []string{"projects/p/locations/global/phraseSets/missing"}}}, codes.InvalidArgument},
 	} {
 		if _, _, err := v.s.v1Checked(c.cfg); code(grpcError(err)) != c.want {
 			t.Errorf("%s: %v, want %v", c.name, err, c.want)
