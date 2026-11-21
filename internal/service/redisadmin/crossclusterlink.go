@@ -54,11 +54,23 @@ type crrLink struct {
 	shards int // shards of the current attempt
 	synced map[int]bool
 	err    error
+	// srcs are the current attempt's source ends, and offs the offset of
+	// each one's replication stream applied so far.
+	srcs []shardEnd
+	offs []int64
 }
 
 func (l *crrLink) setSynced(i int) {
 	l.mu.Lock()
 	l.synced[i] = true
+	l.mu.Unlock()
+}
+
+func (l *crrLink) setOffset(i int, off int64) {
+	l.mu.Lock()
+	if i < len(l.offs) {
+		l.offs[i] = off
+	}
 	l.mu.Unlock()
 }
 
@@ -79,6 +91,12 @@ type shardEnd struct {
 // crossClusterLink links r, a CLUSTER mode secondary, to its primary p and
 // waits until every shard is copied and streaming.
 func (c *clusters) crossClusterLink(ctx context.Context, r, p string) error {
+	return c.startLink(ctx, r, p, func(ctx context.Context) ([][2]shardEnd, error) { return c.shardPairs(ctx, r, p) })
+}
+
+// startLink links r to the source p names, its shards paired by pairs,
+// and waits until every shard is copied and streaming.
+func (c *clusters) startLink(ctx context.Context, r, p string, pairs func(context.Context) ([][2]shardEnd, error)) error {
 	c.mu.Lock()
 	if c.links == nil {
 		c.links = map[string]*crrLink{}
@@ -91,7 +109,7 @@ func (c *clusters) crossClusterLink(ctx context.Context, r, p string) error {
 		lctx, cancel := context.WithCancel(c.bg)
 		l = &crrLink{primary: p, cancel: cancel, done: make(chan struct{}), synced: map[int]bool{}}
 		c.links[r] = l
-		go c.runLink(lctx, l, r, p)
+		go c.runLink(lctx, l, r, p, pairs)
 	}
 	c.mu.Unlock()
 	return c.until(ctx, "the replication of "+p+"'s shards into "+r, func() bool {
@@ -115,18 +133,24 @@ func (c *clusters) crossClusterUnlink(r string) {
 // runLink keeps l's shard links running until ctx ends: each attempt
 // pairs the shards and runs one link per pair, and starts again a second
 // after any of them fails.
-func (c *clusters) runLink(ctx context.Context, l *crrLink, r, p string) {
+func (c *clusters) runLink(ctx context.Context, l *crrLink, r, p string, pairer func(context.Context) ([][2]shardEnd, error)) {
 	defer close(l.done)
 	for ctx.Err() == nil {
-		pairs, err := c.shardPairs(ctx, r, p)
+		pairs, err := pairer(ctx)
 		l.mu.Lock()
 		l.shards, l.synced, l.err = len(pairs), map[int]bool{}, err
+		l.srcs, l.offs = nil, make([]int64, len(pairs))
+		for _, pr := range pairs {
+			l.srcs = append(l.srcs, pr[0])
+		}
 		l.mu.Unlock()
 		if err == nil {
 			actx, cancel := context.WithCancel(ctx)
 			errs := make(chan error, len(pairs))
 			for i, pr := range pairs {
-				go func() { errs <- linkShard(actx, pr[0], pr[1], func() { l.setSynced(i) }) }()
+				go func() {
+					errs <- linkShard(actx, pr[0], pr[1], func() { l.setSynced(i) }, func(off int64) { l.setOffset(i, off) })
+				}()
 			}
 			err = <-errs
 			cancel()
@@ -152,13 +176,13 @@ func (c *clusters) runLink(ctx context.Context, l *crrLink, r, p string) {
 func (c *clusters) shardPairs(ctx context.Context, r, p string) ([][2]shardEnd, error) {
 	c.mu.Lock()
 	sr, pr := c.byName[r], c.byName[p]
-	if sr == nil || pr == nil || sr.Valkey == nil {
+	if sr == nil || pr == nil {
 		c.mu.Unlock()
 		return nil, fmt.Errorf("instance %s or %s is gone", r, p)
 	}
 	snode := append([]*clusterNode(nil), sr.Nodes...)
 	pnode := append([]*clusterNode(nil), pr.Nodes...)
-	sto := shardEnd{user: crrUser, password: sr.Valkey.LinkPassword, ca: sr.TransitCA}
+	sto := shardEnd{user: crrUser, password: sr.linkPassword(), ca: sr.TransitCA}
 	from := shardEnd{password: pr.password(), ca: pr.TransitCA}
 	spass, sca := sr.password(), sr.TransitCA
 	c.mu.Unlock()
@@ -170,22 +194,29 @@ func (c *clusters) shardPairs(ctx context.Context, r, p string) ([][2]shardEnd, 
 	if err != nil {
 		return nil, fmt.Errorf("secondary %s: %w", r, err)
 	}
+	return pairRanges(src, dst, from, sto, p, r)
+}
+
+// pairRanges pairs each source primary, src, with the target primary,
+// dst, that holds the same slots; from and to give each end its
+// credentials, and sname and tname name the two for an error.
+func pairRanges(src, dst map[string][][2]int64, from, to shardEnd, sname, tname string) ([][2]shardEnd, error) {
 	byRanges := map[string]string{}
 	for addr, rs := range dst {
 		byRanges[fmt.Sprint(rs)] = addr
 	}
 	var out [][2]shardEnd
 	for addr, rs := range src {
-		to, ok := byRanges[fmt.Sprint(rs)]
+		t, ok := byRanges[fmt.Sprint(rs)]
 		if !ok {
-			return nil, fmt.Errorf("no shard of %s holds the slots %v of %s's shard at %s", r, rs, p, addr)
+			return nil, fmt.Errorf("no shard of %s holds the slots %v of %s's shard at %s", tname, rs, sname, addr)
 		}
-		a, b := from, sto
-		a.addr, a.ranges, b.addr, b.ranges = addr, rs, to, rs
+		a, b := from, to
+		a.addr, a.ranges, b.addr, b.ranges = addr, rs, t, rs
 		out = append(out, [2]shardEnd{a, b})
 	}
 	if len(out) != len(dst) {
-		return nil, fmt.Errorf("%s has %d shards with slots and %s %d", p, len(out), r, len(dst))
+		return nil, fmt.Errorf("%s has %d shards with slots and %s %d", sname, len(out), tname, len(dst))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i][0].ranges[0][0] < out[j][0].ranges[0][0] })
 	return out, nil
@@ -290,7 +321,7 @@ func dialEnd(ctx context.Context, e shardEnd) (net.Conn, *bufio.Reader, error) {
 // linkShard replicates the shard whose primary is from into the shard
 // whose primary is to, until ctx ends or the link breaks; synced is called
 // once the data is copied and the stream is being applied.
-func linkShard(ctx context.Context, from, to shardEnd, synced func()) error {
+func linkShard(ctx context.Context, from, to shardEnd, synced func(), progress func(int64)) error {
 	admin, err := endClient(from)
 	if err != nil {
 		return err
@@ -339,8 +370,9 @@ func linkShard(ctx context.Context, from, to shardEnd, synced func()) error {
 	stopOut := context.AfterFunc(ctx, func() { _ = out.Close() })
 	defer stopOut()
 	go drainReplies(obr, to.addr)
+	progress(offset)
 	synced()
-	return applyStream(ctx, src, br, out, offset)
+	return applyStream(ctx, src, br, out, offset, progress)
 }
 
 // fullSync asks the source for a full resynchronization and reads past the
@@ -461,8 +493,9 @@ func copyShard(ctx context.Context, src, dst *redis.Client) error {
 }
 
 // applyStream applies the source's replication stream, from offset, to
-// out, acknowledging the offset each second and when asked (GETACK).
-func applyStream(ctx context.Context, src net.Conn, br *bufio.Reader, out net.Conn, offset int64) error {
+// out, acknowledging the offset each second and when asked (GETACK), and
+// telling progress each offset it has applied.
+func applyStream(ctx context.Context, src net.Conn, br *bufio.Reader, out net.Conn, offset int64, progress func(int64)) error {
 	var wmu sync.Mutex
 	var off int64 = offset
 	ack := func() error {
@@ -488,6 +521,17 @@ func applyStream(ctx context.Context, src net.Conn, br *bufio.Reader, out net.Co
 	}()
 	w := bufio.NewWriter(out)
 	for {
+		if br.Buffered() == 0 {
+			// Nothing more has arrived: what was read is sent to the
+			// target, and its offset (PINGs included) applied.
+			if err := w.Flush(); err != nil {
+				return err
+			}
+			wmu.Lock()
+			at := off
+			wmu.Unlock()
+			progress(at)
+		}
 		args, n, err := readCommand(br)
 		if err != nil {
 			if ctx.Err() != nil {
@@ -514,11 +558,6 @@ func applyStream(ctx context.Context, src net.Conn, br *bufio.Reader, out net.Co
 		}
 		if _, err := w.Write(respCommand(args)); err != nil {
 			return err
-		}
-		if br.Buffered() == 0 {
-			if err := w.Flush(); err != nil {
-				return err
-			}
 		}
 	}
 }
@@ -654,9 +693,10 @@ func readCommand(br *bufio.Reader) ([]string, int64, error) {
 }
 
 // crrSecondary is whether r is a CLUSTER mode secondary of cross-instance
-// replication, whose clients are refused writes.
+// replication, or a migration's target (crossclustermigration.go), whose
+// clients are refused writes.
 func (r *clusterRecord) crrSecondary() bool {
-	return r.Valkey != nil && !r.standalone() && r.Valkey.role() == memorystorepb.CrossInstanceReplicationConfig_SECONDARY.String()
+	return !r.standalone() && (r.cirRole() == memorystorepb.CrossInstanceReplicationConfig_SECONDARY.String() || r.migrationTarget())
 }
 
 // crrUsers are r's ACL users with writes refused (block) or allowed: in
@@ -664,7 +704,7 @@ func (r *clusterRecord) crrSecondary() bool {
 // a secondary, and the link's own user is there to write.
 func (c *clusters) crrUsers(r *clusterRecord, block bool) map[string][]any {
 	users := c.aclUsersOf(r)
-	if r.Valkey == nil || r.standalone() {
+	if r.standalone() || (r.Valkey == nil && r.linkPassword() == "") {
 		return users
 	}
 	out := map[string][]any{}
@@ -680,7 +720,7 @@ func (c *clusters) crrUsers(r *clusterRecord, block bool) map[string][]any {
 		for u := range out {
 			out[u] = append(out[u], "-@write")
 		}
-		out[crrUser] = []any{"reset", "on", ">" + r.Valkey.LinkPassword, "~*", "&*", "+@all"}
+		out[crrUser] = []any{"reset", "on", ">" + r.linkPassword(), "~*", "&*", "+@all"}
 	}
 	return out
 }
@@ -688,8 +728,8 @@ func (c *clusters) crrUsers(r *clusterRecord, block bool) map[string][]any {
 // setWrites refuses (block) or allows the writes of r's clients on nodes.
 func (c *clusters) setWrites(ctx context.Context, r *clusterRecord, nodes []*clusterNode, block bool) error {
 	c.mu.Lock()
-	if block && r.Valkey.LinkPassword == "" {
-		r.Valkey.LinkPassword = newUID() + newUID()
+	if block && r.linkPassword() == "" {
+		r.setLinkPassword(newUID() + newUID())
 	}
 	users := c.crrUsers(r, block)
 	c.mu.Unlock()

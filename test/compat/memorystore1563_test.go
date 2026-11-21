@@ -237,11 +237,8 @@ func TestMemorystoreValkeyClusterUpgradeKeepsWrites(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "not allowed in cluster mode") {
 		t.Errorf("REPLICAOF on a cluster-mode node = %v, want it refused in cluster mode", err)
 	}
-	if _, err := c.StartMigration(ctx, &memorystorepb.StartMigrationRequest{Name: name, Source: &memorystorepb.StartMigrationRequest_SelfManagedSource{
-		SelfManagedSource: &memorystorepb.SelfManagedSource{IpAddress: "127.0.0.1", Port: 6379,
-			NetworkAttachment: "projects/" + project + "/regions/us-central1/networkAttachments/na"}}}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("StartMigration into CLUSTER mode = %v, want UNIMPLEMENTED", err)
-	}
+	// Migration into CLUSTER mode is served since #1577
+	// (TestMemorystoreValkeyClusterModeMigration).
 
 	acked, inst := upgradeWhileWriting(t, ctx, c, name, "VALKEY_9_0", func(k, v string) error {
 		return rc.Set(ctx, k, v, 0).Err()

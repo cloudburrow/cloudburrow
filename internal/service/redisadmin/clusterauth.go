@@ -381,15 +381,3 @@ func trimOwner(name string) string {
 	}
 	return name
 }
-
-// checkCrossCluster refuses a Redis cluster's cross_cluster_replication_
-// config: Memorystore for Valkey's CLUSTER mode secondaries are fed by
-// replication links (crossclusterlink.go, #1577), but the Redis Cluster
-// API's config, its membership and its switchover and detach are not
-// mapped onto them yet.
-func checkCrossCluster(asked bool) error {
-	if !asked {
-		return nil
-	}
-	return apierror.Unimplemented("cross-cluster replication of a Redis cluster is not served here yet: it is served for Memorystore for Valkey instances in CLUSTER mode (cross_instance_replication_config), whose links are not yet mapped onto the Redis Cluster API's cross_cluster_replication_config")
-}

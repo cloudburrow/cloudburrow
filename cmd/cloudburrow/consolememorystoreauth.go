@@ -168,6 +168,8 @@ func (p redisClusterProvider) DetailActions(ctx context.Context, project string,
 		return nil
 	}
 	acts := append(memorystoreAuthActions(c.GetAuthorizationMode() == clusterpb.AuthorizationMode_AUTH_MODE_TOKEN_AUTH, true), redisClusterMaintenance(c).actions()...)
+	// Cross-region replication (#1577).
+	acts = append(acts, redisClusterReplicationActions(c)...)
 	if c.GetServerCaMode() == clusterpb.ServerCaMode_SERVER_CA_MODE_CUSTOMER_MANAGED_CAS_CA {
 		// On-demand rotation, customer-managed CAs only (#1918), as gcloud
 		// redis clusters update --rotate-server-certificate.
@@ -195,6 +197,10 @@ func (p redisClusterProvider) ActAt(ctx context.Context, project string, path []
 	backup := c.GetBackupCollection() + "/backups/" + strings.TrimSpace(values["backup"])
 	if ok, err := clusterMaintenanceAct(ctx, api, srv, name, action, values); ok {
 		// Maintenance (#1524).
+		return err
+	}
+	if ok, err := redisClusterReplicationAct(ctx, api, srv, c, action, values); ok {
+		// Cross-region replication (#1577).
 		return err
 	}
 	var op interface{ GetName() string }
