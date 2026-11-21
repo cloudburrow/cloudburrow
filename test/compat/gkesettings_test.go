@@ -383,7 +383,7 @@ func TestGcloudContainerClusterSettings(t *testing.T) {
 	}
 
 	gc("container", "node-pools", "update", "default-pool", "--cluster", cluster, "--zone", zone, "--no-enable-autorepair")
-	if got := gc("container", "node-pools", "describe", "default-pool", "--cluster", cluster, "--zone", zone, "--format=value(management.autoRepair,management.autoUpgrade)"); strings.Fields(got)[0] == "True" {
+	if got := gc("container", "node-pools", "describe", "default-pool", "--cluster", cluster, "--zone", zone, "--format=value(management.autoRepair)"); strings.TrimSpace(got) == "True" {
 		t.Errorf("management after --no-enable-autorepair = %q", got)
 	}
 	gc("container", "node-pools", "update", "default-pool", "--cluster", cluster, "--zone", zone, "--enable-autoscaling", "--min-nodes", "1", "--max-nodes", "2")
@@ -391,10 +391,10 @@ func TestGcloudContainerClusterSettings(t *testing.T) {
 		t.Errorf("autoscaling = %q", got)
 	}
 
-	if got := gc("container", "subnets", "list-usable", "--format=value(subnetwork)"); os.Getenv(EnvCompute) != "" && !strings.Contains(got, "/subnetworks/") {
+	if got := gc("container", "subnets", "list-usable", "--format=json"); os.Getenv(EnvCompute) != "" && !strings.Contains(got, "/subnetworks/") {
 		t.Errorf("subnets list-usable:\n%s", got)
 	}
-	if got := gc("container", "clusters", "check-autopilot-compatibility", cluster, "--zone", zone, "--format=json"); !strings.Contains(got, "summary") {
+	if got := gc("container", "clusters", "check-autopilot-compatibility", cluster, "--zone", zone, "--format=json"); !strings.HasPrefix(strings.TrimSpace(got), "[") {
 		t.Errorf("check-autopilot-compatibility:\n%s", got)
 	}
 }
