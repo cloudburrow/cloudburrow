@@ -96,6 +96,8 @@ type adminDeps struct {
 	dataform *dataformService
 	// appHub is App Hub (#2110), nil unless enabled.
 	appHub *appHubService
+	// trace is Cloud Trace (#2118), nil unless enabled.
+	trace *traceService
 	// gke is the Kubernetes Engine API (#1913), nil unless enabled.
 	gke *gkeService
 	// monitoring is Cloud Monitoring (#1939), nil unless enabled.
@@ -244,6 +246,9 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 	}
 	if d.appHub != nil {
 		api.RegisterResetter(&appHubResetter{svc: d.appHub})
+	}
+	if d.trace != nil {
+		api.RegisterResetter(&traceResetter{svc: d.trace})
 	}
 	if d.monitoring != nil {
 		api.RegisterResetter(&monitoringResetter{svc: d.monitoring})

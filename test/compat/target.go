@@ -103,6 +103,7 @@ var targetEndpoints = []targetEndpoint{
 	{"PARAMETERMANAGER", envKey("CLOUDBURROW_PARAMETERMANAGER_ENDPOINT")},
 	{"DATAFORM", envKey("CLOUDBURROW_DATAFORM_ENDPOINT")},
 	{"APPHUB", envKey("CLOUDBURROW_APPHUB_ENDPOINT")},
+	{"TRACE", envKey("CLOUDBURROW_TRACE_ENDPOINT")},
 }
 
 // normalizeEndpoint reduces an address to host:port, so that

@@ -1228,7 +1228,7 @@ jobs:
           # pages make is removed through it by name whatever the test
           # reached, and the kubeconfig the Deploy test cleans up with
           # (#1913, #1925).
-          if [ "$SHARD" = served ]; then BROWSER_VARS+=,GKE,KUBECONFIG; fi
+          if [ "$SHARD" = served ]; then BROWSER_VARS+=,GKE,KUBECONFIG,TRACE,LOGGING; fi
           # The localai shard's: the Embeddings page's Cloud Storage objects,
           # and the local AI endpoints (#1985).
           if [ "$SHARD" = localai ]; then BROWSER_VARS+=,STORAGE,LOCALAI,EMBEDDINGS; fi

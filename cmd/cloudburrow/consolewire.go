@@ -113,6 +113,8 @@ type consoleDeps struct {
 	dataform *dataformService
 	// appHub is App Hub (#2110), nil unless enabled.
 	appHub *appHubService
+	// trace is Cloud Trace (#2118), nil unless enabled.
+	trace *traceService
 	// gke is the Kubernetes Engine API (#1913), nil unless enabled.
 	gke *gkeService
 	// monitoring is Cloud Monitoring (#1939), nil unless enabled.
@@ -373,6 +375,15 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		}
 		providers = append(providers, wp)
 	}
+	// Cloud Trace (#2118), in process: the Trace Explorer and its trace
+	// details, whose trace scopes and log entries are Cloud Logging's.
+	if enabled[config.ServiceTrace] && d.trace != nil {
+		tp := traceExplorerProvider{svc: d.trace}
+		if enabled[config.ServiceLogging] {
+			tp.logging = d.logging
+		}
+		providers = append(providers, tp)
+	}
 	// Cloud Monitoring (#1939) runs in this process too: Metrics explorer
 	// and Metrics management.
 	// A dashboard's Log Analytics chart runs its SQL through Log
@@ -450,7 +461,10 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			loggingSavedQueriesProvider{screen},
 			loggingLogScopesProvider{loggingAdminScreen: screen},
 			// Trace scopes (#2108), a tab of Settings beside Log Scopes.
-			loggingTraceScopesProvider{loggingAdminScreen: screen})
+			loggingTraceScopesProvider{loggingAdminScreen: screen},
+			// The Observability API's settings and buckets (#2117), tabs
+			// of Settings too.
+			observabilitySettingsProvider{screen}, observabilityBucketsProvider{screen})
 		// Log Analytics (#1863), over the buckets' linked datasets in the
 		// instance's BigQuery; without BigQuery the page says it is not
 		// available.
@@ -806,6 +820,7 @@ var serviceTitles = map[config.Service]string{
 	config.ServiceParameterManager: "Parameter Manager",
 	config.ServiceDataform:         "Dataform",
 	config.ServiceAppHub:           "App Hub",
+	config.ServiceTrace:            "Cloud Trace",
 }
 
 func serviceTitle(s config.Service) string {

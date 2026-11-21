@@ -19,10 +19,9 @@ package logging
 //   - the project's Observability scope (observability.go) names its default
 //     trace scope, which must be one the project holds.
 //
-// Trace scopes decide which projects' traces the Trace Explorer searches.
-// CloudBurrow serves no Cloud Trace (no cloudtrace.googleapis.com, no
-// Trace Explorer), so a trace scope is kept and read back and changes no
-// search: there are no traces to search.
+// Trace scopes decide which projects' traces the Trace Explorer searches:
+// the console's Trace Explorer, over the local Cloud Trace (#2118),
+// searches every project of the chosen scope.
 //
 // Choices Google does not document (UNVERIFIED (docs re-read 2026-11-21:
 // https://docs.cloud.google.com/trace/docs/trace-scope/create-and-manage)):

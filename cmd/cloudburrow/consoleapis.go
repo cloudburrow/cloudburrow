@@ -45,6 +45,8 @@ var apiLibrary = map[string]apiLibraryInfo{
 	"parametermanager.googleapis.com":     {"Security", "Stores, versions and renders configuration parameters, in plain text, JSON or YAML, with references to Secret Manager secrets.", "parametermanager"},
 	"dataform.googleapis.com":             {"Big data", "Develops, version controls and runs SQL workflows in BigQuery with SQLX.", "dataform"},
 	"apphub.googleapis.com":               {"Management tools", "Discovers a boundary's services and workloads and groups them into applications.", "apphub"},
+	"cloudtrace.googleapis.com":           {"Management tools", "Sends application latency data to Cloud Trace for viewing, and reads traces back.", "trace"},
+	"telemetry.googleapis.com":            {"Management tools", "Ingests OpenTelemetry (OTLP) traces into Cloud Trace.", "trace"},
 	"cloudkms.googleapis.com":             {"Security", "Manages cryptographic keys and performs operations with them.", "kms"},
 	"kmsinventory.googleapis.com":         {"Security", "Reports which resources Cloud KMS keys protect.", "kms"},
 	"cloudscheduler.googleapis.com":       {"Developer tools", "Runs jobs on a schedule: HTTP targets, Pub/Sub topics and App Engine.", "scheduler"},

@@ -491,6 +491,14 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// Explorer.
 	appHubSvc.useLogging(loggingSvc)
 	loggingSvc.register(coord)
+	// Cloud Trace (#2118), in process: the Cloud Trace API v1 and v2 and
+	// OTLP trace ingestion on one port,
+	// after the Cloud Logging whose _Trace bucket takes its spans (#2117).
+	traceSvc := newTraceService(cfg)
+	if traceSvc != nil {
+		traceSvc.logging = loggingSvc
+	}
+	traceSvc.register(coord)
 	// Cloud Monitoring (#1939), in process: log-based metrics' values come
 	// from this instance's Cloud Logging, request metrics from its counters.
 	monitoringSvc := newMonitoringService(cfg)
@@ -636,6 +644,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		parameterManager: parameterManagerSvc,
 		dataform:         dataformSvc,
 		appHub:           appHubSvc,
+		trace:            traceSvc,
 		gke:              gkeSvc,
 		monitoring:       monitoringSvc,
 		compute:          computeSvc,
@@ -750,6 +759,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		dataformSvc.calls = callEvents(recorder, requestMetrics, "dataform")
 		dataformSvc.interpose = append(dataformSvc.interpose, grpctransport.LogInterceptor(logger, "dataform"), faults.Interceptor("dataform"))
 		dataformSvc.requests = requestEvents(recorder, requestMetrics, "dataform")
+	}
+	if traceSvc != nil {
+		traceSvc.calls = callEvents(recorder, requestMetrics, "trace")
+		traceSvc.interpose = append(traceSvc.interpose, grpctransport.LogInterceptor(logger, "trace"), faults.Interceptor("trace"))
+		traceSvc.requests = requestEvents(recorder, requestMetrics, "trace")
 	}
 	if dataTransfer != nil {
 		dataTransfer.tracing = tracing
@@ -1282,6 +1296,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		parameterManager: parameterManagerSvc,
 		dataform:         dataformSvc,
 		appHub:           appHubSvc,
+		trace:            traceSvc,
 		gke:              gkeSvc,
 		monitoring:       monitoringSvc,
 		compute:          computeSvc,
@@ -1385,6 +1400,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if a := appHubSvc.Addr(); a != "" {
 			live["apphub"] = a
 		}
+		if a := traceSvc.Addr(); a != "" {
+			live["trace"] = a
+		}
 		if a := gkeSvc.Addr(); a != "" {
 			live["gke"] = a
 		}
@@ -1458,7 +1476,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		published := map[string]bool{"run": true, "tasks": true, "secretmanager": true, "kms": true,
 			"scheduler": true, "logging": true, "resourcemanager": true, "serviceusage": true, "apikeys": true, "metadata": true,
 			"storagebatchoperations": true, "storageinsights": true, "storagetransfer": true,
-			"sqladmin": true, "cloudsql-connector": true, "onnx": true, "tfconvert": true, "localai": true, "workflows": true, "parametermanager": true, "dataform": true, "apphub": true}
+			"sqladmin": true, "cloudsql-connector": true, "onnx": true, "tfconvert": true, "localai": true, "workflows": true, "parametermanager": true, "dataform": true, "apphub": true, "trace": true}
 		if !runEnabled {
 			published = map[string]bool{"resourcemanager": true, "onnx": true, "tfconvert": true, "localai": true}
 			// The storage server reads IAM service accounts' certificates
@@ -1499,6 +1517,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			// A revision's and a task's output in Cloud Logging, as Google
 			// writes it (#1298), while Logging is served too.
 			newRunLogFeeder(cfg.KubeconfigPath(), cfg.ClusterName()+"-control-plane", loggingSvc).register(coord)
+			// Each request to a revision a span in Cloud Trace, and a
+			// traceparent for the container (#2118), while Cloud Trace is
+			// served.
+			coord.Register(&runTracing{cfg: cfg, host: hostComp, out: stdout, trace: traceSvc})
 		}
 	}
 	// Every revision and job task is given the in-cluster addresses (#576):

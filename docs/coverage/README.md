@@ -53,11 +53,13 @@ Do not edit these files by hand.
 | [Cloud Quotas API (v1)](cloudquotas.md) | 8 | 8 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Billing API and Budget API (v1)](billing.md) | 18 | 18 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Site Verification API (v1)](siteverification.md) | 7 | 7 | 0 | 0 | 0 | 0 | 0 | 0 |
+| [Observability API (v1)](observability.md) | 45 | 45 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Workload Identity Federation (IAM v1 pools, STS v1)](workloadidentity.md) | 88 | 63 | 0 | 25 | 0 | 0 | 0 | 0 |
 | [Certificate Authority Service (v1)](privateca.md) | 29 | 29 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Parameter Manager (v1)](parametermanager.md) | 22 | 22 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Dataform (v1)](dataform.md) | 74 | 73 | 0 | 0 | 1 | 0 | 0 | 0 |
 | [App Hub (v1)](apphub.md) | 31 | 31 | 0 | 0 | 0 | 0 | 0 | 0 |
+| [Cloud Trace API (v1 and v2)](trace.md) | 5 | 5 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Workflows and Workflow Executions (v1)](workflows.md) | 10 | 10 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Kubernetes Engine API (v1)](gke.md) | 37 | 36 | 0 | 0 | 1 | 0 | 0 | 0 |
 | [BigQuery sharing (Analytics Hub) API (v1)](analyticshub.md) | 29 | 20 | 0 | 8 | 1 | 0 | 0 | 0 |

@@ -127,7 +127,7 @@ func TestLoggingRequiredBucketCustomIndexesAndTraceScopesThroughTheBrowser(t *te
 		fmt.Sprintf(`tr[aria-label=%q]`, "Inspect "+scope), fmt.Sprintf(`tr[aria-label=%q]`, "Inspect "+defScope)))
 	var tabs string
 	p.eval(`[...document.querySelectorAll("#view .page-tabs a")].map((a) => a.textContent.trim() + (a.getAttribute("aria-current") === "page" ? "*" : "")).join("|")`, &tabs)
-	if tabs != "Settings|Log Scopes|Trace Scopes*" {
+	if tabs != "Settings|Log Scopes|Trace Scopes*|Observability Settings|Observability Buckets" {
 		t.Errorf("the Settings tabs = %q", tabs)
 	}
 	if got := p.menuItems(defScope); !strings.Contains(got, "Edit scope (disabled)") || !strings.Contains(got, "Delete scope (disabled)") ||

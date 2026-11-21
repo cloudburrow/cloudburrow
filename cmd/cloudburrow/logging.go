@@ -388,7 +388,13 @@ func (s *loggingService) Start(ctx context.Context) error {
 		jsonAPI = rest.Observe(jsonAPI, s.requests)
 	}
 	s.server.ServeHTTP(jsonAPI)
-	if err := s.server.Register(func(g *grpc.Server) { register(g) }); err != nil {
+	// On gRPC the Observability API (#2117), observability.googleapis.com
+	// v1, with its Locations and Operations mixins, beside Logging's.
+	if err := s.server.Register(func(g *grpc.Server) {
+		s.api.Register(g)
+		s.admin.RegisterGRPC(g)
+		s.admin.RegisterViewIAM(g)
+	}); err != nil {
 		return err
 	}
 	return s.server.Start(ctx)
