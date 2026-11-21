@@ -378,8 +378,9 @@ func (s *Server) serveJSON(w http.ResponseWriter, r *http.Request, rest string, 
 		s.channelsStop(w, r)
 		return
 	}
-	// Nor is anywhereCaches.pause since revision 20261107 (anywherecache.go).
-	if !upload && r.Method == http.MethodPost && anywhereCachesPauseRE.MatchString(rest) {
+	// anywhereCaches.pause left the document in revision 20261107: only
+	// Storage Control's PauseAnywhereCache reaches it (anywherecache.go).
+	if !upload && r.Method == http.MethodPost && fromGRPC(r) && anywhereCachesPauseRE.MatchString(rest) {
 		if err := s.authorizeJSON(r, "storage.anywhereCaches.pause", jsonPrefix, rest); err != nil {
 			writeError(w, err)
 			return

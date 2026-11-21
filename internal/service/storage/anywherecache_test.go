@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -9,6 +10,12 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"cloud.google.com/go/storage/control/apiv2/controlpb"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
+	grpcstatus "google.golang.org/grpc/status"
 )
 
 type testClock struct {
@@ -65,9 +72,36 @@ func opID(t *testing.T, op map[string]any) string {
 	return name[strings.LastIndex(name, "/")+1:]
 }
 
+// controlFixture is a clocked server on loopback, JSON and gRPC on one
+// port, with a Storage Control client of it: the only way to pause a cache
+// since anywhereCaches.pause left the JSON API (#1791).
+func controlFixture(t *testing.T) (string, *testClock, controlpb.StorageControlClient) {
+	t.Helper()
+	clock := &testClock{t: time.Date(2026, 10, 16, 12, 0, 0, 0, time.UTC)}
+	s, err := NewServer(Options{Now: clock.Now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := grpcFixture(t, s)
+	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	return "http://" + addr, clock, controlpb.NewStorageControlClient(conn)
+}
+
+// pauseCache pauses bucket's cache in zone through Storage Control and
+// returns the gRPC code and the cache's state.
+func pauseCache(t *testing.T, sc controlpb.StorageControlClient, bucket, zone string) (codes.Code, string) {
+	t.Helper()
+	c, err := sc.PauseAnywhereCache(context.Background(), &controlpb.PauseAnywhereCacheRequest{Name: "projects/_/buckets/" + bucket + "/anywhereCaches/" + zone})
+	return grpcstatus.Code(err), c.GetState()
+}
+
 func TestAnywhereCacheLifecycle(t *testing.T) {
-	h, clock := clockedServer(t)
-	base := h.URL + "/storage/v1/b"
+	url, clock, sc := controlFixture(t)
+	base := url + "/storage/v1/b"
 	if st, b := doJSON(t, "POST", base+"?project=p", `{"name":"cbk","location":"US-CENTRAL1"}`); st != 200 {
 		t.Log(b)
 		t.Fatalf("bucket insert = %d", st)
@@ -97,8 +131,8 @@ func TestAnywhereCacheLifecycle(t *testing.T) {
 	if _, c := doJSON(t, "GET", caches+"/us-central1-a", ""); c["state"] != "creating" || c["admissionPolicy"] != admitFirstMiss {
 		t.Errorf("cache while creating = %v", c)
 	}
-	if st, _ := doJSON(t, "POST", caches+"/us-central1-a/pause", ""); st != 400 {
-		t.Errorf("pause while creating = %d; want 400", st)
+	if code, _ := pauseCache(t, sc, "cbk", "us-central1-a"); code != codes.FailedPrecondition {
+		t.Errorf("pause while creating = %v; want FAILED_PRECONDITION", code)
 	}
 	clock.Add(pendingDelay)
 	if _, o := doJSON(t, "GET", base+"/cbk/operations/"+opID(t, op), ""); o["done"] != true || o["response"] == nil {
@@ -125,14 +159,20 @@ func TestAnywhereCacheLifecycle(t *testing.T) {
 	if _, c := doJSON(t, "GET", caches+"/us-central1-a", ""); c["pendingUpdate"] != false || c["ttl"] != "86400s" || c["admissionPolicy"] != admitSecondMiss {
 		t.Errorf("cache after update = %v", c)
 	}
-	// pause, resume, disable
-	for _, step := range []struct{ verb, want string }{{"pause", "paused"}, {"resume", "running"}, {"disable", "disabled"}, {"resume", "running"}, {"disable", "disabled"}} {
+	// pause (Storage Control only), resume, disable
+	if st, b := doJSON(t, "POST", caches+"/us-central1-a/pause", ""); st != 404 || b["error"].(map[string]any)["errors"].([]any)[0].(map[string]any)["reason"] != "notFound" {
+		t.Errorf("JSON pause = %d %v; want 404 notFound, as for any path the document does not bind", st, b)
+	}
+	if code, state := pauseCache(t, sc, "cbk", "us-central1-a"); code != codes.OK || state != cachePaused {
+		t.Errorf("PauseAnywhereCache = %v %q; want paused", code, state)
+	}
+	for _, step := range []struct{ verb, want string }{{"resume", "running"}, {"disable", "disabled"}, {"resume", "running"}, {"disable", "disabled"}} {
 		if st, c := doJSON(t, "POST", caches+"/us-central1-a/"+step.verb, ""); st != 200 || c["state"] != step.want {
 			t.Errorf("%s = %d %v; want %s", step.verb, st, c, step.want)
 		}
 	}
-	if st, _ := doJSON(t, "POST", caches+"/us-central1-a/pause", ""); st != 400 {
-		t.Errorf("pause a disabled cache = %d; want 400", st)
+	if code, _ := pauseCache(t, sc, "cbk", "us-central1-a"); code != codes.FailedPrecondition {
+		t.Errorf("pause a disabled cache = %v; want FAILED_PRECONDITION", code)
 	}
 	clock.Add(disabledGrace)
 	if st, _ := doJSON(t, "GET", caches+"/us-central1-a", ""); st != 404 {
