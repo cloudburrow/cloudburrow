@@ -16,8 +16,8 @@ package main
 //     and links (docs.cloud.google.com/trace/docs/storage-overview and
 //     analytics-query-linked-dataset, read 2026-11-21).
 //
-// Google's console layout for these is UNVERIFIED (docs re-read
-// 2026-11-21: https://docs.cloud.google.com/trace/docs/storage-overview):
+// Google's console layout for these is UNVERIFIED (docs re-read 2026-11-21:
+// https://docs.cloud.google.com/trace/docs/storage-overview):
 // the pages describe the API and gcloud, not a console page.
 
 import (

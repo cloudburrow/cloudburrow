@@ -39,9 +39,12 @@ and ordering; `GetTrace` reads one trace. A span from any writer reads the
 same: its attributes are its v1 labels.
 
 The console's Trace Explorer searches the projects of the chosen trace
-scope (Observability API trace scopes, #2108), and a trace's details page
-shows the log entries whose `trace` and `spanId` name its spans, from the
-instance's Cloud Logging.
+scope (Observability API trace scopes, #2108). It draws the latency
+heatmap (a cell lists its spans) and the Chart view's Span duration
+(percentile) and Span rate, and lists the spans in the Spans table or
+grouped by service and span name in the Grouped table. A trace's details
+show its timeline or its Graph, Find in Trace, and the log entries whose
+`trace` and `spanId` name its spans, from the instance's Cloud Logging.
 
 ## Limits
 

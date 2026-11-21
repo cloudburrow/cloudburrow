@@ -297,129 +297,139 @@ func TestObservabilityBuckets2117(t *testing.T) {
 // through the official BigQuery client; a second link on the dataset is
 // FAILED_PRECONDITION; the link is read, listed, updated and deleted (each
 // through its operation), and deleting it deletes the dataset. It runs
-// beside BigQuery under SINK_LOGGING, as TestLoggingLinksToBigQuery does.
+// beside BigQuery under SINK_LOGGING, as TestLoggingLinksToBigQuery does,
+// once through the client's REST transport and once through its gRPC one.
 func TestObservabilityLinks2117(t *testing.T) {
 	h := New(t)
 	logging := runShardEndpoint(h, envSinkLogging, EnvLogging)
 	bq, project := bigqueryClient(t, h)
-	c := observabilityClient(t, h, logging)
-	ctx := h.Context()
+	// Over REST and over gRPC (obsgrpc.go), each its own link.
+	for _, tr := range []struct {
+		name string
+		c    *obs.Client
+	}{{"REST", observabilityClient(t, h, logging)}, {"gRPC", observabilityGRPCClient(t, h, logging)}} {
+		t.Run(tr.name, func(t *testing.T) {
+			h := h.For(t)
+			c := tr.c
+			ctx := h.Context()
 
-	// The project's _Trace, made here or by an earlier run.
-	us := "projects/" + project + "/locations/us"
-	if op, err := c.CreateBucket(ctx, &obspb.CreateBucketRequest{Parent: us, BucketId: "_Trace"}); err == nil {
-		if _, err := op.Wait(ctx); err != nil {
-			t.Fatal(err)
-		}
-	} else if obsCode(err) != codes.AlreadyExists {
-		t.Fatalf("CreateBucket _Trace: %v", err)
-	}
-	var trace string
-	for it := c.ListBuckets(ctx, &obspb.ListBucketsRequest{Parent: "projects/" + project + "/locations/-"}); ; {
-		x, err := it.Next()
-		if errors.Is(err, iterator.Done) {
-			break
-		}
-		if err != nil {
-			t.Fatalf("ListBuckets: %v", err)
-		}
-		if strings.HasSuffix(x.GetName(), "/buckets/_Trace") {
-			trace = x.GetName()
-		}
-	}
-	if trace == "" {
-		t.Fatal("no _Trace bucket")
-	}
-	spans := trace + "/datasets/Spans"
-	id := fmt.Sprintf("spans_%d", time.Now().UnixNano()%1e9)
-	op, err := c.CreateLink(ctx, &obspb.CreateLinkRequest{Parent: spans, LinkId: id, Link: &obspb.Link{Description: "to BigQuery"}})
-	if err != nil {
-		t.Fatalf("CreateLink: %v", err)
-	}
-	l, err := op.Wait(ctx)
-	if err != nil || l.GetName() != spans+"/links/"+id || l.GetCreateTime() == nil {
-		t.Fatalf("CreateLink.Wait = %v, %v", l, err)
-	}
-	t.Cleanup(func() {
-		if dop, err := c.DeleteLink(context.Background(), &obspb.DeleteLinkRequest{Name: l.GetName()}); err == nil {
-			_ = dop.Wait(context.Background())
-		}
-	})
-	if _, err := bq.Dataset(id).Table("_AllSpans").Metadata(ctx); err != nil {
-		t.Errorf("the linked dataset's _AllSpans view: %v", err)
-	}
-	// A span written to Cloud Trace afterwards is a row of the linked
-	// dataset (#2118), when the shard serves Cloud Trace.
-	if strings.TrimSpace(os.Getenv(EnvTrace)) != "" {
-		w, err := tracev2.NewClient(ctx, traceGRPCOpts(h.Endpoint(EnvTrace))...)
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = w.Close() })
-		traceID, spanID := newTraceID("obslink"), "00f067aa0ba90201"
-		if err := w.BatchWriteSpans(ctx, &cloudtracev2pb.BatchWriteSpansRequest{Name: "projects/" + project,
-			Spans: []*cloudtracev2pb.Span{v2Span(project, traceID, spanID, "", "linked span", time.Now(), time.Millisecond, nil)}}); err != nil {
-			t.Fatalf("BatchWriteSpans: %v", err)
-		}
-		q := "SELECT name, trace_id FROM `" + project + "." + id + "._AllSpans` WHERE span_id = '" + spanID + "' AND trace_id = '" + traceID + "'"
-		var got []map[string]bigquery.Value
-		for deadline := time.Now().Add(30 * time.Second); len(got) == 0 && time.Now().Before(deadline); time.Sleep(time.Second) {
-			it, err := bq.Query(q).Read(ctx)
-			if err != nil {
-				continue
+			// The project's _Trace, made here or by an earlier run.
+			us := "projects/" + project + "/locations/us"
+			if op, err := c.CreateBucket(ctx, &obspb.CreateBucketRequest{Parent: us, BucketId: "_Trace"}); err == nil {
+				if _, err := op.Wait(ctx); err != nil {
+					t.Fatal(err)
+				}
+			} else if obsCode(err) != codes.AlreadyExists {
+				t.Fatalf("CreateBucket _Trace: %v", err)
 			}
-			for {
-				var r map[string]bigquery.Value
-				if err := it.Next(&r); err != nil {
+			var trace string
+			for it := c.ListBuckets(ctx, &obspb.ListBucketsRequest{Parent: "projects/" + project + "/locations/-"}); ; {
+				x, err := it.Next()
+				if errors.Is(err, iterator.Done) {
 					break
 				}
-				got = append(got, r)
+				if err != nil {
+					t.Fatalf("ListBuckets: %v", err)
+				}
+				if strings.HasSuffix(x.GetName(), "/buckets/_Trace") {
+					trace = x.GetName()
+				}
 			}
-		}
-		if len(got) != 1 || got[0]["name"] != "linked span" {
-			t.Errorf("%s = %v; want the span written to Cloud Trace", q, got)
-		}
-	}
-	if _, err := c.CreateLink(ctx, &obspb.CreateLinkRequest{Parent: spans, LinkId: id + "_2"}); obsCode(err) != codes.FailedPrecondition {
-		t.Errorf("a second link on the dataset: %v; want FAILED_PRECONDITION", err)
-	}
-	if got, err := c.GetLink(ctx, &obspb.GetLinkRequest{Name: l.GetName()}); err != nil || got.GetDescription() != "to BigQuery" {
-		t.Errorf("GetLink = %v, %v", got, err)
-	}
-	uop, err := c.UpdateLink(ctx, &obspb.UpdateLinkRequest{Link: &obspb.Link{Name: l.GetName(), DisplayName: "Spans in BigQuery"},
-		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"display_name"}}})
-	if err != nil {
-		t.Fatalf("UpdateLink: %v", err)
-	}
-	if got, err := uop.Wait(ctx); err != nil || got.GetDisplayName() != "Spans in BigQuery" {
-		t.Errorf("UpdateLink.Wait = %v, %v", got, err)
-	}
-	var links []string
-	for it := c.ListLinks(ctx, &obspb.ListLinksRequest{Parent: spans}); ; {
-		x, err := it.Next()
-		if errors.Is(err, iterator.Done) {
-			break
-		}
-		if err != nil {
-			t.Fatalf("ListLinks: %v", err)
-		}
-		links = append(links, x.GetName())
-	}
-	if len(links) != 1 || links[0] != l.GetName() {
-		t.Errorf("ListLinks = %v", links)
-	}
-	dop, err := c.DeleteLink(ctx, &obspb.DeleteLinkRequest{Name: l.GetName()})
-	if err != nil {
-		t.Fatalf("DeleteLink: %v", err)
-	}
-	if err := dop.Wait(ctx); err != nil {
-		t.Fatalf("DeleteLink.Wait: %v", err)
-	}
-	if _, err := c.GetLink(ctx, &obspb.GetLinkRequest{Name: l.GetName()}); obsCode(err) != codes.NotFound {
-		t.Errorf("GetLink after delete: %v; want NOT_FOUND", err)
-	}
-	if _, err := bq.Dataset(id).Metadata(ctx); err == nil {
-		t.Error("the linked BigQuery dataset outlived its link")
+			if trace == "" {
+				t.Fatal("no _Trace bucket")
+			}
+			spans := trace + "/datasets/Spans"
+			id := fmt.Sprintf("spans_%d", time.Now().UnixNano()%1e9)
+			op, err := c.CreateLink(ctx, &obspb.CreateLinkRequest{Parent: spans, LinkId: id, Link: &obspb.Link{Description: "to BigQuery"}})
+			if err != nil {
+				t.Fatalf("CreateLink: %v", err)
+			}
+			l, err := op.Wait(ctx)
+			if err != nil || l.GetName() != spans+"/links/"+id || l.GetCreateTime() == nil {
+				t.Fatalf("CreateLink.Wait = %v, %v", l, err)
+			}
+			t.Cleanup(func() {
+				if dop, err := c.DeleteLink(context.Background(), &obspb.DeleteLinkRequest{Name: l.GetName()}); err == nil {
+					_ = dop.Wait(context.Background())
+				}
+			})
+			if _, err := bq.Dataset(id).Table("_AllSpans").Metadata(ctx); err != nil {
+				t.Errorf("the linked dataset's _AllSpans view: %v", err)
+			}
+			// A span written to Cloud Trace afterwards is a row of the linked
+			// dataset (#2118), when the shard serves Cloud Trace.
+			if strings.TrimSpace(os.Getenv(EnvTrace)) != "" {
+				w, err := tracev2.NewClient(ctx, traceGRPCOpts(h.Endpoint(EnvTrace))...)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = w.Close() })
+				traceID, spanID := newTraceID("obslink"), "00f067aa0ba90201"
+				if err := w.BatchWriteSpans(ctx, &cloudtracev2pb.BatchWriteSpansRequest{Name: "projects/" + project,
+					Spans: []*cloudtracev2pb.Span{v2Span(project, traceID, spanID, "", "linked span", time.Now(), time.Millisecond, nil)}}); err != nil {
+					t.Fatalf("BatchWriteSpans: %v", err)
+				}
+				q := "SELECT name, trace_id FROM `" + project + "." + id + "._AllSpans` WHERE span_id = '" + spanID + "' AND trace_id = '" + traceID + "'"
+				var got []map[string]bigquery.Value
+				for deadline := time.Now().Add(30 * time.Second); len(got) == 0 && time.Now().Before(deadline); time.Sleep(time.Second) {
+					it, err := bq.Query(q).Read(ctx)
+					if err != nil {
+						continue
+					}
+					for {
+						var r map[string]bigquery.Value
+						if err := it.Next(&r); err != nil {
+							break
+						}
+						got = append(got, r)
+					}
+				}
+				if len(got) != 1 || got[0]["name"] != "linked span" {
+					t.Errorf("%s = %v; want the span written to Cloud Trace", q, got)
+				}
+			}
+			if _, err := c.CreateLink(ctx, &obspb.CreateLinkRequest{Parent: spans, LinkId: id + "_2"}); obsCode(err) != codes.FailedPrecondition {
+				t.Errorf("a second link on the dataset: %v; want FAILED_PRECONDITION", err)
+			}
+			if got, err := c.GetLink(ctx, &obspb.GetLinkRequest{Name: l.GetName()}); err != nil || got.GetDescription() != "to BigQuery" {
+				t.Errorf("GetLink = %v, %v", got, err)
+			}
+			uop, err := c.UpdateLink(ctx, &obspb.UpdateLinkRequest{Link: &obspb.Link{Name: l.GetName(), DisplayName: "Spans in BigQuery"},
+				UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"display_name"}}})
+			if err != nil {
+				t.Fatalf("UpdateLink: %v", err)
+			}
+			if got, err := uop.Wait(ctx); err != nil || got.GetDisplayName() != "Spans in BigQuery" {
+				t.Errorf("UpdateLink.Wait = %v, %v", got, err)
+			}
+			var links []string
+			for it := c.ListLinks(ctx, &obspb.ListLinksRequest{Parent: spans}); ; {
+				x, err := it.Next()
+				if errors.Is(err, iterator.Done) {
+					break
+				}
+				if err != nil {
+					t.Fatalf("ListLinks: %v", err)
+				}
+				links = append(links, x.GetName())
+			}
+			if len(links) != 1 || links[0] != l.GetName() {
+				t.Errorf("ListLinks = %v", links)
+			}
+			dop, err := c.DeleteLink(ctx, &obspb.DeleteLinkRequest{Name: l.GetName()})
+			if err != nil {
+				t.Fatalf("DeleteLink: %v", err)
+			}
+			if err := dop.Wait(ctx); err != nil {
+				t.Fatalf("DeleteLink.Wait: %v", err)
+			}
+			if _, err := c.GetLink(ctx, &obspb.GetLinkRequest{Name: l.GetName()}); obsCode(err) != codes.NotFound {
+				t.Errorf("GetLink after delete: %v; want NOT_FOUND", err)
+			}
+			if _, err := bq.Dataset(id).Metadata(ctx); err == nil {
+				t.Error("the linked BigQuery dataset outlived its link")
+			}
+		})
 	}
 }
 

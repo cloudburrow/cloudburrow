@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -110,5 +111,76 @@ func TestConsoleTraceExplorer(t *testing.T) {
 	}
 	if _, err := p.Build(ctx, project, []string{"trace"}, map[string]string{"trace": strings.Repeat("1", 32)}); err == nil {
 		t.Error("a missing trace opened")
+	}
+}
+
+// The heatmap, its Chart view series and the Grouped table (#2118).
+func TestConsoleTraceHeatmapAndGrouped(t *testing.T) {
+	ctx := context.Background()
+	api, err := trace.NewServer("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := traceExplorerProvider{svc: &traceService{api: api}}
+	const project = "trace-heatmap"
+	var w v2Writer
+	api.RegisterCloudTrace(&w)
+	now := time.Now().Add(-time.Minute)
+	var spans []*cloudtracev2pb.Span
+	for i, d := range []time.Duration{3 * time.Millisecond, 4 * time.Millisecond, 30 * time.Millisecond, 700 * time.Millisecond} {
+		tid := strings.Repeat(string(rune('a'+i)), 32)
+		id := "00f067aa0ba9020" + string(rune('1'+i))
+		sp := &cloudtracev2pb.Span{Name: "projects/" + project + "/traces/" + tid + "/spans/" + id, SpanId: id,
+			DisplayName: &cloudtracev2pb.TruncatableString{Value: "GET /cart"}, StartTime: timestamppb.New(now), EndTime: timestamppb.New(now.Add(d)),
+			Attributes: &cloudtracev2pb.Span_Attributes{AttributeMap: map[string]*cloudtracev2pb.AttributeValue{"service.name": trace.StringAttr("frontend")}}}
+		if i == 3 {
+			sp.Status = &statuspb.Status{Code: 2}
+			sp.DisplayName.Value = "POST /pay"
+		}
+		spans = append(spans, sp)
+	}
+	if _, err := w.BatchWriteSpans(ctx, &cloudtracev2pb.BatchWriteSpansRequest{Name: "projects/" + project, Spans: spans}); err != nil {
+		t.Fatal(err)
+	}
+	h, err := p.Build(ctx, project, []string{"heatmap"}, map[string]string{"range": "3600"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cells := map[string]string{}
+	intervals := 0
+	var p99 string
+	for _, it := range h.Items {
+		switch it.Name {
+		case "cell":
+			cells[it.Fields["lo"]+"-"+it.Fields["hi"]] = it.Fields["count"]
+		case "interval":
+			intervals++
+			if it.Fields["count"] == "4" {
+				p99 = it.Fields["p99"]
+			}
+		}
+	}
+	if len(cells) != 3 || cells["2.000-5.000"] != "2" || cells["20.000-50.000"] != "1" || cells["500.000-1000.000"] != "1" {
+		t.Errorf("heatmap cells = %v", cells)
+	}
+	if intervals != heatmapColumns || p99 != "700.000" {
+		t.Errorf("intervals = %d, p99 = %q", intervals, p99)
+	}
+	// A cell's selection narrows the Spans table.
+	sel, err := p.Build(ctx, project, []string{"spans"}, map[string]string{"range": "3600", "minDuration": "2", "maxDuration": "5",
+		"cellStart": strconv.FormatInt(now.Add(-time.Second).UnixMilli(), 10), "cellEnd": strconv.FormatInt(now.Add(time.Second).UnixMilli(), 10)})
+	if err != nil || len(sel.Items) != 2 {
+		t.Errorf("the cell's spans = %+v, %v", sel.Items, err)
+	}
+	g, err := p.Build(ctx, project, []string{"grouped"}, map[string]string{"range": "3600"})
+	if err != nil || len(g.Items) != 2 {
+		t.Fatalf("grouped = %+v, %v", g.Items, err)
+	}
+	if f := g.Items[0].Fields; g.Items[0].Name != "GET /cart" || f["Spans"] != "3" || f["Service/workload"] != "frontend" || f["P50 (ms)"] != "4.000" ||
+		f["Average (ms)"] != "12.333" || f["Trace ID"] != strings.Repeat("c", 32) {
+		t.Errorf("the GET /cart group = %+v", g.Items[0])
+	}
+	if f := g.Items[1].Fields; g.Items[1].Name != "POST /pay" || f["Errors"] != "1" {
+		t.Errorf("the POST /pay group = %+v", g.Items[1])
 	}
 }

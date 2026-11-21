@@ -13922,11 +13922,13 @@ async function renderMetricsExplorer(view, match) {
 //
 // Google's page (docs.cloud.google.com/trace/docs/finding-traces): the
 // toolbar's trace scope, time range and Trace ID; the Span filters pane and
-// the Filter bar; a chart of the spans' durations over time; the Spans
-// table. Selecting a span opens the trace's details
+// the Filter bar; the latency heatmap, whose cells select their spans, and
+// the Chart view menu's Span duration (percentile) and Span rate; the Spans
+// and Grouped tables. Selecting a span opens the trace's details
 // (docs.cloud.google.com/trace/docs/viewing-details): the timeline of its
-// spans with their latency bars, and the selected span's Attributes, Logs &
-// Events and Metadata & Links tabs. Each search is one server query.
+// spans with their latency bars, or the Graph of its call hierarchy; Find
+// in Trace; and the selected span's Attributes, Logs & Events and Metadata
+// & Links tabs.
 
 const TRACE_RANGES = [
   { label: "1 hour", seconds: 3600 }, { label: "6 hours", seconds: 21600 }, { label: "1 day", seconds: 86400 },
@@ -13944,47 +13946,180 @@ function traceDetailsLink(le) {
   return el("a", { class: "link-button is-inline", href: `/traces/explorer?${q.toString()}`, text: "View trace details" });
 }
 
-// traceChart is the spans' durations over their start times, errors in red.
-function traceChart(rows) {
-  const NS = "http://www.w3.org/2000/svg";
-  const W = 720, H = 220, L = 56, R = 12, T = 12, B = 28;
-  const pts = rows.map((r) => ({ t: Number((r.fields || {}).startMs), v: Number((r.fields || {})["Duration (ms)"]),
-    err: (r.fields || {}).Status === "Error", name: r.name })).filter((p) => Number.isFinite(p.t) && Number.isFinite(p.v));
-  if (!pts.length) return el("p", { class: "unavailable", text: "No spans in the selected time range." });
-  let tMin = Math.min(...pts.map((p) => p.t)), tMax = Math.max(...pts.map((p) => p.t));
-  if (tMax === tMin) { tMin -= 30000; tMax += 30000; }
-  let yMax = Math.max(...pts.map((p) => p.v));
-  if (yMax <= 0) yMax = 1;
-  const sx = (t) => L + (t - tMin) / (tMax - tMin) * (W - L - R);
-  const sy = (v) => T + (1 - v / yMax) * (H - T - B);
-  const svg = document.createElementNS(NS, "svg");
-  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
-  svg.setAttribute("class", "explorer-chart trace-chart");
-  svg.setAttribute("role", "img");
-  svg.setAttribute("aria-label", `Span duration over time: ${pts.length} spans, the longest ${yMax} ms`);
-  const add = (tag, attrs, text) => {
-    const n = document.createElementNS(NS, tag);
-    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, String(v));
-    if (text !== undefined) n.textContent = text;
-    svg.append(n);
-    return n;
-  };
+// svgEl makes an SVG element with attributes, and text when given.
+function traceSvg(tag, attrs, text) {
+  const n = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for (const [k, v] of Object.entries(attrs || {})) n.setAttribute(k, String(v));
+  if (text !== undefined) n.textContent = text;
+  return n;
+}
+
+function traceTime(ms) { return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }); }
+
+// traceLatencyLabel is a latency edge in ms as an axis label.
+function traceLatencyLabel(ms) {
+  const v = Number(ms);
+  return v >= 1000 ? `${bqShortNumber(v / 1000)} s` : `${bqShortNumber(v)} ms`;
+}
+
+// traceHeatmap draws the spans by start time (x) and latency (y): "The
+// heatmap uses color to represent the number of spans in a cell. A cell
+// with many spans has a darker color than one with few spans." Each cell
+// with spans is a button: selecting it narrows the tables to its spans.
+function traceHeatmap(data, selected, onSelect) {
+  const cells = (data.items || []).filter((i) => i.name === "cell");
+  const intervals = (data.items || []).filter((i) => i.name === "interval");
+  if (!cells.length) return el("p", { class: "unavailable", text: "No spans in the selected time range." });
+  const edges = String(data.note || "").split(",").map(Number);
+  const rows = edges.length;
+  const t0 = Number(intervals[0].fields.t0), t1 = Number(intervals[intervals.length - 1].fields.t1);
+  const W = 720, H = 260, L = 64, R = 12, T = 12, B = 28;
+  const cw = (W - L - R) / intervals.length, rh = (H - T - B) / rows;
+  const maxCount = Math.max(...cells.map((c) => Number(c.fields.count)));
+  const svg = traceSvg("svg", { viewBox: `0 0 ${W} ${H}`, class: "explorer-chart trace-heatmap", role: "group",
+    "aria-label": `Latency heatmap: ${data.total} spans; select a cell to list its spans` });
+  for (let r = 0; r <= rows; r += 2) {
+    const y = H - B - r * rh;
+    svg.append(traceSvg("line", { x1: L, x2: W - R, y1: y, y2: y, class: "explorer-grid" }));
+    if (r < rows) svg.append(traceSvg("text", { x: L - 6, y: y + 4, "text-anchor": "end", "font-size": 11, class: "explorer-axis" }, traceLatencyLabel(edges[r])));
+  }
+  for (let i = 0; i <= 4; i++) {
+    const t = t0 + (t1 - t0) * i / 4;
+    svg.append(traceSvg("text", { x: L + (W - L - R) * i / 4, y: H - 8, "text-anchor": "middle", "font-size": 11, class: "explorer-axis" }, traceTime(t)));
+  }
+  for (const c of cells) {
+    const f = c.fields, n = Number(f.count);
+    const col = Math.round((Number(f.t0) - t0) / ((t1 - t0) / intervals.length));
+    const row = Number(f.row);
+    const level = Math.max(1, Math.ceil(n / maxCount * 5));
+    const isSel = selected && selected.cellStart === f.t0 && selected.minDuration === f.lo;
+    const range = f.hi ? `${traceLatencyLabel(f.lo)} to ${traceLatencyLabel(f.hi)}` : `over ${traceLatencyLabel(f.lo)}`;
+    const label = `${n} ${n === 1 ? "span" : "spans"}, ${new Date(Number(f.t0)).toLocaleString()} to ${traceTime(Number(f.t1))}, latency ${range}`;
+    const rect = traceSvg("rect", { x: L + col * cw + 0.5, y: H - B - (row + 1) * rh + 0.5, width: Math.max(1, cw - 1), height: Math.max(1, rh - 1),
+      class: `trace-cell level-${level}` + (isSel ? " is-selected" : ""), tabindex: 0, role: "button", "aria-pressed": String(!!isSel), "aria-label": label,
+      "data-count": n });
+    rect.append(traceSvg("title", {}, label));
+    const pick = () => onSelect({ cellStart: f.t0, cellEnd: f.t1, minDuration: f.lo, maxDuration: f.hi, label });
+    rect.addEventListener("click", pick);
+    rect.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } });
+    svg.append(rect);
+  }
+  const legend = el("div", { class: "trace-heatmap-legend", "aria-hidden": "true" },
+    el("span", { text: "Fewer spans" }), ...[1, 2, 3, 4, 5].map((l) => el("span", { class: `trace-swatch level-${l}` })), el("span", { text: "More spans" }));
+  return el("div", { class: "trace-heatmap-host" }, svg, legend);
+}
+
+// traceSeries draws the Chart view's lines over the heatmap's intervals:
+// Span duration (percentile) "the 50th, 90th, 95th and 99th percentiles",
+// or Span rate, OK and error spans a second.
+function traceSeries(data, view) {
+  const intervals = (data.items || []).filter((i) => i.name === "interval");
+  if (!intervals.length || !data.total) return el("p", { class: "unavailable", text: "No spans in the selected time range." });
+  const series = view === "rate"
+    ? [["okRate", "OK", "trace-line-ok"], ["errorRate", "Error", "trace-line-error"]]
+    : [["p50", "50th percentile", "trace-line-p50"], ["p90", "90th percentile", "trace-line-p90"],
+       ["p95", "95th percentile", "trace-line-p95"], ["p99", "99th percentile", "trace-line-p99"]];
+  const W = 720, H = 240, L = 64, R = 12, T = 12, B = 28;
+  const xs = intervals.map((i) => (Number(i.fields.t0) + Number(i.fields.t1)) / 2);
+  const tMin = Number(intervals[0].fields.t0), tMax = Number(intervals[intervals.length - 1].fields.t1);
+  let yMax = Math.max(...intervals.flatMap((i) => series.map(([k]) => Number(i.fields[k]) || 0)));
+  if (!(yMax > 0)) yMax = 1;
+  const sx = (t) => L + (t - tMin) / (tMax - tMin) * (W - L - R), sy = (v) => T + (1 - v / yMax) * (H - T - B);
+  const unit = view === "rate" ? "/s" : " ms";
+  const title = view === "rate" ? "Span rate" : "Span duration (percentile)";
+  const svg = traceSvg("svg", { viewBox: `0 0 ${W} ${H}`, class: "explorer-chart trace-series", role: "img",
+    "aria-label": `${title}: ${series.map(([, l]) => l).join(", ")}; the highest ${bqShortNumber(yMax)}${unit}` });
   for (let i = 0; i <= 4; i++) {
     const v = yMax * i / 4;
-    add("line", { x1: L, x2: W - R, y1: sy(v), y2: sy(v), class: "explorer-grid" });
-    add("text", { x: L - 6, y: sy(v) + 4, "text-anchor": "end", "font-size": 11, class: "explorer-axis" }, `${bqShortNumber(v)} ms`);
+    svg.append(traceSvg("line", { x1: L, x2: W - R, y1: sy(v), y2: sy(v), class: "explorer-grid" }));
+    svg.append(traceSvg("text", { x: L - 6, y: sy(v) + 4, "text-anchor": "end", "font-size": 11, class: "explorer-axis" }, `${bqShortNumber(v)}${unit}`));
   }
   for (let i = 0; i <= 4; i++) {
     const t = tMin + (tMax - tMin) * i / 4;
-    add("text", { x: sx(t), y: H - 8, "text-anchor": "middle", "font-size": 11, class: "explorer-axis" },
-      new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+    svg.append(traceSvg("text", { x: sx(t), y: H - 8, "text-anchor": "middle", "font-size": 11, class: "explorer-axis" }, traceTime(t)));
   }
-  for (const p of pts) {
-    add("circle", { cx: sx(p.t), cy: sy(p.v), r: 3.5, class: p.err ? "trace-point is-error" : "trace-point" })
-      .append(Object.assign(document.createElementNS(NS, "title"),
-        { textContent: `${p.name}: ${p.v} ms at ${new Date(p.t).toLocaleString()}` }));
+  for (const [k, , cls] of series) {
+    const pts = intervals.map((iv, i) => (view === "rate" || Number(iv.fields.count) > 0) ? `${sx(xs[i]).toFixed(1)},${sy(Number(iv.fields[k]) || 0).toFixed(1)}` : null).filter(Boolean);
+    svg.append(traceSvg("polyline", { points: pts.join(" "), class: `trace-line ${cls}`, fill: "none" }));
   }
-  return svg;
+  const legend = el("ul", { class: "trace-series-legend" },
+    ...series.map(([, l, cls]) => el("li", {}, el("span", { class: `trace-key ${cls}`, "aria-hidden": "true" }), el("span", { text: l }))));
+  return el("div", { class: "trace-series-host" }, svg, legend);
+}
+
+// traceMatch reports whether Find in Trace's text is in a span's Name,
+// Service/workload or Attributes: "Search applies only to the span name,
+// service or workload name, and attributes fields", case-insensitive plain
+// text.
+function traceMatch(span, needle) {
+  if (!needle) return false;
+  const n = needle.toLowerCase(), f = span.fields || {};
+  if (String(span.name).toLowerCase().includes(n) || String(f.Service || "").toLowerCase().includes(n)) return true;
+  let attrs = {};
+  try { attrs = JSON.parse(f.attributes || "{}") || {}; } catch { attrs = {}; }
+  return Object.entries(attrs).some(([k, v]) => `${k}: ${v}`.toLowerCase().includes(n));
+}
+
+// traceMarked is text with Find in Trace's matches marked.
+function traceMarked(text, needle) {
+  const s = String(text);
+  if (!needle) return [s];
+  const out = [], low = s.toLowerCase(), n = needle.toLowerCase();
+  let i = 0;
+  for (let j = low.indexOf(n); j >= 0; j = low.indexOf(n, i)) {
+    if (j > i) out.push(s.slice(i, j));
+    out.push(el("mark", { class: "trace-find-mark", text: s.slice(j, j + n.length) }));
+    i = j + n.length;
+  }
+  if (i < s.length) out.push(s.slice(i));
+  return out;
+}
+
+// traceGraph is the trace's call hierarchy "as a directed acyclic graph
+// (DAG)": "the name and latency appear with each element", coloured by
+// status; the scroll wheel resizes it. Each node selects its span.
+function traceGraph(spans, selected, needle, onSelect) {
+  const NW = 180, NH = 40, GX = 40, GY = 16;
+  const ids = new Set(spans.map((s) => s.fields["Span ID"]));
+  let row = 0;
+  const pos = new Map();
+  for (const s of spans) { // depth first already, from the server
+    pos.set(s.fields["Span ID"], { x: Number(s.fields.depth) * (NW + GX) + 8, y: row++ * (NH + GY) + 8 });
+  }
+  const W = Math.max(...[...pos.values()].map((p) => p.x)) + NW + 16, H = row * (NH + GY) + 16;
+  const svg = traceSvg("svg", { viewBox: `0 0 ${W} ${H}`, class: "trace-graph", role: "group", width: W, height: H,
+    "aria-label": `Graph of ${spans.length} spans; the scroll wheel resizes it` });
+  for (const s of spans) {
+    const par = s.fields["Parent span ID"];
+    if (!ids.has(par)) continue;
+    const a = pos.get(par), b = pos.get(s.fields["Span ID"]);
+    svg.append(traceSvg("path", { d: `M${a.x + 16},${a.y + NH} V${b.y + NH / 2} H${b.x}`, class: "trace-edge", fill: "none" }));
+  }
+  for (const s of spans) {
+    const p = pos.get(s.fields["Span ID"]);
+    const err = String(s.fields.Status || "").startsWith("Error");
+    const hit = traceMatch(s, needle);
+    const g = traceSvg("g", { class: "trace-node" + (err ? " is-error" : "") + (s === selected ? " is-selected" : "") + (hit ? " is-match" : ""),
+      transform: `translate(${p.x},${p.y})`, tabindex: 0, role: "button", "aria-pressed": String(s === selected),
+      "aria-label": `Select span ${s.name}, ${s.fields["Duration (ms)"]} ms${err ? ", error" : ""}${hit ? ", matches Find in Trace" : ""}` });
+    g.append(traceSvg("rect", { width: NW, height: NH, rx: 4 }));
+    const name = s.name.length > 24 ? s.name.slice(0, 23) + "…" : s.name;
+    g.append(traceSvg("text", { x: 8, y: 16, class: "trace-node-name" }, name));
+    g.append(traceSvg("text", { x: 8, y: 32, class: "trace-node-latency" }, `${s.fields["Duration (ms)"]} ms`));
+    g.append(traceSvg("title", {}, `${s.name} (${s.fields.Service}): ${s.fields["Duration (ms)"]} ms`));
+    g.addEventListener("click", () => onSelect(s));
+    g.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(s); } });
+    svg.append(g);
+  }
+  let scale = 1;
+  const host = el("div", { class: "trace-graph-host" }, svg);
+  host.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    scale = Math.min(3, Math.max(0.3, scale * (e.deltaY < 0 ? 1.1 : 0.9)));
+    svg.setAttribute("width", String(W * scale));
+    svg.setAttribute("height", String(H * scale));
+  }, { passive: false });
+  return host;
 }
 
 async function renderTraceExplorer(view, match) {
@@ -14039,13 +14174,30 @@ async function renderTraceExplorer(view, match) {
   const field = (label, control, help) => el("div", { class: "explorer-field" },
     el("label", { for: control.id, text: label }), control, help ? el("p", { class: "field-help", text: help }) : null);
 
+  // The Chart view menu. UNVERIFIED (docs re-read 2026-11-21:
+  // https://docs.cloud.google.com/trace/docs/finding-traces): Google names
+  // the menu's Span duration (percentile) and Span rate, and the heatmap
+  // apart from it; here the heatmap is the menu's first, default, view.
+  let chartView = params.get("chart") || "heatmap";
+  const chartSelect = select("trace-chart-view", "Chart view", [["heatmap", "Heatmap"], ["percentile", "Span duration (percentile)"],
+    ["rate", "Span rate"]], chartView);
   const chartHost = el("div", { class: "explorer-chart-host", "aria-live": "polite" });
+  const selectionHost = el("div", { class: "trace-selection" });
   const tableHost = el("div", { class: "explorer-table-host" });
   const detailsHost = el("section", { class: "card trace-details", id: "trace-details", "aria-label": "Trace details", hidden: true });
 
-  let lastSpans = [];
-  let sortCol = "Start time", sortDesc = true;
-  function drawTable() {
+  // The tables: "Spans" and "Grouped".
+  let tableTab = params.get("table") === "grouped" ? "grouped" : "spans";
+  const tableTabs = [["spans", "Spans"], ["grouped", "Grouped"]].map(([id, label]) => el("button", {
+    type: "button", role: "tab", class: "tab", id: `trace-table-tab-${id}`, "aria-controls": "trace-table-panel", text: label,
+    onclick: () => { tableTab = id; drawTable(); } }));
+  const tablePanel = el("div", { id: "trace-table-panel", role: "tabpanel" }, tableHost);
+
+  let lastSpans = [], lastGroups = [], lastHeatmap = {}, selection = null, lastTotals = { spans: 0, groups: 0 };
+  let sortCol = "Start time", sortDesc = true, groupSort = "Spans", groupDesc = true;
+  const sortHead = (c, cur, desc, set) => el("th", { scope: "col", "aria-sort": c === cur ? (desc ? "descending" : "ascending") : "none" },
+    el("button", { type: "button", class: "link-button is-inline", text: c, onclick: () => set(c) }));
+  function drawSpans() {
     const cols = ["Start time", "Span name", "Service", "Duration (ms)", "Status", "Span kind", "Trace ID", "Project"];
     const val = (r, c) => c === "Span name" ? r.name : (r.fields || {})[c] || "";
     const rows = [...lastSpans].sort((a, b) => {
@@ -14053,12 +14205,10 @@ async function renderTraceExplorer(view, match) {
       const n = sortCol === "Duration (ms)" ? Number(x) - Number(y) : String(x).localeCompare(String(y));
       return sortDesc ? -n : n;
     });
+    const set = (c) => { if (sortCol === c) sortDesc = !sortDesc; else { sortCol = c; sortDesc = false; } drawTable(); };
     setChildren(tableHost, rows.length
-      ? el("div", { class: "table-wrap explorer-table-wrap" }, el("table", { class: "explorer-table", "aria-label": "Spans" },
-          el("thead", {}, el("tr", {}, ...cols.map((c) => el("th", { scope: "col",
-            "aria-sort": c === sortCol ? (sortDesc ? "descending" : "ascending") : "none" },
-            el("button", { type: "button", class: "link-button is-inline", text: c,
-              onclick: () => { if (sortCol === c) sortDesc = !sortDesc; else { sortCol = c; sortDesc = false; } drawTable(); } }))))),
+      ? el("div", { class: "table-wrap explorer-table-wrap" }, el("table", { class: "explorer-table trace-spans", "aria-label": "Spans" },
+          el("thead", {}, el("tr", {}, ...cols.map((c) => sortHead(c, sortCol, sortDesc, set)))),
           el("tbody", {}, ...rows.map((r) => el("tr", {},
             el("td", { class: "mono", text: new Date(r.fields["Start time"]).toLocaleString() }),
             el("td", {}, el("button", { type: "button", class: "link-button is-inline", text: r.name,
@@ -14073,34 +14223,110 @@ async function renderTraceExplorer(view, match) {
             el("td", { text: r.fields.Project }))))))
       : el("p", { class: "unavailable", text: "No spans match." }));
   }
-
+  function drawGroups() {
+    const cols = ["Span name", "Service/workload", "Spans", "Errors", "Average (ms)", "P50 (ms)", "P95 (ms)", "P99 (ms)"];
+    const val = (r, c) => c === "Span name" ? r.name : (r.fields || {})[c] || "";
+    const numeric = (c) => !["Span name", "Service/workload"].includes(c);
+    const rows = [...lastGroups].sort((a, b) => {
+      const x = val(a, groupSort), y = val(b, groupSort);
+      const n = numeric(groupSort) ? Number(x) - Number(y) : String(x).localeCompare(String(y));
+      return groupDesc ? -n : n;
+    });
+    const set = (c) => { if (groupSort === c) groupDesc = !groupDesc; else { groupSort = c; groupDesc = false; } drawTable(); };
+    setChildren(tableHost, rows.length
+      ? el("div", { class: "table-wrap explorer-table-wrap" }, el("table", { class: "explorer-table trace-groups", "aria-label": "Grouped spans" },
+          el("thead", {}, el("tr", {}, ...cols.map((c) => sortHead(c, groupSort, groupDesc, set)))),
+          el("tbody", {}, ...rows.map((r) => el("tr", {},
+            el("td", {}, el("button", { type: "button", class: "link-button is-inline", text: r.name,
+              "aria-label": `Open the slowest ${r.name} span of ${r.fields["Service/workload"]}`,
+              onclick: () => openTrace(r.fields["Trace ID"], r.fields.Project, r.fields["Span ID"]) })),
+            ...cols.slice(1).map((c) => el("td", { text: r.fields[c] })))))))
+      : el("p", { class: "unavailable", text: "No spans match." }));
+  }
+  function drawTable() {
+    tableTabs.forEach((b, i) => {
+      const on = (i === 0 ? "spans" : "grouped") === tableTab;
+      b.setAttribute("aria-selected", on ? "true" : "false");
+      b.setAttribute("tabindex", on ? "0" : "-1");
+      b.classList.toggle("is-selected", on);
+    });
+    tablePanel.setAttribute("aria-labelledby", `trace-table-tab-${tableTab}`);
+    const q = new URLSearchParams(location.search);
+    if (tableTab === "grouped") q.set("table", "grouped"); else q.delete("table");
+    history.replaceState(history.state, "", location.pathname + "?" + q.toString());
+    if (tableTab === "grouped") drawGroups(); else drawSpans();
+  }
+  function drawChart() {
+    const total = lastHeatmap.total || 0;
+    setChildren(chartHost,
+      el("div", { class: "chart-head" }, el("h2", { text: chartView === "heatmap" ? "Latency heatmap" : chartView === "rate" ? "Span rate" : "Span duration (percentile)" }),
+        el("span", { class: "chart-now", text: `${total} ${total === 1 ? "span" : "spans"}` })),
+      chartView === "heatmap" ? traceHeatmap(lastHeatmap, selection, selectCell) : traceSeries(lastHeatmap, chartView));
+  }
+  function drawSelection() {
+    setChildren(selectionHost, selection
+      ? el("div", { class: "trace-selection-chip", role: "status" },
+          el("span", { text: `Selected cell: ${selection.label}` }),
+          el("button", { type: "button", class: "secondary", text: "Clear selection", onclick: () => { selection = null; drawChart(); drawSelection(); runTables(); } }))
+      : null);
+  }
+  function selectCell(cell) {
+    selection = cell;
+    drawChart();
+    drawSelection();
+    runTables();
+  }
+  const baseValues = () => ({ scope: scopeSelect.value, range: String(range), filter: filterInput.value, service: serviceInput.value,
+    spanName: nameInput.value, status: statusSelect.value, minDuration: minInput.value, kind: kindSelect.value });
+  async function runTables() {
+    const values = baseValues();
+    if (selection) {
+      values.cellStart = selection.cellStart;
+      values.cellEnd = selection.cellEnd;
+      if (!values.minDuration || Number(selection.minDuration) > Number(values.minDuration)) values.minDuration = selection.minDuration;
+      if (selection.maxDuration) values.maxDuration = selection.maxDuration;
+    }
+    setChildren(tableHost, loadingState(2, { what: "spans" }));
+    let spans, groups;
+    try {
+      [spans, groups] = await Promise.all([query("spans", values), query("grouped", values)]);
+    } catch (err) {
+      setChildren(tableHost, errorState("Spans unavailable", String(err.message), runTables));
+      return;
+    }
+    lastSpans = spans.items || [];
+    lastGroups = groups.items || [];
+    lastTotals = { spans: spans.total || lastSpans.length, groups: groups.total || lastGroups.length };
+    drawTable();
+    announce(`Trace explorer: ${lastSpans.length} spans in ${lastGroups.length} groups`);
+  }
   async function run() {
-    const values = { scope: scopeSelect.value, range: String(range), filter: filterInput.value, service: serviceInput.value,
-      spanName: nameInput.value, status: statusSelect.value, minDuration: minInput.value, kind: kindSelect.value };
+    const values = baseValues();
     const q = new URLSearchParams(location.search);
     for (const [k, v] of Object.entries(values)) { if (v) q.set(k, v); else q.delete(k); }
     history.replaceState(history.state, "", location.pathname + "?" + q.toString());
+    selection = null;
+    drawSelection();
     setChildren(chartHost, loadingState(2, { what: "spans" }));
-    let data;
     try {
-      data = await query("spans", values);
+      lastHeatmap = await query("heatmap", values);
     } catch (err) {
       setChildren(chartHost, errorState("Spans unavailable", String(err.message), run));
       setChildren(tableHost);
       return;
     }
-    lastSpans = data.items || [];
-    const shown = lastSpans.length, total = data.total || shown;
-    setChildren(chartHost,
-      el("div", { class: "chart-head" }, el("h2", { text: "Span duration" }),
-        el("span", { class: "chart-now", text: total > shown ? `${shown} of ${total} spans` : `${shown} spans` })),
-      traceChart(lastSpans),
-      data.note ? el("p", { class: "chart-foot unavailable mono", text: data.note }) : null);
-    drawTable();
-    announce(`Trace explorer: ${shown} spans`);
+    drawChart();
+    await runTables();
   }
   apply.addEventListener("click", run);
   scopeSelect.addEventListener("change", run);
+  chartSelect.addEventListener("change", () => {
+    chartView = chartSelect.value;
+    const q = new URLSearchParams(location.search);
+    if (chartView !== "heatmap") q.set("chart", chartView); else q.delete("chart");
+    history.replaceState(history.state, "", location.pathname + "?" + q.toString());
+    drawChart();
+  });
 
   async function openTrace(id, traceProject, spanId) {
     if (!id) return;
@@ -14119,15 +14345,22 @@ async function renderTraceExplorer(view, match) {
         errorState("Trace unavailable", String(err.message), () => openTrace(id, traceProject, spanId)));
       return;
     }
+    detailsView = params.get("view") === "graph" ? "graph" : detailsView;
+    findText = "";
     drawDetails(data, spanId);
     detailsHost.scrollIntoView({ block: "nearest" });
   }
 
-  function drawDetails(data, selectedId) {
+  // The details' view (Timeline, or Graph) and Find in Trace's text, kept
+  // while another span is selected.
+  let detailsView = "timeline", findText = "", findIndex = 0;
+  function drawDetails(data, selectedId, focusFind) {
     const spans = data.items || [];
     const total = Math.max(1, ...spans.map((s) => Number(s.fields["Start (ms)"]) + Number(s.fields["Duration (ms)"])));
     let selected = spans.find((s) => s.fields["Span ID"] === selectedId) || spans[0];
-    const panel = el("div", { class: "trace-span-panel" });
+    const matches = spans.filter((s) => traceMatch(s, findText));
+    if (findIndex >= matches.length) findIndex = 0;
+    const select = (s) => drawDetails(data, s.fields["Span ID"]);
     const rows = spans.map((s) => {
       const f = s.fields;
       let evs = [];
@@ -14136,26 +14369,30 @@ async function renderTraceExplorer(view, match) {
       const bar = el("div", { class: "trace-bar-track" },
         el("span", { class: "trace-bar" + (f.Status.startsWith("Error") ? " is-error" : ""), style: `left:${left}%;width:${width}%` },
           evs.length ? el("span", { class: "trace-bar-dot", title: `${evs.length} log entries and events` }) : null));
-      const row = el("tr", { class: "trace-row" + (s === selected ? " is-selected" : "") },
+      const hit = traceMatch(s, findText);
+      const current = hit && matches[findIndex] === s;
+      return el("tr", { class: "trace-row" + (s === selected ? " is-selected" : "") + (hit ? " is-match" : "") + (current ? " is-current-match" : "") },
         el("td", { style: `padding-left:${8 + Number(f.depth) * 16}px` },
-          el("button", { type: "button", class: "link-button is-inline", text: s.name, "aria-pressed": String(s === selected),
-            "aria-label": `Select span ${s.name} (${f["Span ID"]})`, onclick: () => { selected = s; drawDetails(data, f["Span ID"]); } }),
+          el("button", { type: "button", class: "link-button is-inline", "aria-pressed": String(s === selected),
+            "aria-label": `Select span ${s.name} (${f["Span ID"]})${hit ? ", matches Find in Trace" : ""}`, onclick: () => select(s) },
+            ...traceMarked(s.name, findText)),
           el("span", { class: "trace-span-id mono", text: ` ${f["Span ID"]}` })),
-        el("td", { text: f.Service }),
+        el("td", {}, ...traceMarked(f.Service, findText)),
         el("td", { class: "trace-bar-cell" }, bar),
         el("td", { text: `${f["Duration (ms)"]} ms` + (evs.length ? ` · ${evs.length} ${evs.length === 1 ? "entry" : "entries"}` : "") }));
-      return row;
     });
     const tabs = [["attributes", "Attributes"], ["logs", "Logs & Events"], ["metadata", "Metadata & Links"]];
     let tab = "attributes";
     const tabButtons = tabs.map(([id, label]) => el("button", { type: "button", role: "tab", class: "tab", id: `trace-tab-${id}`,
       "aria-controls": "trace-tab-panel", text: label, onclick: () => { tab = id; drawPanel(); } }));
     const tabPanel = el("div", { id: "trace-tab-panel", role: "tabpanel" });
-    const kv = (pairs, label) => pairs.length
+    const kv = (pairs, label, mark) => pairs.length
       ? el("div", { class: "table-wrap" }, el("table", { class: "explorer-table trace-kv", "aria-label": label },
           el("thead", {}, el("tr", {}, el("th", { scope: "col", text: "Key" }), el("th", { scope: "col", text: "Value" }))),
           el("tbody", {},
-            ...pairs.map(([k, v]) => el("tr", {}, el("th", { scope: "row", class: "mono", text: k }), el("td", { class: "mono", text: v }))))))
+            ...pairs.map(([k, v]) => el("tr", { class: mark && `${k}: ${v}`.toLowerCase().includes(findText.toLowerCase()) ? "is-match" : "" },
+              el("th", { scope: "row", class: "mono" }, ...(mark ? traceMarked(k, findText) : [k])),
+              el("td", { class: "mono" }, ...(mark ? traceMarked(v, findText) : [v])))))))
       : el("p", { class: "unavailable", text: "None." });
     function drawPanel() {
       tabButtons.forEach((b, i) => {
@@ -14170,7 +14407,7 @@ async function renderTraceExplorer(view, match) {
       if (tab === "attributes") {
         let attrs = {};
         try { attrs = JSON.parse(f.attributes || "{}") || {}; } catch { attrs = {}; }
-        setChildren(tabPanel, kv(Object.entries(attrs).sort(([a], [b]) => a.localeCompare(b)), "Span attributes"));
+        setChildren(tabPanel, kv(Object.entries(attrs).sort(([a], [b]) => a.localeCompare(b)), "Span attributes", !!findText));
       } else if (tab === "logs") {
         let evs = [];
         try { evs = JSON.parse(f.events || "[]") || []; } catch { evs = []; }
@@ -14184,25 +14421,66 @@ async function renderTraceExplorer(view, match) {
       } else {
         setChildren(tabPanel, kv([["Span ID", f["Span ID"]], ["Parent span ID", f["Parent span ID"]], ["Trace ID", f["Trace ID"]],
           ["Project ID", f.Project], ["Start time", f["Start time"]], ["End time", f["End time"]], ["Span kind", f["Span kind"]],
-          ["Status", f.Status], ["Instrumentation scope", f["Instrumentation scope"]], ["Links", f.Links]], "Span metadata"));
+          ["Status", f.Status], ["Instrumentation scope", f["Instrumentation scope"]], ["Links", f.Links]], "Span metadata", false));
       }
     }
     drawPanel();
+
+    // The toolbar: Timeline or Graph, and Find in Trace.
+    const viewGroup = el("div", { class: "actions", role: "group", "aria-label": "Trace view" },
+      ...[["timeline", "Timeline"], ["graph", "Graph"]].map(([id, label]) => el("button", {
+        type: "button", class: id === detailsView ? "primary" : "secondary", "aria-pressed": String(id === detailsView), text: label,
+        onclick: () => {
+          detailsView = id;
+          const q = new URLSearchParams(location.search);
+          if (id === "graph") q.set("view", "graph"); else q.delete("view");
+          history.replaceState(history.state, "", location.pathname + "?" + q.toString());
+          drawDetails(data, selected && selected.fields["Span ID"]);
+        } })));
+    const findInput = el("input", { id: "trace-find", type: "search", "aria-label": "Find in Trace", placeholder: "Find in Trace",
+      value: findText, "aria-describedby": "trace-find-count" });
+    const go = (step) => {
+      if (!matches.length) return;
+      findIndex = (findIndex + step + matches.length) % matches.length;
+      drawDetails(data, matches[findIndex].fields["Span ID"]);
+    };
+    findInput.addEventListener("input", () => {
+      findText = findInput.value.trim();
+      findIndex = 0;
+      const first = spans.find((s) => traceMatch(s, findText));
+      drawDetails(data, first ? first.fields["Span ID"] : selected && selected.fields["Span ID"], true);
+    });
+    findInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); go(e.shiftKey ? -1 : 1); } });
+    const countText = !findText ? "" : matches.length ? `${findIndex + 1} of ${matches.length} matches` : "No matches";
+    const findBar = el("div", { class: "trace-find", role: "search", "aria-label": "Find in Trace" },
+      el("label", { for: "trace-find", text: "Find in Trace" }), findInput,
+      el("span", { id: "trace-find-count", class: "trace-find-count", "aria-live": "polite", text: countText }),
+      el("button", { type: "button", class: "secondary", text: "Previous", disabled: matches.length < 2, onclick: () => go(-1) }),
+      el("button", { type: "button", class: "secondary", text: "Next", disabled: matches.length < 2, onclick: () => go(1) }));
+
+    const body = detailsView === "graph"
+      ? traceGraph(spans, selected, findText, select)
+      : el("div", { class: "table-wrap" }, el("table", { class: "explorer-table trace-timeline", "aria-label": "Timeline" },
+          el("thead", {}, el("tr", {}, ...["Name", "Service/workload", "Latency", "Duration"].map((c) => el("th", { scope: "col", text: c })))),
+          el("tbody", {}, ...rows)));
     setChildren(detailsHost,
       el("div", { class: "chart-head" }, el("h2", { text: "Trace details" }),
         el("button", { type: "button", class: "secondary", text: "Close", onclick: () => {
           detailsHost.hidden = true;
           const q = new URLSearchParams(location.search);
-          for (const k of ["trace", "traceProject", "span"]) q.delete(k);
+          for (const k of ["trace", "traceProject", "span", "view"]) q.delete(k);
           history.replaceState(history.state, "", location.pathname + "?" + q.toString());
         } })),
       data.note ? el("p", { class: "mono", text: data.note }) : null,
-      el("div", { class: "table-wrap" }, el("table", { class: "explorer-table trace-timeline", "aria-label": "Timeline" },
-        el("thead", {}, el("tr", {}, ...["Name", "Service", "Latency", "Duration"].map((c) => el("th", { scope: "col", text: c })))),
-        el("tbody", {}, ...rows))),
+      el("div", { class: "trace-details-toolbar" }, viewGroup, findBar),
+      body,
       el("div", { class: "tab-strip", role: "tablist", "aria-label": "Span details" }, ...tabButtons),
       tabPanel);
-    announce(`Trace details: ${spans.length} spans`);
+    if (focusFind) {
+      const f = document.getElementById("trace-find");
+      if (f) { f.focus(); f.setSelectionRange(f.value.length, f.value.length); }
+    }
+    announce(findText ? `Find in Trace: ${countText}` : `Trace details: ${spans.length} spans`);
   }
 
   setChildren(view, header,
@@ -14220,7 +14498,11 @@ async function renderTraceExplorer(view, match) {
         el("h2", { text: "Filter" }),
         field("Filter", filterInput, "root:, span:, latency:, label:KEY, KEY:VALUE; + for exact, ^ for the root span."),
         apply),
-      el("section", { class: "card explorer-results", "aria-label": "Spans" }, chartHost, tableHost)),
+      el("section", { class: "card explorer-results", "aria-label": "Spans" },
+        el("div", { class: "trace-chart-toolbar" }, field("Chart view", chartSelect)),
+        chartHost, selectionHost,
+        el("div", { class: "tab-strip", role: "tablist", "aria-label": "Span tables" }, ...tableTabs),
+        tablePanel)),
     detailsHost);
   announce("Trace explorer");
   await run();

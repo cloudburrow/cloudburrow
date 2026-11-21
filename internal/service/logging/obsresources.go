@@ -89,8 +89,9 @@ const (
 	SpansDatasetID = "Spans"
 	AllSpansViewID = "_AllSpans"
 	// DefaultTraceBucketLocation is where a system-created _Trace goes
-	// without default settings (UNVERIFIED: "the system selects a supported
-	// location").
+	// without default settings (UNVERIFIED (docs re-read 2026-11-21:
+	// https://docs.cloud.google.com/trace/docs/storage-overview): "the
+	// system selects a supported location").
 	DefaultTraceBucketLocation = "us"
 )
 

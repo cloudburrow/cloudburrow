@@ -32,6 +32,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"sort"
 	"strconv"
@@ -167,6 +168,10 @@ func (traceExplorerProvider) QueryForm(path []string) (string, []console.Field) 
 		{Name: "status", Label: "Span status", Type: "select", Options: []string{"", "OK", "Error"}},
 		{Name: "minDuration", Label: "Minimum duration (ms)", Type: "text"},
 		{Name: "kind", Label: "Span kind", Type: "select", Options: []string{"", "INTERNAL", "SERVER", "CLIENT", "PRODUCER", "CONSUMER"}},
+		// A heatmap cell's selection.
+		{Name: "maxDuration", Label: "Maximum duration (ms)", Type: "text"},
+		{Name: "cellStart", Label: "Interval start (epoch ms)", Type: "text"},
+		{Name: "cellEnd", Label: "Interval end (epoch ms)", Type: "text"},
 	}
 }
 
@@ -196,8 +201,9 @@ func durationMs(d time.Duration) string {
 	return strconv.FormatFloat(float64(d)/float64(time.Millisecond), 'f', 3, 64)
 }
 
-// Build runs the explorer: ["spans"] is the Spans table and chart of a
-// search; ["trace"] is one trace's details.
+// Build runs the explorer: ["spans"] is the Spans table of a search,
+// ["heatmap"] its latency heatmap and Chart view series, ["grouped"] its
+// Grouped table; ["trace"] is one trace's details.
 func (p traceExplorerProvider) Build(_ context.Context, project string, path []string, values map[string]string) (console.Listing, error) {
 	a, err := p.api()
 	if err != nil {
@@ -209,34 +215,72 @@ func (p traceExplorerProvider) Build(_ context.Context, project string, path []s
 	switch {
 	case len(path) == 1 && path[0] == "spans":
 		return p.spans(a, project, values, time.Now())
+	case len(path) == 1 && path[0] == "heatmap":
+		return p.heatmap(a, project, values, time.Now())
+	case len(path) == 1 && path[0] == "grouped":
+		return p.grouped(a, project, values, time.Now())
 	case len(path) == 1 && path[0] == "trace":
 		return p.details(a, project, values)
 	}
 	return console.Listing{}, fmt.Errorf("Trace explorer has no query at %v", path)
 }
 
-func (p traceExplorerProvider) spans(a *trace.Server, project string, values map[string]string, now time.Time) (console.Listing, error) {
+// spanQuery is one search's matched spans, the newest first, with the
+// time range it read and the trace scope it read through.
+type spanQuery struct {
+	spans    []*trace.Span
+	projects []string
+	scope    string
+	start    time.Time // zero for no lower bound
+}
+
+func msValue(values map[string]string, key, what string) (time.Duration, bool, error) {
+	v := values[key]
+	if v == "" {
+		return 0, false, nil
+	}
+	ms, err := strconv.ParseFloat(v, 64)
+	if err != nil || ms < 0 {
+		return 0, false, fmt.Errorf("%s %q is not a number of milliseconds", what, v)
+	}
+	return time.Duration(ms * float64(time.Millisecond)), true, nil
+}
+
+// match runs a search: the trace scope, the Filter bar, the time range and
+// the Span filters, and a heatmap cell's selection (cellStart and cellEnd,
+// epoch milliseconds of the spans' start; minDuration and maxDuration).
+func (p traceExplorerProvider) match(a *trace.Server, project string, values map[string]string, now time.Time) (spanQuery, error) {
 	projects, scopeName, err := p.scopeProjects(project, values["scope"])
 	if err != nil {
-		return console.Listing{}, err
+		return spanQuery{}, err
 	}
 	f, err := trace.ParseFilter(values["filter"])
 	if err != nil {
-		return console.Listing{}, err
+		return spanQuery{}, err
 	}
 	q := trace.Query{Projects: projects, Filter: f}
 	if r, err := strconv.Atoi(values["range"]); err == nil && r > 0 {
 		q.Start = now.Add(-time.Duration(r) * time.Second)
 	} else if values["range"] != "" {
-		return console.Listing{}, fmt.Errorf("time range %q is not a number of seconds", values["range"])
+		return spanQuery{}, fmt.Errorf("time range %q is not a number of seconds", values["range"])
 	}
-	var minDur time.Duration
-	if v := values["minDuration"]; v != "" {
-		ms, err := strconv.ParseFloat(v, 64)
-		if err != nil || ms < 0 {
-			return console.Listing{}, fmt.Errorf("minimum duration %q is not a number of milliseconds", v)
+	minDur, _, err := msValue(values, "minDuration", "minimum duration")
+	if err != nil {
+		return spanQuery{}, err
+	}
+	maxDur, hasMax, err := msValue(values, "maxDuration", "maximum duration")
+	if err != nil {
+		return spanQuery{}, err
+	}
+	var cellStart, cellEnd int64
+	for key, dst := range map[string]*int64{"cellStart": &cellStart, "cellEnd": &cellEnd} {
+		if v := values[key]; v != "" {
+			n, err := strconv.ParseInt(v, 10, 64)
+			if err != nil {
+				return spanQuery{}, fmt.Errorf("%s %q is not a time in epoch milliseconds", key, v)
+			}
+			*dst = n
 		}
-		minDur = time.Duration(ms * float64(time.Millisecond))
 	}
 	var spans []*trace.Span
 	for _, t := range a.Search(q) {
@@ -256,13 +300,26 @@ func (p traceExplorerProvider) spans(a *trace.Server, project string, values map
 			if v := values["kind"]; v != "" && spanKind(sp) != v {
 				continue
 			}
-			if sp.End().Sub(sp.Start()) < minDur {
+			d := sp.End().Sub(sp.Start())
+			if d < minDur || (hasMax && d >= maxDur) {
+				continue
+			}
+			if ms := sp.Start().UnixMilli(); (cellStart != 0 && ms < cellStart) || (cellEnd != 0 && ms >= cellEnd) {
 				continue
 			}
 			spans = append(spans, sp)
 		}
 	}
 	sort.SliceStable(spans, func(i, j int) bool { return spans[i].Start().After(spans[j].Start()) })
+	return spanQuery{spans: spans, projects: projects, scope: scopeName, start: q.Start}, nil
+}
+
+func (p traceExplorerProvider) spans(a *trace.Server, project string, values map[string]string, now time.Time) (console.Listing, error) {
+	m, err := p.match(a, project, values, now)
+	if err != nil {
+		return console.Listing{}, err
+	}
+	spans := m.spans
 	out := console.Listing{NameColumn: "Span name", Noun: "spans",
 		Columns: []string{"Start time", "Service", "Duration (ms)", "Status", "Span kind", "Trace ID", "Project"}}
 	out.Total = len(spans)
@@ -276,7 +333,172 @@ func (p traceExplorerProvider) spans(a *trace.Server, project string, values map
 			"Trace ID": sp.TraceID, "Project": sp.Project, "Span ID": sp.SpanID,
 			"startMs": strconv.FormatInt(sp.Start().UnixMilli(), 10)}})
 	}
-	out.Note = fmt.Sprintf("trace scope %s: %s", scopeName, strings.Join(projects, ", "))
+	out.Note = fmt.Sprintf("trace scope %s: %s", m.scope, strings.Join(m.projects, ", "))
+	return out, nil
+}
+
+// heatmapLatencyEdges are the heatmap's latency rows, in milliseconds,
+// each row from one edge to the next and the last open above. UNVERIFIED
+// (docs re-read 2026-11-21: https://docs.cloud.google.com/trace/docs/
+// finding-traces): Google does not publish its buckets; these are
+// logarithmic, 1-2-5 per decade.
+var heatmapLatencyEdges = []float64{0, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 60000}
+
+// heatmapColumns is the number of time intervals across the range.
+const heatmapColumns = 30
+
+// percentile is the nearest-rank percentile of sorted durations.
+func percentile(sorted []float64, p float64) float64 {
+	if len(sorted) == 0 {
+		return 0
+	}
+	i := int(math.Ceil(p/100*float64(len(sorted)))) - 1
+	return sorted[max(0, min(i, len(sorted)-1))]
+}
+
+func fms(v float64) string { return strconv.FormatFloat(v, 'f', 3, 64) }
+
+// heatmap is the search's spans by start time and latency: "the heatmap
+// uses color to represent the number of spans in a cell", each cell a time
+// interval and latency range ("cell" items); and per interval the 50th,
+// 90th, 95th and 99th percentiles of the span duration and the rate of OK
+// and error spans ("interval" items), for the Chart view's Span duration
+// (percentile) and Span rate.
+func (p traceExplorerProvider) heatmap(a *trace.Server, project string, values map[string]string, now time.Time) (console.Listing, error) {
+	m, err := p.match(a, project, values, now)
+	if err != nil {
+		return console.Listing{}, err
+	}
+	out := console.Listing{Noun: "cells", Columns: []string{"t0", "t1", "lo", "hi", "count"}, Total: len(m.spans)}
+	from, to := m.start, now
+	if from.IsZero() {
+		if len(m.spans) == 0 {
+			return out, nil
+		}
+		from = m.spans[len(m.spans)-1].Start()
+		if s := m.spans[0].Start(); s.After(to) {
+			to = s
+		}
+	}
+	width := to.Sub(from) / heatmapColumns
+	if width <= 0 {
+		width = time.Second
+	}
+	type cellKey struct{ col, row int }
+	cells := map[cellKey]int{}
+	cols := make([][]float64, heatmapColumns)
+	errs := make([]int, heatmapColumns)
+	for _, sp := range m.spans {
+		col := int(sp.Start().Sub(from) / width)
+		col = max(0, min(col, heatmapColumns-1))
+		ms := float64(sp.End().Sub(sp.Start())) / float64(time.Millisecond)
+		row := sort.SearchFloat64s(heatmapLatencyEdges, ms)
+		if row == len(heatmapLatencyEdges) || heatmapLatencyEdges[row] != ms {
+			row--
+		}
+		row = max(0, row)
+		cells[cellKey{col, row}]++
+		cols[col] = append(cols[col], ms)
+		if spanStatus(sp) == "Error" {
+			errs[col]++
+		}
+	}
+	colStart := func(c int) int64 { return from.Add(time.Duration(c) * width).UnixMilli() }
+	keys := make([]cellKey, 0, len(cells))
+	for k := range cells {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].col != keys[j].col {
+			return keys[i].col < keys[j].col
+		}
+		return keys[i].row < keys[j].row
+	})
+	for _, k := range keys {
+		hi := ""
+		if k.row+1 < len(heatmapLatencyEdges) {
+			hi = fms(heatmapLatencyEdges[k.row+1])
+		}
+		out.Items = append(out.Items, console.Resource{Name: "cell", Fields: map[string]string{
+			"t0": strconv.FormatInt(colStart(k.col), 10), "t1": strconv.FormatInt(colStart(k.col+1), 10),
+			"lo": fms(heatmapLatencyEdges[k.row]), "hi": hi, "row": strconv.Itoa(k.row), "count": strconv.Itoa(cells[k])}})
+	}
+	secs := width.Seconds()
+	for c := range heatmapColumns {
+		d := cols[c]
+		sort.Float64s(d)
+		out.Items = append(out.Items, console.Resource{Name: "interval", Fields: map[string]string{
+			"t0": strconv.FormatInt(colStart(c), 10), "t1": strconv.FormatInt(colStart(c+1), 10), "count": strconv.Itoa(len(d)),
+			"p50": fms(percentile(d, 50)), "p90": fms(percentile(d, 90)), "p95": fms(percentile(d, 95)), "p99": fms(percentile(d, 99)),
+			"okRate": strconv.FormatFloat(float64(len(d)-errs[c])/secs, 'g', 6, 64), "errorRate": strconv.FormatFloat(float64(errs[c])/secs, 'g', 6, 64)}})
+	}
+	edges := make([]string, len(heatmapLatencyEdges))
+	for i, e := range heatmapLatencyEdges {
+		edges[i] = fms(e)
+	}
+	out.Note = strings.Join(edges, ",")
+	return out, nil
+}
+
+// grouped is the Grouped table: "The Grouped table groups spans by their
+// name and by service or workload name", each row with its latency
+// statistics. Its columns are UNVERIFIED (docs re-read 2026-11-21:
+// https://docs.cloud.google.com/trace/docs/finding-traces names only
+// average latency): the span count, errors, the average and the 50th, 95th
+// and 99th percentiles; the row's slowest span opens its trace.
+func (p traceExplorerProvider) grouped(a *trace.Server, project string, values map[string]string, now time.Time) (console.Listing, error) {
+	m, err := p.match(a, project, values, now)
+	if err != nil {
+		return console.Listing{}, err
+	}
+	type group struct {
+		service, name string
+		ms            []float64
+		errors        int
+		slowest       *trace.Span
+	}
+	groups := map[[2]string]*group{}
+	for _, sp := range m.spans {
+		k := [2]string{spanService(sp), sp.Name()}
+		g := groups[k]
+		if g == nil {
+			g = &group{service: k[0], name: k[1]}
+			groups[k] = g
+		}
+		d := sp.End().Sub(sp.Start())
+		g.ms = append(g.ms, float64(d)/float64(time.Millisecond))
+		if spanStatus(sp) == "Error" {
+			g.errors++
+		}
+		if g.slowest == nil || d > g.slowest.End().Sub(g.slowest.Start()) {
+			g.slowest = sp
+		}
+	}
+	out := console.Listing{NameColumn: "Span name", Noun: "span groups", Total: len(groups),
+		Columns: []string{"Service/workload", "Spans", "Errors", "Average (ms)", "P50 (ms)", "P95 (ms)", "P99 (ms)"}}
+	list := make([]*group, 0, len(groups))
+	for _, g := range groups {
+		list = append(list, g)
+	}
+	sort.Slice(list, func(i, j int) bool {
+		if len(list[i].ms) != len(list[j].ms) {
+			return len(list[i].ms) > len(list[j].ms)
+		}
+		return list[i].service+"\x00"+list[i].name < list[j].service+"\x00"+list[j].name
+	})
+	for _, g := range list {
+		sort.Float64s(g.ms)
+		sum := 0.0
+		for _, v := range g.ms {
+			sum += v
+		}
+		out.Items = append(out.Items, console.Resource{Name: g.name, Fields: map[string]string{
+			"Service/workload": orDash(g.service), "Spans": strconv.Itoa(len(g.ms)), "Errors": strconv.Itoa(g.errors),
+			"Average (ms)": fms(sum / float64(len(g.ms))), "P50 (ms)": fms(percentile(g.ms, 50)),
+			"P95 (ms)": fms(percentile(g.ms, 95)), "P99 (ms)": fms(percentile(g.ms, 99)),
+			"Trace ID": g.slowest.TraceID, "Project": g.slowest.Project, "Span ID": g.slowest.SpanID}})
+	}
+	out.Note = fmt.Sprintf("trace scope %s: %s", m.scope, strings.Join(m.projects, ", "))
 	return out, nil
 }
 
