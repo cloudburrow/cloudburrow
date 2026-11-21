@@ -32,7 +32,9 @@ import (
 // (third_party/ssm-templates/PROVENANCE.md), generated into
 // ssmtemplates.tar.gz by tools/ssmtemplates/generate.py: Google publishes
 // neither its templates' text nor its default README, so the files are
-// UNVERIFIED stand-ins for Google's. The README is "# {repository ID}",
+// UNVERIFIED stand-ins for Google's (re-read 2026-11-20:
+// secure-source-manager/docs/create-repository names the menus, not the
+// files' text). The README is "# {repository ID}",
 // then the description when there is one. The files are the repository's
 // first commit on its default branch, "Initial commit", written by the
 // caller: .gitignore is the chosen templates one after another, each

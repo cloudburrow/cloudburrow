@@ -155,7 +155,9 @@ const ssmTypeField = "_type"
 
 // typeField sets a row's Type: the console's account opened it, is
 // assigned to it, or both. Google's page names the Type menu but not its
-// choices; these are the web interface's issue filters (UNVERIFIED).
+// choices; these are the web interface's issue filters (UNVERIFIED,
+// re-read 2026-11-20: secure-source-manager/docs/work-with-issues-pull-requests
+// names Assignee, Type and Sort but not Type's choices).
 func typeField(fields map[string]string, author string, m runadapter.SourceManagerIssueMeta) {
 	me := runadapter.SourceManagerConsoleAccount()
 	var t []string

@@ -87,7 +87,7 @@ func TestConsoleArtifactRegistryScanResultsAndDependencies(t *testing.T) {
 	}
 	// Most common licenses is a bar graph, a bar per license (#2066).
 	if len(dep.Groups) != 2 || dep.Groups[0].Heading != "SBOM" || dep.Groups[1].Heading != "Most common licenses" || !dep.Groups[1].Bars ||
-		fmt.Sprint(dep.Groups[1].Properties) != "[{Apache-2.0 1    } {MIT 1    } {Zlib 1    }]" {
+		propertyPairs(dep.Groups[1].Properties) != "Apache-2.0=1 MIT=1 Zlib=1" {
 		t.Errorf("Dependencies sections = %+v", dep.Groups)
 	}
 	if g := dependenciesOf([]*grafeaspb.Occurrence{disc, pkg("a", "1", "")}).Groups[1]; g.Bars || !strings.Contains(fmt.Sprint(g.Properties), "No license") {
@@ -96,4 +96,14 @@ func TestConsoleArtifactRegistryScanResultsAndDependencies(t *testing.T) {
 	if d := dependenciesOf(nil); !strings.Contains(d.Listing.Unavailable, "not scanned") {
 		t.Errorf("an unscanned digest's Dependencies = %+v", d.Listing)
 	}
+}
+
+// propertyPairs is a group's properties as "Label=Value" pairs, so a check
+// does not depend on the Property struct's other fields.
+func propertyPairs(ps []console.Property) string {
+	out := make([]string, len(ps))
+	for i, p := range ps {
+		out[i] = p.Label + "=" + p.Value
+	}
+	return strings.Join(out, " ")
 }
