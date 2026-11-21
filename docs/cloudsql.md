@@ -881,16 +881,24 @@ because mysqld 5.7 sizes its tables from the open-files limit, and containerd's 
 OOMKilled.
 
 A MySQL 5.7 instance serves its server, databases, users, database flags, restarts and
-connections. These are 501 on it: read replicas, `REGIONAL`, `binaryLogEnabled`, clones, a major
-version upgrade, `demote`/`demoteMaster` and blue-green deployments. CloudBurrow builds them on
+connections, backups and their restores, `instances.clone` and restores to a new instance (their
+`mysqldump` steps are 8.0's, with the accounts from `SHOW CREATE USER`), and a major version
+upgrade to `MYSQL_8_0` (#1524). Cloud SQL upgrades MySQL one major version at a time ("You can't
+upgrade directly from MySQL 5.6 to MySQL 8.0 or from MySQL 5.7 to MySQL 8.4"), so its
+`upgradableDatabaseVersions` is the next version only, and an upgrade that skips one is 400; the
+console's Upgrade action offers the same. These are 501 on it: read replicas, `REGIONAL`,
+`binaryLogEnabled`, `demote`/`demoteMaster` and blue-green deployments. CloudBurrow builds them on
 MySQL 8.0's statements (`CHANGE REPLICATION SOURCE`, `START REPLICA`, `SET PERSIST`), which 5.7
 does not have. `flags.list` answers no flags for it. The console's version picker offers it.
 
 **MySQL 5.6 (#1524)** is served the same way. Its official image, `mysql:5.6`, was last built in
 2021-12 (5.6.51), only for linux/amd64, and is pinned by that manifest's digest
 (`docker buildx imagetools inspect mysql:5.6`, 2026-11-18). It starts under the same open-files
-limit, and serves and refuses what a MySQL 5.7 instance does. `users.update` changes a password
-with `SET PASSWORD FOR ... = PASSWORD(...)`, because MySQL 5.6's `ALTER USER` only expires one.
+limit, and serves and refuses what a MySQL 5.7 instance does; its upgrade is to `MYSQL_5_7`.
+`users.update` changes a password with `SET PASSWORD FOR ... = PASSWORD(...)`, because MySQL 5.6's
+`ALTER USER` only expires one. MySQL 5.6 has no `SHOW CREATE USER`: a backup, a clone and an upgrade
+carry each account as `CREATE USER ... IDENTIFIED BY PASSWORD` with its password hash, which 5.6
+and 5.7 both read, and its `SHOW GRANTS` without that clause.
 
 `databaseInstalledVersion` is read from the server. `maintenanceVersion` and
 `availableMaintenanceVersions` are not answered: they name Cloud SQL's own releases

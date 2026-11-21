@@ -251,9 +251,11 @@ const mysqlUserAccounts = `user NOT LIKE 'mysql.%' AND user NOT IN ('` + sqladmi
 // their grants and the IAM users' table, in forms a replica of the target
 // replays whatever accounts it has. PROXY grants are left out: only the
 // image's root@localhost may grant them. MySQL 5.6 has no SHOW CREATE
-// USER, and its backups carry no accounts.
+// USER: its accounts are mysql56Accounts' (#1524).
 const mysqlExportAccounts = mysqlRootEnv + `set -e
-case "$(mysql $MYSQL_LOCAL -N -B -e 'SELECT VERSION()')" in 5.6*) exit 0 ;; esac
+case "$(mysql $MYSQL_LOCAL -N -B -e 'SELECT VERSION()')" in 5.6*)
+` + mysql56Accounts + `  exit 0 ;;
+esac
 for u in $(mysql $MYSQL_LOCAL -N -B -e "SELECT CONCAT(QUOTE(user), '@', QUOTE(host)) FROM mysql.user WHERE ` + mysqlUserAccounts + `"); do
   { mysql $MYSQL_LOCAL -N -B -r -e "SET SESSION print_identified_with_as_hex = ON; SHOW CREATE USER $u" 2>/dev/null ||
     mysql $MYSQL_LOCAL -N -B -r -e "SHOW CREATE USER $u"; } | sed 's/^CREATE USER /CREATE USER IF NOT EXISTS /; s/$/;/'
@@ -265,10 +267,24 @@ if [ "$(mysql $MYSQL_LOCAL -N -B -e "SELECT COUNT(*) FROM information_schema.tab
 fi
 `
 
+// mysql56Accounts prints, on MySQL 5.6, which has no SHOW CREATE USER
+// (#1524), a CREATE USER for each account mysqlUserAccounts selects, with
+// its password hash (IDENTIFIED BY PASSWORD, which MySQL 5.6 and 5.7 both
+// read), and its grants without that clause, which 5.6's SHOW GRANTS
+// repeats.
+const mysql56Accounts = `  mysql $MYSQL_LOCAL -N -B -r -e "SELECT CONCAT('CREATE USER ', QUOTE(user), '@', QUOTE(host), IF(password = '', '', ` +
+	`CONCAT(' IDENTIFIED BY PASSWORD ', QUOTE(password))), ';') FROM mysql.user WHERE ` + mysqlUserAccounts + `"
+  for u in $(mysql $MYSQL_LOCAL -N -B -e "SELECT CONCAT(QUOTE(user), '@', QUOTE(host)) FROM mysql.user WHERE ` + mysqlUserAccounts + `"); do
+    mysql $MYSQL_LOCAL -N -B -r -e "SHOW GRANTS FOR $u" | grep -v '^GRANT PROXY ON ' | sed -E "s/ IDENTIFIED BY PASSWORD '[^']*'//" | sed 's/$/;/'
+  done
+`
+
 // mysqlImportAccounts drops the target's accounts, and its IAM users'
-// rows, and runs the archive's statements, read on standard input.
+// rows, and runs the archive's statements, read on standard input. MySQL
+// 5.6's DROP USER has no IF EXISTS; the accounts it drops exist.
 const mysqlImportAccounts = mysqlRootEnv + `set -e
-drops=$(mysql $MYSQL_LOCAL -N -B -e "SELECT CONCAT('DROP USER IF EXISTS ', QUOTE(user), '@', QUOTE(host), ';') FROM mysql.user WHERE ` + mysqlUserAccounts + `")
+ifx='IF EXISTS '; case "$(mysql $MYSQL_LOCAL -N -B -e 'SELECT VERSION()')" in 5.6*) ifx= ;; esac
+drops=$(mysql $MYSQL_LOCAL -N -B -e "SELECT CONCAT('DROP USER $ifx', QUOTE(user), '@', QUOTE(host), ';') FROM mysql.user WHERE ` + mysqlUserAccounts + `")
 iam=$(mysql $MYSQL_LOCAL -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'mysql' AND table_name = 'cloudburrow_iam_users'")
 {
   printf '%s\n' "$drops"

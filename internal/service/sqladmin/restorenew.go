@@ -167,11 +167,8 @@ func (s *Server) restoreToNewInstance(r *http.Request, base, project, dest strin
 	}
 	spec.Name, spec.Project = dest, project
 	spec.CreateTime, spec.SettingsVersion = time.Now().UTC().Format(time.RFC3339Nano), 1
-	if legacyMySQL(spec.DatabaseVersion) {
-		return nil, legacyUnimplemented("restoring a backup to a new instance")
-	}
-	if !SupportedVersions[spec.DatabaseVersion] {
-		return nil, unimplemented("restoring a "+spec.DatabaseVersion+" backup to a new instance", unservedVersionWhy(spec.DatabaseVersion))
+	if err := s.copyRefusal(spec.DatabaseVersion, "restoring a backup to a new instance"); err != nil {
+		return nil, err
 	}
 	if !s.engineServed(spec.DatabaseVersion) {
 		return nil, Errorf(http.StatusPreconditionFailed, "Invalid request: a %s instance runs an image this instance was not started with.",

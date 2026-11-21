@@ -10,13 +10,15 @@ package sqladmin
 // version stays 501 naming why.
 //
 // What a MySQL 5.7 or 5.6 instance serves: instances.insert, get, list, patch of
-// its database flags, restart and delete, its databases and users, and
-// connecting through the connector. Read replicas, high availability,
-// point-in-time recovery, clones, major version upgrades, demotion and the
-// external syncs are 501: CloudBurrow's replication, standby, recovery and
-// upgrade steps are written in MySQL 8.0's statements (CHANGE REPLICATION
-// SOURCE, START REPLICA, SET PERSIST, SHOW CREATE USER with
-// print_identified_with_as_hex), which 5.7 and 5.6 have not.
+// its database flags, restart and delete, its databases and users,
+// connecting through the connector, backups and their restores, clones and
+// restores to a new instance, and major version upgrades, one major
+// version at a time (5.6 to 5.7, 5.7 to 8.0), which are mysqldump's, as
+// 8.0's are. Read replicas, high availability, point-in-time recovery,
+// demotion and the external syncs are 501: CloudBurrow's replication,
+// standby and recovery steps are written in MySQL 8.0's statements (CHANGE
+// REPLICATION SOURCE, START REPLICA, SET PERSIST), which 5.7 and 5.6 have
+// not.
 
 // legacyMySQL is whether version is a MySQL version before 8.0 that
 // Cloud SQL still lists.
@@ -53,11 +55,25 @@ func (s *Server) versionServed(version string) (ok bool, why string) {
 	return false, unservedVersionWhy(version)
 }
 
+// copyRefusal is the 501 for what (a clone, a restore to a new instance)
+// of an instance of version, or nil: MySQL 5.7 and 5.6 instances are
+// copied by mysqldump as 8.0's are (#1524), on a node that runs their
+// image; a SQL Server instance's are not built.
+func (s *Server) copyRefusal(version, what string) error {
+	if IsSQLServer(version) {
+		return sqlServerUnimplemented(what)
+	}
+	if ok, why := s.versionServed(version); !ok {
+		return unimplemented(what+" of a "+version+" instance", why)
+	}
+	return nil
+}
+
 // legacyMySQLWhy is the reason a MySQL 5.7 instance cannot have what
 // legacyRefusal refuses.
 const legacyMySQLWhy = "CloudBurrow's replication, standby, recovery and upgrade steps use MySQL 8.0's statements " +
 	"(CHANGE REPLICATION SOURCE, START REPLICA, SET PERSIST), which MySQL 5.7 and 5.6 have not; a MYSQL_5_7 or MYSQL_5_6 instance here serves " +
-	"its server, databases, users, flags and connections"
+	"its server, databases, users, flags, connections, backups, clones and major version upgrades"
 
 // legacyUnimplemented is the 501 for what, on a MySQL 5.7 or 5.6 instance.
 func legacyUnimplemented(what string) error {

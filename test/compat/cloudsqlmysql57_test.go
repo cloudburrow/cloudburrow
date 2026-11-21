@@ -23,15 +23,23 @@ import (
 // a database and a user made with databases.insert and users.insert are
 // there, and through the official connector with the MySQL driver SELECT
 // version() is 5.7.44 (5.6.51), as the user too, who connects again with
-// the password users.update sets. A read replica, availabilityType
-// REGIONAL, binaryLogEnabled and a major version upgrade are 501.
-// covers: sql.instances.insert, sql.instances.get, sql.instances.patch, sql.instances.delete, sql.databases.insert, sql.databases.get, sql.users.insert, sql.users.list, sql.users.update, sql.connect.get, sql.connect.generateEphemeral, sql.operations.get
-func TestCloudSQLMySQL57(t *testing.T) { testLegacyMySQL(t, "MYSQL_5_7", "5.7.44") }
+// the password users.update sets. instances.clone copies its table and
+// its user, who signs in to the clone. Its upgradableDatabaseVersions is
+// the next major version only, as Cloud SQL upgrades MySQL one major
+// version at a time; an upgrade that skips one is 400, and instances.patch
+// to the next one upgrades it, keeping the table and the user (#1524). A
+// read replica, availabilityType REGIONAL and binaryLogEnabled are 501.
+// covers: sql.instances.insert, sql.instances.get, sql.instances.patch, sql.instances.clone, sql.instances.delete, sql.databases.insert, sql.databases.get, sql.users.insert, sql.users.list, sql.users.update, sql.connect.get, sql.connect.generateEphemeral, sql.operations.get
+func TestCloudSQLMySQL57(t *testing.T) {
+	testLegacyMySQL(t, "MYSQL_5_7", "5.7.44", "MYSQL_8_0", "8.0.")
+}
 
-// covers: sql.instances.insert, sql.instances.get, sql.instances.patch, sql.instances.delete, sql.databases.insert, sql.databases.get, sql.users.insert, sql.users.list, sql.users.update, sql.connect.get, sql.connect.generateEphemeral, sql.operations.get
-func TestCloudSQLMySQL56(t *testing.T) { testLegacyMySQL(t, "MYSQL_5_6", "5.6.51") }
+// covers: sql.instances.insert, sql.instances.get, sql.instances.patch, sql.instances.clone, sql.instances.delete, sql.databases.insert, sql.databases.get, sql.users.insert, sql.users.list, sql.users.update, sql.connect.get, sql.connect.generateEphemeral, sql.operations.get
+func TestCloudSQLMySQL56(t *testing.T) {
+	testLegacyMySQL(t, "MYSQL_5_6", "5.6.51", "MYSQL_5_7", "5.7.44")
+}
 
-func testLegacyMySQL(t *testing.T, version, release string) {
+func testLegacyMySQL(t *testing.T, version, release, next, nextRelease string) {
 	h := New(t)
 	if os.Getenv(EnvMySQL) == "" {
 		t.Skip("needs --services cloudsql-mysql")
@@ -122,6 +130,71 @@ func testLegacyMySQL(t *testing.T, version, release string) {
 	_, err = svc.Instances.Patch(project, name, &sqladmin.DatabaseInstance{Settings: &sqladmin.Settings{
 		BackupConfiguration: &sqladmin.BackupConfiguration{Enabled: true, BinaryLogEnabled: true}}}).Do()
 	wantHTTP(t, "binaryLogEnabled on "+version, err, http.StatusNotImplemented)
-	_, err = svc.Instances.Patch(project, name, &sqladmin.DatabaseInstance{DatabaseVersion: "MYSQL_8_0"}).Do()
-	wantHTTP(t, "upgrading "+version, err, http.StatusNotImplemented)
+
+	// A clone has the table and the user.
+	clone := name + "-c"
+	cop, err := svc.Instances.Clone(project, name, &sqladmin.InstancesCloneRequest{
+		CloneContext: &sqladmin.CloneContext{DestinationInstanceName: clone}}).Do()
+	if err != nil {
+		t.Fatalf("instances.clone: %v", err)
+	}
+	t.Cleanup(func() {
+		if d, err := svc.Instances.Delete(project, clone).Do(); err == nil {
+			waitSQLOpDone(t, svc, project, d)
+		}
+	})
+	if cop = waitSQLOpDone(t, svc, project, cop); cop.Error != nil {
+		t.Fatalf("clone %s: %+v", name, cop.Error.Errors[0])
+	}
+	cl, err := svc.Instances.Get(project, clone).Do()
+	if err != nil || cl.DatabaseVersion != version || cl.State != "RUNNABLE" {
+		t.Fatalf("the clone: %+v %v", cl, err)
+	}
+	capp := e.open(t, h, cl.ConnectionName, "appuser", "App-pass2", "app")
+	eventually(t, "the clone's table as appuser", func() error {
+		var n int
+		if err := capp.QueryRow("SELECT count(*) FROM t").Scan(&n); err != nil {
+			return err
+		}
+		if n != 1 {
+			return fmt.Errorf("%d rows, want 1", n)
+		}
+		return nil
+	})
+	if d, err := svc.Instances.Delete(project, clone).Do(); err == nil {
+		waitSQLOpDone(t, svc, project, d)
+	}
+
+	// The upgrade goes to the next major version only.
+	got, err = svc.Instances.Get(project, name).Do()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.UpgradableDatabaseVersions) != 1 || got.UpgradableDatabaseVersions[0].MajorVersion != next {
+		t.Errorf("upgradableDatabaseVersions = %+v, want %s only", got.UpgradableDatabaseVersions, next)
+	}
+	_, err = svc.Instances.Patch(project, name, &sqladmin.DatabaseInstance{DatabaseVersion: "MYSQL_8_4"}).Do()
+	wantHTTP(t, "upgrading "+version+" to MYSQL_8_4", err, http.StatusBadRequest)
+	uop, err = svc.Instances.Patch(project, name, &sqladmin.DatabaseInstance{DatabaseVersion: next}).Do()
+	if err != nil {
+		t.Fatalf("upgrading %s to %s: %v", version, next, err)
+	}
+	if uop = waitSQLOpDone(t, svc, project, uop); uop.Error != nil {
+		t.Fatalf("upgrade to %s: %+v", next, uop.Error.Errors[0])
+	}
+	if got, err = svc.Instances.Get(project, name).Do(); err != nil || got.DatabaseVersion != next || got.State != "RUNNABLE" {
+		t.Fatalf("after the upgrade: %+v %v", got, err)
+	}
+	up := e.open(t, h, got.ConnectionName, "appuser", "App-pass2", "app")
+	eventually(t, "the upgraded server's table as appuser", func() error {
+		var v string
+		var n int
+		if err := up.QueryRow("SELECT version(), (SELECT count(*) FROM t)").Scan(&v, &n); err != nil {
+			return err
+		}
+		if !strings.HasPrefix(v, nextRelease) || n != 1 {
+			return fmt.Errorf("version %s with %d rows, want %s with 1", v, n, nextRelease)
+		}
+		return nil
+	})
 }

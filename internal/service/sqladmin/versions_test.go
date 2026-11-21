@@ -128,9 +128,14 @@ type legacyProv struct {
 
 func (p legacyProv) LegacyUnrunnable(string) string { return p.why }
 
-// MYSQL_5_7 and MYSQL_5_6 are served where the node runs their images (#1524), and their
-// replicas, high availability, point-in-time recovery and upgrades are
-// 501; MYSQL_5_6 too.
+// legacyUpgrader is a legacyProv that can upgrade.
+type legacyUpgrader struct{ legacyProv }
+
+func (legacyUpgrader) Upgrade(context.Context, Spec, Spec) error { return nil }
+
+// MYSQL_5_7 and MYSQL_5_6 are served where the node runs their images
+// (#1524), with their clones and major version upgrades, and their
+// replicas, high availability and point-in-time recovery are 501.
 func TestLegacyMySQLServed(t *testing.T) {
 	runs := &Server{writes: &instances{prov: legacyProv{}, byName: map[string]*created{}}}
 	if ok, why := runs.versionServed("MYSQL_5_7"); !ok {
@@ -161,9 +166,33 @@ func TestLegacyMySQLServed(t *testing.T) {
 			t.Errorf("%+v: %v, want 501", sp, err)
 		}
 	}
-	c := &created{spec: base}
-	if err := runs.checkUpgrade(c, "MYSQL_8_0", false); err == nil || !strings.Contains(errStatus(err), "501") {
-		t.Errorf("upgrading MYSQL_5_7: %v, want 501", err)
+	// A major version upgrade goes one version at a time: 5.6 to 5.7, 5.7
+	// to 8.0, where the node runs the images.
+	up := &Server{writes: &instances{prov: legacyUpgrader{legacyProv{}}, byName: map[string]*created{}}}
+	for _, tc := range []struct{ from, to, want string }{
+		{"MYSQL_5_7", "MYSQL_8_0", ""}, {"MYSQL_5_6", "MYSQL_5_7", ""}, {"MYSQL_5_6", "MYSQL_8_0", "400"},
+		{"MYSQL_5_7", "MYSQL_8_4", "400"}, {"MYSQL_8_0", "MYSQL_5_7", "400"}, {"MYSQL_5_7", "MYSQL_5_6", "400"},
+	} {
+		err := up.checkUpgrade(&created{spec: Spec{Name: "a", DatabaseVersion: tc.from}}, tc.to, false)
+		if (tc.want == "" && err != nil) || (tc.want != "" && (err == nil || !strings.Contains(errStatus(err), tc.want))) {
+			t.Errorf("upgrading %s to %s: %v, want %q", tc.from, tc.to, err, tc.want)
+		}
+	}
+	noAMD := &Server{writes: &instances{prov: legacyUpgrader{legacyProv{why: "the node is aarch64"}}, byName: map[string]*created{}}}
+	if err := noAMD.checkUpgrade(&created{spec: Spec{Name: "a", DatabaseVersion: "MYSQL_5_6"}}, "MYSQL_5_7", false); err == nil ||
+		!strings.Contains(errStatus(err), "501") {
+		t.Errorf("upgrading MYSQL_5_6 to MYSQL_5_7 where the node cannot run it: %v, want 501", err)
+	}
+	for v, want := range map[string]string{"MYSQL_5_6": "MYSQL_5_7", "MYSQL_5_7": "MYSQL_8_0", "MYSQL_8_0": "MYSQL_8_4"} {
+		if got := upgradable(v); len(got) != 1 || got[0].(map[string]any)["name"] != want {
+			t.Errorf("upgradable(%s) = %v, want %s only", v, got, want)
+		}
+	}
+	if err := up.copyRefusal("MYSQL_5_6", "instances.clone"); err != nil {
+		t.Errorf("cloning a MYSQL_5_6 instance: %v", err)
+	}
+	if err := noAMD.copyRefusal("MYSQL_5_7", "instances.clone"); err == nil || !strings.Contains(errStatus(err), "501") {
+		t.Errorf("cloning a MYSQL_5_7 instance where the node cannot run it: %v, want 501", err)
 	}
 	if err := legacyRefusal(Spec{Name: "b", DatabaseVersion: "MYSQL_5_6", MasterInstanceName: "p"}); err == nil || !strings.Contains(errStatus(err), "501") {
 		t.Errorf("a MYSQL_5_6 read replica: %v, want 501", err)

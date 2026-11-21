@@ -53,11 +53,24 @@ func (p *sqlProvisioner) Upgrade(ctx context.Context, from, to sqladmin.Spec) er
 // root, the image's own, CloudBurrow's (the new server's Start made it)
 // and the replication user, with its grants; and the drop of the new
 // server's 'root'@'%' when the user deleted the old one's (#1993).
+// MySQL 5.7 has no print_identified_with_as_hex, and its SHOW CREATE USER
+// prints mysql_native_password's hash as it is; MySQL 5.6 has no SHOW
+// CREATE USER, and its accounts are recreated from their password hashes
+// and grants as mysql56Accounts recreates a backup's (#1524).
 const mysqlAccounts = mysqlRootEnv + `set -e
 [ "$(mysql $MYSQL_LOCAL -N -B -e "SELECT COUNT(*) FROM mysql.user WHERE user = 'root' AND host = '%'")" != 0 ] || echo "DROP USER IF EXISTS 'root'@'%';"
-for u in $(mysql $MYSQL_LOCAL -N -B -e "SELECT CONCAT(QUOTE(user), '@', QUOTE(host)) FROM mysql.user WHERE user NOT LIKE 'mysql.%' AND user NOT IN ('root', '` +
-	sqladmin.MySQLAdminUser + `', '` + components.SQLReplicaUser + `')"); do
-  mysql $MYSQL_LOCAL -N -B -r -e "SET SESSION print_identified_with_as_hex = ON; SHOW CREATE USER $u" | sed 's/$/;/'
+where="user NOT LIKE 'mysql.%' AND user NOT IN ('root', '` + sqladmin.MySQLAdminUser + `', '` + components.SQLReplicaUser + `')"
+case "$(mysql $MYSQL_LOCAL -N -B -e 'SELECT VERSION()')" in 5.6*) v56=1 ;; *) v56= ;; esac
+if [ -n "$v56" ]; then
+  mysql $MYSQL_LOCAL -N -B -r -e "SELECT CONCAT('CREATE USER ', QUOTE(user), '@', QUOTE(host), IF(password = '', '', CONCAT(' IDENTIFIED BY PASSWORD ', QUOTE(password))), ';') FROM mysql.user WHERE $where"
+fi
+for u in $(mysql $MYSQL_LOCAL -N -B -e "SELECT CONCAT(QUOTE(user), '@', QUOTE(host)) FROM mysql.user WHERE $where"); do
+  if [ -n "$v56" ]; then
+    mysql $MYSQL_LOCAL -N -B -r -e "SHOW GRANTS FOR $u" | sed -E "s/ IDENTIFIED BY PASSWORD '[^']*'//" | sed 's/$/;/'
+    continue
+  fi
+  { mysql $MYSQL_LOCAL -N -B -r -e "SET SESSION print_identified_with_as_hex = ON; SHOW CREATE USER $u" 2>/dev/null ||
+    mysql $MYSQL_LOCAL -N -B -r -e "SHOW CREATE USER $u"; } | sed 's/$/;/'
   mysql $MYSQL_LOCAL -N -B -r -e "SHOW GRANTS FOR $u" | sed 's/$/;/'
 done
 dbs=$(mysql $MYSQL_LOCAL -N -B -e "SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('mysql','sys','information_schema','performance_schema')")
