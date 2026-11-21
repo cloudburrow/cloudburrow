@@ -72,6 +72,10 @@ func TestGcloudPrincipalAccessBoundaryPolicies(t *testing.T) {
 		"--display-name=Service accounts", "--condition-title=sa", "--condition-expression=principal.type == 'iam.googleapis.com/ServiceAccount'")...)
 	t.Cleanup(func() { _, _ = g.run(nil, pb("delete", binding, "--quiet")...) })
 	out = g.must(pb("describe", binding, "--format=json")...)
+	// gcloud names the parsed resource on stderr before the JSON.
+	if i := strings.Index(out, "{"); i > 0 {
+		out = out[i:]
+	}
 	var b struct {
 		Policy, PolicyKind, DisplayName string
 		Target                          struct{ PrincipalSet string }
