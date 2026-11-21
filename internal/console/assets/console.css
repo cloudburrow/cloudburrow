@@ -359,7 +359,8 @@ input[type="datetime-local"]:focus-within {
   margin-bottom: 20px; padding-bottom: 16px; padding-top: 8px;
 }
 .page-header h1 { margin-bottom: 2px; }
-.page-header .subtitle { margin: 0; }
+/* A resource name under a title (#1851: a key ring's full name above Create key) wraps rather than widening a narrow page. */
+.page-header .subtitle { margin: 0; overflow-wrap: anywhere; }
 
 /* The title line (#1842): a back arrow where there is somewhere to go back
    to, the title, and the screen's own controls beside it, as Google's

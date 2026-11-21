@@ -209,19 +209,20 @@ func TestKMSSignAndVerifyThroughTheForm(t *testing.T) {
 	p.navigate("/kms/keyrings?project=" + project)
 	p.clickText("#view tbody a", ring)
 	p.clickText("#view .page-actions button", "Create key")
-	p.waitFor(`document.querySelector(".modal.is-open #f-purpose") !== null`)
+	p.waitFor(`document.querySelector("#view form.create-page #f-purpose") !== null`)
 	var purposes []string
-	p.eval(`[...document.querySelector(".modal.is-open #f-purpose").options].map((o) => o.value)`, &purposes)
+	p.eval(`[...document.querySelector("#view form.create-page #f-purpose").options].map((o) => o.value)`, &purposes)
 	if !strings.Contains(strings.Join(purposes, ","), "ASYMMETRIC_SIGN") {
 		t.Fatalf("Create key offers purposes %v", purposes)
 	}
-	setField(p, ".modal.is-open", "f-cryptoKeyId", "signer")
-	setField(p, ".modal.is-open", "f-purpose", "ASYMMETRIC_SIGN")
-	setField(p, ".modal.is-open", "f-algorithm", "EC_SIGN_P256_SHA256")
-	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
-	p.waitFor(`document.querySelector(".modal") === null`)
+	setField(p, "#view form.create-page", "f-cryptoKeyId", "signer")
+	setField(p, "#view form.create-page", "f-purpose", "ASYMMETRIC_SIGN")
+	setField(p, "#view form.create-page", "f-algorithm", "EC_SIGN_P256_SHA256")
+	p.run(chromedp.Click(chromedp.CSS(`#view form.create-page button[type="submit"]`)))
+	p.waitFor(`!location.search.includes("action=") && [...document.querySelectorAll("#view tbody a")].some((a) => a.textContent === "signer")`)
 
 	p.clickText("#view tbody a", "signer")
+	p.clickText("#view .tab-strip .tab", "Versions")
 	p.clickText("#view tbody a", "1")
 	sign := func(action string, values map[string]string) string {
 		p.waitFor(`document.querySelector(".modal") === null`)
@@ -297,5 +298,6 @@ func TestKMSImportJobAndVersionThroughTheForm(t *testing.T) {
 	setField(p, ".modal.is-open", "f-material", "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=")
 	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
+	p.clickText("#view .tab-strip .tab", "Versions")
 	p.waitFor(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes("ENABLED") && r.querySelector("a") && r.querySelector("a").textContent === "2")`)
 }

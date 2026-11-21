@@ -452,27 +452,51 @@ func (p kmsAutokeyProvider) Detail(ctx context.Context, project string, path []s
 	return d, nil
 }
 
-func (p kmsAutokeyProvider) DetailActions(_ context.Context, project string, path []string) []console.Action {
+func (p kmsAutokeyProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
 	if len(path) != 1 || !p.inChain(project, path[0]) {
 		return nil
 	}
 	// Google's Configure (https://docs.cloud.google.com/kms/docs/enable-autokey):
+	// Configuration source (Configure for project or folder, or Inherit,
+	// which clears the configuration so the parent folder's applies), then
 	// the Configuration in words, the key project for dedicated-project
-	// storage, Submit; turning Autokey off is confirmed (#1851). The
-	// enums stay the values, as UpdateAutokeyConfig takes them.
+	// storage, Submit; turning Autokey off asks Confirm in a prompt (#2053). The enums
+	// stay the values, as UpdateAutokeyConfig takes them.
+	kind := "project"
+	if strings.HasPrefix(path[0], "folders/") {
+		kind = "folder"
+	}
+	src := kmsAutokeySourceConfigure
+	if c, err := p.svc.API().AutokeyAdmin().GetAutokeyConfig(ctx, &kmspb.GetAutokeyConfigRequest{Name: path[0]}); err == nil &&
+		c.GetKeyProject() == "" && c.GetKeyProjectResolutionMode() == kmspb.AutokeyConfig_KEY_PROJECT_RESOLUTION_MODE_UNSPECIFIED {
+		src = kmsAutokeySourceInherit
+	}
+	configure := "configurationSource=" + kmsAutokeySourceConfigure
 	modes := []string{"DEDICATED_KEY_PROJECT", "RESOURCE_PROJECT", "DISABLED"}
-	return []console.Action{{ID: "editconfig", Label: "Configure", Fields: []console.Field{
+	return []console.Action{{ID: "editconfig", Label: "Configure", Submit: "Submit", Fields: []console.Field{
+		{Name: "configurationSource", Label: "Configuration source", Type: "radio", Default: src,
+			Options:      []string{kmsAutokeySourceConfigure, kmsAutokeySourceInherit},
+			OptionLabels: map[string]string{kmsAutokeySourceConfigure: "Configure for " + kind, kmsAutokeySourceInherit: "Inherit"},
+			Help:         "Inherit clears this " + kind + "'s configuration, so the nearest parent folder's applies."},
 		{Name: "keyProjectResolutionMode", Label: "Configuration", Type: "radio", Default: "DEDICATED_KEY_PROJECT", Options: modes,
+			ShowWhen: configure,
 			OptionLabels: map[string]string{"DEDICATED_KEY_PROJECT": "Enable dedicated-project key storage",
-				"RESOURCE_PROJECT": "Enable same-project key storage", "DISABLED": "Disable autokey"},
-			Help: "Where Autokey makes keys: a dedicated key project, the resource's own project, or nowhere (Autokey off below here)."},
-		{Name: "keyProject", Label: "Key project", Type: "text", ShowWhen: "keyProjectResolutionMode=DEDICATED_KEY_PROJECT",
-			Help: "projects/PROJECT, the dedicated key project. Empty clears the configuration, so the parent's applies (Google's Inherit)."},
-		{Name: "confirmDisable", Label: "Confirm: resources created from now on get no Autokey key", Type: "checkbox",
-			ShowWhen: "keyProjectResolutionMode=DISABLED",
-			Help:     "Disabling Autokey needs this confirmation, as Google's Confirm; existing keys and key handles stay."},
+				"RESOURCE_PROJECT": "Enable same-project key storage", "DISABLED": "Disable autokey for " + kind},
+			Help: "Where Autokey makes keys: a dedicated key project, the resource's own project, or nowhere (Autokey off below here).",
+			// Google's Disable asks Confirm in a prompt after Submit
+			// (https://docs.cloud.google.com/kms/docs/enable-autokey).
+			ConfirmValue: "DISABLED", ConfirmTitle: "Disable autokey?",
+			Confirm: "Resources created from now on get no Autokey key. Existing keys and key handles stay."},
+		{Name: "keyProject", Label: "Key project", Type: "text", ShowWhen: configure + "&keyProjectResolutionMode=DEDICATED_KEY_PROJECT",
+			Help: "projects/PROJECT, the dedicated key project."},
 	}}}
 }
+
+// Autokey's Configuration source choices (#1851).
+const (
+	kmsAutokeySourceConfigure = "configure"
+	kmsAutokeySourceInherit   = "inherit"
+)
 
 func (p kmsAutokeyProvider) ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error {
 	api := p.svc.API()
@@ -482,11 +506,15 @@ func (p kmsAutokeyProvider) ActAt(ctx context.Context, project string, path []st
 	if action != "editconfig" || len(path) != 1 || !p.inChain(project, path[0]) {
 		return fmt.Errorf("unknown action %q", action)
 	}
+	if strings.TrimSpace(values["configurationSource"]) == kmsAutokeySourceInherit {
+		// Inherit: the configuration cleared, so the parent's applies.
+		_, err := api.AutokeyAdmin().UpdateAutokeyConfig(ctx, &kmspb.UpdateAutokeyConfigRequest{
+			AutokeyConfig: &kmspb.AutokeyConfig{Name: path[0]},
+			UpdateMask:    &fieldmaskpb.FieldMask{Paths: []string{"key_project", "key_project_resolution_mode"}}})
+		return err
+	}
 	mode := kmspb.AutokeyConfig_KeyProjectResolutionMode(kmspb.AutokeyConfig_KeyProjectResolutionMode_value[strings.TrimSpace(values["keyProjectResolutionMode"])])
 	kp := strings.TrimSpace(values["keyProject"])
-	if mode == kmspb.AutokeyConfig_DISABLED && values["confirmDisable"] != "" && !checked(values, "confirmDisable") {
-		return fmt.Errorf("check the confirmation to disable Autokey")
-	}
 	if mode != kmspb.AutokeyConfig_DEDICATED_KEY_PROJECT {
 		// The key project is hidden for the other choices.
 		kp = ""

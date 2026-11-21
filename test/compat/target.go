@@ -211,6 +211,7 @@ var gcloudOverrides = []struct {
 	{"storage", []string{"STORAGE", "RUN_STORAGE", "SINK_STORAGE", "FIRESTORE_STORAGE"}},
 	{"pubsub", []string{"PUBSUB", "SINK_PUBSUB"}},
 	{"cloudkms", []string{"KMS"}},
+	{"kmsinventory", []string{"KMS"}},
 	{"secretmanager", []string{"SECRETS"}},
 	{"cloudtasks", []string{"TASKS"}},
 	{"cloudscheduler", []string{"SCHEDULER"}},

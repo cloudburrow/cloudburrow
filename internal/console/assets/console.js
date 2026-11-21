@@ -514,7 +514,7 @@ const ROUTES = [
     section: "Security and identity", product: "secrets", productTitle: "Secret Manager",
     unavailable: "Google's Secret Manager settings are the project's own Google Cloud configuration, which Google's documentation does not describe and a local instance does not hold. A secret's replication, encryption, rotation, expiration and destruction delay are set on the secret itself, with Create secret and Edit secret." },
   // Key Management (#1851), in Google's menu order: Key management (the key
-  // rings), Autokey, EKM connections, KMS config, Key inventory; then
+  // rings), Autokey, EKM connections, KMS Controls, Key inventory; then
   // CloudBurrow's Single-tenant HSM, whose instances Google manages with
   // gcloud only.
   { path: "/kms/keyrings", service: "kms", title: "Key management", navTitle: "Key management", kind: "Key ring",
@@ -525,9 +525,10 @@ const ROUTES = [
     product: "kms", productTitle: "Key Management" },
   { path: "/kms/ekm", service: "kms-ekm", icon: "kms", title: "EKM connections", kind: "EKM connection", section: "Security and identity",
     product: "kms", productTitle: "Key Management" },
-  { path: "/kms/config", title: "KMS config", service: null, requires: "kms", screen: "unavailable", icon: "kms",
-    section: "Security and identity", product: "kms", productTitle: "Key Management",
-    unavailable: "KMS config holds a project's and an organization's Cloud KMS settings, such as the default Key Access Justifications policy for new keys, which Google serves through an API CloudBurrow does not run. Autokey's configuration is on the Autokey page, the default EKM connection on EKM connections, and a key's own settings on its page." },
+  // KMS Controls (#2053): the default Key Access Justifications policy of
+  // the project, its folders and its organization.
+  { path: "/kms/config", service: "kms-config", icon: "kms", title: "KMS Controls", kind: "Configuration",
+    section: "Security and identity", product: "kms", productTitle: "Key Management" },
   { path: "/kms/inventory", service: "kms-inventory", icon: "kms", title: "Key inventory", section: "Security and identity",
     product: "kms", productTitle: "Key Management" },
   { path: "/kms/hsm", service: "kms-hsm", icon: "kms", title: "Single-tenant HSM", kind: "Single-tenant HSM instance", section: "Security and identity",
@@ -2465,9 +2466,11 @@ function filterBar({ noun, columns, onChange, extra = [], valuesOf = null }) {
 // remembered per service. hidden() is the set of columns turned off.
 const COLUMNS_KEY = "cloudburrow.columns";
 
-function viewOptions({ service, columns, onChange, scope = null, reload = null }) {
+function viewOptions({ service, columns, onChange, scope = null, reload = null, hiddenByDefault = [] }) {
   const stored = readStored(COLUMNS_KEY, {}) || {};
-  let off = new Set(Array.isArray(stored[service]) ? stored[service] : []);
+  // Until the viewer chooses, the listing's HiddenColumns are off, as
+  // Google's Key inventory hides EKM via VPC connection (#1851).
+  let off = new Set(Array.isArray(stored[service]) ? stored[service] : hiddenByDefault);
   if (scope) return viewOptionsDialog({ service, columns, onChange, scope, reload, off });
   const button = el("button", { type: "button", class: "icon-button view-options",
     "aria-label": "View options", title: "View options", "aria-haspopup": "true", "aria-expanded": "false",
@@ -3127,7 +3130,8 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   // (#1842). The filter still reads the hidden ones, as Google's does.
   const chooser = opts.rowControls && route.service
     ? viewOptions({ service: route.service, columns: allDataColumns, onChange: () => draw(),
-      scope: data.scope && data.scope.viewOptions ? data.scope : null, reload })
+      scope: data.scope && data.scope.viewOptions ? data.scope : null, reload,
+      hiddenByDefault: data.hiddenColumns || [] })
     : null;
   const dataColumns = () => allDataColumns().filter((c) => !chooser || !chooser.hidden().has(c));
   const hasActions = () =>
@@ -4251,6 +4255,10 @@ async function renderDetail(view, route, resourcePath) {
   const drawListingSection = (into, section, note, reload) => {
     let list = section.listing || {};
     const noun = list.noun || section.label.toLowerCase();
+    // A tab's own summary cards over its rows: a key's Usage tracking
+    // tab draws its key usage summary over the protected resources (#2053).
+    const cards = listingSummary(list);
+    if (cards.length) note = note ? el("div", {}, note, ...cards) : el("div", {}, ...cards);
     // A workflow execution's Steps (#2004): the visualization panel of
     // the revision that ran, over the step entries' table.
     if (section.graph) {
@@ -4708,6 +4716,16 @@ async function renderDetail(view, route, resourcePath) {
   // off the address, so a reload or Back does not open it again.
   const asked = new URLSearchParams(location.search).get("action");
   const opened = asked && (data.actions || []).find((a) => a.id === asked);
+  // One that is a page of its own (Action.Page, #1851) is drawn in the
+  // page's place and keeps its address, so a reload shows it again and
+  // Back returns to the resource's page.
+  if (opened && opened.page) {
+    const here = new URL(location.href);
+    here.searchParams.delete("action");
+    openActionForm(route, segments, opened, () => {}, data.title || null,
+      { view, back: here.pathname + here.search });
+    return;
+  }
   if (asked) {
     const here = new URL(location.href);
     here.searchParams.delete("action");
@@ -4717,7 +4735,11 @@ async function renderDetail(view, route, resourcePath) {
 }
 
 // openActionForm collects an action's inputs and then performs it.
-function openActionForm(route, segments, action, onDone, title = null) {
+//
+// With host ({ view, back }), the form is a page of its own in view
+// (Action.Page, #1851): headed by the action's title with a back arrow,
+// ending in its submit and Cancel, and leaving for back when done.
+function openActionForm(route, segments, action, onDone, title = null, host = null) {
   const name = title || segments[segments.length - 1];
   const fields = buildCreateForm({ label: action.label, fields: action.fields });
   // An action whose form is Google's steps (Action.Steps, #1858): Create
@@ -4729,10 +4751,12 @@ function openActionForm(route, segments, action, onDone, title = null) {
   const error = el("p", { class: "form-error", role: "alert", hidden: true });
   let submitting = false;
 
-  const { dialog, close } = openModal({
-    labelledBy: "action-title",
-    canClose: () => !submitting,
-  });
+  const { dialog, close } = host
+    ? { dialog: null, close: () => navigate(host.back) }
+    : openModal({
+      labelledBy: "action-title",
+      canClose: () => !submitting,
+    });
 
   const primary = el("button", {
     type: "submit",
@@ -4744,8 +4768,11 @@ function openActionForm(route, segments, action, onDone, title = null) {
 
   // A checked box that puts something at risk — Replace the destination —
   // asks first, and wants the thing at risk named back (#790).
-  const risky = (values) => (action.fields || []).find((f) =>
-    f.type === "checkbox" && f.confirm && values[f.name] === "true");
+  // A choice that puts something at risk — Disable autokey — asks too,
+  // with Google's Confirm and nothing typed (#2053).
+  const risky = (values) => (action.fields || []).find((f) => f.confirm &&
+    ((f.type === "checkbox" && !f.confirmValue && values[f.name] === "true") ||
+     (f.confirmValue && values[f.name] === f.confirmValue)));
 
   const submit = async (e) => {
     e.preventDefault();
@@ -4773,6 +4800,22 @@ function openActionForm(route, segments, action, onDone, title = null) {
       return;
     }
     const risk = risky(values);
+    if (risk && risk.confirmValue) {
+      // Cancelled, the form stays open with what was chosen.
+      await confirmDestructive({
+        title: risk.confirmTitle || `${action.label}?`,
+        detail: risk.confirm,
+        confirmWord: name,
+        confirmLabel: "Confirm",
+        consequence: "",
+        style: "confirm",
+        onConfirm: async () => {
+          const failure = await perform(values);
+          if (failure) throw failure;
+        },
+      });
+      return;
+    }
     if (risk) {
       const word = (values[risk.confirmWith] || "").trim() || name;
       // Cancelled, the form stays open with what was typed. Refused, the
@@ -4820,7 +4863,7 @@ function openActionForm(route, segments, action, onDone, title = null) {
       // An action that answers with rows — a pull — keeps its dialog open to
       // show them. Closing it would be the pull done and its messages thrown
       // away, which for "Pull and ack" means gone for good.
-      if (res.result) {
+      if (res.result && !host) {
         setChildren(dialog, el("div", { class: "modal-body", id: "action-result" },
           el("h2", { id: "action-title", text: `${action.label}: ${name}` }),
           resultTable(res.result, { route, path: segments }),
@@ -4840,6 +4883,19 @@ function openActionForm(route, segments, action, onDone, title = null) {
     }
   };
 
+  if (host) {
+    const heading = action.title || action.label;
+    setChildren(host.view,
+      pageHeader(heading, segments.length ? name : null, { back: host.back, backLabel: `Back to ${name}` }),
+      el("form", { class: "create-page is-single-page", novalidate: true, onsubmit: submit, "aria-label": heading },
+        error,
+        ...actionSteps.nodes,
+        el("div", { class: "form-actions" }, primary,
+          el("a", { class: "button secondary", href: host.back, text: "Cancel" }))));
+    fields.focusFirst();
+    announce(`${heading} form`);
+    return;
+  }
   dialog.append(el("form", { class: "modal-body", novalidate: true, onsubmit: submit },
     // Google's title where it is not the action's label (Action.Title,
     // #1860): Cloud SQL's Create database opens "New database".
@@ -7256,6 +7312,25 @@ function buildCreateForm(spec) {
       if (other) other.control.addEventListener("change", show);
     }
     show();
+  }
+
+  // A select whose options follow another field (optionsBy, #1851):
+  // Cloud KMS's Create key lists the chosen purpose's algorithms only. The
+  // value is kept where the new list has it, otherwise the first is chosen.
+  for (const entry of entries) {
+    const by = entry.field.optionsBy;
+    const other = by && byName.get(by);
+    if (!other || entry.control.tagName !== "SELECT") continue;
+    const labels = entry.field.optionLabels || {};
+    const relist = () => {
+      const keep = entry.control.value;
+      const opts = (entry.field.optionsFor || {})[valueText(other)] || entry.field.options || [];
+      setChildren(entry.control, ...opts.map((o) => el("option", { value: o, text: labels[o] || o || "None" })));
+      entry.control.value = opts.includes(keep) ? keep : (opts[0] ?? "");
+      entry.control.dispatchEvent(new Event("change", { bubbles: true }));
+    };
+    other.control.addEventListener("change", relist);
+    relist();
   }
 
   // A checkbox checked and held while another field holds a value
@@ -9918,6 +9993,13 @@ async function runAction(route, target, action, onDone, row = NO_ROW, title = nu
   // View secret value from a version row (Action.Reveal, #1850): the
   // value in a dialog ending in Done, through the recorded reveal route.
   if (action.reveal) return revealValue(route, path || [target], action.label);
+  // An action that is a page of its own (Action.Page, #1851): Cloud KMS's
+  // Create key opens at the ring's address with ?action=createkey.
+  if (action.page && path && path.length) {
+    const to = new URL(detailHref(route, path), location.origin);
+    to.searchParams.set("action", action.id);
+    return navigate(to.pathname + to.search);
+  }
   // A page's own heading, when its last segment is an address no reader
   // recognises: a Datastore entity's encoded key (#875). A delete is
   // confirmed by typing back what the page is headed, not the address.

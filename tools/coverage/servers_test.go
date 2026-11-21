@@ -40,6 +40,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/datatransfer"
 	"github.com/cloudburrow/cloudburrow/internal/service/gke"
 	"github.com/cloudburrow/cloudburrow/internal/service/kms"
+	"github.com/cloudburrow/cloudburrow/internal/service/kmsinventory"
 	"github.com/cloudburrow/cloudburrow/internal/service/logging"
 	"github.com/cloudburrow/cloudburrow/internal/service/monitoring"
 	"github.com/cloudburrow/cloudburrow/internal/service/privateca"
@@ -71,6 +72,7 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	tasks.NewGRPCServer(tasks.NewStore(store.NewMemory())).Register(srv)
 	secrets.NewGRPCServer(secrets.NewStore(store.NewMemory())).Register(srv)
 	kms.NewServer(store.NewMemory()).Register(srv)
+	(&kmsinventory.Server{}).Register(srv)
 	// Certificate Authority Service alone: its IAM, Locations and
 	// Operations mixins are other services' rows, registered by them.
 	pca, err := privateca.NewServer("")

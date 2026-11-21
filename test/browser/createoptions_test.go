@@ -213,7 +213,7 @@ func TestPubSubCreateOptionsThroughTheForms(t *testing.T) {
 }
 
 // TestKMSCreateKeyOptionsThroughTheForm (#852, #1851), in the run shard,
-// whose instance serves Cloud KMS: Create key on a ring's page offers the
+// whose instance serves Cloud KMS: Create key, a page of its own from a ring's page, offers the
 // Duration of 'scheduled for destruction' state, defaulted to Cloud KMS's
 // 30 days, and the Rotation period, defaulted to 90 days as Google's is; a key created there with 3 days and a 30-day period reads both
 // back through the console API.
@@ -229,20 +229,23 @@ func TestKMSCreateKeyOptionsThroughTheForm(t *testing.T) {
 	p.navigate("/kms/keyrings?project=" + project)
 	p.clickText("#view tbody a", ring)
 	p.clickText("#view .page-actions button", "Create key")
-	p.waitFor(`document.querySelector(".modal.is-open #f-destroyScheduledDays") !== null`)
+	p.waitFor(`document.querySelector("#view form.create-page #f-destroyScheduledDays") !== null`)
 	var defaults struct{ Destroy, Period string }
-	p.eval(`({ Destroy: document.querySelector(".modal.is-open #f-destroyScheduledDays").value,
-	           Period: document.querySelector(".modal.is-open #f-rotationPeriod").value })`, &defaults)
+	p.eval(`({ Destroy: document.querySelector("#view form.create-page #f-destroyScheduledDays").value,
+	           Period: document.querySelector("#view form.create-page #f-rotationPeriod").value })`, &defaults)
 	if defaults.Destroy != "30" || defaults.Period != "90d" {
 		t.Errorf("Create key opened with destroy %q, period %q; want 30 days and 90d", defaults.Destroy, defaults.Period)
 	}
-	next := time.Now().UTC().Add(10 * 24 * time.Hour).Truncate(time.Second).Format(time.RFC3339)
-	setField(p, ".modal.is-open", "f-cryptoKeyId", "k")
-	setField(p, ".modal.is-open", "f-destroyScheduledDays", "3")
-	setField(p, ".modal.is-open", "f-rotationPeriod", "30d")
-	setField(p, ".modal.is-open", "f-nextRotationTime", next)
-	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
-	p.waitFor(`document.querySelector(".modal") === null`)
+	// Starting on is a date picker (#2053): the key rotates at that date's
+	// midnight UTC.
+	day := time.Now().UTC().Add(10 * 24 * time.Hour).Format(time.DateOnly)
+	next := day + "T00:00:00Z"
+	setField(p, "#view form.create-page", "f-cryptoKeyId", "k")
+	setField(p, "#view form.create-page", "f-destroyScheduledDays", "3")
+	setField(p, "#view form.create-page", "f-rotationPeriod", "30d")
+	setField(p, "#view form.create-page", "f-nextRotationTime", day)
+	p.run(chromedp.Click(chromedp.CSS(`#view form.create-page button[type="submit"]`)))
+	p.waitFor(`!location.search.includes("action=") && document.querySelector("#view form.create-page") === null`)
 	got := editDefaults(t, "kms", project, ring, "k")
 	const destroy = "Duration of 'scheduled for destruction' state"
 	if got[destroy] != "3 days" || got["rotationPeriod"] != "30d" || got["nextRotationTime"] != next {

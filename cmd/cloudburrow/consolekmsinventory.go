@@ -33,7 +33,9 @@ func (p kmsInventoryProvider) List(ctx context.Context, project string) (console
 	if api == nil {
 		return console.Listing{}, errors.New(kmsNotStarted)
 	}
-	listing := console.Listing{Columns: kmsInventoryColumns, NameColumn: "Key name", Noun: "keys", AlwaysStatus: true}
+	listing := console.Listing{Columns: kmsInventoryColumns, NameColumn: "Key name", Noun: "keys", AlwaysStatus: true,
+		// Off until turned on in Column display options, as Google's is.
+		HiddenColumns: []string{"EKM via VPC connection"}}
 	if project == "" {
 		listing.Prompt = "Key inventory lists a project's keys. Choose one in the toolbar."
 		return listing, nil
@@ -53,8 +55,8 @@ func (p kmsInventoryProvider) List(ctx context.Context, project string) (console
 	}
 	listing.Total = len(listing.Items)
 	listing.Note = "Status applies to symmetric keys, as on Google's page: Available when the primary version is enabled, " +
-		"Not available when it is disabled or there is none. Google's key usage summaries come from the Cloud KMS " +
-		"Inventory API, which CloudBurrow does not serve."
+		"Not available when it is disabled or there is none. Open a key for its Usage tracking tab: the resources " +
+		"that use it through CMEK, from the Cloud KMS Inventory API."
 	return listing, nil
 }
 

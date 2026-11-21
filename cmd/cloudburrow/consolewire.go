@@ -326,7 +326,7 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	// Cloud KMS and Cloud Scheduler run in this process too, so their screens
 	// read the objects their APIs serve rather than going through a tunnel.
 	if enabled[config.ServiceKMS] && d.kms != nil {
-		providers = append(providers, kmsProvider{svc: d.kms}, kmsEkmProvider{svc: d.kms}, kmsAutokeyProvider{svc: d.kms}, kmsInventoryProvider{svc: d.kms}, kmsHsmProvider{svc: d.kms})
+		providers = append(providers, kmsProvider{svc: d.kms}, kmsEkmProvider{svc: d.kms}, kmsAutokeyProvider{svc: d.kms}, kmsConfigProvider{svc: d.kms}, kmsInventoryProvider{svc: d.kms}, kmsHsmProvider{svc: d.kms})
 	}
 	// Certificate Authority Service (#1834) runs in this process too.
 	// BigQuery's Sharing (Analytics Hub) page (#1960).

@@ -146,6 +146,10 @@ type Listing struct {
 	// Cloud Run functions' leads with Environment, then Name (#1853).
 	// Empty, or a column not on screen, draws the name first.
 	NameAfter string `json:"nameAfter,omitempty"`
+	// HiddenColumns are the Columns off until the viewer turns them on in
+	// Column display options, as Google's Key inventory hides EKM via VPC
+	// connection by default (#1851).
+	HiddenColumns []string `json:"hiddenColumns,omitempty"`
 	// TableTitle heads the table, and names it, where Google's page titles
 	// its table apart from the page: Audit Logs' "Data Access audit logs
 	// configuration" (#1864). Empty draws no heading.
@@ -380,6 +384,12 @@ type Field struct {
 	// default, and choosing to is a destructive act of its own.
 	Confirm     string `json:"confirm,omitempty"`
 	ConfirmWith string `json:"confirmWith,omitempty"`
+	// ConfirmValue, on a radio or select field with Confirm, is the choice
+	// that asks first: a submit with it chosen opens a prompt naming
+	// Confirm under ConfirmTitle, ended by Confirm with nothing typed, as
+	// Cloud KMS's Disable autokey asks after Submit (#2053).
+	ConfirmValue string `json:"confirmValue,omitempty"`
+	ConfirmTitle string `json:"confirmTitle,omitempty"`
 	// Options are the values a "select" field offers, in order; its value is
 	// one of them. A bucket notification's topic is chosen from the
 	// project's topics this way (#791), so the form cannot name one that
@@ -479,6 +489,13 @@ type Field struct {
 	// field is neither checked nor submitted. Cloud SQL's Database version
 	// lists the chosen engine's versions only (#1860).
 	VisibleWhen map[string]string `json:"visibleWhen,omitempty"`
+	// OptionsBy and OptionsFor, on a select, list only the options
+	// OptionsFor gives for the value the field OptionsBy names holds, the
+	// first of them chosen when the current one is not among them: Cloud
+	// KMS's Create key lists the chosen purpose's algorithms only (#1851).
+	// Options still lists every option, the field's whole range.
+	OptionsBy  string              `json:"optionsBy,omitempty"`
+	OptionsFor map[string][]string `json:"optionsFor,omitempty"`
 	// CheckedWhen, on a checkbox, checks it and holds it checked while
 	// another field of the form holds a value, in ShowWhen's "name=value"
 	// form ("a|b" for either): Memorystore's Security choice of IAM Auth or
@@ -1415,7 +1432,8 @@ type Action struct {
 	// it is not the last segment of the path acted on: a secret version's
 	// Destroy asks for the secret's ID, "enter the secret ID to confirm"
 	// (#1850), whether it is chosen from the version's row or checked on the
-	// secret's Versions tab.
+	// secret's Versions tab; a key version row's Destroy asks for the key's
+	// name, as the key page's Destroy does (#2053).
 	ConfirmWord string `json:"confirmWord,omitempty"`
 	// Confirm is what performing the action changes or puts at stake, and
 	// asks for the resource's name back before anything is sent.
@@ -1489,6 +1507,12 @@ type Action struct {
 	// secret value does from a version row's Actions menu (#1850). The
 	// action route never receives it; the reveal route records it.
 	Reveal bool `json:"reveal,omitempty"`
+	// Page draws the action's form as a page of its own at the resource
+	// page's address with ?action=<id>, under the action's Title (or
+	// Label), ending in its Submit (or Label) and Cancel, instead of a
+	// dialog: Cloud KMS's Create key is a page (#1851). Cancel and success
+	// return to the resource's page.
+	Page bool `json:"page,omitempty"`
 }
 
 // PathActor is a provider with actions on the resources inside a resource.

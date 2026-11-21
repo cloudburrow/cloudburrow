@@ -304,11 +304,15 @@ func (p kmsProvider) keyDetail(ctx context.Context, key string) (console.Detail,
 	}
 	versions.Note = strings.TrimSpace(versions.Note + " " + kmsProtectionNote +
 		" Key material is never shown: no Cloud KMS method returns it; a public key is, through Get public key.")
+	// Google's key page tabs: Overview (the key's details), Versions,
+	// Usage tracking (#2053), Permissions and Logs (#1851).
 	return console.Detail{
-		Edit:    kmsKeyEditForm(k),
-		Summary: summary,
+		Edit: kmsKeyEditForm(k),
 		Sections: []console.Section{
-			{ID: "overview", Label: "Overview", Listing: versions},
+			{ID: "overview", Label: "Overview", Kind: console.KindProperties,
+				Groups: []console.PropertyGroup{{Heading: "Key details", Properties: summary}}},
+			{ID: "versions", Label: "Versions", Listing: versions},
+			p.usageTracking(ctx, k.GetName()),
 			{ID: "permissions", Kind: console.KindPermissions},
 			{ID: "logs", Label: "Logs", Kind: console.KindLogs},
 		},
@@ -320,22 +324,27 @@ func (p kmsProvider) keyDetail(ctx context.Context, key string) (console.Detail,
 // enabled version of a symmetric key that is not primary, Get public key
 // beside it, then Disable or Enable, Destroy, Restore, Delete version.
 func kmsVersionLifecycle(k *kmspb.CryptoKey, v *kmspb.CryptoKeyVersion) []console.Action {
-	destroy := console.Action{ID: "destroy", Label: "Destroy", Destructive: true,
-		Confirm: "The version is scheduled for destruction: it can be restored for " +
+	// Google's Destroy asks for the key's name, then Schedule Destruction
+	// (https://docs.cloud.google.com/kms/docs/destroy-restore).
+	// A version row's (and page's) Destroy asks for the key's name too, as
+	// the key page's does (#2053), not the version number.
+	destroy := console.Action{ID: "destroy", Label: "Destroy", Destructive: true, Submit: "Schedule Destruction",
+		ConfirmWord:  lastSegment(k.GetName()),
+		ConfirmTitle: "Destroy key version?", Confirm: "The version is scheduled for destruction: it can be restored for " +
 			kmsPeriodWords(k.GetDestroyScheduledDuration().AsDuration()) + ", then its key material is destroyed."}
 	switch v.GetState() {
 	case kmspb.CryptoKeyVersion_ENABLED:
 		var out []console.Action
 		if k.GetPurpose() == kmspb.CryptoKey_ENCRYPT_DECRYPT && k.GetPrimary().GetName() != v.GetName() {
-			out = append(out, console.Action{ID: "makeprimary", Label: "Make primary version",
-				Confirm: "Encrypt uses this version from now on; the other versions still decrypt."})
+			out = append(out, console.Action{ID: "makeprimary", Label: "Make primary version", Submit: "Make primary",
+				ConfirmStyle: console.DeleteConfirmClick, ConfirmTitle: "Make primary version?", Confirm: "Encrypt uses this version from now on; the other versions still decrypt."})
 		}
 		return append(out, console.Action{ID: "disable", Label: "Disable"}, destroy)
 	case kmspb.CryptoKeyVersion_DISABLED:
 		return []console.Action{{ID: "enable", Label: "Enable"}, destroy}
 	case kmspb.CryptoKeyVersion_DESTROY_SCHEDULED:
-		return []console.Action{{ID: "restore", Label: "Restore",
-			Confirm: "The version is restored DISABLED; enable it to use it again."}}
+		return []console.Action{{ID: "restore", Label: "Restore", ConfirmStyle: console.DeleteConfirmClick,
+			ConfirmTitle: "Restore key version?", Confirm: "The version is restored DISABLED; enable it to use it again."}}
 	case kmspb.CryptoKeyVersion_DESTROYED:
 		// Only a DESTROYED version that was not imported can be deleted
 		// (service.proto DeleteCryptoKeyVersion).
@@ -372,15 +381,15 @@ const kmsVersionsField = "versions"
 func kmsVersionSelectActions(k *kmspb.CryptoKey) []console.Action {
 	sel := []console.Field{{Name: kmsVersionsField, Type: "hidden"}}
 	return []console.Action{
-		{ID: "disableversions", Label: "Disable", SelectionField: kmsVersionsField, Fields: sel,
-			Confirm: "The checked versions stop encrypting and decrypting until they are enabled."},
-		{ID: "enableversions", Label: "Enable", SelectionField: kmsVersionsField, Fields: sel,
-			Confirm: "The checked versions can encrypt and decrypt again."},
+		{ID: "disableversions", Label: "Disable", SelectionField: kmsVersionsField, Fields: sel, ConfirmStyle: console.DeleteConfirmClick,
+			ConfirmTitle: "Disable key versions?", Confirm: "The checked versions stop encrypting and decrypting until they are enabled."},
+		{ID: "enableversions", Label: "Enable", SelectionField: kmsVersionsField, Fields: sel, ConfirmStyle: console.DeleteConfirmClick,
+			ConfirmTitle: "Enable key versions?", Confirm: "The checked versions can encrypt and decrypt again."},
 		{ID: "destroyversions", Label: "Destroy", Destructive: true, SelectionField: kmsVersionsField, Fields: sel,
-			Confirm: "The checked versions are scheduled for destruction: they can be restored for " +
+			Submit: "Schedule Destruction", ConfirmTitle: "Destroy key versions?", Confirm: "The checked versions are scheduled for destruction: they can be restored for " +
 				kmsPeriodWords(k.GetDestroyScheduledDuration().AsDuration()) + ", then their key material is destroyed."},
-		{ID: "restoreversions", Label: "Restore", SelectionField: kmsVersionsField, Fields: sel,
-			Confirm: "The checked versions are restored DISABLED; enable them to use them again."},
+		{ID: "restoreversions", Label: "Restore", SelectionField: kmsVersionsField, Fields: sel, ConfirmStyle: console.DeleteConfirmClick,
+			ConfirmTitle: "Restore key versions?", Confirm: "The checked versions are restored DISABLED; enable them to use them again."},
 	}
 }
 
@@ -393,7 +402,7 @@ func kmsEditRotationAction(k *kmspb.CryptoKey) console.Action {
 	return console.Action{ID: "editrotation", Label: "Edit Rotation Period", Fields: []console.Field{
 		{Name: "rotationPeriod", Label: "Rotation period", Type: "select", Default: cur, Options: opts,
 			OptionLabels: kmsLabelsFor(opts, kmsPeriodLabel), Help: kmsRotationPeriodHelp},
-		{Name: "nextRotationTime", Label: "Starting on", Type: "text", Default: kmsFormatTime(k.GetNextRotationTime()),
+		{Name: "nextRotationTime", Label: "Starting on", Type: "date", Default: kmsFormatDate(k.GetNextRotationTime()),
 			Help: kmsNextRotationHelp + " Never (manual rotation) clears it."},
 	}}
 }
@@ -590,16 +599,17 @@ func kmsCreateKeyFieldsAt(now time.Time) []console.Field {
 				"or External via VPC on a MANUAL connection, whose versions each name their external key."},
 		{Name: "purpose", Label: purpose.Label, Type: "select", Default: purpose.Default, Options: purpose.Options,
 			OptionLabels: kmsLabelsFor(purpose.Options, kmsPurposeWords), Help: purpose.Help},
-		{Name: "algorithm", Label: alg.Label, Type: "select", Options: alg.Options,
-			OptionLabels: kmsLabelsFor(alg.Options, kmsAlgorithmWords), Help: alg.Help},
+		{Name: "algorithm", Label: alg.Label, Type: "select", Default: kms.Algorithms(kmspb.CryptoKey_ENCRYPT_DECRYPT)[0], Options: alg.Options,
+			OptionLabels: kmsLabelsFor(alg.Options, kmsAlgorithmWords), Help: alg.Help,
+			OptionsBy: "purpose", OptionsFor: kmsAlgorithmsByPurpose()},
 		kmsTrustedWrappingField("the first version"),
 		{Name: "importOnly", Label: "Restrict key versions to import only", Type: "checkbox", ShowWhen: "keyMaterial=" + kmsMaterialImported,
 			Help: "import_only: every version is imported, never generated, and the key is rotated by hand. Fixed once the key exists."},
 		{Name: "rotationPeriod", Label: "Rotation period", Type: "select", Default: kmsFormatPeriod(durationpb.New(kmsDefaultRotation)),
 			Options: kmsRotationPresets, OptionLabels: kmsLabelsFor(kmsRotationPresets, kmsPeriodLabel),
 			Help: "Symmetric keys only: Cloud KMS rotates other keys by hand. " + kmsRotationPeriodHelp},
-		{Name: "nextRotationTime", Label: "Starting on", Type: "text",
-			Default: now.UTC().Add(kmsDefaultRotation).Truncate(time.Second).Format(time.RFC3339),
+		{Name: "nextRotationTime", Label: "Starting on", Type: "date",
+			Default: now.UTC().Add(kmsDefaultRotation).Format(time.DateOnly),
 			Help:    "The first automatic rotation, one rotation period from now unless changed. " + kmsNextRotationHelp},
 		{Name: "labels", Label: "Labels", Type: "map", Section: "Additional settings",
 			Help: "Optional. Lowercase keys and values."},
@@ -652,6 +662,11 @@ func kmsCreateKeyRequest(ring string, values map[string]string) (*kmspb.CreateCr
 	// Unset, an external ENCRYPT_DECRYPT key gets EXTERNAL_SYMMETRIC_ENCRYPTION
 	// from CreateCryptoKey.
 	external := level == kmspb.ProtectionLevel_EXTERNAL || level == kmspb.ProtectionLevel_EXTERNAL_VPC
+	// The form's symmetric algorithm is Google's; an external symmetric key
+	// is EXTERNAL_SYMMETRIC_ENCRYPTION, which CreateCryptoKey implies.
+	if external && purpose == kmspb.CryptoKey_ENCRYPT_DECRYPT && alg == kmspb.CryptoKeyVersion_GOOGLE_SYMMETRIC_ENCRYPTION {
+		alg = 0
+	}
 	if alg == 0 && purpose == kmspb.CryptoKey_ENCRYPT_DECRYPT && !external {
 		alg = kmspb.CryptoKeyVersion_GOOGLE_SYMMETRIC_ENCRYPTION
 	}
@@ -706,9 +721,9 @@ func kmsCreateKeyRequest(ring string, values map[string]string) (*kmspb.CreateCr
 		key.RotationSchedule = &kmspb.CryptoKey_RotationPeriod{RotationPeriod: durationpb.New(d)}
 	}
 	if raw := strings.TrimSpace(values["nextRotationTime"]); raw != "" {
-		t, err := time.Parse(time.RFC3339, raw)
+		t, _, err := kmsParseNextRotation(raw)
 		if err != nil {
-			return nil, fmt.Errorf("next rotation time: %q is not an RFC 3339 time such as 2026-10-01T00:00:00Z", raw)
+			return nil, err
 		}
 		key.NextRotationTime = timestamppb.New(t)
 	}
@@ -734,7 +749,8 @@ func (p kmsProvider) DetailActions(ctx context.Context, project string, path []s
 	}
 	switch len(path) {
 	case 1:
-		out := []console.Action{{ID: "createkey", Label: "Create key", Fields: kmsCreateKeyFields()},
+		// Create key is a page of its own, as Google's is (#1851).
+		out := []console.Action{{ID: "createkey", Label: "Create key", Page: true, Submit: "Create", Fields: kmsCreateKeyFields()},
 			kmsCreateImportJobAction(), kmsRandomBytesAction}
 		// DeleteKeyRing needs every key deleted first, and every import
 		// job expired (delete-kms-resources, #1595): offered on an empty
@@ -757,8 +773,10 @@ func (p kmsProvider) DetailActions(ctx context.Context, project string, path []s
 		}
 		// Rotate, as Google's header has it, makes a version and, on a
 		// symmetric key, its primary; Add version only makes one.
-		out := []console.Action{{ID: "rotate", Label: "Rotate", Fields: addFields,
-			Confirm: "A new version is created" + map[bool]string{true: " and made the primary version.", false: "."}[k.GetPurpose() == kmspb.CryptoKey_ENCRYPT_DECRYPT]}}
+		// Google confirms it with Rotate alone, nothing typed
+		// (https://docs.cloud.google.com/kms/docs/rotate-key).
+		out := []console.Action{{ID: "rotate", Label: "Rotate", Fields: addFields, ConfirmStyle: console.DeleteConfirmClick,
+			ConfirmTitle: "Rotate key?", Confirm: "A new version is created" + map[bool]string{true: " and made the primary version.", false: "."}[k.GetPurpose() == kmspb.CryptoKey_ENCRYPT_DECRYPT]}}
 		if k.GetPurpose() == kmspb.CryptoKey_ENCRYPT_DECRYPT {
 			out = append(out, kmsEditRotationAction(k))
 		}

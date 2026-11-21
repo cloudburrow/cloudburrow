@@ -277,6 +277,16 @@ func kmsAlgorithmField() console.Field {
 			"EC_SIGN_* and RSA_SIGN_* sign (EC_SIGN_SECP256K1_SHA256 at HSM or HSM_SINGLE_TENANT only, as on Google), RSA_DECRYPT_OAEP_* decrypt, HMAC_* MAC, AES_* raw encryption, ML_KEM_* and KEM_XWING key encapsulation, PQ_SIGN_* post-quantum signing (ML-DSA, SLH-DSA; SOFTWARE only, as on Google), AES_256_KWP (AES_WRAPPING, HSM_SINGLE_TENANT only) trusted key wrapping."}
 }
 
+// kmsAlgorithmsByPurpose is Create key's Algorithm list for each purpose,
+// as Google's lists only the chosen purpose's algorithms (#1851).
+func kmsAlgorithmsByPurpose() map[string][]string {
+	out := map[string][]string{}
+	for _, p := range kms.Purposes() {
+		out[p] = kms.Algorithms(kmspb.CryptoKey_CryptoKeyPurpose(kmspb.CryptoKey_CryptoKeyPurpose_value[p]))
+	}
+	return out
+}
+
 // Import jobs and retired resources (#1219). An import job's page is
 // [ring, kmsImportJobsSegment, job ID] and a retired key's is
 // [ring, kmsRetiredSegment, retired resource ID]: a key ID is letters,

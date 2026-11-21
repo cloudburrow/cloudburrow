@@ -61,6 +61,10 @@ var gcloudVerified = []gcloudEndpoint{
 	// Cloud KMS (#426): gcloud's apitools client appends v1/ itself, and
 	// TestGcloudKMS drives keyrings, keys and versions through it.
 	{config.ServiceKMS, "cloudkms", "/", false, false},
+	// The Cloud KMS Inventory API (#2053), on the Cloud KMS port; gcloud
+	// kms inventory appends v1/. TestGcloudKMSInventory drives list-keys,
+	// get-protected-resources-summary and search-protected-resources.
+	{config.ServiceKMS, "kmsinventory", "/", false, false},
 	// Secret Manager and Cloud Tasks (#590): JSON on the gRPC port, v1/ and
 	// v2/ appended by gcloud. TestGcloudSecrets drives secrets and versions;
 	// TestGcloudTasks drives queues and, since tasks are transcoded (#591),

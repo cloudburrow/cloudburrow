@@ -45,7 +45,7 @@ const kmsKeyEditNote = "Saved through UpdateCryptoKey with an update mask naming
 const (
 	kmsRotationPeriodHelp = "Optional. A period such as 30d, 90d or 720h, at least 24 hours (1d) and at most " +
 		"876,000 hours; empty for no automatic rotation. A period needs a next rotation time."
-	kmsNextRotationHelp = "Optional. An RFC 3339 time such as 2026-10-01T00:00:00Z: when the key next rotates. " +
+	kmsNextRotationHelp = "Optional. The date the key next rotates, at midnight UTC (an RFC 3339 time is taken too). " +
 		"Empty for none."
 )
 
@@ -81,6 +81,28 @@ func kmsParsePeriod(raw string) (d time.Duration, ok bool, err error) {
 		return 0, false, fmt.Errorf("rotation period: %q is not a period such as 30d or 720h", raw)
 	}
 	return d, true, nil
+}
+
+// kmsParseNextRotation reads Starting on: a date from the date picker
+// (2006-01-02, midnight UTC, #2053), or an RFC 3339 time. dateOnly says it
+// was a date.
+func kmsParseNextRotation(raw string) (t time.Time, dateOnly bool, err error) {
+	if t, err := time.Parse(time.DateOnly, raw); err == nil {
+		return t, true, nil
+	}
+	if t, err := time.Parse(time.RFC3339, raw); err == nil {
+		return t, false, nil
+	}
+	return time.Time{}, false, fmt.Errorf("next rotation time: %q is not a date such as 2026-10-01 or an RFC 3339 time such as 2026-10-01T00:00:00Z", raw)
+}
+
+// kmsFormatDate shows a timestamp as the date picker holds it, empty for
+// none.
+func kmsFormatDate(ts *timestamppb.Timestamp) string {
+	if ts == nil {
+		return ""
+	}
+	return ts.AsTime().UTC().Format(time.DateOnly)
 }
 
 // kmsFormatTime shows a timestamp as the form accepts it, empty for none.
@@ -144,11 +166,15 @@ func kmsKeyUpdate(cur *kmspb.CryptoKey, values map[string]string) (*kmspb.Update
 	if raw, ok := values["nextRotationTime"]; ok {
 		var next *timestamppb.Timestamp
 		if raw = strings.TrimSpace(raw); raw != "" {
-			t, err := time.Parse(time.RFC3339, raw)
+			t, dateOnly, err := kmsParseNextRotation(raw)
 			if err != nil {
-				return nil, fmt.Errorf("next rotation time: %q is not an RFC 3339 time such as 2026-10-01T00:00:00Z", raw)
+				return nil, err
 			}
 			next = timestamppb.New(t)
+			// The date picker's unchanged date keeps the time of day.
+			if c := cur.GetNextRotationTime(); dateOnly && c != nil && kmsFormatDate(c) == raw {
+				next = c
+			}
 		}
 		curNext := cur.GetNextRotationTime()
 		if (next != nil) != (curNext != nil) || (next != nil && !next.AsTime().Equal(curNext.AsTime())) {

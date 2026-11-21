@@ -204,6 +204,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/rpmfixture/` | Builds small, installable `.rpm` packages in Go for tests (#1539): a signature header with the header and payload digests, an immutable-region header with files, dependencies and changelog, and a gzip cpio payload; rpm and dnf install them with `gpgcheck=0`. |
 | `internal/sched/` | Cancellable background work, due-time scheduling, retry and backoff over an injected clock. |
 | `internal/service/kms/` | Cloud KMS, built by us (#309). |
+| `internal/service/kmsinventory/` | The Cloud KMS Inventory API (#2053): key usage from the products' CMEK resources. |
 | `internal/locations/` | The `google.cloud.location.Locations` mixin's gRPC registration, shared by Cloud Scheduler and Cloud KMS (#1237, #1291). |
 | `internal/service/logging/` | Cloud Logging write and read (`LoggingServiceV2`), built by us (#304). |
 | `internal/service/resourcemanager/` | The project registry, and the Resource Manager v3 and v1 Projects APIs over it (#298, #301). |
