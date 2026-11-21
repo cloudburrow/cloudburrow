@@ -91,13 +91,12 @@ func waitOp(t *testing.T, s *storagev1.Service, bucket, id string) *storagev1.Go
 // Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/anywhere-cache
 // unverified: storage.anywhereCaches.update 400: another update while one is pending
 // Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/anywhere-cache
-// (anywhereCaches.pause, sent by hand: a cache that is not running is 400,
-// UNVERIFIED, docs re-read 2026-10-17, still unanswered:
-// https://docs.cloud.google.com/storage/docs/anywhere-cache. Revision
-// 20261107 of the discovery document has no pause, nor has 20261111, the
-// public one re-read 2026-11-18, so it is no coverage method; what Google
-// now answers on the path is UNVERIFIED (2026-11-18), measurable only on a
-// live project, so it stays served for older clients, #1791.)
+// (anywhereCaches.pause is gone from the JSON API: revision 20261107 of
+// the discovery document dropped it and 20261111, google.golang.org/api
+// v0.316.0's, read 2026-11-20, has none, so its old path, sent by hand, is
+// 404 notFound as any unbound path is, #1791. The cache is paused through
+// Storage Control's PauseAnywhereCache, which still has it, and resumed
+// over JSON.)
 // unverified: storage.buckets.operations.cancel 400: an Anywhere Cache update's operation, and a done one
 // Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/anywhere-cache
 // covers: storage.anywhereCaches.insert, storage.anywhereCaches.get, storage.anywhereCaches.list, storage.anywhereCaches.update
@@ -105,6 +104,7 @@ func waitOp(t *testing.T, s *storagev1.Service, bucket, id string) *storagev1.Go
 func TestStorageAnywhereCachesJSON(t *testing.T) {
 	h := New(t)
 	s := storageJSON(t, h)
+	sc := storageControlGRPC(t, h)
 	b := locatedBucket(t, h, "-acj", "US-CENTRAL1")
 	putText(t, h.Context(), storageClient(t, h).Bucket(b), "o.txt")
 
@@ -155,7 +155,11 @@ func TestStorageAnywhereCachesJSON(t *testing.T) {
 		want string
 	}{
 		{func(...googleapi.CallOption) (*storagev1.AnywhereCache, error) {
-			return pauseAnywhereCache(s, b, "us-central1-a")
+			if _, err := pauseAnywhereCache(s, b, "us-central1-a"); httpCode(err) != http.StatusNotFound {
+				t.Errorf("JSON anywhereCaches.pause = %v; want 404, gone from the discovery document", err)
+			}
+			c, err := sc.PauseAnywhereCache(h.Context(), &controlpb.PauseAnywhereCacheRequest{Name: "projects/_/buckets/" + b + "/anywhereCaches/us-central1-a"})
+			return &storagev1.AnywhereCache{State: c.GetState()}, err
 		}, "paused"},
 		{s.AnywhereCaches.Resume(b, "us-central1-a").Do, "running"},
 		{s.AnywhereCaches.Disable(b, "us-central1-a").Do, "disabled"},
@@ -164,8 +168,8 @@ func TestStorageAnywhereCachesJSON(t *testing.T) {
 			t.Errorf("state change = %+v, %v; want %s", c, err, step.want)
 		}
 	}
-	if _, err := pauseAnywhereCache(s, b, "us-central1-a"); httpCode(err) != http.StatusBadRequest {
-		t.Errorf("pause a disabled cache = %v; want 400", err)
+	if _, err := sc.PauseAnywhereCache(h.Context(), &controlpb.PauseAnywhereCacheRequest{Name: "projects/_/buckets/" + b + "/anywhereCaches/us-central1-a"}); grpcCode(err) != codes.FailedPrecondition {
+		t.Errorf("pause a disabled cache = %v; want FAILED_PRECONDITION", err)
 	}
 	// The object is read from the bucket, cache or none.
 	if r, err := storageClient(t, h).Bucket(b).Object("o.txt").NewReader(h.Context()); err != nil {
@@ -505,11 +509,11 @@ func TestStorageNotificationsWithoutPubSub(t *testing.T) {
 	}
 }
 
-// pauseAnywhereCache calls storage.anywhereCaches.pause, which the storage
-// v1 discovery document lists up to revision 20261009 and google.golang.org/api
-// v0.314.0's (revision 20261107) and the public 20261111 no longer do
-// (#1791), so the generated
-// client has no Pause: the same request, made by hand against s's endpoint.
+// pauseAnywhereCache sends storage.anywhereCaches.pause's old request, which
+// the storage v1 discovery document lists up to revision 20261009 and
+// revisions 20261107 and 20261111 (google.golang.org/api v0.314.0 to
+// v0.316.0) no longer do (#1791), so the generated client has no Pause: the
+// same request, made by hand against s's endpoint.
 func pauseAnywhereCache(s *storagev1.Service, bucket, id string) (*storagev1.AnywhereCache, error) {
 	if s.BasePath == "" {
 		return nil, errors.New("pauseAnywhereCache: no endpoint")
