@@ -58,8 +58,10 @@ import (
 //   - a jax2tf-style XlaCallModule (a core TensorFlow op) whose StableHLO
 //     is a stablehlo.case runs as STABLEHLO_CASE, the last branch for an
 //     index out of range;
-//   - ML.EXPLAIN_PREDICT of an imported TensorFlow model is 501: Google's
-//     troubleshooting page runs it, and no page says how it attributes.
+//   - ML.EXPLAIN_PREDICT of an imported TensorFlow model runs on
+//     TensorFlow (Integrated Gradients; TestBigQueryMLTensorFlowRuntime
+//     checks its values): an explained row's prediction_value is its
+//     first floating-point output's, and only FLOAT inputs are attributed.
 //
 // It runs in the localai shard, beside the other locally run models.
 //
@@ -289,8 +291,8 @@ func TestBigQueryMLTensorFlowImportGenerated(t *testing.T) {
 			t.Errorf("a refused model %s was kept", model)
 		}
 	}
-	refused("old", http.StatusBadRequest, "earlier than version 20 aren't supported")
-	refused("dev", http.StatusBadRequest, "unreleased version of TensorFlow aren't supported")
+	refused("old", http.StatusBadRequest, "Models trained using a version of GraphDef earlier than version 20 aren't supported.")
+	refused("dev", http.StatusBadRequest, "Models trained using an unreleased version of TensorFlow aren't supported.")
 	refused("ragged", http.StatusBadRequest, "RaggedTensors aren't supported")
 	refused("sparse3", http.StatusNotImplemented, "SparseTensor")
 
@@ -368,8 +370,19 @@ func TestBigQueryMLTensorFlowImportGenerated(t *testing.T) {
 		arrays("y", i, r["y"], ref.HloCase[i].Outputs["y"])
 	}
 
-	// ML.EXPLAIN_PREDICT: Google runs it (its troubleshooting page) but no
-	// page says how it attributes an imported TensorFlow model.
-	_, err = c.Query(fmt.Sprintf("SELECT * FROM ML.EXPLAIN_PREDICT(MODEL `%s.cf`, TABLE `%[1]s.cf`)", name)).Read(ctx)
-	wantAPIError(t, "ML.EXPLAIN_PREDICT", err, http.StatusNotImplemented, "EXPLAIN_PREDICT")
+	// ML.EXPLAIN_PREDICT, on TensorFlow (modeltfruntime.go): Integrated
+	// Gradients of the first floating-point output, total, through the
+	// tf.while_loop and tf.cond, over the FLOAT input x (n, an INT64, is
+	// held); prediction_value is the row's total.
+	rows = mlQuery(t, h, c, fmt.Sprintf("SELECT id, total, top_feature_attributions, prediction_value FROM ML.EXPLAIN_PREDICT(MODEL `%s.cf`, TABLE `%[1]s.cf`) ORDER BY id", name))
+	if len(rows) != len(ref.CF) {
+		t.Fatalf("explain cf: %d rows, want %d", len(rows), len(ref.CF))
+	}
+	for i, r := range rows {
+		num("explain total", i, r["prediction_value"], ref.CF[i].Outputs["total"][0])
+		attrs, _ := r["top_feature_attributions"].([]bigquery.Value)
+		if len(attrs) != 1 || attrs[0].(map[string]bigquery.Value)["feature"] != "x" {
+			t.Errorf("explain cf row %d: attributions %v, want x's alone", i, r["top_feature_attributions"])
+		}
+	}
 }

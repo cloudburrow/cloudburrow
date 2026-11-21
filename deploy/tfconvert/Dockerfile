@@ -5,7 +5,9 @@
 # an --internal Docker network of its own (no route out): Google's
 # tf.lite.TFLiteConverter.from_saved_model turns the SavedModel into a
 # TensorFlow Lite flatbuffer of builtin operators, which
-# internal/tflitemodel (pure Go) then runs for ML.PREDICT.
+# internal/tflitemodel (pure Go) then runs for ML.PREDICT. A model
+# TensorFlow Lite cannot take runs on TensorFlow in this image's serve mode
+# (a long-lived predictor on the same network), as BigQuery runs it.
 #
 # The base is Google's official TensorFlow image, tensorflow/tensorflow
 # 2.20.0 (Apache-2.0), pinned by digest (dependencies.json's

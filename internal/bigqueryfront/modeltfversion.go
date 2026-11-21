@@ -141,12 +141,13 @@ func checkSavedModelVersions(uri string, files map[string][]byte) (int, string) 
 	}
 	for _, v := range vs {
 		if v.producer >= 0 && v.producer < 20 {
-			return 400, "Failed to load the TensorFlow model " + uri + ": its graph is GraphDef version " + strconv.FormatInt(v.producer, 10) +
-				"; models trained using a version of GraphDef earlier than version 20 aren't supported"
+			// The page's own sentence, as BigQuery's error (#1775).
+			return 400, "Models trained using a version of GraphDef earlier than version 20 aren't supported. The TensorFlow model " + uri +
+				" is GraphDef version " + strconv.FormatInt(v.producer, 10) + "."
 		}
 		if unreleasedTensorFlow(v.tfVersion) {
-			return 400, "Failed to load the TensorFlow model " + uri + ": it was written by TensorFlow " + v.tfVersion +
-				"; models trained using an unreleased version of TensorFlow aren't supported"
+			return 400, "Models trained using an unreleased version of TensorFlow aren't supported. The TensorFlow model " + uri +
+				" was written by TensorFlow " + v.tfVersion + "."
 		}
 	}
 	return 0, ""

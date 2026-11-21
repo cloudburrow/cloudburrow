@@ -55,8 +55,10 @@ func (zeros) Read(p []byte) (int, error) {
 //     out of the vocabulary and empty ones among them;
 //   - a STRING column (StringLookup one-hot, Dense) does too;
 //   - a model that splits a sentence with tf.strings.split needs Flex
-//     (StringSplitV2, which TensorFlow Lite has no builtin for): 501 with
-//     the converter's list of operators, and no model is made;
+//     (StringSplitV2, which TensorFlow Lite has no builtin for), so it runs
+//     on TensorFlow itself, as BigQuery runs it (the CLI's long-lived
+//     predictor container), and predicts TensorFlow's output for a STRING
+//     column;
 //   - "Models are limited to 450 MB in size": a folder of 451 MB is 400.
 //
 // It runs in the localai shard, beside the other locally run models.
@@ -132,6 +134,7 @@ func TestBigQueryMLTensorFlowKeras(t *testing.T) {
 		Dense []rowRef `json:"dense"`
 		Text  []rowRef `json:"text"`
 		Word  []rowRef `json:"word"`
+		Split []rowRef `json:"split"`
 	}
 	raw, err := os.ReadFile(filepath.Join(out, "predictions.json"))
 	if err != nil {
@@ -151,7 +154,7 @@ func TestBigQueryMLTensorFlowKeras(t *testing.T) {
 		}
 		return "ARRAY<" + typ + ">[" + strings.Join(s, ", ") + "]"
 	}
-	var dRows, tRows, wRows []string
+	var dRows, tRows, wRows, sRows []string
 	for i, r := range ref.Dense {
 		dRows = append(dRows, fmt.Sprintf("SELECT %d AS id, %s AS features", i, array("FLOAT64", r.Inputs["features"])))
 	}
@@ -161,8 +164,11 @@ func TestBigQueryMLTensorFlowKeras(t *testing.T) {
 	for i, r := range ref.Word {
 		wRows = append(wRows, fmt.Sprintf("SELECT %d AS id, %q AS word", i, r.Inputs["word"]))
 	}
+	for i, r := range ref.Split {
+		sRows = append(sRows, fmt.Sprintf("SELECT %d AS id, %q AS sentence", i, r.Inputs["sentence"]))
+	}
 	name := mlDataset(t, h, c, map[string]string{"dense": strings.Join(dRows, " UNION ALL "), "text": strings.Join(tRows, " UNION ALL "),
-		"word": strings.Join(wRows, " UNION ALL ")})
+		"word": strings.Join(wRows, " UNION ALL "), "split": strings.Join(sRows, " UNION ALL ")})
 
 	// The first TENSORFLOW import may still build the instance's converter
 	// image: tensorflowImportDeadline.
@@ -197,8 +203,10 @@ func TestBigQueryMLTensorFlowKeras(t *testing.T) {
 			labels = append(labels, f.Name+" "+string(f.Type.TypeKind))
 		}
 		sort.Strings(feats)
-		if !reflect.DeepEqual(feats, wantFeat) || !reflect.DeepEqual(labels, []string{"output_0 ARRAY"}) {
-			t.Errorf("%s columns %v %v, want %v [output_0 ARRAY]", m, feats, labels, wantFeat)
+		// split's Dense(1) is [None, 1]: one FLOAT64 a row.
+		wantLabel := map[bool]string{true: "output_0 FLOAT64", false: "output_0 ARRAY"}[m == "split"]
+		if !reflect.DeepEqual(feats, wantFeat) || !reflect.DeepEqual(labels, []string{wantLabel}) {
+			t.Errorf("%s columns %v %v, want %v [%s]", m, feats, labels, wantFeat, wantLabel)
 		}
 		got := mlQuery(t, h, c, fmt.Sprintf("SELECT id, output_0 FROM ML.PREDICT(MODEL `%s.%s`, TABLE `%[1]s.%[2]s`) ORDER BY id", name, m))
 		if len(got) != len(rows) {
@@ -207,6 +215,9 @@ func TestBigQueryMLTensorFlowKeras(t *testing.T) {
 		for i, r := range got {
 			want := rows[i].Outputs["output_0"]
 			ys, _ := r["output_0"].([]bigquery.Value)
+			if y, ok := r["output_0"].(float64); ok {
+				ys = []bigquery.Value{y}
+			}
 			if len(ys) != len(want) {
 				t.Fatalf("%s row %d: %v, TensorFlow %v", m, i, r["output_0"], want)
 			}
@@ -222,12 +233,9 @@ func TestBigQueryMLTensorFlowKeras(t *testing.T) {
 	check("text", []string{"tokens ARRAY<STRING>"}, ref.Text)
 	check("word", []string{"word STRING"}, ref.Word)
 
-	// tf.strings.split has no TensorFlow Lite builtin: 501, never a model.
-	err = create("split")
-	wantAPIError(t, "Flex", err, http.StatusNotImplemented, "StringSplitV2")
-	if _, err := c.Dataset(name).Model("split").Metadata(h.Context()); err == nil {
-		t.Error("a model that did not convert was made")
-	}
+	// tf.strings.split has no TensorFlow Lite builtin: it runs on
+	// TensorFlow, as on BigQuery.
+	check("split", []string{"sentence STRING"}, ref.Split)
 
 	// "Models are limited to 450 MB in size": the dense model's files and
 	// a 451 MB variables shard beside them.

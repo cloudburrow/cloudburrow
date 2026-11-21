@@ -1,5 +1,6 @@
 // Package tfconvert converts BigQuery ML's imported TensorFlow SavedModels
-// (MODEL_TYPE='TENSORFLOW', #1775) to TensorFlow Lite, on the host.
+// (MODEL_TYPE='TENSORFLOW', #1775) on the host, and runs the ones
+// TensorFlow Lite cannot take on TensorFlow itself.
 //
 // The BigQuery front is a CGO-less static binary in the cluster and cannot
 // run TensorFlow, so the CLI serves this converter on --port-tfconvert,
@@ -8,8 +9,12 @@
 // them to a temporary directory and runs the converter image
 // (deploy/tfconvert: Google's tf.lite.TFLiteConverter.from_saved_model in
 // Google's pinned tensorflow/tensorflow image) on an --internal Docker
-// network with no route out, and answers the
-// TensorFlow Lite flatbuffer, which internal/tflitemodel runs. The CLI
+// network with no route out, and answers a bundle (bundle.go): the
+// SavedModel with its signature and, when TensorFlow Lite's builtin
+// operators take it, the TensorFlow Lite flatbuffer internal/tflitemodel
+// runs. A model they do not take (Flex, or one TFLiteConverter cannot
+// lower) runs, as on BigQuery, on TensorFlow: a long-lived predictor
+// container of the same image on the same network (predict.go). The CLI
 // only shells out to docker: it stays static.
 package tfconvert
 
@@ -23,7 +28,9 @@ import (
 type Refusal struct {
 	// Kind is "format" (not a SavedModel), "signature" (no
 	// serving_default), "flex" (needs TensorFlow ops TensorFlow Lite's
-	// builtins lack), "ragged" (a RaggedTensor input, output or
+	// builtins lack: a bundle's fallback.json, never a refusal of the
+	// model), "run" (TensorFlow's error running it), "missing" (the
+	// runtime does not hold the model), "ragged" (a RaggedTensor input, output or
 	// tf.train.Example feature), "sparse" (a SparseTensor of rank other
 	// than 2 or a SparseTensor output, which no column fills; rank-2
 	// SparseTensor inputs and VarLenFeatures convert), "convert" (any other

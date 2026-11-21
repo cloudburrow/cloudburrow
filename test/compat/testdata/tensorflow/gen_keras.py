@@ -25,8 +25,10 @@ layers' names and answers output_0.
                FLOAT32[None,3].
 <out>/split:   a sentence STRING[None] split into words with
                tf.strings.split before its StringLookup: TensorFlow Lite
-               has no builtin for StringSplit, so it needs Flex.
-<out>/predictions.json: {"dense": [...], "text": [...], "word": [...]},
+               has no builtin for StringSplit, so it needs Flex, and runs
+               on TensorFlow as on BigQuery.
+<out>/predictions.json: {"dense": [...], "text": [...], "word": [...],
+               "split": [...]},
                each row's inputs and TensorFlow's outputs.
 """
 
@@ -91,7 +93,7 @@ def flat(o):
     return {k: [float(z) for z in np.asarray(v.numpy()).ravel()] for k, v in o.items()}
 
 
-pred = {"dense": [], "text": [], "word": []}
+pred = {"dense": [], "text": [], "word": [], "split": []}
 fn = serve("dense")
 for _ in range(5):
     x = rng.normal(size=(1, 4)).astype(np.float32)
@@ -104,5 +106,8 @@ for _ in range(5):
 fn = serve("word")
 for t in ["good", "boring", "plot", "unseen", ""]:
     pred["word"].append({"inputs": {"word": t}, "outputs": flat(fn(word=tf.constant([t])))})
+fn = serve("split")
+for t in ["good movie", "bad boring plot", "", "unseen words here", "great fine movie plot extra"]:
+    pred["split"].append({"inputs": {"sentence": t}, "outputs": flat(fn(sentence=tf.constant([t])))})
 with open(os.path.join(out, "predictions.json"), "w") as f:
     json.dump(pred, f, indent=1)

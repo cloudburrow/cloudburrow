@@ -25,14 +25,16 @@ func tfConverterEnabled(cfg config.Config) bool {
 // tfConverterService serves internal/tfconvert on --port-tfconvert: on
 // loopback, and to the BigQuery front through cloudburrow-host. Each
 // conversion is a `docker run` of the converter image, on an --internal network,
-// (deploy/tfconvert), built on the first import; the CLI itself runs no
-// TensorFlow and stays static.
+// (deploy/tfconvert), built on the first import; a model TensorFlow Lite
+// cannot take predicts in a long-lived container of the same image there
+// (internal/tfconvert's predict.go). The CLI itself runs no TensorFlow and
+// stays static.
 type tfConverterService struct {
 	addr string
 	out  io.Writer
 	srv  *http.Server
 	ln   net.Listener
-	h    http.Handler
+	h    *tfconvert.Server
 }
 
 // newTFConverter is the converter, or nil when tfConverterEnabled is false.
@@ -71,7 +73,12 @@ func (s *tfConverterService) Stop(ctx context.Context) error {
 	if s.srv == nil {
 		return nil
 	}
-	return s.srv.Shutdown(ctx)
+	err := s.srv.Shutdown(ctx)
+	// The TensorFlow runtime's predictor containers (predict.go) go with it.
+	if cerr := s.h.Close(); err == nil {
+		err = cerr
+	}
+	return err
 }
 
 // Addr is the bound address, "" before Start or for a nil converter.

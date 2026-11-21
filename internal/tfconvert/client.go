@@ -26,8 +26,8 @@ func NewClient(base string, hc *http.Client) *Client {
 	return &Client{base: strings.TrimRight(base, "/"), hc: hc}
 }
 
-// Convert sends the SavedModel's files and returns its TensorFlow Lite
-// flatbuffer, or a *Refusal.
+// Convert sends the SavedModel's files and returns its bundle
+// (bundle.go), or a *Refusal.
 func (c *Client) Convert(ctx context.Context, files []File) ([]byte, error) {
 	if c.base == "" {
 		return nil, &Refusal{Kind: "unavailable", Message: "no TensorFlow converter address"}
@@ -66,4 +66,58 @@ func (c *Client) Convert(ctx context.Context, files []File) ([]byte, error) {
 		return nil, decodeRefusal(body)
 	}
 	return nil, &Refusal{Kind: "unavailable", Message: fmt.Sprintf("the TensorFlow converter answered HTTP %d", res.StatusCode)}
+}
+
+// Run sends one request line to the TensorFlow runtime of the converted
+// model whose bundle's SHA-256 is sum (predict.go), sending the bundle
+// first when the converter does not hold it, and answers the answer line,
+// or a *Refusal: of kind "run" for TensorFlow's own error.
+func (c *Client) Run(ctx context.Context, sum string, bundle func() ([]byte, error), req []byte) ([]byte, error) {
+	if c.base == "" {
+		return nil, &Refusal{Kind: "unavailable", Message: "no TensorFlow converter address"}
+	}
+	for attempt := 0; ; attempt++ {
+		code, body, err := c.post(ctx, "/v1/run?model="+sum, "application/json", req)
+		if err != nil {
+			return nil, err
+		}
+		switch {
+		case code == http.StatusOK:
+			return body, nil
+		case code == http.StatusNotFound && attempt == 0:
+			b, err := bundle()
+			if err != nil {
+				return nil, err
+			}
+			code, body, err := c.post(ctx, "/v1/models?model="+sum, "application/x-tar", b)
+			if err != nil {
+				return nil, err
+			}
+			if code != http.StatusNoContent {
+				return nil, decodeRefusal(body)
+			}
+			continue
+		case code == http.StatusUnprocessableEntity, code == http.StatusServiceUnavailable, code == http.StatusNotFound:
+			return nil, decodeRefusal(body)
+		}
+		return nil, &Refusal{Kind: "unavailable", Message: fmt.Sprintf("the TensorFlow converter answered HTTP %d", code)}
+	}
+}
+
+func (c *Client) post(ctx context.Context, path, typ string, body []byte) (int, []byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+path, bytes.NewReader(body))
+	if err != nil {
+		return 0, nil, err
+	}
+	req.Header.Set("Content-Type", typ)
+	res, err := c.hc.Do(req)
+	if err != nil {
+		return 0, nil, &Refusal{Kind: "unavailable", Message: "the TensorFlow converter could not be reached: " + err.Error()}
+	}
+	defer res.Body.Close()
+	b, err := io.ReadAll(io.LimitReader(res.Body, 1<<30))
+	if err != nil {
+		return 0, nil, &Refusal{Kind: "unavailable", Message: "the TensorFlow converter's answer was cut short: " + err.Error()}
+	}
+	return res.StatusCode, b, nil
 }
