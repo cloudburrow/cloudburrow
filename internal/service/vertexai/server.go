@@ -46,6 +46,9 @@ type Server struct {
 	// objects reads file_data's gs:// objects (#1651); nil without Cloud
 	// Storage.
 	objects Objects
+	// videoDecoder decodes multimodalembedding@001's AVI, FLV, MPEG and
+	// WMV video (#1651); nil leaves them UNAVAILABLE.
+	videoDecoder VideoDecoder
 
 	// garden serves Model Garden's Hugging Face deployments (#1840,
 	// modelgarden.go), with their operations and REST transcoder.

@@ -65,6 +65,11 @@ type Input struct {
 	Content  string
 	TaskType string
 	Title    string
+	// MaxTextTokens, when positive, cuts a text-only input's Content to its
+	// first MaxTextTokens tokens of the model's own tokenizer before the
+	// task prefix is applied, as multimodalembedding@001 "internally
+	// shortens" text over 32 tokens (#1651); Output.Truncated reports it.
+	MaxTextTokens int
 	// Parts, when set, are the input in order, and Content is unused. Only an
 	// embedder that implements Multimodal accepts an image part.
 	Parts []Part

@@ -1301,6 +1301,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}})
 	}
 
+	// multimodalembedding@001's AVI, FLV, MPEG and WMV video (#1651).
+	if localAISrv != nil {
+		localAISrv.SetVideoDecoder(newVideoDecoder(stdout))
+	}
+
 	// One manager of the local AI models for the console's Local models
 	// page and /admin/local-models (#1396), so a download started on one is
 	// the download the other reports.
