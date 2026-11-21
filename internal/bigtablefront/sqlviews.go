@@ -202,6 +202,52 @@ func (s *sqlViews) delete(k sqlKind, name, etag string) error {
 }
 
 // drop forgets the views of instance.
+// usingBundle is the view whose query reads the schema bundle named
+// bundle (projects/P/instances/I/tables/T/schemaBundles/B), or "": a view
+// of the same instance whose query reads from T and names B in a type.
+func (s *sqlViews) usingBundle(bundle string) string {
+	i := strings.Index(bundle, "/tables/")
+	j := strings.Index(bundle, "/schemaBundles/")
+	if i < 0 || j < i {
+		return ""
+	}
+	instance, table, id := bundle[:i], bundle[i+len("/tables/"):j], bundle[j+len("/schemaBundles/"):]
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var names []string
+	for n := range s.byName {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		if !strings.HasPrefix(n, instance+"/") {
+			continue
+		}
+		q, err := parseQuery(s.byName[n].query)
+		if err != nil || !queryReads(q, table) {
+			continue
+		}
+		toks, _ := lex(s.byName[n].query)
+		for k, t := range toks {
+			if (t.kind == "ident" || t.kind == "qident") && t.text == id && k+1 < len(toks) && toks[k+1].text == "." ||
+				t.kind == "qident" && strings.HasPrefix(t.text, id+".") {
+				return n
+			}
+		}
+	}
+	return ""
+}
+
+// queryReads is whether q, or the query it unpacks, reads table.
+func queryReads(q *query, table string) bool {
+	for ; q != nil; q = q.unpack {
+		if q.from == table {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *sqlViews) drop(instance string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

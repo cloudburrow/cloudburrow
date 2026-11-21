@@ -679,6 +679,8 @@ func (r *clusterRecord) spec(server string) Spec {
 	tls := func(s Spec) Spec {
 		s.TransitCA, s.TransitCAKey, s.TransitTrust = r.TransitCA, r.TransitCAKey, r.TransitCA
 		s.ServerCAPool = r.ServerCAPool
+		// CMEK (#2113): the node's persistence files sealed with the data key.
+		s.CMEKKey, s.CMEKWrapped = r.KmsKey, r.WrappedKey
 		if s.TransitCA != "" {
 			// Cross-instance replication's members' CAs (crossinstance.go).
 			s.TransitTrust += r.peerCAs()
@@ -1522,6 +1524,9 @@ func (s *ClusterServer) UpdateCluster(ctx context.Context, req *clusterpb.Update
 	defer c.mu.Unlock()
 	if _, pending := c.busy[r.Name]; pending || r.state != clusterpb.Cluster_ACTIVE {
 		return nil, apierror.FailedPrecondition("cluster %s is %s: a cluster is updated only when ACTIVE", r.Name, r.state)
+	}
+	if r.KeyState != "" && (set["persistence_config"] || set["automated_backup_config"]) {
+		return nil, errKeyUnavailable(r)
 	}
 	next := *r
 	if set["shard_count"] {

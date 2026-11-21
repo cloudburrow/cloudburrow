@@ -368,6 +368,14 @@ func parseTokens(toks []token) (*query, error) {
 				return nil, err
 			}
 			it := selectItem{e: e}
+			if p.peek().text == "." && p.peekAt(1).text == "*" {
+				p.pos += 2
+				q.items = append(q.items, selectItem{e: e, star: true, pos: tokenText(p.toks[start:p.pos])})
+				if !p.op(",") {
+					break
+				}
+				continue
+			}
 			if p.keyword("AS") {
 				t := p.next()
 				if t.kind != "ident" && t.kind != "qident" {
@@ -788,7 +796,7 @@ func (p *parser) postfix() (expr, error) {
 				return nil, err
 			}
 			x = &index{x: x, k: k, mode: mode}
-		case p.peek().text == "." && p.peek().kind == "op":
+		case p.peek().text == "." && p.peek().kind == "op" && p.peekAt(1).text != "*":
 			p.pos++
 			t := p.next()
 			if t.kind != "ident" && t.kind != "qident" {
@@ -809,8 +817,23 @@ func (p *parser) postfix() (expr, error) {
 // typeNames are the types CAST and typed literals name.
 func (p *parser) typeName() (string, error) {
 	t := p.next()
-	if t.kind != "ident" {
+	if t.kind != "ident" && t.kind != "qident" {
 		return "", fmt.Errorf("Syntax error: expected a type name")
+	}
+	// A protobuf message or enum of a schema bundle (#2113):
+	// bundle_id.package.Name, the bundle ID backticked when it holds a
+	// hyphen, or the whole path backticked.
+	if p.peek().text == "." && p.peek().kind == "op" || t.kind == "qident" {
+		parts := []string{t.text}
+		for p.peek().text == "." && p.peek().kind == "op" {
+			p.pos++
+			n := p.next()
+			if n.kind != "ident" && n.kind != "qident" {
+				return "", fmt.Errorf("Syntax error: expected a name after . in a type name")
+			}
+			parts = append(parts, n.text)
+		}
+		return protoTypePrefix + strings.Join(parts, "."), nil
 	}
 	name := strings.ToUpper(t.text)
 	if name == "ARRAY" || name == "MAP" || name == "STRUCT" {

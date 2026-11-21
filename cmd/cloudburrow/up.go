@@ -8,6 +8,7 @@ import (
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/authplatform"
 	"github.com/cloudburrow/cloudburrow/internal/egress"
+	"github.com/cloudburrow/cloudburrow/internal/faultgate"
 	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/iamcheck"
@@ -1034,6 +1035,17 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	rmSrv.ServerOptions(tracing.ServerOptions()...)
 	rmSrv.Interpose(grpctransport.LogInterceptor(logger, "resourcemanager"))
 	rmSrv.Interpose(faults.Interceptor("resourcemanager"))
+	// Fault rules (#2113) reach the servers in the cluster, whose fronts
+	// ask the host for them on this port (internal/faultgate), so their
+	// services' rules are accepted.
+	rmSrv.HandleJSON(func(r *http.Request) bool { return faultgate.IsPath(r.URL.Path) }, faultgate.Handler(faults))
+	for _, s := range cfg.EnabledServices() {
+		switch s {
+		case config.ServicePubSub, config.ServiceBigtable, config.ServiceSpanner, config.ServiceFirestore,
+			config.ServiceDatastore, config.ServiceStorage:
+			faults.InterposeRemote(string(s))
+		}
+	}
 	// Policy Troubleshooter and Policy Analyzer (#1879) on the same port,
 	// over the enforcement's evaluator.
 	// Cloud Asset's analysis (#2112) writes analyzeIamPolicyLongrunning's
@@ -1520,7 +1532,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// verify the URLs those accounts sign (#1787).
 	runEnabled := serviceEnabled(cfg, config.ServiceRun)
 	pubsubKMS := serviceEnabled(cfg, config.ServicePubSub) && serviceEnabled(cfg, config.ServiceKMS)
-	if runEnabled || serviceEnabled(cfg, config.ServiceBigQuery) || serviceEnabled(cfg, config.ServiceStorage) || pubsubKMS || firestoreKMS(cfg) || spannerKMS(cfg) || computeEnabled(cfg) {
+	if runEnabled || serviceEnabled(cfg, config.ServiceBigQuery) || serviceEnabled(cfg, config.ServiceStorage) || pubsubKMS || firestoreKMS(cfg) || spannerKMS(cfg) || memorystoreCMEK(cfg) || computeEnabled(cfg) {
 		// The Cloud SQL Admin API and its connector are published for Cloud
 		// SQL volumes (#1346): the Auth Proxy a revision runs reaches both.
 		published := map[string]bool{"run": true, "tasks": true, "secretmanager": true, "kms": true,
@@ -1545,6 +1557,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			// Cloud Storage (#1938) and Spanner (#1950) encrypt with
 			// customer-managed keys.
 			if storageKMS(cfg) || spannerKMS(cfg) {
+				published["kms"] = true
+			}
+			// A CMEK Memorystore server's pod unwraps its data key (#2113).
+			if memorystoreCMEK(cfg) {
 				published["kms"] = true
 			}
 		}
@@ -1585,6 +1601,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			return ""
 		}
 		computeSvc.metadataHost = func() string { return hostComp.InCluster("metadata") }
+	}
+	if memorystoreAdminSvc != nil && kmsSvc != nil {
+		// A CMEK Memorystore server's pod unwraps its data key with Cloud
+		// KMS, through cloudburrow-host (#2113).
+		memorystoreAdminSvc.kmsInCluster = func() string { return hostComp.InCluster("kms") }
 	}
 	if runSvc != nil {
 		// A build step reaches the metadata server as its build's account (#1854).

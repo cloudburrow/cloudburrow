@@ -42,6 +42,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/apienable"
 	"github.com/cloudburrow/cloudburrow/internal/calllog"
+	"github.com/cloudburrow/cloudburrow/internal/faultgate"
 	"github.com/cloudburrow/cloudburrow/internal/frontready"
 	"github.com/cloudburrow/cloudburrow/internal/frontstate"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
@@ -132,6 +133,8 @@ func New(upstream string, logf func(format string, args ...any)) (*Front, error)
 		return sql.checkViewQuery(ctx, instance, query)
 	}
 	f.bundles = &schemaBundles{upstream: conn, byName: map[string]*btapb.SchemaBundle{}}
+	sql.bundles = f.bundles
+	f.bundles.usedBy = f.sqlViews.usingBundle
 	f.tableIAM = &tableIAM{upstream: conn, policies: map[string]*iampolicy.Stored{}, views: f.views, copies: f.copies, bundles: f.bundles}
 	for _, ms := range []map[string]method{f.tableIAM.methods(), f.copies.methods(), f.viewMethods(),
 		f.sqlViews.methods(f.copies.op), f.bundles.methods(f.copies.op),
@@ -201,6 +204,8 @@ func (f *Front) Server() *grpc.Server {
 				}
 				return "bigtableadmin.googleapis.com"
 			}),
+			// Fault rules (#2113), the host's.
+			faultgate.StreamInterceptor("bigtable"),
 			// IAM enforcement (#1879), on the call's first request.
 			f.gate.StreamInterceptor(func() any { return new(frame) },
 				func(v any) []byte { return *v.(*frame) },
