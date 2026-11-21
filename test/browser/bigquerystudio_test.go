@@ -3,6 +3,8 @@
 package browser
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -232,13 +234,40 @@ func TestBigQueryStudioExplorerEditorAndHistory(t *testing.T) {
 }
 
 // clickExpr clicks the element a JavaScript expression names, as a person
-// would, once it is drawn.
+// would, once it is drawn and not inert: a dialog on its way out is inert
+// (openModal) and still drawn for its exit, holding the same IDs as the
+// next one, so a click meant for the new dialog's button could otherwise be
+// aimed at the old one's.
+//
+// The element is marked, then clicked by its mark. A page that replaces it
+// in between (a dialog that opens removes one still fading out) leaves no
+// marked node, and chromedp's Click would wait for one until the test's
+// deadline: each attempt has a few seconds, and the element is found and
+// marked again, within waitFor's 30 seconds (main CI 44926873355).
 func (p *tab) clickExpr(expr string) {
 	p.t.Helper()
-	p.waitFor(`(() => { const n = ` + expr + `; return !!n && n.getClientRects().length > 0; })()`)
-	p.eval(`(() => { document.querySelectorAll("[data-cb-click]").forEach((n) => n.removeAttribute("data-cb-click"));
-		(`+expr+`).setAttribute("data-cb-click", ""); return true; })()`, nil)
-	p.run(chromedp.Click(chromedp.CSS(`[data-cb-click]`)))
+	ready := `(() => { const n = ` + expr + `; return !!n && n.isConnected && !n.closest("[inert]") && n.getClientRects().length > 0; })()`
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		p.waitFor(ready)
+		var marked bool
+		p.eval(`(() => { document.querySelectorAll("[data-cb-click]").forEach((n) => n.removeAttribute("data-cb-click"));
+			const n = `+expr+`; if (!n || !n.isConnected || n.closest("[inert]")) return false; n.setAttribute("data-cb-click", ""); return true; })()`, &marked)
+		if marked {
+			ctx, cancel := context.WithTimeout(p.ctx, 5*time.Second)
+			err := chromedp.Do(ctx, chromedp.Click(chromedp.CSS(`[data-cb-click]`)))
+			cancel()
+			if err == nil {
+				return
+			}
+			if p.ctx.Err() != nil || !errors.Is(err, context.DeadlineExceeded) || time.Now().After(deadline) {
+				p.t.Fatalf("browser: clicking %s: %v", strings.Join(strings.Fields(expr), " "), err)
+			}
+		} else if time.Now().After(deadline) {
+			p.t.Fatalf("browser: %s went before it could be clicked", strings.Join(strings.Fields(expr), " "))
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 // TestBigQueryCreateDatasetAndTableAsGoogles (#1861), in the emulators

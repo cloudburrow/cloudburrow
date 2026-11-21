@@ -238,10 +238,29 @@ func (g *GKE) join(ctx context.Context, kind, image, pool, name string) error {
 		}
 		return fail(fmt.Errorf("join node %s: %w", name, err))
 	}
-	if _, err := r.Run(ctx, "kubectl", "--kubeconfig", g.kubeconfig(kind), "wait", "--for=condition=Ready", "node/"+name, "--timeout=180s"); err != nil {
-		return fmt.Errorf("node %s did not become Ready: %w", name, err)
+	// Ready, polled to a three-minute deadline. kubeadm join returns once
+	// the kubelet has its credentials, and the kubelet registers the Node
+	// after that: kubectl wait on a node not registered yet fails at once
+	// (NotFound), as on a dropped connection, and a loaded runner's
+	// kubelet registered it after kubectl had given up, which left
+	// TestTerraformContainerClusterAndNodePool's new pool in ERROR within
+	// ten seconds (main CI 44926873355).
+	deadline = time.Now().Add(3 * time.Minute)
+	for {
+		out, err := r.Run(ctx, "kubectl", "--kubeconfig", g.kubeconfig(kind), "get", "node", name, "-o",
+			`jsonpath={.status.conditions[?(@.type=="Ready")].status}`)
+		if err == nil && strings.TrimSpace(out) == "True" {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("node %s did not become Ready (%q, %v)", name, strings.TrimSpace(out), err)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
 	}
-	return nil
 }
 
 // joinConfig is kind's JoinConfiguration and KubeletConfiguration for a

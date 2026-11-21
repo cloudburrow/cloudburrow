@@ -201,13 +201,20 @@ func (f front) pastRows(r *http.Request, dataset, table string, m partitionMeta,
 		return "", http.StatusInternalServerError, err.Error()
 	}
 	status, got := f.send(r, http.MethodPost, "/queries", body)
+	if status != http.StatusOK && status != http.StatusBadRequest && status != http.StatusNotFound {
+		// Not a history the engine lacks (no change table, or no column
+		// of it, answers 404 or 400) but an engine that could not answer:
+		// its error, not a claim that the history is not kept (main CI
+		// 44926873355 named none).
+		return "", status, "cloudburrow: could not read the history of " + ref + ": " + errorMessage(got, status)
+	}
 	if status != http.StatusOK && ingestion {
 		return notBuilt("CloudBurrow's history of the table keeps no _PARTITIONTIME (its change table was made before " +
-			"CloudBurrow kept it), or none it can read at that time")
+			"CloudBurrow kept it), or none it can read at that time (" + errorMessage(got, status) + ")")
 	}
 	if status != http.StatusOK {
 		return notBuilt("CloudBurrow keeps no history of the table that it can read at that time; it records a table's " +
-			"changes from when it was made")
+			"changes from when it was made (" + errorMessage(got, status) + ")")
 	}
 	var res struct {
 		Rows []struct {
