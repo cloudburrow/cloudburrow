@@ -11,10 +11,14 @@ name: Cloud SQL ephemeral nightly
 # scheduled run, or one dispatched on main, is reported by
 # report-red-runs.yml.
 #
-# The shard is the one scripts/compat-shards.sh defines (compat_shard sql),
-# with the same setup steps as ci.yml's compat job. The restart probes are
-# not run: they measure persistent mode first, which ci.yml already does on
-# every push to main. Nothing here reaches Google: the compat harness's
+# The shards are the ones scripts/compat-shards.sh defines (compat_shard
+# sql and sqlreplicas), each on an instance of its own, with the same setup
+# steps, -run/-skip patterns and go test -timeout as ci.yml's compat job
+# (#1813: the nightly ran sql's services without its COMPAT_SKIP, so the
+# replica tests sqlreplicas holds, about 28 minutes, ran too, and the suite
+# hit its 60m deadline in runs 44562270227 and 44766672852). The restart
+# probes are not run: they measure persistent mode first, which ci.yml
+# already does on every push to main. Nothing here reaches Google: the compat harness's
 # egress guard stays on, and gcloud's update check is off as in ci.yml.
 on:
   schedule:
@@ -36,13 +40,17 @@ env:
 
 jobs:
   sql-ephemeral:
-    name: official SDK compatibility (sql, ephemeral)
+    name: official SDK compatibility (${{ matrix.shard }}, ephemeral)
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [sql, sqlreplicas]
     # ci.yml's compat job's 90, plus a cold emulator build when its cache
     # misses; go test's own 60m deadline fires first.
     timeout-minutes: 105
     env:
-      SHARD: sql
+      SHARD: ${{ matrix.shard }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -132,7 +140,11 @@ jobs:
           # shellcheck source=.github/scripts/retry-flaky.sh
           . .github/scripts/retry-flaky.sh
           set +e
-          go test -tags=compat -timeout 60m -v ./test/compat/... | tee compat.log
+          # COMPAT_RUN and COMPAT_SKIP, from compat_shard: sql skips the
+          # replica tests, which sqlreplicas runs alone, as in ci.yml.
+          SELECT_RUN=(); [ -n "$COMPAT_RUN" ] && SELECT_RUN=(-run "$COMPAT_RUN")
+          [ -n "$COMPAT_SKIP" ] && SELECT_RUN+=(-skip "$COMPAT_SKIP")
+          go test -tags=compat -timeout "$COMPAT_TIMEOUT" -v ${SELECT_RUN[@]+"${SELECT_RUN[@]}"} ./test/compat/... | tee compat.log
           rc=$?
           set -e
           if [ "$rc" -ne 0 ]; then
@@ -142,8 +154,13 @@ jobs:
           echo "== compat summary ($SHARD, ephemeral): $(grep -c -- '--- PASS' compat.log) passed, $(grep -c -- '--- SKIP' compat.log) skipped, retried: $(grep -h '^RETRIED:' compat.log | sed 's/RETRIED: //' | tr '\n' ' ')"
           grep -- '--- SKIP' compat.log || true
           # The tests #1740 found failing only in this mode must have run and
-          # passed, not skipped.
-          for t in TestCloudSQLInstanceWrites TestCloudSQLDemoteSkipReplicationSetup TestCloudSQLDemotePostgres TestCloudSQLExternalPostgresPrimary; do
+          # passed, not skipped, each in the shard that runs it.
+          if [ "$SHARD" = sqlreplicas ]; then
+            MUST_PASS="TestCloudSQLDemoteSkipReplicationSetup TestCloudSQLDemotePostgres TestCloudSQLExternalPostgresPrimary TestCloudSQLExternalMySQLPhysical"
+          else
+            MUST_PASS="TestCloudSQLInstanceWrites"
+          fi
+          for t in $MUST_PASS; do
             grep -q -- "^--- PASS: $t (" compat.log ||
               { echo "$t did not pass: $(grep -- "^--- [A-Z]*: $t (" compat.log || echo 'no result')"; exit 1; }
           done
@@ -152,7 +169,7 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
-          name: compat-log-sql-ephemeral
+          name: compat-log-${{ matrix.shard }}-ephemeral
           path: |
             compat.log
             ${{ runner.temp }}/cb/ci/up.log
@@ -169,7 +186,7 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure()
         with:
-          name: compat-diagnostics-sql-ephemeral
+          name: compat-diagnostics-${{ matrix.shard }}-ephemeral
           path: diagnostics
           retention-days: 7
           if-no-files-found: ignore
