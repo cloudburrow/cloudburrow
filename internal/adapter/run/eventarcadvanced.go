@@ -528,8 +528,18 @@ func eaCheckPipeline(e *EventarcServer) func(*eventarcpb.Pipeline) error {
 				return apierror.InvalidArgument("authentication_config.google_oidc.service_account is required")
 			}
 		case a.GetOauthToken() != nil:
-			return apierror.Unimplemented("authentication_config.oauth_token is not supported: an OAuth token authenticates a call to a " +
-				"Google API on *.googleapis.com, which this local instance never reaches; use google_oidc for an HTTP endpoint")
+			// An OAuth token is for a Google API on *.googleapis.com: of
+			// those, a pipeline here calls the Cloud Run Admin API's
+			// jobs.run, served in process (#2098); any other is never
+			// reached.
+			if EventarcRunJobOf(d.GetHttpEndpoint().GetUri()) == "" {
+				return apierror.Unimplemented("authentication_config.oauth_token is supported only for the Cloud Run Admin API's jobs.run " +
+					"(https://run.googleapis.com/v2/projects/P/locations/L/jobs/J:run), served by this instance: any other Google API " +
+					"on *.googleapis.com is never reached; use google_oidc for an HTTP endpoint")
+			}
+			if a.GetOauthToken().GetServiceAccount() == "" {
+				return apierror.InvalidArgument("authentication_config.oauth_token.service_account is required")
+			}
 		}
 		switch {
 		case d.GetHttpEndpoint() != nil:
