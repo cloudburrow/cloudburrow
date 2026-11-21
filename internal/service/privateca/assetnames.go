@@ -5,11 +5,11 @@ import (
 	"strings"
 )
 
-// PolicyResourceNames are the project's CA pools and certificate templates,
-// in every location, by name: the resources that keep allow policies, for
-// Cloud Asset's IAM policy analysis under a scope (#2112), as Cloud Asset
-// Inventory's privateca.googleapis.com/CaPool and CertificateTemplate
-// assets are named.
+// PolicyResourceNames are the project's CA pools, certificate templates and
+// certificate revocation lists, in every location, by name: the resources
+// that keep allow policies, for Cloud Asset's IAM policy analysis under a
+// scope (#2112), as Cloud Asset Inventory's privateca.googleapis.com/CaPool,
+// CertificateTemplate and CertificateRevocationList assets are named.
 func (s *Server) PolicyResourceNames(project string) []string {
 	prefix := "projects/" + project + "/locations/"
 	s.mu.Lock()
@@ -21,6 +21,11 @@ func (s *Server) PolicyResourceNames(project string) []string {
 		}
 	}
 	for n := range s.templates {
+		if strings.HasPrefix(n, prefix) {
+			out = append(out, n)
+		}
+	}
+	for n := range s.crls {
 		if strings.HasPrefix(n, prefix) {
 			out = append(out, n)
 		}

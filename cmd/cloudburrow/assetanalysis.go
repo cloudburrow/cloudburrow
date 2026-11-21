@@ -56,14 +56,21 @@ import (
 // https://docs.cloud.google.com/asset-inventory/docs/analyzing-iam-policy-longrunning-bigquery.
 //
 // The resources under a project are every served resource that keeps an
-// allow policy: its service accounts, its Cloud Storage buckets, the
-// in-process services' (Enforcer.Resources: Secret Manager's secrets,
-// Cloud KMS's key rings and keys, Cloud Tasks's queues, Cloud Run's
-// services, jobs and worker pools, Cloud Run functions, Artifact Registry
-// repositories, Certificate Authority Service's CA pools and certificate
-// templates) and the in-cluster products' (assetlisting.go: Pub/Sub,
-// BigQuery, Spanner, Bigtable), by Cloud Asset Inventory's full resource
-// names.
+// allow policy and that Cloud Asset Inventory's supported asset types page
+// lists as available in the analysis APIs: its service accounts, its
+// Cloud Storage buckets, the in-process services' (Enforcer.Resources:
+// Secret Manager's secrets, Cloud KMS's key rings, keys, import jobs and
+// EKM connections, Cloud Tasks's queues, Cloud Run's services and jobs,
+// Cloud Run functions, Artifact Registry repositories, Certificate
+// Authority Service's CA pools, certificate templates and CRLs, Compute
+// Engine's instances, disks, snapshots and subnetworks) and the
+// in-cluster products' (assetlisting.go: Pub/Sub, BigQuery, Spanner,
+// Bigtable), by Cloud Asset Inventory's full resource names; under a
+// project or the organization, the tag keys it parents, and under a key
+// its values. Cloud Run worker pools, Logging log views, Secure Source
+// Manager instances and workforce and workload identity pools are "Not
+// available in the analysis APIs", and Secure Source Manager repositories
+// and Container Analysis notes are not asset types, so none is listed.
 //
 // The BigQuery tables' columns are the API's JSON field names, as the
 // page's example queries read them (opName, requestTime, analysisId,
@@ -1076,6 +1083,15 @@ func (v *analysisInventory) Children(full string) []string {
 	}
 	var out []string
 	if host == "cloudresourcemanager.googleapis.com" {
+		if strings.HasPrefix(name, "tagKeys/") {
+			// A tag key's values (cloudresourcemanager.googleapis.com/TagValue).
+			vals, _ := reg.TagValues(name)
+			for _, tv := range vals {
+				out = append(out, iameval.CRMPrefix+tv.GetName())
+			}
+			return out
+		}
+		out = append(out, v.tagKeysUnder(reg, name)...)
 		if p, ok := strings.CutPrefix(name, "projects/"); ok {
 			for _, c := range v.projectResources(p) {
 				if c.parent == "" {
@@ -1134,6 +1150,15 @@ func (v *analysisInventory) Policy(full string) *iampolicy.Stored {
 func (v *analysisInventory) Chain(full string) ([]iameval.Attached, error) {
 	host, name := splitFull(full)
 	if host == "cloudresourcemanager.googleapis.com" {
+		if own, parent, ok := v.tagChain(name); ok {
+			// A tag value's own policy and its key's, then its key's
+			// parent's chain.
+			rest, err := v.Chain(iameval.CRMPrefix + parent)
+			if err != nil {
+				return nil, err
+			}
+			return append(own, rest...), nil
+		}
 		var rs []string
 		if p, ok := strings.CutPrefix(name, "projects/"); ok {
 			rs = v.src.Ancestry(v.src.projectID(v.a.registry(), p))
@@ -1172,6 +1197,10 @@ func (v *analysisInventory) Attributes(full string) iamcond.Attributes {
 	if host == "cloudresourcemanager.googleapis.com" {
 		typ := "cloudresourcemanager.googleapis.com/Project"
 		switch {
+		case strings.HasPrefix(name, "tagKeys/"):
+			typ = "cloudresourcemanager.googleapis.com/TagKey"
+		case strings.HasPrefix(name, "tagValues/"):
+			typ = "cloudresourcemanager.googleapis.com/TagValue"
 		case strings.HasPrefix(name, "folders/"):
 			typ = "cloudresourcemanager.googleapis.com/Folder"
 		case strings.HasPrefix(name, "organizations/"):
@@ -1184,6 +1213,56 @@ func (v *analysisInventory) Attributes(full string) iamcond.Attributes {
 		return iamcond.Attributes{ResourceName: name, ResourceService: host}
 	}
 	return req.Attributes()
+}
+
+// tagKeysUnder are the tag keys whose parent is the organization or
+// project name names (a project's by its ID or number), by full name:
+// cloudresourcemanager.googleapis.com/TagKey assets.
+func (v *analysisInventory) tagKeysUnder(reg *resourcemanager.Registry, name string) []string {
+	parents := map[string]bool{name: true}
+	if id, ok := strings.CutPrefix(name, "projects/"); ok {
+		if p, err := reg.Get(v.src.projectID(reg, id)); err == nil {
+			parents["projects/"+p.ProjectID] = true
+			parents["projects/"+strconv.FormatInt(p.Number, 10)] = true
+		}
+	} else if !strings.HasPrefix(name, "organizations/") {
+		return nil
+	}
+	keys, err := reg.AllTagKeys()
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, k := range keys {
+		if parents[k.GetParent()] {
+			out = append(out, iameval.CRMPrefix+k.GetName())
+		}
+	}
+	return out
+}
+
+// tagChain is a tag key's or value's own policies (a value's, then its
+// key's) and the key's parent; ok is false for any other name.
+func (v *analysisInventory) tagChain(name string) (own []iameval.Attached, parent string, ok bool) {
+	reg := v.a.registry()
+	if reg == nil || !(strings.HasPrefix(name, "tagKeys/") || strings.HasPrefix(name, "tagValues/")) {
+		return nil, "", false
+	}
+	key := name
+	if strings.HasPrefix(name, "tagValues/") {
+		tv, err := reg.TagValue(name)
+		if err != nil {
+			return nil, "", false
+		}
+		own = append(own, iameval.Attached{Resource: iameval.CRMPrefix + name, Policy: v.src.Policy(name)})
+		key = tv.GetParent()
+	}
+	k, err := reg.TagKey(key)
+	if err != nil {
+		return nil, "", false
+	}
+	own = append(own, iameval.Attached{Resource: iameval.CRMPrefix + key, Policy: v.src.Policy(key)})
+	return own, k.GetParent(), true
 }
 
 func (v *analysisInventory) GroupMembers(email string) []string {

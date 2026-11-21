@@ -483,7 +483,11 @@ compat_shard() {
       # Federation's (#2056), its SAML exchange read through Cloud Storage
       # and its pools' own IAM policies (#2065), and SCIM-provisioned users and
       # groups read through Cloud Storage (#2068), which need enforcement.
-      COMPAT_RUN='^Test(IAMEnforcement|WorkloadIdentityFederationStorage$|WorkforceIdentityFederationStorage$|WorkforceIdentityFederationSAML$|WorkforcePoolIAMPolicy$|WorkforceScimProvisioning$)' ;;
+      # And Cloud Asset's analysis of every asset type with an allow policy
+      # (#2112): BigQuery, Spanner, Bigtable, Cloud KMS, Compute Engine and
+      # Resource Manager's tags on one instance, which only this shard serves
+      # together.
+      COMPAT_RUN='^Test(IAMEnforcement|WorkloadIdentityFederationStorage$|WorkforceIdentityFederationStorage$|WorkforceIdentityFederationSAML$|WorkforcePoolIAMPolicy$|WorkforceScimProvisioning$|CloudAssetAnalyzeIamPolicyEveryAssetType$)' ;;
     localai)
       # The local AI tests (#1985): BigQuery and Cloud Storage for the AI
       # and ML functions' tables and object tables, Resource Manager (every

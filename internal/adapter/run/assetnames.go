@@ -8,14 +8,17 @@ import (
 
 // Cloud Asset's IAM policy analysis (#2112) enumerates a project's
 // resources that keep allow policies, in every location: Cloud Run's
-// services, jobs and worker pools, Cloud Run functions and Artifact
-// Registry repositories, named as their APIs name them (and as Cloud Asset
-// Inventory's run.googleapis.com/Service, Job and WorkerPool,
+// services and jobs, Cloud Run functions and Artifact Registry
+// repositories, named as their APIs name them (and as Cloud Asset
+// Inventory's run.googleapis.com/Service and Job,
 // cloudfunctions.googleapis.com/Function and
-// artifactregistry.googleapis.com/Repository assets are).
+// artifactregistry.googleapis.com/Repository assets are). Worker pools
+// keep policies too, but run.googleapis.com/WorkerPool is "Not available
+// in the analysis APIs" (supported-asset-types, read 2026-11-21), so they
+// are not listed.
 
-// ProjectResourceNames are the project's services, jobs and worker pools,
-// in every location, by name.
+// ProjectResourceNames are the project's services and jobs, in every
+// location, by name.
 func (s *Server) ProjectResourceNames(ctx context.Context, project string) []string {
 	var out []string
 	if svcs, _, err := s.v1Services(ctx, v1Scope{project: project}); err == nil {
@@ -27,13 +30,6 @@ func (s *Server) ProjectResourceNames(ctx context.Context, project string) []str
 	if cms, err := listObjects[kconfigMap](ctx, s.kn, resConfigMap, labelOwned+"=true,"+labelKind+"="+kindRunJob); err == nil {
 		for _, cm := range cms {
 			if n := cm.Metadata.Annotations[annRunName]; strings.HasPrefix(n, prefix) && strings.Contains(n, "/jobs/") {
-				out = append(out, n)
-			}
-		}
-	}
-	if cms, err := s.specsOfKind(ctx, kindWorkerPool); err == nil {
-		for _, cm := range cms {
-			if n := cm.Metadata.Annotations[annRunName]; strings.HasPrefix(n, prefix) && strings.Contains(n, "/workerPools/") {
 				out = append(out, n)
 			}
 		}

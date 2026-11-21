@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/cloudburrow/cloudburrow/internal/iameval"
+	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
 	"github.com/cloudburrow/cloudburrow/internal/service/apikeys"
 	"github.com/cloudburrow/cloudburrow/internal/service/compute"
 	"github.com/cloudburrow/cloudburrow/internal/service/privateca"
@@ -51,7 +52,12 @@ func (s iamEnforced7) use(e *iameval.Enforcer) {
 			}
 			var out []iameval.ChildResource
 			for _, n := range api.PolicyResourceNames(project) {
-				out = append(out, iameval.ChildResource{Name: n})
+				c := iameval.ChildResource{Name: n}
+				if pool, _, ok := strings.Cut(n, "/certificateAuthorities/"); ok {
+					// A CRL, under its CA's pool: a CA keeps no policy.
+					c.Parent = pool
+				}
+				out = append(out, c)
 			}
 			return out
 		}
@@ -61,11 +67,36 @@ func (s iamEnforced7) use(e *iameval.Enforcer) {
 		s.gke.wrapJSON = jsonEnforcer(e, iameval.GKE, nil)
 	}
 	if s.compute != nil {
+		// Instances, disks, snapshots and subnetworks keep allow policies
+		// (#2112), which apply beside the project's, and Cloud Asset's
+		// analysis under a scope lists them.
+		e.Policies[iameval.Compute.Name] = func(_ context.Context, resource string) *iampolicy.Stored {
+			api := s.compute.API()
+			if api == nil {
+				return nil
+			}
+			return api.Policy(resource)
+		}
+		e.Resources[iameval.Compute.Name] = func(_ context.Context, project string) []iameval.ChildResource {
+			api := s.compute.API()
+			if api == nil {
+				return nil
+			}
+			var out []iameval.ChildResource
+			for _, n := range api.PolicyResourceNames(project) {
+				out = append(out, iameval.ChildResource{Name: n})
+			}
+			return out
+		}
 		s.compute.wrapJSON = func(next http.Handler) http.Handler {
 			checked := e.HTTPPaths(iameval.Compute, iameval.ComputeJSON, next)
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if publicImageProject(r.URL.Path) {
 					next.ServeHTTP(w, r)
+					return
+				}
+				if m := iameval.ComputeIAMTest.FindStringSubmatch(r.URL.Path); m != nil && r.Method == http.MethodPost && e.On != nil && e.On() {
+					e.TestPermissionsJSON(w, r, iameval.Compute, m[1], next)
 					return
 				}
 				// An INTERNAL address's insert is createInternal, in place

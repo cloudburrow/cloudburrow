@@ -471,6 +471,17 @@ func useIAMEnforcement(e *iameval.Enforcer, secretsSvc *secretsService, kmsSvc *
 				for _, k := range keys.GetCryptoKeys() {
 					out = append(out, iameval.ChildResource{Name: k.GetName(), Parent: r.GetName()})
 				}
+				jobs, err := api.ListImportJobs(ctx, &kmspb.ListImportJobsRequest{Parent: r.GetName(), PageSize: 1000})
+				if err != nil {
+					continue
+				}
+				for _, j := range jobs.GetImportJobs() {
+					out = append(out, iameval.ChildResource{Name: j.GetName(), Parent: r.GetName()})
+				}
+			}
+			conns, _ := api.EkmConnectionsInProject(project)
+			for _, c := range conns {
+				out = append(out, iameval.ChildResource{Name: c.GetName()})
 			}
 			return out
 		}

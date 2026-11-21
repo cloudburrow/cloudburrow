@@ -14469,9 +14469,9 @@
     "Key": "compute",
     "Title": "Compute Engine API (v1): VPC networking",
     "counts": {
-      "Implemented": 20,
-      "Unimplemented": 74,
-      "Verified": 72
+      "Implemented": 29,
+      "Unimplemented": 62,
+      "Verified": 75
     },
     "rows": [
       {
@@ -14581,8 +14581,8 @@
       },
       {
         "method": "compute.disks.getIamPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.disks.insert",
@@ -14612,8 +14612,8 @@
       },
       {
         "method": "compute.disks.setIamPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.disks.setLabels",
@@ -14637,8 +14637,8 @@
       },
       {
         "method": "compute.disks.testIamPermissions",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.disks.update",
@@ -14905,8 +14905,8 @@
       },
       {
         "method": "compute.instances.getIamPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.instances.getScreenshot",
@@ -14972,8 +14972,8 @@
       },
       {
         "method": "compute.instances.setIamPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.instances.setLabels",
@@ -15062,8 +15062,8 @@
       },
       {
         "method": "compute.instances.testIamPermissions",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.instances.update",
@@ -15336,8 +15336,8 @@
       },
       {
         "method": "compute.snapshots.getIamPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.snapshots.insert",
@@ -15353,8 +15353,8 @@
       },
       {
         "method": "compute.snapshots.setIamPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.snapshots.setLabels",
@@ -15363,8 +15363,8 @@
       },
       {
         "method": "compute.snapshots.testIamPermissions",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.subnetworks.aggregatedList",
@@ -15399,8 +15399,10 @@
       },
       {
         "method": "compute.subnetworks.getIamPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudasset2112_everytype_test.go:39 TestCloudAssetAnalyzeIamPolicyEveryAssetType"
+        ]
       },
       {
         "method": "compute.subnetworks.insert",
@@ -15433,8 +15435,10 @@
       },
       {
         "method": "compute.subnetworks.setIamPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudasset2112_everytype_test.go:39 TestCloudAssetAnalyzeIamPolicyEveryAssetType"
+        ]
       },
       {
         "method": "compute.subnetworks.setPrivateIpGoogleAccess",
@@ -15446,8 +15450,10 @@
       },
       {
         "method": "compute.subnetworks.testIamPermissions",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudasset2112_everytype_test.go:39 TestCloudAssetAnalyzeIamPolicyEveryAssetType"
+        ]
       },
       {
         "method": "compute.zoneOperations.delete",

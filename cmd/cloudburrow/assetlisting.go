@@ -1,7 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -14,6 +20,7 @@ import (
 	"google.golang.org/api/iterator"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/cloudburrow/cloudburrow/internal/iameval"
 	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
@@ -29,17 +36,20 @@ import (
 // read 2026-11-21):
 //
 //   - pubsub.googleapis.com/Topic, Subscription, Snapshot and Schema;
-//   - bigquery.googleapis.com/Dataset and Table (a table under its
-//     dataset); a dataset's policy is its access entries, the basic roles
-//     READER, WRITER and OWNER read as roles/bigquery.dataViewer,
-//     dataEditor and dataOwner, as BigQuery documents;
+//   - bigquery.googleapis.com/Dataset, Table and Routine (a table and a
+//     routine under its dataset) and RowAccessPolicy (under its table); a
+//     dataset's policy is its access entries, the basic roles READER,
+//     WRITER and OWNER read as roles/bigquery.dataViewer, dataEditor and
+//     dataOwner, as BigQuery documents, and a row access policy's is its
+//     grantees as roles/bigquery.filteredDataViewer (its getIamPolicy);
 //   - spanner.googleapis.com/Instance, Database and Backup (under their
 //     instance);
-//   - bigtableadmin.googleapis.com/Instance and Table (under its instance).
+//   - bigtableadmin.googleapis.com/Instance, Table and Backup (under its
+//     instance; a backup's cluster keeps no policy);
 //
 // Cloud SQL instances keep no resource-level allow policy, and Analytics
-// Hub's data exchanges and listings are "not available in the analysis
-// APIs", so neither is listed.
+// Hub's data exchanges and listings and Bigtable's authorized views are
+// "not available in the analysis APIs", so none is listed.
 
 // assetRemote is one in-cluster product's resources and policies.
 type assetRemote struct {
@@ -241,10 +251,100 @@ func bigqueryAssets(ctx context.Context, o *assetOutputs, addr, project string) 
 			if err == iterator.Done || err != nil {
 				break
 			}
-			out = append(out, iameval.ChildResource{Name: dn + "/tables/" + t.TableID, Parent: dn})
+			tn := dn + "/tables/" + t.TableID
+			out = append(out, iameval.ChildResource{Name: tn, Parent: dn})
+			for _, id := range bigqueryRowAccessPolicies(ctx, addr, tn) {
+				out = append(out, iameval.ChildResource{Name: tn + "/rowAccessPolicies/" + id, Parent: tn})
+			}
+		}
+		rit := ds.Routines(ctx)
+		for {
+			r, err := rit.Next()
+			if err == iterator.Done || err != nil {
+				break
+			}
+			out = append(out, iameval.ChildResource{Name: dn + "/routines/" + r.RoutineID, Parent: dn})
 		}
 	}
 	return out
+}
+
+// bigqueryREST calls one BigQuery v2 JSON method at addr on path (after
+// /bigquery/v2/), into out.
+func bigqueryREST(ctx context.Context, addr, method, path string, body, out any) error {
+	var rd io.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			return err
+		}
+		rd = bytes.NewReader(b)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, "http://"+addr+"/bigquery/v2/"+path, rd)
+	if err != nil {
+		return err
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	b, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("%s %s answered %d", method, path, resp.StatusCode)
+	}
+	return json.Unmarshal(b, out)
+}
+
+// bigqueryRowAccessPolicies are a table's row access policies' IDs
+// (rowAccessPolicies.list).
+func bigqueryRowAccessPolicies(ctx context.Context, addr, table string) []string {
+	var ids []string
+	for tok, i := "", 0; i < 100; i++ {
+		var r struct {
+			RowAccessPolicies []struct {
+				Ref struct {
+					PolicyID string `json:"policyId"`
+				} `json:"rowAccessPolicyReference"`
+			} `json:"rowAccessPolicies"`
+			NextPageToken string `json:"nextPageToken"`
+		}
+		path := table + "/rowAccessPolicies"
+		if tok != "" {
+			path += "?pageToken=" + url.QueryEscape(tok)
+		}
+		if bigqueryREST(ctx, addr, http.MethodGet, path, nil, &r) != nil {
+			break
+		}
+		for _, p := range r.RowAccessPolicies {
+			ids = append(ids, p.Ref.PolicyID)
+		}
+		if tok = r.NextPageToken; tok == "" {
+			break
+		}
+	}
+	return ids
+}
+
+// bigqueryRESTPolicy is a routine's or a row access policy's allow policy,
+// through its getIamPolicy.
+func bigqueryRESTPolicy(ctx context.Context, addr, name string) *iampolicy.Stored {
+	var raw json.RawMessage
+	body := map[string]any{"options": map[string]any{"requestedPolicyVersion": 3}}
+	if bigqueryREST(ctx, addr, http.MethodPost, name+":getIamPolicy", body, &raw) != nil {
+		return nil
+	}
+	p := &iampb.Policy{}
+	if (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(raw, p) != nil {
+		return nil
+	}
+	return iameval.FromProto(p)
 }
 
 // bigqueryBasicRoles are a dataset access entry's basic roles as the IAM
@@ -267,6 +367,9 @@ func bigqueryAssetPolicy(ctx context.Context, o *assetOutputs, addr, name string
 	defer c.Close()
 	ds := c.Dataset(parts[3])
 	switch {
+	case len(parts) == 6 && parts[4] == "routines",
+		len(parts) == 8 && parts[4] == "tables" && parts[6] == "rowAccessPolicies":
+		return bigqueryRESTPolicy(ctx, addr, name)
 	case len(parts) == 6 && parts[4] == "tables":
 		p, err := ds.Table(parts[5]).IAM().Policy(ctx)
 		if err != nil {
@@ -410,6 +513,20 @@ func bigtableAssets(ctx context.Context, o *assetOutputs, addr, project string) 
 				break
 			}
 		}
+		// Backups, of every cluster ("-"), under their instance: a
+		// cluster keeps no policy.
+		for tok, j := "", 0; j < 100; j++ {
+			b, err := ta.ListBackups(ctx, &btapb.ListBackupsRequest{Parent: in.GetName() + "/clusters/-", PageToken: tok})
+			if err != nil {
+				break
+			}
+			for _, bk := range b.GetBackups() {
+				out = append(out, iameval.ChildResource{Name: bk.GetName(), Parent: in.GetName()})
+			}
+			if tok = b.GetNextPageToken(); tok == "" {
+				break
+			}
+		}
 	}
 	return out
 }
@@ -419,8 +536,11 @@ func bigtableAssetPolicy(ctx context.Context, o *assetOutputs, addr, name string
 	if err != nil {
 		return nil
 	}
-	if strings.Contains(name, "/tables/") {
+	switch parts := strings.Split(name, "/"); {
+	case strings.Contains(name, "/tables/"), strings.Contains(name, "/backups/"):
 		return grpcPolicy(ctx, btapb.NewBigtableTableAdminClient(c).GetIamPolicy, name)
+	case len(parts) != 4:
+		return nil // a cluster keeps no policy
 	}
 	return grpcPolicy(ctx, btapb.NewBigtableInstanceAdminClient(c).GetIamPolicy, name)
 }
