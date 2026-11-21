@@ -9,6 +9,8 @@ import (
 	billingpb "cloud.google.com/go/billing/apiv1/billingpb"
 	budgetspb "cloud.google.com/go/billing/budgets/apiv1/budgetspb"
 
+	"github.com/cloudburrow/cloudburrow/internal/iameval"
+	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/service/billing"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
@@ -112,10 +114,17 @@ func (p billingProjects) Resolve(s string) (string, error) {
 }
 
 // serveBilling mounts the Cloud Billing API and the Budget API (#2109) on
-// the Resource Manager port, in the registry's store.
-func serveBilling(rm *resourcemanager.Server, reg *resourcemanager.Registry, su func() *serviceusage.Server) *billing.Server {
+// the Resource Manager port, in the registry's store, with e's checks
+// (iameval.Billing, billingiam.go), the Cloud Billing clock
+// (billing.ClockPath) and budget notifications published to the
+// instance's Pub/Sub until ctx ends.
+func serveBilling(ctx context.Context, rm *resourcemanager.Server, reg *resourcemanager.Registry, su func() *serviceusage.Server,
+	e *iameval.Enforcer, pubsub func() *netfwd.Forwarder) *billing.Server {
 	s := billing.NewServer(reg.Backing(), billingProjects{reg: reg}, resourcemanager.OrganizationName)
 	s.APIs = billingAPIs{su: su}
+	if pubsub != nil {
+		s.Publisher = dtPublisher{tunnel: pubsub}
+	}
 	catalog := &billing.Catalog{Since: time.Date(2026, 11, 21, 0, 0, 0, 0, time.UTC), APIs: func() []billing.API {
 		srv := su()
 		var out []billing.API
@@ -126,31 +135,57 @@ func serveBilling(rm *resourcemanager.Server, reg *resourcemanager.Registry, su 
 		}
 		return out
 	}}
-	rm.HandleService("google.cloud.billing.budgets.v1", isBudgetsPath,
+	// gRPC through HandleService; JSON through HandleJSON, so IAM
+	// enforcement wraps it (HandleService's JSON is not wrapped).
+	never := func(*http.Request) bool { return false }
+	rm.HandleService("google.cloud.billing.budgets.v1", never,
 		resourcemanager.Impl{Desc: &budgetspb.BudgetService_ServiceDesc, Impl: s.Budgets()})
-	// google_billing_project_info's URL ends in a slash
-	// (projects/{{project}}/billingInfo/), which Google accepts.
-	slashed := &rest.Transcoder{Packages: []string{"google.cloud.billing.v1"}}
-	slashed.RegisterService(&billingpb.CloudBilling_ServiceDesc, s)
-	rm.HandleJSON(func(r *http.Request) bool {
-		return strings.HasPrefix(r.URL.Path, "/v1/projects/") && strings.HasSuffix(r.URL.Path, "/billingInfo/")
-	}, trimTrailingBillingSlash{t: slashed})
-	rm.HandleService("google.cloud.billing.v1", isCloudBillingPath,
+	rm.HandleService("google.cloud.billing.v1", never,
 		resourcemanager.Impl{Desc: &billingpb.CloudBilling_ServiceDesc, Impl: s},
 		resourcemanager.Impl{Desc: &billingpb.CloudCatalog_ServiceDesc, Impl: catalog})
+	if e != nil && e.On != nil && e.On() {
+		rm.Interpose(e.Interceptor(iameval.Billing))
+		rm.Interpose(billingLinkInterceptor(e, s))
+		rm.Interpose(budgetTopicInterceptor(e, pubsub))
+	}
+	budgetsREST := &rest.Transcoder{Packages: []string{"google.cloud.billing.budgets.v1"}}
+	budgetsREST.RegisterService(&budgetspb.BudgetService_ServiceDesc, s.Budgets())
+	billingREST := &rest.Transcoder{Packages: []string{"google.cloud.billing.v1"}}
+	billingREST.RegisterService(&billingpb.CloudBilling_ServiceDesc, s)
+	billingREST.RegisterService(&billingpb.CloudCatalog_ServiceDesc, catalog)
+	enforced := billingJSONEnforced(e, s, pubsub, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isBudgetsPath(r) {
+			budgetsREST.ServeHTTP(w, r)
+			return
+		}
+		billingREST.ServeHTTP(w, r)
+	}))
+	// google_billing_project_info's URL ends in a slash
+	// (projects/{{project}}/billingInfo/), which Google accepts.
+	rm.HandleJSON(func(r *http.Request) bool {
+		return strings.HasPrefix(r.URL.Path, "/v1/projects/") && strings.HasSuffix(r.URL.Path, "/billingInfo/")
+	}, trimTrailingBillingSlash{h: enforced})
+	rm.HandleJSON(func(r *http.Request) bool { return isBudgetsPath(r) || isCloudBillingPath(r) }, enforced)
+	rm.HandleJSON(func(r *http.Request) bool {
+		return r.URL.Path == billing.ClockPath || r.URL.Path == billing.ClockAdvancePath
+	}, http.HandlerFunc(s.ServeClock))
 	billingCatalogRef = catalog
+	billingAccounts.Store(s)
+	if ctx != nil {
+		go s.RunNotifications(ctx)
+	}
 	return s
 }
 
 // trimTrailingBillingSlash serves projects/{p}/billingInfo/ as
-// projects/{p}/billingInfo, through Cloud Billing's transcoder.
-type trimTrailingBillingSlash struct{ t *rest.Transcoder }
+// projects/{p}/billingInfo.
+type trimTrailingBillingSlash struct{ h http.Handler }
 
 func (h trimTrailingBillingSlash) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r2 := r.Clone(r.Context())
 	r2.URL.Path = strings.TrimSuffix(r.URL.Path, "/")
 	r2.URL.RawPath = ""
-	h.t.ServeHTTP(w, r2)
+	h.h.ServeHTTP(w, r2)
 }
 
 // billingCatalogRef is the instance's Cloud Catalog, for the console.

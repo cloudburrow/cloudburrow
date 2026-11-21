@@ -85,6 +85,28 @@ func topBillingAccount(t *testing.T, h *Harness, c *billing.CloudBillingClient) 
 	return nil
 }
 
+// billingSubaccount creates a subaccount of the instance's top-level
+// account, for a test that needs a billing account Cloud Billing holds
+// (Logging's billingAccounts/* parents, #2109), and returns its name. It
+// asks for the Resource Manager endpoint first, so a shard without it
+// skips.
+func billingSubaccount(t *testing.T, h *Harness, displayName string) string {
+	t.Helper()
+	ep := h.Endpoint(EnvResourceManager)
+	c, err := billing.NewCloudBillingClient(h.Context(), rmOptionsAt(ep)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	top := topBillingAccount(t, h, c)
+	sub, err := c.CreateBillingAccount(h.Context(), &pb.CreateBillingAccountRequest{Parent: top.GetName(),
+		BillingAccount: &pb.BillingAccount{DisplayName: displayName}})
+	if err != nil {
+		t.Fatalf("CreateBillingAccount: %v", err)
+	}
+	return sub.GetName()
+}
+
 // covers: google.cloud.billing.v1.CloudBilling/ListBillingAccounts, google.cloud.billing.v1.CloudBilling/GetBillingAccount, google.cloud.billing.v1.CloudBilling/CreateBillingAccount, google.cloud.billing.v1.CloudBilling/UpdateBillingAccount, google.cloud.billing.v1.CloudBilling/MoveBillingAccount, google.cloud.billing.v1.CloudBilling/GetIamPolicy, google.cloud.billing.v1.CloudBilling/SetIamPolicy, google.cloud.billing.v1.CloudBilling/TestIamPermissions
 //
 // TestCloudBillingAccounts (#2109), with cloud.google.com/go/billing over

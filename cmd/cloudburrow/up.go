@@ -979,7 +979,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	cloudQuotasRef, siteVerificationRef = serveCloudQuotas(rmSrv, projects, func() *serviceusage.Server { return serviceUsageRef },
 		creds.Email, func(bearer string) (string, bool) { return creds.TokenAccount(bearer, time.Now()) })
 	// Cloud Billing and the Budget API (#2109), on the same port.
-	billingRef = serveBilling(rmSrv, projects, func() *serviceusage.Server { return serviceUsageRef })
+	billingRef = serveBilling(ctx, rmSrv, projects, func() *serviceusage.Server { return serviceUsageRef }, iamEnforcer,
+		func() *netfwd.Forwarder { return forwarderFor(forwarders, "pubsub") })
 	// Google Auth Platform's app and OAuth clients (#2030), whose
 	// authorization code flow the metadata server's token endpoint serves.
 	authPlatformRef = authplatform.NewStore(projects.Backing(), resource.ProjectNumber)

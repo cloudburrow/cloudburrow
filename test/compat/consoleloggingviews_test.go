@@ -201,7 +201,7 @@ func TestConsoleLoggingCopyFromParents(t *testing.T) {
 		_ = dest.Delete(context.Background())
 	})
 	folder, _ := loggingParentsFixture(t, h, "ccp-")
-	billing := fmt.Sprintf("billingAccounts/0C%04X-%06X-%06X", time.Now().UnixNano()%0xFFFF, time.Now().UnixNano()%0xFFFFFF, (time.Now().UnixNano()/7)%0xFFFFFF)
+	billing := billingSubaccount(t, h, "console logging copy")
 
 	for _, parent := range []string{folder, localOrg, billing} {
 		log := parent + "/logs/ccopy-" + strings.SplitN(parent, "/", 2)[0] + "-" + suffix

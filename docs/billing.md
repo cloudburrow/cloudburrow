@@ -24,10 +24,46 @@ the next link. The APIs that need no billing account stay enabled (`freeAPIs` in
 ## Spend, pricing and budgets
 
 CloudBurrow measures usage but has no pricing model. Every service in the local Cloud Catalog
-has one SKU at a list price of 0, so the measured usage costs 0. A budget's actual spend is 0. No
-threshold rule is exceeded and no Pub/Sub notification is published. Google's periodic status messages
-are not sent either. Nothing is invented: if a pricing model is added, `billing.Spend` is where it
-plugs in.
+has one SKU at a list price of 0, so the measured usage costs 0. A budget's actual spend is 0, and
+no threshold rule is exceeded. Nothing is invented: if a pricing model is added, `billing.Spend` is
+where it plugs in.
+
+## Budget notifications
+
+A budget with a Pub/Sub topic gets Google's programmatic notification, the budget's current status,
+"multiple times per day" and with no usage too
+([budgets-programmatic-notifications](https://docs.cloud.google.com/billing/docs/how-to/budgets-programmatic-notifications)):
+here every 6 hours of the Cloud Billing clock, the first one interval after the topic is set. Each
+message has the attributes `billingAccountId`, `budgetId` and `schemaVersion` (`1.0`) and Google's
+JSON body, with `costAmount` 0 and no `alertThresholdExceeded`. Its `costIntervalStart` is the
+period's start, at midnight UTC-8. Email alerts are not sent.
+
+The clock is CloudBurrow's own extension on the Resource Manager port, for tests:
+
+```sh
+# publish what is due after 6 hours
+curl -X POST http://127.0.0.1:9007/cloudburrow/v1/clock:advance -d '{"duration": "21600s"}'
+# a message every minute from now on
+curl -X POST http://127.0.0.1:9007/cloudburrow/v1/clock:advance -d '{"duration": "0s", "budgetNotificationInterval": "60s"}'
+```
+
+`GET /cloudburrow/v1/clock` reads the clock and the interval. The console's Budgets & alerts page
+has the same Advance clock action.
+
+## Access control
+
+With `up --iam-enforcement=on`, Cloud Billing checks Google's documented permissions
+(`billing.accounts.get`, `billing.budgets.*`, ...) against each account's own policy, a
+subaccount's parent account's and the organization's. Linking a project needs
+`resourcemanager.projects.createBillingAssignment` on the project and
+`billing.resourceAssociations.create` on the account. Cloud Logging's `billingAccounts/*`
+resources must be accounts Cloud Billing holds.
+
+## gcloud
+
+`gcloud billing accounts` and `gcloud billing projects` reach CloudBurrow through the
+`cloudbilling` override that `gcloud-setup` writes. `gcloud billing budgets` cannot: gcloud (593.0.0)
+has no override property for `billingbudgets`, so use the client libraries or Terraform.
 
 ## Console
 

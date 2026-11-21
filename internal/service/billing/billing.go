@@ -36,6 +36,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	pb "cloud.google.com/go/billing/apiv1/billingpb"
@@ -75,9 +76,18 @@ type Server struct {
 	// APIs, when set, is told when a project's billing is unlinked and
 	// linked again.
 	APIs APIs
-	now  func() time.Time
+	// Publisher, when set, publishes budget notifications (notify.go).
+	Publisher Publisher
+	now       func() time.Time
+	// clockOffset is how far the Cloud Billing clock is ahead of now, and
+	// notifyInterval the interval between a budget's notifications (0:
+	// DefaultNotifyInterval), both in nanoseconds.
+	clockOffset, notifyInterval atomic.Int64
 
 	mu sync.Mutex
+	// dueMu guards due, each notifying budget's next notification.
+	dueMu sync.Mutex
+	due   map[string]dueAt
 }
 
 // NewServer keeps accounts, links and budgets in st. org is the instance's
@@ -173,7 +183,7 @@ func (s *Server) ensureDefault() error {
 		return nil
 	}
 	return s.put(accountPrefix+DefaultAccountID(s.org), &account{DisplayName: DefaultDisplayName, Open: true,
-		Parent: s.org, Currency: Currency, Created: s.now().UTC()})
+		Parent: s.org, Currency: Currency, Created: s.Now().UTC()})
 }
 
 // accountName parses "billingAccounts/ID".
@@ -214,6 +224,44 @@ func (s *Server) Account(name string) (*pb.BillingAccount, error) {
 		return nil, err
 	}
 	return a.proto(id), nil
+}
+
+// Policy is the account name's own IAM policy, nil for none or an
+// account that does not exist (IAM enforcement reads it, #2109).
+func (s *Server) Policy(name string) *iampolicy.Stored {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, a, err := s.load(name); err == nil {
+		return a.Policy
+	}
+	return nil
+}
+
+// Ancestry is the account name's IAM ancestry, itself first: a
+// subaccount's parent account, and the organization a top-level account
+// belongs to ("the billing account inherits IAM permissions from its
+// parent organization", https://docs.cloud.google.com/billing/docs/how-to/billing-access,
+// read 2026-11-21). nil for an account that does not exist.
+func (s *Server) Ancestry(name string) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []string
+	for n, i := name, 0; n != "" && i < 3; i++ {
+		id, a, err := s.load(n)
+		if err != nil {
+			return out
+		}
+		out = append(out, "billingAccounts/"+id)
+		if a.Master != "" {
+			n = a.Master
+			continue
+		}
+		if strings.HasPrefix(a.Parent, "organizations/") {
+			out = append(out, a.Parent)
+		}
+		break
+	}
+	return out
 }
 
 // Accounts are every billing account, sorted by name.
@@ -380,7 +428,7 @@ func (s *Server) CreateBillingAccount(_ context.Context, req *pb.CreateBillingAc
 	}
 	id := newAccountID()
 	a := &account{DisplayName: in.GetDisplayName(), Open: true, Master: "billingAccounts/" + pid,
-		Parent: "billingAccounts/" + pid, Currency: p.Currency, Created: s.now().UTC()}
+		Parent: "billingAccounts/" + pid, Currency: p.Currency, Created: s.Now().UTC()}
 	if err := s.put(accountPrefix+id, a); err != nil {
 		return nil, err
 	}
@@ -401,7 +449,7 @@ func (s *Server) CreateTopLevel(displayName string) (*pb.BillingAccount, error) 
 		return nil, err
 	}
 	id := newAccountID()
-	a := &account{DisplayName: displayName, Open: true, Parent: s.org, Currency: Currency, Created: s.now().UTC()}
+	a := &account{DisplayName: displayName, Open: true, Parent: s.org, Currency: Currency, Created: s.Now().UTC()}
 	if err := s.put(accountPrefix+id, a); err != nil {
 		return nil, err
 	}

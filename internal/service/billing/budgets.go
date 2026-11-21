@@ -222,6 +222,7 @@ func (b *Budgets) CreateBudget(_ context.Context, req *bpb.CreateBudgetRequest) 
 	if err := b.write(aid, id, in); err != nil {
 		return nil, err
 	}
+	b.s.schedule(in.GetName(), in.GetNotificationsRule().GetPubsubTopic())
 	return in, nil
 }
 
@@ -378,6 +379,7 @@ func (b *Budgets) UpdateBudget(_ context.Context, req *bpb.UpdateBudgetRequest) 
 	if err := b.write(aid, id, next); err != nil {
 		return nil, err
 	}
+	b.s.schedule(next.GetName(), next.GetNotificationsRule().GetPubsubTopic())
 	return next, nil
 }
 
@@ -452,6 +454,7 @@ func (b *Budgets) DeleteBudget(_ context.Context, req *bpb.DeleteBudgetRequest) 
 	if err := b.s.st.Delete(budgetKey(aid, id)); err != nil {
 		return nil, fmt.Errorf("billing: delete budget: %w", err)
 	}
+	b.s.schedule(req.GetName(), "")
 	return &emptypb.Empty{}, nil
 }
 
@@ -461,7 +464,8 @@ func (b *Budgets) DeleteBudget(_ context.Context, req *bpb.DeleteBudgetRequest) 
 func Spend(*bpb.Budget) float64 { return 0 }
 
 // Exceeded are the threshold rules a spend of spend against amount
-// exceeds. With a spend of 0 none is, so no notification is published.
+// exceeds. With a spend of 0 none is: a notification carries no
+// alertThresholdExceeded (notify.go).
 func Exceeded(x *bpb.Budget, spend float64) []*bpb.ThresholdRule {
 	m := x.GetAmount().GetSpecifiedAmount()
 	if m == nil {
