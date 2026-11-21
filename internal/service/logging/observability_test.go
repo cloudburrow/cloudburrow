@@ -41,7 +41,12 @@ func TestObservabilityScopes(t *testing.T) {
 		[]byte(`{"resourceNames":["projects/proj-1"]}`)); code != http.StatusBadRequest {
 		t.Errorf("creating _Default = %d", code)
 	}
+	if code, body := a.CallObservability(http.MethodPost, "/v1/projects/proj-1/locations/global/traceScopes?traceScopeId=t",
+		[]byte(`{"resourceNames":["projects/proj-1"]}`)); code != http.StatusOK {
+		t.Fatalf("create trace scope = %d %s", code, body)
+	}
 	for body, want := range map[string]int{
+		`{"traceScope":"projects/proj-1/locations/global/traceScopes/none"}`:                      http.StatusNotFound,
 		`{"logScope":"//logging.googleapis.com/projects/proj-1/locations/global/logScopes/none"}`: http.StatusNotFound,
 		`{"logScope":"//logging.googleapis.com/projects/proj-2/locations/global/logScopes/two"}`:  http.StatusBadRequest,
 		`{"logScope":"projects/proj-1/locations/global/logScopes/two"}`:                           http.StatusBadRequest,

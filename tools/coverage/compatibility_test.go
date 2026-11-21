@@ -73,6 +73,8 @@ var compatSections = map[string]string{
 	// #2030, on the Resource Manager port.
 	"cloudquotas":      "## Cloud Quotas — `google.api.cloudquotas.v1`",
 	"siteverification": "## Site Verification — `siteVerification` v1",
+	// #2109, on the Resource Manager port.
+	"billing": "## Cloud Billing — `google.cloud.billing.v1` and `google.cloud.billing.budgets.v1`",
 	// The Firebase Rules API (#2048), named by whole discovery ID.
 	"firebaserules": "## Firebase Rules — `firebaserules.googleapis.com` v1",
 	// The Cloud Storage companion APIs (#1957), named by whole discovery ID.
@@ -86,6 +88,8 @@ var compatSections = map[string]string{
 	// Certificate Authority Service (#1834), named by gRPC method.
 	"privateca":        "## Certificate Authority Service — `google.cloud.security.privateca.v1`",
 	"parametermanager": "## Parameter Manager — `google.cloud.parametermanager.v1`",
+	"dataform":         "## Dataform — `google.cloud.dataform.v1`",
+	"apphub":           "## App Hub — `google.cloud.apphub.v1`",
 	"workflows":        "## Workflows — `google.cloud.workflows.v1` and `google.cloud.workflows.executions.v1`",
 	// The Kubernetes Engine API (#1913), named by gRPC method.
 	"gke": "## Kubernetes Engine API — `google.container.v1`",

@@ -392,6 +392,7 @@ func (p valkeyProvider) Detail(ctx context.Context, project string, path []strin
 	}
 	d.Sections = append(d.Sections, p.authSections(ctx, api, i)...)
 	d.Sections = append(d.Sections, memorystorePropsTab("maintenance", "Maintenance", valkeyMaintenance(i).summary()), memorystoreMonitoring("instance"))
+	memorystoreTabActions(&d, valkeyPersistenceView(i).action(), valkeyMaintenance(i))
 	fields := []console.Field{}
 	if i.GetMode() != memorystorepb.Instance_CLUSTER_DISABLED {
 		fields = append(fields, console.Field{Name: "shardCount", Label: "Shards", Type: "number", Required: true, Pattern: `^[0-9]{1,3}$`,

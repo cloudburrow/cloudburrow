@@ -334,6 +334,9 @@ func (s configServer) CreateBucket(ctx context.Context, req *loggingpb.CreateBuc
 	if b.GetRetentionDays() == 0 {
 		b.RetentionDays = defaultRetention
 	}
+	if err := checkIndexConfigs(b.GetIndexConfigs(), nil, s.a.now()); err != nil {
+		return nil, apierror.Wrap(err)
+	}
 	if err := s.a.applyDefaultKey(ref, b); err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -360,8 +363,8 @@ func (s configServer) UpdateBucket(ctx context.Context, req *loggingpb.UpdateBuc
 	if len(req.GetUpdateMask().GetPaths()) == 0 {
 		return nil, apierror.Wrap(apierror.InvalidArgument("update_mask is required: name the fields to change"))
 	}
-	if ref.bucket == bucketRequired {
-		return nil, apierror.Wrap(apierror.FailedPrecondition("bucket %s cannot be modified", ref.name()))
+	if ref.bucket == bucketRequired && ref.location == "global" {
+		return nil, apierror.Wrap(refuseRequiredBucket(ref, req.GetUpdateMask().GetPaths()))
 	}
 	s.a.mu.Lock()
 	defer s.a.mu.Unlock()
@@ -404,6 +407,9 @@ func (s configServer) UpdateBucket(ctx context.Context, req *loggingpb.UpdateBuc
 		}
 	}
 	if err := checkBucket(b); err != nil {
+		return nil, apierror.Wrap(err)
+	}
+	if err := checkIndexConfigs(b.GetIndexConfigs(), old.GetIndexConfigs(), s.a.now()); err != nil {
 		return nil, apierror.Wrap(err)
 	}
 	if b.GetAnalyticsEnabled() && !old.GetAnalyticsEnabled() {

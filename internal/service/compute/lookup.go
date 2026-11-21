@@ -63,6 +63,39 @@ func (s *Server) Subnetwork(ref, project, region string) (network string, ok boo
 	return str(o, "network"), true
 }
 
+// SubnetInfo is one subnetwork as other services list it: its relative
+// name (projects/P/regions/R/subnetworks/S), its network's
+// (projects/P/global/networks/N), its primary range and its secondary
+// ranges (name, range).
+type SubnetInfo struct {
+	Name, Network, IPCIDRRange string
+	Secondary                  [][2]string
+}
+
+// ListSubnetworks lists project's subnetworks, for Kubernetes Engine's
+// usable subnetworks (#2100).
+func (s *Server) ListSubnetworks(project string) []SubnetInfo {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_ = s.ensureProjectLocked(project)
+	prefix := "projects/" + project + "/regions/"
+	var out []SubnetInfo
+	for rel, o := range s.res {
+		p := strings.Split(rel, "/")
+		if !strings.HasPrefix(rel, prefix) || len(p) != 6 || p[4] != "subnetworks" {
+			continue
+		}
+		si := SubnetInfo{Name: rel, Network: Rel(str(o, "network"), project), IPCIDRRange: str(o, "ipCidrRange")}
+		l, _ := o["secondaryIpRanges"].([]any)
+		for _, r := range l {
+			m, _ := r.(obj)
+			si.Secondary = append(si.Secondary, [2]string{str(m, "rangeName"), str(m, "ipCidrRange")})
+		}
+		out = append(out, si)
+	}
+	return out
+}
+
 // Conflict is the subnet range (or allocated range) of network, a
 // relative name, that n overlaps, or "" when it overlaps none.
 func (s *Server) Conflict(network string, n *net.IPNet) string {

@@ -101,6 +101,8 @@ var targetEndpoints = []targetEndpoint{
 	{"FIREBASERULES", envKey("CLOUDBURROW_FIREBASERULES_ENDPOINT")},
 	{"WORKFLOWS", envKey("CLOUDBURROW_WORKFLOWS_ENDPOINT")},
 	{"PARAMETERMANAGER", envKey("CLOUDBURROW_PARAMETERMANAGER_ENDPOINT")},
+	{"DATAFORM", envKey("CLOUDBURROW_DATAFORM_ENDPOINT")},
+	{"APPHUB", envKey("CLOUDBURROW_APPHUB_ENDPOINT")},
 }
 
 // normalizeEndpoint reduces an address to host:port, so that
@@ -227,6 +229,8 @@ var gcloudOverrides = []struct {
 	{"orgpolicy", []string{"RESOURCEMANAGER"}},
 	// The Cloud Quotas API (#2030), on the Resource Manager port.
 	{"cloudquotas", []string{"RESOURCEMANAGER"}},
+	// Cloud Billing (#2109), on the Resource Manager port.
+	{"cloudbilling", []string{"RESOURCEMANAGER"}},
 	{"serviceusage", []string{"SERVICEUSAGE", "RUN_SERVICEUSAGE"}},
 	{"apikeys", []string{"APIKEYS", "RUN_APIKEYS"}},
 	// The Cloud Storage companion APIs (#1957), each on its own port.
@@ -255,6 +259,7 @@ var gcloudOverrides = []struct {
 	{"workflows", []string{"WORKFLOWS"}},
 	{"workflowexecutions", []string{"WORKFLOWS"}},
 	{"parametermanager", []string{"PARAMETERMANAGER"}},
+	{"apphub", []string{"APPHUB"}},
 	// Bigtable's admin REST API, on the Bigtable front's port (#1440).
 	{"bigtableadmin", []string{"BIGTABLE"}},
 	// Spanner's admin REST API and the Firestore Admin API (#1461).

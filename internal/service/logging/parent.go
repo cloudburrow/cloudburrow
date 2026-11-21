@@ -9,8 +9,10 @@ package logging
 //     through a Hierarchy the CLI wires in: one that does not exist is
 //     NOT_FOUND, and without a Hierarchy they are UNIMPLEMENTED.
 //   - Billing accounts are accepted in the documented ID form
-//     (XXXXXX-XXXXXX-XXXXXX) and are not checked: Cloud Billing is not served,
-//     so nothing holds them. Nothing is a billing account's child.
+//     (XXXXXX-XXXXXX-XXXXXX) and are the ones Cloud Billing holds (#2109),
+//     through the same Hierarchy: one that does not exist is NOT_FOUND;
+//     without a Hierarchy they are not checked. Nothing is a billing
+//     account's child.
 //   - Log-based metrics have only project parents, as Google documents.
 
 import (
@@ -21,11 +23,12 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 )
 
-// Hierarchy is what Logging needs of Resource Manager: whether a folder or
-// organization exists, and what a project or folder sits under.
+// Hierarchy is what Logging needs of Resource Manager and Cloud Billing:
+// whether a folder, organization or billing account exists, and what a
+// project or folder sits under.
 type Hierarchy interface {
-	// Exists answers nil for an existing folders/{n} or organizations/{n},
-	// and an error (NOT_FOUND) otherwise.
+	// Exists answers nil for an existing folders/{n}, organizations/{n}
+	// or billingAccounts/{id}, and an error (NOT_FOUND) otherwise.
 	Exists(name string) error
 	// Ancestors are the folders and organization above projects/{p} or
 	// folders/{n}, nearest first, as resource names.
@@ -104,9 +107,13 @@ func cutParent(field, name string) (parent, string, error) {
 	return p, rest, nil
 }
 
-// check refuses a folder or organization Resource Manager does not hold.
+// check refuses a folder or organization Resource Manager does not hold,
+// and a billing account Cloud Billing does not.
 func (a *Admin) check(p parent) error {
-	if p.coll != collFolders && p.coll != collOrgs {
+	if p.coll == collBilling && (a == nil || a.h == nil) {
+		return nil
+	}
+	if p.coll != collFolders && p.coll != collOrgs && p.coll != collBilling {
 		return nil
 	}
 	if a == nil || a.h == nil {

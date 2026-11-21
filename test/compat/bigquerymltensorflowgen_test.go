@@ -90,7 +90,12 @@ func TestBigQueryMLTensorFlowImportGenerated(t *testing.T) {
 	if err := os.Chmod(out, 0o777); err != nil {
 		t.Fatal(err)
 	}
+	// As this process's user, not the image's (65534): TensorFlow makes
+	// each SavedModel's directory 0755 whatever the umask, so on Linux,
+	// where a bind mount keeps the container's owner, t.TempDir's cleanup
+	// could not unlink the files of a directory nobody owns.
 	cmd := exec.CommandContext(bctx, "docker", "run", "--rm", "--network", "none", "--read-only", "--tmpfs", "/tmp",
+		"--user", fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()),
 		"-e", "HOME=/tmp", "-e", "TF_CPP_MIN_LOG_LEVEL=3", "-v", gen+":/w:ro", "-v", out+":/out",
 		"--entrypoint", "python3", img, "-I", "/w/gen_import.py", "/out")
 	var log bytes.Buffer

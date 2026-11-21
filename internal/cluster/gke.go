@@ -69,7 +69,9 @@ func (g *GKE) Create(ctx context.Context, kind, image string, standard bool) (GK
 	if err != nil {
 		return GKEAccess{}, err
 	}
-	cfg, err := WriteConfig(filepath.Join(g.Dir, kind), nil)
+	// A second API server port, published unused, is the address a
+	// rotation moves the endpoint to (gkerotation.go).
+	cfg, err := WriteConfig(filepath.Join(g.Dir, kind), []PortMapping{{HostPort: 0, NodePort: spareAPIPort}})
 	if err != nil {
 		return GKEAccess{}, err
 	}
@@ -225,7 +227,7 @@ func (g *GKE) join(ctx context.Context, kind, image, pool, name string) error {
 	if err != nil {
 		return fail(fmt.Errorf("make a bootstrap token: %w", err))
 	}
-	conf := joinConfig(kind, name, ip, strings.TrimSpace(token), pool)
+	conf := joinConfig(kind, name, ip, strings.TrimSpace(token), pool+g.zoneLabels(kind, pool, name))
 	if _, err := r.Run(ctx, "docker", "exec", name, "sh", "-c", `printf '%s' "$1" > /kind/kubeadm.conf`, "sh", conf); err != nil {
 		return fail(fmt.Errorf("write node %s's kubeadm configuration: %w", name, err))
 	}
@@ -237,6 +239,18 @@ func (g *GKE) join(ctx context.Context, kind, image, pool, name string) error {
 			err = fmt.Errorf("%w; the kubelet's last journal lines:\n%s", err, j)
 		}
 		return fail(fmt.Errorf("join node %s: %w", name, err))
+	}
+	// The kubelet registers the node a moment after the join returns, and
+	// kubectl wait fails at once on a node not there yet.
+	for registered := time.Now().Add(time.Minute); time.Now().Before(registered); {
+		if _, err := r.Run(ctx, "kubectl", "--kubeconfig", g.kubeconfig(kind), "get", "node", name); err == nil {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return fail(ctx.Err())
+		case <-time.After(time.Second):
+		}
 	}
 	if _, err := r.Run(ctx, "kubectl", "--kubeconfig", g.kubeconfig(kind), "wait", "--for=condition=Ready", "node/"+name, "--timeout=180s"); err != nil {
 		return fmt.Errorf("node %s did not become Ready: %w", name, err)

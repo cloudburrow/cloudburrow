@@ -26,6 +26,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/service/apikeys"
 	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
+	"github.com/cloudburrow/cloudburrow/internal/service/billing"
 	"github.com/cloudburrow/cloudburrow/internal/service/cloudquotas"
 	"github.com/cloudburrow/cloudburrow/internal/service/datatransfer"
 	"github.com/cloudburrow/cloudburrow/internal/service/monitoring"
@@ -88,6 +89,8 @@ type consoleDeps struct {
 	// Domain verification.
 	cloudQuotas *cloudquotas.Server
 	siteVerify  *siteverification.Server
+	// billing (#2109) backs the Billing pages.
+	billing *billing.Server
 	// authPlatform backs the OAuth consent screen and OAuth clients.
 	authPlatform *authplatform.Store
 	// requestMetrics are the request counters, which APIs & Services
@@ -106,6 +109,10 @@ type consoleDeps struct {
 	workflows *workflowsService
 	// parameterManager is Parameter Manager (#2054), nil unless enabled.
 	parameterManager *parameterManagerService
+	// dataform is Dataform (#2105), nil unless enabled.
+	dataform *dataformService
+	// appHub is App Hub (#2110), nil unless enabled.
+	appHub *appHubService
 	// gke is the Kubernetes Engine API (#1913), nil unless enabled.
 	gke *gkeService
 	// monitoring is Cloud Monitoring (#1939), nil unless enabled.
@@ -347,6 +354,16 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		providers = append(providers, parameterManagerProvider{svc: d.parameterManager},
 			parameterTemplatesProvider{svc: d.parameterManager})
 	}
+	// Dataform (#2105), in process, under BigQuery.
+	if enabled[config.ServiceDataform] && d.dataform != nil {
+		df := dataformProvider{svc: d.dataform}
+		providers = append(providers, df, dataformFoldersProvider{df: df}, dataformSettingsProvider{df: df})
+	}
+	// App Hub (#2110), in process: Applications, Services and workloads,
+	// Settings.
+	if enabled[config.ServiceAppHub] && d.appHub != nil {
+		providers = append(providers, appHubProvider{svc: d.appHub}, appHubDiscoveredProvider{svc: d.appHub}, appHubSettingsProvider{svc: d.appHub})
+	}
 	// Workflows (#1986), in process.
 	if enabled[config.ServiceWorkflows] && d.workflows != nil {
 		wp := workflowsProvider{svc: d.workflows, logs: d.logging, eventarc: workflowsEventarc}
@@ -396,6 +413,11 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	if enabled[config.ServiceScheduler] && d.scheduler != nil {
 		providers = append(providers, schedulerProvider{svc: d.scheduler, faults: d.faults, logs: d.logging})
 	}
+	// Billing (#2109): always served, on the Resource Manager port.
+	if d.billing != nil {
+		bc := billingConsole{srv: d.billing, catalog: billingCatalogRef, projects: d.projects}
+		providers = append(providers, billingAccountsProvider{bc}, billingProjectsProvider{bc}, billingBudgetsProvider{bc}, billingPricingProvider{bc})
+	}
 	// APIs & Services (#1352): always served, as projects are.
 	if d.serviceUsage != nil {
 		providers = append(providers, serviceUsageProvider{api: d.serviceUsage, metrics: d.requestMetrics, history: d.requestHistory, apiKeys: d.apiKeys, quotas: d.cloudQuotas, sites: d.siteVerify, auth: d.authPlatform, metaAddr: d.metaAddr}, serviceUsageOperationsProvider{api: d.serviceUsage})
@@ -426,7 +448,9 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			loggingSettingsProvider{screen},
 			// Saved queries and log scopes (#1519).
 			loggingSavedQueriesProvider{screen},
-			loggingLogScopesProvider{loggingAdminScreen: screen})
+			loggingLogScopesProvider{loggingAdminScreen: screen},
+			// Trace scopes (#2108), a tab of Settings beside Log Scopes.
+			loggingTraceScopesProvider{loggingAdminScreen: screen})
 		// Log Analytics (#1863), over the buckets' linked datasets in the
 		// instance's BigQuery; without BigQuery the page says it is not
 		// available.
@@ -780,6 +804,8 @@ var serviceTitles = map[config.Service]string{
 	config.ServiceCompute:          "VPC network",
 	config.ServiceWorkflows:        "Workflows",
 	config.ServiceParameterManager: "Parameter Manager",
+	config.ServiceDataform:         "Dataform",
+	config.ServiceAppHub:           "App Hub",
 }
 
 func serviceTitle(s config.Service) string {

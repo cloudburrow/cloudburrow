@@ -194,7 +194,7 @@ func TestGKEServedClusterTabsAndUpgrades(t *testing.T) {
 			upgrade = a
 		}
 	}
-	if upgrade.Unavailable != "" || len(upgrade.Fields) != 1 || strings.Join(upgrade.Fields[0].Options, ",") != "1.36.4-gke.0" {
+	if upgrade.Unavailable != "" || len(upgrade.Fields) != 2 || strings.Join(upgrade.Fields[0].Options, ",") != "1.36.4-gke.0" || upgrade.Fields[1].Name != "soak" {
 		t.Fatalf("Upgrade = %+v", upgrade)
 	}
 	// The console's Upgrade asks the API to upgrade (#2069); this test's

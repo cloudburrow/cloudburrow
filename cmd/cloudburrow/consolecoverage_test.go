@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
+	"github.com/cloudburrow/cloudburrow/internal/service/billing"
 
 	"os"
 	"slices"
@@ -49,7 +50,7 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 	config.ServiceBigQuery:      {Providers: []string{"bigquery", "bigquery-jobs", "bigquery-transfers", "bigquery-scheduled-queries", "bigquery-sharing"}},
 	config.ServiceScheduler:     {Providers: []string{"scheduler"}},
 	config.ServiceKMS:           {Providers: []string{"kms", "kms-ekm", "kms-autokey", "kms-config", "kms-inventory", "kms-hsm"}},
-	config.ServiceLogging:       {Providers: []string{"logging-metrics", "logging-sinks", "logging-exclusions", "logging-buckets", "logging-settings", "logging-saved-queries", "logging-log-scopes", "logging-analytics"}, Screen: "/logs"},
+	config.ServiceLogging:       {Providers: []string{"logging-metrics", "logging-sinks", "logging-exclusions", "logging-buckets", "logging-settings", "logging-saved-queries", "logging-log-scopes", "logging-trace-scopes", "logging-analytics"}, Screen: "/logs"},
 	config.ServiceMemorystore:   {Providers: []string{"memorystore", "memorystore-clusters", "memorystore-valkey"}},
 	config.ServiceCloudSQLMySQL: {Providers: []string{"cloudsql-mysql", "cloudsql-instances", "cloudsql-backups"}},
 	config.ServiceBackupDR: {Providers: []string{"backupdr-overview", "backupdr-vaulted", "backupdr-plans", "backupdr-associations",
@@ -57,6 +58,8 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 	config.ServicePrivateCA:        {Providers: []string{"privateca", "privateca-templates"}},
 	config.ServiceWorkflows:        {Providers: []string{"workflows"}},
 	config.ServiceParameterManager: {Providers: []string{"parametermanager", "parametermanager-templates"}},
+	config.ServiceDataform:         {Providers: []string{"dataform", "dataform-folders", "dataform-settings"}},
+	config.ServiceAppHub:           {Providers: []string{"apphub", "apphub-discovered", "apphub-settings"}},
 	// The Kubernetes Engine API (#1913): its clusters are on Kubernetes
 	// clusters, beside the instance's own.
 	config.ServiceGKE: {Providers: []string{"gkeclusters"}},
@@ -73,6 +76,8 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 // cluster.
 var clusterScreens = []string{
 	"projects", "hierarchy", "tags", "iam", "iam-roles", "iam-groups", "iam-sso-profiles", "iam-sso-assignments", "iam-service-accounts", "iam-workload-identity", "iam-workforce-identity", "iam-principal-access-boundary", "iam-audit", "iam-orgpolicies", "iam-labels", "iam-settings", "serviceusage", "serviceusage-operations", "ai",
+	// Billing (#2109), always served on the Resource Manager port.
+	"billing", "billing-projects", "billing-budgets", "billing-pricing",
 	"documentai-overview", "documentai-gallery", "documentai", "speech-transcriptions", "speech-recognizers",
 	"speech-custom-classes", "speech-phrase-sets",
 	"workloads", "pods", "k8sservices", "jobs", "nodes", "k8sstorage", "events",
@@ -174,8 +179,12 @@ func coverageDeps(t *testing.T) consoleDeps {
 		logging:          &loggingService{},
 		workflows:        &workflowsService{},
 		parameterManager: &parameterManagerService{},
+		dataform:         &dataformService{},
+		appHub:           &appHubService{},
 		// The APIs & Services page (#1352) reads the Service Usage server.
 		serviceUsage: newServiceUsageServer(cfg, projects, store.NewMemory()),
+		// The Billing pages (#2109) read the Cloud Billing server.
+		billing: billing.NewServer(store.NewMemory(), nil, "organizations/1"),
 		// The Backup and DR page (#1433) reads the Backup and DR server.
 		backupdr: backupdr.NewServer("127.0.0.1:0", nil, ""),
 		// Document AI and Speech-to-Text (#1930) read the local AI

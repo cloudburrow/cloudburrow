@@ -76,6 +76,9 @@ func (s *Server) tailSpec(req *loggingpb.TailLogEntriesRequest) ([]source, pred,
 	if err != nil {
 		return nil, nil, 0, apierror.Wrap(err)
 	}
+	for i := range sources {
+		sources[i].query = req.GetFilter()
+	}
 	window := DefaultTailBufferWindow
 	if bw := req.GetBufferWindow(); bw != nil {
 		if err := bw.CheckValid(); err != nil {
@@ -97,12 +100,13 @@ func (s *Server) tail(stream loggingpb.LoggingServiceV2_TailLogEntriesServer, so
 	var pending []*loggingpb.LogEntry
 	wake := make(chan struct{}, 1)
 	cancel := s.store.subscribe(func(e *loggingpb.LogEntry) {
-		if !match(e) {
-			return
-		}
 		in := false
 		for _, src := range sources {
-			if in = s.store.inBucket(src.bucket, e) && src.holds(e, s.clock()); in {
+			m, err := src.matcher(src.query, match, s.clock())
+			if err != nil {
+				m = match
+			}
+			if in = s.store.inBucket(src.bucket, e) && src.holds(e, s.clock()) && m(e); in {
 				break
 			}
 		}

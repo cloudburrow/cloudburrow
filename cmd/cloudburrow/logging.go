@@ -41,6 +41,8 @@ import (
 // that grew without limit on a laptop would be a problem of its own.
 type loggingService struct {
 	cfg config.Config
+	// appHub is an entry's LogEntry.apphub (#2096); nil without App Hub.
+	appHub logging.AppHubOf
 	// tracing, when on, spans gRPC calls (#600), as for Cloud Tasks.
 	tracing *telemetry.Tracing
 	calls   grpctransport.Observer
@@ -139,8 +141,16 @@ func (h loggingHierarchy) Exists(name string) error {
 	case strings.HasPrefix(name, "folders/"):
 		_, err := h.reg.Folder(name)
 		return err
+	case strings.HasPrefix(name, "billingAccounts/"):
+		// A billing account Cloud Billing holds (#2109).
+		b := billingAccounts.Load()
+		if b == nil {
+			return fmt.Errorf("%s: Cloud Billing is not served", name)
+		}
+		_, err := b.Account(name)
+		return err
 	}
-	return fmt.Errorf("%s is not a folder or the organization %s", name, resourcemanager.OrganizationName)
+	return fmt.Errorf("%s is not a folder, a billing account or the organization %s", name, resourcemanager.OrganizationName)
 }
 
 func (h loggingHierarchy) Ancestors(name string) ([]string, error) {
@@ -342,6 +352,9 @@ func (s *loggingService) Start(ctx context.Context) error {
 		s.admin.RegisterViewIAM(g) // log views' IAM (#1519)
 	}
 	var jsonAPI http.Handler = logging.NewRESTHandler(register)
+	// entries.list's output-only apphub (#2096), from App Hub's
+	// registrations.
+	jsonAPI = logging.WithAppHub(jsonAPI, s.appHub)
 	if s.wrapJSON != nil {
 		jsonAPI = s.wrapJSON(jsonAPI)
 	}

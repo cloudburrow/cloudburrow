@@ -172,9 +172,21 @@ func (s *computeService) memorystoreNetworks() redisadmin.Networks {
 
 func (s *computeService) gkeNetworks() gke.Networks {
 	if api := s.API(); api != nil {
-		return api
+		return gkeComputeNetworks{api}
 	}
 	return nil
+}
+
+// gkeComputeNetworks are Compute Engine's networks as Kubernetes Engine
+// checks and lists them (ListUsableSubnetworks, #2100).
+type gkeComputeNetworks struct{ *compute.Server }
+
+func (n gkeComputeNetworks) UsableSubnetworks(project string) []gke.UsableSubnet {
+	var out []gke.UsableSubnet
+	for _, sn := range n.ListSubnetworks(project) {
+		out = append(out, gke.UsableSubnet{Subnetwork: sn.Name, Network: sn.Network, IPCIDRRange: sn.IPCIDRRange, Secondary: sn.Secondary})
+	}
+	return out
 }
 
 func (s *computeService) sqlNetworks() sqladmin.Networks {

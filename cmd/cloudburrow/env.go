@@ -602,6 +602,23 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 			envVar{cliEndpointVar("parametermanager"), pm,
 				"Parameter Manager v1, global and regional, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint"})
 	}
+	// App Hub (#2110): gcloud apphub, the Go client, and Terraform's
+	// google_apphub_* through apphub_custom_endpoint.
+	if appHubEnabled(cfg) && cfg.Endpoints.AppHub != 0 {
+		ah := addr(cfg.Endpoints.AppHub)
+		vars = append(vars,
+			envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_APPHUB", "http://" + ah + "/", "read by gcloud; gcloud apphub"},
+			envVar{cliEndpointVar("apphub"), ah,
+				"App Hub v1, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint"})
+	}
+
+	// Dataform (#2105): the Go client, and Terraform's
+	// google_dataform_repository through dataform_custom_endpoint.
+	if dataformEnabled(cfg) && cfg.Endpoints.Dataform != 0 {
+		vars = append(vars,
+			envVar{cliEndpointVar("dataform"), addr(cfg.Endpoints.Dataform),
+				"Dataform v1, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint"})
+	}
 
 	// The Kubernetes Engine API (#1913): gcloud container clusters and
 	// node-pools, and Terraform's google_container_* through
@@ -709,7 +726,14 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 			envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_CLOUDRESOURCEMANAGER", "http://" + rm + "/",
 				"read by gcloud; its projects commands use the v1 API, served here with v3"},
 			envVar{cliEndpointVar("resourcemanager"), rm,
-				"gRPC and REST, plaintext; read by no client library: pass it to option.WithEndpoint"})
+				"gRPC and REST, plaintext; read by no client library: pass it to option.WithEndpoint"},
+			// Cloud Billing and the Budget API (#2109), on the same port.
+			// gcloud billing budgets has no override (billingbudgets), so
+			// only the client libraries reach budgets here.
+			envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_CLOUDBILLING", "http://" + rm + "/",
+				"read by gcloud billing accounts and projects; Cloud Billing is served on the Resource Manager port"},
+			envVar{cliEndpointVar("billing"), rm,
+				"Cloud Billing and Budget APIs, gRPC and REST, plaintext; read by no client library: pass it to option.WithEndpoint"})
 	}
 
 	// Ingress is reported only when it is actually published, or a developer
@@ -842,6 +866,8 @@ func withLivePorts(cfg config.Config, live map[string]string) config.Config {
 		"analyticshub":           &e.AnalyticsHub,
 		"workflows":              &e.Workflows,
 		"parametermanager":       &e.ParameterManager,
+		"dataform":               &e.Dataform,
+		"apphub":                 &e.AppHub,
 		// The local AI endpoint, which serves Vertex AI's Model Registry
 		// and Endpoints (#1940) to gcloud-setup and terraform, and Document
 		// AI (#1953), which terraform points document_ai_custom_endpoint at.

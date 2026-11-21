@@ -1,0 +1,75 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "discoveryengine.googleapis.com/agentregistry/connector",
+  "description": "Gemini Enterprise (Discovery Engine) connector metadata. Present on the McpServer of a resource backed by a Gemini Enterprise connector. Every field is optional.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "type": "string",
+      "description": "The type of the Gemini Enterprise connector, as a lowercase hyphen-separated identifier: for example 'github', 'atlassian-rovo'. Instances of the same connector share a type; it identifies which external service the connector integrates with.",
+      "maxLength": 128
+    },
+    "version": {
+      "type": "string",
+      "description": "The version of the connector definition this instance was created from, for example '1.0'.",
+      "maxLength": 32
+    },
+    "state": {
+      "type": "string",
+      "description": "The provisioning state of the connector instance. Some possible values are: 'STATE_UNSPECIFIED', 'INITIALIZING', 'INITIALIZED', 'INITIALIZATION_FAILED', 'ACTIVE', 'RUNNING', 'FAILED', 'WARNING', 'UPDATING' or 'DELETING'.",
+      "maxLength": 64
+    },
+    "instanceUri": {
+      "type": "string",
+      "description": "The customer's own site, for connectors addressed per customer: for example 'https://acme.atlassian.net'. This is the tenant the connector reads from, and differs from the MCP endpoint in 'interfaces', which is the same for every customer of a given connector. Absent for connectors that address a single fixed endpoint.",
+      "maxLength": 512
+    },
+    "tenantId": {
+      "type": "string",
+      "description": "The identifier of the customer tenant within the external service, where the service requires one to address it.",
+      "maxLength": 128
+    },
+    "skills": {
+      "type": "array",
+      "description": "The Agent Registry skill revisions a Gemini Enterprise administrator added to this custom MCP connector, one entry per skill, at most five. Absent for other connectors and for custom MCP connectors without any.",
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "skill": {
+            "type": "string",
+            "description": "The resource name of the skill, in the form 'projects/{project_number}/locations/{location}/skills/{skill}'.",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "skillUid": {
+            "type": "string",
+            "description": "The 'uid' of the skill.",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "revision": {
+            "type": "string",
+            "description": "The resource name of the skill revision, in the form 'projects/{project_number}/locations/{location}/skills/{skill}/revisions/{revision}'.",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "revisionUid": {
+            "type": "string",
+            "description": "The 'uid' of the skill revision.",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "sha256": {
+            "type": "string",
+            "description": "The SHA-256 digest of the skill revision's payload, as 64 lowercase hexadecimal characters.",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "required": ["skill", "skillUid", "revision", "revisionUid", "sha256"]
+      }
+    }
+  }
+}

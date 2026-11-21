@@ -268,6 +268,8 @@ func compatEnvFixture(t *testing.T, edit func(env map[string]string)) (dir, envF
 		"CLOUDBURROW_ANALYTICSHUB_ENDPOINT":           "127.0.0.1:9042",
 		"CLOUDBURROW_WORKFLOWS_ENDPOINT":              "127.0.0.1:9038",
 		"CLOUDBURROW_PARAMETERMANAGER_ENDPOINT":       "127.0.0.1:9047",
+		"CLOUDBURROW_DATAFORM_ENDPOINT":               "127.0.0.1:9058",
+		"CLOUDBURROW_APPHUB_ENDPOINT":                 "127.0.0.1:9048",
 	}
 	if edit != nil {
 		edit(env)
@@ -392,6 +394,8 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 		"PUBSUB_MONITORING":        "127.0.0.1:9033",
 		"WORKFLOWS":                "127.0.0.1:9038",
 		"PARAMETERMANAGER":         "127.0.0.1:9047",
+		"DATAFORM":                 "127.0.0.1:9058",
+		"APPHUB":                   "127.0.0.1:9048",
 		"COMPUTE":                  "127.0.0.1:9031",
 		"DATATRANSFER":             "127.0.0.1:9034",
 		"FIREBASERULES":            "127.0.0.1:9043",
@@ -407,6 +411,7 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 		"FIRESTORE_MONGODB":        "127.0.0.1:9026",
 		"FIRESTORE_MONGODB_CA":     "/state/ct/firestore-mongodb-ca.pem",
 		"SINK_LOGGING":             "127.0.0.1:9009",
+		"STORAGE_LOGGING":          "127.0.0.1:9009",
 		"SINK_STORAGE":             "http://127.0.0.1:50003",
 		"SINK_PUBSUB":              "127.0.0.1:50004",
 		"FIRESTORE_STORAGE":        "http://127.0.0.1:50003",
@@ -531,8 +536,8 @@ func TestWorkflowsSetCompatEnvThroughTheScript(t *testing.T) {
 		`if [ "$SHARD" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE,BIGTABLE,SPANNER,KMS,DATATRANSFER,ANALYTICSHUB; fi`,
 		`if [ "$SHARD" = memorystore ]; then BROWSER_VARS+=,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT; fi`,
 		`if [ "$SHARD" = storage ]; then BROWSER_VARS+=,LOGGING,STORAGE,PUBSUB,TASKS,SCHEDULER,RESOURCEMANAGER,SERVICEUSAGE,APIKEYS,STORAGE_BATCH,STORAGE_INSIGHTS,STORAGE_TRANSFER,KUBECONFIG,MONITORING; fi`,
-		`if [ "$SHARD" = run ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT,RUN_SERVICEUSAGE,WORKFLOWS,STORAGE,MONITORING,KUBECONFIG; fi`,
-		`if [ "$SHARD" = sql ]; then BROWSER_VARS+=,SQLADMIN,BACKUPDR,SECRETS; fi`,
+		`if [ "$SHARD" = run ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT,RUN_SERVICEUSAGE,WORKFLOWS,STORAGE,MONITORING,KUBECONFIG,RUN_FIRESTORE,RUN_DATASTORE; fi`,
+		`if [ "$SHARD" = sql ]; then BROWSER_VARS+=,SQLADMIN,BACKUPDR,SECRETS,COMPUTE; fi`,
 		`scripts/compat-env.sh --strict --only "$BROWSER_VARS"`,
 	} {
 		if !strings.Contains(ci["compat"], want) {
@@ -548,8 +553,8 @@ func TestWorkflowsSetCompatEnvThroughTheScript(t *testing.T) {
 		`if [ "$shard" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE,BIGTABLE,SPANNER,KMS,DATATRANSFER,ANALYTICSHUB; fi`,
 		`if [ "$shard" = memorystore ]; then BROWSER_VARS+=,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT; fi`,
 		`if [ "$shard" = storage ]; then BROWSER_VARS+=,LOGGING,STORAGE,PUBSUB,TASKS,SCHEDULER,RESOURCEMANAGER,SERVICEUSAGE,APIKEYS,STORAGE_BATCH,STORAGE_INSIGHTS,STORAGE_TRANSFER,KUBECONFIG,MONITORING; fi`,
-		`if [ "$shard" = run ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT,RUN_SERVICEUSAGE,WORKFLOWS,STORAGE,MONITORING,KUBECONFIG; fi`,
-		`if [ "$shard" = sql ]; then BROWSER_VARS+=,SQLADMIN,BACKUPDR,SECRETS; fi`,
+		`if [ "$shard" = run ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT,RUN_SERVICEUSAGE,WORKFLOWS,STORAGE,MONITORING,KUBECONFIG,RUN_FIRESTORE,RUN_DATASTORE; fi`,
+		`if [ "$shard" = sql ]; then BROWSER_VARS+=,SQLADMIN,BACKUPDR,SECRETS,COMPUTE; fi`,
 		`scripts/compat-env.sh --only "$BROWSER_VARS"`,
 	} {
 		if !strings.Contains(string(verify), want) {

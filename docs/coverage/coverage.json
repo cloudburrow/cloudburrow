@@ -251,6 +251,7 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/CreateSecret",
         "status": "Verified",
         "tests": [
+          "test/compat/iamenforcementterraform_test.go:31 TestIAMEnforcementTerraform",
           "test/compat/orgpolicy1890_test.go:419 TestOrgPolicyEnforcementSecretLocations",
           "test/compat/orgpolicycustom1891_test.go:282 TestOrgPolicyCustomConstraintsSecretManager",
           "test/compat/resterrorstatus_test.go:94 TestGcloudSecretManagerErrorStatus",
@@ -284,6 +285,7 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/DeleteSecret",
         "status": "Verified",
         "tests": [
+          "test/compat/iamenforcementterraform_test.go:31 TestIAMEnforcementTerraform",
           "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
           "test/compat/secrets_test.go:49 TestSecretLifecycle",
           "test/compat/secrettags1961_test.go:31 TestSecretManagerTagsAndAliasesAtCreation",
@@ -354,6 +356,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/iamenforcement1879_test.go:119 TestIAMEnforcementSecretManager",
+          "test/compat/iamenforcementterraform_test.go:31 TestIAMEnforcementTerraform",
           "test/compat/secretaliases_test.go:22 TestSecretManagerVersionAliases",
           "test/compat/secretcmek_test.go:74 TestSecretManagerCMEK",
           "test/compat/secretexpiryfilter_test.go:35 TestSecretManagerExpiry",
@@ -4684,6 +4687,7 @@
         "method": "google.iam.admin.v1.IAM/CreateServiceAccountKey",
         "status": "Verified",
         "tests": [
+          "test/compat/iamenforcementterraform_test.go:31 TestIAMEnforcementTerraform",
           "test/compat/iamserviceaccounts1747_test.go:256 TestIAMServiceAccountKeys",
           "test/compat/orgpolicy1890_test.go:269 TestOrgPolicyEnforcementIAM",
           "test/compat/orgpolicycustom1891_test.go:156 TestOrgPolicyCustomConstraintsIAM",
@@ -6013,6 +6017,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/logging1595_test.go:27 TestLoggingOldTimestampsFollowEachBucketsRetention",
+          "test/compat/logging2108_test.go:169 TestLoggingCustomIndexes",
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
           "test/compat/loggingcmek1950_test.go:70 TestLoggingBucketCMEK",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
@@ -6035,7 +6040,7 @@
           "test/compat/logging1226_test.go:279 TestLoggingExclusions",
           "test/compat/logging2026_test.go:32 TestLoggingQueryLanguage",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
-          "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
+          "test/compat/terraform_logging_parents_test.go:255 TestTerraformLoggingBillingAccount",
           "test/compat/terraform_logging_parents_test.go:60 TestTerraformLoggingFolderAndOrganizationExclusionsAndBuckets",
           "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
@@ -6064,10 +6069,11 @@
           "test/compat/logging1577_test.go:28 TestLoggingListSinksInScope",
           "test/compat/logging1595_test.go:27 TestLoggingOldTimestampsFollowEachBucketsRetention",
           "test/compat/logging2026_test.go:32 TestLoggingQueryLanguage",
+          "test/compat/logging2108_test.go:169 TestLoggingCustomIndexes",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/loggingparentstools_test.go:87 TestTerraformLoggingFolderAndOrganizationSinks",
           "test/compat/terraform_batch11_test.go:59 TestTerraformLoggingSavedQueryAndLogScope",
-          "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
+          "test/compat/terraform_logging_parents_test.go:255 TestTerraformLoggingBillingAccount",
           "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
       },
@@ -6094,6 +6100,7 @@
         "method": "google.logging.v2.ConfigServiceV2/DeleteBucket",
         "status": "Verified",
         "tests": [
+          "test/compat/logging2108_test.go:80 TestLoggingRequiredBucketAndSink",
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/terraform_logging_buckets_test.go:33 TestTerraformLoggingBucketsAndLinks",
@@ -6106,7 +6113,7 @@
         "tests": [
           "test/compat/logging1226_test.go:279 TestLoggingExclusions",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
-          "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
+          "test/compat/terraform_logging_parents_test.go:255 TestTerraformLoggingBillingAccount",
           "test/compat/terraform_logging_parents_test.go:60 TestTerraformLoggingFolderAndOrganizationExclusionsAndBuckets",
           "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
@@ -6128,10 +6135,11 @@
           "test/compat/logging1404tools_test.go:103 TestTerraformLoggingSinkDestinations",
           "test/compat/logging1451_test.go:239 TestTerraformLoggingBigQuerySinkExportErrors",
           "test/compat/logging1521_test.go:63 TestLoggingInterceptingSinks",
+          "test/compat/logging2108_test.go:80 TestLoggingRequiredBucketAndSink",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/loggingparentstools_test.go:87 TestTerraformLoggingFolderAndOrganizationSinks",
           "test/compat/terraform_batch11_test.go:59 TestTerraformLoggingSavedQueryAndLogScope",
-          "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
+          "test/compat/terraform_logging_parents_test.go:255 TestTerraformLoggingBillingAccount",
           "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
       },
@@ -6149,11 +6157,13 @@
         "method": "google.logging.v2.ConfigServiceV2/GetBucket",
         "status": "Verified",
         "tests": [
+          "test/compat/logging2108_test.go:169 TestLoggingCustomIndexes",
+          "test/compat/logging2108_test.go:80 TestLoggingRequiredBucketAndSink",
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
           "test/compat/loggingcmek1950_test.go:70 TestLoggingBucketCMEK",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/terraform_logging_buckets_test.go:33 TestTerraformLoggingBucketsAndLinks",
-          "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
+          "test/compat/terraform_logging_parents_test.go:255 TestTerraformLoggingBillingAccount",
           "test/compat/terraform_logging_parents_test.go:60 TestTerraformLoggingFolderAndOrganizationExclusionsAndBuckets",
           "test/compat/terraform_loggingcmek1950_test.go:22 TestTerraformLoggingBucketCMEK"
         ]
@@ -6175,7 +6185,7 @@
         "tests": [
           "test/compat/logging1226_test.go:279 TestLoggingExclusions",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
-          "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
+          "test/compat/terraform_logging_parents_test.go:255 TestTerraformLoggingBillingAccount",
           "test/compat/terraform_logging_parents_test.go:60 TestTerraformLoggingFolderAndOrganizationExclusionsAndBuckets",
           "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
@@ -6208,10 +6218,11 @@
           "test/compat/logging1404tools_test.go:103 TestTerraformLoggingSinkDestinations",
           "test/compat/logging1451_test.go:239 TestTerraformLoggingBigQuerySinkExportErrors",
           "test/compat/logging1521_test.go:63 TestLoggingInterceptingSinks",
+          "test/compat/logging2108_test.go:80 TestLoggingRequiredBucketAndSink",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/loggingparentstools_test.go:87 TestTerraformLoggingFolderAndOrganizationSinks",
           "test/compat/terraform_batch11_test.go:59 TestTerraformLoggingSavedQueryAndLogScope",
-          "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
+          "test/compat/terraform_logging_parents_test.go:255 TestTerraformLoggingBillingAccount",
           "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
       },
@@ -6227,6 +6238,7 @@
         "method": "google.logging.v2.ConfigServiceV2/ListBuckets",
         "status": "Verified",
         "tests": [
+          "test/compat/logging2108_test.go:169 TestLoggingCustomIndexes",
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews"
         ]
       },
@@ -6253,6 +6265,7 @@
           "test/compat/logging1226_test.go:185 TestLoggingSinks",
           "test/compat/logging1521_test.go:63 TestLoggingInterceptingSinks",
           "test/compat/logging1577_test.go:28 TestLoggingListSinksInScope",
+          "test/compat/logging2108_test.go:80 TestLoggingRequiredBucketAndSink",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents"
         ]
       },
@@ -6276,11 +6289,13 @@
         "method": "google.logging.v2.ConfigServiceV2/UpdateBucket",
         "status": "Verified",
         "tests": [
+          "test/compat/logging2108_test.go:169 TestLoggingCustomIndexes",
+          "test/compat/logging2108_test.go:80 TestLoggingRequiredBucketAndSink",
           "test/compat/logginganalyticsviews_test.go:191 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
           "test/compat/loggingcmek1950_test.go:70 TestLoggingBucketCMEK",
           "test/compat/terraform_logging_buckets_test.go:33 TestTerraformLoggingBucketsAndLinks",
-          "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
+          "test/compat/terraform_logging_parents_test.go:255 TestTerraformLoggingBillingAccount",
           "test/compat/terraform_logging_parents_test.go:60 TestTerraformLoggingFolderAndOrganizationExclusionsAndBuckets"
         ]
       },
@@ -6304,7 +6319,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/logging1226_test.go:279 TestLoggingExclusions",
-          "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
+          "test/compat/terraform_logging_parents_test.go:255 TestTerraformLoggingBillingAccount",
           "test/compat/terraform_logging_parents_test.go:60 TestTerraformLoggingFolderAndOrganizationExclusionsAndBuckets",
           "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
@@ -6325,10 +6340,11 @@
         "tests": [
           "test/compat/logging1226_test.go:185 TestLoggingSinks",
           "test/compat/logging1521_test.go:63 TestLoggingInterceptingSinks",
+          "test/compat/logging2108_test.go:80 TestLoggingRequiredBucketAndSink",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/loggingparentstools_test.go:87 TestTerraformLoggingFolderAndOrganizationSinks",
           "test/compat/terraform_batch11_test.go:59 TestTerraformLoggingSavedQueryAndLogScope",
-          "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
+          "test/compat/terraform_logging_parents_test.go:255 TestTerraformLoggingBillingAccount",
           "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
       },
@@ -6370,6 +6386,8 @@
           "test/compat/logging1521_test.go:63 TestLoggingInterceptingSinks",
           "test/compat/logging1595_test.go:27 TestLoggingOldTimestampsFollowEachBucketsRetention",
           "test/compat/logging2026_test.go:32 TestLoggingQueryLanguage",
+          "test/compat/logging2108_test.go:169 TestLoggingCustomIndexes",
+          "test/compat/logging2108_test.go:80 TestLoggingRequiredBucketAndSink",
           "test/compat/logging_fidelity_test.go:31 TestLoggingPartialSuccessAndScopedPaging",
           "test/compat/logging_test.go:34 TestLoggingWriteAndRead",
           "test/compat/loggingcmek1950_test.go:70 TestLoggingBucketCMEK",
@@ -6418,6 +6436,7 @@
           "test/compat/logging1451_test.go:115 TestLoggingBigQuerySinkExportErrorsAndProtoPayload",
           "test/compat/logging1521_test.go:63 TestLoggingInterceptingSinks",
           "test/compat/logging1595_test.go:27 TestLoggingOldTimestampsFollowEachBucketsRetention",
+          "test/compat/logging2108_test.go:80 TestLoggingRequiredBucketAndSink",
           "test/compat/logging_fidelity_test.go:31 TestLoggingPartialSuccessAndScopedPaging",
           "test/compat/logging_test.go:34 TestLoggingWriteAndRead",
           "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",
@@ -8492,6 +8511,7 @@
         "method": "google.pubsub.v1.Subscriber/Pull",
         "status": "Verified",
         "tests": [
+          "test/compat/billingiam2109_test.go:56 TestBillingBudgetNotifications",
           "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
           "test/compat/iamenforcementpubsub1879_test.go:59 TestIAMEnforcementPubSub",
           "test/compat/pubsub_test.go:90 TestPubSubPublishAndPull",
@@ -8806,8 +8826,8 @@
           "test/compat/storageipfiltertools_test.go:145 TestTerraformStorageBucketIPFilter",
           "test/compat/storagesoftdelete_test.go:137 TestStorageBucketDeleteIgnoresSoftDeleted",
           "test/compat/terraform_batch9_test.go:77 TestTerraformStorageBucketIAM",
-          "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources",
-          "test/compat/terraformstorage_test.go:237 TestTerraformForceDestroyVersionedBucket"
+          "test/compat/terraformstorage_test.go:106 TestTerraformStorageResources",
+          "test/compat/terraformstorage_test.go:239 TestTerraformForceDestroyVersionedBucket"
         ],
         "unverified": [
           {
@@ -8852,7 +8872,7 @@
           "test/compat/sysparams1954_test.go:283 TestSystemParametersStorage",
           "test/compat/terraform_batch10_test.go:164 TestTerraformDataSourcesBatch10",
           "test/compat/terraform_batch9_test.go:77 TestTerraformStorageBucketIAM",
-          "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
+          "test/compat/terraformstorage_test.go:106 TestTerraformStorageResources"
         ]
       },
       {
@@ -8865,7 +8885,7 @@
           "test/compat/storageiam_test.go:94 TestStorageBucketIAMConditions",
           "test/compat/terraform_batch9_test.go:77 TestTerraformStorageBucketIAM",
           "test/compat/terraform_iam_more_test.go:32 TestTerraformStoredIAM",
-          "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
+          "test/compat/terraformstorage_test.go:106 TestTerraformStorageResources"
         ]
       },
       {
@@ -8895,7 +8915,7 @@
           "test/compat/storagexmlpost_test.go:33 TestStorageXMLBucketPutAndServiceGet",
           "test/compat/sysparams1954_test.go:283 TestSystemParametersStorage",
           "test/compat/terraform_batch9_test.go:77 TestTerraformStorageBucketIAM",
-          "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
+          "test/compat/terraformstorage_test.go:106 TestTerraformStorageResources"
         ],
         "unverified": [
           {
@@ -8999,7 +9019,7 @@
           "test/compat/storageretention_test.go:35 TestStorageRetentionBlocksDelete",
           "test/compat/storageretention_test.go:61 TestStorageLockRetentionPolicy",
           "test/compat/storageversioning_test.go:114 TestStorageVersioningDisableKeepsExisting",
-          "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
+          "test/compat/terraformstorage_test.go:106 TestTerraformStorageResources"
         ],
         "unverified": [
           {
@@ -9060,7 +9080,7 @@
           "test/compat/storageiam_test.go:94 TestStorageBucketIAMConditions",
           "test/compat/terraform_batch9_test.go:77 TestTerraformStorageBucketIAM",
           "test/compat/terraform_iam_more_test.go:32 TestTerraformStoredIAM",
-          "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
+          "test/compat/terraformstorage_test.go:106 TestTerraformStorageResources"
         ],
         "unverified": [
           {
@@ -9332,14 +9352,14 @@
         "status": "Verified",
         "tests": [
           "test/compat/notifications_test.go:158 TestNotificationConfigsCRUDThroughTheSDK",
-          "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
+          "test/compat/terraformstorage_test.go:106 TestTerraformStorageResources"
         ]
       },
       {
         "method": "storage.notifications.get",
         "status": "Verified",
         "tests": [
-          "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
+          "test/compat/terraformstorage_test.go:106 TestTerraformStorageResources"
         ]
       },
       {
@@ -9349,7 +9369,7 @@
           "test/compat/notifications_test.go:158 TestNotificationConfigsCRUDThroughTheSDK",
           "test/compat/storagenotifyevents_test.go:75 TestNotificationArchiveOnVersionedOverwrite",
           "test/compat/storagenotifyevents_test.go:95 TestNotificationDeleteAndMetadataUpdate",
-          "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
+          "test/compat/terraformstorage_test.go:106 TestTerraformStorageResources"
         ]
       },
       {
@@ -9446,8 +9466,8 @@
           "test/compat/storageversioning_test.go:87 TestStorageVersioningDeleteKeepsNoncurrent",
           "test/compat/terraform_batch5_test.go:103 TestTerraformStorageObjectCustomerKey",
           "test/compat/terraform_batch6_test.go:178 TestTerraformStorageObjectRetention",
-          "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources",
-          "test/compat/terraformstorage_test.go:237 TestTerraformForceDestroyVersionedBucket"
+          "test/compat/terraformstorage_test.go:106 TestTerraformStorageResources",
+          "test/compat/terraformstorage_test.go:239 TestTerraformForceDestroyVersionedBucket"
         ]
       },
       {
@@ -9470,7 +9490,7 @@
           "test/compat/terraform_batch5_test.go:103 TestTerraformStorageObjectCustomerKey",
           "test/compat/terraform_batch6_test.go:178 TestTerraformStorageObjectRetention",
           "test/compat/terraform_batch6_test.go:477 TestTerraformDataSources",
-          "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
+          "test/compat/terraformstorage_test.go:106 TestTerraformStorageResources"
         ],
         "unverified": [
           {
@@ -9505,7 +9525,7 @@
           "test/compat/sysparams1954_test.go:283 TestSystemParametersStorage",
           "test/compat/terraform_batch5_test.go:103 TestTerraformStorageObjectCustomerKey",
           "test/compat/terraform_batch6_test.go:178 TestTerraformStorageObjectRetention",
-          "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
+          "test/compat/terraformstorage_test.go:106 TestTerraformStorageResources"
         ]
       },
       {
@@ -9527,7 +9547,7 @@
           "test/compat/sysparams1954_test.go:283 TestSystemParametersStorage",
           "test/compat/terraform_batch10_test.go:164 TestTerraformDataSourcesBatch10",
           "test/compat/terraform_batch11_test.go:930 TestTerraformStorageObjectContentsDataSource",
-          "test/compat/terraformstorage_test.go:237 TestTerraformForceDestroyVersionedBucket"
+          "test/compat/terraformstorage_test.go:239 TestTerraformForceDestroyVersionedBucket"
         ],
         "unverified": [
           {
@@ -9563,7 +9583,7 @@
           "test/compat/terraform_batch5_test.go:103 TestTerraformStorageObjectCustomerKey",
           "test/compat/terraform_batch6_test.go:178 TestTerraformStorageObjectRetention",
           "test/compat/terraform_iam_more_test.go:169 TestTerraformStorageACLLists",
-          "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
+          "test/compat/terraformstorage_test.go:106 TestTerraformStorageResources"
         ]
       },
       {
@@ -9624,7 +9644,7 @@
           "test/compat/storagehmac_test.go:33 TestStorageHMACKeyLifecycle",
           "test/compat/storagehmac_test.go:69 TestStorageHMACKeyLimit",
           "test/compat/storagesigned_test.go:62 TestStorageSignedURLV4HMAC",
-          "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
+          "test/compat/terraformstorage_test.go:106 TestTerraformStorageResources"
         ]
       },
       {
@@ -9633,7 +9653,7 @@
         "tests": [
           "test/compat/gcloudstorage_test.go:288 TestGcloudStorageHMAC",
           "test/compat/storagehmac_test.go:33 TestStorageHMACKeyLifecycle",
-          "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
+          "test/compat/terraformstorage_test.go:106 TestTerraformStorageResources"
         ]
       },
       {
@@ -9641,7 +9661,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/storagehmac_test.go:33 TestStorageHMACKeyLifecycle",
-          "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
+          "test/compat/terraformstorage_test.go:106 TestTerraformStorageResources"
         ]
       },
       {
@@ -9658,7 +9678,7 @@
         "tests": [
           "test/compat/gcloudstorage_test.go:288 TestGcloudStorageHMAC",
           "test/compat/storagehmac_test.go:33 TestStorageHMACKeyLifecycle",
-          "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
+          "test/compat/terraformstorage_test.go:106 TestTerraformStorageResources"
         ]
       },
       {
@@ -14360,7 +14380,7 @@
         "method": "serviceusage.services.list",
         "status": "Verified",
         "tests": [
-          "test/compat/loggingparents_test.go:282 TestServiceUsageFolderParentRefused",
+          "test/compat/loggingparents_test.go:290 TestServiceUsageFolderParentRefused",
           "test/compat/serviceusage_test.go:168 TestTerraformProjectService",
           "test/compat/serviceusage_test.go:239 TestGcloudServices",
           "test/compat/serviceusage_test.go:53 TestServiceUsageServices"
@@ -17038,6 +17058,148 @@
     ]
   },
   {
+    "Key": "billing",
+    "Title": "Cloud Billing API and Budget API (v1)",
+    "counts": {
+      "Verified": 18
+    },
+    "rows": [
+      {
+        "method": "google.cloud.billing.budgets.v1.BudgetService/CreateBudget",
+        "status": "Verified",
+        "tests": [
+          "test/compat/billing2109_test.go:318 TestCloudBillingBudgets",
+          "test/compat/billingiam2109_test.go:159 TestIAMEnforcementBilling",
+          "test/compat/billingiam2109_test.go:56 TestBillingBudgetNotifications"
+        ]
+      },
+      {
+        "method": "google.cloud.billing.budgets.v1.BudgetService/DeleteBudget",
+        "status": "Verified",
+        "tests": [
+          "test/compat/billing2109_test.go:318 TestCloudBillingBudgets"
+        ]
+      },
+      {
+        "method": "google.cloud.billing.budgets.v1.BudgetService/GetBudget",
+        "status": "Verified",
+        "tests": [
+          "test/compat/billing2109_test.go:318 TestCloudBillingBudgets"
+        ]
+      },
+      {
+        "method": "google.cloud.billing.budgets.v1.BudgetService/ListBudgets",
+        "status": "Verified",
+        "tests": [
+          "test/compat/billing2109_test.go:318 TestCloudBillingBudgets",
+          "test/compat/billingiam2109_test.go:159 TestIAMEnforcementBilling"
+        ]
+      },
+      {
+        "method": "google.cloud.billing.budgets.v1.BudgetService/UpdateBudget",
+        "status": "Verified",
+        "tests": [
+          "test/compat/billing2109_test.go:318 TestCloudBillingBudgets"
+        ]
+      },
+      {
+        "method": "google.cloud.billing.v1.CloudBilling/CreateBillingAccount",
+        "status": "Verified",
+        "tests": [
+          "test/compat/billing2109_test.go:117 TestCloudBillingAccounts"
+        ]
+      },
+      {
+        "method": "google.cloud.billing.v1.CloudBilling/GetBillingAccount",
+        "status": "Verified",
+        "tests": [
+          "test/compat/billing2109_test.go:117 TestCloudBillingAccounts",
+          "test/compat/billingiam2109_test.go:159 TestIAMEnforcementBilling"
+        ]
+      },
+      {
+        "method": "google.cloud.billing.v1.CloudBilling/GetIamPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/billing2109_test.go:117 TestCloudBillingAccounts"
+        ]
+      },
+      {
+        "method": "google.cloud.billing.v1.CloudBilling/GetProjectBillingInfo",
+        "status": "Verified",
+        "tests": [
+          "test/compat/billing2109_test.go:196 TestCloudBillingLinkProject"
+        ]
+      },
+      {
+        "method": "google.cloud.billing.v1.CloudBilling/ListBillingAccounts",
+        "status": "Verified",
+        "tests": [
+          "test/compat/billing2109_test.go:117 TestCloudBillingAccounts",
+          "test/compat/billingiam2109_test.go:159 TestIAMEnforcementBilling"
+        ]
+      },
+      {
+        "method": "google.cloud.billing.v1.CloudBilling/ListProjectBillingInfo",
+        "status": "Verified",
+        "tests": [
+          "test/compat/billing2109_test.go:196 TestCloudBillingLinkProject"
+        ]
+      },
+      {
+        "method": "google.cloud.billing.v1.CloudBilling/MoveBillingAccount",
+        "status": "Verified",
+        "tests": [
+          "test/compat/billing2109_test.go:117 TestCloudBillingAccounts"
+        ]
+      },
+      {
+        "method": "google.cloud.billing.v1.CloudBilling/SetIamPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/billing2109_test.go:117 TestCloudBillingAccounts"
+        ]
+      },
+      {
+        "method": "google.cloud.billing.v1.CloudBilling/TestIamPermissions",
+        "status": "Verified",
+        "tests": [
+          "test/compat/billing2109_test.go:117 TestCloudBillingAccounts",
+          "test/compat/billingiam2109_test.go:159 TestIAMEnforcementBilling"
+        ]
+      },
+      {
+        "method": "google.cloud.billing.v1.CloudBilling/UpdateBillingAccount",
+        "status": "Verified",
+        "tests": [
+          "test/compat/billing2109_test.go:117 TestCloudBillingAccounts"
+        ]
+      },
+      {
+        "method": "google.cloud.billing.v1.CloudBilling/UpdateProjectBillingInfo",
+        "status": "Verified",
+        "tests": [
+          "test/compat/billing2109_test.go:196 TestCloudBillingLinkProject",
+          "test/compat/billingiam2109_test.go:159 TestIAMEnforcementBilling"
+        ]
+      },
+      {
+        "method": "google.cloud.billing.v1.CloudCatalog/ListServices",
+        "status": "Verified",
+        "tests": [
+          "test/compat/billing2109_test.go:263 TestCloudBillingCatalog"
+        ]
+      },
+      {
+        "method": "google.cloud.billing.v1.CloudCatalog/ListSkus",
+        "status": "Verified",
+        "tests": [
+          "test/compat/billing2109_test.go:263 TestCloudBillingCatalog"
+        ]
+      }
+    ]
+  },
+  {
     "Key": "siteverification",
     "Title": "Site Verification API (v1)",
     "counts": {
@@ -18147,6 +18309,779 @@
     ]
   },
   {
+    "Key": "dataform",
+    "Title": "Dataform (v1)",
+    "counts": {
+      "Implemented": 1,
+      "Verified": 73
+    },
+    "rows": [
+      {
+        "method": "google.cloud.dataform.v1.Dataform/CancelWorkflowInvocation",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataformkeys_test.go:39 TestDataformLongRunningCompileAndCancel"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/CommitRepositoryChanges",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:118 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/CommitWorkspaceChanges",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:118 TestDataformWorkspaceFilesAndGit",
+          "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke",
+          "test/compat/dataform_test.go:660 TestDataformSecureSourceManagerRemote"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/ComputeRepositoryAccessTokenStatus",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:660 TestDataformSecureSourceManagerRemote"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/CreateCompilationResult",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/CreateCompilationResultLongRunning",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataformkeys_test.go:39 TestDataformLongRunningCompileAndCancel"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/CreateFolder",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:770 TestDataformFoldersAndConfig"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/CreateReleaseConfig",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/CreateRepository",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_terraform_test.go:22 TestTerraformDataformRepository",
+          "test/compat/dataform_test.go:118 TestDataformWorkspaceFilesAndGit",
+          "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke",
+          "test/compat/dataform_test.go:660 TestDataformSecureSourceManagerRemote"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/CreateTeamFolder",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:770 TestDataformFoldersAndConfig"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/CreateWorkflowConfig",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/CreateWorkflowInvocation",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/CreateWorkspace",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:118 TestDataformWorkspaceFilesAndGit",
+          "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke",
+          "test/compat/dataform_test.go:660 TestDataformSecureSourceManagerRemote"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/DeleteFolder",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:770 TestDataformFoldersAndConfig"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/DeleteFolderTree",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:770 TestDataformFoldersAndConfig"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/DeleteReleaseConfig",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/DeleteRepository",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_terraform_test.go:22 TestTerraformDataformRepository",
+          "test/compat/dataform_test.go:118 TestDataformWorkspaceFilesAndGit",
+          "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke",
+          "test/compat/dataform_test.go:660 TestDataformSecureSourceManagerRemote"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/DeleteTeamFolder",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:770 TestDataformFoldersAndConfig"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/DeleteTeamFolderTree",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:770 TestDataformFoldersAndConfig"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/DeleteWorkflowConfig",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/DeleteWorkflowInvocation",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/DeleteWorkspace",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:118 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/FetchFileDiff",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:118 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/FetchFileGitStatuses",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:118 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/FetchGitAheadBehind",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:118 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/FetchRemoteBranches",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:660 TestDataformSecureSourceManagerRemote"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/FetchRepositoryHistory",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:118 TestDataformWorkspaceFilesAndGit",
+          "test/compat/dataform_test.go:660 TestDataformSecureSourceManagerRemote"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/GetCompilationResult",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/GetConfig",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:770 TestDataformFoldersAndConfig",
+          "test/compat/dataformkeys_test.go:147 TestDataformCustomerManagedKey"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/GetFolder",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:770 TestDataformFoldersAndConfig"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/GetIamPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:118 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/GetReleaseConfig",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/GetRepository",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_terraform_test.go:22 TestTerraformDataformRepository",
+          "test/compat/dataform_test.go:118 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/GetTeamFolder",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:770 TestDataformFoldersAndConfig"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/GetWorkflowConfig",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/GetWorkflowInvocation",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/GetWorkspace",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:118 TestDataformWorkspaceFilesAndGit",
+          "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/InstallNpmPackages",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/ListCompilationResults",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/ListReleaseConfigs",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/ListRepositories",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:118 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/ListWorkflowConfigs",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/ListWorkflowInvocations",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/ListWorkspaces",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:118 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/MakeDirectory",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:118 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/MoveDirectory",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:118 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/MoveFile",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:118 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/MoveFolder",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:770 TestDataformFoldersAndConfig"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/MoveRepository",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:770 TestDataformFoldersAndConfig"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/PullGitCommits",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:118 TestDataformWorkspaceFilesAndGit",
+          "test/compat/dataform_test.go:660 TestDataformSecureSourceManagerRemote"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/PushGitCommits",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:118 TestDataformWorkspaceFilesAndGit",
+          "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke",
+          "test/compat/dataform_test.go:660 TestDataformSecureSourceManagerRemote"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/QueryCompilationResultActions",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/QueryDirectoryContents",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:118 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/QueryFolderContents",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:770 TestDataformFoldersAndConfig"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/QueryRepositoryDirectoryContents",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:118 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/QueryTeamFolderContents",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:770 TestDataformFoldersAndConfig"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/QueryUserRootContents",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:770 TestDataformFoldersAndConfig"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/QueryWorkflowInvocationActions",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/ReadFile",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:118 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/ReadRepositoryFile",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:118 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/RemoveDirectory",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:118 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/RemoveFile",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:118 TestDataformWorkspaceFilesAndGit",
+          "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/ResetWorkspaceChanges",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:118 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/SearchFiles",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:118 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/SearchTeamFolders",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:770 TestDataformFoldersAndConfig"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/SetIamPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:118 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/TestIamPermissions",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:118 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/UpdateConfig",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:770 TestDataformFoldersAndConfig",
+          "test/compat/dataformkeys_test.go:147 TestDataformCustomerManagedKey"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/UpdateFolder",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:770 TestDataformFoldersAndConfig"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/UpdateReleaseConfig",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/UpdateRepository",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_terraform_test.go:22 TestTerraformDataformRepository",
+          "test/compat/dataform_test.go:118 TestDataformWorkspaceFilesAndGit"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/UpdateTeamFolder",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:770 TestDataformFoldersAndConfig"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/UpdateWorkflowConfig",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke"
+        ]
+      },
+      {
+        "method": "google.cloud.dataform.v1.Dataform/WriteFile",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_test.go:118 TestDataformWorkspaceFilesAndGit",
+          "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke"
+        ]
+      }
+    ]
+  },
+  {
+    "Key": "apphub",
+    "Title": "App Hub (v1)",
+    "counts": {
+      "Verified": 31
+    },
+    "rows": [
+      {
+        "method": "google.cloud.apphub.v1.AppHub/CreateApplication",
+        "status": "Verified",
+        "tests": [
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.apphub.v1.AppHub/CreateService",
+        "status": "Verified",
+        "tests": [
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.apphub.v1.AppHub/CreateServiceProjectAttachment",
+        "status": "Verified",
+        "tests": [
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.apphub.v1.AppHub/CreateWorkload",
+        "status": "Verified",
+        "tests": [
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.apphub.v1.AppHub/DeleteApplication",
+        "status": "Verified",
+        "tests": [
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.apphub.v1.AppHub/DeleteService",
+        "status": "Verified",
+        "tests": [
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.apphub.v1.AppHub/DeleteServiceProjectAttachment",
+        "status": "Verified",
+        "tests": [
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.apphub.v1.AppHub/DeleteWorkload",
+        "status": "Verified",
+        "tests": [
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.apphub.v1.AppHub/DetachServiceProjectAttachment",
+        "status": "Verified",
+        "tests": [
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.apphub.v1.AppHub/GetApplication",
+        "status": "Verified",
+        "tests": [
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.apphub.v1.AppHub/GetBoundary",
+        "status": "Verified",
+        "tests": [
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.apphub.v1.AppHub/GetDiscoveredService",
+        "status": "Verified",
+        "tests": [
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.apphub.v1.AppHub/GetDiscoveredWorkload",
+        "status": "Verified",
+        "tests": [
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.apphub.v1.AppHub/GetExtendedMetadataSchema",
+        "status": "Verified",
+        "tests": [
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.apphub.v1.AppHub/GetService",
+        "status": "Verified",
+        "tests": [
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.apphub.v1.AppHub/GetServiceProjectAttachment",
+        "status": "Verified",
+        "tests": [
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.apphub.v1.AppHub/GetWorkload",
+        "status": "Verified",
+        "tests": [
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.apphub.v1.AppHub/ListApplications",
+        "status": "Verified",
+        "tests": [
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.apphub.v1.AppHub/ListDiscoveredServices",
+        "status": "Verified",
+        "tests": [
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.apphub.v1.AppHub/ListDiscoveredWorkloads",
+        "status": "Verified",
+        "tests": [
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.apphub.v1.AppHub/ListExtendedMetadataSchemas",
+        "status": "Verified",
+        "tests": [
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.apphub.v1.AppHub/ListServiceProjectAttachments",
+        "status": "Verified",
+        "tests": [
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.apphub.v1.AppHub/ListServices",
+        "status": "Verified",
+        "tests": [
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.apphub.v1.AppHub/ListWorkloads",
+        "status": "Verified",
+        "tests": [
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.apphub.v1.AppHub/LookupDiscoveredService",
+        "status": "Verified",
+        "tests": [
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.apphub.v1.AppHub/LookupDiscoveredWorkload",
+        "status": "Verified",
+        "tests": [
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.apphub.v1.AppHub/LookupServiceProjectAttachment",
+        "status": "Verified",
+        "tests": [
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.apphub.v1.AppHub/UpdateApplication",
+        "status": "Verified",
+        "tests": [
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.apphub.v1.AppHub/UpdateBoundary",
+        "status": "Verified",
+        "tests": [
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.apphub.v1.AppHub/UpdateService",
+        "status": "Verified",
+        "tests": [
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.apphub.v1.AppHub/UpdateWorkload",
+        "status": "Verified",
+        "tests": [
+          "test/compat/apphub_test.go:98 TestAppHubLifecycle"
+        ]
+      }
+    ]
+  },
+  {
     "Key": "workflows",
     "Title": "Workflows and Workflow Executions (v1)",
     "counts": {
@@ -18260,9 +19195,8 @@
     "Key": "gke",
     "Title": "Kubernetes Engine API (v1)",
     "counts": {
-      "Implemented": 2,
-      "Unimplemented": 16,
-      "Verified": 19
+      "Implemented": 1,
+      "Verified": 36
     },
     "rows": [
       {
@@ -18275,18 +19209,27 @@
       },
       {
         "method": "google.container.v1.ClusterManager/CheckAutopilotCompatibility",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkesettings_test.go:331 TestGcloudContainerClusterSettings",
+          "test/compat/gkesettings_test.go:57 TestGKEClusterSettings"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/CompleteControlPlaneUpgrade",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkemethods_test.go:272 TestGKERollbackSafeUpgrade",
+          "test/compat/gkemethods_test.go:393 TestGcloudContainerRotationLocationsAndUpgradeInfo"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/CompleteIPRotation",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkemethods_test.go:393 TestGcloudContainerRotationLocationsAndUpgradeInfo",
+          "test/compat/gkemethods_test.go:94 TestGKERotationLocationsAndUpgradeInfo"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/CompleteNodePoolUpgrade",
@@ -18329,13 +19272,19 @@
       },
       {
         "method": "google.container.v1.ClusterManager/FetchClusterUpgradeInfo",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkemethods_test.go:393 TestGcloudContainerRotationLocationsAndUpgradeInfo",
+          "test/compat/gkemethods_test.go:94 TestGKERotationLocationsAndUpgradeInfo"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/FetchNodePoolUpgradeInfo",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkemethods_test.go:393 TestGcloudContainerRotationLocationsAndUpgradeInfo",
+          "test/compat/gkemethods_test.go:94 TestGKERotationLocationsAndUpgradeInfo"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/GetCluster",
@@ -18348,8 +19297,10 @@
       },
       {
         "method": "google.container.v1.ClusterManager/GetJSONWebKeys",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkesettings_test.go:57 TestGKEClusterSettings"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/GetNodePool",
@@ -18400,8 +19351,11 @@
       },
       {
         "method": "google.container.v1.ClusterManager/ListUsableSubnetworks",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkesettings_test.go:331 TestGcloudContainerClusterSettings",
+          "test/compat/gkesettings_test.go:57 TestGKEClusterSettings"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/RollbackNodePoolUpgrade",
@@ -18412,8 +19366,10 @@
       },
       {
         "method": "google.container.v1.ClusterManager/SetAddonsConfig",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkesettings_test.go:57 TestGKEClusterSettings"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/SetLabels",
@@ -18425,18 +19381,27 @@
       },
       {
         "method": "google.container.v1.ClusterManager/SetLegacyAbac",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkesettings_test.go:331 TestGcloudContainerClusterSettings",
+          "test/compat/gkesettings_test.go:57 TestGKEClusterSettings"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/SetLocations",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkemethods_test.go:393 TestGcloudContainerRotationLocationsAndUpgradeInfo",
+          "test/compat/gkemethods_test.go:94 TestGKERotationLocationsAndUpgradeInfo"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/SetLoggingService",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gketelemetry_test.go:257 TestGcloudContainerClusterLoggingAndMonitoring",
+          "test/compat/gketelemetry_test.go:95 TestGKELoggingAndMonitoring"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/SetMaintenancePolicy",
@@ -18448,28 +19413,41 @@
       },
       {
         "method": "google.container.v1.ClusterManager/SetMasterAuth",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkesettings_test.go:57 TestGKEClusterSettings"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/SetMonitoringService",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gketelemetry_test.go:257 TestGcloudContainerClusterLoggingAndMonitoring",
+          "test/compat/gketelemetry_test.go:95 TestGKELoggingAndMonitoring"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/SetNetworkPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkesettings_test.go:331 TestGcloudContainerClusterSettings",
+          "test/compat/gkesettings_test.go:57 TestGKEClusterSettings"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/SetNodePoolAutoscaling",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkesettings_test.go:57 TestGKEClusterSettings"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/SetNodePoolManagement",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkesettings_test.go:331 TestGcloudContainerClusterSettings",
+          "test/compat/gkesettings_test.go:57 TestGKEClusterSettings"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/SetNodePoolSize",
@@ -18481,8 +19459,11 @@
       },
       {
         "method": "google.container.v1.ClusterManager/StartIPRotation",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkemethods_test.go:393 TestGcloudContainerRotationLocationsAndUpgradeInfo",
+          "test/compat/gkemethods_test.go:94 TestGKERotationLocationsAndUpgradeInfo"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/UpdateCluster",

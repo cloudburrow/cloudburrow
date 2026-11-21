@@ -70,15 +70,19 @@ import (
 
 	_ "cloud.google.com/go/aiplatform/apiv1/aiplatformpb"
 	_ "cloud.google.com/go/aiplatform/apiv1beta1/aiplatformpb"
+	_ "cloud.google.com/go/apphub/apiv1/apphubpb"
 	_ "cloud.google.com/go/artifactregistry/apiv1/artifactregistrypb"
 	_ "cloud.google.com/go/bigquery/analyticshub/apiv1/analyticshubpb"
 	_ "cloud.google.com/go/bigquery/datatransfer/apiv1/datatransferpb"
 	_ "cloud.google.com/go/bigtable/admin/apiv2/adminpb"
 	_ "cloud.google.com/go/bigtable/apiv2/bigtablepb"
+	_ "cloud.google.com/go/billing/apiv1/billingpb"
+	_ "cloud.google.com/go/billing/budgets/apiv1/budgetspb"
 	_ "cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
 	_ "cloud.google.com/go/cloudquotas/apiv1/cloudquotaspb"
 	_ "cloud.google.com/go/cloudtasks/apiv2/cloudtaskspb"
 	_ "cloud.google.com/go/container/apiv1/containerpb"
+	_ "cloud.google.com/go/dataform/apiv1/dataformpb"
 	_ "cloud.google.com/go/datastore/admin/apiv1/adminpb"
 	_ "cloud.google.com/go/datastore/apiv1/datastorepb"
 	_ "cloud.google.com/go/developerconnect/apiv1/developerconnectpb"
@@ -307,6 +311,10 @@ var areas = []area{
 	// Resource Manager's port.
 	{Key: "cloudquotas", Title: "Cloud Quotas API (v1)", Own: true, Services: []string{"google.api.cloudquotas.v1.CloudQuotas",
 		"google.api.cloudquotas.v1.QuotaAdjusterSettingsManager"}},
+	// Cloud Billing and the Budget API (#2109): CloudBurrow's own, gRPC and
+	// JSON on Resource Manager's port.
+	{Key: "billing", Title: "Cloud Billing API and Budget API (v1)", Own: true, Services: []string{"google.cloud.billing.v1.CloudBilling",
+		"google.cloud.billing.v1.CloudCatalog", "google.cloud.billing.budgets.v1.BudgetService"}},
 	// The Site Verification API (#2030): CloudBurrow's own, JSON only, on
 	// Resource Manager's port. Its methods are the official generated
 	// client's (google.golang.org/api/siteverification/v1).
@@ -326,6 +334,12 @@ var areas = []area{
 	// Parameter Manager (#2054): CloudBurrow's own, gRPC and JSON on one
 	// port; its Locations mixin is another area's row.
 	{Key: "parametermanager", Title: "Parameter Manager (v1)", Own: true, Services: []string{"google.cloud.parametermanager.v1.ParameterManager"}},
+	// Dataform (#2105): CloudBurrow's own, gRPC and JSON on one port;
+	// Dataform core compiles, BigQuery runs the invocations.
+	{Key: "dataform", Title: "Dataform (v1)", Own: true, Services: []string{"google.cloud.dataform.v1.Dataform"}},
+	// App Hub (#2110): CloudBurrow's own, gRPC and JSON on one port; its
+	// Locations, Operations and IAM mixins are other areas' rows.
+	{Key: "apphub", Title: "App Hub (v1)", Own: true, Services: []string{"google.cloud.apphub.v1.AppHub"}},
 	{Key: "workflows", Title: "Workflows and Workflow Executions (v1)", Own: true,
 		Services: []string{"google.cloud.workflows.v1.Workflows", "google.cloud.workflows.executions.v1.Executions"}},
 	// The Kubernetes Engine API (#1913): CloudBurrow's own, gRPC and JSON

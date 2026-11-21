@@ -280,6 +280,42 @@ Run, Cloud Scheduler and Resource Manager), and any other enabled service, Cloud
 them, is named in a warning. The file is removed however the run ends, Ctrl-C included, and a file of either name
 that `cloudburrow terraform` did not write is never replaced.
 
+**Terraform under IAM enforcement.** The provider block's `access_token = "owner"` is not a token
+the instance minted, so on an instance started with `--iam-enforcement=on` every served API would
+refuse it 401 `UNAUTHENTICATED`, as Google refuses a token it did not issue. There
+`cloudburrow terraform` signs the provider in as a principal instead, taking the credentials in
+the provider's own order of precedence:
+
+1. `GOOGLE_OAUTH_ACCESS_TOKEN`: an access token this instance minted (IAM Credentials
+   `generateAccessToken`, the metadata server, `gcloud auth print-access-token` with the
+   `gcloud-setup` configuration), written as `access_token`.
+2. `GOOGLE_CREDENTIALS`, `GOOGLE_CLOUD_KEYFILE_JSON`, `GCLOUD_KEYFILE_JSON`, then
+   `GOOGLE_APPLICATION_CREDENTIALS`: a service account key file (a path, or the JSON itself,
+   which is written to a file in the instance's state directory for the run and removed after),
+   written as `credentials`. The provider signs a JWT with the key and exchanges it at the file's
+   `token_uri` (the JWT-bearer grant; in the default universe it asks for no self-signed JWT), so
+   the account is the key's, and its roles apply.
+3. None of them: the instance's credentials fixture, the account `env` exports, which is the
+   project owner, as without enforcement.
+
+```sh
+gcloud iam service-accounts keys create key.json --iam-account=deployer@PROJECT.iam.gserviceaccount.com
+GOOGLE_CREDENTIALS=$PWD/key.json cloudburrow terraform -- apply -auto-approve
+```
+
+A call the account has no role for fails as on Google, `Error 403` naming the permission. So that
+the provider never signs in at Google, the wrapper refuses to run with a key file whose `token_uri`
+is not this instance's token endpoint (every key `keys create` makes here names it), an
+`authorized_user` file (its refresh goes to `oauth2.googleapis.com`), an `external_account` or
+`impersonated_service_account` file, and `impersonate_service_account` or
+`GOOGLE_IMPERSONATE_SERVICE_ACCOUNT`: the provider mints an impersonated token at
+`iamcredentials.googleapis.com`, at a URL no endpoint argument moves. Sign in with that account's
+key or token instead. The module's own `credentials` or `access_token`, when it declares
+`provider "google"`, is replaced by the override, as without enforcement. Firestore and Datastore
+take the minted token too: their fronts check it, then pass the emulator `owner`.
+`TestIAMEnforcementTerraform` (iam shard) applies a secret as the fixture's account, then as a
+service account's key, refused 403 before its role and applied after.
+
 **Hard-coded Google hosts: `--intercept-hardcoded` (opt-in, #1578).** When a plan's
 `google_bigquery_table` schema drops a column, `hashicorp/google` (8.4.0 to 8.12.0 and its main
 branch) lists the table's row access policies at a literal
@@ -352,7 +388,7 @@ eval "$(cloudburrow gcloud-teardown)"  # unset CLOUDSDK_ACTIVE_CONFIG_NAME
 gcloud's configuration directory (`CLOUDSDK_CONFIG`, or `~/.config/gcloud`). It sets
 `core/project`, turns on `auth/disable_credentials` and names the ADC fixture. It writes
 `api_endpoint_overrides` **only** for the services whose gcloud use is Verified below.
-Overrides written: `storage`, `pubsub`, `cloudkms`, `kmsinventory`, `secretmanager`, `cloudtasks`, `cloudscheduler`, `logging`, `observability`, `run`, `artifactregistry`, `cloudbuild`, `cloudfunctions`, `securesourcemanager`, `cloudresourcemanager`, `iam`, `cloudidentity`, `policytroubleshooter`, `orgpolicy`, `cloudquotas`, `serviceusage`, `parametermanager`, `apikeys`, `transfer`, `storagebatchoperations`, `storageinsights`, `sql`, `redis`, `memorystore`, `bigtableadmin`, `spanner`, `firestore`, `datastore`, `developerconnect`, `eventarc`, `eventarcpublishing`, `containeranalysis`, `privateca`, `container`, `monitoring`, `compute`, `backupdr`, `workflows`, `workflowexecutions` and `aiplatform` (`kmsinventory` since #2053, the Cloud KMS Inventory API at the Cloud KMS port, with `kms`, driven by `TestGcloudKMSInventory`; `workflows` and `workflowexecutions`, Workflows and Workflow Executions on one port, with `workflows`, #1986; `compute`, the Compute Engine API's VPC networking at `/compute/v1/` on its port, with `compute`, #1936; `container`, the Kubernetes Engine API, with `gke`, #1913; `privateca`, Certificate Authority Service, with `privateca`, #1834; `monitoring`, Cloud Monitoring, with `monitoring`, #1964; `backupdr`, the Backup and DR Service, with `backupdr` and a Cloud SQL service, #1433)
+Overrides written: `storage`, `pubsub`, `cloudkms`, `kmsinventory`, `secretmanager`, `cloudtasks`, `cloudscheduler`, `logging`, `observability`, `run`, `artifactregistry`, `cloudbuild`, `cloudfunctions`, `securesourcemanager`, `cloudresourcemanager`, `iam`, `cloudidentity`, `policytroubleshooter`, `orgpolicy`, `cloudquotas`, `cloudbilling`, `serviceusage`, `parametermanager`, `apphub`, `apikeys`, `transfer`, `storagebatchoperations`, `storageinsights`, `sql`, `redis`, `memorystore`, `bigtableadmin`, `spanner`, `firestore`, `datastore`, `developerconnect`, `eventarc`, `eventarcpublishing`, `containeranalysis`, `privateca`, `container`, `monitoring`, `compute`, `backupdr`, `workflows`, `workflowexecutions` and `aiplatform` (`kmsinventory` since #2053, the Cloud KMS Inventory API at the Cloud KMS port, with `kms`, driven by `TestGcloudKMSInventory`; `workflows` and `workflowexecutions`, Workflows and Workflow Executions on one port, with `workflows`, #1986; `compute`, the Compute Engine API's VPC networking at `/compute/v1/` on its port, with `compute`, #1936; `container`, the Kubernetes Engine API, with `gke`, #1913; `privateca`, Certificate Authority Service, with `privateca`, #1834; `monitoring`, Cloud Monitoring, with `monitoring`, #1964; `backupdr`, the Backup and DR Service, with `backupdr` and a Cloud SQL service, #1433)
 (written whatever `--services` selects, since Resource Manager and Service Usage are always served; `sql` with either Cloud SQL service; `redis`, the Memorystore admin API, and `memorystore`, its Memorystore for Valkey JSON under `/memorystore/` (#1519), with `memorystore`; `bigtableadmin`, Bigtable's admin REST API on the Bigtable port, with `bigtable`, #1440; `spanner`, Spanner's admin REST port, with `spanner`, and `firestore`, the Firestore Admin API on the Firestore port, with `firestore`, #1461). `run` (#1293) is
 `http://run.localhost:<port>/` on a loopback bind: gcloud run calls `{region}-{host}` for a
 command given `--region`, and `us-central1-run.localhost` is still loopback. `cloudresourcemanager`

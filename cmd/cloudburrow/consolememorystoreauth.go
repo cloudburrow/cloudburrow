@@ -168,6 +168,7 @@ func (p redisClusterProvider) DetailActions(ctx context.Context, project string,
 		return nil
 	}
 	acts := append(memorystoreAuthActions(c.GetAuthorizationMode() == clusterpb.AuthorizationMode_AUTH_MODE_TOKEN_AUTH, true), redisClusterMaintenance(c).actions()...)
+	acts = append(acts, clusterPersistenceView(c).action())
 	if c.GetServerCaMode() == clusterpb.ServerCaMode_SERVER_CA_MODE_CUSTOMER_MANAGED_CAS_CA {
 		// On-demand rotation, customer-managed CAs only (#1918), as gcloud
 		// redis clusters update --rotate-server-certificate.
@@ -193,6 +194,10 @@ func (p redisClusterProvider) ActAt(ctx context.Context, project string, path []
 	}
 	user := name + "/tokenAuthUsers/" + strings.TrimSpace(values["user"])
 	backup := c.GetBackupCollection() + "/backups/" + strings.TrimSpace(values["backup"])
+	if ok, err := clusterPersistenceAct(ctx, api, srv, name, action, values); ok {
+		// Persistence (#2099).
+		return err
+	}
 	if ok, err := clusterMaintenanceAct(ctx, api, srv, name, action, values); ok {
 		// Maintenance (#1524).
 		return err
@@ -320,6 +325,7 @@ func (p valkeyProvider) DetailActions(ctx context.Context, project string, path 
 	}
 	acts := append(memorystoreAuthActions(i.GetAuthorizationMode() == memorystorepb.Instance_TOKEN_AUTH, false), valkeyReplicationActions(i)...)
 	acts = append(acts, valkeyMaintenance(i).actions()...)
+	acts = append(acts, valkeyPersistenceView(i).action())
 	if i.GetServerCaMode() == memorystorepb.Instance_SERVER_CA_MODE_CUSTOMER_MANAGED_CAS_CA {
 		// On-demand rotation, customer-managed CAs only (#1918), as gcloud
 		// memorystore instances update --rotate-server-certificate.
@@ -346,6 +352,10 @@ func (p valkeyProvider) ActAt(ctx context.Context, project string, path []string
 	user := name + "/tokenAuthUsers/" + strings.TrimSpace(values["user"])
 	backup := i.GetBackupCollection() + "/backups/" + strings.TrimSpace(values["backup"])
 	var op interface{ GetName() string }
+	if ok, err := valkeyPersistenceAct(ctx, api, srv, name, action, values); ok {
+		// Persistence (#2099).
+		return err
+	}
 	if ok, err := valkeyMaintenanceAct(ctx, api, srv, name, action, values); ok {
 		// Maintenance (#1524).
 		return err

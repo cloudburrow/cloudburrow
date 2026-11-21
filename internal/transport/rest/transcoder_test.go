@@ -352,7 +352,7 @@ func TestQueryBinding(t *testing.T) {
 		{"GET", jobs + "?pageSize=1&pageSize=2", 400, "INVALID_ARGUMENT", "repeated"},
 		{"GET", jobs + "?pageSize=1&page_size=2", 400, "INVALID_ARGUMENT", "repeated"},
 		{"GET", jobs + "?pageSize=two&zzz=1", 400, "INVALID_ARGUMENT", "zzz"}, // names are checked first
-		{"PATCH", jobs + "/j?updateMask=retry_config", 400, "INVALID_ARGUMENT", "updateMask"},
+		{"PATCH", jobs + "/j?updateMask=Retry-Config", 400, "INVALID_ARGUMENT", "updateMask"},
 		{"GET", jobs + "?fields=bogus", 400, "INVALID_ARGUMENT", "Invalid field selection bogus"},
 		{"GET", jobs + "?$fields=jobs(nope)", 400, "INVALID_ARGUMENT", "Invalid field selection jobs/nope"},
 		{"GET", jobs + "?fields=jobs(name", 400, "INVALID_ARGUMENT", "Invalid field selection jobs(name"},
@@ -542,5 +542,23 @@ func TestSystemParameters(t *testing.T) {
 	code, _, body = get(jobs+"/absent?$.xgafv=2", nil)
 	if code != 404 || strings.Contains(body, `"errors"`) {
 		t.Errorf("$.xgafv=2 = %d %s", code, body)
+	}
+}
+
+// A FieldMask query parameter may name proto (snake_case) paths, as gcloud
+// logging buckets update sends updateMask=retention_days (#2108).
+func TestMixedFieldMask(t *testing.T) {
+	for v, want := range map[string]string{
+		"retention_days":              "retention_days",
+		"retentionDays,description":   "retention_days,description",
+		"index_configs,retentionDays": "index_configs,retention_days",
+	} {
+		got, ok := mixedFieldMask(v)
+		if !ok || strings.Join(got, ",") != want {
+			t.Errorf("mixedFieldMask(%q) = %v, %v; want %s", v, got, ok, want)
+		}
+	}
+	if _, ok := mixedFieldMask("Bad-Path"); ok {
+		t.Error("a path in neither form was taken")
 	}
 }

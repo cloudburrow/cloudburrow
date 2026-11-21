@@ -176,8 +176,14 @@ COMPAT_SHARDS="storage served run crossservice scale emulators memorystore sql s
 # Batch Operations' rewrite to a Cloud KMS key, Cloud Storage's Data Access
 # audit logs (Cloud Logging), Pub/Sub's BigQuery subscriptions and gcloud's
 # message storage policy (Pub/Sub with BigQuery and Service Usage), and
-# BigQuery and Firestore refused while disabled (Service Usage).
+# BigQuery and Firestore refused while disabled (Service Usage); Cloud
+# KMS Inventory's protected resources (#2053: a CMEK bucket and a BigQuery
+# dataset beside the key, through the client and gcloud), and Firestore's
+# and Cloud Tasks' metrics in Cloud Monitoring (#2050, Firestore or Cloud
+# Tasks with Monitoring), which no other shard serves together.
 COMPAT_CROSSSERVICE_TEST_NAMES="ArtifactRegistryCleanupPolicies
+  FirestoreDocumentMetrics FirestoreStreamMetrics GcloudKMSInventory
+  KMSInventoryCountsCMEKResources TasksQueueMetricsInCloudMonitoring
   GcloudPubSubTopicStoragePolicyUpdate GcloudStorageInsightsDatasetConfigs
   PubSubBigQuerySubscriptionPermissionDenied ServiceDisabledBigQuery
   ServiceDisabledFirestore StorageBatchOperationsRewriteToKMSKey
@@ -200,7 +206,9 @@ COMPAT_SQL_REPLICA_TESTS='^Test[A-Za-z]*SQL[A-Za-z0-9]*(HighAvailability|Replica
 # deliver to a Cloud Run service, and Document AI's and Speech-to-Text's
 # (TestDocumentAI*, TestSpeech*, #1930), served by the local AI
 # endpoint Cloud Run starts, and Workflows' (TestWorkflows*, #1986), whose
-# instance is the run shard's; the BigQuery,
+# instance is the run shard's, and Dataform's (TestDataform*, #2105), whose
+# invocations run on its BigQuery, and App Hub's (TestAppHub*, #2110), served
+# only by the run shard's instance; the BigQuery,
 # Firestore, Datastore (#854) and Spanner screens and the Bigtable screen's
 # actions (#1198) only by the emulators shard's; the Memorystore screens
 # only by the memorystore shard's (#1568); and the Cloud SQL screens, MySQL
@@ -237,7 +245,7 @@ COMPAT_SQL_REPLICA_TESTS='^Test[A-Za-z]*SQL[A-Za-z0-9]*(HighAvailability|Replica
 COMPAT_BROWSER_SHARDS="storage served run emulators memorystore sql localai"
 COMPAT_BROWSER_SERVED_SHARD_TESTS='^Test(GKEServed|KubernetesEnginePages|VPCNetwork|ComputeEngine)'
 COMPAT_BROWSER_SERVED_ONLY_TESTS='^Test(GKEServed|VPCNetwork|ComputeEngine)'
-COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|LoggingAdmin|SecretManager|Eventarc|DocumentAI|Speech|Workflows|ModelRegistry)'
+COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|LoggingAdmin|SecretManager|Eventarc|DocumentAI|Speech|Workflows|ModelRegistry|Dataform|AppHub)'
 COMPAT_BROWSER_EMULATORS_SHARD_TESTS='^Test(BigQuery|Firestore|Datastore|Bigtable|Spanner)'
 COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS='^TestMemorystore'
 COMPAT_BROWSER_SQL_SHARD_TESTS='^Test(CloudSQL|BackupDR|PrivateCAKMS)'
@@ -246,8 +254,11 @@ COMPAT_BROWSER_SQL_SHARD_TESTS='^Test(CloudSQL|BackupDR|PrivateCAKMS)'
 # document_ocr (#1733) need a -tags onnx build started with
 # -local-ai-embeddings (without it the console has no ai-embed screen and
 # the test skips) and EmbeddingGemma 2, which the compat suite's image and
-# audio tests download and load first: the localai shard's (#1985).
-COMPAT_BROWSER_LOCALAI_SHARD_TESTS='^Test(StudioManagesLocalModelsAndTestsEmbeddings|EmbeddingsPageEmbedsAnImage|EmbeddingsPageEmbedsAudioAndCloudStorage|EmbeddingsPageReadsAScannedPDFWithOCR)$'
+# audio tests download and load first: the localai shard's (#1985). So does
+# Speech-to-Text's workspace and playback (#2084), whose transcription needs
+# the local models (CLOUDBURROW_TEST_LOCALAI): its TestSpeech name matches
+# the run shard's pattern, which skips the localai shard's tests.
+COMPAT_BROWSER_LOCALAI_SHARD_TESTS='^Test(StudioManagesLocalModelsAndTestsEmbeddings|EmbeddingsPageEmbedsAnImage|EmbeddingsPageEmbedsAudioAndCloudStorage|EmbeddingsPageReadsAScannedPDFWithOCR|SpeechWorkspaceAndPlaybackThroughThePage)$'
 # Browser tests no shard runs: Functions' Edit, Download and Permissions builds a function from source with
 # Google's builder, as the compat suite's Functions tests do, so it runs only
 # when asked for (CLOUDBURROW_TEST_FUNCTIONS) on amd64 nodes.
@@ -312,10 +323,12 @@ compat_shard() {
       # one instance, so its tests run here.
       # Cloud Logging as TASKS_LOGGING (#1256): only the Cloud Tasks
       # dispatch log test reads it, so the Logging tests run in served.
+      # And as STORAGE_LOGGING for TestTerraformLoggingBillingAccount
+      # (#2109), which needs OpenTofu and Resource Manager beside it.
       # Service Usage (#1352), always served, with the Terraform and gcloud
       # tests that need Cloud Storage beside it; and the API Keys API
       # (#1915), always served too.
-      TEST_VARS+=,STORAGE,CORS_ORIGIN,PUBSUB,TASKS,SECRETS,SCHEDULER,TOFU,RESOURCEMANAGER,SERVICEUSAGE,APIKEYS,STORAGE_BATCH,STORAGE_INSIGHTS,STORAGE_TRANSFER,TASKS_LOGGING,PUBSUB_MONITORING,CMEK_KMS,PARAMETERMANAGER
+      TEST_VARS+=,STORAGE,CORS_ORIGIN,PUBSUB,TASKS,SECRETS,SCHEDULER,TOFU,RESOURCEMANAGER,SERVICEUSAGE,APIKEYS,STORAGE_BATCH,STORAGE_INSIGHTS,STORAGE_TRANSFER,TASKS_LOGGING,STORAGE_LOGGING,PUBSUB_MONITORING,CMEK_KMS,PARAMETERMANAGER
       # The restart probes' fixtures, left just before stop so no
       # suite-level reset wipes them: Secret Manager (#483), a secret and a
       # version; Cloud Tasks and Cloud Scheduler (#596), a paused queue with
@@ -370,7 +383,12 @@ compat_shard() {
       # direct events (#1997). Cloud Monitoring, as the browser step's
       # MONITORING only, for Cloud Run's request, latency and instance
       # metrics on a service's and a function's Metrics tab (#2049).
-      SERVICES=run,secretmanager,tasks,storage,pubsub,firestore,datastore,gke,memorystore,kms,scheduler,logging,bigquery,cloudsql,cloudsql-mysql,workflows,monitoring
+      # Dataform (#2105): its invocations run on this shard's BigQuery, its
+      # git remotes are Secure Source Manager's (Cloud Run's) and their
+      # access tokens Secret Manager's.
+      # App Hub (#2110), which discovers this shard's Cloud Run services
+      # and jobs.
+      SERVICES=run,secretmanager,tasks,storage,pubsub,firestore,datastore,gke,memorystore,kms,scheduler,logging,bigquery,cloudsql,cloudsql-mysql,workflows,monitoring,dataform,apphub
       # Cloud Run (#336). For the revisions that reach Storage and Pub/Sub
       # with no client options (#576) and call KMS, Scheduler and Logging
       # (#681), the RUN_* names, so those suites do not run a second time
@@ -407,12 +425,12 @@ compat_shard() {
       # without a model, for the Document AI and Speech-to-Text
       # customer-managed key tests (with RUN_KMS); LOCALAI, which the
       # generation tests read, is not exported, so they still skip.
-      TEST_VARS+=,RUN,SECRETS,TASKS,RUN_STORAGE,RUN_PUBSUB,RUN_FIRESTORE,RUN_DATASTORE,RUN_GKE,RUN_MEMORYSTORE_ADMIN,RUN_KMS,RUN_LOCALAI,RUN_SCHEDULER,RUN_LOGGING,RUN_BIGQUERY,RUN_SQLADMIN,RUN_RESOURCEMANAGER,RUN_SERVICEUSAGE,RUN_APIKEYS,RUN_MYSQL,MYSQL_PASSWORD,BIGQUERY_PROJECT,APPENGINE_URL,WORKFLOWS
+      TEST_VARS+=,RUN,SECRETS,TASKS,RUN_STORAGE,RUN_PUBSUB,RUN_FIRESTORE,RUN_DATASTORE,RUN_GKE,RUN_MEMORYSTORE_ADMIN,RUN_KMS,RUN_LOCALAI,RUN_SCHEDULER,RUN_LOGGING,RUN_BIGQUERY,RUN_SQLADMIN,RUN_RESOURCEMANAGER,RUN_SERVICEUSAGE,RUN_APIKEYS,RUN_MYSQL,MYSQL_PASSWORD,BIGQUERY_PROJECT,APPENGINE_URL,WORKFLOWS,DATAFORM,APPHUB
       if [ "$1" = crossservice ]; then
         # The run shard's instance again, for COMPAT_CROSSSERVICE_TESTS only, with
         # the plain names of the services they read: COMPAT_RUN keeps every
         # other suite those names would select to its own shard.
-        TEST_VARS+=,STORAGE,STORAGE_BATCH,STORAGE_INSIGHTS,PUBSUB,BIGQUERY,FIRESTORE,SERVICEUSAGE,KMS,LOGGING,RESOURCEMANAGER
+        TEST_VARS+=,STORAGE,STORAGE_BATCH,STORAGE_INSIGHTS,PUBSUB,BIGQUERY,FIRESTORE,SERVICEUSAGE,KMS,LOGGING,RESOURCEMANAGER,MONITORING
         COMPAT_RUN=$COMPAT_CROSSSERVICE_TESTS
       else
         COMPAT_SKIP=$COMPAT_CROSSSERVICE_TESTS
@@ -461,9 +479,10 @@ compat_shard() {
       # Storage companion APIs since the twelfth; Parameter Manager for its
       # renders as the parameter's identity (#2054); the Firebase Rules API,
       # served with Firestore, whose releases govern client SDK calls,
-      # which IAM does not (#2048).
-      SERVICES=storage,pubsub,tasks,secretmanager,kms,run,bigquery,scheduler,workflows,logging,monitoring,memorystore,cloudsql,privateca,gke,compute,firestore,datastore,spanner,bigtable,backupdr,parametermanager
-      TEST_VARS+=,STORAGE,PUBSUB,TASKS,SECRETS,KMS,RUN,RESOURCEMANAGER,ANALYTICSHUB,BIGQUERY,BIGQUERY_PROJECT,SCHEDULER,WORKFLOWS,LOGGING,MONITORING,MEMORYSTORE_ADMIN,SQLADMIN,PRIVATECA,GKE,COMPUTE,APIKEYS,SERVICEUSAGE,LOCALAI,FIRESTORE,DATASTORE,SPANNER,BIGTABLE,DATATRANSFER,BACKUPDR,STORAGE_BATCH,STORAGE_INSIGHTS,STORAGE_TRANSFER,IAM_ENFORCEMENT,PARAMETERMANAGER,FIREBASERULES
+      # which IAM does not (#2048); App Hub, whose methods are checked
+      # (#2110).
+      SERVICES=storage,pubsub,tasks,secretmanager,kms,run,bigquery,scheduler,workflows,logging,monitoring,memorystore,cloudsql,privateca,gke,compute,firestore,datastore,spanner,bigtable,backupdr,parametermanager,apphub
+      TEST_VARS+=,STORAGE,PUBSUB,TASKS,SECRETS,KMS,RUN,RESOURCEMANAGER,ANALYTICSHUB,BIGQUERY,BIGQUERY_PROJECT,SCHEDULER,WORKFLOWS,LOGGING,MONITORING,MEMORYSTORE_ADMIN,SQLADMIN,PRIVATECA,GKE,COMPUTE,APIKEYS,SERVICEUSAGE,LOCALAI,FIRESTORE,DATASTORE,SPANNER,BIGTABLE,DATATRANSFER,BACKUPDR,STORAGE_BATCH,STORAGE_INSIGHTS,STORAGE_TRANSFER,IAM_ENFORCEMENT,PARAMETERMANAGER,FIREBASERULES,APPHUB
       UP_FLAGS=(--iam-enforcement=on)
       # And Workload Identity Federation's federated principal reading a
       # bucket, refused until it is granted (#1941), and Workforce Identity
