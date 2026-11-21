@@ -21,8 +21,8 @@ import (
 )
 
 // TestMemorystoreClusterAndValkeyMaintenanceThroughThePage (#1524), in the
-// memorystore shard. On a Redis cluster's page: Set maintenance window
-// sets a Sunday 03:00 UTC maintenance_policy; Schedule maintenance
+// memorystore shard. On a Redis cluster's page: Edit maintenance window
+// (Custom, #2099) sets a Sunday 03:00 UTC maintenance_policy; Schedule maintenance
 // (CloudBurrow) schedules the first window a week away, which GetCluster's
 // maintenance_schedule reads and the summary shows; Reschedule
 // maintenance with SPECIFIC_TIME moves it ten days; Cancel maintenance,
@@ -97,7 +97,7 @@ func TestMemorystoreClusterAndValkeyMaintenanceThroughThePage(t *testing.T) {
 	p := open(t)
 	page := "/memorystore-clusters/" + cid + "?project=" + project
 	p.navigate(page)
-	p.pageAction("Set maintenance window", map[string]string{"maintenanceDay": "SUNDAY", "maintenanceHour": "3"}, "")
+	memorystoreDialog(p, "Edit maintenance window", map[string]int{"maintenance": 1}, map[string]string{"maintenanceDay": "SUNDAY", "maintenanceHour": "3"})
 	getCluster("with a Sunday 03:00 window", func(c *clusterpb.Cluster) bool {
 		ws := c.GetMaintenancePolicy().GetWeeklyMaintenanceWindow()
 		return len(ws) == 1 && ws[0].GetDay().String() == "SUNDAY" && ws[0].GetStartTime().GetHours() == 3
