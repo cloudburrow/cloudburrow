@@ -59,6 +59,25 @@ func TestCompatShardsMatchTheCIMatrix(t *testing.T) {
 	}
 }
 
+// No shard is named as another ci.yml job is, by its id or the first word
+// of its name: the compat shard once called cross shared its name with the
+// cross-compile job (cross (linux/amd64), ...), and is crossservice now.
+func TestCompatShardsAreNotNamedAsOtherJobs(t *testing.T) {
+	_, ci := workflowJobs(t, "ci.yml")
+	jobs := map[string]string{}
+	for id, body := range ci {
+		jobs[id] = id
+		if m := regexp.MustCompile(`(?m)^    name: ([A-Za-z0-9_-]+)`).FindStringSubmatch(body); m != nil {
+			jobs[m[1]] = id
+		}
+	}
+	for _, shard := range strings.Fields(compatShard(t, "")["COMPAT_SHARDS"]) {
+		if id, ok := jobs[shard]; ok && id != "compat" {
+			t.Errorf("compat shard %s is named as ci.yml's %s job", shard, id)
+		}
+	}
+}
+
 // The browser step runs in the shards the script names for it.
 func TestCompatBrowserShardsMatchTheCIStep(t *testing.T) {
 	_, ci := workflowJobs(t, "ci.yml")

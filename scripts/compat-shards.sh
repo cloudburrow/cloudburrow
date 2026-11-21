@@ -68,8 +68,9 @@
 # BigQuery (for Pub/Sub's BigQuery subscriptions, #1998), Cloud Scheduler
 # and Workflows.
 
-# An eleventh, cross, is the run shard's instance again for
-# COMPAT_CROSS_TESTS, which the run shard skips: Eventarc's tests and
+# An eleventh, crossservice (cross alone was the cross-compile job's
+# name in ci.yml), is the run shard's instance again for
+# COMPAT_CROSSSERVICE_TESTS, which the run shard skips: Eventarc's tests and
 # Artifact Registry's cleanup policies, split from run when it reached its
 # 60m (main run 44740769561), and the tests that need services no other
 # shard exports together (Cloud Storage with BigQuery, Cloud KMS or Cloud
@@ -155,9 +156,9 @@ COMPAT_LOCALAI_TEST_NAMES="
 COMPAT_LOCALAI_TESTS="^Test($(echo "$COMPAT_LOCALAI_TEST_NAMES" | tr -s ' \n' '||' | sed 's/^|//; s/|$//'))\$"
 
 # The shards, in the order ci.yml's matrix lists them.
-COMPAT_SHARDS="storage served run cross scale emulators memorystore sql sqlreplicas acceptance iam localai"
+COMPAT_SHARDS="storage served run crossservice scale emulators memorystore sql sqlreplicas acceptance iam localai"
 
-# The cross shard's tests (COMPAT_CROSS_TESTS), which the run shard skips:
+# The crossservice shard's tests (COMPAT_CROSSSERVICE_TESTS), which the run shard skips:
 # Eventarc's, whose triggers route events from Cloud Storage, Pub/Sub,
 # Firestore, Datastore, Memorystore and Cloud Audit Logs to Cloud Run, GKE
 # and Workflows (about 620 s), and Artifact Registry's cleanup policies
@@ -171,14 +172,14 @@ COMPAT_SHARDS="storage served run cross scale emulators memorystore sql sqlrepli
 # audit logs (Cloud Logging), Pub/Sub's BigQuery subscriptions and gcloud's
 # message storage policy (Pub/Sub with BigQuery and Service Usage), and
 # BigQuery and Firestore refused while disabled (Service Usage).
-COMPAT_CROSS_TEST_NAMES="ArtifactRegistryCleanupPolicies
+COMPAT_CROSSSERVICE_TEST_NAMES="ArtifactRegistryCleanupPolicies
   GcloudPubSubTopicStoragePolicyUpdate GcloudStorageInsightsDatasetConfigs
   PubSubBigQuerySubscriptionPermissionDenied ServiceDisabledBigQuery
   ServiceDisabledFirestore StorageBatchOperationsRewriteToKMSKey
   StorageDataAccessAuditLogs StorageDataAccessAuditLogsOffByDefault
   StorageInsightsActivityViews StorageInsightsDatasetConfigChecks
   StorageInsightsLinkedDataset TerraformStorageInsightsDatasetConfig"
-COMPAT_CROSS_TESTS="^Test((Gcloud|Terraform|GcloudAndTerraform)?Eventarc[A-Za-z0-9_]*|$(echo "$COMPAT_CROSS_TEST_NAMES" | tr -s ' \n' '||' | sed 's/^|//; s/|$//'))\$"
+COMPAT_CROSSSERVICE_TESTS="^Test((Gcloud|Terraform|GcloudAndTerraform)?Eventarc[A-Za-z0-9_]*|$(echo "$COMPAT_CROSSSERVICE_TEST_NAMES" | tr -s ' \n' '||' | sed 's/^|//; s/|$//'))\$"
 
 # The sqlreplicas shard's tests, by name: every Cloud SQL test of high
 # availability, read replicas, blue-green deployments, external primaries,
@@ -341,7 +342,7 @@ compat_shard() {
       SETUP_TESTS="TestKMSRestartSetup"
       PROBE_TESTS="TestKMSAcrossRestart"
       PROBE_VARS=KMS ;;
-    run|cross)
+    run|crossservice)
       # tasks too: TestAPodReachesTheCLIHostedServices (#575) needs Secret
       # Manager and Tasks served to pods, which only Run's cluster has.
       # Storage and Pub/Sub for
@@ -398,14 +399,14 @@ compat_shard() {
       # customer-managed key tests (with RUN_KMS); LOCALAI, which the
       # generation tests read, is not exported, so they still skip.
       TEST_VARS+=,RUN,SECRETS,TASKS,RUN_STORAGE,RUN_PUBSUB,RUN_FIRESTORE,RUN_DATASTORE,RUN_GKE,RUN_MEMORYSTORE_ADMIN,RUN_KMS,RUN_LOCALAI,RUN_SCHEDULER,RUN_LOGGING,RUN_BIGQUERY,RUN_SQLADMIN,RUN_RESOURCEMANAGER,RUN_SERVICEUSAGE,RUN_APIKEYS,RUN_MYSQL,MYSQL_PASSWORD,BIGQUERY_PROJECT,APPENGINE_URL,WORKFLOWS
-      if [ "$1" = cross ]; then
-        # The run shard's instance again, for COMPAT_CROSS_TESTS only, with
+      if [ "$1" = crossservice ]; then
+        # The run shard's instance again, for COMPAT_CROSSSERVICE_TESTS only, with
         # the plain names of the services they read: COMPAT_RUN keeps every
         # other suite those names would select to its own shard.
         TEST_VARS+=,STORAGE,STORAGE_BATCH,STORAGE_INSIGHTS,PUBSUB,BIGQUERY,FIRESTORE,SERVICEUSAGE,KMS,LOGGING,RESOURCEMANAGER
-        COMPAT_RUN=$COMPAT_CROSS_TESTS
+        COMPAT_RUN=$COMPAT_CROSSSERVICE_TESTS
       else
-        COMPAT_SKIP=$COMPAT_CROSS_TESTS
+        COMPAT_SKIP=$COMPAT_CROSSSERVICE_TESTS
         # Workflows (#1996): an execution waiting on a callback when the
         # instance stops carries on after it starts again.
         SETUP_TESTS="TestWorkflowsRestartSetup"
@@ -578,7 +579,7 @@ compat_shard() {
   # bq's (#696) run in the emulators shard, with BigQuery, and gcloud sql's
   # in the sql shard.
   case "$1" in
-    storage|served|run|cross|scale|emulators|memorystore|sql|sqlreplicas) TEST_VARS+=,GCLOUD ;;
+    storage|served|run|crossservice|scale|emulators|memorystore|sql|sqlreplicas) TEST_VARS+=,GCLOUD ;;
   esac
 }
 

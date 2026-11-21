@@ -541,7 +541,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [storage, served, run, cross, scale, emulators, memorystore, sql, sqlreplicas, acceptance, iam, localai]
+        shard: [storage, served, run, crossservice, scale, emulators, memorystore, sql, sqlreplicas, acceptance, iam, localai]
     env:
       SHARD: ${{ matrix.shard }}
       # Every make build here uses the emulator binaries the
@@ -596,7 +596,7 @@ jobs:
       # since 586.0.0 had no `gcloud alpha source-manager hooks`, which
       # TestGcloudSourceManagerHooks drives (#1927; main run 44645694075).
       - name: Install the Google Cloud CLI
-        if: matrix.shard == 'storage' || matrix.shard == 'served' || matrix.shard == 'run' || matrix.shard == 'cross' || matrix.shard == 'scale' || matrix.shard == 'emulators' || matrix.shard == 'memorystore' || matrix.shard == 'sql' || matrix.shard == 'sqlreplicas'
+        if: matrix.shard == 'storage' || matrix.shard == 'served' || matrix.shard == 'run' || matrix.shard == 'crossservice' || matrix.shard == 'scale' || matrix.shard == 'emulators' || matrix.shard == 'memorystore' || matrix.shard == 'sql' || matrix.shard == 'sqlreplicas'
         run: |
           curl --retry 5 --retry-all-errors -fsSLo "$RUNNER_TEMP/gcloud.tar.gz" https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-593.0.0-linux-x86_64.tar.gz
           echo "42c32b7553c712f71fcf6f124546c0519437f53755f47f9bd0c957998cd6b826  $RUNNER_TEMP/gcloud.tar.gz" | sha256sum -c -
@@ -930,7 +930,8 @@ jobs:
             # leaving run about 32. It reached 60m again in 44740769561
             # (Landing 160's Eventarc, Workflows and Memorystore events):
             # Eventarc's tests and Artifact Registry's cleanup policies
-            # moved to the cross shard, the run instance again (about 860 s).
+            # moved to the crossservice shard, the run instance again (about
+            # 860 s).
             # The sql shard passed 60m in 44645694075 with no test hung
             # (3,185 s in 44617241748): its replica tests moved to the
             # sqlreplicas shard, about 28 minutes of tests, leaving sql
@@ -1313,7 +1314,7 @@ jobs:
         run: |
           go test -tags=compat -list '.*' ./test/compat/ | grep '^Test' | sort > all.txt
           missing=
-          for shard in storage served run cross scale emulators memorystore sql sqlreplicas iam localai; do
+          for shard in storage served run crossservice scale emulators memorystore sql sqlreplicas iam localai; do
             d=logs/compat-log-$shard
             [ -d "$d" ] || { echo "no logs from the $shard shard"; missing=1; continue; }
             # Top-level results only; a subtest's line is indented.
