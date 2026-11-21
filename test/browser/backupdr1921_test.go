@@ -63,7 +63,7 @@ func TestBackupDRMultiRegionLockAndJobsThroughThePages(t *testing.T) {
 	p.navigate("/backupdr-jobs?project=" + project)
 	p.waitFor(`document.querySelector("#view").textContent.includes("Current failures")`)
 	p.eval(`document.querySelector("#view").textContent`, &text)
-	if !strings.Contains(text, "1h, 6h, 12h, 24h") {
+	if !strings.Contains(text, "Last 24 hours") {
 		t.Errorf("the Jobs page names no time range: %q", text)
 	}
 }

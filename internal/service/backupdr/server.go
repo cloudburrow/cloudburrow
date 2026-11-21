@@ -12,10 +12,10 @@
 // source's instance to a time through instances.clone's path; both resolve
 // the names here through Resolver.
 //
-// Other workload types (Compute Engine instances, disks, AlloyDB,
-// Filestore) need servers CloudBurrow does not run, and are refused with
-// that reason, as backups.restore, whose targets are all Compute Engine
-// instances and disks, is.
+// Compute Engine instances and disks are protected through the instance's
+// Compute Engine API (#2075, compute.go), and backups.restore restores
+// them to a new VM or disk. Other workload types (AlloyDB, Filestore) need
+// servers CloudBurrow does not run, and are refused with that reason.
 //
 // Every mutation is a long-running operation (google.longrunning), answered
 // done or running as the work is, and operations.get answers it
@@ -168,6 +168,9 @@ type Server struct {
 	// jobLog writes a job's log entry to Cloud Logging (#1924); nil when
 	// it is not served. mu guards it.
 	jobLog func(JobLog)
+	// compute is the Compute Engine API (#2075), nil until it is served.
+	// mu guards it.
+	compute func() Compute
 }
 
 // state is every record, as it is kept.
@@ -181,6 +184,8 @@ type state struct {
 	Trials map[string]*trial `json:"trials,omitempty"`
 	// Jobs are the last 14 days' jobs, by jobId (#1924).
 	Jobs map[string]*Job `json:"jobs,omitempty"`
+	// ComputeRuns are the Compute Engine backups' runs (#2075), by run ID.
+	ComputeRuns map[string]*computeRun `json:"computeRuns,omitempty"`
 }
 
 type vault struct {
@@ -239,6 +244,12 @@ type dataSource struct {
 	Name, Project, Instance, Association, CreateTime, UpdateTime string
 	Info                                                         Instance
 	Labels                                                       map[string]string `json:",omitempty"`
+	// Kind is the protected resource's type for a Compute Engine instance
+	// or disk (#2075), "" for a Cloud SQL instance; Zone is its zone and
+	// Props its dataSourceGcpResource properties, as last backed up.
+	Kind  string         `json:",omitempty"`
+	Zone  string         `json:",omitempty"`
+	Props map[string]any `json:",omitempty"`
 }
 
 type backup struct {
@@ -959,7 +970,7 @@ func (s *Server) deleteVault(r *http.Request, name string) (any, error) {
 	err := s.saveLocked()
 	s.mu.Unlock()
 	for _, id := range runs {
-		_ = s.sql.DeleteRun(id)
+		_ = s.deleteRun(id)
 	}
 	if err != nil {
 		return nil, err
@@ -1038,7 +1049,7 @@ func (s *Server) storedBytes(prefix string) int64 {
 	var n int64
 	for _, b := range s.st.Backups {
 		if strings.HasPrefix(b.Name, prefix) {
-			if r, ok := s.sql.Run(b.RunID); ok && r.Status == "SUCCESSFUL" {
+			if r, ok := s.runLocked(b.RunID); ok && r.Status == "SUCCESSFUL" {
 				n += r.SizeBytes
 			}
 		}

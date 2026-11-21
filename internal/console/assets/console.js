@@ -960,13 +960,20 @@ const capabilityOf = (id) => SERVICES.find((s) => s.id === id) || {};
 // project alone.
 const scopeKeyOf = (service) => capabilityOf(service).scope || "";
 
+// carriesScope is whether the service's screens carry parameters of their
+// own on their requests: its scope, or its Filterer pickers (#1844).
+const carriesScope = (s) => !!(s && (s.scope || (s.filters || []).length));
+
 // carryScope copies the service's scope from the address onto url.
 function carryScope(url, service) {
   const key = scopeKeyOf(service);
-  if (!key) return url;
-  // A Filterer's own pickers (Listing.Filters, #1846) travel with it.
+  // A Filterer's own pickers (Listing.Filters, #1846) travel with it, on a
+  // screen scoped by the project alone too (#1844: Vaulted backups'
+  // Resource type, the Jobs page's time range).
+  const keys = [...(key ? [key] : []), ...(capabilityOf(service).filters || [])];
+  if (!keys.length) return url;
   const here = new URLSearchParams(location.search);
-  for (const k of [key, ...(capabilityOf(service).filters || [])]) {
+  for (const k of keys) {
     const value = here.get(k);
     if (value && !url.searchParams.has(k)) url.searchParams.set(k, value);
   }
@@ -977,7 +984,7 @@ function carryScope(url, service) {
 // on, or "".
 function scopeServiceOfPath(pathname) {
   for (const s of SERVICES) {
-    if (!s.scope) continue;
+    if (!carriesScope(s)) continue;
     const r = ROUTES.find((x) => x.service === s.id);
     const base = r ? r.path : "/" + s.id;
     if (pathname === base || pathname.startsWith(base + "/")) return s.id;
@@ -993,7 +1000,7 @@ function scopedAPIPath(path) {
   if (typeof path !== "string" || !path.startsWith("/api/")) return path;
   const url = new URL(path, location.origin);
   const service = url.pathname.split("/")[3] || "";
-  if (!scopeKeyOf(service) || scopeServiceOfPath(location.pathname) !== service) return path;
+  if (!carriesScope(capabilityOf(service)) || scopeServiceOfPath(location.pathname) !== service) return path;
   carryScope(url, service);
   return url.pathname + url.search;
 }

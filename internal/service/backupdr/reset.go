@@ -49,10 +49,10 @@ func (s *Server) ResetProject(_ context.Context, project string) error {
 		errs = append(errs, fmt.Errorf("save the Backup and DR records: %w", err))
 	}
 	for _, id := range runs {
-		if id == "" || s.sql == nil {
+		if id == "" {
 			continue
 		}
-		if err := s.sql.DeleteRun(id); err != nil {
+		if err := s.deleteRun(id); err != nil {
 			errs = append(errs, fmt.Errorf("delete backup run %s: %w", id, err))
 		}
 	}

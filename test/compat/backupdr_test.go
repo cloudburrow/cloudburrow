@@ -81,9 +81,9 @@ func wantBackupDRCode(t *testing.T, what string, err error, code int, contains s
 //     holding the rows of the noted time.
 //
 // Both are read with a database client through the official connector.
-// backups.restore (Compute Engine and disk targets) and a plan for a
-// Compute Engine instance are refused with the reason.
-// covers: backupdr.projects.locations.backupVaults.create, backupdr.projects.locations.backupVaults.get, backupdr.projects.locations.backupVaults.list, backupdr.projects.locations.backupVaults.delete, backupdr.projects.locations.backupPlans.create, backupdr.projects.locations.backupPlans.get, backupdr.projects.locations.backupPlans.list, backupdr.projects.locations.backupPlans.delete, backupdr.projects.locations.backupPlanAssociations.create, backupdr.projects.locations.backupPlanAssociations.get, backupdr.projects.locations.backupPlanAssociations.list, backupdr.projects.locations.backupPlanAssociations.delete, backupdr.projects.locations.backupPlanAssociations.triggerBackup, backupdr.projects.locations.backupVaults.dataSources.list, backupdr.projects.locations.backupVaults.dataSources.get, backupdr.projects.locations.backupVaults.dataSources.backups.list, backupdr.projects.locations.backupVaults.dataSources.backups.get, backupdr.projects.locations.backupVaults.dataSources.backups.delete, backupdr.projects.locations.backupVaults.dataSources.backups.restore (unimplemented), backupdr.projects.locations.operations.get, backupdr.projects.locations.operations.list, backupdr.projects.locations.list, backupdr.projects.locations.get, sql.instances.restoreBackup, sql.instances.pointInTimeRestore, sql.instances.insert, sql.instances.get, sql.operations.get
+// backups.restore of a Cloud SQL backup is refused (Cloud SQL restores it),
+// and a plan for an AlloyDB cluster with the reason.
+// covers: backupdr.projects.locations.backupVaults.create, backupdr.projects.locations.backupVaults.get, backupdr.projects.locations.backupVaults.list, backupdr.projects.locations.backupVaults.delete, backupdr.projects.locations.backupPlans.create, backupdr.projects.locations.backupPlans.get, backupdr.projects.locations.backupPlans.list, backupdr.projects.locations.backupPlans.delete, backupdr.projects.locations.backupPlanAssociations.create, backupdr.projects.locations.backupPlanAssociations.get, backupdr.projects.locations.backupPlanAssociations.list, backupdr.projects.locations.backupPlanAssociations.delete, backupdr.projects.locations.backupPlanAssociations.triggerBackup, backupdr.projects.locations.backupVaults.dataSources.list, backupdr.projects.locations.backupVaults.dataSources.get, backupdr.projects.locations.backupVaults.dataSources.backups.list, backupdr.projects.locations.backupVaults.dataSources.backups.get, backupdr.projects.locations.backupVaults.dataSources.backups.delete, backupdr.projects.locations.operations.get, backupdr.projects.locations.operations.list, backupdr.projects.locations.list, backupdr.projects.locations.get, sql.instances.restoreBackup, sql.instances.pointInTimeRestore, sql.instances.insert, sql.instances.get, sql.operations.get
 func TestBackupDRCloudSQLRestore(t *testing.T) {
 	h := New(t)
 	if os.Getenv(EnvBackupDR) == "" {
@@ -109,7 +109,9 @@ func TestBackupDRCloudSQLRestore(t *testing.T) {
 
 	vaultID := "vault-" + suffix
 	wait(bdr.Projects.Locations.BackupVaults.Create(loc, &backupdr.BackupVault{
-		BackupMinimumEnforcedRetentionDuration: "86400s", Description: "compat"}).BackupVaultId(vaultID).Do())
+		// No minimum enforced retention, so the backup can be deleted at the
+		// end (one inside its enforced retention cannot: TestBackupDRUpdatesAndViews).
+		BackupMinimumEnforcedRetentionDuration: "0s", Description: "compat"}).BackupVaultId(vaultID).Do())
 	vaultName := loc + "/backupVaults/" + vaultID
 	defer func() {
 		if op, err := bdr.Projects.Locations.BackupVaults.Delete(vaultName).Force(true).Do(); err == nil {
@@ -127,8 +129,8 @@ func TestBackupDRCloudSQLRestore(t *testing.T) {
 	}
 
 	_, err = bdr.Projects.Locations.BackupPlans.Create(loc, &backupdr.BackupPlan{BackupVault: vaultName,
-		ResourceType: "compute.googleapis.com/Instance", BackupRules: dailyRule()}).BackupPlanId("gce-" + suffix).Do()
-	wantBackupDRCode(t, "a plan for a Compute Engine instance", err, http.StatusNotImplemented, "Compute")
+		ResourceType: "alloydb.googleapis.com/Cluster", BackupRules: dailyRule()}).BackupPlanId("adb-" + suffix).Do()
+	wantBackupDRCode(t, "a plan for an AlloyDB cluster", err, http.StatusNotImplemented, "AlloyDB")
 
 	planID := "plan-" + suffix
 	wait(bdr.Projects.Locations.BackupPlans.Create(loc, &backupdr.BackupPlan{BackupVault: vaultName,
@@ -247,7 +249,7 @@ func backupDRRestoreCase(t *testing.T, h *Harness, bdr *backupdr.Service, svc *s
 
 	_, err = bdr.Projects.Locations.BackupVaults.DataSources.Backups.Restore(bk.Name, &backupdr.RestoreBackupRequest{
 		ComputeInstanceTargetEnvironment: &backupdr.ComputeInstanceTargetEnvironment{Project: project, Zone: "us-central1-a"}}).Do()
-	wantBackupDRCode(t, "backups.restore into a Compute Engine instance", err, http.StatusNotImplemented, "backupdrBackup")
+	wantBackupDRCode(t, "backups.restore of a Cloud SQL backup into a Compute Engine instance", err, http.StatusBadRequest, "backupdrBackup")
 
 	if got := sqlBackupRows(t, h, c, conn, "UPDATE "+c.table+" SET name = 'y' WHERE id = 2",
 		"INSERT INTO "+c.table+" VALUES (3, 'c')"); !reflect.DeepEqual(got, []string{"1=a", "2=y", "3=c"}) {

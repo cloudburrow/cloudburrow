@@ -8,6 +8,7 @@ require (
 	cloud.google.com/go/aiplatform v1.127.0
 	cloud.google.com/go/artifactregistry v1.27.0
 	cloud.google.com/go/auth v0.24.1
+	cloud.google.com/go/backupdr v1.18.0
 	cloud.google.com/go/bigquery v1.85.0
 	cloud.google.com/go/bigtable v1.58.0
 	cloud.google.com/go/cloudbuild v1.35.0
