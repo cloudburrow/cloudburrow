@@ -20,6 +20,8 @@ import (
 	"cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	"google.golang.org/api/iterator"
 	"google.golang.org/genproto/googleapis/type/money"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // advanceBillingClock posts body to the Cloud Billing clock extension on
@@ -272,6 +274,17 @@ func TestIAMEnforcementBilling(t *testing.T) {
 	ps := pubsubClient(t, h)
 	// In the test's project, where the principal is granted Pub/Sub Admin.
 	topicName := "projects/" + project + "/topics/iobill-" + fmt.Sprint(time.Now().UnixNano()%1000000000)
+	// Unlinking disabled the project's billable APIs, Pub/Sub among them
+	// ("Any billable activity of your in-use services will stop"), so the
+	// topic is SERVICE_DISABLED until the project is linked again, which
+	// enables them again.
+	if _, err := ps.TopicAdminClient.CreateTopic(ctx, &pubsubpb.Topic{Name: topicName}); status.Code(err) != codes.PermissionDenied ||
+		!strings.Contains(err.Error(), "SERVICE_DISABLED") {
+		t.Fatalf("CreateTopic with billing disabled = %v; want PERMISSION_DENIED with SERVICE_DISABLED", err)
+	}
+	if err := link(acct); err != nil {
+		t.Fatalf("linking again as a Project Billing Manager and Billing Account User: %v", err)
+	}
 	if _, err := ps.TopicAdminClient.CreateTopic(ctx, &pubsubpb.Topic{Name: topicName}); err != nil {
 		t.Fatalf("CreateTopic: %v", err)
 	}
