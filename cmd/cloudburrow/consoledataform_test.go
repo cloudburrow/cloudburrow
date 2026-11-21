@@ -50,7 +50,7 @@ func TestConsoleDataform(t *testing.T) {
 		tabs = append(tabs, s.Group+"/"+s.Label)
 	}
 	if got := strings.Join(tabs, ","); got != "/Development workspaces,Releases & Scheduling/Release configurations,"+
-		"Releases & Scheduling/Workflow configurations,/Workflow Execution Logs,/Settings,/Git connection" {
+		"Releases & Scheduling/Workflow configurations,/Workflow Execution Logs,/Settings,/Git connection,/Code,/" {
 		t.Errorf("repository tabs: %s", got)
 	}
 

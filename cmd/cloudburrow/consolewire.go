@@ -355,7 +355,8 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	}
 	// Dataform (#2105), in process, under BigQuery.
 	if enabled[config.ServiceDataform] && d.dataform != nil {
-		providers = append(providers, dataformProvider{svc: d.dataform})
+		df := dataformProvider{svc: d.dataform}
+		providers = append(providers, df, dataformFoldersProvider{df: df}, dataformSettingsProvider{df: df})
 	}
 	// Workflows (#1986), in process.
 	if enabled[config.ServiceWorkflows] && d.workflows != nil {

@@ -68,6 +68,11 @@ func (p dataformProvider) List(ctx context.Context, project string) (console.Lis
 			return console.Listing{}, err
 		}
 		for _, r := range resp.GetRepositories() {
+			// Studio's code assets are hidden here, as Google hides them
+			// (consolebigqueryassets.go).
+			if dataformIsAsset(r) {
+				continue
+			}
 			listing.Items = append(listing.Items, console.Resource{Name: r.GetName(), Fields: map[string]string{
 				"Region": kmsLocation(r.GetName()), "Git remote": kmsOrDash(r.GetGitRemoteSettings().GetUrl()),
 				"Service account": dataformServiceAccount(r.GetServiceAccount()), "Created": kmsTime(r.GetCreateTime())}})
@@ -146,6 +151,16 @@ func (p dataformProvider) Detail(ctx context.Context, project string, pth []stri
 	}
 	if len(pth) < 3 {
 		return console.DeeperThan(1, pth), nil
+	}
+	if pth[1] == "code" && len(pth) == 3 {
+		// A file of the repository's code at its head, read without a
+		// workspace (ReadRepositoryFile, #2094).
+		d := dataformCodeFile(ctx, s, repo.GetName(), pth[2])
+		if d.Unavailable == "" {
+			d.Title = pth[2]
+			d.Trail = []console.Crumb{{Label: lastSegment(repo.GetName()), Path: pth[:1]}, {Label: pth[2]}}
+		}
+		return d, nil
 	}
 	name, err := dataformChild(repo.GetName(), pth[1], pth[2])
 	if err != nil {
@@ -268,6 +283,8 @@ func (p dataformProvider) repositoryDetail(ctx context.Context, s *dataform.Serv
 					{Label: "Table prefix", Value: kmsOrDash(ov.GetTablePrefix())}}}},
 				Actions: []console.Action{{ID: "settings", Label: "Edit"}}},
 			{ID: "git", Label: "Git connection", Kind: console.KindProperties, Groups: []console.PropertyGroup{gitGroup}, Actions: gitActions},
+			dataformCode(ctx, s, name),
+			{ID: "permissions", Kind: console.KindPermissions},
 		},
 	}
 }

@@ -57,7 +57,7 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 	config.ServicePrivateCA:        {Providers: []string{"privateca", "privateca-templates"}},
 	config.ServiceWorkflows:        {Providers: []string{"workflows"}},
 	config.ServiceParameterManager: {Providers: []string{"parametermanager", "parametermanager-templates"}},
-	config.ServiceDataform:         {Providers: []string{"dataform"}},
+	config.ServiceDataform:         {Providers: []string{"dataform", "dataform-folders", "dataform-settings"}},
 	// The Kubernetes Engine API (#1913): its clusters are on Kubernetes
 	// clusters, beside the instance's own.
 	config.ServiceGKE: {Providers: []string{"gkeclusters"}},

@@ -45,7 +45,7 @@ func TestBigQueryStudioExplorerEditorAndHistory(t *testing.T) {
 	var menu []string
 	p.eval(`[...document.querySelectorAll("#product-nav li a")].map((a) => a.textContent)`, &menu)
 	want := []string{"Studio", "Search", "Datasets", "Job history", "Data transfers", "Scheduled queries",
-		"Analytics Hub", "Dataform", "Partner Center", "Settings"}
+		"Analytics Hub", "Dataform", "Dataform folders", "Dataform settings", "Partner Center", "Settings"}
 	if strings.Join(menu, "|") != strings.Join(want, "|") {
 		t.Errorf("BigQuery's menu is %q, want %q", menu, want)
 	}

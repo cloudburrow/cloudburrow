@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -93,8 +94,8 @@ func checkCron(cronSchedule, tz string) error {
 }
 
 func checkCompilationConfig(c *dfpb.CodeCompilationConfig) error {
-	if c.GetBuiltinAssertionNamePrefix() != "" {
-		return apierror.Unimplemented("code_compilation_config.builtin_assertion_name_prefix is not served by CloudBurrow")
+	if p := c.GetBuiltinAssertionNamePrefix(); p != "" && !assertionPrefixRE.MatchString(p) {
+		return apierror.InvalidArgument("code_compilation_config.builtin_assertion_name_prefix %q: letters, digits and underscores only", p)
 	}
 	if c.GetDefaultNotebookRuntimeOptions() != nil {
 		return apierror.Unimplemented("notebooks are not served by CloudBurrow's Dataform")
@@ -386,6 +387,7 @@ func (s *Server) compile(ctx context.Context, parent string, c *dfpb.Compilation
 	if err != nil {
 		return nil, apierror.FailedPrecondition("Dataform core's output: %v", err)
 	}
+	g.prefixBuiltinAssertions(cfg.GetBuiltinAssertionNamePrefix())
 	c.Name = parent + "/compilationResults/" + newUUID()
 	c.CodeCompilationConfig = cfg
 	c.ResolvedGitCommitSha = sha
@@ -617,6 +619,51 @@ func parseGraph(b []byte) (*dfGraph, error) {
 		return nil, fmt.Errorf("not a compiled graph: %w", err)
 	}
 	return &g, nil
+}
+
+// assertionPrefixRE is what a built-in assertion name prefix may hold: it
+// becomes part of a BigQuery view name.
+var assertionPrefixRE = regexp.MustCompile(`^[A-Za-z0-9_]{1,64}$`)
+
+// prefixBuiltinAssertions is code_compilation_config.builtin_assertion_name_prefix,
+// "prefix prepended to auto-generated built-in assertion names" (Dataform
+// core's WorkflowSettings.builtinAssertionNamePrefix): every assertion
+// Dataform core generated from a table's assertions config (those with a
+// parent action) is renamed, and the targets that depend on it follow.
+// The pinned CLI has no flag for it, so it is applied to the compiled graph.
+func (g *dfGraph) prefixBuiltinAssertions(prefix string) {
+	if prefix == "" {
+		return
+	}
+	renamed := map[dfTarget]string{}
+	for i := range g.Assertions {
+		a := &g.Assertions[i]
+		if a.ParentAction == nil || a.Target == nil {
+			continue
+		}
+		old := *a.Target
+		renamed[old] = prefix + old.Name
+		a.Target = &dfTarget{Database: old.Database, Schema: old.Schema, Name: prefix + old.Name}
+		if ct := a.CanonicalTarget; ct != nil {
+			renamed[*ct] = prefix + ct.Name
+			a.CanonicalTarget = &dfTarget{Database: ct.Database, Schema: ct.Schema, Name: prefix + ct.Name}
+		}
+	}
+	if len(renamed) == 0 {
+		return
+	}
+	for _, list := range [][]dfAction{g.Tables, g.Operations, g.Assertions, g.Notebooks, g.DataPreparations} {
+		for i := range list {
+			for j, t := range list[i].DependencyTargets {
+				if t == nil {
+					continue
+				}
+				if n, ok := renamed[*t]; ok {
+					list[i].DependencyTargets[j] = &dfTarget{Database: t.Database, Schema: t.Schema, Name: n}
+				}
+			}
+		}
+	}
 }
 
 func (g *dfGraph) errors(project string) []*dfpb.CompilationResult_CompilationError {

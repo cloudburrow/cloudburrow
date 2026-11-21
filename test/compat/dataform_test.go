@@ -22,7 +22,9 @@ import (
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )
@@ -436,6 +438,51 @@ func TestDataformCompileAndInvoke(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// builtin_assertion_name_prefix (#2094) renames the assertions Dataform
+	// core generates from a table's assertions config, and only those.
+	dataformWrite(ctx, t, c, ws.GetName(), "definitions/checked.sqlx", "config { type: \"table\", assertions: { nonNull: [\"a\"] } }\nselect 1 as a\n")
+	pre, err := c.CreateCompilationResult(ctx, &dfpb.CreateCompilationResultRequest{Parent: repo.GetName(),
+		CompilationResult: &dfpb.CompilationResult{Source: &dfpb.CompilationResult_Workspace{Workspace: ws.GetName()},
+			CodeCompilationConfig: &dfpb.CodeCompilationConfig{BuiltinAssertionNamePrefix: "chk_"}}})
+	if err != nil {
+		t.Fatalf("CreateCompilationResult with builtin_assertion_name_prefix: %v", err)
+	}
+	builtin, manual := 0, 0
+	for it := c.QueryCompilationResultActions(ctx, &dfpb.QueryCompilationResultActionsRequest{Name: pre.GetName()}); ; {
+		a, err := it.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			t.Fatalf("QueryCompilationResultActions: %v", err)
+		}
+		as := a.GetAssertion()
+		switch {
+		case as == nil:
+		case as.GetParentAction().GetName() == "checked":
+			builtin++
+			if !strings.HasPrefix(a.GetTarget().GetName(), "chk_") {
+				t.Errorf("built-in assertion %v has no prefix", a.GetTarget())
+			}
+		default:
+			manual++
+			if strings.HasPrefix(a.GetTarget().GetName(), "chk_") {
+				t.Errorf("hand-written assertion %v was prefixed", a.GetTarget())
+			}
+		}
+	}
+	if builtin == 0 || manual != 2 {
+		t.Errorf("built-in assertions %d, hand-written %d, want >0 and 2", builtin, manual)
+	}
+	if _, err := c.CreateCompilationResult(ctx, &dfpb.CreateCompilationResultRequest{Parent: repo.GetName(),
+		CompilationResult: &dfpb.CompilationResult{Source: &dfpb.CompilationResult_Workspace{Workspace: ws.GetName()},
+			CodeCompilationConfig: &dfpb.CodeCompilationConfig{BuiltinAssertionNamePrefix: "not valid"}}}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("an invalid prefix = %v, want InvalidArgument", err)
+	}
+	if _, err := c.RemoveFile(ctx, &dfpb.RemoveFileRequest{Workspace: ws.GetName(), Path: "definitions/checked.sqlx"}); err != nil {
+		t.Fatal(err)
+	}
+
 	inv, err := rest.CreateWorkflowInvocation(ctx, &dfpb.CreateWorkflowInvocationRequest{Parent: repo.GetName(),
 		WorkflowInvocation: &dfpb.WorkflowInvocation{CompilationSource: &dfpb.WorkflowInvocation_CompilationResult{CompilationResult: comp.GetName()}}})
 	if err != nil {
@@ -560,8 +607,8 @@ func TestDataformCompileAndInvoke(t *testing.T) {
 		}
 		n++
 	}
-	if n != 3 {
-		t.Errorf("ListCompilationResults listed %d, want 3", n)
+	if n != 4 { // the workspace, the broken project, the prefixed one (#2094) and the release
+		t.Errorf("ListCompilationResults listed %d, want 4", n)
 	}
 	wc, err := c.CreateWorkflowConfig(ctx, &dfpb.CreateWorkflowConfigRequest{Parent: repo.GetName(), WorkflowConfigId: "nightly",
 		WorkflowConfig: &dfpb.WorkflowConfig{ReleaseConfig: rc.GetName(), CronSchedule: "0 4 * * *",

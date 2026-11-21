@@ -2674,3 +2674,21 @@ tr.log-entry.is-located { outline: 2px solid var(--accent); outline-offset: -2px
 .card-filter { width: min(360px, 100%); }
 .row-delete-icon svg { fill: none; stroke: currentColor; stroke-width: 1.6; }
 .listing-summary:has(> .card-pin) > h2 { padding-right: 40px; }
+
+/* BigQuery Studio's notebooks, data canvases, Files and Recent tabs (#2094). */
+.bq-nb-cells, .bq-canvas-nodes { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.bq-nb-cell, .bq-canvas-node { border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; background: var(--surface); }
+.bq-nb-cell-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 6px; }
+.bq-nb-cell-bar h3 { margin: 0; font-size: var(--text-body-size); }
+.bq-nb-source { width: 100%; box-sizing: border-box; }
+.bq-nb-output { margin-top: 6px; overflow-x: auto; }
+.bq-nb-table { border-collapse: collapse; font-size: var(--text-caption-size); }
+.bq-nb-table th, .bq-nb-table td { border: 1px solid var(--border); padding: 2px 6px; text-align: left; }
+.bq-canvas-row, .bq-canvas-actions, .bq-files-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 6px 0; }
+.bq-canvas-row input[type="search"], .bq-canvas-row input[type="text"] { flex: 1 1 200px; min-width: 0; }
+.bq-canvas-found { list-style: none; padding: 0; margin: 4px 0; }
+.bq-canvas-found li { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 2px 0; }
+.bq-home-whatsnew { margin: 0; padding-left: 18px; }
+.bq-file-kind { font-size: var(--text-caption-size); }
+.bq-source .button { display: inline-block; margin: 4px 0 8px; }
+.bq-map { display: block; }
