@@ -2640,3 +2640,55 @@ func TestNoScreenIsDrawnBeforeTheConsoleBoots(t *testing.T) {
 		t.Error("main does not set BOOTED after resolving the projects and before its route()")
 	}
 }
+
+// TestNavigationAfterBootDraws: route() draws nothing before main has
+// finished booting (TestNoScreenIsDrawnBeforeTheConsoleBoots), and every
+// navigation after that draws, so the guard does not leave the console on
+// its first screen. Main run 44845978136 suspected it, when a folder made
+// on Resource hierarchy was not in the list it went back to (the folder
+// was on the list's second page). BOOTED goes from false to true once and
+// never back; a link's click and navigate() move the URL and then call
+// route(), and so does the browser's Back (popstate); and route() has no
+// other way out before it dispatches.
+func TestNavigationAfterBootDraws(t *testing.T) {
+	js := consoleAsset(t, "console.js")
+	body := func(start string) string {
+		t.Helper()
+		i := strings.Index(js, start)
+		if i < 0 {
+			t.Fatalf("console.js has no %q", strings.TrimSpace(start))
+		}
+		b := js[i:]
+		if end := strings.Index(b, "\n}\n"); end >= 0 {
+			b = b[:end]
+		}
+		return b
+	}
+	if got := regexp.MustCompile(`\bBOOTED\s*=[^=]`).FindAllString(js, -1); len(got) != 2 ||
+		!strings.Contains(js, "let BOOTED = false;") || strings.Count(js, "BOOTED = true;") != 1 {
+		t.Errorf("BOOTED is assigned %q: want its declaration, false, and one assignment of true", got)
+	}
+	route := body("\nfunction route() {")
+	dispatch := strings.Index(route, "dispatch(")
+	if dispatch < 0 {
+		t.Fatal("route() does not dispatch")
+	}
+	// route()'s own statements are indented by two spaces; a return of a
+	// function inside it (its title) is not route() returning.
+	if returns := regexp.MustCompile(`(?m)^  (if \(.*\) )?return\b`).FindAllString(route[:dispatch], -1); len(returns) != 1 {
+		t.Errorf("route() returns %q before it dispatches; want only the one before boot", returns)
+	}
+	follows := func(name, code string) {
+		t.Helper()
+		push := strings.Index(code, "history.pushState(")
+		if push < 0 || !strings.Contains(code[push:], "route();") {
+			t.Errorf("%s does not call route() after it moves the URL", name)
+		}
+	}
+	follows("navigate()", body("\nfunction navigate(path) {"))
+	routing := body("\nfunction initRouting() {")
+	follows("a link's click", routing)
+	if !strings.Contains(routing, `window.addEventListener("popstate", route);`) {
+		t.Error("Back and Forward (popstate) do not call route()")
+	}
+}

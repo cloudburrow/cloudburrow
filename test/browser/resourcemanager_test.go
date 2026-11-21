@@ -107,6 +107,24 @@ func (p *tab) submitForm(values map[string]string, first string) {
 	p.run(chromedp.Click(chromedp.CSS(`[data-cb-click]`)))
 }
 
+// listedRow is true once the list at path ("" for wherever it is) shows a
+// row holding text. A list shows 25 rows a page, and the shard's earlier
+// tests leave folders behind: main run 44845978136 had 31, ordered by
+// their random IDs, and the one just made was on the second page. So,
+// while no row on the page holds text, it types text into the list's
+// filter, as someone looking for the row would; a list drawn again after
+// the create starts with an empty filter, and is filtered again.
+func listedRow(path, text string) string {
+	return fmt.Sprintf(`(() => {
+		if (%[1]q !== "" && location.pathname !== %[1]q) return false;
+		const has = () => [...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%[2]q));
+		if (has()) return true;
+		const f = document.querySelector("#view input.filter");
+		if (f && f.value !== %[2]q) { f.value = %[2]q; f.dispatchEvent(new Event("input", { bubbles: true })); }
+		return has();
+	})()`, path, text)
+}
+
 // TestResourceHierarchyAndTagsThroughTheDrawer, in the storage shard. The
 // Resource hierarchy and Tags screens (#1294, #1295) had providers but no
 // route. Since #1865 they are IAM & Admin's, as Google's are: the drawer
@@ -175,8 +193,7 @@ func TestResourceHierarchyAndTagsThroughTheDrawer(t *testing.T) {
 	folder := fmt.Sprintf("Browser %d", time.Now().UnixNano()%1e8)
 	p.clickText("#view button", "Create folder")
 	p.submitForm(map[string]string{"displayName": folder}, "displayName")
-	p.waitFor(fmt.Sprintf(`location.pathname === "/resource-hierarchy" &&
-		[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q))`, folder))
+	p.waitFor(listedRow("/resource-hierarchy", folder))
 	var made *rmpb.Folder
 	it := folders.ListFolders(ctx, &rmpb.ListFoldersRequest{Parent: org.GetName()})
 	for {
@@ -219,7 +236,7 @@ func TestResourceHierarchyAndTagsThroughTheDrawer(t *testing.T) {
 	short := fmt.Sprintf("browser-env-%d", time.Now().UnixNano()%1e8)
 	p.clickText("#view button", "Create tag key")
 	p.submitForm(map[string]string{"shortName": short, "description": "made in the browser"}, "shortName")
-	p.waitFor(fmt.Sprintf(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q))`, short))
+	p.waitFor(listedRow("", short))
 	key, err := keys.GetNamespacedTagKey(ctx, &rmpb.GetNamespacedTagKeyRequest{Name: tagNamespace(org.GetName()) + "/" + short})
 	if err != nil {
 		t.Fatalf("GetNamespacedTagKey after Create tag key: %v", err)

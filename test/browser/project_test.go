@@ -19,6 +19,9 @@ func TestPickingAProjectRescopesTheNavigation(t *testing.T) {
 	p := open(t)
 	project := uniqueProject(t)
 	p.navigate("/")
+	// The picker's button answers once main has read the projects, which is
+	// before it draws the first screen: a click before then did nothing.
+	p.waitFor(`document.querySelector("#view h1") !== null`)
 	p.run(chromedp.Click(chromedp.CSS("#project-button")))
 	p.waitFor(`[...document.querySelectorAll("#project-list button")].some((b) => b.textContent.includes("` + project + `"))`)
 	p.eval(`[...document.querySelectorAll("#project-list button")].find((b) => b.textContent.includes("`+project+`")).click()`, nil)
