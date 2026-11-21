@@ -141,7 +141,8 @@
         "patches/googlesqlite/0099-typed-null-array-struct-parameters.patch",
         "patches/googlesqlite/0103-catalog-sync-on-an-older-snapshot.patch",
         "patches/googlesqlite/0104-new-columns-in-the-catalog.patch",
-        "patches/googlesqlite/0106-ten-thousand-columns.patch"
+        "patches/googlesqlite/0106-ten-thousand-columns.patch",
+        "patches/googlesqlite/0107-handles-kept-alive-through-their-call.patch"
       ]
     },
     {

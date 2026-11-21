@@ -1,0 +1,233 @@
+CloudBurrow patch 107 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#2134).
+
+The bug: a go-googlesql method copies the C++ pointers of its receiver and
+arguments into its request, then waits for the module's lock. A handle whose
+last Go use was that copy can be finalized, and its C++ object freed in the
+engine's WebAssembly memory, before the call runs; the call then reads freed
+memory. newSimpleCatalog passed its LanguageOptions inside
+BuiltinFunctionOptions to AddGoogleSQLFunctions2 and never used it again: on
+main CI (run 44954090598) a spec case's sql.Open hung for ten minutes inside
+the analyzer, in absl's hash-set probe loop, which also stalled every other
+goroutine behind the garbage collector's stop-the-world. Calling
+AddGoogleSQLFunctions2 with a freed LanguageOptions reproduces the same loop.
+The handles googlesqlite drops this way (the catalog's language options,
+RegisterProto's FileDescriptorProto, and the collation helpers' annotation,
+value and map proto) are now kept alive through the call with
+runtime.KeepAlive.
+
+The spec runner gets a per-test timeout (4 minutes, or
+GOOGLESQLITE_PER_TEST_TIMEOUT), which names the overdue cases, and, when
+GOOGLESQLITE_TEST_TRACE names a file, logs each case's start and end there,
+so a hang that also freezes the watchdog still names its case.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2026 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch is
+offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+--- a/internal/catalog.go
++++ b/internal/catalog.go
+@@ -267,6 +267,12 @@
+ 		if err := catalog.AddGoogleSQLFunctions2(bf); err != nil {
+ 			_ = catalog.AddGoogleSQLFunctions()
+ 		}
++		// CloudBurrow patch (cloudburrow/cloudburrow#2134): bf.marshal
++		// read opts' C++ pointer, and nothing after it used opts, so its
++		// finalizer could free the LanguageOptions while the call waited
++		// for the module's lock; the call then read freed memory and
++		// spun forever probing a hash set.
++		runtime.KeepAlive(opts)
+ 	} else {
+ 		_ = catalog.AddGoogleSQLFunctions()
+ 	}
+@@ -1604,6 +1610,9 @@
+ 	}
+ 	c.mu.Lock()
+ 	fd, err := c.descriptorPool.BuildFile(fdProto)
++	// CloudBurrow patch (#2134): fdProto must outlive BuildFile, which
++	// reads it through a pointer its finalizer would free.
++	runtime.KeepAlive(fdProto)
+ 	if err != nil {
+ 		c.mu.Unlock()
+ 		return fmt.Errorf("RegisterProto: BuildFile: %w", err)
+--- a/internal/collation.go
++++ b/internal/collation.go
+@@ -17,6 +17,7 @@
+ // collation.
+ 
+ import (
++	"runtime"
+ 	"strings"
+ 	"sync"
+ 
+@@ -100,6 +101,7 @@
+ 		return ""
+ 	}
+ 	id, err := ca.Id()
++	runtime.KeepAlive(ca) // CloudBurrow patch (#2134): ca outlives the call on it
+ 	if err != nil {
+ 		return ""
+ 	}
+@@ -167,6 +169,7 @@
+ 		return nil
+ 	}
+ 	id, err := ca.Id()
++	runtime.KeepAlive(ca) // CloudBurrow patch (#2134): ca outlives the call on it
+ 	if err != nil {
+ 		return nil
+ 	}
+@@ -186,7 +189,9 @@
+ 	if err != nil || sv.Serialize(v) != nil {
+ 		return nil
+ 	}
++	runtime.KeepAlive(sv) // CloudBurrow patch (#2134)
+ 	am, err := tf().DeserializeAnnotationMap(proto)
++	runtime.KeepAlive(proto) // CloudBurrow patch (#2134): proto outlives the call it is read in
+ 	if err != nil || am == nil {
+ 		return nil
+ 	}
+--- a/internal/nested_collation.go
++++ b/internal/nested_collation.go
+@@ -19,6 +19,7 @@
+ import (
+ 	"encoding/json"
+ 	"fmt"
++	"runtime"
+ 	"strings"
+ 	"sync"
+ 
+@@ -123,6 +124,7 @@
+ 		return nil
+ 	}
+ 	id, err := ca.Id()
++	runtime.KeepAlive(ca) // CloudBurrow patch (#2134): ca outlives the call on it
+ 	if err != nil {
+ 		return nil
+ 	}
+@@ -134,6 +136,7 @@
+ 		return nil
+ 	}
+ 	am, err := tf().DeserializeAnnotationMap(proto)
++	runtime.KeepAlive(proto) // CloudBurrow patch (#2134): proto outlives the call it is read in
+ 	if err != nil || am == nil {
+ 		return nil
+ 	}
+@@ -198,6 +201,7 @@
+ 		if err != nil || sv.Serialize(v) != nil {
+ 			return false
+ 		}
++		runtime.KeepAlive(sv) // CloudBurrow patch (#2134)
+ 	}
+ 	return true
+ }
+--- a/main_test.go
++++ b/main_test.go
+@@ -2,8 +2,12 @@
+ 
+ import (
+ 	"context"
++	"fmt"
+ 	"io"
+ 	"os"
++	"runtime/debug"
++	"sort"
++	"sync"
+ 	"testing"
+ 	"time"
+ 
+@@ -42,5 +46,83 @@
+ 		return nopWriteCloser{}, nil
+ 	})
+ 
++	startTestWatchdog()
+ 	os.Exit(m.Run())
+ }
++
++// CloudBurrow patch (cloudburrow/cloudburrow#2134): a per-test timeout.
++// One spec case hung in the wasm analyzer and the package was killed by
++// go test's 10-minute timeout with no test named (the dump shows only
++// that a runCase was running). trackTest records each running case; the
++// watchdog fails the run, naming every case over perTestTimeout. A hang
++// inside the transpiled module that blocks a stop-the-world freezes the
++// watchdog too, so trackTest also appends "start"/"end" lines to the file
++// GOOGLESQLITE_TEST_TRACE names, unbuffered: whatever happens to the
++// process, the cases that started and never ended are in the file (the
++// Makefile's bigquery-patch-tests prints them).
++const defaultPerTestTimeout = 4 * time.Minute
++
++var (
++	runningTests sync.Map // test name -> start time
++	traceMu      sync.Mutex
++	traceFile    *os.File
++)
++
++func trackTest(t *testing.T) {
++	name := t.Name()
++	runningTests.Store(name, time.Now())
++	writeTrace("start", name)
++	t.Cleanup(func() {
++		runningTests.Delete(name)
++		writeTrace("end", name)
++	})
++}
++
++func writeTrace(event, name string) {
++	traceMu.Lock()
++	defer traceMu.Unlock()
++	if traceFile != nil {
++		_, _ = fmt.Fprintf(traceFile, "%s %s\n", event, name)
++	}
++}
++
++func startTestWatchdog() {
++	if path := os.Getenv("GOOGLESQLITE_TEST_TRACE"); path != "" {
++		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
++		if err != nil {
++			fmt.Fprintf(os.Stderr, "GOOGLESQLITE_TEST_TRACE: %v\n", err)
++			os.Exit(2)
++		}
++		traceFile = f
++	}
++	limit := defaultPerTestTimeout
++	if v := os.Getenv("GOOGLESQLITE_PER_TEST_TIMEOUT"); v != "" {
++		d, err := time.ParseDuration(v)
++		if err != nil || d <= 0 {
++			fmt.Fprintf(os.Stderr, "GOOGLESQLITE_PER_TEST_TIMEOUT=%q: not a positive duration\n", v)
++			os.Exit(2)
++		}
++		limit = d
++	}
++	go func() {
++		for range time.Tick(limit / 8) {
++			var over []string
++			runningTests.Range(func(k, v any) bool {
++				if d := time.Since(v.(time.Time)); d > limit {
++					over = append(over, fmt.Sprintf("%s (running %s)", k, d.Round(time.Millisecond)))
++				}
++				return true
++			})
++			if len(over) == 0 {
++				continue
++			}
++			sort.Strings(over)
++			fmt.Fprintf(os.Stderr, "per-test timeout of %s exceeded by:\n", limit)
++			for _, s := range over {
++				fmt.Fprintf(os.Stderr, "\t%s\n", s)
++			}
++			debug.SetTraceback("all")
++			panic(fmt.Sprintf("per-test timeout: %d test(s) ran over %s, first %s", len(over), limit, over[0]))
++		}
++	}()
++}
+--- a/spec_runner_test.go
++++ b/spec_runner_test.go
+@@ -111,6 +111,7 @@
+ 			}
+ 			t.Run(name, func(t *testing.T) {
+ 				t.Parallel()
++				trackTest(t) // CloudBurrow patch (#2134): per-test timeout
+ 				if !gateAsserts {
+ 					t.Skip("spec status is not implemented/tested; case retained as documentation only")
+ 				}
