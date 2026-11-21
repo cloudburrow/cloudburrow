@@ -468,13 +468,11 @@ func addUsage(total, u *Usage) *Usage {
 func collectCandidate(ctx context.Context, model string, chunks <-chan Chunk, errFn func() error) (*GenerateContentResponse, *Usage, error) {
 	var text, thought strings.Builder
 	var calls []FunctionCall
-	var chosen []LogprobsCandidate
+	var steps []LogprobStep
 	var usage *Usage
 	finish := FinishReasonStop
 	for c := range chunks {
-		if c.Logprob != nil {
-			chosen = append(chosen, *c.Logprob)
-		}
+		steps = append(steps, c.Logprobs...)
 		if c.Usage != nil {
 			usage = c.Usage
 		}
@@ -498,7 +496,7 @@ func collectCandidate(ctx context.Context, model string, chunks <-chan Chunk, er
 		// alone is answered as Gemini answers one, with no text part.
 		t = strings.TrimSpace(t)
 	}
-	return withLogprobs(thoughtResponse(model, strings.TrimSpace(thought.String()), t, calls, finish, usage), chosen), usage, nil
+	return withLogprobs(thoughtResponse(model, strings.TrimSpace(thought.String()), t, calls, finish, usage), steps), usage, nil
 }
 
 // chunkResponse frames one streamed chunk, or returns nil for a chunk that
@@ -512,20 +510,16 @@ func collectCandidate(ctx context.Context, model string, chunks <-chan Chunk, er
 func chunkResponse(model string, c Chunk) *GenerateContentResponse {
 	switch {
 	case c.Last:
-		return candidateResponse(model, "", nil, c.FinishReason, c.Usage)
+		return withLogprobs(candidateResponse(model, "", nil, c.FinishReason, c.Usage), c.Logprobs)
 	case c.Thought != "":
 		return &GenerateContentResponse{Candidates: []Candidate{{
 			Content: Content{Role: "model", Parts: []Part{{Text: c.Thought, Thought: ptr(true)}}}}}, ModelVersion: model}
 	case len(c.ToolCalls) > 0:
-		return candidateResponse(model, "", c.ToolCalls, "", nil)
+		return withLogprobs(candidateResponse(model, "", c.ToolCalls, "", nil), c.Logprobs)
 	case c.Usage != nil && c.Text == "":
 		return nil
 	}
-	r := textResponse(model, c.Text, "")
-	if c.Logprob != nil {
-		withLogprobs(r, []LogprobsCandidate{*c.Logprob})
-	}
-	return r
+	return withLogprobs(textResponse(model, c.Text, ""), c.Logprobs)
 }
 
 // writeStream writes server-sent events in the shape the SDK parses.

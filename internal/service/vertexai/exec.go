@@ -187,6 +187,9 @@ func runnerFlags(req Request) []string {
 	}
 	if req.ResponseLogprobs {
 		out = append(out, "--response_logprobs")
+		if req.TopLogprobs > 0 {
+			out = append(out, "--logprobs="+strconv.Itoa(int(req.TopLogprobs)))
+		}
 	}
 	if req.Thinking != nil {
 		out = append(out, "--enable_thinking="+strconv.FormatBool(*req.Thinking))
@@ -364,14 +367,29 @@ type runnerLine struct {
 	Thought      *string           `json:"thought"`
 	ToolCalls    []json.RawMessage `json:"tool_calls"`
 	Logprob      *struct {
-		Token string  `json:"token"`
-		ID    int32   `json:"id"`
-		Score float32 `json:"score"`
+		runnerToken
+		Top []runnerToken `json:"top"`
 	} `json:"logprob"`
 	Compute []struct {
 		IDs    []int64  `json:"ids"`
 		Tokens []string `json:"tokens"`
 	} `json:"compute"`
+}
+
+// runnerToken is one token of a logprob line: its bytes in base64, its id
+// and its log-probability.
+type runnerToken struct {
+	Token string  `json:"token"`
+	ID    int32   `json:"id"`
+	Score float32 `json:"score"`
+}
+
+func (t runnerToken) candidate() (LogprobsCandidate, error) {
+	tok, err := base64.StdEncoding.DecodeString(t.Token)
+	if err != nil {
+		return LogprobsCandidate{}, err
+	}
+	return LogprobsCandidate{Token: string(tok), TokenID: t.ID, LogProbability: t.Score}, nil
 }
 
 // streamJSONLines forwards cloudburrow_generate's JSON lines as chunks:
@@ -394,13 +412,20 @@ func streamJSONLines(ctx context.Context, r io.Reader, out chan<- Chunk, usage *
 			c.Usage = &u
 		case l.Text != nil:
 			c.Text = *l.Text
-			if lp := l.Logprob; lp != nil {
-				tok, err := base64.StdEncoding.DecodeString(lp.Token)
+		case l.Logprob != nil:
+			chosen, err := l.Logprob.candidate()
+			if err != nil {
+				return
+			}
+			step := LogprobStep{Chosen: chosen}
+			for _, t := range l.Logprob.Top {
+				tc, err := t.candidate()
 				if err != nil {
 					return
 				}
-				c.Logprob = &LogprobsCandidate{Token: string(tok), TokenID: lp.ID, LogProbability: lp.Score}
+				step.Top = append(step.Top, tc)
 			}
+			c.Logprobs = []LogprobStep{step}
 		case l.Thought != nil:
 			c.Thought = *l.Thought
 		case len(l.ToolCalls) > 0:

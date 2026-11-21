@@ -14,9 +14,10 @@ type Chunk struct {
 	// ToolCalls are function calls the model made, parsed by the runtime
 	// from the model's native tool-call syntax (#1937).
 	ToolCalls []FunctionCall
-	// Logprob is the chosen token Text decoded from, with its
-	// log-probability (responseLogprobs, #2107).
-	Logprob *LogprobsCandidate
+	// Logprobs are decode steps' log-probabilities (responseLogprobs,
+	// #2107): from the runtime, one step per chunk with nothing else in
+	// it; downstream of applyStops, the steps of the chunk's own tokens.
+	Logprobs []LogprobStep
 	// Last marks the final chunk, carrying the finish reason.
 	Last         bool
 	FinishReason string
@@ -85,8 +86,10 @@ type Request struct {
 	Thinking       *bool
 	ThinkingBudget int32
 	// ResponseLogprobs reports each chosen token's log-probability
-	// (Chunk.Logprob, #2107).
+	// (Chunk.Logprobs, #2107), and TopLogprobs (logprobs, 0 to 20) that
+	// many of each step's most probable tokens.
 	ResponseLogprobs bool
+	TopLogprobs      int32
 
 	// Conversation, when set, is the whole request in LiteRT-LM's message
 	// format (#1937, conversation.go), sent to cloudburrow_generate on

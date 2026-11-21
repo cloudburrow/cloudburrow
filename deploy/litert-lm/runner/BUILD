@@ -1,5 +1,7 @@
 # cloudburrow_generate: LiteRT-LM's litert_lm_main with the sampler and the
-# token limit set per request (see cloudburrow_generate.cc). The Dockerfile
+# token limit set per request (see cloudburrow_generate.cc).
+# decode_step_observer is CloudBurrow's own target, added to the checkout by
+# ../patches/0001-decode-step-logprobs.patch. The Dockerfile
 # copies this directory into the LiteRT-LM checkout as //cloudburrow, so every
 # dependency is one of upstream's public targets and the link options are
 # litert_lm_main's own. The exported-symbols list is upstream's, copied beside
@@ -17,6 +19,7 @@ cc_binary(
         "//runtime/conversation",
         "//runtime/conversation:end_of_turn",
         "//runtime/conversation:io_types",
+        "//runtime/core:decode_step_observer",
         "//runtime/engine:engine_factory",
         "//runtime/engine:engine_impl_selected",
         "//runtime/engine:engine_interface",

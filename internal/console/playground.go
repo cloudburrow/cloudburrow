@@ -106,9 +106,9 @@ type PlaygroundStatus struct {
 // the runtime serves system instructions, multi-turn chat, function calling
 // and token counts, which the screen offers (#1962). candidateCount,
 // thinkingConfig and cachedContent are served since #2107 and offered since
-// #2121. logprobs (the top candidates) stays refused: the runtime exposes no
-// other token's score (docs/generation.md).
-var refusedOptions = []string{"safetySettings", "logprobs"}
+// #2121. responseLogprobs and logprobs are served since #2107 round 3; the
+// screen does not offer them yet (#2107's console follow-up).
+var refusedOptions = []string{"safetySettings"}
 
 // supportedOptions are the generationConfig fields the screen offers: the
 // runtime's cloudburrow_generate applies the sampler, the token limit, the

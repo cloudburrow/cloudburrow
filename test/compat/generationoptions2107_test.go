@@ -4,6 +4,7 @@ package compat
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -379,8 +380,209 @@ func TestGenerateContentResponseLogprobsThroughTheOfficialSDK(t *testing.T) {
 	if n != len(c.LogprobsResult.ChosenCandidates) {
 		t.Errorf("the stream carried %d chosen tokens, the unary answer %d (seed 7)", n, len(c.LogprobsResult.ChosenCandidates))
 	}
-	_, err = cl.Models.GenerateContent(ctx, localModel, prompt, &genai.GenerateContentConfig{ResponseLogprobs: true, Logprobs: genai.Ptr[int32](3)})
-	if err == nil || !strings.Contains(err.Error(), "logprobs") {
-		t.Errorf("logprobs: %v", err)
+}
+
+// covers: google.cloud.aiplatform.v1beta1.PredictionService/GenerateContent, google.cloud.aiplatform.v1beta1.PredictionService/StreamGenerateContent
+//
+// TestGenerateContentLogprobsTopCandidatesThroughTheOfficialSDK (#2107 round
+// 3): logprobs N answers each step's N most probable tokens
+// (logprobsResult.topCandidates), most probable first, each the model's
+// log-softmax before sampling: at temperature 0 the chosen token is the top
+// candidate with the same score, and the scores are not all 0 (they are the
+// model's, not the greedy sampler's certainty). The stream carries the same
+// steps. logprobs outside 1 to 20, or without responseLogprobs, is refused.
+func TestGenerateContentLogprobsTopCandidatesThroughTheOfficialSDK(t *testing.T) {
+	h := New(t)
+	cl := genaiClient(t, h)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	defer cancel()
+	prompt := genai.Text("Invent a name for a new colour. Answer with the name only.")
+	cfg := &genai.GenerateContentConfig{ResponseLogprobs: true, Logprobs: genai.Ptr[int32](5), Temperature: genai.Ptr[float32](0), MaxOutputTokens: 16}
+	r, err := cl.Models.GenerateContent(ctx, localModel, prompt, cfg)
+	if err != nil {
+		t.Fatalf("GenerateContent: %v", err)
 	}
+	c := r.Candidates[0]
+	lr := c.LogprobsResult
+	if lr == nil || len(lr.ChosenCandidates) == 0 || len(lr.TopCandidates) != len(lr.ChosenCandidates) {
+		t.Fatalf("logprobsResult %+v", lr)
+	}
+	negative := false
+	for i, step := range lr.TopCandidates {
+		chosen := lr.ChosenCandidates[i]
+		negative = negative || chosen.LogProbability < 0
+		if len(step.Candidates) != 5 {
+			t.Errorf("step %d: %d top candidates, want 5", i, len(step.Candidates))
+			continue
+		}
+		for j, tc := range step.Candidates {
+			if tc.LogProbability > 0 || (j > 0 && tc.LogProbability > step.Candidates[j-1].LogProbability) {
+				t.Errorf("step %d: top candidates not in descending log-probability: %+v", i, step.Candidates)
+				break
+			}
+		}
+		if top := step.Candidates[0]; top.TokenID != chosen.TokenID || top.LogProbability != chosen.LogProbability {
+			t.Errorf("step %d at temperature 0: chosen %+v, most probable %+v", i, chosen, top)
+		}
+	}
+	if !negative {
+		t.Errorf("every chosen token has log-probability 0 at temperature 0: the scores are the greedy sampler's, not the model's")
+	}
+	var first []string
+	for _, tc := range lr.TopCandidates[0].Candidates {
+		first = append(first, fmt.Sprintf("%q %.3f", tc.Token, tc.LogProbability))
+	}
+	t.Logf("answer %q, first step's top candidates %v (recorded)", r.Text(), first)
+	n := 0
+	for chunk, err := range cl.Models.GenerateContentStream(ctx, localModel, prompt, cfg) {
+		if err != nil {
+			t.Fatalf("stream: %v", err)
+		}
+		if len(chunk.Candidates) > 0 && chunk.Candidates[0].LogprobsResult != nil {
+			n += len(chunk.Candidates[0].LogprobsResult.TopCandidates)
+		}
+	}
+	if n != len(lr.TopCandidates) {
+		t.Errorf("the stream carried %d steps' top candidates, the unary answer %d", n, len(lr.TopCandidates))
+	}
+	for name, bad := range map[string]*genai.GenerateContentConfig{
+		"logprobs 0":          {ResponseLogprobs: true, Logprobs: genai.Ptr[int32](0)},
+		"logprobs 21":         {ResponseLogprobs: true, Logprobs: genai.Ptr[int32](21)},
+		"no responseLogprobs": {Logprobs: genai.Ptr[int32](3)},
+	} {
+		_, err := cl.Models.GenerateContent(ctx, localModel, prompt, bad)
+		if err == nil || !strings.Contains(err.Error(), "logprobs") || !strings.Contains(err.Error(), "400") {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}
+
+// covers: google.cloud.aiplatform.v1beta1.PredictionService/GenerateContent
+//
+// TestGenerateContentLogprobsWithOtherFeaturesThroughTheOfficialSDK (#2107
+// round 3): responseLogprobs and logprobs combine with every other feature,
+// as on Vertex: a JSON response, thinking (the steps are the answer's, not
+// the thoughts'), stop sequences (the steps end where the answer is cut),
+// function calling and an image part.
+func TestGenerateContentLogprobsWithOtherFeaturesThroughTheOfficialSDK(t *testing.T) {
+	h := New(t)
+	cl := genaiClient(t, h)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+	defer cancel()
+	base := func() *genai.GenerateContentConfig {
+		return &genai.GenerateContentConfig{ResponseLogprobs: true, Logprobs: genai.Ptr[int32](3), Temperature: genai.Ptr[float32](0), MaxOutputTokens: 64}
+	}
+	// spelled joins the chosen tokens, checking each step on the way.
+	spelled := func(t *testing.T, c *genai.Candidate) string {
+		t.Helper()
+		lr := c.LogprobsResult
+		if lr == nil || len(lr.ChosenCandidates) == 0 || len(lr.TopCandidates) != len(lr.ChosenCandidates) {
+			t.Fatalf("logprobsResult %+v", lr)
+		}
+		var b strings.Builder
+		for i, ch := range lr.ChosenCandidates {
+			if ch.LogProbability > 0 || len(lr.TopCandidates[i].Candidates) != 3 {
+				t.Errorf("step %d: chosen %+v, top %d", i, *ch, len(lr.TopCandidates[i].Candidates))
+			}
+			b.WriteString(ch.Token)
+		}
+		t.Logf("%d steps spell %q, avgLogprobs %.3f (recorded)", len(lr.ChosenCandidates), b.String(), c.AvgLogprobs)
+		return b.String()
+	}
+	answer := func(c *genai.Candidate) string {
+		var b strings.Builder
+		for _, p := range c.Content.Parts {
+			if !p.Thought {
+				b.WriteString(p.Text)
+			}
+		}
+		return strings.TrimSpace(b.String())
+	}
+
+	t.Run("json", func(t *testing.T) {
+		cfg := base()
+		cfg.ResponseMIMEType = "application/json"
+		cfg.ResponseSchema = &genai.Schema{Type: genai.TypeObject,
+			Properties: map[string]*genai.Schema{"colour": {Type: genai.TypeString}}, Required: []string{"colour"}}
+		r, err := cl.Models.GenerateContent(ctx, localModel, genai.Text("Name one colour."), cfg)
+		if err != nil {
+			t.Fatalf("GenerateContent: %v", err)
+		}
+		text := answer(r.Candidates[0])
+		var v map[string]any
+		if err := json.Unmarshal([]byte(text), &v); err != nil || v["colour"] == nil {
+			t.Errorf("answer %q is not the schema's JSON: %v", text, err)
+		}
+		if got := spelled(t, r.Candidates[0]); !strings.Contains(got, text) {
+			t.Errorf("tokens spell %q, answer %q", got, text)
+		}
+	})
+	t.Run("thinking", func(t *testing.T) {
+		cfg := base()
+		cfg.MaxOutputTokens = 256
+		cfg.ThinkingConfig = &genai.ThinkingConfig{IncludeThoughts: true, ThinkingBudget: genai.Ptr[int32](64)}
+		r, err := cl.Models.GenerateContent(ctx, localModel, genai.Text("What is 17 times 23? Answer with the number only."), cfg)
+		if err != nil {
+			t.Fatalf("GenerateContent: %v", err)
+		}
+		c := r.Candidates[0]
+		if len(c.Content.Parts) < 2 || !c.Content.Parts[0].Thought {
+			t.Fatalf("parts %+v: no thought", c.Content.Parts)
+		}
+		text := answer(c)
+		got := spelled(t, c)
+		// The thought is longer than the answer, so tokens that spelled it
+		// too would show.
+		thought := strings.TrimSpace(c.Content.Parts[0].Text)
+		if !strings.Contains(got, text) || (len(thought) > len(text) && strings.Contains(got, thought)) || strings.Contains(got, "<|channel>") {
+			t.Errorf("tokens spell %q: answer %q, thought %q", got, text, c.Content.Parts[0].Text)
+		}
+	})
+	t.Run("stopSequences", func(t *testing.T) {
+		cfg := base()
+		cfg.StopSequences = []string{","}
+		r, err := cl.Models.GenerateContent(ctx, localModel, genai.Text("List the colours of the rainbow, separated by commas."), cfg)
+		if err != nil {
+			t.Fatalf("GenerateContent: %v", err)
+		}
+		text := answer(r.Candidates[0])
+		got := spelled(t, r.Candidates[0])
+		if strings.Contains(text, ",") || strings.Contains(got, ",") || !strings.Contains(got, text) {
+			t.Errorf("stop at \",\": answer %q, tokens spell %q", text, got)
+		}
+	})
+	t.Run("tools", func(t *testing.T) {
+		cfg := base()
+		cfg.Tools = []*genai.Tool{{FunctionDeclarations: []*genai.FunctionDeclaration{{
+			Name:        "get_weather",
+			Description: "Returns the current weather for a city.",
+			Parameters: &genai.Schema{Type: genai.TypeObject,
+				Properties: map[string]*genai.Schema{"city": {Type: genai.TypeString}}, Required: []string{"city"}},
+		}}}}
+		cfg.ToolConfig = &genai.ToolConfig{FunctionCallingConfig: &genai.FunctionCallingConfig{Mode: genai.FunctionCallingConfigModeAny}}
+		r, err := cl.Models.GenerateContent(ctx, localModel, genai.Text("What is the weather in Paris?"), cfg)
+		if err != nil {
+			t.Fatalf("GenerateContent: %v", err)
+		}
+		if calls := r.FunctionCalls(); len(calls) == 0 || calls[0].Name != "get_weather" {
+			t.Fatalf("no get_weather call: %+v", r.Candidates[0].Content)
+		}
+		if got := spelled(t, r.Candidates[0]); !strings.Contains(got, "get_weather") {
+			t.Errorf("the call's tokens spell %q", got)
+		}
+	})
+	t.Run("image", func(t *testing.T) {
+		contents := []*genai.Content{genai.NewContentFromParts([]*genai.Part{
+			genai.NewPartFromBytes(redPNG(t), "image/png"),
+			genai.NewPartFromText("What colour is this image? One word."),
+		}, genai.RoleUser)}
+		r, err := cl.Models.GenerateContent(ctx, localModel, contents, base())
+		if err != nil {
+			t.Fatalf("GenerateContent: %v", err)
+		}
+		text := answer(r.Candidates[0])
+		if got := spelled(t, r.Candidates[0]); !strings.Contains(got, text) || !strings.Contains(strings.ToLower(text), "red") {
+			t.Errorf("answer %q, tokens spell %q", text, got)
+		}
+	})
 }

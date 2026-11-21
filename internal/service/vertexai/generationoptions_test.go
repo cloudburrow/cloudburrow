@@ -308,46 +308,69 @@ func TestCachedContentLifecycleAndUse(t *testing.T) {
 	}
 }
 
-// TestResponseLogprobsReportsTheChosenTokens: responseLogprobs reaches the
-// runtime, each chosen token comes back in logprobsResult.chosenCandidates
-// with avgLogprobs their mean, unary and streamed; logprobs (the top
-// candidates) and the combinations the scored decode cannot apply are refused.
+// TestResponseLogprobsReportsTheChosenTokens: responseLogprobs and logprobs
+// reach the runtime; each step comes back in logprobsResult (chosen and top
+// candidates) with avgLogprobs the chosen tokens' mean, unary and streamed,
+// each streamed chunk carrying its own tokens' steps; a stop sequence drops
+// the steps of the tokens it cuts; logprobs outside 1 to 20, or without
+// responseLogprobs, is refused as Vertex refuses it.
 func TestResponseLogprobsReportsTheChosenTokens(t *testing.T) {
+	step := func(tok string, id int32, lp float32) Chunk {
+		return Chunk{Logprobs: []LogprobStep{{
+			Chosen: LogprobsCandidate{Token: tok, TokenID: id, LogProbability: lp},
+			Top: []LogprobsCandidate{
+				{Token: tok, TokenID: id, LogProbability: lp},
+				{Token: "x", TokenID: 99, LogProbability: -3},
+			},
+		}}}
+	}
 	g := &convGen{chunks: []Chunk{
 		{Usage: &Usage{PromptTokens: 5, CandidateTokens: -1}},
-		{Text: "Hel", Logprob: &LogprobsCandidate{Token: "Hel", TokenID: 10, LogProbability: -0.5}},
-		{Text: "lo", Logprob: &LogprobsCandidate{Token: "lo", TokenID: 11, LogProbability: -1.5}},
-		{Last: true, FinishReason: FinishReasonStop, Usage: &Usage{PromptTokens: 5, CandidateTokens: 2}},
+		step("Hel", 10, -0.5),
+		{Text: "Hel"},
+		step("lo", 11, -1.5),
+		step(" you", 12, -1),
+		{Text: "lo you"},
+		{Last: true, FinishReason: FinishReasonStop, Usage: &Usage{PromptTokens: 5, CandidateTokens: 3}},
 	}}
 	srv := newTestServer(t, g)
-	req := `{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"responseLogprobs":true}}`
-	resp, body := post(t, srv, vertexPath(testModel, "generateContent"), req)
+	gen := func(cfg string) (*http.Response, string) {
+		return post(t, srv, vertexPath(testModel, "generateContent"),
+			`{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":`+cfg+`}`)
+	}
+	resp, body := gen(`{"responseLogprobs":true,"logprobs":2}`)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status %d: %s", resp.StatusCode, body)
 	}
 	c := decodeResp(t, body).Candidates[0]
-	if c.LogprobsResult == nil || len(c.LogprobsResult.ChosenCandidates) != 2 || c.AvgLogprobs == nil || *c.AvgLogprobs != -1 ||
-		c.LogprobsResult.ChosenCandidates[1] != (LogprobsCandidate{Token: "lo", TokenID: 11, LogProbability: -1.5}) {
+	if c.LogprobsResult == nil || len(c.LogprobsResult.ChosenCandidates) != 3 || c.AvgLogprobs == nil || *c.AvgLogprobs != -1 ||
+		c.LogprobsResult.ChosenCandidates[1] != (LogprobsCandidate{Token: "lo", TokenID: 11, LogProbability: -1.5}) ||
+		len(c.LogprobsResult.TopCandidates) != 3 || len(c.LogprobsResult.TopCandidates[2].Candidates) != 2 ||
+		c.LogprobsResult.TopCandidates[2].Candidates[1].TokenID != 99 {
 		t.Errorf("candidate %s", body)
 	}
 	g.mu.Lock()
-	if !g.got[0].ResponseLogprobs {
-		t.Error("responseLogprobs did not reach the runtime")
+	if !g.got[0].ResponseLogprobs || g.got[0].TopLogprobs != 2 {
+		t.Errorf("request %+v: responseLogprobs and logprobs did not reach the runtime", g.got[0])
 	}
 	g.mu.Unlock()
-	_, body = post(t, srv, vertexPath(testModel, "streamGenerateContent")+"?alt=sse", req)
-	if strings.Count(body, `"chosenCandidates"`) != 2 {
+	_, body = post(t, srv, vertexPath(testModel, "streamGenerateContent")+"?alt=sse",
+		`{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"responseLogprobs":true}}`)
+	if strings.Count(body, `"chosenCandidates"`) != 2 || !strings.Contains(body, `"avgLogprobs":-1.25`) {
 		t.Errorf("stream: %s", body)
 	}
+	// "lo you" stops at " you": the step of " you" goes with it.
+	_, body = gen(`{"responseLogprobs":true,"stopSequences":[" you"]}`)
+	if c := decodeResp(t, body).Candidates[0]; c.Content.Parts[0].Text != "Hello" || c.LogprobsResult == nil || len(c.LogprobsResult.ChosenCandidates) != 2 {
+		t.Errorf("stop sequence: %s", body)
+	}
 	for name, cfg := range map[string]string{
-		"logprobs": `{"responseLogprobs":true,"logprobs":3}`,
-		"json":     `{"responseLogprobs":true,"responseMimeType":"application/json"}`,
-		"thinking": `{"responseLogprobs":true,"thinkingConfig":{"thinkingBudget":64}}`,
-		"stops":    `{"responseLogprobs":true,"stopSequences":["x"]}`,
+		"logprobs 0":          `{"responseLogprobs":true,"logprobs":0}`,
+		"logprobs 21":         `{"responseLogprobs":true,"logprobs":21}`,
+		"no responseLogprobs": `{"logprobs":3}`,
 	} {
-		resp, body := post(t, srv, vertexPath(testModel, "generateContent"),
-			`{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":`+cfg+`}`)
-		if resp.StatusCode != http.StatusBadRequest {
+		resp, body := gen(cfg)
+		if resp.StatusCode != http.StatusBadRequest || !strings.Contains(body, "logprobs") {
 			t.Errorf("%s: status %d: %s", name, resp.StatusCode, body)
 		}
 	}

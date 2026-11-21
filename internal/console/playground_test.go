@@ -362,7 +362,6 @@ func TestPlaygroundRefusalsMatchTheAPI(t *testing.T) {
 	// Each refused name paired with a request that exercises it.
 	bodies := map[string]string{
 		"safetySettings": `{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"safetySettings":[{}]}`,
-		"logprobs":       `{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"responseLogprobs":true,"logprobs":3}}`,
 	}
 
 	if len(bodies) != len(refusedOptions) {

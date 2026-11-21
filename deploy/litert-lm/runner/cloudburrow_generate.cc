@@ -48,25 +48,25 @@
 //                               channel streamed as {"thought":"..."} lines
 //   --thinking_budget=N         the thinking token budget, -1 unlimited
 //                               (LiteRT-LM's ThinkingBudgetConstraint)
-//   --response_logprobs         decode on an Engine::Session instead of the
-//                               Conversation, and write each sampled token's
-//                               {"text":"...","logprob":{"token":"<base64>",
-//                               "id":N,"score":S}} (#2107)
+//   --response_logprobs         write each decoded token's log-probability
+//                               as a line of its own (#2107):
+//                               {"logprob":{"token":"<base64>","id":N,
+//                               "score":S,"top":[{"token":..,"id":..,
+//                               "score":..},...]}}
+//   --logprobs=N                with --response_logprobs, the N (0 to 20)
+//                               most probable tokens of each step in "top"
 //
-// --response_logprobs exists because the Conversation API drops the scores:
-// the sampler writes each sampled token's log-probability
-// (Sampler::SampleToIdAndScoreBuffer) and the session streams it in
-// Responses::GetScores, but Conversation turns each step into a Message
-// without it. The prompt is the Conversation's own rendering of the same
-// preface and message (RenderPrefaceIntoString, RenderMessageIntoString: the
-// model's chat template and generation prompt), prefilled on a session with
-// the conversation's own SessionConfig and the CPU sampler as an external
-// sampler, the one path on which LiteRT-LM reports scores. That path parses
-// no channels, tool calls or constraints, so the caller sends it plain text
-// requests only. No LiteRT-LM API exposes the other candidates' scores at a
-// step (what Vertex's logprobs, the top candidates, needs): the sampler
-// returns the sampled token's alone, and RunTextScoring scores only targets it
-// is given, one full-vocabulary sort each.
+// The scores come from CloudBurrow's LiteRT-LM patch
+// (deploy/litert-lm/patches/0001-decode-step-logprobs.patch): a decode step
+// observer that sees each step's logits as the model produced them, before
+// any constraint, temperature, top-k or top-p, and reports the log-softmax of
+// the chosen token and of the N most probable ones. The observer runs on the
+// external-sampler path (the CPU sampler outside the executor), so with
+// --response_logprobs the conversation's session samples there. Everything
+// else stays the Conversation's: the chat template, tools and tool choice,
+// JSON and regex constraints, thinking, images and penalties. Tokens of the
+// thought channel (its delimiters included) and the stop tokens are not
+// written: they are not part of the answer.
 //
 // With --request_stdin the runner takes one JSON object on standard input
 // (#1937) instead of --input_prompt:
@@ -107,6 +107,7 @@
 #include <iostream>
 #include <iterator>
 #include <memory>
+#include <mutex>  // NOLINT
 #include <optional>
 #include <string>
 #include <utility>
@@ -132,6 +133,7 @@
 #include "runtime/conversation/conversation.h"
 #include "runtime/conversation/end_of_turn.h"
 #include "runtime/conversation/io_types.h"
+#include "runtime/core/decode_step_observer.h"
 #include "runtime/engine/engine.h"
 #include "runtime/engine/engine_factory.h"
 #include "runtime/engine/engine_settings.h"
@@ -154,8 +156,10 @@ ABSL_FLAG(std::optional<bool>, enable_thinking, std::nullopt,
 ABSL_FLAG(int, thinking_budget, -1,
           "Thinking token budget when thinking is enabled; -1 is unlimited.");
 ABSL_FLAG(bool, response_logprobs, false,
-          "Decode on an Engine::Session and write each sampled token's "
-          "log-probability (#2107).");
+          "Write each decoded token's log-probability (#2107).");
+ABSL_FLAG(int, logprobs, 0,
+          "With --response_logprobs, the number (0 to 20) of most probable "
+          "tokens written for each step.");
 
 namespace {
 
@@ -265,98 +269,93 @@ absl::StatusOr<ToolChoice> ToolChoiceOf(const Message& tc) {
   return out;
 }
 
-void JsonLine(const json& j) { std::cout << j.dump() << "\n" << std::flush; }
-
-// DecodeWithScores answers the request on an Engine::Session that streams
-// the sampler's score of each token it samples (see --response_logprobs).
-absl::Status DecodeWithScores(litert::lm::Engine& engine,
-                              Conversation& conversation,
-                              const ConversationConfig& conversation_config,
-                              const Message& request, const OptionalArgs& args) {
-  const Message& message = request["message"];
-  ABSL_ASSIGN_OR_RETURN(int prompt_tokens,
-                        conversation.CountTokens({message}, args));
-  JsonLine({{"prompt_tokens", prompt_tokens}});
-  // The text the Conversation would prefill: the preface (when the
-  // conversation prefilled it at creation, RenderMessageIntoString renders
-  // only the turn after it), the message and the generation prompt.
-  std::string prompt;
-  if (conversation_config.prefill_preface_on_init()) {
-    ABSL_ASSIGN_OR_RETURN(prompt,
-                          conversation.RenderPrefaceIntoString(OptionalArgs()));
-  }
-  ABSL_ASSIGN_OR_RETURN(std::string turn, conversation.RenderMessageIntoString(
-                                              message, OptionalArgs()));
-  prompt += turn;
-
-  litert::lm::SessionConfig session_config =
-      conversation_config.GetSessionConfig();
-  session_config.SetApplyPromptTemplateInSession(false);
-  session_config.SetUseExternalSampler(true);
-  session_config.SetSamplerBackend(Backend::CPU);
-  ABSL_ASSIGN_OR_RETURN(auto session, engine.CreateSession(session_config));
-  std::vector<litert::lm::InputData> inputs;
-  inputs.emplace_back(litert::lm::InputText(prompt));
-  ABSL_RETURN_IF_ERROR(session->RunPrefill(inputs));
-
-  auto decode_config = litert::lm::DecodeConfig::CreateDefault();
-  if (args.max_output_tokens.has_value()) {
-    decode_config.SetMaxOutputTokens(*args.max_output_tokens);
-  }
-  if (args.repetition_penalty_config.has_value()) {
-    decode_config.SetRepetitionPenaltyConfig(*args.repetition_penalty_config);
-  }
-  auto& tokenizer =
-      const_cast<litert::support::Tokenizer&>(engine.GetTokenizer());
-  absl::Status failure = absl::OkStatus();
-  int decoded = 0;
-  ABSL_ASSIGN_OR_RETURN(
-      auto task,
-      session->RunDecodeAsync(
-          [&](absl::StatusOr<litert::lm::Responses> responses) {
-            if (!responses.ok()) {
-              failure = responses.status();
-              return;
-            }
-            if (responses->GetTexts().empty()) return;
-            const std::string& text = responses->GetTexts()[0];
-            const auto& ids = responses->GetTokenIds();
-            const auto& scores = responses->GetScores();
-            if (text.empty()) return;
-            if (scores.empty()) {
-              // The decode's flush: text held back until the end (a partial
-              // UTF-8 sequence or stop-token prefix). The session reports no
-              // score with it, so it has no logprob line.
-              JsonLine({{"text", text}});
-              return;
-            }
-            if (ids.empty() || ids[0].size() != 1) {
-              // A step without exactly one token and its score has no
-              // score to report: fail rather than invent one.
-              if (failure.ok()) {
-                failure = absl::InternalError(absl::StrCat(
-                    "the session reported ", scores.size(), " scores for ",
-                    ids.empty() ? 0 : ids[0].size(), " tokens in one step"));
-              }
-              return;
-            }
-            const int id = ids[0][0];
-            std::vector<int> one = {id};
-            auto piece = tokenizer.TokenIdsToText(absl::MakeConstSpan(one));
-            ++decoded;
-            JsonLine({{"text", text},
-                      {"logprob",
-                       {{"token", absl::Base64Escape(piece.ok() ? *piece : text)},
-                        {"id", id},
-                        {"score", scores[0]}}}});
-          },
-          decode_config));
-  ABSL_RETURN_IF_ERROR(task->WaitUntilDone(absl::Minutes(10)));
-  ABSL_RETURN_IF_ERROR(failure);
-  std::cout << std::flush;
-  std::cerr << "cloudburrow_generate: decoded_tokens=" << decoded << std::endl;
-  return absl::OkStatus();
+// Lines come from two threads with --response_logprobs: the decode
+// thread's step observer and the conversation's callback.
+std::mutex& OutputMutex() {
+  static std::mutex* mu = new std::mutex();
+  return *mu;
 }
+
+void JsonLine(const json& j) {
+  std::lock_guard<std::mutex> lock(OutputMutex());
+  std::cout << j.dump() << "\n" << std::flush;
+}
+
+// LogprobWriter writes the decode step observer's report of each answer
+// token as a {"logprob":...} line. A step is skipped when its token is a
+// stop token, or lies in the thought channel: from the token that opens it
+// (the first token of the channel's start) to the one that closes it (the
+// last token of its end), both included.
+class LogprobWriter {
+ public:
+  LogprobWriter(litert::support::Tokenizer& tokenizer,
+                const ConversationConfig& config,
+                const EngineSettings& settings)
+      : tokenizer_(tokenizer) {
+    for (const auto& stop : config.GetSessionConfig().GetStopTokenIds()) {
+      if (stop.size() == 1) stop_ids_.push_back(stop[0]);
+    }
+    if (settings.GetLlmMetadata().has_value()) {
+      for (const auto& stop : settings.GetLlmMetadata()->stop_tokens()) {
+        if (stop.has_token_ids() && stop.token_ids().ids_size() == 1) {
+          stop_ids_.push_back(stop.token_ids().ids(0));
+        }
+      }
+    }
+    for (const auto& channel : config.GetChannels()) {
+      if (channel.channel_name != "thought" || channel.start.empty() ||
+          channel.end.empty()) {
+        continue;
+      }
+      auto start = tokenizer_.TextToTokenIds(channel.start);
+      auto end = tokenizer_.TextToTokenIds(channel.end);
+      if (start.ok() && !start->empty() && end.ok() && !end->empty()) {
+        thought_start_ = start->front();
+        thought_end_ = end->back();
+      }
+    }
+  }
+
+  void Step(const litert::lm::DecodeStepLogprobs& step) {
+    if (step.candidate != 0) return;
+    const int id = step.chosen.token_id;
+    for (int stop : stop_ids_) {
+      if (id == stop) return;
+    }
+    if (thought_start_.has_value()) {
+      if (!in_thought_ && id == *thought_start_) in_thought_ = true;
+      if (in_thought_) {
+        if (id == *thought_end_) in_thought_ = false;
+        return;
+      }
+    }
+    json top = json::array();
+    for (const auto& t : step.top) {
+      top.push_back({{"token", Piece(t.token_id)},
+                     {"id", t.token_id},
+                     {"score", t.log_probability}});
+    }
+    JsonLine({{"logprob",
+               {{"token", Piece(id)},
+                {"id", id},
+                {"score", step.chosen.log_probability},
+                {"top", top}}}});
+  }
+
+ private:
+  // Piece is the base64 of the bytes token id decodes to.
+  std::string Piece(int id) {
+    std::vector<int> one = {id};
+    auto piece = tokenizer_.TokenIdsToText(absl::MakeConstSpan(one));
+    return absl::Base64Escape(piece.ok() ? *piece : std::string());
+  }
+
+  litert::support::Tokenizer& tokenizer_;
+  std::vector<int> stop_ids_;
+  std::optional<int> thought_start_;
+  std::optional<int> thought_end_;
+  bool in_thought_ = false;
+};
 
 absl::Status Run(int argc, char** argv) {
   absl::ParseCommandLine(argc, argv);
@@ -442,6 +441,22 @@ absl::Status Run(int argc, char** argv) {
   if (vision_backend.has_value()) {
     session_config.SetVisionModalityEnabled(true);
   }
+  const bool response_logprobs = absl::GetFlag(FLAGS_response_logprobs);
+  const int top_logprobs = absl::GetFlag(FLAGS_logprobs);
+  if (top_logprobs < 0 || top_logprobs > 20) {
+    return absl::InvalidArgumentError(
+        absl::StrCat("--logprobs must be in [0, 20], got ", top_logprobs));
+  }
+  if (response_logprobs) {
+    if (!request_stdin) {
+      return absl::InvalidArgumentError(
+          "--response_logprobs needs --request_stdin");
+    }
+    // The decode step observer (the LiteRT-LM patch) reports the steps the
+    // CPU sampler samples outside the executor.
+    session_config.SetUseExternalSampler(true);
+    session_config.SetSamplerBackend(Backend::CPU);
+  }
   if (AnySamplerFlag()) {
     ABSL_ASSIGN_OR_RETURN(SamplerParameters sampler,
                           RequestSampler(engine->GetEngineSettings()));
@@ -514,13 +529,13 @@ absl::Status Run(int argc, char** argv) {
         .constraint_string = schema};
   }
 
-  if (absl::GetFlag(FLAGS_response_logprobs)) {
-    if (!request_stdin) {
-      return absl::InvalidArgumentError(
-          "--response_logprobs needs --request_stdin");
-    }
-    return DecodeWithScores(*engine, *conversation, conversation_config,
-                            request, args);
+  // Never freed: the decode thread may call the observer until the process
+  // ends, even on an error return.
+  LogprobWriter* logprob_writer = nullptr;
+  if (response_logprobs) {
+    logprob_writer = new LogprobWriter(
+        const_cast<litert::support::Tokenizer&>(engine->GetTokenizer()),
+        conversation_config, engine->GetEngineSettings());
   }
 
   absl::Status failure = absl::OkStatus();
@@ -538,6 +553,13 @@ absl::Status Run(int argc, char** argv) {
     json content = json::array();
     content.push_back({{"type", "text"}, {"text", prompt}});
     message = Message(json::object({{"role", "user"}, {"content", content}}));
+  }
+  if (logprob_writer != nullptr) {
+    litert::lm::SetDecodeStepObserver(
+        [w = logprob_writer](const litert::lm::DecodeStepLogprobs& step) {
+          w->Step(step);
+        },
+        top_logprobs);
   }
   ABSL_RETURN_IF_ERROR(conversation->SendMessageAsync(
       message,
@@ -584,6 +606,7 @@ absl::Status Run(int argc, char** argv) {
       },
       std::move(args)));
   ABSL_RETURN_IF_ERROR(engine->WaitUntilDone(absl::Minutes(10)));
+  litert::lm::SetDecodeStepObserver(nullptr, 0);
   ABSL_RETURN_IF_ERROR(failure);
   std::cout << std::flush;
   auto info = conversation->GetBenchmarkInfo();

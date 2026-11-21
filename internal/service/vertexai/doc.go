@@ -12,7 +12,7 @@
 //     before it resolves to anything.
 //
 //  2. **Unsupported options are refused, not ignored.** An option the runtime
-//     does not apply (logprobs, safetySettings, a Google-hosted tool, …) is
+//     does not apply (safetySettings, audio output, a Google-hosted tool, …) is
 //     refused naming it. Accepting one and generating anyway would report
 //     compliance that did not happen, which is worse than an error because
 //     the caller cannot see it.
