@@ -307,7 +307,7 @@ func (s *Server) UpdateNodePool(_ context.Context, req *containerpb.UpdateNodePo
 			return nil, err
 		}
 		np.Config.ImageType = req.GetImageType()
-		return s.startPoolUpgradeLocked(p, e, np, sv, up), nil
+		return s.startPoolUpgradeLocked(p, e, np, sv, up, false), nil
 	}
 	np.Config.ImageType = req.GetImageType()
 	if rl := req.GetResourceLabels(); rl != nil {

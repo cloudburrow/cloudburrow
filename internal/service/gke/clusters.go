@@ -261,7 +261,7 @@ func (s *Server) CreateCluster(_ context.Context, req *containerpb.CreateCluster
 	c.Status = containerpb.Cluster_PROVISIONING
 	c.InitialClusterVersion = version.GKE
 	c.CurrentMasterVersion = version.GKE
-	c.CurrentNodeVersion = version.GKE
+	c.CurrentNodeVersion = oldestNodeVersion(c)
 	if c.Network == "" {
 		c.Network = "default"
 	}
@@ -324,7 +324,9 @@ func (s *Server) CreateCluster(_ context.Context, req *containerpb.CreateCluster
 		e.access = access
 		s.mu.Unlock()
 		for _, np := range pools {
-			if err := s.backend.Resize(ctx, kind, version.Image, np.Name, poolNodes(np, len(np.Locations))); err != nil {
+			// A pool made on an older version than the control plane's
+			// (node_pools[].version) runs that version's nodes.
+			if err := s.backend.Resize(ctx, kind, s.NodeImage(np.Version), np.Name, poolNodes(np, len(np.Locations))); err != nil {
 				return status.Errorf(codes.Internal, "Adding node pool %q's nodes failed: %v", np.Name, err)
 			}
 		}
@@ -567,7 +569,7 @@ func (s *Server) UpdateCluster(_ context.Context, req *containerpb.UpdateCluster
 			}
 			pp := p
 			pp.pool = np.Name
-			return s.startPoolUpgradeLocked(pp, e, np, sv, up), nil
+			return s.startPoolUpgradeLocked(pp, e, np, sv, up, false), nil
 		}
 	}
 	if t := u.GetDesiredImageType(); t != "" {

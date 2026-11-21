@@ -160,6 +160,10 @@ func (b gkeBackend) DrainNode(ctx context.Context, kind, name string) error {
 	return b.g.DrainNode(ctx, kind, name)
 }
 
+func (b gkeBackend) ForceDrainNode(ctx context.Context, kind, name string) error {
+	return b.g.ForceDrainNode(ctx, kind, name)
+}
+
 func (b gkeBackend) RemoveNode(ctx context.Context, kind, name string) error {
 	return b.g.RemoveNode(ctx, kind, name)
 }

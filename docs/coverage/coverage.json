@@ -17247,15 +17247,16 @@
     "Title": "Kubernetes Engine API (v1)",
     "counts": {
       "Implemented": 2,
-      "Unimplemented": 17,
-      "Verified": 18
+      "Unimplemented": 16,
+      "Verified": 19
     },
     "rows": [
       {
         "method": "google.container.v1.ClusterManager/CancelOperation",
         "status": "Verified",
         "tests": [
-          "test/compat/gke_test.go:125 TestGKEClustersNodePoolsAndOperations"
+          "test/compat/gke_test.go:125 TestGKEClustersNodePoolsAndOperations",
+          "test/compat/gkerollback_test.go:128 TestGKERollbackNodePoolUpgrade"
         ]
       },
       {
@@ -17390,8 +17391,10 @@
       },
       {
         "method": "google.container.v1.ClusterManager/RollbackNodePoolUpgrade",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkerollback_test.go:128 TestGKERollbackNodePoolUpgrade"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/SetAddonsConfig",
@@ -17425,7 +17428,8 @@
         "method": "google.container.v1.ClusterManager/SetMaintenancePolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/gkeupgrade_test.go:170 TestGKEUpgradeMasterThenNodePool"
+          "test/compat/gkerollback_test.go:261 TestGKEAutoUpgradePausesPastItsWindow",
+          "test/compat/gkeupgrade_test.go:172 TestGKEUpgradeMasterThenNodePool"
         ]
       },
       {
@@ -17477,7 +17481,7 @@
         "method": "google.container.v1.ClusterManager/UpdateMaster",
         "status": "Verified",
         "tests": [
-          "test/compat/gkeupgrade_test.go:170 TestGKEUpgradeMasterThenNodePool"
+          "test/compat/gkeupgrade_test.go:172 TestGKEUpgradeMasterThenNodePool"
         ]
       },
       {

@@ -38,12 +38,14 @@ func gkeUpgradeVersions(t *testing.T, g *container.ClusterManagerClient, parent 
 
 // gkeNoAutoUpgrade is a maintenance policy with a "no upgrades" exclusion
 // over the test, so no automatic upgrade races the manual ones, which
-// ignore exclusions.
+// ignore exclusions. It lasts 29 days (a "no upgrades" exclusion may last
+// 30): TestGKEAutoUpgradePausesPastItsWindow moves the Kubernetes Engine
+// clock a day forward (#2076).
 func gkeNoAutoUpgrade() *containerpb.MaintenancePolicy {
 	now := time.Now()
 	return &containerpb.MaintenancePolicy{Window: &containerpb.MaintenanceWindow{
 		MaintenanceExclusions: map[string]*containerpb.TimeWindow{"compat-freeze": {
-			StartTime: timestamppb.New(now.Add(-time.Hour)), EndTime: timestamppb.New(now.Add(24 * time.Hour)),
+			StartTime: timestamppb.New(now.Add(-time.Hour)), EndTime: timestamppb.New(now.Add(29 * 24 * time.Hour)),
 			Options: &containerpb.TimeWindow_MaintenanceExclusionOptions{MaintenanceExclusionOptions: &containerpb.MaintenanceExclusionOptions{
 				Scope: containerpb.MaintenanceExclusionOptions_NO_UPGRADES}}}}}}
 }
@@ -406,7 +408,7 @@ func TestGcloudContainerClustersUpgrade(t *testing.T) {
 		"--maintenance-window-start", "2030-01-01T00:00:00Z", "--maintenance-window-end", "2030-01-01T04:00:00Z",
 		"--maintenance-window-recurrence", "FREQ=DAILY")
 	start := time.Now().UTC().Add(-time.Hour).Format(time.RFC3339)
-	end := time.Now().UTC().Add(24 * time.Hour).Format(time.RFC3339)
+	end := time.Now().UTC().Add(29 * 24 * time.Hour).Format(time.RFC3339)
 	gc("container", "clusters", "update", cluster, "--zone", zone,
 		"--add-maintenance-exclusion-name", "compat-freeze", "--add-maintenance-exclusion-start", start,
 		"--add-maintenance-exclusion-end", end, "--add-maintenance-exclusion-scope", "no_upgrades")

@@ -102,6 +102,7 @@ func (p gkeClustersProvider) poolActions(c *containerpb.Cluster, np *containerpb
 		}},
 		gkePoolUpgrade(c, np, versions),
 		gkePoolCompleteUpgrade(np),
+		gkePoolRollback(np),
 		{ID: "delete", Label: "Delete", Destructive: true, Confirm: np.GetName()},
 	}
 }
@@ -117,6 +118,32 @@ func gkePoolCompleteUpgrade(np *containerpb.NodePool) console.Action {
 		return console.Action{ID: "complete", Label: "Complete upgrade", Unavailable: "This node pool is not soaking in a blue-green upgrade."}
 	}
 	return a
+}
+
+// gkePoolRollback is a node pool's Roll back, as `gcloud container
+// node-pools rollback` does it (#2076): offered while an upgrade is
+// incomplete (cancelled, failed, paused at the end of its maintenance
+// window) or a blue-green one runs before it deletes its blue nodes; the
+// API refuses the rest with its reason.
+// The label is UNVERIFIED (re-read 2026-11-20: how-to/upgrading-a-cluster gives the gcloud command and the API only).
+func gkePoolRollback(np *containerpb.NodePool) console.Action {
+	ph := np.GetUpdateInfo().GetBlueGreenInfo().GetPhase()
+	incomplete := np.GetStatus() == containerpb.NodePool_RUNNING_WITH_ERROR || np.GetStatusMessage() != "" ||
+		(ph != containerpb.NodePool_UpdateInfo_BlueGreenInfo_PHASE_UNSPECIFIED && ph != containerpb.NodePool_UpdateInfo_BlueGreenInfo_DELETING_BLUE_POOL &&
+			ph != containerpb.NodePool_UpdateInfo_BlueGreenInfo_ROLLBACK_STARTED)
+	if !incomplete {
+		why := "This node pool has no incomplete upgrade to roll back: a node pool cannot be rolled back once it has been successfully upgraded."
+		if ph == containerpb.NodePool_UpdateInfo_BlueGreenInfo_DELETING_BLUE_POOL {
+			why = "This node pool is deleting its blue nodes: a blue-green upgrade cannot be rolled back in that phase."
+		}
+		return console.Action{ID: "rollback", Label: "Roll back", Unavailable: why}
+	}
+	return console.Action{ID: "rollback", Label: "Roll back", Title: "Roll back node pool upgrade", Submit: "Roll back", Fields: []console.Field{
+		{Name: "note", Label: "Rollback", Type: "textarea", Immutable: true,
+			Default: "The nodes already upgraded are recreated on " + np.GetVersion() + "; a blue-green upgrade's blue nodes are uncordoned and its green nodes drained and deleted."},
+		{Name: "respectPdb", Label: "Respect pod disruption budgets", Type: "checkbox",
+			Help: "Drain the nodes through evictions, as an upgrade does (gcloud's --respect-pdb). Unchecked, the pods are deleted."},
+	}}
 }
 
 // gkePoolUpgrade is a node pool's Upgrade: Google's node pool page has
@@ -186,6 +213,9 @@ func (p gkeClustersProvider) poolAct(ctx context.Context, cluster string, c *con
 		return gkeStatusErr(err)
 	case "complete":
 		_, err := api.CompleteNodePoolUpgrade(ctx, &containerpb.CompleteNodePoolUpgradeRequest{Name: name})
+		return gkeStatusErr(err)
+	case "rollback":
+		_, err := api.RollbackNodePoolUpgrade(ctx, &containerpb.RollbackNodePoolUpgradeRequest{Name: name, RespectPdb: v["respectPdb"] == "true"})
 		return gkeStatusErr(err)
 	case "upgrade":
 		v := strings.TrimSpace(v["version"])
@@ -258,12 +288,18 @@ func (p gkeClustersProvider) operationsSection(ctx context.Context, project stri
 		st := gkeTitle(o.GetStatus().String())
 		if o.GetStatus() == containerpb.Operation_DONE && o.GetError() != nil {
 			st = "Error"
+			if o.GetError().GetCode() == 1 {
+				// CANCELLED: a cancelled or rolled-back upgrade (#2076).
+				st = "Cancelled"
+			}
 		}
 		r := console.Resource{Name: o.GetName(), Status: st, Fields: map[string]string{
 			"Type": gkeOpType(o.GetOperationType()), "Target": target,
 			"Started": unsetAs(shortTime(o.GetStartTime()), "—"), "Ended": unsetAs(shortTime(o.GetEndTime()), "—"),
 			"Message": unsetAs(o.GetStatusMessage(), "—"),
 		}}
+		// ABORTING (a cancel asked, its started nodes completing) has
+		// nothing left to cancel.
 		if o.GetStatus() == containerpb.Operation_RUNNING || o.GetStatus() == containerpb.Operation_PENDING {
 			r.Target = []string{c.GetName(), gkeOpSeg, o.GetName()}
 			r.Actions = []console.Action{{ID: "cancel", Label: "Cancel", Destructive: true, Confirm: o.GetName()}}

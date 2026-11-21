@@ -644,7 +644,7 @@
   "google.container.v1.ClusterManager/ListNodePools": "implemented",
   "google.container.v1.ClusterManager/ListOperations": "implemented",
   "google.container.v1.ClusterManager/ListUsableSubnetworks": "unimplemented",
-  "google.container.v1.ClusterManager/RollbackNodePoolUpgrade": "unimplemented",
+  "google.container.v1.ClusterManager/RollbackNodePoolUpgrade": "implemented",
   "google.container.v1.ClusterManager/SetAddonsConfig": "unimplemented",
   "google.container.v1.ClusterManager/SetLabels": "implemented",
   "google.container.v1.ClusterManager/SetLegacyAbac": "unimplemented",

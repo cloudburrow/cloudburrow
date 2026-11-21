@@ -28,6 +28,9 @@ type upFake struct {
 	next   int
 	log    []string
 	master string
+	// hook, when set, runs before each AddNode and RemoveNode, outside
+	// the fake's lock (#2076's tests stop an upgrade midway with it).
+	hook func(verb, name string)
 }
 
 func newUpFake() *upFake { return &upFake{fakeBackend: newFake(), pools: map[string][]Node{}} }
@@ -57,7 +60,23 @@ func (f *upFake) PoolNodes(_ context.Context, _, pool string) ([]Node, error) {
 	return append([]Node(nil), f.pools[pool]...), nil
 }
 
+func (f *upFake) runHook(verb, name string) {
+	f.umu.Lock()
+	h := f.hook
+	f.umu.Unlock()
+	if h != nil {
+		h(verb, name)
+	}
+}
+
+func (f *upFake) setHook(h func(verb, name string)) {
+	f.umu.Lock()
+	f.hook = h
+	f.umu.Unlock()
+}
+
 func (f *upFake) AddNode(_ context.Context, _, image, pool string) (string, error) {
+	f.runHook("add", image)
 	f.umu.Lock()
 	defer f.umu.Unlock()
 	f.next++
@@ -79,7 +98,11 @@ func (f *upFake) UncordonNode(_ context.Context, _, name string) error {
 	return f.act("uncordon", name)
 }
 func (f *upFake) DrainNode(_ context.Context, _, name string) error { return f.act("drain", name) }
+func (f *upFake) ForceDrainNode(_ context.Context, _, name string) error {
+	return f.act("force-drain", name)
+}
 func (f *upFake) RemoveNode(_ context.Context, _, name string) error {
+	f.runHook("remove", name)
 	f.umu.Lock()
 	defer f.umu.Unlock()
 	f.log = append(f.log, "remove "+name)

@@ -88,7 +88,7 @@ func gkeIdle(t *testing.T, project, name string, limit time.Duration) gkeServedD
 			for _, s := range d.Sections {
 				if s.ID == "operations" {
 					for _, o := range s.Listing.Items {
-						busy = busy || o.Status == "Running" || o.Status == "Pending"
+						busy = busy || o.Status == "Running" || o.Status == "Pending" || o.Status == "Aborting"
 						if o.Status == "Error" {
 							t.Fatalf("operation %s (%s) failed: %s", o.Name, o.Fields["Type"], o.Fields["Message"])
 						}

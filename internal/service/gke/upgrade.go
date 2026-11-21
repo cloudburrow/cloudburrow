@@ -2,6 +2,7 @@ package gke
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"strconv"
@@ -51,6 +52,9 @@ type Upgrader interface {
 	// DrainNode evicts a node's pods, respecting PodDisruptionBudgets for
 	// up to an hour.
 	DrainNode(ctx context.Context, kind, name string) error
+	// ForceDrainNode deletes a node's pods without the eviction API, so
+	// PodDisruptionBudgets are not respected (a rollback's default).
+	ForceDrainNode(ctx context.Context, kind, name string) error
 	// RemoveNode deletes the node and its machine.
 	RemoveNode(ctx context.Context, kind, name string) error
 }
@@ -261,8 +265,10 @@ func (s *Server) startMasterUpgradeLocked(p parsed, e *entry, to Version, u Upgr
 // ---- node pools ----
 
 // startPoolUpgradeLocked replaces pool np's nodes with nodes of to, per
-// its upgrade settings; s.mu is held and the cluster is ready.
-func (s *Server) startPoolUpgradeLocked(p parsed, e *entry, np *containerpb.NodePool, to Version, u Upgrader) *containerpb.Operation {
+// its upgrade settings; s.mu is held and the cluster is ready. auto is an
+// automatic upgrade's: a surge one pauses when it runs past the end of the
+// maintenance window.
+func (s *Server) startPoolUpgradeLocked(p parsed, e *entry, np *containerpb.NodePool, to Version, u Upgrader, auto bool) *containerpb.Operation {
 	c := e.cluster
 	c.Status = containerpb.Cluster_RECONCILING
 	np.Status = containerpb.NodePool_RECONCILING
@@ -277,24 +283,72 @@ func (s *Server) startPoolUpgradeLocked(p parsed, e *entry, np *containerpb.Node
 	kind, pool := e.kind, np.Name
 	soak := make(chan struct{})
 	e.soak = map[string]chan struct{}{pool: soak}
-	return s.startOpLocked(p, containerpb.Operation_UPGRADE_NODES, np.SelfLink, e, func(ctx context.Context) error {
+	pause := make(chan struct{})
+	// stop is checked between steps: a cancelled upgrade stops (the nodes
+	// it started complete), and an automatic surge upgrade past the end of
+	// its window pauses, to resume in the next one (re-read 2026-11-20:
+	// concepts/maintenance-windows-and-exclusions, "If tasks run beyond
+	// the maintenance window, GKE attempts to pause the tasks", and
+	// how-to/upgrading-a-cluster, rollback when "the upgrade is incomplete
+	// due to a maintenance window timing out").
+	stop := func(window bool) error {
+		select {
+		case <-pause:
+			return errCancelled
+		default:
+		}
+		if auto && window {
+			s.mu.Lock()
+			mp := e.cluster.GetMaintenancePolicy()
+			s.mu.Unlock()
+			if !inWindow(mp, s.now()) {
+				return errPaused
+			}
+		}
+		return nil
+	}
+	op := s.startOpLocked(p, containerpb.Operation_UPGRADE_NODES, np.SelfLink, e, func(ctx context.Context) error {
 		nodes, err := u.PoolNodes(ctx, kind, pool)
 		if err != nil {
 			return status.Errorf(codes.Internal, "Listing node pool %q's nodes failed: %v", pool, err)
 		}
 		var old []string
+		green := 0
 		for _, n := range nodes {
 			if n.Image != to.Image {
 				old = append(old, n.Name)
+			} else {
+				green++
 			}
 		}
 		if settings.GetStrategy() == containerpb.NodePoolUpdateStrategy_BLUE_GREEN {
-			return s.blueGreen(ctx, u, e, np, kind, pool, to, old, settings.GetBlueGreenSettings(), soak)
+			// "Blue-green upgrades continue until completion if they
+			// exceed a maintenance window" (node-pool-upgrade-strategies):
+			// only a cancel stops one. A resumed one keeps the green nodes
+			// it made.
+			return s.blueGreen(ctx, u, np, kind, pool, to, old, green, settings.GetBlueGreenSettings(), soak, pause, func() error { return stop(false) })
 		}
-		return s.surge(ctx, u, kind, pool, to, old, zones, int(settings.GetMaxSurge()), int(settings.GetMaxUnavailable()))
+		return s.surge(ctx, u, kind, pool, to, old, zones, int(settings.GetMaxSurge()), int(settings.GetMaxUnavailable()), func() error { return stop(true) })
 	}, func(err error) {
 		c.Status = containerpb.Cluster_RUNNING
 		delete(e.soak, pool)
+		switch {
+		case errors.Is(err, errPaused):
+			// Partly upgraded: the pool keeps its version until every node
+			// runs the new one.
+			np.Status = containerpb.NodePool_RUNNING
+			np.StatusMessage = pausedMessage
+			return
+		case status.Code(err) == codes.Canceled:
+			// A cancelled blue-green upgrade stays in its phase, to be
+			// resumed or rolled back.
+			np.Status = containerpb.NodePool_RUNNING
+			np.StatusMessage = "The upgrade to " + to.GKE + " was cancelled: resume it by upgrading again, or roll it back."
+			if np.GetUpdateInfo().GetBlueGreenInfo() == nil {
+				np.UpdateInfo = nil
+			}
+			return
+		}
 		np.UpdateInfo = nil
 		if err != nil {
 			np.Status = containerpb.NodePool_RUNNING_WITH_ERROR
@@ -306,7 +360,23 @@ func (s *Server) startPoolUpgradeLocked(p parsed, e *entry, np *containerpb.Node
 		np.Version = to.GKE
 		c.CurrentNodeVersion = oldestNodeVersion(c)
 	})
+	if oe := s.ops[opName(p.project, p.location, op.Name)]; oe != nil {
+		oe.pause, oe.pool = pause, np
+	}
+	return op
 }
+
+// errPaused ends an automatic upgrade that ran past the end of its
+// maintenance window: done, the pool partly upgraded.
+var errPaused = errors.New("paused at the end of the maintenance window")
+
+// pausedMessage is a paused upgrade's operation and node pool message.
+// UNVERIFIED wording (re-read 2026-11-20: maintenance-windows-and-exclusions
+// gives none).
+const pausedMessage = "The automatic upgrade ran past the end of the maintenance window and was paused: it resumes in the next maintenance window."
+
+// errCancelled ends a node pool upgrade that CancelOperation stopped.
+var errCancelled = status.Error(codes.Canceled, "Operation was cancelled.")
 
 // oldestNodeVersion is the cluster's node version: its oldest pool's.
 func oldestNodeVersion(c *containerpb.Cluster) string {
@@ -326,7 +396,7 @@ func oldestNodeVersion(c *containerpb.Cluster) string {
 // at most maxSurge+maxUnavailable of a zone at a time: maxSurge new nodes
 // are added and Ready before as many old ones are drained and deleted; the
 // rest of the batch is drained, deleted and then recreated.
-func (s *Server) surge(ctx context.Context, u Upgrader, kind, pool string, to Version, old []string, zones, maxSurge, maxUnavailable int) error {
+func (s *Server) surge(ctx context.Context, u Upgrader, kind, pool string, to Version, old []string, zones, maxSurge, maxUnavailable int, stop func() error) error {
 	total := len(old)
 	done := 0
 	per := int(math.Ceil(float64(total) / float64(zones)))
@@ -337,6 +407,11 @@ func (s *Server) surge(ctx context.Context, u Upgrader, kind, pool string, to Ve
 	for z := 0; z < total; z += per {
 		zone := old[z:min(z+per, total)]
 		for len(zone) > 0 {
+			if done > 0 {
+				if err := stop(); err != nil {
+					return err
+				}
+			}
 			batch := zone[:min(maxSurge+maxUnavailable, len(zone))]
 			zone = zone[len(batch):]
 			surgeN := min(maxSurge, len(batch))
@@ -374,8 +449,8 @@ func (s *Server) surge(ctx context.Context, u Upgrader, kind, pool string, to Ve
 // blueGreen makes the green nodes, cordons the blue ones, drains them in
 // batches, soaks the pool (CompleteNodePoolUpgrade ends it early) and
 // deletes the blue nodes.
-func (s *Server) blueGreen(ctx context.Context, u Upgrader, e *entry, np *containerpb.NodePool, kind, pool string, to Version,
-	blue []string, bg *containerpb.BlueGreenSettings, soak chan struct{}) error {
+func (s *Server) blueGreen(ctx context.Context, u Upgrader, np *containerpb.NodePool, kind, pool string, to Version,
+	blue []string, green int, bg *containerpb.BlueGreenSettings, soak, pause chan struct{}, stop func() error) error {
 	total := len(blue)
 	phase := func(ph containerpb.NodePool_UpdateInfo_BlueGreenInfo_Phase, deletion string) {
 		s.mu.Lock()
@@ -386,16 +461,25 @@ func (s *Server) blueGreen(ctx context.Context, u Upgrader, e *entry, np *contai
 		s.nodeProgress(ctx, pool, 0, total, "Phase: "+ph.String()+".")
 	}
 	phase(containerpb.NodePool_UpdateInfo_BlueGreenInfo_CREATING_GREEN_POOL, "")
-	for range blue {
+	for i := green; i < total; i++ {
+		if err := stop(); err != nil {
+			return err
+		}
 		if _, err := u.AddNode(ctx, kind, to.Image, pool); err != nil {
 			return status.Errorf(codes.Internal, "Creating the green pool failed: %v", err)
 		}
+	}
+	if err := stop(); err != nil {
+		return err
 	}
 	phase(containerpb.NodePool_UpdateInfo_BlueGreenInfo_CORDONING_BLUE_POOL, "")
 	for _, n := range blue {
 		if err := u.CordonNode(ctx, kind, n); err != nil {
 			return status.Errorf(codes.Internal, "Cordoning node %s failed: %v", n, err)
 		}
+	}
+	if err := stop(); err != nil {
+		return err
 	}
 	phase(containerpb.NodePool_UpdateInfo_BlueGreenInfo_DRAINING_BLUE_POOL, "")
 	rp := bg.GetStandardRolloutPolicy()
@@ -409,10 +493,13 @@ func (s *Server) blueGreen(ctx context.Context, u Upgrader, e *entry, np *contai
 	for i := 0; i < total; i += batch {
 		if i > 0 {
 			d := rp.GetBatchSoakDuration().AsDuration()
-			if err := sleep(ctx, d, nil); err != nil {
+			if err := sleep(ctx, d, nil, pause); err != nil {
 				return err
 			}
 			waited += d
+		}
+		if err := stop(); err != nil {
+			return err
 		}
 		for _, n := range blue[i:min(i+batch, total)] {
 			if err := u.DrainNode(ctx, kind, n); err != nil {
@@ -428,9 +515,13 @@ func (s *Server) blueGreen(ctx context.Context, u Upgrader, e *entry, np *contai
 	if waited+d > maxSoak {
 		d = max(0, maxSoak-waited)
 	}
-	if err := sleep(ctx, d, soak); err != nil {
+	if err := sleep(ctx, d, soak, pause); err != nil {
 		return err
 	}
+	if err := stop(); err != nil {
+		return err
+	}
+	// "This phase can't be paused": CancelOperation refuses it.
 	phase(containerpb.NodePool_UpdateInfo_BlueGreenInfo_DELETING_BLUE_POOL, s.stamp())
 	for j, n := range blue {
 		if err := u.RemoveNode(ctx, kind, n); err != nil {
@@ -441,8 +532,9 @@ func (s *Server) blueGreen(ctx context.Context, u Upgrader, e *entry, np *contai
 	return nil
 }
 
-// sleep waits d, or until early is closed, or ctx is done.
-func sleep(ctx context.Context, d time.Duration, early chan struct{}) error {
+// sleep waits d, or until early or pause is closed (a paused caller
+// checks its stop next), or ctx is done.
+func sleep(ctx context.Context, d time.Duration, early, pause chan struct{}) error {
 	if d <= 0 {
 		return nil
 	}
@@ -451,6 +543,7 @@ func sleep(ctx context.Context, d time.Duration, early chan struct{}) error {
 	select {
 	case <-t.C:
 	case <-early:
+	case <-pause:
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -724,7 +817,7 @@ func (s *Server) AutoUpgrade() []*containerpb.Operation {
 	if err != nil {
 		return nil
 	}
-	now := s.opts.Now()
+	now := s.now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var ops []*containerpb.Operation
@@ -751,7 +844,7 @@ func (s *Server) AutoUpgrade() []*containerpb.Operation {
 			}
 			pp := p
 			pp.pool = np.Name
-			ops = append(ops, s.startPoolUpgradeLocked(pp, e, np, to, u))
+			ops = append(ops, s.startPoolUpgradeLocked(pp, e, np, to, u, true))
 			break
 		}
 	}

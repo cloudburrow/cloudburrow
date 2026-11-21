@@ -180,6 +180,14 @@ func (g *GKE) DrainNode(ctx context.Context, kind, name string) error {
 	return err
 }
 
+// ForceDrainNode cordons and drains a node without the eviction API:
+// PodDisruptionBudgets are not respected.
+func (g *GKE) ForceDrainNode(ctx context.Context, kind, name string) error {
+	_, err := g.runner().Run(ctx, "kubectl", "--kubeconfig", g.kubeconfig(kind), "drain", name, "--ignore-daemonsets",
+		"--delete-emptydir-data", "--force", "--disable-eviction", "--timeout=5m")
+	return err
+}
+
 // RemoveNode deletes a node from the cluster and removes its container.
 func (g *GKE) RemoveNode(ctx context.Context, kind, name string) error {
 	if !strings.HasPrefix(name, kind+"-") {
