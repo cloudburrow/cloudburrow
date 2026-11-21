@@ -312,7 +312,10 @@ func (b *Budgets) List(name string) ([]*bpb.Budget, error) {
 
 // updatable are the fields an update mask may name, by their top-level
 // field; a nested path (budget_filter.projects) updates within it.
-var updatable = map[string]bool{"display_name": true, "budget_filter": true, "amount": true, "threshold_rules": true, "notifications_rule": true}
+// ownership_scope, which the Terraform provider names in every update, is
+// not in the v1 proto this package serves, so it changes nothing.
+var updatable = map[string]bool{"display_name": true, "budget_filter": true, "amount": true, "threshold_rules": true,
+	"notifications_rule": true, "ownership_scope": true}
 
 // UpdateBudget is billingAccounts.budgets.patch. Without an update mask,
 // "only fields with non-default values from the request are updated".

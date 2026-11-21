@@ -16954,6 +16954,141 @@
     ]
   },
   {
+    "Key": "billing",
+    "Title": "Cloud Billing API and Budget API (v1)",
+    "counts": {
+      "Verified": 18
+    },
+    "rows": [
+      {
+        "method": "google.cloud.billing.budgets.v1.BudgetService/CreateBudget",
+        "status": "Verified",
+        "tests": [
+          "test/compat/billing2109_test.go:296 TestCloudBillingBudgets"
+        ]
+      },
+      {
+        "method": "google.cloud.billing.budgets.v1.BudgetService/DeleteBudget",
+        "status": "Verified",
+        "tests": [
+          "test/compat/billing2109_test.go:296 TestCloudBillingBudgets"
+        ]
+      },
+      {
+        "method": "google.cloud.billing.budgets.v1.BudgetService/GetBudget",
+        "status": "Verified",
+        "tests": [
+          "test/compat/billing2109_test.go:296 TestCloudBillingBudgets"
+        ]
+      },
+      {
+        "method": "google.cloud.billing.budgets.v1.BudgetService/ListBudgets",
+        "status": "Verified",
+        "tests": [
+          "test/compat/billing2109_test.go:296 TestCloudBillingBudgets"
+        ]
+      },
+      {
+        "method": "google.cloud.billing.budgets.v1.BudgetService/UpdateBudget",
+        "status": "Verified",
+        "tests": [
+          "test/compat/billing2109_test.go:296 TestCloudBillingBudgets"
+        ]
+      },
+      {
+        "method": "google.cloud.billing.v1.CloudBilling/CreateBillingAccount",
+        "status": "Verified",
+        "tests": [
+          "test/compat/billing2109_test.go:95 TestCloudBillingAccounts"
+        ]
+      },
+      {
+        "method": "google.cloud.billing.v1.CloudBilling/GetBillingAccount",
+        "status": "Verified",
+        "tests": [
+          "test/compat/billing2109_test.go:95 TestCloudBillingAccounts"
+        ]
+      },
+      {
+        "method": "google.cloud.billing.v1.CloudBilling/GetIamPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/billing2109_test.go:95 TestCloudBillingAccounts"
+        ]
+      },
+      {
+        "method": "google.cloud.billing.v1.CloudBilling/GetProjectBillingInfo",
+        "status": "Verified",
+        "tests": [
+          "test/compat/billing2109_test.go:174 TestCloudBillingLinkProject"
+        ]
+      },
+      {
+        "method": "google.cloud.billing.v1.CloudBilling/ListBillingAccounts",
+        "status": "Verified",
+        "tests": [
+          "test/compat/billing2109_test.go:95 TestCloudBillingAccounts"
+        ]
+      },
+      {
+        "method": "google.cloud.billing.v1.CloudBilling/ListProjectBillingInfo",
+        "status": "Verified",
+        "tests": [
+          "test/compat/billing2109_test.go:174 TestCloudBillingLinkProject"
+        ]
+      },
+      {
+        "method": "google.cloud.billing.v1.CloudBilling/MoveBillingAccount",
+        "status": "Verified",
+        "tests": [
+          "test/compat/billing2109_test.go:95 TestCloudBillingAccounts"
+        ]
+      },
+      {
+        "method": "google.cloud.billing.v1.CloudBilling/SetIamPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/billing2109_test.go:95 TestCloudBillingAccounts"
+        ]
+      },
+      {
+        "method": "google.cloud.billing.v1.CloudBilling/TestIamPermissions",
+        "status": "Verified",
+        "tests": [
+          "test/compat/billing2109_test.go:95 TestCloudBillingAccounts"
+        ]
+      },
+      {
+        "method": "google.cloud.billing.v1.CloudBilling/UpdateBillingAccount",
+        "status": "Verified",
+        "tests": [
+          "test/compat/billing2109_test.go:95 TestCloudBillingAccounts"
+        ]
+      },
+      {
+        "method": "google.cloud.billing.v1.CloudBilling/UpdateProjectBillingInfo",
+        "status": "Verified",
+        "tests": [
+          "test/compat/billing2109_test.go:174 TestCloudBillingLinkProject"
+        ]
+      },
+      {
+        "method": "google.cloud.billing.v1.CloudCatalog/ListServices",
+        "status": "Verified",
+        "tests": [
+          "test/compat/billing2109_test.go:241 TestCloudBillingCatalog"
+        ]
+      },
+      {
+        "method": "google.cloud.billing.v1.CloudCatalog/ListSkus",
+        "status": "Verified",
+        "tests": [
+          "test/compat/billing2109_test.go:241 TestCloudBillingCatalog"
+        ]
+      }
+    ]
+  },
+  {
     "Key": "siteverification",
     "Title": "Site Verification API (v1)",
     "counts": {

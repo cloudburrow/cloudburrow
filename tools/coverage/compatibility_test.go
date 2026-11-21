@@ -73,6 +73,8 @@ var compatSections = map[string]string{
 	// #2030, on the Resource Manager port.
 	"cloudquotas":      "## Cloud Quotas — `google.api.cloudquotas.v1`",
 	"siteverification": "## Site Verification — `siteVerification` v1",
+	// #2109, on the Resource Manager port.
+	"billing": "## Cloud Billing — `google.cloud.billing.v1` and `google.cloud.billing.budgets.v1`",
 	// The Firebase Rules API (#2048), named by whole discovery ID.
 	"firebaserules": "## Firebase Rules — `firebaserules.googleapis.com` v1",
 	// The Cloud Storage companion APIs (#1957), named by whole discovery ID.

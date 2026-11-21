@@ -760,7 +760,7 @@ const ROUTES = [
   // Billing (#2109), Google's Billing menu: Manage billing accounts, the
   // projects' Account management, Budgets & alerts and Pricing. Every
   // account is local: nothing asks for or shows payment details.
-  { path: "/billing", service: "billing", icon: "billing", title: "Manage billing accounts", navTitle: "Billing accounts", kind: "Billing account",
+  { path: "/billing/manage", service: "billing", icon: "billing", title: "Manage billing accounts", navTitle: "Billing accounts", kind: "Billing account",
     section: "Billing", product: "billing", productTitle: "Billing" },
   { path: "/billing/projects", service: "billing-projects", icon: "billing", title: "Account management", kind: "Project",
     section: "Billing", product: "billing", productTitle: "Billing" },

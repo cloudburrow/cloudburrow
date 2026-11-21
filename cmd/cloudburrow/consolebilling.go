@@ -112,7 +112,7 @@ func (p billingAccountsProvider) List(ctx context.Context, project string) (cons
 	if err != nil {
 		return console.Listing{}, err
 	}
-	l := console.Listing{Columns: []string{"Billing account ID", "Status", "Type", "Projects", "Organization"}, NameColumn: "Name",
+	l := console.Listing{Columns: []string{"Name", "Status", "Type", "Projects", "Organization"}, NameColumn: "Billing account",
 		Noun: "billing accounts", RowsOpenable: true}
 	for _, a := range all {
 		linked, _ := s.Linked(a.GetName())
@@ -183,7 +183,7 @@ func (p billingAccountsProvider) Detail(ctx context.Context, _ string, path []st
 	if err != nil {
 		return console.Detail{Unavailable: "cannot read the billing account: " + consoleErr(err)}, nil
 	}
-	projects := console.Listing{Columns: []string{"Project ID", "Billing"}, NameColumn: "Project name", Noun: "projects"}
+	projects := console.Listing{Columns: []string{"Billing"}, NameColumn: "Project ID", Noun: "projects"}
 	linked, _ := s.Linked(a.GetName())
 	for _, pi := range linked {
 		state := "Enabled"
@@ -194,7 +194,7 @@ func (p billingAccountsProvider) Detail(ctx context.Context, _ string, path []st
 			"Project name": pi.GetProjectId(), "Project ID": pi.GetProjectId(), "Billing": state}})
 	}
 	projects.Total = len(projects.Items)
-	subs := console.Listing{Columns: []string{"Billing account ID", "Status"}, NameColumn: "Name", Noun: "subaccounts"}
+	subs := console.Listing{Columns: []string{"Name", "Status"}, NameColumn: "Billing account", Noun: "subaccounts"}
 	if l, err := s.ListBillingAccounts(ctx, &billingpb.ListBillingAccountsRequest{Filter: "masterBillingAccount=" + a.GetName()}); err == nil {
 		for _, sub := range l.GetBillingAccounts() {
 			subs.Items = append(subs.Items, console.Resource{Name: sub.GetName(), Fields: map[string]string{"Name": sub.GetDisplayName(),
@@ -335,7 +335,7 @@ func (p billingProjectsProvider) List(ctx context.Context, project string) (cons
 	if err != nil {
 		return console.Listing{}, err
 	}
-	l := console.Listing{Columns: []string{"Project ID", "Billing account", "Billing"}, NameColumn: "Project name", Noun: "projects"}
+	l := console.Listing{Columns: []string{"Billing account", "Billing"}, NameColumn: "Project ID", Noun: "projects"}
 	_, labels := p.accountOptions(false)
 	for _, id := range p.projectIDs() {
 		info, err := s.ProjectBilling(id)
@@ -402,8 +402,8 @@ func (p billingProjectsProvider) ActAt(ctx context.Context, _ string, path []str
 
 // budgetListing lists the accounts' budgets, with their actual spend.
 func budgetListing(s *billing.Server, accounts []*billingpb.BillingAccount) console.Listing {
-	l := console.Listing{Columns: []string{"Billing account", "Budget type", "Amount", "Actual spend", "Thresholds", "Notifications"},
-		NameColumn: "Name", Noun: "budgets"}
+	l := console.Listing{Columns: []string{"Name", "Billing account", "Budget type", "Amount", "Actual spend", "Thresholds", "Notifications"},
+		NameColumn: "Budget", Noun: "budgets"}
 	for _, a := range accounts {
 		list, err := s.Budgets().List(a.GetName())
 		if err != nil {
@@ -664,7 +664,7 @@ func (p billingPricingProvider) List(ctx context.Context, project string) (conso
 	if p.catalog == nil {
 		return console.Listing{}, errors.New(billingNotStarted)
 	}
-	l := console.Listing{Columns: []string{"Service ID", "SKU ID", "SKU description", "Unit", "List price"}, NameColumn: "Service",
+	l := console.Listing{Columns: []string{"Service", "Service ID", "SKU ID", "SKU description", "Unit", "List price"}, NameColumn: "SKU",
 		Noun: "SKUs", TableTitle: "Pricing for the services this instance serves"}
 	svcs, err := p.catalog.ListServices(ctx, &billingpb.ListServicesRequest{})
 	if err != nil {

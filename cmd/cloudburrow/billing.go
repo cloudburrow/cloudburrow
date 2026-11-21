@@ -12,6 +12,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/billing"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
+	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
 )
 
 // isCloudBillingPath matches the Cloud Billing API v1 (#2109) on the
@@ -127,11 +128,29 @@ func serveBilling(rm *resourcemanager.Server, reg *resourcemanager.Registry, su 
 	}}
 	rm.HandleService("google.cloud.billing.budgets.v1", isBudgetsPath,
 		resourcemanager.Impl{Desc: &budgetspb.BudgetService_ServiceDesc, Impl: s.Budgets()})
+	// google_billing_project_info's URL ends in a slash
+	// (projects/{{project}}/billingInfo/), which Google accepts.
+	slashed := &rest.Transcoder{Packages: []string{"google.cloud.billing.v1"}}
+	slashed.RegisterService(&billingpb.CloudBilling_ServiceDesc, s)
+	rm.HandleJSON(func(r *http.Request) bool {
+		return strings.HasPrefix(r.URL.Path, "/v1/projects/") && strings.HasSuffix(r.URL.Path, "/billingInfo/")
+	}, trimTrailingBillingSlash{t: slashed})
 	rm.HandleService("google.cloud.billing.v1", isCloudBillingPath,
 		resourcemanager.Impl{Desc: &billingpb.CloudBilling_ServiceDesc, Impl: s},
 		resourcemanager.Impl{Desc: &billingpb.CloudCatalog_ServiceDesc, Impl: catalog})
 	billingCatalogRef = catalog
 	return s
+}
+
+// trimTrailingBillingSlash serves projects/{p}/billingInfo/ as
+// projects/{p}/billingInfo, through Cloud Billing's transcoder.
+type trimTrailingBillingSlash struct{ t *rest.Transcoder }
+
+func (h trimTrailingBillingSlash) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	r2 := r.Clone(r.Context())
+	r2.URL.Path = strings.TrimSuffix(r.URL.Path, "/")
+	r2.URL.RawPath = ""
+	h.t.ServeHTTP(w, r2)
 }
 
 // billingCatalogRef is the instance's Cloud Catalog, for the console.

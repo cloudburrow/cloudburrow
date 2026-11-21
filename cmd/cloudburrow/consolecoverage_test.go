@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
+	"github.com/cloudburrow/cloudburrow/internal/service/billing"
 
 	"os"
 	"slices"
@@ -73,6 +74,8 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 // cluster.
 var clusterScreens = []string{
 	"projects", "hierarchy", "tags", "iam", "iam-roles", "iam-groups", "iam-sso-profiles", "iam-sso-assignments", "iam-service-accounts", "iam-workload-identity", "iam-workforce-identity", "iam-audit", "iam-orgpolicies", "iam-labels", "iam-settings", "serviceusage", "serviceusage-operations", "ai",
+	// Billing (#2109), always served on the Resource Manager port.
+	"billing", "billing-projects", "billing-budgets", "billing-pricing",
 	"documentai-overview", "documentai-gallery", "documentai", "speech-transcriptions", "speech-recognizers",
 	"speech-custom-classes", "speech-phrase-sets",
 	"workloads", "pods", "k8sservices", "jobs", "nodes", "k8sstorage", "events",
@@ -176,6 +179,8 @@ func coverageDeps(t *testing.T) consoleDeps {
 		parameterManager: &parameterManagerService{},
 		// The APIs & Services page (#1352) reads the Service Usage server.
 		serviceUsage: newServiceUsageServer(cfg, projects, store.NewMemory()),
+		// The Billing pages (#2109) read the Cloud Billing server.
+		billing: billing.NewServer(store.NewMemory(), nil, "organizations/1"),
 		// The Backup and DR page (#1433) reads the Backup and DR server.
 		backupdr: backupdr.NewServer("127.0.0.1:0", nil, ""),
 		// Document AI and Speech-to-Text (#1930) read the local AI

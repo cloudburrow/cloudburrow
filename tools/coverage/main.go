@@ -75,6 +75,8 @@ import (
 	_ "cloud.google.com/go/bigquery/datatransfer/apiv1/datatransferpb"
 	_ "cloud.google.com/go/bigtable/admin/apiv2/adminpb"
 	_ "cloud.google.com/go/bigtable/apiv2/bigtablepb"
+	_ "cloud.google.com/go/billing/apiv1/billingpb"
+	_ "cloud.google.com/go/billing/budgets/apiv1/budgetspb"
 	_ "cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
 	_ "cloud.google.com/go/cloudquotas/apiv1/cloudquotaspb"
 	_ "cloud.google.com/go/cloudtasks/apiv2/cloudtaskspb"
@@ -306,6 +308,10 @@ var areas = []area{
 	// Resource Manager's port.
 	{Key: "cloudquotas", Title: "Cloud Quotas API (v1)", Own: true, Services: []string{"google.api.cloudquotas.v1.CloudQuotas",
 		"google.api.cloudquotas.v1.QuotaAdjusterSettingsManager"}},
+	// Cloud Billing and the Budget API (#2109): CloudBurrow's own, gRPC and
+	// JSON on Resource Manager's port.
+	{Key: "billing", Title: "Cloud Billing API and Budget API (v1)", Own: true, Services: []string{"google.cloud.billing.v1.CloudBilling",
+		"google.cloud.billing.v1.CloudCatalog", "google.cloud.billing.budgets.v1.BudgetService"}},
 	// The Site Verification API (#2030): CloudBurrow's own, JSON only, on
 	// Resource Manager's port. Its methods are the official generated
 	// client's (google.golang.org/api/siteverification/v1).
