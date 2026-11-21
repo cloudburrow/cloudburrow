@@ -2176,7 +2176,7 @@ dd.has-property-action { display: flex; flex-wrap: wrap; align-items: baseline; 
 .trace-details-toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; margin: 8px 0; }
 .trace-find { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .trace-find-count { color: var(--text-muted); min-width: 8ch; }
-.trace-find-mark { background: #fdd663; color: #202124; padding: 0 1px; border-radius: 2px; }
+.trace-find-mark { background: var(--warn); color: var(--on-warn); padding: 0 1px; border-radius: 2px; }
 .trace-row.is-match { box-shadow: inset 3px 0 0 #b06000; }
 .trace-row.is-current-match { background: color-mix(in srgb, #fdd663 30%, transparent); }
 .trace-kv tr.is-match { background: color-mix(in srgb, #fdd663 20%, transparent); }
@@ -2187,8 +2187,8 @@ dd.has-property-action { display: flex; flex-wrap: wrap; align-items: baseline; 
 .trace-node.is-error rect { stroke: var(--error); fill: color-mix(in srgb, var(--error) 10%, var(--surface)); }
 .trace-node.is-match rect { fill: color-mix(in srgb, #fdd663 40%, var(--surface)); }
 .trace-node.is-selected rect, .trace-node:focus-visible rect { stroke-width: 3; }
-.trace-node-name { font-size: 12px; fill: var(--text); }
-.trace-node-latency { font-size: 11px; fill: var(--text-muted); }
+.trace-node-name { font-size: var(--text-caption-size); fill: var(--text); }
+.trace-node-latency { font-size: var(--text-overline-size); fill: var(--text-muted); }
 .trace-details { margin-top: 16px; }
 .trace-timeline td { vertical-align: middle; }
 .trace-bar-cell { width: 45%; min-width: 120px; }

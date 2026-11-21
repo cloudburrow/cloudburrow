@@ -115,7 +115,9 @@ func TestCloudIdentitySearch2103(t *testing.T) {
 		t.Errorf("deviceUsers.list name: = %+v, %v", l, err)
 	}
 
-	// clientStates.list's filter: devices.list's grammar (UNVERIFIED:
+	// clientStates.list's filter: devices.list's grammar (UNVERIFIED (docs
+	// re-read 2026-11-21:
+	// <https://docs.cloud.google.com/identity/docs/reference/rest/v1/devices.deviceUsers.clientStates/list>):
 	// Google does not document it), over each state's device and user.
 	l, err := svc.Devices.DeviceUsers.List("devices/-").Filter("email:joe.s" + sfx).Do()
 	if err != nil || len(l.DeviceUsers) != 1 {

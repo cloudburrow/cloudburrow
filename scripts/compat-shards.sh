@@ -266,12 +266,16 @@ COMPAT_SQL_REPLICA_TESTS='^Test[A-Za-z]*SQL[A-Za-z0-9]*(HighAvailability|Replica
 # the Logging console rounds (TestLoggingConsole*, #2021, #2031, #2032),
 # whose Log Analytics screen needs BigQuery beside Cloud Logging and Cloud
 # Monitoring, which only the run shard's instance serves together.
-# Cloud Trace's pages (TestTraceExplorer*, #2118) run in served, the
-# shard that serves Cloud Trace, and only there.
+# Cloud Trace's pages (TestTraceExplorer*, #2118) and the Compute Engine
+# Permissions panel (TestComputePermissions*, #2125, which needs Compute
+# Engine) run in served, and only there. The Cloud Storage picker over
+# Document AI and Speech-to-Text (TestStoragePicker*, #2097), whose screens
+# are drawn where Cloud Run serves the local AI endpoint, and Logging's App
+# Hub dimensions (TestLoggingAppHub*, #2096), which need App Hub, run in run.
 COMPAT_BROWSER_SHARDS="storage served run emulators memorystore sql localai"
-COMPAT_BROWSER_SERVED_SHARD_TESTS='^Test(GKEServed|KubernetesEnginePages|VPCNetwork|ComputeEngine|TraceExplorer)'
-COMPAT_BROWSER_SERVED_ONLY_TESTS='^Test(GKEServed|VPCNetwork|ComputeEngine|TraceExplorer)'
-COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|CloudBuild|LoggingAdmin|LoggingConsole|SecretManager|Eventarc|DocumentAI|Speech|Workflows|ModelRegistry|Dataform|AppHub)'
+COMPAT_BROWSER_SERVED_SHARD_TESTS='^Test(GKEServed|KubernetesEnginePages|VPCNetwork|ComputeEngine|ComputePermissions|TraceExplorer)'
+COMPAT_BROWSER_SERVED_ONLY_TESTS='^Test(GKEServed|VPCNetwork|ComputeEngine|ComputePermissions|TraceExplorer)'
+COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|CloudBuild|LoggingAdmin|LoggingConsole|LoggingAppHub|SecretManager|Eventarc|DocumentAI|Speech|StoragePicker|Workflows|ModelRegistry|Dataform|AppHub)'
 COMPAT_BROWSER_EMULATORS_SHARD_TESTS='^Test(BigQuery|Firestore|Datastore|Bigtable|Spanner)'
 COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS='^TestMemorystore'
 COMPAT_BROWSER_SQL_SHARD_TESTS='^Test(CloudSQL|BackupDR|PrivateCAKMS)'

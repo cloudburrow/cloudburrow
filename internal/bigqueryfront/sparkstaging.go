@@ -18,7 +18,8 @@ package bigqueryfront
 // spark-procedures/SPARK_JOB_ID/staging/, and the driver's output, once
 // the job ends, as spark-procedures/SPARK_JOB_ID/driveroutput.000000000.
 // The layout is CloudBurrow's own: the page names the bucket, not what it
-// holds (UNVERIFIED). The job's identity needs storage.objects.create on
+// holds (UNVERIFIED (docs re-read 2026-11-21:
+// <https://docs.cloud.google.com/bigquery/docs/spark-procedures>)). The job's identity needs storage.objects.create on
 // the bucket, checked first; a bucket that does not exist is 404. Without a
 // staging bucket nothing is written: "a default Cloud Storage bucket is
 // created in your project", whose name the page does not give, so none is
