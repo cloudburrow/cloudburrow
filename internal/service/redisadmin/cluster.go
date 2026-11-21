@@ -243,6 +243,9 @@ type clusters struct {
 	// rotating are the clusters whose certificates are being rotated
 	// (clustercertrotation.go).
 	rotating map[string]bool
+	// links are the replication links of CLUSTER mode secondaries, by
+	// name (crossclusterlink.go).
+	links map[string]*crrLink
 }
 
 // ClusterServer implements clusterpb.CloudRedisClusterServer.

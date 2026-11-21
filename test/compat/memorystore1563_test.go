@@ -196,9 +196,10 @@ func TestMemorystoreValkeyUpgradeKeepsWrites(t *testing.T) {
 // google.com/go/memorystore/apiv1 and a go-redis ClusterClient: writes made
 // during the engine upgrade of a CLUSTER mode instance (new nodes join as
 // replicas and take over by CLUSTER FAILOVER) are there after it. It also
-// measures why cross-instance replication and migration into CLUSTER mode
-// stay UNIMPLEMENTED: a cluster-mode node refuses REPLICAOF, so its shards
-// cannot replicate another cluster's or a self-managed source's primaries.
+// measures why cross-instance replication in CLUSTER mode is served by
+// replication links (#1577) and migration into it stays UNIMPLEMENTED: a
+// cluster-mode node refuses REPLICAOF, so its shards cannot replicate
+// another cluster's or a self-managed source's primaries themselves.
 func TestMemorystoreValkeyClusterUpgradeKeepsWrites(t *testing.T) {
 	h := New(t)
 	c, project := valkeyAdminClient(t, h)

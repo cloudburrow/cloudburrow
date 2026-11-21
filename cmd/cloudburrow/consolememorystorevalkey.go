@@ -170,8 +170,7 @@ func (valkeyProvider) CreateForm() (string, []console.Field) {
 		console.Field{Name: "restoreBackup", Label: "Restore from backup", Type: "text", Section: msSectionAdvanced,
 			Help: "Optional. projects/{project}/locations/{location}/backupCollections/{collection}/backups/{backup}: the instance starts with its keys."},
 		console.Field{Name: "primaryInstance", Label: "Secondary of (cross-instance replication)", Type: "text", Section: msSectionAdvanced,
-			ShowWhen: "mode=CLUSTER_DISABLED",
-			Help:     "Optional. projects/{project}/locations/{location}/instances/{instance}: the instance replicates that primary and is read-only."})
+			Help: "Optional. projects/{project}/locations/{location}/instances/{instance}, of the same mode: the instance replicates that primary and is read-only; in Cluster mode it takes the primary's shard count and version."})
 	return "Create instance", fields
 }
 

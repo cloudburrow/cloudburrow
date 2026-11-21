@@ -65,10 +65,17 @@ func (r *clusterRecord) tokenAuth() bool {
 	return r.AuthMode == "AUTH_MODE_TOKEN_AUTH"
 }
 
-// aclUsers are the ACL users every node of r has, each SETUSER's rules
+// aclUsers are the ACL users every node of r has: aclUsersOf's, with a
+// CLUSTER mode secondary's clients refused writes (crossclusterlink.go).
+// Call with mu held, or on a snapshot.
+func (c *clusters) aclUsers(r *clusterRecord) map[string][]any {
+	return c.crrUsers(r, r.crrSecondary())
+}
+
+// aclUsersOf are the ACL users every node of r has, each SETUSER's rules
 // after the username, in name order: the token auth users, the ACL
 // policy's (aclpolicy.go) and IAM auth's (iamauth.go). Call with mu held, or on a snapshot.
-func (c *clusters) aclUsers(r *clusterRecord) map[string][]any {
+func (c *clusters) aclUsersOf(r *clusterRecord) map[string][]any {
 	out := map[string][]any{}
 	for u, tu := range r.TokenUsers {
 		rule := []any{"reset", "on"}
@@ -375,14 +382,14 @@ func trimOwner(name string) string {
 	return name
 }
 
-// checkCrossCluster refuses cross-cluster (cross-instance) replication:
-// a Valkey cluster-mode replica follows a primary of its own cluster only
-// (CLUSTER REPLICATE takes a node ID the cluster's gossip knows), so a
-// separate cluster cannot replicate another's shards, and a switchover
-// would have to merge the two clusters' gossip.
+// checkCrossCluster refuses a Redis cluster's cross_cluster_replication_
+// config: Memorystore for Valkey's CLUSTER mode secondaries are fed by
+// replication links (crossclusterlink.go, #1577), but the Redis Cluster
+// API's config, its membership and its switchover and detach are not
+// mapped onto them yet.
 func checkCrossCluster(asked bool) error {
 	if !asked {
 		return nil
 	}
-	return apierror.Unimplemented("cross-cluster replication is not served here: a Valkey cluster-mode node refuses REPLICAOF and its replicas replicate only a primary of its own cluster (CLUSTER REPLICATE), so one cluster cannot be a secondary of another")
+	return apierror.Unimplemented("cross-cluster replication of a Redis cluster is not served here yet: it is served for Memorystore for Valkey instances in CLUSTER mode (cross_instance_replication_config), whose links are not yet mapped onto the Redis Cluster API's cross_cluster_replication_config")
 }

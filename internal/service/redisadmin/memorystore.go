@@ -100,6 +100,9 @@ type valkeyFields struct {
 	// (crossinstance.go); nil for none.
 	CIR       *cirConfig `json:"cir,omitempty"`
 	Migration *migration `json:"migration,omitempty"`
+	// LinkPassword is the password of the user a CLUSTER mode secondary's
+	// replication links write as (crossclusterlink.go).
+	LinkPassword string `json:"linkPassword,omitempty"`
 }
 
 type valkeyNetwork struct {
@@ -909,6 +912,13 @@ func (s *MemorystoreServer) UpdateInstance(ctx context.Context, req *memorystore
 	if next.ShardCount != r.ShardCount && next.ReplicaCount != r.ReplicaCount {
 		return nil, apierror.InvalidArgument("shard_count and replica_count cannot be changed in one update")
 	}
+	if !r.standalone() && vf.role() != memorystorepb.CrossInstanceReplicationConfig_NONE.String() &&
+		(next.ShardCount != r.ShardCount || (set["engine_version"] && in.GetEngineVersion() != vf.EngineVersion)) {
+		// Google scales and upgrades the secondaries with their primary;
+		// here each shard's replication link pairs shards of the same
+		// slots and version (crossclusterlink.go), so neither is served.
+		return nil, apierror.Unimplemented("shard_count and engine_version of a CLUSTER mode instance in cross-instance replication are not changed here: its secondaries are not scaled or upgraded with it; detach them first")
+	}
 	if set["node_type"] {
 		if err := checkValkeyNodeType(in.GetNodeType()); err != nil {
 			return nil, err
@@ -1113,6 +1123,7 @@ func (s *MemorystoreServer) DeleteInstance(ctx context.Context, req *memorystore
 	nodes := append([]*clusterNode(nil), r.Nodes...)
 	name := r.Name
 	return s.api.launch(op, func() {
+		c.crossClusterUnlink(name)
 		c.removeNodes(nodes)
 		c.mu.Lock()
 		delete(c.busy, name)

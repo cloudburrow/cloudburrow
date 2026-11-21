@@ -449,7 +449,9 @@ func TestMemorystoreValkeyTokenAuthBackups(t *testing.T) {
 	}
 	if _, err := c.CreateInstance(h.Context(), &memorystorepb.CreateInstanceRequest{Parent: parent, InstanceId: fmt.Sprintf("compat-vkccr-%d", sfx),
 		Instance: &memorystorepb.Instance{ShardCount: 1, CrossInstanceReplicationConfig: &memorystorepb.CrossInstanceReplicationConfig{
-			InstanceRole: memorystorepb.CrossInstanceReplicationConfig_SECONDARY}}}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("CreateInstance with cross-instance replication = %v, want UNIMPLEMENTED", err)
+			InstanceRole: memorystorepb.CrossInstanceReplicationConfig_SECONDARY}}}); status.Code(err) != codes.InvalidArgument {
+		// Served in CLUSTER mode since #1577: a secondary with no
+		// primary_instance is INVALID_ARGUMENT.
+		t.Errorf("CreateInstance of a secondary without primary_instance = %v, want INVALID_ARGUMENT", err)
 	}
 }

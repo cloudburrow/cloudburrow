@@ -37,12 +37,12 @@ import (
 // and its nodes trust every member's (cirConfig.PeerCAs, given to a node
 // at its start and to the running ones by CONFIG SET tls-ca-cert-file
 // before a switchover), so they replicate over TLS (tls-replication)
-// whichever member is the primary. In CLUSTER mode it keeps its 501: a
-// cluster-mode node refuses REPLICAOF ("REPLICAOF not allowed in cluster
-// mode", measured by TestMemorystoreValkeyClusterUpgradeKeepsWrites), and a
-// cluster-mode replica follows only a primary of its own cluster (CLUSTER
-// REPLICATE takes a node ID its gossip knows), so another cluster's shards
-// cannot be replicated, even with the same slot layout.
+// whichever member is the primary. In CLUSTER mode, where a node refuses
+// REPLICAOF ("REPLICAOF not allowed in cluster mode", measured by
+// TestMemorystoreValkeyClusterUpgradeKeepsWrites) and follows only a
+// primary of its own cluster, each shard of a secondary is fed by a
+// replication link CloudBurrow runs (crossclusterlink.go, #1577); the
+// switchover and detach are the same updates.
 //
 // Migration (StartMigration, FinishMigration) from a self-managed Valkey or
 // Redis server into a CLUSTER_DISABLED instance is the same replication:
@@ -170,9 +170,6 @@ func cirPrimary(in *memorystorepb.Instance, mode memorystorepb.Instance_Mode) (s
 	default:
 		return "", apierror.InvalidArgument("cross_instance_replication_config.instance_role %s is not an instance role", cfg.GetInstanceRole())
 	}
-	if mode == memorystorepb.Instance_CLUSTER {
-		return "", checkCrossCluster(true)
-	}
 	p := cfg.GetPrimaryInstance().GetInstance()
 	if instanceRE.FindStringSubmatch(p) == nil {
 		return "", apierror.InvalidArgument("cross_instance_replication_config.primary_instance.instance must be projects/{project}/locations/{location}/instances/{instance}, not %q", p)
@@ -187,8 +184,8 @@ func (c *clusters) checkPrimary(r *clusterRecord, name string) error {
 		return apierror.NotFound("primary instance %s was not found", name)
 	}
 	switch {
-	case !p.standalone():
-		return apierror.FailedPrecondition("primary instance %s is in CLUSTER mode: a secondary replicates a primary of its own mode, and only CLUSTER_DISABLED instances are served", name)
+	case p.standalone() != r.standalone():
+		return apierror.InvalidArgument("a secondary's mode must be its primary's: primary instance %s is %s", name, p.Valkey.Mode)
 	case p.state != clusterpb.Cluster_ACTIVE:
 		return apierror.FailedPrecondition("primary instance %s is %s, not ACTIVE", name, p.state)
 	case c.busy[name] != "":
@@ -204,7 +201,21 @@ func (c *clusters) checkPrimary(r *clusterRecord, name string) error {
 	case p.Valkey.Migration.migrating():
 		return apierror.FailedPrecondition("primary instance %s is migrating", name)
 	}
-	if r.TransitCA != "" {
+	if !r.standalone() {
+		// In CLUSTER mode the shard count and engine version are the
+		// primary's, as Google's guide says a secondary's are copied from
+		// it, and the shards are fed by replication links
+		// (crossclusterlink.go).
+		r.ShardCount, r.Valkey.EngineVersion = p.ShardCount, p.Valkey.EngineVersion
+		r.Nodes, r.NextNode = nil, 0
+		for sh := 0; sh < int(r.ShardCount); sh++ {
+			for k := 0; k <= int(r.ReplicaCount); k++ {
+				r.Nodes = append(r.Nodes, &clusterNode{Server: clusterServerName(r.Name, r.NextNode), Shard: sh, Primary: k == 0})
+				r.NextNode++
+			}
+		}
+		r.Valkey.LinkPassword = newUID() + newUID()
+	} else if r.TransitCA != "" {
 		if _, ok := c.rt.(Shell); !ok {
 			return apierror.Unimplemented("cross-instance replication with in-transit encryption is not supported by this instance's servers")
 		}
@@ -373,7 +384,24 @@ func (c *clusters) linkSecondary(ctx context.Context, name string) error {
 	src := c.sourceOf(p)
 	snap := *r
 	snap.Nodes = append([]*clusterNode(nil), r.Nodes...)
+	pname := p.Name
 	c.mu.Unlock()
+	if !snap.standalone() {
+		// CLUSTER mode: replication links feed the shards
+		// (crossclusterlink.go).
+		if err := c.setWrites(ctx, &snap, snap.Nodes, true); err != nil {
+			return fmt.Errorf("refuse the secondary's writes: %w", err)
+		}
+		if err := c.crossClusterLink(ctx, name, pname); err != nil {
+			return fmt.Errorf("replicate primary instance %s: %w", pname, err)
+		}
+		c.mu.Lock()
+		if live := c.byName[pname]; live != nil {
+			c.setMembership(live, c.secondariesOf(pname))
+		}
+		c.mu.Unlock()
+		return nil
+	}
 	if src.host == "" {
 		return fmt.Errorf("primary instance %s has no running primary", p.Name)
 	}
@@ -509,9 +537,6 @@ func (s *MemorystoreServer) updateCIR(c *clusters, r *clusterRecord, want *memor
 		return nil, apierror.InvalidArgument("cross_instance_replication_config.instance_role is required")
 	}
 	cur := r.Valkey.role()
-	if !r.standalone() {
-		return nil, checkCrossCluster(true)
-	}
 	type step struct {
 		unlink []*clusterRecord
 		link   []*clusterRecord // to the new primary
@@ -600,9 +625,36 @@ func (s *MemorystoreServer) updateCIR(c *clusters, r *clusterRecord, want *memor
 		linked = append(linked, snaps[x])
 	}
 	trust := trustOf(append([]*clusterRecord{primary}, members...))
+	if !r.standalone() {
+		for _, x := range st.link {
+			if x.Valkey.LinkPassword == "" {
+				x.Valkey.LinkPassword = newUID() + newUID()
+				_ = c.save(x)
+			}
+		}
+	}
 	return s.api.launch(op, func() {
 		ctx, cancel := context.WithTimeout(c.bg, clusterWait)
 		defer cancel()
+		if !r.standalone() {
+			err := c.relinkClusters(ctx, snaps, st.unlink, st.link, primary)
+			c.mu.Lock()
+			c.clearBusy(marked, op)
+			r.state = clusterpb.Cluster_ACTIVE
+			if err == nil {
+				for _, x := range st.unlink {
+					if x != primary {
+						x.Valkey.CIR = nil
+						_ = c.save(x)
+					}
+				}
+				c.setMembership(primary, members)
+			}
+			out := c.renderValkey(r)
+			c.mu.Unlock()
+			c.finish(op, out, err)
+			return
+		}
 		// Over TLS, the members that will replicate the new primary trust
 		// its CA first.
 		err := c.shareTrust(ctx, append([]*clusterRecord{snaps[primary]}, linked...), trust)

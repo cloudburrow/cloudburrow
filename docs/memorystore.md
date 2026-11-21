@@ -646,9 +646,9 @@ instance are: not `ACTIVE`, `encryption_info.kms_key_primary_state` says why, an
 stopped, their data first kept as RDB files sealed with the data key; once the key can be used
 again new nodes are formed (`UPDATING`) and the data loaded, then `ACTIVE`.
 
-Not served: cross-cluster replication (UNIMPLEMENTED: a Valkey cluster-mode replica replicates
-only a primary of its own cluster, `CLUSTER REPLICATE` taking a node its gossip knows, so one
-cluster cannot be another's secondary).
+Not served yet: the Redis Cluster API's cross-cluster replication (UNIMPLEMENTED). Memorystore
+for Valkey serves it in `CLUSTER` mode (#1577, below), through replication links that are not
+yet mapped onto `cross_cluster_replication_config`.
 
 **Across a restart** (#1557). After `cloudburrow stop` and `up` (persistent mode, the same state
 directory) a cluster is formed again with its users, policy and backups (`CREATING` until it
@@ -823,11 +823,21 @@ ends after it, finding the primary node a replica, does not fence it, and a fenc
 instance that is no longer checked (a secondary, a migration's target) is lifted at the next
 check, so its primary endpoint reaches its primary node instead of closing every connection
 (`TestValkeySwitchoverCheckLeavesEndpointOpen`).
-In `CLUSTER` mode it is 501, as a
-Redis cluster's (§8): Google documents it with the same shards and slots on both, but a
-cluster-mode Valkey node refuses `REPLICAOF` ("REPLICAOF not allowed in cluster mode", measured
-in `TestMemorystoreValkeyClusterUpgradeKeepsWrites` on 8.1) and its replicas follow only primaries
-of their own cluster, so a shard cannot replicate another cluster's primary.
+In `CLUSTER` mode (#1577) a secondary takes its primary's shard count and engine version, as
+Google's guide says they are copied. A cluster-mode Valkey node refuses `REPLICAOF` ("REPLICAOF
+not allowed in cluster mode", measured in `TestMemorystoreValkeyClusterUpgradeKeepsWrites`) and its
+replicas follow only primaries of their own cluster, so CloudBurrow runs a replication link per
+shard: it pauses the primary shard's writes (`CLIENT PAUSE WRITE`), asks it for a full
+resynchronization as a replica does (`PSYNC ? -1`, the RDB payload read past), copies every key
+with its TTL (`DUMP`, `RESTORE ... REPLACE`) and the functions (`FUNCTION DUMP`/`RESTORE`) into the
+secondary's shard of the same slots, emptied first, lets the writes resume, and applies the
+replication stream from the paused offset, acknowledging it (`REPLCONF ACK`) each second; a link
+that breaks starts again with a full copy. The secondary's clients are refused writes by ACL
+(`-@write` on every user, the default one included: NOPERM, as Google documents secondaries as
+read-only and names no error), and the links write as a user of their own. A switchover and a
+detach are the same updates as above (`TestMemorystoreValkeyClusterModeCrossRegionReplication`).
+A shard count change or engine upgrade of a member is 501: Google scales and upgrades the
+secondaries with their primary, and the links pair shards of the same slots and version.
 
 **Migration** (`StartMigration`, `FinishMigration`, #1557) into a `CLUSTER_DISABLED` instance:
 its primary replicates `self_managed_source`'s `ip_address` and `port` (state `MIGRATING`,
