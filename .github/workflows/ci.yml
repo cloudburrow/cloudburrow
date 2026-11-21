@@ -1210,7 +1210,9 @@ jobs:
           # their output back through (#1930, #1953).
           # Cloud Monitoring's Cloud Run metrics, and the kubeconfig that
           # port-forwards the gateway a service's URL is reached through (#2049).
-          if [ "$SHARD" = run ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT,RUN_SERVICEUSAGE,WORKFLOWS,STORAGE,MONITORING,KUBECONFIG; fi
+          # And the Firestore and Datastore emulators, where the Eventarc
+          # triggers made on a function's Add trigger have their events caused (#2093).
+          if [ "$SHARD" = run ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT,RUN_SERVICEUSAGE,WORKFLOWS,STORAGE,MONITORING,KUBECONFIG,RUN_FIRESTORE,RUN_DATASTORE; fi
           # The sql shard's read back through the Cloud SQL Admin API, the Backup
           # and DR Service and Secret Manager, which holds Run SQL's password,
           # and the Compute Engine API, whose VMs and disks Backup and DR backs

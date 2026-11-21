@@ -504,7 +504,7 @@ browser_suite() {  # <shard> <dir> <flags...>
   # Cloud Storage, for the Document AI and Speech batch pages' output, Cloud
   # Monitoring's Cloud Run metrics, and the kubeconfig that port-forwards the
   # gateway a service's URL is reached through (#2049).
-  if [ "$shard" = run ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT,RUN_SERVICEUSAGE,WORKFLOWS,STORAGE,MONITORING,KUBECONFIG; fi
+  if [ "$shard" = run ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT,RUN_SERVICEUSAGE,WORKFLOWS,STORAGE,MONITORING,KUBECONFIG,RUN_FIRESTORE,RUN_DATASTORE; fi
   # The sql shard's read back through the Cloud SQL Admin API, the Backup
   # and DR Service and Secret Manager, which holds Run SQL's password, and
   # the Compute Engine API for Backup and DR's VM and disk pages.
