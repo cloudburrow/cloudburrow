@@ -195,6 +195,15 @@ and nothing in it reaches Google. A red scheduled run, or one dispatched on main
 `workflow-red` issue through `report-red-runs.yml`. `test/repo/nightly_sql_workflow_test.go` keeps it
 in shape.
 
+### The crossservice shard
+
+The compat job's `crossservice` shard runs on the `run` shard's instance again. It runs only
+`COMPAT_CROSSSERVICE_TESTS` from `scripts/compat-shards.sh`, which the `run` shard skips: these are
+Eventarc's tests, Artifact Registry's cleanup policies, and the tests that need services that no
+other shard serves together. Until #2088 it was called `cross`, which was also the name of the
+cross-compile job (`make cross`, checks `cross (<target>)`). `test/repo`'s
+`TestCompatShardsAreNotNamedAsOtherJobs` now fails if a shard is named like another ci.yml job.
+
 ### The local AI shard
 
 The compat job's `localai` shard (#1985) runs the compat tests that need the local generation or
