@@ -24,6 +24,39 @@ export async function enterpriseDatabase(project, id) {
   return async () => { await fetch(`${base}/${id}`, { method: 'DELETE', headers }); };
 }
 
+// Open Security Rules for project's databases, released through the
+// Firebase Rules API the instance serves: on Google, as here (#2050), a
+// database with no cloud.firestore release denies every client SDK call,
+// and the Firebase SDK is a client SDK. A release per database, as Google
+// names them (cloud.firestore for (default), cloud.firestore/DATABASE for
+// another); deleted when done, which leaves the project denying clients
+// again.
+export async function openRules(project, databases) {
+  const addr = process.env.CLOUDBURROW_FIREBASERULES_ENDPOINT;
+  assert.ok(addr, '`cloudburrow env` exported no CLOUDBURROW_FIREBASERULES_ENDPOINT');
+  const base = `http://${addr}/v1/projects/${project}`;
+  const headers = { 'content-type': 'application/json' };
+  const call = async (method, path, body) => {
+    const res = await fetch(`${base}${path}`, { method, headers, body: body && JSON.stringify(body) });
+    const text = await res.text();
+    assert.equal(res.status, 200, `${method} ${path}: ${text}`);
+    return text ? JSON.parse(text) : {};
+  };
+  const source = "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n" +
+    '    match /{document=**} {\n      allow read, write: if true;\n    }\n  }\n}\n';
+  const ruleset = await call('POST', '/rulesets', { source: { files: [{ name: 'firestore.rules', content: source }] } });
+  const releases = [];
+  for (const db of databases) {
+    const name = `projects/${project}/releases/cloud.firestore${db === '(default)' ? '' : `/${db}`}`;
+    await call('POST', '/releases', { name, rulesetName: ruleset.name });
+    releases.push(name);
+  }
+  return async () => {
+    for (const name of releases) await fetch(`http://${addr}/v1/${name}`, { method: 'DELETE', headers });
+    await fetch(`http://${addr}/v1/${ruleset.name}`, { method: 'DELETE', headers });
+  };
+}
+
 // No apiKey: the SDK sends the app's key as X-Goog-Api-Key on every call,
 // and Google refuses a key no project has (API_KEY_INVALID, #1915), which a
 // made-up one is; Firestore needs none, as the caller's token authorizes.
@@ -55,6 +88,7 @@ export async function writeStream(sdk, settings = {}) {
   const project = process.env.GOOGLE_CLOUD_PROJECT;
   const entId = `edition-fb-${suffix()}`.toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 60);
   const drop = await enterpriseDatabase(project, entId);
+  const closeRules = await openRules(project, ['(default)', entId]);
   const std = firestoreFor(sdk, settings, project, '(default)');
   const ent = firestoreFor(sdk, settings, project, entId);
   const coll = `fb-edition-${suffix()}`;
@@ -79,6 +113,7 @@ export async function writeStream(sdk, settings = {}) {
   } finally {
     await std.close();
     await ent.close();
+    await closeRules();
     await drop();
   }
 }

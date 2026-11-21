@@ -271,8 +271,13 @@ echo $a`
 		return fmt.Errorf("install kubeadm %s: %w", version, err)
 	}
 	// The version is given, so kubeadm looks nothing up online, and the
-	// images are present, so it pulls none.
-	if _, err := r.Run(ctx, "docker", "exec", cp, "kubeadm", "upgrade", "apply", version, "--yes"); err != nil {
+	// images are present, so it pulls none. SystemVerification checks the
+	// host's kernel, which a kind node shares and cannot load modules into:
+	// on a kernel built without CONFIG_IKCONFIG (GitHub's 7.0 azure runners)
+	// it fails reading the kernel config, so it is skipped here, as kind
+	// skips the whole preflight phase at init and join.
+	if _, err := r.Run(ctx, "docker", "exec", cp, "kubeadm", "upgrade", "apply", version, "--yes",
+		"--ignore-preflight-errors=SystemVerification"); err != nil {
 		return fmt.Errorf("kubeadm upgrade apply %s: %w", version, err)
 	}
 	for _, b := range []string{"kubelet", "kubectl"} {

@@ -155,7 +155,7 @@ func (p *tab) mediaFetch(src string) (status int, ctype string) {
 	return r.Status, r.Type
 }
 
-// TestSpeechWorkspaceAndPlaybackThroughThePage (#2084), in the run shard
+// TestSpeechWorkspaceAndPlaybackThroughThePage (#2084), in the localai shard
 // with Cloud Storage and the local models (CLOUDBURROW_TEST_LOCALAI): New
 // transcription's Workspace > New workspace creates the bucket; a Local
 // upload's audio, transcript.json and metadata.json are written there under
