@@ -116,6 +116,12 @@ func (s *Server) CreateService(ctx context.Context, req *runpb.CreateServiceRequ
 		return nil, apierror.FailedPrecondition("the Knative Service %s this service would be created as is held by %s", kname, holder)
 	}
 
+	// Output only: who made it (servicerecord.go, #2049).
+	svc.Creator = callerEmail(ctx)
+	svc.LastModifier = svc.Creator
+	if err := s.ensurePlaceholder(ctx, svc.GetTemplate().GetContainers()); err != nil {
+		return nil, err
+	}
 	manifest, err := renderService(svc, kname, s.kn.namespace(), s.instance, s.secrets, s.injectedFor(projectOf(name), svc.GetTemplate().GetServiceAccount()), s.cloudSQLConfig())
 	if err != nil {
 		return nil, err
@@ -196,6 +202,10 @@ func (s *Server) UpdateService(ctx context.Context, req *runpb.UpdateServiceRequ
 	// Updated in place, under the name it has: an older version's service
 	// keeps its ID as its Knative name (#1400).
 	kname := existing.Metadata.Name
+	svc.Creator, svc.LastModifier = existing.Metadata.Annotations[annCreator], callerEmail(ctx)
+	if err := s.ensurePlaceholder(ctx, svc.GetTemplate().GetContainers()); err != nil {
+		return nil, err
+	}
 	manifest, err := renderService(svc, kname, s.kn.namespace(), s.instance, s.secrets, s.injectedFor(projectOf(svc.GetName()), svc.GetTemplate().GetServiceAccount()), s.cloudSQLConfig())
 	if err != nil {
 		return nil, err

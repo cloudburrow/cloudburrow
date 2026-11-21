@@ -364,8 +364,10 @@ compat_shard() {
       # Workflows (#1986): its workflows call a Cloud Run service with
       # http.post and Cloud Storage and Pub/Sub through connectors.
       # Memorystore, as RUN_MEMORYSTORE_ADMIN, for the Redis instances'
-      # direct events (#1997).
-      SERVICES=run,secretmanager,tasks,storage,pubsub,firestore,datastore,gke,memorystore,kms,scheduler,logging,bigquery,cloudsql,cloudsql-mysql,workflows
+      # direct events (#1997). Cloud Monitoring, as the browser step's
+      # MONITORING only, for Cloud Run's request, latency and instance
+      # metrics on a service's and a function's Metrics tab (#2049).
+      SERVICES=run,secretmanager,tasks,storage,pubsub,firestore,datastore,gke,memorystore,kms,scheduler,logging,bigquery,cloudsql,cloudsql-mysql,workflows,monitoring
       # Cloud Run (#336). For the revisions that reach Storage and Pub/Sub
       # with no client options (#576) and call KMS, Scheduler and Logging
       # (#681), the RUN_* names, so those suites do not run a second time

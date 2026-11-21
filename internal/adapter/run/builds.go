@@ -144,7 +144,9 @@ func (b *builtImages) original(local string) (string, bool) {
 func builtImagesOf(containers []*runpb.Container) map[string]string {
 	out := map[string]string{}
 	for _, c := range containers {
-		if l, ok := localBuilds.resolve(c.GetImage()); ok {
+		if p := placeholderRef(); p != "" && c.GetImage() == PlaceholderImage {
+			out[p] = PlaceholderImage
+		} else if l, ok := localBuilds.resolve(c.GetImage()); ok {
 			out[l] = c.GetImage()
 		} else if r, ok := RegistryImage(c.GetImage()); ok && r != c.GetImage() {
 			out[r] = c.GetImage() // pulled by digest from the registry (#1383)
@@ -156,6 +158,11 @@ func builtImagesOf(containers []*runpb.Container) map[string]string {
 // containerImage is the reference a container runs: the locally built image
 // for an image_uri SubmitBuild produced, otherwise the localised reference.
 func containerImage(ref string) string {
+	if ref == PlaceholderImage {
+		if p := placeholderRef(); p != "" {
+			return p
+		}
+	}
 	if l, ok := localBuilds.resolve(ref); ok {
 		return l
 	}

@@ -15,6 +15,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/encoding/protojson"
 
+	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 	"github.com/cloudburrow/cloudburrow/internal/metrics"
@@ -49,6 +50,8 @@ type monitoringService struct {
 	// are sampled by whoever set them.
 	reqs *monitoring.RequestBuiltin
 	stop chan struct{}
+	// runStop ends the sampling of Cloud Run's metrics (#2049).
+	runStop chan struct{}
 	// pubsub is the instance's Pub/Sub tunnel, for Pub/Sub notification
 	// channels (#1964); nil, or nil from it, when Pub/Sub is not served.
 	pubsub func() *netfwd.Forwarder
@@ -131,6 +134,12 @@ func (s *monitoringService) Start(ctx context.Context) error {
 	evalCtx, cancel := context.WithCancel(context.Background())
 	s.cancel = cancel
 	api.StartEvaluating(evalCtx)
+	if serviceEnabled(s.cfg, config.ServiceRun) {
+		s.runStop = make(chan struct{})
+		go sampleRunMetrics(api, monitoringRun{kubeconfig: s.cfg.KubeconfigPath(), namespace: runadapter.WorkloadNamespace,
+			project: s.cfg.DefaultProject(), region: "us-central1"}, s.runStop)
+	}
+	setRunMetricsEndpoint(s.Addr)
 	if s.reqs != nil {
 		// up's request history (#1866), which it samples itself, shared
 		// with the APIs & Services charts.
@@ -182,6 +191,10 @@ func (s *monitoringService) Stop(ctx context.Context) error {
 	if s.stop != nil {
 		close(s.stop)
 		s.stop = nil
+	}
+	if s.runStop != nil {
+		close(s.runStop)
+		s.runStop = nil
 	}
 	if s.server == nil {
 		return nil

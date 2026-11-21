@@ -143,13 +143,21 @@ func (p runProvider) copyService(ctx context.Context, project, service string, v
 
 // writeFunctionAction is Write a function: Create function's fields, where
 // Cloud Functions and Cloud Storage, where the source is uploaded, run here.
-func (p runProvider) writeFunctionAction() []console.Action {
+func (p runProvider) writeFunctionAction(ctx context.Context, project string) []console.Action {
 	if p.functions == nil || !p.functions.storage {
 		return nil
+	}
+	if project == "" {
+		project = p.defaultProject
 	}
 	a := p.functions.createAction()
 	a.ID, a.Label, a.Submit = runWriteFunction, "Write a function", "Create"
 	a.Fields = inlineSourceFields(a.Fields)
+	a = writeFunctionLayout(a)
+	// Create makes the service with a placeholder revision and lands on
+	// its Source tab, as Google's does (#2049).
+	a.Fields = placeholderWriteFields(a.Fields, p.functions.eventarcPaneFields(ctx, project, "us-central1"))
+	a.Then = "/run/{name}?tab=source"
 	return []console.Action{a}
 }
 

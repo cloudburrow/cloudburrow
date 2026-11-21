@@ -1204,7 +1204,9 @@ jobs:
           # And Cloud Storage, which the Document AI batch, processor version
           # and evaluation pages and Speech-to-Text's batch transcription read
           # their output back through (#1930, #1953).
-          if [ "$SHARD" = run ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT,RUN_SERVICEUSAGE,WORKFLOWS,STORAGE; fi
+          # Cloud Monitoring's Cloud Run metrics, and the kubeconfig that
+          # port-forwards the gateway a service's URL is reached through (#2049).
+          if [ "$SHARD" = run ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT,RUN_SERVICEUSAGE,WORKFLOWS,STORAGE,MONITORING,KUBECONFIG; fi
           # The sql shard's read back through the Cloud SQL Admin API, the Backup
           # and DR Service and Secret Manager, which holds Run SQL's password.
           if [ "$SHARD" = sql ]; then BROWSER_VARS+=,SQLADMIN,BACKUPDR,SECRETS; fi

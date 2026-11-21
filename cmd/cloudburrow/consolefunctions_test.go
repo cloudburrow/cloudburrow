@@ -201,14 +201,14 @@ func TestConsoleFunctionsCreateGenerations(t *testing.T) {
 		}
 		acts := p.DetailActions(ctx, "", []string{cs.id})
 		if cs.id == "gen1-http" {
-			if ids := strings.Join(actionIDs(acts), ","); ids != "edit-function,copy-function,download-source,delete-function,test-function,edit-source" {
-				t.Errorf("a 1st-gen HTTP function's actions = %s; want Edit function, Copy function, Download source, Test the function and Edit source", ids)
+			if ids := strings.Join(actionIDs(acts), ","); ids != "edit-function,copy-function,download-source,delete-function,test-function,show-payload,source-test,edit-source" {
+				t.Errorf("a 1st-gen HTTP function's actions = %s; want Edit function, Copy function, Download source, Test the function, Show Payload, Test and Edit source", ids)
 			}
 			_, err := p.ActAtResult(ctx, "", []string{cs.id}, functionsTestAction, map[string]string{"data": `{"name":"x"}`})
 			if err == nil || !strings.Contains(err.Error(), "not ACTIVE") {
 				t.Errorf("Test function of an OFFLINE function = %v; want the v1 API's refusal", err)
 			}
-		} else if ids := strings.Join(actionIDs(acts), ","); ids != "edit-function,copy-function,download-source,delete-function,test-function,edit-source" {
+		} else if ids := strings.Join(actionIDs(acts), ","); ids != "edit-function,copy-function,download-source,delete-function,test-function,show-payload,source-test,edit-source" {
 			t.Errorf("a 1st-gen event function's actions = %s", ids)
 		}
 	}
@@ -225,7 +225,7 @@ func TestConsoleFunctionsCreateGenerations(t *testing.T) {
 		t.Errorf("the 2nd-gen function = %v, %v", fn, err)
 	}
 	if ids := strings.Join(actionIDs(p.DetailActions(ctx, "", []string{"gen2-bucket"})), ","); ids !=
-		"edit-function,copy-function,download-source,delete-function,edit-trigger,add-trigger,delete-trigger,test-function,edit-source" {
+		"edit-function,copy-function,download-source,delete-function,edit-trigger,add-trigger,delete-trigger,test-function,show-payload,source-test,edit-source,edit-runtime" {
 		t.Errorf("a 2nd-gen event function's actions = %s", ids)
 	}
 
