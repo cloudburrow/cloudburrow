@@ -175,7 +175,12 @@ func (g *GenerationConfig) unsupportedConfig(options bool) []string {
 	// (#1937).
 	add("presencePenalty", !options && g.PresencePenalty != nil)
 	add("frequencyPenalty", !options && g.FrequencyPenalty != nil)
-	add("responseLogprobs", g.ResponseLogprobs != nil)
+	// responseLogprobs is the sampler's score of each chosen token, from
+	// cloudburrow_generate's --response_logprobs session decode (#2107).
+	// logprobs, the top candidates at each step, is refused: no LiteRT-LM
+	// API (Conversation, Session or Engine) exposes any other token's
+	// score at a step; see docs/generation.md.
+	add("responseLogprobs", !options && g.ResponseLogprobs != nil && *g.ResponseLogprobs)
 	add("logprobs", g.Logprobs != nil)
 	add("thinkingConfig", !options && g.ThinkingConfig != nil)
 	add("thinkingConfig.thinkingLevel", g.ThinkingConfig != nil && g.ThinkingConfig.ThinkingLevel != "")
@@ -363,6 +368,7 @@ func generatorRequest(req *GenerateContentRequest) Request {
 		out.JSONSchema, _ = g.jsonSchema() // validated by rangeError
 		out.PresencePenalty = g.PresencePenalty
 		out.FrequencyPenalty = g.FrequencyPenalty
+		out.ResponseLogprobs = g.ResponseLogprobs != nil && *g.ResponseLogprobs
 		if g.ThinkingConfig != nil {
 			on, budget, _ := g.thinking()
 			out.Thinking = &on
@@ -402,6 +408,40 @@ type Candidate struct {
 	Content      Content `json:"content"`
 	FinishReason string  `json:"finishReason,omitempty"`
 	Index        int32   `json:"index"`
+	// AvgLogprobs and LogprobsResult answer responseLogprobs (#2107): the
+	// mean of the chosen tokens' log-probabilities, and each one.
+	AvgLogprobs    *float64        `json:"avgLogprobs,omitempty"`
+	LogprobsResult *LogprobsResult `json:"logprobsResult,omitempty"`
+}
+
+// LogprobsResult is Vertex's per-step log-probabilities. ChosenCandidates
+// is the token the sampler chose at each step; TopCandidates (logprobs) is
+// never filled: the runtime exposes no other candidate's score.
+type LogprobsResult struct {
+	ChosenCandidates []LogprobsCandidate `json:"chosenCandidates"`
+}
+
+// LogprobsCandidate is one token and its log-probability.
+type LogprobsCandidate struct {
+	Token          string  `json:"token"`
+	TokenID        int32   `json:"tokenId"`
+	LogProbability float32 `json:"logProbability"`
+}
+
+// withLogprobs is r's candidate with chosen as its logprobsResult and their
+// mean as avgLogprobs.
+func withLogprobs(r *GenerateContentResponse, chosen []LogprobsCandidate) *GenerateContentResponse {
+	if r == nil || len(chosen) == 0 || len(r.Candidates) == 0 {
+		return r
+	}
+	var sum float64
+	for _, c := range chosen {
+		sum += float64(c.LogProbability)
+	}
+	avg := sum / float64(len(chosen))
+	r.Candidates[0].AvgLogprobs = &avg
+	r.Candidates[0].LogprobsResult = &LogprobsResult{ChosenCandidates: chosen}
+	return r
 }
 
 // ModalityTokenCount is one entry of usageMetadata's per-modality details.
@@ -508,6 +548,12 @@ func validate(req *GenerateContentRequest, options bool) error {
 	if err := req.GenerationConfig.rangeError(); err != nil {
 		return err
 	}
+	if with := logprobsConflict(req); options && with != "" {
+		return apierror.InvalidArgument(
+			"generationConfig.responseLogprobs cannot be combined with %s on this runtime: the scores come from "+
+				"decoding on a LiteRT-LM session, which applies no tools, constraints, thinking, images or stop "+
+				"sequences. See docs/generation.md", with)
+	}
 	if options {
 		if err := validateTools(req.Tools, req.ToolConfig); err != nil {
 			return err
@@ -545,6 +591,33 @@ func validate(req *GenerateContentRequest, options bool) error {
 	}
 
 	return nil
+}
+
+// logprobsConflict names what a responseLogprobs request also asks for that
+// the scored decode cannot apply, or "".
+func logprobsConflict(req *GenerateContentRequest) string {
+	g := req.GenerationConfig
+	if g == nil || g.ResponseLogprobs == nil || !*g.ResponseLogprobs {
+		return ""
+	}
+	switch {
+	case len(req.Tools) > 0 || req.ToolConfig != nil:
+		return "tools"
+	case g.ResponseMIMEType == "application/json" || len(g.ResponseSchema) > 0 || len(g.ResponseJSONSchema) > 0:
+		return "a JSON response (responseMimeType application/json)"
+	case g.ThinkingConfig != nil:
+		return "thinkingConfig"
+	case len(g.StopSequences) > 0:
+		return "stopSequences"
+	}
+	for _, c := range req.Contents {
+		for _, p := range c.Parts {
+			if p.InlineData != nil || p.FileData != nil {
+				return "image parts"
+			}
+		}
+	}
+	return ""
 }
 
 func unsupportedField(name string) error {

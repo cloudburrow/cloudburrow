@@ -14,6 +14,9 @@ type Chunk struct {
 	// ToolCalls are function calls the model made, parsed by the runtime
 	// from the model's native tool-call syntax (#1937).
 	ToolCalls []FunctionCall
+	// Logprob is the chosen token Text decoded from, with its
+	// log-probability (responseLogprobs, #2107).
+	Logprob *LogprobsCandidate
 	// Last marks the final chunk, carrying the finish reason.
 	Last         bool
 	FinishReason string
@@ -81,6 +84,9 @@ type Request struct {
 	// ThinkingBudget its token budget (-1 unlimited) (#2107).
 	Thinking       *bool
 	ThinkingBudget int32
+	// ResponseLogprobs reports each chosen token's log-probability
+	// (Chunk.Logprob, #2107).
+	ResponseLogprobs bool
 
 	// Conversation, when set, is the whole request in LiteRT-LM's message
 	// format (#1937, conversation.go), sent to cloudburrow_generate on

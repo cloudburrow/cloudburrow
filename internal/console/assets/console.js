@@ -15872,6 +15872,8 @@ let PLAYGROUND_CHAT = [];
 let PLAYGROUND_SYSTEM = "";
 let PLAYGROUND_TOOLS = "";
 let PLAYGROUND_TOOL_MODE = "AUTO";
+// The context cache the requests name (cachedContent, #2121), or "".
+let PLAYGROUND_CACHE = "";
 
 // The image types Agent Studio's Insert Media takes for Gemini (Google's
 // image understanding page: image/png, image/jpeg, image/webp, image/heic,
@@ -15923,9 +15925,10 @@ function playgroundCode(lang, status, body) {
   const gc = body.generationConfig || {};
   const snake = { maxOutputTokens: "max_output_tokens", topP: "top_p", topK: "top_k", stopSequences: "stop_sequences",
     presencePenalty: "presence_penalty", frequencyPenalty: "frequency_penalty", responseMimeType: "response_mime_type",
-    responseSchema: "response_schema" };
+    responseSchema: "response_schema", candidateCount: "candidate_count", thinkingConfig: "thinking_config" };
   for (const [k, v] of Object.entries(gc)) cfg[snake[k] || k] = v;
   if (body.systemInstruction) cfg.system_instruction = body.systemInstruction;
+  if (body.cachedContent) cfg.cached_content = body.cachedContent;
   if (body.tools) cfg.tools = body.tools;
   if (body.toolConfig) cfg.tool_config = { function_calling_config: body.toolConfig.functionCallingConfig };
   const py = (v) => JSON.stringify(v, null, 4).replace(/\btrue\b/g, "True").replace(/\bfalse\b/g, "False").replace(/\bnull\b/g, "None");
@@ -16035,6 +16038,29 @@ async function renderPlayground(view) {
     placeholder: '{"type":"BOOLEAN"}' });
   const jsonOut = el("input", { type: "checkbox", id: "pg-opt-json" });
 
+  // Number of responses (candidateCount, 1 to 8, #2121): more than one is
+  // generateContent only, as Vertex documents, so the page sends it unary.
+  const candidates = optInput("candidateCount", "Number of responses", { type: "number", step: "1", min: "1", max: "8",
+    placeholder: "1", "aria-describedby": "pg-candidates-help" });
+  const candidatesHelp = el("p", { id: "pg-candidates-help", class: "unavailable",
+    text: "More than one response is sent with generateContent (not streamed)." });
+  // Thinking (thinkingConfig, #2121): Google's Thinking budget (Off, Auto,
+  // Manual with a token budget) and Include thoughts.
+  const thinkMode = el("select", { id: "pg-thinking-mode" },
+    el("option", { value: "off", text: "Off" }), el("option", { value: "auto", text: "Auto" }),
+    el("option", { value: "manual", text: "Manual" }));
+  const thinkBudget = el("input", { type: "number", id: "pg-thinking-budget", step: "1", min: "1", value: "1024" });
+  const thinkBudgetField = el("label", { for: "pg-thinking-budget", class: "pg-field" },
+    el("span", { text: "Budget (tokens)" }), thinkBudget);
+  const thoughts = el("input", { type: "checkbox", id: "pg-include-thoughts" });
+  const syncThinking = () => {
+    thinkBudgetField.hidden = thinkMode.value !== "manual";
+    thoughts.disabled = thinkMode.value === "off";
+    if (thoughts.disabled) thoughts.checked = false;
+  };
+  thinkMode.addEventListener("change", syncThinking);
+  syncThinking();
+
   // Function calling (#1962): the declarations as the API takes them, a
   // JSON array of FunctionDeclaration, and the mode (AUTO, ANY, NONE,
   // VALIDATED: Google's function calling page). Agent Studio lists
@@ -16077,7 +16103,13 @@ async function renderPlayground(view) {
     el("h2", { id: "pg-settings-h", text: "Model settings" }),
     el("p", { class: "pg-field" }, el("span", { text: "Model" }), el("span", { class: "mono", text: status.model })),
     ...basic.map((o) => o.field),
+    ...(supported.has("candidateCount") ? [candidates.field, candidatesHelp] : []),
     ...(supported.has("stopSequences") ? [stops.field] : []),
+    ...(supported.has("thinkingConfig") ? [playgroundDisclosure("pg-thinking", "Thinking",
+      el("label", { for: "pg-thinking-mode", class: "pg-field" }, el("span", { text: "Thinking budget" }), thinkMode),
+      thinkBudgetField,
+      el("label", { for: "pg-include-thoughts", class: "pg-check", title: "includeThoughts: the model's thoughts come back as parts marked thought" },
+        thoughts, " Include thoughts"))] : []),
     playgroundDisclosure("pg-advanced", "Advanced", ...advanced.map((o) => o.field)),
     ...(supported.has("responseMimeType") ? [playgroundDisclosure("pg-output-format", "Output format",
       el("label", { for: "pg-opt-json", class: "pg-check", title: "responseMimeType application/json; the schema, if given, constrains the answer" },
@@ -16095,6 +16127,12 @@ async function renderPlayground(view) {
     }
     const st = stops.input.value.split(",").map((x) => x.trim()).filter((x) => x);
     if (st.length) cfg.stopSequences = st;
+    const n = candidates.input.value.trim();
+    if (supported.has("candidateCount") && n !== "" && Number(n) !== 1) cfg.candidateCount = Number(n);
+    if (supported.has("thinkingConfig") && thinkMode.value !== "off") {
+      cfg.thinkingConfig = { thinkingBudget: thinkMode.value === "auto" ? -1 : Number(thinkBudget.value) };
+      if (thoughts.checked) cfg.thinkingConfig.includeThoughts = true;
+    }
     if (jsonOut.checked) {
       cfg.responseMimeType = "application/json";
       const sc = schema.value.trim();
@@ -16222,8 +16260,12 @@ async function renderPlayground(view) {
     const contents = PLAYGROUND_CHAT.concat(pending && pending.length ? [{ role: "user", parts: pending }] : []).map(playgroundStrip);
     const body = { contents };
     const si = system.value.trim();
-    if (si) body.systemInstruction = { parts: [{ text: si }] };
-    if (fcOn.checked && decls.value.trim()) {
+    // A request that names a cache takes its system instruction and tools
+    // from the cache: Vertex refuses them alongside one.
+    const cache = PLAYGROUND_CACHE;
+    if (cache) body.cachedContent = cache;
+    if (si && !cache) body.systemInstruction = { parts: [{ text: si }] };
+    if (fcOn.checked && decls.value.trim() && !cache) {
       body.tools = [{ functionDeclarations: JSON.parse(decls.value) }];
       body.toolConfig = { functionCallingConfig: { mode: mode.value } };
     }
@@ -16325,6 +16367,100 @@ async function renderPlayground(view) {
     if (open) drawCode();
   });
 
+  // --- Context caching (cachedContents, #2121) ------------------------
+  // Create a cache from the prompt (the conversation, this turn and the
+  // system instructions), list the caches with their tokens and expiry,
+  // update a cache's TTL, delete it, and pick one for the requests.
+  const cacheName = el("input", { type: "text", id: "pg-cache-name", placeholder: "my-cache" });
+  const cacheTTL = el("input", { type: "number", id: "pg-cache-ttl", min: "1", step: "1", value: "60" });
+  const cacheCreate = el("button", { type: "button", id: "pg-cache-create", text: "Create cache from prompt" });
+  const cacheUse = el("select", { id: "pg-cache-use" }, el("option", { value: "", text: "None" }));
+  const cacheBody = el("tbody", { id: "pg-cache-rows" });
+  const cacheStatus = el("p", { id: "pg-cache-status", class: "unavailable", role: "status" });
+  const cacheCall = async (method, query, body) => {
+    const resp = await fetch("/api/ai/playground/caches" + query, { method,
+      headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+    const text = await resp.text();
+    if (!resp.ok) throw new Error(errorMessageOf(text) || `HTTP ${resp.status}`);
+    return text ? JSON.parse(text) : {};
+  };
+  const cacheID = (name) => name.split("/").pop();
+  const loadCaches = async () => {
+    let list = [];
+    try { list = (await cacheCall("GET", "")).cachedContents || []; } catch (err) {
+      cacheStatus.textContent = "Listing caches failed: " + err.message; return;
+    }
+    if (PLAYGROUND_CACHE && !list.some((c) => c.name === PLAYGROUND_CACHE)) PLAYGROUND_CACHE = "";
+    setChildren(cacheUse, el("option", { value: "", text: "None" }),
+      ...list.map((c) => el("option", { value: c.name, text: c.displayName || cacheID(c.name) })));
+    cacheUse.value = PLAYGROUND_CACHE;
+    cacheBody.replaceChildren();
+    if (!list.length) {
+      cacheBody.append(el("tr", {}, el("td", { colspan: "5", class: "unavailable", text: "No caches. Create one from the prompt." })));
+    }
+    for (const c of list) {
+      const id = cacheID(c.name);
+      const ttl = el("input", { type: "number", min: "1", step: "1", value: "60", id: "pg-cache-ttl-" + id,
+        "aria-label": `New TTL in minutes for ${c.displayName || id}` });
+      const update = el("button", { type: "button", class: "secondary", text: "Update TTL", "aria-label": `Update TTL of ${c.displayName || id}`,
+        onclick: async () => {
+          try {
+            await cacheCall("PATCH", `?id=${encodeURIComponent(id)}&updateMask=ttl`, { ttl: `${Number(ttl.value) * 60}s` });
+            announce("TTL updated"); cacheStatus.textContent = `Updated ${c.displayName || id}`; loadCaches();
+          } catch (err) { cacheStatus.textContent = "Update failed: " + err.message; }
+        } });
+      const del = el("button", { type: "button", class: "secondary", text: "Delete", "aria-label": `Delete ${c.displayName || id}`,
+        onclick: async () => {
+          try {
+            await cacheCall("DELETE", `?id=${encodeURIComponent(id)}`);
+            if (PLAYGROUND_CACHE === c.name) PLAYGROUND_CACHE = "";
+            announce("Cache deleted"); cacheStatus.textContent = `Deleted ${c.displayName || id}`; loadCaches(); countSoon();
+          } catch (err) { cacheStatus.textContent = "Delete failed: " + err.message; }
+        } });
+      cacheBody.append(el("tr", { "data-cache": c.name },
+        el("td", {}, el("span", { text: c.displayName || "—" }), el("br"), el("span", { class: "mono", text: id })),
+        el("td", { class: "mono", text: String(c.usageMetadata?.totalTokenCount ?? "—") }),
+        el("td", { class: "mono", text: c.expireTime ? new Date(c.expireTime).toLocaleString() : "—" }),
+        el("td", {}, ttl), el("td", {}, el("div", { class: "card-actions" }, update, del))));
+    }
+  };
+  cacheUse.addEventListener("change", () => {
+    PLAYGROUND_CACHE = cacheUse.value;
+    cacheStatus.textContent = PLAYGROUND_CACHE ? "Requests use this cache; its system instructions and tools replace the page's." : "";
+    countSoon();
+  });
+  cacheCreate.addEventListener("click", async () => {
+    const parts = turnParts();
+    const contents = PLAYGROUND_CHAT.concat(parts.length ? [{ role: "user", parts }] : []).map(playgroundStrip);
+    if (!contents.length) { announce("A prompt is required"); prompt.focus(); return; }
+    const body = { contents, ttl: `${Number(cacheTTL.value || 60) * 60}s` };
+    if (cacheName.value.trim()) body.displayName = cacheName.value.trim();
+    const si = system.value.trim();
+    if (si) body.systemInstruction = { parts: [{ text: si }] };
+    cacheCreate.disabled = true;
+    cacheStatus.textContent = "Creating…";
+    try {
+      const made = await cacheCall("POST", "", body);
+      cacheStatus.textContent = `Created ${made.displayName || cacheID(made.name || "")} (${made.usageMetadata?.totalTokenCount ?? "?"} tokens)`;
+      announce("Cache created");
+      await loadCaches();
+    } catch (err) { cacheStatus.textContent = "Create failed: " + err.message; }
+    finally { cacheCreate.disabled = false; }
+  });
+  const cacheCard = el("section", { class: "card", id: "pg-cache", "aria-labelledby": "pg-cache-h" },
+    el("h2", { id: "pg-cache-h", text: "Context caching" }),
+    el("p", { class: "unavailable", text: "A cache holds the prompt's contents and system instructions for reuse (at least 2,048 tokens). A request that uses one sends only its new turn." }),
+    el("div", { class: "pg-stack" },
+      el("label", { for: "pg-cache-name", class: "pg-field" }, el("span", { text: "Cache name" }), cacheName),
+      el("label", { for: "pg-cache-ttl", class: "pg-field" }, el("span", { text: "TTL (minutes)" }), cacheTTL),
+      el("div", { class: "card-actions" }, cacheCreate),
+      el("label", { for: "pg-cache-use", class: "pg-field" }, el("span", { text: "Use cache" }), cacheUse)),
+    cacheStatus,
+    el("div", { class: "table-wrap" }, el("table", { "aria-label": "Context caches" },
+      el("thead", {}, el("tr", {}, ["Cache", "Tokens", "Expires", "New TTL (minutes)", "Actions"].map((c) => el("th", { scope: "col", text: c })))),
+      cacheBody)));
+  loadCaches();
+
   const send = el("button", { type: "button", id: "pg-submit", text: "Submit" });
   const cancel = el("button", { type: "button", class: "secondary", text: "Cancel", disabled: "disabled" });
   const clear = el("button", { type: "button", class: "secondary", id: "pg-clear", text: "Clear conversation" });
@@ -16340,6 +16476,11 @@ async function renderPlayground(view) {
   const timing = el("span", { class: "unavailable", text: "" });
   const usage = el("p", { id: "pg-usage", class: "unavailable" });
   const output = el("pre", { class: "mono pg-output", id: "pg-output", "aria-live": "polite", "aria-label": "Response" });
+  const thoughtsOut = el("pre", { class: "mono pg-output", id: "pg-thoughts", tabindex: "0", "aria-labelledby": "pg-thoughts-h" });
+  const thoughtsSection = el("div", { id: "pg-thoughts-section" }, el("h4", { id: "pg-thoughts-h", text: "Thoughts" }), thoughtsOut);
+  thoughtsSection.hidden = true;
+  const candidatesOut = el("div", { id: "pg-candidates", class: "pg-stack" });
+  candidatesOut.hidden = true;
   const historyBody = el("tbody");
 
   const refused = el("details", { class: "card" },
@@ -16386,7 +16527,7 @@ async function renderPlayground(view) {
     send.disabled = true;
     cancel.disabled = false;
 
-    const streaming = stream.checked;
+    const streaming = stream.checked && !(body.generationConfig && body.generationConfig.candidateCount > 1);
     const rawBody = raw.checked;
     const controller = new AbortController();
     PLAYGROUND_ABORT = controller;
@@ -16397,9 +16538,29 @@ async function renderPlayground(view) {
     let text = "";
     const calls = [];
     let meta = null;
+    let thought = "";
+    thoughtsOut.textContent = "";
+    thoughtsSection.hidden = true;
+    candidatesOut.replaceChildren();
+    candidatesOut.hidden = true;
     const take = (event) => {
       if (event.usageMetadata) meta = event.usageMetadata;
-      for (const p of event.candidates?.[0]?.content?.parts || []) {
+      const all = event.candidates || [];
+      if (all.length > 1) {
+        // Number of responses: each candidate under its own heading;
+        // the first one continues the conversation.
+        candidatesOut.hidden = false;
+        candidatesOut.append(...all.map((c, i) => el("section", { class: "pg-candidate", "aria-labelledby": "pg-candidate-h-" + i },
+          el("h4", { id: "pg-candidate-h-" + i, text: `Response ${i + 1}` }),
+          el("pre", { class: "mono pg-output", id: "pg-candidate-" + i, tabindex: "0",
+            text: (c.content?.parts || []).filter((p) => p.text && !p.thought).map((p) => p.text).join("") }))));
+      }
+      for (const p of all[0]?.content?.parts || []) {
+        if (p.thought) {
+          // Thoughts are shown apart from the answer (includeThoughts).
+          if (p.text) { thought += p.text; thoughtsOut.textContent += p.text; thoughtsSection.hidden = false; }
+          continue;
+        }
         if (p.functionCall) calls.push(p.functionCall);
         if (p.text) {
           if (firstAt === null) firstAt = performance.now();
@@ -16467,7 +16628,10 @@ async function renderPlayground(view) {
       cancel.disabled = true;
       PLAYGROUND_ABORT = null;
       if (meta) {
-        usage.textContent = `Tokens: prompt ${meta.promptTokenCount ?? "—"} · response ${meta.candidatesTokenCount ?? "—"} · total ${meta.totalTokenCount ?? "—"} (usageMetadata)`;
+        usage.textContent = `Tokens: prompt ${meta.promptTokenCount ?? "—"} · response ${meta.candidatesTokenCount ?? "—"}` +
+          (meta.thoughtsTokenCount ? ` · thoughts ${meta.thoughtsTokenCount}` : "") +
+          (meta.cachedContentTokenCount ? ` · cached ${meta.cachedContentTokenCount}` : "") +
+          ` · total ${meta.totalTokenCount ?? "—"} (usageMetadata)`;
       }
       if (ok) {
         // The turn and its answer join the conversation; the prompt box
@@ -16515,8 +16679,9 @@ async function renderPlayground(view) {
           el("div", { class: "card-actions" }, send, cancel, tokens, getCode, clear, timing),
           tokenizer,
           el("h3", { id: "pg-response-h", text: "Response" }),
-          output, usage),
-        codePane),
+          thoughtsSection, output, candidatesOut, usage),
+        codePane,
+        cacheCard),
       settings),
     el("div", { class: "card" },
       el("h2", { text: "This session" }),

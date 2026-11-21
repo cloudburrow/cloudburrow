@@ -151,6 +151,7 @@ COMPAT_LOCALAI_TEST_NAMES="
   GenerateContentFunctionCallingRoundTripThroughTheOfficialSDK
   GenerateContentImagePartThroughTheOfficialSDK
   GenerateContentMultiTurnChatThroughTheOfficialSDK
+  GenerateContentResponseLogprobsThroughTheOfficialSDK
   GenerateContentThinkingConfigThroughTheOfficialSDK
   GenerateContentThroughTheOfficialSDK
   GenerationNeverUsesApplicationDefaultCredentials

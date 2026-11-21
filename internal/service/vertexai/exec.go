@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -112,6 +113,49 @@ func (g *ExecGenerator) Model() string { return g.ModelID }
 // HonoursOptions implements OptionsGenerator.
 func (g *ExecGenerator) HonoursOptions() bool { return g.Runner }
 
+// The sampling a request gets for each of temperature, topP and topK it
+// leaves unset (#2107): Google's documented configuration for the served
+// model, Gemma 4 ("Use the following standardized sampling configuration
+// across all use cases: temperature=1.0, top_p=0.95, top_k=64", the Gemma 4
+// model card), which are also the Gemini 2.5 models' Vertex defaults. Vertex
+// samples by default; the model file's own sampler has top-k 1 (measured:
+// "sampler type=2 k=1 p=0.95"), which is greedy, so without these every
+// unconfigured request, and every one of candidateCount's candidates, would
+// be the same answer. Temperature 0 stays greedy (the runner decodes it as
+// GREEDY whatever top-k and top-p say).
+const (
+	defaultTemperature = float32(1.0)
+	defaultTopP        = float32(0.95)
+	defaultTopK        = int32(64)
+)
+
+// withSamplingDefaults is req with Google's default sampling for each field
+// it leaves unset, and a random seed when it sets none, as Vertex draws one
+// ("By default, a random seed value is used", content generation
+// parameters), so that repeated unseeded requests are independent samples.
+// A request's own values are kept.
+func withSamplingDefaults(req Request) Request {
+	if req.Temperature == nil {
+		v := defaultTemperature
+		req.Temperature = &v
+	}
+	if req.TopP == nil {
+		v := defaultTopP
+		req.TopP = &v
+	}
+	if req.TopK == nil {
+		v := defaultTopK
+		req.TopK = &v
+	}
+	if req.Seed == nil {
+		var b [4]byte
+		_, _ = rand.Read(b[:])
+		v := int32(binary.LittleEndian.Uint32(b[:]) & 0x7fffffff)
+		req.Seed = &v
+	}
+	return req
+}
+
 // runnerFlags are a request's options as cloudburrow_generate's flags, which
 // are LiteRT-LM's own shared flag names.
 func runnerFlags(req Request) []string {
@@ -140,6 +184,9 @@ func runnerFlags(req Request) []string {
 	}
 	if req.FrequencyPenalty != nil {
 		out = append(out, "--frequency_penalty="+f32(*req.FrequencyPenalty))
+	}
+	if req.ResponseLogprobs {
+		out = append(out, "--response_logprobs")
 	}
 	if req.Thinking != nil {
 		out = append(out, "--enable_thinking="+strconv.FormatBool(*req.Thinking))
@@ -205,7 +252,7 @@ func (g *ExecGenerator) Generate(ctx context.Context, req Request) (<-chan Chunk
 		req.Conversation = nil
 	}
 	if g.Runner {
-		args = append(args, runnerFlags(req)...)
+		args = append(args, runnerFlags(withSamplingDefaults(req))...)
 	}
 	var stdin []byte
 	if conversation {
@@ -316,7 +363,12 @@ type runnerLine struct {
 	Text         *string           `json:"text"`
 	Thought      *string           `json:"thought"`
 	ToolCalls    []json.RawMessage `json:"tool_calls"`
-	Compute      []struct {
+	Logprob      *struct {
+		Token string  `json:"token"`
+		ID    int32   `json:"id"`
+		Score float32 `json:"score"`
+	} `json:"logprob"`
+	Compute []struct {
 		IDs    []int64  `json:"ids"`
 		Tokens []string `json:"tokens"`
 	} `json:"compute"`
@@ -342,6 +394,13 @@ func streamJSONLines(ctx context.Context, r io.Reader, out chan<- Chunk, usage *
 			c.Usage = &u
 		case l.Text != nil:
 			c.Text = *l.Text
+			if lp := l.Logprob; lp != nil {
+				tok, err := base64.StdEncoding.DecodeString(lp.Token)
+				if err != nil {
+					return
+				}
+				c.Logprob = &LogprobsCandidate{Token: string(tok), TokenID: lp.ID, LogProbability: lp.Score}
+			}
 		case l.Thought != nil:
 			c.Thought = *l.Thought
 		case len(l.ToolCalls) > 0:

@@ -307,3 +307,48 @@ func TestCachedContentLifecycleAndUse(t *testing.T) {
 		t.Errorf("unknown cache: %d %s", code, body)
 	}
 }
+
+// TestResponseLogprobsReportsTheChosenTokens: responseLogprobs reaches the
+// runtime, each chosen token comes back in logprobsResult.chosenCandidates
+// with avgLogprobs their mean, unary and streamed; logprobs (the top
+// candidates) and the combinations the scored decode cannot apply are refused.
+func TestResponseLogprobsReportsTheChosenTokens(t *testing.T) {
+	g := &convGen{chunks: []Chunk{
+		{Usage: &Usage{PromptTokens: 5, CandidateTokens: -1}},
+		{Text: "Hel", Logprob: &LogprobsCandidate{Token: "Hel", TokenID: 10, LogProbability: -0.5}},
+		{Text: "lo", Logprob: &LogprobsCandidate{Token: "lo", TokenID: 11, LogProbability: -1.5}},
+		{Last: true, FinishReason: FinishReasonStop, Usage: &Usage{PromptTokens: 5, CandidateTokens: 2}},
+	}}
+	srv := newTestServer(t, g)
+	req := `{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"responseLogprobs":true}}`
+	resp, body := post(t, srv, vertexPath(testModel, "generateContent"), req)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d: %s", resp.StatusCode, body)
+	}
+	c := decodeResp(t, body).Candidates[0]
+	if c.LogprobsResult == nil || len(c.LogprobsResult.ChosenCandidates) != 2 || c.AvgLogprobs == nil || *c.AvgLogprobs != -1 ||
+		c.LogprobsResult.ChosenCandidates[1] != (LogprobsCandidate{Token: "lo", TokenID: 11, LogProbability: -1.5}) {
+		t.Errorf("candidate %s", body)
+	}
+	g.mu.Lock()
+	if !g.got[0].ResponseLogprobs {
+		t.Error("responseLogprobs did not reach the runtime")
+	}
+	g.mu.Unlock()
+	_, body = post(t, srv, vertexPath(testModel, "streamGenerateContent")+"?alt=sse", req)
+	if strings.Count(body, `"chosenCandidates"`) != 2 {
+		t.Errorf("stream: %s", body)
+	}
+	for name, cfg := range map[string]string{
+		"logprobs": `{"responseLogprobs":true,"logprobs":3}`,
+		"json":     `{"responseLogprobs":true,"responseMimeType":"application/json"}`,
+		"thinking": `{"responseLogprobs":true,"thinkingConfig":{"thinkingBudget":64}}`,
+		"stops":    `{"responseLogprobs":true,"stopSequences":["x"]}`,
+	} {
+		resp, body := post(t, srv, vertexPath(testModel, "generateContent"),
+			`{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":`+cfg+`}`)
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("%s: status %d: %s", name, resp.StatusCode, body)
+		}
+	}
+}

@@ -68,6 +68,12 @@ type parityRow struct {
 	Issue int
 }
 
+// cacheOffers is Studio's Context caching card (#2121).
+const cacheOffers = "Studio: Context caching creates a cache from the prompt (the conversation, this turn and the System instructions) with a name and TTL, " +
+	"lists the caches with their tokens and expiry, updates a cache's TTL, deletes it, and Use cache sends it as the requests' cachedContent " +
+	"(the usage line shows the cached tokens); Model settings' Number of responses (candidateCount) shows each response, and Thinking " +
+	"(Thinking budget Off, Auto or Manual, Include thoughts) sends thinkingConfig and shows the thoughts apart (#2121)"
+
 var parityRows = []parityRow{
 	// VPC network (#1936): the Compute Engine API's networking.
 	{Resource: "VPC networks", Service: "compute",
@@ -2212,15 +2218,19 @@ var parityRows = []parityRow{
 		Screen:  "/agent-platform/studio", Offers: "Studio: the \"<count> tokens\" indicator is countTokens of the conversation, System instructions, declarations and prompt as it is typed; " +
 			"clicking it opens the prompt tokenizer, computeTokens' tokens (Token ID to text) and IDs (Token ID) of the prompt (#1962)",
 		Tests: []string{"TestPlaygroundRelaysTokenCounts", "TestAgentStudioChatToolsImagesTokensAndCode", "TestCountTokensAndComputeTokensThroughTheOfficialSDK"}},
-	// Context caching (#2107): no console surface yet.
+	// Context caching (#2107), on Studio's Context caching card (#2121):
+	// the screen relays v1beta1's cachedContents routes, which run v1's
+	// handlers.
 	{Resource: "Vertex AI GenAiCacheService: cached contents", Service: "vertexai",
 		Methods: []string{"GenAiCacheService/CreateCachedContent", "GenAiCacheService/GetCachedContent", "GenAiCacheService/ListCachedContents",
 			"GenAiCacheService/UpdateCachedContent", "GenAiCacheService/DeleteCachedContent"},
-		Issue: 2121},
+		Screen: "/agent-platform/studio", Offers: cacheOffers,
+		Tests: []string{"TestPlaygroundRelaysContextCaching", "TestAgentStudioResponsesThinkingAndContextCaching", "TestCachedContentsThroughTheOfficialSDK"}},
 	{Resource: "Vertex AI GenAiCacheService v1beta1: cached contents", Service: "vertexaiv1beta1",
 		Methods: []string{"GenAiCacheService/CreateCachedContent", "GenAiCacheService/GetCachedContent", "GenAiCacheService/ListCachedContents",
 			"GenAiCacheService/UpdateCachedContent", "GenAiCacheService/DeleteCachedContent"},
-		Issue: 2121},
+		Screen: "/agent-platform/studio", Offers: cacheOffers,
+		Tests: []string{"TestPlaygroundRelaysContextCaching", "TestAgentStudioResponsesThinkingAndContextCaching", "TestCachedContentsThroughTheOfficialSDK"}},
 	// v1beta1 serves v1's methods by converting to them (#1937): the console
 	// reaches the same handlers through the v1 rows above.
 	{Resource: "Vertex AI PredictionService v1beta1: v1's methods", Service: "vertexaiv1beta1",

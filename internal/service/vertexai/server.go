@@ -468,9 +468,13 @@ func addUsage(total, u *Usage) *Usage {
 func collectCandidate(ctx context.Context, model string, chunks <-chan Chunk, errFn func() error) (*GenerateContentResponse, *Usage, error) {
 	var text, thought strings.Builder
 	var calls []FunctionCall
+	var chosen []LogprobsCandidate
 	var usage *Usage
 	finish := FinishReasonStop
 	for c := range chunks {
+		if c.Logprob != nil {
+			chosen = append(chosen, *c.Logprob)
+		}
 		if c.Usage != nil {
 			usage = c.Usage
 		}
@@ -494,7 +498,7 @@ func collectCandidate(ctx context.Context, model string, chunks <-chan Chunk, er
 		// alone is answered as Gemini answers one, with no text part.
 		t = strings.TrimSpace(t)
 	}
-	return thoughtResponse(model, strings.TrimSpace(thought.String()), t, calls, finish, usage), usage, nil
+	return withLogprobs(thoughtResponse(model, strings.TrimSpace(thought.String()), t, calls, finish, usage), chosen), usage, nil
 }
 
 // chunkResponse frames one streamed chunk, or returns nil for a chunk that
@@ -517,7 +521,11 @@ func chunkResponse(model string, c Chunk) *GenerateContentResponse {
 	case c.Usage != nil && c.Text == "":
 		return nil
 	}
-	return textResponse(model, c.Text, "")
+	r := textResponse(model, c.Text, "")
+	if c.Logprob != nil {
+		withLogprobs(r, []LogprobsCandidate{*c.Logprob})
+	}
+	return r
 }
 
 // writeStream writes server-sent events in the shape the SDK parses.

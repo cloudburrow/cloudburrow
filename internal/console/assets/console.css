@@ -1203,7 +1203,7 @@ td.mono { word-break: break-word; }
    a narrow one. */
 .pg-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
 @media (min-width: 1100px) { .pg-layout { grid-template-columns: minmax(0, 1fr) 300px; align-items: start; } }
-.pg-main { display: grid; gap: 16px; min-width: 0; }
+.pg-main { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; }
 .pg-main > .card, .pg-layout > .card { margin: 0; }
 .pg-stack { display: grid; gap: 8px; margin: 8px 0; }
 .pg-field { display: grid; gap: 4px; margin: 8px 0; }

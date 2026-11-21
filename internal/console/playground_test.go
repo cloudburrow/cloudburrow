@@ -362,6 +362,7 @@ func TestPlaygroundRefusalsMatchTheAPI(t *testing.T) {
 	// Each refused name paired with a request that exercises it.
 	bodies := map[string]string{
 		"safetySettings": `{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"safetySettings":[{}]}`,
+		"logprobs":       `{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"responseLogprobs":true,"logprobs":3}}`,
 	}
 
 	if len(bodies) != len(refusedOptions) {
@@ -406,7 +407,8 @@ func TestPlaygroundSupportedOptionsAreHonoured(t *testing.T) {
 	})
 	resp, body := postJSON(t, srv, "/api/ai/playground", `{"prompt":"hi","stream":false,"generationConfig":{
 		"temperature":0.4,"topP":0.9,"topK":20,"seed":3,"maxOutputTokens":16,"stopSequences":["zz"],
-		"presencePenalty":0.5,"frequencyPenalty":-0.5,"responseMimeType":"application/json","responseSchema":{"type":"BOOLEAN"}}}`)
+		"presencePenalty":0.5,"frequencyPenalty":-0.5,"responseMimeType":"application/json","responseSchema":{"type":"BOOLEAN"},
+		"candidateCount":1,"thinkingConfig":{"thinkingBudget":64,"includeThoughts":true}}}`)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status %d: %s", resp.StatusCode, body)
 	}
@@ -414,10 +416,11 @@ func TestPlaygroundSupportedOptionsAreHonoured(t *testing.T) {
 	defer mu.Unlock()
 	if got.Temperature == nil || *got.Temperature != 0.4 || got.TopP == nil || got.TopK == nil || *got.TopK != 20 ||
 		got.Seed == nil || got.MaxOutputTokens == nil || *got.MaxOutputTokens != 16 || got.JSONSchema != `{"type":"boolean"}` ||
-		got.PresencePenalty == nil || *got.PresencePenalty != 0.5 || got.FrequencyPenalty == nil || *got.FrequencyPenalty != -0.5 {
+		got.PresencePenalty == nil || *got.PresencePenalty != 0.5 || got.FrequencyPenalty == nil || *got.FrequencyPenalty != -0.5 ||
+		got.Thinking == nil || !*got.Thinking || got.ThinkingBudget != 64 {
 		t.Errorf("the generator was asked %+v", got)
 	}
-	if len(supportedOptions) != 10 {
+	if len(supportedOptions) != 12 {
 		t.Errorf("supportedOptions changed (%v): extend this test's request", supportedOptions)
 	}
 }
@@ -474,5 +477,54 @@ func TestPlaygroundStreamSwitchPicksTheMethod(t *testing.T) {
 	resp, body = postJSON(t, srv, "/api/ai/playground", `{"prompt":"hello there","stream":false,"raw":true}`)
 	if resp.StatusCode != http.StatusOK || !strings.Contains(body, `"HELLO THERE"`) || !strings.Contains(body, `"STOP"`) {
 		t.Fatalf("raw unary = %d: %s", resp.StatusCode, body)
+	}
+}
+
+// TestPlaygroundRelaysContextCaching: Context caching's create, list,
+// update TTL and delete reach the API's own cachedContents routes, the
+// created cache is for the served model, and a generation names it
+// (#2121).
+func TestPlaygroundRelaysContextCaching(t *testing.T) {
+	const model = "gemma-4-e2b-it-community"
+	var seen []string
+	var gen map[string]any
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		seen = append(seen, r.Method+" "+r.URL.RequestURI()+" "+string(body))
+		if strings.HasSuffix(r.URL.Path, ":generateContent") {
+			_ = json.Unmarshal(body, &gen)
+		}
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer api.Close()
+	srv := newPlaygroundServer(t, &Playground{Addr: func() string { return strings.TrimPrefix(api.URL, "http://") }, Model: model})
+	for _, c := range []struct{ method, path, body string }{
+		{http.MethodPost, "/api/ai/playground/caches", `{"displayName":"d","ttl":"600s","contents":[{"role":"user","parts":[{"text":"x"}]}]}`},
+		{http.MethodGet, "/api/ai/playground/caches", ``},
+		{http.MethodPatch, "/api/ai/playground/caches?id=c1&updateMask=ttl", `{"ttl":"1200s"}`},
+		{http.MethodDelete, "/api/ai/playground/caches?id=c1", ``},
+	} {
+		req, _ := http.NewRequest(c.method, srv.URL+c.path, strings.NewReader(c.body))
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("%s %s: %d", c.method, c.path, resp.StatusCode)
+		}
+	}
+	postJSON(t, srv, "/api/ai/playground", `{"prompt":"hi","stream":false,"cachedContent":"projects/console/locations/us-central1/cachedContents/c1"}`)
+	want := []string{
+		`POST /v1beta1/projects/console/locations/us-central1/cachedContents {"contents":[{"parts":[{"text":"x"}],"role":"user"}],"displayName":"d","model":"projects/console/locations/us-central1/publishers/google/models/` + model + `","ttl":"600s"}`,
+		`GET /v1beta1/projects/console/locations/us-central1/cachedContents?pageSize=100 `,
+		`PATCH /v1beta1/projects/console/locations/us-central1/cachedContents/c1?updateMask=ttl {"ttl":"1200s"}`,
+		`DELETE /v1beta1/projects/console/locations/us-central1/cachedContents/c1 `,
+	}
+	if len(seen) < 4 || strings.Join(seen[:4], "\n") != strings.Join(want, "\n") {
+		t.Errorf("relayed:\n%s\nwant:\n%s", strings.Join(seen, "\n"), strings.Join(want, "\n"))
+	}
+	if gen["cachedContent"] != "projects/console/locations/us-central1/cachedContents/c1" {
+		t.Errorf("generation %v", gen)
 	}
 }

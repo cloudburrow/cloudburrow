@@ -48,6 +48,25 @@
 //                               channel streamed as {"thought":"..."} lines
 //   --thinking_budget=N         the thinking token budget, -1 unlimited
 //                               (LiteRT-LM's ThinkingBudgetConstraint)
+//   --response_logprobs         decode on an Engine::Session instead of the
+//                               Conversation, and write each sampled token's
+//                               {"text":"...","logprob":{"token":"<base64>",
+//                               "id":N,"score":S}} (#2107)
+//
+// --response_logprobs exists because the Conversation API drops the scores:
+// the sampler writes each sampled token's log-probability
+// (Sampler::SampleToIdAndScoreBuffer) and the session streams it in
+// Responses::GetScores, but Conversation turns each step into a Message
+// without it. The prompt is the Conversation's own rendering of the same
+// preface and message (RenderPrefaceIntoString, RenderMessageIntoString: the
+// model's chat template and generation prompt), prefilled on a session with
+// the conversation's own SessionConfig and the CPU sampler as an external
+// sampler, the one path on which LiteRT-LM reports scores. That path parses
+// no channels, tool calls or constraints, so the caller sends it plain text
+// requests only. No LiteRT-LM API exposes the other candidates' scores at a
+// step (what Vertex's logprobs, the top candidates, needs): the sampler
+// returns the sampled token's alone, and RunTextScoring scores only targets it
+// is given, one full-vocabulary sort each.
 //
 // With --request_stdin the runner takes one JSON object on standard input
 // (#1937) instead of --input_prompt:
@@ -134,6 +153,9 @@ ABSL_FLAG(std::optional<bool>, enable_thinking, std::nullopt,
           "Set the conversation's thinking mode (#2107).");
 ABSL_FLAG(int, thinking_budget, -1,
           "Thinking token budget when thinking is enabled; -1 is unlimited.");
+ABSL_FLAG(bool, response_logprobs, false,
+          "Decode on an Engine::Session and write each sampled token's "
+          "log-probability (#2107).");
 
 namespace {
 
@@ -244,6 +266,97 @@ absl::StatusOr<ToolChoice> ToolChoiceOf(const Message& tc) {
 }
 
 void JsonLine(const json& j) { std::cout << j.dump() << "\n" << std::flush; }
+
+// DecodeWithScores answers the request on an Engine::Session that streams
+// the sampler's score of each token it samples (see --response_logprobs).
+absl::Status DecodeWithScores(litert::lm::Engine& engine,
+                              Conversation& conversation,
+                              const ConversationConfig& conversation_config,
+                              const Message& request, const OptionalArgs& args) {
+  const Message& message = request["message"];
+  ABSL_ASSIGN_OR_RETURN(int prompt_tokens,
+                        conversation.CountTokens({message}, args));
+  JsonLine({{"prompt_tokens", prompt_tokens}});
+  // The text the Conversation would prefill: the preface (when the
+  // conversation prefilled it at creation, RenderMessageIntoString renders
+  // only the turn after it), the message and the generation prompt.
+  std::string prompt;
+  if (conversation_config.prefill_preface_on_init()) {
+    ABSL_ASSIGN_OR_RETURN(prompt,
+                          conversation.RenderPrefaceIntoString(OptionalArgs()));
+  }
+  ABSL_ASSIGN_OR_RETURN(std::string turn, conversation.RenderMessageIntoString(
+                                              message, OptionalArgs()));
+  prompt += turn;
+
+  litert::lm::SessionConfig session_config =
+      conversation_config.GetSessionConfig();
+  session_config.SetApplyPromptTemplateInSession(false);
+  session_config.SetUseExternalSampler(true);
+  session_config.SetSamplerBackend(Backend::CPU);
+  ABSL_ASSIGN_OR_RETURN(auto session, engine.CreateSession(session_config));
+  std::vector<litert::lm::InputData> inputs;
+  inputs.emplace_back(litert::lm::InputText(prompt));
+  ABSL_RETURN_IF_ERROR(session->RunPrefill(inputs));
+
+  auto decode_config = litert::lm::DecodeConfig::CreateDefault();
+  if (args.max_output_tokens.has_value()) {
+    decode_config.SetMaxOutputTokens(*args.max_output_tokens);
+  }
+  if (args.repetition_penalty_config.has_value()) {
+    decode_config.SetRepetitionPenaltyConfig(*args.repetition_penalty_config);
+  }
+  auto& tokenizer =
+      const_cast<litert::support::Tokenizer&>(engine.GetTokenizer());
+  absl::Status failure = absl::OkStatus();
+  int decoded = 0;
+  ABSL_ASSIGN_OR_RETURN(
+      auto task,
+      session->RunDecodeAsync(
+          [&](absl::StatusOr<litert::lm::Responses> responses) {
+            if (!responses.ok()) {
+              failure = responses.status();
+              return;
+            }
+            if (responses->GetTexts().empty()) return;
+            const std::string& text = responses->GetTexts()[0];
+            const auto& ids = responses->GetTokenIds();
+            const auto& scores = responses->GetScores();
+            if (text.empty()) return;
+            if (scores.empty()) {
+              // The decode's flush: text held back until the end (a partial
+              // UTF-8 sequence or stop-token prefix). The session reports no
+              // score with it, so it has no logprob line.
+              JsonLine({{"text", text}});
+              return;
+            }
+            if (ids.empty() || ids[0].size() != 1) {
+              // A step without exactly one token and its score has no
+              // score to report: fail rather than invent one.
+              if (failure.ok()) {
+                failure = absl::InternalError(absl::StrCat(
+                    "the session reported ", scores.size(), " scores for ",
+                    ids.empty() ? 0 : ids[0].size(), " tokens in one step"));
+              }
+              return;
+            }
+            const int id = ids[0][0];
+            std::vector<int> one = {id};
+            auto piece = tokenizer.TokenIdsToText(absl::MakeConstSpan(one));
+            ++decoded;
+            JsonLine({{"text", text},
+                      {"logprob",
+                       {{"token", absl::Base64Escape(piece.ok() ? *piece : text)},
+                        {"id", id},
+                        {"score", scores[0]}}}});
+          },
+          decode_config));
+  ABSL_RETURN_IF_ERROR(task->WaitUntilDone(absl::Minutes(10)));
+  ABSL_RETURN_IF_ERROR(failure);
+  std::cout << std::flush;
+  std::cerr << "cloudburrow_generate: decoded_tokens=" << decoded << std::endl;
+  return absl::OkStatus();
+}
 
 absl::Status Run(int argc, char** argv) {
   absl::ParseCommandLine(argc, argv);
@@ -399,6 +512,15 @@ absl::Status Run(int argc, char** argv) {
     args.decoding_constraint = litert::lm::LlGuidanceConstraintArg{
         .constraint_type = litert::lm::LlgConstraintType::kJsonSchema,
         .constraint_string = schema};
+  }
+
+  if (absl::GetFlag(FLAGS_response_logprobs)) {
+    if (!request_stdin) {
+      return absl::InvalidArgumentError(
+          "--response_logprobs needs --request_stdin");
+    }
+    return DecodeWithScores(*engine, *conversation, conversation_config,
+                            request, args);
   }
 
   absl::Status failure = absl::OkStatus();

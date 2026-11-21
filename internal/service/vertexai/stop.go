@@ -39,6 +39,19 @@ func applyStops(ctx context.Context, cancel context.CancelFunc, in <-chan Chunk,
 		var pending string
 		var usage *Usage // the prompt's count, for a generation cut short
 		for c := range in {
+			// A scored token passes through whole, its text with its
+			// logprob: responseLogprobs is refused with stop sequences,
+			// so there is nothing to cut (#2107).
+			if c.Logprob != nil {
+				if pending != "" && !send(Chunk{Text: pending}) {
+					return
+				}
+				pending = ""
+				if !send(c) {
+					return
+				}
+				continue
+			}
 			// Thoughts pass through: stop sequences end the answer, not
 			// the thinking before it (#2107).
 			if !c.Last && (c.Usage != nil || len(c.ToolCalls) > 0 || c.Thought != "") {

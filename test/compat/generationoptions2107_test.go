@@ -37,11 +37,10 @@ func TestGenerateContentCandidateCountThroughTheOfficialSDK(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
 	prompt := genai.Text("Invent a name for a new colour. Answer with the name only.")
-	// topK is set because the model's own default sampler has k = 1
-	// (measured: "sampler type=2 k=1 p=0.95"), which decodes greedily, so
-	// every candidate would be the same answer.
-	cfg := &genai.GenerateContentConfig{CandidateCount: 3, Temperature: genai.Ptr[float32](1), TopK: genai.Ptr[float32](40),
-		MaxOutputTokens: 16, Seed: genai.Ptr[int32](11)}
+	// No temperature, topP or topK: Google's defaults apply (Gemma 4's
+	// documented temperature 1.0, topP 0.95, topK 64), which sample, as
+	// Vertex does by default (#2107 round 2).
+	cfg := &genai.GenerateContentConfig{CandidateCount: 3, MaxOutputTokens: 16, Seed: genai.Ptr[int32](11)}
 	r, err := cl.Models.GenerateContent(ctx, localModel, prompt, cfg)
 	if err != nil {
 		t.Fatalf("GenerateContent: %v", err)
@@ -63,7 +62,7 @@ func TestGenerateContentCandidateCountThroughTheOfficialSDK(t *testing.T) {
 		distinct[a] = true
 	}
 	if len(distinct) < 2 {
-		t.Errorf("three candidates at temperature 1, topK 40 are one answer %q: they are not independent samples", answers)
+		t.Errorf("three candidates at the default sampling are one answer %q: they are not independent samples", answers)
 	}
 	u := r.UsageMetadata
 	count, err := cl.Models.CountTokens(ctx, localModel, prompt, nil)
@@ -81,6 +80,21 @@ func TestGenerateContentCandidateCountThroughTheOfficialSDK(t *testing.T) {
 		if i < len(answers) && again.Candidates[i].Content.Parts[0].Text != answers[i] {
 			t.Errorf("seed 11, candidate %d: %q then %q", i, answers[i], again.Candidates[i].Content.Parts[0].Text)
 		}
+	}
+	// Temperature 0 stays deterministic: greedy decoding, every candidate
+	// the same answer, with or without a seed.
+	greedy, err := cl.Models.GenerateContent(ctx, localModel, prompt, &genai.GenerateContentConfig{CandidateCount: 3,
+		MaxOutputTokens: 16, Temperature: genai.Ptr[float32](0)})
+	if err != nil {
+		t.Fatalf("GenerateContent temperature 0: %v", err)
+	}
+	var greedyAnswers []string
+	for _, c := range greedy.Candidates {
+		greedyAnswers = append(greedyAnswers, c.Content.Parts[0].Text)
+	}
+	t.Logf("three candidates at temperature 0 (recorded): %q", greedyAnswers)
+	if len(greedyAnswers) != 3 || greedyAnswers[0] != greedyAnswers[1] || greedyAnswers[1] != greedyAnswers[2] {
+		t.Errorf("temperature 0 candidates differ: %q", greedyAnswers)
 	}
 	for _, err := range []error{
 		func() error {
@@ -305,5 +319,68 @@ func TestCachedContentsThroughTheOfficialSDK(t *testing.T) {
 	_, err = grpcClient.GetCachedContent(ctx, &aiplatformpb.GetCachedContentRequest{Name: cache.Name})
 	if status.Code(err) != codes.NotFound {
 		t.Errorf("gRPC Get after delete: %v", err)
+	}
+}
+
+// covers: google.cloud.aiplatform.v1beta1.PredictionService/GenerateContent, google.cloud.aiplatform.v1beta1.PredictionService/StreamGenerateContent
+//
+// TestGenerateContentResponseLogprobsThroughTheOfficialSDK (#2107 round 2):
+// responseLogprobs answers each chosen token with its log-probability
+// (logprobsResult.chosenCandidates) and avgLogprobs their mean, the tokens
+// spelling the answer; the stream carries them chunk by chunk; logprobs (the
+// top candidates), which the runtime cannot measure, is refused.
+func TestGenerateContentResponseLogprobsThroughTheOfficialSDK(t *testing.T) {
+	h := New(t)
+	cl := genaiClient(t, h)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	defer cancel()
+	prompt := genai.Text("Invent a name for a new colour. Answer with the name only.")
+	// Google's default sampling with a fixed seed, so the stream decodes
+	// the same tokens as the unary call.
+	cfg := &genai.GenerateContentConfig{ResponseLogprobs: true, MaxOutputTokens: 16, Seed: genai.Ptr[int32](7)}
+	r, err := cl.Models.GenerateContent(ctx, localModel, prompt, cfg)
+	if err != nil {
+		t.Fatalf("GenerateContent: %v", err)
+	}
+	c := r.Candidates[0]
+	if c.LogprobsResult == nil || len(c.LogprobsResult.ChosenCandidates) == 0 {
+		t.Fatalf("no logprobsResult: %+v", c)
+	}
+	var spelled strings.Builder
+	var sum float64
+	negative := false
+	for _, lp := range c.LogprobsResult.ChosenCandidates {
+		negative = negative || lp.LogProbability < 0
+		if lp.LogProbability > 0 || lp.Token == "" {
+			t.Errorf("token %+v", lp)
+		}
+		spelled.WriteString(lp.Token)
+		sum += float64(lp.LogProbability)
+	}
+	t.Logf("answer %q, chosen %+v, avg %v (recorded)", c.Content.Parts[0].Text, c.LogprobsResult.ChosenCandidates, c.AvgLogprobs)
+	if !negative {
+		t.Errorf("every chosen token has log-probability 0 at temperature 1: %+v", c.LogprobsResult.ChosenCandidates)
+	}
+	if !strings.Contains(spelled.String(), strings.TrimSpace(c.Content.Parts[0].Text)) {
+		t.Errorf("tokens spell %q, answer %q", spelled.String(), c.Content.Parts[0].Text)
+	}
+	if want := sum / float64(len(c.LogprobsResult.ChosenCandidates)); c.AvgLogprobs > want+1e-4 || c.AvgLogprobs < want-1e-4 {
+		t.Errorf("avgLogprobs %v, mean %v", c.AvgLogprobs, want)
+	}
+	n := 0
+	for chunk, err := range cl.Models.GenerateContentStream(ctx, localModel, prompt, cfg) {
+		if err != nil {
+			t.Fatalf("stream: %v", err)
+		}
+		if len(chunk.Candidates) > 0 && chunk.Candidates[0].LogprobsResult != nil {
+			n += len(chunk.Candidates[0].LogprobsResult.ChosenCandidates)
+		}
+	}
+	if n != len(c.LogprobsResult.ChosenCandidates) {
+		t.Errorf("the stream carried %d chosen tokens, the unary answer %d (seed 7)", n, len(c.LogprobsResult.ChosenCandidates))
+	}
+	_, err = cl.Models.GenerateContent(ctx, localModel, prompt, &genai.GenerateContentConfig{ResponseLogprobs: true, Logprobs: genai.Ptr[int32](3)})
+	if err == nil || !strings.Contains(err.Error(), "logprobs") {
+		t.Errorf("logprobs: %v", err)
 	}
 }
