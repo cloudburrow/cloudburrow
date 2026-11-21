@@ -3,8 +3,6 @@
 package browser
 
 import (
-	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -239,32 +237,39 @@ func TestBigQueryStudioExplorerEditorAndHistory(t *testing.T) {
 // next one, so a click meant for the new dialog's button could otherwise be
 // aimed at the old one's.
 //
-// The element is marked, then clicked by its mark. A page that replaces it
-// in between (a dialog that opens removes one still fading out) leaves no
-// marked node, and chromedp's Click would wait for one until the test's
-// deadline: each attempt has a few seconds, and the element is found and
-// marked again, within waitFor's 30 seconds (main CI 44926873355).
+// The element is found, scrolled to the middle of the viewport and aimed at
+// in one evaluation, which answers the point to click only when the topmost
+// element there is the element, one of its descendants, an ancestor (an
+// input drawn by its label or container) or one of its labels. Anything
+// else (gone, inert, covered by the dialog replacing it, without a box) is
+// looked for again within waitFor's 30 seconds (main CI 44926873355). The
+// mouse click at that point is sent once and never retried: the page has
+// it then, and a second one could submit a form twice. Clicking by a mark
+// (chromedp.Click on [data-cb-click]) instead waited on a node the page
+// could replace until the test's deadline, and a click retried after a
+// timeout may already have landed.
 func (p *tab) clickExpr(expr string) {
 	p.t.Helper()
 	ready := `(() => { const n = ` + expr + `; return !!n && n.isConnected && !n.closest("[inert]") && n.getClientRects().length > 0; })()`
+	aim := `(() => { const n = ` + expr + `;
+		if (!n || !n.isConnected || n.closest("[inert]")) return null;
+		n.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
+		const r = n.getBoundingClientRect();
+		if (!r.width || !r.height) return null;
+		const x = r.left + r.width / 2, y = r.top + r.height / 2, hit = n.getRootNode().elementFromPoint(x, y);
+		const reaches = !!hit && (n.contains(hit) || hit.contains(n) || [...(n.labels || [])].some((l) => l.contains(hit)));
+		return reaches ? { X: x, Y: y } : null; })()`
 	deadline := time.Now().Add(30 * time.Second)
 	for {
-		p.waitFor(ready)
-		var marked bool
-		p.eval(`(() => { document.querySelectorAll("[data-cb-click]").forEach((n) => n.removeAttribute("data-cb-click"));
-			const n = `+expr+`; if (!n || !n.isConnected || n.closest("[inert]")) return false; n.setAttribute("data-cb-click", ""); return true; })()`, &marked)
-		if marked {
-			ctx, cancel := context.WithTimeout(p.ctx, 5*time.Second)
-			err := chromedp.Do(ctx, chromedp.Click(chromedp.CSS(`[data-cb-click]`)))
-			cancel()
-			if err == nil {
-				return
-			}
-			if p.ctx.Err() != nil || !errors.Is(err, context.DeadlineExceeded) || time.Now().After(deadline) {
-				p.t.Fatalf("browser: clicking %s: %v", strings.Join(strings.Fields(expr), " "), err)
-			}
-		} else if time.Now().After(deadline) {
-			p.t.Fatalf("browser: %s went before it could be clicked", strings.Join(strings.Fields(expr), " "))
+		p.waitForWithin(ready, max(time.Until(deadline), time.Second))
+		var at *struct{ X, Y float64 }
+		p.eval(aim, &at)
+		if at != nil {
+			p.run(chromedp.MouseClickXY(at.X, at.Y))
+			return
+		}
+		if time.Now().After(deadline) {
+			p.t.Fatalf("browser: %s was never where a click would reach it", strings.Join(strings.Fields(expr), " "))
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
