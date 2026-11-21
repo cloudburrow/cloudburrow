@@ -12,10 +12,10 @@
 // source's instance to a time through instances.clone's path; both resolve
 // the names here through Resolver.
 //
-// Other workload types (Compute Engine instances, disks, AlloyDB,
-// Filestore) need servers CloudBurrow does not run, and are refused with
-// that reason, as backups.restore, whose targets are all Compute Engine
-// instances and disks, is.
+// Compute Engine instances and disks are protected through the instance's
+// Compute Engine API (#2075, compute.go), and backups.restore restores
+// them to a new VM or disk. Other workload types (AlloyDB, Filestore) need
+// servers CloudBurrow does not run, and are refused with that reason.
 //
 // Every mutation is a long-running operation (google.longrunning), answered
 // done or running as the work is, and operations.get answers it

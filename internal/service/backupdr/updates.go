@@ -16,10 +16,11 @@ import (
 // refused, each naming what is missing.
 const (
 	managementServerWhy = "a management server is the Backup and DR appliance's console: a Google-managed VM " +
-		"on Compute Engine reached over VPC peering with your network, and CloudBurrow runs neither Compute Engine " +
-		"nor Google-managed networking; backup vaults and plans protect Cloud SQL instances without one (docs/backupdr.md)"
+		"on Compute Engine reached over VPC peering with your network, and CloudBurrow runs no such appliance nor " +
+		"Google-managed networking; backup vaults and plans protect Cloud SQL instances and Compute Engine VMs and disks " +
+		"without one (docs/backupdr.md)"
 	applianceWhy = "this is the backup/recovery appliance's and agent's protocol for workloads on Compute Engine " +
-		"(the appliance streams a backup in and finalizes it); CloudBurrow runs no appliance and no Compute Engine, " +
+		"(the appliance streams a backup in and finalizes it); CloudBurrow runs no appliance (vaulted Compute Engine backups need none), " +
 		"and a Cloud SQL data source's backups are taken by the Cloud SQL Admin API (docs/backupdr.md)"
 	hierarchyWhy = "fetching resource backup configs for a folder or an organization answers every project under it, " +
 		"and this Backup and DR Service was started without Resource Manager's folders and organization (`up` " +

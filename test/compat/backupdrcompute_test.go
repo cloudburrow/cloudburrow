@@ -358,3 +358,173 @@ func TestGcloudBackupDRRestoreDisk(t *testing.T) {
 		t.Fatalf("the restored disk: %v %v", d, err)
 	}
 }
+
+// TestGcloudBackupDRRestoreCompute (#2075): `gcloud backup-dr backups
+// restore compute BACKUP --name --target-zone --target-project
+// --machine-type`, through the configuration `cloudburrow gcloud-setup`
+// writes with egress to Google blocked, makes a new VM from a VM's backup:
+// the override's machine type, and the backup's disks.
+// covers: backupdr.projects.locations.backupVaults.dataSources.backups.restore, backupdr.projects.locations.operations.get
+func TestGcloudBackupDRRestoreCompute(t *testing.T) {
+	h := New(t)
+	_, computeAddr := backupDRComputeFixture(t, h)
+	g := newGcloudSession(t, h)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+	t.Cleanup(cancel)
+	copts := []option.ClientOption{option.WithEndpoint("http://" + computeAddr), option.WithoutAuthentication()}
+	insts, err := computeapi.NewInstancesRESTClient(ctx, copts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bdr := backupDRService(t, h)
+	wait := backupDRWaiter(t, bdr)
+	p := g.project
+	const zone = "us-central1-a"
+	loc := "projects/" + p + "/locations/us-central1"
+	sfx := fmt.Sprintf("%d", time.Now().UnixNano()%1e6)
+	src, restored, vault := "gc-src-"+sfx, "gc-restored-"+sfx, "gc-vault-"+sfx
+	t.Cleanup(func() {
+		c := context.Background()
+		for _, n := range []string{src, restored} {
+			if op, err := insts.Delete(c, &computepb.DeleteInstanceRequest{Project: p, Zone: zone, Instance: n}); err == nil {
+				_ = op.Wait(c)
+			}
+		}
+		_, _ = bdr.Projects.Locations.BackupPlanAssociations.Delete(loc + "/backupPlanAssociations/gc-a-" + sfx).Do()
+		_, _ = bdr.Projects.Locations.BackupPlans.Delete(loc + "/backupPlans/gc-p-" + sfx).Do()
+		_, _ = bdr.Projects.Locations.BackupVaults.Delete(loc + "/backupVaults/" + vault).Force(true).Do()
+	})
+	op, err := insts.Insert(ctx, &computepb.InsertInstanceRequest{Project: p, Zone: zone, InstanceResource: &computepb.Instance{
+		Name:        proto.String(src),
+		MachineType: proto.String("zones/" + zone + "/machineTypes/e2-small"),
+		Disks: []*computepb.AttachedDisk{{Boot: proto.Bool(true), AutoDelete: proto.Bool(true),
+			InitializeParams: &computepb.AttachedDiskInitializeParams{SourceImage: proto.String("projects/debian-cloud/global/images/family/debian-12")}}},
+		NetworkInterfaces: []*computepb.NetworkInterface{{Network: proto.String("global/networks/default")}},
+	}})
+	if err != nil || op.Wait(ctx) != nil {
+		t.Fatalf("instance: %v", err)
+	}
+	wait(bdr.Projects.Locations.BackupVaults.Create(loc, &bdrv1.BackupVault{BackupMinimumEnforcedRetentionDuration: "86400s"}).BackupVaultId(vault).Do())
+	wait(bdr.Projects.Locations.BackupPlans.Create(loc, &bdrv1.BackupPlan{BackupVault: loc + "/backupVaults/" + vault,
+		ResourceType: "compute.googleapis.com/Instance", BackupRules: dailyRule()}).BackupPlanId("gc-p-" + sfx).Do())
+	wait(bdr.Projects.Locations.BackupPlanAssociations.Create(loc, &bdrv1.BackupPlanAssociation{BackupPlan: loc + "/backupPlans/gc-p-" + sfx,
+		ResourceType: "compute.googleapis.com/Instance", Resource: "projects/" + p + "/zones/" + zone + "/instances/" + src}).BackupPlanAssociationId("gc-a-" + sfx).Do())
+	wait(bdr.Projects.Locations.BackupPlanAssociations.TriggerBackup(loc+"/backupPlanAssociations/gc-a-"+sfx, &bdrv1.TriggerBackupRequest{RuleId: "daily"}).Do())
+	a, err := bdr.Projects.Locations.BackupPlanAssociations.Get(loc + "/backupPlanAssociations/gc-a-" + sfx).Do()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bs, err := bdr.Projects.Locations.BackupVaults.DataSources.Backups.List(a.DataSource).Do()
+	if err != nil || len(bs.Backups) != 1 {
+		t.Fatalf("backups: %v %v", bs, err)
+	}
+	out, err := g.run(nil, "backup-dr", "backups", "restore", "compute", bs.Backups[0].Name, "--name", restored,
+		"--target-zone", zone, "--target-project", p, "--machine-type", "e2-medium", "--quiet")
+	if err != nil {
+		t.Fatalf("gcloud backup-dr backups restore compute: %v\n%s", err, out)
+	}
+	i, err := insts.Get(ctx, &computepb.GetInstanceRequest{Project: p, Zone: zone, Instance: restored})
+	if err != nil || !strings.HasSuffix(i.GetMachineType(), "/e2-medium") || len(i.GetDisks()) != 1 || !i.GetDisks()[0].GetBoot() {
+		t.Fatalf("the restored VM: %v %v", i, err)
+	}
+}
+
+// TestTerraformBackupDRCompute (#2075): a google_backup_dr_backup_plan for
+// compute.googleapis.com/Instance and one for compute.googleapis.com/Disk,
+// with a google_backup_dr_backup_plan_association each of a
+// google_compute_instance and a google_compute_disk, apply with the
+// official hashicorp/google provider through `cloudburrow terraform` with
+// egress to Google blocked; the official client reads the associations'
+// data sources back in the vault; the plan is clean and destroy removes it.
+// covers: backupdr.projects.locations.backupPlans.create, backupdr.projects.locations.backupPlans.get, backupdr.projects.locations.backupPlans.delete, backupdr.projects.locations.backupPlanAssociations.create, backupdr.projects.locations.backupPlanAssociations.get, backupdr.projects.locations.backupPlanAssociations.delete
+func TestTerraformBackupDRCompute(t *testing.T) {
+	h := New(t)
+	backupDRComputeFixture(t, h)
+	bdr := backupDRService(t, h)
+	m := newTFModule(t)
+	n := time.Now().UnixNano() % 1e6
+	const zone = "us-central1-a"
+	plan := func(id, typ string) string {
+		return fmt.Sprintf(`
+resource "google_backup_dr_backup_plan" %[2]q {
+  project        = %[1]q
+  location       = "us-central1"
+  backup_plan_id = "%[2]s-%[3]d"
+  resource_type  = %[4]q
+  backup_vault   = google_backup_dr_backup_vault.v.id
+  backup_rules {
+    rule_id               = "daily"
+    backup_retention_days = 7
+    standard_schedule {
+      recurrence_type = "DAILY"
+      time_zone       = "UTC"
+      backup_window {
+        start_hour_of_day = 1
+        end_hour_of_day   = 5
+      }
+    }
+  }
+}
+`, m.project, id, n, typ)
+	}
+	m.write(fmt.Sprintf(`
+resource "google_backup_dr_backup_vault" "v" {
+  project                                    = %[1]q
+  location                                   = "us-central1"
+  backup_vault_id                            = "tfcvault-%[2]d"
+  backup_minimum_enforced_retention_duration = "100000s"
+  ignore_inactive_datasources                = true
+}
+resource "google_compute_disk" "d" {
+  project = %[1]q
+  name    = "tfcdisk-%[2]d"
+  zone    = %[3]q
+  type    = "pd-balanced"
+  size    = 10
+}
+resource "google_compute_instance" "vm" {
+  project      = %[1]q
+  name         = "tfcvm-%[2]d"
+  zone         = %[3]q
+  machine_type = "e2-small"
+  boot_disk {
+    initialize_params {
+      image = "debian-cloud/debian-12"
+    }
+  }
+  network_interface {
+    network = "default"
+  }
+}
+resource "google_backup_dr_backup_plan_association" "vm" {
+  project                    = %[1]q
+  location                   = "us-central1"
+  backup_plan_association_id = "tfcvm-%[2]d"
+  resource                   = google_compute_instance.vm.id
+  resource_type              = "compute.googleapis.com/Instance"
+  backup_plan                = google_backup_dr_backup_plan.iplan.name
+}
+resource "google_backup_dr_backup_plan_association" "disk" {
+  project                    = %[1]q
+  location                   = "us-central1"
+  backup_plan_association_id = "tfcdisk-%[2]d"
+  resource                   = google_compute_disk.d.id
+  resource_type              = "compute.googleapis.com/Disk"
+  backup_plan                = google_backup_dr_backup_plan.dplan.name
+}
+`, m.project, n, zone) + plan("iplan", "compute.googleapis.com/Instance") + plan("dplan", "compute.googleapis.com/Disk"))
+	m.must("init", "-input=false", "-no-color")
+	m.apply()
+	loc := "projects/" + m.project + "/locations/us-central1"
+	for _, id := range []string{"tfcvm", "tfcdisk"} {
+		a, err := bdr.Projects.Locations.BackupPlanAssociations.Get(fmt.Sprintf("%s/backupPlanAssociations/%s-%d", loc, id, n)).Do()
+		if err != nil || !strings.HasPrefix(a.DataSource, fmt.Sprintf("%s/backupVaults/tfcvault-%d/dataSources/", loc, n)) {
+			t.Fatalf("the association %s: %v %+v", id, err, a)
+		}
+	}
+	m.planClean()
+	m.must("destroy", "-auto-approve", "-input=false", "-no-color")
+	if _, err := bdr.Projects.Locations.BackupVaults.Get(fmt.Sprintf("%s/backupVaults/tfcvault-%d", loc, n)).Do(); err == nil {
+		t.Errorf("the vault survived destroy")
+	}
+}

@@ -346,9 +346,9 @@ func cloudidentityMethods() []string {
 }
 
 // backupdrStatuses is every method of the backupdr v1 discovery document,
-// true for the ones internal/service/backupdr serves. backups.restore is
-// false: its targets are Compute Engine instances and disks, and it
-// answers 501 (a Cloud SQL backup is restored by Cloud SQL). Patches,
+// true for the ones internal/service/backupdr serves. backups.restore
+// restores a Compute Engine VM's or disk's backup since #2075 (a Cloud SQL
+// backup is restored by Cloud SQL). Patches,
 // plan revisions, the fetch and reference views and operations.cancel and
 // delete are served since #1462, resourceBackupConfigs.list (Cloud SQL
 // instances) since #1501, resourceBackupConfigs.fetch (a project's, a
@@ -380,7 +380,7 @@ var backupdrStatuses = map[string]bool{
 	"backupdr.projects.locations.backupVaults.dataSources.backups.get":                  true,
 	"backupdr.projects.locations.backupVaults.dataSources.backups.list":                 true,
 	"backupdr.projects.locations.backupVaults.dataSources.backups.patch":                true,
-	"backupdr.projects.locations.backupVaults.dataSources.backups.restore":              false,
+	"backupdr.projects.locations.backupVaults.dataSources.backups.restore":              true,
 	"backupdr.projects.locations.backupVaults.dataSources.fetchAccessToken":             false,
 	"backupdr.projects.locations.backupVaults.dataSources.finalizeBackup":               false,
 	"backupdr.projects.locations.backupVaults.dataSources.get":                          true,

@@ -45,9 +45,9 @@ Do not edit these files by hand.
 | [Cloud SQL Admin API (v1)](sqladmin.md) | 80 | 75 | 0 | 5 | 0 | 0 | 0 | 0 |
 | [Service Usage API (v1)](serviceusage.md) | 10 | 10 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [API Keys API (v2)](apikeys.md) | 9 | 9 | 0 | 0 | 0 | 0 | 0 | 0 |
-| [Compute Engine API (v1): VPC networking](compute.md) | 166 | 71 | 0 | 74 | 21 | 0 | 0 | 0 |
+| [Compute Engine API (v1): VPC networking](compute.md) | 166 | 72 | 0 | 74 | 20 | 0 | 0 | 0 |
 | [Cloud Storage companion APIs (Batch Operations, Insights, Transfer v1)](storagejobs.md) | 50 | 50 | 0 | 0 | 0 | 0 | 0 | 0 |
-| [Backup and DR Service API (v1)](backupdr.md) | 61 | 46 | 0 | 15 | 0 | 0 | 0 | 0 |
+| [Backup and DR Service API (v1)](backupdr.md) | 61 | 47 | 0 | 14 | 0 | 0 | 0 | 0 |
 | [Cloud Identity API (v1)](cloudidentity.md) | 70 | 39 | 0 | 31 | 0 | 0 | 0 | 0 |
 | [Workload Identity Federation (IAM v1 pools, STS v1)](workloadidentity.md) | 47 | 22 | 0 | 25 | 0 | 0 | 0 | 0 |
 | [Certificate Authority Service (v1)](privateca.md) | 29 | 29 | 0 | 0 | 0 | 0 | 0 | 0 |

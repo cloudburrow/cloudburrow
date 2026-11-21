@@ -218,7 +218,8 @@ func TestBackupDRComputeRestoresThroughThePages(t *testing.T) {
 	}
 	p.clickText(".modal.is-open button", "Cancel")
 	p.waitFor(`document.querySelector(".modal.is-open") === null`)
-	restoreOn("disk", map[string]string{"zone": zone})
+	// The dialog is opened again, its time newer: keep the name read.
+	restoreOn("disk", map[string]string{"zone": zone, "name": rdisk})
 	var d *computepb.Disk
 	for end := time.Now().Add(3 * time.Minute); time.Now().Before(end); time.Sleep(2 * time.Second) {
 		if d, err = disks.Get(ctx, &computepb.GetDiskRequest{Project: project, Zone: zone, Disk: rdisk}); err == nil && d.GetStatus() == "READY" {
@@ -251,9 +252,12 @@ func TestBackupDRComputeRestoresThroughThePages(t *testing.T) {
 
 	// Resource Type offers Compute Engine and Disk, enabled.
 	var enabled string
-	p.navigate("/backupdr-plans/new?project=" + project)
-	p.waitFor(`document.querySelector('input[name="resourceType"]') !== null`)
-	p.eval(`[...document.querySelectorAll('input[name="resourceType"]')].filter((r) => !r.disabled).map((r) => r.value).join(",")`, &enabled)
+	p.navigate("/backupdr-plans/create?project=" + project)
+	// Resource Type's radios are named f-resourceType-choice; the hidden
+	// input named resourceType holds the choice.
+	radios := `[...document.querySelectorAll('input[type="radio"][name$="resourceType-choice"]')]`
+	p.waitFor(radios + `.length > 0`)
+	p.eval(radios+`.filter((r) => !r.disabled).map((r) => r.value).join(",")`, &enabled)
 	if !strings.Contains(enabled, "compute.googleapis.com/Instance") || !strings.Contains(enabled, "compute.googleapis.com/Disk") {
 		t.Errorf("Create Backup plan's enabled Resource Types: %s", enabled)
 	}

@@ -163,7 +163,7 @@ func (p bdrVaultedProvider) computeRestoreAction(ctx context.Context, project st
 		console.Field{Name: "zone", Label: "Zone", Type: "select", Required: true, Section: "Choose the restore destination", Options: zones,
 			Default: s.location(), Help: "The zone of the new resource."},
 		console.Field{Name: "name", Label: "Name", Type: "text", Required: true, Section: "Properties", Default: name,
-			Pattern: `[a-z]([-a-z0-9]{0,61}[a-z0-9])?`, Help: "The new resource's name: lowercase letters, digits and hyphens, starting with a letter."})
+			Pattern: `[a-z]([a-z0-9\-]{0,61}[a-z0-9])?`, Help: "The new resource's name: lowercase letters, digits and hyphens, starting with a letter."})
 	if typ == backupdr.ComputeInstanceResourceType {
 		mts, _ := computeMachineTypeOptions()
 		fields = append(fields, console.Field{Name: "machineType", Label: "Machine type", Type: "select", Section: "Properties",
