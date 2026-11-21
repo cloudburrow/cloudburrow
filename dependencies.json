@@ -14,6 +14,32 @@
   },
   "components": {
     "bigqueryml": {
+      "sparkImage": {
+        "$comment": "BigQuery's stored procedures for Apache Spark (#2104): cmd/cloudburrow/sparkrunner.go runs spark-submit --master local[*] in this image, on a per-run docker network create --internal network, its one peer a relay (python3 in the same image) to the instance's BigQuery REST and Storage API ports.",
+        "image": "apache/spark:3.5.9-scala2.12-java17-python3-ubuntu",
+        "digest": "sha256:f3d6eaa8bab8ec2e38f3c3918a5b2f8b253c95bcb19f9e87ad0e0cdacf9df2d5",
+        "license": "Apache-2.0 (Apache Spark) and the Ubuntu and Eclipse Temurin packages it is built on",
+        "redistribution": "not published: pulled by digest by the local CLI on the first CALL of a Spark procedure",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "notes": "Resolved 2026-11-21. The Apache Software Foundation's official image; Google publishes no Spark image an instance may run (Serverless for Apache Spark's runtimes are not published images).",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve with `docker buildx imagetools inspect apache/spark:3.5.9-scala2.12-java17-python3-ubuntu`."
+      },
+      "sparkBigQueryConnector": {
+        "$comment": "Google's BigQuery connector for Apache Spark (#2104), passed to spark-submit --jars: Spark procedures read and write the instance's BigQuery through it (bigQueryHttpEndpoint, bigQueryStorageGrpcEndpoint). Fetched by the CLI from Maven Central on the first CALL, checked against this SHA-256 (cmd/cloudburrow/sparkrunner.go) and kept in <state-dir>/models/spark.",
+        "version": "0.46.2",
+        "source": "https://repo1.maven.org/maven2/com/google/cloud/spark/spark-3.5-bigquery/0.46.2/spark-3.5-bigquery-0.46.2.jar",
+        "sha256": "817aafccd47b4756f7ae5bb51b509d5642140ead0fb3da06f1a20c24e9baa0ac",
+        "license": "Apache-2.0",
+        "redistribution": "not published: downloaded by the local CLI; nothing of it is in the CLI or the repository",
+        "updateFeed": "maven-central",
+        "verification": "sha256",
+        "skipDiscovery": "Maven Central; depcheck only discovers GitHub-sourced components."
+      },
       "tfconvertBase": {
         "$comment": "deploy/tfconvert/Dockerfile builds FROM this digest (#1775): the TensorFlow SavedModel converter image the CLI builds locally on the first imported TENSORFLOW model.",
         "image": "python:3.12-slim",

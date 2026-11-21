@@ -226,6 +226,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		comps.SetTFConverter(fmt.Sprintf("%s.%s.svc.cluster.local:%d", ClusterHostService, cfg.Cluster.Namespace,
 			cfg.Endpoints.TFConvert))
 	}
+	if sparkRunnerEnabled(cfg) && cfg.Endpoints.Spark > 0 {
+		// The Spark procedure runner, through cloudburrow-host, runs
+		// BigQuery's stored procedures for Apache Spark (#2104).
+		comps.SetSparkRunner(fmt.Sprintf("%s.%s.svc.cluster.local:%d", ClusterHostService, cfg.Cluster.Namespace,
+			cfg.Endpoints.Spark))
+	}
 	if serviceEnabled(cfg, config.ServiceBigQuery) && localAIServed(cfg) {
 		if err := pinLocalAIPort(&cfg); err != nil {
 			return err
@@ -1277,6 +1283,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if tfConverter != nil {
 		coord.Register(tfConverter)
 	}
+	// The Spark procedure runner (#2104), for BigQuery's front.
+	sparkRunner := newSparkRunner(cfg, stdout, boundAddrs)
+	if sparkRunner != nil {
+		coord.Register(sparkRunner)
+	}
 
 	// hostComp publishes the CLI-hosted services to the cluster (#575); nil
 	// without Cloud Run or BigQuery.
@@ -1354,6 +1365,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if a := tfConverter.Addr(); a != "" {
 			live["tfconvert"] = a
 		}
+		if a := sparkRunner.Addr(); a != "" {
+			live["spark"] = a
+		}
 		if localAISrv != nil && localAISrv.Addr() != "" {
 			live["localai"] = localAISrv.Addr()
 		}
@@ -1381,9 +1395,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		published := map[string]bool{"run": true, "tasks": true, "secretmanager": true, "kms": true,
 			"scheduler": true, "logging": true, "resourcemanager": true, "serviceusage": true, "apikeys": true, "metadata": true,
 			"storagebatchoperations": true, "storageinsights": true, "storagetransfer": true,
-			"sqladmin": true, "cloudsql-connector": true, "onnx": true, "tfconvert": true, "localai": true, "workflows": true, "parametermanager": true}
+			"sqladmin": true, "cloudsql-connector": true, "onnx": true, "tfconvert": true, "spark": true, "localai": true, "workflows": true, "parametermanager": true}
 		if !runEnabled {
-			published = map[string]bool{"resourcemanager": true, "onnx": true, "tfconvert": true, "localai": true}
+			published = map[string]bool{"resourcemanager": true, "onnx": true, "tfconvert": true, "spark": true, "localai": true}
 			// The storage server reads IAM service accounts' certificates
 			// from the metadata server (#1787).
 			if serviceEnabled(cfg, config.ServiceStorage) {

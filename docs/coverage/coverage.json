@@ -6281,6 +6281,7 @@
         "tests": [
           "test/compat/backupdr1921_test.go:252 TestBackupDRJobLogsStoredBytesAndOnDemandRetention",
           "test/compat/backupdr1922_test.go:46 TestBackupDRRestoreToANewInstance",
+          "test/compat/bigquerysparkprocs2104_test.go:125 TestBigQuerySparkStoredProcedures",
           "test/compat/consoleloggingviews_test.go:58 TestConsoleLogsExplorerThroughView",
           "test/compat/gcloudschedulerlogging_test.go:79 TestGcloudLogging",
           "test/compat/logging1521_test.go:63 TestLoggingInterceptingSinks",
@@ -11982,6 +11983,7 @@
           "test/compat/bigqueryscriptfailedchildren_test.go:27 TestBigQueryScriptFailedChildJobs",
           "test/compat/bigqueryscriptflow2_test.go:22 TestBigQueryScriptControlFlowMore",
           "test/compat/bigqueryscriptflow_test.go:59 TestBigQueryScriptControlFlow",
+          "test/compat/bigquerysparkprocs2104_test.go:125 TestBigQuerySparkStoredProcedures",
           "test/compat/bigquerytempscriptsinturn_test.go:40 TestBigQueryTempScriptsInTurn",
           "test/compat/bigquerytempscriptstatements_test.go:161 TestBigQueryEveryScriptInTurn",
           "test/compat/bigquerytimes_test.go:22 TestBigQueryResourceTimesInMilliseconds",
@@ -11992,6 +11994,7 @@
           "test/compat/bigquerywrites_test.go:145 TestBigQueryBytesParameters",
           "test/compat/bqcopysnapshot_test.go:25 TestBqCopySnapshotCloneAndRestore",
           "test/compat/bqscript_test.go:17 TestBqRunsAScriptWithControlFlow",
+          "test/compat/bqsparkprocs2104_test.go:23 TestBqSparkStoredProcedure",
           "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory",
           "test/compat/consolebigqueryloadfile_test.go:207 TestConsoleBigQueryJobPageShowsDMLRows",
           "test/compat/consolebigqueryloadfile_test.go:97 TestConsoleBigQueryLoadFromAFile",
@@ -12021,7 +12024,8 @@
           "test/compat/bigquerytransactions_test.go:118 TestBigQueryScriptTransactionsMore",
           "test/compat/bigquerytransactions_test.go:24 TestBigQueryScriptTransactions",
           "test/compat/bqiceberg2104_test.go:21 TestBqIcebergNestedTypesAndRefusedTypes",
-          "test/compat/bqscript_test.go:17 TestBqRunsAScriptWithControlFlow"
+          "test/compat/bqscript_test.go:17 TestBqRunsAScriptWithControlFlow",
+          "test/compat/bqsparkprocs2104_test.go:23 TestBqSparkStoredProcedure"
         ]
       },
       {
@@ -12159,6 +12163,7 @@
           "test/compat/bigquerymlmore_test.go:225 TestBigQueryMLTransform",
           "test/compat/bigquerymlmore_test.go:38 TestBigQueryMLMulticlassConfusionAndROC",
           "test/compat/bigquerymlonnx_test.go:48 TestBigQueryMLImportedONNXModel",
+          "test/compat/bigquerymlonnximage2104_test.go:38 TestBigQueryMLImportedONNXModelOverImages",
           "test/compat/bigquerymlpreprocess_test.go:138 TestBigQueryMLQuantilePreprocess",
           "test/compat/bigquerymlpreprocess_test.go:21 TestBigQueryMLPreprocessFunctions",
           "test/compat/bigquerymlpreprocess_test.go:75 TestBigQueryMLTransformPreprocess",
@@ -12216,6 +12221,7 @@
           "test/compat/bigqueryscriptflow_test.go:59 TestBigQueryScriptControlFlow",
           "test/compat/bigqueryscriptpartition1512_test.go:29 TestBigQueryScriptCreateTableKeepsPartitioning",
           "test/compat/bigquerysilent_test.go:511 TestBigQueryExecuteImmediateInTurn",
+          "test/compat/bigquerysparkprocs2104_test.go:125 TestBigQuerySparkStoredProcedures",
           "test/compat/bigquerystoragebytes_test.go:29 TestBigQueryPartitionsBytesAndWriteTimes",
           "test/compat/bigquerystoragephysical_test.go:30 TestBigQueryTableStoragePhysicalAndJobColumns",
           "test/compat/bigquerystreamdml_test.go:54 TestBigQueryDMLOfRecentlyStreamedRows",
@@ -12248,6 +12254,7 @@
           "test/compat/bqcopysnapshot_test.go:25 TestBqCopySnapshotCloneAndRestore",
           "test/compat/bqiceberg2104_test.go:21 TestBqIcebergNestedTypesAndRefusedTypes",
           "test/compat/bqscript_test.go:17 TestBqRunsAScriptWithControlFlow",
+          "test/compat/bqsparkprocs2104_test.go:23 TestBqSparkStoredProcedure",
           "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory",
           "test/compat/consolebigqueryloadfile_test.go:97 TestConsoleBigQueryLoadFromAFile",
           "test/compat/consolebigqueryorc_test.go:17 TestConsoleBigQueryLoadORCThroughTheForm",
@@ -12272,10 +12279,12 @@
           "test/compat/bigqueryscriptchildren_test.go:27 TestBigQueryScriptChildJobs",
           "test/compat/bigqueryscriptfailedchildren_test.go:27 TestBigQueryScriptFailedChildJobs",
           "test/compat/bigqueryscriptframes_test.go:28 TestBigQueryScriptChildFrames",
+          "test/compat/bigquerysparkprocs2104_test.go:125 TestBigQuerySparkStoredProcedures",
           "test/compat/bigquerytempscriptsinturn_test.go:40 TestBigQueryTempScriptsInTurn",
           "test/compat/bigquerytempscriptstatements_test.go:109 TestBigQueryStatementsLaterInAScript",
           "test/compat/bigquerytempscriptstatements_test.go:161 TestBigQueryEveryScriptInTurn",
           "test/compat/bigquerytempscriptstatements_test.go:30 TestBigQueryStatementsInTempScripts",
+          "test/compat/bqsparkprocs2104_test.go:23 TestBqSparkStoredProcedure",
           "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory"
         ]
       },
@@ -12431,6 +12440,7 @@
           "test/compat/bigquerymlmore_test.go:38 TestBigQueryMLMulticlassConfusionAndROC",
           "test/compat/bigquerymlonnx_test.go:173 TestBigQueryMLONNXNeedsTheOnnxBuild",
           "test/compat/bigquerymlonnx_test.go:48 TestBigQueryMLImportedONNXModel",
+          "test/compat/bigquerymlonnximage2104_test.go:38 TestBigQueryMLImportedONNXModelOverImages",
           "test/compat/bigquerymlpreprocess_test.go:138 TestBigQueryMLQuantilePreprocess",
           "test/compat/bigquerymlpreprocess_test.go:21 TestBigQueryMLPreprocessFunctions",
           "test/compat/bigquerymlpreprocess_test.go:75 TestBigQueryMLTransformPreprocess",
@@ -12514,6 +12524,7 @@
           "test/compat/bigqueryscriptflow_test.go:59 TestBigQueryScriptControlFlow",
           "test/compat/bigqueryscriptpartition1512_test.go:29 TestBigQueryScriptCreateTableKeepsPartitioning",
           "test/compat/bigquerysilent_test.go:511 TestBigQueryExecuteImmediateInTurn",
+          "test/compat/bigquerysparkprocs2104_test.go:125 TestBigQuerySparkStoredProcedures",
           "test/compat/bigquerystoragebytes_test.go:29 TestBigQueryPartitionsBytesAndWriteTimes",
           "test/compat/bigquerystoragephysical_test.go:30 TestBigQueryTableStoragePhysicalAndJobColumns",
           "test/compat/bigquerystoragesplit_test.go:31 TestBigQueryStorageReadSplitAndRestart",
@@ -12544,6 +12555,7 @@
           "test/compat/bigqueryviewcolumns_test.go:145 TestBigQueryViewColumnListInAScriptAndColumnOptions",
           "test/compat/bigqueryviewcolumns_test.go:240 TestBigQueryViewColumnListInATempScriptAndADryRun",
           "test/compat/bigqueryviewcolumns_test.go:29 TestBigQueryCreateViewWithAColumnList",
+          "test/compat/bigqueryviewdescriptions2104_test.go:24 TestBigQueryViewColumnDescriptions",
           "test/compat/bigquerywrites_test.go:145 TestBigQueryBytesParameters",
           "test/compat/consolebigqueryorc_test.go:17 TestConsoleBigQueryLoadORCThroughTheForm",
           "test/compat/consolebigquerywrites_test.go:398 TestConsoleBigQueryReadWriteEditorRunsDML",
@@ -12667,8 +12679,10 @@
           "test/compat/bigquerypurge1781_test.go:36 TestBigQueryPurgedProjectStartsEmpty",
           "test/compat/bigqueryroutines_test.go:144 TestConsoleBigQueryRoutines",
           "test/compat/bigqueryroutines_test.go:29 TestBigQueryRoutinesListGetDelete",
+          "test/compat/bigquerysparkprocs2104_test.go:125 TestBigQuerySparkStoredProcedures",
           "test/compat/bigquerytimes_test.go:22 TestBigQueryResourceTimesInMilliseconds",
           "test/compat/bigqueryundeleteroutines_test.go:43 TestBigQueryUndeleteKeepsRoutinesAndModels",
+          "test/compat/bqsparkprocs2104_test.go:23 TestBqSparkStoredProcedure",
           "test/compat/terraform_iam_test.go:224 TestTerraformBigQueryIAM"
         ]
       },
@@ -12973,6 +12987,7 @@
           "test/compat/bigqueryviewcolumns_test.go:145 TestBigQueryViewColumnListInAScriptAndColumnOptions",
           "test/compat/bigqueryviewcolumns_test.go:240 TestBigQueryViewColumnListInATempScriptAndADryRun",
           "test/compat/bigqueryviewcolumns_test.go:29 TestBigQueryCreateViewWithAColumnList",
+          "test/compat/bigqueryviewdescriptions2104_test.go:24 TestBigQueryViewColumnDescriptions",
           "test/compat/bqcopysnapshot_test.go:25 TestBqCopySnapshotCloneAndRestore",
           "test/compat/bqiceberg2104_test.go:21 TestBqIcebergNestedTypesAndRefusedTypes",
           "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",
@@ -13068,6 +13083,7 @@
           "test/compat/bigqueryprivacypolicy_test.go:77 TestBigQueryPrivacyPolicyAggregationThreshold",
           "test/compat/bigquerysilent_test.go:594 TestBigQueryTableUpdateAddsColumns",
           "test/compat/bigquerytimes_test.go:22 TestBigQueryResourceTimesInMilliseconds",
+          "test/compat/bigqueryviewdescriptions2104_test.go:24 TestBigQueryViewColumnDescriptions",
           "test/compat/consolebigquerywrites_test.go:207 TestConsoleBigQueryEditTableViewsAndInsertOptions",
           "test/compat/terraform_bigquery_tables_test.go:24 TestTerraformBigQueryPartitionedTableAndJob"
         ]

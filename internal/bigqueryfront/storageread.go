@@ -334,6 +334,20 @@ func (s *storageRead) createSession(ss grpc.ServerStream, open func() (grpc.Clie
 	default:
 		return status.Errorf(codes.InvalidArgument, "read_session.data_format %s: give ARROW or AVRO", f)
 	}
+	if req.GetMaxStreamCount() > 1 || req.GetPreferredMinStreamCount() > 0 {
+		// max_stream_count is an upper bound: "the server will choose ... a
+		// number of streams up to the maximum" (storage.proto); the session
+		// has one stream, which the emulator refuses to be asked more than
+		// ("currently supported only one stream", measured: Google's
+		// BigQuery connector for Spark asks for its parallelism, #2104).
+		// preferred_min_stream_count is a preference, "not guaranteed".
+		req.MaxStreamCount, req.PreferredMinStreamCount = 1, 0
+		b, err := proto.Marshal(&req)
+		if err != nil {
+			return status.Error(codes.Internal, err.Error())
+		}
+		in = b
+	}
 	asked := req.GetReadSession().GetTable()
 	in, t, err := s.hubSession(&req, in, t) // hublinks.go, #1989
 	if err != nil {

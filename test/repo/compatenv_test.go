@@ -26,6 +26,9 @@ var compatEnvExceptions = map[string]string{
 	// The instance under test is a `-tags onnx` build whose BigQuery
 	// imports ONNX models (#1711); no instance reports which build it is.
 	"CLOUDBURROW_TEST_ONNX": "opt-in switch: the instance is an onnx build run with ONNXRUNTIME_LIB",
+	// The host may pull the 1.8 GB apache/spark image for BigQuery's Spark
+	// procedures (#2104); no instance reports what the host may pull.
+	"CLOUDBURROW_TEST_SPARK": "opt-in switch: the host may pull the apache/spark image and run Spark procedures",
 	// Test data, not an instance: internal/isoconformance downloads ISO's
 	// conformance files only when it is set (#1754).
 	"CLOUDBURROW_TEST_DOWNLOADS": "opt-in switch: tests may download test data not cached yet",

@@ -1,0 +1,491 @@
+package sparkproc
+
+import (
+	"bufio"
+	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"embed"
+	"encoding/json"
+	"encoding/pem"
+	"errors"
+	"fmt"
+	"io"
+	"math/big"
+	"net"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/cloudburrow/cloudburrow/internal/hostrelay"
+)
+
+//go:embed assets/relay.py assets/procedure.py assets/run.sh
+var assets embed.FS
+
+// The connector's endpoints, the relay's aliases on the job's network.
+const (
+	// restHost is the name the instance's REST ports answer to beside
+	// loopback (hostguard, ADR-0004), as Docker Desktop names the host.
+	restHost    = "host.docker.internal"
+	storageHost = "bigquerystorage.cloudburrow.internal"
+	restPort    = "8080"
+	storagePort = "8443"
+	// accessToken is the connector's gcpAccessToken: the front takes every
+	// caller to be the instance's one identity, so any token serves, and a
+	// fixed one is never refreshed.
+	accessToken = "cloudburrow-spark-procedure"
+)
+
+// LogEntry is one line of the application's output, for Cloud Logging.
+type LogEntry struct {
+	Job       Job
+	Component string // DRIVER or EXECUTOR
+	Severity  string
+	Text      string
+	Time      time.Time
+}
+
+// Docker runs jobs in the Spark image.
+type Docker struct {
+	// Image is the apache/spark image, by digest.
+	Image string
+	// Connector returns the BigQuery connector jar's path on the host,
+	// fetching it on the first use.
+	Connector func(ctx context.Context) (string, error)
+	// BigQuery and Storage are the instance's BigQuery REST and Storage
+	// API addresses on the host (host:port), live at each run.
+	BigQuery, Storage func() string
+	// Instance labels the containers and networks made.
+	Instance string
+	// Tmp holds each job's directory ("": the system's).
+	Tmp string
+	// Log receives each line of output; Logf the runner's own notes.
+	Log  func(LogEntry)
+	Logf func(format string, args ...any)
+
+	once      sync.Once
+	desktop   bool
+	desktopOK error
+}
+
+func (d *Docker) logf(format string, args ...any) {
+	if d.Logf != nil {
+		d.Logf(format, args...)
+	}
+}
+
+var nameSafe = regexp.MustCompile(`[^a-z0-9-]+`)
+
+// Run runs job to its end.
+func (d *Docker) Run(ctx context.Context, job Job) (Result, error) {
+	if _, err := exec.LookPath("docker"); err != nil {
+		return Result{}, &Unavailable{Msg: "docker is not on PATH: stored procedures for Apache Spark run in a local Spark container"}
+	}
+	jar, err := d.Connector(ctx)
+	if err != nil {
+		return Result{}, &Unavailable{Msg: "the BigQuery connector for Spark is not available: " + err.Error()}
+	}
+	rest, storage := d.BigQuery(), d.Storage()
+	if rest == "" || storage == "" {
+		return Result{}, &Unavailable{Msg: "the instance's BigQuery REST and Storage API ports are not live"}
+	}
+	dir, err := os.MkdirTemp(d.Tmp, "cb-spark-")
+	if err != nil {
+		return Result{}, err
+	}
+	defer os.RemoveAll(dir)
+	args, err := writeJob(dir, job)
+	if err != nil {
+		return Result{}, err
+	}
+	if err := writeTLS(filepath.Join(dir, "tls")); err != nil {
+		return Result{}, err
+	}
+	// Readable by the image's spark user (uid 185); out/ writable.
+	_ = filepath.Walk(dir, func(p string, info os.FileInfo, err error) error {
+		if err == nil {
+			mode := os.FileMode(0o644)
+			if info.IsDir() {
+				mode = 0o755
+			}
+			_ = os.Chmod(p, mode)
+		}
+		return nil
+	})
+	_ = os.Chmod(filepath.Join(dir, "out"), 0o777)
+
+	suffix := nameSafe.ReplaceAllString(strings.ToLower(job.SparkJobID), "-")
+	if len(suffix) > 40 {
+		suffix = suffix[len(suffix)-40:]
+	}
+	suffix = strings.Trim(suffix, "-") + fmt.Sprintf("-%d", time.Now().UnixNano()%1e6)
+	network, relay, spark := "cb-spark-net-"+suffix, "cb-spark-relay-"+suffix, "cb-spark-"+suffix
+	label := "cloudburrow.instance=" + d.Instance
+
+	restTarget, storageTarget, stop, err := d.targets(ctx, rest, storage)
+	if err != nil {
+		return Result{}, &Unavailable{Msg: err.Error()}
+	}
+	defer stop()
+
+	if out, err := d.docker(ctx, "network", "create", "--internal", "--label", label, network); err != nil {
+		return Result{}, &Unavailable{Msg: "create the Spark job's internal network: " + out}
+	}
+	defer func() { _, _ = d.docker(context.Background(), "network", "rm", network) }()
+
+	relayArgs := []string{"run", "-d", "--name", relay, "--label", label, "-v", dir + ":/cb:ro", "--entrypoint", "python3"}
+	if !d.desktop {
+		relayArgs = append(relayArgs, "--add-host", "host.docker.internal:host-gateway")
+	}
+	relayArgs = append(relayArgs, d.Image, "/cb/relay.py", restTarget, storageTarget)
+	if out, err := d.docker(ctx, relayArgs...); err != nil {
+		return Result{}, &Unavailable{Msg: "start the Spark job's relay: " + out}
+	}
+	defer func() { _, _ = d.docker(context.Background(), "rm", "-f", "-v", relay) }()
+	if err := d.waitReady(ctx, relay); err != nil {
+		return Result{}, &Unavailable{Msg: err.Error()}
+	}
+	if out, err := d.docker(ctx, "network", "connect", "--alias", restHost, "--alias", storageHost, network, relay); err != nil {
+		return Result{}, &Unavailable{Msg: "connect the Spark job's relay: " + out}
+	}
+
+	run := []string{"run", "--name", spark, "--label", label, "--network", network,
+		"-v", dir + ":/cb", "-v", jar + ":/cb-connector/spark-bigquery.jar:ro",
+		"-e", "CB_SPARK_OUT=/cb/out/params.json", "-e", "PYTHONPATH=/cb/lib",
+		"-e", "PYSPARK_PYTHON=python3", "--entrypoint", "/bin/bash"}
+	names := make([]string, 0, len(job.Params))
+	for name := range job.Params {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		run = append(run, "-e", "BIGQUERY_PROC_PARAM."+name+"="+job.Params[name])
+	}
+	run = append(run, d.Image, "/cb/run.sh")
+	run = append(run, submitArgs(job, args)...)
+	d.logf("spark: running %s (%s) in %s", job.Procedure, job.SparkJobID, d.Image)
+	defer func() { _, _ = d.docker(context.Background(), "rm", "-f", "-v", spark) }()
+	cmd := exec.CommandContext(ctx, "docker", run...)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return Result{}, err
+	}
+	cmd.Stderr = cmd.Stdout
+	if err := cmd.Start(); err != nil {
+		return Result{}, &Unavailable{Msg: "start the Spark container: " + err.Error()}
+	}
+	tail := d.follow(job, stdout)
+	waitErr := cmd.Wait()
+	res := Result{Out: map[string]string{}}
+	if b, err := os.ReadFile(filepath.Join(dir, "out", "params.json")); err == nil {
+		_ = json.Unmarshal(b, &res.Out)
+	}
+	if waitErr != nil {
+		var exit *exec.ExitError
+		if !errors.As(waitErr, &exit) {
+			return Result{}, &Unavailable{Msg: "the Spark container: " + waitErr.Error()}
+		}
+		if exit.ExitCode() == 125 {
+			return Result{}, &Unavailable{Msg: "the Spark container did not start: " + strings.Join(tail(), "\n")}
+		}
+		res.Failed = true
+		res.Message = failure(tail())
+	}
+	return res, nil
+}
+
+// targets are the relay's two targets, as the relay container reaches
+// the host. Docker Desktop's host.docker.internal is the host's loopback;
+// on Docker Engine the host's loopback is not reachable from a container,
+// so the runner relays the two ports from the default bridge's gateway
+// address for the run (internal/hostrelay, as #575 does for the cluster).
+func (d *Docker) targets(ctx context.Context, rest, storage string) (string, string, func(), error) {
+	d.once.Do(func() {
+		out, err := d.docker(ctx, "info", "--format", "{{.OperatingSystem}}")
+		d.desktop, d.desktopOK = strings.Contains(out, "Docker Desktop"), err
+	})
+	_, restPortHost, _ := net.SplitHostPort(rest)
+	_, storagePortHost, _ := net.SplitHostPort(storage)
+	if d.desktop {
+		return "host.docker.internal:" + restPortHost, "host.docker.internal:" + storagePortHost, func() {}, nil
+	}
+	gw, err := d.docker(ctx, "network", "inspect", "bridge", "--format", "{{range .IPAM.Config}}{{.Gateway}} {{end}}")
+	if err != nil {
+		return "", "", nil, errors.New("find the default bridge's gateway: " + gw)
+	}
+	var ip string
+	for _, f := range strings.Fields(gw) {
+		if p := net.ParseIP(f); p != nil && p.To4() != nil {
+			ip = f
+			break
+		}
+	}
+	if ip == "" {
+		return "", "", nil, fmt.Errorf("the default bridge has no IPv4 gateway (%q)", gw)
+	}
+	r1 := &hostrelay.Relay{Listen: net.JoinHostPort(ip, "0"), Target: rest}
+	r2 := &hostrelay.Relay{Listen: net.JoinHostPort(ip, "0"), Target: storage}
+	if err := r1.Start(ctx); err != nil {
+		return "", "", nil, err
+	}
+	if err := r2.Start(ctx); err != nil {
+		_ = r1.Close()
+		return "", "", nil, err
+	}
+	return r1.Addr(), r2.Addr(), func() { _ = r1.Close(); _ = r2.Close() }, nil
+}
+
+func (d *Docker) docker(ctx context.Context, args ...string) (string, error) {
+	out, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput()
+	return strings.TrimSpace(string(out)), err
+}
+
+func (d *Docker) waitReady(ctx context.Context, name string) error {
+	deadline := time.Now().Add(2 * time.Minute)
+	for {
+		logs, _ := d.docker(ctx, "logs", name)
+		if strings.Contains(logs, "ready") {
+			return nil
+		}
+		if time.Now().After(deadline) || ctx.Err() != nil {
+			return fmt.Errorf("the Spark job's relay did not start: %s", logs)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
+// log4j's console layout in the image: "25/11/21 10:00:00 INFO Executor: …".
+var log4jLine = regexp.MustCompile(`^\d\d/\d\d/\d\d \d\d:\d\d:\d\d (TRACE|DEBUG|INFO|WARN|ERROR|FATAL) (\S+?):`)
+
+// follow sends each line of r to Log, and returns the last lines read.
+func (d *Docker) follow(job Job, r io.Reader) func() []string {
+	var mu sync.Mutex
+	var last []string
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 64<<10), 4<<20)
+	for sc.Scan() {
+		line := sc.Text()
+		component, severity := "DRIVER", "INFO"
+		if m := log4jLine.FindStringSubmatch(line); m != nil {
+			severity = map[string]string{"TRACE": "DEBUG", "FATAL": "CRITICAL", "WARN": "WARNING"}[m[1]]
+			if severity == "" {
+				severity = m[1]
+			}
+			if strings.HasPrefix(m[2], "Executor") || strings.Contains(m[2], "executor.") {
+				component = "EXECUTOR"
+			}
+		}
+		if d.Log != nil {
+			d.Log(LogEntry{Job: job, Component: component, Severity: severity, Text: line, Time: time.Now()})
+		}
+		mu.Lock()
+		last = append(last, line)
+		if len(last) > 400 {
+			last = last[len(last)-400:]
+		}
+		mu.Unlock()
+	}
+	return func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), last...)
+	}
+}
+
+// pyError is a Python traceback's last line: "ValueError: kaboom".
+var pyError = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.]*(Error|Exception|Exit|Interrupt)\b`)
+
+// failure is a failed application's error from its last lines: a Python
+// traceback's last line (for py4j's, the Java exception it carries, on
+// the line after), or else the last ERROR line.
+func failure(lines []string) string {
+	for i := len(lines) - 1; i >= 0; i-- {
+		l := strings.TrimRight(lines[i], " \t")
+		if !pyError.MatchString(l) {
+			continue
+		}
+		if strings.HasPrefix(l, "py4j.protocol.Py4JJavaError") && i+1 < len(lines) {
+			if next := strings.TrimSpace(lines[i+1]); strings.HasPrefix(next, ": ") {
+				return strings.TrimPrefix(next, ": ")
+			}
+		}
+		return l
+	}
+	for i := len(lines) - 1; i >= 0; i-- {
+		if l := strings.TrimSpace(lines[i]); strings.Contains(l, " ERROR ") {
+			return l
+		}
+	}
+	return "The Spark application failed"
+}
+
+// jobArgs are a job's files as spark-submit names them in the container.
+type jobArgs struct {
+	main                         string
+	pyFiles, jars, files, archiv []string
+}
+
+// writeJob writes the job's files under dir and the library and scripts
+// the container runs.
+func writeJob(dir string, job Job) (jobArgs, error) {
+	var a jobArgs
+	put := func(rel string, data []byte) (string, error) {
+		p := filepath.Join(dir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			return "", err
+		}
+		return "/cb/" + rel, os.WriteFile(p, data, 0o644)
+	}
+	for _, name := range []string{"relay.py", "run.sh"} {
+		b, _ := assets.ReadFile("assets/" + name)
+		if _, err := put(name, b); err != nil {
+			return a, err
+		}
+	}
+	lib, _ := assets.ReadFile("assets/procedure.py")
+	for rel, data := range map[string][]byte{"lib/bigquery/__init__.py": nil, "lib/bigquery/spark/__init__.py": nil,
+		"lib/bigquery/spark/procedure.py": lib} {
+		if _, err := put(rel, data); err != nil {
+			return a, err
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "out"), 0o777); err != nil {
+		return a, err
+	}
+	var err error
+	switch {
+	case job.Main != nil:
+		a.main, err = put("main/"+safeBase(job.Main.Base()), job.Main.Data)
+	case job.Code != "":
+		a.main, err = put("main/main.py", []byte(job.Code))
+	}
+	if err != nil {
+		return a, err
+	}
+	for kind, files := range map[string][]File{"py": job.PyFiles, "jars": job.Jars, "files": job.Files, "archives": job.Archives} {
+		for i, f := range files {
+			p, err := put(fmt.Sprintf("%s/%d/%s", kind, i, safeBase(f.Base())), f.Data)
+			if err != nil {
+				return a, err
+			}
+			switch kind {
+			case "py":
+				a.pyFiles = append(a.pyFiles, p)
+			case "jars":
+				a.jars = append(a.jars, p)
+			case "files":
+				a.files = append(a.files, p)
+			case "archives":
+				a.archiv = append(a.archiv, p)
+			}
+		}
+	}
+	sort.Strings(a.pyFiles)
+	sort.Strings(a.jars)
+	sort.Strings(a.files)
+	sort.Strings(a.archiv)
+	return a, nil
+}
+
+func safeBase(s string) string {
+	s = filepath.Base(filepath.Clean("/" + s))
+	if s == "/" || s == "." || s == "" {
+		return "file"
+	}
+	return s
+}
+
+// submitArgs are spark-submit's arguments for job.
+func submitArgs(job Job, a jobArgs) []string {
+	args := []string{"--master", "local[*]", "--name", job.SparkJobID,
+		"--driver-java-options", "-Djavax.net.ssl.trustStore=/tmp/cb-trust.jks -Djavax.net.ssl.trustStorePassword=changeit",
+		"--jars", strings.Join(append([]string{"/cb-connector/spark-bigquery.jar"}, a.jars...), ",")}
+	if len(a.pyFiles) > 0 {
+		args = append(args, "--py-files", strings.Join(a.pyFiles, ","))
+	}
+	if len(a.files) > 0 {
+		args = append(args, "--files", strings.Join(a.files, ","))
+	}
+	if len(a.archiv) > 0 {
+		args = append(args, "--archives", strings.Join(a.archiv, ","))
+	}
+	conf := map[string]string{
+		"spark.datasource.bigquery.bigQueryHttpEndpoint":        "http://" + restHost + ":" + restPort,
+		"spark.datasource.bigquery.bigQueryStorageGrpcEndpoint": storageHost + ":" + storagePort,
+		"spark.datasource.bigquery.gcpAccessToken":              accessToken,
+		"spark.datasource.bigquery.parentProject":               job.Project,
+		"spark.datasource.bigquery.project":                     job.Project,
+		"spark.ui.enabled":                                      "false",
+	}
+	for k, v := range job.Properties {
+		conf[k] = v
+	}
+	keys := make([]string, 0, len(conf))
+	for k := range conf {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		args = append(args, "--conf", k+"="+conf[k])
+	}
+	if job.MainClass != "" {
+		args = append(args, "--class", job.MainClass)
+		if a.main == "" && len(a.jars) > 0 {
+			// main_class in jar_uris: spark-submit runs the first jar.
+			a.main = a.jars[0]
+		}
+	}
+	return append(args, a.main)
+}
+
+// writeTLS writes a CA made for the run and the relay's certificate of
+// the Storage API's name, signed by it.
+func writeTLS(dir string) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return err
+	}
+	now := time.Now()
+	ca := &x509.Certificate{SerialNumber: big.NewInt(now.UnixNano()), Subject: pkix.Name{CommonName: "CloudBurrow Spark procedure CA"},
+		NotBefore: now.Add(-time.Hour), NotAfter: now.Add(7 * 24 * time.Hour), IsCA: true, BasicConstraintsValid: true,
+		KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature}
+	caDER, err := x509.CreateCertificate(rand.Reader, ca, ca, &caKey.PublicKey, caKey)
+	if err != nil {
+		return err
+	}
+	caCert, _ := x509.ParseCertificate(caDER)
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return err
+	}
+	leaf := &x509.Certificate{SerialNumber: big.NewInt(now.UnixNano() + 1), Subject: pkix.Name{CommonName: storageHost},
+		DNSNames: []string{storageHost, restHost}, NotBefore: now.Add(-time.Hour), NotAfter: now.Add(7 * 24 * time.Hour),
+		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
+	der, err := x509.CreateCertificate(rand.Reader, leaf, caCert, &key.PublicKey, caKey)
+	if err != nil {
+		return err
+	}
+	keyDER, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		return err
+	}
+	for name, block := range map[string]*pem.Block{"ca.pem": {Type: "CERTIFICATE", Bytes: caDER},
+		"cert.pem": {Type: "CERTIFICATE", Bytes: der}, "key.pem": {Type: "PRIVATE KEY", Bytes: keyDER}} {
+		if err := os.WriteFile(filepath.Join(dir, name), pem.EncodeToMemory(block), 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
+}

@@ -411,6 +411,12 @@ type Endpoints struct {
 	// published to the cluster through cloudburrow-host. CloudBurrow's
 	// own API, not a Google one: bound with BigQuery enabled.
 	TFConvert int `json:"tfconvert"`
+	// Spark is the host port of the runner of BigQuery's stored
+	// procedures for Apache Spark (#2104, internal/sparkproc), which runs
+	// them in a local Apache Spark container for the BigQuery front,
+	// published to the cluster through cloudburrow-host. CloudBurrow's own
+	// API, not a Google one: bound with BigQuery enabled.
+	Spark int `json:"spark"`
 }
 
 // NamedPort is one host endpoint and the name its --port-<name> flag uses.
@@ -484,6 +490,7 @@ func (e *Endpoints) fields() []endpointField {
 		{"parametermanager", &e.ParameterManager},
 		{"onnx", &e.ONNX},
 		{"tfconvert", &e.TFConvert},
+		{"spark", &e.Spark},
 	}
 }
 
@@ -928,6 +935,9 @@ func Default() Config {
 			// Parameter Manager (#2054): 9039 to 9046 are taken by open
 			// branches, so 9047.
 			ParameterManager: 9047,
+			// The Spark procedure runner (#2104): the next free port after
+			// Parameter Manager's 9047.
+			Spark: 9048,
 			// OS-assigned. The port is not what enables local AI —
 			// LocalAI.ModelPath is. A configured port with no model binds
 			// nothing, so there is no endpoint answering every request with

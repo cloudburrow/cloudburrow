@@ -255,8 +255,10 @@ type scriptNode struct {
 	forVar     string
 	caseExpr   []token
 	target     string // BREAK's or CONTINUE's label
-	// procSpan is a CREATE PROCEDURE's body, BEGIN ... END, in the script.
+	// procSpan is a CREATE PROCEDURE's body, BEGIN ... END, in the script;
+	// for a procedure for Apache Spark (spark), the whole statement.
 	procSpan [2]int
+	spark    bool
 }
 
 type scriptParser struct {

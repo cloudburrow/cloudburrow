@@ -144,6 +144,8 @@ Flags:
     	Spanner emulator host port (0 = OS-assigned; default 9013)
   -port-spanner-rest int
     	Spanner emulator REST API host port, which Terraform uses (0 = OS-assigned; default 9022)
+  -port-spark int
+    	Spark procedure runner host port, for BigQuery's stored procedures for Apache Spark (0 = OS-assigned; default 9048)
   -port-sqladmin int
     	Cloud SQL Admin API host port (0 = OS-assigned; default 9020)
   -port-storage int
