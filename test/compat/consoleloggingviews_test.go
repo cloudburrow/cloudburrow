@@ -179,6 +179,9 @@ func TestConsoleLoggingCopyFromParents(t *testing.T) {
 	h := New(t)
 	shardEndpoint(h, envSinkLogging, EnvLogging)
 	shardEndpoint(h, envSinkStorage, EnvStorage)
+	// And Resource Manager, for its folder and organization (and, #2109,
+	// billing-account) parents, as the emulators shard exports it.
+	shardEndpoint(h, envLoggingResourceManager, EnvResourceManager)
 	ctx := h.Context()
 	addr := consoleAddr(t, h)
 	sc := storageClient(t, h)
