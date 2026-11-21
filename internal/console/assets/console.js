@@ -399,9 +399,10 @@ const ROUTES = [
   // and subscriptions.
   { path: "/bigquery-sharing", service: "bigquery-sharing", icon: "bigquery", title: "Analytics Hub", kind: "Exchange",
     section: "Databases", product: "bigquery", productTitle: "BigQuery" },
-  { path: "/bigquery-dataform", service: null, requires: "bigquery", screen: "unavailable", icon: "bigquery", title: "Dataform",
-    section: "Databases", product: "bigquery", productTitle: "BigQuery",
-    unavailable: "Dataform repositories and workflows are the Dataform API's, which CloudBurrow does not run." },
+  // Dataform (#2105): repositories, their workspaces' editor, releases,
+  // workflow configurations and execution logs, in Google's place.
+  { path: "/bigquery-dataform", service: "dataform", icon: "bigquery", title: "Dataform", kind: "Repository",
+    section: "Databases", product: "bigquery", productTitle: "BigQuery" },
   { path: "/bigquery-partner-center", service: null, requires: "bigquery", screen: "unavailable", icon: "bigquery", title: "Partner Center",
     section: "Databases", product: "bigquery", productTitle: "BigQuery",
     unavailable: "Partner Center lists Google Cloud partners' solutions, which a local instance does not hold." },
@@ -19142,12 +19143,12 @@ function diagnoseCard(data) {
 const BQ_STUDIO_STARS = "cloudburrow.bigquery.stars";
 const BQ_STUDIO_TABS = "cloudburrow.bigquery.tabs";
 const BQ_STUDIO_RECENT = "cloudburrow.bigquery.recent";
-const BQ_SAVED_NOTE = "CloudBurrow-only: Google keeps a saved query as a Dataform code asset, which CloudBurrow does not serve. " +
+const BQ_SAVED_NOTE = "CloudBurrow-only: Google keeps a saved query as a Dataform code asset, which Studio does not yet keep in CloudBurrow's Dataform (#2105). " +
   "This one is kept in the instance's state directory, listed under Queries in the Explorer, and reachable by no API.";
 const BQ_UNAVAILABLE_SCHEDULE = "Not available locally: a scheduled query is a BigQuery Data Transfer Service transfer, " +
   "which CloudBurrow does not run.";
 const BQ_UNAVAILABLE_PERMISSIONS = "Not available locally: a saved query's permissions (Code Owner, Code Editor, Code Viewer) " +
-  "are Dataform's IAM, which CloudBurrow does not serve. Copy link shares it with anyone using this instance.";
+  "are Dataform's IAM, which Studio does not yet reach. Copy link shares it with anyone using this instance.";
 
 const bqStudioCall = (call, body = {}) =>
   send(`/api/studio/bigquery?call=${encodeURIComponent(call)}&project=${encodeURIComponent(currentProject())}`,
@@ -19602,7 +19603,7 @@ function renderBigQueryStudio(view) {
   const drawFiles = () => {
     const proj = tree ? tree.project : project;
     setChildren(explorerBody,
-      el("p", { class: "unavailable bq-files-note", text: BQ_SAVED_NOTE + " Folders and notebooks are Dataform's, which is not served." }),
+      el("p", { class: "unavailable bq-files-note", text: BQ_SAVED_NOTE + " Folders and notebooks are Dataform's, which Studio does not yet draw (#2105)." }),
       saved.length
         ? el("ul", { class: "bq-files", "aria-label": "Saved queries" }, ...saved.map((sq) => el("li", { class: "bq-node-row" },
             el("a", { class: "bq-node-name", href: "/bigquery-studio?" + new URLSearchParams({ project: proj, savedQuery: sq.id }),
@@ -19644,8 +19645,8 @@ function renderBigQueryStudio(view) {
         : null);
     if (pane === "source") {
       setChildren(paneHost, head, el("p", { class: "unavailable", text:
-        "Not available locally: Source control keeps code assets in a Git repository through Dataform, which CloudBurrow does not serve. " +
-        "Saved queries are listed under Files." }));
+        "Not available locally: Source control keeps Studio's code assets in a Git repository through Dataform, which Studio does not yet reach (#2105). " +
+        "Dataform repositories are on BigQuery's Dataform page; saved queries are listed under Files." }));
       return;
     }
     if (pane === "files") {
@@ -19919,8 +19920,8 @@ function bqHomeTab(ctx) {
         action("Notebook", null, notebook),
         action("Apache Spark notebook", null, notebook),
         action("Data canvas", null, "Not available locally: data canvas is a Gemini in BigQuery feature, which CloudBurrow does not run."),
-        action("Data preparation", null, "Not available locally: data preparation files are Dataform's, which CloudBurrow does not serve."),
-        action("Pipeline", null, "Not available locally: pipelines are Dataform's, which CloudBurrow does not serve."),
+        action("Data preparation", null, "Not available locally: data preparation files are Dataform's, which CloudBurrow's Dataform does not run."),
+        action("Pipeline", null, "Not available locally: pipelines are Dataform's, which Studio does not yet reach (#2105)."),
         tableButton),
       dsLabel),
     card("Recent",

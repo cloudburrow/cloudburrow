@@ -212,13 +212,13 @@ func TestBigQueryStudioExplorerEditorAndHistory(t *testing.T) {
 		document.querySelector(".bq-editor").value.includes("ORDER BY id")`)
 
 	// A page CloudBurrow does not serve, in Google's place.
-	// (Analytics Hub is served since #1960; Dataform is not.)
-	p.navigate("/bigquery-dataform" + q)
+	// (Analytics Hub is served since #1960, Dataform since #2105.)
+	p.navigate("/bigquery-partner-center" + q)
 	p.waitFor(`document.querySelector("#view .state h2") !== null`)
 	var unavailable string
 	p.eval(`document.querySelector("#view .state").textContent`, &unavailable)
 	if !strings.Contains(unavailable, "Not available locally") {
-		t.Errorf("Dataform says %q", unavailable)
+		t.Errorf("Partner Center says %q", unavailable)
 	}
 
 	// The table's tabs, in Google's order.
