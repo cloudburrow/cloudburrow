@@ -70,7 +70,7 @@ func TestTasksCreateQueueTakesItsConfiguration(t *testing.T) {
 }
 
 // The checked queues' Pause queue, Resume queue and Purge queue, and the
-// queue page's Pause queue, Configure logging and Delete queue (#1848).
+// queue page's Pause queue, Enable logs and Disable logs, and Delete queue (#1848).
 func TestTasksQueueHeaderActions(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -91,13 +91,21 @@ func TestTasksQueueHeaderActions(t *testing.T) {
 	if err := p.ActAt(ctx, "edit-proj", []string{name}, "resumequeue", nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := p.ActAt(ctx, "edit-proj", []string{name}, "logging", map[string]string{"logging": "On", "samplingRatio": "0.25"}); err != nil {
+	if err := p.ActAt(ctx, "edit-proj", []string{name}, tasksEnableLogs, nil); err != nil {
 		t.Fatal(err)
 	}
-	if q, _ := p.svc.Store().GetQueue(name); q.State != tasks.StateRunning || q.Logging == nil || q.Logging.SamplingRatio != 0.25 {
+	if q, _ := p.svc.Store().GetQueue(name); q.State != tasks.StateRunning || q.Logging == nil || q.Logging.SamplingRatio != 1 {
 		t.Fatalf("queue = %+v", q)
 	}
-	if err := p.ActAt(ctx, "edit-proj", []string{name}, "logging", map[string]string{"logging": "Off"}); err != nil {
+	// Logging on, the Logs tab offers Disable logs instead.
+	offered := map[string]bool{}
+	for _, a := range p.DetailActions(ctx, "edit-proj", []string{name}) {
+		offered[a.ID] = true
+	}
+	if !offered[tasksDisableLogs] || offered[tasksEnableLogs] {
+		t.Fatalf("a logging queue offers %v; want Disable logs alone", offered)
+	}
+	if err := p.ActAt(ctx, "edit-proj", []string{name}, tasksDisableLogs, nil); err != nil {
 		t.Fatal(err)
 	}
 	if q, _ := p.svc.Store().GetQueue(name); q.Logging != nil && q.Logging.SamplingRatio != 0 {
@@ -116,8 +124,8 @@ func TestTasksQueueHeaderActions(t *testing.T) {
 		t.Fatalf("tabs = %v", ids)
 	}
 	for _, a := range d.Actions {
-		if a.ID == "logging" {
-			t.Fatal("Configure logging is beside the title; it belongs on the Logs tab")
+		if a.ID == tasksEnableLogs || a.ID == tasksDisableLogs {
+			t.Fatal("Enable logs is beside the title; it belongs on the Logs tab")
 		}
 	}
 

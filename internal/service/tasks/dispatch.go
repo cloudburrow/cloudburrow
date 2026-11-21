@@ -163,6 +163,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, task Task) error {
 		task.DispatchCount++
 		started := d.clock.Now()
 		err := d.attemptAppEngine(&task, started)
+		d.recordAttempt(task, started, attemptStatus(AppEngineAttemptStatus, nil))
 		d.logAttempt(ctx, task, AppEngineAttemptStatus, nil, started)
 		if span != nil {
 			span.SetAttributes(attribute.Int("http.response.status_code", AppEngineAttemptStatus))
@@ -192,6 +193,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, task Task) error {
 		task.LastAttempt = &Attempt{Scheduled: task.ScheduleTime, Dispatched: started}
 		_ = d.store.UpdateTask(task)
 		d.report(task, 0, err)
+		d.recordAttempt(task, started, attemptStatus(0, err))
 		d.logAttempt(ctx, task, 0, err, started)
 		return fmt.Errorf("dispatch %s: %w", task.Name, err)
 	}
@@ -216,6 +218,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, task Task) error {
 	// retried too, which surprises people, but it is what the real service
 	// does and the point here is to match it.
 	d.report(task, resp.StatusCode, nil)
+	d.recordAttempt(task, started, attemptStatus(resp.StatusCode, nil))
 	d.logAttempt(ctx, task, resp.StatusCode, nil, started)
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {

@@ -1499,6 +1499,9 @@ tbody tr.is-selected { background: var(--nav-selected); }
 .overflow-item:hover { background: var(--state-hover); }
 .overflow-item:active { background: var(--state-press); }
 .overflow-item.is-destructive { color: var(--error); }
+/* A tab's ellipsis (#2064) opens from its left edge: it can be the first
+   control on the tab, with nothing to its left to open over. */
+.section-actions .overflow-menu { left: 0; right: auto; }
 
 /* The footer carries the page size and the range, so the count on screen
    always describes the rows on screen. */

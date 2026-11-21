@@ -3188,8 +3188,10 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   const body = el("tbody");
   const headRow = el("tr");
   const footer = el("div", { class: "table-footer" });
+  // Named as Google's header button names it where the provider does
+  // (DeleteWorder, #1848): Cloud Tasks' Delete queue.
   const bulk = el("button", {
-    class: "secondary danger", text: "Delete", disabled: "disabled",
+    class: "secondary danger", text: caps.deleteSelected || "Delete", disabled: "disabled",
     onclick: () => deleteSelected(),
   });
   const selectionLabel = el("span", { class: "selection-count unavailable", text: "" });
@@ -3247,6 +3249,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
       title: `Delete ${names.length} ${names.length === 1 ? noun.replace(/s$/, "") : noun}?`,
       detail: [names.join(", "), DELETE_DETAIL[route.service]].filter(Boolean).join("\n\n"),
       confirmWord: names.length === 1 ? names[0] : String(names.length),
+      confirmLabel: caps.deleteSubmit || "Delete",
       style: caps.deleteConfirm || "name",
       onConfirm: async () => {
         for (const name of names) operating.add(name);
@@ -4091,12 +4094,20 @@ async function renderDetail(view, route, resourcePath) {
       : null;
     // A tab's own actions, at the top of the tab rather than beside the
     // page title: Google's Lifecycle tab has Add a rule (#1843).
+    // An action with Menu goes in the tab's ellipsis menu instead, as
+    // Google's Cloud Tasks Logs tab has Disable logs (#2064), drawn and
+    // driven by the keyboard as a row's menu is.
     if ((section.actions || []).length) {
+      const run = (a) => () => runAction(route, segments, a, reload, NO_ROW, data.title || null);
+      const inMenu = section.actions.filter((a) => a.menu);
       const bar = el("div", { class: "action-bar section-actions", id: `section-actions-${section.id}` },
-        ...section.actions.map((a) => el("button", {
+        ...section.actions.filter((a) => !a.menu).map((a) => el("button", {
           type: "button", class: "secondary" + (a.destructive ? " danger" : ""), text: a.label,
-          onclick: () => runAction(route, segments, a, reload, NO_ROW, data.title || null),
-        })));
+          disabled: a.unavailable ? "disabled" : null, title: a.unavailable || null,
+          onclick: run(a),
+        })),
+        inMenu.length ? overflowMenu(inMenu.map((a) => ({ label: a.label, destructive: a.destructive,
+          unavailable: a.unavailable, run: run(a) })), `the ${section.label} tab`) : null);
       note = note ? el("div", {}, bar, note) : bar;
     }
     // Section.Edit (#1864): a form drawn in the tab itself, as Google's
@@ -9969,6 +9980,7 @@ async function deleteResource(route, name, onDone, row = NO_ROW) {
     title: shutDown ? `Shut down ${name}?` : `Delete ${name}?`,
     detail: DELETE_DETAIL[route.service],
     confirmWord: name,
+    confirmLabel: capabilityOf(route.service).deleteSubmit || "Delete",
     ...(shutDown ? { confirmLabel: "Shut down", consequence: "" } : {}),
     style: capabilityOf(route.service).deleteConfirm || "name",
     onConfirm: async () => {
