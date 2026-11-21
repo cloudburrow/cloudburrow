@@ -635,6 +635,15 @@ const ROUTES = [
   { path: "/iam-admin/principal-access-boundary", title: "Principal Access Boundary", service: null, requires: "iam", screen: "unavailable", icon: "iam", section: "IAM & Admin", product: "iam", productTitle: "IAM & Admin",
     unavailable: "Principal access boundary policies are the IAM v3 API's, which CloudBurrow does not serve." },
 
+  // App Hub (#2110), its menu in Google's order: Applications, Services
+  // and workloads, Settings (the host project's service projects).
+  { path: "/apphub/applications", service: "apphub", icon: "apphub", title: "Applications", kind: "Application",
+    section: "Operations", product: "apphub", productTitle: "App Hub" },
+  { path: "/apphub/services-workloads", service: "apphub-discovered", icon: "apphub", title: "Services and workloads", kind: "Discovered resource",
+    section: "Operations", product: "apphub", productTitle: "App Hub" },
+  { path: "/apphub/settings", service: "apphub-settings", icon: "apphub", title: "Settings", kind: "Service project attachment",
+    section: "Operations", product: "apphub", productTitle: "App Hub" },
+
   { path: "/monitoring", service: null, screen: "monitoring", title: "Monitoring", section: "Operations",
     product: "monitoring", productTitle: "Monitoring" },
   // Cloud Monitoring's Metrics explorer and Metrics management (#1939),
@@ -838,6 +847,8 @@ const pagesOf = (key) => {
 // assets/icons/PROVENANCE.md. A screen with no drawing of its own gets the
 // dashboard mark rather than a broken image.
 const ICONS = {
+  // App Hub: three components grouped in one application.
+  apphub: '<rect x="3" y="3" width="18" height="18" rx="3"/><rect x="6" y="6" width="5" height="5" rx="1"/><rect x="13" y="6" width="5" height="5" rx="1"/><rect x="6" y="13" width="12" height="5" rx="1"/>',
   // Cloud Run: a container with a run triangle.
   run:       '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5l5 2.5-5 2.5z"/>',
   // Cloud Run jobs: the same mark, since it is the same product.
@@ -14592,8 +14603,12 @@ async function renderLogs(view) {
   // (logs-explorer-interface, read 2026-11-20). Workload / Service is made
   // from the k8s-pod/app label (a Kubernetes container's workload) and
   // from service.name, each value adding the clause of the label it came
-  // from.
-  const LABEL_DIMENSIONS = [["Workload / Service", ['labels."k8s-pod/app"', 'labels."service.name"']]];
+  // from. Application is made from the App Hub application ID label
+  // apphub.application.id, and Workload / Service from apphub.workload.id
+  // and apphub.service.id too: the entry's apphub, which the instance
+  // fills in for a resource registered to an application (#2096).
+  const LABEL_DIMENSIONS = [["Application", ["apphub.application.id"]],
+    ["Workload / Service", ["apphub.workload.id", "apphub.service.id", 'labels."k8s-pod/app"', 'labels."service.name"']]];
   // How many json_payload fields Frequent fields lists, and values a field.
   const FREQUENT_FIELDS = 10;
   const FIELD_VALUES = 20;

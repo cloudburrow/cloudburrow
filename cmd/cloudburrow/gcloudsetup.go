@@ -224,6 +224,9 @@ var gcloudVerified = []gcloudEndpoint{
 	// global and regional parameters alike. TestGcloudParameterManager
 	// drives parameters, versions and render.
 	{config.ServiceParameterManager, "parametermanager", "/", false, false},
+	// App Hub (#2110): gcloud apphub appends v1/. TestGcloudAppHub drives
+	// service projects, applications, discovered services and services.
+	{config.ServiceAppHub, "apphub", "/", false, false},
 	// Bigtable's admin REST API (#1440), on the Bigtable port beside gRPC;
 	// gcloud bigtable appends v2/. TestGcloudBigtableAppProfiles creates,
 	// lists, updates and deletes app profiles.
@@ -309,7 +312,7 @@ func gcloudPorts(cfg config.Config) map[config.Service]int {
 		config.ServiceFirestore: cfg.Endpoints.Firestore, config.ServicePrivateCA: cfg.Endpoints.PrivateCA, config.ServiceDatastore: cfg.Endpoints.Datastore,
 		config.ServiceGKE: cfg.Endpoints.GKE, config.ServiceMonitoring: cfg.Endpoints.Monitoring, config.ServiceCompute: cfg.Endpoints.Compute,
 		config.ServiceWorkflows: cfg.Endpoints.Workflows, config.ServiceParameterManager: cfg.Endpoints.ParameterManager,
-		localAIEndpoint: cfg.Endpoints.LocalAI, storageTransferService: cfg.Endpoints.StorageTransfer,
+		config.ServiceAppHub: cfg.Endpoints.AppHub, localAIEndpoint: cfg.Endpoints.LocalAI, storageTransferService: cfg.Endpoints.StorageTransfer,
 		storageBatchService: cfg.Endpoints.StorageBatchOperations, storageInsightsService: cfg.Endpoints.StorageInsights}
 }
 
@@ -334,6 +337,9 @@ func gcloudOverrideOn(cfg config.Config, v gcloudEndpoint) bool {
 	}
 	if v.service == config.ServiceParameterManager {
 		on = parameterManagerEnabled(cfg)
+	}
+	if v.service == config.ServiceAppHub {
+		on = appHubEnabled(cfg)
 	}
 	if v.service == localAIEndpoint {
 		on = serviceEnabled(cfg, config.ServiceRun)

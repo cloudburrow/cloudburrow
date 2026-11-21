@@ -111,6 +111,8 @@ type consoleDeps struct {
 	parameterManager *parameterManagerService
 	// dataform is Dataform (#2105), nil unless enabled.
 	dataform *dataformService
+	// appHub is App Hub (#2110), nil unless enabled.
+	appHub *appHubService
 	// gke is the Kubernetes Engine API (#1913), nil unless enabled.
 	gke *gkeService
 	// monitoring is Cloud Monitoring (#1939), nil unless enabled.
@@ -356,6 +358,11 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	if enabled[config.ServiceDataform] && d.dataform != nil {
 		df := dataformProvider{svc: d.dataform}
 		providers = append(providers, df, dataformFoldersProvider{df: df}, dataformSettingsProvider{df: df})
+	}
+	// App Hub (#2110), in process: Applications, Services and workloads,
+	// Settings.
+	if enabled[config.ServiceAppHub] && d.appHub != nil {
+		providers = append(providers, appHubProvider{svc: d.appHub}, appHubDiscoveredProvider{svc: d.appHub}, appHubSettingsProvider{svc: d.appHub})
 	}
 	// Workflows (#1986), in process.
 	if enabled[config.ServiceWorkflows] && d.workflows != nil {
@@ -796,6 +803,7 @@ var serviceTitles = map[config.Service]string{
 	config.ServiceWorkflows:        "Workflows",
 	config.ServiceParameterManager: "Parameter Manager",
 	config.ServiceDataform:         "Dataform",
+	config.ServiceAppHub:           "App Hub",
 }
 
 func serviceTitle(s config.Service) string {

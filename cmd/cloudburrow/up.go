@@ -439,6 +439,16 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	computeSvc.register(coord)
 	gkeSvc.register(coord)
+	// App Hub (#2110), in process; it discovers the supported resources
+	// of every served product (apphubdiscover.go).
+	appHubSvc := newAppHubService(cfg)
+	if appHubSvc != nil {
+		appHubSvc.run = runSvc
+		appHubSvc.gke = gkeSvc
+		appHubSvc.live = boundAddrs
+		appHubSvc.bigquery = func() *netfwd.Forwarder { return forwarderFor(forwarders, "bigquery") }
+	}
+	appHubSvc.register(coord)
 	if gkeSvc != nil && runSvc != nil && runSvc.events != nil {
 		// Eventarc's GKE destinations (#1877) reach its clusters' services.
 		runSvc.events.gke = gkeSvc.clusterAccess
@@ -477,6 +487,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	memorystoreAdminSvc.register(coord)
 	loggingSvc := newLoggingService(cfg)
+	// Log entries' App Hub metadata (#2096), in entries.list and the Logs
+	// Explorer.
+	appHubSvc.useLogging(loggingSvc)
 	loggingSvc.register(coord)
 	// Cloud Monitoring (#1939), in process: log-based metrics' values come
 	// from this instance's Cloud Logging, request metrics from its counters.
@@ -549,6 +562,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// reads it through this at reset time.
 	var registered func() []string = func() []string { return nil }
 	var projectRegistry *resourcemanager.Registry
+	if appHubSvc != nil {
+		appHubSvc.registry = func() *resourcemanager.Registry { return projectRegistry }
+	}
 	if dataTransfer != nil {
 		dataTransfer.registry = func() *resourcemanager.Registry { return projectRegistry }
 	}
@@ -619,6 +635,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		workflows:        workflowsSvc,
 		parameterManager: parameterManagerSvc,
 		dataform:         dataformSvc,
+		appHub:           appHubSvc,
 		gke:              gkeSvc,
 		monitoring:       monitoringSvc,
 		compute:          computeSvc,
@@ -715,6 +732,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		workflowsSvc.calls = callEvents(recorder, requestMetrics, "workflows")
 		workflowsSvc.interpose = append(workflowsSvc.interpose, grpctransport.LogInterceptor(logger, "workflows"), faults.Interceptor("workflows"))
 		workflowsSvc.requests = requestEvents(recorder, requestMetrics, "workflows")
+	}
+	if appHubSvc != nil {
+		appHubSvc.tracing = tracing
+		appHubSvc.calls = callEvents(recorder, requestMetrics, "apphub")
+		appHubSvc.interpose = append(appHubSvc.interpose, grpctransport.LogInterceptor(logger, "apphub"), faults.Interceptor("apphub"))
+		appHubSvc.requests = requestEvents(recorder, requestMetrics, "apphub")
 	}
 	if parameterManagerSvc != nil {
 		parameterManagerSvc.tracing = tracing
@@ -848,6 +871,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if dataformSvc != nil {
 		dataformSvc.keys = cmekKeys(kmsSvc, iamEnforcer)
 	}
+	// App Hub (#2110): each method's documented permissions, and the
+	// policies of its applications.
+	useIAMEnforcementAppHub(iamEnforcer, appHubSvc)
 	// Log buckets' customer-managed keys (#1950).
 	if loggingSvc != nil {
 		keys := cmekKeys(kmsSvc, iamEnforcer)
@@ -1255,6 +1281,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		workflows:        workflowsSvc,
 		parameterManager: parameterManagerSvc,
 		dataform:         dataformSvc,
+		appHub:           appHubSvc,
 		gke:              gkeSvc,
 		monitoring:       monitoringSvc,
 		compute:          computeSvc,
@@ -1355,6 +1382,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if a := dataformSvc.Addr(); a != "" {
 			live["dataform"] = a
 		}
+		if a := appHubSvc.Addr(); a != "" {
+			live["apphub"] = a
+		}
 		if a := gkeSvc.Addr(); a != "" {
 			live["gke"] = a
 		}
@@ -1428,7 +1458,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		published := map[string]bool{"run": true, "tasks": true, "secretmanager": true, "kms": true,
 			"scheduler": true, "logging": true, "resourcemanager": true, "serviceusage": true, "apikeys": true, "metadata": true,
 			"storagebatchoperations": true, "storageinsights": true, "storagetransfer": true,
-			"sqladmin": true, "cloudsql-connector": true, "onnx": true, "tfconvert": true, "localai": true, "workflows": true, "parametermanager": true, "dataform": true}
+			"sqladmin": true, "cloudsql-connector": true, "onnx": true, "tfconvert": true, "localai": true, "workflows": true, "parametermanager": true, "dataform": true, "apphub": true}
 		if !runEnabled {
 			published = map[string]bool{"resourcemanager": true, "onnx": true, "tfconvert": true, "localai": true}
 			// The storage server reads IAM service accounts' certificates

@@ -102,6 +102,7 @@ var targetEndpoints = []targetEndpoint{
 	{"WORKFLOWS", envKey("CLOUDBURROW_WORKFLOWS_ENDPOINT")},
 	{"PARAMETERMANAGER", envKey("CLOUDBURROW_PARAMETERMANAGER_ENDPOINT")},
 	{"DATAFORM", envKey("CLOUDBURROW_DATAFORM_ENDPOINT")},
+	{"APPHUB", envKey("CLOUDBURROW_APPHUB_ENDPOINT")},
 }
 
 // normalizeEndpoint reduces an address to host:port, so that
@@ -258,6 +259,7 @@ var gcloudOverrides = []struct {
 	{"workflows", []string{"WORKFLOWS"}},
 	{"workflowexecutions", []string{"WORKFLOWS"}},
 	{"parametermanager", []string{"PARAMETERMANAGER"}},
+	{"apphub", []string{"APPHUB"}},
 	// Bigtable's admin REST API, on the Bigtable front's port (#1440).
 	{"bigtableadmin", []string{"BIGTABLE"}},
 	// Spanner's admin REST API and the Firestore Admin API (#1461).

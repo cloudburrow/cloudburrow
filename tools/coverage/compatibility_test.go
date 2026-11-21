@@ -89,6 +89,7 @@ var compatSections = map[string]string{
 	"privateca":        "## Certificate Authority Service — `google.cloud.security.privateca.v1`",
 	"parametermanager": "## Parameter Manager — `google.cloud.parametermanager.v1`",
 	"dataform":         "## Dataform — `google.cloud.dataform.v1`",
+	"apphub":           "## App Hub — `google.cloud.apphub.v1`",
 	"workflows":        "## Workflows — `google.cloud.workflows.v1` and `google.cloud.workflows.executions.v1`",
 	// The Kubernetes Engine API (#1913), named by gRPC method.
 	"gke": "## Kubernetes Engine API — `google.container.v1`",

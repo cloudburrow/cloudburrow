@@ -6,6 +6,7 @@ require (
 	cel.dev/cel-go v0.33.4
 	cloud.google.com/go v0.123.0
 	cloud.google.com/go/aiplatform v1.127.0
+	cloud.google.com/go/apphub v1.4.1
 	cloud.google.com/go/artifactregistry v1.27.0
 	cloud.google.com/go/auth v0.24.1
 	cloud.google.com/go/backupdr v1.18.0

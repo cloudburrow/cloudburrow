@@ -74,6 +74,8 @@ Flags:
     	BigQuery sharing (Analytics Hub) API host port (0 = OS-assigned; default 9042)
   -port-apikeys int
     	API Keys API (apikeys.googleapis.com) host port (0 = OS-assigned; default 9029)
+  -port-apphub int
+    	App Hub API host port (0 = OS-assigned; default 9048)
   -port-backupdr int
     	Backup and DR Service API host port (0 = OS-assigned; default 9024)
   -port-base int
@@ -169,7 +171,7 @@ Flags:
   -seed-file string
     	seed document (the /admin/seed body) applied when up starts
   -services string
-    	comma-separated services to start (default storage,pubsub,tasks,run,secretmanager; opt-in: firestore,datastore,bigtable,spanner,cloudsql,bigquery,memorystore,cloudsql-mysql,scheduler,logging,kms,backupdr,privateca,gke,monitoring,compute,workflows,parametermanager,dataform)
+    	comma-separated services to start (default storage,pubsub,tasks,run,secretmanager; opt-in: firestore,datastore,bigtable,spanner,cloudsql,bigquery,memorystore,cloudsql-mysql,scheduler,logging,kms,backupdr,privateca,gke,monitoring,compute,workflows,parametermanager,dataform,apphub)
   -shutdown-timeout duration
     	bounded time to drain on shutdown
   -state-dir string

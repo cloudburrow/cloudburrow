@@ -48,6 +48,9 @@ var serviceAgents = map[string]string{
 	// key (docs.cloud.google.com/secret-manager/parameter-manager/docs/cmek).
 	"parametermanager.googleapis.com": "gcp-sa-pm.iam.gserviceaccount.com",
 	"dataform.googleapis.com":         "gcp-sa-dataform.iam.gserviceaccount.com",
+	// App Hub Service Account, the primary agent of apphub.googleapis.com
+	// (docs.cloud.google.com/iam/docs/service-agents, read 2026-11-21).
+	"apphub.googleapis.com": "gcp-sa-apphub.iam.gserviceaccount.com",
 	// Kubernetes Engine Service Agent, the primary agent of
 	// container.googleapis.com.
 	"container.googleapis.com": "container-engine-robot.iam.gserviceaccount.com",
