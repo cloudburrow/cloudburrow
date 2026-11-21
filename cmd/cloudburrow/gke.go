@@ -170,6 +170,22 @@ func (b gkeBackend) RemoveNode(ctx context.Context, kind, name string) error {
 	return b.g.RemoveNode(ctx, kind, name)
 }
 
+func (b gkeBackend) Get(ctx context.Context, kind, path string) ([]byte, error) {
+	return b.g.Get(ctx, kind, path)
+}
+
+func (b gkeBackend) SetLegacyAbac(ctx context.Context, kind string, enabled bool) error {
+	return b.g.SetLegacyAbac(ctx, kind, enabled)
+}
+
+func (b gkeBackend) SetNetworkPolicy(ctx context.Context, kind string, enabled bool) error {
+	return b.g.SetNetworkPolicy(ctx, kind, enabled)
+}
+
+func (b gkeBackend) RepairNode(ctx context.Context, kind, image, pool, name string) error {
+	return b.g.RepairNode(ctx, kind, image, pool, name)
+}
+
 func (b gkeBackend) Delete(ctx context.Context, kind string) error { return b.g.Delete(ctx, kind) }
 
 func (b gkeBackend) FreeBytes() (uint64, error) { return b.g.FreeBytes() }

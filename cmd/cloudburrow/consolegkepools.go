@@ -100,6 +100,8 @@ func (p gkeClustersProvider) poolActions(c *containerpb.Cluster, np *containerpb
 			{Name: "image", Label: "Image type", Type: "select", Options: gkeImageTypes, Default: image},
 			{Name: "labels", Label: "Labels", Type: "textarea", Default: strings.TrimSpace(labels), Help: "The nodes' resource labels, one key=value per line."},
 		}},
+		gkePoolAutoscalingAction(np),
+		gkePoolManagementAction(np),
 		gkePoolUpgrade(c, np, versions),
 		gkePoolCompleteUpgrade(np),
 		gkePoolRollback(np),
@@ -211,6 +213,8 @@ func (p gkeClustersProvider) poolAct(ctx context.Context, cluster string, c *con
 	case "delete":
 		_, err := api.DeleteNodePool(ctx, &containerpb.DeleteNodePoolRequest{Name: name})
 		return gkeStatusErr(err)
+	case "autoscaling", "management":
+		return p.poolSettingsAct(ctx, name, action, v)
 	case "complete":
 		_, err := api.CompleteNodePoolUpgrade(ctx, &containerpb.CompleteNodePoolUpgradeRequest{Name: name})
 		return gkeStatusErr(err)

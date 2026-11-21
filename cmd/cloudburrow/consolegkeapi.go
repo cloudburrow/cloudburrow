@@ -144,8 +144,12 @@ func (p gkeClustersProvider) servedDetail(ctx context.Context, project string, c
 	networking := console.PropertyGroup{Heading: "Networking", Properties: []console.Property{
 		{Label: "Network", Value: c.GetNetwork()}, {Label: "Subnet", Value: c.GetSubnetwork()},
 		{Label: "Cluster pod IPv4 range", Value: c.GetClusterIpv4Cidr()}, {Label: "Service IPv4 range", Value: c.GetServicesIpv4Cidr()},
+		{Label: "Network policy", Value: gkeEnabledText(enforcesNetworkPolicy(c)), Action: "netpolicy", ActionText: "Edit network policy"},
 	}}
-	details := console.Section{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{basics, networking}}
+	security := console.PropertyGroup{Heading: "Security", Properties: []console.Property{
+		{Label: "Legacy authorization", Value: gkeEnabledText(c.GetLegacyAbac().GetEnabled()), Action: "abac", ActionText: "Edit legacy authorization"},
+	}}
+	details := console.Section{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{basics, networking, security}}
 	pools := p.poolListing(ctx, project, c)
 	// Google's Nodes tab holds the cluster's node pools and its nodes:
 	// two sections drawn as one tab, Nodes, with Node pools and Nodes on a
@@ -298,6 +302,8 @@ func (p gkeClustersProvider) servedActions(ctx context.Context, project string, 
 		}},
 		upgrade,
 		gkeMaintenanceAction(c),
+		gkeNetworkPolicyAction(c),
+		gkeLegacyAbacAction(c),
 		{ID: "delete", Label: "Delete", Destructive: true, Confirm: c.GetName(), Leaves: true},
 		p.addPoolAction(c),
 	}
@@ -324,6 +330,8 @@ func (p gkeClustersProvider) servedAct(ctx context.Context, project string, c *c
 	case "upgrade":
 		_, err := api.UpdateCluster(ctx, &containerpb.UpdateClusterRequest{Name: name, Update: &containerpb.ClusterUpdate{DesiredMasterVersion: v["version"]}})
 		return gkeStatusErr(err)
+	case "netpolicy", "abac":
+		return p.settingsAct(ctx, name, c, action, v)
 	case "maintenance":
 		mp, err := gkeParseMaintenance(v["window"], v["exclusions"])
 		if err != nil {

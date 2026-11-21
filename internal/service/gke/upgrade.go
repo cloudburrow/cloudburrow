@@ -237,6 +237,7 @@ func (s *Server) startMasterUpgradeLocked(p parsed, e *entry, to Version, u Upgr
 	c.Status = containerpb.Cluster_RECONCILING
 	kind := e.kind
 	autopilot := c.GetAutopilot().GetEnabled()
+	abac := c.GetLegacyAbac().GetEnabled()
 	return s.startOpLocked(p, containerpb.Operation_UPGRADE_MASTER, c.SelfLink, e, func(ctx context.Context) error {
 		s.progress(ctx, func(op *containerpb.Operation) {
 			op.Detail = "Upgrading the control plane to " + to.GKE + "."
@@ -244,6 +245,15 @@ func (s *Server) startMasterUpgradeLocked(p parsed, e *entry, to Version, u Upgr
 		})
 		if err := u.UpgradeControlPlane(ctx, kind, to.Image); err != nil {
 			return status.Errorf(codes.Internal, "Upgrading the control plane to %s failed: %v", to.GKE, err)
+		}
+		// kubeadm rewrites the API server's manifest: legacy ABAC is
+		// made again.
+		if abac {
+			if ctl, ok := s.backend.(Controller); ok {
+				if err := ctl.SetLegacyAbac(ctx, kind, true); err != nil {
+					return status.Errorf(codes.Internal, "Enabling legacy ABAC after the upgrade failed: %v", err)
+				}
+			}
 		}
 		return nil
 	}, func(err error) {

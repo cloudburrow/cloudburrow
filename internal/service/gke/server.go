@@ -119,6 +119,14 @@ type Options struct {
 	// AutoUpgradeInterval is how often automatic upgrades are started
 	// (upgrade.go): a minute when zero, never when negative.
 	AutoUpgradeInterval time.Duration
+	// AutoscaleInterval is how often the cluster autoscaler and auto-repair
+	// look at the clusters (autoscale.go): ten seconds when zero, never
+	// when negative.
+	AutoscaleInterval time.Duration
+	// ScaleDownUnneeded is DefaultScaleDownUnneeded when zero.
+	ScaleDownUnneeded time.Duration
+	// RepairAfter is DefaultRepairAfter when zero.
+	RepairAfter time.Duration
 }
 
 // Server is the Kubernetes Engine API.
@@ -152,6 +160,8 @@ type entry struct {
 	busy string
 	// soak ends a blue-green upgrade's pool soak early, by pool.
 	soak map[string]chan struct{}
+	// scale is the cluster autoscaler's memory of the cluster.
+	scale *autoscaleState
 }
 
 type opEntry struct {
@@ -196,6 +206,13 @@ func NewServer(backend Backend, opts Options) (*Server, error) {
 	if _, ok := backend.(Upgrader); ok && opts.AutoUpgradeInterval > 0 {
 		s.wg.Add(1)
 		go s.autoUpgradeLoop(opts.AutoUpgradeInterval)
+	}
+	if opts.AutoscaleInterval == 0 {
+		opts.AutoscaleInterval = 10 * time.Second
+	}
+	if _, ok := backend.(Controller); ok && opts.AutoscaleInterval > 0 {
+		s.wg.Add(1)
+		go s.autoscaleLoop(opts.AutoscaleInterval)
 	}
 	return s, nil
 }

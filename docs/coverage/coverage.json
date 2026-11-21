@@ -18176,9 +18176,9 @@
     "Key": "gke",
     "Title": "Kubernetes Engine API (v1)",
     "counts": {
-      "Implemented": 2,
-      "Unimplemented": 16,
-      "Verified": 19
+      "Implemented": 1,
+      "Unimplemented": 8,
+      "Verified": 28
     },
     "rows": [
       {
@@ -18191,18 +18191,21 @@
       },
       {
         "method": "google.container.v1.ClusterManager/CheckAutopilotCompatibility",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkesettings_test.go:331 TestGcloudContainerClusterSettings",
+          "test/compat/gkesettings_test.go:57 TestGKEClusterSettings"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/CompleteControlPlaneUpgrade",
         "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "note": "returns UNIMPLEMENTED (in-process check): rollback-safe control plane upgrades are not built yet (#2100)"
       },
       {
         "method": "google.container.v1.ClusterManager/CompleteIPRotation",
         "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "note": "returns UNIMPLEMENTED (in-process check): IP and credential rotation: rotating a kind control plane's cluster CA (re-issuing every control-plane and kubelet certificate, both CAs trusted until completion) is not built yet (#2100)"
       },
       {
         "method": "google.container.v1.ClusterManager/CompleteNodePoolUpgrade",
@@ -18246,12 +18249,12 @@
       {
         "method": "google.container.v1.ClusterManager/FetchClusterUpgradeInfo",
         "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "note": "returns UNIMPLEMENTED (in-process check): upgrade info (end-of-support dates, auto-upgrade status) is not built yet (#2100)"
       },
       {
         "method": "google.container.v1.ClusterManager/FetchNodePoolUpgradeInfo",
         "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "note": "returns UNIMPLEMENTED (in-process check): upgrade info (end-of-support dates, auto-upgrade status) is not built yet (#2100)"
       },
       {
         "method": "google.container.v1.ClusterManager/GetCluster",
@@ -18264,8 +18267,10 @@
       },
       {
         "method": "google.container.v1.ClusterManager/GetJSONWebKeys",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkesettings_test.go:57 TestGKEClusterSettings"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/GetNodePool",
@@ -18316,8 +18321,11 @@
       },
       {
         "method": "google.container.v1.ClusterManager/ListUsableSubnetworks",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkesettings_test.go:331 TestGcloudContainerClusterSettings",
+          "test/compat/gkesettings_test.go:57 TestGKEClusterSettings"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/RollbackNodePoolUpgrade",
@@ -18328,8 +18336,10 @@
       },
       {
         "method": "google.container.v1.ClusterManager/SetAddonsConfig",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkesettings_test.go:57 TestGKEClusterSettings"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/SetLabels",
@@ -18341,18 +18351,21 @@
       },
       {
         "method": "google.container.v1.ClusterManager/SetLegacyAbac",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkesettings_test.go:331 TestGcloudContainerClusterSettings",
+          "test/compat/gkesettings_test.go:57 TestGKEClusterSettings"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/SetLocations",
         "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "note": "returns UNIMPLEMENTED (in-process check): a local cluster's zones are names only: choosing node zones is not available locally"
       },
       {
         "method": "google.container.v1.ClusterManager/SetLoggingService",
         "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "note": "returns UNIMPLEMENTED (in-process check): no log agent runs on a local cluster: its workloads' logs do not reach Cloud Logging, so the setting would have no effect (#2100)"
       },
       {
         "method": "google.container.v1.ClusterManager/SetMaintenancePolicy",
@@ -18364,28 +18377,38 @@
       },
       {
         "method": "google.container.v1.ClusterManager/SetMasterAuth",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkesettings_test.go:57 TestGKEClusterSettings"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/SetMonitoringService",
         "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "note": "returns UNIMPLEMENTED (in-process check): no metrics agent runs on a local cluster: its metrics do not reach Cloud Monitoring, so the setting would have no effect (#2100)"
       },
       {
         "method": "google.container.v1.ClusterManager/SetNetworkPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkesettings_test.go:331 TestGcloudContainerClusterSettings",
+          "test/compat/gkesettings_test.go:57 TestGKEClusterSettings"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/SetNodePoolAutoscaling",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkesettings_test.go:57 TestGKEClusterSettings"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/SetNodePoolManagement",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkesettings_test.go:331 TestGcloudContainerClusterSettings",
+          "test/compat/gkesettings_test.go:57 TestGKEClusterSettings"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/SetNodePoolSize",
@@ -18398,7 +18421,7 @@
       {
         "method": "google.container.v1.ClusterManager/StartIPRotation",
         "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "note": "returns UNIMPLEMENTED (in-process check): IP and credential rotation: rotating a kind control plane's cluster CA (re-issuing every control-plane and kubelet certificate, both CAs trusted until completion) is not built yet (#2100)"
       },
       {
         "method": "google.container.v1.ClusterManager/UpdateCluster",
