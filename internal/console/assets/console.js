@@ -4428,13 +4428,26 @@ async function renderDetail(view, route, resourcePath) {
         return drawAnalyticsSection(panel, section, note);
       case "media":
         return drawMediaSection(panel, section, note);
-      case "result":
+      case "result": {
         // An action's answer on a page of its own (#2084): Document AI's
         // analysis page, drawn as its result dialog draws it.
         // Its own region scrolls sideways, never the page, and is
         // reachable from the keyboard to be scrolled.
-        return setChildren(panel, note, el("div", { class: "card result-section", role: "region", tabindex: "0",
-          "aria-label": section.label }, resultTable(section.listing || {})));
+        const card = el("div", { class: "card result-section", role: "region", tabindex: "0",
+          "aria-label": section.label }, resultTable(section.listing || {}));
+        // Section.LabelAction (#2124): a box drawn over a page opens the
+        // labeling action with the page and the box filled in, as
+        // Document AI's bounding box tool asks which field the box is.
+        const labelAction = section.labelAction && (section.actions || []).find((a) => a.id === section.labelAction);
+        if (labelAction) {
+          card.querySelectorAll(".result-page-frame").forEach((frame, i) =>
+            drawLabelBox(frame, Number(((frame.querySelector("img") || {}).alt || "").replace(/\D+/g, "")) || i + 1, (box) => runAction(route, segments, {
+              ...labelAction,
+              fields: (labelAction.fields || []).map((f) => (f.name in box ? { ...f, default: box[f.name] } : f)),
+            }, reload, NO_ROW, data.title || null)));
+        }
+        return setChildren(panel, note, card);
+      }
       case "logs":
         return drawLogsSection(panel, section, note);
       case "permissions":
@@ -5787,6 +5800,49 @@ function resultRows(listing, cols, items, acts, rowButtons) {
       }
       return tr;
     })));
+}
+
+// drawLabelBox lets a pointer draw a box over a page frame (#2124): on
+// release, done gets the page and the box in fractions of the page, as
+// strings, for the labeling form. The form's own fields take the same
+// values from the keyboard.
+function drawLabelBox(frame, page, done) {
+  frame.classList.add("is-labeling");
+  let start = null;
+  let band = null;
+  const at = (e) => {
+    const r = frame.getBoundingClientRect();
+    return { x: Math.min(Math.max((e.clientX - r.left) / r.width, 0), 1), y: Math.min(Math.max((e.clientY - r.top) / r.height, 0), 1) };
+  };
+  const place = (a, b) => {
+    const pct = (v) => `${(v * 100).toFixed(3)}%`;
+    band.style.left = pct(Math.min(a.x, b.x));
+    band.style.top = pct(Math.min(a.y, b.y));
+    band.style.width = pct(Math.abs(a.x - b.x));
+    band.style.height = pct(Math.abs(a.y - b.y));
+  };
+  frame.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    start = at(e);
+    band = el("div", { class: "result-box kind-drawing", "aria-hidden": "true" });
+    frame.append(band);
+    place(start, start);
+    try { frame.setPointerCapture(e.pointerId); } catch { /* a pointer the page did not see start */ }
+  });
+  frame.addEventListener("pointermove", (e) => { if (start) place(start, at(e)); });
+  frame.addEventListener("pointerup", (e) => {
+    if (!start) return;
+    const end = at(e);
+    const a = start;
+    start = null;
+    band.remove();
+    const w = Math.abs(a.x - end.x);
+    const h = Math.abs(a.y - end.y);
+    if (w < 0.005 || h < 0.005) return;
+    const f = (v) => v.toFixed(4);
+    done({ page: String(page), x: f(Math.min(a.x, end.x)), y: f(Math.min(a.y, end.y)), w: f(w), h: f(h), value: "" });
+  });
 }
 
 // resultPage is a page image with its boxes over it; a box lights its row.
@@ -7650,9 +7706,10 @@ function buildCreateForm(spec) {
       : el("div", { class: "form-row" }, label,
           // Browse (#1845): a gs:// field chooses a bucket of this
           // instance's Cloud Storage, as Google's Choose Destination does.
-          f.browse === "storage" ? el("div", { class: "browse-row" }, control,
+          // Its folders and objects too (#2097), per Field.Browse.
+          /^storage(-object|-path|-bucket)?$/.test(f.browse || "") ? el("div", { class: "browse-row" }, control,
             el("button", { type: "button", class: "secondary", id: `browse-${f.name}`, text: "Browse",
-              onclick: () => browseBuckets(control) }))
+              "aria-label": `Browse Cloud Storage for ${f.label}`, onclick: () => browseBuckets(control, f.browse) }))
           // A Cloud KMS key field (#1881) chooses an ENCRYPT_DECRYPT key of
           // this instance's Cloud KMS in the location the form's own
           // location fields hold, as Google's key picker does.
@@ -19296,34 +19353,144 @@ async function requestCharts(samples = []) {
       : null);
 }
 
-// browseBuckets is a gs:// field's Browse (#1845): the project's buckets in
-// this instance's Cloud Storage, one of which fills the field as
-// gs://BUCKET/. It is drawn over the form it was opened from.
-async function browseBuckets(control) {
+// browseBuckets is the shared Cloud Storage picker behind a gs:// field's
+// Browse (#1845, #2097), laid out as Google's Select folder and Select
+// object dialogs are: a breadcrumb from Buckets down to the folder shown, a
+// Filter over its rows, the buckets or the folders and objects directly in
+// it (a bucket or folder row opens with its chevron, and its name chooses
+// it), and Select and Cancel. What it chooses depends on the field's
+// Browse: "storage" a bucket or folder (gs://BUCKET/ or gs://BUCKET/FOLDER/,
+// Batch process's Destination path, Speech's Output location), "storage-
+// object" an object (gs://BUCKET/OBJECT, Speech's Audio file), "storage-
+// path" either (Document AI's Source path, which takes a folder or one
+// file) and "storage-bucket" a bucket's bare name (Speech's New Workspace).
+// Select with nothing chosen takes the folder shown, where a folder can be
+// chosen. Folders and objects are read from the bucket page's own Objects
+// listing (/api/detail/storage), so the picker lists what the bucket's
+// page does, managed and hierarchical-namespace folders included.
+async function browseBuckets(control, mode = "storage") {
+  const wantObject = mode === "storage-object" || mode === "storage-path";
+  const wantFolder = mode === "storage" || mode === "storage-path";
+  const bucketOnly = mode === "storage-bucket";
+  const title = mode === "storage-object" ? "Select object" : mode === "storage-path" ? "Select folder or object"
+    : bucketOnly ? "Select bucket" : "Select folder";
   const { dialog, close } = openModal({ labelledBy: "browse-title" });
-  const body = el("div", { class: "browse-list" }, loadingState(3, { what: "buckets" }));
+  const trail = el("nav", { class: "breadcrumb browse-trail", "aria-label": "Location" });
+  const filter = el("input", { type: "search", id: "browse-filter", class: "browse-filter", placeholder: "Filter",
+    "aria-label": "Filter by name" });
+  const body = el("div", { class: "browse-list", id: "browse-list" });
+  const status = el("p", { class: "form-help", id: "browse-chosen", "aria-live": "polite" });
+  const select = el("button", { type: "button", id: "browse-select", text: "Select" });
   dialog.append(el("div", { class: "modal-body" },
-    el("h2", { id: "browse-title", text: "Select a bucket" }),
-    body,
+    el("h2", { id: "browse-title", text: title }),
+    trail, filter, body, status,
     el("div", { class: "modal-actions" },
-      el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }))));
-  try {
-    const list = await api(`/api/resources/storage?project=${encodeURIComponent(currentProject())}`);
-    const items = list.items || [];
-    if (list.unavailable || list.prompt) return setChildren(body, el("p", { class: "form-error", text: list.unavailable || list.prompt }));
-    if (!items.length) return setChildren(body, el("p", { class: "unavailable", text: "This project has no buckets. Create one in Cloud Storage first." }));
-    setChildren(body, el("ul", { class: "fs-rows", role: "list" }, ...items.map((b) => el("li", { class: "fs-row" },
-      el("button", { type: "button", class: "fs-row-link", text: b.name, onclick: () => {
-        control.value = `gs://${b.name}/`;
-        control.dispatchEvent(new Event("input", { bubbles: true }));
-        control.dispatchEvent(new Event("change", { bubbles: true }));
-        close();
-        control.focus();
-      } })))));
-    body.querySelector("button").focus();
-  } catch (err) {
-    setChildren(body, el("p", { class: "form-error", text: `Cloud Storage cannot be read: ${err.message}` }));
-  }
+      el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }),
+      select)));
+  const project = currentProject();
+  // where is the bucket then the folder's segments; [] is the bucket list.
+  let where = [];
+  let rows = [];
+  let chosen = null;
+  const uriOf = (segs, object) => object !== undefined
+    ? `gs://${segs[0]}/${object}`
+    : `gs://${segs[0]}/${segs.slice(1).map((s) => s + "/").join("")}`;
+  const valueOf = (c) => bucketOnly ? c.segs[0] : c.uri;
+  const canChooseHere = () => where.length > 0 && wantFolder;
+  const refreshSelect = () => {
+    const pick = chosen || (canChooseHere() ? { uri: uriOf(where), segs: where } : null);
+    select.disabled = !pick;
+    status.textContent = pick ? `Selected: ${valueOf(pick)}` : (wantObject ? "Choose an object." : "Choose a bucket or folder.");
+  };
+  const commit = () => {
+    const pick = chosen || (canChooseHere() ? { uri: uriOf(where), segs: where } : null);
+    if (!pick) return;
+    control.value = valueOf(pick);
+    control.dispatchEvent(new Event("input", { bubbles: true }));
+    control.dispatchEvent(new Event("change", { bubbles: true }));
+    close();
+    control.focus();
+  };
+  select.addEventListener("click", commit);
+  const drawTrail = () => {
+    const nodes = [where.length
+      ? el("a", { href: "#", text: "Buckets", onclick: (e) => { e.preventDefault(); go([]); } })
+      : el("span", { text: "Buckets", "aria-current": "location" })];
+    where.forEach((s, i) => {
+      nodes.push(el("span", { "aria-hidden": "true", text: "/" }));
+      nodes.push(i === where.length - 1
+        ? el("span", { text: s, "aria-current": "location" })
+        : el("a", { href: "#", text: s, onclick: (e) => { e.preventDefault(); go(where.slice(0, i + 1)); } }));
+    });
+    setChildren(trail, ...nodes);
+  };
+  const drawRows = () => {
+    const q = filter.value.trim().toLowerCase();
+    const shown = rows.filter((r) => !q || r.label.toLowerCase().includes(q));
+    if (!shown.length) {
+      return setChildren(body, el("p", { class: "unavailable", text: rows.length ? "No rows match the filter."
+        : where.length ? "This folder is empty." : "This project has no buckets. Create one in Cloud Storage first." }));
+    }
+    setChildren(body, el("ul", { class: "fs-rows", role: "list" }, ...shown.map((r) => {
+      const selectable = r.kind === "object" ? wantObject : (r.kind === "bucket" ? !wantObject || wantFolder || bucketOnly : wantFolder);
+      const isChosen = chosen && chosen.uri === r.uri;
+      return el("li", { class: "fs-row" + (isChosen ? " is-selected" : "") },
+        el("button", { type: "button", class: "fs-row-link", text: r.label, "aria-pressed": isChosen ? "true" : "false",
+          disabled: !selectable && r.kind === "object",
+          title: r.kind === "object" ? r.type || "Object" : r.kind === "bucket" ? "Bucket" : "Folder",
+          onclick: () => {
+            if (!selectable) return go(r.segs);
+            chosen = isChosen ? null : r;
+            drawRows();
+            refreshSelect();
+            [...body.querySelectorAll(".fs-row-link")].find((b) => b.textContent === r.label)?.focus();
+          },
+          ondblclick: () => { if (r.kind !== "object" && !bucketOnly) go(r.segs); else if (selectable) { chosen = r; commit(); } } }),
+        r.kind !== "object" && !bucketOnly
+          ? el("button", { type: "button", class: "icon-button browse-open", "aria-label": `Open ${r.label}`, text: "›",
+              onclick: () => go(r.segs) })
+          : null);
+    })));
+  };
+  const go = async (segs) => {
+    where = segs;
+    chosen = null;
+    filter.value = "";
+    drawTrail();
+    refreshSelect();
+    setChildren(body, loadingState(3, { what: segs.length ? "objects" : "buckets" }));
+    try {
+      if (!segs.length) {
+        const list = await api(`/api/resources/storage?project=${encodeURIComponent(project)}`);
+        if (list.unavailable || list.prompt) return setChildren(body, el("p", { class: "form-error", text: list.unavailable || list.prompt }));
+        rows = (list.items || []).map((b) => ({ kind: "bucket", label: b.name, segs: [b.name], uri: `gs://${b.name}/` }));
+      } else {
+        const d = await api(`/api/detail/storage?project=${encodeURIComponent(project)}` +
+          segs.map((s) => `&name=${encodeURIComponent(s)}`).join(""));
+        const objects = (d.sections || []).find((s) => s.id === "objects");
+        const listing = objects && objects.listing;
+        if (d.unavailable || !listing) return setChildren(body, el("p", { class: "form-error", text: d.unavailable || "The folder cannot be listed." }));
+        if (listing.unavailable) return setChildren(body, el("p", { class: "form-error", text: listing.unavailable }));
+        rows = (listing.items || []).map((it) => {
+          if (it.object && it.object.length === 2) {
+            return { kind: "object", label: it.name, uri: uriOf(segs, it.object[1]), segs, type: (it.fields || {}).Type };
+          }
+          const leaf = it.name.replace(/\/$/, "");
+          const sub = [...segs, leaf];
+          return { kind: "folder", label: it.name, segs: sub, uri: uriOf(sub) };
+        });
+      }
+      drawRows();
+      if (where === segs) body.querySelector("button")?.focus();
+    } catch (err) {
+      setChildren(body, el("p", { class: "form-error", text: `Cloud Storage cannot be read: ${err.message}` }));
+    }
+  };
+  filter.addEventListener("input", drawRows);
+  // A field that already names a place opens there.
+  const m = /^gs:\/\/([^/]+)\/?(.*)$/.exec(control.value.trim());
+  const start = m && !bucketOnly ? [m[1], ...m[2].split("/").slice(0, -1).filter(Boolean)] : [];
+  await go(start);
 }
 
 // formKMSLocation is the Cloud KMS location of the location a create

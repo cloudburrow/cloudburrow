@@ -89,6 +89,7 @@ import (
 	_ "cloud.google.com/go/datastore/apiv1/datastorepb"
 	_ "cloud.google.com/go/developerconnect/apiv1/developerconnectpb"
 	_ "cloud.google.com/go/documentai/apiv1/documentaipb"
+	_ "cloud.google.com/go/documentai/apiv1beta3/documentaipb"
 	_ "cloud.google.com/go/eventarc/apiv1/eventarcpb"
 	_ "cloud.google.com/go/eventarc/publishing/apiv1/publishingpb"
 	_ "cloud.google.com/go/firestore/apiv1/admin/adminpb"
@@ -238,7 +239,10 @@ var areas = []area{
 	// its method names repeat v1's.
 	// Speech-to-Text v1 on the same port (#1930): a page of its own, since
 	// its method names repeat v2's.
-	{Key: "speechv1", Title: "Speech-to-Text v1", Own: true, Services: []string{"google.cloud.speech.v1.Speech"}},
+	// Document AI's datasets, v1beta3's DocumentService (#2106), on the
+	// same port: a page of its own, since it is another API version.
+	{Key: "documentaiv1beta3", Title: "Document AI v1beta3 datasets", Own: true, Services: []string{"google.cloud.documentai.v1beta3.DocumentService"}},
+	{Key: "speechv1", Title: "Speech-to-Text v1", Own: true, Services: []string{"google.cloud.speech.v1.Speech", "google.cloud.speech.v1.Adaptation"}},
 	{Key: "vertexaiv1beta1", Title: "Vertex AI PredictionService v1beta1", Own: true, Services: []string{"google.cloud.aiplatform.v1beta1.PredictionService",
 		"google.cloud.aiplatform.v1beta1.LlmUtilityService", "google.cloud.aiplatform.v1beta1.GenAiCacheService"}},
 	// The Memorystore for Redis admin API (#1302), over the one Valkey

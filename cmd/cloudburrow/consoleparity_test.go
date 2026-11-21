@@ -2500,18 +2500,37 @@ var parityRows = []parityRow{
 		Methods:  []string{"DocumentProcessorService/BatchProcessDocuments"},
 		Provider: "documentai", Offers: "A processor's Batch process (#1930): a gs:// source (a folder, or one document) and a gs:// " +
 			"destination sent to BatchProcessDocuments, with the processor version to use and an optional pages per shard (#1953), " +
-			"waited on, and each document's status and the folder its Document (or its shards) was written to shown",
-		Tests: []string{"TestConsoleDocumentAIProcessors", "TestDocumentAIBatchProcessThroughThePage"}},
+			"waited on, and each document's status and the folder its Document (or its shards) was written to shown; each path " +
+			"chosen with Browse, the shared Cloud Storage picker (Google's Select folder or object, #2097)",
+		Tests: []string{"TestConsoleDocumentAIProcessors", "TestConsoleDocumentAISpeechStorageBrowse", "TestDocumentAIBatchProcessThroughThePage",
+			"TestStoragePickerThroughDocumentAIAndSpeech"}},
 	{Resource: "Document AI: evaluations", Service: "vertexai",
 		Methods:  []string{"DocumentProcessorService/ListEvaluations", "DocumentProcessorService/GetEvaluation"},
 		Provider: "documentai", Offers: "A processor's Evaluate & test tab (#1953): ListEvaluations of the default version, which " +
 			"no served type has, and why (evaluation measures a custom processor's entities against a labeled dataset)",
 		Tests: []string{"TestConsoleDocumentAIProcessors", "TestDocumentAIProcessorVersionsAndEvaluationsThroughThePage"}},
 	{Resource: "Document AI: training and evaluation runs", Service: "vertexai",
-		Methods: []string{"DocumentProcessorService/TrainProcessorVersion", "DocumentProcessorService/EvaluateProcessorVersion"},
-		Excluded: "TrainProcessorVersion and EvaluateProcessorVersion train and score versions of custom extractors, classifiers " +
-			"and splitters on a labeled dataset, none of which is served; for the served types they are only ever refused, and " +
-			"Google's console offers neither for them"},
+		Methods:  []string{"DocumentProcessorService/TrainProcessorVersion", "DocumentProcessorService/EvaluateProcessorVersion"},
+		Provider: "documentai", Offers: "A custom processor's Build tab (#2124): Create new version (a name, an optional base version " +
+			"to uptrain) sent to TrainProcessorVersion and answered with the version, its model and its scores; Evaluate & test lists " +
+			"every version's evaluations and Run new evaluation sends EvaluateProcessorVersion (the test split, or gs:// documents) and " +
+			"opens the evaluation's page: precision, recall and F1 for all labels and each label, at the optimal or a chosen " +
+			"confidence threshold, and every threshold's scores; Deploy & use deploys, undeploys, deletes and sets the default",
+		Tests: []string{"TestConsoleDocumentAICustomProcessors", "TestDocumentAICustomExtractorBuildTrainEvaluateThroughThePage"}},
+	// The custom processors' datasets (#2106), in the Get started and
+	// Build tabs and the labeling page (#2124).
+	{Resource: "Document AI v1beta3: datasets", Service: "documentaiv1beta3",
+		Methods: []string{"DocumentService/UpdateDataset", "DocumentService/ImportDocuments", "DocumentService/GetDocument",
+			"DocumentService/ListDocuments", "DocumentService/BatchDeleteDocuments", "DocumentService/GetDatasetSchema",
+			"DocumentService/UpdateDatasetSchema"},
+		Provider: "documentai", Offers: "A custom processor's Get started tab (#2124): the schema's fields (Create new field with its " +
+			"data type and occurrence, Delete, Edit document prompt: UpdateDatasetSchema); Build: Configure dataset (a Cloud Storage " +
+			"folder or unmanaged: UpdateDataset), Import documents (a gs:// folder or file, a data split or auto-split, a document type: " +
+			"ImportDocuments), the documents with their split and labeling state (ListDocuments), Filter documents, Assign to training " +
+			"or test, and Delete (BatchDeleteDocuments); a document's labeling page (GetDocument) draws its pages with its labels boxed, " +
+			"and a box drawn over a page labels the words in it; Import documents' source chosen with the Cloud Storage picker (#2097)",
+		Tests: []string{"TestConsoleDocumentAICustomProcessors", "TestDocumentAICustomExtractorBuildTrainEvaluateThroughThePage",
+			"TestStoragePickerThroughDocumentAIAndSpeech"}},
 	{Resource: "Speech-to-Text: recognizers", Service: "vertexai",
 		Methods: []string{"Speech/CreateRecognizer", "Speech/GetRecognizer", "Speech/ListRecognizers", "Speech/UpdateRecognizer",
 			"Speech/DeleteRecognizer", "Speech/UndeleteRecognizer", "Speech/Recognize"},
@@ -2538,10 +2557,11 @@ var parityRows = []parityRow{
 		Provider: "speech-transcriptions", Offers: "Transcriptions' New transcription with a Cloud storage audio source (#1930): " +
 			"a gs:// audio file and an optional gs:// output prefix, then the Transcription options (recognizer, Spoken language, " +
 			"Model), sent to BatchRecognize; its transcript written to the chosen workspace beside the metadata naming the file " +
-			"(#2084), and Transcription details playing the file's own object; with an output prefix, the result object's gs:// URI",
+			"(#2084), and Transcription details playing the file's own object; with an output prefix, the result object's gs:// URI; " +
+			"the file, the output folder and New workspace's bucket chosen with the Cloud Storage picker (#2097)",
 		Tests: []string{"TestConsoleSpeechAdaptation", "TestConsoleSpeechNewTranscription", "TestConsoleSpeechWorkspaces",
 			"TestSpeechBatchTranscriptionThroughThePage", "TestSpeechNewTranscriptionIsGooglesThroughThePage",
-			"TestSpeechWorkspaceAndPlaybackThroughThePage"}},
+			"TestSpeechWorkspaceAndPlaybackThroughThePage", "TestStoragePickerThroughDocumentAIAndSpeech"}},
 	{Resource: "Speech-to-Text: custom classes and phrase sets", Service: "vertexai",
 		Methods: []string{"Speech/CreateCustomClass", "Speech/GetCustomClass", "Speech/ListCustomClasses", "Speech/UpdateCustomClass",
 			"Speech/DeleteCustomClass", "Speech/UndeleteCustomClass", "Speech/CreatePhraseSet", "Speech/GetPhraseSet",
@@ -2559,6 +2579,12 @@ var parityRows = []parityRow{
 		Methods: []string{"Speech/Recognize", "Speech/LongRunningRecognize", "Speech/StreamingRecognize"},
 		Excluded: "v1's API for existing clients (#1930): the same local recognition the console's Transcriptions offer through " +
 			"v2 (Recognize and BatchRecognize), as Google's console offers it only through v2's recognizers"},
+	{Resource: "Speech-to-Text v1 Adaptation: phrase sets and custom classes", Service: "speechv1",
+		Methods: []string{"Adaptation/CreatePhraseSet", "Adaptation/GetPhraseSet", "Adaptation/ListPhraseSet", "Adaptation/UpdatePhraseSet",
+			"Adaptation/DeletePhraseSet", "Adaptation/CreateCustomClass", "Adaptation/GetCustomClass", "Adaptation/ListCustomClasses",
+			"Adaptation/UpdateCustomClass", "Adaptation/DeleteCustomClass"},
+		Excluded: "v1's adaptation API for existing clients (#2106): the console's Custom classes and Phrase sets pages manage " +
+			"v2's resources, as Google's console offers model adaptation only through v2"},
 	{Resource: "Starting the instance",
 		Commands: []string{"up"},
 		Excluded: "starts the process that serves the console, so the console cannot exist before it"},

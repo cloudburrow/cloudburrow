@@ -580,7 +580,7 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			transcriptions.ws = speechWorkspaces{storage: storageProvider{endpoint: storageAddr}}
 		}
 		providers = append(providers, docAIOverviewProvider{d: docs}, docAIGalleryProvider{d: docs},
-			docAIProcessorsProvider{d: docs, analyses: &docAIAnalyses{}},
+			docAIProcessorsProvider{d: docs, analyses: &docAIAnalyses{}, labels: d.localAI},
 			transcriptions, speechRecognizersProvider{s: sp},
 			speechCustomClassesProvider{s: sp}, speechPhraseSetsProvider{s: sp})
 	}

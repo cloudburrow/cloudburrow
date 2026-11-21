@@ -38,7 +38,9 @@ func init() {
 		}
 	}
 	Services["google.cloud.documentai.v1.DocumentProcessorService"] = DocumentAI
+	Services["google.cloud.documentai.v1beta3.DocumentService"] = DocumentAI
 	Services["google.cloud.speech.v2.Speech"] = Speech
+	Services["google.cloud.speech.v1.Adaptation"] = Speech
 }
 
 const aiPredict = "aiplatform.endpoints.predict"
@@ -134,7 +136,12 @@ func docAIByType(verb string) func(string) string {
 
 // DocumentAI is Document AI's table: its RPC reference
 // (https://docs.cloud.google.com/document-ai/docs/reference/rpc/google.cloud.documentai.v1,
-// read 2026-11-20). Document AI keeps no resource-level policies.
+// read 2026-11-20), and v1beta3's DocumentService, whose permissions the
+// IAM permissions page does not list but the roles page does
+// (https://docs.cloud.google.com/iam/docs/roles-permissions/clouddocumentai,
+// read 2026-11-21: documentai.datasets.* and documentai.datasetSchemas.*,
+// in Viewer the get and list ones, in Editor and Admin all). Document AI
+// keeps no resource-level policies.
 var DocumentAI = &Service{
 	Name: "documentai.googleapis.com",
 	Methods: func() map[string]Method {
@@ -152,6 +159,17 @@ var DocumentAI = &Service{
 				"ListEvaluations": {"documentai.evaluations.list", "parent"}, "ReviewDocument": {"documentai.humanReviewConfigs.review", "human_review_config"},
 				"ProcessDocument": {"", "name"}, "BatchProcessDocuments": {"", "name"},
 			},
+			// The datasets of custom processors (#2124): each method's v1beta3
+			// REST reference, "Requires the following IAM permission on the
+			// dataset resource" (.../reference/rest/v1beta3/projects.locations.processors.dataset/importDocuments
+			// and its siblings, and .../projects.locations.processors/updateDataset,
+			// read 2026-11-21).
+			"/google.cloud.documentai.v1beta3.DocumentService/": {
+				"UpdateDataset": {"documentai.datasets.update", "dataset.name"}, "ImportDocuments": {"documentai.datasets.createDocuments", "dataset"},
+				"GetDocument": {"documentai.datasets.getDocuments", "dataset"}, "ListDocuments": {"documentai.datasets.listDocuments", "dataset"},
+				"BatchDeleteDocuments": {"documentai.datasets.deleteDocuments", "dataset"},
+				"GetDatasetSchema":     {"documentai.datasetSchemas.get", "name"}, "UpdateDatasetSchema": {"documentai.datasetSchemas.update", "dataset_schema.name"},
+			},
 		})
 		const p = "/google.cloud.documentai.v1.DocumentProcessorService/"
 		m[p+"ProcessDocument"] = Method{Field: "name", PermissionFor: docAIByType("processOnline")}
@@ -161,7 +179,9 @@ var DocumentAI = &Service{
 	Deny: newerDenyOf,
 }
 
-// Speech is Speech-to-Text v2's table: its RPC reference
+// Speech is Speech-to-Text v2's table, with v1's Adaptation (#2106,
+// https://docs.cloud.google.com/speech-to-text/docs/reference/rpc/google.cloud.speech.v1,
+// re-read 2026-11-21): its RPC reference
 // (https://docs.cloud.google.com/speech-to-text/docs/reference/rpc/google.cloud.speech.v2,
 // and "Speech-to-Text audit logging", read 2026-11-20).
 var Speech = &Service{
@@ -184,7 +204,20 @@ var Speech = &Service{
 		r["ListRecognizers"] = [2]string{"speech.recognizers.list", "parent"}
 		r["ListCustomClasses"] = [2]string{"speech.customClasses.list", "parent"}
 		r["ListPhraseSets"] = [2]string{"speech.phraseSets.list", "parent"}
-		return sm(r, "/google.cloud.speech.v2.Speech/")
+		m := sm(r, "/google.cloud.speech.v2.Speech/")
+		// v1's Adaptation (#2106): the v1 RPC reference's permissions.
+		v1 := map[string][2]string{"ListPhraseSet": {"speech.phraseSets.list", "parent"}, "ListCustomClasses": {"speech.customClasses.list", "parent"}}
+		for kind, plural := range map[string][2]string{"CustomClass": {"customClasses", "custom_class"}, "PhraseSet": {"phraseSets", "phrase_set"}} {
+			perm := "speech." + plural[0] + "."
+			v1["Create"+kind] = [2]string{perm + "create", "parent"}
+			v1["Get"+kind] = [2]string{perm + "get", "name"}
+			v1["Update"+kind] = [2]string{perm + "update", plural[1] + ".name"}
+			v1["Delete"+kind] = [2]string{perm + "delete", "name"}
+		}
+		for k, x := range sm(v1, "/google.cloud.speech.v1.Adaptation/") {
+			m[k] = x
+		}
+		return m
 	}(),
 	Deny: newerDenyOf,
 }
