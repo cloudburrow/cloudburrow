@@ -445,7 +445,7 @@ func (es *endpointService) DeployModel(ctx context.Context, req *aiplatformpb.De
 	created := time.Now()
 	_ = es.s.ops.SetMetadata(name, &aiplatformpb.DeployModelOperationMetadata{GenericMetadata: genericMeta(created, created),
 		DeploymentStage: aiplatformpb.DeploymentStage_STARTING_MODEL_SERVER})
-	go func() {
+	r.background(func() {
 		out, err := r.deploy(context.Background(), req, e, dm, run)
 		stage := aiplatformpb.DeploymentStage_DEPLOYMENT_TERMINATED
 		_ = es.s.ops.SetMetadata(name, &aiplatformpb.DeployModelOperationMetadata{GenericMetadata: genericMeta(created, time.Now()),
@@ -455,7 +455,7 @@ func (es *endpointService) DeployModel(ctx context.Context, req *aiplatformpb.De
 			return
 		}
 		_ = es.s.ops.Succeed(name, &aiplatformpb.DeployModelResponse{DeployedModel: out})
-	}()
+	})
 	op, _ := es.s.ops.Get(name)
 	out, err := opProto(op)
 	return out, grpcError(err)

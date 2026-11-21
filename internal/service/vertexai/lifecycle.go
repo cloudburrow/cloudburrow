@@ -116,7 +116,7 @@ func (s *Server) Stop(ctx context.Context) error {
 	s.lis.mu.Unlock()
 
 	if srv == nil {
-		return nil
+		return s.WaitRegistry(ctx)
 	}
 	err := srv.Shutdown(ctx)
 	if err != nil {
@@ -132,5 +132,8 @@ func (s *Server) Stop(ctx context.Context) error {
 		case <-ctx.Done():
 		}
 	}
+	// No call is served now, so no deploy starts: join those running, which
+	// write the registry's state file.
+	_ = s.WaitRegistry(ctx)
 	return err
 }

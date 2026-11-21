@@ -91,6 +91,43 @@ type registry struct {
 	mu        sync.Mutex
 	models    map[string]*regModel
 	endpoints map[string]*regEndpoint
+
+	// bg is the registry's background work, which outlives the call that
+	// started it: a DeployModel operation's deploy, which saves the state
+	// file when its container is up, and the removal of a container that
+	// failed to start. WaitRegistry (and Stop) join it, so nothing writes
+	// the state file after its owner is done with it.
+	bg sync.WaitGroup
+}
+
+// background runs fn as background work that WaitRegistry joins.
+func (r *registry) background(fn func()) {
+	r.bg.Add(1)
+	go func() {
+		defer r.bg.Done()
+		fn()
+	}()
+}
+
+// WaitRegistry waits for the Model Registry's background work, a
+// DeployModel operation still deploying or a failed container's removal,
+// until ctx ends; it returns at once without a registry.
+func (s *Server) WaitRegistry(ctx context.Context) error {
+	r := s.registry()
+	if r == nil {
+		return nil
+	}
+	done := make(chan struct{})
+	go func() {
+		r.bg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // regModel is one model: its versions, by version ID, and evaluations.
@@ -1268,7 +1305,7 @@ func (r *registry) deploy(ctx context.Context, req *aiplatformpb.DeployModelRequ
 	if err != nil {
 		delete(e.Serving, dm.GetId())
 		r.save()
-		go func() { _ = r.runner.Remove(context.Background(), e.Project, run.ID) }()
+		r.background(func() { _ = r.runner.Remove(context.Background(), e.Project, run.ID) })
 		return nil, err
 	}
 	e.Serving[dm.GetId()].URL = url
