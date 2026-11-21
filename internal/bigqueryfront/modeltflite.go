@@ -79,6 +79,14 @@ type tflitePortCol struct {
 	Shape []int `json:"shape"`
 	// image is set for a query whose column is an image STRUCT.
 	image bool
+	// Sparse marks an imported TensorFlow model's SparseTensor input (or
+	// VarLenFeature, #1775): the converter made it a dense [batch, n]
+	// input of the row's values, and BigQuery takes "A NULL, the
+	// associated BigQuery ML type, or an ARRAY of the associated BigQuery
+	// ML type" for it. SparseDims is the SparseTensor's dense shape after
+	// the batch, -1 where free.
+	Sparse     bool  `json:"sparse,omitempty"`
+	SparseDims []int `json:"sparseDims,omitempty"`
 }
 
 func (c tflitePortCol) sqlType() string {
@@ -160,12 +168,24 @@ func tflitePorts(uri string, data []byte, kind string) (*tfliteImport, int, stri
 		return nil, code, strings.Replace(msg, "TensorFlow Lite model", kind+" model", 1)
 	}
 	imp := &tfliteImport{URI: uri, SHA256: tfliteSum(data), Size: int64(len(data))}
+	var sparse map[string][]int
+	if kind == "TensorFlow" {
+		// The TensorFlow converter's SparseTensor inputs (#1775).
+		if b, ok, err := tflitemodel.Metadata(data, tensorflowSparseMetadata); err == nil && ok {
+			if err := json.Unmarshal(b, &sparse); err != nil {
+				return nil, 500, "cloudburrow: the converted model's " + tensorflowSparseMetadata + " metadata is unreadable: " + err.Error()
+			}
+		}
+	}
 	for k, ports := range [][]tflitemodel.Port{m.Inputs, m.Outputs} {
 		what := []string{"input", "output"}[k]
 		for _, p := range ports {
 			c, code, msg := tfliteColumnOf(p, what)
 			if code != 0 {
 				return nil, code, strings.Replace(msg, "TensorFlow Lite model", kind+" model", 1)
+			}
+			if dims, ok := sparse[p.Name]; ok && k == 0 {
+				c.Sparse, c.SparseDims, c.Array = true, dims, true
 			}
 			if k == 0 {
 				imp.Inputs = append(imp.Inputs, c)
@@ -214,6 +234,22 @@ func tfliteTensor(c tflitePortCol, raw json.RawMessage) (tflitemodel.Tensor, str
 	if err := json.Unmarshal(raw, &v); err != nil {
 		return tflitemodel.Tensor{}, err.Error()
 	}
+	if c.Sparse {
+		// "A NULL, the associated BigQuery ML type, or an ARRAY of the
+		// associated BigQuery ML type": none, one or the ARRAY's values.
+		switch e := v.(type) {
+		case nil:
+			v = []any{}
+		case []any:
+			for _, y := range e {
+				if _, nested := y.([]any); nested || y == nil {
+					return tflitemodel.Tensor{}, "is not a NULL, a value or an ARRAY of values for the model's SparseTensor input"
+				}
+			}
+		default:
+			v = []any{e}
+		}
+	}
 	var flat []float64
 	var strs []string
 	var walk func(any) string
@@ -250,6 +286,13 @@ func tfliteTensor(c tflitePortCol, raw json.RawMessage) (tflitemodel.Tensor, str
 		return tflitemodel.Tensor{}, why
 	}
 	shape := append([]int{}, c.Shape...)
+	if c.Sparse {
+		if len(c.SparseDims) == 1 && c.SparseDims[0] >= 0 && len(flat) > c.SparseDims[0] {
+			return tflitemodel.Tensor{}, fmt.Sprintf("has %d values; the model's SparseTensor input of dense shape [batch, %d] holds at most %d a row",
+				len(flat), c.SparseDims[0], c.SparseDims[0])
+		}
+		shape = []int{1, len(flat)}
+	}
 	known := 1
 	free := -1
 	for k, d := range shape {
@@ -350,6 +393,13 @@ func (f front) tfliteSubquery(r *http.Request, q queryOptions, md bqModel, c mlC
 		// modeltensorflow.go, #1775: the functions the create-tensorflow
 		// page names.
 		return "", 400, "ML." + c.fn + " is not supported for model type TENSORFLOW"
+	case md.Type == "TENSORFLOW" && c.fn == "EXPLAIN_PREDICT":
+		// Google runs it (troubleshoot-queries#tensorflow_worker_oom: "If the
+		// error occurs during ML.EXPLAIN_PREDICT, run the job with
+		// ML.PREDICT instead"), but no page says how it attributes an
+		// imported TensorFlow model's prediction (#1775).
+		return "", 501, "Not implemented here: ML.EXPLAIN_PREDICT of an imported TensorFlow model: BigQuery documents no feature attribution " +
+			"method for imported TensorFlow models, so CloudBurrow cannot give BigQuery's attributions; ML.PREDICT runs. Nothing was run."
 	case md.Type == "TENSORFLOW":
 		return "", 501, "Not implemented here: ML." + c.fn + " of an imported TensorFlow model; CloudBurrow runs ML.PREDICT of it. Nothing was run."
 	default:
@@ -395,11 +445,13 @@ func (f front) tfliteSubquery(r *http.Request, q queryOptions, md bqModel, c mlC
 			refs = append(refs, "_cbml_in."+sqlIdent(col.Name)+" AS c"+strconv.Itoa(i))
 			continue
 		}
+		// A SparseTensor input takes a value or an ARRAY (#1775).
+		shapeOK := isArray == in.Array || in.Sparse
 		switch elem {
 		case "INT64", "FLOAT64", "NUMERIC", "BIGNUMERIC", "BOOL":
-			okType = isArray == in.Array && in.Type != "STRING"
+			okType = shapeOK && in.Type != "STRING"
 		case "STRING":
-			okType = isArray == in.Array && in.Type == "STRING" // #1766
+			okType = shapeOK && in.Type == "STRING" // #1766
 		}
 		if !okType {
 			return "", 400, fmt.Sprintf("Invalid table-valued function ML.PREDICT Column %s of type %s cannot be converted to the type the model's input %s expects, %s",

@@ -19,6 +19,8 @@ func TestTensorFlowRefusal(t *testing.T) {
 		"signature":   {400, "SavedModel format"},
 		"custom":      {400, "only core TensorFlow operations are supported"},
 		"limit":       {400, "450 MB"},
+		"ragged":      {400, "RaggedTensors aren't supported"},
+		"sparse":      {501, "SparseTensor"},
 		"flex":        {501, "SELECT_TF_OPS"},
 		"convert":     {501, "could not lower"},
 		"unavailable": {501, "cannot run"},
