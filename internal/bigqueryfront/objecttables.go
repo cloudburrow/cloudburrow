@@ -89,6 +89,9 @@ type objectTable struct {
 	// StalenessMs is max_staleness in milliseconds, 0 for no cache.
 	StalenessMs int64  `json:"stalenessMs,omitempty"`
 	CacheMode   string `json:"cacheMode,omitempty"`
+	// Manifest is file_set_spec_type NEW_LINE_DELIMITED_MANIFEST: each
+	// URI is a manifest whose lines name the objects (#2104).
+	Manifest bool `json:"manifest,omitempty"`
 	// Cached is when the cache (the engine's rows) was last read from
 	// Cloud Storage, in Unix milliseconds.
 	Cached int64 `json:"cached,omitempty"`
@@ -221,6 +224,15 @@ type objectSpec struct {
 	description  *string
 	friendlyName *string
 	labels       map[string]string
+	// expiration is expiration_timestamp's expression (DDL), expirationMs
+	// tables.insert's expirationTime, tags the IAM tags (#2104).
+	expiration   string
+	expirationMs string
+	tags         map[string]string
+	// staleness is max_staleness's expression when it is not a literal
+	// readOptions reads, evaluated by the engine (#2104).
+	staleness string
+	manifest  bool
 	// invalid is a 400's message, unsupported a 501's.
 	invalid, unsupported string
 }
@@ -292,8 +304,8 @@ func parseObjectTableDDL(sql string) (s objectSpec, ok bool) {
 		return s, false
 	}
 	close := skipTo(t, opt+2, ")")
-	if close != end-1 && s.unsupported == "" {
-		s.unsupported = "a clause after OPTIONS"
+	if close != end-1 && s.invalid == "" {
+		s.invalid = "Syntax error: CREATE EXTERNAL TABLE ends with its OPTIONS list."
 	}
 	if !s.readOptions(sql, t[opt+2:min(close, end)]) {
 		return s, false
@@ -320,8 +332,8 @@ func (s *objectSpec) readOptions(sql string, t []token) bool {
 	seen := false
 	for i := 0; i < len(t); {
 		if t[i].kind != tokWord || i+1 >= len(t) || !t[i+1].punct("=") {
-			if s.unsupported == "" {
-				s.unsupported = "OPTIONS that CloudBurrow does not read"
+			if s.invalid == "" {
+				s.invalid = "Syntax error: OPTIONS is a list of name = value."
 			}
 			return seen || s.metadata != ""
 		}
@@ -370,14 +382,46 @@ func (s *objectSpec) readOptions(sql string, t []token) bool {
 				s.uris = append(s.uris, v)
 			}
 		case "max_staleness":
+			if len(val) == 0 {
+				bad("an INTERVAL is expected")
+				continue
+			}
+			if len(val) == 1 && val[0].is("NULL") {
+				continue
+			}
 			ms, ok := intervalLiteralMs(val)
 			if !ok {
-				if s.unsupported == "" {
-					s.unsupported = "max_staleness written other than as 0 or INTERVAL n MINUTE|HOUR|DAY or INTERVAL 'Y-M D H:M:S' YEAR TO SECOND"
-				}
+				s.hasStaleness, s.staleness = true, sql[val[0].pos:val[len(val)-1].end] // evaluated (resolveStaleness)
 				continue
 			}
 			s.hasStaleness, s.stalenessMs = true, ms
+		case "expiration_timestamp":
+			if len(val) == 0 {
+				bad("a TIMESTAMP is expected")
+				continue
+			}
+			s.expiration = sql[val[0].pos:val[len(val)-1].end]
+		case "tags":
+			l, ok := labelsLiteral(val)
+			if !ok {
+				bad("an array of (key, value) string literals is expected")
+				continue
+			}
+			s.tags = l
+		case "file_set_spec_type":
+			v, ok := str()
+			switch {
+			case !ok:
+				bad("a string literal is expected")
+			case v == "NEW_LINE_DELIMITED_MANIFEST":
+				s.manifest = true
+			case v != "FILE_SYSTEM_MATCH":
+				bad("FILE_SYSTEM_MATCH or NEW_LINE_DELIMITED_MANIFEST is expected")
+			}
+		case "format":
+			if s.invalid == "" {
+				s.invalid = "An object table takes no format: its rows are the objects' metadata (\"If ObjectMetadata is set, sourceFormat should be omitted\")."
+			}
 		case "metadata_cache_mode":
 			v, ok := str()
 			if !ok {
@@ -408,13 +452,37 @@ func (s *objectSpec) readOptions(sql string, t []token) bool {
 			}
 			s.labels = l
 		default:
-			if s.unsupported == "" {
-				s.unsupported = "the option " + name
+			if s.invalid == "" {
+				if formatOnlyOptions[name] {
+					s.invalid = "The option " + name + " is for a format's files (CSV, JSON, Avro, Parquet, ORC, Google Sheets, Bigtable or " +
+						"Datastore) and does not apply to an object table, which has no format."
+				} else {
+					s.invalid = "Unknown option: " + name + " is not an option of CREATE EXTERNAL TABLE."
+				}
 			}
 		}
 	}
 	return seen
 }
+
+// formatOnlyOptions are the external_table_option_list options the DDL
+// reference gives a format ("CSV only", "Parquet only", "Only for
+// Bigtable tables", ...; https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/data-definition-language#external_table_option_list,
+// read 2026-11-21), which an object table has none of: 400, nothing made
+// (#2104; Google documents no answer for one, the wording is
+// CloudBurrow's, UNVERIFIED (docs re-read 2026-11-21: the page above)). The
+// other options of the list, description,
+// expiration_timestamp, file_set_spec_type, max_staleness,
+// object_metadata, tags and uris, are read (readOptions), as are
+// friendly_name, labels and metadata_cache_mode, which tables.insert's
+// resource gives an external table.
+var formatOnlyOptions = map[string]bool{"allow_jagged_rows": true, "allow_quoted_newlines": true, "bigtable_options": true,
+	"compression": true, "decimal_target_types": true, "enable_list_inference": true, "enable_logical_types": true,
+	"encoding": true, "enum_as_string": true, "field_delimiter": true, "ignore_unknown_values": true, "json_extension": true,
+	"max_bad_records": true, "null_marker": true, "null_markers": true, "preserve_ascii_control_characters": true,
+	"projection_fields": true, "quote": true, "reference_file_schema_uri": true, "sheet_range": true, "skip_leading_rows": true,
+	"source_column_match": true, "time_zone": true, "date_format": true, "datetime_format": true, "time_format": true,
+	"timestamp_format": true}
 
 // intervalLiteralMs reads 0, INTERVAL n UNIT or INTERVAL 'Y-M D H:M:S'
 // YEAR TO SECOND as milliseconds.
@@ -546,7 +614,13 @@ func (f front) resolveObjectConnection(r *http.Request, s objectSpec, loc string
 	if s.connection == "DEFAULT" {
 		var code int
 		var msg string
-		if cn, code, msg = f.ensureDefaultConnection(r.Context(), project, number, parts[1], parts[2], cn); code != 0 {
+		var buckets []string
+		for _, u := range s.uris {
+			b, _, _ := strings.Cut(strings.TrimPrefix(u, "gs://"), "/")
+			buckets = append(buckets, b)
+		}
+		grant := f.grantBucketRoles(r.Context(), project, buckets, defaultReaderRoles) // #2104
+		if cn, code, msg = f.ensureDefaultConnectionFor(r.Context(), project, number, parts[1], parts[2], cn, grant); code != 0 {
 			return "", 0, code, msg
 		}
 		ok = true
@@ -587,12 +661,33 @@ func (f front) checkConnectionCaller(ctx context.Context, connProject, project s
 // DDL operation (CREATE, REPLACE or SKIP); the table's resource is
 // answered when made.
 func (f front) createObjectTable(r *http.Request, dataset, table string, s objectSpec) (op string, meta []byte, code int, msg string) {
+	if s.invalid == "" && s.staleness != "" { // #2104: max_staleness as an expression
+		ms, ok, code, msg := f.evalObjectStaleness(r, s.staleness)
+		if code != 0 {
+			return "", nil, code, msg
+		}
+		if !ok {
+			s.hasStaleness = false
+		}
+		s.stalenessMs = ms
+	}
+	if s.invalid == "" && s.expiration != "" && !strings.EqualFold(s.expiration, "NULL") { // #2104
+		ms, _, status, body := f.expirationMillis(r, queryOptions{}, s.expiration)
+		if status != http.StatusOK {
+			return "", nil, 400, "expiration_timestamp: " + errorMessage(body, status)
+		}
+		s.expirationMs = ms
+	}
+	if s.expirationMs != "" {
+		if n, err := strconv.ParseInt(s.expirationMs, 10, 64); err != nil || n <= f.nowMillis() {
+			return "", nil, 400, "Invalid expiration time: the table's expiration_timestamp must be in the future."
+		}
+	}
 	if msg := s.check(); msg != "" {
 		return "", nil, 400, msg
 	}
 	if s.unsupported != "" {
-		return "", nil, 501, "Not implemented here: " + s.unsupported + " of an object table. CloudBurrow reads object_metadata, uris, " +
-			"max_staleness, metadata_cache_mode, description, friendly_name and labels. Nothing was made."
+		return "", nil, 501, "Not implemented here: " + s.unsupported + " of an object table. Nothing was made."
 	}
 	if f.storage == nil {
 		return "", nil, 501, "Not implemented here: an object table reads the instance's Cloud Storage, which the BigQuery front was not given (enable Cloud Storage). Nothing was made."
@@ -634,6 +729,12 @@ func (f front) createObjectTable(r *http.Request, dataset, table string, s objec
 	if len(s.labels) > 0 {
 		res["labels"] = s.labels
 	}
+	if s.expirationMs != "" {
+		res["expirationTime"] = s.expirationMs
+	}
+	if len(s.tags) > 0 {
+		res["resourceTags"] = s.tags
+	}
 	body, _ := json.Marshal(res)
 	status, made := f.send(r, http.MethodPost, "/datasets/"+url.PathEscape(dataset)+"/tables", body)
 	if status != http.StatusOK {
@@ -645,7 +746,7 @@ func (f front) createObjectTable(r *http.Request, dataset, table string, s objec
 	_ = json.Unmarshal(made, &m)
 	key := streamKey(project, dataset, table)
 	ot := objectTable{Base: f.base, Dataset: dataset, Table: table, Created: m.CreationTime, Connection: conn, Number: number,
-		URIs: s.uris, StalenessMs: s.stalenessMs, CacheMode: s.cacheMode}
+		URIs: s.uris, StalenessMs: s.stalenessMs, CacheMode: s.cacheMode, Manifest: s.manifest}
 	f.objects.put(key, ot)
 	// "autopopulated when the object table is created": the first read;
 	// a refusal (the service account's access) is the queries' to report.
@@ -759,7 +860,15 @@ func (f front) refreshObjectTable(r *http.Request, key string) (int, string) {
 	sa := cn.serviceAccount()
 	seen := map[string]bool{}
 	var objs []gcsObjectMeta
-	for _, u := range ot.URIs {
+	uris := ot.URIs
+	if ot.Manifest {
+		var code int
+		var msg string
+		if uris, code, msg = f.manifestURIs(r, project, sa, ot.URIs); code != 0 {
+			return code, msg
+		}
+	}
+	for _, u := range uris {
 		bucket, _, _ := strings.Cut(strings.TrimPrefix(u, "gs://"), "/")
 		if code, msg := f.checkBucketAccess(r, project, sa, bucket); code != 0 {
 			return code, msg
@@ -1047,6 +1156,15 @@ func (f front) serveObjectTableStatements(w http.ResponseWriter, r *http.Request
 		if code != 0 {
 			return failed(code, msg)
 		}
+		// The object table's row access policies (#2104): "signed URLs
+		// are only generated for the objects" whose rows the caller may
+		// read, so the rewritten text's reads of it are filtered as any
+		// query's are (rowpolicies.go).
+		if t, ok, why := f.filterQuery(r, text); why != "" {
+			return failed(501, why)
+		} else if ok {
+			text = t
+		}
 		if !setQueryText(r, insert, text) {
 			writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not rewrite the query")
 			return true
@@ -1116,6 +1234,9 @@ func (f front) decorateObjectTable(meta map[string]any, ot objectTable) {
 	if ot.CacheMode != "" {
 		conf["metadataCacheMode"] = ot.CacheMode
 	}
+	if ot.Manifest {
+		conf["fileSetSpecType"] = "FILE_SET_SPEC_TYPE_NEW_LINE_DELIMITED_MANIFEST"
+	}
 	meta["externalDataConfiguration"] = conf
 	if ot.StalenessMs > 0 {
 		meta["maxStaleness"] = formatIntervalMs(ot.StalenessMs)
@@ -1161,6 +1282,8 @@ func (f front) insertObjectTable(w http.ResponseWriter, r *http.Request, dataset
 		FriendlyName *string           `json:"friendlyName"`
 		Labels       map[string]string `json:"labels"`
 		MaxStaleness string            `json:"maxStaleness"`
+		Expiration   string            `json:"expirationTime"`
+		ResourceTags map[string]string `json:"resourceTags"`
 		Schema       *struct {
 			Fields []json.RawMessage `json:"fields"`
 		} `json:"schema"`
@@ -1170,6 +1293,7 @@ func (f front) insertObjectTable(w http.ResponseWriter, r *http.Request, dataset
 			ConnectionID      string          `json:"connectionId"`
 			MetadataCacheMode string          `json:"metadataCacheMode"`
 			SourceFormat      string          `json:"sourceFormat"`
+			FileSetSpecType   string          `json:"fileSetSpecType"`
 			Hive              json.RawMessage `json:"hivePartitioningOptions"`
 		} `json:"externalDataConfiguration"`
 	}
@@ -1178,7 +1302,15 @@ func (f front) insertObjectTable(w http.ResponseWriter, r *http.Request, dataset
 	}
 	e := body.External
 	s := objectSpec{metadata: e.ObjectMetadata, uris: e.SourceURIs, connection: e.ConnectionID, cacheMode: e.MetadataCacheMode,
-		description: body.Description, friendlyName: body.FriendlyName, labels: body.Labels}
+		description: body.Description, friendlyName: body.FriendlyName, labels: body.Labels, expirationMs: body.Expiration,
+		tags: body.ResourceTags}
+	switch e.FileSetSpecType { // #2104
+	case "", "FILE_SET_SPEC_TYPE_FILE_SYSTEM_MATCH":
+	case "FILE_SET_SPEC_TYPE_NEW_LINE_DELIMITED_MANIFEST":
+		s.manifest = true
+	default:
+		s.invalid = fmt.Sprintf("Invalid fileSetSpecType %q.", e.FileSetSpecType)
+	}
 	if body.Schema != nil && len(body.Schema.Fields) > 0 {
 		s.invalid = "An object table has a fixed schema: tables.insert of an objectMetadata takes no schema."
 	}
@@ -1380,4 +1512,76 @@ func (f front) checkObjectTransform(r *http.Request, q queryOptions) (calls []ob
 		i = k + 1
 	}
 	return calls, 0, ""
+}
+
+// manifestURIs are the object URIs of manifests, file_set_spec_type
+// NEW_LINE_DELIMITED_MANIFEST: "the provided URIs are newline-delimited
+// manifest files, with one URI per line. Wildcard URIs are not supported
+// in the manifest files" (the DDL reference's file_set_spec_type, read
+// 2026-11-21; #2104). Each manifest is read with the connection's service
+// account's access, as the objects are; a line that is not a gs:// URI,
+// or holds a wildcard, is 400.
+func (f front) manifestURIs(r *http.Request, project, sa string, manifests []string) ([]string, int, string) {
+	var out []string
+	for _, m := range manifests {
+		rest := strings.TrimPrefix(m, "gs://")
+		bucket, name, _ := strings.Cut(rest, "/")
+		if code, msg := f.checkBucketAccess(r, project, sa, bucket); code != 0 {
+			return nil, code, msg
+		}
+		if strings.Contains(name, "*") {
+			return nil, 400, "Invalid manifest URI " + m + ": with NEW_LINE_DELIMITED_MANIFEST each URI is one manifest file."
+		}
+		rc, err := f.storage.open(r.Context(), gsObject{bucket, name})
+		if err != nil {
+			return nil, 404, "Not found: manifest " + m
+		}
+		b, err := io.ReadAll(io.LimitReader(rc, maxBody))
+		_ = rc.Close()
+		if err != nil {
+			return nil, 500, "cloudburrow: reading the manifest " + m + ": " + err.Error()
+		}
+		for _, line := range strings.Split(string(b), "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			if !strings.HasPrefix(line, "gs://") || strings.Contains(line, "*") {
+				return nil, 400, fmt.Sprintf("Invalid URI %q in the manifest %s: each line is one gs:// URI, and wildcard URIs are not supported in the manifest files.", line, m)
+			}
+			out = append(out, line)
+		}
+	}
+	return out, 0, ""
+}
+
+// evalObjectStaleness evaluates an object table's max_staleness written as
+// an expression, as a table's is (tableoptions.go): its milliseconds, or
+// false for NULL.
+func (f front) evalObjectStaleness(r *http.Request, expr string) (int64, bool, int, string) {
+	legacy := false
+	req, _ := json.Marshal(queryOptions{Query: "SELECT CAST((" + expr + ") AS STRING)", UseLegacySQL: &legacy})
+	status, got := f.send(r, http.MethodPost, "/queries", req)
+	if status != http.StatusOK {
+		return 0, false, 400, "Invalid value for the option max_staleness: " + errorMessage(got, status)
+	}
+	var res struct {
+		Rows []struct {
+			F []struct {
+				V *string `json:"v"`
+			} `json:"f"`
+		} `json:"rows"`
+	}
+	if json.Unmarshal(got, &res) != nil || len(res.Rows) != 1 || len(res.Rows[0].F) != 1 {
+		return 0, false, 500, "cloudburrow: max_staleness could not be read"
+	}
+	v := res.Rows[0].F[0].V
+	if v == nil {
+		return 0, false, 0, ""
+	}
+	ms, ok := parseIntervalMs(*v)
+	if !ok {
+		return 0, false, 400, "Invalid value for the option max_staleness: an INTERVAL of days, hours, minutes and seconds is expected, not " + *v + "."
+	}
+	return ms, true, 0, ""
 }

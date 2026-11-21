@@ -188,6 +188,11 @@ func serveStorageRead(ctx context.Context, l net.Listener, upstream string, rest
 			s.write.active = wo.cdcStreams
 		}
 		if wo != nil && wo.stateDir != "" {
+			if wo.cdcStreams != nil {
+				wo.cdcStreams.mu.Lock()
+				wo.cdcStreams.dir = wo.stateDir // upsert_stream_apply_watermark, #2104
+				wo.cdcStreams.mu.Unlock()
+			}
 			if err := s.write.keepStreams(wo.stateDir); err != nil {
 				return err
 			}

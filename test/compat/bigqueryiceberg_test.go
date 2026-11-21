@@ -38,8 +38,9 @@ import (
 // tabledata.insertAll into the second; EXPORT TABLE METADATA FROM each
 // writes its Iceberg metadata, and the files are read back from Cloud
 // Storage with Apache Iceberg's Go library: the current snapshot's rows
-// are the table's, one snapshot a write. A column of a type CloudBurrow
-// does not write is 501 by either way, nothing made; a write whose files
+// are the table's, one snapshot a write. A column of a type Google
+// documents a table for Apache Iceberg cannot hold (JSON) is 400 by either
+// way, nothing made (#2104); a write whose files
 // cannot be written (the bucket missing) fails, not only logged.
 //
 // covers: bigquery.jobs.query, bigquery.jobs.insert, bigquery.jobs.get, bigquery.tables.insert, bigquery.tables.get, bigquery.tabledata.insertAll
@@ -156,12 +157,13 @@ func TestBigQueryIcebergTablesWriteIcebergFiles(t *testing.T) {
 		t.Errorf("snapshots: %d of the CREATE TABLE form, %d of the tables.insert form; want 2 each", snapsDDL, snapsAPI)
 	}
 
-	// A column of a type not written: 501 either way, nothing made.
+	// A column of a type Iceberg managed tables don't support: 400 either
+	// way, nothing made (#2104).
 	notImplemented := func(what string, err error, table string) {
 		t.Helper()
 		var ge *googleapi.Error
-		if !errors.As(err, &ge) || ge.Code != http.StatusNotImplemented || !strings.Contains(ge.Message, "j (JSON)") {
-			t.Errorf("%s: %v, want 501 naming j (JSON)", what, err)
+		if !errors.As(err, &ge) || ge.Code != http.StatusBadRequest || !strings.Contains(ge.Message, "j (JSON)") {
+			t.Errorf("%s: %v, want 400 naming j (JSON)", what, err)
 		}
 		if tableExists(t, ctx, ds.Table(table)) {
 			t.Errorf("%s: the table %s was made", what, table)
