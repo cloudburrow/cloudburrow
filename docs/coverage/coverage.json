@@ -6040,7 +6040,7 @@
           "test/compat/logging1226_test.go:279 TestLoggingExclusions",
           "test/compat/logging2026_test.go:32 TestLoggingQueryLanguage",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
-          "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
+          "test/compat/terraform_logging_parents_test.go:255 TestTerraformLoggingBillingAccount",
           "test/compat/terraform_logging_parents_test.go:60 TestTerraformLoggingFolderAndOrganizationExclusionsAndBuckets",
           "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
@@ -6073,7 +6073,7 @@
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/loggingparentstools_test.go:87 TestTerraformLoggingFolderAndOrganizationSinks",
           "test/compat/terraform_batch11_test.go:59 TestTerraformLoggingSavedQueryAndLogScope",
-          "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
+          "test/compat/terraform_logging_parents_test.go:255 TestTerraformLoggingBillingAccount",
           "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
       },
@@ -6113,7 +6113,7 @@
         "tests": [
           "test/compat/logging1226_test.go:279 TestLoggingExclusions",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
-          "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
+          "test/compat/terraform_logging_parents_test.go:255 TestTerraformLoggingBillingAccount",
           "test/compat/terraform_logging_parents_test.go:60 TestTerraformLoggingFolderAndOrganizationExclusionsAndBuckets",
           "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
@@ -6139,7 +6139,7 @@
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/loggingparentstools_test.go:87 TestTerraformLoggingFolderAndOrganizationSinks",
           "test/compat/terraform_batch11_test.go:59 TestTerraformLoggingSavedQueryAndLogScope",
-          "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
+          "test/compat/terraform_logging_parents_test.go:255 TestTerraformLoggingBillingAccount",
           "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
       },
@@ -6163,7 +6163,7 @@
           "test/compat/loggingcmek1950_test.go:70 TestLoggingBucketCMEK",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/terraform_logging_buckets_test.go:33 TestTerraformLoggingBucketsAndLinks",
-          "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
+          "test/compat/terraform_logging_parents_test.go:255 TestTerraformLoggingBillingAccount",
           "test/compat/terraform_logging_parents_test.go:60 TestTerraformLoggingFolderAndOrganizationExclusionsAndBuckets",
           "test/compat/terraform_loggingcmek1950_test.go:22 TestTerraformLoggingBucketCMEK"
         ]
@@ -6185,7 +6185,7 @@
         "tests": [
           "test/compat/logging1226_test.go:279 TestLoggingExclusions",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
-          "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
+          "test/compat/terraform_logging_parents_test.go:255 TestTerraformLoggingBillingAccount",
           "test/compat/terraform_logging_parents_test.go:60 TestTerraformLoggingFolderAndOrganizationExclusionsAndBuckets",
           "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
@@ -6222,7 +6222,7 @@
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/loggingparentstools_test.go:87 TestTerraformLoggingFolderAndOrganizationSinks",
           "test/compat/terraform_batch11_test.go:59 TestTerraformLoggingSavedQueryAndLogScope",
-          "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
+          "test/compat/terraform_logging_parents_test.go:255 TestTerraformLoggingBillingAccount",
           "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
       },
@@ -6295,7 +6295,7 @@
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
           "test/compat/loggingcmek1950_test.go:70 TestLoggingBucketCMEK",
           "test/compat/terraform_logging_buckets_test.go:33 TestTerraformLoggingBucketsAndLinks",
-          "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
+          "test/compat/terraform_logging_parents_test.go:255 TestTerraformLoggingBillingAccount",
           "test/compat/terraform_logging_parents_test.go:60 TestTerraformLoggingFolderAndOrganizationExclusionsAndBuckets"
         ]
       },
@@ -6319,7 +6319,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/logging1226_test.go:279 TestLoggingExclusions",
-          "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
+          "test/compat/terraform_logging_parents_test.go:255 TestTerraformLoggingBillingAccount",
           "test/compat/terraform_logging_parents_test.go:60 TestTerraformLoggingFolderAndOrganizationExclusionsAndBuckets",
           "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
@@ -6344,7 +6344,7 @@
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/loggingparentstools_test.go:87 TestTerraformLoggingFolderAndOrganizationSinks",
           "test/compat/terraform_batch11_test.go:59 TestTerraformLoggingSavedQueryAndLogScope",
-          "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
+          "test/compat/terraform_logging_parents_test.go:255 TestTerraformLoggingBillingAccount",
           "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
       },
@@ -8511,7 +8511,7 @@
         "method": "google.pubsub.v1.Subscriber/Pull",
         "status": "Verified",
         "tests": [
-          "test/compat/billingiam2109_test.go:54 TestBillingBudgetNotifications",
+          "test/compat/billingiam2109_test.go:56 TestBillingBudgetNotifications",
           "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
           "test/compat/iamenforcementpubsub1879_test.go:59 TestIAMEnforcementPubSub",
           "test/compat/pubsub_test.go:90 TestPubSubPublishAndPull",
@@ -14380,7 +14380,7 @@
         "method": "serviceusage.services.list",
         "status": "Verified",
         "tests": [
-          "test/compat/loggingparents_test.go:287 TestServiceUsageFolderParentRefused",
+          "test/compat/loggingparents_test.go:290 TestServiceUsageFolderParentRefused",
           "test/compat/serviceusage_test.go:168 TestTerraformProjectService",
           "test/compat/serviceusage_test.go:239 TestGcloudServices",
           "test/compat/serviceusage_test.go:53 TestServiceUsageServices"
@@ -17069,8 +17069,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/billing2109_test.go:318 TestCloudBillingBudgets",
-          "test/compat/billingiam2109_test.go:157 TestIAMEnforcementBilling",
-          "test/compat/billingiam2109_test.go:54 TestBillingBudgetNotifications"
+          "test/compat/billingiam2109_test.go:159 TestIAMEnforcementBilling",
+          "test/compat/billingiam2109_test.go:56 TestBillingBudgetNotifications"
         ]
       },
       {
@@ -17092,7 +17092,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/billing2109_test.go:318 TestCloudBillingBudgets",
-          "test/compat/billingiam2109_test.go:157 TestIAMEnforcementBilling"
+          "test/compat/billingiam2109_test.go:159 TestIAMEnforcementBilling"
         ]
       },
       {
@@ -17114,7 +17114,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/billing2109_test.go:117 TestCloudBillingAccounts",
-          "test/compat/billingiam2109_test.go:157 TestIAMEnforcementBilling"
+          "test/compat/billingiam2109_test.go:159 TestIAMEnforcementBilling"
         ]
       },
       {
@@ -17136,7 +17136,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/billing2109_test.go:117 TestCloudBillingAccounts",
-          "test/compat/billingiam2109_test.go:157 TestIAMEnforcementBilling"
+          "test/compat/billingiam2109_test.go:159 TestIAMEnforcementBilling"
         ]
       },
       {
@@ -17165,7 +17165,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/billing2109_test.go:117 TestCloudBillingAccounts",
-          "test/compat/billingiam2109_test.go:157 TestIAMEnforcementBilling"
+          "test/compat/billingiam2109_test.go:159 TestIAMEnforcementBilling"
         ]
       },
       {
@@ -17180,7 +17180,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/billing2109_test.go:196 TestCloudBillingLinkProject",
-          "test/compat/billingiam2109_test.go:157 TestIAMEnforcementBilling"
+          "test/compat/billingiam2109_test.go:159 TestIAMEnforcementBilling"
         ]
       },
       {
