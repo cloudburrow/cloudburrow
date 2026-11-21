@@ -12,6 +12,7 @@ import (
 	pb "cloud.google.com/go/cloudquotas/apiv1/cloudquotaspb"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
+	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/service/cloudquotas"
 	"github.com/cloudburrow/cloudburrow/internal/service/siteverification"
 )
@@ -20,7 +21,9 @@ import (
 // serviceusage Studio that read and change the Cloud Quotas and Site
 // Verification APIs gcloud, Terraform and the client libraries call.
 //
-//   - quotas {service}: the project's quotas, of one API or of every one;
+//   - quotas {service}: the project's quotas, of one API or of every one,
+//     or, with the folder or organization chosen in the toolbar
+//     (?folder=N, ?organizationId=N), that container's quotas (#2102);
 //   - quota-set {service, quotaId, region, value, justification}: Edit
 //     quotas' Submit request, an UpdateQuotaPreference with allow_missing;
 //   - domains: the verified sites and domains;
@@ -83,7 +86,13 @@ func (p serviceUsageProvider) quotasCall(ctx context.Context, project, call stri
 	if p.quotas == nil {
 		return nil, errors.New("the Cloud Quotas API is not served by this instance")
 	}
-	parent := "projects/" + project + "/locations/global"
+	scope := "projects/" + project
+	if f := console.ScopeValue(ctx, scopeFolderParam); f != "" {
+		scope = "folders/" + f
+	} else if o := console.ScopeValue(ctx, scopeOrgParam); o != "" {
+		scope = "organizations/" + o
+	}
+	parent := scope + "/locations/global"
 	switch call {
 	case "quotas":
 		services := map[string]bool{}
@@ -98,7 +107,7 @@ func (p serviceUsageProvider) quotasCall(ctx context.Context, project, call stri
 			names = append(names, s)
 		}
 		sort.Strings(names)
-		prefs, err := p.quotas.Preferences(project)
+		prefs, err := p.quotas.PreferencesOf(scope)
 		if err != nil {
 			return nil, err
 		}
@@ -131,7 +140,7 @@ func (p serviceUsageProvider) quotasCall(ctx context.Context, project, call stri
 				}
 			}
 		}
-		return map[string]any{"project": project, "quotas": rows}, nil
+		return map[string]any{"project": project, "scope": scope, "quotas": rows}, nil
 	case "quota-set":
 		v, err := strconv.ParseInt(strings.TrimSpace(req.Value), 10, 64)
 		if err != nil || v < 0 {

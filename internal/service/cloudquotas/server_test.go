@@ -110,8 +110,8 @@ func TestQuotaInfosAndPreferences(t *testing.T) {
 	if _, err := s.ListQuotaPreferences(ctx, &pb.ListQuotaPreferencesRequest{Parent: "projects/p1/locations/us-east1"}); status.Code(err) != codes.InvalidArgument {
 		t.Errorf("non-global location = %v", err)
 	}
-	if _, err := s.ListQuotaPreferences(ctx, &pb.ListQuotaPreferencesRequest{Parent: "folders/1/locations/global"}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("folder = %v", err)
+	if got, err := s.ListQuotaPreferences(ctx, &pb.ListQuotaPreferencesRequest{Parent: "folders/1/locations/global"}); err != nil || len(got.GetQuotaPreferences()) != 0 {
+		t.Errorf("folder = %v, %v, want none: a container lists only its own preferences", got, err)
 	}
 	adj := s.Adjuster()
 	set, err := adj.UpdateQuotaAdjusterSettings(ctx, &pb.UpdateQuotaAdjusterSettingsRequest{QuotaAdjusterSettings: &pb.QuotaAdjusterSettings{
@@ -174,5 +174,89 @@ func TestProvidedQuotasAndNumberedProjects(t *testing.T) {
 	}
 	if v, _ := s.Value("p1", "parametermanager.googleapis.com", "ReadRequestsPerMinutePerProject", nil); v != 1050 {
 		t.Errorf("after the update, Value = %d", v)
+	}
+}
+
+// fakeHierarchy is organizations/1 > folders/2 > projects/p1.
+type fakeHierarchy map[string]string
+
+func (h fakeHierarchy) Parent(c string) (string, error) {
+	p, ok := h[c]
+	if !ok {
+		return "", status.Error(codes.NotFound, c)
+	}
+	return p, nil
+}
+
+// TestFolderAndOrganizationParents (#2102): organization quotas under
+// organizations/{n}, none under a folder, preferences on the level their
+// quota applies to, and the quota adjuster's inherited enablement.
+func TestFolderAndOrganizationParents(t *testing.T) {
+	ctx := context.Background()
+	s := NewServer(store.NewMemory(), nil, nil)
+	s.Hierarchy = fakeHierarchy{"organizations/1": "", "folders/2": "organizations/1", "projects/p1": "folders/2"}
+	const org, folder = "organizations/1/locations/global", "folders/2/locations/global"
+	infos, err := s.ListQuotaInfos(ctx, &pb.ListQuotaInfosRequest{Parent: org + "/services/iam.googleapis.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, qi := range infos.GetQuotaInfos() {
+		if qi.GetContainerType() != pb.QuotaInfo_ORGANIZATION || !strings.HasPrefix(qi.GetName(), org+"/") {
+			t.Errorf("org quota %v", qi)
+		}
+	}
+	if len(infos.GetQuotaInfos()) != 5 {
+		t.Errorf("org iam quotas = %d, want 5", len(infos.GetQuotaInfos()))
+	}
+	if got, err := s.ListQuotaInfos(ctx, &pb.ListQuotaInfosRequest{Parent: folder + "/services/iam.googleapis.com"}); err != nil || len(got.GetQuotaInfos()) != 0 {
+		t.Errorf("folder quotas = %v, %v", got, err)
+	}
+	if _, err := s.GetQuotaInfo(ctx, &pb.GetQuotaInfoRequest{Name: parent + "/services/iam.googleapis.com/quotaInfos/" + WorkforcePoolQuotaID}); status.Code(err) != codes.NotFound {
+		t.Errorf("org quota under a project = %v, want NOT_FOUND", err)
+	}
+	if _, err := s.ListQuotaPreferences(ctx, &pb.ListQuotaPreferencesRequest{Parent: "folders/9/locations/global"}); status.Code(err) != codes.PermissionDenied {
+		t.Errorf("unknown folder = %v", err)
+	}
+	pool := &pb.QuotaPreference{Service: "iam.googleapis.com", QuotaId: WorkforcePoolQuotaID, QuotaConfig: &pb.QuotaConfig{PreferredValue: 2}}
+	for _, at := range []string{parent, folder} {
+		if _, err := s.CreateQuotaPreference(ctx, &pb.CreateQuotaPreferenceRequest{Parent: at, QuotaPreference: pool}); status.Code(err) != codes.InvalidArgument {
+			t.Errorf("org quota preference under %s = %v, want INVALID_ARGUMENT", at, err)
+		}
+	}
+	got, err := s.CreateQuotaPreference(ctx, &pb.CreateQuotaPreferenceRequest{Parent: org, QuotaPreferenceId: "pools", QuotaPreference: pool,
+		IgnoreSafetyChecks: []pb.QuotaSafetyCheck{pb.QuotaSafetyCheck_QUOTA_DECREASE_PERCENTAGE_TOO_HIGH}})
+	if err != nil || got.GetName() != org+"/quotaPreferences/pools" {
+		t.Fatalf("org preference = %v, %v", got, err)
+	}
+	if v, ok := s.Value("organizations/1", "iam.googleapis.com", WorkforcePoolQuotaID, nil); !ok || v != 2 {
+		t.Errorf("enforced org value = %d, %v, want 2", v, ok)
+	}
+	if list, _ := s.ListQuotaPreferences(ctx, &pb.ListQuotaPreferencesRequest{Parent: parent}); len(list.GetQuotaPreferences()) != 0 {
+		t.Errorf("project lists the organization's preference: %v", list)
+	}
+	adj := s.Adjuster()
+	a, err := adj.GetQuotaAdjusterSettings(ctx, &pb.GetQuotaAdjusterSettingsRequest{Name: parent + "/quotaAdjusterSettings"})
+	if err != nil || !a.GetInherited() || a.GetInheritedFrom() != "default" {
+		t.Errorf("unset adjuster = %v, %v", a, err)
+	}
+	if _, err := adj.UpdateQuotaAdjusterSettings(ctx, &pb.UpdateQuotaAdjusterSettingsRequest{QuotaAdjusterSettings: &pb.QuotaAdjusterSettings{
+		Name: org + "/quotaAdjusterSettings", Enablement: pb.QuotaAdjusterSettings_ENABLED}}); err != nil {
+		t.Fatal(err)
+	}
+	a, err = adj.GetQuotaAdjusterSettings(ctx, &pb.GetQuotaAdjusterSettingsRequest{Name: parent + "/quotaAdjusterSettings"})
+	if err != nil || a.GetEnablement() != pb.QuotaAdjusterSettings_ENABLED || !a.GetInherited() || a.GetInheritedFrom() != "organizations/1" {
+		t.Errorf("inherited adjuster = %v, %v", a, err)
+	}
+	if _, err := adj.UpdateQuotaAdjusterSettings(ctx, &pb.UpdateQuotaAdjusterSettingsRequest{QuotaAdjusterSettings: &pb.QuotaAdjusterSettings{
+		Name: folder + "/quotaAdjusterSettings", Enablement: pb.QuotaAdjusterSettings_DISABLED}}); err != nil {
+		t.Fatal(err)
+	}
+	a, _ = adj.GetQuotaAdjusterSettings(ctx, &pb.GetQuotaAdjusterSettingsRequest{Name: parent + "/quotaAdjusterSettings"})
+	if a.GetEnablement() != pb.QuotaAdjusterSettings_DISABLED || a.GetInheritedFrom() != "folders/2" {
+		t.Errorf("nearest ancestor = %v", a)
+	}
+	a, _ = adj.GetQuotaAdjusterSettings(ctx, &pb.GetQuotaAdjusterSettingsRequest{Name: folder + "/quotaAdjusterSettings"})
+	if a.GetInherited() || a.GetInheritedFrom() != "" {
+		t.Errorf("set on the folder = %v", a)
 	}
 }

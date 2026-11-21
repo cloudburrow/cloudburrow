@@ -17353,56 +17353,64 @@
         "method": "google.api.cloudquotas.v1.CloudQuotas/CreateQuotaPreference",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudquotas2030_test.go:82 TestCloudQuotasLifecycle"
+          "test/compat/cloudquotas2030_test.go:82 TestCloudQuotasLifecycle",
+          "test/compat/cloudquotasparents2102_test.go:147 TestCloudQuotasOrganizationPreferenceIsEnforced"
         ]
       },
       {
         "method": "google.api.cloudquotas.v1.CloudQuotas/GetQuotaInfo",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudquotas2030_test.go:82 TestCloudQuotasLifecycle"
+          "test/compat/cloudquotas2030_test.go:82 TestCloudQuotasLifecycle",
+          "test/compat/cloudquotasparents2102_test.go:32 TestCloudQuotasFolderAndOrganizationParents"
         ]
       },
       {
         "method": "google.api.cloudquotas.v1.CloudQuotas/GetQuotaPreference",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudquotas2030_test.go:82 TestCloudQuotasLifecycle"
+          "test/compat/cloudquotas2030_test.go:82 TestCloudQuotasLifecycle",
+          "test/compat/cloudquotasparents2102_test.go:32 TestCloudQuotasFolderAndOrganizationParents"
         ]
       },
       {
         "method": "google.api.cloudquotas.v1.CloudQuotas/ListQuotaInfos",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudquotas2030_test.go:82 TestCloudQuotasLifecycle"
+          "test/compat/cloudquotas2030_test.go:82 TestCloudQuotasLifecycle",
+          "test/compat/cloudquotasparents2102_test.go:32 TestCloudQuotasFolderAndOrganizationParents"
         ]
       },
       {
         "method": "google.api.cloudquotas.v1.CloudQuotas/ListQuotaPreferences",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudquotas2030_test.go:82 TestCloudQuotasLifecycle"
+          "test/compat/cloudquotas2030_test.go:82 TestCloudQuotasLifecycle",
+          "test/compat/cloudquotasparents2102_test.go:32 TestCloudQuotasFolderAndOrganizationParents"
         ]
       },
       {
         "method": "google.api.cloudquotas.v1.CloudQuotas/UpdateQuotaPreference",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudquotas2030_test.go:82 TestCloudQuotasLifecycle"
+          "test/compat/cloudquotas2030_test.go:82 TestCloudQuotasLifecycle",
+          "test/compat/cloudquotasparents2102_test.go:147 TestCloudQuotasOrganizationPreferenceIsEnforced"
         ]
       },
       {
         "method": "google.api.cloudquotas.v1.QuotaAdjusterSettingsManager/GetQuotaAdjusterSettings",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudquotas2030_test.go:82 TestCloudQuotasLifecycle"
+          "test/compat/cloudquotas2030_test.go:82 TestCloudQuotasLifecycle",
+          "test/compat/cloudquotasparents2102_test.go:32 TestCloudQuotasFolderAndOrganizationParents"
         ]
       },
       {
         "method": "google.api.cloudquotas.v1.QuotaAdjusterSettingsManager/UpdateQuotaAdjusterSettings",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudquotas2030_test.go:82 TestCloudQuotasLifecycle"
+          "test/compat/cloudquotas2030_test.go:82 TestCloudQuotasLifecycle",
+          "test/compat/cloudquotasparents2102_test.go:32 TestCloudQuotasFolderAndOrganizationParents"
         ]
       }
     ]
