@@ -2637,7 +2637,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/containeranalysis_test.go:150 TestArtifactRegistryVulnerabilityScanning",
-          "test/compat/containeranalysis_test.go:414 TestGcloudArtifactsVulnerabilityScanning"
+          "test/compat/containeranalysis_test.go:414 TestGcloudArtifactsVulnerabilityScanning",
+          "test/compat/containeranalysislicenses_test.go:146 TestArtifactRegistryLanguagePackageLicenses"
         ]
       },
       {

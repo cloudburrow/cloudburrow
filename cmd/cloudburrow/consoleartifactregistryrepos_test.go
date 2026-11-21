@@ -43,24 +43,32 @@ func TestConsoleArtifactRegistryCreateAndEditRepository(t *testing.T) {
 		t.Error("a second repository of the same name was created")
 	}
 	defaults := map[string]string{}
+	d, err := p.Detail(ctx, "", []string{"made"})
+	if err != nil || d.Edit == nil || !d.Edit.Page || d.Edit.Label != "Edit Repository" || d.Edit.Submit != "Update" {
+		t.Fatalf("the repository's Edit = %+v, %v; want Google's Edit Repository page ending in Update", d.Edit, err)
+	}
+	for _, f := range d.Edit.Fields {
+		defaults[f.Name] = f.Default
+	}
 	for _, a := range p.DetailActions(ctx, "", []string{"made"}) {
 		if a.ID == "edit-repository" {
-			for _, f := range a.Fields {
-				defaults[f.Name] = f.Default
-			}
+			t.Error("Edit Repository is still a dialog action")
 		}
+	}
+	if p.RowEditLabel() != "Edit Repository" {
+		t.Errorf("a row's Edit is %q", p.RowEditLabel())
 	}
 	if defaults["description"] != "first" || defaults["labels"] != `{"team":"web"}` || defaults["immutableTags"] != arDisabled {
 		t.Fatalf("Edit repository opens on %v; want the repository's description and labels", defaults)
 	}
-	if err := p.ActAt(ctx, "", []string{"made"}, "edit-repository", map[string]string{"description": "second", "labels": "team=api, env=dev"}); err != nil {
+	if err := p.Edit(ctx, "", []string{"made"}, map[string]string{"description": "second", "labels": "team=api, env=dev"}); err != nil {
 		t.Fatalf("Edit repository: %v", err)
 	}
 	r, _, err := p.repository("console-ar-create", "made")
 	if err != nil || r.GetDescription() != "second" || r.GetLabels()["team"] != "api" || r.GetLabels()["env"] != "dev" {
 		t.Errorf("the repository after Edit repository = %v, %v", r, err)
 	}
-	if err := p.ActAt(ctx, "", []string{"made"}, "edit-repository", map[string]string{"labels": "nokey"}); err == nil {
+	if err := p.Edit(ctx, "", []string{"made"}, map[string]string{"labels": "nokey"}); err == nil {
 		t.Error("Edit repository took labels that are not key=value")
 	}
 }
@@ -153,7 +161,7 @@ func TestConsoleArtifactRegistryCreatePage(t *testing.T) {
 		t.Errorf("Repositories = %+v", l.Items)
 	}
 	// Edit Repository turns immutable tags off.
-	if err := p.ActAt(ctx, "", []string{"multi"}, "edit-repository", map[string]string{"immutableTags": arDisabled, "labels": `{"team":"web"}`}); err != nil {
+	if err := p.Edit(ctx, "", []string{"multi"}, map[string]string{"immutableTags": arDisabled, "labels": `{"team":"web"}`}); err != nil {
 		t.Fatal(err)
 	}
 	if r, _, _ := p.repository(proj, "multi"); r.GetDockerConfig().GetImmutableTags() || r.GetKmsKeyName() != key {

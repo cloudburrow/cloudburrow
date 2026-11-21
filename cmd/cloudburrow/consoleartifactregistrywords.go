@@ -16,6 +16,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
+	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/registry"
 )
 
@@ -113,6 +114,14 @@ func (p artifactRegistryProvider) runPort() string {
 		}
 	}
 	return "RUN_PORT"
+}
+
+// setupPanel is the repository's Setup Instructions, beside its title,
+// which open in a side panel as Google's do (#2066).
+func (p artifactRegistryProvider) setupPanel(r *arpb.Repository) console.SidePanel {
+	return console.SidePanel{Label: "Setup Instructions", Title: "Setup instructions",
+		Intro: "Commands for this repository, pointed at this instance's registry.",
+		Text:  p.setupInstructions(r), Copy: "Copy setup instructions"}
 }
 
 // setupInstructions are the repository's Setup instructions: Google's,

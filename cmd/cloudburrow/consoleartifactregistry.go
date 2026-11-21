@@ -65,7 +65,11 @@ func (p artifactRegistryProvider) Detail(ctx context.Context, project string, pa
 	}
 	st := runadapter.RegistryStore()
 	if st == nil {
-		return console.Detail{Unavailable: "this instance has no registry store"}, nil
+		d := console.Detail{Unavailable: "this instance has no registry store"}
+		if len(path) == 1 {
+			d.Edit = editRepositoryForm(r)
+		}
+		return d, nil
 	}
 	switch len(path) {
 	case 1:
@@ -122,9 +126,10 @@ func (p artifactRegistryProvider) repositoryDetail(ctx context.Context, st *regi
 	}
 	attachments.Total = len(attachments.Items)
 	return console.Detail{
+		Edit:    editRepositoryForm(r),
 		Summary: p.repositorySummary(ctx, r, dockerMode(r)),
+		Panels:  []console.SidePanel{p.setupPanel(r)},
 		Sections: []console.Section{{ID: "images", Label: "Images", Listing: images},
-			{ID: "setup", Label: "Setup instructions", Kind: console.KindText, Text: p.setupInstructions(r)},
 			{ID: "rules", Label: "Rules", Listing: rules},
 			{ID: "attachments", Label: "Attachments", Listing: attachments}},
 	}
@@ -199,13 +204,15 @@ func (p artifactRegistryProvider) imageDetail(st *registry.Store, repo registry.
 	if err != nil || len(ms) == 0 {
 		return console.Detail{}, fmt.Errorf("image %q not found in repository %s", image, repo.Repository)
 	}
-	versions := console.Listing{Columns: []string{"Tags", "Created", "Uploaded", "Virtual size", "Media type"}, NameColumn: "Name",
-		Noun: "versions", RowsOpenable: true}
+	versions := console.Listing{Columns: []string{"Tags", "Created", "Uploaded", "Virtual size", "Media type", "Vulnerabilities"}, NameColumn: "Name",
+		Noun: "versions", RowsOpenable: true, SelectActions: []console.Action{arDeleteVersionsAction()}}
 	tags := console.Listing{Columns: []string{"Version"}, NameColumn: "Tag", Noun: "tags"}
 	for _, m := range ms {
-		versions.Items = append(versions.Items, console.Resource{Name: m.Digest, Fields: map[string]string{
+		versions.Items = append(versions.Items, console.Resource{Name: m.Digest, Selectable: true, Fields: map[string]string{
 			"Tags": orDash(strings.Join(m.Tags, ", ")), "Virtual size": humanBytes(m.ImageSize), "Media type": m.MediaType,
-			"Created": arTimeOf(m.Uploaded), "Uploaded": arTimeOf(m.Uploaded)}})
+			"Created": arImageCreated(st, repo, image, m), "Uploaded": arTimeOf(m.Uploaded),
+			"Vulnerabilities": arVulnerabilityTotals(repo, image, m.Digest)},
+			Actions: []console.Action{arEditTagsAction(m.Tags)}})
 		for _, t := range m.Tags {
 			tags.Items = append(tags.Items, console.Resource{Name: t, Fields: map[string]string{"Version": shortDigest(m.Digest)}})
 		}
@@ -269,19 +276,44 @@ func (p artifactRegistryProvider) versionDetail(st *registry.Store, repo registr
 	} else {
 		manifest.Unavailable = err.Error()
 	}
+	pull := registry.ImageURL(repo, image) + "@" + m.Digest
+	// Google's image digest page opens on Overview: "details such as
+	// format, location, repository, virtual size, and tags"
+	// (https://docs.cloud.google.com/artifact-analysis/docs/view-licenses-dependencies).
+	overview := console.Section{ID: "overview", Label: "Overview", Kind: console.KindProperties, Groups: []console.PropertyGroup{{
+		Properties: []console.Property{{Label: "Format", Value: "Docker"}, {Label: "Location", Value: repo.Location},
+			{Label: "Repository", Value: repo.Repository, Link: "/artifact-registry/" + url.PathEscape(repo.Repository) + "?project=" + url.QueryEscape(repo.Project)},
+			{Label: "Image digest", Value: m.Digest}, {Label: "Virtual size", Value: humanBytes(m.ImageSize)},
+			{Label: "Media type", Value: m.MediaType}, {Label: "Tags", Value: orDash(strings.Join(m.Tags, ", "))},
+			{Label: "Created", Value: arImageCreated(st, repo, image, m)},
+			{Label: "Uploaded", Value: arTimeOf(m.Uploaded)}, {Label: "Annotations", Value: annotations},
+			{Label: "Image URL", Value: pull, Copy: "Copy image URL"}}}}}
 	return console.Detail{
-		Summary: []console.Property{{Label: "Pull by digest", Value: registry.ImageURL(repo, image) + "@" + m.Digest},
-			{Label: "Annotations", Value: annotations},
-			{Label: "Tags", Value: orDash(strings.Join(m.Tags, ", "))}, {Label: "Media type", Value: m.MediaType},
-			{Label: "Size", Value: humanBytes(m.ImageSize)}, {Label: "Uploaded", Value: stampAge(timestamppb.New(m.Uploaded))}},
-		Sections: []console.Section{{ID: "files", Label: "Layers", Listing: files}, manifest, vulnerabilitiesSection(repo, image, m.Digest)},
+		Summary: []console.Property{{Label: "Pull by digest", Value: pull},
+			{Label: "Uploaded", Value: stampAge(timestamppb.New(m.Uploaded))}},
+		Sections: append(append([]console.Section{overview}, vulnerabilitiesSections(repo, image, m.Digest)...),
+			dependenciesSection(repo, image, m.Digest), console.Section{ID: "files", Label: "Layers", Listing: files}, manifest),
 	}, nil
 }
 
-// vulnerabilitiesSection is an image version's Vulnerabilities tab
+// vulnerabilitiesSections are an image version's Vulnerabilities tab
 // (#1912): Artifact Analysis's scan status and the VULNERABILITY
-// occurrences it wrote, most severe first, as Google's tab lists them.
-func vulnerabilitiesSection(repo registry.Repo, image, digest string) console.Section {
+// occurrences it wrote, most severe first, as Google's tab lists them,
+// each row's View or View Fixed opening its Vulnerability details; then
+// the tab's Layer bar, a section per layer with vulnerabilities, ShownIn
+// the tab (#2066).
+func vulnerabilitiesSections(repo registry.Repo, image, digest string) []console.Section {
+	sec, layers := vulnerabilitiesSection(repo, image, digest)
+	bar := arLayerSections(sec, layers)
+	if len(bar) > 0 {
+		sec.Show, sec.ShowLabel = "All layers", "Layer"
+	}
+	return append([]console.Section{sec}, bar...)
+}
+
+// vulnerabilitiesSection is the tab's own rows, and the layer each came
+// from (nil where the scan names none).
+func vulnerabilitiesSection(repo registry.Repo, image, digest string) (console.Section, []*grafeaspb.LayerDetails) {
 	sec := console.Section{ID: "vulnerabilities", Label: "Vulnerabilities", Listing: console.Listing{
 		Columns:    []string{"Effective severity", "CVSS", "Fix available", "Package", "Package type", "Installed version", "Fixed version"},
 		NameColumn: "Name", Noun: "vulnerabilities"}}
@@ -302,15 +334,15 @@ func vulnerabilitiesSection(repo registry.Repo, image, digest string) console.Se
 		} else {
 			sec.Listing.Unavailable = "This image was not scanned: it was pushed before scanning was active. Push it again under a new digest to scan it."
 		}
-		return sec
+		return sec, nil
 	}
 	switch disc.GetAnalysisStatus() {
 	case grafeaspb.DiscoveryOccurrence_PENDING, grafeaspb.DiscoveryOccurrence_SCANNING:
 		sec.Listing.Unavailable = "Scanning: the results appear here when the scan finishes."
-		return sec
+		return sec, nil
 	case grafeaspb.DiscoveryOccurrence_FINISHED_FAILED, grafeaspb.DiscoveryOccurrence_FINISHED_UNSUPPORTED:
 		sec.Listing.Unavailable = "The scan did not complete: " + disc.GetAnalysisStatusError().GetMessage()
-		return sec
+		return sec, nil
 	}
 	sort.SliceStable(vulns, func(i, j int) bool {
 		a, b := vulns[i].GetVulnerability(), vulns[j].GetVulnerability()
@@ -319,6 +351,7 @@ func vulnerabilitiesSection(repo registry.Repo, image, digest string) console.Se
 		}
 		return a.GetCvssScore() > b.GetCvssScore()
 	})
+	var layers []*grafeaspb.LayerDetails
 	for _, o := range vulns {
 		v := o.GetVulnerability()
 		fix := "No"
@@ -337,13 +370,24 @@ func vulnerabilitiesSection(repo registry.Repo, image, digest string) console.Se
 		if v.GetCvssScore() > 0 {
 			cvss = strconv.FormatFloat(float64(v.GetCvssScore()), 'f', 1, 32)
 		}
-		sev := strings.TrimPrefix(v.GetEffectiveSeverity().String(), "SEVERITY_")
-		sec.Listing.Items = append(sec.Listing.Items, console.Resource{Name: v.GetShortDescription(), Fields: map[string]string{
+		sev := arSeverityWord(v.GetEffectiveSeverity())
+		row := console.Resource{Name: v.GetShortDescription(), Fields: map[string]string{
 			"Effective severity": sev, "CVSS": cvss, "Fix available": fix, "Package": orDash(pi.GetAffectedPackage()),
-			"Package type": orDash(pi.GetPackageType()), "Installed version": orDash(pi.GetAffectedVersion().GetFullName()), "Fixed version": fixed}})
+			"Package type": orDash(pi.GetPackageType()), "Installed version": orDash(pi.GetAffectedVersion().GetFullName()), "Fixed version": fixed}}
+		row.Panel = arVulnerabilityPanel(row, v, pi)
+		sec.Listing.Items = append(sec.Listing.Items, row)
+		var layer *grafeaspb.LayerDetails
+		for _, l := range pi.GetFileLocation() {
+			if l.GetLayerDetails() != nil {
+				layer = l.GetLayerDetails()
+				break
+			}
+		}
+		layers = append(layers, layer)
 	}
 	sec.Listing.Total = len(sec.Listing.Items)
-	return sec
+	sec.Groups = []console.PropertyGroup{arScanResults(vulns, runadapter.ImageOccurrences(repo, image, digest))}
+	return sec, layers
 }
 
 // DetailActions are Delete at each level, and Add tag and Remove tag on a
@@ -356,7 +400,6 @@ func (p artifactRegistryProvider) DetailActions(ctx context.Context, project str
 	case 1:
 		var acts []console.Action
 		if r, _, err := p.repository(project, path[0]); err == nil {
-			acts = append(acts, console.Action{ID: "setup", Label: "Setup Instructions", Href: "/artifact-registry/" + url.PathEscape(path[0]) + "?tab=setup"}, editRepositoryAction(r))
 			if a, ok := editRuleAction(ctx, r.GetName()); ok {
 				acts = append(acts, a)
 			}
@@ -380,12 +423,22 @@ func (p artifactRegistryProvider) DetailActions(ctx context.Context, project str
 		return []console.Action{
 			{ID: "display-name", Label: "Set display name", Fields: []console.Field{
 				{Name: "name", Label: "Display name", Type: "text", Help: "empty restores the image's name"}}},
+			arDeleteVersionsAction(),
 			{ID: "delete-untagged", Label: "Delete untagged versions", Destructive: true,
 				Confirm: "Every version with no tag is deleted at once, as BatchDeleteVersions does."},
 			{ID: "delete", Label: "Delete image", Destructive: true, Leaves: true,
 				Confirm: "Every version and tag of the image is deleted, as DeletePackage does."}}
 	case 3:
+		var tags []string
+		if st := runadapter.RegistryStore(); st != nil {
+			if _, repo, err := p.repository(project, path[0]); err == nil {
+				if m, err := st.Manifest(repo, path[1], path[2]); err == nil {
+					tags = m.Tags
+				}
+			}
+		}
 		return []console.Action{
+			arEditTagsAction(tags),
 			{ID: "annotate", Label: "Set annotations", Fields: []console.Field{{Name: "annotations", Label: "Annotations", Type: "text",
 				Help: "key=value pairs, comma separated, replacing the version's annotations; empty clears them"}}},
 			{ID: "annotate-file", Label: "Set file annotations", Fields: []console.Field{
@@ -397,10 +450,6 @@ func (p artifactRegistryProvider) DetailActions(ctx context.Context, project str
 				{Name: "file", Label: "File digest", Type: "text", Required: true, Help: "a file of this repository, sha256:..."}}},
 			{ID: "export", Label: "Export to Cloud Storage", Fields: []console.Field{
 				{Name: "path", Label: "Destination", Type: "text", Required: true, Help: "bucket or bucket/dir in this instance's Cloud Storage"}}},
-			{ID: "add-tag", Label: "Add tag", Fields: []console.Field{{Name: "tag", Label: "Tag", Type: "text", Required: true,
-				Help: "a new tag, or an existing one to move to this version"}}},
-			{ID: "remove-tag", Label: "Delete tag", Destructive: true, Fields: []console.Field{{Name: "tag", Label: "Tag", Type: "text", Required: true,
-				Help: "one of this version's tags; the version stays"}}},
 			{ID: "delete", Label: "Delete version", Destructive: true, Leaves: true,
 				Confirm: "The version and its tags are deleted, as DeleteVersion with force does."},
 		}
@@ -416,9 +465,6 @@ func (p artifactRegistryProvider) ActAt(ctx context.Context, project string, pat
 	r, repo, err := p.repository(project, path[0])
 	if err != nil {
 		return err
-	}
-	if len(path) == 1 && action == "edit-repository" {
-		return p.editRepository(ctx, r, values)
 	}
 	if len(path) == 1 && action == "edit-rule" {
 		return editRule(ctx, r.GetName(), values)
@@ -499,22 +545,24 @@ func (p artifactRegistryProvider) ActAt(ctx context.Context, project string, pat
 		return st.DeleteImage(repo, path[1])
 	case len(path) == 3 && action == "delete":
 		return st.DeleteManifest(repo, path[1], path[2])
-	case len(path) == 3 && action == "add-tag":
-		tag := strings.TrimSpace(values["tag"])
-		if !registry.ValidTag(tag) {
-			return fmt.Errorf("%q is not a valid tag", tag)
+	case len(path) == 3 && action == "edit-tags":
+		return arEditTags(st, repo, path[1], path[2], values["tags"])
+	case len(path) == 2 && action == "delete-versions":
+		var digests []string
+		for _, d := range strings.Split(values[arVersionsField], "\n") {
+			if d = strings.TrimSpace(d); d != "" {
+				digests = append(digests, d)
+			}
 		}
-		return st.SetTag(repo, path[1], tag, path[2])
-	case len(path) == 3 && action == "remove-tag":
-		tag := strings.TrimSpace(values["tag"])
-		tags, err := st.Tags(repo, path[1])
-		if err != nil {
-			return err
+		if len(digests) == 0 {
+			return fmt.Errorf("select the versions to delete")
 		}
-		if tags[tag] != path[2] {
-			return fmt.Errorf("%q is not a tag of this version", tag)
+		for _, d := range digests {
+			if err := st.DeleteManifest(repo, path[1], d); err != nil {
+				return err
+			}
 		}
-		return st.DeleteTag(repo, path[1], tag)
+		return nil
 	}
 	return fmt.Errorf("unknown action %q", action)
 }

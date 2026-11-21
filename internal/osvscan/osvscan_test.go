@@ -69,6 +69,53 @@ func TestConvert(t *testing.T) {
 	}
 }
 
+// layered is OSV-Scanner v2.7.1's shape for an image scan run with
+// --licenses (#2066): each package's licenses and the index of the layer
+// it came from, and the image's layers.
+const layered = `{"results":[{"source":{"path":"/lib/apk/db/installed","type":"os"},"packages":[
+ {"package":{"name":"musl","version":"1.2.5-r0","ecosystem":"Alpine:v3.20","image_origin_details":{"index":1}},
+  "licenses":["MIT","MIT AND BSD-2-Clause"],
+  "vulnerabilities":[{"id":"ALPINE-CVE-2025-26519","upstream":["CVE-2025-26519"],"affected":[{"package":{"name":"musl","ecosystem":"Alpine:v3.20"},
+   "ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"1.2.5-r1"}]}]}]}]},
+ {"package":{"name":"zlib","version":"1.3.1-r1","ecosystem":"Alpine:v3.20","image_origin_details":{"index":0}},"licenses":["Zlib"]},
+ {"package":{"name":"busybox","version":"1.36.1-r29","ecosystem":"Alpine:v3.20"},"licenses":["unknown"]}]}],
+ "image_metadata":{"os":"Alpine Linux v3.20","layer_metadata":[
+  {"diff_id":"sha256:88b4","command":"ADD alpine-minirootfs.tar.gz / # buildkit","base_image_index":0},
+  {"diff_id":"sha256:5f1a","command":"RUN apk add musl","base_image_index":1},
+  {"diff_id":"","command":"CMD [\"/bin/sh\"]","is_empty":true}],
+  "base_images":[[],[{"name":"alpine:3.20"}]]}}`
+
+func TestConvertRecordsLicensesAndLayers(t *testing.T) {
+	var r Result
+	if err := json.Unmarshal([]byte(layered), &r); err != nil {
+		t.Fatal(err)
+	}
+	f := Convert(&r)
+	lic := map[string]string{}
+	for _, o := range f.Packages {
+		lic[o.GetPackage().GetName()] = o.GetPackage().GetLicense().GetExpression()
+	}
+	if lic["musl"] != "MIT AND (MIT AND BSD-2-Clause)" || lic["zlib"] != "Zlib" || lic["busybox"] != "" {
+		t.Errorf("licenses: %v", lic)
+	}
+	if len(f.Vulnerabilities) != 1 {
+		t.Fatalf("vulnerabilities: %v", f.Vulnerabilities)
+	}
+	l := f.Vulnerabilities[0].GetVulnerability().GetPackageIssue()[0].GetFileLocation()[0].GetLayerDetails()
+	if l.GetIndex() != 1 || l.GetDiffId() != "sha256:5f1a" || l.GetCommand() != "RUN apk add musl" ||
+		len(l.GetBaseImages()) != 1 || l.GetBaseImages()[0].GetName() != "alpine:3.20" {
+		t.Errorf("layer: %v", l)
+	}
+	// A directory scan names no layer.
+	var plain Result
+	if err := json.Unmarshal([]byte(result), &plain); err != nil {
+		t.Fatal(err)
+	}
+	if l := Convert(&plain).Vulnerabilities[0].GetVulnerability().GetPackageIssue()[0].GetFileLocation()[0].GetLayerDetails(); l != nil {
+		t.Errorf("layer outside an image scan: %v", l)
+	}
+}
+
 // The CVSS v3.1 specification's examples.
 func TestCVSS3BaseScore(t *testing.T) {
 	for vec, want := range map[string]float32{
@@ -180,8 +227,25 @@ func TestScanWithThePinnedScanner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if f := Convert(r); len(f.Vulnerabilities) == 0 {
+	f := Convert(r)
+	if len(f.Vulnerabilities) == 0 {
 		t.Errorf("no vulnerabilities: %+v", r)
+	}
+	// --licenses reads each OS package's license from its database, offline
+	// (#2066), and an image scan names each package's layer.
+	licensed := 0
+	for _, o := range f.Packages {
+		if o.GetPackage().GetLicense().GetExpression() != "" {
+			licensed++
+		}
+	}
+	if licensed == 0 {
+		t.Errorf("no package has a license: %v", f.Packages)
+	}
+	for _, o := range f.Vulnerabilities {
+		if o.GetVulnerability().GetPackageIssue()[0].GetFileLocation()[0].GetLayerDetails() == nil {
+			t.Errorf("%s names no layer", o.GetNoteName())
+		}
 	}
 }
 

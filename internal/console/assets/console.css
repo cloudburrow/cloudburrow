@@ -1635,6 +1635,22 @@ thead th {
 .info-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px;
                 padding-top: 16px; border-top: 1px solid var(--border); }
 .info-empty { padding-top: 24px; text-align: center; }
+
+/* A provider's side panel (#2066): Setup Instructions, Vulnerability
+   details. Its tables scroll inside the panel rather than widening it. */
+.side-panel h3 { margin: 16px 0 4px; font-size: var(--text-body-size, 14px); font-weight: 500; }
+.side-panel-text pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0 0; }
+.side-panel-table { margin-top: 16px; overflow-x: auto; }
+.side-panel-table caption { text-align: left; font-weight: 500; padding-bottom: 8px; }
+.side-panel-table td { overflow-wrap: anywhere; }
+
+/* A group of counts as a bar graph (#2066): Most common licenses. */
+.bar-graph { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.bar-row { display: grid; grid-template-columns: minmax(8em, 16em) 1fr auto; align-items: center; gap: 8px; }
+.bar-label { overflow-wrap: anywhere; }
+.bar-track { height: 12px; background: var(--border); border-radius: 2px; overflow: hidden; }
+.bar-fill { display: block; height: 100%; background: var(--accent); }
+.bar-count { font-variant-numeric: tabular-nums; }
 .info-empty h2 { font-size: var(--text-heading-size); font-weight: 500; margin: 0 0 4px; }
 
 /* The row being described, marked so the panel and the table agree. */
@@ -2009,7 +2025,10 @@ dd.has-copy .property-copy-value { overflow-wrap: anywhere; min-width: 0; }
 dd.has-copy .property-copy { padding: 2px 8px; font-size: var(--text-badge-size); }
 /* A link beside a value that opens a page action: Upgrade beside an edition (#1859). */
 dd.has-property-action { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
-.objects-show { display: inline-flex; align-items: center; gap: 6px; }
+.objects-show { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; }
+/* A long choice (a layer's build command, #2066) narrows the list rather
+   than widening the page. */
+.objects-show select { min-width: 0; max-width: 100%; text-overflow: ellipsis; }
 /* A form section's tabs (Field.Tab, #1852): Google's Create service page's
    Container(s), Variables & Secrets, Volumes, Networking and Security. */
 .form-tabs { margin: 4px 0 16px; overflow-x: auto; }

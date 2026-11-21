@@ -11,9 +11,12 @@ import (
 	arpb "cloud.google.com/go/artifactregistry/apiv1/artifactregistrypb"
 	"cloud.google.com/go/iam/apiv1/iampb"
 	"github.com/google/go-containerregistry/pkg/crane"
+	v1 "github.com/google/go-containerregistry/pkg/v1"
+	"github.com/google/go-containerregistry/pkg/v1/mutate"
 	"github.com/google/go-containerregistry/pkg/v1/random"
 
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
+	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/registry"
 )
 
@@ -45,30 +48,61 @@ func TestConsoleArtifactRegistryImagesAndTags(t *testing.T) {
 	digest, _ := img.Digest()
 	p := artifactRegistryProvider{defaultProject: "console-ar"}
 	d, err := p.Detail(ctx, "", []string{"images"})
-	if err != nil || len(d.Sections) != 4 || len(d.Sections[0].Listing.Items) != 1 || d.Sections[0].Listing.Items[0].Name != "web" ||
-		d.Sections[1].ID != "setup" || !strings.Contains(d.Sections[1].Text, "docker push us-central1-docker.pkg.localhost:") {
+	// Setup Instructions open a side panel beside the title (#2066).
+	if err != nil || len(d.Sections) != 3 || len(d.Sections[0].Listing.Items) != 1 || d.Sections[0].Listing.Items[0].Name != "web" ||
+		len(d.Panels) != 1 || d.Panels[0].Label != "Setup Instructions" || d.Panels[0].Copy == "" ||
+		!strings.Contains(d.Panels[0].Text, "docker push us-central1-docker.pkg.localhost:") {
 		t.Fatalf("repository page = %+v, %v", d, err)
 	}
-	if d, err := p.Detail(ctx, "", []string{"images", "web", digest.String()}); err != nil || len(d.Sections) != 3 ||
-		d.Sections[1].ID != "manifest" || !strings.Contains(d.Sections[1].Text, `"layers"`) ||
-		d.Sections[2].ID != "vulnerabilities" || !strings.Contains(d.Sections[2].Listing.Unavailable, "not active") {
+	if d, err := p.Detail(ctx, "", []string{"images", "web", digest.String()}); err != nil || len(d.Sections) != 5 ||
+		!strings.Contains(arSectionOf(d, "manifest").Text, `"layers"`) ||
+		!strings.Contains(arSectionOf(d, "vulnerabilities").Listing.Unavailable, "not active") ||
+		!strings.Contains(arSectionOf(d, "dependencies").Listing.Unavailable, "not active") {
 		t.Fatalf("repository page = %+v, %v", d, err)
 	}
 	d, err = p.Detail(ctx, "", []string{"images", "web"})
 	if err != nil || d.Sections[0].Listing.Items[0].Name != digest.String() || d.Sections[1].Listing.Items[0].Name != "v1" {
 		t.Fatalf("image page = %+v, %v", d, err)
 	}
+	// A version's Created is its image's build time, its config's created
+	// (#2066): random.Image records none, so it is "-", not the upload.
+	if c := d.Sections[0].Listing.Items[0].Fields["Created"]; c != "-" {
+		t.Errorf("Created of an image with no build time = %q", c)
+	}
+	built := time.Date(2024, 3, 1, 9, 30, 0, 0, time.UTC)
+	dated, err := mutate.CreatedAt(img, v1.Time{Time: built})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := crane.Push(dated, host+"/console-ar/images/built:v1"); err != nil {
+		t.Fatal(err)
+	}
+	if bd, err := p.Detail(ctx, "", []string{"images", "built"}); err != nil || bd.Sections[0].Listing.Items[0].Fields["Created"] != arTimeOf(built) ||
+		bd.Sections[0].Listing.Items[0].Fields["Uploaded"] == arTimeOf(built) {
+		t.Errorf("Created of an image built %s = %+v, %v", built, bd.Sections[0].Listing.Items, err)
+	}
+	if err := p.ActAt(ctx, "", []string{"images", "built"}, "delete", nil); err != nil {
+		t.Fatal(err)
+	}
 	vpath := []string{"images", "web", digest.String()}
 	d, err = p.Detail(ctx, "", vpath)
-	if err != nil || len(d.Sections[0].Listing.Items) != 2 { // config and layer
+	if err != nil || len(arSectionOf(d, "files").Listing.Items) != 2 { // config and layer
 		t.Fatalf("version page = %+v, %v", d, err)
+	}
+	// Google's image digest page (#1855): Overview first, then
+	// Vulnerabilities and Dependencies.
+	if ids := fmt.Sprint(arSectionIDs(d)); ids != "[overview vulnerabilities dependencies files manifest]" {
+		t.Errorf("version tabs = %s", ids)
+	}
+	if ov := fmt.Sprint(arSectionOf(d, "overview").Groups); !strings.Contains(ov, "Image digest") || !strings.Contains(ov, "Virtual size") || !strings.Contains(ov, "{Repository images /artifact-registry/images?project=console-ar") {
+		t.Errorf("Overview = %s", ov)
 	}
 	// #1449: annotations, a display name, a rule and the VPC-SC policy.
 	if err := p.ActAt(ctx, "", vpath, "annotate", map[string]string{"annotations": "team=core, scan=clean"}); err != nil {
 		t.Fatal(err)
 	}
-	if d, _ := p.Detail(ctx, "", vpath); !strings.Contains(fmt.Sprint(d.Summary), "scan=clean, team=core") {
-		t.Errorf("version annotations = %v", d.Summary)
+	if d, _ := p.Detail(ctx, "", vpath); !strings.Contains(fmt.Sprint(arSectionOf(d, "overview").Groups), "scan=clean, team=core") {
+		t.Errorf("version annotations = %v", arSectionOf(d, "overview").Groups)
 	}
 	if err := p.ActAt(ctx, "", []string{"images", "web"}, "display-name", map[string]string{"name": "Web front end"}); err != nil {
 		t.Fatal(err)
@@ -86,8 +120,8 @@ func TestConsoleArtifactRegistryImagesAndTags(t *testing.T) {
 		t.Fatal(err)
 	}
 	settings := func() string { l, _ := sp.List(ctx, ""); return fmt.Sprint(l.Items) }
-	if d, _ := p.Detail(ctx, "", []string{"images"}); len(d.Sections[2].Listing.Items) != 1 || !strings.Contains(settings(), "VPC-SC policy (us-central1)  map[Scope:us-central1 Value:ALLOW]") {
-		t.Errorf("rules = %+v, settings %v", d.Sections[2].Listing.Items, settings())
+	if d, _ := p.Detail(ctx, "", []string{"images"}); len(arSectionOf(d, "rules").Listing.Items) != 1 || !strings.Contains(settings(), "VPC-SC policy (us-central1)  map[Scope:us-central1 Value:ALLOW]") {
+		t.Errorf("rules = %+v, settings %v", arSectionOf(d, "rules").Listing.Items, settings())
 	}
 	if err := p.ActAt(ctx, "", []string{"images"}, "delete-rule", map[string]string{"id": "deny-all"}); err != nil {
 		t.Fatal(err)
@@ -101,18 +135,18 @@ func TestConsoleArtifactRegistryImagesAndTags(t *testing.T) {
 		t.Errorf("platform logs = %v", settings())
 	}
 	_ = sp.ActAt(ctx, "", nil, "platform-logs", map[string]string{"location": "us-central1", "state": "LOGGING_STATE_UNSPECIFIED", "severity": "SEVERITY_LEVEL_UNSPECIFIED"})
-	file := d.Sections[0].Listing.Items[0].Name
+	file := arSectionOf(d, "files").Listing.Items[0].Name
 	if err := p.ActAt(ctx, "", vpath, "annotate-file", map[string]string{"file": file, "annotations": "scan=ok"}); err != nil {
 		t.Fatal(err)
 	}
-	if d, _ := p.Detail(ctx, "", vpath); d.Sections[0].Listing.Items[0].Fields["Annotations"] != "scan=ok" {
-		t.Errorf("file annotations = %+v", d.Sections[0].Listing.Items[0])
+	if d, _ := p.Detail(ctx, "", vpath); arSectionOf(d, "files").Listing.Items[0].Fields["Annotations"] != "scan=ok" {
+		t.Errorf("file annotations = %+v", arSectionOf(d, "files").Listing.Items[0])
 	}
 	if err := p.ActAt(ctx, "", vpath, "attach", map[string]string{"id": "sbom", "type": "application/spdx", "file": file}); err != nil {
 		t.Fatal(err)
 	}
-	if d, _ := p.Detail(ctx, "", []string{"images"}); len(d.Sections[3].Listing.Items) != 1 {
-		t.Errorf("attachments = %+v", d.Sections[3].Listing.Items)
+	if d, _ := p.Detail(ctx, "", []string{"images"}); len(arSectionOf(d, "attachments").Listing.Items) != 1 {
+		t.Errorf("attachments = %+v", arSectionOf(d, "attachments").Listing.Items)
 	}
 	if err := p.ActAt(ctx, "", []string{"images"}, "delete-attachment", map[string]string{"id": "sbom"}); err != nil {
 		t.Fatal(err)
@@ -129,17 +163,31 @@ func TestConsoleArtifactRegistryImagesAndTags(t *testing.T) {
 	if err := p.ActAt(ctx, "", []string{"images", "web"}, "delete-untagged", nil); err == nil {
 		t.Error("delete-untagged with every version tagged succeeded")
 	}
-	if err := p.ActAt(ctx, "", vpath, "add-tag", map[string]string{"tag": "prod"}); err != nil {
+	// More actions > Edit tags (#1855): the version's tags become the
+	// ones typed, Save.
+	if err := p.ActAt(ctx, "", vpath, "edit-tags", map[string]string{"tags": "v1, prod"}); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := crane.Digest(host + "/console-ar/images/web:prod"); err != nil || got != digest.String() {
 		t.Errorf("the added tag pulls %q, %v", got, err)
 	}
-	if err := p.ActAt(ctx, "", vpath, "remove-tag", map[string]string{"tag": "prod"}); err != nil {
+	im, _ := p.Detail(ctx, "", []string{"images", "web"})
+	row := im.Sections[0].Listing.Items[0]
+	if row.Fields["Tags"] != "prod, v1" || len(row.Actions) != 1 || row.Actions[0].ID != "edit-tags" || row.Actions[0].Fields[0].Default != "prod, v1" ||
+		row.Fields["Vulnerabilities"] != "-" || !row.Selectable || im.Sections[0].Listing.SelectActions[0].ID != "delete-versions" {
+		t.Errorf("version row = %+v, select %+v", row, im.Sections[0].Listing.SelectActions)
+	}
+	if err := p.ActAt(ctx, "", vpath, "edit-tags", map[string]string{"tags": "v1"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := p.ActAt(ctx, "", vpath, "remove-tag", map[string]string{"tag": "prod"}); err == nil {
-		t.Error("removing a removed tag succeeded")
+	if _, err := crane.Digest(host + "/console-ar/images/web:prod"); err == nil {
+		t.Error("prod resolves after Edit tags removed it")
+	}
+	if err := p.ActAt(ctx, "", vpath, "edit-tags", map[string]string{"tags": "v1, bad tag"}); err == nil {
+		t.Error("Edit tags took an invalid tag")
+	}
+	if err := p.ActAt(ctx, "", []string{"images", "web"}, "delete-versions", map[string]string{"versions": ""}); err == nil {
+		t.Error("Delete with no version checked succeeded")
 	}
 	if err := p.ActAt(ctx, "", vpath, "delete", nil); err != nil {
 		t.Fatal(err)
@@ -214,4 +262,22 @@ func TestConsoleArtifactRegistryPermissions(t *testing.T) {
 	if _, err := p.GetPolicy(ctx, "", []string{"missing"}); err == nil {
 		t.Error("a missing repository's policy was read")
 	}
+}
+
+// arSectionOf is a page's section of that ID.
+func arSectionOf(d console.Detail, id string) console.Section {
+	for _, s := range d.Sections {
+		if s.ID == id {
+			return s
+		}
+	}
+	return console.Section{}
+}
+
+func arSectionIDs(d console.Detail) []string {
+	var out []string
+	for _, s := range d.Sections {
+		out = append(out, s.ID)
+	}
+	return out
 }

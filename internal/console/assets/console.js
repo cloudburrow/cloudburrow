@@ -3141,7 +3141,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
     : null;
   const dataColumns = () => allDataColumns().filter((c) => !chooser || !chooser.hidden().has(c));
   const hasActions = () =>
-    data.items.some((i) => (i.actions || []).some((a) => !a.panel) || i.object) || caps.delete;
+    data.items.some((i) => (i.actions || []).some((a) => !a.panel) || i.object || i.panel) || caps.delete;
   // Declared by the provider, or inferred from the rows that happen to be
   // present. Inference alone made the column come and go as the data
   // changed, taking any sort applied to it with it.
@@ -3316,6 +3316,12 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
     const buttons = (item.actions || []).filter((a) => a.button).map((a) =>
       el("button", { type: "button", class: "secondary row-button", text: a.label,
         disabled: busy ? "disabled" : null, "aria-label": `${a.label} ${item.name}`, onclick: rowAction(a) }));
+    // A row's side panel (#2066): Google's View or View Fixed, opening
+    // the Vulnerability details panel.
+    if (item.panel) {
+      buttons.unshift(el("button", { type: "button", class: "link-button row-panel-link", text: item.panel.label,
+        "aria-label": `${item.panel.label} ${item.name}`, onclick: (e) => openSidePanel(item.panel, e.currentTarget) }));
+    }
     const actions = [
       ...(caps.editRowFirst ? edit : []),
       ...(item.actions || []).filter((a) => !a.button && !a.panel).map((a) => ({
@@ -3951,7 +3957,6 @@ async function renderDetail(view, route, resourcePath) {
     return setChildren(view, ...header,
       errorState(`${name} unavailable`, data.unavailable, () => renderDetail(view, route, segments)));
   }
-
   if ((data.trail || []).length) drawTrail(data.trail);
   // A page addressed by something no reader recognises — a Datastore
   // entity's encoded key (#875) — says what it is in its heading.
@@ -3961,10 +3966,11 @@ async function renderDetail(view, route, resourcePath) {
   // "<Kind> details".
   if (data.heading) crumb.querySelector("h1, h2").textContent = data.heading;
   // An edit form that is a page of its own (#1862), as Google's Edit opens
-  // the Edit Redis instance page and Edit job Create job's page (#2062):
-  // the resource's address with ?edit=1 draws the form instead of the
-  // resource's tabs.
-  if (data.edit && data.edit.page && new URLSearchParams(location.search).get("edit") === "1") {
+  // the Edit Redis instance page, Edit Repository (#1855) and Edit job
+  // Create job's page (#2062): the resource's address with ?edit=1 draws
+  // the form instead of the resource's tabs.
+  if (data.edit && data.edit.page && new URLSearchParams(location.search).get("edit") === "1" &&
+      view.dataset.embedded !== "true") {
     return renderEditPage(view, route, segments, data, crumb);
   }
   // Google's Edit subscription and Edit secret are pages (#1847, #1850):
@@ -4204,8 +4210,18 @@ async function renderDetail(view, route, resourcePath) {
       }
       case undefined:
       case "":
-      case "listing":
+      case "listing": {
+        // A listing's own Groups, drawn as cards over its rows (#1855):
+        // Google's Vulnerabilities tab has its Scan results summary above
+        // the table.
+        const cards = (section.groups || []).filter((g) => (g.properties || []).length).map((group) =>
+          el("div", { class: "card properties section-summary" },
+            group.heading ? el("h2", { text: group.heading }) : null,
+            group.bars ? barGraph(group)
+              : el("dl", {}, ...group.properties.flatMap((prop) => [el("dt", { text: prop.label }), propertyValue(prop)]))));
+        if (cards.length) note = el("div", {}, ...cards, note);
         return drawListingSection(panel, section, note, reload);
+      }
       default:
         // Said out loud rather than drawn as an empty table: a kind this
         // console does not know is a version skew, and guessing hides it.
@@ -4635,6 +4651,11 @@ async function renderDetail(view, route, resourcePath) {
   // button, not the header's (#1851): a key's Disable over its versions.
   const onRows = new Set(sections.flatMap((s) => ((s.listing || {}).selectActions || []).map((a) => a.id)));
   const pageActions = [
+    // Side panels beside the title (#2066): Google's Setup Instructions.
+    ...(data.panels || []).map((sp, i) => el("button", {
+      type: "button", class: "secondary", id: `side-panel-open-${i}`, text: sp.label,
+      onclick: (e) => openSidePanel(sp, e.currentTarget),
+    })),
     // A Linked action is opened from where the page links to it (#1859:
     // Upgrade beside a Spanner instance's edition), not as a button.
     ...(data.actions || []).filter((a) => !onTabs.has(a.id) && !onRows.has(a.id) && !a.linked).map((a) =>
@@ -5044,6 +5065,56 @@ function openActionPanel(route, segments, action, onDone, title, { keepFocus = f
   if (!keepFocus) (buttons[0] || primary).focus();
 }
 
+// barGraph draws a group of counts as a horizontal bar graph
+// (PropertyGroup.Bars, #2066): Google's Most common licenses. Each bar is
+// a list item naming its label and count, so it reads the same without
+// the picture; the bar's length is its count against the largest.
+function barGraph(group) {
+  const counts = group.properties.map((p) => Number(p.value) || 0);
+  const max = Math.max(1, ...counts);
+  return el("ul", { class: "bar-graph", "aria-label": group.heading || "Counts" },
+    ...group.properties.map((p, i) => el("li", { class: "bar-row" },
+      el("span", { class: "bar-label", text: p.label }),
+      el("span", { class: "bar-track", "aria-hidden": "true" },
+        el("span", { class: "bar-fill", style: `width: ${Math.max(2, Math.round(100 * counts[i] / max))}%` })),
+      el("span", { class: "bar-count", text: p.value }))));
+}
+
+// openSidePanel draws a provider's side panel (SidePanel, #2066) in the
+// info panel's place: Google's Setup Instructions and Vulnerability
+// details. It changes nothing. Escape or Close takes it away, and focus
+// goes back to what opened it.
+function openSidePanel(sp, opener) {
+  const panel = infoPanelHost();
+  if (!panel) return;
+  const close = () => {
+    closeActionPanel();
+    if (opener && opener.isConnected) opener.focus();
+  };
+  const head = el("div", { class: "info-head" },
+    el("h2", { id: "side-panel-title", text: sp.title || sp.label }),
+    el("button", { type: "button", class: "icon-button", id: "side-panel-close", "aria-label": `Close ${sp.title || sp.label}`, onclick: close,
+      html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>' }));
+  const groups = (sp.groups || []).filter((g) => (g.properties || []).length).map((g) =>
+    el("div", { class: "side-panel-group" },
+      g.heading ? el("h3", { text: g.heading }) : null,
+      el("dl", { class: "info-fields" }, ...g.properties.flatMap((pr) => [el("dt", { text: pr.label }), propertyValue(pr)]))));
+  const tables = (sp.tables || []).map((t, i) => el("div", { class: "side-panel-table table-wrap" },
+    el("table", { id: `side-panel-table-${i}` },
+      el("caption", { text: t.title }),
+      el("thead", {}, el("tr", {}, ...(t.columns || []).map((c) => el("th", { scope: "col", text: c })))),
+      el("tbody", {}, ...(t.rows || []).map((r) => el("tr", {}, ...r.map((v) => el("td", { text: v || "—" }))))))));
+  const text = sp.text ? el("div", { class: "side-panel-text" },
+    sp.copy ? el("div", { class: "text-actions" }, copyButton(sp.text, sp.copy.replace(/^Copy /i, ""))) : null,
+    el("pre", { class: "mono", tabindex: "0", "aria-label": sp.title || sp.label, text: sp.text })) : null;
+  panel.hidden = false;
+  panel.dataset.actionPanel = "side-panel";
+  document.documentElement.setAttribute("data-info", "open");
+  setChildren(panel, el("section", { class: "side-panel", id: "side-panel", "aria-labelledby": "side-panel-title" },
+    head, sp.intro ? el("p", { class: "form-help", text: sp.intro }) : null, ...groups, text, ...tables));
+  panel.querySelector("#side-panel-close").focus();
+}
+
 // closeActionPanel takes an action's form out of the info panel: the
 // panel goes back to the row the viewer keeps open, or hides.
 function closeActionPanel(fromPanel = false) {
@@ -5449,7 +5520,8 @@ function showList(section, shownHere, onChange) {
     if (section.uploadTo) writeStored(VERSIONS_KEY, select.value === SHOW_NONCURRENT);
     onChange();
   });
-  return { node: el("label", { class: "objects-show", for: id }, "Show ", select), choice };
+  // The Layer bar (#2066) is a Show list named Layer.
+  return { node: el("label", { class: "objects-show", for: id }, `${section.showLabel || "Show"} `, select), choice };
 }
 
 function objectQuery(path) {
@@ -6000,7 +6072,7 @@ function renderEditPage(view, route, segments, data, crumb) {
     }
   };
   setChildren(view, header,
-    el("form", { class: "create-page edit-page" + (spec.steps ? "" : " is-single-page"), novalidate: true, onsubmit: submit },
+    el("form", { class: "create-page edit-page" + (spec.steps ? "" : " is-single-page"), id: "edit-page-form", novalidate: true, onsubmit: submit },
       spec.note ? el("p", { class: "form-help", text: spec.note }) : null,
       error,
       ...steps.nodes,
@@ -7193,7 +7265,13 @@ function buildCreateForm(spec) {
           // location fields hold, as Google's key picker does.
           : f.browse === "kms" ? el("div", { class: "browse-row" }, control,
             el("button", { type: "button", class: "secondary", id: `browse-${f.name}`, text: "Browse",
-              onclick: () => browseKeys(control, formKMSLocation(entries)) })) : control,
+              onclick: () => browseKeys(control, formKMSLocation(entries)) }))
+          // A remote repository's upstream (#2066): a standard repository
+          // of this instance's Artifact Registry, of the form's format and
+          // in its location.
+          : f.browse === "artifact-registry" ? el("div", { class: "browse-row" }, control,
+            el("button", { type: "button", class: "secondary", id: `browse-${f.name}`, text: "Browse",
+              onclick: () => browseRepositories(control, entries) })) : control,
           templates, upload, help, error);
 
     return { field: f, control, node, error, helpId, errorId, isCheck };
@@ -17633,6 +17711,60 @@ function formKMSLocation(entries) {
   if (!entries.some((x) => x.field.name === "locationType")) return value("location") || value("region");
   const loc = value("locationType") === "region" ? value("region") : value("multiRegion");
   return ({ nam5: "us", eur3: "europe" })[loc] || loc;
+}
+
+// browseRepositories is a remote repository's upstream Browse (#2066):
+// the project's standard repositories of the form's format in the form's
+// location, from this instance's Artifact Registry, one of which fills
+// the field with its resource name.
+async function browseRepositories(control, entries) {
+  const entry = (name) => entries.find((x) => x.field.name === name);
+  const value = (name) => { const e = entry(name); return e ? e.control.value : ""; };
+  const checked = (name) => {
+    const e = entries.filter((x) => x.field.name === name);
+    const on = e.find((x) => x.control.checked);
+    return on ? on.control.value : value(name);
+  };
+  const fmt = checked("format");
+  const fe = entry("format");
+  const formatWord = (fe && (fe.field.optionLabels || {})[fmt]) || fmt;
+  const multi = /multi/i.test(checked("locationType"));
+  const location = multi ? value("multiRegion") : value("location");
+  const { dialog, close } = openModal({ labelledBy: "browse-title" });
+  const body = el("div", { class: "browse-list" }, loadingState(3, { what: "repositories" }));
+  dialog.append(el("div", { class: "modal-body" },
+    el("h2", { id: "browse-title", text: "Select a repository" }),
+    el("p", { class: "form-help", text: `Standard ${formatWord} repositories in ${location}: a remote repository's upstream has its format and location.` }),
+    body,
+    el("div", { class: "modal-actions" },
+      el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }))));
+  const project = currentProject();
+  try {
+    const list = await api(`/api/resources/artifact-registry?project=${encodeURIComponent(project)}`);
+    if (list.unavailable || list.prompt) return setChildren(body, el("p", { class: "form-error", text: list.unavailable || list.prompt }));
+    const repos = (list.items || []).filter((r) => {
+      const f = r.fields || {};
+      return f.Location === location && f.Mode === "Standard" && f.Format.toLowerCase() === String(formatWord).toLowerCase();
+    });
+    if (!repos.length) {
+      return setChildren(body, el("p", { class: "unavailable",
+        text: `This project has no standard ${formatWord} repository in ${location}. Create one first.` }));
+    }
+    setChildren(body, el("ul", { class: "fs-rows", role: "list" }, ...repos.map((r) => {
+      const name = `projects/${project}/locations/${location}/repositories/${r.name}`;
+      return el("li", { class: "fs-row" },
+        el("button", { type: "button", class: "fs-row-link", text: r.name, title: name, onclick: () => {
+          control.value = name;
+          control.dispatchEvent(new Event("input", { bubbles: true }));
+          control.dispatchEvent(new Event("change", { bubbles: true }));
+          close();
+          control.focus();
+        } }));
+    })));
+    body.querySelector("button").focus();
+  } catch (err) {
+    setChildren(body, el("p", { class: "form-error", text: `Artifact Registry cannot be read: ${err.message}` }));
+  }
 }
 
 // browseKeys is a Cloud KMS key field's Browse (#1881): the project's

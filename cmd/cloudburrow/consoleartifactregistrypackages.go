@@ -71,8 +71,9 @@ func (p artifactRegistryProvider) packageRepoDetail(ctx context.Context, r *arpb
 		if l, label, ok := formatListing(ctx, r); ok {
 			sections = append(sections, console.Section{ID: "artifacts", Label: label, Listing: l})
 		}
-		sections = append(sections, console.Section{ID: "setup", Label: "Setup instructions", Kind: console.KindText, Text: p.setupInstructions(r)})
 		return console.Detail{
+			Panels:   []console.SidePanel{p.setupPanel(r)},
+			Edit:     editRepositoryForm(r),
 			Summary:  append(p.repositorySummary(ctx, r, mode), console.Property{Label: "Use", Value: packageUse(r)}),
 			Sections: sections,
 		}, nil

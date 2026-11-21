@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -23,7 +24,23 @@ type Result struct {
 	} `json:"results"`
 	ImageMetadata struct {
 		OS string `json:"os"`
+		// LayerMetadata are the image's layers, bottom first, as an
+		// image scan reports them: each package's ImageOriginDetails
+		// index is one of them (#2066).
+		LayerMetadata []Layer `json:"layer_metadata"`
+		// BaseImages are the base images each BaseImageIndex names.
+		BaseImages [][]struct {
+			Name string `json:"name"`
+		} `json:"base_images"`
 	} `json:"image_metadata"`
+}
+
+// Layer is one layer of a scanned image.
+type Layer struct {
+	DiffID         string `json:"diff_id"`
+	Command        string `json:"command"`
+	IsEmpty        bool   `json:"is_empty"`
+	BaseImageIndex int    `json:"base_image_index"`
 }
 
 // Package is one package OSV-Scanner found, with its vulnerabilities.
@@ -34,7 +51,16 @@ type Package struct {
 		Version       string `json:"version"`
 		Ecosystem     string `json:"ecosystem"`
 		PURL          string `json:"purl"`
+		// ImageOriginDetails names the layer the package came from, in
+		// an image scan.
+		ImageOriginDetails *struct {
+			Index int `json:"index"`
+		} `json:"image_origin_details"`
 	} `json:"package"`
+	// Licenses are the package's licenses, as SPDX expressions, which
+	// --licenses reports from the package's own metadata (an OS
+	// package database records them) (#2066).
+	Licenses        []string        `json:"licenses"`
 	Vulnerabilities []Vulnerability `json:"vulnerabilities"`
 	Groups          []struct {
 		IDs         []string `json:"ids"`
@@ -106,7 +132,7 @@ func Scan(ctx context.Context, d Dir, archive string) (*Result, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, d.BinaryPath(), "scan", "image", "--archive", "--offline",
-		"--all-packages", "--format", "json", "--output-file", out, archive)
+		"--all-packages", "--licenses", "--format", "json", "--output-file", out, archive)
 	cmd.Dir = work
 	cmd.Env = []string{
 		"HOME=" + work, "TMPDIR=" + work, "PATH=/usr/bin:/bin",
@@ -139,6 +165,11 @@ func Scan(ctx context.Context, d Dir, archive string) (*Result, error) {
 	r := &Result{}
 	if err := json.Unmarshal(b, r); err != nil {
 		return nil, fmt.Errorf("osv-scanner result: %w", err)
+	}
+	// Offline, the scanner reads no language package's license (it asks
+	// deps.dev for those): they are read from the image itself (#2072).
+	if err := AddLocalLicenses(r, archive); err != nil {
+		slog.Warn("Artifact Analysis could not read the image's package licenses", "err", err)
 	}
 	return r, nil
 }

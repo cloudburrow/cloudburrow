@@ -1,6 +1,7 @@
 package console
 
 import (
+	"encoding/json"
 	"io/fs"
 	"os"
 	"regexp"
@@ -2759,13 +2760,74 @@ func TestAnEditFormWithPageIsAPage(t *testing.T) {
 		`url.searchParams.set("edit", "1");`,
 		`data.edit && data.edit.page && new URLSearchParams(location.search).get("edit") === "1"`,
 		"return renderEditPage(view, route, segments, data, crumb);",
-		`el("form", { class: "create-page edit-page" + (spec.steps ? "" : " is-single-page"), novalidate: true, onsubmit: submit }`,
+		`el("form", { class: "create-page edit-page" + (spec.steps ? "" : " is-single-page"), id: "edit-page-form", novalidate: true, onsubmit: submit }`,
 		`const returnTo = createReturn(new URLSearchParams(location.search).get("return"));`,
 		`"PATCH", { Path: segments, Values: fields.values() });`,
 		`el("div", { class: "form-actions" }, primary, cancel)`,
 	} {
 		if !strings.Contains(js, want) {
 			t.Errorf("console.js is missing %q", want)
+		}
+	}
+}
+
+// An EditForm with Page set is drawn at the resource's own address with
+// ?edit=1, opened by the Edit button and a row's Edit item, as Google's
+// Edit Repository is a page ending in Update (#1855); and a listing
+// section's Groups are drawn as cards over its rows, as Google's
+// Vulnerabilities tab has Scan results above its table.
+func TestAnEditFormCanBeAPageAndAListingHasGroupsOverItsRows(t *testing.T) {
+	b, err := json.Marshal(EditForm{Label: "Edit Repository", Page: true})
+	if err != nil || !strings.Contains(string(b), `"page":true`) {
+		t.Errorf("EditForm.Page marshals as %s, %v", b, err)
+	}
+	js := consoleAsset(t, "console.js")
+	for _, want := range []string{
+		"if (data.edit && data.edit.page) {",
+		`id: "detail-edit", href: editHref.pathname + editHref.search,`,
+		`editHref.searchParams.set("edit", "1");`,
+		`new URLSearchParams(location.search).get("edit") === "1" &&
+      view.dataset.embedded !== "true"`,
+		"return renderEditPage(view, route, segments, data, crumb);",
+		"if (data.edit.page) return openEditPage(route, segments);",
+		`id: "edit-page-form", novalidate: true, onsubmit: submit },`,
+		"navigate(here);",
+		"const cards = (section.groups || []).filter((g) => (g.properties || []).length).map((group) =>",
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("console.js is missing %q", want)
+		}
+	}
+}
+
+// TestSidePanelsLayerBarBarsAndRepositoryBrowse covers #2066: a page's
+// and a row's side panels (Setup Instructions, Vulnerability details)
+// close back to what opened them; the Layer bar is a Show list named
+// Layer; a group of counts is a bar graph that reads as text; a remote
+// repository's upstream has a Browse.
+func TestSidePanelsLayerBarBarsAndRepositoryBrowse(t *testing.T) {
+	js := consoleAsset(t, "console.js")
+	for _, want := range []string{
+		"function openSidePanel(sp, opener)", "if (opener && opener.isConnected) opener.focus();",
+		`...(data.panels || []).map((sp, i) => el("button", {`, "if (item.panel) {",
+		"i.object || i.panel) || caps.delete;", `el("caption", { text: t.title })`,
+		"`${section.showLabel || \"Show\"} `", "group.bars ? barGraph(group)", `el("span", { class: "bar-count", text: p.value })`,
+		`f.browse === "artifact-registry"`, "async function browseRepositories(control, entries)",
+		`f.Mode === "Standard"`,
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("console.js lacks %s", want)
+		}
+	}
+	b, err := json.Marshal(Detail{Panels: []SidePanel{{Label: "Setup Instructions", Text: "x"}},
+		Sections: []Section{{ShowLabel: "Layer", Groups: []PropertyGroup{{Bars: true}},
+			Listing: Listing{Items: []Resource{{Name: "CVE-1", Panel: &SidePanel{Label: "View", Tables: []PanelTable{{Title: "File location(s)"}}}}}}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"panels":[{"label":"Setup Instructions"`, `"showLabel":"Layer"`, `"bars":true`, `"panel":{"label":"View"`, `"tables":[{"title":"File location(s)"`} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("the detail's JSON %s lacks %s", b, want)
 		}
 	}
 }
