@@ -7072,14 +7072,16 @@ function buildCreateForm(spec) {
           // option as Google's console does (#1852, #1860).
           ...(f.options || []).map((o) => el("option", { value: o, text: (f.optionLabels || {})[o] || o || "None" })))
       : el("input", {
-          id, name: f.name, type: f.type || "text", required: f.required,
+          // A zoned date and time (#1850) is the browser's datetime-local
+          // picker; plain datetime-local fields stay UTC wall-clock times.
+          id, name: f.name, type: f.type === "datetime-zoned" ? "datetime-local" : (f.type || "text"), required: f.required,
           // `pattern` is only enforced on the text-like inputs. Attaching one
           // elsewhere would be a constraint nothing applies.
           pattern: isCheck || isArea ? null : (f.pattern || null),
         });
     if (isCheck) control.checked = f.default === "true" && !f.unavailable;
     else if (isSelect) control.value = f.default || (f.options || [])[0] || "";
-    else if (f.type === "datetime-local") control.value = localDateTime(f.default);
+    else if (f.type === "datetime-zoned") control.value = localDateTime(f.default);
     else control.value = f.default || "";
     if (helpId) control.setAttribute("aria-describedby", helpId);
     // Ctrl+Space offers the field's completions at the cursor, as Google's
@@ -7477,7 +7479,7 @@ function buildCreateForm(spec) {
     if (entry.isCheck) return entry.field.default === "true";
     if (entry.field.type === "select") return entry.field.default || (entry.field.options || [])[0] || "";
     if (entry.field.type === "map") return mapToLines(entry.field.default);
-    if (entry.field.type === "datetime-local") return localDateTime(entry.field.default);
+    if (entry.field.type === "datetime-zoned") return localDateTime(entry.field.default);
     return entry.field.default || "";
   };
   const valueOf = (entry) => (entry.isCheck ? entry.control.checked : entry.control.value);
@@ -7531,7 +7533,7 @@ function buildCreateForm(spec) {
         .map((e) => {
           if (e.isCheck) return [e.field.name, String(e.control.checked)];
           if (e.field.type === "map") return [e.field.name, linesToMap(e.control.value)];
-          if (e.field.type === "datetime-local") return [e.field.name, instantOf(e.control.value)];
+          if (e.field.type === "datetime-zoned") return [e.field.name, instantOf(e.control.value)];
           return [e.field.name, e.control.value];
         })]);
     },
@@ -7539,7 +7541,8 @@ function buildCreateForm(spec) {
 }
 
 // localDateTime is an RFC 3339 time as a datetime-local control's value,
-// in the browser's time zone (console.DateTimeFieldType, #1850); "" for
+// in the browser's time zone (console.DateTimeFieldType, "datetime-zoned",
+// #1850); "" for
 // none or a value that is not a time.
 function localDateTime(rfc3339) {
   if (!rfc3339) return "";

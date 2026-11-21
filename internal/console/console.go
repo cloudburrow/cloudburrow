@@ -971,8 +971,10 @@ type EditForm struct {
 // DateTimeFieldType is a Field.Type drawn as the browser's date and time
 // picker (input type=datetime-local), as Google's Starting on is (#1850).
 // Its Default is an RFC 3339 time, shown in the browser's time zone, and
-// the value sent is the RFC 3339 instant chosen, in UTC.
-const DateTimeFieldType = "datetime-local"
+// the value sent is the RFC 3339 instant chosen, in UTC. A plain
+// "datetime-local" field (Firestore's Clone from, Backup and DR's lock
+// date) is a UTC wall-clock time sent as typed.
+const DateTimeFieldType = "datetime-zoned"
 
 // EditLayoutPage is EditForm.Layout for an edit drawn as its own page.
 const EditLayoutPage = "page"
