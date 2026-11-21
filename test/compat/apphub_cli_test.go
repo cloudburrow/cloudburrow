@@ -27,7 +27,7 @@ func TestGcloudAppHub(t *testing.T) {
 	g := newGcloudSession(t, h)
 	detachAppHubProject(t, h, c, g.project)
 	suffix := time.Now().UnixNano() % 1e6
-	svcName, _ := deployAppHubResources(t, h, fmt.Sprintf("gc-ah-%d", suffix))
+	svcName, _ := deployAppHubResources(t, h, g.project, fmt.Sprintf("gc-ah-%d", suffix))
 	run := func(a ...string) string {
 		t.Helper()
 		out, err := g.run(nil, append(append([]string{"apphub"}, a...), "--project", g.project, "--quiet")...)
@@ -37,14 +37,17 @@ func TestGcloudAppHub(t *testing.T) {
 		return out
 	}
 	run("service-projects", "add", g.project, "--location", "global")
-	if out := run("service-projects", "lookup", "--location", "global", "--format", "value(serviceProjectAttachment.name)"); !strings.Contains(out, "/serviceProjectAttachments/"+g.project) {
+	// lookup takes no --location: it looks the --project up, in global.
+	if out := run("service-projects", "lookup", "--format", "value(serviceProjectAttachment.name)"); !strings.Contains(out, "/serviceProjectAttachments/"+g.project) {
 		t.Errorf("gcloud apphub service-projects lookup: %s", out)
 	}
 	disc := strings.TrimSpace(run("discovered-services", "lookup", "--location", "us-central1", "--uri", "//run.googleapis.com/"+svcName, "--format", "value(discoveredService.name)"))
 	if !strings.Contains(disc, "/discoveredServices/") {
 		t.Fatalf("gcloud apphub discovered-services lookup: %q", disc)
 	}
-	if out := run("discovered-services", "list", "--location", "us-central1", "--format", "value(name)"); !strings.Contains(out, disc) {
+	// A list's default format scopes name to its ID (name.scope(...)), and
+	// value(name) inherits that transform.
+	if out := run("discovered-services", "list", "--location", "us-central1", "--format", "value(name)"); !strings.Contains(out, disc[strings.LastIndex(disc, "/")+1:]) {
 		t.Errorf("gcloud apphub discovered-services list: %s", out)
 	}
 	app := fmt.Sprintf("gc-app-%d", suffix)
@@ -56,7 +59,7 @@ func TestGcloudAppHub(t *testing.T) {
 		t.Fatalf("the application gcloud created: %v, %v", a, err)
 	}
 	run("applications", "services", "create", "hello", "--application", app, "--location", "global", "--discovered-service", disc)
-	if out := run("applications", "services", "list", "--application", app, "--location", "global", "--format", "value(name)"); !strings.Contains(out, name+"/services/hello") {
+	if out := run("applications", "services", "list", "--application", app, "--location", "global", "--format", "value(name)"); !strings.Contains(out, "hello") {
 		t.Errorf("gcloud apphub applications services list: %s", out)
 	}
 	if out := run("applications", "describe", app, "--location", "global", "--format", "value(scope.type)"); !strings.Contains(out, "GLOBAL") {
@@ -83,7 +86,7 @@ func TestTerraformAppHub(t *testing.T) {
 	m := newTFModule(t)
 	detachAppHubProject(t, h, c, m.project)
 	suffix := time.Now().UnixNano() % 1e6
-	svcName, _ := deployAppHubResources(t, h, fmt.Sprintf("tf-ah-%d", suffix))
+	svcName, _ := deployAppHubResources(t, h, m.project, fmt.Sprintf("tf-ah-%d", suffix))
 	app := fmt.Sprintf("tf-app-%d", suffix)
 	conf := func(env string) string {
 		return fmt.Sprintf(`

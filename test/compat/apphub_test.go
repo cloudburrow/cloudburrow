@@ -46,18 +46,21 @@ func appHubClients(t *testing.T, h *Harness) map[string]*apphub.Client {
 	return map[string]*apphub.Client{"grpc": g, "rest": r}
 }
 
-// deployAppHubService deploys a Cloud Run service and a Cloud Run job in
-// the harness project's us-central1, for App Hub to discover.
-func deployAppHubResources(t *testing.T, h *Harness, id string) (service, job string) {
+// deployAppHubResources deploys a Cloud Run service and a Cloud Run job in
+// project's us-central1, for App Hub to discover: the project the tool
+// under test attaches (gcloud's and Terraform's are the instance's, not
+// the harness's).
+func deployAppHubResources(t *testing.T, h *Harness, project, id string) (service, job string) {
 	t.Helper()
+	parent := "projects/" + project + "/locations/us-central1"
 	ctx := runWait(t)
 	rc := runClient(t, h)
-	op, err := rc.CreateService(ctx, &runpb.CreateServiceRequest{Parent: runParent(h), ServiceId: id,
+	op, err := rc.CreateService(ctx, &runpb.CreateServiceRequest{Parent: parent, ServiceId: id,
 		Service: &runpb.Service{Template: &runpb.RevisionTemplate{Containers: []*runpb.Container{{Image: "ghcr.io/knative/helloworld-go:latest"}}}}})
 	if err != nil {
 		t.Fatalf("CreateService: %v", err)
 	}
-	service = runParent(h) + "/services/" + id
+	service = parent + "/services/" + id
 	t.Cleanup(func() { _, _ = rc.DeleteService(h.Context(), &runpb.DeleteServiceRequest{Name: service}) })
 	if _, err := waitLRO(ctx, op); err != nil {
 		t.Fatalf("waiting for the Cloud Run service: %v", err)
@@ -67,11 +70,11 @@ func deployAppHubResources(t *testing.T, h *Harness, id string) (service, job st
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = jc.Close() })
-	jop, err := jc.CreateJob(ctx, &runpb.CreateJobRequest{Parent: runParent(h), JobId: id + "-job", Job: shellJob("echo hi", 1, nil)})
+	jop, err := jc.CreateJob(ctx, &runpb.CreateJobRequest{Parent: parent, JobId: id + "-job", Job: shellJob("echo hi", 1, nil)})
 	if err != nil {
 		t.Fatalf("CreateJob: %v", err)
 	}
-	job = runParent(h) + "/jobs/" + id + "-job"
+	job = parent + "/jobs/" + id + "-job"
 	t.Cleanup(func() { _, _ = jc.DeleteJob(h.Context(), &runpb.DeleteJobRequest{Name: job}) })
 	if _, err := waitLRO(ctx, jop); err != nil {
 		t.Fatalf("waiting for CreateJob: %v", err)
@@ -99,7 +102,7 @@ func TestAppHubLifecycle(t *testing.T) {
 	ctx := h.Context()
 	project := h.Project()
 	suffix := time.Now().UnixNano() % 1e6
-	svcName, jobName := deployAppHubResources(t, h, fmt.Sprintf("ah-hello-%d", suffix))
+	svcName, jobName := deployAppHubResources(t, h, h.Project(), fmt.Sprintf("ah-hello-%d", suffix))
 	svcURI, jobURI := "//run.googleapis.com/"+svcName, "//run.googleapis.com/"+jobName
 	global := "projects/" + project + "/locations/global"
 	region := "projects/" + project + "/locations/us-central1"
