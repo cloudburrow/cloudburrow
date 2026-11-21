@@ -199,12 +199,14 @@ var SecretManager = &Service{
 // read 2026-11-19). Google words a denial "Permission 'P' denied on
 // resource 'R' (or it may not exist).", with ErrorInfo
 // IAM_PERMISSION_DENIED. A key's policy and its key ring's both apply to
-// the key and its versions, an import job's and its key ring's to the job.
+// the key and its versions, an import job's and its key ring's to the job,
+// and an EKM connection's own policy to it (#2112).
 var KMS = &Service{
 	Name:              "cloudkms.googleapis.com",
-	PolicyCollections: []string{"keyRings", "cryptoKeys", "importJobs"},
+	PolicyCollections: []string{"keyRings", "cryptoKeys", "importJobs", "ekmConnections"},
 	Types: map[string]string{"keyRings": "cloudkms.googleapis.com/KeyRing", "cryptoKeys": "cloudkms.googleapis.com/CryptoKey",
-		"cryptoKeyVersions": "cloudkms.googleapis.com/CryptoKeyVersion", "importJobs": "cloudkms.googleapis.com/ImportJob"},
+		"cryptoKeyVersions": "cloudkms.googleapis.com/CryptoKeyVersion", "importJobs": "cloudkms.googleapis.com/ImportJob",
+		"ekmConnections": "cloudkms.googleapis.com/EkmConnection"},
 	Methods: kmsMethods(),
 	Deny: func(permission, resource string) error {
 		return grpcDenied(fmt.Sprintf("Permission '%s' denied on resource '%s' (or it may not exist).", permission, resource),

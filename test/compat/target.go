@@ -226,6 +226,9 @@ var gcloudOverrides = []struct {
 	// Cloud Identity groups (#1812), on the Resource Manager port.
 	{"cloudidentity", []string{"RESOURCEMANAGER"}},
 	{"policytroubleshooter", []string{"RESOURCEMANAGER"}},
+	// Cloud Asset Inventory's IAM policy analysis (#2112), on the Resource
+	// Manager port.
+	{"cloudasset", []string{"RESOURCEMANAGER"}},
 	// The Organization Policy API v2 (#1890), on the Resource Manager port.
 	{"orgpolicy", []string{"RESOURCEMANAGER"}},
 	// The Cloud Quotas API (#2030), on the Resource Manager port.

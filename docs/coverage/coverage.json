@@ -94,7 +94,7 @@
           "test/compat/consoleappengine1447_test.go:28 TestConsoleTasksEditQueueAppEngineRouting",
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
           "test/compat/iamenforcement1879_test.go:282 TestIAMEnforcementTasks",
-          "test/compat/iamenforcement1879_test.go:499 TestIAMEnforcementJSON",
+          "test/compat/iamenforcement1879_test.go:501 TestIAMEnforcementJSON",
           "test/compat/tasks_test.go:65 TestTasksQueueLifecycle",
           "test/compat/taskshttptarget_test.go:33 TestTasksQueueHTTPTarget",
           "test/compat/taskslogging_test.go:35 TestTasksStackdriverLoggingConfig",
@@ -218,7 +218,7 @@
           "test/compat/iamdenypolicies1886_test.go:50 TestIAMEnforcementDenyPolicies",
           "test/compat/iamenforcement1879_test.go:119 TestIAMEnforcementSecretManager",
           "test/compat/iamenforcement1879_test.go:342 TestIAMEnforcementInherited",
-          "test/compat/iamenforcement1879_test.go:499 TestIAMEnforcementJSON",
+          "test/compat/iamenforcement1879_test.go:501 TestIAMEnforcementJSON",
           "test/compat/resterrorstatus_test.go:94 TestGcloudSecretManagerErrorStatus",
           "test/compat/secretaliases_test.go:22 TestSecretManagerVersionAliases",
           "test/compat/secretcmek_test.go:246 TestTerraformSecretCMEK",
@@ -445,7 +445,7 @@
         "tests": [
           "test/compat/consolepermissions_test.go:237 TestConsolePermissionsOnASecret",
           "test/compat/iamenforcement1879_test.go:119 TestIAMEnforcementSecretManager",
-          "test/compat/iamenforcement1879_test.go:618 TestIAMEnforcementJSONTestIamPermissions",
+          "test/compat/iamenforcement1879_test.go:620 TestIAMEnforcementJSONTestIamPermissions",
           "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
           "test/compat/secretsiam_test.go:22 TestSecretIamPolicyIsStoredNotEnforced"
         ]
@@ -3958,7 +3958,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/iamenforcement1879_test.go:224 TestIAMEnforcementKMS",
-          "test/compat/iamenforcement1879_test.go:499 TestIAMEnforcementJSON",
+          "test/compat/iamenforcement1879_test.go:501 TestIAMEnforcementJSON",
           "test/compat/kms1577_test.go:34 TestKMSDefaultKeyAccessJustificationsPolicies",
           "test/compat/kms_external_test.go:39 TestKMSExternalKeys",
           "test/compat/kms_hsm_ekm_autokey_test.go:54 TestKMSHSMKeysAndKeyAccessJustifications",
@@ -14842,9 +14842,9 @@
     "Key": "compute",
     "Title": "Compute Engine API (v1): VPC networking",
     "counts": {
-      "Implemented": 20,
-      "Unimplemented": 74,
-      "Verified": 72
+      "Implemented": 29,
+      "Unimplemented": 62,
+      "Verified": 75
     },
     "rows": [
       {
@@ -14954,8 +14954,8 @@
       },
       {
         "method": "compute.disks.getIamPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.disks.insert",
@@ -14985,8 +14985,8 @@
       },
       {
         "method": "compute.disks.setIamPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.disks.setLabels",
@@ -15010,8 +15010,8 @@
       },
       {
         "method": "compute.disks.testIamPermissions",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.disks.update",
@@ -15278,8 +15278,8 @@
       },
       {
         "method": "compute.instances.getIamPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.instances.getScreenshot",
@@ -15345,8 +15345,8 @@
       },
       {
         "method": "compute.instances.setIamPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.instances.setLabels",
@@ -15435,8 +15435,8 @@
       },
       {
         "method": "compute.instances.testIamPermissions",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.instances.update",
@@ -15709,8 +15709,8 @@
       },
       {
         "method": "compute.snapshots.getIamPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.snapshots.insert",
@@ -15726,8 +15726,8 @@
       },
       {
         "method": "compute.snapshots.setIamPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.snapshots.setLabels",
@@ -15736,8 +15736,8 @@
       },
       {
         "method": "compute.snapshots.testIamPermissions",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.subnetworks.aggregatedList",
@@ -15772,8 +15772,10 @@
       },
       {
         "method": "compute.subnetworks.getIamPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudasset2112_everytype_test.go:39 TestCloudAssetAnalyzeIamPolicyEveryAssetType"
+        ]
       },
       {
         "method": "compute.subnetworks.insert",
@@ -15806,8 +15808,10 @@
       },
       {
         "method": "compute.subnetworks.setIamPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudasset2112_everytype_test.go:39 TestCloudAssetAnalyzeIamPolicyEveryAssetType"
+        ]
       },
       {
         "method": "compute.subnetworks.setPrivateIpGoogleAccess",
@@ -15819,8 +15823,10 @@
       },
       {
         "method": "compute.subnetworks.testIamPermissions",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudasset2112_everytype_test.go:39 TestCloudAssetAnalyzeIamPolicyEveryAssetType"
+        ]
       },
       {
         "method": "compute.zoneOperations.delete",

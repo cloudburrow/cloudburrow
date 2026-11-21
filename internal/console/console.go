@@ -270,6 +270,11 @@ type Listing struct {
 	// row it checks, as Google's Spanner Instances list does: "Select the
 	// checkbox for the instance. The Info panel appears" (#1859).
 	InfoOnSelect bool `json:"infoOnSelect,omitempty"`
+	// PermissionsButton gives each row a checkbox and the list a
+	// Permissions button that opens the info panel's Permissions tab on the
+	// checked rows, as Google's VM instances list does: "For a VM instance,
+	// click Permissions" (#2125). The rows carry that tab in their Info.
+	PermissionsButton bool `json:"permissionsButton,omitempty"`
 	// Actions are the list screen's own actions, on no existing resource,
 	// drawn beside Create (ListActor, #1289). The server sets them.
 	Actions []Action `json:"actions,omitempty"`

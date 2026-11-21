@@ -190,13 +190,17 @@ COMPAT_SHARDS="storage served run crossservice scale emulators memorystore sql s
 # KMS Inventory's protected resources (#2053: a CMEK bucket and a BigQuery
 # dataset beside the key, through the client and gcloud), and Firestore's
 # and Cloud Tasks' metrics in Cloud Monitoring (#2050, Firestore or Cloud
-# Tasks with Monitoring), which no other shard serves together. And Cloud
-# Run's own tests (TestRun*) with gcloud's and Terraform's of Cloud Run and
-# Cloud Functions (about 1,430 s): main run 44905534820 cancelled the run
+# Tasks with Monitoring), and Cloud Asset's analyzeIamPolicyLongrunning to
+# BigQuery (#2112, Resource Manager with BigQuery), and its analysis of
+# Pub/Sub topics and Cloud Run services under a scope (#2112, Resource
+# Manager with Pub/Sub and Cloud Run), which no other shard serves together.
+# And Cloud Run's own tests (TestRun*) with gcloud's and Terraform's of
+# Cloud Run and Cloud Functions (about 1,430 s): main run 44905534820 cancelled the run
 # shard at its 90m, its suite at 4,021 s (3,157 s in 44858607986) and its
 # browser step at 22 minutes of its 30m once #2123 moved Cloud Build's and
 # the Logging console rounds' browser tests there; crossservice was 29m.
 COMPAT_CROSSSERVICE_TEST_NAMES="ArtifactRegistryCleanupPolicies
+  CloudAssetAnalyzeIamPolicyLongrunningBigQuery CloudAssetAnalyzeIamPolicyServiceResources
   FirestoreDocumentMetrics FirestoreStreamMetrics GcloudKMSInventory
   KMSInventoryCountsCMEKResources TasksQueueMetricsInCloudMonitoring
   GcloudPubSubTopicStoragePolicyUpdate GcloudStorageInsightsDatasetConfigs
@@ -515,7 +519,11 @@ compat_shard() {
       # Federation's (#2056), its SAML exchange read through Cloud Storage
       # and its pools' own IAM policies (#2065), and SCIM-provisioned users and
       # groups read through Cloud Storage (#2068), which need enforcement.
-      COMPAT_RUN='^Test(IAMEnforcement|WorkloadIdentityFederationStorage$|WorkforceIdentityFederationStorage$|WorkforceIdentityFederationSAML$|WorkforcePoolIAMPolicy$|WorkforceScimProvisioning$)' ;;
+      # And Cloud Asset's analysis of every asset type with an allow policy
+      # (#2112): BigQuery, Spanner, Bigtable, Cloud KMS, Compute Engine and
+      # Resource Manager's tags on one instance, which only this shard serves
+      # together.
+      COMPAT_RUN='^Test(IAMEnforcement|WorkloadIdentityFederationStorage$|WorkforceIdentityFederationStorage$|WorkforceIdentityFederationSAML$|WorkforcePoolIAMPolicy$|WorkforceScimProvisioning$|CloudAssetAnalyzeIamPolicyEveryAssetType$)' ;;
     spark)
       # BigQuery's stored procedures for Apache Spark (#2104), nightly only
       # (nightly-sql-ephemeral.yml's spark job), not one of ci.yml's

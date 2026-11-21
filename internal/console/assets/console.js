@@ -3245,10 +3245,14 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   // Google's Spanner Instances list, "Select the checkbox for the instance.
   // The Info panel appears".
   const infoOnSelect = Boolean(opts.rowControls && data.infoOnSelect);
-  if (infoOnSelect) {
+  // Or a Permissions button over the checked rows (#2125): Google's VM
+  // instances list, "Select the checkbox next to each resource ... For a
+  // VM instance, click Permissions".
+  const permissionsButton = Boolean(opts.rowControls && data.permissionsButton);
+  if (infoOnSelect || permissionsButton) {
     INFO_SELECTION = () => [...selected].map((n) => data.items.find((i) => i.name === n)).filter(Boolean);
   }
-  const selectable = Boolean(opts.rowControls && caps.delete) || selectActions.length > 0 || infoOnSelect;
+  const selectable = Boolean(opts.rowControls && caps.delete) || selectActions.length > 0 || infoOnSelect || permissionsButton;
   // Or a list screen's rows marked selectable: History's builds awaiting
   // approval, which its Approve takes (#1854). A top-level list's own
   // selection actions take any of its rows (#1864).
@@ -3372,6 +3376,18 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
       runAction(route, opts.pagePath || [], { ...a, fields }, () => reload(), NO_ROW, what);
     },
   }));
+  if (permissionsButton) {
+    selectionButtons.push(el("button", {
+      class: "secondary", id: "list-permissions", text: "Permissions", disabled: "disabled",
+      onclick: () => {
+        const first = data.items.find((i) => selected.has(i.name));
+        if (!first) return;
+        INFO_TAB = "permissions";
+        inspected = first.name;
+        openInfoPanelOn(first, dataColumns(), route, refresh);
+      },
+    }));
+  }
 
   const visibleRows = () => {
     let rows = data.items.filter((i) => matches(i));
@@ -3975,7 +3991,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
               // (#1854); Delete only where the rows can be deleted.
               ...selectionButtons,
               caps.delete ? bulk : null,
-              caps.delete || selectActions.length ? selectionLabel : null)
+              caps.delete || selectActions.length || permissionsButton ? selectionLabel : null)
           : null)
       : el("div", { class: "action-bar" }, ...selectionButtons,
           selectActions.length ? selectionLabel : null, refreshControl),
@@ -23285,55 +23301,208 @@ function renderIAMTroubleshooter(view) {
   if (asked.get("principal") && asked.get("resource") && asked.get("permission")) submit(new Event("submit"));
 }
 
-// renderIAMAnalyzer is Policy Analyzer (#1879): who has what in the
-// project's policies and its ancestors', by principal, permission or role.
+// analyzerFormModal is Policy Analyzer's Save query and Export dialogs: a
+// form, and onSubmit's error shown in it.
+function analyzerFormModal({ title, submitLabel, fields: specs, onSubmit }) {
+  const fields = buildCreateForm({ label: title, fields: specs });
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  let submitting = false;
+  const { dialog, close } = openModal({ labelledBy: "analyzer-modal-title", canClose: () => !submitting });
+  const primary = el("button", { type: "submit", class: "primary", text: submitLabel });
+  const cancel = el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() });
+  const submit = async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    if (submitting || !fields.validate()) return;
+    submitting = true;
+    primary.disabled = true;
+    try {
+      await onSubmit(fields.values());
+      submitting = false;
+      close();
+      return;
+    } catch (err) {
+      error.textContent = err.message;
+      error.hidden = false;
+    }
+    submitting = false;
+    primary.disabled = false;
+  };
+  dialog.append(el("form", { class: "modal-body", novalidate: true, onsubmit: submit },
+    el("h2", { id: "analyzer-modal-title", text: title }), error, ...fields.nodes,
+    el("div", { class: "modal-actions" }, cancel, primary)));
+  fields.focusFirst();
+}
+
+// renderIAMAnalyzer is Policy Analyzer (#1879, #2112), in Google's
+// layout: the Analyze policies tab's custom query (a scope; a principal,
+// resource, role or permission; the Advanced options: list resources
+// within, list users inside groups, list permissions inside roles,
+// service account impersonation, an access time and the relationship
+// edges), then Run query, Save query and Export (analyzeIamPolicyLongrunning
+// to Cloud Storage or BigQuery); and the Saved queries tab.
 function renderIAMAnalyzer(view) {
   const project = currentProject();
   const note = el("div", { id: "iam-enforcement-note" });
-  const fields = buildCreateForm({ label: "Analyze", fields: [
+  const fields = buildCreateForm({ label: "Custom query", fields: [
     { name: "scope", label: "Scope", default: project ? `projects/${project}` : "", required: true,
-      help: "projects/PROJECT_ID, folders/NUMBER or organizations/NUMBER." },
-    { name: "identity", label: "Principal", help: "Such as serviceAccount:worker@my-project.iam.gserviceaccount.com, user:… or group:…" },
-    { name: "permissions", label: "Permissions", help: "Comma-separated, such as secretmanager.versions.access." },
+      help: "projects/PROJECT_ID, folders/NUMBER or organizations/NUMBER: only the policies of the scope and its descendants are analyzed." },
+    { name: "identity", label: "Principal", help: "Such as user:ann@example.com, group:admins@example.com or serviceAccount:worker@my-project.iam.gserviceaccount.com." },
+    { name: "resource", label: "Resource", help: "A full resource name, such as //cloudresourcemanager.googleapis.com/projects/my-project." },
     { name: "roles", label: "Roles", help: "Comma-separated, such as roles/secretmanager.secretAccessor." },
-    { name: "resource", label: "Resource", help: "A full resource name, to include its own policies." },
+    { name: "permissions", label: "Permissions", help: "Comma-separated, such as secretmanager.versions.access." },
+    { name: "expandResources", label: "List resources within resource(s) matching your query", type: "checkbox" },
+    { name: "expandGroups", label: "List individual users inside groups", type: "checkbox" },
+    { name: "expandRoles", label: "List permissions inside roles", type: "checkbox" },
+    { name: "analyzeServiceAccountImpersonation", label: "Analyze service account impersonation", type: "checkbox" },
+    { name: "outputResourceEdges", label: "Show resource relationships", type: "checkbox" },
+    { name: "outputGroupEdges", label: "Show group membership relationships", type: "checkbox" },
+    { name: "accessTime", label: "Return only those policies that would apply at a specific time (UTC)", type: "datetime-local",
+      help: "Evaluates conditions on request.time at this time, which must be in the future." },
   ] });
   const error = el("p", { class: "form-error", role: "alert", hidden: true });
   const results = el("div", { id: "analyze-result", "aria-live": "polite" });
-  const run = el("button", { type: "submit", class: "primary", id: "analyze-run", text: "Analyze" });
+  const run = el("button", { type: "submit", class: "primary", id: "analyze-run", text: "Run query" });
+  const save = el("button", { type: "button", id: "analyze-save", text: "Save query" });
+  const exp = el("button", { type: "button", id: "analyze-export", text: "Export" });
   const list = (v) => (v || "").split(/[\s,]+/).map((x) => x.trim()).filter(Boolean);
+  const on = (x) => x === true || x === "true" || x === "on";
+  const query = () => {
+    const v = fields.values();
+    return { scope: v.scope, identity: v.identity, permissions: list(v.permissions), roles: list(v.roles), resource: v.resource,
+      expandGroups: on(v.expandGroups), expandRoles: on(v.expandRoles), expandResources: on(v.expandResources),
+      analyzeServiceAccountImpersonation: on(v.analyzeServiceAccountImpersonation),
+      outputResourceEdges: on(v.outputResourceEdges), outputGroupEdges: on(v.outputGroupEdges),
+      accessTime: v.accessTime ? new Date(v.accessTime + "Z").toISOString() : "" };
+  };
+  const fail = (err) => { error.textContent = err.message; error.hidden = false; };
+  const table = (id, analysis) => {
+    const res = (analysis || {}).analysisResults || [];
+    if (!res.length) return el("p", { class: "unavailable", id: id + "-empty", text: "No results match the query." });
+    const rows = [];
+    for (const x of res) {
+      for (const acl of x.accessControlLists || []) {
+        rows.push(el("tr", {},
+          el("td", { class: "mono", text: ((x.identityList || {}).identities || []).map((i) => i.name).join(", ") }),
+          el("td", { class: "mono", text: (acl.resources || []).map((r) => r.fullResourceName).join(", ") }),
+          el("td", { class: "mono", text: (acl.accesses || []).map((a) => a.permission || a.role).join(", ") }),
+          el("td", { class: "mono", text: `${x.iamBinding.role} on ${x.attachedResourceFullName}` }),
+          el("td", { class: "mono", text: x.iamBinding.condition ? `${x.iamBinding.condition.expression} (${(acl.conditionEvaluation || {}).evaluationValue || ""})` : "" }),
+          el("td", { class: "mono", text: [...((x.identityList || {}).groupEdges || []), ...(acl.resourceEdges || [])].map((e) => `${e.sourceNode} → ${e.targetNode}`).join("; ") })));
+      }
+    }
+    return el("table", { class: "table", id },
+      el("caption", { class: "visually-hidden", text: "Policy analysis results" }),
+      el("thead", {}, el("tr", {}, ...["Principal", "Resource", "Role / permission", "Policy binding", "Condition", "Relationships"].map((h) => el("th", { scope: "col", text: h })))),
+      el("tbody", {}, ...rows));
+  };
   const submit = async (e) => {
     e.preventDefault();
     error.hidden = true;
     if (!fields.validate()) return;
-    const v = fields.values();
     run.disabled = true;
     try {
-      const r = await iamCall("analyze", { scope: v.scope, identity: v.identity, permissions: list(v.permissions), roles: list(v.roles), resource: v.resource });
-      const res = (r.mainAnalysis || {}).analysisResults || [];
-      setChildren(results, res.length ? el("table", { class: "table", id: "analyze-table" },
-        el("thead", {}, el("tr", {}, ...["Policy", "Role", "Principals", "Access", "Condition"].map((h) => el("th", { text: h })))),
-        el("tbody", {}, ...res.map((x) => {
-          const acl = (x.accessControlLists || [])[0] || {};
-          return el("tr", {},
-            el("td", { class: "mono", text: x.attachedResourceFullName }),
-            el("td", { class: "mono", text: x.iamBinding.role }),
-            el("td", { class: "mono", text: ((x.identityList || {}).identities || []).map((i) => i.name).join(", ") }),
-            el("td", { class: "mono", text: (acl.accesses || []).map((a) => a.permission || a.role).join(", ") }),
-            el("td", { class: "mono", text: x.iamBinding.condition ? `${x.iamBinding.condition.expression} (${(acl.conditionEvaluation || {}).evaluationValue || ""})` : "" }));
-        }))) : el("p", { class: "unavailable", id: "analyze-empty", text: "No binding matches the query." }));
-      announce(`${res.length} results`);
+      const r = await iamCall("analyze", query());
+      const sa = r.serviceAccountImpersonationAnalysis || [];
+      setChildren(results,
+        el("h2", { text: "Query results" }),
+        r.fullyExplored === false ? noteBanner("The results are incomplete: an expansion reached its limit.", "analyze-incomplete") : null,
+        table("analyze-table", r.mainAnalysis),
+        ...(sa.length ? [el("h3", { text: "Access through service account impersonation" }),
+          ...sa.map((a, i) => table(`analyze-impersonation-${i}`, a))] : []));
+      announce(`${((r.mainAnalysis || {}).analysisResults || []).length} results`);
     } catch (err) {
       setChildren(results);
-      error.textContent = err.message;
-      error.hidden = false;
+      fail(err);
     }
     run.disabled = false;
   };
-  setChildren(view, pageHeader("Policy Analyzer", ""), note,
-    el("p", { class: "subtitle", text: "Find which bindings give a principal, a permission or a role, in the scope's policies and its ancestors'." }),
-    el("form", { class: "card", novalidate: true, onsubmit: submit }, error, ...fields.nodes, el("div", { class: "modal-actions" }, run)),
+  save.addEventListener("click", () => {
+    error.hidden = true;
+    if (!fields.validate()) return;
+    analyzerFormModal({ title: "Save query", submitLabel: "Save", fields: [
+      { name: "id", label: "Query ID", required: true, pattern: "[a-z0-9\\-]{4,63}", help: "4 to 63 lowercase letters, digits and hyphens." },
+      { name: "description", label: "Description" },
+    ], onSubmit: async (v) => {
+      await iamCall("saved-create", { ...query(), id: v.id, description: v.description });
+      announce("Query saved");
+    } });
+  });
+  exp.addEventListener("click", () => {
+    error.hidden = true;
+    if (!fields.validate()) return;
+    analyzerFormModal({ title: "Export query results", submitLabel: "Export", fields: [
+      { name: "destination", label: "Destination", type: "select", options: ["bigquery", "gcs"], optionLabels: { bigquery: "BigQuery", gcs: "Cloud Storage" } },
+      { name: "dataset", label: "BigQuery dataset", help: "projects/PROJECT_ID/datasets/DATASET_ID" },
+      { name: "tablePrefix", label: "Table prefix", help: "The tables are PREFIX_analysis and PREFIX_analysis_result." },
+      { name: "partitionKey", label: "Partition", type: "select", options: ["", "REQUEST_TIME"], optionLabels: { "": "None", REQUEST_TIME: "By request time" } },
+      { name: "writeDisposition", label: "If the table exists", type: "select", options: ["WRITE_APPEND", "WRITE_TRUNCATE", "WRITE_EMPTY"],
+        optionLabels: { WRITE_APPEND: "Append", WRITE_TRUNCATE: "Overwrite", WRITE_EMPTY: "Write if empty" } },
+      { name: "gcsUri", label: "Cloud Storage URI", help: "gs://BUCKET/OBJECT" },
+    ], onSubmit: async (v) => {
+      const body = { ...query(), ...(v.destination === "gcs" ? { gcsUri: v.gcsUri } :
+        { dataset: v.dataset, tablePrefix: v.tablePrefix, partitionKey: v.partitionKey, writeDisposition: v.writeDisposition }) };
+      let op = await iamCall("analyze-export", body);
+      for (let i = 0; i < 60 && !op.done; i++) {
+        await new Promise((ok) => setTimeout(ok, 1000));
+        op = await iamCall("analyze-operation", { name: op.name });
+      }
+      if (op.error) throw new Error(op.error.message);
+      setChildren(results, el("p", { id: "analyze-export-done", class: "subtitle",
+        text: op.done ? `Export finished: ${op.name}` : `Export running: ${op.name}` }));
+      announce(op.done ? "Export finished" : "Export running");
+    } });
+  });
+  const analyzePanel = el("div", { id: "analyzer-analyze", role: "tabpanel", "aria-labelledby": "analyzer-tab-analyze" },
+    el("p", { class: "subtitle", text: "Find out which principals have what access to which resources, from the allow policies of the scope and its descendants." }),
+    el("form", { class: "card", novalidate: true, onsubmit: submit }, error, ...fields.nodes, el("div", { class: "modal-actions" }, run, save, exp)),
     results);
+  const savedPanel = el("div", { id: "analyzer-saved", role: "tabpanel", "aria-labelledby": "analyzer-tab-saved", hidden: true });
+  const loadSaved = async () => {
+    try {
+      const r = await iamCall("saved-list", { scope: fields.values().scope });
+      const qs = r.savedQueries || [];
+      setChildren(savedPanel, qs.length ? el("table", { class: "table", id: "saved-queries-table" },
+        el("caption", { class: "visually-hidden", text: "Saved queries" }),
+        el("thead", {}, el("tr", {}, ...["Name", "Description", "Created by", "Last updated", "Actions"].map((h) => el("th", { scope: "col", text: h })))),
+        el("tbody", {}, ...qs.map((q) => el("tr", { "data-name": q.name },
+          el("td", { class: "mono", text: q.name.split("/").pop() }),
+          el("td", { text: q.description || "" }),
+          el("td", { text: q.creator || "" }),
+          el("td", { text: q.lastUpdateTime || "" }),
+          el("td", {},
+            el("button", { type: "button", class: "link", text: "Run", "aria-label": `Run ${q.name.split("/").pop()}`, onclick: async () => {
+              select("analyze");
+              try {
+                const r = await iamCall("analyze", { scope: fields.values().scope, savedQuery: q.name });
+                setChildren(results, el("h2", { text: "Query results" }), table("analyze-table", r.mainAnalysis));
+              } catch (err) { fail(err); }
+            } }),
+            el("button", { type: "button", class: "link", text: "Delete", "aria-label": `Delete ${q.name.split("/").pop()}`, onclick: async () => {
+              await iamCall("saved-delete", { name: q.name });
+              loadSaved();
+            } })))))) : el("p", { class: "unavailable", id: "saved-queries-empty", text: "No saved queries in this scope." }));
+    } catch (err) {
+      setChildren(savedPanel, el("p", { class: "form-error", role: "alert", text: err.message }));
+    }
+  };
+  const tabs = {};
+  const select = (which) => {
+    for (const [k, t] of Object.entries(tabs)) {
+      t.setAttribute("aria-selected", String(k === which));
+      t.classList.toggle("is-active", k === which);
+      t.tabIndex = k === which ? 0 : -1;
+    }
+    analyzePanel.hidden = which !== "analyze";
+    savedPanel.hidden = which !== "saved";
+    if (which === "saved") loadSaved();
+  };
+  tabs.analyze = el("button", { type: "button", class: "tab", role: "tab", id: "analyzer-tab-analyze", "aria-controls": "analyzer-analyze", text: "Analyze policies", onclick: () => select("analyze") });
+  tabs.saved = el("button", { type: "button", class: "tab", role: "tab", id: "analyzer-tab-saved", "aria-controls": "analyzer-saved", text: "Saved queries", onclick: () => select("saved") });
+  setChildren(view, pageHeader("Policy Analyzer", ""), note,
+    el("div", { class: "tab-strip", role: "tablist", "aria-label": "Policy Analyzer tabs" }, tabs.analyze, tabs.saved),
+    analyzePanel, savedPanel);
+  select("analyze");
   iamEnforcementNote(note);
   announce("Policy Analyzer");
   fields.focusFirst();
