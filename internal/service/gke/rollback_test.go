@@ -227,6 +227,15 @@ func TestBlueGreenCancelThenResumeKeepsTheGreenNodes(t *testing.T) {
 	if im := f.images("default-pool"); len(im) != 2 || im[0] != newImg || im[1] != newImg {
 		t.Errorf("after the resumed upgrade the pool's images = %v", im)
 	}
+	// "The upgrade process will continue at the intermediate phase it was
+	// paused": the resumed upgrade starts soaking, without cordoning or
+	// draining the blue nodes again.
+	e := ", " + f.events() + ","
+	for _, w := range []string{"cordon n1", "drain n1", "cordon n2", "drain n2"} {
+		if c := strings.Count(e, ", "+w+","); c != 1 {
+			t.Errorf("%q happened %d times: %s", w, c, e)
+		}
+	}
 }
 
 func waitPhase(t *testing.T, s *Server, pool string, ph containerpb.NodePool_UpdateInfo_BlueGreenInfo_Phase) {
