@@ -37,7 +37,8 @@ func secretsSDK(t *testing.T) *secretmanager.Client {
 }
 
 // TestSecretManagerConsoleParity (#1850), in the run shard, which serves
-// Secret Manager: the product's menu is Secret Manager and Settings, the
+// Secret Manager: the product's menu is Secret Manager, Parameter Manager's
+// pages and Settings, the
 // regional secrets a tab of its page; Create secret is one page in Google's
 // sections, whose Secret value is typed or read from Upload file, Set rotation period reveals the
 // Rotation period list and Custom its own period, and Version aliases name
@@ -61,8 +62,9 @@ func TestSecretManagerConsoleParity(t *testing.T) {
 	p.waitFor(`document.querySelectorAll("#product-nav a").length >= 2 && document.querySelector("#view .page-tabs") !== null`)
 	var menu string
 	p.eval(`[...document.querySelectorAll("#product-nav a")].map((a) => a.textContent.trim()).join("|")`, &menu)
-	if !strings.Contains(menu, "Secret Manager|Settings") {
-		t.Errorf("Secret Manager's menu = %q; want Secret Manager, Settings", menu)
+	// Parameter Manager is in the same menu, as on Google's (#2054, #2063).
+	if menu != "Secret Manager|Parameter Manager|Parameter templates|Settings" {
+		t.Errorf("Secret Manager's menu = %q; want Secret Manager, Parameter Manager, Parameter templates, Settings", menu)
 	}
 	// The regional secrets are a tab of the Secret Manager page (#1850).
 	var pageTabs string
