@@ -6702,6 +6702,7 @@
         "method": "google.cloud.aiplatform.v1.PredictionService/Predict",
         "status": "Verified",
         "tests": [
+          "test/compat/embedmultimodalpredict_test.go:44 TestMultimodalEmbeddingPredictThroughThePredictionClient",
           "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
           "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints",
           "test/compat/modelregistryexport_test.go:58 TestModelRegistryExportsTheImageToArtifactRegistry",

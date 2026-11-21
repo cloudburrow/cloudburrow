@@ -151,6 +151,7 @@ COMPAT_LOCALAI_TEST_NAMES="
   GenerateContentMultiTurnChatThroughTheOfficialSDK
   GenerateContentThroughTheOfficialSDK
   GenerationNeverUsesApplicationDefaultCredentials
+  MultimodalEmbeddingPredictThroughThePredictionClient
   RawPredictOnTheEmbeddingModel RawPredictOnTheGenerationModel
   SpeechAdaptationBoost SpeechAdaptationResources SpeechBatchRecognize
   SpeechRecognitionFeatures1799 SpeechRecognizers SpeechStreamingRecognize SpeechV1

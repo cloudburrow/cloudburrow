@@ -542,3 +542,30 @@ docker run --rm -v "$PWD:/models" \
 > `djpeg -dct float`. Embedded through the official client by
 > `TestEmbedContentEmbedsArithmeticAnd12BitJPEGThroughThePredictionClient`. Lossless and
 > hierarchical JPEG stay `UNIMPLEMENTED`.
+
+> **Update 2026-11-21 (#1651): multimodalembedding@001's `:predict` request.** `Predict` (gRPC
+> and `POST .../publishers/google/models/embeddinggemma-2-onnx-community:predict`) also takes the
+> request Google documents for `multimodalembedding@001`
+> ([Get multimodal embeddings](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/embeddings/get-multimodal-embeddings)):
+> one instance of `text`, `image` and `video` in any combination, answered with `textEmbedding`,
+> `imageEmbedding` and `videoEmbeddings` (`startOffsetSec`, `endOffsetSec`, `embedding`).
+> An image or video is `bytesBase64Encoded` or a `gcsUri` in this instance's Cloud Storage, its
+> type from `mimeType`, the object's content type or its bytes. Images are BMP, GIF (its first
+> frame), JPEG or PNG, at most 20 MB. A video gets one embedding per `videoSegmentConfig` interval
+> (default 0 to 120 seconds every 16; `intervalSec` at least 4; 2 minutes analysed a request, the
+> last segment ending at the video's end), each segment's frames at 1 a second through the vision
+> encoder, audio not considered; MP4 and MOV as for `EmbedContent`, and MKV and WebM, which Google
+> also takes, through a Matroska demuxer written here from RFC 9559
+> (`internal/embedding/matroska.go`; a remuxed clip's frames are the MP4's pixel for pixel,
+> `TestMatroskaFramesMatchMP4`). `parameters.dimension` 128, 256 or 512 reduces the text and
+> image vectors (video vectors are not reduced, as Google documents). What differs, because
+> the model is EmbeddingGemma 2 and not Google's: vectors have 768 values, so `dimension` 1408,
+> Google's default, is `UNIMPLEMENTED` and an unset dimension gives 768; text is not cut to 32
+> tokens; AVI, FLV, MPEG and WMV are `UNIMPLEMENTED`. `multimodalembedding@001` itself is
+> `NOT_FOUND`, naming the model that serves its request: nothing is substituted. Two instances, a
+> dimension Google does not offer and an interval under 4 seconds are `INVALID_ARGUMENT`.
+> Verified with the official `aiplatform` PredictionClient by
+> `TestMultimodalEmbeddingPredictThroughThePredictionClient`. The Go `genai` SDK cannot send this
+> request: its `Models.EmbedContent` posts `:embedContent` only for model names containing
+> `gemini` or `maas` and otherwise `:predict` with each content's first text part, so it reaches
+> the local model as text only (`TestEmbeddingGemmaThroughTheOfficialSDK`).

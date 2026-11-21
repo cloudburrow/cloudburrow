@@ -102,6 +102,10 @@ type VideoOptions struct {
 	Start, End time.Duration
 	// FPS is the sampling rate; zero means DefaultVideoFPS.
 	FPS float64
+	// Matroska also takes the Matroska and WebM containers
+	// (MatroskaMIMETypes), which multimodalembedding@001 takes and
+	// gemini-embedding-2 does not (#1651).
+	Matroska bool
 }
 
 // ErrVideoCodec is a codec Google takes that this build cannot decode.
@@ -153,13 +157,7 @@ func DecodeVideoPatched(mimeType string, data []byte, opt VideoOptions) ([]image
 }
 
 func decodeVideo(mimeType string, data []byte, opt VideoOptions, patch bool) ([]image.Image, error) {
-	if !videoMIMETypes[baseMIME(mimeType)] {
-		return nil, fmt.Errorf("mime_type %q is not supported; send one of %s", mimeType, strings.Join(VideoMIMETypes, ", "))
-	}
-	if len(data) == 0 {
-		return nil, fmt.Errorf("the video data is empty")
-	}
-	tr, err := readVideoTrack(data)
+	tr, err := readVideoOf(mimeType, data, opt.Matroska)
 	if err != nil {
 		return nil, err
 	}
@@ -218,6 +216,38 @@ func decodeVideo(mimeType string, data []byte, opt VideoOptions, patch bool) ([]
 		out[k] = frames[want[k]]
 	}
 	return out, nil
+}
+
+// VideoDuration is the presentation length of an MP4 or MOV video's first
+// video track, for multimodalembedding@001's videoSegmentConfig (#1651),
+// whose segments end at the video's end.
+func VideoDuration(mimeType string, data []byte, opt VideoOptions) (time.Duration, error) {
+	tr, err := readVideoOf(mimeType, data, opt.Matroska)
+	if err != nil {
+		return 0, err
+	}
+	return time.Duration(float64(tr.end) / float64(tr.timescale) * float64(time.Second)), nil
+}
+
+// readVideoOf reads a video's first video track: an MP4 or MOV file, or
+// with matroska a Matroska or WebM one.
+func readVideoOf(mimeType string, data []byte, matroska bool) (*videoTrack, error) {
+	mt := baseMIME(mimeType)
+	mkv := matroska && matroskaMIMETypes[mt]
+	if !videoMIMETypes[mt] && !mkv {
+		types := VideoMIMETypes
+		if matroska {
+			types = append(append([]string(nil), VideoMIMETypes...), MatroskaMIMETypes...)
+		}
+		return nil, fmt.Errorf("mime_type %q is not supported; send one of %s", mimeType, strings.Join(types, ", "))
+	}
+	if len(data) == 0 {
+		return nil, fmt.Errorf("the video data is empty")
+	}
+	if mkv {
+		return readMatroskaTrack(data)
+	}
+	return readVideoTrack(data)
 }
 
 // sampleTimes are the presentation times (in tr.timescale units) of the
