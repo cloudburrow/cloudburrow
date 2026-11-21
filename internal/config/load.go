@@ -221,6 +221,7 @@ type rawFlags struct {
 	appHub           int
 	onnx             int
 	tfconvert        int
+	spark            int
 	firestore        int
 	datastore        int
 	bigtable         int
@@ -316,6 +317,7 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.IntVar(&r.dataform, "port-dataform", 0, "Dataform API host port (0 = OS-assigned; default 9058)")
 	fs.IntVar(&r.appHub, "port-apphub", 0, "App Hub API host port (0 = OS-assigned; default 9048)")
 	fs.IntVar(&r.onnx, "port-onnx", 0, "ONNX runner host port, for BigQuery ML's imported ONNX models in the onnx build (0 = OS-assigned; default 9025)")
+	fs.IntVar(&r.spark, "port-spark", 0, "Spark procedure runner host port, for BigQuery's stored procedures for Apache Spark (0 = OS-assigned; default 9049)")
 	fs.IntVar(&r.tfconvert, "port-tfconvert", 0, "TensorFlow SavedModel converter host port, for BigQuery ML's imported TENSORFLOW models (0 = OS-assigned; default 9027)")
 	fs.IntVar(&r.firestore, "port-firestore", 0, "Firestore emulator host port (0 = OS-assigned; default 9010)")
 	fs.IntVar(&r.datastore, "port-datastore", 0, "Datastore emulator host port (0 = OS-assigned; default 9011)")
@@ -539,6 +541,7 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 		{"PORT_APPHUB", &cfg.Endpoints.AppHub},
 		{"PORT_ONNX", &cfg.Endpoints.ONNX},
 		{"PORT_TFCONVERT", &cfg.Endpoints.TFConvert},
+		{"PORT_SPARK", &cfg.Endpoints.Spark},
 		{"PORT_FIRESTORE", &cfg.Endpoints.Firestore},
 		{"PORT_DATASTORE", &cfg.Endpoints.Datastore},
 		{"PORT_BIGTABLE", &cfg.Endpoints.Bigtable},
@@ -701,6 +704,7 @@ func applyFlags(cfg *Config, raw *rawFlags, set map[string]bool) {
 		{"port-apphub", raw.appHub, &cfg.Endpoints.AppHub},
 		{"port-onnx", raw.onnx, &cfg.Endpoints.ONNX},
 		{"port-tfconvert", raw.tfconvert, &cfg.Endpoints.TFConvert},
+		{"port-spark", raw.spark, &cfg.Endpoints.Spark},
 		{"port-firestore", raw.firestore, &cfg.Endpoints.Firestore},
 		{"port-datastore", raw.datastore, &cfg.Endpoints.Datastore},
 		{"port-bigtable", raw.bigtable, &cfg.Endpoints.Bigtable},

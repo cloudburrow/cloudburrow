@@ -888,6 +888,7 @@ func withLivePorts(cfg config.Config, live map[string]string) config.Config {
 		"localai":   &e.LocalAI,
 		"onnx":      &e.ONNX,
 		"tfconvert": &e.TFConvert,
+		"spark":     &e.Spark,
 		// The ingress gateway, which kind publishes where `up` configured
 		// it: without this, `env --name x` for an instance started with
 		// --port-base exported the default ingress port (#863).

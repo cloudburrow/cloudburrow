@@ -458,7 +458,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 				configs: configs, jobs: own, records: records, functions: functions, views: views, ids: ids, policies: policies,
 				listJobs: listJobs, iam: iam, buffers: buffers, settings: settings, jobsTable: jobRows, newest: newest, open: open,
 				resourceManager: o.resourceManager, tables: tables, linked: linked, hubs: hubs, icebergs: icebergs, dropped: dropped, models: models,
-				onnx: o.onnx, tfconvert: o.tfconvert, vertexai: o.vertexai, connections: connections, numbers: numbers, objects: objects,
+				onnx: o.onnx, tfconvert: o.tfconvert, spark: o.spark, vertexai: o.vertexai, connections: connections, numbers: numbers, objects: objects,
 				cdcStreams: o.cdcStreams}
 			if j[3] == "jobs" {
 				f.withDefaultJobKey(w, r, func(w http.ResponseWriter) { f.insertJob(w, r) }) // #1456, defaultjobkey.go
@@ -753,6 +753,9 @@ type front struct {
 	// (modeltensorflow.go, #1775): the CLI's converter, or nil, and every
 	// TENSORFLOW model is 501.
 	tfconvert tfConverter
+	// spark runs stored procedures for Apache Spark (sparkprocs.go,
+	// #2104): the CLI's runner, or nil, and every one is 501.
+	spark sparkRunner
 	// vertexai is the instance's local Vertex AI endpoint (http://host:port),
 	// which remote models run on (modelremote.go, #1760), or "".
 	vertexai string
@@ -812,6 +815,9 @@ type options struct {
 	// tfconvert converts imported TENSORFLOW models, or nil
 	// (modeltensorflow.go, #1775).
 	tfconvert tfConverter
+	// spark runs stored procedures for Apache Spark, or nil (sparkprocs.go,
+	// #2104).
+	spark sparkRunner
 	// vertexai is the local Vertex AI endpoint remote models run on, or ""
 	// (modelremote.go, #1760).
 	vertexai string

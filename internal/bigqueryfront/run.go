@@ -18,6 +18,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/onnxrunner"
 	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
+	"github.com/cloudburrow/cloudburrow/internal/sparkproc"
 	"github.com/cloudburrow/cloudburrow/internal/tfconvert"
 )
 
@@ -52,6 +53,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		"ONNX models (#1711); empty: CREATE MODEL of model_type ONNX is 501")
 	tfconvertAddr := fs.String("tfconvert", "", "the TensorFlow SavedModel converter of the CLI (http://host:port), which converts BigQuery ML's imported "+
 		"TENSORFLOW models to TensorFlow Lite (#1775); empty: CREATE MODEL of model_type TENSORFLOW is 501")
+	sparkAddr := fs.String("spark", "", "the Spark procedure runner of the CLI (http://host:port), which runs BigQuery's stored procedures for "+
+		"Apache Spark in a local Spark container (#2104); empty: CREATE PROCEDURE … WITH CONNECTION … LANGUAGE is 501")
 	vertexai := fs.String("vertexai", "", "the instance's local Vertex AI endpoint (http://host:port), which BigQuery ML's remote models "+
 		"run on (#1760); empty: CREATE MODEL … REMOTE WITH CONNECTION is 501. Never Google's")
 	if err := fs.Parse(args); err != nil {
@@ -106,6 +109,9 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 		if *tfconvertAddr != "" {
 			o.tfconvert = tfconvert.NewClient(*tfconvertAddr, nil)
+		}
+		if *sparkAddr != "" {
+			o.spark = sparkproc.NewClient(*sparkAddr, nil)
 		}
 		o.streamTimes = true // streamingbuffer.go, #1370
 	})
