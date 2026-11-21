@@ -33,7 +33,7 @@ import (
 
 func init() {
 	for _, v := range []string{"v1", "v1beta1"} {
-		for _, s := range []string{"PredictionService", "LlmUtilityService", "ModelGardenService", "EndpointService", "ModelService"} {
+		for _, s := range []string{"PredictionService", "LlmUtilityService", "ModelGardenService", "EndpointService", "ModelService", "GenAiCacheService"} {
 			Services["google.cloud.aiplatform."+v+"."+s] = VertexAI
 		}
 	}
@@ -75,6 +75,15 @@ var VertexAI = &Service{
 				},
 				p + "LlmUtilityService/":  {"CountTokens": {aiPredict, "endpoint"}, "ComputeTokens": {aiPredict, "endpoint"}},
 				p + "ModelGardenService/": {"Deploy": {"aiplatform.endpoints.create", "destination"}},
+				// Context caching (#2107): aiplatform.cachedContents.* on the
+				// cache, or on its parent location to create and list.
+				p + "GenAiCacheService/": {
+					"CreateCachedContent": {"aiplatform.cachedContents.create", "parent"},
+					"GetCachedContent":    {"aiplatform.cachedContents.get", "name"},
+					"ListCachedContents":  {"aiplatform.cachedContents.list", "parent"},
+					"UpdateCachedContent": {"aiplatform.cachedContents.update", "cached_content.name"},
+					"DeleteCachedContent": {"aiplatform.cachedContents.delete", "name"},
+				},
 				p + "EndpointService/": {
 					"CreateEndpoint": {"aiplatform.endpoints.create", "parent"}, "GetEndpoint": {"aiplatform.endpoints.get", "name"},
 					"ListEndpoints": {"aiplatform.endpoints.list", "parent"}, "UpdateEndpoint": {"aiplatform.endpoints.update", "endpoint.name"},

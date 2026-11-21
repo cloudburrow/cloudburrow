@@ -1,0 +1,272 @@
+CloudBurrow patch to LiteRT-LM 0082833d (#2107): a decode step observer.
+
+At each decode step that samples outside the executor (the CPU external
+sampler), the observer is told the chosen token and the top-k tokens, each
+with the log-softmax of the logits the model produced for that step, read
+before any decoding constraint masks them. cloudburrow_generate uses it to
+answer Vertex AI's responseLogprobs (logprobsResult.chosenCandidates) and
+logprobs (logprobsResult.topCandidates).
+
+diff --git a/runtime/core/BUILD b/runtime/core/BUILD
+index 0e735f23..8edba69f 100644
+--- a/runtime/core/BUILD
++++ b/runtime/core/BUILD
+@@ -571,11 +571,19 @@ cc_test(
+     ],
+ )
+ 
++cc_library(
++    name = "decode_step_observer",
++    srcs = ["decode_step_observer.cc"],
++    hdrs = ["decode_step_observer.h"],
++    deps = ["@com_google_absl//absl/types:span"],
++)
++
+ cc_library(
+     name = "tasks",
+     srcs = ["tasks.cc"],
+     hdrs = ["tasks.h"],
+     deps = [
++        ":decode_step_observer",
+         "@com_google_absl//absl/base:nullability",
+         "@com_google_absl//absl/functional:any_invocable",
+         "@com_google_absl//absl/log:absl_log",
+diff --git a/runtime/core/decode_step_observer.cc b/runtime/core/decode_step_observer.cc
+new file mode 100644
+index 00000000..17a4aae5
+--- /dev/null
++++ b/runtime/core/decode_step_observer.cc
+@@ -0,0 +1,111 @@
++// Copyright 2026 The CloudBurrow Authors.
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++//      http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++#include "runtime/core/decode_step_observer.h"
++
++#include <algorithm>
++#include <cmath>
++#include <limits>
++#include <mutex>  // NOLINT
++#include <numeric>
++#include <utility>
++#include <vector>
++
++#include "absl/types/span.h"  // from @com_google_absl
++
++namespace litert::lm {
++namespace {
++
++std::mutex& ObserverMutex() {
++  static std::mutex* mu = new std::mutex();
++  return *mu;
++}
++
++DecodeStepObserver& Observer() {
++  static DecodeStepObserver* observer = new DecodeStepObserver();
++  return *observer;
++}
++
++int& TopK() {
++  static int top_k = 0;
++  return top_k;
++}
++
++}  // namespace
++
++void SetDecodeStepObserver(DecodeStepObserver observer, int top_k) {
++  std::lock_guard<std::mutex> lock(ObserverMutex());
++  Observer() = std::move(observer);
++  TopK() = std::max(0, top_k);
++}
++
++bool HasDecodeStepObserver() {
++  std::lock_guard<std::mutex> lock(ObserverMutex());
++  return static_cast<bool>(Observer());
++}
++
++int DecodeStepObserverTopK() {
++  std::lock_guard<std::mutex> lock(ObserverMutex());
++  return TopK();
++}
++
++void NotifyDecodeStep(const DecodeStepLogprobs& step) {
++  DecodeStepObserver observer;
++  {
++    std::lock_guard<std::mutex> lock(ObserverMutex());
++    observer = Observer();
++  }
++  if (observer) observer(step);
++}
++
++DecodeStepLogprobs ComputeDecodeStepLogprobs(absl::Span<const float> logits,
++                                             int chosen_id, int top_k) {
++  DecodeStepLogprobs out;
++  out.chosen.token_id = chosen_id;
++  const int vocab = static_cast<int>(logits.size());
++  if (vocab == 0) return out;
++  float max_logit = -std::numeric_limits<float>::infinity();
++  for (float v : logits) {
++    if (v > max_logit) max_logit = v;
++  }
++  double sum = 0.0;
++  for (float v : logits) {
++    if (std::isfinite(v)) sum += std::exp(static_cast<double>(v - max_logit));
++  }
++  const double log_z = static_cast<double>(max_logit) + std::log(sum);
++  auto log_prob = [&](int id) {
++    return static_cast<float>(
++        std::min(0.0, static_cast<double>(logits[id]) - log_z));
++  };
++  if (chosen_id >= 0 && chosen_id < vocab) {
++    out.chosen.log_probability = log_prob(chosen_id);
++  } else {
++    out.chosen.log_probability = -std::numeric_limits<float>::infinity();
++  }
++  const int k = std::min(top_k, vocab);
++  if (k <= 0) return out;
++  std::vector<int> ids(vocab);
++  std::iota(ids.begin(), ids.end(), 0);
++  auto higher = [&](int a, int b) {
++    return logits[a] > logits[b] || (logits[a] == logits[b] && a < b);
++  };
++  std::partial_sort(ids.begin(), ids.begin() + k, ids.end(), higher);
++  out.top.reserve(k);
++  for (int i = 0; i < k; ++i) {
++    out.top.push_back({ids[i], log_prob(ids[i])});
++  }
++  return out;
++}
++
++}  // namespace litert::lm
+diff --git a/runtime/core/decode_step_observer.h b/runtime/core/decode_step_observer.h
+new file mode 100644
+index 00000000..786782ba
+--- /dev/null
++++ b/runtime/core/decode_step_observer.h
+@@ -0,0 +1,64 @@
++// Copyright 2026 The CloudBurrow Authors.
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++//      http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++#ifndef THIRD_PARTY_ODML_LITERT_LM_RUNTIME_CORE_DECODE_STEP_OBSERVER_H_
++#define THIRD_PARTY_ODML_LITERT_LM_RUNTIME_CORE_DECODE_STEP_OBSERVER_H_
++
++#include <functional>
++#include <vector>
++
++#include "absl/types/span.h"  // from @com_google_absl
++
++namespace litert::lm {
++
++// One token and its log-probability under the model's distribution at a
++// decode step: the log-softmax of the step's logits as the model produced
++// them, before any decoding constraint, temperature, top-k or top-p.
++struct TokenLogprob {
++  int token_id = 0;
++  float log_probability = 0.0f;
++};
++
++// What an observer learns about one decode step of one output candidate.
++struct DecodeStepLogprobs {
++  int candidate = 0;
++  // The token the sampler chose, with its log-probability.
++  TokenLogprob chosen;
++  // The `top_k` most probable tokens, most probable first.
++  std::vector<TokenLogprob> top;
++};
++
++using DecodeStepObserver = std::function<void(const DecodeStepLogprobs&)>;
++
++// Installs `observer` for every later decode step that samples outside the
++// executor (SessionConfig::SetUseExternalSampler), in every session of this
++// process, with the `top_k` (>= 0) most probable tokens of each step. An
++// empty observer removes it. The observer runs on the decode thread.
++void SetDecodeStepObserver(DecodeStepObserver observer, int top_k);
++
++// Whether an observer is installed, and its top-k.
++bool HasDecodeStepObserver();
++int DecodeStepObserverTopK();
++
++// Calls the installed observer, if any, with `step`.
++void NotifyDecodeStep(const DecodeStepLogprobs& step);
++
++// The log-softmax of `logits` (one candidate's row) at `chosen_id`, and its
++// `top_k` most probable tokens.
++DecodeStepLogprobs ComputeDecodeStepLogprobs(absl::Span<const float> logits,
++                                             int chosen_id, int top_k);
++
++}  // namespace litert::lm
++
++#endif  // THIRD_PARTY_ODML_LITERT_LM_RUNTIME_CORE_DECODE_STEP_OBSERVER_H_
+diff --git a/runtime/core/tasks.cc b/runtime/core/tasks.cc
+index 40faf955..be3810aa 100644
+--- a/runtime/core/tasks.cc
++++ b/runtime/core/tasks.cc
+@@ -52,6 +52,7 @@
+ #include "runtime/components/sampling_uniforms.h"
+ #include "runtime/components/scoring_cpu_util.h"
+ #include "runtime/components/stop_token_detector.h"
++#include "runtime/core/decode_step_observer.h"
+ #include "runtime/engine/engine_defaults.h"
+ #include "runtime/engine/io_types.h"
+ #include "runtime/executor/executor_settings_base.h"
+@@ -529,6 +530,18 @@ class DecodeOneStep {
+       if (benchmark_info_.has_value()) {
+         ABSL_RETURN_IF_ERROR(benchmark_info_->TimeMarkDelta("executor_decode"));
+       }
++      // CloudBurrow: a decode step observer sees the model's own logits,
++      // copied before the constraints below mask them in place.
++      const bool observed = HasDecodeStepObserver();
++      std::vector<float> observed_logits;
++      if (observed) {
++        std::vector<float> float_logits;
++        ABSL_ASSIGN_OR_RETURN(
++            absl::Span<const float> logits_data,
++            GetLogitsAsFloats(output_logits, num_output_candidates_,
++                              float_logits));
++        observed_logits.assign(logits_data.begin(), logits_data.end());
++      }
+       // If constraints are active, process the logits based on the current
+       // state.
+       if (constrained_decoder_ != nullptr) {
+@@ -553,6 +566,20 @@ class DecodeOneStep {
+ 
+       ABSL_ASSIGN_OR_RETURN(auto token_ids, tokenizer_.TensorBufferToTokenIds(
+                                                 decoded_ids.value()));
++      if (observed && !observed_logits.empty()) {
++        const int top_k = DecodeStepObserverTopK();
++        const size_t vocab = observed_logits.size() / num_output_candidates_;
++        for (int b = 0; b < num_output_candidates_ &&
++                        b < static_cast<int>(token_ids.size()) &&
++                        !token_ids[b].empty();
++             ++b) {
++          DecodeStepLogprobs step = ComputeDecodeStepLogprobs(
++              absl::MakeConstSpan(observed_logits.data() + b * vocab, vocab),
++              token_ids[b][0], top_k);
++          step.candidate = b;
++          NotifyDecodeStep(step);
++        }
++      }
+       return token_ids;
+     } else {  // Internal sampling path
+       // Benchmark executor_decode_and_sample section.

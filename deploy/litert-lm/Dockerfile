@@ -64,6 +64,12 @@ RUN git lfs install --skip-repo \
     && cd /src && git checkout "${LITERT_LM_REF}"
 
 WORKDIR /src
+# CloudBurrow's patches to LiteRT-LM (patches/, PROVENANCE.md), applied in
+# file-name order with git apply, which fails the build when one no longer
+# applies cleanly to LITERT_LM_REF. 0001 adds the decode step observer that
+# reports each step's log-probabilities (#2107).
+COPY patches/ /patches/
+RUN for p in /patches/*.patch; do git apply --verbose "$p" || exit 1; done
 # The runner builds as the package //cloudburrow inside upstream's workspace,
 # beside the litert_lm_main it is derived from, with that target's own
 # exported-symbols list (upstream does not export the file across packages).

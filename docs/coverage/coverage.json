@@ -6492,9 +6492,9 @@
     "Key": "vertexai",
     "Title": "Vertex AI PredictionService",
     "counts": {
-      "Implemented": 1,
+      "Implemented": 3,
       "Unimplemented": 7,
-      "Verified": 83
+      "Verified": 86
     },
     "rows": [
       {
@@ -6576,6 +6576,37 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.EndpointService/UpdateEndpointLongRunning",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.GenAiCacheService/CreateCachedContent",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.GenAiCacheService/DeleteCachedContent",
+        "status": "Verified",
+        "tests": [
+          "test/compat/generationoptions2107_test.go:213 TestCachedContentsThroughTheOfficialSDK"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.GenAiCacheService/GetCachedContent",
+        "status": "Verified",
+        "tests": [
+          "test/compat/generationoptions2107_test.go:213 TestCachedContentsThroughTheOfficialSDK"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.GenAiCacheService/ListCachedContents",
+        "status": "Verified",
+        "tests": [
+          "test/compat/generationoptions2107_test.go:213 TestCachedContentsThroughTheOfficialSDK"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.GenAiCacheService/UpdateCachedContent",
         "status": "Implemented",
         "note": "no official-SDK test proves it yet"
       },
@@ -7243,9 +7274,44 @@
     "Title": "Vertex AI PredictionService v1beta1",
     "counts": {
       "Implemented": 12,
-      "Verified": 5
+      "Verified": 10
     },
     "rows": [
+      {
+        "method": "google.cloud.aiplatform.v1beta1.GenAiCacheService/CreateCachedContent",
+        "status": "Verified",
+        "tests": [
+          "test/compat/generationoptions2107_test.go:213 TestCachedContentsThroughTheOfficialSDK"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.GenAiCacheService/DeleteCachedContent",
+        "status": "Verified",
+        "tests": [
+          "test/compat/generationoptions2107_test.go:213 TestCachedContentsThroughTheOfficialSDK"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.GenAiCacheService/GetCachedContent",
+        "status": "Verified",
+        "tests": [
+          "test/compat/generationoptions2107_test.go:213 TestCachedContentsThroughTheOfficialSDK"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.GenAiCacheService/ListCachedContents",
+        "status": "Verified",
+        "tests": [
+          "test/compat/generationoptions2107_test.go:213 TestCachedContentsThroughTheOfficialSDK"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.GenAiCacheService/UpdateCachedContent",
+        "status": "Verified",
+        "tests": [
+          "test/compat/generationoptions2107_test.go:213 TestCachedContentsThroughTheOfficialSDK"
+        ]
+      },
       {
         "method": "google.cloud.aiplatform.v1beta1.LlmUtilityService/ComputeTokens",
         "status": "Implemented",
@@ -7289,7 +7355,13 @@
         "method": "google.cloud.aiplatform.v1beta1.PredictionService/GenerateContent",
         "status": "Verified",
         "tests": [
-          "test/compat/generationconversation_test.go:47 TestGenerateContentMultiTurnChatThroughTheOfficialSDK"
+          "test/compat/generationconversation_test.go:47 TestGenerateContentMultiTurnChatThroughTheOfficialSDK",
+          "test/compat/generationoptions2107_test.go:128 TestGenerateContentThinkingConfigThroughTheOfficialSDK",
+          "test/compat/generationoptions2107_test.go:213 TestCachedContentsThroughTheOfficialSDK",
+          "test/compat/generationoptions2107_test.go:333 TestGenerateContentResponseLogprobsThroughTheOfficialSDK",
+          "test/compat/generationoptions2107_test.go:35 TestGenerateContentCandidateCountThroughTheOfficialSDK",
+          "test/compat/generationoptions2107_test.go:394 TestGenerateContentLogprobsTopCandidatesThroughTheOfficialSDK",
+          "test/compat/generationoptions2107_test.go:467 TestGenerateContentLogprobsWithOtherFeaturesThroughTheOfficialSDK"
         ]
       },
       {
@@ -7323,7 +7395,10 @@
         "method": "google.cloud.aiplatform.v1beta1.PredictionService/StreamGenerateContent",
         "status": "Verified",
         "tests": [
-          "test/compat/generationconversation_test.go:247 TestV1Beta1PredictionClientServesWhatV1Serves"
+          "test/compat/generationconversation_test.go:247 TestV1Beta1PredictionClientServesWhatV1Serves",
+          "test/compat/generationoptions2107_test.go:128 TestGenerateContentThinkingConfigThroughTheOfficialSDK",
+          "test/compat/generationoptions2107_test.go:333 TestGenerateContentResponseLogprobsThroughTheOfficialSDK",
+          "test/compat/generationoptions2107_test.go:394 TestGenerateContentLogprobsTopCandidatesThroughTheOfficialSDK"
         ]
       },
       {

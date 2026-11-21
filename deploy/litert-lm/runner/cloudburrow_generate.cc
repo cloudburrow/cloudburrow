@@ -42,6 +42,31 @@
 //                               RepetitionPenaltyConfig (OpenAI semantics)
 //   --vision_backend=cpu        load the model's vision encoder (image parts)
 //   --request_stdin             read a whole conversation from standard input
+//   --enable_thinking=B         set the conversation's ThinkingConfig (#2107):
+//                               the model's own thinking mode (Gemma 4's
+//                               template injects <|think|>), its thought
+//                               channel streamed as {"thought":"..."} lines
+//   --thinking_budget=N         the thinking token budget, -1 unlimited
+//                               (LiteRT-LM's ThinkingBudgetConstraint)
+//   --response_logprobs         write each decoded token's log-probability
+//                               as a line of its own (#2107):
+//                               {"logprob":{"token":"<base64>","id":N,
+//                               "score":S,"top":[{"token":..,"id":..,
+//                               "score":..},...]}}
+//   --logprobs=N                with --response_logprobs, the N (0 to 20)
+//                               most probable tokens of each step in "top"
+//
+// The scores come from CloudBurrow's LiteRT-LM patch
+// (deploy/litert-lm/patches/0001-decode-step-logprobs.patch): a decode step
+// observer that sees each step's logits as the model produced them, before
+// any constraint, temperature, top-k or top-p, and reports the log-softmax of
+// the chosen token and of the N most probable ones. The observer runs on the
+// external-sampler path (the CPU sampler outside the executor), so with
+// --response_logprobs the conversation's session samples there. Everything
+// else stays the Conversation's: the chat template, tools and tool choice,
+// JSON and regex constraints, thinking, images and penalties. Tokens of the
+// thought channel (its delimiters included) and the stop tokens are not
+// written: they are not part of the answer.
 //
 // With --request_stdin the runner takes one JSON object on standard input
 // (#1937) instead of --input_prompt:
@@ -59,7 +84,11 @@
 //                                   preface, tools and image tokens included
 //   {"text":"..."}                  each decoded chunk
 //   {"tool_calls":[...]}            parsed calls, arguments as JSON objects
+//   {"thought":"..."}               thought channel text (--enable_thinking)
 // and with count_only only the first line is written and nothing decodes.
+// With thinking on, standard error also gets
+//   cloudburrow_generate: thought_tokens=N
+// the model's tokenizer's count of the thought channel's text.
 // With "compute" the model's tokenizer splits each text (no template) and the
 // one line written is {"compute":[{"ids":[...],"tokens":["<base64>",...]}]},
 // each token the bytes its id decodes to.
@@ -78,6 +107,7 @@
 #include <iostream>
 #include <iterator>
 #include <memory>
+#include <mutex>  // NOLINT
 #include <optional>
 #include <string>
 #include <utility>
@@ -103,6 +133,7 @@
 #include "runtime/conversation/conversation.h"
 #include "runtime/conversation/end_of_turn.h"
 #include "runtime/conversation/io_types.h"
+#include "runtime/core/decode_step_observer.h"
 #include "runtime/engine/engine.h"
 #include "runtime/engine/engine_factory.h"
 #include "runtime/engine/engine_settings.h"
@@ -120,6 +151,15 @@ ABSL_FLAG(std::string, constraint_json_schema, "",
           "Constrain the output to JSON valid against this JSON schema.");
 ABSL_FLAG(bool, request_stdin, false,
           "Read the conversation as JSON from standard input (#1937).");
+ABSL_FLAG(std::optional<bool>, enable_thinking, std::nullopt,
+          "Set the conversation's thinking mode (#2107).");
+ABSL_FLAG(int, thinking_budget, -1,
+          "Thinking token budget when thinking is enabled; -1 is unlimited.");
+ABSL_FLAG(bool, response_logprobs, false,
+          "Write each decoded token's log-probability (#2107).");
+ABSL_FLAG(int, logprobs, 0,
+          "With --response_logprobs, the number (0 to 20) of most probable "
+          "tokens written for each step.");
 
 namespace {
 
@@ -130,6 +170,7 @@ using ::litert::lm::EngineSettings;
 using ::litert::lm::Message;
 using ::litert::lm::ModelAssets;
 using ::litert::lm::OptionalArgs;
+using ::litert::lm::ThinkingConfig;
 using ::litert::lm::ToolChoice;
 using ::litert::lm::proto::SamplerParameters;
 using ::nlohmann::json;
@@ -228,7 +269,93 @@ absl::StatusOr<ToolChoice> ToolChoiceOf(const Message& tc) {
   return out;
 }
 
-void JsonLine(const json& j) { std::cout << j.dump() << "\n" << std::flush; }
+// Lines come from two threads with --response_logprobs: the decode
+// thread's step observer and the conversation's callback.
+std::mutex& OutputMutex() {
+  static std::mutex* mu = new std::mutex();
+  return *mu;
+}
+
+void JsonLine(const json& j) {
+  std::lock_guard<std::mutex> lock(OutputMutex());
+  std::cout << j.dump() << "\n" << std::flush;
+}
+
+// LogprobWriter writes the decode step observer's report of each answer
+// token as a {"logprob":...} line. A step is skipped when its token is a
+// stop token, or lies in the thought channel: from the token that opens it
+// (the first token of the channel's start) to the one that closes it (the
+// last token of its end), both included.
+class LogprobWriter {
+ public:
+  LogprobWriter(litert::support::Tokenizer& tokenizer,
+                const ConversationConfig& config,
+                const EngineSettings& settings)
+      : tokenizer_(tokenizer) {
+    for (const auto& stop : config.GetSessionConfig().GetStopTokenIds()) {
+      if (stop.size() == 1) stop_ids_.push_back(stop[0]);
+    }
+    if (settings.GetLlmMetadata().has_value()) {
+      for (const auto& stop : settings.GetLlmMetadata()->stop_tokens()) {
+        if (stop.has_token_ids() && stop.token_ids().ids_size() == 1) {
+          stop_ids_.push_back(stop.token_ids().ids(0));
+        }
+      }
+    }
+    for (const auto& channel : config.GetChannels()) {
+      if (channel.channel_name != "thought" || channel.start.empty() ||
+          channel.end.empty()) {
+        continue;
+      }
+      auto start = tokenizer_.TextToTokenIds(channel.start);
+      auto end = tokenizer_.TextToTokenIds(channel.end);
+      if (start.ok() && !start->empty() && end.ok() && !end->empty()) {
+        thought_start_ = start->front();
+        thought_end_ = end->back();
+      }
+    }
+  }
+
+  void Step(const litert::lm::DecodeStepLogprobs& step) {
+    if (step.candidate != 0) return;
+    const int id = step.chosen.token_id;
+    for (int stop : stop_ids_) {
+      if (id == stop) return;
+    }
+    if (thought_start_.has_value()) {
+      if (!in_thought_ && id == *thought_start_) in_thought_ = true;
+      if (in_thought_) {
+        if (id == *thought_end_) in_thought_ = false;
+        return;
+      }
+    }
+    json top = json::array();
+    for (const auto& t : step.top) {
+      top.push_back({{"token", Piece(t.token_id)},
+                     {"id", t.token_id},
+                     {"score", t.log_probability}});
+    }
+    JsonLine({{"logprob",
+               {{"token", Piece(id)},
+                {"id", id},
+                {"score", step.chosen.log_probability},
+                {"top", top}}}});
+  }
+
+ private:
+  // Piece is the base64 of the bytes token id decodes to.
+  std::string Piece(int id) {
+    std::vector<int> one = {id};
+    auto piece = tokenizer_.TokenIdsToText(absl::MakeConstSpan(one));
+    return absl::Base64Escape(piece.ok() ? *piece : std::string());
+  }
+
+  litert::support::Tokenizer& tokenizer_;
+  std::vector<int> stop_ids_;
+  std::optional<int> thought_start_;
+  std::optional<int> thought_end_;
+  bool in_thought_ = false;
+};
 
 absl::Status Run(int argc, char** argv) {
   absl::ParseCommandLine(argc, argv);
@@ -314,6 +441,22 @@ absl::Status Run(int argc, char** argv) {
   if (vision_backend.has_value()) {
     session_config.SetVisionModalityEnabled(true);
   }
+  const bool response_logprobs = absl::GetFlag(FLAGS_response_logprobs);
+  const int top_logprobs = absl::GetFlag(FLAGS_logprobs);
+  if (top_logprobs < 0 || top_logprobs > 20) {
+    return absl::InvalidArgumentError(
+        absl::StrCat("--logprobs must be in [0, 20], got ", top_logprobs));
+  }
+  if (response_logprobs) {
+    if (!request_stdin) {
+      return absl::InvalidArgumentError(
+          "--response_logprobs needs --request_stdin");
+    }
+    // The decode step observer (the LiteRT-LM patch) reports the steps the
+    // CPU sampler samples outside the executor.
+    session_config.SetUseExternalSampler(true);
+    session_config.SetSamplerBackend(Backend::CPU);
+  }
   if (AnySamplerFlag()) {
     ABSL_ASSIGN_OR_RETURN(SamplerParameters sampler,
                           RequestSampler(engine->GetEngineSettings()));
@@ -346,6 +489,11 @@ absl::Status Run(int argc, char** argv) {
       builder.SetEnableConstrainedDecoding(true);
     }
     builder.SetPreface(preface);
+  }
+  const std::optional<bool> thinking = absl::GetFlag(FLAGS_enable_thinking);
+  if (thinking.has_value()) {
+    builder.SetThinkingConfig(
+        ThinkingConfig(*thinking, absl::GetFlag(FLAGS_thinking_budget)));
   }
   if (!regex.empty() || !schema.empty() || has_tools) {
     // Without a provider the conversation drops decoding_constraint silently.
@@ -381,7 +529,17 @@ absl::Status Run(int argc, char** argv) {
         .constraint_string = schema};
   }
 
+  // Never freed: the decode thread may call the observer until the process
+  // ends, even on an error return.
+  LogprobWriter* logprob_writer = nullptr;
+  if (response_logprobs) {
+    logprob_writer = new LogprobWriter(
+        const_cast<litert::support::Tokenizer&>(engine->GetTokenizer()),
+        conversation_config, engine->GetEngineSettings());
+  }
+
   absl::Status failure = absl::OkStatus();
+  std::string thought_text;
   Message message;
   if (request_stdin) {
     message = request["message"];
@@ -396,9 +554,16 @@ absl::Status Run(int argc, char** argv) {
     content.push_back({{"type", "text"}, {"text", prompt}});
     message = Message(json::object({{"role", "user"}, {"content", content}}));
   }
+  if (logprob_writer != nullptr) {
+    litert::lm::SetDecodeStepObserver(
+        [w = logprob_writer](const litert::lm::DecodeStepLogprobs& step) {
+          w->Step(step);
+        },
+        top_logprobs);
+  }
   ABSL_RETURN_IF_ERROR(conversation->SendMessageAsync(
       message,
-      [&failure, request_stdin](absl::StatusOr<Message> message) {
+      [&failure, &thought_text, request_stdin](absl::StatusOr<Message> message) {
         if (!message.ok()) {
           failure = message.status();
           return;
@@ -407,6 +572,16 @@ absl::Status Run(int argc, char** argv) {
           return;
         }
         if (request_stdin) {
+          if (message->contains("channels") &&
+              (*message)["channels"].is_object()) {
+            for (const auto& [name, text] : (*message)["channels"].items()) {
+              if (name == "thought" && text.is_string() &&
+                  !text.get<std::string>().empty()) {
+                thought_text += text.get<std::string>();
+                JsonLine({{"thought", text.get<std::string>()}});
+              }
+            }
+          }
           if (message->contains("content") &&
               (*message)["content"].is_array()) {
             for (const auto& part : (*message)["content"]) {
@@ -431,6 +606,7 @@ absl::Status Run(int argc, char** argv) {
       },
       std::move(args)));
   ABSL_RETURN_IF_ERROR(engine->WaitUntilDone(absl::Minutes(10)));
+  litert::lm::SetDecodeStepObserver(nullptr, 0);
   ABSL_RETURN_IF_ERROR(failure);
   std::cout << std::flush;
   auto info = conversation->GetBenchmarkInfo();
@@ -442,6 +618,17 @@ absl::Status Run(int argc, char** argv) {
       }
     }
     std::cerr << "cloudburrow_generate: decoded_tokens=" << decoded
+              << std::endl;
+  }
+  if (thinking.value_or(false)) {
+    int thought_tokens = 0;
+    if (!thought_text.empty()) {
+      auto& tokenizer =
+          const_cast<litert::support::Tokenizer&>(engine->GetTokenizer());
+      auto ids = tokenizer.TextToTokenIds(thought_text);
+      if (ids.ok()) thought_tokens = static_cast<int>(ids->size());
+    }
+    std::cerr << "cloudburrow_generate: thought_tokens=" << thought_tokens
               << std::endl;
   }
   return absl::OkStatus();

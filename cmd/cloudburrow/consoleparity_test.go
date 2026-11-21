@@ -68,6 +68,12 @@ type parityRow struct {
 	Issue int
 }
 
+// cacheOffers is Studio's Context caching card (#2121).
+const cacheOffers = "Studio: Context caching creates a cache from the prompt (the conversation, this turn and the System instructions) with a name and TTL, " +
+	"lists the caches with their tokens and expiry, updates a cache's TTL, deletes it, and Use cache sends it as the requests' cachedContent " +
+	"(the usage line shows the cached tokens); Model settings' Number of responses (candidateCount) shows each response, and Thinking " +
+	"(Thinking budget Off, Auto or Manual, Include thoughts) sends thinkingConfig and shows the thoughts apart (#2121)"
+
 var parityRows = []parityRow{
 	// VPC network (#1936): the Compute Engine API's networking.
 	{Resource: "VPC networks", Service: "compute",
@@ -2344,15 +2350,19 @@ var parityRows = []parityRow{
 			"the chat sends every earlier turn as contents with the System instructions, Function calling's declarations and mode (AUTO, ANY, NONE, VALIDATED) as tools and toolConfig, " +
 			"shows a returned functionCall and sends the user's functionResponse turn, sends Insert Media's uploaded image as inlineData or a gs:// object as fileData, " +
 			"applies Model settings (Temperature, Output token limit, Add stop sequence; Advanced: Top-K, Top-P, Seed, frequency and presence penalty; Output format), " +
-			"shows the response's usageMetadata, and Get code writes the request as Python or curl (#1962)",
+			"shows the response's usageMetadata, and Get code writes the request as Python or curl (#1962); " +
+			"Advanced's Log probabilities switch sends responseLogprobs and its Top candidates (1 to 20, enabled only with the switch) logprobs, " +
+			"and the response shows avgLogprobs and each chosen token with its log probability, probability and the step's top candidates (#2122)",
 		Tests: []string{"TestPlaygroundStreamSwitchPicksTheMethod", "TestPlaygroundRelaysTheConversation", "TestAgentStudioChatToolsImagesTokensAndCode",
 			"TestPlaygroundSupportedOptionsAreHonoured", "TestStreamGenerateContentThroughThePredictionClient", "TestGRPCGenerateContentMatchesTheJSONRoute",
 			"TestGenerateContentMultiTurnChatThroughTheOfficialSDK", "TestGenerateContentFunctionCallingRoundTripThroughTheOfficialSDK",
-			"TestGenerateContentImagePartThroughTheOfficialSDK"}},
+			"TestGenerateContentImagePartThroughTheOfficialSDK", "TestAgentStudioLogProbabilities",
+			"TestGenerateContentLogprobsTopCandidatesThroughTheOfficialSDK"}},
 	{Resource: "Vertex AI PredictionService: StreamGenerateContent", Service: "vertexai",
 		Methods: []string{"PredictionService/StreamGenerateContent"},
-		Screen:  "/agent-platform/studio", Offers: "Playground: Stream on (the default) sends streamGenerateContent, which StreamGenerateContent serves from the same code, and shows each chunk as it arrives (#1257)",
-		Tests: []string{"TestPlaygroundGeneratesThroughTheRealAPIPath", "TestPlaygroundStreamSwitchPicksTheMethod",
+		Screen:  "/agent-platform/studio", Offers: "Playground: Stream on (the default) sends streamGenerateContent, which StreamGenerateContent serves from the same code, and shows each chunk as it arrives (#1257); " +
+			"with Log probabilities on, the chunks' steps are gathered into one table (#2122)",
+		Tests: []string{"TestPlaygroundGeneratesThroughTheRealAPIPath", "TestPlaygroundStreamSwitchPicksTheMethod", "TestAgentStudioLogProbabilities",
 			"TestStreamGenerateContentThroughThePredictionClient", "TestGRPCStreamGenerateContentEmitsOneMessagePerChunk"}},
 	// Streaming and direct predict (#1285) carry the same requests in another
 	// framing, served by the same code.
@@ -2399,6 +2409,19 @@ var parityRows = []parityRow{
 		Screen:  "/agent-platform/studio", Offers: "Studio: the \"<count> tokens\" indicator is countTokens of the conversation, System instructions, declarations and prompt as it is typed; " +
 			"clicking it opens the prompt tokenizer, computeTokens' tokens (Token ID to text) and IDs (Token ID) of the prompt (#1962)",
 		Tests: []string{"TestPlaygroundRelaysTokenCounts", "TestAgentStudioChatToolsImagesTokensAndCode", "TestCountTokensAndComputeTokensThroughTheOfficialSDK"}},
+	// Context caching (#2107), on Studio's Context caching card (#2121):
+	// the screen relays v1beta1's cachedContents routes, which run v1's
+	// handlers.
+	{Resource: "Vertex AI GenAiCacheService: cached contents", Service: "vertexai",
+		Methods: []string{"GenAiCacheService/CreateCachedContent", "GenAiCacheService/GetCachedContent", "GenAiCacheService/ListCachedContents",
+			"GenAiCacheService/UpdateCachedContent", "GenAiCacheService/DeleteCachedContent"},
+		Screen: "/agent-platform/studio", Offers: cacheOffers,
+		Tests: []string{"TestPlaygroundRelaysContextCaching", "TestAgentStudioResponsesThinkingAndContextCaching", "TestCachedContentsThroughTheOfficialSDK"}},
+	{Resource: "Vertex AI GenAiCacheService v1beta1: cached contents", Service: "vertexaiv1beta1",
+		Methods: []string{"GenAiCacheService/CreateCachedContent", "GenAiCacheService/GetCachedContent", "GenAiCacheService/ListCachedContents",
+			"GenAiCacheService/UpdateCachedContent", "GenAiCacheService/DeleteCachedContent"},
+		Screen: "/agent-platform/studio", Offers: cacheOffers,
+		Tests: []string{"TestPlaygroundRelaysContextCaching", "TestAgentStudioResponsesThinkingAndContextCaching", "TestCachedContentsThroughTheOfficialSDK"}},
 	// v1beta1 serves v1's methods by converting to them (#1937): the console
 	// reaches the same handlers through the v1 rows above.
 	{Resource: "Vertex AI PredictionService v1beta1: v1's methods", Service: "vertexaiv1beta1",

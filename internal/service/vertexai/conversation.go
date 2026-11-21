@@ -385,8 +385,11 @@ func validateConversation(req *GenerateContentRequest, generate bool) error {
 					return err
 				}
 			}
-			if p.Thought != nil && *p.Thought {
-				return apierror.InvalidArgument("%s: thought parts are not accepted; this model returns none", at)
+			if p.Thought != nil && *p.Thought && role != "model" {
+				// A model turn's thoughts come back with the history
+				// (thinkingConfig.includeThoughts, #2107); a user's
+				// cannot be one.
+				return apierror.InvalidArgument("%s: thought parts belong to model turns", at)
 			}
 		}
 		// The function-calling guide: "you must return all corresponding
@@ -500,6 +503,10 @@ func toRunner(ctx context.Context, req *GenerateContentRequest, objs Objects) (*
 			var calls []any
 			for _, p := range c.Parts {
 				switch {
+				case p.Thought != nil && *p.Thought:
+					// Gemma 4's template strips thinking from earlier
+					// turns (its strip_thinking), so the thoughts are
+					// not sent back.
 				case p.FunctionCall != nil:
 					args := p.FunctionCall.Args
 					if args == nil {
