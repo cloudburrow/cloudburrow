@@ -232,10 +232,6 @@ func (s *Server) transcribeAudioMax(ctx context.Context, name string, config jso
 		return none, nil, cfg, err
 	}
 	if cfg.PerChannel {
-		if cfg.Diarization {
-			return none, nil, cfg, apierror.Unimplemented("Not implemented here: features.diarizationConfig with SEPARATE_RECOGNITION_PER_CHANNEL: " +
-				"CloudBurrow diarizes one mixed channel, and never calls Google")
-		}
 		return s.transcribeChannels(ctx, cfg, data, maxSeconds)
 	}
 	samples, err := speech.DecodeMax(cfg.Decoding, data, maxSeconds)
@@ -474,6 +470,10 @@ func (s *Server) transcribeChannels(ctx context.Context, cfg speechconfig.Config
 		}
 		if c == 0 {
 			cfg = chCfg
+		}
+		// Each channel's speakers, numbered from 1 in it (speechdiarize.go).
+		if err := diarizeSegments(ctx, ch, res.Segments, cfg); err != nil {
+			return none, nil, cfg, err
 		}
 		if out.Language == "" {
 			out.Language = res.Language

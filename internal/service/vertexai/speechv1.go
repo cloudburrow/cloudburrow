@@ -180,16 +180,11 @@ func v1Config(c *speechv1pb.RecognitionConfig) (json.RawMessage, error) {
 	}
 	if dc := c.GetDiarizationConfig(); dc.GetEnableSpeakerDiarization() {
 		// v1's defaults: "If not set, the default value is 2" and 6.
-		lo, hi := dc.GetMinSpeakerCount(), dc.GetMaxSpeakerCount()
-		if lo == 0 {
-			lo = 2
-		}
-		if hi == 0 {
-			hi = 6
-		}
+		lo, hi := v1SpeakerCounts(dc)
 		if lo > hi {
 			return nil, apierror.InvalidArgument("diarization_config.min_speaker_count %d is greater than max_speaker_count %d", lo, hi)
 		}
+		// v2 ignores these counts; v1Checked passes them on.
 		features["diarizationConfig"] = map[string]any{"minSpeakerCount": lo, "maxSpeakerCount": hi}
 	}
 	if n := c.GetMaxAlternatives(); n != 0 {
@@ -277,8 +272,26 @@ func (s *Server) v1Checked(c *speechv1pb.RecognitionConfig, single bool) (speech
 	if err := cfg.Unserved(); err != nil {
 		return cfg, speech.Options{}, apierror.Unimplemented("%v", err)
 	}
+	if cfg.Diarization {
+		// v1 uses min_speaker_count and max_speaker_count, 2 and 6 when
+		// unset (v1Config checked them), where v2 does not.
+		cfg.MinSpeakers, cfg.MaxSpeakers = v1SpeakerCounts(c.GetDiarizationConfig())
+	}
 	opt, err := s.transcribeOptions(cfg)
 	return cfg, opt, err
+}
+
+// v1SpeakerCounts are a diarization_config's min_speaker_count and
+// max_speaker_count: "If not set, the default value is 2" and 6.
+func v1SpeakerCounts(dc *speechv1pb.SpeakerDiarizationConfig) (lo, hi int) {
+	lo, hi = int(dc.GetMinSpeakerCount()), int(dc.GetMaxSpeakerCount())
+	if lo == 0 {
+		lo = 2
+	}
+	if hi == 0 {
+		hi = 6
+	}
+	return lo, hi
 }
 
 func v1Alternative(segs []speech.Segment, cfg speechconfig.Config) *speechv1pb.SpeechRecognitionAlternative {
@@ -315,21 +328,28 @@ func v1Results(res speech.Result, cfg speechconfig.Config) []*speechv1pb.SpeechR
 	}
 	if cfg.Diarization && len(res.Segments) > 0 {
 		// The speakers, in one last result of every word (speechdiarize.go).
-		last := &speechv1pb.SpeechRecognitionAlternative{}
-		for _, seg := range res.Segments {
-			for _, w := range seg.Words {
-				wi := &speechv1pb.WordInfo{Word: w.Text, SpeakerTag: int32(w.Speaker), SpeakerLabel: strconv.Itoa(w.Speaker)}
-				if cfg.WordOffsets {
-					wi.StartTime, wi.EndTime = durationpb.New(w.Start), durationpb.New(w.End)
-				}
-				if cfg.WordConfidence {
-					wi.Confidence = float32(w.Confidence)
-				}
-				last.Words = append(last.Words, wi)
-			}
-		}
+		last := &speechv1pb.SpeechRecognitionAlternative{Words: v1SpeakerWords(res.Segments, cfg)}
 		out = append(out, &speechv1pb.SpeechRecognitionResult{Alternatives: []*speechv1pb.SpeechRecognitionAlternative{last},
 			ResultEndTime: durationpb.New(res.Segments[len(res.Segments)-1].End), LanguageCode: code})
+	}
+	return out
+}
+
+// v1SpeakerWords are every word of segs with its speaker_tag and
+// speaker_label.
+func v1SpeakerWords(segs []speech.Segment, cfg speechconfig.Config) []*speechv1pb.WordInfo {
+	var out []*speechv1pb.WordInfo
+	for _, seg := range segs {
+		for _, w := range seg.Words {
+			wi := &speechv1pb.WordInfo{Word: w.Text, SpeakerTag: int32(w.Speaker), SpeakerLabel: strconv.Itoa(w.Speaker)}
+			if cfg.WordOffsets {
+				wi.StartTime, wi.EndTime = durationpb.New(w.Start), durationpb.New(w.End)
+			}
+			if cfg.WordConfidence {
+				wi.Confidence = float32(w.Confidence)
+			}
+			out = append(out, wi)
+		}
 	}
 	return out
 }
@@ -441,10 +461,6 @@ func (v *speechV1Service) StreamingRecognize(stream speechv1pb.Speech_StreamingR
 	if err != nil {
 		return grpcError(err)
 	}
-	if cfg.Diarization {
-		return grpcError(apierror.Unimplemented("Not implemented here: diarization_config in StreamingRecognize: CloudBurrow diarizes " +
-			"the whole audio at once (Recognize and LongRunningRecognize), and never calls Google"))
-	}
 	if err := v.s.checkStreamLanguage(stream.Context(), cfg); err != nil {
 		return grpcError(err)
 	}
@@ -466,6 +482,9 @@ func (v *speechV1Service) StreamingRecognize(stream speechv1pb.Speech_StreamingR
 		}
 		return req.GetAudioContent(), nil
 	}
+	// said are the stream's final segments so far, which diarization
+	// labels again at each final result (speechdiarize.go).
+	var said []speech.Segment
 	err = runStream(stream.Context(), st, recv, func(ev streamEvent) error {
 		out := &speechv1pb.StreamingRecognizeResponse{}
 		switch ev.kind {
@@ -480,6 +499,13 @@ func (v *speechV1Service) StreamingRecognize(stream speechv1pb.Speech_StreamingR
 				Alternatives: []*speechv1pb.SpeechRecognitionAlternative{v1Alternative(ev.segs, cfg)}}
 			if !ev.final {
 				r.Stability = streamInterimStability
+			}
+			if cfg.Diarization && ev.final {
+				said = append(said, ev.segs...)
+				if err := diarizeSegments(stream.Context(), ev.samples, said, cfg); err != nil {
+					return err
+				}
+				r.Alternatives[0].Words = v1SpeakerWords(said, cfg)
 			}
 			out.Results = []*speechv1pb.StreamingRecognitionResult{r}
 			out.TotalBilledTime = durationpb.New(time.Duration(math.Ceil(ev.offset.Seconds())) * time.Second)

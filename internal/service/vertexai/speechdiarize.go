@@ -27,13 +27,25 @@ import (
 // are only included in the last result object, which has only one
 // alternative"), the other results' words untagged.
 //
-// minSpeakerCount and maxSpeakerCount bound the speakers found (v1's
-// defaults, 2 and 6, apply to v1; v2 leaves them free when unset).
-// UNVERIFIED (re-read 2026-11-21: the v2 reference says of both "The
-// system automatically determines the number of speakers. This value is not
-// currently used"; CloudBurrow honours them as v1 documents): that v2
-// ignores them; how Google segments and numbers speakers; v1's last
-// result's transcript (empty here) and resultEndTime.
+// minSpeakerCount and maxSpeakerCount: v1's bound the speakers found
+// ("If not set, the default value is 2" and 6); v2's are accepted and
+// ignored, the clusterer choosing the count, as the v2 reference says of
+// both: "The system automatically determines the number of speakers. This
+// value is not currently used" (read 2026-11-21).
+//
+// v1 StreamingRecognize diarizes too: diarization_config's reference says
+// "When this is enabled, we send all the words from the beginning of the
+// audio for the top alternative in every consecutive STREAMING responses",
+// so each final result's alternative holds every word said so far, all
+// labelled again over the audio so far. With
+// SEPARATE_RECOGNITION_PER_CHANNEL (v2), which no Google page restricts,
+// each channel is diarized on its own.
+//
+// UNVERIFIED (re-read 2026-11-21): how Google segments and numbers
+// speakers; v1's last result's transcript (empty here) and resultEndTime;
+// whether v1's interim streaming results carry the words too (here only
+// the final ones do); how speakers are numbered across channels (here from
+// 1 in each).
 
 // diarizeSegments labels each word of segs with its speaker when cfg asks
 // for diarization.
