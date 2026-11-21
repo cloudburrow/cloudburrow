@@ -47,7 +47,8 @@ const (
 )
 
 // RunTask forces a task to run now.
-func (g *GRPCServer) RunTask(_ context.Context, req *taskspb.RunTaskRequest) (*taskspb.Task, error) {
+func (g *GRPCServer) RunTask(_ context.Context, req *taskspb.RunTaskRequest) (_ *taskspb.Task, err error) {
+	defer func() { g.called("RunTask", req, err) }()
 	if _, err := resource.Parse(req.GetName()); err != nil {
 		return nil, apierror.InvalidArgument("%v", err)
 	}
@@ -59,7 +60,8 @@ func (g *GRPCServer) RunTask(_ context.Context, req *taskspb.RunTaskRequest) (*t
 }
 
 // BatchCreateTasks creates up to 100 tasks in one queue.
-func (g *GRPCServer) BatchCreateTasks(ctx context.Context, req *taskspb.BatchCreateTasksRequest) (*longrunningpb.Operation, error) {
+func (g *GRPCServer) BatchCreateTasks(ctx context.Context, req *taskspb.BatchCreateTasksRequest) (_ *longrunningpb.Operation, err error) {
+	defer func() { g.called("BatchCreateTasks", req, err) }()
 	parent := req.GetParent()
 	if _, err := resource.Parse(parent); err != nil {
 		return nil, apierror.InvalidArgument("%v", err)
@@ -108,7 +110,8 @@ func (g *GRPCServer) BatchCreateTasks(ctx context.Context, req *taskspb.BatchCre
 }
 
 // BatchDeleteTasks deletes up to 1000 tasks of one queue.
-func (g *GRPCServer) BatchDeleteTasks(_ context.Context, req *taskspb.BatchDeleteTasksRequest) (*longrunningpb.Operation, error) {
+func (g *GRPCServer) BatchDeleteTasks(_ context.Context, req *taskspb.BatchDeleteTasksRequest) (_ *longrunningpb.Operation, err error) {
+	defer func() { g.called("BatchDeleteTasks", req, err) }()
 	parent := req.GetParent()
 	if _, err := resource.Parse(parent); err != nil {
 		return nil, apierror.InvalidArgument("%v", err)

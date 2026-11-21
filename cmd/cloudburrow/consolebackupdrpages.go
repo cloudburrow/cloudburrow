@@ -26,8 +26,8 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
 )
 
-// bdrResourceTypes are Google's Resource Type choices; only Cloud SQL is
-// served here (docs/backupdr.md).
+// bdrResourceTypes are Google's Resource Type choices; Cloud SQL and
+// Compute Engine's VMs and disks (#2075) are served here (docs/backupdr.md).
 var bdrResourceTypes = []string{backupdr.CloudSQLResourceType, "compute.googleapis.com/Instance", "compute.googleapis.com/Disk",
 	"alloydb.googleapis.com/Cluster", "file.googleapis.com/Instance"}
 
@@ -38,8 +38,8 @@ var bdrResourceTypeLabels = map[string]string{backupdr.CloudSQLResourceType: "Cl
 // why.
 func bdrUnservedTypes() map[string]string {
 	out := map[string]string{}
-	for _, t := range bdrResourceTypes[1:] {
-		out[t] = "Not available locally: CloudBurrow's Backup and DR Service backs up Cloud SQL instances only; " +
+	for _, t := range bdrResourceTypes[3:] {
+		out[t] = "Not available locally: CloudBurrow's Backup and DR Service backs up Cloud SQL instances and Compute Engine VMs and disks; " +
 			bdrResourceTypeLabels[t] + " is not served (docs/backupdr.md)."
 	}
 	return out
@@ -101,8 +101,18 @@ type bdrSource struct {
 func (s bdrSource) vaultID() string { return lastSegment(str(s.vault, "name")) }
 func (s bdrSource) id() string      { return lastSegment(str(s.ds, "name")) }
 func (s bdrSource) instance() string {
-	return str(nested(s.ds, "dataSourceGcpResource", "cloudSqlInstanceDatasourceProperties"), "name")
+	g := nested(s.ds, "dataSourceGcpResource")
+	switch str(g, "type") {
+	case backupdr.ComputeInstanceResourceType:
+		return str(nested(g, "computeInstanceDatasourceProperties"), "name")
+	case backupdr.ComputeDiskResourceType:
+		return str(nested(g, "diskDatasourceProperties"), "name")
+	}
+	return str(nested(g, "cloudSqlInstanceDatasourceProperties"), "name")
 }
+
+// typ is the protected resource's type.
+func (s bdrSource) typ() string          { return str(nested(s.ds, "dataSourceGcpResource"), "type") }
 func (s bdrSource) instanceName() string { return lastSegment(s.instance()) }
 func (s bdrSource) location() string     { return str(nested(s.ds, "dataSourceGcpResource"), "location") }
 func (s bdrSource) plan() string {
@@ -262,6 +272,12 @@ func bdrRecurrence(r map[string]any) string {
 			}
 		}
 	}
+	if w := nested(sch, "weekDayOfMonth"); len(w) > 0 {
+		wk, d := str(w, "weekOfMonth"), str(w, "dayOfWeek")
+		if len(wk) > 1 && len(d) > 1 {
+			on = append(on, "the "+strings.ToLower(wk)+" "+d[:1]+strings.ToLower(d[1:]))
+		}
+	}
 	if len(on) > 0 {
 		out += ", on " + strings.Join(on, " ")
 	}
@@ -402,9 +418,42 @@ func (bdrVaultedProvider) Title() string { return "Vaulted backups" }
 
 var bdrVaultedColumns = []string{"Resource type", "Location", "Backup plan", "Backup vault", "Backups", "Last backup", "Last successful backup"}
 
+// bdrTypeKey is Vaulted backups' Filter table > Resource type, in ?type=:
+// "At the top of the table, select Filter table > Resource type. Select
+// Cloud SQL" (csql-backup, #1844).
+const bdrTypeKey = "type"
+
+// FilterKeys implements console.Filterer: the Resource type filter.
+func (bdrVaultedProvider) FilterKeys() []string { return []string{bdrTypeKey} }
+
+var _ console.Filterer = bdrVaultedProvider{}
+
+func bdrTypeFilter(selected string) *console.Scope {
+	sc := &console.Scope{Key: bdrTypeKey, Label: "Resource type", Selected: selected, Default: "all",
+		Options: []console.ScopeOption{{ID: "all", Label: "All resource types"}}}
+	for _, t := range bdrResourceTypes {
+		sc.Options = append(sc.Options, console.ScopeOption{ID: t, Label: bdrResourceTypeLabels[t]})
+	}
+	return sc
+}
+
 func (p bdrVaultedProvider) List(ctx context.Context, project string) (console.Listing, error) {
+	typ := console.ScopeValue(ctx, bdrTypeKey)
+	if typ == "" {
+		typ = "all"
+	}
 	l := console.Listing{Columns: bdrVaultedColumns, NameColumn: "Resource name", Noun: "protected resources", AlwaysStatus: true,
-		Note: "The resources with a backup plan applied, or with backups in a backup vault of this project: Cloud SQL instances only (docs/backupdr.md)."}
+		Filters: []*console.Scope{bdrTypeFilter(typ)},
+		Note:    "The resources with a backup plan applied, or with backups in a backup vault of this project: Cloud SQL instances, Compute Engine VMs and disks (docs/backupdr.md)."}
+	if typ != "all" && typ != backupdr.CloudSQLResourceType && !bdrComputeType(typ) {
+		if _, known := bdrResourceTypeLabels[typ]; !known {
+			l.Unavailable = fmt.Sprintf("%q is not a resource type Backup and DR protects", typ)
+			return l, nil
+		}
+		// A type the service does not back up has no protected resource.
+		l.Note = bdrUnservedTypes()[typ]
+		return l, nil
+	}
 	if project == "" {
 		l.Prompt = "Vaulted backups lists a project's protected resources. Choose one in the toolbar."
 		return l, nil
@@ -415,10 +464,22 @@ func (p bdrVaultedProvider) List(ctx context.Context, project string) (console.L
 		return l, nil
 	}
 	for _, s := range srcs {
+		if typ != "all" && s.typ() != typ {
+			continue
+		}
 		cfg := nested(s.ds, "backupConfigInfo")
+		// The row's menu: "Either from the menu, or from the details page
+		// for the resource, select Create on-demand backup"; Change backup
+		// plan likewise (csql-backup).
+		var menu []console.Action
+		for _, a := range p.DetailActions(ctx, project, []string{s.vaultID(), s.id()}) {
+			if a.ID == "ondemand" || a.ID == "changeplan" || a.ID == "removeplan" {
+				menu = append(menu, a)
+			}
+		}
 		l.Items = append(l.Items, console.Resource{Name: s.instanceName(), Status: str(s.ds, "configState"),
-			Opens: []string{s.vaultID(), s.id()},
-			Fields: map[string]string{"Resource type": "Cloud SQL", "Location": s.location(), "Backup plan": lastSegment(s.plan()),
+			Opens: []string{s.vaultID(), s.id()}, Target: []string{s.vaultID(), s.id()}, Actions: menu,
+			Fields: map[string]string{"Resource type": bdrTypeLabel(s.typ()), "Location": s.location(), "Backup plan": lastSegment(s.plan()),
 				"Backup vault": s.vaultID(), "Backups": str(s.ds, "backupCount"), "Last backup": bdrLastState(str(cfg, "lastBackupState")),
 				"Last successful backup": str(cfg, "lastSuccessfulBackupConsistencyTime")}})
 	}
@@ -435,10 +496,11 @@ func bdrLastState(s string) string {
 
 // CreateForm implements console.Creator: Google's Schedule backup.
 func (bdrVaultedProvider) CreateForm() (string, []console.Field) {
-	return "Schedule backup", bdrScheduleFields(nil, nil, nil, nil)
+	return "Schedule backup", bdrScheduleFields(nil, nil, nil, nil, nil, nil, nil, nil)
 }
 
-func bdrScheduleFields(instances []string, instLabels map[string]string, plans []string, planLabels map[string]string) []console.Field {
+func bdrScheduleFields(instances []string, instLabels map[string]string, plans []string, planLabels map[string]string,
+	vms []string, vmLabels map[string]string, disks []string, diskLabels map[string]string) []console.Field {
 	regions := backupdr.Regions
 	return []console.Field{
 		{Name: "resourceType", Label: "Resource Type", Type: "radio", Required: true, Section: "Choose resources",
@@ -446,10 +508,15 @@ func bdrScheduleFields(instances []string, instLabels map[string]string, plans [
 			UnavailableOptions: bdrUnservedTypes()},
 		{Name: "region", Label: "Region", Type: "select", Required: true, Section: "Choose resources", Options: regions,
 			OptionLabels: bdrRegionLabels(), Default: "us-central1", Help: "The region of the instance."},
-		{Name: "instance", Label: "Resources", Type: "select", Required: true, Section: "Choose resources", Options: instances,
-			OptionLabels: instLabels, Help: "The Cloud SQL instance to back up, in the region chosen."},
+		{Name: "instance", Label: "Resources", Type: "select", Section: "Choose resources", Options: instances,
+			OptionLabels: instLabels, ShowWhen: "resourceType=" + backupdr.CloudSQLResourceType,
+			Help: "The Cloud SQL instance to back up, in the region chosen."},
+		{Name: "vm", Label: "VM instances", Type: "select", Section: "Choose resources", Options: vms, OptionLabels: vmLabels,
+			ShowWhen: "resourceType=" + backupdr.ComputeInstanceResourceType, Help: "The Compute Engine VM to back up, in the region chosen: each of its disks, and its configuration."},
+		{Name: "disk", Label: "Disks", Type: "select", Section: "Choose resources", Options: disks, OptionLabels: diskLabels,
+			ShowWhen: "resourceType=" + backupdr.ComputeDiskResourceType, Help: "The disk to back up, in the region chosen."},
 		{Name: "plan", Label: "Backup plan", Type: "select", Required: true, Section: "Apply backup plan", Options: plans,
-			OptionLabels: planLabels, Help: "A Cloud SQL backup plan in the instance's region."},
+			OptionLabels: planLabels, Help: "A backup plan for the resource type, in the resource's region."},
 	}
 }
 
@@ -462,7 +529,9 @@ func (p bdrVaultedProvider) CreateFormFor(ctx context.Context, project string) [
 		labels[n] = n + " (" + inst[n][0] + ")"
 	}
 	plans, planLabels := p.api.planOptions(ctx, project)
-	return bdrScheduleFields(sortedKeysOf(inst), labels, plans, planLabels)
+	vms, vmLabels := bdrResourceOptions(p.api.computeResources(project, "instances"))
+	disks, diskLabels := bdrResourceOptions(p.api.computeResources(project, "disks"))
+	return bdrScheduleFields(sortedKeysOf(inst), labels, plans, planLabels, vms, vmLabels, disks, diskLabels)
 }
 
 func (bdrVaultedProvider) CreateOnPage() bool   { return true }
@@ -475,8 +544,11 @@ func (p bdrVaultedProvider) Create(ctx context.Context, project string, v map[st
 	if project == "" {
 		return "", errors.New("choose a project first")
 	}
+	if bdrComputeType(v["resourceType"]) {
+		return p.scheduleCompute(ctx, project, v)
+	}
 	if v["resourceType"] != "" && v["resourceType"] != backupdr.CloudSQLResourceType {
-		return "", fmt.Errorf("%s is not served here: Backup and DR backs up Cloud SQL instances only", bdrTypeLabel(v["resourceType"]))
+		return "", fmt.Errorf("%s is not served here: Backup and DR backs up Cloud SQL instances and Compute Engine VMs and disks", bdrTypeLabel(v["resourceType"]))
 	}
 	inst := p.api.sqlInstances(ctx, project)
 	i, ok := inst[v["instance"]]
@@ -517,7 +589,7 @@ func (p bdrVaultedProvider) Detail(ctx context.Context, project string, path []s
 	}
 	cfg := nested(s.ds, "backupConfigInfo")
 	d := console.Detail{Title: s.instanceName(), Summary: []console.Property{
-		{Label: "Resource name", Value: s.instance()}, {Label: "Resource type", Value: "Cloud SQL"},
+		{Label: "Resource name", Value: s.instance()}, {Label: "Resource type", Value: bdrTypeLabel(s.typ())},
 		{Label: "Location", Value: bdrRegionLabel(s.location())},
 		{Label: "Backup vault", Value: s.vaultID(), Link: "/backupdr/" + url.PathEscape(s.vaultID())},
 		{Label: "Backup plan", Value: lastSegment(s.plan()), Link: bdrLinkIf(s.plan() != "", "/backupdr-plans/"+url.PathEscape(lastSegment(s.plan())))},
@@ -527,6 +599,10 @@ func (p bdrVaultedProvider) Detail(ctx context.Context, project string, path []s
 		{Label: "Last backup", Value: bdrLastState(str(cfg, "lastBackupState"))},
 		{Label: "Last successful backup", Value: str(cfg, "lastSuccessfulBackupConsistencyTime")},
 		{Label: "Data source", Value: str(s.ds, "name")}}}
+	if bdrComputeType(s.typ()) {
+		// A VM's or disk's rows in place of the database version.
+		d.Summary = append(append(d.Summary[:6:6], bdrComputeSummary(s)...), d.Summary[7:]...)
+	}
 	if s.association() == "" {
 		d.Summary = append(d.Summary, console.Property{Label: "Backup configuration",
 			Value: "No backup plan: its backups are kept until they expire. Schedule backup applies a plan again."})
@@ -568,13 +644,29 @@ func (p bdrVaultedProvider) backupActions(ctx context.Context, project string, s
 	if str(b, "state") == "ACTIVE" {
 		out = append(out, p.restoreAction(ctx, project, s, nil))
 	}
-	return append(out, console.Action{ID: "backupdelete", Label: "Delete", Destructive: true,
-		Confirm: "The backup is deleted and can no longer be restored. A backup inside its enforced retention cannot be deleted."})
+	return append(out, bdrBackupDelete(b, time.Now()))
+}
+
+// bdrBackupDelete is a backup's Delete, drawn disabled with the reason
+// while its enforced retention lasts: "You can delete a backup only after
+// it exceeds its minimum enforced retention period" (bv-backup-manage,
+// #1844). The service refuses it then too.
+func bdrBackupDelete(b map[string]any, now time.Time) console.Action {
+	a := console.Action{ID: "backupdelete", Label: "Delete", Destructive: true, ConfirmStyle: "confirm",
+		ConfirmTitle: "Delete backup?", Confirm: "The backup is deleted and can no longer be restored."}
+	if end, err := time.Parse(time.RFC3339Nano, str(b, "enforcedRetentionEndTime")); err == nil && now.Before(end) {
+		a.Unavailable = "This backup is inside its minimum enforced retention: it can be deleted after " +
+			end.UTC().Format("Jan 2, 2006, 15:04 UTC") + "."
+	}
+	return a
 }
 
 // restoreAction is Google's Restore: the backup (chosen on the resource's
 // page, given on a backup's row), then Choose restore destination.
 func (p bdrVaultedProvider) restoreAction(ctx context.Context, project string, s bdrSource, backups []string) console.Action {
+	if bdrComputeType(s.typ()) {
+		return p.computeRestoreAction(ctx, project, s, backups)
+	}
 	engine := strings.SplitN(str(nested(s.ds, "dataSourceGcpResource", "cloudSqlInstanceDatasourceProperties"), "databaseInstalledVersion"), "_", 2)[0]
 	var targets []string
 	inst := p.api.sqlInstances(ctx, project)
@@ -629,7 +721,7 @@ func (p bdrVaultedProvider) DetailActions(ctx context.Context, project string, p
 	if a := s.association(); a != "" {
 		if plan, err := p.api.get(ctx, s.plan()); err == nil {
 			acts = append(acts, console.Action{ID: "ondemand", Label: "Create on-demand backup", Submit: "Create",
-				Fields: bdrOnDemandFields(plan)})
+				Title: "Create an on-demand backup", Fields: bdrOnDemandFields(plan)})
 		}
 		plans, labels := p.api.planOptions(ctx, project)
 		var same []string
@@ -656,6 +748,10 @@ func (p bdrVaultedProvider) DetailActions(ctx context.Context, project string, p
 	}
 	if len(active) > 0 {
 		acts = append(acts, p.restoreAction(ctx, project, s, active))
+	}
+	if bdrComputeType(s.typ()) {
+		// Point-in-time restore is Cloud SQL's.
+		return acts
 	}
 	acts = append(acts, console.Action{ID: "pitr", Label: "Point-in-time restore", Fields: []console.Field{
 		{Name: "target", Label: "New instance ID", Type: "text", Required: true, Pattern: `[a-z][a-z0-9\-]{0,96}`},
@@ -698,6 +794,9 @@ func (p bdrVaultedProvider) ActAt(ctx context.Context, project string, path []st
 		}
 		_, err = p.api.call(ctx, p.api.bdr, http.MethodDelete, "/v1/"+s.association(), nil)
 	case "restore":
+		if bdrComputeType(s.typ()) {
+			return p.restoreCompute(ctx, s, v)
+		}
 		target := s.instanceName()
 		switch v["destination"] {
 		case "", "source":
@@ -812,17 +911,20 @@ func bdrPlanFields(vaults []string, vaultLabels map[string]string) []console.Fie
 		{Name: "rules", Label: "Backup rules", Type: console.GroupFieldType, Required: true, Section: "Backup rules", AddLabel: "Add rule",
 			Default: console.FormatGroup([]map[string]string{{"ruleId": "daily-backup", "recurrence": "DAILY", "hourly": "6", "start": "0", "end": "24", "retention": "7"}}),
 			Help: "Each rule's recurrence, its backup window (24-hour clock, start inclusive, end exclusive, in the plan's time zone) and how many " +
-				"days its backups are kept; an hourly rule repeats every 6 to 23 hours. A weekly rule runs on its days of the week; a monthly rule " +
-				"on its days of the month; a yearly rule in its months, on its days of the month.",
+				"days its backups are kept; an hourly rule repeats every 6 to 23 hours (1 to 23 for Compute Engine and disks). A weekly rule runs on its days of the week; a monthly rule " +
+				"on its days of the month, or on a week day of the month (the LAST SUNDAY); a yearly rule in its months, on either.",
 			Group: []console.Field{
 				{Name: "ruleId", Label: "Rule name", Type: "text", Required: true, Pattern: bdrIDPattern, Help: bdrIDHelp},
 				{Name: "recurrence", Label: "Recurrence", Type: "select", Options: recur, OptionLabels: map[string]string{
 					"HOURLY": "Hourly", "DAILY": "Daily", "WEEKLY": "Weekly", "MONTHLY": "Monthly", "YEARLY": "Yearly"}},
-				{Name: "hourly", Label: "Every (hours, hourly only)", Type: "text", Pattern: `[6-9]|1[0-9]|2[0-3]`, Help: "6 to 23"},
+				{Name: "hourly", Label: "Every (hours, hourly only)", Type: "text", Pattern: `[1-9]|1[0-9]|2[0-3]`,
+					Help: "6 to 23 for Cloud SQL, 1 to 23 for Compute Engine and disks"},
 				{Name: "daysOfWeek", Label: "Days of the week (weekly only)", Type: "text", Pattern: bdrTokensPattern,
 					Help: "Such as MON WED: MON, TUE, WED, THU, FRI, SAT, SUN."},
 				{Name: "daysOfMonth", Label: "Days of the month (monthly and yearly only)", Type: "text", Pattern: `[0-9 ,]*`,
 					Help: "Such as 1 15: 1 to 31."},
+				{Name: "weekDayOfMonth", Label: "Week day of the month (monthly and yearly, instead of days)", Type: "text",
+					Pattern: `[A-Za-z]*[ \-]?[A-Za-z]*`, Help: "Such as FIRST-SUNDAY or LAST-FRIDAY: FIRST, SECOND, THIRD, FOURTH or LAST, then the day."},
 				{Name: "months", Label: "Months (yearly only)", Type: "text", Pattern: bdrTokensPattern,
 					Help: "Such as MAR JUN SEP DEC: JAN to DEC."},
 				{Name: "start", Label: "Backup window start", Type: "select", Options: starts, OptionLabels: startLabels},
@@ -862,7 +964,7 @@ func (bdrPlansProvider) CreateSubmit() string { return "Create" }
 
 // bdrRulesFrom reads the Backup rules group into the API's rules, checking
 // what Google's form checks.
-func bdrRulesFrom(group, tz string, optional bool) ([]any, error) {
+func bdrRulesFrom(group, tz string, optional bool, typ string) ([]any, error) {
 	rows, err := console.ParseGroup(group)
 	if err != nil {
 		return nil, err
@@ -905,13 +1007,19 @@ func bdrRulesFrom(group, tz string, optional bool) ([]any, error) {
 		}
 		sch := map[string]any{"recurrenceType": rec, "timeZone": tz,
 			"backupWindow": map[string]any{"startHourOfDay": st, "endHourOfDay": en}}
-		if err := bdrApplyDays(sch, rec, r["daysOfWeek"], r["daysOfMonth"], r["months"], false); err != nil {
+		if err := bdrApplyDaysWeek(sch, rec, r["daysOfWeek"], r["daysOfMonth"], r["months"], r["weekDayOfMonth"], false); err != nil {
 			return nil, fmt.Errorf("rule %d: %w", n, err)
 		}
 		if rec == "HOURLY" {
+			// Compute Engine VMs and disks: 1 to 23 hours; Cloud SQL: 6
+			// to 23 (StandardSchedule.hourlyFrequency).
+			lo := 6
+			if bdrComputeType(typ) {
+				lo = 1
+			}
 			h, err := strconv.Atoi(r["hourly"])
-			if err != nil || h < 6 || h > 23 {
-				return nil, fmt.Errorf("rule %d: an hourly rule repeats every 6 to 23 hours", n)
+			if err != nil || h < lo || h > 23 {
+				return nil, fmt.Errorf("rule %d: an hourly rule repeats every %d to 23 hours", n, lo)
 			}
 			sch["hourlyFrequency"] = h
 		}
@@ -925,8 +1033,12 @@ func (p bdrPlansProvider) Create(ctx context.Context, project string, v map[stri
 	if project == "" {
 		return "", errors.New("choose a project first")
 	}
-	if v["resourceType"] != "" && v["resourceType"] != backupdr.CloudSQLResourceType {
-		return "", fmt.Errorf("%s is not served here: Backup and DR backs up Cloud SQL instances only", bdrTypeLabel(v["resourceType"]))
+	typ := v["resourceType"]
+	if typ == "" {
+		typ = backupdr.CloudSQLResourceType
+	}
+	if typ != backupdr.CloudSQLResourceType && !bdrComputeType(typ) {
+		return "", fmt.Errorf("%s is not served here: Backup and DR backs up Cloud SQL instances and Compute Engine VMs and disks", bdrTypeLabel(typ))
 	}
 	if !bdrIDRe.MatchString(v["id"]) {
 		return "", fmt.Errorf("the name must be %s", bdrIDHelp)
@@ -936,11 +1048,11 @@ func (p bdrPlansProvider) Create(ctx context.Context, project string, v map[stri
 			lastSegment(v["vault"]), vl, v["region"])
 	}
 	ondemand := v["ondemand"] == "true" || v["ondemand"] == "on"
-	rules, err := bdrRulesFrom(v["rules"], strings.TrimSpace(v["timeZone"]), ondemand)
+	rules, err := bdrRulesFrom(v["rules"], strings.TrimSpace(v["timeZone"]), ondemand, typ)
 	if err != nil {
 		return "", err
 	}
-	body := map[string]any{"backupVault": v["vault"], "resourceType": backupdr.CloudSQLResourceType, "backupRules": rules}
+	body := map[string]any{"backupVault": v["vault"], "resourceType": typ, "backupRules": rules}
 	if ondemand {
 		n, err := strconv.Atoi(strings.TrimSpace(v["ondemandDays"]))
 		if err != nil || n < 1 || n > 36159 {
@@ -1022,8 +1134,112 @@ func (p bdrPlansProvider) Detail(ctx context.Context, project string, path []str
 	revs.Total = len(revs.Items)
 	d.Sections = []console.Section{{ID: "rules", Label: "Backup rules", Listing: rules},
 		{ID: "resources", Label: "Resources", Listing: applied}, {ID: "revisions", Label: "Revisions", Listing: revs}}
+	d.Edit = bdrPlanEditForm(x)
 	return d, nil
 }
+
+// bdrRuleRow is one API rule as a row of the Backup rules group.
+func bdrRuleRow(r map[string]any) map[string]string {
+	sch := nested(r, "standardSchedule")
+	row := map[string]string{"ruleId": str(r, "ruleId"), "recurrence": str(sch, "recurrenceType"), "start": "0", "end": "24"}
+	if f, ok := r["backupRetentionDays"].(float64); ok {
+		row["retention"] = strconv.Itoa(int(f))
+	}
+	if f, ok := sch["hourlyFrequency"].(float64); ok {
+		row["hourly"] = strconv.Itoa(int(f))
+	}
+	if w := nested(sch, "backupWindow"); len(w) > 0 {
+		st, _ := w["startHourOfDay"].(float64)
+		en, _ := w["endHourOfDay"].(float64)
+		row["start"], row["end"] = strconv.Itoa(int(st)), strconv.Itoa(int(en))
+	}
+	short := func(k string) string {
+		var out []string
+		if l, ok := sch[k].([]any); ok {
+			for _, x := range l {
+				if v, ok := x.(string); ok && len(v) >= 3 {
+					out = append(out, v[:3])
+				} else if f, ok := x.(float64); ok {
+					out = append(out, strconv.Itoa(int(f)))
+				}
+			}
+		}
+		return strings.Join(out, " ")
+	}
+	row["daysOfWeek"], row["daysOfMonth"], row["months"] = short("daysOfWeek"), short("daysOfMonth"), short("months")
+	if w := nested(sch, "weekDayOfMonth"); len(w) > 0 {
+		row["weekDayOfMonth"] = str(w, "weekOfMonth") + "-" + str(w, "dayOfWeek")
+	}
+	return row
+}
+
+// bdrPlanEditForm is Google's Edit on a plan's page, a page of its own
+// (EditForm.Page): "You can edit the Backup plan description", add, edit or
+// remove backup rules, and the Maximum custom on-demand retention, then
+// "Click Save Changes" (backup-plan-edit, #1844). Each save is a new
+// revision.
+func bdrPlanEditForm(x map[string]any) *console.EditForm {
+	var rows []map[string]string
+	tz := "UTC"
+	for _, r := range bdrItems(x, "backupRules") {
+		rows = append(rows, bdrRuleRow(r))
+		if z := str(nested(r, "standardSchedule"), "timeZone"); z != "" {
+			tz = z
+		}
+	}
+	var fields []console.Field
+	for _, f := range bdrPlanFields(nil, nil) {
+		switch f.Name {
+		case "description":
+			f.Label, f.Section, f.Default = "Backup plan description", "Backup plan description", str(x, "description")
+		case "rules":
+			f.Default, f.Required = console.FormatGroup(rows), false
+		case "timeZone":
+			f.Default = tz
+		case "ondemand":
+			if v, ok := x["maxCustomOnDemandRetentionDays"].(float64); ok && v > 0 {
+				f.Default = "true"
+			}
+		case "ondemandDays":
+			if v, ok := x["maxCustomOnDemandRetentionDays"].(float64); ok && v > 0 {
+				f.Default = strconv.Itoa(int(v))
+			}
+		default:
+			continue
+		}
+		fields = append(fields, f)
+	}
+	return &console.EditForm{Label: "Edit", Title: "Edit backup plan", Submit: "Save Changes", Page: true, Fields: fields,
+		Note: "Resource type, name, region and backup vault are fixed once the plan exists. Each save makes a new revision."}
+}
+
+// Edit implements console.Editor: Edit backup plan's Save Changes, through
+// backupPlans.patch of its description, rules and on-demand retention.
+func (p bdrPlansProvider) Edit(ctx context.Context, project string, path []string, v map[string]string) error {
+	if len(path) != 1 {
+		return errors.New("a backup plan is addressed by its ID")
+	}
+	x, err := p.api.planByID(ctx, project, path[0])
+	if err != nil {
+		return err
+	}
+	ondemand := v["ondemand"] == "true" || v["ondemand"] == "on"
+	rules, err := bdrRulesFrom(v["rules"], strings.TrimSpace(v["timeZone"]), ondemand, str(x, "resourceType"))
+	if err != nil {
+		return err
+	}
+	days := 0
+	if ondemand {
+		if days, err = strconv.Atoi(strings.TrimSpace(v["ondemandDays"])); err != nil || days < 1 || days > 36159 {
+			return errors.New("the maximum custom on-demand retention is 1 to 36159 days")
+		}
+	}
+	body := map[string]any{"description": strings.TrimSpace(v["description"]), "backupRules": rules, "maxCustomOnDemandRetentionDays": days}
+	_, err = p.api.call(ctx, p.api.bdr, http.MethodPatch, "/v1/"+str(x, "name")+"?updateMask=description,backupRules,maxCustomOnDemandRetentionDays", body)
+	return err
+}
+
+var _ console.Editor = bdrPlansProvider{}
 
 func bdrDaysText(s string) string {
 	if s == "" || s == "0" {
@@ -1055,13 +1271,6 @@ func (p bdrPlansProvider) DetailActions(ctx context.Context, project string, pat
 	return []console.Action{
 		{ID: "schedule", Label: "Apply to a resource", Href: "/backupdr-vaulted-backups/create?region=" + url.QueryEscape(locationOf(str(x, "name"))) +
 			"&plan=" + url.QueryEscape(str(x, "name"))},
-		{ID: "editplan", Label: "Edit", Submit: "Save", Fields: []console.Field{
-			{Name: "rule", Label: "Backup rule", Type: "select", Required: true, Options: bdrRuleIDs(x),
-				Help: "Each edit makes a new revision of the plan, listed under Revisions."},
-			{Name: "recurrence", Label: "Recurrence", Type: "select", Options: []string{"", "HOURLY", "DAILY", "WEEKLY", "MONTHLY", "YEARLY"},
-				OptionLabels: map[string]string{"": "Keep the rule's"}},
-			{Name: "retention", Label: "Retention period (days)", Type: "text", Pattern: `[1-9][0-9]{0,4}`, Help: "Empty keeps the rule's."},
-			{Name: "description", Label: "Description", Type: "text", Default: str(x, "description"), Help: "Empty keeps the plan's."}}},
 		{ID: "delete", Label: "Delete", Destructive: true, Leaves: true,
 			Confirm: "The backup plan is deleted. A plan applied to a resource cannot be: remove it from the resource first."},
 	}
@@ -1076,20 +1285,11 @@ func (p bdrPlansProvider) ActAt(ctx context.Context, project string, path []stri
 	if err != nil {
 		return err
 	}
-	name := str(x, "name")
-	loc := name[:strings.Index(name, "/backupPlans/")]
-	switch action {
-	case "editplan":
-		v["plan"] = path[0]
-		if v["description"] == str(x, "description") {
-			v["description"] = ""
-		}
-		return p.api.editPlan(ctx, loc, v)
-	case "delete":
-		_, err = p.api.call(ctx, p.api.bdr, http.MethodDelete, "/v1/"+name, nil)
-		return err
+	if action != "delete" {
+		return fmt.Errorf("unknown action %q", action)
 	}
-	return fmt.Errorf("unknown action %q", action)
+	_, err = p.api.call(ctx, p.api.bdr, http.MethodDelete, "/v1/"+str(x, "name"), nil)
+	return err
 }
 
 // --- Backup plan associations -------------------------------------------------
@@ -1171,7 +1371,7 @@ func (p bdrAssocsProvider) DetailActions(ctx context.Context, project string, pa
 	}
 	var acts []console.Action
 	if plan, err := p.api.get(ctx, str(a, "backupPlan")); err == nil {
-		acts = append(acts, console.Action{ID: "ondemand", Label: "Create on-demand backup", Submit: "Create",
+		acts = append(acts, console.Action{ID: "ondemand", Label: "Create on-demand backup", Submit: "Create", Title: "Create an on-demand backup",
 			Fields: bdrOnDemandFields(plan)})
 	}
 	plans, labels := p.api.planOptions(ctx, project)
@@ -1261,31 +1461,54 @@ func (p backupDRProvider) backupJobs(ctx context.Context, srcs []bdrSource) []co
 	return out
 }
 
-func (p bdrJobsProvider) List(ctx context.Context, project string) (console.Listing, error) {
-	return p.ListFiltered(ctx, project, "")
-}
-
 // bdrRanges are the Jobs page's time ranges; 24 hours is the default.
 var bdrRanges = map[string]time.Duration{"1h": time.Hour, "6h": 6 * time.Hour, "12h": 12 * time.Hour, "24h": 24 * time.Hour,
 	"7d": 7 * 24 * time.Hour, "14d": 14 * 24 * time.Hour}
 
-const bdrRangeHelp = "The time range: 1h, 6h, 12h, 24h (the default), 7d or 14d."
+// bdrRangeOrder and bdrRangeLabels are the time range list's choices, in
+// Google's words: "By default, the Jobs page displays jobs from the last
+// 24 hours. You can change the time range to 1 hour, 6 hours, 12 hours, 7
+// days, or 14 days" (monitor-jobs-console).
+var (
+	bdrRangeOrder  = []string{"1h", "6h", "12h", "24h", "7d", "14d"}
+	bdrRangeLabels = map[string]string{"1h": "Last 1 hour", "6h": "Last 6 hours", "12h": "Last 12 hours", "24h": "Last 24 hours",
+		"7d": "Last 7 days", "14d": "Last 14 days"}
+)
 
-// ListFiltered implements console.FilterLister: the filter is Google's
-// time range (#1924).
-func (p bdrJobsProvider) ListFiltered(ctx context.Context, project, filter string) (console.Listing, error) {
-	rng := strings.ToLower(strings.TrimSpace(filter))
+const (
+	bdrRangeKey  = "range"
+	bdrRangeHelp = "The time range: 1h, 6h, 12h, 24h (the default), 7d or 14d."
+)
+
+// FilterKeys implements console.Filterer: the Jobs page's time range, a
+// list as Google's is, in ?range= (#1844).
+func (bdrJobsProvider) FilterKeys() []string { return []string{bdrRangeKey} }
+
+var _ console.Filterer = bdrJobsProvider{}
+
+func bdrRangePicker(selected string) *console.Scope {
+	sc := &console.Scope{Key: bdrRangeKey, Label: "Time range", Selected: selected, Default: "24h"}
+	for _, r := range bdrRangeOrder {
+		sc.Options = append(sc.Options, console.ScopeOption{ID: r, Label: bdrRangeLabels[r]})
+	}
+	return sc
+}
+
+// List implements console.Provider: the jobs in the time range ?range=
+// chose (#1924, #1844).
+func (p bdrJobsProvider) List(ctx context.Context, project string) (console.Listing, error) {
+	rng := strings.ToLower(strings.TrimSpace(console.ScopeValue(ctx, bdrRangeKey)))
 	if rng == "" {
 		rng = "24h"
 	}
-	sf := &console.ServerFilter{Value: filter, Placeholder: "24h", Help: bdrRangeHelp}
-	l := console.Listing{Columns: bdrJobColumns, NameColumn: "Job ID", Noun: "jobs", AlwaysStatus: true, ServerFilter: sf,
-		ListTab: "jobs",
+	l := console.Listing{Columns: bdrJobColumns, NameColumn: "Job ID", Noun: "jobs", AlwaysStatus: true,
+		ListTab: "jobs", Filters: []*console.Scope{bdrRangePicker(rng)},
 		Note: "The backup and restore jobs of the project, from the job logs the Backup and DR Service writes to Cloud Logging " +
 			"(bdr_backup_restore_jobs and bdr_backup_plan_jobs), in the chosen time range."}
 	d, ok := bdrRanges[rng]
 	if !ok {
-		sf.Error = bdrRangeHelp
+		l.Filters = []*console.Scope{bdrRangePicker("24h")}
+		l.Unavailable = fmt.Sprintf("%q is not a time range. %s", rng, bdrRangeHelp)
 		return l, nil
 	}
 	if project == "" {
@@ -1440,9 +1663,45 @@ func bdrNames(v string, names map[string]string, what string) ([]any, error) {
 // With defaults, a rule that names none runs on SUNDAY, on the 1st, in
 // JANUARY, for the forms that do not ask.
 func bdrApplyDays(sch map[string]any, rec, days, dom, months string, defaults bool) error {
+	return bdrApplyDaysWeek(sch, rec, days, dom, months, "", defaults)
+}
+
+// bdrWeeksOfMonth are gcloud's week-day-of-month ordinals, the API's
+// weekOfMonth.
+var bdrWeeksOfMonth = map[string]bool{"FIRST": true, "SECOND": true, "THIRD": true, "FOURTH": true, "LAST": true}
+
+// bdrWeekDay reads gcloud's week-day-of-month, such as FIRST-SUNDAY or
+// LAST MON, as the API's weekDayOfMonth; "" is none.
+func bdrWeekDay(v string) (map[string]any, error) {
+	t := strings.FieldsFunc(strings.ToUpper(strings.TrimSpace(v)), func(r rune) bool { return r == ' ' || r == '-' || r == ',' })
+	if len(t) == 0 {
+		return nil, nil
+	}
+	bad := fmt.Errorf("%q is not a week day of the month, such as FIRST-SUNDAY or THIRD-MONDAY: FIRST, SECOND, THIRD, FOURTH or LAST, then MONDAY to SUNDAY", v)
+	if len(t) != 2 || !bdrWeeksOfMonth[t[0]] {
+		return nil, bad
+	}
+	day, err := bdrNames(t[1], bdrWeekdays, "day of the week (MON to SUN)")
+	if err != nil || len(day) != 1 {
+		return nil, bad
+	}
+	return map[string]any{"weekOfMonth": t[0], "dayOfWeek": day[0]}, nil
+}
+
+// bdrApplyDaysWeek is bdrApplyDays with a week day of the month (gcloud's
+// week-day-of-month, FIRST-SUNDAY), which a monthly or yearly rule may run
+// on instead of its days of the month.
+func bdrApplyDaysWeek(sch map[string]any, rec, days, dom, months, weekDay string, defaults bool) error {
 	dw, err := bdrNames(days, bdrWeekdays, "day of the week (MON to SUN)")
 	if err != nil {
 		return err
+	}
+	wdm, err := bdrWeekDay(weekDay)
+	if err != nil {
+		return err
+	}
+	if wdm != nil && rec != "MONTHLY" && rec != "YEARLY" {
+		return errors.New("a week day of the month is for a monthly or yearly rule only")
 	}
 	ms, err := bdrNames(months, bdrMonths, "month (JAN to DEC)")
 	if err != nil {
@@ -1456,11 +1715,14 @@ func bdrApplyDays(sch map[string]any, rec, days, dom, months string, defaults bo
 		}
 		dm = append(dm, n)
 	}
+	if wdm != nil && len(dm) > 0 {
+		return errors.New("give the days of the month or a week day of the month, not both")
+	}
 	if defaults {
 		if len(dw) == 0 {
 			dw = []any{"SUNDAY"}
 		}
-		if len(dm) == 0 {
+		if len(dm) == 0 && wdm == nil {
 			dm = []any{1}
 		}
 		if len(ms) == 0 {
@@ -1470,6 +1732,7 @@ func bdrApplyDays(sch map[string]any, rec, days, dom, months string, defaults bo
 	delete(sch, "daysOfWeek")
 	delete(sch, "daysOfMonth")
 	delete(sch, "months")
+	delete(sch, "weekDayOfMonth")
 	switch rec {
 	case "WEEKLY":
 		if len(dw) == 0 {
@@ -1477,10 +1740,14 @@ func bdrApplyDays(sch map[string]any, rec, days, dom, months string, defaults bo
 		}
 		sch["daysOfWeek"] = dw
 	case "MONTHLY", "YEARLY":
-		if len(dm) == 0 {
-			return fmt.Errorf("a %s rule needs its days of the month", strings.ToLower(rec))
+		switch {
+		case wdm != nil:
+			sch["weekDayOfMonth"] = wdm
+		case len(dm) == 0:
+			return fmt.Errorf("a %s rule needs its days of the month, or a week day of the month", strings.ToLower(rec))
+		default:
+			sch["daysOfMonth"] = dm
 		}
-		sch["daysOfMonth"] = dm
 		if rec == "YEARLY" {
 			if len(ms) == 0 {
 				return errors.New("a yearly rule needs its months")

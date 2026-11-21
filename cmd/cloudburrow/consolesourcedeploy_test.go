@@ -141,11 +141,12 @@ func TestConsoleSourceDeployScreens(t *testing.T) {
 	for _, sec := range d.Sections {
 		labels = append(labels, sec.Label)
 	}
-	if err != nil || strings.Join(labels, ",") != "Build summary,Build log,Execution details,Build artifacts" ||
+	if err != nil || strings.Join(labels, ",") != "Build summary,Build log,Execution details,Build dependencies,Build artifacts" ||
 		len(d.Sections[0].Listing.Items) != 2 ||
 		d.Sections[0].Listing.Items[0].Status != "Succeeded" || d.Sections[0].Listing.Items[0].Name != "#0 img" ||
 		!strings.Contains(d.Sections[1].Text, "Starting Step #0") || !strings.Contains(d.Sections[1].Text, "DONE") ||
-		len(d.Sections[3].Listing.Items) != 1 || !strings.HasPrefix(d.Sections[3].Listing.Items[0].Fields["Digest"], "sha256:") {
+		len(d.Sections[3].Listing.Items) != 0 || d.Sections[3].Listing.Note != "This build has no dependencies." ||
+		len(d.Sections[4].Listing.Items) != 1 || !strings.HasPrefix(d.Sections[4].Listing.Items[0].Fields["Digest"], "sha256:") {
 		t.Errorf("build detail = %+v, %v", d, err)
 	}
 	// A step opens its own log: its lines only.

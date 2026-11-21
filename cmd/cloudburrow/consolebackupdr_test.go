@@ -246,7 +246,9 @@ func TestConsoleBackupDRDeletes(t *testing.T) {
 	p := backupDRProvider{bdr: srv}
 	ctx := context.Background()
 	const project = "bdr-deletes"
-	if _, err := p.Create(ctx, project, map[string]string{"id": "vault-1", "region": "us-central1", "retentionDays": "1"}); err != nil {
+	// No minimum enforced retention, so the backup can be deleted at once
+	// (#1844: one inside its enforced retention cannot).
+	if _, err := p.Create(ctx, project, map[string]string{"id": "vault-1", "region": "us-central1", "retentionDays": "0"}); err != nil {
 		t.Fatal(err)
 	}
 	for _, step := range []struct {

@@ -241,7 +241,11 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			pubsubSchemasProvider{endpoint: pubsubAddr})
 	}
 	if enabled[config.ServiceTasks] && d.tasks != nil {
-		providers = append(providers, tasksProvider{svc: d.tasks, faults: d.faults})
+		tp := tasksProvider{svc: d.tasks, faults: d.faults}
+		if enabled[config.ServiceMonitoring] && d.monitoring != nil {
+			tp.metrics = monitoringScreen{api: monitoringAPIOf(d.monitoring)}
+		}
+		providers = append(providers, tp)
 	}
 	// workflowsEventarc is Eventarc, for Workflows' Eventarc triggers
 	// (#2011); nil without it.
@@ -394,7 +398,7 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			dataTransferProvider{svc: d.dataTransfer, only: datatransfer.ScheduledQuery})
 	}
 	if enabled[config.ServiceScheduler] && d.scheduler != nil {
-		providers = append(providers, schedulerProvider{svc: d.scheduler, faults: d.faults})
+		providers = append(providers, schedulerProvider{svc: d.scheduler, faults: d.faults, logs: d.logging})
 	}
 	// APIs & Services (#1352): always served, as projects are.
 	if d.serviceUsage != nil {
@@ -405,6 +409,10 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		p := backupDRProvider{bdr: d.backupdr}
 		if d.sqlAdmin != nil {
 			p.sql = d.sqlAdmin
+		}
+		if enabled[config.ServiceCompute] && d.compute != nil {
+			// Compute Engine VMs and disks (#2075).
+			p.compute = d.compute.API
 		}
 		// Google's menu (#1844): Overview, Vaulted backups, Backup plans,
 		// Backup plan associations, Backup vaults (p) and Jobs.
@@ -530,8 +538,16 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	if d.localAI != nil {
 		docs := docAI{defaultProject: d.cfg.DefaultProject(), addr: d.localAI.Addr}
 		sp := speechSvc{defaultProject: d.cfg.DefaultProject(), addr: d.localAI.Addr}
-		providers = append(providers, docAIOverviewProvider{d: docs}, docAIGalleryProvider{d: docs}, docAIProcessorsProvider{d: docs},
-			speechTranscriptionsProvider{s: sp, held: &speechTranscriptions{}}, speechRecognizersProvider{s: sp},
+		// New transcription saves to a workspace, a bucket of the served
+		// Cloud Storage, as Google's does (#2084); Upload test document
+		// opens its analysis page.
+		transcriptions := speechTranscriptionsProvider{s: sp, held: &speechTranscriptions{}}
+		if enabled[config.ServiceStorage] && storageAddr != "" {
+			transcriptions.ws = speechWorkspaces{storage: storageProvider{endpoint: storageAddr}}
+		}
+		providers = append(providers, docAIOverviewProvider{d: docs}, docAIGalleryProvider{d: docs},
+			docAIProcessorsProvider{d: docs, analyses: &docAIAnalyses{}},
+			transcriptions, speechRecognizersProvider{s: sp},
 			speechCustomClassesProvider{s: sp}, speechPhraseSetsProvider{s: sp})
 	}
 
@@ -544,7 +560,7 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	cluster, own := d.cfg.ClusterName(), d.cfg.Cluster.Namespace
 	providers = append(providers,
 		gkeClustersProvider{name: cluster, kubeconfig: kubeconfig, own: own, svc: d.gke, gkeDir: gkeDir(d.cfg)},
-		gkeWorkloads(kubeconfig, cluster, own),
+		gkeWorkloads(kubeconfig, cluster, own).withSeries(series),
 		podsProvider(kubeconfig, metrics, series),
 		gkeServices(kubeconfig, cluster, own),
 		jobsProvider(kubeconfig),

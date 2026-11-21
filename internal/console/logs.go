@@ -62,6 +62,12 @@ type Entry struct {
 	// labels.KEY against and the Fields pane's label dimensions (Workload /
 	// Service) count (#2032).
 	Labels map[string]string `json:"labels,omitempty"`
+	// ResourceType and ResourceLabels are the monitored resource of an
+	// entry written to Cloud Logging, so the query editor matches
+	// resource.type="cloud_scheduler_job" and resource.labels.job_id as
+	// Google's Logs Explorer does (#1849). Empty for a pod's line.
+	ResourceType   string            `json:"resourceType,omitempty"`
+	ResourceLabels map[string]string `json:"resourceLabels,omitempty"`
 }
 
 // RedactJSON is a JSON payload with Redact applied to its text, or nil when

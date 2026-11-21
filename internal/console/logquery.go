@@ -42,6 +42,16 @@ func LogEntryFields(e Entry) map[string]string {
 	if e.OperationID != "" {
 		f["operation.id"] = e.OperationID
 	}
+	// A Cloud Logging entry's own monitored resource (#1849).
+	if e.ResourceType != "" {
+		f["resource.type"] = e.ResourceType
+	}
+	for k, v := range e.ResourceLabels {
+		if k == "" || f["resource.labels."+k] != "" {
+			continue
+		}
+		f["resource.labels."+k] = v
+	}
 	return f
 }
 

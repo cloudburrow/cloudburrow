@@ -93,10 +93,19 @@ func TestCloudRunBuildTriggerEditAndDisableThroughThePage(t *testing.T) {
 			t.Errorf("Create trigger has no %q", want)
 		}
 	}
+	// Pull request (#2077) is a choice like the others: choosing it shows
+	// Base branch and Comment control, with Google's three choices.
 	var prDisabled bool
 	p.eval(`[...document.querySelectorAll("form.create-page input[type=radio]")].some((r) => r.value === "Pull request" && r.disabled)`, &prDisabled)
-	if !prDisabled {
-		t.Error("Create trigger's Pull request is not drawn disabled")
+	if prDisabled {
+		t.Error("Create trigger's Pull request is drawn disabled")
+	}
+	p.eval(`(() => { document.querySelector('form.create-page input[type=radio][value="Pull request"]').click(); return true; })()`, nil)
+	p.waitFor(`(() => { const b = document.querySelector("#f-base"); return b !== null && b.offsetParent !== null; })()`)
+	var cc string
+	p.eval(`[...document.querySelectorAll('form.create-page input[type=radio][name="f-commentControl-choice"]')].filter((r) => r.offsetParent !== null).map((r) => r.value + (r.checked ? "*" : "")).join("|")`, &cc)
+	if cc != "Required except for owners and collaborators*|Required|Not required" {
+		t.Errorf("Create trigger's Comment control = %q; want Google's three choices, Required except for owners and collaborators chosen", cc)
 	}
 
 	// The row: a Run button, then the menu Edit, Disable, Delete (#1854).
@@ -142,6 +151,17 @@ func TestCloudRunBuildTriggerEditAndDisableThroughThePage(t *testing.T) {
 		document.querySelector("#view").textContent.includes("Cloud Run Admin")`)
 }
 
+// TestCloudBuildPullRequestTriggerFormMeetsWCAG (#2077), in the run shard:
+// Create trigger with Pull request chosen, which shows Base branch and
+// Comment control, passes the console's WCAG 2.1 AA audit.
+func TestCloudBuildPullRequestTriggerFormMeetsWCAG(t *testing.T) {
+	needService(t, "cloud-build-triggers")
+	project := uniqueProject(t)
+	auditScreens(t, []a11yPage{{"create trigger on a pull request", "/cloud-build/triggers/create?project=" + project,
+		`document.querySelector('form.create-page input[type=radio][value="Pull request"]') !== null`,
+		`document.querySelector('form.create-page input[type=radio][value="Pull request"]').click()`}})
+}
+
 // TestCloudRunBuildWorkerPoolEditThroughThePage (#1491), in the run shard.
 // A pool had no page and was changed only with gcloud: from the Worker
 // pools list, a pool's page opens, and Edit worker pool changes the display
@@ -170,15 +190,26 @@ func TestCloudRunBuildWorkerPoolEditThroughThePage(t *testing.T) {
 		consoleDo(t, http.MethodDelete, "/api/resources/cloud-build-worker-pools?project="+project+"&name="+name, "")
 	})
 
+	// The pool's name opens Google's Edit private pool page (#1854),
+	// prefilled, ending in Save.
 	p := open(t)
 	p.navigate("/cloud-build/worker-pools?project=" + project)
 	p.clickText("#view tbody a", name)
-	p.waitFor(fmt.Sprintf(`location.pathname === %q`, "/cloud-build/worker-pools/"+name))
-	p.pageAction("Edit worker pool", map[string]string{"displayName": "Browser builders", "machineType": "e2-highcpu-8", "diskSizeGb": "200"}, "")
+	p.waitFor(fmt.Sprintf(`location.pathname === %q && new URLSearchParams(location.search).get("edit") === "1" &&
+		document.querySelector("#edit-page-form #f-diskSizeGb") !== null`, "/cloud-build/worker-pools/"+name))
+	var form struct{ Heading, Submit, Machine string }
+	p.eval(`(() => ({ Heading: document.querySelector("#view h1").textContent,
+		Submit: document.querySelector("#edit-page-form button[type=submit]").textContent,
+		Machine: document.querySelector("#edit-page-form #f-machineType-e2").value }))()`, &form)
+	if form.Heading != "Edit private pool" || form.Submit != "Save" || form.Machine != "e2-standard-2" {
+		t.Errorf("the pool's page is %+v; want Edit private pool, prefilled, ending in Save", form)
+	}
+	p.submitForm(map[string]string{"machineType-e2": "e2-highcpu-8", "diskSizeGb": "200"}, "diskSizeGb")
+	p.waitFor(`!new URLSearchParams(location.search).has("edit")`)
 	w, err := c.GetWorkerPool(ctx, &cbpb.GetWorkerPoolRequest{Name: "projects/" + project + "/locations/us-central1/workerPools/" + name})
-	if wc := w.GetPrivatePoolV1Config().GetWorkerConfig(); err != nil || w.GetDisplayName() != "Browser builders" ||
+	if wc := w.GetPrivatePoolV1Config().GetWorkerConfig(); err != nil ||
 		wc.GetMachineType() != "e2-highcpu-8" || wc.GetDiskSizeGb() != 200 {
-		t.Errorf("GetWorkerPool after Edit worker pool = %v, %v; want the form's values", w, err)
+		t.Errorf("GetWorkerPool after Edit private pool's Save = %v, %v; want the page's values", w, err)
 	}
 
 	// The default build service account is Create trigger's Service
@@ -233,7 +264,7 @@ func TestCloudRunBuildConsoleRound2ThroughThePages(t *testing.T) {
 			t.Errorf("Create private pool has no %q", want)
 		}
 	}
-	p.submitForm(map[string]string{"name": pool, "region": "us-east1", "series": "n1", "machineType-n1": "n1-standard-4", "diskSizeGb": "250"}, "name")
+	p.submitForm(map[string]string{"name": pool, "region": "us-east1", "series": "n2d", "machineType-n2d": "n2d-standard-4", "diskSizeGb": "250"}, "name")
 	var w *cbpb.WorkerPool
 	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(200 * time.Millisecond) {
 		if w, err = c.GetWorkerPool(ctx, &cbpb.GetWorkerPoolRequest{Name: poolName}); err == nil {
@@ -241,7 +272,7 @@ func TestCloudRunBuildConsoleRound2ThroughThePages(t *testing.T) {
 		}
 	}
 	if wc, nc := w.GetPrivatePoolV1Config().GetWorkerConfig(), w.GetPrivatePoolV1Config().GetNetworkConfig(); err != nil ||
-		wc.GetMachineType() != "n1-standard-4" || wc.GetDiskSizeGb() != 250 || wc.GetWorkerRelease() != "regular" ||
+		wc.GetMachineType() != "n2d-standard-4" || wc.GetDiskSizeGb() != 250 || wc.GetWorkerRelease() != "regular" ||
 		nc.GetEgressOption() != cbpb.PrivatePoolV1Config_NetworkConfig_PUBLIC_EGRESS {
 		t.Fatalf("GetWorkerPool after Create private pool = %v, %v", w, err)
 	}

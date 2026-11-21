@@ -243,13 +243,22 @@ func (p runBuildsProvider) ListSelectActions(_ context.Context, project string) 
 	if !waiting {
 		return nil
 	}
-	return []console.Action{{ID: "approve-selected", Label: "Approve", SelectionField: "builds", Submit: "Approve",
-		Fields: append([]console.Field{{Name: "builds", Label: "Builds", Type: "textarea", Required: true,
-			Help: "The builds checked on History, one ID per line; each must be awaiting approval."}}, approvalFields()...)}}
+	checked := func() []console.Field {
+		return append([]console.Field{{Name: "builds", Label: "Builds", Type: "textarea", Required: true,
+			Help: "The builds checked on History, one ID per line; each must be awaiting approval."}}, approvalFields()...)
+	}
+	// Approve and Reject at the top of the page, over the builds checked
+	// ("Click Reject at the top of the page to reject the build",
+	// https://docs.cloud.google.com/build/docs/securing-builds/gate-builds-on-approval).
+	return []console.Action{
+		{ID: "approve-selected", Label: "Approve", SelectionField: "builds", Submit: "Approve", Fields: checked()},
+		{ID: "reject-selected", Label: "Reject", SelectionField: "builds", Submit: "Reject", Destructive: true, Fields: checked()},
+	}
 }
 
-// approveSelected approves each checked build through ApproveBuild.
-func (p runBuildsProvider) approveSelected(ctx context.Context, project string, values map[string]string) error {
+// approveSelected approves, or with reject rejects, each checked build
+// through ApproveBuild.
+func (p runBuildsProvider) approveSelected(ctx context.Context, project string, values map[string]string, reject bool) error {
 	var ids []string
 	for _, l := range strings.Split(values["builds"], "\n") {
 		if l = strings.TrimSpace(l); l != "" {
@@ -257,7 +266,7 @@ func (p runBuildsProvider) approveSelected(ctx context.Context, project string, 
 		}
 	}
 	if len(ids) == 0 {
-		return fmt.Errorf("select the builds to approve")
+		return fmt.Errorf("select the builds to approve or reject")
 	}
 	var builds []*cbpb.Build
 	for _, id := range ids {
@@ -270,15 +279,19 @@ func (p runBuildsProvider) approveSelected(ctx context.Context, project string, 
 		}
 		builds = append(builds, b)
 	}
+	decision, verb := cbpb.ApprovalResult_APPROVED, "approve"
+	if reject {
+		decision, verb = cbpb.ApprovalResult_REJECTED, "reject"
+	}
 	return p.withClient(ctx, func(c *cloudbuild.Client) error {
 		for _, b := range builds {
 			op, err := c.ApproveBuild(ctx, &cbpb.ApproveBuildRequest{Name: b.GetName(), ApprovalResult: &cbpb.ApprovalResult{
-				Decision: cbpb.ApprovalResult_APPROVED, Comment: values["comment"], Url: strings.TrimSpace(values["url"])}})
+				Decision: decision, Comment: values["comment"], Url: strings.TrimSpace(values["url"])}})
 			if err != nil {
-				return fmt.Errorf("approve %s: %w", b.GetId(), err)
+				return fmt.Errorf("%s %s: %w", verb, b.GetId(), err)
 			}
 			if _, err := op.Wait(ctx); err != nil {
-				return fmt.Errorf("approve %s: %w", b.GetId(), err)
+				return fmt.Errorf("%s %s: %w", verb, b.GetId(), err)
 			}
 		}
 		return nil
@@ -288,8 +301,8 @@ func (p runBuildsProvider) approveSelected(ctx context.Context, project string, 
 // ActAt cancels the build through CancelBuild, or reruns it through
 // RetryBuild; on History itself, approves the checked builds.
 func (p runBuildsProvider) ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error {
-	if len(path) == 0 && action == "approve-selected" {
-		return p.approveSelected(ctx, project, values)
+	if len(path) == 0 && (action == "approve-selected" || action == "reject-selected") {
+		return p.approveSelected(ctx, project, values, action == "reject-selected")
 	}
 	if (action != "cancel" && action != "retry" && action != "approve" && action != "reject") || len(path) != 1 {
 		return fmt.Errorf("unknown action %q", action)
@@ -350,8 +363,8 @@ const buildsFilterHelp = `ListBuilds' filter, as "Filtering build results" docum
 // (#1382), evaluated by the same code as the API. Its columns are
 // Google's History columns (#1854), then the region and image.
 func (p runBuildsProvider) ListFiltered(_ context.Context, project, filter string) (console.Listing, error) {
-	out := console.Listing{Columns: []string{"Source", "Ref", "Commit", "Trigger name", "Created", "Duration", "Region", "Image"},
-		NameColumn: "Build", Noun: "builds", AlwaysStatus: true, RowsOpenable: true, Note: buildStepsNote(p.hostSteps),
+	out := console.Listing{Columns: []string{"Source", "Ref", "Commit", "Trigger name", "Trigger description", "Created", "Duration", "Artifacts", "Region", "Image"},
+		OptionalColumns: []string{"Trigger description", "Artifacts"}, NameColumn: "Build", Noun: "builds", AlwaysStatus: true, RowsOpenable: true, Note: buildStepsNote(p.hostSteps),
 		ServerFilter: &console.ServerFilter{Value: filter, Placeholder: `status="FAILURE" OR status="TIMEOUT"`, Help: buildsFilterHelp}}
 	if project == "" {
 		project = p.defaultProject
@@ -361,9 +374,9 @@ func (p runBuildsProvider) ListFiltered(_ context.Context, project, filter strin
 		out.ServerFilter.Error = err.Error()
 		return out, nil
 	}
-	triggers := map[string]string{}
+	triggers, descriptions := map[string]string{}, map[string]string{}
 	for _, t := range runadapter.Triggers(project, "") {
-		triggers[t.GetId()] = t.GetName()
+		triggers[t.GetId()], descriptions[t.GetId()] = t.GetName(), t.GetDescription()
 	}
 	for _, b := range builds {
 		image := ""
@@ -377,8 +390,9 @@ func (p runBuildsProvider) ListFiltered(_ context.Context, project, filter strin
 		}
 		out.Items = append(out.Items, console.Resource{Name: b.GetId(), Status: buildStatus(b), Selectable: awaitingApproval(b), Fields: map[string]string{
 			"Source": orDash(buildSource(b)), "Ref": orDash(ref), "Commit": orDash(subs["SHORT_SHA"]),
-			"Trigger name": orDash(triggers[b.GetBuildTriggerId()]), "Created": stampAge(b.GetCreateTime()),
-			"Duration": orDash(buildDuration(b)), "Region": buildRegion(b), "Image": orDash(image)}})
+			"Trigger name": orDash(triggers[b.GetBuildTriggerId()]), "Trigger description": orDash(descriptions[b.GetBuildTriggerId()]),
+			"Created": stampAge(b.GetCreateTime()), "Duration": orDash(buildDuration(b)),
+			"Artifacts": orDash(strings.Join(artifactNames(b), ", ")), "Region": buildRegion(b), "Image": orDash(image)}})
 	}
 	out.Total = len(out.Items)
 	return out, nil
@@ -476,6 +490,7 @@ func (p runBuildsProvider) Detail(_ context.Context, project string, path []stri
 		{ID: "summary", Label: "Build summary", Listing: steps, Note: "Select a step to see its log."},
 		{ID: "log", Label: "Build log", Kind: console.KindText, Text: log},
 		{ID: "execution", Label: "Execution details", Kind: console.KindProperties, Groups: buildExecution(b)},
+		{ID: "dependencies", Label: "Build dependencies", Listing: buildDependencies(b)},
 		{ID: "artifacts", Label: "Build artifacts", Listing: buildArtifacts(b)},
 	}}, nil
 }
@@ -560,6 +575,44 @@ func buildExecution(b *cbpb.Build) []console.PropertyGroup {
 		groups = append(groups, console.PropertyGroup{Heading: "Environment variables", Properties: ps})
 	}
 	return groups
+}
+
+// buildDependencies is the Build dependencies view: "If your build has one
+// or more dependencies, then this tab shows dependency information such as
+// repository URL and revision" (view-build-results).
+func buildDependencies(b *cbpb.Build) console.Listing {
+	out := console.Listing{Columns: []string{"Revision", "Destination path", "Depth"}, NameColumn: "Repository URL", Noun: "dependencies"}
+	for _, d := range b.GetDependencies() {
+		g := d.GetGitSource()
+		if g == nil {
+			continue
+		}
+		u := g.GetRepository().GetUrl()
+		if u == "" {
+			u = g.GetRepository().GetDeveloperConnect()
+		}
+		depth := "-"
+		if g.GetDepth() != 0 {
+			depth = fmt.Sprint(g.GetDepth())
+		}
+		out.Items = append(out.Items, console.Resource{Name: u, Fields: map[string]string{
+			"Revision": orDash(g.GetRevision()), "Destination path": orDash(g.GetDestPath()), "Depth": depth}})
+	}
+	out.Total = len(out.Items)
+	if out.Total == 0 {
+		out.Note = "This build has no dependencies."
+	}
+	return out
+}
+
+// artifactNames are the names of a build's artifacts, as Build artifacts
+// lists them: History's Artifacts column.
+func artifactNames(b *cbpb.Build) []string {
+	var out []string
+	for _, r := range buildArtifacts(b).Items {
+		out = append(out, r.Name)
+	}
+	return out
 }
 
 // buildArtifacts is the Build artifacts view: the images the build pushed,

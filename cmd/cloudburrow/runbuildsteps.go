@@ -132,6 +132,24 @@ func (b *localImageBuilder) OpenWorkspace(ctx context.Context, buildID string, a
 	return w, nil
 }
 
+// Unpack implements runadapter.WorkspaceUnpacker: an archive's tree, a
+// build dependency's clone under its destPath (#2074), copied into
+// /workspace over what is there.
+func (w *hostWorkspace) Unpack(ctx context.Context, archive io.Reader) error {
+	dir, err := os.MkdirTemp("", "cloudburrow-build-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(dir)
+	if err := untarGz(archive, dir); err != nil {
+		return fmt.Errorf("unpack: %w", err)
+	}
+	if _, err := w.b.dockerOut(ctx, "cp", dir+"/.", w.holder+":/workspace"); err != nil {
+		return fmt.Errorf("copy into /workspace: %w", err)
+	}
+	return nil
+}
+
 // volume makes the build's volume name, labelled as this instance's.
 func (w *hostWorkspace) volume(ctx context.Context, name string) error {
 	full := w.prefix + "-" + name

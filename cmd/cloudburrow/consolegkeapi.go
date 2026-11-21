@@ -107,10 +107,11 @@ func gkeChannel(c *containerpb.Cluster) string {
 }
 
 // servedRow is a served cluster's row of the list.
-func (p gkeClustersProvider) servedRow(c *containerpb.Cluster) console.Resource {
+func (p gkeClustersProvider) servedRow(ctx context.Context, project string, c *containerpb.Cluster) console.Resource {
+	cpu, memory := p.servedTotals(ctx, project, c)
 	return console.Resource{Name: c.GetName(), Status: gkeStatusText(c), Fields: map[string]string{
 		"Location": c.GetLocation(), "Tier": "Standard", "Mode": gkeMode(c),
-		"Number of nodes": strconv.Itoa(int(c.GetCurrentNodeCount())), "Total vCPUs": "—", "Total memory": "—",
+		"Number of nodes": strconv.Itoa(int(c.GetCurrentNodeCount())), "Total vCPUs": cpu, "Total memory": memory,
 		"Notifications": "—", "Labels": gkeLabels(c.GetResourceLabels()),
 	}}
 }
@@ -145,47 +146,105 @@ func (p gkeClustersProvider) servedDetail(ctx context.Context, project string, c
 		{Label: "Cluster pod IPv4 range", Value: c.GetClusterIpv4Cidr()}, {Label: "Service IPv4 range", Value: c.GetServicesIpv4Cidr()},
 	}}
 	details := console.Section{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{basics, networking}}
-	pools := p.poolListing(c)
-	poolsSection := console.Section{ID: "nodepools", Label: "Node pools", Listing: pools}
+	pools := p.poolListing(ctx, project, c)
+	// Google's Nodes tab holds the cluster's node pools and its nodes:
+	// two sections drawn as one tab, Nodes, with Node pools and Nodes on a
+	// strip inside it.
+	poolsSection := console.Section{ID: "nodepools", Label: "Node pools", Group: "Nodes", Listing: pools}
 	if a := p.addPoolAction(c); a.ID != "" {
 		poolsSection.Actions = []console.Action{a}
 	}
-	nodes := console.Listing{Columns: []string{"Roles", "Version"}, NameColumn: "Name", Noun: "nodes", AlwaysStatus: true}
-	if c.GetStatus() == containerpb.Cluster_RUNNING || c.GetStatus() == containerpb.Cluster_RECONCILING {
-		f := gkeClustersProvider{kubeconfig: p.kubeconfigOf(project, c)}.facts(ctx)
-		nodes.Unavailable = f.unavailable
-		for _, n := range f.nodes {
-			m := meta(n)
-			nodes.Items = append(nodes.Items, console.Resource{Name: str(m, "name"), Status: nodeStatus(n), Fields: map[string]string{
-				"Roles": nodeRoles(m), "Version": str(nested(n, "status", "nodeInfo"), "kubeletVersion")}})
-		}
+	var nodes, storage console.Listing
+	if gkeServedReadable(c) {
+		kc := p.kubeconfigOf(project, c)
+		nodes = gkeNodesListing(ctx, kc, gkeClustersProvider{kubeconfig: kc}.facts(ctx), "")
+		storage = gkeVolumesListing(ctx, kc)
 	} else {
-		nodes.Unavailable = "The cluster is " + strings.ToLower(gkeStatusText(c)) + "."
+		why := "The cluster is " + strings.ToLower(gkeStatusText(c)) + "."
+		nodes = console.Listing{NameColumn: "Name", Noun: "nodes", Unavailable: why}
+		storage = console.Listing{NameColumn: "Persistent volume", Noun: "persistent volumes", Unavailable: why}
 	}
-	nodes.Total = len(nodes.Items)
+	if v := p.upgradeTarget(ctx, project, c); v != "" {
+		for i, prop := range basics.Properties {
+			if prop.Label == "Version" {
+				basics.Properties[i].Action, basics.Properties[i].ActionText = "upgrade", "Upgrade available"
+			}
+		}
+		details.Groups[0] = basics
+	}
 	return console.Detail{
 		Summary: stored(
 			console.Property{Label: "Status", Value: gkeStatusText(c)},
 			console.Property{Label: "Location", Value: c.GetLocation()},
 			console.Property{Label: "Version", Value: c.GetCurrentMasterVersion()},
 		),
-		Sections: []console.Section{details, poolsSection, {ID: "nodes", Label: "Nodes", Listing: nodes},
-			p.operationsSection(ctx, project, c), gkeObservability(), gkeLogs()},
+		Sections: []console.Section{details, poolsSection, {ID: "nodes", Label: "Nodes", Group: "Nodes", Listing: nodes},
+			{ID: "storage", Label: "Storage", Listing: storage}, gkeObservability(), gkeLogs(),
+			p.operationsSection(ctx, project, c)},
 	}
 }
 
-// upgradeTarget is a newer served version than the cluster's, or "".
-func (p gkeClustersProvider) upgradeTarget(ctx context.Context, project string, c *containerpb.Cluster) string {
+// gkeServedReadable is whether a served cluster's Kubernetes API can be
+// read: it is running, or reconciling an update.
+func gkeServedReadable(c *containerpb.Cluster) bool {
+	return c.GetStatus() == containerpb.Cluster_RUNNING || c.GetStatus() == containerpb.Cluster_RECONCILING
+}
+
+// servedTotals are a served cluster's Total vCPUs and Total memory, read
+// from its nodes, as the list shows them; "—" while it cannot be read.
+func (p gkeClustersProvider) servedTotals(ctx context.Context, project string, c *containerpb.Cluster) (string, string) {
+	if !gkeServedReadable(c) {
+		return "—", "—"
+	}
+	f := gkeClustersProvider{kubeconfig: p.kubeconfigOf(project, c)}.facts(ctx)
+	if f.unavailable != "" || len(f.nodes) == 0 {
+		return "—", "—"
+	}
+	return gkeCoresText(f.cpu), gkeMemory(f.memory)
+}
+
+// servedVersions are the versions the API serves in the cluster's
+// location, GetServerConfig's valid master versions.
+func (p gkeClustersProvider) servedVersions(ctx context.Context, project string, c *containerpb.Cluster) []string {
 	cfg, err := p.gkeAPI().GetServerConfig(ctx, &containerpb.GetServerConfigRequest{Name: "projects/" + project + "/locations/" + c.GetLocation()})
 	if err != nil {
-		return ""
+		return nil
 	}
-	for _, v := range cfg.GetValidMasterVersions() {
-		if v != c.GetCurrentMasterVersion() && gkeVersionLess(c.GetCurrentMasterVersion(), v) {
-			return v
+	return cfg.GetValidMasterVersions()
+}
+
+// gkeNewer are the versions newer than from, newest first.
+func gkeNewer(versions []string, from string) []string {
+	var out []string
+	for _, v := range versions {
+		if v != from && gkeVersionLess(from, v) {
+			out = append(out, v)
 		}
 	}
+	sort.SliceStable(out, func(i, j int) bool { return gkeVersionLess(out[j], out[i]) })
+	return out
+}
+
+// upgradeTarget is the newest served version newer than the cluster's
+// control plane, or "".
+func (p gkeClustersProvider) upgradeTarget(ctx context.Context, project string, c *containerpb.Cluster) string {
+	if t := gkeNewer(p.servedVersions(ctx, project, c), c.GetCurrentMasterVersion()); len(t) > 0 {
+		return t[0]
+	}
 	return ""
+}
+
+// gkePoolTargets are the versions a node pool can be upgraded to: newer
+// than its own, and no newer than the control plane's, as Google's "node
+// pools cannot run a newer version than the control plane".
+func gkePoolTargets(versions []string, c *containerpb.Cluster, np *containerpb.NodePool) []string {
+	var out []string
+	for _, v := range gkeNewer(versions, np.GetVersion()) {
+		if !gkeVersionLess(c.GetCurrentMasterVersion(), v) {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // gkeVersionLess compares X.Y.Z-gke.N versions numerically.
@@ -215,9 +274,12 @@ var gkeChannels = map[string]containerpb.ReleaseChannel_Channel{
 func (p gkeClustersProvider) servedActions(ctx context.Context, project string, c *containerpb.Cluster) []console.Action {
 	upgrade := console.Action{ID: "upgrade", Label: "Upgrade", Unavailable: "No newer Kubernetes Engine version is available locally: " +
 		"the versions served are the kind node images this instance has (" + c.GetCurrentMasterVersion() + ")."}
-	if v := p.upgradeTarget(ctx, project, c); v != "" {
-		upgrade = console.Action{ID: "upgrade", Label: "Upgrade", Submit: "Upgrade", Fields: []console.Field{
-			{Name: "version", Label: "Target version", Type: "text", Default: v}}}
+	if targets := gkeNewer(p.servedVersions(ctx, project, c), c.GetCurrentMasterVersion()); len(targets) > 0 {
+		// Google's Upgrade control plane: the target version, and the
+		// note that the node pools follow separately.
+		upgrade = console.Action{ID: "upgrade", Label: "Upgrade", Title: "Upgrade control plane", Submit: "Save changes", Fields: []console.Field{
+			{Name: "version", Label: "Target version", Type: "select", Options: targets, Default: targets[0],
+				Help: "Current version: " + c.GetCurrentMasterVersion() + ". The control plane is upgraded first; each node pool is upgraded on its own, from the Nodes tab."}}}
 	}
 	labels := ""
 	for k, v := range c.GetResourceLabels() {
@@ -235,6 +297,7 @@ func (p gkeClustersProvider) servedActions(ctx context.Context, project string, 
 			{Name: "labels", Label: "Labels", Type: "textarea", Default: strings.TrimSpace(labels), Help: "One key=value per line."},
 		}},
 		upgrade,
+		gkeMaintenanceAction(c),
 		{ID: "delete", Label: "Delete", Destructive: true, Confirm: c.GetName(), Leaves: true},
 		p.addPoolAction(c),
 	}
@@ -260,6 +323,14 @@ func (p gkeClustersProvider) servedAct(ctx context.Context, project string, c *c
 		return gkeStatusErr(err)
 	case "upgrade":
 		_, err := api.UpdateCluster(ctx, &containerpb.UpdateClusterRequest{Name: name, Update: &containerpb.ClusterUpdate{DesiredMasterVersion: v["version"]}})
+		return gkeStatusErr(err)
+	case "maintenance":
+		mp, err := gkeParseMaintenance(v["window"], v["exclusions"])
+		if err != nil {
+			return err
+		}
+		mp.ResourceVersion = c.GetMaintenancePolicy().GetResourceVersion()
+		_, err = api.SetMaintenancePolicy(ctx, &containerpb.SetMaintenancePolicyRequest{Name: name, MaintenancePolicy: mp})
 		return gkeStatusErr(err)
 	case "edit":
 		labels := map[string]string{}
@@ -323,6 +394,22 @@ func (p gkeClustersProvider) servedCreate(ctx context.Context, project string, v
 		}
 		c.NodePools = []*containerpb.NodePool{{Name: "default-pool", InitialNodeCount: int32(n),
 			Config: &containerpb.NodeConfig{MachineType: strings.TrimSpace(v["machine"])}}}
+		more, err := console.ParseGroup(v["pools"])
+		if err != nil {
+			return "", fmt.Errorf("node pools: %w", err)
+		}
+		for _, row := range more {
+			pool := strings.TrimSpace(row["name"])
+			if pool == "" {
+				return "", fmt.Errorf("a node pool has no name")
+			}
+			n, err := strconv.Atoi(strings.TrimSpace(row["nodes"]))
+			if err != nil {
+				return "", fmt.Errorf("node pool %s: number of nodes %q is not a number", pool, row["nodes"])
+			}
+			c.NodePools = append(c.NodePools, &containerpb.NodePool{Name: pool, InitialNodeCount: int32(n),
+				Config: &containerpb.NodeConfig{MachineType: strings.TrimSpace(row["machine"]), ImageType: row["image"]}})
+		}
 	} else {
 		c.Autopilot = &containerpb.Autopilot{Enabled: true}
 	}

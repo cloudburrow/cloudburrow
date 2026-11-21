@@ -29,6 +29,7 @@
           "test/compat/tasks_test.go:65 TestTasksQueueLifecycle",
           "test/compat/taskshttptarget_test.go:33 TestTasksQueueHTTPTarget",
           "test/compat/taskslogging_test.go:35 TestTasksStackdriverLoggingConfig",
+          "test/compat/tasksmetrics_test.go:30 TestTasksQueueMetricsInCloudMonitoring",
           "test/compat/terraform_batch9_test.go:36 TestTerraformCloudTasksQueueIAM",
           "test/compat/terraform_tasks_secrets_test.go:24 TestTerraformTasksQueueHTTPTarget"
         ]
@@ -44,6 +45,7 @@
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
           "test/compat/iamenforcement1879_test.go:282 TestIAMEnforcementTasks",
           "test/compat/tasks_test.go:146 TestTasksTaskLifecycle",
+          "test/compat/tasksmetrics_test.go:30 TestTasksQueueMetricsInCloudMonitoring",
           "test/compat/tasktokens_test.go:115 TestTasksOIDCAndOAuthTokens"
         ]
       },
@@ -1430,6 +1432,7 @@
           "test/compat/cloudbuildcreate_test.go:45 TestCloudBuildCreateBuild",
           "test/compat/cloudbuilddefaultlogs_test.go:132 TestGcloudBuildsSubmitDefaultLogsBucket",
           "test/compat/cloudbuilddefaultlogs_test.go:47 TestCloudBuildDefaultLogsBucket",
+          "test/compat/cloudbuilddeps_test.go:41 TestCloudBuildGitDependencies",
           "test/compat/cloudbuildsecrets_test.go:231 TestGcloudBuildsSecretsAndScript",
           "test/compat/cloudbuildsecrets_test.go:87 TestCloudBuildSecretsScriptAndAllowFailure",
           "test/compat/cloudbuildserviceaccount_test.go:92 TestCloudBuildServiceAccount",
@@ -1446,6 +1449,7 @@
           "test/compat/cloudbuildapproval_test.go:308 TestTerraformCloudBuildTriggerApproval",
           "test/compat/cloudbuildpubsub_test.go:108 TestTerraformCloudBuildPubsubTrigger",
           "test/compat/cloudbuildpubsub_test.go:31 TestCloudBuildPubsubTrigger",
+          "test/compat/cloudbuildpullrequests_test.go:36 TestCloudBuildPullRequestTriggers",
           "test/compat/cloudbuildserviceaccount_test.go:92 TestCloudBuildServiceAccount",
           "test/compat/cloudbuildssm_test.go:183 TestCloudBuildSourceManagerTriggerFilters",
           "test/compat/cloudbuildssm_test.go:455 TestTerraformCloudBuildSourceManagerTrigger",
@@ -1458,6 +1462,7 @@
         "method": "google.devtools.cloudbuild.v1.CloudBuild/CreateWorkerPool",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudbuilddeps_test.go:182 TestCloudBuildWorkerPoolMachineTypes",
           "test/compat/cloudbuildtriggers_test.go:75 TestCloudBuildTriggersAndWorkerPools",
           "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
         ]
@@ -1491,6 +1496,7 @@
           "test/compat/cloudbuildcreate_test.go:182 TestGcloudBuildsSubmit",
           "test/compat/cloudbuildcreate_test.go:45 TestCloudBuildCreateBuild",
           "test/compat/cloudbuilddefaultlogs_test.go:132 TestGcloudBuildsSubmitDefaultLogsBucket",
+          "test/compat/cloudbuilddeps_test.go:41 TestCloudBuildGitDependencies",
           "test/compat/cloudbuildsecrets_test.go:231 TestGcloudBuildsSecretsAndScript",
           "test/compat/cloudbuildsecrets_test.go:87 TestCloudBuildSecretsScriptAndAllowFailure",
           "test/compat/cloudbuildserviceaccount_test.go:92 TestCloudBuildServiceAccount",
@@ -1536,6 +1542,7 @@
         "method": "google.devtools.cloudbuild.v1.CloudBuild/ListBuilds",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudbuildpullrequests_test.go:36 TestCloudBuildPullRequestTriggers",
           "test/compat/cloudbuildssm_test.go:183 TestCloudBuildSourceManagerTriggerFilters",
           "test/compat/cloudbuildsteps_test.go:220 TestGcloudBuildsStepsAndList",
           "test/compat/cloudbuildsteps_test.go:283 TestCloudBuildHostStepsOff",
@@ -1593,6 +1600,7 @@
         "method": "google.devtools.cloudbuild.v1.CloudBuild/UpdateWorkerPool",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudbuilddeps_test.go:182 TestCloudBuildWorkerPoolMachineTypes",
           "test/compat/cloudbuildtriggers_test.go:75 TestCloudBuildTriggersAndWorkerPools",
           "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
         ]
@@ -1646,6 +1654,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/securesourcemanager_test.go:36 TestSecureSourceManagerPushTrigger",
+          "test/compat/securesourcemanagerprivate_test.go:29 TestSecureSourceManagerPrivateInstance",
           "test/compat/terraform_batch11_run_test.go:164 TestTerraformSecureSourceManagerIAM"
         ]
       },
@@ -1668,6 +1677,7 @@
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/CreatePullRequest",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudbuildpullrequests_test.go:36 TestCloudBuildPullRequestTriggers",
           "test/compat/securesourcemanagercontent_test.go:249 TestSecureSourceManagerPullRequestsAndBranchRules"
         ]
       },
@@ -1675,6 +1685,7 @@
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/CreatePullRequestComment",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudbuildpullrequests_test.go:36 TestCloudBuildPullRequestTriggers",
           "test/compat/securesourcemanagerreviews_test.go:128 TestSecureSourceManagerReviewsAndHooks"
         ]
       },
@@ -1684,6 +1695,7 @@
         "tests": [
           "test/compat/iamenforcementround12_1879_test.go:265 TestIAMEnforcementSourceManagerGit",
           "test/compat/securesourcemanager_test.go:36 TestSecureSourceManagerPushTrigger",
+          "test/compat/securesourcemanagertemplates_test.go:29 TestSecureSourceManagerInitialConfig",
           "test/compat/terraform_batch11_run_test.go:164 TestTerraformSecureSourceManagerIAM"
         ]
       },
@@ -1787,7 +1799,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/iamenforcementround12_source_1879_test.go:55 TestIAMEnforcementSecureSourceManager",
-          "test/compat/securesourcemanager_test.go:36 TestSecureSourceManagerPushTrigger"
+          "test/compat/securesourcemanager_test.go:36 TestSecureSourceManagerPushTrigger",
+          "test/compat/securesourcemanagerprivate_test.go:29 TestSecureSourceManagerPrivateInstance"
         ]
       },
       {
@@ -2011,7 +2024,7 @@
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/CreateConnection",
         "status": "Verified",
         "tests": [
-          "test/compat/developerconnect_test.go:49 TestDeveloperConnectSourceManagerTrigger",
+          "test/compat/developerconnect_test.go:47 TestDeveloperConnectSourceManagerTrigger",
           "test/compat/iamenforcementround12_source_1879_test.go:172 TestIAMEnforcementDeveloperConnect"
         ]
       },
@@ -2019,7 +2032,7 @@
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/CreateGitRepositoryLink",
         "status": "Verified",
         "tests": [
-          "test/compat/developerconnect_test.go:49 TestDeveloperConnectSourceManagerTrigger",
+          "test/compat/developerconnect_test.go:47 TestDeveloperConnectSourceManagerTrigger",
           "test/compat/terraform_developerconnect_test.go:31 TestTerraformDeveloperConnect"
         ]
       },
@@ -2032,7 +2045,7 @@
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/DeleteConnection",
         "status": "Verified",
         "tests": [
-          "test/compat/developerconnect_test.go:49 TestDeveloperConnectSourceManagerTrigger",
+          "test/compat/developerconnect_test.go:47 TestDeveloperConnectSourceManagerTrigger",
           "test/compat/iamenforcementround12_source_1879_test.go:172 TestIAMEnforcementDeveloperConnect",
           "test/compat/terraform_developerconnect_test.go:31 TestTerraformDeveloperConnect"
         ]
@@ -2041,7 +2054,7 @@
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/DeleteGitRepositoryLink",
         "status": "Verified",
         "tests": [
-          "test/compat/developerconnect_test.go:49 TestDeveloperConnectSourceManagerTrigger",
+          "test/compat/developerconnect_test.go:47 TestDeveloperConnectSourceManagerTrigger",
           "test/compat/terraform_developerconnect_test.go:31 TestTerraformDeveloperConnect"
         ]
       },
@@ -2069,14 +2082,14 @@
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/FetchGitRefs",
         "status": "Verified",
         "tests": [
-          "test/compat/developerconnect_test.go:49 TestDeveloperConnectSourceManagerTrigger"
+          "test/compat/developerconnect_test.go:47 TestDeveloperConnectSourceManagerTrigger"
         ]
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/FetchLinkableGitRepositories",
         "status": "Verified",
         "tests": [
-          "test/compat/developerconnect_test.go:49 TestDeveloperConnectSourceManagerTrigger"
+          "test/compat/developerconnect_test.go:47 TestDeveloperConnectSourceManagerTrigger"
         ]
       },
       {
@@ -2112,7 +2125,7 @@
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/GetConnection",
         "status": "Verified",
         "tests": [
-          "test/compat/developerconnect_test.go:49 TestDeveloperConnectSourceManagerTrigger",
+          "test/compat/developerconnect_test.go:47 TestDeveloperConnectSourceManagerTrigger",
           "test/compat/iamenforcementround12_source_1879_test.go:172 TestIAMEnforcementDeveloperConnect",
           "test/compat/terraform_developerconnect_test.go:31 TestTerraformDeveloperConnect"
         ]
@@ -2121,7 +2134,7 @@
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/GetGitRepositoryLink",
         "status": "Verified",
         "tests": [
-          "test/compat/developerconnect_test.go:49 TestDeveloperConnectSourceManagerTrigger",
+          "test/compat/developerconnect_test.go:47 TestDeveloperConnectSourceManagerTrigger",
           "test/compat/terraform_developerconnect_test.go:31 TestTerraformDeveloperConnect"
         ]
       },
@@ -2134,7 +2147,7 @@
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/ListConnections",
         "status": "Verified",
         "tests": [
-          "test/compat/developerconnect_test.go:49 TestDeveloperConnectSourceManagerTrigger",
+          "test/compat/developerconnect_test.go:47 TestDeveloperConnectSourceManagerTrigger",
           "test/compat/iamenforcementround12_source_1879_test.go:172 TestIAMEnforcementDeveloperConnect"
         ]
       },
@@ -2142,7 +2155,7 @@
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/ListGitRepositoryLinks",
         "status": "Verified",
         "tests": [
-          "test/compat/developerconnect_test.go:49 TestDeveloperConnectSourceManagerTrigger"
+          "test/compat/developerconnect_test.go:47 TestDeveloperConnectSourceManagerTrigger"
         ]
       },
       {
@@ -2164,7 +2177,7 @@
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/UpdateConnection",
         "status": "Verified",
         "tests": [
-          "test/compat/developerconnect_test.go:49 TestDeveloperConnectSourceManagerTrigger",
+          "test/compat/developerconnect_test.go:47 TestDeveloperConnectSourceManagerTrigger",
           "test/compat/terraform_developerconnect_test.go:31 TestTerraformDeveloperConnect"
         ]
       }
@@ -2635,7 +2648,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/containeranalysis_test.go:150 TestArtifactRegistryVulnerabilityScanning",
-          "test/compat/containeranalysis_test.go:414 TestGcloudArtifactsVulnerabilityScanning"
+          "test/compat/containeranalysis_test.go:414 TestGcloudArtifactsVulnerabilityScanning",
+          "test/compat/containeranalysislicenses_test.go:146 TestArtifactRegistryLanguagePackageLicenses"
         ]
       },
       {
@@ -14455,9 +14469,9 @@
     "Key": "compute",
     "Title": "Compute Engine API (v1): VPC networking",
     "counts": {
-      "Implemented": 21,
+      "Implemented": 20,
       "Unimplemented": 74,
-      "Verified": 71
+      "Verified": 72
     },
     "rows": [
       {
@@ -14560,6 +14574,7 @@
         "method": "compute.disks.get",
         "status": "Verified",
         "tests": [
+          "test/compat/backupdrcompute_test.go:57 TestBackupDRComputeVMAndDiskRoundTrip",
           "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient",
           "test/compat/computevmstools_test.go:176 TestTerraformComputeInstance"
         ]
@@ -14837,6 +14852,7 @@
         "method": "compute.instances.attachDisk",
         "status": "Verified",
         "tests": [
+          "test/compat/backupdrcompute_test.go:57 TestBackupDRComputeVMAndDiskRoundTrip",
           "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient",
           "test/compat/computevmstools_test.go:176 TestTerraformComputeInstance"
         ]
@@ -14871,6 +14887,7 @@
         "method": "compute.instances.get",
         "status": "Verified",
         "tests": [
+          "test/compat/backupdrcompute_test.go:57 TestBackupDRComputeVMAndDiskRoundTrip",
           "test/compat/computevmnet_test.go:33 TestComputeVMNetworkingThroughTheGoClient",
           "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient",
           "test/compat/computevmstools_test.go:176 TestTerraformComputeInstance"
@@ -14912,6 +14929,7 @@
         "method": "compute.instances.insert",
         "status": "Verified",
         "tests": [
+          "test/compat/backupdrcompute_test.go:57 TestBackupDRComputeVMAndDiskRoundTrip",
           "test/compat/computevmnet_test.go:33 TestComputeVMNetworkingThroughTheGoClient",
           "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
         ]
@@ -15328,8 +15346,10 @@
       },
       {
         "method": "compute.snapshots.list",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/backupdrcompute_test.go:57 TestBackupDRComputeVMAndDiskRoundTrip"
+        ]
       },
       {
         "method": "compute.snapshots.setIamPolicy",
@@ -15874,8 +15894,8 @@
     "Key": "backupdr",
     "Title": "Backup and DR Service API (v1)",
     "counts": {
-      "Unimplemented": 15,
-      "Verified": 46
+      "Unimplemented": 14,
+      "Verified": 47
     },
     "rows": [
       {
@@ -15899,7 +15919,9 @@
           "test/compat/backupdr_cli_test.go:36 TestGcloudBackupDR",
           "test/compat/backupdr_cli_test.go:91 TestTerraformBackupDR",
           "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
-          "test/compat/backupdrcmek_test.go:26 TestBackupDRVaultEncryptionConfig"
+          "test/compat/backupdrcmek_test.go:26 TestBackupDRVaultEncryptionConfig",
+          "test/compat/backupdrcompute_test.go:440 TestTerraformBackupDRCompute",
+          "test/compat/backupdrcompute_test.go:57 TestBackupDRComputeVMAndDiskRoundTrip"
         ]
       },
       {
@@ -15908,7 +15930,8 @@
         "tests": [
           "test/compat/backupdr_cli_test.go:36 TestGcloudBackupDR",
           "test/compat/backupdr_cli_test.go:91 TestTerraformBackupDR",
-          "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore"
+          "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
+          "test/compat/backupdrcompute_test.go:440 TestTerraformBackupDRCompute"
         ]
       },
       {
@@ -15924,7 +15947,8 @@
         "tests": [
           "test/compat/backupdr_cli_test.go:36 TestGcloudBackupDR",
           "test/compat/backupdr_cli_test.go:91 TestTerraformBackupDR",
-          "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore"
+          "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
+          "test/compat/backupdrcompute_test.go:440 TestTerraformBackupDRCompute"
         ]
       },
       {
@@ -15950,7 +15974,8 @@
           "test/compat/backupdr1922_test.go:46 TestBackupDRRestoreToANewInstance",
           "test/compat/backupdr_cli_test.go:36 TestGcloudBackupDR",
           "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
-          "test/compat/backupdrcmek_test.go:26 TestBackupDRVaultEncryptionConfig"
+          "test/compat/backupdrcmek_test.go:26 TestBackupDRVaultEncryptionConfig",
+          "test/compat/backupdrcompute_test.go:57 TestBackupDRComputeVMAndDiskRoundTrip"
         ]
       },
       {
@@ -15964,6 +15989,8 @@
           "test/compat/backupdr_cli_test.go:91 TestTerraformBackupDR",
           "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
           "test/compat/backupdrcmek_test.go:26 TestBackupDRVaultEncryptionConfig",
+          "test/compat/backupdrcompute_test.go:440 TestTerraformBackupDRCompute",
+          "test/compat/backupdrcompute_test.go:57 TestBackupDRComputeVMAndDiskRoundTrip",
           "test/compat/terraform_batch8_test.go:279 TestTerraformBackupDRVaultAndPlanUpdates"
         ]
       },
@@ -15977,6 +16004,7 @@
           "test/compat/backupdr_cli_test.go:36 TestGcloudBackupDR",
           "test/compat/backupdr_cli_test.go:91 TestTerraformBackupDR",
           "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
+          "test/compat/backupdrcompute_test.go:440 TestTerraformBackupDRCompute",
           "test/compat/terraform_batch8_test.go:279 TestTerraformBackupDRVaultAndPlanUpdates"
         ]
       },
@@ -15989,6 +16017,7 @@
           "test/compat/backupdr_cli_test.go:36 TestGcloudBackupDR",
           "test/compat/backupdr_cli_test.go:91 TestTerraformBackupDR",
           "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
+          "test/compat/backupdrcompute_test.go:440 TestTerraformBackupDRCompute",
           "test/compat/terraform_batch8_test.go:279 TestTerraformBackupDRVaultAndPlanUpdates"
         ]
       },
@@ -16042,9 +16071,9 @@
         "method": "backupdr.projects.locations.backupVaults.dataSources.abandonBackup",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/backupdr1462_test.go:232 TestBackupDRRefusals"
+          "test/compat/backupdr1462_test.go:236 TestBackupDRRefusals"
         ],
-        "note": "returns UNIMPLEMENTED (in-process check): the backup/recovery appliance's and agent's protocol for Compute Engine workloads (the appliance streams a backup in and finalizes it); CloudBurrow runs no appliance and no Compute Engine, and a Cloud SQL data source's backups are taken by the Cloud SQL Admin API"
+        "note": "returns UNIMPLEMENTED (in-process check): the backup/recovery appliance's and agent's protocol for Compute Engine workloads (the appliance streams a backup in and finalizes it); CloudBurrow runs no appliance (vaulted Compute Engine backups need none), and a Cloud SQL data source's backups are taken by the Cloud SQL Admin API"
       },
       {
         "method": "backupdr.projects.locations.backupVaults.dataSources.backups.delete",
@@ -16075,6 +16104,7 @@
           "test/compat/backupdr1922_test.go:46 TestBackupDRRestoreToANewInstance",
           "test/compat/backupdr_cli_test.go:36 TestGcloudBackupDR",
           "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
+          "test/compat/backupdrcompute_test.go:57 TestBackupDRComputeVMAndDiskRoundTrip",
           "test/compat/terraform_batch12_sql_test.go:207 TestTerraformBackupDRDataSources"
         ]
       },
@@ -16087,27 +16117,28 @@
       },
       {
         "method": "backupdr.projects.locations.backupVaults.dataSources.backups.restore",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check): every RestoreBackupRequest target is a Compute Engine instance or disk, which CloudBurrow does not serve; a Cloud SQL backup is restored by Cloud SQL: sqladmin instances.restoreBackup with backupdrBackup, or instances.pointInTimeRestore with its data source"
+          "test/compat/backupdrcompute_test.go:305 TestGcloudBackupDRRestoreDisk",
+          "test/compat/backupdrcompute_test.go:368 TestGcloudBackupDRRestoreCompute",
+          "test/compat/backupdrcompute_test.go:57 TestBackupDRComputeVMAndDiskRoundTrip"
+        ]
       },
       {
         "method": "backupdr.projects.locations.backupVaults.dataSources.fetchAccessToken",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/backupdr1462_test.go:232 TestBackupDRRefusals"
+          "test/compat/backupdr1462_test.go:236 TestBackupDRRefusals"
         ],
-        "note": "returns UNIMPLEMENTED (in-process check): the backup/recovery appliance's and agent's protocol for Compute Engine workloads (the appliance streams a backup in and finalizes it); CloudBurrow runs no appliance and no Compute Engine, and a Cloud SQL data source's backups are taken by the Cloud SQL Admin API"
+        "note": "returns UNIMPLEMENTED (in-process check): the backup/recovery appliance's and agent's protocol for Compute Engine workloads (the appliance streams a backup in and finalizes it); CloudBurrow runs no appliance (vaulted Compute Engine backups need none), and a Cloud SQL data source's backups are taken by the Cloud SQL Admin API"
       },
       {
         "method": "backupdr.projects.locations.backupVaults.dataSources.finalizeBackup",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/backupdr1462_test.go:232 TestBackupDRRefusals"
+          "test/compat/backupdr1462_test.go:236 TestBackupDRRefusals"
         ],
-        "note": "returns UNIMPLEMENTED (in-process check): the backup/recovery appliance's and agent's protocol for Compute Engine workloads (the appliance streams a backup in and finalizes it); CloudBurrow runs no appliance and no Compute Engine, and a Cloud SQL data source's backups are taken by the Cloud SQL Admin API"
+        "note": "returns UNIMPLEMENTED (in-process check): the backup/recovery appliance's and agent's protocol for Compute Engine workloads (the appliance streams a backup in and finalizes it); CloudBurrow runs no appliance (vaulted Compute Engine backups need none), and a Cloud SQL data source's backups are taken by the Cloud SQL Admin API"
       },
       {
         "method": "backupdr.projects.locations.backupVaults.dataSources.get",
@@ -16115,6 +16146,7 @@
         "tests": [
           "test/compat/backupdr1921_test.go:252 TestBackupDRJobLogsStoredBytesAndOnDemandRetention",
           "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
+          "test/compat/backupdrcompute_test.go:57 TestBackupDRComputeVMAndDiskRoundTrip",
           "test/compat/terraform_batch12_sql_test.go:207 TestTerraformBackupDRDataSources"
         ]
       },
@@ -16122,9 +16154,9 @@
         "method": "backupdr.projects.locations.backupVaults.dataSources.initiateBackup",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/backupdr1462_test.go:232 TestBackupDRRefusals"
+          "test/compat/backupdr1462_test.go:236 TestBackupDRRefusals"
         ],
-        "note": "returns UNIMPLEMENTED (in-process check): the backup/recovery appliance's and agent's protocol for Compute Engine workloads (the appliance streams a backup in and finalizes it); CloudBurrow runs no appliance and no Compute Engine, and a Cloud SQL data source's backups are taken by the Cloud SQL Admin API"
+        "note": "returns UNIMPLEMENTED (in-process check): the backup/recovery appliance's and agent's protocol for Compute Engine workloads (the appliance streams a backup in and finalizes it); CloudBurrow runs no appliance (vaulted Compute Engine backups need none), and a Cloud SQL data source's backups are taken by the Cloud SQL Admin API"
       },
       {
         "method": "backupdr.projects.locations.backupVaults.dataSources.list",
@@ -16146,7 +16178,7 @@
         "method": "backupdr.projects.locations.backupVaults.dataSources.remove",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/backupdr1462_test.go:232 TestBackupDRRefusals"
+          "test/compat/backupdr1462_test.go:236 TestBackupDRRefusals"
         ],
         "note": "returns UNIMPLEMENTED (in-process check): removes a data source made by a backup appliance (the reference: external clients never delete one); CloudBurrow runs no appliance, and a Cloud SQL data source goes with its backup plan association"
       },
@@ -16154,9 +16186,9 @@
         "method": "backupdr.projects.locations.backupVaults.dataSources.setInternalStatus",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/backupdr1462_test.go:232 TestBackupDRRefusals"
+          "test/compat/backupdr1462_test.go:236 TestBackupDRRefusals"
         ],
-        "note": "returns UNIMPLEMENTED (in-process check): an appliance's report of a Compute Engine data source's internal state; CloudBurrow runs no appliance and no Compute Engine, and a Cloud SQL data source's state is its association's"
+        "note": "returns UNIMPLEMENTED (in-process check): an appliance's report of a Compute Engine data source's internal state; CloudBurrow runs no appliance (vaulted Compute Engine backups need none), and a Cloud SQL data source's state is its association's"
       },
       {
         "method": "backupdr.projects.locations.backupVaults.delete",
@@ -16271,41 +16303,41 @@
         "method": "backupdr.projects.locations.managementServers.create",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/backupdr1462_test.go:232 TestBackupDRRefusals"
+          "test/compat/backupdr1462_test.go:236 TestBackupDRRefusals"
         ],
-        "note": "returns UNIMPLEMENTED (in-process check): a management server is the Backup and DR appliance's console, a Google-managed VM on Compute Engine reached over VPC peering with your network; CloudBurrow runs neither, so none can exist, and backup vaults and plans protect Cloud SQL instances without one"
+        "note": "returns UNIMPLEMENTED (in-process check): a management server is the Backup and DR appliance's console, a Google-managed VM on Compute Engine reached over VPC peering with your network; CloudBurrow runs no such appliance, so none can exist, and backup vaults and plans protect Cloud SQL instances and Compute Engine VMs and disks without one"
       },
       {
         "method": "backupdr.projects.locations.managementServers.delete",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/backupdr1462_test.go:232 TestBackupDRRefusals"
+          "test/compat/backupdr1462_test.go:236 TestBackupDRRefusals"
         ],
-        "note": "returns UNIMPLEMENTED (in-process check): a management server is the Backup and DR appliance's console, a Google-managed VM on Compute Engine reached over VPC peering with your network; CloudBurrow runs neither, so none can exist, and backup vaults and plans protect Cloud SQL instances without one"
+        "note": "returns UNIMPLEMENTED (in-process check): a management server is the Backup and DR appliance's console, a Google-managed VM on Compute Engine reached over VPC peering with your network; CloudBurrow runs no such appliance, so none can exist, and backup vaults and plans protect Cloud SQL instances and Compute Engine VMs and disks without one"
       },
       {
         "method": "backupdr.projects.locations.managementServers.get",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/backupdr1462_test.go:232 TestBackupDRRefusals"
+          "test/compat/backupdr1462_test.go:236 TestBackupDRRefusals"
         ],
-        "note": "returns UNIMPLEMENTED (in-process check): a management server is the Backup and DR appliance's console, a Google-managed VM on Compute Engine reached over VPC peering with your network; CloudBurrow runs neither, so none can exist, and backup vaults and plans protect Cloud SQL instances without one"
+        "note": "returns UNIMPLEMENTED (in-process check): a management server is the Backup and DR appliance's console, a Google-managed VM on Compute Engine reached over VPC peering with your network; CloudBurrow runs no such appliance, so none can exist, and backup vaults and plans protect Cloud SQL instances and Compute Engine VMs and disks without one"
       },
       {
         "method": "backupdr.projects.locations.managementServers.getIamPolicy",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/backupdr1462_test.go:232 TestBackupDRRefusals"
+          "test/compat/backupdr1462_test.go:236 TestBackupDRRefusals"
         ],
-        "note": "returns UNIMPLEMENTED (in-process check): a management server is the Backup and DR appliance's console, a Google-managed VM on Compute Engine reached over VPC peering with your network; CloudBurrow runs neither, so none can exist, and backup vaults and plans protect Cloud SQL instances without one"
+        "note": "returns UNIMPLEMENTED (in-process check): a management server is the Backup and DR appliance's console, a Google-managed VM on Compute Engine reached over VPC peering with your network; CloudBurrow runs no such appliance, so none can exist, and backup vaults and plans protect Cloud SQL instances and Compute Engine VMs and disks without one"
       },
       {
         "method": "backupdr.projects.locations.managementServers.list",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/backupdr1462_test.go:232 TestBackupDRRefusals"
+          "test/compat/backupdr1462_test.go:236 TestBackupDRRefusals"
         ],
-        "note": "returns UNIMPLEMENTED (in-process check): a management server is the Backup and DR appliance's console, a Google-managed VM on Compute Engine reached over VPC peering with your network; CloudBurrow runs neither, so none can exist, and backup vaults and plans protect Cloud SQL instances without one"
+        "note": "returns UNIMPLEMENTED (in-process check): a management server is the Backup and DR appliance's console, a Google-managed VM on Compute Engine reached over VPC peering with your network; CloudBurrow runs no such appliance, so none can exist, and backup vaults and plans protect Cloud SQL instances and Compute Engine VMs and disks without one"
       },
       {
         "method": "backupdr.projects.locations.managementServers.msComplianceMetadata",
@@ -16318,17 +16350,17 @@
         "method": "backupdr.projects.locations.managementServers.setIamPolicy",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/backupdr1462_test.go:232 TestBackupDRRefusals"
+          "test/compat/backupdr1462_test.go:236 TestBackupDRRefusals"
         ],
-        "note": "returns UNIMPLEMENTED (in-process check): a management server is the Backup and DR appliance's console, a Google-managed VM on Compute Engine reached over VPC peering with your network; CloudBurrow runs neither, so none can exist, and backup vaults and plans protect Cloud SQL instances without one"
+        "note": "returns UNIMPLEMENTED (in-process check): a management server is the Backup and DR appliance's console, a Google-managed VM on Compute Engine reached over VPC peering with your network; CloudBurrow runs no such appliance, so none can exist, and backup vaults and plans protect Cloud SQL instances and Compute Engine VMs and disks without one"
       },
       {
         "method": "backupdr.projects.locations.managementServers.testIamPermissions",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/backupdr1462_test.go:232 TestBackupDRRefusals"
+          "test/compat/backupdr1462_test.go:236 TestBackupDRRefusals"
         ],
-        "note": "returns UNIMPLEMENTED (in-process check): a management server is the Backup and DR appliance's console, a Google-managed VM on Compute Engine reached over VPC peering with your network; CloudBurrow runs neither, so none can exist, and backup vaults and plans protect Cloud SQL instances without one"
+        "note": "returns UNIMPLEMENTED (in-process check): a management server is the Backup and DR appliance's console, a Google-managed VM on Compute Engine reached over VPC peering with your network; CloudBurrow runs no such appliance, so none can exist, and backup vaults and plans protect Cloud SQL instances and Compute Engine VMs and disks without one"
       },
       {
         "method": "backupdr.projects.locations.operations.cancel",
@@ -16351,6 +16383,8 @@
           "test/compat/backupdr_cli_test.go:36 TestGcloudBackupDR",
           "test/compat/backupdr_cli_test.go:91 TestTerraformBackupDR",
           "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
+          "test/compat/backupdrcompute_test.go:305 TestGcloudBackupDRRestoreDisk",
+          "test/compat/backupdrcompute_test.go:368 TestGcloudBackupDRRestoreCompute",
           "test/compat/iamenforcementround12_backup_1879_test.go:52 TestIAMEnforcementBackupDR",
           "test/compat/terraform_batch8_test.go:279 TestTerraformBackupDRVaultAndPlanUpdates"
         ]
@@ -16382,7 +16416,7 @@
         "method": "backupdr.projects.locations.serviceConfig.initialize",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/backupdr1462_test.go:232 TestBackupDRRefusals"
+          "test/compat/backupdr1462_test.go:236 TestBackupDRRefusals"
         ],
         "note": "returns UNIMPLEMENTED (in-process check): creates Google's default backup vault and backup plan for the resource type, whose names, rules and retention Google chooses and does not document; create them with backupVaults.create and backupPlans.create"
       },
@@ -18143,15 +18177,16 @@
     "Title": "Kubernetes Engine API (v1)",
     "counts": {
       "Implemented": 2,
-      "Unimplemented": 19,
-      "Verified": 16
+      "Unimplemented": 16,
+      "Verified": 19
     },
     "rows": [
       {
         "method": "google.container.v1.ClusterManager/CancelOperation",
         "status": "Verified",
         "tests": [
-          "test/compat/gke_test.go:125 TestGKEClustersNodePoolsAndOperations"
+          "test/compat/gke_test.go:125 TestGKEClustersNodePoolsAndOperations",
+          "test/compat/gkerollback_test.go:128 TestGKERollbackNodePoolUpgrade"
         ]
       },
       {
@@ -18171,8 +18206,8 @@
       },
       {
         "method": "google.container.v1.ClusterManager/CompleteNodePoolUpgrade",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "google.container.v1.ClusterManager/CreateCluster",
@@ -18286,8 +18321,10 @@
       },
       {
         "method": "google.container.v1.ClusterManager/RollbackNodePoolUpgrade",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkerollback_test.go:128 TestGKERollbackNodePoolUpgrade"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/SetAddonsConfig",
@@ -18319,8 +18356,11 @@
       },
       {
         "method": "google.container.v1.ClusterManager/SetMaintenancePolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkerollback_test.go:261 TestGKEAutoUpgradePausesPastItsWindow",
+          "test/compat/gkeupgrade_test.go:172 TestGKEUpgradeMasterThenNodePool"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/SetMasterAuth",
@@ -18369,8 +18409,10 @@
       },
       {
         "method": "google.container.v1.ClusterManager/UpdateMaster",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkeupgrade_test.go:172 TestGKEUpgradeMasterThenNodePool"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/UpdateNodePool",
@@ -18779,7 +18821,8 @@
           "test/compat/logging2021_test.go:34 TestMonitoringSinkVolumeAndIngestion",
           "test/compat/monitoring_test.go:242 TestMonitoringLogBasedMetrics",
           "test/compat/monitoring_test.go:365 TestTerraformMonitoringMetricDescriptor",
-          "test/compat/monitoring_test.go:88 TestMonitoringCustomMetrics"
+          "test/compat/monitoring_test.go:88 TestMonitoringCustomMetrics",
+          "test/compat/tasksmetrics_test.go:30 TestTasksQueueMetricsInCloudMonitoring"
         ]
       },
       {
@@ -18814,7 +18857,8 @@
           "test/compat/monitoring_query_test.go:288 TestMonitoringSLOCompliance",
           "test/compat/monitoring_test.go:242 TestMonitoringLogBasedMetrics",
           "test/compat/monitoring_test.go:324 TestMonitoringRequestCounts",
-          "test/compat/monitoring_test.go:88 TestMonitoringCustomMetrics"
+          "test/compat/monitoring_test.go:88 TestMonitoringCustomMetrics",
+          "test/compat/tasksmetrics_test.go:30 TestTasksQueueMetricsInCloudMonitoring"
         ]
       },
       {

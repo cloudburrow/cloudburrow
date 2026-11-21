@@ -306,6 +306,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// Each Cloud Run workload is told its own service account (#1388).
 		metaSrv.WithAccounts(runSvc.metadataAccount)
 		runSvc.storage = func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") }
+		runSvc.tokens = creds
 		// Functions' event triggers (#1414) deliver through Pub/Sub.
 		if serviceEnabled(cfg, config.ServicePubSub) {
 			runSvc.events = &eventsConfig{
@@ -463,6 +464,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	monitoringSvc := newMonitoringService(cfg)
 	if monitoringSvc != nil {
 		monitoringSvc.logging = loggingSvc
+		// Cloud Tasks' queue metrics come from its dispatch (#2064).
+		monitoringSvc.tasks = tasksSvc
 		// Pub/Sub notification channels publish to this instance's Pub/Sub
 		// (#1964).
 		if serviceEnabled(cfg, config.ServicePubSub) {
@@ -496,6 +499,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			return err
 		})
 		tasksSvc.useLogging(func(ctx context.Context, e *loggingpb.LogEntry) error {
+			_, err := api.WriteLogEntries(ctx, &loggingpb.WriteLogEntriesRequest{Entries: []*loggingpb.LogEntry{e}})
+			return err
+		})
+		// Cloud Scheduler's execution logs (#1849).
+		schedulerSvc.useLogging(func(ctx context.Context, e *loggingpb.LogEntry) error {
 			_, err := api.WriteLogEntries(ctx, &loggingpb.WriteLogEntriesRequest{Entries: []*loggingpb.LogEntry{e}})
 			return err
 		})
@@ -1076,6 +1084,14 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// answer the projects under them (#1536), in process.
 		backupDRSrv.UseHierarchy(backupDRHierarchy{reg: projects})
 		backupDRRef = backupDRSrv
+		// Compute Engine VMs and disks (#2075), backed up through the
+		// Compute Engine API in process once it is started.
+		backupDRSrv.SetCompute(func() backupdr.Compute {
+			if api := computeSvc.API(); api != nil {
+				return api
+			}
+			return nil
+		})
 		if kmsSvc != nil {
 			// A vault's encryptionConfig (#1501) wraps its data key with
 			// this instance's Cloud KMS, in process.

@@ -71,9 +71,9 @@ func TestCloudSQLBackupLifecycle(t *testing.T) {
 	if code, _ := call(t, s, "POST", loc+"/backupVaults?backupVaultId=v", `{"backupMinimumEnforcedRetentionDuration":"86400s"}`); code != http.StatusConflict {
 		t.Errorf("a second vault create: %d", code)
 	}
-	if code, out := call(t, s, "POST", loc+"/backupPlans?backupPlanId=gce", strings.Replace(planBody, "sqladmin.googleapis.com", "compute.googleapis.com", 1)); code != 501 ||
-		!strings.Contains(out["error"].(map[string]any)["message"].(string), "Compute") {
-		t.Errorf("a Compute Engine plan: %d %v", code, out)
+	if code, out := call(t, s, "POST", loc+"/backupPlans?backupPlanId=gce", strings.Replace(planBody, "sqladmin.googleapis.com/Instance", "alloydb.googleapis.com/Cluster", 1)); code != 501 ||
+		!strings.Contains(out["error"].(map[string]any)["message"].(string), "AlloyDB") {
+		t.Errorf("an AlloyDB plan: %d %v", code, out)
 	}
 	if code, out := call(t, s, "POST", loc+"/backupPlans?backupPlanId=plan", planBody); code != 200 {
 		t.Fatalf("plan create: %d %v", code, out)
@@ -118,7 +118,7 @@ func TestCloudSQLBackupLifecycle(t *testing.T) {
 	if id, err := s.BackupRunID(bk); err != nil || id != "run1" {
 		t.Errorf("BackupRunID: %s %v", id, err)
 	}
-	if code, out := call(t, s, "POST", "/v1/"+bk+":restore", `{"computeInstanceTargetEnvironment":{"project":"p","zone":"us-central1-a"}}`); code != 501 ||
+	if code, out := call(t, s, "POST", "/v1/"+bk+":restore", `{"computeInstanceTargetEnvironment":{"project":"p","zone":"us-central1-a"}}`); code != 400 ||
 		!strings.Contains(out["error"].(map[string]any)["message"].(string), "backupdrBackup") {
 		t.Errorf("backups.restore: %d %v", code, out)
 	}

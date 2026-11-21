@@ -100,10 +100,31 @@ func TestConsoleBackupDRGooglePages(t *testing.T) {
 	if r := pd.Sections[0].Listing.Items; len(r) != 2 || r[0].Fields["Backup window"] != "01:00 to 05:00" || r[1].Fields["Recurrence"] != "Hourly, every 6 hours" {
 		t.Errorf("the plan's rules: %+v", r)
 	}
+	// Edit backup plan, a page of its own ending in Save Changes (#1844):
+	// prefilled with the plan's rules; a monthly rule on the last Sunday is
+	// added, the hourly rule removed, and the description changed.
+	if e := pd.Edit; e == nil || !e.Page || e.Submit != "Save Changes" || len(e.Fields) < 3 || e.Fields[0].Default != "gold" ||
+		!strings.Contains(e.Fields[1].Default, `"ruleId":"hourly"`) || !strings.Contains(e.Fields[1].Default, `"hourly":"6"`) {
+		t.Fatalf("Edit backup plan: %+v", pd.Edit)
+	}
+	edited := console.FormatGroup([]map[string]string{
+		{"ruleId": "daily", "recurrence": "DAILY", "start": "1", "end": "5", "retention": "7"},
+		{"ruleId": "monthly", "recurrence": "MONTHLY", "weekDayOfMonth": "LAST-SUNDAY", "start": "0", "end": "24", "retention": "30"}})
+	if err := plans.Edit(ctx, project, []string{"plan-1"}, map[string]string{"description": "platinum", "rules": edited, "timeZone": "UTC"}); err != nil {
+		t.Fatal(err)
+	}
+	pd, _ = plans.Detail(ctx, project, []string{"plan-1"})
+	if r := pd.Sections[0].Listing.Items; len(r) != 2 || r[1].Name != "monthly" || r[1].Fields["Recurrence"] != "Monthly, on the last Sunday" ||
+		len(pd.Sections[2].Listing.Items) != 2 {
+		t.Errorf("after Edit backup plan: rules %+v, revisions %+v", r, pd.Sections[2].Listing.Items)
+	}
+	if !strings.Contains(pd.Edit.Fields[1].Default, `"weekDayOfMonth":"LAST-SUNDAY"`) {
+		t.Errorf("the edit page's rules: %s", pd.Edit.Fields[1].Default)
+	}
 
 	// Schedule backup: an instance and a plan of its region.
-	if f := vaulted.CreateFormFor(ctx, project); len(f[2].Options) != 2 || len(f[3].Options) != 2 {
-		t.Errorf("Schedule backup's resources and plans: %+v %+v", f[2], f[3])
+	if f := vaulted.CreateFormFor(ctx, project); len(f[2].Options) != 2 || len(f[5].Options) != 2 {
+		t.Errorf("Schedule backup's resources and plans: %+v %+v", f[2], f[5])
 	}
 	if _, err := vaulted.Create(ctx, project, map[string]string{"resourceType": backupdr.CloudSQLResourceType, "region": "us-east1",
 		"instance": "pg", "plan": "projects/" + project + "/locations/us-central1/backupPlans/plan-1"}); err == nil {
@@ -118,6 +139,22 @@ func TestConsoleBackupDRGooglePages(t *testing.T) {
 		t.Fatalf("Vaulted backups: %+v", vl.Items)
 	}
 	path := vl.Items[0].Opens
+	// The row's menu (#1844): Create on-demand backup, Change and Remove backup
+	// plan, at the resource's path; Filter table > Resource type.
+	if ids := bdrActionIDs(vl.Items[0].Actions); ids != "ondemand,changeplan,removeplan" || strings.Join(vl.Items[0].Target, "/") != strings.Join(path, "/") ||
+		len(vl.Filters) != 1 || vl.Filters[0].Label != "Resource type" || vl.Filters[0].Selected != "all" {
+		t.Errorf("a Vaulted backups row's menu %s at %v, filters %+v", ids, vl.Items[0].Target, vl.Filters)
+	}
+	if sqlOnly, _ := vaulted.List(console.WithScopeValue(ctx, bdrTypeKey, backupdr.CloudSQLResourceType), project); len(sqlOnly.Items) != 1 {
+		t.Errorf("Resource type Cloud SQL: %+v", sqlOnly.Items)
+	}
+	if vms, _ := vaulted.List(console.WithScopeValue(ctx, bdrTypeKey, "compute.googleapis.com/Instance"), project); len(vms.Items) != 0 {
+		t.Errorf("Resource type Compute Engine: %+v %q", vms.Items, vms.Note)
+	}
+	if adb, _ := vaulted.List(console.WithScopeValue(ctx, bdrTypeKey, "alloydb.googleapis.com/Cluster"), project); len(adb.Items) != 0 ||
+		!strings.Contains(adb.Note, "not served") {
+		t.Errorf("Resource type AlloyDB: %+v %q", adb.Items, adb.Note)
+	}
 	if acts := bdrActionIDs(vaulted.DetailActions(ctx, project, path)); acts != "ondemand,changeplan,removeplan,pitr" {
 		t.Errorf("a resource's actions before a backup: %s", acts)
 	}
@@ -170,11 +207,12 @@ func TestConsoleBackupDRGooglePages(t *testing.T) {
 	}
 	// Google's time ranges (#1924): an unknown one is refused, 1h still
 	// holds the job just taken.
-	if bad, _ := jobs.ListFiltered(ctx, project, "3d"); bad.ServerFilter == nil || bad.ServerFilter.Error == "" {
-		t.Errorf("time range 3d: %+v", bad.ServerFilter)
+	if bad, _ := jobs.List(console.WithScopeValue(ctx, bdrRangeKey, "3d"), project); bad.Unavailable == "" {
+		t.Errorf("time range 3d: %+v", bad)
 	}
-	if hour, _ := jobs.ListFiltered(ctx, project, "1h"); len(hour.Items) != 1 {
-		t.Errorf("time range 1h: %d jobs", len(hour.Items))
+	if hour, _ := jobs.List(console.WithScopeValue(ctx, bdrRangeKey, "1h"), project); len(hour.Items) != 1 ||
+		len(hour.Filters) != 1 || hour.Filters[0].Label != "Time range" || hour.Filters[0].Selected != "1h" || len(hour.Filters[0].Options) != 6 {
+		t.Errorf("time range 1h: %d jobs, filters %+v", len(hour.Items), hour.Filters)
 	}
 	ov, _ := overview.List(ctx, project)
 	if ov.Summary[0].Properties[0].Value != "1" || ov.Summary[0].Properties[2].Value != "2" || ov.Summary[1].Properties[0].Value != "1" {

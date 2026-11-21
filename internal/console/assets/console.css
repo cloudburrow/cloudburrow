@@ -1499,6 +1499,9 @@ tbody tr.is-selected { background: var(--nav-selected); }
 .overflow-item:hover { background: var(--state-hover); }
 .overflow-item:active { background: var(--state-press); }
 .overflow-item.is-destructive { color: var(--error); }
+/* A tab's ellipsis (#2064) opens from its left edge: it can be the first
+   control on the tab, with nothing to its left to open over. */
+.section-actions .overflow-menu { left: 0; right: auto; }
 
 /* The footer carries the page size and the range, so the count on screen
    always describes the rows on screen. */
@@ -1632,6 +1635,22 @@ thead th {
 .info-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px;
                 padding-top: 16px; border-top: 1px solid var(--border); }
 .info-empty { padding-top: 24px; text-align: center; }
+
+/* A provider's side panel (#2066): Setup Instructions, Vulnerability
+   details. Its tables scroll inside the panel rather than widening it. */
+.side-panel h3 { margin: 16px 0 4px; font-size: var(--text-body-size, 14px); font-weight: 500; }
+.side-panel-text pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0 0; }
+.side-panel-table { margin-top: 16px; overflow-x: auto; }
+.side-panel-table caption { text-align: left; font-weight: 500; padding-bottom: 8px; }
+.side-panel-table td { overflow-wrap: anywhere; }
+
+/* A group of counts as a bar graph (#2066): Most common licenses. */
+.bar-graph { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.bar-row { display: grid; grid-template-columns: minmax(8em, 16em) 1fr auto; align-items: center; gap: 8px; }
+.bar-label { overflow-wrap: anywhere; }
+.bar-track { height: 12px; background: var(--border); border-radius: 2px; overflow: hidden; }
+.bar-fill { display: block; height: 100%; background: var(--accent); }
+.bar-count { font-variant-numeric: tabular-nums; }
 .info-empty h2 { font-size: var(--text-heading-size); font-weight: 500; margin: 0 0 4px; }
 
 /* The row being described, marked so the panel and the table agree. */
@@ -2006,7 +2025,10 @@ dd.has-copy .property-copy-value { overflow-wrap: anywhere; min-width: 0; }
 dd.has-copy .property-copy { padding: 2px 8px; font-size: var(--text-badge-size); }
 /* A link beside a value that opens a page action: Upgrade beside an edition (#1859). */
 dd.has-property-action { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
-.objects-show { display: inline-flex; align-items: center; gap: 6px; }
+.objects-show { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; }
+/* A long choice (a layer's build command, #2066) narrows the list rather
+   than widening the page. */
+.objects-show select { min-width: 0; max-width: 100%; text-overflow: ellipsis; }
 /* A form section's tabs (Field.Tab, #1852): Google's Create service page's
    Container(s), Variables & Secrets, Volumes, Networking and Security. */
 .form-tabs { margin: 4px 0 16px; overflow-x: auto; }
@@ -2428,6 +2450,13 @@ svg.bq-chart { display: block; border: 1px solid var(--border); border-radius: v
    document, its page images with the layout's boxes, beside its text and
    rows. Side by side when there is room, stacked in a narrow window. */
 .modal:has(.result-doc) { max-width: min(1280px, calc(100vw - 32px)); width: 100%; }
+.media-section .media-player { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+.media-section audio { width: 100%; max-width: 640px; }
+/* The player's controls are in the browser's own shadow tree, where the
+   rule above does not reach: the host shows focus while any of them holds it. */
+.media-section audio:focus, .media-section audio:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.result-section { overflow-x: auto; }
+.result-section .result-pages, .result-section .result-side { max-height: none; }
 .result-doc { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
 .result-pages { flex: 1 1 320px; min-width: 0; max-height: 70vh; overflow: auto; }
 .result-side { flex: 1 1 320px; min-width: 0; max-height: 70vh; overflow: auto; }
@@ -2577,3 +2606,71 @@ tr.log-entry.is-located { outline: 2px solid var(--accent); outline-offset: -2px
 .log-analytics p { overflow-wrap: anywhere; }
 .log-analytics-chart { margin-top: 16px; min-width: 0; }
 .log-analytics-chart h2 { font-size: var(--text-body-size); margin: 0 0 8px; }
+
+/* A list's checkbox tree filter (#2070): Object Browser's API groups and
+   kinds. Columns that reflow to one at narrow widths. */
+.check-tree { border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 12px; margin: 0 0 12px; min-width: 0; }
+.check-tree legend { font-weight: 500; padding: 0 4px; }
+.check-tree ul { list-style: none; margin: 0; padding: 0; }
+.check-tree-groups { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 16rem), 1fr)); gap: 2px 16px; }
+.check-tree-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.check-tree-label { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; overflow-wrap: anywhere; min-width: 0; }
+.check-tree .check-tree-kinds { padding-left: 36px; }
+.check-tree-toggle svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; }
+.check-tree-toggle[aria-expanded="true"] svg { transform: rotate(90deg); }
+.check-tree-spacer { display: inline-block; width: 32px; flex: none; }
+@media (prefers-reduced-motion: no-preference) { .check-tree-toggle svg { transition: transform 0.15s; } }
+
+/* Secure Source Manager's code view and Files changed (#2071). */
+.tok-kw { color: var(--accent); font-weight: 600; }
+.list-menus { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin: 8px 0; }
+.list-menu-label { display: inline-flex; gap: 6px; align-items: center; max-width: 100%; min-width: 0; }
+.list-menu-label .list-menu { min-width: 0; max-width: 100%; flex: 1 1 auto; }
+.list-menu-toggle[aria-pressed="true"] { box-shadow: inset 0 0 0 2px var(--accent); font-weight: 600; }
+.ref-picker-row { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
+.code-scroll { overflow: auto; max-height: 70vh; }
+.code-view { border-collapse: collapse; width: 100%; font-size: var(--text-caption-size, 12px); }
+.code-view td { padding: 0 8px; vertical-align: top; white-space: pre; }
+.code-line-number { color: var(--text-muted); text-align: right; user-select: none; width: 1%; border-right: 1px solid var(--border); }
+.code-blame { white-space: nowrap; border-right: 1px solid var(--border); background: var(--surface-alt); max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
+.diff-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; position: relative; }
+.diff-file { margin: 8px 0; padding: 0; overflow: auto; }
+.diff-file-head { display: flex; gap: 8px; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--border); background: var(--surface-alt); }
+.diff-file-name { margin: 0; font-size: inherit; }
+.diff-table { border-collapse: collapse; width: 100%; }
+.diff-table td { padding: 0 6px; vertical-align: top; }
+.diff-code { white-space: pre; width: 50%; }
+.diff-table:not(.is-split) .diff-code { width: auto; }
+.diff-num { color: var(--text-muted); text-align: right; width: 1%; user-select: none; }
+.diff-sign { display: inline-block; width: 1.2em; user-select: none; }
+.is-add { background: color-mix(in srgb, var(--ok) 14%, var(--surface)); }
+.is-del { background: color-mix(in srgb, var(--error) 14%, var(--surface)); }
+.is-hunk { color: var(--text-muted); background: var(--surface-alt); }
+.diff-plus-cell { width: 1%; }
+.diff-plus { border: 1px solid var(--accent); color: var(--accent); background: var(--surface); border-radius: 3px; cursor: pointer;
+  line-height: 1; padding: 0 4px; }
+.is-add .diff-num, .is-del .diff-num { color: var(--text); }
+.diff-comments td, .diff-form-row td { background: var(--surface-alt); padding: 6px 8px; }
+.diff-comment { margin: 2px 0; white-space: pre-wrap; }
+.diff-comment.is-pending .status-chip { font-weight: 600; }
+.diff-comment-form textarea { width: 100%; box-sizing: border-box; }
+
+/* A Cloud Build Dashboard card's Build history bar chart, its Pin and the
+   Filter triggers box (#1854). */
+.bar-chart { display: flex; flex-direction: column; gap: 4px; }
+.bar-chart-bars { display: flex; align-items: flex-end; gap: 3px; height: 48px; margin: 0; padding: 0; list-style: none; }
+.bar-chart-bars li { display: flex; align-items: flex-end; height: 100%; flex: 0 0 10px; }
+.bar-chart-bar { display: block; width: 10px; border-radius: 2px 2px 0 0; background: var(--text-muted); }
+.bar-chart-bar.is-ok { background: var(--ok); }
+.bar-chart-bar.is-fail { background: var(--error); }
+.bar-chart-bar:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.bar-chart-tip { min-height: 1.3em; font-size: var(--text-caption-size); color: var(--text-muted); }
+.listing-summary { position: relative; }
+.card-pin { position: absolute; top: 8px; right: 8px; }
+.card-pin svg { fill: none; stroke: currentColor; stroke-width: 1.6; }
+.card-pin[aria-pressed="true"] svg { fill: currentColor; }
+.listing-summary.is-pinned { border-color: var(--accent); }
+.card-filter-bar { margin: 0 0 16px; }
+.card-filter { width: min(360px, 100%); }
+.row-delete-icon svg { fill: none; stroke: currentColor; stroke-width: 1.6; }
+.listing-summary:has(> .card-pin) > h2 { padding-right: 40px; }

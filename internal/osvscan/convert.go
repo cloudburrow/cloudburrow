@@ -153,10 +153,15 @@ func Convert(r *Result) Findings {
 					LongDescription: "Packages of type " + pt + " found by Artifact Analysis's container scanning.",
 					Type:            &pb.Note_Package{Package: &pb.PackageNote{Name: pt, PackageType: pt}}}
 			}
-			f.Packages = append(f.Packages, &pb.Occurrence{NoteName: pn, Details: &pb.Occurrence_Package{Package: &pb.PackageOccurrence{
+			pk := &pb.PackageOccurrence{
 				Name: p.Package.Name, PackageType: pt, CpeUri: cpe, Version: ver,
 				Location: []*pb.Location{{CpeUri: cpe, Version: ver, Path: res.Source.Path}},
-			}}})
+			}
+			if lic := licenseOf(p.Licenses); lic != "" {
+				pk.License = &pb.License{Expression: lic}
+			}
+			f.Packages = append(f.Packages, &pb.Occurrence{NoteName: pn, Details: &pb.Occurrence_Package{Package: pk}})
+			layer := layerOf(r, p)
 			score := map[string]float64{}
 			for _, g := range p.Groups {
 				s, err := strconv.ParseFloat(g.MaxSeverity, 64)
@@ -175,6 +180,7 @@ func Convert(r *Result) Findings {
 				}
 				seen[id] = true
 				occ, note := vulnerability(v, p, pt, isOS, cpe, ver, res.Source.Path, score)
+				occ.GetVulnerability().GetPackageIssue()[0].GetFileLocation()[0].LayerDetails = layer
 				f.Vulnerabilities = append(f.Vulnerabilities, occ)
 				if notes[note.Name] == nil {
 					notes[note.Name] = note
@@ -190,6 +196,46 @@ func Convert(r *Result) Findings {
 		f.Notes = append(f.Notes, n)
 	}
 	return f
+}
+
+// licenseOf is a package's license as one SPDX expression: the scanner's
+// licenses joined by AND, as each one applies. Empty when the scanner
+// found none, or reports it as unknown.
+func licenseOf(ls []string) string {
+	var out []string
+	for _, l := range ls {
+		if l = strings.TrimSpace(l); l != "" && !strings.EqualFold(l, "unknown") {
+			out = append(out, l)
+		}
+	}
+	if len(out) > 1 {
+		for i, l := range out {
+			if strings.Contains(l, " ") {
+				out[i] = "(" + l + ")"
+			}
+		}
+	}
+	return strings.Join(out, " AND ")
+}
+
+// layerOf is the layer a package of an image scan came from, as Grafeas's
+// LayerDetails: its index (0 is the bottom layer), diff ID, build command
+// and the base images it is in. Nil outside an image scan.
+func layerOf(r *Result, p Package) *pb.LayerDetails {
+	o := p.Package.ImageOriginDetails
+	if o == nil || o.Index < 0 || o.Index >= len(r.ImageMetadata.LayerMetadata) {
+		return nil
+	}
+	l := r.ImageMetadata.LayerMetadata[o.Index]
+	d := &pb.LayerDetails{Index: int32(o.Index), DiffId: l.DiffID, Command: l.Command}
+	if i := l.BaseImageIndex; i > 0 && i < len(r.ImageMetadata.BaseImages) {
+		for _, b := range r.ImageMetadata.BaseImages[i] {
+			if b.Name != "" {
+				d.BaseImages = append(d.BaseImages, &pb.BaseImage{Name: b.Name})
+			}
+		}
+	}
+	return d
 }
 
 func sortedNotes(m map[string]*pb.Note) []*pb.Note {

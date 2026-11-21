@@ -8,6 +8,7 @@ require (
 	cloud.google.com/go/aiplatform v1.127.0
 	cloud.google.com/go/artifactregistry v1.27.0
 	cloud.google.com/go/auth v0.24.1
+	cloud.google.com/go/backupdr v1.18.0
 	cloud.google.com/go/bigquery v1.85.0
 	cloud.google.com/go/bigtable v1.58.0
 	cloud.google.com/go/cloudbuild v1.35.0
@@ -64,6 +65,7 @@ require (
 	github.com/golang/protobuf v1.5.4
 	github.com/google/differential-privacy/go/v4 v4.1.0
 	github.com/google/go-containerregistry v0.22.1
+	github.com/google/licensecheck v0.3.1
 	github.com/google/uuid v1.6.0
 	github.com/googleapis/gax-go/v2 v2.27.0
 	github.com/jackc/pgx/v5 v5.11.0

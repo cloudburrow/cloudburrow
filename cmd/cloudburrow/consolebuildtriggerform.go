@@ -38,6 +38,11 @@ const (
 	cfgDockerfile = "Dockerfile"
 	cfgBuildpacks = "Buildpacks"
 
+	// Comment control, as Google's form words its choices.
+	ccExceptOwners = "Required except for owners and collaborators"
+	ccRequired     = "Required"
+	ccNotRequired  = "Not required"
+
 	locRepository = "Repository"
 	locInline     = "Inline"
 
@@ -91,9 +96,8 @@ func (p buildTriggersProvider) triggerFields(ctx context.Context, project string
 		{Name: "tags", Label: "Tags", Type: "text", Help: "Optional: comma separated."},
 
 		{Name: "event", Label: "Event", Type: "radio", Section: "Event", Default: evPushBranch,
-			Options:            []string{evPushBranch, evPushTag, evPullRequest, evManual, evPubsub, evWebhook},
-			UnavailableOptions: map[string]string{evPullRequest: "Pull request triggers do not run: this instance's Secure Source Manager serves pull requests but runs no build when one is opened or updated (#1927), so it takes pushes only."},
-			Help:               "Repository event that invokes trigger, or another event."},
+			Options: []string{evPushBranch, evPushTag, evPullRequest, evManual, evPubsub, evWebhook},
+			Help:    "Repository event that invokes trigger, or another event."},
 		{Name: "topic", Label: "Subscription", Type: "text", Section: "Event", ShowWhen: "event=" + evPubsub,
 			Pattern: `^projects/[^\/]+/topics/[^\/]+$`,
 			Help:    "The Pub/Sub topic, projects/PROJECT/topics/TOPIC, on this instance's Pub/Sub; $(body.message.data.KEY) in a substitution reads the message."},
@@ -106,8 +110,13 @@ func (p buildTriggersProvider) triggerFields(ctx context.Context, project string
 			Help: "A regular expression (RE2) matched against the pushed branch."},
 		{Name: "tag", Label: "Tag", Type: "text", Section: "Source", Default: ".*", ShowWhen: "event=" + evPushTag,
 			Help: "A regular expression (RE2) matched against the pushed tag."},
+		{Name: "base", Label: "Base branch", Type: "text", Section: "Source", Default: "^main$", ShowWhen: "event=" + evPullRequest,
+			Help: "A regular expression (RE2) matched against the branch the pull request merges into."},
 		{Name: "invert", Label: "Invert Regex", Type: "checkbox", Section: "Source",
 			Help: "Builds every branch or tag the regular expression does not match."},
+		{Name: "commentControl", Label: "Comment control", Type: "radio", Section: "Source", Default: ccExceptOwners,
+			Options: []string{ccExceptOwners, ccRequired, ccNotRequired}, ShowWhen: "event=" + evPullRequest,
+			Help: "Whether a build waits for an owner or collaborator (a repository writer) to comment /gcbrun on the pull request."},
 
 		{Name: "config", Label: "Type", Type: "radio", Section: "Configuration", Default: cfgAuto,
 			Options: []string{cfgAuto, cfgFile, cfgDockerfile, cfgBuildpacks},
@@ -177,6 +186,12 @@ func triggerValues(t *cbpb.BuildTrigger) map[string]string {
 	}
 	if rc := t.GetRepositoryEventConfig(); rc != nil {
 		v["repository"] = rc.GetRepository()
+		if pr := rc.GetPullRequest(); pr != nil {
+			v["event"], v["base"], v["commentControl"] = evPullRequest, pr.GetBranch(), commentControlChoice(pr.GetCommentControl())
+			if pr.GetInvertRegex() {
+				v["invert"] = "true"
+			}
+		}
 		if push := rc.GetPush(); push != nil {
 			if push.GetTag() != "" {
 				v["event"], v["tag"] = evPushTag, push.GetTag()
@@ -257,7 +272,7 @@ func triggerFromValues(v map[string]string) (*cbpb.BuildTrigger, error) {
 		}
 	}
 	repo := strings.TrimSpace(v["repository"])
-	onRepo := event == evPushBranch || event == evPushTag
+	onRepo := event == evPushBranch || event == evPushTag || event == evPullRequest
 	switch event {
 	case evPushBranch, evPushTag:
 		if repo == "" {
@@ -271,7 +286,16 @@ func triggerFromValues(v map[string]string) (*cbpb.BuildTrigger, error) {
 		}
 		t.RepositoryEventConfig = &cbpb.RepositoryEventConfig{Repository: repo, Filter: &cbpb.RepositoryEventConfig_Push{Push: push}}
 	case evPullRequest:
-		return nil, fmt.Errorf("pull request triggers are not served: Secure Source Manager here takes pushes only")
+		if repo == "" {
+			return nil, fmt.Errorf("%s needs a repository: link one on Repositories (2nd gen)", event)
+		}
+		cc, err := commentControlOf(v["commentControl"])
+		if err != nil {
+			return nil, err
+		}
+		t.RepositoryEventConfig = &cbpb.RepositoryEventConfig{Repository: repo, Filter: &cbpb.RepositoryEventConfig_PullRequest{
+			PullRequest: &cbpb.PullRequestFilter{GitRef: &cbpb.PullRequestFilter_Branch{Branch: orText(strings.TrimSpace(v["base"]), ".*")},
+				InvertRegex: v["invert"] == "true" || v["invert"] == "on", CommentControl: cc}}}
 	case evManual:
 	case evPubsub:
 		t.PubsubConfig = &cbpb.PubsubConfig{Topic: strings.TrimSpace(v["topic"])}
@@ -307,7 +331,7 @@ func applyTriggerConfig(t *cbpb.BuildTrigger, v map[string]string, onRepo bool) 
 	config, location := orText(v["config"], cfgAuto), orText(v["location"], locRepository)
 	needsRepo := func() error {
 		if !onRepo {
-			return fmt.Errorf("configuration %q reads the repository: choose Push to a branch or Push new tag, or an Inline configuration file", config)
+			return fmt.Errorf("configuration %q reads the repository: choose Push to a branch, Push new tag or Pull request, or an Inline configuration file", config)
 		}
 		return nil
 	}
@@ -408,4 +432,29 @@ func (p buildTriggersProvider) serviceAccounts(project string) []string {
 		resp, err = p.registry.ListServiceAccounts(&adminpb.ListServiceAccountsRequest{Name: "projects/" + project, PageSize: 100, PageToken: resp.GetNextPageToken()})
 	}
 	return out
+}
+
+// commentControlChoice is a pull request filter's Comment control choice.
+func commentControlChoice(c cbpb.PullRequestFilter_CommentControl) string {
+	switch c {
+	case cbpb.PullRequestFilter_COMMENTS_ENABLED:
+		return ccRequired
+	case cbpb.PullRequestFilter_COMMENTS_ENABLED_FOR_EXTERNAL_CONTRIBUTORS_ONLY:
+		return ccExceptOwners
+	}
+	return ccNotRequired
+}
+
+// commentControlOf is the comment control a Comment control choice sets;
+// none chosen is the form's default.
+func commentControlOf(choice string) (cbpb.PullRequestFilter_CommentControl, error) {
+	switch strings.TrimSpace(choice) {
+	case "", ccExceptOwners:
+		return cbpb.PullRequestFilter_COMMENTS_ENABLED_FOR_EXTERNAL_CONTRIBUTORS_ONLY, nil
+	case ccRequired:
+		return cbpb.PullRequestFilter_COMMENTS_ENABLED, nil
+	case ccNotRequired:
+		return cbpb.PullRequestFilter_COMMENTS_DISABLED, nil
+	}
+	return 0, fmt.Errorf("unknown comment control %q", choice)
 }

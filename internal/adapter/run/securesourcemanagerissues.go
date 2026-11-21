@@ -23,11 +23,12 @@ import (
 // UNIMPLEMENTED); an issue's etag, when sent, must be current.
 
 // CreateIssue opens an issue on a repository.
-func (m *SecureSourceManagerServer) CreateIssue(_ context.Context, req *ssmpb.CreateIssueRequest) (*longrunningpb.Operation, error) {
+func (m *SecureSourceManagerServer) CreateIssue(ctx context.Context, req *ssmpb.CreateIssueRequest) (*longrunningpb.Operation, error) {
 	in := req.GetIssue()
 	if strings.TrimSpace(in.GetTitle()) == "" {
 		return nil, apierror.InvalidArgument("issue.title is required")
 	}
+	author := ssmCallerOf(ctx)
 	ssmState.mu.Lock()
 	if _, _, err := ssmRepoLocked(req.GetParent()); err != nil {
 		ssmState.mu.Unlock()
@@ -38,6 +39,8 @@ func (m *SecureSourceManagerServer) CreateIssue(_ context.Context, req *ssmpb.Cr
 	is := &ssmpb.Issue{Name: req.GetParent() + "/issues/" + strconv.Itoa(n), Title: in.GetTitle(), Body: in.GetBody(),
 		State: ssmpb.Issue_OPEN, CreateTime: now, UpdateTime: now, Etag: ssmEtag(now)}
 	ssmState.issues[is.Name] = is
+	// Who opened it, for the web interface's Type menu (#2071).
+	ssmState.authors[is.Name] = author
 	out := proto.Clone(is)
 	saveSSMLocked()
 	ssmState.mu.Unlock()
@@ -140,6 +143,7 @@ func (m *SecureSourceManagerServer) DeleteIssue(_ context.Context, req *ssmpb.De
 		return nil, err
 	}
 	delete(ssmState.issues, is.GetName())
+	delete(ssmExtra.IssueMeta, is.GetName())
 	deletePrefix(ssmState.issueComments, is.GetName()+"/")
 	deletePrefix(ssmState.counters, is.GetName()+"/")
 	saveSSMLocked()

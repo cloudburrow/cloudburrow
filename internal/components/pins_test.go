@@ -65,12 +65,14 @@ func pinned(e entry) string {
 func TestPinsMatchTheInventory(t *testing.T) {
 	inv, unresolved := inventory(t)
 	node := inv["cluster"]["kubernetesNodeImage"]
+	prev := inv["cluster"]["gkePreviousNodeImage"]
 	checks := map[string][2]string{
 		"PubSubImage":             {components.PubSubImage, pinned(inv["emulatorBackends"]["googleCloudCliEmulatorsImage"])},
 		"SpannerImage":            {components.SpannerImage, pinned(inv["emulatorBackends"]["spannerEmulator"])},
 		"KnativeVersion":          {components.KnativeVersion, inv["serving"]["knativeServing"].Version},
 		"net-kourier":             {components.KnativeVersion, inv["serving"]["knativeNetKourier"].Version},
 		"DefaultNodeImage":        {config.DefaultNodeImage, node.Image + ":" + node.Version + "@" + *node.Digest},
+		"GKEPreviousNodeImage":    {config.GKEPreviousNodeImage, prev.Image + ":" + prev.Version + "@" + *prev.Digest},
 		"KindVersion":             {doctor.KindVersion, inv["cluster"]["kind"].Version},
 		"BuilderImage":            {buildpacks.BuilderImage, pinned(inv["build"]["buildpacksBuilder"])},
 		"PHPFunctionBuilderImage": {buildpacks.PHPFunctionBuilderImage, pinned(inv["build"]["buildpacksPHPFunctionBuilder"])},

@@ -71,6 +71,17 @@
         "digest": "sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed",
         "notes": "kind v0.33.0 publishes v1.34.11, v1.35.8, v1.36.4, v1.37.0. Chosen above Knative's enforced minimum without being newest. Digest resolved and pinned by #26/#28.",
         "skipDiscovery": "Version tracks Kubernetes, not the kind release that publishes it, so the source repository's tags are not comparable. Upgraded together with kind using the node images listed in that release's notes."
+      },
+      "gkePreviousNodeImage": {
+        "image": "kindest/node",
+        "version": "v1.35.8",
+        "source": "https://github.com/kubernetes-sigs/kind",
+        "license": "Apache-2.0",
+        "updateFeed": "kind-release-notes",
+        "verification": "image-digest",
+        "digest": "sha256:07b2536e30b803ed61d1677a79df6115f798ce64c80f9e22f6ed45afd09323c0",
+        "notes": "The Kubernetes Engine API's second served version (#2069), one minor below kubernetesNodeImage, so clusters can be made on it and upgraded to the default. Digest from kind v0.33.0's release notes. Pulled only when a cluster is made on it.",
+        "skipDiscovery": "Moves with kubernetesNodeImage: always the kind release's node image one minor below it."
       }
     },
     "serving": {
@@ -775,6 +786,13 @@
         "verification": "go.sum",
         "notes": "Cloud SQL for SQL Server (#1916): internal/service/sqladmin reaches a SQL Server instance's server as sa, to make its sqlserver user, databases, users and flags, as pgx and go-sql-driver/mysql reach PostgreSQL and MySQL. Microsoft's own pure-Go driver; Google publishes none. Only its root package is imported (no Azure or Kerberos packages)."
       },
+      "goLicensecheck": {
+        "module": "github.com/google/licensecheck",
+        "version": "v0.3.1",
+        "license": "BSD-3-Clause",
+        "verification": "go.sum",
+        "notes": "Artifact Analysis's language package licenses (#2072): internal/osvscan classifies a Go module's LICENSE files in a scanned image, and a POM's license URL, as SPDX IDs, since OSV-Scanner's offline mode reads none (it asks deps.dev). Google's own classifier (pkg.go.dev's); its license patterns, including those of GPL texts, are data it matches against, not code linked from them."
+      },
       "goCreackPty": {
         "module": "github.com/creack/pty",
         "version": "1.1.24",
@@ -1434,6 +1452,32 @@
         "verification": "lock-file-hashes",
         "digest": null,
         "notes": "The lock file carries each registry's hashes for linux_amd64, linux_arm64, darwin_amd64 and darwin_arm64; OpenTofu's registry serves different packages, so its hashes differ from Terraform's. init installs the provider only if its package matches a locked hash."
+      }
+    },
+    "consoleData": {
+      "$comment": "Data embedded for the console and its backends, derived from openly licensed sources because Google publishes none.",
+      "ssmGitignoreTemplates": {
+        "$comment": "Secure Source Manager initial_config gitignores (#2071): tools/ssmtemplates/generate.py writes internal/adapter/run/ssmtemplates.tar.gz, an UNVERIFIED (docs re-read 2026-11-20) stand-in for Google's templates (third_party/ssm-templates/PROVENANCE.md).",
+        "source": "https://github.com/github/gitignore",
+        "pinnedCommit": "b71db924d35085e481ad7c7ad8a7435b8d8b3016",
+        "license": "CC0-1.0",
+        "digest": "sha256:0a4bb4abd684b961c0dd0da0b4615f4986eabf2399217fd1a3c56512f3d4d667",
+        "redistribution": "derived data only: the templates are embedded in the CLI (NOTICE, third_party/ssm-templates/LICENSE-gitignore)",
+        "updateFeed": "none",
+        "verification": "commit-sha",
+        "skipDiscovery": "No releases upstream; the commit is pinned, and the template names are the pinned securesourcemanager module's."
+      },
+      "ssmLicenseTemplates": {
+        "$comment": "Secure Source Manager initial_config license (#2071): the SPDX License List's text/ folder, through the same generator (third_party/ssm-templates/PROVENANCE.md).",
+        "version": "v3.29.0",
+        "source": "https://github.com/spdx/license-list-data",
+        "pinnedCommit": "ab9b0904b43db6f4b67431efd8821feb821f1c8b",
+        "license": "CC-BY-3.0",
+        "digest": "sha256:98380b0a6813ce1f792dbd790f2e8ae06f77701e98d9c3504791b94c3cd48a8f",
+        "redistribution": "derived data only: licence documents embedded in the CLI and written into a repository only when a user picks one; no code under those licences (NOTICE)",
+        "updateFeed": "github-releases",
+        "verification": "commit-sha",
+        "skipDiscovery": "The template names are fixed by the pinned securesourcemanager module, so a newer list release is taken only with it."
       }
     },
     "scanning": {

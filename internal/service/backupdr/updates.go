@@ -16,10 +16,11 @@ import (
 // refused, each naming what is missing.
 const (
 	managementServerWhy = "a management server is the Backup and DR appliance's console: a Google-managed VM " +
-		"on Compute Engine reached over VPC peering with your network, and CloudBurrow runs neither Compute Engine " +
-		"nor Google-managed networking; backup vaults and plans protect Cloud SQL instances without one (docs/backupdr.md)"
+		"on Compute Engine reached over VPC peering with your network, and CloudBurrow runs no such appliance nor " +
+		"Google-managed networking; backup vaults and plans protect Cloud SQL instances and Compute Engine VMs and disks " +
+		"without one (docs/backupdr.md)"
 	applianceWhy = "this is the backup/recovery appliance's and agent's protocol for workloads on Compute Engine " +
-		"(the appliance streams a backup in and finalizes it); CloudBurrow runs no appliance and no Compute Engine, " +
+		"(the appliance streams a backup in and finalizes it); CloudBurrow runs no appliance (vaulted Compute Engine backups need none), " +
 		"and a Cloud SQL data source's backups are taken by the Cloud SQL Admin API (docs/backupdr.md)"
 	hierarchyWhy = "fetching resource backup configs for a folder or an organization answers every project under it, " +
 		"and this Backup and DR Service was started without Resource Manager's folders and organization (`up` " +
@@ -306,7 +307,7 @@ func (s *Server) patchPlan(r *http.Request, name string) (any, error) {
 		}
 	}
 	if v := s.st.Vaults[p.Vault]; v != nil {
-		if err := checkPlanRetention(next.Rules, next.LogRetentionDays, next.MaxOnDemandDays, v); err != nil {
+		if err := checkPlanRetention(next.Rules, next.LogRetentionDays, next.MaxOnDemandDays, v, next.ResourceType); err != nil {
 			return nil, err
 		}
 	}
@@ -354,16 +355,21 @@ func (s *Server) patchAssociation(r *http.Request, name string) (any, error) {
 	now := s.stamp()
 	if old := s.st.DataSources[a.DataSource]; old == nil || !strings.HasPrefix(old.Name, p.Vault+"/") {
 		project, instance, _ := sqlResource(a.Resource)
+		kind, zone := "", ""
+		if old != nil {
+			project, instance, kind, zone = old.Project, old.Instance, old.Kind, old.Zone
+		}
 		var ds *dataSource
 		for _, d := range s.st.DataSources {
-			if d.Project == project && d.Instance == instance && strings.HasPrefix(d.Name, p.Vault+"/") {
+			if d.Kind == kind && d.Zone == zone && d.Project == project && d.Instance == instance && strings.HasPrefix(d.Name, p.Vault+"/") {
 				ds = d
 			}
 		}
 		if ds == nil {
-			ds = &dataSource{Name: p.Vault + "/dataSources/ds-" + newID()[:20], Project: project, Instance: instance, CreateTime: now}
+			ds = &dataSource{Name: p.Vault + "/dataSources/ds-" + newID()[:20], Project: project, Instance: instance, CreateTime: now,
+				Kind: kind, Zone: zone}
 			if old != nil {
-				ds.Info = old.Info
+				ds.Info, ds.Props = old.Info, old.Props
 			}
 			s.st.DataSources[ds.Name] = ds
 		}
@@ -523,8 +529,10 @@ func (s *Server) fetchBackups(r *http.Request, dsName string) (any, error) {
 		return nil, err
 	}
 	out := []any{}
-	if typ == CloudSQLResourceType {
-		out = all.(map[string]any)["backups"].([]any)
+	for _, b := range all.(map[string]any)["backups"].([]any) {
+		if g, _ := b.(map[string]any)["gcpResource"].(map[string]any); g["type"] == typ {
+			out = append(out, b)
+		}
 	}
 	return map[string]any{"backups": out}, nil
 }
@@ -539,13 +547,18 @@ func (s *Server) referenceJSON(loc string, d *dataSource) map[string]any {
 		info["lastSuccessfulBackupConsistencyTime"] = t
 	}
 	res := "projects/" + d.Project + "/instances/" + d.Instance
+	gcp := map[string]any{"gcpResourcename": "//sqladmin.googleapis.com/" + res,
+		"location": d.Info.Region, "type": CloudSQLResourceType, "cloudSqlInstanceProperties": map[string]any{
+			"name": res, "databaseInstalledVersion": d.Info.DatabaseVersion, "instanceCreateTime": d.Info.CreateTime,
+			"instanceTier": d.Info.Tier}}
+	if d.Kind != "" {
+		g := d.computeGcpResource()
+		gcp = map[string]any{"gcpResourcename": g["gcpResourcename"], "location": g["location"], "type": g["type"]}
+	}
 	return map[string]any{"name": loc + "/dataSourceReferences/" + d.Name[strings.LastIndex(d.Name, "/")+1:],
 		"dataSource": d.Name, "createTime": d.CreateTime, "dataSourceBackupConfigState": ds["configState"],
 		"dataSourceBackupCount": ds["backupCount"], "dataSourceBackupConfigInfo": info, "totalStoredBytes": "0",
-		"dataSourceGcpResourceInfo": map[string]any{"gcpResourcename": "//sqladmin.googleapis.com/" + res,
-			"location": d.Info.Region, "type": CloudSQLResourceType, "cloudSqlInstanceProperties": map[string]any{
-				"name": res, "databaseInstalledVersion": d.Info.DatabaseVersion, "instanceCreateTime": d.Info.CreateTime,
-				"instanceTier": d.Info.Tier}}}
+		"dataSourceGcpResourceInfo": gcp}
 }
 
 // referencesLocked are the location's data source references, by name.
@@ -589,8 +602,10 @@ func (s *Server) fetchReferences(r *http.Request, loc string) (any, error) {
 		return nil, err
 	}
 	out := []any{}
-	if typ == CloudSQLResourceType {
-		out = s.listReferences(loc).(map[string]any)["dataSourceReferences"].([]any)
+	for _, ref := range s.listReferences(loc).(map[string]any)["dataSourceReferences"].([]any) {
+		if g, _ := ref.(map[string]any)["dataSourceGcpResourceInfo"].(map[string]any); g["type"] == typ {
+			out = append(out, ref)
+		}
 	}
 	return map[string]any{"dataSourceReferences": out}, nil
 }

@@ -1,6 +1,7 @@
 package console
 
 import (
+	"encoding/json"
 	"io/fs"
 	"os"
 	"regexp"
@@ -2746,5 +2747,111 @@ func TestAnActionPageAndOptionsThatFollowAField(t *testing.T) {
 	}
 	if !strings.Contains(js, `stored[service] : hiddenByDefault`) || !strings.Contains(js, `hiddenByDefault: data.hiddenColumns || []`) {
 		t.Error("a listing's hiddenColumns do not start off")
+	}
+}
+
+// An EditForm with Page opens as a page at the resource's address with
+// ?edit=1, the create page's layout, not a dialog (#2062): Google's Edit
+// job follows Create job's steps on the Create a job page.
+func TestAnEditFormWithPageIsAPage(t *testing.T) {
+	js := consoleAsset(t, "console.js")
+	for _, want := range []string{
+		"if (spec.page) return openEditPage(route, segments);",
+		`url.searchParams.set("edit", "1");`,
+		`data.edit && data.edit.page && new URLSearchParams(location.search).get("edit") === "1"`,
+		"return renderEditPage(view, route, segments, data, crumb);",
+		`el("form", { class: "create-page edit-page" + (spec.steps ? "" : " is-single-page"), id: "edit-page-form", novalidate: true, onsubmit: submit }`,
+		`const returnTo = createReturn(new URLSearchParams(location.search).get("return"));`,
+		`"PATCH", { Path: segments, Values: fields.values() });`,
+		`el("div", { class: "form-actions" }, primary, cancel)`,
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("console.js is missing %q", want)
+		}
+	}
+}
+
+// An EditForm with Page set is drawn at the resource's own address with
+// ?edit=1, opened by the Edit button and a row's Edit item, as Google's
+// Edit Repository is a page ending in Update (#1855); and a listing
+// section's Groups are drawn as cards over its rows, as Google's
+// Vulnerabilities tab has Scan results above its table.
+func TestAnEditFormCanBeAPageAndAListingHasGroupsOverItsRows(t *testing.T) {
+	b, err := json.Marshal(EditForm{Label: "Edit Repository", Page: true})
+	if err != nil || !strings.Contains(string(b), `"page":true`) {
+		t.Errorf("EditForm.Page marshals as %s, %v", b, err)
+	}
+	js := consoleAsset(t, "console.js")
+	for _, want := range []string{
+		"if (data.edit && data.edit.page) {",
+		`id: "detail-edit", href: editHref.pathname + editHref.search,`,
+		`editHref.searchParams.set("edit", "1");`,
+		`new URLSearchParams(location.search).get("edit") === "1" &&
+      view.dataset.embedded !== "true"`,
+		"return renderEditPage(view, route, segments, data, crumb);",
+		"if (data.edit.page) return openEditPage(route, segments);",
+		`id: "edit-page-form", novalidate: true, onsubmit: submit },`,
+		"navigate(here);",
+		"const cards = (section.groups || []).filter((g) => (g.properties || []).length).map((group) =>",
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("console.js is missing %q", want)
+		}
+	}
+}
+
+// TestSidePanelsLayerBarBarsAndRepositoryBrowse covers #2066: a page's
+// and a row's side panels (Setup Instructions, Vulnerability details)
+// close back to what opened them; the Layer bar is a Show list named
+// Layer; a group of counts is a bar graph that reads as text; a remote
+// repository's upstream has a Browse.
+func TestSidePanelsLayerBarBarsAndRepositoryBrowse(t *testing.T) {
+	js := consoleAsset(t, "console.js")
+	for _, want := range []string{
+		"function openSidePanel(sp, opener)", "if (opener && opener.isConnected) opener.focus();",
+		`...(data.panels || []).map((sp, i) => el("button", {`, "if (item.panel) {",
+		"i.object || i.panel) || caps.delete;", `el("caption", { text: t.title })`,
+		"`${section.showLabel || \"Show\"} `", "group.bars ? barGraph(group)", `el("span", { class: "bar-count", text: p.value })`,
+		`f.browse === "artifact-registry"`, "async function browseRepositories(control, entries)",
+		`f.Mode === "Standard"`,
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("console.js lacks %s", want)
+		}
+	}
+	b, err := json.Marshal(Detail{Panels: []SidePanel{{Label: "Setup Instructions", Text: "x"}},
+		Sections: []Section{{ShowLabel: "Layer", Groups: []PropertyGroup{{Bars: true}},
+			Listing: Listing{Items: []Resource{{Name: "CVE-1", Panel: &SidePanel{Label: "View", Tables: []PanelTable{{Title: "File location(s)"}}}}}}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"panels":[{"label":"Setup Instructions"`, `"showLabel":"Layer"`, `"bars":true`, `"panel":{"label":"View"`, `"tables":[{"title":"File location(s)"`} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("the detail's JSON %s lacks %s", b, want)
+		}
+	}
+}
+
+// An Action with Page set draws its form at the page's own address with
+// ?action=ID instead of in a dialog, as Google's Secure Source Manager web
+// interface has Create repository as a page (#1856, on #1851's page
+// actions); Opens names the field whose value is the row it made, which
+// the console then opens.
+func TestAnActionCanBeAPage(t *testing.T) {
+	b, err := json.Marshal(Action{ID: "create-repo", Label: "Create repository", Page: true, Opens: "id"})
+	if err != nil || !strings.Contains(string(b), `"page":true`) || !strings.Contains(string(b), `"opens":"id"`) {
+		t.Errorf("Action.Page and Opens marshal as %s, %v", b, err)
+	}
+	js := consoleAsset(t, "console.js")
+	for _, want := range []string{
+		`if (host && action.opens && values[action.opens]) {`,
+		"navigate(detailHref(route, [...segments, values[action.opens]]));",
+		`el("form", { class: "create-page is-single-page", id: "action-page-form", novalidate: true, onsubmit: submit, "aria-label": heading },`,
+		`header.prepend(el("nav", { class: "breadcrumb", "aria-label": "Breadcrumb" }, ...trail));`,
+		`"POST", { Path: segments, Action: action.id, Values: values });`,
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("console.js is missing %q", want)
+		}
 	}
 }

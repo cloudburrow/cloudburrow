@@ -6,8 +6,10 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"cloud.google.com/go/container/apiv1/containerpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
 )
@@ -37,7 +39,8 @@ func gkePoolNodes(np *containerpb.NodePool) int {
 }
 
 // poolListing is the Node pools tab: each pool, with its actions.
-func (p gkeClustersProvider) poolListing(c *containerpb.Cluster) console.Listing {
+func (p gkeClustersProvider) poolListing(ctx context.Context, project string, c *containerpb.Cluster) console.Listing {
+	versions := p.servedVersions(ctx, project, c)
 	l := console.Listing{Columns: []string{"Number of nodes", "Machine type", "Image type", "Version", "Labels"}, NameColumn: "Name",
 		Noun: "node pools", AlwaysStatus: true}
 	for _, np := range c.GetNodePools() {
@@ -48,7 +51,7 @@ func (p gkeClustersProvider) poolListing(c *containerpb.Cluster) console.Listing
 		}}
 		if !c.GetAutopilot().GetEnabled() {
 			r.Target = []string{c.GetName(), gkePoolSeg, np.GetName()}
-			r.Actions = p.poolActions(np)
+			r.Actions = p.poolActions(c, np, versions)
 		}
 		l.Items = append(l.Items, r)
 	}
@@ -75,7 +78,7 @@ func (p gkeClustersProvider) addPoolAction(c *containerpb.Cluster) console.Actio
 	}}
 }
 
-func (p gkeClustersProvider) poolActions(np *containerpb.NodePool) []console.Action {
+func (p gkeClustersProvider) poolActions(c *containerpb.Cluster, np *containerpb.NodePool, versions []string) []console.Action {
 	labels := ""
 	keys := make([]string, 0, len(np.GetConfig().GetResourceLabels()))
 	for k := range np.GetConfig().GetResourceLabels() {
@@ -97,8 +100,67 @@ func (p gkeClustersProvider) poolActions(np *containerpb.NodePool) []console.Act
 			{Name: "image", Label: "Image type", Type: "select", Options: gkeImageTypes, Default: image},
 			{Name: "labels", Label: "Labels", Type: "textarea", Default: strings.TrimSpace(labels), Help: "The nodes' resource labels, one key=value per line."},
 		}},
+		gkePoolUpgrade(c, np, versions),
+		gkePoolCompleteUpgrade(np),
+		gkePoolRollback(np),
 		{ID: "delete", Label: "Delete", Destructive: true, Confirm: np.GetName()},
 	}
+}
+
+// gkePoolCompleteUpgrade ends a blue-green upgrade's soak, as `gcloud
+// container node-pools complete-upgrade` does (#2069); otherwise it says
+// why it is not offered.
+func gkePoolCompleteUpgrade(np *containerpb.NodePool) console.Action {
+	a := console.Action{ID: "complete", Label: "Complete upgrade", Submit: "Complete upgrade", Fields: []console.Field{
+		{Name: "note", Label: "Soaking", Type: "textarea", Immutable: true,
+			Default: "The green nodes run " + np.GetUpdateInfo().GetBlueGreenInfo().GetGreenPoolVersion() + ". Completing ends the soak: the blue nodes are deleted now."}}}
+	if np.GetUpdateInfo().GetBlueGreenInfo().GetPhase() != containerpb.NodePool_UpdateInfo_BlueGreenInfo_NODE_POOL_SOAKING {
+		return console.Action{ID: "complete", Label: "Complete upgrade", Unavailable: "This node pool is not soaking in a blue-green upgrade."}
+	}
+	return a
+}
+
+// gkePoolRollback is a node pool's Roll back, as `gcloud container
+// node-pools rollback` does it (#2076): offered while an upgrade is
+// incomplete (cancelled, failed, paused at the end of its maintenance
+// window) or a blue-green one runs before it deletes its blue nodes; the
+// API refuses the rest with its reason.
+// The label is UNVERIFIED (re-read 2026-11-20: how-to/upgrading-a-cluster gives the gcloud command and the API only).
+func gkePoolRollback(np *containerpb.NodePool) console.Action {
+	ph := np.GetUpdateInfo().GetBlueGreenInfo().GetPhase()
+	incomplete := np.GetStatus() == containerpb.NodePool_RUNNING_WITH_ERROR || np.GetStatusMessage() != "" ||
+		(ph != containerpb.NodePool_UpdateInfo_BlueGreenInfo_PHASE_UNSPECIFIED && ph != containerpb.NodePool_UpdateInfo_BlueGreenInfo_DELETING_BLUE_POOL &&
+			ph != containerpb.NodePool_UpdateInfo_BlueGreenInfo_ROLLBACK_STARTED)
+	if !incomplete {
+		why := "This node pool has no incomplete upgrade to roll back: a node pool cannot be rolled back once it has been successfully upgraded."
+		if ph == containerpb.NodePool_UpdateInfo_BlueGreenInfo_DELETING_BLUE_POOL {
+			why = "This node pool is deleting its blue nodes: a blue-green upgrade cannot be rolled back in that phase."
+		}
+		return console.Action{ID: "rollback", Label: "Roll back", Unavailable: why}
+	}
+	return console.Action{ID: "rollback", Label: "Roll back", Title: "Roll back node pool upgrade", Submit: "Roll back", Fields: []console.Field{
+		{Name: "note", Label: "Rollback", Type: "textarea", Immutable: true,
+			Default: "The nodes already upgraded are recreated on " + np.GetVersion() + "; a blue-green upgrade's blue nodes are uncordoned and its green nodes drained and deleted."},
+		{Name: "respectPdb", Label: "Respect pod disruption budgets", Type: "checkbox",
+			Help: "Drain the nodes through evictions, as an upgrade does (gcloud's --respect-pdb). Unchecked, the pods are deleted."},
+	}}
+}
+
+// gkePoolUpgrade is a node pool's Upgrade: Google's node pool page has
+// Upgrade beside the node version, to a version no newer than the
+// control plane's.
+func gkePoolUpgrade(c *containerpb.Cluster, np *containerpb.NodePool, versions []string) console.Action {
+	targets := gkePoolTargets(versions, c, np)
+	if len(targets) == 0 {
+		why := "This node pool runs the newest version served locally (" + np.GetVersion() + ")."
+		if len(gkeNewer(versions, np.GetVersion())) > 0 {
+			why = "This node pool runs the control plane's version (" + np.GetVersion() + "): upgrade the control plane first."
+		}
+		return console.Action{ID: "upgrade", Label: "Upgrade", Unavailable: why}
+	}
+	return console.Action{ID: "upgrade", Label: "Upgrade", Title: "Upgrade node pool", Submit: "Save changes", Fields: []console.Field{
+		{Name: "version", Label: "Target version", Type: "select", Options: targets, Default: targets[0],
+			Help: "Current version: " + np.GetVersion() + ". Control plane version: " + c.GetCurrentMasterVersion() + "."}}}
 }
 
 // gkeParseLabels reads key=value lines.
@@ -148,6 +210,23 @@ func (p gkeClustersProvider) poolAct(ctx context.Context, cluster string, c *con
 	switch action {
 	case "delete":
 		_, err := api.DeleteNodePool(ctx, &containerpb.DeleteNodePoolRequest{Name: name})
+		return gkeStatusErr(err)
+	case "complete":
+		_, err := api.CompleteNodePoolUpgrade(ctx, &containerpb.CompleteNodePoolUpgradeRequest{Name: name})
+		return gkeStatusErr(err)
+	case "rollback":
+		_, err := api.RollbackNodePoolUpgrade(ctx, &containerpb.RollbackNodePoolUpgradeRequest{Name: name, RespectPdb: v["respectPdb"] == "true"})
+		return gkeStatusErr(err)
+	case "upgrade":
+		v := strings.TrimSpace(v["version"])
+		if v == "" {
+			return fmt.Errorf("choose a target version")
+		}
+		image := np.GetConfig().GetImageType()
+		if image == "" {
+			image = gkeImageTypes[0]
+		}
+		_, err := api.UpdateNodePool(ctx, &containerpb.UpdateNodePoolRequest{Name: name, NodeVersion: v, ImageType: image})
 		return gkeStatusErr(err)
 	case "resize":
 		n, err := strconv.Atoi(strings.TrimSpace(v["nodes"]))
@@ -209,12 +288,18 @@ func (p gkeClustersProvider) operationsSection(ctx context.Context, project stri
 		st := gkeTitle(o.GetStatus().String())
 		if o.GetStatus() == containerpb.Operation_DONE && o.GetError() != nil {
 			st = "Error"
+			if o.GetError().GetCode() == 1 {
+				// CANCELLED: a cancelled or rolled-back upgrade (#2076).
+				st = "Cancelled"
+			}
 		}
 		r := console.Resource{Name: o.GetName(), Status: st, Fields: map[string]string{
 			"Type": gkeOpType(o.GetOperationType()), "Target": target,
 			"Started": unsetAs(shortTime(o.GetStartTime()), "—"), "Ended": unsetAs(shortTime(o.GetEndTime()), "—"),
 			"Message": unsetAs(o.GetStatusMessage(), "—"),
 		}}
+		// ABORTING (a cancel asked, its started nodes completing) has
+		// nothing left to cancel.
 		if o.GetStatus() == containerpb.Operation_RUNNING || o.GetStatus() == containerpb.Operation_PENDING {
 			r.Target = []string{c.GetName(), gkeOpSeg, o.GetName()}
 			r.Actions = []console.Action{{ID: "cancel", Label: "Cancel", Destructive: true, Confirm: o.GetName()}}
@@ -245,7 +330,7 @@ func (p gkeClustersProvider) servedSubActions(ctx context.Context, project strin
 		}
 		for _, np := range c.GetNodePools() {
 			if np.GetName() == name {
-				return p.poolActions(np)
+				return p.poolActions(c, np, p.servedVersions(ctx, project, c))
 			}
 		}
 	case gkeOpSeg:
@@ -266,4 +351,97 @@ func (p gkeClustersProvider) servedSubAct(ctx context.Context, project string, c
 		return p.opAct(ctx, project, c, name, action)
 	}
 	return fmt.Errorf("no %s under cluster %s", seg, c.GetName())
+}
+
+// gkeExclusionScopes are the console's words for an exclusion's scope.
+var gkeExclusionScopes = map[string]containerpb.MaintenanceExclusionOptions_Scope{
+	"no_upgrades": containerpb.MaintenanceExclusionOptions_NO_UPGRADES, "no_minor_upgrades": containerpb.MaintenanceExclusionOptions_NO_MINOR_UPGRADES,
+	"no_minor_or_node_upgrades": containerpb.MaintenanceExclusionOptions_NO_MINOR_OR_NODE_UPGRADES,
+}
+
+// gkeMaintenanceAction edits the cluster's maintenance window and
+// exclusions (Google's Details, Automation: Maintenance window and
+// Maintenance exclusions; #2069), which automatic upgrades respect and
+// manual ones ignore.
+func gkeMaintenanceAction(c *containerpb.Cluster) console.Action {
+	w := c.GetMaintenancePolicy().GetWindow()
+	window := ""
+	if d := w.GetDailyMaintenanceWindow(); d != nil {
+		window = "daily " + d.GetStartTime()
+	} else if r := w.GetRecurringWindow(); r != nil {
+		window = r.GetWindow().GetStartTime().AsTime().UTC().Format(time.RFC3339) + " " +
+			r.GetWindow().GetEndTime().AsTime().UTC().Format(time.RFC3339) + " " + r.GetRecurrence()
+	}
+	names := make([]string, 0, len(w.GetMaintenanceExclusions()))
+	for n := range w.GetMaintenanceExclusions() {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	var ex []string
+	for _, n := range names {
+		tw := w.GetMaintenanceExclusions()[n]
+		ex = append(ex, n+" "+tw.GetStartTime().AsTime().UTC().Format(time.RFC3339)+" "+tw.GetEndTime().AsTime().UTC().Format(time.RFC3339)+" "+
+			strings.ToLower(tw.GetMaintenanceExclusionOptions().GetScope().String()))
+	}
+	return console.Action{ID: "maintenance", Label: "Edit maintenance", Title: "Maintenance window and exclusions", Submit: "Save", Fields: []console.Field{
+		{Name: "window", Label: "Maintenance window", Type: "text", Default: window,
+			Help: "Empty for any time; \"daily HH:MM\" (UTC, four hours); or \"START END RRULE\", RFC 3339 times and FREQ=DAILY or FREQ=WEEKLY;BYDAY=SA,SU. Automatic upgrades start only inside it; manual upgrades ignore it."},
+		{Name: "exclusions", Label: "Maintenance exclusions", Type: "textarea", Default: strings.Join(ex, "\n"),
+			Help: "One per line: NAME START END SCOPE, RFC 3339 times, scope no_upgrades, no_minor_upgrades or no_minor_or_node_upgrades."},
+	}}
+}
+
+// gkeParseMaintenance reads the Edit maintenance dialog.
+func gkeParseMaintenance(window, exclusions string) (*containerpb.MaintenancePolicy, error) {
+	mw := &containerpb.MaintenanceWindow{MaintenanceExclusions: map[string]*containerpb.TimeWindow{}}
+	ts := func(s string) (*timestamppb.Timestamp, error) {
+		t, err := time.Parse(time.RFC3339, s)
+		if err != nil {
+			return nil, fmt.Errorf("%q is not an RFC 3339 time", s)
+		}
+		return timestamppb.New(t), nil
+	}
+	if f := strings.Fields(window); len(f) > 0 {
+		switch {
+		case len(f) == 2 && f[0] == "daily":
+			mw.Policy = &containerpb.MaintenanceWindow_DailyMaintenanceWindow{DailyMaintenanceWindow: &containerpb.DailyMaintenanceWindow{StartTime: f[1]}}
+		case len(f) == 3:
+			start, err := ts(f[0])
+			if err != nil {
+				return nil, err
+			}
+			end, err := ts(f[1])
+			if err != nil {
+				return nil, err
+			}
+			mw.Policy = &containerpb.MaintenanceWindow_RecurringWindow{RecurringWindow: &containerpb.RecurringTimeWindow{
+				Window: &containerpb.TimeWindow{StartTime: start, EndTime: end}, Recurrence: f[2]}}
+		default:
+			return nil, fmt.Errorf("maintenance window %q is neither \"daily HH:MM\" nor \"START END RRULE\"", window)
+		}
+	}
+	for _, line := range strings.Split(exclusions, "\n") {
+		f := strings.Fields(line)
+		if len(f) == 0 {
+			continue
+		}
+		if len(f) != 4 {
+			return nil, fmt.Errorf("exclusion %q is not NAME START END SCOPE", strings.TrimSpace(line))
+		}
+		start, err := ts(f[1])
+		if err != nil {
+			return nil, err
+		}
+		end, err := ts(f[2])
+		if err != nil {
+			return nil, err
+		}
+		scope, ok := gkeExclusionScopes[strings.ToLower(f[3])]
+		if !ok {
+			return nil, fmt.Errorf("exclusion scope %q is not no_upgrades, no_minor_upgrades or no_minor_or_node_upgrades", f[3])
+		}
+		mw.MaintenanceExclusions[f[0]] = &containerpb.TimeWindow{StartTime: start, EndTime: end,
+			Options: &containerpb.TimeWindow_MaintenanceExclusionOptions{MaintenanceExclusionOptions: &containerpb.MaintenanceExclusionOptions{Scope: scope}}}
+	}
+	return &containerpb.MaintenancePolicy{Window: mw}, nil
 }

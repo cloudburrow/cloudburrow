@@ -36,6 +36,9 @@ type ssmSavedChildren struct {
 	Authors             map[string]string         `json:"authors,omitempty"`
 	HookSecrets         map[string]string         `json:"hookSecrets,omitempty"`
 	PullBuilds          map[string][]ssmPullBuild `json:"pullBuilds,omitempty"`
+	// #2071: labels, milestones, issues' labels, milestone and assignees,
+	// pending review comments and hooks' service account authentication.
+	Extras *ssmSavedExtras `json:"extras,omitempty"`
 }
 
 func ssmMarshalAll[T proto.Message](m map[string]T) []json.RawMessage {
@@ -60,7 +63,7 @@ func saveSSMChildrenLocked() ssmSavedChildren {
 	return ssmSavedChildren{Issues: ssmMarshalAll(ssmState.issues), IssueComments: ssmMarshalAll(ssmState.issueComments),
 		PullRequests: ssmMarshalAll(ssmState.pulls), BranchRules: ssmMarshalAll(ssmState.rules), Counters: ssmState.counters,
 		PullRequestComments: ssmMarshalAll(ssmState.prComments), Hooks: ssmMarshalAll(ssmState.hooks), Authors: ssmState.authors,
-		HookSecrets: ssmState.hookSecrets, PullBuilds: ssmState.prBuilds}
+		HookSecrets: ssmState.hookSecrets, PullBuilds: ssmState.prBuilds, Extras: &ssmExtra}
 }
 
 func loadSSMChildrenLocked(c ssmSavedChildren) {
@@ -91,6 +94,7 @@ func loadSSMChildrenLocked(c ssmSavedChildren) {
 			ssmState.counters[k] = v
 		}
 	}
+	loadSSMExtrasLocked(c.Extras)
 }
 
 // deleteSSMChildrenLocked drops everything a repository holds.
@@ -106,6 +110,7 @@ func deleteSSMChildrenLocked(repo string) {
 	deletePrefix(ssmState.authors, prefix)
 	deletePrefix(ssmState.hookSecrets, prefix)
 	deletePrefix(ssmState.prBuilds, prefix)
+	deleteSSMExtrasLocked(prefix)
 	deleteDeliveries(prefix)
 }
 

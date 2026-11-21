@@ -27,6 +27,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"cloud.google.com/go/container/apiv1/containerpb"
@@ -54,6 +55,8 @@ type Access struct {
 type Node struct {
 	Pool string
 	Name string
+	// Image is the node image it runs.
+	Image string
 }
 
 // Backend makes and removes the local clusters behind the API. Its names
@@ -113,6 +116,9 @@ type Options struct {
 	// subnetwork are checked against (vpc.go, #1936); nil, or nil from it,
 	// checks none.
 	Networks func() Networks
+	// AutoUpgradeInterval is how often automatic upgrades are started
+	// (upgrade.go): a minute when zero, never when negative.
+	AutoUpgradeInterval time.Duration
 }
 
 // Server is the Kubernetes Engine API.
@@ -129,6 +135,10 @@ type Server struct {
 	clusters map[string]*entry   // by projects/P/locations/L/clusters/C
 	ops      map[string]*opEntry // by projects/P/locations/L/operations/ID
 	seq      int
+
+	// clockOffset is how far the Kubernetes Engine clock is ahead of
+	// Options.Now, in nanoseconds (clock.go, #2076).
+	clockOffset atomic.Int64
 }
 
 // entry is one cluster and what the API never returns of it.
@@ -140,13 +150,27 @@ type entry struct {
 	// busy is the operation running on the cluster: Google runs one at a
 	// time and refuses another.
 	busy string
+	// soak ends a blue-green upgrade's pool soak early, by pool.
+	soak map[string]chan struct{}
 }
 
 type opEntry struct {
 	op      *containerpb.Operation
 	project string
 	cancel  context.CancelFunc
+	// pause, when set, stops the work gracefully at its next step instead
+	// of cancelling it: a node pool upgrade's nodes that have started
+	// complete (CancelOperation, RollbackNodePoolUpgrade, #2076).
+	pause     chan struct{}
+	pauseOnce sync.Once
+	// pool is the node pool a node pool upgrade works on.
+	pool *containerpb.NodePool
+	// done is closed when the work has ended and done has run.
+	done chan struct{}
 }
+
+// stopGracefully asks o's work to stop at its next step.
+func (o *opEntry) stopGracefully() { o.pauseOnce.Do(func() { close(o.pause) }) }
 
 // NewServer returns a Server over backend, with its records restored.
 func NewServer(backend Backend, opts Options) (*Server, error) {
@@ -165,6 +189,13 @@ func NewServer(backend Backend, opts Options) (*Server, error) {
 	if err := s.restore(); err != nil {
 		stop()
 		return nil, err
+	}
+	if opts.AutoUpgradeInterval == 0 {
+		opts.AutoUpgradeInterval = time.Minute
+	}
+	if _, ok := backend.(Upgrader); ok && opts.AutoUpgradeInterval > 0 {
+		s.wg.Add(1)
+		go s.autoUpgradeLoop(opts.AutoUpgradeInterval)
 	}
 	return s, nil
 }
@@ -190,6 +221,10 @@ func NewRESTHandler(s *Server) http.Handler {
 		// A node pool's instance group managers (compute.go).
 		if strings.HasPrefix(r.URL.Path, "/compute/") {
 			s.serveCompute(w, r)
+			return
+		}
+		if r.URL.Path == ClockAdvancePath {
+			s.serveClock(w, r)
 			return
 		}
 		t.ServeHTTP(w, r)
@@ -401,7 +436,7 @@ func locationKind(location string) string {
 }
 
 func (s *Server) stamp() string {
-	return s.opts.Now().UTC().Format(time.RFC3339Nano)
+	return s.now().UTC().Format(time.RFC3339Nano)
 }
 
 // parsed is a request's resource, from its name or its deprecated fields.
@@ -497,7 +532,7 @@ func (s *Server) lookupLocked(p parsed) (*entry, error) {
 func (s *Server) startOpLocked(p parsed, typ containerpb.Operation_Type, target string, e *entry,
 	work func(ctx context.Context) error, done func(err error)) *containerpb.Operation {
 	s.seq++
-	now := s.opts.Now()
+	now := s.now()
 	id := "operation-" + strconv.FormatInt(now.UnixMilli(), 10) + "-" + shortHash(fmt.Sprint(p, s.seq))
 	op := &containerpb.Operation{
 		Name:          id,
@@ -510,7 +545,8 @@ func (s *Server) startOpLocked(p parsed, typ containerpb.Operation_Type, target 
 		StartTime:     now.UTC().Format(time.RFC3339Nano),
 	}
 	ctx, cancel := context.WithCancel(s.bg)
-	oe := &opEntry{op: op, project: p.project, cancel: cancel}
+	ctx = context.WithValue(ctx, opKey{}, op)
+	oe := &opEntry{op: op, project: p.project, cancel: cancel, done: make(chan struct{})}
 	s.ops[opName(p.project, p.location, id)] = oe
 	if e != nil {
 		e.busy = id
@@ -520,6 +556,7 @@ func (s *Server) startOpLocked(p parsed, typ containerpb.Operation_Type, target 
 	go func() {
 		defer s.wg.Done()
 		defer cancel()
+		defer close(oe.done)
 		err := work(ctx)
 		if err == nil && ctx.Err() != nil {
 			err = ctx.Err()
@@ -531,7 +568,11 @@ func (s *Server) startOpLocked(p parsed, typ containerpb.Operation_Type, target 
 		}
 		op.Status = containerpb.Operation_DONE
 		op.EndTime = s.stamp()
-		if err != nil {
+		if errors.Is(err, errPaused) {
+			// Paused at the end of the maintenance window: done, not
+			// failed; the next window resumes it.
+			op.StatusMessage = pausedMessage
+		} else if err != nil {
 			st, ok := status.FromError(err)
 			if !ok || errors.Is(err, context.Canceled) {
 				if errors.Is(err, context.Canceled) {
@@ -605,6 +646,21 @@ func (s *Server) CancelOperation(_ context.Context, req *containerpb.CancelOpera
 	}
 	if o.op.Status == containerpb.Operation_DONE {
 		return nil, status.Errorf(codes.FailedPrecondition, "Operation %s is already done.", p.op)
+	}
+	if o.pause != nil {
+		// A node pool upgrade: "Cancelling pauses the upgrade, stopping
+		// GKE from upgrading new nodes ... Nodes that have started the
+		// upgrade complete it"; a blue-green one "is paused in its
+		// current phase", which "can be used at all phases except the
+		// Delete blue pool phase" (re-read 2026-11-20:
+		// concepts/node-pool-upgrade-strategies).
+		if o.pool.GetUpdateInfo().GetBlueGreenInfo().GetPhase() == containerpb.NodePool_UpdateInfo_BlueGreenInfo_DELETING_BLUE_POOL {
+			// UNVERIFIED wording (re-read 2026-11-20: concepts/node-pool-upgrade-strategies).
+			return nil, status.Errorf(codes.FailedPrecondition, "Node pool %q is deleting its blue nodes: a blue-green upgrade cannot be cancelled in the DELETING_BLUE_POOL phase.", o.pool.GetName())
+		}
+		o.op.Status = containerpb.Operation_ABORTING
+		o.stopGracefully()
+		return &emptyResp{}, nil
 	}
 	o.op.Status = containerpb.Operation_ABORTING
 	if o.cancel != nil {

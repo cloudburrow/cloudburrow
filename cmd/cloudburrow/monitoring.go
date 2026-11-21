@@ -22,6 +22,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/service/logging"
 	"github.com/cloudburrow/cloudburrow/internal/service/monitoring"
+	"github.com/cloudburrow/cloudburrow/internal/service/tasks"
 	"github.com/cloudburrow/cloudburrow/internal/telemetry"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
 	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
@@ -49,7 +50,11 @@ type monitoringService struct {
 	// reqs are the serviceruntime request metrics; set before Start, they
 	// are sampled by whoever set them.
 	reqs *monitoring.RequestBuiltin
-	stop chan struct{}
+	// tasks is the instance's Cloud Tasks, or nil, whose calls, attempts
+	// and queue depths are cloudtasks.googleapis.com metrics (#2064).
+	tasks     *tasksService
+	tasksMets *monitoring.TasksBuiltin
+	stop      chan struct{}
 	// runStop ends the sampling of Cloud Run's metrics (#2049).
 	runStop chan struct{}
 	// pubsub is the instance's Pub/Sub tunnel, for Pub/Sub notification
@@ -147,19 +152,31 @@ func (s *monitoringService) Start(ctx context.Context) error {
 	} else if s.counters != nil {
 		s.reqs = monitoring.NewRequestBuiltin(monitoringCounters{reg: s.counters}, s.cfg.DefaultProject(), time.Now)
 		api.AddBuiltin(s.reqs)
+	}
+	if s.tasks != nil {
+		s.tasksMets = monitoring.NewTasksBuiltin(monitoringTasks{svc: s.tasks}, time.Now)
+		api.AddBuiltin(s.tasksMets)
+	}
+	// Both are sampled every 60 seconds, as Google samples them.
+	if s.reqs != nil || s.tasksMets != nil {
 		s.stop = make(chan struct{})
-		go func(stop chan struct{}) {
+		go func(stop chan struct{}, reqs *monitoring.RequestBuiltin, tm *monitoring.TasksBuiltin) {
 			t := time.NewTicker(requestSampleInterval)
 			defer t.Stop()
 			for {
 				select {
 				case <-t.C:
-					s.reqs.Sample()
+					if reqs != nil {
+						reqs.Sample()
+					}
+					if tm != nil {
+						tm.Sample()
+					}
 				case <-stop:
 					return
 				}
 			}
-		}(s.stop)
+		}(s.stop, s.reqs, s.tasksMets)
 	}
 	s.server = grpctransport.New(net.JoinHostPort(s.cfg.BindAddress, strconv.Itoa(s.cfg.Endpoints.Monitoring)))
 	s.server.Observe(s.calls)
@@ -409,6 +426,46 @@ func (l monitoringLogs) Ingested(project string, from, to time.Time) []monitorin
 	out := make([]monitoring.Ingestion, 0, len(vs))
 	for _, v := range vs {
 		out = append(out, monitoring.Ingestion{End: v.End, ResourceType: v.ResourceType, Bytes: v.Bytes})
+	}
+	return out
+}
+
+// monitoringTasks is Cloud Tasks as Cloud Monitoring reads it: the calls
+// and attempts its store recorded, and its queues' depths. Nothing before
+// Cloud Tasks starts.
+type monitoringTasks struct{ svc *tasksService }
+
+func (m monitoringTasks) Drain() []monitoring.TasksEvent {
+	st := m.svc.Store()
+	if st == nil {
+		return nil
+	}
+	evs := st.DrainMetrics()
+	out := make([]monitoring.TasksEvent, 0, len(evs))
+	for _, e := range evs {
+		te := monitoring.TasksEvent{Time: e.Time, Queue: e.Queue, TargetType: e.TargetType, Code: e.Code}
+		if e.Kind == tasks.MetricAPICall {
+			te.Method = e.Method
+		} else {
+			te.DelayMs = float64(e.Delay) / float64(time.Millisecond)
+		}
+		out = append(out, te)
+	}
+	return out
+}
+
+func (m monitoringTasks) Depths() []monitoring.TasksQueueDepth {
+	st := m.svc.Store()
+	if st == nil {
+		return nil
+	}
+	ds, err := st.Depths()
+	if err != nil {
+		return nil
+	}
+	out := make([]monitoring.TasksQueueDepth, len(ds))
+	for i, d := range ds {
+		out[i] = monitoring.TasksQueueDepth{Queue: d.Queue, TargetType: d.TargetType, Tasks: d.Tasks}
 	}
 	return out
 }

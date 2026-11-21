@@ -35,8 +35,17 @@ type ssmPullBuild struct {
 	Build   string `json:"build"`
 }
 
-// runPullTriggers runs the pull_request triggers for an open pull request.
+// runPullTriggers runs the pull_request triggers for an open pull request:
+// its triggers file's, and the Cloud Build triggers with a pull request
+// filter on links to its repository (#2077, cloudbuildpullrequests.go).
 func (m *SecureSourceManagerServer) runPullTriggers(ctx context.Context, pull string) {
+	m.runFilePullTriggers(ctx, pull)
+	m.runDevConnectPullTriggers(ctx, pull, "")
+}
+
+// runFilePullTriggers runs the triggers file's pull_request triggers for an
+// open pull request.
+func (m *SecureSourceManagerServer) runFilePullTriggers(ctx context.Context, pull string) {
 	builds := m.builds
 	if builds == nil {
 		return

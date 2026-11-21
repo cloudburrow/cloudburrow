@@ -960,13 +960,20 @@ const capabilityOf = (id) => SERVICES.find((s) => s.id === id) || {};
 // project alone.
 const scopeKeyOf = (service) => capabilityOf(service).scope || "";
 
+// carriesScope is whether the service's screens carry parameters of their
+// own on their requests: its scope, or its Filterer pickers (#1844).
+const carriesScope = (s) => !!(s && (s.scope || (s.filters || []).length));
+
 // carryScope copies the service's scope from the address onto url.
 function carryScope(url, service) {
   const key = scopeKeyOf(service);
-  if (!key) return url;
-  // A Filterer's own pickers (Listing.Filters, #1846) travel with it.
+  // A Filterer's own pickers (Listing.Filters, #1846) travel with it, on a
+  // screen scoped by the project alone too (#1844: Vaulted backups'
+  // Resource type, the Jobs page's time range).
+  const keys = [...(key ? [key] : []), ...(capabilityOf(service).filters || [])];
+  if (!keys.length) return url;
   const here = new URLSearchParams(location.search);
-  for (const k of [key, ...(capabilityOf(service).filters || [])]) {
+  for (const k of keys) {
     const value = here.get(k);
     if (value && !url.searchParams.has(k)) url.searchParams.set(k, value);
   }
@@ -977,7 +984,7 @@ function carryScope(url, service) {
 // on, or "".
 function scopeServiceOfPath(pathname) {
   for (const s of SERVICES) {
-    if (!s.scope) continue;
+    if (!carriesScope(s)) continue;
     const r = ROUTES.find((x) => x.service === s.id);
     const base = r ? r.path : "/" + s.id;
     if (pathname === base || pathname.startsWith(base + "/")) return s.id;
@@ -993,7 +1000,7 @@ function scopedAPIPath(path) {
   if (typeof path !== "string" || !path.startsWith("/api/")) return path;
   const url = new URL(path, location.origin);
   const service = url.pathname.split("/")[3] || "";
-  if (!scopeKeyOf(service) || scopeServiceOfPath(location.pathname) !== service) return path;
+  if (!carriesScope(capabilityOf(service)) || scopeServiceOfPath(location.pathname) !== service) return path;
   carryScope(url, service);
   return url.pathname + url.search;
 }
@@ -2467,15 +2474,94 @@ function filterBar({ noun, columns, onChange, extra = [], valuesOf = null }) {
   };
 }
 
+// checkTreeFilter is a list's checkbox tree in place of the filter bar
+// (Listing.CheckTree, #2070): Google's Object Browser filters "by specific
+// API groups and Resource Kinds". Each group is a checkbox, mixed while
+// only some of its kinds are checked, with a disclosure button showing its
+// kinds, each a checkbox of its own. Every box starts checked. It answers
+// as filterBar does, so the table draws, empties and clears the same way.
+let checkTreeSeq = 0;
+function checkTreeFilter({ tree, onChange }) {
+  const off = new Set(); // "group\u0000kind" of each unchecked kind
+  const key = (g, k) => `${g}\u0000${k}`;
+  const groupBoxes = [];
+  const sync = () => {
+    for (const { box, group } of groupBoxes) {
+      const kids = group.children || [];
+      const unchecked = kids.filter((k) => off.has(key(group.label, k))).length;
+      box.checked = kids.length ? unchecked < kids.length : !off.has(key(group.label, ""));
+      box.indeterminate = kids.length > 0 && unchecked > 0 && unchecked < kids.length;
+    }
+  };
+  const kidBoxes = [];
+  const list = el("ul", { class: "check-tree-groups" }, ...(tree.groups || []).map((group) => {
+    const id = `check-tree-${++checkTreeSeq}`;
+    const kids = group.children || [];
+    const box = el("input", { type: "checkbox", checked: "checked",
+      onchange: () => {
+        if (kids.length) kids.forEach((k) => (box.checked ? off.delete(key(group.label, k)) : off.add(key(group.label, k))));
+        else if (box.checked) off.delete(key(group.label, ""));
+        else off.add(key(group.label, ""));
+        kidBoxes.forEach((kb) => { kb.box.checked = !off.has(key(kb.group, kb.kind)); });
+        sync(); onChange();
+      } });
+    groupBoxes.push({ box, group });
+    const kidList = el("ul", { class: "check-tree-kinds", id, hidden: true }, ...kids.map((kind) => {
+      const kb = el("input", { type: "checkbox", checked: "checked",
+        onchange: () => {
+          if (kb.checked) off.delete(key(group.label, kind)); else off.add(key(group.label, kind));
+          sync(); onChange();
+        } });
+      kidBoxes.push({ box: kb, group: group.label, kind });
+      return el("li", {}, el("label", { class: "check-tree-label" }, kb, el("span", { text: kind })));
+    }));
+    const toggle = kids.length ? el("button", { type: "button", class: "icon-button check-tree-toggle",
+      "aria-expanded": "false", "aria-controls": id, "aria-label": `Show the kinds in ${group.label}`,
+      html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>',
+      onclick: () => {
+        const open = toggle.getAttribute("aria-expanded") !== "true";
+        toggle.setAttribute("aria-expanded", open ? "true" : "false");
+        toggle.setAttribute("aria-label", `${open ? "Hide" : "Show"} the kinds in ${group.label}`);
+        kidList.hidden = !open;
+      } }) : el("span", { class: "check-tree-spacer", "aria-hidden": "true" });
+    return el("li", {},
+      el("div", { class: "check-tree-row" }, toggle,
+        el("label", { class: "check-tree-label" }, box, el("span", { text: group.label }))),
+      kidList);
+  }));
+  const node = el("fieldset", { class: "check-tree" },
+    el("legend", { text: tree.label || "Filter" }), list);
+  return {
+    node,
+    chips: null,
+    matches: (get) => {
+      const g = String(get(tree.column) || ""), k = String(get(tree.childColumn) || "");
+      return !off.has(key(g, k)) && !off.has(key(g, ""));
+    },
+    active: () => off.size > 0,
+    text: () => {
+      const n = off.size;
+      return `${n} unchecked ${n === 1 ? "kind" : "kinds"} in ${tree.label || "the filter"}`;
+    },
+    clear: () => { off.clear(); kidBoxes.forEach((kb) => { kb.box.checked = true; }); sync(); },
+  };
+}
+
 // viewOptions is the column chooser beside the filter (#1842), Google's
 // "View options" / "Column display options": a checkbox per data column,
 // remembered per service. hidden() is the set of columns turned off.
 const COLUMNS_KEY = "cloudburrow.columns";
+// CARD_PINS_KEY keeps a SummaryOnly screen's pinned cards (#1854), and
+// cardFilterText what its card filter holds across its polls.
+const CARD_PINS_KEY = "cloudburrow.cardpins";
+const cardFilterText = new Map();
 
-function viewOptions({ service, columns, onChange, scope = null, reload = null, hiddenByDefault = [] }) {
+function viewOptions({ service, columns, onChange, scope = null, reload = null, hiddenByDefault = [], optional = [] }) {
   const stored = readStored(COLUMNS_KEY, {}) || {};
   // Until the viewer chooses, the listing's HiddenColumns are off, as
-  // Google's Key inventory hides EKM via VPC connection (#1851).
+  // Google's Key inventory hides EKM via VPC connection (#1851), and so is
+  // a column offered only on request (Listing.OptionalColumns, #1854).
+  hiddenByDefault = [...hiddenByDefault, ...(optional || [])];
   let off = new Set(Array.isArray(stored[service]) ? stored[service] : hiddenByDefault);
   if (scope) return viewOptionsDialog({ service, columns, onChange, scope, reload, off });
   const button = el("button", { type: "button", class: "icon-button view-options",
@@ -2710,8 +2796,10 @@ function sparkline(points, opts = {}) {
 // Both are on screen rather than assumed: a chart that does not say what it
 // covers or where the numbers came from is a picture, not a measurement.
 function chartCard(title, points, opts = {}) {
-  const readings = points.filter((p) => p.value !== null && p.value !== undefined);
-  const body = readings.length < 2
+  const readings = (points || []).filter((p) => p.value !== null && p.value !== undefined);
+  const body = opts.unavailable
+    ? el("p", { class: "unavailable", text: opts.unavailable })
+    : readings.length < 2
     ? el("p", { class: "unavailable",
         text: readings.length === 1
           ? "Not enough history yet — one reading so far."
@@ -3137,11 +3225,12 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   const chooser = opts.rowControls && route.service
     ? viewOptions({ service: route.service, columns: allDataColumns, onChange: () => draw(),
       scope: data.scope && data.scope.viewOptions ? data.scope : null, reload,
-      hiddenByDefault: data.hiddenColumns || [] })
+      hiddenByDefault: data.hiddenColumns || [], optional: data.optionalColumns })
     : null;
-  const dataColumns = () => allDataColumns().filter((c) => !chooser || !chooser.hidden().has(c));
+  const dataColumns = () => allDataColumns().filter((c) => chooser
+    ? !chooser.hidden().has(c) : !(data.optionalColumns || []).includes(c));
   const hasActions = () =>
-    data.items.some((i) => (i.actions || []).some((a) => !a.panel) || i.object) || caps.delete;
+    data.items.some((i) => (i.actions || []).some((a) => !a.panel) || i.object || i.panel) || caps.delete;
   // Declared by the provider, or inferred from the rows that happen to be
   // present. Inference alone made the column come and go as the data
   // changed, taking any sort applied to it with it.
@@ -3180,7 +3269,10 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   // have, as Google's offers Deployment type's Container and Function.
   const valuesOf = (column) => [...new Set(data.items.map((i) => valueOf(i, column))
     .filter((v) => v && v !== "—" && v.length <= 40))].sort().slice(0, 20);
-  const bar = filterBar({ noun, columns: filterColumns, onChange: () => { page = 0; draw(); }, valuesOf });
+  // Object Browser's API group and kind tree in place of the bar (#2070).
+  const bar = data.checkTree
+    ? checkTreeFilter({ tree: data.checkTree, onChange: () => { page = 0; draw(); } })
+    : filterBar({ noun, columns: filterColumns, onChange: () => { page = 0; draw(); }, valuesOf });
   const matches = (item) => bar.matches((column) => column === null
     ? filterColumns().map((c) => valueOf(item, c))
     : valueOf(item, column));
@@ -3188,8 +3280,10 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   const body = el("tbody");
   const headRow = el("tr");
   const footer = el("div", { class: "table-footer" });
+  // Named as Google's header button names it where the provider does
+  // (DeleteWorder, #1848): Cloud Tasks' Delete queue.
   const bulk = el("button", {
-    class: "secondary danger", text: "Delete", disabled: "disabled",
+    class: "secondary danger", text: caps.deleteSelected || "Delete", disabled: "disabled",
     onclick: () => deleteSelected(),
   });
   const selectionLabel = el("span", { class: "selection-count unavailable", text: "" });
@@ -3247,6 +3341,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
       title: `Delete ${names.length} ${names.length === 1 ? noun.replace(/s$/, "") : noun}?`,
       detail: [names.join(", "), DELETE_DETAIL[route.service]].filter(Boolean).join("\n\n"),
       confirmWord: names.length === 1 ? names[0] : String(names.length),
+      confirmLabel: caps.deleteSubmit || "Delete",
       style: caps.deleteConfirm || "name",
       onConfirm: async () => {
         for (const name of names) operating.add(name);
@@ -3313,10 +3408,19 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
     const buttons = (item.actions || []).filter((a) => a.button).map((a) =>
       el("button", { type: "button", class: "secondary row-button", text: a.label,
         disabled: busy ? "disabled" : null, "aria-label": `${a.label} ${item.name}`, onclick: rowAction(a) }));
+    // A row's side panel (#2066): Google's View or View Fixed, opening
+    // the Vulnerability details panel.
+    if (item.panel) {
+      buttons.unshift(el("button", { type: "button", class: "link-button row-panel-link", text: item.panel.label,
+        "aria-label": `${item.panel.label} ${item.name}`, onclick: (e) => openSidePanel(item.panel, e.currentTarget) }));
+    }
     const actions = [
       ...(caps.editRowFirst ? edit : []),
       ...(item.actions || []).filter((a) => !a.button && !a.panel).map((a) => ({
         key: a.id, label: a.label, destructive: a.destructive,
+        // An action the row cannot take here is drawn disabled with its
+        // reason, as on a page (#1857: a node pool's Upgrade).
+        unavailable: a.unavailable,
         // A row whose actions address a path of their own is named by its
         // row, not the path's last segment: a value inside a Datastore
         // property is addressed by its steps as JSON, [6,"when"], and its
@@ -3325,7 +3429,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
           (item.actsOn || []).length ? item.name : null),
       })),
       ...(caps.editRowFirst ? [] : edit),
-      ...(caps.delete ? [{
+      ...(caps.delete && !caps.deleteIcon ? [{
         key: "delete", label: caps.deleteLabel || "Delete", destructive: true,
         run: () => deleteResource(route, item.name, refresh, rowBusy(item.name)),
       }] : []),
@@ -3336,6 +3440,15 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
     if ((caps.rowMenuOrder || []).length) {
       const rank = (a) => { const i = caps.rowMenuOrder.indexOf(a.key); return i < 0 ? caps.rowMenuOrder.length : i; };
       actions.sort((a, b) => rank(a) - rank(b));
+    }
+    // Delete as a trash icon on the row (RowDeleteIconer), as Google's
+    // private pools list draws it (#1854).
+    if (caps.delete && caps.deleteIcon) {
+      buttons.push(el("button", { type: "button", class: "icon-button row-delete-icon",
+        disabled: busy ? "disabled" : null,
+        "aria-label": `${caps.deleteLabel || "Delete"} ${item.name}`, title: caps.deleteLabel || "Delete",
+        onclick: () => deleteResource(route, item.name, refresh, rowBusy(item.name)),
+        html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 7h12M9 7V5h6v2M8 7l1 12h6l1-12M10.5 10v6M13.5 10v6"/></svg>' }));
     }
     if (!actions.length && !buttons.length) return el("td", {});
     if (!actions.length) return el("td", { class: "row-actions" }, ...buttons);
@@ -3492,7 +3605,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
       const state = bar.active()
         ? el("div", { class: "state state-inline" },
             el("h2", { text: `No matching ${noun}` }),
-            el("p", { text: `Nothing matches “${query}”.` }),
+            el("p", { text: data.checkTree ? `Nothing matches: ${query}.` : `Nothing matches “${query}”.` }),
             el("button", {
               class: "secondary", text: "Clear filter",
               onclick: () => { bar.clear(); page = 0; draw(); },
@@ -3810,7 +3923,10 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
           : null)
       : el("div", { class: "action-bar" }, ...selectionButtons,
           selectActions.length ? selectionLabel : null, refreshControl),
-    el("div", { class: "filter-bar" }, bar.node, chooser ? chooser.node : null, freshness),
+    // A checkbox tree (#2070) is too tall for the sticky bar: it goes
+    // above it, and the bar keeps the column chooser and freshness.
+    data.checkTree ? bar.node : null,
+    el("div", { class: "filter-bar" }, data.checkTree ? null : bar.node, chooser ? chooser.node : null, freshness),
     bar.chips,
     // Listing.TableTitle (#1864): the table's own heading, as Google's
     // Audit Logs titles its table "Data Access audit logs configuration".
@@ -3846,6 +3962,72 @@ function openAskedListAction(route, data, onDone) {
 //
 // Readable as text, which docs/console-parity.md section 5 requires, and
 // deep-linkable at any depth: /cloudsql/cloudburrow/widgets is a table.
+// A listing's Sort and filter menus (Listing.Sorts, Listing.Menus, #2071):
+// the choices live in the address as {section}-sort and
+// {section}-{key}, a toggle's as {section}-mine.
+function listMenuParam(section, key) { return `${section.id}-${key.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`; }
+
+function listMenuValue(section, key) { return new URLSearchParams(location.search).get(listMenuParam(section, key)) || ""; }
+
+function setListMenuValue(section, key, value) {
+  const url = new URL(location.href);
+  if (value) url.searchParams.set(listMenuParam(section, key), value);
+  else url.searchParams.delete(listMenuParam(section, key));
+  history.replaceState({}, "", url);
+}
+
+// arrangeListing is a listing's rows filtered by its menus' choices and
+// ordered by its Sort's.
+function arrangeListing(section, list) {
+  if (!list) return list;
+  const holds = (item, key, value) => (item.fields || {})[key] && (item.fields[key] || "").split(",").map((v) => v.trim()).includes(value);
+  let items = [...(list.items || [])];
+  for (const m of list.menus || []) {
+    const chosen = m.toggle ? (listMenuValue(section, "mine") ? m.toggle : "") : listMenuValue(section, m.label);
+    if (chosen) items = items.filter((it) => holds(it, m.key, chosen));
+  }
+  const sorts = list.sorts || [];
+  const sort = sorts.find((x) => x.label === listMenuValue(section, "sort"));
+  if (sort) {
+    items.sort((a, b) => {
+      const x = (a.fields || {})[sort.key] || "", y = (b.fields || {})[sort.key] || "";
+      return (sort.desc ? -1 : 1) * (x < y ? -1 : x > y ? 1 : 0);
+    });
+  }
+  return { ...list, items, total: items.length };
+}
+
+// listMenusBar draws the menus; a change redraws the tab through redraw
+// and gives the menu its focus back.
+function listMenusBar(section, list, redraw) {
+  const again = (id) => { redraw(); const c = document.getElementById(id); if (c) c.focus(); };
+  const controls = [];
+  for (const m of list.menus || []) {
+    if (m.toggle) {
+      const id = `${section.id}-menu-mine`;
+      const on = !!listMenuValue(section, "mine");
+      controls.push(el("button", { type: "button", id, class: "secondary list-menu-toggle", "aria-pressed": on ? "true" : "false",
+        text: m.label, onclick: () => { setListMenuValue(section, "mine", on ? "" : "1"); again(id); announce(`${m.label} ${on ? "off" : "on"}`); } }));
+      continue;
+    }
+    const id = `${section.id}-menu-${listMenuParam(section, m.label)}`;
+    const select = el("select", { id, class: "list-menu" },
+      el("option", { value: "", text: `All` }),
+      ...(m.options || []).map((o) => el("option", { value: o, text: o })));
+    select.value = listMenuValue(section, m.label);
+    select.addEventListener("change", () => { setListMenuValue(section, m.label, select.value); again(id); });
+    controls.push(el("label", { class: "list-menu-label", for: id }, el("span", { text: m.label }), select));
+  }
+  if ((list.sorts || []).length) {
+    const id = `${section.id}-menu-sort`;
+    const select = el("select", { id, class: "list-menu" }, ...list.sorts.map((x) => el("option", { value: x.label, text: x.label })));
+    select.value = listMenuValue(section, "sort") || list.sorts[0].label;
+    select.addEventListener("change", () => { setListMenuValue(section, "sort", select.value); again(id); });
+    controls.push(el("label", { class: "list-menu-label", for: id }, el("span", { text: "Sort" }), select));
+  }
+  return el("div", { class: "list-menus", role: "group", "aria-label": `${section.label} filters and sort` }, ...controls);
+}
+
 function detailHref(route, path) {
   const segments = Array.isArray(path) ? path : [path];
   const url = new URL(
@@ -3948,7 +4130,6 @@ async function renderDetail(view, route, resourcePath) {
     return setChildren(view, ...header,
       errorState(`${name} unavailable`, data.unavailable, () => renderDetail(view, route, segments)));
   }
-
   if ((data.trail || []).length) drawTrail(data.trail);
   // A page addressed by something no reader recognises — a Datastore
   // entity's encoded key (#875) — says what it is in its heading.
@@ -3958,9 +4139,11 @@ async function renderDetail(view, route, resourcePath) {
   // "<Kind> details".
   if (data.heading) crumb.querySelector("h1, h2").textContent = data.heading;
   // An edit form that is a page of its own (#1862), as Google's Edit opens
-  // the Edit Redis instance page: the resource's address with ?edit=1 draws
+  // the Edit Redis instance page, Edit Repository (#1855) and Edit job
+  // Create job's page (#2062): the resource's address with ?edit=1 draws
   // the form instead of the resource's tabs.
-  if (data.edit && data.edit.page && new URLSearchParams(location.search).get("edit") === "1") {
+  if (data.edit && data.edit.page && new URLSearchParams(location.search).get("edit") === "1" &&
+      view.dataset.embedded !== "true") {
     return renderEditPage(view, route, segments, data, crumb);
   }
   // Google's Edit subscription and Edit secret are pages (#1847, #1850):
@@ -4090,12 +4273,20 @@ async function renderDetail(view, route, resourcePath) {
       : null;
     // A tab's own actions, at the top of the tab rather than beside the
     // page title: Google's Lifecycle tab has Add a rule (#1843).
+    // An action with Menu goes in the tab's ellipsis menu instead, as
+    // Google's Cloud Tasks Logs tab has Disable logs (#2064), drawn and
+    // driven by the keyboard as a row's menu is.
     if ((section.actions || []).length) {
+      const run = (a) => () => runAction(route, segments, a, reload, NO_ROW, data.title || null);
+      const inMenu = section.actions.filter((a) => a.menu);
       const bar = el("div", { class: "action-bar section-actions", id: `section-actions-${section.id}` },
-        ...section.actions.map((a) => el("button", {
+        ...section.actions.filter((a) => !a.menu).map((a) => el("button", {
           type: "button", class: "secondary" + (a.destructive ? " danger" : ""), text: a.label,
-          onclick: () => runAction(route, segments, a, reload, NO_ROW, data.title || null),
-        })));
+          disabled: a.unavailable ? "disabled" : null, title: a.unavailable || null,
+          onclick: run(a),
+        })),
+        inMenu.length ? overflowMenu(inMenu.map((a) => ({ label: a.label, destructive: a.destructive,
+          unavailable: a.unavailable, run: run(a) })), `the ${section.label} tab`) : null);
       note = note ? el("div", {}, bar, note) : bar;
     }
     // Section.Edit (#1864): a form drawn in the tab itself, as Google's
@@ -4163,7 +4354,14 @@ async function renderDetail(view, route, resourcePath) {
     // The provider says what the section holds. Inferring it from whichever
     // field happened to be populated would put the decision in the client,
     // and an empty one would be indistinguishable from a table with no rows.
+    // A branch and tag selector over the tab (#2071): the code view's.
+    if (section.refs) {
+      const picker = refPicker(route, section.refs);
+      note = note ? el("div", {}, picker, note) : picker;
+    }
     switch (section.kind) {
+      case "diff":
+        return setChildren(panel, note, drawDiffView(route, segments, section, reload));
       case "properties":
         return drawPropertiesSection(panel, section, note);
       case "text":
@@ -4172,6 +4370,15 @@ async function renderDetail(view, route, resourcePath) {
         return drawChartSection(panel, section, note);
       case "analytics":
         return drawAnalyticsSection(panel, section, note);
+      case "media":
+        return drawMediaSection(panel, section, note);
+      case "result":
+        // An action's answer on a page of its own (#2084): Document AI's
+        // analysis page, drawn as its result dialog draws it.
+        // Its own region scrolls sideways, never the page, and is
+        // reachable from the keyboard to be scrolled.
+        return setChildren(panel, note, el("div", { class: "card result-section", role: "region", tabindex: "0",
+          "aria-label": section.label }, resultTable(section.listing || {})));
       case "logs":
         return drawLogsSection(panel, section, note);
       case "permissions":
@@ -4192,8 +4399,18 @@ async function renderDetail(view, route, resourcePath) {
       }
       case undefined:
       case "":
-      case "listing":
+      case "listing": {
+        // A listing's own Groups, drawn as cards over its rows (#1855):
+        // Google's Vulnerabilities tab has its Scan results summary above
+        // the table.
+        const cards = (section.groups || []).filter((g) => (g.properties || []).length).map((group) =>
+          el("div", { class: "card properties section-summary" },
+            group.heading ? el("h2", { text: group.heading }) : null,
+            group.bars ? barGraph(group)
+              : el("dl", {}, ...group.properties.flatMap((prop) => [el("dt", { text: prop.label }), propertyValue(prop)]))));
+        if (cards.length) note = el("div", {}, ...cards, note);
         return drawListingSection(panel, section, note, reload);
+      }
       default:
         // Said out loud rather than drawn as an empty table: a kind this
         // console does not know is a version skew, and guessing hides it.
@@ -4261,6 +4478,20 @@ async function renderDetail(view, route, resourcePath) {
   const drawListingSection = (into, section, note, reload) => {
     let list = section.listing || {};
     const noun = list.noun || section.label.toLowerCase();
+    // A tab's Sort menu and filter menus (#2071): Secure Source Manager's
+    // Issues tab has Labels, Milestones, Assignee, Assigned to me and
+    // Sort. The choices are kept in the address, so a reload keeps them.
+    if ((list.sorts || []).length || (list.menus || []).length) {
+      // The redraw starts from the note as it came, not the one the bar
+      // joins below, or each change would add another bar.
+      const given = note;
+      const bar = listMenusBar(section, list, () => drawListingSection(into, section, given, reload));
+      list = arrangeListing(section, list);
+      note = note ? el("div", {}, note, bar) : bar;
+      if (!(list.items || []).length && (section.listing.items || []).length) {
+        return setChildren(into, note, emptyState(`No ${noun} match`, "Clear a menu's choice to see the others."));
+      }
+    }
     // A tab's own summary cards over its rows: a key's Usage tracking
     // tab draws its key usage summary over the protected resources (#2053).
     const cards = listingSummary(list);
@@ -4323,7 +4554,7 @@ async function renderDetail(view, route, resourcePath) {
       refetch: async () => {
         const fresh = await api(path);
         const same = (fresh.sections || []).find((sec) => sec.id === section.id);
-        return same ? linked(same.listing) : null;
+        return same ? linked(arrangeListing(section, same.listing)) : null;
       },
     });
   };
@@ -4475,6 +4706,10 @@ async function renderDetail(view, route, resourcePath) {
       return setChildren(into, note,
         emptyState(`No ${section.label.toLowerCase()}`, `${name} reports none.`));
     }
+    // A file's content (#2071): numbered, highlighted, with Blame.
+    if (section.language && section.language !== "workflows") {
+      return setChildren(into, note, codeView(route, section, name));
+    }
     // A workflow's source (#2004), highlighted beside its graph.
     if (section.language === "workflows") {
       return setChildren(into, note,
@@ -4490,18 +4725,48 @@ async function renderDetail(view, route, resourcePath) {
         el("pre", { class: "mono", text: section.text })));
   };
 
+  // A player for an audio object (#2084): a Speech-to-Text transcription's
+  // audio, which Google's Transcription details page plays in the browser,
+  // with the transcript under it. The browser's own controls, which are
+  // reachable and operable from the keyboard.
+  const drawMediaSection = (into, section, note) => {
+    const m = section.media;
+    if (!m || !m.src) {
+      return setChildren(into, note, emptyState("No audio", `${name} keeps no audio to play.`));
+    }
+    const status = el("p", { class: "form-help", id: "media-status", role: "status" });
+    const audio = el("audio", { id: "media-player", controls: "", preload: "metadata", "aria-label": m.label,
+      "aria-describedby": "media-status" },
+      el("source", { src: m.src, ...(m.type ? { type: m.type } : {}) }));
+    const failed = () => { status.textContent = "The audio could not be played: the object is missing or is not audio this browser plays."; };
+    audio.addEventListener("error", failed);
+    audio.querySelector("source").addEventListener("error", failed);
+    audio.addEventListener("loadedmetadata", () => {
+      if (Number.isFinite(audio.duration)) status.textContent = `${m.label}, ${audio.duration.toFixed(1)} seconds`;
+    });
+    setChildren(into, note,
+      el("div", { class: "card media-section" },
+        el("div", { class: "media-player" }, audio, status),
+        section.text ? el("div", { class: "text-section" },
+          el("div", { class: "text-actions" }, copyButton(section.text, `${section.label} for ${name}`)),
+          el("pre", { class: "mono result-text", id: "media-text", tabindex: "0", "aria-label": section.label, text: section.text })) : null));
+  };
+
   const drawChartSection = (into, section, note) => {
-    const series = (section.series || []).filter((sv) => (sv.points || []).length);
+    // A metric the server says is unavailable keeps its card, saying why
+    // (#2070: a workload's Disk where the kubelet reports none).
+    const series = (section.series || []).filter((sv) => (sv.points || []).length || sv.unavailable);
     if (!series.length) {
       return setChildren(into, note,
         emptyState("No readings yet",
           "This instance has taken no measurements for this resource yet."));
     }
     setChildren(into, note, el("div", { class: "charts" }, ...series.map((sv) =>
-      chartCard(sv.label, sv.points, {
+      chartCard(sv.label, sv.points || [], {
         label: `${sv.label} for ${name}`,
         max: sv.max || undefined,
         foot: sv.unit ? `Measured in ${sv.unit}` : "",
+        unavailable: sv.unavailable,
       }))));
   };
 
@@ -4623,6 +4888,11 @@ async function renderDetail(view, route, resourcePath) {
   // button, not the header's (#1851): a key's Disable over its versions.
   const onRows = new Set(sections.flatMap((s) => ((s.listing || {}).selectActions || []).map((a) => a.id)));
   const pageActions = [
+    // Side panels beside the title (#2066): Google's Setup Instructions.
+    ...(data.panels || []).map((sp, i) => el("button", {
+      type: "button", class: "secondary", id: `side-panel-open-${i}`, text: sp.label,
+      onclick: (e) => openSidePanel(sp, e.currentTarget),
+    })),
     // A Linked action is opened from where the page links to it (#1859:
     // Upgrade beside a Spanner instance's edition), not as a button.
     ...(data.actions || []).filter((a) => !onTabs.has(a.id) && !onRows.has(a.id) && !a.linked).map((a) =>
@@ -4691,6 +4961,8 @@ async function renderDetail(view, route, resourcePath) {
     ? () => navigate(editPageHref())
     : () => openEditForm(route, segments, data.edit, reloadPage);
   if (data.edit && data.edit.page) {
+    // An edit form with a page of its own (EditForm.Page, #1855, #1862):
+    // Google's Edit Repository and Edit Redis instance open a page.
     const editHref = new URL(detailHref(route, segments), location.origin);
     editHref.searchParams.set("edit", "1");
     pageActions.unshift(el("a", {
@@ -4865,6 +5137,21 @@ function openActionForm(route, segments, action, onDone, title = null, host = nu
         navigate(actionThen(action.then, values));
         return null;
       }
+      // A page action that made a row goes on to it (Action.Opens, #1856):
+      // the web interface's Create repository opens the new repository.
+      if (host && action.opens && values[action.opens]) {
+        navigate(detailHref(route, [...segments, values[action.opens]]));
+        return null;
+      }
+      // An answer with a page of its own opens it (#2084): Document AI's
+      // Upload test document its analysis page, New transcription its
+      // Transcription details. The page left is not redrawn, which would
+      // race the one opened.
+      if (res.result && res.result.open) {
+        close();
+        navigate(res.result.open);
+        return null;
+      }
       onDone();
       // An action that answers with rows — a pull — keeps its dialog open to
       // show them. Closing it would be the pull done and its messages thrown
@@ -4891,9 +5178,24 @@ function openActionForm(route, segments, action, onDone, title = null, host = nu
 
   if (host) {
     const heading = action.title || action.label;
-    setChildren(host.view,
-      pageHeader(heading, segments.length ? name : null, { back: host.back, backLabel: `Back to ${name}` }),
-      el("form", { class: "create-page is-single-page", novalidate: true, onsubmit: submit, "aria-label": heading },
+    const header = pageHeader(heading, segments.length ? name : null, { back: host.back, backLabel: `Back to ${name}` });
+    // The page's crumbs back to the resource it is on, as Secure Source
+    // Manager's Create repository has (#1856).
+    if (segments.length) {
+      const list = new URL(route.path, location.origin);
+      const project = currentProject();
+      if (project) list.searchParams.set("project", project);
+      carryScope(list, route.service);
+      const trail = [el("a", { href: list.pathname + list.search, text: route.crumb || route.title })];
+      segments.forEach((sg, i) => {
+        trail.push(el("span", { "aria-hidden": "true", text: "/" }));
+        trail.push(el("a", { href: detailHref(route, segments.slice(0, i + 1)), text: sg }));
+      });
+      trail.push(el("span", { "aria-hidden": "true", text: "/" }), el("span", { text: heading }));
+      header.prepend(el("nav", { class: "breadcrumb", "aria-label": "Breadcrumb" }, ...trail));
+    }
+    setChildren(host.view, header,
+      el("form", { class: "create-page is-single-page", id: "action-page-form", novalidate: true, onsubmit: submit, "aria-label": heading },
         error,
         ...actionSteps.nodes,
         el("div", { class: "form-actions" }, primary,
@@ -5030,6 +5332,56 @@ function openActionPanel(route, segments, action, onDone, title, { keepFocus = f
       el("div", { class: "modal-actions" },
         el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => closeActionPanel(true) }), primary)));
   if (!keepFocus) (buttons[0] || primary).focus();
+}
+
+// barGraph draws a group of counts as a horizontal bar graph
+// (PropertyGroup.Bars, #2066): Google's Most common licenses. Each bar is
+// a list item naming its label and count, so it reads the same without
+// the picture; the bar's length is its count against the largest.
+function barGraph(group) {
+  const counts = group.properties.map((p) => Number(p.value) || 0);
+  const max = Math.max(1, ...counts);
+  return el("ul", { class: "bar-graph", "aria-label": group.heading || "Counts" },
+    ...group.properties.map((p, i) => el("li", { class: "bar-row" },
+      el("span", { class: "bar-label", text: p.label }),
+      el("span", { class: "bar-track", "aria-hidden": "true" },
+        el("span", { class: "bar-fill", style: `width: ${Math.max(2, Math.round(100 * counts[i] / max))}%` })),
+      el("span", { class: "bar-count", text: p.value }))));
+}
+
+// openSidePanel draws a provider's side panel (SidePanel, #2066) in the
+// info panel's place: Google's Setup Instructions and Vulnerability
+// details. It changes nothing. Escape or Close takes it away, and focus
+// goes back to what opened it.
+function openSidePanel(sp, opener) {
+  const panel = infoPanelHost();
+  if (!panel) return;
+  const close = () => {
+    closeActionPanel();
+    if (opener && opener.isConnected) opener.focus();
+  };
+  const head = el("div", { class: "info-head" },
+    el("h2", { id: "side-panel-title", text: sp.title || sp.label }),
+    el("button", { type: "button", class: "icon-button", id: "side-panel-close", "aria-label": `Close ${sp.title || sp.label}`, onclick: close,
+      html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>' }));
+  const groups = (sp.groups || []).filter((g) => (g.properties || []).length).map((g) =>
+    el("div", { class: "side-panel-group" },
+      g.heading ? el("h3", { text: g.heading }) : null,
+      el("dl", { class: "info-fields" }, ...g.properties.flatMap((pr) => [el("dt", { text: pr.label }), propertyValue(pr)]))));
+  const tables = (sp.tables || []).map((t, i) => el("div", { class: "side-panel-table table-wrap" },
+    el("table", { id: `side-panel-table-${i}` },
+      el("caption", { text: t.title }),
+      el("thead", {}, el("tr", {}, ...(t.columns || []).map((c) => el("th", { scope: "col", text: c })))),
+      el("tbody", {}, ...(t.rows || []).map((r) => el("tr", {}, ...r.map((v) => el("td", { text: v || "—" }))))))));
+  const text = sp.text ? el("div", { class: "side-panel-text" },
+    sp.copy ? el("div", { class: "text-actions" }, copyButton(sp.text, sp.copy.replace(/^Copy /i, ""))) : null,
+    el("pre", { class: "mono", tabindex: "0", "aria-label": sp.title || sp.label, text: sp.text })) : null;
+  panel.hidden = false;
+  panel.dataset.actionPanel = "side-panel";
+  document.documentElement.setAttribute("data-info", "open");
+  setChildren(panel, el("section", { class: "side-panel", id: "side-panel", "aria-labelledby": "side-panel-title" },
+    head, sp.intro ? el("p", { class: "form-help", text: sp.intro }) : null, ...groups, text, ...tables));
+  panel.querySelector("#side-panel-close").focus();
 }
 
 // closeActionPanel takes an action's form out of the info panel: the
@@ -5437,7 +5789,8 @@ function showList(section, shownHere, onChange) {
     if (section.uploadTo) writeStored(VERSIONS_KEY, select.value === SHOW_NONCURRENT);
     onChange();
   });
-  return { node: el("label", { class: "objects-show", for: id }, "Show ", select), choice };
+  // The Layer bar (#2066) is a Show list named Layer.
+  return { node: el("label", { class: "objects-show", for: id }, `${section.showLabel || "Show"} `, select), choice };
 }
 
 function objectQuery(path) {
@@ -5689,12 +6042,9 @@ async function editFromRow(route, segments, onDone) {
     const data = await api(`/api/detail/${route.service}?project=${encodeURIComponent(project)}` +
       segments.map((sg) => `&name=${encodeURIComponent(sg)}`).join(""));
     if (!data.edit) throw new Error("This resource has nothing that can be edited.");
-    // An edit form that is a page of its own (#1862) opens that page.
-    if (data.edit.page) {
-      const url = new URL(detailHref(route, segments), location.origin);
-      url.searchParams.set("edit", "1");
-      return navigate(url.pathname + url.search);
-    }
+    // An edit form that is a page of its own (#1862) opens that page,
+    // whose Save and Cancel come back to this list (#2062).
+    if (data.edit.page) return openEditPage(route, segments);
     if (data.edit.layout === "page") return navigate(editPageHref(detailHref(route, segments)));
     openEditForm(route, segments, data.edit, onDone);
   } catch (err) {
@@ -5716,8 +6066,13 @@ function openEditForm(route, segments, spec, onDone) {
     to.searchParams.set("edit", "1");
     return navigate(to.pathname + to.search);
   }
+  // An edit that is a page (EditForm.Page, #2062): Google's Edit job is
+  // Create job's page, so it opens at the resource's address with ?edit=1.
+  if (spec.page) return openEditPage(route, segments);
   const name = segments[segments.length - 1];
   const fields = buildCreateForm(spec);
+  // Google's Edit job follows Create job's steps (EditForm.Steps, #1849).
+  const steps = spec.steps ? createSteps(fields.nodes, spec.steps === "next" ? "Next" : "Continue") : null;
   const error = el("p", { class: "form-error", role: "alert", hidden: true });
   let submitting = false;
 
@@ -5736,7 +6091,11 @@ function openEditForm(route, segments, spec, onDone) {
   const submit = async (e) => {
     e.preventDefault();
     error.hidden = true;
-    if (submitting || !fields.validate()) return;
+    if (submitting) return;
+    if (!fields.validate()) {
+      if (steps) steps.revealInvalid();
+      return;
+    }
     // Google's View diff & redeploy (#1852): the changes, then Deploy changes.
     if (spec.review && !(await reviewChanges(spec, initial, fields.values()))) return;
     submitting = true;
@@ -5766,7 +6125,7 @@ function openEditForm(route, segments, spec, onDone) {
     el("h2", { id: "edit-title", text: `${spec.title || spec.label || "Edit"} ${name}` }),
     spec.note ? el("p", { class: "form-help", text: spec.note }) : null,
     error,
-    ...fields.nodes,
+    ...(steps ? steps.nodes : fields.nodes),
     el("div", { class: "modal-actions" }, cancel, primary)));
   fields.focusFirst();
 }
@@ -5840,6 +6199,16 @@ function renderLayoutEditPage(view, route, segments, spec, crumb) {
       el("div", { class: "form-actions" }, primary, cancel)));
   fields.focusFirst();
   announce(`${title} form`);
+}
+
+// openEditPage opens a resource's Edit page (EditForm.Page, #2062): its
+// detail address with ?edit=1, and ?return= naming the list it was opened
+// from, where Save and Cancel go back to.
+function openEditPage(route, segments) {
+  const url = new URL(detailHref(route, segments), location.origin);
+  url.searchParams.set("edit", "1");
+  if (location.pathname === route.path) url.searchParams.set("return", location.pathname + location.search);
+  navigate(url.pathname + url.search);
 }
 
 // reviewChanges is an edit form's review step (EditForm.Review, #1852):
@@ -5919,29 +6288,39 @@ function inlineEditForm(route, segments, section, onDone) {
 // renderEditPage draws an edit form that is a page of its own (#1862):
 // Google's Edit opens the "Edit Redis instance" page, under the resource's
 // crumbs, which saves with Save and goes back to the resource's page;
-// Cancel goes back without saving.
+// Cancel goes back without saving. A form with Steps is drawn in the
+// create page's steps, as Google's Edit job follows Create job's (#2062),
+// and one opened from a list (?return=) goes back to that list.
 function renderEditPage(view, route, segments, data, crumb) {
   const spec = data.edit;
   const name = segments[segments.length - 1];
-  const here = detailHref(route, segments);
+  const detail = detailHref(route, segments);
+  const returnTo = createReturn(new URLSearchParams(location.search).get("return"));
+  const here = returnTo ? returnTo.href : detail;
   const title = spec.title || spec.label || "Edit";
   // The resource's crumbs, its own now a link back to it, then the form.
   const nav = crumb.querySelector(".breadcrumb").cloneNode(true);
   const last = nav.lastElementChild;
-  if (last && last.tagName === "SPAN") last.replaceWith(el("a", { href: here, text: last.textContent }));
+  if (last && last.tagName === "SPAN") last.replaceWith(el("a", { href: detail, text: last.textContent }));
   nav.append(el("span", { "aria-hidden": "true", text: "/" }), el("span", { text: title }));
   const header = pageHeader(title, `${name} · ` + (currentProject() ? `Project ${currentProject()}` : "All projects"),
-    { back: here, backLabel: `Back to ${name}` });
+    { back: here, backLabel: returnTo ? `Back to ${returnTo.title}` : `Back to ${name}` });
   header.prepend(nav);
 
   const fields = buildCreateForm(spec);
+  const steps = spec.steps
+    ? createSteps(fields.nodes, spec.steps === "next" ? "Next" : "Continue")
+    : { nodes: fields.nodes, revealInvalid() {} };
   const error = el("p", { class: "form-error", role: "alert", hidden: true });
   const primary = el("button", { type: "submit", class: "primary", id: "edit-page-save", text: spec.submit || "Save" });
   const cancel = el("a", { class: "button secondary", href: here, text: "Cancel" });
+  let submitting = false;
   const submit = async (e) => {
     e.preventDefault();
     error.hidden = true;
-    if (!fields.validate()) return;
+    if (submitting) return;
+    if (!fields.validate()) { steps.revealInvalid(); return; }
+    submitting = true;
     setBusy(primary, true);
     const op = recordOperation(`Update ${name}`);
     try {
@@ -5955,16 +6334,17 @@ function renderEditPage(view, route, segments, data, crumb) {
     } catch (err) {
       // The API's own message, on the page where the change was made.
       op.failed(err.message, err.operation);
+      submitting = false;
       setBusy(primary, false);
       error.textContent = err.message;
       error.hidden = false;
     }
   };
   setChildren(view, header,
-    el("form", { class: "create-page is-single-page edit-page", novalidate: true, onsubmit: submit },
+    el("form", { class: "create-page edit-page" + (spec.steps ? "" : " is-single-page"), id: "edit-page-form", novalidate: true, onsubmit: submit },
       spec.note ? el("p", { class: "form-help", text: spec.note }) : null,
       error,
-      ...fields.nodes,
+      ...steps.nodes,
       el("div", { class: "form-actions" }, primary, cancel)));
   fields.focusFirst();
   announce(`${title} form`);
@@ -6102,15 +6482,61 @@ async function renderList(view, route) {
     // Cards under section headings, when the provider names them, as
     // Document AI's Processor gallery groups its types (#1930).
     const cards = listingSummary(data), groups = (data.summary || []).filter((g) => (g.properties || []).length);
-    const runs = [];
-    groups.forEach((g, i) => {
-      if (!runs.length || g.section) runs.push({ section: g.section || "", cards: [] });
-      runs[runs.length - 1].cards.push(cards[i]);
-    });
-    setChildren(view, ...header, noteBanner(data.note),
-      ...runs.flatMap((r) => [
+    // A card with a Pin key can be pinned to the top (#1854), the pins
+    // the viewer's own; Filter narrows the cards by what is typed.
+    const pinKey = `${CARD_PINS_KEY}.${route.service}`;
+    const pins = new Set(readStored(pinKey, []) || []);
+    const filterBox = data.cardFilter ? el("input", { type: "search", class: "card-filter", id: "card-filter",
+      "aria-label": data.cardFilter, placeholder: data.cardFilter }) : null;
+    const typed = cardFilterText.get(route.service) || "";
+    if (filterBox) filterBox.value = typed;
+    const drawCards = () => {
+      const want = filterBox ? filterBox.value.trim().toLowerCase() : "";
+      const shown = groups.map((g, i) => ({ g, card: cards[i], i }))
+        // A card with no Filter text (a banner) stays whatever is typed.
+        .filter(({ g }) => !want || !g.filter || g.filter.toLowerCase().includes(want));
+      for (const { g, card } of shown) {
+        const old = card.querySelector(".card-pin");
+        if (old) old.remove();
+        if (!g.pin) continue;
+        const on = pins.has(g.pin);
+        card.classList.toggle("is-pinned", on);
+        card.prepend(el("button", { type: "button", class: "icon-button card-pin", "aria-pressed": on ? "true" : "false",
+          "aria-label": `Pin ${g.heading || g.pin}`, title: on ? "Unpin" : "Pin",
+          html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l-1 6 3 3v2H7v-2l3-3zM12 14v7"/></svg>',
+          onclick: () => {
+            if (pins.has(g.pin)) pins.delete(g.pin); else pins.add(g.pin);
+            writeStored(pinKey, [...pins]);
+            keepingFocus(view, drawCards);
+            announce(`${g.heading || g.pin} ${pins.has(g.pin) ? "pinned" : "unpinned"}`);
+          } }));
+      }
+      // Pinned cards first, in their own order; then the rest in theirs.
+      shown.sort((a, b) => (pins.has(b.g.pin) ? 1 : 0) - (pins.has(a.g.pin) ? 1 : 0) || a.i - b.i);
+      const runs = [];
+      shown.forEach(({ g, card }, n) => {
+        const pinned = g.pin && pins.has(g.pin);
+        if (!runs.length || (!pinned && g.section) || (n > 0 && !pinned && shown[n - 1].g.pin && pins.has(shown[n - 1].g.pin)))
+          runs.push({ section: pinned ? "" : g.section || "", cards: [] });
+        runs[runs.length - 1].cards.push(card);
+      });
+      setChildren(cardsHolder, ...(shown.length ? runs.flatMap((r) => [
         r.section ? el("h2", { class: "summary-section", text: r.section }) : null,
-        el("div", { class: "summary-cards" }, ...r.cards)]).filter(Boolean));
+        el("div", { class: "summary-cards" }, ...r.cards)]).filter(Boolean)
+        : [emptyState(`No ${noun} match the filter`, "Change or clear the filter to see more.")]));
+      return shown.length;
+    };
+    const cardsHolder = el("div", { class: "summary-card-runs" });
+    if (filterBox) filterBox.addEventListener("input", () => {
+      cardFilterText.set(route.service, filterBox.value);
+      const n = drawCards();
+      announce(`${n} ${noun} shown`);
+    });
+    drawCards();
+    setChildren(view, ...header, noteBanner(data.note),
+      filterBox ? el("div", { class: "card-filter-bar" },
+        el("label", { for: "card-filter", class: "sr-only", text: data.cardFilter }), filterBox) : null,
+      cardsHolder);
     announce(`${data.summary.length} ${noun} loaded`);
     return;
   }
@@ -6189,6 +6615,7 @@ function serverFilterBox(spec, reload) {
 let DETAIL_EDIT = null;
 
 function propertyValue(prop) {
+  if (prop.chart && (prop.chart.bars || []).length) return el("dd", {}, barChart(prop));
   const value = prop.link ? el("a", { href: prop.link, text: prop.value }) : prop.value;
   // A link beside the value that opens one of the page's actions, as
   // Google's Upgrade beside a Spanner instance's edition (#1859): the page's
@@ -6213,6 +6640,27 @@ function propertyValue(prop) {
   button.textContent = prop.copy;
   button.classList.add("property-copy");
   return el("dd", { class: "has-copy" }, el("span", { class: "property-copy-value" }, value), button);
+}
+
+// barChart draws a Property's Chart (#1854): a Cloud Build Dashboard card's
+// Build history, a bar per build, each telling its outcome, duration and
+// time when hovered or focused, as Google's does on hover. The bars are a
+// list a screen reader reads; the property's value is its summary.
+function barChart(prop) {
+  const max = Math.max(...prop.chart.bars.map((b) => b.value), 0) || 1;
+  const tip = el("span", { class: "bar-chart-tip", "aria-hidden": "true" });
+  const show = (b) => { tip.textContent = b.label; };
+  const bars = prop.chart.bars.map((b) => {
+    const style = `height:${Math.max(6, Math.round((b.value / max) * 100))}%`;
+    const bar = b.link
+      ? el("a", { class: `bar-chart-bar is-${b.status || "none"}`, href: b.link, style, "aria-label": b.label, title: b.label })
+      : el("span", { class: `bar-chart-bar is-${b.status || "none"}`, tabindex: "0", role: "img", style, "aria-label": b.label, title: b.label });
+    bar.addEventListener("mouseenter", () => show(b));
+    bar.addEventListener("focus", () => show(b));
+    return el("li", {}, bar);
+  });
+  return el("div", { class: "bar-chart" },
+    el("ul", { class: "bar-chart-bars", "aria-label": `${prop.label}: ${prop.value}` }, ...bars), tip);
 }
 
 // listingSummary draws a listing's summary groups as the same property cards
@@ -7154,7 +7602,13 @@ function buildCreateForm(spec) {
           // location fields hold, as Google's key picker does.
           : f.browse === "kms" ? el("div", { class: "browse-row" }, control,
             el("button", { type: "button", class: "secondary", id: `browse-${f.name}`, text: "Browse",
-              onclick: () => browseKeys(control, formKMSLocation(entries)) })) : control,
+              onclick: () => browseKeys(control, formKMSLocation(entries)) }))
+          // A remote repository's upstream (#2066): a standard repository
+          // of this instance's Artifact Registry, of the form's format and
+          // in its location.
+          : f.browse === "artifact-registry" ? el("div", { class: "browse-row" }, control,
+            el("button", { type: "button", class: "secondary", id: `browse-${f.name}`, text: "Browse",
+              onclick: () => browseRepositories(control, entries) })) : control,
           templates, upload, help, error);
 
     return { field: f, control, node, error, helpId, errorId, isCheck };
@@ -7268,6 +7722,39 @@ function buildCreateForm(spec) {
     if (!other || !entry.follow) continue;
     other.control.addEventListener("change", () => entry.follow(other.control.value));
     entry.follow(other.control.value);
+  }
+
+  // A select whose options follow other fields (optionsWhen, #2073):
+  // Create private pool's Series and Machine type offer the chosen
+  // region's. The first condition that holds gives the options, else the
+  // field's own; a choice no longer offered moves to the first that is,
+  // and the change is announced so the fields that follow it follow too.
+  const holds = (cond) => cond.split("&").every((t) => {
+    const [name, choice] = t.split("=");
+    const other = byName.get(name);
+    if (!other) return false;
+    if (choice === undefined) return other.isCheck ? other.control.checked : !!other.control.value;
+    return choice.split("|").includes(other.control.value);
+  });
+  for (const entry of entries) {
+    const f = entry.field;
+    if (!(f.optionsWhen || []).length || entry.control.tagName !== "SELECT") continue;
+    const refresh = () => {
+      const match = f.optionsWhen.find((o) => holds(o.when));
+      const options = (match ? match.options : f.options) || [];
+      const before = entry.control.value;
+      const now = [...entry.control.options].map((o) => o.value);
+      if (now.length === options.length && now.every((v, i) => v === options[i])) return;
+      setChildren(entry.control, ...options.map((o) => el("option", { value: o, text: (f.optionLabels || {})[o] || o || "None" })));
+      entry.control.value = options.includes(before) ? before : (options.includes(f.default) ? f.default : (options[0] || ""));
+      if (entry.control.value !== before) entry.control.dispatchEvent(new Event("change"));
+    };
+    const names = new Set(f.optionsWhen.flatMap((o) => o.when.split("&").map((t) => t.split("=")[0])));
+    for (const n of names) {
+      const other = byName.get(n);
+      if (other) other.control.addEventListener("change", refresh);
+    }
+    refresh();
   }
 
   // A field shown only while another holds a value (#1847): "name" for a
@@ -7492,7 +7979,13 @@ function buildCreateForm(spec) {
     // Escape handler never hears the key (#700, measured in #765's CI).
     focusFirst() {
       const e = entries.find((x) => !x.control.disabled);
-      if (e) (e.focus || (() => e.control.focus()))();
+      if (e) { (e.focus || (() => e.control.focus()))(); return; }
+      // Every field immutable, as a GKE cluster's Connect shows only its
+      // command (#1857): focus the dialog's first button, so focus is in
+      // the dialog and Escape reaches it.
+      const at = entries.length && entries[0].node && entries[0].node.closest ? entries[0].node.closest(".modal") : null;
+      const b = at && at.querySelector("button:not([disabled])");
+      if (b) b.focus();
     },
     // Anything the user changed away from what the form offered. A form
     // holding only its own defaults has nothing to lose.
@@ -7515,7 +8008,8 @@ function buildCreateForm(spec) {
     // The files chosen in "file" fields (#999), which are sent as parts of
     // their own rather than as values.
     files() {
-      return entries.filter((e) => e.field.type === "file" && e.control.files && e.control.files[0])
+      // A file field hidden by another's choice (visibleWhen) sends nothing.
+      return entries.filter((e) => e.field.type === "file" && !e.inactive && e.control.files && e.control.files[0])
         .map((e) => ({ name: e.field.name, file: e.control.files[0] }));
     },
     values() {
@@ -7891,6 +8385,353 @@ function sourceFilesEntry(f, id, errorId, helpId) {
   const entry = { field: Object.assign({}, f, { default: control.value }), control, node, error, helpId, errorId,
                   isCheck: false, follow, focus: () => editor.focus() };
   return entry;
+}
+
+// --- Secure Source Manager's code view and Files changed (#2071) ----------
+//
+// The web interface's code view: a branch and tag selector over the tree
+// (Section.Refs), a file's lines numbered with their syntax highlighted by
+// its language (Section.Language), and Blame (Section.Blame), the commit
+// that last changed each line beside it. Files changed (Section.Diff) is
+// each file's lines with the Whitespace, Split view/Unified view and diff
+// options menus, a plus icon beside each line that opens a comment form
+// (Add single comment, Start review: Google's "click the plus icon next to
+// the line you want to comment on, click Start review"), and the comments
+// under their lines, pending ones marked Pending until Review sends them.
+
+// refPicker is a branch and tag selector: choosing a ref opens its path.
+function refPicker(route, refs, label) {
+  const id = "ref-picker";
+  const select = el("select", { id, class: "ref-picker" },
+    (refs.branches || []).length ? el("optgroup", { label: "Branches" },
+      ...refs.branches.map((r) => el("option", { value: `b:${r.name}`, text: r.name }))) : null,
+    (refs.tags || []).length ? el("optgroup", { label: "Tags" },
+      ...refs.tags.map((r) => el("option", { value: `t:${r.name}`, text: r.name }))) : null);
+  const all = [...(refs.branches || []).map((r) => [`b:${r.name}`, r]), ...(refs.tags || []).map((r) => [`t:${r.name}`, r])];
+  const current = all.find(([, r]) => r.name === refs.current);
+  if (current) select.value = current[0];
+  else select.prepend(el("option", { value: "", text: refs.current.length > 12 ? refs.current.slice(0, 7) : refs.current, selected: "selected" }));
+  select.addEventListener("change", () => {
+    const hit = all.find(([k]) => k === select.value);
+    if (hit) navigate(detailHref(route, hit[1].path));
+  });
+  return el("div", { class: "ref-picker-row" }, el("label", { for: id, text: label || "Branch or tag" }), select);
+}
+
+// CODE_KEYWORDS are the words codeTokens draws as keywords, by language.
+const CODE_KEYWORDS = (() => {
+  const w = (s) => new Set(s.split(" "));
+  const cLike = "if else for while do switch case default break continue return goto struct union enum typedef sizeof static const extern void int char long short float double unsigned signed";
+  return {
+    go: w("break case chan const continue default defer else fallthrough for func go goto if import interface map package range return select struct switch type var nil true false iota"),
+    javascript: w("async await break case catch class const continue debugger default delete do else export extends finally for from function if import in instanceof let new of return static super switch this throw try typeof var void while with yield null undefined true false"),
+    typescript: w("async await break case catch class const continue default delete do else enum export extends finally for from function if implements import in instanceof interface let new of private protected public readonly return static super switch this throw try type typeof var void while yield null undefined true false"),
+    python: w("False None True and as assert async await break class continue def del elif else except finally for from global if import in is lambda nonlocal not or pass raise return try while with yield self"),
+    java: w("abstract boolean break byte case catch char class const continue default do double else enum extends final finally float for if implements import instanceof int interface long native new package private protected public return short static super switch synchronized this throw throws try void volatile while null true false var record"),
+    kotlin: w("as break class continue do else false for fun if in interface is null object package return super this throw true try typealias val var when while import override private public internal data"),
+    c: w(cLike + " include define ifdef ifndef endif"),
+    cpp: w(cLike + " class namespace template typename public private protected virtual new delete this nullptr true false using auto include"),
+    csharp: w("abstract as bool break byte case catch class const continue default do double else enum false finally for foreach if in int interface internal is namespace new null object out override private protected public readonly ref return static string struct switch this throw true try using var virtual void while async await"),
+    rust: w("as async await break const continue crate else enum extern false fn for if impl in let loop match mod move mut pub ref return self Self static struct super trait true type unsafe use where while"),
+    ruby: w("alias and begin break case class def defined do else elsif end ensure false for if in module next nil not or redo rescue retry return self super then true undef unless until when while yield require"),
+    php: w("abstract and array as break case catch class clone const continue declare default do echo else elseif empty endif extends final for foreach function global if implements include interface isset namespace new null private protected public require return static switch throw trait try use var while true false"),
+    swift: w("class deinit enum extension func import init let protocol struct subscript typealias var break case continue default do else fallthrough for guard if in repeat return switch where while as false is nil self super throw throws true try"),
+    scala: w("abstract case catch class def do else extends false final finally for if implicit import lazy match new null object override package private protected return sealed super this throw trait try true type val var while with yield"),
+    dart: w("abstract as async await break case catch class const continue default do else enum extends false final finally for if import in is new null return static super switch this throw true try var void while"),
+    shell: w("if then else elif fi for while do done case esac in function return export local set unset echo exit"),
+    sql: w("select from where and or not insert into values update set delete create table drop alter join left right inner outer on group by order having limit as null is in like distinct union all primary key"),
+    proto: w("syntax package import option message enum service rpc returns repeated optional map oneof reserved true false"),
+    hcl: w("resource data variable output module provider locals terraform true false null for in if"),
+    dockerfile: w("FROM RUN CMD LABEL EXPOSE ENV ADD COPY ENTRYPOINT VOLUME USER WORKDIR ARG ONBUILD STOPSIGNAL HEALTHCHECK SHELL AS"),
+    yaml: w("true false null yes no"), json: w("true false null"), toml: w("true false"),
+  };
+})();
+
+// CODE_COMMENTS are a language's line comment and block comment marks.
+const CODE_COMMENTS = {
+  python: ["#"], ruby: ["#"], shell: ["#"], yaml: ["#"], toml: ["#"], dockerfile: ["#"], makefile: ["#"], hcl: ["#", "/*", "*/"],
+  sql: ["--", "/*", "*/"], html: [null, "<!--", "-->"], css: [null, "/*", "*/"], markdown: [null], json: [null], text: [null],
+};
+
+// codeTokens splits one line into highlighted spans: comments, strings,
+// numbers and keywords. state carries an open block comment over lines.
+function codeTokens(line, lang, state) {
+  const out = [];
+  const [lineMark, open, close] = CODE_COMMENTS[lang] || ["//", "/*", "*/"];
+  const kws = CODE_KEYWORDS[lang] || new Set();
+  const ci = lang === "sql";
+  let plain = "";
+  const flush = () => { if (plain) out.push(document.createTextNode(plain)); plain = ""; };
+  const push = (cls, s) => { flush(); out.push(el("span", { class: cls, text: s })); };
+  if (lang === "text" || lang === "markdown") return [document.createTextNode(line)];
+  let i = 0;
+  if (state.inBlock) {
+    const end = line.indexOf(close);
+    if (end < 0) return [el("span", { class: "tok-comment", text: line })];
+    push("tok-comment", line.slice(0, end + close.length));
+    i = end + close.length;
+    state.inBlock = false;
+  }
+  while (i < line.length) {
+    const rest = line.slice(i);
+    if (lineMark && rest.startsWith(lineMark) && (lineMark !== "#" || i === 0 || /\s/.test(line[i - 1]))) {
+      push("tok-comment", rest); return out;
+    }
+    if (open && rest.startsWith(open)) {
+      const end = rest.indexOf(close, open.length);
+      if (end < 0) { push("tok-comment", rest); state.inBlock = true; return out; }
+      push("tok-comment", rest.slice(0, end + close.length)); i += end + close.length; continue;
+    }
+    const c = line[i];
+    if (c === '"' || c === "'" || c === "`") {
+      let j = i + 1;
+      for (; j < line.length && line[j] !== c; j++) if (line[j] === "\\") j++;
+      push("tok-str", line.slice(i, j + 1)); i = j + 1; continue;
+    }
+    const num = /^(0x[0-9a-fA-F_]+|\d[\d_]*(\.\d+)?([eE][+-]?\d+)?)\b/.exec(rest);
+    if (num && (i === 0 || !/[\w$]/.test(line[i - 1]))) { push("tok-num", num[0]); i += num[0].length; continue; }
+    const word = /^[A-Za-z_$][\w$]*/.exec(rest);
+    if (word) {
+      if (kws.has(ci ? word[0].toLowerCase() : word[0])) push("tok-kw", word[0]);
+      else plain += word[0];
+      i += word[0].length; continue;
+    }
+    plain += c; i++;
+  }
+  flush();
+  return out;
+}
+
+// codeView is a file's content: its lines numbered and highlighted, and
+// Blame, a toggle that draws each run of lines' commit beside them.
+function codeView(route, section, name) {
+  const lines = section.text.replace(/\n$/, "").split("\n");
+  const state = { inBlock: false };
+  const highlighted = lines.map((l) => codeTokens(l, section.language, state));
+  const blameAt = new Map();
+  for (const b of section.blame || []) blameAt.set(b.line, b);
+  const table = el("table", { class: "code-view", "aria-label": `${section.label}, ${lines.length} lines, ${section.language}` });
+  let blameOn = new URLSearchParams(location.search).get("blame") === "1";
+  const draw = () => {
+    const rows = lines.map((_, n) => {
+      const ln = n + 1;
+      const cells = [];
+      if (blameOn) {
+        const b = blameAt.get(ln);
+        cells.push(b
+          ? el("td", { class: "code-blame", rowspan: String(b.count) },
+            el("a", { href: detailHref(route, b.opens), class: "mono", text: b.commit, title: b.summary }),
+            el("span", { text: ` ${b.author}` }), el("span", { class: "form-help", text: ` ${b.summary}` }))
+          : null);
+      }
+      cells.push(el("td", { class: "code-line-number mono", text: String(ln) }),
+        el("td", { class: "code-line mono" }, ...highlighted[n]));
+      return el("tr", { id: `L${ln}` }, ...cells.filter(Boolean));
+    });
+    setChildren(table, el("caption", { class: "sr-only", text: `${section.label}${blameOn ? ", with blame" : ""}` }),
+      el("thead", { class: "sr-only" }, el("tr", {},
+        blameOn ? el("th", { scope: "col", text: "Commit" }) : null,
+        el("th", { scope: "col", text: "Line" }), el("th", { scope: "col", text: "Code" }))),
+      el("tbody", {}, ...rows));
+  };
+  const blame = (section.blame || []).length ? el("button", { type: "button", class: "secondary", id: "code-blame-toggle",
+    "aria-pressed": blameOn ? "true" : "false", text: "Blame",
+    onclick: () => {
+      blameOn = !blameOn;
+      blame.setAttribute("aria-pressed", blameOn ? "true" : "false");
+      const url = new URL(location.href);
+      if (blameOn) url.searchParams.set("blame", "1"); else url.searchParams.delete("blame");
+      history.replaceState({}, "", url);
+      draw();
+      announce(blameOn ? "Blame shown" : "Blame hidden");
+    } }) : null;
+  draw();
+  return el("div", { class: "card text-section code-file" },
+    el("div", { class: "text-actions" }, blame, copyButton(section.text, `${section.label} for ${name}`)),
+    el("div", { class: "code-scroll", tabindex: "0", role: "region", "aria-label": `${section.label} content` }, table));
+}
+
+// diffPairs is a file's lines for Split view: context on both sides, and
+// each run of removed lines beside the added run after it.
+function diffPairs(lines) {
+  const out = [];
+  for (let i = 0; i < lines.length;) {
+    const l = lines[i];
+    if (l.kind !== "-" && l.kind !== "+") { out.push([l, l]); i++; continue; }
+    const del = [], add = [];
+    while (i < lines.length && lines[i].kind === "-") del.push(lines[i++]);
+    while (i < lines.length && lines[i].kind === "+") add.push(lines[i++]);
+    for (let k = 0; k < Math.max(del.length, add.length); k++) out.push([del[k] || null, add[k] || null]);
+  }
+  return out;
+}
+
+// diffIgnoringWhitespace folds a removed line and the added line paired
+// with it into one context line when they differ only in whitespace.
+function diffIgnoringWhitespace(lines) {
+  const out = [];
+  for (const [a, b] of diffPairs(lines)) {
+    if (a && b && a === b) { out.push(a); continue; }
+    if (a && b && a.kind === "-" && b.kind === "+" && a.text.replace(/\s+/g, "") === b.text.replace(/\s+/g, "")) {
+      out.push({ kind: " ", old: a.old, new: b.new, text: b.text });
+      continue;
+    }
+    if (a) out.push(a);
+    if (b) out.push(b);
+  }
+  // Removed lines first within a change, as the patch has them.
+  return out;
+}
+
+// drawDiffView is Files changed (Section.Diff).
+function drawDiffView(route, segments, section, reload) {
+  const view = section.diff;
+  const param = (k) => new URLSearchParams(location.search).get(k);
+  const setParam = (k, v) => {
+    const url = new URL(location.href);
+    if (v) url.searchParams.set(k, v); else url.searchParams.delete(k);
+    history.replaceState({}, "", url);
+  };
+  let split = param("diff-view") === "split";
+  let ignoreWs = param("whitespace") === "ignore";
+  const collapsed = new Set();
+  const body = el("div", { class: "diff-files" });
+  const post = async (action, values, label) => {
+    const op = recordOperation(label);
+    try {
+      const res = await send(`/api/actions/${route.service}?project=${encodeURIComponent(currentProject())}`, "POST",
+        { Path: segments, Action: action, Values: values });
+      op.succeeded("", res.operation);
+      notify(label);
+      reload();
+    } catch (err) {
+      op.failed(err.message, err.operation);
+      throw err;
+    }
+  };
+  // The form the plus icon opens under a line.
+  const commentForm = (file, line, onCancel) => {
+    const id = `diff-comment-${file.name.replace(/[^A-Za-z0-9]/g, "-")}-${line < 0 ? "o" : "n"}${Math.abs(line)}`;
+    const text = el("textarea", { id, rows: "3", class: "diff-comment-text" });
+    const err = el("p", { class: "form-field-error", role: "alert", hidden: true });
+    const sendAs = (action, label) => async () => {
+      if (!text.value.trim()) { err.hidden = false; err.textContent = "Write a comment first."; text.focus(); return; }
+      try {
+        await post(action, { path: file.name, line: String(line), lineBody: text.value }, label);
+      } catch (e) { err.hidden = false; err.textContent = e.message; }
+    };
+    const where = line < 0 ? `old line ${-line}` : `line ${line}`;
+    const buttons = [el("button", { type: "button", class: "secondary", text: "Add single comment",
+      onclick: sendAs(view.commentAction, `Comment on ${file.name} ${where}`) })];
+    if (view.startAction) {
+      buttons.push(el("button", { type: "button", class: "primary", text: view.pending ? "Add comment" : "Start review",
+        onclick: sendAs(view.startAction, view.pending ? `Added a pending comment on ${file.name} ${where}` : `Started a review with ${file.name} ${where}`) }));
+    }
+    buttons.push(el("button", { type: "button", class: "secondary", text: "Cancel", onclick: onCancel }));
+    const form = el("div", { class: "diff-comment-form" },
+      el("label", { for: id, text: `Comment on ${file.name}, ${where}` }), text,
+      el("p", { class: "form-help", text: "Comments support styling with markdown." }), err,
+      el("div", { class: "action-bar" }, ...buttons));
+    setTimeout(() => text.focus(), 0);
+    return form;
+  };
+  const commentsAt = (file, line) => (file.comments || []).filter((c) => c.line === line);
+  const commentRow = (cols, comments) => el("tr", { class: "diff-comments" }, el("td", { colspan: String(cols) },
+    ...comments.map((c) => el("div", { class: "diff-comment" + (c.pending ? " is-pending" : "") },
+      el("span", { class: "status-chip", text: c.state || "" }), el("span", { class: "mono", text: ` #${c.id} ` }),
+      el("span", { text: c.body })))));
+  const drawFile = (file) => {
+    const lines = ignoreWs ? diffIgnoringWhitespace(file.lines || []) : (file.lines || []);
+    const fid = `diff-file-${file.name.replace(/[^A-Za-z0-9]/g, "-")}`;
+    const open = !collapsed.has(file.name);
+    const toggle = el("button", { type: "button", class: "icon-button diff-file-toggle", "aria-expanded": open ? "true" : "false",
+      "aria-controls": `${fid}-body`, "aria-label": `${open ? "Collapse" : "Expand"} ${file.name}`, text: open ? "▾" : "▸",
+      onclick: () => { if (open) collapsed.add(file.name); else collapsed.delete(file.name); draw(); document.getElementById(`${fid}-toggle`)?.focus(); } });
+    toggle.id = `${fid}-toggle`;
+    const cols = split ? 6 : 4;
+    const table = el("table", { class: "diff-table" + (split ? " is-split" : ""), id: `${fid}-body`, hidden: open ? null : "hidden",
+      "aria-label": `Changes to ${file.name}` });
+    const rows = [];
+    const plus = (line, label, row) => el("button", { type: "button", class: "diff-plus", "aria-label": `Add a comment on ${label} of ${file.name}`,
+      title: "Add a comment", text: "+",
+      onclick: () => {
+        const existing = row.nextElementSibling;
+        if (existing && existing.classList.contains("diff-form-row")) { existing.remove(); return; }
+        const formRow = el("tr", { class: "diff-form-row" });
+        formRow.append(el("td", { colspan: String(cols) }, commentForm(file, line, () => { formRow.remove(); })));
+        row.after(formRow);
+      } });
+    const numCell = (n) => el("td", { class: "diff-num mono", text: n ? String(n) : "" });
+    const kindClass = (l) => (l ? (l.kind === "+" ? "is-add" : l.kind === "-" ? "is-del" : l.kind === "@" ? "is-hunk" : "") : "is-empty");
+    const codeCell = (l) => el("td", { class: `diff-code mono ${kindClass(l)}` },
+      l ? el("span", { class: "diff-sign", "aria-hidden": "true", text: l.kind === "@" ? "" : l.kind }) : null,
+      l ? document.createTextNode(l.text) : null);
+    if (!split) {
+      for (const l of lines) {
+        const row = el("tr", { class: `diff-row ${kindClass(l)}` });
+        const at = l.kind === "-" ? -l.old : l.new;
+        const label = l.kind === "-" ? `old line ${l.old}` : `line ${l.new}`;
+        row.append(el("td", { class: "diff-plus-cell" }, l.kind === "@" ? null : plus(at, label, row)), numCell(l.old), numCell(l.new), codeCell(l));
+        rows.push(row);
+        const cs = l.kind === "@" ? [] : commentsAt(file, at);
+        if (cs.length) rows.push(commentRow(cols, cs));
+      }
+    } else {
+      for (const [a, b] of diffPairs(lines)) {
+        const row = el("tr", { class: "diff-row" });
+        const left = a && a.kind !== "+" ? a : null, right = b && b.kind !== "-" ? b : null;
+        if (a && a.kind === "@") {
+          row.append(el("td", {}), el("td", { class: "diff-code mono is-hunk", colspan: "5", text: a.text }));
+          rows.push(row); continue;
+        }
+        row.append(el("td", { class: "diff-plus-cell" }, left ? plus(-left.old, `old line ${left.old}`, row) : null), numCell(left && left.old), codeCell(left),
+          el("td", { class: "diff-plus-cell" }, right ? plus(right.new, `line ${right.new}`, row) : null), numCell(right && right.new), codeCell(right));
+        rows.push(row);
+        const cs = [...(left ? commentsAt(file, -left.old) : []), ...(right && right.new ? commentsAt(file, right.new) : [])];
+        if (cs.length) rows.push(commentRow(cols, cs));
+      }
+    }
+    setChildren(table, el("thead", { class: "sr-only" }, el("tr", {},
+      ...(split ? ["Comment", "Old line", "Old", "Comment", "New line", "New"] : ["Comment", "Old line", "New line", "Change"]).map((h) =>
+        el("th", { scope: "col", text: h })))), el("tbody", {}, ...rows));
+    const n = (file.comments || []).length;
+    return el("section", { class: "card diff-file", "aria-labelledby": `${fid}-name` },
+      el("div", { class: "diff-file-head" }, toggle,
+        el("h3", { class: "mono diff-file-name", id: `${fid}-name`, text: file.name }),
+        el("span", { class: "status-chip", text: file.action }),
+        n ? el("span", { class: "form-help", text: ` ${n} comment${n === 1 ? "" : "s"}` }) : null),
+      table);
+  };
+  const draw = () => setChildren(body, ...view.files.map(drawFile));
+  // The menus over the files: Whitespace, Split view/Unified view, diff
+  // options.
+  const ws = el("select", { id: "diff-whitespace" },
+    el("option", { value: "", text: "Show all whitespace changes" }),
+    el("option", { value: "ignore", text: "Ignore whitespace changes" }));
+  ws.value = ignoreWs ? "ignore" : "";
+  ws.addEventListener("change", () => { ignoreWs = ws.value === "ignore"; setParam("whitespace", ws.value); draw(); announce(ws.selectedOptions[0].text); });
+  const viewToggle = el("button", { type: "button", class: "secondary", id: "diff-view-toggle", text: split ? "Unified view" : "Split view",
+    onclick: () => {
+      split = !split;
+      setParam("diff-view", split ? "split" : "");
+      viewToggle.textContent = split ? "Unified view" : "Split view";
+      draw();
+      announce(split ? "Split view" : "Unified view");
+    } });
+  const options = overflowMenu([
+    { label: "Expand all files", run: () => { collapsed.clear(); draw(); announce("Every file expanded"); } },
+    { label: "Collapse all files", run: () => { view.files.forEach((f) => collapsed.add(f.name)); draw(); announce("Every file collapsed"); } },
+  ], "diff options");
+  options.classList.add("diff-options");
+  const pending = view.pending
+    ? el("span", { class: "status-chip diff-pending", text: `${view.pending} pending comment${view.pending === 1 ? "" : "s"}: Review sends them` })
+    : null;
+  draw();
+  return el("div", { class: "diff-view" },
+    el("div", { class: "diff-toolbar", role: "group", "aria-label": "Files changed options" },
+      el("label", { for: "diff-whitespace", text: "Whitespace" }), ws, viewToggle,
+      el("span", { class: "diff-options-label", text: "diff options" }), options, pending),
+    body);
 }
 
 // --- Workflows' source editor and graph (#2004) ---------------------------
@@ -9941,6 +10782,7 @@ async function deleteResource(route, name, onDone, row = NO_ROW) {
     title: shutDown ? `Shut down ${name}?` : `Delete ${name}?`,
     detail: DELETE_DETAIL[route.service],
     confirmWord: name,
+    confirmLabel: capabilityOf(route.service).deleteSubmit || "Delete",
     ...(shutDown ? { confirmLabel: "Shut down", consequence: "" } : {}),
     style: capabilityOf(route.service).deleteConfirm || "name",
     onConfirm: async () => {
@@ -17593,6 +18435,60 @@ function formKMSLocation(entries) {
   if (!entries.some((x) => x.field.name === "locationType")) return value("location") || value("region");
   const loc = value("locationType") === "region" ? value("region") : value("multiRegion");
   return ({ nam5: "us", eur3: "europe" })[loc] || loc;
+}
+
+// browseRepositories is a remote repository's upstream Browse (#2066):
+// the project's standard repositories of the form's format in the form's
+// location, from this instance's Artifact Registry, one of which fills
+// the field with its resource name.
+async function browseRepositories(control, entries) {
+  const entry = (name) => entries.find((x) => x.field.name === name);
+  const value = (name) => { const e = entry(name); return e ? e.control.value : ""; };
+  const checked = (name) => {
+    const e = entries.filter((x) => x.field.name === name);
+    const on = e.find((x) => x.control.checked);
+    return on ? on.control.value : value(name);
+  };
+  const fmt = checked("format");
+  const fe = entry("format");
+  const formatWord = (fe && (fe.field.optionLabels || {})[fmt]) || fmt;
+  const multi = /multi/i.test(checked("locationType"));
+  const location = multi ? value("multiRegion") : value("location");
+  const { dialog, close } = openModal({ labelledBy: "browse-title" });
+  const body = el("div", { class: "browse-list" }, loadingState(3, { what: "repositories" }));
+  dialog.append(el("div", { class: "modal-body" },
+    el("h2", { id: "browse-title", text: "Select a repository" }),
+    el("p", { class: "form-help", text: `Standard ${formatWord} repositories in ${location}: a remote repository's upstream has its format and location.` }),
+    body,
+    el("div", { class: "modal-actions" },
+      el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }))));
+  const project = currentProject();
+  try {
+    const list = await api(`/api/resources/artifact-registry?project=${encodeURIComponent(project)}`);
+    if (list.unavailable || list.prompt) return setChildren(body, el("p", { class: "form-error", text: list.unavailable || list.prompt }));
+    const repos = (list.items || []).filter((r) => {
+      const f = r.fields || {};
+      return f.Location === location && f.Mode === "Standard" && f.Format.toLowerCase() === String(formatWord).toLowerCase();
+    });
+    if (!repos.length) {
+      return setChildren(body, el("p", { class: "unavailable",
+        text: `This project has no standard ${formatWord} repository in ${location}. Create one first.` }));
+    }
+    setChildren(body, el("ul", { class: "fs-rows", role: "list" }, ...repos.map((r) => {
+      const name = `projects/${project}/locations/${location}/repositories/${r.name}`;
+      return el("li", { class: "fs-row" },
+        el("button", { type: "button", class: "fs-row-link", text: r.name, title: name, onclick: () => {
+          control.value = name;
+          control.dispatchEvent(new Event("input", { bubbles: true }));
+          control.dispatchEvent(new Event("change", { bubbles: true }));
+          close();
+          control.focus();
+        } }));
+    })));
+    body.querySelector("button").focus();
+  } catch (err) {
+    setChildren(body, el("p", { class: "form-error", text: `Artifact Registry cannot be read: ${err.message}` }));
+  }
 }
 
 // browseKeys is a Cloud KMS key field's Browse (#1881): the project's

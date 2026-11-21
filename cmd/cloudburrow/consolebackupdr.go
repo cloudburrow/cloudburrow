@@ -16,6 +16,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
+	"github.com/cloudburrow/cloudburrow/internal/service/compute"
 )
 
 // backupDRProvider is the Backup and DR page (#1433): a project's backup
@@ -32,14 +33,16 @@ import (
 type backupDRProvider struct {
 	bdr http.Handler
 	sql http.Handler
+	// compute is the Compute Engine API (#2075), nil when not served.
+	compute func() *compute.Server
 }
 
 func (backupDRProvider) ID() string    { return "backupdr" }
 func (backupDRProvider) Title() string { return "Backup vaults" }
 
-const backupDRNote = "Backup vaults hold the backups of the Cloud SQL instances their backup plans protect. " +
-	"A backup is a real dump of the instance's databases, restored by Cloud SQL; " +
-	"other workload types (Compute Engine, disks, AlloyDB, Filestore) are not served (docs/backupdr.md)."
+const backupDRNote = "Backup vaults hold the backups of the Cloud SQL instances and Compute Engine VMs and disks their backup plans protect. " +
+	"A Cloud SQL backup is a real dump of the instance's databases, restored by Cloud SQL; a VM's or disk's holds its disks' contents, " +
+	"restored to a new VM or disk. Other workload types (AlloyDB, Filestore) are not served (docs/backupdr.md)."
 
 // call sends one request to h and decodes its JSON answer, or returns the
 // API's own error message.

@@ -106,6 +106,37 @@ type Resource struct {
 	// listing's columns, have no actions, and are not counted, filtered or
 	// paged on their own.
 	Children []Resource `json:"children,omitempty"`
+	// Panel is a side panel a link on the row opens, its text the panel's
+	// Label: Google's Vulnerabilities rows link View or View Fixed, which
+	// open the Vulnerability details panel (#2066).
+	Panel *SidePanel `json:"panel,omitempty"`
+}
+
+// SidePanel is a panel drawn at the side of the page, over the info
+// panel's place, holding what the provider gives: Google's repository
+// Setup Instructions and a vulnerability's Vulnerability details (#2066).
+// It changes nothing, so it is never sent anywhere.
+type SidePanel struct {
+	// Label is the button or link that opens it; Title heads it.
+	Label string `json:"label"`
+	Title string `json:"title"`
+	// Intro is a line under the title.
+	Intro string `json:"intro,omitempty"`
+	// Text is preformatted text, such as commands, and Copy the label of
+	// the button that copies it.
+	Text string `json:"text,omitempty"`
+	Copy string `json:"copy,omitempty"`
+	// Groups are headed label/value pairs.
+	Groups []PropertyGroup `json:"groups,omitempty"`
+	// Tables are headed tables: the File location(s) table.
+	Tables []PanelTable `json:"tables,omitempty"`
+}
+
+// PanelTable is one table of a SidePanel.
+type PanelTable struct {
+	Title   string     `json:"title"`
+	Columns []string   `json:"columns"`
+	Rows    [][]string `json:"rows"`
 }
 
 // InfoTab is one tab of the info panel for a row (Resource.Info).
@@ -245,6 +276,15 @@ type Listing struct {
 	// table, as Google's Cloud Build Dashboard is a card per trigger
 	// (#1854). With no card, the screen's empty state shows.
 	SummaryOnly bool `json:"summaryOnly,omitempty"`
+	// CardFilter, on a SummaryOnly screen, is the label of a box over its
+	// cards that narrows them to those whose PropertyGroup.Filter holds
+	// what is typed: Google's Cloud Build Dashboard has "Filter triggers"
+	// by source, name or description (#1854).
+	CardFilter string `json:"cardFilter,omitempty"`
+	// OptionalColumns are Columns a viewer has not chosen yet: drawn only
+	// once turned on in the column selector, as Google's History adds
+	// Trigger description and Artifacts with it (#1854).
+	OptionalColumns []string `json:"optionalColumns,omitempty"`
 	// Scope is the picker a Scoper's list screen draws above its rows: the
 	// Bigtable instance whose tables these are (#1360).
 	Scope *Scope `json:"scope,omitempty"`
@@ -253,6 +293,12 @@ type Listing struct {
 	// page has Namespace and Kind (#1846). A Filterer's screens carry
 	// them on every request; choosing one clears those after it.
 	Filters []*Scope `json:"filters,omitempty"`
+	// CheckTree, when set, is the list's filter in place of the shared
+	// filter bar: a tree of checkboxes, each group's children under it, as
+	// Google's Kubernetes Engine Object Browser filters by API group and
+	// Resource Kind (#2070). A row is shown while its Column value's group
+	// and its ChildColumn value are both checked; every box starts checked.
+	CheckTree *CheckTree `json:"checkTree,omitempty"`
 	// Tabs, when set, draw the list screen as tabs, as Google's Cloud
 	// Storage Settings page has Project access and Interoperability (#1843):
 	// the tab whose ID is ListTab holds the rows, with the screen's create
@@ -274,6 +320,17 @@ type Listing struct {
 	// BigQuery names them (STRING, INTEGER, TIMESTAMP, …; REPEATED for an
 	// array), for the results' chart: Log Analytics' (#2021).
 	ColumnTypes map[string]string `json:"columnTypes,omitempty"`
+	// Sorts are the listing's Sort menu, and Menus its filter menus,
+	// drawn over the rows of a page's tab (#2071): Secure Source
+	// Manager's Issues and Pull requests tabs. The first sort is the
+	// order the rows came in.
+	Sorts []ListSort `json:"sorts,omitempty"`
+	Menus []ListMenu `json:"menus,omitempty"`
+	// Open, on an action's answer, is a console route the page goes to
+	// instead of showing the answer in a dialog: Document AI's Upload test
+	// document opens its analysis page, as Google's opens the layout
+	// parser analysis page (#2084).
+	Open string `json:"open,omitempty"`
 }
 
 // ResultPage is one page image of an action's answer, and its boxes.
@@ -340,6 +397,13 @@ type Provider interface {
 // accept it — a form offering something the API refuses is the working-looking
 // control the parity specification forbids.
 // Link is a document a Field names: its label and its https URL.
+// ConditionalOptions are a select's options while When holds
+// (Field.OptionsWhen).
+type ConditionalOptions struct {
+	When    string   `json:"when"`
+	Options []string `json:"options"`
+}
+
 type Link struct {
 	Label string `json:"label"`
 	URL   string `json:"url"`
@@ -401,6 +465,12 @@ type Field struct {
 	// "PostgreSQL 17" (#1860), and BigQuery's Region list shows
 	// "us-central1 (Iowa)" and submits us-central1 (#1861).
 	OptionLabels map[string]string `json:"optionLabels,omitempty"`
+	// OptionsWhen, on a "select", are the options it offers while other
+	// fields hold values, each condition in ShowWhen's form ("region=a|b",
+	// joined by "&"); the first that holds wins, else Options. A choice no
+	// longer offered moves to the first that is. Create private pool's
+	// Series and Machine type offer the chosen region's (#2073).
+	OptionsWhen []ConditionalOptions `json:"optionsWhen,omitempty"`
 	// Follows and Templates, on a "sourcefiles" field (Google's inline
 	// source editor, #1852), name the select field whose choice picks the
 	// files the editor starts with, and those files by choice: a function's
@@ -453,7 +523,11 @@ type Field struct {
 	// as Google's Choose Destination does (#1845); "kms" is a symmetric key
 	// of this instance's Cloud KMS in the location the form's
 	// locationType, multiRegion and region fields hold, filled in as its
-	// resource name (#1881).
+	// resource name (#1881); "artifact-registry" is a standard
+	// repository of this instance's Artifact Registry of the format and in
+	// the location the form's format, locationType, location and
+	// multiRegion fields hold, filled in as its resource name, as Google's
+	// remote repository's Browse does (#2066).
 	Browse string `json:"browse,omitempty"`
 	// Unavailable, on a checkbox, is why the choice cannot be made on this
 	// instance: the box is drawn as Google's page has it, unchecked and
@@ -920,6 +994,10 @@ type Detail struct {
 	// (#1860), and Google's Spanner instance and database pages have
 	// Overview, Spanner Studio, Backup/Restore and the rest (#1859).
 	SideNav bool `json:"sideNav,omitempty"`
+	// Panels are side panels opened by buttons beside the title, before
+	// the page's actions: Google's repository page has Setup Instructions,
+	// which opens its commands in a panel (#2066).
+	Panels []SidePanel `json:"panels,omitempty"`
 }
 
 // Crumb is one breadcrumb: its text, and the path it opens (none for the
@@ -945,7 +1023,10 @@ type EditForm struct {
 	// Page draws the form as a page of its own, the resource's address
 	// with ?edit=1, ending in Submit and Cancel, rather than as a dialog:
 	// Google's Edit opens the "Edit Redis instance" page, which saves with
-	// Save (#1862).
+	// Save (#1862), as Google's Edit Repository is a page ending in Update
+	// (#1855). Google's Edit job is Create job's page too, its steps
+	// (Steps) drawn as the create page draws them, and opened from the
+	// jobs list it goes back there (#2062).
 	Page bool `json:"page,omitempty"`
 	// Inline means the form opens only from the Edit beside a property
 	// that names it (Property.Edit), not from a button by the title:
@@ -966,6 +1047,11 @@ type EditForm struct {
 	// labelled Review. Google's Cloud Run service tabs end in View diff &
 	// redeploy, whose review ends in Deploy changes (#1852).
 	Review string `json:"review,omitempty"`
+	// Steps lays the form out as the create page's numbered steps, its
+	// fields' Sections each a step with Continue, as Google's Edit job
+	// follows Create job's steps (#1849): "continue" for Continue, "next"
+	// for Next.
+	Steps string `json:"steps,omitempty"`
 }
 
 // DateTimeFieldType is a Field.Type drawn as the browser's date and time
@@ -999,6 +1085,17 @@ type Property struct {
 	// the page's EditForm, as Google's tag key page has Edit next to
 	// Description (#1865).
 	Edit string `json:"edit,omitempty"`
+	// Chart draws the value as a bar chart, oldest bar first, each bar
+	// telling what it is when hovered or focused: a Cloud Build
+	// Dashboard card's Build history, the duration of each of the 20 most
+	// recent builds (#1854). Value is then the chart's text alternative.
+	// A pointer, so a Property stays comparable.
+	Chart *BarChart `json:"chart,omitempty"`
+}
+
+// BarChart is a Property's bar chart.
+type BarChart struct {
+	Bars []Bar `json:"bars"`
 }
 
 // SectionKind says what a section actually holds.
@@ -1040,7 +1137,26 @@ const (
 	// widget, its SQL run through Log Analytics. Listing holds the rows
 	// (with ColumnTypes) and Visualization says Bar, Line or Table.
 	KindAnalytics SectionKind = "analytics"
+	// KindDiff is a pull request's changed files (Section.Diff, #2071).
+	KindDiff SectionKind = "diff"
+	// KindMedia is a player for Media, an audio object of the instance's
+	// Cloud Storage: a Speech-to-Text transcription's audio, which Google's
+	// Transcription details page plays in the browser (#2084).
+	KindMedia SectionKind = "media"
+	// KindResult is an action's answer, its Listing, drawn as the action's
+	// result dialog draws it (page images with their boxes beside the text
+	// and rows), on a page of its own: Document AI's analysis page (#2084).
+	KindResult SectionKind = "result"
 )
+
+// Media is a KindMedia section's player: Src is the console's own media
+// route for the object, Type its audio type, and Label what the player is
+// named for a screen reader.
+type Media struct {
+	Src   string `json:"src"`
+	Type  string `json:"type,omitempty"`
+	Label string `json:"label"`
+}
 
 // Section is one aspect of a resource, rendered as a tab.
 //
@@ -1090,6 +1206,8 @@ type Section struct {
 	// Visualization is how a KindAnalytics section draws its rows: Bar,
 	// Line or Table (#2032).
 	Visualization string `json:"visualization,omitempty"`
+	// Media is the content when Kind is KindMedia.
+	Media *Media `json:"media,omitempty"`
 	// Unavailable explains why this one section has no content, so a section
 	// that cannot be read shows its own error inside its own panel rather
 	// than an empty table claiming the resource holds nothing.
@@ -1127,6 +1245,112 @@ type Section struct {
 	// another section is ShownIn it: "Live and noncurrent objects" on an
 	// object's Version history (#1843). Empty is "Live objects only".
 	Show string `json:"show,omitempty"`
+	// ShowLabel names this tab's Show list where Google's is not Show:
+	// the Vulnerabilities tab's Layer bar lists each layer with
+	// vulnerabilities, ShownIn it, after Show "All layers" (#2066).
+	ShowLabel string `json:"showLabel,omitempty"`
+	// Refs is the branch and tag selector drawn over the section, as
+	// Secure Source Manager's code view has one (#2071): choosing a ref
+	// opens its path.
+	Refs *RefPicker `json:"refs,omitempty"`
+	// Blame, on a KindText section with a Language (a file's content), is
+	// the commit that last changed each line, which the Blame button
+	// draws beside the lines (#2071).
+	Blame []BlameLine `json:"blame,omitempty"`
+	// Diff is the content when Kind is KindDiff.
+	Diff *DiffView `json:"diff,omitempty"`
+}
+
+// RefPicker is a branch and tag selector: the ref shown, and each
+// branch's and tag's page.
+type RefPicker struct {
+	Current  string      `json:"current"`
+	Branches []RefOption `json:"branches,omitempty"`
+	Tags     []RefOption `json:"tags,omitempty"`
+}
+
+// RefOption is one ref a RefPicker opens.
+type RefOption struct {
+	Name string   `json:"name"`
+	Path []string `json:"path"`
+}
+
+// BlameLine is the commit that last changed a line of a file, from Line
+// for Count lines.
+type BlameLine struct {
+	Line    int      `json:"line"`
+	Count   int      `json:"count"`
+	Commit  string   `json:"commit"`
+	Author  string   `json:"author"`
+	When    string   `json:"when"`
+	Summary string   `json:"summary"`
+	Opens   []string `json:"opens,omitempty"`
+}
+
+// DiffView is a pull request's Files changed drawn as Secure Source
+// Manager's web interface draws it (#2071): each file's lines, old and new
+// numbered, with the Whitespace, Split view/Unified view and diff options
+// menus, a plus icon beside each line that comments on it, and the code
+// comments under their lines. A comment is sent as the page's action
+// CommentAction (a single comment) or StartAction (kept for a review,
+// shown Pending until ReviewAction sends them), with the values path,
+// line (negative on the old side) and lineBody.
+type DiffView struct {
+	Files         []DiffFile `json:"files"`
+	CommentAction string     `json:"commentAction,omitempty"`
+	StartAction   string     `json:"startAction,omitempty"`
+	ReviewAction  string     `json:"reviewAction,omitempty"`
+	// Pending is how many of the viewer's comments wait for their review.
+	Pending int `json:"pending,omitempty"`
+}
+
+// DiffFile is one changed file of a DiffView.
+type DiffFile struct {
+	Name     string        `json:"name"`
+	Action   string        `json:"action"`
+	Lines    []DiffLine    `json:"lines"`
+	Comments []DiffComment `json:"comments,omitempty"`
+}
+
+// DiffLine is one line of a DiffFile: Kind is " " (context), "+", "-" or
+// "@" (a hunk header, Text its header); Old and New are its line numbers
+// on each side, 0 where it has none.
+type DiffLine struct {
+	Kind string `json:"kind"`
+	Old  int    `json:"old,omitempty"`
+	New  int    `json:"new,omitempty"`
+	Text string `json:"text"`
+}
+
+// DiffComment is a code comment on a DiffFile's line (negative on the old
+// side).
+type DiffComment struct {
+	ID      string `json:"id"`
+	Line    int64  `json:"line"`
+	Author  string `json:"author,omitempty"`
+	Body    string `json:"body"`
+	State   string `json:"state,omitempty"`
+	Pending bool   `json:"pending,omitempty"`
+}
+
+// ListSort is one choice of a listing's Sort menu: rows ordered by the
+// Fields value Key (compared as text: an RFC 3339 time, a zero-padded
+// number), descending when Desc (#2071).
+type ListSort struct {
+	Label string `json:"label"`
+	Key   string `json:"key"`
+	Desc  bool   `json:"desc,omitempty"`
+}
+
+// ListMenu is one of a listing's filter menus, over the Fields value Key,
+// a comma-separated list: choosing an option keeps the rows whose list
+// holds it (#2071). With Toggle it is a button instead, keeping the rows
+// whose list holds Toggle: Secure Source Manager's Assigned to me.
+type ListMenu struct {
+	Label   string   `json:"label"`
+	Key     string   `json:"key"`
+	Options []string `json:"options,omitempty"`
+	Toggle  string   `json:"toggle,omitempty"`
 }
 
 // dropBlankProperties removes every Property whose Value is empty or
@@ -1202,6 +1426,30 @@ type PropertyGroup struct {
 	Section string `json:"section,omitempty"`
 	// Properties are the pairs, in the order the provider gives them.
 	Properties []Property `json:"properties"`
+	// Bars draws the group as a bar graph, a bar per property whose Value
+	// is a count: Google's Dependencies tab's Most common licenses
+	// (#2066).
+	Bars bool `json:"bars,omitempty"`
+	// Pin, on a SummaryOnly screen's card, is the card's key for a Pin
+	// button on it: a pinned card is drawn first, as Google's Cloud Build
+	// Dashboard pins a card to the top of the page (#1854). Pins are the
+	// viewer's own, kept in the browser.
+	Pin string `json:"pin,omitempty"`
+	// Filter is the text Listing.CardFilter matches the card by.
+	Filter string `json:"filter,omitempty"`
+}
+
+// Bar is one bar of a Property's bar chart (Property.Chart).
+type Bar struct {
+	// Value is the bar's height, against the tallest bar of its chart.
+	Value float64 `json:"value"`
+	// Label is what the bar says when hovered or focused: "Successful,
+	// 00:01:02, Nov 20, 2026".
+	Label string `json:"label"`
+	// Status colours it: "ok", "fail", or empty for neither.
+	Status string `json:"status,omitempty"`
+	// Link, when set, is the console route the bar opens.
+	Link string `json:"link,omitempty"`
 }
 
 // ChartSeries is one line on a chart, with its own points and unit.
@@ -1219,6 +1467,28 @@ type ChartSeries struct {
 	// scale to the data.
 	Max    float64      `json:"max,omitempty"`
 	Points []ChartPoint `json:"points"`
+	// Unavailable, when set, is why this metric has no readings, drawn in
+	// the chart's place (#2070: a workload's Disk where the kubelet reports
+	// no ephemeral storage for its pods), so a missing metric is said, not
+	// drawn as an empty or invented line.
+	Unavailable string `json:"unavailable,omitempty"`
+}
+
+// CheckTree is a list screen's checkbox tree filter (Listing.CheckTree).
+type CheckTree struct {
+	// Label names the tree for assistive technology: "API groups".
+	Label string `json:"label"`
+	// Column is the column a row's group is read from, ChildColumn the
+	// column its child is: "API group" and "Kind".
+	Column      string          `json:"column"`
+	ChildColumn string          `json:"childColumn"`
+	Groups      []CheckTreeNode `json:"groups"`
+}
+
+// CheckTreeNode is one group of a CheckTree and the children under it.
+type CheckTreeNode struct {
+	Label    string   `json:"label"`
+	Children []string `json:"children,omitempty"`
 }
 
 // ChartPoint is one reading. Value is nil where no reading was taken.
@@ -1361,11 +1631,37 @@ const (
 	RowMenuDelete = "delete"
 )
 
+// DeleteWorder is a Deleter whose delete reads as Google's in two more
+// places (#1848): the list's header button over the checked rows, and the
+// confirmation's button. Cloud Tasks' Queues list has "Select the checkbox
+// for the queue ... Click Delete queue. At the prompt, type the queue name,
+// and then click Confirm."
+type DeleteWorder interface {
+	Deleter
+	DeleteWords() DeleteWords
+}
+
+// DeleteWords are a DeleteWorder's labels; an empty one keeps "Delete".
+type DeleteWords struct {
+	// Selected is the list's button that deletes the checked rows.
+	Selected string
+	// Submit is the confirmation dialog's button.
+	Submit string
+}
+
 // RowEditLeader is a RowEditor whose rows' menus begin with Edit, as
 // Google's Triggers menu reads Edit, Disable, Delete (#1854).
 type RowEditLeader interface {
 	RowEditor
 	RowEditFirst() bool
+}
+
+// RowDeleteIconer is a Deleter whose rows' Delete is a trash icon on the
+// row rather than an item of its menu: Google's private pools list has "In
+// the row with your private pool, click the trash icon" (#1854).
+type RowDeleteIconer interface {
+	Deleter
+	RowDeleteIcon() bool
 }
 
 // SelectionLister is a list screen whose rows marked Selectable can be
@@ -1512,9 +1808,20 @@ type Action struct {
 	// Page draws the action's form as a page of its own at the resource
 	// page's address with ?action=<id>, under the action's Title (or
 	// Label), ending in its Submit (or Label) and Cancel, instead of a
-	// dialog: Cloud KMS's Create key is a page (#1851). Cancel and success
-	// return to the resource's page.
+	// dialog: Cloud KMS's Create key is a page (#1851), as Google's Secure
+	// Source Manager web interface has Create repository (#1856). Cancel
+	// and success return to the resource's page, or to Opens'.
 	Page bool `json:"page,omitempty"`
+	// Menu, on a Section's action, draws it in the ellipsis menu at the
+	// top of the tab instead of as a button there, as Google's Cloud Tasks
+	// Logs tab has "Click the ellipsis icon > Disable logs" (#2064). The
+	// menu is the row menus' own: Escape closes it and gives focus back to
+	// its trigger. Any provider's tab may use it.
+	Menu bool `json:"menu,omitempty"`
+	// Opens, on a Page action, names the field whose value is the ID of
+	// the row the action made, which the console opens when it is done:
+	// Create repository goes on to the new repository's page.
+	Opens string `json:"opens,omitempty"`
 }
 
 // PathActor is a provider with actions on the resources inside a resource.
@@ -1852,6 +2159,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/objects/{service}/upload", s.handleUpload)
 	mux.HandleFunc("GET /api/objects/{service}/download", s.handleDownload)
 	mux.HandleFunc("GET /api/objects/{service}/preview", s.handlePreview)
+	mux.HandleFunc("GET /api/objects/{service}/media", s.handleMedia)
 	mux.HandleFunc("GET /api/objects/{service}/versions", s.handleVersions)
 	mux.HandleFunc("DELETE /api/objects/{service}", s.handleDeleteObject)
 	mux.HandleFunc("GET /api/terminal", s.handleTerminalStatus)
@@ -2002,8 +2310,9 @@ func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
 			"id": p.ID(), "title": p.Title(),
 			"create": caps.Create, "delete": caps.Delete, "detail": caps.Detail,
 			"query": caps.Query, "edit": caps.Edit, "reveal": caps.Reveal,
-			"deleteLabel": caps.DeleteLabel, "deleteConfirm": caps.DeleteConfirm, "editRow": caps.EditRow, "editRowFirst": caps.EditRowFirst, "rowMenuOrder": caps.RowMenuOrder,
-			"page": caps.Page, "scope": caps.Scope, "filters": caps.Filters,
+			"deleteLabel": caps.DeleteLabel, "deleteConfirm": caps.DeleteConfirm,
+			"deleteSelected": caps.DeleteSelected, "deleteSubmit": caps.DeleteSubmit, "editRow": caps.EditRow, "editRowFirst": caps.EditRowFirst,
+			"deleteIcon": caps.DeleteIcon, "rowMenuOrder": caps.RowMenuOrder, "page": caps.Page, "scope": caps.Scope, "filters": caps.Filters,
 		})
 	}
 	// The playground is advertised only when local AI is configured, so the
@@ -2194,11 +2503,17 @@ type capabilities struct {
 	// console confirms this kind's (deleteconfirm.go): "delete", "DELETE",
 	// "confirm" (Delete alone), or empty for the name typed back.
 	DeleteConfirm string `json:"deleteConfirm,omitempty"`
-	EditRow       string `json:"editRow,omitempty"`
+	// DeleteSelected and DeleteSubmit are a DeleteWorder's labels for the
+	// checked rows' Delete and the confirmation's button (#1848).
+	DeleteSelected string `json:"deleteSelected,omitempty"`
+	DeleteSubmit   string `json:"deleteSubmit,omitempty"`
+	EditRow        string `json:"editRow,omitempty"`
 	// EditRowFirst puts the rows' Edit first in their menus (RowEditLeader).
 	EditRowFirst bool `json:"editRowFirst,omitempty"`
 	// RowMenuOrder is RowMenuOrderer's order of a row's menu.
 	RowMenuOrder []string `json:"rowMenuOrder,omitempty"`
+	// DeleteIcon draws the rows' Delete as a trash icon (RowDeleteIconer).
+	DeleteIcon bool `json:"deleteIcon,omitempty"`
 	// Detail means a row can be opened to show what is inside it.
 	Detail bool `json:"detail,omitempty"`
 	// Edit means a resource's detail page can offer an edit form. The form
@@ -2397,11 +2712,18 @@ func (s *Server) capabilitiesOf(p Provider) capabilities {
 	if c.Delete {
 		c.DeleteConfirm = deleteConfirmOf(p)
 	}
+	if dw, ok := p.(DeleteWorder); ok {
+		w := dw.DeleteWords()
+		c.DeleteSelected, c.DeleteSubmit = w.Selected, w.Submit
+	}
 	if rl, ok := p.(RowEditLeader); ok {
 		c.EditRowFirst = rl.RowEditFirst()
 	}
 	if ro, ok := p.(RowMenuOrderer); ok {
 		c.RowMenuOrder = ro.RowMenuOrder()
+	}
+	if di, ok := p.(RowDeleteIconer); ok && c.Delete {
+		c.DeleteIcon = di.RowDeleteIcon()
 	}
 	if re, ok := p.(RowEditor); ok {
 		c.EditRow = re.RowEditLabel()
@@ -2692,8 +3014,9 @@ func (s *Server) actAtPath(w http.ResponseWriter, r *http.Request, p Provider, p
 	}
 	offered := false
 	for _, a := range offers {
-		// A list action that takes a file goes to the upload route.
-		if a.ID == action && (len(path) > 0 || !takesFile(a)) {
+		// A list action that takes a file goes to the upload route, unless
+		// its file is one choice of several (requiresFile).
+		if a.ID == action && (len(path) > 0 || !requiresFile(a)) {
 			offered = true
 			break
 		}
@@ -3154,8 +3477,12 @@ type PodMetrics struct {
 	CPUCoreNanoSeconds uint64  `json:"cpuCoreNanoSeconds,omitempty"`
 	// MemoryWorkingSetBytes is the working set, which is what the kubelet
 	// itself uses for eviction decisions.
-	MemoryWorkingSetBytes int64  `json:"memoryWorkingSetBytes"`
-	At                    string `json:"at,omitempty"`
+	MemoryWorkingSetBytes int64 `json:"memoryWorkingSetBytes"`
+	// EphemeralStorageUsedBytes is the pod's ephemeral storage in use (its
+	// containers' writable layers, logs and emptyDir volumes), as the
+	// kubelet's summary reports it; zero where it reported none (#2070).
+	EphemeralStorageUsedBytes int64  `json:"ephemeralStorageUsedBytes,omitempty"`
+	At                        string `json:"at,omitempty"`
 }
 
 // Key identifies a pod across reads.

@@ -12,9 +12,9 @@ import (
 // workloadWhy is why a resource type other than a Cloud SQL instance is
 // refused.
 func workloadWhy(typ string) string {
-	return "CloudBurrow's Backup and DR Service protects Cloud SQL instances (" + CloudSQLResourceType + "); " + typ +
-		" is another workload type (Compute Engine instances and disks, AlloyDB, Filestore), whose servers CloudBurrow " +
-		"does not run (docs/backupdr.md)"
+	return "CloudBurrow's Backup and DR Service protects Cloud SQL instances (" + CloudSQLResourceType + ") and Compute Engine " +
+		"instances and disks (" + ComputeInstanceResourceType + ", " + ComputeDiskResourceType + "); " + typ +
+		" is another workload type (AlloyDB, Filestore, regional disks), whose servers CloudBurrow does not run (docs/backupdr.md)"
 }
 
 var recurrences = map[string]bool{"HOURLY": true, "DAILY": true, "WEEKLY": true, "MONTHLY": true, "YEARLY": true}
@@ -63,7 +63,7 @@ func (s *Server) createPlan(r *http.Request, loc string) (any, error) {
 	switch {
 	case body.ResourceType == "":
 		return nil, invalid("backupPlan.resourceType is required.")
-	case body.ResourceType != CloudSQLResourceType:
+	case !servedType(body.ResourceType):
 		return nil, unimplemented("a backup plan for "+body.ResourceType, workloadWhy(body.ResourceType))
 	case body.Vault == "":
 		return nil, invalid("backupPlan.backupVault is required.")
@@ -80,7 +80,7 @@ func (s *Server) createPlan(r *http.Request, loc string) (any, error) {
 	}
 	v, err := s.planVaultLocked(name, body.Vault)
 	if err == nil {
-		err = checkPlanRetention(body.Rules, logDays, body.MaxOnDemandDays, v)
+		err = checkPlanRetention(body.Rules, logDays, body.MaxOnDemandDays, v, body.ResourceType)
 	}
 	if err != nil {
 		s.mu.Unlock()
@@ -131,7 +131,7 @@ const maxRetentionDays = 36159
 // vault (#1923): every rule's retention, and the log retention, at least
 // the vault's minimum enforced retention; no rules only with a maximum
 // custom on-demand retention.
-func checkPlanRetention(rules []rule, logDays, maxOnDemand int64, v *vault) error {
+func checkPlanRetention(rules []rule, logDays, maxOnDemand int64, v *vault, typ string) error {
 	if maxOnDemand < 0 || maxOnDemand > maxRetentionDays {
 		return invalid("backupPlan.maxCustomOnDemandRetentionDays %d must be 1 to %d.", maxOnDemand, maxRetentionDays)
 	}
@@ -139,7 +139,7 @@ func checkPlanRetention(rules []rule, logDays, maxOnDemand int64, v *vault) erro
 		return invalid("backupPlan.backupRules must have at least one rule, unless backupPlan.maxCustomOnDemandRetentionDays is set.")
 	}
 	if len(rules) > 0 {
-		if err := checkRules(rules); err != nil {
+		if err := checkRules(rules, typ); err != nil {
 			return err
 		}
 	}
@@ -173,7 +173,7 @@ func (s *Server) maxOnDemandLocked(p *plan) int64 {
 }
 
 // checkRules validates a plan's backup rules.
-func checkRules(rules []rule) error {
+func checkRules(rules []rule, typ string) error {
 	if len(rules) == 0 {
 		return invalid("backupPlan.backupRules must have at least one rule.")
 	}
@@ -189,7 +189,7 @@ func checkRules(rules []rule) error {
 		if ru.RetentionDays <= 0 || ru.RetentionDays > maxRetentionDays {
 			return invalid("backupPlan.backupRules[%d].backupRetentionDays must be 1 to %d.", i, maxRetentionDays)
 		}
-		if err := checkSchedule(i, ru.Schedule); err != nil {
+		if err := checkSchedule(i, ru.Schedule, typ); err != nil {
 			return err
 		}
 	}
@@ -209,10 +209,11 @@ func parseLogDays(raw json.RawMessage) (int64, error) {
 	return n, nil
 }
 
-func checkSchedule(i int, sch map[string]any) error {
+func checkSchedule(i int, sch map[string]any, typ string) error {
 	if sch == nil {
 		return invalid("backupPlan.backupRules[%d].standardSchedule is required.", i)
 	}
+	enumNames(sch)
 	rt, _ := sch["recurrenceType"].(string)
 	if !recurrences[rt] {
 		return invalid("backupPlan.backupRules[%d].standardSchedule.recurrenceType %q is not one of HOURLY, DAILY, WEEKLY, MONTHLY, YEARLY.", i, rt)
@@ -224,7 +225,7 @@ func checkSchedule(i int, sch map[string]any) error {
 	if _, err := time.LoadLocation(tz); err != nil {
 		return invalid("backupPlan.backupRules[%d].standardSchedule.timeZone %q is not an IANA time zone.", i, tz)
 	}
-	if err := checkScheduleDays(i, rt, sch); err != nil {
+	if err := checkScheduleDays(i, rt, sch, typ); err != nil {
 		return err
 	}
 	if w, ok := sch["backupWindow"].(map[string]any); ok {
@@ -314,12 +315,15 @@ func (s *Server) associationJSON(a *association) map[string]any {
 			infos = append(infos, info)
 		}
 	}
-	return map[string]any{"name": a.Name, "backupPlan": a.Plan, "resource": a.Resource, "resourceType": a.ResourceType,
+	out := map[string]any{"name": a.Name, "backupPlan": a.Plan, "resource": a.Resource, "resourceType": a.ResourceType,
 		"dataSource": a.DataSource, "createTime": a.CreateTime, "updateTime": a.UpdateTime, "state": "ACTIVE",
-		"rulesConfigInfo": infos, "backupPlanRevisionId": s.planRevision(a.Plan), "backupPlanRevisionName": a.Plan + "/revisions/" + s.planRevision(a.Plan),
-		"cloudSqlInstanceBackupPlanAssociationProperties": map[string]any{
+		"rulesConfigInfo": infos, "backupPlanRevisionId": s.planRevision(a.Plan), "backupPlanRevisionName": a.Plan + "/revisions/" + s.planRevision(a.Plan)}
+	if a.ResourceType == CloudSQLResourceType {
+		out["cloudSqlInstanceBackupPlanAssociationProperties"] = map[string]any{
 			"instanceCreateTime": s.st.DataSources[a.DataSource].info().CreateTime,
-		}}
+		}
+	}
+	return out
 }
 
 func (d *dataSource) info() Instance {
@@ -345,12 +349,14 @@ func (s *Server) createAssociation(r *http.Request, loc string) (any, error) {
 	switch {
 	case body.ResourceType == "":
 		return nil, invalid("backupPlanAssociation.resourceType is required.")
-	case body.ResourceType != CloudSQLResourceType:
+	case !servedType(body.ResourceType):
 		return nil, unimplemented("a backup plan association for "+body.ResourceType, workloadWhy(body.ResourceType))
 	case body.Resource == "":
 		return nil, invalid("backupPlanAssociation.resource is required.")
 	case body.Plan == "":
 		return nil, invalid("backupPlanAssociation.backupPlan is required.")
+	case body.ResourceType != CloudSQLResourceType:
+		return s.createComputeAssociation(loc, id, body.Plan, body.Resource, body.ResourceType)
 	}
 	project, instance, ok := sqlResource(body.Resource)
 	if !ok {
@@ -375,7 +381,7 @@ func (s *Server) createAssociation(r *http.Request, loc string) (any, error) {
 		return nil, invalid("Backup plan %s protects %s, not %s.", p.Name, p.ResourceType, body.ResourceType)
 	}
 	for _, a := range s.st.Associations {
-		if ap, ai, _ := sqlResource(a.Resource); ap == project && ai == instance {
+		if ap, ai, _ := sqlResource(a.Resource); a.ResourceType == CloudSQLResourceType && ap == project && ai == instance {
 			s.mu.Unlock()
 			return nil, errorf(http.StatusConflict, "ALREADY_EXISTS", "The Cloud SQL instance %s is already protected by %s.", instance, a.Name)
 		}
@@ -385,7 +391,7 @@ func (s *Server) createAssociation(r *http.Request, loc string) (any, error) {
 	// earlier association made, if its backups are still there.
 	var ds *dataSource
 	for _, d := range s.st.DataSources {
-		if d.Project == project && d.Instance == instance && strings.HasPrefix(d.Name, p.Vault+"/") {
+		if d.Kind == "" && d.Project == project && d.Instance == instance && strings.HasPrefix(d.Name, p.Vault+"/") {
 			ds = d
 		}
 	}
@@ -462,14 +468,14 @@ func (s *Server) dataSourceJSON(d *dataSource) map[string]any {
 			continue
 		}
 		count++
-		if r, ok := s.sql.Run(b.RunID); ok && r.Status == "SUCCESSFUL" && (last == nil || b.CreateTime > last.CreateTime) {
+		if r, ok := s.runLocked(b.RunID); ok && r.Status == "SUCCESSFUL" && (last == nil || b.CreateTime > last.CreateTime) {
 			last = b
 		}
 	}
 	res := "projects/" + d.Project + "/instances/" + d.Instance
 	cfg := map[string]any{"lastBackupState": "FIRST_BACKUP_PENDING"}
 	if last != nil {
-		r, _ := s.sql.Run(last.RunID)
+		r, _ := s.runLocked(last.RunID)
 		cfg["lastBackupState"], cfg["lastSuccessfulBackupConsistencyTime"] = "SUCCEEDED", r.EndTime
 	}
 	state := "PASSIVE"
@@ -484,14 +490,18 @@ func (s *Server) dataSourceJSON(d *dataSource) map[string]any {
 		cfg["gcpBackupConfig"] = map[string]any{"backupPlan": a.Plan, "backupPlanAssociation": a.Name, "backupPlanRules": rules,
 			"backupPlanRevisionId": s.planRevision(a.Plan), "backupPlanRevisionName": a.Plan + "/revisions/" + s.planRevision(a.Plan)}
 	}
+	gcp := map[string]any{"gcpResourcename": "//sqladmin.googleapis.com/" + res, "location": d.Info.Region,
+		"type": CloudSQLResourceType, "cloudSqlInstanceDatasourceProperties": map[string]any{
+			"name": res, "databaseInstalledVersion": d.Info.DatabaseVersion, "instanceCreateTime": d.Info.CreateTime,
+			"instanceTier": d.Info.Tier}}
+	if d.Kind != "" {
+		gcp = d.computeGcpResource()
+	}
 	out := map[string]any{"name": d.Name, "state": "ACTIVE", "configState": state, "backupCount": strconv.Itoa(count),
 		"createTime": d.CreateTime, "updateTime": d.UpdateTime, "etag": strconv.Quote(d.UpdateTime),
-		"totalStoredBytes": strconv.FormatInt(s.storedBytes(d.Name+"/"), 10),
-		"backupConfigInfo": cfg,
-		"dataSourceGcpResource": map[string]any{"gcpResourcename": "//sqladmin.googleapis.com/" + res, "location": d.Info.Region,
-			"type": CloudSQLResourceType, "cloudSqlInstanceDatasourceProperties": map[string]any{
-				"name": res, "databaseInstalledVersion": d.Info.DatabaseVersion, "instanceCreateTime": d.Info.CreateTime,
-				"instanceTier": d.Info.Tier}}}
+		"totalStoredBytes":      strconv.FormatInt(s.storedBytes(d.Name+"/"), 10),
+		"backupConfigInfo":      cfg,
+		"dataSourceGcpResource": gcp}
 	if len(d.Labels) > 0 {
 		out["labels"] = d.Labels
 	}
@@ -529,7 +539,7 @@ func (s *Server) backupJSON(b *backup) map[string]any {
 	d := s.st.DataSources[b.DataSource]
 	info := d.info()
 	state, consistency, size := "CREATING", "", int64(0)
-	if r, ok := s.sql.Run(b.RunID); !ok {
+	if r, ok := s.runLocked(b.RunID); !ok {
 		state = "ERROR"
 	} else {
 		switch r.Status {
@@ -559,6 +569,9 @@ func (s *Server) backupJSON(b *backup) map[string]any {
 			"backupPlanRevisionId": b.revision(), "backupPlanRevisionName": b.Plan + "/revisions/" + b.revision()},
 		"gcpResource": map[string]any{"gcpResourcename": "//sqladmin.googleapis.com/" + res, "location": info.Region,
 			"type": CloudSQLResourceType}, "resourceSizeBytes": strconv.FormatInt(size, 10)}
+	if d != nil && d.Kind != "" {
+		s.computeBackupJSON(b, d, out)
+	}
 	if consistency != "" {
 		out["consistencyTime"] = consistency
 	}
@@ -605,15 +618,21 @@ func (s *Server) deleteBackup(name string) (any, error) {
 		s.mu.Unlock()
 		return nil, notFound("Backup %s does not exist.", name)
 	}
-	if r, ok := s.sql.Run(b.RunID); ok && r.Status == "RUNNING" {
+	if r, ok := s.runLocked(b.RunID); ok && r.Status == "RUNNING" {
 		s.mu.Unlock()
 		return nil, precondition("Backup %s is still being taken.", name)
+	}
+	// "You can delete a backup only after it exceeds its minimum enforced
+	// retention period" (bv-backup-manage, #1844).
+	if end, err := time.Parse(time.RFC3339Nano, b.enforcedEnd()); err == nil && s.now().Before(end) {
+		s.mu.Unlock()
+		return nil, precondition("Backup %s cannot be deleted before its enforced retention ends, at %s.", name, b.enforcedEnd())
 	}
 	delete(s.st.Backups, name)
 	err := s.saveLocked()
 	s.mu.Unlock()
 	if err == nil {
-		err = s.sql.DeleteRun(b.RunID)
+		err = s.deleteRun(b.RunID)
 	}
 	if err != nil {
 		return nil, err
@@ -630,9 +649,16 @@ func (s *Server) restoreBackup(r *http.Request, name string) (any, error) {
 	}
 	s.mu.Lock()
 	b := s.st.Backups[name]
+	var d *dataSource
+	if b != nil {
+		d = s.st.DataSources[b.DataSource]
+	}
 	s.mu.Unlock()
 	if b == nil {
 		return nil, notFound("Backup %s does not exist.", name)
+	}
+	if d != nil && d.Kind != "" {
+		return s.restoreCompute(name, body)
 	}
 	target := "a Compute Engine instance or disk"
 	for k := range body {
@@ -640,9 +666,8 @@ func (s *Server) restoreBackup(r *http.Request, name string) (any, error) {
 			target = "a disk"
 		}
 	}
-	return nil, unimplemented("backups.restore into "+target, workloadWhy("compute.googleapis.com/Instance")+
-		"; a Cloud SQL backup is restored by Cloud SQL: sqladmin instances.restoreBackup with backupdrBackup "+name+
-		", or instances.pointInTimeRestore with its data source")
+	return nil, invalid("Backup %s is a Cloud SQL backup, which backups.restore does not restore into %s: Cloud SQL restores it, "+
+		"with sqladmin instances.restoreBackup and backupdrBackup %s, or instances.pointInTimeRestore with its data source.", name, target, name)
 }
 
 // triggerBackup takes an on-demand backup under one of the plan's rules.
@@ -720,6 +745,9 @@ func (s *Server) backup(assocName, ruleID string, onDemand bool, retentionDays i
 	if err := s.checkVaultKeyFor(d.Name); err != nil {
 		return "", nil, err
 	}
+	if d.Kind != "" {
+		return s.computeBackup(assocName, a.Plan, ruleID, onDemand, retentionDays, labels, rev, d, vlt)
+	}
 	cat := "SCHEDULED_BACKUP"
 	if onDemand {
 		cat = "ON_DEMAND_BACKUP"
@@ -772,7 +800,7 @@ func (s *Server) backup(assocName, ruleID string, onDemand bool, retentionDays i
 	s.mu.Unlock()
 	go func() {
 		<-done
-		r, _ := s.sql.Run(runID)
+		r, _ := s.runLocked(runID)
 		var err error
 		if r.Status != "SUCCESSFUL" {
 			err = fmt.Errorf("the backup of Cloud SQL instance %s failed: %s", d.Instance, r.Error)
@@ -818,6 +846,9 @@ func (s *Server) DataSourceInstance(name string) (string, string, error) {
 	if d == nil {
 		return "", "", fmt.Errorf("The Backup and DR data source %s does not exist.", name)
 	}
+	if d.Kind != "" {
+		return "", "", fmt.Errorf("The Backup and DR data source %s protects a %s, not a Cloud SQL instance.", name, d.Kind)
+	}
 	return d.Project, d.Instance, nil
 }
 
@@ -832,6 +863,9 @@ func (s *Server) BackupRunID(name string) (string, error) {
 	b := s.st.Backups[name]
 	if b == nil {
 		return "", fmt.Errorf("The Backup and DR backup %s does not exist.", name)
+	}
+	if strings.HasPrefix(b.RunID, computeRunPrefix) {
+		return "", fmt.Errorf("The Backup and DR backup %s is a Compute Engine backup, not a Cloud SQL one: restore it with backups.restore.", name)
 	}
 	return b.RunID, nil
 }
@@ -848,7 +882,7 @@ var (
 // 6 to 23 for a Cloud SQL instance; daysOfWeek required for WEEKLY and
 // only there; daysOfMonth or weekDayOfMonth for MONTHLY and YEARLY only;
 // months for YEARLY only, and required there.
-func checkScheduleDays(i int, rt string, sch map[string]any) error {
+func checkScheduleDays(i int, rt string, sch map[string]any, typ string) error {
 	f := fmt.Sprintf("backupPlan.backupRules[%d].standardSchedule.", i)
 	list := func(k string) []any { l, _ := sch[k].([]any); return l }
 	_, hasHourly := sch["hourlyFrequency"]
@@ -859,8 +893,17 @@ func checkScheduleDays(i int, rt string, sch map[string]any) error {
 		if !hasHourly {
 			return invalid("%shourlyFrequency is required for an HOURLY rule.", f)
 		}
-		if h < 6 || h > 23 || h != float64(int(h)) {
-			return invalid("%shourlyFrequency %v is not supported: for %s it must be 6 to 23.", f, sch["hourlyFrequency"], CloudSQLResourceType)
+		// "compute.googleapis.com/Instance: 1-23 ... compute.googleapis.com/Disk:
+		// 1-23 ... sqladmin.googleapis.com/Instance: 6-23" (StandardSchedule).
+		lo := 6.0
+		if typ == ComputeInstanceResourceType || typ == ComputeDiskResourceType {
+			lo = 1
+		}
+		if typ == "" {
+			typ = CloudSQLResourceType
+		}
+		if h < lo || h > 23 || h != float64(int(h)) {
+			return invalid("%shourlyFrequency %v is not supported: for %s it must be %v to 23.", f, sch["hourlyFrequency"], typ, lo)
 		}
 	case hasHourly:
 		return invalid("%shourlyFrequency applies to an HOURLY rule only, not %s.", f, rt)
@@ -929,4 +972,41 @@ func locationOfName(name string) string {
 		return p[3]
 	}
 	return ""
+}
+
+// The schedule's enums by number: the REST clients of
+// cloud.google.com/go/backupdr send enums as numbers (protojson with
+// UseEnumNumbers), which Google's API accepts as it does their names.
+var (
+	recurrenceEnum = []string{"RECURRENCE_TYPE_UNSPECIFIED", "HOURLY", "DAILY", "WEEKLY", "MONTHLY", "YEARLY"}
+	dayEnum        = []string{"DAY_OF_WEEK_UNSPECIFIED", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY"}
+	monthEnum      = []string{"MONTH_UNSPECIFIED", "JANUARY", "FEBRUARY", "MARCH", "APRIL", "MAY", "JUNE", "JULY", "AUGUST",
+		"SEPTEMBER", "OCTOBER", "NOVEMBER", "DECEMBER"}
+	weekEnum = []string{"WEEK_OF_MONTH_UNSPECIFIED", "FIRST", "SECOND", "THIRD", "FOURTH", "LAST"}
+)
+
+// enumName is v as its enum's name when it is a number.
+func enumName(v any, names []string) any {
+	if n, ok := v.(float64); ok && n >= 0 && int(n) < len(names) && n == float64(int(n)) {
+		return names[int(n)]
+	}
+	return v
+}
+
+// enumNames rewrites a standardSchedule's numeric enums as their names.
+func enumNames(sch map[string]any) {
+	if v, ok := sch["recurrenceType"]; ok {
+		sch["recurrenceType"] = enumName(v, recurrenceEnum)
+	}
+	for k, names := range map[string][]string{"daysOfWeek": dayEnum, "months": monthEnum} {
+		if l, ok := sch[k].([]any); ok {
+			for i := range l {
+				l[i] = enumName(l[i], names)
+			}
+		}
+	}
+	if w, ok := sch["weekDayOfMonth"].(map[string]any); ok {
+		w["weekOfMonth"] = enumName(w["weekOfMonth"], weekEnum)
+		w["dayOfWeek"] = enumName(w["dayOfWeek"], dayEnum)
+	}
 }

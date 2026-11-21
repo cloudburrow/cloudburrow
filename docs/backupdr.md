@@ -1,16 +1,20 @@
 # Backup and DR
 
 CloudBurrow serves the Backup and DR Service API v1 (`backupdr.googleapis.com`, #1433) as far as
-Cloud SQL's integration uses it: backup vaults, backup plans with their rules, backup plan
-associations that enroll a Cloud SQL instance, the data sources they make in the plan's vault,
-and the backups taken of them. Cloud SQL restores those backups, and recovers a data source's
-instance to a point in time (`instances.pointInTimeRestore`, #1425).
+Cloud SQL's and Compute Engine's integrations use it: backup vaults, backup plans with their rules,
+backup plan associations that enroll a Cloud SQL instance, a Compute Engine VM or a disk, the data
+sources they make in the plan's vault, and the backups taken of them. Cloud SQL restores its
+backups, and recovers a data source's instance to a point in time (`instances.pointInTimeRestore`,
+#1425); `backups.restore` restores a VM's or a disk's backup to a new VM or disk
+([Compute Engine VMs and disks](#compute-engine-vms-and-disks-2075)).
 
 It is opt-in, beside a Cloud SQL service:
 
 ```sh
 cloudburrow up --services cloudsql,cloudsql-mysql,storage,backupdr
 ```
+
+Add `compute` to back up Compute Engine VMs and disks.
 
 It runs in the CLI process on `--port-backupdr` (default `9024`, moved by `--port-base`), bound
 only when `backupdr` and `cloudsql` or `cloudsql-mysql` are enabled. `cloudburrow env` exports
@@ -39,7 +43,7 @@ the regions CloudBurrow lists, and `-` lists every location's vaults, plans and 
 | `backupPlans` | `create`, `get`, `list`, `delete` | `resourceType` must be `sqladmin.googleapis.com/Instance`; `backupVault` must exist; at least one rule, each with a unique `ruleId`, a positive `backupRetentionDays` and a `standardSchedule` (`recurrenceType` HOURLY, DAILY, WEEKLY, MONTHLY or YEARLY, an IANA `timeZone`, `hourlyFrequency` for HOURLY, an optional `backupWindow`). `logRetentionDays` is kept and reported. A plan an association applies cannot be deleted. |
 | `backupPlanAssociations` | `create`, `get`, `list`, `delete`, `triggerBackup` | `resource` is `projects/{project}/instances/{instance}` (with or without `//sqladmin.googleapis.com/`), `resourceType` `sqladmin.googleapis.com/Instance`; the instance must exist. An instance is protected by one association at a time. Creating it makes a data source in the plan's vault (or reuses the one an earlier association left there); `rulesConfigInfo` reports each rule's last backup. Deleting it stops protection; the data source and its backups stay. `triggerBackup` with a `ruleId` takes an on-demand backup, kept for the rule's retention or `customRetentionDays`. |
 | `backupVaults.dataSources` | `get`, `list` | The instance protected (`dataSourceGcpResource.cloudSqlInstanceDatasourceProperties`: name, version, tier, create time), `backupCount`, and `backupConfigInfo` (last backup state and consistency time, the plan and association). `configState` is ACTIVE while an association applies, PASSIVE after. |
-| `backupVaults.dataSources.backups` | `get`, `list`, `delete` | `state` CREATING, ACTIVE or ERROR from the Cloud SQL backup underneath, `backupType` SCHEDULED or ON_DEMAND, `consistencyTime` when it finished, `expireTime` from the retention, `cloudSqlInstanceBackupProperties` and `gcpBackupPlanInfo`. `-` as the data source lists a vault's every backup. |
+| `backupVaults.dataSources.backups` | `get`, `list`, `delete` | `state` CREATING, ACTIVE or ERROR from the Cloud SQL backup underneath, `backupType` SCHEDULED or ON_DEMAND, `consistencyTime` when it finished, `expireTime` from the retention, `cloudSqlInstanceBackupProperties` and `gcpBackupPlanInfo`. `-` as the data source lists a vault's every backup. `delete` inside the backup's `enforcedRetentionEndTime` is FAILED_PRECONDITION: "you can delete a backup only after it has exceeded its minimum enforced retention period" (#1844). |
 | Updates (#1462) | `backupVaults.patch`, `backupPlans.patch`, `backupPlanAssociations.patch`, `dataSources.patch`, `backups.patch` | `updateMask` is required (camelCase or snake_case); a field outside these is 400. A vault: description, labels, `backupMinimumEnforcedRetentionDuration`, `accessRestriction`, `effectiveTime`, with `validateOnly`. A plan: description, labels, `backupRules`, `logRetentionDays`, checked as on create. An association: `backupPlan` only, as Google documents; a plan in another vault gives the instance a data source there, and the old one goes PASSIVE. A data source: labels (`allowMissing` is refused, since data sources are made by associations). A backup: `expireTime`, `enforcedRetentionEndTime` (extended, never reduced; `expireTime` cannot come before it), labels, description. |
 | `backupPlans.revisions` | `get`, `list` | Each create and patch of a plan is a revision, `v0`, `v1`, …, newest first: the current one ACTIVE, the others INACTIVE, each with its `backupPlanSnapshot`. The plan reports `revisionId` and `revisionName`; associations and data sources name the current one, and each backup the one it was taken under. |
 | Views (#1462) | `backupVaults.fetchUsable`, `backupVaults.testIamPermissions`, `backupPlanAssociations.fetchForResourceType`, `backups.fetchForResourceType`, `dataSourceReferences.get`, `list`, `fetchForResourceType` | Over what the service holds; a resource type other than `sqladmin.googleapis.com/Instance` lists nothing. `testIamPermissions` returns every permission asked (IAM is not enforced). A data source reference is `{location}/dataSourceReferences/{data source id}`, the project-level view of the data source. |
@@ -126,16 +130,50 @@ run. `TestBackupDRJobLogsStoredBytesAndOnDemandRetention` and `TestBackupDRResto
 read the entries through `cloud.google.com/go/logging/logadmin`;
 `TestBackupDRRestoreToANewInstanceAndJobsThroughThePages` drives the Jobs page.
 
+## Compute Engine VMs and disks (#2075)
+
+With `compute` beside `backupdr`, a plan's `resourceType` may also be
+`compute.googleapis.com/Instance` or `compute.googleapis.com/Disk`, with the same rules, windows
+and retention as Cloud SQL's. An association's `resource` is
+`projects/{project}/zones/{zone}/instances/{vm}` or `.../disks/{disk}` (or the
+`//compute.googleapis.com/` or `https://www.googleapis.com/compute/v1/` form); it must exist. No
+management server is needed, as Google's vaulted backups of Compute Engine use none.
+
+A backup snapshots each disk (every disk attached to the VM, or the one disk) through the
+instance's Compute Engine API, into snapshots only the vault reaches: the project's
+`snapshots.list` and `get` do not show them, and deleting the backup, its expiry or a forced vault
+delete deletes them. A VM's backup keeps its configuration as it was (machine type, network
+interfaces, metadata, labels, tags, scheduling, service accounts and each disk), reported as
+`computeInstanceBackupProperties`; a disk's as `diskBackupProperties`. The data source reports
+`computeInstanceDatasourceProperties` or `diskDatasourceProperties`.
+
+`backups.restore` makes a new resource, as Google's restore pages describe
+(<https://docs.cloud.google.com/backup-disaster-recovery/docs/cloud-console/compute/compute-instance-restore>,
+<https://docs.cloud.google.com/backup-disaster-recovery/docs/cloud-console/compute/disk-restore>):
+
+- a VM's backup with `computeInstanceTargetEnvironment` (`project`, `zone`) and
+  `computeInstanceRestoreProperties` (a required `name`, and overrides such as `machineType`,
+  `networkInterfaces`, `metadata`, `labels`, `tags`, `scheduling`, `serviceAccounts`): a new VM
+  with a new disk from each disk's snapshot;
+- a disk's backup, or one disk of a VM's (`diskRestoreProperties.instanceBackupSource` with
+  `bootDisk` or `sourceDeviceName`), with `diskTargetEnvironment` and `diskRestoreProperties`
+  (`name`, a `sizeGb` no smaller than the backup's, `type`, `description`, `labels`): a new disk.
+
+The restored disks hold the backup's data. A disk's backup into a VM, or a Cloud SQL backup, is
+400 (a Cloud SQL backup is restored with `instances.restoreBackup` and `backupdrBackup`). Neither
+page documents an in-place restore of a vaulted backup, so none is offered. The restore is logged
+as a RESTORE job.
+
 ## What is refused
 
 Each answers 501 UNIMPLEMENTED with the reason:
 
-- **Other workload types.** A plan or association for any `resourceType` but
-  `sqladmin.googleapis.com/Instance` (Compute Engine instances, disks, AlloyDB, Filestore) needs a
-  server of that type, which CloudBurrow does not run.
-- **`backups.restore`.** Its targets are Compute Engine instances and disks; the answer names
-  `instances.restoreBackup` with `backupdrBackup` and `instances.pointInTimeRestore`, which restore
-  a Cloud SQL backup.
+- **Other workload types.** A plan or association for a `resourceType` other than Cloud SQL's and
+  Compute Engine's (AlloyDB, Filestore) needs a server of that type, which CloudBurrow does not
+  run. (A Compute Engine one without `compute` is FAILED_PRECONDITION, naming `--services`.)
+- **Restore settings Compute Engine here does not serve**: `regionDiskTargetEnvironment`,
+  `clearOverridesFieldMask`, and restore properties such as customer-managed disk keys, storage
+  pools, provisioned IOPS, reservations, confidential VMs and GPUs.
 - **`pointInTimeRestore` into another project** than the data source's instance's: call it with
   that project as the parent.
 - **Management servers** (`managementServers.*`): a management server is a Google-managed backup
@@ -212,14 +250,21 @@ Assured Workloads**.
 and so does `resource-backup-config list` with its `--filter` and `--sort-by`
 (`TestGcloudBackupDRResourceBackupConfigFilter`). gcloud has no command for trials or compliance
 metadata, and the Terraform provider no resource for them. gcloud's `backup-dr backups restore`
-has only `compute` and `disk`: a Cloud SQL backup is restored with `gcloud sql backups restore`,
+has only `compute` and `disk`, which restore a VM's and a disk's backup with `--name`,
+`--target-zone` and `--target-project` (`TestGcloudBackupDRRestoreCompute`,
+`TestGcloudBackupDRRestoreDisk`): a Cloud SQL backup is restored with `gcloud sql backups restore`,
 as Google's guide does (`TestBackupDRRestoreToANewInstance`).
 The Terraform provider's `google_backup_dr_backup_vault`, `google_backup_dr_backup_plan` and
 `google_backup_dr_backup_plan_association` apply, plan clean and destroy through
-`backup_dr_custom_endpoint` (`TestTerraformBackupDR`).
+`backup_dr_custom_endpoint` (`TestTerraformBackupDR`), and so do plans for
+`compute.googleapis.com/Instance` and `Disk` with associations of a `google_compute_instance` and a
+`google_compute_disk` (`TestTerraformBackupDRCompute`).
 
 ## The console
 
 The console's **Backup and DR** page lists vaults, plans, associations, data sources and backups,
 creates and deletes them, takes an on-demand backup, and restores a backup into an instance or
-a data source to a point in time.
+a data source to a point in time. Create Backup plan's and Schedule backup's Resource Type, and
+Vaulted backups' Filter table, offer Compute Engine and Disk; a VM's or a disk's page restores a
+backup to a new VM (Restore scope Entire instance, project, zone, name, machine type) or a new disk
+(`TestBackupDRComputeRestoresThroughThePages`).
