@@ -77,6 +77,13 @@ var DeleteConfirmRules = map[string]DeleteConfirmRule{
 	// UNVERIFIED: no console steps for deleting an SSO profile or an assignment (https://knowledge.workspace.google.com/admin/apps/setting-up-sso re-read 2026-11-20)
 	"iam-sso-profiles":    unverified,
 	"iam-sso-assignments": unverified,
+	// UNVERIFIED (re-read 2026-11-21): the Admin console's Delete user,
+	// Delete device, a policy's and an allowlisted domain's removal
+	// describe no typed confirmation (https://knowledge.workspace.google.com/admin).
+	"iam-users":               unverified,
+	"iam-devices":             unverified,
+	"iam-identity-policies":   unverified,
+	"iam-allowlisted-domains": unverified,
 	// UNVERIFIED: "Select the service account ... click Delete." No dialog described (docs re-read 2026-11-19).
 	"iam-service-accounts": unverified,
 	// a label is removed with its delete icon, then Save: nothing typed.

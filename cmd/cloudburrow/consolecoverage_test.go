@@ -76,7 +76,7 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 // Speech-to-Text on the local AI endpoint (#1930), and CloudBurrow's own
 // cluster.
 var clusterScreens = []string{
-	"projects", "hierarchy", "tags", "iam", "iam-roles", "iam-groups", "iam-sso-profiles", "iam-sso-assignments", "iam-service-accounts", "iam-workload-identity", "iam-workforce-identity", "iam-principal-access-boundary", "iam-audit", "iam-orgpolicies", "iam-labels", "iam-settings", "serviceusage", "serviceusage-operations", "ai",
+	"projects", "hierarchy", "tags", "iam", "iam-roles", "iam-groups", "iam-sso-profiles", "iam-sso-assignments", "iam-users", "iam-devices", "iam-user-invitations", "iam-identity-policies", "iam-allowlisted-domains", "iam-service-accounts", "iam-workload-identity", "iam-workforce-identity", "iam-principal-access-boundary", "iam-audit", "iam-orgpolicies", "iam-labels", "iam-settings", "serviceusage", "serviceusage-operations", "ai",
 	// Billing (#2109), always served on the Resource Manager port.
 	"billing", "billing-projects", "billing-budgets", "billing-pricing",
 	"documentai-overview", "documentai-gallery", "documentai", "speech-transcriptions", "speech-recognizers",

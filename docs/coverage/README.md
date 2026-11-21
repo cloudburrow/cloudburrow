@@ -50,7 +50,7 @@ Do not edit these files by hand.
 | [Compute Engine API (v1): VPC networking](compute.md) | 166 | 75 | 0 | 62 | 29 | 0 | 0 | 0 |
 | [Cloud Storage companion APIs (Batch Operations, Insights, Transfer v1)](storagejobs.md) | 50 | 50 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Backup and DR Service API (v1)](backupdr.md) | 61 | 47 | 0 | 14 | 0 | 0 | 0 | 0 |
-| [Cloud Identity API (v1)](cloudidentity.md) | 70 | 39 | 0 | 31 | 0 | 0 | 0 | 0 |
+| [Cloud Identity API (v1)](cloudidentity.md) | 70 | 70 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Quotas API (v1)](cloudquotas.md) | 8 | 8 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Billing API and Budget API (v1)](billing.md) | 18 | 18 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Site Verification API (v1)](siteverification.md) | 7 | 7 | 0 | 0 | 0 | 0 | 0 | 0 |

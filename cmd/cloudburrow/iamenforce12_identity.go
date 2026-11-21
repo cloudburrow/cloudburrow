@@ -74,6 +74,23 @@ func ssoDenied() error {
 	return &apierror.Error{Code: codes.PermissionDenied, Reason: "forbidden", Message: "The caller does not have permission"}
 }
 
+// adminOnlyIdentityPath is whether p is one of the customer's admin
+// surfaces (#2103): devices, user invitations, policies, allowlisted
+// domains and the Directory API's users. "Only a super administrator can
+// use the Cloud Identity Policy API"
+// (https://docs.cloud.google.com/identity/docs/concepts/overview-policies);
+// devices and invitations need the admin's Devices and User management
+// privileges (https://docs.cloud.google.com/identity/docs/how-to/setup-devices,
+// read 2026-11-21), which no caller but the customer's admin holds here.
+func adminOnlyIdentityPath(p string) bool {
+	for _, x := range []string{"/v1/devices", "/v1/policies", "/v1/allowlistedDomains", "/v1/customers/", "/admin/directory/v1/users"} {
+		if p == x || strings.HasPrefix(p, x+"/") || strings.HasPrefix(p, x+":") || (strings.HasSuffix(x, "/") && strings.HasPrefix(p, x)) {
+			return true
+		}
+	}
+	return false
+}
+
 var (
 	ciGroupPath      = regexp.MustCompile(`^/v1/(groups/[^/:]+)(?:/securitySettings)?$`)
 	ciMembershipsVia = regexp.MustCompile(`^/v1/(groups/[^/:]+)/memberships(?::([A-Za-z]+))?$`)
@@ -85,7 +102,7 @@ var (
 func identityEnforcer(e *iameval.Enforcer, reg func() *resourcemanager.Registry, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := r.URL.Path
-		if !strings.HasPrefix(p, "/v1/groups") && !strings.HasPrefix(p, "/v1/inboundS") && !strings.HasPrefix(p, "/v1/inboundOidc") {
+		if !strings.HasPrefix(p, "/v1/groups") && !strings.HasPrefix(p, "/v1/inboundS") && !strings.HasPrefix(p, "/v1/inboundOidc") && !adminOnlyIdentityPath(p) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -118,6 +135,15 @@ func identityEnforcer(e *iameval.Enforcer, reg func() *resourcemanager.Registry,
 func identityCheck(rg *resourcemanager.Registry, c identityCaller, r *http.Request, w http.ResponseWriter, next http.Handler) error {
 	p := r.URL.Path
 	if strings.HasPrefix(p, "/v1/inboundS") || strings.HasPrefix(p, "/v1/inboundOidc") {
+		return ssoDenied()
+	}
+	if adminOnlyIdentityPath(p) {
+		// devices.deviceUsers.lookup is the end user's own ("userId: Must
+		// be set to 'me'", end-user credentials).
+		if p == "/v1/devices/-/deviceUsers:lookup" && r.Method == http.MethodGet {
+			next.ServeHTTP(w, r)
+			return nil
+		}
 		return ssoDenied()
 	}
 	q := r.URL.Query()
