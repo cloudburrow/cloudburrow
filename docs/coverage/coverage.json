@@ -6808,7 +6808,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/documentai_test.go:276 TestDocumentAIProcessorVersions",
-          "test/compat/documentaicustom2106_test.go:97 TestDocumentAICustomProcessorsThroughTheOfficialClients"
+          "test/compat/documentaicustom2106_test.go:97 TestDocumentAICustomProcessorsThroughTheOfficialClients",
+          "test/compat/documentaisplitter2124_test.go:67 TestDocumentAICustomSplitterThroughTheOfficialClient"
         ]
       },
       {
@@ -6907,7 +6908,8 @@
           "test/compat/documentai1953_test.go:69 TestDocumentAIBatchShardsAndFieldMask",
           "test/compat/documentai_test.go:72 TestDocumentAIProcessors",
           "test/compat/documentaicmek1950_test.go:67 TestDocumentAICMEK",
-          "test/compat/documentaicustom2106_test.go:97 TestDocumentAICustomProcessorsThroughTheOfficialClients"
+          "test/compat/documentaicustom2106_test.go:97 TestDocumentAICustomProcessorsThroughTheOfficialClients",
+          "test/compat/documentaisplitter2124_test.go:67 TestDocumentAICustomSplitterThroughTheOfficialClient"
         ]
       },
       {
@@ -6929,7 +6931,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/documentai_test.go:276 TestDocumentAIProcessorVersions",
-          "test/compat/documentaicustom2106_test.go:97 TestDocumentAICustomProcessorsThroughTheOfficialClients"
+          "test/compat/documentaicustom2106_test.go:97 TestDocumentAICustomProcessorsThroughTheOfficialClients",
+          "test/compat/documentaisplitter2124_test.go:67 TestDocumentAICustomSplitterThroughTheOfficialClient"
         ]
       },
       {
@@ -7143,7 +7146,8 @@
         "method": "google.cloud.documentai.v1beta3.DocumentService/ImportDocuments",
         "status": "Verified",
         "tests": [
-          "test/compat/documentaicustom2106_test.go:97 TestDocumentAICustomProcessorsThroughTheOfficialClients"
+          "test/compat/documentaicustom2106_test.go:97 TestDocumentAICustomProcessorsThroughTheOfficialClients",
+          "test/compat/documentaisplitter2124_test.go:67 TestDocumentAICustomSplitterThroughTheOfficialClient"
         ]
       },
       {

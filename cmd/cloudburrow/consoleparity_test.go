@@ -2298,14 +2298,26 @@ var parityRows = []parityRow{
 			"no served type has, and why (evaluation measures a custom processor's entities against a labeled dataset)",
 		Tests: []string{"TestConsoleDocumentAIProcessors", "TestDocumentAIProcessorVersionsAndEvaluationsThroughThePage"}},
 	{Resource: "Document AI: training and evaluation runs", Service: "vertexai",
-		Methods: []string{"DocumentProcessorService/TrainProcessorVersion", "DocumentProcessorService/EvaluateProcessorVersion"},
-		Issue:   2124},
-	// The custom processors' datasets (#2106): the Build tab is #2124.
+		Methods:  []string{"DocumentProcessorService/TrainProcessorVersion", "DocumentProcessorService/EvaluateProcessorVersion"},
+		Provider: "documentai", Offers: "A custom processor's Build tab (#2124): Create new version (a name, an optional base version " +
+			"to uptrain) sent to TrainProcessorVersion and answered with the version, its model and its scores; Evaluate & test lists " +
+			"every version's evaluations and Run new evaluation sends EvaluateProcessorVersion (the test split, or gs:// documents) and " +
+			"opens the evaluation's page: precision, recall and F1 for all labels and each label, at the optimal or a chosen " +
+			"confidence threshold, and every threshold's scores; Deploy & use deploys, undeploys, deletes and sets the default",
+		Tests: []string{"TestConsoleDocumentAICustomProcessors", "TestDocumentAICustomExtractorBuildTrainEvaluateThroughThePage"}},
+	// The custom processors' datasets (#2106), in the Get started and
+	// Build tabs and the labeling page (#2124).
 	{Resource: "Document AI v1beta3: datasets", Service: "documentaiv1beta3",
 		Methods: []string{"DocumentService/UpdateDataset", "DocumentService/ImportDocuments", "DocumentService/GetDocument",
 			"DocumentService/ListDocuments", "DocumentService/BatchDeleteDocuments", "DocumentService/GetDatasetSchema",
 			"DocumentService/UpdateDatasetSchema"},
-		Issue: 2124},
+		Provider: "documentai", Offers: "A custom processor's Get started tab (#2124): the schema's fields (Create new field with its " +
+			"data type and occurrence, Delete, Edit document prompt: UpdateDatasetSchema); Build: Configure dataset (a Cloud Storage " +
+			"folder or unmanaged: UpdateDataset), Import documents (a gs:// folder or file, a data split or auto-split, a document type: " +
+			"ImportDocuments), the documents with their split and labeling state (ListDocuments), Filter documents, Assign to training " +
+			"or test, and Delete (BatchDeleteDocuments); a document's labeling page (GetDocument) draws its pages with its labels boxed, " +
+			"and a box drawn over a page labels the words in it",
+		Tests: []string{"TestConsoleDocumentAICustomProcessors", "TestDocumentAICustomExtractorBuildTrainEvaluateThroughThePage"}},
 	{Resource: "Speech-to-Text: recognizers", Service: "vertexai",
 		Methods: []string{"Speech/CreateRecognizer", "Speech/GetRecognizer", "Speech/ListRecognizers", "Speech/UpdateRecognizer",
 			"Speech/DeleteRecognizer", "Speech/UndeleteRecognizer", "Speech/Recognize"},

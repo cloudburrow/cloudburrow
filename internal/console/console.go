@@ -1221,6 +1221,12 @@ type Section struct {
 	// Permissions is the content when Kind is KindPermissions, set by the
 	// server from the provider's PolicyEditor (#793).
 	Permissions *PermissionsView `json:"permissions,omitempty"`
+	// LabelAction, on a KindResult section, is the ID of one of its
+	// Actions that a box drawn over a page image opens, with the page and
+	// the box (fractions of the page: x, y, w, h) filled in: Document AI's
+	// labeling tool, whose bounding box tool draws a box and then asks
+	// which field it is (#2124).
+	LabelAction string `json:"labelAction,omitempty"`
 	// Actions are drawn at the top of this tab rather than beside the page
 	// title, as Google's Lifecycle tab has Add a rule (#1843). The provider's
 	// DetailActions must offer them too, as for the page's own actions.

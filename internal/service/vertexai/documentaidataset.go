@@ -234,7 +234,9 @@ func (d *documentService) importDocuments(ctx context.Context, req *beta.ImportD
 						err = apierror.InvalidArgument("%s is not a Document in JSON: %v", in.uri, uerr)
 					}
 				} else {
-					doc, err = readDocument(ctx, ocrProc, content, mt, nil, docAIBatchMaxPages, true)
+					// The page images are kept, for the labeling tool's
+					// document viewer (#2124).
+					doc, err = readDocument(ctx, ocrProc, content, mt, nil, docAIBatchMaxPages, false)
 				}
 			}
 			if err != nil {
@@ -525,4 +527,49 @@ func (d *documentService) UpdateDatasetSchema(_ context.Context, req *beta.Updat
 	d.s.docAI().saveCustom()
 	d.s.mu.Unlock()
 	return &beta.DatasetSchema{Name: in.GetName(), DocumentSchema: betaToV1(sc, &beta.DocumentSchema{})}, nil
+}
+
+// LabelDatasetDocument is the console's labeling (#2124): it replaces a
+// dataset document's entities and, when split is set, its split
+// (DATASET_SPLIT_TRAIN, DATASET_SPLIT_TEST or DATASET_SPLIT_UNASSIGNED).
+// Google's labeling tool saves through a method the public DocumentService
+// does not have (the roles page's documentai.datasets.updateDocuments,
+// https://docs.cloud.google.com/iam/docs/roles-permissions/clouddocumentai,
+// read 2026-11-21), so the console, which runs in this process, calls this
+// instead of inventing a route. A managed document's JSON in Cloud Storage
+// is rewritten.
+func (s *Server) LabelDatasetDocument(ctx context.Context, processor, id string, entities []*documentaipb.Document_Entity, split string) error {
+	switch split {
+	case "", "DATASET_SPLIT_TRAIN", "DATASET_SPLIT_TEST", "DATASET_SPLIT_UNASSIGNED":
+	default:
+		return apierror.InvalidArgument("unknown split %q", split)
+	}
+	s.mu.Lock()
+	c := s.docAI().customOf(processor)
+	i, err := findDoc(c, &beta.DocumentId{Type: &beta.DocumentId_GcsManagedDocId{GcsManagedDocId: &beta.DocumentId_GCSManagedDocumentId{CwDocId: id}}})
+	if err != nil {
+		s.mu.Unlock()
+		return err
+	}
+	dd := c.Docs[i]
+	if entities != nil {
+		dd.Doc = proto.Clone(dd.Doc).(*documentaipb.Document)
+		dd.Doc.Entities = entities
+	}
+	if split != "" {
+		dd.Split = split
+	}
+	doc, uri := proto.Clone(dd.Doc).(*documentaipb.Document), dd.GcsURI
+	s.docAI().saveCustom()
+	s.mu.Unlock()
+	if uri == "" || entities == nil {
+		return nil
+	}
+	_, w, err := s.storageRW("A dataset in Cloud Storage")
+	if err != nil {
+		return err
+	}
+	b, _ := protojson.Marshal(doc)
+	bucket, object, _ := splitGCS(uri, false)
+	return w.Write(ctx, bucket, object, "application/json", b)
 }

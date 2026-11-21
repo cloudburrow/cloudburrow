@@ -267,7 +267,9 @@ func (p docAIOverviewProvider) List(ctx context.Context, project string) (consol
 			{Label: "Regions", Value: "us, eu"},
 			{Label: "Other processor types", Value: "Not available locally: Google's trained models have no local equivalent"},
 			{Label: "Processing", Value: "Online (ProcessDocument) and batch (BatchProcessDocuments, Cloud Storage to Cloud Storage)"},
-			{Label: "Versions", Value: "Google's pretrained versions of each type, all read with Tesseract; training is for custom processors, which are not available"},
+			{Label: "Custom processors", Value: "Custom Extractor, Classifier and Splitter: a dataset, labeling, training, evaluation " +
+				"and deployment; versions are generative on the local model when one is installed (up --local-ai-model), counting models otherwise"},
+			{Label: "Versions", Value: "Google's pretrained versions of OCR and Layout Parser, all read with Tesseract; custom processors' versions are trained here"},
 		}},
 	}
 	out.Total = len(procs)
@@ -361,6 +363,19 @@ func (p docAIGalleryProvider) Detail(ctx context.Context, project string, path [
 }
 
 func docAIAbout(t string) string {
+	switch docAICustomKinds[t] {
+	case "extractor":
+		return "Custom Extractor extracts the fields you define. Define the fields in Get started, import and label documents in " +
+			"Build, then Create new version. Where this instance serves a local generation model, a version is generative: " +
+			"zero-shot from the fields and the document prompt, or few-shot from labeled documents; otherwise it learns each " +
+			"field's anchor words and value shape from the labeled documents. Pages are read with Tesseract."
+	case "classifier":
+		return "Custom Classifier classifies documents into the document types you define, from labeled documents: few-shot on " +
+			"the local generation model where one is installed, a naive Bayes model over the words otherwise."
+	case "splitter":
+		return "Custom Splitter finds the logical documents in a file and classifies each, from labeled files: few-shot on the " +
+			"local generation model where one is installed, naive Bayes models over each page's words otherwise."
+	}
 	if t == "LAYOUT_PARSER_PROCESSOR" {
 		return "Layout Parser reads each page with Tesseract and answers documentLayout, a text block per paragraph, " +
 			"and chunkedDocument, chunks of whole paragraphs of at most 500 words by default.\n" +
@@ -413,6 +428,9 @@ type docAIProcessorsProvider struct {
 	// analyses are Upload test document's results, each opened as a page
 	// of its own (#2084). Nil answers them in the dialog.
 	analyses *docAIAnalyses
+	// labels saves a custom processor's dataset document's labels, in
+	// process (consoledocumentaicustom.go, #2124). Nil refuses labeling.
+	labels docAILabeler
 }
 
 func (docAIProcessorsProvider) ID() string    { return "documentai" }
@@ -438,7 +456,10 @@ func (p docAIProcessorsProvider) List(ctx context.Context, project string) (cons
 func (p docAIProcessorsProvider) CreateForm() (string, []console.Field) {
 	var types []string
 	labels := map[string]string{}
-	for _, g := range docAIGallery[:2] {
+	for _, g := range docAIGallery {
+		if g.Type != "OCR_PROCESSOR" && g.Type != "LAYOUT_PARSER_PROCESSOR" && docAICustomKinds[g.Type] == "" {
+			continue
+		}
 		types = append(types, g.Type)
 		labels[g.Type] = g.Name
 	}
@@ -526,6 +547,9 @@ func (p docAIProcessorsProvider) Detail(ctx context.Context, project string, pat
 	if len(path) == 3 && path[1] == docAIAnalysisSegment {
 		return p.analysisDetail(project, path[0], path[2]), nil
 	}
+	if d, ok := p.customDetail(ctx, project, path); ok {
+		return d, nil
+	}
 	if len(path) > 1 {
 		return console.DeeperThan(1, path), nil
 	}
@@ -551,6 +575,7 @@ func (p docAIProcessorsProvider) Detail(ctx context.Context, project string, pat
 	// Google's Manage versions tab: the versions with their state, the
 	// Default version picker, and Deploy, Undeploy and Delete over the
 	// checked versions (#1930).
+	custom := docAICustomKinds[pr.GetType()] != ""
 	versions := console.Section{ID: "versions", Label: "Manage versions", Listing: console.Listing{
 		Columns: []string{"Version name", "Default", "Google managed", "Created"}, NameColumn: "Version ID", Noun: "versions",
 		AlwaysStatus: true, SelectActions: docAIVersionSelectActions()},
@@ -571,6 +596,33 @@ func (p docAIProcessorsProvider) Detail(ctx context.Context, project string, pat
 				"Google managed": gm, "Created": stampAge(v.GetCreateTime())}})
 	}
 	versions.Listing.Total = len(versions.Listing.Items)
+	if custom {
+		// Google's Deploy & use: the trained versions, their state and
+		// model, deployed, undeployed, deleted or made the default.
+		versions.Label = "Deploy & use"
+		versions.Note = "The versions trained in Build. Deploy a version, then set it as the default, which a request that names " +
+			"the processor uses; a request may also name a deployed version. The default and a deployed version cannot be deleted."
+		versions.Listing.Columns = []string{"Version name", "Default", "Model", "F1 score", "Created"}
+		for i, v := range vers {
+			model := "Counting model"
+			if v.GetModelType() == documentaipb.ProcessorVersion_MODEL_TYPE_GENERATIVE {
+				model = "Generative"
+			}
+			f1 := "Not evaluated"
+			if m := v.GetLatestEvaluation().GetAggregateMetrics(); m != nil {
+				f1 = pct(m.GetF1Score())
+			}
+			versions.Listing.Items[i].Fields["Model"], versions.Listing.Items[i].Fields["F1 score"] = model, f1
+		}
+		if len(vers) == 0 {
+			versions.Actions = nil
+		}
+		cs := p.customSections(ctx, project, pr, vers)
+		d.Sections = append([]console.Section{{ID: "overview", Label: "Overview", Kind: console.KindProperties,
+			Groups: []console.PropertyGroup{{Properties: overview}}}}, cs[:len(cs)-1]...)
+		d.Sections = append(d.Sections, versions, cs[len(cs)-1])
+		return d, nil
+	}
 	d.Sections = []console.Section{
 		{ID: "overview", Label: "Overview", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Properties: overview}}},
 		versions,
@@ -612,6 +664,9 @@ const docAIMaxUpload = 40 << 20
 
 // DetailActions implements console.PathActor.
 func (p docAIProcessorsProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
+	if len(path) > 1 {
+		return p.customPathActions(ctx, project, path)
+	}
 	if len(path) != 1 {
 		return nil
 	}
@@ -625,6 +680,18 @@ func (p docAIProcessorsProvider) DetailActions(ctx context.Context, project stri
 		acts = append(acts, docAIDefaultVersionAction(pr, vers))
 	}
 	acts = append(acts, docAIVersionSelectActions()...)
+	if kind := docAICustomKinds[pr.GetType()]; kind != "" && verr == nil {
+		// The Get started, Build and Evaluate & test tabs' own.
+		ds, err := p.d.dataset(ctx, pr, "")
+		if err == nil {
+			acts = append(acts, docAISchemaActions(kind)...)
+			acts = append(acts, p.buildActions(pr, kind, ds.schema, vers)...)
+		}
+		acts = append(acts, console.Action{ID: "delete-fields", Label: "Delete", Destructive: true, SelectionField: docAIVersionsField,
+			Fields: []console.Field{{Name: docAIVersionsField, Type: "hidden"}}})
+		acts = append(acts, docAIDocumentSelectActions()...)
+		acts = append(acts, docAIEvaluateAction(vers))
+	}
 	batch := []console.Field{
 		{Name: "input", Label: "Source path", Type: "text", Required: true, Pattern: `^gs://[^\/]+(\/.*)?$`,
 			Help: "gs://bucket/folder/ to process every document under it, or gs://bucket/file.pdf for one"},
@@ -721,6 +788,9 @@ func docAIProcessOptions(pr *documentaipb.Processor, v map[string]string) (strin
 // document's status and where its result was written; every other action
 // answers nothing.
 func (p docAIProcessorsProvider) ActAtResult(ctx context.Context, project string, path []string, action string, v map[string]string) (*console.Listing, error) {
+	if out, ok, err := p.customActAt(ctx, project, path, action, v); ok {
+		return out, err
+	}
 	if action != "batch-process" {
 		return nil, p.ActAt(ctx, project, path, action, v)
 	}
@@ -781,6 +851,9 @@ func (p docAIProcessorsProvider) ActAtResult(ctx context.Context, project string
 }
 
 func (p docAIProcessorsProvider) ActAt(ctx context.Context, project string, path []string, action string, v map[string]string) error {
+	if _, ok, err := p.customActAt(ctx, project, path, action, v); ok {
+		return err
+	}
 	if action == "batch-process" {
 		_, err := p.ActAtResult(ctx, project, path, action, v)
 		return err
@@ -1040,6 +1113,17 @@ func docAIResult(doc *documentaipb.Document) *console.Listing {
 			add(pg.GetPageNumber(), "Symbol", b.GetLayout())
 		}
 	}
+	// A custom processor's entities: the extractor's values, the
+	// classifier's classes, the splitter's subdocuments (#2124).
+	for _, e := range doc.GetEntities() {
+		var pages []string
+		for _, r := range e.GetPageAnchor().GetPageRefs() {
+			pages = append(pages, strconv.Itoa(int(r.GetPage())+1))
+		}
+		out.Items = append(out.Items, console.Resource{Name: strconv.Itoa(len(out.Items) + 1), Fields: map[string]string{
+			"Page": strings.Join(pages, ", "), "Element": "Entity (" + e.GetType() + ")", "Text": entityText(doc, e),
+			"Confidence": strconv.FormatFloat(float64(e.GetConfidence()), 'f', 2, 32)}})
+	}
 	// The layout parser's blocks and chunks.
 	var lt bytes.Buffer
 	// The layout parser's blocks organized by their detected type, as
@@ -1087,3 +1171,29 @@ var (
 	_ console.FileActor   = docAIProcessorsProvider{}
 	_ console.ResultActor = docAIProcessorsProvider{}
 )
+
+// customActAt runs a custom processor's own actions (#2124): its deeper
+// pages', and its tabs'. ok is false for any other.
+func (p docAIProcessorsProvider) customActAt(ctx context.Context, project string, path []string, action string,
+	v map[string]string) (*console.Listing, bool, error) {
+	if len(path) > 1 {
+		return p.customPathAct(ctx, project, path, action, v)
+	}
+	if len(path) != 1 {
+		return nil, false, nil
+	}
+	switch action {
+	case "configure-dataset", "import-documents", "filter-documents", "assign-train", "assign-test", "assign-unassigned",
+		"delete-documents", "add-field", "delete-fields", "edit-prompt", "train-version", "evaluate-version":
+	default:
+		return nil, false, nil
+	}
+	pr, err := p.d.processor(ctx, project, path[0])
+	if err != nil {
+		return nil, true, err
+	}
+	if docAICustomKinds[pr.GetType()] == "" {
+		return nil, true, fmt.Errorf("%s is for a custom processor; %s is %s", action, path[0], docAITypeLabel(pr.GetType()))
+	}
+	return p.customAct(ctx, project, pr, action, v)
+}

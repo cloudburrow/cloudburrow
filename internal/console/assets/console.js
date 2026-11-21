@@ -4372,13 +4372,26 @@ async function renderDetail(view, route, resourcePath) {
         return drawAnalyticsSection(panel, section, note);
       case "media":
         return drawMediaSection(panel, section, note);
-      case "result":
+      case "result": {
         // An action's answer on a page of its own (#2084): Document AI's
         // analysis page, drawn as its result dialog draws it.
         // Its own region scrolls sideways, never the page, and is
         // reachable from the keyboard to be scrolled.
-        return setChildren(panel, note, el("div", { class: "card result-section", role: "region", tabindex: "0",
-          "aria-label": section.label }, resultTable(section.listing || {})));
+        const card = el("div", { class: "card result-section", role: "region", tabindex: "0",
+          "aria-label": section.label }, resultTable(section.listing || {}));
+        // Section.LabelAction (#2124): a box drawn over a page opens the
+        // labeling action with the page and the box filled in, as
+        // Document AI's bounding box tool asks which field the box is.
+        const labelAction = section.labelAction && (section.actions || []).find((a) => a.id === section.labelAction);
+        if (labelAction) {
+          card.querySelectorAll(".result-page-frame").forEach((frame, i) =>
+            drawLabelBox(frame, Number(((frame.querySelector("img") || {}).alt || "").replace(/\D+/g, "")) || i + 1, (box) => runAction(route, segments, {
+              ...labelAction,
+              fields: (labelAction.fields || []).map((f) => (f.name in box ? { ...f, default: box[f.name] } : f)),
+            }, reload, NO_ROW, data.title || null)));
+        }
+        return setChildren(panel, note, card);
+      }
       case "logs":
         return drawLogsSection(panel, section, note);
       case "permissions":
@@ -5731,6 +5744,49 @@ function resultRows(listing, cols, items, acts, rowButtons) {
       }
       return tr;
     })));
+}
+
+// drawLabelBox lets a pointer draw a box over a page frame (#2124): on
+// release, done gets the page and the box in fractions of the page, as
+// strings, for the labeling form. The form's own fields take the same
+// values from the keyboard.
+function drawLabelBox(frame, page, done) {
+  frame.classList.add("is-labeling");
+  let start = null;
+  let band = null;
+  const at = (e) => {
+    const r = frame.getBoundingClientRect();
+    return { x: Math.min(Math.max((e.clientX - r.left) / r.width, 0), 1), y: Math.min(Math.max((e.clientY - r.top) / r.height, 0), 1) };
+  };
+  const place = (a, b) => {
+    const pct = (v) => `${(v * 100).toFixed(3)}%`;
+    band.style.left = pct(Math.min(a.x, b.x));
+    band.style.top = pct(Math.min(a.y, b.y));
+    band.style.width = pct(Math.abs(a.x - b.x));
+    band.style.height = pct(Math.abs(a.y - b.y));
+  };
+  frame.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    start = at(e);
+    band = el("div", { class: "result-box kind-drawing", "aria-hidden": "true" });
+    frame.append(band);
+    place(start, start);
+    try { frame.setPointerCapture(e.pointerId); } catch { /* a pointer the page did not see start */ }
+  });
+  frame.addEventListener("pointermove", (e) => { if (start) place(start, at(e)); });
+  frame.addEventListener("pointerup", (e) => {
+    if (!start) return;
+    const end = at(e);
+    const a = start;
+    start = null;
+    band.remove();
+    const w = Math.abs(a.x - end.x);
+    const h = Math.abs(a.y - end.y);
+    if (w < 0.005 || h < 0.005) return;
+    const f = (v) => v.toFixed(4);
+    done({ page: String(page), x: f(Math.min(a.x, end.x)), y: f(Math.min(a.y, end.y)), w: f(w), h: f(h), value: "" });
+  });
 }
 
 // resultPage is a page image with its boxes over it; a box lights its row.
