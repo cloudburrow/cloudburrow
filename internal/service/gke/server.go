@@ -162,6 +162,8 @@ type entry struct {
 	soak map[string]chan struct{}
 	// scale is the cluster autoscaler's memory of the cluster.
 	scale *autoscaleState
+	// extra is kept with the record (upgradeinfo.go, rotation.go).
+	extra clusterExtra
 }
 
 type opEntry struct {
@@ -316,6 +318,9 @@ type savedCluster struct {
 	Access     Access          `json:"access"`
 	Cluster    json.RawMessage `json:"cluster"`
 	Operations []string        `json:"-"`
+	// Extra is what the API keeps of the cluster beside its record:
+	// upgrade history, a rollback-safe upgrade's state, a rotation's.
+	Extra *clusterExtra `json:"extra,omitempty"`
 }
 
 type savedState struct {
@@ -352,6 +357,9 @@ func (s *Server) restore() error {
 			c.StatusMessage = "The operation was interrupted by a restart of the CloudBurrow instance."
 		}
 		s.clusters[resourceName(sc.Project, c.Location, c.Name)] = &entry{cluster: c, project: sc.Project, kind: sc.Kind, access: sc.Access}
+		if sc.Extra != nil {
+			s.clusters[resourceName(sc.Project, c.Location, c.Name)].extra = *sc.Extra
+		}
 	}
 	for i, raw := range st.Operations {
 		op := &containerpb.Operation{}
@@ -391,7 +399,8 @@ func (s *Server) saveLocked() error {
 		if err != nil {
 			return err
 		}
-		st.Clusters = append(st.Clusters, savedCluster{Project: e.project, Kind: e.kind, Access: e.access, Cluster: raw})
+		extra := e.extra
+		st.Clusters = append(st.Clusters, savedCluster{Project: e.project, Kind: e.kind, Access: e.access, Cluster: raw, Extra: &extra})
 	}
 	okeys := make([]string, 0, len(s.ops))
 	for k := range s.ops {

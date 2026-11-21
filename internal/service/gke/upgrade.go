@@ -232,13 +232,20 @@ func (s *Server) nodeProgress(ctx context.Context, pool string, done, total int,
 
 // startMasterUpgradeLocked upgrades e's control plane to to; s.mu is held
 // and the cluster is ready.
-func (s *Server) startMasterUpgradeLocked(p parsed, e *entry, to Version, u Upgrader) *containerpb.Operation {
+// auto is an automatic upgrade's; soak, when not zero, makes it a
+// rollback-safe upgrade's step one (upgradeinfo.go).
+func (s *Server) startMasterUpgradeLocked(p parsed, e *entry, to Version, u Upgrader, auto bool, soak time.Duration) *containerpb.Operation {
 	c := e.cluster
 	c.Status = containerpb.Cluster_RECONCILING
 	kind := e.kind
 	autopilot := c.GetAutopilot().GetEnabled()
 	abac := c.GetLegacyAbac().GetEnabled()
-	return s.startOpLocked(p, containerpb.Operation_UPGRADE_MASTER, c.SelfLink, e, func(ctx context.Context) error {
+	from := c.CurrentMasterVersion
+	emulated := ""
+	if soak > 0 {
+		emulated = minorVersion(from)
+	}
+	op := s.startOpLocked(p, containerpb.Operation_UPGRADE_MASTER, c.SelfLink, e, func(ctx context.Context) error {
 		s.progress(ctx, func(op *containerpb.Operation) {
 			op.Detail = "Upgrading the control plane to " + to.GKE + "."
 			op.Progress = &containerpb.OperationProgress{Name: "control-plane", Status: containerpb.Operation_RUNNING}
@@ -255,6 +262,15 @@ func (s *Server) startMasterUpgradeLocked(p parsed, e *entry, to Version, u Upgr
 				}
 			}
 		}
+		if emulated != "" {
+			em, ok := s.backend.(Emulator)
+			if !ok {
+				return status.Error(codes.Unimplemented, "Rollback-safe upgrades are not available with this backend.")
+			}
+			if err := em.SetEmulatedVersion(ctx, kind, emulated); err != nil {
+				return status.Errorf(codes.Internal, "Keeping version %s's behaviour failed: %v", emulated, err)
+			}
+		}
 		return nil
 	}, func(err error) {
 		c.Status = containerpb.Cluster_RUNNING
@@ -264,12 +280,22 @@ func (s *Server) startMasterUpgradeLocked(p parsed, e *entry, to Version, u Upgr
 		}
 		c.StatusMessage = ""
 		c.CurrentMasterVersion = to.GKE
+		c.CurrentEmulatedVersion = to.GKE
+		if emulated != "" {
+			c.CurrentEmulatedVersion = from
+			e.extra.RollbackSafe = &rollbackSafeState{Previous: from, End: s.now().Add(soak)}
+		}
 		if autopilot {
 			// Google manages an Autopilot cluster's nodes: the local
 			// cluster's one node is the control plane's, upgraded with it.
 			c.CurrentNodeVersion = to.GKE
 		}
 	})
+	r := s.recordUpgradeLocked(e, op, "", from, to.GKE, auto)
+	if emulated != "" {
+		r.FromEmulated, r.ToEmulated = from, from
+	}
+	return op
 }
 
 // ---- node pools ----
@@ -317,6 +343,7 @@ func (s *Server) startPoolUpgradeLocked(p parsed, e *entry, np *containerpb.Node
 		}
 		return nil
 	}
+	from := np.Version
 	op := s.startOpLocked(p, containerpb.Operation_UPGRADE_NODES, np.SelfLink, e, func(ctx context.Context) error {
 		nodes, err := u.PoolNodes(ctx, kind, pool)
 		if err != nil {
@@ -373,6 +400,7 @@ func (s *Server) startPoolUpgradeLocked(p parsed, e *entry, np *containerpb.Node
 	if oe := s.ops[opName(p.project, p.location, op.Name)]; oe != nil {
 		oe.pause, oe.pool = pause, np
 	}
+	s.recordUpgradeLocked(e, op, pool, from, to.GKE, auto)
 	return op
 }
 
@@ -830,17 +858,18 @@ func (s *Server) AutoUpgrade() []*containerpb.Operation {
 	now := s.now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var ops []*containerpb.Operation
+	ops := s.completeExpiredRollbacksLocked(now)
+	ops = append(ops, s.completeExpiredRotationsLocked(now)...)
 	for _, e := range s.clusters {
 		c := e.cluster
-		if e.busy != "" || c.Status != containerpb.Cluster_RUNNING {
+		if e.busy != "" || c.Status != containerpb.Cluster_RUNNING || e.extra.RollbackSafe != nil {
 			continue
 		}
 		p := parsed{project: e.project, location: c.Location, cluster: c.Name}
 		mp := c.GetMaintenancePolicy()
 		if to, ok := s.channelTarget(c.CurrentMasterVersion); ok {
 			if checkMasterUpgrade(c, to) == nil && AutoUpgradeAllowed(mp, now, false, minorDiffers(to.GKE, c.CurrentMasterVersion)) {
-				ops = append(ops, s.startMasterUpgradeLocked(p, e, to, u))
+				ops = append(ops, s.startMasterUpgradeLocked(p, e, to, u, true, 0))
 			}
 			continue
 		}

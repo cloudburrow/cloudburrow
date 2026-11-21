@@ -1,11 +1,15 @@
 // Command eventprobe is the Cloud Run fixture of the event trigger tests
 // (#1414): it records every CloudEvent POSTed to it, its ce-* headers, its
 // Authorization header and its data, and GET /events answers them as JSON.
+// PROBE_STDOUT and PROBE_STDERR, when set, are written to standard output
+// and standard error as it starts: the Kubernetes Engine logging test's
+// lines (#2100).
 package main
 
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -26,6 +30,12 @@ type event struct {
 }
 
 func main() {
+	if v := os.Getenv("PROBE_STDOUT"); v != "" {
+		fmt.Fprintln(os.Stdout, v)
+	}
+	if v := os.Getenv("PROBE_STDERR"); v != "" {
+		fmt.Fprintln(os.Stderr, v)
+	}
 	var mu sync.Mutex
 	var events []event
 	http.HandleFunc("/events", func(w http.ResponseWriter, r *http.Request) {

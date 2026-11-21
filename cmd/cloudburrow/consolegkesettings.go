@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"cloud.google.com/go/container/apiv1/containerpb"
 
@@ -120,4 +121,175 @@ func (p gkeClustersProvider) poolSettingsAct(ctx context.Context, name, act stri
 		return gkeStatusErr(err)
 	}
 	return fmt.Errorf("unknown node pool action %s", act)
+}
+
+// The rest of the cluster's settings (#2100, round 2), where Google's
+// console has them: Cluster basics' Default node zones with Edit zones;
+// Security's Credential rotation with Start and Complete credential
+// rotation; Features' Logging and Cloud Monitoring with their edits; the
+// Version's automatic upgrade status (FetchClusterUpgradeInfo), and the
+// Upgrade dialog's control plane soak, a rollback-safe upgrade's, with
+// Complete control plane upgrade during the soak.
+
+func gkeZonesAction(c *containerpb.Cluster) console.Action {
+	if c.GetAutopilot().GetEnabled() {
+		return console.Action{ID: "zones", Label: "Edit zones", Unavailable: "Google manages an Autopilot cluster's nodes and their zones."}
+	}
+	return console.Action{ID: "zones", Label: "Edit zones", Title: "Edit default node zones", Submit: "Save changes", Fields: []console.Field{
+		{Name: "zones", Label: "Node zones", Type: "text", Default: strings.Join(c.GetLocations(), ","), Pattern: `^[a-z0-9\-]+(,[a-z0-9\-]+)*$`,
+			Help: "Comma-separated zones of the cluster's region. A zonal cluster keeps its own zone. Every node pool has its node count in each zone: nodes are added or removed at once."},
+	}}
+}
+
+func gkeRotationProperty(since time.Time, rotating bool) console.Property {
+	if rotating {
+		return console.Property{Label: "Credential rotation", Value: "In progress since " + since.UTC().Format(time.RFC3339) +
+			"; completes by itself seven days after it started", Action: "rotate-complete", ActionText: "Complete credential rotation"}
+	}
+	return console.Property{Label: "Credential rotation", Value: "Not in progress", Action: "rotate-start", ActionText: "Start credential rotation"}
+}
+
+func gkeRotationActions(rotating bool) []console.Action {
+	start := console.Action{ID: "rotate-start", Label: "Start credential rotation", Title: "Start credential rotation", Submit: "Start rotation",
+		Fields: []console.Field{{Name: "note", Label: "What happens", Type: "textarea", Immutable: true,
+			Default: "A new cluster root CA is made. Until you complete the rotation, the API server and the nodes trust both the old and the new CA. " +
+				"Update your clients (gcloud container clusters get-credentials), then complete the rotation."}}}
+	complete := console.Action{ID: "rotate-complete", Label: "Complete credential rotation", Title: "Complete credential rotation", Submit: "Complete rotation",
+		Fields: []console.Field{{Name: "note", Label: "What happens", Type: "textarea", Immutable: true,
+			Default: "The old CA is no longer trusted: clients still using credentials of the old CA lose access, and the pods are re-created."}}}
+	if rotating {
+		start = console.Action{ID: "rotate-start", Label: "Start credential rotation", Unavailable: "A credential rotation is already in progress: complete it first."}
+	} else {
+		complete = console.Action{ID: "rotate-complete", Label: "Complete credential rotation", Unavailable: "No credential rotation is in progress."}
+	}
+	return []console.Action{start, complete}
+}
+
+func gkeHas[T comparable](list []T, v T) bool {
+	for _, x := range list {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}
+
+func gkeLoggingText(c *containerpb.Cluster) string {
+	comps := c.GetLoggingConfig().GetComponentConfig().GetEnableComponents()
+	var on []string
+	if gkeHas(comps, containerpb.LoggingComponentConfig_SYSTEM_COMPONENTS) {
+		on = append(on, "System")
+	}
+	if gkeHas(comps, containerpb.LoggingComponentConfig_WORKLOADS) {
+		on = append(on, "Workloads")
+	}
+	if len(on) == 0 {
+		return "Disabled"
+	}
+	return strings.Join(on, ", ")
+}
+
+func gkeMonitoringText(c *containerpb.Cluster) string {
+	if gkeHas(c.GetMonitoringConfig().GetComponentConfig().GetEnableComponents(), containerpb.MonitoringComponentConfig_SYSTEM_COMPONENTS) {
+		return "System"
+	}
+	return "Disabled"
+}
+
+func gkeTelemetryActions(c *containerpb.Cluster) []console.Action {
+	lc := c.GetLoggingConfig().GetComponentConfig().GetEnableComponents()
+	return []console.Action{
+		{ID: "logging", Label: "Edit logging", Title: "Edit Cloud Logging", Submit: "Save changes", Fields: []console.Field{
+			{Name: "system", Label: "System logs", Type: "checkbox", Default: strconv.FormatBool(gkeHas(lc, containerpb.LoggingComponentConfig_SYSTEM_COMPONENTS)),
+				Help: "Logs of the kube-system and other GKE system namespaces, and of the control plane."},
+			{Name: "workloads", Label: "Workload logs", Type: "checkbox", Default: strconv.FormatBool(gkeHas(lc, containerpb.LoggingComponentConfig_WORKLOADS)),
+				Help: "Every other container's stdout and stderr, as k8s_container entries in Cloud Logging. Workload logs need system logs."},
+		}},
+		{ID: "monitoring", Label: "Edit Cloud Monitoring", Title: "Edit Cloud Monitoring", Submit: "Save changes", Fields: []console.Field{
+			{Name: "system", Label: "System metrics", Type: "checkbox", Default: strconv.FormatBool(gkeHas(c.GetMonitoringConfig().GetComponentConfig().GetEnableComponents(), containerpb.MonitoringComponentConfig_SYSTEM_COMPONENTS)),
+				Help: "The kubernetes.io container, pod and node metrics, read from each node's kubelet every minute."},
+		}},
+	}
+}
+
+// gkeUpgradeInfoText is the automatic upgrade status and its targets.
+func gkeUpgradeInfoText(info *containerpb.ClusterUpgradeInfo) string {
+	if info == nil {
+		return "—"
+	}
+	var parts []string
+	for _, s := range info.GetAutoUpgradeStatus() {
+		parts = append(parts, strings.ReplaceAll(strings.ToLower(s.String()), "_", " "))
+	}
+	for _, r := range info.GetPausedReason() {
+		parts = append(parts, "paused by "+strings.ReplaceAll(strings.ToLower(r.String()), "_", " "))
+	}
+	if v := info.GetMinorTargetVersion(); v != "" {
+		parts = append(parts, "minor target "+v)
+	}
+	if v := info.GetPatchTargetVersion(); v != "" {
+		parts = append(parts, "patch target "+v)
+	}
+	if rs := info.GetRollbackSafeUpgradeStatus(); rs != nil {
+		parts = append(parts, "rollback-safe upgrade from "+rs.GetPreviousVersion()+" until "+rs.GetControlPlaneUpgradeRollbackEndTime().AsTime().UTC().Format(time.RFC3339))
+	}
+	return strings.Join(parts, "; ")
+}
+
+func gkeCompleteUpgradeAction(info *containerpb.ClusterUpgradeInfo) console.Action {
+	rs := info.GetRollbackSafeUpgradeStatus()
+	if rs == nil {
+		return console.Action{ID: "complete-upgrade", Label: "Complete control plane upgrade",
+			Unavailable: "No rollback-safe control plane upgrade is soaking: upgrade the control plane with a soak duration first."}
+	}
+	return console.Action{ID: "complete-upgrade", Label: "Complete control plane upgrade", Title: "Complete control plane upgrade", Submit: "Complete upgrade",
+		Fields: []console.Field{{Name: "note", Label: "What happens", Type: "textarea", Immutable: true,
+			Default: "The control plane stops emulating " + rs.GetPreviousVersion() + ". Afterwards you can no longer go back to the previous minor version."}}}
+}
+
+// moreSettingsAct saves the zones, rotation, logging, monitoring and
+// complete upgrade dialogs.
+func (p gkeClustersProvider) moreSettingsAct(ctx context.Context, name, act string, v map[string]string) error {
+	api := p.gkeAPI()
+	on := func(k string) bool { return v[k] == "true" || v[k] == "on" }
+	switch act {
+	case "zones":
+		var zones []string
+		for _, z := range strings.Split(v["zones"], ",") {
+			if z = strings.TrimSpace(z); z != "" {
+				zones = append(zones, z)
+			}
+		}
+		_, err := api.SetLocations(ctx, &containerpb.SetLocationsRequest{Name: name, Locations: zones})
+		return gkeStatusErr(err)
+	case "rotate-start":
+		_, err := api.StartIPRotation(ctx, &containerpb.StartIPRotationRequest{Name: name, RotateCredentials: true})
+		return gkeStatusErr(err)
+	case "rotate-complete":
+		_, err := api.CompleteIPRotation(ctx, &containerpb.CompleteIPRotationRequest{Name: name})
+		return gkeStatusErr(err)
+	case "complete-upgrade":
+		_, err := api.CompleteControlPlaneUpgrade(ctx, &containerpb.CompleteControlPlaneUpgradeRequest{Name: name})
+		return gkeStatusErr(err)
+	case "logging":
+		cfg := &containerpb.LoggingComponentConfig{}
+		if on("system") {
+			cfg.EnableComponents = append(cfg.EnableComponents, containerpb.LoggingComponentConfig_SYSTEM_COMPONENTS)
+		}
+		if on("workloads") {
+			cfg.EnableComponents = append(cfg.EnableComponents, containerpb.LoggingComponentConfig_WORKLOADS)
+		}
+		_, err := api.UpdateCluster(ctx, &containerpb.UpdateClusterRequest{Name: name, Update: &containerpb.ClusterUpdate{
+			DesiredLoggingConfig: &containerpb.LoggingConfig{ComponentConfig: cfg}}})
+		return gkeStatusErr(err)
+	case "monitoring":
+		cfg := &containerpb.MonitoringComponentConfig{}
+		if on("system") {
+			cfg.EnableComponents = append(cfg.EnableComponents, containerpb.MonitoringComponentConfig_SYSTEM_COMPONENTS)
+		}
+		_, err := api.UpdateCluster(ctx, &containerpb.UpdateClusterRequest{Name: name, Update: &containerpb.ClusterUpdate{
+			DesiredMonitoringConfig: &containerpb.MonitoringConfig{ComponentConfig: cfg}}})
+		return gkeStatusErr(err)
+	}
+	return fmt.Errorf("unknown action %s", act)
 }

@@ -477,6 +477,13 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 	}
 	monitoringSvc.register(coord)
+	// Kubernetes Engine's container logs and system metrics, shipped to
+	// this instance's Cloud Logging and Cloud Monitoring while both sides
+	// are served, as GKE ships them (#2100).
+	if gkeSvc != nil {
+		newGKELogFeeder(gkeDir(cfg), gkeSvc, loggingSvc).register(coord)
+		newGKEMetricsSampler(gkeDir(cfg), gkeSvc, monitoringSvc).register(coord)
+	}
 	if loggingSvc != nil {
 		// CopyLogEntries writes to the instance's Cloud Storage (#1394).
 		loggingSvc.storage = func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") }

@@ -93,6 +93,7 @@ func (s *Server) SetLegacyAbac(_ context.Context, req *containerpb.SetLegacyAbac
 	enabled := req.GetEnabled()
 	if enabled && e.cluster.GetAutopilot().GetEnabled() {
 		// UNVERIFIED wording; the refusal is documented.
+		// Docs re-read 2026-11-21: nothing more is published.
 		return nil, status.Error(codes.InvalidArgument, "Legacy ABAC can't be enabled in Autopilot clusters.")
 	}
 	kind := e.kind
@@ -145,6 +146,7 @@ func (s *Server) SetNetworkPolicy(_ context.Context, req *containerpb.SetNetwork
 	}
 	c := e.cluster
 	// UNVERIFIED wordings below; the rules are the documented ones.
+	// Docs re-read 2026-11-21: nothing more is published.
 	if c.GetAutopilot().GetEnabled() || c.GetNetworkConfig().GetDatapathProvider() == containerpb.DatapathProvider_ADVANCED_DATAPATH {
 		return nil, status.Error(codes.InvalidArgument, "Network policy enforcement is built into GKE Dataplane V2, which this cluster uses: it cannot be changed.")
 	}
@@ -208,6 +210,7 @@ func (s *Server) SetAddonsConfig(_ context.Context, req *containerpb.SetAddonsCo
 		}
 		if npc.GetDisabled() && c.GetNetworkPolicy().GetEnabled() {
 			// UNVERIFIED wording: enforcement is disabled before the add-on.
+			// Docs re-read 2026-11-21: nothing more is published.
 			return nil, status.Error(codes.FailedPrecondition, "The NetworkPolicy add-on cannot be disabled while network policy is enabled: disable network policy first.")
 		}
 	}
@@ -222,7 +225,7 @@ func (s *Server) SetAddonsConfig(_ context.Context, req *containerpb.SetAddonsCo
 // SetNodePoolManagement sets a pool's auto-upgrade and auto-repair. A pool
 // of a cluster on a release channel keeps auto-upgrade ("Node auto-upgrade
 // can't be disabled for clusters enrolled in a release channel", UNVERIFIED
-// wording; https://docs.cloud.google.com/kubernetes-engine/docs/concepts/node-auto-upgrades).
+// wording, re-read 2026-11-21: https://docs.cloud.google.com/kubernetes-engine/docs/concepts/node-auto-upgrades).
 func (s *Server) SetNodePoolManagement(_ context.Context, req *containerpb.SetNodePoolManagementRequest) (*containerpb.Operation, error) {
 	p, err := parseName(req.GetName(), req.GetProjectId(), req.GetZone(), req.GetClusterId(), req.GetNodePoolId(), "", "pool")
 	if err != nil {
@@ -260,8 +263,8 @@ func checkAutoscaling(a *containerpb.NodePoolAutoscaling, zones, others int) err
 	if !a.GetEnabled() {
 		return nil
 	}
-	// UNVERIFIED wordings; the limits are the documented ones (re-read
-	// 2026-11-21: https://docs.cloud.google.com/kubernetes-engine/docs/concepts/cluster-autoscaler).
+	// UNVERIFIED wordings; the limits are the documented ones (re-read 2026-11-21:
+	// https://docs.cloud.google.com/kubernetes-engine/docs/concepts/cluster-autoscaler).
 	if a.GetAutoprovisioned() {
 		return status.Error(codes.Unimplemented, "Node auto-provisioning is not available locally.")
 	}
@@ -494,6 +497,7 @@ func (s *Server) CheckAutopilotCompatibility(ctx context.Context, req *container
 		kind = e.kind
 		if e.cluster.GetAutopilot().GetEnabled() {
 			// UNVERIFIED wording.
+			// Docs re-read 2026-11-21: nothing more is published.
 			err = status.Error(codes.FailedPrecondition, "The cluster is already an Autopilot cluster.")
 		} else if e.access.Endpoint == "" {
 			err = busyErr(e)
@@ -536,6 +540,7 @@ func (s *Server) CheckAutopilotCompatibility(ctx context.Context, req *container
 		})
 	}
 	// UNVERIFIED wording.
+	// Docs re-read 2026-11-21: nothing more is published.
 	if len(resp.Issues) == 0 {
 		resp.Summary = "No incompatibilities found: the cluster's workloads can run on Autopilot."
 	} else {

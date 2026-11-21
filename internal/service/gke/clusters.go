@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"cloud.google.com/go/container/apiv1/containerpb"
 	"google.golang.org/grpc/codes"
@@ -274,11 +275,9 @@ func (s *Server) CreateCluster(_ context.Context, req *containerpb.CreateCluster
 	if c.Subnetwork == "" {
 		c.Subnetwork = "default"
 	}
-	if c.LoggingService == "" {
-		c.LoggingService = "logging.googleapis.com/kubernetes"
-	}
-	if c.MonitoringService == "" {
-		c.MonitoringService = "monitoring.googleapis.com/kubernetes"
+	// Logging and monitoring, GKE's defaults or as given (telemetry.go).
+	if err := defaultTelemetry(c); err != nil {
+		return nil, err
 	}
 	c.ClusterIpv4Cidr = "10.244.0.0/16"
 	c.ServicesIpv4Cidr = "10.96.0.0/16"
@@ -482,6 +481,8 @@ func (s *Server) doneOpLocked(p parsed, typ containerpb.Operation_Type, target s
 // other answers UNIMPLEMENTED, naming it.
 var supportedUpdates = map[string]bool{
 	"desired_master_version":        true,
+	"desired_rollback_safe_upgrade": true,
+	"desired_locations":             true,
 	"desired_node_version":          true,
 	"desired_node_pool_id":          true,
 	"desired_image_type":            true,
@@ -490,6 +491,8 @@ var supportedUpdates = map[string]bool{
 	"desired_release_channel":       true,
 	"desired_addons_config":         true,
 	"desired_node_pool_autoscaling": true,
+	"desired_logging_config":        true,
+	"desired_monitoring_config":     true,
 }
 
 // UpdateCluster applies a ClusterUpdate: versions (to one served), the
@@ -518,6 +521,22 @@ func (s *Server) UpdateCluster(ctx context.Context, req *containerpb.UpdateClust
 	if len(unsupported) > 0 {
 		sort.Strings(unsupported)
 		return nil, status.Errorf(codes.Unimplemented, "Not available locally: updating %s.", strings.Join(unsupported, ", "))
+	}
+	// Logging and monitoring, as gcloud's --logging and --monitoring send
+	// them (telemetry.go): their own change.
+	if ch, err := telemetryUpdate(u, set); err != nil || ch != nil {
+		if err != nil {
+			return nil, err
+		}
+		return s.changeTelemetry(p, ch)
+	}
+	// The zones, as gcloud's --node-locations sends them (#2100).
+	if len(u.GetDesiredLocations()) > 0 {
+		if len(set) != 1 {
+			return nil, status.Error(codes.InvalidArgument, "desired_locations must be the only change of its update.")
+		}
+		return s.SetLocations(ctx, &containerpb.SetLocationsRequest{Name: req.GetName(), ProjectId: req.GetProjectId(), Zone: req.GetZone(),
+			ClusterId: req.GetClusterId(), Locations: u.GetDesiredLocations()})
 	}
 	// The add-ons and a pool's autoscaling, as gcloud's --update-addons
 	// and --enable-autoscaling send them (#2100): each its own change.
@@ -549,17 +568,27 @@ func (s *Server) UpdateCluster(ctx context.Context, req *containerpb.UpdateClust
 		if sv.GKE != c.CurrentMasterVersion {
 			// A real upgrade replaces the control plane's version: it is
 			// the only change of its operation, as Google runs it.
-			if len(set) > 1 {
+			rs := u.GetDesiredRollbackSafeUpgrade()
+			if len(set) > 1 && !(len(set) == 2 && rs != nil) {
 				return nil, status.Error(codes.InvalidArgument, "desired_master_version must be the only field of an update that upgrades the control plane.")
 			}
 			if err := checkMasterUpgrade(c, sv); err != nil {
 				return nil, err
 			}
+			var soak time.Duration
+			if rs != nil {
+				if soak, err = checkRollbackSafe(c, sv, rs); err != nil {
+					return nil, err
+				}
+				if _, ok := s.backend.(Emulator); !ok {
+					return nil, status.Error(codes.Unimplemented, "Rollback-safe upgrades are not available with this backend.")
+				}
+			}
 			up, err := s.upgrader()
 			if err != nil {
 				return nil, err
 			}
-			return s.startMasterUpgradeLocked(p, e, sv, up), nil
+			return s.startMasterUpgradeLocked(p, e, sv, up, false, soak), nil
 		}
 	}
 	if v := u.GetDesiredNodeVersion(); v != "" {
@@ -606,12 +635,6 @@ func (s *Server) UpdateCluster(ctx context.Context, req *containerpb.UpdateClust
 				np.Config.ImageType = t
 			}
 		}
-	}
-	if v := u.GetDesiredLoggingService(); v != "" {
-		c.LoggingService = v
-	}
-	if v := u.GetDesiredMonitoringService(); v != "" {
-		c.MonitoringService = v
 	}
 	if rc := u.GetDesiredReleaseChannel(); rc != nil {
 		c.ReleaseChannel = proto.Clone(rc).(*containerpb.ReleaseChannel)

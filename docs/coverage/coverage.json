@@ -18177,8 +18177,7 @@
     "Title": "Kubernetes Engine API (v1)",
     "counts": {
       "Implemented": 1,
-      "Unimplemented": 8,
-      "Verified": 28
+      "Verified": 36
     },
     "rows": [
       {
@@ -18199,13 +18198,19 @@
       },
       {
         "method": "google.container.v1.ClusterManager/CompleteControlPlaneUpgrade",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): rollback-safe control plane upgrades are not built yet (#2100)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkemethods_test.go:272 TestGKERollbackSafeUpgrade",
+          "test/compat/gkemethods_test.go:393 TestGcloudContainerRotationLocationsAndUpgradeInfo"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/CompleteIPRotation",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): IP and credential rotation: rotating a kind control plane's cluster CA (re-issuing every control-plane and kubelet certificate, both CAs trusted until completion) is not built yet (#2100)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkemethods_test.go:393 TestGcloudContainerRotationLocationsAndUpgradeInfo",
+          "test/compat/gkemethods_test.go:94 TestGKERotationLocationsAndUpgradeInfo"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/CompleteNodePoolUpgrade",
@@ -18248,13 +18253,19 @@
       },
       {
         "method": "google.container.v1.ClusterManager/FetchClusterUpgradeInfo",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): upgrade info (end-of-support dates, auto-upgrade status) is not built yet (#2100)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkemethods_test.go:393 TestGcloudContainerRotationLocationsAndUpgradeInfo",
+          "test/compat/gkemethods_test.go:94 TestGKERotationLocationsAndUpgradeInfo"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/FetchNodePoolUpgradeInfo",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): upgrade info (end-of-support dates, auto-upgrade status) is not built yet (#2100)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkemethods_test.go:393 TestGcloudContainerRotationLocationsAndUpgradeInfo",
+          "test/compat/gkemethods_test.go:94 TestGKERotationLocationsAndUpgradeInfo"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/GetCluster",
@@ -18359,13 +18370,19 @@
       },
       {
         "method": "google.container.v1.ClusterManager/SetLocations",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): a local cluster's zones are names only: choosing node zones is not available locally"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkemethods_test.go:393 TestGcloudContainerRotationLocationsAndUpgradeInfo",
+          "test/compat/gkemethods_test.go:94 TestGKERotationLocationsAndUpgradeInfo"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/SetLoggingService",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): no log agent runs on a local cluster: its workloads' logs do not reach Cloud Logging, so the setting would have no effect (#2100)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gketelemetry_test.go:257 TestGcloudContainerClusterLoggingAndMonitoring",
+          "test/compat/gketelemetry_test.go:95 TestGKELoggingAndMonitoring"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/SetMaintenancePolicy",
@@ -18384,8 +18401,11 @@
       },
       {
         "method": "google.container.v1.ClusterManager/SetMonitoringService",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): no metrics agent runs on a local cluster: its metrics do not reach Cloud Monitoring, so the setting would have no effect (#2100)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gketelemetry_test.go:257 TestGcloudContainerClusterLoggingAndMonitoring",
+          "test/compat/gketelemetry_test.go:95 TestGKELoggingAndMonitoring"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/SetNetworkPolicy",
@@ -18420,8 +18440,11 @@
       },
       {
         "method": "google.container.v1.ClusterManager/StartIPRotation",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): IP and credential rotation: rotating a kind control plane's cluster CA (re-issuing every control-plane and kubelet certificate, both CAs trusted until completion) is not built yet (#2100)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkemethods_test.go:393 TestGcloudContainerRotationLocationsAndUpgradeInfo",
+          "test/compat/gkemethods_test.go:94 TestGKERotationLocationsAndUpgradeInfo"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/UpdateCluster",
