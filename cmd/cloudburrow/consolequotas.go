@@ -87,7 +87,8 @@ func (p serviceUsageProvider) quotasCall(ctx context.Context, project, call stri
 	switch call {
 	case "quotas":
 		services := map[string]bool{}
-		for _, q := range cloudquotas.Catalog {
+		catalog := p.quotas.Quotas(project)
+		for _, q := range catalog {
 			if req.Service == "" || q.Service == req.Service {
 				services[q.Service] = true
 			}
@@ -108,7 +109,7 @@ func (p serviceUsageProvider) quotasCall(ctx context.Context, project, call stri
 				return nil, err
 			}
 			for _, qi := range resp.GetQuotaInfos() {
-				def, _ := catalogQuota(s, qi.GetQuotaId())
+				def, _ := catalogQuota(catalog, s, qi.GetQuotaId())
 				for _, di := range qi.GetDimensionsInfos() {
 					row := consoleQuota{Service: s, QuotaID: qi.GetQuotaId(), Name: qi.GetQuotaDisplayName(), Metric: qi.GetMetric(),
 						Type: "Quota", Dimensions: di.GetDimensions(), Value: di.GetDetails().GetValue(), Default: def.Default,
@@ -167,8 +168,8 @@ func sameDims(a, b map[string]string) bool {
 	return true
 }
 
-func catalogQuota(service, id string) (cloudquotas.Quota, bool) {
-	for _, q := range cloudquotas.Catalog {
+func catalogQuota(catalog []cloudquotas.Quota, service, id string) (cloudquotas.Quota, bool) {
+	for _, q := range catalog {
 		if q.Service == service && q.QuotaID == id {
 			return q, true
 		}

@@ -33,15 +33,18 @@ const (
 	quotaRender = Service + "/render_requests"
 )
 
+// quotasPage documents Parameter Manager's quotas.
+const quotasPage = "https://docs.cloud.google.com/secret-manager/quotas"
+
 // Quotas are Parameter Manager's request quotas, at Google's defaults.
 func Quotas() []ratequota.Metric {
 	return []ratequota.Metric{
 		{Service: Service, Name: quotaRead, Title: "Read requests", Limit: "ReadRequestsPerMinutePerProject",
-			LimitTitle: "Read requests per minute per project", Default: 1200},
+			LimitTitle: "Read requests per minute per project", Default: 1200, Source: quotasPage},
 		{Service: Service, Name: quotaWrite, Title: "Write requests", Limit: "WriteRequestsPerMinutePerProject",
-			LimitTitle: "Write requests per minute per project", Default: 1200},
+			LimitTitle: "Write requests per minute per project", Default: 1200, Source: quotasPage},
 		{Service: Service, Name: quotaRender, Title: "Render requests", Limit: "RenderRequestsPerMinutePerProject",
-			LimitTitle: "Render requests per minute per project", Default: 1800},
+			LimitTitle: "Render requests per minute per project", Default: 1800, Source: quotasPage},
 	}
 }
 

@@ -22132,37 +22132,10 @@ async function renderAPIPage(view, name, tab) {
             el("td", { text: apisLatency(m.p50Ms, m) }), el("td", { text: apisLatency(m.p95Ms, m) })))
             : [el("tr", {}, el("td", { colspan: "5", text: "No calls yet." }))])))));
   } else if (tab === "quotas") {
-    // The Cloud Quotas API's quotas (#2030), then the per-minute request
-    // quotas this instance enforces for the API (#2063), as the project has
-    // them, each editable for the project.
-    const cloudQuotas = quotasBlock(a.name, redraw);
-    const quotas = data.requestQuotas || [];
-    const note = el("p", { class: "form-help", text: "Quotas are enforced by this CloudBurrow instance at Google's documented defaults; " +
-      "Edit quota changes one for this project while the instance runs (the configuration's requestQuotas and /admin/quotas set them too)." });
-    if (!quotas.length) {
-      setChildren(panel, cloudQuotas);
-    } else {
-      setChildren(panel, cloudQuotas, el("h2", { text: "Request quotas" }), note,
-        el("div", { class: "table-wrap" }, el("table", { class: "table", id: "api-request-quotas" },
-        el("caption", { class: "sr-only", text: `${a.title} quotas` }),
-        el("thead", {}, el("tr", {}, ...["Quota", "Metric", "Value", "Default", "Actions"].map((h) => el("th", { scope: "col", text: h })))),
-        el("tbody", {}, ...quotas.map((q) => el("tr", {},
-          el("td", { text: q.limitTitle }), el("td", { class: "mono", text: q.metric }),
-          el("td", { text: apisNumber(q.value) + (q.adjusted ? " (adjusted)" : "") }), el("td", { text: apisNumber(q.default) }),
-          el("td", {},
-            el("button", { type: "button", class: "link-button", text: "Edit quota", "aria-label": `Edit quota ${q.limitTitle}`,
-              onclick: () => mrForm({ id: "api-quota-edit", title: `Edit quota: ${q.limitTitle}`, label: "Submit request",
-                note: `Requests per minute for project ${project}. Calls past it in a minute are refused RESOURCE_EXHAUSTED (HTTP 429), as on Google.`,
-                fields: [{ name: "limit", label: "New value", type: "number", required: true, default: String(q.value) }],
-                submit: async (v) => {
-                  const op = recordOperation(`Edit quota ${q.metric} on ${project}`);
-                  try { await apisCall("setquota", { metric: q.metric, limit: v.limit }); op.succeeded(""); } catch (err) { op.failed(err.message); throw err; }
-                  notify(`${q.limitTitle} is ${v.limit}`);
-                  redraw();
-                } }) }),
-            q.adjusted ? el("button", { type: "button", class: "link-button", text: "Reset to default", "aria-label": `Reset ${q.limitTitle} to its default`,
-              onclick: async () => { await apisCall("resetquota", { metric: q.metric }); notify(`${q.limitTitle} is back to ${apisNumber(q.default)}`); redraw(); } }) : null)))))));
-    }
+    // The Cloud Quotas API's quotas (#2030), the per-minute request quotas
+    // this instance enforces among them (#2063, #2090): Edit quota sets a
+    // QuotaPreference, the limit the API's calls are then charged against.
+    setChildren(panel, quotasBlock(a.name, redraw));
   } else {
     setChildren(panel, apisCredentialSections("api-credentials"));
   }
