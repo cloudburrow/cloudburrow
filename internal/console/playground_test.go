@@ -407,7 +407,7 @@ func TestPlaygroundSupportedOptionsAreHonoured(t *testing.T) {
 	resp, body := postJSON(t, srv, "/api/ai/playground", `{"prompt":"hi","stream":false,"generationConfig":{
 		"temperature":0.4,"topP":0.9,"topK":20,"seed":3,"maxOutputTokens":16,"stopSequences":["zz"],
 		"presencePenalty":0.5,"frequencyPenalty":-0.5,"responseMimeType":"application/json","responseSchema":{"type":"BOOLEAN"},
-		"candidateCount":1,"thinkingConfig":{"thinkingBudget":64,"includeThoughts":true}}}`)
+		"candidateCount":1,"thinkingConfig":{"thinkingBudget":64,"includeThoughts":true},"responseLogprobs":true,"logprobs":5}}`)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status %d: %s", resp.StatusCode, body)
 	}
@@ -416,10 +416,10 @@ func TestPlaygroundSupportedOptionsAreHonoured(t *testing.T) {
 	if got.Temperature == nil || *got.Temperature != 0.4 || got.TopP == nil || got.TopK == nil || *got.TopK != 20 ||
 		got.Seed == nil || got.MaxOutputTokens == nil || *got.MaxOutputTokens != 16 || got.JSONSchema != `{"type":"boolean"}` ||
 		got.PresencePenalty == nil || *got.PresencePenalty != 0.5 || got.FrequencyPenalty == nil || *got.FrequencyPenalty != -0.5 ||
-		got.Thinking == nil || !*got.Thinking || got.ThinkingBudget != 64 {
+		got.Thinking == nil || !*got.Thinking || got.ThinkingBudget != 64 || !got.ResponseLogprobs || got.TopLogprobs != 5 {
 		t.Errorf("the generator was asked %+v", got)
 	}
-	if len(supportedOptions) != 12 {
+	if len(supportedOptions) != 14 {
 		t.Errorf("supportedOptions changed (%v): extend this test's request", supportedOptions)
 	}
 }

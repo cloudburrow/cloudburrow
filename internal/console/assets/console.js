@@ -15925,7 +15925,8 @@ function playgroundCode(lang, status, body) {
   const gc = body.generationConfig || {};
   const snake = { maxOutputTokens: "max_output_tokens", topP: "top_p", topK: "top_k", stopSequences: "stop_sequences",
     presencePenalty: "presence_penalty", frequencyPenalty: "frequency_penalty", responseMimeType: "response_mime_type",
-    responseSchema: "response_schema", candidateCount: "candidate_count", thinkingConfig: "thinking_config" };
+    responseSchema: "response_schema", candidateCount: "candidate_count", thinkingConfig: "thinking_config",
+    responseLogprobs: "response_logprobs" };
   for (const [k, v] of Object.entries(gc)) cfg[snake[k] || k] = v;
   if (body.systemInstruction) cfg.system_instruction = body.systemInstruction;
   if (body.cachedContent) cfg.cached_content = body.cachedContent;
@@ -15969,6 +15970,32 @@ function playgroundDisclosure(id, label, ...children) {
     button.setAttribute("aria-expanded", String(!body.hidden));
   });
   return el("div", { class: "pg-section" }, button, body);
+}
+
+// playgroundLogprobs draws one response's logprobsResult (#2122): its
+// avgLogprobs, then a row per decode step with the chosen token, its log
+// probability and probability, and the step's top candidates, most probable
+// first, as the API returns them. A streamed answer's avgLogprobs is the
+// mean of its chunks' steps (each chunk reports its own).
+function playgroundLogprobs(i, s, many) {
+  const fmt = (v) => Number(v).toFixed(4);
+  const pct = (v) => (Math.exp(v) * 100).toFixed(2) + "%";
+  const tok = (c) => JSON.stringify(c.token ?? "");
+  const avg = s.avg.length === 1 ? s.avg[0]
+    : s.chosen.length ? s.chosen.reduce((a, c) => a + (c.logProbability || 0), 0) / s.chosen.length : null;
+  const label = many ? `Response ${i + 1}` : "Response";
+  const rows = s.chosen.map((c, n) => el("tr", {},
+    el("td", { class: "mono", text: String(n + 1) }),
+    el("td", { class: "mono", text: tok(c) }),
+    el("td", { class: "mono", text: fmt(c.logProbability || 0) }),
+    el("td", { class: "mono", text: pct(c.logProbability || 0) }),
+    el("td", { class: "mono", text: (s.top[n]?.candidates || []).map((t) => `${tok(t)} ${fmt(t.logProbability || 0)}`).join(", ") || "—" })));
+  return el("section", { class: "pg-logprobs", id: "pg-logprobs-" + i, "aria-label": `${label} log probabilities` },
+    ...(many ? [el("h5", { text: label })] : []),
+    el("p", { id: "pg-avg-logprobs-" + i, text: `Average log probability (avgLogprobs): ${avg === null ? "—" : fmt(avg)}` }),
+    el("div", { class: "table-wrap" }, el("table", { "aria-label": `${label}: chosen tokens and top candidates` },
+      el("thead", {}, el("tr", {}, ["Step", "Chosen token", "Log probability", "Probability", "Top candidates"].map((h) => el("th", { scope: "col", text: h })))),
+      el("tbody", { id: "pg-logprobs-rows-" + i }, ...rows))));
 }
 
 async function renderPlayground(view) {
@@ -16061,6 +16088,31 @@ async function renderPlayground(view) {
   thinkMode.addEventListener("change", syncThinking);
   syncThinking();
 
+  // Log probabilities (responseLogprobs, #2122) and Top candidates
+  // (logprobs, 1 to 20, which the API takes only with responseLogprobs, so
+  // the number is enabled only with the switch). Google's pages document
+  // no console control for these, so the labels are the inference
+  // reference's ("log probabilities", "top candidate tokens"), under
+  // Advanced beside the sampler (UNVERIFIED, re-read 2026-11-21:
+  // https://docs.cloud.google.com/vertex-ai/generative-ai/docs/model-reference/inference).
+  const lpOn = el("input", { type: "checkbox", role: "switch", id: "pg-logprobs" });
+  const lpTop = el("input", { type: "number", id: "pg-logprobs-top", step: "1", min: "1", max: "20", placeholder: "None",
+    "aria-describedby": "pg-logprobs-help" });
+  const lpHelp = el("p", { id: "pg-logprobs-help", class: "unavailable",
+    text: "Return each chosen token's log probability; Top candidates (1 to 20) also returns that many most probable tokens per step." });
+  const syncLogprobs = () => {
+    lpTop.disabled = !lpOn.checked;
+    if (lpTop.disabled) lpTop.value = "";
+  };
+  lpOn.addEventListener("change", syncLogprobs);
+  syncLogprobs();
+  const lpFields = supported.has("responseLogprobs") ? [
+    el("label", { for: "pg-logprobs", class: "pg-check", title: "responseLogprobs: each chosen token's log probability" },
+      lpOn, " Log probabilities"),
+    ...(supported.has("logprobs") ? [el("label", { for: "pg-logprobs-top", class: "pg-field" },
+      el("span", { text: "Top candidates" }), lpTop)] : []),
+    lpHelp] : [];
+
   // Function calling (#1962): the declarations as the API takes them, a
   // JSON array of FunctionDeclaration, and the mode (AUTO, ANY, NONE,
   // VALIDATED: Google's function calling page). Agent Studio lists
@@ -16110,7 +16162,7 @@ async function renderPlayground(view) {
       thinkBudgetField,
       el("label", { for: "pg-include-thoughts", class: "pg-check", title: "includeThoughts: the model's thoughts come back as parts marked thought" },
         thoughts, " Include thoughts"))] : []),
-    playgroundDisclosure("pg-advanced", "Advanced", ...advanced.map((o) => o.field)),
+    playgroundDisclosure("pg-advanced", "Advanced", ...advanced.map((o) => o.field), ...lpFields),
     ...(supported.has("responseMimeType") ? [playgroundDisclosure("pg-output-format", "Output format",
       el("label", { for: "pg-opt-json", class: "pg-check", title: "responseMimeType application/json; the schema, if given, constrains the answer" },
         jsonOut, " JSON (application/json)"),
@@ -16132,6 +16184,11 @@ async function renderPlayground(view) {
     if (supported.has("thinkingConfig") && thinkMode.value !== "off") {
       cfg.thinkingConfig = { thinkingBudget: thinkMode.value === "auto" ? -1 : Number(thinkBudget.value) };
       if (thoughts.checked) cfg.thinkingConfig.includeThoughts = true;
+    }
+    if (supported.has("responseLogprobs") && lpOn.checked) {
+      cfg.responseLogprobs = true;
+      const k = lpTop.value.trim();
+      if (supported.has("logprobs") && k !== "") cfg.logprobs = Number(k);
     }
     if (jsonOut.checked) {
       cfg.responseMimeType = "application/json";
@@ -16481,6 +16538,8 @@ async function renderPlayground(view) {
   thoughtsSection.hidden = true;
   const candidatesOut = el("div", { id: "pg-candidates", class: "pg-stack" });
   candidatesOut.hidden = true;
+  const logprobsOut = el("div", { id: "pg-logprobs-out", class: "pg-stack" });
+  logprobsOut.hidden = true;
   const historyBody = el("tbody");
 
   const refused = el("details", { class: "card" },
@@ -16543,9 +16602,21 @@ async function renderPlayground(view) {
     thoughtsSection.hidden = true;
     candidatesOut.replaceChildren();
     candidatesOut.hidden = true;
+    logprobsOut.replaceChildren();
+    logprobsOut.hidden = true;
+    // Each response's logprobsResult, gathered over the stream's chunks
+    // (every chunk carries its own tokens' steps).
+    const scores = [];
     const take = (event) => {
       if (event.usageMetadata) meta = event.usageMetadata;
       const all = event.candidates || [];
+      all.forEach((c, i) => {
+        if (!c.logprobsResult && c.avgLogprobs === undefined) return;
+        const s = scores[c.index ?? i] || (scores[c.index ?? i] = { chosen: [], top: [], avg: [] });
+        s.chosen.push(...(c.logprobsResult?.chosenCandidates || []));
+        s.top.push(...(c.logprobsResult?.topCandidates || []));
+        if (c.avgLogprobs !== undefined) s.avg.push(c.avgLogprobs);
+      });
       if (all.length > 1) {
         // Number of responses: each candidate under its own heading;
         // the first one continues the conversation.
@@ -16633,6 +16704,11 @@ async function renderPlayground(view) {
           (meta.cachedContentTokenCount ? ` · cached ${meta.cachedContentTokenCount}` : "") +
           ` · total ${meta.totalTokenCount ?? "—"} (usageMetadata)`;
       }
+      if (scores.length) {
+        logprobsOut.hidden = false;
+        logprobsOut.append(el("h4", { id: "pg-logprobs-h", text: "Log probabilities" }),
+          ...scores.map((s, i) => s ? playgroundLogprobs(i, s, scores.length > 1) : null).filter((x) => x));
+      }
       if (ok) {
         // The turn and its answer join the conversation; the prompt box
         // empties for the next turn, as a chat's does.
@@ -16679,7 +16755,7 @@ async function renderPlayground(view) {
           el("div", { class: "card-actions" }, send, cancel, tokens, getCode, clear, timing),
           tokenizer,
           el("h3", { id: "pg-response-h", text: "Response" }),
-          thoughtsSection, output, candidatesOut, usage),
+          thoughtsSection, output, candidatesOut, logprobsOut, usage),
         codePane,
         cacheCard),
       settings),

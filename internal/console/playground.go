@@ -106,8 +106,8 @@ type PlaygroundStatus struct {
 // the runtime serves system instructions, multi-turn chat, function calling
 // and token counts, which the screen offers (#1962). candidateCount,
 // thinkingConfig and cachedContent are served since #2107 and offered since
-// #2121. responseLogprobs and logprobs are served since #2107 round 3; the
-// screen does not offer them yet (#2107's console follow-up).
+// #2121. responseLogprobs and logprobs are served since #2107 round 3 and
+// offered since #2122.
 var refusedOptions = []string{"safetySettings"}
 
 // supportedOptions are the generationConfig fields the screen offers: the
@@ -116,11 +116,12 @@ var refusedOptions = []string{"safetySettings"}
 // at a stop sequence (#1797, #1779, #1937). TestPlaygroundSupportedOptionsAreHonoured
 // holds them in step with the API.
 // candidateCount is Number of responses and thinkingConfig the Thinking
-// budget and Include thoughts (#2121).
+// budget and Include thoughts (#2121); responseLogprobs is Advanced's Log
+// probabilities switch and logprobs its Top candidates (#2122).
 var supportedOptions = []string{
 	"temperature", "topP", "topK", "seed", "maxOutputTokens", "stopSequences",
 	"presencePenalty", "frequencyPenalty", "responseMimeType", "responseSchema",
-	"candidateCount", "thinkingConfig",
+	"candidateCount", "thinkingConfig", "responseLogprobs", "logprobs",
 }
 
 // Features are the request fields beside generationConfig the screen sends

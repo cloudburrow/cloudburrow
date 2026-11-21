@@ -2163,15 +2163,19 @@ var parityRows = []parityRow{
 			"the chat sends every earlier turn as contents with the System instructions, Function calling's declarations and mode (AUTO, ANY, NONE, VALIDATED) as tools and toolConfig, " +
 			"shows a returned functionCall and sends the user's functionResponse turn, sends Insert Media's uploaded image as inlineData or a gs:// object as fileData, " +
 			"applies Model settings (Temperature, Output token limit, Add stop sequence; Advanced: Top-K, Top-P, Seed, frequency and presence penalty; Output format), " +
-			"shows the response's usageMetadata, and Get code writes the request as Python or curl (#1962)",
+			"shows the response's usageMetadata, and Get code writes the request as Python or curl (#1962); " +
+			"Advanced's Log probabilities switch sends responseLogprobs and its Top candidates (1 to 20, enabled only with the switch) logprobs, " +
+			"and the response shows avgLogprobs and each chosen token with its log probability, probability and the step's top candidates (#2122)",
 		Tests: []string{"TestPlaygroundStreamSwitchPicksTheMethod", "TestPlaygroundRelaysTheConversation", "TestAgentStudioChatToolsImagesTokensAndCode",
 			"TestPlaygroundSupportedOptionsAreHonoured", "TestStreamGenerateContentThroughThePredictionClient", "TestGRPCGenerateContentMatchesTheJSONRoute",
 			"TestGenerateContentMultiTurnChatThroughTheOfficialSDK", "TestGenerateContentFunctionCallingRoundTripThroughTheOfficialSDK",
-			"TestGenerateContentImagePartThroughTheOfficialSDK"}},
+			"TestGenerateContentImagePartThroughTheOfficialSDK", "TestAgentStudioLogProbabilities",
+			"TestGenerateContentLogprobsTopCandidatesThroughTheOfficialSDK"}},
 	{Resource: "Vertex AI PredictionService: StreamGenerateContent", Service: "vertexai",
 		Methods: []string{"PredictionService/StreamGenerateContent"},
-		Screen:  "/agent-platform/studio", Offers: "Playground: Stream on (the default) sends streamGenerateContent, which StreamGenerateContent serves from the same code, and shows each chunk as it arrives (#1257)",
-		Tests: []string{"TestPlaygroundGeneratesThroughTheRealAPIPath", "TestPlaygroundStreamSwitchPicksTheMethod",
+		Screen:  "/agent-platform/studio", Offers: "Playground: Stream on (the default) sends streamGenerateContent, which StreamGenerateContent serves from the same code, and shows each chunk as it arrives (#1257); " +
+			"with Log probabilities on, the chunks' steps are gathered into one table (#2122)",
+		Tests: []string{"TestPlaygroundGeneratesThroughTheRealAPIPath", "TestPlaygroundStreamSwitchPicksTheMethod", "TestAgentStudioLogProbabilities",
 			"TestStreamGenerateContentThroughThePredictionClient", "TestGRPCStreamGenerateContentEmitsOneMessagePerChunk"}},
 	// Streaming and direct predict (#1285) carry the same requests in another
 	// framing, served by the same code.
