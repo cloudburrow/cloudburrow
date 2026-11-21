@@ -54,7 +54,9 @@ import (
 // storageProvider lists buckets through the Cloud Storage JSON API.
 // pubsub is the Pub/Sub emulator's address, for the topics a bucket
 // notification can publish to (#791); empty when Pub/Sub is not enabled.
-type storageProvider struct{ endpoint, pubsub string }
+// storageProvider is Cloud Storage's buckets. insights, when Storage
+// Insights is served, is its address, for a bucket's Inventory reports tab.
+type storageProvider struct{ endpoint, pubsub, insights string }
 
 func (storageProvider) ID() string    { return "storage" }
 func (storageProvider) Title() string { return "Cloud Storage" }
@@ -3582,7 +3584,8 @@ func (p storageProvider) Detail(ctx context.Context, project string, path []stri
 			if !meta.hierarchical() {
 				protection.Actions = append([]console.Action{editVersioningAction(meta)}, protection.Actions...)
 			}
-			sections = append(sections, config, permissionsPlaceholder(meta), protection, lifecycleSection(meta))
+			sections = append(sections, config, permissionsPlaceholder(meta), protection, lifecycleSection(meta),
+				bucketObservability(), p.inventoryReportsSection(ctx, project, bucket))
 			// The Operations tab, on an HNS bucket always, and on any
 			// other once it has an operation, a bulk restore (#1279).
 			if ops := p.operationsSection(ctx, bucket); hns || len(ops.Listing.Items) > 0 || ops.Listing.Unavailable != "" {

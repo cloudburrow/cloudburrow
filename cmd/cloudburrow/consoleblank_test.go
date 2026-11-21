@@ -344,6 +344,11 @@ func blankCheckDeps(t *testing.T) consoleDeps {
 			t.Fatalf("upload %s: %s", name, resp.Status)
 		}
 	}
+	// An HMAC key, so Interoperability lists its service account (#2047).
+	if _, _, err := (storageSettingsProvider{endpoint: tunnels["storage"]}).CreateOneTime(ctx, blankProject,
+		map[string]string{"serviceAccountEmail": "blank@" + blankProject + ".iam.gserviceaccount.com"}); err != nil {
+		t.Fatal(err)
+	}
 
 	// Pub/Sub: a topic with a bare pull subscription, and a push one whose
 	// optional parts are unset; and a snapshot of the pull one (#787), from

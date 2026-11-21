@@ -37,6 +37,7 @@ import (
 	"strings"
 
 	"cloud.google.com/go/storage"
+	"google.golang.org/api/iterator"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
 )
@@ -188,7 +189,7 @@ func versionActions(generation int64, name string, live bool) []console.Action {
 	return append(out, console.Action{
 		ID: "deleteversion", Label: "Delete version", Destructive: true,
 		Confirm: fmt.Sprintf("Generation %s of %s is deleted, not kept as a noncurrent version. %s "+
-			"With soft delete on for the bucket it can be restored from Deleted objects until its hard delete time.",
+			"With soft delete on for the bucket it can be restored, from the Show list's Soft-deleted objects only, until its hard delete time.",
 			gen, name, after),
 	})
 }
@@ -372,6 +373,7 @@ func (p storageProvider) objectPageActions(ctx context.Context, path []string) [
 	retention := err == nil && b.objectRetentionEnabled()
 	if gen == 0 {
 		out := append(objectActions(bucket, attrsMeta(attrs)), protectionActions(attrs, retention)...)
+		out = append(out, deleteVersionsAction())
 		return append(out, p.objectACLActions(ctx, bucket)...)
 	}
 	return append(versionActions(gen, name, attrs.Deleted.IsZero()), protectionActions(attrs, retention)...)
@@ -382,13 +384,16 @@ func (p storageProvider) objectPageActions(ctx context.Context, path []string) [
 // for those.
 func (p storageProvider) actOnObjectPage(ctx context.Context, c *storage.Client, path []string, action string, values map[string]string) (bool, error) {
 	switch action {
-	case "restoreversion", "deleteversion", "editholds", "editretention":
+	case "restoreversion", "deleteversion", "editholds", "editretention", deleteVersionsID:
 	default:
 		return false, nil
 	}
 	bucket, name, gen, err := objectTarget(path)
 	if err != nil {
 		return true, err
+	}
+	if action == deleteVersionsID {
+		return true, deleteCheckedVersions(ctx, c, bucket, name, gen, values[versionsField])
 	}
 	switch action {
 	case "restoreversion", "deleteversion":
@@ -497,3 +502,173 @@ var (
 	_ console.ObjectVersioner = storageProvider{}
 	_ console.ResultActor     = storageProvider{}
 )
+
+// Google's object page has a Version history tab (#1843;
+// using-versioned-objects, use-soft-deleted-objects): every generation of
+// the object, each noncurrent one with Restore, which opens "the restore
+// object version pane" ending in Confirm; and in its Show list, "Soft-deleted
+// objects only", the object's soft-deleted generations, each with Restore.
+const (
+	showLiveAndNoncurrent = "Live and noncurrent objects"
+	versionHistoryID      = "versions"
+)
+
+// restoreVersionPane is Restore on a Version history row: what is restored,
+// confirmed with Confirm and nothing typed.
+func restoreVersionPane(id, what string) console.Action {
+	return console.Action{ID: id, Label: "Restore", ConfirmTitle: "Restore object version",
+		Confirm: what, ConfirmStyle: console.DeleteConfirmClick, Submit: "Confirm"}
+}
+
+// versionHistory is the object page's Version history tab and the
+// soft-deleted generations its Show list draws.
+func (p storageProvider) versionHistory(ctx context.Context, bucket, name string) []console.Section {
+	live := console.Section{ID: versionHistoryID, Label: "Version history", Show: showLiveAndNoncurrent,
+		Listing: console.Listing{Columns: []string{"Generation", "State", "Size", "Updated"}, NameColumn: "Name",
+			Noun: "versions", Items: []console.Resource{}, SelectActions: []console.Action{deleteVersionsAction()}}}
+	token := ""
+	for {
+		q := urlpkg.Values{"versions": {"true"}, "prefix": {name}}
+		if token != "" {
+			q.Set("pageToken", token)
+		}
+		var page struct {
+			Items         []versionJSON `json:"items"`
+			NextPageToken string        `json:"nextPageToken"`
+		}
+		if err := getJSON(ctx, p.bucketURL(bucket)+"/o?"+q.Encode(), &page); err != nil {
+			live.Listing.Unavailable = "cannot list the object's versions: " + err.Error()
+			break
+		}
+		for _, v := range page.Items {
+			if v.Name != name {
+				continue
+			}
+			if len(live.Listing.Items) == versionsLimit {
+				live.Listing.Note = fmt.Sprintf("The first %d versions are listed, as on Google's console; list the rest with objects.list versions=true.", versionsLimit)
+				break
+			}
+			row, ok := versionRow(bucket, "", v)
+			if !ok {
+				continue
+			}
+			// Checked for Delete, as Google's Version history is (#2047),
+			// rather than deleted from the row's menu.
+			row.Selectable = true
+			row.Actions = withoutAction(row.Actions, "deleteversion")
+			if v.TimeDeleted != "" {
+				row.Actions = append([]console.Action{restoreVersionPane("restoreversion", fmt.Sprintf(
+					"Generation %s of %s becomes the live version again; on a versioned bucket the live version it replaces is kept as noncurrent.",
+					v.Generation, name))}, row.Actions[1:]...)
+			}
+			live.Listing.Items = append(live.Listing.Items, row)
+		}
+		if page.NextPageToken == "" || live.Listing.Note != "" {
+			break
+		}
+		token = page.NextPageToken
+	}
+	live.Listing.Total = len(live.Listing.Items)
+	return []console.Section{live, p.softDeletedVersions(ctx, bucket, name)}
+}
+
+// softDeletedVersions are the object's soft-deleted generations, drawn by
+// Version history's Show list.
+func (p storageProvider) softDeletedVersions(ctx context.Context, bucket, name string) console.Section {
+	sec := console.Section{ID: "versionsdeleted", Label: "Soft-deleted versions", ShownIn: versionHistoryID,
+		ShowAs: showSoftDeleted, Listing: console.Listing{Columns: []string{"Generation", "Size", "Deleted", "Hard delete"},
+			NameColumn: "Name", Noun: "soft-deleted versions", Items: []console.Resource{}}}
+	c, err := p.storageClient(ctx)
+	if err != nil {
+		sec.Listing.Unavailable = err.Error()
+		return sec
+	}
+	defer func() { _ = c.Close() }()
+	it := c.Bucket(bucket).Objects(ctx, &storage.Query{SoftDeleted: true, Prefix: name})
+	for len(sec.Listing.Items) < softDeletedLimit {
+		o, err := it.Next()
+		if errors.Is(err, iterator.Done) {
+			break
+		}
+		if err != nil {
+			sec.Listing.Unavailable = "cannot list the soft-deleted versions: " + err.Error()
+			return sec
+		}
+		if o.Name != name {
+			continue
+		}
+		gen := strconv.FormatInt(o.Generation, 10)
+		sec.Listing.Items = append(sec.Listing.Items, console.Resource{
+			Name: name + "#" + gen,
+			Fields: map[string]string{"Generation": gen, "Size": formatBytes(o.Size),
+				"Deleted": stampOrDash(o.SoftDeleteTime), "Hard delete": stampOrDash(o.HardDeleteTime)},
+			Target: softObjectPath(bucket, o.Generation, name),
+			Actions: []console.Action{restoreVersionPane("restore", fmt.Sprintf(
+				"Soft-deleted generation %s of %s is restored as the object's live version.", gen, name))},
+		})
+	}
+	sec.Listing.Total = len(sec.Listing.Items)
+	return sec
+}
+
+// Version history's Delete (#2047; using-versioned-objects): "select the
+// checkbox for the version", click Delete, and type delete to confirm.
+const (
+	deleteVersionsID = "deleteversions"
+	versionsField    = "versions"
+)
+
+// deleteVersionsAction is Version history's Delete over its checked rows.
+func deleteVersionsAction() console.Action {
+	return console.Action{ID: deleteVersionsID, Label: "Delete", Destructive: true,
+		ConfirmTitle: "Delete object versions?", ConfirmStyle: console.DeleteConfirmWord,
+		SelectionField: versionsField, Fields: []console.Field{{Name: versionsField, Type: "hidden"}},
+		Confirm: "The checked versions are deleted, each by its generation. With soft delete on for the bucket " +
+			"each can be restored, from the Show list's Soft-deleted objects only, until its hard delete time."}
+}
+
+// deleteCheckedVersions is objects.delete of each checked generation of the
+// object, named as Version history names its rows (name#generation), one
+// per line. Every one is checked to be a generation of this object before
+// any is deleted.
+func deleteCheckedVersions(ctx context.Context, c *storage.Client, bucket, name string, page int64, checked string) error {
+	if page != 0 {
+		return errors.New("versions are deleted from the object's Version history")
+	}
+	var gens []int64
+	for _, line := range strings.Split(checked, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		i := strings.LastIndex(line, "#")
+		if i < 0 || line[:i] != name {
+			return fmt.Errorf("%q is not a version of %s", line, name)
+		}
+		gen, err := strconv.ParseInt(line[i+1:], 10, 64)
+		if err != nil || gen <= 0 {
+			return fmt.Errorf("%q names no generation", line)
+		}
+		gens = append(gens, gen)
+	}
+	if len(gens) == 0 {
+		return errors.New("check the versions to delete")
+	}
+	for _, gen := range gens {
+		if err := c.Bucket(bucket).Object(name).Generation(gen).Delete(ctx); err != nil {
+			return fmt.Errorf("delete generation %d: %w", gen, err)
+		}
+	}
+	return nil
+}
+
+// withoutAction is actions less the one with that ID.
+func withoutAction(actions []console.Action, id string) []console.Action {
+	out := actions[:0:0]
+	for _, a := range actions {
+		if a.ID != id {
+			out = append(out, a)
+		}
+	}
+	return out
+}

@@ -66,16 +66,24 @@ func editVersioningAction(b bucketMeta) console.Action {
 		state = "Enabled"
 	}
 	return console.Action{
-		ID: "editversioning", Label: "Edit object versioning",
+		// Google's "Object versioning" dialog, ending in Confirm, with "Add
+		// recommended lifecycle rules to manage version costs" (#1843,
+		// using-object-versioning).
+		ID: "editversioning", Label: "Edit object versioning", Title: "Object versioning", Submit: "Confirm",
 		Fields: []console.Field{
 			{Name: "metageneration", Type: "hidden", Default: b.Metageneration},
 			{Name: "versioning", Label: "Object versioning", Type: "radio", Default: state,
 				Options: []string{"Enabled", "Disabled"},
 				Help:    "Enabled, an overwritten or deleted object is kept as a noncurrent version."},
+			{Name: "recommended", Label: "Add recommended lifecycle rules to manage version costs", Type: "checkbox",
+				Default: "false", ShowWhen: "versioning=Enabled",
+				Help: "Adds lifecycle rules deleting noncurrent versions, by count and by age, as set below."},
 			{Name: "maxVersions", Label: "Max. number of versions per object", Type: "text", Pattern: `^[0-9]*$`,
-				Help: "Optional. Adds a lifecycle rule deleting noncurrent versions past this many newer ones."},
+				ShowWhen: "versioning=Enabled&recommended",
+				Help:     "Adds a lifecycle rule deleting noncurrent versions past this many newer ones."},
 			{Name: "expireDays", Label: "Expire noncurrent versions after (days)", Type: "text", Pattern: `^[0-9]*$`,
-				Help: "Optional. Adds a lifecycle rule deleting a version this many days after it becomes noncurrent."},
+				ShowWhen: "versioning=Enabled&recommended",
+				Help:     "Adds a lifecycle rule deleting a version this many days after it becomes noncurrent."},
 		},
 	}
 }
@@ -140,9 +148,16 @@ func (p storageProvider) actOnBucketTabs(ctx context.Context, path []string, act
 	on := values["versioning"] == "Enabled"
 	body := map[string]any{"versioning": map[string]any{"enabled": on}}
 	var added []any
+	// The limits are the recommended rules' (#1843): read only while that
+	// box is checked; a caller that sends no box at all keeps the limits
+	// it sends.
+	recommended := values["recommended"]
+	if recommended == "true" && strings.TrimSpace(values["maxVersions"]) == "" && strings.TrimSpace(values["expireDays"]) == "" {
+		return true, errors.New("the recommended lifecycle rules need a max. number of versions or days to expire noncurrent versions after")
+	}
 	for _, lim := range []struct{ key, cond string }{{"maxVersions", "numNewerVersions"}, {"expireDays", "daysSinceNoncurrentTime"}} {
 		v := strings.TrimSpace(values[lim.key])
-		if v == "" {
+		if v == "" || recommended == "false" {
 			continue
 		}
 		if !on {
@@ -218,7 +233,7 @@ func (storageProvider) ScopeKey() string { return bucketViewKey }
 func bucketViewScope(selected string) *console.Scope {
 	return &console.Scope{Key: bucketViewKey, Label: "View options", Selected: selected, Default: bucketViewLive,
 		Options: []console.ScopeOption{{ID: bucketViewLive, Label: "Live buckets"},
-			{ID: bucketViewSoftDeleted, Label: "Soft deleted buckets only"}}}
+			{ID: bucketViewSoftDeleted, Label: "Soft deleted buckets only"}}, ViewOptions: true}
 }
 
 // softDeletedBuckets is the Buckets list showing soft-deleted buckets only,
@@ -264,16 +279,16 @@ func (p storageProvider) softBucketDetail(ctx context.Context, path []string) (c
 		Trail: []console.Crumb{{Label: "Soft-deleted buckets", Path: nil}, {Label: b.Name}}}, nil
 }
 
-func (p storageProvider) softBucketActions(ctx context.Context, path []string) []console.Action {
+func (p storageProvider) softBucketActions(ctx context.Context, project string, path []string) []console.Action {
 	if len(path) != 3 {
 		return nil
 	}
-	return storageDeletedProvider{endpoint: p.endpoint}.DetailActions(ctx, "", path[1:])
+	return storageDeletedProvider{endpoint: p.endpoint}.DetailActions(ctx, project, path[1:])
 }
 
-func (p storageProvider) restoreSoftBucket(ctx context.Context, path []string, action string) error {
+func (p storageProvider) restoreSoftBucket(ctx context.Context, path []string, action string, values map[string]string) error {
 	if len(path) != 3 {
 		return errors.New("a soft-deleted bucket is addressed generation/name")
 	}
-	return storageDeletedProvider{endpoint: p.endpoint}.ActAt(ctx, "", path[1:], action, nil)
+	return storageDeletedProvider{endpoint: p.endpoint}.ActAt(ctx, "", path[1:], action, values)
 }

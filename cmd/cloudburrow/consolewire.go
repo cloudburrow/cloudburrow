@@ -210,6 +210,8 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		if enabled[config.ServicePubSub] {
 			sp.pubsub = pubsubAddr
 		}
+		// A bucket's Inventory reports tab (#1843) reads Storage Insights.
+		sp.insights = companionAddr(d.cfg, d.cfg.Endpoints.StorageInsights)
 		providers = append(providers, sp,
 			storageDeletedProvider{endpoint: storageAddr},
 			storageSettingsProvider{endpoint: storageAddr},

@@ -24,6 +24,13 @@ const (
 	DeleteConfirmWordTitle = "Delete"
 	// DeleteConfirmClick asks for nothing typed: the dialog's Delete alone.
 	DeleteConfirmClick = "confirm"
+	// DeleteConfirmPrefix10 asks for the first 10 characters of the name,
+	// as Cloud Storage's Delete HMAC key asks for the access ID's (#2047).
+	// An action's ConfirmStyle only.
+	DeleteConfirmPrefix10 = "prefix10"
+	// DeleteConfirmDisable asks for the word Disable, as Storage
+	// Intelligence's Disable does (#2047). An action's ConfirmStyle only.
+	DeleteConfirmDisable = "Disable"
 )
 
 // DeleteConfirmer is a Deleter that names its confirmation itself, where
