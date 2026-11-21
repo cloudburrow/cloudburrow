@@ -142,7 +142,13 @@ func (e *gemma2Embedder) Embed(ctx context.Context, in []Input, dim int, autoTru
 }
 
 func (e *gemma2Embedder) embedOne(x Input, autoTruncate bool) (Output, error) {
+	cut := false
 	if len(x.Parts) == 0 {
+		if n := x.MaxTextTokens; n > 0 {
+			if ids, _ := e.tok.Encode(x.Content, false); len(ids) > n {
+				x.Content, cut = e.tok.Decode(ids[:n], false), true
+			}
+		}
 		x.Parts = []Part{{Text: x.Content}}
 	}
 	text, _, err := MultimodalPrompt(x)
@@ -228,7 +234,7 @@ func (e *gemma2Embedder) embedOne(x Input, autoTruncate bool) (Output, error) {
 		return Output{}, fmt.Errorf("%d images, %d clips and %d videos but %d, %d and %d placeholders",
 			len(patches), len(clips), len(videos), k, a, v)
 	}
-	truncated := false
+	truncated := cut
 	if len(expanded) > MaxTokens2 {
 		if len(patches) > 0 || len(clips) > 0 || len(videos) > 0 || !autoTruncate {
 			return Output{}, fmt.Errorf("%d tokens exceeds %d", len(expanded), MaxTokens2)

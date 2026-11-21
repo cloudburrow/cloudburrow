@@ -35,12 +35,20 @@ import (
 //     Storage, the same vectors as inline;
 //   - a VP9 WebM and an H.264 MKV (Google takes MKV and WEBM), each the
 //     same vector as the MP4 it was remuxed from;
+//   - AVI, FLV, MPEG and WMV (Google takes them too), decoded by FFmpeg in
+//     the instance's video decoder container: the MP4's H.264 stream
+//     copied into AVI and FLV gives the MP4's vector, and MPEG-4 Part 2
+//     AVI, Sorenson Spark FLV, MPEG-2 and WMV 8 re-encodings of it a vector
+//     within their encoders' loss of it;
+//   - text over 32 tokens shortened to its first 32 (Google: "the model
+//     internally shortens the input to this length"): 40 one-token words
+//     embed as their first 32 do, and not as their first 31;
 //
 // and refuses what Google refuses, or this build cannot do, naming it: two
 // instances, a dimension Google does not offer, an interval under 4 seconds
-// (INVALID_ARGUMENT), dimension 1408 (the local model's vectors have 768
-// values) and an AVI (not demuxed here; UNIMPLEMENTED); and
-// multimodalembedding@001 itself is NOT_FOUND, nothing being substituted.
+// (INVALID_ARGUMENT) and dimension 1408 (the local model's vectors have 768
+// values; UNIMPLEMENTED); and multimodalembedding@001 itself is NOT_FOUND,
+// nothing being substituted.
 func TestMultimodalEmbeddingPredictThroughThePredictionClient(t *testing.T) {
 	h := New(t)
 	pc := predictionClientAt(t, h, EnvEmbeddings)
@@ -182,7 +190,44 @@ func TestMultimodalEmbeddingPredictThroughThePredictionClient(t *testing.T) {
 		}
 	}
 
-	avi := []byte("RIFF\x24\x00\x00\x00AVI LIST\x04\x00\x00\x00hdrl")
+	// AVI, FLV, MPEG and WMV, through the video decoder container.
+	h264 := must(predict(nil, video(map[string]any{"bytesBase64Encoded": b64(embeddingTestdata(t, "turtle-h264.mp4"))})))
+	for _, c := range []struct {
+		file string
+		min  float64
+	}{
+		{"turtle-h264.avi", 0.99999}, {"turtle-h264.flv", 0.99999},
+		{"turtle-mpeg4.avi", 0.98}, {"turtle-flv1.flv", 0.98}, {"turtle-mpeg2.mpg", 0.98}, {"turtle-wmv2.wmv", 0.98},
+	} {
+		a := must(predict(nil, video(map[string]any{"bytesBase64Encoded": b64(embeddingTestdata(t, c.file))})))
+		if len(a.video) != 1 || a.video[0].start != 0 || a.video[0].end != 3 || len(h264.video) != 1 {
+			t.Errorf("%s: segments %+v, the MP4's %+v", c.file, a.video, h264.video)
+			continue
+		}
+		cs := cosine(a.video[0].vec, h264.video[0].vec)
+		if cs < c.min {
+			t.Errorf("%s against turtle-h264.mp4: cosine %.6f, want at least %v", c.file, cs, c.min)
+		}
+		t.Logf("%s against turtle-h264.mp4: cosine %.6f", c.file, cs)
+	}
+
+	// Text over 32 tokens is shortened to 32.
+	words := strings.Fields("the cat sat on the mat and the dog ran in the park with a red ball while the sun was high in the blue sky " +
+		"over the green hill near the old town by the sea and the wind blew softly")
+	if len(words) < 40 {
+		t.Fatalf("%d words", len(words))
+	}
+	text := func(n int) string { return strings.Join(words[:n], " ") }
+	long := must(predict(nil, map[string]any{"text": text(40)})).text
+	first32 := must(predict(nil, map[string]any{"text": text(32)})).text
+	first31 := must(predict(nil, map[string]any{"text": text(31)})).text
+	if c := cosine(long, first32); c < 0.99999 {
+		t.Errorf("40 words against their first 32: cosine %.6f, want the same vector", c)
+	}
+	if c := cosine(long, first31); c > 0.99999 {
+		t.Errorf("40 words against their first 31: cosine %.6f, want a different vector", c)
+	}
+
 	for what, c := range map[string]struct {
 		params    map[string]any
 		instances []map[string]any
@@ -194,7 +239,6 @@ func TestMultimodalEmbeddingPredictThroughThePredictionClient(t *testing.T) {
 		"dimension 1408": {map[string]any{"dimension": 1408}, []map[string]any{{"text": "a"}}, codes.Unimplemented, "768 values"},
 		"interval 3": {nil, []map[string]any{video(map[string]any{"bytesBase64Encoded": b64(turtle),
 			"videoSegmentConfig": map[string]any{"intervalSec": 3}})}, codes.InvalidArgument, "minimum of 4"},
-		"AVI": {nil, []map[string]any{video(map[string]any{"bytesBase64Encoded": b64(avi)})}, codes.Unimplemented, "AVI container"},
 	} {
 		_, err := predict(c.params, c.instances...)
 		if status.Code(err) != c.code || !strings.Contains(err.Error(), c.field) {

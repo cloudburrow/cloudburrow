@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/color"
 	"image/gif"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/embedding"
 	"github.com/cloudburrow/cloudburrow/internal/localai"
@@ -88,7 +90,7 @@ func TestMultimodalEmbeddingPredict(t *testing.T) {
 		t.Fatalf("text and image at 256: %d, %d, %v", len(p.TextEmbedding), len(p.ImageEmbedding), p.VideoEmbeddings)
 	}
 	last := e.calls[len(e.calls)-1]
-	if len(last) != 2 || last[0].Content != "a test pattern" || last[1].Parts[0].Image == nil {
+	if len(last) != 2 || last[0].Content != "a test pattern" || last[0].MaxTextTokens != 32 || last[1].Parts[0].Image == nil {
 		t.Fatalf("embedder got %+v", last)
 	}
 	// GIF and BMP, which multimodalembedding@001 documents.
@@ -156,7 +158,7 @@ func TestMultimodalEmbeddingPredict(t *testing.T) {
 		{`{"instances":[{"image":{"gcsUri":"gs://b/x.webp"}}]}`, 400, "BMP, GIF, JPEG or PNG"},
 		{`{"instances":[{"image":{"gcsUri":"https://example.com/i.png"}}]}`, 400, "gs://{bucket}/{object}"},
 		{`{"instances":[{"image":{"gcsUri":"gs://b/missing.png"}}]}`, 404, "not found"},
-		{`{"instances":[{"video":{"gcsUri":"gs://b/v.avi"}}]}`, 501, "AVI container"},
+		{`{"instances":[{"video":{"gcsUri":"gs://b/v.avi"}}]}`, 503, "video decoder container"},
 		{`{"instances":[{"video":{"gcsUri":"gs://b/txt.bin"}}]}`, 400, "is not supported"},
 		{`{"instances":[{"video":{"gcsUri":"gs://b/v.mp4","videoSegmentConfig":{"intervalSec":3}}}]}`, 400, "minimum of 4"},
 		{`{"instances":[{"video":{"gcsUri":"gs://b/v.mp4","videoSegmentConfig":{"startOffsetSec":-1}}}]}`, 400, "must not be negative"},
@@ -206,4 +208,96 @@ func TestSniffMedia(t *testing.T) {
 			t.Errorf("%q: %s, want %s", c.b, got, c.want)
 		}
 	}
+}
+
+// fakeContainer serves a 10-second, 2 fps AVI of 4 × 2 grey frames, each
+// frame's luma its index, as internal/videodecode's FFmpeg would.
+type fakeContainer struct {
+	closed  *int
+	decoded *[]int
+	err     error
+}
+
+func (f fakeContainer) ProbeFrames([]byte) (*embedding.ProbedVideo, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	pv := &embedding.ProbedVideo{Codec: "mpeg4", End: 10 * time.Second}
+	for i := 0; i < 20; i++ {
+		pv.Times = append(pv.Times, time.Duration(i)*500*time.Millisecond)
+	}
+	return pv, nil
+}
+
+func (f fakeContainer) DecodeFrames(_ []byte, idx []int, yield func(int, embedding.RawFrame) error) error {
+	for _, i := range idx {
+		*f.decoded = append(*f.decoded, i)
+		pix := bytes.Repeat([]byte{byte(i)}, 4*2)
+		if err := yield(i, embedding.RawFrame{W: 4, H: 2, Format: "gray", Pix: pix, Matrix: 2}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (f fakeContainer) Close() error { *f.closed++; return nil }
+
+type fakeVideoDecoder struct{ c fakeContainer }
+
+func (d fakeVideoDecoder) Source(context.Context) ContainerSource { return d.c }
+
+// TestMultimodalEmbeddingContainerVideo (#1651): AVI, FLV, MPEG and WMV
+// video goes through the VideoDecoder, sampled at 1 fps from its frame
+// list as an MP4's frames are, and its Source is closed; a decoder that
+// cannot run is UNAVAILABLE.
+func TestMultimodalEmbeddingContainerVideo(t *testing.T) {
+	s := NewServer(nil)
+	e := &callsEmbedder{}
+	s.SwapModelEmbedder(localai.EmbeddingGemma2ONNXID, e, nil)
+	closed, decoded := 0, []int{}
+	s.SetVideoDecoder(fakeVideoDecoder{fakeContainer{closed: &closed, decoded: &decoded}})
+	avi := base64.StdEncoding.EncodeToString([]byte("RIFF\x00\x00\x00\x00AVI LIST"))
+	rec := postPredict(t, s, localai.EmbeddingGemma2ONNXID,
+		`{"instances":[{"video":{"bytesBase64Encoded":"`+avi+`","videoSegmentConfig":{"intervalSec":5}}}]}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	var r struct{ Predictions []mmPrediction }
+	if err := json.Unmarshal(rec.Body.Bytes(), &r); err != nil || len(r.Predictions) != 1 {
+		t.Fatalf("response %s: %v", rec.Body.String(), err)
+	}
+	v := r.Predictions[0].VideoEmbeddings
+	if len(v) != 2 || v[0].StartOffsetSec != 0 || v[0].EndOffsetSec != 5 || v[1].StartOffsetSec != 5 || v[1].EndOffsetSec != 10 {
+		t.Fatalf("segments: %+v", v)
+	}
+	// 1 fps: every second frame of the 2 fps stream.
+	if want := []int{0, 2, 4, 6, 8, 10, 12, 14, 16, 18}; !equalInts(decoded, want) {
+		t.Fatalf("decoded frames %v, want %v", decoded, want)
+	}
+	if closed != 1 {
+		t.Fatalf("Source closed %d times", closed)
+	}
+	segs := e.calls[len(e.calls)-1]
+	if len(segs) != 2 || len(segs[0].Parts[0].Video) != 5 {
+		t.Fatalf("segments' frames: %+v", segs)
+	}
+
+	s.SetVideoDecoder(fakeVideoDecoder{fakeContainer{closed: &closed, decoded: &decoded,
+		err: fmt.Errorf("no docker: %w", embedding.ErrDecoderUnavailable)}})
+	rec = postPredict(t, s, localai.EmbeddingGemma2ONNXID, `{"instances":[{"video":{"bytesBase64Encoded":"`+avi+`"}}]}`)
+	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "no docker") {
+		t.Fatalf("decoder unavailable: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func equalInts(a, b []int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

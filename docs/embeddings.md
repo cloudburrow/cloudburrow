@@ -560,12 +560,30 @@ docker run --rm -v "$PWD:/models" \
 > `TestMatroskaFramesMatchMP4`). `parameters.dimension` 128, 256 or 512 reduces the text and
 > image vectors (video vectors are not reduced, as Google documents). What differs, because
 > the model is EmbeddingGemma 2 and not Google's: vectors have 768 values, so `dimension` 1408,
-> Google's default, is `UNIMPLEMENTED` and an unset dimension gives 768; text is not cut to 32
-> tokens; AVI, FLV, MPEG and WMV are `UNIMPLEMENTED`. `multimodalembedding@001` itself is
+> Google's default, is `UNIMPLEMENTED` and an unset dimension gives 768; text is shortened to 32
+> tokens and AVI, FLV, MPEG and WMV are decoded since the second round (below). `multimodalembedding@001` itself is
 > `NOT_FOUND`, naming the model that serves its request: nothing is substituted. Two instances, a
 > dimension Google does not offer and an interval under 4 seconds are `INVALID_ARGUMENT`.
 > Verified with the official `aiplatform` PredictionClient by
-> `TestMultimodalEmbeddingPredictThroughThePredictionClient`. The Go `genai` SDK cannot send this
+> `TestMultimodalEmbeddingPredictThroughThePredictionClient`.
+>
+> **Update 2026-11-21 (#1651, second round).** Text over 32 tokens is shortened to its first 32,
+> as Google documents ("If the input exceeds 32 tokens, the model internally shortens the input to
+> this length"; no error), counted with the local model's own tokenizer (Gemma's SentencePiece:
+> Google documents its count only as "32 tokens (approximately 32 words)"). AVI, FLV, MPEG
+> (program and transport streams) and WMV video, which Google also takes, are decoded by FFmpeg in
+> a pinned container, `internal/videodecode`: Debian's `ffmpeg` 7.1.5 (from snapshot.debian.org)
+> on the official `debian:trixie-slim`, built locally as `cloudburrow/videodecode:<hash>` on the
+> first such video and run `docker run --network none --read-only` as nobody. ffprobe lists the
+> frames; ffmpeg decodes the ones sampled at 1 a second to their native planes, which
+> `internal/embedding` converts and patches exactly as it does an MP4's, so an H.264 stream copied
+> into AVI or FLV gives the MP4's frames pixel for pixel (`TestFramesMatchTheMP4`, with
+> `CLOUDBURROW_VIDEODECODE_IMAGE` set; MPEG-4 Part 2, Sorenson Spark, MPEG-2 and WMV 8
+> re-encodings within their encoders' loss, over 33 dB PSNR). FFmpeg runs as a separate program:
+> none of its (LGPL/GPL) code is in the repository or linked into the CLI. Without Docker these
+> four containers are `UNAVAILABLE`, naming why. Still different: `dimension` 1408 (the vectors
+> have 768 values) and `multimodalembedding@001` itself (`NOT_FOUND`: nothing is substituted).
+> The Go `genai` SDK cannot send this
 > request: its `Models.EmbedContent` posts `:embedContent` only for model names containing
 > `gemini` or `maas` and otherwise `:predict` with each content's first text part, so it reaches
 > the local model as text only (`TestEmbeddingGemmaThroughTheOfficialSDK`).

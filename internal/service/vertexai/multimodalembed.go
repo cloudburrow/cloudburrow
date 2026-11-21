@@ -47,10 +47,17 @@ import (
 // considered; dimension 128, 256 or 512 for text and image (video vectors
 // are not reduced). What differs, because the local model is not Google's:
 // vectors are EmbeddingGemma 2's 768 values, so dimension 1408 (Google's
-// default) is UNIMPLEMENTED and an unset dimension gives 768; text is not
-// cut to 32 tokens (the local tokenizer is not Google's); and of the
-// containers Google takes, MP4, MOV, MKV and WebM are demuxed here
-// (embedding/matroska.go), while AVI, FLV, MPEG and WMV are UNIMPLEMENTED.
+// default) is UNIMPLEMENTED and an unset dimension gives 768.
+//
+// Text over Google's 32 tokens is shortened to them, as Google documents
+// ("the model internally shortens the input to this length"), counted
+// with the local model's own tokenizer (Gemma's SentencePiece), Google's
+// being undocumented beyond "approximately 32 words". MP4, MOV, MKV and
+// WebM are demuxed and decoded in process (embedding/video.go,
+// matroska.go); AVI, FLV, MPEG and WMV, whose codecs no permissive Go
+// decoder reads, are decoded by FFmpeg in a pinned container
+// (internal/videodecode), sampled and converted here as an MP4's frames
+// are.
 
 // mmImageBytes is Google's image limit for multimodalembedding@001: 20 MB.
 const mmImageBytes = 20 << 20
@@ -74,6 +81,31 @@ const (
 var mmDimensions = []int{128, 256, 512, 1408}
 
 const mmGoogleDim = 1408
+
+// mmMaxTextTokens is multimodalembedding@001's text length: 32 tokens;
+// longer text is shortened to them.
+const mmMaxTextTokens = 32
+
+// VideoDecoder decodes the AVI, FLV, MPEG and WMV video the in-process
+// decoders do not (internal/videodecode's Docker).
+type VideoDecoder interface {
+	// Source is a decoder for one request's video; its Close frees it.
+	Source(ctx context.Context) ContainerSource
+}
+
+// ContainerSource is one request's VideoDecoder.
+type ContainerSource interface {
+	embedding.ContainerDecoder
+	Close() error
+}
+
+// SetVideoDecoder makes multimodalembedding@001's request decode AVI, FLV,
+// MPEG and WMV video with d; without it they are UNAVAILABLE.
+func (s *Server) SetVideoDecoder(d VideoDecoder) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.videoDecoder = d
+}
 
 type mmRequest struct {
 	Instances  []mmInstance  `json:"instances"`
@@ -174,12 +206,13 @@ func (s *Server) multimodalPredict(ctx context.Context, e embedding.Embedder, bo
 	}
 	s.mu.RLock()
 	objs := s.objects
+	vd := s.videoDecoder
 	s.mu.RUnlock()
 
 	// Text and image, reduced to dimension; then the video's segments.
 	var reduced []embedding.Input
 	if x.Text != nil {
-		reduced = append(reduced, embedding.Input{Content: *x.Text})
+		reduced = append(reduced, embedding.Input{Content: *x.Text, MaxTextTokens: mmMaxTextTokens})
 	}
 	if x.Image != nil {
 		img, err := mmDecodeImage(ctx, x.Image, objs)
@@ -191,7 +224,7 @@ func (s *Server) multimodalPredict(ctx context.Context, e embedding.Embedder, bo
 	var segs []mmSegment
 	if x.Video != nil {
 		var err error
-		if segs, err = mmDecodeVideo(ctx, x.Video, objs); err != nil {
+		if segs, err = mmDecodeVideo(ctx, x.Video, objs, vd); err != nil {
 			return nil, err
 		}
 	}
@@ -238,6 +271,15 @@ func embedFailed(ctx context.Context, err error) error {
 		return ctx.Err()
 	}
 	return apierror.InvalidArgument("%v", err)
+}
+
+func containsString(xs []string, v string) bool {
+	for _, x := range xs {
+		if x == v {
+			return true
+		}
+	}
+	return false
 }
 
 func containsInt(xs []int, v int) bool {
@@ -341,16 +383,15 @@ func decodeGIF(data []byte) (image.Image, error) {
 }
 
 // mmVideoTypes are the containers multimodalembedding@001 takes, with
-// their aliases, mapped to the type demuxed here, or for one that is not
-// to its name.
+// their aliases, mapped to their canonical type.
 var mmVideoTypes = map[string]string{
 	"video/mp4": "video/mp4", "video/quicktime": "video/quicktime", "video/mov": "video/quicktime",
-	"video/x-msvideo": "AVI", "video/avi": "AVI", "video/msvideo": "AVI",
-	"video/x-flv": "FLV", "video/flv": "FLV",
+	"video/x-msvideo": "video/x-msvideo", "video/avi": "video/x-msvideo", "video/msvideo": "video/x-msvideo",
+	"video/x-flv": "video/x-flv", "video/flv": "video/x-flv",
 	"video/x-matroska": "video/x-matroska", "video/mkv": "video/x-matroska",
 	"video/webm": "video/webm",
-	"video/mpeg": "MPEG", "video/mpg": "MPEG",
-	"video/x-ms-wmv": "WMV", "video/wmv": "WMV", "video/x-ms-asf": "WMV",
+	"video/mpeg": "video/mpeg", "video/mpg": "video/mpeg", "video/mp2t": "video/mpeg",
+	"video/x-ms-wmv": "video/x-ms-wmv", "video/wmv": "video/x-ms-wmv", "video/x-ms-asf": "video/x-ms-wmv",
 }
 
 // mmSegment is one videoSegmentConfig interval and its sampled frames.
@@ -359,7 +400,7 @@ type mmSegment struct {
 	frames     []image.Image
 }
 
-func mmDecodeVideo(ctx context.Context, v *mmVideo, objs Objects) ([]mmSegment, error) {
+func mmDecodeVideo(ctx context.Context, v *mmVideo, objs Objects, vd VideoDecoder) ([]mmSegment, error) {
 	const field = "instances[0].video"
 	data, mt, err := mmMediaBytes(ctx, field, v.BytesBase64Encoded, v.GcsURI, v.MimeType, mmVideoObjectBytes, objs)
 	if err != nil {
@@ -380,9 +421,15 @@ func mmDecodeVideo(ctx context.Context, v *mmVideo, objs Objects) ([]mmSegment, 
 		return nil, apierror.InvalidArgument(
 			"%s: %q is not supported; send AVI, FLV, MKV, MOV, MP4, MPEG, MPG, WEBM or WMV", field, t)
 	}
-	if !strings.HasPrefix(canon, "video/") {
-		return nil, apierror.Unimplemented(
-			"%s: the %s container is not demuxed by this build; send MP4, MOV, MKV or WebM", field, canon)
+	opt := embedding.VideoOptions{FPS: embedding.DefaultVideoFPS, Matroska: true}
+	if containsString(embedding.ContainerMIMETypes, canon) {
+		if vd == nil {
+			return nil, &apierror.Error{Code: codes.Unavailable, Reason: "backendError", Message: fmt.Sprintf(
+				"%s: %s video is decoded by the video decoder container, which this instance does not run; send MP4, MOV, MKV or WebM", field, canon)}
+		}
+		src := vd.Source(ctx)
+		defer src.Close()
+		opt.Container = src
 	}
 
 	start, interval := 0, mmDefaultInterval
@@ -412,7 +459,6 @@ func mmDecodeVideo(ctx context.Context, v *mmVideo, objs Objects) ([]mmSegment, 
 	if end < 0 || end-start > mmMaxSeconds {
 		end = start + mmMaxSeconds
 	}
-	opt := embedding.VideoOptions{FPS: embedding.DefaultVideoFPS, Matroska: true}
 	dur, err := embedding.VideoDuration(canon, data, opt)
 	if err != nil {
 		return nil, videoError(field, err)
@@ -441,6 +487,12 @@ func mmDecodeVideo(ctx context.Context, v *mmVideo, objs Objects) ([]mmSegment, 
 }
 
 func videoError(field string, err error) error {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	if errors.Is(err, embedding.ErrDecoderUnavailable) {
+		return &apierror.Error{Code: codes.Unavailable, Reason: "backendError", Message: fmt.Sprintf("%s: %v", field, err)}
+	}
 	if errors.Is(err, embedding.ErrNotDecoded) || errors.Is(err, embedding.ErrVideoCodec) {
 		return apierror.Unimplemented("%s: %v", field, err)
 	}
@@ -481,6 +533,8 @@ func sniffMedia(b []byte) string {
 		return "video/x-matroska"
 	case bytes.HasPrefix(b, []byte{0, 0, 1, 0xBA}) || bytes.HasPrefix(b, []byte{0, 0, 1, 0xB3}):
 		return "video/mpeg"
+	case len(b) > 376 && b[0] == 0x47 && b[188] == 0x47 && b[376] == 0x47:
+		return "video/mpeg" // an MPEG transport stream
 	}
 	return mmBase(http.DetectContentType(b))
 }

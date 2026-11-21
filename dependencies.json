@@ -13,6 +13,33 @@
     "latestCandidate": "Discovered by #31, tested in isolation, never used for release artifacts until promoted here."
   },
   "components": {
+    "videodecode": {
+      "debianBase": {
+        "$comment": "internal/videodecode/Dockerfile builds FROM this digest (#1651): the video decoder image the CLI builds locally on the first AVI, FLV, MPEG or WMV video sent to multimodalembedding@001's :predict.",
+        "image": "debian:trixie-slim",
+        "digest": "sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2",
+        "license": "DFSG-free Debian packages (see /usr/share/doc/*/copyright)",
+        "redistribution": "not published: built locally by `cloudburrow up` (tag cloudburrow/videodecode:<Dockerfile hash>) and run with --network none",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "notes": "Multi-arch OCI index, resolved 2026-11-21. The Docker official debian image, third-party: Google publishes no FFmpeg image.",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect debian:trixie-slim`."
+      },
+      "ffmpeg": {
+        "$comment": "apt-get install ffmpeg=7:7.1.5-0+deb13u1 from snapshot.debian.org 20261120T000000Z in internal/videodecode/Dockerfile (#1651): ffprobe lists a video's frames and ffmpeg decodes the sampled ones to raw planes.",
+        "version": "7:7.1.5-0+deb13u1",
+        "source": "https://snapshot.debian.org/archive/debian/20261120T000000Z/pool/main/f/ffmpeg/",
+        "license": "GPL-2.0-or-later and LGPL-2.1-or-later (Debian's build)",
+        "redistribution": "not published: installed into the locally built decoder image and run there as a separate program; no FFmpeg code is in the repository or linked into the CLI",
+        "updateFeed": "debian-snapshot",
+        "verification": "built-and-run",
+        "skipDiscovery": "Debian package; depcheck only discovers GitHub-sourced components."
+      }
+    },
     "bigqueryml": {
       "tfconvertBase": {
         "$comment": "deploy/tfconvert/Dockerfile builds FROM this digest (#1775): the TensorFlow SavedModel converter image the CLI builds locally on the first imported TENSORFLOW model.",
