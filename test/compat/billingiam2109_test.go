@@ -278,15 +278,35 @@ func TestIAMEnforcementBilling(t *testing.T) {
 	// ("Any billable activity of your in-use services will stop"), so the
 	// topic is SERVICE_DISABLED until the project is linked again, which
 	// enables them again.
-	if _, err := ps.TopicAdminClient.CreateTopic(ctx, &pubsubpb.Topic{Name: topicName}); status.Code(err) != codes.PermissionDenied ||
-		!strings.Contains(err.Error(), "SERVICE_DISABLED") {
+	// Pub/Sub's gate in the cluster caches the API states for a second
+	// (apienable.CacheFor), so each is waited for.
+	disabled := func(err error) bool {
+		return status.Code(err) == codes.PermissionDenied && strings.Contains(err.Error(), "SERVICE_DISABLED")
+	}
+	for i := 0; i < 25; i++ {
+		probe := fmt.Sprintf("%s-off%d", topicName, i)
+		if _, err = ps.TopicAdminClient.CreateTopic(ctx, &pubsubpb.Topic{Name: probe}); disabled(err) {
+			break
+		}
+		if err == nil {
+			_ = ps.TopicAdminClient.DeleteTopic(ctx, &pubsubpb.DeleteTopicRequest{Topic: probe})
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	if !disabled(err) {
 		t.Fatalf("CreateTopic with billing disabled = %v; want PERMISSION_DENIED with SERVICE_DISABLED", err)
 	}
 	if err := link(acct); err != nil {
 		t.Fatalf("linking again as a Project Billing Manager and Billing Account User: %v", err)
 	}
-	if _, err := ps.TopicAdminClient.CreateTopic(ctx, &pubsubpb.Topic{Name: topicName}); err != nil {
-		t.Fatalf("CreateTopic: %v", err)
+	for i := 0; i < 25; i++ {
+		if _, err = ps.TopicAdminClient.CreateTopic(ctx, &pubsubpb.Topic{Name: topicName}); !disabled(err) {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatalf("CreateTopic once billing is linked again: %v", err)
 	}
 	t.Cleanup(func() {
 		_ = ps.TopicAdminClient.DeleteTopic(context.Background(), &pubsubpb.DeleteTopicRequest{Topic: topicName})
