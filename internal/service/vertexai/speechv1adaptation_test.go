@@ -141,7 +141,7 @@ func TestSpeechV1AdaptationBiasesRecognition(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, opt, err := v.s.v1Checked(&speechv1pb.RecognitionConfig{Encoding: speechv1pb.RecognitionConfig_LINEAR16, SampleRateHertz: 16000,
-		LanguageCode: "en-US", Adaptation: &speechv1pb.SpeechAdaptation{PhraseSetReferences: []string{ps.GetName()}}})
+		LanguageCode: "en-US", Adaptation: &speechv1pb.SpeechAdaptation{PhraseSetReferences: []string{ps.GetName()}}}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,13 +164,13 @@ func TestSpeechV1AdaptationBiasesRecognition(t *testing.T) {
 
 	// An inline phrase naming the stored class by its resource name.
 	_, opt, err = v.s.v1Checked(&speechv1pb.RecognitionConfig{LanguageCode: "en-US",
-		SpeechContexts: []*speechv1pb.SpeechContext{{Phrases: []string{"from ${" + v1Parent + "/customClasses/towns}"}, Boost: 8}}})
+		SpeechContexts: []*speechv1pb.SpeechContext{{Phrases: []string{"from ${" + v1Parent + "/customClasses/towns}"}, Boost: 8}}}, false)
 	if err != nil || len(opt.Phrases) != 2 {
 		t.Errorf("resource-name class: %v %v", opt.Phrases, err)
 	}
 	// An unknown class or phrase set is refused.
 	if _, _, err := v.s.v1Checked(&speechv1pb.RecognitionConfig{LanguageCode: "en-US",
-		SpeechContexts: []*speechv1pb.SpeechContext{{Phrases: []string{"to ${nowhere}"}}}}); code(grpcError(err)) != codes.InvalidArgument {
+		SpeechContexts: []*speechv1pb.SpeechContext{{Phrases: []string{"to ${nowhere}"}}}}, false); code(grpcError(err)) != codes.InvalidArgument {
 		t.Errorf("unknown class: %v", err)
 	}
 }

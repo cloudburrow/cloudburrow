@@ -37,6 +37,13 @@ type Options struct {
 	// ProfanityFilter, SpokenPunctuation and SpokenEmojis are the
 	// features of those names, applied to each final transcript (Format).
 	ProfanityFilter, SpokenPunctuation, SpokenEmojis bool
+	// AutomaticPunctuation is features.enableAutomaticPunctuation:
+	// without it, a model that does not punctuate by itself
+	// (PunctuatesByDefault) answers with the punctuation removed.
+	AutomaticPunctuation bool
+	// Diarization is a features.diarizationConfig: UNIMPLEMENTED
+	// (Unserved) where the table allows it.
+	Diarization bool
 }
 
 // Encodings are ExplicitDecodingConfig's AudioEncoding values, true for
@@ -58,6 +65,9 @@ type Config struct {
 	Options
 	// Model is the recognition model asked for.
 	Model string
+	// Codes are languageCodes as given ("auto" included), checked
+	// against the supported languages table (CheckV2).
+	Codes []string
 	// Adaptation is the config's SpeechAdaptation in JSON, nil for none:
 	// the Speech-to-Text front resolves its phrase sets and custom
 	// classes and biases whisper with them (#1930).
@@ -87,10 +97,14 @@ type Candidate struct {
 	Whisper string // whisper's code for it
 }
 
-// Format applies the config's spoken punctuation and emojis, profanity
+// Format removes the punctuation local whisper.cpp writes when the config
+// does not ask for it (Punctuated), then applies the config's spoken punctuation and emojis, profanity
 // filter and transcriptNormalization, in that order, to a final transcript
 // recognised in the language code.
 func (c Config) Format(text, code string) string {
+	if !c.Punctuated() {
+		text = StripPunctuation(text)
+	}
 	if c.SpokenPunctuation {
 		text = SpokenPunctuation(text, code)
 	}
@@ -174,7 +188,7 @@ func Parse(raw []byte) (c Config, code int, err error) {
 	norm, _ := json.Marshal(camelKeys(generic))
 	var rc recognitionConfig
 	_ = json.Unmarshal(norm, &rc)
-	c = Config{Decoding: d, Language: lang, Options: opt, Model: rc.Model}
+	c = Config{Decoding: d, Language: lang, Options: opt, Model: rc.Model, Codes: rc.LanguageCodes}
 	if rc.TranscriptNormalization != nil {
 		c.Normalization = rc.TranscriptNormalization.Entries
 	}
@@ -400,11 +414,6 @@ func parse(raw []byte) (Decoding, string, Options, int, error) {
 	}
 	if f := c.Features; f != nil {
 		switch {
-		case f.DiarizationConfig != nil && !diarizationModels[c.Model]:
-			return d, "", opt, 400, fmt.Errorf("Recognizer does not support feature: speaker_diarization: the %q model does not support "+
-				"diarization (Speech-to-Text's supported languages table lists it for chirp_3 alone among the served models)", c.Model)
-		case f.DiarizationConfig != nil:
-			return unimpl("features.diarizationConfig")
 		case f.MultiChannelMode != "" && f.MultiChannelMode != "MULTI_CHANNEL_MODE_UNSPECIFIED" && f.MultiChannelMode != "SEPARATE_RECOGNITION_PER_CHANNEL":
 			return d, "", opt, 400, fmt.Errorf("invalid features.multiChannelMode %q", f.MultiChannelMode)
 		case f.MaxAlternatives < 0 || f.MaxAlternatives > 30:
@@ -412,7 +421,8 @@ func parse(raw []byte) (Decoding, string, Options, int, error) {
 		}
 		opt = Options{Words: f.EnableWordTimeOffsets || f.EnableWordConfidence, WordOffsets: f.EnableWordTimeOffsets, WordConfidence: f.EnableWordConfidence,
 			PerChannel:      f.MultiChannelMode == "SEPARATE_RECOGNITION_PER_CHANNEL",
-			ProfanityFilter: f.ProfanityFilter, SpokenPunctuation: f.EnableSpokenPunctuation, SpokenEmojis: f.EnableSpokenEmojis}
+			ProfanityFilter: f.ProfanityFilter, SpokenPunctuation: f.EnableSpokenPunctuation, SpokenEmojis: f.EnableSpokenEmojis,
+			AutomaticPunctuation: f.EnableAutomaticPunctuation, Diarization: f.DiarizationConfig != nil && string(f.DiarizationConfig) != "null"}
 	}
 	if e := c.ExplicitDecodingConfig; e != nil {
 		served, known := Encodings[e.Encoding]

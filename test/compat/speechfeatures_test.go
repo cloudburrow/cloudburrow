@@ -30,7 +30,7 @@ import (
 // features local whisper.cpp now answers:
 //
 //   - profanityFilter, enableSpokenPunctuation and enableSpokenEmojis on a
-//     clip (macOS say: "Hello comma this shit is great exclamation mark
+//     clip, with the long model in global (chirp takes none of them, #2127) (macOS say: "Hello comma this shit is great exclamation mark
 //     thumbs up"): the profane word keeps its first letter ("s***"), the
 //     spoken marks become "!" and the emoji 👍, from Google's inventories;
 //     the words[] are masked too. Without the features the words stay.
@@ -55,7 +55,8 @@ import (
 //     UNIMPLEMENTED on chirp_3.
 //
 // Speech-to-Text v1's Recognize (cloud.google.com/go/speech/apiv1) takes
-// enable_spoken_punctuation, enable_spoken_emojis and profanity_filter too.
+// enable_spoken_punctuation, enable_spoken_emojis and profanity_filter too,
+// on latest_long (v1's default model has no spoken punctuation, #2127).
 //
 // covers: google.cloud.speech.v2.Speech/Recognize, google.cloud.speech.v1.Speech/Recognize
 func TestSpeechRecognitionFeatures1799(t *testing.T) {
@@ -101,7 +102,7 @@ func TestSpeechRecognitionFeatures1799(t *testing.T) {
 
 	// Profanity filter, spoken punctuation and emojis, gRPC then REST.
 	plain, err := g.Recognize(ctx, &speechv2pb.RecognizeRequest{Recognizer: recognizer("global"), AudioSource: &speechv2pb.RecognizeRequest_Content{Content: spoken},
-		Config: &speechv2pb.RecognitionConfig{Model: "chirp", LanguageCodes: []string{"en-US"}, DecodingConfig: auto}})
+		Config: &speechv2pb.RecognitionConfig{Model: "long", LanguageCodes: []string{"en-US"}, DecodingConfig: auto}})
 	if err != nil {
 		t.Fatalf("Recognize without the features: %v", err)
 	}
@@ -111,7 +112,7 @@ func TestSpeechRecognitionFeatures1799(t *testing.T) {
 	features := &speechv2pb.RecognitionFeatures{ProfanityFilter: true, EnableSpokenPunctuation: true, EnableSpokenEmojis: true, EnableWordTimeOffsets: true}
 	for name, c := range map[string]*speech.Client{"gRPC": g, "REST": r} {
 		res, err := c.Recognize(ctx, &speechv2pb.RecognizeRequest{Recognizer: recognizer("global"), AudioSource: &speechv2pb.RecognizeRequest_Content{Content: spoken},
-			Config: &speechv2pb.RecognitionConfig{Model: "chirp", LanguageCodes: []string{"en-US"}, DecodingConfig: auto, Features: features}})
+			Config: &speechv2pb.RecognitionConfig{Model: "long", LanguageCodes: []string{"en-US"}, DecodingConfig: auto, Features: features}})
 		if err != nil {
 			t.Fatalf("%s Recognize with the features: %v", name, err)
 		}
@@ -131,7 +132,7 @@ func TestSpeechRecognitionFeatures1799(t *testing.T) {
 
 	// v1: the same features.
 	v1res, err := v1.Recognize(ctx, &speechpb.RecognizeRequest{Audio: &speechpb.RecognitionAudio{AudioSource: &speechpb.RecognitionAudio_Content{Content: spoken}},
-		Config: &speechpb.RecognitionConfig{LanguageCode: "en-US", ProfanityFilter: true,
+		Config: &speechpb.RecognitionConfig{LanguageCode: "en-US", Model: "latest_long", ProfanityFilter: true,
 			EnableSpokenPunctuation: wrapperspb.Bool(true), EnableSpokenEmojis: wrapperspb.Bool(true)}})
 	if err != nil {
 		t.Fatalf("v1 Recognize with the features: %v", err)
@@ -198,7 +199,7 @@ func TestSpeechRecognitionFeatures1799(t *testing.T) {
 		"AMR_WB explicit": {amrWB, &speechv2pb.RecognitionConfig{DecodingConfig: &speechv2pb.RecognitionConfig_ExplicitDecodingConfig{ExplicitDecodingConfig: &speechv2pb.ExplicitDecodingConfig{Encoding: speechv2pb.ExplicitDecodingConfig_AMR_WB, SampleRateHertz: 16000, AudioChannelCount: 1}}}},
 	} {
 		c.dec.Model, c.dec.LanguageCodes = "chirp", []string{"en-US"}
-		res, err := r.Recognize(ctx, &speechv2pb.RecognizeRequest{Recognizer: recognizer("global"), Config: c.dec,
+		res, err := r.Recognize(ctx, &speechv2pb.RecognizeRequest{Recognizer: recognizer("us-central1"), Config: c.dec,
 			AudioSource: &speechv2pb.RecognizeRequest_Content{Content: c.data}})
 		if err != nil {
 			t.Errorf("%s: %v", name, err)
@@ -209,7 +210,7 @@ func TestSpeechRecognitionFeatures1799(t *testing.T) {
 			t.Errorf("%s: %q %v", name, text, res.GetMetadata())
 		}
 	}
-	if _, err := g.Recognize(ctx, &speechv2pb.RecognizeRequest{Recognizer: recognizer("global"), AudioSource: &speechv2pb.RecognizeRequest_Content{Content: amrNB},
+	if _, err := g.Recognize(ctx, &speechv2pb.RecognizeRequest{Recognizer: recognizer("us-central1"), AudioSource: &speechv2pb.RecognizeRequest_Content{Content: amrNB},
 		Config: &speechv2pb.RecognitionConfig{Model: "chirp", LanguageCodes: []string{"en-US"}, DecodingConfig: &speechv2pb.RecognitionConfig_ExplicitDecodingConfig{
 			ExplicitDecodingConfig: &speechv2pb.ExplicitDecodingConfig{Encoding: speechv2pb.ExplicitDecodingConfig_AMR, SampleRateHertz: 16000, AudioChannelCount: 1}}}}); status.Code(err) != codes.InvalidArgument {
 		t.Errorf("AMR at 16000 Hz: %v", err)
@@ -247,11 +248,12 @@ func TestSpeechRecognitionFeatures1799(t *testing.T) {
 		}
 	}
 
-	// Diarization: not a feature of chirp_2; chirp_3's not served.
+	// Diarization: not a feature of chirp_2; chirp_3's (in us) not served.
 	for model, want := range map[string]codes.Code{"chirp_2": codes.InvalidArgument, "chirp_3": codes.Unimplemented} {
+		loc := map[string]string{"chirp_2": "us-central1", "chirp_3": "us"}[model]
 		cfg := &speechv2pb.RecognitionConfig{Model: model, LanguageCodes: []string{"en-US"}, DecodingConfig: auto,
 			Features: &speechv2pb.RecognitionFeatures{DiarizationConfig: &speechv2pb.SpeakerDiarizationConfig{}}}
-		if _, err := g.Recognize(ctx, &speechv2pb.RecognizeRequest{Recognizer: recognizer("us-central1"), Config: cfg,
+		if _, err := g.Recognize(ctx, &speechv2pb.RecognizeRequest{Recognizer: recognizer(loc), Config: cfg,
 			AudioSource: &speechv2pb.RecognizeRequest_Content{Content: spoken}}); status.Code(err) != want {
 			t.Errorf("diarization on %s: %v, want %v", model, err, want)
 		}

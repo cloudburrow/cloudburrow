@@ -30,7 +30,7 @@ func recognizeCall(t *testing.T, path, body string) (int, map[string]any) {
 	return resp.StatusCode, out
 }
 
-const recognizePath = "/v2/projects/p/locations/us/recognizers/_:recognize"
+const recognizePath = "/v2/projects/p/locations/us-central1/recognizers/_:recognize"
 
 // TestRecognizeRefusals: what the route refuses before transcribing.
 func TestRecognizeRefusals(t *testing.T) {
@@ -88,7 +88,7 @@ func TestRecognize(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	code, out := recognizeCall(t, recognizePath, `{"config": {"model": "chirp", "language_codes": ["en-US"], "auto_decoding_config": {}, `+
+	code, out := recognizeCall(t, recognizePath, `{"config": {"model": "chirp_2", "language_codes": ["en-US"], "auto_decoding_config": {}, `+
 		`"features": {"enable_word_time_offsets": true, "enable_word_confidence": true}}, "content": "`+base64.StdEncoding.EncodeToString(wav)+`"}`)
 	if code != 200 {
 		t.Fatalf("%d %v", code, out)

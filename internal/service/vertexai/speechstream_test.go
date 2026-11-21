@@ -15,6 +15,7 @@ import (
 	"cloud.google.com/go/speech/apiv2/speechpb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	"github.com/cloudburrow/cloudburrow/internal/speech"
 	"github.com/cloudburrow/cloudburrow/internal/speechconfig"
@@ -324,7 +325,7 @@ func TestSpeechV1Config(t *testing.T) {
 	v := newSpeech(t, "")
 	cfg, opt, err := v.s.v1Checked(&speechv1pb.RecognitionConfig{Encoding: speechv1pb.RecognitionConfig_LINEAR16, SampleRateHertz: 8000,
 		LanguageCode: "en-US", Model: "phone_call", EnableWordTimeOffsets: true,
-		SpeechContexts: []*speechv1pb.SpeechContext{{Phrases: []string{"Nyhuis"}, Boost: 15}}})
+		SpeechContexts: []*speechv1pb.SpeechContext{{Phrases: []string{"Nyhuis"}, Boost: 15}}}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -333,19 +334,26 @@ func TestSpeechV1Config(t *testing.T) {
 		t.Errorf("config %+v options %+v", cfg, opt)
 	}
 	for _, c := range []struct {
-		name string
-		cfg  *speechv1pb.RecognitionConfig
-		want codes.Code
+		name   string
+		cfg    *speechv1pb.RecognitionConfig
+		want   codes.Code
+		single bool
 	}{
-		{"no language", &speechv1pb.RecognitionConfig{}, codes.InvalidArgument},
-		{"amr at 16 kHz", &speechv1pb.RecognitionConfig{LanguageCode: "en-US", Encoding: speechv1pb.RecognitionConfig_AMR, SampleRateHertz: 16000}, codes.InvalidArgument},
-		{"speex", &speechv1pb.RecognitionConfig{LanguageCode: "en-US", Encoding: speechv1pb.RecognitionConfig_SPEEX_WITH_HEADER_BYTE}, codes.Unimplemented},
-		{"opus rate", &speechv1pb.RecognitionConfig{LanguageCode: "en-US", Encoding: speechv1pb.RecognitionConfig_OGG_OPUS, SampleRateHertz: 44100}, codes.InvalidArgument},
-		{"medical", &speechv1pb.RecognitionConfig{LanguageCode: "en-US", Model: "medical_dictation"}, codes.Unimplemented},
-		{"alternatives", &speechv1pb.RecognitionConfig{LanguageCode: "en-US", AlternativeLanguageCodes: []string{"de-DE"}}, codes.Unimplemented},
-		{"references", &speechv1pb.RecognitionConfig{LanguageCode: "en-US", Adaptation: &speechv1pb.SpeechAdaptation{PhraseSetReferences: []string{"projects/p/locations/global/phraseSets/missing"}}}, codes.InvalidArgument},
+		{"no language", &speechv1pb.RecognitionConfig{}, codes.InvalidArgument, false},
+		{"amr at 16 kHz", &speechv1pb.RecognitionConfig{LanguageCode: "en-US", Encoding: speechv1pb.RecognitionConfig_AMR, SampleRateHertz: 16000}, codes.InvalidArgument, false},
+		{"speex", &speechv1pb.RecognitionConfig{LanguageCode: "en-US", Encoding: speechv1pb.RecognitionConfig_SPEEX_WITH_HEADER_BYTE}, codes.Unimplemented, false},
+		{"opus rate", &speechv1pb.RecognitionConfig{LanguageCode: "en-US", Encoding: speechv1pb.RecognitionConfig_OGG_OPUS, SampleRateHertz: 44100}, codes.InvalidArgument, false},
+		{"medical", &speechv1pb.RecognitionConfig{LanguageCode: "en-US", Model: "medical_dictation"}, codes.Unimplemented, false},
+		{"alternatives", &speechv1pb.RecognitionConfig{LanguageCode: "en-US", AlternativeLanguageCodes: []string{"de-DE"}}, codes.Unimplemented, false},
+		// Speech-to-Text v1's supported languages table (#2127): en-US's
+		// default model has no spoken punctuation, and no single utterance.
+		{"default spoken punctuation", &speechv1pb.RecognitionConfig{LanguageCode: "en-US", EnableSpokenPunctuation: wrapperspb.Bool(true)}, codes.InvalidArgument, false},
+		{"latest_long spoken punctuation", &speechv1pb.RecognitionConfig{LanguageCode: "en-US", Model: "latest_long", EnableSpokenPunctuation: wrapperspb.Bool(true)}, codes.OK, false},
+		{"default single utterance", &speechv1pb.RecognitionConfig{LanguageCode: "en-US"}, codes.InvalidArgument, true},
+		{"unlisted language", &speechv1pb.RecognitionConfig{LanguageCode: "xx-XX"}, codes.InvalidArgument, false},
+		{"references", &speechv1pb.RecognitionConfig{LanguageCode: "en-US", Adaptation: &speechv1pb.SpeechAdaptation{PhraseSetReferences: []string{"projects/p/locations/global/phraseSets/missing"}}}, codes.InvalidArgument, false},
 	} {
-		if _, _, err := v.s.v1Checked(c.cfg); code(grpcError(err)) != c.want {
+		if _, _, err := v.s.v1Checked(c.cfg, c.single); code(grpcError(err)) != c.want {
 			t.Errorf("%s: %v, want %v", c.name, err, c.want)
 		}
 	}

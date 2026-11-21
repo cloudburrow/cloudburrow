@@ -62,6 +62,25 @@ type speechV1Service struct {
 	s *Server
 }
 
+// v1Features are the supported languages table's features a v1 config
+// asks for.
+func v1Features(c *speechv1pb.RecognitionConfig) speechconfig.Feature {
+	var f speechconfig.Feature
+	set := func(on bool, x speechconfig.Feature) {
+		if on {
+			f |= x
+		}
+	}
+	set(c.GetEnableAutomaticPunctuation(), speechconfig.AutomaticPunctuation)
+	set(c.GetDiarizationConfig().GetEnableSpeakerDiarization(), speechconfig.Diarization)
+	set(len(c.GetSpeechContexts()) > 0 || c.GetAdaptation() != nil, speechconfig.ModelAdaptation)
+	set(c.GetEnableWordConfidence(), speechconfig.WordConfidence)
+	set(c.GetProfanityFilter(), speechconfig.ProfanityFilter)
+	set(c.GetEnableSpokenPunctuation().GetValue(), speechconfig.SpokenPunctuationFeature)
+	set(c.GetEnableSpokenEmojis().GetValue(), speechconfig.SpokenEmojiFeature)
+	return f
+}
+
 // v1Config maps a v1 RecognitionConfig to a v2 one in JSON.
 func v1Config(c *speechv1pb.RecognitionConfig) (json.RawMessage, error) {
 	if c == nil {
@@ -92,8 +111,10 @@ func v1Config(c *speechv1pb.RecognitionConfig) (json.RawMessage, error) {
 	switch m := c.GetModel(); m {
 	case "", "default", "latest_long", "video":
 		out["model"] = "long"
-	case "phone_call":
+	case "phone_call", "telephony":
 		out["model"] = "telephony"
+	case "telephony_short":
+		out["model"] = "telephony_short"
 	case "latest_short", "command_and_search":
 		out["model"] = "short"
 	default:
@@ -148,6 +169,9 @@ func v1Config(c *speechv1pb.RecognitionConfig) (json.RawMessage, error) {
 	}
 	if c.GetProfanityFilter() {
 		features["profanityFilter"] = true
+	}
+	if c.GetEnableAutomaticPunctuation() {
+		features["enableAutomaticPunctuation"] = true
 	}
 	if c.GetEnableSpokenPunctuation().GetValue() {
 		features["enableSpokenPunctuation"] = true
@@ -214,16 +238,26 @@ func v1Config(c *speechv1pb.RecognitionConfig) (json.RawMessage, error) {
 }
 
 // v1Checked maps and checks a v1 config.
-func (s *Server) v1Checked(c *speechv1pb.RecognitionConfig) (speechconfig.Config, speech.Options, error) {
+//
+// The model, language and features are checked against Speech-to-Text v1's
+// supported languages table, single_utterance (streaming's) included
+// (speechconfig's CheckV1, #2127), before the config is mapped, so the
+// v2 table of the model it maps to does not decide.
+func (s *Server) v1Checked(c *speechv1pb.RecognitionConfig, single bool) (speechconfig.Config, speech.Options, error) {
 	c, err := s.v1Resolve(c)
 	if err != nil {
 		return speechconfig.Config{}, speech.Options{}, err
+	}
+	if c != nil && c.GetLanguageCode() != "" {
+		if err := speechconfig.CheckV1(c.GetModel(), c.GetLanguageCode(), single, v1Features(c)); err != nil {
+			return speechconfig.Config{}, speech.Options{}, apierror.InvalidArgument("%v", err)
+		}
 	}
 	raw, err := v1Config(c)
 	if err != nil {
 		return speechconfig.Config{}, speech.Options{}, err
 	}
-	cfg, err := s.checkedConfig("projects/-/locations/global/recognizers/_", raw)
+	cfg, err := s.parsedConfig("projects/-/locations/global/recognizers/_", raw)
 	if err != nil {
 		return cfg, speech.Options{}, err
 	}
@@ -301,7 +335,7 @@ func (s *Server) v1Transcribe(ctx context.Context, cfg speechconfig.Config, opt 
 }
 
 func (v *speechV1Service) Recognize(ctx context.Context, req *speechv1pb.RecognizeRequest) (*speechv1pb.RecognizeResponse, error) {
-	cfg, opt, err := v.s.v1Checked(req.GetConfig())
+	cfg, opt, err := v.s.v1Checked(req.GetConfig(), false)
 	if err != nil {
 		return nil, grpcError(err)
 	}
@@ -322,7 +356,7 @@ func (v *speechV1Service) LongRunningRecognize(ctx context.Context, req *speechv
 		return nil, grpcError(apierror.Unimplemented("Not implemented here: LongRunningRecognizeRequest.output_config: " +
 			"the transcript is answered in the operation's response"))
 	}
-	cfg, opt, err := v.s.v1Checked(req.GetConfig())
+	cfg, opt, err := v.s.v1Checked(req.GetConfig(), false)
 	if err != nil {
 		return nil, grpcError(err)
 	}
@@ -366,7 +400,7 @@ func (v *speechV1Service) StreamingRecognize(stream speechv1pb.Speech_StreamingR
 	if sc == nil {
 		return grpcError(apierror.InvalidArgument("The first StreamingRecognizeRequest must carry streaming_config"))
 	}
-	cfg, opt, err := v.s.v1Checked(sc.GetConfig())
+	cfg, opt, err := v.s.v1Checked(sc.GetConfig(), sc.GetSingleUtterance())
 	if err != nil {
 		return grpcError(err)
 	}

@@ -322,8 +322,10 @@ func TestBigQueryMLAnnotateImageDetections(t *testing.T) {
 // no recognition_config (the recognizer's chirp and word offsets apply); a
 // recognizer that does not exist is refused at CREATE MODEL, as is the
 // option on another service type. A missing recognition_config, a
-// model other than chirp and a config option with no local equivalent
-// (profanity_filter, 501) are refused before anything is read.
+// model other than chirp, and a feature the supported languages table does
+// not mark for chirp (profanity filter, word confidence, spoken emoji,
+// adaptation, diarization: INVALID_ARGUMENT, #2127) are refused before
+// anything is read; chirp's automatic punctuation in af-ZA is taken.
 //
 // covers: bigquery.jobs.query
 func TestBigQueryMLTranscribe(t *testing.T) {
@@ -443,7 +445,7 @@ func TestBigQueryMLTranscribe(t *testing.T) {
 		t.Errorf("SPEECH_RECOGNIZER on a translation model: %v", err)
 	}
 	sg, _ := speechClients(t, h)
-	rec := createRecognizer(t, h, sg, "projects/"+h.Project()+"/locations/us", "bqml-jfk")
+	rec := createRecognizer(t, h, sg, "projects/"+h.Project()+"/locations/us-central1", "bqml-jfk") // chirp's (#2127)
 	if err := run(fmt.Sprintf("CREATE MODEL `%s.speech_rec` REMOTE WITH CONNECTION `%s` OPTIONS(REMOTE_SERVICE_TYPE = 'CLOUD_AI_SPEECH_TO_TEXT_V2', "+
 		"SPEECH_RECOGNIZER = '%s')", ds, conn, rec.GetName())); err != nil {
 		t.Fatalf("CREATE MODEL with SPEECH_RECOGNIZER: %v", err)
@@ -548,18 +550,18 @@ func TestBigQueryMLTranscribe(t *testing.T) {
 		t.Errorf("per-channel transcripts: %q", text)
 	}
 
-	// The profanity filter and spoken punctuation and emojis (#1799):
-	// "Hello comma this shit is great exclamation mark thumbs up" as
-	// "s***", "!" and 👍 (speechconfig's Format).
+	// The spoken clip ("Hello comma this shit is great exclamation mark
+	// thumbs up") as chirp reads it: chirp takes no profanity filter nor
+	// spoken punctuation or emojis (the supported languages table, #2127),
+	// so its words stay.
 	spRows := mlQueryIn(t, ctx, c, fmt.Sprintf("SELECT transcripts, ml_transcribe_status AS status "+
 		`FROM ML.TRANSCRIBE(MODEL `+"`%s.speech`, TABLE `%s.spoken`"+`, recognition_config => (JSON '{"language_codes": ["en-US"], "model": "chirp", `+
-		`"auto_decoding_config": {}, "features": {"profanity_filter": true, "enable_spoken_punctuation": true, "enable_spoken_emojis": true}}'))`, ds, ds))
+		`"auto_decoding_config": {}}'))`, ds, ds))
 	if len(spRows) != 1 || spRows[0]["status"] != "" {
 		t.Fatalf("spoken rows: %v", spRows)
 	}
-	if text, _ := spRows[0]["transcripts"].(string); !strings.Contains(text, "s***") || strings.Contains(strings.ToLower(text), "shit") ||
-		!strings.Contains(text, "!") || !strings.Contains(text, "👍") || strings.Contains(strings.ToLower(text), "exclamation") {
-		t.Errorf("profanity filter and spoken punctuation and emojis: %q", text)
+	if text, _ := spRows[0]["transcripts"].(string); !strings.Contains(strings.ToLower(text), "shit") || !strings.Contains(strings.ToLower(text), "exclamation") {
+		t.Errorf("spoken clip on chirp: %q", text)
 	}
 
 	recRows := mlQueryIn(t, ctx, c, fmt.Sprintf("SELECT uri, transcripts, ml_transcribe_status AS status, "+
@@ -571,11 +573,23 @@ func TestBigQueryMLTranscribe(t *testing.T) {
 
 	for cfg, want := range map[string]string{
 		"": "requires recognition_config",
-		`, recognition_config => (JSON '{"language_codes": ["en-US"], "model": "long", "auto_decoding_config": {}}')`:                                                               "chirp",
-		`, recognition_config => (JSON '{"language_codes": ["en-US"], "model": "chirp", "auto_decoding_config": {}, "features": {"diarization_config": {}}}')`:                      "does not support feature: speaker_diarization",
-		`, recognition_config => (JSON '{"language_codes": ["en-US"], "model": "chirp", "auto_decoding_config": {}, "transcript_normalization": {"entries": [{"replace": "x"}]}}')`: "search is empty",
+		`, recognition_config => (JSON '{"language_codes": ["en-US"], "model": "long", "auto_decoding_config": {}}')`:                                                                                               "chirp",
+		`, recognition_config => (JSON '{"language_codes": ["en-US"], "model": "chirp", "auto_decoding_config": {}, "features": {"diarization_config": {}}}')`:                                                      "does not support feature: features.diarizationConfig",
+		`, recognition_config => (JSON '{"language_codes": ["en-US"], "model": "chirp", "auto_decoding_config": {}, "features": {"profanity_filter": true}}')`:                                                      "does not support feature: features.profanityFilter",
+		`, recognition_config => (JSON '{"language_codes": ["en-US"], "model": "chirp", "auto_decoding_config": {}, "features": {"enable_word_confidence": true}}')`:                                                "features.enableWordConfidence",
+		`, recognition_config => (JSON '{"language_codes": ["en-US"], "model": "chirp", "auto_decoding_config": {}, "features": {"enable_spoken_emojis": true}}')`:                                                  "features.enableSpokenEmojis",
+		`, recognition_config => (JSON '{"language_codes": ["en-US"], "model": "chirp", "auto_decoding_config": {}, "adaptation": {"phrase_sets": [{"inline_phrase_set": {"phrases": [{"value": "Kennedy"}]}}]}}')`: "does not support feature: adaptation",
+		`, recognition_config => (JSON '{"language_codes": ["af-ZA"], "model": "chirp", "auto_decoding_config": {}, "features": {"enable_automatic_punctuation": true}}')`:                                          "",
+		`, recognition_config => (JSON '{"language_codes": ["en-US"], "model": "chirp", "auto_decoding_config": {}, "transcript_normalization": {"entries": [{"replace": "x"}]}}')`:                                 "search is empty",
 	} {
-		if err := run(fmt.Sprintf("SELECT * FROM ML.TRANSCRIBE(MODEL `%s.speech`, TABLE `%s.audio`%s)", ds, ds, cfg)); err == nil || !strings.Contains(err.Error(), want) {
+		err := run(fmt.Sprintf("SELECT * FROM ML.TRANSCRIBE(MODEL `%s.speech`, TABLE `%s.audio`%s)", ds, ds, cfg))
+		if want == "" {
+			if err != nil {
+				t.Errorf("ML.TRANSCRIBE%s: %v", cfg, err)
+			}
+			continue
+		}
+		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("ML.TRANSCRIBE%s: %v, want %q", cfg, err, want)
 		}
 	}
