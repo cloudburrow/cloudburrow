@@ -371,6 +371,8 @@ cloud.google.com/go/parametermanager v1.2.1 h1:RWhV4rxgBjxKkHCjNmQEMCa6Nqr+8FhZm
 cloud.google.com/go/parametermanager v1.2.1/go.mod h1:6RQSbM3EbmoXET98IfgiqR7vYAbmh0MWNKaBL3Fsnv8=
 cloud.google.com/go/phishingprotection v0.13.0/go.mod h1:2gyYqwNjePPEocXDkDve3EuJPaRqN/E7fp28K3arR0k=
 cloud.google.com/go/policytroubleshooter v1.16.0/go.mod h1:FZg3IW3exF6wc9eO/iBYijsGqiiCzc9mjZhsxgATXYA=
+cloud.google.com/go/policytroubleshooter v1.18.1 h1:ZLjL6qJjnuuJVhzv+0ztlPFEufjTWuLUdVoebawHlZs=
+cloud.google.com/go/policytroubleshooter v1.18.1/go.mod h1:w1PF4UnJz6QfeGdJ8lIAx+H4lSboE4DnnbWphS2Itxw=
 cloud.google.com/go/privatecatalog v0.16.0/go.mod h1:Dq1bSHRRaDqFr7Rb7UntXVjh1reeY6YdzYicL0EPTrM=
 cloud.google.com/go/pubsub v1.0.1/go.mod h1:R0Gpsv3s54REJCy4fxDixWD93lHJMoZTyQ2kNxGRt3I=
 cloud.google.com/go/pubsub v1.1.0/go.mod h1:EwwdRX2sKPjnvnqCa270oGRyludottCI76h+R3AArQw=

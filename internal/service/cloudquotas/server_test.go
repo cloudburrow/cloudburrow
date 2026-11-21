@@ -2,6 +2,7 @@ package cloudquotas
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	pb "cloud.google.com/go/cloudquotas/apiv1/cloudquotaspb"
@@ -127,5 +128,51 @@ func TestQuotaInfosAndPreferences(t *testing.T) {
 	}
 	if v := quotalimit.Limit("p1", "iam.googleapis.com", "SERVICE-ACCOUNT-COUNT-per-project", nil, 100); v != 100 {
 		t.Errorf("after reset = %d", v)
+	}
+}
+
+// TestProvidedQuotasAndNumberedProjects (#2090): a provider's quotas are
+// QuotaInfos at its per-project value, a preference for one is granted and
+// is quotalimit's value for the project by ID or by number, and the
+// preference's name, which names a project that was never created by its
+// number, reads and updates it.
+func TestProvidedQuotasAndNumberedProjects(t *testing.T) {
+	ctx := context.Background()
+	s := NewServer(store.NewMemory(), nil, nil)
+	s.AddQuotas(func(project string) []Quota {
+		v := int64(1200)
+		if project == "low" {
+			v = 600
+		}
+		return []Quota{{Service: "parametermanager.googleapis.com", QuotaID: "ReadRequestsPerMinutePerProject",
+			Metric: "parametermanager.googleapis.com/read_requests", MetricUnit: "1/min/{project}", Default: v, RefreshInterval: "minute", Enforced: true}}
+	})
+	name := "/locations/global/services/parametermanager.googleapis.com/quotaInfos/ReadRequestsPerMinutePerProject"
+	for project, want := range map[string]int64{"p1": 1200, "low": 600} {
+		qi, err := s.GetQuotaInfo(ctx, &pb.GetQuotaInfoRequest{Name: "projects/" + project + name})
+		if err != nil || qi.GetDimensionsInfos()[0].GetDetails().GetValue() != want || qi.GetRefreshInterval() != "minute" {
+			t.Fatalf("%s: GetQuotaInfo = %v, %v", project, qi, err)
+		}
+	}
+	p, err := s.CreateQuotaPreference(ctx, &pb.CreateQuotaPreferenceRequest{Parent: parent, QuotaPreferenceId: "reads",
+		QuotaPreference: &pb.QuotaPreference{Service: "parametermanager.googleapis.com", QuotaId: "ReadRequestsPerMinutePerProject",
+			Justification: "unit", QuotaConfig: &pb.QuotaConfig{PreferredValue: 1100}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := s.Value("p1", "parametermanager.googleapis.com", "ReadRequestsPerMinutePerProject", nil); !ok || v != 1100 {
+		t.Errorf("Value(p1) = %d, %v", v, ok)
+	}
+	number := strings.TrimPrefix(strings.Split(p.GetName(), "/locations/")[0], "projects/")
+	if v, ok := s.Value(number, "parametermanager.googleapis.com", "ReadRequestsPerMinutePerProject", nil); !ok || v != 1100 {
+		t.Errorf("Value(%s) = %d, %v", number, v, ok)
+	}
+	p.QuotaConfig = &pb.QuotaConfig{PreferredValue: 1050}
+	if _, err := s.UpdateQuotaPreference(ctx, &pb.UpdateQuotaPreferenceRequest{QuotaPreference: p,
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"quota_config.preferred_value"}}}); err != nil {
+		t.Fatalf("UpdateQuotaPreference by the answered name %s: %v", p.GetName(), err)
+	}
+	if v, _ := s.Value("p1", "parametermanager.googleapis.com", "ReadRequestsPerMinutePerProject", nil); v != 1050 {
+		t.Errorf("after the update, Value = %d", v)
 	}
 }

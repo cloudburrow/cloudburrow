@@ -582,6 +582,12 @@ const ROUTES = [
   // and a subject's Revoke sessions.
   { path: "/iam-admin/workforce-identity-pools", service: "iam-workforce-identity", icon: "iam", title: "Workforce Identity Federation", kind: "Workforce pool", section: "IAM & Admin",
     product: "iam", productTitle: "IAM & Admin" },
+  // IAM & Admin > Principal access boundary (#2057): the organization's
+  // principal access boundary policies, Create policy with a first
+  // boundary rule, a policy's rules and bindings, Add binding, Add
+  // boundary rule, Edit and Delete.
+  { path: "/iam-admin/principal-access-boundary", service: "iam-principal-access-boundary", icon: "iam", title: "Principal access boundary", kind: "Principal access boundary policy", section: "IAM & Admin",
+    product: "iam", productTitle: "IAM & Admin" },
   // Labels (#1864): the selected project's labels, Resource Manager's.
   { path: "/iam-admin/labels", service: "iam-labels", icon: "iam", title: "Labels", kind: "Label", section: "IAM & Admin",
     product: "iam", productTitle: "IAM & Admin" },
@@ -21301,17 +21307,22 @@ function iamEnforcementNote(into) {
 }
 
 // renderIAMTroubleshooter is Policy Troubleshooter (#1879): a principal, a
-// resource and a permission in; whether the principal has it, and each
-// allow policy's bindings with why each grants it or not.
+// resource and a permission in; whether the principal has it, each
+// principal access boundary policy bound to it (#2057, v3beta's
+// pabPolicyExplanation), whether a deny policy denies it, and each allow
+// policy's bindings with why each grants it or not.
 function renderIAMTroubleshooter(view) {
   const project = currentProject();
   const note = el("div", { id: "iam-enforcement-note" });
+  // ?principal=&resource=&permission= fill the form and check at once, so
+  // a check can be linked to.
+  const asked = new URLSearchParams(location.search);
   const fields = buildCreateForm({ label: "Troubleshoot access", fields: [
-    { name: "principal", label: "Principal email", required: true,
+    { name: "principal", label: "Principal email", required: true, default: asked.get("principal") || "",
       help: "The email of a user or service account, such as worker@my-project.iam.gserviceaccount.com." },
-    { name: "resource", label: "Resource", required: true, default: project ? `//cloudresourcemanager.googleapis.com/projects/${project}` : "",
+    { name: "resource", label: "Resource", required: true, default: asked.get("resource") || (project ? `//cloudresourcemanager.googleapis.com/projects/${project}` : ""),
       help: "A full resource name, such as //secretmanager.googleapis.com/projects/my-project/secrets/my-secret." },
-    { name: "permission", label: "Permission", required: true, help: "Such as secretmanager.versions.access." },
+    { name: "permission", label: "Permission", required: true, default: asked.get("permission") || "", help: "Such as secretmanager.versions.access." },
   ] });
   const error = el("p", { class: "form-error", role: "alert", hidden: true });
   const results = el("div", { id: "troubleshoot-result", "aria-live": "polite" });
@@ -21337,12 +21348,42 @@ function renderIAMTroubleshooter(view) {
             el("td", { text: b.allowAccessState === "ALLOW_ACCESS_STATE_GRANTED" ? "Grants access" : "Does not grant" })));
         }
       }
+      const denied = ((r.denyPolicyExplanation || {}).denyAccessState) === "DENY_ACCESS_STATE_DENIED";
+      const pab = r.pabPolicyExplanation || {};
+      const pabState = { PAB_ACCESS_STATE_ALLOWED: "Allows access", PAB_ACCESS_STATE_NOT_ALLOWED: "Blocks access", PAB_ACCESS_STATE_NOT_ENFORCED: "Not enforced" };
+      const pabRows = (pab.explainedBindingsAndPolicies || []).map((e) => {
+        const b = (e.explainedPolicyBinding || {}).policyBinding || {};
+        const p = e.explainedPolicy || {};
+        const c = (e.explainedPolicyBinding || {}).conditionExplanation;
+        const resources = (p.explainedRules || []).flatMap((x) => x.explainedResources || [])
+          .map((x) => `${x.resource} (${x.resourceInclusionState === "RESOURCE_INCLUSION_STATE_INCLUDED" ? "includes the resource" : "does not include it"})`);
+        return el("tr", {},
+          el("td", { class: "mono", text: (p.policy || {}).name || b.policy || "" }),
+          el("td", { class: "mono", text: b.name || "" }),
+          el("td", { class: "mono", text: (b.target || {}).principalSet || "" }),
+          el("td", { class: "mono", text: b.condition ? `${b.condition.expression} (${c && c.value === true ? "true" : c && c.value === false ? "false" : "not evaluable"})` : "" }),
+          el("td", { text: p.policyVersion ? `${p.policyVersion.version}${p.policyVersion.enforcementState === "PAB_POLICY_ENFORCEMENT_STATE_ENFORCED" ? "" : " (cannot block this permission)"}` : "" }),
+          el("td", { class: "mono", text: resources.join(", ") }),
+          el("td", { text: pabState[e.bindingAndPolicyAccessState] || e.bindingAndPolicyAccessState }));
+      });
+      const blocked = pab.principalAccessBoundaryAccessState === "PAB_ACCESS_STATE_NOT_ALLOWED";
+      const why = blocked ? "A principal access boundary policy blocks it." : denied ? "A deny policy denies it." : "";
       setChildren(results,
         el("h2", { id: "troubleshoot-verdict", text: granted ? "Access granted" : "Access not granted" }),
-        el("p", { class: "subtitle", text: `${fields.values().principal} ${granted ? "has" : "does not have"} ${fields.values().permission} on ${fields.values().resource}. No deny policy applies: deny policies are not stored locally.` }),
-        rows.length ? el("table", { class: "table", id: "troubleshoot-bindings" },
-          el("thead", {}, el("tr", {}, ...["Policy", "Role", "Role has permission", "Principal included", "Condition", "Result"].map((h) => el("th", { text: h })))),
-          el("tbody", {}, ...rows)) : el("p", { class: "unavailable", text: "No allow policy on the resource or its ancestors has a binding." }));
+        el("p", { class: "subtitle", text: `${fields.values().principal} ${granted ? "has" : "does not have"} ${fields.values().permission} on ${fields.values().resource}. ${why}`.trim() }),
+        el("h3", { text: "Principal access boundary policies" }),
+        el("p", { id: "troubleshoot-pab-state", text: pabRows.length ? `Principal access boundary: ${pabState[pab.principalAccessBoundaryAccessState] || pab.principalAccessBoundaryAccessState}.` : "The principal is not subject to any principal access boundary policy." }),
+        pabRows.length ? el("div", { class: "table-wrap", tabindex: "0", role: "region", "aria-label": "Principal access boundary policies" },
+          el("table", { class: "table", id: "troubleshoot-pab" },
+            el("thead", {}, el("tr", {}, ...["Policy", "Binding", "Principal set", "Condition", "Enforcement version", "Resources", "Result"].map((h) => el("th", { text: h })))),
+            el("tbody", {}, ...pabRows))) : null,
+        el("h3", { text: "Deny policies" }),
+        el("p", { id: "troubleshoot-deny-state", text: denied ? "A deny policy denies the permission." : "No deny policy denies the permission." }),
+        el("h3", { text: "Allow policies" }),
+        rows.length ? el("div", { class: "table-wrap", tabindex: "0", role: "region", "aria-label": "Allow policies" },
+          el("table", { class: "table", id: "troubleshoot-bindings" },
+            el("thead", {}, el("tr", {}, ...["Policy", "Role", "Role has permission", "Principal included", "Condition", "Result"].map((h) => el("th", { text: h })))),
+            el("tbody", {}, ...rows))) : el("p", { class: "unavailable", text: "No allow policy on the resource or its ancestors has a binding." }));
       announce(granted ? "Access granted" : "Access not granted");
     } catch (err) {
       setChildren(results);
@@ -21352,12 +21393,13 @@ function renderIAMTroubleshooter(view) {
     check.disabled = false;
   };
   setChildren(view, pageHeader("Policy Troubleshooter", ""), note,
-    el("p", { class: "subtitle", text: "Check whether a principal has a permission on a resource, and which allow policies decide it." }),
+    el("p", { class: "subtitle", text: "Check whether a principal has a permission on a resource, and which principal access boundary, deny and allow policies decide it." }),
     el("form", { class: "card", novalidate: true, onsubmit: submit }, error, ...fields.nodes, el("div", { class: "modal-actions" }, check)),
     results);
   iamEnforcementNote(note);
   announce("Policy Troubleshooter");
   fields.focusFirst();
+  if (asked.get("principal") && asked.get("resource") && asked.get("permission")) submit(new Event("submit"));
 }
 
 // renderIAMAnalyzer is Policy Analyzer (#1879): who has what in the
@@ -23028,37 +23070,10 @@ async function renderAPIPage(view, name, tab) {
             el("td", { text: apisLatency(m.p50Ms, m) }), el("td", { text: apisLatency(m.p95Ms, m) })))
             : [el("tr", {}, el("td", { colspan: "5", text: "No calls yet." }))])))));
   } else if (tab === "quotas") {
-    // The Cloud Quotas API's quotas (#2030), then the per-minute request
-    // quotas this instance enforces for the API (#2063), as the project has
-    // them, each editable for the project.
-    const cloudQuotas = quotasBlock(a.name, redraw);
-    const quotas = data.requestQuotas || [];
-    const note = el("p", { class: "form-help", text: "Quotas are enforced by this CloudBurrow instance at Google's documented defaults; " +
-      "Edit quota changes one for this project while the instance runs (the configuration's requestQuotas and /admin/quotas set them too)." });
-    if (!quotas.length) {
-      setChildren(panel, cloudQuotas);
-    } else {
-      setChildren(panel, cloudQuotas, el("h2", { text: "Request quotas" }), note,
-        el("div", { class: "table-wrap" }, el("table", { class: "table", id: "api-request-quotas" },
-        el("caption", { class: "sr-only", text: `${a.title} quotas` }),
-        el("thead", {}, el("tr", {}, ...["Quota", "Metric", "Value", "Default", "Actions"].map((h) => el("th", { scope: "col", text: h })))),
-        el("tbody", {}, ...quotas.map((q) => el("tr", {},
-          el("td", { text: q.limitTitle }), el("td", { class: "mono", text: q.metric }),
-          el("td", { text: apisNumber(q.value) + (q.adjusted ? " (adjusted)" : "") }), el("td", { text: apisNumber(q.default) }),
-          el("td", {},
-            el("button", { type: "button", class: "link-button", text: "Edit quota", "aria-label": `Edit quota ${q.limitTitle}`,
-              onclick: () => mrForm({ id: "api-quota-edit", title: `Edit quota: ${q.limitTitle}`, label: "Submit request",
-                note: `Requests per minute for project ${project}. Calls past it in a minute are refused RESOURCE_EXHAUSTED (HTTP 429), as on Google.`,
-                fields: [{ name: "limit", label: "New value", type: "number", required: true, default: String(q.value) }],
-                submit: async (v) => {
-                  const op = recordOperation(`Edit quota ${q.metric} on ${project}`);
-                  try { await apisCall("setquota", { metric: q.metric, limit: v.limit }); op.succeeded(""); } catch (err) { op.failed(err.message); throw err; }
-                  notify(`${q.limitTitle} is ${v.limit}`);
-                  redraw();
-                } }) }),
-            q.adjusted ? el("button", { type: "button", class: "link-button", text: "Reset to default", "aria-label": `Reset ${q.limitTitle} to its default`,
-              onclick: async () => { await apisCall("resetquota", { metric: q.metric }); notify(`${q.limitTitle} is back to ${apisNumber(q.default)}`); redraw(); } }) : null)))))));
-    }
+    // The Cloud Quotas API's quotas (#2030), the per-minute request quotas
+    // this instance enforces among them (#2063, #2090): Edit quota sets a
+    // QuotaPreference, the limit the API's calls are then charged against.
+    setChildren(panel, quotasBlock(a.name, redraw));
   } else {
     setChildren(panel, apisCredentialSections("api-credentials"));
   }

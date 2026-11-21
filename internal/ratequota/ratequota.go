@@ -19,6 +19,11 @@
 // admin API (GET, PUT and DELETE /admin/quotas) one for one project or
 // every project while the instance runs, so a test can lower a limit in a
 // project of its own without touching another's.
+//
+// Each metric is also a quota of the Cloud Quotas API (#2090): its quota
+// ID is the limit's name, and a project's granted QuotaPreference, read
+// through internal/quotalimit, is the limit in force for that project, over
+// the configured one, as a preference on Google sets the enforced value.
 package ratequota
 
 import (
@@ -33,6 +38,7 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/quotalimit"
 	"github.com/cloudburrow/cloudburrow/internal/resource"
 )
 
@@ -51,7 +57,13 @@ type Metric struct {
 	LimitTitle string `json:"limitTitle"`
 	// Default is Google's documented limit.
 	Default int64 `json:"default"`
+	// Source is the Google page the default was read from.
+	Source string `json:"source,omitempty"`
 }
+
+// QuotaID is the metric's Cloud Quotas quota ID: the limit's name, as
+// the ErrorInfo's quota_limit names it.
+func (m Metric) QuotaID() string { return m.Limit }
 
 // Quota is a metric with the limit in force.
 type Quota struct {
@@ -145,6 +157,33 @@ func (l *Limiter) limitLocked(m Metric, project string) int64 {
 	return m.Default
 }
 
+// Metrics lists the registered metrics, by name.
+func (l *Limiter) Metrics() []Metric {
+	if l == nil {
+		return nil
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	out := make([]Metric, 0, len(l.metrics))
+	for _, m := range l.metrics {
+		out = append(out, m)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+// Configured is metric's limit in project before any Cloud Quotas
+// preference: the project's own, every project's, or the default.
+func (l *Limiter) Configured(metric, project string) (int64, bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	m, ok := l.metrics[metric]
+	if !ok {
+		return 0, false
+	}
+	return l.limitLocked(m, consumerOf(project)), true
+}
+
 // Quotas lists the metrics and their limits, by name.
 func (l *Limiter) Quotas() []Quota {
 	l.mu.Lock()
@@ -180,11 +219,17 @@ func (l *Limiter) Charge(metric, project string) error {
 	minute := now.Truncate(time.Minute)
 	consumer := consumerOf(project)
 	l.mu.Lock()
-	defer l.mu.Unlock()
 	m, ok := l.metrics[metric]
+	limit := l.limitLocked(m, consumer)
+	l.mu.Unlock()
 	if !ok {
 		return nil
 	}
+	// A granted Cloud Quotas preference is the project's limit (#2090);
+	// it is read outside the lock, as the preferences are in the store.
+	limit = quotalimit.Limit(project, m.Service, m.QuotaID(), nil, limit)
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	// Projects are charged by number, so an ID and its number share one
 	// quota, as on Google.
 	k := key{metric, consumer}
@@ -193,7 +238,6 @@ func (l *Limiter) Charge(metric, project string) error {
 		w = &window{minute: minute}
 		l.windows[k] = w
 	}
-	limit := l.limitLocked(m, consumer)
 	if w.used >= limit {
 		return Exceeded(m, consumer, limit)
 	}

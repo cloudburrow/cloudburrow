@@ -85,33 +85,37 @@ func TestParameterTemplatesThroughThePage(t *testing.T) {
 	})
 }
 
-// TestRequestQuotasThroughThePage (#2063): Parameter Manager's Quotas &
-// System Limits tab lists its read, write and render quotas at Google's
-// defaults; Edit quota lowers the read quota for the project, which the
-// tab then shows adjusted, and Reset to default restores it. The tab meets
-// WCAG 2.1 AA.
+// TestRequestQuotasThroughThePage (#2063, #2090): Parameter Manager's
+// Quotas & System Limits tab lists its read, write and render quotas, from
+// the Cloud Quotas API, at Google's defaults and enforced locally; Edit
+// quota lowers the read quota for the project through a QuotaPreference,
+// which the tab then shows beside the default. The tab meets WCAG 2.1 AA.
 func TestRequestQuotasThroughThePage(t *testing.T) {
 	needService(t, "parametermanager")
+	needService(t, "serviceusage")
 	project := uniqueProject(t)
 	path := "/apis/api/parametermanager.googleapis.com/quotas"
 	p := open(t)
 	p.navigate(path + "?project=" + project)
-	p.waitFor(`document.querySelector("#api-request-quotas tbody") !== null`)
+	row := `[...document.querySelectorAll("#api-quotas-table tbody tr")].find((r) => r.textContent.includes("Read requests per minute per project"))`
+	p.waitFor(row + ` !== undefined`)
 	var text string
-	p.eval(`document.querySelector("#api-request-quotas").textContent`, &text)
-	for _, want := range []string{"Read requests per minute per project", "1,200", "Render requests per minute per project", "1,800"} {
+	p.eval(`document.querySelector("#api-quotas-table").textContent`, &text)
+	for _, want := range []string{"Read requests per minute per project", "1,200", "Render requests per minute per project", "1,800", "parametermanager.googleapis.com/write_requests"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the Quotas tab lacks %q: %s", want, text)
 		}
 	}
-	p.clickText("#api-request-quotas button", "Edit quota")
-	p.waitFor(`document.querySelector(".modal.is-open #f-limit") !== null`)
-	p.eval(`(() => { const f = document.querySelector(".modal.is-open #f-limit"); f.value = "7";
-		f.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`, nil)
-	p.clickText(".modal.is-open button", "Submit request")
-	p.waitFor(`document.querySelector(".modal") === null && document.querySelector("#api-request-quotas").textContent.includes("7 (adjusted)")`)
-	p.clickText("#api-request-quotas button", "Reset to default")
-	p.waitFor(`document.querySelector("#api-request-quotas") !== null && !document.querySelector("#api-request-quotas").textContent.includes("(adjusted)")`)
+	p.eval(row+`.textContent`, &text)
+	if !strings.Contains(text, "Yes") {
+		t.Errorf("the read quota is not enforced locally: %q", text)
+	}
+	p.clickExpr(row + `.querySelector("button")`)
+	p.waitFor(`document.querySelector("#quota-edit") !== null`)
+	p.setField("#quota-edit #f-value", "1100")
+	p.setField("#quota-edit #f-justification", "browser")
+	p.clickExpr(`document.querySelector('#quota-edit button[type="submit"]')`)
+	p.waitFor(`document.querySelector("#quota-edit") === null && ` + row + `.textContent.includes("1,100 (default 1,200)")`)
 
 	auditScreens(t, []a11yPage{screen("API quotas tab", path, project)})
 }

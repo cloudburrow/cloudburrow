@@ -877,6 +877,9 @@ td a { color: var(--accent); }
 /* A resource-name pattern in a hint (projects/PROJECT/locations/...) is one
    unbreakable word, which ran 176px past a 320px window (#1604). */
 .form-help { margin: 4px 0 0; font-size: var(--text-caption-size); color: var(--text-muted); overflow-wrap: anywhere; }
+/* Policy Troubleshooter's verdict names a principal and a full resource
+   name, unbroken, so it wraps anywhere rather than widen the page (#2057). */
+#troubleshoot-result p { overflow-wrap: anywhere; }
 /* A scope picker's options are full resource names; a select is as wide as
    its longest, so it shrinks to the card instead (#1604). */
 .scope-picker select { max-width: 100%; min-width: 0; }

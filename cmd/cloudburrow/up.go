@@ -972,7 +972,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	rmSrv.HandleUnguarded(unserved.Match, unserved.Handler())
 	// The Cloud Quotas API and the Site Verification API (#2030), on the
 	// same port, in the registry's store.
-	cloudQuotasRef, siteVerificationRef = serveCloudQuotas(rmSrv, projects, func() *serviceusage.Server { return serviceUsageRef },
+	cloudQuotasRef, siteVerificationRef = serveCloudQuotas(rmSrv, projects, func() *serviceusage.Server { return serviceUsageRef }, requestQuotas,
 		creds.Email, func(bearer string) (string, bool) { return creds.TokenAccount(bearer, time.Now()) })
 	// Google Auth Platform's app and OAuth clients (#2030), whose
 	// authorization code flow the metadata server's token endpoint serves.
@@ -1203,7 +1203,6 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		siteVerify:       siteVerificationRef,
 		authPlatform:     authPlatformRef,
 		requestMetrics:   requestMetrics,
-		requestQuotas:    requestQuotas,
 		requestHistory:   requestHistory,
 		backupdr:         backupDRSrv,
 		sqlAdmin:         sqlAdminSrv,

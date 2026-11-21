@@ -58,6 +58,33 @@ type Server struct {
 	now      func() time.Time
 
 	mu sync.Mutex
+
+	providersMu sync.RWMutex
+	providers   []Provider
+}
+
+// Provider supplies quotas registered while the instance runs (#2090):
+// the per-minute request quotas internal/ratequota enforces, each with its
+// value in project before any preference (Default).
+type Provider func(project string) []Quota
+
+// AddQuotas adds the quotas p supplies to the Catalog's.
+func (s *Server) AddQuotas(p Provider) {
+	s.providersMu.Lock()
+	defer s.providersMu.Unlock()
+	s.providers = append(s.providers, p)
+}
+
+// Quotas are every quota the server describes in project: the Catalog's
+// and the providers'.
+func (s *Server) Quotas(project string) []Quota {
+	out := append([]Quota(nil), Catalog...)
+	s.providersMu.RLock()
+	defer s.providersMu.RUnlock()
+	for _, p := range s.providers {
+		out = append(out, p(project)...)
+	}
+	return out
 }
 
 // NewServer keeps preferences in st. served may be nil (every catalogued
@@ -164,6 +191,30 @@ func (s *Server) ResetProject(project string) error {
 	return nil
 }
 
+// resolve is the project ID of a project ID or number: the registry's, or
+// for a number the registry does not know, the project whose preferences
+// are stored, so a preference made in a project that was never created
+// (every CloudBurrow service accepts any project) can be read and updated
+// by the name it was answered with, which names the project by number.
+func (s *Server) resolve(project string) (string, error) {
+	id, err := project, error(nil)
+	if s.projects != nil {
+		if id, err = s.projects.Resolve(project); err == nil {
+			return id, nil
+		}
+	}
+	if n, perr := strconv.ParseInt(project, 10, 64); perr == nil && s.st != nil {
+		if keys, lerr := s.st.List(keyPrefix); lerr == nil {
+			for _, k := range keys {
+				if pid := strings.TrimPrefix(k, keyPrefix); resource.ProjectNumber(pid) == n {
+					return pid, nil
+				}
+			}
+		}
+	}
+	return id, err
+}
+
 // container parses "projects/{p}/locations/{l}" and returns the project ID
 // and the canonical parent, named by project number as Google names it.
 func (s *Server) container(parent string) (project, canonical string, err error) {
@@ -181,20 +232,17 @@ func (s *Server) container(parent string) (project, canonical string, err error)
 	if p[3] != "global" {
 		return "", "", status.Errorf(codes.InvalidArgument, "location %q is not supported; Cloud Quotas resources are in location global", p[3])
 	}
-	id := p[1]
-	if s.projects != nil {
-		id, err = s.projects.Resolve(p[1])
-		if err != nil {
-			return "", "", status.Errorf(codes.PermissionDenied, "Permission denied on resource project %s (or it may not exist).", p[1])
-		}
+	id, err := s.resolve(p[1])
+	if err != nil {
+		return "", "", status.Errorf(codes.PermissionDenied, "Permission denied on resource project %s (or it may not exist).", p[1])
 	}
 	return id, "projects/" + strconv.FormatInt(resource.ProjectNumber(id), 10) + "/locations/global", nil
 }
 
 func (s *Server) listed(service string) bool { return s.served == nil || s.served(service) }
 
-func lookup(service, quotaID string) (Quota, bool) {
-	for _, q := range Catalog {
+func (s *Server) lookup(project, service, quotaID string) (Quota, bool) {
+	for _, q := range s.Quotas(project) {
 		if q.Service == service && q.QuotaID == quotaID {
 			return q, true
 		}
@@ -276,7 +324,7 @@ func (s *Server) ListQuotaInfos(_ context.Context, req *pb.ListQuotaInfosRequest
 	byID := map[string]*pb.QuotaInfo{}
 	var ids []string
 	if s.listed(service) {
-		for _, q := range Catalog {
+		for _, q := range s.Quotas(project) {
 			if q.Service == service {
 				byID[q.QuotaID] = info(canonical, q, prefs)
 				ids = append(ids, q.QuotaID)
@@ -306,7 +354,7 @@ func (s *Server) GetQuotaInfo(_ context.Context, req *pb.GetQuotaInfoRequest) (*
 	if err != nil {
 		return nil, err
 	}
-	q, found := lookup(service, quotaID)
+	q, found := s.lookup(project, service, quotaID)
 	if !found || !s.listed(service) {
 		return nil, status.Errorf(codes.NotFound, "QuotaInfo %s not found", req.GetName())
 	}
@@ -632,7 +680,7 @@ func (s *Server) grant(project string, old, p *pb.QuotaPreference, ignore []pb.Q
 	if p.GetService() == "" || p.GetQuotaId() == "" {
 		return nil, status.Errorf(codes.InvalidArgument, "quota_preference.service and quota_preference.quota_id are required")
 	}
-	q, ok := lookup(p.GetService(), p.GetQuotaId())
+	q, ok := s.lookup(project, p.GetService(), p.GetQuotaId())
 	if !ok || !s.listed(p.GetService()) {
 		return nil, status.Errorf(codes.InvalidArgument, "the quota %s of %s does not exist", p.GetQuotaId(), p.GetService())
 	}
@@ -701,6 +749,11 @@ func containsCheck(xs []pb.QuotaSafetyCheck, x pb.QuotaSafetyCheck) bool {
 // Value is quotalimit.Source: a granted preference's value for the
 // dimensions, the most specific first (a region's, then the project's).
 func (s *Server) Value(project, service, quotaID string, dims map[string]string) (int64, bool) {
+	// A request quota is charged to a project by ID or by number.
+	project, err := s.resolve(project)
+	if err != nil {
+		return 0, false
+	}
 	st, err := s.load(project)
 	if err != nil {
 		return 0, false

@@ -193,6 +193,10 @@ var DeleteConfirmRules = map[string]DeleteConfirmRule{
 	// "Follow additional instructions"; the dialog itself is not described
 	// (https://docs.cloud.google.com/iam/docs/manage-workforce-identity-pools-providers).
 	"iam-workforce-identity": unverified,
+	// UNVERIFIED (re-read 2026-11-20): principal access boundary policies
+	// (#2057): the console steps for deleting a policy or a binding are not
+	// described (https://docs.cloud.google.com/iam/docs/principal-access-boundary-policies-create).
+	"iam-principal-access-boundary": unverified,
 	// Model Registry (#1940): "Click Delete on the confirmation screen."
 	"vertex-models": {Style: DeleteConfirmClick, Source: "https://docs.cloud.google.com/vertex-ai/docs/model-registry/delete-model", Verified: true},
 	// UNVERIFIED: "click Actions, and then click Delete endpoint." No dialog
