@@ -538,8 +538,9 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if fa != nil {
 			// Reads, writes, deletes and query statistics (#2048), then
 			// who Security Rules apply to: server libraries' calls are
-			// sent as the emulator's owner.
-			h = firestoreadmin.ClientAuth(fa.Usage().Wrap(h))
+			// sent as the emulator's owner, and a client call before any
+			// Rules release is denied (#2050).
+			h = firestoreadmin.ClientAuth(fa.RulesGate(fa.Usage().Wrap(h)))
 		}
 		// The IAM gate outermost: it reads the caller's own bearer token
 		// before ClientAuth or PassAs rewrites it.

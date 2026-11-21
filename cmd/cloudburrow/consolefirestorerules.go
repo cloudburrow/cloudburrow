@@ -120,7 +120,7 @@ func (p firestoreDatabasesProvider) rulesSection(ctx context.Context, project, d
 	sec.Actions = p.rulesActions(src)
 	if rel == nil {
 		sec.Text = defaultFirestoreRules
-		sec.Note = "No rules are published for this database, so client requests are not checked against any. " +
+		sec.Note = "No rules are published for this database, so every client request is denied, as on Google. " +
 			"Edit rules and Publish to release a ruleset as " + strings.TrimPrefix(rulesRelease(project, db), "projects/"+project+"/releases/") +
 			". Server client libraries bypass rules, as on Google."
 		return sec
@@ -296,7 +296,7 @@ func (p firestoreDatabasesProvider) usageSection(ctx context.Context, project, d
 	sec.Series = series
 	sec.Note = fmt.Sprintf("Last 60 minutes: %d reads, %d writes, %d deletes. Successful document operations by minute, "+
 		"as Cloud Monitoring's Firestore metrics document/read_ops_count, write_ops_count and delete_ops_count report them. "+
-		"Listen and Write streams (snapshot listeners) are not counted.", reads, writes, deletes)
+		"Snapshot listeners and Write streams count as Google bills them.", reads, writes, deletes)
 	return sec
 }
 

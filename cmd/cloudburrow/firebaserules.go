@@ -45,7 +45,7 @@ func newFirebaseRulesServer(cfg config.Config, firestore func() *netfwd.Forwarde
 }
 
 // firebaseRulesResetter forgets each project's rulesets and releases
-// (#2048), opening its Firestore again.
+// (#2048), leaving its Firestore denying client calls (#2050).
 type firebaseRulesResetter struct {
 	srv func() *firebaserules.Server
 }

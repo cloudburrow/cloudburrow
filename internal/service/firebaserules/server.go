@@ -872,10 +872,10 @@ func (s *Server) inForceLocked(project string) *rules.Release {
 }
 
 // apply sets project's rules in the emulator: its release in force, or
-// the open rules.
+// the deny-all rules of a project with none.
 func (s *Server) apply(ctx context.Context, project string) error {
 	s.mu.Lock()
-	src := OpenRules
+	src := DenyRules
 	if rel := s.inForceLocked(project); rel != nil {
 		if rs, ok := s.rulesets[rel.RulesetName]; ok {
 			src = sourceText(rs.Source)
@@ -886,7 +886,7 @@ func (s *Server) apply(ctx context.Context, project string) error {
 }
 
 // ResetProject forgets one project's rulesets and releases, or every
-// project's for "", and opens their Firestore again.
+// project's for "", leaving their Firestore denying client calls.
 func (s *Server) ResetProject(ctx context.Context, project string) error {
 	s.mu.Lock()
 	touched := map[string]bool{}

@@ -22,9 +22,10 @@ package firestoreadmin
 // at UsagePath to the CLI, which answers Cloud Monitoring's time series
 // and the console's Usage and Query insights pages from them.
 //
-// Not counted: the bidirectional Listen and Write streams (the mobile and
-// web SDKs' snapshot listeners and writes) and the web SDK's WebChannel,
-// whose messages the front does not decode.
+// The bidirectional Listen and Write streams (snapshot listeners, the
+// mobile SDKs' writes) are counted as their frames pass (usagestream.go,
+// #2050). Not counted: the web SDK's WebChannel, whose framing the front
+// does not decode.
 
 import (
 	"bytes"
@@ -347,6 +348,11 @@ func (u *Usage) Wrap(next http.Handler) http.Handler {
 			u.serve(w, r)
 			return
 		}
+		if m, ok := strings.CutPrefix(r.URL.Path, "/google.firestore.v1.Firestore/"); ok && streamMethods[m] &&
+			strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
+			u.wrapStream(m, next, w, r)
+			return
+		}
 		c, ok := classify(r)
 		if !ok {
 			next.ServeHTTP(w, r)
@@ -614,7 +620,7 @@ func (u *Usage) count(c usageCall, cw *captureWriter, existed map[string]bool, d
 			u.addWrites(c.db, 1, 0, 0)
 		}
 	case "Commit", "BatchWrite", "UpdateDocument", "DeleteDocument":
-		names, dels, _ := writes(c.req)
+		names, _, _ := writes(c.req)
 		applied := make([]bool, len(names))
 		for i := range applied {
 			applied[i] = ok
@@ -625,31 +631,38 @@ func (u *Usage) count(c usageCall, cw *captureWriter, existed map[string]bool, d
 				applied[i] = i < len(st) && st[i].GetCode() == 0
 			}
 		}
-		var creates, updates, deletes int64
-		// A document written twice in one commit is created once.
-		state := map[string]bool{}
-		for k, v := range existed {
-			state[k] = v
-		}
-		for i, n := range names {
-			if !applied[i] {
-				continue
-			}
-			switch {
-			case dels[i]:
-				if state[n] {
-					deletes++
-				}
-				state[n] = false
-			case state[n]:
-				updates++
-			default:
-				creates++
-				state[n] = true
-			}
-		}
-		u.addWrites(c.db, creates, updates, deletes)
+		u.countWrites(c.db, c.req, applied, existed)
 	}
+}
+
+// countWrites counts a write call's applied writes (all of them for a nil
+// applied), given the documents that existed before it.
+func (u *Usage) countWrites(db string, req proto.Message, applied []bool, existed map[string]bool) {
+	names, dels, _ := writes(req)
+	var creates, updates, deletes int64
+	// A document written twice in one commit is created once.
+	state := map[string]bool{}
+	for k, v := range existed {
+		state[k] = v
+	}
+	for i, n := range names {
+		if applied != nil && !applied[i] {
+			continue
+		}
+		switch {
+		case dels[i]:
+			if state[n] {
+				deletes++
+			}
+			state[n] = false
+		case state[n]:
+			updates++
+		default:
+			creates++
+			state[n] = true
+		}
+	}
+	u.addWrites(db, creates, updates, deletes)
 }
 
 // queryShape is a query's normalized text: its collection, the fields it
