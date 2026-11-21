@@ -227,7 +227,7 @@ var areas = []area{
 	// its method names repeat v1's.
 	// Speech-to-Text v1 on the same port (#1930): a page of its own, since
 	// its method names repeat v2's.
-	{Key: "speechv1", Title: "Speech-to-Text v1", Own: true, Services: []string{"google.cloud.speech.v1.Speech"}},
+	{Key: "speechv1", Title: "Speech-to-Text v1", Own: true, Services: []string{"google.cloud.speech.v1.Speech", "google.cloud.speech.v1.Adaptation"}},
 	{Key: "vertexaiv1beta1", Title: "Vertex AI PredictionService v1beta1", Own: true, Services: []string{"google.cloud.aiplatform.v1beta1.PredictionService",
 		"google.cloud.aiplatform.v1beta1.LlmUtilityService"}},
 	// The Memorystore for Redis admin API (#1302), over the one Valkey

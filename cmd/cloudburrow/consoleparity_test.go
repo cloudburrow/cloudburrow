@@ -2349,6 +2349,12 @@ var parityRows = []parityRow{
 		Methods: []string{"Speech/Recognize", "Speech/LongRunningRecognize", "Speech/StreamingRecognize"},
 		Excluded: "v1's API for existing clients (#1930): the same local recognition the console's Transcriptions offer through " +
 			"v2 (Recognize and BatchRecognize), as Google's console offers it only through v2's recognizers"},
+	{Resource: "Speech-to-Text v1 Adaptation: phrase sets and custom classes", Service: "speechv1",
+		Methods: []string{"Adaptation/CreatePhraseSet", "Adaptation/GetPhraseSet", "Adaptation/ListPhraseSet", "Adaptation/UpdatePhraseSet",
+			"Adaptation/DeletePhraseSet", "Adaptation/CreateCustomClass", "Adaptation/GetCustomClass", "Adaptation/ListCustomClasses",
+			"Adaptation/UpdateCustomClass", "Adaptation/DeleteCustomClass"},
+		Excluded: "v1's adaptation API for existing clients (#2106): the console's Custom classes and Phrase sets pages manage " +
+			"v2's resources, as Google's console offers model adaptation only through v2"},
 	{Resource: "Starting the instance",
 		Commands: []string{"up"},
 		Excluded: "starts the process that serves the console, so the console cannot exist before it"},

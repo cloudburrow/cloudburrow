@@ -7106,9 +7106,60 @@
     "Key": "speechv1",
     "Title": "Speech-to-Text v1",
     "counts": {
+      "Implemented": 10,
       "Verified": 3
     },
     "rows": [
+      {
+        "method": "google.cloud.speech.v1.Adaptation/CreateCustomClass",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.speech.v1.Adaptation/CreatePhraseSet",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.speech.v1.Adaptation/DeleteCustomClass",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.speech.v1.Adaptation/DeletePhraseSet",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.speech.v1.Adaptation/GetCustomClass",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.speech.v1.Adaptation/GetPhraseSet",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.speech.v1.Adaptation/ListCustomClasses",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.speech.v1.Adaptation/ListPhraseSet",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.speech.v1.Adaptation/UpdateCustomClass",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.speech.v1.Adaptation/UpdatePhraseSet",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
       {
         "method": "google.cloud.speech.v1.Speech/LongRunningRecognize",
         "status": "Verified",

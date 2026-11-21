@@ -73,6 +73,9 @@ func (s *Server) RegisterGRPC(srv *grpc.Server) {
 	// Speech-to-Text v1's Recognize, LongRunningRecognize and
 	// StreamingRecognize (speechv1.go, #1930).
 	speechv1pb.RegisterSpeechServer(srv, &speechV1Service{s: s})
+	// v1's Adaptation: phrase sets and custom classes (speechv1adaptation.go,
+	// #2106).
+	speechv1pb.RegisterAdaptationServer(srv, &speechV1AdaptationService{s: s})
 	// countTokens and computeTokens (#1937, tokens.go).
 	s.registerTokens(srv)
 }

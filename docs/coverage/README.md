@@ -29,7 +29,7 @@ Do not edit these files by hand.
 | [Cloud Scheduler](scheduler.md) | 10 | 10 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Logging](logging.md) | 43 | 43 | 0 | 0 | 0 | 0 | 0 | 2 |
 | [Vertex AI PredictionService](vertexai.md) | 91 | 83 | 0 | 7 | 1 | 0 | 0 | 0 |
-| [Speech-to-Text v1](speechv1.md) | 3 | 3 | 0 | 0 | 0 | 0 | 0 | 0 |
+| [Speech-to-Text v1](speechv1.md) | 13 | 3 | 0 | 0 | 10 | 0 | 0 | 0 |
 | [Vertex AI PredictionService v1beta1](vertexaiv1beta1.md) | 17 | 5 | 0 | 0 | 12 | 0 | 0 | 0 |
 | [Memorystore for Redis](memorystore.md) | 73 | 73 | 0 | 0 | 0 | 0 | 0 | 1 |
 | [Pub/Sub](pubsub.md) | 47 | 47 | 0 | 0 | 0 | 0 | 0 | 4 |
