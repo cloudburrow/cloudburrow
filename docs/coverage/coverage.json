@@ -2195,6 +2195,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/eventarcadvanced_test.go:47 TestEventarcAdvancedBusToCloudRun",
+          "test/compat/eventarcadvancedjob2098_test.go:32 TestEventarcAdvancedPipelineRunsAJob",
           "test/compat/eventarcadvancedworkflow_test.go:33 TestEventarcAdvancedPipelineStartsAWorkflow"
         ]
       },
@@ -2232,6 +2233,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/eventarcadvanced_test.go:47 TestEventarcAdvancedBusToCloudRun",
+          "test/compat/eventarcadvancedjob2098_test.go:32 TestEventarcAdvancedPipelineRunsAJob",
           "test/compat/eventarcadvancedworkflow_test.go:33 TestEventarcAdvancedPipelineStartsAWorkflow"
         ]
       },
@@ -2255,6 +2257,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/eventarcadvanced_test.go:47 TestEventarcAdvancedBusToCloudRun",
+          "test/compat/eventarcadvancedjob2098_test.go:32 TestEventarcAdvancedPipelineRunsAJob",
           "test/compat/eventarcadvancedworkflow_test.go:33 TestEventarcAdvancedPipelineStartsAWorkflow"
         ]
       },
