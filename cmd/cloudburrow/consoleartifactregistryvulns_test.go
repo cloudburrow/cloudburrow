@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	grafeaspb "google.golang.org/genproto/googleapis/grafeas/v1"
+	spb "google.golang.org/genproto/googleapis/rpc/status"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
 )
@@ -95,6 +96,18 @@ func TestConsoleArtifactRegistryScanResultsAndDependencies(t *testing.T) {
 	}
 	if d := dependenciesOf(nil); !strings.Contains(d.Listing.Unavailable, "not scanned") {
 		t.Errorf("an unscanned digest's Dependencies = %+v", d.Listing)
+	}
+	// A scan that never ran is not an image without dependencies.
+	failed := &grafeaspb.Occurrence{Details: &grafeaspb.Occurrence_Discovery{Discovery: &grafeaspb.DiscoveryOccurrence{
+		AnalysisStatus:      grafeaspb.DiscoveryOccurrence_FINISHED_FAILED,
+		AnalysisStatusError: &spb.Status{Message: "OSV-Scanner and its database are not prefetched: run `cloudburrow prefetch`"}}}}
+	if d := dependenciesOf([]*grafeaspb.Occurrence{failed}); len(d.Listing.Items) != 0 || !strings.Contains(d.Listing.Unavailable, "not prefetched") {
+		t.Errorf("a failed scan's Dependencies = %+v", d.Listing)
+	}
+	scanning := &grafeaspb.Occurrence{Details: &grafeaspb.Occurrence_Discovery{Discovery: &grafeaspb.DiscoveryOccurrence{
+		AnalysisStatus: grafeaspb.DiscoveryOccurrence_SCANNING}}}
+	if d := dependenciesOf([]*grafeaspb.Occurrence{scanning}); !strings.HasPrefix(d.Listing.Unavailable, "Scanning") {
+		t.Errorf("a running scan's Dependencies = %+v", d.Listing)
 	}
 }
 

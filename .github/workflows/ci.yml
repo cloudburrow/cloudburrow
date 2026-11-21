@@ -707,8 +707,11 @@ jobs:
       # Artifact Registry's vulnerability scanning (#1912) in the run shard,
       # so TestArtifactRegistryVulnerabilityScanning and
       # TestGcloudArtifactsVulnerabilityScanning scan instead of skipping
-      # (#1917): the pinned OSV-Scanner and the Alpine snapshot (about 67 MB)
-      # in the instance's prefetch cache, from this cache, keyed by the pins,
+      # (#1917): the pinned OSV-Scanner and the Alpine snapshot, and the Go,
+      # Maven, PyPI and npm snapshots, without which the offline scanner
+      # refuses an image of language packages, so
+      # TestArtifactRegistryLanguagePackageLicenses and its page's test scan
+      # too (#2072) (about 350 MB together), in the instance's prefetch cache, from this cache, keyed by the pins,
       # or else the latest release's mirror, then upstream, each file checked
       # against its pinned SHA-256 (tools/osvmirror fetch). Saved as soon as
       # it is fetched, so a failing suite still keeps it. With
@@ -738,7 +741,7 @@ jobs:
       - name: Prefetch the vulnerability scanner
         if: matrix.shard == 'run'
         run: |
-          go run ./tools/osvmirror fetch -dir "$RUNNER_TEMP/cb/cache" -ecosystems Alpine
+          go run ./tools/osvmirror fetch -dir "$RUNNER_TEMP/cb/cache" -ecosystems Alpine,Go,Maven,PyPI,npm
           echo "CLOUDBURROW_TEST_OSV_REQUIRED=1" >> "$GITHUB_ENV"
       - name: Save the vulnerability scanner
         if: matrix.shard == 'run' && steps.osv-cache.outputs.cache-hit != 'true'

@@ -10,6 +10,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"time"
 )
 
@@ -156,6 +158,13 @@ func Scan(ctx context.Context, d Dir, archive string) (*Result, error) {
 		}
 	}
 	if err != nil {
+		// Offline, the scanner gives up on the whole image when an
+		// ecosystem whose packages it found has no local database: that
+		// snapshot was not prefetched (prefetch -ecosystems named others).
+		if eco := missingDatabases(stderr.String()); len(eco) > 0 {
+			return nil, fmt.Errorf("%w: no OSV database snapshot for %s under %s; run `cloudburrow prefetch`",
+				ErrNotPrefetched, strings.Join(eco, ", "), d.DBDir())
+		}
 		return nil, fmt.Errorf("osv-scanner: %w: %s", err, tail(stderr.String(), 600))
 	}
 	b, err := os.ReadFile(out)
@@ -172,6 +181,24 @@ func Scan(ctx context.Context, d Dir, archive string) (*Result, error) {
 		slog.Warn("Artifact Analysis could not read the image's package licenses", "err", err)
 	}
 	return r, nil
+}
+
+// missingDB is OSV-Scanner's offline error for an ecosystem with no local
+// database.
+var missingDB = regexp.MustCompile(`could not load db for (\S+) ecosystem: unable to fetch OSV database: no offline version`)
+
+// missingDatabases are the ecosystems the scanner's output says it had no
+// offline database for, each once, in the order it names them.
+func missingDatabases(out string) []string {
+	var eco []string
+	seen := map[string]bool{}
+	for _, m := range missingDB.FindAllStringSubmatch(out, -1) {
+		if !seen[m[1]] {
+			seen[m[1]] = true
+			eco = append(eco, m[1])
+		}
+	}
+	return eco
 }
 
 func tail(s string, n int) string {

@@ -234,6 +234,20 @@ func dependenciesOf(occs []*grafeaspb.Occurrence) console.Section {
 		sec.Listing.Unavailable = "This image was not scanned: it was pushed before scanning was active. Push it again under a new digest to scan it."
 		return sec
 	}
+	// A scan still running, or one that never completed (the scanner not
+	// prefetched, an unsupported image), found no packages: it did not
+	// look. Say so, as the Vulnerabilities tab does, rather than list no
+	// dependencies.
+	switch disc.GetAnalysisStatus() {
+	case grafeaspb.DiscoveryOccurrence_PENDING, grafeaspb.DiscoveryOccurrence_SCANNING:
+		sec.Listing.Items = nil
+		sec.Listing.Unavailable = "Scanning: the dependencies appear here when the scan finishes."
+		return sec
+	case grafeaspb.DiscoveryOccurrence_FINISHED_FAILED, grafeaspb.DiscoveryOccurrence_FINISHED_UNSUPPORTED:
+		sec.Listing.Items = nil
+		sec.Listing.Unavailable = "The scan did not complete: " + disc.GetAnalysisStatusError().GetMessage()
+		return sec
+	}
 	sort.SliceStable(sec.Listing.Items, func(i, j int) bool { return sec.Listing.Items[i].Name < sec.Listing.Items[j].Name })
 	sec.Listing.Total = len(sec.Listing.Items)
 	sbomText := "No SBOM: SBOMs are not created automatically, and none is stored for this image."

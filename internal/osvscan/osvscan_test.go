@@ -378,3 +378,17 @@ func TestDefaultMirrors(t *testing.T) {
 		t.Error("IsMirrored")
 	}
 }
+
+// An offline scan missing an ecosystem's database names the ecosystems,
+// each once, so the scan is reported as not prefetched (#2072).
+func TestMissingDatabases(t *testing.T) {
+	out := "Error during extraction: (extracting as vulnmatch/osvlocal) could not load db for Go ecosystem: unable to fetch OSV database: no offline version of the OSV database is available\n" +
+		"could not load db for Maven ecosystem: unable to fetch OSV database: no offline version of the OSV database is available\n" +
+		"could not load db for Go ecosystem: unable to fetch OSV database: no offline version of the OSV database is available\n"
+	if got := strings.Join(missingDatabases(out), ","); got != "Go,Maven" {
+		t.Errorf("missingDatabases = %q; want Go,Maven", got)
+	}
+	if got := missingDatabases("osv-scanner: some other failure"); len(got) != 0 {
+		t.Errorf("missingDatabases of an unrelated failure = %q", got)
+	}
+}
