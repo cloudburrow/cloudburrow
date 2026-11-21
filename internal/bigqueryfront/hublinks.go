@@ -99,9 +99,43 @@ type hubLink struct {
 	Restricted  bool `json:"restricted,omitempty"`
 	QueryResult bool `json:"queryResult,omitempty"`
 	Revoked     bool `json:"revoked,omitempty"`
+	// CleanRoom marks a data clean room's one linked dataset (#2101),
+	// whose tables, views and routines are Resources, each from its own
+	// dataset.
+	CleanRoom bool          `json:"cleanRoom,omitempty"`
+	Resources []hubResource `json:"resources,omitempty"`
+}
+
+// hubResource is one listing's resource of a clean room's linked dataset.
+type hubResource struct {
+	SourceProject string `json:"sourceProject"`
+	SourceDataset string `json:"sourceDataset"`
+	Table         string `json:"table,omitempty"`
+	Routine       string `json:"routine,omitempty"`
+	QueryResult   bool   `json:"queryResult,omitempty"`
+}
+
+// sourceOf is the dataset that holds a linked table's shared table.
+func (l hubLink) sourceOf(table string) (project, dataset string) {
+	if l.CleanRoom {
+		for _, r := range l.Resources {
+			if r.Table == table {
+				return r.SourceProject, r.SourceDataset
+			}
+		}
+	}
+	return l.SourceProject, l.SourceDataset
 }
 
 func (l hubLink) selected(table string) bool {
+	if l.CleanRoom {
+		for _, r := range l.Resources {
+			if r.Table == table {
+				return true
+			}
+		}
+		return false
+	}
 	if len(l.Tables) == 0 {
 		return true
 	}
@@ -320,7 +354,7 @@ func (f front) syncHubLink(r *http.Request, dataset string) {
 	if !ok || l.Revoked {
 		return
 	}
-	src, status := f.hubSourceFront(l).listAll(r, l.SourceDataset)
+	src, status := f.hubSourceTables(r, l)
 	if status != http.StatusOK {
 		return
 	}
@@ -351,12 +385,102 @@ func (f front) syncHubLink(r *http.Request, dataset string) {
 	sort.Strings(ids)
 	project := projectOf(f.base)
 	for _, id := range ids {
+		sp, sd := l.sourceOf(id)
 		body, _ := json.Marshal(map[string]any{
 			"tableReference": map[string]string{"projectId": project, "datasetId": dataset, "tableId": id},
-			"view": map[string]any{"query": "SELECT * FROM `" + l.SourceProject + "." + l.SourceDataset + "." + id + "`",
+			"view": map[string]any{"query": "SELECT * FROM `" + sp + "." + sd + "." + id + "`",
 				"useLegacySql": false},
 		})
 		f.send(r, http.MethodPost, "/datasets/"+url.PathEscape(dataset)+"/tables", body)
+	}
+	if l.CleanRoom {
+		f.syncHubRoutines(r, dataset, l)
+	}
+}
+
+// hubSourceTables are the shared tables of a link, as tables.list's
+// objects: the shared dataset's, or a clean room's resources' (each read
+// from its own dataset; one gone is left out).
+func (f front) hubSourceTables(r *http.Request, l hubLink) ([]map[string]any, int) {
+	if !l.CleanRoom {
+		return f.hubSourceFront(l).listAll(r, l.SourceDataset)
+	}
+	var out []map[string]any
+	for _, res := range l.Resources {
+		if res.Table == "" {
+			continue
+		}
+		if m, ok := f.inProject(res.SourceProject).metaOf(r, res.SourceDataset, res.Table); ok {
+			out = append(out, m)
+		}
+	}
+	return out, http.StatusOK
+}
+
+// syncHubRoutines makes a clean room's linked dataset hold a table-valued
+// function for each routine listing (a query template's, #2101) that
+// calls the shared one, and drops one no longer listed. Subscribers call
+// it in the linked dataset, as the query templates page has it: SELECT *
+// FROM `my_project.dcr_linked_dataset.mytvf`(TABLE myTable).
+func (f front) syncHubRoutines(r *http.Request, dataset string, l hubLink) {
+	project := projectOf(f.base)
+	want := map[string]bool{}
+	for _, res := range l.Resources {
+		if res.Routine == "" {
+			continue
+		}
+		want[res.Routine] = true
+		if f.routineExists(r, dataset, res.Routine) {
+			continue
+		}
+		def, ok := f.inProject(res.SourceProject).knownRoutine(r, res.SourceProject, res.SourceDataset, res.Routine)
+		if !ok || def["routineType"] != "TABLE_VALUED_FUNCTION" {
+			continue
+		}
+		args, _ := def["arguments"].([]any)
+		var call []string
+		for _, a := range args {
+			m, _ := a.(map[string]any)
+			name, _ := m["name"].(string)
+			if name == "" {
+				call = nil
+				break
+			}
+			call = append(call, quotePath([]string{name}))
+		}
+		if len(call) != len(args) {
+			continue
+		}
+		body := map[string]any{
+			"routineReference": map[string]string{"projectId": project, "datasetId": dataset, "routineId": res.Routine},
+			"routineType":      "TABLE_VALUED_FUNCTION",
+			"language":         "SQL",
+			"arguments":        args,
+			"definitionBody":   "SELECT * FROM " + quotePath([]string{res.SourceProject, res.SourceDataset, res.Routine}) + "(" + strings.Join(call, ", ") + ")",
+		}
+		if rt, ok := def["returnTableType"]; ok {
+			body["returnTableType"] = rt
+		}
+		b, _ := json.Marshal(body)
+		r2 := r.Clone(r.Context())
+		r2.Method = http.MethodPost
+		p := f.base + "/datasets/" + url.PathEscape(dataset) + "/routines"
+		r2.URL.Path, r2.URL.RawPath, r2.URL.RawQuery = "", "", ""
+		if u, err := url.PathUnescape(p); err == nil {
+			r2.URL.Path, r2.URL.RawPath = u, p
+		}
+		r2.Body, r2.ContentLength = io.NopCloser(bytes.NewReader(b)), int64(len(b))
+		r2.Header = r.Header.Clone()
+		r2.Header.Set("Content-Type", "application/json")
+		r2.Header.Del(HubLinkHeader)
+		f.insertRoutine(newRecorder(), r2, project)
+	}
+	for _, def := range f.liveRoutines(r, project, dataset) {
+		ref, _ := def["routineReference"].(map[string]any)
+		if id, _ := ref["routineId"].(string); id != "" && !want[id] {
+			f.sendDDL(r, "DROP TABLE FUNCTION IF EXISTS "+quotePath([]string{project, dataset, id}))
+			f.functions.dropDef(project, []string{dataset, id})
+		}
 	}
 }
 
@@ -412,7 +536,7 @@ func (f front) serveHubRead(w http.ResponseWriter, r *http.Request, dataset, tab
 	switch {
 	case isList:
 		f.syncHubLink(r, dataset)
-		all, status := src.listAll(r, l.SourceDataset)
+		all, status := f.hubSourceTables(r, l)
 		if status != http.StatusOK {
 			writeError(w, http.StatusNotFound, "notFound", fmt.Sprintf("Not found: Dataset %s:%s", project, dataset))
 			return true
@@ -434,7 +558,8 @@ func (f front) serveHubRead(w http.ResponseWriter, r *http.Request, dataset, tab
 			return true
 		}
 		f.syncHubLink(r, dataset)
-		status, b := src.get(r, tablePath(l.SourceDataset, table))
+		sp, sd := l.sourceOf(table)
+		status, b := f.inProject(sp).get(r, tablePath(sd, table))
 		var t map[string]any
 		if status != http.StatusOK || json.Unmarshal(b, &t) != nil {
 			writeError(w, http.StatusNotFound, "notFound", fmt.Sprintf("Not found: Table %s:%s.%s", project, dataset, table))
@@ -454,12 +579,14 @@ func (f front) serveHubRead(w http.ResponseWriter, r *http.Request, dataset, tab
 		// The shared table's rows, read as the shared table: the request
 		// is sent as tabledata.list of it.
 		r2 := r.Clone(r.Context())
-		p := src.base + tablePath(l.SourceDataset, table) + "/data"
+		sp, sd := l.sourceOf(table)
+		src = f.inProject(sp)
+		p := src.base + tablePath(sd, table) + "/data"
 		r2.URL.Path, r2.URL.RawPath = "", ""
 		if u, err := url.PathUnescape(p); err == nil {
 			r2.URL.Path, r2.URL.RawPath = u, p
 		}
-		src.listTableData(w, r2, l.SourceDataset, table)
+		src.listTableData(w, r2, sd, table)
 	default:
 		return false
 	}
@@ -654,7 +781,8 @@ func (s *storageRead) hubSession(req *storagepb.CreateReadSessionRequest, in raw
 	case !l.selected(t.table):
 		return nil, t, status.Errorf(codes.NotFound, "Not found: Table %s:%s.%s", t.project, t.dataset, t.table)
 	}
-	src := readTable{project: l.SourceProject, dataset: l.SourceDataset, table: t.table}
+	sp, sd := l.sourceOf(t.table)
+	src := readTable{project: sp, dataset: sd, table: t.table}
 	req.ReadSession.Table = "projects/" + src.project + "/datasets/" + src.dataset + "/tables/" + src.table
 	out, err := proto.Marshal(req)
 	if err != nil {
@@ -667,10 +795,45 @@ func (s *storageRead) hubSession(req *storagepb.CreateReadSessionRequest, in raw
 // a datasets.get answer.
 func (f front) hubDatasetFields(dataset string, content map[string]json.RawMessage) {
 	l, ok := f.hubLink(dataset)
-	if !ok {
+	if !ok || l.SourceProject == "" {
 		return
 	}
 	src, _ := json.Marshal(map[string]any{"sourceDataset": map[string]string{"projectId": l.SourceProject, "datasetId": l.SourceDataset}})
 	content["linkedDatasetSource"] = src
 	content["type"] = json.RawMessage(`"LINKED"`)
+}
+
+// checkHubRead adds a read of a linked table (tr) to prot when its shared
+// table or view has a privacy policy, so the query is held to the
+// analysis rules as a query of that view is (#2101: "Subscribers can
+// query the linked dataset ... with SELECT WITH AGGREGATION_THRESHOLD",
+// https://docs.cloud.google.com/bigquery/docs/data-clean-rooms); it
+// answers the query and returns true when it is refused. checked is a
+// query the front already rewrote by the policies.
+func (f front) checkHubRead(w http.ResponseWriter, r *http.Request, q queryOptions, insert bool, tr tableRead, checked, clause bool,
+	prot *[]privacyRead) bool {
+	l, _ := f.hubLink(tr.dataset)
+	if checked || l.Revoked || !l.selected(tr.table) {
+		return false
+	}
+	sp, sd := l.sourceOf(tr.table)
+	src := f.inProject(sp)
+	meta, ok := src.metaOf(r, sd, tr.table)
+	if !ok {
+		return false
+	}
+	name := tr.dataset + "." + tr.table
+	if text := src.privacyOf(sp, sd, tr.table, meta); text != "" && f.tables.watched(streamKey(sp, sd, tr.table)) {
+		pol, why := parsePrivacyPolicy(text)
+		if why != "" {
+			writeError(w, http.StatusNotImplemented, "notImplemented", privacyRefusal("a query", name)+" The policy could not be read: "+why+".")
+			return true
+		}
+		*prot = append(*prot, privacyRead{tr: tr, name: name, pol: pol, columns: schemaColumns(meta), srcProject: sp, srcDataset: sd})
+		return false
+	}
+	if why := src.viewReadsPrivate(r, sp, sd, tr.table, meta, 0); why.msg != "" {
+		return f.refuseViewRead(w, r, q, insert, tr.dataset, clause, why)
+	}
+	return false
 }

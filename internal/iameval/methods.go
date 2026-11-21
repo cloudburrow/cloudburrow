@@ -358,6 +358,19 @@ func analyticsHubMethods() map[string]Method {
 		"RefreshSubscription": {"analyticshub.subscriptions.update", "name"},
 		"RevokeSubscription":  {"analyticshub.subscriptions.delete", "name"},
 		"DeleteSubscription":  {"analyticshub.subscriptions.delete", "name"},
+		// Data clean rooms and query templates (#2101): "Subscribe to a
+		// clean room" needs analyticshub.dataExchanges.subscribe, and the
+		// query template methods the analyticshub.queryTemplates.*
+		// permission of their names ("Query templates", required
+		// permissions, https://docs.cloud.google.com/bigquery/docs/query-templates, read 2026-11-21).
+		"SubscribeDataExchange": {"analyticshub.dataExchanges.subscribe", "name"},
+		"CreateQueryTemplate":   {"analyticshub.queryTemplates.create", "parent"},
+		"GetQueryTemplate":      {"analyticshub.queryTemplates.get", "name"},
+		"ListQueryTemplates":    {"analyticshub.queryTemplates.list", "parent"},
+		"UpdateQueryTemplate":   {"analyticshub.queryTemplates.update", "query_template.name"},
+		"DeleteQueryTemplate":   {"analyticshub.queryTemplates.delete", "name"},
+		"SubmitQueryTemplate":   {"analyticshub.queryTemplates.submit", "name"},
+		"ApproveQueryTemplate":  {"analyticshub.queryTemplates.approve", "name"},
 	}, prefix)
 	kind := func(resource string) string {
 		switch {

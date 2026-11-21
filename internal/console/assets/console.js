@@ -399,6 +399,10 @@ const ROUTES = [
   // and subscriptions.
   { path: "/bigquery-sharing", service: "bigquery-sharing", icon: "bigquery", title: "Analytics Hub", kind: "Exchange",
     section: "Databases", product: "bigquery", productTitle: "BigQuery" },
+  // Data clean rooms and their query templates (#2101), beside it as
+  // BigQuery sharing has them.
+  { path: "/bigquery-clean-rooms", service: "bigquery-clean-rooms", icon: "bigquery", title: "Data clean rooms", kind: "Clean room",
+    section: "Databases", product: "bigquery", productTitle: "BigQuery" },
   { path: "/bigquery-dataform", service: null, requires: "bigquery", screen: "unavailable", icon: "bigquery", title: "Dataform",
     section: "Databases", product: "bigquery", productTitle: "BigQuery",
     unavailable: "Dataform repositories and workflows are the Dataform API's, which CloudBurrow does not run." },

@@ -72,10 +72,32 @@ project. Grant `roles/analyticshub.viewer`, `subscriber`, `publisher`,
 `listingAdmin`, `subscriptionOwner` or `admin` as on Google. A request with no
 access token is the instance's own account, which holds every permission.
 
+## Data clean rooms and query templates
+
+A data exchange created with `sharing_environment_config.dcr_exchange_config`
+is a data clean room (#2101), on the console's Data clean rooms page
+(`/bigquery-clean-rooms`). Each listing shares one table, view or (for a query
+template) table-valued function, with copy and export of the shared data
+always disabled; `restrict_query_result` may be added when the listing is
+made, and neither changes afterwards. Add data on the page makes a view of a
+table with an aggregation threshold, differential privacy or list overlap
+analysis rule and lists it. `SubscribeDataExchange` makes one linked dataset,
+named after the clean room, holding every listing's resource; queries of it
+are held to each view's analysis rules as queries of the view itself are, so
+an aggregation threshold view needs `SELECT WITH AGGREGATION_THRESHOLD` and
+drops the groups under its threshold.
+
+Query templates are created DRAFTED, submitted (PENDING, "Requires review")
+and approved. Approving on the page makes the template's table-valued function
+in the approver's dataset and lists it, so subscribers call it in the linked
+dataset: ``SELECT * FROM `project.linked_dataset.template`(...)``. Through the
+API, make the function with `CREATE TABLE FUNCTION`, list it with
+`selected_resources.routine`, then call `ApproveQueryTemplate`.
+
 ## Not served
 
-Data clean rooms (`dcr_exchange_config`, `SubscribeDataExchange`, query
-templates), Pub/Sub topic listings, routines in `selected_resources`,
-multi-region listings and linked dataset replicas, and Marketplace commercial
-listings are refused UNIMPLEMENTED. See
+Pub/Sub topic listings, routines in `selected_resources` outside a clean
+room, multi-region listings and linked dataset replicas, and Marketplace
+commercial listings are refused UNIMPLEMENTED; a query template's `TABLE`
+arguments are not forwarded to the linked dataset (#2120). See
 [compatibility.md](compatibility.md#bigquery-sharing-analytics-hub--googlecloudbigqueryanalyticshubv1).

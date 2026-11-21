@@ -18428,14 +18428,15 @@
     "Title": "BigQuery sharing (Analytics Hub) API (v1)",
     "counts": {
       "Implemented": 1,
-      "Unimplemented": 8,
-      "Verified": 20
+      "Verified": 28
     },
     "rows": [
       {
         "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/ApproveQueryTemplate",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/analyticshub2101_test.go:61 TestAnalyticsHubDataCleanRoom"
+        ]
       },
       {
         "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/CreateDataExchange",
@@ -18456,8 +18457,10 @@
       },
       {
         "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/CreateQueryTemplate",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/analyticshub2101_test.go:61 TestAnalyticsHubDataCleanRoom"
+        ]
       },
       {
         "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/DeleteDataExchange",
@@ -18478,8 +18481,10 @@
       },
       {
         "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/DeleteQueryTemplate",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/analyticshub2101_test.go:61 TestAnalyticsHubDataCleanRoom"
+        ]
       },
       {
         "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/DeleteSubscription",
@@ -18515,8 +18520,10 @@
       },
       {
         "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/GetQueryTemplate",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/analyticshub2101_test.go:61 TestAnalyticsHubDataCleanRoom"
+        ]
       },
       {
         "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/GetSubscription",
@@ -18549,8 +18556,10 @@
       },
       {
         "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/ListQueryTemplates",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/analyticshub2101_test.go:61 TestAnalyticsHubDataCleanRoom"
+        ]
       },
       {
         "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/ListSharedResourceSubscriptions",
@@ -18590,13 +18599,17 @@
       },
       {
         "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/SubmitQueryTemplate",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/analyticshub2101_test.go:61 TestAnalyticsHubDataCleanRoom"
+        ]
       },
       {
         "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/SubscribeDataExchange",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/analyticshub2101_test.go:61 TestAnalyticsHubDataCleanRoom"
+        ]
       },
       {
         "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/SubscribeListing",
@@ -18635,8 +18648,10 @@
       },
       {
         "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/UpdateQueryTemplate",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/analyticshub2101_test.go:61 TestAnalyticsHubDataCleanRoom"
+        ]
       }
     ]
   },
