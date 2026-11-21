@@ -1272,7 +1272,9 @@ jobs:
           # before, so about 615 s. And 20m in sql, 365 s in main run
           # 44875166859 before Backup and DR's Compute Engine pages, whose VM
           # and disk round trip took 152 s in its compat test.
-          BROWSER_TIMEOUT=10m; case "$SHARD" in served|run|storage|sql) BROWSER_TIMEOUT=20m ;; esac
+          # And 30m in run since Cloud Build's and the Logging console rounds'
+          # tests joined it: 1,005 s in main run 44891736706 before them.
+          BROWSER_TIMEOUT=10m; case "$SHARD" in served|storage|sql) BROWSER_TIMEOUT=20m ;; run) BROWSER_TIMEOUT=30m ;; esac
           go test -tags=browser -count=1 -timeout "$BROWSER_TIMEOUT" -v "${SELECT[@]}" ./test/browser/ | tee browser.log || rc=1
           for t in $(go test -tags=browser -list '.*' ./test/browser/ | grep '^Test' | "${PICK[@]}" | grep -vE "$NOT"); do
             grep -q -- "^--- PASS: $t (" browser.log ||

@@ -239,11 +239,15 @@ COMPAT_SQL_REPLICA_TESTS='^Test[A-Za-z]*SQL[A-Za-z0-9]*(HighAvailability|Replica
 # Registry and Endpoints screens are drawn only where Cloud Run is served,
 # which starts the local AI endpoint they call (#1940): their test,
 # TestModelRegistryAndEndpointsThroughThePages, runs in run, as the scale
-# shard runs no browser test.
+# shard runs no browser test. So do Cloud Build's (TestCloudBuild*, #2074,
+# #2077), whose screens are drawn where Cloud Run serves Cloud Build, and
+# the Logging console rounds (TestLoggingConsole*, #2021, #2031, #2032),
+# whose Log Analytics screen needs BigQuery beside Cloud Logging and Cloud
+# Monitoring, which only the run shard's instance serves together.
 COMPAT_BROWSER_SHARDS="storage served run emulators memorystore sql localai"
 COMPAT_BROWSER_SERVED_SHARD_TESTS='^Test(GKEServed|KubernetesEnginePages|VPCNetwork|ComputeEngine)'
 COMPAT_BROWSER_SERVED_ONLY_TESTS='^Test(GKEServed|VPCNetwork|ComputeEngine)'
-COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|LoggingAdmin|SecretManager|Eventarc|DocumentAI|Speech|Workflows|ModelRegistry)'
+COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|CloudBuild|LoggingAdmin|LoggingConsole|SecretManager|Eventarc|DocumentAI|Speech|Workflows|ModelRegistry)'
 COMPAT_BROWSER_EMULATORS_SHARD_TESTS='^Test(BigQuery|Firestore|Datastore|Bigtable|Spanner)'
 COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS='^TestMemorystore'
 COMPAT_BROWSER_SQL_SHARD_TESTS='^Test(CloudSQL|BackupDR|PrivateCAKMS)'
