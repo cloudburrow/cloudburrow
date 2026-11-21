@@ -181,7 +181,7 @@ func (s *Store) inBucket(ref bucketRef, e *loggingpb.LogEntry) bool {
 	s.mu.Lock()
 	r := s.routed[e]
 	s.mu.Unlock()
-	if ref.location == "global" && ref.bucket == bucketDefault && (r == nil || !r.hidden) && entryParent(e) == ref.parent {
+	if holdsOwn(ref, e, r != nil && r.hidden) {
 		return true
 	}
 	return r != nil && slices.Contains(r.buckets, ref.name())
@@ -192,13 +192,13 @@ func (s *Store) inBucket(ref bucketRef, e *loggingpb.LogEntry) bool {
 // and, in any bucket, the entries sinks routed to it (#1395, #1404).
 func (s *Store) bucketEntries(ref bucketRef) []*loggingpb.LogEntry {
 	name := ref.name()
-	own := ref.location == "global" && ref.bucket == bucketDefault
+	own := ref.location == "global" && builtinBucket(ref.bucket)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out []*loggingpb.LogEntry
 	for _, e := range s.entries {
 		r := s.routed[e]
-		if own && (r == nil || !r.hidden) && entryParent(e) == ref.parent {
+		if own && holdsOwn(ref, e, r != nil && r.hidden) {
 			out = append(out, e)
 			continue
 		}
@@ -416,7 +416,9 @@ func (s *Server) WriteLogEntries(ctx context.Context, req *loggingpb.WriteLogEnt
 		hits = append(hits, rt.hits...)
 		hidden := s.excluded(e, exclusions) || rt.intercepted
 		buckets := rt.buckets
-		if hidden && len(buckets) == 0 {
+		// Its own _Required bucket keeps an audit entry whatever hides it
+		// from _Default (required.go).
+		if hidden && len(buckets) == 0 && !isRequiredLog(e) {
 			continue
 		}
 		if hidden || len(buckets) > 0 {
@@ -470,7 +472,7 @@ func (s *Server) WriteLogEntries(ctx context.Context, req *loggingpb.WriteLogEnt
 // only, as Google documents: sinks of the folders and organization above it
 // still see it. Each parent's exclusions are read once per request.
 func (s *Server) excluded(e *loggingpb.LogEntry, cache map[parent]pred) bool {
-	if s.admin == nil {
+	if s.admin == nil || isRequiredLog(e) {
 		return false
 	}
 	project := entryParent(e)
@@ -574,8 +576,12 @@ func (s *Server) ListLogEntries(ctx context.Context, req *loggingpb.ListLogEntri
 		if err != nil {
 			return nil, apierror.Wrap(err)
 		}
+		m, err := src.matcher(req.GetFilter(), match, now)
+		if err != nil {
+			return nil, apierror.Wrap(err)
+		}
 		for _, e := range es {
-			if c := cursorOf(e); !seen[c] && src.holds(e, now) && match(e) {
+			if c := cursorOf(e); !seen[c] && src.holds(e, now) && m(e) {
 				seen[c] = true
 				found = append(found, e)
 			}
@@ -672,6 +678,12 @@ type source struct {
 	bucket    bucketRef
 	view      pred // nil for _AllLogs or an unfiltered view
 	retention time.Duration
+	// indexes are the bucket's custom indexes, which type a query's
+	// comparisons on their fields (index.go, #2108).
+	indexes []*loggingpb.IndexConfig
+	// query is a tail's filter, which a bucket with indexes compiles
+	// against them.
+	query string
 }
 
 // holds is whether e, one of the source bucket's entries, is in the view at
@@ -701,38 +713,55 @@ func (s *Server) sources(names []string) ([]source, error) {
 		if err := s.admin.check(p); err != nil {
 			return nil, err
 		}
-		ref, view := bucketRef{parent: p, location: "global", bucket: bucketDefault}, viewAllLogs
+		// A parent reads its own two buckets, _Default and _Required
+		// (required.go, #2108).
+		refs, view := []bucketRef{{parent: p, location: "global", bucket: bucketDefault}, {parent: p, location: "global", bucket: bucketRequired}}, viewAllLogs
 		if rest != "" {
-			ref, view, err = parseView("resource name", r)
+			ref, v, err := parseView("resource name", r)
 			if err != nil {
 				return nil, apierror.InvalidArgument("resource name %q is neither a parent nor {parent}/locations/{location}/buckets/{bucket}/views/{view}", r)
 			}
+			refs, view = []bucketRef{ref}, v
 		}
-		src := source{bucket: ref, retention: defaultRetention * 24 * time.Hour}
-		if s.admin != nil {
-			s.admin.mu.Lock()
-			b, err := s.admin.getBucket(ref)
-			var v *loggingpb.LogView
-			if err == nil {
-				v, err = s.admin.getView(ref, view)
-			}
-			s.admin.mu.Unlock()
+		for _, ref := range refs {
+			src, err := s.source(ref, view)
 			if err != nil {
 				return nil, err
 			}
-			if d := b.GetRetentionDays(); d > 0 {
-				src.retention = time.Duration(d) * 24 * time.Hour
-			}
-			if f := strings.TrimSpace(v.GetFilter()); f != "" {
-				src.view, err = compileWith(f, s.admin.ancestors)
-				if err != nil {
-					return nil, apierror.Unimplemented("view %s: its filter %q is not one CloudBurrow evaluates: %s", v.GetName(), f, apierror.From(err).Message)
-				}
-			}
+			out = append(out, src)
 		}
-		out = append(out, src)
 	}
 	return out, nil
+}
+
+// source reads one view of a bucket: its retention, its filter, and its
+// custom indexes (index.go).
+func (s *Server) source(ref bucketRef, view string) (source, error) {
+	src := source{bucket: ref, retention: defaultRetention * 24 * time.Hour}
+	if s.admin == nil {
+		return src, nil
+	}
+	s.admin.mu.Lock()
+	b, err := s.admin.getBucket(ref)
+	var v *loggingpb.LogView
+	if err == nil {
+		v, err = s.admin.getView(ref, view)
+	}
+	s.admin.mu.Unlock()
+	if err != nil {
+		return source{}, err
+	}
+	if d := b.GetRetentionDays(); d > 0 {
+		src.retention = time.Duration(d) * 24 * time.Hour
+	}
+	src.indexes = b.GetIndexConfigs()
+	if f := strings.TrimSpace(v.GetFilter()); f != "" {
+		src.view, err = compileWith(f, s.admin.ancestors)
+		if err != nil {
+			return source{}, apierror.Unimplemented("view %s: its filter %q is not one CloudBurrow evaluates: %s", v.GetName(), f, apierror.From(err).Message)
+		}
+	}
+	return src, nil
 }
 
 // sinkRoute is one sink and where it sends what it matches.

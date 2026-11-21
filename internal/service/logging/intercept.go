@@ -24,8 +24,8 @@ package logging
 // sentence: an entry an intercepting sink above it matches is kept out of its
 // own _Default bucket and its own sinks, and out of the sinks of every folder
 // between it and the intercepting sink's owner. The farthest intercepting sink
-// that matches wins, as the sinks below it are its children's. _Required is
-// not modelled (the gaps row), so nothing is exempt.
+// that matches wins, as the sinks below it are its children's. The entry's
+// own _Required bucket still takes an audit log it matches (required.go).
 //
 // The field's last sentence, that the sink is listed from a child resource
 // when ListSinks' filter is in_scope("ALL") or in_scope("ANCESTOR"), is

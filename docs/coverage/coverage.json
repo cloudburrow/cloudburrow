@@ -5929,6 +5929,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/logging1595_test.go:27 TestLoggingOldTimestampsFollowEachBucketsRetention",
+          "test/compat/logging2108_test.go:169 TestLoggingCustomIndexes",
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
           "test/compat/loggingcmek1950_test.go:70 TestLoggingBucketCMEK",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
@@ -5980,6 +5981,7 @@
           "test/compat/logging1577_test.go:28 TestLoggingListSinksInScope",
           "test/compat/logging1595_test.go:27 TestLoggingOldTimestampsFollowEachBucketsRetention",
           "test/compat/logging2026_test.go:32 TestLoggingQueryLanguage",
+          "test/compat/logging2108_test.go:169 TestLoggingCustomIndexes",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/loggingparentstools_test.go:87 TestTerraformLoggingFolderAndOrganizationSinks",
           "test/compat/terraform_batch11_test.go:59 TestTerraformLoggingSavedQueryAndLogScope",
@@ -6010,6 +6012,7 @@
         "method": "google.logging.v2.ConfigServiceV2/DeleteBucket",
         "status": "Verified",
         "tests": [
+          "test/compat/logging2108_test.go:80 TestLoggingRequiredBucketAndSink",
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/terraform_logging_buckets_test.go:33 TestTerraformLoggingBucketsAndLinks",
@@ -6044,6 +6047,7 @@
           "test/compat/logging1404tools_test.go:103 TestTerraformLoggingSinkDestinations",
           "test/compat/logging1451_test.go:239 TestTerraformLoggingBigQuerySinkExportErrors",
           "test/compat/logging1521_test.go:63 TestLoggingInterceptingSinks",
+          "test/compat/logging2108_test.go:80 TestLoggingRequiredBucketAndSink",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/loggingparentstools_test.go:87 TestTerraformLoggingFolderAndOrganizationSinks",
           "test/compat/terraform_batch11_test.go:59 TestTerraformLoggingSavedQueryAndLogScope",
@@ -6065,6 +6069,8 @@
         "method": "google.logging.v2.ConfigServiceV2/GetBucket",
         "status": "Verified",
         "tests": [
+          "test/compat/logging2108_test.go:169 TestLoggingCustomIndexes",
+          "test/compat/logging2108_test.go:80 TestLoggingRequiredBucketAndSink",
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
           "test/compat/loggingcmek1950_test.go:70 TestLoggingBucketCMEK",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
@@ -6124,6 +6130,7 @@
           "test/compat/logging1404tools_test.go:103 TestTerraformLoggingSinkDestinations",
           "test/compat/logging1451_test.go:239 TestTerraformLoggingBigQuerySinkExportErrors",
           "test/compat/logging1521_test.go:63 TestLoggingInterceptingSinks",
+          "test/compat/logging2108_test.go:80 TestLoggingRequiredBucketAndSink",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/loggingparentstools_test.go:87 TestTerraformLoggingFolderAndOrganizationSinks",
           "test/compat/terraform_batch11_test.go:59 TestTerraformLoggingSavedQueryAndLogScope",
@@ -6143,6 +6150,7 @@
         "method": "google.logging.v2.ConfigServiceV2/ListBuckets",
         "status": "Verified",
         "tests": [
+          "test/compat/logging2108_test.go:169 TestLoggingCustomIndexes",
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews"
         ]
       },
@@ -6169,6 +6177,7 @@
           "test/compat/logging1226_test.go:185 TestLoggingSinks",
           "test/compat/logging1521_test.go:63 TestLoggingInterceptingSinks",
           "test/compat/logging1577_test.go:28 TestLoggingListSinksInScope",
+          "test/compat/logging2108_test.go:80 TestLoggingRequiredBucketAndSink",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents"
         ]
       },
@@ -6192,6 +6201,8 @@
         "method": "google.logging.v2.ConfigServiceV2/UpdateBucket",
         "status": "Verified",
         "tests": [
+          "test/compat/logging2108_test.go:169 TestLoggingCustomIndexes",
+          "test/compat/logging2108_test.go:80 TestLoggingRequiredBucketAndSink",
           "test/compat/logginganalyticsviews_test.go:191 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
           "test/compat/loggingcmek1950_test.go:70 TestLoggingBucketCMEK",
@@ -6241,6 +6252,7 @@
         "tests": [
           "test/compat/logging1226_test.go:185 TestLoggingSinks",
           "test/compat/logging1521_test.go:63 TestLoggingInterceptingSinks",
+          "test/compat/logging2108_test.go:80 TestLoggingRequiredBucketAndSink",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/loggingparentstools_test.go:87 TestTerraformLoggingFolderAndOrganizationSinks",
           "test/compat/terraform_batch11_test.go:59 TestTerraformLoggingSavedQueryAndLogScope",
@@ -6286,6 +6298,8 @@
           "test/compat/logging1521_test.go:63 TestLoggingInterceptingSinks",
           "test/compat/logging1595_test.go:27 TestLoggingOldTimestampsFollowEachBucketsRetention",
           "test/compat/logging2026_test.go:32 TestLoggingQueryLanguage",
+          "test/compat/logging2108_test.go:169 TestLoggingCustomIndexes",
+          "test/compat/logging2108_test.go:80 TestLoggingRequiredBucketAndSink",
           "test/compat/logging_fidelity_test.go:31 TestLoggingPartialSuccessAndScopedPaging",
           "test/compat/logging_test.go:34 TestLoggingWriteAndRead",
           "test/compat/loggingcmek1950_test.go:70 TestLoggingBucketCMEK",
@@ -6334,6 +6348,7 @@
           "test/compat/logging1451_test.go:115 TestLoggingBigQuerySinkExportErrorsAndProtoPayload",
           "test/compat/logging1521_test.go:63 TestLoggingInterceptingSinks",
           "test/compat/logging1595_test.go:27 TestLoggingOldTimestampsFollowEachBucketsRetention",
+          "test/compat/logging2108_test.go:80 TestLoggingRequiredBucketAndSink",
           "test/compat/logging_fidelity_test.go:31 TestLoggingPartialSuccessAndScopedPaging",
           "test/compat/logging_test.go:34 TestLoggingWriteAndRead",
           "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",
