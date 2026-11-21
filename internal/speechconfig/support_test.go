@@ -3,6 +3,8 @@ package speechconfig
 import (
 	"strings"
 	"testing"
+
+	"github.com/cloudburrow/cloudburrow/internal/speaker"
 )
 
 // TestSupportMatrix (#2127): cells of Google's supported languages tables,
@@ -72,11 +74,19 @@ func TestSupportMatrix(t *testing.T) {
 }
 
 // TestUnserved: diarization, which the table allows on chirp_3, is
-// UNIMPLEMENTED locally.
+// UNIMPLEMENTED in the default build and served by internal/speaker in the
+// onnx build (#2131), so the test holds under both tags.
 func TestUnserved(t *testing.T) {
 	c, _, _ := Parse([]byte(`{"model":"chirp_3","languageCodes":["en-US"],"autoDecodingConfig":{},"features":{"diarizationConfig":{}}}`))
-	if c.CheckV2("us") != nil || c.Unserved() == nil {
-		t.Errorf("chirp_3 diarization: %v %v", c.CheckV2("us"), c.Unserved())
+	if err := c.CheckV2("us"); err != nil {
+		t.Fatalf("chirp_3 diarization: CheckV2: %v", err)
+	}
+	err := c.Unserved()
+	if speaker.Available != (err == nil) {
+		t.Errorf("chirp_3 diarization with speaker.Available %v: Unserved %v", speaker.Available, err)
+	}
+	if err != nil && !strings.Contains(err.Error(), "diarizationConfig") {
+		t.Errorf("Unserved %q does not name diarizationConfig", err)
 	}
 }
 
