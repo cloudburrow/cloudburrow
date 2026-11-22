@@ -97,7 +97,7 @@ func (a *a1SSH) run(zone, vm, cmd string) string {
 // address given to another VM with deleteAccessConfig and
 // addAccessConfig; addresses.delete refused while IN_USE; the address
 // RESERVED again once its VM is deleted.
-// covers-pending (EPF: make this "covers:" once run): compute.images.insert, compute.images.setLabels, compute.images.get, compute.images.delete, compute.machineImages.insert, compute.machineImages.get, compute.machineImages.setLabels, compute.machineImages.delete, compute.instances.setScheduling, compute.instances.addAccessConfig, compute.instances.deleteAccessConfig, compute.addresses.insert, compute.addresses.get, compute.addresses.delete, compute.instances.stop, compute.instances.start
+// covers: compute.images.insert, compute.images.setLabels, compute.images.get, compute.images.delete, compute.machineImages.insert, compute.machineImages.get, compute.machineImages.setLabels, compute.machineImages.delete, compute.instances.setScheduling, compute.instances.addAccessConfig, compute.instances.deleteAccessConfig, compute.addresses.insert, compute.addresses.get, compute.addresses.delete, compute.instances.stop, compute.instances.start
 func TestComputeLabelsSchedulingAndExternalIPsThroughTheGoClient(t *testing.T) {
 	h := New(t)
 	opts := computeOpts(t, h)
@@ -260,7 +260,7 @@ func TestComputeLabelsSchedulingAndExternalIPsThroughTheGoClient(t *testing.T) {
 // attaches it and reads the file back (the replicas are one storage); a
 // VM of zone c is refused; createSnapshot; delete refused while attached,
 // then done.
-// covers-pending (EPF: make this "covers:" once run): compute.regionDiskTypes.list, compute.regionDiskTypes.get, compute.regionDisks.insert, compute.regionDisks.get, compute.regionDisks.list, compute.regionDisks.setLabels, compute.regionDisks.resize, compute.regionDisks.createSnapshot, compute.regionDisks.delete, compute.instances.attachDisk, compute.instances.detachDisk, compute.regionOperations.get
+// covers: compute.regionDiskTypes.list, compute.regionDiskTypes.get, compute.regionDisks.insert, compute.regionDisks.get, compute.regionDisks.list, compute.regionDisks.setLabels, compute.regionDisks.resize, compute.regionDisks.createSnapshot, compute.regionDisks.delete, compute.instances.attachDisk, compute.instances.detachDisk, compute.regionOperations.get
 func TestComputeRegionalDisksThroughTheGoClient(t *testing.T) {
 	h := New(t)
 	opts := computeOpts(t, h)
@@ -406,7 +406,7 @@ func TestComputeRegionalDisksThroughTheGoClient(t *testing.T) {
 // IPv6 address given to one of them, IN_USE; and over the VPC
 // network an IPv6 connection between two VMs that a rule of IPv6 ranges
 // allows, a port it does not allow refused by the implied deny.
-// covers-pending (EPF: make this "covers:" once run): compute.networks.insert, compute.networks.get, compute.subnetworks.insert, compute.subnetworks.get, compute.subnetworks.patch, compute.firewalls.insert, compute.instances.insert, compute.instances.get, compute.addresses.insert, compute.addresses.get
+// covers: compute.networks.insert, compute.networks.get, compute.subnetworks.insert, compute.subnetworks.get, compute.subnetworks.patch, compute.firewalls.insert, compute.instances.insert, compute.instances.get, compute.addresses.insert, compute.addresses.get
 func TestComputeIPv6ThroughTheGoClient(t *testing.T) {
 	h := New(t)
 	opts := computeOpts(t, h)

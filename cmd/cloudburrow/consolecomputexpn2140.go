@@ -198,6 +198,15 @@ func (p computeSharedVPCProvider) attach(project, list string) error {
 	return nil
 }
 
+// DetailActions: the page has no resource of its own to act on; its
+// actions are on the list (ListActions). Without it the provider is no
+// console.PathActor, and the console drops its list actions.
+func (p computeSharedVPCProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
+	return nil
+}
+
+var _ console.ListActor = computeSharedVPCProvider{}
+
 func (p computeSharedVPCProvider) ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error {
 	if values["sharing"] == "individual" {
 		return errors.New("Individual subnets (subnet-level permissions) are not served: share all subnets")

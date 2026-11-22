@@ -14474,9 +14474,9 @@
     "Key": "compute",
     "Title": "Compute Engine API (v1): VPC networking",
     "counts": {
-      "Implemented": 83,
+      "Implemented": 64,
       "Unimplemented": 115,
-      "Verified": 141
+      "Verified": 160
     },
     "rows": [
       {
@@ -14491,14 +14491,17 @@
         "method": "compute.addresses.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient",
+          "test/compat/computea1_test.go:101 TestComputeLabelsSchedulingAndExternalIPsThroughTheGoClient"
         ]
       },
       {
         "method": "compute.addresses.get",
         "status": "Verified",
         "tests": [
-          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient",
+          "test/compat/computea1_test.go:101 TestComputeLabelsSchedulingAndExternalIPsThroughTheGoClient",
+          "test/compat/computea1_test.go:410 TestComputeIPv6ThroughTheGoClient"
         ]
       },
       {
@@ -14506,6 +14509,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient",
+          "test/compat/computea1_test.go:101 TestComputeLabelsSchedulingAndExternalIPsThroughTheGoClient",
+          "test/compat/computea1_test.go:410 TestComputeIPv6ThroughTheGoClient",
           "test/compat/iamenforcementround13_1879_test.go:223 TestIAMEnforcementComputeRound13"
         ]
       },
@@ -14724,6 +14729,7 @@
         "tests": [
           "test/compat/compute_test.go:299 TestGcloudComputeNetworks",
           "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient",
+          "test/compat/computea1_test.go:410 TestComputeIPv6ThroughTheGoClient",
           "test/compat/computevmnet_test.go:33 TestComputeVMNetworkingThroughTheGoClient"
         ]
       },
@@ -14926,8 +14932,10 @@
       },
       {
         "method": "compute.images.delete",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computea1_test.go:101 TestComputeLabelsSchedulingAndExternalIPsThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.images.deprecate",
@@ -14938,6 +14946,7 @@
         "method": "compute.images.get",
         "status": "Verified",
         "tests": [
+          "test/compat/computea1_test.go:101 TestComputeLabelsSchedulingAndExternalIPsThroughTheGoClient",
           "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
         ]
       },
@@ -14955,8 +14964,10 @@
       },
       {
         "method": "compute.images.insert",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computea1_test.go:101 TestComputeLabelsSchedulingAndExternalIPsThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.images.list",
@@ -14977,8 +14988,10 @@
       },
       {
         "method": "compute.images.setLabels",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computea1_test.go:101 TestComputeLabelsSchedulingAndExternalIPsThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.images.testIamPermissions",
@@ -15207,8 +15220,10 @@
       },
       {
         "method": "compute.instances.addAccessConfig",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computea1_test.go:101 TestComputeLabelsSchedulingAndExternalIPsThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.instances.addResourcePolicies",
@@ -15227,6 +15242,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/backupdrcompute_test.go:57 TestBackupDRComputeVMAndDiskRoundTrip",
+          "test/compat/computea1_test.go:264 TestComputeRegionalDisksThroughTheGoClient",
           "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient",
           "test/compat/computevmstools_test.go:178 TestTerraformComputeInstance"
         ]
@@ -15247,13 +15263,16 @@
       },
       {
         "method": "compute.instances.deleteAccessConfig",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computea1_test.go:101 TestComputeLabelsSchedulingAndExternalIPsThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.instances.detachDisk",
         "status": "Verified",
         "tests": [
+          "test/compat/computea1_test.go:264 TestComputeRegionalDisksThroughTheGoClient",
           "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient",
           "test/compat/computevmstools_test.go:178 TestTerraformComputeInstance"
         ]
@@ -15263,6 +15282,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/backupdrcompute_test.go:57 TestBackupDRComputeVMAndDiskRoundTrip",
+          "test/compat/computea1_test.go:410 TestComputeIPv6ThroughTheGoClient",
           "test/compat/computevmnet_test.go:33 TestComputeVMNetworkingThroughTheGoClient",
           "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient",
           "test/compat/computevmstools_test.go:178 TestTerraformComputeInstance"
@@ -15305,6 +15325,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/backupdrcompute_test.go:57 TestBackupDRComputeVMAndDiskRoundTrip",
+          "test/compat/computea1_test.go:410 TestComputeIPv6ThroughTheGoClient",
           "test/compat/computevmnet_test.go:33 TestComputeVMNetworkingThroughTheGoClient",
           "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient",
           "test/compat/routers2140_test.go:211 TestCloudNATGivesVMsWithoutExternalIPsEgress"
@@ -15385,8 +15406,10 @@
       },
       {
         "method": "compute.instances.setScheduling",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computea1_test.go:101 TestComputeLabelsSchedulingAndExternalIPsThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.instances.setServiceAccount",
@@ -15414,6 +15437,7 @@
         "method": "compute.instances.start",
         "status": "Verified",
         "tests": [
+          "test/compat/computea1_test.go:101 TestComputeLabelsSchedulingAndExternalIPsThroughTheGoClient",
           "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
         ]
       },
@@ -15426,6 +15450,7 @@
         "method": "compute.instances.stop",
         "status": "Verified",
         "tests": [
+          "test/compat/computea1_test.go:101 TestComputeLabelsSchedulingAndExternalIPsThroughTheGoClient",
           "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
         ]
       },
@@ -15468,13 +15493,17 @@
       },
       {
         "method": "compute.machineImages.delete",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computea1_test.go:101 TestComputeLabelsSchedulingAndExternalIPsThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.machineImages.get",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computea1_test.go:101 TestComputeLabelsSchedulingAndExternalIPsThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.machineImages.getIamPolicy",
@@ -15483,8 +15512,10 @@
       },
       {
         "method": "compute.machineImages.insert",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computea1_test.go:101 TestComputeLabelsSchedulingAndExternalIPsThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.machineImages.list",
@@ -15498,8 +15529,10 @@
       },
       {
         "method": "compute.machineImages.setLabels",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computea1_test.go:101 TestComputeLabelsSchedulingAndExternalIPsThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.machineImages.testIamPermissions",
@@ -15548,7 +15581,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/compute_test.go:384 TestTerraformComputeNetworkAndSubnetwork",
-          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient",
+          "test/compat/computea1_test.go:410 TestComputeIPv6ThroughTheGoClient"
         ]
       },
       {
@@ -15562,6 +15596,7 @@
         "tests": [
           "test/compat/compute_test.go:384 TestTerraformComputeNetworkAndSubnetwork",
           "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient",
+          "test/compat/computea1_test.go:410 TestComputeIPv6ThroughTheGoClient",
           "test/compat/computevmnet_test.go:33 TestComputeVMNetworkingThroughTheGoClient"
         ]
       },
@@ -15737,13 +15772,17 @@
       },
       {
         "method": "compute.regionDiskTypes.get",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computea1_test.go:264 TestComputeRegionalDisksThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.regionDiskTypes.list",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computea1_test.go:264 TestComputeRegionalDisksThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.regionDisks.addResourcePolicies",
@@ -15757,18 +15796,24 @@
       },
       {
         "method": "compute.regionDisks.createSnapshot",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computea1_test.go:264 TestComputeRegionalDisksThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.regionDisks.delete",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computea1_test.go:264 TestComputeRegionalDisksThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.regionDisks.get",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computea1_test.go:264 TestComputeRegionalDisksThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.regionDisks.getIamPolicy",
@@ -15777,13 +15822,17 @@
       },
       {
         "method": "compute.regionDisks.insert",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computea1_test.go:264 TestComputeRegionalDisksThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.regionDisks.list",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computea1_test.go:264 TestComputeRegionalDisksThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.regionDisks.removeResourcePolicies",
@@ -15792,8 +15841,10 @@
       },
       {
         "method": "compute.regionDisks.resize",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computea1_test.go:264 TestComputeRegionalDisksThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.regionDisks.setIamPolicy",
@@ -15802,8 +15853,10 @@
       },
       {
         "method": "compute.regionDisks.setLabels",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computea1_test.go:264 TestComputeRegionalDisksThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.regionDisks.startAsyncReplication",
@@ -16034,7 +16087,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/compute_test.go:384 TestTerraformComputeNetworkAndSubnetwork",
-          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient",
+          "test/compat/computea1_test.go:264 TestComputeRegionalDisksThroughTheGoClient"
         ]
       },
       {
@@ -16408,7 +16462,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/compute_test.go:384 TestTerraformComputeNetworkAndSubnetwork",
-          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient",
+          "test/compat/computea1_test.go:410 TestComputeIPv6ThroughTheGoClient"
         ]
       },
       {
@@ -16422,6 +16477,7 @@
         "tests": [
           "test/compat/compute_test.go:384 TestTerraformComputeNetworkAndSubnetwork",
           "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient",
+          "test/compat/computea1_test.go:410 TestComputeIPv6ThroughTheGoClient",
           "test/compat/computevmnet_test.go:33 TestComputeVMNetworkingThroughTheGoClient"
         ]
       },
@@ -16442,7 +16498,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/compute_test.go:384 TestTerraformComputeNetworkAndSubnetwork",
-          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient",
+          "test/compat/computea1_test.go:410 TestComputeIPv6ThroughTheGoClient"
         ]
       },
       {
