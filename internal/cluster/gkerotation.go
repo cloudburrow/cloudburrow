@@ -2,9 +2,7 @@ package cluster
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -370,60 +368,6 @@ func (g *GKE) SetEmulatedVersion(ctx context.Context, kind, minor string) error 
 	}
 }
 
-// zonesFile keeps the zones of a pool's nodes (PlaceNodes).
-func (g *GKE) zonesFile(kind, pool string) string {
-	sum := sha256.Sum256([]byte(pool))
-	return filepath.Join(g.Dir, kind, "zones-"+hex.EncodeToString(sum[:])[:8])
-}
-
-// nodeZone is the zone of a pool's node: the pool's zones in turn by its
-// index; "" when the pool has none recorded.
-func (g *GKE) nodeZone(kind, pool, name string) string {
-	b, err := os.ReadFile(g.zonesFile(kind, pool))
-	if err != nil {
-		return ""
-	}
-	zones := strings.Fields(string(b))
-	i := nodeIndex(name)
-	if len(zones) == 0 || i < 1 {
-		return ""
-	}
-	return zones[(i-1)%len(zones)]
-}
-
-// zoneLabels is the kubelet node-labels suffix of a node's zone.
-func (g *GKE) zoneLabels(kind, pool, name string) string {
-	z := g.nodeZone(kind, pool, name)
-	if z == "" {
-		return ""
-	}
-	return ",topology.kubernetes.io/zone=" + z + ",topology.kubernetes.io/region=" + z[:strings.LastIndex(z, "-")]
-}
-
-// PlaceNodes records pool's zones, which the nodes it gets later are
-// labelled with, and labels its nodes now: the zones in turn by node
-// index, as topology.kubernetes.io/zone and topology.kubernetes.io/region.
-func (g *GKE) PlaceNodes(ctx context.Context, kind, pool string, zones []string) error {
-	if !strings.HasPrefix(kind, OwnerPrefix) {
-		return fmt.Errorf("%w: %q", ErrNotOwned, kind)
-	}
-	if err := os.WriteFile(g.zonesFile(kind, pool), []byte(strings.Join(zones, "\n")+"\n"), 0o600); err != nil {
-		return err
-	}
-	nodes, err := g.poolNodes(ctx, kind, pool)
-	if err != nil {
-		return err
-	}
-	for _, n := range nodes {
-		z := g.nodeZone(kind, pool, n)
-		if _, err := g.runner().Run(ctx, "kubectl", "--kubeconfig", g.kubeconfig(kind), "label", "node", n, "--overwrite",
-			"topology.kubernetes.io/zone="+z, "topology.kubernetes.io/region="+z[:strings.LastIndex(z, "-")]); err != nil {
-			return fmt.Errorf("label node %s's zone: %w", n, err)
-		}
-	}
-	return nil
-}
-
 // The control plane's address (#2100). GKE serves a rotating cluster on
 // its old and a new IP address, and stops serving on the old one when the
 // rotation completes (re-read 2026-11-21: how-to/ip-rotation). Locally an
@@ -581,4 +525,35 @@ func (g *GKE) closePreviousEndpoint(ctx context.Context, kind string) error {
 		return err
 	}
 	return g.saveEndpointPorts(kind, endpointState{Serving: st.Next})
+}
+
+// KeepEndpoint puts back the rules the cluster's endpoint state needs, in
+// the control plane's network namespace: iptables rules live there, so a
+// restarted control plane container (Docker or the machine restarting)
+// loses them, and a rotated cluster would serve its old endpoint again,
+// or no longer its new one. During a rotation both ports serve; after
+// one, the port in use serves and the other refuses. A cluster on its
+// first port with no rotation under way has no rules and nothing is run.
+func (g *GKE) KeepEndpoint(ctx context.Context, kind string) error {
+	if !strings.HasPrefix(kind, OwnerPrefix) {
+		return fmt.Errorf("%w: %q", ErrNotOwned, kind)
+	}
+	st := g.endpointPorts(kind)
+	if st.Serving == defaultAPIPort && st.Next == 0 {
+		return nil
+	}
+	if _, err := g.hostPort(ctx, kind, spareAPIPort); err != nil {
+		return nil // made before the spare port: one address
+	}
+	if err := g.setEndpoint(ctx, kind, st.Serving, true); err != nil {
+		return err
+	}
+	if st.Next != 0 {
+		return g.setEndpoint(ctx, kind, st.Next, true)
+	}
+	other := spareAPIPort
+	if st.Serving == spareAPIPort {
+		other = defaultAPIPort
+	}
+	return g.setEndpoint(ctx, kind, other, false)
 }

@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -152,8 +153,9 @@ func nodeIndex(name string) int {
 	return n
 }
 
-// Resize makes pool have n nodes: it adds nodes after the highest index and
-// removes the highest first.
+// Resize makes pool have n nodes: it deletes the nodes of zones the pool
+// no longer has (SetLocations), removes nodes in shrinkOrder, and adds
+// nodes after the highest index, each in the zone with the fewest.
 func (g *GKE) Resize(ctx context.Context, kind, image, pool string, n int) error {
 	if !strings.HasPrefix(kind, OwnerPrefix) {
 		return fmt.Errorf("%w: %q", ErrNotOwned, kind)
@@ -164,15 +166,28 @@ func (g *GKE) Resize(ctx context.Context, kind, image, pool string, n int) error
 	}
 	r := g.runner()
 	kc := g.kubeconfig(kind)
-	for len(have) > n {
-		name := have[len(have)-1]
+	remove := func(name string) error {
 		// Drain is Google's on a resize down; the pods go elsewhere.
 		_, _ = r.Run(ctx, "kubectl", "--kubeconfig", kc, "drain", name, "--ignore-daemonsets", "--delete-emptydir-data", "--force", "--timeout=60s")
 		_, _ = r.Run(ctx, "kubectl", "--kubeconfig", kc, "delete", "node", name, "--ignore-not-found")
 		if _, err := r.Run(ctx, "docker", "rm", "-f", "-v", name); err != nil {
 			return fmt.Errorf("remove node %s: %w", name, err)
 		}
-		have = have[:len(have)-1]
+		g.forgetNode(kind, pool, name)
+		have = slices.DeleteFunc(have, func(x string) bool { return x == name })
+		return nil
+	}
+	for _, name := range g.outsideZones(kind, pool, have) {
+		if err := remove(name); err != nil {
+			return err
+		}
+	}
+	if len(have) > n {
+		for _, name := range g.shrinkOrder(kind, pool, have)[:len(have)-n] {
+			if err := remove(name); err != nil {
+				return err
+			}
+		}
 	}
 	next := 1
 	if len(have) > 0 {
@@ -227,9 +242,19 @@ func (g *GKE) join(ctx context.Context, kind, image, pool, name string) error {
 	if err != nil {
 		return fail(fmt.Errorf("make a bootstrap token: %w", err))
 	}
-	conf := joinConfig(kind, name, ip, strings.TrimSpace(token), pool+g.zoneLabels(kind, pool, name))
+	labels, taints := g.poolNodeConfig(kind, pool)
+	kubelet := g.poolKubelet(kind, pool)
+	conf := joinConfig(kind, name, ip, strings.TrimSpace(token), pool+g.zoneLabels(kind, pool, name)+labels, kubelet, taints...)
 	if _, err := r.Run(ctx, "docker", "exec", name, "sh", "-c", `printf '%s' "$1" > /kind/kubeadm.conf`, "sh", conf); err != nil {
 		return fail(fmt.Errorf("write node %s's kubeadm configuration: %w", name, err))
+	}
+	if patch, err := kubeletPatch(kubelet); err != nil {
+		return fail(fmt.Errorf("node %s's kubelet settings: %w", name, err))
+	} else if patch != "" {
+		if _, err := r.Run(ctx, "docker", "exec", name, "sh", "-c",
+			`mkdir -p "$1" && printf '%s' "$2" > "$1/kubeletconfiguration+merge.json"`, "sh", kubeletPatchDir, patch); err != nil {
+			return fail(fmt.Errorf("write node %s's kubelet settings: %w", name, err))
+		}
 	}
 	if _, err := r.Run(ctx, "docker", "exec", name, "kubeadm", "join", "--config", "/kind/kubeadm.conf", "--skip-phases=preflight"); err != nil {
 		// Why the kubelet did not come up is in its journal, which goes
@@ -268,7 +293,18 @@ func (g *GKE) join(ctx context.Context, kind, image, pool, name string) error {
 // joinConfig is kind's JoinConfiguration and KubeletConfiguration for a
 // worker (kind v0.33's), with the pool's GKE node label, and the
 // control plane's imagePullCredentialsVerificationPolicy (kindconfig.go).
-func joinConfig(kind, name, ip, token, pool string) string {
+func joinConfig(kind, name, ip, token, pool string, kubelet map[string]any, taints ...NodeTaint) string {
+	patches := ""
+	if len(kubelet) > 0 {
+		patches = "patches:\n  directory: " + kubeletPatchDir + "\n"
+	}
+	reg := ""
+	if len(taints) > 0 {
+		reg = "  taints:\n"
+		for _, t := range taints {
+			reg += "  - key: " + strconv.Quote(t.Key) + "\n    value: " + strconv.Quote(t.Value) + "\n    effect: " + t.Effect + "\n"
+		}
+	}
 	return `apiVersion: kubeadm.k8s.io/v1beta4
 kind: JoinConfiguration
 discovery:
@@ -284,8 +320,8 @@ nodeRegistration:
   - name: provider-id
     value: kind://docker/` + kind + `/` + name + `
   - name: node-labels
-    value: cloud.google.com/gke-nodepool=` + pool + `
-skipPhases:
+    value: ` + strconv.Quote("cloud.google.com/gke-nodepool="+pool) + `
+` + reg + `` + patches + `skipPhases:
 - preflight
 ---
 apiVersion: kubelet.config.k8s.io/v1beta1
@@ -300,6 +336,22 @@ imageGCHighThresholdPercent: 100
 imagePullCredentialsVerificationPolicy: NeverVerify
 kind: KubeletConfiguration
 `
+}
+
+// kubeletPatchDir is where a node's kubeadm patches are: kubeadm join
+// takes the kubelet's configuration from the cluster (its kubelet-config
+// ConfigMap), so a pool's kubelet settings are a merge patch kubeadm
+// applies over it on that node (target kubeletconfiguration).
+const kubeletPatchDir = "/kind/patches"
+
+// kubeletPatch is a pool's kubelet settings as kubeadm's
+// kubeletconfiguration+merge.json, or "" for none.
+func kubeletPatch(settings map[string]any) (string, error) {
+	if len(settings) == 0 {
+		return "", nil
+	}
+	b, err := json.Marshal(settings)
+	return string(b), err
 }
 
 // Delete removes the kind cluster, every node it added with it, and the

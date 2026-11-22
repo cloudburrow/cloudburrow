@@ -4,6 +4,7 @@ import (
 	"context"
 	"sort"
 	"strings"
+	"time"
 
 	"cloud.google.com/go/container/apiv1/containerpb"
 	"google.golang.org/grpc/codes"
@@ -71,6 +72,11 @@ type TelemetryTarget struct {
 	ControlPlaneLogs         map[string]bool
 	// SystemMetrics is whether system metrics are shipped.
 	SystemMetrics bool
+	// LoggingChanged is when the cluster's logging was last changed by
+	// this server, zero for none since it started: a log category turned
+	// on is shipped from then, so a line a pod writes as soon as the
+	// change's operation is done is not lost to the shipper's next sweep.
+	LoggingChanged time.Time
 }
 
 // Telemetry lists the running clusters and what of each is shipped.
@@ -89,7 +95,7 @@ func (s *Server) Telemetry() []TelemetryTarget {
 			continue
 		}
 		t := TelemetryTarget{Name: name, Project: e.project, Location: c.GetLocation(), Cluster: c.GetName(), Kind: e.kind,
-			ControlPlaneLogs: map[string]bool{}}
+			ControlPlaneLogs: map[string]bool{}, LoggingChanged: e.loggingChanged}
 		if c.GetLoggingService() != telemetryNone {
 			for _, comp := range c.GetLoggingConfig().GetComponentConfig().GetEnableComponents() {
 				switch comp {
@@ -371,6 +377,9 @@ func (s *Server) changeTelemetry(p parsed, ch *telemetryChange) (*containerpb.Op
 	}
 	c := e.cluster
 	return s.startSettingLocked(p, e, containerpb.Operation_UPDATE_CLUSTER, func(context.Context) error { return nil }, func() {
+		if !proto.Equal(c.GetLoggingConfig(), next.LoggingConfig) || c.GetLoggingService() != next.LoggingService {
+			e.loggingChanged = s.now()
+		}
 		c.LoggingService, c.LoggingConfig = next.LoggingService, next.LoggingConfig
 		c.MonitoringService, c.MonitoringConfig = next.MonitoringService, next.MonitoringConfig
 	}), nil

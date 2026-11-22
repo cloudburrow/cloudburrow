@@ -18,17 +18,29 @@ import (
 // node count in each zone, so each pool is resized to it.
 //
 // Locally a zone is a label: each node of a pool carries
-// topology.kubernetes.io/zone (and topology.kubernetes.io/region), the
-// pool's zones taken in turn by node index, so a pool's nodes are spread
-// evenly. A pool whose zones shrink keeps its lowest-numbered nodes, which
-// are labelled again for the zones left (GKE deletes the removed zones'
-// nodes instead; the counts per zone are the same).
+// topology.kubernetes.io/zone (and topology.kubernetes.io/region), from
+// the moment its pool is made. A new node goes to the pool's zone with the
+// fewest nodes and keeps it; removing a zone deletes that zone's nodes, as
+// GKE does, and the other nodes keep their zones.
 
 // Placer is what a Backend does for zones.
 type Placer interface {
 	// PlaceNodes labels pool's nodes, and those it gets later, with zones
 	// in turn.
 	PlaceNodes(ctx context.Context, kind, pool string, zones []string) error
+}
+
+// placePool records a new pool's zones before its nodes are made, so each
+// is labelled with its zone; a backend with no zones does nothing.
+func (s *Server) placePool(ctx context.Context, kind, pool string, zones []string) error {
+	placer, ok := s.backend.(Placer)
+	if !ok || len(zones) == 0 {
+		return nil
+	}
+	if err := placer.PlaceNodes(ctx, kind, pool, zones); err != nil {
+		return status.Errorf(codes.Internal, "Placing node pool %q's nodes failed: %v", pool, err)
+	}
+	return nil
 }
 
 // checkZones refuses zones GKE refuses for a cluster in location.
@@ -53,6 +65,29 @@ func checkZones(location string, zones []string) error {
 	}
 	if isZone(location) && !seen[location] {
 		return status.Errorf(codes.InvalidArgument, "The locations of a zonal cluster must contain its primary zone %s.", location)
+	}
+	return nil
+}
+
+// checkPoolZones refuses a node pool's own zones (node_pool.locations)
+// outside the cluster's region, or listed twice. Unlike the cluster's,
+// they need not include its primary zone: the reference sets no such rule
+// (re-read 2026-11-22: rest/v1/projects.locations.clusters.nodePools).
+func checkPoolZones(region string, zones []string) error {
+	seen := map[string]bool{}
+	for _, z := range zones {
+		if !isZone(z) {
+			return status.Errorf(codes.InvalidArgument, "Location %q is not a zone.", z)
+		}
+		if regionOf(z) != region {
+			// UNVERIFIED wording, as checkZones' (re-read 2026-11-22:
+			// rest/v1/projects.locations.clusters.nodePools quotes none).
+			return status.Errorf(codes.InvalidArgument, "Zone %q is not in the cluster's region %s: all zones must be in the same region as the cluster's control plane.", z, region)
+		}
+		if seen[z] {
+			return status.Errorf(codes.InvalidArgument, "Zone %q is listed twice.", z)
+		}
+		seen[z] = true
 	}
 	return nil
 }
@@ -135,6 +170,7 @@ func (s *Server) SetLocations(_ context.Context, req *containerpb.SetLocationsRe
 		c.Locations = zones
 		for _, np := range c.NodePools {
 			np.Locations = append([]string(nil), zones...)
+			setInstanceGroups(p.project, c.Name, np)
 		}
 	}), nil
 }

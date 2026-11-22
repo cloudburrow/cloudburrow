@@ -21070,8 +21070,7 @@
     "Key": "gke",
     "Title": "Kubernetes Engine API (v1)",
     "counts": {
-      "Implemented": 1,
-      "Verified": 36
+      "Verified": 37
     },
     "rows": [
       {
@@ -21086,7 +21085,7 @@
         "method": "google.container.v1.ClusterManager/CheckAutopilotCompatibility",
         "status": "Verified",
         "tests": [
-          "test/compat/gkesettings_test.go:331 TestGcloudContainerClusterSettings",
+          "test/compat/gkesettings_test.go:336 TestGcloudContainerClusterSettings",
           "test/compat/gkesettings_test.go:57 TestGKEClusterSettings"
         ]
       },
@@ -21094,22 +21093,24 @@
         "method": "google.container.v1.ClusterManager/CompleteControlPlaneUpgrade",
         "status": "Verified",
         "tests": [
-          "test/compat/gkemethods_test.go:272 TestGKERollbackSafeUpgrade",
-          "test/compat/gkemethods_test.go:393 TestGcloudContainerRotationLocationsAndUpgradeInfo"
+          "test/compat/gkemethods_test.go:298 TestGKERollbackSafeUpgrade",
+          "test/compat/gkemethods_test.go:419 TestGcloudContainerRotationLocationsAndUpgradeInfo"
         ]
       },
       {
         "method": "google.container.v1.ClusterManager/CompleteIPRotation",
         "status": "Verified",
         "tests": [
-          "test/compat/gkemethods_test.go:393 TestGcloudContainerRotationLocationsAndUpgradeInfo",
-          "test/compat/gkemethods_test.go:94 TestGKERotationLocationsAndUpgradeInfo"
+          "test/compat/gkemethods_test.go:419 TestGcloudContainerRotationLocationsAndUpgradeInfo",
+          "test/compat/gkemethods_test.go:98 TestGKERotationLocationsAndUpgradeInfo"
         ]
       },
       {
         "method": "google.container.v1.ClusterManager/CompleteNodePoolUpgrade",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gkebluegreen_test.go:87 TestGKEBlueGreenCompleteNodePoolUpgrade"
+        ]
       },
       {
         "method": "google.container.v1.ClusterManager/CreateCluster",
@@ -21125,6 +21126,9 @@
         "status": "Verified",
         "tests": [
           "test/compat/gke_test.go:125 TestGKEClustersNodePoolsAndOperations",
+          "test/compat/gkekubelet_test.go:64 TestGKENodeKubeletConfig",
+          "test/compat/gkezones_test.go:205 TestGKENodeLabelsAndTaints",
+          "test/compat/gkezones_test.go:59 TestGKENodeZones",
           "test/compat/terraform_gke_test.go:24 TestTerraformContainerClusterAndNodePool"
         ]
       },
@@ -21149,16 +21153,16 @@
         "method": "google.container.v1.ClusterManager/FetchClusterUpgradeInfo",
         "status": "Verified",
         "tests": [
-          "test/compat/gkemethods_test.go:393 TestGcloudContainerRotationLocationsAndUpgradeInfo",
-          "test/compat/gkemethods_test.go:94 TestGKERotationLocationsAndUpgradeInfo"
+          "test/compat/gkemethods_test.go:419 TestGcloudContainerRotationLocationsAndUpgradeInfo",
+          "test/compat/gkemethods_test.go:98 TestGKERotationLocationsAndUpgradeInfo"
         ]
       },
       {
         "method": "google.container.v1.ClusterManager/FetchNodePoolUpgradeInfo",
         "status": "Verified",
         "tests": [
-          "test/compat/gkemethods_test.go:393 TestGcloudContainerRotationLocationsAndUpgradeInfo",
-          "test/compat/gkemethods_test.go:94 TestGKERotationLocationsAndUpgradeInfo"
+          "test/compat/gkemethods_test.go:419 TestGcloudContainerRotationLocationsAndUpgradeInfo",
+          "test/compat/gkemethods_test.go:98 TestGKERotationLocationsAndUpgradeInfo"
         ]
       },
       {
@@ -21228,7 +21232,7 @@
         "method": "google.container.v1.ClusterManager/ListUsableSubnetworks",
         "status": "Verified",
         "tests": [
-          "test/compat/gkesettings_test.go:331 TestGcloudContainerClusterSettings",
+          "test/compat/gkesettings_test.go:336 TestGcloudContainerClusterSettings",
           "test/compat/gkesettings_test.go:57 TestGKEClusterSettings"
         ]
       },
@@ -21258,7 +21262,7 @@
         "method": "google.container.v1.ClusterManager/SetLegacyAbac",
         "status": "Verified",
         "tests": [
-          "test/compat/gkesettings_test.go:331 TestGcloudContainerClusterSettings",
+          "test/compat/gkesettings_test.go:336 TestGcloudContainerClusterSettings",
           "test/compat/gkesettings_test.go:57 TestGKEClusterSettings"
         ]
       },
@@ -21266,8 +21270,9 @@
         "method": "google.container.v1.ClusterManager/SetLocations",
         "status": "Verified",
         "tests": [
-          "test/compat/gkemethods_test.go:393 TestGcloudContainerRotationLocationsAndUpgradeInfo",
-          "test/compat/gkemethods_test.go:94 TestGKERotationLocationsAndUpgradeInfo"
+          "test/compat/gkemethods_test.go:419 TestGcloudContainerRotationLocationsAndUpgradeInfo",
+          "test/compat/gkemethods_test.go:98 TestGKERotationLocationsAndUpgradeInfo",
+          "test/compat/gkezones_test.go:59 TestGKENodeZones"
         ]
       },
       {
@@ -21305,7 +21310,7 @@
         "method": "google.container.v1.ClusterManager/SetNetworkPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/gkesettings_test.go:331 TestGcloudContainerClusterSettings",
+          "test/compat/gkesettings_test.go:336 TestGcloudContainerClusterSettings",
           "test/compat/gkesettings_test.go:57 TestGKEClusterSettings"
         ]
       },
@@ -21320,7 +21325,7 @@
         "method": "google.container.v1.ClusterManager/SetNodePoolManagement",
         "status": "Verified",
         "tests": [
-          "test/compat/gkesettings_test.go:331 TestGcloudContainerClusterSettings",
+          "test/compat/gkesettings_test.go:336 TestGcloudContainerClusterSettings",
           "test/compat/gkesettings_test.go:57 TestGKEClusterSettings"
         ]
       },
@@ -21329,6 +21334,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gke_test.go:125 TestGKEClustersNodePoolsAndOperations",
+          "test/compat/gkezones_test.go:59 TestGKENodeZones",
           "test/compat/terraform_gke_test.go:24 TestTerraformContainerClusterAndNodePool"
         ]
       },
@@ -21336,8 +21342,8 @@
         "method": "google.container.v1.ClusterManager/StartIPRotation",
         "status": "Verified",
         "tests": [
-          "test/compat/gkemethods_test.go:393 TestGcloudContainerRotationLocationsAndUpgradeInfo",
-          "test/compat/gkemethods_test.go:94 TestGKERotationLocationsAndUpgradeInfo"
+          "test/compat/gkemethods_test.go:419 TestGcloudContainerRotationLocationsAndUpgradeInfo",
+          "test/compat/gkemethods_test.go:98 TestGKERotationLocationsAndUpgradeInfo"
         ]
       },
       {
@@ -21358,7 +21364,10 @@
         "method": "google.container.v1.ClusterManager/UpdateNodePool",
         "status": "Verified",
         "tests": [
-          "test/compat/gke_test.go:125 TestGKEClustersNodePoolsAndOperations"
+          "test/compat/gke_test.go:125 TestGKEClustersNodePoolsAndOperations",
+          "test/compat/gkebluegreen_test.go:87 TestGKEBlueGreenCompleteNodePoolUpgrade",
+          "test/compat/gkekubelet_test.go:64 TestGKENodeKubeletConfig",
+          "test/compat/gkezones_test.go:205 TestGKENodeLabelsAndTaints"
         ]
       }
     ]

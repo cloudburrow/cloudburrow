@@ -22,6 +22,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
+
+	"github.com/cloudburrow/cloudburrow/internal/service/gke"
 )
 
 // gkeTLSGet is a GET of the cluster's API server at path, trusting only
@@ -89,6 +91,8 @@ func gkeNodeZones(t *testing.T, kubeconfig, pool string) []string {
 //     the old one; CompleteIPRotation drops the old CA and the old
 //     endpoint, after which only the new-CA client does, only at the new
 //     endpoint, and the old client certificate is refused.
+//   - the endpoint rules dropped inside the control plane (as a restarted
+//     container loses them) are put back within a minute.
 //
 // covers: google.container.v1.ClusterManager/FetchClusterUpgradeInfo, google.container.v1.ClusterManager/FetchNodePoolUpgradeInfo, google.container.v1.ClusterManager/SetLocations, google.container.v1.ClusterManager/StartIPRotation, google.container.v1.ClusterManager/CompleteIPRotation
 func TestGKERotationLocationsAndUpgradeInfo(t *testing.T) {
@@ -256,6 +260,30 @@ func TestGKERotationLocationsAndUpgradeInfo(t *testing.T) {
 		return err == nil && strings.Contains(string(out), "true") && !strings.Contains(string(out), "false")
 	}) {
 		t.Error("CoreDNS is not ready after the rotation")
+	}
+
+	// Last, as it cuts the host off the cluster for a while:
+	// the rules that serve the new endpoint and refuse the old one live in
+	// the control plane's network namespace, which a restarted container
+	// loses: dropped there, they are put back within a minute.
+	instance := strings.TrimSpace(os.Getenv("CLOUDBURROW_TEST_CLUSTER"))
+	if instance == "" {
+		t.Skip("CLOUDBURROW_TEST_CLUSTER is not set: the cluster's control plane container is not known")
+	}
+	drop := `iptables -t nat -D PREROUTING -p tcp --dport 6444 -j REDIRECT --to-ports 6443 && ` +
+		`iptables -S INPUT | grep -e '--dport 6443' | sed 's/^-A /-D /' | while read -r rule; do eval "iptables $rule"; done`
+	if out, err := exec.Command("docker", "exec", gke.KindName(instance, name)+"-control-plane", "sh", "-c", drop).CombinedOutput(); err != nil {
+		t.Fatalf("drop the control plane's endpoint rules: %v\n%s", err, out)
+	}
+	if code, _, err := gkeTLSGet(after, newCA, "/api/v1/namespaces/default"); err == nil && code == http.StatusOK {
+		t.Error("the new endpoint served with its rule dropped")
+	}
+	if !gkeEventually(90*time.Second, func() bool {
+		_, _, oldErr := gkeTLSGet(atOld, newCA, "/api/v1/namespaces/default")
+		code, _, newErr := gkeTLSGet(after, newCA, "/api/v1/namespaces/default")
+		return oldErr != nil && newErr == nil && code == http.StatusOK
+	}) {
+		t.Error("after the control plane lost its rules, the new endpoint does not serve or the old one serves again")
 	}
 }
 

@@ -1,8 +1,15 @@
 package main
 
 import (
+	"context"
+	"io"
+	"slices"
+	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"cloud.google.com/go/logging/apiv2/loggingpb"
 
 	ltype "google.golang.org/genproto/googleapis/logging/type"
 
@@ -85,4 +92,77 @@ func TestGKELogEntry(t *testing.T) {
 	if e.Severity != ltype.LogSeverity_WARNING || e.GetJsonPayload().GetFields()["message"].GetStringValue() != "m" {
 		t.Errorf("structured entry = %v", e)
 	}
+}
+
+// gkeFeederFor is a feeder over one cluster whose pod web-1 wrote line,
+// with a clock starting at at that each listing moves on five seconds.
+func gkeFeederFor(at, changed time.Time, line string, written chan string) *gkeLogFeeder {
+	var mu sync.Mutex
+	clock := at
+	file := podLogDir("default", "web-1", "u1") + "/app/0.log"
+	return &gkeLogFeeder{
+		targets: func() []gke.TelemetryTarget {
+			return []gke.TelemetryTarget{{Project: "p", Location: "us-central1-a", Cluster: "c1", Kind: "k",
+				SystemLogs: true, WorkloadLogs: true, ControlPlaneLogs: map[string]bool{}, LoggingChanged: changed}}
+		},
+		kubectl: func(context.Context, string, ...string) (string, error) {
+			mu.Lock()
+			clock = clock.Add(5 * time.Second)
+			mu.Unlock()
+			return gkePodsJSON, nil
+		},
+		docker: func(_ context.Context, args ...string) (io.ReadCloser, func() error, error) {
+			if slices.Contains(args, "find") {
+				return io.NopCloser(strings.NewReader(file + "\n")), func() error { return nil }, nil
+			}
+			return io.NopCloser(strings.NewReader(line)), func() error { return nil }, nil
+		},
+		write: func(_ context.Context, req *loggingpb.WriteLogEntriesRequest) (*loggingpb.WriteLogEntriesResponse, error) {
+			for _, e := range req.GetEntries() {
+				written <- e.GetTextPayload()
+			}
+			return &loggingpb.WriteLogEntriesResponse{}, nil
+		},
+		now: func() time.Time {
+			mu.Lock()
+			defer mu.Unlock()
+			return clock
+		},
+		since: map[string]time.Time{}, follows: map[string]*runLogFollow{},
+	}
+}
+
+func wantShipped(t *testing.T, what string, written chan string, want bool) {
+	t.Helper()
+	select {
+	case got := <-written:
+		if !want || got != "hello" {
+			t.Errorf("%s: shipped %q", what, got)
+		}
+	case <-time.After(2 * time.Second):
+		if want {
+			t.Errorf("%s: the line was not shipped", what)
+		}
+	}
+}
+
+// TestGKELogFeederShipsFromWhenLoggingWasOn (#2100): a category turned on
+// is shipped from when the cluster's logging change turned it on, so a
+// line a pod writes half a second after the change, before the shipper's
+// next sweep, is shipped (TestGKELoggingAndMonitoring's lg3 line was
+// dropped by 115ms); without a change made by this server, from the
+// start of the sweep that first sees it, not from when its slow listing
+// ends; a line older than both is not.
+func TestGKELogFeederShipsFromWhenLoggingWasOn(t *testing.T) {
+	t0 := time.Date(2026, 11, 22, 13, 0, 0, 0, time.UTC)
+	line := t0.Add(time.Second).Format(time.RFC3339Nano) + " stdout F hello\n"
+	written := make(chan string, 4)
+	gkeFeederFor(t0.Add(2*time.Second), t0, line, written).sweep(context.Background())
+	wantShipped(t, "a line after the change, before the sweep", written, true)
+	written = make(chan string, 4)
+	gkeFeederFor(t0, time.Time{}, line, written).sweep(context.Background())
+	wantShipped(t, "a line during the sweep's listing", written, true)
+	written = make(chan string, 4)
+	gkeFeederFor(t0.Add(2*time.Second), time.Time{}, line, written).sweep(context.Background())
+	wantShipped(t, "a line before the sweep, no change known", written, false)
 }

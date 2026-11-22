@@ -266,9 +266,17 @@ func (f *gkeLogFeeder) sweep(ctx context.Context) {
 	type file struct {
 		kind string
 		src  gkeLogSource
+		// on is when the file's cluster's logging was last changed.
+		on time.Time
 	}
 	var files []file
 	listed := map[string]bool{} // clusters whose files were listed
+	// A category turned on is shipped from when the change turned it on
+	// (TelemetryTarget.LoggingChanged), or this sweep's start: a pod made
+	// as soon as logging is back on writes its first line within half a
+	// second, before the next sweep, and listing the pods and their files
+	// takes seconds more.
+	start := f.now()
 	for _, t := range f.targets() {
 		if !t.SystemLogs && !t.WorkloadLogs && len(t.ControlPlaneLogs) == 0 {
 			continue
@@ -297,7 +305,7 @@ func (f *gkeLogFeeder) sweep(ctx context.Context) {
 			}
 			for _, n := range names {
 				if s, found := dirs[n[:max(strings.LastIndex(n, "/"), 0)]]; found {
-					files = append(files, file{kind: t.Kind, src: s})
+					files = append(files, file{kind: t.Kind, src: s, on: t.LoggingChanged})
 					files[len(files)-1].src.dir = n
 				}
 			}
@@ -308,14 +316,18 @@ func (f *gkeLogFeeder) sweep(ctx context.Context) {
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	now := f.now()
 	seen := map[string]bool{}
 	categories := map[string]bool{}
 	for _, fl := range files {
 		cat := fl.kind + "/" + fl.src.category
 		categories[cat] = true
 		if _, ok := f.since[cat]; !ok {
-			f.since[cat] = now
+			// From when the change turned it on, when this server made
+			// it; else from this sweep's start.
+			f.since[cat] = start
+			if !fl.on.IsZero() && fl.on.Before(start) {
+				f.since[cat] = fl.on
+			}
 		}
 		key := fl.kind + "\x00" + fl.src.node + "\x00" + fl.src.dir
 		seen[key] = true
