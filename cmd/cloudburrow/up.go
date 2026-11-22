@@ -454,6 +454,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		appHubSvc.gke = gkeSvc
 		appHubSvc.live = boundAddrs
 		appHubSvc.bigquery = func() *netfwd.Forwarder { return forwarderFor(forwarders, "bigquery") }
+		if dataformSvc != nil {
+			appHubSvc.dataform = dataformSvc.Addr
+		}
 	}
 	appHubSvc.register(coord)
 	if gkeSvc != nil && runSvc != nil && runSvc.events != nil {

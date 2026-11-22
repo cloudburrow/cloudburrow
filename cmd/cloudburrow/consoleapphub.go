@@ -302,7 +302,7 @@ func (p appHubProvider) DetailActions(ctx context.Context, project string, path 
 		{Name: "id", Label: "Name", Type: "text", Required: true, Pattern: `^[a-z]([a-z0-9\-]{0,61}[a-z0-9])?$`},
 		{Name: "displayName", Label: "Display name", Type: "text"}}, appHubAttributeFields(nil, "")...)}
 	if len(opts) == 0 {
-		register.Unavailable = "The boundary has no discovered service or workload this application can register: attach a project in Settings, and deploy a Cloud Run service or job there."
+		register.Unavailable = "The boundary has no discovered service or workload this application can register: attach a project in Settings, and create there a supported resource this application's scope can register, such as a Cloud Run service, a Pub/Sub topic or a Dataform repository."
 	}
 	return []console.Action{register,
 		{ID: "edit", Label: "Edit", Fields: append([]console.Field{
