@@ -48,7 +48,10 @@ type computeService struct {
 	vms          *computeVMs
 	guestBase    func() string
 	metadataHost func() string
-	cancel       context.CancelFunc
+	// storage is the Cloud Storage port's host address, for image import
+	// (#2139); set by up, "" or nil when Storage is not served.
+	storage func() string
+	cancel  context.CancelFunc
 	// registry is the project registry, for Shared VPC's organization
 	// rule (#2140); nil allows every project.
 	registry func() *resourcemanager.Registry
@@ -116,7 +119,12 @@ func (s *computeService) Start(ctx context.Context) error {
 		return s.metadataHost()
 	}
 	api, err := compute.New(compute.Options{State: state, Extra: s.instanceGroupManagers, ExtraGroups: s.gkeGroups, NetworkUsers: s.networkUsers, VMs: s.vms,
-		ProjectOrganization: s.projectOrganization})
+		ProjectOrganization: s.projectOrganization, ReadObject: imageObjectReader(func() string {
+			if s.storage == nil {
+				return ""
+			}
+			return s.storage()
+		})})
 	if err != nil {
 		return err
 	}

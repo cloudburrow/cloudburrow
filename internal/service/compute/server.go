@@ -26,6 +26,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -68,6 +69,10 @@ type Options struct {
 	// project outside any) and whether the project is known, for Shared
 	// VPC's organization rule (xpn.go); nil allows every project.
 	ProjectOrganization func(project string) (org string, known bool)
+	// ReadObject opens a Cloud Storage object of this instance and says its
+	// size, for image import (rawDisk.source, #2139); a missing bucket or
+	// object wraps ErrObjectNotFound. nil answers rawDisk with 501.
+	ReadObject func(ctx context.Context, bucket, object string) (io.ReadCloser, int64, error)
 	// MinFreeBytes is DefaultMinFreeBytes when zero.
 	MinFreeBytes uint64
 	// CPU reads a running VM's CPU time in seconds since it booted, the

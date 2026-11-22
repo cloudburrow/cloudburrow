@@ -1450,6 +1450,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			return ""
 		}
 		computeSvc.metadataHost = func() string { return hostComp.InCluster("metadata") }
+		computeSvc.storage = func() string {
+			if f := forwarderFor(forwarders, "storage"); f != nil {
+				return f.HostAddr()
+			}
+			return ""
+		}
 	}
 	if runSvc != nil {
 		// A build step reaches the metadata server as its build's account (#1854).

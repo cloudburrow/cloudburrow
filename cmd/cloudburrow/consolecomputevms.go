@@ -1187,6 +1187,12 @@ func (p computeDisksProvider) Create(ctx context.Context, project string, values
 		b["description"] = d
 	}
 	switch values["source"] {
+	case "Cloud Storage file":
+		src := strings.TrimSpace(values["rawSource"])
+		if src == "" {
+			return "", fmt.Errorf("Cloud Storage file: name the gs://BUCKET/FILE.tar.gz to import")
+		}
+		b["rawDisk"] = map[string]any{"source": src}
 	case "Image":
 		img := strings.TrimSpace(values["image"])
 		if proj, fam, ok := strings.Cut(img, "/"); ok {
@@ -1550,7 +1556,7 @@ func (computeImagesProvider) Title() string { return "Images" }
 func (p computeImagesProvider) List(ctx context.Context, project string) (console.Listing, error) {
 	listing := console.Listing{Columns: []string{"Location", "Family", "Disk size", "Created by", "Creation time"}, Noun: "images", AlwaysStatus: true,
 		Note: "The public images served are systemd container images of the distribution, built locally at first use. " +
-			"Not served: " + refusedImagesText() + ". A custom image is a copy of its source disk."}
+			"Not served: " + refusedImagesText() + ". A custom image is a copy of its source disk; one imported from a Cloud Storage file holds its disk.raw's root file system."}
 	if p.api() == nil {
 		return listing, errors.New(computeNotStarted)
 	}
@@ -1608,7 +1614,8 @@ func (computeImagesProvider) CreateTitle() string  { return "Create an image" }
 func (computeImagesProvider) CreateLayout() string { return console.CreateLayoutPage }
 
 // CreateForm is Google's Create an image (images/create-custom, read
-// 2026-11-22): Name, Source (Disk, Snapshot or Image), the source,
+// 2026-11-22): Name, Source (Disk, Snapshot, Image or Cloud Storage file),
+// the source,
 // Location, Family, Description and Labels.
 func (p computeImagesProvider) CreateForm() (string, []console.Field) {
 	return "Create image", p.imageFields(nil, nil, nil)
@@ -1626,8 +1633,11 @@ func (p computeImagesProvider) imageFields(disks, snapshots, images []string) []
 	return []console.Field{
 		{Name: "name", Label: "Name", Type: "text", Required: true, Pattern: computeNamePattern, Help: computeNameHelp},
 		{Name: "source", Label: "Source", Type: "select", Default: "Disk", Options: []string{"Disk", "Snapshot", "Image", "Cloud Storage file", "Virtual disk (VMDK, VHD)"},
-			DisabledOptions: []string{"Cloud Storage file", "Virtual disk (VMDK, VHD)"},
-			Help:            "Importing a Cloud Storage tarball or a virtual disk is not served: make the image from a disk, a snapshot or an image."},
+			DisabledOptions: []string{"Virtual disk (VMDK, VHD)"},
+			Help:            "Importing a virtual disk (VMDK, VHD) needs Google's image import tools, which convert it on a Compute Engine VM: convert it to disk.raw and import it as a Cloud Storage file."},
+		{Name: "rawSource", Label: "Cloud Storage file", Type: "text", Required: true, Pattern: `^gs://[^\/]+/.+\.tar\.gz$`, Browse: "storage",
+			VisibleWhen: map[string]string{"source": "Cloud Storage file"},
+			Help:        "gs://BUCKET/FILE.tar.gz in this instance's Cloud Storage: a gzip-compressed tar archive of a single file named disk.raw."},
 		selectOrText(console.Field{Name: "disk", Label: "Source disk", Required: true, VisibleWhen: map[string]string{"source": "Disk"}}, disks, "ZONE/NAME of a disk: none exists yet."),
 		{Name: "force", Label: "Keep instance running (not recommended)", Type: "checkbox", VisibleWhen: map[string]string{"source": "Disk"}},
 		selectOrText(console.Field{Name: "snapshot", Label: "Source snapshot", Required: true, VisibleWhen: map[string]string{"source": "Snapshot"}}, snapshots, "A snapshot's name: none exists yet."),
@@ -1653,6 +1663,12 @@ func (p computeImagesProvider) Create(ctx context.Context, project string, value
 		b["forceCreate"] = values["force"] == "true"
 	case "Snapshot":
 		b["sourceSnapshot"] = "global/snapshots/" + strings.TrimSpace(values["snapshot"])
+	case "Cloud Storage file":
+		src := strings.TrimSpace(values["rawSource"])
+		if src == "" {
+			return "", fmt.Errorf("Cloud Storage file: name the gs://BUCKET/FILE.tar.gz to import")
+		}
+		b["rawDisk"] = map[string]any{"source": src}
 	case "Image":
 		img := strings.TrimSpace(values["image"])
 		if proj, fam, ok := strings.Cut(img, "/"); ok {
