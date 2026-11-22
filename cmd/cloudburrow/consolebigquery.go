@@ -18,6 +18,7 @@ import (
 	"google.golang.org/api/option"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/nbruntime"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 )
 
@@ -54,6 +55,9 @@ type bigqueryProvider struct {
 	// savedQueries is the record of Studio's saved queries in the
 	// instance's state directory (consolebigquerysavedqueries.go, #1861).
 	savedQueries string
+	// notebooks are Studio's notebook runtimes
+	// (consolebigquerynotebooks.go, #2094); nil when none can run.
+	notebooks *nbruntime.Manager
 }
 
 func (bigqueryProvider) ID() string    { return "bigquery" }

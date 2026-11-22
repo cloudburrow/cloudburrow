@@ -85,6 +85,9 @@ func (p bigqueryProvider) StudioCall(ctx context.Context, project, call string, 
 	if prompt := p.scope(project); prompt != "" {
 		return nil, errors.New(prompt)
 	}
+	if call == "runtime" {
+		return p.studioRuntime(ctx, project, body)
+	}
 	ctx, cancel := context.WithTimeout(ctx, bigqueryJobTimeout)
 	defer cancel()
 	svc, err := bqv2.NewService(ctx, option.WithEndpoint("http://"+p.endpoint), option.WithoutAuthentication())

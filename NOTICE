@@ -170,3 +170,16 @@ under CC0 1.0 Universal, and licence texts from the SPDX License List
 being made available by the Linux Foundation and its contributors under the
 Creative Commons Attribution 3.0 licence; the sources' digests are in
 third_party/ssm-templates/.
+
+The binary embeds the base map of BigQuery Studio's Map visualization
+(internal/console/assets/vendor/naturalearth/land-110m.json), derived from
+Natural Earth's 1:110m land (https://github.com/nvkelso/natural-earth-vector,
+v5.1.2), which is in the public domain. Made with Natural Earth; the source's
+digest is in third_party/naturalearth/.
+
+BigQuery Studio's notebook runtime image (internal/nbruntime/image) is built
+locally on a notebook's first Connect; pip installs Google's
+google-cloud-bigquery and bigquery-magics (Apache License, Version 2.0),
+IPython, pandas (BSD 3-Clause License), pyarrow (Apache License, Version
+2.0), db-dtypes and matplotlib into it. None of them is part of this
+repository or of the binary.
