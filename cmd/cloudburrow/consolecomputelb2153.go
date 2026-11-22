@@ -390,9 +390,17 @@ func lbCreateFields(groups, hcs, buckets []string) []console.Field {
 			Help: "ZONE/NAME, or REGION/NAME for a regional managed group."}, groups),
 		{Name: "portName", Label: "Named port", Type: "text", Default: "http", Section: s3, VisibleWhen: map[string]string{"backendType": "instanceGroup"},
 			Help: "The instance group's named port the backend service serves."},
-		{Name: "balancingMode", Label: "Balancing mode", Type: "select", Default: "UTILIZATION", Section: s3, Options: []string{"UTILIZATION", "RATE", "CONNECTION"},
-			VisibleWhen: map[string]string{"backendType": "instanceGroup"}},
+		{Name: "balancingMode", Label: "Balancing mode", Type: "select", Default: "UTILIZATION", Section: s3, Options: []string{"UTILIZATION", "RATE", "CONNECTION", "CUSTOM_METRICS"},
+			OptionLabels: map[string]string{"UTILIZATION": "Utilization", "RATE": "Rate", "CONNECTION": "Connection", "CUSTOM_METRICS": "Custom metrics"},
+			VisibleWhen:  map[string]string{"backendType": "instanceGroup"}},
 		{Name: "maxRatePerInstance", Label: "Maximum RPS per instance", Type: "text", Section: s3, VisibleWhen: map[string]string{"balancingMode": "RATE"}},
+		{Name: "customMetricName", Label: "Custom metric name", Type: "text", Section: s3, VisibleWhen: map[string]string{"balancingMode": "CUSTOM_METRICS"},
+			Pattern: `^[a-z]([-_.a-z0-9]*[a-z0-9])?$`,
+			Help:    "The metric your backends report in their ORCA load report (the endpoint-load-metrics response header), such as orca.cpu_utilization or a named metric."},
+		{Name: "customMetricMaxUtilization", Label: "Max utilization", Type: "text", Default: "0.8", Section: s3, VisibleWhen: map[string]string{"balancingMode": "CUSTOM_METRICS"},
+			Help: "The target value of the metric, between 0.0 and 1.0."},
+		{Name: "customMetricDryRun", Label: "Dry run", Type: "checkbox", Section: s3, VisibleWhen: map[string]string{"balancingMode": "CUSTOM_METRICS"},
+			Help: "Report the metric without using it to balance traffic."},
 		sel(console.Field{Name: "healthCheck", Label: "Health check", Type: "text", Section: s3, VisibleWhen: map[string]string{"backendType": "instanceGroup"},
 			Help: "An existing health check's name, or empty to create an HTTP (TCP for a Network Load Balancer) health check on the serving port."}, append([]string{""}, hcs...)),
 		{Name: "cloudRunService", Label: "Cloud Run service", Type: "text", Section: s3, VisibleWhen: map[string]string{"backendType": "serverless"},
@@ -418,6 +426,24 @@ func (p computeLBProvider) Create(ctx context.Context, project string, v map[str
 	lbType, internal := vpcOr(v["lbType"], "application"), v["facing"] == "internal"
 	regional := v["deployment"] == "regional" || lbType == "network-passthrough" || internal
 	region := vpcOr(v["region"], "us-central1")
+	var customMetric map[string]any
+	if v["balancingMode"] == "CUSTOM_METRICS" && vpcOr(v["backendType"], "instanceGroup") == "instanceGroup" {
+		customMetric = map[string]any{"name": strings.TrimSpace(v["customMetricName"])}
+		if customMetric["name"] == "" {
+			return "", errors.New("Custom metric name: give the metric your backends report")
+		}
+		u, err := strconv.ParseFloat(vpcOr(strings.TrimSpace(v["customMetricMaxUtilization"]), "0.8"), 64)
+		if err != nil || u < 0 || u > 1 {
+			return "", errors.New("Max utilization: a number between 0.0 and 1.0")
+		}
+		customMetric["maxUtilization"] = u
+		if v["customMetricDryRun"] == "true" || v["customMetricDryRun"] == "on" {
+			customMetric["dryRun"] = true
+		}
+		if lbType != "application" {
+			return "", errors.New("Balancing mode: custom metrics are for Application Load Balancers")
+		}
+	}
 	scope := "global"
 	if regional {
 		scope = region
@@ -537,6 +563,9 @@ func (p computeLBProvider) Create(ctx context.Context, project string, v map[str
 				return "", errors.New("Maximum RPS per instance: a number above 0")
 			}
 			be["maxRatePerInstance"] = r
+		}
+		if mode == "CUSTOM_METRICS" {
+			be["customMetrics"] = []any{customMetric}
 		}
 		bs := map[string]any{"name": name + "-backend-service", "loadBalancingScheme": scheme, "protocol": bp,
 			"healthChecks": []any{coll("healthChecks") + "/" + hc}, "backends": []any{be}}
