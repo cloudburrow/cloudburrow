@@ -217,9 +217,11 @@ func (s *Server) zonal(c call, zone string) (obj, error) {
 	case "disks":
 		return s.disks(c, zone)
 	case "instanceGroups":
-		return s.instanceGroups(c, zone)
+		return s.instanceGroups(c, zoneLoc(c.project, zone))
 	case "instanceGroupManagers":
-		return s.instanceGroupManagers(c, zone)
+		return s.instanceGroupManagers(c, zoneLoc(c.project, zone))
+	case "autoscalers":
+		return s.autoscalers(c, zoneLoc(c.project, zone))
 	}
 	return nil, unimplemented("zones/%s/%s is not served (#1963)", zone, c.parts[2])
 }

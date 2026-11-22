@@ -307,6 +307,11 @@ func (p computeInstancesProvider) unmanagedGroupsOf(project string) map[string]s
 	}
 	for _, g := range aggregatedItems(m, "instanceGroups") {
 		zone := zoneOf(vpcStr(g, "zone"))
+		if zone == "" || vpcStr(g, "region") != "" {
+			// A regional group is a manager's: its VMs name it in their
+			// created-by metadata.
+			continue
+		}
 		l, err := p.call("POST", project, "zones/"+zone+"/instanceGroups/"+vpcStr(g, "name")+"/listInstances", nil, map[string]any{})
 		if err != nil {
 			continue

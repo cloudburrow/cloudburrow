@@ -475,6 +475,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if serviceEnabled(cfg, config.ServiceFirestore) {
 			monitoringSvc.firestore = func() string { return forwardedAddr(forwarders, "firestore") }
 		}
+		// Compute Engine VMs' CPU utilization, from the readings its
+		// autoscalers scale on (#2139).
+		if computeSvc != nil {
+			monitoringSvc.computeCPU = computeSvc.API
+		}
 	}
 	monitoringSvc.register(coord)
 	if loggingSvc != nil {

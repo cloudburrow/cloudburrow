@@ -327,6 +327,20 @@ func (s *Server) doLocked(c call) (obj, error) {
 			return s.resourcePolicies(c, region)
 		case "instanceTemplates":
 			return s.instanceTemplates(c, "regions/"+region)
+		case "instanceGroupManagers", "instanceGroups", "autoscalers":
+			// Regional managed instance groups and their autoscalers
+			// (#2139): their VMs are zonal instances.
+			if s.opts.VMs == nil {
+				return nil, noVMs()
+			}
+			l := regionLoc(c.project, region)
+			switch p[2] {
+			case "instanceGroupManagers":
+				return s.instanceGroupManagers(c, l)
+			case "instanceGroups":
+				return s.instanceGroups(c, l)
+			}
+			return s.autoscalers(c, l)
 		case "operations":
 			return s.operation(c, rel)
 		}
@@ -456,6 +470,8 @@ func (s *Server) aggregated(c call, coll string) (obj, error) {
 		m, kind = s.res, "compute#instanceGroupAggregatedList"
 	case "instanceGroupManagers":
 		m, kind = s.res, "compute#instanceGroupManagerAggregatedList"
+	case "autoscalers":
+		m, kind = s.res, "compute#autoscalerAggregatedList"
 	default:
 		return nil, unimplemented("aggregated/%s is not served", coll)
 	}
@@ -490,6 +506,12 @@ func (s *Server) aggregated(c call, coll string) (obj, error) {
 				// As instances.get: with the SSH address a running
 				// instance's port 22 is forwarded to.
 				o = s.decorate(o)
+			}
+			switch coll {
+			case "instanceGroupManagers":
+				s.refreshManagerLocked(o)
+			case "autoscalers":
+				s.refreshAutoscalerLocked(o)
 			}
 			scopes[scope] = append(scopes[scope], o)
 		}

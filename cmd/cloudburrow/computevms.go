@@ -345,6 +345,31 @@ func (b *computeVMs) Resume(ctx context.Context, vm compute.VMSpec) error {
 	return b.freeze(ctx, vm, false)
 }
 
+// CPUUsage implements compute.VMCPU: the CPU seconds the VM's container
+// has used, its cgroup's cpu.stat usage_usec (the container has its own
+// cgroup namespace, so /sys/fs/cgroup is the VM's whole cgroup).
+func (b *computeVMs) CPUUsage(ctx context.Context, vm compute.VMSpec) (float64, error) {
+	out, err := b.kubectl(ctx, "exec", vm.Key, "-c", "vm", "--", "cat", "/sys/fs/cgroup/cpu.stat")
+	if err != nil {
+		return 0, err
+	}
+	return cpuStatSeconds(out)
+}
+
+// cpuStatSeconds is cpu.stat's usage_usec in seconds.
+func cpuStatSeconds(stat string) (float64, error) {
+	for _, line := range strings.Split(stat, "\n") {
+		if f := strings.Fields(line); len(f) == 2 && f[0] == "usage_usec" {
+			us, err := strconv.ParseUint(f[1], 10, 64)
+			if err != nil {
+				return 0, err
+			}
+			return float64(us) / 1e6, nil
+		}
+	}
+	return 0, fmt.Errorf("no usage_usec in cpu.stat")
+}
+
 var ansiRE = regexp.MustCompile(`\x1b\[[0-9;?]*[A-Za-z]|\x1b[MD78]|\r`)
 
 func (b *computeVMs) SerialOutput(ctx context.Context, vm compute.VMSpec) (string, error) {

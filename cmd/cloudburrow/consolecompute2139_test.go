@@ -229,7 +229,8 @@ func TestConsoleComputeParity2139(t *testing.T) {
 	if f := vpcField(gf, "template"); f.Type != "select" || strings.Join(f.Options, ",") != "global/tpl,global/tpl-2" {
 		t.Fatalf("the group form's templates = %+v", f)
 	}
-	if _, err := groups.Create(ctx, project, map[string]string{"kind": groupManaged, "name": "mig", "template": "global/tpl", "zone": "us-central1-a", "size": "2"}); err != nil {
+	if _, err := groups.Create(ctx, project, map[string]string{"kind": groupManaged, "name": "mig", "template": "global/tpl", "zone": "us-central1-a",
+		"autoscaling": autoscaleOff, "size": "2"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := groups.Create(ctx, project, map[string]string{"kind": groupUnmanaged, "name": "ug", "zone": "us-central1-a", "network": "default", "instances": "web"}); err != nil {

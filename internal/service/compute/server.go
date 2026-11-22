@@ -66,6 +66,13 @@ type Options struct {
 	VMs VMBackend
 	// MinFreeBytes is DefaultMinFreeBytes when zero.
 	MinFreeBytes uint64
+	// CPU reads a running VM's CPU time in seconds since it booted, the
+	// autoscalers' load signal and compute.googleapis.com/instance/cpu/
+	// utilization's; nil uses VMs' CPUUsage when it has one (VMCPU).
+	CPU func(ctx context.Context, vm VMSpec) (float64, error)
+	// AutoscaleEvery is how often the VMs' CPU is read and the autoscalers
+	// run; 15 seconds when zero.
+	AutoscaleEvery time.Duration
 }
 
 // obj is one resource, as its JSON is kept: link fields hold relative
@@ -98,8 +105,13 @@ type Server struct {
 	// by instance.
 	pods map[string]podSeen
 
-	// stopLoop ends the schedules' runner (resourcepolicies.go).
+	// stopLoop ends the schedules' runner (resourcepolicies.go) and the
+	// autoscalers' (autoscalers.go); loops is done once both have ended.
 	stopLoop context.CancelFunc
+	loops    sync.WaitGroup
+	// scale is the autoscalers' memory: the VMs' CPU readings and each
+	// autoscaler's recent recommendations and sizes (autoscalers.go).
+	scale scaleState
 
 	srv *http.Server
 	ln  net.Listener
@@ -127,7 +139,9 @@ func (s *Server) Start(context.Context) error {
 	if s.opts.VMs != nil && s.stopLoop == nil {
 		ctx, cancel := context.WithCancel(context.Background())
 		s.stopLoop = cancel
-		go s.scheduleLoop(ctx)
+		s.loops.Add(2)
+		go func() { defer s.loops.Done(); s.scheduleLoop(ctx) }()
+		go func() { defer s.loops.Done(); s.autoscaleLoop(ctx) }()
 	}
 	if s.opts.Addr == "" {
 		return nil
@@ -147,6 +161,7 @@ func (s *Server) Stop(ctx context.Context) error {
 	if s.stopLoop != nil {
 		s.stopLoop()
 		s.stopLoop = nil
+		s.loops.Wait()
 	}
 	if s.srv == nil {
 		return nil

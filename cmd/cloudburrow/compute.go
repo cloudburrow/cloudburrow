@@ -102,6 +102,11 @@ func (s *computeService) Start(ctx context.Context) error {
 		return err
 	}
 	s.api = api
+	// The schedules' and autoscalers' loops (#2139); with no Addr, Start
+	// listens on nothing.
+	if err := api.Start(ctx); err != nil {
+		return err
+	}
 	ln, err := net.Listen("tcp", net.JoinHostPort(s.cfg.BindAddress, strconv.Itoa(s.cfg.Endpoints.Compute)))
 	if err != nil {
 		return fmt.Errorf("compute: %w", err)
@@ -120,6 +125,9 @@ func (s *computeService) Start(ctx context.Context) error {
 }
 
 func (s *computeService) Stop(ctx context.Context) error {
+	if s.api != nil {
+		_ = s.api.Stop(ctx)
+	}
 	if s.vms != nil {
 		s.vms.stopAll()
 	}
