@@ -14469,9 +14469,9 @@
     "Key": "compute",
     "Title": "Compute Engine API (v1): VPC networking",
     "counts": {
-      "Implemented": 104,
+      "Implemented": 70,
       "Unimplemented": 96,
-      "Verified": 72
+      "Verified": 106
     },
     "rows": [
       {
@@ -14533,28 +14533,38 @@
       },
       {
         "method": "compute.autoscalers.delete",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computegroups2139_test.go:346 TestComputeAutoscalerScalesOnRealCPU"
+        ]
       },
       {
         "method": "compute.autoscalers.get",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computegroups2139_test.go:346 TestComputeAutoscalerScalesOnRealCPU"
+        ]
       },
       {
         "method": "compute.autoscalers.insert",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computegroups2139_test.go:346 TestComputeAutoscalerScalesOnRealCPU"
+        ]
       },
       {
         "method": "compute.autoscalers.list",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computegroups2139_test.go:346 TestComputeAutoscalerScalesOnRealCPU"
+        ]
       },
       {
         "method": "compute.autoscalers.patch",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computegroups2139_test.go:346 TestComputeAutoscalerScalesOnRealCPU"
+        ]
       },
       {
         "method": "compute.autoscalers.testIamPermissions",
@@ -14563,8 +14573,10 @@
       },
       {
         "method": "compute.autoscalers.update",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computegroups2139_test.go:346 TestComputeAutoscalerScalesOnRealCPU"
+        ]
       },
       {
         "method": "compute.diskTypes.aggregatedList",
@@ -14893,8 +14905,10 @@
       },
       {
         "method": "compute.instanceGroupManagers.delete",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computegroups2139_test.go:346 TestComputeAutoscalerScalesOnRealCPU"
+        ]
       },
       {
         "method": "compute.instanceGroupManagers.deleteInstances",
@@ -14908,13 +14922,17 @@
       },
       {
         "method": "compute.instanceGroupManagers.get",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computegroups2139_test.go:346 TestComputeAutoscalerScalesOnRealCPU"
+        ]
       },
       {
         "method": "compute.instanceGroupManagers.insert",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computegroups2139_test.go:346 TestComputeAutoscalerScalesOnRealCPU"
+        ]
       },
       {
         "method": "compute.instanceGroupManagers.list",
@@ -14963,8 +14981,10 @@
       },
       {
         "method": "compute.instanceGroupManagers.setInstanceTemplate",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computegroups2139_test.go:69 TestComputeRegionalGroupsThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.instanceGroupManagers.setTargetPools",
@@ -15033,8 +15053,10 @@
       },
       {
         "method": "compute.instanceGroups.setNamedPorts",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computegroups2139_test.go:69 TestComputeRegionalGroupsThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.instanceGroups.testIamPermissions",
@@ -15540,28 +15562,38 @@
       },
       {
         "method": "compute.regionAutoscalers.delete",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computegroups2139_test.go:69 TestComputeRegionalGroupsThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.regionAutoscalers.get",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computegroups2139_test.go:69 TestComputeRegionalGroupsThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.regionAutoscalers.insert",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computegroups2139_test.go:69 TestComputeRegionalGroupsThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.regionAutoscalers.list",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computegroups2139_test.go:69 TestComputeRegionalGroupsThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.regionAutoscalers.patch",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computegroups2139_test.go:69 TestComputeRegionalGroupsThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.regionAutoscalers.testIamPermissions",
@@ -15570,8 +15602,10 @@
       },
       {
         "method": "compute.regionAutoscalers.update",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computegroups2139_test.go:69 TestComputeRegionalGroupsThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.regionInstanceGroupManagers.abandonInstances",
@@ -15590,13 +15624,17 @@
       },
       {
         "method": "compute.regionInstanceGroupManagers.delete",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computegroups2139_test.go:69 TestComputeRegionalGroupsThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.regionInstanceGroupManagers.deleteInstances",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computegroups2139_test.go:69 TestComputeRegionalGroupsThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.regionInstanceGroupManagers.deletePerInstanceConfigs",
@@ -15605,18 +15643,24 @@
       },
       {
         "method": "compute.regionInstanceGroupManagers.get",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computegroups2139_test.go:69 TestComputeRegionalGroupsThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.regionInstanceGroupManagers.insert",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computegroups2139_test.go:69 TestComputeRegionalGroupsThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.regionInstanceGroupManagers.list",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computegroups2139_test.go:69 TestComputeRegionalGroupsThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.regionInstanceGroupManagers.listErrors",
@@ -15625,8 +15669,10 @@
       },
       {
         "method": "compute.regionInstanceGroupManagers.listManagedInstances",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computegroups2139_test.go:69 TestComputeRegionalGroupsThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.regionInstanceGroupManagers.listPerInstanceConfigs",
@@ -15645,23 +15691,31 @@
       },
       {
         "method": "compute.regionInstanceGroupManagers.recreateInstances",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computegroups2139_test.go:69 TestComputeRegionalGroupsThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.regionInstanceGroupManagers.resize",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computegroups2139_test.go:69 TestComputeRegionalGroupsThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.regionInstanceGroupManagers.resumeInstances",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computegroups2139_test.go:69 TestComputeRegionalGroupsThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.regionInstanceGroupManagers.setInstanceTemplate",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computegroups2139_test.go:69 TestComputeRegionalGroupsThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.regionInstanceGroupManagers.setTargetPools",
@@ -15670,18 +15724,24 @@
       },
       {
         "method": "compute.regionInstanceGroupManagers.startInstances",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computegroups2139_test.go:69 TestComputeRegionalGroupsThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.regionInstanceGroupManagers.stopInstances",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computegroups2139_test.go:69 TestComputeRegionalGroupsThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.regionInstanceGroupManagers.suspendInstances",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computegroups2139_test.go:69 TestComputeRegionalGroupsThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.regionInstanceGroupManagers.updatePerInstanceConfigs",
@@ -15690,23 +15750,31 @@
       },
       {
         "method": "compute.regionInstanceGroups.get",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computegroups2139_test.go:69 TestComputeRegionalGroupsThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.regionInstanceGroups.list",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computegroups2139_test.go:69 TestComputeRegionalGroupsThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.regionInstanceGroups.listInstances",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computegroups2139_test.go:69 TestComputeRegionalGroupsThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.regionInstanceGroups.setNamedPorts",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computegroups2139_test.go:69 TestComputeRegionalGroupsThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.regionInstanceGroups.testIamPermissions",
