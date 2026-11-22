@@ -178,6 +178,11 @@ func (m *Model) eval5(o op, a []*Tensor) (*Tensor, error) {
 		return tflReduceWindow(o, a)
 	case opSkipGram: // ops6.go
 		return skipGram(o, x)
+	case opLSHProjection: // lsh.go
+		if arg(1) == nil {
+			return nil, fmt.Errorf("operator LSH_PROJECTION has no input")
+		}
+		return lshProjection(o, x, arg(1), arg(2))
 	}
 	return nil, &UnsupportedError{"operator " + o.name + " is not supported"}
 }

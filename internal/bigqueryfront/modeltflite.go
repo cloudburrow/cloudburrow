@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cloudburrow/cloudburrow/internal/tfconvert"
 	"github.com/cloudburrow/cloudburrow/internal/tflitemodel"
 )
 
@@ -67,6 +68,16 @@ type tfliteImport struct {
 	Size      int64           `json:"size"`
 	Inputs    []tflitePortCol `json:"inputs"`
 	Outputs   []tflitePortCol `json:"outputs"`
+	// Bundle marks an imported TensorFlow model kept as the converter's
+	// bundle (internal/tfconvert's bundle.go: the SavedModel, and its
+	// TensorFlow Lite flatbuffer when there is one), SHA256 the bundle's;
+	// a model imported before it keeps the flatbuffer alone.
+	Bundle bool `json:"bundle,omitempty"`
+	// Runtime is "tensorflow" for a model TensorFlow Lite's builtins do
+	// not take, which predicts on TensorFlow itself (modeltfruntime.go),
+	// with Fallback saying why; "" runs internal/tflitemodel.
+	Runtime  string `json:"runtime,omitempty"`
+	Fallback string `json:"fallback,omitempty"`
 }
 
 // tflitePortCol is how a model port reads or writes a column.
@@ -230,9 +241,33 @@ func tfliteTensor(c tflitePortCol, raw json.RawMessage) (tflitemodel.Tensor, str
 	if c.image {
 		return tfliteImageTensor(c, raw)
 	}
+	shape, flat, strs, why := tfliteFlat(c, raw)
+	if why != "" {
+		return tflitemodel.Tensor{}, why
+	}
+	if c.Type == "STRING" {
+		return tflitemodel.Tensor{Type: tflitemodel.String, Shape: shape, S: strs}, ""
+	}
+	t := tflitemodel.Tensor{Type: tflitemodel.Float64, Shape: shape}
+	for _, x := range flat {
+		t.F = append(t.F, float32(x))
+	}
+	if c.Type != "FLOAT64" {
+		t.Type = tflitemodel.Int64
+		t.F = nil
+		for _, x := range flat {
+			t.I = append(t.I, int64(x))
+		}
+	}
+	return t, ""
+}
+
+// tfliteFlat is a row's JSON value of column c as the port's shape, with a
+// batch of one, and its values: strs for a STRING port, flat otherwise.
+func tfliteFlat(c tflitePortCol, raw json.RawMessage) ([]int, []float64, []string, string) {
 	var v any
 	if err := json.Unmarshal(raw, &v); err != nil {
-		return tflitemodel.Tensor{}, err.Error()
+		return nil, nil, nil, err.Error()
 	}
 	if c.Sparse {
 		// "A NULL, the associated BigQuery ML type, or an ARRAY of the
@@ -243,7 +278,7 @@ func tfliteTensor(c tflitePortCol, raw json.RawMessage) (tflitemodel.Tensor, str
 		case []any:
 			for _, y := range e {
 				if _, nested := y.([]any); nested || y == nil {
-					return tflitemodel.Tensor{}, "is not a NULL, a value or an ARRAY of values for the model's SparseTensor input"
+					return nil, nil, nil, "is not a NULL, a value or an ARRAY of values for the model's SparseTensor input"
 				}
 			}
 		default:
@@ -283,12 +318,12 @@ func tfliteTensor(c tflitePortCol, raw json.RawMessage) (tflitemodel.Tensor, str
 		return ""
 	}
 	if why := walk(v); why != "" {
-		return tflitemodel.Tensor{}, why
+		return nil, nil, nil, why
 	}
 	shape := append([]int{}, c.Shape...)
 	if c.Sparse {
 		if len(c.SparseDims) == 1 && c.SparseDims[0] >= 0 && len(flat) > c.SparseDims[0] {
-			return tflitemodel.Tensor{}, fmt.Sprintf("has %d values; the model's SparseTensor input of dense shape [batch, %d] holds at most %d a row",
+			return nil, nil, nil, fmt.Sprintf("has %d values; the model's SparseTensor input of dense shape [batch, %d] holds at most %d a row",
 				len(flat), c.SparseDims[0], c.SparseDims[0])
 		}
 		shape = []int{1, len(flat)}
@@ -316,26 +351,15 @@ func tfliteTensor(c tflitePortCol, raw json.RawMessage) (tflitemodel.Tensor, str
 		n *= d
 	}
 	if n != len(flat) {
-		return tflitemodel.Tensor{}, fmt.Sprintf("has %d values; the model's input of shape %v takes %d a row", len(flat), c.Shape, n)
+		return nil, nil, nil, fmt.Sprintf("has %d values; the model's input of shape %v takes %d a row", len(flat), c.Shape, n)
 	}
-	if c.Type == "STRING" {
-		if len(strs) != len(flat) {
-			return tflitemodel.Tensor{}, "is not a STRING"
-		}
-		return tflitemodel.Tensor{Type: tflitemodel.String, Shape: shape, S: strs}, ""
+	if c.Type == "STRING" && len(strs) != len(flat) {
+		return nil, nil, nil, "is not a STRING"
 	}
-	t := tflitemodel.Tensor{Type: tflitemodel.Float64, Shape: shape}
-	for _, x := range flat {
-		t.F = append(t.F, float32(x))
+	if c.Type != "STRING" {
+		strs = nil
 	}
-	if c.Type != "FLOAT64" {
-		t.Type = tflitemodel.Int64
-		t.F = nil
-		for _, x := range flat {
-			t.I = append(t.I, int64(x))
-		}
-	}
-	return t, ""
+	return shape, flat, strs, ""
 }
 
 // tfliteLiteral is a row's output value as SQL.
@@ -387,6 +411,7 @@ func tfliteLiteral(c tflitePortCol, t tflitemodel.Tensor) string {
 func (f front) tfliteSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall) (string, int, string) {
 	imp := md.TFLite
 	inputs := append([]tflitePortCol(nil), imp.Inputs...) // marked per query (image)
+	explain := false
 	switch {
 	case c.fn == "PREDICT":
 	case md.Type == "TENSORFLOW" && tensorflowUnsupportedFns[c.fn]:
@@ -394,12 +419,9 @@ func (f front) tfliteSubquery(r *http.Request, q queryOptions, md bqModel, c mlC
 		// page names.
 		return "", 400, "ML." + c.fn + " is not supported for model type TENSORFLOW"
 	case md.Type == "TENSORFLOW" && c.fn == "EXPLAIN_PREDICT":
-		// Google runs it (troubleshoot-queries#tensorflow_worker_oom: "If the
-		// error occurs during ML.EXPLAIN_PREDICT, run the job with
-		// ML.PREDICT instead"), but no page says how it attributes an
-		// imported TensorFlow model's prediction (#1775).
-		return "", 501, "Not implemented here: ML.EXPLAIN_PREDICT of an imported TensorFlow model: BigQuery documents no feature attribution " +
-			"method for imported TensorFlow models, so CloudBurrow cannot give BigQuery's attributions; ML.PREDICT runs. Nothing was run."
+		// Integrated Gradients on the TensorFlow runtime (modeltfruntime.go,
+		// #1775).
+		explain = true
 	case md.Type == "TENSORFLOW":
 		return "", 501, "Not implemented here: ML." + c.fn + " of an imported TensorFlow model; CloudBurrow runs ML.PREDICT of it. Nothing was run."
 	default:
@@ -408,16 +430,37 @@ func (f front) tfliteSubquery(r *http.Request, q queryOptions, md bqModel, c mlC
 	if c.input == "" {
 		return "", 400, "ML.PREDICT requires an input: a query in parentheses or TABLE name"
 	}
-	if len(c.struc) > 0 {
+	var xo tfExplainOptions
+	switch {
+	case explain:
+		if c.input == "" {
+			return "", 400, "ML.EXPLAIN_PREDICT requires an input: a query in parentheses or TABLE name"
+		}
+		var code int
+		var msg string
+		if xo, code, msg = tfExplainOpts(md, c); code != 0 {
+			return "", code, msg
+		}
+	case len(c.struc) > 0:
 		return "", 400, "ML.PREDICT of an imported " + map[bool]string{true: "TensorFlow", false: "TensorFlow Lite"}[md.Type == "TENSORFLOW"] + " model takes no STRUCT of options"
 	}
 	data, err := f.models.blob(imp.SHA256)
 	if err != nil {
-		return "", 500, "cloudburrow: the model's TensorFlow Lite file is missing from the state directory: " + err.Error()
+		return "", 500, "cloudburrow: the model's file is missing from the state directory: " + err.Error()
 	}
-	m, err := tflitemodel.Load(data)
-	if err != nil {
-		return "", 500, "cloudburrow: could not load the model's TensorFlow Lite file: " + err.Error()
+	bundle := data
+	var m *tflitemodel.Model
+	if imp.Bundle {
+		b, err := tfconvert.ReadBundle(data)
+		if err != nil {
+			return "", 500, "cloudburrow: could not read the model's converted bundle: " + err.Error()
+		}
+		data = b.TFLite
+	}
+	if imp.Runtime == "" && !explain {
+		if m, err = tflitemodel.Load(data); err != nil {
+			return "", 500, "cloudburrow: could not load the model's TensorFlow Lite file: " + err.Error()
+		}
 	}
 	cols, _, code, msg := f.queryAllRows(r, q, "SELECT * FROM ("+c.input+") LIMIT 0")
 	if code != 0 {
@@ -431,7 +474,7 @@ func (f front) tfliteSubquery(r *http.Request, q queryOptions, md bqModel, c mlC
 	for i, in := range inputs {
 		col, ok := byName[strings.ToLower(in.Name)]
 		if !ok {
-			return "", 400, "Invalid table-valued function ML.PREDICT Column " + in.Name + " is not found in the input data to the PREDICT function."
+			return "", 400, "Invalid table-valued function ML." + c.fn + " Column " + in.Name + " is not found in the input data to the " + c.fn + " function."
 		}
 		ct := bqColumnType(col.Type)
 		elem, isArray := strings.CutPrefix(ct, "ARRAY<")
@@ -454,8 +497,8 @@ func (f front) tfliteSubquery(r *http.Request, q queryOptions, md bqModel, c mlC
 			okType = shapeOK && in.Type == "STRING" // #1766
 		}
 		if !okType {
-			return "", 400, fmt.Sprintf("Invalid table-valued function ML.PREDICT Column %s of type %s cannot be converted to the type the model's input %s expects, %s",
-				col.Name, ct, in.Name, in.sqlType())
+			return "", 400, fmt.Sprintf("Invalid table-valued function ML.%s Column %s of type %s cannot be converted to the type the model's input %s expects, %s",
+				c.fn, col.Name, ct, in.Name, in.sqlType())
 		}
 		ref := "_cbml_in." + sqlIdent(col.Name)
 		if !isArray && in.Type != "STRING" {
@@ -471,6 +514,18 @@ func (f front) tfliteSubquery(r *http.Request, q queryOptions, md bqModel, c mlC
 	var lits, outTypes []string
 	for _, o := range imp.Outputs {
 		outTypes = append(outTypes, sqlIdent(o.Name)+" "+o.sqlType())
+	}
+	if explain || imp.Runtime == tfRuntimeTensorFlow {
+		// The TensorFlow runtime (modeltfruntime.go): every row in batches.
+		var code int
+		var msg string
+		if lits, code, msg = f.tfRuntimeRows(r, imp, inputs, rows, bundle, explain, xo); code != 0 {
+			return "", code, msg
+		}
+		if explain {
+			outTypes = append(outTypes, tfExplainColumns)
+		}
+		rows = nil
 	}
 	for _, row := range rows {
 		if len(row) != 1 || row[0] == nil {
@@ -502,10 +557,17 @@ func (f front) tfliteSubquery(r *http.Request, q queryOptions, md bqModel, c mlC
 		lits = append(lits, "STRUCT("+strings.Join(parts, ", ")+")")
 	}
 	var sel, except []string
+	outNames := []string{}
 	for _, o := range imp.Outputs {
-		name := sqlIdent(o.Name)
+		outNames = append(outNames, o.Name)
+	}
+	if explain {
+		outNames = append(outNames, tfExplainNames...)
+	}
+	for _, o := range outNames {
+		name := sqlIdent(o)
 		sel = append(sel, "_cbml_p."+name+" AS "+name)
-		if col, ok := byName[strings.ToLower(o.Name)]; ok {
+		if col, ok := byName[strings.ToLower(o)]; ok {
 			except = append(except, sqlIdent(col.Name))
 		}
 	}

@@ -135,6 +135,9 @@ type op struct {
 	// outType is its first output tensor's type, as stored (BITCAST's
 	// target).
 	outType Type
+	// outDefs are its outputs' types and static shapes, for an operator
+	// whose output shape no input gives (STABLEHLO_RNG_BIT_GENERATOR).
+	outDefs []tensorDef
 }
 
 // CustomOp runs one custom operator: its custom_options, as the model
@@ -503,6 +506,14 @@ func loadGraph(sg *flatbuffers.Table, codes, bufs []*flatbuffers.Table, custom m
 			op.outType = m.tensors[outs[0]].typ
 			if m.tensors[outs[0]].q != nil {
 				op.outType = m.tensors[outs[0]].stored
+			}
+		}
+		if code == opStablehloRngBitGenerator {
+			for _, i := range op.out {
+				if i < 0 || i >= len(m.tensors) {
+					return nil, fmt.Errorf("operator %s writes tensor %d, which the model does not have", name, i)
+				}
+				op.outDefs = append(op.outDefs, m.tensors[i])
 			}
 		}
 		op.opts = sub(o, 12)

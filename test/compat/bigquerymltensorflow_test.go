@@ -3,6 +3,7 @@
 package compat
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -35,7 +36,7 @@ import (
 // ADD_N, SPLIT, UNPACK);
 // the functions the page says do not take a TensorFlow model are 400; a
 // folder that is not a SavedModel is 400; a graph TensorFlow Lite has no
-// builtin for (an SVD) is 501, never a result.
+// builtin for (an SVD) runs on TensorFlow, as BigQuery runs it.
 //
 // covers: bigquery.jobs.query, bigquery.models.get, bigquery.models.delete
 func TestBigQueryMLImportedTensorFlowModel(t *testing.T) {
@@ -250,10 +251,18 @@ func TestBigQueryMLImportedTensorFlowModel(t *testing.T) {
 	wantAPIError(t, "a missing column", err, http.StatusBadRequest, "Column k is not found")
 	_, err = c.Query(fmt.Sprintf("CREATE MODEL `%s.bad` OPTIONS(model_type='TENSORFLOW', model_path='gs://%s/tf/notsaved/*')", name, b)).Read(ctx)
 	wantAPIError(t, "not a SavedModel", err, http.StatusBadRequest, "SavedModel format")
-	_, err = c.Query(fmt.Sprintf("CREATE MODEL `%s.flex` OPTIONS(model_type='TENSORFLOW', model_path='gs://%s/tf/flex/*')", name, b)).Read(ctx)
-	wantAPIError(t, "Flex", err, http.StatusNotImplemented, "Svd")
-	if _, err := c.Dataset(name).Model("flex").Metadata(ctx); err == nil {
-		t.Error("a refused model was kept")
+	// An SVD has no TensorFlow Lite builtin (Flex): BigQuery runs the
+	// model on TensorFlow, and so does CloudBurrow (modeltfruntime.go).
+	if err := mlRunWithin(h, c, fmt.Sprintf("CREATE MODEL `%s.flex` OPTIONS(model_type='TENSORFLOW', model_path='gs://%s/tf/flex/*')", name, b),
+		tensorflowImportDeadline); err != nil {
+		t.Fatalf("CREATE MODEL flex: %v", err)
+	}
+	qctx, qcancel := context.WithTimeout(context.Background(), tensorflowImportDeadline)
+	defer qcancel()
+	sv := mlQueryIn(t, qctx, c, fmt.Sprintf("SELECT s FROM ML.PREDICT(MODEL `%s.flex`, (SELECT [0.0, 0, 3, 0, 2, 0, 1, 0, 0] AS m))", name))
+	if s, _ := sv[0]["s"].([]bigquery.Value); len(s) != 3 || math.Abs(s[0].(float64)-3) > 1e-5 || math.Abs(s[1].(float64)-2) > 1e-5 ||
+		math.Abs(s[2].(float64)-1) > 1e-5 {
+		t.Errorf("the SVD's singular values %v, want [3 2 1]", sv[0]["s"])
 	}
 	if err := c.Dataset(name).Model("mlp").Delete(ctx); err != nil {
 		t.Errorf("models.delete: %v", err)

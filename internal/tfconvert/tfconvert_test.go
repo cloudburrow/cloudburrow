@@ -72,8 +72,8 @@ func TestServerRoundTrip(t *testing.T) {
 // the testdata SavedModels when CLOUDBURROW_TFCONVERT_IMAGE names it: the
 // converted mlp and loop (WHILE, IF, comparisons and SELECT_V2, #1775),
 // run on internal/tflitemodel, give TensorFlow's own serving_default
-// output (tensorflow_predictions.json), and the SVD model
-// is refused as needing Flex.
+// output (tensorflow_predictions.json), and the SVD model's bundle says it
+// needs Flex (it runs on TensorFlow, predict.go).
 func TestDockerConverter(t *testing.T) {
 	image := os.Getenv("CLOUDBURROW_TFCONVERT_IMAGE")
 	if image == "" {
@@ -94,7 +94,18 @@ func TestDockerConverter(t *testing.T) {
 			_ = os.MkdirAll(filepath.Join(model, filepath.Dir(rel)), 0o755)
 			return os.WriteFile(filepath.Join(model, rel), b, 0o644)
 		})
-		return d.Convert(context.Background(), model)
+		b, err := d.Convert(context.Background(), model)
+		if err != nil {
+			return nil, err
+		}
+		bd, err := ReadBundle(b)
+		if err != nil {
+			return nil, err
+		}
+		if bd.Fallback != nil {
+			return nil, bd.Fallback
+		}
+		return bd.TFLite, nil
 	}
 	type rows []struct {
 		Inputs  map[string][]float64 `json:"inputs"`
