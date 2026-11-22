@@ -18746,7 +18746,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/monitoring_alerting_test.go:345 TestMonitoringUptimeGroupsServicesSnoozes",
-          "test/compat/monitoring_alerting_test.go:594 TestTerraformMonitoringAlerting"
+          "test/compat/monitoring_alerting_test.go:594 TestTerraformMonitoringAlerting",
+          "test/compat/monitoringgroups2146_test.go:32 TestMonitoringGroupsMatchResourceMetadata"
         ]
       },
       {
@@ -18754,7 +18755,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/monitoring_alerting_test.go:345 TestMonitoringUptimeGroupsServicesSnoozes",
-          "test/compat/monitoring_alerting_test.go:594 TestTerraformMonitoringAlerting"
+          "test/compat/monitoring_alerting_test.go:594 TestTerraformMonitoringAlerting",
+          "test/compat/monitoringgroups2146_test.go:32 TestMonitoringGroupsMatchResourceMetadata"
         ]
       },
       {
@@ -18769,7 +18771,8 @@
         "method": "google.monitoring.v3.GroupService/ListGroupMembers",
         "status": "Verified",
         "tests": [
-          "test/compat/monitoring_alerting_test.go:345 TestMonitoringUptimeGroupsServicesSnoozes"
+          "test/compat/monitoring_alerting_test.go:345 TestMonitoringUptimeGroupsServicesSnoozes",
+          "test/compat/monitoringgroups2146_test.go:32 TestMonitoringGroupsMatchResourceMetadata"
         ]
       },
       {
@@ -19052,7 +19055,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/monitoring_alerting_test.go:345 TestMonitoringUptimeGroupsServicesSnoozes",
-          "test/compat/monitoring_alerting_test.go:594 TestTerraformMonitoringAlerting"
+          "test/compat/monitoring_alerting_test.go:594 TestTerraformMonitoringAlerting",
+          "test/compat/monitoringgroups2146_test.go:112 TestMonitoringUptimeLogCheckFailures"
         ]
       },
       {
@@ -19060,7 +19064,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/monitoring_alerting_test.go:345 TestMonitoringUptimeGroupsServicesSnoozes",
-          "test/compat/monitoring_alerting_test.go:594 TestTerraformMonitoringAlerting"
+          "test/compat/monitoring_alerting_test.go:594 TestTerraformMonitoringAlerting",
+          "test/compat/monitoringgroups2146_test.go:112 TestMonitoringUptimeLogCheckFailures"
         ]
       },
       {
@@ -19068,7 +19073,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/monitoring_alerting_test.go:345 TestMonitoringUptimeGroupsServicesSnoozes",
-          "test/compat/monitoring_alerting_test.go:594 TestTerraformMonitoringAlerting"
+          "test/compat/monitoring_alerting_test.go:594 TestTerraformMonitoringAlerting",
+          "test/compat/monitoringgroups2146_test.go:112 TestMonitoringUptimeLogCheckFailures"
         ]
       },
       {
@@ -19089,7 +19095,8 @@
         "method": "google.monitoring.v3.UptimeCheckService/UpdateUptimeCheckConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/monitoring_alerting_test.go:345 TestMonitoringUptimeGroupsServicesSnoozes"
+          "test/compat/monitoring_alerting_test.go:345 TestMonitoringUptimeGroupsServicesSnoozes",
+          "test/compat/monitoringgroups2146_test.go:112 TestMonitoringUptimeLogCheckFailures"
         ]
       }
     ]

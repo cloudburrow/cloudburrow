@@ -243,7 +243,11 @@ func (s *Server) UpdateUptimeCheckConfig(_ context.Context, req *monitoringpb.Up
 	next := clone(in)
 	if len(req.GetUpdateMask().GetPaths()) > 0 {
 		next = clone(old)
-		if err := applyMask(next, in, req.GetUpdateMask()); err != nil {
+		mask, err := overlayMask(next, in, req.GetUpdateMask())
+		if err != nil {
+			return nil, err
+		}
+		if err := applyMask(next, in, mask); err != nil {
 			return nil, err
 		}
 	}
@@ -312,6 +316,19 @@ func (s *Server) UptimeResults(name string) []UptimeResult {
 // RunUptimeChecks runs each check whose period has elapsed.
 func (s *Server) RunUptimeChecks(ctx context.Context) {
 	now := s.now()
+	// The group checks' projects' products' resources, read before mu.
+	s.mu.Lock()
+	groupProjects := map[string]bool{}
+	for _, m := range s.under(kindUptime, "") {
+		if c := m.(*monitoringpb.UptimeCheckConfig); c.GetResourceGroup() != nil {
+			groupProjects[projectOfName(c.GetName())] = true
+		}
+	}
+	s.mu.Unlock()
+	invs := map[string]map[string]InventoryResource{}
+	for p := range groupProjects {
+		invs[p] = s.inventory(ctx, p)
+	}
 	s.mu.Lock()
 	var due []*monitoringpb.UptimeCheckConfig
 	targets := map[string][]*monitoredres.MonitoredResource{}
@@ -320,12 +337,12 @@ func (s *Server) RunUptimeChecks(ctx context.Context) {
 		s.uptime.mu.Lock()
 		last := s.uptime.last[c.GetName()]
 		s.uptime.mu.Unlock()
-		if !last.IsZero() && now.Sub(last) < c.GetPeriod().AsDuration() {
+		if UptimeDisabled(c) || (!last.IsZero() && now.Sub(last) < c.GetPeriod().AsDuration()) {
 			continue
 		}
 		due = append(due, clone(c))
 		if c.GetResourceGroup() != nil {
-			targets[c.GetName()] = s.groupMembersLocked(projectOfName(c.GetName()), c.GetResourceGroup().GetGroupId(), now)
+			targets[c.GetName()] = s.groupMembersLocked(projectOfName(c.GetName()), c.GetResourceGroup().GetGroupId(), now, invs[projectOfName(c.GetName())])
 		}
 	}
 	s.mu.Unlock()
@@ -349,6 +366,7 @@ func (s *Server) RunUptimeChecks(ctx context.Context) {
 		for _, h := range hosts {
 			r := runCheck(ctx, c, h.GetLabels()["host"])
 			r.Time = now
+			s.logUptimeFailure(ctx, c, h.GetLabels()["host"], r)
 			s.uptime.mu.Lock()
 			key := c.GetName() + "|" + h.GetLabels()["host"]
 			s.uptime.results[key] = append(s.uptime.results[key], r)

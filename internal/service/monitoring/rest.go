@@ -9,7 +9,8 @@ import (
 // Transcoder is the JSON API's configuration (the google.api.http bindings
 // of google.monitoring.v3 and google.monitoring.dashboard.v1), with nothing registered.
 func Transcoder() *rest.Transcoder {
-	return &rest.Transcoder{Packages: []string{"google.monitoring.v3", "google.monitoring.dashboard.v1"}}
+	// The overlay serves the uptime check fields the protos lack (#2146).
+	return &rest.Transcoder{Packages: []string{"google.monitoring.v3", "google.monitoring.dashboard.v1"}, Overlay: monitoringOverlay}
 }
 
 // Routes is every bound route.

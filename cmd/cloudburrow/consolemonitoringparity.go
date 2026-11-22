@@ -14,6 +14,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -403,6 +404,10 @@ func uptimeFormFields() []console.Field {
 		{Name: "acceptedCodes", Label: "Acceptable HTTP response codes", Type: "select", Options: uptimeCodeClasses, Default: "STATUS_CLASS_2XX",
 			OptionLabels: map[string]string{"STATUS_CLASS_2XX": "Response codes 2xx", "STATUS_CLASS_3XX": "Response codes 3xx", "STATUS_CLASS_4XX": "Response codes 4xx",
 				"STATUS_CLASS_5XX": "Response codes 5xx", "STATUS_CLASS_ANY": "Any response code"}, Section: upStepResponse, ShowWhen: http},
+		// Google's Log check failures, on by default: each failed run is
+		// an entry in Cloud Logging (#2146).
+		{Name: "logCheckFailures", Label: "Log check failures", Type: "checkbox", Default: "true", Section: upStepResponse,
+			Help: "Writes each failed check to Cloud Logging (resource Uptime Check URL). Clear it to create no log entries."},
 
 		{Name: "createAlert", Label: "Create an alert", Type: "checkbox", Default: "true", Section: upStepAlert,
 			Help: "Creates an alerting policy that opens an alert when the check fails."},
@@ -445,6 +450,9 @@ func uptimeGoogleFromForm(values map[string]string, c *monitoringpb.UptimeCheckC
 			return fmt.Errorf("user labels: %v", err)
 		}
 		c.UserLabels = m
+	}
+	if err := monitoring.SetLogCheckFailures(c, values["logCheckFailures"] == "true"); err != nil {
+		return err
 	}
 	h := c.GetHttpCheck()
 	if h == nil {
@@ -538,11 +546,10 @@ func channelFormFields() []console.Field {
 // ---- Groups: criteria ----
 
 var (
-	// Google's Name, Tag and Region criteria match resource metadata,
-	// which this instance keeps none of (the group API refuses
-	// resource.metadata.*), so the criteria offered are the two it
-	// evaluates.
-	groupCriterionTypes  = []string{"resource_type", "project"}
+	// Google's criteria (docs.cloud.google.com/monitoring/groups): Name,
+	// Tag and Region match the resource metadata the products' resources
+	// carry (#2146), Resource Type and Cloud Project the resource itself.
+	groupCriterionTypes  = []string{"name", "tag", "region", "resource_type", "project"}
 	groupCriterionLabels = map[string]string{"name": "Name", "tag": "Tag", "region": "Region", "resource_type": "Resource Type", "project": "Cloud Project"}
 	groupOperators       = []string{"contains", "not_contains", "equals", "starts_with", "ends_with"}
 	groupOperatorLabels  = map[string]string{"contains": "Contains", "not_contains": "Does not contain", "equals": "Equals",
@@ -555,9 +562,9 @@ func groupFormFields() []console.Field {
 	return []console.Field{
 		{Name: "displayName", Label: "Name", Type: "text", Required: true, Section: "Group details"},
 		{Name: "criteria", Label: "Criteria", Type: console.GroupFieldType, AddLabel: "Add criterion", Section: "Group details",
-			Help: "Each criterion matches resources by Type and Operator.",
+			Help: "Name is the resource's display name; Tag a network tag or label, as key or key=value; Region its location's region, such as us-central1.",
 			Group: []console.Field{
-				{Name: "type", Label: "Type", Type: "select", Options: groupCriterionTypes, OptionLabels: groupCriterionLabels, Default: "resource_type"},
+				{Name: "type", Label: "Type", Type: "select", Options: groupCriterionTypes, OptionLabels: groupCriterionLabels, Default: "name"},
 				{Name: "operator", Label: "Operator", Type: "select", Options: groupOperators, OptionLabels: groupOperatorLabels, Default: "contains"},
 				{Name: "value", Label: "Value", Type: "text"},
 			}},
@@ -571,8 +578,9 @@ func groupFormFields() []console.Field {
 
 // groupFilterFromCriteria is the group filter Create Group's criteria
 // make, in the API's group filter language: Name, Tag and Region are the
-// resource metadata's name, user_labels and region, Resource Type the
-// resource's type and Cloud Project its project_id label.
+// resource metadata's name, tags (network tags and labels) and region,
+// Resource Type the resource's type and Cloud Project its project_id
+// label.
 func groupFilterFromCriteria(values map[string]string) (string, error) {
 	rows, err := console.ParseGroup(values["criteria"])
 	if err != nil {
@@ -587,11 +595,14 @@ func groupFilterFromCriteria(values map[string]string) (string, error) {
 		sel := map[string]string{"name": "resource.metadata.name", "region": "resource.metadata.region",
 			"resource_type": "resource.type", "project": "resource.labels.project_id"}[r["type"]]
 		if r["type"] == "tag" {
-			k, v, ok := strings.Cut(val, "=")
-			if !ok {
-				return "", fmt.Errorf("tag %q is not key=value", val)
+			// A network tag, or a label's key alone, is the key's presence:
+			// any value contains "".
+			k, v, _ := strings.Cut(val, "=")
+			sel, val = fmt.Sprintf("resource.metadata.tag.%q", strings.ToLower(strings.TrimSpace(k))), strings.TrimSpace(v)
+			if val == "" && (r["operator"] == "contains" || r["operator"] == "") {
+				terms = append(terms, fmt.Sprintf("%s = has_substring(%q)", sel, ""))
+				continue
 			}
-			sel, val = fmt.Sprintf("resource.metadata.user_labels.%q", strings.TrimSpace(k)), strings.TrimSpace(v)
 		}
 		if sel == "" {
 			return "", fmt.Errorf("criterion type %q is not one of Name, Tag, Region, Resource Type, Cloud Project", r["type"])
@@ -725,12 +736,22 @@ func firingSLOText(ctx context.Context, s *monitoring.Server, project string) st
 // ---- Snoozes: Create snooze ----
 
 // snoozeFormFields are Create snooze's: its name, the alert policies it
-// silences (at most 16), its start time and duration.
-func snoozeFormFields() []console.Field {
+// silences (at most 16) picked from the project's (pols; nil before a
+// project is known), its start time and duration.
+func snoozeFormFields(pols []*monitoringpb.AlertPolicy) []console.Field {
+	policies := console.Field{Name: "policies", Label: "Alert policies", Type: console.MultiSelectFieldType, Required: true, Section: "Snooze criteria",
+		AddLabel: "Select alert policies", Help: "The alert policies the snooze silences: at most 16.", OptionLabels: map[string]string{}}
+	for _, p := range pols {
+		id := lastSegment(p.GetName())
+		policies.Options = append(policies.Options, id)
+		policies.OptionLabels[id] = orDash(p.GetDisplayName())
+	}
+	if pols != nil && len(pols) == 0 {
+		policies.Help = "This project has no alert policies yet: create one in Alerting first."
+	}
 	return []console.Field{
 		{Name: "displayName", Label: "Snooze name", Type: "text", Required: true, Section: "Snooze details"},
-		{Name: "policies", Label: "Alert policies", Type: "text", Required: true, Section: "Snooze criteria",
-			Help: "Policy IDs from Alerting, comma separated: at most 16."},
+		policies,
 		{Name: "start", Label: "Start time", Type: console.DateTimeFieldType, Section: "Snooze details", Help: "Empty to start now."},
 		{Name: "minutes", Label: "Duration (minutes)", Type: "number", Required: true, Default: "60", Section: "Snooze details"},
 	}
@@ -752,4 +773,25 @@ func snoozeInterval(values map[string]string, now time.Time) (*monitoringpb.Time
 		}
 	}
 	return &monitoringpb.TimeInterval{StartTime: timestamppb.New(start), EndTime: timestamppb.New(start.Add(time.Duration(mins) * time.Minute))}, nil
+}
+
+// ---- Alerting: the Summary pane ----
+
+// alertingSummary is the Alerting page's Summary pane, which "lists the
+// number of open alerts" (docs.cloud.google.com/monitoring/alerts/
+// incidents-events, read 2026-11-22), with See all alerts opening the
+// Alerts tab. An acknowledged alert is still open, as Google's are until
+// they close.
+func alertingSummary(s *monitoring.Server, project string) []console.PropertyGroup {
+	open := 0
+	for _, in := range s.Incidents(project) {
+		if in.State == monitoring.IncidentOpen {
+			open++
+		}
+	}
+	alerts := "/monitoring/alerting/incidents?project=" + url.QueryEscape(project)
+	return []console.PropertyGroup{{Heading: "Summary", Properties: []console.Property{
+		{Label: "Open alerts", Value: strconv.Itoa(open), Link: alerts},
+		{Label: "Alerts", Value: "See all alerts", Link: alerts},
+	}}}
 }

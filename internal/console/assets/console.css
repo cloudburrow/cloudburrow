@@ -2148,6 +2148,8 @@ dd.has-property-action { display: flex; flex-wrap: wrap; align-items: baseline; 
 .picklist-rows { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 4px; max-height: 240px; overflow-y: auto; }
 .picklist-row .mono { overflow-wrap: anywhere; }
 .picklist-picker { border: 1px solid var(--border); border-radius: var(--radius-control); padding: 12px; margin-top: 8px; }
+.multiselect-button { justify-self: start; min-width: 240px; text-align: left; }
+.multiselect-chips { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
 .picklist-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .picklist-filters { display: flex; gap: 12px; flex-wrap: wrap; }
 .picklist-filters .form-row { flex: 1 1 160px; min-width: 0; }

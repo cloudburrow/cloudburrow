@@ -162,6 +162,7 @@ func (p monitoringAlertingProvider) List(ctx context.Context, project string) (c
 	if err != nil {
 		return console.Listing{}, err
 	}
+	out.Summary = alertingSummary(s, project)
 	open := map[string]int{}
 	for _, in := range s.Incidents(project) {
 		if in.State == monitoring.IncidentOpen {
@@ -562,6 +563,7 @@ func (p monitoringIncidentsProvider) List(ctx context.Context, project string) (
 		return console.Listing{Prompt: "Incidents are one project's. Choose one in the toolbar."}, nil
 	}
 	out := incidentListing(s.Incidents(project))
+	out.Summary = alertingSummary(s, project)
 	out.RowsOpenable = true
 	for i := range out.Items {
 		out.Items[i].Link = ""
@@ -1007,7 +1009,7 @@ func (p monitoringUptimeProvider) Detail(ctx context.Context, project string, pa
 	d := console.Detail{Title: c.GetDisplayName(), Summary: []console.Property{
 		{Label: "Name", Value: c.GetName()}, {Label: "Protocol", Value: uptimeProtocol(c)}, {Label: "Target", Value: uptimeTarget(c)},
 		{Label: "Check frequency", Value: c.GetPeriod().AsDuration().String()}, {Label: "Timeout", Value: c.GetTimeout().AsDuration().String()},
-		{Label: "Content contains", Value: orDash(content)},
+		{Label: "Content contains", Value: orDash(content)}, {Label: "Log check failures", Value: enabledText(wrapperspb.Bool(monitoring.LogCheckFailures(c)))},
 	}, Edit: &console.EditForm{Label: "Edit", Title: "Edit uptime check", Submit: "Save",
 		Note: "The hostname cannot change: create another check for another host.",
 		Fields: []console.Field{
@@ -1019,6 +1021,7 @@ func (p monitoringUptimeProvider) Detail(ctx context.Context, project string, pa
 				Default: strconv.Itoa(int(c.GetPeriod().AsDuration().Seconds()))},
 			{Name: "timeout", Label: "Response timeout (seconds)", Type: "number", Default: strconv.Itoa(int(c.GetTimeout().AsDuration().Seconds()))},
 			{Name: "content", Label: "Response content contains", Type: "text", Default: content},
+			{Name: "logCheckFailures", Label: "Log check failures", Type: "checkbox", Default: strconv.FormatBool(monitoring.LogCheckFailures(c))},
 		}}}
 	rs := s.UptimeResults(c.GetName())
 	results := console.Listing{Columns: []string{"Time", "Latency", "Status", "Error"}, NameColumn: "Result", Noun: "results", AlwaysStatus: true}
@@ -1064,6 +1067,11 @@ func (p monitoringUptimeProvider) Edit(ctx context.Context, project string, path
 	values["protocol"] = uptimeProtocol(c)
 	if err := uptimeFromForm(project, values, c); err != nil {
 		return err
+	}
+	if v, ok := values["logCheckFailures"]; ok {
+		if err := monitoring.SetLogCheckFailures(c, v == "true"); err != nil {
+			return err
+		}
 	}
 	_, err = s.UpdateUptimeCheckConfig(ctx, &monitoringpb.UpdateUptimeCheckConfigRequest{UptimeCheckConfig: c})
 	return err
@@ -1545,10 +1553,24 @@ func (p monitoringGroupsProvider) Detail(ctx context.Context, project string, pa
 		Edit: &console.EditForm{Label: "Edit", Title: "Edit group", Submit: "Save", Fields: []console.Field{
 			{Name: "displayName", Label: "Name", Type: "text", Required: true, Default: g.GetDisplayName()},
 			{Name: "filter", Label: "Filter", Type: "text", Required: true, Default: g.GetFilter()}}}}
-	members := console.Listing{Columns: []string{"Labels"}, NameColumn: "Resource type", Noun: "members"}
+	// A member's name, type and region, as Google's group page lists its
+	// resources; a series-only resource has no metadata.
+	members := console.Listing{Columns: []string{"Resource type", "Region", "Tags", "Labels"}, NameColumn: "Name", Noun: "members"}
 	if resp, err := s.ListGroupMembers(ctx, &monitoringpb.ListGroupMembersRequest{Name: name, PageSize: 1000}); err == nil {
+		metaOf := s.ResourceMetadataIndex(ctx, project)
 		for _, m := range resp.GetMembers() {
-			members.Items = append(members.Items, console.Resource{Name: m.GetType(), Fields: map[string]string{"Labels": labelsText(m.GetLabels())}})
+			row := console.Resource{Name: labelsText(m.GetLabels()), Fields: map[string]string{"Resource type": m.GetType(), "Region": "—", "Tags": "—",
+				"Labels": labelsText(m.GetLabels())}}
+			if md := metaOf(m); md != nil {
+				row.Name, row.Fields["Region"] = md.Name, orDash(md.Region)
+				tags := append([]string(nil), md.NetworkTags...)
+				for k, v := range md.UserLabels {
+					tags = append(tags, k+":"+v)
+				}
+				sort.Strings(tags)
+				row.Fields["Tags"] = orDash(strings.Join(tags, ", "))
+			}
+			members.Items = append(members.Items, row)
 		}
 	} else {
 		members.Unavailable = err.Error()
@@ -1926,7 +1948,33 @@ func (p monitoringSnoozesProvider) List(ctx context.Context, project string) (co
 }
 
 func (monitoringSnoozesProvider) CreateForm() (string, []console.Field) {
-	return "Create snooze", snoozeFormFields()
+	return "Create snooze", snoozeFormFields(nil)
+}
+
+// CreateFormFor is Create snooze with the project's alert policies to pick
+// from, as Google's Alert policies menu lists them by name (#2146).
+func (p monitoringSnoozesProvider) CreateFormFor(ctx context.Context, project string) []console.Field {
+	s, err := p.server()
+	if err != nil || project == "" {
+		return snoozeFormFields(nil)
+	}
+	var pols []*monitoringpb.AlertPolicy
+	req := &monitoringpb.ListAlertPoliciesRequest{Name: "projects/" + project, PageSize: 1000}
+	for {
+		resp, err := s.ListAlertPolicies(ctx, req)
+		if err != nil {
+			break
+		}
+		pols = append(pols, resp.GetAlertPolicies()...)
+		if resp.GetNextPageToken() == "" {
+			break
+		}
+		req.PageToken = resp.GetNextPageToken()
+	}
+	if pols == nil {
+		pols = []*monitoringpb.AlertPolicy{}
+	}
+	return snoozeFormFields(pols)
 }
 
 func (p monitoringSnoozesProvider) Create(ctx context.Context, project string, values map[string]string) (string, error) {
@@ -1939,7 +1987,7 @@ func (p monitoringSnoozesProvider) Create(ctx context.Context, project string, v
 		return "", err
 	}
 	var ps []string
-	for _, id := range splitList(values["policies"]) {
+	for _, id := range console.ParseMultiSelect(values["policies"]) {
 		ps = append(ps, "projects/"+project+"/alertPolicies/"+lastSegment(id))
 	}
 	sn, err := s.CreateSnooze(ctx, &monitoringpb.CreateSnoozeRequest{Parent: "projects/" + project, Snooze: &monitoringpb.Snooze{

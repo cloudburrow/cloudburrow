@@ -325,9 +325,6 @@ latency and resource charts (#1267); the Artifact Registry repository Permission
 
 | Gap | Why open | Size |
 |---|---|---|
-| Monitoring groups' Name, Tag and Region criteria: they match resource metadata, which CloudBurrow keeps none of, so the group API refuses `resource.metadata.*` (#2146) | not built yet | M |
-| Uptime checks' Log check failures: the pinned `monitoringpb` has no `log_check_failures` field (#2146) | not built yet | S |
-| The Alerting page's summary pane (#2146) | not built yet | S |
 
 ## Excluded on purpose
 

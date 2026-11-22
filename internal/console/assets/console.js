@@ -7543,6 +7543,9 @@ function buildCreateForm(spec) {
     // Items chosen from a picker (#1864): Google's Create role and Edit
     // role permissions, each with a checkbox, and Add permissions.
     if (f.type === "picklist") return picklistEntry(f, id, errorId, helpId);
+    // Several of the listed options (#2146): Google's Create snooze picks
+    // its alert policies from a menu of the project's policies.
+    if (f.type === "multiselect") return multiselectEntry(f, id, errorId, helpId);
 
     // A textarea rather than an input wherever the value can hold newlines:
     // Enter inserts one instead of submitting the form, which is the whole
@@ -9912,6 +9915,83 @@ function picklistEntry(f, id, errorId, helpId) {
     }).catch((err) => { seedNote.textContent = err.message; seedNote.classList.add("form-field-error"); });
   }
   return { field: f, control, node, error, helpId, errorId, isCheck: false, focus: () => toggle.focus() };
+}
+
+// multiselectEntry is a "multiselect" field: a menu button that opens the
+// options, each with a checkbox, under a filter; the chosen ones are chips
+// below it, each with a remove button. The value is the chosen options, one
+// per line, in a hidden textarea, so validation, dirtiness and submission
+// are every other field's.
+function multiselectEntry(f, id, errorId, helpId) {
+  const control = el("textarea", { id: `${id}-value`, name: f.name, hidden: true, class: "multiselect-value" });
+  const options = f.options || [];
+  const labelOf = (v) => (f.optionLabels || {})[v] || v;
+  const chosen = new Set((f.default || "").split(/[\n,]/).map((x) => x.trim()).filter((x) => options.includes(x)));
+  const menuId = `${id}-menu`;
+  const button = el("button", { type: "button", id, class: "secondary multiselect-button", "aria-haspopup": "true",
+    "aria-expanded": "false", "aria-controls": menuId, "aria-describedby": helpId || null });
+  const filterInput = el("input", { type: "text", id: `${id}-filter`, autocomplete: "off", spellcheck: "false",
+    placeholder: "Filter", "aria-label": `Filter ${f.label.toLowerCase()}` });
+  const list = el("ul", { class: "picklist-rows multiselect-options", role: "list", "aria-label": f.label });
+  const empty = el("p", { class: "form-help", "aria-live": "polite" });
+  const chips = el("ul", { class: "multiselect-chips", role: "list", "aria-label": `Selected ${f.label.toLowerCase()}` });
+  const sync = () => {
+    control.value = options.filter((o) => chosen.has(o)).join("\n");
+    button.textContent = chosen.size ? `${chosen.size} selected` : (f.addLabel || `Select ${f.label.toLowerCase()}`);
+    control.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  const drawChips = () => {
+    setChildren(chips, ...options.filter((o) => chosen.has(o)).map((o) => el("li", { class: "chip" },
+      el("span", { text: labelOf(o) }),
+      el("button", { type: "button", class: "chip-clear", "aria-label": `Remove ${labelOf(o)}`,
+        html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+        onclick: () => { chosen.delete(o); drawChips(); drawOptions(); sync(); button.focus(); } }))));
+    chips.hidden = chosen.size === 0;
+  };
+  const drawOptions = () => {
+    const q = filterInput.value.trim().toLowerCase();
+    const match = options.filter((o) => !q || labelOf(o).toLowerCase().includes(q) || o.toLowerCase().includes(q));
+    setChildren(list, ...match.map((o, n) => {
+      const box = el("input", { type: "checkbox", id: `${id}-opt-${n}`, "data-value": o });
+      box.checked = chosen.has(o);
+      box.addEventListener("change", () => {
+        if (box.checked) chosen.add(o); else chosen.delete(o);
+        drawChips();
+        sync();
+      });
+      return el("li", { class: "picklist-row" }, el("label", { class: "group-check", for: box.id }, box, el("span", { text: labelOf(o) })));
+    }));
+    empty.textContent = options.length === 0 ? "There is nothing to select." : (match.length ? "" : "No match.");
+  };
+  const close = () => {
+    menu.hidden = true;
+    button.setAttribute("aria-expanded", "false");
+  };
+  const menu = el("div", { class: "picklist-picker multiselect-menu", id: menuId, role: "group", "aria-label": f.label, hidden: true },
+    filterInput, empty, list,
+    el("div", { class: "picklist-actions" },
+      el("button", { type: "button", class: "primary", text: "OK", onclick: () => { close(); button.focus(); } })));
+  menu.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(); button.focus(); }
+  });
+  filterInput.addEventListener("keydown", (e) => { if (e.key === "Enter") e.preventDefault(); });
+  filterInput.addEventListener("input", drawOptions);
+  button.addEventListener("click", () => {
+    if (!menu.hidden) return close();
+    menu.hidden = false;
+    button.setAttribute("aria-expanded", "true");
+    drawOptions();
+    filterInput.focus();
+  });
+  const help = f.help ? el("p", { id: helpId, class: "form-help", text: f.help }) : null;
+  const error = el("p", { id: errorId, class: "form-field-error", hidden: true });
+  const node = el("div", { class: "form-row multiselect-field" },
+    el("label", { for: id, text: f.required ? `${f.label} *` : f.label }), button, menu, chips, control, help, error);
+  drawChips();
+  drawOptions();
+  sync();
+  f.default = control.value;
+  return { field: f, control, node, error, helpId, errorId, isCheck: false, focus: () => button.focus() };
 }
 
 // mapToLines renders a map field's JSON value as one "key=value" per line.

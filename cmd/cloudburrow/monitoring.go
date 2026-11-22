@@ -11,9 +11,13 @@ import (
 	"strings"
 	"time"
 
+	"cloud.google.com/go/logging/apiv2/loggingpb"
 	"google.golang.org/genproto/googleapis/api/monitoredres"
+	ltype "google.golang.org/genproto/googleapis/logging/type"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/types/known/structpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/config"
@@ -63,6 +67,8 @@ type monitoringService struct {
 	// firestore is the Firestore front's host address, for Firestore's
 	// document metrics (#2048); nil when Firestore is not served.
 	firestore func() string
+	// inventory is the products whose resources are group members (#2146).
+	inventory *monitoringInventoryWiring
 	// cancel stops alert evaluation and uptime checks.
 	cancel context.CancelFunc
 }
@@ -123,8 +129,16 @@ func (s *monitoringService) Start(ctx context.Context) error {
 	if s.firestore != nil {
 		api.AddBuiltin(monitoring.NewFirestoreBuiltin(monitoringFirestore{addr: s.firestore}))
 	}
+	if s.inventory != nil {
+		for _, inv := range s.inventory.inventories() {
+			api.AddResourceInventory(inv)
+		}
+	}
 	if s.logging != nil {
 		api.SetLogMatcher(monitoringLogs{svc: s.logging})
+		// Uptime checks' Log check failures (#2146) are entries in this
+		// instance's Cloud Logging.
+		api.SetUptimeLogger(monitoringLogs{svc: s.logging}.WriteUptimeFailure)
 	}
 	if s.pubsub != nil {
 		tunnel := s.pubsub
@@ -323,6 +337,29 @@ func (l monitoringLogs) MatchLogEntries(project, filter string, extractors map[s
 			Type: e.GetResource().GetType(), Resource: e.GetResource().GetLabels(), Labels: s.Labels, Summary: summary})
 	}
 	return out, nil
+}
+
+// WriteUptimeFailure writes an uptime check's failed run to the project's
+// log monitoring.googleapis.com/uptime_checks, through Cloud Logging's own
+// WriteLogEntries, so exclusions and sinks apply.
+func (l monitoringLogs) WriteUptimeFailure(ctx context.Context, project string, e monitoring.UptimeLogEntry) error {
+	api := l.api()
+	if api == nil {
+		return errors.New("Cloud Logging has not started")
+	}
+	payload, err := structpb.NewStruct(e.Payload)
+	if err != nil {
+		return err
+	}
+	_, err = api.WriteLogEntries(ctx, &loggingpb.WriteLogEntriesRequest{Entries: []*loggingpb.LogEntry{{
+		LogName:   "projects/" + project + "/logs/" + url.PathEscape(monitoring.UptimeLogID),
+		Resource:  e.Resource,
+		Labels:    e.Labels,
+		Severity:  ltype.LogSeverity_ERROR,
+		Timestamp: timestamppb.New(e.Time),
+		Payload:   &loggingpb.LogEntry_JsonPayload{JsonPayload: payload},
+	}}})
+	return err
 }
 
 func entryResource(r *monitoredres.MonitoredResource) *monitoredres.MonitoredResource {

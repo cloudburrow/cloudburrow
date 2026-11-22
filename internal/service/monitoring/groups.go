@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/monitoring/apiv3/v2/monitoringpb"
+	metricpb "google.golang.org/genproto/googleapis/api/metric"
 	"google.golang.org/genproto/googleapis/api/monitoredres"
 	"google.golang.org/protobuf/types/known/emptypb"
 
@@ -18,9 +19,11 @@ import (
 // (user-written and built-in) its filter matches, and its ancestors'
 // filters too, as Google defines group membership
 // (docs.cloud.google.com/monitoring/groups and
-// /api/ref_v3/rest/v3/projects.groups, read 2026-11-19). Filters take the
-// selectors of the time series filter; resource.metadata.* is
-// INVALID_ARGUMENT, since CloudBurrow keeps no resource metadata.
+// /api/ref_v3/rest/v3/projects.groups, read 2026-11-19). The products'
+// own resources (Compute Engine VMs, Cloud SQL instances, GKE clusters,
+// buckets, topics: AddResourceInventory) are members too, with their
+// metadata (#2146). Filters take the selectors of the time series filter
+// and the resource metadata's (inventory.go).
 
 // MaxGroups is "Groups per metrics scope: 500"; MaxGroupDepth is "Nesting
 // depth: 6".
@@ -105,7 +108,7 @@ func (s *Server) checkGroup(project string, g *monitoringpb.Group) error {
 	if strings.TrimSpace(g.GetFilter()) == "" {
 		return apierror.InvalidArgument("Field group.filter is required")
 	}
-	if _, err := parseFilter(g.GetFilter(), filterSeries); err != nil {
+	if _, err := parseFilter(g.GetFilter(), filterGroups); err != nil {
 		return err
 	}
 	depth := 1
@@ -206,14 +209,14 @@ func (s *Server) DeleteGroup(_ context.Context, req *monitoringpb.DeleteGroupReq
 	return &emptypb.Empty{}, s.save()
 }
 
-func (s *Server) ListGroupMembers(_ context.Context, req *monitoringpb.ListGroupMembersRequest) (*monitoringpb.ListGroupMembersResponse, error) {
+func (s *Server) ListGroupMembers(ctx context.Context, req *monitoringpb.ListGroupMembersRequest) (*monitoringpb.ListGroupMembersResponse, error) {
 	project, err := childName("name", req.GetName(), "groups")
 	if err != nil {
 		return nil, err
 	}
 	var extra *Filter
 	if strings.TrimSpace(req.GetFilter()) != "" {
-		if extra, err = parseFilter(req.GetFilter(), filterSeries); err != nil {
+		if extra, err = parseFilter(req.GetFilter(), filterGroups); err != nil {
 			return nil, err
 		}
 	}
@@ -221,44 +224,47 @@ func (s *Server) ListGroupMembers(_ context.Context, req *monitoringpb.ListGroup
 	if req.GetInterval().GetEndTime() != nil {
 		end = req.GetInterval().GetEndTime().AsTime()
 	}
+	inv := s.inventory(ctx, project)
 	s.mu.Lock()
 	if s.get(kindGroups, req.GetName()) == nil {
 		s.mu.Unlock()
 		return nil, apierror.NotFound("Requested entity was not found.")
 	}
 	id := req.GetName()[strings.LastIndex(req.GetName(), "/")+1:]
-	members := s.groupMembersLocked(project, id, end)
+	members := s.groupMembersLocked(project, id, end, inv)
 	s.mu.Unlock()
 	var keep []*monitoredres.MonitoredResource
 	for _, r := range members {
-		if extra == nil || extra.match(subject{project: project, resourceType: r.GetType(), resourceLabels: r.GetLabels()}) {
+		if extra == nil || extra.match(subject{project: project, resourceType: r.GetType(), resourceLabels: r.GetLabels(), meta: metaOf(inv, r)}) {
 			keep = append(keep, r)
 		}
 	}
-	keyOf := func(r *monitoredres.MonitoredResource) string {
-		var b strings.Builder
-		b.WriteString(r.GetType())
-		writeLabels(&b, r.GetLabels())
-		return b.String()
-	}
-	page, next, err := pageOf("members|"+req.GetName()+"|"+req.GetFilter(), keep, keyOf, req.GetPageToken(), req.GetPageSize())
+	page, next, err := pageOf("members|"+req.GetName()+"|"+req.GetFilter(), keep, monResKey, req.GetPageToken(), req.GetPageSize())
 	if err != nil {
 		return nil, err
 	}
 	return &monitoringpb.ListGroupMembersResponse{Members: page, NextPageToken: next, TotalSize: int32(len(keep))}, nil
 }
 
+// metaOf is a resource's metadata in an inventory, or nil.
+func metaOf(inv map[string]InventoryResource, r *monitoredres.MonitoredResource) *ResourceMetadata {
+	if ir, ok := inv[monResKey(r)]; ok {
+		return &ir.Metadata
+	}
+	return nil
+}
+
 // groupMembersLocked are the resources a group's filter, and every
-// ancestor's, match among the project's series of the 24 hours before
-// end; the caller holds mu.
-func (s *Server) groupMembersLocked(project, id string, end time.Time) []*monitoredres.MonitoredResource {
+// ancestor's, match among the project's series of the 24 hours before end
+// and its products' resources (inv); the caller holds mu.
+func (s *Server) groupMembersLocked(project, id string, end time.Time, inv map[string]InventoryResource) []*monitoredres.MonitoredResource {
 	var filters []*Filter
 	for n := "projects/" + project + "/groups/" + id; n != ""; {
 		g, _ := s.get(kindGroups, n).(*monitoringpb.Group)
 		if g == nil {
 			break
 		}
-		f, err := parseFilter(g.GetFilter(), filterSeries)
+		f, err := parseFilter(g.GetFilter(), filterGroups)
 		if err != nil {
 			return nil
 		}
@@ -266,29 +272,28 @@ func (s *Server) groupMembersLocked(project, id string, end time.Time) []*monito
 		n = g.GetParentName()
 	}
 	seen := map[string]*monitoredres.MonitoredResource{}
-	consider := func(ts *monitoringpb.TimeSeries) {
-		r := ts.GetResource()
-		sub := subject{project: project, resourceType: r.GetType(), resourceLabels: r.GetLabels(), metricType: ts.GetMetric().GetType(),
-			metricLabels: ts.GetMetric().GetLabels()}
+	consider := func(r *monitoredres.MonitoredResource, metric *metricpb.Metric) {
+		sub := subject{project: project, resourceType: r.GetType(), resourceLabels: r.GetLabels(), metricType: metric.GetType(),
+			metricLabels: metric.GetLabels(), meta: metaOf(inv, r)}
 		for _, f := range filters {
 			if !f.match(sub) {
 				return
 			}
 		}
-		var b strings.Builder
-		b.WriteString(r.GetType())
-		writeLabels(&b, r.GetLabels())
-		seen[b.String()] = clone(r)
+		seen[monResKey(r)] = clone(r)
+	}
+	for _, k := range inventoryKeys(inv) {
+		consider(inv[k].Resource, nil)
 	}
 	start := end.Add(-24 * time.Hour)
 	for _, sr := range s.series[project] {
-		consider(sr.TS)
+		consider(sr.TS.GetResource(), sr.TS.GetMetric())
 	}
 	for _, b := range s.builtins {
 		for _, md := range b.Descriptors(project) {
 			ts, _ := b.Series(project, md.GetType(), start, end)
 			for _, t := range ts {
-				consider(t)
+				consider(t.GetResource(), t.GetMetric())
 			}
 		}
 	}
