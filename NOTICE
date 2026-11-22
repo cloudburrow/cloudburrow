@@ -196,3 +196,14 @@ their dependencies, every version pinned in
 internal/modelgarden/runtime/constraints-*.txt; the images pinned by digest
 in dependencies.json. The start scripts and servers in
 internal/modelgarden/runtime are CloudBurrow's own.
+
+On macOS with Apple silicon, Model Garden's Apple GPU (Metal) runtimes of
+#2155 run on the host, without CloudBurrow shipping or modifying them:
+llama.cpp's official macOS arm64 release archive (llama-server,
+https://github.com/ggml-org/llama.cpp, MIT License), downloaded on first
+use and checked against the SHA-256 pinned in dependencies.json; and MLX,
+mlx-metal and mlx-lm (https://github.com/ml-explore/mlx and
+https://github.com/ml-explore/mlx-lm, MIT License) with their dependencies,
+installed from PyPI into a virtual environment of CloudBurrow's from the
+hash-pinned lock internal/hostai/mlx-lock.txt (MIT, BSD, Apache License
+2.0, PSF and MPL-2.0 licences).

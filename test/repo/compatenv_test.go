@@ -29,6 +29,10 @@ var compatEnvExceptions = map[string]string{
 	// The host may pull the 1.8 GB apache/spark image for BigQuery's Spark
 	// procedures (#2104); no instance reports what the host may pull.
 	"CLOUDBURROW_TEST_SPARK": "opt-in switch: the host may pull the apache/spark image and run Spark procedures",
+	// The host is a Mac with Apple silicon whose GPU a test may use, and
+	// may download about 800 MB of models and runtimes (#2155); no instance
+	// reports what the host may download.
+	"CLOUDBURROW_TEST_METAL": "opt-in switch: darwin/arm64 host deploys GGUF and MLX models on the Apple GPU",
 	// Test data, not an instance: internal/isoconformance downloads ISO's
 	// conformance files only when it is set (#1754).
 	"CLOUDBURROW_TEST_DOWNLOADS": "opt-in switch: tests may download test data not cached yet",

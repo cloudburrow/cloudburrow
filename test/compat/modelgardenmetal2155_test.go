@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"runtime"
 	"strings"
 	"testing"
@@ -270,4 +271,31 @@ func TestModelGardenDeploysAnMLXModelOnTheAppleGPU(t *testing.T) {
 		t.Errorf("ChatCompletions = %q; want Paris", got)
 	}
 	t.Logf("%s generation on the Apple GPU (MLX Metal, host): %.1f tokens/s", metalMLXModel, tokensPerSecond(t, h, ctx, gpu))
+	fromTheCluster(t, gpu)
+}
+
+// fromTheCluster checks that the cluster reaches a host server as its
+// workload would be reached: the Service mg-<endpoint>, which has no
+// selector and an EndpointSlice at the host, answers a chat completion
+// from the cluster's node.
+func fromTheCluster(t *testing.T, endpoint string) {
+	t.Helper()
+	kubeconfig, cluster := strings.TrimSpace(os.Getenv(envKubeconfig)), strings.TrimSpace(os.Getenv("CLOUDBURROW_TEST_CLUSTER"))
+	if kubeconfig == "" || cluster == "" {
+		t.Logf("CLOUDBURROW_TEST_KUBECONFIG and CLOUDBURROW_TEST_CLUSTER are not set: the cluster's Service is not checked")
+		return
+	}
+	name := "mg-" + endpoint[strings.LastIndexByte(endpoint, '/')+1:]
+	out, err := exec.Command("kubectl", "--kubeconfig", kubeconfig, "get", "service", "-A", "-l", "cloudburrow.dev/modelgarden="+name,
+		"-o", `jsonpath={.items[0].spec.clusterIP} {.items[0].spec.selector} {.items[0].metadata.labels.cloudburrow\.dev/modelgarden-runtime}`).CombinedOutput()
+	f := strings.Fields(string(out))
+	if err != nil || len(f) != 2 || f[1] != "host" {
+		t.Fatalf("the host server's Service %s: %q, %v; want a cluster IP, no selector and the host runtime label", name, out, err)
+	}
+	out, err = exec.Command("docker", "exec", cluster+"-control-plane", "curl", "-sS", "-m", "60", "http://"+f[0]+":8080/v1/chat/completions",
+		"-H", "Content-Type: application/json",
+		"-d", `{"messages":[{"role":"user","content":"What is the capital of France? Answer in one word."}],"max_tokens":8,"temperature":0}`).CombinedOutput()
+	if err != nil || !strings.Contains(string(out), "Paris") {
+		t.Errorf("a chat completion from the cluster through Service %s = %s, %v", name, out, err)
+	}
 }

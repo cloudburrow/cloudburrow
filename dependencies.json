@@ -1458,6 +1458,37 @@
         ],
         "notes": "Release b12211 (2026-11-08), resolved 2026-11-22 with `docker buildx imagetools inspect` (linux/amd64, linux/arm64, linux/s390x). Served bartowski/SmolLM2-135M-Instruct-GGUF (Q4_K_M) on a kind v1.36.4 arm64 node the same day.",
         "skipDiscovery": "GHCR tag list; depcheck only discovers GitHub-sourced components. Re-resolve with `docker buildx imagetools inspect ghcr.io/ggml-org/llama.cpp:server-b<build>`."
+      },
+      "hostLlamaCpp": {
+        "$comment": "llama.cpp's official macOS arm64 release archive, built with Metal (#2155, internal/hostai LlamaCppArchive and LlamaCppSHA256): the host runtime for GGUF models deployed on the Apple GPU. Docker Desktop's Linux VM gives containers no GPU, so llama-server runs as a supervised host process on 127.0.0.1, reached by the cluster through a selector-less Service.",
+        "version": "b12211",
+        "source": "https://github.com/ggml-org/llama.cpp",
+        "license": "MIT",
+        "redistribution": "not redistributed: downloaded from the GitHub release by the user's CLI on first Metal deploy, checked against the SHA-256 before unpacking, into the user cache (CLOUDBURROW_HOSTAI_DIR)",
+        "updateFeed": "github-releases",
+        "verification": "release-checksum",
+        "digest": null,
+        "checksums": {
+          "llama-b12211-bin-macos-arm64.tar.gz": "sha256:4da4edb437358d31d55938ad849d262ca31b0e0ffb35e9caedb727a0cd5a8f0f"
+        },
+        "platforms": [
+          "darwin/arm64"
+        ],
+        "notes": "The same build as modelGardenLlamaCpp's image, so a model behaves alike on either. The SHA-256 is GitHub's release asset digest, rechecked on download 2026-11-22. Served Qwen/Qwen2.5-0.5B-Instruct-GGUF (Q4_K_M) on an Apple M4 Max with all 25 layers offloaded to MTL0 the same day (test/compat/modelgardenmetal2155_test.go). Move with modelGardenLlamaCpp."
+      },
+      "hostMLX": {
+        "$comment": "MLX and mlx-lm on MLX's Metal backend (#2155, internal/hostai/mlx-lock.txt): the host runtime for MLX models deployed on the Apple GPU, installed into a CloudBurrow-managed virtual environment with uv, or an official python.org or Homebrew Python 3.11-3.13, never system-wide.",
+        "version": "mlx 0.32.4, mlx-lm 0.32.2, mlx-metal 0.32.4",
+        "source": "https://github.com/ml-explore/mlx-lm",
+        "license": "MIT",
+        "redistribution": "not redistributed: installed from PyPI by the user's CLI on first Metal deploy, with --require-hashes --no-deps from the embedded lock",
+        "updateFeed": "pypi",
+        "verification": "lock-file-hashes",
+        "digest": null,
+        "platforms": [
+          "darwin/arm64"
+        ],
+        "notes": "Every transitive package pinned by version and SHA-256 in internal/hostai/mlx-lock.txt (uv pip compile --universal --generate-hashes, Python >= 3.11, macOS >= 14): MIT, BSD, Apache-2.0, PSF and MPL-2.0 licences, no GPL. Served mlx-community/Qwen2.5-0.5B-Instruct-4bit on an Apple M4 Max 2026-11-22 (test/compat/modelgardenmetal2155_test.go). The cluster's CPU MLX runtime pins its own copy in internal/modelgarden/runtime/constraints-mlx.txt; move both together."
       }
     },
     "consoleTerminal": {

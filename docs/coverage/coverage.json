@@ -6408,6 +6408,7 @@
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/loggingsettingscmek1972_test.go:41 TestLoggingSettingsCMEK",
           "test/compat/loggingviews_test.go:83 TestLoggingViewFiltersAndRetention",
+          "test/compat/modelgardenmetal2155_test.go:200 TestModelGardenDeploysAGGUFModelOnTheAppleGPU",
           "test/compat/runlogs_test.go:189 TestGcloudRunLogsRead",
           "test/compat/storage_audit_test.go:116 TestStorageDataAccessAuditLogs",
           "test/compat/storage_audit_test.go:198 TestStorageDataAccessAuditLogsOffByDefault",
@@ -6547,6 +6548,7 @@
         "tests": [
           "test/compat/modelgardencluster2148_test.go:33 TestModelGardenDeploysAHubModelOnTheCluster",
           "test/compat/modelgardendeploy_test.go:62 TestModelGardenDeploysHuggingFaceModels",
+          "test/compat/modelgardenmetal2155_test.go:200 TestModelGardenDeploysAGGUFModelOnTheAppleGPU",
           "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
           "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints",
           "test/compat/modelregistrycli_test.go:96 TestTerraformVertexAIEndpoint",
@@ -6645,17 +6647,19 @@
         "tests": [
           "test/compat/modelgardencluster2148_test.go:33 TestModelGardenDeploysAHubModelOnTheCluster",
           "test/compat/modelgardendeploy_test.go:62 TestModelGardenDeploysHuggingFaceModels",
-          "test/compat/modelgardenruntimes2148_test.go:131 TestModelGardenDeploysAGGUFModelOnLlamaCpp",
-          "test/compat/modelgardenruntimes2148_test.go:167 TestModelGardenDeploysOnHuggingFacePyTorchInference",
-          "test/compat/modelgardenruntimes2148_test.go:219 TestModelGardenDeploysAnONNXModel",
-          "test/compat/modelgardenruntimes2148_test.go:249 TestModelGardenDeploysAnMLXModel"
+          "test/compat/modelgardenmetal2155_test.go:200 TestModelGardenDeploysAGGUFModelOnTheAppleGPU",
+          "test/compat/modelgardenmetal2155_test.go:265 TestModelGardenDeploysAnMLXModelOnTheAppleGPU",
+          "test/compat/modelgardenruntimes2148_test.go:138 TestModelGardenDeploysAGGUFModelOnLlamaCpp",
+          "test/compat/modelgardenruntimes2148_test.go:174 TestModelGardenDeploysOnHuggingFacePyTorchInference",
+          "test/compat/modelgardenruntimes2148_test.go:226 TestModelGardenDeploysAnONNXModel",
+          "test/compat/modelgardenruntimes2148_test.go:256 TestModelGardenDeploysAnMLXModel"
         ]
       },
       {
         "method": "google.cloud.aiplatform.v1.ModelGardenService/GetPublisherModel",
         "status": "Verified",
         "tests": [
-          "test/compat/modelgardenruntimes2148_test.go:275 TestModelGardenHuggingFacePublisherModel",
+          "test/compat/modelgardenruntimes2148_test.go:282 TestModelGardenHuggingFacePublisherModel",
           "test/compat/modelregistry_test.go:490 TestGetPublisherModelDescribesTheServedModels"
         ]
       },
@@ -6863,10 +6867,12 @@
         "tests": [
           "test/compat/embedmultimodalpredict_test.go:52 TestMultimodalEmbeddingPredictThroughThePredictionClient",
           "test/compat/modelgardencluster2148_test.go:33 TestModelGardenDeploysAHubModelOnTheCluster",
-          "test/compat/modelgardenruntimes2148_test.go:131 TestModelGardenDeploysAGGUFModelOnLlamaCpp",
-          "test/compat/modelgardenruntimes2148_test.go:167 TestModelGardenDeploysOnHuggingFacePyTorchInference",
-          "test/compat/modelgardenruntimes2148_test.go:219 TestModelGardenDeploysAnONNXModel",
-          "test/compat/modelgardenruntimes2148_test.go:249 TestModelGardenDeploysAnMLXModel",
+          "test/compat/modelgardenmetal2155_test.go:200 TestModelGardenDeploysAGGUFModelOnTheAppleGPU",
+          "test/compat/modelgardenmetal2155_test.go:265 TestModelGardenDeploysAnMLXModelOnTheAppleGPU",
+          "test/compat/modelgardenruntimes2148_test.go:138 TestModelGardenDeploysAGGUFModelOnLlamaCpp",
+          "test/compat/modelgardenruntimes2148_test.go:174 TestModelGardenDeploysOnHuggingFacePyTorchInference",
+          "test/compat/modelgardenruntimes2148_test.go:226 TestModelGardenDeploysAnONNXModel",
+          "test/compat/modelgardenruntimes2148_test.go:256 TestModelGardenDeploysAnMLXModel",
           "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
           "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints",
           "test/compat/modelregistryexport_test.go:58 TestModelRegistryExportsTheImageToArtifactRegistry",
@@ -6879,10 +6885,12 @@
         "status": "Verified",
         "tests": [
           "test/compat/modelgardencluster2148_test.go:33 TestModelGardenDeploysAHubModelOnTheCluster",
-          "test/compat/modelgardenruntimes2148_test.go:131 TestModelGardenDeploysAGGUFModelOnLlamaCpp",
-          "test/compat/modelgardenruntimes2148_test.go:167 TestModelGardenDeploysOnHuggingFacePyTorchInference",
-          "test/compat/modelgardenruntimes2148_test.go:219 TestModelGardenDeploysAnONNXModel",
-          "test/compat/modelgardenruntimes2148_test.go:249 TestModelGardenDeploysAnMLXModel",
+          "test/compat/modelgardenmetal2155_test.go:200 TestModelGardenDeploysAGGUFModelOnTheAppleGPU",
+          "test/compat/modelgardenmetal2155_test.go:265 TestModelGardenDeploysAnMLXModelOnTheAppleGPU",
+          "test/compat/modelgardenruntimes2148_test.go:138 TestModelGardenDeploysAGGUFModelOnLlamaCpp",
+          "test/compat/modelgardenruntimes2148_test.go:174 TestModelGardenDeploysOnHuggingFacePyTorchInference",
+          "test/compat/modelgardenruntimes2148_test.go:226 TestModelGardenDeploysAnONNXModel",
+          "test/compat/modelgardenruntimes2148_test.go:256 TestModelGardenDeploysAnMLXModel",
           "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
           "test/compat/predictiongrpc_test.go:63 TestPredictionClientReachesACustomEndpoint",
           "test/compat/rawpredict_test.go:26 TestRawPredictOnTheEmbeddingModel",
@@ -7496,7 +7504,9 @@
         "method": "google.cloud.aiplatform.v1beta1.PredictionService/ChatCompletions",
         "status": "Verified",
         "tests": [
-          "test/compat/modelgardendeploy_test.go:62 TestModelGardenDeploysHuggingFaceModels"
+          "test/compat/modelgardendeploy_test.go:62 TestModelGardenDeploysHuggingFaceModels",
+          "test/compat/modelgardenmetal2155_test.go:200 TestModelGardenDeploysAGGUFModelOnTheAppleGPU",
+          "test/compat/modelgardenmetal2155_test.go:265 TestModelGardenDeploysAnMLXModelOnTheAppleGPU"
         ]
       },
       {

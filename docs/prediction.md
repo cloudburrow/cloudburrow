@@ -307,17 +307,75 @@ The endpoint answers, over gRPC and JSON:
 
 ## Accelerators
 
-**CPU only. No GPU path exists, on any platform.**
-
 | Host | What happens |
 |---|---|
-| CPU (amd64, arm64) | Works. This is the only tested path. |
-| NVIDIA | Untested. kind can be configured with the NVIDIA container runtime, and Kubernetes can schedule `nvidia.com/gpu` — CloudBurrow does neither, and claims nothing it has not run. |
-| Apple Silicon | **No GPU access, and none is achievable this way.** Metal is not reachable from a Linux container: Docker Desktop runs the cluster inside a Linux VM, and that VM has no Metal device. |
+| CPU (amd64, arm64) | Works: the default everywhere but a Mac with Apple silicon, and what `machine_spec` with no accelerator (`local-cpu`) asks for. |
+| macOS on Apple silicon | **The Apple GPU, through Metal, on the host** (#2155): see [Apple GPU (Metal)](#apple-gpu-metal). |
+| NVIDIA | Untested. kind can be configured with the NVIDIA container runtime, and Kubernetes can schedule `nvidia.com/gpu` — CloudBurrow does neither, and claims nothing it has not run. On Linux a GPU machine spec runs on CPU. |
 
-Passing NVIDIA container flags on a Mac would neither fail loudly nor enable anything — it
-would simply be ignored. **NVIDIA container flags do not establish Metal acceleration**, and
-the two must not be conflated: a GPU-capable image is not a GPU-capable runtime.
+Metal is not reachable from a Linux container: Docker Desktop runs the cluster inside a Linux VM,
+and that VM has no Metal device. NVIDIA container flags on a Mac would be ignored, not fail, so
+CloudBurrow never passes them. The Apple GPU is reached by running the model server as a process
+on the Mac itself, not in a container.
+
+## Apple GPU (Metal)
+
+On macOS with Apple silicon (#2155) a Model Garden deployment on a GPU runs on the Mac's GPU:
+
+| Model | Host runtime | Pinned in `dependencies.json` |
+|---|---|---|
+| GGUF (llama.cpp's engine) | `llama-server` from llama.cpp's official macOS arm64 release archive (MIT), the same build b12211 as the cluster's image, `--n-gpu-layers 999` | `localai.hostLlamaCpp`: the archive's SHA-256 |
+| MLX (`library_name: mlx`) | `python -m mlx_lm server` (MIT), MLX's Metal backend | `localai.hostMLX`: `internal/hostai/mlx-lock.txt`, every package by version and SHA-256 |
+
+**Choosing it.** `machine_spec.accelerator_type` decides, as on Google: a GPU type (`NVIDIA_L4`,
+`accelerator_count` 1; any NVIDIA type is accepted) is the Apple GPU, machine type `local-metal`; a
+machine spec with no accelerator is CPU, `local-cpu`; a TPU type, or a count with no type, is
+`INVALID_ARGUMENT`. A deploy with no `machine_spec` takes the instance's default,
+`cloudburrow up --local-ai-accelerator metal|cpu` (`localAI.accelerator`), which is `metal` on a Mac
+with Apple silicon and `cpu` everywhere else; `metal` is refused on any other machine. The console's
+deploy form offers **Accelerator type** "Apple GPU (Metal), local", chosen by default when the Mac
+has one, or "None (CPU)". Runtimes with no Metal build (vLLM, Text Embeddings Inference, the
+PyTorch and ONNX runtimes) run on CPU in the cluster even on a GPU spec, and the deployed model's
+details say so.
+
+**How it runs.** The first deploy downloads the runtime into the user cache
+(`~/Library/Caches/cloudburrow/hostai`, or `CLOUDBURROW_HOSTAI_DIR`): the llama.cpp archive is
+checked against its SHA-256 before it is unpacked; mlx-lm is installed with
+`--require-hashes --no-deps` into a virtual environment of CloudBurrow's own, with `uv` if it is on
+`PATH`, else an official python.org or Homebrew Python 3.11–3.13. Nothing is installed system-wide.
+The model's files are downloaded from the Hub to `<state-dir>/host-models/mg-<endpoint>` (the
+GGUF file alone, or the MLX repository's weights and tokenizer), with the 50 GB-free rule. The
+server binds 127.0.0.1 only, on a free port, with `HF_HUB_OFFLINE=1`. A supervisor runs it in its
+own process group, checks its health every 5 s, restarts it with back-off when it exits or fails
+three checks, and writes its output to Cloud Logging as the endpoint's
+`aiplatform.googleapis.com/prediction_container` log. `UndeployModel` and `cloudburrow stop` stop
+it, process group and all; a server a crashed instance left is found by its pid file and stopped
+on the next `up`.
+
+**Reaching it.** The cluster reaches the server as it would a pod: the Service `mg-<endpoint>` has
+no selector and an EndpointSlice at the host's address on Docker's network
+(`host.docker.internal`), so `:predict`, `:rawPredict`, `:streamRawPredict` and the OpenAI-compatible
+`chat/completions` work unchanged. The Endpoints page shows **Accelerator** "Apple GPU (Metal),
+local", and the deployed model's details its machine type, accelerator type and count, and the
+chip.
+
+**Measured** on an Apple M4 Max, generating 128 tokens with Qwen/Qwen2.5-0.5B-Instruct-GGUF
+(Q4_K_M), by test/compat/modelgardenmetal2155_test.go: **243 tokens/s on the Apple GPU** against
+**8.5 tokens/s on CPU in the cluster** (llama.cpp's image, the same build), 28.6×; the server logs
+`using device MTL0 (Apple M4 Max)` and `offloaded 25/25 layers to GPU`.
+mlx-community/Qwen2.5-0.5B-Instruct-4bit on MLX's Metal backend: 234–245 tokens/s.
+
+**What stays on CPU, and why.**
+
+- Gemini on LiteRT-LM (`cloudburrow_generate`) runs in its container: LiteRT-LM's macOS release has
+  a GPU backend, but CloudBurrow's runner is built from source with its own patches (per-request
+  sampler, logprobs, constraints) for Linux only; a macOS build of the runner is #2159.
+- Embeddings on ONNX Runtime (the `onnx` build) stay on CPU: ONNX Runtime's Core ML execution
+  provider was measured slower than its CPU provider on the shipped int8 EmbeddingGemma model
+  (8 × 128 tokens: 782 ms on CPU, 989 ms with Core ML on CPU and GPU, 3028 ms on all units),
+  because Core ML has no int8 matrix-multiply kernels and the graph is split back to CPU.
+- Custom containers deployed with `DeployModel` run in the cluster on CPU, whatever their machine
+  spec: a container cannot reach Metal.
 
 ## Cleanup
 
