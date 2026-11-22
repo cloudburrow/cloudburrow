@@ -23,7 +23,7 @@ import (
 // https://cloud.google.com/bigquery/docs/reference/rest/v2/routines#Argument).
 //
 // The engine CloudBurrow builds runs them (third_party/bigquery-emulator,
-// googlesqlite patch 0107). The front leaves a table parameter's name in
+// googlesqlite patch 0109). The front leaves a table parameter's name in
 // the function's body unqualified, and qualifies TABLE name in a call as
 // it qualifies any table (qualify.go); routineFromDDL reads the
 // parameters as the Routine's arguments. The emulator's routines.insert

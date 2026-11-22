@@ -237,13 +237,58 @@ func TestBigQueryStudioExplorerEditorAndHistory(t *testing.T) {
 }
 
 // clickExpr clicks the element a JavaScript expression names, as a person
-// would, once it is drawn.
+// would, once it is drawn and not inert: a dialog on its way out is inert
+// (openModal) and still drawn for its exit, holding the same IDs as the
+// next one, so a click meant for the new dialog's button could otherwise be
+// aimed at the old one's.
+//
+// The element is found, scrolled to the middle of the viewport and aimed at
+// in one evaluation, which answers the point to click only when the topmost
+// element there is the element, one of its descendants, an ancestor (an
+// input drawn by its label or container) or one of its labels. Anything
+// else (gone, inert, covered by the dialog replacing it, without a box) is
+// looked for again within waitFor's 30 seconds (main CI 44926873355). An
+// inline element that wraps, as a long ID's link does in a narrow column,
+// is aimed at the middle of one of its own line boxes: the middle of its
+// bounding box can fall between its lines, on the cell around it, which
+// counted as an ancestor and took the click instead of the link (main CI
+// 44966435794: Scheduled queries' config ID on four lines). The
+// mouse click at that point is sent once and never retried: the page has
+// it then, and a second one could submit a form twice. Clicking by a mark
+// (chromedp.Click on [data-cb-click]) instead waited on a node the page
+// could replace until the test's deadline, and a click retried after a
+// timeout may already have landed.
 func (p *tab) clickExpr(expr string) {
 	p.t.Helper()
-	p.waitFor(`(() => { const n = ` + expr + `; return !!n && n.getClientRects().length > 0; })()`)
-	p.eval(`(() => { document.querySelectorAll("[data-cb-click]").forEach((n) => n.removeAttribute("data-cb-click"));
-		(`+expr+`).setAttribute("data-cb-click", ""); return true; })()`, nil)
-	p.run(chromedp.Click(chromedp.CSS(`[data-cb-click]`)))
+	ready := `(() => { const n = ` + expr + `; return !!n && n.isConnected && !n.closest("[inert]") && n.getClientRects().length > 0; })()`
+	aim := `(() => { const n = ` + expr + `;
+		if (!n || !n.isConnected || n.closest("[inert]")) return null;
+		n.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
+		const root = n.getRootNode();
+		for (const b of n.getClientRects()) {
+			if (!b.width || !b.height) continue;
+			const x = b.left + b.width / 2, y = b.top + b.height / 2, hit = root.elementFromPoint(x, y);
+			if (hit && n.contains(hit)) return { X: x, Y: y };
+		}
+		const r = n.getBoundingClientRect();
+		if (!r.width || !r.height) return null;
+		const x = r.left + r.width / 2, y = r.top + r.height / 2, hit = root.elementFromPoint(x, y);
+		const reaches = !!hit && (n.contains(hit) || hit.contains(n) || [...(n.labels || [])].some((l) => l.contains(hit)));
+		return reaches ? { X: x, Y: y } : null; })()`
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		p.waitForWithin(ready, max(time.Until(deadline), time.Second))
+		var at *struct{ X, Y float64 }
+		p.eval(aim, &at)
+		if at != nil {
+			p.run(chromedp.MouseClickXY(at.X, at.Y))
+			return
+		}
+		if time.Now().After(deadline) {
+			p.t.Fatalf("browser: %s was never where a click would reach it", strings.Join(strings.Fields(expr), " "))
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 // TestBigQueryCreateDatasetAndTableAsGoogles (#1861), in the emulators

@@ -202,8 +202,10 @@ func TestGoogleAuthPlatformThroughThePages(t *testing.T) {
 		t.Errorf("the secrets table shows more than the last four characters")
 	}
 	p.clickExpr(`document.querySelector("#auth-secret-add")`)
-	p.waitFor(`document.querySelector("#oauth-created-secret") !== null`)
-	p.clickExpr(`document.querySelector("#oauth-created-close")`)
+	// The new secret's dialog, not the first one, which may still be in
+	// its exit (openModal) and holds the same IDs.
+	p.waitFor(`document.querySelector(".modal.is-open #oauth-created-secret") !== null`)
+	p.clickExpr(`document.querySelector(".modal.is-open #oauth-created-close")`)
 	p.waitFor(`document.querySelectorAll("#auth-secrets tbody tr").length === 2 && document.querySelector("#auth-secret-add").disabled`)
 
 	p.navigate("/apis/credentials?project=" + project)

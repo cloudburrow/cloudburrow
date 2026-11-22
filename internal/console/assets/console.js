@@ -1336,7 +1336,17 @@ function recordOperation(label) {
     // fetched as soon as there is something new in it.
     refreshOperations();
   };
-  return { succeeded: finish("succeeded"), failed: finish("failed") };
+  // started is an action that answered once its long-running operation
+  // began (StartingActor): the server's record of it, under the same id,
+  // stays running until the operation ends.
+  return { succeeded: finish("succeeded"), failed: finish("failed"), started: finish("running") };
+}
+
+// settleOperation marks op from an action's answer: started when the
+// server goes on with it (pending), succeeded otherwise.
+function settleOperation(op, res) {
+  if (res && res.pending) op.started("", res.operation);
+  else op.succeeded("", res && res.operation);
 }
 
 // relativeTime answers the question the panel is actually asked.
@@ -5224,9 +5234,10 @@ function openActionForm(route, segments, action, onDone, title = null, host = nu
         : await send(
           `/api/actions/${route.service}?project=${encodeURIComponent(currentProject())}`,
           "POST", { Path: segments, Action: action.id, Values: values });
-      op.succeeded("", res.operation);
+      settleOperation(op, res);
       submitting = false;
-      notify(segments.length ? `${action.label} applied to ${name}` : `${action.label} done`);
+      notify(res.pending ? `${action.label} started for ${name}: its progress is in Notifications`
+        : segments.length ? `${action.label} applied to ${name}` : `${action.label} done`);
       // An action whose Google flow goes on to the resource it made
       // (Action.Then): Write a function's Create lands on the function's
       // Source tab (#1853).
@@ -5403,8 +5414,8 @@ function openActionPanel(route, segments, action, onDone, title, { keepFocus = f
     try {
       const res = await send(`/api/actions/${route.service}?project=${encodeURIComponent(currentProject())}`,
         "POST", { Path: segments, Action: action.id, Values: fields.values() });
-      op.succeeded("", res.operation);
-      notify(`${action.label}: saved for ${name}`);
+      settleOperation(op, res);
+      notify(res.pending ? `${action.label} started for ${name}: its progress is in Notifications` : `${action.label}: saved for ${name}`);
       announce(`Saved ${name}`);
       closeActionPanel();
       onDone();

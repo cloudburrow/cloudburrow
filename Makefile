@@ -67,8 +67,16 @@ bigquery-patch-tests:
 	# TZ=UTC: googlesqlite's TestBindDateFromUnixDate and
 	# TestParseTimeFormatRoundtrip/unixsec (internal/functions/date, helper)
 	# expect UTC and fail in any other local zone, as on a developer's machine.
-	cd third_party/bigquery-emulator && TZ=UTC GOFLAGS=-mod=readonly GOWORK=off go test -tags http2legacy \
-		$$(GOFLAGS=-mod=readonly GOWORK=off go list -e -tags http2legacy $(BQ_PATCH_TEST_PKGS) | grep -v -e '/googlesqlite/cmd/googlesqlite$$' -e '/googlesqlite/internal/cli$$')
+	# GOOGLESQLITE_TEST_TRACE (#2134): googlesqlite's spec runner logs each
+	# case's start and end there; on a failure the cases that never ended are
+	# printed, which names a case hung where its own watchdog cannot run.
+	cd third_party/bigquery-emulator && : > build/googlesqlite-test-trace.txt && \
+		TZ=UTC GOOGLESQLITE_TEST_TRACE=$(CURDIR)/third_party/bigquery-emulator/build/googlesqlite-test-trace.txt \
+		GOFLAGS=-mod=readonly GOWORK=off go test -tags http2legacy \
+		$$(GOFLAGS=-mod=readonly GOWORK=off go list -e -tags http2legacy $(BQ_PATCH_TEST_PKGS) | grep -v -e '/googlesqlite/cmd/googlesqlite$$' -e '/googlesqlite/internal/cli$$') || { \
+		echo "googlesqlite spec cases started and never ended:"; \
+		awk '$$1 == "start" { s[$$2] = 1 } $$1 == "end" { delete s[$$2] } END { for (n in s) print "\t" n }' build/googlesqlite-test-trace.txt; \
+		exit 1; }
 
 ## build: Build the binary into bin/, with the Linux storage server and BigQuery emulator embedded
 .PHONY: build

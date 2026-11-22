@@ -40,6 +40,19 @@ func TestTerraformContainerClusterAndNodePool(t *testing.T) {
 			}
 		}
 	})
+	t.Cleanup(func() {
+		// Run before the cleanup above: Terraform names a pool's error
+		// state, not why (main CI 44926873355), and the pool says.
+		if !t.Failed() {
+			return
+		}
+		if got, err := c.GetCluster(ctx, &containerpb.GetClusterRequest{Name: clusterName}); err == nil {
+			t.Logf("the cluster is %v (%q)", got.GetStatus(), got.GetStatusMessage())
+			for _, np := range got.GetNodePools() {
+				t.Logf("node pool %s is %v (%q)", np.GetName(), np.GetStatus(), np.GetStatusMessage())
+			}
+		}
+	})
 	module := func(env string, nodes int) string {
 		return fmt.Sprintf(`
 resource "google_container_cluster" "c" {
