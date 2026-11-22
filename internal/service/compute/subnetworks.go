@@ -123,8 +123,9 @@ func (s *Server) insertSubnetwork(project, region string, b obj) (obj, error) {
 	if !ok {
 		return nil, notFound(nw)
 	}
-	if st := str(b, "stackType"); st != "" && st != "IPV4_ONLY" {
-		return nil, unimplemented("stackType %s: IPv6 subnets are not served", st)
+	v6 := obj{"selfLink": rel}
+	if err := s.dualStackLocked(netObj, b, v6, "resource"); err != nil {
+		return nil, err
 	}
 	if str(b, "ipCidrRange") == "" {
 		return nil, required("resource.ipCidrRange")
@@ -153,6 +154,11 @@ func (s *Server) insertSubnetwork(project, region string, b obj) (obj, error) {
 		}
 	}
 	o := s.addSubnetLocked(project, region, in, false)
+	for k, v := range v6 {
+		if k != "selfLink" {
+			o[k] = v
+		}
+	}
 	return s.done(project, "regions/"+region, "insert", rel, o["id"])
 }
 
@@ -341,6 +347,10 @@ func (s *Server) patchSubnetwork(project, region, name string, b obj) (obj, erro
 		case "ipCidrRange":
 			if v != nil && v != o[k] {
 				return nil, invalid("Invalid value for field 'resource.ipCidrRange': '%v'. Use expandIpCidrRange to change the primary IP range.", v)
+			}
+		case "stackType", "ipv6AccessType":
+			if err := s.patchStackLocked(rel, o, next, b); err != nil {
+				return nil, err
 			}
 		case "network", "region", "name":
 			if v != nil && Rel(fmt.Sprint(v), project) != o[k] && v != o[k] {

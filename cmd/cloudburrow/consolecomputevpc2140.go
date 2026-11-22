@@ -32,8 +32,8 @@ func (p computeSubnetsProvider) networks() computeNetworksProvider {
 }
 
 func (p computeSubnetsProvider) List(ctx context.Context, project string) (console.Listing, error) {
-	listing := console.Listing{Columns: []string{"Region", "Network", "IP stack type", "Internal IP ranges", "Secondary IPv4 ranges",
-		"Gateway", "Private Google Access", "Flow logs"}, Noun: "subnets", Note: computeNote}
+	listing := console.Listing{Columns: []string{"Region", "Network", "IP stack type", "Internal IP ranges", "Internal IPv6 ranges", "External IPv6 ranges",
+		"Secondary IPv4 ranges", "Gateway", "Private Google Access", "Flow logs"}, Noun: "subnets", Note: computeNote}
 	if p.api() == nil {
 		return listing, errors.New(computeNotStarted)
 	}
@@ -57,8 +57,9 @@ func (p computeSubnetsProvider) List(ctx context.Context, project string) (conso
 		region := vpcLast(vpcStr(s, "region"))
 		target := []string{region, vpcStr(s, "name")}
 		listing.Items = append(listing.Items, console.Resource{Name: vpcStr(s, "name"), Opens: target, Target: target,
-			Fields: map[string]string{"Region": region, "Network": vpcLast(vpcStr(s, "network")), "IP stack type": "IPv4 (single-stack)",
-				"Internal IP ranges": vpcStr(s, "ipCidrRange"), "Secondary IPv4 ranges": vpcDash(secondaryText(s)),
+			Fields: map[string]string{"Region": region, "Network": vpcLast(vpcStr(s, "network")), "IP stack type": stackTypeText(vpcStr(s, "stackType")),
+				"Internal IP ranges": vpcStr(s, "ipCidrRange"), "Internal IPv6 ranges": vpcDash(vpcStr(s, "internalIpv6Prefix")),
+				"External IPv6 ranges": vpcDash(vpcStr(s, "externalIpv6Prefix")), "Secondary IPv4 ranges": vpcDash(secondaryText(s)),
 				"Gateway": vpcStr(s, "gatewayAddress"), "Private Google Access": vpcOnOff(s["privateIpGoogleAccess"] == true),
 				"Flow logs": vpcOnOff(flowLogsOn(s))}})
 	}
@@ -270,8 +271,8 @@ func peeringFields(project string, networks []string, cur map[string]any) []cons
 			Help: "A project this instance keeps networks for."},
 		{Name: "peerNetworkName", Label: "VPC network name", Type: "text", Required: true, Pattern: computeNamePattern, VisibleWhen: other},
 		{Name: "stackType", Label: "IP stack type", Type: "radio", Default: "IPV4_ONLY", Options: []string{"IPV4_ONLY", "IPV4_IPV6"},
-			OptionLabels:       map[string]string{"IPV4_ONLY": "IPv4 (single-stack)", "IPV4_IPV6": "IPv4 and IPv6 (dual-stack)"},
-			UnavailableOptions: map[string]string{"IPV4_IPV6": "IPv6 is not served: networks are IPv4 only."}},
+			OptionLabels: map[string]string{"IPV4_ONLY": "IPv4 (single-stack)", "IPV4_IPV6": "IPv4 and IPv6 (dual-stack)"},
+			Help:         "Dual-stack also exchanges the networks' IPv6 subnet routes."},
 	}, routes...)
 }
 
@@ -329,7 +330,7 @@ func (p computePeeringProvider) Detail(ctx context.Context, project string, path
 	props = append(props,
 		console.Property{Label: "Exchange subnet routes with public IP", Value: "Export " + vpcOnOff(e["exportSubnetRoutesWithPublicIp"] == true) +
 			", import " + vpcOnOff(e["importSubnetRoutesWithPublicIp"] == true)},
-		console.Property{Label: "IP stack type", Value: "IPv4 (single-stack)"},
+		console.Property{Label: "IP stack type", Value: stackTypeText(vpcStr(e, "stackType"))},
 		console.Property{Label: "Update strategy", Value: map[string]string{"CONSENSUS": "Consensus"}[vpcStr(e, "updateStrategy")]},
 		console.Property{Label: "Peer MTU", Value: vpcDash(vpcStr(e, "peerMtu"))},
 		console.Property{Label: "State details", Value: vpcDash(vpcStr(e, "stateDetails"))})

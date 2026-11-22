@@ -30,8 +30,8 @@ func TestConsoleVPCParity2140(t *testing.T) {
 	nets := computeNetworksProvider{screen}
 
 	_, form := nets.CreateForm()
-	if got := vpcFieldNames(form); !strings.HasPrefix(got, "name,description,autoMtu,mtu,ulaIpv6,subnetMode,subnetName") ||
-		!strings.Contains(got, "subnetStackType,subnetRange,subnetSecondaryRanges,privateGoogleAccess,subnetFlowLogs,rule-custom,rule-icmp,rule-rdp,rule-ssh,routingMode") {
+	if got := vpcFieldNames(form); !strings.HasPrefix(got, "name,description,autoMtu,mtu,ulaIpv6,ulaAllocation,internalIpv6Range,subnetMode,subnetName") ||
+		!strings.Contains(got, "subnetStackType,subnetIpv6AccessType,subnetRange,subnetSecondaryRanges,privateGoogleAccess,subnetFlowLogs,rule-custom,rule-icmp,rule-rdp,rule-ssh,routingMode") {
 		t.Fatalf("Create VPC network fields = %s", got)
 	}
 	if _, err := nets.Create(ctx, project, map[string]string{"name": "blue", "subnetMode": "Custom", "autoMtu": "true", "mtu": "1300",
@@ -143,8 +143,8 @@ func TestConsoleVPCParity2140(t *testing.T) {
 	// The firewall rule form.
 	fields := fwp.CreateFormFor(ctx, project)
 	if got := vpcFieldNames(fields); got != "name,description,logs,network,priority,direction,action,targets,targetTags,targetServiceAccount,"+
-		"sourceFilter,sourceRanges,sourceTags,sourceServiceAccount,secondSourceFilter,secondSourceTags,secondSourceServiceAccount,"+
-		"destinationFilter,destinationRanges,protocolsMode,tcp,tcpPorts,udp,udpPorts,other,otherProtocols,enforcement" {
+		"sourceFilter,sourceRanges,sourceRanges6,sourceTags,sourceServiceAccount,secondSourceFilter,secondSourceTags,secondSourceServiceAccount,"+
+		"destinationFilter,destinationRanges,destinationRanges6,protocolsMode,tcp,tcpPorts,udp,udpPorts,other,otherProtocols,enforcement" {
 		t.Fatalf("Create firewall rule fields = %s", got)
 	}
 	if _, err := fwp.Create(ctx, project, map[string]string{"name": "web", "network": "blue", "logs": "On", "priority": "900", "direction": "Ingress",
@@ -244,10 +244,28 @@ func TestConsoleVPCParity2140(t *testing.T) {
 			t.Errorf("the promoted address is still listed ephemeral: %+v", it)
 		}
 	}
+	// The external ephemeral address: its own 192.0.2.0/24 IP, promoted
+	// to static IN_USE by hop (#2140, A1).
 	el2, _ := addrs.List(ctx, project)
+	var ext *console.Resource
+	for i, it := range el2.Items {
+		if it.Fields["Type"] == "Ephemeral" && it.Fields["In use by"] == "VM instance hop (us-central1-a)" {
+			ext = &el2.Items[i]
+		}
+	}
+	if ext == nil || !strings.HasPrefix(ext.Fields["IP address"], "192.0.2.") || vpcActionIDs(ext.Actions) != "promote" || ext.Actions[0].Unavailable != "" {
+		t.Fatalf("hop's ephemeral external address = %+v", ext)
+	}
+	if err := addrs.ActAt(ctx, project, ext.Target, "promote", map[string]string{"name": "hop-ext"}); err != nil {
+		t.Fatal(err)
+	}
+	el2, _ = addrs.List(ctx, project)
+	if r := vpcRow(el2, "hop-ext"); r == nil || r.Fields["IP address"] != ext.Fields["IP address"] || r.Fields["In use by"] != "hop" || r.Fields["Type"] != "Static" {
+		t.Fatalf("promoted external = %+v (all %+v)", r, el2.Items)
+	}
 	for _, it := range el2.Items {
-		if it.Fields["Type"] == "Ephemeral" && (len(it.Actions) != 1 || it.Actions[0].Unavailable == "") {
-			t.Errorf("an external ephemeral address offers Promote: %+v", it)
+		if it.Fields["Type"] == "Ephemeral" {
+			t.Errorf("the promoted external address is still listed ephemeral: %+v", it)
 		}
 	}
 }

@@ -9,6 +9,10 @@
 #     the instance's internal IP, an on-link route per subnet range of the
 #     network, and a static neighbour and forwarding entry per peer VM
 #     (its internal IP, its MAC, its pod IP);
+#   - IPv6 (dual-stack interfaces, #2140): the instance's IPv6 address on
+#     vpc0, an on-link route per dual-stack /64 of the network and a
+#     permanent neighbour entry per peer's IPv6 address (the peer's MAC,
+#     already forwarded), so IPv6 crosses the same VXLAN segment;
 #   - internal DNS: INSTANCE.ZONE.c.PROJECT.internal of every instance on
 #     the network, in a block of /etc/hosts.
 set -u
@@ -37,7 +41,13 @@ apply() {
   fi
   max=$(( $(cat /sys/class/net/eth0/mtu) - 50 ))
   [ "$mtu" -gt "$max" ] && mtu=$max
-  echo 1 > /proc/sys/net/ipv6/conf/vpc0/disable_ipv6 2>/dev/null
+  addr6=$(val addr6)
+  if [ -n "$addr6" ]; then
+    echo 0 > /proc/sys/net/ipv6/conf/all/disable_ipv6 2>/dev/null
+    echo 0 > /proc/sys/net/ipv6/conf/vpc0/disable_ipv6 2>/dev/null
+  else
+    echo 1 > /proc/sys/net/ipv6/conf/vpc0/disable_ipv6 2>/dev/null
+  fi
   ip link set vpc0 address "$mac" mtu "$mtu" up
   ip addr replace "$addr/32" dev vpc0
   # Routes: one per subnet range; stale ones removed.
@@ -48,6 +58,25 @@ apply() {
   ip -4 route show dev vpc0 | while read -r cidr _; do
     grep -qx "$cidr" "$RUN/routes" || ip route del "$cidr" dev vpc0
   done
+  # IPv6: the address, its routes and its peers' neighbour entries.
+  sed -n 's/^route6 //p' "$RUN/conf" > "$RUN/routes6"
+  sed -n 's/^peer6 //p' "$RUN/conf" > "$RUN/peers6"
+  if [ -n "$addr6" ]; then
+    ip -6 addr replace "$addr6/128" dev vpc0 nodad
+    ip -6 addr show dev vpc0 scope global | sed -n 's/.* inet6 \([0-9a-f:]*\)\/.*/\1/p' | while read -r a; do
+      [ "$a" = "$addr6" ] || ip -6 addr del "$a/128" dev vpc0
+    done
+    while read -r cidr; do
+      ip -6 route replace "$cidr" dev vpc0 src "$addr6"
+    done < "$RUN/routes6"
+    ip -6 route show dev vpc0 | while read -r cidr _; do
+      case "$cidr" in fe80:*) continue ;; esac
+      grep -qx "$cidr" "$RUN/routes6" || ip -6 route del "$cidr" dev vpc0
+    done
+    while read -r ip pmac; do
+      ip -6 neigh replace "$ip" lladdr "$pmac" dev vpc0 nud permanent
+    done < "$RUN/peers6"
+  fi
   # Peers: a permanent neighbour and forwarding entry each.
   sed -n 's/^peer //p' "$RUN/conf" > "$RUN/peers"
   while read -r ip pmac pod; do
@@ -55,7 +84,7 @@ apply() {
     bridge fdb replace "$pmac" dev vpc0 dst "$pod" self permanent
   done < "$RUN/peers"
   ip neigh show dev vpc0 | while read -r ip _ pmac _; do
-    grep -q "^$ip " "$RUN/peers" || ip neigh del "$ip" dev vpc0
+    grep -q "^$ip " "$RUN/peers" "$RUN/peers6" || ip neigh del "$ip" dev vpc0
   done
   bridge fdb show dev vpc0 | while read -r pmac kw dst _; do
     [ "$kw" = dst ] || continue
@@ -70,7 +99,7 @@ apply() {
     echo "# cloudburrow-vpc end"
   } > "$RUN/hosts"
   cat "$RUN/hosts" > /etc/hosts
-  log "vpc0 $addr (VNI $vni), $(wc -l < "$RUN/peers") peers, $(grep -c ' comment ' "$RUN/ruleset") firewall entries"
+  log "vpc0 $addr ${addr6:+$addr6 }(VNI $vni), $(wc -l < "$RUN/peers") peers, $(grep -c ' comment ' "$RUN/ruleset") firewall entries"
 }
 
 last=""

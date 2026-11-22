@@ -23,8 +23,9 @@ import (
 //     PRIVATE_SERVICE_CONNECT, one address in its network;
 //   - an EXTERNAL address is chosen from documentation ranges
 //     (203.0.113.0/24 regional, 198.51.100.0/24 global), since no address
-//     here is reachable from the internet; a given external address (BYOIP)
-//     is not served.
+//     here is reachable from the internet; a given external address is a
+//     VM's ephemeral one promoted (natip.go), any other (BYOIP) is not
+//     served.
 
 var (
 	regionalPool = cidrs("203.0.113.0/24")[0]
@@ -89,7 +90,15 @@ func (s *Server) insertAddress(project, region string, b obj) (obj, error) {
 			return nil, invalid("Invalid value for field 'resource.purpose': '%s'. Purpose is set only for internal addresses.", purpose)
 		}
 		if addr != "" {
-			return nil, unimplemented("a given external address (bring your own IP) is not served: leave address unset to have one chosen")
+			// Promoting an instance's ephemeral external address (natip.go).
+			ok, err := s.promoteExternalLocked(project, region, addr, str(b, "networkTier"), o)
+			if err != nil {
+				return nil, err
+			}
+			if !ok {
+				return nil, unimplemented("a given external address (bring your own IP) is not served: leave address unset to have one chosen, or give a VM's ephemeral external address to promote it")
+			}
+			break
 		}
 		pool := regionalPool
 		if region == "" {
@@ -327,6 +336,9 @@ func (s *Server) setLabels(project, scope, rel string, b obj) (obj, error) {
 			"Labels fingerprint either invalid or resource labels have changed")
 	}
 	l, _ := b["labels"].(map[string]any)
+	if err := checkLabels("labels", l); err != nil {
+		return nil, err
+	}
 	if len(l) == 0 {
 		delete(o, "labels")
 	} else {

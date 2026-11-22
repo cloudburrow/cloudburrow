@@ -357,9 +357,16 @@ func (s *Server) insertMachineImage(c call, coll string) (obj, error) {
 	}
 	o := obj{"kind": "compute#machineImage", "id": newID(), "name": name, "selfLink": rel, "creationTimestamp": s.stamp(),
 		"status": "CREATING", "sourceInstance": src, "instanceProperties": s.propertiesOfLocked(vm),
-		"sourceInstanceProperties": s.propertiesOfLocked(vm), "guestFlush": b["guestFlush"] == true, "totalStorageBytes": "0"}
+		"sourceInstanceProperties": s.propertiesOfLocked(vm), "guestFlush": b["guestFlush"] == true, "totalStorageBytes": "0",
+		"labelFingerprint": labelFingerprint(nil)}
 	if d := str(b, "description"); d != "" {
 		o["description"] = d
+	}
+	if l, ok := b["labels"].(map[string]any); ok && len(l) > 0 {
+		if err := checkLabels("resource.labels", l); err != nil {
+			return nil, err
+		}
+		o["labels"], o["labelFingerprint"] = l, labelFingerprint(l)
 	}
 	locs := strsAny(b["storageLocations"])
 	if len(locs) == 0 {

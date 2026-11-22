@@ -325,6 +325,10 @@ func (s *Server) doLocked(c call) (obj, error) {
 			}
 		case "resourcePolicies":
 			return s.resourcePolicies(c, region)
+		case "disks":
+			return s.regionDisks(c, region)
+		case "diskTypes":
+			return s.regionDiskTypes(c, region)
 		case "instanceTemplates":
 			return s.instanceTemplates(c, "regions/"+region)
 		case "operations":

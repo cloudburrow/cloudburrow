@@ -130,8 +130,8 @@ func TestConsoleComputeParity2139(t *testing.T) {
 	if f := vpcField(df, "snapshotSchedule"); strings.Join(f.Options, ",") != noBackups+",us-central1/nightly" {
 		t.Fatalf("the disk form's schedules = %v", f.Options)
 	}
-	if f := vpcField(df, "location"); f.UnavailableOptions["Regional"] == "" {
-		t.Error("regional disks are offered")
+	if f := vpcField(df, "location"); len(f.UnavailableOptions) != 0 || vpcField(df, "replicaZone").VisibleWhen["location"] != "Regional" {
+		t.Errorf("Create a disk's location = %+v", f)
 	}
 	if _, err := disks.Create(ctx, project, map[string]string{"name": "data", "zone": "us-central1-a", "sizeGb": "20", "snapshotSchedule": "us-central1/nightly"}); err != nil {
 		t.Fatal(err)
@@ -175,7 +175,7 @@ func TestConsoleComputeParity2139(t *testing.T) {
 	images := computeImagesProvider{s}
 	il, _ := images.List(ctx, project)
 	img := vpcRow(il, "data-img")
-	if img == nil || img.Fields["Family"] != "data" || img.Fields["Created by"] != project || vpcActionIDs(img.Actions) != "deprecate,delete" {
+	if img == nil || img.Fields["Family"] != "data" || img.Fields["Created by"] != project || vpcActionIDs(img.Actions) != "labels,deprecate,delete" {
 		t.Fatalf("data-img = %+v", img)
 	}
 	if _, err := images.Create(ctx, project, map[string]string{"name": "from-snap", "source": "Snapshot", "snapshot": "arch", "locationName": "us-central1"}); err != nil {

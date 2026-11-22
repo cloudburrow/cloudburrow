@@ -87,7 +87,7 @@ The design (#1963, option A): **a VM is a systemd container** in the instance's 
 | Disk sizes | Checked as Google documents; kind's local-path storage neither enforces nor grows them |
 | Snapshot | A copy of the disk's files in a PersistentVolumeClaim of its own; a disk can be made from it |
 | Internal IP | Reserved in the instance's subnet as Google picks it, on the guest's `vpc0`, and routed to the other VMs of its network, with the network's firewall rules enforced: see [VM networking and firewall rules](#vm-networking-and-firewall-rules) |
-| External IP | `127.0.0.1`: the guest's port 22 is forwarded to a port on this machine, named in the instance's JSON as `cloudburrowSshAddress` |
+| External IP | An ephemeral `natIP` of the VM's own from `192.0.2.0/24` (TEST-NET-1, RFC 5737: never routed, so nothing that dials it leaves this machine), stable for the life of its access config, promotable to a static address; the guest's port 22 is forwarded to a port on this machine's `127.0.0.1`, named in the instance's JSON as `cloudburrowSshAddress` |
 | `startup-script` | Runs at every boot (`google-startup-scripts.service`), its output on the serial port as `google_metadata_script_runner` writes it |
 | `ssh-keys` | The guest agent's account manager (a script polling every 2 seconds) makes each user, its `authorized_keys` and passwordless sudo (`google-sudoers`); project keys apply unless `block-project-ssh-keys` |
 | Metadata server | The guest reads its instance and project attributes from the Compute port under a per-instance token (`CLOUDBURROW_GUEST_METADATA`); service account tokens come from the instance's metadata server, which `GCE_METADATA_HOST` names in the guest (in `/etc/environment` too). `metadata.google.internal` is not resolved in the guest |
@@ -140,13 +140,13 @@ gcloud compute instances delete vm-1 --zone us-central1-a
 
 ### SSH
 
-The guest's port 22 is forwarded to a loopback port, named in `instances.get` and the aggregated list as `cloudburrowSshAddress` (and in the console's Connect column). The instance's `natIP` is `127.0.0.1`.
+The guest's port 22 is forwarded to a loopback port, named in `instances.get` and the aggregated list as `cloudburrowSshAddress` (and in the console's Connect column). The instance's `natIP` is its own unrouted `192.0.2.0/24` address (see [External IP addresses](#external-ip-addresses)), not the forwarded port's host.
 
-**gcloud compute ssh always dials port 22 of the natIP**: it has no port flag of its own, and the port cannot be put in the instance's address. Pass the forwarded port to its `ssh` with `--ssh-flag`:
+**gcloud compute ssh always dials port 22 of the natIP**: it has no port flag of its own, and the port cannot be put in the instance's address. Pass the forwarded port, and `127.0.0.1` in place of the natIP, to its `ssh` with `--ssh-flag` (the console's Connect shows this command):
 
 ```sh
 PORT=$(curl -s http://127.0.0.1:COMPUTE_PORT/compute/v1/projects/PROJECT/zones/us-central1-a/instances/vm-1 | jq -r .cloudburrowSshAddress | cut -d: -f2)
-gcloud compute ssh vm-1 --zone us-central1-a --ssh-flag="-p $PORT" --strict-host-key-checking=no
+gcloud compute ssh vm-1 --zone us-central1-a --ssh-flag="-p $PORT" --ssh-flag="-o HostName=127.0.0.1" --strict-host-key-checking=no
 ```
 
 gcloud makes its key (`~/.ssh/google_compute_engine`, or `--ssh-key-file`) and adds it to the project's `ssh-keys` metadata (`projects.setCommonInstanceMetadata`); the guest applies it within seconds. `--strict-host-key-checking=no` is needed because the host key gcloud records is per instance ID, and guest attributes (`hostkeys/`) are not served. `TestGcloudComputeInstances` runs exactly this, with `HOME` and the key in throwaway directories. `--internal-ip`, `--tunnel-through-iap` and OS Login are not served.
@@ -156,6 +156,20 @@ Plain `ssh` works the same with any key in `ssh-keys`:
 ```sh
 ssh -p PORT -i KEY USER@127.0.0.1
 ```
+
+### External IP addresses
+
+As Google documents (vpc/docs/reserve-static-external-ip-address, compute/docs/ip-addresses/configure-static-external-ip-address, read 2026-11-22), #2140:
+
+| Google | Here |
+|---|---|
+| Ephemeral external IP | An access config without `natIP` gets a distinct address of its own from `192.0.2.0/24`, recorded on the access config; it is a record, not a route (nothing outside the VPC data plane reaches a VM; SSH uses `cloudburrowSshAddress`) |
+| Promote an ephemeral IP to static | `addresses.insert` in the VM's region with `address` set to its `natIP`: the address keeps the IP, is `IN_USE` with `users` the instance, of the access config's `networkTier`; another region, or a different tier, is refused |
+| Assign a static external IP | `accessConfigs[].natIP` of a `RESERVED` regional `EXTERNAL` address of the VM's region, at insert or with `instances.addAccessConfig` (after `deleteAccessConfig`); one `IN_USE` or of another region is refused; the tier is the address's |
+| Release | `addresses.delete` is refused while `IN_USE`; deleting the VM, or `deleteAccessConfig`, returns the address to `RESERVED` |
+| A given external address (BYOIP) | 501: no address here is the project's own |
+
+The console's IP addresses page lists each VM's ephemeral external address with Promote to static IP address, the static ones with In use by, and Reserve external static IP address's Attached to assigns the new address to a VM of its region.
 
 ### Terraform
 

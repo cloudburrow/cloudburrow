@@ -69,6 +69,7 @@ func macOf(ip string) string {
 type vmNet struct {
 	rel, name, zone, project string
 	network, ip, sa          string
+	ip6                      string // the interface's IPv6 address, if dual-stack (ipv6.go)
 	tags                     []string
 	running                  bool
 }
@@ -80,7 +81,12 @@ func vmNetOf(rel string, o obj) (vmNet, bool) {
 	}
 	nic, _ := nics[0].(map[string]any)
 	v := vmNet{rel: rel, name: str(o, "name"), zone: lastSeg(str(o, "zone")), project: strings.Split(rel, "/")[1],
-		network: str(nic, "network"), ip: str(nic, "networkIP"), running: str(o, "status") == stRunning}
+		network: str(nic, "network"), ip: str(nic, "networkIP"), running: str(o, "status") == stRunning, ip6: str(nic, "ipv6Address")}
+	for _, a := range listOf(nic["ipv6AccessConfigs"]) {
+		if ac, ok := a.(map[string]any); ok && v.ip6 == "" {
+			v.ip6 = str(ac, "externalIpv6")
+		}
+	}
 	if t, ok := o["tags"].(map[string]any); ok {
 		v.tags = strsAny(t["items"])
 	}
@@ -152,15 +158,20 @@ func (s *Server) vpcConfigLocked(inst obj, pod string) (string, bool) {
 	}
 	sort.Slice(members, func(i, j int) bool { return members[i].rel < members[j].rel })
 	sort.Slice(reachable, func(i, j int) bool { return reachable[i].rel < reachable[j].rel })
-	var subnets []string
+	var subnets, subnets6 []string
 	for k, o := range s.res {
 		if strings.Contains(k, "/subnetworks/") && reach[str(o, "network")] {
 			if c := str(o, "ipCidrRange"); c != "" {
 				subnets = append(subnets, c)
 			}
+			if c := str(o, "ipv6CidrRange"); c != "" && (str(o, "network") == self.network || s.dualStackPeeringLocked(self.network, str(o, "network"))) {
+				// A peer network's IPv6 ranges only over a dual-stack peering.
+				subnets6 = append(subnets6, c)
+			}
 		}
 	}
 	sort.Strings(subnets)
+	sort.Strings(subnets6)
 	mtu := 1460
 	if v, ok := nw["mtu"].(float64); ok && v > 0 {
 		mtu = int(v)
@@ -169,6 +180,14 @@ func (s *Server) vpcConfigLocked(inst obj, pod string) (string, bool) {
 	fmt.Fprintf(&b, "vni %d\nmtu %d\naddr %s\nmac %s\n", vniOf(s.segmentIDLocked(self.network, str(nw, "id"))), mtu, self.ip, macOf(self.ip))
 	for _, c := range subnets {
 		fmt.Fprintf(&b, "route %s\n", c)
+	}
+	if self.ip6 != "" {
+		// IPv6 on the same segment (ipv6.go): the guest's address, the
+		// network's dual-stack /64s on-link, and each peer's address.
+		fmt.Fprintf(&b, "addr6 %s\n", self.ip6)
+		for _, c := range subnets6 {
+			fmt.Fprintf(&b, "route6 %s\n", c)
+		}
 	}
 	var peerPods []string
 	now := s.opts.Now()
@@ -183,6 +202,9 @@ func (s *Server) vpcConfigLocked(inst obj, pod string) (string, bool) {
 		}
 		if p, ok := s.pods[m.rel]; ok && now.Sub(p.seen) < podFresh {
 			fmt.Fprintf(&b, "peer %s %s %s\n", m.ip, macOf(m.ip), p.ip)
+			if m.ip6 != "" && self.ip6 != "" {
+				fmt.Fprintf(&b, "peer6 %s %s\n", m.ip6, macOf(m.ip))
+			}
 			peerPods = append(peerPods, p.ip)
 		}
 	}
@@ -352,16 +374,28 @@ func firewallNFT(self vmNet, members []vmNet, rules []obj, peerPods []string) st
 		for _, m := range members {
 			if (len(tags) > 0 && anyIn(m.tags, tags)) || (len(sas) > 0 && m.sa != "" && hasStr(sas, m.sa)) {
 				src = append(src, m.ip)
+				if m.ip6 != "" {
+					src = append(src, m.ip6)
+				}
 			}
 		}
 		if len(src) == 0 {
 			continue // source tags no instance has: matches nothing
 		}
-		match := "ip saddr " + nftSet(src)
-		if dst := strsAny(r.o["destinationRanges"]); len(dst) > 0 {
-			match += " ip daddr " + nftSet(dst)
+		// Each family's ranges match that family's packets only (ipv6.go).
+		dst := strsAny(r.o["destinationRanges"])
+		for _, fam := range []bool{false, true} {
+			fsrc, fdst := byFamily(src, fam), byFamily(dst, fam)
+			if len(fsrc) == 0 || (len(dst) > 0 && len(fdst) == 0) {
+				continue
+			}
+			kw := map[bool]string{false: "ip", true: "ip6"}[fam]
+			match := kw + " saddr " + nftSet(fsrc)
+			if len(fdst) > 0 {
+				match += " " + kw + " daddr " + nftSet(fdst)
+			}
+			writeEntries(&b, r, match)
 		}
-		writeEntries(&b, r, match)
 	}
 	b.WriteString("    counter drop comment \"implied deny ingress\"\n  }\n")
 	b.WriteString("  chain egress {\n    type filter hook output priority filter; policy accept;\n")
@@ -369,14 +403,27 @@ func firewallNFT(self vmNet, members []vmNet, rules []obj, peerPods []string) st
 	b.WriteString("    oifname != \"vpc0\" ip daddr " + nftSet(append([]string{"169.254.169.254"}, ClusterCIDRs...)) + " accept\n")
 	for _, r := range eg {
 		dst := strsAny(r.o["destinationRanges"])
-		if len(dst) == 0 {
-			dst = []string{"0.0.0.0/0"}
+		src := strsAny(r.o["sourceRanges"])
+		for _, fam := range []bool{false, true} {
+			fdst, fsrc := byFamily(dst, fam), byFamily(src, fam)
+			kw := map[bool]string{false: "ip", true: "ip6"}[fam]
+			switch {
+			case len(dst) == 0 && fam && self.ip6 == "":
+				continue // no IPv6 here to send from
+			case len(dst) == 0:
+				fdst = []string{map[bool]string{false: "0.0.0.0/0", true: "::/0"}[fam]}
+			case len(fdst) == 0:
+				continue
+			}
+			if len(src) > 0 && len(fsrc) == 0 {
+				continue
+			}
+			match := kw + " daddr " + nftSet(fdst)
+			if len(fsrc) > 0 {
+				match += " " + kw + " saddr " + nftSet(fsrc)
+			}
+			writeEntries(&b, r, match)
 		}
-		match := "ip daddr " + nftSet(dst)
-		if src := strsAny(r.o["sourceRanges"]); len(src) > 0 {
-			match += " ip saddr " + nftSet(src)
-		}
-		writeEntries(&b, r, match)
 	}
 	b.WriteString("    accept comment \"implied allow egress\"\n  }\n}\n")
 	return b.String()

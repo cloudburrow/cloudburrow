@@ -100,7 +100,9 @@ func (s *Server) attachedDiskLocked(project, zone, instance string, e map[string
 		if d, ok = s.res[rel]; !ok {
 			return nil, nil, notFound(rel)
 		}
-		if lastSeg(str(d, "zone")) != zone {
+		if !diskInZone(d, zone) {
+			// A regional disk attaches in either of its replica zones
+			// (regiondisks.go).
 			return nil, nil, invalid("Invalid value for field '%s.source': '%s'. Disk must be in the same zone as the instance.", field, rel)
 		}
 		if str(d, "status") != "READY" {
@@ -189,24 +191,25 @@ func (s *Server) nicLocked(project, zone string, e map[string]any, i int) (obj, 
 	if st, ok := tmp["_static"]; ok {
 		nic["_static"] = st
 	}
+	if err := s.nicV6Locked(e, nic, s.res[str(tmp, "subnetwork")], field); err != nil {
+		return nil, err
+	}
 	if acs, _ := e["accessConfigs"].([]any); len(acs) > 0 {
-		var out []any
-		for _, a := range acs {
-			ac, _ := a.(map[string]any)
-			name := str(ac, "name")
-			if name == "" {
-				name = "External NAT"
-			}
-			tier := str(ac, "networkTier")
-			if tier == "" {
-				tier = "PREMIUM"
-			}
-			// The instance's external address is this machine's loopback:
-			// its SSH port is forwarded to a port on it (#1963).
-			out = append(out, obj{"kind": "compute#accessConfig", "type": "ONE_TO_ONE_NAT", "name": name,
-				"natIP": "127.0.0.1", "networkTier": tier})
+		if len(acs) > 1 {
+			return nil, invalid("Invalid value for field '%s.accessConfigs': ''. At most one access config currently supported.", field)
 		}
-		nic["accessConfigs"] = out
+		// An ephemeral external address of the instance's own, or a
+		// reserved static one (natip.go); SSH reaches the guest through the
+		// forwarded port cloudburrowSshAddress names, not this address.
+		ac, _ := acs[0].(map[string]any)
+		out, static, err := s.accessConfigLocked(project, region, ac, field+".accessConfigs[0]")
+		if err != nil {
+			return nil, err
+		}
+		nic["accessConfigs"] = []any{out}
+		if static != "" {
+			nic["_staticNat"] = static
+		}
 	}
 	return nic, nil
 }
@@ -336,6 +339,10 @@ func (s *Server) instances(c call, zone string) (obj, error) {
 		return s.attachDisk(c, scope, rel, o)
 	case post && verb == "detachDisk":
 		return s.detachDisk(c, scope, rel, o)
+	case post && verb == "addAccessConfig":
+		return s.addAccessConfig(c, scope, rel, o)
+	case post && verb == "deleteAccessConfig":
+		return s.deleteAccessConfig(c, scope, rel, o)
 	case post && (verb == "addResourcePolicies" || verb == "removeResourcePolicies"):
 		return s.attachPolicies(c.project, scope, rel, o, c.body, verb == "addResourcePolicies", "instanceSchedulePolicy")
 	case post && verb == "setScheduling":
@@ -357,7 +364,7 @@ func (s *Server) instances(c call, zone string) (obj, error) {
 var servedInstanceVerbs = map[string]bool{"serialPort": true, "start": true, "stop": true, "reset": true, "suspend": true,
 	"resume": true, "setMetadata": true, "setLabels": true, "setTags": true, "setDeletionProtection": true,
 	"setMachineType": true, "attachDisk": true, "detachDisk": true, "addResourcePolicies": true, "removeResourcePolicies": true,
-	"setScheduling": true}
+	"setScheduling": true, "addAccessConfig": true, "deleteAccessConfig": true}
 
 // checkScheduling merges a scheduling update into cur as Google validates
 // it (compute/docs/instances/create-use-spot, read 2026-11-22): a Spot VM
@@ -594,6 +601,9 @@ func (s *Server) insertInstance(c call, zone string) (obj, error) {
 			if a, ok := s.res[st]; ok {
 				a["status"], a["users"] = "IN_USE", []any{rel}
 			}
+		}
+		if st := str(e.(obj), "_staticNat"); st != "" {
+			s.takeAddressLocked(st, rel)
 		}
 	}
 	s.res[rel] = norm(o)

@@ -103,12 +103,19 @@ func (s *Server) createNetworkLocked(project string, b obj) (obj, error) {
 	default:
 		return nil, invalid("Invalid value for field 'resource.networkFirewallPolicyEnforcementOrder': '%s'.", order)
 	}
-	if v, _ := b["enableUlaInternalIpv6"].(bool); v {
-		return nil, unimplemented("IPv6 (enableUlaInternalIpv6) is not served")
-	}
 	o := norm(obj{"kind": "compute#network", "id": newID(), "creationTimestamp": s.stamp(), "name": name,
 		"description": str(b, "description"), "selfLink": rel, "autoCreateSubnetworks": auto,
 		"subnetworks": []any{}, "routingConfig": rc, "mtu": mtu, "networkFirewallPolicyEnforcementOrder": order})
+	if v, _ := b["enableUlaInternalIpv6"].(bool); v {
+		// A ULA internal IPv6 /48 of fd20::/20 (ipv6.go).
+		r, err := s.ulaRangeLocked(rel, str(b, "internalIpv6Range"))
+		if err != nil {
+			return nil, err
+		}
+		o["enableUlaInternalIpv6"], o["internalIpv6Range"] = true, r
+	} else if str(b, "internalIpv6Range") != "" {
+		return nil, invalid("Invalid value for field 'resource.internalIpv6Range': '%s'. Set enableUlaInternalIpv6 to give the network an internal IPv6 range.", str(b, "internalIpv6Range"))
+	}
 	if o["description"] == "" {
 		delete(o, "description")
 	}
@@ -169,6 +176,11 @@ func (s *Server) patchNetwork(project, name string, b obj) (obj, error) {
 			next[k] = f
 		case "networkFirewallPolicyEnforcementOrder":
 			next[k] = v
+		case "enableUlaInternalIpv6":
+			on, _ := v.(bool)
+			if err := s.patchUlaLocked(rel, o, next, on, str(b, "internalIpv6Range")); err != nil {
+				return nil, err
+			}
 		case "name", "selfLink", "id", "kind", "creationTimestamp", "autoCreateSubnetworks", "subnetworks", "description", "selfLinkWithId":
 			// Unchanged or output only: a patch of the whole resource
 			// carries them; a change is refused.
