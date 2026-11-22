@@ -296,6 +296,9 @@ func (s *Server) submitJob(ctx context.Context, req *dataprocpb.SubmitJobRequest
 	if err != nil {
 		return nil, nil, err
 	}
+	if err := checkDriverScheduling(j, c); err != nil {
+		return nil, nil, err
+	}
 	if comp := jobComponent(j, imageMMOf(c)); comp != "" && !hasComponent(c, comp) {
 		return nil, nil, apierror.FailedPrecondition("%s jobs need the %s optional component, which cluster %s does not enable", JobType(j), comp, c.ClusterName)
 	}
@@ -418,11 +421,16 @@ func (s *Server) runJob(ctx context.Context, name string) {
 		}
 		snap := clone(j)
 		cluster := clone(c)
+		driverNode := ""
+		if snap.GetDriverSchedulingConfig() != nil {
+			driverNode = s.placeDriverLocked(c)
+		}
 		s.setJobStateLocked(name, j, dataprocpb.JobStatus_SETUP_DONE, "")
 		s.save()
 		s.mu.Unlock()
 
 		job, err := s.clusterJob(ctx, snap, cluster, project, region)
+		job.DriverNode = driverNode
 		var res sparkproc.Result
 		if err == nil {
 			s.mu.Lock()

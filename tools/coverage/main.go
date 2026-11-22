@@ -353,11 +353,12 @@ var areas = []area{
 	// Dataform core compiles, BigQuery runs the invocations.
 	{Key: "dataform", Title: "Dataform (v1)", Own: true, Services: []string{"google.cloud.dataform.v1.Dataform"}},
 	// Serverless for Apache Spark (#2156): the Dataproc API's batch,
-	// session and session template controllers, CloudBurrow's own; its
-	// clusters, jobs and workflow templates are not served.
+	// session and session template controllers, and Dataproc on Compute
+	// Engine's (#2162) clusters, node groups, jobs, workflow templates and
+	// autoscaling policies, CloudBurrow's own.
 	{Key: "dataproc", Title: "Dataproc (v1): clusters, jobs, workflow templates, autoscaling policies and Serverless for Apache Spark", Own: true, Services: []string{
 		"google.cloud.dataproc.v1.ClusterController", "google.cloud.dataproc.v1.JobController", "google.cloud.dataproc.v1.WorkflowTemplateService",
-		"google.cloud.dataproc.v1.AutoscalingPolicyService",
+		"google.cloud.dataproc.v1.AutoscalingPolicyService", "google.cloud.dataproc.v1.NodeGroupController",
 		"google.cloud.dataproc.v1.BatchController", "google.cloud.dataproc.v1.SessionController", "google.cloud.dataproc.v1.SessionTemplateController"}},
 	// App Hub (#2110): CloudBurrow's own, gRPC and JSON on one port; its
 	// Locations, Operations and IAM mixins are other areas' rows.

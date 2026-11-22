@@ -34,6 +34,7 @@ func (s *Server) Register(g grpc.ServiceRegistrar) {
 	dataprocpb.RegisterJobControllerServer(g, s)
 	dataprocpb.RegisterAutoscalingPolicyServiceServer(g, s)
 	dataprocpb.RegisterWorkflowTemplateServiceServer(g, s)
+	dataprocpb.RegisterNodeGroupControllerServer(g, s)
 	longrunningpb.RegisterOperationsServer(g, &operations{s: s})
 	locations.Register(g, &locationsServer{})
 }

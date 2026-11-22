@@ -19604,7 +19604,7 @@
     "Key": "dataproc",
     "Title": "Dataproc (v1): clusters, jobs, workflow templates, autoscaling policies and Serverless for Apache Spark",
     "counts": {
-      "Verified": 41
+      "Verified": 44
     },
     "rows": [
       {
@@ -19676,7 +19676,8 @@
         "method": "google.cloud.dataproc.v1.ClusterController/CreateCluster",
         "status": "Verified",
         "tests": [
-          "test/compat/dataproc2162_test.go:169 TestDataprocClusters"
+          "test/compat/dataproc2162_test.go:169 TestDataprocClusters",
+          "test/compat/dataproc2162b_test.go:254 TestDataprocOptionalComponents"
         ]
       },
       {
@@ -19697,7 +19698,8 @@
         "method": "google.cloud.dataproc.v1.ClusterController/GetCluster",
         "status": "Verified",
         "tests": [
-          "test/compat/dataproc2162_test.go:169 TestDataprocClusters"
+          "test/compat/dataproc2162_test.go:169 TestDataprocClusters",
+          "test/compat/dataproc2162b_test.go:254 TestDataprocOptionalComponents"
         ]
       },
       {
@@ -19746,7 +19748,8 @@
         "method": "google.cloud.dataproc.v1.JobController/GetJob",
         "status": "Verified",
         "tests": [
-          "test/compat/dataproc2162_test.go:169 TestDataprocClusters"
+          "test/compat/dataproc2162_test.go:169 TestDataprocClusters",
+          "test/compat/dataproc2162b_test.go:74 TestDataprocHadoopHivePigJobs"
         ]
       },
       {
@@ -19760,7 +19763,8 @@
         "method": "google.cloud.dataproc.v1.JobController/SubmitJob",
         "status": "Verified",
         "tests": [
-          "test/compat/dataproc2162_test.go:169 TestDataprocClusters"
+          "test/compat/dataproc2162_test.go:169 TestDataprocClusters",
+          "test/compat/dataproc2162b_test.go:74 TestDataprocHadoopHivePigJobs"
         ]
       },
       {
@@ -19775,6 +19779,27 @@
         "status": "Verified",
         "tests": [
           "test/compat/dataproc2162_test.go:169 TestDataprocClusters"
+        ]
+      },
+      {
+        "method": "google.cloud.dataproc.v1.NodeGroupController/CreateNodeGroup",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataproc2162b_test.go:367 TestDataprocDriverNodeGroups"
+        ]
+      },
+      {
+        "method": "google.cloud.dataproc.v1.NodeGroupController/GetNodeGroup",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataproc2162b_test.go:367 TestDataprocDriverNodeGroups"
+        ]
+      },
+      {
+        "method": "google.cloud.dataproc.v1.NodeGroupController/ResizeNodeGroup",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataproc2162b_test.go:367 TestDataprocDriverNodeGroups"
         ]
       },
       {

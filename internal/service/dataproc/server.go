@@ -122,6 +122,7 @@ type Server struct {
 	dataprocpb.UnimplementedJobControllerServer
 	dataprocpb.UnimplementedAutoscalingPolicyServiceServer
 	dataprocpb.UnimplementedWorkflowTemplateServiceServer
+	dataprocpb.UnimplementedNodeGroupControllerServer
 
 	opts Options
 	now  func() time.Time
@@ -145,9 +146,11 @@ type Server struct {
 	history   *historyServer
 	apps      map[string]string // workload ID to Spark application ID (resolveApp)
 	wfCancel  map[string]bool   // workflow operations cancelled
-	stop      chan struct{}     // closed by Close
-	closed    bool
-	wg        sync.WaitGroup
+	// driverNext is each cluster's next driver node (placeDriverLocked).
+	driverNext map[string]int
+	stop       chan struct{} // closed by Close
+	closed     bool
+	wg         sync.WaitGroup
 
 	bridgeOnce sync.Once
 	bridgeLn   *bridgeListener

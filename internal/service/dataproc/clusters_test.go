@@ -34,6 +34,7 @@ type fakeNodes struct {
 	jobs    []sparkproc.Job
 	submit  func(sparkproc.Job) sparkproc.Result
 	dir     string
+	groups  map[string][]string
 }
 
 func (f *fakeClusterEngine) StartCluster(_ context.Context, spec sparkproc.ClusterSpec) (Nodes, error) {
@@ -68,6 +69,15 @@ func (n *fakeNodes) Web(context.Context) map[string]string {
 	return map[string]string{}
 }
 func (n *fakeNodes) HistoryDir() string { return n.dir }
+func (n *fakeNodes) SetNodeGroup(_ context.Context, id string, instances []string) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.groups == nil {
+		n.groups = map[string][]string{}
+	}
+	n.groups[id] = instances
+	return nil
+}
 func (n *fakeNodes) Diagnose(_ context.Context, summary string) ([]byte, error) {
 	return []byte(summary), nil
 }

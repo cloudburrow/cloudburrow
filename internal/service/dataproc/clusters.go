@@ -44,6 +44,8 @@ type Nodes interface {
 	Web(ctx context.Context) map[string]string
 	HistoryDir() string
 	Diagnose(ctx context.Context, summary string) ([]byte, error)
+	// SetNodeGroup makes a node group's nodes the instances named.
+	SetNodeGroup(ctx context.Context, id string, instances []string) error
 }
 
 // ClusterEngine starts clusters: an Engine that runs them.
@@ -206,6 +208,9 @@ func (s *Server) checkCluster(project, region string, c *dataprocpb.Cluster) err
 	}
 	cfg.SoftwareConfig.ImageVersion = full
 	if err := checkComponents(mm, cfg.SoftwareConfig.GetOptionalComponents()); err != nil {
+		return err
+	}
+	if err := checkAuxiliaryGroups(project, region, c); err != nil {
 		return err
 	}
 	if cfg.MasterConfig == nil {
@@ -571,6 +576,18 @@ func (s *Server) startCluster(name, opName string, restart bool) {
 		s.finishOpLocked(opName, nil, status.Error(codes.Unknown, "Cluster "+c.ClusterName+" failed to start: "+msg))
 		s.save()
 		return
+	}
+	for _, g := range c.GetConfig().GetAuxiliaryNodeGroups() {
+		gctx, gcancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		err := nodes.SetNodeGroup(gctx, g.GetNodeGroupId(), g.GetNodeGroup().GetNodeGroupConfig().GetInstanceNames())
+		gcancel()
+		if err != nil {
+			go nodes.Delete()
+			s.setClusterStateLocked(c, dataprocpb.ClusterStatus_ERROR, err.Error())
+			s.finishOpLocked(opName, nil, status.Error(codes.Unknown, "Cluster "+c.ClusterName+" failed to start: "+err.Error()))
+			s.save()
+			return
+		}
 	}
 	s.nodes[name] = nodes
 	s.fillEndpointsLocked(c)
@@ -972,6 +989,9 @@ func (s *Server) stopStart(project, region, clusterName, uuid, requestID string,
 		}
 	}
 	st := c.GetStatus().GetState()
+	if stop && len(c.GetConfig().GetAuxiliaryNodeGroups()) > 0 {
+		return nil, apierror.FailedPrecondition("Cluster %s has node groups: clusters with node groups cannot be stopped or restarted", c.ClusterName)
+	}
 	if stop && st != dataprocpb.ClusterStatus_RUNNING {
 		return nil, apierror.FailedPrecondition("Cluster %s is in state %s: only a RUNNING cluster can be stopped", c.ClusterName, st)
 	}

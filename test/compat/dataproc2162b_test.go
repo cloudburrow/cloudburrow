@@ -80,7 +80,7 @@ func TestDataprocHadoopHivePigJobs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer cc.Close()
+	t.Cleanup(func() { _ = cc.Close() })
 	jc, err := dataproc.NewJobControllerClient(ctx, grpcOpts...)
 	if err != nil {
 		t.Fatal(err)
@@ -260,7 +260,7 @@ func TestDataprocOptionalComponents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer cc.Close()
+	t.Cleanup(func() { _ = cc.Close() })
 	jc, err := dataproc.NewJobControllerClient(ctx, grpcOpts...)
 	if err != nil {
 		t.Fatal(err)
@@ -283,7 +283,15 @@ func TestDataprocOptionalComponents(t *testing.T) {
 				OptionalComponents: []dataprocpb.Component{dataprocpb.Component_TRINO, dataprocpb.Component_FLINK, dataprocpb.Component_JUPYTER,
 					dataprocpb.Component_ZOOKEEPER, dataprocpb.Component_SOLR, dataprocpb.Component_HIVE_WEBHCAT}},
 			EndpointConfig: &dataprocpb.EndpointConfig{EnableHttpPortAccess: true}}})
-	ports := c.GetConfig().GetEndpointConfig().GetHttpPorts()
+	// GetCluster's http_ports are URLs at the caller's host.
+	gc, err := cc.GetCluster(ctx, &dataprocpb.GetClusterRequest{ProjectId: project, Region: region, ClusterName: name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.GetConfig().GetEndpointConfig().GetHttpPorts()) != len(gc.GetConfig().GetEndpointConfig().GetHttpPorts()) {
+		t.Errorf("http_ports: %v, then %v", c.GetConfig().GetEndpointConfig().GetHttpPorts(), gc.GetConfig().GetEndpointConfig().GetHttpPorts())
+	}
+	ports := gc.GetConfig().GetEndpointConfig().GetHttpPorts()
 	for key, want := range map[string]string{"Trino": "Trino", "Flink": "Apache Flink", "JupyterLab": "JupyterLab", "Solr": "Solr", "WebHCat": `"ok"`} {
 		u := ports[key]
 		if u == "" {
@@ -333,5 +341,123 @@ func TestDataprocOptionalComponents(t *testing.T) {
 	}
 	if got, err := jupyterRun(ctx, base, "python3", "print(6 * 7)"); err != nil || !strings.Contains(got, "42") {
 		t.Errorf("the Python 3 kernel: %q %v", got, err)
+	}
+}
+
+const dataprocHostScript = `
+import socket
+from pyspark.sql import SparkSession
+spark = SparkSession.builder.getOrCreate()
+n = spark.sparkContext.parallelize(range(10), 2).sum()
+print("driver-host", socket.gethostname(), "sum", n)
+spark.stop()
+`
+
+// TestDataprocDriverNodeGroups (#2162): a cluster with a driver node
+// group, as the driver node groups page documents it
+// (https://docs.cloud.google.com/dataproc/docs/guides/node-groups/dataproc-driver-node-groups):
+// its nodes are named CLUSTER-np-XXXX; a job without
+// driver_scheduling_config, or with a zero value in it, is refused with
+// the page's errors; a job with it runs its driver on the group's node;
+// the group is read and resized with projects.regions.clusters.nodeGroups;
+// and the cluster cannot be stopped. Its one secondary worker is
+// PREEMPTIBLE, the default.
+//
+// covers: google.cloud.dataproc.v1.NodeGroupController/GetNodeGroup, google.cloud.dataproc.v1.NodeGroupController/ResizeNodeGroup, google.cloud.dataproc.v1.NodeGroupController/CreateNodeGroup
+func TestDataprocDriverNodeGroups(t *testing.T) {
+	h, addr, project := dataprocEnv(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+	grpcOpts := append(dataprocGRPC(), option.WithEndpoint(addr))
+	cc, err := dataproc.NewClusterControllerClient(ctx, grpcOpts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cc.Close() })
+	jc, err := dataproc.NewJobControllerClient(ctx, grpcOpts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer jc.Close()
+	ng, err := dataproc.NewNodeGroupControllerClient(ctx, grpcOpts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ng.Close()
+	sc := storageClient(t, h)
+	bh := bucket(t, h, sc)
+	const region = "us-central1"
+	suffix := dataprocSuffix(h, 30)
+	name := "ng-" + suffix
+
+	bad := &dataprocpb.Cluster{ProjectId: project, ClusterName: name + "x", Config: &dataprocpb.ClusterConfig{
+		AuxiliaryNodeGroups: []*dataprocpb.AuxiliaryNodeGroup{{NodeGroupId: "-bad", NodeGroup: &dataprocpb.NodeGroup{Roles: []dataprocpb.NodeGroup_Role{dataprocpb.NodeGroup_DRIVER}}}}}}
+	if _, err := cc.CreateCluster(ctx, &dataprocpb.CreateClusterRequest{ProjectId: project, Region: region, Cluster: bad}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("a node group ID beginning with a hyphen: %v", err)
+	}
+
+	c := dataprocClusterUp(t, ctx, h, cc, project, region, &dataprocpb.Cluster{ProjectId: project, ClusterName: name,
+		Config: &dataprocpb.ClusterConfig{SoftwareConfig: &dataprocpb.SoftwareConfig{ImageVersion: "2.2"},
+			WorkerConfig:          &dataprocpb.InstanceGroupConfig{NumInstances: 2},
+			SecondaryWorkerConfig: &dataprocpb.InstanceGroupConfig{NumInstances: 1},
+			AuxiliaryNodeGroups: []*dataprocpb.AuxiliaryNodeGroup{{NodeGroupId: "drivers", NodeGroup: &dataprocpb.NodeGroup{
+				Roles: []dataprocpb.NodeGroup_Role{dataprocpb.NodeGroup_DRIVER}, NodeGroupConfig: &dataprocpb.InstanceGroupConfig{NumInstances: 1}}}}}})
+	// Secondary workers are preemptible unless said otherwise.
+	if sw := c.GetConfig().GetSecondaryWorkerConfig(); sw.GetPreemptibility() != dataprocpb.InstanceGroupConfig_PREEMPTIBLE || !sw.GetIsPreemptible() ||
+		len(sw.GetInstanceNames()) != 1 || !strings.HasPrefix(sw.GetInstanceNames()[0], name+"-sw-") {
+		t.Errorf("the secondary workers: %v", sw)
+	}
+	groups := c.GetConfig().GetAuxiliaryNodeGroups()
+	if len(groups) != 1 {
+		t.Fatalf("auxiliary node groups: %v", groups)
+	}
+	insts := groups[0].GetNodeGroup().GetNodeGroupConfig().GetInstanceNames()
+	if len(insts) != 1 || !strings.HasPrefix(insts[0], name+"-np-") || len(insts[0]) != len(name)+8 {
+		t.Errorf("the node group's instances: %v", insts)
+	}
+	groupName := "projects/" + project + "/regions/" + region + "/clusters/" + name + "/nodeGroups/drivers"
+	if g, err := ng.GetNodeGroup(ctx, &dataprocpb.GetNodeGroupRequest{Name: groupName}); err != nil || g.GetName() != groupName ||
+		len(g.GetRoles()) != 1 || g.GetRoles()[0] != dataprocpb.NodeGroup_DRIVER {
+		t.Errorf("GetNodeGroup: %v %v", g, err)
+	}
+
+	script := dataprocPut(t, ctx, bh, "host.py", dataprocHostScript)
+	place := &dataprocpb.JobPlacement{ClusterName: name}
+	py := &dataprocpb.Job_PysparkJob{PysparkJob: &dataprocpb.PySparkJob{MainPythonFileUri: script}}
+	_, err = jc.SubmitJob(ctx, &dataprocpb.SubmitJobRequest{ProjectId: project, Region: region, Job: &dataprocpb.Job{Placement: place, TypeJob: py}})
+	want := "Cluster " + name + " requires driver scheduling config to run PYSPARK job because it contains a node pool with role DRIVER."
+	if status.Code(err) != codes.InvalidArgument || status.Convert(err).Message() != want {
+		t.Errorf("a job without driver_scheduling_config: %v", err)
+	}
+	_, err = jc.SubmitJob(ctx, &dataprocpb.SubmitJobRequest{ProjectId: project, Region: region, Job: &dataprocpb.Job{Placement: place, TypeJob: py,
+		DriverSchedulingConfig: &dataprocpb.DriverSchedulingConfig{MemoryMb: 1024}}})
+	if status.Code(err) != codes.InvalidArgument || status.Convert(err).Message() != "Positive values are required for all driver scheduling config values." {
+		t.Errorf("driver_scheduling_config with zero vcores: %v", err)
+	}
+	j := dataprocRunJob(t, ctx, jc, project, region, &dataprocpb.Job{Placement: place, TypeJob: py,
+		DriverSchedulingConfig: &dataprocpb.DriverSchedulingConfig{MemoryMb: 1024, Vcores: 1}})
+	out := dataprocGSText(t, ctx, sc, j.GetDriverOutputResourceUri())
+	if j.GetStatus().GetState() != dataprocpb.JobStatus_DONE || !strings.Contains(out, "driver-host "+insts[0]+" sum 45") {
+		t.Errorf("a job on the driver node group: %v\n%s", j.GetStatus(), out)
+	}
+
+	op, err := ng.ResizeNodeGroup(ctx, &dataprocpb.ResizeNodeGroupRequest{Name: groupName, Size: 2})
+	if err != nil {
+		t.Fatalf("ResizeNodeGroup: %v", err)
+	}
+	if md, err := op.Metadata(); err != nil || md.GetNodeGroupId() != "drivers" || md.GetClusterUuid() != c.ClusterUuid ||
+		md.GetOperationType() != dataprocpb.NodeGroupOperationMetadata_RESIZE {
+		t.Errorf("NodeGroupOperationMetadata: %v %v", md, err)
+	}
+	g, err := op.Wait(ctx)
+	if err != nil || len(g.GetNodeGroupConfig().GetInstanceNames()) != 2 || g.GetNodeGroupConfig().GetInstanceNames()[0] != insts[0] {
+		t.Errorf("the resized node group: %v %v", g, err)
+	}
+	if _, err := ng.CreateNodeGroup(ctx, &dataprocpb.CreateNodeGroupRequest{Parent: "projects/" + project + "/regions/" + region + "/clusters/" + name,
+		NodeGroupId: "drivers", NodeGroup: &dataprocpb.NodeGroup{Roles: []dataprocpb.NodeGroup_Role{dataprocpb.NodeGroup_DRIVER}}}); status.Code(err) != codes.AlreadyExists {
+		t.Errorf("a second node group drivers: %v", err)
+	}
+	if _, err := cc.StopCluster(ctx, &dataprocpb.StopClusterRequest{ProjectId: project, Region: region, ClusterName: name}); status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("stopping a cluster with node groups: %v", err)
 	}
 }

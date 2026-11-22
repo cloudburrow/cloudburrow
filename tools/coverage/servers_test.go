@@ -129,6 +129,7 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	dataprocpb.RegisterJobControllerServer(srv, dp)
 	dataprocpb.RegisterAutoscalingPolicyServiceServer(srv, dp)
 	dataprocpb.RegisterWorkflowTemplateServiceServer(srv, dp)
+	dataprocpb.RegisterNodeGroupControllerServer(srv, dp)
 	// App Hub alone (#2110): its mixins are other services' rows.
 	ah, err := apphub.NewServer("", apphub.Options{})
 	if err != nil {

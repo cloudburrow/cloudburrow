@@ -38,8 +38,9 @@ func (n *consoleNodes) Delete()                     {}
 func (n *consoleNodes) Web(context.Context) map[string]string {
 	return map[string]string{"history": "127.0.0.1:1"}
 }
-func (n *consoleNodes) HistoryDir() string                               { return "" }
-func (n *consoleNodes) Diagnose(context.Context, string) ([]byte, error) { return []byte("x"), nil }
+func (n *consoleNodes) HistoryDir() string                                   { return "" }
+func (n *consoleNodes) SetNodeGroup(context.Context, string, []string) error { return nil }
+func (n *consoleNodes) Diagnose(context.Context, string) ([]byte, error)     { return []byte("x"), nil }
 func (n *consoleNodes) Submit(context.Context, sparkproc.Job) (sparkproc.Result, error) {
 	return sparkproc.Result{DriverOutput: "pi\n", AppID: "app-1"}, nil
 }
@@ -141,8 +142,11 @@ func TestConsoleDataprocClusters(t *testing.T) {
 	if !found {
 		t.Errorf("no Spark UI link: %+v", jd.Sections[1].Groups[0].Properties)
 	}
-	if _, err := jobs.Create(ctx, project, map[string]string{"region": "us-central1", "cluster": "c1", "jobType": "HIVE"}); err == nil || !strings.Contains(err.Error(), "Hive") {
-		t.Errorf("Hive job: %v", err)
+	if _, err := jobs.Create(ctx, project, map[string]string{"region": "us-central1", "cluster": "c1", "jobType": "HIVE"}); err == nil || !strings.Contains(err.Error(), "query_list") {
+		t.Errorf("a Hive job without queries: %v", err)
+	}
+	if _, err := jobs.Create(ctx, project, map[string]string{"region": "us-central1", "cluster": "c1", "jobType": "TRINO", "queries": "SELECT 1;"}); err == nil || !strings.Contains(err.Error(), "TRINO") {
+		t.Errorf("a Trino job on a cluster without the Trino component: %v", err)
 	}
 	if err := jobs.ActAt(ctx, project, []string{job}, "delete", nil); err != nil {
 		t.Errorf("Delete job: %v", err)

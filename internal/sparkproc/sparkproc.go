@@ -120,6 +120,9 @@ type Job struct {
 	OutputFormat      string   `json:"outputFormat,omitempty"`
 	ClientTags        []string `json:"clientTags,omitempty"`
 	SavepointURI      string   `json:"savepointUri,omitempty"`
+	// DriverNode is the driver node group instance a cluster job's
+	// driver runs on ("": a container of its own).
+	DriverNode string `json:"driverNode,omitempty"`
 }
 
 // The kinds of Dataproc workload (Job.Kind).

@@ -182,3 +182,73 @@ func TestDataprocClustersThroughThePage(t *testing.T) {
 	p.waitFor(`document.querySelector("#view").textContent.includes("pol-browser")`)
 	p.dpAct("Delete")
 }
+
+// TestDataprocHiveOnDriverNodesThroughThePage (#2162), in the spark
+// shard: Create cluster with a driver node group of one node and the
+// ZooKeeper component; its Configuration lists the node group
+// (CLUSTER-np-XXXX) and the component; Submit a job of type Hive, with its
+// queries and the driver memory and vCores a cluster with a driver node
+// group needs, runs on the cluster's HiveServer2, its Output Beeline's
+// table; Resize node group makes it two nodes, and Stop is not offered;
+// and the screens meet WCAG 2.1 AA.
+func TestDataprocHiveOnDriverNodesThroughThePage(t *testing.T) {
+	needService(t, "dataproc-clusters")
+	if os.Getenv("CLOUDBURROW_TEST_SPARK") == "" {
+		t.Skip("CLOUDBURROW_TEST_SPARK is not set: a cluster runs in the pinned apache/spark images")
+	}
+	project := uniqueProject(t)
+	p := openWithin(t, 30*time.Minute)
+	p.navigate("/dataproc/clusters?project=" + project)
+	p.clickText("#view button", "Create")
+	p.waitFor(`["f-clusterName", "f-driverNodes", "f-comp_ZOOKEEPER", "f-comp_TRINO", "f-comp_JUPYTER"].every((id) => document.getElementById(id) !== null)`)
+	p.submitForm(map[string]string{"clusterName": "browser-ng", "imageVersion": "2.2-debian12", "workers": "2", "driverNodes": "1",
+		"comp_ZOOKEEPER": "true"}, "clusterName")
+	cluster := "projects/" + project + "/regions/us-central1/clusters/browser-ng"
+	p.waitFor(fmt.Sprintf(`[...document.querySelectorAll("#view tbody tr, #view h1")].some((r) => r.textContent.includes(%q))`, "browser-ng"))
+	t.Cleanup(func() {
+		consoleDo(t, "POST", "/api/act/dataproc-clusters?project="+project+"&name="+cluster+"&action=delete", "{}")
+	})
+	dpWait(t, "dataproc-clusters", project, cluster, `"Running"`, 10*time.Minute)
+	p.navigate("/dataproc/clusters?project=" + project)
+	p.waitFor(listedRow("", "browser-ng"))
+	p.follow("browser-ng")
+	var clusterPath string
+	p.eval(`location.pathname + location.search`, &clusterPath)
+	p.clickText(`#view [role="tab"]`, "Configuration")
+	p.waitFor(`document.querySelector("#view").textContent.includes("ZOOKEEPER") && /\(DRIVER\): browser-ng-np-[a-z0-9]{4}/.test(document.querySelector("#view").textContent)`)
+
+	p.clickText(p.findAction("Submit job"), "Submit job")
+	p.waitFor(`location.pathname === "/dataproc/jobs/create" && document.getElementById("f-cluster").value === "browser-ng"`)
+	p.eval(`(() => { const s = document.getElementById("f-jobType"); s.value = "HIVE";
+		s.dispatchEvent(new Event("input", { bubbles: true })); s.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`, nil)
+	p.waitFor(`!document.getElementById("f-queries").closest("[hidden]") && document.getElementById("f-mainPythonFile").closest("[hidden]") !== null`)
+	p.submitForm(map[string]string{"jobId": "hive-browser", "queries": "SELECT 6 * 7 AS answer;", "driverMemory": "1024", "driverVcores": "1"}, "jobId")
+	job := "projects/" + project + "/regions/us-central1/jobs/hive-browser"
+	dpWait(t, "dataproc-jobs", project, job, `"Done"`, 10*time.Minute)
+	p.navigate("/dataproc/jobs?project=" + project)
+	p.waitFor(listedRow("", "hive-browser"))
+	p.follow("hive-browser")
+	var jobPath string
+	p.eval(`location.pathname + location.search`, &jobPath)
+	p.waitFor(`document.querySelector("#view").textContent.includes("answer") && document.querySelector("#view").textContent.includes("42")`)
+
+	// Resize node group, from the cluster's page.
+	p.navigate(clusterPath)
+	p.waitFor(`document.querySelector("#view").textContent.includes("browser-ng")`)
+	p.pageAction("Resize node group", map[string]string{"size": "2"}, "")
+	dpWait(t, "dataproc-clusters", project, cluster, "DRIVER): browser-ng-np-", time.Minute)
+	got := dpWait(t, "dataproc-clusters", project, cluster, ", browser-ng-np-", 3*time.Minute)
+	if !strings.Contains(got, "Clusters with node groups cannot be stopped.") {
+		t.Errorf("Stop is offered on a cluster with node groups: %s", got)
+	}
+
+	auditScreens(t, []a11yPage{
+		screen("create cluster", "/dataproc/clusters/create", project),
+		{"cluster with a driver node group", clusterPath, settled, ""},
+		screen("submit a job", "/dataproc/jobs/create", project),
+		{"Hive job", jobPath, settled, ""},
+	})
+	p.navigate(clusterPath)
+	p.waitFor(`document.querySelector("#view").textContent.includes("browser-ng")`)
+	p.dpAct("Delete")
+}

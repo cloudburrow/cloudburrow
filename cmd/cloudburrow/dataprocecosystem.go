@@ -21,7 +21,7 @@ import (
 )
 
 // The Dataproc clusters' other engines (#2162), pinned in
-// dependencies.json (components.dataproc.*): each project's official
+// dependencies.json (components.bigqueryml.dataproc*): each project's official
 // image by its multi-arch index digest, Google's Cloud Storage connector
 // for Hadoop from Maven Central, and the Apache Pig release from the
 // Apache distribution site, each checked against its SHA-256.

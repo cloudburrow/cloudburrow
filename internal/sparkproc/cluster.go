@@ -91,6 +91,11 @@ type Cluster struct {
 
 	hiveMu sync.Mutex
 	hiveUp bool
+
+	// groups are the driver node groups' instances by group ID, and
+	// groupNodes each instance's container.
+	groups     map[string][]string
+	groupNodes map[string]string
 }
 
 // nodeAlias is a node's host name on the cluster's network.
@@ -359,7 +364,7 @@ func (c *Cluster) Scale(ctx context.Context, n int) error {
 
 // nodes are every container of the cluster, the relay first.
 func (c *Cluster) nodesLocked() []string {
-	return append(append([]string{c.relay, c.master}, c.workers...), c.extras...)
+	return append(append(append([]string{c.relay, c.master}, c.workers...), c.extras...), c.groupContainersLocked()...)
 }
 
 // Stop stops the cluster's containers, keeping them.
@@ -531,8 +536,9 @@ func (c *Cluster) Submit(ctx context.Context, job Job) (Result, error) {
 		suffix = suffix[len(suffix)-40:]
 	}
 	driver := c.master[:len(c.master)-2] + "-d-" + strings.Trim(suffix, "-") + fmt.Sprintf("-%d", time.Now().UnixNano()%1e6)
+	netArgs, driverHost := c.driverNodeNetwork(job, driver)
 	conf := map[string]string{
-		"spark.driver.host":                driver,
+		"spark.driver.host":                driverHost,
 		"spark.submit.deployMode":          "client",
 		"spark.eventLog.enabled":           "true",
 		"spark.eventLog.dir":               "file:/cb-history",
@@ -547,10 +553,10 @@ func (c *Cluster) Submit(ctx context.Context, job Job) (Result, error) {
 	}
 	submit := submitArgs(job, args, token, conf)
 	submit[1] = "spark://" + c.nodeAlias(-1) + ":7077"
-	run := []string{"run", "--name", driver, "--hostname", driver, "--label", c.label, "--label", "cloudburrow.dataproc.cluster=" + c.spec.ID,
-		"--network", c.network, "-v", dir + ":/cb", "-v", c.jar + ":/cb-connector/spark-bigquery.jar:ro", "-v", c.HistoryDir() + ":/cb-history",
+	run := append(append([]string{"run", "--name", driver, "--label", c.label, "--label", "cloudburrow.dataproc.cluster=" + c.spec.ID}, netArgs...),
+		"-v", dir+":/cb", "-v", c.jar+":/cb-connector/spark-bigquery.jar:ro", "-v", c.HistoryDir()+":/cb-history",
 		"-e", "CB_SPARK_OUT=/cb/out/params.json", "-e", "CB_SPARK_TYPES=/cb/types.json", "-e", "PYTHONPATH=/cb/lib", "-e", "PYSPARK_PYTHON=python3",
-		"--entrypoint", "/bin/bash", c.rt.Image, "/cb/run.sh"}
+		"--entrypoint", "/bin/bash", c.rt.Image, "/cb/run.sh")
 	run = append(run, submit...)
 	defer func() { _, _ = d.docker(context.Background(), "rm", "-f", "-v", driver) }()
 	d.logf("spark: running %s (%s) on cluster %s", job.Procedure, job.SparkJobID, c.spec.Name)

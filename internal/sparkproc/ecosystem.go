@@ -200,7 +200,15 @@ func (c *Cluster) writeConf(dir string, job map[string]string) error {
 			return err
 		}
 	}
-	pig := c.confProps("pig")
+	// Pig in local mode builds its Hadoop configuration from its
+	// properties, not HADOOP_CONF_DIR's, so they carry core-site's and
+	// mapred-site's (the Cloud Storage connector's among them).
+	pig := map[string]string{}
+	for _, m := range []map[string]string{core, mapred, c.confProps("pig")} {
+		for k, v := range m {
+			pig[k] = v
+		}
+	}
 	var pb strings.Builder
 	for _, k := range sortedKeys(pig) {
 		fmt.Fprintf(&pb, "%s=%s\n", k, pig[k])
@@ -557,8 +565,9 @@ func (c *Cluster) submitEco(ctx context.Context, job Job) (Result, error) {
 		suffix = suffix[len(suffix)-40:]
 	}
 	driver := c.master[:len(c.master)-2] + "-d-" + strings.Trim(suffix, "-") + fmt.Sprintf("-%d", time.Now().UnixNano()%1e6)
-	run := []string{"run", "--name", driver, "--hostname", driver, "--label", c.label, "--label", "cloudburrow.dataproc.cluster=" + c.spec.ID,
-		"--network", c.network, "-v", dir + ":" + mount + ":ro", "--user", "0:0"}
+	netArgs, _ := c.driverNodeNetwork(job, driver)
+	run := append(append([]string{"run", "--name", driver, "--label", c.label, "--label", "cloudburrow.dataproc.cluster=" + c.spec.ID}, netArgs...),
+		"-v", dir+":"+mount+":ro", "--user", "0:0")
 	vars := sortedKeys(job.QueryVariables)
 	props := sortedKeys(job.Properties)
 	switch job.Kind {

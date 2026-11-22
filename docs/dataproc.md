@@ -9,7 +9,7 @@ CloudBurrow serves the Dataproc API (`dataproc.googleapis.com` v1):
   templates and autoscaling policies;
 - the **Spark UI** of every workload, in Apache Spark's History Server.
 
-Node groups and Dataproc on GKE (virtual clusters) are not served.
+Dataproc on GKE (virtual clusters) is not served.
 
 It is opt-in, in the CLI process, beside BigQuery:
 
@@ -194,8 +194,28 @@ image's Ubuntu.
   - `endpoint_config.enable_http_port_access` (the component gateway) gives
     `http_ports["Spark History Server"]`: the cluster's History Server, at
     `/component-gateway/UUID/sparkhistory/` on the API's port.
-  - Optional components, Dataproc on GKE (`virtual_cluster_config`) and
-    node groups are `UNIMPLEMENTED`: no pinned image runs them.
+  - Optional components (#2162) run as containers of their projects'
+    official images in the master's network, so they answer at
+    `CLUSTER-m:PORT`: JUPYTER (JupyterLab built on the cluster's Spark
+    image, with PySpark and Python 3 kernels), TRINO (`trinodb/trino`,
+    catalogs `tpch`, `tpcds`, `memory` and `hive`), FLINK (a JobManager and
+    a TaskManager), HIVE_WEBHCAT, ZOOKEEPER, SOLR and, on 2.3 and later,
+    PIG. With the component gateway each web interface is in `http_ports`
+    (`Jupyter`, `JupyterLab`, `Trino`, `Flink`, `Solr`, `WebHCat`). A
+    component the image version does not offer, or one named twice, is
+    `INVALID_ARGUMENT`. ZEPPELIN, DOCKER, RANGER, DELTA, ICEBERG and HUDI
+    are `UNIMPLEMENTED`, each with its reason (docs/gaps.md).
+  - Every cluster has a Hive metastore (Derby, in the cluster's files) and
+    HiveServer2 on its master, started with its first Hive job or with a
+    component that uses them.
+  - `auxiliary_node_groups` of role DRIVER: driver node groups. Each node
+    is a container of the cluster's image named `CLUSTER-np-XXXX`; a job's
+    driver runs in a node's network. A job on such a cluster needs
+    `driver_scheduling_config`, as Google's driver node groups page says.
+    `NodeGroupController`'s `CreateNodeGroup`, `GetNodeGroup` and
+    `ResizeNodeGroup` manage them. A cluster with node groups cannot be
+    stopped or autoscaled.
+  - Dataproc on GKE (`virtual_cluster_config`) is `UNIMPLEMENTED`.
 - `GetCluster`, `ListClusters` and `DeleteCluster`. `ListClusters` takes a
   `filter` on `status.state`, `clusterName` and `labels.KEY`, joined by
   `AND`.
@@ -225,10 +245,16 @@ image's Ubuntu.
   container in client mode against the cluster's master.
   - PySpark, Spark, SparkSql (a query file or a query list, with
     `script_variables`) and SparkR jobs run.
-  - Hadoop, Hive, Pig, Presto, Trino and Flink jobs are `UNIMPLEMENTED`,
-    with the reason: they need YARN or their components, which a Spark
-    standalone cluster does not run. Presto is not available at all on
-    image version 2.1 and later.
+  - Hadoop, Hive and Pig jobs run in the official `apache/hive` image
+    (Hadoop 3.3.6, Hive 4.0.1, Tez) with Google's Cloud Storage connector
+    for Hadoop, `gs://` reaching the instance's Cloud Storage through the
+    cluster's relay. Hadoop MapReduce uses Hadoop's local job runner in
+    the driver's container (there is no YARN); Hive jobs run Beeline
+    against the cluster's HiveServer2; Pig 0.18.0 runs in local mode.
+  - Trino jobs run the Trino CLI against the TRINO component, and Flink
+    jobs `flink run` against the FLINK component; without the component
+    they are `FAILED_PRECONDITION`. Presto is not available on image
+    version 2.1 and later.
   - A job on a cluster that is not `RUNNING` is `FAILED_PRECONDITION`.
 - State: `PENDING`, `SETUP_DONE` and `RUNNING`, then `DONE`, `ERROR` or
   `CANCELLED`, each recorded in `status_history`.
@@ -370,9 +396,11 @@ the WebSocket bridge at it, with local credentials, as it does for BigQuery.
 
 - Jupyter sessions' Scala kernel, and a Jupyter kernel gateway endpoint.
 - IPython magics in notebook batches.
-- Hadoop, Hive, Pig, Presto, Trino and Flink jobs, and every optional
-  component.
-- Node groups and Dataproc on GKE.
+- The optional components ZEPPELIN, DOCKER, RANGER, DELTA, ICEBERG and
+  HUDI.
+- Dataproc on GKE.
+- YARN: MapReduce runs on Hadoop's local job runner, Hive on Tez local
+  mode.
 - Network settings (`subnetwork_uri`, `network_tags`), which are accepted
   and kept but have no effect: a local run has no VPC.
 - Serverless autoscaling, which is not run. A batch's executors are

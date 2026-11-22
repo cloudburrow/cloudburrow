@@ -204,12 +204,21 @@ func (p dataprocClustersProvider) CreateForm() (string, []console.Field) {
 			Help: "2.1 runs Apache Spark 3.3, 2.2 and 2.3 Spark 3.5, 3.0 Spark 4.1."},
 		{Name: "componentGateway", Label: "Enable component gateway", Type: "checkbox", Section: setup, Default: "true",
 			Help: "Opens the cluster's web interfaces, the Spark History Server, from its Web interfaces tab."},
+		{Name: "comp_JUPYTER", Label: "Jupyter Notebook", Type: "checkbox", Section: setup},
+		{Name: "comp_TRINO", Label: "Trino", Type: "checkbox", Section: setup},
+		{Name: "comp_FLINK", Label: "Flink", Type: "checkbox", Section: setup},
+		{Name: "comp_HIVE_WEBHCAT", Label: "Hive WebHCat", Type: "checkbox", Section: setup},
+		{Name: "comp_ZOOKEEPER", Label: "Zookeeper", Type: "checkbox", Section: setup},
+		{Name: "comp_SOLR", Label: "Solr", Type: "checkbox", Section: setup},
+		{Name: "comp_PIG", Label: "Pig", Type: "checkbox", Section: setup, Help: "Optional components: on image 2.3 and later Pig is one; before, it is always installed."},
 		{Name: "autoscalingPolicy", Label: "Autoscaling policy", Type: "text", Section: setup,
 			Help: "An autoscaling policy's ID in the cluster's region, or its resource name. Left empty, none."},
 		{Name: "masterMachineType", Label: "Manager node machine type", Type: "text", Section: nodes, Default: "n4-standard-4"},
 		{Name: "workers", Label: "Number of worker nodes", Type: "number", Section: nodes, Default: "2", ShowWhen: "clusterType=STANDARD|HA",
 			Help: "At least 2. Each worker is an Apache Spark worker of its machine type's cores and memory."},
 		{Name: "workerMachineType", Label: "Worker node machine type", Type: "text", Section: nodes, Default: "n4-standard-4", ShowWhen: "clusterType=STANDARD|HA"},
+		{Name: "driverNodes", Label: "Driver node group: number of nodes", Type: "number", Section: nodes,
+			Help: "Nodes that run the cluster's job drivers, its node group of role DRIVER. Left empty, none. Jobs then need driver memory and vCores."},
 		{Name: "idleDelete", Label: "Delete after a cluster idle time period without submitted jobs (minutes)", Type: "number", Section: custom,
 			Help: "10 to 20160 minutes. Left empty, the cluster is not deleted when idle."},
 		{Name: "autoDelete", Label: "Delete after a fixed time period (minutes)", Type: "number", Section: custom, Help: "10 to 20160 minutes. Left empty, off."},
@@ -265,6 +274,19 @@ func (p dataprocClustersProvider) Create(ctx context.Context, project string, va
 			cfg.SoftwareConfig.Properties = map[string]string{}
 		}
 		cfg.SoftwareConfig.Properties[k] = v
+	}
+	for _, comp := range []string{"JUPYTER", "TRINO", "FLINK", "HIVE_WEBHCAT", "ZOOKEEPER", "SOLR", "PIG"} {
+		if values["comp_"+comp] == "true" {
+			cfg.SoftwareConfig.OptionalComponents = append(cfg.SoftwareConfig.OptionalComponents, dataprocpb.Component(dataprocpb.Component_value[comp]))
+		}
+	}
+	if n := strings.TrimSpace(values["driverNodes"]); n != "" {
+		v, err := strconv.Atoi(n)
+		if err != nil {
+			return "", fmt.Errorf("driver node group: %q is not a number of nodes", n)
+		}
+		cfg.AuxiliaryNodeGroups = []*dataprocpb.AuxiliaryNodeGroup{{NodeGroup: &dataprocpb.NodeGroup{
+			Roles: []dataprocpb.NodeGroup_Role{dataprocpb.NodeGroup_DRIVER}, NodeGroupConfig: &dataprocpb.InstanceGroupConfig{NumInstances: int32(v)}}}}
 	}
 	if values["componentGateway"] == "true" {
 		cfg.EndpointConfig = &dataprocpb.EndpointConfig{EnableHttpPortAccess: true}
@@ -442,6 +464,7 @@ func (p dataprocClustersProvider) Detail(ctx context.Context, project string, pa
 			{Label: "Region", Value: region}, {Label: "Zone", Value: kmsOrDash(lastSegment(cfg.GetGceClusterConfig().GetZoneUri()))},
 			{Label: "Cluster type", Value: dataprocClusterType(c)}, {Label: "Image version", Value: sw.GetImageVersion()},
 			{Label: "Optional components", Value: kmsOrDash(strings.Join(comps, ", "))},
+			{Label: "Node groups", Value: kmsOrDash(dataprocNodeGroups(cfg))},
 			{Label: "Autoscaling", Value: kmsOrDash(cfg.GetAutoscalingConfig().GetPolicyUri())},
 			{Label: "Component gateway", Value: map[bool]string{true: "Enabled", false: "Disabled"}[cfg.GetEndpointConfig().GetEnableHttpPortAccess()]},
 			{Label: "Scheduled deletion", Value: dataprocLifecycle(lc.GetIdleDeleteTtl(), lc.GetAutoDeleteTtl(), lc.GetAutoDeleteTime() != nil)},
@@ -514,7 +537,21 @@ func (p dataprocClustersProvider) DetailActions(ctx context.Context, project str
 	if st != dataprocpb.ClusterStatus_STOPPED {
 		start.Unavailable = "The cluster is not stopped."
 	}
-	return []console.Action{submit, edit, start, stop, diagnose, del}
+	// Driver node groups: Add one, or resize the cluster's.
+	nodes := console.Action{ID: "addnodegroup", Label: "Add driver node group", Submit: "Add", Fields: []console.Field{
+		{Name: "nodeGroupId", Label: "Node group ID", Type: "text", Pattern: `^[A-Za-z0-9][A-Za-z0-9_\-]{1,31}[A-Za-z0-9]$`,
+			Help: "3 to 33 letters, numbers, underscores and hyphens, not beginning or ending with an underscore or hyphen. Left empty, one is generated."},
+		{Name: "size", Label: "Number of nodes", Type: "number", Default: "1", Required: true}}}
+	if g := c.GetConfig().GetAuxiliaryNodeGroups(); len(g) > 0 {
+		stop.Unavailable = "Clusters with node groups cannot be stopped."
+		nodes = console.Action{ID: "resizenodegroup", Label: "Resize node group", Submit: "Resize", Fields: []console.Field{
+			{Name: "nodeGroupId", Label: "Node group", Type: "select", Options: dataprocNodeGroupIDs(c), Default: g[0].GetNodeGroupId(), Required: true},
+			{Name: "size", Label: "Number of nodes", Type: "number", Default: fmt.Sprint(g[0].GetNodeGroup().GetNodeGroupConfig().GetNumInstances()), Required: true}}}
+	}
+	if !running {
+		nodes.Unavailable = "The cluster is not running."
+	}
+	return []console.Action{submit, edit, nodes, start, stop, diagnose, del}
 }
 
 func (p dataprocClustersProvider) ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error {
@@ -554,6 +591,19 @@ func (p dataprocClustersProvider) ActAt(ctx context.Context, project string, pat
 			return nil
 		}
 		_, err = s.UpdateCluster(ctx, &dataprocpb.UpdateClusterRequest{ProjectId: pr, Region: region, ClusterName: name, Cluster: x, UpdateMask: &fieldmaskpb.FieldMask{Paths: mask}})
+		return err
+	case "addnodegroup", "resizenodegroup":
+		n, err := strconv.Atoi(strings.TrimSpace(values["size"]))
+		if err != nil {
+			return fmt.Errorf("number of nodes: %q is not a number", values["size"])
+		}
+		id := strings.TrimSpace(values["nodeGroupId"])
+		if action == "resizenodegroup" {
+			_, err = s.ResizeNodeGroup(ctx, &dataprocpb.ResizeNodeGroupRequest{Name: path[0] + "/nodeGroups/" + id, Size: int32(n)})
+			return err
+		}
+		_, err = s.CreateNodeGroup(ctx, &dataprocpb.CreateNodeGroupRequest{Parent: path[0], NodeGroupId: id, NodeGroup: &dataprocpb.NodeGroup{
+			Roles: []dataprocpb.NodeGroup_Role{dataprocpb.NodeGroup_DRIVER}, NodeGroupConfig: &dataprocpb.InstanceGroupConfig{NumInstances: int32(n)}}})
 		return err
 	case "stop":
 		_, err := s.StopCluster(ctx, &dataprocpb.StopClusterRequest{ProjectId: pr, Region: region, ClusterName: name})
@@ -621,17 +671,19 @@ func (p dataprocJobsProvider) CreateForm() (string, []console.Field) {
 		{Name: "cluster", Label: "Cluster", Type: "text", Required: true, Section: info, Help: "The name of a running cluster in the region."},
 		{Name: "jobType", Label: "Job type", Type: "select", Required: true, Section: job, Default: "PYSPARK",
 			Options: []string{"SPARK", "PYSPARK", "SPARKR", "SPARKSQL", "HIVE", "PIG", "HADOOP", "PRESTO", "TRINO", "FLINK"}, OptionLabels: dataprocJobTypes,
-			Help: "Hive, Pig, Hadoop, Presto, Trino and Flink jobs need YARN and their components, which CloudBurrow's Spark standalone clusters do not run."},
+			Help: "Trino and Flink jobs need the cluster's Trino or Flink optional component; Presto is not offered on image 2.1 and later."},
 		{Name: "mainPythonFile", Label: "Main python file", Type: "text", Section: job, ShowWhen: "jobType=PYSPARK", Help: "The gs:// URI of the main .py file."},
 		{Name: "mainR", Label: "Main R file", Type: "text", Section: job, ShowWhen: "jobType=SPARKR", Help: "The gs:// URI of the main .R file."},
-		{Name: "mainClass", Label: "Main class or jar", Type: "text", Section: job, ShowWhen: "jobType=SPARK",
+		{Name: "mainClass", Label: "Main class or jar", Type: "text", Section: job, ShowWhen: "jobType=SPARK|HADOOP|FLINK",
 			Help: "A main class (with its jar in Jar files), or the gs:// URI of a jar whose manifest names one."},
-		{Name: "queryFile", Label: "Query source: query file", Type: "text", Section: job, ShowWhen: "jobType=SPARKSQL", Help: "The gs:// URI of a Spark SQL script; or give the queries below."},
-		{Name: "queries", Label: "Query source: query text", Type: "textarea", Section: job, ShowWhen: "jobType=SPARKSQL", Help: "Spark SQL statements, ; separated."},
-		{Name: "args", Label: "Arguments", Type: "textarea", Section: job, ShowWhen: "jobType=SPARK|PYSPARK|SPARKR", Help: "One argument a line."},
+		{Name: "queryFile", Label: "Query source: query file", Type: "text", Section: job, ShowWhen: "jobType=SPARKSQL|HIVE|PIG|TRINO|PRESTO", Help: "The gs:// URI of a script; or give the queries below."},
+		{Name: "queries", Label: "Query source: query text", Type: "textarea", Section: job, ShowWhen: "jobType=SPARKSQL|HIVE|PIG|TRINO|PRESTO", Help: "Statements, ; separated."},
+		{Name: "args", Label: "Arguments", Type: "textarea", Section: job, ShowWhen: "jobType=SPARK|PYSPARK|SPARKR|HADOOP|FLINK", Help: "One argument a line."},
 		{Name: "pyFiles", Label: "Additional python files", Type: "textarea", Section: job, ShowWhen: "jobType=PYSPARK", Help: "gs:// URIs, one a line."},
-		{Name: "jarFiles", Label: "Jar files", Type: "textarea", Section: job, ShowWhen: "jobType=SPARK|PYSPARK|SPARKSQL", Help: "gs:// URIs, one a line."},
-		{Name: "files", Label: "Files", Type: "textarea", Section: job, ShowWhen: "jobType=SPARK|PYSPARK|SPARKR", Help: "gs:// URIs, one a line."},
+		{Name: "jarFiles", Label: "Jar files", Type: "textarea", Section: job, ShowWhen: "jobType=SPARK|PYSPARK|SPARKSQL|HADOOP|HIVE|PIG|FLINK", Help: "gs:// URIs, one a line."},
+		{Name: "files", Label: "Files", Type: "textarea", Section: job, ShowWhen: "jobType=SPARK|PYSPARK|SPARKR|HADOOP", Help: "gs:// URIs, one a line."},
+		{Name: "driverMemory", Label: "Driver memory (MB)", Type: "number", Section: job, Help: "For a cluster with a driver node group: the driver's memory and vCores."},
+		{Name: "driverVcores", Label: "Driver vCores", Type: "number", Section: job},
 		{Name: "maxRestarts", Label: "Max restarts per hour", Type: "number", Section: job, Help: "Restarts the driver when it fails, at most this many times an hour. Left empty, never."},
 		{Name: "properties", Label: "Properties", Type: "textarea", Section: props, Help: "One spark.property=value a line."},
 		{Name: "labels", Label: "Labels", Type: "textarea", Section: props, Help: "One key=value a line."},
@@ -686,20 +738,64 @@ func (p dataprocJobsProvider) Create(ctx context.Context, project string, values
 		}
 		j.TypeJob = &dataprocpb.Job_SparkSqlJob{SparkSqlJob: w}
 	case "HIVE":
-		j.TypeJob = &dataprocpb.Job_HiveJob{HiveJob: &dataprocpb.HiveJob{}}
+		w := &dataprocpb.HiveJob{JarFileUris: dataprocURIs(values["jarFiles"]), Properties: props}
+		if q := strings.TrimSpace(values["queries"]); q != "" {
+			w.Queries = &dataprocpb.HiveJob_QueryList{QueryList: &dataprocpb.QueryList{Queries: []string{q}}}
+		} else {
+			w.Queries = &dataprocpb.HiveJob_QueryFileUri{QueryFileUri: strings.TrimSpace(values["queryFile"])}
+		}
+		j.TypeJob = &dataprocpb.Job_HiveJob{HiveJob: w}
 	case "PIG":
-		j.TypeJob = &dataprocpb.Job_PigJob{PigJob: &dataprocpb.PigJob{}}
+		w := &dataprocpb.PigJob{JarFileUris: dataprocURIs(values["jarFiles"]), Properties: props}
+		if q := strings.TrimSpace(values["queries"]); q != "" {
+			w.Queries = &dataprocpb.PigJob_QueryList{QueryList: &dataprocpb.QueryList{Queries: []string{q}}}
+		} else {
+			w.Queries = &dataprocpb.PigJob_QueryFileUri{QueryFileUri: strings.TrimSpace(values["queryFile"])}
+		}
+		j.TypeJob = &dataprocpb.Job_PigJob{PigJob: w}
 	case "HADOOP":
-		j.TypeJob = &dataprocpb.Job_HadoopJob{HadoopJob: &dataprocpb.HadoopJob{}}
+		w := &dataprocpb.HadoopJob{Args: args, JarFileUris: dataprocURIs(values["jarFiles"]), FileUris: dataprocURIs(values["files"]), Properties: props}
+		if m := strings.TrimSpace(values["mainClass"]); strings.Contains(m, "://") {
+			w.Driver = &dataprocpb.HadoopJob_MainJarFileUri{MainJarFileUri: m}
+		} else {
+			w.Driver = &dataprocpb.HadoopJob_MainClass{MainClass: m}
+		}
+		j.TypeJob = &dataprocpb.Job_HadoopJob{HadoopJob: w}
 	case "PRESTO":
-		j.TypeJob = &dataprocpb.Job_PrestoJob{PrestoJob: &dataprocpb.PrestoJob{}}
+		w := &dataprocpb.PrestoJob{Properties: props}
+		if q := strings.TrimSpace(values["queries"]); q != "" {
+			w.Queries = &dataprocpb.PrestoJob_QueryList{QueryList: &dataprocpb.QueryList{Queries: []string{q}}}
+		} else {
+			w.Queries = &dataprocpb.PrestoJob_QueryFileUri{QueryFileUri: strings.TrimSpace(values["queryFile"])}
+		}
+		j.TypeJob = &dataprocpb.Job_PrestoJob{PrestoJob: w}
 	case "TRINO":
-		j.TypeJob = &dataprocpb.Job_TrinoJob{TrinoJob: &dataprocpb.TrinoJob{}}
+		w := &dataprocpb.TrinoJob{Properties: props}
+		if q := strings.TrimSpace(values["queries"]); q != "" {
+			w.Queries = &dataprocpb.TrinoJob_QueryList{QueryList: &dataprocpb.QueryList{Queries: []string{q}}}
+		} else {
+			w.Queries = &dataprocpb.TrinoJob_QueryFileUri{QueryFileUri: strings.TrimSpace(values["queryFile"])}
+		}
+		j.TypeJob = &dataprocpb.Job_TrinoJob{TrinoJob: w}
 	case "FLINK":
-		j.TypeJob = &dataprocpb.Job_FlinkJob{FlinkJob: &dataprocpb.FlinkJob{}}
+		w := &dataprocpb.FlinkJob{Args: args, JarFileUris: dataprocURIs(values["jarFiles"]), Properties: props}
+		if m := strings.TrimSpace(values["mainClass"]); strings.Contains(m, "://") {
+			w.Driver = &dataprocpb.FlinkJob_MainJarFileUri{MainJarFileUri: m}
+		} else {
+			w.Driver = &dataprocpb.FlinkJob_MainClass{MainClass: m}
+		}
+		j.TypeJob = &dataprocpb.Job_FlinkJob{FlinkJob: w}
 	default:
 		j.TypeJob = &dataprocpb.Job_PysparkJob{PysparkJob: &dataprocpb.PySparkJob{MainPythonFileUri: strings.TrimSpace(values["mainPythonFile"]), Args: args,
 			PythonFileUris: dataprocURIs(values["pyFiles"]), JarFileUris: dataprocURIs(values["jarFiles"]), FileUris: dataprocURIs(values["files"]), Properties: props}}
+	}
+	if m, v := strings.TrimSpace(values["driverMemory"]), strings.TrimSpace(values["driverVcores"]); m != "" || v != "" {
+		mb, err1 := strconv.Atoi(m)
+		vc, err2 := strconv.Atoi(v)
+		if err1 != nil || err2 != nil {
+			return "", fmt.Errorf("driver memory and vCores: %q and %q are not numbers", m, v)
+		}
+		j.DriverSchedulingConfig = &dataprocpb.DriverSchedulingConfig{MemoryMb: int32(mb), Vcores: int32(vc)}
 	}
 	got, err := s.SubmitJob(ctx, &dataprocpb.SubmitJobRequest{ProjectId: project, Region: values["region"], Job: j})
 	if err != nil {
@@ -1310,4 +1406,27 @@ func (p dataprocPoliciesProvider) ActAt(ctx context.Context, project string, pat
 		return err
 	}
 	return fmt.Errorf("unknown action %q", action)
+}
+
+// dataprocNodeGroups is a cluster's auxiliary node groups, each as ID
+// (ROLE): its instances.
+func dataprocNodeGroups(cfg *dataprocpb.ClusterConfig) string {
+	var out []string
+	for _, g := range cfg.GetAuxiliaryNodeGroups() {
+		var roles []string
+		for _, r := range g.GetNodeGroup().GetRoles() {
+			roles = append(roles, r.String())
+		}
+		out = append(out, g.GetNodeGroupId()+" ("+strings.Join(roles, ", ")+"): "+strings.Join(g.GetNodeGroup().GetNodeGroupConfig().GetInstanceNames(), ", "))
+	}
+	return strings.Join(out, "; ")
+}
+
+// dataprocNodeGroupIDs are a cluster's node groups' IDs.
+func dataprocNodeGroupIDs(c *dataprocpb.Cluster) []string {
+	var ids []string
+	for _, g := range c.GetConfig().GetAuxiliaryNodeGroups() {
+		ids = append(ids, g.GetNodeGroupId())
+	}
+	return ids
 }
