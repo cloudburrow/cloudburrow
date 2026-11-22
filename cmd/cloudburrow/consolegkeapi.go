@@ -15,6 +15,8 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/k8s"
+	"github.com/cloudburrow/cloudburrow/internal/modelgarden"
 	"github.com/cloudburrow/cloudburrow/internal/service/gke"
 )
 
@@ -480,3 +482,27 @@ func gkeTitle(s string) string {
 }
 
 func gkeTick() <-chan time.Time { return time.After(200 * time.Millisecond) }
+
+// GKEClusters lists the project's served clusters for Model Garden's GKE
+// deployment environment (#2148): each with its kubeconfig and, when it is
+// running, its nodes' architecture, which picks the runtime's image.
+func (p gkeClustersProvider) GKEClusters(ctx context.Context, project string) []console.GKETarget {
+	var out []console.GKETarget
+	for _, c := range p.served(ctx, project) {
+		t := console.GKETarget{Name: c.GetName(), Location: c.GetLocation(), Status: c.GetStatus().String(),
+			Kubeconfig: p.kubeconfigOf(project, c)}
+		if c.GetStatus() == containerpb.Cluster_RUNNING {
+			if arch, err := k8s.New(t.Kubeconfig, "", "").Do(ctx, "", "get", "nodes", "-o",
+				"jsonpath={.items[0].status.nodeInfo.architecture}"); err == nil {
+				t.Arch = strings.TrimSpace(arch)
+			}
+		}
+		out = append(out, t)
+	}
+	return out
+}
+
+// ApplyGKE applies a model's GKE manifests to a served cluster (#2148).
+func (p gkeClustersProvider) ApplyGKE(ctx context.Context, t console.GKETarget, plan modelgarden.GKEPlan, token string) error {
+	return modelgarden.ApplyGKE(ctx, t.Kubeconfig, plan, token)
+}

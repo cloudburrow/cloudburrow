@@ -244,6 +244,7 @@ type rawFlags struct {
 	localAIImage     string
 	localAIAliases   string
 	localAIEmbed     bool
+	localAIAccel     string
 	provider         string
 	nodeImage        string
 	namespace        string
@@ -341,6 +342,7 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.StringVar(&r.localAIModelID, "local-ai-model-id", "", "model ID clients must request (default: the catalogue entry for the artifact)")
 	fs.StringVar(&r.localAIImage, "local-ai-image", "", "local AI runtime image (default: the image published with this release; for a dev build, the one make litert-lm builds)")
 	fs.BoolVar(&r.localAIEmbed, "local-ai-embeddings", false, "serve text-embedding :predict for embeddinggemma-300m-onnx-community, a community ONNX conversion that is NOT an official Google artifact (needs a -tags onnx build)")
+	fs.StringVar(&r.localAIAccel, "local-ai-accelerator", "", "where Model Garden deployments with no machine spec run: metal (the Apple GPU, as host processes) or cpu (the cluster); default metal on macOS on Apple silicon, cpu elsewhere")
 	fs.StringVar(&r.localAIAliases, "local-ai-alias", "", "comma-separated model IDs that resolve to the configured model (explicit substitution)")
 	fs.StringVar(&r.provider, "cluster-provider", "", "cluster provider (only kind is supported)")
 	fs.StringVar(&r.nodeImage, "node-image", "", "pinned kind node image, which fixes the Kubernetes version")
@@ -739,6 +741,9 @@ func applyFlags(cfg *Config, raw *rawFlags, set map[string]bool) {
 	}
 	if set["local-ai-embeddings"] {
 		cfg.LocalAI.Embeddings = raw.localAIEmbed
+	}
+	if set["local-ai-accelerator"] {
+		cfg.LocalAI.Accelerator = raw.localAIAccel
 	}
 	if set["local-ai-alias"] {
 		cfg.LocalAI.Aliases = splitList(raw.localAIAliases)

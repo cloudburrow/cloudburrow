@@ -205,3 +205,40 @@ Kubernetes Authors, Apache License, Version 2.0), and
 github.com/cyphar/filepath-securejoin, github.com/hashicorp/errwrap and
 github.com/hashicorp/go-multierror, unmodified, under the Mozilla Public
 License, Version 2.0, whose source is at their upstream repositories.
+
+Model Garden's Hugging Face deployments (#1840, #2148) run, without
+CloudBurrow shipping or modifying them, the official images of vLLM
+(docker.io/vllm/vllm-openai-cpu, https://github.com/vllm-project/vllm) and
+Hugging Face Text Embeddings Inference
+(ghcr.io/huggingface/text-embeddings-inference, cpu and cpu-arm64 builds,
+https://github.com/huggingface/text-embeddings-inference), both under the
+Apache License, Version 2.0, pinned by digest in dependencies.json. The
+models they serve are pulled from huggingface.co under each model's own
+licence, which the console shows and, for a gated model, the end user
+accepts on huggingface.co.
+
+The Model Garden runtimes of #2148 run, without CloudBurrow shipping or
+modifying them: llama.cpp's server image (ghcr.io/ggml-org/llama.cpp,
+https://github.com/ggml-org/llama.cpp, MIT License); the official Python
+image (docker.io/library/python, Python Software Foundation License), into
+which a pod installs, from PyPI and PyTorch's CPU index, Hugging Face's
+huggingface-inference-toolkit (the server of Google's Hugging Face PyTorch
+Inference container, https://github.com/huggingface/huggingface-inference-toolkit,
+Apache License 2.0), transformers, diffusers, accelerate, huggingface_hub,
+optimum and optimum-onnx (Apache License 2.0), PyTorch and torchaudio (BSD
+3-Clause), ONNX Runtime (MIT License), MLX and mlx-lm (MIT License) and
+their dependencies, every version pinned in
+internal/modelgarden/runtime/constraints-*.txt; the images pinned by digest
+in dependencies.json. The start scripts and servers in
+internal/modelgarden/runtime are CloudBurrow's own.
+
+On macOS with Apple silicon, Model Garden's Apple GPU (Metal) runtimes of
+#2155 run on the host, without CloudBurrow shipping or modifying them:
+llama.cpp's official macOS arm64 release archive (llama-server,
+https://github.com/ggml-org/llama.cpp, MIT License), downloaded on first
+use and checked against the SHA-256 pinned in dependencies.json; and MLX,
+mlx-metal and mlx-lm (https://github.com/ml-explore/mlx and
+https://github.com/ml-explore/mlx-lm, MIT License) with their dependencies,
+installed from PyPI into a virtual environment of CloudBurrow's from the
+hash-pinned lock internal/hostai/mlx-lock.txt (MIT, BSD, Apache License
+2.0, PSF and MPL-2.0 licences).

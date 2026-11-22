@@ -18313,7 +18313,7 @@ async function hfDeploy(m) {
   const go = async () => {
     const resp = await fetch("/api/ai/hf-deployments/deploy", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: m.id, acceptEula: !!m.gated }),
+      body: JSON.stringify({ id: m.id, acceptEula: !!m.gated, local: true }),
     });
     const text = await resp.text();
     if (!resp.ok) throw new Error(errorMessageOf(text) || `HTTP ${resp.status}`);
@@ -18330,6 +18330,27 @@ async function hfDeploy(m) {
 let HF_EP_POLL = null;
 
 const HF_STATE_LABEL = { DEPLOYING: "Deploying", READY: "Ready", FAILED: "Failed" };
+
+// The serving runtimes' names (#2148), and which are OpenAI-compatible.
+const HF_ENGINE_TITLE = { vllm: "vLLM", tei: "Text Embeddings Inference", "hf-pytorch": "Hugging Face PyTorch Inference",
+  "llama-cpp": "llama.cpp", mlx: "MLX (mlx-lm)", onnx: "ONNX Runtime" };
+const HF_OPENAI = new Set(["vllm", "llama-cpp", "mlx"]);
+const METAL_LABEL = "Apple GPU (Metal), local";
+
+// A deployed model's accelerator (#2155): the Apple GPU, the GPU type it
+// stands for, or none.
+function hfAccelerator(d) {
+  if (!d) return "—";
+  if (d.device) return `${METAL_LABEL}: ${d.device} (${d.acceleratorType} × ${d.acceleratorCount || 1})`;
+  if (d.acceleratorType) return `${d.acceleratorType} × ${d.acceleratorCount || 1}, served on CPU`;
+  return "None (CPU)";
+}
+
+function hfRunsOn(d) {
+  if (!d) return "—";
+  if (d.runtime === "host") return "This Mac (Apple GPU)";
+  return d.runtime === "cluster" ? "Instance cluster" : "Docker";
+}
 
 // The Endpoints page (#1840): Model Garden's deployments with their state,
 // and the selected endpoint's details and test panel.
@@ -18363,7 +18384,9 @@ async function renderHFEndpoints(view) {
         onclick: (ev) => { ev.preventDefault(); navigate(ev.currentTarget.getAttribute("href")); } })),
       el("td", { class: "mono", text: e.id }),
       el("td", { class: "mono", text: e.model ? e.model.hfModelId : "—" }),
-      el("td", { text: e.model ? (e.model.engine === "tei" ? "Text Embeddings Inference" : "vLLM") : "—" }),
+      el("td", { text: e.model ? HF_ENGINE_TITLE[e.model.engine] || e.model.engine : "—" }),
+      el("td", { "data-runtime": d ? d.runtime || "docker" : "", text: hfRunsOn(d) }),
+      el("td", { "data-accelerator": d ? d.acceleratorType || "" : "", text: hfAccelerator(d) }),
       el("td", { "data-state": st },
         el("span", { text: st === "UNDEPLOYED" ? "No deployed model" : HF_STATE_LABEL[st] || st }),
         st === "DEPLOYING" ? el("span", { class: "unavailable", text: ` · ${d.message}` }) : null,
@@ -18371,9 +18394,9 @@ async function renderHFEndpoints(view) {
         st === "FAILED" ? el("p", { class: "unavailable", text: d.message }) : null));
   });
   const table = rows.length ? el("div", { class: "table-wrap" }, el("table", { id: "hf-endpoints" },
-    el("thead", {}, el("tr", {}, ...["Name", "ID", "Model", "Serving container", "State"].map((c) => el("th", { scope: "col", text: c })))),
+    el("thead", {}, el("tr", {}, ...["Name", "ID", "Model", "Serving container", "Runs on", "Accelerator", "State"].map((c) => el("th", { scope: "col", text: c })))),
     el("tbody", {}, ...rows)))
-    : el("p", { class: "unavailable", text: "No endpoints yet. Download a Hugging Face model in Model Garden, then Deploy it." });
+    : el("p", { class: "unavailable", text: "No endpoints yet. Deploy a Hugging Face model from Model Garden." });
 
   let detail = null;
   const ep = data.endpoints.find((e) => e.name === selected);
@@ -18395,9 +18418,26 @@ async function renderHFEndpoints(view) {
       el("dt", { text: "State" }), el("dd", { id: "hf-endpoint-state", text: st === "UNDEPLOYED" ? "No deployed model" : HF_STATE_LABEL[st] || st }),
       ep.model ? el("dt", { text: "Model" }) : null, ep.model ? el("dd", { class: "mono", text: `${ep.model.hfModelId} @ ${ep.model.revision.slice(0, 12)} (${ep.model.license})` }) : null,
       ep.model ? el("dt", { text: "Container" }) : null, ep.model ? el("dd", { class: "mono", text: ep.model.image }) : null,
+      ep.deployed ? el("dt", { text: "Runs on" }) : null,
+      ep.deployed ? el("dd", { id: "hf-endpoint-runtime", text: ep.deployed.runtime === "cluster"
+        ? `This instance's Kubernetes cluster: Deployment and Service ${ep.deployed.container}${ep.deployed.gated ? ", with the Hugging Face token in Secret " + ep.deployed.container + "-hf-token" : ""}`
+        : ep.deployed.runtime === "host"
+          ? `This Mac, on the Apple GPU: a supervised ${HF_ENGINE_TITLE[ep.model ? ep.model.engine : ""] || "model"} server on 127.0.0.1:${ep.deployed.hostPort || "…"}, which the cluster reaches as Service ${ep.deployed.container}`
+          : `Docker, beside the cluster: container ${ep.deployed.container}` }) : null,
+      ep.deployed ? el("dt", { text: "Machine type" }) : null,
+      ep.deployed ? el("dd", { class: "mono", id: "hf-endpoint-machine", text: ep.deployed.machineType }) : null,
+      ep.deployed ? el("dt", { text: "Accelerator type" }) : null,
+      ep.deployed ? el("dd", { id: "hf-endpoint-accelerator", text: ep.deployed.device
+        ? `${METAL_LABEL} (${ep.deployed.device}), as ${ep.deployed.acceleratorType}` : ep.deployed.acceleratorType || "None" }) : null,
+      ep.deployed && ep.deployed.acceleratorType ? el("dt", { text: "Accelerator count" }) : null,
+      ep.deployed && ep.deployed.acceleratorType ? el("dd", { id: "hf-endpoint-accelerator-count", text: String(ep.deployed.acceleratorCount || 1) }) : null,
+      ep.deployed && ep.deployed.acceleratorNote ? el("dd", { class: "unavailable", id: "hf-endpoint-accelerator-note", text: ep.deployed.acceleratorNote }) : null,
+      ep.deployed && st === "DEPLOYING" ? el("dt", { text: "Progress" }) : null,
+      ep.deployed && st === "DEPLOYING" ? el("dd", { id: "hf-endpoint-progress" }, el("span", { text: ep.deployed.message }),
+        ep.deployed.progress > 0 ? el("progress", { max: "100", value: String(ep.deployed.progress), "aria-label": "Deploy progress" }) : null) : null,
       el("dt", { text: "Predict" }), el("dd", { class: "mono", text: `POST ${rest}:predict, :rawPredict, :streamRawPredict` }),
-      ep.model && ep.model.engine === "vllm" ? el("dt", { text: "OpenAI-compatible" }) : null,
-      ep.model && ep.model.engine === "vllm" ? el("dd", { class: "mono", text: `POST /v1beta1/${ep.name}/chat/completions` }) : null);
+      ep.model && HF_OPENAI.has(ep.model.engine) ? el("dt", { text: "OpenAI-compatible" }) : null,
+      ep.model && HF_OPENAI.has(ep.model.engine) ? el("dd", { class: "mono", text: `POST /v1beta1/${ep.name}/chat/completions` }) : null);
     let test = null;
     if (st === "READY") {
       const tei = ep.model.engine === "tei";
@@ -18437,8 +18477,415 @@ async function renderHFEndpoints(view) {
   if (data.endpoints.some((e) => stateOf(e) === "DEPLOYING")) HF_EP_POLL = setTimeout(again, 2000);
 }
 
+// Model Garden's Hugging Face tab (#2148): every public model on
+// huggingface.co, searched through the Hub's anonymous API with Google's
+// filter chips (task, library, licence) and sorts, a page at a time; a
+// model's card with its README, licence, task, size and downloads; and its
+// deploy form, which for a gated model takes the end user's own Hugging
+// Face access token, as Google's does. The token is posted once to the
+// deploy and never kept in the page: it goes into a Kubernetes Secret in
+// this instance's cluster.
+const HF_TASKS = [
+  ["text-generation", "Text generation"], ["feature-extraction", "Feature extraction"],
+  ["sentence-similarity", "Sentence similarity"], ["image-text-to-text", "Image-text-to-text"],
+  ["text2text-generation", "Text2text generation"], ["text-to-image", "Text-to-image"],
+  ["text-classification", "Text classification"], ["automatic-speech-recognition", "Speech recognition"],
+];
+const HF_LIBRARIES = [
+  ["transformers", "Transformers"], ["sentence-transformers", "sentence-transformers"],
+  ["diffusers", "Diffusers"], ["gguf", "GGUF"], ["onnx", "ONNX"], ["mlx", "MLX"],
+];
+const HF_LICENSES = [
+  ["apache-2.0", "Apache 2.0"], ["mit", "MIT"], ["gemma", "Gemma"], ["llama3.1", "Llama 3.1"],
+  ["openrail", "OpenRAIL"], ["cc-by-4.0", "CC BY 4.0"], ["other", "Other"],
+];
+const HF_SORTS = [["trendingScore", "Trending"], ["downloads", "Most downloads"], ["likes", "Most likes"], ["lastModified", "Recently updated"]];
+const HF_TASK_LABEL = Object.fromEntries(HF_TASKS);
+
+const hfCount = (n) => {
+  if (n >= 1e9) return `${(n / 1e9).toFixed(1)}B`;
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(1)}k`;
+  return String(n || 0);
+};
+
+const hfGalleryPath = (params = {}) => {
+  const u = new URLSearchParams({ view: "hugging-face", ...params });
+  return `${AP_PATHS.modelGarden}?${u}`;
+};
+
+// A Hub model's card in the gallery.
+function hfHubCard(m) {
+  const href = hfGalleryPath({ model: m.id });
+  return el("article", { class: "card garden-card hf-card", "data-hf-hub-model": m.id, "data-gated": m.gated ? "true" : "false" },
+    el("h2", {}, el("a", { href, text: m.id })),
+    el("p", { class: "garden-provider", text: [HF_TASK_LABEL[m.task] || m.task, m.library].filter(Boolean).join(" · ") || "Task not stated" }),
+    el("p", { class: "garden-tags" },
+      m.gated ? el("span", { class: "garden-tag hf-gated", text: "Gated" }) : null,
+      el("span", { class: "garden-tag", text: m.license })),
+    el("p", { class: "hf-stats" },
+      el("span", { "data-stat": "downloads", text: `${hfCount(m.downloads)} downloads` }),
+      el("span", { "data-stat": "likes", text: `${hfCount(m.likes)} likes` }),
+      m.parameters ? el("span", { text: `${hfCount(m.parameters)} parameters` }) : null),
+    el("p", { class: m.unavailable ? "unavailable" : "hf-engine", text: m.unavailable
+      ? `Deploy unavailable: ${m.unavailable}` : `Deploys on ${m.engineTitle}` }));
+}
+
+// The gallery: search, sort, chips and pages of models.
+async function renderHFGallery(view) {
+  const params = new URLSearchParams(location.search);
+  const chosen = { task: params.get("task") || "", library: params.get("library") || "", license: params.get("license") || "" };
+  let sort = params.get("sort") || "trendingScore";
+  const search = el("input", { type: "search", id: "hf-hub-search", placeholder: "Search Hugging Face models",
+    "aria-label": "Search Hugging Face models", value: params.get("q") || "", autocomplete: "off" });
+  const sortSelect = el("select", { id: "hf-hub-sort", "aria-label": "Sort by" },
+    ...HF_SORTS.map(([v, label]) => el("option", { value: v, text: label, selected: v === sort ? true : null })));
+  const grid = el("div", { class: "garden-cards", id: "hf-hub-cards", "aria-live": "polite" });
+  const status = el("p", { class: "unavailable", id: "hf-hub-status", role: "status" });
+  const more = el("button", { class: "secondary", id: "hf-hub-more", text: "Load more", hidden: true });
+  let next = "";
+  let seq = 0;
+
+  const chipRow = (name, label, values) => el("div", { class: "library-categories hf-chips", role: "group", "aria-label": label, "data-chips": name },
+    el("span", { class: "hf-chips-label", text: label }),
+    ...values.map(([v, text]) => {
+      const on = chosen[name] === v;
+      return el("button", { type: "button", class: on ? "chip is-selected" : "chip", "data-chip": v, "aria-pressed": on ? "true" : "false", text,
+        onclick: () => { chosen[name] = chosen[name] === v ? "" : v; draw(true); } });
+    }));
+  const chips = el("div", { id: "hf-hub-chips" });
+
+  const load = async (reset) => {
+    const mine = ++seq;
+    const q = new URLSearchParams();
+    if (search.value.trim()) q.set("q", search.value.trim());
+    for (const k of ["task", "library", "license"]) if (chosen[k]) q.set(k, chosen[k]);
+    q.set("sort", sort);
+    if (!reset && next) q.set("cursor", next);
+    status.textContent = "Searching huggingface.co…";
+    more.hidden = true;
+    let r;
+    try {
+      r = await api("/api/ai/hf-hub/models?" + q);
+    } catch (err) {
+      if (mine === seq) status.textContent = `[error] ${err.message}`;
+      return;
+    }
+    if (mine !== seq) return;
+    if (reset) setChildren(grid);
+    grid.append(...r.models.map(hfHubCard));
+    next = r.next || "";
+    more.hidden = !next;
+    const shown = grid.children.length;
+    status.textContent = shown ? `${shown} models${next ? ", more on the next page" : ""}` : "No models match.";
+  };
+  const draw = (reset) => {
+    setChildren(chips, chipRow("task", "Tasks", HF_TASKS), chipRow("library", "Libraries", HF_LIBRARIES), chipRow("license", "Licenses", HF_LICENSES));
+    const url = new URL(location.href);
+    for (const k of ["task", "library", "license"]) { if (chosen[k]) url.searchParams.set(k, chosen[k]); else url.searchParams.delete(k); }
+    if (search.value.trim()) url.searchParams.set("q", search.value.trim()); else url.searchParams.delete("q");
+    url.searchParams.set("sort", sort);
+    history.replaceState(history.state, "", url);
+    if (reset) { next = ""; load(true); }
+  };
+  let typing = null;
+  search.addEventListener("input", () => { clearTimeout(typing); typing = setTimeout(() => draw(true), 300); });
+  sortSelect.addEventListener("change", () => { sort = sortSelect.value; draw(true); });
+  more.addEventListener("click", () => load(false));
+
+  setChildren(view,
+    pageHeader("Hugging Face", "Open models on Hugging Face: deploy any supported public model from huggingface.co to an endpoint on this instance."),
+    el("nav", { class: "hf-crumbs", "aria-label": "Breadcrumb" },
+      el("a", { href: AP_PATHS.modelGarden, text: "Model Garden" }), el("span", { text: " › Hugging Face" })),
+    el("div", { class: "card" }, el("p", { class: "unavailable", id: "hf-hub-note", text:
+      "Models are read anonymously from huggingface.co's public API. Deploy runs the model on this instance's Kubernetes cluster: " +
+      "Text Embeddings Inference for sentence-transformers and embedding models, vLLM for text generation. " +
+      "The serving pod downloads the weights from Hugging Face itself." })),
+    el("div", { class: "hf-toolbar" }, search, el("label", { for: "hf-hub-sort", text: "Sort by" }), sortSelect),
+    chips, status, grid, more);
+  draw(true);
+}
+
+// A small markdown renderer for model cards. Everything becomes text
+// nodes and a fixed set of elements; links are kept only when they are
+// http(s). The server has already stripped the README's HTML.
+function hfMarkdown(text, repo) {
+  const root = el("div", { class: "hf-readme", id: "hf-readme" });
+  const lines = text.split("\n");
+  const inline = (s) => {
+    const out = [];
+    const re = /(`[^`]+`)|(!?\[[^\]]*\]\([^)\s]+(?:\s+"[^"]*")?\))|(\*\*[^*]+\*\*)|(\*[^*\s][^*]*\*)/g;
+    let last = 0, m;
+    while ((m = re.exec(s))) {
+      if (m.index > last) out.push(document.createTextNode(s.slice(last, m.index)));
+      const t = m[0];
+      if (m[1]) out.push(el("code", { text: t.slice(1, -1) }));
+      else if (m[2]) {
+        const image = t.startsWith("!");
+        const label = t.slice(image ? 2 : 1, t.indexOf("]"));
+        let href = t.slice(t.indexOf("](") + 2, -1).split(/\s+/)[0];
+        // Only http(s) links are kept; a relative one is the repository's
+        // file; any other scheme (javascript:, data:) is its text alone.
+        const scheme = /^[a-z][a-z0-9+.-]*:/i.test(href);
+        if (!scheme && !href.startsWith("#")) href = `https://huggingface.co/${repo}/blob/main/${href.replace(/^\.?\//, "")}`;
+        if (href.startsWith("#") || (scheme && !/^https?:\/\//i.test(href))) out.push(document.createTextNode(label));
+        else out.push(el("a", { href, target: "_blank", rel: "noopener noreferrer nofollow", text: image ? `[image: ${label || "image"}]` : label || href }));
+      } else if (m[3]) out.push(el("strong", { text: t.slice(2, -2) }));
+      else out.push(el("em", { text: t.slice(1, -1) }));
+      last = m.index + t.length;
+    }
+    if (last < s.length) out.push(document.createTextNode(s.slice(last)));
+    return out;
+  };
+  let i = 0;
+  let para = [];
+  const flush = () => { if (para.length) { root.append(el("p", {}, ...inline(para.join(" ")))); para = []; } };
+  while (i < lines.length) {
+    const line = lines[i];
+    if (/^\s*```/.test(line)) {
+      flush();
+      const code = [];
+      i++;
+      while (i < lines.length && !/^\s*```/.test(lines[i])) code.push(lines[i++]);
+      i++;
+      root.append(el("pre", { class: "mono" }, el("code", { text: code.join("\n") })));
+      continue;
+    }
+    const h = /^(#{1,6})\s+(.*)$/.exec(line);
+    if (h) { flush(); root.append(el(`h${Math.min(6, h[1].length + 1)}`, {}, ...inline(h[2]))); i++; continue; }
+    if (/^\s*\|.*\|\s*$/.test(line) && i + 1 < lines.length && /^\s*\|?[\s:-]+\|[\s|:-]*$/.test(lines[i + 1])) {
+      flush();
+      const cells = (l) => l.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+      const head = cells(line);
+      i += 2;
+      const body = [];
+      while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) body.push(cells(lines[i++]));
+      root.append(el("div", { class: "table-wrap" }, el("table", {},
+        el("thead", {}, el("tr", {}, ...head.map((c) => el("th", { scope: "col" }, ...inline(c))))),
+        el("tbody", {}, ...body.map((r) => el("tr", {}, ...r.map((c) => el("td", {}, ...inline(c)))))))));
+      continue;
+    }
+    if (/^\s*([-*+]|\d+\.)\s+/.test(line)) {
+      flush();
+      const ordered = /^\s*\d+\./.test(line);
+      const list = el(ordered ? "ol" : "ul");
+      while (i < lines.length && /^\s*([-*+]|\d+\.)\s+/.test(lines[i])) {
+        list.append(el("li", {}, ...inline(lines[i].replace(/^\s*([-*+]|\d+\.)\s+/, ""))));
+        i++;
+      }
+      root.append(list);
+      continue;
+    }
+    if (/^\s*>\s?/.test(line)) { flush(); root.append(el("blockquote", {}, ...inline(line.replace(/^\s*>\s?/, "")))); i++; continue; }
+    if (/^\s*(---+|\*\*\*+)\s*$/.test(line)) { flush(); root.append(el("hr")); i++; continue; }
+    if (!line.trim()) { flush(); i++; continue; }
+    para.push(line.trim());
+    i++;
+  }
+  flush();
+  return root;
+}
+
+// A model's card and its deploy form.
+async function renderHFHubModel(view, id) {
+  const header = () => pageHeader(id, "Hugging Face model");
+  setChildren(view, header(), el("p", { class: "unavailable", text: `Reading ${id} from huggingface.co…` }));
+  let r;
+  try {
+    r = await api("/api/ai/hf-hub/model?" + new URLSearchParams({ id }));
+  } catch (err) {
+    return setChildren(view, header(), errorState("Model unavailable", String(err.message), () => renderHFHubModel(view, id)));
+  }
+  const m = r.model;
+  const message = el("p", { id: "hf-deploy-message", class: "unavailable", role: "status" });
+  const hubLink = `https://huggingface.co/${m.id}`;
+  const facts = el("dl", { id: "hf-card-facts" },
+    el("dt", { text: "Task" }), el("dd", { text: HF_TASK_LABEL[m.task] || m.task || "Not stated" }),
+    el("dt", { text: "Library" }), el("dd", { text: m.library || "Not stated" }),
+    el("dt", { text: "License" }), el("dd", {}, m.licenseLink ? el("a", { href: m.licenseLink, target: "_blank", rel: "noopener noreferrer", text: m.licenseName || m.license }) : document.createTextNode(m.license)),
+    el("dt", { text: "Access" }), el("dd", { id: "hf-card-access", text: m.gated
+      ? `Gated (${m.gated === "manual" ? "the author approves each request" : "approved on request"}): accept the license on huggingface.co, then deploy with your Hugging Face access token`
+      : "Public" }),
+    el("dt", { text: "Downloads" }), el("dd", { text: `${Number(m.downloads).toLocaleString()} (last 30 days)` }),
+    el("dt", { text: "Likes" }), el("dd", { text: Number(m.likes).toLocaleString() }),
+    el("dt", { text: "Model size" }), el("dd", { id: "hf-card-size", text: m.weightsBytes ? `${formatBytes(m.weightsBytes)} of weights` : "No transformers weights" }),
+    m.parameters ? el("dt", { text: "Parameters" }) : null, m.parameters ? el("dd", { text: Number(m.parameters).toLocaleString() }) : null,
+    el("dt", { text: "Repository" }), el("dd", {}, el("a", { href: hubLink, target: "_blank", rel: "noopener noreferrer", text: `huggingface.co/${m.id}` }),
+      document.createTextNode(` · ${formatBytes(m.bytes)} in ${m.files.length} files · revision ${m.revision.slice(0, 12)}`)),
+    el("dt", { text: "Serving container" }), el("dd", { text: r.engineTitle || "None: " + r.unavailable }));
+
+  const deployable = r.deploys && !r.unavailable;
+  const deploy = el("button", { class: "primary", text: "Deploy", "data-action": "hf-deploy", disabled: deployable ? null : true,
+    "aria-describedby": deployable ? null : "hf-card-why" });
+  const why = deployable ? null : el("p", { class: "unavailable", id: "hf-card-why", text: r.deploys
+    ? `Deploy is unavailable: ${r.unavailable}.` : "Deploy needs the local AI endpoint: start the instance with a local AI model or with --services including run." });
+  const form = el("form", { id: "hf-deploy-form", class: "card", hidden: true, "aria-label": "Deploy model", autocomplete: "off" });
+  deploy.addEventListener("click", () => { form.hidden = false; const f = form.querySelector("input"); if (f) f.focus(); });
+
+  // Google's deploy panel: the Deployment environment is Agent Platform
+  // (an endpoint) or GKE, whose manifests Model Garden generates and
+  // applies to a chosen Kubernetes Engine cluster.
+  const envAP = el("input", { type: "radio", id: "hf-env-ap", name: "hf-env", value: "vertex", checked: true });
+  const envGKE = el("input", { type: "radio", id: "hf-env-gke", name: "hf-env", value: "gke" });
+  const env = el("fieldset", { id: "hf-env" }, el("legend", { text: "Deployment environment" }),
+    el("div", { class: "garden-filter" }, envAP,
+      el("label", { for: "hf-env-ap", text: "Agent Platform: a managed endpoint, served from this instance's Kubernetes cluster" })),
+    el("div", { class: "garden-filter" }, envGKE,
+      el("label", { for: "hf-env-gke", text: "GKE: deploy to a Kubernetes Engine cluster with the generated Kubernetes manifests" })));
+  // Google's Accelerator type (machine_spec.accelerator_type, #2155): the
+  // Apple GPU, which CloudBurrow serves as NVIDIA_L4, or none (CPU).
+  const acc = r.accelerators || { metal: false, default: "none", metalType: "NVIDIA_L4", cpuMachine: "local-cpu", metalMachine: "local-metal",
+    metalNote: "this instance runs no host runtime" };
+  const accSelect = el("select", { id: "hf-accelerator", name: "hf-accelerator", "aria-describedby": "hf-accelerator-note" },
+    el("option", { value: acc.metalType, disabled: acc.metal ? null : true,
+      text: `${METAL_LABEL}${acc.device ? " · " + acc.device : ""} (as ${acc.metalType})` }),
+    el("option", { value: "none", text: "None (CPU)" }));
+  accSelect.value = acc.metal && acc.default !== "none" ? acc.metalType : "none";
+  const accNote = el("p", { class: "unavailable", id: "hf-accelerator-note", role: "status" });
+  const machineDD = el("dd", { class: "mono", id: "hf-machine-type" });
+  const countDD = el("dd", { id: "hf-accelerator-count" });
+  const onAcc = () => {
+    const gpu = accSelect.value !== "none";
+    machineDD.textContent = gpu && acc.engineMetal ? acc.metalMachine : acc.cpuMachine;
+    countDD.textContent = gpu ? "1" : "0";
+    accNote.textContent = !acc.metal
+      ? `The Apple GPU is not available: ${acc.metalNote}.`
+      : gpu && !acc.engineMetal
+        ? `${r.engineTitle || "This runtime"} has no Metal build, so it runs on CPU in the instance's cluster; the Apple GPU serves GGUF (llama.cpp) and MLX (mlx-lm) models.`
+        : gpu ? `Runs on this Mac's GPU as a host process, reached by the cluster through a Service.` : "Runs on CPU in the instance's cluster.";
+  };
+  accSelect.addEventListener("change", onAcc);
+  onAcc();
+  const apFields = el("dl", { id: "hf-ap-fields" },
+    el("dt", {}, el("label", { for: "hf-accelerator", text: "Accelerator type" })), el("dd", {}, accSelect, accNote),
+    el("dt", { text: "Accelerator count" }), countDD,
+    el("dt", { text: "Machine type" }), machineDD,
+    el("dt", { text: "Serving container" }), el("dd", { text: r.engineTitle || "" }),
+    el("dt", { text: "Region" }), el("dd", { class: "mono", text: r.location }));
+  const gkeCluster = el("select", { id: "hf-gke-cluster", "aria-label": "Cluster" });
+  const gkeYAML = el("code", { id: "hf-gke-yaml" });
+  const gkeSteps = el("ol", { id: "hf-gke-steps" });
+  const gkeNote = el("p", { class: "unavailable", id: "hf-gke-note", role: "status" });
+  const gkeCopy = el("button", { type: "button", class: "secondary", id: "hf-gke-copy", text: "Copy YAML", onclick: async () => {
+    try { await navigator.clipboard.writeText(gkeYAML.textContent); announce("Copied"); } catch { announce("Copy is not available here"); }
+  } });
+  const gkeFields = el("div", { id: "hf-gke-fields", hidden: true },
+    el("label", { for: "hf-gke-cluster", text: "Cluster" }), gkeCluster, gkeNote,
+    el("h3", { text: "Deployment instructions" }), gkeSteps,
+    el("div", { class: "hf-yaml-head" }, el("span", { class: "mono", id: "hf-gke-file", text: "" }), gkeCopy),
+    el("pre", { class: "mono hf-yaml", tabindex: "0", "aria-label": "Kubernetes manifests" }, gkeYAML));
+  let gkeData = null;
+  const loadGKE = async () => {
+    const q = new URLSearchParams({ id: m.id, project: currentProject() });
+    const [name, loc] = (gkeCluster.value || "").split("|");
+    if (name) { q.set("cluster", name); q.set("location", loc); }
+    gkeNote.textContent = "Generating the deployment configuration…";
+    try { gkeData = await api("/api/ai/hf-hub/gke?" + q); } catch (err) { gkeNote.textContent = `[error] ${err.message}`; return; }
+    const keep = gkeCluster.value;
+    setChildren(gkeCluster, ...gkeData.clusters.map((c) => el("option", { value: `${c.name}|${c.location}`, disabled: c.status !== "RUNNING" ? true : null,
+      text: `${c.name} (${c.location})${c.status !== "RUNNING" ? " · " + c.status.toLowerCase() : ""}` })));
+    if (keep) gkeCluster.value = keep;
+    const running = gkeData.clusters.filter((c) => c.status === "RUNNING");
+    gkeNote.textContent = !gkeData.served ? "The Kubernetes Engine API is not served by this instance: start it with gke among --services to deploy here; the manifests can still be copied."
+      : running.length ? "" : "This project has no running Kubernetes Engine cluster. Create one on Kubernetes Engine's Clusters page, or copy the manifests.";
+    const p = gkeData.plan;
+    const steps = [`Connect kubectl to the cluster: gcloud container clusters get-credentials ${name || (running[0] || {}).name || "CLUSTER_NAME"} --location ${loc || (running[0] || {}).location || "LOCATION"}`];
+    if (p.secretCommand) steps.push(`Create the Hugging Face token Secret: ${p.secretCommand}`);
+    steps.push(`Save the manifests below as ${p.name}.yaml and apply them: ${p.applyCommand}`);
+    steps.push(`When the Deployment is available, send requests through the Service: ${p.forwardCommand}`);
+    setChildren(gkeSteps, ...steps.map((t) => el("li", { class: "mono", text: t })));
+    document.getElementById("hf-gke-file") && (document.getElementById("hf-gke-file").textContent = `${p.name}.yaml · ${p.engineTitle}`);
+    gkeYAML.textContent = p.yaml;
+    submit.disabled = !running.length;
+  };
+  gkeCluster.addEventListener("change", loadGKE);
+  const onEnv = () => {
+    const gke = envGKE.checked;
+    apFields.hidden = gke; gkeFields.hidden = !gke;
+    if (gke) loadGKE(); else submit.disabled = false;
+  };
+  envAP.addEventListener("change", onEnv);
+  envGKE.addEventListener("change", onEnv);
+  const fields = [el("h2", { text: `Deploy ${m.id}` }), env, apFields, gkeFields];
+  let accept = null, token = null;
+  if (m.gated) {
+    accept = el("input", { type: "checkbox", id: "hf-accept-eula", required: true });
+    token = el("input", { type: "password", id: "hf-token", name: "hf-token", required: true, autocomplete: "off", spellcheck: "false",
+      "aria-describedby": "hf-token-help", placeholder: "hf_…" });
+    fields.push(
+      el("p", { id: "hf-gated-note" }, document.createTextNode(`${m.id} is gated. `),
+        el("a", { href: hubLink, target: "_blank", rel: "noopener noreferrer", text: "Accept its license on huggingface.co" }),
+        document.createTextNode(" with your account first."), m.gatedPrompt ? el("span", { class: "unavailable", text: ` ${m.gatedPrompt}` }) : null),
+      el("div", { class: "garden-filter" }, accept, el("label", { for: "hf-accept-eula", text: `I have accepted the ${m.licenseName || m.license} license on Hugging Face` })),
+      el("label", { for: "hf-token", text: "Hugging Face access token" }), token,
+      el("p", { class: "unavailable", id: "hf-token-help", text: "A read token of the account that accepted the license. It is stored only " +
+        "in a Kubernetes Secret in the cluster the model runs on (hf-secret on a GKE cluster), which the serving pod reads; CloudBurrow never logs, keeps or shows it." }));
+  }
+  const submit = el("button", { class: "primary", type: "submit", text: "Deploy", "data-action": "hf-deploy-submit" });
+  fields.push(el("div", { class: "garden-actions" }, submit,
+    el("button", { class: "secondary", type: "button", text: "Cancel", onclick: () => { form.hidden = true; if (token) token.value = ""; } })), message);
+  setChildren(form, ...fields);
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const gke = envGKE.checked;
+    const body = { id: m.id, acceptEula: !!(accept && accept.checked) };
+    if (!gke) body.accelerator = accSelect.value;
+    if (gke) body.project = currentProject();
+    if (gke) { const [cluster, loc] = gkeCluster.value.split("|"); body.cluster = cluster; body.location = loc; }
+    if (token) body.hfToken = token.value.trim();
+    if (token) token.value = "";
+    submit.disabled = true;
+    message.textContent = gke ? "Applying the manifests to the cluster…" : "Deploying…";
+    try {
+      const resp = await fetch(gke ? "/api/ai/hf-hub/gke-deploy" : "/api/ai/hf-deployments/deploy",
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const text = await resp.text();
+      if (!resp.ok) throw new Error(errorMessageOf(text) || `HTTP ${resp.status}`);
+      const out = JSON.parse(text);
+      if (gke) {
+        message.textContent = `Deployment ${out.deployment} and Service ${out.deployment} were created on cluster ${out.cluster}.`;
+        announce(message.textContent);
+        navigate(out.workloads);
+        return;
+      }
+      navigate(`${AP_PATHS.endpoints}?endpoint=${encodeURIComponent(out.endpoint)}`);
+    } catch (err) {
+      message.textContent = `[error] ${err.message}`;
+      announce(err.message);
+      submit.disabled = false;
+    }
+  });
+
+  setChildren(view, header(),
+    el("nav", { class: "hf-crumbs", "aria-label": "Breadcrumb" },
+      el("a", { href: AP_PATHS.modelGarden, text: "Model Garden" }), el("span", { text: " › " }),
+      el("a", { href: hfGalleryPath(), text: "Hugging Face" }), el("span", { text: ` › ${m.id}` })),
+    el("section", { class: "card", id: "hf-card", "aria-label": m.id },
+      el("p", { class: "garden-tags" }, m.gated ? el("span", { class: "garden-tag hf-gated", text: "Gated" }) : null,
+        ...(m.tags || []).slice(0, 10).map((t) => el("span", { class: "garden-tag", text: t }))),
+      facts, el("div", { class: "garden-actions" }, deploy), why),
+    form,
+    el("section", { class: "card", "aria-label": "Model card" }, el("h2", { text: "Model card" }),
+      m.readme ? hfMarkdown(m.readme, m.id) : el("p", { class: "unavailable", text: "This model has no README." })));
+}
+
+// The section on Model Garden's main page: Google's "Open models on
+// Hugging Face" and its Show more, which opens the Hugging Face tab. The
+// page itself does not call huggingface.co: only the tab searches it.
+function drawHFHubSection(host) {
+  setChildren(host, el("h2", { text: "Open models on Hugging Face" }),
+    el("p", { class: "unavailable", text: "Deploy open models from Hugging Face: search every public model on huggingface.co by task, " +
+      "library and license, read its model card, and deploy it to an endpoint served from this instance's Kubernetes cluster." }),
+    el("div", { class: "garden-actions" }, el("button", { id: "hf-hub-show-more", class: "secondary", text: "Show more",
+      onclick: () => navigate(hfGalleryPath()) })));
+}
+
 async function renderModelGarden(view) {
   stopGardenPoll();
+  const gardenView = new URLSearchParams(location.search);
+  if (gardenView.get("view") === "hugging-face") {
+    return gardenView.get("model") ? renderHFHubModel(view, gardenView.get("model")) : renderHFGallery(view);
+  }
   const header = () => pageHeader("Model Garden",
     "Discover, test, customize and deploy models. Deploy is enabled for the models this machine runs.");
   let data;
@@ -18462,6 +18909,7 @@ async function renderModelGarden(view) {
   const grid = el("div", { class: "garden-cards", id: "garden-cards" });
   const count = el("p", { class: "unavailable", id: "garden-count", role: "status" });
   const hfPanel = el("section", { class: "card", id: "hf-panel", "aria-label": "Deploy from Hugging Face" });
+  const hfHub = el("section", { class: "card", id: "hf-hub", "aria-label": "Open models on Hugging Face" });
 
   const card = (m) => {
     const deploy = gardenDeployAction(m, again, fail);
@@ -18525,8 +18973,9 @@ async function renderModelGarden(view) {
     message,
     el("div", { class: "garden" }, filters,
       el("div", { class: "garden-main" }, search, count, grid)),
-    hfPanel);
+    hfHub, hfPanel);
   draw();
+  drawHFHubSection(hfHub);
   drawHFPanel(hfPanel);
 
   if (data.models.some((m) => m.localState && m.localState.state === "downloading")) {

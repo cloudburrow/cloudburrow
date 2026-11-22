@@ -26,11 +26,12 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
-// EnvHFDeploy opts in to TestModelGardenDeploysHuggingFaceModels. It
-// downloads about 1.3 GB of models from huggingface.co and runs the vLLM CPU
-// (about 5.5 GB) and Text Embeddings Inference CPU (about 0.7 GB, emulated on
-// arm64) images, which is more than a CI shard's download and disk budget,
-// so it is gated rather than run in every shard.
+// EnvHFDeploy opts in to TestModelGardenDeploysHuggingFaceModels. Its pods
+// download about 1.3 GB of models from huggingface.co and run the vLLM CPU
+// image (about 5.5 GB) beside Text Embeddings Inference's, which is more
+// than a CI shard's download and disk budget, so it is gated rather than
+// run in every shard. TestModelGardenDeploysAHubModelOnTheCluster (the
+// localai shard) deploys a 70 MB model on TEI in every run.
 const EnvHFDeploy = "CLOUDBURROW_TEST_HF_DEPLOY"
 
 // The models: small public ones, Apache-2.0 and MIT.
@@ -54,17 +55,17 @@ func gardenOpts(h *Harness, envVar string) []option.ClientOption {
 // shapes Google documents for Model Garden deployments (vLLM's "Prompt:
 // ... Output: ..." strings, TEI's vectors), RawPredict relays an OpenAI
 // completions body, StreamRawPredict streams chat completion events and
-// v1beta1 ChatCompletions answers the OpenAI chat body. A
-// hugging_face_access_token in the request is refused. Undeploy frees the
-// containers, and DeleteEndpoint and DeleteModel delete the rest; deleting
-// a deployed model is FAILED_PRECONDITION.
+// v1beta1 ChatCompletions answers the OpenAI chat body. Both run on the
+// instance's cluster (#2148). Undeploy frees the workloads, and
+// DeleteEndpoint and DeleteModel delete the rest; deleting a deployed model
+// is FAILED_PRECONDITION.
 func TestModelGardenDeploysHuggingFaceModels(t *testing.T) {
 	if os.Getenv(EnvHFDeploy) == "" {
 		t.Skipf("set %s=1 to deploy %s and %s from huggingface.co (about 1.3 GB of models and 6 GB of engine images)",
 			EnvHFDeploy, hfTextModel, hfEmbedModel)
 	}
 	h := New(t)
-	opts := gardenOpts(h, EnvPrediction)
+	opts := gardenOpts(h, EnvLocalAI)
 	// Deploying downloads the models and starts the engines: minutes, not
 	// the harness's 60-second context.
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Minute)
@@ -84,21 +85,13 @@ func TestModelGardenDeploysHuggingFaceModels(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = mc.Close() }) // after the cleanup below, which uses it
-	pc := predictionClientAt(t, h, EnvPrediction)
+	pc := predictionClientAt(t, h, EnvLocalAI)
 	bc, err := aiplatformbeta.NewPredictionClient(ctx, opts...)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = bc.Close() }) // after the cleanup below, which uses it
 	parent := runParent(h)
-
-	// A token in the request is refused before anything is created.
-	_, err = mg.Deploy(ctx, &aiplatformpb.DeployRequest{Destination: parent,
-		Artifacts:   &aiplatformpb.DeployRequest_HuggingFaceModelId{HuggingFaceModelId: hfTextModel},
-		ModelConfig: &aiplatformpb.DeployRequest_ModelConfig{HuggingFaceAccessToken: "hf_not-a-real-token"}})
-	if status.Code(err) != codes.InvalidArgument || !strings.Contains(err.Error(), "HF_TOKEN") || strings.Contains(err.Error(), "hf_not-a-real-token") {
-		t.Fatalf("Deploy with hugging_face_access_token = %v; want INVALID_ARGUMENT naming HF_TOKEN, without the token", err)
-	}
 
 	// Whatever a failed run leaves is removed: every compat-qwen or
 	// compat-bge endpoint, its deployed model and its model.

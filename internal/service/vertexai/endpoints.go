@@ -79,7 +79,7 @@ type endpointAnswer struct {
 // refusal is an answer, which the caller maps.
 func (s *Server) relay(ctx context.Context, project, location, endpoint string, body []byte, contentType string) (*endpointAnswer, error) {
 	if g := s.gardenEndpoint(project, location, endpoint); g != nil {
-		status, ct, out, err := g.RawPredict(ctx, project, location, endpoint, body)
+		status, ct, out, err := g.RawPredict(ctx, project, location, endpoint, body, contentType)
 		if err != nil {
 			return nil, err
 		}

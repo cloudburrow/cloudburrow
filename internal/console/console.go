@@ -2061,7 +2061,10 @@ type Server struct {
 	hfDeploy  HFDeployer
 	hfProject string
 	// market is the Marketplace (#2149, marketplace.go); nil offers none.
-	market  *Marketplace
+	market *Marketplace
+	// hfGKE lists the Kubernetes Engine clusters a model's GKE deployment
+	// can go to (#2148), nil when the API is not served.
+	hfGKE   HFGKE
 	metrics MetricsSource
 	// series is the retained history the charts draw. Nil means this
 	// instance keeps none, which the endpoint says rather than returning an
@@ -2206,6 +2209,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/ai/agent-garden", s.handleAgentGarden)
 	mux.HandleFunc("GET /api/ai/hf-models", s.handleHFModels)
 	mux.HandleFunc("GET /api/ai/hf-models/lookup", s.handleHFLookup)
+	mux.HandleFunc("GET /api/ai/hf-hub/models", s.handleHFHubSearch)
+	mux.HandleFunc("GET /api/ai/hf-hub/model", s.handleHFHubCard)
+	mux.HandleFunc("GET /api/ai/hf-hub/gke", s.handleHFGKEPlan)
+	mux.HandleFunc("POST /api/ai/hf-hub/gke-deploy", s.handleHFGKEDeploy)
 	mux.HandleFunc("POST /api/ai/hf-models/{action}", s.handleHFAction)
 	mux.HandleFunc("GET /api/ai/hf-deployments", s.handleHFDeployments)
 	mux.HandleFunc("POST /api/ai/hf-deployments/{action}", s.handleHFDeploymentAction)

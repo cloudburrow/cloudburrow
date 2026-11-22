@@ -64,8 +64,8 @@ func (s *Server) gardenEndpoint(project, location, endpoint string) *modelgarden
 }
 
 func gardenUnavailable() error {
-	return apierror.Unimplemented("Model Garden deployments are not served on this instance: they need the Hugging Face " +
-		"model cache and Docker (start with --services including run)")
+	return apierror.Unimplemented("Model Garden deployments are not served on this instance: they need the local AI " +
+		"endpoint (start with a local AI model, or --services including run)")
 }
 
 // parent parses projects/{p}/locations/{l}.
@@ -187,20 +187,34 @@ func (g *modelGardenService) Deploy(ctx context.Context, req *aiplatformpb.Deplo
 			"Model Garden picks for the model's task (vLLM or Text Embeddings Inference)"))
 	}
 	r := modelgarden.Request{Project: project, Location: location, HFModelID: req.GetHuggingFaceModelId(),
-		AcceptEULA: mc.GetAcceptEula(), TokenSet: mc.GetHuggingFaceAccessToken() != "",
+		AcceptEULA: mc.GetAcceptEula(), TokenSet: mc.GetHuggingFaceAccessToken() != "", HFToken: mc.GetHuggingFaceAccessToken(),
 		ModelDisplayName: mc.GetModelDisplayName(), ModelUserID: mc.GetModelUserId(),
 		EndpointDisplayName: ec.GetEndpointDisplayName(), EndpointUserID: ec.GetEndpointUserId(),
 		DedicatedDisabled: ec.GetDedicatedEndpointDisabled(),
 		MachineType:       dc.GetDedicatedResources().GetMachineSpec().GetMachineType(), Labels: dc.GetSystemLabels()}
+	// The machine spec's accelerator (#2155): a GPU type is the Apple GPU
+	// on an Apple silicon Mac.
+	if ms := dc.GetDedicatedResources().GetMachineSpec(); ms != nil {
+		if at := ms.GetAcceleratorType(); at != aiplatformpb.AcceleratorType_ACCELERATOR_TYPE_UNSPECIFIED {
+			r.AcceleratorType = at.String()
+		}
+		r.AcceleratorCount = ms.GetAcceleratorCount()
+	}
+	return g.deploy(ctx, m, req.GetDestination(), r)
+}
+
+// deploy prepares r and runs it in the background, under an operation.
+func (g *modelGardenService) deploy(ctx context.Context, m *modelgarden.Manager, destination string, r modelgarden.Request) (*longrunningpb.Operation, error) {
+	project, location := r.Project, r.Location
 	p, err := m.Prepare(ctx, r)
 	if err != nil {
 		return nil, grpcError(err)
 	}
-	name := g.s.newOp(req.GetDestination())
+	name := g.s.newOp(destination)
 	created := time.Now()
 	meta := func() *aiplatformpb.DeployOperationMetadata {
 		return &aiplatformpb.DeployOperationMetadata{GenericMetadata: genericMeta(created, time.Now()),
-			PublisherModel: p.PublisherModel, Destination: req.GetDestination(), ModelId: p.Model}
+			PublisherModel: p.PublisherModel, Destination: destination, ModelId: p.Model}
 	}
 	_ = g.s.ops.SetMetadata(name, meta())
 	go func() {
@@ -218,13 +232,31 @@ func (g *modelGardenService) Deploy(ctx context.Context, req *aiplatformpb.Deplo
 }
 
 // DeployHF runs Deploy for the console, returning the operation name and
-// the endpoint's resource name.
-func (s *Server) DeployHF(ctx context.Context, project, location, hfID string, acceptEULA bool) (op, endpoint string, err error) {
+// the endpoint's resource name. token is the deploy form's Hugging Face
+// access token, which goes into the workload's Secret and nowhere else;
+// runtime forces modelgarden.RuntimeDocker for a downloaded model.
+// accelerator is the form's Accelerator type: an accelerator type name
+// (modelgarden.MetalAcceleratorType, the Apple GPU), "none" for CPU, or ""
+// for the instance's default (#2155).
+func (s *Server) DeployHF(ctx context.Context, project, location, hfID string, acceptEULA bool, token, runtime, accelerator string) (op, endpoint string, err error) {
+	m := s.modelGarden()
+	if m == nil {
+		return "", "", gardenUnavailable()
+	}
 	g := &modelGardenService{s: s}
-	o, err := g.Deploy(ctx, &aiplatformpb.DeployRequest{
-		Artifacts:   &aiplatformpb.DeployRequest_HuggingFaceModelId{HuggingFaceModelId: hfID},
-		Destination: "projects/" + project + "/locations/" + location,
-		ModelConfig: &aiplatformpb.DeployRequest_ModelConfig{AcceptEula: acceptEULA}})
+	r := modelgarden.Request{Project: project, Location: location,
+		HFModelID: hfID, AcceptEULA: acceptEULA, TokenSet: token != "", HFToken: token, Runtime: runtime}
+	switch accelerator {
+	case "":
+	case "none":
+		r.MachineType = modelgarden.CPUMachineType
+	default:
+		if _, ok := aiplatformpb.AcceleratorType_value[accelerator]; !ok {
+			return "", "", apierror.InvalidArgument("accelerator type %q is not an accelerator type of Agent Platform", accelerator)
+		}
+		r.AcceleratorType, r.AcceleratorCount = accelerator, 1
+	}
+	o, err := g.deploy(ctx, m, "projects/"+project+"/locations/"+location, r)
 	if err != nil {
 		return "", "", err
 	}
@@ -254,10 +286,20 @@ func endpointProto(m *modelgarden.Manager, e modelgarden.Endpoint) *aiplatformpb
 		out.DeployedModels = []*aiplatformpb.DeployedModel{{Id: d.ID, Model: model.Name(), ModelVersionId: "1",
 			DisplayName: d.DisplayName, CreateTime: timestamppb.New(d.Created),
 			PredictionResources: &aiplatformpb.DeployedModel_DedicatedResources{DedicatedResources: &aiplatformpb.DedicatedResources{
-				MachineSpec: &aiplatformpb.MachineSpec{MachineType: d.MachineType}, MinReplicaCount: 1, MaxReplicaCount: 1}}}}
+				MachineSpec: machineSpec(d), MinReplicaCount: 1, MaxReplicaCount: 1}}}}
 		out.TrafficSplit = map[string]int32{d.ID: 100}
 	}
 	return out
+}
+
+// machineSpec is a deployed model's machine spec, with its accelerator
+// (#2155).
+func machineSpec(d *modelgarden.DeployedModel) *aiplatformpb.MachineSpec {
+	ms := &aiplatformpb.MachineSpec{MachineType: d.MachineType}
+	if v, ok := aiplatformpb.AcceleratorType_value[d.AcceleratorType]; ok && v != 0 {
+		ms.AcceleratorType, ms.AcceleratorCount = aiplatformpb.AcceleratorType(v), d.AcceleratorCount
+	}
+	return ms
 }
 
 func (es *endpointService) garden() (*modelgarden.Manager, error) {

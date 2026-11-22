@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 
 	"google.golang.org/grpc/codes"
@@ -31,16 +32,38 @@ import (
 //     body with "instances" is answered as :predict.
 //   - :streamRawPredict and v1beta1 .../chat/completions relay OpenAI
 //     bodies to vLLM, streaming its server-sent events when "stream" is set.
+//
+// The runtimes of #2148 map the same way:
+//
+//   - llama.cpp and mlx-lm are OpenAI-compatible servers, as vLLM is, and
+//     are mapped as vLLM is: :predict's prompt instances to completions
+//     (and chatCompletions instances to chat completions), :rawPredict and
+//     chat/completions relaying OpenAI bodies. A GGUF embedding model on
+//     llama.cpp takes TEI's {"inputs"} instances and answers one vector per
+//     input, through llama.cpp's /v1/embeddings. mlx-lm always serves the
+//     model it was started with: a body's "model" is replaced, so a request
+//     cannot make it load another repository.
+//   - The Hugging Face PyTorch Inference container and ONNX Runtime take
+//     the container's own :predict body ({"instances", "parameters"}, each
+//     instance the pipeline's inputs) and answer its predictions, as
+//     Google's container on Vertex AI does; :rawPredict relays the body,
+//     with its content type (an image or a WAV file is one instance), to
+//     the container's predict route and answers what it answered. They have
+//     no chat completions.
 
 // bodyLimit bounds an engine's answer.
 const bodyLimit = 32 << 20
 
 func (m *Manager) post(ctx context.Context, s Serving, route string, body []byte) (*http.Response, error) {
+	return m.postTyped(ctx, s, route, body, "application/json")
+}
+
+func (m *Manager) postTyped(ctx context.Context, s Serving, route string, body []byte, contentType string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.BaseURL+route, bytes.NewReader(body))
 	if err != nil {
 		return nil, apierror.Internal(err, "building the request: %v", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", contentType)
 	resp, err := m.client().Do(req)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -143,6 +166,20 @@ func (m *Manager) Predict(ctx context.Context, project, location, endpoint strin
 		}
 	}
 	out := predictResponse{DeployedModelID: s.DeployedModelID, Model: s.ModelName, ModelDisplayName: s.ModelDisplay, ModelVersionID: "1"}
+	if eng, _ := EngineByName(s.Engine); eng.Pipeline {
+		got, err := m.call(ctx, s, eng.PredictRoute, body)
+		if err != nil {
+			return nil, err
+		}
+		var p struct {
+			Predictions []json.RawMessage `json:"predictions"`
+		}
+		if err := json.Unmarshal(got, &p); err != nil || p.Predictions == nil {
+			return nil, apierror.Internal(err, "the %s container answered something that is not predictions", eng.Title)
+		}
+		out.Predictions = p.Predictions
+		return json.Marshal(out)
+	}
 	for i, raw := range req.Instances {
 		var inst map[string]any
 		if err := json.Unmarshal(raw, &inst); err != nil || inst == nil {
@@ -154,11 +191,13 @@ func (m *Manager) Predict(ctx context.Context, project, location, endpoint strin
 			}
 		}
 		var p json.RawMessage
-		switch s.Engine {
-		case EngineVLLM:
+		switch {
+		case s.Engine == EngineTEI:
+			p, err = m.teiInstance(ctx, s, i, inst, "/embed")
+		case s.embeddings():
+			p, err = m.teiInstance(ctx, s, i, inst, "/v1/embeddings")
+		case s.openAI():
 			p, err = m.vllmInstance(ctx, s, i, inst)
-		case EngineTEI:
-			p, err = m.teiInstance(ctx, s, i, inst)
 		default:
 			err = apierror.Internal(nil, "unknown engine %q", s.Engine)
 		}
@@ -180,9 +219,10 @@ func (m *Manager) vllmInstance(ctx context.Context, s Serving, i int, inst map[s
 			return nil, apierror.InvalidArgument("instances[%d]: a chatCompletions instance needs messages", i)
 		}
 		inst["stream"] = false
-		if name, _ := inst["model"].(string); name == "" {
-			inst["model"] = s.ServedModel
+		if name, _ := inst["model"].(string); name == "" || s.Engine == EngineMLX {
+			inst["model"] = s.servedName()
 		}
+		s.pin(inst)
 		b, _ := json.Marshal(inst)
 		return m.call(ctx, s, "/v1/chat/completions", b)
 	}
@@ -200,8 +240,9 @@ func (m *Manager) vllmInstance(ctx context.Context, s Serving, i int, inst map[s
 	raw, _ := inst["raw_response"].(bool)
 	delete(inst, "raw_response")
 	delete(inst, "lora_id")
-	inst["model"] = s.ServedModel
+	inst["model"] = s.servedName()
 	inst["stream"] = false
+	s.pin(inst)
 	b, _ := json.Marshal(inst)
 	got, err := m.call(ctx, s, "/v1/completions", b)
 	if err != nil {
@@ -213,7 +254,7 @@ func (m *Manager) vllmInstance(ctx context.Context, s Serving, i int, inst map[s
 		} `json:"choices"`
 	}
 	if err := json.Unmarshal(got, &c); err != nil || len(c.Choices) == 0 {
-		return nil, apierror.Internal(err, "vLLM answered something that is not a completion")
+		return nil, apierror.Internal(err, "%s answered something that is not a completion", s.title())
 	}
 	text := c.Choices[0].Text
 	if !raw {
@@ -222,7 +263,7 @@ func (m *Manager) vllmInstance(ctx context.Context, s Serving, i int, inst map[s
 	return json.Marshal(text)
 }
 
-func (m *Manager) teiInstance(ctx context.Context, s Serving, i int, inst map[string]any) (json.RawMessage, error) {
+func (m *Manager) teiInstance(ctx context.Context, s Serving, i int, inst map[string]any, route string) (json.RawMessage, error) {
 	in, ok := inst["inputs"]
 	if !ok {
 		return nil, apierror.InvalidArgument("instances[%d].inputs is required: a string or a list of strings to embed", i)
@@ -238,16 +279,83 @@ func (m *Manager) teiInstance(ctx context.Context, s Serving, i int, inst map[st
 	default:
 		return nil, apierror.InvalidArgument("instances[%d].inputs must be a string or a list of strings", i)
 	}
-	b, _ := json.Marshal(inst)
-	return m.call(ctx, s, "/embed", b)
+	if route == "/embed" {
+		b, _ := json.Marshal(inst)
+		return m.call(ctx, s, route, b)
+	}
+	// llama.cpp's OpenAI embeddings, answered as TEI answers: one vector
+	// per input.
+	b, _ := json.Marshal(map[string]any{"model": s.servedName(), "input": in})
+	got, err := m.call(ctx, s, route, b)
+	if err != nil {
+		return nil, err
+	}
+	var e struct {
+		Data []struct {
+			Index     int             `json:"index"`
+			Embedding json.RawMessage `json:"embedding"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(got, &e); err != nil || len(e.Data) == 0 {
+		return nil, apierror.Internal(err, "llama.cpp answered something that is not embeddings")
+	}
+	sort.Slice(e.Data, func(a, b int) bool { return e.Data[a].Index < e.Data[b].Index })
+	vecs := make([]json.RawMessage, len(e.Data))
+	for j, d := range e.Data {
+		vecs[j] = d.Embedding
+	}
+	return json.Marshal(vecs)
+}
+
+// openAI reports whether the endpoint's engine is an OpenAI-compatible
+// server.
+func (s Serving) openAI() bool {
+	e, _ := EngineByName(s.Engine)
+	return e.OpenAI
+}
+
+// embeddings reports whether the endpoint serves an embedding model on an
+// OpenAI-compatible server (a GGUF embedding model on llama.cpp).
+func (s Serving) embeddings() bool {
+	return s.Engine == EngineLlamaCpp && (s.Task == "feature-extraction" || s.Task == "sentence-similarity")
+}
+
+func (s Serving) title() string {
+	e, _ := EngineByName(s.Engine)
+	return e.Title
+}
+
+// servedName is the model name the engine serves under: the Hugging Face
+// ID (vLLM's --served-model-name, llama.cpp's --alias), or mlx-lm's
+// "default_model", the model it was started with.
+func (s Serving) servedName() string {
+	if s.Engine == EngineMLX {
+		return "default_model"
+	}
+	return s.ServedModel
+}
+
+// pin keeps an mlx-lm request on the model it serves: mlx-lm loads the
+// model, adapter or draft model a request names, from the Hub if need be.
+func (s Serving) pin(fields map[string]any) {
+	if s.Engine != EngineMLX {
+		return
+	}
+	fields["model"] = "default_model"
+	delete(fields, "adapters")
+	delete(fields, "adapter")
+	delete(fields, "draft_model")
 }
 
 // RawPredict answers :rawPredict: status, content type and body as the
 // engine answered.
-func (m *Manager) RawPredict(ctx context.Context, project, location, endpoint string, body []byte) (int, string, []byte, error) {
+func (m *Manager) RawPredict(ctx context.Context, project, location, endpoint string, body []byte, contentType string) (int, string, []byte, error) {
 	s, err := m.Target(project, location, endpoint)
 	if err != nil {
 		return 0, "", nil, err
+	}
+	if eng, _ := EngineByName(s.Engine); eng.Pipeline {
+		return m.relayRaw(ctx, s, eng.PredictRoute, body, contentType)
 	}
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(body, &fields); err != nil {
@@ -264,7 +372,16 @@ func (m *Manager) RawPredict(ctx context.Context, project, location, endpoint st
 	if err != nil {
 		return 0, "", nil, err
 	}
-	resp, err := m.post(ctx, s, route, body)
+	return m.relayRaw(ctx, s, route, body, "application/json")
+}
+
+// relayRaw posts body to route with its content type and answers the
+// engine's status, content type and body.
+func (m *Manager) relayRaw(ctx context.Context, s Serving, route string, body []byte, contentType string) (int, string, []byte, error) {
+	if contentType == "" {
+		contentType = "application/json"
+	}
+	resp, err := m.postTyped(ctx, s, route, body, contentType)
 	if err != nil {
 		return 0, "", nil, err
 	}
@@ -292,22 +409,35 @@ func openAIRoute(s Serving, fields map[string]json.RawMessage, stream bool) (str
 		if stream {
 			return "", nil, apierror.FailedPrecondition("Text Embeddings Inference does not stream; use :predict or :rawPredict")
 		}
-	case EngineVLLM:
+	case EngineVLLM, EngineLlamaCpp, EngineMLX:
 		if _, ok := fields["messages"]; ok {
 			route = "/v1/chat/completions"
 		} else if _, ok := fields["prompt"]; ok {
 			route = "/v1/completions"
+		} else if _, ok := fields["input"]; ok && s.embeddings() {
+			route = "/v1/embeddings"
 		} else {
-			return "", nil, apierror.InvalidArgument(`a vLLM endpoint takes an OpenAI chat completions body ({"messages": [...]}), ` +
-				`a completions body ({"prompt": ...}) or {"instances": [...]}`)
+			return "", nil, apierror.InvalidArgument(`a %s endpoint takes an OpenAI chat completions body ({"messages": [...]}), `+
+				`a completions body ({"prompt": ...}) or {"instances": [...]}`, s.title())
+		}
+		if s.embeddings() && route != "/v1/embeddings" {
+			return "", nil, apierror.FailedPrecondition("the endpoint serves an embedding model on llama.cpp, which takes "+
+				`{"input": ...} or {"instances": [{"inputs": ...}]}, not %s`, route)
 		}
 		var name string
-		if raw, ok := fields["model"]; !ok || json.Unmarshal(raw, &name) != nil || name == "" {
-			fields["model"], _ = json.Marshal(s.ServedModel)
+		if raw, ok := fields["model"]; !ok || json.Unmarshal(raw, &name) != nil || name == "" || s.Engine == EngineMLX {
+			fields["model"], _ = json.Marshal(s.servedName())
+		}
+		if s.Engine == EngineMLX {
+			delete(fields, "adapters")
+			delete(fields, "adapter")
+			delete(fields, "draft_model")
 		}
 		if stream {
 			fields["stream"] = json.RawMessage("true")
 		}
+	default:
+		return "", nil, apierror.FailedPrecondition("the %s container has no OpenAI-compatible routes; use :predict or :rawPredict", s.title())
 	}
 	b, err := json.Marshal(fields)
 	return route, b, err
@@ -326,9 +456,17 @@ func (m *Manager) Stream(ctx context.Context, project, location, endpoint string
 	if err := json.Unmarshal(body, &fields); err != nil {
 		return apierror.InvalidArgument("the request body is not a JSON object: %v", err)
 	}
-	if s.Engine == EngineTEI && !forceStream {
+	if (s.Engine == EngineTEI || s.embeddings()) && !forceStream {
 		if _, ok := fields["messages"]; ok {
-			return apierror.FailedPrecondition("endpoint %s serves a Text Embeddings Inference model, which has no chat completions", endpoint)
+			return apierror.FailedPrecondition("endpoint %s serves an embedding model on %s, which has no chat completions", endpoint, s.title())
+		}
+	}
+	if eng, _ := EngineByName(s.Engine); eng.Pipeline {
+		if !forceStream {
+			return apierror.FailedPrecondition("endpoint %s serves a %s model, which has no chat completions", endpoint, eng.Title)
+		}
+		if _, ok := fields["instances"]; !ok {
+			return apierror.InvalidArgument(`the %s container takes {"instances": [...], "parameters": {...}}`, eng.Title)
 		}
 	}
 	if _, ok := fields["instances"]; ok && forceStream {
@@ -338,7 +476,7 @@ func (m *Manager) Stream(ctx context.Context, project, location, endpoint string
 		}
 		return emit("application/json", out)
 	}
-	if s.Engine == EngineVLLM && !forceStream {
+	if s.openAI() && !s.embeddings() && !forceStream {
 		if _, ok := fields["messages"]; !ok {
 			return apierror.InvalidArgument("messages is required")
 		}

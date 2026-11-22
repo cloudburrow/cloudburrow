@@ -1266,7 +1266,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	localAISrv = withPredictionEndpoints(cfg, localAISrv, runSvc, ingressAddr)
 	// Model Garden's Hugging Face downloads (#1840), shared by the console
 	// and ModelGardenService.Deploy, which serves them on that endpoint.
-	hfModels, garden := modelGardenFor(cfg, localAISrv)
+	hfModels, garden := modelGardenFor(cfg, localAISrv, loggingSvc)
 	// Document AI's processors and Speech-to-Text's recognizers (#1799),
 	// which ML.PROCESS_DOCUMENT and ML.TRANSCRIBE name, are kept with the
 	// instance's state.
