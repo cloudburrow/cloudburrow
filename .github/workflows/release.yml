@@ -381,8 +381,10 @@ jobs:
           # The Linux storage server every CLI embeds, whatever its own
           # platform: `up` builds the in-cluster image from it (#514).
           for arch in amd64 arm64; do
-            GOOS=linux GOARCH=$arch CGO_ENABLED=0 go build -trimpath \
-              -ldflags "-s -w -X 'github.com/cloudburrow/cloudburrow/internal/version.version=${VERSION}'" \
+            # Reproducibly, as `make storage-binaries` (#2152): the image
+            # tag is the binary's content hash.
+            GOOS=linux GOARCH=$arch CGO_ENABLED=0 go build -trimpath -buildvcs=false \
+              -ldflags "-s -w -buildid=" \
               -o "internal/storageimage/bin/cloudburrow-storage-linux-${arch}" ./cmd/cloudburrow-storage
           done
           # The patched BigQuery emulator every CLI embeds (#1061), which

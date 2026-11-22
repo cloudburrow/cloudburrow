@@ -58,6 +58,9 @@ Commands:
   events      Print a running up's recent admin events, newest first
               (--service, --kind, --since, --limit, --format json)
   delete      Destroy the cluster CloudBurrow created
+  gc          List, and with --yes remove, Docker images and volumes past
+              CloudBurrow builds left behind (stop and delete remove an
+              instance's own)
   version     Print version information
   help        Print this message
 
@@ -157,6 +160,13 @@ func run(args []string, stdout, stderr io.Writer) error {
 			return printCommandHelp(stdout, "delete")
 		}
 		return runDelete(args[1:], stdout, stderr)
+
+	case "gc":
+		if hasHelpFlag(args[1:]) {
+			fmt.Fprint(stdout, "Usage: cloudburrow gc [--yes]\n\n"+gcHelp)
+			return nil
+		}
+		return runGC(context.Background(), args[1:], stdout, stderr)
 
 	case "env":
 		if hasHelpFlag(args[1:]) {

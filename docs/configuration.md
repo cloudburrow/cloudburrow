@@ -58,11 +58,12 @@ application pods get no host mounts, no Docker socket and no privileged mode by 
 | `logs` | Print emulator, component and Cloud Run workload logs. **Changes nothing.** |
 | `state save <file>` / `state load <file>` | Save the running instance's Cloud Storage, Cloud Tasks, Cloud Scheduler, Secret Manager, project and Cloud SQL (PostgreSQL) state to an archive, or replace it with one. See [compatibility.md](compatibility.md#state-snapshots) for what is captured. **The archive holds secret values.** |
 | `status` | Report the configured instance, its endpoints, and per-service persistence. `--format json` for a script (below). |
-| `stop` | End the running `up`, if any, then stop the cluster **without destroying it.** State a backend persists survives. |
+| `stop` | End the running `up`, if any, then stop the cluster **without destroying it.** State a backend persists survives. The images CloudBurrow built into the host's Docker for the instance are removed ([Docker images and volumes](#docker-images-and-volumes)). |
 | `reset` | Destroy CloudBurrow-managed state, **keeping the cluster.** Cancels work before deleting state. With an `up` running it goes through the [admin API](#admin-api) (`--service`, `--project`, `--reseed`), so pods and port-forwards stay up; with none running it deletes the managed namespace. |
 | `seed <file>` | Create the resources in a [seed document](#admin-api) in the running `up`. `--if-not-exists` skips resources that exist. |
 | `events` | Print the running `up`'s recent [admin events](#admin-api), newest first (`--service`, `--kind`, `--since 10m`, `--limit`, `--format json`). **Changes nothing.** |
 | `delete` | Destroy the cluster CloudBurrow created. |
+| `gc` | List the Docker images and volumes past CloudBurrow builds left behind; `--yes` removes them. See [Docker images and volumes](#docker-images-and-volumes). |
 | `storage-server` | Run CloudBurrow's own Cloud Storage server alone (`--listen`, default `127.0.0.1:4443`; `--host` for virtual-hosted XML; `--allow-remote` for a non-loopback address). It is built to Google's spec (#485) and is what `up` runs in the cluster (#514, #519): every JSON API method from Google's discovery document is routed, and each one not built answers **501 `notImplemented`** naming it; XML requests answer an XML `<Error>`. It is the Cloud Storage `up` serves; methods it has not built answer 501, and [compatibility.md](compatibility.md) lists which are Verified. |
 
 ### Running in the background
@@ -556,6 +557,44 @@ digest**, and **matches the node architecture**. An `amd64` image on `arm64` nod
 reported as an architecture mismatch with the `--platform` flag to fix it, rather than
 surfacing later as an opaque `ImagePullBackOff`.
 
+## Docker images and volumes
+
+`up` builds images into the host's Docker: the builtin Cloud Storage server's and the BigQuery
+emulator's, Compute Engine VM images, Cloud Run source builds and Cloud Build outputs
+(`dev.local/<image URI>`, such as `dev.local/us-central1-docker.pkg.dev/...`), and Dataproc
+custom containers (`cloudburrow.local/spark-container:...`). Before #2152 nothing removed them,
+and every `up` built a new 113 MB storage image.
+
+- **Content-addressed.** The storage and BigQuery images are tagged with the hash of the
+  embedded binary and the pinned base (`dev.local/cloudburrow-storage:<16 hex>`). The storage
+  server is built reproducibly (`-buildvcs=false`, an empty build ID, no build date), so the
+  same sources give the same tag whatever the commit, worktree or time, and `up` reuses an
+  image that exists without rebuilding it. Identical builds in two worktrees share one image.
+- **Labelled.** Every image CloudBurrow builds or loads for an instance carries
+  `io.cloudburrow.instance=<name>`, as does every volume it creates, the anonymous volume of a
+  buildpacks build's throwaway registry included (Cloud Build's workspace volumes keep their
+  `cloudburrow.instance=<name>`). `docker image ls --filter label=io.cloudburrow.instance=<name>`
+  lists an instance's images.
+- **Removed on `stop` and `delete`.** Once the cluster is stopped or deleted, the instance's
+  labelled images and volumes are removed: the cluster's nodes keep what was loaded into them,
+  and the next `up` rebuilds the rest. An image stays while any container uses it, or while
+  another running instance's nodes hold it (a shared storage image); that instance's own `stop`
+  removes it later. Removal is never forced, and nothing without CloudBurrow's labels is
+  touched. What could not be removed is printed, and `stop` and `delete` still succeed.
+- **`cloudburrow gc`** lists what older builds left: images with no instance label under
+  CloudBurrow's own repositories (`dev.local/cloudburrow-*`, `cloudburrow.local/*`,
+  `cloudburrow-vm-*`, and `dev.local/` followed by an Artifact Registry
+  (`*-docker.pkg.dev`) or Container Registry (`[region.]gcr.io`) host), images labelled
+  `cloudburrow.dev/owned=true`, and images and volumes labelled for an instance whose cluster no
+  longer exists. `cloudburrow gc --yes` removes them. It skips any image a container uses
+  (running or not) or a running instance's nodes hold, every image with any other tag (your own
+  `dev.local/myapp:1` among them), and untagged images without a CloudBurrow label.
+
+Not removed: images pulled rather than built (the kind node image, the distroless base, Cloud
+Build step images such as `gcr.io/cloud-builders/docker`, backend images), which carry no
+CloudBurrow label and may be yours; and the machine-wide BigQuery ML TensorFlow converter and
+video decoder images, which `prefetch` builds for offline use and every instance shares.
+
 ## Ownership and safety
 
 - CloudBurrow only ever acts on clusters named `cloudburrow` or `cloudburrow-<name>`. The
@@ -564,6 +603,9 @@ surfacing later as an opaque `ImagePullBackOff`.
   kubecontext**. `kubectl` behaves identically before and after.
 - A failed `up` cleans up the partial cluster it created, and nothing else.
 - `delete` removes only its own kubeconfig file.
+- `stop`, `delete` and `gc` remove only Docker images and volumes carrying CloudBurrow's labels
+  or repositories, never forced, and never one a container uses
+  ([Docker images and volumes](#docker-images-and-volumes)).
 
 ## Settings
 

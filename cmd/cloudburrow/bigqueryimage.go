@@ -26,14 +26,16 @@ type bigQueryImageComponent struct {
 	out        io.Writer
 }
 
-func newBigQueryImageComponent(kubeconfig, cluster string, comps *components.LifecycleComponent, out io.Writer) *bigQueryImageComponent {
+func newBigQueryImageComponent(kubeconfig, cluster, instance string, comps *components.LifecycleComponent, out io.Writer) *bigQueryImageComponent {
 	r := images.ExecRunner{}
 	return &bigQueryImageComponent{
 		kubeconfig: kubeconfig,
 		loader:     &images.Loader{ClusterName: cluster, Runner: r},
-		build:      func(ctx context.Context, arch string) (string, error) { return bigqueryimage.Build(ctx, r, arch) },
-		comps:      comps,
-		out:        out,
+		build: func(ctx context.Context, arch string) (string, error) {
+			return bigqueryimage.Build(ctx, r, arch, instance)
+		},
+		comps: comps,
+		out:   out,
 	}
 }
 

@@ -2659,9 +2659,10 @@ var parityRows = []parityRow{
 	{Resource: "Stopping and destroying",
 		Commands: []string{"stop", "delete"},
 		Excluded: "ends the process that serves the console (stop) or destroys the cluster it runs on (delete); neither page could report its own outcome"},
-	{Resource: "Workstation checks and offline cache",
-		Commands: []string{"doctor", "prefetch"},
-		Excluded: "run before an instance exists, to check prerequisites or fill the offline cache `up --offline` reads; a running instance's health is the dashboard's Components card"},
+	{Resource: "Workstation checks, offline cache and Docker cleanup",
+		Commands: []string{"doctor", "prefetch", "gc"},
+		Excluded: "run before an instance exists, to check prerequisites or fill the offline cache `up --offline` reads, or with none, " +
+			"to remove the host Docker images past instances left (gc, #2152); a running instance's health is the dashboard's Components card"},
 	{Resource: "Trust and lifecycle hooks",
 		Commands: []string{"trust"},
 		Excluded: "trusting ./cloudburrow.json and its hooks lets `up` run host scripts; that decision stays at the terminal of whoever owns the checkout, so no page can grant it"},

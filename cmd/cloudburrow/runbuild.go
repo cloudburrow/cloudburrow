@@ -23,6 +23,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/buildpacks"
 	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/dockergc"
 	"github.com/cloudburrow/cloudburrow/internal/images"
 	"github.com/cloudburrow/cloudburrow/internal/service/storage"
 
@@ -194,7 +195,10 @@ func (b *localImageBuilder) docker(ctx context.Context, spec runadapter.BuildSpe
 	if err != nil {
 		return fmt.Errorf("read the cluster's node architecture: %w", err)
 	}
-	args := []string{"build", "--platform", "linux/" + arch, "-t", spec.LocalImage, "-f", dockerfile}
+	// The label is the instance's, whose stop or delete removes the image
+	// (#2152).
+	args := append(append([]string{"build", "--platform", "linux/" + arch}, dockergc.LabelArgs(b.cfg.Name)...),
+		"-t", spec.LocalImage, "-f", dockerfile)
 	for _, a := range spec.BuildArgs {
 		args = append(args, "--build-arg", a)
 	}
@@ -242,8 +246,13 @@ func (b *localImageBuilder) pack(ctx context.Context, spec runadapter.BuildSpec,
 	}
 	port := ln.Addr().(*net.TCPAddr).Port
 	_ = ln.Close()
-	if out, err := exec.CommandContext(ctx, "docker", "run", "-d", "--name", name, "--network", network,
-		"-p", fmt.Sprintf("127.0.0.1:%d:5000", port), buildRegistryImage).CombinedOutput(); err != nil {
+	// The registry image declares a volume; it is mounted here as one
+	// labelled for the instance, so a registry this process never removed
+	// (killed mid-build) goes with the instance's stop (#2152).
+	runArgs := append([]string{"run", "-d", "--name", name, "--network", network}, dockergc.LabelArgs(b.cfg.Name)...)
+	runArgs = append(runArgs, "--mount", "type=volume,dst=/var/lib/registry,volume-label="+dockergc.Label(b.cfg.Name),
+		"-p", fmt.Sprintf("127.0.0.1:%d:5000", port), buildRegistryImage)
+	if out, err := exec.CommandContext(ctx, "docker", runArgs...).CombinedOutput(); err != nil {
 		return fmt.Errorf("start the build registry: %v\n%s", err, out)
 	}
 	defer exec.Command("docker", "rm", "-f", "-v", name).Run()
@@ -273,8 +282,12 @@ func (b *localImageBuilder) pack(ctx context.Context, spec runadapter.BuildSpec,
 		return fmt.Errorf("pull the built image: %v\n%s", err, out)
 	}
 	defer exec.Command("docker", "image", "rm", pulled).Run()
-	if out, err := exec.CommandContext(ctx, "docker", "tag", pulled, spec.LocalImage).CombinedOutput(); err != nil {
-		return fmt.Errorf("tag the built image: %v\n%s", err, out)
+	// The local image is the pulled one labelled for the instance: a
+	// Dockerfile of FROM and LABEL adds no layer (#2152).
+	label := exec.CommandContext(ctx, "docker", "build", "--platform", buildpacks.BuilderPlatform, "-t", spec.LocalImage, "-")
+	label.Stdin = strings.NewReader(dockergc.LabelDockerfile(pulled, b.cfg.Name))
+	if out, err := label.CombinedOutput(); err != nil {
+		return fmt.Errorf("tag the built image: %v\n%s", err, tailLines(string(out), 10))
 	}
 	return nil
 }

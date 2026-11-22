@@ -31,10 +31,17 @@ help:
 	@grep -E '^## [a-z-]+:' $(MAKEFILE_LIST) | sed 's/## /  /' | sort
 
 ## storage-binaries: Cross-build the Linux storage server the CLI embeds (#514)
+# Reproducibly (#2152): the storage image's tag is the binary's content
+# hash, so the same sources must give the same bytes whatever the commit,
+# worktree or time. -buildvcs=false drops the commit and its time, and an
+# empty build ID drops the hash of the flags, which held the build date: with
+# them every `make build` gave `up` a new 113 MB image to build. The storage
+# server does not link internal/version, so it loses no version string.
+STORAGE_LDFLAGS := -s -w -buildid=
 .PHONY: storage-binaries
 storage-binaries:
 	for arch in amd64 arm64; do \
-		CGO_ENABLED=0 GOOS=linux GOARCH=$$arch go build -trimpath -ldflags "$(LDFLAGS)" \
+		CGO_ENABLED=0 GOOS=linux GOARCH=$$arch go build -trimpath -buildvcs=false -ldflags "$(STORAGE_LDFLAGS)" \
 			-o internal/storageimage/bin/cloudburrow-storage-linux-$$arch ./cmd/cloudburrow-storage || exit 1; \
 	done
 
