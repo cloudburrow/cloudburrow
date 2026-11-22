@@ -212,6 +212,8 @@ func TestGKELogsAcrossRestart(t *testing.T) {
 	lc := gkeLoggingClient(t, h)
 	g, _ := gkeClients(t, h)
 	ctx := context.Background()
+	// The setup's project, which the harness may not name again.
+	project := strings.Split(p.Cluster, "/")[1]
 	switch expect {
 	case "absent":
 		if _, err := g.GetCluster(ctx, &containerpb.GetClusterRequest{Name: p.Cluster}); status.Code(err) != codes.NotFound {
@@ -224,12 +226,12 @@ func TestGKELogsAcrossRestart(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		if op, err := g.DeleteCluster(context.Background(), &containerpb.DeleteClusterRequest{Name: p.Cluster}); err == nil {
-			gkeWait(t, g, h.Project(), gkeLogsRestartZone, op)
+			gkeWait(t, g, project, gkeLogsRestartZone, op)
 		}
 	})
 	last := gkeLastTick(t, p.Kubeconfig, p.Tick)
 	var got map[int]*gkeTick
-	if !gkeEventually(120*time.Second, func() bool { got = gkeTicks(ctx, t, lc, h.Project(), p.Tick); return got[last] != nil }) {
+	if !gkeEventually(120*time.Second, func() bool { got = gkeTicks(ctx, t, lc, project, p.Tick); return got[last] != nil }) {
 		t.Fatalf("tick %d, written after the restart, is not in Cloud Logging (%d ticks are)", last, len(got))
 	}
 	first := last
