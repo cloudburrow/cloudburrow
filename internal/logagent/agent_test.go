@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -234,5 +235,30 @@ func TestConfigNext(t *testing.T) {
 	back, err := ParseConfig(on.Marshal())
 	if err != nil || back.Marshal() != on.Marshal() {
 		t.Errorf("round trip: %v %v", back, err)
+	}
+}
+
+// TestAgentNewFileNeverTakesAReusedInodesPosition (#2100): a position left
+// by a file deleted while the agent was stopped is not taken by another
+// container's file that reuses its inode.
+func TestAgentNewFileNeverTakesAReusedInodesPosition(t *testing.T) {
+	root, file, c := setup(t)
+	now := t0.Add(time.Hour)
+	s := &sink{}
+	appendFile(t, file, criLine(t0, "stdout", "F", "first"))
+	id, _ := fileID(file)
+	other := filepath.Join(root, "default_web-2_u2", "app", "0.log")
+	if err := os.MkdirAll(filepath.Dir(other), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	appendFile(t, other, criLine(t0, "stdout", "F", "second"))
+	a := newAgent(root, c, s, &now)
+	// A stale position under the other file's inode but the first's directory.
+	_, oid := filepath.Split(func() string { o, _ := fileID(other); return o }())
+	a.pos = map[string]int64{filepath.Dir(file) + "#" + oid[strings.LastIndex(oid, "#")+1:]: 1000}
+	a.Round(context.Background())
+	got := s.texts()
+	if len(got) != 2 {
+		t.Fatalf("shipped %q, want both lines (positions %v, first file %s)", got, a.pos, id)
 	}
 }

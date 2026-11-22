@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"os"
 	"path/filepath"
@@ -252,14 +253,18 @@ func containerFiles(dir string) []string {
 	return out
 }
 
-// fileID is a file's inode, which a rotation keeps, and its size.
+// fileID is a file's key in the position file, and its size: its
+// container's directory and its inode, which a rotation keeps. The
+// directory is part of it because a node reuses a deleted file's inode,
+// and a new pod's log must not take the position of one deleted while the
+// agent was not running.
 func fileID(path string) (string, int64) {
 	fi, err := os.Stat(path)
 	if err != nil {
 		return "", 0
 	}
 	if st, ok := fi.Sys().(*syscall.Stat_t); ok {
-		return strconv.FormatUint(uint64(st.Ino), 10), fi.Size()
+		return filepath.Dir(path) + "#" + strconv.FormatUint(uint64(st.Ino), 10), fi.Size()
 	}
 	return path, fi.Size()
 }
@@ -340,7 +345,7 @@ func (a *Agent) ship(ctx context.Context, path, id string, cfg Config, src Sourc
 			}
 		}
 		if e.InsertId == "" {
-			e.InsertId = a.Node + "-" + id + "-" + strconv.FormatInt(next-int64(len(line)), 16)
+			e.InsertId = insertID(a.Node, id, next-int64(len(line)))
 		}
 		batch = append(batch, e)
 		size += len(text) + 512
@@ -351,4 +356,12 @@ func (a *Agent) ship(ctx context.Context, path, id string, cfg Config, src Sourc
 		}
 	}
 	return flush()
+}
+
+// insertID is a line's insertId: its node, file and offset, the same each
+// time it is shipped.
+func insertID(node, id string, offset int64) string {
+	h := fnv.New64a()
+	h.Write([]byte(node + "\x00" + id))
+	return strconv.FormatUint(h.Sum64(), 36) + "-" + strconv.FormatInt(offset, 36)
 }
