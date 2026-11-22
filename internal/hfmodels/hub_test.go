@@ -220,3 +220,24 @@ func TestHubLive(t *testing.T) {
 		t.Errorf("card of %s: revision %q, weights %d, README %d bytes", c.ID, c.Revision, c.WeightsBytes, len(c.README))
 	}
 }
+
+// A full page of the Hub's answer (search-page.json, recorded 2026-11-22:
+// 30 sentence-similarity models by downloads) decodes, fractional trending
+// scores included.
+func TestSearchDecodesAFullHubPage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(fixture(t, "search-page.json"))
+	}))
+	defer srv.Close()
+	page, err := (&Manager{Base: srv.URL}).Search(context.Background(), SearchQuery{Task: "sentence-similarity"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fractional := false
+	for _, m := range page.Models {
+		fractional = fractional || m.Trending != float64(int64(m.Trending))
+	}
+	if len(page.Models) != 30 || !fractional {
+		t.Errorf("%d models, fractional trending %v", len(page.Models), fractional)
+	}
+}

@@ -18467,8 +18467,11 @@ function hfMarkdown(text, repo) {
         const image = t.startsWith("!");
         const label = t.slice(image ? 2 : 1, t.indexOf("]"));
         let href = t.slice(t.indexOf("](") + 2, -1).split(/\s+/)[0];
-        if (!/^https?:\/\//i.test(href) && !href.startsWith("#")) href = `https://huggingface.co/${repo}/blob/main/${href.replace(/^\.?\//, "")}`;
-        if (href.startsWith("#")) out.push(document.createTextNode(label));
+        // Only http(s) links are kept; a relative one is the repository's
+        // file; any other scheme (javascript:, data:) is its text alone.
+        const scheme = /^[a-z][a-z0-9+.-]*:/i.test(href);
+        if (!scheme && !href.startsWith("#")) href = `https://huggingface.co/${repo}/blob/main/${href.replace(/^\.?\//, "")}`;
+        if (href.startsWith("#") || (scheme && !/^https?:\/\//i.test(href))) out.push(document.createTextNode(label));
         else out.push(el("a", { href, target: "_blank", rel: "noopener noreferrer nofollow", text: image ? `[image: ${label || "image"}]` : label || href }));
       } else if (m[3]) out.push(el("strong", { text: t.slice(2, -2) }));
       else out.push(el("em", { text: t.slice(1, -1) }));
@@ -18620,19 +18623,14 @@ async function renderHFHubModel(view, id) {
 }
 
 // The section on Model Garden's main page: Google's "Open models on
-// Hugging Face", the trending ones and Show more.
-async function drawHFHubSection(host) {
-  setChildren(host, el("h2", { text: "Open models on Hugging Face" }), el("p", { class: "unavailable", text: "Reading huggingface.co…" }));
-  let r;
-  try {
-    r = await api("/api/ai/hf-hub/models?sort=trendingScore");
-  } catch (err) {
-    return setChildren(host, el("h2", { text: "Open models on Hugging Face" }), el("p", { class: "unavailable", text: `[error] ${err.message}` }));
-  }
+// Hugging Face" and its Show more, which opens the Hugging Face tab. The
+// page itself does not call huggingface.co: only the tab searches it.
+function drawHFHubSection(host) {
   setChildren(host, el("h2", { text: "Open models on Hugging Face" }),
-    el("p", { class: "unavailable", text: "Deploy over a million open models from Hugging Face to an endpoint on this instance's cluster." }),
-    el("div", { class: "garden-cards", id: "hf-hub-trending" }, ...r.models.slice(0, 6).map(hfHubCard)),
-    el("div", { class: "garden-actions" }, el("button", { id: "hf-hub-show-more", class: "secondary", text: "Show more", onclick: () => navigate(hfGalleryPath()) })));
+    el("p", { class: "unavailable", text: "Deploy open models from Hugging Face: search every public model on huggingface.co by task, " +
+      "library and license, read its model card, and deploy it to an endpoint served from this instance's Kubernetes cluster." }),
+    el("div", { class: "garden-actions" }, el("button", { id: "hf-hub-show-more", class: "secondary", text: "Show more",
+      onclick: () => navigate(hfGalleryPath()) })));
 }
 
 async function renderModelGarden(view) {

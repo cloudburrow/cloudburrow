@@ -162,6 +162,7 @@ COMPAT_LOCALAI_TEST_NAMES="
   GenerateContentThroughTheOfficialSDK
   GenerationNeverUsesApplicationDefaultCredentials
   MultimodalEmbeddingPredictThroughThePredictionClient
+  ModelGardenDeploysAHubModelOnTheCluster
   RawPredictOnTheEmbeddingModel RawPredictOnTheGenerationModel
   SpeechAdaptationBoost SpeechAdaptationResources SpeechBatchRecognize
   SpeechRecognitionFeatures1799 SpeechRecognizers SpeechStreamingRecognize SpeechV1

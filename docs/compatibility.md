@@ -1927,32 +1927,52 @@ methods, relayed to the container's gRPC server (#1477).
 | `Explain` | **Verified** (Sampled Shapley, measured 2026-10-16) | On a custom endpoint (#1454): Vertex Explainable AI's Sampled Shapley method, computed as Vertex computes it for a custom container, from predictions alone: for each of `path_count` (1–50) random orderings of the features, each feature in turn moves from its baseline to the instance's value, and is credited with the change in the output; the container's predict route is called once, with every perturbed instance. Answered as `ExplainResponse`: one `Explanation` per instance, an `Attribution` per explained output (`baseline_output_value`, `instance_output_value`, `feature_attributions` keyed by feature, `output_index` for a list output), the predictions and `deployed_model_id`. A prediction must be a number or a list of numbers; `top_k` (default 1) or `output_indices` chooses the outputs. On Vertex the spec lives on the DeployedModel; a Cloud Run predictor has none, so it is `explanation_spec_override`'s: `parameters.sampled_shapley_attribution` and `metadata.inputs` (a struct instance's keys, or the one input of a non-struct instance), each with `input_baselines` (several are averaged over; a number with none is 0). No override is `FAILED_PRECONDITION`, as Vertex answers for a model deployed without a spec; integrated gradients and XRAI, and example-based explanations (`parameters.examples` or `examples_override`), are `INVALID_ARGUMENT` naming the custom container, as Vertex documents them only for TensorFlow models (integrated gradients and XRAI in a prebuilt TensorFlow container, examples for a model that outputs an embedding) and Sampled Shapley for "any custom-trained model (running in any inference container)" ([overview](https://docs.cloud.google.com/vertex-ai/docs/explainable-ai/overview), #1454); a publisher model is `UNIMPLEMENTED`; a `deployed_model_id` other than the container's is `NOT_FOUND`. The orderings come from a fixed seed, so one request's attributions are reproducible. Also served as JSON at `POST /v1/{endpoint}:explain`. Unit `TestExplainSampledShapleyOnAScalarModel`, `TestExplainSampledShapleyOnAStructModel` (attributions sum to the output's change; a linear output is attributed exactly) and `TestExplainRefusals`; `TestPredictionClientReachesACustomEndpoint` (official `aiplatform` v1.127.0 PredictionClient, gRPC; the Cloud Run shard) passed 2026-10-16 on darwin/arm64 against the doubling predictor: `x` credited with all of 6 from a baseline output of 0; no override `FAILED_PRECONDITION`; integrated gradients, XRAI and `examples` each `INVALID_ARGUMENT` naming the custom container (re-run 2026-10-16 on darwin/arm64). The official Go client has no REST transport for `PredictionService`, so `:explain` over REST is unit-tested only. Console: Agent Platform → Online prediction's **Explain** (#1454) sends the Sampled Shapley path count and each feature's `input_baselines` as `explanation_spec_override` and shows the attributions per feature; `TestConsoleExplainMatchesThePredictionClient` (the Cloud Run shard) passed 2026-10-16 on darwin/arm64, the console's attributions, baseline and instance outputs equal to the official PredictionClient's for the same request, and a path count of 51 the same `INVALID_ARGUMENT` through both; `TestCloudRunPredictorAnswersOnlinePredictionInTheBrowser` sends it from the form in Chrome. Integrated gradients, XRAI and example-based explanations are named in the page's not-served list. |
 
 
-### Model Garden: Hugging Face deployments (#1840)
+### Model Garden: Hugging Face deployments (#1840, #2148)
 
 `ModelGardenService.Deploy` deploys a Hugging Face model (`hugging_face_model_id`) on the same
 endpoint, over gRPC and JSON (`POST /v1/projects/{p}/locations/{l}:deploy`, through the REST
-transcoder of the same implementations). The serving engine is the one Google's Model Garden picks
-for the model's pipeline task: **vLLM** (Apache-2.0, `vllm/vllm-openai-cpu`, its CPU build) for
-text-generation, text2text-generation and image-text-to-text, and **Text Embeddings Inference**
-(Apache-2.0, `ghcr.io/huggingface/text-embeddings-inference:cpu-*`) for feature-extraction and
-sentence-similarity, both pinned by digest in `dependencies.json`, with Model Garden's serving
-arguments (`--max-model-len=4096` capped at the model's context, `--dtype=auto`,
-`--max-num-seqs=256`, `--disable-log-stats`). The engine runs as a Docker container beside the
-instance's kind cluster (`cloudburrow-<instance>-mg-<endpoint>`, published on 127.0.0.1 only), on
-the downloaded files mounted read-only; no token is passed into it. `stop` removes the containers
-and `up` starts them again. The TEI image is published for linux/amd64 only, so arm64 hosts run it
-emulated. The test downloads about 1.3 GB of models and runs about 6.4 GB of images, so it is
-opt-in (`CLOUDBURROW_TEST_HF_DEPLOY=1`) and runs in no CI shard.
+transcoder of the same implementations). Any public model on huggingface.co can be deployed whose
+task and library one of the engines serves: the engine is the one Google's Model Garden picks:
+**vLLM** (Apache-2.0, `vllm/vllm-openai-cpu`, its CPU build) for text-generation,
+text2text-generation and image-text-to-text models with transformers weights, and **Text
+Embeddings Inference** (Apache-2.0, `ghcr.io/huggingface/text-embeddings-inference:cpu-*`, the
+`cpu-arm64-*` build on an arm64 node) for sentence-transformers, feature-extraction and
+sentence-similarity models, all pinned by digest in `dependencies.json`, with Model Garden's
+serving arguments (`--max-model-len=4096` capped at the model's context, `--dtype=auto`,
+`--max-num-seqs=256`, `--disable-log-stats`). Other tasks (text-to-image, which Google serves with
+a diffusers container, speech recognition, classification) and GGUF, MLX or ONNX-only repositories
+are INVALID_ARGUMENT naming why, and the console's card says so beside a disabled Deploy.
+
+Since #2148 the model runs on the instance's Kubernetes cluster, as Google serves Model Garden's
+Hugging Face deployments on its own infrastructure and as Marketplace apps run on the instance's
+cluster: a Deployment (`mg-<endpoint>`, owned and labelled with the instance) and a ClusterIP
+Service in the instance's namespace, whose pod downloads the weights from the Hub itself at the
+model's current commit (`--revision`), reached from the host through a supervised tunnel. Every
+instance has the cluster, so Deploy is served wherever the local AI endpoint runs (a local AI model
+or `--local-ai-embeddings`, or `--services` including run). A gated model needs
+`model_config.hugging_face_access_token`, the end user's own read token, which Deploy first checks
+against the Hub (INVALID_ARGUMENT, in Google's words, "Model … is a gated Hugging Face model. The
+token is not valid or does not have permission", when the Hub refuses it), and `accept_eula`; the
+token is then written to a Kubernetes Secret (`mg-<endpoint>-hf-token`, applied server-side so no
+annotation copies it) which the pod reads as `HF_TOKEN`, and is never logged, persisted in the
+state file, returned or shown; Undeploy deletes it. `stop` keeps the workloads (the cluster stops
+with them) and `up` reopens their tunnels; a deployment whose workload is gone is applied again,
+except a gated one, whose Secret went with it, which is FAILED asking for a redeploy. The
+console's Deploy of a model downloaded to the host (#1840) still runs its engine as a Docker
+container beside the cluster, on the downloaded files, and refuses a token there. The opt-in
+`TestModelGardenDeploysHuggingFaceModels` (`CLOUDBURROW_TEST_HF_DEPLOY=1`, about 1.3 GB of models
+and 6 GB of images) deploys a vLLM and a TEI model; `TestModelGardenDeploysAHubModelOnTheCluster`
+(the localai shard) deploys a 70 MB model on TEI in every run.
 
 | Method | Status | Notes |
 |---|---|---|
-| `ModelGardenService.Deploy` | **Verified** (measured 2026-11-18) | `TestModelGardenDeploysHuggingFaceModels`, official `aiplatform` v1.127.0 `ModelGardenClient`: Qwen/Qwen2.5-0.5B-Instruct (vLLM) and BAAI/bge-small-en-v1.5 (TEI) deployed from Hugging Face; the operation's `DeployOperationMetadata` names the destination and model ID and its `DeployResponse` the Endpoint, the Model and `publishers/hf-{author}/models/{name}@001`. A model not yet downloaded is downloaded first (SHA-256 checked, refused under 50 GB free). `model_config.hugging_face_access_token` is refused with INVALID_ARGUMENT naming `HF_TOKEN` and is never kept or logged; a gated model needs `accept_eula` (FAILED_PRECONDITION otherwise) and `HF_TOKEN` in CloudBurrow's environment. `endpoint_user_id`, `model_user_id`, display names and the machine type are kept. `publisher_model_name` (Google's own models), `container_spec` and the text-to-image task are UNIMPLEMENTED or INVALID_ARGUMENT, not substituted. |
+| `ModelGardenService.Deploy` | **Verified** (measured 2026-11-22, #2148; 2026-11-18, #1840) | `TestModelGardenDeploysAHubModelOnTheCluster` (the localai shard), official `aiplatform` v1.127.0 `ModelGardenClient`, passed 2026-11-22 on darwin/arm64: sentence-transformers/paraphrase-MiniLM-L3-v2 deployed on the instance's kind cluster (TEI `cpu-arm64-1.9`, the pod pulling the weights from the Hub) in 33 s; the operation's `DeployOperationMetadata` names the publisher model and model ID and its `DeployResponse` the Endpoint and the Model. `TestModelGardenDeploysHuggingFaceModels` (opt-in) deployed Qwen/Qwen2.5-0.5B-Instruct (vLLM) and BAAI/bge-small-en-v1.5 (TEI) on 2026-11-18, then on Docker. A gated model needs `model_config.hugging_face_access_token`, checked against the Hub (INVALID_ARGUMENT in Google's words when refused), and `accept_eula` (FAILED_PRECONDITION otherwise); the token goes only into the workload's Secret (unit `TestDeployAGatedModelPutsTheTokenOnlyInTheSecret`, `TestKubeClusterApplyAndObserve`, browser `TestModelGardenPageDeploysAHubModelOnTheCluster`, all with a fake token against a local stub). On the Docker path (a model downloaded to the host) a token is refused naming `HF_TOKEN`. `endpoint_user_id`, `model_user_id`, display names and the machine type are kept. `publisher_model_name` (Google's own models), `container_spec` and the text-to-image task are UNIMPLEMENTED or INVALID_ARGUMENT, not substituted. |
 | `EndpointService.GetEndpoint`, `EndpointService.ListEndpoints` | **Verified** (measured 2026-11-18) | Same test: the Endpoint carries its deployed model (ID, model, machine type) once ready, and 100% of its traffic. `ListEndpoints` lists Model Garden and Model Registry endpoints (#1940; Cloud Run custom prediction services are endpoints by name but not listed); its `filter` takes the documented fields `endpoint` (the ID), `display_name` and `labels` (#1943; `base_model_name` is UNIMPLEMENTED), its `order_by` `display_name`, `create_time` and `update_time`, and it pages. |
 | `EndpointService.UndeployModel` | **Verified** (measured 2026-11-18) | Same test: removes the engine container; Predict afterwards is FAILED_PRECONDITION. |
 | `EndpointService.DeleteEndpoint` | **Verified** (measured 2026-11-18) | Same test; FAILED_PRECONDITION while a model is deployed, NOT_FOUND after. |
 | `ModelService.GetModel`, `ModelService.ListModels` | **Verified** (measured 2026-11-18) | Same test: the Model's `containerSpec` is the engine image, its arguments and environment, `baseModelSource.modelGardenSource` the publisher model, and `deployedModels` its deployment. |
 | `ModelService.DeleteModel` | **Verified** (measured 2026-11-18) | Same test; FAILED_PRECONDITION while deployed. The downloaded files stay in the model cache until the console's **Delete files**. |
-| Predict, RawPredict and StreamRawPredict on a Model Garden endpoint | **Verified** (measured 2026-11-18) | Same test, through `PredictionClient`: vLLM `:predict` takes Model Garden's `{"prompt", "max_tokens", "temperature", "top_p", "top_k", "raw_response"}` instances and answers `"Prompt:\n…\nOutput:\n…"` strings (the text alone with `raw_response`), and an `"@requestFormat": "chatCompletions"` instance answers the chat completion; TEI `:predict` takes `{"inputs"}` instances and answers TEI's vectors; `:rawPredict` relays an OpenAI completions or chat body (or TEI's own); `:streamRawPredict` streams vLLM's server-sent events, one per `HttpBody`. |
+| Predict, RawPredict and StreamRawPredict on a Model Garden endpoint | **Verified** (measured 2026-11-22 on the cluster, Predict and RawPredict; 2026-11-18) | `TestModelGardenDeploysAHubModelOnTheCluster`, through `PredictionClient`: TEI `:predict` on the cluster workload answers one 384-dimensional vector per `{"inputs"}` instance with the deployed model's ID, and `:rawPredict` relays TEI's own `{"inputs": [...]}` body and answer. `TestModelGardenDeploysHuggingFaceModels`, through `PredictionClient`: vLLM `:predict` takes Model Garden's `{"prompt", "max_tokens", "temperature", "top_p", "top_k", "raw_response"}` instances and answers `"Prompt:\n…\nOutput:\n…"` strings (the text alone with `raw_response`), and an `"@requestFormat": "chatCompletions"` instance answers the chat completion; TEI `:predict` takes `{"inputs"}` instances and answers TEI's vectors; `:rawPredict` relays an OpenAI completions or chat body (or TEI's own); `:streamRawPredict` streams vLLM's server-sent events, one per `HttpBody`. |
 
 ### Model Registry and Endpoints (#1940)
 

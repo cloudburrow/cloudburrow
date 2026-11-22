@@ -1,7 +1,9 @@
 // Package modelgarden deploys Hugging Face models from Model Garden on a
 // local endpoint (#1840): ModelGardenService.Deploy's Endpoint, Model and
 // DeployedModel, served by the engine Google's Model Garden uses for the
-// model's task.
+// model's task, as a workload on the instance's Kubernetes cluster
+// (cluster.go, #2148) or, for a model downloaded to the host, a Docker
+// container beside it (docker.go).
 //
 // Google picks the serving container from the model's Hugging Face pipeline
 // task (docs: models/open-models/use-hugging-face-models): vLLM for text
@@ -28,8 +30,8 @@ const (
 	// linux/amd64 index.
 	VLLMImage = "docker.io/vllm/vllm-openai-cpu:v0.34.0@sha256:1640fdc27ae499572f611ffd4dc55e0b07ce97608f33566d5834c98671b115d4"
 	// TEIImage is Hugging Face Text Embeddings Inference's CPU image
-	// (Apache-2.0). It is published for linux/amd64 only, so an arm64 host
-	// runs it emulated.
+	// (Apache-2.0), linux/amd64 only: Docker on an arm64 host runs it
+	// emulated, and an arm64 cluster node runs TEIArm64Image instead.
 	TEIImage = "ghcr.io/huggingface/text-embeddings-inference:cpu-1.9@sha256:2538ea1c9640d3763b15af668039d24172d063b42337b0c27796fc2be180c78d"
 	// TEIArm64Image is the same release's arm64 CPU build (Apache-2.0,
 	// dependencies.json localai.modelGardenTEIArm64), which a cluster whose

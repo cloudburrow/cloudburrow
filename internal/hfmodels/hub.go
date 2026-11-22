@@ -52,7 +52,7 @@ type HubModel struct {
 	Gated        string   `json:"gated,omitempty"` // "", "auto" or "manual"
 	Downloads    int64    `json:"downloads"`
 	Likes        int64    `json:"likes"`
-	Trending     int64    `json:"trending"`
+	Trending     float64  `json:"trending"`
 	LastModified string   `json:"lastModified,omitempty"`
 	Parameters   int64    `json:"parameters,omitempty"`
 	Tags         []string `json:"tags,omitempty"`
@@ -85,7 +85,7 @@ type rawModel struct {
 	Tags         []string        `json:"tags"`
 	Downloads    int64           `json:"downloads"`
 	Likes        int64           `json:"likes"`
-	Trending     int64           `json:"trendingScore"`
+	Trending     float64         `json:"trendingScore"`
 	LastModified string          `json:"lastModified"`
 	Private      bool            `json:"private"`
 	Disabled     bool            `json:"disabled"`

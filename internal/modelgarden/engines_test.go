@@ -21,7 +21,8 @@ func TestEngineImagesMatchDependencies(t *testing.T) {
 	if err := json.Unmarshal(raw, &d); err != nil {
 		t.Fatal(err)
 	}
-	for key, want := range map[string]string{"modelGardenVLLM": VLLMImage, "modelGardenTEI": TEIImage} {
+	for key, want := range map[string]string{"modelGardenVLLM": VLLMImage, "modelGardenTEI": TEIImage,
+		"modelGardenTEIArm64": TEIArm64Image} {
 		var e struct{ Image, Digest, License string }
 		if err := json.Unmarshal(d.Components.LocalAI[key], &e); err != nil {
 			t.Fatalf("%s: %v", key, err)

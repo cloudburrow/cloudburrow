@@ -2426,11 +2426,15 @@ var parityRows = []parityRow{
 	// Model Garden's Hugging Face deployments (#1840).
 	{Resource: "Model Garden: deploy a Hugging Face model", Service: "vertexai",
 		Methods: []string{"ModelGardenService/Deploy", "EndpointService/GetEndpoint", "EndpointService/ListEndpoints"},
-		Screen:  "/agent-platform/endpoints", Offers: "Model Garden: Deploy on a downloaded Hugging Face model runs Deploy (accepting a gated model's " +
-			"licence as accept_eula) and opens Endpoints, which lists the deployments with their serving container and state " +
-			"(Deploying with its step and progress, Ready, Failed with the reason) and the selected endpoint's details: its resource " +
-			"name, model, revision, licence, image and REST paths",
-		Tests: []string{"TestModelGardenDeploysADownloadedHuggingFaceModel", "TestModelGardenDeploysHuggingFaceModels"}},
+		Screen:  "/agent-platform/endpoints", Offers: "Model Garden: the Hugging Face tab (Show more) searches every public model on " +
+			"huggingface.co with the task, library and licence chips and sorts, a page at a time, and a model's card shows its README, " +
+			"licence, task, size and downloads; Deploy on the card runs Deploy on the instance's cluster (a gated model's form takes the " +
+			"licence and the end user's Hugging Face access token, which goes into a Secret), and Deploy on a downloaded model runs it " +
+			"in Docker; both open Endpoints, which lists the deployments with their serving container, where they run and state " +
+			"(Deploying with its step and image pull progress, Ready, Failed with the reason) and the selected endpoint's details: its " +
+			"resource name, model, revision, licence, image and REST paths",
+		Tests: []string{"TestModelGardenDeploysADownloadedHuggingFaceModel", "TestModelGardenDeploysHuggingFaceModels",
+			"TestModelGardenBrowsesHuggingFace", "TestModelGardenPageDeploysAHubModelOnTheCluster", "TestModelGardenDeploysAHubModelOnTheCluster"}},
 	{Resource: "Model Garden: test, undeploy and delete a deployment", Service: "vertexai",
 		Methods: []string{"EndpointService/UndeployModel", "EndpointService/DeleteEndpoint", "ModelService/GetModel",
 			"ModelService/ListModels", "ModelService/DeleteModel"},

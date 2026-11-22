@@ -170,3 +170,14 @@ under CC0 1.0 Universal, and licence texts from the SPDX License List
 being made available by the Linux Foundation and its contributors under the
 Creative Commons Attribution 3.0 licence; the sources' digests are in
 third_party/ssm-templates/.
+
+Model Garden's Hugging Face deployments (#1840, #2148) run, without
+CloudBurrow shipping or modifying them, the official images of vLLM
+(docker.io/vllm/vllm-openai-cpu, https://github.com/vllm-project/vllm) and
+Hugging Face Text Embeddings Inference
+(ghcr.io/huggingface/text-embeddings-inference, cpu and cpu-arm64 builds,
+https://github.com/huggingface/text-embeddings-inference), both under the
+Apache License, Version 2.0, pinned by digest in dependencies.json. The
+models they serve are pulled from huggingface.co under each model's own
+licence, which the console shows and, for a gated model, the end user
+accepts on huggingface.co.

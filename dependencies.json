@@ -1365,7 +1365,7 @@
         "skipDiscovery": "PyPI; depcheck only discovers GitHub-sourced components."
       },
       "modelGardenVLLM": {
-        "$comment": "ModelGardenService.Deploy's engine for Hugging Face text-generation models (#1840, internal/modelgarden): the engine Model Garden uses, its official CPU build. Run by `docker run` beside the instance's cluster when a model is deployed, never at `up`.",
+        "$comment": "ModelGardenService.Deploy's engine for Hugging Face text-generation models (#1840, internal/modelgarden): the engine Model Garden uses, its official CPU build. Run as a Deployment on the instance's cluster when a model is deployed (#2148), its pod pulling the weights from the Hub, or by `docker run` for a model downloaded to the host; never at `up`.",
         "image": "docker.io/vllm/vllm-openai-cpu:v0.34.0",
         "digest": "sha256:1640fdc27ae499572f611ffd4dc55e0b07ce97608f33566d5834c98671b115d4",
         "version": "v0.34.0",
@@ -1382,7 +1382,7 @@
         "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve with `docker buildx imagetools inspect vllm/vllm-openai-cpu:<tag>`."
       },
       "modelGardenTEI": {
-        "$comment": "ModelGardenService.Deploy's engine for Hugging Face feature-extraction and sentence-similarity models (#1840, internal/modelgarden): Hugging Face Text Embeddings Inference, the engine Model Garden uses for embeddings, its CPU build.",
+        "$comment": "ModelGardenService.Deploy's engine for Hugging Face feature-extraction and sentence-similarity models (#1840, internal/modelgarden): Hugging Face Text Embeddings Inference, the engine Model Garden uses for embeddings, its CPU build. Run as a Deployment on the instance's cluster when its node is linux/amd64 (#2148), or by `docker run` for a model downloaded to the host.",
         "image": "ghcr.io/huggingface/text-embeddings-inference:cpu-1.9",
         "digest": "sha256:2538ea1c9640d3763b15af668039d24172d063b42337b0c27796fc2be180c78d",
         "version": "1.9",
@@ -1396,6 +1396,22 @@
         ],
         "notes": "Resolved 2026-11-18. Published for linux/amd64 only (there is no arm64 CPU image), so an arm64 host runs it emulated with --platform linux/amd64; measured working under Docker Desktop on Apple silicon. 938 MB unpacked.",
         "skipDiscovery": "GHCR tag list; depcheck only discovers GitHub-sourced components. Re-resolve with `docker buildx imagetools inspect ghcr.io/huggingface/text-embeddings-inference:<tag>`."
+      },
+      "modelGardenTEIArm64": {
+        "$comment": "Text Embeddings Inference's arm64 CPU build (#2148, internal/modelgarden TEIArm64Image): the same release as modelGardenTEI, run natively as a Deployment on the instance's cluster when its node is linux/arm64.",
+        "image": "ghcr.io/huggingface/text-embeddings-inference:cpu-arm64-1.9",
+        "digest": "sha256:798cd7615e060a72ccbdf19aa0ada52289c6a0147490195bafaece6ce04d70f1",
+        "version": "1.9",
+        "source": "https://github.com/huggingface/text-embeddings-inference",
+        "license": "Apache-2.0",
+        "redistribution": "not redistributed: pulled from GHCR by the cluster's node when an embedding model is first deployed",
+        "updateFeed": "ghcr-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/arm64"
+        ],
+        "notes": "Resolved 2026-11-22 with `docker buildx imagetools inspect`: an OCI index whose one image is linux/arm64 (sha256:7a1b4aa11c491f39cea38eb0a210afe68a78dd5edee11c8f44f46c3529b27cd8). 117 MB compressed, pulled by a kind v1.36.4 arm64 node and serving sentence-transformers/paraphrase-MiniLM-L3-v2 the same day.",
+        "skipDiscovery": "GHCR tag list; depcheck only discovers GitHub-sourced components. Re-resolve with `docker buildx imagetools inspect ghcr.io/huggingface/text-embeddings-inference:cpu-arm64-<tag>`."
       }
     },
     "consoleTerminal": {
