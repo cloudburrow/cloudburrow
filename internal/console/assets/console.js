@@ -125,6 +125,14 @@ const SECRET_TABS = ["/secrets", "/secrets-regional"];
 const GKE_STORAGE = ["/kubernetes/storage", "/kubernetes/storage-classes"];
 // Cloud Logging's Settings and its Log Scopes tab (#2020), as Google's
 // Settings page has a Log Scopes tab (log-scope/create-and-manage).
+// BigQuery sharing's page lists exchanges and data clean rooms (#2101):
+// Google's docs reach clean rooms only from the Sharing (Analytics Hub)
+// page ("go to the Sharing (Analytics Hub) page ... All the data clean
+// rooms that you can access are listed", and its "Clean rooms" filter:
+// https://docs.cloud.google.com/bigquery/docs/data-clean-rooms, read
+// 2026-11-22), never from a menu item of their own. The tabs' names are
+// CloudBurrow's (UNVERIFIED, re-read 2026-11-22: the same page).
+const SHARING_TABS = ["/bigquery-sharing", "/bigquery-clean-rooms"];
 const LOGGING_SETTINGS = ["/logs/settings", "/logs/log-scopes", "/logs/trace-scopes", "/logs/observability-settings", "/logs/observability-buckets"];
 
 
@@ -397,12 +405,12 @@ const ROUTES = [
     kind: "Scheduled query", section: "Databases", product: "bigquery", productTitle: "BigQuery" },
   // BigQuery sharing (Analytics Hub, #1960): exchanges, their listings
   // and subscriptions.
-  { path: "/bigquery-sharing", service: "bigquery-sharing", icon: "bigquery", title: "Analytics Hub", kind: "Exchange",
-    section: "Databases", product: "bigquery", productTitle: "BigQuery" },
-  // Data clean rooms and their query templates (#2101), beside it as
-  // BigQuery sharing has them.
-  { path: "/bigquery-clean-rooms", service: "bigquery-clean-rooms", icon: "bigquery", title: "Data clean rooms", kind: "Clean room",
-    section: "Databases", product: "bigquery", productTitle: "BigQuery" },
+  { path: "/bigquery-sharing", service: "bigquery-sharing", icon: "bigquery", title: "Analytics Hub", tabTitle: "Exchanges", kind: "Exchange",
+    pageTabs: SHARING_TABS, section: "Databases", product: "bigquery", productTitle: "BigQuery" },
+  // Data clean rooms and their query templates (#2101): a tab of the
+  // sharing page, not a menu item (SHARING_TABS).
+  { path: "/bigquery-clean-rooms", service: "bigquery-clean-rooms", icon: "bigquery", title: "Data clean rooms", tabTitle: "Clean rooms", kind: "Clean room",
+    navHidden: true, navAs: "/bigquery-sharing", pageTabs: SHARING_TABS, section: "Databases", product: "bigquery", productTitle: "BigQuery" },
   // Dataform (#2105): repositories, their workspaces' editor, releases,
   // workflow configurations and execution logs, in Google's place.
   { path: "/bigquery-dataform", service: "dataform", icon: "bigquery", title: "Dataform", kind: "Repository",

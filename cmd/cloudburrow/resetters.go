@@ -174,6 +174,8 @@ func (p *pubsubResetter) Reset(ctx context.Context) error {
 // schemas, in that order, so nothing is left pointing at a topic or a schema
 // that no longer exists.
 func (p *pubsubResetter) ResetProject(ctx context.Context, project string) error {
+	// A project whose Pub/Sub API is disabled is cleared too.
+	ctx = stateCallContext(ctx)
 	c, err := pubsubAdmin(ctx, p.tunnel, project)
 	if err != nil {
 		return err

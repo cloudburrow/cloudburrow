@@ -279,6 +279,14 @@ func TestAutoscalerAndAutoRepair(t *testing.T) {
 	if ops := s.Autoscale(ctx); len(ops) != 0 {
 		t.Fatalf("a node NotReady for 3 minutes was repaired: %v", ops)
 	}
+	// The Kubernetes Engine clock moved ahead (the maintenance windows'
+	// AdvanceClock) does not age the kubelet's real-time lastTransitionTime.
+	if _, err := s.AdvanceClock(time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if ops := s.Autoscale(ctx); len(ops) != 0 {
+		t.Fatalf("a node NotReady for 3 minutes was repaired once the clock moved an hour ahead: %v", ops)
+	}
 	now = now.Add(8 * time.Minute)
 	ops := s.Autoscale(ctx)
 	if len(ops) != 1 || ops[0].OperationType != containerpb.Operation_AUTO_REPAIR_NODES {

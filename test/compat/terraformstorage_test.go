@@ -74,6 +74,24 @@ func (m *tfModule) tf(args ...string) (string, error) {
 	return string(b), err
 }
 
+// stdout runs the wrapper like must, and returns its standard output
+// alone: what `output -json` prints, without the wrapper's own lines on
+// stderr (an --intercept-hardcoded summary follows every command).
+func (m *tfModule) stdout(args ...string) string {
+	m.t.Helper()
+	ours := append(append([]string{"terraform", "--binary", m.binary}, m.flags...), "--")
+	cmd := exec.Command(m.cli, append(ours, args...)...)
+	cmd.Dir = m.dir
+	cmd.Env = append(noGoogleEgress(), m.env...)
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	b, err := cmd.Output()
+	if err != nil {
+		m.t.Fatalf("cloudburrow terraform %s: %v\n%s%s", strings.Join(args, " "), err, b, lastLines(stderr.String(), 30))
+	}
+	return string(b)
+}
+
 func (m *tfModule) must(args ...string) string {
 	m.t.Helper()
 	out, err := m.tf(args...)

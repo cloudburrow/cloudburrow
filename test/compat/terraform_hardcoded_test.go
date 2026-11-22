@@ -270,7 +270,7 @@ output "ar"  { value = data.google_artifact_registry_locations.ar.locations }
 		want []string
 	}{{"run", wantRun}, {"ar", wantAR}} {
 		var got []string
-		if err := json.Unmarshal([]byte(m.must("output", "-json", c.name)), &got); err != nil {
+		if err := json.Unmarshal([]byte(m.stdout("output", "-json", c.name)), &got); err != nil {
 			t.Fatalf("output %s: %v", c.name, err)
 		}
 		if strings.Join(got, ",") != strings.Join(c.want, ",") {

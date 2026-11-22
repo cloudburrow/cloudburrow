@@ -117,3 +117,21 @@ func TestOptionalEmulatorPortsAreDistinctByDefault(t *testing.T) {
 		t.Fatalf("a Spanner port equal to Storage's was accepted: %v", err)
 	}
 }
+
+// TestEveryExportedVariableHasAName.
+//
+// cliEndpointVar answers "" for a service it has no case for. Landing 164
+// exported cliEndpointVar("billing") beside Resource Manager, so `env
+// --format plain` wrote the line "=127.0.0.1:9007", which docker run
+// --env-file refuses ("no variable name"), and the shell format an
+// assignment with no name. Every service on: no variable may be unnamed.
+func TestEveryExportedVariableHasAName(t *testing.T) {
+	cfg := config.Default()
+	cfg.Services = config.KnownServices()
+	vars := envVars(cfg, "demo-local", "/tmp/adc.json")
+	for _, v := range envOutputVars("plain", cfg, vars) {
+		if v.Name == "" || strings.ContainsAny(v.Name, "= \t\n") {
+			t.Errorf("exported a variable with no valid name: %q=%q (%s)", v.Name, v.Value, v.Comment)
+		}
+	}
+}
