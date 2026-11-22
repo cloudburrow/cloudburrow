@@ -286,6 +286,12 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 		if strings.HasPrefix(m, "cloudresourcemanager.folders.capabilities.") {
 			continue
 		}
+		// Colab Enterprise runtime templates' IAM methods (#2105) are the
+		// IAMPolicy mixin, named by their discovery IDs; TestNotebookTemplateIAM
+		// checks them over gRPC and REST (internal/service/vertexai).
+		if strings.HasPrefix(m, "aiplatform.projects.locations.notebookRuntimeTemplates.") {
+			continue
+		}
 		// KMS DeleteKeyRing (#1595) has no descriptor (service.proto has
 		// no such RPC yet); TestDeleteKeyRingOverGRPC calls it over gRPC
 		// (internal/service/kms).

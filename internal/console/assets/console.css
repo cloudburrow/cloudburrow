@@ -2777,6 +2777,13 @@ tr.log-entry.is-located { outline: 2px solid var(--accent); outline-offset: -2px
 .bq-dp-step:hover, .bq-pl-task:hover { background: var(--state-hover); }
 .bq-dp-step.is-selected, .bq-pl-task.is-selected { border-color: var(--accent); background: var(--nav-selected); color: var(--nav-selected-text); }
 .bq-dp-form, .bq-pl-details { border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 12px; margin-top: 8px; background: var(--surface); }
+/* Gemini's suggestion cards in the Steps list, each with Preview, Edit and Apply. */
+.bq-dp-suggestions { margin-top: 8px; }
+.bq-dp-cards { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.bq-dp-card { border: 1px dashed var(--accent); border-radius: var(--radius); padding: 8px 12px; background: var(--surface); }
+.bq-dp-card-title { margin: 0 0 4px; font-weight: 500; }
+.bq-dp-card-step { margin: 0 0 6px; color: var(--text-muted); overflow-wrap: anywhere; }
+.bq-dp-col { font: inherit; font-weight: 500; }
 .bq-dp-node { display: flex; flex-direction: column; align-items: flex-start; }
 .bq-dp-node > span:first-child { border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 10px; background: var(--surface-alt); }
 .bq-dp-edge { color: var(--text-muted); padding-left: 16px; }

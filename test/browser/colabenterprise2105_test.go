@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -203,4 +204,211 @@ func TestColabEnterpriseRuntimesThroughThePages(t *testing.T) {
 	p.openRowDelete(id, "Delete")
 	p.confirmByName(id)
 	p.waitFor(fmt.Sprintf(`![...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q))`, display))
+}
+
+// TestColabEnterpriseExecutionsThroughThePages (#2105): Agent Platform >
+// Colab Enterprise, as Google's "Schedule a notebook run" and "Manage
+// access to a runtime template" walk it. My notebooks' Create notebook
+// makes a notebook (a Dataform repository, as BigQuery Studio keeps one);
+// its Schedule (Schedule notebook: Schedule name, Runtime template, Run
+// schedule, Cloud Storage output location, Submit) with One-off runs it
+// once, listed on Executions until Succeeded, whose View result opens the
+// executed notebook's folder in Cloud Storage; Recurring makes a schedule,
+// listed on Schedules, whose Schedule details, Pause and Resume work; Delete
+// removes the execution and the schedule. The runtime template's
+// Permissions tab grants the Notebook Runtime User role, read back. The
+// console API reads each result back; every screen meets WCAG 2.1 AA.
+func TestColabEnterpriseExecutionsThroughThePages(t *testing.T) {
+	for _, s := range []string{"colab-templates", "colab-notebooks", "colab-executions", "colab-schedules", "dataform", "storage"} {
+		needService(t, s)
+	}
+	project := servedProject(t)
+	q := "?project=" + url.QueryEscape(project)
+	r := "&region=us-central1"
+	stamp := time.Now().UnixNano() % 1e6
+	bucket := fmt.Sprintf("colab-exec-%d", stamp)
+	fixture(t, "storage", project, `{"name":"`+bucket+`"}`, bucket)
+	type item struct {
+		Name, Status string
+		Fields       map[string]string
+		Actions      []struct{ ID, Label, Href string }
+	}
+	list := func(svc string) []item {
+		t.Helper()
+		code, body := consoleDo(t, http.MethodGet, "/api/resources/"+svc+q+r, "")
+		if code != http.StatusOK {
+			t.Fatalf("list %s = %d: %s", svc, code, body)
+		}
+		var l struct{ Items []item }
+		if err := json.Unmarshal([]byte(body), &l); err != nil {
+			t.Fatal(err)
+		}
+		return l.Items
+	}
+	find := func(svc, field, value string) item {
+		for _, it := range list(svc) {
+			if it.Fields[field] == value {
+				return it
+			}
+		}
+		return item{}
+	}
+	// A runtime template, through the console API (the Runtime templates
+	// pages are TestColabEnterpriseRuntimesThroughThePages').
+	tplName := fmt.Sprintf("Exec template %d", stamp)
+	if code, body := consoleDo(t, http.MethodPost, "/api/resources/colab-templates"+q+r, `{"displayName":"`+tplName+`","region":"us-central1","machineType":"e2-standard-4","acceleratorType":"NONE","diskType":"pd-standard","diskSize":"100","idleShutdown":"true","idleMinutes":"180","environment":"latest","postStartupBehavior":"RUN_ONCE","internet":"true","euc":"true"}`); code != http.StatusOK {
+		t.Fatalf("create a runtime template = %d: %s", code, body)
+	}
+	tpl := find("colab-templates", "Display name", tplName).Name
+	if tpl == "" {
+		t.Fatal("the new runtime template is not listed")
+	}
+	t.Cleanup(func() {
+		consoleDo(t, http.MethodDelete, "/api/resources/colab-templates"+q+r+"&name="+url.QueryEscape(tpl), "")
+	})
+
+	p := open(t)
+	notebooksPath := "/agent-platform/colab/notebooks" + q
+	executionsPath := "/agent-platform/colab/executions" + q
+	schedulesPath := "/agent-platform/colab/schedules" + q
+	nbName := fmt.Sprintf("Browser notebook %d", stamp)
+	p.navigate(notebooksPath)
+	p.waitFor(settled)
+	p.clickText("#view a, #view button", "Create notebook")
+	p.submitForm(map[string]string{"displayName": nbName}, "displayName")
+	p.waitFor(`location.pathname === "/agent-platform/colab/notebooks" && ` + rowReady(nbName))
+	nb := find("colab-notebooks", "Notebook name", nbName)
+	if nb.Name == "" {
+		t.Fatalf("My notebooks does not list %q", nbName)
+	}
+	t.Cleanup(func() {
+		consoleDo(t, http.MethodDelete, "/api/resources/colab-notebooks"+q+r+"&name="+url.QueryEscape(nb.Name), "")
+	})
+	openHref := ""
+	for _, a := range nb.Actions {
+		if a.Label == "Open" {
+			openHref = a.Href
+		}
+	}
+	if !strings.HasPrefix(openHref, "/bigquery-studio?") {
+		t.Errorf("the notebook's Open = %q, want BigQuery Studio", openHref)
+	}
+
+	schedule := func(name, run string, extra map[string]string) {
+		t.Helper()
+		p.navigate(notebooksPath)
+		p.waitFor(rowReady(nbName))
+		p.colabRowItem(nb.Name, "Schedule")
+		var title string
+		p.waitFor(`document.querySelector(".modal.is-open h2") !== null`)
+		p.eval(`document.querySelector(".modal.is-open h2").textContent`, &title)
+		if title != "Schedule notebook" {
+			t.Errorf("the Schedule dialog's title = %q", title)
+		}
+		v := map[string]string{"displayName": name, "runtimeTemplate": tpl, "runSchedule": run, "output": "gs://" + bucket}
+		for k, x := range extra {
+			v[k] = x
+		}
+		p.submitForm(v, "displayName")
+		p.waitForWithin(`document.querySelector(".modal") === null`, 2*time.Minute)
+	}
+	// One-off: an execution.
+	runName := fmt.Sprintf("once %d", stamp)
+	schedule(runName, "one-off", nil)
+	var exec item
+	for deadline := time.Now().Add(20 * time.Minute); ; {
+		exec = find("colab-executions", "Execution name", runName)
+		if exec.Status == "Succeeded" || exec.Status == "Failed" || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(3 * time.Second)
+	}
+	if exec.Status != "Succeeded" {
+		t.Fatalf("the one-off execution = %+v", exec)
+	}
+	t.Cleanup(func() {
+		consoleDo(t, http.MethodDelete, "/api/resources/colab-executions"+q+r+"&name="+url.QueryEscape(exec.Name), "")
+	})
+	if exec.Fields["Runtime template"] != tpl {
+		t.Errorf("the execution's runtime template = %q", exec.Fields["Runtime template"])
+	}
+	p.navigate(executionsPath)
+	p.waitFor(rowReady(runName))
+	p.colabRowItem(exec.Name, "View result")
+	p.waitFor(`location.pathname.startsWith("/storage/browser/` + bucket + `/` + exec.Name + `")`)
+	p.waitFor(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes("content.ipynb"))`)
+
+	// Recurring: a schedule.
+	schedName := fmt.Sprintf("weekly %d", stamp)
+	schedule(schedName, "recurring", map[string]string{"cron": "0 9 * * MON"})
+	sched := find("colab-schedules", "Schedule name", schedName)
+	if sched.Name == "" || sched.Status != "Active" || sched.Fields["Frequency"] != "0 9 * * MON" {
+		t.Fatalf("the recurring schedule = %+v", sched)
+	}
+	t.Cleanup(func() {
+		consoleDo(t, http.MethodDelete, "/api/resources/colab-schedules"+q+r+"&name="+url.QueryEscape(sched.Name), "")
+	})
+	p.navigate(schedulesPath)
+	p.waitFor(rowReady(schedName))
+	waitSchedule := func(what, want string) {
+		t.Helper()
+		got := ""
+		for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); time.Sleep(500 * time.Millisecond) {
+			if got = find("colab-schedules", "Schedule name", schedName).Status; got == want {
+				return
+			}
+		}
+		t.Errorf("after %s the schedule is %q, want %s", what, got, want)
+	}
+	p.colabRowItem(sched.Name, "Pause")
+	waitSchedule("Pause", "Paused")
+	p.navigate(schedulesPath)
+	p.follow(sched.Name)
+	var detailsPath, heading string
+	p.waitFor(settled)
+	p.eval(`location.pathname + location.search`, &detailsPath)
+	p.eval(`document.querySelector("#view h1").textContent.trim()`, &heading)
+	if heading != "Schedule details" && heading != schedName {
+		t.Errorf("the schedule's page heading = %q", heading)
+	}
+	p.clickText(p.findAction("Resume"), "Resume")
+	waitSchedule("Resume", "Active")
+
+	// The template's Permissions.
+	p.navigate("/agent-platform/colab/runtime-templates" + q)
+	p.waitFor(rowReady(tplName))
+	p.follow(tpl)
+	var templatePath string
+	p.eval(`location.pathname + location.search`, &templatePath)
+	p.clickText("#view .tab-strip .tab", "Permissions")
+	p.waitFor(`document.querySelector("#view #grant-access") !== null`)
+	p.grantOnTab("user:ana@example.com", "roles/aiplatform.notebookRuntimeUser")
+	b, _ := json.Marshal(map[string]any{"Path": []string{tpl}, "Read": map[string]any{}})
+	if code, body := consoleDo(t, http.MethodPost, "/api/permissions/colab-templates"+q+r, string(b)); code != http.StatusOK ||
+		!strings.Contains(body, "ana@example.com") || !strings.Contains(body, "roles/aiplatform.notebookRuntimeUser") {
+		t.Errorf("after Grant access the template's policy reads %d %s", code, body)
+	}
+
+	auditScreens(t, []a11yPage{
+		{"my notebooks", notebooksPath, rowReady(nbName), ""},
+		{"schedule notebook dialog", notebooksPath, rowReady(nbName),
+			fmt.Sprintf(`document.querySelector('button[aria-label=%q]').click(); setTimeout(() => [...document.querySelectorAll('.overflow-menu:not([hidden]) [role="menuitem"]')].find((b) => b.textContent.trim() === "Schedule").click(), 50)`, "Actions for "+nb.Name)},
+		{"executions", executionsPath, rowReady(runName), ""},
+		{"schedules", schedulesPath, rowReady(schedName), ""},
+		{"schedule details", detailsPath, settled, ""},
+		{"runtime template permissions", templatePath, settled,
+			`[...document.querySelectorAll("#view .tab-strip .tab")].find((b) => b.textContent.trim() === "Permissions").click()`},
+	})
+
+	// Delete: the execution, then the schedule (whose runs stay).
+	p = open(t)
+	p.navigate(executionsPath)
+	p.openRowDelete(exec.Name, "Delete")
+	p.confirmOnlyDialog()
+	p.pressDelete()
+	p.waitFor(fmt.Sprintf(`![...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q))`, runName))
+	p.navigate(schedulesPath)
+	p.openRowDelete(sched.Name, "Delete")
+	p.confirmByName(sched.Name)
+	p.waitFor(fmt.Sprintf(`![...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q))`, schedName))
 }

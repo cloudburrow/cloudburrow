@@ -2516,6 +2516,25 @@ var parityRows = []parityRow{
 		Provider: "colab-runtimes", Offers: "Runtimes: a Region menu, Create (Create Agent Platform runtime: Runtime template and Runtime name), " +
 			"Start, Stop and Delete with Confirm",
 		Tests: []string{"TestColabEnterpriseRuntimesThroughThePages"}},
+	{Resource: "Colab Enterprise: notebook executions", Service: "vertexai",
+		Methods: []string{"NotebookService/CreateNotebookExecutionJob", "NotebookService/GetNotebookExecutionJob",
+			"NotebookService/ListNotebookExecutionJobs", "NotebookService/DeleteNotebookExecutionJob"},
+		Provider: "colab-executions", Offers: "Executions: a Region menu, each run's state, View result (the executed notebook's folder in Cloud Storage) " +
+			"and Delete with Confirm; My notebooks' Notebook actions > Schedule (One-off) creates one",
+		Tests: []string{"TestColabEnterpriseExecutionsThroughThePages"}},
+	{Resource: "Colab Enterprise: schedules", Service: "vertexai",
+		Methods: []string{"ScheduleService/CreateSchedule", "ScheduleService/GetSchedule", "ScheduleService/ListSchedules",
+			"ScheduleService/PauseSchedule", "ScheduleService/ResumeSchedule", "ScheduleService/DeleteSchedule"},
+		Provider: "colab-schedules", Offers: "Schedules: a Region menu, Schedule details (output location, start and end times, frequency), " +
+			"Pause, Resume and Delete; My notebooks' Schedule (Recurring) creates one",
+		Tests: []string{"TestColabEnterpriseExecutionsThroughThePages"}},
+	{Resource: "Colab Enterprise: schedule update", Service: "vertexai", Methods: []string{"ScheduleService/UpdateSchedule"},
+		Excluded: "Google's Schedule details page offers no Edit (https://docs.cloud.google.com/colab/docs/schedule-notebook-run lists Pause, Resume and Delete only); the API's update is served"},
+	{Resource: "Colab Enterprise: runtime template permissions", Service: "vertexai",
+		Methods: []string{"aiplatform.projects.locations.notebookRuntimeTemplates.getIamPolicy", "aiplatform.projects.locations.notebookRuntimeTemplates.setIamPolicy",
+			"aiplatform.projects.locations.notebookRuntimeTemplates.testIamPermissions"},
+		Provider: "colab-templates", Offers: "A runtime template's Permissions: Add principal (Grant access: New principals, Select a role) and Remove principal",
+		Tests: []string{"TestColabEnterpriseExecutionsThroughThePages"}},
 	{Resource: "Colab Enterprise: runtime upgrade", Service: "vertexai", Methods: []string{"NotebookService/UpgradeNotebookRuntime"},
 		Excluded: "a runtime here is always on the instance's runtime image (is_upgradable false), so Google's Upgrade, offered only for an upgradable runtime, never shows"},
 	// The Model Registry and Endpoints (#1940).

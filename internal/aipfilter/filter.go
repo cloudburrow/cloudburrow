@@ -31,6 +31,7 @@ package aipfilter
 import (
 	"fmt"
 	"math"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -48,6 +49,31 @@ type config struct {
 	fields   map[string]bool   // allowed top-level paths; nil allows every field
 	aliases  map[string]string // filter name -> descriptor path
 	computed map[string]func(proto.Message) string
+	// regex are the fields that take "=~" (an RE2 match), with their
+	// string values.
+	regex map[string]func(proto.Message) string
+}
+
+// Regex lets name take regular-expression matches
+// (FIELD =~ "RE2"), as the Vertex AI lists document for displayName
+// ("supports = and != and regex"); get reads the field's string value.
+func Regex(name string, get func(proto.Message) string) Option {
+	return func(c *config) {
+		if c.regex == nil {
+			c.regex = map[string]func(proto.Message) string{}
+		}
+		c.regex[name] = get
+	}
+}
+
+// regexRestriction is FIELD =~ "RE2".
+type regexRestriction struct {
+	get func(proto.Message) string
+	re  *regexp.Regexp
+}
+
+func (r *regexRestriction) eval(m protoreflect.Message) bool {
+	return r.re.MatchString(r.get(m.Interface()))
 }
 
 // Computed adds a string-valued filter field that is not a message field,
@@ -833,6 +859,18 @@ func (p *parser) parseRestriction() (node, error) {
 	}
 	if !p.cfg.allowed(name) {
 		return nil, p.errorf("field %q is not a filterable field", name)
+	}
+	if get, ok := p.cfg.regex[name]; ok && op == "=" && p.peekByte() == '~' {
+		p.pos++
+		v, _, err := p.readValue()
+		if err != nil {
+			return nil, err
+		}
+		re, err := regexp.Compile(v)
+		if err != nil {
+			return nil, p.errorf("invalid regular expression %q: %v", v, err)
+		}
+		return &regexRestriction{get: get, re: re}, nil
 	}
 	if get, ok := p.cfg.computed[name]; ok {
 		v, q, err := p.readValue()

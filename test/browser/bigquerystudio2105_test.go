@@ -476,3 +476,93 @@ func TestBigQueryStudioDataPreparationUpsertValidationFlatten(t *testing.T) {
 		})
 	})
 }
+
+// TestBigQueryStudioDataPreparationSuggestions (#2105): Gemini's
+// suggestions, as data-prep-get-suggestions shows them: after the source's
+// sample loads, the Steps list's Suggestions has cards with Preview, Edit
+// and Apply, made by the instance's local model from the table's schema
+// and sample (a column header asks for that column's); Apply adds the
+// step. Without a local model installed the Suggestions list and a step's
+// Description say so, and Generate is off. The model's answer is read as
+// steps the editor can apply (the parsing checked on a fixed answer).
+// WCAG 2.1 AA.
+func TestBigQueryStudioDataPreparationSuggestions(t *testing.T) {
+	needService(t, "bigquery")
+	needService(t, "dataform")
+	s := newStudio2105(t)
+	ds := fmt.Sprintf("dataprep_sg_%d", s.stamp)
+	fixture(t, "bigquery", s.project, `{"datasetId":"`+ds+`"}`, ds)
+	s.query(t, fmt.Sprintf("CREATE TABLE `%s.%s.src` AS SELECT * FROM UNNEST([STRUCT(1 AS v, ' ana ' AS name), STRUCT(-2 AS v, 'BO' AS name), STRUCT(3 AS v, CAST(NULL AS STRING) AS name)])", s.project, ds))
+
+	p := open(t)
+	p.navigate("/bigquery-studio" + s.q)
+	p.waitFor(`document.querySelector(".bq-home") !== null && document.querySelector(".bq-tree") !== null`)
+
+	// The answer's parsing: a fenced JSON array, an unknown type and an
+	// incomplete step dropped, a transform of an existing column replacing it.
+	var parsed []struct {
+		Description string
+		Step        map[string]any
+	}
+	p.eval(`bqPrepSuggestionsOf("Here:\n`+"```json"+`\n[{\"type\":\"filter\",\"description\":\"Keep positive values\",\"expression\":\"v > 0\"},`+
+		`{\"type\":\"pivot\",\"expression\":\"x\"},{\"type\":\"transform\",\"column\":\"name\",\"expression\":\"TRIM(name)\",\"description\":\"Trim names\"},`+
+		`{\"type\":\"filter\"}]\n`+"```"+`", [{name: "v", type: "INTEGER"}, {name: "name", type: "STRING"}])`, &parsed)
+	if len(parsed) != 2 || parsed[0].Step["expression"] != "v > 0" || parsed[1].Step["column"] != "name" || parsed[1].Step["replace"] != true {
+		t.Errorf("bqPrepSuggestionsOf = %+v", parsed)
+	}
+
+	p.clickText(".bq-home-action", "Data preparation")
+	p.waitFor(`document.querySelector(".bq-dataprep") !== null && document.querySelector("#bq-dp-source") !== null`)
+	p.setField("#bq-dp-source", ds+".src")
+	p.clickText(".bq-dataprep .bq-toolbar button", "Refresh sample")
+	p.waitFor(`document.querySelector(".bq-dp-view table") !== null`)
+	model := hasService(t, "playground")
+	if !model {
+		p.waitFor(`document.querySelector(".bq-dp-suggestions .bq-dp-no-model") !== null`)
+		var msg string
+		p.eval(`document.querySelector(".bq-dp-suggestions .bq-dp-no-model").textContent`, &msg)
+		if !strings.Contains(msg, "no local model installed") || !strings.Contains(msg, "Local models") {
+			t.Errorf("without a local model the Suggestions list says %q", msg)
+		}
+		studioMenu(p, ".bq-dataprep", "Add step", "Filter")
+		p.waitFor(`document.querySelector("#bq-dp-describe") !== null`)
+		var off bool
+		p.eval(`[...document.querySelectorAll(".bq-dp-form button")].find((b) => b.textContent === "Generate").disabled`, &off)
+		if !off {
+			t.Error("Generate is on without a local model")
+		}
+		// A step saves with its condition.
+		p.setField("#bq-dp-expr", "v > 0")
+	} else {
+		p.waitForWithin(`document.querySelector(".bq-dp-suggestions .bq-dp-card, .bq-dp-suggestions [role=status], .bq-dp-suggestions [role=alert]") !== null &&
+			document.querySelector(".bq-dp-suggestions .spinner") === null`, 10*time.Minute)
+		var cards int
+		p.eval(`document.querySelectorAll(".bq-dp-card").length`, &cards)
+		if cards > 0 {
+			var buttons []string
+			p.eval(`[...document.querySelectorAll(".bq-dp-card")[0].querySelectorAll("button")].map((b) => b.textContent)`, &buttons)
+			if strings.Join(buttons, ",") != "Preview,Edit,Apply" {
+				t.Errorf("a suggestion card's buttons = %v", buttons)
+			}
+			p.clickText(".bq-dp-card button", "Apply")
+			p.waitFor(`document.querySelectorAll(".bq-dp-steps li").length === 3`)
+		} else {
+			var why string
+			p.eval(`document.querySelector(".bq-dp-suggestions").textContent`, &why)
+			t.Logf("the local model made no suggestion card: %s", why)
+		}
+	}
+
+	name := fmt.Sprintf("browser suggestions %d", s.stamp)
+	p.clickText(".bq-dataprep .bq-toolbar button", "Destination")
+	p.waitFor(`document.querySelector("#bq-dp-dest") !== null`)
+	p.setField("#bq-dp-dest", ds+".prepared")
+	p.clickText(".bq-dataprep-tab > .bq-toolbar button", "Save")
+	studioSaveAs(p, name)
+	_, repo, _ := studioAsset(t, s.project, name)
+	link := "/bigquery-studio?" + url.Values{"project": {s.project}, "savedQuery": {repo}}.Encode()
+	ready := `document.querySelector(".bq-dp-suggestions h3") !== null && document.querySelector(".bq-dp-suggestions .spinner") === null`
+	t.Run("WCAG", func(t *testing.T) {
+		auditScreens(t, []a11yPage{{"Studio data preparation suggestions", link, ready, ""}})
+	})
+}

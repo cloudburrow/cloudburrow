@@ -236,8 +236,14 @@ var areas = []area{
 		"google.cloud.aiplatform.v1.LlmUtilityService",
 		// Context caching (#2107).
 		"google.cloud.aiplatform.v1.GenAiCacheService",
-		// Colab Enterprise's runtime templates and runtimes (#2105).
-		"google.cloud.aiplatform.v1.NotebookService"}},
+		// Colab Enterprise's runtime templates and runtimes (#2105), and
+		// its schedules of notebook executions.
+		"google.cloud.aiplatform.v1.NotebookService", "google.cloud.aiplatform.v1.ScheduleService"},
+		// The runtime templates' IAM policies (#2105): the IAMPolicy mixin,
+		// whose keys the kms area holds, so named by their discovery IDs.
+		Extra: []string{"aiplatform.projects.locations.notebookRuntimeTemplates.getIamPolicy",
+			"aiplatform.projects.locations.notebookRuntimeTemplates.setIamPolicy",
+			"aiplatform.projects.locations.notebookRuntimeTemplates.testIamPermissions"}},
 	// v1beta1's PredictionService, for ChatCompletions on those endpoints
 	// (#1840) and v1's methods bridged (#1937): a page of its own, since
 	// its method names repeat v1's.

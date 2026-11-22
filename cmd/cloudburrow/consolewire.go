@@ -284,7 +284,9 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		if d.localAI != nil {
 			api.addr = d.localAI.Addr
 		}
-		providers = append(providers, colabRuntimesProvider{api: api}, colabTemplatesProvider{api: api})
+		providers = append(providers, colabRuntimesProvider{api: api}, colabTemplatesProvider{api: api, enforced: d.cfg.IAMEnforced()},
+			// My notebooks, Executions and Schedules (consolecolabexec.go).
+			colabNotebooksProvider{api: api, df: d.dataform.API}, colabExecutionsProvider{api: api}, colabSchedulesProvider{api: api})
 	}
 	if enabled[config.ServiceRun] {
 		// Two screens of one product: services, and jobs with their

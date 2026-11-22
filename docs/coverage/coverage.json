@@ -6530,10 +6530,31 @@
     "Title": "Vertex AI PredictionService",
     "counts": {
       "Implemented": 3,
-      "Unimplemented": 11,
-      "Verified": 98
+      "Unimplemented": 7,
+      "Verified": 112
     },
     "rows": [
+      {
+        "method": "aiplatform.projects.locations.notebookRuntimeTemplates.getIamPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabexecutions2105_test.go:410 TestColabEnterpriseRuntimeTemplateIAM"
+        ]
+      },
+      {
+        "method": "aiplatform.projects.locations.notebookRuntimeTemplates.setIamPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabexecutions2105_test.go:410 TestColabEnterpriseRuntimeTemplateIAM"
+        ]
+      },
+      {
+        "method": "aiplatform.projects.locations.notebookRuntimeTemplates.testIamPermissions",
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabexecutions2105_test.go:410 TestColabEnterpriseRuntimeTemplateIAM"
+        ]
+      },
       {
         "method": "google.cloud.aiplatform.v1.EndpointService/CreateEndpoint",
         "status": "Verified",
@@ -6821,8 +6842,10 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.NotebookService/CreateNotebookExecutionJob",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabexecutions2105_test.go:93 TestColabEnterpriseNotebookExecutions"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.NotebookService/CreateNotebookRuntimeTemplate",
@@ -6833,8 +6856,10 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.NotebookService/DeleteNotebookExecutionJob",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabexecutions2105_test.go:93 TestColabEnterpriseNotebookExecutions"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.NotebookService/DeleteNotebookRuntime",
@@ -6852,8 +6877,10 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.NotebookService/GetNotebookExecutionJob",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabexecutions2105_test.go:93 TestColabEnterpriseNotebookExecutions"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.NotebookService/GetNotebookRuntime",
@@ -6871,8 +6898,10 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.NotebookService/ListNotebookExecutionJobs",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabexecutions2105_test.go:93 TestColabEnterpriseNotebookExecutions"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.NotebookService/ListNotebookRuntimeTemplates",
@@ -7046,6 +7075,55 @@
         "status": "Verified",
         "tests": [
           "test/compat/predictiondirectraw_test.go:64 TestPredictionClientReachesAModelsGRPCServer"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.ScheduleService/CreateSchedule",
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabexecutions2105_test.go:260 TestColabEnterpriseSchedules"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.ScheduleService/DeleteSchedule",
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabexecutions2105_test.go:260 TestColabEnterpriseSchedules"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.ScheduleService/GetSchedule",
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabexecutions2105_test.go:260 TestColabEnterpriseSchedules"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.ScheduleService/ListSchedules",
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabexecutions2105_test.go:260 TestColabEnterpriseSchedules"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.ScheduleService/PauseSchedule",
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabexecutions2105_test.go:260 TestColabEnterpriseSchedules"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.ScheduleService/ResumeSchedule",
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabexecutions2105_test.go:260 TestColabEnterpriseSchedules"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.ScheduleService/UpdateSchedule",
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabexecutions2105_test.go:260 TestColabEnterpriseSchedules"
         ]
       },
       {

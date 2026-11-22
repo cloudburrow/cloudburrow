@@ -82,6 +82,8 @@ type Server struct {
 	nb           *notebookStore
 	nbRESTOnce   sync.Once
 	nbTranscoder *rest.Transcoder
+	// schedStop ends the Colab Enterprise schedules' loop (schedules.go).
+	schedStop chan struct{}
 }
 
 // NewServer returns a server. A nil generator is valid and makes every
@@ -144,7 +146,9 @@ func (s *Server) Handler() http.Handler {
 	}
 	// Colab Enterprise's runtime templates and runtimes, and their
 	// operations (notebookruntimes.go, #2105).
-	for _, c := range []string{"notebookRuntimeTemplates", "notebookRuntimes"} {
+	// Notebook executions, schedules and the templates' IAM policies
+	// (notebookjobs.go, schedules.go, notebookiam.go) too.
+	for _, c := range []string{"notebookRuntimeTemplates", "notebookRuntimes", "notebookExecutionJobs", "schedules"} {
 		mux.HandleFunc("/v1/projects/{project}/locations/{location}/"+c, s.serveNotebookREST)
 		mux.HandleFunc("/v1/projects/{project}/locations/{location}/"+c+"/", s.serveNotebookREST)
 	}

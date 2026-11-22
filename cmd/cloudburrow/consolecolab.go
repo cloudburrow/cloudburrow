@@ -131,7 +131,12 @@ var colabScriptLabels = map[string]string{"RUN_ONCE": "Run once", "RUN_EVERY_STA
 
 // ---- Runtime templates
 
-type colabTemplatesProvider struct{ api vertexAPI }
+type colabTemplatesProvider struct {
+	api vertexAPI
+	// enforced is whether the instance enforces IAM, which its
+	// Permissions tab says (consolecolabexec.go).
+	enforced bool
+}
 
 func (colabTemplatesProvider) ID() string                    { return "colab-templates" }
 func (colabTemplatesProvider) Title() string                 { return "Runtime templates" }

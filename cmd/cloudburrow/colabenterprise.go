@@ -9,9 +9,17 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"strings"
 
+	"cloud.google.com/go/dataform/apiv1/dataformpb"
+	"cloud.google.com/go/storage"
+	"google.golang.org/api/option"
+
 	"github.com/cloudburrow/cloudburrow/internal/nbruntime"
+	"github.com/cloudburrow/cloudburrow/internal/netfwd"
+	"github.com/cloudburrow/cloudburrow/internal/service/dataform"
 	"github.com/cloudburrow/cloudburrow/internal/service/vertexai"
 )
 
@@ -65,4 +73,84 @@ func colabTemplates(srv *vertexai.Server) func(string) (nbruntime.Options, error
 		}
 		return nbOptions(o), nil
 	}
+}
+
+// colabExecutor is vertexai.NotebookExecutor (#2105): Colab Enterprise's
+// notebook executions read their notebooks from the instance's Cloud
+// Storage (with the official client) or its Dataform repositories, run on
+// the notebook runtime, and write the executed notebook back to Cloud
+// Storage.
+type colabExecutor struct {
+	m        *nbruntime.Manager
+	storage  func() *netfwd.Forwarder
+	dataform func() *dataform.Server
+}
+
+func (x colabExecutor) client(ctx context.Context) (*storage.Client, error) {
+	var f *netfwd.Forwarder
+	if x.storage != nil {
+		f = x.storage()
+	}
+	if f == nil || f.HostAddr() == "" {
+		return nil, errors.New("Cloud Storage is not served on this instance (start with --services including storage)")
+	}
+	return storage.NewClient(ctx, option.WithEndpoint("http://"+f.HostAddr()+"/storage/v1/"), option.WithoutAuthentication(),
+		storage.WithJSONReads(), storage.WithDisabledClientMetrics())
+}
+
+func (x colabExecutor) ReadObject(ctx context.Context, bucket, object string, generation int64) ([]byte, error) {
+	c, err := x.client(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = c.Close() }()
+	o := c.Bucket(bucket).Object(object)
+	if generation > 0 {
+		o = o.Generation(generation)
+	}
+	r, err := o.NewReader(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("gs://%s/%s: %w", bucket, object, err)
+	}
+	defer func() { _ = r.Close() }()
+	return io.ReadAll(io.LimitReader(r, 64<<20))
+}
+
+func (x colabExecutor) WriteObject(ctx context.Context, bucket, object, contentType string, data []byte) error {
+	c, err := x.client(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = c.Close() }()
+	w := c.Bucket(bucket).Object(object).NewWriter(ctx)
+	w.ContentType = contentType
+	if _, err := w.Write(data); err != nil {
+		_ = w.Close()
+		return err
+	}
+	return w.Close()
+}
+
+func (x colabExecutor) ReadRepositoryFile(ctx context.Context, repository, commit, file string) ([]byte, error) {
+	var api *dataform.Server
+	if x.dataform != nil {
+		api = x.dataform()
+	}
+	if api == nil {
+		return nil, errors.New("Dataform is not served on this instance (start with --services including dataform)")
+	}
+	resp, err := api.ReadRepositoryFile(ctx, &dataformpb.ReadRepositoryFileRequest{Name: repository, CommitSha: commit, Path: file})
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", repository, err)
+	}
+	return resp.GetContents(), nil
+}
+
+func (x colabExecutor) Run(ctx context.Context, key, project string, notebook []byte, o vertexai.NotebookRuntimeOptions) ([]byte, error) {
+	out, err := x.m.RunNotebookWith(ctx, key, project, notebook, nbOptions(o))
+	var ce *nbruntime.CellError
+	if errors.As(err, &ce) && len(out) == 0 {
+		out = ce.Output
+	}
+	return out, err
 }

@@ -71,6 +71,7 @@ import (
 	"unicode/utf8"
 
 	"cloud.google.com/go/aiplatform/apiv1/aiplatformpb"
+	"cloud.google.com/go/iam/apiv1/iampb"
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
 	"google.golang.org/genproto/googleapis/api/annotations"
 	"google.golang.org/grpc"
@@ -82,6 +83,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/aipfilter"
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
 	"github.com/cloudburrow/cloudburrow/internal/lro"
 	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
 )
@@ -181,6 +183,13 @@ type notebookStore struct {
 	// (Set as Default), by parent.
 	defaults map[string]string
 	now      func() time.Time
+	// exec runs notebook executions (notebookjobs.go); jobs and
+	// schedules are theirs (schedules.go), policies the templates' IAM
+	// policies (notebookiam.go).
+	exec      NotebookExecutor
+	jobs      map[string]*jobEntry
+	schedules map[string]*aiplatformpb.Schedule
+	policies  map[string]*iampolicy.Stored
 }
 
 // runtimeEntry is a runtime and what its lifecycle needs.
@@ -199,7 +208,8 @@ func (s *Server) notebooks() *notebookStore {
 	defer s.mu.Unlock()
 	if s.nb == nil {
 		s.nb = &notebookStore{templates: map[string]*aiplatformpb.NotebookRuntimeTemplate{}, runtimes: map[string]*runtimeEntry{},
-			defaults: map[string]string{}, now: time.Now}
+			defaults: map[string]string{}, now: time.Now, jobs: map[string]*jobEntry{}, schedules: map[string]*aiplatformpb.Schedule{},
+			policies: map[string]*iampolicy.Stored{}}
 	}
 	if s.ops == nil {
 		s.ops = lro.NewStore(nil)
@@ -225,7 +235,10 @@ func (s *Server) SetNotebookRuntimes(host NotebookHost, file string) {
 			Runtime json.RawMessage `json:"runtime"`
 			Ran     bool            `json:"ran"`
 		} `json:"runtimes"`
-		Defaults map[string]string `json:"defaults"`
+		Defaults  map[string]string            `json:"defaults"`
+		Jobs      []json.RawMessage            `json:"jobs"`
+		Schedules []json.RawMessage            `json:"schedules"`
+		Policies  map[string]*iampolicy.Stored `json:"policies"`
 	}
 	if json.Unmarshal(b, &saved) != nil {
 		return
@@ -246,6 +259,7 @@ func (s *Server) SetNotebookRuntimes(host NotebookHost, file string) {
 	for k, v := range saved.Defaults {
 		st.defaults[k] = v
 	}
+	st.loadJobs(saved.Jobs, saved.Schedules, saved.Policies)
 }
 
 // save writes the store; the caller holds st.mu.
@@ -258,10 +272,24 @@ func (st *notebookStore) save() {
 		Ran     bool            `json:"ran"`
 	}
 	out := struct {
-		Templates []json.RawMessage `json:"templates"`
-		Runtimes  []savedRuntime    `json:"runtimes"`
-		Defaults  map[string]string `json:"defaults"`
-	}{Templates: []json.RawMessage{}, Runtimes: []savedRuntime{}, Defaults: st.defaults}
+		Templates []json.RawMessage            `json:"templates"`
+		Runtimes  []savedRuntime               `json:"runtimes"`
+		Defaults  map[string]string            `json:"defaults"`
+		Jobs      []json.RawMessage            `json:"jobs"`
+		Schedules []json.RawMessage            `json:"schedules"`
+		Policies  map[string]*iampolicy.Stored `json:"policies"`
+	}{Templates: []json.RawMessage{}, Runtimes: []savedRuntime{}, Defaults: st.defaults, Jobs: []json.RawMessage{}, Schedules: []json.RawMessage{},
+		Policies: st.policies}
+	for _, n := range sortedNames(st.jobs) {
+		if b, err := protojson.Marshal(st.jobs[n].Job); err == nil {
+			out.Jobs = append(out.Jobs, b)
+		}
+	}
+	for _, n := range sortedNames(st.schedules) {
+		if b, err := protojson.Marshal(st.schedules[n]); err == nil {
+			out.Schedules = append(out.Schedules, b)
+		}
+	}
 	for _, n := range sortedNames(st.templates) {
 		if b, err := protojson.Marshal(st.templates[n]); err == nil {
 			out.Templates = append(out.Templates, b)
@@ -563,6 +591,7 @@ func (n *notebookService) DeleteNotebookRuntimeTemplate(_ context.Context, req *
 		return nil, grpcError(err)
 	}
 	delete(st.templates, req.GetName())
+	delete(st.policies, req.GetName())
 	for k, v := range st.defaults {
 		if v == req.GetName() {
 			delete(st.defaults, k)
@@ -1132,6 +1161,7 @@ func (n *notebookService) UpgradeNotebookRuntime(_ context.Context, req *aiplatf
 
 func (s *Server) registerNotebooks(srv grpc.ServiceRegistrar) {
 	aiplatformpb.RegisterNotebookServiceServer(srv, &notebookService{s: s})
+	aiplatformpb.RegisterScheduleServiceServer(srv, &scheduleService{s: s})
 }
 
 // notebookREST is the transcoder for the notebookRuntimeTemplates and
@@ -1141,8 +1171,12 @@ func (s *Server) notebookREST() *rest.Transcoder {
 		t := &rest.Transcoder{Packages: []string{"google.cloud.aiplatform.v1"}, SnakeCaseMasks: true, Mixins: []*annotations.HttpRule{
 			opRule("/v1/{name=projects/*/locations/*/notebookRuntimeTemplates/*/operations/*}"),
 			opRule("/v1/{name=projects/*/locations/*/notebookRuntimes/*/operations/*}"),
+			opRule("/v1/{name=projects/*/locations/*/notebookExecutionJobs/*/operations/*}"),
+			opRule("/v1/{name=projects/*/locations/*/schedules/*/operations/*}"),
 		}}
+		t.Mixins = append(t.Mixins, NotebookIAMMixins()...)
 		s.registerNotebooks(t)
+		iampb.RegisterIAMPolicyServer(t, &notebookIAM{s: s})
 		s.notebooks()
 		longrunningpb.RegisterOperationsServer(t, &operations{s: s})
 		s.nbTranscoder = t

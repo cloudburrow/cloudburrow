@@ -91,9 +91,10 @@ function agentPlatformRoutes() {
     // Colab Enterprise (#2105): its runtimes and runtime templates, whose
     // runtimes are the instance's notebook runtimes; the off state is the
     // not-served page.
-    absent(`${AP}/colab/notebooks`, "My notebooks", "Colab Enterprise", null,
-      "Notebooks of your own, in Colab Enterprise", "https://docs.cloud.google.com/colab/docs/create-console-quickstart",
-      "Open BigQuery Studio's notebooks, which run on the same runtimes."),
+    page(`${AP}/colab/notebooks`, "My notebooks", "Colab Enterprise", { service: "colab-notebooks", listedWhenOff: true,
+      api: "Dataform single-file notebook repositories", about: "Your notebooks, each with Notebook actions > Schedule",
+      docs: "https://docs.cloud.google.com/colab/docs/schedule-notebook-run",
+      instead: "Start CloudBurrow with --services including run, dataform and bigquery: a notebook is kept in Dataform and runs on the local Vertex AI endpoint's runtimes." }),
     page(`${AP}/colab/runtimes`, "Runtimes", "Colab Enterprise", { service: "colab-runtimes", listedWhenOff: true,
       api: "projects.locations.notebookRuntimes", about: "Runtimes your notebooks run on, made from runtime templates",
       docs: "https://docs.cloud.google.com/colab/docs/create-runtime",
@@ -102,12 +103,14 @@ function agentPlatformRoutes() {
       api: "projects.locations.notebookRuntimeTemplates", about: "The machine, disk, idle shutdown, environment and network a runtime is made with",
       docs: "https://docs.cloud.google.com/colab/docs/create-runtime-template",
       instead: "Start CloudBurrow with --services including run, which starts the local Vertex AI endpoint." }),
-    absent(`${AP}/colab/executions`, "Executions", "Colab Enterprise", "projects.locations.notebookExecutionJobs",
-      "Runs of a notebook on a runtime, with the executed notebook", "https://docs.cloud.google.com/colab/docs/schedule-notebook-run",
-      "Schedule the notebook in BigQuery Studio, whose executions run on these runtimes."),
-    absent(`${AP}/colab/schedules`, "Schedules", "Colab Enterprise", "projects.locations.schedules",
-      "Recurring notebook executions", "https://docs.cloud.google.com/colab/docs/schedule-notebook-run",
-      "Schedule the notebook in BigQuery Studio, whose executions run on these runtimes."),
+    page(`${AP}/colab/executions`, "Executions", "Colab Enterprise", { service: "colab-executions", listedWhenOff: true,
+      api: "projects.locations.notebookExecutionJobs", about: "Runs of a notebook on a runtime, with View result for the executed notebook",
+      docs: "https://docs.cloud.google.com/colab/docs/schedule-notebook-run",
+      instead: "Start CloudBurrow with --services including run, storage and bigquery: an execution writes its executed notebook to Cloud Storage." }),
+    page(`${AP}/colab/schedules`, "Schedules", "Colab Enterprise", { service: "colab-schedules", listedWhenOff: true,
+      api: "projects.locations.schedules", about: "Recurring notebook executions, with Pause, Resume and Delete",
+      docs: "https://docs.cloud.google.com/colab/docs/schedule-notebook-run",
+      instead: "Start CloudBurrow with --services including run, storage and bigquery." }),
     // Notebooks.
     absent(`${AP}/workbench/instances`, "Workbench", "Notebooks", "notebooks.googleapis.com (Workbench instances)",
       "JupyterLab instances", "https://docs.cloud.google.com/gemini-enterprise-agent-platform/notebooks/overview"),
@@ -21567,7 +21570,7 @@ async function bqSaveAsset(tab, kind, content, onSaved) {
 // write mode), More > Error table, and Data, Graph, Schema and SQLX views.
 // All of it is Dataform's (POST /api/studio/dataform, the calls in
 // cmd/cloudburrow/consolebigqueryorchestration.go): Dataform runs the
-// schedules. Gemini's suggestions are not run here.
+// schedules. Gemini's step suggestions are the local model's (bqPrepSuggest).
 
 const BQ_REPEATS = [["hourly", "Hourly"], ["daily", "Daily"], ["weekly", "Weekly"], ["monthly", "Monthly"], ["custom", "Custom"]];
 const BQ_WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -21948,6 +21951,68 @@ async function bqRunAsset(tab, kind, content, ctx, host, opts = {}) {
   }
 }
 
+// Gemini's data preparation suggestions (https://docs.cloud.google.com/bigquery/docs/data-prep-get-suggestions,
+// read 2026-11-22): "Gemini generates suggestions based on your data",
+// shown as cards in the Steps list, each with Preview, Edit and Apply; a
+// column's header gives "suggestions specific to that column"; a
+// Transformation, Filter or Aggregation step takes a Description, "a
+// prompt to generate a SQL expression". Here the local model (LiteRT-LM,
+// /api/ai/playground; no network) is given the table's schema and a
+// sample of its rows. Without one installed, the editor says so, as
+// Google's shows no suggestions while Gemini in BigQuery is off.
+const BQ_PREP_NO_MODEL = "Gemini suggestions are off: this instance has no local model installed. " +
+  "Download and load one on Agent Platform > Local models; data preparation suggestions are generated by it, with no network.";
+const bqPrepModelOn = () => !!capabilityOf("playground").id;
+const BQ_PREP_SUGGESTED = ["filter", "transform", "aggregate", "deduplicate", "delete"];
+
+// bqPrepPrompt asks for step suggestions for a sample (its schema and up to
+// 10 rows), all columns or one.
+function bqPrepPrompt(source, schema, rows, column) {
+  const cols = (schema || []).map((f) => `${f.name} ${f.mode === "REPEATED" ? "ARRAY<" + f.type + ">" : f.type}`).join(", ");
+  const sample = (rows || []).slice(0, 10).map((r) => JSON.stringify(r)).join("\n");
+  return "You suggest data preparation steps for a BigQuery table, as Gemini in BigQuery's data preparation does: " +
+    "cleaning, filtering, standardizing and enriching the data.\n" +
+    `Table: ${source}\nColumns: ${cols}\nSample rows (JSON):\n${sample}\n` +
+    (column ? `Suggest only steps about the column ${column}.\n` : "") +
+    "Answer with a JSON array only, at most 5 items, each an object with: " +
+    "\"type\" (one of filter, transform, aggregate, deduplicate, delete), \"description\" (one short sentence), " +
+    "\"expression\" (GoogleSQL: a WHERE condition for filter, a column expression for transform, aggregate expressions for aggregate), " +
+    "\"column\" (the target column for transform), \"replace\" (true to replace that column's values), " +
+    "\"keys\" (grouping columns for aggregate), \"columns\" (comma-separated columns for delete).";
+}
+
+// bqPrepSuggestionsOf reads a model's answer as steps: the JSON array (in a
+// fence or not), each item kept only when it is a step the editor can
+// apply. A non-JSON answer is no suggestions.
+function bqPrepSuggestionsOf(text, schema) {
+  const m = /```(?:json)?\s*([\s\S]*?)```/i.exec(text || "");
+  let body = (m ? m[1] : text || "").trim();
+  const a = body.indexOf("["), b = body.lastIndexOf("]");
+  if (a >= 0 && b > a) body = body.slice(a, b + 1);
+  let items;
+  try { items = JSON.parse(body); } catch { return []; }
+  if (!Array.isArray(items)) return [];
+  const names = new Set((schema || []).map((f) => f.name));
+  const str = (v) => (typeof v === "string" ? v.trim() : "");
+  const out = [];
+  for (const it of items) {
+    if (!it || typeof it !== "object") continue;
+    const type = str(it.type).toLowerCase().replace(/ation$/, "").replace(/^transform.*/, "transform");
+    if (!BQ_PREP_SUGGESTED.includes(type)) continue;
+    const step = { type };
+    if (type === "filter") step.expression = str(it.expression);
+    if (type === "transform") { step.column = str(it.column); step.expression = str(it.expression); step.replace = it.replace === true || names.has(step.column); }
+    if (type === "aggregate") { step.keys = Array.isArray(it.keys) ? it.keys.join(", ") : str(it.keys); step.expression = str(it.expression); }
+    if (type === "delete") step.columns = Array.isArray(it.columns) ? it.columns.join(", ") : str(it.columns);
+    if ((type === "filter" || type === "aggregate") && !step.expression) continue;
+    if (type === "transform" && (!step.column || !step.expression)) continue;
+    if (type === "delete" && !step.columns) continue;
+    out.push({ description: str(it.description) || type, step });
+    if (out.length === 5) break;
+  }
+  return out;
+}
+
 // bqDataPrepDoc is a new data preparation's model.
 const bqDataPrepDoc = (source = "") => ({ source, steps: [], destination: "", loadMode: "REPLACE", loadColumn: "", errorTable: "", errorRetentionDays: 30 });
 
@@ -21961,6 +22026,13 @@ function bqDataPrepEditor(doc, onChange, ctx, { idPrefix = "bq-dp" } = {}) {
   // The last sample's schema: Incremental picks MAXIMUM or UNIQUE from its
   // column's type, and Flatten and Unnest offer its columns.
   let lastSchema = [];
+  // Gemini's suggestions: the cards for the last sample (or one column),
+  // and the sample they were made for.
+  let suggestions = null;
+  let suggestFor = "";
+  let lastRows = [];
+  let suggestKey = "";
+  const suggestHost = el("section", { class: "bq-dp-suggestions", "aria-label": "Suggestions" });
   const tables = () => ((ctx.tree() || {}).datasets || []).flatMap((d) => (d.tables || []).map((t) => `${d.id}.${t.id}`));
   const listId = `${idPrefix}-tables`;
   const datalist = el("datalist", { id: listId });
@@ -21988,6 +22060,97 @@ function bqDataPrepEditor(doc, onChange, ctx, { idPrefix = "bq-dp" } = {}) {
     setChildren(stepsHost, item("source", `Source: ${doc.source || "choose a table"}`),
       ...doc.steps.map((s, i) => item(String(i), stepLabel(s))),
       item("destination", `Destination: ${doc.destination || "not set"} (${modeText()})`));
+  };
+  // drawSuggestions is the Suggestions list: Gemini's cards (Preview, Edit,
+  // Apply), the state of a request, or why there are none.
+  const drawSuggestions = () => {
+    const head = el("h3", { text: "Suggestions" });
+    if (!bqPrepModelOn()) return setChildren(suggestHost, head, el("p", { class: "unavailable bq-dp-no-model", role: "status", text: BQ_PREP_NO_MODEL }));
+    if (doc.yaml) return setChildren(suggestHost, head, el("p", { class: "unavailable", text: "Migrate the YAML data preparation to SQLX to apply suggestions." }));
+    if (!doc.source) return setChildren(suggestHost, head, el("p", { class: "unavailable", text: "Choose the source table: Gemini suggests steps from its data." }));
+    if (suggestions === null) return setChildren(suggestHost, head, el("p", { class: "unavailable", role: "status", text: "Load a sample (Data) to get suggestions." }));
+    if (suggestions === "loading") return setChildren(suggestHost, head, spinner("Generating suggestions"));
+    if (typeof suggestions === "string") return setChildren(suggestHost, head, el("p", { class: "form-error", role: "alert", text: suggestions }));
+    const again = el("button", { type: "button", class: "secondary", text: "Refresh suggestions", onclick: () => suggest(suggestFor.startsWith("column:") ? suggestFor.slice(7) : "") });
+    if (!suggestions.length) return setChildren(suggestHost, head, el("p", { class: "unavailable", role: "status", text: "The local model has no suggestions for this sample." }), again);
+    const col = suggestFor.startsWith("column:") ? suggestFor.slice(7) : "";
+    setChildren(suggestHost, head, col ? el("p", { class: "form-help", text: `Suggestions for the column ${col}.` }) : null,
+      el("ul", { class: "bq-dp-cards", "aria-label": "Suggested steps" }, ...suggestions.map((sg, k) => el("li", { class: "bq-dp-card" },
+        el("p", { class: "bq-dp-card-title", text: sg.description }),
+        el("p", { class: "mono bq-dp-card-step", text: stepLabel(sg.step) }),
+        el("div", { class: "bq-toolbar" },
+          el("button", { type: "button", class: "secondary", text: "Preview", "aria-label": `Preview: ${sg.description}`, onclick: () => previewStep(sg.step) }),
+          el("button", { type: "button", class: "secondary", text: "Edit", "aria-label": `Edit: ${sg.description}`, onclick: () => applySuggestion(k, true) }),
+          el("button", { type: "button", class: "primary", text: "Apply", "aria-label": `Apply: ${sg.description}`, onclick: () => applySuggestion(k, false) }))))),
+      again);
+  };
+  const applySuggestion = (k, edit) => {
+    const sg = suggestions[k];
+    doc.steps.push({ ...sg.step });
+    suggestions = suggestions.filter((_, j) => j !== k);
+    selected = edit ? String(doc.steps.length - 1) : selected;
+    changed(); drawForm(); drawSuggestions(); drawView();
+    announce(edit ? "Suggestion added; edit the step" : "Suggestion applied");
+    if (edit) formHost.querySelector("input, select, textarea")?.focus();
+    else (suggestHost.querySelector(".bq-dp-card button") || stepsHost.querySelector(".bq-dp-step"))?.focus();
+  };
+  // suggest asks the local model for steps for the last sample (or one
+  // column of it).
+  const suggest = async (column = "") => {
+    if (!bqPrepModelOn() || !doc.source || !lastSchema.length) { drawSuggestions(); return; }
+    const key = (column ? "column:" + column : "table") + "|" + doc.source + "|" + doc.steps.length;
+    suggestKey = key;
+    suggestFor = column ? "column:" + column : "";
+    suggestions = "loading"; drawSuggestions();
+    let got;
+    try {
+      got = bqPrepSuggestionsOf(await bqLocalModel(bqPrepPrompt(doc.source, lastSchema, lastRows, column)), lastSchema);
+    } catch (e) { got = e.message; }
+    // A later request (another column, or the steps changed) wins.
+    if (suggestKey !== key) return;
+    suggestions = got;
+    drawSuggestions();
+  };
+  // A Description prompt for a step: the local model's expression.
+  const describe = (s, i) => {
+    if (!["filter", "transform", "aggregate"].includes(s.type)) return [];
+    const did = `${idPrefix}-describe`;
+    const box = el("input", { type: "text", id: did, placeholder: s.type === "filter" ? "keep the orders over 100 dollars" : s.type === "transform" ? "the name in upper case" : "revenue by region" });
+    const note = el("p", { class: "form-help", role: "status" });
+    const go = el("button", { type: "button", class: "secondary", text: "Generate", disabled: bqPrepModelOn() ? null : true, onclick: async () => {
+      if (!box.value.trim()) { note.textContent = "Describe the step first."; return; }
+      note.textContent = "Generating…"; go.disabled = true;
+      try {
+        const kind = s.type === "filter" ? "a WHERE condition" : s.type === "transform" ? `a column expression${s.column ? " for the column " + s.column : ""}` : "aggregate expressions (with AS names)";
+        const cols = lastSchema.map((f) => `${f.name} ${f.type}`).join(", ");
+        const text = await bqLocalModel(`BigQuery table ${doc.source} has columns: ${cols}. Write ${kind} in GoogleSQL for: ${box.value.trim()}. Answer with the expression only.`);
+        s.expression = bqSqlOf(text).replace(/^WHERE\s+/i, "").replace(/;\s*$/, "");
+        changed(); drawForm(); announce("Expression generated");
+        formHost.querySelector(`#${idPrefix}-expr`)?.focus();
+      } catch (e) { note.textContent = e.message; go.disabled = false; }
+    } });
+    return [bqField(did, "Description", box, "A prompt to generate the SQL expression with Gemini (the local model)."), go,
+      bqPrepModelOn() ? note : el("p", { class: "unavailable", text: "Generate is off: no local model is installed (see Suggestions)." })];
+  };
+  // previewStep shows the sample with a suggested step applied after the
+  // others.
+  const previewStep = async (step) => {
+    view = "data"; drawViewTabs();
+    const mine = ++drawn;
+    setChildren(viewHost, spinner("Loading the preview"));
+    try {
+      const gen = await bqDfCall("dataprepsql", { content: JSON.stringify({ ...doc, yaml: undefined, steps: [...doc.steps, step], destination: "" }) });
+      const res = await bqStudioCall("query", { query: gen.sql + "\n|> LIMIT 100", legacySql: false, priority: "INTERACTIVE" });
+      if (mine !== drawn) return;
+      const cols = (res.schema || []).map((f) => f.name);
+      setChildren(viewHost, el("p", { class: "unavailable", role: "status", text: `Preview: ${stepLabel(step)}. Apply it to keep it.` }),
+        el("div", { class: "table-scroll", tabindex: "0", role: "region", "aria-label": "Preview rows" }, el("table", { class: "bq-nb-table" },
+          el("thead", {}, el("tr", {}, ...cols.map((h) => el("th", { scope: "col", text: h })))),
+          el("tbody", {}, ...(res.rows || []).map((r) => el("tr", {}, ...cols.map((c) => el("td", { text: cellText(r[c]) }))))))));
+    } catch (err) {
+      if (mine !== drawn) return;
+      setChildren(viewHost, el("p", { class: "form-error", role: "alert", text: err.message }));
+    }
   };
   // A YAML data preparation (More > Open YAML) keeps its file; Migrate to
   // SQLX makes it an editable SQLX one, as Google migrates them.
@@ -22156,7 +22319,7 @@ function bqDataPrepEditor(doc, onChange, ctx, { idPrefix = "bq-dp" } = {}) {
         fields.push(el("p", { class: "form-help", text: "Each element of the array becomes its own row, the other columns repeated; the array column is replaced by its elements." }));
       }
     }
-    setChildren(formHost, el("h3", { text: `Step ${i + 1}: ${stepTitle(s)}` }), ...fields,
+    setChildren(formHost, el("h3", { text: `Step ${i + 1}: ${stepTitle(s)}` }), ...describe(s, i), ...fields,
       el("div", { class: "bq-toolbar" },
         el("button", { type: "button", class: "secondary", text: "Move up", disabled: i === 0 ? true : null, onclick: () => { doc.steps.splice(i - 1, 0, doc.steps.splice(i, 1)[0]); selected = String(i - 1); changed(); drawForm(); } }),
         el("button", { type: "button", class: "secondary", text: "Delete step", "aria-label": `Delete step ${i + 1}`, onclick: () => { doc.steps.splice(i, 1); selected = "source"; changed(); drawForm(); } })));
@@ -22205,6 +22368,9 @@ function bqDataPrepEditor(doc, onChange, ctx, { idPrefix = "bq-dp" } = {}) {
       const res = await bqStudioCall("query", { query: gen.sql + "\n|> LIMIT 100", legacySql: false, priority: "INTERACTIVE" });
       if (mine !== drawn) return;
       lastSchema = res.schema || [];
+      lastRows = res.rows || [];
+      // New suggestions for a new source or new steps; a column's stay.
+      if (bqPrepModelOn() && lastSchema.length && !suggestKey.endsWith("|" + doc.source + "|" + doc.steps.length) && !doc.yaml) suggest("");
       if (["MAXIMUM", "UNIQUE"].includes(doc.loadMode) && doc.loadColumn) {
         const m = incrementalMode(doc.loadColumn);
         if (m !== doc.loadMode) { doc.loadMode = m; changed(); }
@@ -22218,7 +22384,9 @@ function bqDataPrepEditor(doc, onChange, ctx, { idPrefix = "bq-dp" } = {}) {
       }
       setChildren(viewHost, el("p", { class: "unavailable", text: `A sample of ${Math.min(100, Number(res.totalRows) || 0)} rows after the applied steps.` }),
         el("div", { class: "table-scroll", tabindex: "0", role: "region", "aria-label": "Sample rows" }, el("table", { class: "bq-nb-table" },
-          el("thead", {}, el("tr", {}, ...cols.map((h) => el("th", { scope: "col", text: h })))),
+          el("thead", {}, el("tr", {}, ...cols.map((h) => el("th", { scope: "col" }, el("button", { type: "button", class: "link bq-dp-col",
+            text: h, title: `Suggestions for ${h}`, "aria-label": `${h}: suggestions for this column`,
+            onclick: () => { if (!bqPrepModelOn()) { drawSuggestions(); suggestHost.querySelector("p")?.focus(); return; } suggest(h); } }))))),
           el("tbody", {}, ...(res.rows || []).map((r) => el("tr", {}, ...cols.map((k) => el("td", { text: cellText(r[k]) }))))))));
     } catch (err) {
       if (mine !== drawn) return;
@@ -22237,6 +22405,7 @@ function bqDataPrepEditor(doc, onChange, ctx, { idPrefix = "bq-dp" } = {}) {
   drawSteps();
   drawYaml();
   drawForm();
+  drawSuggestions();
   drawViewTabs();
   drawView();
   return el("div", { class: "bq-dataprep" }, datalist,
@@ -22244,7 +22413,7 @@ function bqDataPrepEditor(doc, onChange, ctx, { idPrefix = "bq-dp" } = {}) {
       el("button", { type: "button", class: "secondary", text: "Destination", onclick: () => { selected = "destination"; drawSteps(); drawForm(); } }), more, refreshSample),
     yamlHost,
     el("div", { class: "bq-dp-layout" },
-      el("section", { class: "bq-dp-side", "aria-label": "Steps" }, el("h3", { text: "Steps" }), stepsHost, formHost),
+      el("section", { class: "bq-dp-side", "aria-label": "Steps" }, el("h3", { text: "Steps" }), stepsHost, suggestHost, formHost),
       el("section", { class: "bq-dp-main", "aria-label": "Data preparation views" }, viewTabs, viewHost)));
 }
 
@@ -22265,7 +22434,7 @@ function bqDataPrepTab(tab, ctx) {
     ...bqAssetToolbarTail(tab, "data_preparation", ctx, contentOf));
   return el("div", { class: "bq-dataprep-tab" }, toolbar,
     el("p", { class: "unavailable bq-hint", text: "Run saves the data preparation and runs it through Dataform into its destination with its write mode. " +
-      "Gemini's suggestions are not run locally. " + (bqDataformOn() ? BQ_DATAFORM_NOTE : BQ_NO_DATAFORM) }),
+      (bqPrepModelOn() ? "Gemini's suggestions are made by this instance's local model. " : BQ_PREP_NO_MODEL + " ") + (bqDataformOn() ? BQ_DATAFORM_NOTE : BQ_NO_DATAFORM) }),
     bqDataPrepEditor(doc, keep, ctx), runs);
 }
 

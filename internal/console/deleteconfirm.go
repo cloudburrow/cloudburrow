@@ -219,6 +219,18 @@ var DeleteConfirmRules = map[string]DeleteConfirmRule{
 	// Colab Enterprise runtimes (#2105): "select the runtime ... click
 	// Delete ... click Confirm" (https://docs.cloud.google.com/colab/docs/manage-runtimes).
 	"colab-runtimes": {Style: DeleteConfirmClick, Source: "https://docs.cloud.google.com/colab/docs/manage-runtimes", Verified: true},
+	// Colab Enterprise executions (#2105): "Select the notebook run that you
+	// want to delete the result for. Click Delete. To confirm the deletion,
+	// click Confirm." (https://docs.cloud.google.com/colab/docs/schedule-notebook-run).
+	"colab-executions": {Style: DeleteConfirmClick, Source: "https://docs.cloud.google.com/colab/docs/schedule-notebook-run", Verified: true},
+	// UNVERIFIED (re-read 2026-11-22): "Click Pause, Resume, or Delete." for a
+	// schedule, no dialog described
+	// (https://docs.cloud.google.com/colab/docs/schedule-notebook-run).
+	"colab-schedules": unverified,
+	// My notebooks (#2105): "click the Actions menu, and then select Delete
+	// notebook. In the Delete notebook dialog, click Confirm."
+	// (https://docs.cloud.google.com/colab/docs/create-console-quickstart).
+	"colab-notebooks": {Style: DeleteConfirmClick, Source: "https://docs.cloud.google.com/colab/docs/create-console-quickstart", Verified: true},
 	// UNVERIFIED (re-read 2026-11-22): Google's console documents no Delete
 	// for a runtime template, which the API has
 	// (https://docs.cloud.google.com/colab/docs/create-runtime-template).
