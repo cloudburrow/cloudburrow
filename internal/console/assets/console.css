@@ -2468,7 +2468,41 @@ svg.bq-chart { display: block; border: 1px solid var(--border); border-radius: v
 .spanner-editor { width: 100%; box-sizing: border-box; min-height: 160px; }
 .spanner-editor-tab { display: inline-flex; align-items: center; }
 .spanner-editor-actions { margin: 8px 0; }
-.spanner-plan { font-family: var(--font-mono, monospace); }
+/* The query plan visualizer (#2029). */
+/* the panel sits beside the plan when there is room for both, else below it */
+.spanner-plan-layout { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
+.spanner-plan-main { flex: 1 1 480px; min-width: 0; background: var(--surface-alt); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; overflow: auto; }
+.spanner-plan-side { flex: 0 1 320px; min-width: 260px; max-width: 100%; display: flex; flex-direction: column; gap: 12px; align-items: stretch; }
+.spanner-plan-side > button { align-self: flex-start; }
+.spanner-plan-bar-top { display: flex; justify-content: flex-end; margin: 14px 0 8px; color: var(--text-muted); font-size: var(--text-caption-size); }
+.spanner-plan-mode { display: inline-flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--radius-control); margin-bottom: 8px; background: var(--surface); }
+.spanner-plan-mode .segment { border: 0; background: none; padding: 4px 10px; cursor: pointer; text-align: left; font: inherit; color: var(--text); }
+.spanner-plan-mode .segment.is-selected { background: var(--nav-selected); color: var(--nav-selected-text); }
+.spanner-plan-tree, .spanner-plan-tree ul { list-style: none; margin: 0; padding: 0; display: flex; justify-content: center; gap: 24px; }
+.spanner-plan-tree ul { padding-top: 28px; position: relative; }
+.spanner-plan-node { display: flex; flex-direction: column; align-items: center; position: relative; }
+.spanner-plan-tree ul > .spanner-plan-node::before { content: ""; position: absolute; top: -28px; left: 50%; width: 6px; height: 28px; margin-left: -3px; background: color-mix(in srgb, #e52592 35%, transparent); }
+.spanner-plan-link { font-size: var(--text-caption-size); color: var(--text-muted); margin-bottom: 2px; }
+.spanner-plan-card { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 220px; max-width: 300px; text-align: left; font: inherit; color: var(--text);
+  background: var(--surface); border: 1px solid var(--field-border); border-bottom: 6px solid #e52592; border-radius: var(--radius); padding: 10px 12px; cursor: pointer; }
+.spanner-plan-card:hover { box-shadow: var(--shadow-menu); }
+.spanner-plan-card.is-selected { outline: 2px solid var(--accent); }
+.spanner-plan-card-title { display: flex; gap: 6px; align-items: center; font-size: var(--text-heading-size); }
+.spanner-plan-warning { color: var(--warn); }
+.spanner-plan-target, .spanner-plan-full, .spanner-plan-rows { font-size: var(--text-caption-size); }
+.spanner-plan-full { color: var(--text-muted); }
+.spanner-plan-chips { display: flex; flex-direction: column; gap: 2px; }
+.spanner-plan-chips .chip { background: var(--surface-alt); border-radius: 12px; padding: 1px 10px; font-size: var(--text-caption-size); color: var(--text-muted); }
+.spanner-plan-times { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; width: 100%; font-size: var(--text-caption-size); }
+.spanner-plan-times > span { display: flex; flex-direction: column; gap: 2px; }
+.spanner-plan-bar { display: block; height: 6px; background: #e8710a; }
+.spanner-plan-tree.is-compact .spanner-plan-card { min-width: 160px; padding: 6px 8px; }
+.spanner-query-summary, .spanner-iterator-info { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 16px; background: var(--surface); }
+.spanner-query-summary h3, .spanner-iterator-info h3 { margin: 0 0 8px; font-size: var(--text-heading-size); font-weight: 400; }
+.spanner-query-summary h4, .spanner-iterator-info h4 { margin: 12px 0 4px; font-size: var(--text-body-size); font-weight: 500; }
+.spanner-explanation { min-width: 0; }
+.spanner-plan-info .resource-summary { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 16px; align-items: baseline; }
+.spanner-plan-info .resource-summary dd { margin: 0; }
 .form-templates { margin: 6px 0; }
 .form-template { display: flex; gap: 8px; align-items: flex-start; margin: 6px 0; }
 .form-template pre { margin: 0; flex: 1; overflow-x: auto; }

@@ -24239,6 +24239,164 @@ function btSaveDialog({ title, label, value, regions, submit }) {
   });
 }
 
+// --- Spanner query plans (#2029) ----------------------------------------------
+//
+// The Explanation tab as Google's query plan visualizer draws a plan
+// (https://docs.cloud.google.com/spanner/docs/tune-query-with-visualizer):
+// a card per operator (iterator), the data flowing bottom-up; the local
+// distributed unions hidden ("hidden from the visual plan", Google's
+// distributed operators page); on each card the iterator's name, its table
+// or index ("on Songs"), "Full scan" with a warning triangle, the Highest
+// latency, CPU time and row count chips, Rows returned, and Latency and CPU
+// time with bars; an Expanded/Compact selector and Download JSON; and the
+// information panel: the Query summary, Prominent operators, and the
+// selected card's Iterator information.
+
+// spannerOpName is an operator's name as the visualizer writes it: "Table
+// scan", "Stream aggregate", "Distributed union".
+function spannerOpName(n) {
+  const m = n.meta || {};
+  if (n.name === "Scan") return { TableScan: "Table scan", IndexScan: "Index scan", BatchScan: "Batch scan" }[m.scan_type] || "Scan";
+  if (n.name === "Aggregate" && m.iterator_type) return `${m.iterator_type} aggregate`;
+  return n.name.charAt(0) + n.name.slice(1).toLowerCase();
+}
+
+// spannerMs writes a latency of msecs as the visualizer does: "<1 ms".
+function spannerMs(v) {
+  const f = parseFloat(v);
+  if (!Number.isFinite(f)) return "—";
+  return f < 1 ? "<1 ms" : `${f.toFixed(2)} ms`;
+}
+
+function spannerExplanation(r) {
+  const nodes = r.plan || [];
+  if (!nodes.length) {
+    return el("p", { class: "unavailable", id: "spanner-plan-note", text: r.planNote || "No query plan." });
+  }
+  // the visible tree: relational operators, the local distributed unions
+  // folded into their children
+  const visibleKids = (n) => (n.links || []).flatMap((l) => {
+    const c = nodes[l.child];
+    if (!c || c.kind !== "RELATIONAL") return [];
+    if (c.name === "Distributed Union" && (c.meta || {}).call_type === "Local") return visibleKids(c);
+    return [{ node: c, type: l.type || "" }];
+  });
+  const rel = nodes.filter((n) => n.kind === "RELATIONAL" && !(n.name === "Distributed Union" && (n.meta || {}).call_type === "Local"));
+  const num = (v) => parseFloat(v) || 0;
+  const most = (k) => rel.reduce((best, n) => (n.stats && num(n.stats[k]) > num(best && best.stats && best.stats[k]) ? n : best), null);
+  const top = { latency: most("latency"), cpu: most("cpu"), rows: most("rows") };
+  // a tie shares the chip, as Google's visualizer draws it
+  const ties = (k, key, n) => top[k] && n.stats && num(n.stats[key]) === num(top[k].stats[key]);
+  const totalLatency = rel.reduce((s, n) => s + num(n.stats && n.stats.latency), 0) || 1;
+  const totalCPU = rel.reduce((s, n) => s + num(n.stats && n.stats.cpu), 0) || 1;
+  let compact = false;
+  let selected = null;
+  const cards = new Map();
+  const info = el("section", { class: "spanner-plan-info", id: "spanner-plan-info", "aria-label": "Information panel" });
+  const graph = el("div", { class: "spanner-plan-graph", id: "spanner-plan-graph", role: "tree", "aria-label": "Query plan" });
+
+  const scalarText = (n, types) => (n.links || []).filter((l) => types.includes(l.type))
+    .map((l) => [l.type, (nodes[l.child] || {}).desc || ""]);
+  const card = (n) => {
+    const m = n.meta || {};
+    const st = n.stats;
+    const full = m["Full scan"] === "true";
+    const chips = [];
+    if (ties("latency", "latency", n)) chips.push("Highest latency");
+    if (ties("cpu", "cpu", n)) chips.push("Highest CPU time");
+    if (ties("rows", "rows", n)) chips.push("Highest row count");
+    const bar = (v, total) => el("span", { class: "spanner-plan-bar", style: `width:${Math.max(4, Math.round(100 * num(v) / total))}%` });
+    const c = el("button", { type: "button", class: "spanner-plan-card" + (full ? " is-full-scan" : ""), role: "treeitem",
+      "data-node": String(n.index), "aria-label": `${spannerOpName(n)}${m.scan_target ? ` on ${m.scan_target}` : ""}`,
+      onclick: () => select(n) },
+    el("span", { class: "spanner-plan-card-title" },
+      full ? el("span", { class: "spanner-plan-warning", title: "Full scan", "aria-label": "Warning: full scan", text: "⚠" }) : null,
+      el("span", { class: "spanner-plan-name", text: spannerOpName(n) })),
+    m.scan_target && n.name === "Scan" && m.scan_type !== "BatchScan" ? el("span", { class: "spanner-plan-target" }, "on ", el("span", { text: m.scan_target })) : null,
+    full ? el("span", { class: "spanner-plan-full", text: "Full scan" }) : null,
+    compact ? null : el("span", { class: "spanner-plan-chips" }, ...chips.map((t) => el("span", { class: "chip", text: t }))),
+    st ? el("span", { class: "spanner-plan-rows", text: `Rows returned: ${st.rows || "0"}` }) : null,
+    st && !compact ? el("span", { class: "spanner-plan-times" },
+      el("span", {}, el("span", { text: `Latency: ${spannerMs(st.latency)}` }), bar(st.latency, totalLatency)),
+      el("span", {}, el("span", { text: `CPU time: ${spannerMs(st.cpu)}` }), bar(st.cpu, totalCPU))) : null);
+    cards.set(n, c);
+    return c;
+  };
+  const subtree = (n, type) => {
+    const kids = visibleKids(n);
+    return el("li", { class: "spanner-plan-node" },
+      type ? el("span", { class: "spanner-plan-link", text: type }) : null,
+      card(n),
+      kids.length ? el("ul", { role: "group" }, ...kids.map((k) => subtree(k.node, k.type))) : null);
+  };
+  const st = r.stats || {};
+  const summary = () => el("section", { class: "spanner-query-summary", id: "spanner-query-summary", "aria-label": "Query summary" },
+    el("h3", { text: "Query summary" }),
+    el("dl", { class: "resource-summary" },
+      ...[["Total elapsed time", st.elapsedTime], ["CPU time", st.cpuTime], ["Plan creation time", st.planCreation],
+        ["Rows returned", st.rowsReturned], ["Rows scanned", st.rowsScanned]]
+        .filter(([, v]) => v)
+        .flatMap(([k, v]) => [el("dt", { text: k }), el("dd", { class: "mono", id: `spanner-stat-${k.toLowerCase().replaceAll(" ", "-")}`,
+          text: /msecs$/.test(v) ? v.replace(" msecs", " ms") : v })])),
+    st.rowsReturned ? el("h4", { text: "Prominent operators" }) : null,
+    st.rowsReturned ? el("dl", { class: "resource-summary", id: "spanner-prominent" },
+      ...[["Highest latency", top.latency, (n) => spannerMs(n.stats.latency)], ["Highest CPU time", top.cpu, (n) => spannerMs(n.stats.cpu)],
+        ["Highest row count", top.rows, (n) => n.stats.rows]].filter(([, n]) => n)
+        .flatMap(([k, n, v]) => [el("dt", { text: k }), el("dd", {}, el("button", { type: "button", class: "link-button",
+          "aria-label": `${k}: ${spannerOpName(n)}`, text: `${v(n)} (${spannerOpName(n)})`, onclick: () => select(n) }))])) : null,
+    r.planNote ? el("p", { class: "unavailable", id: "spanner-plan-note", text: r.planNote }) : null);
+  const iterator = (n) => {
+    const m = n.meta || {};
+    const props = [];
+    if (m.scan_target && n.name === "Scan") props.push([m.scan_type === "IndexScan" ? "Index" : "Table", m.scan_target]);
+    if (m["Full scan"] === "true") props.push(["Full scan", "true"]);
+    if (m.scan_method) props.push(["Scan method", m.scan_method]);
+    if (m.execution_method) props.push(["Execution method", m.execution_method]);
+    if (m.call_type) props.push(["Call type", m.call_type]);
+    if (m.iterator_type) props.push(["Iterator type", m.iterator_type]);
+    if (m.join_type) props.push(["Join type", m.join_type]);
+    if (m.distribution_table) props.push(["Distribution table", m.distribution_table]);
+    for (const [t, d] of scalarText(n, ["Seek Condition", "Residual Condition", "Condition", "Split Range", "Key", "Limit", "Offset"])) props.push([t, d]);
+    const vars = (n.links || []).filter((l) => l.variable).map((l) => l.variable);
+    if (vars.length) props.push(["Variable assignment", vars.join(", ")]);
+    const s = n.stats;
+    const stats = s ? [["Rows returned", s.rows], ["Latency", spannerMs(s.latency)], ["CPU time", spannerMs(s.cpu)],
+      ["Number of executions", s.executions], ...(s.scanned ? [["Scanned rows", s.scanned]] : [])] : [];
+    return el("section", { class: "spanner-iterator-info", id: "spanner-iterator-info", "aria-label": "Iterator information" },
+      el("h3", { text: spannerOpName(n) }),
+      m["Full scan"] === "true" ? el("p", { class: "callout callout-warning", text: "This operator performs a full scan. Consider adding an index, or revising the query or schema, to avoid reading the whole table." }) : null,
+      el("h4", { text: "Properties" }),
+      el("dl", { class: "resource-summary" }, ...props.flatMap(([k, v]) => [el("dt", { text: k }), el("dd", { class: "mono", text: v })])),
+      stats.length ? el("h4", { text: "Execution statistics" }) : null,
+      stats.length ? el("dl", { class: "resource-summary" }, ...stats.flatMap(([k, v]) => [el("dt", { text: k }), el("dd", { class: "mono", text: v || "—" })])) : null,
+      el("button", { type: "button", class: "link-button", text: "Back to the query summary", onclick: () => { selected = null; draw(); } }));
+  };
+  const select = (n) => { selected = n; draw(); const c = cards.get(n); if (c) c.focus(); };
+  const modes = el("div", { class: "segmented spanner-plan-mode", role: "radiogroup", "aria-label": "View" });
+  const draw = () => {
+    cards.clear();
+    setChildren(modes, ...[["Expanded", false], ["Compact", true]].map(([label, v]) => el("button", { type: "button", role: "radio",
+      class: "segment" + (compact === v ? " is-selected" : ""), "aria-checked": compact === v ? "true" : "false", text: label,
+      id: `spanner-plan-${label.toLowerCase()}`, onclick: () => { compact = v; draw(); } })));
+    setChildren(graph, el("ul", { class: "spanner-plan-tree" + (compact ? " is-compact" : "") }, subtree(nodes[0], "")));
+    for (const [n, c] of cards) if (n === selected) c.classList.add("is-selected");
+    setChildren(info, selected ? iterator(selected) : summary());
+  };
+  const download = el("button", { type: "button", class: "primary", id: "spanner-plan-download", text: "Download JSON",
+    onclick: () => {
+      const blob = new Blob([JSON.stringify(r.planJson || { planNodes: [] }, null, 2)], { type: "application/json" });
+      const a = el("a", { href: URL.createObjectURL(blob), download: "query-plan.json" });
+      document.body.append(a); a.click(); a.remove();
+    } });
+  draw();
+  return el("div", { class: "spanner-explanation", id: "spanner-explanation" },
+    el("div", { class: "spanner-plan-bar-top" },
+      r.elapsed ? el("span", { class: "spanner-plan-completed", text: `Statement completed (${r.elapsed} elapsed)` }) : null),
+    el("div", { class: "spanner-plan-layout" },
+      el("div", { class: "spanner-plan-main" }, modes, graph),
+      el("aside", { class: "spanner-plan-side" }, download, info)));
+}
+
 const STUDIO_SECTIONS = { spanner: renderSpannerStudio, "bigtable-instances": renderBigtableStudio };
 
 function renderSpannerStudio(panel, route, segments, project) {
@@ -24279,22 +24437,7 @@ function renderSpannerStudio(panel, route, segments, project) {
         text: resultTab === "results" ? "Run a statement to see its results." : "Explain a query to see its query plan." }));
     }
     if (r.error) return setChildren(results, el("p", { class: "form-error", role: "alert", text: r.error }));
-    if (resultTab === "explanation") {
-      // Google's Explanation tab: the Query summary (PROFILE mode's
-      // statistics, after Run) above the plan, which the emulator lacks.
-      const st = r.stats;
-      const summary = st ? el("section", { class: "spanner-query-summary", id: "spanner-query-summary", "aria-label": "Query summary" },
-        el("h3", { text: "Query summary" }),
-        el("dl", { class: "resource-summary" },
-          ...[["Rows returned", st.rowsReturned], ["Elapsed time", st.elapsedTime],
-            ["CPU time", st.cpuTime || "Not reported by the Spanner emulator"], ["Rows scanned", st.rowsScanned || "Not reported by the Spanner emulator"]]
-            .flatMap(([k, v]) => [el("dt", { text: k }), el("dd", { class: "mono", id: `spanner-stat-${k.toLowerCase().replaceAll(" ", "-")}`, text: v || "—" })]))) : null;
-      const plan = (r.plan || []).length
-        ? el("ol", { class: "spanner-plan" }, ...r.plan.map((n) =>
-          el("li", { text: `${n.index}: ${n.name} (${n.kind})` + ((n.children || []).length ? ` → ${n.children.join(", ")}` : "") })))
-        : el("p", { class: "unavailable", id: "spanner-plan-note", text: r.planNote || "No plan." });
-      return setChildren(results, summary, plan);
-    }
+    if (resultTab === "explanation") return setChildren(results, spannerExplanation(r));
     if (r.kind !== "query") {
       return setChildren(results, el("p", { class: "spanner-message", id: "spanner-message", text: `${r.message || "Done."} ${r.elapsed ? `(${r.elapsed})` : ""}` }));
     }
@@ -24342,7 +24485,8 @@ function renderSpannerStudio(panel, route, segments, project) {
         return;
       }
       last.results = res;
-      // Run is PROFILE mode: its statistics are the Explanation tab's.
+      // Run is PROFILE mode: its plan and statistics are the Explanation
+      // tab's.
       if (res.kind === "query") last.explanation = res;
       if (res.kind !== "query") loadExplorer();
       announce(res.kind === "query" ? `Query complete: ${(res.rows || []).length} rows` : (res.message || "Done"));
