@@ -175,6 +175,9 @@ func buildConsole(d consoleDeps) *console.Server {
 	}
 	srv.SetHFModels(d.hfModels)
 	srv.SetModelGarden(d.garden, d.localAI, d.cfg.DefaultProject())
+	if d.gke != nil {
+		srv.SetHFGKE(gkeClustersProvider{name: d.cfg.ClusterName(), svc: d.gke, gkeDir: gkeDir(d.cfg)})
+	}
 	srv.SetMetrics(metrics)
 	// The history is the console's, not a browser tab's. Kept server-side so
 	// it survives a reload and so the sampling rate does not depend on how

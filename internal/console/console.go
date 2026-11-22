@@ -2038,7 +2038,10 @@ type Server struct {
 	garden    *modelgarden.Manager
 	hfDeploy  HFDeployer
 	hfProject string
-	metrics   MetricsSource
+	// hfGKE lists the Kubernetes Engine clusters a model's GKE deployment
+	// can go to (#2148), nil when the API is not served.
+	hfGKE   HFGKE
+	metrics MetricsSource
 	// series is the retained history the charts draw. Nil means this
 	// instance keeps none, which the endpoint says rather than returning an
 	// empty array that looks like an idle cluster.
@@ -2184,6 +2187,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/ai/hf-models/lookup", s.handleHFLookup)
 	mux.HandleFunc("GET /api/ai/hf-hub/models", s.handleHFHubSearch)
 	mux.HandleFunc("GET /api/ai/hf-hub/model", s.handleHFHubCard)
+	mux.HandleFunc("GET /api/ai/hf-hub/gke", s.handleHFGKEPlan)
+	mux.HandleFunc("POST /api/ai/hf-hub/gke-deploy", s.handleHFGKEDeploy)
 	mux.HandleFunc("POST /api/ai/hf-models/{action}", s.handleHFAction)
 	mux.HandleFunc("GET /api/ai/hf-deployments", s.handleHFDeployments)
 	mux.HandleFunc("POST /api/ai/hf-deployments/{action}", s.handleHFDeploymentAction)

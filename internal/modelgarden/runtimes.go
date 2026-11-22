@@ -75,8 +75,15 @@ var runtimeFiles embed.FS
 // runtimeConfig is a Python runtime's ConfigMap: its start script, its
 // pinned requirements and its server modules.
 func runtimeConfig(engine string) map[string]string {
+	cons, err := runtimeFiles.ReadFile("runtime/constraints-" + engine + ".txt")
+	if err != nil {
+		panic(err)
+	}
 	files := map[string]string{
-		"requirements.txt":        strings.Join(requirements[engine], "\n") + "\n",
+		// Every transitive package is held to the version measured, so a
+		// pod installs what was tested (constraints-*.txt).
+		"requirements.txt":        "-c /etc/cloudburrow/constraints.txt\n" + strings.Join(requirements[engine], "\n") + "\n",
+		"constraints.txt":         string(cons),
 		"requirements-nodeps.txt": strings.Join(requirementsNoDeps[engine], "\n") + "\n",
 	}
 	names := []string{"start.sh", "fetch.py"}

@@ -18565,13 +18565,64 @@ async function renderHFHubModel(view, id) {
   const form = el("form", { id: "hf-deploy-form", class: "card", hidden: true, "aria-label": "Deploy model", autocomplete: "off" });
   deploy.addEventListener("click", () => { form.hidden = false; const f = form.querySelector("input"); if (f) f.focus(); });
 
-  const env = el("fieldset", {}, el("legend", { text: "Deployment environment" }),
-    el("div", { class: "garden-filter" }, el("input", { type: "radio", id: "hf-env-ap", name: "hf-env", checked: true }),
-      el("label", { for: "hf-env-ap", text: "Agent Platform: an endpoint served from this instance's Kubernetes cluster" })));
-  const fields = [el("h2", { text: `Deploy ${m.id}` }), env,
-    el("dl", {}, el("dt", { text: "Machine type" }), el("dd", { class: "mono", text: "local-cpu" }),
-      el("dt", { text: "Serving container" }), el("dd", { text: r.engineTitle || "" }),
-      el("dt", { text: "Region" }), el("dd", { class: "mono", text: r.location }))];
+  // Google's deploy panel: the Deployment environment is Agent Platform
+  // (an endpoint) or GKE, whose manifests Model Garden generates and
+  // applies to a chosen Kubernetes Engine cluster.
+  const envAP = el("input", { type: "radio", id: "hf-env-ap", name: "hf-env", value: "vertex", checked: true });
+  const envGKE = el("input", { type: "radio", id: "hf-env-gke", name: "hf-env", value: "gke" });
+  const env = el("fieldset", { id: "hf-env" }, el("legend", { text: "Deployment environment" }),
+    el("div", { class: "garden-filter" }, envAP,
+      el("label", { for: "hf-env-ap", text: "Agent Platform: a managed endpoint, served from this instance's Kubernetes cluster" })),
+    el("div", { class: "garden-filter" }, envGKE,
+      el("label", { for: "hf-env-gke", text: "GKE: deploy to a Kubernetes Engine cluster with the generated Kubernetes manifests" })));
+  const apFields = el("dl", { id: "hf-ap-fields" }, el("dt", { text: "Machine type" }), el("dd", { class: "mono", text: "local-cpu" }),
+    el("dt", { text: "Serving container" }), el("dd", { text: r.engineTitle || "" }),
+    el("dt", { text: "Region" }), el("dd", { class: "mono", text: r.location }));
+  const gkeCluster = el("select", { id: "hf-gke-cluster", "aria-label": "Cluster" });
+  const gkeYAML = el("code", { id: "hf-gke-yaml" });
+  const gkeSteps = el("ol", { id: "hf-gke-steps" });
+  const gkeNote = el("p", { class: "unavailable", id: "hf-gke-note", role: "status" });
+  const gkeCopy = el("button", { type: "button", class: "secondary", id: "hf-gke-copy", text: "Copy YAML", onclick: async () => {
+    try { await navigator.clipboard.writeText(gkeYAML.textContent); announce("Copied"); } catch { announce("Copy is not available here"); }
+  } });
+  const gkeFields = el("div", { id: "hf-gke-fields", hidden: true },
+    el("label", { for: "hf-gke-cluster", text: "Cluster" }), gkeCluster, gkeNote,
+    el("h3", { text: "Deployment instructions" }), gkeSteps,
+    el("div", { class: "hf-yaml-head" }, el("span", { class: "mono", id: "hf-gke-file", text: "" }), gkeCopy),
+    el("pre", { class: "mono hf-yaml", tabindex: "0", "aria-label": "Kubernetes manifests" }, gkeYAML));
+  let gkeData = null;
+  const loadGKE = async () => {
+    const q = new URLSearchParams({ id: m.id });
+    const [name, loc] = (gkeCluster.value || "").split("|");
+    if (name) { q.set("cluster", name); q.set("location", loc); }
+    gkeNote.textContent = "Generating the deployment configuration…";
+    try { gkeData = await api("/api/ai/hf-hub/gke?" + q); } catch (err) { gkeNote.textContent = `[error] ${err.message}`; return; }
+    const keep = gkeCluster.value;
+    setChildren(gkeCluster, ...gkeData.clusters.map((c) => el("option", { value: `${c.name}|${c.location}`, disabled: c.status !== "RUNNING" ? true : null,
+      text: `${c.name} (${c.location})${c.status !== "RUNNING" ? " · " + c.status.toLowerCase() : ""}` })));
+    if (keep) gkeCluster.value = keep;
+    const running = gkeData.clusters.filter((c) => c.status === "RUNNING");
+    gkeNote.textContent = !gkeData.served ? "The Kubernetes Engine API is not served by this instance: start it with gke among --services to deploy here; the manifests can still be copied."
+      : running.length ? "" : "This project has no running Kubernetes Engine cluster. Create one on Kubernetes Engine's Clusters page, or copy the manifests.";
+    const p = gkeData.plan;
+    const steps = [`Connect kubectl to the cluster: gcloud container clusters get-credentials ${name || (running[0] || {}).name || "CLUSTER_NAME"} --location ${loc || (running[0] || {}).location || "LOCATION"}`];
+    if (p.secretCommand) steps.push(`Create the Hugging Face token Secret: ${p.secretCommand}`);
+    steps.push(`Save the manifests below as ${p.name}.yaml and apply them: ${p.applyCommand}`);
+    steps.push(`When the Deployment is available, send requests through the Service: ${p.forwardCommand}`);
+    setChildren(gkeSteps, ...steps.map((t) => el("li", { class: "mono", text: t })));
+    document.getElementById("hf-gke-file") && (document.getElementById("hf-gke-file").textContent = `${p.name}.yaml · ${p.engineTitle}`);
+    gkeYAML.textContent = p.yaml;
+    submit.disabled = !running.length;
+  };
+  gkeCluster.addEventListener("change", loadGKE);
+  const onEnv = () => {
+    const gke = envGKE.checked;
+    apFields.hidden = gke; gkeFields.hidden = !gke;
+    if (gke) loadGKE(); else submit.disabled = false;
+  };
+  envAP.addEventListener("change", onEnv);
+  envGKE.addEventListener("change", onEnv);
+  const fields = [el("h2", { text: `Deploy ${m.id}` }), env, apFields, gkeFields];
   let accept = null, token = null;
   if (m.gated) {
     accept = el("input", { type: "checkbox", id: "hf-accept-eula", required: true });
@@ -18584,7 +18635,7 @@ async function renderHFHubModel(view, id) {
       el("div", { class: "garden-filter" }, accept, el("label", { for: "hf-accept-eula", text: `I have accepted the ${m.licenseName || m.license} license on Hugging Face` })),
       el("label", { for: "hf-token", text: "Hugging Face access token" }), token,
       el("p", { class: "unavailable", id: "hf-token-help", text: "A read token of the account that accepted the license. It is stored only " +
-        "in a Kubernetes Secret in this instance's cluster, which the serving pod reads; CloudBurrow never logs, keeps or shows it." }));
+        "in a Kubernetes Secret in the cluster the model runs on (hf-secret on a GKE cluster), which the serving pod reads; CloudBurrow never logs, keeps or shows it." }));
   }
   const submit = el("button", { class: "primary", type: "submit", text: "Deploy", "data-action": "hf-deploy-submit" });
   fields.push(el("div", { class: "garden-actions" }, submit,
@@ -18592,16 +18643,26 @@ async function renderHFHubModel(view, id) {
   setChildren(form, ...fields);
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
+    const gke = envGKE.checked;
     const body = { id: m.id, acceptEula: !!(accept && accept.checked) };
+    if (gke) { const [cluster, loc] = gkeCluster.value.split("|"); body.cluster = cluster; body.location = loc; }
     if (token) body.hfToken = token.value.trim();
     if (token) token.value = "";
     submit.disabled = true;
-    message.textContent = "Deploying…";
+    message.textContent = gke ? "Applying the manifests to the cluster…" : "Deploying…";
     try {
-      const resp = await fetch("/api/ai/hf-deployments/deploy", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const resp = await fetch(gke ? "/api/ai/hf-hub/gke-deploy" : "/api/ai/hf-deployments/deploy",
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const text = await resp.text();
       if (!resp.ok) throw new Error(errorMessageOf(text) || `HTTP ${resp.status}`);
-      navigate(`${AP_PATHS.endpoints}?endpoint=${encodeURIComponent(JSON.parse(text).endpoint)}`);
+      const out = JSON.parse(text);
+      if (gke) {
+        message.textContent = `Deployment ${out.deployment} and Service ${out.deployment} were created on cluster ${out.cluster}.`;
+        announce(message.textContent);
+        navigate(out.workloads);
+        return;
+      }
+      navigate(`${AP_PATHS.endpoints}?endpoint=${encodeURIComponent(out.endpoint)}`);
     } catch (err) {
       message.textContent = `[error] ${err.message}`;
       announce(err.message);

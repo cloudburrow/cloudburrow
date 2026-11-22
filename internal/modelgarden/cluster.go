@@ -48,6 +48,13 @@ type Workload struct {
 	ShmSize string
 	// HealthRoute is the readiness probe's path.
 	HealthRoute string
+	// SecretName and SecretKey are where the pod reads HF_TOKEN from:
+	// secretName(Name) and "token" when empty; a GKE deployment's are
+	// Google's hf-secret and hf_api_token.
+	SecretName, SecretKey string
+	// Bare leaves out CloudBurrow's ownership labels (a GKE deployment's
+	// manifests, which are the user's).
+	Bare bool
 }
 
 // Observation is a workload's state, read from its pod.
@@ -142,6 +149,9 @@ func (c *KubeCluster) kube() *k8s.Runner {
 func (c *KubeCluster) labels(w Workload) map[string]string {
 	l := map[string]string{k8s.OwnedLabel: k8s.OwnedValue, k8s.InstanceLabel: c.Instance,
 		k8s.ServiceLabel: "aiplatform", WorkloadLabel: w.Name}
+	if w.Bare {
+		l = map[string]string{}
+	}
 	for k, v := range w.Labels {
 		l[k] = v
 	}
@@ -174,6 +184,13 @@ func (c *KubeCluster) Arch(ctx context.Context) (string, error) {
 func (c *KubeCluster) Manifests(w Workload) (deployment, service []byte) {
 	labels := c.labels(w)
 	selector := map[string]string{WorkloadLabel: w.Name}
+	if w.Bare {
+		selector = map[string]string{"app": w.Name}
+	}
+	sname, skey := w.SecretName, w.SecretKey
+	if sname == "" {
+		sname, skey = secretName(w.Name), "token"
+	}
 	env := []map[string]any{}
 	for _, k := range sortedKeys(w.Env) {
 		env = append(env, map[string]any{"name": k, "value": w.Env[k]})
@@ -181,7 +198,7 @@ func (c *KubeCluster) Manifests(w Workload) (deployment, service []byte) {
 	// The token, when the deploy carried one, is the Secret's: optional, so
 	// an ungated model's pod starts without one.
 	env = append(env, map[string]any{"name": "HF_TOKEN", "valueFrom": map[string]any{"secretKeyRef": map[string]any{
-		"name": secretName(w.Name), "key": "token", "optional": true}}})
+		"name": sname, "key": skey, "optional": true}}})
 	health := w.HealthRoute
 	if health == "" {
 		health = "/health"

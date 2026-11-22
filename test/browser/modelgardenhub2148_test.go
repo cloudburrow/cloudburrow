@@ -61,7 +61,9 @@ func newStubHub(t *testing.T) *stubHub {
 			return
 		}
 		fmt.Fprint(w, `[{"id":"acme/quantized","author":"acme","gated":false,"downloads":10,"likes":1,"pipeline_tag":"text-generation",
-			"library_name":"gguf","tags":["gguf","license:mit"]}]`)
+			"library_name":"gguf","tags":["gguf","license:mit"]},
+			{"id":"acme/robot","author":"acme","gated":false,"downloads":3,"likes":0,"pipeline_tag":"robotics",
+			"library_name":"lerobot","tags":["lerobot","license:mit"]}]`)
 	})
 	mux.HandleFunc("GET /api/models/acme/mini", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, `{"id":"acme/mini","author":"acme","sha":%q,"gated":false,"downloads":1234567,"likes":89,
@@ -168,7 +170,35 @@ func (c *browserCluster) secrets() []string {
 	return out
 }
 
+// browserGKE stands in for the Kubernetes Engine API's clusters: one
+// running, one provisioning; Apply records what the console applied.
+type browserGKE struct {
+	mu      sync.Mutex
+	applied []modelgarden.GKEPlan
+	tokens  []string
+}
+
+func (g *browserGKE) GKEClusters(context.Context, string) []console.GKETarget {
+	return []console.GKETarget{{Name: "ml-cluster", Location: "us-central1", Status: "RUNNING", Arch: "arm64"},
+		{Name: "new-cluster", Location: "us-east1", Status: "PROVISIONING"}}
+}
+
+func (g *browserGKE) ApplyGKE(_ context.Context, t console.GKETarget, plan modelgarden.GKEPlan, token string) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.applied = append(g.applied, plan)
+	if token != "" {
+		g.tokens = append(g.tokens, token)
+	}
+	return nil
+}
+
 func hubConsole(t *testing.T) (*tab, *stubHub, *browserCluster, string) {
+	p, hub, cluster, state, _ := hubConsoleGKE(t)
+	return p, hub, cluster, state
+}
+
+func hubConsoleGKE(t *testing.T) (*tab, *stubHub, *browserCluster, string, *browserGKE) {
 	t.Helper()
 	hub := newStubHub(t)
 	dir := t.TempDir()
@@ -181,11 +211,13 @@ func hubConsole(t *testing.T) (*tab, *stubHub, *browserCluster, string) {
 	s := console.New("", func(context.Context) console.Status { return console.Status{} })
 	s.SetHFModels(hf)
 	s.SetModelGarden(garden, ai, "browser-project")
+	g := &browserGKE{}
+	s.SetHFGKE(g)
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)
 	p := openAt(t, strings.TrimPrefix(srv.URL, "http://"))
 	t.Cleanup(p.forgive)
-	return p, hub, cluster, state
+	return p, hub, cluster, state, g
 }
 
 // TestModelGardenBrowsesHuggingFace (#2148): Model Garden's Show more opens
@@ -235,14 +267,18 @@ func TestModelGardenBrowsesHuggingFace(t *testing.T) {
 	// Load more fetches the next page with the Hub's cursor; a GGUF-only
 	// model says why it cannot deploy.
 	p.clickText("#hf-hub-more", "Load more")
-	p.waitFor(`document.querySelectorAll("#hf-hub-cards [data-hf-hub-model]").length === 3`)
+	p.waitFor(`document.querySelectorAll("#hf-hub-cards [data-hf-hub-model]").length === 4`)
 	if c := hub.lastQuery().Get("cursor"); c != "page2" {
 		t.Errorf("Load more sent cursor %q", c)
 	}
-	var quantized string
+	var quantized, robot string
 	p.eval(`document.querySelector('[data-hf-hub-model="acme/quantized"]').textContent`, &quantized)
-	if !strings.Contains(quantized, "Deploy unavailable") || !strings.Contains(quantized, "gguf") {
+	if !strings.Contains(quantized, "Deploys on llama.cpp") {
 		t.Errorf("the GGUF card reads %q", quantized)
+	}
+	p.eval(`document.querySelector('[data-hf-hub-model="acme/robot"]').textContent`, &robot)
+	if !strings.Contains(robot, "Deploy unavailable") || !strings.Contains(robot, "robotics") {
+		t.Errorf("the robotics card reads %q", robot)
 	}
 
 	// The card.
@@ -349,5 +385,88 @@ func TestModelGardenPageDeploysAHubModelOnTheCluster(t *testing.T) {
 	b, _ := os.ReadFile(state)
 	if strings.Contains(string(b), fakeHFToken) {
 		t.Error("the deployments file holds the token")
+	}
+}
+
+// TestModelGardenDeployFormOffersGKE (#2148): the deploy form's Deployment
+// environment is Agent Platform or GKE, as on Google's console. GKE lists
+// the project's Kubernetes Engine clusters (one not running, disabled),
+// shows the deployment instructions and the generated manifests with
+// Google's Model Garden labels, and its Deploy applies them to the chosen
+// cluster and opens Kubernetes Engine's Workloads; a gated model's token
+// goes to the cluster's hf-secret only, never into the manifests or the
+// page.
+func TestModelGardenDeployFormOffersGKE(t *testing.T) {
+	p, _, _, _, g := hubConsoleGKE(t)
+	p.navigate("/agent-platform/model-garden?view=hugging-face&model=acme/mini")
+	p.waitFor(`document.querySelector('[data-action="hf-deploy"]') !== null`)
+	p.clickText(`#hf-card button`, "Deploy")
+	p.waitFor(`!document.querySelector("#hf-deploy-form").hidden`)
+	var env struct {
+		Legend, AP, GKE string
+		Checked         bool
+		GKEHidden       bool
+	}
+	p.eval(`({ Legend: document.querySelector("#hf-env legend").textContent, AP: document.querySelector('label[for="hf-env-ap"]').textContent,
+		GKE: document.querySelector('label[for="hf-env-gke"]').textContent, Checked: document.querySelector("#hf-env-ap").checked,
+		GKEHidden: document.querySelector("#hf-gke-fields").hidden })`, &env)
+	if env.Legend != "Deployment environment" || !strings.HasPrefix(env.AP, "Agent Platform") || !strings.HasPrefix(env.GKE, "GKE") ||
+		!env.Checked || !env.GKEHidden {
+		t.Errorf("the environment choice = %+v", env)
+	}
+	p.eval(`(() => { const r = document.querySelector("#hf-env-gke"); r.checked = true; r.dispatchEvent(new Event("change")); return true; })()`, new(bool))
+	p.waitFor(`document.querySelector("#hf-gke-yaml").textContent.includes("kind: Deployment")`)
+	var gke struct {
+		Options, Disabled int
+		YAML, Steps, File string
+		APHidden          bool
+	}
+	p.eval(`({ Options: document.querySelectorAll("#hf-gke-cluster option").length,
+		Disabled: document.querySelectorAll("#hf-gke-cluster option:disabled").length,
+		YAML: document.querySelector("#hf-gke-yaml").textContent, Steps: document.querySelector("#hf-gke-steps").textContent,
+		File: document.querySelector("#hf-gke-file").textContent, APHidden: document.querySelector("#hf-ap-fields").hidden })`, &gke)
+	if gke.Options != 2 || gke.Disabled != 1 || !gke.APHidden || gke.File != "mini.yaml · Text Embeddings Inference" {
+		t.Errorf("the GKE fields = %+v", gke)
+	}
+	for _, want := range []string{"kind: Deployment", "kind: Service", "examples.ai.gke.io/source: model-garden",
+		"ai.gke.io/inference-server: tei", modelgarden.TEIArm64Image, "--model-id=acme/mini"} {
+		if !strings.Contains(gke.YAML, want) {
+			t.Errorf("the manifests lack %q", want)
+		}
+	}
+	for _, want := range []string{"get-credentials ml-cluster --location us-central1", "kubectl apply -f mini.yaml", "kubectl port-forward service/mini"} {
+		if !strings.Contains(gke.Steps, want) {
+			t.Errorf("the instructions lack %q: %s", want, gke.Steps)
+		}
+	}
+	p.clickText(`#hf-deploy-form button`, "Deploy")
+	p.waitFor(`location.pathname === "/kubernetes/workloads"`)
+	g.mu.Lock()
+	if len(g.applied) != 1 || g.applied[0].Name != "mini" || g.applied[0].Engine != "tei" {
+		t.Errorf("applied = %+v", g.applied)
+	}
+	g.mu.Unlock()
+
+	// A gated model: the hf-secret step, and the token to the cluster only.
+	p.navigate("/agent-platform/model-garden?view=hugging-face&model=acme/gated-llm")
+	p.waitFor(`document.querySelector('[data-action="hf-deploy"]') !== null`)
+	p.clickText(`#hf-card button`, "Deploy")
+	p.waitFor(`!document.querySelector("#hf-deploy-form").hidden`)
+	p.eval(`(() => { const r = document.querySelector("#hf-env-gke"); r.checked = true; r.dispatchEvent(new Event("change")); return true; })()`, new(bool))
+	p.waitFor(`document.querySelector("#hf-gke-steps").textContent.includes("kubectl create secret generic hf-secret")`)
+	p.setField("#hf-accept-eula", "true")
+	p.setField("#hf-token", fakeHFToken)
+	p.clickText(`#hf-deploy-form button`, "Deploy")
+	p.waitFor(`location.pathname === "/kubernetes/workloads"`)
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if len(g.applied) != 2 || len(g.tokens) != 1 || g.tokens[0] != fakeHFToken || strings.Contains(g.applied[1].YAML, fakeHFToken) ||
+		!strings.Contains(g.applied[1].YAML, "name: hf-secret") {
+		t.Errorf("the gated GKE deploy applied %d plans with %d tokens", len(g.applied), len(g.tokens))
+	}
+	var page string
+	p.eval(`document.documentElement.outerHTML`, &page)
+	if strings.Contains(page, fakeHFToken) {
+		t.Error("the page shows the token")
 	}
 }

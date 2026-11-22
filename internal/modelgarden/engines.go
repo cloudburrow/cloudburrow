@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -231,8 +232,10 @@ func (e Engine) Pod(p Plan) PodSpec {
 		return PodSpec{Args: e.PodArgs(p.HFID, p.Revision, p.ContextLen), Env: e.PodEnv(p.HFID)}
 	case EngineLlamaCpp:
 		env["LLAMA_CACHE"] = "/data/llama.cpp"
+		// --model names where --model-url's download goes: without it the
+		// server starts in its router mode, serving no model.
 		args := []string{"--host", "0.0.0.0", "--port", strconv.Itoa(containerPort),
-			"--model-url", "https://huggingface.co/" + p.HFID + "/resolve/" + p.Revision + "/" + p.File,
+			"--model", "/data/llama.cpp/" + path.Base(p.File), "--model-url", "https://huggingface.co/" + p.HFID + "/resolve/" + p.Revision + "/" + p.File,
 			"--alias", p.HFID, "--no-webui"}
 		if p.Task == "feature-extraction" || p.Task == "sentence-similarity" {
 			args = append(args, "--embeddings")
