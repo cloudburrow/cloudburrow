@@ -134,6 +134,10 @@ const VPC_ADDRESS_TABS = ["/networking/addresses/list", "/networking/addresses/i
 const PSC_TABS = ["/net-services/psc/list", "/net-services/psc/published"];
 // Load balancing's tabs (#2153): Load balancers, Backends and Frontends.
 const LB_TABS = ["/net-services/loadbalancing/list/loadBalancers", "/net-services/loadbalancing/list/backends", "/net-services/loadbalancing/list/frontends"];
+// Certificate Manager's tabs (#2160): Certificates, Certificate Maps, DNS
+// Authorizations, Issuance Configs and Classic Certificates (#2153).
+const CCM_TABS = ["/security/ccm/list/certificates", "/security/ccm/list/certificateMaps", "/security/ccm/list/dnsAuthorizations",
+  "/security/ccm/list/issuanceConfigs", "/security/ccm/list/lbCertificates"];
 const GKE_STORAGE = ["/kubernetes/storage", "/kubernetes/storage-classes"];
 // Cloud Logging's Settings and its Log Scopes tab (#2020), as Google's
 // Settings page has a Log Scopes tab (log-scope/create-and-manage).
@@ -594,8 +598,25 @@ const ROUTES = [
     navHidden: true, navAs: "/net-services/loadbalancing/list/loadBalancers", pageTabs: LB_TABS, section: "Networking", product: "netservices", productTitle: "Network services" },
   // Certificate Manager's Classic Certificates (#2153): Compute Engine SSL
   // certificates.
+  { path: "/security/ccm/list/certificates", service: "ccm-certificates", icon: "vpc", title: "Certificate Manager", tabTitle: "Certificates", kind: "Certificate",
+    pageTabs: CCM_TABS, section: "Security and identity", product: "certificatemanager", productTitle: "Certificate Manager" },
+  { path: "/security/ccm/list/certificateMaps", service: "ccm-maps", icon: "vpc", title: "Certificate Manager", tabTitle: "Certificate Maps", kind: "Certificate map",
+    navHidden: true, navAs: "/security/ccm/list/certificates", pageTabs: CCM_TABS, section: "Security and identity", product: "certificatemanager", productTitle: "Certificate Manager" },
+  { path: "/security/ccm/list/dnsAuthorizations", service: "ccm-dnsauth", icon: "vpc", title: "Certificate Manager", tabTitle: "DNS Authorizations", kind: "DNS authorization",
+    navHidden: true, navAs: "/security/ccm/list/certificates", pageTabs: CCM_TABS, section: "Security and identity", product: "certificatemanager", productTitle: "Certificate Manager" },
+  { path: "/security/ccm/list/issuanceConfigs", service: "ccm-issuance", icon: "vpc", title: "Certificate Manager", tabTitle: "Issuance Configs", kind: "Certificate issuance config",
+    navHidden: true, navAs: "/security/ccm/list/certificates", pageTabs: CCM_TABS, section: "Security and identity", product: "certificatemanager", productTitle: "Certificate Manager" },
   { path: "/security/ccm/list/lbCertificates", service: "netservices-lb-certs", icon: "vpc", title: "Certificate Manager", tabTitle: "Classic Certificates", kind: "Certificate",
-    section: "Security and identity", product: "certificatemanager", productTitle: "Certificate Manager" },
+    navHidden: true, navAs: "/security/ccm/list/certificates", pageTabs: CCM_TABS, section: "Security and identity", product: "certificatemanager", productTitle: "Certificate Manager" },
+  // Identity-Aware Proxy (#2160): its HTTPS resources.
+  { path: "/security/iap", service: "security-iap", icon: "vpc", title: "Identity-Aware Proxy", tabTitle: "HTTPS resources", kind: "HTTPS resource",
+    section: "Security and identity", product: "iap", productTitle: "Identity-Aware Proxy" },
+  // Cloud Armor (#2160): Network Security's Cloud Armor policies.
+  { path: "/net-security/securitypolicies/list", service: "netsecurity-armor", icon: "vpc", title: "Cloud Armor policies", kind: "Security policy",
+    section: "Networking", product: "netsecurity", productTitle: "Network Security" },
+  // Cloud CDN (#2160): Network services' Cloud CDN origins.
+  { path: "/net-services/cdn/list", service: "netservices-cdn", icon: "vpc", title: "Cloud CDN", kind: "Origin",
+    section: "Networking", product: "netservices", productTitle: "Network services" },
 
   // Secret Manager (#1850): Google's menu, Secret Manager (the global
   // secrets), Regional secrets and Settings.
@@ -6555,11 +6576,14 @@ function renderEditPage(view, route, segments, data, crumb) {
   const primary = el("button", { type: "submit", class: "primary", id: "edit-page-save", text: spec.submit || "Save" });
   const cancel = el("a", { class: "button secondary", href: here, text: "Cancel" });
   let submitting = false;
+  const initial = fields.values();
   const submit = async (e) => {
     e.preventDefault();
     error.hidden = true;
     if (submitting) return;
     if (!fields.validate()) { steps.revealInvalid(); return; }
+    // A load balancer's Review and finalize, then Update (EditForm.Review, #2160).
+    if (spec.review && !(await reviewChanges(spec, initial, fields.values()))) return;
     submitting = true;
     setBusy(primary, true);
     const op = recordOperation(`Update ${name}`);

@@ -25,7 +25,8 @@ import (
 // name where they name them (UNVERIFIED for the rest, re-read 2026-11-22).
 
 const lbNote = "Each forwarding rule listens on 127.0.0.1 at the port shown as its address (cloudburrowAddress): requests to it are routed by its URL map to its backends — instance groups' VMs, Cloud Run through serverless network endpoint groups, buckets — as health checks, balancing modes and session affinity decide. " +
-	"Google-managed certificates are issued by this instance's own certificate authority (/cloudburrow/lb/ca.pem). Cloud Armor, Cloud CDN, IAP and UDP are not served."
+	"Google-managed certificates are issued by this instance's own certificate authority (/cloudburrow/lb/ca.pem). " +
+	"Cloud Armor policies, Cloud CDN and Identity-Aware Proxy act on each request through the proxy, as a load balancer's Edit sets them."
 
 // lbScopePath is a resource's [scope, name] path: scope "global" or its
 // region.
@@ -785,7 +786,7 @@ func (p computeLBProvider) Detail(ctx context.Context, project string, path []st
 			"Backends": vpcDash(strings.Join(insts, ", "))}})
 	}
 	backs.Total = len(backs.Items)
-	return console.Detail{Title: path[1], Heading: "Load balancer details",
+	return console.Detail{Title: path[1], Heading: "Load balancer details", Edit: p.lbEditForm(project, lm),
 		Sections: []console.Section{{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Properties: props}}},
 			{ID: "frontend", Label: "Frontend", Listing: front},
 			{ID: "routing", Label: "Routing rules", Listing: routes},
