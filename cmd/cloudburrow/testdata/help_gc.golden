@@ -1,0 +1,18 @@
+Usage: cloudburrow gc [--yes]
+
+List the Docker images and volumes CloudBurrow left behind, and with --yes
+remove them (#2152): images under CloudBurrow's own repositories
+(dev.local/cloudburrow-*, cloudburrow.local/*, cloudburrow-vm-*, and the
+dev.local/<Artifact Registry or Container Registry host>/... images Cloud Run
+source builds and Cloud Build make) that carry no io.cloudburrow.instance
+label, as builds before the label left them; images with the cloudburrow.dev/owned
+label; and images and volumes labelled for an instance whose cluster no longer
+exists. An image a container uses, or a running instance's nodes hold, is
+never listed, nor is any image or volume without CloudBurrow's labels or
+repositories. stop and delete remove an instance's own labelled images
+themselves. See "Docker images and volumes" in docs/configuration.md.
+
+Flags of gc:
+  -yes
+    	remove what is listed (default: list only)
+

@@ -63,11 +63,16 @@ func runStop(args []string, stdout, stderr io.Writer) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.ShutdownTimeout))
 	defer cancel()
 
+	used := instanceNodeImages(ctx, cfg.Name)
 	if err := c.Stop(ctx); err != nil {
 		return describeClusterError(err)
 	}
 	fmt.Fprintf(stdout, "stopped cluster %s\n", c.Name())
 	fmt.Fprintln(stdout, "state held in volumes is preserved; run `cloudburrow up` to start again")
+	// The images CloudBurrow built into the host's Docker for the instance
+	// are not its state: the cluster's nodes keep what they loaded, and up
+	// rebuilds the rest (#2152).
+	cleanInstanceDocker(cfg.Name, used, stdout)
 	return nil
 }
 
@@ -93,10 +98,12 @@ func runDelete(args []string, stdout, stderr io.Writer) error {
 	if err := deleteGKEClusters(ctx, cfg, stdout); err != nil {
 		return err
 	}
+	used := instanceNodeImages(ctx, cfg.Name)
 	if err := c.Delete(ctx); err != nil {
 		return describeClusterError(err)
 	}
 	fmt.Fprintf(stdout, "deleted cluster %s and its state\n", c.Name())
+	cleanInstanceDocker(cfg.Name, used, stdout)
 	return nil
 }
 

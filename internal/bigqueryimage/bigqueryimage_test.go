@@ -109,8 +109,8 @@ func (r *recordingRunner) Run(_ context.Context, name string, args ...string) (s
 func TestBuild(t *testing.T) {
 	bigqueryimagetest.Present(t)
 	r := &recordingRunner{}
-	tag, err := bigqueryimage.Build(context.Background(), r, "arm64")
-	if err != nil || len(r.calls) != 2 || !strings.Contains(r.calls[1], "docker build --platform linux/arm64 -t "+tag) {
+	tag, err := bigqueryimage.Build(context.Background(), r, "arm64", "w1")
+	if err != nil || len(r.calls) != 2 || !strings.Contains(r.calls[1], "docker build --platform linux/arm64 --label io.cloudburrow.instance=w1 -t "+tag) {
 		t.Fatalf("Build = %s, %v; calls %v", tag, err, r.calls)
 	}
 	if want := bigqueryimage.Tag(storageimagetest.ELF("arm64"), []byte("licences\n")); tag != want || string(r.binary) != string(storageimagetest.ELF("arm64")) {
@@ -120,7 +120,7 @@ func TestBuild(t *testing.T) {
 		t.Errorf("TagFor = %s, %v; Build tagged %s", got, err, tag)
 	}
 	again := &recordingRunner{exists: true}
-	if _, err := bigqueryimage.Build(context.Background(), again, "arm64"); err != nil || len(again.calls) != 1 {
+	if _, err := bigqueryimage.Build(context.Background(), again, "arm64", "w2"); err != nil || len(again.calls) != 1 {
 		t.Errorf("a second Build rebuilt: %v %v", again.calls, err)
 	}
 }
@@ -129,7 +129,7 @@ func TestBuild(t *testing.T) {
 func TestBuildNotEmbedded(t *testing.T) {
 	bigqueryimagetest.Missing(t)
 	r := &recordingRunner{}
-	if _, err := bigqueryimage.Build(context.Background(), r, "amd64"); !errors.Is(err, bigqueryimage.ErrNotEmbedded) || !strings.Contains(err.Error(), "make build") || len(r.calls) != 0 {
+	if _, err := bigqueryimage.Build(context.Background(), r, "amd64", "w1"); !errors.Is(err, bigqueryimage.ErrNotEmbedded) || !strings.Contains(err.Error(), "make build") || len(r.calls) != 0 {
 		t.Errorf("Build = %v, calls %v", err, r.calls)
 	}
 }

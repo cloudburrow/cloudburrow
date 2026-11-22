@@ -28,6 +28,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/cloudburrow/cloudburrow/internal/dockergc"
 	"github.com/cloudburrow/cloudburrow/internal/storageimage"
 )
 
@@ -260,7 +261,11 @@ func Dockerfile() string {
 }
 
 // Build makes the image for arch unless it exists, and returns its tag.
-func Build(ctx context.Context, r Runner, arch string) (string, error) {
+// The tag is the content's, so the same build reuses the image whichever
+// instance or worktree asks; a new one is labelled for instance
+// (dockergc.InstanceLabel), whose stop or delete removes it once no other
+// instance uses it (#2152).
+func Build(ctx context.Context, r Runner, arch, instance string) (string, error) {
 	lic, err := Licences()
 	if err != nil {
 		return "", err
@@ -290,7 +295,7 @@ func Build(ctx context.Context, r Runner, arch string) (string, error) {
 	if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte(Dockerfile()), 0o644); err != nil {
 		return "", err
 	}
-	if out, err := r.Run(ctx, "docker", "build", "--platform", "linux/"+arch, "-t", tag, dir); err != nil {
+	if out, err := r.Run(ctx, "docker", append(append([]string{"build", "--platform", "linux/" + arch}, dockergc.LabelArgs(instance)...), "-t", tag, dir)...); err != nil {
 		return "", fmt.Errorf("build %s: %w\n%s", tag, err, out)
 	}
 	return tag, nil

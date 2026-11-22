@@ -487,7 +487,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 		// A Redis before 6.0 with in-transit encryption is served TLS by
 		// a front from the storage image (#1768).
-		memorystoreAdminSvc.storageImage = lazyStorageImage(newStorageImageComponent(cfg.KubeconfigPath(), cfg.ClusterName(), comps, stdout), comps)
+		memorystoreAdminSvc.storageImage = lazyStorageImage(newStorageImageComponent(cfg.KubeconfigPath(), cfg.ClusterName(), cfg.Name, comps, stdout), comps)
 		// IAM auth (#1614) checks a token against the tokens these
 		// credentials minted and the project's IAM policy.
 		memorystoreAdminSvc.creds = creds
@@ -924,12 +924,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// Between the cluster and the components: the image must be in the
 		// cluster before its Deployment is (#514). BigQuery's front (#902)
 		// and Pub/Sub's front (#873) run from it too.
-		imageComps = append(imageComps, newStorageImageComponent(cfg.KubeconfigPath(), cfg.ClusterName(), comps, stdout))
+		imageComps = append(imageComps, newStorageImageComponent(cfg.KubeconfigPath(), cfg.ClusterName(), cfg.Name, comps, stdout))
 	}
 	if serviceEnabled(cfg, config.ServiceBigQuery) {
 		// The emulator's image, built from the patched build this CLI
 		// embeds (#1061), in the cluster before its Deployment.
-		imageComps = append(imageComps, newBigQueryImageComponent(cfg.KubeconfigPath(), cfg.ClusterName(), comps, stdout))
+		imageComps = append(imageComps, newBigQueryImageComponent(cfg.KubeconfigPath(), cfg.ClusterName(), cfg.Name, comps, stdout))
 	}
 	coord.RegisterConcurrent(imageComps...)
 	// `kind create` returns before its node is Ready (#1588), so the

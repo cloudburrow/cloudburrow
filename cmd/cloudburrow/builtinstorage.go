@@ -33,14 +33,16 @@ type storageImageComponent struct {
 	out        io.Writer
 }
 
-func newStorageImageComponent(kubeconfig, cluster string, comps *components.LifecycleComponent, out io.Writer) *storageImageComponent {
+func newStorageImageComponent(kubeconfig, cluster, instance string, comps *components.LifecycleComponent, out io.Writer) *storageImageComponent {
 	r := images.ExecRunner{}
 	return &storageImageComponent{
 		kubeconfig: kubeconfig,
 		loader:     &images.Loader{ClusterName: cluster, Runner: r},
-		build:      func(ctx context.Context, arch string) (string, error) { return storageimage.Build(ctx, r, arch) },
-		comps:      comps,
-		out:        out,
+		build: func(ctx context.Context, arch string) (string, error) {
+			return storageimage.Build(ctx, r, arch, instance)
+		},
+		comps: comps,
+		out:   out,
 	}
 }
 

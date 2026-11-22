@@ -34,6 +34,9 @@ Commands:
   events      Print a running up's recent admin events, newest first
               (--service, --kind, --since, --limit, --format json)
   delete      Destroy the cluster CloudBurrow created
+  gc          List, and with --yes remove, Docker images and volumes past
+              CloudBurrow builds left behind (stop and delete remove an
+              instance's own)
   version     Print version information
   help        Print this message
 

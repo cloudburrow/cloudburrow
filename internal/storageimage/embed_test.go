@@ -43,7 +43,7 @@ func TestCheckMissing(t *testing.T) {
 		}
 	}
 	r := &recorder{}
-	if _, err := storageimage.Build(context.Background(), r, "amd64"); !errors.Is(err, storageimage.ErrNotEmbedded) || len(r.calls) != 0 {
+	if _, err := storageimage.Build(context.Background(), r, "amd64", "w1"); !errors.Is(err, storageimage.ErrNotEmbedded) || len(r.calls) != 0 {
 		t.Errorf("Build = %v after %v, want ErrNotEmbedded and no docker", err, r.calls)
 	}
 }
