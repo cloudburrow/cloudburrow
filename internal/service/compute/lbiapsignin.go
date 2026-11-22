@@ -37,7 +37,8 @@ import (
 // the redirect URI on the Compute Engine port, where IAP is served, and
 // from there to the app's /_gcp_gatekeeper/authenticate, which sets the
 // cookies. Google's docs name neither the cookies nor that path; their
-// names are the ones Google's IAP is seen to use (UNVERIFIED).
+// names are the ones Google's IAP is seen to use (UNVERIFIED (docs
+// re-read 2026-11-22: https://docs.cloud.google.com/iap/docs/query-parameters-and-headers-howto)).
 
 // IAPSignIn is the sign-in an IAPGate may offer browsers.
 type IAPSignIn interface {
@@ -144,7 +145,10 @@ func (s *Server) iapRedirectToSignIn(w http.ResponseWriter, r *http.Request, sch
 	}
 	cid, sec := iapClient(objOf(bs["iap"]), si)
 	q := r.URL.Query()
-	q.Del("gcp-iap-mode")
+	if q.Get("gcp-iap-mode") == "DO_SESSION_REFRESH" {
+		// Refreshed once: back to the page itself.
+		q.Del("gcp-iap-mode")
+	}
 	uri := r.URL.Path
 	if len(q) > 0 {
 		uri += "?" + q.Encode()

@@ -425,7 +425,7 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			computeLBProvider{screen}, computeLBBackendsProvider{screen}, computeLBFrontendsProvider{screen},
 			computeHealthChecksProvider{screen}, computeNEGsProvider{screen}, computeLBCertsProvider{screen},
 			// Cloud Armor, Cloud CDN, IAP and Certificate Manager (#2160).
-			computeArmorProvider{screen}, computeCDNProvider{screen}, iapProvider{screen},
+			computeArmorProvider{screen}, computeCDNProvider{screen}, iapProvider{screen}, iapTCPProvider{screen},
 			ccmCertsProvider{ccmScreen{screen}}, ccmMapsProvider{ccmScreen{screen}}, ccmDNSAuthProvider{ccmScreen{screen}}, ccmIssuanceProvider{ccmScreen{screen}},
 			// Serverless VPC Access (#2140), on the same port.
 			vpcAccessProvider{screen},

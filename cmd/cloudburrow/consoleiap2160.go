@@ -168,7 +168,20 @@ func (p iapProvider) PolicyOn(ctx context.Context, path []string) *console.Polic
 }
 
 func (p iapProvider) GetPolicy(ctx context.Context, project string, path []string) (console.Policy, error) {
-	m, err := p.v1(ctx, "POST", "/v1/"+iapResource(project, path)+":getIamPolicy", map[string]any{"options": map[string]any{"requestedPolicyVersion": 3}})
+	return iapGetPolicy(ctx, p.computeScreen, iapResource(project, path))
+}
+
+func (p iapProvider) SetPolicy(ctx context.Context, project string, path []string, pol console.Policy) error {
+	return iapSetPolicy(ctx, p.computeScreen, iapResource(project, path), pol)
+}
+
+func (p iapProvider) TestPermissions(ctx context.Context, project string, path []string, perms []string) ([]string, error) {
+	return iapTestPermissions(ctx, p.computeScreen, iapResource(project, path), perms)
+}
+
+// iapGetPolicy is an IAP resource's policy, through IAP's v1 API.
+func iapGetPolicy(ctx context.Context, p computeScreen, res string) (console.Policy, error) {
+	m, err := p.v1(ctx, "POST", "/v1/"+res+":getIamPolicy", map[string]any{"options": map[string]any{"requestedPolicyVersion": 3}})
 	if err != nil {
 		return console.Policy{}, err
 	}
@@ -187,7 +200,8 @@ func (p iapProvider) GetPolicy(ctx context.Context, project string, path []strin
 	return out, nil
 }
 
-func (p iapProvider) SetPolicy(ctx context.Context, project string, path []string, pol console.Policy) error {
+// iapSetPolicy writes an IAP resource's policy.
+func iapSetPolicy(ctx context.Context, p computeScreen, res string, pol console.Policy) error {
 	version := 1
 	bindings := []any{}
 	for _, b := range pol.Bindings {
@@ -205,12 +219,12 @@ func (p iapProvider) SetPolicy(ctx context.Context, project string, path []strin
 	if pol.Etag != "" {
 		policy["etag"] = pol.Etag
 	}
-	_, err := p.v1(ctx, "POST", "/v1/"+iapResource(project, path)+":setIamPolicy", map[string]any{"policy": policy})
+	_, err := p.v1(ctx, "POST", "/v1/"+res+":setIamPolicy", map[string]any{"policy": policy})
 	return err
 }
 
-func (p iapProvider) TestPermissions(ctx context.Context, project string, path []string, perms []string) ([]string, error) {
-	m, err := p.v1(ctx, "POST", "/v1/"+iapResource(project, path)+":testIamPermissions", map[string]any{"permissions": perms})
+func iapTestPermissions(ctx context.Context, p computeScreen, res string, perms []string) ([]string, error) {
+	m, err := p.v1(ctx, "POST", "/v1/"+res+":testIamPermissions", map[string]any{"permissions": perms})
 	if err != nil {
 		return nil, err
 	}

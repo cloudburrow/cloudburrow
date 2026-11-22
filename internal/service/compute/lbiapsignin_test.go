@@ -111,6 +111,11 @@ func TestIAPBrowserSignIn(t *testing.T) {
 	if h := seen.Load().(http.Header); h.Get("X-Goog-Authenticated-User-Email") != "accounts.google.com:dev@example.com" || h.Get("X-Goog-Iap-Jwt-Assertion") == "" {
 		t.Fatalf("headers: %v", h)
 	}
+	// DO_SESSION_REFRESH signs in again, back to the page itself.
+	r = get(base + "/page?gcp-iap-mode=DO_SESSION_REFRESH")
+	if r.StatusCode != 302 || !strings.HasPrefix(r.Header.Get("Location"), "http://signin.test/") {
+		t.Fatalf("DO_SESSION_REFRESH: %d", r.StatusCode)
+	}
 	// IDENTITY.
 	r = get(base + "/any?gcp-iap-mode=IDENTITY")
 	var id map[string]string
