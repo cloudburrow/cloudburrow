@@ -47,6 +47,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(XDSBootstrap(r.Host, r.URL.Query().Get("project"), r.URL.Query().Get("network"))))
 		return
 	}
+	if strings.HasPrefix(r.URL.Path, IAPRedirectPrefix) {
+		// IAP's OAuth redirect URI, as on iap.googleapis.com (#2160).
+		s.ServeIAPRedirect(w, r)
+		return
+	}
 	if r.URL.Path == IAPKeysPath {
 		// The keys of IAP's signed headers (#2160).
 		s.serveIAPKeys(w, r)

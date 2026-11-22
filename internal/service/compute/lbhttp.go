@@ -76,6 +76,10 @@ func (h *lbHTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		scheme = "https"
 	}
 	host := r.Host
+	if s.iapAuthenticate(w, r, scheme) {
+		// IAP's sign-in coming back to the app (#2160).
+		return
+	}
 	d := lbMatch(m, host, r.URL.Path, r.Header, r.URL.Query())
 	if d.action != nil {
 		if fi := objOf(d.action["faultInjectionPolicy"]); fi != nil {
@@ -148,7 +152,7 @@ func (h *lbHTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	headers = append(headers, extra...)
-	if !s.iapCheck(w, r, so) {
+	if !s.iapCheck(w, r, so, scheme) {
 		return
 	}
 	s.mu.Lock()

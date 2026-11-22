@@ -7,10 +7,12 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/cloudburrow/cloudburrow/internal/authplatform"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/iameval"
@@ -57,6 +59,15 @@ type computeService struct {
 	// IAP checks requests with; up sets them (useIAP).
 	iapEval *iameval.Evaluator
 	creds   *metadata.Credentials
+	// authPlatform and metaAddr are IAP's browser sign-in: Google Auth
+	// Platform's store and the metadata server's address, where the
+	// authorization endpoint is (useIAPSignIn).
+	authPlatform *authplatform.Store
+	metaAddr     func() string
+	// callerOf names a bearer token's caller (the IAM enforcer's), for
+	// IAP TCP forwarding's tunnels; tunnel is their relay.
+	callerOf func(string) iameval.Caller
+	tunnel   *iap.Tunnel
 	// vms runs the VM instances (#1963); guestBase and metadataHost are
 	// set by up once the cluster host is known.
 	vms          *computeVMs
@@ -175,6 +186,7 @@ func (s *computeService) Start(ctx context.Context) error {
 	cm.UseTargets(func(project string) []certificatemanager.Target { return certMapTargets(api, project) })
 	ia.SetBackendServices(func(rel string) bool { return backendServiceExists(api, rel) })
 	ia.SetNormalizer(s.iapNormalize)
+	s.tunnel = s.newIAPTunnel(api, ia)
 	// The schedules' and autoscalers' loops (#2139); with no Addr, Start
 	// listens on nothing.
 	if err := api.Start(ctx); err != nil {
@@ -229,6 +241,12 @@ func (s *computeService) Start(ctx context.Context) error {
 	s.srv = &http.Server{Handler: hostguard.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.ProtoMajor == 2 && strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
 			api.XDSHandler().ServeHTTP(w, r)
+			return
+		}
+		if slices.Contains(iap.TunnelPaths, r.URL.Path) {
+			// IAP TCP forwarding (#2160): gcloud's
+			// --iap-tunnel-url-override=ws://THIS_PORT.
+			s.tunnel.ServeHTTP(w, r)
 			return
 		}
 		jsonAPI.ServeHTTP(w, r)

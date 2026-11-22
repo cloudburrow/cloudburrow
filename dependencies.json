@@ -891,6 +891,13 @@
         "verification": "go.sum",
         "notes": "Promoted from indirect to direct for h2c, which lets Secret Manager serve gRPC and JSON on one port. Same version as before; no new dependency was added."
       },
+      "goGorillaWebsocket": {
+        "module": "github.com/gorilla/websocket",
+        "version": "1.5.4-0.20250319132907-e064f32e3674",
+        "license": "BSD-2-Clause",
+        "verification": "go.sum",
+        "notes": "IAP TCP forwarding (#2160): internal/service/iap/tunnel.go serves the relay.tunnel.cloudproxy.app WebSocket subprotocol gcloud start-iap-tunnel speaks, closing a refused tunnel with IAP's close codes and reasons, which golang.org/x/net/websocket cannot send. Promoted from indirect (google.golang.org/genai already links it) to direct; same version, no new dependency."
+      },
       "goMSSQL": {
         "module": "github.com/microsoft/go-mssqldb",
         "version": "1.10.0",

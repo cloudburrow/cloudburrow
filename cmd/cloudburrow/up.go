@@ -1113,7 +1113,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// Google Auth Platform's app and OAuth clients (#2030), whose
 	// authorization code flow the metadata server's token endpoint serves.
 	authPlatformRef = authplatform.NewStore(projects.Backing(), resource.ProjectNumber)
-	metaSrv.WithOAuth(&authplatform.Endpoints{Store: authPlatformRef, User: creds.Email})
+	metaSrv.WithOAuth(&authplatform.Endpoints{Store: authPlatformRef, User: creds.Email, LocalRedirect: computeSvc.iapLocalRedirect})
+	// IAP's browser sign-in (#2160) is that authorization endpoint's.
+	computeSvc.useIAPSignIn(authPlatformRef, metaSrv.Addr)
 	// IAM enforcement (#1879) of Resource Manager, IAM, deny and
 	// organization policies, on this port.
 	useIAMEnforcement11(iamEnforcer, rmSrv, func() *resourcemanager.Registry { return projects })

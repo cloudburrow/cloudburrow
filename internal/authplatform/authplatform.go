@@ -133,6 +133,8 @@ type Store struct {
 
 	mu    sync.Mutex
 	codes map[string]*grant
+	// managed are the Google-managed clients (managed.go).
+	managed map[string]managedClient
 }
 
 // NewStore keeps the apps in st; number names a project's number, which
@@ -574,6 +576,9 @@ func (s *Store) SetSecret(project, id, secretID, action string) (*Client, error)
 
 // find is the live client with a client ID, in whichever project.
 func (s *Store) find(clientID string) (string, *state, *Client, error) {
+	if m := s.managedOf(clientID); m != nil {
+		return "", &state{Brand: m.b, Clients: map[string]*Client{clientID: m.c}, Refresh: map[string]*refresh{}}, m.c, nil
+	}
 	if s.st == nil || clientID == "" {
 		return "", nil, nil, nil
 	}

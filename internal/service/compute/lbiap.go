@@ -50,6 +50,9 @@ type lbIAPKey struct {
 	mu  sync.Mutex
 	key *ecdsa.PrivateKey
 	kid string
+	// pending are browser sign-ins sent to the authorization endpoint,
+	// by state, and tickets those redeemed, by ticket (lbiapsignin.go).
+	pending, tickets map[string]iapPending
 }
 
 // iapKeyLocked is the signing key, made once and kept in the state.
@@ -125,8 +128,9 @@ func iapRefuse(w http.ResponseWriter, code int, msg string) {
 
 // iapCheck applies a backend service's IAP to a request: ok is false
 // when the request was answered; otherwise the identity headers are set
-// on r.
-func (s *Server) iapCheck(w http.ResponseWriter, r *http.Request, bs obj) bool {
+// on r. A browser without a session is sent to the sign-in
+// (lbiapsignin.go).
+func (s *Server) iapCheck(w http.ResponseWriter, r *http.Request, bs obj, scheme string) bool {
 	iap := objOf(bs["iap"])
 	if iap == nil || iap["enabled"] != true {
 		return true
@@ -148,6 +152,20 @@ func (s *Server) iapCheck(w http.ResponseWriter, r *http.Request, bs obj) bool {
 		r.Header.Get("Access-Control-Request-Method") != "" {
 		return true
 	}
+	mode := r.URL.Query().Get("gcp-iap-mode")
+	if mode == "CLEAR_LOGIN_COOKIE" {
+		iapGenerated(w)
+		iapClearCookies(w, r)
+		q := r.URL.Query()
+		q.Del("gcp-iap-mode")
+		loc := r.URL.Path
+		if len(q) > 0 {
+			loc += "?" + q.Encode()
+		}
+		w.Header().Set("Location", loc)
+		w.WriteHeader(http.StatusFound)
+		return false
+	}
 	tok := ""
 	for _, h := range []string{"Proxy-Authorization", "Authorization"} {
 		if v := r.Header.Get(h); len(v) > 7 && strings.EqualFold(v[:7], "bearer ") {
@@ -158,28 +176,47 @@ func (s *Server) iapCheck(w http.ResponseWriter, r *http.Request, bs obj) bool {
 			break
 		}
 	}
+	email := ""
 	if tok == "" {
-		iapRefuse(w, http.StatusUnauthorized, "Invalid IAP credentials: empty token")
+		if si := s.iapSignIn(); si != nil && mode != "DO_SESSION_REFRESH" {
+			cid, _ := iapClient(iap, si)
+			email = s.iapSessionEmail(r, cid)
+		}
+		if email == "" {
+			s.iapRedirectToSignIn(w, r, scheme, bs, "Invalid IAP credentials: empty token")
+			return false
+		}
+	} else {
+		if gate == nil {
+			iapGenerated(w)
+			iapRefuse(w, http.StatusUnauthorized, "Invalid IAP credentials: Unable to parse JWT")
+			return false
+		}
+		var aud string
+		var ok bool
+		email, aud, ok = gate.VerifyIDToken(tok)
+		if !ok {
+			iapGenerated(w)
+			iapRefuse(w, http.StatusUnauthorized, "Invalid IAP credentials: Unable to parse JWT")
+			return false
+		}
+		clients := strs(objOf(acc["oauthSettings"]), "programmaticClients")
+		if cid := str(iap, "oauth2ClientId"); cid != "" {
+			clients = append(clients, cid)
+		}
+		if !hasStr(clients, aud) {
+			iapGenerated(w)
+			iapRefuse(w, http.StatusUnauthorized, "Invalid IAP credentials: Expected JWT to have audience \""+strings.Join(clients, ", ")+"\", but was \""+aud+"\"")
+			return false
+		}
+	}
+	if mode == "IDENTITY" {
+		// Any signed-in account, with access or not.
+		iapIdentity(w, email)
 		return false
 	}
-	if gate == nil {
-		iapRefuse(w, http.StatusUnauthorized, "Invalid IAP credentials: Unable to parse JWT")
-		return false
-	}
-	email, aud, ok := gate.VerifyIDToken(tok)
-	if !ok {
-		iapRefuse(w, http.StatusUnauthorized, "Invalid IAP credentials: Unable to parse JWT")
-		return false
-	}
-	clients := strs(objOf(acc["oauthSettings"]), "programmaticClients")
-	if cid := str(iap, "oauth2ClientId"); cid != "" {
-		clients = append(clients, cid)
-	}
-	if !hasStr(clients, aud) {
-		iapRefuse(w, http.StatusUnauthorized, "Invalid IAP credentials: Expected JWT to have audience \""+strings.Join(clients, ", ")+"\", but was \""+aud+"\"")
-		return false
-	}
-	if !gate.Allowed(r.Context(), res, email, IAPRequest{Host: r.Host, Path: r.URL.Path, Time: s.opts.Now()}) {
+	if gate == nil || !gate.Allowed(r.Context(), res, email, IAPRequest{Host: r.Host, Path: r.URL.Path, Time: s.opts.Now()}) {
+		iapGenerated(w)
 		if u := str(objOf(acc["accessDeniedPageSettings"]), "accessDeniedPageUri"); u != "" {
 			w.Header().Set("Location", u)
 			w.WriteHeader(http.StatusFound)
@@ -188,9 +225,17 @@ func (s *Server) iapCheck(w http.ResponseWriter, r *http.Request, bs obj) bool {
 		iapRefuse(w, http.StatusForbidden, `<!DOCTYPE html><html lang=en><meta charset=utf-8><title>Error 403 (Forbidden)</title><p><b>403.</b> <ins>That's an error.</ins><p>You don't have access.`)
 		return false
 	}
-	jwt, err := s.iapAssertion(r.Context(), bs, email)
+	test := ""
+	if mode == "SECURE_TOKEN_TEST" {
+		test = r.URL.Query().Get("iap-secure-token-test-type")
+		if test == "" {
+			test = "NOT_SET"
+		}
+	}
+	jwt, err := s.iapAssertion(r.Context(), bs, email, test)
 	if err != nil {
-		iapRefuse(w, http.StatusInternalServerError, "IAP could not sign the request")
+		iapGenerated(w)
+		iapRefuse(w, http.StatusBadRequest, "Invalid IAP request: "+htmlEscape(err.Error()))
 		return false
 	}
 	uid := "accounts.google.com:" + iapUserID(email)
@@ -208,8 +253,9 @@ func iapUserID(email string) string {
 }
 
 // iapAssertion is the signed header: ES256, audience
-// /projects/NUMBER/global/backendServices/ID (or regions/R), 10 minutes.
-func (s *Server) iapAssertion(_ context.Context, bs obj, email string) (string, error) {
+// /projects/NUMBER/global/backendServices/ID (or regions/R), 10 minutes;
+// test is a SECURE_TOKEN_TEST type ("" for none), which spoils it.
+func (s *Server) iapAssertion(_ context.Context, bs obj, email, test string) (string, error) {
 	s.mu.Lock()
 	k, kid, err := s.iapKeyLocked()
 	s.mu.Unlock()
@@ -236,18 +282,20 @@ func (s *Server) iapAssertion(_ context.Context, bs obj, email string) (string, 
 	if i := strings.LastIndex(email, "@"); i > 0 && !strings.HasSuffix(email, "gserviceaccount.com") && !strings.HasSuffix(email, "@gmail.com") {
 		claims["hd"] = email[i+1:]
 	}
-	hb, _ := json.Marshal(obj{"alg": "ES256", "typ": "JWT", "kid": kid})
-	cb, _ := json.Marshal(claims)
-	in := base64.RawURLEncoding.EncodeToString(hb) + "." + base64.RawURLEncoding.EncodeToString(cb)
-	sum := sha256.Sum256([]byte(in))
-	rr, ss, err := ecdsa.Sign(rand.Reader, k, sum[:])
-	if err != nil {
-		return "", err
+	if test != "" {
+		if !iapTestClaims(claims, test, now) {
+			return "", fmt.Errorf("unknown iap-secure-token-test-type %q", test)
+		}
+		if test == "SIGNATURE" {
+			// Signed by a key that is not IAP's.
+			other, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+			if err != nil {
+				return "", err
+			}
+			k = other
+		}
 	}
-	sig := make([]byte, 64)
-	rr.FillBytes(sig[:32])
-	ss.FillBytes(sig[32:])
-	return in + "." + base64.RawURLEncoding.EncodeToString(sig), nil
+	return signES256(k, kid, claims)
 }
 
 // buildIAP checks a backend service's iap: the OAuth client's secret is
