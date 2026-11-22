@@ -197,7 +197,7 @@ func TestBigQuerySparkNotebookThroughThePage(t *testing.T) {
 	p.navigate("/bigquery-studio" + q)
 	p.waitFor(`document.querySelector(".bq-home") !== null && document.querySelector(".bq-tree") !== null`)
 	p.clickText(".bq-home-action", "Apache Spark notebook")
-	p.waitFor(`document.querySelector(".bq-notebook") !== null && document.querySelector(".bq-notebook").textContent.includes("DataprocSparkSession")`)
+	p.waitFor(`document.querySelector(".bq-notebook") !== null && [...document.querySelectorAll(".bq-nb-source")].some((t) => t.value.includes("DataprocSparkSession"))`)
 	press(".bq-notebook .bq-toolbar button", "Connect")
 	p.waitForWithin(`document.querySelector(".bq-nb-runtime").textContent.startsWith("Connected") || document.querySelector(".bq-nb-runtime").className.includes("form-error")`, 25*time.Minute)
 	var status string

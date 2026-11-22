@@ -93,10 +93,12 @@ type Docker struct {
 	Log  func(LogEntry)
 	Logf func(format string, args ...any)
 
-	once      sync.Once
-	desktop   bool
-	desktopOK error
-	treeMu    sync.Mutex
+	// desktop says whether the daemon is Docker Desktop; probed is set
+	// once a probe has answered (a failed probe is retried next run).
+	probeMu sync.Mutex
+	probed  bool
+	desktop bool
+	treeMu  sync.Mutex
 }
 
 func (d *Docker) logf(format string, args ...any) {
@@ -362,10 +364,9 @@ func (d *Docker) prepare(ctx context.Context, job Job, inbound string) (_ *prepa
 // so the runner relays the two ports from the default bridge's gateway
 // address for the run (internal/hostrelay, as #575 does for the cluster).
 func (d *Docker) targets(ctx context.Context, rest, storage string) (string, string, func(), error) {
-	d.once.Do(func() {
-		out, err := d.docker(ctx, "info", "--format", "{{.OperatingSystem}}")
-		d.desktop, d.desktopOK = strings.Contains(out, "Docker Desktop"), err
-	})
+	if err := d.probeDesktop(); err != nil {
+		return "", "", nil, err
+	}
 	_, restPortHost, _ := net.SplitHostPort(rest)
 	_, storagePortHost, _ := net.SplitHostPort(storage)
 	if d.desktop {
@@ -395,6 +396,26 @@ func (d *Docker) targets(ctx context.Context, rest, storage string) (string, str
 		return "", "", nil, err
 	}
 	return r1.Addr(), r2.Addr(), func() { _ = r1.Close(); _ = r2.Close() }, nil
+}
+
+// probeDesktop asks the daemon whether it is Docker Desktop. The probe
+// has its own deadline rather than a job's context: a job cancelled
+// while it ran must not leave every later job relaying the wrong way.
+// Only an answer is kept, so a failed probe is retried by the next job.
+func (d *Docker) probeDesktop() error {
+	d.probeMu.Lock()
+	defer d.probeMu.Unlock()
+	if d.probed {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	out, err := d.docker(ctx, "info", "--format", "{{.OperatingSystem}}")
+	if err != nil {
+		return &Unavailable{Msg: "ask Docker which daemon it is: " + out}
+	}
+	d.desktop, d.probed = strings.Contains(out, "Docker Desktop"), true
+	return nil
 }
 
 func (d *Docker) docker(ctx context.Context, args ...string) (string, error) {
