@@ -195,6 +195,9 @@ func (s *kmsService) Start(ctx context.Context) error {
 	}
 	addr := net.JoinHostPort(s.cfg.BindAddress, strconv.Itoa(s.cfg.Endpoints.KMS))
 	s.server = grpctransport.New(addr)
+	if l := takeHeldPort(addr); l != nil { // pinKMSPort's
+		s.server.UseListener(l)
+	}
 	s.server.Gate(s.apiGate, "cloudkms.googleapis.com")
 	s.server.Observe(s.calls)
 	for _, i := range s.interpose {
@@ -396,10 +399,10 @@ func pinKMSPort(cfg *config.Config) error {
 	if cfg.Endpoints.KMS != 0 {
 		return nil
 	}
-	l, err := net.Listen("tcp", net.JoinHostPort(cfg.BindAddress, "0"))
+	port, err := holdPort(cfg.BindAddress) // kept bound until the API serves it
 	if err != nil {
 		return fmt.Errorf("choose a port for Cloud KMS: %w", err)
 	}
-	cfg.Endpoints.KMS = l.Addr().(*net.TCPAddr).Port
-	return l.Close()
+	cfg.Endpoints.KMS = port
+	return nil
 }

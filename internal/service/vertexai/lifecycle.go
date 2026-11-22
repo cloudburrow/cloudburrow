@@ -23,6 +23,9 @@ import (
 // tracks.
 type listener struct {
 	addr string
+	// held is a listener already bound to addr (UseListener), which Start
+	// serves instead of binding addr again; nil when there is none.
+	held net.Listener
 
 	// options are extra gRPC server options (tests: a stats handler; IAM
 	// enforcement's interceptors, UseIAM).
@@ -44,6 +47,15 @@ func (s *Server) UseIAM(unary []grpc.UnaryServerInterceptor, stream []grpc.Strea
 	s.lis.wrapJSON = wrapJSON
 }
 
+// UseListener makes Start serve ln, already bound to the server's address,
+// rather than bind that address itself: the caller that chose the port
+// holds it from then on, so nothing else can take it in between.
+func (s *Server) UseListener(ln net.Listener) {
+	s.lis.mu.Lock()
+	defer s.lis.mu.Unlock()
+	s.lis.held = ln
+}
+
 // Name implements the lifecycle component interface.
 func (s *Server) Name() string { return "localai" }
 
@@ -62,10 +74,16 @@ func (s *Server) Start(ctx context.Context) error {
 	if s.lis.addr == "" {
 		return errors.New("no address configured for the local generation endpoint")
 	}
-	var lc net.ListenConfig
-	ln, err := lc.Listen(ctx, "tcp", s.lis.addr)
-	if err != nil {
-		return fmt.Errorf("bind local AI address %s: %w", s.lis.addr, err)
+	s.lis.mu.Lock()
+	ln := s.lis.held
+	s.lis.held = nil
+	s.lis.mu.Unlock()
+	if ln == nil {
+		var lc net.ListenConfig
+		var err error
+		if ln, err = lc.Listen(ctx, "tcp", s.lis.addr); err != nil {
+			return fmt.Errorf("bind local AI address %s: %w", s.lis.addr, err)
+		}
 	}
 
 	// No write timeout: a generation can legitimately run for minutes, and a
