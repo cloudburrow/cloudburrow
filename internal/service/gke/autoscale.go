@@ -274,7 +274,13 @@ func (s *Server) repairOnce(key string, ctl Controller, nodes []k8sNode) *contai
 	if e == nil || e.busy != "" || e.cluster.Status != containerpb.Cluster_RUNNING {
 		return nil
 	}
-	now := s.now()
+	// The wall clock, not s.now(): the kubelet stamps Ready's
+	// lastTransitionTime in real time, and AdvanceClock (the maintenance
+	// windows' clock) moves s.now() ahead of it, which made a node
+	// NotReady for a moment read as NotReady for hours and repaired at
+	// once, holding the cluster busy ("Cluster is running incompatible
+	// operation").
+	now := s.opts.Now()
 	for _, n := range nodes {
 		np := findPool(e.cluster, n.Metadata.Labels["cloud.google.com/gke-nodepool"])
 		if np == nil || !np.GetManagement().GetAutoRepair() || np.Status != containerpb.NodePool_RUNNING {

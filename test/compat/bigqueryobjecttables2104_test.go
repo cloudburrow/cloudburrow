@@ -102,7 +102,10 @@ func TestBigQueryObjectTablesDefaultConnectionOptionsAndRowPolicies(t *testing.T
 	}
 
 	// WITH CONNECTION DEFAULT: refused without the permission to make it.
-	expires := time.Now().Add(48 * time.Hour).UTC().Truncate(time.Second)
+	// 48 hours past the instance's BigQuery clock, which "in the future"
+	// is judged by: earlier tests in the shard advance it (clock:advance)
+	// by days, past a wall-clock time.Now()+48h.
+	expires := advanceBigQueryClock(t, h, 0).Add(48 * time.Hour).Truncate(time.Second)
 	create := fmt.Sprintf("CREATE EXTERNAL TABLE `%s.objs` WITH CONNECTION DEFAULT OPTIONS(object_metadata = 'SIMPLE', uris = ['%s'], "+
 		"expiration_timestamp = TIMESTAMP '%s', tags = [('%s/env', 'dev')], max_staleness = INTERVAL 30 * 2 MINUTE, metadata_cache_mode = 'MANUAL')",
 		ds, uri, expires.Format("2006-01-02 15:04:05 UTC"), project)
