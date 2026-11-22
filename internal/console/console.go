@@ -2060,7 +2060,9 @@ type Server struct {
 	garden    *modelgarden.Manager
 	hfDeploy  HFDeployer
 	hfProject string
-	metrics   MetricsSource
+	// market is the Marketplace (#2149, marketplace.go); nil offers none.
+	market  *Marketplace
+	metrics MetricsSource
 	// series is the retained history the charts draw. Nil means this
 	// instance keeps none, which the endpoint says rather than returning an
 	// empty array that looks like an idle cluster.
@@ -2207,6 +2209,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/ai/hf-models/{action}", s.handleHFAction)
 	mux.HandleFunc("GET /api/ai/hf-deployments", s.handleHFDeployments)
 	mux.HandleFunc("POST /api/ai/hf-deployments/{action}", s.handleHFDeploymentAction)
+	s.marketplaceRoutes(mux)
 	mux.HandleFunc("POST /api/ai/local-models/{id}/{action}", s.handleLocalModelAction)
 	mux.HandleFunc("GET /api/ai/predict", s.handlePredictStatus)
 	mux.HandleFunc("POST /api/ai/predict", s.handlePredict)

@@ -2423,6 +2423,27 @@ var parityRows = []parityRow{
 	{Resource: "Vertex AI PredictionService: streaming raw predict on a gRPC model", Service: "vertexai",
 		Methods:  []string{"PredictionService/StreamDirectRawPredict", "PredictionService/StreamingRawPredict"},
 		Excluded: "the streaming forms of the DirectRawPredict the Online prediction page sends: the same method_name and input bytes on a stream held open both ways, which a request-and-answer form has no way to hold; the page's DirectRawPredict calls the same method on the same container (#1477)"},
+	// Marketplace (#2149): a console feature over Docker Hub's public
+	// catalogue and the clusters' Kubernetes API, with no Google API method.
+	{Resource: "Marketplace: browse, search and deploy Docker Hub images", Screen: "/marketplace",
+		Offers: "Marketplace (/marketplace): Search Marketplace over Docker Hub's public catalogue, with the Filter panel's Category, Type, Source and " +
+			"Publisher (Docker Official Image, Verified Publisher, Sponsored OSS), result pages and a namespace/repository opened by name; a product's " +
+			"page (Overview with its README, Pricing, Documentation, Support, Tags, Additional details) and Configure: Deploy via Google Cloud (Cluster " +
+			"or Create a new cluster, Namespace or Create a namespace, App instance name, the image's tag, replicas, ports from its EXPOSE, Service type, " +
+			"environment, arguments and resources), then Deploy, which applies a Deployment, a Service and an app.k8s.io/v1beta1 Application (#2149)",
+		Tests: []string{"TestMarketplaceBrowseSearchAndProduct", "TestMarketplaceDeploysToApplications", "TestMarketplaceOffline"}},
+	{Resource: "Marketplace: Kubernetes apps from Helm charts", Screen: "/marketplace/repositories",
+		Offers: "Marketplace's Kubernetes apps: Helm charts from Artifact Hub, Rancher's chart repositories and the Helm repositories added on " +
+			"Helm repositories (/marketplace/repositories), each card labelled by its source; Configure with the chart version, its values.schema.json " +
+			"as fields and its values.yaml in an editor; Deploy installs the release with the Helm SDK and records it as an Application, whose page " +
+			"offers Upgrade and Delete, which uninstalls it (#2149)",
+		Tests: []string{"TestMarketplaceDeploysHelmChart"}},
+	{Resource: "Kubernetes Engine: Applications", Screen: "/kubernetes/applications",
+		Offers: "Applications (/kubernetes/applications): the Kubernetes Applications of the instance's cluster and the project's Kubernetes Engine " +
+			"clusters (name, status, type, version, namespace, cluster), Deploy from Marketplace; an application's page with its deploy progress " +
+			"(its pods' states), details, Components (each with its status and endpoints, linked to its workload or service) and YAML, and Delete, " +
+			"which removes the Application and its components (#2149)",
+		Tests: []string{"TestMarketplaceDeploysToApplications"}},
 	// Model Garden's Hugging Face deployments (#1840).
 	{Resource: "Model Garden: deploy a Hugging Face model", Service: "vertexai",
 		Methods: []string{"ModelGardenService/Deploy", "EndpointService/GetEndpoint", "EndpointService/ListEndpoints"},

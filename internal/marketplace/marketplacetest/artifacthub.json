@@ -1,0 +1,392 @@
+{
+ "recorded": "2026-11-22 from https://artifacthub.io/api/v1 (search ts_query_web=nginx limit=3; packages/helm/bitnami/nginx, readme cut to 4000 bytes, 30 versions); content_url is replaced by the fixture chart",
+ "total": 336,
+ "search_nginx": {
+  "packages": [
+   {
+    "package_id": "bec45f52-fe90-46a1-b6eb-a3dcd9bb203f",
+    "name": "nginx",
+    "normalized_name": "nginx",
+    "category": 5,
+    "category_display_name": "Networking",
+    "logo_image_id": "df8b0c56-3686-47ad-b3cf-44ab4c2ef096",
+    "stars": 107,
+    "description": "NGINX Open Source is a web server that can be also used as a reverse proxy, load balancer, and HTTP cache. Recommended for high-demanding sites due to its ability to provide faster content.",
+    "version": "25.2.16",
+    "app_version": "1.31.9",
+    "deprecated": false,
+    "has_values_schema": false,
+    "signed": true,
+    "signatures": [
+     "cosign"
+    ],
+    "security_report_summary": {
+     "low": 0,
+     "high": 0,
+     "medium": 0,
+     "unknown": 0,
+     "critical": 0
+    },
+    "all_containers_images_whitelisted": false,
+    "production_organizations_count": 2,
+    "ts": 1795135899,
+    "repository": {
+     "url": "https://charts.bitnami.com/bitnami",
+     "kind": 0,
+     "name": "bitnami",
+     "official": false,
+     "display_name": "Bitnami",
+     "repository_id": "64117528-d525-41d6-862c-41a43207c431",
+     "scanner_disabled": false,
+     "organization_name": "bitnami",
+     "verified_publisher": true,
+     "organization_display_name": "Bitnami"
+    }
+   },
+   {
+    "package_id": "ba70c546-4f86-4d82-b414-0bd0f47fc731",
+    "name": "nginx",
+    "normalized_name": "nginx",
+    "category": 5,
+    "category_display_name": "Networking",
+    "logo_image_id": "2e078225-f162-4fe7-bd80-bb6ccf0d8376",
+    "stars": 7,
+    "description": "Nginx is a high-performance HTTP server and reverse proxy.",
+    "version": "0.16.18",
+    "app_version": "1.31.9",
+    "license": "Apache-2.0",
+    "deprecated": false,
+    "has_values_schema": true,
+    "signed": true,
+    "signatures": [
+     "cosign"
+    ],
+    "security_report_summary": {
+     "low": 4,
+     "high": 1,
+     "medium": 7,
+     "unknown": 0,
+     "critical": 0
+    },
+    "all_containers_images_whitelisted": false,
+    "production_organizations_count": 0,
+    "ts": 1795023037,
+    "repository": {
+     "url": "oci://registry-1.docker.io/cloudpirates/nginx",
+     "kind": 0,
+     "name": "cloudpirates-nginx",
+     "official": false,
+     "display_name": "nginx",
+     "repository_id": "7e7ab434-cbc6-4e1b-aa32-5ad4145a9fa2",
+     "scanner_disabled": false,
+     "organization_name": "cloudpirates",
+     "verified_publisher": true,
+     "organization_display_name": "CloudPirates"
+    }
+   },
+   {
+    "package_id": "916cffff-fd1e-4b05-a1c1-5d015c915af8",
+    "name": "nginx",
+    "normalized_name": "nginx",
+    "category": 5,
+    "category_display_name": "Networking",
+    "stars": 1,
+    "description": "Bitnami-compatible NGINX Helm chart for NiceOS",
+    "version": "1.31.1+niceos.2",
+    "app_version": "1.31.1",
+    "license": "Apache-2.0",
+    "deprecated": false,
+    "has_values_schema": true,
+    "signed": true,
+    "signatures": [
+     "prov"
+    ],
+    "security_report_summary": {
+     "low": 2,
+     "high": 38,
+     "medium": 36,
+     "unknown": 2,
+     "critical": 0
+    },
+    "all_containers_images_whitelisted": false,
+    "production_organizations_count": 0,
+    "ts": 1781001610,
+    "repository": {
+     "url": "https://helm.nice-soft.com",
+     "kind": 0,
+     "name": "niceos",
+     "official": false,
+     "display_name": "NiceOS Helm Charts",
+     "repository_id": "75e050bb-c2cf-4b2d-852b-7616b65cb43a",
+     "scanner_disabled": false,
+     "organization_name": "niceos",
+     "verified_publisher": true,
+     "organization_display_name": "NiceOS"
+    }
+   }
+  ]
+ },
+ "package_bitnami_nginx": {
+  "package_id": "bec45f52-fe90-46a1-b6eb-a3dcd9bb203f",
+  "name": "nginx",
+  "normalized_name": "nginx",
+  "category": 5,
+  "category_display_name": "Networking",
+  "is_operator": false,
+  "description": "NGINX Open Source is a web server that can be also used as a reverse proxy, load balancer, and HTTP cache. Recommended for high-demanding sites due to its ability to provide faster content.",
+  "logo_image_id": "df8b0c56-3686-47ad-b3cf-44ab4c2ef096",
+  "keywords": [
+   "nginx",
+   "http",
+   "web",
+   "www",
+   "reverse proxy"
+  ],
+  "home_url": "https://bitnami.com",
+  "readme": "<!--- app-name: NGINX Open Source -->\n\n# Bitnami Secure Images Helm chart for NGINX Open Source\n\nNGINX Open Source is a web server that can be also used as a reverse proxy, load balancer, and HTTP cache. Recommended for high-demanding sites due to its ability to provide faster content.\n\n[Overview of NGINX Open Source](http://nginx.org)\n\nTrademarks: This software listing is packaged by Bitnami. The respective trademarks mentioned in the offering are owned by the respective companies, and use of them does not imply any affiliation or endorsement.\n\n## TL;DR\n\n```console\nhelm install my-release oci://MY-OCI-REGISTRY/nginx\n```\n\n## Why use Bitnami Secure Images?\n\nThose are hardened, minimal CVE images built and maintained by Bitnami. Bitnami Secure Images are based on the cloud-optimized, security-hardened enterprise [OS Photon Linux](https://vmware.github.io/photon/). Why choose BSI images?\n\n- Hardened secure images of popular open source software with Near-Zero Vulnerabilities\n- Vulnerability Triage & Prioritization with VEX Statements, KEV and EPSS Scores\n- Compliance focus with FIPS, STIG, and air-gap options, including secure bill of materials (SBOM)\n- Software supply chain provenance attestation through in-toto\n- First class support for the internet\u2019s favorite Helm charts\n\nEach image comes with valuable security metadata. You can view the metadata in [our public catalog here](https://app-catalog.vmware.com/bitnami/apps). Note: Some data is only available with [commercial subscriptions to BSI](https://bitnami.com/).\n\n![Alt text](https://github.com/bitnami/containers/blob/main/BSI%20UI%201.png?raw=true \"Application details\")\n![Alt text](https://github.com/bitnami/containers/blob/main/BSI%20UI%202.png?raw=true \"Packaging report\")\n\nIf you are looking for our previous generation of images based on Debian Linux, please see the [Bitnami Legacy registry](https://hub.docker.com/u/bitnamilegacy).\n\n## Introduction\n\nBitnami charts for Helm are carefully engineered, actively maintained and are the quickest and easiest way to deploy containers on a Kubernetes cluster that are ready to handle production workloads.\n\nThis chart bootstraps a [NGINX Open Source](https://github.com/bitnami/containers/tree/main/bitnami/nginx) deployment on a [Kubernetes](https://kubernetes.io) cluster using the [Helm](https://helm.sh) package manager.\n\n## Before you begin\n\n- Kubernetes 1.23+\n- Helm 3.8.0+\n\n## Installing the Chart\n\nFirst, log in to the OCI registry and create a secret with your registry credentials:\n\n```console\nhelm registry login REGISTRY_NAME\nkubectl create secret docker-registry SECRET_NAME -n NAMESPACE \\\n  --docker-server REGISTRY_NAME \\\n  --docker-username \"USER\" \\\n  --docker-password \"TOKEN\"\n```\n\n> **Note** Replace the placeholders in these commands (`REGISTRY_NAME`, `SECRET_NAME`, `NAMESPACE`, `USER`, and `TOKEN`) with your actual values.\n\nThen install the chart with the release name `my-release`:\n\n```console\nhelm install my-release oci://REGISTRY_NAME/REPOSITORY_NAME/nginx --set \"global.imagePullSecrets[0]=SECRET_NAME\" -n NAMESPACE\n```\n\n> **Note** Replace the placeholders in the `helm install` command (`REGISTRY_NAME`, `REPOSITORY_NAME`, `SECRET_NAME`, and `NAMESPACE`) with your actual values.\n\nThese commands deploy NGINX Open Source on the Kubernetes cluster in the default configuration.\n\n> **Tip**: List all releases using `helm list`\n\n## Configuration and installation details\n\nThis section describes credentials, configuration, and other installation options.\n\n### Resource requests and limits\n\nBitnami charts allow setting resource requests and limits for all containers inside the chart deployment. These are inside the `resources` value (check parameter table). Setting requests is essential for production workloads and these should be adapted to your specific use case.\n\nTo make this process easier, the chart contains the `resourcesPreset` values, which automatically sets the `resources` section according to different presets. Check these pre",
+  "links": [
+   {
+    "url": "https://github.com/bitnami/charts/tree/main/bitnami/nginx",
+    "name": "source"
+   }
+  ],
+  "security_report_created_at": 1795313730,
+  "version": "25.2.16",
+  "available_versions": [
+   {
+    "version": "25.2.16",
+    "app_version": "1.31.9",
+    "contains_security_updates": false,
+    "prerelease": false,
+    "ts": 1795135899
+   },
+   {
+    "version": "25.2.15",
+    "app_version": "1.31.9",
+    "contains_security_updates": false,
+    "prerelease": false,
+    "ts": 1795030531
+   },
+   {
+    "version": "25.2.14",
+    "app_version": "1.31.8",
+    "contains_security_updates": false,
+    "prerelease": false,
+    "ts": 1793801496
+   },
+   {
+    "version": "25.2.13",
+    "app_version": "1.31.8",
+    "contains_security_updates": false,
+    "prerelease": false,
+    "ts": 1793031605
+   },
+   {
+    "version": "25.2.12",
+    "app_version": "1.31.8",
+    "contains_security_updates": false,
+    "prerelease": false,
+    "ts": 1792978309
+   },
+   {
+    "version": "25.2.11",
+    "app_version": "1.31.8",
+    "contains_security_updates": false,
+    "prerelease": false,
+    "ts": 1792791483
+   },
+   {
+    "version": "25.2.10",
+    "app_version": "1.31.8",
+    "contains_security_updates": false,
+    "prerelease": false,
+    "ts": 1792765084
+   },
+   {
+    "version": "25.2.8",
+    "app_version": "1.31.8",
+    "contains_security_updates": false,
+    "prerelease": false,
+    "ts": 1792606817
+   },
+   {
+    "version": "25.2.5",
+    "app_version": "1.31.7",
+    "contains_security_updates": false,
+    "prerelease": false,
+    "ts": 1792003564
+   },
+   {
+    "version": "25.2.1",
+    "app_version": "1.31.6",
+    "contains_security_updates": false,
+    "prerelease": false,
+    "ts": 1790764981
+   },
+   {
+    "version": "25.2.0",
+    "app_version": "1.31.6",
+    "contains_security_updates": false,
+    "prerelease": false,
+    "ts": 1790603071
+   },
+   {
+    "version": "25.1.15",
+    "app_version": "1.31.6",
+    "contains_security_updates": false,
+    "prerelease": false,
+    "ts": 1790345899
+   },
+   {
+    "version": "25.1.14",
+    "app_version": "1.31.6",
+    "contains_security_updates": false,
+    "prerelease": false,
+    "ts": 1789837966
+   },
+   {
+    "version": "25.1.13",
+    "app_version": "1.31.6",
+    "contains_security_updates": false,
+    "prerelease": false,
+    "ts": 1789676220
+   },
+   {
+    "version": "25.1.12",
+    "app_version": "1.31.6",
+    "contains_security_updates": false,
+    "prerelease": false,
+    "ts": 1789496288
+   },
+   {
+    "version": "25.1.11",
+    "app_version": "1.31.5",
+    "contains_security_updates": false,
+    "prerelease": false,
+    "ts": 1788888974
+   },
+   {
+    "version": "25.1.10",
+    "app_version": "1.31.5",
+    "contains_security_updates": false,
+    "prerelease": false,
+    "ts": 1788486852
+   },
+   {
+    "version": "25.1.9",
+    "app_version": "1.31.5",
+    "contains_security_updates": false,
+    "prerelease": false,
+    "ts": 1788369281
+   },
+   {
+    "version": "25.1.5",
+    "app_version": "1.31.4",
+    "contains_security_updates": false,
+    "prerelease": false,
+    "ts": 1787396819
+   },
+   {
+    "version": "25.1.1",
+    "app_version": "1.31.4",
+    "contains_security_updates": false,
+    "prerelease": false,
+    "ts": 1787159362
+   },
+   {
+    "version": "25.0.22",
+    "app_version": "1.31.3",
+    "contains_security_updates": false,
+    "prerelease": false,
+    "ts": 1787087280
+   },
+   {
+    "version": "25.0.21",
+    "app_version": "1.31.3",
+    "contains_security_updates": false,
+    "prerelease": false,
+    "ts": 1786738345
+   },
+   {
+    "version": "25.0.20",
+    "app_version": "1.31.3",
+    "contains_security_updates": false,
+    "prerelease": false,
+    "ts": 1786366205
+   },
+   {
+    "version": "25.0.19",
+    "app_version": "1.31.3",
+    "contains_security_updates": false,
+    "prerelease": false,
+    "ts": 1786221854
+   },
+   {
+    "version": "25.0.18",
+    "app_version": "1.31.3",
+    "contains_security_updates": false,
+    "prerelease": false,
+    "ts": 1785835787
+   },
+   {
+    "version": "25.0.17",
+    "app_version": "1.31.3",
+    "contains_security_updates": false,
+    "prerelease": false,
+    "ts": 1785572318
+   },
+   {
+    "version": "25.0.16",
+    "app_version": "1.31.3",
+    "contains_security_updates": false,
+    "prerelease": false,
+    "ts": 1785351060
+   },
+   {
+    "version": "25.0.15",
+    "app_version": "1.31.3",
+    "contains_security_updates": false,
+    "prerelease": false,
+    "ts": 1784781544
+   },
+   {
+    "version": "25.0.14",
+    "app_version": "1.31.3",
+    "contains_security_updates": false,
+    "prerelease": false,
+    "ts": 1784147290
+   },
+   {
+    "version": "25.0.13",
+    "app_version": "1.31.2",
+    "contains_security_updates": false,
+    "prerelease": false,
+    "ts": 1783400308
+   }
+  ],
+  "app_version": "1.31.9",
+  "digest": "87f9cc47946ecefc5de6760e568c510bf8139f67ffe0ff52d0ef48d954672f22",
+  "deprecated": false,
+  "contains_security_updates": false,
+  "prerelease": false,
+  "signed": true,
+  "content_url": "oci://registry-1.docker.io/bitnamicharts/nginx:25.2.16",
+  "all_containers_images_whitelisted": false,
+  "has_values_schema": false,
+  "has_changelog": false,
+  "ts": 1795135899,
+  "repository": {
+   "repository_id": "64117528-d525-41d6-862c-41a43207c431",
+   "name": "bitnami",
+   "display_name": "Bitnami",
+   "url": "https://charts.bitnami.com/bitnami",
+   "private": false,
+   "kind": 0,
+   "verified_publisher": true,
+   "official": false,
+   "scanner_disabled": false,
+   "organization_name": "bitnami",
+   "organization_display_name": "Bitnami"
+  }
+ }
+}
