@@ -55,7 +55,8 @@ func (f *Front) httpServer(grpcSrv *grpc.Server) *frontHTTP {
 		upgraded: map[net.Conn]bool{},
 	}
 	// Disabled APIs (#1914): refused before the front serves a call.
-	h := apienable.Gate(nil, "pubsub.googleapis.com", f.Handler(grpcSrv))
+	// CloudBurrow's own state calls pass (StateHeader).
+	h := apienable.Gate(nil, "pubsub.googleapis.com", f.Handler(grpcSrv), apienable.Options{Skip: stateCallHTTP})
 	s.Server = &http.Server{
 		// The Host and Origin checks (#1587) come before an Upgrade: h2c
 		// is taken, so the request asking for it is checked like any

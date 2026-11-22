@@ -2,8 +2,8 @@
 # Loopback addresses are rewritten to host.docker.internal; see docs/configuration.md for when
 # a container can reach them. GOOGLE_APPLICATION_CREDENTIALS is omitted: it names a host path.
 environment:
-  : "host.docker.internal:9007"
   CLOUDBURROW_APIKEYS_ENDPOINT: "host.docker.internal:9029"
+  CLOUDBURROW_BILLING_ENDPOINT: "host.docker.internal:9007"
   CLOUDBURROW_CLOUDSQL_URL: "postgres://cloudburrow@host.docker.internal:9019/cloudburrow?sslmode=disable"
   CLOUDBURROW_DOMAIN: "cloudburrow.localhost"
   CLOUDBURROW_INGRESS: "http://host.docker.internal:9080"

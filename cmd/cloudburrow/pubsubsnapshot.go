@@ -153,6 +153,8 @@ func all[T any](next func() (T, error)) ([]T, error) {
 }
 
 func (p *pubsubSnapshotter) Export(ctx context.Context, w admin.EntryWriter) error {
+	// A project whose Pub/Sub API is disabled is captured too.
+	ctx = stateCallContext(ctx)
 	c, sc, conn, err := p.clients(ctx)
 	if err != nil {
 		return err
@@ -257,6 +259,7 @@ func unmarshalAll[M proto.Message](raw []json.RawMessage, fresh func() M) ([]M, 
 // Import replaces every known project's Pub/Sub resources, and those of
 // every project the archive names, with the archive's.
 func (p *pubsubSnapshotter) Import(ctx context.Context, r admin.EntryReader) error {
+	ctx = stateCallContext(ctx)
 	f, err := r.Open(pubsubEntry)
 	if err != nil {
 		return err
@@ -417,4 +420,13 @@ func randomHex(n int) string {
 	b := make([]byte, n)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+// stateCallContext marks ctx's calls as CloudBurrow's own state save, load
+// or reset (pubsubfront.StateHeader), which a project's disabled Pub/Sub
+// API does not refuse: disabling the API leaves its topics and
+// subscriptions in place, so a save captures them and a load or reset
+// replaces them like any other project's.
+func stateCallContext(ctx context.Context) context.Context {
+	return metadata.AppendToOutgoingContext(ctx, pubsubfront.StateHeader, "1")
 }
