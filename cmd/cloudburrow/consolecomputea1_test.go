@@ -232,6 +232,18 @@ func TestConsoleComputeA1(t *testing.T) {
 		"region": "us-central1", "subnetwork": "six-a", "assign": "Assign automatically", "purpose": "Non-shared"}); err != nil {
 		t.Fatal(err)
 	}
+	// Create route, IPv6, to the default internet gateway.
+	routes := computeRoutesProvider{s}
+	if f := vpcField(routes.CreateFormFor(ctx, project), "ipVersion"); len(f.UnavailableOptions) != 0 {
+		t.Fatalf("Create route's IP version = %+v", f)
+	}
+	if _, err := routes.Create(ctx, project, map[string]string{"name": "six-out", "network": "six", "ipVersion": "IPv6", "destRange6": "2001:db8::/32",
+		"priority": "1000", "nextHop": "Default internet gateway"}); err != nil {
+		t.Fatal(err)
+	}
+	if r, err := s.call("GET", project, "global/routes/six-out", nil, nil); err != nil || vpcStr(r, "destRange") != "2001:db8::/32" {
+		t.Fatalf("six-out = %v %v", r, err)
+	}
 	il, _ := computeInternalAddressesProvider{addrs}.List(ctx, project)
 	if r := vpcRow(il, "six-ip"); r == nil || r.Fields["Version"] != "IPv6" || !strings.HasPrefix(r.Fields["IP address"], "fd2") || !strings.HasSuffix(r.Fields["IP address"], "/96") {
 		t.Fatalf("six-ip's row = %+v", r)

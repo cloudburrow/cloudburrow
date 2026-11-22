@@ -1406,8 +1406,11 @@ func routeFields(networks, instances []string) []console.Field {
 		netField,
 		{Name: "routeType", Label: "Route type", Type: "select", Default: "Static route", Options: []string{"Static route"}},
 		{Name: "ipVersion", Label: "IP version", Type: "radio", Default: "IPv4", Options: []string{"IPv4", "IPv6"},
-			UnavailableOptions: map[string]string{"IPv6": "IPv6 is not served: routes are IPv4 only."}},
-		{Name: "destRange", Label: "Destination IPv4 range", Type: "text", Required: true, Help: "For example, 192.168.0.0/16. It may not match or fit within a subnet's range."},
+			Help: "An IPv6 route's next hop is the default internet gateway, an IPv6 address of a dual-stack subnet, or a dual-stack instance."},
+		{Name: "destRange", Label: "Destination IPv4 range", Type: "text", Required: true, VisibleWhen: map[string]string{"ipVersion": "IPv4"},
+			Help: "For example, 192.168.0.0/16. It may not match or fit within a subnet's range."},
+		{Name: "destRange6", Label: "Destination IPv6 range", Type: "text", Required: true, VisibleWhen: map[string]string{"ipVersion": "IPv6"},
+			Help: "For example, 2001:db8::/32. It may not match or fit within a subnet's IPv6 range."},
 		{Name: "priority", Label: "Priority", Type: "text", Required: true, Default: "1000", Pattern: `^[0-9]{1,5}$`, Help: "Priority can be 0 - 65535; a lower number is preferred."},
 		{Name: "tags", Label: "Instance tags", Type: "text", Help: "Optional, comma-separated: the route applies only to instances with one of these tags; blank applies it to all instances."},
 		{Name: "nextHop", Label: "Next hop", Type: "select", Default: hopGateway,
@@ -1415,7 +1418,7 @@ func routeFields(networks, instances []string) []console.Field {
 			Help: "VPN tunnels and internal passthrough Network Load Balancers are not served."},
 		instField,
 		{Name: "nextHopIp", Label: "Next hop IP address", Type: "text", Required: true, VisibleWhen: map[string]string{"nextHop": hopIP},
-			Help: "An internal IPv4 address in one of the network's subnets."},
+			Help: "An internal address in one of the network's subnets, of the route's IP version."},
 	}
 }
 
@@ -1445,6 +1448,9 @@ func (p computeRoutesProvider) Create(ctx context.Context, project string, value
 	name := strings.TrimSpace(values["name"])
 	b := map[string]any{"name": name, "network": "global/networks/" + strings.TrimSpace(vpcOr(values["network"], "default")),
 		"destRange": strings.TrimSpace(values["destRange"])}
+	if values["ipVersion"] == "IPv6" {
+		b["destRange"] = strings.TrimSpace(values["destRange6"])
+	}
 	if d := strings.TrimSpace(values["description"]); d != "" {
 		b["description"] = d
 	}

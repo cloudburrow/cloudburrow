@@ -975,7 +975,8 @@ Audited against Google's public docs (vpc/docs, firewall/docs, read 2026-11-22).
 - [x] VPC network peering: Create peering connection (this or another project, custom route exchange), Edit, Delete; ACTIVE once both sides exist; peered networks' VMs reach each other.
 - [x] IPv6: Create VPC network's ULA internal IPv6 range (automatic or given); a subnet's IP stack type IPv4 and IPv6 (dual-stack) with IPv6 access type Internal or External (Add subnet, Create VPC network); the Subnets list's IP stack type, Internal and External IPv6 ranges; Create an instance's network interface IP stack type; a VM's interfaces with their IPv6 addresses; firewall rules' IPv6 source and destination ranges; a dual-stack peering.
 - [x] Edit subnet's IP stack type, IPv4 to dual-stack (its IPv6 access type then fixed) and back; Reserve internal static IP address's IP version IPv6; Create an instance's External IPv4 address offering the region's reserved addresses.
-- [ ] Not yet: IPv6 routes (drawn unavailable with the reason). Not local: IPv6-only subnets, Cloud VPN and load balancer next hops (gaps.md).
+- [x] Create route's IP version IPv6, with its Destination IPv6 range.
+- [ ] Not local: IPv6-only subnets, Cloud VPN and load balancer next hops (gaps.md).
 
 #### Eventarc Advanced (#1947, #2006)
 

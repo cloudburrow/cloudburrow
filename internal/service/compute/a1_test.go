@@ -339,3 +339,34 @@ func TestStaticIPv6Addresses(t *testing.T) {
 		t.Fatalf("i6 after its VM's delete = %v", o)
 	}
 }
+
+// TestIPv6Routes (#2140): an IPv6 static route to the default internet
+// gateway, to an IPv6 address of a dual-stack subnet and to a dual-stack
+// instance; an IPv4 next hop, an IPv4-only instance and a destination
+// inside a subnet's IPv6 range refused.
+func TestIPv6Routes(t *testing.T) {
+	s, _, call := parityFixture(t)
+	call("POST", "global/networks", nil, obj{"name": "v6", "autoCreateSubnetworks": false, "enableUlaInternalIpv6": true})
+	call("POST", "regions/us-central1/subnetworks", nil, obj{"name": "in6", "network": "global/networks/v6", "ipCidrRange": "10.6.0.0/24",
+		"stackType": "IPV4_IPV6", "ipv6AccessType": "INTERNAL"})
+	sub := call("GET", "regions/us-central1/subnetworks/in6", nil, nil)
+	call("POST", "zones/us-central1-a/instances", nil, vmBody("dual", obj{"networkInterfaces": []any{map[string]any{
+		"subnetwork": "regions/us-central1/subnetworks/in6", "stackType": "IPV4_IPV6"}}}))
+	call("POST", "zones/us-central1-a/instances", nil, vmBody("four", obj{"networkInterfaces": []any{map[string]any{
+		"subnetwork": "regions/us-central1/subnetworks/in6"}}}))
+	nic := listOf(call("GET", "zones/us-central1-a/instances/dual", nil, nil)["networkInterfaces"])[0].(map[string]any)
+	call("POST", "global/routes", nil, obj{"name": "r-gw", "network": "global/networks/v6", "destRange": "2001:db8::/32",
+		"nextHopGateway": "global/gateways/default-internet-gateway"})
+	call("POST", "global/routes", nil, obj{"name": "r-ip", "network": "global/networks/v6", "destRange": "2001:db8:1::/48", "nextHopIp": nic["ipv6Address"]})
+	call("POST", "global/routes", nil, obj{"name": "r-vm", "network": "global/networks/v6", "destRange": "2001:db8:2::/48",
+		"nextHopInstance": "zones/us-central1-a/instances/dual"})
+	if r := call("GET", "global/routes/r-ip", nil, nil); r["destRange"] != "2001:db8:1::/48" || r["nextHopIp"] != nic["ipv6Address"] {
+		t.Fatalf("r-ip = %v", r)
+	}
+	callErr(t, s, 400, "POST", "global/routes", obj{"name": "x", "network": "global/networks/v6", "destRange": "2001:db8:3::/48", "nextHopIp": "10.6.0.2"})
+	callErr(t, s, 400, "POST", "global/routes", obj{"name": "x", "network": "global/networks/v6", "destRange": "2001:db8:3::/48",
+		"nextHopInstance": "zones/us-central1-a/instances/four"})
+	callErr(t, s, 400, "POST", "global/routes", obj{"name": "x", "network": "global/networks/v6", "destRange": str(sub, "ipv6CidrRange"),
+		"nextHopGateway": "global/gateways/default-internet-gateway"})
+	callErr(t, s, 400, "POST", "global/routes", obj{"name": "x", "network": "global/networks/v6", "destRange": "2001:db8:3::/48", "nextHopIp": "2001:db8:9::1"})
+}
