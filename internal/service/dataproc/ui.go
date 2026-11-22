@@ -191,14 +191,14 @@ func logRecords(file string, needle []byte) bool {
 
 var errStopping = &sparkproc.Unavailable{Msg: "the instance is stopping"}
 
-var gatewayRE = regexp.MustCompile(`^/component-gateway/([0-9a-f-]{36})/sparkhistory(/.*)?$`)
+var gatewayRE = regexp.MustCompile(`^/component-gateway/([0-9a-f-]{36})/([a-z]+)(/.*)?$`)
 
 // WebUI serves the History Servers beside next: the instance's at
 // /sparkhistory/, each cluster's at its Component Gateway path.
 func (s *Server) WebUI(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := r.URL.Path
-		var addr, base string
+		var addr, base, strip string
 		switch {
 		case p == HistoryBase || strings.HasPrefix(p, HistoryBase+"/"):
 			a, err := s.instanceHistory(r.Context())
@@ -215,7 +215,7 @@ func (s *Server) WebUI(next http.Handler) http.Handler {
 				http.Redirect(w, r, HistoryBase+"/history/"+app+m[2]+query(r.URL), http.StatusFound)
 				return
 			}
-			addr, base = a, HistoryBase
+			addr, base, strip = a, HistoryBase, HistoryBase
 		case gatewayRE.MatchString(p):
 			m := gatewayRE.FindStringSubmatch(p)
 			s.mu.Lock()
@@ -230,7 +230,17 @@ func (s *Server) WebUI(next http.Handler) http.Handler {
 				http.Error(w, "The cluster is not running, so its web interfaces are not available", http.StatusServiceUnavailable)
 				return
 			}
-			addr, base = nodes.Web(r.Context())["history"], gatewayBase(m[1])+"sparkhistory"
+			key, ok := gatewayKeys[m[2]]
+			if !ok {
+				http.NotFound(w, r)
+				return
+			}
+			addr, base = nodes.Web(r.Context())[key], gatewayBase(m[1])+m[2]
+			if gatewayFull[m[2]] {
+				strip = ""
+			} else {
+				strip = base
+			}
 		default:
 			next.ServeHTTP(w, r)
 			return
@@ -242,7 +252,7 @@ func (s *Server) WebUI(next http.Handler) http.Handler {
 		target := &url.URL{Scheme: "http", Host: addr}
 		proxy := &httputil.ReverseProxy{Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(target)
-			pr.Out.URL.Path = strings.TrimPrefix(pr.In.URL.Path, base)
+			pr.Out.URL.Path = strings.TrimPrefix(pr.In.URL.Path, strip)
 			if pr.Out.URL.Path == "" {
 				pr.Out.URL.Path = "/"
 			}
@@ -252,7 +262,7 @@ func (s *Server) WebUI(next http.Handler) http.Handler {
 			// The History Server redirects to its own paths, which the
 			// proxy base prefixes.
 			if loc := resp.Header.Get("Location"); loc != "" {
-				if u, err := url.Parse(loc); err == nil && (u.Host == addr || u.Host == "") && !strings.HasPrefix(u.Path, base) {
+				if u, err := url.Parse(loc); err == nil && (u.Host == addr || u.Host == "") && strip != "" && !strings.HasPrefix(u.Path, base) {
 					resp.Header.Set("Location", base+u.Path+query(u))
 				}
 			}

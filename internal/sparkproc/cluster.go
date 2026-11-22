@@ -58,6 +58,16 @@ type ClusterSpec struct {
 	// HistoryBase is the path the History Server is reached at through
 	// the API's proxy (spark.ui.proxyBase).
 	HistoryBase string
+	// GatewayBase is the cluster's Component Gateway path (ending in
+	// /), under which the components' web interfaces are served.
+	GatewayBase string
+	// Components are the optional components the cluster runs
+	// (ComponentTrino, ...).
+	Components []string
+	// ConfProperties are the cluster's properties of its other engines'
+	// files, prefixed as softwareConfig.properties has them (core:,
+	// mapred:, hive:, pig:, trino:, flink:).
+	ConfProperties map[string]string
 }
 
 // Cluster is a running cluster.
@@ -75,8 +85,12 @@ type Cluster struct {
 
 	mu      sync.Mutex
 	workers []string // worker container names, in order
+	extras  []string // the components' containers, in start order
 	stopped bool
 	gone    bool
+
+	hiveMu sync.Mutex
+	hiveUp bool
 }
 
 // nodeAlias is a node's host name on the cluster's network.
@@ -144,7 +158,7 @@ func (d *Docker) StartCluster(ctx context.Context, spec ClusterSpec) (_ *Cluster
 	if rest == "" || storage == "" {
 		return nil, &Unavailable{Msg: "the instance's BigQuery REST and Storage API ports are not live"}
 	}
-	c := &Cluster{d: d, spec: spec, rt: rt, version: version, jar: jar, label: "cloudburrow.instance=" + d.Instance}
+	c := &Cluster{d: d, spec: spec, rt: rt, version: version, jar: jar, label: d.instanceLabel()}
 	defer func() {
 		if err != nil {
 			c.Delete()
@@ -158,7 +172,7 @@ func (d *Docker) StartCluster(ctx context.Context, spec ClusterSpec) (_ *Cluster
 		// event logs.
 		c.history = d.History
 	}
-	for _, name := range []string{"relay.py", "run.sh", "node.sh"} {
+	for _, name := range []string{"relay.py", "run.sh", "node.sh", "eco.sh", "hivenode.sh"} {
 		b, _ := assets.ReadFile("assets/" + name)
 		if err := os.WriteFile(filepath.Join(c.dir, name), b, 0o644); err != nil {
 			return nil, err
@@ -167,7 +181,7 @@ func (d *Docker) StartCluster(ctx context.Context, spec ClusterSpec) (_ *Cluster
 	if err := writeTLS(filepath.Join(c.dir, "tls")); err != nil {
 		return nil, err
 	}
-	for _, sub := range []string{"history", "jobs"} {
+	for _, sub := range []string{"history", "jobs", "warehouse"} {
 		if err := os.MkdirAll(filepath.Join(c.dir, sub), 0o777); err != nil {
 			return nil, err
 		}
@@ -188,10 +202,22 @@ func (d *Docker) StartCluster(ctx context.Context, spec ClusterSpec) (_ *Cluster
 	base := "cb-dpc-" + strings.Trim(suffix, "-")
 	c.network, c.relay, c.master = base+"-net", base+"-relay", base+"-m"
 
-	restTarget, storageTarget, stop, err := d.targets(ctx, rest, storage)
+	if err := c.writeConf(filepath.Join(c.dir, "conf"), nil); err != nil {
+		return nil, err
+	}
+	hosts := []string{rest, storage}
+	gcs := ""
+	if d.GCS != nil {
+		gcs = d.GCS()
+	}
+	if gcs != "" {
+		hosts = append(hosts, gcs)
+	}
+	targets, stop, err := d.hostTargets(ctx, hosts...)
 	if err != nil {
 		return nil, &Unavailable{Msg: err.Error()}
 	}
+	restTarget, storageTarget := targets[0], targets[1]
 	c.stopRelay = stop
 	if out, err := d.docker(ctx, "network", "create", "--internal", "--label", c.label, c.network); err != nil {
 		return nil, &Unavailable{Msg: "create the cluster's internal network: " + out}
@@ -201,10 +227,21 @@ func (d *Docker) StartCluster(ctx context.Context, spec ClusterSpec) (_ *Cluster
 	if !d.desktop {
 		relayArgs = append(relayArgs, "--add-host", "host.docker.internal:host-gateway")
 	}
-	// The History Server (18080) and the master's web UI (8080, which
-	// the relay listens for on 18088: its own 8080 is BigQuery's).
-	relayArgs = append(relayArgs, "-p", "127.0.0.1::18080", "-p", "127.0.0.1::18088", rt.Image, "/cb/relay.py", restTarget, storageTarget,
-		alias+":18080", "18088="+alias+":8080")
+	// The History Server (18080), the master's web UI (18088) and the
+	// components' web ports; and the instance's Cloud Storage, for the
+	// Hadoop connector, on gcsPort.
+	relays := []string{alias + ":18080", alias + ":18088"}
+	relayArgs = append(relayArgs, "-p", "127.0.0.1::18080", "-p", "127.0.0.1::18088")
+	for _, comp := range spec.Components {
+		if p, ok := componentPorts[comp]; ok {
+			relayArgs = append(relayArgs, "-p", "127.0.0.1::"+p.listen)
+			relays = append(relays, p.listen+"="+alias+":"+p.port)
+		}
+	}
+	if len(targets) > 2 {
+		relays = append(relays, gcsPort+"=@"+targets[2])
+	}
+	relayArgs = append(append(relayArgs, rt.Image, "/cb/relay.py", restTarget, storageTarget), relays...)
 	if out, err := d.docker(ctx, relayArgs...); err != nil {
 		return nil, &Unavailable{Msg: "start the cluster's relay: " + out}
 	}
@@ -232,6 +269,9 @@ func (d *Docker) StartCluster(ctx context.Context, spec ClusterSpec) (_ *Cluster
 			return nil, err
 		}
 		if err := c.Scale(ctx, spec.Workers); err != nil {
+			return nil, err
+		}
+		if err := c.startComponents(ctx); err != nil {
 			return nil, err
 		}
 	}
@@ -319,7 +359,7 @@ func (c *Cluster) Scale(ctx context.Context, n int) error {
 
 // nodes are every container of the cluster, the relay first.
 func (c *Cluster) nodesLocked() []string {
-	return append([]string{c.relay, c.master}, c.workers...)
+	return append(append([]string{c.relay, c.master}, c.workers...), c.extras...)
 }
 
 // Stop stops the cluster's containers, keeping them.
@@ -410,7 +450,13 @@ func (c *Cluster) Delete() {
 // History Server's address, "master" the standalone master's UI.
 func (c *Cluster) Web(ctx context.Context) map[string]string {
 	out := map[string]string{}
-	for key, port := range map[string]string{"history": "18080", "master": "18088"} {
+	ports := map[string]string{"history": "18080", "master": "18088"}
+	for _, comp := range c.spec.Components {
+		if p, ok := componentPorts[comp]; ok {
+			ports[p.key] = p.listen
+		}
+	}
+	for key, port := range ports {
 		if a, err := c.d.docker(ctx, "port", c.relay, port); err == nil {
 			out[key] = strings.TrimSpace(strings.Split(a, "\n")[0])
 		}
@@ -431,6 +477,10 @@ func (c *Cluster) Submit(ctx context.Context, job Job) (Result, error) {
 		return Result{}, errors.New("the cluster is not running")
 	}
 	c.mu.Unlock()
+	switch job.Kind {
+	case KindHadoop, KindHive, KindPig, KindTrino, KindFlink:
+		return c.submitEco(ctx, job)
+	}
 	d := c.d
 	token := accessToken
 	if job.RunAs != "" {

@@ -247,8 +247,28 @@ func TestJobs(t *testing.T) {
 		t.Errorf("cancel done: %v", err)
 	}
 	if _, err := s.SubmitJob(ctx, &dataprocpb.SubmitJobRequest{ProjectId: "p", Region: "us-central1", Job: &dataprocpb.Job{
-		Placement: &dataprocpb.JobPlacement{ClusterName: "c1"}, TypeJob: &dataprocpb.Job_HiveJob{HiveJob: &dataprocpb.HiveJob{}}}}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("hive: %v", err)
+		Placement: &dataprocpb.JobPlacement{ClusterName: "c1"}, TypeJob: &dataprocpb.Job_HiveJob{HiveJob: &dataprocpb.HiveJob{}}}}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("hive with no queries: %v", err)
+	}
+	// A Trino job needs the Trino component, which c1 does not enable.
+	if _, err := s.SubmitJob(ctx, &dataprocpb.SubmitJobRequest{ProjectId: "p", Region: "us-central1", Job: &dataprocpb.Job{
+		Placement: &dataprocpb.JobPlacement{ClusterName: "c1"}, TypeJob: &dataprocpb.Job_TrinoJob{TrinoJob: &dataprocpb.TrinoJob{
+			Queries: &dataprocpb.TrinoJob_QueryList{QueryList: &dataprocpb.QueryList{Queries: []string{"SELECT 1"}}}}}}}); status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("trino without the component: %v", err)
+	}
+	// A Hive job runs its query list, each query ended with ";", and its
+	// script variables.
+	hj, err := s.SubmitJob(ctx, &dataprocpb.SubmitJobRequest{ProjectId: "p", Region: "us-central1", Job: &dataprocpb.Job{
+		Placement: &dataprocpb.JobPlacement{ClusterName: "c1"}, TypeJob: &dataprocpb.Job_HiveJob{HiveJob: &dataprocpb.HiveJob{
+			ScriptVariables: map[string]string{"n": "3"},
+			Queries:         &dataprocpb.HiveJob_QueryList{QueryList: &dataprocpb.QueryList{Queries: []string{"SHOW TABLES", "SELECT ${n};"}}}}}}})
+	if err != nil {
+		t.Fatalf("hive: %v", err)
+	}
+	waitJob(t, s, hj.GetReference().GetJobId())
+	last := eng.clusters[0].jobs[len(eng.clusters[0].jobs)-1]
+	if last.Kind != sparkproc.KindHive || string(last.Main.Data) != "SHOW TABLES;\nSELECT ${n};\n" || last.QueryVariables["n"] != "3" {
+		t.Errorf("hive job %+v", last)
 	}
 	if _, err := s.DeleteJob(ctx, &dataprocpb.DeleteJobRequest{ProjectId: "p", Region: "us-central1", JobId: "job-1"}); err != nil {
 		t.Error(err)
@@ -373,6 +393,37 @@ func TestMachineShape(t *testing.T) {
 		c, m := machineShape(uri)
 		if got := fmt.Sprint(c) + " " + m; got != want {
 			t.Errorf("%s: %q, want %q", uri, got, want)
+		}
+	}
+}
+
+// waitJob waits for the job id of project p to end.
+func waitJob(t *testing.T, s *Server, id string) *dataprocpb.Job {
+	t.Helper()
+	var j *dataprocpb.Job
+	wait(t, func() bool {
+		var err error
+		j, err = s.GetJob(context.Background(), &dataprocpb.GetJobRequest{ProjectId: "p", Region: "us-central1", JobId: id})
+		return err == nil && j.GetDone()
+	})
+	return j
+}
+
+func TestCheckComponents(t *testing.T) {
+	for _, c := range []struct {
+		mm    string
+		comps []dataprocpb.Component
+		code  codes.Code
+	}{
+		{"2.2", []dataprocpb.Component{dataprocpb.Component_TRINO, dataprocpb.Component_JUPYTER, dataprocpb.Component_FLINK}, codes.OK},
+		{"2.2", []dataprocpb.Component{dataprocpb.Component_PRESTO}, codes.InvalidArgument},
+		{"2.3", []dataprocpb.Component{dataprocpb.Component_HBASE}, codes.InvalidArgument},
+		{"2.1", []dataprocpb.Component{dataprocpb.Component_ICEBERG}, codes.InvalidArgument},
+		{"2.2", []dataprocpb.Component{dataprocpb.Component_ZOOKEEPER, dataprocpb.Component_ZOOKEEPER}, codes.InvalidArgument},
+		{"2.2", []dataprocpb.Component{dataprocpb.Component_RANGER}, codes.Unimplemented},
+	} {
+		if err := checkComponents(c.mm, c.comps); status.Code(err) != c.code {
+			t.Errorf("%s %v: %v, want %v", c.mm, c.comps, err, c.code)
 		}
 	}
 }

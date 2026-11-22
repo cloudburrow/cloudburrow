@@ -7,7 +7,8 @@
 # the internal network (a Spark Connect session's, a Dataproc cluster's
 # web interfaces): the relay listens on LISTEN (PORT when none), published
 # on the host's loopback, and relays to it (resolved at each connection,
-# as the server starts after the relay).
+# as the server starts after the relay); a target @HOST:PORT is a host
+# address, resolved at the start.
 import asyncio
 import socket
 import ssl
@@ -65,6 +66,13 @@ async def main():
     servers = [rest.serve_forever(), storage.serve_forever()]
     for arg in sys.argv[3:]:
         listen, _, target = arg.rpartition("=")
+        if target.startswith("@"):
+            # A host address (the instance's Cloud Storage for a
+            # cluster's Hadoop), resolved now, as REST and STORAGE are.
+            fixed = resolve(target[1:])
+            inbound = await asyncio.start_server(relay(fixed), "0.0.0.0", int(listen or fixed[1]))
+            servers.append(inbound.serve_forever())
+            continue
         name, port = target.rsplit(":", 1)
         inbound = await asyncio.start_server(relay(lambda name=name, port=port: (name, int(port))), "0.0.0.0", int(listen or port))
         servers.append(inbound.serve_forever())

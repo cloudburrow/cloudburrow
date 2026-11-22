@@ -86,20 +86,26 @@ func JobType(j interface {
 	return ""
 }
 
-// unservedJob is why a job type does not run on a local cluster.
-func unservedJob(j *dataprocpb.Job) error {
-	why := map[string]string{
-		"Hadoop": "Hadoop MapReduce jobs need YARN and the Hadoop MapReduce framework, which a local cluster (Spark's standalone scheduler) does not run",
-		"Hive":   "Hive jobs need Apache Hive's HiveServer2 and metastore, which a local cluster does not run",
-		"Pig":    "Pig jobs need Apache Pig on Hadoop MapReduce or Tez, which a local cluster does not run",
-		"Presto": "Presto jobs need the Presto optional component, which is not available on image versions 2.1 and later",
-		"Trino":  "Trino jobs need the Trino optional component, which a local cluster does not run",
-		"Flink":  "Flink jobs need the Flink optional component, which a local cluster does not run",
-	}[JobType(j)]
-	if why == "" {
-		return nil
+// jobComponent is the optional component a job type needs on its
+// cluster, or "": a Trino job the Trino component, a Flink job Flink, a
+// Presto job Presto (which no image of 2.1 or later offers), and on image
+// 2.3 and later a Pig job the Pig component ("optional in 2.3 and later,
+// pre-installed in 2.2 and earlier", the components overview, read
+// 2026-11-22: https://docs.cloud.google.com/dataproc/docs/concepts/components/overview).
+func jobComponent(j *dataprocpb.Job, imageMM string) string {
+	switch JobType(j) {
+	case "Trino":
+		return "TRINO"
+	case "Flink":
+		return "FLINK"
+	case "Presto":
+		return "PRESTO"
+	case "Pig":
+		if imageMM >= "2.3" {
+			return "PIG"
+		}
 	}
-	return status.Errorf(codes.Unimplemented, "%s jobs are not served by CloudBurrow: %s. Submit a PySpark, Spark, SparkSql or SparkR job", JobType(j), why)
+	return ""
 }
 
 func checkJobFiles(j *dataprocpb.Job) error {
@@ -164,9 +170,44 @@ func checkJobFiles(j *dataprocpb.Job) error {
 			return apierror.InvalidArgument("spark_r_job.main_r_file_uri %q must be a .R or .r file", p.GetMainRFileUri())
 		}
 		return first(all("spark_r_job.file_uris", p.GetFileUris()), all("spark_r_job.archive_uris", p.GetArchiveUris()))
-	}
-	if err := unservedJob(j); err != nil {
-		return err
+	case j.GetHadoopJob() != nil:
+		p := j.GetHadoopJob()
+		if p.GetMainClass() == "" && p.GetMainJarFileUri() == "" {
+			return apierror.InvalidArgument("hadoop_job needs main_jar_file_uri or main_class")
+		}
+		return first(gs("hadoop_job.main_jar_file_uri", p.GetMainJarFileUri(), false), all("hadoop_job.jar_file_uris", p.GetJarFileUris()),
+			all("hadoop_job.file_uris", p.GetFileUris()), all("hadoop_job.archive_uris", p.GetArchiveUris()))
+	case j.GetHiveJob() != nil:
+		p := j.GetHiveJob()
+		if p.GetQueryFileUri() == "" && len(p.GetQueryList().GetQueries()) == 0 {
+			return apierror.InvalidArgument("hive_job needs query_file_uri or query_list")
+		}
+		return first(gs("hive_job.query_file_uri", p.GetQueryFileUri(), false), all("hive_job.jar_file_uris", p.GetJarFileUris()))
+	case j.GetPigJob() != nil:
+		p := j.GetPigJob()
+		if p.GetQueryFileUri() == "" && len(p.GetQueryList().GetQueries()) == 0 {
+			return apierror.InvalidArgument("pig_job needs query_file_uri or query_list")
+		}
+		return first(gs("pig_job.query_file_uri", p.GetQueryFileUri(), false), all("pig_job.jar_file_uris", p.GetJarFileUris()))
+	case j.GetTrinoJob() != nil:
+		p := j.GetTrinoJob()
+		if p.GetQueryFileUri() == "" && len(p.GetQueryList().GetQueries()) == 0 {
+			return apierror.InvalidArgument("trino_job needs query_file_uri or query_list")
+		}
+		return gs("trino_job.query_file_uri", p.GetQueryFileUri(), false)
+	case j.GetPrestoJob() != nil:
+		p := j.GetPrestoJob()
+		if p.GetQueryFileUri() == "" && len(p.GetQueryList().GetQueries()) == 0 {
+			return apierror.InvalidArgument("presto_job needs query_file_uri or query_list")
+		}
+		return gs("presto_job.query_file_uri", p.GetQueryFileUri(), false)
+	case j.GetFlinkJob() != nil:
+		p := j.GetFlinkJob()
+		if p.GetMainClass() == "" && p.GetMainJarFileUri() == "" {
+			return apierror.InvalidArgument("flink_job needs main_jar_file_uri or main_class")
+		}
+		return first(gs("flink_job.main_jar_file_uri", p.GetMainJarFileUri(), false), all("flink_job.jar_file_uris", p.GetJarFileUris()),
+			gs("flink_job.savepoint_uri", p.GetSavepointUri(), false))
 	}
 	return apierror.InvalidArgument("job needs one of pyspark_job, spark_job, spark_sql_job, spark_r_job, hadoop_job, hive_job, pig_job, presto_job, trino_job and flink_job")
 }
@@ -254,6 +295,9 @@ func (s *Server) submitJob(ctx context.Context, req *dataprocpb.SubmitJobRequest
 	c, err := s.placeLocked(req.GetProjectId(), req.GetRegion(), j.Placement)
 	if err != nil {
 		return nil, nil, err
+	}
+	if comp := jobComponent(j, imageMMOf(c)); comp != "" && !hasComponent(c, comp) {
+		return nil, nil, apierror.FailedPrecondition("%s jobs need the %s optional component, which cluster %s does not enable", JobType(j), comp, c.ClusterName)
 	}
 	j.Placement.ClusterName, j.Placement.ClusterUuid = c.ClusterName, c.ClusterUuid
 	j.JobUuid, j.Done, j.StatusHistory, j.YarnApplications = newUUID(), false, nil, nil
@@ -384,8 +428,10 @@ func (s *Server) runJob(ctx context.Context, name string) {
 			s.mu.Lock()
 			if j := s.jobs[name]; j != nil && !jobDone(j) && j.GetStatus().GetState() == dataprocpb.JobStatus_SETUP_DONE {
 				s.setJobStateLocked(name, j, dataprocpb.JobStatus_RUNNING, "")
-				j.YarnApplications = []*dataprocpb.YarnApplication{{Name: snap.GetReference().GetJobId(), State: dataprocpb.YarnApplication_RUNNING,
-					TrackingUrl: gatewayBase(cluster.ClusterUuid) + "sparkhistory/"}}
+				if sparkJob(snap) {
+					j.YarnApplications = []*dataprocpb.YarnApplication{{Name: snap.GetReference().GetJobId(), State: dataprocpb.YarnApplication_RUNNING,
+						TrackingUrl: gatewayBase(cluster.ClusterUuid) + "sparkhistory/"}}
+				}
 				s.save()
 			}
 			s.mu.Unlock()
@@ -557,8 +603,62 @@ func (s *Server) clusterJob(ctx context.Context, j *dataprocpb.Job, c *dataprocp
 			job.Main = &sparkproc.File{URI: "query.sql", Data: []byte(q + "\n")}
 		}
 		job.Jars = many(p.GetJarFileUris())
+	case j.GetHadoopJob() != nil:
+		p := j.GetHadoopJob()
+		job.Kind, job.Language, job.Args, job.MainClass, job.Properties = sparkproc.KindHadoop, "JAVA", p.GetArgs(), p.GetMainClass(), p.GetProperties()
+		job.Main = one(p.GetMainJarFileUri())
+		job.Jars, job.Files, job.Archives = many(p.GetJarFileUris()), many(p.GetFileUris()), many(p.GetArchiveUris())
+	case j.GetHiveJob() != nil:
+		p := j.GetHiveJob()
+		job.Kind, job.Language, job.QueryVariables, job.Properties, job.ContinueOnFailure = sparkproc.KindHive, "SQL", p.GetScriptVariables(), p.GetProperties(), p.GetContinueOnFailure()
+		job.Main = queryFile(p.GetQueryFileUri(), p.GetQueryList().GetQueries(), "query.hql", one)
+		job.Jars = many(p.GetJarFileUris())
+	case j.GetPigJob() != nil:
+		p := j.GetPigJob()
+		job.Kind, job.Language, job.QueryVariables, job.Properties, job.ContinueOnFailure = sparkproc.KindPig, "PIG", p.GetScriptVariables(), p.GetProperties(), p.GetContinueOnFailure()
+		job.Main = queryFile(p.GetQueryFileUri(), p.GetQueryList().GetQueries(), "query.pig", one)
+		job.Jars = many(p.GetJarFileUris())
+	case j.GetTrinoJob() != nil:
+		p := j.GetTrinoJob()
+		job.Kind, job.Language, job.Properties, job.ContinueOnFailure = sparkproc.KindTrino, "SQL", p.GetProperties(), p.GetContinueOnFailure()
+		job.OutputFormat, job.ClientTags = p.GetOutputFormat(), p.GetClientTags()
+		job.Main = queryFile(p.GetQueryFileUri(), p.GetQueryList().GetQueries(), "query.sql", one)
+	case j.GetFlinkJob() != nil:
+		p := j.GetFlinkJob()
+		job.Kind, job.Language, job.Args, job.MainClass, job.Properties = sparkproc.KindFlink, "JAVA", p.GetArgs(), p.GetMainClass(), p.GetProperties()
+		job.Main = one(p.GetMainJarFileUri())
+		job.Jars = many(p.GetJarFileUris())
+		job.SavepointURI = p.GetSavepointUri()
 	}
 	return job, err
+}
+
+// queryFile is a Hive, Pig or Trino job's script: its query_file_uri's
+// object, or its query_list's queries, each ended with ";".
+func queryFile(uri string, queries []string, name string, one func(string) *sparkproc.File) *sparkproc.File {
+	if uri != "" {
+		return one(uri)
+	}
+	var b strings.Builder
+	for _, q := range queries {
+		q = strings.TrimSpace(q)
+		b.WriteString(q)
+		if !strings.HasSuffix(q, ";") {
+			b.WriteString(";")
+		}
+		b.WriteString("\n")
+	}
+	return &sparkproc.File{URI: name, Data: []byte(b.String())}
+}
+
+// sparkJob is whether j is one of Spark's (PySpark, Spark, SparkSql,
+// SparkR), whose application the cluster's History Server shows.
+func sparkJob(j *dataprocpb.Job) bool {
+	switch JobType(j) {
+	case "PySpark", "Spark", "SparkSql", "SparkR":
+		return true
+	}
+	return false
 }
 
 func (s *Server) jobLocked(project, region, id string) (*dataprocpb.Job, error) {

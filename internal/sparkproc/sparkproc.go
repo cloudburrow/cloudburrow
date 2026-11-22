@@ -112,6 +112,14 @@ type Job struct {
 	// Log names the Cloud Logging resource and logs the job's output is
 	// written to; nil is a procedure's bigquery.googleapis.com/SparkJob.
 	Log *LogTarget `json:"log,omitempty"`
+
+	// A Hive, Pig or Trino job's: ContinueOnFailure runs its remaining
+	// queries after one fails; OutputFormat and ClientTags are a Trino
+	// job's; SavepointURI a Flink job's savepoint to start from.
+	ContinueOnFailure bool     `json:"continueOnFailure,omitempty"`
+	OutputFormat      string   `json:"outputFormat,omitempty"`
+	ClientTags        []string `json:"clientTags,omitempty"`
+	SavepointURI      string   `json:"savepointUri,omitempty"`
 }
 
 // The kinds of Dataproc workload (Job.Kind).
@@ -121,6 +129,14 @@ const (
 	KindSparkR   = "sparkr"
 	KindSparkSQL = "sparksql"
 	KindConnect  = "connect"
+	// A Dataproc cluster's jobs of its other engines (#2162), run by
+	// Cluster.Submit beside Spark's: Hadoop MapReduce, Hive, Pig, Trino
+	// (and Presto's API on it) and Flink.
+	KindHadoop = "hadoop"
+	KindHive   = "hive"
+	KindPig    = "pig"
+	KindTrino  = "trino"
+	KindFlink  = "flink"
 )
 
 // LogTarget is where a Dataproc workload's lines go: its monitored

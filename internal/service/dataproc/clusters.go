@@ -200,16 +200,13 @@ func (s *Server) checkCluster(project, region string, c *dataprocpb.Cluster) err
 	if cfg.SoftwareConfig == nil {
 		cfg.SoftwareConfig = &dataprocpb.SoftwareConfig{}
 	}
-	_, full, err := imageVersion(cfg.SoftwareConfig.GetImageVersion())
+	mm, full, err := imageVersion(cfg.SoftwareConfig.GetImageVersion())
 	if err != nil {
 		return err
 	}
 	cfg.SoftwareConfig.ImageVersion = full
-	// No optional component runs: a local cluster's image is Apache
-	// Spark's, with its History Server, and the components' software
-	// (Jupyter, Docker, ZooKeeper, Flink, Trino...) is in no pinned image.
-	if comps := cfg.SoftwareConfig.GetOptionalComponents(); len(comps) > 0 {
-		return status.Errorf(codes.Unimplemented, "The %s optional component is not served by CloudBurrow: a local cluster runs Apache Spark (and its History Server) only", comps[0])
+	if err := checkComponents(mm, cfg.SoftwareConfig.GetOptionalComponents()); err != nil {
+		return err
 	}
 	if cfg.MasterConfig == nil {
 		cfg.MasterConfig = &dataprocpb.InstanceGroupConfig{}
@@ -286,6 +283,89 @@ func (s *Server) checkCluster(project, region string, c *dataprocpb.Cluster) err
 		cfg.GceClusterConfig.NetworkUri = "https://www.googleapis.com/compute/v1/projects/" + project + "/global/networks/default"
 	}
 	return nil
+}
+
+// componentImages are the image versions each optional component is
+// offered on, as the components overview lists them (read 2026-11-22:
+// https://docs.cloud.google.com/dataproc/docs/concepts/components/overview):
+// the first image version of each, HBase and Presto not on 2.1 and later.
+var componentImages = map[dataprocpb.Component]func(mm string) bool{
+	dataprocpb.Component_DELTA:        func(mm string) bool { return mm >= "2.2" },
+	dataprocpb.Component_ICEBERG:      func(mm string) bool { return mm >= "2.2" },
+	dataprocpb.Component_HUDI:         func(string) bool { return true },
+	dataprocpb.Component_DOCKER:       func(string) bool { return true },
+	dataprocpb.Component_FLINK:        func(string) bool { return true },
+	dataprocpb.Component_HIVE_WEBHCAT: func(string) bool { return true },
+	dataprocpb.Component_JUPYTER:      func(string) bool { return true },
+	dataprocpb.Component_PIG:          func(string) bool { return true },
+	dataprocpb.Component_RANGER:       func(string) bool { return true },
+	dataprocpb.Component_SOLR:         func(string) bool { return true },
+	dataprocpb.Component_TRINO:        func(mm string) bool { return mm >= "2.1" },
+	dataprocpb.Component_ZEPPELIN:     func(string) bool { return true },
+	dataprocpb.Component_ZOOKEEPER:    func(string) bool { return true },
+	dataprocpb.Component_HBASE:        func(mm string) bool { return mm < "2.1" },
+	dataprocpb.Component_PRESTO:       func(mm string) bool { return mm < "2.1" },
+	dataprocpb.Component_ANACONDA:     func(mm string) bool { return mm < "2.0" },
+}
+
+// servedComponents run as containers on a local cluster
+// (internal/sparkproc's Ecosystem).
+var servedComponents = map[dataprocpb.Component]bool{
+	dataprocpb.Component_FLINK: true, dataprocpb.Component_HIVE_WEBHCAT: true, dataprocpb.Component_JUPYTER: true,
+	dataprocpb.Component_PIG: true, dataprocpb.Component_SOLR: true, dataprocpb.Component_TRINO: true,
+	dataprocpb.Component_ZOOKEEPER: true,
+}
+
+// unservedComponents are why the other components do not run.
+var unservedComponents = map[dataprocpb.Component]string{
+	dataprocpb.Component_ZEPPELIN: "the official apache/zeppelin image is amd64 only and over 3 GB",
+	dataprocpb.Component_DOCKER:   "a Docker daemon on a cluster's nodes needs privileged containers",
+	dataprocpb.Component_RANGER:   "Apache Ranger publishes no official image",
+	dataprocpb.Component_DELTA:    "Delta Lake's jars are not pinned on a cluster's Spark yet",
+	dataprocpb.Component_ICEBERG:  "Apache Iceberg's jars are not pinned on a cluster's Spark yet",
+	dataprocpb.Component_HUDI:     "Apache Hudi's jars are not pinned on a cluster's Spark yet",
+}
+
+// checkComponents checks a cluster's optional components against its
+// image version.
+func checkComponents(mm string, comps []dataprocpb.Component) error {
+	seen := map[dataprocpb.Component]bool{}
+	for _, comp := range comps {
+		if comp == dataprocpb.Component_COMPONENT_UNSPECIFIED {
+			return apierror.InvalidArgument("optional_components: COMPONENT_UNSPECIFIED is not a component")
+		}
+		if seen[comp] {
+			return apierror.InvalidArgument("optional_components: %s is listed more than once", comp)
+		}
+		seen[comp] = true
+		offered, ok := componentImages[comp]
+		if !ok || !offered(mm) {
+			return apierror.InvalidArgument("Optional component %s is not supported on image version %s", comp, mm)
+		}
+	}
+	for _, comp := range comps {
+		if !servedComponents[comp] {
+			return status.Errorf(codes.Unimplemented, "The %s optional component is not served by CloudBurrow (%s): a local cluster runs Flink, Hive WebHCat, Jupyter, Pig, Solr, Trino and ZooKeeper", comp, unservedComponents[comp])
+		}
+	}
+	return nil
+}
+
+// imageMMOf is a cluster's image version's MAJOR.MINOR.
+func imageMMOf(c *dataprocpb.Cluster) string {
+	mm, _, _ := imageVersion(c.GetConfig().GetSoftwareConfig().GetImageVersion())
+	return mm
+}
+
+// hasComponent is whether the cluster enables the optional component
+// name (a Component's enum name).
+func hasComponent(c *dataprocpb.Cluster, name string) bool {
+	for _, comp := range c.GetConfig().GetSoftwareConfig().GetOptionalComponents() {
+		if comp.String() == name {
+			return true
+		}
+	}
+	return false
 }
 
 func defaultMachine(project, region string) string {
@@ -410,9 +490,20 @@ func clusterSpec(c *dataprocpb.Cluster) sparkproc.ClusterSpec {
 		ig = c.GetConfig().GetMasterConfig()
 	}
 	cores, mem := machineShape(ig.GetMachineTypeUri())
+	var comps []string
+	for _, comp := range c.GetConfig().GetSoftwareConfig().GetOptionalComponents() {
+		comps = append(comps, comp.String())
+	}
+	conf := map[string]string{}
+	for k, v := range c.GetConfig().GetSoftwareConfig().GetProperties() {
+		if p, _, ok := strings.Cut(k, ":"); ok && p != "spark" && p != "dataproc" {
+			conf[k] = v
+		}
+	}
 	return sparkproc.ClusterSpec{ID: c.GetClusterUuid(), Name: c.GetClusterName(), Project: project, Location: region,
 		ImageVersion: mm, Workers: workerCount(c), WorkerCores: cores, WorkerMemory: mem,
-		Properties: sparkProps(c), HistoryBase: gatewayBase(c.GetClusterUuid()) + "sparkhistory"}
+		Properties: sparkProps(c), HistoryBase: gatewayBase(c.GetClusterUuid()) + "sparkhistory",
+		GatewayBase: gatewayBase(c.GetClusterUuid()), Components: comps, ConfProperties: conf}
 }
 
 var machineRE = regexp.MustCompile(`(?:^|/)[a-z0-9]+-(standard|highmem|highcpu)-(\d+)$`)
@@ -500,6 +591,18 @@ func (s *Server) startCluster(name, opName string, restart bool) {
 // authority this API's, as the caller reached it).
 func gatewayBase(uuid string) string { return "/component-gateway/" + uuid + "/" }
 
+// gatewayPaths are the components' paths under the gateway base, and
+// gatewayKeys the Nodes.Web key each path is served from.
+var (
+	gatewayPaths = map[string]string{"Jupyter": "jupyter/tree", "JupyterLab": "jupyter/lab", "Zeppelin": "zeppelin/",
+		"Flink": "flink/", "Trino": "trino/ui/", "Solr": "solr/", "WebHCat": "webhcat/templeton/v1/status"}
+	gatewayKeys = map[string]string{"sparkhistory": "history", "jupyter": "jupyter", "zeppelin": "zeppelin", "flink": "flink",
+		"trino": "trino", "solr": "solr", "webhcat": "webhcat"}
+	// gatewayFull are the components served at their full path (their
+	// base URL configured to it), the rest with it stripped.
+	gatewayFull = map[string]bool{"jupyter": true, "zeppelin": true}
+)
+
 // fillEndpointsLocked sets the Component Gateway's endpoints, for a
 // cluster that enables HTTP port access: "Spark History Server" (the
 // key the Component Gateway page lists in endpointConfig.httpPorts, re-read 2026-11-22:
@@ -509,7 +612,17 @@ func (s *Server) fillEndpointsLocked(c *dataprocpb.Cluster) {
 	if ec == nil || !ec.GetEnableHttpPortAccess() {
 		return
 	}
-	ec.HttpPorts = map[string]string{"Spark History Server": gatewayBase(c.GetClusterUuid()) + "sparkhistory/"}
+	base := gatewayBase(c.GetClusterUuid())
+	ec.HttpPorts = map[string]string{"Spark History Server": base + "sparkhistory/"}
+	// The components' web interfaces. Their keys are UNVERIFIED (docs
+	// re-read 2026-11-22: the Component Gateway page lists only the
+	// Hadoop, Spark and Tez interfaces' keys).
+	for key, comp := range map[string]string{"Jupyter": "JUPYTER", "JupyterLab": "JUPYTER", "Zeppelin": "ZEPPELIN",
+		"Flink": "FLINK", "Trino": "TRINO", "Solr": "SOLR", "WebHCat": "HIVE_WEBHCAT"} {
+		if hasComponent(c, comp) {
+			ec.HttpPorts[key] = base + gatewayPaths[key]
+		}
+	}
 }
 
 // renderCluster is c as a caller at ctx's authority reads it: its

@@ -163,7 +163,7 @@ func (d *Docker) trees(ctx context.Context, runtimeImage string) (string, string
 		}
 	}
 	box := fmt.Sprintf("cb-spark-trees-%s-%d", hex.EncodeToString(sum[:4]), os.Getpid())
-	if out, err := d.docker(ctx, "create", "--name", box, "--label", "cloudburrow.instance="+d.Instance, runtimeImage); err != nil {
+	if out, err := d.docker(ctx, "create", "--name", box, "--label", d.instanceLabel(), runtimeImage); err != nil {
 		return "", "", errors.New("copy the runtime's Spark out of " + runtimeImage + ": " + out)
 	}
 	defer func() { _, _ = d.docker(context.Background(), "rm", "-f", "-v", box) }()

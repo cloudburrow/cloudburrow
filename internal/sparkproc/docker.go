@@ -28,7 +28,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/hostrelay"
 )
 
-//go:embed assets/relay.py assets/procedure.py assets/run.sh assets/node.sh
+//go:embed assets/relay.py assets/procedure.py assets/run.sh assets/node.sh assets/eco.sh assets/hivenode.sh
 var assets embed.FS
 
 // The connector's endpoints, the relay's aliases on the job's network.
@@ -88,6 +88,13 @@ type Docker struct {
 	// its Artifact Registry's (the Docker registry a container_image is
 	// read from), or nil.
 	BigQuery, Storage, Registry func() string
+	// GCS is the instance's Cloud Storage (JSON API) address on the
+	// host, which a cluster's Hadoop, Hive and Pig reach gs:// through;
+	// nil or "" for none.
+	GCS func() string
+	// Ecosystem is what a cluster's Hadoop, Hive, Pig, Trino and Flink
+	// jobs and its optional components run on; nil serves none.
+	Ecosystem *Ecosystem
 	// Mint mints a token of the instance for a service account that
 	// exists, for a job's RunAs; nil refuses RunAs.
 	Mint func(email string) (string, error)
@@ -289,7 +296,7 @@ func (d *Docker) prepare(ctx context.Context, job Job, inbound string) (_ *prepa
 	suffix = strings.Trim(suffix, "-") + fmt.Sprintf("-%d", time.Now().UnixNano()%1e6)
 	network, relay, spark := "cb-spark-net-"+suffix, "cb-spark-relay-"+suffix, "cb-spark-"+suffix
 	p.network, p.relay, p.spark = network, relay, spark
-	label := "cloudburrow.instance=" + d.Instance
+	label := d.instanceLabel()
 
 	restTarget, storageTarget, stop, err := d.targets(ctx, rest, storage)
 	if err != nil {
@@ -393,17 +400,31 @@ func (d *Docker) prepare(ctx context.Context, job Job, inbound string) (_ *prepa
 // so the runner relays the two ports from the default bridge's gateway
 // address for the run (internal/hostrelay, as #575 does for the cluster).
 func (d *Docker) targets(ctx context.Context, rest, storage string) (string, string, func(), error) {
-	if err := d.probeDesktop(); err != nil {
+	t, stop, err := d.hostTargets(ctx, rest, storage)
+	if err != nil {
 		return "", "", nil, err
 	}
-	_, restPortHost, _ := net.SplitHostPort(rest)
-	_, storagePortHost, _ := net.SplitHostPort(storage)
+	return t[0], t[1], stop, nil
+}
+
+// hostTargets are host addresses (host:port on the host's loopback) as
+// a relay container reaches them, in order, and the function that stops
+// the host relays made for them.
+func (d *Docker) hostTargets(ctx context.Context, addrs ...string) ([]string, func(), error) {
+	if err := d.probeDesktop(); err != nil {
+		return nil, nil, err
+	}
+	out := make([]string, len(addrs))
 	if d.desktop {
-		return "host.docker.internal:" + restPortHost, "host.docker.internal:" + storagePortHost, func() {}, nil
+		for i, a := range addrs {
+			_, port, _ := net.SplitHostPort(a)
+			out[i] = "host.docker.internal:" + port
+		}
+		return out, func() {}, nil
 	}
 	gw, err := d.docker(ctx, "network", "inspect", "bridge", "--format", "{{range .IPAM.Config}}{{.Gateway}} {{end}}")
 	if err != nil {
-		return "", "", nil, errors.New("find the default bridge's gateway: " + gw)
+		return nil, nil, errors.New("find the default bridge's gateway: " + gw)
 	}
 	var ip string
 	for _, f := range strings.Fields(gw) {
@@ -413,18 +434,24 @@ func (d *Docker) targets(ctx context.Context, rest, storage string) (string, str
 		}
 	}
 	if ip == "" {
-		return "", "", nil, fmt.Errorf("the default bridge has no IPv4 gateway (%q)", gw)
+		return nil, nil, fmt.Errorf("the default bridge has no IPv4 gateway (%q)", gw)
 	}
-	r1 := &hostrelay.Relay{Listen: net.JoinHostPort(ip, "0"), Target: rest}
-	r2 := &hostrelay.Relay{Listen: net.JoinHostPort(ip, "0"), Target: storage}
-	if err := r1.Start(ctx); err != nil {
-		return "", "", nil, err
+	var relays []*hostrelay.Relay
+	stop := func() {
+		for _, r := range relays {
+			_ = r.Close()
+		}
 	}
-	if err := r2.Start(ctx); err != nil {
-		_ = r1.Close()
-		return "", "", nil, err
+	for i, a := range addrs {
+		r := &hostrelay.Relay{Listen: net.JoinHostPort(ip, "0"), Target: a}
+		if err := r.Start(ctx); err != nil {
+			stop()
+			return nil, nil, err
+		}
+		relays = append(relays, r)
+		out[i] = r.Addr()
 	}
-	return r1.Addr(), r2.Addr(), func() { _ = r1.Close(); _ = r2.Close() }, nil
+	return out, stop, nil
 }
 
 // probeDesktop asks the daemon whether it is Docker Desktop. The probe

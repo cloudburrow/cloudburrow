@@ -24,18 +24,18 @@ history() {
 
 worker() {
   exec "$home/bin/spark-class" org.apache.spark.deploy.worker.Worker --host "$host" --cores "${CB_CORES:-2}" \
-    --memory "${CB_MEMORY:-2g}" --webui-port 8081 "spark://$1:7077"
+    --memory "${CB_MEMORY:-2g}" --webui-port 18081 "spark://$1:7077"
 }
 
 case "$1" in
 master)
   history &
-  exec "$home/bin/spark-class" org.apache.spark.deploy.master.Master --host "$host" --port 7077 --webui-port 8080
+  exec "$home/bin/spark-class" org.apache.spark.deploy.master.Master --host "$host" --port 7077 --webui-port 18088
   ;;
 single)
   history &
   (sleep 3; worker "$host") &
-  exec "$home/bin/spark-class" org.apache.spark.deploy.master.Master --host "$host" --port 7077 --webui-port 8080
+  exec "$home/bin/spark-class" org.apache.spark.deploy.master.Master --host "$host" --port 7077 --webui-port 18088
   ;;
 worker)
   worker "$CB_MASTER"

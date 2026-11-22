@@ -160,12 +160,16 @@ func newSparkRunner(cfg config.Config, out io.Writer, live func() map[string]str
 		BigQuery: addr("bigquery"),
 		Storage:  addr("bigquery-storage"),
 		Registry: addr("run"),
-		Mint:     mint,
-		KeyCheck: keyCheck,
-		Instance: cfg.Name,
-		Cache:    cache,
-		Logf:     func(format string, args ...any) { fmt.Fprintf(out, "cloudburrow: "+format+"\n", args...) },
-		Log:      sparkLogger(func() string { return live()["logging"] }),
+		// A Dataproc cluster's Hadoop, Hive and Pig reach the instance's
+		// Cloud Storage (#2162).
+		GCS:       addr("storage"),
+		Ecosystem: dataprocEcosystem(filepath.Join(cache, "dataproc"), cfg.Name, out),
+		Mint:      mint,
+		KeyCheck:  keyCheck,
+		Instance:  cfg.Name,
+		Cache:     cache,
+		Logf:      func(format string, args ...any) { fmt.Fprintf(out, "cloudburrow: "+format+"\n", args...) },
+		Log:       sparkLogger(func() string { return live()["logging"] }),
 	}
 	return &sparkRunnerService{docker: d, addr: net.JoinHostPort(cfg.BindAddress, strconv.Itoa(cfg.Endpoints.Spark)), h: sparkproc.NewServer(d)}
 }
@@ -285,7 +289,12 @@ func (s *sparkRunnerService) Stop(ctx context.Context) error {
 	if s.srv == nil {
 		return nil
 	}
-	return s.srv.Shutdown(ctx)
+	err := s.srv.Shutdown(ctx)
+	// A workload's containers whose cleanup the shutdown cut short go
+	// with the runner (#2162); `cloudburrow stop` sweeps them again
+	// after `up` has exited.
+	sparkproc.RemoveInstance(context.Background(), s.docker.Instance)
+	return err
 }
 
 // Addr is the bound address, "" before Start or for a nil runner.

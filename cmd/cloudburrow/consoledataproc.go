@@ -418,7 +418,7 @@ func (p dataprocBatchesProvider) Detail(ctx context.Context, project string, pat
 					{Label: "Version", Value: kmsOrDash(rc.GetVersion())}, {Label: "Container image", Value: kmsOrDash(rc.GetContainerImage())},
 					{Label: "Properties", Value: kmsOrDash(strings.ReplaceAll(dataprocPropsText(rc.GetProperties()), "\n", ", "))},
 					{Label: "Output URI", Value: kmsOrDash(b.GetRuntimeInfo().GetOutputUri()), Copy: "Copy URI"},
-					dataprocSparkUI(p.svc, b.GetUuid(), b.GetState() != dataprocpb.Batch_PENDING),
+					dataprocSparkUI(p.svc, b.GetUuid(), b.GetState() != dataprocpb.Batch_PENDING, rc.GetProperties()),
 					{Label: "Approximate usage", Value: fmt.Sprintf("%.3f DCU-hours, %.3f GB-hours of shuffle storage",
 						float64(usage.GetMilliDcuSeconds())/3.6e6, float64(usage.GetShuffleStorageGbSeconds())/3600)}}},
 				{Heading: "Execution configuration", Properties: []console.Property{
@@ -667,7 +667,7 @@ func (p dataprocSessionsProvider) Detail(ctx context.Context, project string, pa
 				{Heading: "Runtime", Properties: []console.Property{
 					{Label: "Version", Value: kmsOrDash(rc.GetVersion())},
 					{Label: "Properties", Value: kmsOrDash(strings.ReplaceAll(dataprocPropsText(rc.GetProperties()), "\n", ", "))},
-					dataprocSparkUI(p.svc, x.GetUuid(), x.GetState() != dataprocpb.Session_CREATING)}},
+					dataprocSparkUI(p.svc, x.GetUuid(), x.GetState() != dataprocpb.Session_CREATING, rc.GetProperties())}},
 				{Heading: "Execution configuration", Properties: []console.Property{
 					{Label: "Service account", Value: kmsOrDash(ec.GetServiceAccount())},
 					{Label: "Max idle time", Value: dur(ec.GetIdleTtl())}, {Label: "Max session time", Value: dur(ec.GetTtl())}}}}},
@@ -907,8 +907,15 @@ func (p dataprocTemplatesProvider) ActAt(ctx context.Context, project string, pa
 }
 
 // dataprocSparkUI is a batch's or session's View Spark UI: its
-// application in the instance's Spark History Server (#2162).
-func dataprocSparkUI(svc *dataprocService, uuid string, ran bool) console.Property {
+// application in the instance's Spark History Server (#2162). Google
+// disables it for a workload submitted with
+// spark.dataproc.appContext.enabled=false
+// (https://docs.cloud.google.com/dataproc-serverless/docs/guides/monitor-troubleshoot-batches,
+// read 2026-11-22).
+func dataprocSparkUI(svc *dataprocService, uuid string, ran bool, props map[string]string) console.Property {
+	if strings.EqualFold(props["spark.dataproc.appContext.enabled"], "false") {
+		return console.Property{Label: "Spark UI", Value: "Disabled: the workload was submitted with spark.dataproc.appContext.enabled set to false"}
+	}
 	if !ran || svc.Addr() == "" {
 		return console.Property{Label: "Spark UI", Value: "Available once the workload starts"}
 	}
