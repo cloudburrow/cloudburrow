@@ -2492,8 +2492,13 @@ var parityRows = []parityRow{
 			"traffic split, and offers Test model, Edit traffic split, Edit compute nodes, Edit settings and Undeploy model",
 		Tests: []string{"TestModelRegistryAndEndpointsThroughThePages", "TestModelRegistryDeploysACustomContainer"}},
 	{Resource: "Model Garden: publisher model description", Service: "vertexai",
-		Methods:  []string{"ModelGardenService/GetPublisherModel"},
-		Excluded: "a publisher model's description, which the Local models page shows from the same catalogue (ID, publisher, licence, runtime, state) the method reads (#1940)"},
+		Methods: []string{"ModelGardenService/GetPublisherModel"},
+		Screen:  "/agent-platform/model-garden", Offers: "Model Garden: a Hugging Face model's card shows what GetPublisherModel with " +
+			"is_hugging_face_model describes: its serving container (supported_actions.deploy), and its deploy form's GKE environment " +
+			"shows the same gke_yaml_configs, the manifests of its GKE deployment, with the deployment instructions, Copy YAML, and " +
+			"Deploy to a chosen Kubernetes Engine cluster (#2148); Google's own models' description is the Local models page's, from " +
+			"the same catalogue the method reads (#1940)",
+		Tests: []string{"TestModelGardenDeployFormOffersGKE", "TestModelGardenHuggingFacePublisherModel", "TestPlanGKE"}},
 	{Resource: "Endpoints: long-running update", Service: "vertexai",
 		Methods:  []string{"EndpointService/UpdateEndpointLongRunning"},
 		Excluded: "the same update as UpdateEndpoint, answered as an operation, which the endpoint page's Edit settings and Edit traffic split send"},

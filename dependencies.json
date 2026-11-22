@@ -1412,6 +1412,52 @@
         ],
         "notes": "Resolved 2026-11-22 with `docker buildx imagetools inspect`: an OCI index whose one image is linux/arm64 (sha256:7a1b4aa11c491f39cea38eb0a210afe68a78dd5edee11c8f44f46c3529b27cd8). 117 MB compressed, pulled by a kind v1.36.4 arm64 node and serving sentence-transformers/paraphrase-MiniLM-L3-v2 the same day.",
         "skipDiscovery": "GHCR tag list; depcheck only discovers GitHub-sourced components. Re-resolve with `docker buildx imagetools inspect ghcr.io/huggingface/text-embeddings-inference:cpu-arm64-<tag>`."
+      },
+      "modelGardenPython": {
+        "$comment": "The official Python image the Model Garden runtimes of #2148 run on (internal/modelgarden PythonImage): the Hugging Face PyTorch Inference container's server (huggingface-inference-toolkit), mlx-lm on MLX's CPU backend and ONNX Runtime, each installing its pinned packages (internal/modelgarden/runtime/constraints-*.txt, every transitive package by version: MIT, BSD, Apache-2.0, PSF, MPL-2.0 for certifi) from PyPI and PyTorch's CPU index when its pod starts, into the pod, cached on the node.",
+        "image": "docker.io/library/python:3.11-slim-bookworm",
+        "digest": "sha256:a83ba18aef0f865b1a4a611c2cf460fe446f2795673bbb9fe43be570439e3b39",
+        "version": "3.11-slim-bookworm",
+        "source": "https://github.com/docker-library/python",
+        "license": "PSF-2.0",
+        "redistribution": "not redistributed: pulled from Docker Hub by the cluster's node when a model is first deployed on one of these runtimes",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "notes": "Resolved 2026-11-22 with `docker buildx imagetools inspect` (an index with linux/amd64 and linux/arm64/v8 among others). Measured the same day on a kind v1.36.4 arm64 node: M-FAC/bert-tiny-finetuned-sst2, hf-internal-testing/tiny-stable-diffusion-torch, onnx-community/bert-tiny-finetuned-sms-spam-detection-ONNX and mlx-community/SmolLM-135M-Instruct-4bit.",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components."
+      },
+      "modelGardenHFToolkit": {
+        "$comment": "huggingface-inference-toolkit, the server of Google's Hugging Face PyTorch Inference container (#2148, internal/modelgarden ToolkitSource): installed with --no-deps into the PyTorch Inference runtime's pod from its GitHub source archive (it is not on PyPI), checked against the archive's SHA-256 by pip.",
+        "url": "https://github.com/huggingface/huggingface-inference-toolkit/archive/e80584693c9762ec4a7c94570bab9ac2ba3e0961.tar.gz",
+        "sha256": "82143e4db157abf81a49dd46c09a11a7ae64f101e2d6b993ec049a34eb76cb8d",
+        "version": "0.5.5",
+        "source": "https://github.com/huggingface/huggingface-inference-toolkit",
+        "license": "Apache-2.0",
+        "redistribution": "not redistributed: downloaded by the pod when a model is deployed on the runtime",
+        "updateFeed": "github-tags",
+        "verification": "sha256",
+        "skipDiscovery": "Pinned to a release tag's commit; re-resolve with `gh api repos/huggingface/huggingface-inference-toolkit/tags`."
+      },
+      "modelGardenLlamaCpp": {
+        "$comment": "llama.cpp's server (#2148, internal/modelgarden LlamaCppImage): the runtime for GGUF repositories, run as a Deployment on the instance's cluster, its pod downloading the chosen GGUF file at the card's revision with --model-url.",
+        "image": "ghcr.io/ggml-org/llama.cpp:server-b12211",
+        "digest": "sha256:30300ecfcb7ef05dc9413867dd7d03c9ce66eef00fec3576a6a15e9bf2b0bae7",
+        "version": "b12211",
+        "source": "https://github.com/ggml-org/llama.cpp",
+        "license": "MIT",
+        "redistribution": "not redistributed: pulled from GHCR by the cluster's node when a GGUF model is first deployed",
+        "updateFeed": "ghcr-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "notes": "Release b12211 (2026-11-08), resolved 2026-11-22 with `docker buildx imagetools inspect` (linux/amd64, linux/arm64, linux/s390x). Served bartowski/SmolLM2-135M-Instruct-GGUF (Q4_K_M) on a kind v1.36.4 arm64 node the same day.",
+        "skipDiscovery": "GHCR tag list; depcheck only discovers GitHub-sourced components. Re-resolve with `docker buildx imagetools inspect ghcr.io/ggml-org/llama.cpp:server-b<build>`."
       }
     },
     "consoleTerminal": {

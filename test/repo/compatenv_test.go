@@ -68,7 +68,7 @@ var compatEnvExceptions = map[string]string{
 	"CLOUDBURROW_TEST_SKIP_RUN_PULL": "opt-out switch: skips the Cloud Run pull of the registry test",
 	// Model Garden's Hugging Face deploy test (#1840) downloads 1.3 GB of
 	// models and runs 6 GB of engine images, beyond a CI shard's budget.
-	"CLOUDBURROW_TEST_HF_DEPLOY": "opt-in switch: the Model Garden deploy test downloads 1.3 GB of models and 6 GB of images",
+	"CLOUDBURROW_TEST_HF_DEPLOY": "opt-in switch: the Model Garden deploy tests download 1.3 GB of models, 6 GB of images and the Python runtimes' packages",
 	// An opt-in switch for a slow test no CI shard runs (#678).
 	"CLOUDBURROW_TEST_FUNCTIONS": "opt-in switch",
 	// The signed URL tests' key and account, for the builtin storage-server

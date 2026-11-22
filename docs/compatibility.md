@@ -1939,9 +1939,27 @@ Embeddings Inference** (Apache-2.0, `ghcr.io/huggingface/text-embeddings-inferen
 `cpu-arm64-*` build on an arm64 node) for sentence-transformers, feature-extraction and
 sentence-similarity models, all pinned by digest in `dependencies.json`, with Model Garden's
 serving arguments (`--max-model-len=4096` capped at the model's context, `--dtype=auto`,
-`--max-num-seqs=256`, `--disable-log-stats`). Other tasks (text-to-image, which Google serves with
-a diffusers container, speech recognition, classification) and GGUF, MLX or ONNX-only repositories
-are INVALID_ARGUMENT naming why, and the console's card says so beside a disabled Deploy.
+`--max-num-seqs=256`, `--disable-log-stats`). Since #2148's second part every other kind of Hub
+model has a runtime, each permissively licensed and pinned: the **Hugging Face PyTorch Inference**
+container's server (huggingface-inference-toolkit 0.5.5, Apache-2.0, the server of Google's
+container, on the pinned `python:3.11-slim-bookworm` image with every package pinned in
+`internal/modelgarden/runtime/constraints-hf-pytorch.txt`) for diffusers text-to-image and the
+other transformers pipeline tasks (classification, token classification, question answering,
+summarisation, translation, speech recognition, image classification, object detection...),
+answering `:predict`'s `{"instances", "parameters"}` with the container's `{"predictions"}` (a
+text-to-image prediction is a base64 PNG) and relaying `:rawPredict`'s body with its content type
+(audio is decoded from WAV without ffmpeg, which is not shipped); **llama.cpp**'s server (MIT,
+`ghcr.io/ggml-org/llama.cpp:server-b12211`) for GGUF repositories (the Q4_K_M file, else Q8_0, else
+the smallest), mapped as vLLM is (prompt instances to completions, OpenAI bodies relayed, a GGUF
+embedding model answering vectors); **mlx-lm** (MIT) on MLX's Linux CPU backend (`mlx[cpu]`) for
+MLX repositories, mapped as vLLM is, a request's `model`, `adapters` and `draft_model` replaced so
+it cannot load another repository; and **ONNX Runtime** (MIT, through optimum-onnx's ORTModel
+classes) for ONNX-only repositories, with the PyTorch Inference container's shapes. Google's Model
+Garden documents none of GGUF, MLX or ONNX; their mappings follow the documented runtime each is
+closest to. A task no runtime serves (robotics, image-to-image diffusers...) is INVALID_ARGUMENT
+naming why, and the console's card says so beside a disabled Deploy. The opt-in
+`CLOUDBURROW_TEST_HF_DEPLOY=1` tests below deploy one tiny model per Python runtime; the GGUF test
+runs in the localai shard.
 
 Since #2148 the model runs on the instance's Kubernetes cluster, as Google serves Model Garden's
 Hugging Face deployments on its own infrastructure and as Marketplace apps run on the instance's
@@ -1972,7 +1990,7 @@ and 6 GB of images) deploys a vLLM and a TEI model; `TestModelGardenDeploysAHubM
 | `EndpointService.DeleteEndpoint` | **Verified** (measured 2026-11-18) | Same test; FAILED_PRECONDITION while a model is deployed, NOT_FOUND after. |
 | `ModelService.GetModel`, `ModelService.ListModels` | **Verified** (measured 2026-11-18) | Same test: the Model's `containerSpec` is the engine image, its arguments and environment, `baseModelSource.modelGardenSource` the publisher model, and `deployedModels` its deployment. |
 | `ModelService.DeleteModel` | **Verified** (measured 2026-11-18) | Same test; FAILED_PRECONDITION while deployed. The downloaded files stay in the model cache until the console's **Delete files**. |
-| Predict, RawPredict and StreamRawPredict on a Model Garden endpoint | **Verified** (measured 2026-11-22 on the cluster, Predict and RawPredict; 2026-11-18) | `TestModelGardenDeploysAHubModelOnTheCluster`, through `PredictionClient`: TEI `:predict` on the cluster workload answers one 384-dimensional vector per `{"inputs"}` instance with the deployed model's ID, and `:rawPredict` relays TEI's own `{"inputs": [...]}` body and answer. `TestModelGardenDeploysHuggingFaceModels`, through `PredictionClient`: vLLM `:predict` takes Model Garden's `{"prompt", "max_tokens", "temperature", "top_p", "top_k", "raw_response"}` instances and answers `"Prompt:\n…\nOutput:\n…"` strings (the text alone with `raw_response`), and an `"@requestFormat": "chatCompletions"` instance answers the chat completion; TEI `:predict` takes `{"inputs"}` instances and answers TEI's vectors; `:rawPredict` relays an OpenAI completions or chat body (or TEI's own); `:streamRawPredict` streams vLLM's server-sent events, one per `HttpBody`. |
+| Predict, RawPredict and StreamRawPredict on a Model Garden endpoint | **Verified** (measured 2026-11-22 on the cluster, Predict and RawPredict; 2026-11-18) | `TestModelGardenDeploysAHubModelOnTheCluster`, through `PredictionClient`: TEI `:predict` on the cluster workload answers one 384-dimensional vector per `{"inputs"}` instance with the deployed model's ID, and `:rawPredict` relays TEI's own `{"inputs": [...]}` body and answer. `TestModelGardenDeploysHuggingFaceModels`, through `PredictionClient`: vLLM `:predict` takes Model Garden's `{"prompt", "max_tokens", "temperature", "top_p", "top_k", "raw_response"}` instances and answers `"Prompt:\n…\nOutput:\n…"` strings (the text alone with `raw_response`), and an `"@requestFormat": "chatCompletions"` instance answers the chat completion; TEI `:predict` takes `{"inputs"}` instances and answers TEI's vectors; `:rawPredict` relays an OpenAI completions or chat body (or TEI's own); `:streamRawPredict` streams vLLM's server-sent events, one per `HttpBody`. Since #2148's runtimes (measured 2026-11-22 on a kind arm64 node, through `PredictionClient`): `TestModelGardenDeploysAGGUFModelOnLlamaCpp` (localai shard, every run): a GGUF model on llama.cpp answers `:predict` prompt instances and `:rawPredict` OpenAI chat bodies; opt-in (`CLOUDBURROW_TEST_HF_DEPLOY=1`) `TestModelGardenDeploysOnHuggingFacePyTorchInference`: a text classifier's `:predict` answers the container's labels and scores, `:rawPredict` relays its body, and a diffusers model's `:predict` answers a base64 PNG; `TestModelGardenDeploysAnONNXModel`: the same shapes on ONNX Runtime; `TestModelGardenDeploysAnMLXModel`: mlx-lm answers `:predict` prompts and `:rawPredict` chat bodies. |
 
 ### Model Registry and Endpoints (#1940)
 
@@ -2041,7 +2059,7 @@ Console: Agent Platform → Model Registry and Endpoints (`TestModelRegistryAndE
 | `EndpointService.MutateDeployedModel` | **Verified** | Same test: replica counts by mask, applied to the running service. |
 | `EndpointService.UndeployModel` | **Verified** | Same tests: removes the service; a model still taking traffic is FAILED_PRECONDITION unless `traffic_split` moves it or it is the last one. |
 | `EndpointService.DeleteEndpoint` | **Verified** | Same tests: FAILED_PRECONDITION while a model is deployed. |
-| `ModelGardenService.GetPublisherModel` | **Verified** | `TestGetPublisherModelDescribesTheServedModels`, official `ModelGardenClient`: `publishers/google/models/{model}` for the local catalogue's models with a runtime (the embedding and generation models above), named, versioned `001`, with their runtime as `frameworks` and their provenance as `openSourceCategory` (a community conversion is `THIRD_PARTY_OWNED_OSS`); any other model is NOT_FOUND, as Predict on it is; `is_hugging_face_model` is UNIMPLEMENTED (Model Garden's Deploy takes Hugging Face models). gRPC only. |
+| `ModelGardenService.GetPublisherModel` | **Verified** (`is_hugging_face_model` measured 2026-11-22, #2148) | `TestGetPublisherModelDescribesTheServedModels`, official `ModelGardenClient`: `publishers/google/models/{model}` for the local catalogue's models with a runtime (the embedding and generation models above), named, versioned `001`, with their runtime as `frameworks` and their provenance as `openSourceCategory` (a community conversion is `THIRD_PARTY_OWNED_OSS`); any other model is NOT_FOUND, as Predict on it is. With `is_hugging_face_model`, `TestModelGardenHuggingFacePublisherModel` (official `ModelGardenClient`): `publishers/{author}/models/{name}` (or Model Garden's `hf-{author}`) is read from the Hub and named `publishers/hf-{author}/models/{name}@001`, its `supported_actions.deploy` the serving container Deploy runs and `deploy_gke.gke_yaml_configs` its GKE manifests (ConfigMap, Deployment and Service, Google's `ai.gke.io/*` and `examples.ai.gke.io/source: model-garden` labels, the token from `hf-secret`); `hugging_face_token` is not read or kept. gRPC only. |
 | `PredictionService.Predict`, `RawPredict`, `Explain` on a registry endpoint | **Verified** | Same tests: relayed to the picked deployed model's predict route, `deployedModelId` in the answer, and Predict's `model`, `modelVersionId` and `modelDisplayName`, the version it serves (#1940, `TestModelRegistryExportsTheImageToArtifactRegistry`; the Python SDK's `Prediction.model_version_id`, `TestPythonAIPlatformUploadAndDeploy`); `Explain` with the model's or deployed model's explanation spec. |
 
 ### Document AI: processors (#1799)

@@ -22,12 +22,12 @@ func TestEngineImagesMatchDependencies(t *testing.T) {
 		t.Fatal(err)
 	}
 	for key, want := range map[string]string{"modelGardenVLLM": VLLMImage, "modelGardenTEI": TEIImage,
-		"modelGardenTEIArm64": TEIArm64Image} {
+		"modelGardenTEIArm64": TEIArm64Image, "modelGardenLlamaCpp": LlamaCppImage, "modelGardenPython": PythonImage} {
 		var e struct{ Image, Digest, License string }
 		if err := json.Unmarshal(d.Components.LocalAI[key], &e); err != nil {
 			t.Fatalf("%s: %v", key, err)
 		}
-		if got := e.Image + "@" + e.Digest; got != want || e.License != "Apache-2.0" {
+		if got := e.Image + "@" + e.Digest; got != want || (e.License != "Apache-2.0" && key != "modelGardenLlamaCpp" && key != "modelGardenPython") {
 			t.Errorf("dependencies.json %s = %s (%s); the engine runs %s", key, got, e.License, want)
 		}
 	}

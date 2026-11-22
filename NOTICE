@@ -181,3 +181,18 @@ Apache License, Version 2.0, pinned by digest in dependencies.json. The
 models they serve are pulled from huggingface.co under each model's own
 licence, which the console shows and, for a gated model, the end user
 accepts on huggingface.co.
+
+The Model Garden runtimes of #2148 run, without CloudBurrow shipping or
+modifying them: llama.cpp's server image (ghcr.io/ggml-org/llama.cpp,
+https://github.com/ggml-org/llama.cpp, MIT License); the official Python
+image (docker.io/library/python, Python Software Foundation License), into
+which a pod installs, from PyPI and PyTorch's CPU index, Hugging Face's
+huggingface-inference-toolkit (the server of Google's Hugging Face PyTorch
+Inference container, https://github.com/huggingface/huggingface-inference-toolkit,
+Apache License 2.0), transformers, diffusers, accelerate, huggingface_hub,
+optimum and optimum-onnx (Apache License 2.0), PyTorch and torchaudio (BSD
+3-Clause), ONNX Runtime (MIT License), MLX and mlx-lm (MIT License) and
+their dependencies, every version pinned in
+internal/modelgarden/runtime/constraints-*.txt; the images pinned by digest
+in dependencies.json. The start scripts and servers in
+internal/modelgarden/runtime are CloudBurrow's own.
