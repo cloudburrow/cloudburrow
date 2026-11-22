@@ -522,6 +522,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if serviceEnabled(cfg, config.ServiceFirestore) {
 			monitoringSvc.firestore = func() string { return forwardedAddr(forwarders, "firestore") }
 		}
+		// Groups' members are the products' resources, with their
+		// metadata (#2146).
+		monitoringSvc.inventory = &monitoringInventoryWiring{cfg: cfg, compute: computeSvc, gke: gkeSvc,
+			storage: func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") },
+			pubsub:  func() *netfwd.Forwarder { return forwarderFor(forwarders, "pubsub") }}
 	}
 	monitoringSvc.register(coord)
 	// Kubernetes Engine's container logs and system metrics, shipped to

@@ -122,6 +122,9 @@ const AP_ROUTES = agentPlatformRoutes();
 const GKE_DISCOVERY = ["/kubernetes/gateways", "/kubernetes/services", "/kubernetes/ingress"];
 // Secret Manager's page tabs (#1850): the global secrets and Regional secrets.
 const SECRET_TABS = ["/secrets", "/secrets-regional"];
+// Certificate Authority Service's tabs (#2144).
+const ALERTING_TABS = ["/monitoring/alerting", "/monitoring/alerting/incidents", "/monitoring/snoozes"];
+const CAS_TABS = ["/security/cas", "/security/cas/certificateAuthorities", "/security/cas/certificates", "/security/cas/templates"];
 const GKE_STORAGE = ["/kubernetes/storage", "/kubernetes/storage-classes"];
 // Cloud Logging's Settings and its Log Scopes tab (#2020), as Google's
 // Settings page has a Log Scopes tab (log-scope/create-and-manage).
@@ -558,10 +561,20 @@ const ROUTES = [
   { path: "/kms/hsm", service: "kms-hsm", icon: "kms", title: "Single-tenant HSM", kind: "Single-tenant HSM instance", section: "Security and identity",
     product: "kms", productTitle: "Key Management" },
   // Certificate Authority Service (#1834): CA pools, their CAs and the
-  // certificates they issue, at Google's own path.
-  { path: "/security/cas", service: "privateca", title: "CA pools", section: "Security and identity",
+  // certificates they issue, at Google's own path. One page with Google's
+  // tabs (#2144): CA pool manager, CA manager, Private certificate manager
+  // and Template manager, as the CAS docs name them (read 2026-11-22).
+  { path: "/security/cas", service: "privateca", title: "Certificate Authority Service", navTitle: "Certificate Authority Service",
+    tabTitle: "CA pool manager", kind: "CA pool", pageTabs: CAS_TABS, section: "Security and identity",
     product: "privateca", productTitle: "Certificate Authority Service" },
-  { path: "/security/cas/templates", service: "privateca-templates", icon: "privateca", title: "Certificate templates",
+  { path: "/security/cas/certificateAuthorities", service: "privateca-cas", icon: "privateca", title: "Certificate Authority Service",
+    tabTitle: "CA manager", kind: "Certificate authority", navHidden: true, navAs: "/security/cas", pageTabs: CAS_TABS,
+    section: "Security and identity", product: "privateca", productTitle: "Certificate Authority Service" },
+  { path: "/security/cas/certificates", service: "privateca-certs", icon: "privateca", title: "Certificate Authority Service",
+    tabTitle: "Private certificate manager", kind: "Certificate", navHidden: true, navAs: "/security/cas", pageTabs: CAS_TABS,
+    section: "Security and identity", product: "privateca", productTitle: "Certificate Authority Service" },
+  { path: "/security/cas/templates", service: "privateca-templates", icon: "privateca", title: "Certificate Authority Service",
+    tabTitle: "Template manager", kind: "Certificate template", navHidden: true, navAs: "/security/cas", pageTabs: CAS_TABS,
     section: "Security and identity", product: "privateca", productTitle: "Certificate Authority Service" },
   // IAM & Admin (#1864): Google's menu, in Google's order. A page whose API
   // CloudBurrow does not serve is in Google's place and says so; Labels,
@@ -684,10 +697,12 @@ const ROUTES = [
   // Alerting, its incidents and notification channels, Uptime checks,
   // Dashboards, Groups, Services (SLOs) and Snoozes (#1964), over the same
   // in-process API.
-  { path: "/monitoring/alerting", service: "monitoring-alerting", icon: "monitoring", title: "Alerting",
+  // Google's Alerting page holds the policies, the open alerts (Google's
+  // name for incidents) and the snoozes (#2146): here its tabs.
+  { path: "/monitoring/alerting", service: "monitoring-alerting", icon: "monitoring", title: "Alerting", tabTitle: "Policies", pageTabs: ALERTING_TABS,
     kind: "Alert policy", section: "Operations", product: "monitoring", productTitle: "Monitoring" },
-  { path: "/monitoring/alerting/incidents", service: "monitoring-incidents", icon: "monitoring", title: "Incidents",
-    kind: "Incident", section: "Operations", product: "monitoring", productTitle: "Monitoring" },
+  { path: "/monitoring/alerting/incidents", service: "monitoring-incidents", icon: "monitoring", title: "Alerting", tabTitle: "Alerts", pageTabs: ALERTING_TABS,
+    navHidden: true, navAs: "/monitoring/alerting", kind: "Alert", section: "Operations", product: "monitoring", productTitle: "Monitoring" },
   { path: "/monitoring/alerting/channels", service: "monitoring-channels", icon: "monitoring", title: "Notification channels",
     kind: "Notification channel", section: "Operations", product: "monitoring", productTitle: "Monitoring" },
   { path: "/monitoring/uptime", service: "monitoring-uptime", icon: "monitoring", title: "Uptime checks",
@@ -698,8 +713,8 @@ const ROUTES = [
     kind: "Group", section: "Operations", product: "monitoring", productTitle: "Monitoring" },
   { path: "/monitoring/services", service: "monitoring-services", icon: "monitoring", title: "Services",
     kind: "Service", section: "Operations", product: "monitoring", productTitle: "Monitoring" },
-  { path: "/monitoring/snoozes", service: "monitoring-snoozes", icon: "monitoring", title: "Snoozes",
-    kind: "Snooze", section: "Operations", product: "monitoring", productTitle: "Monitoring" },
+  { path: "/monitoring/snoozes", service: "monitoring-snoozes", icon: "monitoring", title: "Alerting", tabTitle: "Snoozes", pageTabs: ALERTING_TABS,
+    navHidden: true, navAs: "/monitoring/alerting", kind: "Snooze", section: "Operations", product: "monitoring", productTitle: "Monitoring" },
   // Cloud Logging's menu in Google's order (#1863): Logs Explorer, Log
   // Analytics, Logs Dashboard, Log-based Metrics, Log Router, Logs Storage,
   // then the pages Google keeps elsewhere that CloudBurrow serves here
@@ -4834,10 +4849,20 @@ async function renderDetail(view, route, resourcePath) {
             copyButton(section.text, `${section.label} for ${name}`)),
           wfSourceSection(section.text, `${section.label} of ${name}`)));
     }
+    // Download <label> saves the text as a file (#2144): Google's issued
+    // certificate has Download certificate and Download certificate chain.
+    const download = section.download ? el("button", { type: "button", class: "secondary", "data-download": section.download,
+      text: `Download ${section.label.charAt(0).toLowerCase()}${section.label.slice(1)}`, onclick: () => {
+        const a = el("a", { href: URL.createObjectURL(new Blob([section.text], { type: "application/x-pem-file" })), download: section.download });
+        document.body.append(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      } }) : null;
     setChildren(into, note,
       el("div", { class: "card text-section" },
         el("div", { class: "text-actions" },
-          copyButton(section.text, `${section.label} for ${name}`)),
+          copyButton(section.text, `${section.label} for ${name}`), download),
         el("pre", { class: "mono", text: section.text })));
   };
 
@@ -7667,6 +7692,9 @@ function buildCreateForm(spec) {
     // Items chosen from a picker (#1864): Google's Create role and Edit
     // role permissions, each with a checkbox, and Add permissions.
     if (f.type === "picklist") return picklistEntry(f, id, errorId, helpId);
+    // Several of the listed options (#2146): Google's Create snooze picks
+    // its alert policies from a menu of the project's policies.
+    if (f.type === "multiselect") return multiselectEntry(f, id, errorId, helpId);
 
     // A textarea rather than an input wherever the value can hold newlines:
     // Enter inserts one instead of submitting the form, which is the whole
@@ -10039,6 +10067,83 @@ function picklistEntry(f, id, errorId, helpId) {
   return { field: f, control, node, error, helpId, errorId, isCheck: false, focus: () => toggle.focus() };
 }
 
+// multiselectEntry is a "multiselect" field: a menu button that opens the
+// options, each with a checkbox, under a filter; the chosen ones are chips
+// below it, each with a remove button. The value is the chosen options, one
+// per line, in a hidden textarea, so validation, dirtiness and submission
+// are every other field's.
+function multiselectEntry(f, id, errorId, helpId) {
+  const control = el("textarea", { id: `${id}-value`, name: f.name, hidden: true, class: "multiselect-value" });
+  const options = f.options || [];
+  const labelOf = (v) => (f.optionLabels || {})[v] || v;
+  const chosen = new Set((f.default || "").split(/[\n,]/).map((x) => x.trim()).filter((x) => options.includes(x)));
+  const menuId = `${id}-menu`;
+  const button = el("button", { type: "button", id, class: "secondary multiselect-button", "aria-haspopup": "true",
+    "aria-expanded": "false", "aria-controls": menuId, "aria-describedby": helpId || null });
+  const filterInput = el("input", { type: "text", id: `${id}-filter`, autocomplete: "off", spellcheck: "false",
+    placeholder: "Filter", "aria-label": `Filter ${f.label.toLowerCase()}` });
+  const list = el("ul", { class: "picklist-rows multiselect-options", role: "list", "aria-label": f.label });
+  const empty = el("p", { class: "form-help", "aria-live": "polite" });
+  const chips = el("ul", { class: "multiselect-chips", role: "list", "aria-label": `Selected ${f.label.toLowerCase()}` });
+  const sync = () => {
+    control.value = options.filter((o) => chosen.has(o)).join("\n");
+    button.textContent = chosen.size ? `${chosen.size} selected` : (f.addLabel || `Select ${f.label.toLowerCase()}`);
+    control.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  const drawChips = () => {
+    setChildren(chips, ...options.filter((o) => chosen.has(o)).map((o) => el("li", { class: "chip" },
+      el("span", { text: labelOf(o) }),
+      el("button", { type: "button", class: "chip-clear", "aria-label": `Remove ${labelOf(o)}`,
+        html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+        onclick: () => { chosen.delete(o); drawChips(); drawOptions(); sync(); button.focus(); } }))));
+    chips.hidden = chosen.size === 0;
+  };
+  const drawOptions = () => {
+    const q = filterInput.value.trim().toLowerCase();
+    const match = options.filter((o) => !q || labelOf(o).toLowerCase().includes(q) || o.toLowerCase().includes(q));
+    setChildren(list, ...match.map((o, n) => {
+      const box = el("input", { type: "checkbox", id: `${id}-opt-${n}`, "data-value": o });
+      box.checked = chosen.has(o);
+      box.addEventListener("change", () => {
+        if (box.checked) chosen.add(o); else chosen.delete(o);
+        drawChips();
+        sync();
+      });
+      return el("li", { class: "picklist-row" }, el("label", { class: "group-check", for: box.id }, box, el("span", { text: labelOf(o) })));
+    }));
+    empty.textContent = options.length === 0 ? "There is nothing to select." : (match.length ? "" : "No match.");
+  };
+  const close = () => {
+    menu.hidden = true;
+    button.setAttribute("aria-expanded", "false");
+  };
+  const menu = el("div", { class: "picklist-picker multiselect-menu", id: menuId, role: "group", "aria-label": f.label, hidden: true },
+    filterInput, empty, list,
+    el("div", { class: "picklist-actions" },
+      el("button", { type: "button", class: "primary", text: "OK", onclick: () => { close(); button.focus(); } })));
+  menu.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(); button.focus(); }
+  });
+  filterInput.addEventListener("keydown", (e) => { if (e.key === "Enter") e.preventDefault(); });
+  filterInput.addEventListener("input", drawOptions);
+  button.addEventListener("click", () => {
+    if (!menu.hidden) return close();
+    menu.hidden = false;
+    button.setAttribute("aria-expanded", "true");
+    drawOptions();
+    filterInput.focus();
+  });
+  const help = f.help ? el("p", { id: helpId, class: "form-help", text: f.help }) : null;
+  const error = el("p", { id: errorId, class: "form-field-error", hidden: true });
+  const node = el("div", { class: "form-row multiselect-field" },
+    el("label", { for: id, text: f.required ? `${f.label} *` : f.label }), button, menu, chips, control, help, error);
+  drawChips();
+  drawOptions();
+  sync();
+  f.default = control.value;
+  return { field: f, control, node, error, helpId, errorId, isCheck: false, focus: () => button.focus() };
+}
+
 // mapToLines renders a map field's JSON value as one "key=value" per line.
 function mapToLines(value) {
   if (!value) return "";
@@ -11538,6 +11643,9 @@ function dispatch(view) {
   if (match.screen === "apis-domains") return renderDomainVerification(view);
   if (match.screen === "apis-credentials" && !resourcePath.length) return renderAPICredentials(view);
   if (match.screen === "apis-credentials" && resourcePath[0] === "key" && resourcePath[1]) return renderAPIKeyPage(view, resourcePath[1]);
+  // Create API key and Create a copy (#2145).
+  if (match.screen === "apis-credentials" && resourcePath[0] === "apikey" && resourcePath[1] === "create") return renderAPIKeyCreate(view, "");
+  if (match.screen === "apis-credentials" && resourcePath[0] === "apikey" && resourcePath[1] === "copy" && resourcePath[2]) return renderAPIKeyCreate(view, resourcePath[2]);
   if (match.screen === "apis-credentials" && resourcePath[0] === "restore") return renderAPIKeysRestore(view);
   if (match.screen === "iam-page" && !resourcePath.length) return renderIAMPage(view, match);
   if (match.screen === "manage-resources" && !resourcePath.length) return renderManageResources(view, match);
@@ -25546,7 +25654,7 @@ function renderAPICredentials(view) {
     "aria-expanded": "false", html: ICON_ADD }, el("span", { text: "Create credentials" }));
   const menu = el("div", { class: "overflow-menu", role: "menu", id: "credentials-create-menu", hidden: true },
     el("button", { type: "button", class: "overflow-item", role: "menuitem", id: "credentials-create-api-key", text: "API key",
-      onclick: () => { menu.hidden = true; trigger.setAttribute("aria-expanded", "false"); apiKeyCreate(project); } }),
+      onclick: () => { menu.hidden = true; trigger.setAttribute("aria-expanded", "false"); navigate("/apis/credentials/apikey/create"); } }),
     // Google's label, its reason as the tooltip and description, as every
     // row menu draws an item this instance cannot perform (#1868).
     el("a", { class: "overflow-item", role: "menuitem", id: "credentials-create-oauth", href: "/apis/credentials/consent/clients/create" + scopeSearch(), text: "OAuth client ID" }),
@@ -25795,16 +25903,6 @@ function apiKeyShow(title, keyString, id, extra) {
   field.select();
 }
 
-async function apiKeyCreate(project, after) {
-  const op = recordOperation(`Create an API key in ${project}`);
-  let k;
-  try { k = await apisCall("key-create", {}); op.succeeded(""); } catch (err) { op.failed(err.message); notify(err.message, "error"); return; }
-  apiKeyShow("API key created", k.keyString, k.id, "Use this key in your application by passing it with the key=API_KEY parameter or the x-goog-api-key header. " +
-    "It has no restrictions: restrict it on its page.");
-  notify("Created API key");
-  if (after) after(); else if (location.pathname === "/apis/credentials") navigate("/apis/credentials");
-}
-
 async function apiKeyReveal(id) {
   try {
     const d = await apisCall("key-string", { id });
@@ -25850,44 +25948,84 @@ function apiKeysTable(idPrefix) {
   return box;
 }
 
-// apiKeyLines are a textarea's non-empty lines.
-const apiKeyLines = (v) => v.split("\n").map((l) => l.trim()).filter(Boolean);
+// apiKeyItems is one application restriction's entries as Google's page
+// takes them (#2145): Add, the entry, Done; each done entry listed with
+// Edit and Delete. fields are the entry's inputs ([name, label] pairs);
+// values the entries it starts with, each an object of those names.
+function apiKeyItems(id, label, fields, values, help) {
+  const items = (values || []).map((v) => ({ ...v }));
+  const list = el("ul", { class: "api-key-items", id: `${id}-items`, "aria-label": label });
+  const editor = el("div", { class: "api-key-item-editor", id: `${id}-editor`, hidden: true });
+  const error = el("p", { class: "form-field-error", role: "alert", hidden: true });
+  let editing = -1;
+  const draw = () => setChildren(list, ...items.map((it, i) => el("li", { class: "api-key-item" },
+    el("span", { class: "mono", text: fields.map(([n]) => it[n]).filter(Boolean).join(" · ") }),
+    el("button", { type: "button", class: "link-button", text: "Edit", "aria-label": `Edit ${fields.map(([n]) => it[n]).join(" ")}`,
+      onclick: () => open(i) }),
+    el("button", { type: "button", class: "link-button", text: "Delete", "aria-label": `Delete ${fields.map(([n]) => it[n]).join(" ")}`,
+      onclick: () => { items.splice(i, 1); draw(); } }))));
+  const inputs = fields.map(([n, l]) => el("input", { type: "text", id: `${id}-${n}`, class: "mono", "aria-label": l }));
+  const open = (i) => {
+    editing = i;
+    inputs.forEach((inp, k) => { inp.value = i >= 0 ? items[i][fields[k][0]] || "" : ""; });
+    editor.hidden = false;
+    error.hidden = true;
+    inputs[0].focus();
+  };
+  const done = () => {
+    const it = Object.fromEntries(fields.map(([n], k) => [n, inputs[k].value.trim()]));
+    if (!it[fields[0][0]]) { error.textContent = `Enter ${fields[0][1].toLowerCase()}.`; error.hidden = false; return; }
+    if (editing >= 0) items[editing] = it; else items.push(it);
+    editor.hidden = true;
+    draw();
+  };
+  setChildren(editor, ...fields.map(([, l], k) => el("label", { class: "form-field" }, el("span", { class: "form-label", text: l }), inputs[k])), error,
+    el("div", { class: "form-actions" },
+      el("button", { type: "button", class: "primary", id: `${id}-done`, text: "Done", onclick: done }),
+      el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => { editor.hidden = true; } })));
+  draw();
+  const node = el("fieldset", { class: "form-field api-key-restriction", id },
+    el("legend", { class: "form-label", text: label }), help ? el("p", { class: "form-help", text: help }) : null, list, editor,
+    el("button", { type: "button", class: "secondary", id: `${id}-add`, html: ICON_ADD, onclick: () => open(-1) }, el("span", { text: "Add" })));
+  // Entries finished with Done, and one still being typed.
+  const value = () => {
+    const out = items.map((it) => ({ ...it }));
+    if (!editor.hidden) {
+      const it = Object.fromEntries(fields.map(([n], k) => [n, inputs[k].value.trim()]));
+      if (it[fields[0][0]]) out.push(it);
+    }
+    return out;
+  };
+  return { node, value };
+}
 
-async function renderAPIKeyPage(view, id) {
-  const project = currentProject();
-  const back = "/apis/credentials" + scopeSearch();
-  if (!project) return apisNeedProject(view, "Edit API key");
-  setChildren(view, pageHeader("Edit API key", "", { back }), loadingState(4, { what: id }));
-  let k, apis;
-  try {
-    k = await apisCall("key", { id });
-    apis = ((await apisCall("apis")).apis || []).filter((a) => a.state === "ENABLED");
-  } catch (err) {
-    setChildren(view, pageHeader("Edit API key", "", { back }), errorState(`Could not read API key ${id}`, err.message));
-    return;
-  }
-  const r = k.restrictions || {};
+// apiKeyForm is the key's form as Google's Create API key and Edit API key
+// pages have it (#2145): Name; on create, Authenticate API calls through a
+// service account; Key restrictions' Application restrictions (None,
+// Websites, IP addresses, Android apps, iOS apps, their entries added one
+// at a time) and API restrictions (Don't restrict key, Restrict key). It
+// answers the form and a read of what it holds.
+function apiKeyForm(view, k, apis, opts) {
+  const r = (k && k.restrictions) || {};
   const app = r.browserKeyRestrictions ? "browser" : r.serverKeyRestrictions ? "server" : r.androidKeyRestrictions ? "android" : r.iosKeyRestrictions ? "ios" : "none";
-  const error = el("p", { class: "form-error", role: "alert", hidden: true });
   const field = (label, input, help) => el("label", { class: "form-field" }, el("span", { class: "form-label", text: label }), input,
     help ? el("span", { class: "form-help", text: help }) : null);
-  const name = el("input", { type: "text", id: "api-key-name", value: k.displayName || "", maxlength: 63 });
-  const lines = (id, values, help, label) => {
-    const t = el("textarea", { id, rows: 4, class: "mono" });
-    t.value = (values || []).join("\n");
-    return { node: field(label, t, help), t };
-  };
-  const browser = lines("api-key-referrers", (r.browserKeyRestrictions || {}).allowedReferrers, "One website per line, such as *.example.com/* or www.example.com/path.", "Website restrictions");
-  const server = lines("api-key-ips", (r.serverKeyRestrictions || {}).allowedIps, "One IPv4 or IPv6 address or subnet (CIDR) per line.", "IP address restrictions");
-  const android = lines("api-key-android", ((r.androidKeyRestrictions || {}).allowedApplications || []).map((a) => `${a.packageName},${a.sha1Fingerprint}`),
-    "One app per line: package name, comma, SHA-1 certificate fingerprint.", "Android restrictions");
-  const ios = lines("api-key-ios", (r.iosKeyRestrictions || {}).allowedBundleIds, "One bundle ID per line, such as com.example.app.", "iOS restrictions");
+  const name = el("input", { type: "text", id: "api-key-name", value: opts.name || "", maxlength: 63 });
+  const browser = apiKeyItems("api-key-referrers", "Website restrictions", [["v", "Website"]],
+    ((r.browserKeyRestrictions || {}).allowedReferrers || []).map((v) => ({ v })), "Such as *.example.com/* or www.example.com/path: a wildcard only as a whole leading subdomain or after the path.");
+  const server = apiKeyItems("api-key-ips", "IP address restrictions", [["v", "IP address"]],
+    ((r.serverKeyRestrictions || {}).allowedIps || []).map((v) => ({ v })), "An IPv4 or IPv6 address or a subnet in CIDR notation. Internal addresses and localhost are not supported by Google.");
+  const android = apiKeyItems("api-key-android", "Android restrictions", [["packageName", "Package name"], ["sha1Fingerprint", "SHA-1 certificate fingerprint"]],
+    (r.androidKeyRestrictions || {}).allowedApplications || [], "The package name and the 20-byte SHA-1 fingerprint of its signing certificate.");
+  const ios = apiKeyItems("api-key-ios", "iOS restrictions", [["v", "Bundle ID"]],
+    ((r.iosKeyRestrictions || {}).allowedBundleIds || []).map((v) => ({ v })), "Such as com.example.app.");
   const appBoxes = { browser: browser.node, server: server.node, android: android.node, ios: ios.node };
   const show = () => {
     const v = (view.querySelector('input[name="api-key-app"]:checked') || {}).value;
     for (const [kname, node] of Object.entries(appBoxes)) node.hidden = kname !== v;
     const restrict = (view.querySelector('input[name="api-key-api"]:checked') || {}).value === "restrict";
     apiList.hidden = !restrict;
+    if (sa) saPick.hidden = !sa.checked;
   };
   const radio = (group, value, label, current) => el("label", { class: "check-line", for: `${group}-${value}` },
     el("input", { type: "radio", name: group, value, id: `${group}-${value}`, checked: value === current ? "checked" : null, onchange: show }),
@@ -25897,16 +26035,23 @@ async function renderAPIKeyPage(view, id) {
     ...apis.map((a) => el("label", { class: "check-line", for: `api-key-target-${a.name}` },
       el("input", { type: "checkbox", id: `api-key-target-${a.name}`, value: a.name, checked: targets.has(a.name) ? "checked" : null }),
       el("span", { text: `${a.title} (${a.name})` }))));
+  // Create API key's service account binding (an authorization key).
+  let sa = null, saPick = null, saSelect = null;
+  if (opts.create) {
+    sa = el("input", { type: "checkbox", id: "api-key-bind-sa", onchange: show });
+    saSelect = el("select", { id: "api-key-service-account" }, el("option", { value: "", text: "Select a service account" }),
+      ...(opts.serviceAccounts || []).map((e) => el("option", { value: e, text: e })));
+    saPick = el("div", { id: "api-key-sa-pick", hidden: true },
+      field("Select a service account", saSelect, opts.serviceAccounts && opts.serviceAccounts.length ? "" :
+        "This project has no service accounts on this instance; create one under IAM & Admin > Service Accounts."));
+  }
   const restrictions = () => {
     const out = {};
     const v = (view.querySelector('input[name="api-key-app"]:checked') || {}).value;
-    if (v === "browser") out.browserKeyRestrictions = { allowedReferrers: apiKeyLines(browser.t.value) };
-    if (v === "server") out.serverKeyRestrictions = { allowedIps: apiKeyLines(server.t.value) };
-    if (v === "android") out.androidKeyRestrictions = { allowedApplications: apiKeyLines(android.t.value).map((l) => {
-      const [packageName, sha1Fingerprint] = l.split(",").map((x) => (x || "").trim());
-      return { packageName, sha1Fingerprint };
-    }) };
-    if (v === "ios") out.iosKeyRestrictions = { allowedBundleIds: apiKeyLines(ios.t.value) };
+    if (v === "browser") out.browserKeyRestrictions = { allowedReferrers: browser.value().map((x) => x.v) };
+    if (v === "server") out.serverKeyRestrictions = { allowedIps: server.value().map((x) => x.v) };
+    if (v === "android") out.androidKeyRestrictions = { allowedApplications: android.value().map((x) => ({ packageName: x.packageName, sha1Fingerprint: x.sha1Fingerprint })) };
+    if (v === "ios") out.iosKeyRestrictions = { allowedBundleIds: ios.value().map((x) => x.v) };
     if ((view.querySelector('input[name="api-key-api"]:checked') || {}).value === "restrict") {
       const picked = [...apiList.querySelectorAll("input:checked")].map((c) => ({ service: c.value }));
       // Methods already on a kept target stay as they were.
@@ -25914,16 +26059,118 @@ async function renderAPIKeyPage(view, id) {
     }
     return out;
   };
+  const appCurrent = opts.create ? "none" : app;
+  const apiCurrent = (r.apiTargets || []).length || opts.create ? "restrict" : "none";
+  const body = [
+    field("Name", name, "A display name, at most 63 characters."),
+    sa ? el("label", { class: "check-line", for: "api-key-bind-sa" }, sa, el("span", { text: "Authenticate API calls through a service account" })) : null,
+    saPick,
+    el("h2", { text: "Key restrictions" }),
+    el("h3", { text: "Application restrictions" }),
+    el("div", { class: "radio-group", role: "radiogroup", "aria-label": "Application restrictions" },
+      radio("api-key-app", "none", "None", appCurrent), radio("api-key-app", "browser", "Websites", appCurrent), radio("api-key-app", "server", "IP addresses", appCurrent),
+      radio("api-key-app", "android", "Android apps", appCurrent), radio("api-key-app", "ios", "iOS apps", appCurrent)),
+    browser.node, server.node, android.node, ios.node,
+    el("h3", { text: "API restrictions" }),
+    el("div", { class: "radio-group", role: "radiogroup", "aria-label": "API restrictions" },
+      radio("api-key-api", "none", "Don't restrict key", apiCurrent), radio("api-key-api", "restrict", "Restrict key", apiCurrent)),
+    apiList,
+    el("p", { class: "form-help", text: "Restrictions apply to the APIs this instance serves, which refuse a request the key does not allow with Google's error." }),
+  ];
+  return { body, show, restrictions, name: () => name.value.trim(), serviceAccount: () => (sa && sa.checked ? saSelect.value : "") };
+}
+
+async function apiKeyFormData(id) {
+  const k = id ? await apisCall("key", { id }) : null;
+  const apis = ((await apisCall("apis")).apis || []).filter((a) => a.state === "ENABLED");
+  return { k, apis };
+}
+
+// renderAPIKeyCreate is Google's Create API key page (#2145): the name,
+// the service account binding and the restrictions, ending in Create and
+// the API key created dialog. Google's console asks for at least one API
+// restriction ("Add at least one API key restriction").
+async function renderAPIKeyCreate(view, copyOf) {
+  const project = currentProject();
+  const back = "/apis/credentials" + scopeSearch();
+  const title = copyOf ? "Create a copy" : "Create API key";
+  if (!project) return apisNeedProject(view, title);
+  setChildren(view, pageHeader(title, "", { back }), loadingState(4, { what: "APIs" }));
+  let d, accounts = [];
+  try {
+    d = await apiKeyFormData(copyOf);
+    if (SERVICES.some((sv) => sv.id === "iam-service-accounts")) {
+      try { accounts = ((await api(`/api/resources/iam-service-accounts?project=${encodeURIComponent(project)}`)).items || []).map((r) => r.name); } catch { accounts = []; }
+    }
+  } catch (err) {
+    setChildren(view, pageHeader(title, "", { back }), errorState("Could not read the project's APIs", err.message));
+    return;
+  }
+  const f = apiKeyForm(view, d.k, d.apis, { create: !copyOf, name: copyOf ? `${d.k.displayName || d.k.id} (copy)` : "API key", serviceAccounts: accounts });
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  const save = el("button", { type: "submit", class: "primary", id: "api-key-create", text: "Create" });
+  const form = el("form", { class: "create-form", id: "api-key-form", novalidate: true, onsubmit: async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    const rs = f.restrictions();
+    if (!rs.apiTargets || !rs.apiTargets.length) {
+      error.textContent = "Add at least one API key restriction: choose Restrict key and select the APIs the key may call.";
+      error.hidden = false;
+      return;
+    }
+    if (!copyOf && document.querySelector("#api-key-bind-sa").checked && !f.serviceAccount()) {
+      error.textContent = "Select a service account, or clear Authenticate API calls through a service account.";
+      error.hidden = false;
+      return;
+    }
+    save.disabled = true;
+    const op = recordOperation(copyOf ? `Copy API key ${copyOf}` : `Create an API key in ${project}`);
+    let k;
+    try {
+      k = copyOf ? await apisCall("key-copy", { id: copyOf, displayName: f.name(), restrictions: rs })
+        : await apisCall("key-create", { displayName: f.name(), restrictions: rs, serviceAccountEmail: f.serviceAccount() });
+      op.succeeded("");
+    } catch (err) {
+      op.failed(err.message);
+      error.textContent = err.message;
+      error.hidden = false;
+      save.disabled = false;
+      return;
+    }
+    notify("Created API key");
+    navigate("/apis/credentials");
+    apiKeyShow("API key created", k.keyString, k.id, "Use this key in your application by passing it with the key=API_KEY parameter or the x-goog-api-key header.");
+  } }, error, ...f.body,
+  el("div", { class: "form-actions" }, save, el("a", { class: "button secondary", href: back, text: "Cancel" })));
+  setChildren(view, pageHeader(title, copyOf ? `A new key with the restrictions of ${d.k.displayName || d.k.id}` : "", { back }), form);
+  f.show();
+  announce(title);
+}
+
+async function renderAPIKeyPage(view, id) {
+  const project = currentProject();
+  const back = "/apis/credentials" + scopeSearch();
+  if (!project) return apisNeedProject(view, "Edit API key");
+  setChildren(view, pageHeader("Edit API key", "", { back }), loadingState(4, { what: id }));
+  let k, apis;
+  try {
+    ({ k, apis } = await apiKeyFormData(id));
+  } catch (err) {
+    setChildren(view, pageHeader("Edit API key", "", { back }), errorState(`Could not read API key ${id}`, err.message));
+    return;
+  }
+  const f = apiKeyForm(view, k, apis, { name: k.displayName || "" });
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
   const save = el("button", { type: "submit", class: "primary", id: "api-key-save", text: "Save" });
   const form = el("form", { class: "create-form", id: "api-key-form", novalidate: true, onsubmit: async (e) => {
     e.preventDefault();
     error.hidden = true;
-    const rs = restrictions();
+    const rs = f.restrictions();
     if (rs.apiTargets && !rs.apiTargets.length) { error.textContent = "Select at least one API, or choose Don't restrict key."; error.hidden = false; return; }
     save.disabled = true;
     const op = recordOperation(`Update API key ${id}`);
     try {
-      await apisCall("key-update", { id, displayName: name.value.trim(), restrictions: rs });
+      await apisCall("key-update", { id, displayName: f.name(), restrictions: rs });
       op.succeeded("");
       notify("Saved API key");
       navigate("/apis/credentials");
@@ -25935,26 +26182,15 @@ async function renderAPIKeyPage(view, id) {
     }
   } },
   error,
-  field("Name", name, "A display name, at most 63 characters."),
-  el("h2", { text: "Key restrictions" }),
-  el("h3", { text: "Application restrictions" }),
-  el("div", { class: "radio-group", role: "radiogroup", "aria-label": "Application restrictions" },
-    radio("api-key-app", "none", "None", app), radio("api-key-app", "browser", "Websites", app), radio("api-key-app", "server", "IP addresses", app),
-    radio("api-key-app", "android", "Android apps", app), radio("api-key-app", "ios", "iOS apps", app)),
-  browser.node, server.node, android.node, ios.node,
-  el("h3", { text: "API restrictions" }),
-  el("div", { class: "radio-group", role: "radiogroup", "aria-label": "API restrictions" },
-    radio("api-key-api", "none", "Don't restrict key", (r.apiTargets || []).length ? "restrict" : "none"),
-    radio("api-key-api", "restrict", "Restrict key", (r.apiTargets || []).length ? "restrict" : "none")),
-  apiList,
-  el("p", { class: "form-help", text: "Restrictions apply to the APIs this instance serves, which refuse a request the key does not allow with Google's error." }),
+  k.serviceAccountEmail ? el("p", { class: "form-help", id: "api-key-bound", text: `Authorization key: API calls are authenticated as the service account ${k.serviceAccountEmail}.` }) : null,
+  ...f.body,
   el("div", { class: "form-actions" }, save, el("a", { class: "button secondary", href: back, text: "Cancel" })));
   const actions = [
     el("button", { type: "button", class: "header-button", id: "api-key-show", text: "Show key", onclick: () => apiKeyReveal(id) }),
     el("button", { type: "button", class: "header-button", id: "api-key-rotate", text: "Rotate key", onclick: () => mrForm({
       id: "api-key-rotate-form", title: "Rotate key", label: "Create",
       fields: [{ name: "displayName", label: "Name", default: `${k.displayName || k.id} (rotated)`, help: "The new key's name. It gets this key's restrictions." }],
-      note: "A new key is created with this key's restrictions. This key keeps working until you delete it from the new key's page (Delete the previous key).",
+      note: `The new key gets this key's restrictions: ${k.summary}. This key keeps working until you delete it from the new key's page (Delete the previous key).`,
       submit: async (v) => {
         const op = recordOperation(`Rotate API key ${id}`);
         let nk;
@@ -25962,6 +26198,7 @@ async function renderAPIKeyPage(view, id) {
         navigate(`/apis/credentials/key/${encodeURIComponent(nk.id)}`);
         apiKeyShow("API key created", nk.keyString, null, "Copy the new key into your applications, then delete the previous key.");
       } }) }),
+    el("a", { class: "header-button", id: "api-key-copy-button", href: `/apis/credentials/apikey/copy/${encodeURIComponent(id)}${scopeSearch()}`, text: "Create a copy" }),
     el("button", { type: "button", class: "header-button", id: "api-key-delete-button", text: "Delete", onclick: () => apiKeyDelete(k, () => navigate("/apis/credentials")) }),
   ];
   const previous = k.previous ? el("section", { class: "card", id: "api-key-previous" },
@@ -25973,7 +26210,7 @@ async function renderAPIKeyPage(view, id) {
       catch (err) { op.failed(err.message); notify(err.message, "error"); }
     } })) : null;
   setChildren(view, pageHeader("Edit API key", `${k.name} · created ${new Date(k.createTime).toLocaleString()}`, { back, actions }), previous, form);
-  show();
+  f.show();
   announce(`Edit API key ${k.displayName || k.id}`);
 }
 

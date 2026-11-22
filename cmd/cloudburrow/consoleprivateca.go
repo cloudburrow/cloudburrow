@@ -106,30 +106,44 @@ func (privateCAProvider) CreateSubmit() string { return "Done" }
 func (privateCAProvider) CreateTitle() string { return "Create CA pool" }
 
 func (privateCAProvider) CreateForm() (string, []console.Field) {
-	return "Create pool", []console.Field{
-		{Name: "caPoolId", Label: "Pool ID", Type: "text", Required: true, Pattern: privateCAIDPattern,
-			Help: "1 to 63 letters, digits, hyphens and underscores. Fixed at creation."},
-		{Name: "location", Label: "Region", Type: "select", Required: true, Default: "us-central1", Options: privateCALocations()},
-		{Name: "tier", Label: "Tier", Type: "select", Required: true, Default: "ENTERPRISE", Options: []string{"ENTERPRISE", "DEVOPS"},
-			Help: "Enterprise stores the certificates it issues, which can then be listed and revoked; DevOps does not store them."},
-		{Name: "maximumLifetimeDays", Label: "Maximum certificate lifetime (days)", Type: "text", Pattern: `^[0-9]{0,5}$`,
-			Help: "Optional: the issuance policy's maximum_lifetime. A longer request is shortened to it."},
-		{Name: "allowCsr", Label: "Allow certificate requests from a CSR", Type: "checkbox", Default: "true"},
-		{Name: "allowConfig", Label: "Allow certificate requests from a config", Type: "checkbox", Default: "true"},
-		{Name: "publishCaCert", Label: "Publish the CA certificates", Type: "checkbox", Default: "true",
-			Help: "publishing_options.publish_ca_cert: each CA's certificate is published, at its bucket when it names one, and its URL put in the certificates it issues."},
-		{Name: "publishCrl", Label: "Publish CRLs", Type: "checkbox", Default: "true",
-			Help: "publishing_options.publish_crl: each CA's CRL is published, at its bucket when it names one, and its URL put in the certificates it issues."},
-		{Name: "allowRequesterNotBefore", Label: "Allow a requester-specified not-before time", Type: "checkbox",
-			Help: "The issuance policy's allow_requester_specified_not_before_time: a request may then set its certificate's not-before time."},
-		{Name: "allowSubjectPassthrough", Label: "Allow the request's subject", Type: "checkbox", Default: "true"},
-		{Name: "allowSansPassthrough", Label: "Allow the request's subject alternative names", Type: "checkbox", Default: "true"},
-		{Name: "celExpression", Label: "Identity CEL expression", Type: "textarea", Help: privateCACELHelp},
-		{Name: "passthroughExtensions", Label: "Passthrough extensions", Type: "text", Help: privateCAExtensionsHelp},
-		{Name: "encryptionKey", Label: "Customer-managed encryption key (CMEK)", Type: "text",
-			Help: "Optional, Enterprise tier only: a Cloud KMS ENCRYPT_DECRYPT key in the pool's region, projects/…/locations/…/keyRings/…/cryptoKeys/…, that encrypts the pool's certificates at rest."},
-		labelsField(nil, ""),
+	// Google's steps (creating-ca-pool, read 2026-11-22): name, region and
+	// tier; allowed key algorithms and sizes; certificate request methods;
+	// publishing options; then the baseline values' steps. The issuance
+	// policy's lifetime, identity constraints and passthrough extensions,
+	// and CMEK and labels, follow as CloudBurrow's own sections: Google's
+	// pool wizard does not show them in the docs.
+	// UNVERIFIED: docs re-read 2026-11-22, still unanswered: https://docs.cloud.google.com/certificate-authority-service/docs/creating-ca-pool
+	const first, methods, publish, more = "Name, region and tier", "Configure certificate request methods", "Configure publishing options", "Issuance policy and labels"
+	fields := []console.Field{
+		{Name: "caPoolId", Label: "Name", Type: "text", Required: true, Pattern: privateCAIDPattern, Section: first,
+			Help: "Unique for the region: 1 to 63 letters, digits, hyphens and underscores. The name, region and tier cannot be changed later."},
+		{Name: "location", Label: "Region", Type: "select", Required: true, Default: "us-central1", Options: privateCALocations(), Section: first},
+		{Name: "tier", Label: "Tier", Type: "radio", Required: true, Default: "ENTERPRISE", Options: []string{"ENTERPRISE", "DEVOPS"}, Section: first,
+			OptionLabels: map[string]string{"ENTERPRISE": "Enterprise", "DEVOPS": "DevOps"},
+			Help:         "Enterprise stores the certificates it issues, which can then be listed and revoked; DevOps does not store them."},
+		privateCAKeyTypesField(),
+		{Name: "allowCsr", Label: "Allow certificate requests from a CSR", Type: "checkbox", Default: "true", Section: methods},
+		{Name: "allowConfig", Label: "Allow certificate requests from a config", Type: "checkbox", Default: "true", Section: methods},
+		{Name: "publishCaCert", Label: "Publish CA certificate to GCS bucket for CAs in this pool", Type: "checkbox", Default: "true", Section: publish,
+			Help: "Each CA's certificate is published, at its bucket when it names one, and its URL put in the certificates it issues."},
+		{Name: "publishCrl", Label: "Publish CRL to GCS bucket for CAs in this pool", Type: "checkbox", Default: "true", Section: publish,
+			Help: "Each CA's CRL is published, at its bucket when it names one, and its URL put in the certificates it issues; a new CRL daily and within 15 minutes of a revocation."},
+		{Name: "encodingFormat", Label: "Encoding format", Type: "select", Default: "PEM", Options: []string{"PEM", "DER"}, Section: publish},
 	}
+	fields = append(fields, privateCAX509Fields("")...)
+	return "Create pool", append(fields,
+		console.Field{Name: "maximumLifetimeDays", Label: "Maximum certificate lifetime (days)", Type: "text", Pattern: `^[0-9]{0,5}$`, Section: more,
+			Help: "Optional: the issuance policy's maximum_lifetime. A longer request is shortened to it."},
+		console.Field{Name: "allowRequesterNotBefore", Label: "Allow a requester-specified not-before time", Type: "checkbox", Section: more,
+			Help: "The issuance policy's allow_requester_specified_not_before_time: a request may then set its certificate's not-before time."},
+		console.Field{Name: "allowSubjectPassthrough", Label: "Copy subject from the certificate requests to the certificate", Type: "checkbox", Default: "true", Section: more},
+		console.Field{Name: "allowSansPassthrough", Label: "Copy subject alternative names (SAN) from the certificate requests to the certificate", Type: "checkbox", Default: "true", Section: more},
+		console.Field{Name: "celExpression", Label: "CEL expression", Type: "textarea", Help: privateCACELHelp, Section: more},
+		console.Field{Name: "passthroughExtensions", Label: "Passthrough extensions", Type: "text", Help: privateCAExtensionsHelp, Section: more},
+		console.Field{Name: "encryptionKey", Label: "Customer-managed encryption key (CMEK)", Type: "text", Section: more,
+			Help: "Optional, Enterprise tier only: a Cloud KMS ENCRYPT_DECRYPT key in the pool's region, projects/…/locations/…/keyRings/…/cryptoKeys/…, that encrypts the pool's certificates at rest."},
+		withSection(labelsField(nil, ""), more),
+	)
 }
 
 func privateCADays(field, v string) (*durationpb.Duration, error) {
@@ -165,8 +179,20 @@ func (p privateCAProvider) Create(ctx context.Context, project string, values ma
 		return "", err
 	}
 	pool := &privatecapb.CaPool{Tier: privatecapb.CaPool_Tier(tier), Labels: labels}
-	if values["publishCaCert"] == "true" || values["publishCrl"] == "true" {
+	der := values["encodingFormat"] == "DER"
+	if values["publishCaCert"] == "true" || values["publishCrl"] == "true" || der {
 		pool.PublishingOptions = &privatecapb.CaPool_PublishingOptions{PublishCaCert: values["publishCaCert"] == "true", PublishCrl: values["publishCrl"] == "true"}
+		if der {
+			pool.PublishingOptions.EncodingFormat = privatecapb.CaPool_PublishingOptions_DER
+		}
+	}
+	keyTypes, err := privateCAKeyTypesFromForm(values["allowedKeyTypes"])
+	if err != nil {
+		return "", err
+	}
+	baseline, err := privateCAX509FromForm(values)
+	if err != nil {
+		return "", err
 	}
 	if k := strings.TrimSpace(values["encryptionKey"]); k != "" {
 		pool.EncryptionSpec = &privatecapb.EncryptionSpec{CloudKmsKey: k}
@@ -178,9 +204,9 @@ func (p privateCAProvider) Create(ctx context.Context, project string, values ma
 	ident := privateCAIdentity(values)
 	notBefore := values["allowRequesterNotBefore"] == "true"
 	csr, cfg := values["allowCsr"] != "false", values["allowConfig"] != "false"
-	if life != nil || !csr || !cfg || ext != nil || ident != nil || notBefore {
+	if life != nil || !csr || !cfg || ext != nil || ident != nil || notBefore || keyTypes != nil || baseline != nil {
 		pool.IssuancePolicy = &privatecapb.CaPool_IssuancePolicy{MaximumLifetime: life, PassthroughExtensions: ext,
-			IdentityConstraints: ident, AllowRequesterSpecifiedNotBeforeTime: notBefore}
+			IdentityConstraints: ident, AllowRequesterSpecifiedNotBeforeTime: notBefore, AllowedKeyTypes: keyTypes, BaselineValues: baseline}
 		if !csr || !cfg {
 			pool.IssuancePolicy.AllowedIssuanceModes = &privatecapb.CaPool_IssuancePolicy_IssuanceModes{
 				AllowCsrBasedIssuance: csr, AllowConfigBasedIssuance: cfg}
@@ -344,11 +370,22 @@ func (p privateCAProvider) poolDetail(ctx context.Context, name string) (console
 					{Label: "Publishes CA certificates", Value: fmt.Sprint(pool.GetPublishingOptions().GetPublishCaCert())},
 					{Label: "Publishes CRLs", Value: fmt.Sprint(pool.GetPublishingOptions().GetPublishCrl())},
 					{Label: "Labels", Value: kmsOrDash(labelsText(pool.GetLabels()))}}},
-				{Heading: "Issuance policy", Properties: privateCAPolicyText(pool.GetIssuancePolicy())}}},
+				{Heading: "Issuance policy", Properties: append(privateCAPolicyText(pool.GetIssuancePolicy()),
+					console.Property{Label: "Allowed key algorithms", Value: privateCAKeyTypesText(pool.GetIssuancePolicy().GetAllowedKeyTypes())},
+					console.Property{Label: "Encoding format", Value: privateCAEncoding(pool)})},
+				{Heading: "Baseline values", Properties: privateCAX509Text(pool.GetIssuancePolicy().GetBaselineValues())}}},
 			{ID: "cacerts", Label: "CA certificates", Kind: console.KindText, Text: anchors.String(),
 				Note: "The pool's trust anchors, as FetchCaCerts answers them (gcloud privateca pools get-ca-certs)."},
 		},
 	}, nil
+}
+
+// privateCAEncoding is the pool's publishing encoding format.
+func privateCAEncoding(pool *privatecapb.CaPool) string {
+	if pool.GetPublishingOptions().GetEncodingFormat() == privatecapb.CaPool_PublishingOptions_DER {
+		return "DER"
+	}
+	return "PEM"
 }
 
 func firstDescription(ca *privatecapb.CertificateAuthority) *privatecapb.CertificateDescription {
@@ -476,17 +513,26 @@ func (p privateCAProvider) certDetail(ctx context.Context, name string) (console
 		props = append(props, console.Property{Label: "Revocation reason", Value: r.GetRevocationState().String()},
 			console.Property{Label: "Revoked", Value: kmsTime(r.GetRevocationTime())})
 	}
-	return console.Detail{
+	d := console.Detail{
 		Summary: []console.Property{
 			{Label: "Status", Value: status},
 			{Label: "Created", Value: kmsTime(c.GetCreateTime())},
 		},
 		Sections: []console.Section{
 			{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Heading: "Certificate", Properties: props}}},
-			{ID: "pem", Label: "Certificate", Kind: console.KindText, Text: c.GetPemCertificate()},
-			{ID: "chain", Label: "Certificate chain", Kind: console.KindText, Text: kmsOrDash(strings.Join(c.GetPemCertificateChain(), ""))},
+			{ID: "pem", Label: "Certificate", Kind: console.KindText, Text: c.GetPemCertificate(), Download: lastSegment(name) + ".crt"},
+			{ID: "chain", Label: "Certificate chain", Kind: console.KindText, Text: kmsOrDash(strings.Join(c.GetPemCertificateChain(), "")),
+				Download: lastSegment(name) + "-chain.crt"},
 		},
-	}, nil
+	}
+	// Manually enter details' generated key, offered as Download private
+	// key for a while after the request (#2144): CAS never stores it.
+	if key := generatedKey(name); key != "" {
+		d.Sections = append(d.Sections, console.Section{ID: "privatekey", Label: "Private key", Kind: console.KindText, Text: key,
+			Download: lastSegment(name) + ".key",
+			Note:     "The key the console generated for this certificate. Download it now: Certificate Authority Service does not keep it, and this page stops offering it 15 minutes after the request."})
+	}
+	return d, nil
 }
 
 // privateCAAlgorithms are the CA key algorithms, as Create CA offers them.
@@ -568,11 +614,11 @@ func (p privateCAProvider) DetailActions(ctx context.Context, project string, pa
 		var out []console.Action
 		switch ca.GetState() {
 		case privatecapb.CertificateAuthority_STAGED, privatecapb.CertificateAuthority_DISABLED:
-			out = append(out, console.Action{ID: "enable", Label: "Enable"})
+			out = append(out, console.Action{ID: "enable", Label: "Enable", Submit: "Confirm", ConfirmStyle: console.DeleteConfirmClick, Confirm: "The CA issues certificates once it is enabled."})
 		}
 		switch ca.GetState() {
 		case privatecapb.CertificateAuthority_STAGED, privatecapb.CertificateAuthority_ENABLED:
-			out = append(out, console.Action{ID: "disable", Label: "Disable",
+			out = append(out, console.Action{ID: "disable", Label: "Disable", Submit: "Confirm", ConfirmStyle: console.DeleteConfirmClick,
 				Confirm: "A disabled CA issues no certificates; the pool's other enabled CAs still do."})
 		}
 		if ca.GetState() == privatecapb.CertificateAuthority_AWAITING_USER_ACTIVATION {
@@ -580,11 +626,17 @@ func (p privateCAProvider) DetailActions(ctx context.Context, project string, pa
 		}
 		switch ca.GetState() {
 		case privatecapb.CertificateAuthority_DISABLED, privatecapb.CertificateAuthority_STAGED, privatecapb.CertificateAuthority_AWAITING_USER_ACTIVATION:
-			out = append(out, console.Action{ID: "delete", Label: "Delete", Destructive: true, Fields: []console.Field{
-				{Name: "skipGracePeriod", Label: "Delete immediately, without the 30-day grace period", Type: "checkbox"},
-				{Name: "ignoreActiveCertificates", Label: "Delete even with active certificates", Type: "checkbox"}}})
+			// Google's Delete Certificate Authority dialog, ending in
+			// Confirm (deleting-certificate-authorities, read 2026-11-22).
+			out = append(out, console.Action{ID: "delete", Label: "Delete", Destructive: true, Title: "Delete Certificate Authority", Submit: "Confirm",
+				Fields: []console.Field{
+					{Name: "ignoreActiveCertificates", Label: "Delete this CA, even if there are active certificates", Type: "checkbox",
+						Help: "Systems that rely on its certificates may stop working."},
+					{Name: "skipGracePeriod", Label: "Skip the 30 day grace period and delete this CA immediately", Type: "checkbox",
+						Help: "Recommended only outside production: the CA cannot then be restored."}}})
 		case privatecapb.CertificateAuthority_DELETED:
-			out = append(out, console.Action{ID: "undelete", Label: "Undelete"})
+			out = append(out, console.Action{ID: "undelete", Label: "Restore", Submit: "Confirm", ConfirmStyle: console.DeleteConfirmClick,
+				Confirm: "The CA is restored to the Disabled state; enable it to issue certificates again."})
 		}
 		if ca.GetState() != privatecapb.CertificateAuthority_DELETED {
 			out = append(out, console.Action{ID: "labels", Label: "Edit labels", Fields: []console.Field{labelsField(ca.GetLabels(), "")}})
@@ -604,36 +656,51 @@ func (p privateCAProvider) DetailActions(ctx context.Context, project string, pa
 		}
 		out := []console.Action{}
 		if c.GetRevocationDetails() == nil {
-			out = append(out, console.Action{ID: "revoke", Label: "Revoke", Destructive: true,
-				Confirm: "A revoked certificate cannot be restored.", Fields: []console.Field{
-					{Name: "reason", Label: "Reason", Type: "select", Default: "REVOCATION_REASON_UNSPECIFIED", Options: privateCARevocationReasons()}}})
+			// Google's Revoke ends in Confirm (revoking-certificates, read
+			// 2026-11-22): the dialog is the confirmation.
+			out = append(out, console.Action{ID: "revoke", Label: "Revoke", Destructive: true, Submit: "Confirm", ConfirmStyle: console.DeleteConfirmClick,
+				Fields: []console.Field{
+					{Name: "reason", Label: "Reason", Type: "select", Default: "REVOCATION_REASON_UNSPECIFIED", Options: privateCARevocationReasons(),
+						Help: "A revoked certificate cannot be restored. It is listed in the CA's next CRL, published within 15 minutes."}}})
 		}
 		return append(out, console.Action{ID: "labels", Label: "Edit labels", Fields: []console.Field{labelsField(c.GetLabels(), "")}})
 	}
 	return nil
 }
 
+// privateCACreateCAFields are Create CA's steps as Google names them
+// (creating-root-ca, create-subordinate-ca, read 2026-11-22): Select CA
+// type, Configure CA subject name, Configure CA key size and algorithm,
+// Configure CA artifacts and Add labels.
 func privateCACreateCAFields() []console.Field {
+	const typ, subj, key, art, lab = "Select CA type", "Configure CA subject name", "Configure CA key size and algorithm", "Configure CA artifacts", "Add labels"
 	return []console.Field{
-		{Name: "certificateAuthorityId", Label: "CA ID", Type: "text", Required: true, Pattern: privateCAIDPattern},
-		{Name: "type", Label: "CA type", Type: "select", Required: true, Default: "SELF_SIGNED", Options: []string{"SELF_SIGNED", "SUBORDINATE"},
-			Help: "SELF_SIGNED is a root CA. SUBORDINATE is signed by the CA named below, or, with none, awaits activation by a third-party issuer."},
-		{Name: "issuerCa", Label: "Issuing CA (subordinate only)", Type: "text",
-			Help: "Optional: the full name of an enabled CA of this instance, projects/…/caPools/…/certificateAuthorities/…. Empty: an external issuer signs the CSR."},
-		{Name: "commonName", Label: "Common name", Type: "text", Help: "Required unless the subject is an RDN sequence."},
-		{Name: "organization", Label: "Organization", Type: "text"},
-		{Name: "countryCode", Label: "Country code", Type: "text", Pattern: `^([A-Za-z]{2})?$`},
-		{Name: "rdnSequence", Label: "Subject RDN sequence", Type: "textarea", Help: privateCARDNHelp},
-		{Name: "algorithm", Label: "Key algorithm", Type: "select", Required: true, Default: "RSA_PKCS1_4096_SHA256", Options: privateCAAlgorithms(),
-			Help: "A key Google manages for the CA. Ignored when a Cloud KMS key version is given below."},
-		{Name: "kmsKeyVersion", Label: "Cloud KMS key version", Type: "text",
-			Help: "Optional: hold the CA's key in Cloud KMS, projects/…/locations/…/keyRings/…/cryptoKeys/…/cryptoKeyVersions/…, an enabled ASYMMETRIC_SIGN version in the pool's region (gcloud --kms-key-version)."},
-		{Name: "gcsBucket", Label: "Publishing bucket", Type: "text",
-			Help: "Optional: a Cloud Storage bucket name, without gs://, where the CA certificate and CRLs are published (gcloud --bucket). Empty: a Google-managed location."},
-		{Name: "lifetimeDays", Label: "Validity (days)", Type: "text", Required: true, Default: "3650", Pattern: `^[0-9]{1,5}$`},
-		{Name: "maxIssuerPathLength", Label: "Path length", Type: "text", Pattern: `^[0-9]{0,2}$`,
+		{Name: "type", Label: "Type", Type: "radio", Required: true, Default: "SELF_SIGNED", Options: []string{"SELF_SIGNED", "SUBORDINATE"}, Section: typ,
+			OptionLabels: map[string]string{"SELF_SIGNED": "Root CA", "SUBORDINATE": "Subordinate CA"}},
+		{Name: "issuerCa", Label: "Issuing CA", Type: "text", ShowWhen: "type=SUBORDINATE", Section: typ,
+			Help: "Root CA is in Google Cloud: the full name of an enabled CA of this instance, projects/…/caPools/…/certificateAuthorities/…. Empty: an external issuer signs the CSR, and the CA awaits activation."},
+		{Name: "lifetimeDays", Label: "Valid for (days)", Type: "text", Required: true, Default: "3650", Pattern: `^[0-9]{1,5}$`, Section: typ},
+		{Name: "initialState", Label: "Initialized state", Type: "radio", Default: "STAGED", Options: []string{"STAGED", "ENABLED"}, Section: typ,
+			OptionLabels: map[string]string{"STAGED": "Staged", "ENABLED": "Enabled"},
+			Help:         "A root CA starts Staged unless Enabled is chosen; a staged CA issues nothing until it is enabled."},
+		{Name: "certificateAuthorityId", Label: "CA ID", Type: "text", Required: true, Pattern: privateCAIDPattern, Section: subj,
+			Help: "The CA's resource ID in the pool, fixed at creation."},
+		{Name: "organization", Label: "Organization (O)", Type: "text", Section: subj},
+		{Name: "organizationalUnit", Label: "Organization unit (OU)", Type: "text", Section: subj},
+		{Name: "countryCode", Label: "Country name (C)", Type: "text", Pattern: `^([A-Za-z]{2})?$`, Section: subj, Help: "A two-letter country code."},
+		{Name: "province", Label: "State or province name", Type: "text", Section: subj},
+		{Name: "locality", Label: "Locality name", Type: "text", Section: subj},
+		{Name: "commonName", Label: "CA common name (CN)", Type: "text", Section: subj, Help: "Required unless the subject is an RDN sequence."},
+		{Name: "rdnSequence", Label: "Subject RDN sequence", Type: "textarea", Help: privateCARDNHelp, Section: subj},
+		{Name: "algorithm", Label: "Key algorithm", Type: "select", Required: true, Default: "RSA_PKCS1_4096_SHA256", Options: privateCAAlgorithms(), Section: key,
+			Help: "A key Google manages for the CA. Ignored when a customer-managed key is given below."},
+		{Name: "kmsKeyVersion", Label: "Customer-managed key", Type: "text", Section: key,
+			Help: "Optional: the Cloud KMS key version that holds the CA's key, projects/…/locations/…/keyRings/…/cryptoKeys/…/cryptoKeyVersions/…, an enabled ASYMMETRIC_SIGN version in the pool's region."},
+		{Name: "maxIssuerPathLength", Label: "Path length", Type: "text", Pattern: `^[0-9]{0,2}$`, Section: key,
 			Help: "Optional: how many subordinate CAs may sit below this one."},
-		labelsField(nil, ""),
+		{Name: "gcsBucket", Label: "Cloud Storage bucket", Type: "text", Browse: "storage", Section: art,
+			Help: "Optional: where the CA certificate and CRLs are published. Empty: a Google-managed bucket in the CA's location."},
+		withSection(labelsField(nil, ""), lab),
 	}
 }
 
@@ -784,11 +851,12 @@ func privateCACreateCA(ctx context.Context, api *privateca.API, pool string, val
 		keySpec.KeyVersion = &privatecapb.CertificateAuthority_KeyVersionSpec_CloudKmsKeyVersion{CloudKmsKeyVersion: v}
 	}
 	ca := &privatecapb.CertificateAuthority{
-		Lifetime: life, Labels: labels, KeySpec: keySpec, GcsBucket: strings.TrimSpace(values["gcsBucket"]),
+		Lifetime: life, Labels: labels, KeySpec: keySpec, GcsBucket: strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(values["gcsBucket"]), "gs://"), "/"),
 		Config: &privatecapb.CertificateConfig{
 			SubjectConfig: &privatecapb.CertificateConfig_SubjectConfig{Subject: &privatecapb.Subject{
 				CommonName: strings.TrimSpace(values["commonName"]), Organization: strings.TrimSpace(values["organization"]),
-				CountryCode: strings.TrimSpace(values["countryCode"]), RdnSequence: rdn}},
+				OrganizationalUnit: strings.TrimSpace(values["organizationalUnit"]), Province: strings.TrimSpace(values["province"]),
+				Locality: strings.TrimSpace(values["locality"]), CountryCode: strings.TrimSpace(values["countryCode"]), RdnSequence: rdn}},
 			X509Config: &privatecapb.X509Parameters{CaOptions: caOpts,
 				KeyUsage: &privatecapb.KeyUsage{BaseKeyUsage: &privatecapb.KeyUsage_KeyUsageOptions{CertSign: true, CrlSign: true}}},
 		},
@@ -807,8 +875,11 @@ func privateCACreateCA(ctx context.Context, api *privateca.API, pool string, val
 	}
 	op, err := api.CreateCertificateAuthority(ctx, &privatecapb.CreateCertificateAuthorityRequest{Parent: pool,
 		CertificateAuthorityId: strings.TrimSpace(values["certificateAuthorityId"]), CertificateAuthority: ca})
-	if err != nil || ca.Type != privatecapb.CertificateAuthority_SUBORDINATE || issuer == "" {
+	if err != nil {
 		return err
+	}
+	if ca.Type != privatecapb.CertificateAuthority_SUBORDINATE || issuer == "" {
+		return privateCAInitialState(ctx, api, pool+"/certificateAuthorities/"+strings.TrimSpace(values["certificateAuthorityId"]), values)
 	}
 	// Signed by a CA of this service, as gcloud privateca subordinates
 	// create --issuer-pool does it: the issuer's pool signs the CSR, and
@@ -831,8 +902,24 @@ func privateCACreateCA(ctx context.Context, api *privateca.API, pool string, val
 	if err != nil {
 		return fmt.Errorf("the issuer did not sign the subordinate's CSR (the CA stays AWAITING_USER_ACTIVATION): %w", err)
 	}
-	_, err = api.ActivateCertificateAuthority(ctx, &privatecapb.ActivateCertificateAuthorityRequest{Name: created.GetName(), PemCaCertificate: signed.GetPemCertificate(),
-		SubordinateConfig: &privatecapb.SubordinateConfig{SubordinateConfig: &privatecapb.SubordinateConfig_CertificateAuthority{CertificateAuthority: issuer}}})
+	if _, err = api.ActivateCertificateAuthority(ctx, &privatecapb.ActivateCertificateAuthorityRequest{Name: created.GetName(), PemCaCertificate: signed.GetPemCertificate(),
+		SubordinateConfig: &privatecapb.SubordinateConfig{SubordinateConfig: &privatecapb.SubordinateConfig_CertificateAuthority{CertificateAuthority: issuer}}}); err != nil {
+		return err
+	}
+	return privateCAInitialState(ctx, api, created.GetName(), values)
+}
+
+// privateCAInitialState applies Create CA's Initialized state: Enabled
+// enables the CA the create left STAGED.
+func privateCAInitialState(ctx context.Context, api *privateca.API, name string, values map[string]string) error {
+	if values["initialState"] != "ENABLED" {
+		return nil
+	}
+	ca, err := api.GetCertificateAuthority(ctx, &privatecapb.GetCertificateAuthorityRequest{Name: name})
+	if err != nil || ca.GetState() != privatecapb.CertificateAuthority_STAGED {
+		return err
+	}
+	_, err = api.EnableCertificateAuthority(ctx, &privatecapb.EnableCertificateAuthorityRequest{Name: name})
 	return err
 }
 

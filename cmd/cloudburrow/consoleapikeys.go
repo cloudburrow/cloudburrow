@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/service/apikeys"
@@ -82,7 +83,9 @@ func toConsoleKey(k *apikeys.Key, withString bool) consoleKey {
 //
 //   - keys {deleted}: the project's live keys, or its deleted ones;
 //   - key {id}: one key, with its previous key after a rotation;
-//   - key-create {displayName}: Create credentials > API key;
+//   - key-create {displayName, restrictions, serviceAccountEmail}: Create
+//     credentials > API key, Google's Create API key page (#2145);
+//   - key-copy {id, displayName, restrictions}: Create a copy (#2145);
 //   - key-update {id, displayName, restrictions}: the key page's Save;
 //   - key-string {id}: Show key;
 //   - key-delete / key-undelete {id}: Delete and Restore;
@@ -97,6 +100,9 @@ func (p serviceUsageProvider) keysCall(project, call string, body json.RawMessag
 		DisplayName  string                `json:"displayName"`
 		Restrictions *apikeys.Restrictions `json:"restrictions"`
 		Deleted      bool                  `json:"deleted"`
+		// ServiceAccount is Create API key's "Authenticate API calls
+		// through a service account" (#2145).
+		ServiceAccount string `json:"serviceAccountEmail"`
 	}
 	if len(body) > 0 {
 		if err := json.Unmarshal(body, &req); err != nil {
@@ -133,7 +139,23 @@ func (p serviceUsageProvider) keysCall(project, call string, body json.RawMessag
 		}
 		return c, nil
 	case "key-create":
-		k, err := p.apiKeys.Create(project, "", req.DisplayName, req.Restrictions, nil, "")
+		k, err := p.apiKeys.Create(project, "", req.DisplayName, req.Restrictions, nil, strings.TrimSpace(req.ServiceAccount))
+		if err != nil {
+			return nil, err
+		}
+		return toConsoleKey(k, true), nil
+	case "key-copy":
+		// Create a copy (#2145): a new key with this one's restrictions,
+		// under the name given, as Google's console-only Create a copy.
+		src, err := p.apiKeys.Get(project, req.ID)
+		if err != nil {
+			return nil, err
+		}
+		r := src.Restrictions
+		if req.Restrictions != nil {
+			r = req.Restrictions
+		}
+		k, err := p.apiKeys.Create(project, "", req.DisplayName, r, nil, src.ServiceAccountEmail)
 		if err != nil {
 			return nil, err
 		}

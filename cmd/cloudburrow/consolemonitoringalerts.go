@@ -162,6 +162,7 @@ func (p monitoringAlertingProvider) List(ctx context.Context, project string) (c
 	if err != nil {
 		return console.Listing{}, err
 	}
+	out.Summary = alertingSummary(s, project)
 	open := map[string]int{}
 	for _, in := range s.Incidents(project) {
 		if in.State == monitoring.IncidentOpen {
@@ -188,37 +189,7 @@ func (p monitoringAlertingProvider) List(ctx context.Context, project string) (c
 var policyComparisons = []string{"COMPARISON_GT", "COMPARISON_GE", "COMPARISON_LT", "COMPARISON_LE", "COMPARISON_EQ", "COMPARISON_NE"}
 
 func (monitoringAlertingProvider) CreateForm() (string, []console.Field) {
-	return "Create policy", []console.Field{
-		{Name: "displayName", Label: "Alert policy name", Type: "text", Required: true, Section: "Policy"},
-		{Name: "severity", Label: "Severity", Type: "select", Options: []string{"SEVERITY_UNSPECIFIED", "CRITICAL", "ERROR", "WARNING"},
-			Default: "SEVERITY_UNSPECIFIED", Section: "Policy"},
-		{Name: "documentation", Label: "Documentation", Type: "textarea", Section: "Policy", Help: "Markdown sent with each notification."},
-		{Name: "conditionType", Label: "Condition type", Type: "select", Options: []string{"threshold", "absence", "log-match", "promql"}, Default: "threshold",
-			Section: "Condition", OptionLabels: map[string]string{"promql": "PromQL"},
-			Help: "Metric threshold, metric absence, a match on log entries, or a PromQL query (the code editor's PromQL)."},
-		{Name: "promqlQuery", Label: "PromQL query", Type: "textarea", Section: "Condition", ShowWhen: "conditionType=promql",
-			Help: `The condition is met for each series the query returns, such as {"custom.googleapis.com/shop/backlog"} > 5.`},
-		{Name: "evaluationInterval", Label: "Evaluation interval (seconds)", Type: "number", Default: "30", Section: "Condition",
-			ShowWhen: "conditionType=promql", Help: "How often the query is evaluated: a multiple of 30 seconds."},
-		{Name: "conditionName", Label: "Condition name", Type: "text", Section: "Condition", Default: "Condition"},
-		{Name: "metric", Label: "Metric type", Type: "text", Section: "Condition", Help: "Threshold and absence: such as custom.googleapis.com/shop/sales."},
-		{Name: "resource", Label: "Resource type", Type: "text", Section: "Condition", Help: "Such as global; empty for any."},
-		{Name: "filter", Label: "Filter", Type: "text", Section: "Condition", Help: `Extra terms, such as metric.labels.env = "prod".`},
-		{Name: "aligner", Label: "Aligner", Type: "select", Options: explorerAligners, Default: "ALIGN_NONE", Section: "Condition"},
-		{Name: "alignmentPeriod", Label: "Alignment period (seconds)", Type: "number", Default: "60", Section: "Condition"},
-		{Name: "reducer", Label: "Reducer", Type: "select", Options: explorerReducers, Default: "REDUCE_NONE", Section: "Condition"},
-		{Name: "comparison", Label: "Comparison", Type: "select", Options: policyComparisons, Default: "COMPARISON_GT", Section: "Condition"},
-		{Name: "threshold", Label: "Threshold", Type: "number", Default: "0", Section: "Condition"},
-		{Name: "duration", Label: "Retest window (seconds)", Type: "number", Default: "0", Section: "Condition",
-			Help: "How long the condition must hold before an incident opens: whole minutes; at least 120 for absence."},
-		{Name: "logFilter", Label: "Log filter", Type: "text", Section: "Condition", Help: `Log match: a Logging filter, such as severity>=ERROR.`},
-		{Name: "rateLimit", Label: "Notification rate limit (seconds)", Type: "number", Default: "300", Section: "Condition",
-			Help: "Log match: at most one notification per period."},
-		{Name: "channels", Label: "Notification channels", Type: "text", Section: "Notifications",
-			Help: "Channel IDs from Notification channels, comma separated."},
-		{Name: "renotify", Label: "Repeat notifications every (minutes)", Type: "number", Section: "Notifications",
-			Help: "Empty to notify once. From 30 to 1440 minutes: an open incident's notification is sent again to the channels above. Not for log match."},
-	}
+	return "Create policy", policyFormFields()
 }
 
 // policyFromForm is the policy a Create policy form describes.
@@ -318,6 +289,9 @@ func policyFromForm(project string, values map[string]string) (*monitoringpb.Ale
 		}
 		pol.NotificationChannels = append(pol.NotificationChannels, c)
 	}
+	if err := applyPolicyGoogle(pol, values); err != nil {
+		return nil, err
+	}
 	if err := setRenotify(pol, values["renotify"]); err != nil {
 		return nil, err
 	}
@@ -416,10 +390,12 @@ func (p monitoringAlertingProvider) Delete(ctx context.Context, project, name st
 func (monitoringAlertingProvider) DeleteLabel() string { return "Delete policy" }
 
 func (p monitoringAlertingProvider) Actions(r console.Resource) []console.Action {
+	// Copy (#2146) opens Create policy holding the policy's settings.
+	cp := console.Action{ID: "copy", Label: "Copy", Href: "/monitoring/alerting/create?from=" + r.Name}
 	if r.Fields["Enabled"] == "Disabled" {
-		return []console.Action{{ID: "enable", Label: "Enable"}}
+		return []console.Action{{ID: "enable", Label: "Enable"}, cp}
 	}
-	return []console.Action{{ID: "disable", Label: "Disable"}}
+	return []console.Action{{ID: "disable", Label: "Disable"}, cp}
 }
 
 func (p monitoringAlertingProvider) Act(ctx context.Context, project, name, action string) error {
@@ -446,6 +422,7 @@ func (p monitoringAlertingProvider) DetailActions(ctx context.Context, project s
 			{Name: "etag", Type: "hidden", Default: fmtTS(pol.GetMutationRecord().GetMutateTime())},
 		}})
 	}
+	acts = append(acts, console.Action{ID: "copy", Label: "Copy", Href: "/monitoring/alerting/create?from=" + path[0]})
 	return append(acts, console.Action{ID: "snooze", Label: "Snooze", Fields: []console.Field{
 		{Name: "displayName", Label: "Snooze name", Type: "text", Required: true, Default: "Snooze " + pol.GetDisplayName()},
 		{Name: "minutes", Label: "Duration (minutes)", Type: "number", Required: true, Default: "60"},
@@ -572,8 +549,10 @@ func (p monitoringAlertingProvider) Detail(ctx context.Context, project string, 
 
 type monitoringIncidentsProvider struct{ monitoringAdmin }
 
-func (monitoringIncidentsProvider) ID() string    { return "monitoring-incidents" }
-func (monitoringIncidentsProvider) Title() string { return "Incidents" }
+func (monitoringIncidentsProvider) ID() string { return "monitoring-incidents" }
+
+// Title is Google's: incidents are listed as Alerts (#2146).
+func (monitoringIncidentsProvider) Title() string { return "Alerts" }
 
 func (p monitoringIncidentsProvider) List(ctx context.Context, project string) (console.Listing, error) {
 	s, err := p.server()
@@ -584,6 +563,7 @@ func (p monitoringIncidentsProvider) List(ctx context.Context, project string) (
 		return console.Listing{Prompt: "Incidents are one project's. Choose one in the toolbar."}, nil
 	}
 	out := incidentListing(s.Incidents(project))
+	out.Summary = alertingSummary(s, project)
 	out.RowsOpenable = true
 	for i := range out.Items {
 		out.Items[i].Link = ""
@@ -595,9 +575,9 @@ func (p monitoringIncidentsProvider) List(ctx context.Context, project string) (
 func (p monitoringIncidentsProvider) Actions(r console.Resource) []console.Action {
 	switch r.Status {
 	case monitoring.IncidentOpen:
-		return []console.Action{{ID: "acknowledge", Label: "Acknowledge"}, {ID: "close", Label: "Close incident"}}
+		return []console.Action{{ID: "acknowledge", Label: "Acknowledge"}, {ID: "close", Label: "Close alert"}}
 	case "acknowledged":
-		return []console.Action{{ID: "close", Label: "Close incident"}}
+		return []console.Action{{ID: "close", Label: "Close alert"}}
 	}
 	return nil
 }
@@ -632,7 +612,7 @@ func (p monitoringIncidentsProvider) Detail(ctx context.Context, project string,
 		if in.Acknowledged && state == monitoring.IncidentOpen {
 			state = "acknowledged"
 		}
-		d := console.Detail{Title: "Incident " + in.ID, Summary: []console.Property{
+		d := console.Detail{Title: "Alert " + in.ID, Summary: []console.Property{
 			{Label: "State", Value: state}, {Label: "Policy", Value: in.PolicyName, Link: "/monitoring/alerting/" + lastSegment(in.Policy)},
 			{Label: "Condition", Value: in.ConditionName}, {Label: "Severity", Value: orDash(in.Severity)},
 			{Label: "Metric", Value: orDash(strings.TrimSpace(in.MetricType + " " + labelsText(in.MetricLabels)))},
@@ -717,21 +697,7 @@ func (p monitoringChannelsProvider) List(ctx context.Context, project string) (c
 var channelFormTypes = []string{"webhook_tokenauth", "webhook_basicauth", "pubsub", "email", "sms", "slack", "pagerduty", "google_chat"}
 
 func (monitoringChannelsProvider) CreateForm() (string, []console.Field) {
-	return "Create channel", []console.Field{
-		{Name: "type", Label: "Channel type", Type: "select", Required: true, Options: channelFormTypes, Default: "webhook_tokenauth"},
-		{Name: "displayName", Label: "Display name", Type: "text", Required: true},
-		{Name: "description", Label: "Description", Type: "text"},
-		{Name: "url", Label: "Endpoint URL", Type: "text", Help: "Webhooks: a local URL, such as http://localhost:8080/alerts."},
-		{Name: "username", Label: "Username", Type: "text", Help: "Webhook with basic auth."},
-		{Name: "password", Label: "Password", Type: "password", Help: "Webhook with basic auth."},
-		{Name: "topic", Label: "Topic", Type: "text", Help: "Pub/Sub: projects/PROJECT/topics/TOPIC on this instance."},
-		{Name: "email_address", Label: "Email address", Type: "text", Help: "Recorded only: no email is sent."},
-		{Name: "number", Label: "Phone number", Type: "text", Help: "SMS, recorded only: no message is sent."},
-		{Name: "channel_name", Label: "Slack channel", Type: "text"},
-		{Name: "auth_token", Label: "Slack token", Type: "password"},
-		{Name: "service_key", Label: "PagerDuty service key", Type: "password"},
-		{Name: "space", Label: "Google Chat space", Type: "text"},
-	}
+	return "Create channel", channelFormFields()
 }
 
 func (p monitoringChannelsProvider) Create(ctx context.Context, project string, values map[string]string) (string, error) {
@@ -789,6 +755,8 @@ func (p monitoringChannelsProvider) DetailActions(ctx context.Context, project s
 	if enabledText(c.GetEnabled()) == "Disabled" {
 		acts = []console.Action{{ID: "enable", Label: "Enable"}}
 	}
+	// Send test notification (#2146), as Google's channel dialogs have.
+	acts = append(acts, console.Action{ID: "test", Label: "Send test notification"})
 	switch c.GetVerificationStatus() {
 	case monitoringpb.NotificationChannel_UNVERIFIED:
 		acts = append(acts, console.Action{ID: "send-code", Label: "Send verification code"},
@@ -820,6 +788,13 @@ func (p monitoringChannelsProvider) ActAtResult(ctx context.Context, project str
 			NotificationChannel: &monitoringpb.NotificationChannel{Name: name, Enabled: wrapperspb.Bool(action == "enable")},
 			UpdateMask:          &fieldmaskpb.FieldMask{Paths: []string{"enabled"}}})
 		return nil, err
+	case "test":
+		d, err := s.SendTestNotification(ctx, name)
+		if err != nil {
+			return nil, err
+		}
+		return &console.Listing{Columns: []string{"Detail"}, NameColumn: "State", Noun: "deliveries", Total: 1,
+			Items: []console.Resource{{Name: d.State, Status: d.State, Fields: map[string]string{"Detail": orDash(d.Detail)}}}}, nil
 	case "send-code":
 		_, err = s.SendNotificationChannelVerificationCode(ctx, &monitoringpb.SendNotificationChannelVerificationCodeRequest{Name: name})
 		return nil, err
@@ -928,16 +903,7 @@ func (p monitoringUptimeProvider) List(ctx context.Context, project string) (con
 }
 
 func (monitoringUptimeProvider) CreateForm() (string, []console.Field) {
-	return "Create uptime check", []console.Field{
-		{Name: "displayName", Label: "Title", Type: "text", Required: true},
-		{Name: "protocol", Label: "Protocol", Type: "select", Options: []string{"HTTP", "HTTPS", "TCP"}, Default: "HTTP"},
-		{Name: "host", Label: "Hostname", Type: "text", Required: true, Help: "A host on this machine, such as localhost or 127.0.0.1."},
-		{Name: "port", Label: "Port", Type: "number", Help: "Empty for 80 (HTTP) or 443 (HTTPS); required for TCP."},
-		{Name: "path", Label: "Path", Type: "text", Default: "/"},
-		{Name: "period", Label: "Check frequency (seconds)", Type: "select", Options: []string{"60", "300", "600", "900"}, Default: "60"},
-		{Name: "timeout", Label: "Response timeout (seconds)", Type: "number", Default: "10"},
-		{Name: "content", Label: "Response content contains", Type: "text", Help: "Optional: the check fails without it."},
-	}
+	return "Create uptime check", uptimeFormFields()
 }
 
 func uptimeFromForm(project string, values map[string]string, c *monitoringpb.UptimeCheckConfig) error {
@@ -986,9 +952,23 @@ func (p monitoringUptimeProvider) Create(ctx context.Context, project string, va
 	if err := uptimeFromForm(project, values, c); err != nil {
 		return "", err
 	}
+	if err := uptimeGoogleFromForm(values, c); err != nil {
+		return "", err
+	}
 	got, err := s.CreateUptimeCheckConfig(ctx, &monitoringpb.CreateUptimeCheckConfigRequest{Parent: "projects/" + project, UptimeCheckConfig: c})
 	if err != nil {
 		return "", err
+	}
+	// Create an alert (#2146): Google's create makes the check's alerting
+	// policy with it.
+	if values["createAlert"] == "true" {
+		pol, err := uptimeAlertPolicy(project, got, values)
+		if err == nil {
+			_, err = s.CreateAlertPolicy(ctx, &monitoringpb.CreateAlertPolicyRequest{Name: "projects/" + project, AlertPolicy: pol})
+		}
+		if err != nil {
+			return "", fmt.Errorf("the uptime check %s was created, but not its alert policy: %v", lastSegment(got.GetName()), err)
+		}
 	}
 	return lastSegment(got.GetName()), nil
 }
@@ -1029,7 +1009,7 @@ func (p monitoringUptimeProvider) Detail(ctx context.Context, project string, pa
 	d := console.Detail{Title: c.GetDisplayName(), Summary: []console.Property{
 		{Label: "Name", Value: c.GetName()}, {Label: "Protocol", Value: uptimeProtocol(c)}, {Label: "Target", Value: uptimeTarget(c)},
 		{Label: "Check frequency", Value: c.GetPeriod().AsDuration().String()}, {Label: "Timeout", Value: c.GetTimeout().AsDuration().String()},
-		{Label: "Content contains", Value: orDash(content)},
+		{Label: "Content contains", Value: orDash(content)}, {Label: "Log check failures", Value: enabledText(wrapperspb.Bool(monitoring.LogCheckFailures(c)))},
 	}, Edit: &console.EditForm{Label: "Edit", Title: "Edit uptime check", Submit: "Save",
 		Note: "The hostname cannot change: create another check for another host.",
 		Fields: []console.Field{
@@ -1041,6 +1021,7 @@ func (p monitoringUptimeProvider) Detail(ctx context.Context, project string, pa
 				Default: strconv.Itoa(int(c.GetPeriod().AsDuration().Seconds()))},
 			{Name: "timeout", Label: "Response timeout (seconds)", Type: "number", Default: strconv.Itoa(int(c.GetTimeout().AsDuration().Seconds()))},
 			{Name: "content", Label: "Response content contains", Type: "text", Default: content},
+			{Name: "logCheckFailures", Label: "Log check failures", Type: "checkbox", Default: strconv.FormatBool(monitoring.LogCheckFailures(c))},
 		}}}
 	rs := s.UptimeResults(c.GetName())
 	results := console.Listing{Columns: []string{"Time", "Latency", "Status", "Error"}, NameColumn: "Result", Noun: "results", AlwaysStatus: true}
@@ -1086,6 +1067,11 @@ func (p monitoringUptimeProvider) Edit(ctx context.Context, project string, path
 	values["protocol"] = uptimeProtocol(c)
 	if err := uptimeFromForm(project, values, c); err != nil {
 		return err
+	}
+	if v, ok := values["logCheckFailures"]; ok {
+		if err := monitoring.SetLogCheckFailures(c, v == "true"); err != nil {
+			return err
+		}
 	}
 	_, err = s.UpdateUptimeCheckConfig(ctx, &monitoringpb.UpdateUptimeCheckConfigRequest{UptimeCheckConfig: c})
 	return err
@@ -1237,7 +1223,7 @@ func (p monitoringDashboardsProvider) List(ctx context.Context, project string) 
 }
 
 func (monitoringDashboardsProvider) CreateForm() (string, []console.Field) {
-	return "Create dashboard", []console.Field{
+	return "Create custom dashboard", []console.Field{
 		{Name: "displayName", Label: "Dashboard name", Type: "text", Required: true},
 		{Name: "json", Label: "Dashboard JSON", Type: "textarea",
 			Help: `Optional: the dashboard as the API's JSON, such as {"gridLayout": {"widgets": [{"title": "Sales", "xyChart": {"dataSets": [{"timeSeriesQuery": {"timeSeriesFilter": {"filter": "metric.type=\"custom.googleapis.com/shop/sales\""}}}]}}]}}; the name above wins.`},
@@ -1511,12 +1497,7 @@ func (p monitoringGroupsProvider) List(ctx context.Context, project string) (con
 }
 
 func (monitoringGroupsProvider) CreateForm() (string, []console.Field) {
-	return "Create group", []console.Field{
-		{Name: "displayName", Label: "Name", Type: "text", Required: true},
-		{Name: "filter", Label: "Filter", Type: "text", Required: true, Help: `Such as resource.type = "global".`},
-		{Name: "parent", Label: "Parent group", Type: "text", Help: "Optional: a group ID."},
-		{Name: "isCluster", Label: "Treat as a cluster", Type: "checkbox"},
-	}
+	return "Create group", groupFormFields()
 }
 
 func (p monitoringGroupsProvider) Create(ctx context.Context, project string, values map[string]string) (string, error) {
@@ -1524,7 +1505,16 @@ func (p monitoringGroupsProvider) Create(ctx context.Context, project string, va
 	if err != nil {
 		return "", err
 	}
-	g := &monitoringpb.Group{DisplayName: strings.TrimSpace(values["displayName"]), Filter: strings.TrimSpace(values["filter"]),
+	filter := strings.TrimSpace(values["filter"])
+	if filter == "" {
+		if filter, err = groupFilterFromCriteria(values); err != nil {
+			return "", err
+		}
+	}
+	if filter == "" {
+		return "", errors.New("add at least one criterion, or a filter")
+	}
+	g := &monitoringpb.Group{DisplayName: strings.TrimSpace(values["displayName"]), Filter: filter,
 		IsCluster: values["isCluster"] == "true"}
 	if v := strings.TrimSpace(values["parent"]); v != "" {
 		g.ParentName = "projects/" + project + "/groups/" + lastSegment(v)
@@ -1563,10 +1553,24 @@ func (p monitoringGroupsProvider) Detail(ctx context.Context, project string, pa
 		Edit: &console.EditForm{Label: "Edit", Title: "Edit group", Submit: "Save", Fields: []console.Field{
 			{Name: "displayName", Label: "Name", Type: "text", Required: true, Default: g.GetDisplayName()},
 			{Name: "filter", Label: "Filter", Type: "text", Required: true, Default: g.GetFilter()}}}}
-	members := console.Listing{Columns: []string{"Labels"}, NameColumn: "Resource type", Noun: "members"}
+	// A member's name, type and region, as Google's group page lists its
+	// resources; a series-only resource has no metadata.
+	members := console.Listing{Columns: []string{"Resource type", "Region", "Tags", "Labels"}, NameColumn: "Name", Noun: "members"}
 	if resp, err := s.ListGroupMembers(ctx, &monitoringpb.ListGroupMembersRequest{Name: name, PageSize: 1000}); err == nil {
+		metaOf := s.ResourceMetadataIndex(ctx, project)
 		for _, m := range resp.GetMembers() {
-			members.Items = append(members.Items, console.Resource{Name: m.GetType(), Fields: map[string]string{"Labels": labelsText(m.GetLabels())}})
+			row := console.Resource{Name: labelsText(m.GetLabels()), Fields: map[string]string{"Resource type": m.GetType(), "Region": "—", "Tags": "—",
+				"Labels": labelsText(m.GetLabels())}}
+			if md := metaOf(m); md != nil {
+				row.Name, row.Fields["Region"] = md.Name, orDash(md.Region)
+				tags := append([]string(nil), md.NetworkTags...)
+				for k, v := range md.UserLabels {
+					tags = append(tags, k+":"+v)
+				}
+				sort.Strings(tags)
+				row.Fields["Tags"] = orDash(strings.Join(tags, ", "))
+			}
+			members.Items = append(members.Items, row)
 		}
 	} else {
 		members.Unavailable = err.Error()
@@ -1608,7 +1612,10 @@ func (monitoringServicesProvider) ID() string    { return "monitoring-services" 
 func (monitoringServicesProvider) Title() string { return "Services" }
 
 func (p monitoringServicesProvider) List(ctx context.Context, project string) (console.Listing, error) {
-	out := console.Listing{Columns: []string{"Display name", "SLOs"}, NameColumn: "Service", Noun: "services", RowsOpenable: true,
+	// Google's Services Overview columns (#2146): Name, Type, SLOs out of
+	// error budget, SLOs with firing alerts, Labels; and the SLO count.
+	out := console.Listing{Columns: []string{"Display name", "Type", "SLOs", "SLOs out of error budget", "SLOs with firing alerts", "Labels"},
+		NameColumn: "Service", Noun: "services", RowsOpenable: true,
 		Note: "A service's page shows each SLO's compliance, error budget and burn rate, computed from its indicator over this instance's time series."}
 	s, err := p.server()
 	if err != nil {
@@ -1622,13 +1629,25 @@ func (p monitoringServicesProvider) List(ctx context.Context, project string) (c
 	if err != nil {
 		return console.Listing{}, err
 	}
+	firing := firingSLOText(ctx, s, project)
+	now := time.Now().Truncate(time.Second)
 	for _, sv := range resp.GetServices() {
-		n := 0
+		n, out0, fire := 0, 0, 0
 		if r, err := s.ListServiceLevelObjectives(ctx, &monitoringpb.ListServiceLevelObjectivesRequest{Parent: sv.GetName(), PageSize: 1000}); err == nil {
 			n = len(r.GetServiceLevelObjectives())
+			for _, o := range r.GetServiceLevelObjectives() {
+				if strings.HasPrefix(sloValues(ctx, s, project, o, now).budget, "-") {
+					out0++
+				}
+				if strings.Contains(firing, `"`+o.GetName()+`"`) {
+					fire++
+				}
+			}
 		}
 		out.Items = append(out.Items, console.Resource{Name: lastSegment(sv.GetName()), Fields: map[string]string{
-			"Display name": orDash(sv.GetDisplayName()), "SLOs": strconv.Itoa(n)}})
+			"Display name": orDash(sv.GetDisplayName()), "Type": serviceTypeText(sv), "SLOs": strconv.Itoa(n),
+			"SLOs out of error budget": strconv.Itoa(out0), "SLOs with firing alerts": strconv.Itoa(fire),
+			"Labels": orDash(labelsText(sv.GetUserLabels()))}})
 	}
 	out.Total = len(out.Items)
 	return out, nil
@@ -1929,11 +1948,33 @@ func (p monitoringSnoozesProvider) List(ctx context.Context, project string) (co
 }
 
 func (monitoringSnoozesProvider) CreateForm() (string, []console.Field) {
-	return "Create snooze", []console.Field{
-		{Name: "displayName", Label: "Snooze name", Type: "text", Required: true},
-		{Name: "policies", Label: "Alert policies", Type: "text", Required: true, Help: "Policy IDs from Alerting, comma separated."},
-		{Name: "minutes", Label: "Duration (minutes)", Type: "number", Required: true, Default: "60"},
+	return "Create snooze", snoozeFormFields(nil)
+}
+
+// CreateFormFor is Create snooze with the project's alert policies to pick
+// from, as Google's Alert policies menu lists them by name (#2146).
+func (p monitoringSnoozesProvider) CreateFormFor(ctx context.Context, project string) []console.Field {
+	s, err := p.server()
+	if err != nil || project == "" {
+		return snoozeFormFields(nil)
 	}
+	var pols []*monitoringpb.AlertPolicy
+	req := &monitoringpb.ListAlertPoliciesRequest{Name: "projects/" + project, PageSize: 1000}
+	for {
+		resp, err := s.ListAlertPolicies(ctx, req)
+		if err != nil {
+			break
+		}
+		pols = append(pols, resp.GetAlertPolicies()...)
+		if resp.GetNextPageToken() == "" {
+			break
+		}
+		req.PageToken = resp.GetNextPageToken()
+	}
+	if pols == nil {
+		pols = []*monitoringpb.AlertPolicy{}
+	}
+	return snoozeFormFields(pols)
 }
 
 func (p monitoringSnoozesProvider) Create(ctx context.Context, project string, values map[string]string) (string, error) {
@@ -1941,18 +1982,16 @@ func (p monitoringSnoozesProvider) Create(ctx context.Context, project string, v
 	if err != nil {
 		return "", err
 	}
-	mins, err := strconv.Atoi(strings.TrimSpace(values["minutes"]))
-	if err != nil || mins <= 0 {
-		return "", fmt.Errorf("duration %q is not a number of minutes", values["minutes"])
+	iv, err := snoozeInterval(values, time.Now())
+	if err != nil {
+		return "", err
 	}
 	var ps []string
-	for _, id := range splitList(values["policies"]) {
+	for _, id := range console.ParseMultiSelect(values["policies"]) {
 		ps = append(ps, "projects/"+project+"/alertPolicies/"+lastSegment(id))
 	}
-	now := time.Now()
 	sn, err := s.CreateSnooze(ctx, &monitoringpb.CreateSnoozeRequest{Parent: "projects/" + project, Snooze: &monitoringpb.Snooze{
-		DisplayName: strings.TrimSpace(values["displayName"]), Criteria: &monitoringpb.Snooze_Criteria{Policies: ps},
-		Interval: &monitoringpb.TimeInterval{StartTime: timestamppb.New(now), EndTime: timestamppb.New(now.Add(time.Duration(mins) * time.Minute))}}})
+		DisplayName: strings.TrimSpace(values["displayName"]), Criteria: &monitoringpb.Snooze_Criteria{Policies: ps}, Interval: iv}})
 	if err != nil {
 		return "", err
 	}
@@ -1960,10 +1999,15 @@ func (p monitoringSnoozesProvider) Create(ctx context.Context, project string, v
 }
 
 func (p monitoringSnoozesProvider) Actions(r console.Resource) []console.Action {
-	if r.Status == "ended" {
+	// Google's row actions: an active snooze's End now, an upcoming one's
+	// Cancel snooze (#2146).
+	switch r.Status {
+	case "ended":
 		return nil
+	case "upcoming":
+		return []console.Action{{ID: "end", Label: "Cancel snooze"}}
 	}
-	return []console.Action{{ID: "end", Label: "End snooze"}}
+	return []console.Action{{ID: "end", Label: "End now"}}
 }
 
 // Act ends a snooze now, which is how Google's API stops one: snoozes are

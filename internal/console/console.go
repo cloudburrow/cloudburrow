@@ -630,6 +630,23 @@ type Field struct {
 // (Field.PickFrom): one per line in the value.
 const PicklistFieldType = "picklist"
 
+// MultiSelectFieldType is the Type of a choice of several of Options
+// (#2146): a menu of them, each with a checkbox, under a filter, the chosen
+// ones drawn as chips, as Google's Create snooze picks alert policies. The
+// value is the chosen options, one per line (ParseMultiSelect).
+const MultiSelectFieldType = "multiselect"
+
+// ParseMultiSelect is a "multiselect" field's chosen options.
+func ParseMultiSelect(value string) []string {
+	var out []string
+	for _, v := range strings.FieldsFunc(value, func(r rune) bool { return r == '\n' || r == ',' }) {
+		if v = strings.TrimSpace(v); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
 // FieldDialog is a Field's Dialog: Button opens a dialog titled Title, an
 // Intro above a table of Columns, each of Rows headed by its first cell.
 type FieldDialog struct {
@@ -1200,6 +1217,11 @@ type Section struct {
 	// Text is the content when Kind is KindText. Newlines are significant and
 	// the client renders it monospace.
 	Text string `json:"text,omitempty"`
+	// Download, on a KindText section, is the file name a Download button
+	// beside Copy saves Text as, labelled "Download" and the section's
+	// label: Google's issued certificate has Download certificate and
+	// Download certificate chain (#2144).
+	Download string `json:"download,omitempty"`
 	// Language, on a KindText section, is the language Text is in, which
 	// the console highlights: "workflows" is a workflow's source, YAML or
 	// JSON, drawn with its syntax highlighted beside the graph of its

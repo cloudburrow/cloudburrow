@@ -23,10 +23,18 @@ import (
 //	         | one_of(string, ...) | monitoring.regex.full_match(string)
 //
 // ":" is "has": a substring of the value. A comparison with a function
-// tests the function; != negates it. metadata.* selectors (system and user
-// labels) are not served and are INVALID_ARGUMENT, as is anything else the
-// grammar does not have: a filter that ignored a term would return series
-// the caller excluded.
+// tests the function; != negates it. Group filters (and ListGroupMembers'
+// filter) also take the resource metadata selectors
+//
+//	"resource.metadata.name" | "resource.metadata.region"
+//	| "resource.metadata.tag." key
+//	| ["resource."] "metadata.user_labels." key
+//	| ["resource."] "metadata.system_labels." key
+//
+// which the console's Name, Tag and Region criteria write. Elsewhere
+// metadata.* is INVALID_ARGUMENT, since time series carry no metadata
+// here, as is anything else the grammar does not have: a filter that
+// ignored a term would return series the caller excluded.
 
 // filterKind is what a filter selects, which decides its selectors.
 type filterKind int
@@ -35,12 +43,17 @@ const (
 	filterSeries filterKind = iota
 	filterDescriptors
 	filterResources
+	// filterGroups is a group's filter: filterSeries's selectors and the
+	// resource metadata's.
+	filterGroups
 )
 
 // subject is what a filter is evaluated against.
 type subject struct {
 	project, metricType, resourceType string
 	metricLabels, resourceLabels      map[string]string
+	// meta is the resource's metadata, for group filters; nil is none.
+	meta *ResourceMetadata
 }
 
 type node interface{ eval(subject) bool }
@@ -341,7 +354,31 @@ func (p *parser) selector(sel string) (func(subject) (string, bool), bool, error
 			return func(s subject) (string, bool) { return s.resourceType, true }, false, nil
 		}
 	}
-	if p.kind == filterSeries {
+	if p.kind == filterGroups {
+		switch sel {
+		case "resource.metadata.name":
+			return func(s subject) (string, bool) { return s.meta.name() }, false, nil
+		case "resource.metadata.region":
+			return func(s subject) (string, bool) { return s.meta.region() }, false, nil
+		}
+		for _, m := range []struct {
+			prefixes []string
+			of       func(*ResourceMetadata) map[string]string
+		}{
+			{[]string{"resource.metadata.tag.", "resource.metadata.tags."}, (*ResourceMetadata).tags},
+			{[]string{"metadata.user_labels.", "resource.metadata.user_labels."}, func(m *ResourceMetadata) map[string]string { return m.userLabels() }},
+			{[]string{"metadata.system_labels.", "resource.metadata.system_labels."}, func(m *ResourceMetadata) map[string]string { return m.systemLabels() }},
+		} {
+			of := m.of
+			if g, ok := labelOf(m.prefixes, func(s subject) map[string]string { return of(s.meta) }); ok {
+				return g, false, nil
+			}
+		}
+		if strings.HasPrefix(sel, "resource.metadata.") || strings.HasPrefix(sel, "metadata.") {
+			return nil, false, badFilter(p.src, "unknown metadata selector %q: resource.metadata.name, resource.metadata.region, resource.metadata.tag.KEY, metadata.user_labels.KEY and metadata.system_labels.KEY are served", sel)
+		}
+	}
+	if p.kind == filterSeries || p.kind == filterGroups {
 		if g, ok := labelOf([]string{"metric.labels.", "metric.label."}, func(s subject) map[string]string { return s.metricLabels }); ok {
 			return g, false, nil
 		}
@@ -349,7 +386,7 @@ func (p *parser) selector(sel string) (func(subject) (string, bool), bool, error
 			return g, false, nil
 		}
 		if strings.HasPrefix(sel, "metadata.") {
-			return nil, false, badFilter(p.src, "metadata selectors (%s) are not supported here: CloudBurrow keeps no system or user metadata labels", sel)
+			return nil, false, badFilter(p.src, "metadata selectors (%s) are served in group filters only: time series carry no resource metadata here", sel)
 		}
 	}
 	return nil, false, badFilter(p.src, "unknown selector %q", sel)

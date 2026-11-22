@@ -15,8 +15,10 @@ import (
 const envAPIKeys = "CLOUDBURROW_TEST_APIKEYS"
 
 // TestAPIKeysThroughTheCredentialsPage (#1915), in the storage shard: Create
-// credentials > API key makes a key whose string the dialog shows; its page
-// saves a name, a website restriction and an API restriction, which the
+// credentials > API key opens Google's Create API key page, which refuses a
+// key with no API restriction and makes one with it, whose string the
+// dialog shows (#2145); its page saves a name and a website restriction
+// added with Add and Done, which the
 // official API Keys client reads back; Show key shows the same string;
 // Rotate key makes a second key with the same restrictions, and Delete the
 // previous key deletes the first; Restore deleted credentials restores it.
@@ -36,6 +38,15 @@ func TestAPIKeysThroughTheCredentialsPage(t *testing.T) {
 	p.waitFor(`document.querySelector("#credentials-api-keys-table") !== null`)
 	p.clickExpr(`document.querySelector("#credentials-create")`)
 	p.clickExpr(`document.querySelector("#credentials-create-api-key")`)
+	// Google's Create API key page (#2145), which asks for at least one
+	// API restriction.
+	p.waitFor(`location.pathname === "/apis/credentials/apikey/create" && document.querySelector("#api-key-form") !== null`)
+	p.clickExpr(`document.querySelector("#api-key-api-none")`)
+	p.clickExpr(`document.querySelector("#api-key-create")`)
+	p.waitFor(`[...document.querySelectorAll("#api-key-form .form-error")].some((e) => !e.hidden && e.textContent.includes("Add at least one API key restriction"))`)
+	p.clickExpr(`document.querySelector("#api-key-api-restrict")`)
+	p.clickExpr(`document.querySelector('#api-key-api-list input[value="serviceusage.googleapis.com"]')`)
+	p.clickExpr(`document.querySelector("#api-key-create")`)
 	p.waitFor(`document.querySelector("#api-key-string") !== null`)
 	var shown string
 	p.eval(`document.querySelector("#api-key-string").value`, &shown)
@@ -63,9 +74,11 @@ func TestAPIKeysThroughTheCredentialsPage(t *testing.T) {
 	p.waitFor(`document.querySelector("#api-key-form") !== null`)
 	p.setField("#api-key-name", "Browser key")
 	p.clickExpr(`document.querySelector("#api-key-app-browser")`)
-	p.setField("#api-key-referrers", "*.example.com/*")
-	p.clickExpr(`document.querySelector("#api-key-api-restrict")`)
-	p.clickExpr(`document.querySelector('#api-key-api-list input[value="storage.googleapis.com"]')`)
+	// Entries are added one at a time: Add, the website, Done (#2145).
+	p.clickExpr(`document.querySelector("#api-key-referrers-add")`)
+	p.setField("#api-key-referrers-v", "*.example.com/*")
+	p.clickExpr(`document.querySelector("#api-key-referrers-done")`)
+	p.waitFor(`document.querySelector("#api-key-referrers-items").textContent.includes("*.example.com/*")`)
 	p.clickExpr(`document.querySelector("#api-key-save")`)
 	p.waitFor(`location.pathname === "/apis/credentials" && document.querySelector('#credentials-api-keys-table tr[data-key]') !== null`)
 	k, err := c.Projects.Locations.Keys.Get(name).Do()
@@ -74,7 +87,7 @@ func TestAPIKeysThroughTheCredentialsPage(t *testing.T) {
 	}
 	if k.DisplayName != "Browser key" || k.Restrictions == nil || k.Restrictions.BrowserKeyRestrictions == nil ||
 		strings.Join(k.Restrictions.BrowserKeyRestrictions.AllowedReferrers, ",") != "*.example.com/*" ||
-		len(k.Restrictions.ApiTargets) != 1 || k.Restrictions.ApiTargets[0].Service != "storage.googleapis.com" {
+		len(k.Restrictions.ApiTargets) != 1 || k.Restrictions.ApiTargets[0].Service != "serviceusage.googleapis.com" {
 		t.Errorf("after Save: %+v", k)
 	}
 	var summary string
