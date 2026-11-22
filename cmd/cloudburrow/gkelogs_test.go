@@ -1,9 +1,14 @@
 package main
 
 import (
+	"context"
+	"io"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
+	"cloud.google.com/go/logging/apiv2/loggingpb"
 	ltype "google.golang.org/genproto/googleapis/logging/type"
 
 	"github.com/cloudburrow/cloudburrow/internal/service/gke"
@@ -84,5 +89,49 @@ func TestGKELogEntry(t *testing.T) {
 	e = gkeLogEntry(s, "stderr", time.Unix(5, 0), `{"severity":"WARNING","message":"m"}`)
 	if e.Severity != ltype.LogSeverity_WARNING || e.GetJsonPayload().GetFields()["message"].GetStringValue() != "m" {
 		t.Errorf("structured entry = %v", e)
+	}
+}
+
+// TestGKELogFeederShipsFromTheLoggingChange (main run 45023269046): a kind
+// of log turned back on is shipped from the change, not from the sweep
+// that first sees a file of it, whose listing ends after a pod made just
+// after the change has written its first line.
+func TestGKELogFeederShipsFromTheLoggingChange(t *testing.T) {
+	changed := time.Date(2026, 11, 22, 13, 30, 0, 0, time.UTC)
+	line := changed.Add(2 * time.Second)
+	pods := `{"items":[{"metadata":{"name":"lg3","namespace":"default","uid":"u3"},
+  "spec":{"nodeName":"k-worker","containers":[{"name":"probe"}]}}]}`
+	file := podLogDir("default", "lg3", "u3") + "/probe/0.log"
+	written := make(chan string, 4)
+	f := &gkeLogFeeder{
+		targets: func() []gke.TelemetryTarget {
+			return []gke.TelemetryTarget{{Name: "c", Project: "proj-1", Location: "us-central1-b", Cluster: "c", Kind: "k",
+				SystemLogs: true, WorkloadLogs: true, LogsSince: changed}}
+		},
+		kubectl: func(context.Context, string, ...string) (string, error) { return pods, nil },
+		docker: func(_ context.Context, args ...string) (io.ReadCloser, func() error, error) {
+			if slices.Contains(args, "find") {
+				return io.NopCloser(strings.NewReader(file + "\n")), func() error { return nil }, nil
+			}
+			return io.NopCloser(strings.NewReader(line.Format(time.RFC3339Nano) + " stdout F stdout-3\n")), func() error { return nil }, nil
+		},
+		write: func(_ context.Context, req *loggingpb.WriteLogEntriesRequest) (*loggingpb.WriteLogEntriesResponse, error) {
+			for _, e := range req.GetEntries() {
+				written <- e.GetTextPayload()
+			}
+			return &loggingpb.WriteLogEntriesResponse{}, nil
+		},
+		// The sweep's clock is past the line: it lists after the pod wrote.
+		now:   func() time.Time { return line.Add(3 * time.Second) },
+		since: map[string]time.Time{}, follows: map[string]*runLogFollow{}, seen: map[string]time.Time{},
+	}
+	f.sweep(context.Background())
+	select {
+	case got := <-written:
+		if got != "stdout-3" {
+			t.Errorf("shipped %q", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the line written after logging was turned back on was not shipped")
 	}
 }

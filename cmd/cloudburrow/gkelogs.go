@@ -186,6 +186,10 @@ type gkeLogFeeder struct {
 	// to be shipped: lines before it are never written.
 	since   map[string]time.Time
 	follows map[string]*runLogFollow
+	// seen is when each cluster (by kind) was first found shipping: the
+	// start of a category whose cluster's logging configuration has not
+	// changed since this process started (TelemetryTarget.LogsSince).
+	seen map[string]time.Time
 }
 
 func newGKELogFeeder(dir string, gkeSvc *gkeService, svc *loggingService) *gkeLogFeeder {
@@ -204,7 +208,7 @@ func newGKELogFeeder(dir string, gkeSvc *gkeService, svc *loggingService) *gkeLo
 			return svc.api.WriteLogEntries(ctx, req)
 		},
 		docker: dockerStream, now: time.Now, every: runLogSweep,
-		since: map[string]time.Time{}, follows: map[string]*runLogFollow{},
+		since: map[string]time.Time{}, follows: map[string]*runLogFollow{}, seen: map[string]time.Time{},
 	}
 }
 
@@ -269,10 +273,20 @@ func (f *gkeLogFeeder) sweep(ctx context.Context) {
 	}
 	var files []file
 	listed := map[string]bool{} // clusters whose files were listed
+	// A category found shipping now starts when its cluster's logging was
+	// last changed, or else when the cluster was first found shipping: not
+	// when this sweep, its listing done, first sees a file of it. A pod
+	// made just after logging was turned back on has written its first
+	// lines by then, and they were dropped (main run 45023269046,
+	// TestGKELoggingAndMonitoring: "logs are not shipped again after
+	// SYSTEM_COMPONENTS and WORKLOADS").
+	start := f.now()
+	starts := map[string]time.Time{}
 	for _, t := range f.targets() {
 		if !t.SystemLogs && !t.WorkloadLogs && len(t.ControlPlaneLogs) == 0 {
 			continue
 		}
+		starts[t.Kind] = t.LogsSince
 		raw, err := f.kubectl(ctx, t.Kind, "get", "pods", "-A", "-o", "json")
 		if err != nil {
 			continue
@@ -308,14 +322,26 @@ func (f *gkeLogFeeder) sweep(ctx context.Context) {
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	now := f.now()
+	for kind, changed := range starts {
+		if _, ok := f.seen[kind]; !ok {
+			f.seen[kind] = start
+		}
+		if changed.IsZero() || changed.After(start) {
+			starts[kind] = f.seen[kind]
+		}
+	}
+	for kind := range f.seen {
+		if _, ok := starts[kind]; !ok {
+			delete(f.seen, kind)
+		}
+	}
 	seen := map[string]bool{}
 	categories := map[string]bool{}
 	for _, fl := range files {
 		cat := fl.kind + "/" + fl.src.category
 		categories[cat] = true
 		if _, ok := f.since[cat]; !ok {
-			f.since[cat] = now
+			f.since[cat] = starts[fl.kind]
 		}
 		key := fl.kind + "\x00" + fl.src.node + "\x00" + fl.src.dir
 		seen[key] = true
