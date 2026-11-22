@@ -18592,7 +18592,7 @@ async function renderHFHubModel(view, id) {
     el("pre", { class: "mono hf-yaml", tabindex: "0", "aria-label": "Kubernetes manifests" }, gkeYAML));
   let gkeData = null;
   const loadGKE = async () => {
-    const q = new URLSearchParams({ id: m.id });
+    const q = new URLSearchParams({ id: m.id, project: currentProject() });
     const [name, loc] = (gkeCluster.value || "").split("|");
     if (name) { q.set("cluster", name); q.set("location", loc); }
     gkeNote.textContent = "Generating the deployment configuration…";
@@ -18645,6 +18645,7 @@ async function renderHFHubModel(view, id) {
     e.preventDefault();
     const gke = envGKE.checked;
     const body = { id: m.id, acceptEula: !!(accept && accept.checked) };
+    if (gke) body.project = currentProject();
     if (gke) { const [cluster, loc] = gkeCluster.value.split("|"); body.cluster = cluster; body.location = loc; }
     if (token) body.hfToken = token.value.trim();
     if (token) token.value = "";

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"sort"
+	"strings"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/modelgarden"
@@ -38,11 +39,20 @@ type HFGKE interface {
 // SetHFGKE offers the GKE deployment environment; nil offers none.
 func (s *Server) SetHFGKE(g HFGKE) { s.hfGKE = g }
 
-func (s *Server) gkeTargets(ctx context.Context) []GKETarget {
+// gkeProject is the project a GKE deployment goes to: the console's
+// selected project (the clusters are that project's), else the endpoints'.
+func (s *Server) gkeProject(project string) string {
+	if p := strings.TrimSpace(project); p != "" {
+		return p
+	}
+	return s.hfProject
+}
+
+func (s *Server) gkeTargets(ctx context.Context, project string) []GKETarget {
 	if s.hfGKE == nil {
 		return nil
 	}
-	out := s.hfGKE.GKEClusters(ctx, s.hfProject)
+	out := s.hfGKE.GKEClusters(ctx, project)
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }
@@ -62,10 +72,11 @@ func (s *Server) handleHFGKEPlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	ts := s.gkeTargets(r.Context())
+	project := s.gkeProject(q.Get("project"))
+	ts := s.gkeTargets(r.Context(), project)
 	clusters := []GKETarget{}
 	clusters = append(clusters, ts...)
-	out := map[string]any{"clusters": clusters, "served": s.hfGKE != nil, "project": s.hfProject}
+	out := map[string]any{"clusters": clusters, "served": s.hfGKE != nil, "project": project}
 	arch := "amd64"
 	if t, ok := pickTarget(ts, q.Get("cluster"), q.Get("location")); ok && t.Arch != "" {
 		arch = t.Arch
@@ -88,6 +99,7 @@ func (s *Server) handleHFGKEDeploy(w http.ResponseWriter, r *http.Request) {
 	}
 	var req struct {
 		ID       string `json:"id"`
+		Project  string `json:"project"`
 		Cluster  string `json:"cluster"`
 		Location string `json:"location"`
 		// Token is a gated model's access token: it goes into the
@@ -102,9 +114,10 @@ func (s *Server) handleHFGKEDeploy(w http.ResponseWriter, r *http.Request) {
 	}
 	token := req.Token
 	req.Token = ""
-	t, ok := pickTarget(s.gkeTargets(r.Context()), req.Cluster, req.Location)
+	project := s.gkeProject(req.Project)
+	t, ok := pickTarget(s.gkeTargets(r.Context(), project), req.Cluster, req.Location)
 	if !ok {
-		writeAPIError(w, apierror.NotFound("cluster %s is not one of project %s's Kubernetes Engine clusters", req.Cluster, s.hfProject))
+		writeAPIError(w, apierror.NotFound("cluster %s is not one of project %s's Kubernetes Engine clusters", req.Cluster, project))
 		return
 	}
 	if t.Status != "RUNNING" {

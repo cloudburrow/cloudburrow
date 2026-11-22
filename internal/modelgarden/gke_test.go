@@ -44,3 +44,17 @@ func TestPlanGKE(t *testing.T) {
 		t.Errorf("gkeName = %q, %q", gkeName("Qwen/Qwen2.5-0.5B-Instruct"), gkeName("a/9b"))
 	}
 }
+
+// Google's ai.gke.io/model label is the model's name lowercased: a
+// mixed-case Hub ID keeps its letters (measured: "SmolLM2-135M-Instruct-GGUF"
+// once came out "mol-2-135---nstruct").
+func TestGKEModelLabelLowercases(t *testing.T) {
+	p, err := gkePlan(Plan{HFID: "bartowski/SmolLM2-135M-Instruct-GGUF", File: "SmolLM2-135M-Instruct-Q4_K_M.gguf"},
+		engines[EngineLlamaCpp], "arm64", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(p.YAML, "ai.gke.io/model: smollm2-135m-instruct-gguf") || p.Name != "smollm2-135m-instruct-gguf" {
+		t.Fatalf("YAML = %s", p.YAML)
+	}
+}

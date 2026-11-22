@@ -91,7 +91,7 @@ func (m *Manager) PlanGKE(ctx context.Context, hfID, arch string) (GKEPlan, erro
 func gkePlan(plan Plan, eng Engine, arch string, gated bool) (GKEPlan, error) {
 	name := gkeName(plan.HFID)
 	pod := eng.Pod(plan)
-	modelLabel := strings.ToLower(nonDNS.ReplaceAllString(plan.HFID[strings.Index(plan.HFID, "/")+1:], "-"))
+	modelLabel := nonDNS.ReplaceAllString(strings.ToLower(plan.HFID[strings.Index(plan.HFID, "/")+1:]), "-")
 	if len(modelLabel) > 63 {
 		modelLabel = modelLabel[:63]
 	}
