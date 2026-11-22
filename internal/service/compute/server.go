@@ -80,6 +80,13 @@ type Options struct {
 	// LB reaches load balancers' backends (#2153, lbplane.go); nil
 	// reaches only those this package can itself.
 	LB LBBackends
+	// CertMaps is Certificate Manager, which target HTTPS and SSL proxies'
+	// certificate maps name (#2160, lbext.go); nil refuses certificateMap.
+	CertMaps CertificateMaps
+	// IAP is Identity-Aware Proxy, which a backend service's iap enforces
+	// (#2160, lbext.go); nil refuses every request through an IAP-enabled
+	// backend service.
+	IAP IAPGate
 }
 
 // obj is one resource, as its JSON is kept: link fields hold relative
