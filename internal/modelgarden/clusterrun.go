@@ -16,39 +16,61 @@ import (
 // token opens it, as Google's deploy does before it starts (its error:
 // "Model ... is a gated Hugging Face model. The token is not valid or does
 // not have permission").
-func (m *Manager) prepareCluster(ctx context.Context, r Request) (hfmodels.Info, Engine, error) {
-	card, err := m.Models.Card(ctx, r.HFModelID)
+func (m *Manager) prepareCluster(ctx context.Context, r Request) (hfmodels.Info, Engine, string, error) {
+	info, eng, file, err := m.Choose(ctx, r.HFModelID)
 	if err != nil {
-		return hfmodels.Info{}, Engine{}, lookupError(r.HFModelID, err)
+		return hfmodels.Info{}, Engine{}, "", err
 	}
-	if card.Disabled {
-		return hfmodels.Info{}, Engine{}, apierror.FailedPrecondition("%s is disabled on Hugging Face", r.HFModelID)
+	if info.Gated == "" {
+		return info, eng, file, nil
 	}
-	info := hfmodels.Info{ID: r.HFModelID, Revision: card.Revision, License: card.License, Gated: card.Gated,
-		PipelineTag: card.Task, Files: card.Files, Bytes: card.Bytes}
-	eng, err := EngineForModel(card.Task, card.Library, card.Tags)
-	if err != nil {
-		return hfmodels.Info{}, Engine{}, apierror.InvalidArgument("cannot deploy %s: %v", r.HFModelID, err)
-	}
-	if card.Gated == "" {
-		return info, eng, nil
-	}
+	card := hfmodels.Card{Revision: info.Revision, Files: info.Files}
 	if r.HFToken == "" {
-		return hfmodels.Info{}, Engine{}, apierror.InvalidArgument("Model %s is a gated Hugging Face model. Accept its licence "+
+		return hfmodels.Info{}, Engine{}, "", apierror.InvalidArgument("Model %s is a gated Hugging Face model. Accept its licence "+
 			"on huggingface.co/%s, then set model_config.hugging_face_access_token to a read token of the account that "+
 			"accepted it", r.HFModelID, r.HFModelID)
 	}
 	if !r.AcceptEULA {
-		return hfmodels.Info{}, Engine{}, apierror.FailedPrecondition("%s is gated on Hugging Face and needs its licence "+
+		return hfmodels.Info{}, Engine{}, "", apierror.FailedPrecondition("%s is gated on Hugging Face and needs its licence "+
 			"accepted: set model_config.accept_eula to true", r.HFModelID)
 	}
 	if err := m.Models.CheckAccess(ctx, r.HFModelID, card.Revision, accessFile(card.Files), r.HFToken); err != nil {
 		if errors.Is(err, hfmodels.ErrGated) {
-			return hfmodels.Info{}, Engine{}, apierror.InvalidArgument("%s", strings.TrimPrefix(err.Error(), hfmodels.ErrGated.Error()+": "))
+			return hfmodels.Info{}, Engine{}, "", apierror.InvalidArgument("%s", strings.TrimPrefix(err.Error(), hfmodels.ErrGated.Error()+": "))
 		}
-		return hfmodels.Info{}, Engine{}, lookupError(r.HFModelID, errors.New(scrub(err.Error(), r.HFToken)))
+		return hfmodels.Info{}, Engine{}, "", lookupError(r.HFModelID, errors.New(scrub(err.Error(), r.HFToken)))
 	}
-	return info, eng, nil
+	return info, eng, file, nil
+}
+
+// Choose reads a Hub model's card and picks its runtime from its task and
+// library, and the file that runtime loads for a GGUF or ONNX repository.
+func (m *Manager) Choose(ctx context.Context, hfID string) (hfmodels.Info, Engine, string, error) {
+	card, err := m.Models.Card(ctx, hfID)
+	if err != nil {
+		return hfmodels.Info{}, Engine{}, "", lookupError(hfID, err)
+	}
+	if card.Disabled {
+		return hfmodels.Info{}, Engine{}, "", apierror.FailedPrecondition("%s is disabled on Hugging Face", hfID)
+	}
+	info := hfmodels.Info{ID: hfID, Revision: card.Revision, License: card.License, Gated: card.Gated,
+		PipelineTag: card.Task, Files: card.Files, Bytes: card.Bytes}
+	eng, err := EngineForModel(card.Task, card.Library, card.Tags)
+	if err != nil {
+		return hfmodels.Info{}, Engine{}, "", apierror.InvalidArgument("cannot deploy %s: %v", hfID, err)
+	}
+	file := ""
+	switch eng.Name {
+	case EngineLlamaCpp:
+		if file = ggufFile(card.Files); file == "" {
+			return hfmodels.Info{}, Engine{}, "", apierror.InvalidArgument("cannot deploy %s: the repository has no GGUF file", hfID)
+		}
+	case EngineONNX:
+		if file = onnxFile(card.Files); file == "" {
+			return hfmodels.Info{}, Engine{}, "", apierror.InvalidArgument("cannot deploy %s: the repository has no ONNX file", hfID)
+		}
+	}
+	return info, eng, file, nil
 }
 
 // accessFile is the file a gated model's access is checked with: its
@@ -91,19 +113,19 @@ func (m *Manager) runCluster(ctx context.Context, project, location string, p Pr
 		return apierror.FailedPrecondition("the instance's cluster cannot run the model: %v", err)
 	}
 	image := eng.ImageFor(arch)
-	contextLen := 0
-	if eng.Name == EngineVLLM {
+	plan := Plan{HFID: model.HFModelID, Revision: model.Revision, Task: model.PipelineTag, File: model.File}
+	if eng.Name == EngineVLLM || (eng.Name == EngineLlamaCpp && model.File != "") {
 		if b, err := m.Models.ReadFile(ctx, model.HFModelID, model.Revision, "config.json", p.token, 1<<20); err == nil {
-			contextLen = ContextLength(b)
+			plan.ContextLen = ContextLength(b)
 		}
 	}
-	args := eng.PodArgs(model.HFModelID, model.Revision, contextLen)
+	pod := eng.Pod(plan)
 	m.mu.Lock()
-	model.Image, model.Args, model.Env = image, args, eng.PodEnv(model.HFModelID)
+	model.Image, model.Args, model.Env = image, append(append([]string{}, pod.Command...), pod.Args...), pod.Env
 	m.save()
 	m.mu.Unlock()
-	w := Workload{Name: name, Image: image, Args: args, Env: eng.PodEnv(model.HFModelID), ShmSize: eng.ShmSize,
-		HealthRoute: eng.HealthRoute, Labels: map[string]string{
+	w := Workload{Name: name, Image: image, Command: pod.Command, Args: pod.Args, Env: pod.Env, Files: pod.Files,
+		ShmSize: eng.ShmSize, HealthRoute: eng.HealthRoute, Labels: map[string]string{
 			"cloudburrow.dev/modelgarden-endpoint": p.Endpoint, "cloudburrow.dev/modelgarden-model": p.Model}}
 	if err := m.Cluster.Apply(ctx, w, p.token); err != nil {
 		return apierror.FailedPrecondition("%s", scrub(err.Error(), p.token))

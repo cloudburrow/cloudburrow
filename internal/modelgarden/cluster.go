@@ -34,9 +34,14 @@ const (
 
 // Workload is one deployed model's objects in the cluster.
 type Workload struct {
-	Name   string
-	Image  string
-	Args   []string
+	Name  string
+	Image string
+	// Command replaces the image's entrypoint when set.
+	Command []string
+	Args    []string
+	// Files are the ConfigMap mounted at /etc/cloudburrow (a Python
+	// runtime's start script, requirements and server), none when empty.
+	Files  map[string]string
 	Env    map[string]string
 	Labels map[string]string
 	// ShmSize is /dev/shm's size, for vLLM's CPU engine.
@@ -100,6 +105,13 @@ func workloadName(epID string) string {
 
 // secretName is a workload's token Secret.
 func secretName(name string) string { return name + "-hf-token" }
+
+// configMapName is a workload's runtime ConfigMap.
+func configMapName(name string) string { return name + "-runtime" }
+
+// cacheHostPath is where, on a node, the Python runtimes keep the packages
+// they download, so a second deployment does not fetch them again.
+const cacheHostPath = "/var/lib/cloudburrow/modelgarden-cache"
 
 // KubeCluster is the instance's kind cluster, through kubectl.
 type KubeCluster struct {
@@ -180,6 +192,26 @@ func (c *KubeCluster) Manifests(w Workload) (deployment, service []byte) {
 		mounts = append(mounts, map[string]any{"name": "shm", "mountPath": "/dev/shm"})
 		volumes = append(volumes, map[string]any{"name": "shm", "emptyDir": map[string]any{"medium": "Memory", "sizeLimit": shmQuantity(w.ShmSize)}})
 	}
+	if len(w.Files) > 0 {
+		mounts = append(mounts, map[string]any{"name": "runtime", "mountPath": "/etc/cloudburrow", "readOnly": true},
+			map[string]any{"name": "cache", "mountPath": "/cache"})
+		volumes = append(volumes, map[string]any{"name": "runtime", "configMap": map[string]any{"name": configMapName(w.Name)}},
+			map[string]any{"name": "cache", "hostPath": map[string]any{"path": cacheHostPath, "type": "DirectoryOrCreate"}})
+	}
+	container := map[string]any{
+		"name": "serving", "image": w.Image, "imagePullPolicy": "IfNotPresent",
+		"args": w.Args, "env": env,
+		"ports":        []map[string]any{{"name": "http", "containerPort": containerPort}},
+		"volumeMounts": mounts,
+		"readinessProbe": map[string]any{"httpGet": map[string]any{"path": health, "port": containerPort},
+			"periodSeconds": 5, "timeoutSeconds": 3, "failureThreshold": 3},
+	}
+	if len(w.Command) > 0 {
+		container["command"] = w.Command
+	}
+	if w.Args == nil {
+		delete(container, "args")
+	}
 	d := map[string]any{
 		"apiVersion": "apps/v1", "kind": "Deployment",
 		"metadata": map[string]any{"name": w.Name, "namespace": c.Namespace, "labels": labels},
@@ -190,15 +222,8 @@ func (c *KubeCluster) Manifests(w Workload) (deployment, service []byte) {
 				"metadata": map[string]any{"labels": labels},
 				"spec": map[string]any{
 					"automountServiceAccountToken": false, "enableServiceLinks": false,
-					"containers": []map[string]any{{
-						"name": "serving", "image": w.Image, "imagePullPolicy": "IfNotPresent",
-						"args": w.Args, "env": env,
-						"ports":        []map[string]any{{"name": "http", "containerPort": containerPort}},
-						"volumeMounts": mounts,
-						"readinessProbe": map[string]any{"httpGet": map[string]any{"path": health, "port": containerPort},
-							"periodSeconds": 5, "timeoutSeconds": 3, "failureThreshold": 3},
-					}},
-					"volumes": volumes,
+					"containers": []map[string]any{container},
+					"volumes":    volumes,
 				},
 			},
 		},
@@ -212,6 +237,20 @@ func (c *KubeCluster) Manifests(w Workload) (deployment, service []byte) {
 	deployment, _ = json.Marshal(d)
 	service, _ = json.Marshal(s)
 	return deployment, service
+}
+
+// ConfigMapManifest is the workload's runtime ConfigMap, nil when it has no
+// files.
+func (c *KubeCluster) ConfigMapManifest(w Workload) []byte {
+	if len(w.Files) == 0 {
+		return nil
+	}
+	b, _ := json.Marshal(map[string]any{
+		"apiVersion": "v1", "kind": "ConfigMap",
+		"metadata": map[string]any{"name": configMapName(w.Name), "namespace": c.Namespace, "labels": c.labels(w)},
+		"data":     w.Files,
+	})
+	return b
 }
 
 // shmQuantity turns Docker's "2g" into Kubernetes' "2Gi".
@@ -241,6 +280,11 @@ func (c *KubeCluster) Apply(ctx context.Context, w Workload, token string) error
 		if err := kube.Apply(ctx, string(secret), opts); err != nil {
 			// kubectl's words, with the token taken out should they quote it.
 			return fmt.Errorf("create the Hugging Face token Secret: %s", scrub(err.Error(), token))
+		}
+	}
+	if cm := c.ConfigMapManifest(w); cm != nil {
+		if err := kube.Apply(ctx, string(cm), opts); err != nil {
+			return fmt.Errorf("create the serving runtime ConfigMap: %w", err)
 		}
 	}
 	d, s := c.Manifests(w)
@@ -504,7 +548,8 @@ func (c *KubeCluster) UnforwardAll() {
 func (c *KubeCluster) Remove(ctx context.Context, name string) error {
 	c.Unforward(name)
 	kube := c.kube()
-	for _, o := range [][2]string{{"deployment", name}, {"service", name}, {"secret", secretName(name)}} {
+	for _, o := range [][2]string{{"deployment", name}, {"service", name}, {"secret", secretName(name)},
+		{"configmap", configMapName(name)}} {
 		if err := kube.Delete(ctx, o[0], o[1], true); err != nil {
 			return fmt.Errorf("delete %s %s: %w", o[0], o[1], err)
 		}

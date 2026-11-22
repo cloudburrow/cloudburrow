@@ -73,20 +73,23 @@ func (d *DeployedModel) OnCluster() bool { return d.Runtime == RuntimeCluster }
 
 // Model is a Model registry entry.
 type Model struct {
-	Project     string            `json:"project"`
-	Location    string            `json:"location"`
-	ID          string            `json:"id"`
-	DisplayName string            `json:"displayName"`
-	HFModelID   string            `json:"hfModelId"`
-	Revision    string            `json:"revision"`
-	License     string            `json:"license"`
-	PipelineTag string            `json:"pipelineTag"`
-	Engine      string            `json:"engine"`
-	Image       string            `json:"image"`
-	Args        []string          `json:"args"`
-	Env         map[string]string `json:"env"`
-	Created     time.Time         `json:"created"`
-	Updated     time.Time         `json:"updated"`
+	Project     string `json:"project"`
+	Location    string `json:"location"`
+	ID          string `json:"id"`
+	DisplayName string `json:"displayName"`
+	HFModelID   string `json:"hfModelId"`
+	Revision    string `json:"revision"`
+	License     string `json:"license"`
+	PipelineTag string `json:"pipelineTag"`
+	Engine      string `json:"engine"`
+	// File is the GGUF or ONNX file a llama.cpp or ONNX Runtime deployment
+	// loads, a path in the repository.
+	File    string            `json:"file,omitempty"`
+	Image   string            `json:"image"`
+	Args    []string          `json:"args"`
+	Env     map[string]string `json:"env"`
+	Created time.Time         `json:"created"`
+	Updated time.Time         `json:"updated"`
 }
 
 // Name is the model's resource name.
@@ -291,9 +294,10 @@ func (m *Manager) Prepare(ctx context.Context, r Request) (Prepared, error) {
 	}
 	var info hfmodels.Info
 	var eng Engine
+	file := ""
 	if runtime == RuntimeCluster {
 		var err error
-		if info, eng, err = m.prepareCluster(ctx, r); err != nil {
+		if info, eng, file, err = m.prepareCluster(ctx, r); err != nil {
 			return Prepared{}, err
 		}
 	} else {
@@ -348,10 +352,10 @@ func (m *Manager) Prepare(ctx context.Context, r Request) (Prepared, error) {
 		machine = "local-cpu"
 	}
 	model := &Model{Project: r.Project, Location: r.Location, ID: modelID, DisplayName: modelName, HFModelID: r.HFModelID,
-		Revision: info.Revision, License: info.License, PipelineTag: info.PipelineTag, Engine: eng.Name, Image: eng.Image,
+		Revision: info.Revision, License: info.License, PipelineTag: info.PipelineTag, Engine: eng.Name, File: file, Image: eng.Image,
 		Env: eng.Env(r.HFModelID), Created: now, Updated: now}
 	if runtime == RuntimeCluster {
-		model.Env = eng.PodEnv(r.HFModelID)
+		model.Env = eng.Pod(Plan{HFID: r.HFModelID, Revision: info.Revision, Task: info.PipelineTag, File: file}).Env
 	}
 	dmID := numericID()
 	ep := &Endpoint{Project: r.Project, Location: r.Location, ID: epID, DisplayName: epName, Dedicated: !r.DedicatedDisabled,
@@ -805,6 +809,7 @@ func (m *Manager) DeleteModel(project, location, modelID string) error {
 // Serving is where a ready endpoint's engine answers.
 type Serving struct {
 	Engine          string
+	Task            string // the model's pipeline task
 	BaseURL         string
 	ServedModel     string // the Hugging Face ID, vLLM's --served-model-name
 	DeployedModelID string
@@ -833,6 +838,6 @@ func (m *Manager) Target(project, location, epID string) (Serving, error) {
 	if x == nil {
 		return Serving{}, apierror.FailedPrecondition("endpoint %s's model is gone", e.Name())
 	}
-	return Serving{Engine: x.Engine, BaseURL: fmt.Sprintf("http://127.0.0.1:%d", e.Deployed.HostPort), ServedModel: x.HFModelID,
+	return Serving{Engine: x.Engine, Task: x.PipelineTag, BaseURL: fmt.Sprintf("http://127.0.0.1:%d", e.Deployed.HostPort), ServedModel: x.HFModelID,
 		DeployedModelID: e.Deployed.ID, ModelName: x.Name(), ModelDisplay: x.DisplayName}, nil
 }

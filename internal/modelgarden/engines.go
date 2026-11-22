@@ -20,7 +20,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
+	"strings"
 )
 
 // The pinned engine images (dependencies.json, localai.modelGardenVLLM and
@@ -43,6 +45,16 @@ const (
 const (
 	EngineVLLM = "vllm"
 	EngineTEI  = "tei"
+	// EngineHFPyTorch is Google's Hugging Face PyTorch Inference container's
+	// server (#2148): the transformers pipeline tasks and diffusers'
+	// text-to-image.
+	EngineHFPyTorch = "hf-pytorch"
+	// EngineLlamaCpp is llama.cpp's server, for GGUF repositories.
+	EngineLlamaCpp = "llama-cpp"
+	// EngineMLX is mlx-lm's server on MLX's Linux CPU backend.
+	EngineMLX = "mlx"
+	// EngineONNX is ONNX Runtime, for ONNX-only repositories.
+	EngineONNX = "onnx"
 )
 
 // containerPort is the port both engines serve on inside their container,
@@ -59,15 +71,33 @@ type Engine struct {
 	// the Model's containerSpec.
 	HealthRoute, PredictRoute string
 	ShmSize                   string
+	// Python is set for the runtimes that run on PythonImage, installing
+	// their pinned packages when the pod starts (runtimes.go).
+	Python bool
+	// OpenAI is set for the OpenAI-compatible servers (vLLM, llama.cpp,
+	// mlx-lm), which take chat completions.
+	OpenAI bool
+	// Pipeline is set for the runtimes whose :predict body is the
+	// container's own ({"instances", "parameters"} in, {"predictions"}
+	// out): the PyTorch Inference container and ONNX Runtime.
+	Pipeline bool
 }
 
 var engines = map[string]Engine{
 	EngineVLLM: {Name: EngineVLLM, Title: "vLLM", Image: VLLMImage, HealthRoute: "/health", PredictRoute: "/v1/completions",
 		// Model Garden sets serving_container_shared_memory_size_mb to 16 GB
 		// on GPUs; vLLM's CPU engine needs more than Docker's 64 MB default.
-		ShmSize: "2g"},
+		ShmSize: "2g", OpenAI: true},
 	EngineTEI: {Name: EngineTEI, Title: "Text Embeddings Inference", Image: TEIImage, Platform: "linux/amd64",
 		HealthRoute: "/health", PredictRoute: "/embed"},
+	EngineHFPyTorch: {Name: EngineHFPyTorch, Title: "Hugging Face PyTorch Inference", Image: PythonImage,
+		HealthRoute: "/health", PredictRoute: "/predict", Python: true, Pipeline: true, ShmSize: "1g"},
+	EngineLlamaCpp: {Name: EngineLlamaCpp, Title: "llama.cpp", Image: LlamaCppImage, HealthRoute: "/health",
+		PredictRoute: "/v1/completions", OpenAI: true},
+	EngineMLX: {Name: EngineMLX, Title: "MLX (mlx-lm, CPU)", Image: PythonImage, HealthRoute: "/health",
+		PredictRoute: "/v1/completions", Python: true, OpenAI: true},
+	EngineONNX: {Name: EngineONNX, Title: "ONNX Runtime", Image: PythonImage, HealthRoute: "/health",
+		PredictRoute: "/predict", Python: true, Pipeline: true},
 }
 
 // EngineByName returns a known engine.
@@ -79,7 +109,9 @@ func EngineByName(name string) (Engine, bool) {
 // EngineFor picks the engine for a Hugging Face pipeline task, as Model
 // Garden does: the documented tasks are text-generation, text2text-generation,
 // image-text-to-text (vLLM), feature-extraction and sentence-similarity (TEI)
-// and text-to-image (a diffusers container, not served here).
+// and text-to-image (a diffusers container). This is the engine for a model
+// downloaded to the host and served in Docker, which runs vLLM and TEI only;
+// EngineForModel picks among every runtime for a cluster deployment.
 func EngineFor(pipelineTag string) (Engine, error) {
 	switch pipelineTag {
 	case "text-generation", "text2text-generation", "image-text-to-text":
@@ -90,36 +122,151 @@ func EngineFor(pipelineTag string) (Engine, error) {
 		return Engine{}, fmt.Errorf("the model declares no Hugging Face pipeline task, so no serving container can be chosen; " +
 			"Model Garden deploys text-generation, text2text-generation, image-text-to-text, feature-extraction and sentence-similarity models")
 	}
-	return Engine{}, fmt.Errorf("pipeline task %q is not served locally: CloudBurrow deploys text-generation, text2text-generation and "+
-		"image-text-to-text models on vLLM and feature-extraction and sentence-similarity models on Text Embeddings Inference", pipelineTag)
+	return Engine{}, fmt.Errorf("pipeline task %q is not served from a download in Docker, which runs vLLM and Text Embeddings "+
+		"Inference only: deploy it from Model Garden's Hugging Face tab, which runs every runtime on the instance's cluster", pipelineTag)
 }
 
-// EngineForModel picks the engine for a Hub model from its task, library
-// and tags (#2148): a sentence-transformers model, or a feature-extraction
-// or sentence-similarity one, on Text Embeddings Inference; a causal or
-// seq2seq LM, or an image-text-to-text model, on vLLM, which loads
-// transformers weights (safetensors or PyTorch), not a GGUF, MLX or ONNX
-// export alone. Everything else is refused with the reason, which Model
-// Garden's card shows beside a disabled Deploy.
+// EngineForModel picks the runtime for a Hub model from its task, library
+// and tags (#2148):
+//
+//   - a GGUF repository on llama.cpp; an MLX one on mlx-lm; an ONNX-only one
+//     (ONNX files and no transformers weights) on ONNX Runtime;
+//   - a sentence-transformers model, or a feature-extraction or
+//     sentence-similarity one, on Text Embeddings Inference;
+//   - a causal or seq2seq LM, or an image-text-to-text model, on vLLM;
+//   - diffusers' text-to-image and the other transformers pipeline tasks on
+//     the Hugging Face PyTorch Inference container's server.
+//
+// Everything else (a task no runtime serves, or a library with no
+// runtime) is refused with the reason, which Model Garden's card shows
+// beside a disabled Deploy.
 func EngineForModel(task, library string, tags []string) (Engine, error) {
 	has := map[string]bool{}
 	for _, t := range tags {
 		has[t] = true
 	}
-	switch library {
-	case "gguf", "mlx", "onnx", "openvino", "llama.cpp", "ctranslate2":
-		if !has["safetensors"] && !has["pytorch"] {
-			return Engine{}, fmt.Errorf("the model is published as %s only; vLLM and Text Embeddings Inference load "+
-				"transformers weights (safetensors or PyTorch)", library)
+	weights := has["safetensors"] || has["pytorch"]
+	switch {
+	case library == "gguf" || (has["gguf"] && !weights):
+		switch task {
+		case "", "text-generation", "image-text-to-text", "feature-extraction", "sentence-similarity":
+			return engines[EngineLlamaCpp], nil
+		}
+		return Engine{}, fmt.Errorf("llama.cpp serves GGUF text-generation and embedding models, not %s", task)
+	case library == "mlx" || has["mlx"]:
+		switch task {
+		case "", "text-generation", "text2text-generation":
+			return engines[EngineMLX], nil
+		}
+		return Engine{}, fmt.Errorf("mlx-lm serves MLX text-generation models, not %s", task)
+	case library == "onnx" || library == "transformers.js" || (has["onnx"] && !weights):
+		if onnxTasks[task] {
+			return engines[EngineONNX], nil
+		}
+		if task == "" {
+			return Engine{}, fmt.Errorf("the ONNX model declares no pipeline task, so ONNX Runtime cannot choose its inputs and outputs")
+		}
+		return Engine{}, fmt.Errorf("ONNX Runtime serves %s, not %s", strings.Join(sortedTrue(onnxTasks), ", "), task)
+	case library == "openvino", library == "ctranslate2", library == "llama.cpp" && !has["gguf"]:
+		if !weights {
+			return Engine{}, fmt.Errorf("the model is published as %s only; CloudBurrow serves transformers weights, GGUF, MLX and ONNX", library)
 		}
 	}
 	if library == "sentence-transformers" && (task == "" || task == "feature-extraction" || task == "sentence-similarity") {
 		return engines[EngineTEI], nil
 	}
 	if library == "diffusers" {
-		return Engine{}, fmt.Errorf("diffusers models (%s) need Model Garden's diffusers container, which is not served locally", task)
+		if task == "text-to-image" || task == "" {
+			return engines[EngineHFPyTorch], nil
+		}
+		return Engine{}, fmt.Errorf("diffusers models are served for text-to-image, which Model Garden documents, not %s", task)
 	}
-	return EngineFor(task)
+	if e, err := EngineFor(task); err == nil {
+		return e, nil
+	}
+	if pipelineTasks[task] {
+		return engines[EngineHFPyTorch], nil
+	}
+	if task == "" {
+		return Engine{}, fmt.Errorf("the model declares no Hugging Face pipeline task, so no serving container can be chosen")
+	}
+	return Engine{}, fmt.Errorf("pipeline task %q has no serving runtime: the transformers pipeline does not serve it", task)
+}
+
+func sortedTrue(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k, v := range m {
+		if v {
+			out = append(out, k)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// Plan is what a cluster pod serves: the model, its revision and task, and
+// for GGUF and ONNX the one file the runtime loads.
+type Plan struct {
+	HFID, Revision, Task, File string
+	// ContextLen is the model's context length (vLLM caps
+	// --max-model-len at it), 0 when unknown.
+	ContextLen int
+}
+
+// PodSpec is an engine's container in a cluster pod: its command (the
+// image's entrypoint when empty), arguments, environment, and the files of
+// its ConfigMap, mounted at /etc/cloudburrow (the Python runtimes').
+type PodSpec struct {
+	Command, Args []string
+	Env           map[string]string
+	Files         map[string]string
+}
+
+// Pod is the engine's container for p. The weights are pulled from the Hub
+// at p.Revision inside the pod, into /data.
+func (e Engine) Pod(p Plan) PodSpec {
+	env := map[string]string{"MODEL_ID": p.HFID, "HF_HOME": "/data/hf", "HF_HUB_DISABLE_TELEMETRY": "1", "DO_NOT_TRACK": "1"}
+	switch e.Name {
+	case EngineVLLM, EngineTEI:
+		return PodSpec{Args: e.PodArgs(p.HFID, p.Revision, p.ContextLen), Env: e.PodEnv(p.HFID)}
+	case EngineLlamaCpp:
+		env["LLAMA_CACHE"] = "/data/llama.cpp"
+		args := []string{"--host", "0.0.0.0", "--port", strconv.Itoa(containerPort),
+			"--model-url", "https://huggingface.co/" + p.HFID + "/resolve/" + p.Revision + "/" + p.File,
+			"--alias", p.HFID, "--no-webui"}
+		if p.Task == "feature-extraction" || p.Task == "sentence-similarity" {
+			args = append(args, "--embeddings")
+		} else {
+			n := maxModelLen
+			if p.ContextLen > 0 && p.ContextLen < n {
+				n = p.ContextLen
+			}
+			args = append(args, "--ctx-size", strconv.Itoa(n))
+		}
+		return PodSpec{Args: args, Env: env}
+	}
+	// The Python runtimes: Vertex's AIP_ variables, as Google's containers
+	// read them, and the model's.
+	env["RUNTIME"] = e.Name
+	env["AIP_MODE"] = "PREDICTION"
+	env["AIP_HTTP_PORT"] = strconv.Itoa(containerPort)
+	env["AIP_HEALTH_ROUTE"] = e.HealthRoute
+	env["AIP_PREDICT_ROUTE"] = e.PredictRoute
+	env["HF_REVISION"] = p.Revision
+	env["HF_TASK"] = p.Task
+	switch e.Name {
+	case EngineHFPyTorch:
+		// The toolkit downloads HF_MODEL_ID itself, into HF_MODEL_DIR.
+		env["HF_MODEL_ID"] = p.HFID
+		env["HF_MODEL_DIR"] = "/data/model"
+		if p.Task == "" {
+			env["HF_TASK"] = "text-to-image"
+		}
+	case EngineONNX:
+		env["ONNX_FILE"] = p.File
+		env["MODEL_FILES"] = strings.Join(onnxPatterns(p.File), "\n")
+	}
+	return PodSpec{Command: []string{"sh", "/etc/cloudburrow/start.sh"}, Env: env, Files: runtimeConfig(e.Name)}
 }
 
 // ImageFor is the engine's image for a node architecture (amd64, arm64).

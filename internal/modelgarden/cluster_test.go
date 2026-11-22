@@ -116,14 +116,24 @@ func hubCardStub(t *testing.T, id, task, library, gated string) *httptest.Server
 				g = gated
 			}
 			tags := []string{library}
-			if library != "gguf" {
+			siblings := []any{map[string]any{"rfilename": "config.json", "size": len(tinyConfig)}}
+			switch library {
+			case "gguf":
+				siblings = append(siblings, map[string]any{"rfilename": "tiny-Q8_0.gguf", "size": 2000},
+					map[string]any{"rfilename": "tiny-Q4_K_M.gguf", "size": 1000})
+			case "transformers.js", "onnx":
+				tags = append(tags, "onnx")
+				siblings = append(siblings, map[string]any{"rfilename": "onnx/model.onnx", "size": 2000},
+					map[string]any{"rfilename": "onnx/model_quantized.onnx", "size": 1000},
+					map[string]any{"rfilename": "tokenizer.json", "size": 10})
+			default:
 				tags = append(tags, "safetensors")
+				siblings = append(siblings, map[string]any{"rfilename": "model.safetensors", "size": 1000})
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"id": id, "sha": strings.Repeat("cd", 20), "pipeline_tag": task,
 				"library_name": library, "gated": g, "tags": tags,
 				"cardData": map[string]any{"license": "apache-2.0"},
-				"siblings": []any{map[string]any{"rfilename": "config.json", "size": len(tinyConfig)},
-					map[string]any{"rfilename": "model.safetensors", "size": 1000}}})
+				"siblings": siblings})
 		case strings.HasSuffix(r.URL.Path, "/config.json"):
 			if gated != "" && r.Header.Get("Authorization") != "Bearer "+testToken {
 				w.WriteHeader(http.StatusUnauthorized)
@@ -282,10 +292,10 @@ func TestClusterFailureIsFailedAndRemoved(t *testing.T) {
 // on the cluster too.
 func TestClusterPrepareRefuses(t *testing.T) {
 	ctx := context.Background()
-	m, _ := newClusterManager(t, "text-generation", "gguf", "", fakeVLLM(t))
+	m, _ := newClusterManager(t, "text-to-image", "gguf", "", fakeVLLM(t))
 	if _, err := m.Prepare(ctx, Request{Project: "p", Location: "l", HFModelID: "acme/tiny"}); codeOf(err) != codes.InvalidArgument ||
-		!strings.Contains(err.Error(), "gguf") {
-		t.Errorf("a GGUF-only model = %v", err)
+		!strings.Contains(err.Error(), "llama.cpp serves GGUF text-generation") {
+		t.Errorf("a GGUF text-to-image model = %v", err)
 	}
 	if _, err := m.Prepare(ctx, Request{Project: "p", Location: "l", HFModelID: "acme/tiny", HFToken: testToken, Runtime: RuntimeDocker}); codeOf(err) != codes.InvalidArgument ||
 		!strings.Contains(err.Error(), "HF_TOKEN") {
@@ -414,7 +424,7 @@ func TestKubeClusterApplyAndObserve(t *testing.T) {
 	for _, call := range f.calls {
 		got = append(got, strings.Join(call[2:4], " "))
 	}
-	if strings.Join(got, ",") != "delete deployment,delete service,delete secret" {
+	if strings.Join(got, ",") != "delete deployment,delete service,delete secret,delete configmap" {
 		t.Errorf("remove = %v", f.calls)
 	}
 }
@@ -442,9 +452,27 @@ func TestEngineForModel(t *testing.T) {
 		{"feature-extraction", "transformers", nil, EngineTEI},
 		{"text-generation", "transformers", []string{"safetensors"}, EngineVLLM},
 		{"image-text-to-text", "transformers", nil, EngineVLLM},
-		{"text-generation", "gguf", []string{"gguf"}, ""},
-		{"text-to-image", "diffusers", nil, ""},
-		{"automatic-speech-recognition", "transformers", nil, ""},
+		{"text-generation", "gguf", []string{"gguf"}, EngineLlamaCpp},
+		{"text-generation", "llama.cpp", []string{"gguf"}, EngineLlamaCpp},
+		{"feature-extraction", "gguf", []string{"gguf"}, EngineLlamaCpp},
+		{"text-to-image", "gguf", []string{"gguf"}, ""},
+		{"text-generation", "mlx", []string{"mlx", "safetensors"}, EngineMLX},
+		{"image-classification", "mlx", []string{"mlx"}, ""},
+		{"text-classification", "transformers.js", []string{"onnx"}, EngineONNX},
+		{"text-classification", "onnx", []string{"onnx"}, EngineONNX},
+		{"", "onnx", []string{"onnx"}, ""},
+		{"text-to-image", "onnx", []string{"onnx"}, ""},
+		{"text-classification", "transformers", []string{"onnx", "safetensors"}, EngineHFPyTorch},
+		{"text-to-image", "diffusers", nil, EngineHFPyTorch},
+		{"image-to-image", "diffusers", nil, ""},
+		{"automatic-speech-recognition", "transformers", nil, EngineHFPyTorch},
+		{"object-detection", "transformers", nil, EngineHFPyTorch},
+		{"translation", "transformers", nil, EngineHFPyTorch},
+		{"question-answering", "transformers", nil, EngineHFPyTorch},
+		{"token-classification", "transformers", nil, EngineHFPyTorch},
+		{"summarization", "transformers", nil, EngineHFPyTorch},
+		{"robotics", "lerobot", nil, ""},
+		{"text-generation", "openvino", []string{"openvino"}, ""},
 	} {
 		e, err := EngineForModel(c.task, c.library, c.tags)
 		if (c.want == "") != (err != nil) || e.Name != c.want {
