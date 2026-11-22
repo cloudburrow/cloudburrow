@@ -52,6 +52,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/doctor"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 	"github.com/cloudburrow/cloudburrow/internal/metadata"
+	"github.com/cloudburrow/cloudburrow/internal/nbruntime"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/prefetch"
 )
@@ -1322,8 +1323,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 
 	// The console reads through the objects above rather than owning any of
 	// them, so it cannot answer from a store of its own.
+	// BigQuery Studio's notebook runtimes (#2094), deleted when up stops.
+	notebooks := &nbruntime.Manager{Instance: cfg.Name,
+		Logf: func(format string, args ...any) { fmt.Fprintf(stdout, "cloudburrow: "+format+"\n", args...) }}
+	defer notebooks.Close()
 	consoleSrv := buildConsole(consoleDeps{
-		cfg: cfg, iam: iamEnforcer, assetOut: assetOut, coord: coord, cluster: clusterComp, localAI: localAISrv, localModels: localModels,
+		cfg: cfg, iam: iamEnforcer, notebooks: notebooks, assetOut: assetOut, coord: coord, cluster: clusterComp, localAI: localAISrv, localModels: localModels,
 		hfModels: hfModels, garden: garden,
 		projects: projects,
 		tasks:    tasksSvc, secrets: secretsSvc, forwarders: forwarders,

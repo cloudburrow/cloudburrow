@@ -974,7 +974,7 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/CreateAttachment",
         "status": "Verified",
         "tests": [
-          "test/compat/artifactregistryclients2111_test.go:325 TestIAMEnforcementArtifactRegistryOCIClients",
+          "test/compat/artifactregistryclients2111_test.go:326 TestIAMEnforcementArtifactRegistryOCIClients",
           "test/compat/artifactregistryconfig_test.go:78 TestArtifactRegistryConfigAndMetadata"
         ]
       },

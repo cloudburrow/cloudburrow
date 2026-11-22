@@ -242,3 +242,16 @@ https://github.com/ml-explore/mlx-lm, MIT License) with their dependencies,
 installed from PyPI into a virtual environment of CloudBurrow's from the
 hash-pinned lock internal/hostai/mlx-lock.txt (MIT, BSD, Apache License
 2.0, PSF and MPL-2.0 licences).
+
+The binary embeds the base map of BigQuery Studio's Map visualization
+(internal/console/assets/vendor/naturalearth/land-110m.js), derived from
+Natural Earth's 1:110m land (https://github.com/nvkelso/natural-earth-vector,
+v5.1.2), which is in the public domain. Made with Natural Earth; the source's
+digest is in third_party/naturalearth/.
+
+BigQuery Studio's notebook runtime image (internal/nbruntime/image) is built
+locally on a notebook's first Connect; pip installs Google's
+google-cloud-bigquery and bigquery-magics (Apache License, Version 2.0),
+IPython, pandas (BSD 3-Clause License), pyarrow (Apache License, Version
+2.0), db-dtypes and matplotlib into it. None of them is part of this
+repository or of the binary.

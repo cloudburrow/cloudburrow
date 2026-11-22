@@ -23,6 +23,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/metadata"
 	"github.com/cloudburrow/cloudburrow/internal/metrics"
 	"github.com/cloudburrow/cloudburrow/internal/modelgarden"
+	"github.com/cloudburrow/cloudburrow/internal/nbruntime"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/service/apikeys"
 	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
@@ -128,6 +129,9 @@ type consoleDeps struct {
 	// sqlAdmin is the Cloud SQL Admin API, which restores Backup and DR
 	// backups; nil unless a Cloud SQL service is enabled.
 	sqlAdmin *sqladmin.Server
+	// notebooks are BigQuery Studio's notebook runtimes (#2094); nil
+	// leaves Connect unavailable.
+	notebooks *nbruntime.Manager
 }
 
 // runAddrOf is the adapter's live address, or nothing when there is no
@@ -532,8 +536,11 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		// The emulator serves the instance's default project and no other, so
 		// the screen is told which one that is (#698).
 		{config.ServiceBigQuery, func(a string) console.Provider {
+			if d.notebooks != nil && d.notebooks.BigQuery == nil {
+				d.notebooks.BigQuery = func() string { return a }
+			}
 			return bigqueryProvider{endpoint: a, project: d.cfg.DefaultProject(), registry: d.projects,
-				savedQueries: filepath.Join(d.cfg.InstanceDir(), bqSavedQueriesFile)}
+				savedQueries: filepath.Join(d.cfg.InstanceDir(), bqSavedQueriesFile), notebooks: d.notebooks}
 		}},
 		// Job history, BigQuery's second screen (#993).
 		{config.ServiceBigQuery, func(a string) console.Provider {

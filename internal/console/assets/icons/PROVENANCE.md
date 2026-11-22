@@ -39,5 +39,6 @@ recorded here.
 | `vendor/xterm/LICENSE` | [xterm.js](https://github.com/xtermjs/xterm.js) `@xterm/xterm` 6.0.0, unmodified | MIT | 2026-09-27 |
 | `vendor/xterm/addon-fit.js` | [xterm.js](https://github.com/xtermjs/xterm.js) `@xterm/addon-fit` 0.11.0, unmodified | MIT (`vendor/xterm/addon-fit.LICENSE`) | 2026-09-27 |
 | `vendor/xterm/addon-fit.LICENSE` | [xterm.js](https://github.com/xtermjs/xterm.js) `@xterm/addon-fit` 0.11.0, unmodified | MIT | 2026-09-27 |
+| `vendor/naturalearth/land-110m.js` | [Natural Earth](https://github.com/nvkelso/natural-earth-vector) v5.1.2 `geojson/ne_110m_land.geojson`, its rings rounded to 0.1 degree by `tools/naturalearth/land.py` (third_party/naturalearth/PROVENANCE.md) | Public domain (third_party/naturalearth/LICENSE.md) | 2026-11-22 |
 
 The table is empty: no third-party asset is embedded.
