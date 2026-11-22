@@ -35,8 +35,8 @@ tracks it; a closed issue is named only where it says what was built.
 | Spanner, Bigtable, Firestore, Datastore | 5 | 0 | 1 | 3 | 1 |
 | Cloud SQL, Memorystore | 6 | 1 | 4 | 1 | 0 |
 | Functions, credentials, tooling | 1 | 0 | 1 | 0 | 0 |
-| Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **65** | **5** | **18** | **36** | **6** |
+| Console | 3 | 3 | 0 | 0 | 0 |
+| **Total** | **68** | **8** | **18** | **36** | **6** |
 
 ## Cloud Storage
 
@@ -325,6 +325,9 @@ latency and resource charts (#1267); the Artifact Registry repository Permission
 
 | Gap | Why open | Size |
 |---|---|---|
+| Monitoring groups' Name, Tag and Region criteria: they match resource metadata, which CloudBurrow keeps none of, so the group API refuses `resource.metadata.*` (#2146) | not built yet | M |
+| Uptime checks' Log check failures: the pinned `monitoringpb` has no `log_check_failures` field (#2146) | not built yet | S |
+| The Alerting page's summary pane (#2146) | not built yet | S |
 
 ## Excluded on purpose
 

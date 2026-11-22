@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/monitoring/apiv3/v2/monitoringpb"
+	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/cloudburrow/cloudburrow/internal/egress"
@@ -221,4 +222,29 @@ func deliver(ctx context.Context, c *monitoringpb.NotificationChannel, payload [
 		return DeliveryFailed, "the webhook answered " + resp.Status
 	}
 	return DeliverySent, "posted to " + u.Host + u.Path
+}
+
+// SendTestNotification is the console's Send test notification (#2146),
+// which Google's channel dialogs offer and the API has no method for: a
+// test incident's payload delivered to the channel as an incident's would
+// be, and recorded with the channel's deliveries.
+func (s *Server) SendTestNotification(ctx context.Context, name string) (Delivery, error) {
+	s.mu.Lock()
+	c, _ := s.get(kindChannels, name).(*monitoringpb.NotificationChannel)
+	publish := s.publish
+	now := s.now()
+	s.mu.Unlock()
+	if c == nil {
+		return Delivery{}, apierror.NotFound("Requested entity was not found.")
+	}
+	payload, _ := json.Marshal(map[string]any{"version": "1.2", "incident": map[string]any{
+		"incident_id": "test-notification", "state": "open", "started_at": now.Unix(),
+		"policy_name": "Test notification", "condition_name": "Test notification",
+		"summary": "This is a test notification from Cloud Monitoring."}})
+	d := Delivery{Time: now, Channel: c.GetName(), Type: c.GetType(), Kind: "test"}
+	d.State, d.Detail = deliver(ctx, c, payload, publish)
+	s.mu.Lock()
+	s.recordDelivery(d)
+	s.mu.Unlock()
+	return d, nil
 }

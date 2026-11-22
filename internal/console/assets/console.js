@@ -123,6 +123,7 @@ const GKE_DISCOVERY = ["/kubernetes/gateways", "/kubernetes/services", "/kuberne
 // Secret Manager's page tabs (#1850): the global secrets and Regional secrets.
 const SECRET_TABS = ["/secrets", "/secrets-regional"];
 // Certificate Authority Service's tabs (#2144).
+const ALERTING_TABS = ["/monitoring/alerting", "/monitoring/alerting/incidents", "/monitoring/snoozes"];
 const CAS_TABS = ["/security/cas", "/security/cas/certificateAuthorities", "/security/cas/certificates", "/security/cas/templates"];
 const GKE_STORAGE = ["/kubernetes/storage", "/kubernetes/storage-classes"];
 // Cloud Logging's Settings and its Log Scopes tab (#2020), as Google's
@@ -646,10 +647,12 @@ const ROUTES = [
   // Alerting, its incidents and notification channels, Uptime checks,
   // Dashboards, Groups, Services (SLOs) and Snoozes (#1964), over the same
   // in-process API.
-  { path: "/monitoring/alerting", service: "monitoring-alerting", icon: "monitoring", title: "Alerting",
+  // Google's Alerting page holds the policies, the open alerts (Google's
+  // name for incidents) and the snoozes (#2146): here its tabs.
+  { path: "/monitoring/alerting", service: "monitoring-alerting", icon: "monitoring", title: "Alerting", tabTitle: "Policies", pageTabs: ALERTING_TABS,
     kind: "Alert policy", section: "Operations", product: "monitoring", productTitle: "Monitoring" },
-  { path: "/monitoring/alerting/incidents", service: "monitoring-incidents", icon: "monitoring", title: "Incidents",
-    kind: "Incident", section: "Operations", product: "monitoring", productTitle: "Monitoring" },
+  { path: "/monitoring/alerting/incidents", service: "monitoring-incidents", icon: "monitoring", title: "Alerting", tabTitle: "Alerts", pageTabs: ALERTING_TABS,
+    navHidden: true, navAs: "/monitoring/alerting", kind: "Alert", section: "Operations", product: "monitoring", productTitle: "Monitoring" },
   { path: "/monitoring/alerting/channels", service: "monitoring-channels", icon: "monitoring", title: "Notification channels",
     kind: "Notification channel", section: "Operations", product: "monitoring", productTitle: "Monitoring" },
   { path: "/monitoring/uptime", service: "monitoring-uptime", icon: "monitoring", title: "Uptime checks",
@@ -660,8 +663,8 @@ const ROUTES = [
     kind: "Group", section: "Operations", product: "monitoring", productTitle: "Monitoring" },
   { path: "/monitoring/services", service: "monitoring-services", icon: "monitoring", title: "Services",
     kind: "Service", section: "Operations", product: "monitoring", productTitle: "Monitoring" },
-  { path: "/monitoring/snoozes", service: "monitoring-snoozes", icon: "monitoring", title: "Snoozes",
-    kind: "Snooze", section: "Operations", product: "monitoring", productTitle: "Monitoring" },
+  { path: "/monitoring/snoozes", service: "monitoring-snoozes", icon: "monitoring", title: "Alerting", tabTitle: "Snoozes", pageTabs: ALERTING_TABS,
+    navHidden: true, navAs: "/monitoring/alerting", kind: "Snooze", section: "Operations", product: "monitoring", productTitle: "Monitoring" },
   // Cloud Logging's menu in Google's order (#1863): Logs Explorer, Log
   // Analytics, Logs Dashboard, Log-based Metrics, Log Router, Logs Storage,
   // then the pages Google keeps elsewhere that CloudBurrow serves here

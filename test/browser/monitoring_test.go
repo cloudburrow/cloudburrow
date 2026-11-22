@@ -247,7 +247,7 @@ func TestMonitoringAlertingThroughThePage(t *testing.T) {
 	row := `[...document.querySelectorAll("#view tbody tr")].find((r) => r.textContent.includes("Backlog too long"))`
 	p.waitFor(row + ` !== undefined`)
 	p.eval(row+`.querySelector(".overflow-trigger").click()`, nil)
-	p.clickText("#view .overflow-item, .overflow-item", "Close incident")
+	p.clickText("#view .overflow-item, .overflow-item", "Close alert")
 	p.waitFor(row + ` !== undefined && ` + row + `.textContent.includes("closed")`)
 
 	p.navigate("/monitoring/alerting?project=" + project)
@@ -338,7 +338,7 @@ func TestMonitoringUptimeAndDashboardsThroughThePage(t *testing.T) {
 	metricType := "custom.googleapis.com/browser/orders"
 	writeBrowserGauge(t, mc, project, metricType, 4)
 	p.navigate("/monitoring/dashboards?project=" + project)
-	p.clickText("#view button", "Create dashboard")
+	p.clickText("#view button", "Create custom dashboard")
 	p.submitForm(map[string]string{"displayName": "Browser board",
 		"json": `{"gridLayout":{"widgets":[{"title":"Orders","xyChart":{"dataSets":[{"timeSeriesQuery":{"timeSeriesFilter":{"filter":"metric.type=\"` + metricType + `\""}}}]}}]}}`},
 		"displayName")

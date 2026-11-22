@@ -111,7 +111,8 @@ func (privateCAProvider) CreateForm() (string, []console.Field) {
 	// publishing options; then the baseline values' steps. The issuance
 	// policy's lifetime, identity constraints and passthrough extensions,
 	// and CMEK and labels, follow as CloudBurrow's own sections: Google's
-	// pool wizard does not show them in the docs (UNVERIFIED).
+	// pool wizard does not show them in the docs.
+	// UNVERIFIED: docs re-read 2026-11-22, still unanswered: https://docs.cloud.google.com/certificate-authority-service/docs/creating-ca-pool
 	const first, methods, publish, more = "Name, region and tier", "Configure certificate request methods", "Configure publishing options", "Issuance policy and labels"
 	fields := []console.Field{
 		{Name: "caPoolId", Label: "Name", Type: "text", Required: true, Pattern: privateCAIDPattern, Section: first,

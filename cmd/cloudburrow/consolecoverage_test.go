@@ -54,7 +54,7 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 	config.ServiceCloudSQLMySQL: {Providers: []string{"cloudsql-mysql", "cloudsql-instances", "cloudsql-backups"}},
 	config.ServiceBackupDR: {Providers: []string{"backupdr-overview", "backupdr-vaulted", "backupdr-plans", "backupdr-associations",
 		"backupdr", "backupdr-jobs"}},
-	config.ServicePrivateCA:        {Providers: []string{"privateca", "privateca-templates"}},
+	config.ServicePrivateCA:        {Providers: []string{"privateca", "privateca-cas", "privateca-certs", "privateca-templates"}},
 	config.ServiceWorkflows:        {Providers: []string{"workflows"}},
 	config.ServiceParameterManager: {Providers: []string{"parametermanager", "parametermanager-templates"}},
 	// The Kubernetes Engine API (#1913): its clusters are on Kubernetes
