@@ -71,6 +71,8 @@ var apiLibrary = map[string]apiLibraryInfo{
 	"workflowexecutions.googleapis.com":   {"Developer tools", "Executes workflows, lists their executions, their step entries and callbacks, and cancels them.", "workflows"},
 	"compute.googleapis.com":              {"Compute", "Creates and runs virtual machines on Google Cloud Platform; CloudBurrow serves its VPC networking: networks, subnets, firewall rules, routes and IP addresses.", ""},
 	"vpcaccess.googleapis.com":            {"Networking", "Manages Serverless VPC Access connectors, which let serverless services such as Cloud Run reach a VPC network; CloudBurrow records them, and carries no traffic through them.", ""},
+	"certificatemanager.googleapis.com":   {"Security", "Manages TLS certificates, certificate maps and DNS authorizations for load balancers; CloudBurrow issues Google-managed certificates from its own local CA.", ""},
+	"iap.googleapis.com":                  {"Security", "Controls access to cloud applications running on Google Cloud Platform: IAP's access policies and settings, enforced on IAP-enabled backend services of this instance's load balancers.", ""},
 	"container.googleapis.com":            {"Compute", "Builds and manages container-based applications, powered by the open source Kubernetes technology.", ""},
 	"containeranalysis.googleapis.com":    {"Developer tools", "Stores and reads the notes and occurrences of software artifacts, vulnerabilities among them.", ""},
 	"containerscanning.googleapis.com":    {"Security", "Scans the container images pushed to Artifact Registry for vulnerabilities.", ""},

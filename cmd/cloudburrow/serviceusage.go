@@ -68,6 +68,8 @@ var serviceUsageAPIs = []struct {
 	{config.ServiceMonitoring, serviceusage.API{Name: "monitoring.googleapis.com", Title: "Cloud Monitoring API"}},
 	{config.ServiceCompute, serviceusage.API{Name: "compute.googleapis.com", Title: "Compute Engine API"}},
 	{config.ServiceCompute, serviceusage.API{Name: "vpcaccess.googleapis.com", Title: "Serverless VPC Access API"}},
+	{config.ServiceCompute, serviceusage.API{Name: "certificatemanager.googleapis.com", Title: "Certificate Manager API"}},
+	{config.ServiceCompute, serviceusage.API{Name: "iap.googleapis.com", Title: "Cloud Identity-Aware Proxy API"}},
 	{config.ServiceWorkflows, serviceusage.API{Name: "workflows.googleapis.com", Title: "Workflows API"}},
 	{config.ServiceWorkflows, serviceusage.API{Name: "workflowexecutions.googleapis.com", Title: "Workflow Executions API"}},
 	{config.ServiceParameterManager, serviceusage.API{Name: "parametermanager.googleapis.com", Title: "Parameter Manager API"}},

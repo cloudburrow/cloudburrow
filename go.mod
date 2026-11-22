@@ -14,6 +14,7 @@ require (
 	cloud.google.com/go/bigquery v1.85.0
 	cloud.google.com/go/bigtable v1.58.0
 	cloud.google.com/go/billing v1.28.1
+	cloud.google.com/go/certificatemanager v1.17.1
 	cloud.google.com/go/cloudbuild v1.35.0
 	cloud.google.com/go/cloudquotas v1.14.1
 	cloud.google.com/go/cloudsqlconn v1.24.0
@@ -31,6 +32,7 @@ require (
 	cloud.google.com/go/functions v1.26.0
 	cloud.google.com/go/grafeas v0.6.1
 	cloud.google.com/go/iam v1.14.0
+	cloud.google.com/go/iap v1.19.1
 	cloud.google.com/go/kms v1.35.0
 	cloud.google.com/go/logging v1.20.0
 	cloud.google.com/go/longrunning v1.5.0

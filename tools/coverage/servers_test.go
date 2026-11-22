@@ -16,6 +16,7 @@ import (
 	ahpb "cloud.google.com/go/bigquery/analyticshub/apiv1/analyticshubpb"
 	"cloud.google.com/go/billing/apiv1/billingpb"
 	"cloud.google.com/go/billing/budgets/apiv1/budgetspb"
+	"cloud.google.com/go/certificatemanager/apiv1/certificatemanagerpb"
 	"cloud.google.com/go/cloudquotas/apiv1/cloudquotaspb"
 	dfpb "cloud.google.com/go/dataform/apiv1/dataformpb"
 	iamadminpb "cloud.google.com/go/iam/admin/apiv1/adminpb"
@@ -45,10 +46,12 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/analyticshub"
 	"github.com/cloudburrow/cloudburrow/internal/service/apphub"
 	"github.com/cloudburrow/cloudburrow/internal/service/billing"
+	"github.com/cloudburrow/cloudburrow/internal/service/certificatemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/cloudquotas"
 	"github.com/cloudburrow/cloudburrow/internal/service/dataform"
 	"github.com/cloudburrow/cloudburrow/internal/service/datatransfer"
 	"github.com/cloudburrow/cloudburrow/internal/service/gke"
+	"github.com/cloudburrow/cloudburrow/internal/service/iap"
 	"github.com/cloudburrow/cloudburrow/internal/service/kms"
 	"github.com/cloudburrow/cloudburrow/internal/service/kmsinventory"
 	"github.com/cloudburrow/cloudburrow/internal/service/logging"
@@ -134,6 +137,18 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 		t.Fatal(err)
 	}
 	vpcaccesspb.RegisterVpcAccessServiceServer(srv, va)
+	// Certificate Manager and IAP alone (#2160): their mixins are other
+	// services' rows.
+	cmSrv, err := certificatemanager.New(certificatemanager.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	certificatemanagerpb.RegisterCertificateManagerServer(srv, cmSrv)
+	iapSrv, err := iap.New(iap.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	iapSrv.Register(srv)
 	gkeSrv, err := gke.NewServer(nil, gke.Options{Versions: []gke.Version{{GKE: "1.36.4-gke.0", Image: "kindest/node:v1.36.4"}}})
 	if err != nil {
 		t.Fatal(err)

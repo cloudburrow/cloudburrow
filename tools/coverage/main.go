@@ -80,6 +80,7 @@ import (
 	_ "cloud.google.com/go/bigtable/apiv2/bigtablepb"
 	_ "cloud.google.com/go/billing/apiv1/billingpb"
 	_ "cloud.google.com/go/billing/budgets/apiv1/budgetspb"
+	_ "cloud.google.com/go/certificatemanager/apiv1/certificatemanagerpb"
 	_ "cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
 	_ "cloud.google.com/go/cloudquotas/apiv1/cloudquotaspb"
 	_ "cloud.google.com/go/cloudtasks/apiv2/cloudtaskspb"
@@ -100,6 +101,7 @@ import (
 	_ "cloud.google.com/go/iam/apiv1/iampb"
 	_ "cloud.google.com/go/iam/apiv2/iampb"
 	_ "cloud.google.com/go/iam/apiv3/iampb"
+	_ "cloud.google.com/go/iap/apiv1/iappb"
 	_ "cloud.google.com/go/kms/apiv1/kmspb"
 	_ "cloud.google.com/go/kms/inventory/apiv1/inventorypb"
 	_ "cloud.google.com/go/logging/apiv2/loggingpb"
@@ -363,6 +365,12 @@ var areas = []area{
 	// Engine port; its Locations and Operations mixins are other areas'
 	// rows.
 	{Key: "vpcaccess", Title: "Serverless VPC Access (v1)", Own: true, Services: []string{"google.cloud.vpcaccess.v1.VpcAccessService"}},
+	// Certificate Manager and Identity-Aware Proxy (#2160): CloudBurrow's
+	// own, JSON on the Compute Engine port; Certificate Manager's Locations
+	// and Operations mixins are other areas' rows.
+	{Key: "certificatemanager", Title: "Certificate Manager (v1)", Own: true, Services: []string{"google.cloud.certificatemanager.v1.CertificateManager"}},
+	{Key: "iap", Title: "Identity-Aware Proxy (v1)", Own: true,
+		Services: []string{"google.cloud.iap.v1.IdentityAwareProxyAdminService", "google.cloud.iap.v1.IdentityAwareProxyOAuthService"}},
 	{Key: "workflows", Title: "Workflows and Workflow Executions (v1)", Own: true,
 		Services: []string{"google.cloud.workflows.v1.Workflows", "google.cloud.workflows.executions.v1.Executions"}},
 	// The Kubernetes Engine API (#1913): CloudBurrow's own, gRPC and JSON
