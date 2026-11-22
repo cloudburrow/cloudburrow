@@ -15,39 +15,28 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// Query modes (#2017). Google documents ExecuteSqlRequest.query_mode
+// Query modes (#2017, #2029). Google documents ExecuteSqlRequest.query_mode
 // (google/spanner/v1/spanner.proto): NORMAL returns the results; PLAN the
 // query plan and no results; PROFILE the plan, the results and the
 // statistics; WITH_STATS "the overall (but not operator-level) execution
 // statistics along with the results"; WITH_PLAN_AND_STATS the plan, the
-// overall statistics and the results. A plan is Spanner's QueryPlan, plan
-// nodes of operators (Distributed Union, Table Scan, Filter, ...) that its
-// optimizer chose.
+// overall statistics and the results.
 //
 // Measured on the emulator (cloud-spanner-emulator 1.5.58, 2026-11-20): PLAN
 // and PROFILE answer a plan of one node, display name "No query plan" and
-// no kind, which is no plan at all (its README: "The SQL query modes PLAN
-// and PROFILE do not return any query plans"); PROFILE's statistics are
-// rows_returned and elapsed_time; WITH_STATS and WITH_PLAN_AND_STATS
-// return the results with no statistics at all.
+// no kind (its README: "The SQL query modes PLAN and PROFILE do not return
+// any query plans"); PROFILE's statistics are rows_returned and
+// elapsed_time; WITH_STATS and WITH_PLAN_AND_STATS return the results with
+// no statistics at all. The emulator runs a query on GoogleSQL's reference
+// evaluator, which has no plan.
 //
-// The front does not draw a plan of its own: which operators run, which
-// index is chosen, where the distributed unions go and how a join is made
-// are Spanner's optimizer's decisions, and nothing local makes them (the
-// emulator runs a query on ZetaSQL's reference evaluator, which has no
-// plan), so a plan written here from the query's text could look right and
-// differ from the one Spanner runs. Read in its source for #2029
-// (cloud-spanner-emulator d357ec1d): EvaluateQuery hands the resolved AST
-// to googlesql::PreparedQuery, every table is read whole from its base
-// table (QueryableTable::CreateEvaluatorTableIterator, KeySet::All),
-// FORCE_INDEX is only validated and JOIN_METHOD validated and dropped, so
-// no shape (scan, filter, join, index read) runs as Spanner's plan would,
-// and none is given one. The modes whose answer is a plan, PLAN,
-// PROFILE and WITH_PLAN_AND_STATS, are refused UNIMPLEMENTED, rather than
-// answered with the emulator's placeholder node. WITH_STATS, which has no
-// plan, is served: the front runs the query in PROFILE mode on the
-// emulator and returns its results and statistics without the placeholder
-// plan. NORMAL passes as it is.
+// So the front serves the modes with a plan itself (plan.go, planstats.go):
+// it plans the query from its text and the database's schema, in the
+// operators of Google's query execution operators pages, and in PROFILE
+// mode measures every operator on the engine. A query its planner does not
+// understand is refused UNIMPLEMENTED, by name. WITH_STATS, which has no
+// plan, runs as PROFILE on the emulator, its placeholder plan dropped.
+// NORMAL passes as it is.
 
 var restExecuteSQL = regexp.MustCompile(`^/v1/(` + pDB + `/sessions/[^/:]+):(executeSql|executeStreamingSql)$`)
 
@@ -58,25 +47,16 @@ var planModes = map[spannerpb.ExecuteSqlRequest_QueryMode]bool{
 	spannerpb.ExecuteSqlRequest_WITH_PLAN_AND_STATS: true,
 }
 
-// errNoQueryPlan is the refusal of a mode that returns a plan.
-func errNoQueryPlan(m spannerpb.ExecuteSqlRequest_QueryMode) error {
-	return status.Errorf(codes.Unimplemented, "Query mode %s is not served here: it returns a query plan, and CloudBurrow's Spanner engine (the Spanner emulator) has no query optimizer to make Spanner's plan, so it has none to return. Run the query in NORMAL mode, or in WITH_STATS mode for its execution statistics.", m)
-}
-
-// emulatorMode is req as the emulator is sent it, and whether its plan is
-// to be dropped from the answer: WITH_STATS runs as PROFILE. A mode with a
-// plan is refused.
-func emulatorMode(req *spannerpb.ExecuteSqlRequest) (*spannerpb.ExecuteSqlRequest, bool, error) {
-	m := req.GetQueryMode()
-	if planModes[m] {
-		return nil, false, errNoQueryPlan(m)
-	}
-	if m != spannerpb.ExecuteSqlRequest_WITH_STATS {
-		return req, false, nil
+// emulatorMode is a request in a mode without a plan as the emulator is
+// sent it, and whether its plan is to be dropped from the answer:
+// WITH_STATS runs as PROFILE.
+func emulatorMode(req *spannerpb.ExecuteSqlRequest) (*spannerpb.ExecuteSqlRequest, bool) {
+	if req.GetQueryMode() != spannerpb.ExecuteSqlRequest_WITH_STATS {
+		return req, false
 	}
 	r := proto.Clone(req).(*spannerpb.ExecuteSqlRequest)
 	r.QueryMode = spannerpb.ExecuteSqlRequest_PROFILE
-	return r, true, nil
+	return r, true
 }
 
 // withoutPlan drops the emulator's placeholder plan from stats.
@@ -90,10 +70,28 @@ func (d cacheData) ExecuteSql(ctx context.Context, req *spannerpb.ExecuteSqlRequ
 	if err := d.check(ctx, req.GetSession()); err != nil {
 		return nil, err
 	}
-	req, strip, err := emulatorMode(req)
-	if err != nil {
-		return nil, err
+	return d.execute(ctx, req)
+}
+
+// execute answers ExecuteSql once its caller is checked.
+func (d cacheData) execute(ctx context.Context, req *spannerpb.ExecuteSqlRequest) (*spannerpb.ResultSet, error) {
+	if planModes[req.GetQueryMode()] {
+		var rs *spannerpb.ResultSet
+		stats, err := d.s.servePlanned(ctx, req, func(r *spannerpb.ExecuteSqlRequest) (*spannerpb.ResultSetStats, []byte, error) {
+			out, err := d.s.data.ExecuteSql(ctx, r)
+			if err != nil {
+				return nil, nil, err
+			}
+			rs = out
+			return out.GetStats(), out.GetMetadata().GetTransaction().GetId(), nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		rs.Stats = stats
+		return rs, nil
 	}
+	req, strip := emulatorMode(req)
 	rs, err := d.s.data.ExecuteSql(ctx, req)
 	if err == nil && strip {
 		withoutPlan(rs.GetStats())
@@ -105,11 +103,50 @@ func (d cacheData) ExecuteStreamingSql(req *spannerpb.ExecuteSqlRequest, stream 
 	if err := d.check(stream.Context(), req.GetSession()); err != nil {
 		return err
 	}
-	req, strip, err := emulatorMode(req)
-	if err != nil {
-		return err
+	return d.executeStreaming(stream.Context(), req, stream.Send)
+}
+
+// executeStreaming answers ExecuteStreamingSql once its caller is checked.
+func (d cacheData) executeStreaming(ctx context.Context, req *spannerpb.ExecuteSqlRequest, send func(*spannerpb.PartialResultSet) error) error {
+	if planModes[req.GetQueryMode()] {
+		var last *spannerpb.PartialResultSet
+		stats, err := d.s.servePlanned(ctx, req, func(r *spannerpb.ExecuteSqlRequest) (*spannerpb.ResultSetStats, []byte, error) {
+			in, err := d.s.data.ExecuteStreamingSql(ctx, r)
+			if err != nil {
+				return nil, nil, err
+			}
+			var began []byte
+			for {
+				m, err := in.Recv()
+				if err == io.EOF {
+					break
+				}
+				if err != nil {
+					return nil, nil, err
+				}
+				if began == nil {
+					began = m.GetMetadata().GetTransaction().GetId()
+				}
+				if last != nil {
+					if err := send(last); err != nil {
+						return nil, nil, err
+					}
+				}
+				last = m
+			}
+			return last.GetStats(), began, nil
+		})
+		if err != nil {
+			return err
+		}
+		if last == nil {
+			last = &spannerpb.PartialResultSet{}
+		}
+		last.Stats = stats
+		return send(last)
 	}
-	in, err := d.s.data.ExecuteStreamingSql(stream.Context(), req)
+	req, strip := emulatorMode(req)
+	in, err := d.s.data.ExecuteStreamingSql(ctx, req)
 	if err != nil {
 		return err
 	}
@@ -124,7 +161,7 @@ func (d cacheData) ExecuteStreamingSql(req *spannerpb.ExecuteSqlRequest, stream 
 		if strip {
 			withoutPlan(m.GetStats())
 		}
-		if err := stream.Send(m); err != nil {
+		if err := send(m); err != nil {
 			return err
 		}
 	}
@@ -160,7 +197,7 @@ func restQueryMode(r *http.Request) (spannerpb.ExecuteSqlRequest_QueryMode, bool
 }
 
 // claimsRESTQuery says whether the front answers a REST query call: one
-// in a mode it refuses or serves (WITH_STATS).
+// in a mode with a plan, or WITH_STATS.
 func claimsRESTQuery(r *http.Request) bool {
 	m, ok := restQueryMode(r)
 	return ok && (planModes[m] || m == spannerpb.ExecuteSqlRequest_WITH_STATS)
@@ -187,20 +224,12 @@ func (s *Instances) serveRESTQuery(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	er, strip, err := emulatorMode(req)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
 	var out []byte
 	if m[2] == "executeSql" {
-		rs, err := s.data.ExecuteSql(ctx, er)
+		rs, err := d.execute(ctx, req)
 		if err != nil {
 			writeError(w, err)
 			return
-		}
-		if strip {
-			withoutPlan(rs.GetStats())
 		}
 		out, err = protojson.Marshal(rs)
 		if err != nil {
@@ -208,33 +237,18 @@ func (s *Instances) serveRESTQuery(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
-		in, err := s.data.ExecuteStreamingSql(ctx, er)
+		parts := []json.RawMessage{}
+		err := d.executeStreaming(ctx, req, func(prs *spannerpb.PartialResultSet) error {
+			j, err := protojson.Marshal(prs)
+			if err != nil {
+				return status.Errorf(codes.Internal, "encoding the response: %v", err)
+			}
+			parts = append(parts, j)
+			return nil
+		})
 		if err != nil {
 			writeError(w, err)
 			return
-		}
-		var parts []json.RawMessage
-		for {
-			prs, err := in.Recv()
-			if err == io.EOF {
-				break
-			}
-			if err != nil {
-				writeError(w, err)
-				return
-			}
-			if strip {
-				withoutPlan(prs.GetStats())
-			}
-			j, err := protojson.Marshal(prs)
-			if err != nil {
-				writeError(w, status.Errorf(codes.Internal, "encoding the response: %v", err))
-				return
-			}
-			parts = append(parts, j)
-		}
-		if parts == nil {
-			parts = []json.RawMessage{}
 		}
 		out, _ = json.Marshal(parts)
 	}

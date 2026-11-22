@@ -7,24 +7,17 @@ import (
 	"testing"
 
 	"cloud.google.com/go/spanner/apiv1/spannerpb"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 func TestEmulatorQueryMode(t *testing.T) {
-	for _, m := range []spannerpb.ExecuteSqlRequest_QueryMode{spannerpb.ExecuteSqlRequest_PLAN, spannerpb.ExecuteSqlRequest_PROFILE, spannerpb.ExecuteSqlRequest_WITH_PLAN_AND_STATS} {
-		if _, _, err := emulatorMode(&spannerpb.ExecuteSqlRequest{QueryMode: m}); status.Code(err) != codes.Unimplemented {
-			t.Errorf("%s = %v, want UNIMPLEMENTED", m, err)
-		}
-	}
 	in := &spannerpb.ExecuteSqlRequest{Sql: "SELECT 1", QueryMode: spannerpb.ExecuteSqlRequest_WITH_STATS}
-	r, strip, err := emulatorMode(in)
-	if err != nil || !strip || r.GetQueryMode() != spannerpb.ExecuteSqlRequest_PROFILE || in.GetQueryMode() != spannerpb.ExecuteSqlRequest_WITH_STATS {
-		t.Errorf("WITH_STATS = %v, %v, %v; want PROFILE to the emulator, the plan dropped, the caller's request unchanged", r, strip, err)
+	r, strip := emulatorMode(in)
+	if !strip || r.GetQueryMode() != spannerpb.ExecuteSqlRequest_PROFILE || in.GetQueryMode() != spannerpb.ExecuteSqlRequest_WITH_STATS {
+		t.Errorf("WITH_STATS = %v, %v; want PROFILE to the emulator, the plan dropped, the caller's request unchanged", r, strip)
 	}
-	r, strip, err = emulatorMode(&spannerpb.ExecuteSqlRequest{Sql: "SELECT 1"})
-	if err != nil || strip || r.GetQueryMode() != spannerpb.ExecuteSqlRequest_NORMAL {
-		t.Errorf("NORMAL = %v, %v, %v; want it passed as it is", r, strip, err)
+	r, strip = emulatorMode(&spannerpb.ExecuteSqlRequest{Sql: "SELECT 1"})
+	if strip || r.GetQueryMode() != spannerpb.ExecuteSqlRequest_NORMAL {
+		t.Errorf("NORMAL = %v, %v; want it passed as it is", r, strip)
 	}
 }
 
