@@ -422,6 +422,81 @@ func (p vertexModelsProvider) ActAtResult(ctx context.Context, project string, p
 	return nil, p.act(ctx, path, action, values)
 }
 
+// Starts names Deploy to endpoint, which answers once its operation has
+// started, as Google's DeployModel does: the deployment then waits for the
+// container to answer its health route, which on a loaded machine
+// outlasted the page's 70 seconds for a mutation (main CI 44966435794).
+func (vertexModelsProvider) Starts(action string) bool { return action == "deploy" }
+
+// StartAt starts Deploy to endpoint and returns the wait for its operation.
+func (p vertexModelsProvider) StartAt(ctx context.Context, _ string, path []string, action string, values map[string]string) (func(context.Context) error, error) {
+	if len(path) != 1 || action != "deploy" {
+		return nil, fmt.Errorf("unknown action %q", action)
+	}
+	ec, err := p.api.endpoints(ctx)
+	if err != nil {
+		return nil, err
+	}
+	op, err := p.deploy(ctx, ec, path[0], values)
+	if err != nil {
+		_ = ec.Close()
+		return nil, err
+	}
+	return func(ctx context.Context) error {
+		defer func() { _ = ec.Close() }()
+		_, err := op.Wait(ctx)
+		return err
+	}, nil
+}
+
+// deploy starts a DeployModel of model with the Deploy to endpoint form's
+// values.
+func (p vertexModelsProvider) deploy(ctx context.Context, ec *aiplatform.EndpointClient, model string, values map[string]string) (*aiplatform.DeployModelOperation, error) {
+	ref := model
+	if v := strings.TrimSpace(values["version"]); v != "" {
+		ref += "@" + v
+	}
+	minR, _ := strconv.Atoi(values["minReplicas"])
+	maxR, _ := strconv.Atoi(values["maxReplicas"])
+	pct, err := strconv.Atoi(strings.TrimSpace(values["traffic"]))
+	if err != nil || pct < 0 || pct > 100 {
+		return nil, fmt.Errorf("traffic split: %q is not a percentage", values["traffic"])
+	}
+	ep := endpointName(model, values["endpoint"])
+	cur, err := ec.GetEndpoint(ctx, &aiplatformpb.GetEndpointRequest{Name: ep})
+	if err != nil {
+		return nil, err
+	}
+	split := map[string]int32{"0": int32(pct)}
+	if rest := 100 - pct; len(cur.GetTrafficSplit()) > 0 {
+		total := int32(0)
+		for _, v := range cur.GetTrafficSplit() {
+			total += v
+		}
+		left := int32(rest)
+		ids := make([]string, 0, len(cur.GetTrafficSplit()))
+		for id := range cur.GetTrafficSplit() {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		for i, id := range ids {
+			share := cur.GetTrafficSplit()[id] * int32(rest) / max(total, 1)
+			if i == len(ids)-1 {
+				share = left
+			}
+			split[id] = share
+			left -= share
+		}
+	} else if pct != 100 {
+		return nil, errors.New("traffic split: the endpoint has no other deployed model, so this one takes 100%")
+	}
+	return ec.DeployModel(ctx, &aiplatformpb.DeployModelRequest{Endpoint: ep, TrafficSplit: split,
+		DeployedModel: &aiplatformpb.DeployedModel{Model: ref, DisplayName: strings.TrimSpace(values["displayName"]),
+			PredictionResources: &aiplatformpb.DeployedModel_DedicatedResources{DedicatedResources: &aiplatformpb.DedicatedResources{
+				MachineSpec:     &aiplatformpb.MachineSpec{MachineType: strings.TrimSpace(values["machineType"])},
+				MinReplicaCount: int32(minR), MaxReplicaCount: int32(maxR)}}}})
+}
+
 func (p vertexModelsProvider) act(ctx context.Context, path []string, action string, values map[string]string) error {
 	model := path[0]
 	mc, err := p.api.models(ctx)
@@ -430,60 +505,6 @@ func (p vertexModelsProvider) act(ctx context.Context, path []string, action str
 	}
 	defer func() { _ = mc.Close() }()
 	switch action {
-	case "deploy":
-		ec, err := p.api.endpoints(ctx)
-		if err != nil {
-			return err
-		}
-		defer func() { _ = ec.Close() }()
-		ref := model
-		if v := strings.TrimSpace(values["version"]); v != "" {
-			ref += "@" + v
-		}
-		minR, _ := strconv.Atoi(values["minReplicas"])
-		maxR, _ := strconv.Atoi(values["maxReplicas"])
-		pct, err := strconv.Atoi(strings.TrimSpace(values["traffic"]))
-		if err != nil || pct < 0 || pct > 100 {
-			return fmt.Errorf("traffic split: %q is not a percentage", values["traffic"])
-		}
-		ep := endpointName(model, values["endpoint"])
-		cur, err := ec.GetEndpoint(ctx, &aiplatformpb.GetEndpointRequest{Name: ep})
-		if err != nil {
-			return err
-		}
-		split := map[string]int32{"0": int32(pct)}
-		if rest := 100 - pct; len(cur.GetTrafficSplit()) > 0 {
-			total := int32(0)
-			for _, v := range cur.GetTrafficSplit() {
-				total += v
-			}
-			left := int32(rest)
-			ids := make([]string, 0, len(cur.GetTrafficSplit()))
-			for id := range cur.GetTrafficSplit() {
-				ids = append(ids, id)
-			}
-			sort.Strings(ids)
-			for i, id := range ids {
-				share := cur.GetTrafficSplit()[id] * int32(rest) / max(total, 1)
-				if i == len(ids)-1 {
-					share = left
-				}
-				split[id] = share
-				left -= share
-			}
-		} else if pct != 100 {
-			return errors.New("traffic split: the endpoint has no other deployed model, so this one takes 100%")
-		}
-		op, err := ec.DeployModel(ctx, &aiplatformpb.DeployModelRequest{Endpoint: ep, TrafficSplit: split,
-			DeployedModel: &aiplatformpb.DeployedModel{Model: ref, DisplayName: strings.TrimSpace(values["displayName"]),
-				PredictionResources: &aiplatformpb.DeployedModel_DedicatedResources{DedicatedResources: &aiplatformpb.DedicatedResources{
-					MachineSpec:     &aiplatformpb.MachineSpec{MachineType: strings.TrimSpace(values["machineType"])},
-					MinReplicaCount: int32(minR), MaxReplicaCount: int32(maxR)}}}})
-		if err != nil {
-			return err
-		}
-		_, err = op.Wait(ctx)
-		return err
 	case "aliases":
 		var aliases []string
 		for _, a := range strings.Split(values["aliases"], ",") {

@@ -111,17 +111,27 @@ func TestCloudRunServiceTabsCopyAndRevisionMenuThroughTheBrowser(t *testing.T) {
 	// other tabs' settings.
 	p.clickText("#view .inline-edit button", "View diff & redeploy")
 	p.clickText(".modal.is-open button", "Deploy changes")
+	// GetService answers with the new template at once, reconciling while
+	// the new revision rolls out, as Google's does; the revision menu and
+	// the copy page below read the serving revision, so wait for the
+	// rollout to end with the new revision ready and serving.
 	deadline := time.Now().Add(5 * time.Minute)
 	var got *runpb.Service
+	rolledOut := func() bool {
+		return got.GetTemplate().GetScaling().GetMaxInstanceCount() == 3 && !got.GetReconciling() &&
+			got.GetLatestReadyRevision() != "" && got.GetLatestReadyRevision() == got.GetLatestCreatedRevision()
+	}
 	for time.Now().Before(deadline) {
 		got, err = c.GetService(ctx, &runpb.GetServiceRequest{Name: name})
-		if err == nil && got.GetTemplate().GetScaling().GetMaxInstanceCount() == 3 {
+		if err == nil && rolledOut() {
 			break
 		}
 		time.Sleep(3 * time.Second)
 	}
-	if got.GetTemplate().GetScaling().GetMaxInstanceCount() != 3 {
-		t.Fatalf("after Deploy changes the template's scaling is %v; want a maximum of 3", got.GetTemplate().GetScaling())
+	if !rolledOut() {
+		t.Fatalf("after Deploy changes the service has template scaling %v, reconciling %v, latest ready %q of latest created %q; "+
+			"want a maximum of 3, rolled out", got.GetTemplate().GetScaling(), got.GetReconciling(),
+			got.GetLatestReadyRevision(), got.GetLatestCreatedRevision())
 	}
 	ctr := got.GetTemplate().GetContainers()[0]
 	target := ""

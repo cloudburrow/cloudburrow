@@ -230,6 +230,32 @@ func TestUnknownConditionIsPending(t *testing.T) {
 	if got := FromKnative(k, parent).GetTerminalCondition().GetState(); got != runpb.Condition_CONDITION_PENDING {
 		t.Errorf("state = %v, want PENDING while reconciling", got)
 	}
+	if !FromKnative(k, parent).GetReconciling() {
+		t.Error("a service whose Ready is Unknown is not reconciling")
+	}
+}
+
+// An update rolling out: Knative has not observed the new generation, so
+// its Ready=True still describes the previous revision. GetService answers
+// with the new template at once, reconciling, as Google's does; the
+// service is not ready until the new generation is.
+func TestUnobservedGenerationIsReconciling(t *testing.T) {
+	t.Parallel()
+	var k ksvc
+	k.Metadata.Name = "app"
+	k.Metadata.Generation = 2
+	k.Status.ObservedGeneration = 1
+	k.Status.Conditions = []ksvcCondition{{Type: "Ready", Status: "True"}}
+	got := FromKnative(k, parent)
+	if !got.GetReconciling() || got.GetTerminalCondition().GetState() != runpb.Condition_CONDITION_PENDING {
+		t.Errorf("reconciling = %v, state = %v; want true and PENDING while generation 2 is unobserved",
+			got.GetReconciling(), got.GetTerminalCondition().GetState())
+	}
+	k.Status.ObservedGeneration = 2
+	if got := FromKnative(k, parent); got.GetReconciling() || got.GetTerminalCondition().GetState() != runpb.Condition_CONDITION_SUCCEEDED {
+		t.Errorf("reconciling = %v, state = %v; want false and SUCCEEDED once generation 2 is ready",
+			got.GetReconciling(), got.GetTerminalCondition().GetState())
+	}
 }
 
 // A revision that fails to start must report the container's own output. The

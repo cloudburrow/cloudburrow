@@ -76,7 +76,8 @@
 # name in ci.yml), is the run shard's instance again for
 # COMPAT_CROSSSERVICE_TESTS, which the run shard skips: Eventarc's tests and
 # Artifact Registry's cleanup policies, split from run when it reached its
-# 60m (main run 44740769561), and the tests that need services no other
+# 60m (main run 44740769561), Cloud Run's own and gcloud's and Terraform's
+# of Cloud Run and Cloud Functions, when it reached its 90m (44905534820), and the tests that need services no other
 # shard exports together (Cloud Storage with BigQuery, Cloud KMS or Cloud
 # Logging; Pub/Sub or Firestore with BigQuery and Service Usage).
 
@@ -180,7 +181,12 @@ COMPAT_SHARDS="storage served run crossservice scale emulators memorystore sql s
 # KMS Inventory's protected resources (#2053: a CMEK bucket and a BigQuery
 # dataset beside the key, through the client and gcloud), and Firestore's
 # and Cloud Tasks' metrics in Cloud Monitoring (#2050, Firestore or Cloud
-# Tasks with Monitoring), which no other shard serves together.
+# Tasks with Monitoring), which no other shard serves together. And Cloud
+# Run's own tests (TestRun*) with gcloud's and Terraform's of Cloud Run and
+# Cloud Functions (about 1,430 s): main run 44905534820 cancelled the run
+# shard at its 90m, its suite at 4,021 s (3,157 s in 44858607986) and its
+# browser step at 22 minutes of its 30m once #2123 moved Cloud Build's and
+# the Logging console rounds' browser tests there; crossservice was 29m.
 COMPAT_CROSSSERVICE_TEST_NAMES="ArtifactRegistryCleanupPolicies
   FirestoreDocumentMetrics FirestoreStreamMetrics GcloudKMSInventory
   KMSInventoryCountsCMEKResources TasksQueueMetricsInCloudMonitoring
@@ -190,7 +196,7 @@ COMPAT_CROSSSERVICE_TEST_NAMES="ArtifactRegistryCleanupPolicies
   StorageDataAccessAuditLogs StorageDataAccessAuditLogsOffByDefault
   StorageInsightsActivityViews StorageInsightsDatasetConfigChecks
   StorageInsightsLinkedDataset TerraformStorageInsightsDatasetConfig"
-COMPAT_CROSSSERVICE_TESTS="^Test((Gcloud|Terraform|GcloudAndTerraform)?Eventarc[A-Za-z0-9_]*|$(echo "$COMPAT_CROSSSERVICE_TEST_NAMES" | tr -s ' \n' '||' | sed 's/^|//; s/|$//'))\$"
+COMPAT_CROSSSERVICE_TESTS="^Test((Gcloud|Terraform|GcloudAndTerraform)?Eventarc[A-Za-z0-9_]*|((Gcloud|Terraform)(Run|CloudRun|CloudFunctions)|Run)[A-Za-z0-9_]*|$(echo "$COMPAT_CROSSSERVICE_TEST_NAMES" | tr -s ' \n' '||' | sed 's/^|//; s/|$//'))\$"
 
 # The sqlreplicas shard's tests, by name: every Cloud SQL test of high
 # availability, read replicas, blue-green deployments, external primaries,
@@ -241,11 +247,15 @@ COMPAT_SQL_REPLICA_TESTS='^Test[A-Za-z]*SQL[A-Za-z0-9]*(HighAvailability|Replica
 # Registry and Endpoints screens are drawn only where Cloud Run is served,
 # which starts the local AI endpoint they call (#1940): their test,
 # TestModelRegistryAndEndpointsThroughThePages, runs in run, as the scale
-# shard runs no browser test.
+# shard runs no browser test. So do Cloud Build's (TestCloudBuild*, #2074,
+# #2077), whose screens are drawn where Cloud Run serves Cloud Build, and
+# the Logging console rounds (TestLoggingConsole*, #2021, #2031, #2032),
+# whose Log Analytics screen needs BigQuery beside Cloud Logging and Cloud
+# Monitoring, which only the run shard's instance serves together.
 COMPAT_BROWSER_SHARDS="storage served run emulators memorystore sql localai"
 COMPAT_BROWSER_SERVED_SHARD_TESTS='^Test(GKEServed|KubernetesEnginePages|VPCNetwork|ComputeEngine)'
 COMPAT_BROWSER_SERVED_ONLY_TESTS='^Test(GKEServed|VPCNetwork|ComputeEngine)'
-COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|LoggingAdmin|SecretManager|Eventarc|DocumentAI|Speech|Workflows|ModelRegistry|Dataform|AppHub)'
+COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|CloudBuild|LoggingAdmin|LoggingConsole|SecretManager|Eventarc|DocumentAI|Speech|Workflows|ModelRegistry|Dataform|AppHub)'
 COMPAT_BROWSER_EMULATORS_SHARD_TESTS='^Test(BigQuery|Firestore|Datastore|Bigtable|Spanner)'
 COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS='^TestMemorystore'
 COMPAT_BROWSER_SQL_SHARD_TESTS='^Test(CloudSQL|BackupDR|PrivateCAKMS)'

@@ -67,8 +67,16 @@ bigquery-patch-tests:
 	# TZ=UTC: googlesqlite's TestBindDateFromUnixDate and
 	# TestParseTimeFormatRoundtrip/unixsec (internal/functions/date, helper)
 	# expect UTC and fail in any other local zone, as on a developer's machine.
-	cd third_party/bigquery-emulator && TZ=UTC GOFLAGS=-mod=readonly GOWORK=off go test -tags http2legacy \
-		$$(GOFLAGS=-mod=readonly GOWORK=off go list -e -tags http2legacy $(BQ_PATCH_TEST_PKGS) | grep -v -e '/googlesqlite/cmd/googlesqlite$$' -e '/googlesqlite/internal/cli$$')
+	# GOOGLESQLITE_TEST_TRACE (#2134): googlesqlite's spec runner logs each
+	# case's start and end there; on a failure the cases that never ended are
+	# printed, which names a case hung where its own watchdog cannot run.
+	cd third_party/bigquery-emulator && : > build/googlesqlite-test-trace.txt && \
+		TZ=UTC GOOGLESQLITE_TEST_TRACE=$(CURDIR)/third_party/bigquery-emulator/build/googlesqlite-test-trace.txt \
+		GOFLAGS=-mod=readonly GOWORK=off go test -tags http2legacy \
+		$$(GOFLAGS=-mod=readonly GOWORK=off go list -e -tags http2legacy $(BQ_PATCH_TEST_PKGS) | grep -v -e '/googlesqlite/cmd/googlesqlite$$' -e '/googlesqlite/internal/cli$$') || { \
+		echo "googlesqlite spec cases started and never ended:"; \
+		awk '$$1 == "start" { s[$$2] = 1 } $$1 == "end" { delete s[$$2] } END { for (n in s) print "\t" n }' build/googlesqlite-test-trace.txt; \
+		exit 1; }
 
 ## build: Build the binary into bin/, with the Linux storage server and BigQuery emulator embedded
 .PHONY: build
@@ -239,12 +247,19 @@ RACE_PKGS ?= ./...
 #    register allocator), vertexai 35 s and 97 s; on macos-latest beside the
 #    other packages, 236 s and 261 s, and TestDecodePDFOCRSixPages past the
 #    5 m timeout on macOS and Linux.
+#    On macos-latest in main runs 44875166859 and 44891736706 (Landings
+#    162-163, then #2116) the three took 340, 306 and 472 s, then 400, 383
+#    and over 600 s: vertexai reached the 10m timeout while no test hung
+#    (three goroutines, TestSpeechRecognizers 0 s in), and all three grew
+#    18 to 27% on the slower runner. Its slowest tests are the wasm ones:
+#    TestSpeechBatchRecognize, TestDocumentAIBatchShards and TestRecognize,
+#    151 of its 226 s under -race on an M-series Mac.
 # The timeout is twice the worst measured time. They run one package at a
 # time (-p 1): together, three race-instrumented wazero compiles were
 # terminated on CI's ubuntu-latest runner two and a half minutes in
 # (Landing 152, run on 14c33a7f), which looks like memory pressure.
 WASM_PKGS         := ./internal/speech/ ./internal/embedding/ ./internal/service/vertexai/
-WASM_TEST_TIMEOUT ?= 10m
+WASM_TEST_TIMEOUT ?= 20m
 .PHONY: test-race
 test-race:
 ifeq ($(RACE_PKGS),./...)

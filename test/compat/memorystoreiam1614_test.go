@@ -255,16 +255,23 @@ func TestMemorystoreIAMAuthChecksTheToken(t *testing.T) {
 // projectRoles changes member's roles on project through the official
 // Resource Manager client: change(role, true) grants role, false takes it
 // back, retrying a concurrent change's ABORTED.
+//
+// Each change has a deadline of its own. Callers keep change for the whole
+// test and revoke in t.Cleanup, after a body that can outlast one
+// h.Context() (TestMemorystoreValkeyInTransitEncryption creates two TLS
+// instances): a context taken here expired before that revoke ran, and its
+// GetIamPolicy failed DeadlineExceeded without reaching the server.
 func projectRoles(t *testing.T, h *Harness, project, member string) func(role string, add bool) {
 	t.Helper()
-	ctx := h.Context()
-	rm, err := resourcemanager.NewProjectsClient(ctx, rmOptionsAt(h.Endpoint(EnvResourceManager))...)
+	rm, err := resourcemanager.NewProjectsClient(h.Context(), rmOptionsAt(h.Endpoint(EnvResourceManager))...)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = rm.Close() })
 	change := func(role string, add bool) {
 		t.Helper()
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
 		for attempt := 0; ; attempt++ {
 			pol, err := rm.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: "projects/" + project})
 			if err != nil {
