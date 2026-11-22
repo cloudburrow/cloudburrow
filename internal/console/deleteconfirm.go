@@ -216,6 +216,13 @@ var DeleteConfirmRules = map[string]DeleteConfirmRule{
 	// described (docs re-read 2026-11-19:
 	// https://docs.cloud.google.com/vertex-ai/docs/predictions/undeploy-model).
 	"vertex-endpoints": unverified,
+	// Colab Enterprise runtimes (#2105): "select the runtime ... click
+	// Delete ... click Confirm" (https://docs.cloud.google.com/colab/docs/manage-runtimes).
+	"colab-runtimes": {Style: DeleteConfirmClick, Source: "https://docs.cloud.google.com/colab/docs/manage-runtimes", Verified: true},
+	// UNVERIFIED (re-read 2026-11-22): Google's console documents no Delete
+	// for a runtime template, which the API has
+	// (https://docs.cloud.google.com/colab/docs/create-runtime-template).
+	"colab-templates": unverified,
 	// UNVERIFIED: Metrics management documents deleting exclusion rules
 	// only, not a metric (docs re-read 2026-11-19:
 	// https://docs.cloud.google.com/monitoring/metrics-management).

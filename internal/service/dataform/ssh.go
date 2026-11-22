@@ -9,15 +9,15 @@ package dataform
 // host's ssh with that key alone, a known_hosts of that host key alone,
 // strict host key checking and no user configuration.
 //
-// A local instance's git stays on the machine: an SSH remote must be on a
-// loopback host (this instance's Secure Source Manager serves git over
-// HTTPS only, so an SSH remote is a git server of the machine's own).
+// The remote is whatever git host the user configures: a host on this
+// machine, on their network or on the internet, as on Google's Dataform.
+// Nothing here assumes a loopback host; git's ssh dials the URL's host
+// and port, and verifies the host against the configured key alone.
 
 import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
-	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -47,14 +47,6 @@ func sshRemote(u string) (host, port string, ok bool) {
 	return "", "", false
 }
 
-func isLoopbackHost(h string) bool {
-	if h == "localhost" {
-		return true
-	}
-	ip := net.ParseIP(h)
-	return ip != nil && ip.IsLoopback()
-}
-
 // hostKeyRE is an OpenSSH public key line: its type and base64 key.
 var hostKeyRE = regexp.MustCompile(`^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp256|ecdsa-sha2-nistp384|ecdsa-sha2-nistp521|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com)\s+([A-Za-z0-9+/]+={0,3})(\s+.*)?$`)
 
@@ -71,8 +63,8 @@ func checkSSH(gr *dfpb.Repository_GitRemoteSettings) error {
 	if !isSSH {
 		return apierror.InvalidArgument("git_remote_settings.url %q must be an SSH URL (ssh://HOST/PATH or USER@HOST:PATH) with ssh_authentication_config", gr.GetUrl())
 	}
-	if !isLoopbackHost(host) {
-		return apierror.InvalidArgument("git_remote_settings.url %q: an SSH remote must be on this machine (a loopback host), as a local instance's git never leaves it", gr.GetUrl())
+	if host == "" {
+		return apierror.InvalidArgument("git_remote_settings.url %q has no host", gr.GetUrl())
 	}
 	if gr.GetAuthenticationTokenSecretVersion() != "" || gr.GetGitRepositoryLink() != "" {
 		return apierror.InvalidArgument("git_remote_settings.ssh_authentication_config cannot be set with authentication_token_secret_version or git_repository_link")

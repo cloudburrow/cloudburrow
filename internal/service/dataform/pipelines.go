@@ -28,9 +28,11 @@ package dataform
 //     same number of rows, and equal values row by row.
 //   - Data preparations: the SQL ones (Dataform core's
 //     `type: "dataPreparation"`, a pipe syntax query) run into their
-//     target with their load mode. Google keeps BigQuery Studio's own data
-//     preparations as YAML (contents_yaml) whose format it does not
-//     document, so a YAML one fails with that reason.
+//     target with their load mode, MERGE included (mergeKeys), the rows
+//     failing a validation (${EXPECT}) going to the error table. A YAML one
+//     (contents_yaml, a .dp.yaml file) runs its documented parts: each
+//     destination node gets its source table's rows; a node with steps,
+//     whose format Google does not document, is refused naming them.
 //
 // UNVERIFIED (re-read 2026-11-22: https://docs.cloud.google.com/dataform/reference/rest/v1/projects.locations.repositories.compilationResults), Google documenting none of them: the notebook
 // output object is gs://BUCKET/JOB_ID/FILE.ipynb; the snapshot is a gzipped
@@ -47,6 +49,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"math/big"
 	"os"
@@ -57,6 +60,7 @@ import (
 	"strings"
 
 	dfpb "cloud.google.com/go/dataform/apiv1/dataformpb"
+	"gopkg.in/yaml.v3"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 )
@@ -66,6 +70,13 @@ import (
 // raises returns the notebook so far with the error.
 type NotebookRunner interface {
 	RunNotebook(ctx context.Context, key, project string, notebook []byte) ([]byte, error)
+}
+
+// TemplateNotebookRunner is a NotebookRunner that runs a notebook on a
+// runtime of a Colab Enterprise runtime template
+// (default_notebook_runtime_options.ai_platform_notebook_runtime_template).
+type TemplateNotebookRunner interface {
+	RunNotebookOnTemplate(ctx context.Context, key, project, template string, notebook []byte) ([]byte, error)
 }
 
 // ObjectWriter writes one Cloud Storage object and returns its generation
@@ -277,8 +288,10 @@ func jobID() string {
 func (s *Server) runNotebook(ctx context.Context, inv string, a *dfpb.CompilationResultAction, opts *dfpb.NotebookRuntimeOptions) (*dfpb.WorkflowInvocationAction_NotebookAction, error) {
 	nb := a.GetNotebook()
 	act := &dfpb.WorkflowInvocationAction_NotebookAction{Contents: nb.GetContents(), FilePath: a.GetFilePath()}
-	if t := opts.GetAiPlatformNotebookRuntimeTemplate(); t != "" {
-		return act, fmt.Errorf("the notebook runtime template %s cannot be used: Colab Enterprise runtime templates are not served by this instance, so notebooks run on the default runtime; leave ai_platform_notebook_runtime_template empty", t)
+	template := opts.GetAiPlatformNotebookRuntimeTemplate()
+	tr, onTemplate := s.opts.Notebooks.(TemplateNotebookRunner)
+	if template != "" && !onTemplate {
+		return act, fmt.Errorf("the notebook runtime template %s cannot be used: this instance serves no Colab Enterprise runtime templates (Vertex AI is not served)", template)
 	}
 	if s.opts.Notebooks == nil {
 		return act, errors.New("notebooks need the notebook runtime, which this instance cannot run (Docker and BigQuery are needed)")
@@ -289,7 +302,16 @@ func (s *Server) runNotebook(ctx context.Context, inv string, a *dfpb.Compilatio
 	}
 	act.JobId = jobID()
 	project := a.GetTarget().GetDatabase()
-	out, runErr := s.opts.Notebooks.RunNotebook(ctx, "dataform/"+path.Base(inv)+"/"+act.JobId, project, contents)
+	key := "dataform/" + path.Base(inv) + "/" + act.JobId
+	var out []byte
+	var runErr error
+	if template != "" {
+		// ai_platform_notebook_runtime_template: the notebook runs on a
+		// runtime made from that Colab Enterprise template.
+		out, runErr = tr.RunNotebookOnTemplate(ctx, key, project, template, contents)
+	} else {
+		out, runErr = s.opts.Notebooks.RunNotebook(ctx, key, project, contents)
+	}
 	if bucket := opts.GetGcsOutputBucket(); bucket != "" && out != nil {
 		if s.opts.Storage == nil {
 			return act, errors.New("gcs_output_bucket: Cloud Storage is not served on this instance")
@@ -373,32 +395,35 @@ func show(v *string) string {
 	return fmt.Sprintf("%q", *v)
 }
 
-// runDataPreparation runs a SQL data preparation's query into its target
-// with its load mode.
-func (s *Server) runDataPreparation(ctx context.Context, a *dfpb.CompilationResultAction, location string) (*dfpb.WorkflowInvocationAction_DataPreparationAction, error) {
+// runDataPreparation runs a data preparation into its target with its
+// load mode: a SQL one's pipe-syntax query (its validations sending the
+// rows that fail them to the error table), or a YAML one's nodes. merge
+// are a MERGE load mode's unique keys (mergeKeys).
+func (s *Server) runDataPreparation(ctx context.Context, a *dfpb.CompilationResultAction, location string, merge []string) (*dfpb.WorkflowInvocationAction_DataPreparationAction, error) {
 	dp := a.GetDataPreparation()
 	act := &dfpb.WorkflowInvocationAction_DataPreparationAction{}
 	if y := dp.GetContentsYaml(); y != "" {
 		act.Definition = &dfpb.WorkflowInvocationAction_DataPreparationAction_ContentsYaml{ContentsYaml: y}
-		return act, errors.New("a YAML data preparation cannot run here: Google does not document the format BigQuery Studio keeps data preparations in; define it in SQL (a SQLX data preparation with a pipe syntax query)")
+		return act, s.runYAMLDataPreparation(ctx, act, a, location)
 	}
 	sqlDef := dp.GetContentsSql()
 	def := &dfpb.WorkflowInvocationAction_DataPreparationAction_ActionSqlDefinition{Query: sqlDef.GetQuery()}
 	if et := sqlDef.GetErrorTable(); et != nil {
 		def.ErrorTable = &dfpb.WorkflowInvocationAction_DataPreparationAction_ActionErrorTable{Target: clone(et.GetTarget()), RetentionDays: et.GetRetentionDays()}
 	}
-	lc := &dfpb.WorkflowInvocationAction_DataPreparationAction_ActionLoadConfig{}
 	switch m := sqlDef.GetLoad().GetMode().(type) {
 	case *dfpb.CompilationResultAction_LoadConfig_Append:
-		lc.Mode = &dfpb.WorkflowInvocationAction_DataPreparationAction_ActionLoadConfig_Append{Append: &dfpb.WorkflowInvocationAction_DataPreparationAction_ActionSimpleLoadMode{}}
+		def.LoadConfig = &dfpb.WorkflowInvocationAction_DataPreparationAction_ActionLoadConfig{Mode: &dfpb.WorkflowInvocationAction_DataPreparationAction_ActionLoadConfig_Append{Append: &dfpb.WorkflowInvocationAction_DataPreparationAction_ActionSimpleLoadMode{}}}
 	case *dfpb.CompilationResultAction_LoadConfig_Maximum:
-		lc.Mode = &dfpb.WorkflowInvocationAction_DataPreparationAction_ActionLoadConfig_Maximum{Maximum: &dfpb.WorkflowInvocationAction_DataPreparationAction_ActionIncrementalLoadMode{Column: m.Maximum.GetColumn()}}
+		def.LoadConfig = &dfpb.WorkflowInvocationAction_DataPreparationAction_ActionLoadConfig{Mode: &dfpb.WorkflowInvocationAction_DataPreparationAction_ActionLoadConfig_Maximum{Maximum: &dfpb.WorkflowInvocationAction_DataPreparationAction_ActionIncrementalLoadMode{Column: m.Maximum.GetColumn()}}}
 	case *dfpb.CompilationResultAction_LoadConfig_Unique:
-		lc.Mode = &dfpb.WorkflowInvocationAction_DataPreparationAction_ActionLoadConfig_Unique{Unique: &dfpb.WorkflowInvocationAction_DataPreparationAction_ActionIncrementalLoadMode{Column: m.Unique.GetColumn()}}
+		def.LoadConfig = &dfpb.WorkflowInvocationAction_DataPreparationAction_ActionLoadConfig{Mode: &dfpb.WorkflowInvocationAction_DataPreparationAction_ActionLoadConfig_Unique{Unique: &dfpb.WorkflowInvocationAction_DataPreparationAction_ActionIncrementalLoadMode{Column: m.Unique.GetColumn()}}}
 	default:
-		lc.Mode = &dfpb.WorkflowInvocationAction_DataPreparationAction_ActionLoadConfig_Replace{Replace: &dfpb.WorkflowInvocationAction_DataPreparationAction_ActionSimpleLoadMode{}}
+		// MERGE has no API load config (mergeKeys).
+		if len(merge) == 0 {
+			def.LoadConfig = &dfpb.WorkflowInvocationAction_DataPreparationAction_ActionLoadConfig{Mode: &dfpb.WorkflowInvocationAction_DataPreparationAction_ActionLoadConfig_Replace{Replace: &dfpb.WorkflowInvocationAction_DataPreparationAction_ActionSimpleLoadMode{}}}
+		}
 	}
-	def.LoadConfig = lc
 	act.Definition = &dfpb.WorkflowInvocationAction_DataPreparationAction_ContentsSql{ContentsSql: def}
 	w := s.opts.Warehouse
 	if w == nil {
@@ -406,63 +431,362 @@ func (s *Server) runDataPreparation(ctx context.Context, a *dfpb.CompilationResu
 	}
 	t := a.GetTarget()
 	project := t.GetDatabase()
+	var et *dfpb.Target
+	if e := sqlDef.GetErrorTable(); e != nil && e.GetTarget() != nil {
+		et = e.GetTarget()
+	}
+	q, checks := validations(sqlDef.GetQuery())
+	var stmts []string
+	run := func(st string) error {
+		stmts = append(stmts, st)
+		act.GeneratedSql = strings.Join(stmts, ";\n")
+		id, err := w.Exec(ctx, project, location, st)
+		if id != "" {
+			act.JobId = id
+		}
+		return err
+	}
 	if err := w.EnsureDataset(ctx, project, t.GetSchema(), location); err != nil {
 		return act, fmt.Errorf("create dataset %s.%s: %w", project, t.GetSchema(), err)
+	}
+	if et != nil {
+		if err := w.EnsureDataset(ctx, et.GetDatabase(), et.GetSchema(), location); err != nil {
+			return act, fmt.Errorf("create dataset %s.%s: %w", et.GetDatabase(), et.GetSchema(), err)
+		}
+		if err := run(errorTableDDL(et, sqlDef.GetErrorTable().GetRetentionDays())); err != nil {
+			return act, err
+		}
+	}
+	// Validations: "Sends rows that don't meet the validation rule criteria
+	// to an error table. If data fails the validation rule and no error
+	// table is configured, the data preparation fails during execution"
+	// (data-prep-introduction). Each is checked on the rows the steps
+	// before it pass.
+	for _, c := range checks {
+		failing := c.before + "\n|> WHERE NOT (" + c.cond + ") OR (" + c.cond + ") IS NULL"
+		if et == nil {
+			id, n, err := w.Count(ctx, project, location, "SELECT COUNT(*) FROM (\n"+failing+"\n)")
+			if id != "" {
+				act.JobId = id
+			}
+			if err != nil {
+				return act, err
+			}
+			if n > 0 {
+				rows := "rows"
+				if n == 1 {
+					rows = "row"
+				}
+				return act, fmt.Errorf("%d %s failed the validation rule %q, and the data preparation has no error table", n, rows, c.cond)
+			}
+			continue
+		}
+		msg, _ := json.Marshal("Validation failed: " + c.cond)
+		if err := run("insert into " + bq(et) + " (error_time, error, row)\nselect current_timestamp(), " + string(msg) + ", to_json(failed)\nfrom (\n" + failing + "\n) as failed"); err != nil {
+			return act, err
+		}
 	}
 	exists, _, columns, err := w.Table(ctx, project, t.GetSchema(), t.GetName())
 	if err != nil {
 		return act, err
 	}
-	q := sqlDef.GetQuery()
-	var stmts []string
 	switch m := sqlDef.GetLoad().GetMode().(type) {
 	case *dfpb.CompilationResultAction_LoadConfig_Append:
 		if exists {
-			stmts = append(stmts, insertInto(t, columns, q))
+			err = run(insertInto(t, columns, q))
 		} else {
-			stmts = append(stmts, "create table "+bq(t)+" as "+q)
+			err = run("create table " + bq(t) + " as " + q)
 		}
 	case *dfpb.CompilationResultAction_LoadConfig_Maximum:
 		c := "`" + m.Maximum.GetColumn() + "`"
 		if exists {
-			stmts = append(stmts, insertInto(t, columns, "select * from ("+q+"\n) where (select max("+c+") from "+bq(t)+") is null or "+c+" > (select max("+c+") from "+bq(t)+")"))
+			err = run(insertInto(t, columns, "select * from ("+q+"\n) where (select max("+c+") from "+bq(t)+") is null or "+c+" > (select max("+c+") from "+bq(t)+")"))
 		} else {
-			stmts = append(stmts, "create table "+bq(t)+" as "+q)
+			err = run("create table " + bq(t) + " as " + q)
 		}
 	case *dfpb.CompilationResultAction_LoadConfig_Unique:
 		c := "`" + m.Unique.GetColumn() + "`"
 		if exists {
-			stmts = append(stmts, insertInto(t, columns, "select * from ("+q+"\n) where "+c+" not in (select "+c+" from "+bq(t)+" where "+c+" is not null)"))
+			err = run(insertInto(t, columns, "select * from ("+q+"\n) where "+c+" not in (select "+c+" from "+bq(t)+" where "+c+" is not null)"))
 		} else {
-			stmts = append(stmts, "create table "+bq(t)+" as "+q)
+			err = run("create table " + bq(t) + " as " + q)
 		}
 	default:
-		stmts = append(stmts, "create or replace table "+bq(t)+" as "+q)
-	}
-	if et := sqlDef.GetErrorTable(); et != nil && et.GetTarget() != nil {
-		e := et.GetTarget()
-		if err := w.EnsureDataset(ctx, e.GetDatabase(), e.GetSchema(), location); err != nil {
-			return act, fmt.Errorf("create dataset %s.%s: %w", e.GetDatabase(), e.GetSchema(), err)
+		switch {
+		case len(merge) > 0 && exists:
+			// Upsert: "When an existing row in the destination table
+			// matches the specified merge keys for an input record, the
+			// values in this row are updated ... Otherwise, a new row is
+			// inserted" (data-prep-introduction).
+			err = run(mergeInto(t, columns, q, backticked(merge), ""))
+		case len(merge) > 0:
+			err = run("create table " + bq(t) + " as " + q)
+		default:
+			err = run("create or replace table " + bq(t) + " as " + q)
 		}
-		// The error table holds the rows a step could not prepare; a
-		// SQL data preparation's steps are its query, which BigQuery
-		// fails whole, so the table is created empty.
-		opts := ""
-		if et.GetRetentionDays() > 0 {
-			opts = fmt.Sprintf(" OPTIONS(partition_expiration_days=%d)", et.GetRetentionDays())
-		}
-		stmts = append(stmts, "create table if not exists "+bq(e)+" (error_time TIMESTAMP, error STRING, row JSON) partition by date(error_time)"+opts)
 	}
-	def.Query = q
-	act.GeneratedSql = strings.Join(stmts, ";\n")
-	for _, st := range stmts {
+	return act, err
+}
+
+// errorTableDDL creates a data preparation's error table: it "holds the
+// rows a step could not prepare".
+//
+// UNVERIFIED (read 2026-11-22: https://docs.cloud.google.com/bigquery/docs/data-prep-introduction):
+// Google documents no error table schema; this one holds the time, the
+// failure and the row as JSON, partitioned by day so retention_days is
+// its partition expiration ("Error table partition expiration in days").
+func errorTableDDL(e *dfpb.Target, days int32) string {
+	opts := ""
+	if days > 0 {
+		opts = fmt.Sprintf(" OPTIONS(partition_expiration_days=%d)", days)
+	}
+	return "create table if not exists " + bq(e) + " (error_time TIMESTAMP, error STRING, row JSON) partition by date(error_time)" + opts
+}
+
+// validationMarker is what Dataform core compiles a SQLX data
+// preparation's ${EXPECT} to (DataPreparationContext.EXPECT, @dataform/core
+// 3.1.6): a validation, a WHERE whose failing rows go to the error table.
+const validationMarker = "/* @@VALIDATION */ WHERE"
+
+type validation struct {
+	before string // the query up to the validation
+	cond   string
+}
+
+// validations splits a compiled data preparation query at its
+// validations: the query with each made a plain WHERE (the rows that pass
+// it), and each validation's condition with the query before it.
+func validations(q string) (string, []validation) {
+	var out []validation
+	for {
+		i := strings.Index(q, validationMarker)
+		if i < 0 {
+			return q, out
+		}
+		pipe := strings.LastIndex(q[:i], "|>")
+		if pipe < 0 || strings.TrimSpace(q[pipe+2:i]) != "" {
+			// Not a pipe operator: leave it a WHERE.
+			q = q[:i] + "WHERE" + q[i+len(validationMarker):]
+			continue
+		}
+		rest := q[i+len(validationMarker):]
+		end := strings.Index(rest, "|>")
+		if end < 0 {
+			end = len(rest)
+		}
+		cond := strings.TrimSpace(rest[:end])
+		out = append(out, validation{before: strings.TrimRight(q[:pipe], " \n\t"), cond: cond})
+		q = q[:pipe] + "|> WHERE " + cond + "\n" + rest[end:]
+		q = strings.TrimRight(q, "\n")
+	}
+}
+
+// yamlNodeKeys and yamlConfigKeys are what Google's data preparation YAML
+// is publicly known to hold (Dataform core 3.1.6, core/actions/data_preparation.ts,
+// read 2026-11-22: https://github.com/dataform-co/dataform): a node's id,
+// its source table or source node, its destination table and the
+// generated schemas, and the configuration's error table. Google
+// documents no step format (https://docs.cloud.google.com/bigquery/docs/manage-data-preparations,
+// read 2026-11-22: such files are migrated to SQLX), so a node holding
+// anything else is refused, naming it.
+var (
+	yamlNodeKeys   = map[string]bool{"id": true, "source": true, "destination": true, "generated": true}
+	yamlConfigKeys = map[string]bool{"errorTable": true}
+)
+
+type yamlTableRef struct {
+	Project string `yaml:"project"`
+	Dataset string `yaml:"dataset"`
+	Table   string `yaml:"table"`
+}
+
+func (r *yamlTableRef) target(def *dfpb.Target) *dfpb.Target {
+	t := &dfpb.Target{Database: r.Project, Schema: r.Dataset, Name: r.Table}
+	if t.Database == "" {
+		t.Database = def.GetDatabase()
+	}
+	if t.Schema == "" {
+		t.Schema = def.GetSchema()
+	}
+	return t
+}
+
+// YAMLDataPreparation is a YAML data preparation's documented parts.
+type YAMLDataPreparation struct {
+	ErrorTable *yamlTableRef
+	Nodes      []YAMLDataPrepNode
+}
+
+// YAMLDataPrepNode is one node: its source table or node, and destination.
+type YAMLDataPrepNode struct {
+	ID          string
+	Source      *yamlTableRef
+	SourceNode  string
+	Destination *yamlTableRef
+}
+
+// ParseYAMLDataPreparation reads a data preparation's YAML, refusing what
+// is not documented (yamlNodeKeys).
+func ParseYAMLDataPreparation(text string) (*YAMLDataPreparation, error) {
+	var raw struct {
+		Configuration map[string]yaml.Node   `yaml:"configuration"`
+		Nodes         []map[string]yaml.Node `yaml:"nodes"`
+	}
+	dec := yaml.NewDecoder(strings.NewReader(text))
+	if err := dec.Decode(&raw); err != nil && !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("the data preparation is not YAML: %v", err)
+	}
+	var top map[string]yaml.Node
+	_ = yaml.Unmarshal([]byte(text), &top)
+	for k := range top {
+		if k != "configuration" && k != "nodes" {
+			return nil, fmt.Errorf("the data preparation's %q is not a documented part of a data preparation's YAML (configuration and nodes)", k)
+		}
+	}
+	out := &YAMLDataPreparation{}
+	for k, v := range raw.Configuration {
+		if !yamlConfigKeys[k] {
+			return nil, fmt.Errorf("the data preparation's configuration.%s is not documented by Google; only configuration.errorTable runs here", k)
+		}
+		var r yamlTableRef
+		if err := v.Decode(&r); err != nil || r.Table == "" {
+			return nil, errors.New("configuration.errorTable must be a table: {project, dataset, table}")
+		}
+		out.ErrorTable = &r
+	}
+	ids := map[string]bool{}
+	for i, n := range raw.Nodes {
+		var node YAMLDataPrepNode
+		keys := make([]string, 0, len(n))
+		for k := range n {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			if !yamlNodeKeys[k] {
+				return nil, fmt.Errorf("node %d's %q is not documented by Google (a node runs here with id, source, destination and generated only); open the data preparation in BigQuery Studio and migrate it to SQLX", i+1, k)
+			}
+		}
+		if v, ok := n["id"]; ok {
+			_ = v.Decode(&node.ID)
+		}
+		if node.ID == "" {
+			node.ID = fmt.Sprintf("node%d", i+1)
+		}
+		if ids[node.ID] {
+			return nil, fmt.Errorf("node id %q is used twice", node.ID)
+		}
+		ids[node.ID] = true
+		if v, ok := n["source"]; ok {
+			var src struct {
+				Table  *yamlTableRef `yaml:"table"`
+				NodeID string        `yaml:"nodeId"`
+			}
+			var srcKeys map[string]yaml.Node
+			_ = v.Decode(&srcKeys)
+			for k := range srcKeys {
+				if k != "table" && k != "nodeId" {
+					return nil, fmt.Errorf("node %q's source.%s is not documented by Google (a source is a table or a nodeId)", node.ID, k)
+				}
+			}
+			if err := v.Decode(&src); err != nil {
+				return nil, fmt.Errorf("node %q's source: %v", node.ID, err)
+			}
+			node.Source, node.SourceNode = src.Table, src.NodeID
+		}
+		if v, ok := n["destination"]; ok {
+			var dst struct {
+				Table *yamlTableRef `yaml:"table"`
+			}
+			if err := v.Decode(&dst); err != nil {
+				return nil, fmt.Errorf("node %q's destination: %v", node.ID, err)
+			}
+			node.Destination = dst.Table
+		}
+		if (node.Source == nil) == (node.SourceNode == "") {
+			return nil, fmt.Errorf("node %q needs a source: a table or a nodeId", node.ID)
+		}
+		out.Nodes = append(out.Nodes, node)
+	}
+	return out, nil
+}
+
+// Query is node id's rows, as a query: its source table's, or its source
+// node's.
+func (y *YAMLDataPreparation) Query(id string, def *dfpb.Target) (string, error) {
+	byID := map[string]YAMLDataPrepNode{}
+	for _, n := range y.Nodes {
+		byID[n.ID] = n
+	}
+	seen := map[string]bool{}
+	for {
+		n, ok := byID[id]
+		if !ok {
+			return "", fmt.Errorf("no node %q", id)
+		}
+		if seen[id] {
+			return "", fmt.Errorf("node %q's sources form a cycle", id)
+		}
+		seen[id] = true
+		if n.Source != nil {
+			return "SELECT * FROM " + bq(n.Source.target(def)), nil
+		}
+		id = n.SourceNode
+	}
+}
+
+// runYAMLDataPreparation writes each destination node's rows to its table
+// (a full refresh: a load mode in the YAML is not documented).
+func (s *Server) runYAMLDataPreparation(ctx context.Context, act *dfpb.WorkflowInvocationAction_DataPreparationAction, a *dfpb.CompilationResultAction, location string) error {
+	y, err := ParseYAMLDataPreparation(act.GetContentsYaml())
+	if err != nil {
+		return err
+	}
+	w := s.opts.Warehouse
+	if w == nil {
+		return errors.New("BigQuery is not served on this instance")
+	}
+	def := a.GetTarget()
+	project := def.GetDatabase()
+	var stmts []string
+	run := func(st string) error {
+		stmts = append(stmts, st)
+		act.GeneratedSql = strings.Join(stmts, ";\n")
 		id, err := w.Exec(ctx, project, location, st)
 		if id != "" {
 			act.JobId = id
 		}
-		if err != nil {
-			return act, err
+		return err
+	}
+	if y.ErrorTable != nil {
+		et := y.ErrorTable.target(def)
+		if err := w.EnsureDataset(ctx, et.GetDatabase(), et.GetSchema(), location); err != nil {
+			return fmt.Errorf("create dataset %s.%s: %w", et.GetDatabase(), et.GetSchema(), err)
+		}
+		if err := run(errorTableDDL(et, 0)); err != nil {
+			return err
 		}
 	}
-	return act, nil
+	wrote := false
+	for _, n := range y.Nodes {
+		if n.Destination == nil {
+			continue
+		}
+		q, err := y.Query(n.ID, def)
+		if err != nil {
+			return err
+		}
+		t := n.Destination.target(def)
+		if err := w.EnsureDataset(ctx, t.GetDatabase(), t.GetSchema(), location); err != nil {
+			return fmt.Errorf("create dataset %s.%s: %w", t.GetDatabase(), t.GetSchema(), err)
+		}
+		if err := run("create or replace table " + bq(t) + " as " + q); err != nil {
+			return err
+		}
+		wrote = true
+	}
+	if !wrote {
+		return errors.New("the data preparation has no destination node")
+	}
+	return nil
 }

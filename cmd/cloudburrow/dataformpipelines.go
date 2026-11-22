@@ -22,11 +22,29 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 )
 
-// dataformNotebooks runs notebook actions on the notebook runtime.
-type dataformNotebooks struct{ m *nbruntime.Manager }
+// dataformNotebooks runs notebook actions on the notebook runtime, on a
+// Colab Enterprise runtime template's settings when the action names one
+// (templates resolves it; nil when Vertex AI is not served).
+type dataformNotebooks struct {
+	m         *nbruntime.Manager
+	templates func(name string) (nbruntime.Options, error)
+}
 
 func (d dataformNotebooks) RunNotebook(ctx context.Context, key, project string, nb []byte) ([]byte, error) {
 	return d.m.RunNotebook(ctx, key, project, nb)
+}
+
+// RunNotebookOnTemplate runs a notebook on a runtime made from the Colab
+// Enterprise runtime template (projects/*/locations/*/notebookRuntimeTemplates/*).
+func (d dataformNotebooks) RunNotebookOnTemplate(ctx context.Context, key, project, template string, nb []byte) ([]byte, error) {
+	if d.templates == nil {
+		return nil, fmt.Errorf("the notebook runtime template %s cannot be used: Colab Enterprise is served on the instance's Vertex AI endpoint, which is not running", template)
+	}
+	o, err := d.templates(template)
+	if err != nil {
+		return nil, fmt.Errorf("the notebook runtime template %s: %v", template, err)
+	}
+	return d.m.RunNotebookWith(ctx, key, project, nb, o)
 }
 
 // dataformStorage writes objects to the instance's Cloud Storage.

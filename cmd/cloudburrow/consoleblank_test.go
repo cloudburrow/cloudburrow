@@ -77,6 +77,7 @@ var emulatorOnly = map[string]string{
 	"eventarc-google-api-sources": "this test's in-process adapter does not serve Eventarc over gRPC (TestEventarcAdvancedPagesThroughTheBrowser drives the page)",
 	"eventarc-channels":           "this test's in-process adapter does not serve Eventarc over gRPC (TestEventarcAdvancedPagesThroughTheBrowser drives the page)",
 	"vertex-models":               "the Model Registry is read from the local AI endpoint over gRPC, which this test does not start (TestModelRegistryAndEndpointsThroughThePages drives the page)",
+	"colab-templates":             "runtime templates are read from the local AI endpoint over gRPC, which this test does not start (TestColabEnterpriseRuntimesThroughThePages drives the page)",
 	"vertex-endpoints":            "Endpoints are read from the local AI endpoint over gRPC, which this test does not start (TestModelRegistryAndEndpointsThroughThePages drives the page)",
 	"run-domains":                 "the Cloud Run Admin API v1's domain mappings, which this test's in-process adapter does not serve over HTTP (TestCloudRunGooglePagesThroughTheBrowser drives the page)",
 	"cloudsql-instances":          "the Cloud SQL Admin API over PostgreSQL and MySQL servers; there is no in-process one",

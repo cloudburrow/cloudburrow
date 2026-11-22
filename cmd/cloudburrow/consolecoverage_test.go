@@ -40,7 +40,7 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 		"storage-transfer-agent-pools"}},
 	config.ServicePubSub:        {Providers: []string{"pubsub", "pubsub-subscriptions", "pubsub-snapshots", "pubsub-schemas"}},
 	config.ServiceTasks:         {Providers: []string{"tasks"}},
-	config.ServiceRun:           {Providers: []string{"run", "run-jobs", "run-worker-pools", "run-domains", "run-instances", "run-builds", "cloud-build-triggers", "cloud-build-worker-pools", "cloud-build-dashboard", "cloud-build-repositories", "cloud-build-settings", "secure-source-manager", "developer-connect-account-connectors", "artifact-registry", "artifact-registry-settings", "functions", "eventarc", "eventarc-buses", "eventarc-pipelines", "eventarc-enrollments", "eventarc-google-api-sources", "eventarc-channels", "vertex-models", "vertex-endpoints"}},
+	config.ServiceRun:           {Providers: []string{"run", "run-jobs", "run-worker-pools", "run-domains", "run-instances", "run-builds", "cloud-build-triggers", "cloud-build-worker-pools", "cloud-build-dashboard", "cloud-build-repositories", "cloud-build-settings", "secure-source-manager", "developer-connect-account-connectors", "artifact-registry", "artifact-registry-settings", "functions", "eventarc", "eventarc-buses", "eventarc-pipelines", "eventarc-enrollments", "eventarc-google-api-sources", "eventarc-channels", "vertex-models", "vertex-endpoints", "colab-runtimes", "colab-templates"}},
 	config.ServiceSecrets:       {Providers: []string{"secrets", "secrets-regional"}},
 	config.ServiceFirestore:     {Providers: []string{"firestore", "firestore-databases"}},
 	config.ServiceDatastore:     {Providers: []string{"datastore"}},

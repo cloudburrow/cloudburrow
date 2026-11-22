@@ -235,7 +235,9 @@ var areas = []area{
 		// countTokens and computeTokens (#1937).
 		"google.cloud.aiplatform.v1.LlmUtilityService",
 		// Context caching (#2107).
-		"google.cloud.aiplatform.v1.GenAiCacheService"}},
+		"google.cloud.aiplatform.v1.GenAiCacheService",
+		// Colab Enterprise's runtime templates and runtimes (#2105).
+		"google.cloud.aiplatform.v1.NotebookService"}},
 	// v1beta1's PredictionService, for ChatCompletions on those endpoints
 	// (#1840) and v1's methods bridged (#1937): a page of its own, since
 	// its method names repeat v1's.

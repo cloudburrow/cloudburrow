@@ -34,6 +34,8 @@ type rowsWarehouse struct {
 	cols  map[string][]string
 	exec  []string
 	table map[string][]string
+	// count is what every Count answers.
+	count int64
 }
 
 func (w *rowsWarehouse) EnsureDataset(context.Context, string, string, string) error { return nil }
@@ -48,7 +50,7 @@ func (w *rowsWarehouse) Exec(_ context.Context, _, _, sql string) (string, error
 	return "job_exec", nil
 }
 func (w *rowsWarehouse) Count(context.Context, string, string, string) (string, int64, error) {
-	return "job_count", 0, nil
+	return "job_count", w.count, nil
 }
 func (w *rowsWarehouse) Rows(_ context.Context, _, _, sql string) (string, []string, [][]*string, int64, error) {
 	k := strings.TrimSpace(sql)
@@ -371,7 +373,7 @@ func TestSSHRemotes(t *testing.T) {
 	}{
 		{"ssh://git@127.0.0.1:2222/r.git", good, codes.OK},
 		{"git@localhost:r.git", good, codes.OK},
-		{"ssh://git@example.com/r.git", good, codes.InvalidArgument},
+		{"ssh://git@example.com/r.git", good, codes.OK},
 		{"https://127.0.0.1/r.git", good, codes.InvalidArgument},
 		{"ssh://git@127.0.0.1/r.git", nil, codes.InvalidArgument},
 		{"ssh://git@127.0.0.1/r.git", &dfpb.Repository_GitRemoteSettings_SshAuthenticationConfig{UserPrivateKeySecretVersion: "k", HostPublicKey: key}, codes.InvalidArgument},
@@ -425,16 +427,112 @@ func TestStripOutputs(t *testing.T) {
 	}
 }
 
-// TestMergeLoadModeIsAnError: Dataform core's MERGE load mode has no API
-// LoadConfig, so it is a compilation error rather than a replace.
-func TestMergeLoadModeIsAnError(t *testing.T) {
-	var g dfGraph
-	if err := json.Unmarshal([]byte(`{"dataPreparations":[{"target":{"database":"p","schema":"d","name":"m"},"fileName":"definitions/m.sqlx",
-		"query":"FROM t","load":{"merge":{"uniqueKey":["id"]}}}]}`), &g); err != nil {
+// TestValidations: Dataform core's compiled ${EXPECT} splits the query
+// into the rows that pass (a plain WHERE) and each validation's rule
+// with the query before it.
+func TestValidations(t *testing.T) {
+	q, checks := validations("FROM `p.d.t`\n|>  /* @@VALIDATION */ WHERE  y > 0\n|> SELECT a, y\n|>  /* @@VALIDATION */ WHERE  a IS NOT NULL")
+	if q != "FROM `p.d.t`\n|> WHERE y > 0\n|> SELECT a, y\n|> WHERE a IS NOT NULL" {
+		t.Errorf("query = %q", q)
+	}
+	if len(checks) != 2 || checks[0].cond != "y > 0" || checks[0].before != "FROM `p.d.t`" ||
+		checks[1].cond != "a IS NOT NULL" || checks[1].before != "FROM `p.d.t`\n|> WHERE y > 0\n|> SELECT a, y" {
+		t.Errorf("validations = %+v", checks)
+	}
+	if q, c := validations("FROM t |> WHERE x"); q != "FROM t |> WHERE x" || len(c) != 0 {
+		t.Errorf("no validation: %q %v", q, c)
+	}
+}
+
+const prepGraph = `{"dataPreparations":[
+ {"target":{"database":"p","schema":"ds","name":"m"},"fileName":"definitions/m.sqlx","errorTable":{"database":"p","schema":"ds","name":"errs"},"errorTableRetentionDays":3,
+  "query":"FROM ` + "`p.ds.src`" + `\n|>  /* @@VALIDATION */ WHERE  y > 0\n|> SELECT *","load":{"merge":{"uniqueKey":["id","k"]}}},
+ {"target":{"database":"p","schema":"ds","name":"v"},"fileName":"definitions/v.sqlx","query":"FROM ` + "`p.ds.src`" + `\n|>  /* @@VALIDATION */ WHERE  y > 0","load":{"replace":{}}},
+ {"target":{"database":"p","schema":"ds","name":"dest"},"fileName":"definitions/y.dp.yaml",
+  "dataPreparationYaml":"configuration:\n  errorTable:\n    project: p\n    dataset: ds\n    table: error\nnodes:\n  - id: node1\n    source:\n      table:\n        project: prj\n        dataset: ds\n        table: src\n    generated:\n      outputSchema:\n        field:\n          - name: a\n            type: INT64\n  - id: node2\n    source:\n      nodeId: node1\n    destination:\n      table:\n        project: p\n        dataset: ds\n        table: dest\n"}],
+ "dataformCoreVersion":"3.1.6","graphErrors":{}}`
+
+// TestDataPreparationLoadModes: MERGE compiles (its keys kept, no API load
+// config) and merges into an existing table; a validation's failing rows
+// go to the error table, or fail the action without one; a YAML data
+// preparation writes its destination node from its source table.
+func TestDataPreparationLoadModes(t *testing.T) {
+	s, r, w, _, _, ws := pipelineServer(t)
+	r.graph = prepGraph
+	w.table["ds.m"] = []string{"id", "k", "y"}
+	w.count = 2
+	ctx := context.Background()
+	repo := strings.SplitN(ws, "/workspaces/", 2)[0]
+	comp, err := s.CreateCompilationResult(ctx, &dfpb.CreateCompilationResultRequest{Parent: repo, CompilationResult: &dfpb.CompilationResult{Source: &dfpb.CompilationResult_Workspace{Workspace: ws}}})
+	if err != nil {
 		t.Fatal(err)
 	}
-	errs := g.errors("p")
-	if len(errs) != 1 || errs[0].GetPath() != "definitions/m.sqlx" || !strings.Contains(errs[0].GetMessage(), "MERGE") {
-		t.Errorf("errors = %v", errs)
+	if len(comp.GetCompilationErrors()) != 0 {
+		t.Fatalf("compilation errors = %v", comp.GetCompilationErrors())
+	}
+	acts, err := s.QueryCompilationResultActions(ctx, &dfpb.QueryCompilationResultActionsRequest{Name: comp.GetName()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range acts.GetCompilationResultActions() {
+		if a.GetTarget().GetName() == "m" && a.GetDataPreparation().GetContentsSql().GetLoad() != nil {
+			t.Errorf("a MERGE data preparation's load = %v, want none (the API has no merge)", a.GetDataPreparation().GetContentsSql().GetLoad())
+		}
+	}
+	if got := s.compilations[comp.GetName()].Merge["p.ds.m"]; strings.Join(got, ",") != "id,k" {
+		t.Errorf("merge keys = %v", got)
+	}
+	inv, err := s.CreateWorkflowInvocation(ctx, &dfpb.CreateWorkflowInvocationRequest{Parent: repo, WorkflowInvocation: &dfpb.WorkflowInvocation{
+		CompilationSource: &dfpb.WorkflowInvocation_CompilationResult{CompilationResult: comp.GetName()}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, list := waitInvocation(t, s, inv.GetName())
+	got := byName(list)
+	m := got["m"]
+	if m.GetState() != dfpb.WorkflowInvocationAction_SUCCEEDED {
+		t.Fatalf("merge = %v (%s)", m.GetState(), m.GetFailureReason())
+	}
+	sql := m.GetDataPreparationAction().GetGeneratedSql()
+	for _, want := range []string{"create table if not exists `p.ds.errs`", "insert into `p.ds.errs` (error_time, error, row)", "WHERE NOT (y > 0) OR (y > 0) IS NULL",
+		"merge `p.ds.m` T", "on T.`id` = S.`id` and T.`k` = S.`k`", "|> WHERE y > 0"} {
+		if !strings.Contains(sql, want) {
+			t.Errorf("generated_sql lacks %q:\n%s", want, sql)
+		}
+	}
+	if v := got["v"]; v.GetState() != dfpb.WorkflowInvocationAction_FAILED || !strings.Contains(v.GetFailureReason(), "2 rows failed the validation rule \"y > 0\", and the data preparation has no error table") {
+		t.Errorf("a failing validation without an error table = %v (%s)", v.GetState(), v.GetFailureReason())
+	}
+	y := got["dest"]
+	if y.GetState() != dfpb.WorkflowInvocationAction_SUCCEEDED || y.GetDataPreparationAction().GetContentsYaml() == "" {
+		t.Fatalf("YAML = %v (%s)", y.GetState(), y.GetFailureReason())
+	}
+	if ys := y.GetDataPreparationAction().GetGeneratedSql(); !strings.Contains(ys, "create or replace table `p.ds.dest` as SELECT * FROM `prj.ds.src`") || !strings.Contains(ys, "`p.ds.error`") {
+		t.Errorf("YAML generated_sql = %s", ys)
+	}
+}
+
+func TestParseYAMLDataPreparation(t *testing.T) {
+	for _, c := range []struct{ yaml, err string }{
+		{"nodes:\n- id: a\n  source: {table: {table: t}}\n  steps: [x]\n", `node 1's "steps" is not documented`},
+		{"nodes:\n- id: a\n  source: {nodeId: b}\n- id: b\n  source: {nodeId: a}\n  destination: {table: {table: d}}\n", ""},
+		{"configuration:\n  loadConfig: {}\n", "configuration.loadConfig is not documented"},
+		{"nodes:\n- id: a\n  destination: {table: {table: d}}\n", `node "a" needs a source`},
+		{"other: 1\n", `"other" is not a documented part`},
+	} {
+		y, err := ParseYAMLDataPreparation(c.yaml)
+		if c.err == "" {
+			if err != nil {
+				t.Errorf("%q: %v", c.yaml, err)
+				continue
+			}
+			if _, err := y.Query("b", &dfpb.Target{Database: "p", Schema: "ds"}); err == nil || !strings.Contains(err.Error(), "cycle") {
+				t.Errorf("a cycle: %v", err)
+			}
+			continue
+		}
+		if err == nil || !strings.Contains(err.Error(), c.err) {
+			t.Errorf("%q: %v, want %q", c.yaml, err, c.err)
+		}
 	}
 }

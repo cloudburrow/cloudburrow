@@ -1376,9 +1376,16 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// Spark's (#2156).
 	notebooks.Dataproc = dataprocSvc.Addr
 	defer notebooks.Close()
-	// Dataform's notebook actions run on them too (#2105).
+	// Colab Enterprise's runtime templates and runtimes (#2105), on the
+	// local Vertex AI endpoint, run on them.
+	if localAISrv != nil {
+		localAISrv.SetNotebookRuntimes(colabHost{m: notebooks}, filepath.Join(cfg.StateDir, "vertexai", "notebookruntimes.json"))
+	}
+	// Dataform's notebook actions run on them too (#2105), on a runtime
+	// template's settings when one is named.
 	if dataformSvc != nil {
 		dataformSvc.notebooks = notebooks
+		dataformSvc.runtimeTemplates = colabTemplates(localAISrv)
 	}
 	consoleSrv := buildConsole(consoleDeps{
 		cfg: cfg, iam: iamEnforcer, notebooks: notebooks, assetOut: assetOut, coord: coord, cluster: clusterComp, localAI: localAISrv, localModels: localModels,

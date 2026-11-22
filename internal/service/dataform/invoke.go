@@ -264,6 +264,16 @@ func (s *Server) CreateWorkflowInvocation(ctx context.Context, req *dfpb.CreateW
 	return clone(in), nil
 }
 
+type batchPriorityKey struct{}
+
+// BatchPriority reports whether an invocation runs its BigQuery jobs at
+// BATCH priority (invocation_config.query_priority); a Warehouse reads it
+// from the context it is given.
+func BatchPriority(ctx context.Context) bool {
+	b, _ := ctx.Value(batchPriorityKey{}).(bool)
+	return b
+}
+
 func disabled(a *dfpb.CompilationResultAction) bool {
 	return a.GetRelation().GetDisabled() || a.GetOperations().GetDisabled() || a.GetAssertion().GetDisabled() ||
 		a.GetNotebook().GetDisabled() || a.GetDataPreparation().GetDisabled() || a.GetBigqueryUnitTest().GetDisabled()
@@ -447,6 +457,11 @@ func endTiming(i *interval.Interval, t *timestamppb.Timestamp) {
 // counts as done for its dependents, as Dataform runs them.
 func (s *Server) run(ctx context.Context, name string, comp *compilation, actions []*dfpb.CompilationResultAction, cfg *dfpb.InvocationConfig) {
 	location := comp.C.GetCodeCompilationConfig().GetDefaultLocation()
+	// query_priority BATCH: the actions' BigQuery jobs are batch jobs
+	// (InvocationConfig.QueryPriority; INTERACTIVE, the default, otherwise).
+	if cfg.GetQueryPriority() == dfpb.InvocationConfig_BATCH {
+		ctx = context.WithValue(ctx, batchPriorityKey{}, true)
+	}
 	outcome := map[string]dfpb.WorkflowInvocationAction_State{}
 	failed := false
 	for i, a := range actions {
@@ -509,7 +524,7 @@ func (s *Server) run(ctx context.Context, name string, comp *compilation, action
 			}
 		case a.GetDataPreparation() != nil:
 			var act *dfpb.WorkflowInvocationAction_DataPreparationAction
-			act, err = s.runDataPreparation(ctx, a, location)
+			act, err = s.runDataPreparation(ctx, a, location, comp.Merge[targetKey(a.GetTarget())])
 			detail = func(w *dfpb.WorkflowInvocationAction) {
 				w.Action = &dfpb.WorkflowInvocationAction_DataPreparationAction_{DataPreparationAction: act}
 			}

@@ -19,9 +19,10 @@ package main
 //     editor keeps its model in content.pipeline.json beside them.
 //   - A data preparation is an asset repository with one SQLX data
 //     preparation (config type dataPreparation, a pipe-syntax query), its
-//     editor's model in content.dataprep.json. Google keeps a data
-//     preparation as YAML it does not document; this is Dataform core's
-//     SQLX form of the same action.
+//     editor's model in content.dataprep.json, as Google keeps one
+//     ("saved in the SQLX file format", manage-data-preparations). A YAML
+//     data preparation, Google's earlier form, opens and saves as its
+//     .dp.yaml file (studiodataprepyaml.go).
 //
 // Run, for a pipeline or a data preparation, compiles main and invokes
 // the compilation result; each action's state is read back as an
@@ -55,9 +56,13 @@ var studioGeneratedKinds = map[string]bool{"pipeline": true, "data_preparation":
 // "letters, numbers, underscores, and hyphens" (create-pipelines).
 var studioTaskName = regexp.MustCompile(`^[A-Za-z0-9_-]{1,63}$`)
 
-// studioLoadModes are a data preparation's write modes: Google's Full
-// refresh, Append, Incremental and Upsert.
-var studioLoadModes = map[string]bool{"REPLACE": true, "APPEND": true, "MAXIMUM": true, "UNIQUE": true}
+// studioLoadModes are a data preparation's write modes (data-prep-introduction,
+// read 2026-11-22): Full refresh (REPLACE), Append, Incremental (MAXIMUM
+// for numeric and datetime columns, UNIQUE for categorical ones) and
+// Upsert (MERGE, "Merges rows using the specified merge keys"), as
+// Dataform core's SQLX loadMode names them (REPLACE_TABLE, APPEND,
+// MAXIMUM, UNIQUE, MERGE; @dataform/core 3.1.6 configs.proto).
+var studioLoadModes = map[string]string{"REPLACE": "REPLACE_TABLE", "REPLACE_TABLE": "REPLACE_TABLE", "APPEND": "APPEND", "MAXIMUM": "MAXIMUM", "UNIQUE": "UNIQUE", "MERGE": "MERGE"}
 
 type studioPrepStep struct {
 	Type       string `json:"type"`
@@ -68,6 +73,14 @@ type studioPrepStep struct {
 	JoinType   string `json:"joinType,omitempty"`
 	Keys       string `json:"keys,omitempty"`
 	Columns    string `json:"columns,omitempty"`
+	// Validation makes a filter a validation: "Failed validation rows go
+	// to error table" (data-prep-get-suggestions).
+	Validation bool `json:"validation,omitempty"`
+	// Keep keeps a flattened column (Google drops a flattened RECORD's
+	// column unless its Drop column step is deleted).
+	Keep bool `json:"keep,omitempty"`
+	// JSON is an unnest of a JSON array, whose elements are JSON.
+	JSON bool `json:"json,omitempty"`
 }
 
 type studioDataPrep struct {
@@ -76,8 +89,13 @@ type studioDataPrep struct {
 	Destination string           `json:"destination"`
 	LoadMode    string           `json:"loadMode"`
 	LoadColumn  string           `json:"loadColumn,omitempty"`
+	MergeKeys   string           `json:"mergeKeys,omitempty"`
 	ErrorTable  string           `json:"errorTable,omitempty"`
 	Retention   int              `json:"errorRetentionDays,omitempty"`
+	// YAML is a YAML data preparation's file (studiodataprepyaml.go): the
+	// editor shows its source, destination and error table, and saves it
+	// back as YAML.
+	YAML string `json:"yaml,omitempty"`
 }
 
 type studioPipelineTask struct {
@@ -87,6 +105,19 @@ type studioPipelineTask struct {
 	SQL             string          `json:"sql,omitempty"`
 	Notebook        string          `json:"notebook,omitempty"`
 	DataPreparation *studioDataPrep `json:"dataPreparation,omitempty"`
+	// Table, View, Declare source, Data quality test and Unit test tasks
+	// (consolebigqueryscheduling.go): the target's project, dataset and
+	// name, Table's Table or Incremental table and View's View or
+	// Materialized view, and a unit test's action and inputs.
+	Project     string            `json:"project,omitempty"`
+	Dataset     string            `json:"dataset,omitempty"`
+	Table       string            `json:"table,omitempty"`
+	TableType   string            `json:"tableType,omitempty"`
+	UniqueKey   string            `json:"uniqueKey,omitempty"`
+	Description string            `json:"description,omitempty"`
+	Tags        []string          `json:"tags,omitempty"`
+	TestedTask  string            `json:"testedTask,omitempty"`
+	Inputs      []studioUnitInput `json:"inputs,omitempty"`
 }
 
 type studioPipelineSettings struct {
@@ -158,8 +189,18 @@ func studioIdents(list string) (string, error) {
 	return strings.Join(out, ", "), nil
 }
 
-// dataPrepQuery is a data preparation's steps as one pipe-syntax query.
+// dataPrepQuery is a data preparation's steps as one pipe-syntax query:
+// a validation is a WHERE (the rows that pass it), as a sample shows it.
 func dataPrepQuery(project string, m studioDataPrep) (string, error) {
+	return dataPrepPipe(project, m, false)
+}
+
+// dataPrepPipe is the steps' query; in SQLX a validation is Dataform
+// core's ${EXPECT}, whose failing rows go to the error table.
+func dataPrepPipe(project string, m studioDataPrep, sqlx bool) (string, error) {
+	if m.YAML != "" {
+		return yamlDataPrepQuery(project, m)
+	}
 	src, err := studioQuoteTable(project, m.Source)
 	if err != nil {
 		return "", fmt.Errorf("source: %w", err)
@@ -173,7 +214,39 @@ func dataPrepQuery(project string, m studioDataPrep) (string, error) {
 			if expr == "" {
 				return "", bad("a filter needs a condition")
 			}
-			lines = append(lines, "|> WHERE "+expr)
+			if st.Validation && sqlx {
+				lines = append(lines, "|> ${EXPECT} "+expr)
+			} else {
+				lines = append(lines, "|> WHERE "+expr)
+			}
+		case "flatten":
+			// Flatten a RECORD (its nested columns as PARENT_FIELD, the
+			// column dropped) or a JSON column (its top-level keys): the
+			// editor generates the expressions from the sample, and they
+			// stay editable, as Google's suggestions do.
+			col, err := studioIdent(st.Column)
+			if err != nil || expr == "" {
+				return "", bad("a flatten needs a column and its expressions")
+			}
+			if st.Keep {
+				lines = append(lines, "|> SELECT *, "+expr)
+			} else {
+				lines = append(lines, "|> SELECT * EXCEPT ("+col+"), "+expr)
+			}
+		case "unnest":
+			// "expands each element in an array into its own row,
+			// duplicating the other original column values into each new
+			// row. By default, the original array column is dropped."
+			col, err := studioIdent(st.Column)
+			if err != nil {
+				return "", bad("an unnest needs an array column")
+			}
+			arr := "`dp_unnest_input`." + col
+			if st.JSON {
+				arr = "JSON_QUERY_ARRAY(" + arr + ")"
+			}
+			lines = append(lines, "|> AS `dp_unnest_input`", "|> CROSS JOIN UNNEST("+arr+") AS `dp_unnest_element`",
+				"|> SELECT * EXCEPT ("+col+", `dp_unnest_element`), `dp_unnest_element` AS "+col)
 		case "transform":
 			col, err := studioIdent(st.Column)
 			if err != nil || expr == "" {
@@ -226,7 +299,7 @@ func dataPrepQuery(project string, m studioDataPrep) (string, error) {
 			}
 			lines = append(lines, "|> DROP "+cols)
 		default:
-			return "", bad("not a step type: filter, transform, join, aggregate, deduplicate or delete")
+			return "", bad("not a step type: filter, transform, join, aggregate, deduplicate, delete, flatten or unnest")
 		}
 	}
 	return strings.Join(lines, "\n"), nil
@@ -235,7 +308,10 @@ func dataPrepQuery(project string, m studioDataPrep) (string, error) {
 // dataPrepSQLX is a data preparation as Dataform core's SQLX action: its
 // destination, error table and load mode in its config, its query after.
 func dataPrepSQLX(project string, m studioDataPrep, deps []string) (string, error) {
-	q, err := dataPrepQuery(project, m)
+	if m.YAML != "" {
+		return "", errors.New("a YAML data preparation is not SQLX: migrate it to SQLX first")
+	}
+	q, err := dataPrepPipe(project, m, true)
 	if err != nil {
 		return "", err
 	}
@@ -247,8 +323,9 @@ func dataPrepSQLX(project string, m studioDataPrep, deps []string) (string, erro
 	if mode == "" {
 		mode = "REPLACE"
 	}
-	if !studioLoadModes[mode] {
-		return "", fmt.Errorf("%q is not a load mode: REPLACE, APPEND, MAXIMUM or UNIQUE", m.LoadMode)
+	mode, ok := studioLoadModes[mode]
+	if !ok {
+		return "", fmt.Errorf("%q is not a load mode: REPLACE, APPEND, MAXIMUM, UNIQUE or MERGE", m.LoadMode)
 	}
 	js := func(s string) string { b, _ := json.Marshal(s); return string(b) }
 	cfg := []string{`  type: "dataPreparation"`, "  project: " + js(p), "  dataset: " + js(d), "  name: " + js(t)}
@@ -264,11 +341,26 @@ func dataPrepSQLX(project string, m studioDataPrep, deps []string) (string, erro
 		cfg = append(cfg, fmt.Sprintf("  errorTable: { project: %s, dataset: %s, name: %s, retentionDays: %d }", js(ep), js(ed), js(en), days))
 	}
 	lm := "  loadMode: { mode: " + js(mode)
-	if mode == "MAXIMUM" || mode == "UNIQUE" {
+	switch mode {
+	case "MAXIMUM", "UNIQUE":
 		if strings.TrimSpace(m.LoadColumn) == "" {
 			return "", fmt.Errorf("the %s load mode needs a column", mode)
 		}
-		lm += ", columnName: " + js(strings.TrimSpace(m.LoadColumn))
+		lm += ", incrementalColumn: " + js(strings.TrimSpace(m.LoadColumn))
+	case "MERGE":
+		var keys []string
+		for _, k := range strings.Split(m.MergeKeys, ",") {
+			if k = strings.TrimSpace(k); k != "" {
+				if strings.ContainsAny(k, "`\n\"") {
+					return "", fmt.Errorf("%q is not a column name", k)
+				}
+				keys = append(keys, js(k))
+			}
+		}
+		if len(keys) == 0 {
+			return "", errors.New("Upsert needs its merge keys")
+		}
+		lm += ", uniqueKey: [" + strings.Join(keys, ", ") + "]"
 	}
 	cfg = append(cfg, lm+" }")
 	if len(deps) > 0 {
@@ -316,6 +408,9 @@ func studioGeneratedFiles(project, kind, content string) (map[string]string, err
 		if err := json.Unmarshal([]byte(content), &m); err != nil {
 			return nil, fmt.Errorf("a data preparation: %w", err)
 		}
+		if m.YAML != "" {
+			return yamlDataPrepFiles(project, m)
+		}
 		sqlx, err := dataPrepSQLX(project, m, nil)
 		if err != nil {
 			return nil, err
@@ -347,6 +442,17 @@ func pipelineFiles(project string, m studioPipeline) (map[string]string, error) 
 		names[t.Name] = true
 	}
 	js := func(v string) string { b, _ := json.Marshal(v); return string(b) }
+	// A task's Run after names other tasks; Dataform's dependencies name
+	// their targets, a table's own name where it has one.
+	targetOf := map[string]string{}
+	for _, t := range m.Tasks {
+		targetOf[t.Name] = studioTaskTarget(t)
+		if t.Type == "data_preparation" && t.DataPreparation != nil {
+			if _, _, tbl, err := studioTableRef(project, t.DataPreparation.Destination); err == nil {
+				targetOf[t.Name] = tbl
+			}
+		}
+	}
 	var notebooks []string
 	for _, t := range m.Tasks {
 		for _, d := range t.RunAfter {
@@ -357,21 +463,18 @@ func pipelineFiles(project string, m studioPipeline) (map[string]string, error) 
 				return nil, fmt.Errorf("task %s cannot run after itself", t.Name)
 			}
 		}
-		deps := ""
-		if len(t.RunAfter) > 0 {
-			q := make([]string, len(t.RunAfter))
-			for i, d := range t.RunAfter {
-				q[i] = js(d)
-			}
-			deps = ", dependencies: [" + strings.Join(q, ", ") + "]"
+		depTargets := make([]string, len(t.RunAfter))
+		for i, d := range t.RunAfter {
+			depTargets[i] = targetOf[d]
 		}
 		switch t.Type {
-		case "sql":
-			if strings.TrimSpace(t.SQL) == "" {
-				return nil, fmt.Errorf("task %s has no query", t.Name)
+		case "sql", "table", "view", "declaration", "assertion", "unit_test":
+			f, err := pipelineTaskFile(t, depTargets)
+			if err != nil {
+				return nil, err
 			}
-			files["definitions/"+t.Name+".sqlx"] = "config { type: \"operations\"" + deps + " }\n\n" + strings.TrimSpace(t.SQL) + "\n"
-		case "notebook":
+			files["definitions/"+t.Name+".sqlx"] = f
+		case "notebook", "spark_notebook":
 			nb := t.Notebook
 			if strings.TrimSpace(nb) == "" {
 				nb = `{"nbformat":4,"nbformat_minor":5,"metadata":{},"cells":[]}`
@@ -383,8 +486,14 @@ func pipelineFiles(project string, m studioPipeline) (map[string]string, error) 
 			entry := "  - notebook:\n      name: " + js(t.Name) + "\n      filename: " + js(t.Name+".ipynb") + "\n"
 			if len(t.RunAfter) > 0 {
 				entry += "      dependencyTargets:\n"
-				for _, d := range t.RunAfter {
+				for _, d := range depTargets {
 					entry += "        - name: " + js(d) + "\n"
+				}
+			}
+			if tags := studioTags(t.Tags); len(tags) > 0 {
+				entry += "      tags:\n"
+				for _, x := range tags {
+					entry += "        - " + js(x) + "\n"
 				}
 			}
 			notebooks = append(notebooks, entry)
@@ -392,13 +501,13 @@ func pipelineFiles(project string, m studioPipeline) (map[string]string, error) 
 			if t.DataPreparation == nil {
 				return nil, fmt.Errorf("task %s has no data preparation", t.Name)
 			}
-			sqlx, err := dataPrepSQLX(project, *t.DataPreparation, t.RunAfter)
+			sqlx, err := dataPrepSQLX(project, *t.DataPreparation, depTargets)
 			if err != nil {
 				return nil, fmt.Errorf("task %s: %w", t.Name, err)
 			}
 			files["definitions/"+t.Name+".sqlx"] = sqlx
 		default:
-			return nil, fmt.Errorf("task %s: %q is not a task type: sql, notebook or data_preparation", t.Name, t.Type)
+			return nil, fmt.Errorf("task %s: %q is not a task type: sql, notebook, spark_notebook, data_preparation, table, view, declaration, assertion or unit_test", t.Name, t.Type)
 		}
 	}
 	if len(notebooks) > 0 {
@@ -452,6 +561,10 @@ type studioOrchReq struct {
 	RuntimeTemplate string `json:"runtimeTemplate"`
 	Disabled        bool   `json:"disabled"`
 	Content         string `json:"content"`
+	// Batch is Execute as interactive job with high priority cleared;
+	// MaxConcurrent, Limit concurrent actions' Maximum concurrent actions.
+	Batch         bool  `json:"batch"`
+	MaxConcurrent int32 `json:"maxConcurrent"`
 }
 
 type studioSchedule struct {
@@ -534,8 +647,13 @@ func studioOrchestration(ctx context.Context, s *dataform.Server, project, call 
 		out = map[string]string{"cancelled": in.Invocation}
 	case "dataprepsql":
 		out, err = studioDataPrepSQL(project, in.Content)
+	case "dataprepyaml":
+		// More > Open YAML: a YAML data preparation as the editor's model.
+		out, err = studioDataPrepFromYAML(in.Content)
 	default:
-		return nil, false, nil
+		// The Scheduling page, triggers and Run's selection
+		// (consolebigqueryscheduling.go).
+		return studioScheduling(ctx, s, project, call, body)
 	}
 	return out, true, err
 }
@@ -550,6 +668,15 @@ func studioDataPrepSQL(project, content string) (any, error) {
 		return nil, err
 	}
 	out := map[string]string{"sql": q}
+	if m.YAML != "" {
+		y, err := dataPrepYAML(project, m)
+		if err != nil {
+			out["yamlError"] = err.Error()
+		} else {
+			out["yaml"] = y
+		}
+		return out, nil
+	}
 	if strings.TrimSpace(m.Destination) != "" {
 		if sqlx, err := dataPrepSQLX(project, m, nil); err == nil {
 			out["sqlx"] = sqlx
@@ -640,6 +767,10 @@ func studioCreateSchedule(ctx context.Context, s *dataform.Server, in studioOrch
 		cc.DefaultNotebookRuntimeOptions = &dfpb.NotebookRuntimeOptions{ExecutionSink: &dfpb.NotebookRuntimeOptions_GcsOutputBucket{GcsOutputBucket: bucket},
 			AiPlatformNotebookRuntimeTemplate: strings.TrimSpace(in.RuntimeTemplate)}
 	}
+	ic, err := studioInvocationConfig(nil, nil, studioRunOptions{Batch: in.Batch, MaxConcurrent: in.MaxConcurrent}, strings.TrimSpace(in.ServiceAccount))
+	if err != nil {
+		return nil, err
+	}
 	rc, err := s.CreateReleaseConfig(ctx, &dfpb.CreateReleaseConfigRequest{Parent: in.Name, ReleaseConfigId: id,
 		ReleaseConfig: &dfpb.ReleaseConfig{GitCommitish: "main", CodeCompilationConfig: cc}})
 	if err != nil {
@@ -647,7 +778,7 @@ func studioCreateSchedule(ctx context.Context, s *dataform.Server, in studioOrch
 	}
 	wc, err := s.CreateWorkflowConfig(ctx, &dfpb.CreateWorkflowConfigRequest{Parent: in.Name, WorkflowConfigId: id,
 		WorkflowConfig: &dfpb.WorkflowConfig{ReleaseConfig: rc.GetName(), CronSchedule: strings.TrimSpace(in.Cron), TimeZone: strings.TrimSpace(in.TimeZone),
-			InvocationConfig: &dfpb.InvocationConfig{ServiceAccount: strings.TrimSpace(in.ServiceAccount)}}})
+			InvocationConfig: ic}})
 	if err != nil {
 		_, _ = s.DeleteReleaseConfig(ctx, &dfpb.DeleteReleaseConfigRequest{Name: rc.GetName()})
 		return nil, err

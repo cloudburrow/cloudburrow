@@ -987,7 +987,7 @@ func (dataformProvider) connectGitAction(repo *dfpb.Repository) console.Action {
 	}
 	return console.Action{ID: "connectgit", Label: "Connect with Git", Submit: "Link", Fields: []console.Field{
 		{Name: "url", Label: "Remote Git repository URL", Type: "text", Required: true, Default: g.GetUrl(),
-			Help: "HTTPS: a Secure Source Manager repository of this instance (its git_https URI). SSH: ssh://USER@HOST:PORT/PATH or USER@HOST:PATH on this machine."},
+			Help: "HTTPS: a Secure Source Manager repository of this instance (its git_https URI). SSH: ssh://USER@HOST:PORT/PATH or USER@HOST:PATH, on any git host you can reach, with its public host key."},
 		{Name: "branch", Label: "Default remote branch name", Type: "text", Required: true, Default: branch},
 		{Name: "auth", Label: "Authentication method", Type: "radio", Default: auth, Options: []string{"https", "ssh", "account"},
 			OptionLabels: map[string]string{"https": "HTTPS", "ssh": "SSH", "account": "Personal authentication (Developer Connect account connector)"}},

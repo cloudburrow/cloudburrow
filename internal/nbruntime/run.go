@@ -41,12 +41,18 @@ func (e *CellError) Error() string {
 // runtime named key in project, deletes the runtime, and returns the
 // executed notebook. A cell that raises ends the run with a *CellError.
 func (m *Manager) RunNotebook(ctx context.Context, key, project string, notebook []byte) ([]byte, error) {
+	return m.RunNotebookWith(ctx, key, project, notebook, Options{})
+}
+
+// RunNotebookWith is RunNotebook on a runtime with a runtime template's
+// options (#2105).
+func (m *Manager) RunNotebookWith(ctx context.Context, key, project string, notebook []byte, opts Options) ([]byte, error) {
 	var nb map[string]any
 	if err := json.Unmarshal(notebook, &nb); err != nil {
 		return nil, fmt.Errorf("the notebook is not nbformat JSON: %w", err)
 	}
 	cells, _ := nb["cells"].([]any)
-	m.Connect(key, project)
+	m.ConnectWith(key, project, opts)
 	defer func() { _ = m.Disconnect(key) }()
 	deadline := time.Now().Add(RunTimeout)
 	for {

@@ -34,6 +34,7 @@ import (
 	"net"
 	"os/exec"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -151,6 +152,7 @@ type Manager struct {
 
 type session struct {
 	key, project string
+	opts         Options
 	status       Status
 	names        []string // network last
 	stop         func()
@@ -194,6 +196,33 @@ func (m *Manager) Status(key string) Status {
 // host has none, and returns at once: Status follows it to CONNECTED or
 // FAILED. A runtime already connected or starting is kept.
 func (m *Manager) Connect(key, project string) Status {
+	return m.ConnectWith(key, project, Options{})
+}
+
+// Options are a runtime's settings from its Colab Enterprise runtime
+// template (#2105): its idle shutdown and its environment variables.
+type Options struct {
+	// IdleTimeout replaces the default IdleTimeout when positive.
+	IdleTimeout time.Duration
+	// IdleDisabled keeps the runtime however long it is idle.
+	IdleDisabled bool
+	// Env is set in the kernel's environment.
+	Env map[string]string
+}
+
+// idleTimeout is the session's idle shutdown, 0 when it has none.
+func (s *session) idleTimeout() time.Duration {
+	switch {
+	case s.opts.IdleDisabled:
+		return 0
+	case s.opts.IdleTimeout > 0:
+		return s.opts.IdleTimeout
+	}
+	return IdleTimeout
+}
+
+// ConnectWith is Connect with a runtime template's options.
+func (m *Manager) ConnectWith(key, project string, opts Options) Status {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.sessions == nil {
@@ -202,7 +231,7 @@ func (m *Manager) Connect(key, project string) Status {
 	if s := m.sessions[key]; s != nil && s.status.State != StateFailed {
 		return s.status
 	}
-	s := &session{key: key, project: project, status: Status{State: StateStarting, Project: project, Image: Tag()}}
+	s := &session{key: key, project: project, opts: opts, status: Status{State: StateStarting, Project: project, Image: Tag()}}
 	m.sessions[key] = s
 	go m.start(s)
 	return s.status
@@ -370,6 +399,9 @@ func (m *Manager) launch(ctx context.Context, s *session) error {
 	}
 	runArgs := []string{"run", "-i", "--rm", "--init", "--name", kernel, "--label", label, "--network", network,
 		"-e", "GOOGLE_CLOUD_PROJECT=" + s.project, "-e", "CB_BIGQUERY_ENDPOINT=" + endpoint, "-e", "NO_GCE_CHECK=True"}
+	for _, k := range sortedKeys(s.opts.Env) {
+		runArgs = append(runArgs, "-e", k+"="+s.opts.Env[k])
+	}
 	if dpTarget != "" {
 		region := m.Region
 		if region == "" {
@@ -418,10 +450,14 @@ func (m *Manager) launch(ctx context.Context, s *session) error {
 			return fmt.Errorf("the runtime did not start: %s", strings.TrimSpace(stderr.String()))
 		}
 		m.mu.Lock()
+		idle := s.idleTimeout()
 		s.status = Status{State: StateConnected, Python: r.Python, Project: s.project, Image: image,
-			Started: time.Now().UTC(), Idle: IdleTimeout.String(), Notes: r.Notes}
+			Started: time.Now().UTC(), Notes: r.Notes}
+		if idle > 0 {
+			s.status.Idle = idle.String()
+			s.timer = time.AfterFunc(idle, func() { m.idle(s) })
+		}
 		s.last = time.Now()
-		s.timer = time.AfterFunc(IdleTimeout, func() { m.idle(s) })
 		m.mu.Unlock()
 		m.logf("notebook runtime %s: connected (%s)", s.key, kernel)
 		return nil
@@ -444,15 +480,25 @@ func (m *Manager) waitReady(ctx context.Context, name string) error {
 	}
 }
 
-// idle shuts a runtime down after IdleTimeout without a cell run.
+func sortedKeys(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// idle shuts a runtime down after its idle timeout without a cell run.
 func (m *Manager) idle(s *session) {
 	m.mu.Lock()
-	quiet := time.Since(s.last) >= IdleTimeout
+	idle := s.idleTimeout()
+	quiet := time.Since(s.last) >= idle
 	m.mu.Unlock()
 	if !quiet {
 		m.mu.Lock()
 		if s.timer != nil {
-			s.timer.Reset(IdleTimeout - time.Since(s.last))
+			s.timer.Reset(idle - time.Since(s.last))
 		}
 		m.mu.Unlock()
 		return

@@ -370,3 +370,109 @@ func TestBigQueryStudioDataPreparationThroughThePage(t *testing.T) {
 		})
 	})
 }
+
+// TestBigQueryStudioDataPreparationUpsertValidationFlatten (#2105): Add
+// step > Validation (Failed validation rows go to error table), Flatten of
+// a RECORD (its nested column generated as PARENT_FIELD) and Unnest of an
+// array; Destination with Write mode Upsert and its Merge keys, and an
+// error table. The SQLX holds Dataform core's MERGE and ${EXPECT}; Run
+// merges into the existing destination and the failing row lands in the
+// error table. More > Open YAML opens a YAML data preparation (its source
+// and destination, the SQLX view showing its YAML), and Migrate to SQLX
+// makes it a SQLX one. WCAG 2.1 AA and the new form by keyboard.
+func TestBigQueryStudioDataPreparationUpsertValidationFlatten(t *testing.T) {
+	needService(t, "bigquery")
+	needService(t, "dataform")
+	s := newStudio2105(t)
+	ds := fmt.Sprintf("dataprep_up_%d", s.stamp)
+	fixture(t, "bigquery", s.project, `{"datasetId":"`+ds+`"}`, ds)
+	s.query(t, fmt.Sprintf("CREATE TABLE `%s.%s.src` AS SELECT 1 AS id, 2 AS v, STRUCT(10 AS a) AS s, [1, 2] AS arr UNION ALL SELECT 2, 0, STRUCT(20), [3] UNION ALL SELECT 3, 5, STRUCT(30), [4]", s.project, ds))
+	s.query(t, fmt.Sprintf("CREATE TABLE `%s.%s.up` AS SELECT 1 AS id, 0 AS v, 0 AS s_a, 1 AS arr", s.project, ds))
+	name := fmt.Sprintf("browser upsert data preparation %d", s.stamp)
+
+	p := open(t)
+	p.navigate("/bigquery-studio" + s.q)
+	p.waitFor(`document.querySelector(".bq-home") !== null && document.querySelector(".bq-tree") !== null`)
+	p.clickText(".bq-home-action", "Data preparation")
+	p.waitFor(`document.querySelector(".bq-dataprep") !== null && document.querySelector("#bq-dp-source") !== null`)
+	p.setField("#bq-dp-source", ds+".src")
+	studioMenu(p, ".bq-dataprep", "Add step", "Validation")
+	p.waitFor(`document.querySelector("#bq-dp-expr") !== null && document.querySelector("#bq-dp-validation").checked`)
+	p.setField("#bq-dp-expr", "v > 1")
+	studioMenu(p, ".bq-dataprep", "Add step", "Flatten")
+	p.waitFor(`[...document.querySelectorAll("#bq-dp-col option")].some((o) => o.value === "s")`)
+	p.setField("#bq-dp-col", "s")
+	p.waitFor(`document.querySelector("#bq-dp-expr").value.includes("AS ` + "`s_a`" + `")`)
+	studioMenu(p, ".bq-dataprep", "Add step", "Unnest")
+	p.waitFor(`[...document.querySelectorAll("#bq-dp-col option")].some((o) => o.value === "arr")`)
+	p.setField("#bq-dp-col", "arr")
+	p.clickText(".bq-dataprep .bq-toolbar button", "Destination")
+	p.waitFor(`document.querySelector("#bq-dp-dest") !== null`)
+	p.setField("#bq-dp-dest", ds+".up")
+	p.setField("#bq-dp-mode", "MERGE")
+	p.waitFor(`!document.querySelector("#bq-dp-merge-keys").closest(".form-field").hidden`)
+	p.setField("#bq-dp-merge-keys", "id, arr")
+	p.setField("#bq-dp-errors", ds+".up_errors")
+	var labels []string
+	p.eval(`[...document.querySelectorAll(".bq-dp-step")].map((b) => b.textContent)`, &labels)
+	if len(labels) != 5 || !strings.HasPrefix(labels[1], "Validation: v > 1") || !strings.HasPrefix(labels[2], "Flatten: s") || !strings.Contains(labels[4], "(Upsert)") {
+		t.Errorf("Steps = %q", labels)
+	}
+	p.clickText(".bq-dataprep [role=tab]", "SQLX")
+	p.waitFor(`(document.querySelector(".bq-dp-sqlx") || {}).textContent?.includes("dataPreparation")`)
+	var sqlx string
+	p.eval(`document.querySelector(".bq-dp-sqlx").textContent`, &sqlx)
+	for _, want := range []string{`mode: "MERGE", uniqueKey: ["id", "arr"]`, "|> ${EXPECT} v > 1", "|> SELECT * EXCEPT (`s`), `s`.`a` AS `s_a`", "CROSS JOIN UNNEST("} {
+		if !strings.Contains(sqlx, want) {
+			t.Errorf("the SQLX lacks %s:\n%s", want, sqlx)
+		}
+	}
+	p.clickText(".bq-dataprep-tab > .bq-toolbar button", "Run")
+	studioSaveAs(p, name)
+	if state := studioWaitExecution(p, ".bq-dp-runs", 5*time.Minute); state != "SUCCEEDED" {
+		t.Fatalf("the run is %s: %s", state, studioTaskStates(p, ".bq-dp-runs"))
+	}
+	if body := s.query(t, fmt.Sprintf("SELECT COUNT(*) AS n, SUM(v) AS sv, SUM(s_a) AS sa FROM `%s.%s.up`", s.project, ds)); !strings.Contains(body, `"3"`) || !strings.Contains(body, `"9"`) || !strings.Contains(body, `"50"`) {
+		t.Errorf("the merged destination reads %s, want 3 rows, v summing to 9 and s_a to 50", body)
+	}
+	if body := s.query(t, fmt.Sprintf("SELECT error FROM `%s.%s.up_errors`", s.project, ds)); !strings.Contains(body, "Validation failed: v > 1") {
+		t.Errorf("the error table reads %s", body)
+	}
+
+	// More > Open YAML: a YAML data preparation's source and destination.
+	studioMenu(p, ".bq-dataprep", "More", "Open YAML")
+	p.waitFor(`document.querySelector("#bq-dp-yaml-text") !== null`)
+	p.setField("#bq-dp-yaml-text", "nodes:\n- id: node1\n  source: {table: {dataset: "+ds+", table: src}}\n- id: node2\n  source: {nodeId: node1}\n  destination: {table: {dataset: "+ds+", table: fromyaml}}\n")
+	p.clickText(".bq-dp-form button", "Open")
+	p.waitFor(`document.querySelector(".bq-dp-yaml button") !== null`)
+	p.eval(`[...document.querySelectorAll(".bq-dp-step")].map((b) => b.textContent)`, &labels)
+	if len(labels) != 2 || labels[0] != "Source: "+ds+".src" || !strings.HasPrefix(labels[1], "Destination: "+ds+".fromyaml") {
+		t.Errorf("the YAML data preparation's steps = %q", labels)
+	}
+	p.clickText(".bq-dataprep [role=tab]", "Data")
+	p.clickText(".bq-dataprep [role=tab]", "SQLX")
+	p.waitFor(`(document.querySelector(".bq-dp-sqlx") || {}).textContent?.includes("nodeId: node1")`)
+
+	t.Run("keyboard", func(t *testing.T) {
+		parent := p.t
+		p.t = t
+		defer func() { p.t = parent }()
+		// Migrate to SQLX by Enter.
+		p.run(chromedp.Focus(chromedp.CSS(`.bq-dp-yaml button`)), chromedp.KeyEvent(kb.Enter))
+		p.waitFor(`document.querySelector(".bq-dp-yaml button") === null`)
+		for _, fl := range p.keyboardFailures() {
+			t.Errorf("data preparation editor: %s", fl)
+		}
+	})
+	p.waitFor(`(document.querySelector(".bq-dp-sqlx") || {}).textContent?.includes("dataPreparation")`)
+	t.Run("WCAG", func(t *testing.T) {
+		auditScreens(t, []a11yPage{
+			{"Studio data preparation Open YAML", "/bigquery-studio" + s.q, `document.querySelector(".bq-home") !== null`,
+				`[...document.querySelectorAll(".bq-home-action")].find((b) => b.textContent.includes("Data preparation")).click();
+				const until = async (f) => { for (let i = 0; i < 200 && !f(); i++) await new Promise((r) => setTimeout(r, 50)); };
+				await until(() => [...document.querySelectorAll(".bq-dataprep .bq-menu-item")].some((b) => b.textContent === "Open YAML"));
+				[...document.querySelectorAll(".bq-dataprep .bq-menu-item")].find((b) => b.textContent === "Open YAML").click();
+				await until(() => document.querySelector("#bq-dp-yaml-text") !== null)`},
+		})
+	})
+}

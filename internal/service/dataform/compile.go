@@ -390,6 +390,7 @@ func (s *Server) compile(ctx context.Context, parent string, c *dfpb.Compilation
 	project := strings.Split(parent, "/")[1]
 	id := newUUID()
 	var actions []*dfpb.CompilationResultAction
+	var merge map[string][]string
 	if p := cfg.GetPipelineConfig(); p != nil && p.GetPipelineType() != dfpb.PipelineConfig_DATAFORM {
 		// A single file asset: its one file, compiled here.
 		actions, err = singleFileActions(dir, project, p, cfg)
@@ -415,6 +416,7 @@ func (s *Server) compile(ctx context.Context, parent string, c *dfpb.Compilation
 		c.DataformCoreVersion = g.DataformCoreVersion
 		c.CompilationErrors = g.errors(project)
 		actions = g.actions(project)
+		merge = g.mergeKeys(project)
 	}
 	if len(c.GetCompilationErrors()) == 0 {
 		md, err := s.uploadSnapshot(ctx, dir, id, cfg.GetDefaultNotebookRuntimeOptions())
@@ -428,7 +430,7 @@ func (s *Server) compile(ctx context.Context, parent string, c *dfpb.Compilation
 	c.ResolvedGitCommitSha = sha
 	c.CreateTime = s.now()
 	c.DataEncryptionState, c.InternalMetadata = nil, nil
-	rec := &compilation{C: c, Actions: actions}
+	rec := &compilation{C: c, Actions: actions, Merge: merge}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.repos[parent]; !ok {
@@ -737,14 +739,28 @@ func (g *dfGraph) errors(project string) []*dfpb.CompilationResult_CompilationEr
 	for _, e := range g.GraphErrors.CompilationErrors {
 		out = append(out, &dfpb.CompilationResult_CompilationError{Message: e.Message, Stack: e.Stack, Path: e.FileName, ActionTarget: e.ActionTarget.proto(project)})
 	}
-	// Dataform core compiles a data preparation's MERGE load mode, but the
-	// API's LoadConfig has no merge (only replace, append, maximum and
-	// unique), so the action cannot be carried: an error, not a replace.
+	return out
+}
+
+// mergeKeys are the unique keys of the data preparations whose load mode
+// is MERGE (Dataform core's `loadMode: { mode: "MERGE", uniqueKey: [...] }`,
+// BigQuery Studio's Upsert write mode), by target (targetKey).
+//
+// UNVERIFIED (read 2026-11-22: https://docs.cloud.google.com/dataform/reference/rest/v1/projects.locations.repositories.compilationResults/query,
+// https://docs.cloud.google.com/bigquery/docs/data-prep-introduction): the
+// API's LoadConfig has only replace, append, maximum and unique, so a
+// MERGE data preparation's contents_sql carries no load config, and the
+// keys stay in the server's own record of the compilation result; the
+// invocation merges on them, and its generated_sql shows the MERGE.
+func (g *dfGraph) mergeKeys(project string) map[string][]string {
+	out := map[string][]string{}
 	for _, a := range g.DataPreparations {
-		if a.Load != nil && a.Load.Merge != nil {
-			out = append(out, &dfpb.CompilationResult_CompilationError{Path: a.FileName, ActionTarget: a.Target.proto(project),
-				Message: "the MERGE load mode has no Dataform API LoadConfig (replace, append, maximum or unique); use UNIQUE or MAXIMUM"})
+		if a.Load != nil && a.Load.Merge != nil && a.Target != nil {
+			out[targetKey(a.Target.proto(project))] = append([]string(nil), a.Load.Merge.UniqueKey...)
 		}
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }
@@ -860,7 +876,8 @@ func (g *dfGraph) actions(project string) []*dfpb.CompilationResultAction {
 
 func (l *dfLoad) proto() *dfpb.CompilationResultAction_LoadConfig {
 	switch {
-	case l == nil:
+	case l == nil, l.Merge != nil:
+		// MERGE has no API LoadConfig (mergeKeys).
 		return nil
 	case l.Append != nil:
 		return &dfpb.CompilationResultAction_LoadConfig{Mode: &dfpb.CompilationResultAction_LoadConfig_Append{Append: &dfpb.CompilationResultAction_SimpleLoadMode{}}}

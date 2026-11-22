@@ -43,7 +43,7 @@ func TestDataPrepSQLX(t *testing.T) {
 		"  dataset: \"reports\",\n" +
 		"  name: \"revenue\",\n" +
 		"  errorTable: { project: \"cp\", dataset: \"reports\", name: \"revenue_errors\", retentionDays: 7 },\n" +
-		"  loadMode: { mode: \"UNIQUE\", columnName: \"region\" },\n" +
+		"  loadMode: { mode: \"UNIQUE\", incrementalColumn: \"region\" },\n" +
 		"  dependencies: [\"load\"]\n" +
 		"}\n\n" +
 		"FROM `cp.sales.orders`\n" +
@@ -59,6 +59,7 @@ func TestDataPrepSQLX(t *testing.T) {
 	}
 	for _, bad := range []studioDataPrep{
 		{Source: "orders", Destination: "d.t"},
+		{Source: "d.t", Destination: "d.u", LoadMode: "PIVOT"},
 		{Source: "d.t", Destination: "d.u", LoadMode: "MERGE"},
 		{Source: "d.t", Destination: "d.u", LoadMode: "MAXIMUM"},
 		{Source: "d.t", Destination: "d.u", Steps: []studioPrepStep{{Type: "filter"}}},
@@ -68,6 +69,99 @@ func TestDataPrepSQLX(t *testing.T) {
 		if _, err := dataPrepSQLX("cp", bad, nil); err == nil {
 			t.Errorf("%+v: no error", bad)
 		}
+	}
+}
+
+// TestDataPrepStepsAndModes (#2105): Upsert writes Dataform core's MERGE
+// load mode with its merge keys, Full refresh REPLACE_TABLE; a
+// validation is ${EXPECT} in SQLX and a WHERE in the sample's query;
+// Flatten and Unnest are pipe operators.
+func TestDataPrepStepsAndModes(t *testing.T) {
+	m := studioDataPrep{Source: "d.t", Destination: "d.u", LoadMode: "MERGE", MergeKeys: "id, k", Steps: []studioPrepStep{
+		{Type: "filter", Expression: "y > 0", Validation: true},
+		{Type: "flatten", Column: "s", Expression: "`s`.`a` AS `s_a`"},
+		{Type: "flatten", Column: "j", Expression: "`j`.`x` AS `x`", Keep: true},
+		{Type: "unnest", Column: "arr"},
+		{Type: "unnest", Column: "ja", JSON: true},
+	}}
+	got, err := dataPrepSQLX("cp", m, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`loadMode: { mode: "MERGE", uniqueKey: ["id", "k"] }`, "|> ${EXPECT} y > 0", "|> SELECT * EXCEPT (`s`), `s`.`a` AS `s_a`", "|> SELECT *, `j`.`x` AS `x`",
+		"|> AS `dp_unnest_input`\n|> CROSS JOIN UNNEST(`dp_unnest_input`.`arr`) AS `dp_unnest_element`\n|> SELECT * EXCEPT (`arr`, `dp_unnest_element`), `dp_unnest_element` AS `arr`",
+		"UNNEST(JSON_QUERY_ARRAY(`dp_unnest_input`.`ja`))"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("SQLX lacks %q:\n%s", want, got)
+		}
+	}
+	if q, _ := dataPrepQuery("cp", m); !strings.Contains(q, "|> WHERE y > 0") || strings.Contains(q, "EXPECT") {
+		t.Errorf("sample query = %s", q)
+	}
+	m.LoadMode, m.Steps = "REPLACE", nil
+	if got, _ := dataPrepSQLX("cp", m, nil); !strings.Contains(got, `loadMode: { mode: "REPLACE_TABLE" }`) {
+		t.Errorf("Full refresh = %s", got)
+	}
+	m.LoadMode, m.MergeKeys = "MERGE", " "
+	if _, err := dataPrepSQLX("cp", m, nil); err == nil {
+		t.Error("Upsert without merge keys: no error")
+	}
+}
+
+const studioYAML = `configuration:
+  errorTable: {table: error}
+nodes:
+- id: node1
+  source: {table: {project: prj, dataset: ds, table: src}}
+  generated:
+    outputSchema: {field: [{name: a, type: INT64, mode: NULLABLE}]}
+- id: node2
+  source: {nodeId: node1}
+  destination: {table: {dataset: out, table: dest}}
+`
+
+// TestYAMLDataPreparationRoundTrip (#2105): a YAML data preparation opens
+// with its source, destination and error table; saved unchanged it is the
+// same bytes; a changed destination changes that mapping alone; it runs
+// as a .dp.yaml file declared in actions.yaml.
+func TestYAMLDataPreparationRoundTrip(t *testing.T) {
+	m, err := studioDataPrepFromYAML(studioYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Source != "prj.ds.src" || m.Destination != "out.dest" || m.ErrorTable != "error" {
+		t.Fatalf("model = %+v", m)
+	}
+	if y, err := dataPrepYAML("cp", m); err != nil || y != studioYAML {
+		t.Errorf("unchanged = %q, %v", y, err)
+	}
+	m.Destination = "cp.out.dest2"
+	y, err := dataPrepYAML("cp", m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"destination: {table: {dataset: out, table: dest2, project: cp}}", "source: {table: {project: prj, dataset: ds, table: src}}",
+		"outputSchema: {field: [{name: a, type: INT64, mode: NULLABLE}]}", "errorTable: {table: error}"} {
+		if !strings.Contains(y, want) {
+			t.Errorf("saved YAML lacks %q:\n%s", want, y)
+		}
+	}
+	files, err := studioGeneratedFiles("cp", "data_preparation", mustJSON(t, m))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if files["definitions/data_preparation.dp.yaml"] != y || !strings.Contains(files["definitions/actions.yaml"], "filename: data_preparation.dp.yaml") {
+		t.Errorf("files = %v", files)
+	}
+	if q, err := dataPrepQuery("cp", m); err != nil || q != "FROM `prj.ds.src`" {
+		t.Errorf("query = %q, %v", q, err)
+	}
+	m.Steps = []studioPrepStep{{Type: "deduplicate"}}
+	if _, err := dataPrepYAML("cp", m); err == nil {
+		t.Error("steps on a YAML data preparation: no error")
+	}
+	if _, err := studioDataPrepFromYAML("a: [1"); err == nil {
+		t.Error("bad YAML: no error")
 	}
 }
 
@@ -88,7 +182,7 @@ func TestPipelineFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := files["definitions/load.sqlx"]; got != "config { type: \"operations\" }\n\nCREATE OR REPLACE TABLE work.t AS SELECT 1 AS x\n" {
+	if got := files["definitions/load.sqlx"]; got != "config {\n  type: \"operations\"\n}\n\nCREATE OR REPLACE TABLE work.t AS SELECT 1 AS x\n" {
 		t.Errorf("load.sqlx = %q", got)
 	}
 	if got := files["definitions/actions.yaml"]; got != "actions:\n  - notebook:\n      name: \"explore\"\n      filename: \"explore.ipynb\"\n      dependencyTargets:\n        - name: \"load\"\n" {

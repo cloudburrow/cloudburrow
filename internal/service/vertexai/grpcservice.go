@@ -63,6 +63,9 @@ func (s *Server) newGRPCServer() *grpc.Server {
 // RegisterGRPC registers PredictionService on srv.
 func (s *Server) RegisterGRPC(srv *grpc.Server) {
 	aiplatformpb.RegisterPredictionServiceServer(srv, &predictionService{s: s})
+	// Colab Enterprise's runtime templates and runtimes (#2105,
+	// notebookruntimes.go).
+	s.registerNotebooks(srv)
 	// Model Garden's Deploy, Endpoints, Models, operations and v1beta1
 	// ChatCompletions (#1840, modelgarden.go).
 	s.registerModelGarden(srv)

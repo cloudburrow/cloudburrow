@@ -515,8 +515,9 @@ func TestDataformV1beta1RemoteBranchesAndTokenStatus(t *testing.T) {
 	}
 }
 
-// sshGitServer is a local sshd test fixture: an SSH server on loopback
-// that runs git-upload-pack and git-receive-pack on bare repositories
+// sshGitServer is a local sshd test fixture: an SSH server on this
+// machine (on its first non-loopback address, so the remote is not a
+// loopback host, or on loopback when there is none) that runs git-upload-pack and git-receive-pack on bare repositories
 // under root for the one client key it authorizes.
 type sshGitServer struct {
 	addr    string
@@ -524,6 +525,24 @@ type sshGitServer struct {
 	userKey []byte // OpenSSH PEM private key
 	ln      net.Listener
 	wg      sync.WaitGroup
+}
+
+// sshFixtureHost is this machine's first up, non-loopback IPv4 address,
+// or 127.0.0.1: the fixture is always local, never an external host.
+func sshFixtureHost() string {
+	ifs, _ := net.Interfaces()
+	for _, i := range ifs {
+		if i.Flags&net.FlagUp == 0 || i.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, _ := i.Addrs()
+		for _, a := range addrs {
+			if n, ok := a.(*net.IPNet); ok && n.IP.To4() != nil && !n.IP.IsLoopback() && !n.IP.IsLinkLocalUnicast() {
+				return n.IP.String()
+			}
+		}
+	}
+	return "127.0.0.1"
 }
 
 func startSSHGitServer(t *testing.T, root string) *sshGitServer {
@@ -555,7 +574,7 @@ func startSSHGitServer(t *testing.T, root string) *sshGitServer {
 		return nil, fmt.Errorf("unknown key")
 	}}
 	cfg.AddHostKey(hostSigner)
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := net.Listen("tcp", net.JoinHostPort(sshFixtureHost(), "0"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -633,8 +652,9 @@ func (s *sshGitServer) serve(conn net.Conn, cfg *ssh.ServerConfig, root string) 
 // instance's Secure Source Manager serves git over HTTPS only): the
 // private key from Secret Manager and the host's public key; a workspace
 // pushes over SSH, the remote's branches are listed, a second workspace
-// pulls; a wrong host key fails host key checking; a remote that is not
-// on this machine is refused.
+// pulls; a wrong host key fails host key checking; a remote on any host
+// is accepted (the fixture listens on a non-loopback address of this
+// machine), and one without a host key is refused.
 func TestDataformSSHRemote(t *testing.T) {
 	h := New(t)
 	clients := dataformClients(t, h)
@@ -670,9 +690,19 @@ func TestDataformSSHRemote(t *testing.T) {
 	for transport, c := range clients {
 		t.Run(transport, func(t *testing.T) {
 			parent := fmt.Sprintf("projects/%s/locations/us-central1", h.Project())
-			if _, err := c.CreateRepository(ctx, &dfpb.CreateRepositoryRequest{Parent: parent, RepositoryId: "sshfar" + transport + suffix,
-				Repository: &dfpb.Repository{GitRemoteSettings: &dfpb.Repository_GitRemoteSettings{Url: "ssh://git@example.com/r.git", DefaultBranch: "main", SshAuthenticationConfig: sshCfg}}}); quotaCode(err) != codes.InvalidArgument {
-				t.Errorf("an SSH remote off this machine: %v, want INVALID_ARGUMENT", err)
+			// Any git host the user configures is accepted, not only a
+			// loopback one (nothing is dialed until git runs).
+			far, err := c.CreateRepository(ctx, &dfpb.CreateRepositoryRequest{Parent: parent, RepositoryId: "sshfar" + transport + suffix,
+				Repository: &dfpb.Repository{GitRemoteSettings: &dfpb.Repository_GitRemoteSettings{Url: "git@git.example.com:team/r.git", DefaultBranch: "main", SshAuthenticationConfig: sshCfg}}})
+			if err != nil {
+				t.Errorf("an SSH remote on a host of the user's choosing: %v", err)
+			} else {
+				_ = c.DeleteRepository(ctx, &dfpb.DeleteRepositoryRequest{Name: far.GetName(), Force: true})
+			}
+			if _, err := c.CreateRepository(ctx, &dfpb.CreateRepositoryRequest{Parent: parent, RepositoryId: "sshnokey" + transport + suffix,
+				Repository: &dfpb.Repository{GitRemoteSettings: &dfpb.Repository_GitRemoteSettings{Url: url, DefaultBranch: "main",
+					SshAuthenticationConfig: &dfpb.Repository_GitRemoteSettings_SshAuthenticationConfig{UserPrivateKeySecretVersion: version.GetName()}}}}); quotaCode(err) != codes.InvalidArgument {
+				t.Errorf("an SSH remote without a host key: %v, want INVALID_ARGUMENT", err)
 			}
 			repo, err := c.CreateRepository(ctx, &dfpb.CreateRepositoryRequest{Parent: parent, RepositoryId: "ssh" + transport + suffix,
 				Repository: &dfpb.Repository{GitRemoteSettings: &dfpb.Repository_GitRemoteSettings{Url: url, DefaultBranch: "main", SshAuthenticationConfig: sshCfg}}})
@@ -733,6 +763,143 @@ func TestDataformSSHRemote(t *testing.T) {
 			})
 			if st, err := c.ComputeRepositoryAccessTokenStatus(ctx, &dfpb.ComputeRepositoryAccessTokenStatusRequest{Name: badRepo.GetName()}); err != nil || st.GetTokenStatus() != dfpb.ComputeRepositoryAccessTokenStatusResponse_INVALID {
 				t.Errorf("ComputeRepositoryAccessTokenStatus with a wrong host key = %v, %v", st, err)
+			}
+		})
+	}
+}
+
+// covers: google.cloud.dataform.v1.Dataform/CreateCompilationResult, google.cloud.dataform.v1.Dataform/QueryCompilationResultActions, google.cloud.dataform.v1.Dataform/CreateWorkflowInvocation, google.cloud.dataform.v1.Dataform/QueryWorkflowInvocationActions
+//
+// TestDataformDataPreparationMergeValidationAndYAML (#2105): Dataform
+// core's data preparations as BigQuery Studio writes them. A MERGE load
+// mode (Studio's Upsert) compiles with no API load config and merges on
+// its unique keys, updating the matching row and inserting the new one;
+// its validation (${EXPECT}) sends the failing row to the error table. A
+// validation without an error table fails its action. A .dp.yaml data
+// preparation writes its destination node from its source table; one
+// whose node holds steps (undocumented) fails naming them.
+func TestDataformDataPreparationMergeValidationAndYAML(t *testing.T) {
+	h := New(t)
+	clients := dataformClients(t, h)
+	bq, project := dataformBigQuery(t, h)
+	if _, err := exec.LookPath("docker"); err != nil {
+		t.Skip("docker is required: Dataform core runs in a container")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+	t.Cleanup(cancel)
+	parent := fmt.Sprintf("projects/%s/locations/us-central1", project)
+	for transport, c := range clients {
+		t.Run(transport, func(t *testing.T) {
+			suffix := strings.ReplaceAll(uuid.NewString(), "-", "")[:8]
+			dataset := "dfdp_" + suffix
+			t.Cleanup(func() { _ = bq.Dataset(dataset).DeleteWithContents(context.Background()) })
+			if err := bq.Dataset(dataset).Create(ctx, &bigquery.DatasetMetadata{Location: "US"}); err != nil {
+				t.Fatal(err)
+			}
+			for _, q := range []string{
+				"CREATE TABLE `" + project + "." + dataset + ".src` AS SELECT 1 AS id, 'a' AS k, 5 AS y UNION ALL SELECT 2, 'b', -1 UNION ALL SELECT 3, 'c', 7",
+				"CREATE TABLE `" + project + "." + dataset + ".m` AS SELECT 1 AS id, 'old' AS k, 0 AS y",
+			} {
+				job, err := bq.Query(q).Run(ctx)
+				if err == nil {
+					_, err = job.Wait(ctx)
+				}
+				if err != nil {
+					t.Fatalf("%s: %v", q, err)
+				}
+			}
+			repo, err := c.CreateRepository(ctx, &dfpb.CreateRepositoryRequest{Parent: parent, RepositoryId: "dp" + transport + suffix})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				_ = c.DeleteRepository(context.Background(), &dfpb.DeleteRepositoryRequest{Name: repo.GetName(), Force: true})
+			})
+			ws, err := c.CreateWorkspace(ctx, &dfpb.CreateWorkspaceRequest{Parent: repo.GetName(), WorkspaceId: "dev"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			w := ws.GetName()
+			src := "`" + project + "." + dataset + ".src`"
+			dataformWrite(ctx, t, c, w, "workflow_settings.yaml", fmt.Sprintf("defaultProject: %s\ndefaultLocation: US\ndefaultDataset: %s\ndataformCoreVersion: 3.1.6\n", project, dataset))
+			dataformWrite(ctx, t, c, w, "definitions/m.sqlx", "config {\n  type: \"dataPreparation\",\n  errorTable: { name: \"m_errors\", retentionDays: 3 },\n"+
+				"  loadMode: { mode: \"MERGE\", uniqueKey: [\"id\"] }\n}\n\nFROM "+src+"\n|> ${EXPECT} y > 0\n|> SELECT id, k, y\n")
+			dataformWrite(ctx, t, c, w, "definitions/v.sqlx", "config { type: \"dataPreparation\", loadMode: { mode: \"REPLACE_TABLE\" } }\nFROM "+src+"\n|> ${EXPECT} y > 0\n")
+			dataformWrite(ctx, t, c, w, "definitions/y.dp.yaml", fmt.Sprintf("configuration:\n  errorTable: {table: y_errors}\nnodes:\n- id: node1\n  source: {table: {project: %s, dataset: %s, table: src}}\n"+
+				"  generated:\n    outputSchema: {field: [{name: id, type: INT64, mode: NULLABLE}]}\n- id: node2\n  source: {nodeId: node1}\n  destination: {table: {table: ydest}}\n", project, dataset))
+			dataformWrite(ctx, t, c, w, "definitions/bad.dp.yaml", "nodes:\n- id: node1\n  source: {table: {table: src}}\n  steps: [{filter: x}]\n  destination: {table: {table: baddest}}\n")
+			dataformWrite(ctx, t, c, w, "definitions/actions.yaml", "actions:\n- dataPreparation:\n    filename: y.dp.yaml\n- dataPreparation:\n    filename: bad.dp.yaml\n")
+			comp, err := c.CreateCompilationResult(ctx, &dfpb.CreateCompilationResultRequest{Parent: repo.GetName(), CompilationResult: &dfpb.CompilationResult{
+				Source: &dfpb.CompilationResult_Workspace{Workspace: w}}})
+			if err != nil {
+				t.Fatalf("CreateCompilationResult: %v", err)
+			}
+			if len(comp.GetCompilationErrors()) > 0 {
+				t.Fatalf("compilation errors: %v", comp.GetCompilationErrors())
+			}
+			seen := map[string]*dfpb.CompilationResultAction{}
+			for it := c.QueryCompilationResultActions(ctx, &dfpb.QueryCompilationResultActionsRequest{Name: comp.GetName()}); ; {
+				a, err := it.Next()
+				if err == iterator.Done {
+					break
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				seen[a.GetTarget().GetName()] = a
+			}
+			if m := seen["m"].GetDataPreparation().GetContentsSql(); m == nil || m.GetLoad() != nil || !strings.Contains(m.GetQuery(), "/* @@VALIDATION */ WHERE") {
+				t.Errorf("the MERGE data preparation = %v", seen["m"])
+			}
+			if y := seen["ydest"].GetDataPreparation().GetContentsYaml(); !strings.Contains(y, "ydest") {
+				t.Errorf("the YAML data preparation = %v", seen["ydest"])
+			}
+			inv, err := c.CreateWorkflowInvocation(ctx, &dfpb.CreateWorkflowInvocationRequest{Parent: repo.GetName(), WorkflowInvocation: &dfpb.WorkflowInvocation{
+				CompilationSource: &dfpb.WorkflowInvocation_CompilationResult{CompilationResult: comp.GetName()}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			waitInvocation(ctx, t, c, inv.GetName())
+			acts := invocationActions(ctx, t, c, inv.GetName())
+			m := acts["m"]
+			if m.GetState() != dfpb.WorkflowInvocationAction_SUCCEEDED {
+				t.Fatalf("MERGE = %v (%s)", m.GetState(), m.GetFailureReason())
+			}
+			if sql := m.GetDataPreparationAction().GetGeneratedSql(); !strings.Contains(sql, "merge `"+project+"."+dataset+".m`") || !strings.Contains(sql, "insert into `"+project+"."+dataset+".m_errors`") {
+				t.Errorf("generated_sql = %s", sql)
+			}
+			rows := func(q string) [][]bigquery.Value {
+				it, err := bq.Query(q).Read(ctx)
+				if err != nil {
+					t.Fatalf("%s: %v", q, err)
+				}
+				var out [][]bigquery.Value
+				for {
+					var r []bigquery.Value
+					if err := it.Next(&r); err == iterator.Done {
+						return out
+					} else if err != nil {
+						t.Fatal(err)
+					}
+					out = append(out, r)
+				}
+			}
+			if got := fmt.Sprint(rows("SELECT id, k FROM `" + project + "." + dataset + ".m` ORDER BY id")); got != "[[1 a] [3 c]]" {
+				t.Errorf("merged rows = %s, want [[1 a] [3 c]]", got)
+			}
+			if got := fmt.Sprint(rows("SELECT error, JSON_VALUE(row, '$.id') FROM `" + project + "." + dataset + ".m_errors`")); got != "[[Validation failed: y > 0 2]]" {
+				t.Errorf("error rows = %s", got)
+			}
+			if v := acts["v"]; v.GetState() != dfpb.WorkflowInvocationAction_FAILED || !strings.Contains(v.GetFailureReason(), "1 row failed the validation rule") {
+				t.Errorf("a validation without an error table = %v (%s)", v.GetState(), v.GetFailureReason())
+			}
+			if y := acts["ydest"]; y.GetState() != dfpb.WorkflowInvocationAction_SUCCEEDED {
+				t.Errorf("YAML = %v (%s)", y.GetState(), y.GetFailureReason())
+			} else if got := fmt.Sprint(rows("SELECT COUNT(*) FROM `" + project + "." + dataset + ".ydest`")); got != "[[3]]" {
+				t.Errorf("YAML rows = %s", got)
+			}
+			if b := acts["baddest"]; b.GetState() != dfpb.WorkflowInvocationAction_FAILED || !strings.Contains(b.GetFailureReason(), `"steps"`) {
+				t.Errorf("YAML with steps = %v (%s)", b.GetState(), b.GetFailureReason())
 			}
 		})
 	}

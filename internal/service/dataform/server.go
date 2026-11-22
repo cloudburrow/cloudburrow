@@ -170,6 +170,8 @@ type Server struct {
 type compilation struct {
 	C       *dfpb.CompilationResult
 	Actions []*dfpb.CompilationResultAction
+	// Merge are its MERGE data preparations' unique keys (mergeKeys).
+	Merge map[string][]string
 }
 
 type invocation struct {
@@ -308,8 +310,9 @@ type stateFile struct {
 }
 
 type storedCompilation struct {
-	Result  json.RawMessage   `json:"result"`
-	Actions []json.RawMessage `json:"actions,omitempty"`
+	Result  json.RawMessage     `json:"result"`
+	Actions []json.RawMessage   `json:"actions,omitempty"`
+	Merge   map[string][]string `json:"merge,omitempty"`
 }
 
 type storedInvocation struct {
@@ -394,7 +397,7 @@ func (s *Server) save() error {
 		if err != nil {
 			return err
 		}
-		st.Compilations = append(st.Compilations, storedCompilation{Result: b, Actions: marshalList(c.Actions)})
+		st.Compilations = append(st.Compilations, storedCompilation{Result: b, Actions: marshalList(c.Actions), Merge: c.Merge})
 	}
 	for _, k := range sortedKeys(s.invocations) {
 		i := s.invocations[k]
@@ -440,7 +443,7 @@ func (s *Server) load() error {
 		return fmt.Errorf("dataform state %s: %w", s.opts.State, err)
 	}
 	for _, c := range st.Compilations {
-		r := &compilation{C: &dfpb.CompilationResult{}}
+		r := &compilation{C: &dfpb.CompilationResult{}, Merge: c.Merge}
 		if err := protojson.Unmarshal(c.Result, r.C); err != nil {
 			return err
 		}
@@ -787,14 +790,11 @@ func (s *Server) checkRepository(ctx context.Context, r *dfpb.Repository) error 
 	return nil
 }
 
-// checkRemoteURL accepts only this instance's Secure Source Manager
-// repositories, so a workspace's git never leaves the instance.
+// checkRemoteURL accepts an SSH remote on any host the user configures
+// (ssh.go), and over HTTPS this instance's Secure Source Manager
+// repositories.
 func (s *Server) checkRemoteURL(u string) error {
-	if host, _, ok := sshRemote(u); ok {
-		// An SSH remote: on this machine (ssh.go).
-		if !isLoopbackHost(host) {
-			return apierror.InvalidArgument("git_remote_settings.url %q: an SSH remote must be on this machine (a loopback host)", u)
-		}
+	if _, _, ok := sshRemote(u); ok {
 		return nil
 	}
 	base := ""

@@ -49,8 +49,16 @@ c, err := dataform.NewClient(ctx, option.WithEndpoint(os.Getenv("CLOUDBURROW_DAT
   `execution_mode` is `UNIT_TESTS_ONLY`, and fail with the first
   difference between the test's rows and the expected rows.
 - **Data preparations** (`type: "dataPreparation"` SQLX, a pipe-syntax
-  query) write their target in the load mode they name: replace, append,
-  maximum or unique. Google's YAML form is not run.
+  query) write their target in the load mode they name: `REPLACE_TABLE`,
+  `APPEND`, `MAXIMUM`, `UNIQUE` (with `incrementalColumn`) or `MERGE`
+  (with `uniqueKey`; BigQuery Studio's Upsert). The API's `LoadConfig` has
+  no merge, so a MERGE action shows no `load` and the server keeps its
+  keys; `generated_sql` shows the MERGE. A validation (`${EXPECT}`) sends
+  the rows failing it to the error table, or fails the action when there
+  is none. A YAML data preparation (`.dp.yaml`, declared in
+  `actions.yaml`) runs its documented parts: each destination node gets
+  its source table's rows; a node holding anything else (steps, whose
+  format Google does not document) fails naming it.
 - **Repository snapshots**: `gcs_repository_snapshot_destination`
   (`gs://BUCKET/PATH/`) gets each compilation's files as
   `COMPILATION_ID.tar.gz`.
@@ -58,9 +66,10 @@ c, err := dataform.NewClient(ctx, option.WithEndpoint(os.Getenv("CLOUDBURROW_DAT
   single `NOTEBOOK` or `SQL` file as one action (what BigQuery Studio's
   scheduled notebooks use).
 - **SSH remotes**: `ssh_authentication_config` with the private key's
-  Secret Manager version and the host's public key. The remote must be on
-  this machine (a loopback host), since the instance's Secure Source
-  Manager serves git over HTTPS only.
+  Secret Manager version and the host's public key, against any git host
+  you configure (on this machine, your network or the internet); git's
+  ssh dials that host and checks it against that key alone. The
+  instance's own Secure Source Manager serves git over HTTPS only.
 
 ## v1beta1
 

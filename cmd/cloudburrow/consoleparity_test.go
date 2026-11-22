@@ -2502,6 +2502,22 @@ var parityRows = []parityRow{
 			"LlmUtilityService/ComputeTokens"},
 		Excluded: "the v1beta1 forms of the v1 methods in the rows above, converted to them and answered by the same handlers; " +
 			"a protocol version is the client library's choice, and the console's surfaces send those handlers' requests (#1937)"},
+	// Colab Enterprise's runtime templates and runtimes (#2105).
+	{Resource: "Colab Enterprise: runtime templates", Service: "vertexai",
+		Methods: []string{"NotebookService/CreateNotebookRuntimeTemplate", "NotebookService/GetNotebookRuntimeTemplate",
+			"NotebookService/ListNotebookRuntimeTemplates", "NotebookService/UpdateNotebookRuntimeTemplate", "NotebookService/DeleteNotebookRuntimeTemplate"},
+		Provider: "colab-templates", Offers: "Runtime templates: a Region menu, the ID column opening a template's page, Set as Default, " +
+			"New template (Create new runtime template: Runtime basics, Configure compute, Environment, Networking and security), " +
+			"Edit runtime template (Update) and Delete",
+		Tests: []string{"TestColabEnterpriseRuntimesThroughThePages"}},
+	{Resource: "Colab Enterprise: runtimes", Service: "vertexai",
+		Methods: []string{"NotebookService/AssignNotebookRuntime", "NotebookService/GetNotebookRuntime", "NotebookService/ListNotebookRuntimes",
+			"NotebookService/StartNotebookRuntime", "NotebookService/StopNotebookRuntime", "NotebookService/DeleteNotebookRuntime"},
+		Provider: "colab-runtimes", Offers: "Runtimes: a Region menu, Create (Create Agent Platform runtime: Runtime template and Runtime name), " +
+			"Start, Stop and Delete with Confirm",
+		Tests: []string{"TestColabEnterpriseRuntimesThroughThePages"}},
+	{Resource: "Colab Enterprise: runtime upgrade", Service: "vertexai", Methods: []string{"NotebookService/UpgradeNotebookRuntime"},
+		Excluded: "a runtime here is always on the instance's runtime image (is_upgradable false), so Google's Upgrade, offered only for an upgradable runtime, never shows"},
 	// The Model Registry and Endpoints (#1940).
 	{Resource: "Model Registry: models and versions", Service: "vertexai",
 		Methods: []string{"ModelService/UploadModel", "ModelService/ListModelVersions", "ModelService/UpdateModel",

@@ -76,6 +76,9 @@ type dataformService struct {
 	// actions run on (dataformpipelines.go).
 	storage   func() *netfwd.Forwarder
 	notebooks *nbruntime.Manager
+	// runtimeTemplates resolves a Colab Enterprise runtime template's
+	// options (#2105, colabenterprise.go); nil without Vertex AI.
+	runtimeTemplates func(name string) (nbruntime.Options, error)
 	// accountToken is a Developer Connect account connector user's token
 	// (Cloud Run's Developer Connect), for personal authentication.
 	accountToken func(ctx context.Context, connector, user string) (string, error)
@@ -148,7 +151,7 @@ func (s *dataformService) Start(ctx context.Context) error {
 		opts.Storage = dataformStorage{tunnel: s.storage}
 	}
 	if s.notebooks != nil {
-		opts.Notebooks = dataformNotebooks{m: s.notebooks}
+		opts.Notebooks = dataformNotebooks{m: s.notebooks, templates: s.runtimeTemplates}
 	}
 	opts.AccountToken = s.accountToken
 	if s.secrets != nil {
@@ -480,6 +483,9 @@ func (b dataformBigQuery) query(ctx context.Context, project, location, sql stri
 	defer c.Close()
 	q := c.Query(sql)
 	q.Location = location
+	if dataform.BatchPriority(ctx) {
+		q.Priority = bigquery.BatchPriority
+	}
 	// The job's ID is chosen here, so a cancelled invocation can stop the
 	// job even when jobs.insert had not answered yet.
 	q.JobID = "dataform_" + strconv.FormatInt(time.Now().UnixNano(), 36)

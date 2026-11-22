@@ -276,6 +276,16 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		}
 		providers = append(providers, vertexModelsProvider{api: api}, vertexEndpointsProvider{api: api})
 	}
+	if enabled[config.ServiceRun] || d.localAI != nil {
+		// Colab Enterprise's Runtimes and Runtime templates (#2105), on the
+		// local Vertex AI endpoint, whose runtimes are the instance's
+		// notebook runtimes.
+		var api vertexAPI
+		if d.localAI != nil {
+			api.addr = d.localAI.Addr
+		}
+		providers = append(providers, colabRuntimesProvider{api: api}, colabTemplatesProvider{api: api})
+	}
 	if enabled[config.ServiceRun] {
 		// Two screens of one product: services, and jobs with their
 		// executions (#785).

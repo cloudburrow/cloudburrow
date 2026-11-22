@@ -6530,8 +6530,8 @@
     "Title": "Vertex AI PredictionService",
     "counts": {
       "Implemented": 3,
-      "Unimplemented": 7,
-      "Verified": 86
+      "Unimplemented": 11,
+      "Verified": 98
     },
     "rows": [
       {
@@ -6810,6 +6810,110 @@
           "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints",
           "test/compat/modelregistryexport_test.go:58 TestModelRegistryExportsTheImageToArtifactRegistry",
           "test/compat/modelregistrypython_test.go:124 TestPythonAIPlatformUploadAndDeploy"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.NotebookService/AssignNotebookRuntime",
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabenterprise2105_test.go:199 TestColabEnterpriseRuntimes"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.NotebookService/CreateNotebookExecutionJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.NotebookService/CreateNotebookRuntimeTemplate",
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabenterprise2105_test.go:71 TestColabEnterpriseRuntimeTemplates"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.NotebookService/DeleteNotebookExecutionJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.NotebookService/DeleteNotebookRuntime",
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabenterprise2105_test.go:199 TestColabEnterpriseRuntimes"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.NotebookService/DeleteNotebookRuntimeTemplate",
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabenterprise2105_test.go:71 TestColabEnterpriseRuntimeTemplates"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.NotebookService/GetNotebookExecutionJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.NotebookService/GetNotebookRuntime",
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabenterprise2105_test.go:199 TestColabEnterpriseRuntimes"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.NotebookService/GetNotebookRuntimeTemplate",
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabenterprise2105_test.go:71 TestColabEnterpriseRuntimeTemplates"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.NotebookService/ListNotebookExecutionJobs",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.NotebookService/ListNotebookRuntimeTemplates",
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabenterprise2105_test.go:71 TestColabEnterpriseRuntimeTemplates"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.NotebookService/ListNotebookRuntimes",
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabenterprise2105_test.go:199 TestColabEnterpriseRuntimes"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.NotebookService/StartNotebookRuntime",
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabenterprise2105_test.go:199 TestColabEnterpriseRuntimes"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.NotebookService/StopNotebookRuntime",
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabenterprise2105_test.go:199 TestColabEnterpriseRuntimes"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.NotebookService/UpdateNotebookRuntimeTemplate",
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabenterprise2105_test.go:71 TestColabEnterpriseRuntimeTemplates"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.NotebookService/UpgradeNotebookRuntime",
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabenterprise2105_test.go:199 TestColabEnterpriseRuntimes"
         ]
       },
       {
@@ -19111,7 +19215,7 @@
         "method": "google.cloud.dataform.v1.Dataform/ComputeRepositoryAccessTokenStatus",
         "status": "Verified",
         "tests": [
-          "test/compat/dataform_pipelines_test.go:638 TestDataformSSHRemote",
+          "test/compat/dataform_pipelines_test.go:658 TestDataformSSHRemote",
           "test/compat/dataform_test.go:660 TestDataformSecureSourceManagerRemote"
         ]
       },
@@ -19121,6 +19225,7 @@
         "tests": [
           "test/compat/dataform_pipelines_test.go:100 TestDataformNotebooksTestsAndDataPreparations",
           "test/compat/dataform_pipelines_test.go:321 TestDataformPipelineConfig",
+          "test/compat/dataform_pipelines_test.go:781 TestDataformDataPreparationMergeValidationAndYAML",
           "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke"
         ]
       },
@@ -19150,7 +19255,7 @@
         "method": "google.cloud.dataform.v1.Dataform/CreateRepository",
         "status": "Verified",
         "tests": [
-          "test/compat/dataform_pipelines_test.go:638 TestDataformSSHRemote",
+          "test/compat/dataform_pipelines_test.go:658 TestDataformSSHRemote",
           "test/compat/dataform_terraform_test.go:22 TestTerraformDataformRepository",
           "test/compat/dataform_test.go:118 TestDataformWorkspaceFilesAndGit",
           "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke",
@@ -19177,6 +19282,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/dataform_pipelines_test.go:100 TestDataformNotebooksTestsAndDataPreparations",
+          "test/compat/dataform_pipelines_test.go:781 TestDataformDataPreparationMergeValidationAndYAML",
+          "test/compat/dataform_runoptions_test.go:27 TestDataformInvocationRunOptions",
           "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke"
         ]
       },
@@ -19280,7 +19387,7 @@
         "method": "google.cloud.dataform.v1.Dataform/FetchRemoteBranches",
         "status": "Verified",
         "tests": [
-          "test/compat/dataform_pipelines_test.go:638 TestDataformSSHRemote",
+          "test/compat/dataform_pipelines_test.go:658 TestDataformSSHRemote",
           "test/compat/dataform_test.go:660 TestDataformSecureSourceManagerRemote"
         ]
       },
@@ -19455,7 +19562,7 @@
         "method": "google.cloud.dataform.v1.Dataform/PullGitCommits",
         "status": "Verified",
         "tests": [
-          "test/compat/dataform_pipelines_test.go:638 TestDataformSSHRemote",
+          "test/compat/dataform_pipelines_test.go:658 TestDataformSSHRemote",
           "test/compat/dataform_test.go:118 TestDataformWorkspaceFilesAndGit",
           "test/compat/dataform_test.go:660 TestDataformSecureSourceManagerRemote"
         ]
@@ -19464,7 +19571,7 @@
         "method": "google.cloud.dataform.v1.Dataform/PushGitCommits",
         "status": "Verified",
         "tests": [
-          "test/compat/dataform_pipelines_test.go:638 TestDataformSSHRemote",
+          "test/compat/dataform_pipelines_test.go:658 TestDataformSSHRemote",
           "test/compat/dataform_test.go:118 TestDataformWorkspaceFilesAndGit",
           "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke",
           "test/compat/dataform_test.go:660 TestDataformSecureSourceManagerRemote"
@@ -19475,6 +19582,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/dataform_pipelines_test.go:100 TestDataformNotebooksTestsAndDataPreparations",
+          "test/compat/dataform_pipelines_test.go:781 TestDataformDataPreparationMergeValidationAndYAML",
           "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke"
         ]
       },
@@ -19518,6 +19626,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/dataform_pipelines_test.go:100 TestDataformNotebooksTestsAndDataPreparations",
+          "test/compat/dataform_pipelines_test.go:781 TestDataformDataPreparationMergeValidationAndYAML",
+          "test/compat/dataform_runoptions_test.go:27 TestDataformInvocationRunOptions",
           "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke"
         ]
       },
