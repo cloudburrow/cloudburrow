@@ -19,6 +19,8 @@ import (
 // runStoredSettings sets, on a template, the settings Google documents and
 // nothing here acts on (#1346).
 func runStoredSettings(h *Harness) (*runpb.VpcAccess, string) {
+	// With Compute Engine served, Cloud Run checks the connector (#2140).
+	ensureCompatConnector(h)
 	return &runpb.VpcAccess{Connector: "projects/" + h.Project() + "/locations/us-central1/connectors/compat",
 			Egress: runpb.VpcAccess_ALL_TRAFFIC},
 		"projects/" + h.Project() + "/locations/us-central1/keyRings/compat/cryptoKeys/run"

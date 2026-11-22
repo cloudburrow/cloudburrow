@@ -177,7 +177,9 @@ func (s *Server) nicLocked(project, zone string, e map[string]any, i int) (obj, 
 		if a, _ := no["autoCreateSubnetworks"].(bool); !a {
 			return nil, invalid("Invalid value for field '%s.subnetwork': ''. Subnetwork should be specified for custom subnetmode network", field)
 		}
-		sub = subnetRel(project, region, lastSeg(rel))
+		// The auto subnet of the network's own project, a Shared VPC
+		// host's for a service project's VM (#2140).
+		sub = subnetRel(strings.Split(rel, "/")[1], region, lastSeg(rel))
 	}
 	tmp := obj{}
 	if err := s.regionalInternal(project, region, obj{"subnetwork": sub}, tmp, "", str(e, "networkIP")); err != nil {

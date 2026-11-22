@@ -74,6 +74,9 @@ type runService struct {
 	env runadapter.Environment
 	// cloudSQL serves Cloud SQL volumes (#1346); nil refuses them.
 	cloudSQL runadapter.CloudSQL
+	// vpc checks VPC access against Compute Engine and Serverless VPC
+	// Access (#2140); nil without compute.
+	vpc runadapter.VPC
 	// events serves functions' event triggers (#1414); nil without
 	// Pub/Sub, which refuses them.
 	events *eventsConfig
@@ -99,6 +102,14 @@ func (r *runService) metadataAccount(label string) (string, bool) {
 		return "", false
 	}
 	return a.MetadataAccount(label)
+}
+
+// useVPC checks VPC access against v (#2140).
+func (r *runService) useVPC(v runadapter.VPC) {
+	if r == nil || v == nil {
+		return
+	}
+	r.vpc = v
 }
 
 // useCloudSQL enables Cloud SQL volumes.
@@ -174,6 +185,9 @@ func (r *runService) Start(ctx context.Context) error {
 	}
 	if r.cloudSQL != nil {
 		adapter = adapter.WithCloudSQL(r.cloudSQL)
+	}
+	if r.vpc != nil {
+		adapter = adapter.WithVPC(r.vpc)
 	}
 	r.adapter.Store(adapter)
 	// Artifact Registry's Docker registry (#1383): content-addressed in

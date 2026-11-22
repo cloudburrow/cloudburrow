@@ -205,6 +205,9 @@ func (s *Server) doLocked(c call) (obj, error) {
 		return s.project(c)
 	case n == 1 && post && p[0] == "setCommonInstanceMetadata":
 		return s.setCommonInstanceMetadata(c)
+	case n == 1 && xpnMethod(p[0]):
+		// Shared VPC (#2140, xpn.go).
+		return s.xpn(c)
 	case n >= 2 && p[0] == "global":
 		coll := p[1]
 		rel := "projects/" + c.project + "/global/" + coll
@@ -267,6 +270,9 @@ func (s *Server) doLocked(c call) (obj, error) {
 			case n == 4 && post && p[3] == "setLabels":
 				return s.setLabels(c.project, "global", rel+"/"+p[2], c.body)
 			}
+		case "forwardingRules":
+			// Private Service Connect endpoints for Google APIs (#2140).
+			return s.forwardingRules(c, "")
 		case "operations":
 			return s.operation(c, rel)
 		case "snapshots":
@@ -323,6 +329,14 @@ func (s *Server) doLocked(c call) (obj, error) {
 			case n == 5 && post && p[4] == "setLabels":
 				return s.setLabels(c.project, scope, rel+"/"+p[3], c.body)
 			}
+		case "routers":
+			// Cloud Router and Cloud NAT (#2140, routers.go).
+			return s.routers(c, region)
+		case "forwardingRules":
+			// Private Service Connect endpoints (#2140, psc.go).
+			return s.forwardingRules(c, region)
+		case "serviceAttachments":
+			return s.serviceAttachments(c, region)
 		case "resourcePolicies":
 			return s.resourcePolicies(c, region)
 		case "instanceTemplates":
@@ -462,6 +476,8 @@ func (s *Server) aggregated(c call, coll string) (obj, error) {
 		m, kind = s.res, "compute#instanceAggregatedList"
 	case "disks":
 		m, kind = s.res, "compute#diskAggregatedList"
+	case "routers":
+		m, kind = s.res, "compute#routerAggregatedList"
 	case "resourcePolicies":
 		m, kind = s.res, "compute#resourcePolicyAggregatedList"
 	case "instanceTemplates":
@@ -472,6 +488,10 @@ func (s *Server) aggregated(c call, coll string) (obj, error) {
 		m, kind = s.res, "compute#instanceGroupManagerAggregatedList"
 	case "autoscalers":
 		m, kind = s.res, "compute#autoscalerAggregatedList"
+	case "forwardingRules":
+		m, kind = s.res, "compute#forwardingRuleAggregatedList"
+	case "serviceAttachments":
+		m, kind = s.res, "compute#serviceAttachmentAggregatedList"
 	default:
 		return nil, unimplemented("aggregated/%s is not served", coll)
 	}

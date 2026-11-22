@@ -64,6 +64,10 @@ type Options struct {
 	// VMs runs VM instances and keeps their disks (#1963); nil answers
 	// instances, disks and snapshots with 501.
 	VMs VMBackend
+	// ProjectOrganization is the organization a project is in ("" for a
+	// project outside any) and whether the project is known, for Shared
+	// VPC's organization rule (xpn.go); nil allows every project.
+	ProjectOrganization func(project string) (org string, known bool)
 	// MinFreeBytes is DefaultMinFreeBytes when zero.
 	MinFreeBytes uint64
 	// CPU reads a running VM's CPU time in seconds since it booted, the
@@ -344,7 +348,9 @@ var linkKeys = map[string]bool{"selfLink": true, "network": true, "subnetwork": 
 	"subnetworks": true, "users": true, "zones": true, "machineType": true, "source": true, "sourceImage": true,
 	"sourceSnapshot": true, "sourceDisk": true, "type": true, "resourcePolicies": true, "sourceInstance": true,
 	"sourceInstanceTemplate": true, "sourceMachineImage": true, "instanceTemplate": true, "instanceGroup": true,
-	"sourceSnapshotSchedulePolicy": true, "instance": true, "replacement": true}
+	"sourceSnapshotSchedulePolicy": true, "instance": true, "replacement": true,
+	// Private Service Connect (#2140, psc.go).
+	"target": true, "targetService": true, "natSubnets": true, "endpoint": true, "consumerNetwork": true}
 
 // renderNested makes the link fields of objects inside lists and objects
 // absolute (an instance's disks and network interfaces).

@@ -193,6 +193,10 @@ var ComputeJSON = func() []JSONMethod {
 	coll(zone, "disks", "disks", true, map[string]string{"createSnapshot": "compute.disks.createSnapshot",
 		"resize": "compute.disks.resize", "setLabels": "compute.disks.setLabels"})
 	coll(global, "snapshots", "snapshots", false, map[string]string{"setLabels": "compute.snapshots.setLabels"})
+	// Private Service Connect (#2140): endpoints and service attachments.
+	coll(global, "forwardingRules", "globalForwardingRules", false, map[string]string{"setLabels": "compute.globalForwardingRules.setLabels"})
+	coll(region, "forwardingRules", "forwardingRules", true, map[string]string{"setLabels": "compute.forwardingRules.setLabels"})
+	coll(region, "serviceAttachments", "serviceAttachments", true, map[string]string{"PATCH": "compute.serviceAttachments.update"})
 	instanceVerbs := map[string]string{}
 	for _, v := range []string{"attachDisk", "detachDisk", "reset", "resume", "setDeletionProtection", "setLabels", "setMachineType",
 		"setMetadata", "setTags", "start", "stop", "suspend"} {
@@ -224,6 +228,17 @@ var ComputeJSON = func() []JSONMethod {
 	add("GET", `(`+p+zone+`/diskTypes/[^/]+)`, "compute.diskTypes.get")
 	add("GET", `(`+p+`)`, "compute.projects.get")
 	add("POST", `(`+p+`)/setCommonInstanceMetadata`, "compute.projects.setCommonInstanceMetadata")
+	// Shared VPC (#2140): each method's REST reference names its
+	// permission on the project (projects/enableXpnHost and the rest, read
+	// 2026-11-22; the getters' compute.projects.get is UNVERIFIED, re-read 2026-11-22:
+	// https://docs.cloud.google.com/compute/docs/reference/rest/v1/projects/getXpnResources names none).
+	for verb, perm := range map[string]string{"enableXpnHost": "compute.organizations.enableXpnHost",
+		"disableXpnHost": "compute.organizations.disableXpnHost", "enableXpnResource": "compute.organizations.enableXpnResource",
+		"disableXpnResource": "compute.organizations.disableXpnResource", "listXpnHosts": "compute.projects.get"} {
+		add("POST", `(`+p+`)/`+verb, perm)
+	}
+	add("GET", `(`+p+`)/getXpnHost`, "compute.projects.get")
+	add("GET", `(`+p+`)/getXpnResources`, "compute.projects.get")
 	return out
 }()
 

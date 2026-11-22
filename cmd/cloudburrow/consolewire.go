@@ -390,6 +390,11 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			// The 2026-11-22 parity round (#2140): Subnets in current
 			// project, and VPC network peering.
 			computeSubnetsProvider{screen}, computePeeringProvider{screen},
+			// Cloud Router and Cloud NAT (#2140).
+			computeRoutersProvider{screen}, computeNATProvider{screen}, computeSharedVPCProvider{screen},
+			computePSCEndpointsProvider{screen}, computePSCPublishedProvider{screen},
+			// Serverless VPC Access (#2140), on the same port.
+			vpcAccessProvider{screen},
 			computeInternalAddressesProvider{computeAddressesProvider{screen}}, computeEffectiveRoutesProvider{screen},
 			computeInstanceSchedulesProvider{screen}, computeSnapshotSchedulesProvider{screen}, computeTemplatesProvider{screen},
 			computeGroupsProvider{screen}, computeMachineImagesProvider{screen}, computeSSHKeysProvider{computeMetadataProvider{screen}},

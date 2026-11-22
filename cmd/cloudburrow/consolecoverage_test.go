@@ -65,7 +65,7 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 	// VPC network (#1936): the Compute Engine API's networking.
 	config.ServiceCompute: {Providers: []string{"vpc-networks", "vpc-firewalls", "vpc-routes", "vpc-addresses",
 		"compute-instances", "compute-disks", "compute-snapshots", "compute-images", "compute-machinetypes", "compute-metadata",
-		"vpc-subnets", "vpc-peering", "vpc-addresses-internal", "vpc-routes-effective",
+		"vpc-subnets", "vpc-peering", "hybrid-routers", "netservices-nat", "vpc-sharedvpc", "netservices-psc-endpoints", "netservices-psc-published", "vpc-connectors", "vpc-addresses-internal", "vpc-routes-effective",
 		"compute-instance-schedules", "compute-snapshot-schedules", "compute-instance-templates", "compute-instance-groups",
 		"compute-machine-images", "compute-ssh-keys"}},
 }
