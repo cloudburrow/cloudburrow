@@ -119,3 +119,22 @@ func (s *computeService) sqlNetworkUsers(rel string) []string {
 	}
 	return out
 }
+
+// serviceAttachment resolves a Private Service Connect endpoint's target,
+// a Cloud SQL instance's service attachment, to the instance's server.
+func (s *computeService) serviceAttachment(link, consumer string) (compute.PrivateService, bool, bool) {
+	if s.sql == nil {
+		return compute.PrivateService{}, false, false
+	}
+	srv := s.sql()
+	if srv == nil {
+		return compute.PrivateService{}, false, false
+	}
+	ep, accepted, ok := srv.PSCAttachment(link, consumer)
+	if !ok {
+		return compute.PrivateService{}, false, false
+	}
+	port := sqlEnginePort(ep.DatabaseVersion)
+	return compute.PrivateService{Name: "cloudsql " + ep.Instance, Port: port, TargetPort: port,
+		TargetIP: s.svcIPs.get(components.SQLInstancePrefix + ep.Server)}, accepted, true
+}

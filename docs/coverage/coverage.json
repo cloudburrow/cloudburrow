@@ -14469,9 +14469,9 @@
     "Key": "compute",
     "Title": "Compute Engine API (v1): VPC networking",
     "counts": {
-      "Implemented": 20,
-      "Unimplemented": 74,
-      "Verified": 72
+      "Implemented": 21,
+      "Unimplemented": 76,
+      "Verified": 77
     },
     "rows": [
       {
@@ -14695,6 +14695,56 @@
         "method": "compute.firewalls.update",
         "status": "Implemented",
         "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.forwardingRules.aggregatedList",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudsqlprivate2141_test.go:27 TestCloudSQLZonesPrivateIPAndPSCEndpoints"
+        ]
+      },
+      {
+        "method": "compute.forwardingRules.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudsqlprivate2141_test.go:27 TestCloudSQLZonesPrivateIPAndPSCEndpoints"
+        ]
+      },
+      {
+        "method": "compute.forwardingRules.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudsqlprivate2141_test.go:27 TestCloudSQLZonesPrivateIPAndPSCEndpoints"
+        ]
+      },
+      {
+        "method": "compute.forwardingRules.insert",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudsqlprivate2141_test.go:27 TestCloudSQLZonesPrivateIPAndPSCEndpoints"
+        ]
+      },
+      {
+        "method": "compute.forwardingRules.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudsqlprivate2141_test.go:27 TestCloudSQLZonesPrivateIPAndPSCEndpoints"
+        ]
+      },
+      {
+        "method": "compute.forwardingRules.patch",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.forwardingRules.setLabels",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.forwardingRules.setTarget",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "compute.globalAddresses.delete",

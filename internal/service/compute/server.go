@@ -68,6 +68,9 @@ type Options struct {
 	// instance's private IP (#2141), which the network's VMs reach. It is
 	// called with the server's lock held, and must not call back into it.
 	PrivateServices func(network string) []PrivateService
+	// ServiceAttachment resolves a Private Service Connect endpoint's
+	// target (#2141); nil serves no endpoint.
+	ServiceAttachment ServiceAttachmentFunc
 }
 
 // PrivateService is one private services access endpoint: its address and
@@ -328,7 +331,7 @@ func (s *Server) stamp() string {
 var linkKeys = map[string]bool{"selfLink": true, "network": true, "subnetwork": true, "region": true, "zone": true,
 	"targetLink": true, "nextHopGateway": true, "nextHopNetwork": true, "nextHopInstance": true, "nextHopVpnTunnel": true,
 	"subnetworks": true, "users": true, "zones": true, "machineType": true, "source": true, "sourceImage": true,
-	"sourceSnapshot": true, "sourceDisk": true, "type": true}
+	"sourceSnapshot": true, "sourceDisk": true, "type": true, "target": true}
 
 // renderNested makes the link fields of objects inside lists and objects
 // absolute (an instance's disks and network interfaces).

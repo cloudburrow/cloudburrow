@@ -136,7 +136,9 @@ func TestVPCConfigPrivateServices(t *testing.T) {
 		t.Fatal("no configuration")
 	}
 	want := "  chain private-services {\n    type nat hook output priority -100; policy accept;\n" +
-		"    ip daddr 10.20.0.3 tcp dport 5432 dnat ip to 10.96.4.5:5432 comment \"cloudsql p:db\"\n  }\n}\n"
+		"    ip daddr 10.20.0.3 tcp dport 5432 dnat ip to 10.96.4.5:5432 comment \"cloudsql p:db\"\n  }\n" +
+		"  chain private-services-source {\n    type nat hook postrouting priority 100; policy accept;\n" +
+		"    ip daddr { 10.96.4.5 } ct status dnat masquerade\n  }\n}\n"
 	if !strings.HasSuffix(out, want) || strings.Contains(out, "nope") {
 		t.Errorf("ruleset:\n%s", out)
 	}

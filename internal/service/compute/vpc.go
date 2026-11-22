@@ -167,9 +167,12 @@ func (s *Server) vpcConfigLocked(inst obj, pod string) (string, bool) {
 	}
 	b.WriteString("nft\n")
 	fw := firewallNFT(self, members, s.firewallsOfLocked(self.network), peerPods)
+	var eps []PrivateService
 	if s.opts.PrivateServices != nil {
-		fw = withPrivateServices(fw, s.opts.PrivateServices(self.network))
+		eps = s.opts.PrivateServices(self.network)
 	}
+	eps = append(eps, s.pscEndpointsLocked(self.network, regionOfZone(self.zone))...)
+	fw = withPrivateServices(fw, eps)
 	b.WriteString(fw)
 	return b.String(), true
 }
@@ -323,11 +326,13 @@ func firewallNFT(self vmNet, members []vmNet, rules []obj, peerPods []string) st
 // firewall's egress chain sees it.
 func withPrivateServices(fw string, eps []PrivateService) string {
 	var lines []string
+	targets := map[string]bool{}
 	for _, e := range eps {
 		if net.ParseIP(e.IP).To4() == nil || net.ParseIP(e.TargetIP).To4() == nil || e.Port <= 0 || e.TargetPort <= 0 {
 			continue
 		}
 		lines = append(lines, fmt.Sprintf("    ip daddr %s tcp dport %d dnat ip to %s:%d comment %q\n", e.IP, e.Port, e.TargetIP, e.TargetPort, e.Name))
+		targets[e.TargetIP] = true
 	}
 	if len(lines) == 0 {
 		return fw
@@ -336,8 +341,18 @@ func withPrivateServices(fw string, eps []PrivateService) string {
 	if end < 0 {
 		return fw
 	}
+	// An endpoint in one of the VM's own subnets is first routed out its
+	// VPC interface, from its VPC address, which the cluster cannot answer:
+	// once sent on to the cluster, the connection leaves from the pod's.
+	var ts []string
+	for t := range targets {
+		ts = append(ts, t)
+	}
+	sort.Strings(ts)
 	return fw[:end] + "  chain private-services {\n    type nat hook output priority -100; policy accept;\n" +
-		strings.Join(lines, "") + "  }\n" + fw[end:]
+		strings.Join(lines, "") + "  }\n" +
+		"  chain private-services-source {\n    type nat hook postrouting priority 100; policy accept;\n" +
+		"    ip daddr { " + strings.Join(ts, ", ") + " } ct status dnat masquerade\n  }\n" + fw[end:]
 }
 
 func writeEntries(b *strings.Builder, r fwRule, match string) {

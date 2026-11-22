@@ -119,4 +119,11 @@ func TestZonesAndPrivateIP(t *testing.T) {
 	if !strings.Contains(in.PscServiceAttachmentLink, "/regions/us-east1/serviceAttachments/") || len(in.IpAddresses) != 0 {
 		t.Errorf("psc: %q %+v", in.PscServiceAttachmentLink, in.IpAddresses)
 	}
+	// Its attachment resolves for an endpoint of an allowed project only.
+	if ep, accepted, ok := srv.PSCAttachment(in.PscServiceAttachmentLink, "proj"); !ok || !accepted || ep.Instance != "psc" {
+		t.Errorf("PSCAttachment for proj: %+v %v %v", ep, accepted, ok)
+	}
+	if _, accepted, ok := srv.PSCAttachment(in.PscServiceAttachmentLink, "other"); !ok || accepted {
+		t.Errorf("PSCAttachment for another project: accepted %v ok %v", accepted, ok)
+	}
 }

@@ -111,6 +111,10 @@ type Server struct {
 	addr    string
 	engines []Engine
 
+	// epMu guards epLast, the private endpoints last read (privateip.go).
+	epMu   sync.Mutex
+	epLast endpoints
+
 	mu  sync.Mutex
 	ops map[string]map[string]any // by operation name
 	// opOrder is creation order, for operations.list.

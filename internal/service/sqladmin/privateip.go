@@ -69,7 +69,8 @@ func (s Spec) preferredZones() (zone, secondary string) {
 }
 
 // checkZones refuses a zone outside the instance's region, and a
-// secondary zone that is the primary's. The wording is UNVERIFIED.
+// secondary zone that is the primary's. The wording is UNVERIFIED
+// (re-read 2026-11-22: https://docs.cloud.google.com/sql/docs/postgres/high-availability).
 func checkZones(spec Spec) error {
 	zone, secondary := spec.preferredZones()
 	in := func(z string) bool {
@@ -139,7 +140,8 @@ func (s *Server) assignNetworkingLocked(next *Spec) error {
 	}
 	pn := next.privateNetwork()
 	if !next.publicIP() && pn == "" && !next.pscEnabled() {
-		// UNVERIFIED wording.
+		// UNVERIFIED wording (re-read 2026-11-22:
+		// https://docs.cloud.google.com/sql/docs/postgres/configure-ip).
 		return Errorf(http.StatusBadRequest, "Invalid request: At least one of Public IP or Private IP or PSC connectivity must be enabled.")
 	}
 	if pn == "" {
@@ -165,7 +167,8 @@ func (s *Server) assignNetworkingLocked(next *Spec) error {
 	if len(ranges) == 0 {
 		// The network has no private services access connection: Google's
 		// failure is NETWORK_NOT_PEERED (configure-private-ip). The
-		// wording around it is UNVERIFIED.
+		// wording around it is UNVERIFIED (re-read 2026-11-22:
+		// https://docs.cloud.google.com/sql/docs/postgres/configure-private-ip).
 		return Errorf(http.StatusBadRequest, "Invalid request: Incorrect Service Networking config for instance: %s:%s:NETWORK_NOT_PEERED. "+
 			"Allocate an IP range for private services access on %s (a global address with purpose VPC_PEERING).", next.Project, next.Name, pn)
 	}
@@ -233,21 +236,78 @@ type PrivateEndpoint struct {
 // PrivateEndpoints are every created instance's private IPs, for Compute
 // Engine's VPC model, which makes them reachable from the network's VMs.
 func (s *Server) PrivateEndpoints() []PrivateEndpoint {
-	s.emu.RLock()
-	defer s.emu.RUnlock()
-	if s.writes == nil {
-		return nil
+	return s.endpointSnapshot().private
+}
+
+// PSCAttachment resolves a service attachment for a Private Service
+// Connect endpoint of consumer (#2141): the instance publishing it, and
+// whether consumer is on its pscConfig.allowedConsumerProjects.
+func (s *Server) PSCAttachment(link, consumer string) (ep PrivateEndpoint, accepted, ok bool) {
+	a, ok := s.endpointSnapshot().psc[link]
+	if !ok {
+		return PrivateEndpoint{}, false, false
 	}
-	var out []PrivateEndpoint
-	for _, c := range s.writes.byName {
-		sp := c.spec
-		if sp.PrivateIP == "" || sp.Stopped() {
-			continue
+	for _, p := range a.allowed {
+		if p == consumer {
+			accepted = true
 		}
-		out = append(out, PrivateEndpoint{Network: sp.PrivateNetwork, IP: sp.PrivateIP, Instance: sp.Name,
-			Server: sp.ServerName(), DatabaseVersion: sp.DatabaseVersion})
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].IP < out[j].IP })
+	return a.ep, accepted, true
+}
+
+type pscAttachment struct {
+	ep      PrivateEndpoint
+	allowed []string
+}
+
+type endpoints struct {
+	private []PrivateEndpoint
+	psc     map[string]pscAttachment
+}
+
+// endpointSnapshot is the instances' private endpoints. Compute Engine
+// asks for them under its own lock, while an instance's write holds the
+// instances' lock and asks Compute Engine for its networks: so it never
+// waits on the instances' lock, and answers the last snapshot taken while
+// a write holds it.
+func (s *Server) endpointSnapshot() endpoints {
+	if !s.emu.TryRLock() {
+		s.epMu.Lock()
+		defer s.epMu.Unlock()
+		return s.epLast
+	}
+	var out endpoints
+	if s.writes != nil {
+		out.psc = map[string]pscAttachment{}
+		for _, c := range s.writes.byName {
+			sp := c.spec
+			if sp.Stopped() {
+				continue
+			}
+			ep := PrivateEndpoint{Network: sp.PrivateNetwork, IP: sp.PrivateIP, Instance: sp.Name, Server: sp.ServerName(),
+				DatabaseVersion: sp.DatabaseVersion}
+			if sp.PrivateIP != "" {
+				out.private = append(out.private, ep)
+			}
+			if sp.pscEnabled() {
+				pc, _ := sp.ipConfig()["pscConfig"].(map[string]any)
+				var allowed []string
+				projects, _ := pc["allowedConsumerProjects"].([]any)
+				for _, p := range projects {
+					if v, ok := p.(string); ok {
+						allowed = append(allowed, v)
+					}
+				}
+				ep.Network, ep.IP = "", ""
+				out.psc[pscServiceAttachment(sp)] = pscAttachment{ep: ep, allowed: allowed}
+			}
+		}
+	}
+	s.emu.RUnlock()
+	sort.Slice(out.private, func(i, j int) bool { return out.private[i].IP < out.private[j].IP })
+	s.epMu.Lock()
+	s.epLast = out
+	s.epMu.Unlock()
 	return out
 }
 

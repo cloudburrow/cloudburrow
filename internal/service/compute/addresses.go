@@ -185,6 +185,10 @@ func (s *Server) usedInSubnetLocked(sub string) map[string]string {
 		if strings.Contains(k, "/addresses/") && str(a, "subnetwork") == sub {
 			used[str(a, "address")] = k
 		}
+		// A Private Service Connect endpoint's own address (#2141).
+		if strings.Contains(k, "/forwardingRules/") && str(a, "subnetwork") == sub {
+			used[str(a, "IPAddress")] = k
+		}
 		if strings.Contains(k, "/instances/") {
 			nics, _ := a["networkInterfaces"].([]any)
 			for _, e := range nics {

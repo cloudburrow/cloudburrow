@@ -103,7 +103,7 @@ func (s *computeService) Start(ctx context.Context) error {
 	}
 	s.svcIPs = &serviceIPs{kubeconfig: s.cfg.KubeconfigPath(), namespace: s.cfg.Cluster.Namespace}
 	api, err := compute.New(compute.Options{State: state, Extra: s.instanceGroupManagers, NetworkUsers: s.networkUsers, VMs: s.vms,
-		PrivateServices: s.privateServices})
+		PrivateServices: s.privateServices, ServiceAttachment: s.serviceAttachment})
 	if err != nil {
 		return err
 	}

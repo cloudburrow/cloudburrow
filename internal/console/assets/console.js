@@ -498,6 +498,10 @@ const ROUTES = [
     section: "Networking", product: "vpc", productTitle: "VPC network" },
   { path: "/networking/addresses/list", service: "vpc-addresses", icon: "vpc", title: "IP addresses", kind: "IP address",
     section: "Networking", product: "vpc", productTitle: "VPC network" },
+  // Network services' Private Service Connect (#2141), at Google's path:
+  // its Connected endpoints, Connect endpoint.
+  { path: "/net-services/psc/list/consumers", service: "vpc-psc", icon: "vpc", title: "Private Service Connect", kind: "Endpoint",
+    section: "Networking", product: "network-services", productTitle: "Network services" },
 
   // Secret Manager (#1850): Google's menu, Secret Manager (the global
   // secrets), Regional secrets and Settings.

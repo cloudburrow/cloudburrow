@@ -325,7 +325,7 @@ latency and resource charts (#1267); the Artifact Registry repository Permission
 
 | Gap | Why open | Size |
 |---|---|---|
-| Cloud SQL: Private Service Connect endpoints (Add an Endpoint, automatic endpoints through service connection policies), managed connection pooling, and Query insights' database load chart (#2141) | no emulator support | M |
+| Cloud SQL: Private Service Connect's automatic endpoints (Add an Endpoint on the create page, `pscAutoConnections`, through Network Connectivity's service connection policies), managed connection pooling, and Query insights' database load chart (#2141) | no emulator support | M |
 
 ## Excluded on purpose
 
