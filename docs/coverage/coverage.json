@@ -13629,6 +13629,8 @@
           "test/compat/cloudsqlbackups_test.go:248 TestGcloudSQLBackups",
           "test/compat/cloudsqlbackups_test.go:99 TestCloudSQLBackups",
           "test/compat/cloudsqlfields_test.go:65 TestCloudSQLFieldsNeverSilentlyDropped",
+          "test/compat/cloudsqlmysql57_test.go:45 TestCloudSQLMySQL57",
+          "test/compat/cloudsqlmysql57_test.go:50 TestCloudSQLMySQL56",
           "test/compat/cloudsqlmysqlroot1993_test.go:113 TestCloudSQLMySQLRootDeleted",
           "test/compat/cloudsqlpitr_test.go:273 TestCloudSQLPointInTimeRetention",
           "test/compat/orgpolicycustom1895_sql_test.go:27 TestOrgPolicyCustomConstraintsCloudSQL"
@@ -13651,7 +13653,9 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqlbluegreen_test.go:31 TestCloudSQLBlueGreenDeployment",
-          "test/compat/cloudsqlbluegreenha_test.go:28 TestCloudSQLBlueGreenDeploymentHA"
+          "test/compat/cloudsqlbluegreenha_test.go:28 TestCloudSQLBlueGreenDeploymentHA",
+          "test/compat/cloudsqlmysql57_test.go:45 TestCloudSQLMySQL57",
+          "test/compat/cloudsqlmysql57_test.go:50 TestCloudSQLMySQL56"
         ]
       },
       {
@@ -13659,7 +13663,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqlbluegreen_test.go:31 TestCloudSQLBlueGreenDeployment",
-          "test/compat/cloudsqlbluegreenha_test.go:28 TestCloudSQLBlueGreenDeploymentHA"
+          "test/compat/cloudsqlbluegreenha_test.go:28 TestCloudSQLBlueGreenDeploymentHA",
+          "test/compat/cloudsqlmysql57_test.go:45 TestCloudSQLMySQL57"
         ]
       },
       {
@@ -13667,7 +13672,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqlbluegreen_test.go:31 TestCloudSQLBlueGreenDeployment",
-          "test/compat/cloudsqlbluegreenha_test.go:28 TestCloudSQLBlueGreenDeploymentHA"
+          "test/compat/cloudsqlbluegreenha_test.go:28 TestCloudSQLBlueGreenDeploymentHA",
+          "test/compat/cloudsqlmysql57_test.go:45 TestCloudSQLMySQL57"
         ]
       },
       {
@@ -13682,7 +13688,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqlbluegreen_test.go:31 TestCloudSQLBlueGreenDeployment",
-          "test/compat/cloudsqlbluegreenha_test.go:28 TestCloudSQLBlueGreenDeploymentHA"
+          "test/compat/cloudsqlbluegreenha_test.go:28 TestCloudSQLBlueGreenDeploymentHA",
+          "test/compat/cloudsqlmysql57_test.go:45 TestCloudSQLMySQL57"
         ]
       },
       {
@@ -13702,8 +13709,8 @@
           "test/compat/cloudsqlha_test.go:34 TestCloudSQLHighAvailability",
           "test/compat/cloudsqliam1944_test.go:48 TestCloudSQLIAMDatabaseAuthentication",
           "test/compat/cloudsqlinstances_test.go:58 TestCloudSQLInstanceWrites",
-          "test/compat/cloudsqlmysql57_test.go:29 TestCloudSQLMySQL57",
-          "test/compat/cloudsqlmysql57_test.go:32 TestCloudSQLMySQL56",
+          "test/compat/cloudsqlmysql57_test.go:45 TestCloudSQLMySQL57",
+          "test/compat/cloudsqlmysql57_test.go:50 TestCloudSQLMySQL56",
           "test/compat/cloudsqlphysical_test.go:37 TestCloudSQLExternalMySQLPhysical",
           "test/compat/cloudsqlproxy_test.go:135 TestCloudSQLAuthProxyBinary",
           "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas",
@@ -13733,8 +13740,8 @@
           "test/compat/cloudsqlfields_test.go:65 TestCloudSQLFieldsNeverSilentlyDropped",
           "test/compat/cloudsqlha_test.go:34 TestCloudSQLHighAvailability",
           "test/compat/cloudsqlinstances_test.go:58 TestCloudSQLInstanceWrites",
-          "test/compat/cloudsqlmysql57_test.go:29 TestCloudSQLMySQL57",
-          "test/compat/cloudsqlmysql57_test.go:32 TestCloudSQLMySQL56",
+          "test/compat/cloudsqlmysql57_test.go:45 TestCloudSQLMySQL57",
+          "test/compat/cloudsqlmysql57_test.go:50 TestCloudSQLMySQL56",
           "test/compat/cloudsqlphysical_test.go:37 TestCloudSQLExternalMySQLPhysical",
           "test/compat/cloudsqlproxy_test.go:135 TestCloudSQLAuthProxyBinary",
           "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas",
@@ -13769,8 +13776,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqlinstances_test.go:321 TestTerraformSQLDatabaseInstance",
-          "test/compat/cloudsqlmysql57_test.go:29 TestCloudSQLMySQL57",
-          "test/compat/cloudsqlmysql57_test.go:32 TestCloudSQLMySQL56",
+          "test/compat/cloudsqlmysql57_test.go:45 TestCloudSQLMySQL57",
+          "test/compat/cloudsqlmysql57_test.go:50 TestCloudSQLMySQL56",
           "test/compat/cloudsqlreplicaupgrade_test.go:237 TestGcloudSQLOldPostgresVersion",
           "test/compat/cloudsqlversions_test.go:113 TestCloudSQLDatabaseVersions",
           "test/compat/sqladmin_test.go:280 TestSQLAdminDatabasesAndUsersAreTheServers",
@@ -13783,8 +13790,8 @@
         "tests": [
           "test/compat/cloudsqlinstances_test.go:321 TestTerraformSQLDatabaseInstance",
           "test/compat/cloudsqlinstances_test.go:58 TestCloudSQLInstanceWrites",
-          "test/compat/cloudsqlmysql57_test.go:29 TestCloudSQLMySQL57",
-          "test/compat/cloudsqlmysql57_test.go:32 TestCloudSQLMySQL56",
+          "test/compat/cloudsqlmysql57_test.go:45 TestCloudSQLMySQL57",
+          "test/compat/cloudsqlmysql57_test.go:50 TestCloudSQLMySQL56",
           "test/compat/cloudsqlreplicaupgrade_test.go:114 TestCloudSQLPostgresOldVersionsAndRefusals",
           "test/compat/cloudsqlreplicaupgrade_test.go:237 TestGcloudSQLOldPostgresVersion",
           "test/compat/cloudsqlversions_test.go:113 TestCloudSQLDatabaseVersions",
@@ -13896,6 +13903,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqlbackups_test.go:99 TestCloudSQLBackups",
+          "test/compat/cloudsqlmysql57_test.go:45 TestCloudSQLMySQL57",
+          "test/compat/cloudsqlmysql57_test.go:50 TestCloudSQLMySQL56",
           "test/compat/cloudsqlmysqlroot1993_test.go:113 TestCloudSQLMySQLRootDeleted",
           "test/compat/cloudsqlparallel_test.go:185 TestCloudSQLCloneToBinLogCoordinates",
           "test/compat/cloudsqlpitr_test.go:112 TestCloudSQLPointInTimeRecoveryBeforePostgres12",
@@ -13927,8 +13936,8 @@
           "test/compat/cloudsqlinstances_test.go:294 TestGcloudSQLInstances",
           "test/compat/cloudsqlinstances_test.go:321 TestTerraformSQLDatabaseInstance",
           "test/compat/cloudsqlinstances_test.go:58 TestCloudSQLInstanceWrites",
-          "test/compat/cloudsqlmysql57_test.go:29 TestCloudSQLMySQL57",
-          "test/compat/cloudsqlmysql57_test.go:32 TestCloudSQLMySQL56",
+          "test/compat/cloudsqlmysql57_test.go:45 TestCloudSQLMySQL57",
+          "test/compat/cloudsqlmysql57_test.go:50 TestCloudSQLMySQL56",
           "test/compat/cloudsqlpasswordpolicy_test.go:27 TestCloudSQLPasswordValidationPolicy",
           "test/compat/cloudsqlphysical_test.go:37 TestCloudSQLExternalMySQLPhysical",
           "test/compat/cloudsqlpitr_test.go:222 TestGcloudSQLPointInTimeClone",
@@ -13962,7 +13971,9 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqldemote_test.go:26 TestCloudSQLDemote",
-          "test/compat/cloudsqldemotepg_test.go:23 TestCloudSQLDemotePostgres"
+          "test/compat/cloudsqldemotepg_test.go:23 TestCloudSQLDemotePostgres",
+          "test/compat/cloudsqlmysql57_test.go:45 TestCloudSQLMySQL57",
+          "test/compat/cloudsqlmysql57_test.go:50 TestCloudSQLMySQL56"
         ]
       },
       {
@@ -13970,7 +13981,9 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqldemote_test.go:177 TestCloudSQLDemoteSkipReplicationSetup",
-          "test/compat/cloudsqldemote_test.go:26 TestCloudSQLDemote"
+          "test/compat/cloudsqldemote_test.go:26 TestCloudSQLDemote",
+          "test/compat/cloudsqlmysql57_test.go:45 TestCloudSQLMySQL57",
+          "test/compat/cloudsqlmysql57_test.go:50 TestCloudSQLMySQL56"
         ]
       },
       {
@@ -14001,6 +14014,8 @@
           "test/compat/cloudsqlha_cli_test.go:20 TestGcloudSQLHighAvailability",
           "test/compat/cloudsqlha_test.go:34 TestCloudSQLHighAvailability",
           "test/compat/cloudsqlhapg1524_test.go:21 TestCloudSQLHighAvailabilityBeforePostgres13",
+          "test/compat/cloudsqlmysql57_test.go:45 TestCloudSQLMySQL57",
+          "test/compat/cloudsqlmysql57_test.go:50 TestCloudSQLMySQL56",
           "test/compat/consolecloudsqlinstances_test.go:503 TestConsoleCloudSQLHighAvailabilityPostgres11"
         ]
       },
@@ -14030,8 +14045,8 @@
           "test/compat/cloudsqlinstances_test.go:321 TestTerraformSQLDatabaseInstance",
           "test/compat/cloudsqlinstances_test.go:58 TestCloudSQLInstanceWrites",
           "test/compat/cloudsqlmaintenance_test.go:51 TestCloudSQLRescheduleMaintenance",
-          "test/compat/cloudsqlmysql57_test.go:29 TestCloudSQLMySQL57",
-          "test/compat/cloudsqlmysql57_test.go:32 TestCloudSQLMySQL56",
+          "test/compat/cloudsqlmysql57_test.go:45 TestCloudSQLMySQL57",
+          "test/compat/cloudsqlmysql57_test.go:50 TestCloudSQLMySQL56",
           "test/compat/cloudsqlpasswordpolicy_test.go:27 TestCloudSQLPasswordValidationPolicy",
           "test/compat/cloudsqlphysical_test.go:37 TestCloudSQLExternalMySQLPhysical",
           "test/compat/cloudsqlpitr_test.go:222 TestGcloudSQLPointInTimeClone",
@@ -14104,8 +14119,8 @@
           "test/compat/cloudsqlinstances_test.go:294 TestGcloudSQLInstances",
           "test/compat/cloudsqlinstances_test.go:321 TestTerraformSQLDatabaseInstance",
           "test/compat/cloudsqlinstances_test.go:58 TestCloudSQLInstanceWrites",
-          "test/compat/cloudsqlmysql57_test.go:29 TestCloudSQLMySQL57",
-          "test/compat/cloudsqlmysql57_test.go:32 TestCloudSQLMySQL56",
+          "test/compat/cloudsqlmysql57_test.go:45 TestCloudSQLMySQL57",
+          "test/compat/cloudsqlmysql57_test.go:50 TestCloudSQLMySQL56",
           "test/compat/cloudsqlmysqlroot1993_test.go:277 TestCloudSQLMySQLRootDeletedReplica",
           "test/compat/cloudsqlpasswordpolicy_test.go:27 TestCloudSQLPasswordValidationPolicy",
           "test/compat/cloudsqlpgreplicas1524_test.go:24 TestCloudSQLReadReplicasBeforePostgres12",
@@ -14180,8 +14195,8 @@
           "test/compat/cloudsqlhapg1524_test.go:21 TestCloudSQLHighAvailabilityBeforePostgres13",
           "test/compat/cloudsqlinstances_test.go:321 TestTerraformSQLDatabaseInstance",
           "test/compat/cloudsqlinstances_test.go:58 TestCloudSQLInstanceWrites",
-          "test/compat/cloudsqlmysql57_test.go:29 TestCloudSQLMySQL57",
-          "test/compat/cloudsqlmysql57_test.go:32 TestCloudSQLMySQL56",
+          "test/compat/cloudsqlmysql57_test.go:45 TestCloudSQLMySQL57",
+          "test/compat/cloudsqlmysql57_test.go:50 TestCloudSQLMySQL56",
           "test/compat/cloudsqlmysqlroot1993_test.go:113 TestCloudSQLMySQLRootDeleted",
           "test/compat/cloudsqlparallel_test.go:267 TestCloudSQLUpgradeWithReplicas",
           "test/compat/cloudsqlpasswordpolicy_test.go:27 TestCloudSQLPasswordValidationPolicy",
@@ -14229,6 +14244,8 @@
           "test/compat/cloudsqlexternal_test.go:25 TestCloudSQLExternalPrimaryReplica",
           "test/compat/cloudsqlexternaldump_test.go:26 TestCloudSQLExternalMySQLDumpFileAndOffline",
           "test/compat/cloudsqlexternalpg_test.go:28 TestCloudSQLExternalPostgresPrimary",
+          "test/compat/cloudsqlmysql57_test.go:45 TestCloudSQLMySQL57",
+          "test/compat/cloudsqlmysql57_test.go:50 TestCloudSQLMySQL56",
           "test/compat/cloudsqlmysqlroot1993_test.go:277 TestCloudSQLMySQLRootDeletedReplica",
           "test/compat/cloudsqlpgreplicas1524_test.go:24 TestCloudSQLReadReplicasBeforePostgres12",
           "test/compat/cloudsqlreplicas_test.go:270 TestGcloudSQLReadReplica",
@@ -14371,8 +14388,8 @@
           "test/compat/cloudsqlinstances_test.go:294 TestGcloudSQLInstances",
           "test/compat/cloudsqlinstances_test.go:321 TestTerraformSQLDatabaseInstance",
           "test/compat/cloudsqlinstances_test.go:58 TestCloudSQLInstanceWrites",
-          "test/compat/cloudsqlmysql57_test.go:29 TestCloudSQLMySQL57",
-          "test/compat/cloudsqlmysql57_test.go:32 TestCloudSQLMySQL56",
+          "test/compat/cloudsqlmysql57_test.go:45 TestCloudSQLMySQL57",
+          "test/compat/cloudsqlmysql57_test.go:50 TestCloudSQLMySQL56",
           "test/compat/cloudsqlpasswordpolicy_test.go:27 TestCloudSQLPasswordValidationPolicy",
           "test/compat/cloudsqlphysical_test.go:37 TestCloudSQLExternalMySQLPhysical",
           "test/compat/cloudsqlpitr_test.go:222 TestGcloudSQLPointInTimeClone",
@@ -14414,6 +14431,8 @@
         "method": "sql.projects.instances.getLatestRecoveryTime",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudsqlmysql57_test.go:45 TestCloudSQLMySQL57",
+          "test/compat/cloudsqlmysql57_test.go:50 TestCloudSQLMySQL56",
           "test/compat/cloudsqlpitr_test.go:112 TestCloudSQLPointInTimeRecoveryBeforePostgres12",
           "test/compat/cloudsqlpitr_test.go:273 TestCloudSQLPointInTimeRetention",
           "test/compat/cloudsqlpitr_test.go:83 TestCloudSQLPointInTimeRecovery",
@@ -14452,6 +14471,8 @@
           "test/compat/cloudsqlexternal_test.go:25 TestCloudSQLExternalPrimaryReplica",
           "test/compat/cloudsqlexternaldump_test.go:26 TestCloudSQLExternalMySQLDumpFileAndOffline",
           "test/compat/cloudsqlexternalpg_test.go:28 TestCloudSQLExternalPostgresPrimary",
+          "test/compat/cloudsqlmysql57_test.go:45 TestCloudSQLMySQL57",
+          "test/compat/cloudsqlmysql57_test.go:50 TestCloudSQLMySQL56",
           "test/compat/cloudsqlphysical_test.go:37 TestCloudSQLExternalMySQLPhysical"
         ]
       },
@@ -14542,8 +14563,8 @@
           "test/compat/cloudsqlfields_test.go:65 TestCloudSQLFieldsNeverSilentlyDropped",
           "test/compat/cloudsqliam1944_test.go:48 TestCloudSQLIAMDatabaseAuthentication",
           "test/compat/cloudsqlinstances_test.go:58 TestCloudSQLInstanceWrites",
-          "test/compat/cloudsqlmysql57_test.go:29 TestCloudSQLMySQL57",
-          "test/compat/cloudsqlmysql57_test.go:32 TestCloudSQLMySQL56",
+          "test/compat/cloudsqlmysql57_test.go:45 TestCloudSQLMySQL57",
+          "test/compat/cloudsqlmysql57_test.go:50 TestCloudSQLMySQL56",
           "test/compat/cloudsqlmysqlroot1993_test.go:113 TestCloudSQLMySQLRootDeleted",
           "test/compat/cloudsqlpasswordpolicy_test.go:27 TestCloudSQLPasswordValidationPolicy",
           "test/compat/cloudsqluserpolicy2009_test.go:41 TestCloudSQLUserPasswordPolicy",
@@ -14558,8 +14579,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqliam1944_test.go:48 TestCloudSQLIAMDatabaseAuthentication",
-          "test/compat/cloudsqlmysql57_test.go:29 TestCloudSQLMySQL57",
-          "test/compat/cloudsqlmysql57_test.go:32 TestCloudSQLMySQL56",
+          "test/compat/cloudsqlmysql57_test.go:45 TestCloudSQLMySQL57",
+          "test/compat/cloudsqlmysql57_test.go:50 TestCloudSQLMySQL56",
           "test/compat/cloudsqlmysqlroot1993_test.go:113 TestCloudSQLMySQLRootDeleted",
           "test/compat/cloudsqlstopstart_test.go:30 TestCloudSQLStopAndStart",
           "test/compat/cloudsqluserpolicy2009_test.go:41 TestCloudSQLUserPasswordPolicy",
@@ -14572,8 +14593,8 @@
         "method": "sql.users.update",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudsqlmysql57_test.go:29 TestCloudSQLMySQL57",
-          "test/compat/cloudsqlmysql57_test.go:32 TestCloudSQLMySQL56",
+          "test/compat/cloudsqlmysql57_test.go:45 TestCloudSQLMySQL57",
+          "test/compat/cloudsqlmysql57_test.go:50 TestCloudSQLMySQL56",
           "test/compat/cloudsqlpasswordpolicy_test.go:27 TestCloudSQLPasswordValidationPolicy",
           "test/compat/cloudsqluserpolicy2009_test.go:41 TestCloudSQLUserPasswordPolicy",
           "test/compat/sqladmin_test.go:280 TestSQLAdminDatabasesAndUsersAreTheServers",

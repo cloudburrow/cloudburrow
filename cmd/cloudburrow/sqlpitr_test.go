@@ -80,6 +80,29 @@ func TestFirstCommitAfter(t *testing.T) {
 			t.Errorf("firstCommitAfter(%v, %d) = %d, %v, %v; want %d, %v", c.at, c.from, pos, found, err, c.pos, c.found)
 		}
 	}
+	// MySQL 5.7's GTID event (42 bytes) and 5.6's (25) have no commit
+	// timestamp: the event's own time, in seconds, is the commit's (#1524).
+	for _, size := range []int{42, 25} {
+		legacy := []byte("\xfebin")
+		legacy = append(legacy, binlogEvent(15, make([]byte, 80))...)
+		at1 := int64(len(legacy))
+		ev := binlogEvent(33, make([]byte, size))
+		binary.LittleEndian.PutUint32(ev[0:4], 1_000_000)
+		legacy = append(legacy, ev...)
+		at2 := int64(len(legacy))
+		ev = binlogEvent(33, make([]byte, size))
+		binary.LittleEndian.PutUint32(ev[0:4], 1_000_002)
+		legacy = append(legacy, ev...)
+		for _, c := range []struct {
+			at    time.Time
+			pos   int64
+			found bool
+		}{{time.Unix(999_999, 0), at1, true}, {time.Unix(1_000_000, 500), at2, true}, {time.Unix(1_000_002, 0), 0, false}} {
+			if pos, found, err := firstCommitAfter(legacy, 4, c.at); err != nil || pos != c.pos || found != c.found {
+				t.Errorf("a %d-byte GTID event: firstCommitAfter(%v) = %d, %v, %v; want %d, %v", size, c.at, pos, found, err, c.pos, c.found)
+			}
+		}
+	}
 	if _, _, err := firstCommitAfter([]byte("nope"), 4, time.Now()); err == nil {
 		t.Error("not a binary log: no error")
 	}

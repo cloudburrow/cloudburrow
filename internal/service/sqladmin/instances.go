@@ -739,6 +739,9 @@ func (s *Server) insertInstance(r *http.Request, base, project string) (any, err
 			if err := limitedUnimplemented(pc.spec.DatabaseVersion, "a read replica"); err != nil {
 				return nil, err
 			}
+			if pc.spec.DatabaseVersion == "MYSQL_5_6" && pc.spec.MasterInstanceName != "" {
+				return nil, mysql56CascadeErr(b.MasterInstanceName)
+			}
 		}
 		if err := s.prepareReplica(r.Context(), project, b, &spec); err != nil {
 			return nil, err

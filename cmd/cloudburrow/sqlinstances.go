@@ -220,6 +220,19 @@ mysql $MYSQL_LOCAL -e "CHANGE REPLICATION SOURCE TO SOURCE_HOST = '$CLOUDSQL_PRI
 	components.SQLReplicaUser + `}', SOURCE_PASSWORD = '$CLOUDSQL_REPLICATION_PASSWORD', SOURCE_AUTO_POSITION = 1, SOURCE_SSL = 1; START REPLICA; SET PERSIST super_read_only = ON"
 `
 
+// mysqlLegacyFirstStart starts a MySQL 5.7 or 5.6 server's binary log
+// afresh at its first start (#1524): it runs with GTIDs from its
+// initialisation (legacyMySQLArgs), whose time zone tables the image's
+// entrypoint loads with the binary log on, and a new Cloud SQL instance
+// has no transaction of its own a replica, or the source it is demoted to
+// replicate from, would see. A marker on its volume records it.
+const mysqlLegacyFirstStart = `set -e
+` + mysqlRootEnv + `m=/var/lib/mysql/cloudsql-binlog-started
+[ -f "$m" ] && exit 0
+mysql $MYSQL_LOCAL -e 'RESET MASTER'
+touch "$m"
+`
+
 // mysqlSystemAccountsScript gives a MySQL server CloudBurrow's own
 // account (sqladmin.MySQLAdminUser, #1993), reading the statements on its
 // standard input so the password never is on a command line. It signs in
@@ -302,9 +315,16 @@ func (p *sqlProvisioner) Start(ctx context.Context, spec sqladmin.Spec) error {
 			return err
 		}
 	}
+	if sqladmin.IsLegacyMySQL(spec.DatabaseVersion) {
+		var out strings.Builder
+		if err := nodeExec(p.cfg, b.Name)(ctx, nil, &out, "sh", "-c", mysqlLegacyFirstStart); err != nil {
+			return fmt.Errorf("start the binary log of %s: %w %s", spec.Name, err, strings.TrimSpace(out.String()))
+		}
+	}
 	if script := replicaSetup(spec); script != "" {
 		// A replica of a source representation instance runs idle until
 		// startExternalSync (#1501).
+		script = sqladmin.MySQLDialect(spec.DatabaseVersion, script)
 		var out strings.Builder
 		if err := podExec(p.cfg, components.SQLInstancePrefix+spec.ServerName())(ctx, nil, &out, "sh", "-c", script); err != nil {
 			return fmt.Errorf("start replication of %s from %s: %w %s", spec.Name, spec.MasterInstanceName, err, strings.TrimSpace(out.String()))
@@ -359,6 +379,11 @@ func (p *sqlProvisioner) Restart(ctx context.Context, spec sqladmin.Spec) error 
 	if sqladmin.IsSQLServer(spec.DatabaseVersion) {
 		// Trace flags last until the server stops.
 		return p.sqlServerSetup(ctx, spec)
+	}
+	if sqladmin.IsLegacyMySQL(spec.DatabaseVersion) && spec.Regional() {
+		// MySQL 5.7 and 5.6 have no SET PERSIST (#1524): the primary's
+		// semi-synchronous replication is set again, as at its start.
+		return p.mysqlStandby(ctx, spec)
 	}
 	return nil
 }

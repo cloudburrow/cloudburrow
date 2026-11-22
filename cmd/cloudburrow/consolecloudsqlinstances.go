@@ -705,8 +705,14 @@ func replicaActions(in *sqladminapi.DatabaseInstance) []console.Action {
 	if in.MasterInstanceName == "" {
 		return []console.Action{create}
 	}
-	acts := []console.Action{create, {ID: "promote-replica", Label: "Promote", Destructive: true,
-		Confirm: "Promoting stops replication from the primary for good: the replica becomes a standalone primary that takes writes."}}
+	acts := []console.Action{create}
+	if in.DatabaseVersion == "MYSQL_5_6" {
+		// Cloud SQL logs a read replica's binary log on MySQL 5.7 and
+		// later only, so a 5.6 replica has no cascading replicas (#1524).
+		acts = nil
+	}
+	acts = append(acts, console.Action{ID: "promote-replica", Label: "Promote", Destructive: true,
+		Confirm: "Promoting stops replication from the primary for good: the replica becomes a standalone primary that takes writes."})
 	if st := in.Settings; st != nil && !st.DatabaseReplicationEnabled {
 		return append(acts, console.Action{ID: "start-replica", Label: "Start replication"})
 	}
@@ -840,7 +846,9 @@ func blueGreenState(ctx context.Context, svc *sqladminapi.Service, project strin
 func blueGreenActions(in *sqladminapi.DatabaseInstance) []console.Action {
 	di := in.DeploymentInfo
 	if di == nil {
-		if !strings.HasPrefix(in.DatabaseVersion, "MYSQL_") || in.MasterInstanceName != "" {
+		// Cloud SQL makes no blue-green deployment of a MySQL 5.6 instance
+		// ("version 5.7, 8.0, or 8.4", #1524).
+		if !strings.HasPrefix(in.DatabaseVersion, "MYSQL_") || in.MasterInstanceName != "" || in.DatabaseVersion == "MYSQL_5_6" {
 			return nil
 		}
 		versions := []string{in.DatabaseVersion}

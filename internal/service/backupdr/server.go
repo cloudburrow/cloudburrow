@@ -634,10 +634,11 @@ func refused(rest []string, verb string) (string, string) {
 	return "", ""
 }
 
-// otherWhy is why a method outside Cloud SQL's integration is refused.
-const otherWhy = "CloudBurrow serves the Backup and DR Service for Cloud SQL instances: backup vaults, backup plans, " +
-	"backup plan associations, data sources, backups and operations (docs/backupdr.md); management servers, " +
-	"backup appliances and the other workload types (Compute Engine, disks, AlloyDB, Filestore) are not served"
+// otherWhy is why a method outside Cloud SQL's and Compute Engine's
+// integrations is refused.
+const otherWhy = "CloudBurrow serves the Backup and DR Service for Cloud SQL instances and Compute Engine VMs and disks (#2075): " +
+	"backup vaults, backup plans, backup plan associations, data sources, backups and operations (docs/backupdr.md); " +
+	"management servers, backup appliances and the other workload types (AlloyDB, Filestore) are not served"
 
 func locationJSON(project, loc string) map[string]any {
 	return map[string]any{"name": "projects/" + project + "/locations/" + loc, "locationId": loc, "displayName": loc}

@@ -138,6 +138,9 @@ func (p *Postgres) PauseReplication(ctx context.Context, pause bool) error {
 	return p.exec(ctx, "SELECT pg_"+p.walWord()+"_replay_resume()")
 }
 
+// replicaPrivileges are the replication user's.
+const replicaPrivileges = "REPLICATION SLAVE, REPLICATION CLIENT, SELECT, RELOAD, SHOW VIEW, TRIGGER, EVENT, PROCESS"
+
 // PrepareReplicationSource turns GTIDs on, by MySQL's online procedure,
 // as every Cloud SQL for MySQL instance has them, and creates the
 // replication user.
@@ -186,11 +189,7 @@ func (m *MySQL) PrepareReplicationSource(ctx context.Context, password string) e
 			}
 		}
 	}
-	for _, st := range []string{
-		"CREATE USER IF NOT EXISTS '" + ReplicaUser + "'@'%' IDENTIFIED BY " + myString(password),
-		"ALTER USER '" + ReplicaUser + "'@'%' IDENTIFIED BY " + myString(password),
-		"GRANT REPLICATION SLAVE, REPLICATION CLIENT, SELECT, RELOAD, SHOW VIEW, TRIGGER, EVENT, PROCESS ON *.* TO '" + ReplicaUser + "'@'%'",
-	} {
+	for _, st := range mysqlUpsertUser(m.Version, ReplicaUser, password, replicaPrivileges) {
 		if _, err := db.ExecContext(ctx, st); err != nil {
 			return myError(err)
 		}
@@ -408,16 +407,11 @@ func (m *MySQL) PrepareCascadingSource(ctx context.Context, password string) err
 		return myError(err)
 	}
 	defer conn.Close()
-	for _, st := range []string{
-		"SET SESSION sql_log_bin = 0",
-		"SET GLOBAL super_read_only = OFF",
-		"CREATE USER IF NOT EXISTS '" + ReplicaUser + "'@'%' IDENTIFIED BY " + myString(password),
-		"ALTER USER '" + ReplicaUser + "'@'%' IDENTIFIED BY " + myString(password),
-		"GRANT REPLICATION SLAVE, REPLICATION CLIENT, SELECT, RELOAD, SHOW VIEW, TRIGGER, EVENT, PROCESS ON *.* TO '" + ReplicaUser + "'@'%'",
-		"SET GLOBAL super_read_only = ON",
-	} {
-		if _, err := conn.ExecContext(ctx, st); err != nil {
-			_, _ = conn.ExecContext(ctx, "SET GLOBAL super_read_only = ON")
+	stmts := append([]string{"SET SESSION sql_log_bin = 0", "SET GLOBAL super_read_only = OFF"},
+		mysqlUpsertUser(m.Version, ReplicaUser, password, replicaPrivileges)...)
+	for _, st := range append(stmts, "SET GLOBAL super_read_only = ON") {
+		if _, err := conn.ExecContext(ctx, MySQLDialect(m.Version, st)); err != nil {
+			_, _ = conn.ExecContext(ctx, MySQLDialect(m.Version, "SET GLOBAL super_read_only = ON"))
 			return myError(err)
 		}
 	}

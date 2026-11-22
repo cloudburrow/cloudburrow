@@ -1061,6 +1061,17 @@ const SQLInstancePrefix = "sqlinst-"
 // SQLInstanceFlag is one database flag of a created instance.
 type SQLInstanceFlag struct{ Name, Value string }
 
+// legacyMySQLArgs are the options of a MYSQL_5_7 or MYSQL_5_6 server
+// (#1524), which MySQL 8.0 has by default or sets with SET PERSIST, which
+// 5.7 and 5.6 lack: the binary log (off by default before 8.0, and needing
+// a server ID), in row format (5.6's default is STATEMENT), logging what
+// a replica applies, and GTIDs, which every Cloud SQL for MySQL instance
+// has and MySQL 5.6 can turn on only at startup. The relay log's name is
+// fixed: its default is the host's, a pod's, which changes at each
+// restart. A replica's options follow, and its server ID wins.
+var legacyMySQLArgs = []string{"--server-id=1", "--log-bin=mysql-bin", "--binlog-format=ROW", "--log-slave-updates=ON",
+	"--gtid-mode=ON", "--enforce-gtid-consistency=ON", "--relay-log=relay-bin"}
+
 // CloudSQLInstanceBackend is a Cloud SQL instance created through the Admin
 // API's instances.insert (#1330): the same image and the same settings as
 // cloudSQLBackend or CloudSQLMySQLBackend, under its own name, with
@@ -1079,6 +1090,9 @@ func CloudSQLInstanceBackend(name, version string, persistent bool, rootPassword
 			b.Env = map[string]string{"MYSQL_ALLOW_EMPTY_PASSWORD": "yes"}
 		}
 		b.Args = append([]string{}, b.Args...)
+		if version == "MYSQL_5_7" || version == "MYSQL_5_6" {
+			b.Args = append(b.Args, legacyMySQLArgs...)
+		}
 		for _, f := range flags {
 			b.Args = append(b.Args, "--"+f.Name+"="+f.Value)
 		}
@@ -1299,8 +1313,13 @@ func CloudSQLMySQLStandbyBackend(b Backend, host string, epoch int, serverID uin
 	for i, a := range args {
 		quoted[i] = "'" + strings.ReplaceAll(a, "'", `'\''`) + "'"
 	}
+	ulimit := ""
+	if b.Image == CloudSQLMySQL57Image || b.Image == CloudSQLMySQL56Image {
+		// cloudSQLMySQL57Command's limit, which this command replaces (#1524).
+		ulimit = "ulimit -n 1048576\n"
+	}
 	b.Command = []string{"sh", "-c", `set -e
-marker=/var/lib/mysql/cloudsql-standby-epoch
+` + ulimit + `marker=/var/lib/mysql/cloudsql-standby-epoch
 if [ "$(cat "$marker" 2>/dev/null)" != "$CLOUDSQL_STANDBY_EPOCH" ]; then
   rm -rf /var/lib/mysql/data
   echo "$CLOUDSQL_STANDBY_EPOCH" > "$marker"

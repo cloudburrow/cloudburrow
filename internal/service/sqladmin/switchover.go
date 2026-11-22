@@ -360,7 +360,7 @@ func queryString(ctx context.Context, m *MySQL, q string) (string, error) {
 	}
 	defer db.Close()
 	var v sql.NullString
-	if err := db.QueryRowContext(ctx, q).Scan(&v); err != nil {
+	if err := db.QueryRowContext(ctx, MySQLDialect(m.Version, q)).Scan(&v); err != nil {
 		return "", myError(err)
 	}
 	return v.String, nil
@@ -374,11 +374,18 @@ func waitForGTIDs(ctx context.Context, m *MySQL, gtids string, timeout time.Dura
 	}
 	defer db.Close()
 	var r sql.NullInt64
-	if err := db.QueryRowContext(ctx, "SELECT WAIT_FOR_EXECUTED_GTID_SET(?, ?)", strings.ReplaceAll(gtids, "\n", ""),
+	// MySQL 5.6 has no WAIT_FOR_EXECUTED_GTID_SET (5.7.5): its
+	// WAIT_UNTIL_SQL_THREAD_AFTER_GTIDS answers the events it waited for,
+	// or -1 at the timeout (#1524).
+	q, done := "SELECT WAIT_FOR_EXECUTED_GTID_SET(?, ?)", func(n int64) bool { return n == 0 }
+	if m.Version == "MYSQL_5_6" {
+		q, done = "SELECT WAIT_UNTIL_SQL_THREAD_AFTER_GTIDS(?, ?)", func(n int64) bool { return n >= 0 }
+	}
+	if err := db.QueryRowContext(ctx, q, strings.ReplaceAll(gtids, "\n", ""),
 		int64(timeout/time.Second)).Scan(&r); err != nil {
 		return myError(err)
 	}
-	if !r.Valid || r.Int64 != 0 {
+	if !r.Valid || !done(r.Int64) {
 		return fmt.Errorf("timed out")
 	}
 	return nil
