@@ -2019,15 +2019,16 @@
     "Key": "developerconnect",
     "Title": "Developer Connect",
     "counts": {
-      "Implemented": 12,
       "Unimplemented": 1,
-      "Verified": 13
+      "Verified": 25
     },
     "rows": [
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/CreateAccountConnector",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/developerconnectaccounts_test.go:52 TestDeveloperConnectAccountConnectors"
+        ]
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/CreateConnection",
@@ -2047,8 +2048,10 @@
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/DeleteAccountConnector",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/developerconnectaccounts_test.go:52 TestDeveloperConnectAccountConnectors"
+        ]
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/DeleteConnection",
@@ -2069,18 +2072,24 @@
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/DeleteSelf",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/developerconnectaccounts_test.go:52 TestDeveloperConnectAccountConnectors"
+        ]
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/DeleteUser",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/developerconnectaccounts_test.go:52 TestDeveloperConnectAccountConnectors"
+        ]
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/FetchAccessToken",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/developerconnectaccounts_test.go:52 TestDeveloperConnectAccountConnectors"
+        ]
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/FetchGitHubInstallations",
@@ -2117,18 +2126,24 @@
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/FetchSelf",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/developerconnectaccounts_test.go:52 TestDeveloperConnectAccountConnectors"
+        ]
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/FinishOAuth",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/developerconnectaccounts_test.go:52 TestDeveloperConnectAccountConnectors"
+        ]
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/GetAccountConnector",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/developerconnectaccounts_test.go:52 TestDeveloperConnectAccountConnectors"
+        ]
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/GetConnection",
@@ -2149,8 +2164,10 @@
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/ListAccountConnectors",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/developerconnectaccounts_test.go:52 TestDeveloperConnectAccountConnectors"
+        ]
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/ListConnections",
@@ -2169,18 +2186,24 @@
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/ListUsers",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/developerconnectaccounts_test.go:52 TestDeveloperConnectAccountConnectors"
+        ]
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/StartOAuth",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/developerconnectaccounts_test.go:52 TestDeveloperConnectAccountConnectors"
+        ]
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/UpdateAccountConnector",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/developerconnectaccounts_test.go:52 TestDeveloperConnectAccountConnectors"
+        ]
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/UpdateConnection",

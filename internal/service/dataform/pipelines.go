@@ -32,7 +32,7 @@ package dataform
 //     preparations as YAML (contents_yaml) whose format it does not
 //     document, so a YAML one fails with that reason.
 //
-// UNVERIFIED (2026-11-22), Google documenting none of them: the notebook
+// UNVERIFIED (re-read 2026-11-22: https://docs.cloud.google.com/dataform/reference/rest/v1/projects.locations.repositories.compilationResults), Google documenting none of them: the notebook
 // output object is gs://BUCKET/JOB_ID/FILE.ipynb; the snapshot is a gzipped
 // tar of the compiled files at DESTINATION/COMPILATION_ID.tar.gz; a single
 // file asset's action target; the job ID's form (Vertex AI's numeric IDs);

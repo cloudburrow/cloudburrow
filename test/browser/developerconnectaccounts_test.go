@@ -145,8 +145,8 @@ func TestDeveloperConnectAccountConnectorsThroughThePage(t *testing.T) {
 	if len(connected) != 1 || !strings.Contains(connected[0], "@") {
 		t.Fatalf("Users after connecting = %v", connected)
 	}
+	// The Users list is the page's one section, drawn without a tab.
 	p.navigate(connectorPath)
-	p.clickText(`#view [role="tab"]`, "Users")
 	p.waitFor(fmt.Sprintf(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q))`, connected[0]))
 
 	// Edit, by keyboard alone: Tab to it, Enter opens its form.

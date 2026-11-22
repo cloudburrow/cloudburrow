@@ -62,6 +62,9 @@ func studioSaveAs(p *tab, name string) {
 	p.setField("#bq-asset-name", name)
 	p.clickText(".modal .modal-actions button", "Save")
 	p.waitFor(`document.querySelector("#bq-asset-name") === null`)
+	// The dialog closes before the save answers: the selected tab takes the
+	// saved name once it has.
+	p.waitForWithin(fmt.Sprintf(`[...document.querySelectorAll("[role=tab].is-selected")].some((n) => n.textContent.includes(%q))`, name), time.Minute)
 }
 
 // studioWaitExecution waits for the execution shown in scope to finish and
@@ -166,7 +169,7 @@ func TestBigQueryStudioScheduledNotebookThroughThePage(t *testing.T) {
 	// Past executions lists the run.
 	p.clickText(".bq-sched-runs button", "Back to executions")
 	p.waitFor(`document.querySelectorAll(".bq-executions tbody tr").length >= 1`)
-	p.run(chromedp.KeyEvent(kb.Escape))
+	p.clickText(".modal button", "Close")
 	p.waitFor(`document.querySelector(".modal") === null`)
 
 	t.Run("keyboard", func(t *testing.T) {
@@ -243,7 +246,10 @@ func TestBigQueryStudioPipelineThroughThePage(t *testing.T) {
 		t.Fatalf("the run is %s: %s", state, studioTaskStates(p, ".bq-pl-runs"))
 	}
 	tasks := studioTaskStates(p, ".bq-pl-runs")
-	if strings.Count(tasks, "SUCCEEDED") != 2 || !strings.Contains(tasks, "Query") || !strings.Contains(tasks, "Notebook") {
+	// One row a task, each SUCCEEDED (a row may show the state twice).
+	rows := strings.Split(tasks, " | ")
+	if len(rows) != 2 || !strings.Contains(rows[0], "SUCCEEDED") || !strings.Contains(rows[1], "SUCCEEDED") || strings.Contains(tasks, "FAILED") ||
+		!strings.Contains(tasks, "Query") || !strings.Contains(tasks, "Notebook") {
 		t.Errorf("the run's tasks: %s", tasks)
 	}
 	if body := s.query(t, fmt.Sprintf("SELECT answer FROM `%s.%s.answer`", s.project, ds)); !strings.Contains(body, "42") {
@@ -343,8 +349,12 @@ func TestBigQueryStudioDataPreparationThroughThePage(t *testing.T) {
 		p.t = t
 		defer func() { p.t = parent }()
 		// The views' tabs move with the arrow keys; a step opens by Enter.
+		// ArrowLeft selects the tab before the selected one, wrapping.
+		var want string
+		p.eval(`(() => { const t = [...document.querySelectorAll(".bq-dataprep [role=tab]")]; const i = t.findIndex((n) => n.getAttribute("aria-selected") === "true");
+			return t[(i + t.length - 1) % t.length].textContent; })()`, &want)
 		p.run(chromedp.Focus(chromedp.CSS(`.bq-dataprep [role=tab][aria-selected=true]`)), chromedp.KeyEvent(kb.ArrowLeft))
-		p.waitFor(`document.querySelector(".bq-dataprep [role=tab][aria-selected=true]").textContent === "Schema"`)
+		p.waitFor(fmt.Sprintf(`document.querySelector(".bq-dataprep [role=tab][aria-selected=true]").textContent === %q`, want))
 		p.run(chromedp.Focus(chromedp.CSS(`.bq-dp-step`)), chromedp.KeyEvent(kb.Enter))
 		p.waitFor(`document.querySelector("#bq-dp-source") !== null`)
 		for _, fl := range p.keyboardFailures() {

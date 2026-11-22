@@ -110,8 +110,16 @@ func TestDataformUnitTestsAndSSHThroughThePage(t *testing.T) {
 	secret := "projects/" + project + "/secrets/df-ssh-key/versions/1"
 	p.navigate(repoPath)
 	p.clickText(`#view [role="tab"]`, "Git connection")
-	p.pageAction("Connect with Git", map[string]string{"url": "ssh://git@127.0.0.1:2222/r.git", "branch": "main", "auth": "ssh",
-		"sshSecret": secret, "hostKey": hostKey}, "")
+	// The authentication method is a radio group: SSH is chosen by clicking it.
+	p.clickText(p.findAction("Connect with Git"), "Connect with Git")
+	p.waitFor(`document.querySelector(".modal.is-open #f-auth-1") !== null`)
+	p.eval(`(() => { const r = document.querySelector(".modal.is-open #f-auth-1"); r.checked = true; r.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`, nil)
+	p.waitFor(`document.querySelector(".modal.is-open #f-auth").value === "ssh"`)
+	for id, v := range map[string]string{"url": "ssh://git@127.0.0.1:2222/r.git", "branch": "main", "sshSecret": secret, "hostKey": hostKey} {
+		p.setField(".modal.is-open #f-"+id, v)
+	}
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
+	p.waitFor(`document.querySelector(".modal.is-open") === null`)
 	if got := detail(repo); !strings.Contains(got, "SSH public host key value") || !strings.Contains(got, hostKey) || !strings.Contains(got, secret) {
 		t.Errorf("the Git connection reads %s", got)
 	}
@@ -137,10 +145,13 @@ func TestDataformUnitTestsAndSSHThroughThePage(t *testing.T) {
 	t.Run("WCAG", func(t *testing.T) {
 		auditScreens(t, []a11yPage{
 			{"Dataform unit test execution", invPath, `document.querySelector("#view tbody tr") !== null`, ""},
-			{"Dataform Connect with Git over SSH", repoPath, `document.querySelector("#view [role=tab]") !== null`,
+			{"Dataform Connect with Git over SSH", repoPath,
+				`[...document.querySelectorAll("#view [role=tab]")].some((b) => b.textContent.trim() === "Git connection")`,
 				`(() => { [...document.querySelectorAll("#view [role=tab]")].find((b) => b.textContent.trim() === "Git connection").click();
-				setTimeout(() => [...document.querySelectorAll("#view button")].find((b) => b.textContent.trim() === "Edit Git connection").click(), 300); })()`},
-			{"Dataform Start execution", wsPath, `document.querySelector("#view") !== null`,
+				const go = () => { const b = [...document.querySelectorAll("#view button")].find((b) => b.textContent.trim() === "Edit Git connection" && b.getClientRects().length);
+					if (b) b.click(); else setTimeout(go, 100); }; go(); })()`},
+			{"Dataform Start execution", wsPath,
+				`[...document.querySelectorAll("#view button")].some((b) => b.textContent.trim() === "Start execution")`,
 				`[...document.querySelectorAll("#view button")].find((b) => b.textContent.trim() === "Start execution").click()`},
 		})
 	})

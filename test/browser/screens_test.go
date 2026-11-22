@@ -238,7 +238,9 @@ func (p *tab) clickText(sel, text string) {
 	find := fmt.Sprintf(`[...document.querySelectorAll(%q)].find((n) => n.textContent.trim() === %q && n.getClientRects().length)`, sel, text)
 	p.waitFor(find + ` !== undefined`)
 	p.eval(fmt.Sprintf(`(() => { document.querySelectorAll("[data-cb-click]").forEach((n) => n.removeAttribute("data-cb-click"));
-		%s.setAttribute("data-cb-click", ""); return true; })()`, find), nil)
+		const n = %s; n.setAttribute("data-cb-click", "");
+		// Centred, so a fixed header never covers the point clicked.
+		n.scrollIntoView({ block: "center", inline: "nearest" }); return true; })()`, find), nil)
 	p.run(chromedp.Click(chromedp.CSS(`[data-cb-click]`)))
 }
 

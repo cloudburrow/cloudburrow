@@ -21773,6 +21773,8 @@ async function bqSchedulesDialog(asset, { notebook = true } = {}) {
     el("p", { class: "unavailable", text: "Dataform runs each schedule: a release configuration of the asset's main branch and a workflow configuration with its frequency." }),
     el("div", { class: "modal-actions" }, el("button", { type: "button", class: "secondary", text: "Close", onclick: () => close() }))));
   await draw();
+  // Focus moves into the dialog, on its first control.
+  dialog.querySelector("button, input, select, textarea, a[href]")?.focus();
   bqExecutionsList(runs, asset);
 }
 
@@ -21784,13 +21786,21 @@ async function bqSchedulesDialog(asset, { notebook = true } = {}) {
 function bqScheduleButton(tab, kind, opts = {}) {
   const asset = () => ({ id: tab.savedId, name: tab.title, kind, location: (BQ_FILES.find((e) => e.name === tab.savedId) || {}).location });
   const now = (v, dflt) => (typeof v === "function" ? v() : v === undefined ? dflt : v);
-  const why = !bqDataformOn() ? BQ_NO_DATAFORM : tab.savedId ? null : `Save the ${BQ_ASSET_KIND[kind]} first: a schedule runs its saved version.`;
+  const whyNow = () => (!bqDataformOn() ? BQ_NO_DATAFORM : tab.savedId ? null : `Save the ${BQ_ASSET_KIND[kind]} first: a schedule runs its saved version.`);
+  const why = whyNow();
   const m = bqMenu("Schedule", [
     { label: "Create schedule", disabled: !!why, title: why, run: () => bqScheduleDialog(asset(), { notebook: now(opts.notebook, true), defaults: now(opts.defaults, {}),
       title: kind === "notebook" ? "Schedule notebook" : `Schedule ${BQ_ASSET_KIND[kind]}` }) },
     { label: "View schedules", disabled: !!why, title: why, run: () => bqSchedulesDialog(asset(), { notebook: now(opts.notebook, true) }) },
   ]);
   bqMenuButton(m, "Schedule", why || "Schedule: create a schedule or view the schedules and their past executions");
+  // A save after the toolbar was drawn enables the items: they are
+  // re-read each time the menu opens.
+  m.addEventListener("click", () => {
+    const w = whyNow();
+    m.querySelectorAll(".bq-menu-item").forEach((b) => { b.disabled = !!w; b.title = w || ""; });
+    m.querySelector(".bq-menu-button").title = w || "Schedule: create a schedule or view the schedules and their past executions";
+  }, true);
   return m;
 }
 
@@ -21848,7 +21858,9 @@ function bqDataPrepEditor(doc, onChange, ctx, { idPrefix = "bq-dp" } = {}) {
   };
   const drawSteps = () => {
     const item = (key, text) => el("li", {}, el("button", { type: "button", class: "bq-dp-step" + (selected === key ? " is-selected" : ""),
-      "aria-pressed": selected === key ? "true" : "false", text, onclick: () => { selected = key; drawSteps(); drawForm(); } }));
+      "aria-pressed": selected === key ? "true" : "false", text,
+      // The steps are redrawn: focus stays on the chosen one.
+      onclick: () => { selected = key; drawSteps(); drawForm(); stepsHost.querySelector(".bq-dp-step.is-selected")?.focus(); } }));
     const mode = (BQ_WRITE_MODES.find(([v]) => v === doc.loadMode) || BQ_WRITE_MODES[0])[1];
     setChildren(stepsHost, item("source", `Source: ${doc.source || "choose a table"}`),
       ...doc.steps.map((s, i) => item(String(i), stepLabel(s))),
@@ -21920,7 +21932,10 @@ function bqDataPrepEditor(doc, onChange, ctx, { idPrefix = "bq-dp" } = {}) {
     const next = tabs[(at + (e.key === "ArrowRight" ? 1 : tabs.length - 1)) % tabs.length];
     if (next) { next.click(); viewTabs.querySelector(`[role=tab]:nth-child(${tabs.indexOf(next) + 1})`)?.focus(); }
   });
+  let drawn = 0;
   const drawView = async () => {
+    // A later draw (another view chosen while a sample loads) wins.
+    const mine = ++drawn;
     if (view === "graph") {
       const nodes = [`Source: ${doc.source || "?"}`, ...doc.steps.map(stepLabel), `Destination: ${doc.destination || "?"}`];
       return setChildren(viewHost, el("ol", { class: "bq-dp-graph", "aria-label": "Graph" }, ...nodes.map((n, i) => el("li", { class: "bq-dp-node" },
@@ -21930,13 +21945,16 @@ function bqDataPrepEditor(doc, onChange, ctx, { idPrefix = "bq-dp" } = {}) {
     setChildren(viewHost, spinner(view === "sqlx" ? "Generating the SQLX" : "Loading a sample"));
     try {
       const gen = await bqDfCall("dataprepsql", { content: JSON.stringify(doc) });
+      if (mine !== drawn) return;
       if (view === "sqlx") {
         return setChildren(viewHost, el("pre", { class: "mono bq-dp-sqlx", text: gen.sqlx || gen.sql }),
           gen.sqlxError ? el("p", { class: "form-error", text: gen.sqlxError }) : null,
           el("p", { class: "unavailable", text: "Kept as a Dataform data preparation (SQLX, Dataform core 3.1.6). Google keeps one as YAML whose format it does not document." }));
       }
       const res = await bqStudioCall("query", { query: gen.sql + "\n|> LIMIT 100", legacySql: false, priority: "INTERACTIVE" });
+      if (mine !== drawn) return;
       const cols = (res.schema || []).map((f) => f.name);
+      if (!cols.length) return setChildren(viewHost, el("p", { class: "unavailable", text: "The sample has no columns yet." }));
       if (view === "schema") {
         return setChildren(viewHost, el("table", { class: "bq-history-table" },
           el("thead", {}, el("tr", {}, ...["Field name", "Type", "Mode"].map((h) => el("th", { scope: "col", text: h })))),
@@ -21947,6 +21965,7 @@ function bqDataPrepEditor(doc, onChange, ctx, { idPrefix = "bq-dp" } = {}) {
           el("thead", {}, el("tr", {}, ...cols.map((h) => el("th", { scope: "col", text: h })))),
           el("tbody", {}, ...(res.rows || []).map((r) => el("tr", {}, ...cols.map((k) => el("td", { text: cellText(r[k]) }))))))));
     } catch (err) {
+      if (mine !== drawn) return;
       setChildren(viewHost, el("p", { class: "form-error", role: "alert", text: err.message }));
     }
   };
@@ -22021,7 +22040,8 @@ function bqPipelineTab(tab, ctx) {
     setChildren(graph, ...order.map(([t, i, lv]) => el("li", { class: "bq-pl-node", style: `margin-left:${lv * 24}px` },
       el("button", { type: "button", class: "bq-pl-task" + (selected === i ? " is-selected" : ""), "aria-pressed": selected === i ? "true" : "false",
         "aria-label": `${t.name}, ${BQ_TASK_TYPES[t.type]}${(t.runAfter || []).length ? ", runs after " + t.runAfter.join(", ") : ""}`,
-        onclick: () => { selected = i; drawGraph(); drawDetails(); } },
+        // The graph is redrawn: focus stays on the chosen task.
+        onclick: () => { selected = i; drawGraph(); drawDetails(); graph.querySelector(".bq-pl-task.is-selected")?.focus(); } },
         el("strong", { text: t.name }), el("span", { class: "unavailable", text: ` ${BQ_TASK_TYPES[t.type]}` }),
         (t.runAfter || []).length ? el("span", { class: "unavailable", text: ` · after ${t.runAfter.join(", ")}` }) : null))));
     if (!doc.tasks.length) graph.append(el("li", { class: "unavailable", text: "No tasks yet. Add task: Query, Notebook or Data preparation." }));
@@ -22029,7 +22049,7 @@ function bqPipelineTab(tab, ctx) {
   const drawDetails = () => {
     const t = doc.tasks[selected];
     if (!t) return setChildren(details, el("p", { class: "unavailable", text: "Choose a task to see its details." }));
-    const name = el("input", { type: "text", id: "bq-pl-name", value: t.name, pattern: "[A-Za-z0-9_-]+",
+    const name = el("input", { type: "text", id: "bq-pl-name", value: t.name, pattern: "[A-Za-z0-9_\\-]+",
       onchange: () => {
         const old = t.name;
         const v = name.value.trim();

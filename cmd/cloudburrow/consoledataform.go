@@ -274,9 +274,13 @@ func (p dataformProvider) repositoryDetail(ctx context.Context, s *dataform.Serv
 		}
 		gitGroup.Properties = append(gitGroup.Properties, console.Property{Label: "Token status", Value: dataformTokenStatus(ctx, s, name)})
 	}
-	gitActions := []console.Action{{ID: "connectgit", Label: "Connect with Git"}}
+	// The tab's actions carry their forms: a section action is run as it
+	// is drawn, so Connect with Git needs its fields here too.
+	connect := p.connectGitAction(repo)
+	gitActions := []console.Action{connect}
 	if git != nil {
-		gitActions = []console.Action{{ID: "connectgit", Label: "Edit Git connection"}, {ID: "disconnectgit", Label: "Disconnect", Destructive: true, ConfirmStyle: console.DeleteConfirmClick,
+		connect.Label = "Edit Git connection"
+		gitActions = []console.Action{connect, {ID: "disconnectgit", Label: "Disconnect", Destructive: true, ConfirmStyle: console.DeleteConfirmClick,
 			Confirm: "The repository goes back to Dataform's own Git repository; the remote keeps its commits."}}
 	}
 	return console.Detail{
