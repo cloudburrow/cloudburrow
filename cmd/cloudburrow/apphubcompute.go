@@ -17,7 +17,7 @@ import (
 // instance groups (zonal and regional, managed or not) as workloads. The
 // page writes only the global backend service URI; a regional backend
 // service is discovered at its regional path (UNVERIFIED: the page gives
-// no regional form).
+// no regional form; re-read 2026-11-22, https://docs.cloud.google.com/app-hub/docs/supported-resources).
 var hubComputeTypes = []struct {
 	coll     string
 	workload bool

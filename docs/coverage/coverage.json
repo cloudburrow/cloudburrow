@@ -14860,9 +14860,9 @@
     "Key": "compute",
     "Title": "Compute Engine API (v1): VPC networking",
     "counts": {
-      "Implemented": 261,
-      "Unimplemented": 110,
-      "Verified": 161
+      "Implemented": 288,
+      "Unimplemented": 97,
+      "Verified": 179
     },
     "rows": [
       {
@@ -14971,8 +14971,8 @@
       },
       {
         "method": "compute.backendBuckets.addSignedUrlKey",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.backendBuckets.aggregatedList",
@@ -14986,8 +14986,8 @@
       },
       {
         "method": "compute.backendBuckets.deleteSignedUrlKey",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.backendBuckets.get",
@@ -15021,8 +15021,8 @@
       },
       {
         "method": "compute.backendBuckets.setEdgeSecurityPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.backendBuckets.setIamPolicy",
@@ -15041,8 +15041,10 @@
       },
       {
         "method": "compute.backendServices.addSignedUrlKey",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computelb2160_test.go:337 TestCloudCDNCachesThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.backendServices.aggregatedList",
@@ -15058,8 +15060,10 @@
       },
       {
         "method": "compute.backendServices.deleteSignedUrlKey",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computelb2160_test.go:337 TestCloudCDNCachesThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.backendServices.get",
@@ -15070,8 +15074,10 @@
       },
       {
         "method": "compute.backendServices.getEffectiveSecurityPolicies",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computelb2160_test.go:198 TestCloudArmorBlocksRequestsThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.backendServices.getHealth",
@@ -15104,13 +15110,16 @@
       },
       {
         "method": "compute.backendServices.patch",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computelb2160_test.go:337 TestCloudCDNCachesThroughTheGoClient",
+          "test/compat/computelb2160_test.go:404 TestIAPGuardsALoadBalancerThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.backendServices.setEdgeSecurityPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.backendServices.setIamPolicy",
@@ -15119,8 +15128,10 @@
       },
       {
         "method": "compute.backendServices.setSecurityPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computelb2160_test.go:198 TestCloudArmorBlocksRequestsThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.backendServices.testIamPermissions",
@@ -16229,14 +16240,41 @@
         ]
       },
       {
+        "method": "compute.networkEdgeSecurityServices.aggregatedList",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.networkEdgeSecurityServices.delete",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.networkEdgeSecurityServices.get",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.networkEdgeSecurityServices.insert",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.networkEdgeSecurityServices.patch",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
         "method": "compute.networkEndpointGroups.aggregatedList",
         "status": "Implemented",
         "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.networkEndpointGroups.attachNetworkEndpoints",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computelb2160_test.go:198 TestCloudArmorBlocksRequestsThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.networkEndpointGroups.delete",
@@ -16255,8 +16293,10 @@
       },
       {
         "method": "compute.networkEndpointGroups.insert",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computelb2160_test.go:198 TestCloudArmorBlocksRequestsThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.networkEndpointGroups.list",
@@ -16530,8 +16570,8 @@
       },
       {
         "method": "compute.regionBackendServices.setSecurityPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.regionBackendServices.testIamPermissions",
@@ -16837,6 +16877,56 @@
         "tests": [
           "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
         ]
+      },
+      {
+        "method": "compute.regionSecurityPolicies.addRule",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionSecurityPolicies.delete",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionSecurityPolicies.get",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionSecurityPolicies.getRule",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionSecurityPolicies.insert",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionSecurityPolicies.list",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionSecurityPolicies.patch",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionSecurityPolicies.patchRule",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionSecurityPolicies.removeRule",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionSecurityPolicies.setLabels",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.regionSslCertificates.delete",
@@ -17247,6 +17337,86 @@
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
+        "method": "compute.securityPolicies.addRule",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computelb2160_test.go:198 TestCloudArmorBlocksRequestsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.securityPolicies.aggregatedList",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.securityPolicies.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computelb2160_test.go:198 TestCloudArmorBlocksRequestsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.securityPolicies.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computelb2160_test.go:198 TestCloudArmorBlocksRequestsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.securityPolicies.getRule",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computelb2160_test.go:198 TestCloudArmorBlocksRequestsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.securityPolicies.insert",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computelb2160_test.go:198 TestCloudArmorBlocksRequestsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.securityPolicies.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computelb2160_test.go:198 TestCloudArmorBlocksRequestsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.securityPolicies.listPreconfiguredExpressionSets",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computelb2160_test.go:198 TestCloudArmorBlocksRequestsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.securityPolicies.patch",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.securityPolicies.patchRule",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computelb2160_test.go:198 TestCloudArmorBlocksRequestsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.securityPolicies.removeRule",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computelb2160_test.go:198 TestCloudArmorBlocksRequestsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.securityPolicies.setLabels",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computelb2160_test.go:198 TestCloudArmorBlocksRequestsThroughTheGoClient"
+        ]
+      },
+      {
         "method": "compute.serviceAttachments.aggregatedList",
         "status": "Verified",
         "tests": [
@@ -17514,6 +17684,31 @@
         ]
       },
       {
+        "method": "compute.targetGrpcProxies.delete",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetGrpcProxies.get",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetGrpcProxies.insert",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetGrpcProxies.list",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetGrpcProxies.patch",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
         "method": "compute.targetHttpProxies.aggregatedList",
         "status": "Implemented",
         "note": "no official-SDK test proves it yet"
@@ -17586,8 +17781,8 @@
       },
       {
         "method": "compute.targetHttpsProxies.setCertificateMap",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.targetHttpsProxies.setQuicOverride",
@@ -17636,8 +17831,8 @@
       },
       {
         "method": "compute.targetInstances.setSecurityPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.targetInstances.testIamPermissions",
@@ -17701,8 +17896,8 @@
       },
       {
         "method": "compute.targetPools.setSecurityPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.targetPools.testIamPermissions",
@@ -17736,8 +17931,8 @@
       },
       {
         "method": "compute.targetSslProxies.setCertificateMap",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.targetSslProxies.setProxyHeader",
@@ -17827,8 +18022,10 @@
       },
       {
         "method": "compute.urlMaps.invalidateCache",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computelb2160_test.go:337 TestCloudCDNCachesThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.urlMaps.list",
@@ -21919,6 +22116,337 @@
         "tests": [
           "test/compat/vpcaccess2140_test.go:74 TestServerlessVPCAccessConnectorsThroughTheGoClient"
         ]
+      }
+    ]
+  },
+  {
+    "Key": "certificatemanager",
+    "Title": "Certificate Manager (v1)",
+    "counts": {
+      "Implemented": 10,
+      "Verified": 20
+    },
+    "rows": [
+      {
+        "method": "google.cloud.certificatemanager.v1.CertificateManager/CreateCertificate",
+        "status": "Verified",
+        "tests": [
+          "test/compat/certmanageriap2160_test.go:59 TestCertificateManagerThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "google.cloud.certificatemanager.v1.CertificateManager/CreateCertificateIssuanceConfig",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.certificatemanager.v1.CertificateManager/CreateCertificateMap",
+        "status": "Verified",
+        "tests": [
+          "test/compat/certmanageriap2160_test.go:59 TestCertificateManagerThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "google.cloud.certificatemanager.v1.CertificateManager/CreateCertificateMapEntry",
+        "status": "Verified",
+        "tests": [
+          "test/compat/certmanageriap2160_test.go:59 TestCertificateManagerThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "google.cloud.certificatemanager.v1.CertificateManager/CreateDnsAuthorization",
+        "status": "Verified",
+        "tests": [
+          "test/compat/certmanageriap2160_test.go:59 TestCertificateManagerThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "google.cloud.certificatemanager.v1.CertificateManager/CreateTrustConfig",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.certificatemanager.v1.CertificateManager/DeleteCertificate",
+        "status": "Verified",
+        "tests": [
+          "test/compat/certmanageriap2160_test.go:59 TestCertificateManagerThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "google.cloud.certificatemanager.v1.CertificateManager/DeleteCertificateIssuanceConfig",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.certificatemanager.v1.CertificateManager/DeleteCertificateMap",
+        "status": "Verified",
+        "tests": [
+          "test/compat/certmanageriap2160_test.go:59 TestCertificateManagerThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "google.cloud.certificatemanager.v1.CertificateManager/DeleteCertificateMapEntry",
+        "status": "Verified",
+        "tests": [
+          "test/compat/certmanageriap2160_test.go:59 TestCertificateManagerThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "google.cloud.certificatemanager.v1.CertificateManager/DeleteDnsAuthorization",
+        "status": "Verified",
+        "tests": [
+          "test/compat/certmanageriap2160_test.go:59 TestCertificateManagerThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "google.cloud.certificatemanager.v1.CertificateManager/DeleteTrustConfig",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.certificatemanager.v1.CertificateManager/GetCertificate",
+        "status": "Verified",
+        "tests": [
+          "test/compat/certmanageriap2160_test.go:59 TestCertificateManagerThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "google.cloud.certificatemanager.v1.CertificateManager/GetCertificateIssuanceConfig",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.certificatemanager.v1.CertificateManager/GetCertificateMap",
+        "status": "Verified",
+        "tests": [
+          "test/compat/certmanageriap2160_test.go:59 TestCertificateManagerThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "google.cloud.certificatemanager.v1.CertificateManager/GetCertificateMapEntry",
+        "status": "Verified",
+        "tests": [
+          "test/compat/certmanageriap2160_test.go:59 TestCertificateManagerThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "google.cloud.certificatemanager.v1.CertificateManager/GetDnsAuthorization",
+        "status": "Verified",
+        "tests": [
+          "test/compat/certmanageriap2160_test.go:59 TestCertificateManagerThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "google.cloud.certificatemanager.v1.CertificateManager/GetTrustConfig",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.certificatemanager.v1.CertificateManager/ListCertificateIssuanceConfigs",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.certificatemanager.v1.CertificateManager/ListCertificateMapEntries",
+        "status": "Verified",
+        "tests": [
+          "test/compat/certmanageriap2160_test.go:59 TestCertificateManagerThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "google.cloud.certificatemanager.v1.CertificateManager/ListCertificateMaps",
+        "status": "Verified",
+        "tests": [
+          "test/compat/certmanageriap2160_test.go:59 TestCertificateManagerThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "google.cloud.certificatemanager.v1.CertificateManager/ListCertificates",
+        "status": "Verified",
+        "tests": [
+          "test/compat/certmanageriap2160_test.go:59 TestCertificateManagerThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "google.cloud.certificatemanager.v1.CertificateManager/ListDnsAuthorizations",
+        "status": "Verified",
+        "tests": [
+          "test/compat/certmanageriap2160_test.go:59 TestCertificateManagerThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "google.cloud.certificatemanager.v1.CertificateManager/ListTrustConfigs",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.certificatemanager.v1.CertificateManager/UpdateCertificate",
+        "status": "Verified",
+        "tests": [
+          "test/compat/certmanageriap2160_test.go:59 TestCertificateManagerThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "google.cloud.certificatemanager.v1.CertificateManager/UpdateCertificateIssuanceConfig",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.certificatemanager.v1.CertificateManager/UpdateCertificateMap",
+        "status": "Verified",
+        "tests": [
+          "test/compat/certmanageriap2160_test.go:59 TestCertificateManagerThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "google.cloud.certificatemanager.v1.CertificateManager/UpdateCertificateMapEntry",
+        "status": "Verified",
+        "tests": [
+          "test/compat/certmanageriap2160_test.go:59 TestCertificateManagerThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "google.cloud.certificatemanager.v1.CertificateManager/UpdateDnsAuthorization",
+        "status": "Verified",
+        "tests": [
+          "test/compat/certmanageriap2160_test.go:59 TestCertificateManagerThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "google.cloud.certificatemanager.v1.CertificateManager/UpdateTrustConfig",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      }
+    ]
+  },
+  {
+    "Key": "iap",
+    "Title": "Identity-Aware Proxy (v1)",
+    "counts": {
+      "Implemented": 6,
+      "Verified": 13
+    },
+    "rows": [
+      {
+        "method": "google.cloud.iap.v1.IdentityAwareProxyAdminService/CreateTunnelDestGroup",
+        "status": "Verified",
+        "tests": [
+          "test/compat/certmanageriap2160_test.go:271 TestIdentityAwareProxyThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "google.cloud.iap.v1.IdentityAwareProxyAdminService/DeleteTunnelDestGroup",
+        "status": "Verified",
+        "tests": [
+          "test/compat/certmanageriap2160_test.go:271 TestIdentityAwareProxyThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "google.cloud.iap.v1.IdentityAwareProxyAdminService/GetIamPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/certmanageriap2160_test.go:271 TestIdentityAwareProxyThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "google.cloud.iap.v1.IdentityAwareProxyAdminService/GetIapSettings",
+        "status": "Verified",
+        "tests": [
+          "test/compat/certmanageriap2160_test.go:271 TestIdentityAwareProxyThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "google.cloud.iap.v1.IdentityAwareProxyAdminService/GetTunnelDestGroup",
+        "status": "Verified",
+        "tests": [
+          "test/compat/certmanageriap2160_test.go:271 TestIdentityAwareProxyThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "google.cloud.iap.v1.IdentityAwareProxyAdminService/ListTunnelDestGroups",
+        "status": "Verified",
+        "tests": [
+          "test/compat/certmanageriap2160_test.go:271 TestIdentityAwareProxyThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "google.cloud.iap.v1.IdentityAwareProxyAdminService/SetIamPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/certmanageriap2160_test.go:271 TestIdentityAwareProxyThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "google.cloud.iap.v1.IdentityAwareProxyAdminService/TestIamPermissions",
+        "status": "Verified",
+        "tests": [
+          "test/compat/certmanageriap2160_test.go:271 TestIdentityAwareProxyThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "google.cloud.iap.v1.IdentityAwareProxyAdminService/UpdateIapSettings",
+        "status": "Verified",
+        "tests": [
+          "test/compat/certmanageriap2160_test.go:271 TestIdentityAwareProxyThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "google.cloud.iap.v1.IdentityAwareProxyAdminService/UpdateTunnelDestGroup",
+        "status": "Verified",
+        "tests": [
+          "test/compat/certmanageriap2160_test.go:271 TestIdentityAwareProxyThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "google.cloud.iap.v1.IdentityAwareProxyAdminService/ValidateIapAttributeExpression",
+        "status": "Verified",
+        "tests": [
+          "test/compat/certmanageriap2160_test.go:271 TestIdentityAwareProxyThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "google.cloud.iap.v1.IdentityAwareProxyOAuthService/CreateBrand",
+        "status": "Verified",
+        "tests": [
+          "test/compat/certmanageriap2160_test.go:271 TestIdentityAwareProxyThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "google.cloud.iap.v1.IdentityAwareProxyOAuthService/CreateIdentityAwareProxyClient",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.iap.v1.IdentityAwareProxyOAuthService/DeleteIdentityAwareProxyClient",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.iap.v1.IdentityAwareProxyOAuthService/GetBrand",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.iap.v1.IdentityAwareProxyOAuthService/GetIdentityAwareProxyClient",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.iap.v1.IdentityAwareProxyOAuthService/ListBrands",
+        "status": "Verified",
+        "tests": [
+          "test/compat/certmanageriap2160_test.go:271 TestIdentityAwareProxyThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "google.cloud.iap.v1.IdentityAwareProxyOAuthService/ListIdentityAwareProxyClients",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.iap.v1.IdentityAwareProxyOAuthService/ResetIdentityAwareProxyClientSecret",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       }
     ]
   },
