@@ -383,6 +383,9 @@ compat_shard() {
       # Cloud Logging its log-based metrics read.
       # The Compute Engine API's VPC networking (#1936), in process,
       # beside Kubernetes Engine, whose cluster networks it checks.
+      # Load balancing round 2 (#2160): Cloud Armor, Cloud CDN and IAP
+      # through the local proxy, and Certificate Manager's and IAP's APIs on
+      # the Compute Engine port, all under COMPUTE.
       # Certificate Authority Service (#1834), in process like KMS.
       # Cloud KMS (#309) and Cloud Logging (#304). Resource Manager's tests
       # run in the storage shard; the Logging folder and organization tests
