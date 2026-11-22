@@ -2762,10 +2762,11 @@ tr.log-entry.is-located { outline: 2px solid var(--accent); outline-offset: -2px
 .bq-nb-count { color: var(--text-muted); min-width: 3ch; }
 .bq-nb-runtime { margin: 8px 0 0; }
 .bq-nb-stream, .bq-nb-error { margin: 4px 0; padding: 6px 8px; white-space: pre-wrap; word-break: break-word;
-  font-family: var(--mono); font-size: var(--text-caption-size); background: var(--surface-alt); border-radius: 4px; }
+  font-family: var(--mono); font-size: var(--text-caption-size); background: var(--surface-alt); border-radius: var(--radius-control); }
 .bq-nb-stream.is-stderr, .bq-nb-error { color: var(--error); }
 .bq-nb-image { display: block; max-width: 100%; height: auto; background: #fff; }
-.bq-nb-html { display: block; width: 100%; min-height: 60px; border: 1px solid var(--border); border-radius: 4px; background: #fff; }
+.bq-nb-html { display: block; width: 100%; min-height: 60px; border: 1px solid var(--border); border-radius: var(--radius-control); background: #fff; }
+.bq-nb-html-wrap { overflow-x: auto; }
 .bq-canvas-row, .bq-canvas-actions, .bq-files-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 6px 0; }
 .bq-canvas-row input[type="search"], .bq-canvas-row input[type="text"] { flex: 1 1 200px; min-width: 0; }
 .bq-canvas-found { list-style: none; padding: 0; margin: 4px 0; }
@@ -2777,7 +2778,7 @@ tr.log-entry.is-located { outline: 2px solid var(--accent); outline-offset: -2px
 .bq-canvas-assistant[hidden], .bq-canvas-settings[hidden] { display: none; }
 .bq-canvas-chat { list-style: none; padding: 0; margin: 8px 0; display: flex; flex-direction: column; gap: 6px; }
 .bq-canvas-msg.is-user { align-self: flex-end; }
-.bq-canvas-dest { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 12px; align-items: center; margin: 6px 0; }
+.bq-canvas-dest-fields { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 12px; align-items: center; margin: 6px 0; }
 .bq-canvas-stats { margin: 4px 0; padding-left: 20px; }
 .bq-canvas-flag { color: var(--text-muted); }
 .bq-canvas-summary { white-space: pre-wrap; }

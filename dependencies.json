@@ -1588,7 +1588,7 @@
     "consoleData": {
       "$comment": "Data embedded for the console and its backends, derived from openly licensed sources because Google publishes none.",
       "naturalEarthLand": {
-        "$comment": "BigQuery Studio's Map visualization base map (#2094): tools/naturalearth/land.py writes internal/console/assets/vendor/naturalearth/land-110m.json from ne_110m_land.geojson, a stand-in for Google's Google Maps base map, which a local instance does not reach (third_party/naturalearth/PROVENANCE.md).",
+        "$comment": "BigQuery Studio's Map visualization base map (#2094): tools/naturalearth/land.py writes internal/console/assets/vendor/naturalearth/land-110m.js from ne_110m_land.geojson, a stand-in for Google's Google Maps base map, which a local instance does not reach (third_party/naturalearth/PROVENANCE.md).",
         "version": "v5.1.2",
         "source": "https://github.com/nvkelso/natural-earth-vector",
         "license": "public domain (Natural Earth terms of use)",

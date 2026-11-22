@@ -47,28 +47,35 @@ func TestBigQueryStudioDataCanvasNodesThroughThePage(t *testing.T) {
 	}
 
 	p := open(t)
+	// press clicks a canvas button by script: the canvas is long, and a
+	// mouse click can land on the console's header drawn over it.
+	press := func(sel, text string) {
+		t.Helper()
+		p.waitFor(fmt.Sprintf(`[...document.querySelectorAll(%q)].some((b) => b.textContent.trim() === %q && !b.disabled)`, sel, text))
+		p.eval(fmt.Sprintf(`[...document.querySelectorAll(%q)].find((b) => b.textContent.trim() === %q && !b.disabled).click(); true`, sel, text), nil)
+	}
 	p.navigate("/bigquery-studio" + q)
 	p.waitFor(`document.querySelector(".bq-home") !== null && document.querySelector(".bq-tree") !== null`)
 	p.clickText(".bq-home-action", "Data canvas")
 	p.waitFor(`document.querySelector(".bq-canvas") !== null`)
-	p.clickText(".bq-canvas .bq-toolbar button", "SQL")
+	press(".bq-canvas .bq-toolbar button", "SQL")
 	p.setField(".bq-canvas-sql textarea", "SELECT 'a' AS k, 'x' AS g, 1 AS v UNION ALL SELECT 'b', 'x', 2 UNION ALL SELECT 'c', 'y', 3")
-	p.clickText(".bq-canvas-sql .bq-canvas-actions button", "Run")
+	press(".bq-canvas-sql .bq-canvas-actions button", "Run")
 	p.waitFor(`[...document.querySelectorAll(".bq-canvas-sql td")].some((c) => c.textContent === "c")`)
 
 	// Destination: a new dataset and table, saved and read back.
-	p.clickText(".bq-canvas-sql .bq-canvas-actions button", "Save to table")
+	press(".bq-canvas-sql .bq-canvas-actions button", "Save to table")
 	p.waitFor(`document.querySelector(".bq-canvas-dest") !== null`)
-	p.setField(".bq-canvas-dest input[id$='-ds']", ds)
-	p.setField(".bq-canvas-dest input[id$='-tb']", "letters")
-	p.clickText(".bq-canvas-dest button", "Save")
+	p.setField(".bq-canvas-dest-fields input[id$='-ds']", ds)
+	p.setField(".bq-canvas-dest-fields input[id$='-tb']", "letters")
+	press(".bq-canvas-dest button", "Save")
 	p.waitForWithin(`document.querySelector(".bq-canvas-dest [role=status]").textContent.startsWith("Saved to")`, time.Minute)
 	if body := rows(fmt.Sprintf("SELECT SUM(v) AS s FROM `%s.%s.letters`", project, ds)); !strings.Contains(body, `"6"`) && !strings.Contains(body, `:6`) {
 		t.Errorf("the Destination's table reads back as %s", body)
 	}
 	// The SQL toggle is on: a re-run of the SQL node rewrites the table.
 	p.setField(".bq-canvas-sql textarea", "SELECT 'a' AS k, 'x' AS g, 10 AS v")
-	p.clickText(".bq-canvas-sql .bq-canvas-actions button", "Run")
+	press(".bq-canvas-sql .bq-canvas-actions button", "Run")
 	ok := false
 	for deadline := time.Now().Add(time.Minute); time.Now().Before(deadline); time.Sleep(500 * time.Millisecond) {
 		if body := rows(fmt.Sprintf("SELECT SUM(v) AS s FROM `%s.%s.letters`", project, ds)); strings.Contains(body, `"10"`) || strings.Contains(body, `:10`) {
@@ -80,12 +87,12 @@ func TestBigQueryStudioDataCanvasNodesThroughThePage(t *testing.T) {
 		t.Error("the Destination's table did not follow its SQL node's run")
 	}
 	p.setField(".bq-canvas-sql textarea", "SELECT 'a' AS k, 'x' AS g, 1 AS v UNION ALL SELECT 'b', 'x', 2 UNION ALL SELECT 'c', 'y', 3")
-	p.clickText(".bq-canvas-sql .bq-canvas-actions button", "Run")
+	press(".bq-canvas-sql .bq-canvas-actions button", "Run")
 	p.waitFor(`[...document.querySelectorAll(".bq-canvas-sql td")].some((c) => c.textContent === "c")`)
 
 	// Insights: the result's statistics.
-	p.clickText(".bq-canvas-sql .bq-canvas-actions button", "Generate insights")
-	p.clickText(".bq-canvas-node.bq-canvas-insights button", "Run")
+	press(".bq-canvas-sql .bq-canvas-actions button", "Generate insights")
+	press(".bq-canvas-node.bq-canvas-insights button", "Run")
 	p.waitForWithin(`(() => { const n = document.querySelector(".bq-canvas-node.bq-canvas-insights"); return n && n.textContent.includes("3 rows, 3 columns") && n.textContent.includes("3 distinct"); })()`, time.Minute)
 	var insight string
 	p.eval(`document.querySelector(".bq-canvas-node.bq-canvas-insights").textContent`, &insight)
@@ -95,7 +102,7 @@ func TestBigQueryStudioDataCanvasNodesThroughThePage(t *testing.T) {
 
 	// Visualization: Auto-Chart picks the pie of three categories; Heat
 	// map and Pie draw.
-	p.clickText(".bq-canvas-sql .bq-canvas-actions button", "Visualize")
+	press(".bq-canvas-sql .bq-canvas-actions button", "Visualize")
 	p.waitFor(`document.querySelector(".bq-canvas-viz svg.bq-chart") !== null`)
 	var label string
 	p.eval(`document.querySelector(".bq-canvas-viz svg.bq-chart").getAttribute("aria-label")`, &label)
@@ -111,17 +118,17 @@ func TestBigQueryStudioDataCanvasNodesThroughThePage(t *testing.T) {
 	}
 
 	// Detach: the Destination becomes a table node of its table.
-	p.clickText(".bq-canvas-dest button", "Detach")
+	press(".bq-canvas-dest button", "Detach")
 	p.waitFor(fmt.Sprintf(`[...document.querySelectorAll(".bq-canvas-table .mono")].some((n) => n.textContent === %q)`, project+"."+ds+".letters"))
 
 	// The Data Canvas Assistant: Settings, then a question.
-	p.clickText(".bq-canvas .bq-toolbar button", "Open Data Canvas Assistant")
+	press(".bq-canvas .bq-toolbar button", "Open Data Canvas Assistant")
 	p.waitFor(`!document.querySelector(".bq-canvas-assistant").hidden`)
-	p.clickText(".bq-canvas-assistant button", "Settings")
+	press(".bq-canvas-assistant button", "Settings")
 	p.waitFor(`document.querySelector("#bq-ca-instructions") !== null`)
 	p.setField("#bq-ca-instructions", "Use GoogleSQL.")
 	p.setField("#bq-ca-question", "How many letters are there?")
-	p.clickText(".bq-canvas-assistant button", "Send")
+	press(".bq-canvas-assistant button", "Send")
 	p.waitForWithin(`document.querySelectorAll(".bq-canvas-msg.is-assistant").length === 1`, 3*time.Minute)
 	var reply string
 	p.eval(`document.querySelector(".bq-canvas-msg.is-assistant").textContent`, &reply)
@@ -146,18 +153,19 @@ func TestBigQueryStudioDataCanvasNodesThroughThePage(t *testing.T) {
 	}
 
 	// Export as notebook: a notebook tab with the SQL as a %%bigquery cell.
-	p.clickText(".bq-canvas-sql .bq-canvas-actions button", "Export as notebook")
+	press(".bq-canvas-sql .bq-canvas-actions button", "Export as notebook")
 	p.waitFor(`document.querySelector(".bq-notebook") !== null && document.querySelector(".bq-nb-source").value.startsWith("%%bigquery\nSELECT 'a'")`)
 	p.eval(`[...document.querySelectorAll(".bq-tabs .tab")].find((b) => b.textContent.includes("canvas")).click(); true`, nil)
 
 	// Clear canvas, confirmed.
 	p.waitFor(`document.querySelector(".bq-canvas") !== null`)
-	p.clickText(".bq-canvas .bq-toolbar button", "Clear canvas")
+	press(".bq-canvas .bq-toolbar button", "Clear canvas")
 	p.waitFor(`document.querySelector(".modal") !== null`)
-	p.clickText(".modal .modal-actions button", "Clear")
+	press(".modal .modal-actions button", "Clear")
 	p.waitFor(`document.querySelectorAll(".bq-canvas-node").length === 0`)
 
 	// The Map's base map: Natural Earth's land under the features.
+	p.eval(`window.scrollTo(0, 0); document.querySelectorAll(".bq-workspace, #main, main").forEach((n) => { n.scrollTop = 0; }); true`, nil)
 	p.clickText(".bq-new-query", "SQL query")
 	p.setField(".bq-editor", "SELECT 'here' AS name, ST_GEOGPOINT(-122.08, 37.42) AS loc")
 	p.clickText(".bq-toolbar button", "Run")
@@ -189,25 +197,53 @@ func TestBigQueryStudioNotebookRuntimeThroughThePage(t *testing.T) {
 	}
 	project := servedProject(t)
 	q := "?project=" + url.QueryEscape(project)
-	p := open(t)
+	p := openWithin(t, 30*time.Minute)
+	press := func(sel, text string) {
+		t.Helper()
+		p.waitFor(fmt.Sprintf(`[...document.querySelectorAll(%q)].some((b) => b.textContent.trim() === %q && !b.disabled && !b.hidden)`, sel, text))
+		p.eval(fmt.Sprintf(`[...document.querySelectorAll(%q)].find((b) => b.textContent.trim() === %q && !b.disabled && !b.hidden).click(); true`, sel, text), nil)
+	}
 	p.navigate("/bigquery-studio" + q)
 	p.waitFor(`document.querySelector(".bq-home") !== null && document.querySelector(".bq-tree") !== null`)
 	p.clickText(".bq-home-action", "Notebook")
 	p.waitFor(`document.querySelector(".bq-notebook") !== null && document.querySelector(".bq-nb-runtime").textContent !== ""`)
-	p.clickText(".bq-notebook .bq-toolbar button", "Connect")
+	// runtimeContainers are the notebook runtimes' containers on this
+	// host; ours are the ones Connect adds.
+	runtimeContainers := func() map[string]bool {
+		out, _ := exec.Command("docker", "ps", "-a", "--filter", "name=cb-nb-", "--format", "{{.Names}}").CombinedOutput()
+		m := map[string]bool{}
+		for _, name := range strings.Fields(string(out)) {
+			m[name] = true
+		}
+		return m
+	}
+	before := runtimeContainers()
+	press(".bq-notebook .bq-toolbar button", "Connect")
 	p.waitForWithin(`document.querySelector(".bq-nb-runtime").textContent.startsWith("Connected") || document.querySelector(".bq-nb-runtime").className.includes("form-error")`, 20*time.Minute)
 	var status string
 	p.eval(`document.querySelector(".bq-nb-runtime").textContent`, &status)
 	if !strings.HasPrefix(status, "Connected to a runtime: Python 3.12") {
 		t.Fatalf("Connect: %q", status)
 	}
+	ours := map[string]bool{}
+	for name := range runtimeContainers() {
+		if !before[name] {
+			ours[name] = true
+		}
+	}
+	if len(ours) != 2 {
+		t.Errorf("Connect started %v, want the runtime and its relay", ours)
+	}
 
 	cell := func(code string) string {
 		t.Helper()
-		p.clickText(".bq-notebook .bq-toolbar button", "+ Code")
+		press(".bq-notebook .bq-toolbar button", "+ Code")
 		p.setField(".bq-nb-cell:last-child .bq-nb-source", code)
-		p.clickText(".bq-nb-cell:last-child button", "Run cell")
-		p.waitForWithin(`(() => { const o = document.querySelector(".bq-nb-cell:last-child .bq-nb-output"); return o.children.length > 0 && !o.querySelector(".spinner"); })()`, 3*time.Minute)
+		press(".bq-nb-cell:last-child button", "Run cell")
+		// Done when the cell shows its execution count (a cell may print
+		// nothing) or an error.
+		p.waitForWithin(`(() => { const c = document.querySelector(".bq-nb-cell:last-child");
+			return !c.querySelector(".bq-nb-output .spinner") && (/\[\d+\]/.test(c.querySelector(".bq-nb-count").textContent) || c.querySelector(".bq-nb-output .form-error") !== null); })()`, 3*time.Minute)
 		var out string
 		p.eval(`document.querySelector(".bq-nb-cell:last-child .bq-nb-output").textContent`, &out)
 		return out
@@ -238,15 +274,15 @@ func TestBigQueryStudioNotebookRuntimeThroughThePage(t *testing.T) {
 	}
 
 	// Interrupt execution stops a long cell.
-	p.clickText(".bq-notebook .bq-toolbar button", "+ Code")
+	press(".bq-notebook .bq-toolbar button", "+ Code")
 	p.setField(".bq-nb-cell:last-child .bq-nb-source", "import time\ntime.sleep(120)")
-	p.clickText(".bq-nb-cell:last-child button", "Run cell")
+	press(".bq-nb-cell:last-child button", "Run cell")
 	time.Sleep(2 * time.Second)
-	p.clickText(".bq-notebook .bq-toolbar button", "Interrupt execution")
+	press(".bq-notebook .bq-toolbar button", "Interrupt execution")
 	p.waitForWithin(`document.querySelector(".bq-nb-cell:last-child .bq-nb-output").textContent.includes("KeyboardInterrupt")`, time.Minute)
 
 	// The notebook's controls by keyboard: Shift+Enter runs a cell.
-	p.clickText(".bq-notebook .bq-toolbar button", "+ Code")
+	press(".bq-notebook .bq-toolbar button", "+ Code")
 	p.setField(".bq-nb-cell:last-child .bq-nb-source", "'by ' + 'keyboard'")
 	p.run(chromedp.Focus(chromedp.CSS(".bq-nb-cell:last-child .bq-nb-source")), chromedp.KeyEvent(kb.Enter, chromedp.KeyModifiers(chromedp.ModifierShift)))
 	p.waitForWithin(`document.querySelector(".bq-nb-cell:last-child .bq-nb-output").textContent.includes("by keyboard")`, time.Minute)
@@ -261,20 +297,19 @@ func TestBigQueryStudioNotebookRuntimeThroughThePage(t *testing.T) {
 	}
 
 	// Restart session: a new kernel, x gone.
-	p.clickText(".bq-notebook .bq-toolbar button", "Restart session")
+	press(".bq-notebook .bq-toolbar button", "Restart session")
 	p.waitForWithin(`document.querySelector(".bq-nb-runtime").textContent.startsWith("Connected")`, 3*time.Minute)
 	if out := cell("x"); !strings.Contains(out, "NameError") {
 		t.Errorf("after Restart session, x shows %q", out)
 	}
 
 	// Disconnect and delete runtime: its containers are gone.
-	p.clickText(".bq-notebook .bq-toolbar button", "Disconnect and delete runtime")
+	press(".bq-notebook .bq-toolbar button", "Disconnect and delete runtime")
 	p.waitFor(`document.querySelector(".bq-nb-runtime").textContent === "Not connected."`)
-	if out, err := exec.Command("docker", "ps", "-a", "--filter", "name=cb-nb-", "--format", "{{.Names}}").CombinedOutput(); err == nil {
-		for _, name := range strings.Fields(string(out)) {
-			if strings.Contains(name, "tab-") {
-				t.Errorf("container %s outlived Disconnect and delete runtime", name)
-			}
+	after := runtimeContainers()
+	for name := range ours {
+		if after[name] {
+			t.Errorf("container %s outlived Disconnect and delete runtime", name)
 		}
 	}
 }

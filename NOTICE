@@ -172,7 +172,7 @@ Creative Commons Attribution 3.0 licence; the sources' digests are in
 third_party/ssm-templates/.
 
 The binary embeds the base map of BigQuery Studio's Map visualization
-(internal/console/assets/vendor/naturalearth/land-110m.json), derived from
+(internal/console/assets/vendor/naturalearth/land-110m.js), derived from
 Natural Earth's 1:110m land (https://github.com/nvkelso/natural-earth-vector,
 v5.1.2), which is in the public domain. Made with Natural Earth; the source's
 digest is in third_party/naturalearth/.

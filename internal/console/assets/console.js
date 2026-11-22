@@ -21190,7 +21190,7 @@ function bqHomeTab(ctx) {
     title: why, "aria-description": why, onclick: why ? null : run,
   });
   const notebook = bqDataformOn() ? null : BQ_NO_DATAFORM;
-  const spark = "Not available locally: an Apache Spark notebook runs on Serverless for Apache Spark, which CloudBurrow does not run.";
+  const spark = "Not available locally: an Apache Spark notebook's session is a Spark Connect session of Serverless for Apache Spark, which CloudBurrow does not serve.";
   // A dataset chooser for Create new's Table and Add your own data's
   // Load from a file, which act on a dataset.
   // The datasets arrive with the Explorer, after the tab is drawn: refresh
@@ -21229,8 +21229,8 @@ function bqHomeTab(ctx) {
         action("Notebook", () => ctx.openAsset("notebook", bqNotebookDoc([])), notebook),
         action("Apache Spark notebook", null, spark),
         action("Data canvas", () => ctx.openAsset("data_canvas", ""), notebook),
-        action("Data preparation", null, "Not available locally: data preparation files are Dataform's, which CloudBurrow's Dataform does not run."),
-        action("Pipeline", null, "Not available locally: pipelines are Dataform's, which Studio does not yet reach (#2105)."),
+        action("Data preparation", null, "Not available locally: a data preparation is a Dataform action, which CloudBurrow's Dataform does not run (#2105)."),
+        action("Pipeline", null, "Not available locally: a pipeline's tasks are a Dataform repository's definitions/actions.yaml, which CloudBurrow's Dataform does not compile (#2105)."),
         tableButton),
       dsLabel),
     card("Recent",
@@ -21528,11 +21528,19 @@ function bqNotebookOutputs(outputs) {
     const img = ["image/png", "image/jpeg", "image/gif"].find((k) => data[k]);
     if (img) return el("img", { class: "bq-nb-image", src: `data:${img};base64,${text(data[img]).replace(/\s+/g, "")}`, alt: text(data["text/plain"]) || "Cell output image" });
     if (data["text/html"]) {
-      const frame = el("iframe", { class: "bq-nb-html", sandbox: "allow-same-origin", title: "Cell output", referrerpolicy: "no-referrer" });
+      // Not a Tab stop: the frame is drawn at its content's full size, so
+      // there is nothing in it to scroll or reach.
+      const frame = el("iframe", { class: "bq-nb-html", sandbox: "allow-same-origin", title: "Cell output", referrerpolicy: "no-referrer", tabindex: "-1" });
       frame.srcdoc = `<!doctype html><meta charset="utf-8"><style>body{font:13px/1.4 Roboto,Arial,sans-serif;margin:4px;color:#202124;background:#fff}` +
         `table{border-collapse:collapse}th,td{border:1px solid #dadce0;padding:2px 6px;text-align:right}</style>${text(data["text/html"])}`;
-      frame.addEventListener("load", () => { try { frame.style.height = Math.min(480, frame.contentDocument.body.scrollHeight + 16) + "px"; } catch { /* sandboxed */ } });
-      return el("div", {}, frame, el("details", {}, el("summary", { text: "Text" }), el("pre", { class: "bq-nb-stream", text: text(data["text/plain"]) })));
+      frame.addEventListener("load", () => {
+        try {
+          const body = frame.contentDocument.body;
+          frame.style.height = (body.scrollHeight + 16) + "px";
+          frame.style.width = Math.max(frame.parentElement.clientWidth, body.scrollWidth + 16) + "px";
+        } catch { /* sandboxed */ }
+      });
+      return el("div", { class: "bq-nb-html-wrap" }, frame, el("details", {}, el("summary", { text: "Text" }), el("pre", { class: "bq-nb-stream", text: text(data["text/plain"]) })));
     }
     return el("pre", { class: "bq-nb-stream", text: text(data["text/plain"] || data["text/markdown"] || JSON.stringify(data)) });
   });
@@ -21542,7 +21550,9 @@ function bqNotebookTab(tab, ctx) {
   let doc;
   try { doc = JSON.parse(tab.query || ""); } catch { doc = JSON.parse(bqNotebookDoc([])); }
   if (!Array.isArray(doc.cells)) doc.cells = [];
-  if (!tab.runtimeKey) tab.runtimeKey = tab.savedId || `tab-${tab.id}`;
+  // The runtime's key: the saved notebook's, or one of its own, never the
+  // tab's number, which another browser's tab reuses.
+  if (!tab.runtimeKey) tab.runtimeKey = tab.savedId || `nb-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   const key = tab.runtimeKey;
   const text = (c) => (Array.isArray(c.source) ? c.source.join("") : String(c.source || ""));
   const keep = () => { tab.query = JSON.stringify(doc, null, 1); ctx.save(); };
@@ -21584,6 +21594,7 @@ function bqNotebookTab(tab, ctx) {
   interruptBtn.addEventListener("click", () => bqRuntimeCall("interrupt", key).then(() => announce("Interrupted")).catch((err) => notify(err.message, "error")));
   restartBtn.addEventListener("click", async () => {
     try {
+      showRuntime({ state: "STARTING", message: "Restarting the session…" });
       showRuntime(await bqRuntimeCall("restart", key));
       await connect();
       for (const c of doc.cells) if (c.cell_type === "code") c.execution_count = null;
@@ -21592,7 +21603,8 @@ function bqNotebookTab(tab, ctx) {
     } catch (err) { showRuntime({ state: "FAILED", message: err.message }); }
   });
   deleteBtn.addEventListener("click", async () => {
-    try { await bqRuntimeCall("disconnect", key); showRuntime({ state: "DISCONNECTED" }); announce("Runtime deleted"); } catch (err) { notify(err.message, "error"); }
+    showRuntime({ state: "STARTING", message: "Deleting the runtime…" });
+    try { await bqRuntimeCall("disconnect", key); showRuntime({ state: "DISCONNECTED" }); announce("Runtime deleted"); } catch (err) { showRuntime({ state: "FAILED", message: err.message }); }
   });
   const runCell = async (c, out, label) => {
     if (c.cell_type !== "code") return true;
@@ -21911,7 +21923,7 @@ function bqCanvasTab(tab, ctx) {
       const sync = el("input", { type: "checkbox", id: `${id}-sync`, role: "switch" });
       sync.checked = !!n.sync;
       sync.addEventListener("change", () => { n.sync = sync.checked; keep(); });
-      body.push(el("div", { class: "bq-canvas-dest" },
+      body.push(el("div", { class: "bq-canvas-dest-fields" },
         el("label", { for: `${id}-ds`, text: "Dataset (new or existing)" }), ds, dsList,
         el("label", { for: `${id}-tb`, text: "Table (new or existing)" }), tb, tbList),
         el("div", { class: "bq-canvas-row" },
@@ -22108,13 +22120,22 @@ function bqRememberClosed(t) {
 // latitude, with a graticule, over a base map of the world's land. Google
 // draws a Google Maps base map, which CloudBurrow does not reach; this one
 // is Natural Earth's public-domain 1:110m land
-// (/vendor/naturalearth/land-110m.json, third_party/naturalearth). Google's
+// (/vendor/naturalearth/land-110m.js, third_party/naturalearth). Google's
 // limits apply: 20,000 features, 1,000,000 vertices.
 
 let BQ_LAND = null;
 // bqLand is the base map's land rings, fetched once.
 function bqLand() {
-  if (!BQ_LAND) BQ_LAND = fetch("/vendor/naturalearth/land-110m.json").then((r) => (r.ok ? r.json() : { rings: [] })).then((j) => j.rings || []).catch(() => []);
+  if (!BQ_LAND) {
+    BQ_LAND = new Promise((resolve) => {
+      if (window.CB_NATURAL_EARTH_LAND) { resolve(window.CB_NATURAL_EARTH_LAND); return; }
+      const tag = document.createElement("script");
+      tag.src = "/vendor/naturalearth/land-110m.js";
+      tag.onload = () => resolve(window.CB_NATURAL_EARTH_LAND || []);
+      tag.onerror = () => { BQ_LAND = null; resolve([]); };
+      document.head.append(tag);
+    });
+  }
   return BQ_LAND;
 }
 
