@@ -259,8 +259,11 @@ func TestMemorystoreRedisClusterTokenAuthBackups(t *testing.T) {
 		t.Errorf("GetBackup of a deleted backup = %v, want NOT_FOUND", err)
 	}
 	if _, err := c.UpdateCluster(h.Context(), &clusterpb.UpdateClusterRequest{UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"cross_cluster_replication_config"}},
-		Cluster: &clusterpb.Cluster{Name: name}}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("UpdateCluster cross_cluster_replication_config = %v, want UNIMPLEMENTED", err)
+		Cluster: &clusterpb.Cluster{Name: name, CrossClusterReplicationConfig: &clusterpb.CrossClusterReplicationConfig{
+			ClusterRole: clusterpb.CrossClusterReplicationConfig_PRIMARY}}}); status.Code(err) != codes.InvalidArgument {
+		// Served since #1577: a cluster in no replication is made a
+		// primary only by creating a secondary of it.
+		t.Errorf("UpdateCluster cross_cluster_replication_config PRIMARY of an unreplicated cluster = %v, want INVALID_ARGUMENT", err)
 	}
 	// Detach the policy so it can be deleted.
 	upd, err := c.UpdateCluster(h.Context(), &clusterpb.UpdateClusterRequest{UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"acl_policy"}},
@@ -449,7 +452,9 @@ func TestMemorystoreValkeyTokenAuthBackups(t *testing.T) {
 	}
 	if _, err := c.CreateInstance(h.Context(), &memorystorepb.CreateInstanceRequest{Parent: parent, InstanceId: fmt.Sprintf("compat-vkccr-%d", sfx),
 		Instance: &memorystorepb.Instance{ShardCount: 1, CrossInstanceReplicationConfig: &memorystorepb.CrossInstanceReplicationConfig{
-			InstanceRole: memorystorepb.CrossInstanceReplicationConfig_SECONDARY}}}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("CreateInstance with cross-instance replication = %v, want UNIMPLEMENTED", err)
+			InstanceRole: memorystorepb.CrossInstanceReplicationConfig_SECONDARY}}}); status.Code(err) != codes.InvalidArgument {
+		// Served in CLUSTER mode since #1577: a secondary with no
+		// primary_instance is INVALID_ARGUMENT.
+		t.Errorf("CreateInstance of a secondary without primary_instance = %v, want INVALID_ARGUMENT", err)
 	}
 }

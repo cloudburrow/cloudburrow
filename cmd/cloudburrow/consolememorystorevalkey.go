@@ -170,8 +170,7 @@ func (valkeyProvider) CreateForm() (string, []console.Field) {
 		console.Field{Name: "restoreBackup", Label: "Restore from backup", Type: "text", Section: msSectionAdvanced,
 			Help: "Optional. projects/{project}/locations/{location}/backupCollections/{collection}/backups/{backup}: the instance starts with its keys."},
 		console.Field{Name: "primaryInstance", Label: "Secondary of (cross-instance replication)", Type: "text", Section: msSectionAdvanced,
-			ShowWhen: "mode=CLUSTER_DISABLED",
-			Help:     "Optional. projects/{project}/locations/{location}/instances/{instance}: the instance replicates that primary and is read-only."})
+			Help: "Optional. projects/{project}/locations/{location}/instances/{instance}, of the same mode: the instance replicates that primary and is read-only; in Cluster mode it takes the primary's shard count and version."})
 	return "Create instance", fields
 }
 
@@ -511,12 +510,10 @@ func valkeySourceAddr(src *memorystorepb.SelfManagedSource) string {
 	return net.JoinHostPort(src.GetIpAddress(), strconv.Itoa(int(src.GetPort())))
 }
 
-// valkeyReplicationActions are a CLUSTER_DISABLED instance's (#1557):
-// a secondary's Switchover and Detach; a migration's Start and Finish.
+// valkeyReplicationActions are a secondary's Switchover and Detach, in
+// either mode (CLUSTER mode since #1577), and a CLUSTER_DISABLED
+// instance's migration Start and Finish (#1557).
 func valkeyReplicationActions(i *memorystorepb.Instance) []console.Action {
-	if i.GetMode() != memorystorepb.Instance_CLUSTER_DISABLED {
-		return nil
-	}
 	var out []console.Action
 	role := i.GetCrossInstanceReplicationConfig().GetInstanceRole()
 	switch {
@@ -524,6 +521,7 @@ func valkeyReplicationActions(i *memorystorepb.Instance) []console.Action {
 		out = append(out,
 			console.Action{ID: "switchover", Label: "Switchover", Confirm: "This instance becomes the primary, writable; its primary and the other secondaries replicate it."},
 			console.Action{ID: "detach-replication", Label: "Detach", Destructive: true, Confirm: "This instance stops replicating its primary and becomes writable."})
+	case i.GetMode() != memorystorepb.Instance_CLUSTER_DISABLED:
 	case i.GetState() == memorystorepb.Instance_MIGRATING:
 		out = append(out, console.Action{ID: "finish-migration", Label: "Finish migration",
 			Confirm: "The instance stops replicating the source and becomes writable."})

@@ -7588,7 +7588,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudmemorystorebackups_test.go:29 TestGcloudMemorystoreTokenAuthBackups",
-          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
+          "test/compat/memorystoreclusterauth_test.go:296 TestMemorystoreValkeyTokenAuthBackups"
         ]
       },
       {
@@ -7596,7 +7596,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudmemorystorebackups_test.go:29 TestGcloudMemorystoreTokenAuthBackups",
-          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
+          "test/compat/memorystoreclusterauth_test.go:296 TestMemorystoreValkeyTokenAuthBackups"
         ]
       },
       {
@@ -7605,7 +7605,7 @@
         "tests": [
           "test/compat/gcloudmemorystorebackups_test.go:29 TestGcloudMemorystoreTokenAuthBackups",
           "test/compat/memorystore1557_test.go:272 TestMemorystoreValkeyKmsKey",
-          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
+          "test/compat/memorystoreclusterauth_test.go:296 TestMemorystoreValkeyTokenAuthBackups"
         ]
       },
       {
@@ -7630,8 +7630,9 @@
           "test/compat/memorystore1557_test.go:183 TestMemorystoreValkeyEngineVersions",
           "test/compat/memorystore1557_test.go:272 TestMemorystoreValkeyKmsKey",
           "test/compat/memorystore1563_test.go:169 TestMemorystoreValkeyUpgradeKeepsWrites",
-          "test/compat/memorystore1563_test.go:202 TestMemorystoreValkeyClusterUpgradeKeepsWrites",
+          "test/compat/memorystore1563_test.go:203 TestMemorystoreValkeyClusterUpgradeKeepsWrites",
           "test/compat/memorystore1563_test.go:57 TestMemorystoreValkeyCrossInstanceReplicationTLS",
+          "test/compat/memorystore1577_test.go:65 TestMemorystoreValkeyClusterModeCrossRegionReplication",
           "test/compat/memorystore1614_test.go:224 TestMemorystoreValkeyCrossInstanceFollowsFailover",
           "test/compat/memorystore1614_test.go:60 TestMemorystoreValkeyReaderAndFailover",
           "test/compat/memorystore1657_test.go:59 TestMemorystoreValkeyAutomaticFailover",
@@ -7668,7 +7669,7 @@
         "method": "google.cloud.memorystore.v1.Memorystore/DeleteAuthToken",
         "status": "Verified",
         "tests": [
-          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
+          "test/compat/memorystoreclusterauth_test.go:296 TestMemorystoreValkeyTokenAuthBackups"
         ]
       },
       {
@@ -7676,7 +7677,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudmemorystorebackups_test.go:29 TestGcloudMemorystoreTokenAuthBackups",
-          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
+          "test/compat/memorystoreclusterauth_test.go:296 TestMemorystoreValkeyTokenAuthBackups"
         ]
       },
       {
@@ -7685,6 +7686,7 @@
         "tests": [
           "test/compat/gcloudmemorystore_test.go:24 TestGcloudMemorystoreValkey",
           "test/compat/memorystore1557_test.go:104 TestMemorystoreValkeyCrossInstanceReplication",
+          "test/compat/memorystore1577_test.go:65 TestMemorystoreValkeyClusterModeCrossRegionReplication",
           "test/compat/memorystorevalkey_test.go:233 TestMemorystoreValkeyClusterDisabled",
           "test/compat/memorystorevalkey_test.go:85 TestMemorystoreValkeyInstance",
           "test/compat/terraform_memorystore1563_test.go:21 TestTerraformMemorystore1563",
@@ -7695,14 +7697,14 @@
         "method": "google.cloud.memorystore.v1.Memorystore/DeleteTokenAuthUser",
         "status": "Verified",
         "tests": [
-          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
+          "test/compat/memorystoreclusterauth_test.go:296 TestMemorystoreValkeyTokenAuthBackups"
         ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/ExportBackup",
         "status": "Verified",
         "tests": [
-          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
+          "test/compat/memorystoreclusterauth_test.go:296 TestMemorystoreValkeyTokenAuthBackups"
         ]
       },
       {
@@ -7710,7 +7712,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudmemorystore1557_test.go:27 TestGcloudMemorystore1557",
-          "test/compat/memorystore1557_test.go:396 TestMemorystoreValkeyMigration"
+          "test/compat/memorystore1557_test.go:396 TestMemorystoreValkeyMigration",
+          "test/compat/memorystore1577_test.go:437 TestMemorystoreValkeyClusterModeMigration"
         ]
       },
       {
@@ -7731,7 +7734,7 @@
         "method": "google.cloud.memorystore.v1.Memorystore/GetAuthToken",
         "status": "Verified",
         "tests": [
-          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
+          "test/compat/memorystoreclusterauth_test.go:296 TestMemorystoreValkeyTokenAuthBackups"
         ]
       },
       {
@@ -7740,14 +7743,14 @@
         "tests": [
           "test/compat/gcloudmemorystorebackups_test.go:29 TestGcloudMemorystoreTokenAuthBackups",
           "test/compat/memorystore1557_test.go:272 TestMemorystoreValkeyKmsKey",
-          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
+          "test/compat/memorystoreclusterauth_test.go:296 TestMemorystoreValkeyTokenAuthBackups"
         ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/GetBackupCollection",
         "status": "Verified",
         "tests": [
-          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
+          "test/compat/memorystoreclusterauth_test.go:296 TestMemorystoreValkeyTokenAuthBackups"
         ]
       },
       {
@@ -7769,6 +7772,7 @@
           "test/compat/memorystore1557_test.go:104 TestMemorystoreValkeyCrossInstanceReplication",
           "test/compat/memorystore1557_test.go:272 TestMemorystoreValkeyKmsKey",
           "test/compat/memorystore1563_test.go:169 TestMemorystoreValkeyUpgradeKeepsWrites",
+          "test/compat/memorystore1577_test.go:65 TestMemorystoreValkeyClusterModeCrossRegionReplication",
           "test/compat/memorystore1614_test.go:60 TestMemorystoreValkeyReaderAndFailover",
           "test/compat/memorystore1657_test.go:59 TestMemorystoreValkeyAutomaticFailover",
           "test/compat/memorystore2019_test.go:80 TestMemorystoreValkey91",
@@ -7793,7 +7797,7 @@
         "method": "google.cloud.memorystore.v1.Memorystore/GetTokenAuthUser",
         "status": "Verified",
         "tests": [
-          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
+          "test/compat/memorystoreclusterauth_test.go:296 TestMemorystoreValkeyTokenAuthBackups"
         ]
       },
       {
@@ -7815,14 +7819,14 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudmemorystorebackups_test.go:29 TestGcloudMemorystoreTokenAuthBackups",
-          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
+          "test/compat/memorystoreclusterauth_test.go:296 TestMemorystoreValkeyTokenAuthBackups"
         ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/ListBackupCollections",
         "status": "Verified",
         "tests": [
-          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
+          "test/compat/memorystoreclusterauth_test.go:296 TestMemorystoreValkeyTokenAuthBackups"
         ]
       },
       {
@@ -7830,7 +7834,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudmemorystorebackups_test.go:29 TestGcloudMemorystoreTokenAuthBackups",
-          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
+          "test/compat/memorystoreclusterauth_test.go:296 TestMemorystoreValkeyTokenAuthBackups"
         ]
       },
       {
@@ -7846,7 +7850,7 @@
         "method": "google.cloud.memorystore.v1.Memorystore/ListTokenAuthUsers",
         "status": "Verified",
         "tests": [
-          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
+          "test/compat/memorystoreclusterauth_test.go:296 TestMemorystoreValkeyTokenAuthBackups"
         ]
       },
       {
@@ -7862,7 +7866,8 @@
         "tests": [
           "test/compat/gcloudmemorystore1557_test.go:27 TestGcloudMemorystore1557",
           "test/compat/memorystore1557_test.go:396 TestMemorystoreValkeyMigration",
-          "test/compat/memorystore1563_test.go:202 TestMemorystoreValkeyClusterUpgradeKeepsWrites"
+          "test/compat/memorystore1563_test.go:203 TestMemorystoreValkeyClusterUpgradeKeepsWrites",
+          "test/compat/memorystore1577_test.go:437 TestMemorystoreValkeyClusterModeMigration"
         ]
       },
       {
@@ -7883,8 +7888,10 @@
           "test/compat/memorystore1557_test.go:183 TestMemorystoreValkeyEngineVersions",
           "test/compat/memorystore1557_test.go:272 TestMemorystoreValkeyKmsKey",
           "test/compat/memorystore1563_test.go:169 TestMemorystoreValkeyUpgradeKeepsWrites",
-          "test/compat/memorystore1563_test.go:202 TestMemorystoreValkeyClusterUpgradeKeepsWrites",
+          "test/compat/memorystore1563_test.go:203 TestMemorystoreValkeyClusterUpgradeKeepsWrites",
           "test/compat/memorystore1563_test.go:57 TestMemorystoreValkeyCrossInstanceReplicationTLS",
+          "test/compat/memorystore1577_test.go:358 TestMemorystoreValkeyClusterModeReplicaScaleAndUpgrade",
+          "test/compat/memorystore1577_test.go:65 TestMemorystoreValkeyClusterModeCrossRegionReplication",
           "test/compat/memorystore1614_test.go:224 TestMemorystoreValkeyCrossInstanceFollowsFailover",
           "test/compat/memorystore2019_test.go:191 TestMemorystoreValkeyUpgrade90To91",
           "test/compat/memorystore2019_test.go:250 TestMemorystoreValkeyUpgrade80To91",
@@ -7934,6 +7941,7 @@
           "test/compat/gcloudmemorystoretls_test.go:24 TestGcloudMemorystoreInTransitEncryption",
           "test/compat/gcloudrediscluster_test.go:23 TestGcloudRedisCluster",
           "test/compat/memorystore1557_test.go:272 TestMemorystoreValkeyKmsKey",
+          "test/compat/memorystore1577_test.go:241 TestRedisClusterCrossClusterReplication",
           "test/compat/memorystorecluster_test.go:136 TestMemorystoreRedisCluster",
           "test/compat/memorystorecluster_test.go:266 TestMemorystoreRedisClusterRefusals",
           "test/compat/memorystoreclusteraddrs_test.go:35 TestMemorystoreRedisClusterHostAndPodClients",
@@ -7978,6 +7986,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudrediscluster_test.go:23 TestGcloudRedisCluster",
+          "test/compat/memorystore1577_test.go:241 TestRedisClusterCrossClusterReplication",
           "test/compat/memorystorecluster_test.go:136 TestMemorystoreRedisCluster",
           "test/compat/memorystoreclusteraddrs_test.go:35 TestMemorystoreRedisClusterHostAndPodClients",
           "test/compat/terraform_rediscluster_test.go:25 TestTerraformRedisCluster"
@@ -8039,6 +8048,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudrediscluster_test.go:23 TestGcloudRedisCluster",
+          "test/compat/memorystore1577_test.go:241 TestRedisClusterCrossClusterReplication",
           "test/compat/memorystorecluster_test.go:136 TestMemorystoreRedisCluster",
           "test/compat/memorystoreclusterca1907_test.go:46 TestRedisClusterServerCAModes",
           "test/compat/memorystoreclusterfailover1910_test.go:131 TestRedisClusterAutomaticFailover",
@@ -8142,6 +8152,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudrediscluster_test.go:23 TestGcloudRedisCluster",
+          "test/compat/memorystore1577_test.go:241 TestRedisClusterCrossClusterReplication",
           "test/compat/memorystorecertrotation1918_test.go:40 TestRedisClusterServerCertRotation",
           "test/compat/memorystorecluster_test.go:136 TestMemorystoreRedisCluster",
           "test/compat/memorystoreiam1614_test.go:121 TestMemorystoreIAMAuthChecksTheToken",

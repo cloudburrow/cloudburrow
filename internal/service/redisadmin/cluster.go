@@ -150,6 +150,12 @@ type clusterRecord struct {
 	// Valkey is a Memorystore for Valkey instance's (memorystore.go):
 	// nil for a Redis cluster.
 	Valkey *valkeyFields `json:"valkey,omitempty"`
+	// CCR is a Redis cluster's cross_cluster_replication_config, and
+	// CCRLinkPassword the password its replication links write as while it
+	// is a secondary (crossclusterapi.go, #1577); a Valkey instance keeps
+	// both in Valkey.
+	CCR             *cirConfig `json:"ccr,omitempty"`
+	CCRLinkPassword string     `json:"ccrLinkPassword,omitempty"`
 	// TransitCA and TransitCAKey, PEM, are the cluster's CA with in-transit
 	// encryption (#1549); "" for none.
 	TransitCA    string `json:"transitCa,omitempty"`
@@ -243,6 +249,9 @@ type clusters struct {
 	// rotating are the clusters whose certificates are being rotated
 	// (clustercertrotation.go).
 	rotating map[string]bool
+	// links are the replication links of CLUSTER mode secondaries, by
+	// name (crossclusterlink.go).
+	links map[string]*crrLink
 }
 
 // ClusterServer implements clusterpb.CloudRedisClusterServer.
@@ -559,6 +568,7 @@ func (c *clusters) render(r *clusterRecord) *clusterpb.Cluster {
 	}
 	if r.Valkey == nil {
 		r.renderServerCA(out)
+		renderCCR(r, out)
 	}
 	if r.KmsKey != "" {
 		out.KmsKey = proto.String(r.KmsKey)
@@ -767,6 +777,12 @@ func (s *ClusterServer) CreateCluster(ctx context.Context, req *clusterpb.Create
 	if in == nil {
 		return nil, apierror.InvalidArgument("cluster is required")
 	}
+	// A secondary of cross-cluster replication copies its primary's
+	// shape and modes (crossclusterapi.go).
+	in, primary, err := c.ccrSecondary(in)
+	if err != nil {
+		return nil, err
+	}
 	if in.ShardCount == nil {
 		return nil, apierror.InvalidArgument("cluster.shard_count is required")
 	}
@@ -800,9 +816,6 @@ func (s *ClusterServer) CreateCluster(ctx context.Context, req *clusterpb.Create
 		tlsOn = true
 	default:
 		return nil, apierror.InvalidArgument("transit_encryption_mode %s is not a transit encryption mode", tm)
-	}
-	if err := checkCrossCluster(in.GetCrossClusterReplicationConfig() != nil); err != nil {
-		return nil, err
 	}
 	if err := checkAutoBackup(in.GetAutomatedBackupConfig()); err != nil {
 		return nil, err
@@ -868,6 +881,12 @@ func (s *ClusterServer) CreateCluster(ctx context.Context, req *clusterpb.Create
 	if _, ok := c.byName[name]; ok {
 		c.mu.Unlock()
 		return nil, apierror.AlreadyExists("Resource '%s' already exists", name)
+	}
+	if primary != "" {
+		if err := c.checkPrimaryCluster(r, primary); err != nil {
+			c.mu.Unlock()
+			return nil, err
+		}
 	}
 	if err := c.save(r); err != nil {
 		c.mu.Unlock()
@@ -1503,7 +1522,7 @@ func (s *ClusterServer) UpdateCluster(ctx context.Context, req *clusterpb.Update
 		case "acl_policy", "aclPolicy":
 			set["acl_policy"] = true
 		case "cross_cluster_replication_config", "crossClusterReplicationConfig":
-			return nil, checkCrossCluster(true)
+			set["cross_cluster_replication_config"] = true
 		case "labels":
 			// Set by ClusterLabels, beside the transcoder.
 		case "rotate_server_certificate", "rotateServerCertificate":
@@ -1528,6 +1547,13 @@ func (s *ClusterServer) UpdateCluster(ctx context.Context, req *clusterpb.Update
 	if r.KeyState != "" && (set["persistence_config"] || set["automated_backup_config"]) {
 		return nil, errKeyUnavailable(r)
 	}
+	if set["cross_cluster_replication_config"] {
+		// A switchover or a detach (crossclusterapi.go).
+		if len(set) > 1 {
+			return nil, apierror.InvalidArgument("cross_cluster_replication_config is updated alone, not with other fields")
+		}
+		return s.updateCCR(c, r, in.GetCrossClusterReplicationConfig())
+	}
 	next := *r
 	if set["shard_count"] {
 		next.ShardCount = in.GetShardCount()
@@ -1540,6 +1566,24 @@ func (s *ClusterServer) UpdateCluster(ctx context.Context, req *clusterpb.Update
 	}
 	if next.ShardCount != r.ShardCount && next.ReplicaCount != r.ReplicaCount {
 		return nil, apierror.InvalidArgument("shard_count and replica_count cannot be changed in one update")
+	}
+	// Cross-cluster replication (crossclusterapi.go): a primary's shard
+	// count, node type, redis_configs and persistence are its
+	// secondaries' too, and a secondary's are its primary's.
+	var group []*clusterRecord
+	if next.ShardCount != r.ShardCount {
+		if group, err = c.replicaGroup(r, "shard_count"); err != nil {
+			return nil, err
+		}
+	}
+	if r.cirRole() == "SECONDARY" {
+		for _, f := range []string{"node_type", "redis_configs", "persistence_config"} {
+			if set[f] {
+				if _, err := c.replicaGroup(r, f); err != nil {
+					return nil, err
+				}
+			}
+		}
 	}
 	if set["node_type"] {
 		nt := in.GetNodeType()
@@ -1621,6 +1665,7 @@ func (s *ClusterServer) UpdateCluster(ctx context.Context, req *clusterpb.Update
 		}
 		syncACL = true
 	}
+	var propagate map[string]string
 	if set["node_type"] || set["redis_configs"] || set["persistence_config"] {
 		settings := serverConfigs(next.RedisConfigs)
 		for k := range serverConfigs(r.RedisConfigs) {
@@ -1640,6 +1685,7 @@ func (s *ClusterServer) UpdateCluster(ctx context.Context, req *clusterpb.Update
 				}
 			}
 		}
+		propagate = settings
 	}
 	reshape := next.ShardCount != r.ShardCount || next.ReplicaCount != r.ReplicaCount
 	if reshape && authChange {
@@ -1660,7 +1706,16 @@ func (s *ClusterServer) UpdateCluster(ctx context.Context, req *clusterpb.Update
 		return nil, apierror.Internal(err, "keep cluster %s", r.Name)
 	}
 	*r = next
+	if propagate != nil {
+		if err := c.propagateSettings(ctx, r, propagate); err != nil {
+			return nil, apierror.Internal(err, "set the change on the secondary clusters")
+		}
+	}
 	op := c.newOperation(r.Name, "update")
+	if len(group) > 0 && shards != r.ShardCount {
+		// The primary and then its secondaries (crossclusterapi.go).
+		return c.launchGroup(s.api, r, op, group, shards, "")
+	}
 	if (syncACL || authChange || rotate) && !reshape {
 		// The policy's users on every node (aclpolicy.go), and the
 		// default user's password when IAM auth was turned on or off
@@ -1701,14 +1756,37 @@ func (s *ClusterServer) UpdateCluster(ctx context.Context, req *clusterpb.Update
 func (c *clusters) reshape(name, op string, shards, replicas int32) {
 	ctx, cancel := context.WithTimeout(c.bg, clusterWait)
 	defer cancel()
+	err := c.reshapeNodes(ctx, name, shards, replicas, false)
+	c.mu.Lock()
+	delete(c.busy, name)
+	r := c.byName[name]
+	r.state, r.message = clusterpb.Cluster_ACTIVE, ""
+	out := c.output(r)
+	c.mu.Unlock()
+	c.finish(op, out, err)
+}
+
+// reshapeNodes adds or removes shards or replicas of cluster name. open
+// lets the nodes of a CLUSTER mode secondary take the admin's writes
+// (MIGRATE, RESTORE-ASKING) while they move slots: its replication links
+// are stopped, and copy its primary's data again when they start
+// (crossclusterapi.go).
+func (c *clusters) reshapeNodes(ctx context.Context, name string, shards, replicas int32, open bool) error {
 	c.mu.Lock()
 	r := c.byName[name]
 	snap := *r
 	snap.Nodes = append([]*clusterNode(nil), r.Nodes...)
+	if open {
+		snap.dropCIR()
+	}
 	c.mu.Unlock()
 	var err error
+	if open {
+		err = c.setWrites(ctx, &snap, snap.Nodes, false)
+	}
 	var removed []*clusterNode
 	switch {
+	case err != nil:
 	case shards > snap.ShardCount:
 		err = c.addShards(ctx, &snap, int(shards))
 	case shards < snap.ShardCount:
@@ -1719,22 +1797,19 @@ func (c *clusters) reshape(name, op string, shards, replicas int32) {
 		removed, err = c.removeReplicas(ctx, &snap, int(replicas))
 	}
 	c.mu.Lock()
-	delete(c.busy, name)
 	r.pendingShards, r.pendingReplicas = 0, -1
 	if err == nil {
 		r.Nodes, r.NextNode, r.ShardCount, r.ReplicaCount = snap.Nodes, snap.NextNode, shards, replicas
 		err = c.save(r)
 	}
-	r.state, r.message = clusterpb.Cluster_ACTIVE, ""
-	out := c.output(r)
 	c.mu.Unlock()
 	if removed != nil && err == nil {
 		c.removeNodes(removed)
 	}
 	if err != nil {
-		err = fmt.Errorf("the cluster's shape did not change: %w", err)
+		err = fmt.Errorf("the shape of %s did not change: %w", name, err)
 	}
-	c.finish(op, out, err)
+	return err
 }
 
 // newNode adds a node to r, of shard.
@@ -1782,6 +1857,19 @@ func (c *clusters) rebalance(ctx context.Context, r *clusterRecord, shards int) 
 		}
 	}
 	sort.Slice(primaries, func(i, j int) bool { return primaries[i].Shard < primaries[j].Shard })
+	ranges := slotRanges(shards)
+	want := map[int]*clusterNode{}
+	for i, rg := range ranges {
+		for s := rg[0]; s <= rg[1]; s++ {
+			want[s] = primaries[i]
+		}
+	}
+	return c.placeSlots(ctx, r, primaries, want)
+}
+
+// placeSlots moves each slot, keys and all, to the primary want names for
+// it, among primaries.
+func (c *clusters) placeSlots(ctx context.Context, r *clusterRecord, primaries []*clusterNode, want map[int]*clusterNode) error {
 	owned, err := c.ownedSlots(ctx, r, primaries[0])
 	if err != nil {
 		return err
@@ -1789,13 +1877,6 @@ func (c *clusters) rebalance(ctx context.Context, r *clusterRecord, shards int) 
 	byID := map[string]*clusterNode{}
 	for _, p := range primaries {
 		byID[p.id] = p
-	}
-	ranges := slotRanges(shards)
-	want := map[int]*clusterNode{}
-	for i, rg := range ranges {
-		for s := rg[0]; s <= rg[1]; s++ {
-			want[s] = primaries[i]
-		}
 	}
 	type move struct{ src, dst *clusterNode }
 	moves := map[move][]int{}
@@ -1923,12 +2004,16 @@ func (s *ClusterServer) DeleteCluster(ctx context.Context, req *clusterpb.Delete
 	if r.DeletionProtect {
 		return nil, apierror.FailedPrecondition("cluster %s has deletion protection enabled: disable it first", r.Name)
 	}
+	if err := c.detachForDelete(r); err != nil {
+		return nil, err
+	}
 	r.state = clusterpb.Cluster_DELETING
 	op := c.newOperation(r.Name, "delete")
 	c.busy[r.Name] = op
 	nodes := append([]*clusterNode(nil), r.Nodes...)
 	name := r.Name
 	return s.api.launch(op, func() {
+		c.crossClusterUnlink(name)
 		c.removeNodes(nodes)
 		c.mu.Lock()
 		delete(c.busy, name)
