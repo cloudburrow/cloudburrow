@@ -7410,7 +7410,8 @@
         "method": "google.cloud.speech.v1.Speech/LongRunningRecognize",
         "status": "Verified",
         "tests": [
-          "test/compat/speechstream_test.go:230 TestSpeechV1"
+          "test/compat/speechstream_test.go:230 TestSpeechV1",
+          "test/compat/speechv1channels2131_test.go:47 TestSpeechV1Channels2131"
         ]
       },
       {
@@ -7420,7 +7421,8 @@
           "test/compat/speechdiarization2131_test.go:58 TestSpeechDiarization2131",
           "test/compat/speechfeatures_test.go:62 TestSpeechRecognitionFeatures1799",
           "test/compat/speechmatrix2127_test.go:46 TestSpeechFeatureMatrix2127",
-          "test/compat/speechstream_test.go:230 TestSpeechV1"
+          "test/compat/speechstream_test.go:230 TestSpeechV1",
+          "test/compat/speechv1channels2131_test.go:47 TestSpeechV1Channels2131"
         ]
       },
       {
@@ -7428,7 +7430,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/speechdiarization2131_test.go:58 TestSpeechDiarization2131",
-          "test/compat/speechstream_test.go:230 TestSpeechV1"
+          "test/compat/speechstream_test.go:230 TestSpeechV1",
+          "test/compat/speechv1channels2131_test.go:47 TestSpeechV1Channels2131"
         ]
       }
     ]

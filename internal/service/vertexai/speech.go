@@ -456,9 +456,29 @@ func (s *Server) transcribeChannels(ctx context.Context, cfg speechconfig.Config
 	}
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Hour)
 	defer cancel()
+	out, samples, cfg, err := transcribeEachChannel(ctx, cfg, opt, chans)
+	if err != nil {
+		return none, nil, cfg, err
+	}
+	normalize(out.Segments, cfg, resultLanguage(cfg, out))
+	if err := s.translateSegments(ctx, out.Segments, cfg, resultLanguage(cfg, out)); err != nil {
+		return none, nil, cfg, err
+	}
+	return out, samples, cfg, nil
+}
+
+// transcribeEachChannel transcribes (and diarizes, when cfg asks) each of
+// chans on its own, v2's transcribeChannels and v1's
+// enable_separate_recognition_per_channel (speechv1.go): each segment
+// tagged with its 1-based channel, ordered by end then channel, before
+// normalize. The samples are the channels one after another, so the
+// billed duration counts each.
+func transcribeEachChannel(ctx context.Context, cfg speechconfig.Config, opt speech.Options, chans [][]float32) (speech.Result, []float32, speechconfig.Config, error) {
 	var (
+		none    speech.Result
 		out     speech.Result
 		samples []float32
+		err     error
 	)
 	for c, ch := range chans {
 		if ch, err = denoise(ctx, cfg, ch); err != nil {
@@ -491,10 +511,6 @@ func (s *Server) transcribeChannels(ctx context.Context, cfg speechconfig.Config
 		}
 		return a.Channel < b.Channel
 	})
-	normalize(out.Segments, cfg, resultLanguage(cfg, out))
-	if err := s.translateSegments(ctx, out.Segments, cfg, resultLanguage(cfg, out)); err != nil {
-		return none, nil, cfg, err
-	}
 	return out, samples, cfg, nil
 }
 

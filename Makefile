@@ -123,6 +123,14 @@ TOKENIZERS_LIB_DIR ?= $(BIN_DIR)/tokenizers/$(TOKENIZERS_VERSION)/$(TOKENIZERS_P
 build-onnx: storage-binaries bigquery-binaries onnx-compile
 	@echo "built $(BIN_DIR)/$(BINARY)-onnx ($(VERSION)); run it with ONNXRUNTIME_LIB=/path/to/libonnxruntime"
 
+# ONNX_PKGS are the packages the onnx tag changes: those with a file under
+# an onnx build constraint, and the internal/ packages importing one, whose
+# behaviour follows it (speechconfig's Unserved follows speaker.Available).
+# test/repo's TestONNXPackages keeps the list complete.
+ONNX_PKGS := ./internal/admin/ ./internal/bigqueryfront/ ./internal/console/ ./internal/embedding/ \
+	./internal/localai/ ./internal/onnxmodel/... ./internal/onnxrunner/ ./internal/service/vertexai/ \
+	./internal/speaker/ ./internal/speech/ ./internal/speechconfig/
+
 ## onnx-compile: Build and vet the onnx-tagged CLI alone, without making the embedded binaries (CI's onnx job)
 .PHONY: onnx-compile
 onnx-compile: $(TOKENIZERS_LIB_DIR)/libtokenizers.a
@@ -130,7 +138,14 @@ onnx-compile: $(TOKENIZERS_LIB_DIR)/libtokenizers.a
 	CGO_ENABLED=1 CGO_LDFLAGS="-L$(abspath $(TOKENIZERS_LIB_DIR)) $(CGO_LDFLAGS)" \
 		go build -tags onnx -trimpath -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/$(BINARY)-onnx ./cmd/$(BINARY)
 	CGO_ENABLED=1 CGO_LDFLAGS="-L$(abspath $(TOKENIZERS_LIB_DIR)) $(CGO_LDFLAGS)" \
-		go vet -tags onnx ./internal/embedding/ ./internal/localai/ ./internal/onnxmodel/... ./internal/onnxrunner/ ./internal/bigqueryfront/ ./cmd/$(BINARY)/
+		go vet -tags onnx $(ONNX_PKGS) ./cmd/$(BINARY)/
+
+## onnx-test: Run the unit tests of ONNX_PKGS with -tags onnx (CI's onnx job); needs ONNXRUNTIME_LIB (scripts/localai-models.sh --onnx-runtime-only on Linux amd64, Homebrew's onnxruntime on macOS)
+.PHONY: onnx-test
+onnx-test: $(TOKENIZERS_LIB_DIR)/libtokenizers.a
+	@test -n "$(ONNXRUNTIME_LIB)" || { echo "onnx-test: set ONNXRUNTIME_LIB to libonnxruntime"; exit 1; }
+	CGO_ENABLED=1 CGO_LDFLAGS="-L$(abspath $(TOKENIZERS_LIB_DIR)) $(CGO_LDFLAGS)" \
+		go test -tags onnx -p 4 $(ONNX_PKGS)
 
 $(BIN_DIR)/tokenizers/$(TOKENIZERS_VERSION)/%/libtokenizers.a:
 	@test -n "$(TOKENIZERS_ASSET_$*)" -a -n "$(TOKENIZERS_SHA256_$*)" || { echo "build-onnx: no pinned libtokenizers for $$(go env GOOS)/$$(go env GOARCH); set TOKENIZERS_LIB_DIR to a directory holding libtokenizers.a"; exit 1; }
