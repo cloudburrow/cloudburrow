@@ -30,6 +30,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/cmek"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
+	"github.com/cloudburrow/cloudburrow/internal/nbruntime"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/service/dataform"
 	"github.com/cloudburrow/cloudburrow/internal/service/secrets"
@@ -70,6 +71,14 @@ type dataformService struct {
 	runAddr func() string
 	// keys are the customer-managed keys (the instance's Cloud KMS).
 	keys cmek.Keys
+	// storage is Cloud Storage's tunnel, for notebook outputs and
+	// repository snapshots; notebooks are the notebook runtimes notebook
+	// actions run on (dataformpipelines.go).
+	storage   func() *netfwd.Forwarder
+	notebooks *nbruntime.Manager
+	// accountToken is a Developer Connect account connector user's token
+	// (Cloud Run's Developer Connect), for personal authentication.
+	accountToken func(ctx context.Context, connector, user string) (string, error)
 
 	server *grpctransport.Server
 	api    *dataform.Server
@@ -135,6 +144,13 @@ func (s *dataformService) Start(ctx context.Context) error {
 	if s.runAddr != nil {
 		opts.LinkToken = s.linkToken
 	}
+	if s.storage != nil {
+		opts.Storage = dataformStorage{tunnel: s.storage}
+	}
+	if s.notebooks != nil {
+		opts.Notebooks = dataformNotebooks{m: s.notebooks}
+	}
+	opts.AccountToken = s.accountToken
 	if s.secrets != nil {
 		opts.AccessSecret = s.accessSecret
 	}

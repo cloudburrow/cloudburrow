@@ -422,6 +422,16 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if dataformSvc != nil {
 		dataformSvc.secrets = secretsSvc
 		dataformSvc.bigquery = func() *netfwd.Forwarder { return forwarderFor(forwarders, "bigquery") }
+		dataformSvc.storage = func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") }
+		// v1beta1's account_connector (#2105): the caller's token from
+		// Developer Connect's account connector. A call without a principal
+		// is the instance's own user, as on Developer Connect's side.
+		dataformSvc.accountToken = func(ctx context.Context, connector, user string) (string, error) {
+			if user == "" || user == "developer@cloudburrow.local" {
+				user = creds.Email
+			}
+			return (&runadapter.DeveloperConnectServer{}).UserAccessToken(ctx, connector, user)
+		}
 		if runSvc != nil {
 			dataformSvc.gitBase = func() string {
 				if a := runSvc.Addr(); a != "" {
@@ -1100,6 +1110,17 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// authorization code flow the metadata server's token endpoint serves.
 	authPlatformRef = authplatform.NewStore(projects.Backing(), resource.ProjectNumber)
 	metaSrv.WithOAuth(&authplatform.Endpoints{Store: authPlatformRef, User: creds.Email})
+	// Developer Connect's account connectors (#2105) connect a user's
+	// account through that authorization server, as its GOOGLE provider,
+	// and hand out tokens the instance's credentials mint for the account.
+	runadapter.SetDeveloperConnectOAuth(runadapter.DeveloperConnectOAuth{Store: authPlatformRef,
+		AuthBase: func() string {
+			if a := metaSrv.Addr(); a != "" {
+				return hostURL(a)
+			}
+			return ""
+		},
+		Mint: func(email string) string { return creds.MintAccessTokenFor(email, metadata.TokenTTL) }, TTL: metadata.TokenTTL})
 	// IAM enforcement (#1879) of Resource Manager, IAM, deny and
 	// organization policies, on this port.
 	useIAMEnforcement11(iamEnforcer, rmSrv, func() *resourcemanager.Registry { return projects })
@@ -1317,8 +1338,18 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// them, so it cannot answer from a store of its own.
 	// BigQuery Studio's notebook runtimes (#2094), deleted when up stops.
 	notebooks := &nbruntime.Manager{Instance: cfg.Name,
-		Logf: func(format string, args ...any) { fmt.Fprintf(stdout, "cloudburrow: "+format+"\n", args...) }}
+		Logf: func(format string, args ...any) { fmt.Fprintf(stdout, "cloudburrow: "+format+"\n", args...) },
+		BigQuery: func() string {
+			if f := forwarderFor(forwarders, "bigquery"); f != nil {
+				return f.HostAddr()
+			}
+			return ""
+		}}
 	defer notebooks.Close()
+	// Dataform's notebook actions run on them too (#2105).
+	if dataformSvc != nil {
+		dataformSvc.notebooks = notebooks
+	}
 	consoleSrv := buildConsole(consoleDeps{
 		cfg: cfg, iam: iamEnforcer, notebooks: notebooks, assetOut: assetOut, coord: coord, cluster: clusterComp, localAI: localAISrv, localModels: localModels,
 		hfModels: hfModels, garden: garden,

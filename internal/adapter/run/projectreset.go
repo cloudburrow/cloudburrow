@@ -107,6 +107,8 @@ func (s *Server) ResetProject(ctx context.Context, project string, fns *Function
 		}
 	}
 	resetCloudBuildProject(prefixes)
+	// Its Developer Connect account connectors and their users (#2105).
+	resetDeveloperConnectProject(prefixes)
 	return errors.Join(errs...)
 }
 

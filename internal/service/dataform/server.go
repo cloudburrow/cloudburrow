@@ -118,6 +118,16 @@ type Options struct {
 	// repository link (projects/*/locations/*/connections/*/gitRepositoryLinks/*);
 	// nil when Developer Connect is not served.
 	LinkToken func(ctx context.Context, link string) (string, error)
+	// Notebooks runs notebook actions (pipelines.go); nil fails them.
+	Notebooks NotebookRunner
+	// Storage writes the instance's Cloud Storage objects: notebook
+	// outputs and repository snapshots (pipelines.go); nil refuses them.
+	Storage ObjectWriter
+	// AccountToken is the token of a Developer Connect account
+	// connector's user (projects/*/locations/*/accountConnectors/*), for
+	// a repository's personal authentication (v1beta1); nil when Developer
+	// Connect is not served.
+	AccountToken func(ctx context.Context, connector, user string) (string, error)
 	// Now is the clock; nil is time.Now.
 	Now func() time.Time
 }
@@ -147,6 +157,9 @@ type Server struct {
 	// workflow configs, by name (v1beta1.go, triggers.go).
 	wsExtras map[string]*workspaceExtra
 	triggers map[string]*triggerState
+	// connectors are v1beta1 repositories' git_remote_settings.account_connector,
+	// by repository name (v1beta1.go).
+	connectors map[string]string
 	// locks serialize git work on one repository or workspace directory.
 	locks map[string]*sync.Mutex
 	// cancels stop running invocations.
@@ -198,6 +211,7 @@ func (s *Server) clear() {
 	s.ops = map[string]*longrunningpb.Operation{}
 	s.sealed = map[string]cmek.Sealed{}
 	s.wsExtras = map[string]*workspaceExtra{}
+	s.connectors = map[string]string{}
 	s.triggers = map[string]*triggerState{}
 	if s.locks == nil {
 		s.locks = map[string]*sync.Mutex{}
@@ -289,6 +303,8 @@ type stateFile struct {
 	// WorkspaceExtras and Triggers are v1beta1's (v1beta1.go).
 	WorkspaceExtras map[string]*workspaceExtra `json:"workspaceExtras,omitempty"`
 	Triggers        map[string]*triggerState   `json:"workflowTriggers,omitempty"`
+	// AccountConnectors are v1beta1 repositories' (v1beta1.go).
+	AccountConnectors map[string]string `json:"accountConnectors,omitempty"`
 }
 
 type storedCompilation struct {
@@ -343,6 +359,11 @@ func (s *Server) save() error {
 			delete(s.wsExtras, k)
 		}
 	}
+	for k := range s.connectors {
+		if _, ok := s.repos[k]; !ok {
+			delete(s.connectors, k)
+		}
+	}
 	for k, t := range s.triggers {
 		if _, ok := s.workflows[k]; !ok {
 			delete(s.triggers, k)
@@ -354,17 +375,18 @@ func (s *Server) save() error {
 		return nil
 	}
 	st := stateFile{
-		WorkspaceExtras: s.wsExtras,
-		Triggers:        s.triggers,
-		Repositories:    marshalAll(s.repos),
-		Workspaces:      marshalAll(s.workspaces),
-		ReleaseConfigs:  marshalAll(s.releases),
-		WorkflowConfig:  marshalAll(s.workflows),
-		Folders:         marshalAll(s.folders),
-		TeamFolders:     marshalAll(s.teamFolders),
-		Configs:         marshalAll(s.configs),
-		Policies:        s.policies,
-		Keys:            s.sealed,
+		WorkspaceExtras:   s.wsExtras,
+		Triggers:          s.triggers,
+		AccountConnectors: s.connectors,
+		Repositories:      marshalAll(s.repos),
+		Workspaces:        marshalAll(s.workspaces),
+		ReleaseConfigs:    marshalAll(s.releases),
+		WorkflowConfig:    marshalAll(s.workflows),
+		Folders:           marshalAll(s.folders),
+		TeamFolders:       marshalAll(s.teamFolders),
+		Configs:           marshalAll(s.configs),
+		Policies:          s.policies,
+		Keys:              s.sealed,
 	}
 	for _, k := range sortedKeys(s.compilations) {
 		c := s.compilations[k]
@@ -465,6 +487,9 @@ func (s *Server) load() error {
 	}
 	if st.WorkspaceExtras != nil {
 		s.wsExtras = st.WorkspaceExtras
+	}
+	if st.AccountConnectors != nil {
+		s.connectors = st.AccountConnectors
 	}
 	for k, t := range st.Triggers {
 		if err := t.unmarshal(); err != nil {
@@ -725,15 +750,14 @@ func (s *Server) checkRepository(ctx context.Context, r *dfpb.Repository) error 
 	if sa := r.GetServiceAccount(); sa != "" && !strings.Contains(sa, "@") {
 		return apierror.InvalidArgument("service_account %q must be a service account email", sa)
 	}
-	if r.GetEndUserAuthConfig() != nil {
-		return apierror.Unimplemented("end-user authentication for Dataform repositories is not served by CloudBurrow")
-	}
+	// end_user_auth_config: workflows run under their invoker, whose
+	// email an invocation config's end_user_auth_config records (invoke.go).
 	gr := r.GetGitRemoteSettings()
 	if gr == nil {
 		return nil
 	}
-	if gr.GetSshAuthenticationConfig() != nil {
-		return apierror.Unimplemented("SSH git remotes are not served by CloudBurrow: use the Secure Source Manager repository's HTTPS URL and an access token")
+	if err := checkSSH(gr); err != nil {
+		return err
 	}
 	if link := gr.GetGitRepositoryLink(); link != "" {
 		// "Resource name for the GitRepositoryLink used for machine
@@ -766,6 +790,13 @@ func (s *Server) checkRepository(ctx context.Context, r *dfpb.Repository) error 
 // checkRemoteURL accepts only this instance's Secure Source Manager
 // repositories, so a workspace's git never leaves the instance.
 func (s *Server) checkRemoteURL(u string) error {
+	if host, _, ok := sshRemote(u); ok {
+		// An SSH remote: on this machine (ssh.go).
+		if !isLoopbackHost(host) {
+			return apierror.InvalidArgument("git_remote_settings.url %q: an SSH remote must be on this machine (a loopback host)", u)
+		}
+		return nil
+	}
 	base := ""
 	if s.opts.GitBase != nil {
 		base = strings.TrimSuffix(s.opts.GitBase(), "/")

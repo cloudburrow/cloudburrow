@@ -10,6 +10,7 @@ import (
 	"time"
 
 	cbpb "cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
+	dcpb "cloud.google.com/go/developerconnect/apiv1/developerconnectpb"
 	ssmpb "cloud.google.com/go/securesourcemanager/apiv1/securesourcemanagerpb"
 	"context"
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
@@ -522,8 +523,15 @@ func blankCheckDeps(t *testing.T) consoleDeps {
 		t.Fatal(err)
 	}
 	ssm := runadapter.NewServer(&runadapter.Knative{}, "t", time.Minute).SecureSourceManager(nil)
-	jobs.also = func(g *grpc.Server) { cb.Register(g); ssm.Register(g) }
+	// Developer Connect's sparsest account connector (#2105).
+	dc := runadapter.NewServer(&runadapter.Knative{}, "t", time.Minute).DeveloperConnect()
+	jobs.also = func(g *grpc.Server) { cb.Register(g); ssm.Register(g); dc.Register(g) }
 	ssmParent := "projects/" + blankProject + "/locations/us-central1"
+	if _, err := dc.CreateAccountConnector(ctx, &dcpb.CreateAccountConnectorRequest{Parent: ssmParent, AccountConnectorId: "blank-connector",
+		AccountConnector: &dcpb.AccountConnector{AccountConnectorConfig: &dcpb.AccountConnector_ProviderOauthConfig{ProviderOauthConfig: &dcpb.ProviderOAuthConfig{
+			OauthProviderId: &dcpb.ProviderOAuthConfig_SystemProviderId{SystemProviderId: dcpb.SystemProvider_GOOGLE}, Scopes: []string{"openid"}}}}}); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := ssm.CreateInstance(ctx, &ssmpb.CreateInstanceRequest{Parent: ssmParent, InstanceId: "blank-instance"}); err != nil {
 		t.Fatal(err)
 	}

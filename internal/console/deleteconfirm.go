@@ -126,6 +126,8 @@ var DeleteConfirmRules = map[string]DeleteConfirmRule{
 	"cloud-build-worker-pools": unverified,
 	// UNVERIFIED: gcloud steps only (docs re-read 2026-11-19)
 	"secure-source-manager": unverified,
+	// UNVERIFIED: "From the More menu, select Delete." No dialog described (docs re-read 2026-11-22).
+	"developer-connect-account-connectors": unverified,
 	// UNVERIFIED: "select the repository to delete. Click Delete." No dialog described (docs re-read 2026-11-19).
 	"artifact-registry": unverified,
 	// UNVERIFIED: no console steps for deleting a function (docs re-read 2026-11-19)

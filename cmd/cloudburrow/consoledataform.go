@@ -11,6 +11,7 @@ import (
 
 	dfpb "cloud.google.com/go/dataform/apiv1/dataformpb"
 	b1pb "cloud.google.com/go/dataform/apiv1beta1/dataformpb"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
@@ -255,9 +256,23 @@ func (p dataformProvider) repositoryDetail(ctx context.Context, s *dataform.Serv
 	gitGroup := console.PropertyGroup{Heading: "Git connection", Properties: []console.Property{{Label: "Remote", Value: "Not connected: the repository keeps its code in Dataform's own Git repository."}}}
 	if git != nil {
 		gitGroup.Properties = []console.Property{{Label: "Remote Git repository URL", Value: git.GetUrl()},
-			{Label: "Default remote branch name", Value: git.GetDefaultBranch()},
-			{Label: "Secret", Value: git.GetAuthenticationTokenSecretVersion()},
-			{Label: "Token status", Value: dataformTokenStatus(ctx, s, name)}}
+			{Label: "Default remote branch name", Value: git.GetDefaultBranch()}}
+		switch ac := dataformAccountConnector(ctx, s, name); {
+		case git.GetSshAuthenticationConfig() != nil:
+			gitGroup.Properties = append(gitGroup.Properties, console.Property{Label: "Authentication method", Value: "SSH"},
+				console.Property{Label: "Secret", Value: git.GetSshAuthenticationConfig().GetUserPrivateKeySecretVersion()},
+				console.Property{Label: "SSH public host key value", Value: git.GetSshAuthenticationConfig().GetHostPublicKey()})
+		case ac != "":
+			gitGroup.Properties = append(gitGroup.Properties, console.Property{Label: "Authentication method", Value: "Personal authentication (Developer Connect)"},
+				console.Property{Label: "Account connector", Value: ac})
+		case git.GetGitRepositoryLink() != "":
+			gitGroup.Properties = append(gitGroup.Properties, console.Property{Label: "Authentication method", Value: "Developer Connect"},
+				console.Property{Label: "Git repository link", Value: git.GetGitRepositoryLink()})
+		default:
+			gitGroup.Properties = append(gitGroup.Properties, console.Property{Label: "Authentication method", Value: "HTTPS"},
+				console.Property{Label: "Secret", Value: git.GetAuthenticationTokenSecretVersion()})
+		}
+		gitGroup.Properties = append(gitGroup.Properties, console.Property{Label: "Token status", Value: dataformTokenStatus(ctx, s, name)})
 	}
 	gitActions := []console.Action{{ID: "connectgit", Label: "Connect with Git"}}
 	if git != nil {
@@ -433,7 +448,28 @@ func dataformSelectionFields(ic *dfpb.InvocationConfig) []console.Field {
 		{Name: "dependencies", Label: "Include dependencies", Type: "checkbox", Default: strconv.FormatBool(ic.GetTransitiveDependenciesIncluded())},
 		{Name: "dependents", Label: "Include dependents", Type: "checkbox", Default: strconv.FormatBool(ic.GetTransitiveDependentsIncluded())},
 		{Name: "fullRefresh", Label: "Run with full refresh", Type: "checkbox", Default: strconv.FormatBool(ic.GetFullyRefreshIncrementalTablesEnabled())},
+		{Name: "unitTests", Label: "Run unit tests only", Type: "checkbox", Default: strconv.FormatBool(ic.GetExecutionMode() == dfpb.InvocationConfig_UNIT_TESTS_ONLY),
+			Help: "Runs the project's unit tests (type: \"test\") instead of its other actions."},
 	}
+}
+
+// dataformInvocationActionDetail is an invocation action's type, job and
+// script: a notebook's execution job and output, a unit test's two jobs
+// and queries, a data preparation's generated SQL.
+func dataformInvocationActionDetail(a *dfpb.WorkflowInvocationAction) (kind, job, script string) {
+	switch {
+	case a.GetNotebookAction() != nil:
+		n := a.GetNotebookAction()
+		return "Notebook", n.GetJobId(), "-- notebook " + n.GetFilePath() + "; the executed notebook is JOB_ID/" + path.Base(n.GetFilePath()) + " in the output bucket"
+	case a.GetBigqueryUnitTestAction() != nil:
+		u := a.GetBigqueryUnitTestAction()
+		return "Unit test", u.GetActualResultsJobId(), "-- actual results (" + u.GetActualResultsJobId() + ")\n" + strings.TrimSpace(u.GetActualResultsSqlScript()) +
+			"\n-- expected results (" + u.GetExpectedResultsJobId() + ")\n" + strings.TrimSpace(u.GetExpectedResultsSqlScript())
+	case a.GetDataPreparationAction() != nil:
+		d := a.GetDataPreparationAction()
+		return "Data preparation", d.GetJobId(), d.GetGeneratedSql()
+	}
+	return "BigQuery", a.GetBigqueryAction().GetJobId(), a.GetBigqueryAction().GetSqlScript()
 }
 
 func dataformTarget(t *dfpb.Target) string {
@@ -450,6 +486,9 @@ func dataformInvocationConfig(values map[string]string) (*dfpb.InvocationConfig,
 	ic := &dfpb.InvocationConfig{ServiceAccount: strings.TrimSpace(values["serviceAccount"]),
 		TransitiveDependenciesIncluded: values["dependencies"] == "true", TransitiveDependentsIncluded: values["dependents"] == "true",
 		FullyRefreshIncrementalTablesEnabled: values["fullRefresh"] == "true"}
+	if values["unitTests"] == "true" {
+		ic.ExecutionMode = dfpb.InvocationConfig_UNIT_TESTS_ONLY
+	}
 	switch values["scope"] {
 	case "actions":
 		for _, line := range strings.Split(values["actions"], "\n") {
@@ -799,20 +838,21 @@ func (p dataformProvider) invocationDetail(ctx context.Context, s *dataform.Serv
 	if err != nil {
 		return console.Detail{Unavailable: "cannot read the workflow execution: " + consoleErr(err)}
 	}
-	actions := console.Listing{Columns: []string{"State", "Start time", "End time", "BigQuery job", "Failure reason"}, NameColumn: "Action", Noun: "actions"}
+	actions := console.Listing{Columns: []string{"State", "Type", "Start time", "End time", "Job", "Failure reason"}, NameColumn: "Action", Noun: "actions"}
 	var log strings.Builder
 	if resp, err := s.QueryWorkflowInvocationActions(ctx, &dfpb.QueryWorkflowInvocationActionsRequest{Name: name, PageSize: 1000}); err == nil {
 		for _, a := range resp.GetWorkflowInvocationActions() {
 			st := dataformState(a.GetState().String())
 			t := dataformTarget(a.GetTarget())
+			kind, job, sql := dataformInvocationActionDetail(a)
 			actions.Items = append(actions.Items, console.Resource{Name: t, Status: st, Fields: map[string]string{
-				"State": st, "Start time": kmsTime(a.GetInvocationTiming().GetStartTime()), "End time": kmsTime(a.GetInvocationTiming().GetEndTime()),
-				"BigQuery job": kmsOrDash(a.GetBigqueryAction().GetJobId()), "Failure reason": kmsOrDash(a.GetFailureReason())}})
+				"State": st, "Type": kind, "Start time": kmsTime(a.GetInvocationTiming().GetStartTime()), "End time": kmsTime(a.GetInvocationTiming().GetEndTime()),
+				"Job": kmsOrDash(job), "Failure reason": kmsOrDash(a.GetFailureReason())}})
 			fmt.Fprintf(&log, "-- %s: %s\n", t, st)
 			if a.GetFailureReason() != "" {
 				fmt.Fprintf(&log, "-- %s\n", a.GetFailureReason())
 			}
-			if sql := a.GetBigqueryAction().GetSqlScript(); sql != "" {
+			if sql != "" {
 				log.WriteString(strings.TrimRight(sql, "\n") + "\n")
 			}
 			log.WriteString("\n")
@@ -937,12 +977,33 @@ func (dataformProvider) connectGitAction(repo *dfpb.Repository) console.Action {
 	if branch == "" {
 		branch = "main"
 	}
+	auth, secret := "https", g.GetAuthenticationTokenSecretVersion()
+	if c := g.GetSshAuthenticationConfig(); c != nil {
+		auth, secret = "ssh", c.GetUserPrivateKeySecretVersion()
+	}
 	return console.Action{ID: "connectgit", Label: "Connect with Git", Submit: "Link", Fields: []console.Field{
 		{Name: "url", Label: "Remote Git repository URL", Type: "text", Required: true, Default: g.GetUrl(),
-			Help: "The HTTPS URL of a Secure Source Manager repository of this instance (its git_https URI)."},
+			Help: "HTTPS: a Secure Source Manager repository of this instance (its git_https URI). SSH: ssh://USER@HOST:PORT/PATH or USER@HOST:PATH on this machine."},
 		{Name: "branch", Label: "Default remote branch name", Type: "text", Required: true, Default: branch},
-		{Name: "secret", Label: "Secret", Type: "text", Required: true, Default: g.GetAuthenticationTokenSecretVersion(),
-			Help: "The Secret Manager secret version holding the access token: projects/PROJECT/secrets/SECRET/versions/VERSION."}}}
+		{Name: "auth", Label: "Authentication method", Type: "radio", Default: auth, Options: []string{"https", "ssh", "account"},
+			OptionLabels: map[string]string{"https": "HTTPS", "ssh": "SSH", "account": "Personal authentication (Developer Connect account connector)"}},
+		{Name: "secret", Label: "Secret", Type: "text", ShowWhen: "auth=https", Default: secret,
+			Help: "The Secret Manager secret version holding the access token: projects/PROJECT/secrets/SECRET/versions/VERSION."},
+		{Name: "sshSecret", Label: "Secret", Type: "text", ShowWhen: "auth=ssh", Default: secret,
+			Help: "The Secret Manager secret version holding the SSH private key: projects/PROJECT/secrets/SECRET/versions/VERSION."},
+		{Name: "hostKey", Label: "SSH public host key value", Type: "textarea", ShowWhen: "auth=ssh", Default: g.GetSshAuthenticationConfig().GetHostPublicKey(),
+			Help: "The Git host's public key, as in known_hosts: TYPE BASE64 (for example ssh-ed25519 AAAA…)."},
+		{Name: "connector", Label: "Account connector", Type: "text", ShowWhen: "auth=account",
+			Help: "projects/PROJECT/locations/LOCATION/accountConnectors/CONNECTOR: each user connects their account in Developer Connect, and Git runs with their own token."}}}
+}
+
+// dataformAccountConnector is a repository's v1beta1 account connector.
+func dataformAccountConnector(ctx context.Context, s *dataform.Server, repo string) string {
+	out, err := s.CallBeta(ctx, "GetRepository", &b1pb.GetRepositoryRequest{Name: repo})
+	if err != nil {
+		return ""
+	}
+	return out.(*b1pb.Repository).GetGitRemoteSettings().GetAccountConnector()
 }
 
 func (p dataformProvider) ActAt(ctx context.Context, project string, pth []string, action string, values map[string]string) error {
@@ -1100,9 +1161,21 @@ func (p dataformProvider) actOnRepository(ctx context.Context, s *dataform.Serve
 			UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"workspace_compilation_overrides"}}})
 		return err
 	case "connectgit":
-		_, err := s.UpdateRepository(ctx, &dfpb.UpdateRepositoryRequest{Repository: &dfpb.Repository{Name: name,
-			GitRemoteSettings: &dfpb.Repository_GitRemoteSettings{Url: strings.TrimSpace(values["url"]), DefaultBranch: strings.TrimSpace(values["branch"]),
-				AuthenticationTokenSecretVersion: strings.TrimSpace(values["secret"])}},
+		g := &b1pb.Repository_GitRemoteSettings{Url: strings.TrimSpace(values["url"]), DefaultBranch: strings.TrimSpace(values["branch"])}
+		switch values["auth"] {
+		case "ssh":
+			g.SshAuthenticationConfig = &b1pb.Repository_GitRemoteSettings_SshAuthenticationConfig{
+				UserPrivateKeySecretVersion: strings.TrimSpace(values["sshSecret"]), HostPublicKey: strings.TrimSpace(values["hostKey"])}
+		case "account":
+			g.AccountConnector = proto.String(strings.TrimSpace(values["connector"]))
+		default:
+			if strings.TrimSpace(values["secret"]) == "" {
+				return errors.New("enter the secret holding the access token")
+			}
+			g.AuthenticationTokenSecretVersion = strings.TrimSpace(values["secret"])
+		}
+		// Through v1beta1, which has the account connector.
+		_, err := s.CallBeta(ctx, "UpdateRepository", &b1pb.UpdateRepositoryRequest{Repository: &b1pb.Repository{Name: name, GitRemoteSettings: g},
 			UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"git_remote_settings"}}})
 		return err
 	case "disconnectgit":

@@ -2019,14 +2019,15 @@
     "Key": "developerconnect",
     "Title": "Developer Connect",
     "counts": {
-      "Unimplemented": 13,
+      "Implemented": 12,
+      "Unimplemented": 1,
       "Verified": 13
     },
     "rows": [
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/CreateAccountConnector",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/CreateConnection",
@@ -2046,8 +2047,8 @@
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/DeleteAccountConnector",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/DeleteConnection",
@@ -2068,18 +2069,18 @@
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/DeleteSelf",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/DeleteUser",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/FetchAccessToken",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/FetchGitHubInstallations",
@@ -2116,18 +2117,18 @@
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/FetchSelf",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/FinishOAuth",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/GetAccountConnector",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/GetConnection",
@@ -2148,8 +2149,8 @@
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/ListAccountConnectors",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/ListConnections",
@@ -2168,18 +2169,18 @@
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/ListUsers",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/StartOAuth",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/UpdateAccountConnector",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/UpdateConnection",
@@ -19086,6 +19087,7 @@
         "method": "google.cloud.dataform.v1.Dataform/ComputeRepositoryAccessTokenStatus",
         "status": "Verified",
         "tests": [
+          "test/compat/dataform_pipelines_test.go:638 TestDataformSSHRemote",
           "test/compat/dataform_test.go:660 TestDataformSecureSourceManagerRemote"
         ]
       },
@@ -19093,6 +19095,8 @@
         "method": "google.cloud.dataform.v1.Dataform/CreateCompilationResult",
         "status": "Verified",
         "tests": [
+          "test/compat/dataform_pipelines_test.go:100 TestDataformNotebooksTestsAndDataPreparations",
+          "test/compat/dataform_pipelines_test.go:321 TestDataformPipelineConfig",
           "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke"
         ]
       },
@@ -19114,6 +19118,7 @@
         "method": "google.cloud.dataform.v1.Dataform/CreateReleaseConfig",
         "status": "Verified",
         "tests": [
+          "test/compat/dataform_pipelines_test.go:100 TestDataformNotebooksTestsAndDataPreparations",
           "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke"
         ]
       },
@@ -19121,6 +19126,7 @@
         "method": "google.cloud.dataform.v1.Dataform/CreateRepository",
         "status": "Verified",
         "tests": [
+          "test/compat/dataform_pipelines_test.go:638 TestDataformSSHRemote",
           "test/compat/dataform_terraform_test.go:22 TestTerraformDataformRepository",
           "test/compat/dataform_test.go:118 TestDataformWorkspaceFilesAndGit",
           "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke",
@@ -19138,6 +19144,7 @@
         "method": "google.cloud.dataform.v1.Dataform/CreateWorkflowConfig",
         "status": "Verified",
         "tests": [
+          "test/compat/dataform_pipelines_test.go:100 TestDataformNotebooksTestsAndDataPreparations",
           "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke"
         ]
       },
@@ -19145,6 +19152,7 @@
         "method": "google.cloud.dataform.v1.Dataform/CreateWorkflowInvocation",
         "status": "Verified",
         "tests": [
+          "test/compat/dataform_pipelines_test.go:100 TestDataformNotebooksTestsAndDataPreparations",
           "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke"
         ]
       },
@@ -19248,6 +19256,7 @@
         "method": "google.cloud.dataform.v1.Dataform/FetchRemoteBranches",
         "status": "Verified",
         "tests": [
+          "test/compat/dataform_pipelines_test.go:638 TestDataformSSHRemote",
           "test/compat/dataform_test.go:660 TestDataformSecureSourceManagerRemote"
         ]
       },
@@ -19321,6 +19330,7 @@
         "method": "google.cloud.dataform.v1.Dataform/GetWorkflowInvocation",
         "status": "Verified",
         "tests": [
+          "test/compat/dataform_pipelines_test.go:321 TestDataformPipelineConfig",
           "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke"
         ]
       },
@@ -19336,7 +19346,8 @@
         "method": "google.cloud.dataform.v1.Dataform/InstallNpmPackages",
         "status": "Verified",
         "tests": [
-          "test/compat/dataform_beta_test.go:862 TestDataformInstallNpmPackages"
+          "test/compat/dataform_beta_test.go:862 TestDataformInstallNpmPackages",
+          "test/compat/dataform_pipelines_test.go:321 TestDataformPipelineConfig"
         ]
       },
       {
@@ -19420,6 +19431,7 @@
         "method": "google.cloud.dataform.v1.Dataform/PullGitCommits",
         "status": "Verified",
         "tests": [
+          "test/compat/dataform_pipelines_test.go:638 TestDataformSSHRemote",
           "test/compat/dataform_test.go:118 TestDataformWorkspaceFilesAndGit",
           "test/compat/dataform_test.go:660 TestDataformSecureSourceManagerRemote"
         ]
@@ -19428,6 +19440,7 @@
         "method": "google.cloud.dataform.v1.Dataform/PushGitCommits",
         "status": "Verified",
         "tests": [
+          "test/compat/dataform_pipelines_test.go:638 TestDataformSSHRemote",
           "test/compat/dataform_test.go:118 TestDataformWorkspaceFilesAndGit",
           "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke",
           "test/compat/dataform_test.go:660 TestDataformSecureSourceManagerRemote"
@@ -19437,6 +19450,7 @@
         "method": "google.cloud.dataform.v1.Dataform/QueryCompilationResultActions",
         "status": "Verified",
         "tests": [
+          "test/compat/dataform_pipelines_test.go:100 TestDataformNotebooksTestsAndDataPreparations",
           "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke"
         ]
       },
@@ -19479,6 +19493,7 @@
         "method": "google.cloud.dataform.v1.Dataform/QueryWorkflowInvocationActions",
         "status": "Verified",
         "tests": [
+          "test/compat/dataform_pipelines_test.go:100 TestDataformNotebooksTestsAndDataPreparations",
           "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke"
         ]
       },
@@ -19604,8 +19619,7 @@
     "Key": "dataformv1beta1",
     "Title": "Dataform (v1beta1)",
     "counts": {
-      "Implemented": 2,
-      "Verified": 79
+      "Verified": 81
     },
     "rows": [
       {
@@ -19638,8 +19652,10 @@
       },
       {
         "method": "google.cloud.dataform.v1beta1.Dataform/ComputeRepositoryAccessTokenStatus",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_pipelines_test.go:421 TestDataformV1beta1RemoteBranchesAndTokenStatus"
+        ]
       },
       {
         "method": "google.cloud.dataform.v1beta1.Dataform/CreateCompilationResult",
@@ -19811,8 +19827,10 @@
       },
       {
         "method": "google.cloud.dataform.v1beta1.Dataform/FetchRemoteBranches",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_pipelines_test.go:421 TestDataformV1beta1RemoteBranchesAndTokenStatus"
+        ]
       },
       {
         "method": "google.cloud.dataform.v1beta1.Dataform/FetchRepositoryHistory",

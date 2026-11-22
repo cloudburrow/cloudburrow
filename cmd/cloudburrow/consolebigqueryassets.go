@@ -47,6 +47,11 @@ var dataformAssetFiles = map[string]string{
 	"sql":         "content.sql",
 	"notebook":    "content.ipynb",
 	"data_canvas": "content.canvas.json",
+	// A pipeline and a data preparation (#2105) keep the editor's model
+	// here and the Dataform project it describes beside it
+	// (consolebigqueryorchestration.go).
+	"pipeline":         "content.pipeline.json",
+	"data_preparation": "content.dataprep.json",
 }
 
 // dataformAssetLimit bounds an asset's content, as a request body is.
@@ -98,6 +103,9 @@ func (p dataformProvider) StudioCall(ctx context.Context, project, call string, 
 	}
 	if project == "" {
 		return nil, errors.New("choose a project first")
+	}
+	if out, ok, err := studioOrchestration(ctx, s, project, call, body); ok {
+		return out, err
 	}
 	var in studioAssetReq
 	if len(body) > 0 {
@@ -269,7 +277,7 @@ func studioAsset(ctx context.Context, s *dataform.Server, name string) (*dfpb.Re
 	}
 	file, ok := dataformAssetFiles[r.GetLabels()[dataformAssetLabel]]
 	if !ok {
-		return nil, "", fmt.Errorf("%s is not a saved query, notebook or data canvas", name)
+		return nil, "", fmt.Errorf("%s is not a saved query, notebook, data canvas, pipeline or data preparation", name)
 	}
 	return r, file, nil
 }
@@ -304,10 +312,17 @@ func studioSaveAsset(ctx context.Context, s *dataform.Server, project string, in
 	if name == "" {
 		_, ok := dataformAssetFiles[in.Kind]
 		if !ok {
-			return nil, fmt.Errorf("%q is not a code asset type: sql, notebook or data_canvas", in.Kind)
+			return nil, fmt.Errorf("%q is not a code asset type: sql, notebook, data_canvas, pipeline or data_preparation", in.Kind)
 		}
 		if in.DisplayName == "" {
 			return nil, errors.New("a code asset needs a name")
+		}
+		if studioGeneratedKinds[in.Kind] {
+			// Checked before the repository is made, so a model that does
+			// not compile leaves nothing behind.
+			if _, err := studioGeneratedFiles(project, in.Kind, in.Content); err != nil {
+				return nil, err
+			}
 		}
 		if len(in.DisplayName) > 256 {
 			return nil, errors.New("a code asset's name is at most 256 characters")
@@ -335,10 +350,22 @@ func studioSaveAsset(ctx context.Context, s *dataform.Server, project string, in
 	if err != nil {
 		return nil, err
 	}
+	kind := r.GetLabels()[dataformAssetLabel]
+	ops := map[string]*dfpb.CommitRepositoryChangesRequest_FileOperation{}
+	if studioGeneratedKinds[kind] {
+		// A pipeline or data preparation saves the Dataform project its
+		// model describes, so Run and its schedules compile it.
+		files, err := studioGeneratedFiles(project, kind, in.Content)
+		if err != nil {
+			return nil, err
+		}
+		ops = studioGeneratedOps(ctx, s, name, files)
+	}
+	ops[file] = &dfpb.CommitRepositoryChangesRequest_FileOperation{Operation: &dfpb.CommitRepositoryChangesRequest_FileOperation_WriteFile_{
+		WriteFile: &dfpb.CommitRepositoryChangesRequest_FileOperation_WriteFile{Contents: []byte(in.Content)}}}
 	if _, err := s.CommitRepositoryChanges(ctx, &dfpb.CommitRepositoryChangesRequest{Name: name,
 		CommitMetadata: &dfpb.CommitMetadata{Author: &dfpb.CommitAuthor{Name: "BigQuery Studio", EmailAddress: "studio@cloudburrow.local"}, CommitMessage: "Save " + studioDisplay(r)},
-		FileOperations: map[string]*dfpb.CommitRepositoryChangesRequest_FileOperation{file: {Operation: &dfpb.CommitRepositoryChangesRequest_FileOperation_WriteFile_{
-			WriteFile: &dfpb.CommitRepositoryChangesRequest_FileOperation_WriteFile{Contents: []byte(in.Content)}}}}}); err != nil {
+		FileOperations: ops}); err != nil {
 		return nil, err
 	}
 	return map[string]any{"name": name, "kind": r.GetLabels()[dataformAssetLabel], "displayName": studioDisplay(r), "location": kmsLocation(name), "parent": r.GetContainingFolder()}, nil

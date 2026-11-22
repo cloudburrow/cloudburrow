@@ -43,7 +43,9 @@ import (
 // UNIMPLEMENTED: they authorize a hosted provider, which no instance
 // reaches. FetchReadToken and FetchReadWriteToken mint tokens the
 // instance's git server accepts (developerconnecttokens.go, #1955); account
-// connectors and insights configs are UNIMPLEMENTED.
+// connectors connect a user's account through the instance's own OAuth
+// authorization server (developerconnectaccounts.go, #2105); insights
+// configs are UNIMPLEMENTED.
 
 // DeveloperConnectServer serves Developer Connect's connections and links.
 type DeveloperConnectServer struct {
@@ -72,6 +74,9 @@ const dcStateFile = "developerconnect.json"
 type dcSaved struct {
 	Connections []json.RawMessage `json:"connections"`
 	Links       []json.RawMessage `json:"gitRepositoryLinks"`
+	// AccountConnectors and Users are developerconnectaccounts.go's.
+	AccountConnectors []json.RawMessage `json:"accountConnectors,omitempty"`
+	Users             []json.RawMessage `json:"users,omitempty"`
 }
 
 // loadDCLocked reads what a previous run saved beside the repositories.
@@ -81,12 +86,15 @@ func loadDCLocked() {
 		return
 	}
 	dcState.loaded = root
+	var saved dcSaved
+	// The account connectors are the new root's alone, saved or not.
+	defer func() { loadDCAccountsLocked(saved.AccountConnectors, saved.Users) }()
 	b, err := os.ReadFile(filepath.Join(root, dcStateFile))
 	if err != nil {
 		return
 	}
-	var saved dcSaved
 	if json.Unmarshal(b, &saved) != nil {
+		saved = dcSaved{}
 		return
 	}
 	for _, raw := range saved.Connections {
@@ -117,6 +125,7 @@ func saveDCLocked() {
 		b, _ := protojson.Marshal(dcState.links[name])
 		saved.Links = append(saved.Links, b)
 	}
+	saved.AccountConnectors, saved.Users = saveDCAccountsLocked()
 	b, _ := json.MarshalIndent(saved, "", "  ")
 	tmp := filepath.Join(root, dcStateFile+".tmp")
 	if os.WriteFile(tmp, b, 0o600) == nil {
