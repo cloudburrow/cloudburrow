@@ -47,6 +47,9 @@ type scriptChild struct {
 	kind        string // STATEMENT or EXPRESSION
 	text        string
 	frames      []childFrame
+	// spark is the sparkStatistics of a CALL of a procedure for Apache
+	// Spark (sparkprocs.go, #2104).
+	spark map[string]any
 }
 
 // childFrame is one of a child job's scriptStatistics.stackFrames: the
@@ -207,6 +210,14 @@ func (j *jobRecords) patchScript(job map[string]any, project string) bool {
 				stats["query"] = qs
 			}
 			qs["statementType"] = typ
+		}
+		if child.spark != nil {
+			qs, _ := stats["query"].(map[string]any)
+			if qs == nil {
+				qs = map[string]any{}
+				stats["query"] = qs
+			}
+			qs["sparkStatistics"] = child.spark
 		}
 	}
 	return true

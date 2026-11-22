@@ -102,6 +102,13 @@ type VideoOptions struct {
 	Start, End time.Duration
 	// FPS is the sampling rate; zero means DefaultVideoFPS.
 	FPS float64
+	// Matroska also takes the Matroska and WebM containers
+	// (MatroskaMIMETypes), which multimodalembedding@001 takes and
+	// gemini-embedding-2 does not (#1651).
+	Matroska bool
+	// Container, when set, decodes the AVI, FLV, MPEG and WMV containers
+	// (ContainerMIMETypes), which multimodalembedding@001 also takes.
+	Container ContainerDecoder
 }
 
 // ErrVideoCodec is a codec Google takes that this build cannot decode.
@@ -122,6 +129,9 @@ type videoTrack struct {
 	nalLengthSize int
 	vpcC          *mp4.VppCBox // VP9's colour description
 	av1Config     []byte       // AV1's configOBUs: the sequence header
+	// ext decodes a container read by a ContainerDecoder (extData).
+	ext     ContainerDecoder
+	extData []byte
 }
 
 // DecodeVideo samples the frames of an MP4 or MOV video, each at full
@@ -153,13 +163,7 @@ func DecodeVideoPatched(mimeType string, data []byte, opt VideoOptions) ([]image
 }
 
 func decodeVideo(mimeType string, data []byte, opt VideoOptions, patch bool) ([]image.Image, error) {
-	if !videoMIMETypes[baseMIME(mimeType)] {
-		return nil, fmt.Errorf("mime_type %q is not supported; send one of %s", mimeType, strings.Join(VideoMIMETypes, ", "))
-	}
-	if len(data) == 0 {
-		return nil, fmt.Errorf("the video data is empty")
-	}
-	tr, err := readVideoTrack(data)
+	tr, err := readVideoOf(mimeType, data, opt)
 	if err != nil {
 		return nil, err
 	}
@@ -218,6 +222,45 @@ func decodeVideo(mimeType string, data []byte, opt VideoOptions, patch bool) ([]
 		out[k] = frames[want[k]]
 	}
 	return out, nil
+}
+
+// VideoDuration is the presentation length of an MP4 or MOV video's first
+// video track, for multimodalembedding@001's videoSegmentConfig (#1651),
+// whose segments end at the video's end.
+func VideoDuration(mimeType string, data []byte, opt VideoOptions) (time.Duration, error) {
+	tr, err := readVideoOf(mimeType, data, opt)
+	if err != nil {
+		return 0, err
+	}
+	return time.Duration(float64(tr.end) / float64(tr.timescale) * float64(time.Second)), nil
+}
+
+// readVideoOf reads a video's first video track: an MP4 or MOV file, or
+// with matroska a Matroska or WebM one.
+func readVideoOf(mimeType string, data []byte, opt VideoOptions) (*videoTrack, error) {
+	mt := baseMIME(mimeType)
+	mkv := opt.Matroska && matroskaMIMETypes[mt]
+	ext := opt.Container != nil && containerMIMETypes[mt]
+	if !videoMIMETypes[mt] && !mkv && !ext {
+		types := VideoMIMETypes
+		if opt.Matroska {
+			types = append(append([]string(nil), VideoMIMETypes...), MatroskaMIMETypes...)
+		}
+		if opt.Container != nil {
+			types = append(append([]string(nil), types...), ContainerMIMETypes...)
+		}
+		return nil, fmt.Errorf("mime_type %q is not supported; send one of %s", mimeType, strings.Join(types, ", "))
+	}
+	if len(data) == 0 {
+		return nil, fmt.Errorf("the video data is empty")
+	}
+	if mkv {
+		return readMatroskaTrack(data)
+	}
+	if ext {
+		return readContainerTrack(opt.Container, data)
+	}
+	return readVideoTrack(data)
 }
 
 // sampleTimes are the presentation times (in tr.timescale units) of the
@@ -432,6 +475,9 @@ func progressiveSamples(st *mp4.StblBox, data []byte,
 // decodeSamples decodes the pictures of the samples in want, starting each
 // at the sync sample before it, and returns them by sample index.
 func decodeSamples(tr *videoTrack, want []int, conv frameConv) (map[int]image.Image, error) {
+	if tr.ext != nil {
+		return decodeContainerSamples(tr, want, conv)
+	}
 	// Group the wanted samples by the sync sample they are decoded from.
 	groups := map[int][]int{}
 	for _, s := range want {

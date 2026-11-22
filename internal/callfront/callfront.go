@@ -39,6 +39,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/calllog"
 	"github.com/cloudburrow/cloudburrow/internal/cmek"
 	"github.com/cloudburrow/cloudburrow/internal/datastoreversions"
+	"github.com/cloudburrow/cloudburrow/internal/faultgate"
 	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin"
 	"github.com/cloudburrow/cloudburrow/internal/frontready"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
@@ -338,6 +339,9 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// Disabled APIs (#1914) are the host's too.
 		apienable.Use(&apienable.Remote{Base: *resourceManager})
 		defer apienable.Use(nil)
+		// Fault rules (#2113) are the host's, applied here.
+		faultgate.Use(&faultgate.Remote{Base: *resourceManager})
+		defer faultgate.Use(nil)
 	}
 	ring := &calllog.Ring{}
 	pairs := [][2]string{{*listen, *upstream}}
@@ -570,7 +574,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 func gateAPI(h http.Handler, service string) http.Handler {
 	switch service {
 	case "firestore", "datastore", "spanner":
-		return apienable.Gate(nil, service+".googleapis.com", h)
+		// Fault rules (#2113) apply after the API gate, as in process.
+		return apienable.Gate(nil, service+".googleapis.com", faultgate.Gate(service, h))
 	}
 	return h
 }

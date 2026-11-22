@@ -1,6 +1,7 @@
 package vertexai
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -135,6 +136,12 @@ func embeddingModelID(requested, verb string) (string, error) {
 			return id, nil
 		}
 	}
+	if strings.HasPrefix(r, "multimodalembedding") {
+		return "", apierror.NotFound(
+			"model %q is not served for %s: no substitution is performed. multimodalembedding@001's request "+
+				"(instances of text, image and video) is served on %q, a community ONNX conversion of EmbeddingGemma 2 "+
+				"that is not an official Google artifact", requested, verb, localai.EmbeddingGemma2ONNXID)
+	}
 	return "", apierror.NotFound(
 		"model %q is not served for %s; the embedding models here are %q and %q, "+
 			"community ONNX conversions of EmbeddingGemma and EmbeddingGemma 2 that are not official Google artifacts. "+
@@ -160,7 +167,15 @@ func (s *Server) embedPredict(ctx context.Context, requested string, body io.Rea
 		return nil, err
 	}
 
-	dec := json.NewDecoder(io.LimitReader(body, maxRequestBytes))
+	raw, err := io.ReadAll(io.LimitReader(body, maxRequestBytes))
+	if err != nil {
+		return nil, apierror.InvalidArgument("reading the request body: %v", err)
+	}
+	// multimodalembedding@001's instances: text, image and video (#1651).
+	if isMultimodalPredict(raw) {
+		return s.multimodalPredict(ctx, e, raw)
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	var req PredictRequest
 	if err := dec.Decode(&req); err != nil {

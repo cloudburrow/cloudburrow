@@ -36,6 +36,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -578,6 +579,9 @@ func (f *FunctionsServer) eaDeliverHTTP(ctx context.Context, pipeline string, d 
 			}
 		}
 	}
+	if job := EventarcRunJobOf(he.GetUri()); job != "" {
+		return f.eaRunJob(ctx, d, job, body)
+	}
 	loc := eaLocOf(pipeline)
 	target, local, err := (&EventarcServer{f: f}).eaEndpoint(loc, he.GetUri())
 	if err != nil {
@@ -625,6 +629,49 @@ func (f *FunctionsServer) eaDeliverHTTP(ctx context.Context, pipeline string, d 
 	_, _ = io.Copy(io.Discard, resp.Body)
 	if resp.StatusCode/100 != 2 {
 		return fmt.Errorf("the endpoint answered %s", resp.Status)
+	}
+	return nil
+}
+
+// eaRunJobURI is the Cloud Run Admin API's jobs.run, global or regional:
+// the HTTP endpoint a pipeline's Cloud Run job (via HTTP) destination calls
+// (#2098), POST https://run.googleapis.com/v2/{name}:run with a
+// RunJobRequest body.
+var eaRunJobURI = regexp.MustCompile(`^https://(?:[a-z0-9-]+-)?run\.googleapis\.com/v2/(projects/[^/]+/locations/[^/]+/jobs/[^/:?#]+):run$`)
+
+// EventarcRunJobOf is the job an HTTP endpoint URI runs, "" when it is not
+// a jobs.run call.
+func EventarcRunJobOf(uri string) string {
+	if m := eaRunJobURI.FindStringSubmatch(uri); m != nil {
+		return m[1]
+	}
+	return ""
+}
+
+// EventarcRunJobURI is the jobs.run URI of a job.
+func EventarcRunJobURI(job string) string { return "https://run.googleapis.com/v2/" + job + ":run" }
+
+// eaRunJob is a delivery to jobs.run, served by this instance's Cloud Run
+// Admin API in process, never by Google's. As on Google, the call needs an
+// OAuth token (the destination's authentication), and the body, which the
+// message binding builds, must be a RunJobRequest: anything else is the
+// API's 400.
+func (f *FunctionsServer) eaRunJob(ctx context.Context, d *eventarcpb.Pipeline_Destination, job string, body []byte) error {
+	if d.GetAuthenticationConfig().GetOauthToken() == nil {
+		return fmt.Errorf("the endpoint answered 401 Unauthorized: the Cloud Run Admin API needs an OAuth token; enable the destination's OAuth token authentication")
+	}
+	if f.s == nil {
+		return fmt.Errorf("the Cloud Run Admin API is not served by this instance")
+	}
+	req := &runpb.RunJobRequest{}
+	if b := bytes.TrimSpace(body); len(b) > 0 {
+		if err := protojson.Unmarshal(b, req); err != nil {
+			return fmt.Errorf("the endpoint answered 400 Bad Request: the body is not a RunJobRequest (%v); define a message binding that builds one", err)
+		}
+	}
+	req.Name = job
+	if _, err := f.s.Jobs().RunJob(ctx, req); err != nil {
+		return fmt.Errorf("the endpoint answered: %w", err)
 	}
 	return nil
 }

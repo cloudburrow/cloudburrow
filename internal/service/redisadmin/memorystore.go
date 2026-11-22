@@ -867,6 +867,9 @@ func (s *MemorystoreServer) UpdateInstance(ctx context.Context, req *memorystore
 	if r.state != clusterpb.Cluster_ACTIVE {
 		return nil, apierror.FailedPrecondition("instance %s is %s: an instance is updated only when ACTIVE", r.Name, r.state)
 	}
+	if r.KeyState != "" && (set["persistence_config"] || set["automated_backup_config"]) {
+		return nil, errKeyUnavailable(r)
+	}
 	rotate := set["rotate_server_certificate"]
 	if rotate && (r.ServerCAMode != clusterpb.ServerCaMode_SERVER_CA_MODE_CUSTOMER_MANAGED_CAS_CA.String() || r.TransitCA == "") {
 		return nil, errRotateNotCustomer

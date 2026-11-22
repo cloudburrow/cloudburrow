@@ -108,7 +108,8 @@ COMPAT_LOCALAI_TEST_NAMES="
   BigQueryAutonomousEmbeddingsAndAISearch
   BigQueryConnectionGroupMembers1812 BigQueryMLAnnotateImage
   BigQueryMLAnnotateImageDetections BigQueryMLAnnotateImageLabels
-  BigQueryMLImportedONNXModel BigQueryMLProcessDocument
+  BigQueryMLImportedONNXModel BigQueryMLImportedONNXModelOverImages
+  BigQueryMLProcessDocument
   BigQueryMLTensorFlowImportGenerated
   BigQueryMLRemoteConnectionPermissions BigQueryMLRemoteDefaultConnection
   BigQueryMLRemoteGenerateEmbedding BigQueryMLRemoteGenerateText
@@ -116,11 +117,14 @@ COMPAT_LOCALAI_TEST_NAMES="
   BigQueryMLTranslate BigQueryMLUnderstandText
   BigQueryObjectRefAIFunctions BigQueryObjectRefEmbeddingsAndSearch
   BigQueryVectorSearchAutonomousEmbeddings
+  CachedContentsThroughTheOfficialSDK
   ConsoleEmbeddingsPlaygroundMatchesTheOfficialSDK
   ConsoleLocalModelsLoadEmbedUnload
   ConsoleLocalModelsUnloadDeleteDownloadLoad
   CountTokensAndComputeTokensThroughTheOfficialSDK DocumentAIBatchProcess
-  DocumentAIBatchShardsAndFieldMask DocumentAIEvaluationsAndReview
+  DocumentAIBatchShardsAndFieldMask DocumentAICustomProcessorsThroughTheOfficialClients
+  DocumentAICustomSplitterThroughTheOfficialClient
+  DocumentAIEvaluationsAndReview
   DocumentAIProcessorVersions DocumentAIProcessors
   TerraformDocumentAIProcessorDefaultVersion
   EmbedContentEmbeds16KVideoThroughThePredictionClient
@@ -147,14 +151,21 @@ COMPAT_LOCALAI_TEST_NAMES="
   EmbedContentThroughThePredictionClient
   EmbeddingGemmaThroughTheOfficialSDK
   EmbeddingGemmaThroughThePredictionClient
+  GenerateContentCandidateCountThroughTheOfficialSDK
   GenerateContentFunctionCallingRoundTripThroughTheOfficialSDK
   GenerateContentImagePartThroughTheOfficialSDK
+  GenerateContentLogprobsTopCandidatesThroughTheOfficialSDK
+  GenerateContentLogprobsWithOtherFeaturesThroughTheOfficialSDK
   GenerateContentMultiTurnChatThroughTheOfficialSDK
+  GenerateContentResponseLogprobsThroughTheOfficialSDK
+  GenerateContentThinkingConfigThroughTheOfficialSDK
   GenerateContentThroughTheOfficialSDK
   GenerationNeverUsesApplicationDefaultCredentials
+  MultimodalEmbeddingPredictThroughThePredictionClient
   RawPredictOnTheEmbeddingModel RawPredictOnTheGenerationModel
   SpeechAdaptationBoost SpeechAdaptationResources SpeechBatchRecognize
   SpeechRecognitionFeatures1799 SpeechRecognizers SpeechStreamingRecognize SpeechV1
+  SpeechV1AdaptationResources
   StreamGenerateContentThroughTheOfficialSDK
   StreamGenerateContentThroughThePredictionClient
   StreamingPredictOnTheEmbeddingModel StreamingPredictOnTheGenerationModel
@@ -181,13 +192,17 @@ COMPAT_SHARDS="storage served run crossservice scale emulators memorystore sql s
 # KMS Inventory's protected resources (#2053: a CMEK bucket and a BigQuery
 # dataset beside the key, through the client and gcloud), and Firestore's
 # and Cloud Tasks' metrics in Cloud Monitoring (#2050, Firestore or Cloud
-# Tasks with Monitoring), which no other shard serves together. And Cloud
-# Run's own tests (TestRun*) with gcloud's and Terraform's of Cloud Run and
-# Cloud Functions (about 1,430 s): main run 44905534820 cancelled the run
+# Tasks with Monitoring), and Cloud Asset's analyzeIamPolicyLongrunning to
+# BigQuery (#2112, Resource Manager with BigQuery), and its analysis of
+# Pub/Sub topics and Cloud Run services under a scope (#2112, Resource
+# Manager with Pub/Sub and Cloud Run), which no other shard serves together.
+# And Cloud Run's own tests (TestRun*) with gcloud's and Terraform's of
+# Cloud Run and Cloud Functions (about 1,430 s): main run 44905534820 cancelled the run
 # shard at its 90m, its suite at 4,021 s (3,157 s in 44858607986) and its
 # browser step at 22 minutes of its 30m once #2123 moved Cloud Build's and
 # the Logging console rounds' browser tests there; crossservice was 29m.
 COMPAT_CROSSSERVICE_TEST_NAMES="ArtifactRegistryCleanupPolicies
+  CloudAssetAnalyzeIamPolicyLongrunningBigQuery CloudAssetAnalyzeIamPolicyServiceResources
   FirestoreDocumentMetrics FirestoreStreamMetrics GcloudKMSInventory
   KMSInventoryCountsCMEKResources TasksQueueMetricsInCloudMonitoring
   GcloudPubSubTopicStoragePolicyUpdate GcloudStorageInsightsDatasetConfigs
@@ -252,10 +267,16 @@ COMPAT_SQL_REPLICA_TESTS='^Test[A-Za-z]*SQL[A-Za-z0-9]*(HighAvailability|Replica
 # the Logging console rounds (TestLoggingConsole*, #2021, #2031, #2032),
 # whose Log Analytics screen needs BigQuery beside Cloud Logging and Cloud
 # Monitoring, which only the run shard's instance serves together.
+# Cloud Trace's pages (TestTraceExplorer*, #2118) and the Compute Engine
+# Permissions panel (TestComputePermissions*, #2125, which needs Compute
+# Engine) run in served, and only there. The Cloud Storage picker over
+# Document AI and Speech-to-Text (TestStoragePicker*, #2097), whose screens
+# are drawn where Cloud Run serves the local AI endpoint, and Logging's App
+# Hub dimensions (TestLoggingAppHub*, #2096), which need App Hub, run in run.
 COMPAT_BROWSER_SHARDS="storage served run emulators memorystore sql localai"
-COMPAT_BROWSER_SERVED_SHARD_TESTS='^Test(GKEServed|KubernetesEnginePages|VPCNetwork|ComputeEngine)'
-COMPAT_BROWSER_SERVED_ONLY_TESTS='^Test(GKEServed|VPCNetwork|ComputeEngine)'
-COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|CloudBuild|LoggingAdmin|LoggingConsole|SecretManager|Eventarc|DocumentAI|Speech|Workflows|ModelRegistry|Dataform|AppHub)'
+COMPAT_BROWSER_SERVED_SHARD_TESTS='^Test(GKEServed|KubernetesEnginePages|VPCNetwork|ComputeEngine|ComputePermissions|TraceExplorer)'
+COMPAT_BROWSER_SERVED_ONLY_TESTS='^Test(GKEServed|VPCNetwork|ComputeEngine|ComputePermissions|TraceExplorer)'
+COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|CloudBuild|LoggingAdmin|LoggingConsole|LoggingAppHub|SecretManager|Eventarc|DocumentAI|Speech|StoragePicker|Workflows|ModelRegistry|Dataform|AppHub)'
 COMPAT_BROWSER_EMULATORS_SHARD_TESTS='^Test(BigQuery|Firestore|Datastore|Bigtable|Spanner)'
 COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS='^TestMemorystore'
 COMPAT_BROWSER_SQL_SHARD_TESTS='^Test(CloudSQL|BackupDR|PrivateCAKMS)'
@@ -296,6 +317,7 @@ compat_shard() {
   # The localai shard's switches, unset for every other shard: verify-local.sh
   # runs the shards one after another in one shell.
   unset CLOUDBURROW_TEST_ONNX CLOUDBURROW_TEST_VISION_LABELS CLOUDBURROW_TEST_VISION_DETECT
+  unset CLOUDBURROW_TEST_SPARK
   # What every instance has, whatever its services: the ADC fixture
   # (#346), the instance's own kubeconfig and kind cluster (#346, never
   # the default kubeconfig), the admin API, the metadata server (#303),
@@ -349,7 +371,9 @@ compat_shard() {
       PROBE_TESTS="TestSecretManagerAcrossRestart TestTasksAcrossRestart TestSchedulerAcrossRestart TestStorageAcrossRestart"
       PROBE_VARS=SECRETS,TASKS,SCHEDULER,STORAGE ;;
     served)
-      SERVICES=kms,logging,privateca,gke,monitoring,compute
+      # Cloud Trace (#2118), beside the Cloud Logging its spans' log
+      # entries are correlated with.
+      SERVICES=kms,logging,privateca,gke,monitoring,compute,trace
       # The Kubernetes Engine API (#1913): its clusters are kind clusters
       # beside the instance's. Service Usage as GKE_SERVICEUSAGE, which
       # `gcloud container clusters create` asks whether
@@ -366,7 +390,7 @@ compat_shard() {
       # 38910752877: in storage gcloud had no logging override).
       # Cloud KMS Autokey's folder and project tests (#1568) make their
       # folder with it too.
-      TEST_VARS+=,KMS,LOGGING,LOGGING_RESOURCEMANAGER,PRIVATECA,GKE,GKE_SERVICEUSAGE,MONITORING,COMPUTE
+      TEST_VARS+=,KMS,LOGGING,LOGGING_RESOURCEMANAGER,PRIVATECA,GKE,GKE_SERVICEUSAGE,MONITORING,COMPUTE,TRACE
       # Cloud KMS (#418): a key with ENABLED, DISABLED and
       # DESTROY_SCHEDULED versions and a ciphertext.
       SETUP_TESTS="TestKMSRestartSetup"
@@ -398,7 +422,9 @@ compat_shard() {
       # access tokens Secret Manager's.
       # App Hub (#2110), which discovers this shard's Cloud Run services
       # and jobs.
-      SERVICES=run,secretmanager,tasks,storage,pubsub,firestore,datastore,gke,memorystore,kms,scheduler,logging,bigquery,cloudsql,cloudsql-mysql,workflows,monitoring,dataform,apphub
+      # trace (#2118): Cloud Run's request spans, exported by Knative's
+      # queue-proxy to Cloud Trace, read back as RUN_TRACE.
+      SERVICES=run,secretmanager,tasks,storage,pubsub,firestore,datastore,gke,memorystore,kms,scheduler,logging,bigquery,cloudsql,cloudsql-mysql,workflows,monitoring,dataform,apphub,trace
       # Cloud Run (#336). For the revisions that reach Storage and Pub/Sub
       # with no client options (#576) and call KMS, Scheduler and Logging
       # (#681), the RUN_* names, so those suites do not run a second time
@@ -435,7 +461,7 @@ compat_shard() {
       # without a model, for the Document AI and Speech-to-Text
       # customer-managed key tests (with RUN_KMS); LOCALAI, which the
       # generation tests read, is not exported, so they still skip.
-      TEST_VARS+=,RUN,SECRETS,TASKS,RUN_STORAGE,RUN_PUBSUB,RUN_FIRESTORE,RUN_DATASTORE,RUN_GKE,RUN_MEMORYSTORE_ADMIN,RUN_KMS,RUN_LOCALAI,RUN_SCHEDULER,RUN_LOGGING,RUN_BIGQUERY,RUN_SQLADMIN,RUN_RESOURCEMANAGER,RUN_SERVICEUSAGE,RUN_APIKEYS,RUN_MYSQL,MYSQL_PASSWORD,BIGQUERY_PROJECT,APPENGINE_URL,WORKFLOWS,DATAFORM,APPHUB
+      TEST_VARS+=,RUN,SECRETS,TASKS,RUN_STORAGE,RUN_PUBSUB,RUN_FIRESTORE,RUN_DATASTORE,RUN_GKE,RUN_MEMORYSTORE_ADMIN,RUN_KMS,RUN_LOCALAI,RUN_SCHEDULER,RUN_LOGGING,RUN_BIGQUERY,RUN_SQLADMIN,RUN_RESOURCEMANAGER,RUN_SERVICEUSAGE,RUN_APIKEYS,RUN_MYSQL,MYSQL_PASSWORD,BIGQUERY_PROJECT,APPENGINE_URL,WORKFLOWS,DATAFORM,APPHUB,RUN_TRACE
       if [ "$1" = crossservice ]; then
         # The run shard's instance again, for COMPAT_CROSSSERVICE_TESTS only, with
         # the plain names of the services they read: COMPAT_RUN keeps every
@@ -499,7 +525,26 @@ compat_shard() {
       # Federation's (#2056), its SAML exchange read through Cloud Storage
       # and its pools' own IAM policies (#2065), and SCIM-provisioned users and
       # groups read through Cloud Storage (#2068), which need enforcement.
-      COMPAT_RUN='^Test(IAMEnforcement|WorkloadIdentityFederationStorage$|WorkforceIdentityFederationStorage$|WorkforceIdentityFederationSAML$|WorkforcePoolIAMPolicy$|WorkforceScimProvisioning$)' ;;
+      # And Cloud Asset's analysis of every asset type with an allow policy
+      # (#2112): BigQuery, Spanner, Bigtable, Cloud KMS, Compute Engine and
+      # Resource Manager's tags on one instance, which only this shard serves
+      # together.
+      COMPAT_RUN='^Test(IAMEnforcement|WorkloadIdentityFederationStorage$|WorkforceIdentityFederationStorage$|WorkforceIdentityFederationSAML$|WorkforcePoolIAMPolicy$|WorkforceScimProvisioning$|CloudAssetAnalyzeIamPolicyEveryAssetType$)' ;;
+    spark)
+      # BigQuery's stored procedures for Apache Spark (#2104), nightly only
+      # (nightly-sql-ephemeral.yml's spark job), not one of ci.yml's
+      # COMPAT_SHARDS: spark-submit runs in the pinned apache/spark images
+      # (one per Spark of the runtime versions) with Google's BigQuery
+      # connector from Maven Central. Cloud Storage for the procedures'
+      # files, Cloud Logging for their output, Cloud Run for the Artifact
+      # Registry a container_image is read from, and Resource Manager and
+      # the metadata server for the invoker's minted tokens, and Cloud KMS
+      # for a procedure's customer-managed key.
+      SERVICES=bigquery,storage,logging,run,kms
+      TEST_VARS+=,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT,BIGQUERY_RESOURCEMANAGER,RESOURCEMANAGER,STORAGE,LOGGING,RUN,KMS,GCLOUD
+      export CLOUDBURROW_TEST_SPARK=1
+      COMPAT_RUN='^Test(BigQuerySpark|BqSpark)'
+      COMPAT_TIMEOUT=150m ;;
     localai)
       # The local AI tests (#1985): BigQuery and Cloud Storage for the AI
       # and ML functions' tables and object tables, Resource Manager (every

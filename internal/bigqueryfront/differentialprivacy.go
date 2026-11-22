@@ -1074,12 +1074,17 @@ func (f front) dpCompute(r *http.Request, q queryOptions, s []token, at *privacy
 					"the policy for table %s", pol.maxGroups, at.name))
 			}
 		}
-		project := projectOf(f.base)
-		created, text := "", ""
-		if meta, ok := f.metaOf(r, at.tr.dataset, at.tr.table); ok {
-			created, text = str(meta, "creationTime"), f.privacyOf(project, at.tr.dataset, at.tr.table, meta)
+		project, dataset, bf := projectOf(f.base), at.tr.dataset, f
+		if at.srcProject != "" {
+			// A linked dataset's view spends its shared view's budget
+			// (#2101): every subscriber's queries draw from it.
+			project, dataset, bf = at.srcProject, at.srcDataset, f.inProject(at.srcProject)
 		}
-		budgetKey = streamKey(project, at.tr.dataset, at.tr.table) + "\x00" + created + "\x00" + text
+		created, text := "", ""
+		if meta, ok := bf.metaOf(r, dataset, at.tr.table); ok {
+			created, text = str(meta, "creationTime"), bf.privacyOf(project, dataset, at.tr.table, meta)
+		}
+		budgetKey = streamKey(project, dataset, at.tr.table) + "\x00" + created + "\x00" + text
 		b := f.dpBudgets()
 		b.mu.Lock()
 		got := b.spent[budgetKey]

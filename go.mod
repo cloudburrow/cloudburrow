@@ -8,6 +8,7 @@ require (
 	cloud.google.com/go/aiplatform v1.127.0
 	cloud.google.com/go/apphub v1.4.1
 	cloud.google.com/go/artifactregistry v1.27.0
+	cloud.google.com/go/asset v1.30.1
 	cloud.google.com/go/auth v0.24.1
 	cloud.google.com/go/backupdr v1.18.0
 	cloud.google.com/go/bigquery v1.85.0
@@ -34,6 +35,7 @@ require (
 	cloud.google.com/go/logging v1.20.0
 	cloud.google.com/go/longrunning v1.5.0
 	cloud.google.com/go/memorystore v1.7.0
+	cloud.google.com/go/observability v0.1.1
 	cloud.google.com/go/orgpolicy v1.22.1
 	cloud.google.com/go/parametermanager v1.2.1
 	cloud.google.com/go/policytroubleshooter v1.18.1
@@ -50,8 +52,10 @@ require (
 	cloud.google.com/go/storagebatchoperations v1.3.1
 	cloud.google.com/go/storageinsights v1.10.1
 	cloud.google.com/go/storagetransfer v1.21.1
+	cloud.google.com/go/trace v1.18.1
 	cloud.google.com/go/workflows v1.22.1
 	github.com/Eyevinn/mp4ff v0.63.0
+	github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/trace v1.39.0
 	github.com/apache/arrow-go/v18 v18.8.0
 	github.com/apache/iceberg-go v0.7.0
 	github.com/beevik/etree v1.7.0
@@ -103,7 +107,7 @@ require (
 	golang.org/x/sys v0.49.0
 	google.golang.org/api v0.314.0
 	google.golang.org/genai v1.77.0
-	google.golang.org/genproto v0.0.0-20261012220534-4341edf3f941
+	google.golang.org/genproto v0.0.0-20261019180522-ce908d29299b
 	google.golang.org/genproto/googleapis/api v0.0.0-20261019180522-ce908d29299b
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20261104224025-d1e00e9f33ab
 	google.golang.org/grpc v1.85.0
@@ -112,6 +116,8 @@ require (
 )
 
 require (
+	cloud.google.com/go/accesscontextmanager v1.15.0 // indirect
+	cloud.google.com/go/osconfig v1.22.0 // indirect
 	github.com/RoaringBitmap/roaring/v2 v2.26.0 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
 	github.com/apache/arrow/go/v15 v15.0.2 // indirect
@@ -162,13 +168,13 @@ require (
 require (
 	cel.dev/expr v0.25.3 // indirect
 	cloud.google.com/go/auth/oauth2adapt v0.3.1 // indirect
-	cloud.google.com/go/monitoring v1.30.0
+	cloud.google.com/go/monitoring v1.31.0
 	cloud.google.com/go/redis v1.27.0
 	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp v1.6.0 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp v1.35.0 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric v0.57.0 // indirect
-	github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/resourcemapping v0.57.0 // indirect
+	github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/resourcemapping v0.63.0 // indirect
 	github.com/andybalholm/brotli v1.2.7 // indirect
 	github.com/apache/thrift v0.24.0 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect

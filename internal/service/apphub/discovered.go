@@ -3,6 +3,7 @@ package apphub
 import (
 	"context"
 	"sort"
+	"sync"
 
 	apphubpb "cloud.google.com/go/apphub/apiv1/apphubpb"
 
@@ -19,8 +20,9 @@ func (s *Server) discovered(ctx context.Context, host string) (map[string]Resour
 	if s.opts.Discover == nil {
 		return out, nil
 	}
+	memo, _ := ctx.Value(memoKey{}).(*discoveryMemo)
 	for _, p := range projects {
-		rs, err := s.opts.Discover(ctx, p)
+		rs, err := memo.discover(ctx, p, s.opts.Discover)
 		if err != nil {
 			return nil, apierror.Wrap(err)
 		}
@@ -29,6 +31,42 @@ func (s *Server) discovered(ctx context.Context, host string) (map[string]Resour
 		}
 	}
 	return out, nil
+}
+
+// memoKey keys a discoveryMemo in a context.
+type memoKey struct{}
+
+// discoveryMemo is each project's discovery, made once for a caller that
+// lists several locations in one go (the console's discovered list and a
+// global application's Register service/workload read every location):
+// discovery asks every served product, Cloud Run through kubectl, so
+// doing it once per location took the console 15 s.
+type discoveryMemo struct {
+	mu   sync.Mutex
+	done map[string][]Resource
+}
+
+// WithDiscoveryMemo is ctx with a memo: the App Hub calls made with it
+// discover each project once.
+func WithDiscoveryMemo(ctx context.Context) context.Context {
+	return context.WithValue(ctx, memoKey{}, &discoveryMemo{done: map[string][]Resource{}})
+}
+
+// discover is discover(ctx, project), memoized when m is not nil.
+func (m *discoveryMemo) discover(ctx context.Context, project string, discover func(context.Context, string) ([]Resource, error)) ([]Resource, error) {
+	if m == nil {
+		return discover(ctx, project)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if rs, ok := m.done[project]; ok {
+		return rs, nil
+	}
+	rs, err := discover(ctx, project)
+	if err == nil {
+		m.done[project] = rs
+	}
+	return rs, err
 }
 
 func discoveredService(host string, r Resource) *apphubpb.DiscoveredService {

@@ -57,6 +57,23 @@ type LinkedDataset struct {
 	// its restrict_query_result; Revoked a revoked subscription's, whose
 	// linked dataset can no longer be queried.
 	Restricted, RestrictQueryResult, Revoked bool
+	// Resources are a data clean room subscription's (#2101): the one
+	// linked dataset holds every listing's shared table, view or routine,
+	// each from its own dataset. Empty for a listing's subscription.
+	Resources []LinkedResource `json:",omitempty"`
+	// CleanRoom marks a data clean room's linked dataset, whose tables
+	// and routines are Resources.
+	CleanRoom bool `json:",omitempty"`
+}
+
+// LinkedResource is one shared resource of a clean room's linked
+// dataset: a table or view (Table), or a table-valued function (Routine),
+// of SourceProject.SourceDataset.
+type LinkedResource struct {
+	SourceProject, SourceDataset string
+	Table, Routine               string `json:",omitempty"`
+	// RestrictQueryResult is its listing's restrict_query_result.
+	RestrictQueryResult bool `json:",omitempty"`
 }
 
 // Linker makes and changes linked datasets in the instance's BigQuery.
@@ -105,6 +122,7 @@ type Server struct {
 	exchanges map[string]*exchangeRecord
 	listings  map[string]*listingRecord
 	subs      map[string]*subscriptionRecord
+	templates map[string]*ahpb.QueryTemplate
 	ops       map[string]*longrunningpb.Operation
 	// orgOf names a project's organization, for ListOrgDataExchanges.
 	orgOf func(project string) string
@@ -136,6 +154,7 @@ func (s *Server) clear() {
 	s.exchanges = map[string]*exchangeRecord{}
 	s.listings = map[string]*listingRecord{}
 	s.subs = map[string]*subscriptionRecord{}
+	s.templates = map[string]*ahpb.QueryTemplate{}
 	s.ops = map[string]*longrunningpb.Operation{}
 }
 
@@ -176,6 +195,11 @@ func (s *Server) Reset(project string) error {
 			delete(s.ops, k)
 		}
 	}
+	for k := range s.templates {
+		if strings.HasPrefix(k, prefix) {
+			delete(s.templates, k)
+		}
+	}
 	return s.save()
 }
 
@@ -187,6 +211,7 @@ type disk struct {
 	Subs      map[string]diskSub         `json:"subscriptions"`
 	Policies  map[string]json.RawMessage `json:"policies"`
 	Ops       map[string]json.RawMessage `json:"operations"`
+	Templates map[string]json.RawMessage `json:"queryTemplates,omitempty"`
 }
 
 type diskSub struct {
@@ -258,6 +283,13 @@ func (s *Server) load() error {
 		}
 		s.ops[n] = op
 	}
+	for n, raw := range d.Templates {
+		t := &ahpb.QueryTemplate{}
+		if err := protojson.Unmarshal(raw, t); err != nil {
+			return fmt.Errorf("parse query template %s: %w", n, err)
+		}
+		s.templates[n] = t
+	}
 	return nil
 }
 
@@ -267,7 +299,7 @@ func (s *Server) save() error {
 		return nil
 	}
 	d := disk{Exchanges: map[string]json.RawMessage{}, Listings: map[string]json.RawMessage{}, Subs: map[string]diskSub{},
-		Policies: map[string]json.RawMessage{}, Ops: map[string]json.RawMessage{}}
+		Policies: map[string]json.RawMessage{}, Ops: map[string]json.RawMessage{}, Templates: map[string]json.RawMessage{}}
 	keep := func(name string, p *iampolicy.Stored) error {
 		if p == nil {
 			return nil
@@ -313,6 +345,13 @@ func (s *Server) save() error {
 		}
 		d.Ops[n] = b
 	}
+	for n, t := range s.templates {
+		b, err := protojson.Marshal(t)
+		if err != nil {
+			return err
+		}
+		d.Templates[n] = b
+	}
 	b, err := json.Marshal(d)
 	if err != nil {
 		return err
@@ -339,6 +378,10 @@ var (
 	datasetRE = regexp.MustCompile(`^projects/([^/]+)/datasets/([^/]+)$`)
 	// tableRE is a selected resource's table.
 	tableRE = regexp.MustCompile(`^projects/([^/]+)/datasets/([^/]+)/tables/([^/]+)$`)
+	// routineRE is a clean room listing's selected routine (#2101).
+	routineRE = regexp.MustCompile(`^projects/([^/]+)/datasets/([^/]+)/routines/([^/]+)$`)
+	// queryTemplateRE is a clean room's query template (#2101).
+	queryTemplateRE = regexp.MustCompile(`^projects/([^/]+)/locations/([^/]+)/dataExchanges/([^/]+)/queryTemplates/([^/]+)$`)
 	// idRE is a data exchange or listing ID: "Unicode letters, numbers
 	// (0-9), underscores (_). Max length: 100 bytes."
 	idRE = regexp.MustCompile(`^[\p{L}\p{N}_]+$`)

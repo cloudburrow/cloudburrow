@@ -60,8 +60,8 @@ func createDocumentProcessor(t *testing.T, h *Harness, c *documentai.DocumentPro
 
 // TestDocumentAIProcessors (#1799): Document AI v1's DocumentProcessorService
 // on the local AI endpoint, through the official
-// cloud.google.com/go/documentai client over gRPC and REST: the two served
-// processor types; a processor created, read, listed, disabled (a
+// cloud.google.com/go/documentai client over gRPC and REST: the served
+// processor types (the custom ones since #2106); a processor created, read, listed, disabled (a
 // FAILED_PRECONDITION to process with), enabled and deleted (operations
 // waited on); an unserved type UNIMPLEMENTED; the OCR processor reading the
 // scanned page with local Tesseract into Document.text, pages, lines and
@@ -81,7 +81,7 @@ func TestDocumentAIProcessors(t *testing.T) {
 	}
 
 	types, err := g.FetchProcessorTypes(ctx, &documentaipb.FetchProcessorTypesRequest{Parent: parent})
-	if err != nil || len(types.GetProcessorTypes()) != 2 {
+	if err != nil || len(types.GetProcessorTypes()) != 5 {
 		t.Fatalf("FetchProcessorTypes: %v %v", types, err)
 	}
 	var listed []string
@@ -96,7 +96,7 @@ func TestDocumentAIProcessors(t *testing.T) {
 		}
 		listed = append(listed, pt.GetType())
 	}
-	if strings.Join(listed, ",") != "LAYOUT_PARSER_PROCESSOR,OCR_PROCESSOR" {
+	if strings.Join(listed, ",") != "CUSTOM_CLASSIFICATION_PROCESSOR,CUSTOM_EXTRACTION_PROCESSOR,CUSTOM_SPLITTING_PROCESSOR,LAYOUT_PARSER_PROCESSOR,OCR_PROCESSOR" {
 		t.Errorf("ListProcessorTypes: %v", listed)
 	}
 	if pt, err := g.GetProcessorType(ctx, &documentaipb.GetProcessorTypeRequest{Name: parent + "/processorTypes/OCR_PROCESSOR"}); err != nil || !pt.GetAllowCreation() {

@@ -107,6 +107,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/apienable"
 	"github.com/cloudburrow/cloudburrow/internal/calllog"
 	"github.com/cloudburrow/cloudburrow/internal/egress"
+	"github.com/cloudburrow/cloudburrow/internal/faultgate"
 	"github.com/cloudburrow/cloudburrow/internal/frontready"
 	"github.com/cloudburrow/cloudburrow/internal/grpchttp"
 	"github.com/cloudburrow/cloudburrow/internal/iamcheck"
@@ -347,7 +348,9 @@ func (f *Front) Server() *grpc.Server {
 			// Disabled APIs (#1914), by the call's routing headers, after
 			// the call log, so a refused call is logged as the client
 			// sees it.
-			apienable.StreamInterceptor(nil, "pubsub.googleapis.com")),
+			apienable.StreamInterceptor(nil, "pubsub.googleapis.com"),
+			// Fault rules (#2113), the host's.
+			faultgate.StreamInterceptor("pubsub")),
 		grpc.MaxRecvMsgSize(math.MaxInt32), grpc.MaxSendMsgSize(math.MaxInt32),
 		// The official clients ping streaming pulls; the server's default
 		// policy would answer a ping more often than every five minutes by

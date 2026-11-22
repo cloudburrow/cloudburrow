@@ -76,3 +76,57 @@ func TestUnsupportedType(t *testing.T) {
 		t.Fatal("JSON column written")
 	}
 }
+
+// TestWriteNestedTypes (#2104): a STRUCT column is an Iceberg struct, an
+// ARRAY an Iceberg list of required elements, an ARRAY of STRUCT a list of
+// structs; a NULL array is written as the empty one, and a second write of
+// the same schema evolves nothing.
+func TestWriteNestedTypes(t *testing.T) {
+	ctx := context.Background()
+	s := &Store{Root: t.TempDir()}
+	loc := "gs://bucket/tables/nested"
+	addr := Column{Name: "addr", Type: "RECORD", Fields: []Column{{Name: "city", Type: "STRING"}, {Name: "zip", Type: "INT64", Required: true}}}
+	cols := []Column{{Name: "id", Type: "INT64", Required: true}, addr,
+		{Name: "tags", Type: "STRING", Repeated: true},
+		{Name: "items", Type: "RECORD", Repeated: true, Fields: []Column{{Name: "sku", Type: "STRING"}, {Name: "n", Type: "INT64"}}}}
+	rows := [][]any{
+		{int64(1), []any{"Paris", int64(75001)}, []any{"a", "b"}, []any{[]any{"x", int64(2)}, []any{"y", nil}}},
+		{int64(2), nil, nil, []any{}},
+	}
+	sc, err := Schema(cols)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := sc.String(); !strings.Contains(got, "struct<") || !strings.Contains(got, "list<") {
+		t.Fatalf("schema %s", got)
+	}
+	if _, err := s.Write(ctx, loc, cols, rows); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Write(ctx, loc, cols, rows[:1]); err != nil {
+		t.Fatal(err)
+	}
+	files, ok, err := s.Metadata(ctx, loc)
+	if err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	if files[0] != loc+"/metadata/v3.metadata.json" {
+		t.Fatalf("a second write of the same schema evolved it: %v", files)
+	}
+	at, err := ReadAll(ctx, s.Root, files[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer at.Release()
+	if at.NumRows() != 1 || at.NumCols() != 4 {
+		t.Fatalf("read %d rows, %d columns", at.NumRows(), at.NumCols())
+	}
+	if got := at.Schema().Field(3).Type.String(); !strings.Contains(got, "list<") || !strings.Contains(got, "struct<") {
+		t.Fatalf("items read as %s", got)
+	}
+	// A column added after the nested ones.
+	cols2 := append(cols, Column{Name: "extra", Type: "STRING"})
+	if _, err := s.Write(ctx, loc, cols2, [][]any{append(rows[0], "e")}); err != nil {
+		t.Fatal(err)
+	}
+}

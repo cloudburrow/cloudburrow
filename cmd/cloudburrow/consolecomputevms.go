@@ -214,7 +214,7 @@ func (p computeInstancesProvider) instances(project string) ([]map[string]any, e
 
 func (p computeInstancesProvider) List(ctx context.Context, project string) (console.Listing, error) {
 	listing := console.Listing{Columns: []string{"Zone", "Machine type", "Internal IP", "External IP", "Connect"},
-		Noun: "VM instances", Note: vmNote, AlwaysStatus: true}
+		Noun: "VM instances", Note: vmNote, AlwaysStatus: true, PermissionsButton: true}
 	if p.api() == nil {
 		return listing, errors.New(computeNotStarted)
 	}
@@ -235,7 +235,7 @@ func (p computeInstancesProvider) List(ctx context.Context, project string) (con
 		}
 		ext := vmExternalIP(o)
 		listing.Items = append(listing.Items, console.Resource{Name: vpcStr(o, "name"), Status: vpcStr(o, "status"),
-			Opens: target, Target: target, Actions: p.instanceActions(o, false),
+			Opens: target, Target: target, Actions: p.instanceActions(o, false), Info: computePermissionsTab(),
 			Fields: map[string]string{"Zone": zone, "Machine type": vpcLast(vpcStr(o, "machineType")),
 				"Internal IP": vpcDash(vmInternalIP(o)), "External IP": vpcDash(ext), "Connect": connect}})
 	}
@@ -719,7 +719,7 @@ func (computeDisksProvider) ID() string    { return "compute-disks" }
 func (computeDisksProvider) Title() string { return "Disks" }
 
 func (p computeDisksProvider) List(ctx context.Context, project string) (console.Listing, error) {
-	listing := console.Listing{Columns: []string{"Type", "Size", "Zone", "In use by"}, Noun: "disks", AlwaysStatus: true,
+	listing := console.Listing{Columns: []string{"Type", "Size", "Zone", "In use by"}, Noun: "disks", AlwaysStatus: true, InfoOnSelect: true,
 		Note: "A disk is a volume in the instance's Kubernetes cluster: an attached disk is mounted at /mnt/disks/DEVICE in the guest, as a directory rather than a block device."}
 	if p.api() == nil {
 		return listing, errors.New(computeNotStarted)
@@ -740,7 +740,7 @@ func (p computeDisksProvider) List(ctx context.Context, project string) (console
 			users = append(users, vpcLast(u))
 		}
 		listing.Items = append(listing.Items, console.Resource{Name: vpcStr(d, "name"), Status: vpcStr(d, "status"), Opens: target, Target: target,
-			Actions: p.diskActions(d, false),
+			Actions: p.diskActions(d, false), Info: computePermissionsTab(),
 			Fields: map[string]string{"Type": vpcLast(vpcStr(d, "type")), "Size": vpcStr(d, "sizeGb") + " GB", "Zone": zone,
 				"In use by": vpcDash(strings.Join(users, ", "))}})
 	}
@@ -901,7 +901,8 @@ func (computeSnapshotsProvider) Title() string { return "Snapshots" }
 
 func (p computeSnapshotsProvider) List(ctx context.Context, project string) (console.Listing, error) {
 	listing := console.Listing{Columns: []string{"Location", "Snapshot size", "Disk size", "Source disk", "Creation time"}, Noun: "snapshots", AlwaysStatus: true,
-		Note: "A snapshot is a full copy of its disk's volume, taken while the disk is detached or its instance runs."}
+		InfoOnSelect: true,
+		Note:         "A snapshot is a full copy of its disk's volume, taken while the disk is detached or its instance runs."}
 	if p.api() == nil {
 		return listing, errors.New(computeNotStarted)
 	}
@@ -915,7 +916,7 @@ func (p computeSnapshotsProvider) List(ctx context.Context, project string) (con
 	}
 	for _, s := range l {
 		listing.Items = append(listing.Items, console.Resource{Name: vpcStr(s, "name"), Status: vpcStr(s, "status"),
-			Actions: diskSnapshotActions(s),
+			Actions: diskSnapshotActions(s), Info: computePermissionsTab(),
 			Fields: map[string]string{"Location": vpcDash(strings.Join(vpcStrs(s, "storageLocations"), ", ")),
 				"Snapshot size": bytesText(vpcStr(s, "storageBytes")), "Disk size": vpcStr(s, "diskSizeGb") + " GB",
 				"Source disk": vpcLast(vpcStr(s, "sourceDisk")), "Creation time": vpcStr(s, "creationTimestamp")}})

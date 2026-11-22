@@ -4,12 +4,10 @@ package compat
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"os"
 	"strings"
 	"testing"
-	"time"
 
 	"cloud.google.com/go/kms/apiv1/kmspb"
 	"cloud.google.com/go/logging/logadmin"
@@ -109,57 +107,6 @@ func TestKMSFaultInjectionAgainstTheSDKRetry(t *testing.T) {
 	code, body := do(http.MethodGet, "/admin/events?service=kms&kind=fault", "")
 	if code != http.StatusOK || !strings.Contains(body, "/ListKeyRings") {
 		t.Errorf("/admin/events for kms faults = %d %s; want the injected ListKeyRings fault", code, body)
-	}
-}
-
-// TestFaultsStorage: `up` runs the storage server in the cluster (#514),
-// where the instance's rules cannot reach it, so a storage rule is refused
-// with that reason rather than accepted and never applied. (A storage server
-// run in-process interposes faults; internal/service/storage tests that.)
-func TestFaultsStorage(t *testing.T) {
-	h := New(t)
-	control := h.Endpoint(EnvControl)
-	post := func(body string) (int, string) {
-		t.Helper()
-		return adminDo(t, http.MethodPost, "http://"+control+"/admin/faults", "application/json", strings.NewReader(body))
-	}
-	t.Cleanup(func() { adminDo(t, http.MethodDelete, "http://"+control+"/admin/faults", "", nil) })
-	code, body := post(`{"service":"storage","method":"storage.buckets.get","httpStatus":503,"count":1}`)
-	if code != http.StatusBadRequest || !strings.Contains(body, "runs in the cluster") {
-		t.Errorf("a storage rule = %d %s, want 400 saying the server runs in the cluster", code, body)
-	}
-	if code, body := rawStorage(t, h, http.MethodGet, "/storage/v1/b/"+h.Project()+"-faulted", ""); code != http.StatusNotFound {
-		t.Errorf("an unfaulted call = %d %s; want the ordinary 404", code, body)
-	}
-}
-
-// TestFaultsPubSubIsRefusedForWhereItRuns: Pub/Sub is served in the cluster,
-// by the emulator behind the front in its pod (#1266), so a rule is refused
-// with that reason. The reason used to be that CloudBurrow never sees its
-// requests, which the front's scraper made false: /admin/events records the
-// official client's call, and the refusal no longer says otherwise.
-func TestFaultsPubSubIsRefusedForWhereItRuns(t *testing.T) {
-	h := New(t)
-	control := h.Endpoint(EnvControl)
-	t.Cleanup(func() { adminDo(t, http.MethodDelete, "http://"+control+"/admin/faults", "", nil) })
-	code, body := adminDo(t, http.MethodPost, "http://"+control+"/admin/faults", "application/json",
-		strings.NewReader(`{"service":"pubsub","method":"Publish","code":"UNAVAILABLE","count":1}`))
-	if code != http.StatusBadRequest || !strings.Contains(body, "served in the cluster") || strings.Contains(body, "never sees") {
-		t.Errorf("a pubsub rule = %d %s, want 400 saying Pub/Sub is served in the cluster", code, body)
-	}
-	c := pubsubClient(t, h)
-	// The project-unique topic CreateTopic created is what the event must name.
-	name := topic(t, h, c, fmt.Sprintf("faultless-%d", time.Now().UnixNano()))
-	deadline := time.Now().Add(30 * time.Second)
-	for {
-		code, body := adminDo(t, http.MethodGet, "http://"+control+"/admin/events?service=pubsub", "", nil)
-		if code == http.StatusOK && strings.Contains(body, "/CreateTopic") && strings.Contains(body, name) {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("/admin/events for pubsub = %d %s; want the CreateTopic the front served", code, body)
-		}
-		time.Sleep(500 * time.Millisecond)
 	}
 }
 

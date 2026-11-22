@@ -1487,6 +1487,7 @@ type cast struct {
 	safe    bool
 	literal bool // TIMESTAMP '...', DATE '...'
 	from, t *btpb.Type
+	conv    func(any) (any, error) // a CAST to or from a message or enum
 }
 
 func (c *cast) String() string { return fmt.Sprintf("cast(%s,%s,%v)", c.x, c.to, c.safe) }
@@ -1496,12 +1497,24 @@ func (c *cast) check(s *scope) (*btpb.Type, error) {
 	if err != nil {
 		return nil, err
 	}
-	tt, err := parseTypeName(c.to)
+	var tt *btpb.Type
+	if strings.HasPrefix(c.to, protoTypePrefix) {
+		tt, err = s.protos.resolve(strings.TrimPrefix(c.to, protoTypePrefix))
+	} else {
+		tt, err = parseTypeName(c.to)
+	}
 	if err != nil {
 		return nil, err
 	}
 	c.from, c.t = ft, tt
 	if l, ok := c.x.(*literal); ok && l.t == nil {
+		return tt, nil
+	}
+	if conv, ok, err := protoCast(s.protos, ft, tt); ok {
+		if err != nil {
+			return nil, err
+		}
+		c.conv = conv
 		return tt, nil
 	}
 	f, t := kind(ft), kind(tt)
@@ -1528,7 +1541,12 @@ func (c *cast) eval(e *env) (any, error) {
 	if err != nil || v == nil {
 		return nil, err
 	}
-	out, err := castValue(v, c.from, c.t)
+	var out any
+	if c.conv != nil {
+		out, err = c.conv(v)
+	} else {
+		out, err = castValue(v, c.from, c.t)
+	}
 	if err != nil && c.safe {
 		return nil, nil
 	}

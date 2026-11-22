@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -103,17 +104,24 @@ type PlaygroundStatus struct {
 // is absent with a reason reads as a decision. The API is the authority and
 // TestPlaygroundRefusalsMatchTheAPI holds these in step with it. Since #1937
 // the runtime serves system instructions, multi-turn chat, function calling
-// and token counts, which the screen offers (#1962).
-var refusedOptions = []string{"candidateCount", "safetySettings"}
+// and token counts, which the screen offers (#1962). candidateCount,
+// thinkingConfig and cachedContent are served since #2107 and offered since
+// #2121. responseLogprobs and logprobs are served since #2107 round 3 and
+// offered since #2122.
+var refusedOptions = []string{"safetySettings"}
 
 // supportedOptions are the generationConfig fields the screen offers: the
 // runtime's cloudburrow_generate applies the sampler, the token limit, the
 // repetition penalties and a JSON response schema, and the API ends a stream
 // at a stop sequence (#1797, #1779, #1937). TestPlaygroundSupportedOptionsAreHonoured
 // holds them in step with the API.
+// candidateCount is Number of responses and thinkingConfig the Thinking
+// budget and Include thoughts (#2121); responseLogprobs is Advanced's Log
+// probabilities switch and logprobs its Top candidates (#2122).
 var supportedOptions = []string{
 	"temperature", "topP", "topK", "seed", "maxOutputTokens", "stopSequences",
 	"presencePenalty", "frequencyPenalty", "responseMimeType", "responseSchema",
+	"candidateCount", "thinkingConfig", "responseLogprobs", "logprobs",
 }
 
 // Features are the request fields beside generationConfig the screen sends
@@ -121,7 +129,7 @@ var supportedOptions = []string{
 // declarations with their mode, image parts and the token counts.
 var playgroundFeatures = []string{
 	"contents", "systemInstruction", "tools", "toolConfig", "inlineData", "fileData",
-	"countTokens", "computeTokens", "usageMetadata",
+	"countTokens", "computeTokens", "usageMetadata", "cachedContent",
 }
 
 // Status probes the endpoint and reports what the screen may offer.
@@ -197,6 +205,9 @@ type playgroundRequest struct {
 	SystemInstruction json.RawMessage `json:"systemInstruction,omitempty"`
 	Tools             json.RawMessage `json:"tools,omitempty"`
 	ToolConfig        json.RawMessage `json:"toolConfig,omitempty"`
+	// CachedContent is a context cache's resource name, relayed as the
+	// request's cachedContent (#2121).
+	CachedContent string `json:"cachedContent,omitempty"`
 	// Stream picks the method: true (the default, when absent) relays
 	// :streamGenerateContent, as StreamGenerateContent streams it, and false
 	// relays the unary :generateContent, as GenerateContent answers (#1257).
@@ -236,6 +247,9 @@ func (b playgroundRequest) body() (map[string]any, string) {
 	}
 	if len(b.GenerationConfig) > 0 {
 		req["generationConfig"] = b.GenerationConfig
+	}
+	if b.CachedContent != "" {
+		req["cachedContent"] = b.CachedContent
 	}
 	return req, ""
 }
@@ -372,6 +386,7 @@ func (s *Server) handlePlaygroundTokens(w http.ResponseWriter, r *http.Request) 
 	// CountTokensRequest takes contents, systemInstruction, tools and
 	// generationConfig; ComputeTokensRequest contents alone.
 	delete(req, "toolConfig")
+	delete(req, "cachedContent")
 	if verb == "computeTokens" {
 		req = map[string]any{"contents": req["contents"]}
 	}
@@ -382,6 +397,94 @@ func (s *Server) handlePlaygroundTokens(w http.ResponseWriter, r *http.Request) 
 	}
 	upstream, err := http.NewRequestWithContext(r.Context(), http.MethodPost,
 		"http://"+p.endpoint()+p.generatePath(verb), strings.NewReader(string(payload)))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	upstream.Header.Set("Content-Type", "application/json")
+	resp, err := p.client().Do(upstream)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{
+			"error": "the local generation endpoint is not answering: " + err.Error(),
+		})
+		return
+	}
+	defer resp.Body.Close()
+	out, _ := io.ReadAll(io.LimitReader(resp.Body, maxRelayBytes))
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	_, _ = w.Write(out)
+}
+
+// cachePath is the cachedContents collection, or one cache, under the
+// project and location the screen's generations use, so a cache it creates
+// is one its requests can name.
+func (p *Playground) cachePath(id string) string {
+	path := "/v1beta1/projects/console/locations/us-central1/cachedContents"
+	if id != "" {
+		path += "/" + id
+	}
+	return path
+}
+
+// handlePlaygroundCaches relays Context caching (#2121) to the API's own
+// cachedContents routes, the calls the SDK's caches.create, list, update and
+// delete make: GET lists, POST creates (the body is the CachedContent, its
+// model set to the served one), PATCH ?id=&updateMask=ttl updates the
+// expiration, DELETE ?id= deletes. The API's answer comes back unchanged.
+func (s *Server) handlePlaygroundCaches(w http.ResponseWriter, r *http.Request) {
+	p := s.playground
+	if !p.Configured() {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "local AI is not configured"})
+		return
+	}
+	id := r.URL.Query().Get("id")
+	if strings.ContainsAny(id, "/?#") {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "malformed cache id"})
+		return
+	}
+	target := p.cachePath(id)
+	var payload io.Reader
+	switch r.Method {
+	case http.MethodGet:
+		if id == "" {
+			target += "?pageSize=100"
+		}
+	case http.MethodDelete:
+		if id == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id is required"})
+			return
+		}
+	case http.MethodPost, http.MethodPatch:
+		var body map[string]any
+		if err := json.NewDecoder(io.LimitReader(r.Body, maxPlaygroundRequest)).Decode(&body); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "malformed request: " + err.Error()})
+			return
+		}
+		if r.Method == http.MethodPost {
+			if id != "" {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "create takes no id"})
+				return
+			}
+			body["model"] = "projects/console/locations/us-central1/publishers/google/models/" + p.Model
+		} else {
+			if id == "" {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id is required"})
+				return
+			}
+			target += "?updateMask=" + url.QueryEscape(r.URL.Query().Get("updateMask"))
+		}
+		b, err := json.Marshal(body)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		payload = strings.NewReader(string(b))
+	default:
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	upstream, err := http.NewRequestWithContext(r.Context(), r.Method, "http://"+p.endpoint()+target, payload)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

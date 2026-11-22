@@ -121,7 +121,9 @@ func TestFirestoreIndexesAndImportExportMatchGooglesThroughTheBrowser(t *testing
 		t.Errorf("Export from an earlier point in time = %+v; want it offered, its snapshot time shown only once it is checked (#1942)", snapshot)
 	}
 	p.run(chromedp.Click(chromedp.CSS(`#browse-outputUriPrefix`)))
-	p.clickText("#browse-title ~ .browse-list .fs-row-link", bucket)
+	p.clickText("#browse-list .fs-row-link", bucket)
+	// Google's Select folder (#2097): the bucket chosen, then Select.
+	p.run(chromedp.Click(chromedp.CSS(`#browse-select`)))
 	p.waitFor(`document.querySelector("#f-outputUriPrefix").value === "gs://` + bucket + `/" && document.querySelector("#browse-title") === null`)
 	p.setField("#f-outputUriPrefix", "gs://"+bucket+"/run1")
 	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))

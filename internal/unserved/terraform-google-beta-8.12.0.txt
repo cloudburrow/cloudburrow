@@ -1,4 +1,4 @@
-# Every *_custom_endpoint argument of hashicorp/google-beta 8.4.0, from `terraform providers schema -json` (scripts/endpoint-inventory.sh, #1975).
+# Every *_custom_endpoint argument of hashicorp/google-beta 8.12.0, from `terraform providers schema -json` (scripts/endpoint-inventory.sh, #1975).
 access_approval_custom_endpoint
 access_context_manager_custom_endpoint
 active_directory_custom_endpoint
@@ -77,6 +77,7 @@ dataproc_gdc_custom_endpoint
 dataproc_metastore_custom_endpoint
 datastream_custom_endpoint
 deployment_manager_custom_endpoint
+design_center_custom_endpoint
 developer_connect_custom_endpoint
 dialogflow_custom_endpoint
 dialogflow_cx_custom_endpoint
@@ -102,6 +103,7 @@ firebase_storage_custom_endpoint
 firebaserules_custom_endpoint
 firestore_custom_endpoint
 gemini_custom_endpoint
+gemini_data_analytics_custom_endpoint
 gke_backup_custom_endpoint
 gke_hub2_custom_endpoint
 gke_hub_custom_endpoint
@@ -136,6 +138,7 @@ network_connectivityv1_custom_endpoint
 network_management_custom_endpoint
 network_managementv1_custom_endpoint
 network_security_custom_endpoint
+network_services2_custom_endpoint
 network_services_custom_endpoint
 observability_custom_endpoint
 oracle_database_custom_endpoint

@@ -120,6 +120,19 @@ func main() {
 		}
 		fmt.Fprintf(w, "IDENTITY PROBE: OK %s\n", out)
 	})
+	// /trace (#2118) answers the traceparent the request arrived with, and
+	// logs a line correlated with it, as Google's guide to Cloud Run
+	// tracing has an application do: logging.googleapis.com/trace and
+	// spanId from the trace context.
+	http.HandleFunc("/trace", func(w http.ResponseWriter, r *http.Request) {
+		tp := r.Header.Get("traceparent")
+		parts := strings.Split(tp, "-")
+		if len(parts) == 4 {
+			fmt.Fprintf(os.Stderr, `{"severity":"INFO","message":"traced %s","logging.googleapis.com/trace":"projects/%s/traces/%s","logging.googleapis.com/spanId":%q}`+"\n",
+				r.URL.Query().Get("marker"), r.URL.Query().Get("project"), parts[1], parts[2])
+		}
+		fmt.Fprintf(w, "TRACE PROBE: %s\n", tp)
+	})
 	http.HandleFunc("/log", func(w http.ResponseWriter, r *http.Request) {
 		writeLogLines(r.URL.Query().Get("marker"))
 		fmt.Fprintln(w, "LOG PROBE: OK")

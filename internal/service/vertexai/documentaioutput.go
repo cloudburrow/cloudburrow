@@ -259,10 +259,14 @@ func noEntitiesRefusal(p *documentaipb.Processor, what string) error {
 		"whose versions are trained on a labeled dataset", p.GetType(), what, what)
 }
 
-func (d *documentAIService) EvaluateProcessorVersion(_ context.Context, req *documentaipb.EvaluateProcessorVersionRequest) (*longrunningpb.Operation, error) {
+func (d *documentAIService) EvaluateProcessorVersion(ctx context.Context, req *documentaipb.EvaluateProcessorVersionRequest) (*longrunningpb.Operation, error) {
 	p, _, err := d.s.processorVersion(req.GetProcessorVersion())
 	if err != nil {
 		return nil, grpcError(err)
+	}
+	if isCustomType(p.GetType()) {
+		op, err := d.evaluateCustom(ctx, req.GetProcessorVersion(), req.GetEvaluationDocuments())
+		return op, grpcError(err)
 	}
 	return nil, grpcError(noEntitiesRefusal(p, "evaluation"))
 }
@@ -286,12 +290,35 @@ func (d *documentAIService) ListEvaluations(_ context.Context, req *documentaipb
 	if req.GetPageSize() < 0 {
 		return nil, grpcError(apierror.InvalidArgument("page_size must not be negative"))
 	}
+	if custom, _ := d.customName(req.GetParent()); custom {
+		all, err := d.s.customEvaluations(req.GetParent())
+		if err != nil {
+			return nil, grpcError(err)
+		}
+		page, next, err := docAIPage(all, req.GetPageSize(), req.GetPageToken())
+		if err != nil {
+			return nil, grpcError(err)
+		}
+		return &documentaipb.ListEvaluationsResponse{Evaluations: page, NextPageToken: next}, nil
+	}
 	return &documentaipb.ListEvaluationsResponse{}, nil
 }
 
 func (d *documentAIService) GetEvaluation(_ context.Context, req *documentaipb.GetEvaluationRequest) (*documentaipb.Evaluation, error) {
-	if _, err := d.evaluationParent(req.GetName(), false); err != nil {
+	version, err := d.evaluationParent(req.GetName(), false)
+	if err != nil {
 		return nil, grpcError(err)
+	}
+	if custom, _ := d.customName(version); custom {
+		all, err := d.s.customEvaluations(version)
+		if err != nil {
+			return nil, grpcError(err)
+		}
+		for _, e := range all {
+			if e.GetName() == req.GetName() {
+				return e, nil
+			}
+		}
 	}
 	return nil, grpcError(apierror.NotFound("Evaluation %s not found", req.GetName()))
 }

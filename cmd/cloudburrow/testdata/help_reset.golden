@@ -146,6 +146,8 @@ Flags:
     	Spanner emulator host port (0 = OS-assigned; default 9013)
   -port-spanner-rest int
     	Spanner emulator REST API host port, which Terraform uses (0 = OS-assigned; default 9022)
+  -port-spark int
+    	Spark procedure runner host port, for BigQuery's stored procedures for Apache Spark (0 = OS-assigned; default 9049)
   -port-sqladmin int
     	Cloud SQL Admin API host port (0 = OS-assigned; default 9020)
   -port-storage int
@@ -160,6 +162,8 @@ Flags:
     	Cloud Tasks host port (0 = OS-assigned)
   -port-tfconvert int
     	TensorFlow SavedModel converter host port, for BigQuery ML's imported TENSORFLOW models (0 = OS-assigned; default 9027)
+  -port-trace int
+    	Cloud Trace API and OTLP trace ingestion host port (0 = OS-assigned; default 9052)
   -port-workflows int
     	Workflows and Workflow Executions API host port (0 = OS-assigned; default 9038)
   -project string
@@ -169,7 +173,7 @@ Flags:
   -seed-file string
     	seed document (the /admin/seed body) applied when up starts
   -services string
-    	comma-separated services to start (default storage,pubsub,tasks,run,secretmanager; opt-in: firestore,datastore,bigtable,spanner,cloudsql,bigquery,memorystore,cloudsql-mysql,scheduler,logging,kms,backupdr,privateca,gke,monitoring,compute,workflows,parametermanager,dataform,apphub)
+    	comma-separated services to start (default storage,pubsub,tasks,run,secretmanager; opt-in: firestore,datastore,bigtable,spanner,cloudsql,bigquery,memorystore,cloudsql-mysql,scheduler,logging,kms,backupdr,privateca,gke,monitoring,compute,workflows,parametermanager,dataform,apphub,trace)
   -shutdown-timeout duration
     	bounded time to drain on shutdown
   -state-dir string

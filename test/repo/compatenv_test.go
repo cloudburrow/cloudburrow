@@ -26,6 +26,9 @@ var compatEnvExceptions = map[string]string{
 	// The instance under test is a `-tags onnx` build whose BigQuery
 	// imports ONNX models (#1711); no instance reports which build it is.
 	"CLOUDBURROW_TEST_ONNX": "opt-in switch: the instance is an onnx build run with ONNXRUNTIME_LIB",
+	// The host may pull the 1.8 GB apache/spark image for BigQuery's Spark
+	// procedures (#2104); no instance reports what the host may pull.
+	"CLOUDBURROW_TEST_SPARK": "opt-in switch: the host may pull the apache/spark image and run Spark procedures",
 	// Test data, not an instance: internal/isoconformance downloads ISO's
 	// conformance files only when it is set (#1754).
 	"CLOUDBURROW_TEST_DOWNLOADS": "opt-in switch: tests may download test data not cached yet",
@@ -270,6 +273,7 @@ func compatEnvFixture(t *testing.T, edit func(env map[string]string)) (dir, envF
 		"CLOUDBURROW_PARAMETERMANAGER_ENDPOINT":       "127.0.0.1:9047",
 		"CLOUDBURROW_DATAFORM_ENDPOINT":               "127.0.0.1:9058",
 		"CLOUDBURROW_APPHUB_ENDPOINT":                 "127.0.0.1:9048",
+		"CLOUDBURROW_TRACE_ENDPOINT":                  "127.0.0.1:9052",
 	}
 	if edit != nil {
 		edit(env)
@@ -363,6 +367,7 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 		"RUN_LOCALAI":              "127.0.0.1:9020",
 		"RUN_SCHEDULER":            "127.0.0.1:9008",
 		"RUN_LOGGING":              "127.0.0.1:9009",
+		"RUN_TRACE":                "127.0.0.1:9052",
 		"RUN_BIGQUERY":             "http://127.0.0.1:9014",
 		"RUN_SQLADMIN":             "127.0.0.1:9020",
 		"TASKS_LOGGING":            "127.0.0.1:9009",
@@ -396,6 +401,7 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 		"PARAMETERMANAGER":         "127.0.0.1:9047",
 		"DATAFORM":                 "127.0.0.1:9058",
 		"APPHUB":                   "127.0.0.1:9048",
+		"TRACE":                    "127.0.0.1:9052",
 		"COMPUTE":                  "127.0.0.1:9031",
 		"DATATRANSFER":             "127.0.0.1:9034",
 		"FIREBASERULES":            "127.0.0.1:9043",

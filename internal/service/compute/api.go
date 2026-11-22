@@ -196,6 +196,9 @@ func (s *Server) doLocked(c call) (obj, error) {
 	if err := s.ensureProjectLocked(c.project); err != nil {
 		return nil, err
 	}
+	if rel := iamTarget(c); rel != "" {
+		return s.iamCall(c, rel)
+	}
 	p := c.parts
 	get, post, del := c.method == http.MethodGet, c.method == http.MethodPost, c.method == http.MethodDelete
 	patch, put := c.method == http.MethodPatch, c.method == http.MethodPut

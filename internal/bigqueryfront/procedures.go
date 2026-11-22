@@ -69,6 +69,9 @@ type storedProc struct {
 	Routine map[string]any `json:"routine"`
 	Args    []procArg      `json:"args"`
 	Body    string         `json:"body"` // BEGIN ... END
+	// Spark is set for a stored procedure for Apache Spark (sparkprocs.go,
+	// #2104), which has no Body.
+	Spark *sparkDef `json:"spark,omitempty"`
 }
 
 // setProc records a procedure, path its dataset and name.
@@ -175,12 +178,19 @@ func (p *scriptParser) createProcedure() scriptNode {
 			break
 		}
 		if depth == 0 && t.punct(";") {
-			p.fail("expected BEGIN in CREATE PROCEDURE")
-			return n
+			break
 		}
 		p.i++
 	}
-	if p.i >= len(p.toks) {
+	if p.i >= len(p.toks) || p.toks[p.i].punct(";") {
+		// A procedure for Apache Spark (sparkprocs.go, #2104) has no
+		// BEGIN ... END: its body is its code or main file.
+		if p.i > start && isSparkHeader(p.toks[start:p.i]) {
+			n.toks = p.toks[start:p.i]
+			n.spark = true
+			n.procSpan = [2]int{p.toks[start].pos, p.toks[p.i-1].end}
+			return n
+		}
 		p.fail("expected BEGIN in CREATE PROCEDURE")
 		return n
 	}
@@ -316,6 +326,9 @@ func (s *scriptRun) procPath(parts []string, text string) ([]string, *scriptFlow
 func (s *scriptRun) createProc(n scriptNode) *scriptFlow {
 	if flow := s.flush(); flow != nil {
 		return flow
+	}
+	if n.spark {
+		return s.createSparkProc(n)
 	}
 	text := s.sql[n.toks[0].pos:n.procSpan[1]]
 	h, msg := readProcHeader(s.sql, n.toks)
@@ -468,6 +481,9 @@ func (s *scriptRun) call(toks []token) *scriptFlow {
 		}
 		scope[name] = v
 		outs[name] = arg[0].text
+	}
+	if proc.Spark != nil {
+		return s.callSpark(proc, p, project, scope, outs, stmt)
 	}
 	body, ok := lex(proc.Body)
 	if !ok {
