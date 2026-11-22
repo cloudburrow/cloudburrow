@@ -11,8 +11,10 @@ import (
 	"fmt"
 	"math/big"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -331,8 +333,26 @@ func (t *icebergTables) syncAll(r *http.Request, mk func(base string) front) (in
 	t.mu.Unlock()
 	sort.Strings(keys)
 	status, why := 0, rowError{}
+	job := r.Method == http.MethodPost && jobsRoute.MatchString(r.URL.EscapedPath())
+	project := ""
+	if m := requestProject.FindStringSubmatch(r.URL.EscapedPath()); m != nil {
+		project, _ = url.PathUnescape(m[1])
+	}
 	for _, k := range keys {
-		it, msg, fresh := t.syncFresh(r, mk, k)
+		t.mu.Lock()
+		base := t.m[k].Base
+		t.mu.Unlock()
+		// Only a request that may have made the change answers its
+		// failure: a job (of any project, as a query can write another
+		// project's table) or a request of the table's project. Another
+		// one still writes the files, but leaves the failure to it: Data
+		// Transfer's scheduler reads BigQuery's clock through
+		// POST clock:advance every few seconds, and when that read came
+		// between the INSERT's commit and its own sync it took the
+		// failure, and the INSERT answered 200 (main run 45023269046,
+		// TestBigQueryIcebergTablesWriteIcebergFiles, one run in seven
+		// with -count 15 locally).
+		it, msg, fresh := t.syncFresh(r, mk, k, job || project == projectOf(base))
 		if msg == "" || !fresh || status != 0 || strings.HasPrefix(msg, "the table no longer exists") {
 			continue
 		}
@@ -359,15 +379,23 @@ func icebergWriteError(it icebergTable, msg string) (int, rowError) {
 // sync writes key's files if its rows changed; it returns the table, and
 // why it could not be written, or "".
 func (t *icebergTables) sync(r *http.Request, mk func(base string) front, key string) (icebergTable, string) {
-	it, msg, _ := t.syncFresh(r, mk, key)
+	it, msg, _ := t.syncFresh(r, mk, key, true)
 	return it, msg
 }
 
+// requestProject is the project a request's path names.
+var requestProject = regexp.MustCompile(`/projects/([^/]+)`)
+
 // syncFresh is sync; fresh when msg is the first failure to write the
 // table's rows then (Failed), so that a bucket that stays unwritable fails
-// the request that changed the rows, not every request after it.
-func (t *icebergTables) syncFresh(r *http.Request, mk func(base string) front, key string) (icebergTable, string, bool) {
+// the request that changed the rows, not every request after it. A
+// request that does not claim the failure (syncAll) leaves it fresh for
+// the next that does.
+func (t *icebergTables) syncFresh(r *http.Request, mk func(base string) front, key string, claim bool) (icebergTable, string, bool) {
 	it, print, msg := t.write(r, mk, key)
+	if !claim {
+		return it, msg, false
+	}
 	if msg == "" || print == "" {
 		// Before its rows were read (a column of a type not written, a
 		// read that failed): answered at EXPORT TABLE METADATA alone.

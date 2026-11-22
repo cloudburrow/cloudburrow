@@ -230,11 +230,19 @@ func (x extractor) apply(fields map[string]any) (string, bool) {
 // MatchEntries are a project's stored entries the filter matches that were
 // received in (after, until], with label extractors applied, for Cloud
 // Monitoring's log-match alert conditions (#1964). The filter is compiled
-// as ListLogEntries compiles it.
+// as ListLogEntries compiles it. after and until are Cloud Monitoring's
+// times, the wall clock's; an entry's receiveTimestamp is the Logging
+// clock's, which clock:advance moves ahead, so the window is moved by as
+// much: otherwise every entry received after an advance is past until, and
+// no log-match condition ever opens an incident again (main run
+// 45023269046, TestMonitoringLogMatchAlert).
 func (s *Server) MatchEntries(project, filter string, extractors map[string]string, after, until time.Time) ([]MetricSample, error) {
 	match, err := compile(filter)
 	if err != nil {
 		return nil, err
+	}
+	if ahead := time.Duration(s.d.offset.Load()); ahead > 0 {
+		after, until = after.Add(ahead), until.Add(ahead)
 	}
 	labels := map[string]extractor{}
 	for k, expr := range extractors {

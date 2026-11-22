@@ -455,7 +455,12 @@ func (a *Admin) prepareMetric(p parent, in, old *loggingpb.LogMetric) (*loggingp
 	d.Description = m.GetDescription()
 	m.MetricDescriptor = d
 	m.Version = loggingpb.LogMetric_V2
-	now := timestamppb.New(a.now())
+	// The Logging clock, which entries' receiveTimestamp is stamped by: a
+	// metric counts the entries received after it was made (MetricSamples),
+	// and with the clock moved ahead (clock:advance) the wall clock would
+	// date it before entries written ahead of it (main run 45023269046,
+	// TestMonitoringLogBasedMetrics counted the entry written before).
+	now := timestamppb.New(a.logNow())
 	m.CreateTime, m.UpdateTime = now, now
 	if old != nil {
 		m.CreateTime = old.GetCreateTime()
