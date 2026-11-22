@@ -10998,8 +10998,10 @@ async function deleteResource(route, name, onDone, row = NO_ROW) {
   // says: its ID typed back, then Shut down (#1865).
   const shutDown = route.service === "projects";
   await confirmDestructive({
-    title: shutDown ? `Shut down ${name}?` : `Delete ${name}?`,
-    detail: DELETE_DETAIL[route.service],
+    title: shutDown ? `Shut down ${name}?` : capabilityOf(route.service).deleteTitle || `Delete ${name}?`,
+    // A dialog Google titles by the kind ("Delete notebook") names the
+    // resource in its body.
+    detail: [capabilityOf(route.service).deleteTitle ? name : "", DELETE_DETAIL[route.service]].filter(Boolean).join("\n\n") || undefined,
     confirmWord: name,
     confirmLabel: capabilityOf(route.service).deleteSubmit || "Delete",
     ...(shutDown ? { confirmLabel: "Shut down", consequence: "" } : {}),

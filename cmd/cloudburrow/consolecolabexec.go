@@ -488,6 +488,16 @@ func (p colabNotebooksProvider) Delete(ctx context.Context, project, name string
 	return err
 }
 
+// DeleteLabel and DeleteWords are Google's: "click the Actions menu, and
+// then select Delete notebook. In the Delete notebook dialog, click
+// Confirm." (https://docs.cloud.google.com/colab/docs/create-console-quickstart,
+// read 2026-11-22).
+func (colabNotebooksProvider) DeleteLabel() string { return "Delete notebook" }
+
+func (colabNotebooksProvider) DeleteWords() console.DeleteWords {
+	return console.DeleteWords{Selected: "Delete notebook", Submit: "Confirm", Title: "Delete notebook"}
+}
+
 func (colabNotebooksProvider) Actions(r console.Resource) []console.Action { return r.Actions }
 
 func (p colabNotebooksProvider) Act(ctx context.Context, project, name, action string) error {

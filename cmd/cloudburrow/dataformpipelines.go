@@ -20,6 +20,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/nbruntime"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
+	"github.com/cloudburrow/cloudburrow/internal/service/dataform"
 )
 
 // dataformNotebooks runs notebook actions on the notebook runtime, on a
@@ -31,7 +32,8 @@ type dataformNotebooks struct {
 }
 
 func (d dataformNotebooks) RunNotebook(ctx context.Context, key, project string, nb []byte) ([]byte, error) {
-	return d.m.RunNotebook(ctx, key, project, nb)
+	// The invocation's identity (#2173), when it runs as one.
+	return d.m.RunNotebookWith(ctx, key, project, nb, nbruntime.Options{Token: dataform.RunToken(ctx)})
 }
 
 // RunNotebookOnTemplate runs a notebook on a runtime made from the Colab
@@ -44,6 +46,7 @@ func (d dataformNotebooks) RunNotebookOnTemplate(ctx context.Context, key, proje
 	if err != nil {
 		return nil, fmt.Errorf("the notebook runtime template %s: %v", template, err)
 	}
+	o.Token = dataform.RunToken(ctx)
 	return d.m.RunNotebookWith(ctx, key, project, nb, o)
 }
 
@@ -58,7 +61,7 @@ func (s dataformStorage) PutObject(ctx context.Context, bucket, object, contentT
 	if f == nil || f.HostAddr() == "" {
 		return 0, "", errors.New("Cloud Storage is not served on this instance")
 	}
-	c, err := storage.NewClient(ctx, option.WithEndpoint("http://"+f.HostAddr()+"/storage/v1/"), option.WithoutAuthentication(),
+	c, err := storage.NewClient(ctx, option.WithEndpoint("http://"+f.HostAddr()+"/storage/v1/"), dataformRunAuth(ctx),
 		storage.WithJSONReads(), storage.WithDisabledClientMetrics())
 	if err != nil {
 		return 0, "", err

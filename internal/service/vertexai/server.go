@@ -84,6 +84,8 @@ type Server struct {
 	nbTranscoder *rest.Transcoder
 	// schedStop ends the Colab Enterprise schedules' loop (schedules.go).
 	schedStop chan struct{}
+	// identity are the execution identity hooks (runas.go, #2173).
+	identity Identity
 }
 
 // NewServer returns a server. A nil generator is valid and makes every
@@ -148,11 +150,14 @@ func (s *Server) Handler() http.Handler {
 	// operations (notebookruntimes.go, #2105).
 	// Notebook executions, schedules and the templates' IAM policies
 	// (notebookjobs.go, schedules.go, notebookiam.go) too.
-	for _, c := range []string{"notebookRuntimeTemplates", "notebookRuntimes", "notebookExecutionJobs", "schedules"} {
+	// Vertex AI pipeline jobs (pipelines.go, #2173) too.
+	for _, c := range []string{"notebookRuntimeTemplates", "notebookRuntimes", "notebookExecutionJobs", "schedules", "pipelineJobs"} {
 		mux.HandleFunc("/v1/projects/{project}/locations/{location}/"+c, s.serveNotebookREST)
 		mux.HandleFunc("/v1/projects/{project}/locations/{location}/"+c+"/", s.serveNotebookREST)
 	}
 	mux.HandleFunc("POST /v1/projects/{project}/locations/{location}/notebookRuntimes:assign", s.serveNotebookREST)
+	mux.HandleFunc("POST /v1/projects/{project}/locations/{location}/pipelineJobs:batchDelete", s.serveNotebookREST)
+	mux.HandleFunc("POST /v1/projects/{project}/locations/{location}/pipelineJobs:batchCancel", s.serveNotebookREST)
 	mux.HandleFunc("POST /v1/projects/{project}/locations/{location}/notebookRuntimeTemplates:setDefault", s.setDefaultREST)
 	// Model Garden's OpenAI-compatible path on its endpoints (#1840).
 	mux.HandleFunc("POST /v1beta1/projects/{project}/locations/{location}/endpoints/{endpoint}/chat/completions", s.chatCompletionsREST)

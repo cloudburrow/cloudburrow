@@ -1667,6 +1667,10 @@ type DeleteWords struct {
 	Selected string
 	// Submit is the confirmation dialog's button.
 	Submit string
+	// Title is the confirmation dialog's title, where Google's names it
+	// ("In the Delete notebook dialog, click Confirm"); empty keeps
+	// "Delete NAME?".
+	Title string
 }
 
 // RowEditLeader is a RowEditor whose rows' menus begin with Edit, as
@@ -2354,7 +2358,7 @@ func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
 			"create": caps.Create, "delete": caps.Delete, "detail": caps.Detail,
 			"query": caps.Query, "edit": caps.Edit, "reveal": caps.Reveal,
 			"deleteLabel": caps.DeleteLabel, "deleteConfirm": caps.DeleteConfirm,
-			"deleteSelected": caps.DeleteSelected, "deleteSubmit": caps.DeleteSubmit, "editRow": caps.EditRow, "editRowFirst": caps.EditRowFirst,
+			"deleteSelected": caps.DeleteSelected, "deleteSubmit": caps.DeleteSubmit, "deleteTitle": caps.DeleteTitle, "editRow": caps.EditRow, "editRowFirst": caps.EditRowFirst,
 			"deleteIcon": caps.DeleteIcon, "rowMenuOrder": caps.RowMenuOrder, "page": caps.Page, "scope": caps.Scope, "filters": caps.Filters,
 		})
 	}
@@ -2550,6 +2554,7 @@ type capabilities struct {
 	// checked rows' Delete and the confirmation's button (#1848).
 	DeleteSelected string `json:"deleteSelected,omitempty"`
 	DeleteSubmit   string `json:"deleteSubmit,omitempty"`
+	DeleteTitle    string `json:"deleteTitle,omitempty"`
 	EditRow        string `json:"editRow,omitempty"`
 	// EditRowFirst puts the rows' Edit first in their menus (RowEditLeader).
 	EditRowFirst bool `json:"editRowFirst,omitempty"`
@@ -2757,7 +2762,7 @@ func (s *Server) capabilitiesOf(p Provider) capabilities {
 	}
 	if dw, ok := p.(DeleteWorder); ok {
 		w := dw.DeleteWords()
-		c.DeleteSelected, c.DeleteSubmit = w.Selected, w.Submit
+		c.DeleteSelected, c.DeleteSubmit, c.DeleteTitle = w.Selected, w.Submit, w.Title
 	}
 	if rl, ok := p.(RowEditLeader); ok {
 		c.EditRowFirst = rl.RowEditFirst()

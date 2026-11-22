@@ -109,6 +109,9 @@ type NotebookRuntimeOptions struct {
 	IdleTimeout  time.Duration
 	IdleDisabled bool
 	Env          map[string]string
+	// Token is the bearer token the runtime's clients use: the identity
+	// a run executes as (runas.go), "" for the instance's own.
+	Token string
 }
 
 const (
@@ -190,6 +193,14 @@ type notebookStore struct {
 	jobs      map[string]*jobEntry
 	schedules map[string]*aiplatformpb.Schedule
 	policies  map[string]*iampolicy.Stored
+	// owners are the email of the user who made each schedule, "" for
+	// the instance's own credentials: an execution_user schedule's runs
+	// run as them (runas.go).
+	owners map[string]string
+	// pipelines are Vertex AI pipeline jobs (pipelines.go, #2173), run on
+	// pipelineRunner.
+	pipelines      map[string]*pipelineEntry
+	pipelineRunner PipelineRunner
 }
 
 // runtimeEntry is a runtime and what its lifecycle needs.
@@ -209,7 +220,7 @@ func (s *Server) notebooks() *notebookStore {
 	if s.nb == nil {
 		s.nb = &notebookStore{templates: map[string]*aiplatformpb.NotebookRuntimeTemplate{}, runtimes: map[string]*runtimeEntry{},
 			defaults: map[string]string{}, now: time.Now, jobs: map[string]*jobEntry{}, schedules: map[string]*aiplatformpb.Schedule{},
-			policies: map[string]*iampolicy.Stored{}}
+			policies: map[string]*iampolicy.Stored{}, owners: map[string]string{}, pipelines: map[string]*pipelineEntry{}}
 	}
 	if s.ops == nil {
 		s.ops = lro.NewStore(nil)
@@ -239,6 +250,8 @@ func (s *Server) SetNotebookRuntimes(host NotebookHost, file string) {
 		Jobs      []json.RawMessage            `json:"jobs"`
 		Schedules []json.RawMessage            `json:"schedules"`
 		Policies  map[string]*iampolicy.Stored `json:"policies"`
+		Owners    map[string]string            `json:"scheduleOwners"`
+		Pipelines []json.RawMessage            `json:"pipelineJobs"`
 	}
 	if json.Unmarshal(b, &saved) != nil {
 		return
@@ -260,6 +273,10 @@ func (s *Server) SetNotebookRuntimes(host NotebookHost, file string) {
 		st.defaults[k] = v
 	}
 	st.loadJobs(saved.Jobs, saved.Schedules, saved.Policies)
+	for k, v := range saved.Owners {
+		st.owners[k] = v
+	}
+	st.loadPipelines(saved.Pipelines)
 }
 
 // save writes the store; the caller holds st.mu.
@@ -278,7 +295,9 @@ func (st *notebookStore) save() {
 		Jobs      []json.RawMessage            `json:"jobs"`
 		Schedules []json.RawMessage            `json:"schedules"`
 		Policies  map[string]*iampolicy.Stored `json:"policies"`
-	}{Templates: []json.RawMessage{}, Runtimes: []savedRuntime{}, Defaults: st.defaults, Jobs: []json.RawMessage{}, Schedules: []json.RawMessage{},
+		Owners    map[string]string            `json:"scheduleOwners,omitempty"`
+		Pipelines []json.RawMessage            `json:"pipelineJobs,omitempty"`
+	}{Owners: st.owners, Pipelines: st.savedPipelines(), Templates: []json.RawMessage{}, Runtimes: []savedRuntime{}, Defaults: st.defaults, Jobs: []json.RawMessage{}, Schedules: []json.RawMessage{},
 		Policies: st.policies}
 	for _, n := range sortedNames(st.jobs) {
 		if b, err := protojson.Marshal(st.jobs[n].Job); err == nil {
@@ -1162,6 +1181,7 @@ func (n *notebookService) UpgradeNotebookRuntime(_ context.Context, req *aiplatf
 func (s *Server) registerNotebooks(srv grpc.ServiceRegistrar) {
 	aiplatformpb.RegisterNotebookServiceServer(srv, &notebookService{s: s})
 	aiplatformpb.RegisterScheduleServiceServer(srv, &scheduleService{s: s})
+	aiplatformpb.RegisterPipelineServiceServer(srv, &pipelineService{s: s})
 }
 
 // notebookREST is the transcoder for the notebookRuntimeTemplates and
@@ -1173,6 +1193,7 @@ func (s *Server) notebookREST() *rest.Transcoder {
 			opRule("/v1/{name=projects/*/locations/*/notebookRuntimes/*/operations/*}"),
 			opRule("/v1/{name=projects/*/locations/*/notebookExecutionJobs/*/operations/*}"),
 			opRule("/v1/{name=projects/*/locations/*/schedules/*/operations/*}"),
+			opRule("/v1/{name=projects/*/locations/*/pipelineJobs/*/operations/*}"),
 		}}
 		t.Mixins = append(t.Mixins, NotebookIAMMixins()...)
 		s.registerNotebooks(t)

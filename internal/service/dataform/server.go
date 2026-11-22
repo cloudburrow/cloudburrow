@@ -128,6 +128,12 @@ type Options struct {
 	// a repository's personal authentication (v1beta1); nil when Developer
 	// Connect is not served.
 	AccountToken func(ctx context.Context, connector, user string) (string, error)
+	// ActAs checks the caller of ctx may act as account in project
+	// (strict act-as, runas.go); nil checks nothing.
+	ActAs func(ctx context.Context, project, account string) error
+	// RunAs mints the token an invocation run as account uses; nil runs
+	// every invocation with the instance's own credentials.
+	RunAs func(account string) (string, error)
 	// Now is the clock; nil is time.Now.
 	Now func() time.Time
 }
@@ -698,6 +704,9 @@ func (s *Server) CreateRepository(ctx context.Context, req *dfpb.CreateRepositor
 	if err := s.checkRepository(ctx, r); err != nil {
 		return nil, err
 	}
+	if err := s.actAs(ctx, req.GetParent(), r.GetServiceAccount()); err != nil {
+		return nil, err
+	}
 	name := req.GetParent() + "/repositories/" + req.GetRepositoryId()
 	m := repoPrefixRE.FindStringSubmatch(name)
 	var sealed *cmek.Sealed
@@ -951,6 +960,9 @@ func (s *Server) UpdateRepository(ctx context.Context, req *dfpb.UpdateRepositor
 		}
 	}
 	if err := s.checkRepository(ctx, next); err != nil {
+		return nil, err
+	}
+	if err := s.actAs(ctx, next.GetName(), next.GetServiceAccount()); err != nil {
 		return nil, err
 	}
 	if gr := next.GetGitRemoteSettings(); gr != nil {

@@ -32,6 +32,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"os/exec"
 	"regexp"
 	"sort"
@@ -208,6 +209,10 @@ type Options struct {
 	IdleDisabled bool
 	// Env is set in the kernel's environment.
 	Env map[string]string
+	// Token, when set, is the bearer token the kernel's Google clients
+	// send (CB_ACCESS_TOKEN): the identity a run executes as (#2173),
+	// instead of the anonymous credentials the instance takes as its own.
+	Token string
 }
 
 // idleTimeout is the session's idle shutdown, 0 when it has none.
@@ -397,10 +402,16 @@ func (m *Manager) launch(ctx context.Context, s *session) error {
 	if bin == "" {
 		bin = "docker"
 	}
+	var cmdEnv []string
 	runArgs := []string{"run", "-i", "--rm", "--init", "--name", kernel, "--label", label, "--network", network,
 		"-e", "GOOGLE_CLOUD_PROJECT=" + s.project, "-e", "CB_BIGQUERY_ENDPOINT=" + endpoint, "-e", "NO_GCE_CHECK=True"}
 	for _, k := range sortedKeys(s.opts.Env) {
 		runArgs = append(runArgs, "-e", k+"="+s.opts.Env[k])
+	}
+	if s.opts.Token != "" {
+		// Passed by name, so the token is not on docker's command line.
+		runArgs = append(runArgs, "-e", "CB_ACCESS_TOKEN")
+		cmdEnv = append(cmdEnv, "CB_ACCESS_TOKEN="+s.opts.Token)
 	}
 	if dpTarget != "" {
 		region := m.Region
@@ -413,6 +424,9 @@ func (m *Manager) launch(ctx context.Context, s *session) error {
 			"-e", "GOOGLE_CLOUD_DATAPROC_API_ENDPOINT="+dataprocEndpoint, "-e", "GOOGLE_CLOUD_REGION="+region)
 	}
 	cmd := exec.Command(bin, append(runArgs, image)...)
+	if len(cmdEnv) > 0 {
+		cmd.Env = append(os.Environ(), cmdEnv...)
+	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return err

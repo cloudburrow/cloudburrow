@@ -38,7 +38,7 @@ func init() {
 		}
 	}
 	// Colab Enterprise (#2105), v1 only as served.
-	for _, s := range []string{"NotebookService", "ScheduleService"} {
+	for _, s := range []string{"NotebookService", "ScheduleService", "PipelineService"} {
 		Services["google.cloud.aiplatform.v1."+s] = VertexAI
 	}
 	Services["google.cloud.documentai.v1.DocumentProcessorService"] = DocumentAI
@@ -142,7 +142,14 @@ var VertexAI = &Service{
 // on the parent; a schedule's pause, resume and patch are
 // aiplatform.schedules.update; the templates' IAM methods
 // aiplatform.notebookRuntimeTemplates.getIamPolicy and .setIamPolicy.
-// StopNotebookRuntime's page names no permission and is not checked.
+// StopNotebookRuntime's page names no permission (re-read 2026-11-22:
+// .../projects.locations.notebookRuntimes/stop has no IAM Permissions
+// section); it is checked as aiplatform.notebookRuntimes.update on the
+// runtime (#2173), the one permission of IAM's notebookRuntimes list
+// (https://docs.cloud.google.com/iam/docs/roles-permissions/aiplatform:
+// assign, delete, get, list, start, update, upgrade) no other method
+// names, held by the Colab Enterprise Admin, Notebook Runtime Admin and
+// Vertex AI User roles but not by Colab Enterprise User (UNVERIFIED).
 // Making a runtime or an execution from a template also needs
 // aiplatform.notebookRuntimeTemplates.apply on it, the permission the
 // Notebook Runtime User role (roles/aiplatform.notebookRuntimeUser)
@@ -163,6 +170,7 @@ func colabMethods() map[string]Method {
 			"ListNotebookRuntimes":          {"aiplatform.notebookRuntimes.list", "parent"},
 			"DeleteNotebookRuntime":         {"aiplatform.notebookRuntimes.delete", "name"},
 			"StartNotebookRuntime":          {"aiplatform.notebookRuntimes.start", "name"},
+			"StopNotebookRuntime":           {"aiplatform.notebookRuntimes.update", "name"},
 			"UpgradeNotebookRuntime":        {"aiplatform.notebookRuntimes.upgrade", "name"},
 			"CreateNotebookExecutionJob":    {"aiplatform.notebookExecutionJobs.create", "parent"},
 			"GetNotebookExecutionJob":       {"aiplatform.notebookExecutionJobs.get", "name"},
@@ -175,6 +183,18 @@ func colabMethods() map[string]Method {
 			"PauseSchedule": {"aiplatform.schedules.update", "name"}, "ResumeSchedule": {"aiplatform.schedules.update", "name"},
 			"UpdateSchedule": {"aiplatform.schedules.update", "schedule.name"},
 		},
+		// Vertex AI Pipelines (#2173): each pipelineJobs method's page,
+		// aiplatform.pipelineJobs.create on the parent, .get, .delete and
+		// .cancel on the job, .list on the parent; the batches the
+		// permission of each job on the parent (UNVERIFIED, re-read
+		// 2026-11-22: the batchDelete and batchCancel pages name
+		// aiplatform.pipelineJobs.delete and .cancel on the parent).
+		p + "PipelineService/": {
+			"CreatePipelineJob": {"aiplatform.pipelineJobs.create", "parent"}, "GetPipelineJob": {"aiplatform.pipelineJobs.get", "name"},
+			"ListPipelineJobs": {"aiplatform.pipelineJobs.list", "parent"}, "DeletePipelineJob": {"aiplatform.pipelineJobs.delete", "name"},
+			"CancelPipelineJob": {"aiplatform.pipelineJobs.cancel", "name"}, "BatchDeletePipelineJobs": {"aiplatform.pipelineJobs.delete", "parent"},
+			"BatchCancelPipelineJobs": {"aiplatform.pipelineJobs.cancel", "parent"},
+		},
 		"/google.iam.v1.IAMPolicy/": {
 			"GetIamPolicy": {"aiplatform.notebookRuntimeTemplates.getIamPolicy", "resource"},
 			"SetIamPolicy": {"aiplatform.notebookRuntimeTemplates.setIamPolicy", "resource"},
@@ -186,7 +206,19 @@ func colabMethods() map[string]Method {
 	m[p+"NotebookService/AssignNotebookRuntime"] = a
 	c := m[p+"NotebookService/CreateNotebookExecutionJob"]
 	c.Also = []Also{{Field: "notebook_execution_job.notebook_runtime_template_resource_name", Permission: apply}}
+	// The run's service account needs actAs (#2173, runas.go): an
+	// execution's, a scheduled request's and a pipeline job's.
+	c.ActAs = []string{"notebook_execution_job.service_account"}
 	m[p+"NotebookService/CreateNotebookExecutionJob"] = c
+	for _, k := range []string{"CreateSchedule", "UpdateSchedule"} {
+		r := m[p+"ScheduleService/"+k]
+		r.ActAs = []string{"schedule.create_notebook_execution_job_request.notebook_execution_job.service_account",
+			"schedule.create_pipeline_job_request.pipeline_job.service_account"}
+		m[p+"ScheduleService/"+k] = r
+	}
+	pj := m[p+"PipelineService/CreatePipelineJob"]
+	pj.ActAs = []string{"pipeline_job.service_account"}
+	m[p+"PipelineService/CreatePipelineJob"] = pj
 	return m
 }
 

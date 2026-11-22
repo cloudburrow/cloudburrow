@@ -39,9 +39,10 @@ package vertexai
 // python3, the runtime's one kernel.
 //
 // Local differences: a Workbench runtime (workbench_runtime) is not served
-// (notebooks.googleapis.com is not run), FAILED_PRECONDITION; the job runs
-// as the instance's notebook runtime whichever identity it names; a job
-// running when the instance stopped is FAILED when it starts again.
+// (notebooks.googleapis.com is not run), FAILED_PRECONDITION; a job
+// running when the instance stopped is FAILED when it starts again. The
+// job runs as the identity it names (runas.go, #2173): its Cloud Storage,
+// Dataform and BigQuery calls carry that identity's token.
 
 import (
 	"context"
@@ -115,6 +116,9 @@ func jobSchedule(m proto.Message) string {
 type jobEntry struct {
 	Job    *aiplatformpb.NotebookExecutionJob
 	cancel context.CancelFunc
+	// runAs is the account the run executes as, "" for the instance's
+	// own credentials (runas.go).
+	runAs string
 }
 
 // SetNotebookExecutor runs notebook executions and schedules on x, the
@@ -239,8 +243,10 @@ func jobView(j *aiplatformpb.NotebookExecutionJob, view aiplatformpb.NotebookExe
 	return out
 }
 
-func (n *notebookService) CreateNotebookExecutionJob(_ context.Context, req *aiplatformpb.CreateNotebookExecutionJobRequest) (*longrunningpb.Operation, error) {
-	j, err := n.s.createJob(req.GetParent(), req.GetNotebookExecutionJobId(), req.GetNotebookExecutionJob(), "")
+func (n *notebookService) CreateNotebookExecutionJob(ctx context.Context, req *aiplatformpb.CreateNotebookExecutionJobRequest) (*longrunningpb.Operation, error) {
+	in := req.GetNotebookExecutionJob()
+	j, err := n.s.createJob(req.GetParent(), req.GetNotebookExecutionJobId(), in, "",
+		jobIdentity(in.GetServiceAccount(), in.GetExecutionUser(), n.s.callerOf(ctx)))
 	if err != nil {
 		return nil, grpcError(err)
 	}
@@ -249,8 +255,8 @@ func (n *notebookService) CreateNotebookExecutionJob(_ context.Context, req *aip
 }
 
 // createJob records an execution and starts it; schedule names the
-// schedule that made it, if one did.
-func (s *Server) createJob(parent, id string, in *aiplatformpb.NotebookExecutionJob, schedule string) (*aiplatformpb.NotebookExecutionJob, error) {
+// schedule that made it, if one did, and runAs the account it runs as.
+func (s *Server) createJob(parent, id string, in *aiplatformpb.NotebookExecutionJob, schedule, runAs string) (*aiplatformpb.NotebookExecutionJob, error) {
 	project, _, err := parseParent("parent", parent)
 	if err != nil {
 		return nil, err
@@ -284,7 +290,7 @@ func (s *Server) createJob(parent, id string, in *aiplatformpb.NotebookExecution
 		j.ScheduleResourceName = schedule
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), j.GetExecutionTimeout().AsDuration())
-	e := &jobEntry{Job: j, cancel: cancel}
+	e := &jobEntry{Job: j, cancel: cancel, runAs: runAs}
 	st.jobs[name] = e
 	st.save()
 	go s.runJob(ctx, e, project)
@@ -320,6 +326,15 @@ func (s *Server) runJob(ctx context.Context, e *jobEntry, project string) {
 		opts = optionsOf(t.GetIdleShutdownConfig(), t.GetSoftwareConfig())
 	}
 	st.mu.Unlock()
+	// The run's identity (runas.go): a service account that does not
+	// exist or is disabled fails the run, as Google's would.
+	tok, err := s.runAsToken(e.runAs)
+	if err != nil {
+		st.setJob(e, aiplatformpb.JobState_JOB_STATE_FAILED, apierror.FailedPrecondition("the execution's identity %s: %v", e.runAs, err))
+		return
+	}
+	ctx = WithRunAsToken(ctx, tok)
+	opts.Token = tok
 	nb, file, err := readJobNotebook(ctx, x, j)
 	if err != nil {
 		st.setJob(e, aiplatformpb.JobState_JOB_STATE_FAILED, apierror.FailedPrecondition("reading the notebook: %v", err))

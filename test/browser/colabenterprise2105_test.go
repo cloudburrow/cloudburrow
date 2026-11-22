@@ -411,4 +411,20 @@ func TestColabEnterpriseExecutionsThroughThePages(t *testing.T) {
 	p.openRowDelete(sched.Name, "Delete")
 	p.confirmByName(sched.Name)
 	p.waitFor(fmt.Sprintf(`![...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q))`, schedName))
+
+	// My notebooks: Actions > Delete notebook, then the Delete notebook
+	// dialog's Confirm (#2173), as Google's quickstart words it.
+	p.navigate(notebooksPath)
+	p.waitFor(rowReady(nbName))
+	p.openRowDelete(nb.Name, "Delete notebook")
+	var dialogTitle string
+	p.eval(`document.querySelector(".modal.is-open h2").textContent`, &dialogTitle)
+	if dialogTitle != "Delete notebook" {
+		t.Errorf("the notebook's delete dialog is titled %q, want Delete notebook", dialogTitle)
+	}
+	p.pressConfirm("Confirm")
+	p.waitFor(fmt.Sprintf(`![...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q))`, nbName))
+	if find("colab-notebooks", "Notebook name", nbName).Name != "" {
+		t.Error("Delete notebook left the notebook listed")
+	}
 }

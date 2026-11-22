@@ -1382,13 +1382,23 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		localAISrv.SetNotebookRuntimes(colabHost{m: notebooks}, filepath.Join(cfg.StateDir, "vertexai", "notebookruntimes.json"))
 		// Their notebook executions and schedules read and write Cloud
 		// Storage and Dataform's single-file notebook repositories.
-		localAISrv.SetNotebookExecutor(colabExecutor{m: notebooks,
+		colabExec := colabExecutor{m: notebooks,
 			storage:  func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") },
-			dataform: dataformSvc.API})
+			dataform: dataformSvc.API}
+		localAISrv.SetNotebookExecutor(colabExec)
+		// Vertex AI pipeline jobs and their schedules (#2173): each task's
+		// container on Docker, its artifacts in Cloud Storage.
+		localAISrv.SetPipelineRunner(colabPipelines{colabExecutor: colabExec, instance: cfg.Name})
+		// Executions, schedules and pipeline jobs run as the identity they
+		// name (#2173), with actAs checked on it.
+		localAISrv.SetIdentity(runIdentity(iamEnforcer, iameval.VertexAI, creds, func() *resourcemanager.Registry { return projectRegistry }))
 	}
 	// Dataform's notebook actions run on them too (#2105), on a runtime
 	// template's settings when one is named.
 	if dataformSvc != nil {
+		// Strict act-as and invocations run as their service account
+		// (#2173).
+		dataformSvc.identity = runIdentity(iamEnforcer, iameval.DataformActAs, creds, func() *resourcemanager.Registry { return projectRegistry })
 		dataformSvc.notebooks = notebooks
 		dataformSvc.runtimeTemplates = colabTemplates(localAISrv)
 	}

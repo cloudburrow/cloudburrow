@@ -34,6 +34,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/service/dataform"
 	"github.com/cloudburrow/cloudburrow/internal/service/secrets"
+	"github.com/cloudburrow/cloudburrow/internal/service/vertexai"
 	"github.com/cloudburrow/cloudburrow/internal/telemetry"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
 	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
@@ -82,6 +83,9 @@ type dataformService struct {
 	// accountToken is a Developer Connect account connector user's token
 	// (Cloud Run's Developer Connect), for personal authentication.
 	accountToken func(ctx context.Context, connector, user string) (string, error)
+	// identity are strict act-as and the invocations' run identities
+	// (#2173, runidentity.go).
+	identity vertexai.Identity
 
 	server *grpctransport.Server
 	api    *dataform.Server
@@ -154,6 +158,7 @@ func (s *dataformService) Start(ctx context.Context) error {
 		opts.Notebooks = dataformNotebooks{m: s.notebooks, templates: s.runtimeTemplates}
 	}
 	opts.AccountToken = s.accountToken
+	opts.ActAs, opts.RunAs = s.identity.ActAs, s.identity.Mint
 	if s.secrets != nil {
 		opts.AccessSecret = s.accessSecret
 	}
@@ -408,7 +413,7 @@ func (b dataformBigQuery) client(ctx context.Context, project string) (*bigquery
 	if f == nil || f.HostAddr() == "" {
 		return nil, errors.New("BigQuery is not served on this instance")
 	}
-	return bigquery.NewClient(ctx, project, option.WithEndpoint("http://"+f.HostAddr()), option.WithoutAuthentication())
+	return bigquery.NewClient(ctx, project, option.WithEndpoint("http://"+f.HostAddr()), dataformRunAuth(ctx))
 }
 
 func (b dataformBigQuery) EnsureDataset(ctx context.Context, project, dataset, location string) error {

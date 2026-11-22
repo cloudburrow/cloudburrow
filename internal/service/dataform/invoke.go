@@ -48,7 +48,11 @@ func (s *Server) CreateWorkflowConfig(ctx context.Context, req *dfpb.CreateWorkf
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, err := s.repo(req.GetParent()); err != nil {
+	repo, err := s.repo(req.GetParent())
+	if err != nil {
+		return nil, err
+	}
+	if err := s.actAs(ctx, req.GetParent(), effectiveAccount(w.GetInvocationConfig(), repo)); err != nil {
 		return nil, err
 	}
 	if !strings.HasPrefix(w.GetReleaseConfig(), req.GetParent()+"/releaseConfigs/") {
@@ -154,6 +158,11 @@ func (s *Server) UpdateWorkflowConfig(ctx context.Context, req *dfpb.UpdateWorkf
 	if err := checkInvocationConfig(next.GetInvocationConfig()); err != nil {
 		return nil, err
 	}
+	if r, err := s.repo(repo); err == nil {
+		if err := s.actAs(ctx, repo, effectiveAccount(next.GetInvocationConfig(), r)); err != nil {
+			return nil, err
+		}
+	}
 	next.UpdateTime = s.now()
 	s.workflows[next.Name] = next
 	if err := s.save(); err != nil {
@@ -184,7 +193,8 @@ func (s *Server) CreateWorkflowInvocation(ctx context.Context, req *dfpb.CreateW
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, err := s.repo(req.GetParent()); err != nil {
+	repo, err := s.repo(req.GetParent())
+	if err != nil {
 		return nil, err
 	}
 	cfg := in.GetInvocationConfig()
@@ -213,6 +223,10 @@ func (s *Server) CreateWorkflowInvocation(ctx context.Context, req *dfpb.CreateW
 		return nil, apierror.InvalidArgument("workflow_invocation needs compilation_result or workflow_config")
 	}
 	if err := checkInvocationConfig(cfg); err != nil {
+		return nil, err
+	}
+	account := effectiveAccount(cfg, repo)
+	if err := s.actAs(ctx, req.GetParent(), account); err != nil {
 		return nil, err
 	}
 	if _, ok := in.GetCompilationSource().(*dfpb.WorkflowInvocation_CompilationResult); ok {
@@ -253,7 +267,11 @@ func (s *Server) CreateWorkflowInvocation(ctx context.Context, req *dfpb.CreateW
 	if err := s.save(); err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	runCtx, runErr := s.withRunAs(context.WithoutCancel(ctx), account)
+	if runErr != nil {
+		return nil, apierror.FailedPrecondition("the invocation's service account %s: %v", account, runErr)
+	}
+	runCtx, cancel := context.WithCancel(runCtx)
 	s.cancels[in.Name] = cancel
 	s.wg.Add(1)
 	go func() {

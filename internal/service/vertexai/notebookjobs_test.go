@@ -209,8 +209,8 @@ func TestSchedulesRunNotebookExecutions(t *testing.T) {
 	}
 	if _, err := sch.CreateSchedule(ctx, &aiplatformpb.CreateScheduleRequest{Parent: parent, Schedule: &aiplatformpb.Schedule{DisplayName: "p",
 		TimeSpecification: &aiplatformpb.Schedule_Cron{Cron: "* * * * *"}, MaxConcurrentRunCount: 1,
-		Request: &aiplatformpb.Schedule_CreatePipelineJobRequest{CreatePipelineJobRequest: &aiplatformpb.CreatePipelineJobRequest{Parent: parent}}}}); codeOf(err) != codes.Unimplemented {
-		t.Errorf("a pipeline schedule = %v, want UNIMPLEMENTED", err)
+		Request: &aiplatformpb.Schedule_CreatePipelineJobRequest{CreatePipelineJobRequest: &aiplatformpb.CreatePipelineJobRequest{Parent: parent}}}}); codeOf(err) != codes.InvalidArgument {
+		t.Errorf("a pipeline schedule without its pipeline_job = %v, want INVALID_ARGUMENT", err)
 	}
 	sc, err := sch.CreateSchedule(ctx, &aiplatformpb.CreateScheduleRequest{Parent: parent, Schedule: &aiplatformpb.Schedule{DisplayName: "Every minute",
 		TimeSpecification: &aiplatformpb.Schedule_Cron{Cron: "TZ=America/New_York * * * * *"}, MaxConcurrentRunCount: 1, MaxRunCount: 2,

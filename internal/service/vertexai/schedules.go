@@ -1,9 +1,15 @@
 package vertexai
 
-// Colab Enterprise schedules (#2105): google.cloud.aiplatform.v1.ScheduleService
-// over gRPC and REST, for schedules whose request is a notebook execution
-// (create_notebook_execution_job_request). Each due run creates a
-// NotebookExecutionJob (notebookjobs.go) named after the schedule.
+// Colab Enterprise and Vertex AI Pipelines schedules (#2105, #2173):
+// google.cloud.aiplatform.v1.ScheduleService over gRPC and REST, for
+// schedules whose request is a notebook execution
+// (create_notebook_execution_job_request) or a pipeline run
+// (create_pipeline_job_request). Each due run creates a
+// NotebookExecutionJob (notebookjobs.go) or a PipelineJob (pipelines.go)
+// named after the schedule ("Schedule a pipeline run with the API",
+// https://docs.cloud.google.com/vertex-ai/docs/pipelines/schedule-pipeline-run,
+// read 2026-11-22: "pipeline_job_id" is not accepted in the template, as
+// for notebooks).
 //
 // Documented behaviour (the ScheduleService protos; the v1 discovery
 // document, revision 20261114; https://docs.cloud.google.com/colab/docs/schedule-notebook-run;
@@ -34,12 +40,14 @@ package vertexai
 // run_response is the created job's name; a run counts toward
 // max_concurrent_run_count until its job ends.
 //
-// Not served: a schedule of a Vertex AI pipeline (create_pipeline_job_request)
-// is UNIMPLEMENTED, as Vertex AI Pipelines is not run on this instance.
+// A schedule run as a service account checks the caller's actAs on it to
+// update, pause or resume it, and one run with a user's credentials that
+// the caller is that user (runas.go).
 
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -66,7 +74,7 @@ var (
 		aipfilter.Fields("display_name", "state", "create_notebook_execution_job_request", "create_pipeline_job_request", "create_time", "start_time", "end_time", "next_run_time"),
 	}
 	scheduleOrder  = aipfilter.Fields("create_time", "start_time", "end_time", "next_run_time")
-	scheduleMasks  = map[string]bool{"display_name": true, "cron": true, "start_time": true, "end_time": true, "max_run_count": true, "max_concurrent_run_count": true, "allow_queueing": true, "create_notebook_execution_job_request": true}
+	scheduleMasks  = map[string]bool{"display_name": true, "cron": true, "start_time": true, "end_time": true, "max_run_count": true, "max_concurrent_run_count": true, "allow_queueing": true, "create_notebook_execution_job_request": true, "create_pipeline_job_request": true}
 	scheduleParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
 )
 
@@ -109,9 +117,21 @@ func (st *notebookStore) checkSchedule(parent string, sc *aiplatformpb.Schedule)
 	}
 	switch r := sc.GetRequest().(type) {
 	case nil:
-		return apierror.InvalidArgument("schedule.request is required: create_notebook_execution_job_request")
+		return apierror.InvalidArgument("schedule.request is required: create_notebook_execution_job_request or create_pipeline_job_request")
 	case *aiplatformpb.Schedule_CreatePipelineJobRequest:
-		return apierror.Unimplemented("schedule.create_pipeline_job_request: Vertex AI Pipelines is not served on this instance; schedule a notebook execution (create_notebook_execution_job_request)")
+		req := r.CreatePipelineJobRequest
+		if req.GetParent() != parent {
+			return apierror.InvalidArgument("schedule.create_pipeline_job_request.parent %q must be %s", req.GetParent(), parent)
+		}
+		if req.GetPipelineJobId() != "" {
+			return apierror.InvalidArgument("schedule.create_pipeline_job_request.pipeline_job_id: User-specified ID is not supported in the request template")
+		}
+		if req.GetPipelineJob() == nil {
+			return apierror.InvalidArgument("schedule.create_pipeline_job_request.pipeline_job is required")
+		}
+		if _, err := checkPipelineJob("schedule.create_pipeline_job_request.pipeline_job.", req.GetPipelineJob()); err != nil {
+			return err
+		}
 	case *aiplatformpb.Schedule_CreateNotebookExecutionJobRequest:
 		req := r.CreateNotebookExecutionJobRequest
 		if req.GetParent() != parent {
@@ -147,7 +167,7 @@ func nextRun(sc *aiplatformpb.Schedule, after time.Time) *timestamppb.Timestamp 
 	return timestamppb.New(n)
 }
 
-func (x *scheduleService) CreateSchedule(_ context.Context, req *aiplatformpb.CreateScheduleRequest) (*aiplatformpb.Schedule, error) {
+func (x *scheduleService) CreateSchedule(ctx context.Context, req *aiplatformpb.CreateScheduleRequest) (*aiplatformpb.Schedule, error) {
 	if _, _, err := parseParent("parent", req.GetParent()); err != nil {
 		return nil, grpcError(err)
 	}
@@ -174,8 +194,38 @@ func (x *scheduleService) CreateSchedule(_ context.Context, req *aiplatformpb.Cr
 		sc.State = aiplatformpb.Schedule_COMPLETED
 	}
 	st.schedules[sc.Name] = sc
+	st.owners[sc.Name] = x.s.callerOf(ctx)
 	st.save()
 	return proto.Clone(sc).(*aiplatformpb.Schedule), nil
+}
+
+// scheduleIdentity is the account a schedule's runs execute as and
+// whether it is a user's (execution_user).
+func scheduleIdentity(sc *aiplatformpb.Schedule) (account string, user bool) {
+	if r := sc.GetCreatePipelineJobRequest(); r != nil {
+		return r.GetPipelineJob().GetServiceAccount(), false
+	}
+	j := sc.GetCreateNotebookExecutionJobRequest().GetNotebookExecutionJob()
+	if u := j.GetExecutionUser(); u != "" {
+		return u, true
+	}
+	return j.GetServiceAccount(), false
+}
+
+// mayModify is the check on a schedule's update, pause and resume: actAs
+// on its service account, or for one run with a user's credentials that
+// the caller is the user who made it; the caller holds st.mu.
+func (x *scheduleService) mayModify(ctx context.Context, st *notebookStore, sc *aiplatformpb.Schedule) error {
+	account, user := scheduleIdentity(sc)
+	if user {
+		caller, owner := x.s.callerOf(ctx), st.owners[sc.GetName()]
+		if caller != "" && caller != owner {
+			return &apierror.Error{Code: codes.PermissionDenied, Message: fmt.Sprintf("Schedule %s runs with the credentials of %s: only that user can modify or trigger it", sc.GetName(), owner)}
+		}
+		return nil
+	}
+	project, _, _ := parseParent("name", sc.GetName()[:strings.Index(sc.GetName(), "/schedules/")])
+	return x.s.checkActAs(ctx, project, account)
 }
 
 func (st *notebookStore) schedule(name string) (*aiplatformpb.Schedule, error) {
@@ -248,11 +298,14 @@ func (x *scheduleService) DeleteSchedule(_ context.Context, req *aiplatformpb.De
 	return x.s.finished(req.GetName(), &aiplatformpb.DeleteOperationMetadata{GenericMetadata: generic()}, &emptypb.Empty{}, nil)
 }
 
-func (x *scheduleService) PauseSchedule(_ context.Context, req *aiplatformpb.PauseScheduleRequest) (*emptypb.Empty, error) {
+func (x *scheduleService) PauseSchedule(ctx context.Context, req *aiplatformpb.PauseScheduleRequest) (*emptypb.Empty, error) {
 	st := x.s.notebooks()
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	sc, err := st.schedule(req.GetName())
+	if err == nil {
+		err = x.mayModify(ctx, st, sc)
+	}
 	if err != nil {
 		return nil, grpcError(err)
 	}
@@ -267,11 +320,14 @@ func (x *scheduleService) PauseSchedule(_ context.Context, req *aiplatformpb.Pau
 	return &emptypb.Empty{}, nil
 }
 
-func (x *scheduleService) ResumeSchedule(_ context.Context, req *aiplatformpb.ResumeScheduleRequest) (*emptypb.Empty, error) {
+func (x *scheduleService) ResumeSchedule(ctx context.Context, req *aiplatformpb.ResumeScheduleRequest) (*emptypb.Empty, error) {
 	st := x.s.notebooks()
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	sc, err := st.schedule(req.GetName())
+	if err == nil {
+		err = x.mayModify(ctx, st, sc)
+	}
 	if err != nil {
 		return nil, grpcError(err)
 	}
@@ -294,7 +350,7 @@ func (x *scheduleService) ResumeSchedule(_ context.Context, req *aiplatformpb.Re
 	return &emptypb.Empty{}, nil
 }
 
-func (x *scheduleService) UpdateSchedule(_ context.Context, req *aiplatformpb.UpdateScheduleRequest) (*aiplatformpb.Schedule, error) {
+func (x *scheduleService) UpdateSchedule(ctx context.Context, req *aiplatformpb.UpdateScheduleRequest) (*aiplatformpb.Schedule, error) {
 	in := req.GetSchedule()
 	if in == nil {
 		return nil, grpcError(apierror.InvalidArgument("schedule is required"))
@@ -307,6 +363,9 @@ func (x *scheduleService) UpdateSchedule(_ context.Context, req *aiplatformpb.Up
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	cur, err := st.schedule(in.GetName())
+	if err == nil {
+		err = x.mayModify(ctx, st, cur)
+	}
 	if err != nil {
 		return nil, grpcError(err)
 	}
@@ -314,7 +373,7 @@ func (x *scheduleService) UpdateSchedule(_ context.Context, req *aiplatformpb.Up
 	for _, p := range paths {
 		p = camelToSnake(p)
 		if !scheduleMasks[p] {
-			return nil, grpcError(apierror.InvalidArgument("update_mask path %q cannot be updated: the updatable fields are display_name, cron, start_time, end_time, max_run_count, max_concurrent_run_count, allow_queueing and create_notebook_execution_job_request", p))
+			return nil, grpcError(apierror.InvalidArgument("update_mask path %q cannot be updated: the updatable fields are display_name, cron, start_time, end_time, max_run_count, max_concurrent_run_count, allow_queueing, create_notebook_execution_job_request and create_pipeline_job_request", p))
 		}
 		switch p {
 		case "display_name":
@@ -333,6 +392,16 @@ func (x *scheduleService) UpdateSchedule(_ context.Context, req *aiplatformpb.Up
 			next.AllowQueueing = in.GetAllowQueueing()
 		case "create_notebook_execution_job_request":
 			if _, ok := in.GetRequest().(*aiplatformpb.Schedule_CreateNotebookExecutionJobRequest); !ok {
+				return nil, grpcError(apierror.InvalidArgument("the scheduled request type cannot be changed"))
+			}
+			if _, ok := cur.GetRequest().(*aiplatformpb.Schedule_CreateNotebookExecutionJobRequest); !ok {
+				return nil, grpcError(apierror.InvalidArgument("the scheduled request type cannot be changed"))
+			}
+			next.Request = in.GetRequest()
+		case "create_pipeline_job_request":
+			_, newOK := in.GetRequest().(*aiplatformpb.Schedule_CreatePipelineJobRequest)
+			_, curOK := cur.GetRequest().(*aiplatformpb.Schedule_CreatePipelineJobRequest)
+			if !newOK || !curOK {
 				return nil, grpcError(apierror.InvalidArgument("the scheduled request type cannot be changed"))
 			}
 			next.Request = in.GetRequest()
@@ -386,6 +455,11 @@ func (st *notebookStore) activeRuns(name string) int64 {
 			n++
 		}
 	}
+	for _, e := range st.pipelines {
+		if e.Job.GetScheduleName() == name && pipelineRunning(e.Job) {
+			n++
+		}
+	}
 	return n
 }
 
@@ -436,7 +510,6 @@ func (s *Server) runDueSchedules() {
 		if sc.GetState() != aiplatformpb.Schedule_ACTIVE || sc.NextRunTime == nil || sc.NextRunTime.AsTime().After(now) {
 			continue
 		}
-		req := sc.GetCreateNotebookExecutionJobRequest()
 		at := sc.NextRunTime.AsTime()
 		if st.activeRuns(k)+int64(countDue(runs, k)) >= sc.GetMaxConcurrentRunCount() {
 			if sc.GetAllowQueueing() {
@@ -454,10 +527,27 @@ func (s *Server) runDueSchedules() {
 		}
 		st.complete(sc)
 		st.save()
+		if req := sc.GetCreatePipelineJobRequest(); req != nil {
+			runs = append(runs, dueRun{name: k, parent: req.GetParent(), pipeline: proto.Clone(req.GetPipelineJob()).(*aiplatformpb.PipelineJob), at: at})
+			continue
+		}
+		req := sc.GetCreateNotebookExecutionJobRequest()
 		runs = append(runs, dueRun{name: k, parent: req.GetParent(), job: proto.Clone(req.GetNotebookExecutionJob()).(*aiplatformpb.NotebookExecutionJob), at: at})
 	}
 	st.mu.Unlock()
 	for _, r := range runs {
+		if r.pipeline != nil {
+			if r.pipeline.GetDisplayName() == "" {
+				st.mu.Lock()
+				if sc := st.schedules[r.name]; sc != nil {
+					r.pipeline.DisplayName = sc.GetDisplayName()
+				}
+				st.mu.Unlock()
+			}
+			j, err := s.createPipelineJob(r.parent, "", r.pipeline, r.name, r.pipeline.GetServiceAccount())
+			s.recordRun(r, j.GetName(), err)
+			continue
+		}
 		if r.job.GetDisplayName() == "" {
 			st.mu.Lock()
 			if sc := st.schedules[r.name]; sc != nil {
@@ -465,19 +555,27 @@ func (s *Server) runDueSchedules() {
 			}
 			st.mu.Unlock()
 		}
-		j, err := s.createJob(r.parent, "", r.job, r.name)
-		resp := ""
-		if err != nil {
-			resp = err.Error()
-		} else {
-			resp = j.GetName()
-		}
 		st.mu.Lock()
-		if sc := st.schedules[r.name]; sc != nil {
-			sc.LastScheduledRunResponse = &aiplatformpb.Schedule_RunResponse{ScheduledRunTime: timestamppb.New(r.at), RunResponse: resp}
-			st.save()
-		}
+		owner := st.owners[r.name]
 		st.mu.Unlock()
+		j, err := s.createJob(r.parent, "", r.job, r.name, jobIdentity(r.job.GetServiceAccount(), r.job.GetExecutionUser(), owner))
+		s.recordRun(r, j.GetName(), err)
+	}
+}
+
+// recordRun keeps a schedule's last run: the created job's name, or why
+// none was.
+func (s *Server) recordRun(r dueRun, name string, err error) {
+	st := s.notebooks()
+	resp := name
+	if err != nil {
+		resp = err.Error()
+	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if sc := st.schedules[r.name]; sc != nil {
+		sc.LastScheduledRunResponse = &aiplatformpb.Schedule_RunResponse{ScheduledRunTime: timestamppb.New(r.at), RunResponse: resp}
+		st.save()
 	}
 }
 
@@ -485,6 +583,7 @@ func (s *Server) runDueSchedules() {
 type dueRun struct {
 	name, parent string
 	job          *aiplatformpb.NotebookExecutionJob
+	pipeline     *aiplatformpb.PipelineJob
 	at           time.Time
 }
 

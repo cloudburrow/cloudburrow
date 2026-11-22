@@ -209,13 +209,21 @@ func (s *Server) ListReleaseConfigs(_ context.Context, req *dfpb.ListReleaseConf
 	return out, nil
 }
 
-func (s *Server) UpdateReleaseConfig(_ context.Context, req *dfpb.UpdateReleaseConfigRequest) (*dfpb.ReleaseConfig, error) {
+func (s *Server) UpdateReleaseConfig(ctx context.Context, req *dfpb.UpdateReleaseConfigRequest) (*dfpb.ReleaseConfig, error) {
 	in := req.GetReleaseConfig()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	cur, err := s.release(in.GetName())
 	if err != nil {
 		return nil, err
+	}
+	// Strict act-as (runas.go): the repository's service account.
+	if parent, _, ok := strings.Cut(in.GetName(), "/releaseConfigs/"); ok {
+		if r, err := s.repo(parent); err == nil {
+			if err := s.actAs(ctx, parent, r.GetServiceAccount()); err != nil {
+				return nil, err
+			}
+		}
 	}
 	next := clone(cur)
 	paths := req.GetUpdateMask().GetPaths()
