@@ -28,7 +28,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/hostrelay"
 )
 
-//go:embed assets/relay.py assets/procedure.py assets/run.sh
+//go:embed assets/relay.py assets/procedure.py assets/run.sh assets/node.sh
 var assets embed.FS
 
 // The connector's endpoints, the relay's aliases on the job's network.
@@ -61,6 +61,10 @@ type LogEntry struct {
 // for that Spark.
 type Runtime struct {
 	Image string
+	// RImage is the same Spark's image with R beside Python (the
+	// official image's -python3-r- variant), which SparkR workloads and
+	// Dataproc clusters run in; "" when none is pinned.
+	RImage string
 	// Connector returns the connector jar's path on the host, fetching
 	// it on the first use.
 	Connector func(ctx context.Context) (string, error)
@@ -72,6 +76,13 @@ type Docker struct {
 	// the one a procedure with no runtime_version runs on.
 	Runtimes map[string]Runtime
 	Default  string
+	// Clusters are the Dataproc cluster image versions (MAJOR.MINOR) a
+	// cluster runs (#2162): each one's Spark, its RImage the nodes'.
+	Clusters map[string]Runtime
+	// History is the host directory batches and sessions write their
+	// Spark event logs to, which the instance's History Server reads
+	// (their Spark UI); "" writes none.
+	History string
 	// BigQuery and Storage are the instance's BigQuery REST and Storage
 	// API addresses on the host (host:port), live at each run; Registry
 	// its Artifact Registry's (the Docker registry a container_image is
@@ -319,6 +330,20 @@ func (d *Docker) prepare(ctx context.Context, job Job, inbound string) (_ *prepa
 		"-v", dir + ":/cb", "-v", jar + ":/cb-connector/spark-bigquery.jar:ro",
 		"-e", "CB_SPARK_OUT=/cb/out/params.json", "-e", "CB_SPARK_TYPES=/cb/types.json"}
 	image, conf := rt.Image, map[string]string{}
+	if job.Kind == KindSparkR {
+		if rt.RImage == "" {
+			return nil, &Result{Failed: true, Message: "SparkR is not available on runtime " + version + ": no Spark image with R is pinned for it"}, nil
+		}
+		image = rt.RImage
+	}
+	if d.History != "" && job.Kind != "" {
+		// The event log the Spark UI is read from (#2162).
+		run = append(run, "-v", d.History+":/cb-history")
+		conf["spark.eventLog.enabled"], conf["spark.eventLog.dir"] = "true", "file:/cb-history"
+		if job.AppID != "" {
+			conf["spark.app.id"] = job.AppID
+		}
+	}
 	pythonPath := "/cb/lib"
 	if custom != nil && custom.env["PYTHONPATH"] != "" {
 		pythonPath += ":" + custom.env["PYTHONPATH"] // the image's packages too

@@ -14,6 +14,7 @@ import (
 
 	"cloud.google.com/go/storage"
 	"google.golang.org/api/googleapi"
+	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc"
 
@@ -99,8 +100,10 @@ func (s *dataprocService) Start(ctx context.Context) error {
 	if s.spark != nil {
 		if d := s.spark(); d != nil {
 			opts.Engine = dataproc.Docker{D: d}
+			opts.HistoryDir = d.History
 		}
 	}
+	opts.InstanceID = s.cfg.Name
 	if s.live != nil && serviceEnabled(s.cfg, config.ServiceStorage) {
 		opts.Storage = &dataprocStorage{live: s.live}
 	}
@@ -133,7 +136,8 @@ func (s *dataprocService) Start(ctx context.Context) error {
 	})
 	// The WebSocket bridge outside every wrapper, which would hide the
 	// connection's Hijacker.
-	s.server.ServeHTTP(api.Bridge(jsonAPI))
+	// The History Servers (the Spark UI, #2162) beside the JSON API.
+	s.server.ServeHTTP(api.Bridge(api.WebUI(jsonAPI)))
 	if err := s.server.Register(func(g *grpc.Server) { api.Register(g) }); err != nil {
 		return err
 	}
@@ -225,6 +229,27 @@ func (d *dataprocStorage) Write(ctx context.Context, uri string, data []byte) er
 		return err
 	}
 	return w.Close()
+}
+
+// List lists the bucket's objects under prefix, by name with their sizes.
+func (d *dataprocStorage) List(ctx context.Context, bucket, prefix string) (map[string]int64, error) {
+	c, err := d.client(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close()
+	out := map[string]int64{}
+	it := c.Bucket(bucket).Objects(ctx, &storage.Query{Prefix: prefix})
+	for {
+		a, err := it.Next()
+		if errors.Is(err, iterator.Done) {
+			return out, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		out[a.Name] = a.Size
+	}
 }
 
 func (d *dataprocStorage) EnsureBucket(ctx context.Context, project, bucket, location string) error {

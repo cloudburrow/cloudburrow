@@ -30,7 +30,12 @@ import (
 // Spark and Java of that Managed Service for Apache Spark runtime, and
 // Google's BigQuery connector for that Spark from Maven Central.
 type sparkRuntime struct {
-	image                       string
+	image string
+	// rImage is the same Spark's official -python3-r- image, which
+	// SparkR workloads and Dataproc clusters run in (#2162): R runs in it
+	// at runtime only, never in the CLI or the repository, as the MySQL
+	// images' GPL server does.
+	rImage                      string
 	connectorURL, connectorSHA  string
 	connectorFile, sparkVersion string
 }
@@ -44,24 +49,47 @@ type sparkRuntime struct {
 var (
 	spark35Runtime = sparkRuntime{
 		image:         "apache/spark@sha256:f3d6eaa8bab8ec2e38f3c3918a5b2f8b253c95bcb19f9e87ad0e0cdacf9df2d5", // 3.5.9-scala2.12-java17-python3-ubuntu
+		rImage:        "apache/spark@sha256:2442368ef4a5ca60e81604cf48d22d847344d009237cd21a1943b060278898bb", // 3.5.9-scala2.12-java17-python3-r-ubuntu
 		connectorURL:  "https://repo1.maven.org/maven2/com/google/cloud/spark/spark-3.5-bigquery/0.46.2/spark-3.5-bigquery-0.46.2.jar",
 		connectorSHA:  "817aafccd47b4756f7ae5bb51b509d5642140ead0fb3da06f1a20c24e9baa0ac",
 		connectorFile: "spark-3.5-bigquery-0.46.2.jar", sparkVersion: "3.5",
 	}
 	spark40Runtime = sparkRuntime{
 		image:         "apache/spark@sha256:fb5c5e61e7bb1be94b7f3a31afe1f73c5b4d20b6008f4ffa7278fc085da08a9e", // 4.0.1-scala2.13-java21-python3-ubuntu
+		rImage:        "apache/spark@sha256:b374a4f28ed5852cbe036c14fd41e29a02fdb7e4fd7cf0e233bcc22f0272b967", // 4.0.1-scala2.13-java21-python3-r-ubuntu
 		connectorURL:  "https://repo1.maven.org/maven2/com/google/cloud/spark/spark-4.0-bigquery/0.46.2/spark-4.0-bigquery-0.46.2.jar",
 		connectorSHA:  "b09c4455875d7811971796091371d4dda646029b349c35ef95f578f133607e0e",
 		connectorFile: "spark-4.0-bigquery-0.46.2.jar", sparkVersion: "4.0",
 	}
 	spark42Runtime = sparkRuntime{
 		image:         "apache/spark@sha256:0a8fa37711b6afe90a1bfe4427a6415b0f315f51f6957ca1bee77d255ebb9e86", // 4.2.0-scala2.13-java25-python3-ubuntu
+		rImage:        "apache/spark@sha256:0686eefef011f8c2bd272f255e30adf911731c574582116c8d8dc9182c7c9565", // 4.2.0-scala2.13-java25-python3-r-ubuntu
 		connectorURL:  "https://repo1.maven.org/maven2/com/google/cloud/spark/spark-4.2-bigquery/0.46.2/spark-4.2-bigquery-0.46.2.jar",
 		connectorSHA:  "45778166a2ebdf1a0e2d758fc0970ff65673f026bc3cb9014dcc242fcba00977",
 		connectorFile: "spark-4.2-bigquery-0.46.2.jar", sparkVersion: "4.2",
 	}
 	sparkRuntimes = map[string]sparkRuntime{"1.2": spark35Runtime, "2.2": spark35Runtime, "2.3": spark35Runtime,
 		"3.0": spark40Runtime, "4.0": spark42Runtime}
+
+	// Dataproc clusters' image versions (#2162), as the image version
+	// list has their Spark (re-read 2026-11-22:
+	// https://docs.cloud.google.com/dataproc/docs/concepts/versioning/dataproc-version-clusters):
+	// 2.1 Spark 3.3.2, 2.2 and 2.3 Spark 3.5.3, 3.0 Spark 4.1.2. Each runs
+	// the official image of its Spark with Python and R, Google's
+	// connector for that Spark on its class path.
+	spark33Cluster = sparkRuntime{
+		rImage:        "apache/spark@sha256:563f9fdb447a9238c50bdb79301368f26df186cbae197f57eb1da0e6efcb7287", // 3.3.3-scala2.12-java11-python3-r-ubuntu
+		connectorURL:  "https://repo1.maven.org/maven2/com/google/cloud/spark/spark-3.3-bigquery/0.46.2/spark-3.3-bigquery-0.46.2.jar",
+		connectorSHA:  "fb700b2d4899ea4823b6f3650273301913323ca0752fc53e8e83e02cee7d1e0a",
+		connectorFile: "spark-3.3-bigquery-0.46.2.jar", sparkVersion: "3.3",
+	}
+	spark41Cluster = sparkRuntime{
+		rImage:        "apache/spark@sha256:4db9a9d28c9fb0a386e224d4201a79e07df825761574b5fd8873c78a2d5b60ea", // 4.1.2-scala2.13-java21-python3-r-ubuntu
+		connectorURL:  "https://repo1.maven.org/maven2/com/google/cloud/spark/spark-4.1-bigquery/0.46.2/spark-4.1-bigquery-0.46.2.jar",
+		connectorSHA:  "4bcfadd6898f98141a44d696824f807bb3d0565e7ec590854ef9d7a7b294b6da",
+		connectorFile: "spark-4.1-bigquery-0.46.2.jar", sparkVersion: "4.1",
+	}
+	sparkClusters = map[string]sparkRuntime{"2.1": spark33Cluster, "2.2": spark35Runtime, "2.3": spark35Runtime, "3.0": spark41Cluster}
 )
 
 // sparkDefaultRuntime is the runtime a procedure with no runtime_version
@@ -102,17 +130,32 @@ func newSparkRunner(cfg config.Config, out io.Writer, live func() map[string]str
 	addr := func(name string) func() string {
 		return func() string { return live()[name] }
 	}
-	runtimes := map[string]sparkproc.Runtime{}
-	for v, rt := range sparkRuntimes {
-		rt := rt
-		runtimes[v] = sparkproc.Runtime{Image: rt.image, Connector: func(ctx context.Context) (string, error) {
+	runtime := func(rt sparkRuntime) sparkproc.Runtime {
+		return sparkproc.Runtime{Image: rt.image, RImage: rt.rImage, Connector: func(ctx context.Context) (string, error) {
 			mu.Lock()
 			defer mu.Unlock()
 			return fetchSparkConnector(ctx, cache, rt, out)
 		}}
 	}
+	runtimes, clusters := map[string]sparkproc.Runtime{}, map[string]sparkproc.Runtime{}
+	for v, rt := range sparkRuntimes {
+		runtimes[v] = runtime(rt)
+	}
+	for v, rt := range sparkClusters {
+		clusters[v] = runtime(rt)
+	}
+	// The batches' and sessions' Spark event logs, which the instance's
+	// History Server reads (their Spark UI, #2162).
+	history := filepath.Join(cfg.InstanceDir(), "spark-history")
+	if err := os.MkdirAll(history, 0o777); err == nil {
+		_ = os.Chmod(history, 0o777)
+	} else {
+		history = ""
+	}
 	d := &sparkproc.Docker{
 		Runtimes: runtimes,
+		Clusters: clusters,
+		History:  history,
 		Default:  sparkDefaultRuntime,
 		BigQuery: addr("bigquery"),
 		Storage:  addr("bigquery-storage"),

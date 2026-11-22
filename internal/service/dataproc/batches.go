@@ -392,6 +392,7 @@ func (s *Server) runBatch(ctx context.Context, name string) {
 		cancel()
 	}
 	s.endBatch(name, res, err, ctx.Err() != nil, started)
+	s.copyToPHS(snap.GetEnvironmentConfig().GetPeripheralsConfig().GetSparkHistoryServerConfig().GetDataprocCluster(), snap.GetUuid())
 }
 
 func batchProjectLocation(name string) (string, string) {
@@ -548,7 +549,7 @@ func baseJob(id, project, location, name string, rc *dataprocpb.RuntimeConfig, e
 	ec := env.GetExecutionConfig()
 	job := sparkproc.Job{SparkJobID: id, Project: project, Location: location, Procedure: name,
 		Properties: rc.GetProperties(), RuntimeVersion: rc.GetVersion(), ContainerImage: rc.GetContainerImage(),
-		ServiceAccount: ec.GetServiceAccount(), KMSKey: ec.GetKmsKey()}
+		ServiceAccount: ec.GetServiceAccount(), KMSKey: ec.GetKmsKey(), AppID: appID(id)}
 	if sa := ec.GetServiceAccount(); sa != "" {
 		// The workload runs as its service account: the BigQuery
 		// connector's token is one minted for it.

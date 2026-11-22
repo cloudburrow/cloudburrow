@@ -105,6 +105,9 @@ type Job struct {
 	// QueryVariables are a Spark SQL batch's query_variables, each set
 	// first as "SET name=\"value\";", as the API reference says they are.
 	QueryVariables map[string]string `json:"queryVariables,omitempty"`
+	// AppID is the Spark application's ID (spark.app.id) a batch or
+	// session runs as, the one its Spark UI shows; "" lets Spark choose.
+	AppID string `json:"appId,omitempty"`
 	// Log names the Cloud Logging resource and logs the job's output is
 	// written to; nil is a procedure's bigquery.googleapis.com/SparkJob.
 	Log *LogTarget `json:"log,omitempty"`
@@ -159,6 +162,9 @@ type Result struct {
 	// DriverOutput is the driver's output, its last MaxDriverOutput
 	// bytes, for the job's staging bucket.
 	DriverOutput string `json:"driverOutput,omitempty"`
+	// AppID is the application's ID on a cluster's master, read from the
+	// driver's output (Cluster.Submit), or "".
+	AppID string `json:"appId,omitempty"`
 	// KeyRefused is why the job's KMSKey cannot be used, and KeyKind
 	// which way (invalid, notFound, unusable, permissionDenied,
 	// unavailable, noKMS); nothing was run.

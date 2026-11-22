@@ -3,8 +3,9 @@
 # bigquerystorage.cloudburrow.internal (8443, TLS with the run's
 # certificate, ALPN h2), relaying to the instance's BigQuery REST port and
 # its Storage Read and Write API port, the two addresses given. It dials
-# nothing else. A third argument, NAME:PORT, is a Spark Connect session's
-# server on the internal network: the relay listens on PORT too, published
+# nothing else. Each further argument, [LISTEN=]NAME:PORT, is a server on
+# the internal network (a Spark Connect session's, a Dataproc cluster's
+# web interfaces): the relay listens on LISTEN (PORT when none), published
 # on the host's loopback, and relays to it (resolved at each connection,
 # as the server starts after the relay).
 import asyncio
@@ -62,9 +63,10 @@ async def main():
     rest = await asyncio.start_server(relay(REST), "0.0.0.0", 8080)
     storage = await asyncio.start_server(relay(STORAGE), "0.0.0.0", 8443, ssl=tls)
     servers = [rest.serve_forever(), storage.serve_forever()]
-    if len(sys.argv) > 3:
-        name, port = sys.argv[3].rsplit(":", 1)
-        inbound = await asyncio.start_server(relay(lambda: (name, int(port))), "0.0.0.0", int(port))
+    for arg in sys.argv[3:]:
+        listen, _, target = arg.rpartition("=")
+        name, port = target.rsplit(":", 1)
+        inbound = await asyncio.start_server(relay(lambda name=name, port=port: (name, int(port))), "0.0.0.0", int(listen or port))
         servers.append(inbound.serve_forever())
     print("ready", flush=True)
     await asyncio.gather(*servers)
