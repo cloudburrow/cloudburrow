@@ -84,6 +84,8 @@ const (
 	relayAlias = "host.docker.internal"
 	relayPort  = "8080"
 	endpoint   = "http://" + relayAlias + ":" + relayPort
+	// dataprocEndpoint is the Dataproc API's, gRPC in plaintext (#2156).
+	dataprocEndpoint = relayAlias + ":8081"
 )
 
 // IdleTimeout is how long a runtime is kept without a cell run: Colab
@@ -127,6 +129,14 @@ type Manager struct {
 	// BigQuery is the instance's BigQuery REST address on the host
 	// (host:port), live at each connect.
 	BigQuery func() string
+	// Dataproc is the instance's Dataproc API address on the host
+	// (host:port), "" when it is not served: an Apache Spark notebook's
+	// DataprocSparkSession creates its Spark Connect session there and
+	// reaches it through the same port (#2156).
+	Dataproc func() string
+	// Region is the Dataproc region a notebook's sessions are made in;
+	// "" is us-central1.
+	Region string
 	// Logf receives the manager's own notes, or is nil.
 	Logf func(format string, args ...any)
 	// Docker is the docker command ("" for "docker"); tests swap it.
@@ -310,6 +320,18 @@ func (m *Manager) launch(ctx context.Context, s *session) error {
 		return err
 	}
 	s.stop = stop
+	// The Dataproc API's port (#2156), on the relay's 8081.
+	dpTarget := ""
+	if m.Dataproc != nil {
+		if dp := m.Dataproc(); dp != "" {
+			t, stopDP, err := m.target(ctx, dp)
+			if err != nil {
+				stop()
+				return err
+			}
+			dpTarget, s.stop = t, func() { stop(); stopDP() }
+		}
+	}
 	suffix := nameSafe.ReplaceAllString(strings.ToLower(s.key), "-")
 	if len(suffix) > 30 {
 		suffix = suffix[len(suffix)-30:]
@@ -329,7 +351,7 @@ func (m *Manager) launch(ctx context.Context, s *session) error {
 	if !m.desktop {
 		relayArgs = append(relayArgs, "--add-host", "host.docker.internal:host-gateway")
 	}
-	relayArgs = append(relayArgs, image, "-I", "/opt/cloudburrow/relay.py", target)
+	relayArgs = append(relayArgs, image, "-I", "/opt/cloudburrow/relay.py", target, dpTarget)
 	if out, err := m.docker(ctx, relayArgs...); err != nil {
 		return errors.New("start the runtime's relay: " + out)
 	}
@@ -346,9 +368,19 @@ func (m *Manager) launch(ctx context.Context, s *session) error {
 	if bin == "" {
 		bin = "docker"
 	}
-	cmd := exec.Command(bin, "run", "-i", "--rm", "--init", "--name", kernel, "--label", label, "--network", network,
-		"-e", "GOOGLE_CLOUD_PROJECT="+s.project, "-e", "CB_BIGQUERY_ENDPOINT="+endpoint, "-e", "NO_GCE_CHECK=True",
-		image)
+	runArgs := []string{"run", "-i", "--rm", "--init", "--name", kernel, "--label", label, "--network", network,
+		"-e", "GOOGLE_CLOUD_PROJECT=" + s.project, "-e", "CB_BIGQUERY_ENDPOINT=" + endpoint, "-e", "NO_GCE_CHECK=True"}
+	if dpTarget != "" {
+		region := m.Region
+		if region == "" {
+			region = "us-central1"
+		}
+		// Google's DataprocSparkSession reads its API endpoint and region
+		// from these; kernel.py points its clients at the relay.
+		runArgs = append(runArgs, "-e", "CB_DATAPROC_ENDPOINT="+dataprocEndpoint,
+			"-e", "GOOGLE_CLOUD_DATAPROC_API_ENDPOINT="+dataprocEndpoint, "-e", "GOOGLE_CLOUD_REGION="+region)
+	}
+	cmd := exec.Command(bin, append(runArgs, image)...)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return err

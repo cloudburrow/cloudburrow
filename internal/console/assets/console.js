@@ -412,6 +412,15 @@ const ROUTES = [
     section: "Databases", product: "bigquery", productTitle: "BigQuery" },
   { path: "/bigquery-dataform-settings", service: "dataform-settings", icon: "bigquery", title: "Dataform settings", kind: "Configuration",
     section: "Databases", product: "bigquery", productTitle: "BigQuery" },
+  // Serverless for Apache Spark (#2156), the Dataproc API's batches,
+  // interactive Spark Connect sessions and session templates, under
+  // Dataproc's Serverless menu as Google's console has them.
+  { path: "/dataproc/batches", service: "dataproc-batches", icon: "dataproc", title: "Batches", kind: "Batch",
+    section: "Databases", product: "dataproc", productTitle: "Dataproc" },
+  { path: "/dataproc/interactive", service: "dataproc-sessions", icon: "dataproc", title: "Interactive sessions", kind: "Session",
+    section: "Databases", product: "dataproc", productTitle: "Dataproc" },
+  { path: "/dataproc/session-templates", service: "dataproc-templates", icon: "dataproc", title: "Session templates", kind: "Session template",
+    section: "Databases", product: "dataproc", productTitle: "Dataproc" },
   { path: "/bigquery-partner-center", service: null, requires: "bigquery", screen: "unavailable", icon: "bigquery", title: "Partner Center",
     section: "Databases", product: "bigquery", productTitle: "BigQuery",
     unavailable: "Partner Center lists Google Cloud partners' solutions, which a local instance does not hold." },
@@ -922,6 +931,7 @@ const ICONS = {
   vpc: '<circle cx="12" cy="5" r="2.5"/><circle cx="5" cy="18" r="2.5"/><circle cx="19" cy="18" r="2.5"/><path d="M11 7.2L6.2 15.8M13 7.2l4.8 8.6M7.5 18h9"/>',
   privateca: '<rect x="3" y="4" width="18" height="12" rx="1"/><path d="M7 8h10M7 11h6"/><circle cx="17" cy="16" r="3"/><path d="M15.5 18.5L15 22l2-1 2 1-.5-3.5"/>',
   // BigQuery: a magnifier over a bar chart.
+  dataproc:  '<path d="M12 3l1.8 5.4H19l-4.3 3.2 1.7 5.4L12 13.8 7.6 17l1.7-5.4L5 8.4h5.2z"/>',
   bigquery:  '<circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.2 15.2L21 21"/><path d="M8 12.5v-2M10.5 12.5v-4M13 12.5v-3"/>',
   // Cloud Scheduler: a clock.
   scheduler: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
@@ -21190,7 +21200,10 @@ function bqHomeTab(ctx) {
     title: why, "aria-description": why, onclick: why ? null : run,
   });
   const notebook = bqDataformOn() ? null : BQ_NO_DATAFORM;
-  const spark = "Not available locally: an Apache Spark notebook's session is a Spark Connect session of Serverless for Apache Spark, which CloudBurrow does not serve.";
+  // An Apache Spark notebook (#2156): its runtime's DataprocSparkSession
+  // makes a Spark Connect session of the instance's Serverless for Apache
+  // Spark, so the Dataproc API must be served beside Dataform.
+  const spark = notebook || (bqSparkOn() ? null : BQ_NO_SPARK);
   // A dataset chooser for Create new's Table and Add your own data's
   // Load from a file, which act on a dataset.
   // The datasets arrive with the Explorer, after the tab is drawn: refresh
@@ -21227,7 +21240,7 @@ function bqHomeTab(ctx) {
       el("div", { class: "bq-home-actions" },
         action("SQL query", () => ctx.openQuery("")),
         action("Notebook", () => ctx.openAsset("notebook", bqNotebookDoc([])), notebook),
-        action("Apache Spark notebook", null, spark),
+        action("Apache Spark notebook", () => ctx.openAsset("notebook", bqNotebookDoc(BQ_SPARK_NOTEBOOK)), spark),
         action("Data canvas", () => ctx.openAsset("data_canvas", ""), notebook),
         action("Data preparation", null, "Not available locally: a data preparation is a Dataform action, which CloudBurrow's Dataform does not run (#2105)."),
         action("Pipeline", null, "Not available locally: a pipeline's tasks are a Dataform repository's definitions/actions.yaml, which CloudBurrow's Dataform does not compile (#2105)."),
@@ -21282,6 +21295,21 @@ const BQ_ASSET_KIND = { sql: "saved query", notebook: "notebook", data_canvas: "
 const BQ_STUDIO_CLOSED = "cloudburrow.bigquery.closed";
 
 const bqDataformOn = () => !!capabilityOf("dataform").id;
+// Serverless for Apache Spark (#2156), whose Spark Connect sessions an
+// Apache Spark notebook runs on.
+const bqSparkOn = () => !!capabilityOf("dataproc-sessions").id;
+const BQ_NO_SPARK = "An Apache Spark notebook runs on a Spark Connect session of Serverless for Apache Spark, which this instance does not serve " +
+  "(start it with --services including dataproc).";
+// The Apache Spark notebook's starter cells, as Google's: a
+// DataprocSparkSession (google-cloud-dataproc-spark-connect) made from a
+// Session config, then Spark reading BigQuery through the connector.
+const BQ_SPARK_NOTEBOOK = [
+  ["markdown", "# Apache Spark notebook\nConnect, then run the cells: the first creates a Spark Connect session of Serverless for Apache Spark (runtime 3.0) and the others run Spark on it, reading BigQuery through the Spark BigQuery connector."],
+  ["code", "from google.cloud.dataproc_spark_connect import DataprocSparkSession\nfrom google.cloud.dataproc_v1 import Session\n\nsession = Session()\nspark = DataprocSparkSession.builder.dataprocSessionConfig(session).getOrCreate()"],
+  ["code", "spark.sql(\"SELECT id, id * id AS square FROM range(5)\").show()"],
+  ["code", "# Replace with a table of this project: PROJECT.DATASET.TABLE\ndf = spark.read.format(\"bigquery\").load(\"PROJECT.DATASET.TABLE\")\ndf.printSchema()"],
+  ["code", "spark.stop()"],
+];
 const bqSavedNote = () => (bqDataformOn() ? BQ_DATAFORM_NOTE : BQ_SAVED_NOTE);
 const bqDfCall = (call, body = {}) =>
   send(`/api/studio/dataform?call=${encodeURIComponent(call)}&project=${encodeURIComponent(currentProject())}`, "POST", body);

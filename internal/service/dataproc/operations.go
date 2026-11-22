@@ -273,3 +273,20 @@ func NewRESTHandler(s *Server) http.Handler {
 	s.Register(t)
 	return t
 }
+
+// CancelBatch cancels a batch through its operation, as the console's
+// Cancel does (operations.cancel on Batch.operation).
+func (s *Server) CancelBatch(ctx context.Context, name string) error {
+	s.mu.Lock()
+	b := s.batches[name]
+	op := ""
+	if b != nil {
+		op = b.GetOperation()
+	}
+	s.mu.Unlock()
+	if b == nil {
+		return status.Errorf(codes.NotFound, "Batch %s not found", name)
+	}
+	_, err := (&operations{s: s}).CancelOperation(ctx, &longrunningpb.CancelOperationRequest{Name: op})
+	return err
+}

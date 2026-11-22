@@ -18,6 +18,7 @@ import (
 )
 
 type fakeEngine struct {
+	addr  string // the sessions' Spark Connect server
 	mu    sync.Mutex
 	jobs  []sparkproc.Job
 	res   sparkproc.Result
@@ -40,16 +41,21 @@ func (f *fakeEngine) Run(ctx context.Context, job sparkproc.Job) (sparkproc.Resu
 }
 
 type fakeConn struct {
+	addr string
 	done chan struct{}
 	once sync.Once
 }
 
-func (c *fakeConn) Address() string          { return "127.0.0.1:1" }
+func (c *fakeConn) Address() string          { return c.addr }
 func (c *fakeConn) Done() <-chan struct{}    { return c.done }
 func (c *fakeConn) Result() sparkproc.Result { return sparkproc.Result{} }
 func (c *fakeConn) Stop()                    { c.once.Do(func() { close(c.done) }) }
 func (f *fakeEngine) StartConnect(context.Context, sparkproc.Job) (Conn, error) {
-	return &fakeConn{done: make(chan struct{})}, nil
+	addr := f.addr
+	if addr == "" {
+		addr = "127.0.0.1:1"
+	}
+	return &fakeConn{addr: addr, done: make(chan struct{})}, nil
 }
 
 type fakeStorage struct {

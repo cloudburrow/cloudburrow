@@ -309,7 +309,8 @@ func (s *Server) setBatchStateLocked(b *dataprocpb.Batch, st dataprocpb.Batch_St
 // workload names none: "a regional staging bucket shared across
 // workloads", its name prefixed dataproc-staging- (the staging bucket
 // page, read 2026-11-22). The rest of its name, the region, the project's
-// number and a suffix, is UNVERIFIED: the page does not give it.
+// number and a suffix, is UNVERIFIED: the page does not give it (docs
+// re-read 2026-11-22: https://docs.cloud.google.com/managed-spark/docs/concepts/staging-bucket-serverless).
 func (s *Server) StagingBucket(project, location string) string {
 	number := project
 	if s.opts.ProjectNumber != nil {
@@ -325,7 +326,8 @@ func (s *Server) StagingBucket(project, location string) string {
 // stderr, under the staging bucket's google-cloud-dataproc-metainfo/
 // folder as Dataproc writes a job's (UNVERIFIED for batches: the
 // reference says only that it points to "the stdout and stderr of the
-// workload").
+// workload"; re-read 2026-11-22:
+// https://docs.cloud.google.com/managed-spark/docs/reference/rest/v1/RuntimeInfo).
 func outputURI(bucket, uuid string) string {
 	return "gs://" + bucket + "/google-cloud-dataproc-metainfo/" + uuid + "/jobs/srvls-batch-" + uuid + "/driveroutput"
 }

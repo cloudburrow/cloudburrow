@@ -1345,6 +1345,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// BigQuery Studio's notebook runtimes (#2094), deleted when up stops.
 	notebooks := &nbruntime.Manager{Instance: cfg.Name,
 		Logf: func(format string, args ...any) { fmt.Fprintf(stdout, "cloudburrow: "+format+"\n", args...) }}
+	// An Apache Spark notebook's sessions are Serverless for Apache
+	// Spark's (#2156).
+	notebooks.Dataproc = dataprocSvc.Addr
 	defer notebooks.Close()
 	consoleSrv := buildConsole(consoleDeps{
 		cfg: cfg, iam: iamEnforcer, notebooks: notebooks, assetOut: assetOut, coord: coord, cluster: clusterComp, localAI: localAISrv, localModels: localModels,

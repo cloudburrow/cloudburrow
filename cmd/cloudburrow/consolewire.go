@@ -374,6 +374,9 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	}
 	// App Hub (#2110), in process: Applications, Services and workloads,
 	// Settings.
+	if enabled[config.ServiceDataproc] && d.dataproc != nil {
+		providers = append(providers, dataprocBatchesProvider{svc: d.dataproc}, dataprocSessionsProvider{svc: d.dataproc}, dataprocTemplatesProvider{svc: d.dataproc})
+	}
 	if enabled[config.ServiceAppHub] && d.appHub != nil {
 		providers = append(providers, appHubProvider{svc: d.appHub}, appHubDiscoveredProvider{svc: d.appHub}, appHubSettingsProvider{svc: d.appHub})
 	}

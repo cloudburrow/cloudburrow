@@ -66,7 +66,7 @@ func connectURI(host string) string {
 	if host == "" {
 		return ""
 	}
-	if h, port, ok := strings.Cut(host, ":"); ok && (port == "443" || h == "host.docker.internal") {
+	if h, port, ok := strings.Cut(host, ":"); ok && port == "443" {
 		host = h
 	}
 	return "sc://" + host
