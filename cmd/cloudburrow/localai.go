@@ -28,6 +28,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/modelgarden"
 	"github.com/cloudburrow/cloudburrow/internal/ocr"
 	"github.com/cloudburrow/cloudburrow/internal/service/vertexai"
+	"github.com/cloudburrow/cloudburrow/internal/speaker"
 	"github.com/cloudburrow/cloudburrow/internal/speech"
 	"github.com/cloudburrow/cloudburrow/internal/syntaxnet"
 )
@@ -74,6 +75,7 @@ func buildLocalAI(cfg config.Config) (*vertexai.Server, error) {
 	addr := net.JoinHostPort(cfg.BindAddress, strconv.Itoa(cfg.Endpoints.LocalAI))
 	srv := newLocalAIServer(addr, gen)
 	attachSpeechModel(cfg) // ML.TRANSCRIBE's route is on every local AI endpoint (#1799)
+	attachSpeakerModel(cfg)
 	for _, a := range cfg.LocalAI.Aliases {
 		srv.Alias(a)
 	}
@@ -232,6 +234,26 @@ func attachSpeechModel(cfg config.Config) {
 	})
 }
 
+// attachSpeakerModel lets Speech-to-Text diarize audio (#2131) in the onnx
+// build: 3D-Speaker's CAM++ speaker model is fetched the first time audio
+// is diarized, into <state-dir>/models, and checked against its pinned
+// SHA-256. The default build never fetches it: diarization is 501 there.
+func attachSpeakerModel(cfg config.Config) {
+	if !speaker.Available {
+		return
+	}
+	cache := embeddingCache(cfg)
+	speaker.SetModelSource(func(ctx context.Context) (string, error) {
+		m := localai.SpeakerCAMPlusPlus
+		f := m.Pin.Files[0]
+		if _, err := os.Stat(cache.PinnedPath(m, f)); err != nil {
+			fmt.Fprintf(os.Stderr, "fetching 3D-Speaker's CAM++ %s (%s release %s, Apache-2.0) for speaker diarization...\n",
+				f.Path, m.Repo, m.Pin.Revision)
+		}
+		return cache.FetchPinnedFile(ctx, m, f)
+	})
+}
+
 // attachLabelModel lets Vision's LABEL_DETECTION label an image (#1799):
 // MediaPipe's EfficientNet-Lite0 classifier is fetched from
 // storage.googleapis.com the first time one is labelled, into
@@ -278,6 +300,7 @@ func attachSyntaxModel(cache localai.Cache) {
 func attachEmbedder(srv *vertexai.Server, cfg config.Config) {
 	attachScriptModels(cfg)
 	attachSpeechModel(cfg)
+	attachSpeakerModel(cfg)
 	m, err := localai.Lookup(localai.EmbeddingGemmaONNXID)
 	if err != nil {
 		srv.SetEmbedder(nil, err)

@@ -41,9 +41,13 @@ type Options struct {
 	// without it, a model that does not punctuate by itself
 	// (PunctuatesByDefault) answers with the punctuation removed.
 	AutomaticPunctuation bool
-	// Diarization is a features.diarizationConfig: UNIMPLEMENTED
-	// (Unserved) where the table allows it.
-	Diarization bool
+	// Diarization is a features.diarizationConfig, served by
+	// internal/speaker in the onnx build and UNIMPLEMENTED (Unserved)
+	// without it, where the table allows it. MinSpeakers and MaxSpeakers
+	// bound the speakers found, 0 leaving them free: v1 sets them from its
+	// min_speaker_count and max_speaker_count; v2's are not used.
+	Diarization              bool
+	MinSpeakers, MaxSpeakers int
 }
 
 // Encodings are ExplicitDecodingConfig's AudioEncoding values, true for
@@ -418,6 +422,22 @@ func parse(raw []byte) (Decoding, string, Options, int, error) {
 			return d, "", opt, 400, fmt.Errorf("invalid features.multiChannelMode %q", f.MultiChannelMode)
 		case f.MaxAlternatives < 0 || f.MaxAlternatives > 30:
 			return d, "", opt, 400, fmt.Errorf("features.maxAlternatives %d is out of range: valid values are 0-30", f.MaxAlternatives)
+		}
+		// v2's minSpeakerCount and maxSpeakerCount: "The system
+		// automatically determines the number of speakers. This value is
+		// not currently used" (SpeakerDiarizationConfig, v2 reference, read
+		// 2026-11-21), so they are type-checked and ignored; v1, whose
+		// reference does use them, sets MinSpeakers and MaxSpeakers itself.
+		if len(f.DiarizationConfig) > 0 && string(f.DiarizationConfig) != "null" {
+			var dz struct {
+				Min      int32 `json:"minSpeakerCount"`
+				Max      int32 `json:"maxSpeakerCount"`
+				MinSnake int32 `json:"min_speaker_count"`
+				MaxSnake int32 `json:"max_speaker_count"`
+			}
+			if err := json.Unmarshal(f.DiarizationConfig, &dz); err != nil {
+				return d, "", opt, 400, fmt.Errorf("invalid features.diarizationConfig: %v", err)
+			}
 		}
 		opt = Options{Words: f.EnableWordTimeOffsets || f.EnableWordConfidence, WordOffsets: f.EnableWordTimeOffsets, WordConfidence: f.EnableWordConfidence,
 			PerChannel:      f.MultiChannelMode == "SEPARATE_RECOGNITION_PER_CHANNEL",

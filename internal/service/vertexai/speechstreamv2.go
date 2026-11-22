@@ -113,6 +113,12 @@ func (s *Server) streamSettingsV2(ctx context.Context, first *speechpb.Streaming
 	if err != nil {
 		return st, err
 	}
+	if cfg.Diarization {
+		// Chirp 3's page (read 2026-11-21): "Chirp 3 supports
+		// transcription and diarization only in BatchRecognize and
+		// Recognize"; chirp_3 is v2's only model the table marks.
+		return st, apierror.InvalidArgument("features.diarizationConfig is not supported in StreamingRecognize: the model %q diarizes only in BatchRecognize and Recognize", cfg.Model)
+	}
 	if cfg.PerChannel {
 		return st, apierror.Unimplemented("Not implemented here: SEPARATE_RECOGNITION_PER_CHANNEL in StreamingRecognize: CloudBurrow's " +
 			"stream transcribes one mixed channel (Recognize and BatchRecognize read each channel), and never calls Google")

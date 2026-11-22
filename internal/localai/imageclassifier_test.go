@@ -42,3 +42,21 @@ func TestDetectorsArePinned(t *testing.T) {
 		}
 	}
 }
+
+// TestSpeakerModelIsPinned: 3D-Speaker's CAM++ is one ONNX file, at
+// sherpa-onnx's GitHub release, with its SHA-256 and size, a community
+// export under Apache-2.0 run on ONNX Runtime.
+func TestSpeakerModelIsPinned(t *testing.T) {
+	m := SpeakerCAMPlusPlus
+	if m.Official || m.Publisher != PublisherCommunity || m.Access != AccessOpen || m.License != "apache-2.0" ||
+		m.Runtime != RuntimeONNX || m.Pin == nil || len(m.Pin.Files) != 1 {
+		t.Fatalf("SpeakerCAMPlusPlus: %+v", m)
+	}
+	f := m.Pin.Files[0]
+	if len(f.SHA256) != 64 || f.Bytes != 28281165 {
+		t.Errorf("incomplete pin: %+v", f)
+	}
+	if got := m.Pin.URL(m.Repo, f); got != "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx" {
+		t.Errorf("URL %s", got)
+	}
+}

@@ -82,6 +82,9 @@ type streamEvent struct {
 	// segs are the utterance's segments, their times in the stream.
 	segs     []speech.Segment
 	language string
+	// samples are, on a final result, the stream's audio up to offset
+	// (v1's diarization labels every word said so far).
+	samples []float32
 }
 
 // streamSettings are a stream's recognition and endpointing settings.
@@ -302,7 +305,7 @@ func (s *streamer) final(samples []float32, end int) error {
 		return err
 	}
 	normalize(segs, s.st.cfg, s.language) // final results only: interims are not stable
-	return s.emit(streamEvent{kind: evResult, final: true, offset: samplesDur(end), segs: segs, language: s.language})
+	return s.emit(streamEvent{kind: evResult, final: true, offset: samplesDur(end), segs: segs, language: s.language, samples: samples[:end]})
 }
 
 func (s *streamer) transcribe(samples []float32, start, end int) ([]speech.Segment, error) {

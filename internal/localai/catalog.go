@@ -53,6 +53,9 @@ const (
 	// ModalityImageClassification labels an image (MediaPipe's
 	// EfficientNet-Lite0, #1799).
 	ModalityImageClassification Modality = "image-classification"
+	// ModalitySpeakerEmbedding tells voices apart (3D-Speaker's CAM++,
+	// #2131).
+	ModalitySpeakerEmbedding Modality = "speaker-embedding"
 )
 
 // Model is a catalogued artifact.

@@ -1011,6 +1011,15 @@
         "digest": "sha256:ff1a9053feb509ff9d7729703355541ae9690073a6b1c40eb692c962e0dc1720",
         "notes": "BigQuery ML.TRANSCRIBE over a CLOUD_AI_SPEECH_TO_TEXT_V2 remote model (#1799, internal/speech): whisper.cpp and its ggml (MIT), compiled by third_party/whisper-wasm/build.sh with wasi-sdk 34 (the same pinned archives as tesseractWasm; linked in: wasi-libc and musl MIT, libc++, libc++abi and libunwind Apache-2.0 WITH LLVM-exception) to a single-threaded WASI module run on wazero with its exception-handling feature, so no cgo. Google publishes no locally runnable speech model. The model, OpenAI's multilingual Whisper base in ggml q8_0 (MIT, https://huggingface.co/ggerganov/whisper.cpp revision 5359861c739e955e79d9a303bcbc70fb988958b1, ggml-base-q8_0.bin, sha256:c577b9a86e7e048a0b7eada054f4dd79a56bbfa911fbdacf900ac5b567cbb7d9, 81768585 bytes), is fetched on first use into <state-dir>/models, pinned in internal/localai/whisper.go. The module's SHA-256 is in whisper.wasm.sha256 and CI's whisper-wasm job rebuilds it (third_party/whisper-wasm/PROVENANCE.md)."
       },
+      "speakerCAMPlusPlus": {
+        "version": "speaker-recongition-models",
+        "source": "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx",
+        "license": "Apache-2.0",
+        "verification": "checksum",
+        "digest": "sha256:53cab20ba8f2eb2f6e2d89ecc18e88ef3222169b61b4419cbc13666744a4574b",
+        "skipDiscovery": "A model file on sherpa-onnx's speaker-recognition-models release, not a versioned release depcheck can compare; re-pinned by hand.",
+        "notes": "Speech-to-Text speaker diarization (#2131, internal/speaker), chirp_3's and v1's: 3D-Speaker's CAM++ speaker-embedding network (Alibaba DAMO Academy's iic/speech_campplus_sv_zh_en_16k-common_advanced, Apache-2.0) in the ONNX export sherpa-onnx's authors (k2-fsa, Apache-2.0) publish ungated on GitHub (28,281,165 bytes). Google publishes no speaker model. Runs on ONNX Runtime in the -tags onnx build only; the default build answers diarization 501. Not shipped in the binary: fetched once the first time audio is diarized, into <state-dir>/models, and checked against the SHA-256 pinned in internal/localai/speaker.go."
+      },
       "mediapipeEfficientNetLite0": {
         "version": "float32/1",
         "source": "https://storage.googleapis.com/mediapipe-models/image_classifier/efficientnet_lite0/float32/1/efficientnet_lite0.tflite",
