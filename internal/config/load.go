@@ -208,6 +208,7 @@ type rawFlags struct {
 	gke              int
 	analyticsHub     int
 	monitoring       int
+	trace            int
 	compute          int
 	storageBatch     int
 	storageInsights  int
@@ -216,8 +217,11 @@ type rawFlags struct {
 	firebaseRules    int
 	workflows        int
 	parameterManager int
+	dataform         int
+	appHub           int
 	onnx             int
 	tfconvert        int
+	spark            int
 	firestore        int
 	datastore        int
 	bigtable         int
@@ -304,12 +308,16 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.IntVar(&r.gke, "port-gke", 0, "Kubernetes Engine API host port (0 = OS-assigned; default 9030)")
 	fs.IntVar(&r.analyticsHub, "port-analyticshub", 0, "BigQuery sharing (Analytics Hub) API host port (0 = OS-assigned; default 9042)")
 	fs.IntVar(&r.monitoring, "port-monitoring", 0, "Cloud Monitoring API host port (0 = OS-assigned; default 9033)")
+	fs.IntVar(&r.trace, "port-trace", 0, "Cloud Trace API and OTLP trace ingestion host port (0 = OS-assigned; default 9052)")
 	fs.IntVar(&r.compute, "port-compute", 0, "Compute Engine API (VPC networking) host port (0 = OS-assigned; default 9031)")
 	fs.IntVar(&r.dataTransfer, "port-datatransfer", 0, "BigQuery Data Transfer Service host port (0 = OS-assigned; default 9034)")
 	fs.IntVar(&r.firebaseRules, "port-firebaserules", 0, "Firebase Rules API host port, served with Firestore (0 = OS-assigned; default 9043)")
 	fs.IntVar(&r.workflows, "port-workflows", 0, "Workflows and Workflow Executions API host port (0 = OS-assigned; default 9038)")
 	fs.IntVar(&r.parameterManager, "port-parametermanager", 0, "Parameter Manager API host port (0 = OS-assigned; default 9047)")
+	fs.IntVar(&r.dataform, "port-dataform", 0, "Dataform API host port (0 = OS-assigned; default 9058)")
+	fs.IntVar(&r.appHub, "port-apphub", 0, "App Hub API host port (0 = OS-assigned; default 9048)")
 	fs.IntVar(&r.onnx, "port-onnx", 0, "ONNX runner host port, for BigQuery ML's imported ONNX models in the onnx build (0 = OS-assigned; default 9025)")
+	fs.IntVar(&r.spark, "port-spark", 0, "Spark procedure runner host port, for BigQuery's stored procedures for Apache Spark (0 = OS-assigned; default 9049)")
 	fs.IntVar(&r.tfconvert, "port-tfconvert", 0, "TensorFlow SavedModel converter host port, for BigQuery ML's imported TENSORFLOW models (0 = OS-assigned; default 9027)")
 	fs.IntVar(&r.firestore, "port-firestore", 0, "Firestore emulator host port (0 = OS-assigned; default 9010)")
 	fs.IntVar(&r.datastore, "port-datastore", 0, "Datastore emulator host port (0 = OS-assigned; default 9011)")
@@ -520,6 +528,7 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 		{"PORT_GKE", &cfg.Endpoints.GKE},
 		{"PORT_ANALYTICSHUB", &cfg.Endpoints.AnalyticsHub},
 		{"PORT_MONITORING", &cfg.Endpoints.Monitoring},
+		{"PORT_TRACE", &cfg.Endpoints.Trace},
 		{"PORT_COMPUTE", &cfg.Endpoints.Compute},
 		{"PORT_STORAGEBATCHOPERATIONS", &cfg.Endpoints.StorageBatchOperations},
 		{"PORT_STORAGEINSIGHTS", &cfg.Endpoints.StorageInsights},
@@ -528,8 +537,11 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 		{"PORT_FIREBASERULES", &cfg.Endpoints.FirebaseRules},
 		{"PORT_WORKFLOWS", &cfg.Endpoints.Workflows},
 		{"PORT_PARAMETERMANAGER", &cfg.Endpoints.ParameterManager},
+		{"PORT_DATAFORM", &cfg.Endpoints.Dataform},
+		{"PORT_APPHUB", &cfg.Endpoints.AppHub},
 		{"PORT_ONNX", &cfg.Endpoints.ONNX},
 		{"PORT_TFCONVERT", &cfg.Endpoints.TFConvert},
+		{"PORT_SPARK", &cfg.Endpoints.Spark},
 		{"PORT_FIRESTORE", &cfg.Endpoints.Firestore},
 		{"PORT_DATASTORE", &cfg.Endpoints.Datastore},
 		{"PORT_BIGTABLE", &cfg.Endpoints.Bigtable},
@@ -679,6 +691,7 @@ func applyFlags(cfg *Config, raw *rawFlags, set map[string]bool) {
 		{"port-gke", raw.gke, &cfg.Endpoints.GKE},
 		{"port-analyticshub", raw.analyticsHub, &cfg.Endpoints.AnalyticsHub},
 		{"port-monitoring", raw.monitoring, &cfg.Endpoints.Monitoring},
+		{"port-trace", raw.trace, &cfg.Endpoints.Trace},
 		{"port-compute", raw.compute, &cfg.Endpoints.Compute},
 		{"port-storagebatchoperations", raw.storageBatch, &cfg.Endpoints.StorageBatchOperations},
 		{"port-storageinsights", raw.storageInsights, &cfg.Endpoints.StorageInsights},
@@ -687,8 +700,11 @@ func applyFlags(cfg *Config, raw *rawFlags, set map[string]bool) {
 		{"port-firebaserules", raw.firebaseRules, &cfg.Endpoints.FirebaseRules},
 		{"port-workflows", raw.workflows, &cfg.Endpoints.Workflows},
 		{"port-parametermanager", raw.parameterManager, &cfg.Endpoints.ParameterManager},
+		{"port-dataform", raw.dataform, &cfg.Endpoints.Dataform},
+		{"port-apphub", raw.appHub, &cfg.Endpoints.AppHub},
 		{"port-onnx", raw.onnx, &cfg.Endpoints.ONNX},
 		{"port-tfconvert", raw.tfconvert, &cfg.Endpoints.TFConvert},
+		{"port-spark", raw.spark, &cfg.Endpoints.Spark},
 		{"port-firestore", raw.firestore, &cfg.Endpoints.Firestore},
 		{"port-datastore", raw.datastore, &cfg.Endpoints.Datastore},
 		{"port-bigtable", raw.bigtable, &cfg.Endpoints.Bigtable},

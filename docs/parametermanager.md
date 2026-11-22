@@ -112,8 +112,13 @@ Google's per-project, per-minute quotas are enforced: 1,800 render requests
 ```
 
 or for one project while the instance runs, through `PUT /admin/quotas`
-([configuration.md](configuration.md#admin-api)) or the console's **Quotas &
-System Limits** tab of the Parameter Manager API (Edit quota).
+([configuration.md](configuration.md#admin-api)) or, as on Google, a Cloud
+Quotas QuotaPreference (#2090): the quotas are QuotaInfos of
+`parametermanager.googleapis.com`, quota IDs `ReadRequestsPerMinutePerProject`,
+`WriteRequestsPerMinutePerProject` and `RenderRequestsPerMinutePerProject`, and
+a granted preference is the project's limit from the next call on, over the
+configured one. The console's **Quotas & System Limits** tab of the Parameter
+Manager API lists them and its Edit quota sets a preference.
 
 ## Not served
 

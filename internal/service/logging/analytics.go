@@ -721,8 +721,7 @@ func bucketsOf(es []*loggingpb.LogEntry, routes map[*loggingpb.LogEntry]*route) 
 	buckets := map[string]bucketRef{}
 	for _, e := range es {
 		r := routes[e]
-		if r == nil || !r.hidden {
-			ref := bucketRef{entryParent(e), "global", bucketDefault}
+		if ref := ownBucket(e); r == nil || !r.hidden || ref.bucket == bucketRequired {
 			buckets[ref.name()] = ref
 			in[e] = append(in[e], ref.name())
 		}

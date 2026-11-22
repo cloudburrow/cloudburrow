@@ -89,7 +89,14 @@ func TestEventarcPaneIsGooglesPane(t *testing.T) {
 	if method.Label != "Method name" || !strings.HasSuffix(method.ShowWhen, "=google.cloud.audit.log.v1.written") {
 		t.Errorf("Method name = %+v", method)
 	}
-	if res := paneField(t, fields, "filter.pubsub.googleapis.com.resourceName"); res.Required || !strings.HasPrefix(res.Help, "Optional.") {
+	// Google's audit-log Resource: Any resource, Specific resource or Path
+	// pattern, then the name or pattern for the last two (#2093).
+	if res := paneField(t, fields, "resource.pubsub.googleapis.com"); res.Label != "Resource" ||
+		strings.Join(res.Options, ",") != "Any resource,Specific resource,Path pattern" || res.Default != eventarcAnyResource {
+		t.Errorf("Resource = %+v", res)
+	}
+	if res := paneField(t, fields, "filter.pubsub.googleapis.com.resourceName"); res.Required ||
+		!strings.HasSuffix(res.ShowWhen, "&resource.pubsub.googleapis.com=Specific resource|Path pattern") {
 		t.Errorf("Resource name = %+v", res)
 	}
 	for _, f := range fields {

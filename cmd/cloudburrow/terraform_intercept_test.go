@@ -125,13 +125,110 @@ func TestTerraformInterceptServesOnlyBigQueryLocally(t *testing.T) {
 	}
 }
 
-// TestTerraformInterceptNeedsBigQuery: with BigQuery not served there is
-// nothing to send the host to, so the intercept refuses to start.
-func TestTerraformInterceptNeedsBigQuery(t *testing.T) {
+// TestTerraformInterceptNeedsAServedHost: with neither BigQuery nor the Run
+// port served there is nothing to send a host to, so the intercept refuses
+// to start.
+func TestTerraformInterceptNeedsAServedHost(t *testing.T) {
 	cfg := config.Default()
 	cfg.StateDir = t.TempDir()
+	cfg.Services = []config.Service{config.ServiceStorage}
 	if _, err := startIntercept(cfg, io.Discard); err == nil {
-		t.Fatal("the intercept started without BigQuery")
+		t.Fatal("the intercept started without BigQuery or Cloud Run")
+	}
+}
+
+// TestTerraformInterceptServesTheLocationsHosts (#1578): with the Run port
+// served, the intercept tunnels run.googleapis.com's and
+// artifactregistry.googleapis.com's /v1/projects/ paths to it, Artifact
+// Registry's under run.ArtifactRegistryPrefix (the Run port's plain
+// /v1/projects/{p}/locations is Cloud Run v1's list), refuses their other
+// paths and bigquery.googleapis.com (not served here), and unlocks
+// google_cloud_run_locations and google_artifact_registry_locations, but
+// not google_iam_testable_permissions.
+func TestTerraformInterceptServesTheLocationsHosts(t *testing.T) {
+	var gotPaths []string
+	front := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPaths = append(gotPaths, r.URL.Path)
+		_, _ = io.WriteString(w, `{"locations":[]}`)
+	}))
+	defer front.Close()
+	_, port, _ := net.SplitHostPort(front.Listener.Addr().String())
+	cfg := config.Default()
+	cfg.StateDir = t.TempDir()
+	cfg.Services = []config.Service{config.ServiceStorage, config.ServiceRun}
+	cfg.Endpoints.Run, _ = strconv.Atoi(port)
+
+	var log strings.Builder
+	ic, err := startIntercept(cfg, &log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caPEM, err := os.ReadFile(ic.caFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool := x509.NewCertPool()
+	pool.AppendCertsFromPEM(caPEM)
+	proxyURL, _ := url.Parse("http://" + ic.listener.Addr().String())
+	client := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL), TLSClientConfig: &tls.Config{RootCAs: pool}}}
+	for _, u := range []string{
+		"https://run.googleapis.com/v1/projects/p/locations",
+		"https://artifactregistry.googleapis.com/v1/projects/p/locations",
+	} {
+		resp, err := client.Get(u)
+		if err != nil {
+			t.Fatalf("GET %s through the intercept: %v", u, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != 200 {
+			t.Errorf("GET %s through the intercept: %d", u, resp.StatusCode)
+		}
+	}
+	want := []string{"/v1/projects/p/locations", "/artifactregistry/v1/projects/p/locations"}
+	if strings.Join(gotPaths, " ") != strings.Join(want, " ") {
+		t.Errorf("the Run port got %q, want %q", gotPaths, want)
+	}
+	for _, u := range []string{
+		"https://run.googleapis.com/apis/serving.knative.dev/v1/namespaces/p/services", // outside /v1/projects/
+		"https://artifactregistry.googleapis.com/v1beta2/projects/p/locations",
+		"https://bigquery.googleapis.com/bigquery/v2/projects/p/datasets", // BigQuery is not served
+		"https://iam.googleapis.com/v1/permissions:queryTestablePermissions",
+	} {
+		if resp, err := client.Get(u); err == nil {
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusForbidden {
+				t.Errorf("%s through the intercept: %d, want 403", u, resp.StatusCode)
+			}
+		}
+	}
+	if len(gotPaths) != 2 {
+		t.Errorf("a refused request reached the Run port: %q", gotPaths)
+	}
+	ic.stop()
+	for _, w := range []string{"served 1 request(s) to run.googleapis.com locally", "served 1 request(s) to artifactregistry.googleapis.com locally", "iam.googleapis.com:443"} {
+		if !strings.Contains(log.String(), w) {
+			t.Errorf("stop reported %q, without %q", log.String(), w)
+		}
+	}
+	if strings.Contains(log.String(), "bigquery.googleapis.com locally") {
+		t.Errorf("stop names BigQuery, which is not served: %q", log.String())
+	}
+
+	got := map[string]bool{}
+	for _, f := range interceptUnlocked(cfg, unpointedResources(cfg)) {
+		got[f.prefix] = true
+	}
+	if got["google_cloud_run_locations"] || got["google_artifact_registry_locations"] || !got["google_iam_testable_permissions"] || !got["google_storage_buckets"] {
+		t.Errorf("with the intercept the refused families are %v", got)
+	}
+	noRun := cfg
+	noRun.Services = []config.Service{config.ServiceStorage}
+	got = map[string]bool{}
+	for _, f := range interceptUnlocked(noRun, unpointedResources(noRun)) {
+		got[f.prefix] = true
+	}
+	if !got["google_cloud_run_locations"] || !got["google_artifact_registry_locations"] {
+		t.Errorf("without the Run port the intercept unlocked a locations data source: %v", got)
 	}
 }
 

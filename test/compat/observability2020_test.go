@@ -30,6 +30,7 @@ func observabilityService(t *testing.T, h *Harness) *observability.Service {
 }
 
 // covers: google.logging.v2.LoggingServiceV2/WriteLogEntries
+// covers: observability.projects.locations.scopes.get, observability.projects.locations.scopes.patch
 //
 // TestObservabilityDefaultLogScope (#2020), through Google's generated
 // Observability v1 and Logging v2 JSON clients: a project's _Default scope

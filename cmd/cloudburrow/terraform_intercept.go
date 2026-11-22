@@ -18,17 +18,28 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 )
 
 // `cloudburrow terraform --intercept-hardcoded` (#1578): an opt-in, local
-// HTTPS intercept for the one call hashicorp/google makes to a fixed Google
-// host that the wrapper cannot refuse.
+// HTTPS intercept for the calls hashicorp/google makes to a fixed Google
+// host whatever its custom endpoints say.
+//
+// The two locations data sources (8.4.0 to 8.12.0 and main, re-read
+// 2026-11-21) list at literal URLs: google_cloud_run_locations at
+// https://run.googleapis.com/v1/projects/{{project}}/locations and
+// google_artifact_registry_locations at
+// https://artifactregistry.googleapis.com/v1/projects/{{project}}/locations.
+// Without the flag the wrapper refuses a module declaring either; with it,
+// they are served by the Run port (Cloud Run v1's list, and Artifact
+// Registry's under ArtifactRegistryPrefix) and no longer refused.
 //
 // When a plan's google_bigquery_table schema drops a column, the provider
 // lists the table's row access policies at
@@ -66,12 +77,66 @@ import (
 type interceptedHost struct {
 	host    string         // the provider's literal host, port 443
 	service config.Service // the terraformEndpoints row whose front serves it
-	attr    string         // that row's provider argument
+	attr    string         // that row's provider argument, for its host and port
 	prefix  string         // the only paths sent on; anything else is 403
+	under   string         // prepended to the path on the front ("" for none)
+	unlocks []string       // the data sources unpointedResources no longer refuses
 }
 
 var interceptedHosts = []interceptedHost{
-	{"bigquery.googleapis.com", config.ServiceBigQuery, "big_query_custom_endpoint", "/bigquery/v2/"},
+	{host: "bigquery.googleapis.com", service: config.ServiceBigQuery, attr: "big_query_custom_endpoint", prefix: "/bigquery/v2/"},
+	// cloud_run_v2_custom_endpoint for the Run port's address: the v1
+	// argument's host is {{location}}-run.localhost on loopback, a template.
+	{host: "run.googleapis.com", service: config.ServiceRun, attr: "cloud_run_v2_custom_endpoint", prefix: "/v1/projects/",
+		unlocks: []string{"google_cloud_run_locations"}},
+	// The Run port's plain /v1/projects/{p}/locations is Cloud Run v1's
+	// list; Artifact Registry's is under run.ArtifactRegistryPrefix.
+	{host: "artifactregistry.googleapis.com", service: config.ServiceRun, attr: "artifact_registry_custom_endpoint", prefix: "/v1/projects/",
+		under: runadapter.ArtifactRegistryPrefix, unlocks: []string{"google_artifact_registry_locations"}},
+}
+
+// interceptRoutes are the intercepted hosts cfg's instance serves, each
+// with its front's scheme and address.
+func interceptRoutes(cfg config.Config) (map[string]*url.URL, error) {
+	set, _ := terraformSettings(cfg)
+	routes := map[string]*url.URL{}
+	for _, h := range interceptedHosts {
+		for _, e := range set {
+			if e.service != h.service || e.attr != h.attr {
+				continue
+			}
+			u, err := url.Parse(e.url)
+			if err != nil {
+				return nil, err
+			}
+			routes[h.host] = &url.URL{Scheme: u.Scheme, Host: u.Host}
+		}
+	}
+	return routes, nil
+}
+
+// interceptUnlocked drops from families the data sources the intercept
+// serves for cfg's instance, so a module declaring one is no longer refused.
+func interceptUnlocked(cfg config.Config, families []unpointedPrefix) []unpointedPrefix {
+	routes, err := interceptRoutes(cfg)
+	if err != nil {
+		return families
+	}
+	unlocked := map[string]bool{}
+	for _, h := range interceptedHosts {
+		if routes[h.host] != nil {
+			for _, d := range h.unlocks {
+				unlocked[d] = true
+			}
+		}
+	}
+	var out []unpointedPrefix
+	for _, f := range families {
+		if !unlocked[f.prefix] {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 // interceptFlag is the wrapper's own flag that turns the intercept on.
@@ -85,34 +150,29 @@ type terraformIntercept struct {
 	inner    *http.Server
 	listener net.Listener
 	conns    *connListener
-	served   atomic.Int64
-	refused  sync.Map // host -> struct{}
+	hosts    []string                 // the hosts served, in interceptedHosts' order
+	served   map[string]*atomic.Int64 // per host
+	refused  sync.Map                 // host -> struct{}
 	log      io.Writer
 }
 
 // startIntercept starts the intercept for cfg's instance. It fails when no
 // intercepted host's service is served, since there is nowhere to send it.
 func startIntercept(cfg config.Config, log io.Writer) (*terraformIntercept, error) {
-	set, _ := terraformSettings(cfg)
-	routes := map[string]*url.URL{}
-	prefixes := map[string]string{}
+	routes, err := interceptRoutes(cfg)
+	if err != nil {
+		return nil, err
+	}
+	byHost := map[string]interceptedHost{}
 	var hosts []string
 	for _, h := range interceptedHosts {
-		for _, e := range set {
-			if e.service != h.service || e.attr != h.attr {
-				continue
-			}
-			u, err := url.Parse(e.url)
-			if err != nil {
-				return nil, err
-			}
-			routes[h.host] = &url.URL{Scheme: u.Scheme, Host: u.Host}
-			prefixes[h.host] = h.prefix
+		if routes[h.host] != nil {
+			byHost[h.host] = h
 			hosts = append(hosts, h.host)
 		}
 	}
 	if len(hosts) == 0 {
-		return nil, fmt.Errorf("--%s: this instance serves none of the services it intercepts (BigQuery)", interceptFlag)
+		return nil, fmt.Errorf("--%s: this instance serves none of the services it intercepts (BigQuery, Cloud Run, Artifact Registry)", interceptFlag)
 	}
 	if err := os.MkdirAll(cfg.InstanceDir(), 0o700); err != nil {
 		return nil, err
@@ -139,22 +199,32 @@ func startIntercept(cfg config.Config, log io.Writer) (*terraformIntercept, erro
 	if err != nil {
 		return nil, err
 	}
-	ic := &terraformIntercept{dir: dir, caFile: caFile, listener: ln, log: log,
+	served := map[string]*atomic.Int64{}
+	for _, h := range hosts {
+		served[h] = new(atomic.Int64)
+	}
+	ic := &terraformIntercept{dir: dir, caFile: caFile, listener: ln, log: log, hosts: hosts, served: served,
 		conns: &connListener{ch: make(chan net.Conn), done: make(chan struct{}), addr: ln.Addr()}}
 	rp := &httputil.ReverseProxy{
 		Rewrite: func(r *httputil.ProxyRequest) {
+			under := byHost[hostOnly(r.In.Host)].under
 			r.SetURL(routes[hostOnly(r.In.Host)])
-			r.Out.URL.Path, r.Out.URL.RawPath = r.In.URL.Path, r.In.URL.RawPath
+			r.Out.URL.Path = under + r.In.URL.Path
+			if r.In.URL.RawPath != "" {
+				r.Out.URL.RawPath = under + r.In.URL.RawPath
+			} else {
+				r.Out.URL.RawPath = ""
+			}
 		},
 	}
 	ic.inner = &http.Server{
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			h := hostOnly(r.Host)
-			if routes[h] == nil || !strings.HasPrefix(r.URL.Path, prefixes[h]) {
+			if routes[h] == nil || !strings.HasPrefix(r.URL.Path, byHost[h].prefix) {
 				ic.refuse(w, h+r.URL.Path)
 				return
 			}
-			ic.served.Add(1)
+			ic.served[h].Add(1)
 			rp.ServeHTTP(w, r)
 		}),
 		ReadHeaderTimeout: 30 * time.Second,
@@ -197,7 +267,7 @@ func startIntercept(cfg config.Config, log io.Writer) (*terraformIntercept, erro
 func (ic *terraformIntercept) refuse(w http.ResponseWriter, what string) {
 	ic.refused.Store(what, struct{}{})
 	http.Error(w, "cloudburrow terraform --"+interceptFlag+": refused "+what+": only "+
-		strings.Join(interceptedHostNames(), ", ")+" is served, locally; nothing is forwarded to the internet", http.StatusForbidden)
+		strings.Join(interceptedHostNames(), ", ")+" are served, locally; nothing is forwarded to the internet", http.StatusForbidden)
 }
 
 // env is the binary's environment: base without any proxy or trust setting
@@ -242,12 +312,13 @@ func (ic *terraformIntercept) stop() {
 	_ = os.RemoveAll(ic.dir)
 	var refused []string
 	ic.refused.Range(func(k, _ any) bool { refused = append(refused, k.(string)); return true })
-	fmt.Fprintf(ic.log, "cloudburrow terraform: --%s served %d request(s) to %s locally",
-		interceptFlag, ic.served.Load(), strings.Join(interceptedHostNames(), ", "))
-	if len(refused) != 0 {
-		fmt.Fprintf(ic.log, "; refused %s", strings.Join(refused, ", "))
+	sort.Strings(refused)
+	for _, h := range ic.hosts {
+		fmt.Fprintf(ic.log, "cloudburrow terraform: --%s served %d request(s) to %s locally\n", interceptFlag, ic.served[h].Load(), h)
 	}
-	fmt.Fprintln(ic.log)
+	if len(refused) != 0 {
+		fmt.Fprintf(ic.log, "cloudburrow terraform: --%s refused %s\n", interceptFlag, strings.Join(refused, ", "))
+	}
 }
 
 func interceptedHostNames() []string {

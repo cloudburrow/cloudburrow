@@ -1,0 +1,147 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "apphub.googleapis.com/McpServer",
+  "description": "The schema for apphub.googleapis.com/McpServer.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "displayName": {
+      "type": "string",
+      "description": "The display name of the MCP Server."
+    },
+    "description": {
+      "type": "string",
+      "description": "The description of the MCP Server."
+    },
+    "interfaces": {
+      "type": "array",
+      "description": "The connection details for the MCP Server.",
+      "items": {
+        "$ref": "#/definitions/Interface"
+      }
+    },
+    "tools": {
+      "type": "array",
+      "description": "Tools provided by the MCP Server.",
+      "items": {
+        "$ref": "#/definitions/Tool"
+      }
+    }
+  },
+  "required": ["interfaces"],
+  "definitions": {
+    "Tool": {
+      "description": "Represents a single tool provided by an MCP Server.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Human-readable name of the tool."
+        },
+        "description": {
+          "type": "string",
+          "description": "Description of what the tool does."
+        },
+        "annotations": {
+          "$ref": "#/definitions/Tool.Annotations",
+          "description": "Annotations associated with the tool."
+        },
+        "_meta": {
+          "$ref": "#/definitions/Tool.Meta",
+          "description": "Protocol-level metadata conforming to MCP _meta."
+        }
+      }
+    },
+    "Tool.Annotations": {
+      "description": "Annotations describing the characteristics and behavior of a tool or operation.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "A human-readable title or name for the tool or operation."
+        },
+        "destructiveHint": {
+          "type": "boolean",
+          "description": "Hint indicating if the operation can cause destructive changes."
+        },
+        "idempotentHint": {
+          "type": "boolean",
+          "description": "Hint indicating if the operation is idempotent (safe to retry)."
+        },
+        "openWorldHint": {
+          "type": "boolean",
+          "description": "Hint indicating if the operation assumes an open world."
+        },
+        "readOnlyHint": {
+          "type": "boolean",
+          "description": "Hint indicating if the operation is read-only."
+        }
+      }
+    },
+    "Tool.Meta": {
+      "type": "object",
+      "description": "Protocol-level tool metadata container conforming to MCP _meta.",
+      "additionalProperties": false,
+      "properties": {
+        "com.googleapis.iap/PolicyHints": {
+          "$ref": "#/definitions/Iap.PolicyHints",
+          "description": "IAP specific policy hints."
+        }
+      }
+    },
+    "Iap.PolicyHints": {
+      "type": "object",
+      "description": "IAP custom extensions to MCP policy hints.",
+      "additionalProperties": false,
+      "properties": {
+        "authorization": {
+          "$ref": "#/definitions/Iap.Authorization",
+          "description": "Authorization configurations for the tool."
+        }
+      }
+    },
+    "Iap.Authorization": {
+      "type": "object",
+      "description": "Authorization configuration including Human-in-the-loop (HITL) settings.",
+      "additionalProperties": false,
+      "properties": {
+        "toolDisabled": {
+          "type": "boolean",
+          "description": "Indicates if the tool is disabled. Defaults to false when absent, which means the tool is enabled."
+        },
+        "hitlMode": {
+          "type": "string",
+          "description": "Human-in-the-loop (HITL) execution mode.",
+          "enum": [
+            "HITL_MODE_UNSPECIFIED",
+            "HITL_MODE_DISABLED",
+            "HITL_MODE_ALWAYS",
+            "HITL_MODE_IF_UNSAFE"
+          ]
+        }
+      }
+    },
+    "Interface": {
+      "description": "Represents interface.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "The destination URL.",
+          "pattern": "^https?://"
+        },
+        "protocolBinding": {
+          "type": "string",
+          "description": "The protocol binding of the interface.",
+          "enum": [
+            "JSONRPC"
+          ]
+        }
+      },
+      "required": ["url", "protocolBinding"]
+    }
+  }
+}

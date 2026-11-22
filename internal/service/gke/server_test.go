@@ -163,8 +163,10 @@ func TestClusterLifecycle(t *testing.T) {
 	// Update: a field not served is UNIMPLEMENTED; an unknown version is refused.
 	_, err = s.UpdateCluster(ctx, &containerpb.UpdateClusterRequest{Name: parent + "/clusters/c1", Update: &containerpb.ClusterUpdate{DesiredMasterVersion: "1.20"}})
 	wantCode(t, "unknown version", err, codes.InvalidArgument)
-	_, err = s.UpdateCluster(ctx, &containerpb.UpdateClusterRequest{Name: parent + "/clusters/c1", Update: &containerpb.ClusterUpdate{DesiredLocations: []string{"x"}}})
+	_, err = s.UpdateCluster(ctx, &containerpb.UpdateClusterRequest{Name: parent + "/clusters/c1", Update: &containerpb.ClusterUpdate{DesiredDatabaseEncryption: &containerpb.DatabaseEncryption{}}})
 	wantCode(t, "unserved field", err, codes.Unimplemented)
+	_, err = s.UpdateCluster(ctx, &containerpb.UpdateClusterRequest{Name: parent + "/clusters/c1", Update: &containerpb.ClusterUpdate{DesiredLocations: []string{"x"}}})
+	wantCode(t, "a location that is not a zone", err, codes.InvalidArgument)
 
 	// The records survive a restart.
 	s2, _ := newTestServer(t, state)

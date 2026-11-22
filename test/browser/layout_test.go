@@ -566,6 +566,25 @@ func reducedMotion() chromedp.Action[chromedp.Void] {
 	return cmd(emulation.SetEmulatedMedia, emulation.SetEmulatedMediaParams{Features: []*emulation.MediaFeature{{Name: "prefers-reduced-motion", Value: "reduce"}}})
 }
 
+// hasService reports whether this instance's console has the screen.
+func hasService(t *testing.T, id string) bool {
+	t.Helper()
+	code, body := consoleDo(t, http.MethodGet, "/api/services", "")
+	if code != http.StatusOK {
+		t.Fatalf("list the console's services = %d: %s", code, body)
+	}
+	var s struct{ Services []struct{ ID string } }
+	if err := json.Unmarshal([]byte(body), &s); err != nil {
+		t.Fatalf("decode the console's services: %v: %s", err, body)
+	}
+	for _, sv := range s.Services {
+		if sv.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
 // needService skips unless this instance's console has the screen: CI runs
 // each test in a shard whose instance serves it and fails the step on a skip.
 func needService(t *testing.T, id string) {

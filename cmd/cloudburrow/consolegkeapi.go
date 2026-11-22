@@ -12,6 +12,7 @@ import (
 
 	"cloud.google.com/go/container/apiv1/containerpb"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/service/gke"
@@ -130,9 +131,10 @@ func (p gkeClustersProvider) servedDetail(ctx context.Context, project string, c
 		{Label: "Mode", Value: gkeMode(c)},
 		{Label: "Location type", Value: map[bool]string{true: "Zonal", false: "Regional"}[len(c.GetLocations()) == 1]},
 		{Label: "Control plane location", Value: c.GetLocation()},
-		{Label: "Default node zones", Value: strings.Join(c.GetLocations(), ", ")},
+		{Label: "Default node zones", Value: strings.Join(c.GetLocations(), ", "), Action: "zones", ActionText: "Edit zones"},
 		{Label: "Release channel", Value: gkeChannel(c)},
 		{Label: "Version", Value: c.GetCurrentMasterVersion()},
+		{Label: "Automatic upgrades", Value: gkeUpgradeInfoText(p.upgradeInfo(ctx, project, c))},
 		{Label: "Total size", Value: strconv.Itoa(int(c.GetCurrentNodeCount()))},
 		{Label: "External endpoint", Value: unsetAs(c.GetEndpoint(), "—")},
 		{Label: "Created", Value: unsetAs(shortTime(c.GetCreateTime()), "—")},
@@ -144,8 +146,17 @@ func (p gkeClustersProvider) servedDetail(ctx context.Context, project string, c
 	networking := console.PropertyGroup{Heading: "Networking", Properties: []console.Property{
 		{Label: "Network", Value: c.GetNetwork()}, {Label: "Subnet", Value: c.GetSubnetwork()},
 		{Label: "Cluster pod IPv4 range", Value: c.GetClusterIpv4Cidr()}, {Label: "Service IPv4 range", Value: c.GetServicesIpv4Cidr()},
+		{Label: "Network policy", Value: gkeEnabledText(enforcesNetworkPolicy(c)), Action: "netpolicy", ActionText: "Edit network policy"},
 	}}
-	details := console.Section{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{basics, networking}}
+	security := console.PropertyGroup{Heading: "Security", Properties: []console.Property{
+		{Label: "Legacy authorization", Value: gkeEnabledText(c.GetLegacyAbac().GetEnabled()), Action: "abac", ActionText: "Edit legacy authorization"},
+		gkeRotationProperty(p.rotation(project, c)),
+	}}
+	features := console.PropertyGroup{Heading: "Features", Properties: []console.Property{
+		{Label: "Logging", Value: gkeLoggingText(c), Action: "logging", ActionText: "Edit logging"},
+		{Label: "Cloud Monitoring", Value: gkeMonitoringText(c), Action: "monitoring", ActionText: "Edit Cloud Monitoring"},
+	}}
+	details := console.Section{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{basics, networking, security, features}}
 	pools := p.poolListing(ctx, project, c)
 	// Google's Nodes tab holds the cluster's node pools and its nodes:
 	// two sections drawn as one tab, Nodes, with Node pools and Nodes on a
@@ -279,13 +290,15 @@ func (p gkeClustersProvider) servedActions(ctx context.Context, project string, 
 		// note that the node pools follow separately.
 		upgrade = console.Action{ID: "upgrade", Label: "Upgrade", Title: "Upgrade control plane", Submit: "Save changes", Fields: []console.Field{
 			{Name: "version", Label: "Target version", Type: "select", Options: targets, Default: targets[0],
-				Help: "Current version: " + c.GetCurrentMasterVersion() + ". The control plane is upgraded first; each node pool is upgraded on its own, from the Nodes tab."}}}
+				Help: "Current version: " + c.GetCurrentMasterVersion() + ". The control plane is upgraded first; each node pool is upgraded on its own, from the Nodes tab."},
+			{Name: "soak", Label: "Control plane soak duration (hours, optional)", Type: "text", Pattern: `^([0-9]+)?$`,
+				Help: "A minor upgrade with a soak of 6 to 168 hours is rollback-safe: the control plane keeps the previous minor version's behaviour until you complete the upgrade or the soak ends."}}}
 	}
 	labels := ""
 	for k, v := range c.GetResourceLabels() {
 		labels += k + "=" + v + "\n"
 	}
-	return []console.Action{
+	actions := []console.Action{
 		{ID: "connect", Label: "Connect", Submit: "OK", Fields: []console.Field{
 			{Name: "command", Label: "Command-line access", Type: "textarea", Immutable: true,
 				Default: "gcloud container clusters get-credentials " + c.GetName() + " --location " + c.GetLocation() + " --project " + project,
@@ -298,9 +311,34 @@ func (p gkeClustersProvider) servedActions(ctx context.Context, project string, 
 		}},
 		upgrade,
 		gkeMaintenanceAction(c),
-		{ID: "delete", Label: "Delete", Destructive: true, Confirm: c.GetName(), Leaves: true},
-		p.addPoolAction(c),
+		gkeNetworkPolicyAction(c),
+		gkeLegacyAbacAction(c),
+		gkeZonesAction(c),
+		gkeCompleteUpgradeAction(p.upgradeInfo(ctx, project, c)),
 	}
+	_, rotating := p.rotation(project, c)
+	actions = append(actions, gkeRotationActions(rotating)...)
+	actions = append(actions, gkeTelemetryActions(c)...)
+	return append(actions,
+		console.Action{ID: "delete", Label: "Delete", Destructive: true, Confirm: c.GetName(), Leaves: true},
+		p.addPoolAction(c),
+	)
+}
+
+// upgradeInfo is FetchClusterUpgradeInfo's, nil when it fails.
+func (p gkeClustersProvider) upgradeInfo(ctx context.Context, project string, c *containerpb.Cluster) *containerpb.ClusterUpgradeInfo {
+	info, err := p.gkeAPI().FetchClusterUpgradeInfo(ctx, &containerpb.FetchClusterUpgradeInfoRequest{
+		Name: "projects/" + project + "/locations/" + c.GetLocation() + "/clusters/" + c.GetName()})
+	if err != nil {
+		return nil
+	}
+	return info
+}
+
+// rotation is when the cluster's credential rotation started, if one is
+// in progress.
+func (p gkeClustersProvider) rotation(project string, c *containerpb.Cluster) (time.Time, bool) {
+	return p.gkeAPI().Rotation("projects/" + project + "/locations/" + c.GetLocation() + "/clusters/" + c.GetName())
 }
 
 func gkeStatusErr(err error) error {
@@ -322,8 +360,20 @@ func (p gkeClustersProvider) servedAct(ctx context.Context, project string, c *c
 		_, err := api.DeleteCluster(ctx, &containerpb.DeleteClusterRequest{Name: name})
 		return gkeStatusErr(err)
 	case "upgrade":
-		_, err := api.UpdateCluster(ctx, &containerpb.UpdateClusterRequest{Name: name, Update: &containerpb.ClusterUpdate{DesiredMasterVersion: v["version"]}})
+		u := &containerpb.ClusterUpdate{DesiredMasterVersion: v["version"]}
+		if h := strings.TrimSpace(v["soak"]); h != "" {
+			n, err := strconv.Atoi(h)
+			if err != nil {
+				return fmt.Errorf("the soak duration must be a number of hours")
+			}
+			u.DesiredRollbackSafeUpgrade = &containerpb.RollbackSafeUpgrade{ControlPlaneSoakDuration: durationpb.New(time.Duration(n) * time.Hour)}
+		}
+		_, err := api.UpdateCluster(ctx, &containerpb.UpdateClusterRequest{Name: name, Update: u})
 		return gkeStatusErr(err)
+	case "zones", "rotate-start", "rotate-complete", "complete-upgrade", "logging", "monitoring":
+		return p.moreSettingsAct(ctx, name, action, v)
+	case "netpolicy", "abac":
+		return p.settingsAct(ctx, name, c, action, v)
 	case "maintenance":
 		mp, err := gkeParseMaintenance(v["window"], v["exclusions"])
 		if err != nil {

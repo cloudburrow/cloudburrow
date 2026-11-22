@@ -87,13 +87,7 @@ func checkExchange(e *ahpb.DataExchange) error {
 	if err := checkText("primary_contact", e.GetPrimaryContact(), 1000); err != nil {
 		return err
 	}
-	if err := checkIcon(e.GetIcon()); err != nil {
-		return err
-	}
-	if e.GetSharingEnvironmentConfig().GetDcrExchangeConfig() != nil {
-		return apierror.Unimplemented("data clean rooms (sharing_environment_config.dcr_exchange_config) are not served by CloudBurrow; create a default exchange")
-	}
-	return nil
+	return checkIcon(e.GetIcon())
 }
 
 func (s *Server) CreateDataExchange(_ context.Context, req *ahpb.CreateDataExchangeRequest) (*ahpb.DataExchange, error) {
@@ -123,6 +117,11 @@ func (s *Server) CreateDataExchange(_ context.Context, req *ahpb.CreateDataExcha
 	if e.SharingEnvironmentConfig == nil {
 		e.SharingEnvironmentConfig = &ahpb.SharingEnvironmentConfig{Environment: &ahpb.SharingEnvironmentConfig_DefaultExchangeConfig_{
 			DefaultExchangeConfig: &ahpb.SharingEnvironmentConfig_DefaultExchangeConfig{}}}
+	}
+	if dcr := e.GetSharingEnvironmentConfig().GetDcrExchangeConfig(); dcr != nil {
+		// Output only, and true for "all new DCRs" (cleanrooms.go).
+		dcr.SingleSelectedResourceSharingRestriction = proto.Bool(true)
+		dcr.SingleLinkedDatasetPerCleanroom = proto.Bool(true)
 	}
 	if e.DiscoveryType == nil {
 		e.DiscoveryType = ahpb.DiscoveryType_DISCOVERY_TYPE_PRIVATE.Enum()
@@ -250,6 +249,16 @@ func (s *Server) DeleteDataExchange(ctx context.Context, req *ahpb.DeleteDataExc
 		}
 		delete(s.listings, k)
 	}
+	// A clean room's subscriptions are unlinked too, so "queries on the
+	// linked datasets start to fail"; its query templates go with it.
+	for _, sub := range s.exchangeSubs(req.GetName()) {
+		if err := s.revokeLocked(ctx, sub); err != nil {
+			return nil, err
+		}
+	}
+	for _, k := range sortedKeys(s.templates, req.GetName()+"/queryTemplates/") {
+		delete(s.templates, k)
+	}
 	delete(s.exchanges, req.GetName())
 	if err := s.save(); err != nil {
 		return nil, apierror.Wrap(err)
@@ -293,7 +302,7 @@ func listingOut(l *ahpb.Listing) *ahpb.Listing {
 
 // checkListing checks a listing's fields, and its shared dataset in
 // BigQuery when ctx allows a call; location is the exchange's.
-func (s *Server) checkListing(ctx context.Context, l *ahpb.Listing, location string, create bool) error {
+func (s *Server) checkListing(ctx context.Context, l *ahpb.Listing, location string, create, dcr bool) error {
 	if err := checkDisplayName(l.GetDisplayName()); err != nil {
 		return err
 	}
@@ -329,7 +338,16 @@ func (s *Server) checkListing(ctx context.Context, l *ahpb.Listing, location str
 	for _, r := range src.GetSelectedResources() {
 		tm := tableRE.FindStringSubmatch(r.GetTable())
 		if r.GetRoutine() != "" {
-			return apierror.Unimplemented("sharing a routine (selected_resources.routine) is not served by CloudBurrow")
+			// A clean room shares a query template's table-valued
+			// function as a routine listing (cleanrooms.go).
+			rm := routineRE.FindStringSubmatch(r.GetRoutine())
+			switch {
+			case !dcr:
+				return apierror.Unimplemented("sharing a routine (selected_resources.routine) outside a data clean room is not served by CloudBurrow")
+			case rm == nil || rm[1] != m[1] || rm[2] != m[2]:
+				return apierror.InvalidArgument("selected_resources.routine %q must be a routine of %s: projects/{project}/datasets/{dataset}/routines/{routine}", r.GetRoutine(), src.GetDataset())
+			}
+			continue
 		}
 		if tm == nil || tm[1] != m[1] || tm[2] != m[2] {
 			return apierror.InvalidArgument("selected_resources.table %q must be a table of %s: projects/{project}/datasets/{dataset}/tables/{table}", r.GetTable(), src.GetDataset())
@@ -365,12 +383,13 @@ func (s *Server) CreateListing(ctx context.Context, req *ahpb.CreateListingReque
 		return nil, apierror.InvalidArgument("listing is required")
 	}
 	s.mu.Lock()
-	_, ok := s.exchanges[req.GetParent()]
+	ex0, ok := s.exchanges[req.GetParent()]
 	s.mu.Unlock()
 	if !ok {
 		return nil, apierror.NotFound("DataExchange %s not found", req.GetParent())
 	}
-	if err := s.checkListing(ctx, l, em[2], true); err != nil {
+	dcr := isCleanRoom(ex0.Exchange)
+	if err := s.checkListing(ctx, l, em[2], true, dcr); err != nil {
 		return nil, err
 	}
 	name := req.GetParent() + "/listings/" + req.GetListingId()
@@ -388,8 +407,17 @@ func (s *Server) CreateListing(ctx context.Context, req *ahpb.CreateListingReque
 	if l.DiscoveryType == nil {
 		l.DiscoveryType = proto.Clone(ex.Exchange).(*ahpb.DataExchange).DiscoveryType
 	}
+	if dcr {
+		if err := s.cleanRoomListing(l, req.GetParent()); err != nil {
+			return nil, err
+		}
+	}
 	rec := &listingRecord{Listing: l}
 	s.listings[name] = rec
+	if err := s.relinkExchange(ctx, req.GetParent()); err != nil {
+		delete(s.listings, name)
+		return nil, err
+	}
 	if err := s.save(); err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -457,6 +485,13 @@ func (s *Server) UpdateListing(ctx context.Context, req *ahpb.UpdateListingReque
 	if next.GetLogLinkedDatasetQueryUserEmail() && hasPath(paths, "log_linked_dataset_query_user_email") && !in.GetLogLinkedDatasetQueryUserEmail() {
 		return nil, apierror.InvalidArgument("log_linked_dataset_query_user_email cannot be turned off once it is enabled")
 	}
+	exName := next.GetName()[:strings.Index(next.GetName(), "/listings/")]
+	dcr := s.exchanges[exName] != nil && isCleanRoom(s.exchanges[exName].Exchange)
+	if dcr {
+		if err := cleanRoomUpdate(rec.Listing, in, paths); err != nil {
+			return nil, err
+		}
+	}
 	for _, p := range paths {
 		if p == "bigquery_dataset.selected_resources" {
 			if next.GetBigqueryDataset() != nil {
@@ -476,10 +511,13 @@ func (s *Server) UpdateListing(ctx context.Context, req *ahpb.UpdateListingReque
 		next.GetBigqueryDataset().RestrictedExportPolicy = nil
 	}
 	lm := listingRE.FindStringSubmatch(next.GetName())
-	if err := s.checkListing(ctx, next, lm[2], false); err != nil {
+	if err := s.checkListing(ctx, next, lm[2], false, dcr); err != nil {
 		return nil, err
 	}
 	rec.Listing = next
+	if err := s.relinkExchange(ctx, exName); err != nil {
+		return nil, err
+	}
 	// "If set, restricted export configuration will be propagated and
 	// enforced on the linked dataset", and so are the selected tables.
 	for _, sub := range s.listingSubs(next.GetName(), false) {
@@ -514,6 +552,11 @@ func (s *Server) DeleteListing(ctx context.Context, req *ahpb.DeleteListingReque
 		}
 	}
 	delete(s.listings, req.GetName())
+	// A clean room's linked datasets lose the listing's resource: "the
+	// linked datasets aren't deleted", and queries of it fail.
+	if err := s.relinkExchange(ctx, req.GetName()[:strings.Index(req.GetName(), "/listings/")]); err != nil {
+		return nil, err
+	}
 	if err := s.save(); err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -585,6 +628,10 @@ func (s *Server) SubscribeListing(ctx context.Context, req *ahpb.SubscribeListin
 	if err != nil {
 		return nil, err
 	}
+	if ex := s.exchanges[req.GetName()[:strings.Index(req.GetName(), "/listings/")]]; ex != nil && isCleanRoom(ex.Exchange) {
+		return nil, apierror.FailedPrecondition("Listing %s is in a data clean room: subscribe to the clean room (SubscribeDataExchange), "+
+			"whose one linked dataset holds every listing's resource", req.GetName())
+	}
 	if rec.Listing.GetAllowOnlyMetadataSharing() {
 		return nil, apierror.FailedPrecondition("Listing %s shares only its metadata (allow_only_metadata_sharing) and cannot be subscribed to", req.GetName())
 	}
@@ -627,12 +674,6 @@ func setLinked(sub *ahpb.Subscription, listing, dataset string) {
 		Reference: &ahpb.Subscription_LinkedResource_LinkedDataset{LinkedDataset: dataset}}
 	sub.LinkedDatasetMap = map[string]*ahpb.Subscription_LinkedResource{listing: lr}
 	sub.LinkedResources = []*ahpb.Subscription_LinkedResource{clone(lr)}
-}
-
-// SubscribeDataExchange is a data clean room's subscription, which
-// CloudBurrow does not serve.
-func (s *Server) SubscribeDataExchange(context.Context, *ahpb.SubscribeDataExchangeRequest) (*longrunningpb.Operation, error) {
-	return nil, apierror.Unimplemented("SubscribeDataExchange subscribes to a data clean room, which CloudBurrow does not serve; subscribe to a listing with SubscribeListing")
 }
 
 func (s *Server) subscription(name string) (*subscriptionRecord, error) {
@@ -687,6 +728,9 @@ func (s *Server) ListSubscriptions(_ context.Context, req *ahpb.ListSubscription
 		if i := strings.Index(listing, "/listings/"); i >= 0 {
 			exchange = listing[:i]
 		}
+		if e := r.Sub.GetDataExchange(); e != "" {
+			exchange = e
+		}
 		switch {
 		case value == "":
 		case field == "listing" && listing != value, field == "data_exchange" && exchange != value,
@@ -723,6 +767,14 @@ func (s *Server) ListSharedResourceSubscriptions(_ context.Context, req *ahpb.Li
 	for _, k := range sortedKeys(s.subs, "") {
 		r := s.subs[k]
 		l := r.Sub.GetListing()
+		if e := r.Sub.GetDataExchange(); e != "" {
+			// A clean room's subscription is the clean room's, and of
+			// each of its listings.
+			l = e
+			if strings.HasPrefix(res, e+"/listings/") {
+				l = res
+			}
+		}
 		if (l != res && !strings.HasPrefix(l, res+"/listings/")) || (!r.Deleted.IsZero() && !req.GetIncludeDeletedSubscriptions()) {
 			continue
 		}
@@ -846,6 +898,10 @@ func (s *Server) RefreshSubscription(ctx context.Context, req *ahpb.RefreshSubsc
 	}
 	if l, ok := s.listings[r.Sub.GetListing()]; ok {
 		r.Linked = linkFor(l.Listing, r.Linked)
+	}
+	if e := r.Sub.GetDataExchange(); e != "" {
+		r.Linked = s.exchangeLink(e, r.Linked)
+		s.setExchangeLinked(r.Sub, e, "projects/"+r.Linked.Project+"/datasets/"+r.Linked.Dataset)
 	}
 	if s.link != nil {
 		if err := s.link.UpdateLinked(ctx, r.Linked); err != nil {
@@ -1017,7 +1073,7 @@ func normalize(m proto.Message) {
 			switch {
 			case f.Kind() == protoreflect.StringKind && !f.IsList() && !f.IsMap():
 				switch f.Name() {
-				case "name", "parent", "resource", "organization", "listing", "data_exchange", "location":
+				case "name", "parent", "resource", "organization", "listing", "data_exchange", "location", "destination":
 				default:
 					continue
 				}

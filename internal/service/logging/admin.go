@@ -15,8 +15,8 @@ package logging
 //     and another project (deliver.go, #1404).
 //   - An enabled exclusion is applied as Google applies a project exclusion to
 //     the _Default sink: a matching entry written after it is not stored, so it
-//     is never listed. Only the _Default bucket is modelled, so that is every
-//     entry.
+//     is never listed. The _Required sink's audit logs are exempt
+//     (required.go, #2108).
 //
 // Filters are compiled with the ListLogEntries grammar (filter.go), so a
 // filter the store could not evaluate is INVALID_ARGUMENT naming the term,
@@ -101,6 +101,9 @@ type Admin struct {
 	// keys are log buckets' customer-managed keys (cmek.go, #1950), read
 	// without mu: a read of a linked bucket holds it.
 	keys atomic.Pointer[cmek.Keys]
+	// reprovisioned is what reprovisioning a project's _Trace observability
+	// bucket does to its spans (obsresources.go, #2117), or nil.
+	reprovisioned func(project string)
 }
 
 // NewAdmin returns the admin services over db.
@@ -677,6 +680,11 @@ func (s configServer) ListSinks(_ context.Context, req *loggingpb.ListSinksReque
 		markIntercept(sk, s.a.intercepts(project, sk.GetName()))
 		resp.Sinks = append(resp.Sinks, sk)
 	}
+	// The parent's _Required sink (required.go, #2108), after its own on
+	// the last page: Google documents no order.
+	if next == "" {
+		resp.Sinks = append(resp.Sinks, requiredSink(project))
+	}
 	return resp, nil
 }
 
@@ -684,6 +692,9 @@ func (s configServer) GetSink(_ context.Context, req *loggingpb.GetSinkRequest) 
 	project, id, err := s.a.parseName(kindSink, "sink_name", req.GetSinkName())
 	if err != nil {
 		return nil, apierror.Wrap(err)
+	}
+	if id == sinkRequired {
+		return requiredSink(project), nil
 	}
 	m, err := s.a.get(kindSink, project, id)
 	if err != nil {
@@ -778,6 +789,9 @@ func (s configServer) UpdateSink(ctx context.Context, req *loggingpb.UpdateSinkR
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
+	if id == sinkRequired {
+		return nil, apierror.Wrap(refuseRequiredSink(project, "modified"))
+	}
 	if req.GetSink() == nil {
 		return nil, apierror.Wrap(apierror.InvalidArgument("sink is required"))
 	}
@@ -832,6 +846,9 @@ func (s configServer) DeleteSink(_ context.Context, req *loggingpb.DeleteSinkReq
 	project, id, err := s.a.parseName(kindSink, "sink_name", req.GetSinkName())
 	if err != nil {
 		return nil, apierror.Wrap(err)
+	}
+	if id == sinkRequired {
+		return nil, apierror.Wrap(refuseRequiredSink(project, "deleted"))
 	}
 	s.a.mu.Lock()
 	defer s.a.mu.Unlock()

@@ -197,8 +197,8 @@ func eventReason(typ string) string {
 		return "the Firebase providers' (Firebase Alerts, Authentication, Data Connect, Realtime Database, Remote Config " +
 			"and Test Lab) need their Firebase services, which this instance does not serve"
 	case strings.HasPrefix(typ, "google.cloud.speech."):
-		return "Speech-to-Text's are v1 Adaptation's custom classes and phrase sets, and this instance does not serve " +
-			"google.cloud.speech.v1.Adaptation"
+		return "Speech-to-Text's are v1 Adaptation's custom classes and phrase sets, which the local AI endpoint serves " +
+			"(#2106) but does not yet emit events for"
 	case strings.HasPrefix(typ, "google.cloud.redis."):
 		return "Memorystore for Redis's are google.cloud.redis.instance.v1 created, updated and deleted"
 	case strings.HasPrefix(typ, "google.cloud.functions."):

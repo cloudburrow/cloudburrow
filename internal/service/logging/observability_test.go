@@ -41,7 +41,12 @@ func TestObservabilityScopes(t *testing.T) {
 		[]byte(`{"resourceNames":["projects/proj-1"]}`)); code != http.StatusBadRequest {
 		t.Errorf("creating _Default = %d", code)
 	}
+	if code, body := a.CallObservability(http.MethodPost, "/v1/projects/proj-1/locations/global/traceScopes?traceScopeId=t",
+		[]byte(`{"resourceNames":["projects/proj-1"]}`)); code != http.StatusOK {
+		t.Fatalf("create trace scope = %d %s", code, body)
+	}
 	for body, want := range map[string]int{
+		`{"traceScope":"projects/proj-1/locations/global/traceScopes/none"}`:                      http.StatusNotFound,
 		`{"logScope":"//logging.googleapis.com/projects/proj-1/locations/global/logScopes/none"}`: http.StatusNotFound,
 		`{"logScope":"//logging.googleapis.com/projects/proj-2/locations/global/logScopes/two"}`:  http.StatusBadRequest,
 		`{"logScope":"projects/proj-1/locations/global/logScopes/two"}`:                           http.StatusBadRequest,
@@ -62,7 +67,8 @@ func TestObservabilityScopes(t *testing.T) {
 	for p, want := range map[string]int{
 		"/v1/projects/proj-1/locations/us-central1/scopes/_Default": http.StatusBadRequest,
 		"/v1/projects/proj-1/locations/global/scopes/other":         http.StatusNotFound,
-		"/v1/projects/proj-1/locations/global/settings":             http.StatusNotImplemented,
+		"/v1/projects/proj-1/locations/global/settings":             http.StatusOK, // served since #2117
+		"/v1/projects/proj-1/locations/global/widgets":              http.StatusNotFound,
 	} {
 		if code, _ := a.CallObservability(http.MethodGet, p, nil); code != want {
 			t.Errorf("GET %s = %d; want %d", p, code, want)

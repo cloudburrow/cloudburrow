@@ -202,6 +202,10 @@ func plural(n int64, unit string) string {
 	return strconv.FormatInt(n, 10) + " " + unit + "s"
 }
 
+// expirationDaysHelp is the Days field's help: Google's console takes "the
+// number of days that the subscription can remain inactive" (#2095).
+const expirationDaysHelp = "A whole number of days, at least 1, and no shorter than the message retention duration."
+
 // expirationWords is a subscription's expiration period: never, or how long
 // it may be inactive. A subscription with no policy is given Google's 31
 // days by the front.
@@ -431,8 +435,8 @@ func subscriptionPageFields(withTopic bool) []console.Field {
 			Help: "Any call naming the subscription is activity, an open streaming pull keeps it active, and so " +
 				"does a successful push."},
 		console.Field{Name: "expirationDays", Label: "Days", Type: "number", Default: "31", Section: expirySec,
-			ShowWhen: "expirationMode=" + expireAfterDays,
-			Help:     "At least 1, and no shorter than the message retention duration."},
+			ShowWhen: "expirationMode=" + expireAfterDays, Pattern: `^[0-9]{1,5}$`,
+			Help: expirationDaysHelp},
 		console.Field{Name: "addTransform", Label: "Add a transform", Type: "checkbox", Default: "false",
 			Section: "Transforms", Unavailable: pubsubNoTransforms},
 		pubsubLabelsField("", labelSection, pubsubCreateLabelsHelp),

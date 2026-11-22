@@ -3,6 +3,7 @@ package main
 import (
 	functionspb "cloud.google.com/go/functions/apiv2/functionspb"
 	"cloud.google.com/go/iam/admin/apiv1/adminpb"
+	iamv3 "cloud.google.com/go/iam/apiv3/iampb"
 	"cloud.google.com/go/kms/apiv1/kmspb"
 	ci "google.golang.org/api/cloudidentity/v1"
 	"google.golang.org/grpc"
@@ -267,6 +268,31 @@ func blankCheckDeps(t *testing.T) consoleDeps {
 		SsoMode: resourcemanager.SSOModeSAML, SamlSsoInfo: &ci.SamlSsoInfo{InboundSamlSsoProfile: blankSAML.Profile.Name}}); err != nil {
 		t.Fatal(err)
 	}
+	// Cloud Identity's directory (#2103): a user signed in on a device
+	// with a client state, an invitation, a policy and an allowlisted
+	// domain.
+	if _, err := d.projects.InsertUser(map[string]any{"primaryEmail": "blank-user@" + resourcemanager.OrganizationDomain,
+		"name": map[string]any{"givenName": "Blank", "familyName": "User"}, "password": "password-1"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.projects.CreateDevice(&ci.GoogleAppsCloudidentityDevicesV1Device{SerialNumber: "BLANK1", DeviceType: "ANDROID"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, du, err := d.projects.SignIn(resourcemanager.SignInInput{UserEmail: "blank-user@" + resourcemanager.OrganizationDomain, SerialNumber: "BLANK1", DeviceType: "ANDROID"}); err != nil {
+		t.Fatal(err)
+	} else if _, err := d.projects.PatchClientState(du.User.Name+"/clientStates/0cloudburrow-blank", &ci.GoogleAppsCloudidentityDevicesV1ClientState{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.projects.InvitationAction(resourcemanager.CustomerName+"/userinvitations/blank-invite@"+resourcemanager.OrganizationDomain, "send", resourcemanager.AcceptInput{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.projects.CreatePolicy(&ci.Policy{PolicyQuery: &ci.PolicyQuery{OrgUnit: "orgUnits/" + resourcemanager.RootOrgUnitID},
+		Setting: &ci.Setting{Type: "settings/security.password", Value: []byte(`{}`)}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.projects.CreateAllowlistedDomain("blank.example.com"); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := d.projects.Create(resourcemanager.Project{
 		ProjectID: "labelled-project", Labels: map[string]string{"team": "", "env": "dev"},
 	}); err != nil {
@@ -297,6 +323,13 @@ func blankCheckDeps(t *testing.T) consoleDeps {
 		DisplayName: "Blank provider", Description: "Blank provider", AttributeMapping: map[string]string{"google.subject": "assertion.sub"},
 		Oidc: &resourcemanager.WFOidc{IssuerURI: "https://idp.example.test", ClientID: "blank",
 			WebSsoConfig: &resourcemanager.WFWebSsoConfig{ResponseType: "ID_TOKEN", AssertionClaimsBehavior: "ONLY_ID_TOKEN_CLAIMS"}}}); err != nil {
+		t.Fatal(err)
+	}
+	// A principal access boundary policy (#2057).
+	if _, err := d.projects.CreatePABPolicy(resourcemanager.OrganizationName+"/locations/global", "blank-boundary", &iamv3.PrincipalAccessBoundaryPolicy{
+		DisplayName: "Blank boundary", Details: &iamv3.PrincipalAccessBoundaryPolicyDetails{EnforcementVersion: "1",
+			Rules: []*iamv3.PrincipalAccessBoundaryPolicyRule{{Description: "Blank rule", Resources: []string{"//cloudresourcemanager.googleapis.com/projects/" + blankProject},
+				Effect: iamv3.PrincipalAccessBoundaryPolicyRule_ALLOW}}}}, false); err != nil {
 		t.Fatal(err)
 	}
 	// A workload identity pool (#1941), with an OIDC provider.

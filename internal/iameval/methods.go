@@ -146,6 +146,7 @@ var Services = map[string]*Service{
 	"google.cloud.workflows.v1.Workflows":                       Workflows,
 	"google.cloud.workflows.executions.v1.Executions":           Workflows,
 	"google.cloud.parametermanager.v1.ParameterManager":         ParameterManager,
+	"google.cloud.apphub.v1.AppHub":                             AppHub,
 }
 
 // ForMethod is the service and method row of a gRPC full method on the
@@ -198,12 +199,14 @@ var SecretManager = &Service{
 // read 2026-11-19). Google words a denial "Permission 'P' denied on
 // resource 'R' (or it may not exist).", with ErrorInfo
 // IAM_PERMISSION_DENIED. A key's policy and its key ring's both apply to
-// the key and its versions, an import job's and its key ring's to the job.
+// the key and its versions, an import job's and its key ring's to the job,
+// and an EKM connection's own policy to it (#2112).
 var KMS = &Service{
 	Name:              "cloudkms.googleapis.com",
-	PolicyCollections: []string{"keyRings", "cryptoKeys", "importJobs"},
+	PolicyCollections: []string{"keyRings", "cryptoKeys", "importJobs", "ekmConnections"},
 	Types: map[string]string{"keyRings": "cloudkms.googleapis.com/KeyRing", "cryptoKeys": "cloudkms.googleapis.com/CryptoKey",
-		"cryptoKeyVersions": "cloudkms.googleapis.com/CryptoKeyVersion", "importJobs": "cloudkms.googleapis.com/ImportJob"},
+		"cryptoKeyVersions": "cloudkms.googleapis.com/CryptoKeyVersion", "importJobs": "cloudkms.googleapis.com/ImportJob",
+		"ekmConnections": "cloudkms.googleapis.com/EkmConnection"},
 	Methods: kmsMethods(),
 	Deny: func(permission, resource string) error {
 		return grpcDenied(fmt.Sprintf("Permission '%s' denied on resource '%s' (or it may not exist).", permission, resource),
@@ -358,6 +361,19 @@ func analyticsHubMethods() map[string]Method {
 		"RefreshSubscription": {"analyticshub.subscriptions.update", "name"},
 		"RevokeSubscription":  {"analyticshub.subscriptions.delete", "name"},
 		"DeleteSubscription":  {"analyticshub.subscriptions.delete", "name"},
+		// Data clean rooms and query templates (#2101): "Subscribe to a
+		// clean room" needs analyticshub.dataExchanges.subscribe, and the
+		// query template methods the analyticshub.queryTemplates.*
+		// permission of their names ("Query templates", required
+		// permissions, https://docs.cloud.google.com/bigquery/docs/query-templates, read 2026-11-21).
+		"SubscribeDataExchange": {"analyticshub.dataExchanges.subscribe", "name"},
+		"CreateQueryTemplate":   {"analyticshub.queryTemplates.create", "parent"},
+		"GetQueryTemplate":      {"analyticshub.queryTemplates.get", "name"},
+		"ListQueryTemplates":    {"analyticshub.queryTemplates.list", "parent"},
+		"UpdateQueryTemplate":   {"analyticshub.queryTemplates.update", "query_template.name"},
+		"DeleteQueryTemplate":   {"analyticshub.queryTemplates.delete", "name"},
+		"SubmitQueryTemplate":   {"analyticshub.queryTemplates.submit", "name"},
+		"ApproveQueryTemplate":  {"analyticshub.queryTemplates.approve", "name"},
 	}, prefix)
 	kind := func(resource string) string {
 		switch {

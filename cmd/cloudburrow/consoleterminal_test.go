@@ -44,6 +44,7 @@ func TestTerminalEnvIsGcloudSetupAtInClusterAddresses(t *testing.T) {
 		"compute":                "cloudburrow-host.cloudburrow.svc.cluster.local:9031",
 		"workflows":              "cloudburrow-host.cloudburrow.svc.cluster.local:9038",
 		"parametermanager":       "cloudburrow-host.cloudburrow.svc.cluster.local:9047",
+		"apphub":                 "cloudburrow-host.cloudburrow.svc.cluster.local:9048",
 		// The Bigtable front, which serves the admin REST API (#1440).
 		"bigtable": "bigtable.cloudburrow.svc.cluster.local:8086",
 		// Spanner's REST port and Firestore, with the admin APIs (#1461).

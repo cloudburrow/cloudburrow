@@ -59,7 +59,7 @@ import (
 // update/delete, getIamPolicy and setIamPolicy; models.list/get/patch/
 // delete; rowAccessPolicies.list/insert/get/update/delete/batchDelete and
 // getIamPolicy; tables.getIamPolicy and setIamPolicy. A table's or
-// routine's own IAM policy (iam.go) grants on it, and a dataset access
+// routine's own IAM policy (iam.go) grants on it, a query's destination table is its creator's to read (tables.get and tabledata.list, #2104), and a dataset access
 // entry's condition is evaluated. The roles are those of the project, its
 // folders and its organization (the host flattens Resource Manager's
 // hierarchy), and a conditional binding counts where its condition
@@ -198,6 +198,12 @@ type iamState struct {
 	// by project and job ID (jobs.get, jobs.list and jobs.cancel let a
 	// job's creator read and cancel it).
 	creators map[string]string
+	// results are the destination tables of the query jobs a minted
+	// caller ran, by tableKey, and the caller: a query's results are its
+	// creator's to read, whatever the dataset's access (#2104: Google's
+	// BigQuery connector for Spark reads a query's results so, for an
+	// EXTERNAL SECURITY INVOKER procedure run as its caller).
+	results map[string]string
 	// creatorsPath is the file the creators are kept in (#1780), "" for
 	// none; logf reports a failure to write it.
 	creatorsPath string
@@ -643,6 +649,38 @@ func (s *iamState) creator(project, job string) string {
 	return s.creators[jobKey(project, job)]
 }
 
+// recordResults keeps body's (a job resource's) query destination table
+// as email's.
+func (s *iamState) recordResults(body []byte, email string) {
+	var job struct {
+		Configuration struct {
+			Query struct {
+				DestinationTable tableRef `json:"destinationTable"`
+			} `json:"query"`
+		} `json:"configuration"`
+	}
+	if json.Unmarshal(body, &job) != nil {
+		return
+	}
+	t := job.Configuration.Query.DestinationTable
+	if t.ProjectID == "" || t.DatasetID == "" || t.TableID == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.results == nil {
+		s.results = map[string]string{}
+	}
+	s.results[t.ProjectID+"\x00"+t.DatasetID+"\x00"+t.TableID] = email
+}
+
+// ownsResults is whether t is the destination of a query email ran.
+func (s *iamState) ownsResults(email string, t tableRef) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return email != "" && s.results[t.ProjectID+"\x00"+t.DatasetID+"\x00"+t.TableID] == email
+}
+
 func (s *iamState) recordCreator(project, job, email string) {
 	if job == "" {
 		return
@@ -794,6 +832,9 @@ func (s *iamState) check(w http.ResponseWriter, r *http.Request, next http.Handl
 				http.MethodDelete: "bigquery.rowAccessPolicies.delete"}[m]
 		case len(parts) == 6 && parts[4] == "rowAccessPolicies" && verb == "getIamPolicy":
 			perm = "bigquery.rowAccessPolicies.getIamPolicy"
+		}
+		if (perm == "bigquery.tables.get" || perm == "bigquery.tables.getData") && m == http.MethodGet && s.ownsResults(email, t) {
+			return false // the caller's own query results
 		}
 		if perm != "" && !onTable(t, perm) {
 			return denyTable(t, perm)
@@ -1137,6 +1178,15 @@ func (s *iamState) handler(engine, rest http.Handler) http.Handler {
 					p = project
 				}
 				s.recordCreator(p, job.JobReference.JobID, email)
+				s.recordResults(rec.body.Bytes(), email)
+			}
+			rec.copyTo(w)
+		case r.Method == http.MethodGet && strings.HasPrefix(tail, "jobs/") && !strings.Contains(strings.TrimPrefix(tail, "jobs/"), "/"):
+			// jobs.get: a query's destination is known once it is done.
+			rec := newRecorder()
+			rest.ServeHTTP(rec, r)
+			if rec.status == http.StatusOK && s.creator(project, strings.TrimPrefix(tail, "jobs/")) == email {
+				s.recordResults(rec.body.Bytes(), email)
 			}
 			rec.copyTo(w)
 		case r.Method == http.MethodGet && tail == "jobs":

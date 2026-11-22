@@ -170,9 +170,22 @@ checks (a decrease below usage, or by more than 10%). The preferences are kept p
 project registry's store. A quota marked enforced is read through internal/quotalimit by the API
 that enforces it, so a granted preference changes what that API allows: IAM's service accounts per
 project (default 100) and Certificate Authority Service's CAs per project and region (default 1000).
-Workflows' 10000 workflows per project is a system limit: listed, enforced, not adjustable. Rate
-quotas are described but not applied. The console's IAM & Admin > Quotas & System Limits page and
+Workflows' 10000 workflows per project is a system limit: listed, enforced, not adjustable. The
+per-minute request quotas the instance enforces (internal/ratequota, #2063) are quotas of their
+services too (#2090): each metric's quota ID is its limit's name, its value the configured one
+(`requestQuotas`, `/admin/quotas`) or Google's default, and a granted preference is the project's
+limit from the next call on. Parameter Manager's read, write and render requests are the only ones
+today. IAM's and IAM Credentials' rate quotas are described but not applied. The console's IAM & Admin > Quotas & System Limits page and
 each API's Quotas & System Limits tab read and edit them.
+
+Folders and organizations are Cloud Quotas containers too (#2102): `folders/{n}/locations/global`
+and `organizations/{n}/locations/global`, kept in the same store under the folder's or
+organization's name. Each lists the quotas of its own level and its own preferences, not its
+projects'. The organization has IAM's organization quotas: workforce identity pools (default 100,
+enforced by `CreateWorkforcePool`), the Workforce Identity Federation request rates, and the fixed
+300 custom roles. No served API documents a folder quota. The quota adjuster's enablement is
+inherited from the nearest folder or organization that sets it. Choosing the organization or a
+folder in the console's toolbar scopes Quotas & System Limits to it.
 
 The Site Verification API (`siteVerification` v1) is on the same port; see
 [compatibility.md](compatibility.md#site-verification--siteverification-v1).

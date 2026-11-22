@@ -1,10 +1,17 @@
 package main
 
 import (
+	"context"
+	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/quotalimit"
+	"github.com/cloudburrow/cloudburrow/internal/resource"
+	"github.com/cloudburrow/cloudburrow/internal/service/cloudquotas"
+	"github.com/cloudburrow/cloudburrow/internal/store"
 )
 
 func TestNewRequestQuotasAppliesTheConfiguration(t *testing.T) {
@@ -29,42 +36,78 @@ func TestNewRequestQuotasAppliesTheConfiguration(t *testing.T) {
 	}
 }
 
-// TestConsoleAPIQuotas (#2063): an API's Quotas & System Limits tab lists
-// its request quotas at their defaults; Edit quota sets the project's,
-// which the tab then shows adjusted and which refuses the project's calls
-// past it; Reset to default restores it.
+// TestConsoleAPIQuotas (#2063, #2090): an API's Quotas & System Limits tab
+// lists its request quotas, from the Cloud Quotas API, at their defaults
+// and enforced; Edit quotas (quota-set, an UpdateQuotaPreference) sets the
+// project's, which the tab then shows and which refuses the project's calls
+// past it, while another project keeps the default.
 func TestConsoleAPIQuotas(t *testing.T) {
+	ctx := context.Background()
 	cfg := config.Default()
 	cfg.Services = append(cfg.Services, config.ServiceParameterManager)
 	l, err := newRequestQuotas(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := serviceUsageProvider{requestQuotas: l}
-	qs := p.apiQuotas("parametermanager.googleapis.com", "cq")
-	if len(qs) != 3 || qs[0].Metric != "parametermanager.googleapis.com/read_requests" || qs[0].Value != 1200 || qs[0].Adjusted {
-		t.Fatalf("quotas = %+v", qs)
+	q := cloudquotas.NewServer(store.NewMemory(), numberedProjects{"cq", "other"}, nil)
+	q.AddQuotas(requestQuotaInfos(l))
+	quotalimit.Use(q)
+	t.Cleanup(func() { quotalimit.Use(nil) })
+	p := serviceUsageProvider{quotas: q}
+	rows := func(project string) []consoleQuota {
+		t.Helper()
+		out, err := p.quotasCall(ctx, project, "quotas", []byte(`{"service":"parametermanager.googleapis.com"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out.(map[string]any)["quotas"].([]consoleQuota)
 	}
-	if _, err := p.quotaCall("cq", "setquota", []byte(`{"metric":"parametermanager.googleapis.com/read_requests","limit":"1"}`)); err != nil {
+	read := func(rs []consoleQuota) consoleQuota {
+		for _, r := range rs {
+			if r.Metric == "parametermanager.googleapis.com/read_requests" {
+				return r
+			}
+		}
+		t.Fatalf("no read quota in %+v", rs)
+		return consoleQuota{}
+	}
+	rs := rows("cq")
+	if len(rs) != 3 {
+		t.Fatalf("quotas = %+v", rs)
+	}
+	if r := read(rs); r.QuotaID != "ReadRequestsPerMinutePerProject" || r.Value != 1200 || !r.Enforced || !r.Adjustable || r.Preference != "" {
+		t.Fatalf("read quota = %+v", r)
+	}
+	if _, err := p.quotasCall(ctx, "cq", "quota-set", []byte(`{"service":"parametermanager.googleapis.com","quotaId":"ReadRequestsPerMinutePerProject","value":"1100","justification":"test"}`)); err != nil {
 		t.Fatal(err)
 	}
-	if qs := p.apiQuotas("parametermanager.googleapis.com", "cq"); qs[0].Value != 1 || !qs[0].Adjusted {
-		t.Errorf("after Edit quota: %+v", qs[0])
+	if r := read(rows("cq")); r.Value != 1100 || r.Default != 1200 || r.Granted == nil || *r.Granted != 1100 {
+		t.Errorf("after Edit quotas: %+v", r)
 	}
-	if qs := p.apiQuotas("parametermanager.googleapis.com", "other"); qs[0].Value != 1200 || qs[0].Adjusted {
-		t.Errorf("another project: %+v", qs[0])
+	if r := read(rows("other")); r.Value != 1200 || r.Preference != "" {
+		t.Errorf("another project: %+v", r)
 	}
-	_ = l.Charge("parametermanager.googleapis.com/read_requests", "cq")
-	if err := l.Charge("parametermanager.googleapis.com/read_requests", "cq"); err == nil {
-		t.Error("the project's second read passed a quota of 1")
+	for i := 0; i < 1100; i++ {
+		if err := l.Charge("parametermanager.googleapis.com/read_requests", "cq"); err != nil {
+			t.Fatalf("read %d: %v", i+1, err)
+		}
 	}
-	if _, err := p.quotaCall("cq", "setquota", []byte(`{"metric":"parametermanager.googleapis.com/read_requests","limit":"many"}`)); err == nil {
+	if err := l.Charge("parametermanager.googleapis.com/read_requests", "cq"); err == nil || !strings.Contains(err.Error(), "Quota exceeded") {
+		t.Errorf("read 1101 = %v; want the quota refusal", err)
+	}
+	if _, err := p.quotasCall(ctx, "cq", "quota-set", []byte(`{"service":"parametermanager.googleapis.com","quotaId":"ReadRequestsPerMinutePerProject","value":"many"}`)); err == nil {
 		t.Error("a value that is not a number was accepted")
 	}
-	if _, err := p.quotaCall("cq", "resetquota", []byte(`{"metric":"parametermanager.googleapis.com/read_requests"}`)); err != nil {
-		t.Fatal(err)
+}
+
+// numberedProjects resolves its projects by ID or by number.
+type numberedProjects []string
+
+func (ps numberedProjects) Resolve(s string) (string, error) {
+	for _, p := range ps {
+		if s == p || s == strconv.FormatInt(resource.ProjectNumber(p), 10) {
+			return p, nil
+		}
 	}
-	if qs := p.apiQuotas("parametermanager.googleapis.com", "cq"); qs[0].Value != 1200 || qs[0].Adjusted {
-		t.Errorf("after Reset to default: %+v", qs[0])
-	}
+	return "", fmt.Errorf("no project %s", s)
 }

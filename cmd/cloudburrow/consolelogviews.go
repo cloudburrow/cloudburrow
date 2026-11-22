@@ -54,6 +54,10 @@ func consoleEntry(e *loggingpb.LogEntry) console.Entry {
 		// queries (#1849).
 		ResourceType:   e.GetResource().GetType(),
 		ResourceLabels: e.GetResource().GetLabels(),
+		// The trace and span, for trace= queries and the entry's link to
+		// its trace details (#2118).
+		Trace:  e.GetTrace(),
+		SpanID: e.GetSpanId(),
 	}
 	// The jsonPayload itself, for the query editor and the Fields pane's
 	// Frequent fields (#2031).

@@ -88,11 +88,53 @@ type GenerationConfig struct {
 	FrequencyPenalty   *float32        `json:"frequencyPenalty,omitempty"`
 	ResponseLogprobs   *bool           `json:"responseLogprobs,omitempty"`
 	Logprobs           *int32          `json:"logprobs,omitempty"`
-	ThinkingConfig     json.RawMessage `json:"thinkingConfig,omitempty"`
+	ThinkingConfig     *ThinkingConfig `json:"thinkingConfig,omitempty"`
 	SpeechConfig       json.RawMessage `json:"speechConfig,omitempty"`
 	AudioTimestamp     *bool           `json:"audioTimestamp,omitempty"`
 	RoutingConfig      json.RawMessage `json:"routingConfig,omitempty"`
 	ResponseModality   []string        `json:"responseModalities,omitempty"`
+}
+
+// ThinkingConfig is generationConfig.thinkingConfig (#2107), applied as
+// LiteRT-LM's ThinkingConfig: Gemma 4's own thinking mode (its chat template's
+// <|think|>, its thought channel) with ThinkingBudgetConstraint's budget.
+type ThinkingConfig struct {
+	IncludeThoughts *bool  `json:"includeThoughts,omitempty"`
+	ThinkingBudget  *int32 `json:"thinkingBudget,omitempty"`
+	// ThinkingLevel is refused: Gemma 4's thinking is on or off with a token
+	// budget, and mapping LOW or HIGH to a budget would invent a meaning.
+	ThinkingLevel string `json:"thinkingLevel,omitempty"`
+}
+
+// thinking reports whether thinking is on and its budget (-1 unlimited).
+// A thinkingConfig turns the model's thinking mode on unless its
+// thinkingBudget is 0 ("0 disables thinking", the reference); without one
+// the model answers without thinking, its template's default.
+func (g *GenerationConfig) thinking() (on bool, budget int32, include bool) {
+	if g == nil || g.ThinkingConfig == nil {
+		return false, 0, false
+	}
+	tc := g.ThinkingConfig
+	budget = -1
+	if tc.ThinkingBudget != nil {
+		budget = *tc.ThinkingBudget
+	}
+	include = tc.IncludeThoughts != nil && *tc.IncludeThoughts
+	return budget != 0, budget, include
+}
+
+// maxCandidateCount bounds candidateCount. UNVERIFIED (re-read 2026-11-21:
+// https://docs.cloud.google.com/vertex-ai/generative-ai/docs/model-reference/inference
+// and .../multimodal/content-generation-parameters, which state no range):
+// Gemini's commonly reported limit of 8.
+const maxCandidateCount = 8
+
+// candidates is the number of candidates asked for, 1 by default.
+func (g *GenerationConfig) candidates() int {
+	if g == nil || g.CandidateCount == nil {
+		return 1
+	}
+	return int(*g.CandidateCount)
 }
 
 // unsupportedConfig lists every populated option the runtime cannot honour.
@@ -121,7 +163,9 @@ func (g *GenerationConfig) unsupportedConfig(options bool) []string {
 	add("topP", !options && g.TopP != nil)
 	add("topK", !options && g.TopK != nil)
 	add("seed", !options && g.Seed != nil)
-	add("candidateCount", g.CandidateCount != nil && *g.CandidateCount != 1)
+	// N candidates are N independent generations (#2107), each seeded on its
+	// own, which needs a runtime that takes a seed.
+	add("candidateCount", !options && g.CandidateCount != nil && *g.CandidateCount != 1)
 	// A JSON response, with or without a schema, is constrained decoding
 	// (cloudburrow_generate's llguidance JSON-schema constraint, #1779).
 	add("responseMimeType", g.ResponseMIMEType != "" && !(options && (g.ResponseMIMEType == "application/json" || g.ResponseMIMEType == "text/plain")))
@@ -131,9 +175,14 @@ func (g *GenerationConfig) unsupportedConfig(options bool) []string {
 	// (#1937).
 	add("presencePenalty", !options && g.PresencePenalty != nil)
 	add("frequencyPenalty", !options && g.FrequencyPenalty != nil)
-	add("responseLogprobs", g.ResponseLogprobs != nil)
-	add("logprobs", g.Logprobs != nil)
-	add("thinkingConfig", len(g.ThinkingConfig) > 0)
+	// responseLogprobs and logprobs are the model's log-softmax at each
+	// decode step, the chosen token and the top candidates, from
+	// cloudburrow_generate's --response_logprobs (CloudBurrow's LiteRT-LM
+	// decode step observer, #2107).
+	add("responseLogprobs", !options && g.ResponseLogprobs != nil && *g.ResponseLogprobs)
+	add("logprobs", !options && g.Logprobs != nil)
+	add("thinkingConfig", !options && g.ThinkingConfig != nil)
+	add("thinkingConfig.thinkingLevel", g.ThinkingConfig != nil && g.ThinkingConfig.ThinkingLevel != "")
 	add("speechConfig", len(g.SpeechConfig) > 0)
 	add("audioTimestamp", g.AudioTimestamp != nil)
 	add("routingConfig", len(g.RoutingConfig) > 0)
@@ -141,6 +190,11 @@ func (g *GenerationConfig) unsupportedConfig(options bool) []string {
 	sort.Strings(out)
 	return out
 }
+
+// maxLogprobs is Vertex AI's limit on generationConfig.logprobs ("Specify an
+// integer value in the range of 1-20", inference reference, re-read
+// 2026-11-21).
+const maxLogprobs = 20
 
 // maxStopSequences is Vertex AI's limit on generationConfig.stopSequences
 // ("A maximum of 5 items in the list", GenerationConfig reference).
@@ -174,6 +228,18 @@ func (g *GenerationConfig) rangeError() error {
 		return apierror.InvalidArgument("Unable to submit request because it has a presencePenalty value of %g but the supported range is from -2 (inclusive) to 2 (exclusive). Update the value and try again.", *g.PresencePenalty)
 	case g.FrequencyPenalty != nil && !(*g.FrequencyPenalty >= -2 && *g.FrequencyPenalty < 2):
 		return apierror.InvalidArgument("Unable to submit request because it has a frequencyPenalty value of %g but the supported range is from -2 (inclusive) to 2 (exclusive). Update the value and try again.", *g.FrequencyPenalty)
+	case g.CandidateCount != nil && (*g.CandidateCount < 1 || *g.CandidateCount > maxCandidateCount):
+		return apierror.InvalidArgument("Unable to submit request because it has a candidateCount value of %d but the supported range is from 1 (inclusive) to %d (inclusive). Update the value and try again.", *g.CandidateCount, maxCandidateCount)
+	case g.ThinkingConfig != nil && g.ThinkingConfig.ThinkingBudget != nil && *g.ThinkingConfig.ThinkingBudget < -1:
+		// The reference: 0 disables thinking, -1 is dynamic thinking.
+		return apierror.InvalidArgument("Unable to submit request because it has a thinkingBudget value of %d; thinkingBudget must be -1 (dynamic), 0 (off) or a positive number of tokens. Update the value and try again.", *g.ThinkingConfig.ThinkingBudget)
+	case g.Logprobs != nil && (*g.Logprobs < 1 || *g.Logprobs > maxLogprobs):
+		// The reference: "Specify an integer value in the range of 1-20."
+		return apierror.InvalidArgument("Unable to submit request because it has a logprobs value of %d but the supported range is from 1 (inclusive) to %d (inclusive). Update the value and try again.", *g.Logprobs, maxLogprobs)
+	case g.Logprobs != nil && (g.ResponseLogprobs == nil || !*g.ResponseLogprobs):
+		// The reference: "You must enable responseLogprobs to use this
+		// parameter."
+		return apierror.InvalidArgument("Unable to submit request because logprobs is set but responseLogprobs is not enabled; logprobs requires responseLogprobs to be true. Update the value and try again.")
 	case len(g.StopSequences) > maxStopSequences:
 		return apierror.InvalidArgument("Unable to submit request because it has %d stopSequences; the maximum is %d. Update the value and try again.", len(g.StopSequences), maxStopSequences)
 	}
@@ -313,6 +379,15 @@ func generatorRequest(req *GenerateContentRequest) Request {
 		out.JSONSchema, _ = g.jsonSchema() // validated by rangeError
 		out.PresencePenalty = g.PresencePenalty
 		out.FrequencyPenalty = g.FrequencyPenalty
+		out.ResponseLogprobs = g.ResponseLogprobs != nil && *g.ResponseLogprobs
+		if out.ResponseLogprobs && g.Logprobs != nil {
+			out.TopLogprobs = *g.Logprobs
+		}
+		if g.ThinkingConfig != nil {
+			on, budget, _ := g.thinking()
+			out.Thinking = &on
+			out.ThinkingBudget = budget
+		}
 	}
 	return out
 }
@@ -347,6 +422,64 @@ type Candidate struct {
 	Content      Content `json:"content"`
 	FinishReason string  `json:"finishReason,omitempty"`
 	Index        int32   `json:"index"`
+	// AvgLogprobs and LogprobsResult answer responseLogprobs (#2107): the
+	// mean of the chosen tokens' log-probabilities, and each one.
+	AvgLogprobs    *float64        `json:"avgLogprobs,omitempty"`
+	LogprobsResult *LogprobsResult `json:"logprobsResult,omitempty"`
+}
+
+// LogprobsResult is Vertex's per-step log-probabilities. ChosenCandidates
+// is the token the sampler chose at each step; TopCandidates (logprobs) the
+// most probable tokens of each step, most probable first.
+type LogprobsResult struct {
+	TopCandidates    []TopCandidates     `json:"topCandidates,omitempty"`
+	ChosenCandidates []LogprobsCandidate `json:"chosenCandidates"`
+}
+
+// TopCandidates is one step's most probable tokens.
+type TopCandidates struct {
+	Candidates []LogprobsCandidate `json:"candidates"`
+}
+
+// LogprobStep is one decode step: the chosen token and, with logprobs, the
+// step's most probable tokens. Every score is the model's log-softmax over
+// the step's logits, before sampling.
+type LogprobStep struct {
+	Chosen LogprobsCandidate
+	Top    []LogprobsCandidate
+}
+
+// LogprobsCandidate is one token and its log-probability.
+type LogprobsCandidate struct {
+	Token          string  `json:"token"`
+	TokenID        int32   `json:"tokenId"`
+	LogProbability float32 `json:"logProbability"`
+}
+
+// withLogprobs is r's candidate with steps as its logprobsResult (the top
+// candidates when the steps carry them) and the chosen tokens' mean as
+// avgLogprobs.
+func withLogprobs(r *GenerateContentResponse, steps []LogprobStep) *GenerateContentResponse {
+	if r == nil || len(steps) == 0 || len(r.Candidates) == 0 {
+		return r
+	}
+	var sum float64
+	res := &LogprobsResult{}
+	top := false
+	for _, s := range steps {
+		top = top || len(s.Top) > 0
+	}
+	for _, s := range steps {
+		sum += float64(s.Chosen.LogProbability)
+		res.ChosenCandidates = append(res.ChosenCandidates, s.Chosen)
+		if top {
+			res.TopCandidates = append(res.TopCandidates, TopCandidates{Candidates: s.Top})
+		}
+	}
+	avg := sum / float64(len(steps))
+	r.Candidates[0].AvgLogprobs = &avg
+	r.Candidates[0].LogprobsResult = res
+	return r
 }
 
 // ModalityTokenCount is one entry of usageMetadata's per-modality details.
@@ -363,6 +496,9 @@ type UsageMetadata struct {
 	PromptTokenCount        int32                `json:"promptTokenCount"`
 	CandidatesTokenCount    int32                `json:"candidatesTokenCount,omitempty"`
 	TotalTokenCount         int32                `json:"totalTokenCount"`
+	CachedContentTokenCount int32                `json:"cachedContentTokenCount,omitempty"`
+	ThoughtsTokenCount      int32                `json:"thoughtsTokenCount,omitempty"`
+	CacheTokensDetails      []ModalityTokenCount `json:"cacheTokensDetails,omitempty"`
 	PromptTokensDetails     []ModalityTokenCount `json:"promptTokensDetails,omitempty"`
 	CandidatesTokensDetails []ModalityTokenCount `json:"candidatesTokensDetails,omitempty"`
 }
@@ -391,6 +527,18 @@ const maxRequestBytes = 20 << 20
 // dropped, and DisallowUnknownFields is what catches the ones not enumerated
 // above — including any Vertex adds after this was written.
 func decodeRequest(r io.Reader, options bool) (*GenerateContentRequest, error) {
+	req, err := decodeBody(r)
+	if err != nil {
+		return nil, err
+	}
+	if err := validate(req, options); err != nil {
+		return nil, err
+	}
+	return req, nil
+}
+
+// decodeBody reads a request without validating it.
+func decodeBody(r io.Reader) (*GenerateContentRequest, error) {
 	dec := json.NewDecoder(io.LimitReader(r, maxRequestBytes))
 	dec.DisallowUnknownFields()
 
@@ -401,9 +549,6 @@ func decodeRequest(r io.Reader, options bool) (*GenerateContentRequest, error) {
 				"%s; this endpoint serves a documented subset of generateContent and refuses fields it cannot honour", err)
 		}
 		return nil, apierror.InvalidArgument("malformed request body: %v", err)
-	}
-	if err := validate(&req, options); err != nil {
-		return nil, err
 	}
 	return &req, nil
 }
@@ -416,6 +561,8 @@ func validate(req *GenerateContentRequest, options bool) error {
 	case len(req.SafetySettings) > 0:
 		return unsupportedField("safetySettings")
 	case req.CachedContent != "":
+		// Expanded by the server (cachedcontent.go) before validation; a
+		// request that reaches here with one was not resolved.
 		return unsupportedField("cachedContent")
 	}
 	if !options {
@@ -514,7 +661,16 @@ func textResponse(model, text, finish string) *GenerateContentResponse {
 // (when there is text), then one functionCall part per call, as Gemini
 // orders them.
 func candidateResponse(model, text string, calls []FunctionCall, finish string, usage *Usage) *GenerateContentResponse {
+	return thoughtResponse(model, "", text, calls, finish, usage)
+}
+
+// thoughtResponse is candidateResponse with the model's thoughts first, as a
+// part marked thought (includeThoughts, #2107).
+func thoughtResponse(model, thought, text string, calls []FunctionCall, finish string, usage *Usage) *GenerateContentResponse {
 	var parts []Part
+	if thought != "" {
+		parts = append(parts, Part{Text: thought, Thought: ptr(true)})
+	}
 	if text != "" || len(calls) == 0 {
 		parts = append(parts, Part{Text: text})
 	}
@@ -545,10 +701,30 @@ func (u *Usage) metadata() *UsageMetadata {
 	if !u.Images {
 		m.PromptTokensDetails = []ModalityTokenCount{{Modality: "TEXT", TokenCount: int32(u.PromptTokens)}}
 	}
+	// The cached content's tokens are part of promptTokenCount ("When
+	// cached_content is set, this is still the total effective prompt size",
+	// the v1 GenerateContentResponse.UsageMetadata proto), counted on their
+	// own as cachedContentTokenCount.
+	if u.CachedTokens > 0 {
+		m.CachedContentTokenCount = int32(u.CachedTokens)
+		if !u.CachedImages {
+			m.CacheTokensDetails = []ModalityTokenCount{{Modality: "TEXT", TokenCount: int32(u.CachedTokens)}}
+		}
+	}
 	if u.CandidateTokens >= 0 {
-		m.CandidatesTokenCount = int32(u.CandidateTokens)
-		m.TotalTokenCount += int32(u.CandidateTokens)
-		m.CandidatesTokensDetails = []ModalityTokenCount{{Modality: "TEXT", TokenCount: int32(u.CandidateTokens)}}
+		cand := u.CandidateTokens
+		// Thoughts are decoded tokens too; Vertex counts them apart from the
+		// candidates, and totalTokenCount holds both.
+		if u.ThoughtTokens > 0 {
+			m.ThoughtsTokenCount = int32(u.ThoughtTokens)
+			cand = max(cand-u.ThoughtTokens, 0)
+			m.TotalTokenCount += int32(u.ThoughtTokens)
+		}
+		m.CandidatesTokenCount = int32(cand)
+		m.TotalTokenCount += int32(cand)
+		m.CandidatesTokensDetails = []ModalityTokenCount{{Modality: "TEXT", TokenCount: int32(cand)}}
 	}
 	return m
 }
+
+func ptr[T any](v T) *T { return &v }

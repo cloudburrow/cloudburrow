@@ -225,6 +225,10 @@ func secondsOf(d interface{ AsDuration() time.Duration }, def string) string {
 
 // expirationDefaults are the Expiration period's choice and days for a
 // policy: Google's 31 days for none, Never expire for one without a ttl.
+// Google's console takes the period as a number of days (#2095), so a ttl
+// that is not a whole number of days, such as 36h, which the API accepts,
+// has no days to show: days is empty, and the page says the period itself
+// (expirationKeptHelp), which Update keeps while the days stay empty.
 func expirationDefaults(p *pubsubpb.ExpirationPolicy) (mode, days string) {
 	switch {
 	case p == nil:
@@ -233,7 +237,17 @@ func expirationDefaults(p *pubsubpb.ExpirationPolicy) (mode, days string) {
 		return expireNever, "31"
 	}
 	d := p.GetTtl().AsDuration()
-	return expireAfterDays, strconv.FormatInt(int64((d+24*time.Hour-1)/(24*time.Hour)), 10)
+	if d%(24*time.Hour) != 0 {
+		return expireAfterDays, ""
+	}
+	return expireAfterDays, strconv.FormatInt(int64(d/(24*time.Hour)), 10)
+}
+
+// expirationKeptHelp is the Days field's help for a ttl that is not a
+// whole number of days: the period exactly, and that it is kept.
+func expirationKeptHelp(p *pubsubpb.ExpirationPolicy) string {
+	return "Now " + durationWords(p.GetTtl()) + ", not a whole number of days: it is kept unless you enter a number of days. " +
+		expirationDaysHelp
 }
 
 // subscriptionEditForm is Google's Edit subscription page, prefilled from
@@ -304,7 +318,7 @@ func subscriptionEditForm(s *pubsubpb.Subscription) *console.EditForm {
 		field("ackDeadline", strconv.Itoa(int(s.GetAckDeadlineSeconds()))),
 		field("messageRetention", formatPubSubDuration(s.GetMessageRetentionDuration())),
 		field("retainAcked", strconv.FormatBool(s.GetRetainAckedMessages())),
-		field("expirationMode", mode), field("expirationDays", days),
+		field("expirationMode", mode), expirationDaysField(s.GetExpirationPolicy(), days),
 		labelsField(s.GetLabels(), "Labels"),
 	)
 	for i := range fields {
@@ -326,7 +340,8 @@ const editDeliveryKey = "_delivery"
 // subscriptionEditValues turns the Edit subscription page's fields into
 // the values Edit reads: a hidden choice's fields dropped, Pull an empty
 // push endpoint, and an expiration period left as it was when its days
-// were not touched (a period of 36h shows as 2 days).
+// were not touched (a period of 36h, no whole number of days, leaves the
+// days empty, #2095).
 func subscriptionEditValues(project string, cur *pubsubpb.Subscription, values map[string]string) (map[string]string, error) {
 	form := subscriptionEditForm(cur)
 	if err := refuseUnavailable(values, form.Fields); err != nil {
@@ -352,6 +367,23 @@ func subscriptionEditValues(project string, cur *pubsubpb.Subscription, values m
 		delete(out, k)
 	}
 	return out, nil
+}
+
+// expirationDaysField is Edit subscription's Days, prefilled with the
+// period's days or, for a period of no whole number of days, empty and
+// saying the period (#2095).
+func expirationDaysField(p *pubsubpb.ExpirationPolicy, days string) console.Field {
+	var f console.Field
+	for _, g := range subscriptionPageFields(false) {
+		if g.Name == "expirationDays" {
+			f = g
+		}
+	}
+	f.Default = days
+	if days == "" {
+		f.Help = expirationKeptHelp(p)
+	}
+	return f
 }
 
 // --- Edit topic ---------------------------------------------------------

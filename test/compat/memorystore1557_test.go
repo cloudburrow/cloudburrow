@@ -257,15 +257,17 @@ func TestMemorystoreValkeyEngineVersions(t *testing.T) {
 	}
 }
 
-// covers: google.cloud.memorystore.v1.Memorystore/CreateInstance, google.cloud.memorystore.v1.Memorystore/GetInstance, google.cloud.memorystore.v1.Memorystore/BackupInstance, google.cloud.memorystore.v1.Memorystore/GetBackup, google.cloud.redis.cluster.v1.CloudRedisCluster/CreateCluster, google.cloud.kms.v1.KeyManagementService/UpdateCryptoKeyVersion
+// covers: google.cloud.memorystore.v1.Memorystore/CreateInstance, google.cloud.memorystore.v1.Memorystore/GetInstance, google.cloud.memorystore.v1.Memorystore/BackupInstance, google.cloud.memorystore.v1.Memorystore/GetBackup, google.cloud.memorystore.v1.Memorystore/UpdateInstance, google.cloud.redis.cluster.v1.CloudRedisCluster/CreateCluster, google.cloud.kms.v1.KeyManagementService/UpdateCryptoKeyVersion
 //
 // TestMemorystoreValkeyKmsKey (#1557), with cloud.google.com/go/memorystore/
 // apiv1, cloud.google.com/go/redis/cluster/apiv1, cloud.google.com/go/kms/
 // apiv1 and go-redis: an instance created with kms_key, a key in its
 // region, reports it with encryption_info CUSTOMER_MANAGED_ENCRYPTION, and
-// its backup is encrypted with it. With the key's version disabled the
-// instance is suspended (not ACTIVE, kms_key_primary_state DISABLED) and no
-// longer answers; enabled again, it resumes with its data. A Redis cluster
+// its backup is encrypted with it. With the key's version disabled it
+// keeps serving reads and writes (ACTIVE, kms_key_primary_state DISABLED),
+// as Memorystore documents (#2113), and BackupInstance and an update of
+// persistence_config are FAILED_PRECONDITION; enabled again, it is ACTIVE
+// with its data. A Redis cluster
 // takes kms_key too. A key in another region is INVALID_ARGUMENT.
 func TestMemorystoreValkeyKmsKey(t *testing.T) {
 	h := New(t)
@@ -330,24 +332,35 @@ func TestMemorystoreValkeyKmsKey(t *testing.T) {
 			time.Sleep(500 * time.Millisecond)
 		}
 	}
+	// The key's version disabled (#2113): the instance keeps serving
+	// reads and writes, its persistence deactivated, and backups and
+	// persistence updates are refused until the key is enabled again.
 	versionState(kmspb.CryptoKeyVersion_DISABLED)
-	got := until("suspended", func(i *memorystorepb.Instance) bool {
-		return i.GetEncryptionInfo().GetKmsKeyPrimaryState() == memorystorepb.EncryptionInfo_DISABLED && len(i.GetPscAutoConnections()) == 0
+	got := until("the key's state reported", func(i *memorystorepb.Instance) bool {
+		return i.GetEncryptionInfo().GetKmsKeyPrimaryState() == memorystorepb.EncryptionInfo_DISABLED
 	})
-	if got.GetState() == memorystorepb.Instance_ACTIVE {
-		t.Errorf("suspended: state %v, want not ACTIVE", got.GetState())
+	if got.GetState() != memorystorepb.Instance_ACTIVE {
+		t.Errorf("with the key disabled: state %v, want ACTIVE", got.GetState())
 	}
-	pctx, pcancel := context.WithTimeout(ctx, 3*time.Second)
-	if err := rc.Ping(pctx).Err(); err == nil {
-		t.Error("a suspended instance's primary still answers")
+	if v, err := rc.Get(ctx, "secret").Result(); err != nil || v != "kept" {
+		t.Errorf("GET with the key disabled = %q, %v", v, err)
 	}
-	pcancel()
+	if err := rc.Set(ctx, "written", "while-disabled", 0).Err(); err != nil {
+		t.Errorf("SET with the key disabled: %v", err)
+	}
+	if _, err := c.BackupInstance(ctx, &memorystorepb.BackupInstanceRequest{Name: inst.GetName(), BackupId: proto.String("disabled")}); status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("BackupInstance with the key disabled = %v, want FAILED_PRECONDITION", err)
+	}
+	if _, err := c.UpdateInstance(ctx, &memorystorepb.UpdateInstanceRequest{UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"persistence_config"}},
+		Instance: &memorystorepb.Instance{Name: inst.GetName(), PersistenceConfig: &memorystorepb.PersistenceConfig{Mode: memorystorepb.PersistenceConfig_AOF}}}); status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("UpdateInstance persistence_config with the key disabled = %v, want FAILED_PRECONDITION", err)
+	}
 	versionState(kmspb.CryptoKeyVersion_ENABLED)
-	got = until("resumed", func(i *memorystorepb.Instance) bool { return i.GetState() == memorystorepb.Instance_ACTIVE })
-	if got.GetEncryptionInfo().GetKmsKeyPrimaryState() != memorystorepb.EncryptionInfo_ENABLED {
-		t.Errorf("resumed: encryption_info %v", got.GetEncryptionInfo())
-	}
+	got = until("re-enabled", func(i *memorystorepb.Instance) bool {
+		return i.GetState() == memorystorepb.Instance_ACTIVE && i.GetEncryptionInfo().GetKmsKeyPrimaryState() == memorystorepb.EncryptionInfo_ENABLED
+	})
 	valkeyEventually(t, ctx, valkeyPrimary(t, got), "secret", "kept")
+	valkeyEventually(t, ctx, valkeyPrimary(t, got), "written", "while-disabled")
 
 	parent := "projects/" + project + "/locations/us-central1"
 	cid := fmt.Sprintf("kms-c-%d", time.Now().UnixNano()%1e8)
