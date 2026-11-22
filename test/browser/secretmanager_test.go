@@ -79,7 +79,7 @@ func TestSecretManagerConsoleParity(t *testing.T) {
 	p.waitFor(`document.querySelector("#view #up-payload") !== null`)
 	var sections string
 	p.eval(`[...document.querySelectorAll("#view h2, #view h3, #view legend")].map((h) => h.textContent.trim()).join("|")`, &sections)
-	for _, s := range []string{"Replication policy", "Encryption", "Rotation", "Expiration", "Labels", "Annotations", "Version aliases", "Delayed destruction"} {
+	for _, s := range []string{"Replication policy", "Encryption", "Rotation", "Expiration", "Labels", "Annotations", "Version aliases", "Delay secret version destroy"} {
 		if !strings.Contains(sections, s) {
 			t.Errorf("Create secret has no %q section: %s", s, sections)
 		}
@@ -102,8 +102,10 @@ func TestSecretManagerConsoleParity(t *testing.T) {
 	setField(p, "#view", "f-rotationPreset", "Custom")
 	p.waitFor(`!document.querySelector("#view #f-rotationPeriod").closest(".form-row").hidden`)
 	setField(p, "#view", "f-setRotation", "false")
-	setField(p, "#view", "f-labels", "env=prod")
-	setField(p, "#view", "f-versionAliases", "stable=1")
+	// Labels and Version aliases are Google's Add label and Add alias rows
+	// (#2142): their value is the rows.
+	setField(p, "#view", "f-labels", `[{"key":"env","value":"prod"}]`)
+	setField(p, "#view", "f-versionAliases", `[{"key":"stable","value":"1"}]`)
 	p.run(chromedp.Click(chromedp.CSS(`#view button[type="submit"]`)))
 	p.waitFor(`location.pathname === "/secrets"`)
 

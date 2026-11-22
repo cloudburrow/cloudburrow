@@ -196,7 +196,8 @@ var settingsFields = map[string]fieldRule{
 	"activeDirectoryConfig": sqlServerOnly(), "advancedMachineFeatures": sqlServerOnly(), "collation": sqlServerOnly(),
 	"entraidConfig": sqlServerOnly(), "sqlServerAuditConfig": sqlServerOnly(), "timeZone": sqlServerOnly(),
 
-	"connectionPoolConfig": refused501("managed connection pooling is not served: connect to the server, or run a pooler of your own"),
+	// Managed connection pooling (#2141): pooling.go.
+	"connectionPoolConfig": kept,
 	"connectorEnforcement": refusedValues("the server is reached directly through its host tunnel as well as through the connectors, "+
 		"and direct connections are not refused", "NOT_REQUIRED"),
 	"enableGoogleMlIntegration": refused501("the server has no Vertex AI integration (google_ml_integration)"),

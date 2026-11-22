@@ -678,6 +678,12 @@ func (s *Server) cloneInstance(r *http.Request, base, project string, e Engine) 
 		s.emu.Unlock()
 		return nil, Errorf(http.StatusConflict, "The Cloud SQL instance already exists.")
 	}
+	// A clone has its own private IP on the source's network (#2141).
+	spec.PrivateIP = ""
+	if err := s.assignNetworkingLocked(&spec); err != nil {
+		s.emu.Unlock()
+		return nil, err
+	}
 	c := &created{spec: spec, engine: s.writes.prov.Engine(spec), state: "PENDING_CREATE"}
 	s.writes.byName[dest] = c
 	err := s.saveLocked()

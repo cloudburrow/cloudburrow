@@ -443,7 +443,8 @@ request), or **refused** with 400 or 501 naming it. A field the discovery docume
 | `settings.ipConfiguration` | Recorded (authorized networks, `ipv4Enabled`, `sslMode`, private network). `serverCaMode` `GOOGLE_MANAGED_INTERNAL_CA` and `GOOGLE_MANAGED_CAS_CA` are served (#1614), and `CUSTOMER_MANAGED_CAS_CA` with `serverCaPool` (#1834, below); `serverCertificateRotationMode` is checked and recorded. A patch whose `ipConfiguration` names none of the three keeps them. |
 | `settings.maintenanceWindow`, `denyMaintenancePeriods`, `autoUpgradeEnabled`, `insightsConfig`, `performanceCaptureConfig`, `dataCacheConfig`, `dataDiskType`, `dataDiskProvisionedIops`, `dataDiskProvisionedThroughput`, `storageAutoResize`, `storageAutoResizeLimit`, `locationPreference`, `pricingPlan`, `replicationType`, `replicationLagMaxSeconds`, `crashSafeReplicationEnabled`, `acceleratedReplicaMode`, `enableDataplexIntegration`, `authorizedGaeApplications` | Recorded and answered. They describe the machine, maintenance and monitoring Cloud SQL would give the instance; nothing here acts on them. |
 | `settings.connectorEnforcement` `REQUIRED` | 501: the server is reached through its host tunnel as well as the connectors, and direct connections are not refused. `NOT_REQUIRED` is taken. |
-| `settings.connectionPoolConfig`, `enableGoogleMlIntegration`, `readPoolAutoScaleConfig` | 501 when enabled: no managed pooling, Vertex AI integration or read pools. |
+| `settings.connectionPoolConfig` | Managed connection pooling (#2141): see [Managed connection pooling](#managed-connection-pooling). |
+| `settings.enableGoogleMlIntegration`, `readPoolAutoScaleConfig` | 501 when enabled: no Vertex AI integration or read pools. |
 | `settings.activeDirectoryConfig`, `advancedMachineFeatures`, `collation`, `entraidConfig`, `sqlServerAuditConfig`, `timeZone` | 400: SQL Server settings. |
 | `replicationCluster.failoverDrReplicaName` | Applied on a MySQL or PostgreSQL primary: see DR replicas and switchover. `drReplica` is answered on the DR replica; `psaWriteEndpoint`, a private services access DNS name, is never answered, as no instance has a private IP. |
 | `databaseCenterIntegrationEnabled`, `geminiConfig`, `maintenanceVersion`, `nodeCount`, `switchTransactionLogsToCloudStorageEnabled`, `tags` | 501 when set, each saying what is not served. |
@@ -1701,4 +1702,25 @@ about 460 MB), checks it becomes `RUNNABLE`, makes a database and a user, and qu
 skips, and `TestCloudSQLServerRefusedWithoutEULA` checks the refusal instead; the unit tests in
 `internal/service/sqladmin`, `internal/config` and `cmd/cloudburrow` always check the refusal and that
 `ACCEPT_EULA` is never set without an acceptance on record.
+
+## Managed connection pooling
+
+`settings.connectionPoolConfig.connectionPoolingEnabled` on a Cloud SQL Enterprise Plus PostgreSQL instance runs a real pooler, PgBouncer 1.26.1 (ISC licence, the pinned `edoburu/pgbouncer` image), in a container of the instance's pod, as Google documents (<https://docs.cloud.google.com/sql/docs/postgres/managed-connection-pooling>, read 2026-11-22):
+
+- Port 6432 is the pooler, 5432 stays the server's. The Cloud SQL connectors and the Auth Proxy (3307) reach the pooler while pooling is on. The pooler's host address is logged when it starts (`... pools connections: its pooler (port 6432) is at 127.0.0.1:PORT`).
+- A user signs in with the password it has on the server (SCRAM or MD5): the pooler reads it from the server's `pg_shadow`.
+- The flags are Google's, with Google's defaults: `pool_mode` (`transaction`, the default, or `session`), `max_pool_size` (50), `min_pool_size` (0), `max_client_connections` (5000), `max_prepared_statements` (0), `client_connection_idle_timeout` (0), `server_connection_idle_timeout` (600), `query_wait_timeout` (120), `server_lifetime` (3600) and `ignore_startup_parameters`. The three timeouts take 0 to 2147483 seconds. An unknown flag, a repeated one or a value out of range is 400.
+- `poolerCount` (output only) is the tier's vCPUs divided by 4, at least 1. One PgBouncer process serves them all here.
+- Turning pooling on or off restarts the instance, as Google documents. So does changing a flag here, whether or not Google's does (the page does not say).
+- In transaction mode, Google's limitations are PgBouncer's: `SET`, `LISTEN`, session advisory locks and prepared statements without `max_prepared_statements` do not carry across transactions.
+
+An Enterprise instance is refused 400. SQL Server is refused 400.
+
+Cloud SQL for MySQL's managed connection pooling is a thread pool inside the server (<https://docs.cloud.google.com/sql/docs/mysql/managed-connection-pooling>). The community MySQL server has no thread pool, so it is refused 501.
+
+A VM does not reach the pooler at a private IP or a Private Service Connect endpoint. Only the server's port is in their NAT chains.
+
+The console has Connections' Enable Managed Connection Pool, with Advanced pooling options, on the create page and in Edit. The Overview's Connect to this instance shows whether the instance pools connections.
+
+`TestCloudSQLManagedConnectionPooling` (compat, the official `sqladmin/v1` client and Cloud SQL Go connector) shows it pools. Eight clients signed in through the connector share at most `max_pool_size` 2 server connections. With pooling off, each client has a server connection of its own.
 

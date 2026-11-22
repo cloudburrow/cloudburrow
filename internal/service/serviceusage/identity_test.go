@@ -74,6 +74,7 @@ func TestGenerateServiceIdentityEveryEntry(t *testing.T) {
 		"monitoring.googleapis.com":             "gcp-sa-monitoring-notification.iam.gserviceaccount.com",
 		"cloudtrace.googleapis.com":             "gcp-sa-cloud-trace.iam.gserviceaccount.com",
 		"compute.googleapis.com":                "compute-system.iam.gserviceaccount.com",
+		"networkconnectivity.googleapis.com":    "gcp-sa-networkconnectivity.iam.gserviceaccount.com",
 		"cloudkms.googleapis.com":               "gcp-sa-ekms.iam.gserviceaccount.com",
 		"pubsub.googleapis.com":                 "gcp-sa-pubsub.iam.gserviceaccount.com",
 		"secretmanager.googleapis.com":          "gcp-sa-secretmanager.iam.gserviceaccount.com",

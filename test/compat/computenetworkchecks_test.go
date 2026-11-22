@@ -28,6 +28,26 @@ const (
 	envSQLCompute         = "CLOUDBURROW_TEST_SQL_COMPUTE"
 )
 
+// sqlComputeEndpoint is Compute Engine's address for a test that needs it
+// beside Cloud SQL (#2141): the sql shards' SQL_COMPUTE, else COMPUTE
+// (skipping without either), so the test runs where both are served.
+func sqlComputeEndpoint(h *Harness) string {
+	if v := os.Getenv(envSQLCompute); v != "" {
+		return v
+	}
+	return h.Endpoint(EnvCompute)
+}
+
+// sqlComputeOpts are computeOpts at sqlComputeEndpoint.
+func sqlComputeOpts(t *testing.T, h *Harness) []option.ClientOption {
+	t.Helper()
+	addr := sqlComputeEndpoint(h)
+	if addr == "" {
+		t.Fatal("no Compute Engine endpoint")
+	}
+	return []option.ClientOption{option.WithEndpoint("http://" + addr), option.WithoutAuthentication()}
+}
+
 // computeNetwork makes a custom mode network with a subnet and a
 // VPC_PEERING allocated range through the official client, and deletes
 // them when the test ends. ensure tolerates what a rerun left.

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/service/parametermanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/secrets"
 	"github.com/cloudburrow/cloudburrow/internal/store"
@@ -34,7 +35,9 @@ func TestConsoleParameterManager(t *testing.T) {
 	p := parameterManagerProvider{svc: svc}
 
 	title, fields := p.CreateForm()
-	if title != "Create parameter" || len(fields) < 5 || fields[0].Name != "parameterId" || fields[2].Name != "format" {
+	// Google's order (#2143): the name, Parameter format, then Location.
+	if title != "Create parameter" || len(fields) < 7 || fields[0].Name != "parameterId" || fields[1].Name != "format" ||
+		fields[1].Section != "Parameter format" || fields[2].Name != "locationType" || fields[2].Section != "Location" {
 		t.Fatalf("Create parameter form: %q %+v", title, fields)
 	}
 	name, err := p.Create(ctx, "cp", map[string]string{"parameterId": "app", "location": "global", "format": "JSON",
@@ -48,6 +51,22 @@ func TestConsoleParameterManager(t *testing.T) {
 	}
 	if err := p.ActAt(ctx, "cp", []string{name}, "newversion", map[string]string{"versionId": "v1", "payload": "{not json"}); err == nil {
 		t.Fatal("a JSON parameter took a version that is not JSON")
+	}
+	// The payload's Secret picker offers the project's secret with latest
+	// and its enabled version (#2143).
+	var picker *console.SecretPicker
+	for _, a := range p.DetailActions(ctx, "cp", []string{name}) {
+		if a.ID == "newversion" {
+			for _, f := range a.Fields {
+				if f.Name == "payload" {
+					picker = f.SecretPicker
+				}
+			}
+		}
+	}
+	if picker == nil || len(picker.Secrets) != 1 || picker.Secrets[0].Name != "projects/cp/secrets/db" ||
+		strings.Join(picker.Secrets[0].Versions, ",") != "latest,1" {
+		t.Fatalf("Secret picker: %+v", picker)
 	}
 	payload := `{"password": "__REF__(\"//secretmanager.googleapis.com/projects/cp/secrets/db/versions/1\")"}`
 	if err := p.ActAt(ctx, "cp", []string{name}, "newversion", map[string]string{"versionId": "v1", "payload": payload}); err != nil {
@@ -113,7 +132,8 @@ func TestConsoleParameterTemplates(t *testing.T) {
 	}
 
 	title, fields := p.CreateForm()
-	if title != "Create template" || len(fields) < 4 || fields[0].Name != "templateId" || fields[2].Name != "format" {
+	if title != "Create template" || len(fields) < 6 || fields[0].Name != "templateId" || fields[1].Name != "format" ||
+		fields[1].Section != "Template format" || fields[2].Name != "locationType" {
 		t.Fatalf("Create template form: %q %+v", title, fields)
 	}
 	name, err := p.Create(ctx, "cp", map[string]string{"templateId": "tpl", "location": "global", "format": "TEMPLATE_FORMAT_YAML", "labels": `{"team":"burrow"}`})
@@ -136,12 +156,25 @@ func TestConsoleParameterTemplates(t *testing.T) {
 		t.Fatalf("version page: %+v, %v", d, err)
 	}
 	acts := p.DetailActions(ctx, "cp", []string{name, "tv1"})
-	if len(acts) == 0 || acts[0].ID != "render" || len(acts[0].Fields) != 1 || len(acts[0].Fields[0].Options) != 1 || acts[0].Fields[0].Options[0] != param+"/versions/v1" {
+	// Render template version is a page: the parameter, then one of its
+	// versions (#2143).
+	if len(acts) == 0 || acts[0].ID != "render" || !acts[0].Page || acts[0].Submit != "Render" || len(acts[0].Fields) != 2 ||
+		acts[0].Fields[0].Name != "parameter" || len(acts[0].Fields[0].Options) != 1 || acts[0].Fields[0].Options[0] != param ||
+		acts[0].Fields[1].OptionsBy != "parameter" || strings.Join(acts[0].Fields[1].OptionsFor[param], ",") != param+"/versions/v1" {
 		t.Fatalf("version actions: %+v", acts)
 	}
-	rows, err := p.ActAtResult(ctx, "cp", []string{name, "tv1"}, "render", map[string]string{"parameterVersion": param + "/versions/v1"})
+	rows, err := p.ActAtResult(ctx, "cp", []string{name, "tv1"}, "render", map[string]string{"parameter": param, "parameterVersion": param + "/versions/v1"})
 	if err != nil || len(rows.Items) != 1 || rows.Items[0].Fields["Rendered value"] != "log: debug\n" || rows.Items[0].Fields["Payload"] != payload {
 		t.Fatalf("Render: %+v, %v", rows, err)
+	}
+	// The answer opens the render's own page, with the payload and the
+	// rendered value.
+	if !strings.Contains(rows.Open, "/render/") {
+		t.Fatalf("Render opens %q", rows.Open)
+	}
+	rd, err := p.Detail(ctx, "cp", []string{name, "tv1", "render", param + "/versions/v1"})
+	if err != nil || rd.Unavailable != "" || workflowsSection(rd, "payload").Text != payload || workflowsSection(rd, "rendered").Text != "log: debug\n" {
+		t.Fatalf("render page: %+v, %v", rd, err)
 	}
 	if err := p.ActAt(ctx, "cp", []string{name, "tv1"}, "disable", nil); err != nil {
 		t.Fatal(err)
@@ -149,14 +182,28 @@ func TestConsoleParameterTemplates(t *testing.T) {
 	if acts := p.DetailActions(ctx, "cp", []string{name, "tv1"}); acts[0].Unavailable == "" || acts[1].ID != "enable" {
 		t.Errorf("a disabled version's actions: %+v", acts)
 	}
-	if err := p.ActAt(ctx, "cp", []string{name}, "delete", nil); err == nil || !strings.Contains(err.Error(), "versions") {
+	// A version's Delete asks for the template's ID; a version row's menu
+	// is View payload, Render, Enable (it is disabled) and Delete (#2143).
+	if acts := p.DetailActions(ctx, "cp", []string{name, "tv1"}); acts[2].ID != "deleteversion" || acts[2].ConfirmWord != "tpl" {
+		t.Errorf("Delete version: %+v", acts[2])
+	}
+	tp, _ := p.Detail(ctx, "cp", []string{name})
+	var ids []string
+	for _, a := range workflowsSection(tp, "versions").Listing.Items[0].Actions {
+		ids = append(ids, a.ID)
+	}
+	if strings.Join(ids, ",") != "row-view,row-render,enable,deleteversion" {
+		t.Errorf("version row actions = %v", ids)
+	}
+	if err := p.ActAt(ctx, "cp", []string{name, "tv1"}, "enable", nil); err != nil {
+		t.Fatal(err)
+	}
+	// "Deleting a template also deletes all of its template versions."
+	if err := p.ActAt(ctx, "cp", []string{name}, "delete", nil); err != nil {
 		t.Fatalf("Delete of a template with a version: %v", err)
 	}
-	if err := p.ActAt(ctx, "cp", []string{name, "tv1"}, "deleteversion", nil); err != nil {
-		t.Fatal(err)
-	}
-	if err := p.ActAt(ctx, "cp", []string{name}, "delete", nil); err != nil {
-		t.Fatal(err)
+	if d, _ := p.Detail(ctx, "cp", []string{name, "tv1"}); d.Unavailable == "" {
+		t.Error("a deleted template's version still reads")
 	}
 	if err := p.ActAt(ctx, "other", []string{name}, "delete", nil); err == nil {
 		t.Error("another project's page acted on the template")

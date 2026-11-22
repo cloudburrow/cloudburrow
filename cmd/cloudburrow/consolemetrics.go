@@ -126,6 +126,19 @@ type kubeletSummary struct {
 		EphemeralStorage struct {
 			UsedBytes int64 `json:"usedBytes"`
 		} `json:"ephemeral-storage"`
+		// The pod's network counters and its volumes' use (a Cloud SQL
+		// server's network and data disk, #2141).
+		Network struct {
+			RxBytes uint64 `json:"rxBytes"`
+			TxBytes uint64 `json:"txBytes"`
+		} `json:"network"`
+		Volume []struct {
+			Name      string `json:"name"`
+			UsedBytes int64  `json:"usedBytes"`
+			PVCRef    *struct {
+				Name string `json:"name"`
+			} `json:"pvcRef"`
+		} `json:"volume"`
 	} `json:"pods"`
 }
 
@@ -140,6 +153,8 @@ type kubeletCPU struct {
 type kubeletMemory struct {
 	Time            string `json:"time"`
 	WorkingSetBytes int64  `json:"workingSetBytes"`
+	// UsageBytes includes the page cache.
+	UsageBytes int64 `json:"usageBytes"`
 }
 
 // nodeUsage reads one node's kubelet summary and keeps all of it.

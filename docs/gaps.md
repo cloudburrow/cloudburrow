@@ -37,8 +37,8 @@ tracks it; a closed issue is named only where it says what was built.
 | Functions, credentials, tooling | 1 | 0 | 1 | 0 | 0 |
 | App Hub | 5 | 1 | 1 | 3 | 0 |
 | Dataform | 7 | 0 | 2 | 4 | 1 |
-| Console | 5 | 4 | 1 | 0 | 0 |
-| **Total** | **85** | **11** | **23** | **44** | **7** |
+| Console | 9 | 7 | 2 | 0 | 0 |
+| **Total** | **89** | **14** | **24** | **44** | **7** |
 
 ## Cloud Storage
 
@@ -369,6 +369,7 @@ latency and resource charts (#1267); the Artifact Registry repository Permission
 |---|---|---|
 | BigQuery Studio's Apache Spark notebooks, data preparations and pipelines (#2094): a Spark notebook's `DataprocSparkSession` is a Spark Connect session of Serverless for Apache Spark, whose sessions API CloudBurrow does not serve (<https://docs.cloud.google.com/bigquery/docs/use-spark>, read 2026-11-22); pipelines and data preparations are Dataform code assets, a pipeline's tasks a repository's `definitions/actions.yaml` (<https://docs.cloud.google.com/bigquery/docs/create-pipelines>, read 2026-11-22), which CloudBurrow's Dataform compiler does not read, and it runs no notebook or data preparation action (#2105). Home's Create new shows each disabled with its reason. Built in the 2026-11-22 round: the notebook runtime a pipeline's notebook task would run on (`internal/nbruntime`) | not built yet | L |
 | BigQuery Studio's notebook runtime reaches only the instance's BigQuery: it runs on an `--internal` Docker network, so `pip install` and any other download a Colab Enterprise runtime makes fail; Home's What's new is CloudBurrow's own list, Google's feed being Google's, and Try with templates queries this instance, Google's templates reading `bigquery-public-data`, which a local instance does not hold (#2094) | no emulator support (nothing local: Google's feed and public datasets; no egress by design) | S |
+| Cloud SQL: managed connection pooling for MySQL (a server thread pool the community MySQL server lacks; 501), and the pooler at a private IP or Private Service Connect endpoint (only the server's port is in a VM's NAT chains) (#2141) | no thread pool in community MySQL; pooler port not in the VPC model | M |
 
 ## Excluded on purpose
 

@@ -761,6 +761,24 @@
         "verification": "compat-tested",
         "updateFeed": "docker-hub-tags",
         "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect`."
+      },
+      "cloudSQLPgBouncer": {
+        "$comment": "PgBouncer, Cloud SQL for PostgreSQL's managed connection pooler (#2141), run beside an instance's server in its pod. NOT a Google-published component: Google publishes no pooler image.",
+        "image": "edoburu/pgbouncer:v1.26.1-p0",
+        "version": "1.26.1",
+        "digest": "sha256:488422e38cff912895d0d65d8963fcd306e6ac589a724398b6eb8e294e94d624",
+        "source": "https://hub.docker.com/r/edoburu/pgbouncer, built from https://github.com/edoburu/docker-pgbouncer",
+        "license": "ISC (PgBouncer); MIT (the image's Dockerfile and entrypoint); the image also carries Alpine Linux and its packages",
+        "redistribution": "not-redistributed",
+        "redistributionPlan": "Pulled from Docker Hub by digest at run time, only for an instance with managed connection pooling on.",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "provides": "A real connection pooler on port 6432 in front of the instance's server.",
+        "verification": "compat-tested",
+        "updateFeed": "docker-hub-tags",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect`."
       }
     },
     "toolchain": {

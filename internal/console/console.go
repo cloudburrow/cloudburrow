@@ -595,6 +595,10 @@ type Field struct {
 	// the Secret value typed or from Upload file (#1850). The value is still
 	// the textarea's, so nothing else about the form changes.
 	Upload string `json:"upload,omitempty"`
+	// Generate, on a password field, puts Google's Generate button beside
+	// it, which fills it with a random password, as Cloud SQL's Create
+	// instance has (#2141). Every password field has Show password.
+	Generate bool `json:"generate,omitempty"`
 	// Dialog is a button beside the field that opens a table, as
 	// Google's Spanner Create instance has Compare editions beside the
 	// edition (#1859).
@@ -624,6 +628,28 @@ type Field struct {
 	// PickFrom call gets {"seed": "<the parameter's value>"} and answers
 	// {"items": [...], "note": "..."}, every item then chosen.
 	SeedFrom string `json:"seedFrom,omitempty"`
+	// SecretPicker, on a textarea, is Parameter Manager's Secret picker
+	// (#2143): Ctrl+Space then Enter in the payload opens a side panel
+	// where a Secret and a Secret version (or, with Select regional secret,
+	// a regional one) are chosen, or a version entered by its resource ID,
+	// and Insert puts its __REF__ reference at the cursor, as Google's
+	// add-parameter-version describes.
+	SecretPicker *SecretPicker `json:"secretPicker,omitempty"`
+}
+
+// SecretPicker lists what Field.SecretPicker offers.
+type SecretPicker struct {
+	Secrets  []PickerSecret `json:"secrets"`
+	Regional []PickerSecret `json:"regional,omitempty"`
+	// CreateHref is the console's Create secret, opened in a new tab.
+	CreateHref string `json:"createHref,omitempty"`
+}
+
+// PickerSecret is a secret the picker offers: its resource name and the
+// versions a reference can name ("latest" and the enabled versions).
+type PickerSecret struct {
+	Name     string   `json:"name"`
+	Versions []string `json:"versions"`
 }
 
 // PicklistFieldType is the Type of a list of items chosen from a picker
@@ -1239,6 +1265,11 @@ type Section struct {
 	StepEntries []StepEntryView `json:"stepEntries,omitempty"`
 	// Series is the content when Kind is KindChart.
 	Series []ChartSeries `json:"series,omitempty"`
+	// SeriesTitle, on a listing section with Series, draws them as one
+	// chart of that title over its rows, a line per series: Cloud SQL's
+	// Query insights has its Database load chart over the top queries
+	// (#2141).
+	SeriesTitle string `json:"seriesTitle,omitempty"`
 	// Visualization is how a KindAnalytics section draws its rows: Bar,
 	// Line or Table (#2032).
 	Visualization string `json:"visualization,omitempty"`

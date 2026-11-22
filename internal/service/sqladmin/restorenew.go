@@ -185,6 +185,11 @@ func (s *Server) restoreToNewInstance(r *http.Request, base, project, dest strin
 		s.emu.Unlock()
 		return nil, Errorf(http.StatusConflict, "The Cloud SQL instance already exists.")
 	}
+	spec.PrivateIP = ""
+	if err := s.assignNetworkingLocked(&spec); err != nil {
+		s.emu.Unlock()
+		return nil, err
+	}
 	c := &created{spec: spec, engine: s.writes.prov.Engine(spec), state: "PENDING_CREATE"}
 	s.writes.byName[dest] = c
 	err = s.saveLocked()

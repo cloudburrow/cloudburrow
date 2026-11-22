@@ -316,6 +316,8 @@ func (s *Server) doLocked(c call) (obj, error) {
 			case n == 5 && post && p[4] == "setLabels":
 				return s.setLabels(c.project, scope, rel+"/"+p[3], c.body)
 			}
+		case "forwardingRules":
+			return s.forwardingRulesLocked(c, region, p, get, post, del)
 		case "operations":
 			return s.operation(c, rel)
 		}
@@ -431,6 +433,13 @@ func (s *Server) aggregated(c call, coll string) (obj, error) {
 		m, kind = s.res, "compute#addressAggregatedList"
 	case "subnetworks":
 		m, kind = s.res, "compute#subnetworkAggregatedList"
+	case "forwardingRules":
+		m, kind = s.res, "compute#forwardingRuleAggregatedList"
+		for k, o := range s.res {
+			if strings.Contains(k, "/forwardingRules/") {
+				s.pscStatusLocked(o)
+			}
+		}
 	case "operations":
 		m, kind = s.ops, "compute#operationAggregatedList"
 	case "instances":

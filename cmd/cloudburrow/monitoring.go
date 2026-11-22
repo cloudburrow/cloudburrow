@@ -26,6 +26,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/service/logging"
 	"github.com/cloudburrow/cloudburrow/internal/service/monitoring"
+	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
 	"github.com/cloudburrow/cloudburrow/internal/service/tasks"
 	"github.com/cloudburrow/cloudburrow/internal/telemetry"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
@@ -61,6 +62,10 @@ type monitoringService struct {
 	stop      chan struct{}
 	// runStop ends the sampling of Cloud Run's metrics (#2049).
 	runStop chan struct{}
+	// sql is the instance's Cloud SQL Admin API, or nil, whose instances'
+	// servers are read for cloudsql.googleapis.com metrics (#2141).
+	sql     func() *sqladmin.Server
+	sqlStop chan struct{}
 	// pubsub is the instance's Pub/Sub tunnel, for Pub/Sub notification
 	// channels (#1964); nil, or nil from it, when Pub/Sub is not served.
 	pubsub func() *netfwd.Forwarder
@@ -182,6 +187,26 @@ func (s *monitoringService) Start(ctx context.Context) error {
 		s.reqs = monitoring.NewRequestBuiltin(monitoringCounters{reg: s.counters}, s.cfg.DefaultProject(), time.Now)
 		api.AddBuiltin(s.reqs)
 	}
+	if s.sql != nil {
+		// Cloud SQL's servers, sampled every 60 seconds on their own, as
+		// a sample reads the cluster and each server (#2141).
+		sm := monitoring.NewSQLBuiltin(monitoringSQL{srv: s.sql, kubeconfig: s.cfg.KubeconfigPath(),
+			namespace: s.cfg.Cluster.Namespace, project: s.cfg.DefaultProject()}, time.Now)
+		api.AddBuiltin(sm)
+		s.sqlStop = make(chan struct{})
+		go func(stop chan struct{}) {
+			t := time.NewTicker(requestSampleInterval)
+			defer t.Stop()
+			for {
+				select {
+				case <-t.C:
+					sm.Sample()
+				case <-stop:
+					return
+				}
+			}
+		}(s.sqlStop)
+	}
 	if s.tasks != nil {
 		s.tasksMets = monitoring.NewTasksBuiltin(monitoringTasks{svc: s.tasks}, time.Now)
 		api.AddBuiltin(s.tasksMets)
@@ -241,6 +266,10 @@ func (s *monitoringService) Stop(ctx context.Context) error {
 	if s.runStop != nil {
 		close(s.runStop)
 		s.runStop = nil
+	}
+	if s.sqlStop != nil {
+		close(s.sqlStop)
+		s.sqlStop = nil
 	}
 	if s.server == nil {
 		return nil

@@ -107,6 +107,7 @@ import (
 	_ "cloud.google.com/go/memorystore/apiv1/memorystorepb"
 	_ "cloud.google.com/go/monitoring/apiv3/v2/monitoringpb"
 	_ "cloud.google.com/go/monitoring/dashboard/apiv1/dashboardpb"
+	_ "cloud.google.com/go/networkconnectivity/apiv1/networkconnectivitypb"
 	_ "cloud.google.com/go/parametermanager/apiv1/parametermanagerpb"
 	_ "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	_ "cloud.google.com/go/redis/apiv1/redispb"
@@ -305,6 +306,15 @@ var areas = []area{
 	// (google.golang.org/api/compute/v1), from the server's own table:
 	// the resources it serves, every one of their methods.
 	{Key: "compute", Title: "Compute Engine API (v1): VPC networking", Own: true, Methods: computeMethods()},
+	// The Network Connectivity API (#2141), on the Compute Engine port:
+	// service connection policies, maps, classes and tokens; the hub,
+	// policy-based routing, internal range and data transfer services
+	// answer UNIMPLEMENTED. Its Locations and Operations mixins are other
+	// areas' rows.
+	{Key: "networkconnectivity", Title: "Network Connectivity API (v1)", Own: true, Services: []string{
+		"google.cloud.networkconnectivity.v1.CrossNetworkAutomationService", "google.cloud.networkconnectivity.v1.HubService",
+		"google.cloud.networkconnectivity.v1.PolicyBasedRoutingService", "google.cloud.networkconnectivity.v1.InternalRangeService",
+		"google.cloud.networkconnectivity.v1.DataTransferService"}},
 	// The Cloud Storage companion APIs (#1957): CloudBurrow's own, JSON
 	// only. Their methods are the official discovery documents' (Storage
 	// Insights: its REST mapping), from the server's own table.

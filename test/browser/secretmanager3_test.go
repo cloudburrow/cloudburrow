@@ -98,7 +98,7 @@ func TestSecretManagerConsoleRound3(t *testing.T) {
 	if edit.Heading != "Edit secret" || edit.Local != picker.Local || edit.Submit != "Update secret" {
 		t.Errorf("Edit secret page = %+v; want Edit secret, Starting on %s, Update secret", edit, picker.Local)
 	}
-	setField(p, "#view", "f-labels", "team=core")
+	setField(p, "#view", "f-labels", `[{"key":"team","value":"core"}]`)
 	p.clickText(`#view form.create-page button[type="submit"]`, "Update secret")
 	p.waitFor(`!location.search.includes("edit=1") && document.querySelector("#view .tab-strip") !== null`)
 	if got, err := c.GetSecret(ctx, &smpb.GetSecretRequest{Name: name}); err != nil || got.GetLabels()["team"] != "core" ||

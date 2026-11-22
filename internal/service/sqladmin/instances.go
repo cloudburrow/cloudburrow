@@ -128,6 +128,10 @@ type Spec struct {
 	// which only CloudBurrow uses; never answered.
 	MSSQLEULA  *EULAAcceptance `json:"mssqlEulaAcceptance,omitempty"`
 	SAPassword string          `json:"saPassword,omitempty"`
+	// PrivateIP is the instance's private IP on PrivateNetwork
+	// (projects/P/global/networks/N), from its allocated range (#2141).
+	PrivateIP      string `json:"privateIp,omitempty"`
+	PrivateNetwork string `json:"privateNetwork,omitempty"`
 }
 
 // ServerName is the name of the instance's server in the cluster.
@@ -147,12 +151,6 @@ func (s Spec) PrimaryNode() int {
 		return 1
 	}
 	return 0
-}
-
-// zone is the zone of a server, by index: the instance's gceZone, and its
-// secondaryGceZone for the standby, as Cloud SQL reports them.
-func (s Spec) zone(node int) string {
-	return s.region() + "-" + string(rune('a'+node))
 }
 
 // region is the instance's region.
@@ -360,7 +358,12 @@ func (s *Server) settle(c *created, opID string, err error) {
 			c.state, c.failure = "RUNNABLE", ""
 		}
 	}
+	spec, ok := c.spec, s.writes.byName[c.spec.Name] == c && c.state == "RUNNABLE"
 	s.emu.Unlock()
+	if ok {
+		// Its automatic Private Service Connect endpoints (#2141).
+		s.syncAutoConnections(spec, false)
+	}
 	if opID != "" {
 		s.finish(opID, err)
 	}
@@ -693,6 +696,10 @@ func (s *Server) insertInstance(r *http.Request, base, project string) (any, err
 		}
 		spec.MSSQLEULA, spec.SAPassword = eula, NewSAPassword()
 	}
+	if err := checkConnectionPool(spec); err != nil {
+
+		return nil, err
+	}
 	if err := checkPasswordPolicy(spec); err != nil {
 		return nil, err
 	}
@@ -796,6 +803,10 @@ func (s *Server) insertInstance(r *http.Request, base, project string) (any, err
 	if s.engineLocked(b.Name) != nil || s.writes.sources[b.Name] != nil {
 		s.emu.Unlock()
 		return nil, Errorf(http.StatusConflict, "The Cloud SQL instance already exists.")
+	}
+	if err := s.assignNetworkingLocked(&spec); err != nil {
+		s.emu.Unlock()
+		return nil, err
 	}
 	c := &created{spec: spec, engine: s.writes.prov.Engine(spec), state: "PENDING_CREATE"}
 	s.writes.byName[b.Name] = c
@@ -998,6 +1009,22 @@ func (s *Server) patchInstance(r *http.Request, base, project, name string, repl
 		s.emu.Unlock()
 		return nil, err
 	}
+	// "Private IP: After it's activated, it can't be deactivated"
+	// (https://docs.cloud.google.com/sql/docs/instance-settings). The
+	// error's wording is UNVERIFIED (re-read 2026-11-22:
+	// https://docs.cloud.google.com/sql/docs/instance-settings).
+	if c.spec.PrivateNetwork != "" && next.privateNetwork() == "" {
+		s.emu.Unlock()
+		return nil, Errorf(http.StatusBadRequest, "Invalid request: Private IP cannot be disabled once it is enabled: settings.ipConfiguration.privateNetwork must stay set.")
+	}
+	if err := s.assignNetworkingLocked(&next); err != nil {
+		s.emu.Unlock()
+		return nil, err
+	}
+	if err := checkConnectionPool(next); err != nil {
+		s.emu.Unlock()
+		return nil, err
+	}
 	if err := checkPasswordPolicy(next); err != nil {
 		s.emu.Unlock()
 		return nil, err
@@ -1025,7 +1052,10 @@ func (s *Server) patchInstance(r *http.Request, base, project, name string, repl
 	// Stopping or starting the instance (#1875) shuts its server down, or
 	// starts it with its data.
 	activation := next.Stopped() != c.spec.Stopped()
-	restart := !flagsEqual(serverFlags(next.Flags), serverFlags(c.spec.Flags)) || c.state == "FAILED" || haChange || activation
+	// Managed connection pooling on or off, or its flags changed, starts
+	// the server again with its pooler (#2141).
+	pooling := next.poolingKey() != c.spec.poolingKey()
+	restart := !flagsEqual(serverFlags(next.Flags), serverFlags(c.spec.Flags)) || c.state == "FAILED" || haChange || activation || pooling
 	if restart && !next.Stopped() {
 		// A server whose key cannot be used is not started again (#1538).
 		if err := s.keyUsableWith(s.kms, next); err != nil {
@@ -1050,6 +1080,9 @@ func (s *Server) patchInstance(r *http.Request, base, project, name string, repl
 	}
 	opType := "UPDATE"
 	if !restart {
+		// Its automatic Private Service Connect endpoints follow the
+		// change (#2141); a restart's are made once it serves.
+		s.syncAutoConnections(next, false)
 		return s.done(base, project, c.engine, opType, name), nil
 	}
 	// The flags are the server's arguments: the server is started again
@@ -1132,6 +1165,10 @@ func (s *Server) deleteInstance(r *http.Request, base, project, name string) (an
 			s.conn.removeInstance(name)
 		}
 		if err == nil {
+			// Its automatic endpoints go with it (#2141).
+			s.syncAutoConnections(c.spec, true)
+		}
+		if err == nil {
 			s.removeInstanceBackups(project, name, retainBackups(c.spec))
 		}
 		s.finish(id, err)
@@ -1211,6 +1248,18 @@ func (s *Server) createdJSON(ctx context.Context, base string, c *created) (map[
 	if spec.Regional() {
 		in["secondaryGceZone"] = spec.zone(1 - spec.PrimaryNode())
 	}
+	// PRIMARY unless ipv4Enabled is false, and PRIVATE on a VPC network
+	// (#2141).
+	host := "127.0.0.1"
+	if ips, _ := in["ipAddresses"].([]any); len(ips) > 0 {
+		if m, _ := ips[0].(map[string]any); m != nil {
+			host, _ = m["ipAddress"].(string)
+		}
+	}
+	in["ipAddresses"] = ipAddressesJSON(spec, host)
+	if spec.pscEnabled() {
+		in["pscServiceAttachmentLink"] = pscServiceAttachment(spec)
+	}
 	// A replica is upgraded on its own: MySQL's (#1462), and PostgreSQL's
 	// (#1524), which then waits for its primary's upgrade.
 	if up := upgradable(spec.DatabaseVersion); len(up) > 0 {
@@ -1245,6 +1294,9 @@ func (s *Server) createdJSON(ctx context.Context, base string, c *created) (map[
 			st[k] = v
 		}
 	}
+	// Each automatic endpoint's address and state (#2141).
+	s.withAutoConnections(st, spec)
+	withPoolerCount(st, spec)
 	st["tier"] = spec.Tier
 	st["activationPolicy"] = "ALWAYS"
 	if spec.ActivationPolicy != "" {

@@ -5360,7 +5360,7 @@
         "method": "google.cloud.resourcemanager.v3.TagBindings/ListEffectiveTags",
         "status": "Verified",
         "tests": [
-          "test/compat/parametermanager2063_test.go:197 TestParameterManagerTags",
+          "test/compat/parametermanager2063_test.go:208 TestParameterManagerTags",
           "test/compat/resourcemanagerdynamictags_test.go:28 TestResourceManagerDynamicTagValues",
           "test/compat/resourcemanagerregionaltags_test.go:54 TestResourceManagerRegionalTagBindings",
           "test/compat/resourcemanagertags_test.go:94 TestResourceManagerV3Tags",
@@ -5372,7 +5372,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/iamenforcementround12_1879_test.go:133 TestIAMEnforcementTagBindingsOnOtherResources",
-          "test/compat/parametermanager2063_test.go:197 TestParameterManagerTags",
+          "test/compat/parametermanager2063_test.go:208 TestParameterManagerTags",
           "test/compat/resourcemanagerdynamictags_test.go:28 TestResourceManagerDynamicTagValues",
           "test/compat/resourcemanagerregionaltags_test.go:54 TestResourceManagerRegionalTagBindings",
           "test/compat/resourcemanagertags_test.go:94 TestResourceManagerV3Tags",
@@ -14117,6 +14117,7 @@
           "test/compat/cloudsqlpitr_test.go:83 TestCloudSQLPointInTimeRecovery",
           "test/compat/cloudsqlpitrrestore_test.go:33 TestCloudSQLPointInTimeRestoreFromBackupDR",
           "test/compat/cloudsqlpitrrestore_test.go:74 TestGcloudSQLPointInTimeRestoreRefused",
+          "test/compat/cloudsqlpooling2141_test.go:35 TestCloudSQLManagedConnectionPooling",
           "test/compat/cloudsqlreencrypt_test.go:25 TestCloudSQLReencrypt",
           "test/compat/cloudsqlreplicas_test.go:204 TestCloudSQLReplicaOfUpsServer",
           "test/compat/cloudsqlreplicas_test.go:270 TestGcloudSQLReadReplica",
@@ -14192,6 +14193,7 @@
           "test/compat/cloudsqlpitr_test.go:222 TestGcloudSQLPointInTimeClone",
           "test/compat/cloudsqlpitr_test.go:273 TestCloudSQLPointInTimeRetention",
           "test/compat/cloudsqlpitr_test.go:83 TestCloudSQLPointInTimeRecovery",
+          "test/compat/cloudsqlpooling2141_test.go:35 TestCloudSQLManagedConnectionPooling",
           "test/compat/cloudsqlreencrypt_test.go:25 TestCloudSQLReencrypt",
           "test/compat/cloudsqlreplicas_test.go:204 TestCloudSQLReplicaOfUpsServer",
           "test/compat/cloudsqlreplicas_test.go:270 TestGcloudSQLReadReplica",
@@ -14263,6 +14265,7 @@
           "test/compat/cloudsqlmysqlroot1993_test.go:113 TestCloudSQLMySQLRootDeleted",
           "test/compat/cloudsqlparallel_test.go:267 TestCloudSQLUpgradeWithReplicas",
           "test/compat/cloudsqlpasswordpolicy_test.go:27 TestCloudSQLPasswordValidationPolicy",
+          "test/compat/cloudsqlpooling2141_test.go:35 TestCloudSQLManagedConnectionPooling",
           "test/compat/cloudsqlreplicaupgrade_test.go:114 TestCloudSQLPostgresOldVersionsAndRefusals",
           "test/compat/cloudsqlreplicaupgrade_test.go:25 TestCloudSQLMySQLReplicaUpgradedOnItsOwn",
           "test/compat/cloudsqlstopstart_test.go:30 TestCloudSQLStopAndStart",
@@ -14630,6 +14633,7 @@
           "test/compat/cloudsqlmysql57_test.go:50 TestCloudSQLMySQL56",
           "test/compat/cloudsqlmysqlroot1993_test.go:113 TestCloudSQLMySQLRootDeleted",
           "test/compat/cloudsqlpasswordpolicy_test.go:27 TestCloudSQLPasswordValidationPolicy",
+          "test/compat/cloudsqlpooling2141_test.go:35 TestCloudSQLManagedConnectionPooling",
           "test/compat/cloudsqluserpolicy2009_test.go:41 TestCloudSQLUserPasswordPolicy",
           "test/compat/cloudsqlversions_test.go:207 TestCloudSQLMajorVersionUpgrade",
           "test/compat/sqladmin_test.go:280 TestSQLAdminDatabasesAndUsersAreTheServers",
@@ -14953,9 +14957,9 @@
     "Key": "compute",
     "Title": "Compute Engine API (v1): VPC networking",
     "counts": {
-      "Implemented": 29,
-      "Unimplemented": 62,
-      "Verified": 75
+      "Implemented": 30,
+      "Unimplemented": 64,
+      "Verified": 80
     },
     "rows": [
       {
@@ -15179,6 +15183,56 @@
         "method": "compute.firewalls.update",
         "status": "Implemented",
         "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.forwardingRules.aggregatedList",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudsqlprivate2141_test.go:27 TestCloudSQLZonesPrivateIPAndPSCEndpoints"
+        ]
+      },
+      {
+        "method": "compute.forwardingRules.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudsqlprivate2141_test.go:27 TestCloudSQLZonesPrivateIPAndPSCEndpoints"
+        ]
+      },
+      {
+        "method": "compute.forwardingRules.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudsqlprivate2141_test.go:27 TestCloudSQLZonesPrivateIPAndPSCEndpoints"
+        ]
+      },
+      {
+        "method": "compute.forwardingRules.insert",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudsqlprivate2141_test.go:27 TestCloudSQLZonesPrivateIPAndPSCEndpoints"
+        ]
+      },
+      {
+        "method": "compute.forwardingRules.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudsqlprivate2141_test.go:27 TestCloudSQLZonesPrivateIPAndPSCEndpoints"
+        ]
+      },
+      {
+        "method": "compute.forwardingRules.patch",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.forwardingRules.setLabels",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.forwardingRules.setTarget",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "compute.globalAddresses.delete",
@@ -15975,6 +16029,367 @@
         "tests": [
           "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
         ]
+      }
+    ]
+  },
+  {
+    "Key": "networkconnectivity",
+    "Title": "Network Connectivity API (v1)",
+    "counts": {
+      "Unimplemented": 44,
+      "Verified": 18
+    },
+    "rows": [
+      {
+        "method": "google.cloud.networkconnectivity.v1.CrossNetworkAutomationService/CreateServiceConnectionMap",
+        "status": "Verified",
+        "tests": [
+          "test/compat/networkconnectivity2141_test.go:88 TestNetworkConnectivityServiceConnectionPolicies"
+        ]
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.CrossNetworkAutomationService/CreateServiceConnectionPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/networkconnectivity2141_test.go:397 TestNetworkConnectivityPoliciesThroughTheRESTClient",
+          "test/compat/networkconnectivity2141_test.go:88 TestNetworkConnectivityServiceConnectionPolicies"
+        ]
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.CrossNetworkAutomationService/CreateServiceConnectionToken",
+        "status": "Verified",
+        "tests": [
+          "test/compat/networkconnectivity2141_test.go:88 TestNetworkConnectivityServiceConnectionPolicies"
+        ]
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.CrossNetworkAutomationService/DeleteServiceClass",
+        "status": "Verified",
+        "tests": [
+          "test/compat/networkconnectivity2141_test.go:88 TestNetworkConnectivityServiceConnectionPolicies"
+        ]
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.CrossNetworkAutomationService/DeleteServiceConnectionMap",
+        "status": "Verified",
+        "tests": [
+          "test/compat/networkconnectivity2141_test.go:88 TestNetworkConnectivityServiceConnectionPolicies"
+        ]
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.CrossNetworkAutomationService/DeleteServiceConnectionPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/networkconnectivity2141_test.go:397 TestNetworkConnectivityPoliciesThroughTheRESTClient",
+          "test/compat/networkconnectivity2141_test.go:88 TestNetworkConnectivityServiceConnectionPolicies"
+        ]
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.CrossNetworkAutomationService/DeleteServiceConnectionToken",
+        "status": "Verified",
+        "tests": [
+          "test/compat/networkconnectivity2141_test.go:88 TestNetworkConnectivityServiceConnectionPolicies"
+        ]
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.CrossNetworkAutomationService/GetServiceClass",
+        "status": "Verified",
+        "tests": [
+          "test/compat/networkconnectivity2141_test.go:88 TestNetworkConnectivityServiceConnectionPolicies"
+        ]
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.CrossNetworkAutomationService/GetServiceConnectionMap",
+        "status": "Verified",
+        "tests": [
+          "test/compat/networkconnectivity2141_test.go:88 TestNetworkConnectivityServiceConnectionPolicies"
+        ]
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.CrossNetworkAutomationService/GetServiceConnectionPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/networkconnectivity2141_test.go:397 TestNetworkConnectivityPoliciesThroughTheRESTClient",
+          "test/compat/networkconnectivity2141_test.go:88 TestNetworkConnectivityServiceConnectionPolicies"
+        ]
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.CrossNetworkAutomationService/GetServiceConnectionToken",
+        "status": "Verified",
+        "tests": [
+          "test/compat/networkconnectivity2141_test.go:88 TestNetworkConnectivityServiceConnectionPolicies"
+        ]
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.CrossNetworkAutomationService/ListServiceClasses",
+        "status": "Verified",
+        "tests": [
+          "test/compat/networkconnectivity2141_test.go:88 TestNetworkConnectivityServiceConnectionPolicies"
+        ]
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.CrossNetworkAutomationService/ListServiceConnectionMaps",
+        "status": "Verified",
+        "tests": [
+          "test/compat/networkconnectivity2141_test.go:88 TestNetworkConnectivityServiceConnectionPolicies"
+        ]
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.CrossNetworkAutomationService/ListServiceConnectionPolicies",
+        "status": "Verified",
+        "tests": [
+          "test/compat/networkconnectivity2141_test.go:397 TestNetworkConnectivityPoliciesThroughTheRESTClient",
+          "test/compat/networkconnectivity2141_test.go:88 TestNetworkConnectivityServiceConnectionPolicies"
+        ]
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.CrossNetworkAutomationService/ListServiceConnectionTokens",
+        "status": "Verified",
+        "tests": [
+          "test/compat/networkconnectivity2141_test.go:88 TestNetworkConnectivityServiceConnectionPolicies"
+        ]
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.CrossNetworkAutomationService/UpdateServiceClass",
+        "status": "Verified",
+        "tests": [
+          "test/compat/networkconnectivity2141_test.go:88 TestNetworkConnectivityServiceConnectionPolicies"
+        ]
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.CrossNetworkAutomationService/UpdateServiceConnectionMap",
+        "status": "Verified",
+        "tests": [
+          "test/compat/networkconnectivity2141_test.go:88 TestNetworkConnectivityServiceConnectionPolicies"
+        ]
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.CrossNetworkAutomationService/UpdateServiceConnectionPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/networkconnectivity2141_test.go:397 TestNetworkConnectivityPoliciesThroughTheRESTClient",
+          "test/compat/networkconnectivity2141_test.go:88 TestNetworkConnectivityServiceConnectionPolicies"
+        ]
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.DataTransferService/CreateDestination",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.DataTransferService/CreateMulticloudDataTransferConfig",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.DataTransferService/DeleteDestination",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.DataTransferService/DeleteMulticloudDataTransferConfig",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.DataTransferService/GetDestination",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.DataTransferService/GetMulticloudDataTransferConfig",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.DataTransferService/GetMulticloudDataTransferSupportedService",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.DataTransferService/ListDestinations",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.DataTransferService/ListMulticloudDataTransferConfigs",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.DataTransferService/ListMulticloudDataTransferSupportedServices",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.DataTransferService/UpdateDestination",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.DataTransferService/UpdateMulticloudDataTransferConfig",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.HubService/AcceptHubSpoke",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.HubService/AcceptSpokeUpdate",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.HubService/CreateHub",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.HubService/CreateSpoke",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.HubService/DeleteHub",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.HubService/DeleteSpoke",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.HubService/GetGroup",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.HubService/GetHub",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.HubService/GetRoute",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.HubService/GetRouteTable",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.HubService/GetSpoke",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.HubService/ListGroups",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.HubService/ListHubSpokes",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.HubService/ListHubs",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.HubService/ListRouteTables",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.HubService/ListRoutes",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.HubService/ListSpokes",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.HubService/QueryHubStatus",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.HubService/RejectHubSpoke",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.HubService/RejectSpokeUpdate",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.HubService/UpdateGroup",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.HubService/UpdateHub",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.HubService/UpdateSpoke",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.InternalRangeService/CreateInternalRange",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.InternalRangeService/DeleteInternalRange",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.InternalRangeService/GetInternalRange",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.InternalRangeService/ListInternalRanges",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.InternalRangeService/UpdateInternalRange",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.PolicyBasedRoutingService/CreatePolicyBasedRoute",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.PolicyBasedRoutingService/DeletePolicyBasedRoute",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.PolicyBasedRoutingService/GetPolicyBasedRoute",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkconnectivity.v1.PolicyBasedRoutingService/ListPolicyBasedRoutes",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       }
     ]
   },
@@ -18988,7 +19403,7 @@
         "method": "google.cloud.parametermanager.v1.ParameterManager/CreateParameter",
         "status": "Verified",
         "tests": [
-          "test/compat/parametermanager2063_test.go:197 TestParameterManagerTags",
+          "test/compat/parametermanager2063_test.go:208 TestParameterManagerTags",
           "test/compat/parametermanager_test.go:110 TestParameterManagerLifecycle",
           "test/compat/parametermanager_test.go:378 TestParameterManagerCMEK"
         ]
@@ -19020,7 +19435,7 @@
         "method": "google.cloud.parametermanager.v1.ParameterManager/DeleteParameter",
         "status": "Verified",
         "tests": [
-          "test/compat/parametermanager2063_test.go:197 TestParameterManagerTags",
+          "test/compat/parametermanager2063_test.go:208 TestParameterManagerTags",
           "test/compat/parametermanager_test.go:110 TestParameterManagerLifecycle"
         ]
       },
@@ -19049,7 +19464,7 @@
         "method": "google.cloud.parametermanager.v1.ParameterManager/GetParameter",
         "status": "Verified",
         "tests": [
-          "test/compat/parametermanager2063_test.go:197 TestParameterManagerTags",
+          "test/compat/parametermanager2063_test.go:208 TestParameterManagerTags",
           "test/compat/parametermanager_test.go:110 TestParameterManagerLifecycle"
         ]
       },

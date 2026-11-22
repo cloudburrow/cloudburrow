@@ -125,6 +125,9 @@ const SECRET_TABS = ["/secrets", "/secrets-regional"];
 // Certificate Authority Service's tabs (#2144).
 const ALERTING_TABS = ["/monitoring/alerting", "/monitoring/alerting/incidents", "/monitoring/snoozes"];
 const CAS_TABS = ["/security/cas", "/security/cas/certificateAuthorities", "/security/cas/certificates", "/security/cas/templates"];
+// Private Service Connect's tabs (#2141): Connected endpoints and
+// Connection Policies, as Google's page has them.
+const PSC_TABS = ["/net-services/psc/list/consumers", "/net-services/psc/list/policies"];
 const GKE_STORAGE = ["/kubernetes/storage", "/kubernetes/storage-classes"];
 // Cloud Logging's Settings and its Log Scopes tab (#2020), as Google's
 // Settings page has a Log Scopes tab (log-scope/create-and-manage).
@@ -520,6 +523,16 @@ const ROUTES = [
     section: "Networking", product: "vpc", productTitle: "VPC network" },
   { path: "/networking/addresses/list", service: "vpc-addresses", icon: "vpc", title: "IP addresses", kind: "IP address",
     section: "Networking", product: "vpc", productTitle: "VPC network" },
+  // Network services' Private Service Connect (#2141), at Google's path:
+  // its Connected endpoints, Connect endpoint.
+  { path: "/net-services/psc/list/consumers", service: "vpc-psc", icon: "vpc", title: "Private Service Connect", tabTitle: "Connected endpoints", kind: "Endpoint",
+    pageTabs: PSC_TABS, section: "Networking", product: "network-services", productTitle: "Network services" },
+  // Its Connection Policies tab (#2141): the Network Connectivity API's
+  // service connection policies ("Private Service Connect > Connection
+  // Policies > Create connection policy", configure-private-service-connect).
+  // The tab's path is UNVERIFIED (re-read 2026-11-22: configure-service-connection-policies).
+  { path: "/net-services/psc/list/policies", service: "psc-policies", icon: "vpc", title: "Private Service Connect", tabTitle: "Connection Policies", kind: "Connection policy",
+    navHidden: true, navAs: "/net-services/psc/list/consumers", pageTabs: PSC_TABS, section: "Networking", product: "network-services", productTitle: "Network services" },
 
   // Secret Manager (#1850): Google's menu, Secret Manager (the global
   // secrets), Regional secrets and Settings.
@@ -4633,6 +4646,17 @@ async function renderDetail(view, route, resourcePath) {
     // tab draws its key usage summary over the protected resources (#2053).
     const cards = listingSummary(list);
     if (cards.length) note = note ? el("div", {}, note, ...cards) : el("div", {}, ...cards);
+    // A chart of the section's series over its rows (#2141): Cloud SQL's
+    // Query insights' database load, a line per wait class.
+    if (section.seriesTitle && (section.series || []).length) {
+      const rows = section.series.map((sv) => ({ name: sv.unit ? `${sv.label} (${sv.unit})` : sv.label,
+        fields: { points: JSON.stringify((sv.points || []).filter((p) => p.value !== undefined && p.value !== null)) } }));
+      const card = el("div", { class: "card query-load-chart" },
+        el("h2", { text: section.seriesTitle }),
+        section.series[0].unavailable ? el("p", { class: "unavailable", text: section.series[0].unavailable })
+          : explorerChart(rows, `${section.seriesTitle} for ${name}`));
+      note = note ? el("div", {}, note, card) : card;
+    }
     // A workflow execution's Steps (#2004): the visualization panel of
     // the revision that ran, over the step entries' table.
     if (section.graph) {
@@ -4827,13 +4851,35 @@ async function renderDetail(view, route, resourcePath) {
         emptyState(`No ${section.label.toLowerCase()}`,
                    `${name} reports none.`));
     }
-    setChildren(into, note, ...groups.map((group) =>
+    setChildren(into, note, overviewChart(section), ...groups.map((group) =>
       el("div", { class: "card properties" },
         group.heading ? el("h2", { text: group.heading }) : null,
         el("dl", {}, ...group.properties.flatMap((prop) => [
           el("dt", { text: prop.label }),
           propertyValue(prop),
         ])))));
+  };
+
+  // A properties section's chart (#2141): Cloud SQL's Overview draws one of
+  // the instance's Cloud Monitoring metrics above its cards, the metric
+  // chosen from a list (CPU utilization first), as Google's Overview does.
+  const overviewChart = (section) => {
+    const series = section.series || [];
+    if (!series.length) return null;
+    const holder = el("div", { class: "overview-chart" });
+    const pick = el("select", { id: "overview-chart-metric" },
+      ...series.map((sv, i) => el("option", { value: String(i), text: sv.label })));
+    const draw = () => {
+      const sv = series[Number(pick.value) || 0];
+      setChildren(holder, chartCard(sv.label, sv.points || [], {
+        label: `${sv.label} for ${name}`, max: sv.max || undefined,
+        foot: sv.unit ? `Measured in ${sv.unit}` : "", unavailable: sv.unavailable }));
+    };
+    pick.addEventListener("change", draw);
+    draw();
+    return el("div", { class: "card overview-chart-card" },
+      el("div", { class: "overview-chart-pick" }, el("label", { for: "overview-chart-metric", text: "Chart" }), pick),
+      holder);
   };
 
   // Preformatted: newlines are the content, and a YAML document that lost
@@ -5140,7 +5186,10 @@ async function renderDetail(view, route, resourcePath) {
   // Create key ring goes on to the ring's Create key. The action is taken
   // off the address, so a reload or Back does not open it again.
   const asked = new URLSearchParams(location.search).get("action");
-  const opened = asked && (data.actions || []).find((a) => a.id === asked);
+  // Or one drawn on a tab (Section.Actions, its Tabs' too), as Cloud SQL's
+  // list row opens Create read replica on the instance's Replicas (#2141).
+  const opened = asked && [...(data.actions || []), ...(data.sections || []).flatMap((s) =>
+    [...(s.actions || []), ...(s.tabs || []).flatMap((t) => t.actions || [])])].find((a) => a.id === asked);
   // One that is a page of its own (Action.Page, #1851) is drawn in the
   // page's place and keeps its address, so a reload shows it again and
   // Back returns to the resource's page.
@@ -7656,6 +7705,120 @@ function attachCompletions(control, words) {
   control.addEventListener("blur", () => setTimeout(close, 150));
 }
 
+// attachSecretPicker is Parameter Manager's Secret picker (#2143), as
+// Google's add-parameter-version describes it: in the payload, Ctrl+Space
+// then Enter opens the Secret picker side panel, where the Secret and the
+// Secret version are chosen (a regional secret with Select regional
+// secret), or a secret entered by its resource ID, and Insert puts its
+// __REF__("//secretmanager.googleapis.com/...") reference at the cursor.
+function attachSecretPicker(control, picker) {
+  const list = el("ul", { class: "completions", role: "listbox", hidden: true, "aria-label": "Suggestions" });
+  list.id = `${control.id || control.name}-suggestions`;
+  control.setAttribute("aria-autocomplete", "list");
+  control.setAttribute("aria-controls", list.id);
+  control.setAttribute("aria-keyshortcuts", "Control+Space");
+  const item = el("li", { role: "option", id: `${list.id}-picker`, class: "active", text: "Secret picker: insert a secret reference" });
+  item.setAttribute("aria-selected", "true");
+  list.append(item);
+  let at = 0;
+  const close = () => { list.hidden = true; control.setAttribute("aria-expanded", "false"); control.removeAttribute("aria-activedescendant"); };
+  const show = () => {
+    if (!list.isConnected) control.after(list);
+    at = control.selectionStart ?? control.value.length;
+    list.hidden = false;
+    control.setAttribute("aria-expanded", "true");
+    control.setAttribute("aria-activedescendant", item.id);
+  };
+  const choose = () => { close(); openSecretPicker(control, picker, at); };
+  item.addEventListener("mousedown", (e) => { e.preventDefault(); choose(); });
+  control.addEventListener("keydown", (e) => {
+    if (e.ctrlKey && (e.key === " " || e.code === "Space")) { e.preventDefault(); show(); return; }
+    if (list.hidden) return;
+    if (e.key === "Enter") { e.preventDefault(); choose(); }
+    else if (e.key === "Escape") { e.preventDefault(); close(); }
+    else if (e.key !== "ArrowDown" && e.key !== "ArrowUp") close();
+  });
+  control.addEventListener("blur", () => setTimeout(close, 150));
+}
+
+// secretPickerLabel is a secret's ID, with its location when regional.
+function secretPickerLabel(name) {
+  const m = /^projects\/[^/]+\/(?:locations\/([^/]+)\/)?secrets\/([^/]+)$/.exec(name);
+  if (!m) return name;
+  return m[1] ? `${m[2]} (${m[1]})` : m[2];
+}
+
+// secretRef is a secret version's reference in a parameter payload.
+function secretRef(version) {
+  return `__REF__("//secretmanager.googleapis.com/${version.replace(/^\/\/secretmanager\.googleapis\.com\//, "")}")`;
+}
+
+function openSecretPicker(control, picker, at) {
+  MODAL_SIDE_NEXT = true;
+  const { dialog, close } = openModal({ labelledBy: "secret-picker-title" });
+  dialog.id = "secret-picker";
+  const regional = el("input", { type: "checkbox", id: "secret-picker-regional", role: "switch" });
+  const manual = el("input", { type: "checkbox", id: "secret-picker-manual" });
+  const secret = el("select", { id: "secret-picker-secret" });
+  const version = el("select", { id: "secret-picker-version" });
+  const resource = el("input", { type: "text", id: "secret-picker-resource", spellcheck: "false",
+    placeholder: "projects/PROJECT_ID/secrets/SECRET_ID/versions/VERSION", "aria-describedby": "secret-picker-resource-help" });
+  const error = el("p", { class: "form-field-error", id: "secret-picker-error", role: "alert", hidden: true });
+  const secrets = () => (regional.checked ? picker.regional : picker.secrets) || [];
+  const fillVersions = () => {
+    const s = secrets().find((x) => x.name === secret.value);
+    setChildren(version, ...((s && s.versions) || []).map((v) => el("option", { value: `${s.name}/versions/${v}`, text: v })));
+  };
+  const fillSecrets = () => {
+    const all = secrets();
+    setChildren(secret, ...(all.length ? all.map((s) => el("option", { value: s.name, text: secretPickerLabel(s.name) }))
+      : [el("option", { value: "", text: regional.checked ? "No regional secrets in this project" : "No secrets in this project" })]));
+    fillVersions();
+  };
+  regional.addEventListener("change", fillSecrets);
+  secret.addEventListener("change", fillVersions);
+  const pickRows = el("div", { class: "secret-picker-pick" },
+    el("div", { class: "form-row is-check" }, el("div", { class: "check-line" }, regional,
+      el("label", { for: "secret-picker-regional", text: "Select regional secret" }))),
+    el("div", { class: "form-row" }, el("label", { for: "secret-picker-secret", text: "Secret" }), secret),
+    el("div", { class: "form-row" }, el("label", { for: "secret-picker-version", text: "Secret version" }), version));
+  const manualRow = el("div", { class: "form-row", hidden: true },
+    el("label", { for: "secret-picker-resource", text: "Secret version resource ID" }), resource,
+    el("p", { class: "form-help", id: "secret-picker-resource-help",
+      text: "A secret version's resource name, such as projects/my-project/secrets/db_password/versions/1, or a regional secret's under locations/LOCATION." }));
+  manual.addEventListener("change", () => { pickRows.hidden = manual.checked; manualRow.hidden = !manual.checked; });
+  const insert = el("button", { type: "button", class: "primary", id: "secret-picker-insert", text: "Insert", onclick: () => {
+    const v = (manual.checked ? resource.value : version.value).trim();
+    if (!/^(\/\/secretmanager\.googleapis\.com\/)?projects\/[^/]+\/(locations\/[^/]+\/)?secrets\/[^/]+\/versions\/[^/]+$/.test(v)) {
+      error.textContent = manual.checked ? "Enter a secret version's resource name: projects/PROJECT_ID/secrets/SECRET_ID/versions/VERSION."
+        : "Choose a secret and a secret version.";
+      error.hidden = false;
+      return;
+    }
+    const ref = secretRef(v);
+    const pos = Math.min(at, control.value.length);
+    control.value = control.value.slice(0, pos) + ref + control.value.slice(pos);
+    close();
+    control.focus();
+    control.setSelectionRange(pos + ref.length, pos + ref.length);
+    control.dispatchEvent(new Event("input", { bubbles: true }));
+  } });
+  setChildren(dialog, el("div", { class: "modal-body secret-picker" },
+    el("h2", { id: "secret-picker-title", text: "Secret picker" }),
+    el("p", { class: "form-help", text: "The reference is replaced by the secret version's value when the parameter version is rendered." }),
+    pickRows,
+    el("div", { class: "form-row is-check" }, el("div", { class: "check-line" }, manual,
+      el("label", { for: "secret-picker-manual", text: "Enter secret manually" }))),
+    manualRow,
+    picker.createHref ? el("p", {}, el("a", { href: picker.createHref, id: "secret-picker-create", target: "_blank", rel: "noopener", text: "Create secret" })) : null,
+    error,
+    el("div", { class: "modal-actions" },
+      el("button", { type: "button", class: "secondary", id: "secret-picker-cancel", text: "Cancel", onclick: () => close() }),
+      insert)));
+  fillSecrets();
+  secret.focus();
+}
+
 function buildCreateForm(spec) {
   // A hidden field is what the form was drawn from, sent back unchanged so
   // the backend can refuse the change when that has changed since: a
@@ -7729,6 +7892,8 @@ function buildCreateForm(spec) {
     // Ctrl+Space offers the field's completions at the cursor, as Google's
     // Query by GQL offers the namespace's kinds (#1846).
     if ((f.completions || []).length && !isCheck && !isSelect) attachCompletions(control, f.completions);
+    // Parameter Manager's Secret picker (#2143): Ctrl+Space, then Enter.
+    if (f.secretPicker && isArea && !isMap) attachSecretPicker(control, f.secretPicker);
     // An immutable field is shown so the operator can see which resource they
     // are editing, and refused so the form does not accept a change the API
     // will not apply. Disabled rather than hidden: hiding it would read as
@@ -7803,7 +7968,10 @@ function buildCreateForm(spec) {
           // in its location.
           : f.browse === "artifact-registry" ? el("div", { class: "browse-row" }, control,
             el("button", { type: "button", class: "secondary", id: `browse-${f.name}`, text: "Browse",
-              onclick: () => browseRepositories(control, entries) })) : control,
+              onclick: () => browseRepositories(control, entries) }))
+          // A password field (#2141): Show password, and Generate where
+          // Field.Generate asks, as Google's Cloud SQL Create instance has.
+          : f.type === "password" ? passwordRow(f, control) : control,
           templates, upload, help, error);
 
     return { field: f, control, node, error, helpId, errorId, isCheck };
@@ -8251,6 +8419,29 @@ function instantOf(local) {
 
 // uploadIntoTextarea is a textarea's Upload file control (Field.Upload,
 // #1850): a file chooser whose text file replaces the textarea's value.
+// passwordRow is a password control with Show password, which reveals
+// what is typed (aria-pressed), and Generate on a Field.Generate field,
+// which fills it with 20 random characters from the browser's CSPRNG.
+function passwordRow(f, control) {
+  const show = el("button", { type: "button", class: "secondary", id: `show-${f.name}`, text: "Show password",
+    "aria-pressed": "false", "aria-controls": control.id });
+  show.onclick = () => {
+    const shown = control.type === "password";
+    control.type = shown ? "text" : "password";
+    show.setAttribute("aria-pressed", String(shown));
+    show.textContent = shown ? "Hide password" : "Show password";
+  };
+  const gen = f.generate ? el("button", { type: "button", class: "secondary", id: `generate-${f.name}`, text: "Generate",
+    onclick: () => {
+      const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789-_.~";
+      const bytes = crypto.getRandomValues(new Uint8Array(20));
+      control.value = [...bytes].map((b) => chars[b % chars.length]).join("");
+      control.dispatchEvent(new Event("input", { bubbles: true }));
+      control.focus();
+    } }) : null;
+  return el("div", { class: "browse-row" }, control, show, gen);
+}
+
 function uploadIntoTextarea(f, control) {
   const input = el("input", { type: "file", id: `up-${f.name}`, class: "upload-into-input",
     "aria-label": `${f.upload} for ${f.label}` });

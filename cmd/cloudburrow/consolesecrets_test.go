@@ -98,8 +98,9 @@ func TestVersionActionsFollowTheVersionsState(t *testing.T) {
 	}
 	// The secret itself offers a new version, at every point, and Advance
 	// clock, the CloudBurrow extension (#1278), Change encryption keys (#1453),
-	// and the Versions tab's Disable, Enable and Destroy over checked versions (#1850).
-	if got := strings.Join(ids("api-key"), ","); got != "addversion,advance-clock,kmskeys,disableversions,enableversions,destroyversions" {
+	// the list's info panel Labels (#2142), and the Versions tab's Disable,
+	// Enable and Destroy over checked versions (#1850).
+	if got := strings.Join(ids("api-key"), ","); got != "addversion,advance-clock,kmskeys,edit-labels,disableversions,enableversions,destroyversions" {
 		t.Fatalf("secret offers %q", got)
 	}
 }

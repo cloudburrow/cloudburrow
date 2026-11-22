@@ -426,7 +426,7 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	if enabled[config.ServiceCompute] && d.compute != nil {
 		screen := computeScreen{svc: d.compute}
 		providers = append(providers, computeNetworksProvider{screen}, computeFirewallsProvider{screen},
-			computeRoutesProvider{screen}, computeAddressesProvider{screen},
+			computeRoutesProvider{screen}, computeAddressesProvider{screen}, computePSCProvider{screen}, ncPoliciesProvider{screen},
 			// Compute Engine (#1965): VM instances, disks, snapshots,
 			// images and machine types, over the same API.
 			computeInstancesProvider{screen}, computeDisksProvider{screen}, computeSnapshotsProvider{screen},
@@ -575,7 +575,11 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			host = "127.0.0.1"
 		}
 		instances := cloudSQLInstancesProvider{
-			endpoint: net.JoinHostPort(host, strconv.Itoa(d.cfg.Endpoints.SQLAdmin)), versions: versions}
+			endpoint: net.JoinHostPort(host, strconv.Itoa(d.cfg.Endpoints.SQLAdmin)), versions: versions, srv: d.sqlAdmin,
+			metrics: monitoringAdmin{api: monitoringServerOf(d.monitoring)}}
+		if enabled[config.ServiceCompute] && d.compute != nil {
+			instances.compute = d.compute.API
+		}
 		// Cloud SQL's Backups page (#1860), the project's backups.
 		providers = append(providers, instances, cloudSQLBackupsProvider{instances: instances})
 	}

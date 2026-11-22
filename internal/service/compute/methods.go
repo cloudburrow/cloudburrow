@@ -58,6 +58,17 @@ var Methods = []Method{
 	{"compute.addresses.move", false},
 	{"compute.addresses.setLabels", true},
 	{"compute.addresses.testIamPermissions", false},
+	// Private Service Connect endpoints (#2141): forwarding rules whose
+	// target is a service attachment; patch (global access) and setTarget
+	// are not served.
+	{"compute.forwardingRules.aggregatedList", true},
+	{"compute.forwardingRules.delete", true},
+	{"compute.forwardingRules.get", true},
+	{"compute.forwardingRules.insert", true},
+	{"compute.forwardingRules.list", true},
+	{"compute.forwardingRules.patch", false},
+	{"compute.forwardingRules.setLabels", true},
+	{"compute.forwardingRules.setTarget", false},
 	{"compute.globalAddresses.delete", true},
 	{"compute.globalAddresses.get", true},
 	{"compute.globalAddresses.insert", true},

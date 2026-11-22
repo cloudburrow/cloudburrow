@@ -53,6 +53,18 @@ type Postgres struct {
 	// LogKey names the server it reads, Name when "".
 	SignInLog SignInLog
 	LogKey    string
+	// PoolerHostAddr, when set, is the host address of the instance's
+	// managed connection pooler, "" while it has none (#2141).
+	PoolerHostAddr func() string
+}
+
+// PoolerAddr is the address of the instance's managed connection pooler,
+// which the connectors reach on 3307 when it pools connections, or "".
+func (p *Postgres) PoolerAddr() string {
+	if p.PoolerHostAddr == nil {
+		return ""
+	}
+	return p.PoolerHostAddr()
 }
 
 func (p *Postgres) Instance() string        { return p.Name }

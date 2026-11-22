@@ -1179,10 +1179,19 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	sqlAdminSrv := newSQLAdminServer(cfg, forwarders, mysqlCreds, stderr)
 	if sqlAdminSrv != nil {
 		sqlAdminRef = sqlAdminSrv
+		// Cloud SQL's metrics in Cloud Monitoring (#2141).
+		if monitoringSvc != nil {
+			monitoringSvc.sql = func() *sqladmin.Server { return sqlAdminRef }
+		}
 		// settings.ipConfiguration.privateNetwork is checked against
 		// Compute Engine's networks when compute is served (#1936).
 		if computeSvc != nil {
 			sqlAdminSrv.SetNetworks(computeSvc.sqlNetworks)
+			// Its private IPs are reachable from the networks' VMs (#2141).
+			computeSvc.sql = func() *sqladmin.Server { return sqlAdminRef }
+			// pscAutoConnections, through the Network Connectivity API's
+			// service connection policies (#2141).
+			sqlAdminSrv.SetAutoConnector(sqlAutoConnections{svc: computeSvc})
 		}
 		// executeSql reads a user's password from Secret Manager (#1462).
 		if secretsSvc != nil {

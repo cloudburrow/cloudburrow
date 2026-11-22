@@ -52,6 +52,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/kmsinventory"
 	"github.com/cloudburrow/cloudburrow/internal/service/logging"
 	"github.com/cloudburrow/cloudburrow/internal/service/monitoring"
+	"github.com/cloudburrow/cloudburrow/internal/service/networkconnectivity"
 	"github.com/cloudburrow/cloudburrow/internal/service/parametermanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/privateca"
 	"github.com/cloudburrow/cloudburrow/internal/service/redisadmin"
@@ -126,6 +127,13 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 		t.Fatal(err)
 	}
 	tr.RegisterCloudTrace(srv)
+	// The Network Connectivity API alone (#2141): its Locations and
+	// Operations mixins are other services' rows.
+	ncs, err := networkconnectivity.NewServer(networkconnectivity.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ncs.RegisterAPI(srv)
 	gkeSrv, err := gke.NewServer(nil, gke.Options{Versions: []gke.Version{{GKE: "1.36.4-gke.0", Image: "kindest/node:v1.36.4"}}})
 	if err != nil {
 		t.Fatal(err)

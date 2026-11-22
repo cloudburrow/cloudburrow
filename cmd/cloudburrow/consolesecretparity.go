@@ -73,7 +73,7 @@ func (p secretsRegionalProvider) Create(ctx context.Context, project string, val
 }
 
 // The secrets list's columns, Google's order; the row menu is Actions.
-var secretListColumns = []string{"Location", "Encryption", "Labels", "Created", "Expiration"}
+var secretListColumns = []string{"Location", "Encryption", "Labels", "Tags", "Created", "Expiration"}
 
 // secretsListing lists the project's global secrets, or its regional ones.
 func (p secretsProvider) secretsListing(_ context.Context, project, filter string, regional bool) (console.Listing, error) {
@@ -100,6 +100,7 @@ func (p secretsProvider) secretsListing(_ context.Context, project, filter strin
 		sf.Error = err.Error()
 		return console.Listing{Columns: secretListColumns, Noun: "secrets", ServerFilter: sf}, nil
 	}
+	tags := p.secretTags(project)
 	items := make([]console.Resource, 0, len(all))
 	for _, s := range all {
 		items = append(items, console.Resource{
@@ -108,13 +109,51 @@ func (p secretsProvider) secretsListing(_ context.Context, project, filter strin
 				"Location":   secretLocationText(s),
 				"Encryption": secretEncryptionText(s),
 				"Labels":     secretPairsText(s.Labels),
+				"Tags":       secretPairsText(tags[secrets.FullResourcePrefix+s.Name]),
 				"Created":    s.Created.Format(time.RFC3339),
 				"Expiration": secretExpiry(s),
 			},
 			Actions: []console.Action{secretAddVersionAction()},
+			// Google's info panel (https://docs.cloud.google.com/secret-manager/docs/manage-access-to-secrets,
+			// https://docs.cloud.google.com/secret-manager/docs/add-labels-to-secrets,
+			// read 2026-11-22): Permissions and Labels (#2142).
+			Info: pubsubInfoTabs(s.Labels, "secret", true),
 		})
 	}
-	return console.Listing{Columns: secretListColumns, Noun: "secrets", Items: items, Total: len(items), ServerFilter: sf}, nil
+	return console.Listing{Columns: secretListColumns, Noun: "secrets", Items: items, Total: len(items), ServerFilter: sf,
+		InfoOnSelect: true}, nil
+}
+
+// secretTags is the project's secrets' tags, as Resource Manager binds them
+// (Secret.tags is input only, so GetSecret never returns them): by the
+// secret's full resource name, each tag key's short name to its value's
+// (https://docs.cloud.google.com/secret-manager/docs/create-and-manage-tags,
+// read 2026-11-22: the Secrets list's Tags column, #2142).
+func (p secretsProvider) secretTags(project string) map[string]map[string]string {
+	if p.svc == nil || p.svc.registry == nil {
+		return nil
+	}
+	reg := p.svc.registry()
+	if reg == nil {
+		return nil
+	}
+	bindings, err := reg.TagBindingsUnder(secrets.FullResourcePrefix + "projects/" + project + "/")
+	if err != nil {
+		return nil
+	}
+	out := map[string]map[string]string{}
+	for _, b := range bindings {
+		// tagValueNamespacedName is PARENT/KEY_SHORT_NAME/VALUE_SHORT_NAME.
+		parts := strings.Split(b.GetTagValueNamespacedName(), "/")
+		if len(parts) < 3 {
+			continue
+		}
+		if out[b.GetParent()] == nil {
+			out[b.GetParent()] = map[string]string{}
+		}
+		out[b.GetParent()][parts[len(parts)-2]] = parts[len(parts)-1]
+	}
+	return out
 }
 
 // secretLocationText is the list's Location: a regional secret's region, a
@@ -170,7 +209,10 @@ const actSecretAddVersion = "addversion"
 
 func secretAddVersionAction() console.Action {
 	return console.Action{
-		ID: actSecretAddVersion, Label: "Add new version",
+		// Google's Add new version dialog, ending in Add new version
+		// (https://docs.cloud.google.com/secret-manager/docs/add-secret-version,
+		// read 2026-11-22).
+		ID: actSecretAddVersion, Label: "Add new version", Title: "Add new version", Submit: "Add new version",
 		Fields: []console.Field{
 			{Name: "payload", Label: "Secret value", Type: "textarea", Required: true, Upload: "Upload file",
 				Help: "Type the value or upload a text file, at most 64 KiB. It becomes the new enabled version; " +
@@ -368,6 +410,63 @@ func secretTypeText(t string) string {
 // Annotations, Version aliases and Delayed destruction. sec gives an edit
 // form its current values; nil is Create's.
 func secretOptionalFields(sec *secrets.Secret) []console.Field {
+	return secretOptionalFieldsWith(sec, nil)
+}
+
+// secretDelaySection is Google's name of the delayed destruction section.
+const secretDelaySection = "Delay secret version destroy"
+
+// secretRowsField is a section of key and value rows with an Add button,
+// its value a group the forms turn back into key=value lines.
+func secretRowsField(name, section, add, key, value, lines string) console.Field {
+	m, _ := console.ParseMap(lines)
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	rows := make([]map[string]string, 0, len(keys))
+	for _, k := range keys {
+		rows = append(rows, map[string]string{"key": k, "value": m[k]})
+	}
+	def := ""
+	if len(rows) > 0 {
+		def = console.FormatGroup(rows)
+	}
+	return console.Field{Name: name, Label: section, Type: console.GroupFieldType, Section: section, AddLabel: add, Default: def,
+		Help: "Optional.", Group: []console.Field{
+			{Name: "key", Label: key, Type: "text", Required: true},
+			{Name: "value", Label: value, Type: "text"}}}
+}
+
+// secretAliasesField is Version aliases' Add alias rows: the alias, and
+// the version chosen from the secret's (versions), or typed on Create.
+func secretAliasesField(lines string, versions []string) console.Field {
+	f := secretRowsField("versionAliases", "Version aliases", "Add alias", "Alias", "Version", lines)
+	f.Group[0].Pattern = `^[A-Za-z][A-Za-z0-9_\-]{0,62}$`
+	f.Group[0].Help = "Starts with a letter; at most 63 letters, numerals, hyphens and underscores; not latest or new."
+	if len(versions) > 0 {
+		f.Group[1] = console.Field{Name: "value", Label: "Version", Type: "select", Options: versions}
+	} else {
+		f.Group[1].Pattern, f.Group[1].Help = `^[1-9][0-9]*$`, "The version number, 1 for the first."
+	}
+	f.Help = "Optional. A version is then reachable as .../versions/ALIAS. At most 50."
+	return f
+}
+
+// secretVersionNumbers are the version rows' numbers, oldest first, for
+// Version aliases' choices.
+func secretVersionNumbers(l console.Listing) []string {
+	var out []string
+	for i := len(l.Items) - 1; i >= 0; i-- {
+		out = append(out, lastSegment(l.Items[i].Name))
+	}
+	return out
+}
+
+// secretOptionalFieldsWith is secretOptionalFields with the secret's
+// version numbers for Version aliases' choices.
+func secretOptionalFieldsWith(sec *secrets.Secret, versions []string) []console.Field {
 	sched := secretScheduleFields(sec)
 	next, period, ttl := sched[0], sched[1], sched[2]
 	next.Label, next.ShowWhen = "Starting on", "setRotation"
@@ -377,7 +476,16 @@ func secretOptionalFields(sec *secrets.Secret) []console.Field {
 	next.Help = "When a SECRET_ROTATE message is first published to the secret's Pub/Sub topics, in your " +
 		"browser's time zone; at least 5 minutes from now. Secret Manager does not change the value: your subscriber adds the new version."
 	period.Label, period.ShowWhen = "Custom rotation period", "setRotation&rotationPreset="+secretRotationCustom
-	ttl.Label, ttl.ShowWhen = "Duration", "setDestroyDelay"
+	// Google's Destruction delay duration, in days from 1 to 1000
+	// (https://docs.cloud.google.com/secret-manager/docs/delay-destruction-of-secret-versions,
+	// read 2026-11-22).
+	delayDays := ""
+	if sec != nil && sec.VersionDestroyTTL > 0 {
+		delayDays = strconv.Itoa(int((sec.VersionDestroyTTL + 12*time.Hour) / (24 * time.Hour)))
+	}
+	ttl = console.Field{Name: "destroyDelayDays", Label: "Destruction delay duration", Type: "text", Section: secretDelaySection,
+		ShowWhen: "setDestroyDelay", Default: delayDays, Pattern: `^([1-9][0-9]{0,2}|1000)$`,
+		Help: "Days, 1 to 1000: a version destroyed is disabled, then destroyed this long after."}
 	setRotation, preset := "false", secretRotationPresets[0].label
 	setExpiry, setDelay := "false", "false"
 	var topics, labels, annotations, aliases, expire string
@@ -405,24 +513,22 @@ func secretOptionalFields(sec *secrets.Secret) []console.Field {
 		period, next,
 		{Name: "topics", Label: "Pub/Sub topics", Type: "textarea", Section: "Notifications", Default: topics,
 			Help: secretTopicsHelp},
+		// Google's console offers a date and time only; a TTL is gcloud's
+		// and REST's (https://docs.cloud.google.com/secret-manager/docs/creating-and-managing-expiring-secrets,
+		// read 2026-11-22).
 		{Name: "setExpiration", Label: "Set expiration date", Type: "checkbox", Section: "Expiration", Default: setExpiry,
 			Help: "At the expiration the secret and every version of it are deleted."},
-		{Name: "expireTime", Label: "Expiration time", Type: "text", Section: "Expiration", ShowWhen: "setExpiration",
-			Default: expire, Pattern: secretExpireTimePattern, Help: secretExpireTimeHelp},
-		{Name: "ttl", Label: "Or a duration (TTL)", Type: "text", Section: "Expiration", ShowWhen: "setExpiration",
-			Pattern: secretTTLPattern, Help: secretTTLHelp},
-		{Name: "labels", Label: "Labels", Type: "map", Section: "Labels", Default: labels,
-			Help: "Optional. One key=value per line."},
-		{Name: "annotations", Label: "Annotations", Type: "map", Section: "Annotations", Default: annotations,
-			Help: "Optional. One key=value per line."},
-		{Name: "versionAliases", Label: "Version aliases", Type: "map", Section: "Version aliases", Default: aliases,
-			KeyPattern: `^[A-Za-z][A-Za-z0-9_\-]{0,62}$`, ValuePattern: `^[1-9][0-9]*$`, MaxEntries: secrets.MaxVersionAliases,
-			KeyHelp:   "An alias starts with a letter and holds at most 63 letters, numerals, hyphens and underscores; not latest or NEW.",
-			ValueHelp: "The version number the alias names.",
-			Help: "Optional. One alias=version per line, such as prod=1: the version is then reachable as " +
-				".../versions/prod. At most 50."},
+		{Name: "expireTime", Label: "Expiration date", Type: console.DateTimeFieldType, Section: "Expiration", ShowWhen: "setExpiration",
+			Default: expire, Help: "In your browser's time zone; at least 60 seconds from now."},
+		// Add label, Add annotation and Add alias rows, as Google's
+		// sections have them (add-labels-to-secrets,
+		// creating-and-managing-annotations, assign-alias-to-secret-version,
+		// read 2026-11-22).
+		secretRowsField("labels", "Labels", "Add label", "Key", "Value", labels),
+		secretRowsField("annotations", "Annotations", "Add annotation", "Key", "Value", annotations),
+		secretAliasesField(aliases, versions),
 		{Name: "setDestroyDelay", Label: "Set duration for delayed destruction", Type: "checkbox",
-			Section: "Delayed destruction", Default: setDelay,
+			Section: secretDelaySection, Default: setDelay,
 			Help: "Destroying a version then disables it and destroys it after the duration; enabling or disabling it " +
 				"before then cancels the destruction."},
 		ttl,
@@ -483,6 +589,29 @@ func secretFormValues(values map[string]string) map[string]string {
 	}
 	if out["setExpiration"] == "false" {
 		out["expireTime"], out["ttl"] = "", ""
+	}
+	// The rows of Labels, Annotations and Version aliases, as the
+	// key=value lines the older fields carry.
+	for _, k := range []string{"labels", "annotations", "versionAliases"} {
+		if v := strings.TrimSpace(out[k]); strings.HasPrefix(v, "[") {
+			if rows, err := console.ParseGroup(v); err == nil {
+				m := map[string]string{}
+				for _, r := range rows {
+					if key := strings.TrimSpace(r["key"]); key != "" {
+						m[key] = strings.TrimSpace(r["value"])
+					}
+				}
+				out[k] = console.FormatMap(m)
+			}
+		}
+	}
+	if d := strings.TrimSpace(out["destroyDelayDays"]); d != "" && out["setDestroyDelay"] != "false" {
+		if n, err := strconv.Atoi(d); err == nil && n >= 1 && n <= 1000 {
+			out["versionDestroyTtl"] = (time.Duration(n) * 24 * time.Hour).String()
+		} else {
+			// Refused by secretScheduleValue, naming what was typed.
+			out["versionDestroyTtl"] = d + " days (1 to 1000)"
+		}
 	}
 	if out["setDestroyDelay"] == "false" {
 		out["versionDestroyTtl"] = ""
@@ -565,6 +694,12 @@ func secretVersionAction(verb string, sec secrets.Secret, now time.Time, selecti
 	case "destroy":
 		a = secretDestroyAction(sec, now)
 		a.Submit, a.ConfirmTitle = "Destroy selected versions", "Destroy selected versions?"
+		if sec.VersionDestroyTTL > 0 {
+			// With a delay, Google's button schedules them
+			// (https://docs.cloud.google.com/secret-manager/docs/delay-destruction-of-secret-versions,
+			// read 2026-11-22).
+			a.Submit, a.ConfirmTitle = "Schedule selected versions for destruction", "Schedule selected versions for destruction?"
+		}
 		a.ConfirmWord = lastSegment(sec.Name)
 		if a.Confirm == "" {
 			a.Confirm = "A destroyed version's value is deleted permanently; the version stays listed as destroyed."
@@ -653,4 +788,16 @@ func actSecretVersions(st *secrets.Store, project, id, verb, list string) error 
 		}
 	}
 	return nil
+}
+
+// DeleteWords: Google's Delete secret dialog asks for the secret's name
+// and ends in Delete secret (https://docs.cloud.google.com/secret-manager/docs/delete-secrets,
+// read 2026-11-22).
+func (secretsProvider) DeleteWords() console.DeleteWords {
+	return console.DeleteWords{Submit: "Delete secret"}
+}
+
+// DeleteWords: a regional secret's dialog is the same.
+func (secretsRegionalProvider) DeleteWords() console.DeleteWords {
+	return console.DeleteWords{Submit: "Delete secret"}
 }
