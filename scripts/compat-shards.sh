@@ -385,7 +385,9 @@ compat_shard() {
       # beside Kubernetes Engine, whose cluster networks it checks.
       # Load balancing round 2 (#2160): Cloud Armor, Cloud CDN and IAP
       # through the local proxy, and Certificate Manager's and IAP's APIs on
-      # the Compute Engine port, all under COMPUTE.
+      # the Compute Engine port, all under COMPUTE; IAP's browser sign-in
+      # and TCP forwarding (gcloud compute start-iap-tunnel and ssh
+      # --tunnel-through-iap to a VM) too.
       # Certificate Authority Service (#1834), in process like KMS.
       # Cloud KMS (#309) and Cloud Logging (#304). Resource Manager's tests
       # run in the storage shard; the Logging folder and organization tests

@@ -124,6 +124,8 @@ const GKE_DISCOVERY = ["/kubernetes/gateways", "/kubernetes/services", "/kuberne
 const SECRET_TABS = ["/secrets", "/secrets-regional"];
 const COMPUTE_INSTANCE_TABS = ["/compute/instances", "/compute/instanceSchedules"];
 const COMPUTE_SNAPSHOT_TABS = ["/compute/snapshots", "/compute/snapshotSchedules"];
+// Identity-Aware Proxy's tabs (#2160).
+const IAP_TABS = ["/security/iap", "/security/iap/tcp"];
 const COMPUTE_METADATA_TABS = ["/compute/metadata", "/compute/metadata/sshKeys"];
 const VPC_NETWORK_TABS = ["/networking/networks/list", "/networking/subnets/list"];
 const VPC_ROUTE_TABS = ["/networking/routes/effective", "/networking/routes/list"];
@@ -613,9 +615,12 @@ const ROUTES = [
     navHidden: true, navAs: "/security/ccm/list/certificates", pageTabs: CCM_TABS, section: "Security and identity", product: "certificatemanager", productTitle: "Certificate Manager" },
   { path: "/security/ccm/list/lbCertificates", service: "netservices-lb-certs", icon: "vpc", title: "Certificate Manager", tabTitle: "Classic Certificates", kind: "Certificate",
     navHidden: true, navAs: "/security/ccm/list/certificates", pageTabs: CCM_TABS, section: "Security and identity", product: "certificatemanager", productTitle: "Certificate Manager" },
-  // Identity-Aware Proxy (#2160): its HTTPS resources.
+  // Identity-Aware Proxy (#2160): its HTTPS resources, and its SSH and TCP
+  // resources (IAP TCP forwarding's instances and destination groups).
   { path: "/security/iap", service: "security-iap", icon: "vpc", title: "Identity-Aware Proxy", tabTitle: "HTTPS resources", kind: "HTTPS resource",
-    section: "Security and identity", product: "iap", productTitle: "Identity-Aware Proxy" },
+    pageTabs: IAP_TABS, section: "Security and identity", product: "iap", productTitle: "Identity-Aware Proxy" },
+  { path: "/security/iap/tcp", service: "security-iap-tcp", icon: "vpc", title: "Identity-Aware Proxy", tabTitle: "SSH and TCP resources", kind: "Destination group",
+    navHidden: true, navAs: "/security/iap", pageTabs: IAP_TABS, section: "Security and identity", product: "iap", productTitle: "Identity-Aware Proxy" },
   // Cloud Armor (#2160): Network Security's Cloud Armor policies.
   { path: "/net-security/securitypolicies/list", service: "netsecurity-armor", icon: "vpc", title: "Cloud Armor policies", tabTitle: "Security policies", kind: "Security policy",
     pageTabs: ARMOR_TABS, section: "Networking", product: "netsecurity", productTitle: "Network Security" },

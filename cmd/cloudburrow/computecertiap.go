@@ -2,10 +2,14 @@ package main
 
 import (
 	"context"
+	"errors"
+	"net"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/cloudburrow/cloudburrow/internal/authplatform"
 	"github.com/cloudburrow/cloudburrow/internal/iameval"
 	"github.com/cloudburrow/cloudburrow/internal/metadata"
 	"github.com/cloudburrow/cloudburrow/internal/resource"
@@ -166,7 +170,81 @@ func (s *computeService) useIAP(e *iameval.Enforcer, creds *metadata.Credentials
 	s.creds = creds
 	if e != nil {
 		s.iapEval = e.Eval
+		s.callerOf = e.CallerOf
 	}
+}
+
+// newIAPTunnel is IAP TCP forwarding's relay over the IAP API's policies
+// and destination groups and the Compute Engine API's instances (#2160).
+func (s *computeService) newIAPTunnel(api *compute.Server, ia *iap.Server) *iap.Tunnel {
+	return &iap.Tunnel{IAP: ia, Caller: s.tunnelCaller, Allowed: s.tunnelAllowed,
+		Instance: func(_ context.Context, project, zone, instance, iface string) (iap.TunnelDest, error) {
+			v, err := api.TunnelInstance(project, zone, instance, iface)
+			return iap.TunnelDest{IP: v.IP(), Handle: v}, tunnelErr(err)
+		},
+		Host: func(_ context.Context, project, region, network, host string) (iap.TunnelDest, error) {
+			v, err := api.TunnelHost(project, region, network, host)
+			return iap.TunnelDest{IP: v.IP(), Handle: v}, tunnelErr(err)
+		},
+		Dial: func(ctx context.Context, d iap.TunnelDest, port int) (net.Conn, error) {
+			v, _ := d.Handle.(compute.TunnelVM)
+			return api.TunnelDial(ctx, v, port)
+		},
+	}
+}
+
+func tunnelErr(err error) error {
+	switch {
+	case errors.Is(err, compute.ErrTunnelNoInstance):
+		return iap.ErrTunnelNotFound
+	case errors.Is(err, compute.ErrTunnelNotRunning):
+		return iap.ErrTunnelStopped
+	}
+	return err
+}
+
+// tunnelCaller is the account of a tunnel's bearer token: an access token
+// this instance minted (gcloud's), or an ID token it signed.
+func (s *computeService) tunnelCaller(bearer string) (string, bool) {
+	if s.callerOf != nil {
+		if c := s.callerOf(bearer); !c.Invalid {
+			if c.Email == "" && s.creds != nil {
+				return strings.ToLower(s.creds.Email), true
+			}
+			return strings.ToLower(c.Email), c.Email != ""
+		}
+	} else if s.creds != nil {
+		if email, ok := s.creds.TokenAccount(bearer, time.Now()); ok {
+			return strings.ToLower(email), true
+		}
+	}
+	if s.creds != nil {
+		if email, _, ok := s.creds.IDTokenClaims(bearer, time.Now()); ok {
+			return strings.ToLower(email), true
+		}
+	}
+	return "", false
+}
+
+// tunnelAllowed checks a tunnel's permission (iap.tunnelInstances.accessViaIAP
+// or iap.tunnelDestGroups.accessViaIAP, roles/iap.tunnelResourceAccessor,
+// which the basic roles do not hold) on the resource, the IAP levels above
+// it and the project's hierarchy, with destination.ip and destination.port.
+func (s *computeService) tunnelAllowed(_ context.Context, permission, resource, email, ip string, port int) bool {
+	ev, srv := s.iapEval, s.iap
+	if ev == nil || srv == nil {
+		return false
+	}
+	typ := "iap.googleapis.com/TunnelInstance"
+	if strings.Contains(resource, "/destGroups/") {
+		typ = "iap.googleapis.com/TunnelDestGroup"
+	}
+	req := iameval.Request{Email: email, Permission: permission, Resource: resource, Type: typ, Service: "iap.googleapis.com",
+		Project: iameval.Project(resource), Time: time.Now(), DestinationIP: ip, DestinationPort: int64(port)}
+	for _, lv := range iap.Levels(resource) {
+		req.Own = append(req.Own, iameval.Attached{Resource: "//iap.googleapis.com/" + lv, Policy: srv.Policy(lv)})
+	}
+	return ev.Check(req).Granted
 }
 
 // ProjectNumber is a project's number (the registry's, as every service
@@ -215,3 +293,50 @@ func (s *computeService) iapNormalize(name string) string {
 	}
 	return strings.Join(p, "/")
 }
+
+// iapManagedClientID is IAP's Google-managed OAuth client here, the one a
+// backend service with no oauth2ClientId signs browsers in with (#2160).
+const iapManagedClientID = "iap-managed.apps.googleusercontent.com"
+
+// useIAPSignIn gives IAP's browser sign-in its authorization endpoint (the
+// metadata server's, Google Auth Platform's store) and registers IAP's
+// Google-managed OAuth client there.
+func (s *computeService) useIAPSignIn(st *authplatform.Store, metaAddr func() string) {
+	if s == nil || st == nil {
+		return
+	}
+	st.RegisterManaged(authplatform.Client{ClientID: iapManagedClientID, Name: "IAP-secured Web App", Type: authplatform.TypeWeb,
+		RedirectURIs: []string{compute.IAPRedirectURI(iapManagedClientID)}},
+		authplatform.Brand{AppName: "Google Cloud", SupportEmail: "cloud-support@google.com", UserType: "INTERNAL"})
+	s.authPlatform, s.metaAddr = st, metaAddr
+}
+
+// iapLocalRedirect maps IAP's redirect URI on iap.googleapis.com onto the
+// Compute Engine port, where IAP is served.
+func (s *computeService) iapLocalRedirect(u string) string {
+	if rest, ok := strings.CutPrefix(u, "https://iap.googleapis.com/"); ok && s.Addr() != "" {
+		return "http://" + s.Addr() + "/" + rest
+	}
+	return u
+}
+
+func (g computeIAPGate) SignInURL(clientID, redirectURI, state string) string {
+	if g.svc.metaAddr == nil || g.svc.metaAddr() == "" || g.svc.authPlatform == nil {
+		return ""
+	}
+	return "http://" + g.svc.metaAddr() + authplatform.AuthorizePath + "?" + url.Values{"client_id": {clientID}, "redirect_uri": {redirectURI},
+		"response_type": {"code"}, "scope": {"openid email"}, "state": {state}}.Encode()
+}
+
+func (g computeIAPGate) Redeem(clientID, secretSHA256, code, redirectURI string) (string, error) {
+	if g.svc.authPlatform == nil {
+		return "", errors.New("no sign-in is served")
+	}
+	gr, e := g.svc.authPlatform.Redeem(clientID, secretSHA256, code, redirectURI)
+	if e != nil {
+		return "", e
+	}
+	return gr.Email, nil
+}
+
+func (computeIAPGate) ManagedClientID() string { return iapManagedClientID }

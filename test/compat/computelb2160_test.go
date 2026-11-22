@@ -395,8 +395,8 @@ func TestCloudCDNCachesThroughTheGoClient(t *testing.T) {
 // the backend service with an OAuth client (iap/docs/enabling-compute-howto),
 // roles/iap.httpsResourceAccessor granted to the instance's service
 // account on the service's iap_web resource through the IAP Go client;
-// then, through the load balancer's local port, a request without a token
-// is refused 401 ("Invalid IAP credentials: empty token"), one with an ID
+// then, through the load balancer's local port, an AJAX request without a
+// token is refused 401 ("Invalid IAP credentials: empty token"), one with an ID
 // token for another audience 401, and one with an ID token for the OAuth
 // client (generateIdToken, iap/docs/authentication-howto) reaches the
 // origin with x-goog-iap-jwt-assertion and the identity headers; a request
@@ -431,7 +431,10 @@ func TestIAPGuardsALoadBalancerThroughTheGoClient(t *testing.T) {
 	if !bs.GetIap().GetEnabled() || bs.GetIap().GetOauth2ClientSecretSha256() == "" || bs.GetIap().GetOauth2ClientSecret() != "" {
 		t.Fatalf("the backend service's iap: %v", bs.GetIap())
 	}
-	if code, body, _ := l.get("/", nil); code != 401 || body != "Invalid IAP credentials: empty token" {
+	// An AJAX request without a token is 401; a browser's is sent to the
+	// sign-in (TestIAPBrowserSignInThroughAGoClient).
+	if code, body, hdr := l.get("/", map[string]string{"X-Requested-With": "XMLHttpRequest"}); code != 401 || body != "Invalid IAP credentials: empty token" ||
+		hdr.Get("X-Goog-IAP-Generated-Response") == "" {
 		t.Errorf("without a token: %d %q", code, body)
 	}
 	other := idTokenFor(t, h, account, "https://example.com/other")

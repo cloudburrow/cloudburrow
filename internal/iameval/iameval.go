@@ -90,6 +90,11 @@ type Request struct {
 	// host and URL path, which its bindings' conditions read as
 	// request.host and request.path (#2160).
 	RequestHost, RequestPath string
+	// DestinationIP and DestinationPort are an IAP TCP forwarding
+	// tunnel's destination (#2160), which conditions read as
+	// destination.ip and destination.port; 0 is no port.
+	DestinationIP   string
+	DestinationPort int64
 }
 
 // Attributes are what req's conditions read: resource.name, resource.type,
@@ -100,7 +105,7 @@ func (req Request) Attributes() iamcond.Attributes {
 		at = time.Now()
 	}
 	return iamcond.Attributes{ResourceName: req.Resource, ResourceType: req.Type, ResourceService: req.Service, RequestTime: at,
-		RequestHost: req.RequestHost, RequestPath: req.RequestPath}
+		RequestHost: req.RequestHost, RequestPath: req.RequestPath, DestinationIP: req.DestinationIP, DestinationPort: req.DestinationPort}
 }
 
 // Access is an access state, in Policy Troubleshooter v3's words.
