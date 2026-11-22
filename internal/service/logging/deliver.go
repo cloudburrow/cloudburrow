@@ -507,8 +507,7 @@ func (s *Server) recordDelivery(g *group, n, rejected int, code, detail string) 
 		Timestamp: timestamppb.New(now), ReceiveTimestamp: timestamppb.New(now),
 	}
 	s.store.mu.Lock()
-	s.store.seq++
-	e.InsertId = fmt.Sprintf("cb%x", s.store.seq)
+	e.InsertId = s.store.nextInsertID()
 	s.store.mu.Unlock()
 	s.store.append([]*loggingpb.LogEntry{e}, nil)
 }

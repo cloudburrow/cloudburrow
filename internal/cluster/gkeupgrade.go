@@ -271,8 +271,13 @@ echo $a`
 		return fmt.Errorf("install kubeadm %s: %w", version, err)
 	}
 	// The version is given, so kubeadm looks nothing up online, and the
-	// images are present, so it pulls none.
-	if _, err := r.Run(ctx, "docker", "exec", cp, "kubeadm", "upgrade", "apply", version, "--yes"); err != nil {
+	// images are present, so it pulls none. SystemVerification checks the
+	// host's kernel, which a kind node shares and cannot load modules into:
+	// on a kernel built without CONFIG_IKCONFIG (GitHub's 7.0 azure runners)
+	// it fails reading the kernel config, so it is skipped here, as kind
+	// skips the whole preflight phase at init and join.
+	if _, err := r.Run(ctx, "docker", "exec", cp, "kubeadm", "upgrade", "apply", version, "--yes",
+		"--ignore-preflight-errors=SystemVerification"); err != nil {
 		return fmt.Errorf("kubeadm upgrade apply %s: %w", version, err)
 	}
 	for _, b := range []string{"kubelet", "kubectl"} {
@@ -300,6 +305,24 @@ echo $a`
 		case <-time.After(2 * time.Second):
 		}
 	}
-	_, err = r.Run(ctx, "kubectl", "--kubeconfig", g.kubeconfig(kind), "wait", "--for=condition=Ready", "node/"+cp, "--timeout=180s")
-	return err
+	// And Ready. The API server can still drop a connection here, as the
+	// restarted kubelet brings the control plane's static pods back, and
+	// kubectl wait gives up on the first dropped one ("Unable to connect
+	// to the server: EOF"), so the condition is polled to the deadline.
+	deadline = time.Now().Add(3 * time.Minute)
+	for {
+		out, err := r.Run(ctx, "kubectl", "--kubeconfig", g.kubeconfig(kind), "get", "node", cp, "-o",
+			`jsonpath={.status.conditions[?(@.type=="Ready")].status}`)
+		if err == nil && strings.TrimSpace(out) == "True" {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("the control plane's node %s is not Ready on %s (%q, %v)", cp, version, strings.TrimSpace(out), err)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
+	}
 }

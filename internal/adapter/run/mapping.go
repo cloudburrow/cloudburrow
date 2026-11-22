@@ -598,15 +598,26 @@ func FromKnative(k ksvc, parent string) *runpb.Service {
 
 	// Readiness is reported truthfully, including the failure reason. A caller
 	// that only saw a URL would treat a failed revision as merely slow.
+	//
+	// Until Knative has observed the newest spec, its Ready condition still
+	// describes the previous generation: the service is reconciling, as
+	// Google's is while an update rolls out ("While reconciliation is in
+	// process, observed_generation, latest_ready_revision, traffic_statuses,
+	// and uri will have transient values that might mismatch the intended
+	// state"), not ready.
 	ready, reason := k.Ready()
+	observed := k.Status.ObservedGeneration >= k.Metadata.Generation
 	cond := &runpb.Condition{Type: "Ready", State: runpb.Condition_CONDITION_PENDING}
-	if ready {
+	switch {
+	case !observed:
+	case ready:
 		cond.State = runpb.Condition_CONDITION_SUCCEEDED
-	} else if reason != "" {
+	case reason != "":
 		cond.State = runpb.Condition_CONDITION_FAILED
 		cond.Message = reason
 	}
 	svc.TerminalCondition = cond
+	svc.Reconciling = cond.State == runpb.Condition_CONDITION_PENDING
 	svc.Traffic, svc.TrafficStatuses = fromKnativeTraffic(k, rev)
 	return svc
 }

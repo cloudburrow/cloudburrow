@@ -2,6 +2,7 @@ package logging
 
 import (
 	"context"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -130,5 +131,30 @@ func TestListMonitoredResourceDescriptors(t *testing.T) {
 	}
 	if len(types) != 1 || types[0] != "global" {
 		t.Errorf("descriptor types = %v, want [global]", types)
+	}
+}
+
+// TestTailLogEntriesEndsWithTheContextsStatus: a tail whose deadline passes,
+// or whose client cancels it, ends with DEADLINE_EXCEEDED or CANCELLED, as
+// on Google, never OK. Ending OK let a client reading at its deadline see
+// io.EOF when the server's deadline fired first (main CI 44941828292,
+// TestIAMEnforcementLoggingTailAndExtras), and the window's wait ends the
+// same way.
+func TestTailLogEntriesEndsWithTheContextsStatus(t *testing.T) {
+	t.Parallel()
+	s := NewServer(NewStore(100))
+	run := func(ctx context.Context, window time.Duration) error {
+		return s.TailLogEntries(&jsonTail{ctx: ctx, w: httptest.NewRecorder(),
+			req: &loggingpb.TailLogEntriesRequest{ResourceNames: []string{"projects/" + project}, BufferWindow: durationpb.New(window)}})
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if err := run(ctx, time.Second); status.Code(err) != codes.DeadlineExceeded {
+		t.Errorf("a tail past its deadline ended %v, want DeadlineExceeded", err)
+	}
+	ctx, cancel = context.WithCancel(context.Background())
+	time.AfterFunc(100*time.Millisecond, cancel)
+	if err := run(ctx, time.Second); status.Code(err) != codes.Canceled {
+		t.Errorf("a cancelled tail ended %v, want Canceled", err)
 	}
 }

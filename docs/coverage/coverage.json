@@ -7394,7 +7394,7 @@
           "test/compat/memorystorevalkey_test.go:85 TestMemorystoreValkeyInstance",
           "test/compat/memorystorevalkeyca1918_test.go:47 TestMemorystoreValkeyServerCA",
           "test/compat/memorystorewindows1909_test.go:52 TestMemorystoreMaintenanceWindowSchedules",
-          "test/compat/memorystorezones1908_test.go:77 TestMemorystoreZoneDistribution",
+          "test/compat/memorystorezones1908_test.go:90 TestMemorystoreZoneDistribution",
           "test/compat/terraform_memorystore1557_test.go:26 TestTerraformMemorystore1557",
           "test/compat/terraform_memorystore1563_test.go:21 TestTerraformMemorystore1563",
           "test/compat/terraform_memorystore_test.go:26 TestTerraformMemorystoreInstance",
@@ -7522,7 +7522,7 @@
           "test/compat/memorystorerestart1557_test.go:74 TestMemorystoreClustersAcrossRestart",
           "test/compat/memorystorevalkey_test.go:85 TestMemorystoreValkeyInstance",
           "test/compat/memorystorevalkeyca1918_test.go:47 TestMemorystoreValkeyServerCA",
-          "test/compat/memorystorezones1908_test.go:77 TestMemorystoreZoneDistribution",
+          "test/compat/memorystorezones1908_test.go:90 TestMemorystoreZoneDistribution",
           "test/compat/terraform_memorystore1563_test.go:21 TestTerraformMemorystore1563",
           "test/compat/terraform_memorystore_test.go:26 TestTerraformMemorystoreInstance"
         ]
@@ -7635,7 +7635,7 @@
           "test/compat/memorystorevalkey_test.go:233 TestMemorystoreValkeyClusterDisabled",
           "test/compat/memorystorevalkey_test.go:85 TestMemorystoreValkeyInstance",
           "test/compat/memorystorevalkeyca1918_test.go:47 TestMemorystoreValkeyServerCA",
-          "test/compat/memorystorezones1908_test.go:77 TestMemorystoreZoneDistribution",
+          "test/compat/memorystorezones1908_test.go:90 TestMemorystoreZoneDistribution",
           "test/compat/terraform_memorystore1557_test.go:26 TestTerraformMemorystore1557",
           "test/compat/terraform_memorystore_test.go:26 TestTerraformMemorystoreInstance"
         ]
@@ -7687,7 +7687,7 @@
           "test/compat/memorystoreiam1614_test.go:121 TestMemorystoreIAMAuthChecksTheToken",
           "test/compat/memorystorerestart1557_test.go:74 TestMemorystoreClustersAcrossRestart",
           "test/compat/memorystorewindows1909_test.go:52 TestMemorystoreMaintenanceWindowSchedules",
-          "test/compat/memorystorezones1908_test.go:77 TestMemorystoreZoneDistribution",
+          "test/compat/memorystorezones1908_test.go:90 TestMemorystoreZoneDistribution",
           "test/compat/terraform_memorystore1557_test.go:26 TestTerraformMemorystore1557",
           "test/compat/terraform_memorystorebackups_test.go:22 TestTerraformMemorystoreAutomatedBackups",
           "test/compat/terraform_memorystoretls_test.go:23 TestTerraformMemorystoreInTransitEncryption",
@@ -7889,7 +7889,7 @@
           "test/compat/memorystorecertrotation1918_test.go:40 TestRedisClusterServerCertRotation",
           "test/compat/memorystorecluster_test.go:136 TestMemorystoreRedisCluster",
           "test/compat/memorystoreiam1614_test.go:121 TestMemorystoreIAMAuthChecksTheToken",
-          "test/compat/memorystorezones1908_test.go:77 TestMemorystoreZoneDistribution",
+          "test/compat/memorystorezones1908_test.go:90 TestMemorystoreZoneDistribution",
           "test/compat/terraform_rediscluster_test.go:25 TestTerraformRedisCluster"
         ]
       },

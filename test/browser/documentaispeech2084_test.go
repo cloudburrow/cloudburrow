@@ -155,7 +155,7 @@ func (p *tab) mediaFetch(src string) (status int, ctype string) {
 	return r.Status, r.Type
 }
 
-// TestSpeechWorkspaceAndPlaybackThroughThePage (#2084), in the run shard
+// TestSpeechWorkspaceAndPlaybackThroughThePage (#2084), in the localai shard
 // with Cloud Storage and the local models (CLOUDBURROW_TEST_LOCALAI): New
 // transcription's Workspace > New workspace creates the bucket; a Local
 // upload's audio, transcript.json and metadata.json are written there under
@@ -184,7 +184,10 @@ func TestSpeechWorkspaceAndPlaybackThroughThePage(t *testing.T) {
 	emptyBucketAtEnd(t, sc, bucket)
 	clip, _ := filepath.Abs("../../internal/speech/testdata/jfk.flac")
 
-	p := open(t)
+	// Two transcriptions, each allowed three minutes on a loaded runner,
+	// and the playback between them: more than a tab's three minutes, which
+	// main CI 44941828292 ran out in, waiting on the second.
+	p := openWithin(t, 7*time.Minute)
 	p.run(reducedMotion())
 	p.navigate("/speech/transcriptions" + q)
 	p.waitFor(settled)
@@ -200,10 +203,12 @@ func TestSpeechWorkspaceAndPlaybackThroughThePage(t *testing.T) {
 	p.run(chromedp.SetUploadFiles(chromedp.CSS(`.modal.is-open #f-file`), []string{clip}))
 	p.clickText(".modal.is-open .create-step-continue button", "Continue")
 	p.waitFor(`document.querySelector(".modal.is-open #f-recognizer").getClientRects().length > 0`)
+	submitted := time.Now()
 	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	// whisper.cpp transcribes locally, slower beside other tests' runs.
 	p.waitForWithin(`location.pathname.startsWith("/speech/transcriptions/transcription-") ||
 		[...document.querySelectorAll(".modal.is-open .form-error")].some((e) => !e.hidden && e.textContent)`, 3*time.Minute)
+	t.Logf("the Local upload's Submit answered in %s", time.Since(submitted).Round(time.Millisecond))
 	var path string
 	p.eval(`location.pathname`, &path)
 	if !strings.HasPrefix(path, "/speech/transcriptions/transcription-") {
@@ -284,8 +289,18 @@ func TestSpeechWorkspaceAndPlaybackThroughThePage(t *testing.T) {
 		t.Errorf("the Workspace drop-down offers %q", opts)
 	}
 	p.setField(".modal.is-open #f-uri", "gs://"+bucket+"/in/jfk.flac")
+	submitted = time.Now()
 	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
-	p.waitForWithin(fmt.Sprintf(`location.pathname.startsWith("/speech/transcriptions/transcription-") && location.pathname !== %q`, path), 3*time.Minute)
+	// A refusal is shown in the dialog, as the Local upload's: waiting only
+	// for the details page would wait out the tab's deadline and say nothing.
+	p.waitForWithin(fmt.Sprintf(`location.pathname.startsWith("/speech/transcriptions/transcription-") && location.pathname !== %q ||
+		[...document.querySelectorAll(".modal.is-open .form-error")].some((e) => !e.hidden && e.textContent)`, path), 3*time.Minute)
+	t.Logf("the Cloud storage file's Submit answered in %s", time.Since(submitted).Round(time.Millisecond))
+	var second string
+	p.eval(`location.pathname`, &second)
+	if second == path || !strings.HasPrefix(second, "/speech/transcriptions/transcription-") {
+		t.Fatalf("Submit of a Cloud storage file did not open its Transcription details: %s", p.modalRefusal())
+	}
 	p.waitFor(settled + ` && document.querySelector("#media-player") !== null`)
 	p.eval(readPlayer, &st)
 	if !strings.Contains(st.Src, "name=in&name=jfk.flac") || !strings.Contains(strings.ToLower(st.Text), "your country") {
