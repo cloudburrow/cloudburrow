@@ -48,7 +48,38 @@ func (h *fakeHost) MLXPython(_ context.Context, progress func(string)) (string, 
 	progress("Installing mlx-lm")
 	return "/cache/mlx/venv/bin/python", h.failRun
 }
-func (h *fakeHost) Reap() []string { h.reaped++; return nil }
+func (h *fakeHost) Reap() []string {
+	h.mu.Lock()
+	h.reaped++
+	h.mu.Unlock()
+	return nil
+}
+
+// startedCount and reapCount read what the manager's goroutines write.
+func (h *fakeHost) startedCount() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return len(h.started)
+}
+
+// spec is the i'th server's spec, and proc its process.
+func (h *fakeHost) spec(i int) hostai.Spec {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.started[i]
+}
+
+func (h *fakeHost) proc(i int) *fakeProc {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.procs[i]
+}
+
+func (h *fakeHost) reapCount() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.reaped
+}
 
 func (h *fakeHost) Start(spec hostai.Spec) (HostProcess, error) {
 	u, _ := url.Parse(spec.Health)
@@ -168,10 +199,10 @@ func TestDeployOnTheAppleGPUServesLlamaCpp(t *testing.T) {
 	if err := m.Run(ctx, "p", "us-central1", p); err != nil {
 		t.Fatal(err)
 	}
-	if len(h.started) != 1 {
-		t.Fatalf("started %d servers", len(h.started))
+	if h.startedCount() != 1 {
+		t.Fatalf("started %d servers", h.startedCount())
 	}
-	s := h.started[0]
+	s := h.spec(0)
 	args := strings.Join(s.Args, " ")
 	if s.Path != "/cache/llama.cpp/llama-server" || !strings.Contains(args, "--host 127.0.0.1 ") || !strings.Contains(args, "--n-gpu-layers 999") ||
 		!strings.Contains(args, "--alias acme/tiny") || !strings.Contains(args, "--ctx-size 1024") || !strings.HasSuffix(filepath.Base(argAfter(s.Args, "--model")), "tiny-Q4_K_M.gguf") {
@@ -198,7 +229,7 @@ func TestDeployOnTheAppleGPUServesLlamaCpp(t *testing.T) {
 	if err := m.Undeploy(ctx, "p", "us-central1", p.Endpoint, ""); err != nil {
 		t.Fatal(err)
 	}
-	if h.procs[0].Running() {
+	if h.proc(0).Running() {
 		t.Error("the host server survived Undeploy")
 	}
 	if _, err := os.Stat(dir); err == nil {
@@ -227,7 +258,7 @@ func TestDeployOnTheAppleGPUServesMLX(t *testing.T) {
 	if err := m.Run(ctx, "p", "l", p); err != nil {
 		t.Fatal(err)
 	}
-	s := h.started[0]
+	s := h.spec(0)
 	dir := m.hostModelDir(p.Endpoint)
 	if s.Path != "/cache/mlx/venv/bin/python" || strings.Join(s.Args[:4], " ") != "-m mlx_lm server --model" || s.Args[4] != dir ||
 		!contains(s.Env, "HF_HUB_OFFLINE=1") {
@@ -248,7 +279,7 @@ func TestDeployOnTheAppleGPUServesMLX(t *testing.T) {
 	}
 	// Close ends the server; Restore starts it again from its files.
 	m.Close()
-	if h.procs[0].Running() {
+	if h.proc(0).Running() {
 		t.Fatal("Close left the host server running")
 	}
 	m2 := &Manager{Instance: "t", StateFile: m.StateFile, Docker: m.Docker, Cluster: m.Cluster, Host: h, Models: m.Models, ReadyTimeout: m.ReadyTimeout}
@@ -256,7 +287,7 @@ func TestDeployOnTheAppleGPUServesMLX(t *testing.T) {
 	deadline := time.Now().Add(10 * time.Second)
 	for {
 		e, _ := m2.Endpoint("p", "l", p.Endpoint)
-		if e.Deployed.State == StateReady && len(h.started) == 2 && m2.hostHealthy(workloadName(p.Endpoint)) {
+		if e.Deployed.State == StateReady && h.startedCount() == 2 && m2.hostHealthy(workloadName(p.Endpoint)) {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -264,7 +295,7 @@ func TestDeployOnTheAppleGPUServesMLX(t *testing.T) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	if h.reaped == 0 {
+	if h.reapCount() == 0 {
 		t.Error("Restore did not reap servers left behind")
 	}
 	m2.Close()
@@ -341,7 +372,7 @@ func TestHostInstallFailure(t *testing.T) {
 		t.Fatalf("Run = %v", err)
 	}
 	e, _ := m.Endpoint("p", "l", p.Endpoint)
-	if e.Deployed.State != StateFailed || !strings.Contains(e.Deployed.Message, "not the pinned") || len(h.started) != 0 {
+	if e.Deployed.State != StateFailed || !strings.Contains(e.Deployed.Message, "not the pinned") || h.startedCount() != 0 {
 		t.Errorf("deployed = %+v", e.Deployed)
 	}
 }

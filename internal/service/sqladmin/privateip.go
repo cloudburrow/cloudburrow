@@ -31,11 +31,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/cloudburrow/cloudburrow/internal/service/compute"
+	"github.com/cloudburrow/cloudburrow/internal/locations"
 )
 
 // zones are a region's zones, as Compute Engine lists them.
-func zonesOf(region string) []string { return compute.Zones(region) }
+func zonesOf(region string) []string { return locations.Zones(region) }
 
 // zone is the zone of a server, by index: node 0's is
 // locationPreference.zone (else the region's first), node 1's its
@@ -107,10 +107,29 @@ func (s Spec) privateNetwork() string {
 	if pn == "" {
 		return ""
 	}
-	if rel, ok := compute.NetworkName(pn, s.Project); ok {
+	if rel, ok := networkName(pn, s.Project); ok {
 		return rel
 	}
 	return pn
+}
+
+// networkName is the relative name (projects/P/global/networks/N) of a
+// network reference in project (a full URL, projects/P/..., global/... or
+// a bare name), and false when it names none, as Compute Engine reads it.
+func networkName(ref, project string) (string, bool) {
+	rel := ref
+	if i := strings.Index(rel, "/projects/"); i >= 0 && strings.Contains(rel, "://") {
+		rel = rel[i+1:]
+	} else if strings.HasPrefix(rel, "global/") {
+		rel = "projects/" + project + "/" + rel
+	} else if !strings.Contains(rel, "/") {
+		rel = "projects/" + project + "/global/networks/" + rel
+	}
+	parts := strings.Split(rel, "/")
+	if len(parts) != 5 || parts[0] != "projects" || parts[2] != "global" || parts[3] != "networks" {
+		return "", false
+	}
+	return rel, true
 }
 
 // publicIP is whether ipConfiguration.ipv4Enabled is not false.
