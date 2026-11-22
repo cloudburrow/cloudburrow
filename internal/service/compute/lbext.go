@@ -48,7 +48,9 @@ type IAPGate interface {
 	VerifyIDToken(tok string) (email, audience string, ok bool)
 	// Allowed reports whether email (a user or service account) may reach
 	// an IAP resource (projects/P/iap_web/compute/services/S, or
-	// compute-REGION for a regional backend service): whether it holds
+	// compute-REGION for a regional backend service; P is the project ID
+	// and S the backend service's name, and the API's names by project
+	// number or service ID are the same resource): whether it holds
 	// iap.webServiceVersions.accessViaIAP (roles/iap.httpsResourceAccessor)
 	// on the resource or above it (iap_web/compute, iap_web, the project),
 	// with each binding's condition evaluated against r.
@@ -57,6 +59,10 @@ type IAPGate interface {
 	// applicationSettings), merged from the levels above it; nil when
 	// none is set.
 	Settings(resource string) map[string]any
+	// ProjectNumber is a project's number, for the signed header's
+	// audience (/projects/NUMBER/global/backendServices/ID); "" when the
+	// project is not known.
+	ProjectNumber(project string) string
 }
 
 // IAPRequest is what an IAM condition on an IAP binding can read
