@@ -20,6 +20,7 @@ import (
 	pmpb "cloud.google.com/go/parametermanager/apiv1/parametermanagerpb"
 	rmpb "cloud.google.com/go/resourcemanager/apiv3/resourcemanagerpb"
 	"cloud.google.com/go/security/privateca/apiv1/privatecapb"
+	"cloud.google.com/go/vpcaccess/apiv1/vpcaccesspb"
 	"cloud.google.com/go/workflows/apiv1/workflowspb"
 	"cloud.google.com/go/workflows/executions/apiv1/executionspb"
 	"google.golang.org/grpc"
@@ -52,6 +53,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/secrets"
 	"github.com/cloudburrow/cloudburrow/internal/service/tasks"
 	"github.com/cloudburrow/cloudburrow/internal/service/vertexai"
+	"github.com/cloudburrow/cloudburrow/internal/service/vpcaccess"
 	"github.com/cloudburrow/cloudburrow/internal/service/workflows"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 )
@@ -97,6 +99,13 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 		t.Fatal(err)
 	}
 	pmpb.RegisterParameterManagerServer(srv, pm)
+	// Serverless VPC Access alone (#2140): its mixins are other services'
+	// rows.
+	va, err := vpcaccess.New(vpcaccess.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	vpcaccesspb.RegisterVpcAccessServiceServer(srv, va)
 	gkeSrv, err := gke.NewServer(nil, gke.Options{Versions: []gke.Version{{GKE: "1.36.4-gke.0", Image: "kindest/node:v1.36.4"}}})
 	if err != nil {
 		t.Fatal(err)

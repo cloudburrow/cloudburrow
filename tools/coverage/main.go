@@ -113,6 +113,7 @@ import (
 	_ "cloud.google.com/go/spanner/apiv1/spannerpb"
 	_ "cloud.google.com/go/speech/apiv1/speechpb"
 	_ "cloud.google.com/go/speech/apiv2/speechpb"
+	_ "cloud.google.com/go/vpcaccess/apiv1/vpcaccesspb"
 	_ "cloud.google.com/go/workflows/apiv1/workflowspb"
 	_ "cloud.google.com/go/workflows/executions/apiv1/executionspb"
 	_ "google.golang.org/genproto/googleapis/cloud/location"
@@ -325,6 +326,10 @@ var areas = []area{
 	// Parameter Manager (#2054): CloudBurrow's own, gRPC and JSON on one
 	// port; its Locations mixin is another area's row.
 	{Key: "parametermanager", Title: "Parameter Manager (v1)", Own: true, Services: []string{"google.cloud.parametermanager.v1.ParameterManager"}},
+	// Serverless VPC Access (#2140): CloudBurrow's own, JSON on the Compute
+	// Engine port; its Locations and Operations mixins are other areas'
+	// rows.
+	{Key: "vpcaccess", Title: "Serverless VPC Access (v1)", Own: true, Services: []string{"google.cloud.vpcaccess.v1.VpcAccessService"}},
 	{Key: "workflows", Title: "Workflows and Workflow Executions (v1)", Own: true,
 		Services: []string{"google.cloud.workflows.v1.Workflows", "google.cloud.workflows.executions.v1.Executions"}},
 	// The Kubernetes Engine API (#1913): CloudBurrow's own, gRPC and JSON

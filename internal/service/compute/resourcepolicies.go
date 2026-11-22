@@ -485,7 +485,8 @@ func (s *Server) snapshotDueLocked(rel string, d obj, now time.Time) {
 		project := strings.Split(rel, "/")[1]
 		// Google's scheduled snapshot name: DISK-ZONE-TIMESTAMP-RANDOM
 		// (scheduled-snapshots, "snapshots ... named
-		// disk-name-zone-timestamp"), UNVERIFIED suffix.
+		// disk-name-zone-timestamp"), UNVERIFIED suffix (re-read 2026-11-22:
+		// https://docs.cloud.google.com/compute/docs/disks/scheduled-snapshots).
 		name := str(d, "name") + "-" + lastSeg(str(d, "zone")) + "-" + now.UTC().Format("20060102150405") + "-" + randHex(4)[:8]
 		if len(name) > 63 {
 			name = name[len(name)-63:]

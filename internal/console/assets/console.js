@@ -128,6 +128,10 @@ const COMPUTE_METADATA_TABS = ["/compute/metadata", "/compute/metadata/sshKeys"]
 const VPC_NETWORK_TABS = ["/networking/networks/list", "/networking/subnets/list"];
 const VPC_ROUTE_TABS = ["/networking/routes/effective", "/networking/routes/list"];
 const VPC_ADDRESS_TABS = ["/networking/addresses/list", "/networking/addresses/internal"];
+// Private Service Connect's tabs (#2140): Connected endpoints and
+// Published services (vpc/docs/configure-private-service-connect-apis,
+// configure-private-service-connect-producer, read 2026-11-22).
+const PSC_TABS = ["/net-services/psc/list", "/net-services/psc/published"];
 const GKE_STORAGE = ["/kubernetes/storage", "/kubernetes/storage-classes"];
 // Cloud Logging's Settings and its Log Scopes tab (#2020), as Google's
 // Settings page has a Log Scopes tab (log-scope/create-and-manage).
@@ -541,6 +545,26 @@ const ROUTES = [
   // VPC network peering (#2140, vpc/docs/using-vpc-peering).
   { path: "/networking/peering/list", service: "vpc-peering", icon: "vpc", title: "VPC network peering", kind: "Peering connection",
     section: "Networking", product: "vpc", productTitle: "VPC network" },
+  // Shared VPC (#2140, vpc/docs/provisioning-shared-vpc).
+  { path: "/networking/xpn", service: "vpc-sharedvpc", icon: "vpc", title: "Shared VPC", kind: "Attached project",
+    section: "Networking", product: "vpc", productTitle: "VPC network" },
+  // Serverless VPC access (#2140, vpc/docs/configure-serverless-vpc-access).
+  { path: "/networking/connectors/list", service: "vpc-connectors", icon: "vpc", title: "Serverless VPC access", kind: "Connector",
+    section: "Networking", product: "vpc", productTitle: "VPC network" },
+
+  // Cloud Router (#2140, network-connectivity/docs/router): Network
+  // Connectivity's Cloud Routers page.
+  { path: "/hybrid/routers/list", service: "hybrid-routers", icon: "vpc", title: "Cloud Routers", kind: "Cloud Router",
+    section: "Networking", product: "hybrid", productTitle: "Network Connectivity" },
+  // Cloud NAT (#2140, nat/docs/set-up-manage-network-address-translation):
+  // Network services' Cloud NAT page.
+  { path: "/net-services/nat/list", service: "netservices-nat", icon: "vpc", title: "Cloud NAT", kind: "Cloud NAT gateway",
+    section: "Networking", product: "netservices", productTitle: "Network services" },
+  // Private Service Connect (#2140).
+  { path: "/net-services/psc/list", service: "netservices-psc-endpoints", icon: "vpc", title: "Private Service Connect", tabTitle: "Connected endpoints", kind: "Endpoint",
+    pageTabs: PSC_TABS, section: "Networking", product: "netservices", productTitle: "Network services" },
+  { path: "/net-services/psc/published", service: "netservices-psc-published", icon: "vpc", title: "Private Service Connect", tabTitle: "Published services", kind: "Published service",
+    navHidden: true, navAs: "/net-services/psc/list", pageTabs: PSC_TABS, section: "Networking", product: "netservices", productTitle: "Network services" },
 
   // Secret Manager (#1850): Google's menu, Secret Manager (the global
   // secrets), Regional secrets and Settings.

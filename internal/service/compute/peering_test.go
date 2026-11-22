@@ -147,7 +147,10 @@ func TestPeeredNetworksShareASegment(t *testing.T) {
 			t.Errorf("a's configuration has %q:\n%s", not, out)
 		}
 	}
-	if out, _ := s.vpcConfigLocked(c, "10.244.0.9"); !strings.Contains(out, vni) || strings.Contains(out, "10.0.0.") {
+	// (Its ruleset names 10.0.0.0/8 among the private ranges a VM without
+	// an external IP or Cloud NAT keeps, #2140: a's route and address are
+	// what must be missing.)
+	if out, _ := s.vpcConfigLocked(c, "10.244.0.9"); !strings.Contains(out, vni) || strings.Contains(out, "route 10.0.0.") || strings.Contains(out, "10.0.0.2") {
 		t.Errorf("c's configuration (same segment, a unreachable):\n%s", out)
 	}
 	// Unpeered, a is a segment of its own again.

@@ -39,6 +39,12 @@ const podFresh = 30 * time.Second
 // metadata server.
 var ClusterCIDRs = []string{"10.244.0.0/16", "10.96.0.0/12"}
 
+// PrivateRanges are the addresses a VM with neither an external IP nor a
+// Cloud NAT gateway still reaches over its pod interface: RFC 1918's and
+// the shared address space, where this machine's Docker networks and
+// CloudBurrow's endpoints are. Every other address is the internet's.
+var PrivateRanges = []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10"}
+
 type podSeen struct {
 	ip   string
 	seen time.Time
@@ -71,6 +77,10 @@ type vmNet struct {
 	network, ip, sa          string
 	tags                     []string
 	running                  bool
+	// noInternet is a VM whose primary interface has no external IP and
+	// that no Cloud NAT gateway translates (#2140): it has no route to the
+	// internet, as on Google.
+	noInternet bool
 }
 
 func vmNetOf(rel string, o obj) (vmNet, bool) {
@@ -114,6 +124,10 @@ func (s *Server) vpcConfigLocked(inst obj, pod string) (string, bool) {
 	self, ok := vmNetOf(rel, inst)
 	if !ok {
 		return "", false
+	}
+	if nics := sliceOf(inst["networkInterfaces"]); len(nics) > 0 {
+		nic, _ := nics[0].(map[string]any)
+		self.noInternet = len(sliceOf(nic["accessConfigs"])) == 0 && !s.natInternetLocked(inst)
 	}
 	if s.pods == nil {
 		s.pods = map[string]podSeen{}
@@ -367,6 +381,12 @@ func firewallNFT(self vmNet, members []vmNet, rules []obj, peerPods []string) st
 	b.WriteString("  chain egress {\n    type filter hook output priority filter; policy accept;\n")
 	b.WriteString("    oifname \"lo\" accept\n    ct state established,related accept\n")
 	b.WriteString("    oifname != \"vpc0\" ip daddr " + nftSet(append([]string{"169.254.169.254"}, ClusterCIDRs...)) + " accept\n")
+	if self.noInternet {
+		// No external IP and no Cloud NAT (#2140): nothing but private
+		// addresses (this machine's own networks, where CloudBurrow's APIs
+		// are served) is reachable, whatever the egress rules allow.
+		b.WriteString("    oifname != \"vpc0\" ip daddr != " + nftSet(PrivateRanges) + " counter drop comment \"no external IP and no Cloud NAT\"\n")
+	}
 	for _, r := range eg {
 		dst := strsAny(r.o["destinationRanges"])
 		if len(dst) == 0 {

@@ -143,6 +143,10 @@ func (s *Server) regionalInternal(project, region string, b, o obj, purpose, add
 	if !ok {
 		return notFound(sub)
 	}
+	// A subnet of another project only through Shared VPC (#2140).
+	if err := s.checkSharedSubnetLocked(project, sub, "resource.subnetwork"); err != nil {
+		return err
+	}
 	if lastSeg(str(so, "region")) != region {
 		return invalid("Invalid value for field 'resource.subnetwork': '%s'. The subnetwork must be in region '%s'.", sub, region)
 	}
@@ -199,6 +203,10 @@ func (s *Server) usedInSubnetLocked(sub string) map[string]string {
 	for k, a := range s.res {
 		if strings.Contains(k, "/addresses/") && str(a, "subnetwork") == sub {
 			used[str(a, "address")] = k
+		}
+		if strings.Contains(k, "/forwardingRules/") && str(a, "subnetwork") == sub && str(a, "_address") == "" {
+			// A Private Service Connect endpoint's chosen address (#2140).
+			used[str(a, "IPAddress")] = k
 		}
 		if strings.Contains(k, "/instances/") {
 			nics, _ := a["networkInterfaces"].([]any)
@@ -287,7 +295,8 @@ func (s *Server) globalInternal(project string, b, o obj, purpose, addr string) 
 }
 
 func (s *Server) freeExternalLocked(pool *net.IPNet) (string, error) {
-	used := map[string]bool{}
+	// Cloud NAT's AUTO_ONLY addresses (routers.go) are taken too.
+	used := s.natAutoIPsLocked()
 	for k, a := range s.res {
 		if strings.Contains(k, "/addresses/") {
 			used[str(a, "address")] = true

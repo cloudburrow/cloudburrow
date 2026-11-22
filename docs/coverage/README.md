@@ -46,7 +46,7 @@ Do not edit these files by hand.
 | [Service Usage API (v1)](serviceusage.md) | 10 | 10 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [API Keys API (v2)](apikeys.md) | 9 | 9 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Firebase Rules API (v1)](firebaserules.md) | 11 | 11 | 0 | 0 | 0 | 0 | 0 | 0 |
-| [Compute Engine API (v1): VPC networking](compute.md) | 229 | 72 | 0 | 83 | 74 | 0 | 0 | 0 |
+| [Compute Engine API (v1): VPC networking](compute.md) | 277 | 107 | 0 | 96 | 74 | 0 | 0 | 0 |
 | [Cloud Storage companion APIs (Batch Operations, Insights, Transfer v1)](storagejobs.md) | 50 | 50 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Backup and DR Service API (v1)](backupdr.md) | 61 | 47 | 0 | 14 | 0 | 0 | 0 | 0 |
 | [Cloud Identity API (v1)](cloudidentity.md) | 70 | 39 | 0 | 31 | 0 | 0 | 0 | 0 |
@@ -55,6 +55,7 @@ Do not edit these files by hand.
 | [Workload Identity Federation (IAM v1 pools, STS v1)](workloadidentity.md) | 88 | 63 | 0 | 25 | 0 | 0 | 0 | 0 |
 | [Certificate Authority Service (v1)](privateca.md) | 29 | 29 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Parameter Manager (v1)](parametermanager.md) | 22 | 22 | 0 | 0 | 0 | 0 | 0 | 0 |
+| [Serverless VPC Access (v1)](vpcaccess.md) | 4 | 4 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Workflows and Workflow Executions (v1)](workflows.md) | 10 | 10 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Kubernetes Engine API (v1)](gke.md) | 37 | 19 | 0 | 16 | 2 | 0 | 0 | 0 |
 | [BigQuery sharing (Analytics Hub) API (v1)](analyticshub.md) | 29 | 20 | 0 | 8 | 1 | 0 | 0 | 0 |

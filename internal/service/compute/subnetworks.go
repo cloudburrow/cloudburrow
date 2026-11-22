@@ -286,6 +286,13 @@ func (s *Server) deleteSubnetwork(project, region, name string) (obj, error) {
 		if strings.Contains(k, "/addresses/") && str(a, "subnetwork") == rel {
 			return nil, inUse("subnetwork", rel, k)
 		}
+		if strings.Contains(k, "/routers/") && routerUsesSubnet(a, rel) {
+			return nil, inUse("subnetwork", rel, k)
+		}
+	}
+	// Private Service Connect endpoints and attachments (#2140).
+	if u := s.pscUsersLocked(rel); len(u) > 0 {
+		return nil, inUse("subnetwork", rel, u[0])
 	}
 	if s.opts.NetworkUsers != nil {
 		if users := s.opts.NetworkUsers(rel); len(users) > 0 {

@@ -193,7 +193,8 @@ func (s *Server) insertImage(c call) (obj, error) {
 			return nil, errf(http.StatusBadRequest, "resourceNotReady", "The resource '%s' is not ready", dr)
 		}
 		// Google refuses an image of a disk a running VM writes to unless
-		// forced (images/create-custom: "--force"), UNVERIFIED wording.
+		// forced (images/create-custom: "--force"), UNVERIFIED wording
+		// (re-read 2026-11-22: https://docs.cloud.google.com/compute/docs/images/create-custom).
 		if b["forceCreate"] != true && first(c.query, "forceCreate") != "true" {
 			for _, u := range strs(d, "users") {
 				if vm, ok := s.res[u]; ok && str(vm, "status") == stRunning {
