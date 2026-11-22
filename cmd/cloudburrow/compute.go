@@ -45,6 +45,10 @@ type computeService struct {
 	cancel       context.CancelFunc
 	srv          *http.Server
 	ln           net.Listener
+	// sql is the Cloud SQL Admin API, whose private IPs the VPC networks
+	// reach (#2141); nil without Cloud SQL.
+	sql    func() *sqladmin.Server
+	svcIPs *serviceIPs
 }
 
 func newComputeService(cfg config.Config) *computeService {
@@ -97,7 +101,9 @@ func (s *computeService) Start(ctx context.Context) error {
 		}
 		return s.metadataHost()
 	}
-	api, err := compute.New(compute.Options{State: state, Extra: s.instanceGroupManagers, NetworkUsers: s.networkUsers, VMs: s.vms})
+	s.svcIPs = &serviceIPs{kubeconfig: s.cfg.KubeconfigPath(), namespace: s.cfg.Cluster.Namespace}
+	api, err := compute.New(compute.Options{State: state, Extra: s.instanceGroupManagers, NetworkUsers: s.networkUsers, VMs: s.vms,
+		PrivateServices: s.privateServices})
 	if err != nil {
 		return err
 	}
@@ -154,10 +160,11 @@ func (s *computeService) register(coord *lifecycle.Coordinator) {
 // networkUsers are the Kubernetes Engine clusters on a network or subnet,
 // which keep it from being deleted, as on Google.
 func (s *computeService) networkUsers(rel string) []string {
+	out := s.sqlNetworkUsers(rel)
 	if api := s.gke.API(); api != nil {
-		return api.NetworkUsers(rel)
+		out = append(out, api.NetworkUsers(rel)...)
 	}
-	return nil
+	return out
 }
 
 // The networks each service checks against: nil interfaces (not a nil

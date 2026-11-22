@@ -63,6 +63,22 @@ type Options struct {
 	VMs VMBackend
 	// MinFreeBytes is DefaultMinFreeBytes when zero.
 	MinFreeBytes uint64
+	// PrivateServices are the producer endpoints private services access
+	// puts on a network (projects/P/global/networks/N): a Cloud SQL
+	// instance's private IP (#2141), which the network's VMs reach. It is
+	// called with the server's lock held, and must not call back into it.
+	PrivateServices func(network string) []PrivateService
+}
+
+// PrivateService is one private services access endpoint: its address and
+// port on the network, and where its connections go, an address the VMs'
+// pods reach (a cluster Service's).
+type PrivateService struct {
+	Name       string
+	IP         string
+	Port       int
+	TargetIP   string
+	TargetPort int
 }
 
 // obj is one resource, as its JSON is kept: link fields hold relative

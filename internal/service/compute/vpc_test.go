@@ -113,3 +113,31 @@ func TestVPCConfigPeersAndHosts(t *testing.T) {
 		t.Errorf("a peer that stopped reporting is still a peer:\n%s", out)
 	}
 }
+
+// A network's private services access endpoints (a Cloud SQL instance's
+// private IP, #2141) are a nat chain of the guest's ruleset, sending a
+// connection to the endpoint on to its target; another network's are not.
+func TestVPCConfigPrivateServices(t *testing.T) {
+	nw := "projects/p/global/networks/n"
+	s := &Server{opts: Options{Now: time.Now, PrivateServices: func(network string) []PrivateService {
+		if network != nw {
+			return nil
+		}
+		return []PrivateService{{Name: "cloudsql p:db", IP: "10.20.0.3", Port: 5432, TargetIP: "10.96.4.5", TargetPort: 5432},
+			{Name: "bad", IP: "nope", Port: 1, TargetIP: "10.96.0.1", TargetPort: 1}}
+	}}, res: map[string]obj{}}
+	s.res[nw] = obj{"id": "123"}
+	rel := "projects/p/zones/us-central1-a/instances/a"
+	a := obj{"name": "a", "selfLink": rel, "zone": "projects/p/zones/us-central1-a", "status": "RUNNING",
+		"networkInterfaces": []any{map[string]any{"network": nw, "networkIP": "10.0.0.2"}}}
+	s.res[rel] = a
+	out, ok := s.vpcConfigLocked(a, "10.244.0.7")
+	if !ok {
+		t.Fatal("no configuration")
+	}
+	want := "  chain private-services {\n    type nat hook output priority -100; policy accept;\n" +
+		"    ip daddr 10.20.0.3 tcp dport 5432 dnat ip to 10.96.4.5:5432 comment \"cloudsql p:db\"\n  }\n}\n"
+	if !strings.HasSuffix(out, want) || strings.Contains(out, "nope") {
+		t.Errorf("ruleset:\n%s", out)
+	}
+}

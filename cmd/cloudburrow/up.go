@@ -1057,6 +1057,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// Compute Engine's networks when compute is served (#1936).
 		if computeSvc != nil {
 			sqlAdminSrv.SetNetworks(computeSvc.sqlNetworks)
+			// Its private IPs are reachable from the networks' VMs (#2141).
+			computeSvc.sql = func() *sqladmin.Server { return sqlAdminRef }
 		}
 		// executeSql reads a user's password from Secret Manager (#1462).
 		if secretsSvc != nil {

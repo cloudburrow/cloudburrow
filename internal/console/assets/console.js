@@ -7537,6 +7537,13 @@ function attachSecretPicker(control, picker) {
   control.addEventListener("blur", () => setTimeout(close, 150));
 }
 
+// secretPickerLabel is a secret's ID, with its location when regional.
+function secretPickerLabel(name) {
+  const m = /^projects\/[^/]+\/(?:locations\/([^/]+)\/)?secrets\/([^/]+)$/.exec(name);
+  if (!m) return name;
+  return m[1] ? `${m[2]} (${m[1]})` : m[2];
+}
+
 // secretRef is a secret version's reference in a parameter payload.
 function secretRef(version) {
   return `__REF__("//secretmanager.googleapis.com/${version.replace(/^\/\/secretmanager\.googleapis\.com\//, "")}")`;
@@ -7560,7 +7567,7 @@ function openSecretPicker(control, picker, at) {
   };
   const fillSecrets = () => {
     const all = secrets();
-    setChildren(secret, ...(all.length ? all.map((s) => el("option", { value: s.name, text: s.name.replace(/^projects\/[^/]+\//, "") }))
+    setChildren(secret, ...(all.length ? all.map((s) => el("option", { value: s.name, text: secretPickerLabel(s.name) }))
       : [el("option", { value: "", text: regional.checked ? "No regional secrets in this project" : "No secrets in this project" })]));
     fillVersions();
   };

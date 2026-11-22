@@ -18,6 +18,8 @@ type Networks interface {
 	// AllocatedRange is the range of a VPC_PEERING global address name
 	// allocated on network (projects/P/global/networks/N).
 	AllocatedRange(network, name string) (*net.IPNet, bool)
+	// AllocatedRanges are every such range on network, by name.
+	AllocatedRanges(network string) map[string]*net.IPNet
 }
 
 // SetNetworks makes instances.insert, patch and update check

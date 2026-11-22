@@ -11,6 +11,7 @@ import (
 	sqladminapi "google.golang.org/api/sqladmin/v1"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/service/compute"
 	"github.com/cloudburrow/cloudburrow/internal/service/monitoring"
 )
 
@@ -228,5 +229,61 @@ func TestCloudSQLOverviewCharts(t *testing.T) {
 	}
 	if _, why := sqlCharts(context.Background(), monitoringAdmin{}, "p", inst, sqlOverviewCharts); why == "" {
 		t.Error("no Cloud Monitoring, and the charts did not say so")
+	}
+}
+
+// TestCloudSQLZonesAndPrivateIPFields is #2141: the create page's Specify
+// zones and Private IP, the network chosen from Compute Engine's VPC
+// networks and its allocated ranges, and what they send.
+func TestCloudSQLZonesAndPrivateIPFields(t *testing.T) {
+	cs, err := compute.New(compute.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cs.Call("POST", "proj-1", "global/addresses", nil, map[string]any{"name": "psa-range",
+		"addressType": "INTERNAL", "purpose": "VPC_PEERING", "address": "10.30.0.0", "prefixLength": 16.0,
+		"network": "global/networks/default"}); err != nil {
+		t.Fatal(err)
+	}
+	p := cloudSQLInstancesProvider{compute: func() *compute.Server { return cs }}
+	by := map[string]console.Field{}
+	for _, f := range p.CreateFormFor(context.Background(), "proj-1") {
+		by[f.Name] = f
+	}
+	net := by["privateNetwork"]
+	if net.Type != "select" || net.Default != "projects/proj-1/global/networks/default" || by["privateIp"].Section != "Connections" {
+		t.Errorf("network field: %+v", net)
+	}
+	if r := by["allocatedIpRange"].OptionsFor["projects/proj-1/global/networks/default"]; len(r) != 2 || r[1] != "psa-range" {
+		t.Errorf("allocated ranges: %v", r)
+	}
+	if z := by["zone"].OptionsFor["us-east1"]; len(z) < 3 || z[0] != "" || z[1] != "us-east1-b" || by["secondaryZone"].VisibleWhen["availabilityType"] != "REGIONAL" {
+		t.Errorf("zones: %v %+v", z, by["secondaryZone"])
+	}
+	st := &sqladminapi.Settings{}
+	v := map[string]string{"publicIp": "false", "privateIp": "true", "privateMethod": sqlPrivatePSA,
+		"privateNetwork": "projects/proj-1/global/networks/default", "allocatedIpRange": "psa-range", "enablePrivatePath": "true",
+		"zone": "us-east1-c", "secondaryZone": "us-east1-d", "availabilityType": "REGIONAL"}
+	sqlZonesConfig(st, v)
+	if err := sqlCreateConnections(st, v); err != nil {
+		t.Fatal(err)
+	}
+	ic := st.IpConfiguration
+	if ic.Ipv4Enabled || ic.PrivateNetwork != v["privateNetwork"] || ic.AllocatedIpRange != "psa-range" || !ic.EnablePrivatePathForGoogleCloudServices ||
+		st.LocationPreference.Zone != "us-east1-c" || st.LocationPreference.SecondaryZone != "us-east1-d" {
+		t.Errorf("sent: %+v %+v", ic, st.LocationPreference)
+	}
+	st = &sqladminapi.Settings{}
+	if err := editNetworking(st, map[string]string{"publicIp": "false", "privateIp": "true", "privateMethod": sqlPrivatePSC,
+		"pscAllowedProjects": "a, b"}); err != nil || st.IpConfiguration.PscConfig == nil || len(st.IpConfiguration.PscConfig.AllowedConsumerProjects) != 2 {
+		t.Errorf("psc: %+v %v", st.IpConfiguration, err)
+	}
+	if err := editNetworking(&sqladminapi.Settings{}, map[string]string{"privateIp": "true", "privateMethod": sqlPrivatePSA}); err == nil {
+		t.Error("private IP without a network was accepted")
+	}
+	a := p.networkingAction("proj-1", &sqladminapi.DatabaseInstance{Settings: &sqladminapi.Settings{IpConfiguration: &sqladminapi.IpConfiguration{
+		Ipv4Enabled: true, PrivateNetwork: "https://www.googleapis.com/compute/v1/projects/proj-1/global/networks/default"}}})
+	if a.Submit != "Save" || a.Fields[0].Default != "true" || a.Fields[1].Default != "true" || a.Fields[3].Default != "projects/proj-1/global/networks/default" {
+		t.Errorf("networking: %+v", a.Fields)
 	}
 }

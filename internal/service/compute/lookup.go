@@ -100,6 +100,31 @@ func (s *Server) AllocatedRange(network, name string) (*net.IPNet, bool) {
 	return n, ok
 }
 
+// AllocatedRanges are every VPC_PEERING global address range allocated on
+// network (projects/P/global/networks/N), by name: the ranges private
+// services access gives a producer such as Cloud SQL (#2141).
+func (s *Server) AllocatedRanges(network string) map[string]*net.IPNet {
+	p := strings.Split(network, "/")
+	if len(p) < 2 {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := map[string]*net.IPNet{}
+	prefix := "projects/" + p[1] + "/global/addresses/"
+	for k, o := range s.res {
+		rest, ok := strings.CutPrefix(k, prefix)
+		if !ok || strings.Contains(rest, "/") || str(o, "purpose") != "VPC_PEERING" || str(o, "network") != network {
+			continue
+		}
+		b, _ := json.Marshal(o["prefixLength"])
+		if n, ok := ParseCIDR(str(o, "address") + "/" + string(b)); ok {
+			out[rest] = n
+		}
+	}
+	return out
+}
+
 func jsonString(v any) string {
 	b, _ := json.Marshal(v)
 	return string(b)

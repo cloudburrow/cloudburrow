@@ -137,7 +137,11 @@ func zipLabels(options, labels []string) map[string]string {
 // sqlCreateForm is Google's create page (#1860): the engine, the edition and
 // its preset, the instance info, the region and zonal availability, then
 // "Customize your instance".
-func (p cloudSQLInstancesProvider) sqlCreateForm() []console.Field {
+func (p cloudSQLInstancesProvider) sqlCreateForm() []console.Field { return p.sqlCreateFormIn("") }
+
+// sqlCreateFormIn is the create page in project, its Private IP network
+// chosen from the project's VPC networks.
+func (p cloudSQLInstancesProvider) sqlCreateFormIn(project string) []console.Field {
 	var pg, my, ms, pgLabels, myLabels, msLabels []string
 	pgDef, myDef, msDef := "", "", ""
 	for _, v := range p.versions {
@@ -185,7 +189,8 @@ func (p cloudSQLInstancesProvider) sqlCreateForm() []console.Field {
 	for h := 0; h < 24; h++ {
 		hours, hourLabels = append(hours, strconv.Itoa(h)), append(hourLabels, fmt.Sprintf("%02d:00 UTC", h))
 	}
-	return withPasswordPolicy(infoSec, append(append([]console.Field{
+	nets, ranges := p.sqlNetworks(project)
+	return withPasswordPolicy(infoSec, append(append(append([]console.Field{
 		{Name: "engine", Label: "Database engine", Type: "radio", Section: engineSec, Default: sqlEnginePostgres,
 			Options:         []string{sqlEngineMySQL, sqlEnginePostgres, sqlEngineSQLServer},
 			OptionLabels:    zipLabels([]string{sqlEngineMySQL, sqlEnginePostgres, sqlEngineSQLServer}, engineLabels),
@@ -228,6 +233,7 @@ func (p cloudSQLInstancesProvider) sqlCreateForm() []console.Field {
 		{Name: "availabilityType", Label: "Zonal availability", Type: "radio", Section: regionSec, Default: "ZONAL",
 			Options: []string{"ZONAL", "REGIONAL"}, OptionLabels: map[string]string{"ZONAL": "Single zone", "REGIONAL": "Multiple zones (Highly available)"},
 			Help: availabilityHelp},
+		sqlZoneFields(regionSec, "", "", "", false)[0], sqlZoneFields(regionSec, "", "", "", false)[1],
 		{Name: "tier", Label: "Machine type", Type: "text", Section: machineSec,
 			Help: "Such as db-custom-2-7680; empty takes the edition preset's. Recorded and reported; the server is not sized by it."},
 		dataCacheField("Data cache"),
@@ -249,6 +255,7 @@ func (p cloudSQLInstancesProvider) sqlCreateForm() []console.Field {
 		{Name: "authorizedNetworks", Label: "Authorized networks", Type: "text", Section: connSec,
 			VisibleWhen: map[string]string{"publicIp": "true"},
 			Help:        "CIDR ranges allowed to connect, separated by commas, such as 203.0.113.0/24. Recorded and shown on Connections > Networking."},
+	}, sqlPrivateIPFields(connSec, nets, ranges, nil)...), append([]console.Field{
 		{Name: "allowDataApi", Label: "Allow Data API", Type: "checkbox", Section: connSec,
 			Help: "Lets instances.executeSql run statements on the instance (settings.dataApiAccess ALLOW_DATA_API); off by default, as Google's is."},
 		serverCAModeSection(serverCAModeField(internalCAMode), securitySec),
@@ -281,7 +288,7 @@ func (p cloudSQLInstancesProvider) sqlCreateForm() []console.Field {
 			Help: "name=value pairs, separated by commas, passed to the server."},
 		{Name: "queryInsightsEnabled", Label: "Enable Query insights", Type: "checkbox", Section: insightsSec,
 			Help: "The instance's Query insights page lists its top queries, read from the server's own statistics."},
-	}, sqlInsightsFields(insightsSec)...), []console.Field{
+	}, sqlInsightsFields(insightsSec)...)...), []console.Field{
 		{Name: "labels", Label: "Labels", Type: "text", Section: labelsSec, Help: "key=value pairs, separated by commas."},
 		{Name: "sourceHostPort", Label: "External server host:port", Type: "text", Section: externalSec,
 			Help: "Set to record a MySQL or PostgreSQL server outside Cloud SQL as a source representation instance (ON_PREMISES_INSTANCE) instead: " +
@@ -319,6 +326,9 @@ func sqlCreateConnections(st *sqladminapi.Settings, v map[string]string) error {
 		}
 		ic.Ipv4Enabled = pub != "false"
 		ic.ForceSendFields = append(ic.ForceSendFields, "Ipv4Enabled")
+		if err := sqlPrivateIPConfig(ic, v); err != nil {
+			return err
+		}
 		for _, n := range strings.Split(nets, ",") {
 			if n = strings.TrimSpace(n); n == "" {
 				continue
@@ -436,7 +446,7 @@ var sqlPlace = map[string]string{
 
 	"create-client-cert": "connections", "delete-client-cert": "connections", "reset-ssl": "connections",
 	"add-server-ca": "connections", "rotate-server-ca": "connections", "add-server-cert": "connections",
-	"rotate-server-cert": "connections", "resolve-dns": "connections",
+	"rotate-server-cert": "connections", "resolve-dns": "connections", "edit-networking": "connections",
 
 	"add-user": "users", "add-iam-user": "users", "change-password": "users", "remove-user": "users",
 	"set-user-password-policy": "users", "unlock-user": "users", "discard-dual-password": "users",
@@ -601,11 +611,24 @@ func googleLayout(ctx context.Context, svc *sqladminapi.Service, project string,
 	// tab, as Google's Manage client certificates and server CAs are.
 	if i, ok := index["connections"]; ok {
 		c := &sections[i]
-		for j := range c.Tabs {
-			if c.Tabs[j].ID == "connections-security" {
-				c.Tabs[j].Actions, c.Actions = append(c.Tabs[j].Actions, c.Actions...), nil
+		// Networking's Edit is on the Networking tab (#2141).
+		var networking, rest []console.Action
+		for _, a := range c.Actions {
+			if a.ID == "edit-networking" {
+				networking = append(networking, a)
+			} else {
+				rest = append(rest, a)
 			}
 		}
+		for j := range c.Tabs {
+			switch c.Tabs[j].ID {
+			case "connections-security":
+				c.Tabs[j].Actions = append(c.Tabs[j].Actions, rest...)
+			case "connections-networking":
+				c.Tabs[j].Actions = append(c.Tabs[j].Actions, networking...)
+			}
+		}
+		c.Actions = nil
 	}
 	out.Sections = sections
 	return out

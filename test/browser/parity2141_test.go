@@ -20,8 +20,8 @@ import (
 //     by total time, Avg execution time (ms), Times called, Avg rows
 //     returned), read from the server's pg_stat_statements, where the
 //     console's own reads of the server are listed;
-//   - System insights' summary has Google's cards: CPU utilization (not
-//     available locally, said so), Peak connections of max_connections,
+//   - System insights' summary has Google's cards: CPU utilization (read from
+//     Cloud Monitoring's cloudsql.googleapis.com series), Peak connections of max_connections,
 //     Transaction ID utilization, Disk utilization and Log errors;
 //   - the create page's root password has Show password and Generate;
 //   - Delete instance offers Google's final backup (Take a final backup,
@@ -58,7 +58,7 @@ func TestCloudSQLConsoleParity2141(t *testing.T) {
 	p.waitFor(`document.querySelector("#view").textContent.includes("Peak connections")`)
 	var text string
 	p.eval(`document.querySelector("#view").textContent`, &text)
-	for _, w := range []string{"CPU utilization - P99 | P50", "Not available locally", "Peak connections", " of ", "Transaction ID utilization", "Disk utilization", "Log errors"} {
+	for _, w := range []string{"CPU utilization - P99 | P50", "Peak connections", " of ", "Transaction ID utilization", "Disk utilization", "Log errors"} {
 		if !strings.Contains(text, w) {
 			t.Errorf("System insights lacks %q", w)
 		}

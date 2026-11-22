@@ -128,6 +128,10 @@ type Spec struct {
 	// which only CloudBurrow uses; never answered.
 	MSSQLEULA  *EULAAcceptance `json:"mssqlEulaAcceptance,omitempty"`
 	SAPassword string          `json:"saPassword,omitempty"`
+	// PrivateIP is the instance's private IP on PrivateNetwork
+	// (projects/P/global/networks/N), from its allocated range (#2141).
+	PrivateIP      string `json:"privateIp,omitempty"`
+	PrivateNetwork string `json:"privateNetwork,omitempty"`
 }
 
 // ServerName is the name of the instance's server in the cluster.
@@ -147,12 +151,6 @@ func (s Spec) PrimaryNode() int {
 		return 1
 	}
 	return 0
-}
-
-// zone is the zone of a server, by index: the instance's gceZone, and its
-// secondaryGceZone for the standby, as Cloud SQL reports them.
-func (s Spec) zone(node int) string {
-	return s.region() + "-" + string(rune('a'+node))
 }
 
 // region is the instance's region.
@@ -794,6 +792,10 @@ func (s *Server) insertInstance(r *http.Request, base, project string) (any, err
 		s.emu.Unlock()
 		return nil, Errorf(http.StatusConflict, "The Cloud SQL instance already exists.")
 	}
+	if err := s.assignNetworkingLocked(&spec); err != nil {
+		s.emu.Unlock()
+		return nil, err
+	}
 	c := &created{spec: spec, engine: s.writes.prov.Engine(spec), state: "PENDING_CREATE"}
 	s.writes.byName[b.Name] = c
 	err = s.saveLocked()
@@ -992,6 +994,18 @@ func (s *Server) patchInstance(r *http.Request, base, project, name string, repl
 		return nil, err
 	}
 	if err := legacyRefusal(next); err != nil {
+		s.emu.Unlock()
+		return nil, err
+	}
+	// "Private IP: After it's activated, it can't be deactivated"
+	// (https://docs.cloud.google.com/sql/docs/instance-settings). The
+	// error's wording is UNVERIFIED (re-read 2026-11-22:
+	// https://docs.cloud.google.com/sql/docs/instance-settings).
+	if c.spec.PrivateNetwork != "" && next.privateNetwork() == "" {
+		s.emu.Unlock()
+		return nil, Errorf(http.StatusBadRequest, "Invalid request: Private IP cannot be disabled once it is enabled: settings.ipConfiguration.privateNetwork must stay set.")
+	}
+	if err := s.assignNetworkingLocked(&next); err != nil {
 		s.emu.Unlock()
 		return nil, err
 	}
@@ -1207,6 +1221,18 @@ func (s *Server) createdJSON(ctx context.Context, base string, c *created) (map[
 	in["gceZone"] = spec.zone(spec.PrimaryNode())
 	if spec.Regional() {
 		in["secondaryGceZone"] = spec.zone(1 - spec.PrimaryNode())
+	}
+	// PRIMARY unless ipv4Enabled is false, and PRIVATE on a VPC network
+	// (#2141).
+	host := "127.0.0.1"
+	if ips, _ := in["ipAddresses"].([]any); len(ips) > 0 {
+		if m, _ := ips[0].(map[string]any); m != nil {
+			host, _ = m["ipAddress"].(string)
+		}
+	}
+	in["ipAddresses"] = ipAddressesJSON(spec, host)
+	if spec.pscEnabled() {
+		in["pscServiceAttachmentLink"] = pscServiceAttachment(spec)
 	}
 	// A replica is upgraded on its own: MySQL's (#1462), and PostgreSQL's
 	// (#1524), which then waits for its primary's upgrade.

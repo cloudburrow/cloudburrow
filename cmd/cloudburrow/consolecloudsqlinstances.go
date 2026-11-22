@@ -15,6 +15,7 @@ import (
 	sqladminapi "google.golang.org/api/sqladmin/v1"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/service/compute"
 	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
 )
 
@@ -36,6 +37,9 @@ type cloudSQLInstancesProvider struct {
 	// metrics is the instance's Cloud Monitoring, whose cloudsql.googleapis.com
 	// series the Overview and System insights chart (#2141).
 	metrics monitoringAdmin
+	// compute is Compute Engine's API, whose VPC networks the private IP
+	// fields offer (#2141); nil without it.
+	compute func() *compute.Server
 }
 
 func (cloudSQLInstancesProvider) ID() string    { return "cloudsql-instances" }
@@ -208,6 +212,7 @@ func (p cloudSQLInstancesProvider) Create(ctx context.Context, project string, v
 		Name: name, DatabaseVersion: v["databaseVersion"], RootPassword: v["rootPassword"], Region: regionOr(v["region"]), Settings: st,
 	}
 	withServerCAMode(st, nil, v)
+	sqlZonesConfig(st, v)
 	if err := sqlCreateConnections(st, v); err != nil {
 		return "", err
 	}
@@ -445,6 +450,9 @@ func (p cloudSQLInstancesProvider) detailAllOf(ctx context.Context, project stri
 	d.Actions = append(d.Actions, upgradeActions(in)...)
 	if !upSQLInstance(name) {
 		d.Actions = append(d.Actions, backupSettingsAction(backups == "On", start, retained, backupLoc))
+		if in.InstanceType != "ON_PREMISES_INSTANCE" {
+			d.Actions = append(d.Actions, p.networkingAction(project, in))
+		}
 	}
 	d.Actions = append(d.Actions, failoverActions(in)...)
 	d.Actions = append(d.Actions, drActions(in)...)
@@ -485,6 +493,8 @@ func (p cloudSQLInstancesProvider) detailAllOf(ctx context.Context, project stri
 			{Name: "availabilityType", Label: "Zonal availability", Type: "select", Required: true,
 				Options: []string{"ZONAL", "REGIONAL"}, Default: availabilityOr(st.AvailabilityType),
 				Help: availabilityHelp + " Changing it adds or removes the standby."},
+			sqlZoneFields("", in.Region, sqlPreferredZone(st, false), sqlPreferredZone(st, true), st.AvailabilityType == "REGIONAL")[0],
+			sqlZoneFields("", in.Region, sqlPreferredZone(st, false), sqlPreferredZone(st, true), st.AvailabilityType == "REGIONAL")[1],
 			{Name: "backupsEnabled", Label: "Automated backups", Type: "checkbox", Default: strconv.FormatBool(backups == "On")},
 			{Name: "backupStartTime", Label: "Backup start time (UTC, HH:MM)", Type: "text", Default: start, Pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"},
 			{Name: "pitr", Label: "Point-in-time recovery", Type: "checkbox", Default: strconv.FormatBool(pitr == "On"),
@@ -577,6 +587,7 @@ func (p cloudSQLInstancesProvider) Edit(ctx context.Context, project string, pat
 		return sqlAPIError(err)
 	}
 	pitrConfig(st.BackupConfiguration, in.DatabaseVersion, v["pitr"] == "true")
+	sqlZonesConfig(st, v)
 	withServerCAMode(st, in, v)
 	if _, ok := v["enablePasswordPolicy"]; ok && in.MasterInstanceName == "" {
 		had := in.Settings != nil && in.Settings.PasswordValidationPolicy != nil
@@ -1214,6 +1225,12 @@ func (p cloudSQLInstancesProvider) actAt(ctx context.Context, project string, pa
 			return err
 		}
 		_, err = svc.Instances.Delete(project, name).Context(ctx).Do()
+	case "edit-networking":
+		st := &sqladminapi.Settings{}
+		if err = editNetworking(st, v); err != nil {
+			return err
+		}
+		_, err = svc.Instances.Patch(project, name, &sqladminapi.DatabaseInstance{Settings: st}).Context(ctx).Do()
 	case "edit-backups":
 		var bc *sqladminapi.BackupConfiguration
 		if bc, err = backupSettingsOf(v); err != nil {
@@ -1569,4 +1586,16 @@ func backupSettingsOf(v map[string]string) (*sqladminapi.BackupConfiguration, er
 		return nil, err
 	}
 	return bc, nil
+}
+
+// sqlPreferredZone is settings.locationPreference's zone, or its
+// secondaryZone.
+func sqlPreferredZone(st *sqladminapi.Settings, secondary bool) string {
+	if st == nil || st.LocationPreference == nil {
+		return ""
+	}
+	if secondary {
+		return st.LocationPreference.SecondaryZone
+	}
+	return st.LocationPreference.Zone
 }

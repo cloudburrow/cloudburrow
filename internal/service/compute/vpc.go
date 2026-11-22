@@ -166,7 +166,11 @@ func (s *Server) vpcConfigLocked(inst obj, pod string) (string, bool) {
 		}
 	}
 	b.WriteString("nft\n")
-	b.WriteString(firewallNFT(self, members, s.firewallsOfLocked(self.network), peerPods))
+	fw := firewallNFT(self, members, s.firewallsOfLocked(self.network), peerPods)
+	if s.opts.PrivateServices != nil {
+		fw = withPrivateServices(fw, s.opts.PrivateServices(self.network))
+	}
+	b.WriteString(fw)
 	return b.String(), true
 }
 
@@ -311,6 +315,29 @@ func firewallNFT(self vmNet, members []vmNet, rules []obj, peerPods []string) st
 	}
 	b.WriteString("    accept comment \"implied allow egress\"\n  }\n}\n")
 	return b.String()
+}
+
+// withPrivateServices adds the private services access endpoints to the
+// guest's ruleset (#2141): a connection to an endpoint's address and port
+// is sent on to its target, over the VM's pod interface, before the
+// firewall's egress chain sees it.
+func withPrivateServices(fw string, eps []PrivateService) string {
+	var lines []string
+	for _, e := range eps {
+		if net.ParseIP(e.IP).To4() == nil || net.ParseIP(e.TargetIP).To4() == nil || e.Port <= 0 || e.TargetPort <= 0 {
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("    ip daddr %s tcp dport %d dnat ip to %s:%d comment %q\n", e.IP, e.Port, e.TargetIP, e.TargetPort, e.Name))
+	}
+	if len(lines) == 0 {
+		return fw
+	}
+	end := strings.LastIndex(fw, "}")
+	if end < 0 {
+		return fw
+	}
+	return fw[:end] + "  chain private-services {\n    type nat hook output priority -100; policy accept;\n" +
+		strings.Join(lines, "") + "  }\n" + fw[end:]
 }
 
 func writeEntries(b *strings.Builder, r fwRule, match string) {
