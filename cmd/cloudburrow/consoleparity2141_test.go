@@ -146,3 +146,32 @@ func TestParameterLocationAndLabels(t *testing.T) {
 		t.Errorf("row actions %+v", acts)
 	}
 }
+
+// The Backups page's Edit, next to Settings, is a page ending in Save:
+// Automate backups and its window, then Advanced options' location and
+// Number of backups, which cannot be less than seven (#2141).
+func TestCloudSQLBackupSettingsPage(t *testing.T) {
+	a := backupSettingsAction(true, "03:00", "", "europe-west1")
+	if !a.Page || a.Submit != "Save" || a.Fields[0].Name != "backupsEnabled" || a.Fields[1].Default != "03:00" {
+		t.Fatalf("the page: %+v", a)
+	}
+	byName := map[string]string{}
+	for _, f := range a.Fields {
+		byName[f.Name] = f.Default
+	}
+	if byName["locationType"] != "region" || byName["region"] != "europe-west1" || byName["retainedBackups"] != "7" {
+		t.Errorf("the defaults: %v", byName)
+	}
+	bc, err := backupSettingsOf(map[string]string{"backupsEnabled": "true", "backupStartTime": "05:00", "locationType": "multi",
+		"multiRegion": "eu", "retainedBackups": "30"})
+	if err != nil || !bc.Enabled || bc.StartTime != "05:00" || bc.Location != "eu" || bc.BackupRetentionSettings.RetainedBackups != 30 {
+		t.Fatalf("saved: %+v, %v", bc, err)
+	}
+	if _, err := backupSettingsOf(map[string]string{"backupsEnabled": "true", "locationType": "multi", "retainedBackups": "3"}); err == nil {
+		t.Error("3 backups were accepted")
+	}
+	if bc, err := backupSettingsOf(map[string]string{"backupsEnabled": "false", "locationType": "region", "region": "us-east1"}); err != nil ||
+		bc.Enabled || bc.Location != "us-east1" {
+		t.Errorf("disabled: %+v, %v", bc, err)
+	}
+}

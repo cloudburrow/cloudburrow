@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/service/parametermanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/secrets"
 	"github.com/cloudburrow/cloudburrow/internal/store"
@@ -50,6 +51,22 @@ func TestConsoleParameterManager(t *testing.T) {
 	}
 	if err := p.ActAt(ctx, "cp", []string{name}, "newversion", map[string]string{"versionId": "v1", "payload": "{not json"}); err == nil {
 		t.Fatal("a JSON parameter took a version that is not JSON")
+	}
+	// The payload's Secret picker offers the project's secret with latest
+	// and its enabled version (#2143).
+	var picker *console.SecretPicker
+	for _, a := range p.DetailActions(ctx, "cp", []string{name}) {
+		if a.ID == "newversion" {
+			for _, f := range a.Fields {
+				if f.Name == "payload" {
+					picker = f.SecretPicker
+				}
+			}
+		}
+	}
+	if picker == nil || len(picker.Secrets) != 1 || picker.Secrets[0].Name != "projects/cp/secrets/db" ||
+		strings.Join(picker.Secrets[0].Versions, ",") != "latest,1" {
+		t.Fatalf("Secret picker: %+v", picker)
 	}
 	payload := `{"password": "__REF__(\"//secretmanager.googleapis.com/projects/cp/secrets/db/versions/1\")"}`
 	if err := p.ActAt(ctx, "cp", []string{name}, "newversion", map[string]string{"versionId": "v1", "payload": payload}); err != nil {
@@ -139,12 +156,25 @@ func TestConsoleParameterTemplates(t *testing.T) {
 		t.Fatalf("version page: %+v, %v", d, err)
 	}
 	acts := p.DetailActions(ctx, "cp", []string{name, "tv1"})
-	if len(acts) == 0 || acts[0].ID != "render" || len(acts[0].Fields) != 1 || len(acts[0].Fields[0].Options) != 1 || acts[0].Fields[0].Options[0] != param+"/versions/v1" {
+	// Render template version is a page: the parameter, then one of its
+	// versions (#2143).
+	if len(acts) == 0 || acts[0].ID != "render" || !acts[0].Page || acts[0].Submit != "Render" || len(acts[0].Fields) != 2 ||
+		acts[0].Fields[0].Name != "parameter" || len(acts[0].Fields[0].Options) != 1 || acts[0].Fields[0].Options[0] != param ||
+		acts[0].Fields[1].OptionsBy != "parameter" || strings.Join(acts[0].Fields[1].OptionsFor[param], ",") != param+"/versions/v1" {
 		t.Fatalf("version actions: %+v", acts)
 	}
-	rows, err := p.ActAtResult(ctx, "cp", []string{name, "tv1"}, "render", map[string]string{"parameterVersion": param + "/versions/v1"})
+	rows, err := p.ActAtResult(ctx, "cp", []string{name, "tv1"}, "render", map[string]string{"parameter": param, "parameterVersion": param + "/versions/v1"})
 	if err != nil || len(rows.Items) != 1 || rows.Items[0].Fields["Rendered value"] != "log: debug\n" || rows.Items[0].Fields["Payload"] != payload {
 		t.Fatalf("Render: %+v, %v", rows, err)
+	}
+	// The answer opens the render's own page, with the payload and the
+	// rendered value.
+	if !strings.Contains(rows.Open, "/render/") {
+		t.Fatalf("Render opens %q", rows.Open)
+	}
+	rd, err := p.Detail(ctx, "cp", []string{name, "tv1", "render", param + "/versions/v1"})
+	if err != nil || rd.Unavailable != "" || workflowsSection(rd, "payload").Text != payload || workflowsSection(rd, "rendered").Text != "log: debug\n" {
+		t.Fatalf("render page: %+v, %v", rd, err)
 	}
 	if err := p.ActAt(ctx, "cp", []string{name, "tv1"}, "disable", nil); err != nil {
 		t.Fatal(err)

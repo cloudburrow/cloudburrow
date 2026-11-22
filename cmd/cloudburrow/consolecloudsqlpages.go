@@ -441,7 +441,7 @@ var sqlPlace = map[string]string{
 	"add-user": "users", "add-iam-user": "users", "change-password": "users", "remove-user": "users",
 	"set-user-password-policy": "users", "unlock-user": "users", "discard-dual-password": "users",
 	"create-database": "databases", "drop-database": "databases",
-	"create-backup": "backups", "restore-backup": "backups", "delete-backup": "backups",
+	"edit-backups": "backups", "create-backup": "backups", "restore-backup": "backups", "delete-backup": "backups",
 	"pitr-restore": "backups", "binlog-clone": "backups",
 	// The project's Backups API names the same backups (#1860): its
 	// actions are on Backups too.

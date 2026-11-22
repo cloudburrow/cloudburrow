@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
+	"strconv"
 	"strings"
 
 	pmpb "cloud.google.com/go/parametermanager/apiv1/parametermanagerpb"
@@ -11,6 +13,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/service/parametermanager"
+	"github.com/cloudburrow/cloudburrow/internal/service/secrets"
 )
 
 // parameterManagerProvider is the console's Parameter Manager page
@@ -239,8 +242,8 @@ func (p parameterManagerProvider) DetailActions(ctx context.Context, project str
 			// Google's Create parameter version page (add-parameter-version).
 			{ID: "newversion", Label: "New version", Title: "Create parameter version", Submit: "Create", Page: true, Fields: []console.Field{
 				{Name: "versionId", Label: "Name", Type: "text", Required: true, Pattern: pmVersionIDPattern, Help: pmVersionIDHelp},
-				{Name: "payload", Label: "Payload", Type: "textarea", Required: true, Upload: "Browse",
-					Help: "At most 1 MiB, in the parameter's format. In JSON or YAML, __REF__(\"//secretmanager.googleapis.com/projects/PROJECT/secrets/SECRET/versions/VERSION\") is replaced by the secret version when rendered."},
+				{Name: "payload", Label: "Payload", Type: "textarea", Required: true, Upload: "Browse", SecretPicker: p.secretPicker(project),
+					Help: "At most 1 MiB, in the parameter's format. In JSON or YAML, __REF__(\"//secretmanager.googleapis.com/projects/PROJECT/secrets/SECRET/versions/VERSION\") is replaced by the secret version when rendered; press Ctrl+Space, then Enter, for the Secret picker."},
 				{Name: "disabled", Label: "Disable this version", Type: "checkbox"}}},
 			// Google's Edit parameter page, ending in Save (edit-parameter).
 			{ID: "edit", Label: "Edit", Title: "Edit parameter", Submit: "Save", Page: true, Fields: []console.Field{
@@ -333,3 +336,43 @@ var (
 	_ console.Driller   = parameterManagerProvider{}
 	_ console.PathActor = parameterManagerProvider{}
 )
+
+// secretPicker is what the payload's Secret picker offers (#2143): the
+// project's secrets and its regional secrets, each with "latest" and its
+// enabled versions, newest first, from the instance's Secret Manager. With
+// no Secret Manager it offers none; a reference can still be typed.
+func (p parameterManagerProvider) secretPicker(project string) *console.SecretPicker {
+	out := &console.SecretPicker{Secrets: []console.PickerSecret{}, CreateHref: "/secrets/create?project=" + url.QueryEscape(project)}
+	if p.svc == nil || p.svc.secrets == nil || p.svc.secrets.Store() == nil {
+		return out
+	}
+	st := p.svc.secrets.Store()
+	pick := func(all []secrets.Secret) []console.PickerSecret {
+		var list []console.PickerSecret
+		for _, sec := range all {
+			scope, id, err := secrets.ParseSecretName(sec.Name)
+			if err != nil {
+				continue
+			}
+			vs, err := st.ListVersions(scope, id)
+			if err != nil {
+				continue
+			}
+			names := []string{secrets.LatestAlias}
+			for _, v := range vs {
+				if v.Accessible() {
+					names = append(names, strconv.Itoa(v.Number))
+				}
+			}
+			list = append(list, console.PickerSecret{Name: sec.Name, Versions: names})
+		}
+		return list
+	}
+	if all, err := st.ListSecrets(project); err == nil {
+		out.Secrets = append(out.Secrets, pick(all)...)
+	}
+	if all, err := st.ListRegionalSecrets(project); err == nil {
+		out.Regional = pick(all)
+	}
+	return out
+}

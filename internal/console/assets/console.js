@@ -7479,6 +7479,113 @@ function attachCompletions(control, words) {
   control.addEventListener("blur", () => setTimeout(close, 150));
 }
 
+// attachSecretPicker is Parameter Manager's Secret picker (#2143), as
+// Google's add-parameter-version describes it: in the payload, Ctrl+Space
+// then Enter opens the Secret picker side panel, where the Secret and the
+// Secret version are chosen (a regional secret with Select regional
+// secret), or a secret entered by its resource ID, and Insert puts its
+// __REF__("//secretmanager.googleapis.com/...") reference at the cursor.
+function attachSecretPicker(control, picker) {
+  const list = el("ul", { class: "completions", role: "listbox", hidden: true, "aria-label": "Suggestions" });
+  list.id = `${control.id || control.name}-suggestions`;
+  control.setAttribute("aria-autocomplete", "list");
+  control.setAttribute("aria-controls", list.id);
+  control.setAttribute("aria-keyshortcuts", "Control+Space");
+  const item = el("li", { role: "option", id: `${list.id}-picker`, class: "active", text: "Secret picker: insert a secret reference" });
+  item.setAttribute("aria-selected", "true");
+  list.append(item);
+  let at = 0;
+  const close = () => { list.hidden = true; control.setAttribute("aria-expanded", "false"); control.removeAttribute("aria-activedescendant"); };
+  const show = () => {
+    if (!list.isConnected) control.after(list);
+    at = control.selectionStart ?? control.value.length;
+    list.hidden = false;
+    control.setAttribute("aria-expanded", "true");
+    control.setAttribute("aria-activedescendant", item.id);
+  };
+  const choose = () => { close(); openSecretPicker(control, picker, at); };
+  item.addEventListener("mousedown", (e) => { e.preventDefault(); choose(); });
+  control.addEventListener("keydown", (e) => {
+    if (e.ctrlKey && (e.key === " " || e.code === "Space")) { e.preventDefault(); show(); return; }
+    if (list.hidden) return;
+    if (e.key === "Enter") { e.preventDefault(); choose(); }
+    else if (e.key === "Escape") { e.preventDefault(); close(); }
+    else if (e.key !== "ArrowDown" && e.key !== "ArrowUp") close();
+  });
+  control.addEventListener("blur", () => setTimeout(close, 150));
+}
+
+// secretRef is a secret version's reference in a parameter payload.
+function secretRef(version) {
+  return `__REF__("//secretmanager.googleapis.com/${version.replace(/^\/\/secretmanager\.googleapis\.com\//, "")}")`;
+}
+
+function openSecretPicker(control, picker, at) {
+  MODAL_SIDE_NEXT = true;
+  const { dialog, close } = openModal({ labelledBy: "secret-picker-title" });
+  dialog.id = "secret-picker";
+  const regional = el("input", { type: "checkbox", id: "secret-picker-regional", role: "switch" });
+  const manual = el("input", { type: "checkbox", id: "secret-picker-manual" });
+  const secret = el("select", { id: "secret-picker-secret" });
+  const version = el("select", { id: "secret-picker-version" });
+  const resource = el("input", { type: "text", id: "secret-picker-resource", spellcheck: "false",
+    placeholder: "projects/PROJECT_ID/secrets/SECRET_ID/versions/VERSION", "aria-describedby": "secret-picker-resource-help" });
+  const error = el("p", { class: "form-field-error", id: "secret-picker-error", role: "alert", hidden: true });
+  const secrets = () => (regional.checked ? picker.regional : picker.secrets) || [];
+  const fillVersions = () => {
+    const s = secrets().find((x) => x.name === secret.value);
+    setChildren(version, ...((s && s.versions) || []).map((v) => el("option", { value: `${s.name}/versions/${v}`, text: v })));
+  };
+  const fillSecrets = () => {
+    const all = secrets();
+    setChildren(secret, ...(all.length ? all.map((s) => el("option", { value: s.name, text: s.name.replace(/^projects\/[^/]+\//, "") }))
+      : [el("option", { value: "", text: regional.checked ? "No regional secrets in this project" : "No secrets in this project" })]));
+    fillVersions();
+  };
+  regional.addEventListener("change", fillSecrets);
+  secret.addEventListener("change", fillVersions);
+  const pickRows = el("div", { class: "secret-picker-pick" },
+    el("div", { class: "form-row is-check" }, el("div", { class: "check-line" }, regional,
+      el("label", { for: "secret-picker-regional", text: "Select regional secret" }))),
+    el("div", { class: "form-row" }, el("label", { for: "secret-picker-secret", text: "Secret" }), secret),
+    el("div", { class: "form-row" }, el("label", { for: "secret-picker-version", text: "Secret version" }), version));
+  const manualRow = el("div", { class: "form-row", hidden: true },
+    el("label", { for: "secret-picker-resource", text: "Secret version resource ID" }), resource,
+    el("p", { class: "form-help", id: "secret-picker-resource-help",
+      text: "A secret version's resource name, such as projects/my-project/secrets/db_password/versions/1, or a regional secret's under locations/LOCATION." }));
+  manual.addEventListener("change", () => { pickRows.hidden = manual.checked; manualRow.hidden = !manual.checked; });
+  const insert = el("button", { type: "button", class: "primary", id: "secret-picker-insert", text: "Insert", onclick: () => {
+    const v = (manual.checked ? resource.value : version.value).trim();
+    if (!/^(\/\/secretmanager\.googleapis\.com\/)?projects\/[^/]+\/(locations\/[^/]+\/)?secrets\/[^/]+\/versions\/[^/]+$/.test(v)) {
+      error.textContent = manual.checked ? "Enter a secret version's resource name: projects/PROJECT_ID/secrets/SECRET_ID/versions/VERSION."
+        : "Choose a secret and a secret version.";
+      error.hidden = false;
+      return;
+    }
+    const ref = secretRef(v);
+    const pos = Math.min(at, control.value.length);
+    control.value = control.value.slice(0, pos) + ref + control.value.slice(pos);
+    close();
+    control.focus();
+    control.setSelectionRange(pos + ref.length, pos + ref.length);
+    control.dispatchEvent(new Event("input", { bubbles: true }));
+  } });
+  setChildren(dialog, el("div", { class: "modal-body secret-picker" },
+    el("h2", { id: "secret-picker-title", text: "Secret picker" }),
+    el("p", { class: "form-help", text: "The reference is replaced by the secret version's value when the parameter version is rendered." }),
+    pickRows,
+    el("div", { class: "form-row is-check" }, el("div", { class: "check-line" }, manual,
+      el("label", { for: "secret-picker-manual", text: "Enter secret manually" }))),
+    manualRow,
+    picker.createHref ? el("p", {}, el("a", { href: picker.createHref, id: "secret-picker-create", target: "_blank", rel: "noopener", text: "Create secret" })) : null,
+    error,
+    el("div", { class: "modal-actions" },
+      el("button", { type: "button", class: "secondary", id: "secret-picker-cancel", text: "Cancel", onclick: () => close() }),
+      insert)));
+  fillSecrets();
+  secret.focus();
+}
+
 function buildCreateForm(spec) {
   // A hidden field is what the form was drawn from, sent back unchanged so
   // the backend can refuse the change when that has changed since: a
@@ -7549,6 +7656,8 @@ function buildCreateForm(spec) {
     // Ctrl+Space offers the field's completions at the cursor, as Google's
     // Query by GQL offers the namespace's kinds (#1846).
     if ((f.completions || []).length && !isCheck && !isSelect) attachCompletions(control, f.completions);
+    // Parameter Manager's Secret picker (#2143): Ctrl+Space, then Enter.
+    if (f.secretPicker && isArea && !isMap) attachSecretPicker(control, f.secretPicker);
     // An immutable field is shown so the operator can see which resource they
     // are editing, and refused so the form does not accept a change the API
     // will not apply. Disabled rather than hidden: hiding it would read as

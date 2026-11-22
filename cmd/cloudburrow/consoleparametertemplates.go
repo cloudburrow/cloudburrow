@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strings"
 
 	pmpb "cloud.google.com/go/parametermanager/apiv1/parametermanagerpb"
@@ -115,6 +116,10 @@ func (p parameterTemplatesProvider) Detail(ctx context.Context, project string, 
 		return p.templateDetail(ctx, project, path[0])
 	case 2:
 		return p.versionDetail(ctx, project, path[0], path[1])
+	case 4:
+		if path[2] == templateRenderSegment {
+			return p.renderDetail(ctx, project, path[0], path[1], path[3])
+		}
 	}
 	return console.DeeperThan(2, path), nil
 }
@@ -180,19 +185,19 @@ func (p parameterTemplatesProvider) versionDetail(ctx context.Context, project, 
 	}, nil
 }
 
-// parameterVersionsIn are the enabled versions of the JSON and YAML
-// parameters in a template's location, which a render can take.
-func (p parameterTemplatesProvider) parameterVersionsIn(ctx context.Context, tpl string) []string {
+// parameterVersionsIn are the JSON and YAML parameters in a template's
+// location, each with its enabled versions, which a render can take.
+func (p parameterTemplatesProvider) parameterVersionsIn(ctx context.Context, tpl string) (params []string, versions map[string][]string) {
 	s, err := p.api()
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	parent := tpl[:strings.Index(tpl, "/templates/")]
 	resp, err := s.ListParameters(ctx, &pmpb.ListParametersRequest{Parent: parent, PageSize: 1000})
 	if err != nil {
-		return nil
+		return nil, nil
 	}
-	var out []string
+	versions = map[string][]string{}
 	for _, prm := range resp.GetParameters() {
 		if f := prm.GetFormat(); f != pmpb.ParameterFormat_JSON && f != pmpb.ParameterFormat_YAML {
 			continue
@@ -201,13 +206,50 @@ func (p parameterTemplatesProvider) parameterVersionsIn(ctx context.Context, tpl
 		if err != nil {
 			continue
 		}
+		var names []string
 		for _, v := range vs.GetParameterVersions() {
 			if !v.GetDisabled() {
-				out = append(out, v.GetName())
+				names = append(names, v.GetName())
 			}
 		}
+		if len(names) > 0 {
+			params = append(params, prm.GetName())
+			versions[prm.GetName()] = names
+		}
 	}
-	return out
+	return params, versions
+}
+
+// templateRenderSegment is the path segment of a render's page:
+// [template, version, "render", parameter version].
+const templateRenderSegment = "render"
+
+// templateRenderHref is the page Render opens: "A new page is displayed
+// with the payload and the rendered value of the template version"
+// (render-parameter-template-version, read 2026-11-22).
+func templateRenderHref(project, tpl, version, paramVersion string) string {
+	return templatesRoute + "/" + url.PathEscape(tpl) + "/" + url.PathEscape(version) + "/" + templateRenderSegment + "/" +
+		url.PathEscape(paramVersion) + "?project=" + url.QueryEscape(project)
+}
+
+// renderDetail is that page: the template version rendered with the
+// parameter version, read again each time it is opened.
+func (p parameterTemplatesProvider) renderDetail(ctx context.Context, project, tpl, version, paramVersion string) (console.Detail, error) {
+	if _, err := p.template(ctx, project, tpl); err != nil {
+		return console.Detail{Unavailable: "cannot read the template: " + consoleErr(err)}, nil
+	}
+	s, _ := p.api()
+	r, err := s.RenderTemplateVersion(ctx, &pmpb.RenderTemplateVersionRequest{Name: tpl + "/versions/" + version, ParameterVersion: paramVersion})
+	if err != nil {
+		return console.Detail{Unavailable: "cannot render the template version: " + consoleErr(err)}, nil
+	}
+	return console.Detail{
+		Summary: []console.Property{{Label: "Template version", Value: tpl + "/versions/" + version}, {Label: "Parameter version", Value: paramVersion}},
+		Sections: []console.Section{
+			{ID: "payload", Label: "Payload", Kind: console.KindText, Text: string(r.GetPayload().GetData())},
+			{ID: "rendered", Label: "Rendered value", Kind: console.KindText, Text: string(r.GetRenderedPayload())},
+		},
+	}, nil
 }
 
 func (p parameterTemplatesProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
@@ -244,9 +286,27 @@ func (p parameterTemplatesProvider) DetailActions(ctx context.Context, project s
 			return nil
 		}
 		toggle := pmToggleAction(v.GetDisabled())
-		render := console.Action{ID: "render", Label: "Render", Title: "Render template version", Fields: []console.Field{
-			{Name: "parameterVersion", Label: "Parameter version", Type: "select", Required: true, Options: p.parameterVersionsIn(ctx, path[0]),
-				Help: "An enabled version of a JSON or YAML parameter in the template's location; its values replace the template's variables."}}}
+		// Google's Render template version page: the parameter and one
+		// parameter version chosen (render-parameter-template-version).
+		params, versions := p.parameterVersionsIn(ctx, path[0])
+		var all []string
+		labels := map[string]string{}
+		for _, prm := range params {
+			for _, v := range versions[prm] {
+				all = append(all, v)
+				labels[v] = lastSegment(v)
+			}
+		}
+		paramLabels := map[string]string{}
+		for _, prm := range params {
+			paramLabels[prm] = lastSegment(prm)
+		}
+		render := console.Action{ID: "render", Label: "Render", Title: "Render template version", Submit: "Render", Page: true, Fields: []console.Field{
+			{Name: "parameter", Label: "Parameter", Type: "select", Required: true, Options: params, OptionLabels: paramLabels,
+				Help: "A JSON or YAML parameter in the template's location; its values replace the template's variables."},
+			{Name: "parameterVersion", Label: "Parameter version", Type: "select", Required: true, Options: all, OptionLabels: labels,
+				OptionsBy: "parameter", OptionsFor: versions,
+				Help: "One enabled version of the parameter: a render takes one parameter version only."}}}
 		if v.GetDisabled() {
 			render.Unavailable = "A disabled version cannot be rendered."
 		}
@@ -272,7 +332,11 @@ func (p parameterTemplatesProvider) ActAtResult(ctx context.Context, project str
 	if err != nil {
 		return nil, err
 	}
-	return &console.Listing{Columns: []string{"Payload", "Rendered value"}, NameColumn: "Parameter version", Noun: "renders", Total: 1,
+	pv := r.GetParameterVersion()
+	if pv == "" {
+		pv = strings.TrimSpace(values["parameterVersion"])
+	}
+	return &console.Listing{Open: templateRenderHref(project, path[0], path[1], pv), Columns: []string{"Payload", "Rendered value"}, NameColumn: "Parameter version", Noun: "renders", Total: 1,
 		Items: []console.Resource{{Name: r.GetParameterVersion(), Fields: map[string]string{
 			"Payload": string(r.GetPayload().GetData()), "Rendered value": string(r.GetRenderedPayload())}}}}, nil
 }

@@ -73,7 +73,7 @@ func (p secretsRegionalProvider) Create(ctx context.Context, project string, val
 }
 
 // The secrets list's columns, Google's order; the row menu is Actions.
-var secretListColumns = []string{"Location", "Encryption", "Labels", "Created", "Expiration"}
+var secretListColumns = []string{"Location", "Encryption", "Labels", "Tags", "Created", "Expiration"}
 
 // secretsListing lists the project's global secrets, or its regional ones.
 func (p secretsProvider) secretsListing(_ context.Context, project, filter string, regional bool) (console.Listing, error) {
@@ -100,6 +100,7 @@ func (p secretsProvider) secretsListing(_ context.Context, project, filter strin
 		sf.Error = err.Error()
 		return console.Listing{Columns: secretListColumns, Noun: "secrets", ServerFilter: sf}, nil
 	}
+	tags := p.secretTags(project)
 	items := make([]console.Resource, 0, len(all))
 	for _, s := range all {
 		items = append(items, console.Resource{
@@ -108,6 +109,7 @@ func (p secretsProvider) secretsListing(_ context.Context, project, filter strin
 				"Location":   secretLocationText(s),
 				"Encryption": secretEncryptionText(s),
 				"Labels":     secretPairsText(s.Labels),
+				"Tags":       secretPairsText(tags[secrets.FullResourcePrefix+s.Name]),
 				"Created":    s.Created.Format(time.RFC3339),
 				"Expiration": secretExpiry(s),
 			},
@@ -120,6 +122,38 @@ func (p secretsProvider) secretsListing(_ context.Context, project, filter strin
 	}
 	return console.Listing{Columns: secretListColumns, Noun: "secrets", Items: items, Total: len(items), ServerFilter: sf,
 		InfoOnSelect: true}, nil
+}
+
+// secretTags is the project's secrets' tags, as Resource Manager binds them
+// (Secret.tags is input only, so GetSecret never returns them): by the
+// secret's full resource name, each tag key's short name to its value's
+// (https://docs.cloud.google.com/secret-manager/docs/create-and-manage-tags,
+// read 2026-11-22: the Secrets list's Tags column, #2142).
+func (p secretsProvider) secretTags(project string) map[string]map[string]string {
+	if p.svc == nil || p.svc.registry == nil {
+		return nil
+	}
+	reg := p.svc.registry()
+	if reg == nil {
+		return nil
+	}
+	bindings, err := reg.TagBindingsUnder(secrets.FullResourcePrefix + "projects/" + project + "/")
+	if err != nil {
+		return nil
+	}
+	out := map[string]map[string]string{}
+	for _, b := range bindings {
+		// tagValueNamespacedName is PARENT/KEY_SHORT_NAME/VALUE_SHORT_NAME.
+		parts := strings.Split(b.GetTagValueNamespacedName(), "/")
+		if len(parts) < 3 {
+			continue
+		}
+		if out[b.GetParent()] == nil {
+			out[b.GetParent()] = map[string]string{}
+		}
+		out[b.GetParent()][parts[len(parts)-2]] = parts[len(parts)-1]
+	}
+	return out
 }
 
 // secretLocationText is the list's Location: a regional secret's region, a

@@ -440,6 +440,9 @@ func (p cloudSQLInstancesProvider) detailAllOf(ctx context.Context, project stri
 	d.Actions = append(append(append(p.backupActions(ids, sqlOtherInstances(ctx, svc, project, in)), replicaActions(in)...), transferActions()...), certActions(fps, casSigned(in))...)
 	d.Actions = append(d.Actions, serverCertActions(in, otherServerCerts)...)
 	d.Actions = append(d.Actions, upgradeActions(in)...)
+	if !upSQLInstance(name) {
+		d.Actions = append(d.Actions, backupSettingsAction(backups == "On", start, retained, backupLoc))
+	}
 	d.Actions = append(d.Actions, failoverActions(in)...)
 	d.Actions = append(d.Actions, drActions(in)...)
 	d.Actions = append(d.Actions, reencryptActions(in)...)
@@ -1208,6 +1211,12 @@ func (p cloudSQLInstancesProvider) actAt(ctx context.Context, project string, pa
 			return err
 		}
 		_, err = svc.Instances.Delete(project, name).Context(ctx).Do()
+	case "edit-backups":
+		var bc *sqladminapi.BackupConfiguration
+		if bc, err = backupSettingsOf(v); err != nil {
+			return err
+		}
+		_, err = svc.Instances.Patch(project, name, &sqladminapi.DatabaseInstance{Settings: &sqladminapi.Settings{BackupConfiguration: bc}}).Context(ctx).Do()
 	case "create-backup":
 		_, err = svc.BackupRuns.Insert(project, name, &sqladminapi.BackupRun{Description: strings.TrimSpace(v["description"])}).Context(ctx).Do()
 	case "restore-backup":
@@ -1462,4 +1471,99 @@ func sqlBackupLocationField(current string) console.Field {
 	add(current, sqlBackupLocationLabel(current))
 	return console.Field{Name: "backupLocation", Label: "Backup location", Type: "select", Options: opts, OptionLabels: labels,
 		Default: current, Help: "Where automated and on-demand backups are stored. Changing it does not move the backups already taken."}
+}
+
+// backupSettingsAction is the Backups page's Edit, next to Settings
+// (https://docs.cloud.google.com/sql/docs/postgres/backup-recovery/backing-up,
+// read 2026-11-22): a page with Automate backups and its backup window,
+// and under Advanced options where the backups are stored (Multi-region,
+// the default, or Region, then the Location) and the Number of backups,
+// which "can't be less than the default (seven)", ending in Save (#2141).
+func backupSettingsAction(enabled bool, start, retained, location string) console.Action {
+	windows, labels := backupWindows(start)
+	if start == "" {
+		start = windows[0]
+	}
+	if retained == "" {
+		retained = "7"
+	}
+	where, multi, region := "multi", location, "us-central1"
+	if strings.Contains(location, "-") {
+		where, multi, region = "region", "", location
+	}
+	multiOpts := append([]string{""}, sqlBackupMultiRegions...)
+	multiLabels := map[string]string{"": "Multi-region nearest the instance (default)"}
+	var regions []string
+	regionLabels := map[string]string{}
+	for _, r := range bqRegionNames {
+		if strings.Contains(r[0], "-") {
+			regions = append(regions, r[0])
+			regionLabels[r[0]] = r[0] + " (" + r[1] + ")"
+		}
+	}
+	if !pmHas(regions, region) {
+		regions = append(regions, region)
+	}
+	return console.Action{ID: "edit-backups", Label: "Edit", Title: "Manage automated backups", Submit: "Save", Page: true, Fields: []console.Field{
+		{Name: "backupsEnabled", Label: "Automate backups", Type: "checkbox", Section: "Automated backups", Default: strconv.FormatBool(enabled),
+			Help: "Cleared, no automated backup is taken; on-demand backups can still be created."},
+		{Name: "backupStartTime", Label: "Choose a window for automated backups", Type: "select", Section: "Automated backups",
+			Options: windows, OptionLabels: labels, Default: start, VisibleWhen: map[string]string{"backupsEnabled": "true"},
+			Help: "In UTC: the backup can start any time in the 4-hour window."},
+		{Name: "locationType", Label: "Choose where to store your backups", Type: "radio", Section: "Advanced options", Default: where,
+			Options: []string{"multi", "region"}, OptionLabels: map[string]string{"multi": "Multi-region (default)", "region": "Region"},
+			Help: "Existing backups stay where they are."},
+		{Name: "multiRegion", Label: "Location", Type: "select", Section: "Advanced options", Options: multiOpts, OptionLabels: multiLabels,
+			Default: multi, VisibleWhen: map[string]string{"locationType": "multi"}},
+		{Name: "region", Label: "Location", Type: "select", Section: "Advanced options", Options: regions, OptionLabels: regionLabels,
+			Default: region, VisibleWhen: map[string]string{"locationType": "region"}},
+		{Name: "retainedBackups", Label: "Number of backups", Type: "number", Section: "Advanced options", Default: retained,
+			Help: "How many automated backups to store, 7 to 365; older ones are deleted."},
+	}}
+}
+
+// backupWindows are the 4-hour backup windows, each starting on the hour
+// (UTC), with the instance's own start time kept when it is not.
+func backupWindows(current string) ([]string, map[string]string) {
+	var opts []string
+	labels := map[string]string{}
+	for h := 0; h < 24; h++ {
+		o := fmt.Sprintf("%02d:00", h)
+		opts = append(opts, o)
+		labels[o] = fmt.Sprintf("%02d:00 – %02d:00", h, (h+4)%24)
+	}
+	if current != "" && labels[current] == "" {
+		opts = append(opts, current)
+		h, m := 0, 0
+		fmt.Sscanf(current, "%d:%d", &h, &m)
+		labels[current] = fmt.Sprintf("%s – %02d:%02d", current, (h+4)%24, m)
+	}
+	return opts, labels
+}
+
+// backupSettingsOf is the backup configuration the page saves.
+func backupSettingsOf(v map[string]string) (*sqladminapi.BackupConfiguration, error) {
+	bc := &sqladminapi.BackupConfiguration{Enabled: v["backupsEnabled"] == "true", ForceSendFields: []string{"Enabled"}}
+	if bc.Enabled {
+		bc.StartTime = strings.TrimSpace(v["backupStartTime"])
+	}
+	switch v["locationType"] {
+	case "region":
+		if bc.Location = strings.TrimSpace(v["region"]); bc.Location == "" {
+			return nil, fmt.Errorf("choose the region the backups are stored in")
+		}
+	default:
+		bc.Location = strings.TrimSpace(v["multiRegion"])
+		bc.ForceSendFields = append(bc.ForceSendFields, "Location")
+	}
+	if r := strings.TrimSpace(v["retainedBackups"]); r != "" {
+		n, err := strconv.ParseInt(r, 10, 64)
+		if err != nil || n < 7 || n > 365 {
+			return nil, fmt.Errorf("Number of backups must be from 7 to 365")
+		}
+	}
+	if err := retentionConfig(bc, v["retainedBackups"], ""); err != nil {
+		return nil, err
+	}
+	return bc, nil
 }

@@ -67,7 +67,7 @@ func TestConsoleSecretParity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(l.Columns, ","); got != "Location,Encryption,Labels,Created,Expiration" {
+	if got := strings.Join(l.Columns, ","); got != "Location,Encryption,Labels,Tags,Created,Expiration" {
 		t.Errorf("columns %s", got)
 	}
 	row := l.Items[0]
@@ -174,5 +174,14 @@ func TestConsoleSecretTags(t *testing.T) {
 	b, err := reg.TagBindings(secrets.FullResourcePrefix + "projects/tags-project/secrets/ok")
 	if err != nil || len(b) != 1 || b[0].GetTagValueNamespacedName() != k.GetNamespacedName()+"/prod" {
 		t.Errorf("the secret's bindings = %v, %v", b, err)
+	}
+	// The list's Tags column reads the bindings back (#2142).
+	p.svc.registry = func() *resourcemanager.Registry { return reg }
+	l, err := p.List(ctx, "tags-project")
+	if err != nil || len(l.Items) != 1 {
+		t.Fatalf("List = %+v, %v", l, err)
+	}
+	if got := l.Items[0].Fields["Tags"]; got != "env: prod" {
+		t.Errorf("the Tags column = %q, want env: prod", got)
 	}
 }
