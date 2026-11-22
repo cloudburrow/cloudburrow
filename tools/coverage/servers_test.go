@@ -113,6 +113,7 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 		t.Fatal(err)
 	}
 	dfpb.RegisterDataformServer(srv, df)
+	df.RegisterBeta(srv)
 	// App Hub alone (#2110): its mixins are other services' rows.
 	ah, err := apphub.NewServer("", apphub.Options{})
 	if err != nil {

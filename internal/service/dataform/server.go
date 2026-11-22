@@ -143,6 +143,10 @@ type Server struct {
 	// sealed are the data keys of repositories with a customer-managed
 	// key, by repository name (cmek.go).
 	sealed map[string]cmek.Sealed
+	// wsExtras and triggers are what only v1beta1 sets on workspaces and
+	// workflow configs, by name (v1beta1.go, triggers.go).
+	wsExtras map[string]*workspaceExtra
+	triggers map[string]*triggerState
 	// locks serialize git work on one repository or workspace directory.
 	locks map[string]*sync.Mutex
 	// cancels stop running invocations.
@@ -193,6 +197,8 @@ func (s *Server) clear() {
 	s.policies = map[string]*iampolicy.Stored{}
 	s.ops = map[string]*longrunningpb.Operation{}
 	s.sealed = map[string]cmek.Sealed{}
+	s.wsExtras = map[string]*workspaceExtra{}
+	s.triggers = map[string]*triggerState{}
 	if s.locks == nil {
 		s.locks = map[string]*sync.Mutex{}
 	}
@@ -280,6 +286,9 @@ type stateFile struct {
 	Configs        []json.RawMessage            `json:"configs,omitempty"`
 	Policies       map[string]*iampolicy.Stored `json:"policies,omitempty"`
 	Keys           map[string]cmek.Sealed       `json:"keys,omitempty"`
+	// WorkspaceExtras and Triggers are v1beta1's (v1beta1.go).
+	WorkspaceExtras map[string]*workspaceExtra `json:"workspaceExtras,omitempty"`
+	Triggers        map[string]*triggerState   `json:"workflowTriggers,omitempty"`
 }
 
 type storedCompilation struct {
@@ -328,19 +337,34 @@ func unmarshalAll[M proto.Message](raw []json.RawMessage, mk func() M, name func
 
 // save writes the records; the caller holds mu.
 func (s *Server) save() error {
+	// What only v1beta1 sets goes with its workspace or workflow config.
+	for k := range s.wsExtras {
+		if _, ok := s.workspaces[k]; !ok {
+			delete(s.wsExtras, k)
+		}
+	}
+	for k, t := range s.triggers {
+		if _, ok := s.workflows[k]; !ok {
+			delete(s.triggers, k)
+		} else {
+			t.marshal()
+		}
+	}
 	if s.opts.State == "" {
 		return nil
 	}
 	st := stateFile{
-		Repositories:   marshalAll(s.repos),
-		Workspaces:     marshalAll(s.workspaces),
-		ReleaseConfigs: marshalAll(s.releases),
-		WorkflowConfig: marshalAll(s.workflows),
-		Folders:        marshalAll(s.folders),
-		TeamFolders:    marshalAll(s.teamFolders),
-		Configs:        marshalAll(s.configs),
-		Policies:       s.policies,
-		Keys:           s.sealed,
+		WorkspaceExtras: s.wsExtras,
+		Triggers:        s.triggers,
+		Repositories:    marshalAll(s.repos),
+		Workspaces:      marshalAll(s.workspaces),
+		ReleaseConfigs:  marshalAll(s.releases),
+		WorkflowConfig:  marshalAll(s.workflows),
+		Folders:         marshalAll(s.folders),
+		TeamFolders:     marshalAll(s.teamFolders),
+		Configs:         marshalAll(s.configs),
+		Policies:        s.policies,
+		Keys:            s.sealed,
 	}
 	for _, k := range sortedKeys(s.compilations) {
 		c := s.compilations[k]
@@ -438,6 +462,18 @@ func (s *Server) load() error {
 	}
 	if st.Keys != nil {
 		s.sealed = st.Keys
+	}
+	if st.WorkspaceExtras != nil {
+		s.wsExtras = st.WorkspaceExtras
+	}
+	for k, t := range st.Triggers {
+		if err := t.unmarshal(); err != nil {
+			return fmt.Errorf("dataform state %s: trigger of %s: %w", s.opts.State, k, err)
+		}
+		if t.Seen == nil {
+			t.Seen = map[string]time.Time{}
+		}
+		s.triggers[k] = t
 	}
 	return nil
 }
@@ -1010,7 +1046,14 @@ func (s *Server) CreateFolder(ctx context.Context, req *dfpb.CreateFolderRequest
 	if err := s.checkContainer(req.GetParent(), f.GetContainingFolder()); err != nil {
 		return nil, err
 	}
-	f.Name = req.GetParent() + "/folders/" + newUUID()
+	id, _ := ctx.Value(resourceIDKey).(string)
+	if id == "" {
+		id = newUUID()
+	}
+	f.Name = req.GetParent() + "/folders/" + id
+	if _, ok := s.folders[f.Name]; ok {
+		return nil, apierror.AlreadyExists("Folder %s already exists", f.Name)
+	}
 	f.CreateTime, f.UpdateTime = s.now(), s.now()
 	f.TeamFolderName = s.teamFolderOf(f.GetContainingFolder())
 	f.InternalMetadata = nil
@@ -1374,7 +1417,14 @@ func (s *Server) CreateTeamFolder(ctx context.Context, req *dfpb.CreateTeamFolde
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	t.Name = req.GetParent() + "/teamFolders/" + newUUID()
+	id, _ := ctx.Value(resourceIDKey).(string)
+	if id == "" {
+		id = newUUID()
+	}
+	t.Name = req.GetParent() + "/teamFolders/" + id
+	if _, ok := s.teamFolders[t.Name]; ok {
+		return nil, apierror.AlreadyExists("TeamFolder %s already exists", t.Name)
+	}
 	t.CreateTime, t.UpdateTime = s.now(), s.now()
 	t.InternalMetadata = nil
 	t.CreatorIamPrincipal = proto.String(callerOf(ctx))

@@ -22,6 +22,7 @@ import (
 // Register serves the API, its operations and its locations on g.
 func (s *Server) Register(g grpc.ServiceRegistrar) {
 	g.RegisterService(s.keyedDesc(), s)
+	s.RegisterBeta(g)
 	longrunningpb.RegisterOperationsServer(g, &operations{s: s})
 	locations.Register(g, &locationsServer{})
 }
@@ -133,22 +134,27 @@ func (o *operations) CancelOperation(ctx context.Context, req *longrunningpb.Can
 	return &emptypb.Empty{}, nil
 }
 
-// Mixins are the bindings dataform_v1.yaml adds: Locations and Operations.
+// Mixins are the bindings dataform_v1.yaml and dataform_v1beta1.yaml add:
+// Locations and Operations.
 func Mixins() []*annotations.HttpRule {
-	const op = "/v1/{name=projects/*/locations/*/operations/*}"
-	return []*annotations.HttpRule{
-		{Selector: "google.cloud.location.Locations.GetLocation", Pattern: &annotations.HttpRule_Get{Get: "/v1/{name=projects/*/locations/*}"}},
-		{Selector: "google.cloud.location.Locations.ListLocations", Pattern: &annotations.HttpRule_Get{Get: "/v1/{name=projects/*}/locations"}},
-		{Selector: "google.longrunning.Operations.ListOperations", Pattern: &annotations.HttpRule_Get{Get: "/v1/{name=projects/*/locations/*}/operations"}},
-		{Selector: "google.longrunning.Operations.GetOperation", Pattern: &annotations.HttpRule_Get{Get: op}},
-		{Selector: "google.longrunning.Operations.DeleteOperation", Pattern: &annotations.HttpRule_Delete{Delete: op}},
-		{Selector: "google.longrunning.Operations.CancelOperation", Pattern: &annotations.HttpRule_Post{Post: op + ":cancel"}, Body: "*"},
+	var out []*annotations.HttpRule
+	for _, v := range []string{"/v1", "/v1beta1"} {
+		op := v + "/{name=projects/*/locations/*/operations/*}"
+		out = append(out,
+			&annotations.HttpRule{Selector: "google.cloud.location.Locations.GetLocation", Pattern: &annotations.HttpRule_Get{Get: v + "/{name=projects/*/locations/*}"}},
+			&annotations.HttpRule{Selector: "google.cloud.location.Locations.ListLocations", Pattern: &annotations.HttpRule_Get{Get: v + "/{name=projects/*}/locations"}},
+			&annotations.HttpRule{Selector: "google.longrunning.Operations.ListOperations", Pattern: &annotations.HttpRule_Get{Get: v + "/{name=projects/*/locations/*}/operations"}},
+			&annotations.HttpRule{Selector: "google.longrunning.Operations.GetOperation", Pattern: &annotations.HttpRule_Get{Get: op}},
+			&annotations.HttpRule{Selector: "google.longrunning.Operations.DeleteOperation", Pattern: &annotations.HttpRule_Delete{Delete: op}},
+			&annotations.HttpRule{Selector: "google.longrunning.Operations.CancelOperation", Pattern: &annotations.HttpRule_Post{Post: op + ":cancel"}, Body: "*"},
+		)
 	}
+	return out
 }
 
 // Transcoder is the JSON API's configuration, with nothing registered.
 func Transcoder() *rest.Transcoder {
-	return &rest.Transcoder{Packages: []string{"google.cloud.dataform.v1"}, Mixins: Mixins(), SnakeCaseMasks: true}
+	return &rest.Transcoder{Packages: []string{"google.cloud.dataform.v1", "google.cloud.dataform.v1beta1"}, Mixins: Mixins(), SnakeCaseMasks: true}
 }
 
 // NewRESTHandler is the JSON API over s.

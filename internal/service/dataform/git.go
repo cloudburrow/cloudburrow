@@ -440,19 +440,39 @@ func (s *Server) CreateWorkspace(ctx context.Context, req *dfpb.CreateWorkspaceR
 		_ = os.RemoveAll(dir)
 		return nil, gitFailure(err)
 	}
-	if _, err := gitCmd(ctx, dir, nil, "init", "-q", "-b", rm.branch); err != nil {
+	// v1beta1 may name the branch to start from (original_branch) and a
+	// shallow clone's depth.
+	x, _ := ctx.Value(wsExtraKey).(*workspaceExtra)
+	branch := rm.branch
+	if x != nil && x.OriginalBranch != "" {
+		branch = x.OriginalBranch
+	}
+	if _, err := gitCmd(ctx, dir, nil, "init", "-q", "-b", branch); err != nil {
 		return fail(err)
 	}
-	if _, err := gitCmd(ctx, dir, nil, "remote", "add", "origin", rm.url); err != nil {
+	url := rm.url
+	if x != nil && x.Depth > 0 && rm.internal {
+		// git makes a shallow fetch of a local repository only through
+		// file://.
+		url = "file://" + filepath.ToSlash(rm.url)
+	}
+	if _, err := gitCmd(ctx, dir, nil, "remote", "add", "origin", url); err != nil {
 		return fail(err)
 	}
-	// A workspace starts from the default branch, when it has commits.
-	if _, err := gitCmd(ctx, dir, rm.conf, "fetch", "-q", "origin"); err != nil {
+	// A workspace starts from its branch, when it has commits.
+	fetch := []string{"fetch", "-q"}
+	if x != nil && x.Depth > 0 {
+		fetch = append(fetch, "--depth="+strconv.Itoa(int(x.Depth)))
+	}
+	if _, err := gitCmd(ctx, dir, rm.conf, append(fetch, "origin")...); err != nil {
 		return fail(err)
 	}
-	if _, err := gitCmd(ctx, dir, nil, "rev-parse", "--verify", "-q", "refs/remotes/origin/"+rm.branch); err == nil {
-		if _, err := gitCmd(ctx, dir, nil, "reset", "-q", "--hard", "origin/"+rm.branch); err != nil {
+	if _, err := gitCmd(ctx, dir, nil, "rev-parse", "--verify", "-q", "refs/remotes/origin/"+branch); err == nil {
+		if _, err := gitCmd(ctx, dir, nil, "reset", "-q", "--hard", "origin/"+branch); err != nil {
 			return fail(err)
+		}
+		if x != nil && x.BranchManagement {
+			_, _ = gitCmd(ctx, dir, nil, "branch", "-q", "--set-upstream-to=origin/"+branch)
 		}
 	}
 	w := clone(req.GetWorkspace())
@@ -469,6 +489,9 @@ func (s *Server) CreateWorkspace(ctx context.Context, req *dfpb.CreateWorkspaceR
 		return nil, err
 	}
 	s.workspaces[name] = w
+	if x != nil && *x != (workspaceExtra{}) {
+		s.wsExtras[name] = x
+	}
 	if err := s.save(); err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -821,10 +844,15 @@ func (s *Server) wsGit(ctx context.Context, name string) (dir string, rm remote,
 		return "", remote{}, nil, err
 	}
 	unlock = s.lock(dir)
-	if _, err := gitCmd(ctx, dir, nil, "remote", "set-url", "origin", rm.url); err != nil {
+	url := rm.url
+	if rm.internal && s.extraOf(name).Depth > 0 {
+		url = "file://" + filepath.ToSlash(rm.url)
+	}
+	if _, err := gitCmd(ctx, dir, nil, "remote", "set-url", "origin", url); err != nil {
 		unlock()
 		return "", remote{}, nil, gitFailure(err)
 	}
+	rm.branch = s.workspaceBranch(ctx, name, dir, rm)
 	return dir, rm, unlock, nil
 }
 

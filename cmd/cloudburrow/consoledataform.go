@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	dfpb "cloud.google.com/go/dataform/apiv1/dataformpb"
+	b1pb "cloud.google.com/go/dataform/apiv1beta1/dataformpb"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
@@ -337,7 +338,13 @@ func dataformInvocationSource(inv *dfpb.WorkflowInvocation) string {
 func (dataformProvider) createWorkspaceAction() console.Action {
 	return console.Action{ID: "createworkspace", Label: "Create development workspace", Submit: "Create", Fields: []console.Field{
 		{Name: "workspaceId", Label: "Workspace ID", Type: "text", Required: true, Pattern: `^[a-zA-Z_0-9\-]{1,63}$`,
-			Help: "Letters, numbers, hyphens and underscores; at most 63 characters."}}}
+			Help: "Letters, numbers, hyphens and underscores; at most 63 characters."},
+		{Name: "branchManagement", Label: "Enable branch management", Type: "checkbox", Section: "Advanced options",
+			Help: "The workspace can check out, create and delete branches (v1beta1 enable_branch_management)."},
+		{Name: "originalBranch", Label: "Branch", Type: "text", Section: "Advanced options",
+			Help: "The branch the workspace starts from and pulls and pushes by default; empty is the repository's default branch."},
+		{Name: "depth", Label: "Clone depth", Type: "text", Pattern: `^[0-9]*$`, Section: "Advanced options",
+			Help: "A shallow clone of this many commits; empty or 0 clones the full history. Needs branch management."}}}
 }
 
 func (dataformProvider) releaseAction(id, label string, rc *dfpb.ReleaseConfig) console.Action {
@@ -395,6 +402,7 @@ func (dataformProvider) workflowAction(ctx context.Context, s *dataform.Server, 
 		console.Field{Name: "timeZone", Label: "Time zone", Type: "text", Default: wc.GetTimeZone(), Help: "An IANA time zone; empty is UTC."},
 	)
 	fields = append(fields, dataformSelectionFields(ic)...)
+	fields = append(fields, dataformTriggerFields(ctx, s, wc.GetName())...)
 	submit := "Create"
 	if wc != nil {
 		submit = "Save"
@@ -625,10 +633,11 @@ func (p dataformProvider) workspaceDetail(ctx context.Context, s *dataform.Serve
 			compiled += fmt.Sprintf(" (%d errors)", len(c.GetCompilationErrors()))
 		}
 	}
+	branch, branches, history := dataformBranchSections(ctx, s, ws, repo.GetName())
 	return console.Detail{
-		Summary: []console.Property{{Label: "Created", Value: kmsTime(w.GetCreateTime())}, {Label: "Git", Value: ahead},
+		Summary: []console.Property{{Label: "Created", Value: kmsTime(w.GetCreateTime())}, {Label: "Branch", Value: branch}, {Label: "Git", Value: ahead},
 			{Label: "Last compiled", Value: compiled}},
-		Sections: []console.Section{
+		Sections: append([]console.Section{
 			{ID: "files", Label: "Files", Listing: files, Actions: []console.Action{p.createFileAction(), {ID: "createdir", Label: "Create directory",
 				Fields: []console.Field{{Name: "path", Label: "Directory path", Type: "text", Required: true}}},
 				{ID: "movedir", Label: "Rename directory", Menu: true, Fields: []console.Field{{Name: "path", Label: "Directory path", Type: "text", Required: true},
@@ -637,7 +646,7 @@ func (p dataformProvider) workspaceDetail(ctx context.Context, s *dataform.Serve
 			{ID: "graph", Label: "Compiled graph", Listing: graph},
 			{ID: "errors", Label: "Compilation errors", Listing: errs},
 			{ID: "changes", Label: "Uncommitted changes", Listing: changes},
-		},
+		}, append(branches, history)...),
 	}
 }
 
@@ -767,12 +776,14 @@ func (p dataformProvider) workflowDetail(ctx context.Context, s *dataform.Server
 	} else if len(ic.GetIncludedTags()) > 0 {
 		sel = "Tags: " + strings.Join(ic.GetIncludedTags(), ", ")
 	}
+	trigger, evaluations := dataformTriggerSection(ctx, s, name)
 	return console.Detail{
 		Summary: []console.Property{{Label: "Release configuration", Value: lastSegment(wc.GetReleaseConfig())},
 			{Label: "Frequency", Value: kmsOrDash(wc.GetCronSchedule())}, {Label: "Time zone", Value: dataformTimeZone(wc.GetTimeZone())},
-			{Label: "State", Value: dataformEnabledText(wc.GetDisabled())}},
+			{Label: "Trigger", Value: trigger}, {Label: "State", Value: dataformEnabledText(wc.GetDisabled())}},
 		Sections: []console.Section{
 			{ID: "executions", Label: "Scheduled executions", Listing: runs},
+			evaluations,
 			{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Heading: "Execution options", Properties: []console.Property{
 				{Label: "Actions", Value: sel}, {Label: "Include dependencies", Value: strconv.FormatBool(ic.GetTransitiveDependenciesIncluded())},
 				{Label: "Include dependents", Value: strconv.FormatBool(ic.GetTransitiveDependentsIncluded())},
@@ -846,7 +857,7 @@ func (p dataformProvider) DetailActions(ctx context.Context, project string, pth
 	}
 	switch {
 	case pth[1] == "workspaces" && len(pth) == 3:
-		return []console.Action{
+		acts := []console.Action{
 			{ID: "compile", Label: "Compile"},
 			{ID: "execute", Label: "Start execution", Title: "Execute", Submit: "Start execution", Fields: dataformSelectionFields(nil)},
 			{ID: "commit", Label: "Commit", Submit: "Commit", Fields: []console.Field{
@@ -864,6 +875,7 @@ func (p dataformProvider) DetailActions(ctx context.Context, project string, pth
 			{ID: "install", Label: "Install packages", Confirm: "npm installs the packages package.json names into the workspace's node_modules."},
 			{ID: "deleteworkspace", Label: "Delete", Destructive: true, Leaves: true, Confirm: "The workspace's uncommitted changes are lost."},
 		}
+		return append(acts, dataformBranchActions(ctx, s, name)...)
 	case pth[1] == "workspaces" && len(pth) == 5 && pth[3] == "files":
 		resp, err := s.ReadFile(ctx, &dfpb.ReadFileRequest{Workspace: name, Path: pth[4]})
 		if err != nil {
@@ -998,7 +1010,15 @@ func (p dataformProvider) ActAt(ctx context.Context, project string, pth []strin
 				return err
 			}
 			wc.Name = api
-			_, err = s.UpdateWorkflowConfig(ctx, &dfpb.UpdateWorkflowConfigRequest{WorkflowConfig: wc})
+			tc, err := dataformTrigger(values)
+			if err != nil {
+				return err
+			}
+			if _, err := s.UpdateWorkflowConfig(ctx, &dfpb.UpdateWorkflowConfigRequest{WorkflowConfig: wc}); err != nil {
+				return err
+			}
+			_, err = s.CallBeta(ctx, "UpdateWorkflowConfig", &b1pb.UpdateWorkflowConfigRequest{WorkflowConfig: &b1pb.WorkflowConfig{Name: api, WorkflowTriggerConfig: tc},
+				UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"workflow_trigger_config"}}})
 			return err
 		case "deleteworkflow":
 			_, err := s.DeleteWorkflowConfig(ctx, &dfpb.DeleteWorkflowConfigRequest{Name: api})
@@ -1045,8 +1065,7 @@ func (p dataformProvider) actOnRepository(ctx context.Context, s *dataform.Serve
 	name := repo.GetName()
 	switch action {
 	case "createworkspace":
-		_, err := s.CreateWorkspace(ctx, &dfpb.CreateWorkspaceRequest{Parent: name, WorkspaceId: strings.TrimSpace(values["workspaceId"]), Workspace: &dfpb.Workspace{}})
-		return err
+		return dataformCreateWorkspace(ctx, s, name, values)
 	case "createrelease":
 		rc, err := dataformReleaseConfig(values)
 		if err != nil {
@@ -1059,7 +1078,20 @@ func (p dataformProvider) actOnRepository(ctx context.Context, s *dataform.Serve
 		if err != nil {
 			return err
 		}
-		_, err = s.CreateWorkflowConfig(ctx, &dfpb.CreateWorkflowConfigRequest{Parent: name, WorkflowConfigId: strings.TrimSpace(values["workflowId"]), WorkflowConfig: wc})
+		tc, err := dataformTrigger(values)
+		if err != nil {
+			return err
+		}
+		if tc == nil {
+			_, err = s.CreateWorkflowConfig(ctx, &dfpb.CreateWorkflowConfigRequest{Parent: name, WorkflowConfigId: strings.TrimSpace(values["workflowId"]), WorkflowConfig: wc})
+			return err
+		}
+		bwc := &b1pb.WorkflowConfig{}
+		if err := dataformReread(wc, bwc); err != nil {
+			return err
+		}
+		bwc.WorkflowTriggerConfig = tc
+		_, err = s.CallBeta(ctx, "CreateWorkflowConfig", &b1pb.CreateWorkflowConfigRequest{Parent: name, WorkflowConfigId: strings.TrimSpace(values["workflowId"]), WorkflowConfig: bwc})
 		return err
 	case "settings":
 		_, err := s.UpdateRepository(ctx, &dfpb.UpdateRepositoryRequest{Repository: &dfpb.Repository{Name: name,
@@ -1137,6 +1169,8 @@ func (p dataformProvider) actOnWorkspace(ctx context.Context, s *dataform.Server
 	case "deleteworkspace":
 		_, err := s.DeleteWorkspace(ctx, &dfpb.DeleteWorkspaceRequest{Name: ws})
 		return err
+	case "checkout", "deletebranch", "syncrefs":
+		return dataformBranchAction(ctx, s, ws, action, values)
 	}
 	return fmt.Errorf("unknown action %q", action)
 }
