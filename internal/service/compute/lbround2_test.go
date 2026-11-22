@@ -25,6 +25,12 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/health"
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/xds"
 )
 
 // originFixture is an external Application Load Balancer whose backend
@@ -543,4 +549,86 @@ func TestTargetGrpcProxies(t *testing.T) {
 		"portRange": "50052", "loadBalancingScheme": "EXTERNAL_MANAGED"}); ErrorStatus(err) != 400 {
 		t.Fatalf("an external rule: %v", err)
 	}
+}
+
+func TestProxylessGRPCThroughXDS(t *testing.T) {
+	// The backend: a gRPC health server on this machine, a hybrid
+	// endpoint of an INTERNAL_SELF_MANAGED GRPC backend service.
+	gs := grpc.NewServer()
+	hs := health.NewServer()
+	hs.SetServingStatus("", healthpb.HealthCheckResponse_SERVING)
+	healthpb.RegisterHealthServer(gs, hs)
+	gl, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() { _ = gs.Serve(gl) }()
+	t.Cleanup(gs.Stop)
+	gport := gl.Addr().(*net.TCPAddr).Port
+	s, err := New(Options{VMs: fakeVMs{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Stop(context.Background()) })
+	z := "zones/us-central1-a/"
+	lbCall(t, s, "POST", z+"networkEndpointGroups", obj{"name": "grpc", "networkEndpointType": "NON_GCP_PRIVATE_IP_PORT",
+		"network": "global/networks/default", "defaultPort": gport})
+	lbCall(t, s, "POST", z+"networkEndpointGroups/grpc/attachNetworkEndpoints", obj{"networkEndpoints": []any{
+		obj{"ipAddress": "127.0.0.1", "port": gport}}})
+	lbCall(t, s, "POST", "global/healthChecks", obj{"name": "ghc", "type": "GRPC", "grpcHealthCheck": obj{"portSpecification": "USE_SERVING_PORT"},
+		"checkIntervalSec": 1, "timeoutSec": 1, "healthyThreshold": 1})
+	lbCall(t, s, "POST", "global/backendServices", obj{"name": "grpc", "protocol": "GRPC", "loadBalancingScheme": "INTERNAL_SELF_MANAGED",
+		"healthChecks": []any{"global/healthChecks/ghc"},
+		"backends":     []any{obj{"group": z + "networkEndpointGroups/grpc", "balancingMode": "RATE", "maxRatePerEndpoint": 100}}})
+	lbCall(t, s, "POST", "global/urlMaps", obj{"name": "grpc", "defaultService": "global/backendServices/grpc",
+		"hostRules":    []any{obj{"hosts": []any{"health.example"}, "pathMatcher": "pm"}},
+		"pathMatchers": []any{obj{"name": "pm", "defaultService": "global/backendServices/grpc"}}})
+	lbCall(t, s, "POST", "global/targetGrpcProxies", obj{"name": "grpc", "urlMap": "global/urlMaps/grpc", "validateForProxyless": true})
+	lbCall(t, s, "POST", "global/forwardingRules", obj{"name": "grpc", "target": "global/targetGrpcProxies/grpc",
+		"portRange": "8000", "loadBalancingScheme": "INTERNAL_SELF_MANAGED", "network": "global/networks/default"})
+	// The xDS server, as the Compute Engine port serves it: HTTP/2
+	// without TLS.
+	xl, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var protos http.Protocols
+	protos.SetUnencryptedHTTP2(true)
+	xs := &http.Server{Handler: s.XDSHandler(), Protocols: &protos}
+	go func() { _ = xs.Serve(xl) }()
+	t.Cleanup(func() { _ = xs.Close() })
+	rb, err := xds.NewXDSResolverWithConfigForTesting([]byte(XDSBootstrap(xl.Addr().String(), "p", "default")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cc, err := grpc.NewClient("xds:///health.example:8000", grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithResolvers(rb))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cc.Close()
+	var resp *healthpb.HealthCheckResponse
+	defer func() { t.Logf("last error: %v", err) }()
+	waitFor(t, "a proxyless gRPC call through xDS", func() bool {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		resp, err = healthpb.NewHealthClient(cc).Check(ctx, &healthpb.HealthCheckRequest{})
+		return err == nil
+	})
+	if err != nil || resp.GetStatus() != healthpb.HealthCheckResponse_SERVING {
+		t.Logf("last error: %v", err)
+		t.Fatalf("Check: %v", resp)
+	}
+	// A host no host rule takes: the default service still serves it,
+	// as the URL map's defaultService.
+	cc2, _ := grpc.NewClient("xds:///other.example:8000", grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithResolvers(rb))
+	defer cc2.Close()
+	waitFor(t, "the default service", func() bool {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_, err := healthpb.NewHealthClient(cc2).Check(ctx, &healthpb.HealthCheckRequest{})
+		return err == nil
+	})
 }

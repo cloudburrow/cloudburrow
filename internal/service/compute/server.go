@@ -38,6 +38,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/sysparams"
+	"google.golang.org/grpc"
 )
 
 // Options configure a Server.
@@ -96,6 +97,9 @@ type obj = map[string]any
 // Server is the Compute Engine API's VPC networking.
 type Server struct {
 	opts Options
+
+	xdsOnce sync.Once
+	xdsGRPC *grpc.Server
 
 	mu  sync.Mutex
 	res map[string]obj // by relative name: projects/P/global/networks/N

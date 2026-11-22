@@ -36,6 +36,17 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.serveLBCA(w, r)
 		return
 	}
+	if r.ProtoMajor == 2 && strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
+		// The xDS API of proxyless gRPC (#2160).
+		s.XDSHandler().ServeHTTP(w, r)
+		return
+	}
+	if r.URL.Path == XDSBootstrapPath {
+		// A bootstrap file naming this port (#2160), for ?project=P&network=N.
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(XDSBootstrap(r.Host, r.URL.Query().Get("project"), r.URL.Query().Get("network"))))
+		return
+	}
 	if r.URL.Path == IAPKeysPath {
 		// The keys of IAP's signed headers (#2160).
 		s.serveIAPKeys(w, r)
