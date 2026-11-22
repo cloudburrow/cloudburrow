@@ -161,12 +161,16 @@ func (s *Instances) buildQueryPlan(ctx context.Context, req *spannerpb.ExecuteSq
 	if err != nil {
 		return nil, err
 	}
-	ps, q, err := parseQuerySQL(req.GetSql(), sc.pg)
+	ps, stmt, err := parseStatementSQL(req.GetSql(), sc.pg)
 	if err == nil {
 		b := &planBuilder{ps: ps, schema: sc, ctes: map[string]*sqlCTE{}, cols: map[*sqlExpr]colRef{},
 			subPlans: map[*sqlExpr]*planOp{}, orderFor: map[*sqlSelect][]sqlOrder{}}
 		var root *planOp
-		root, err = b.buildPlan(q)
+		if stmt.dml != nil {
+			root, err = b.buildDML(stmt.dml)
+		} else {
+			root, err = b.buildPlan(stmt.query)
+		}
 		if err == nil {
 			nodes, byOp := planNodes(root)
 			return &builtPlan{root: root, nodes: nodes, byOp: byOp, created: time.Since(start)}, nil
@@ -219,7 +223,7 @@ func (s *Instances) measure(ctx context.Context, p *builtPlan, req *spannerpb.Ex
 		}
 		st.cum[o] = kidsCum
 		switch {
-		case o == p.root:
+		case o == p.root && returned >= 0:
 			st.rows[o] = returned
 		case o.rows != "":
 			n, d, err := count(o.rows)
@@ -326,30 +330,82 @@ func queryStats(req *spannerpb.ExecuteSqlRequest, p *builtPlan, elapsed, engine 
 	return st
 }
 
-// servePlanned serves a query in a mode with a plan. run runs a request
-// on the engine and sends its answers on, all but the last, and returns
-// that last answer's statistics and the transaction the request began, if
-// any; servePlanned returns the statistics to put on that last answer. In
-// PLAN mode the engine validates the query, which runs nothing, and the
-// front plans it. In PROFILE and WITH_PLAN_AND_STATS modes the engine
-// validates it first, so that a query the front cannot plan is refused
-// before it runs; then the engine runs it and the front measures the plan.
+// isDML says whether sql is an INSERT, UPDATE or DELETE.
+func isDML(sql string) bool {
+	toks, err := lexSQL(sql, false)
+	if err != nil {
+		toks, err = lexSQL(sql, true)
+	}
+	if err != nil {
+		return false
+	}
+	i := 0
+	if len(toks) > 0 && toks[0].kind == tkPunct && toks[0].text == "@{" {
+		for i < len(toks) && !(toks[i].kind == tkPunct && toks[i].text == "}") {
+			i++
+		}
+		i++
+	}
+	for i < len(toks) && toks[i].kind == tkPGHint {
+		i++
+	}
+	if i >= len(toks) || toks[i].kind != tkIdent {
+		return false
+	}
+	switch strings.ToUpper(toks[i].text) {
+	case "INSERT", "UPDATE", "DELETE":
+		return true
+	}
+	return false
+}
+
+// servePlanned serves a statement in a mode with a plan. run runs a
+// request on the engine and sends its answers on, all but the last, with
+// began, when set, as the first answer's transaction; it returns that last
+// answer's statistics and the transaction the request began, if any.
+// servePlanned returns the statistics to put on the last answer.
+//
+// In PLAN mode the engine validates the statement, which runs nothing, and
+// the front plans it. In PROFILE and WITH_PLAN_AND_STATS modes the engine
+// validates it first, so that a statement the front cannot plan is refused
+// before it runs; the front counts the plan's rows; then the engine runs
+// it. A DML statement's rows are counted before it changes them, in its own
+// read-write transaction, which the front begins when the request asks
+// for one to be begun.
 func (s *Instances) servePlanned(ctx context.Context, req *spannerpb.ExecuteSqlRequest,
-	run func(*spannerpb.ExecuteSqlRequest) (*spannerpb.ResultSetStats, []byte, error)) (*spannerpb.ResultSetStats, error) {
+	run func(r *spannerpb.ExecuteSqlRequest, began *spannerpb.Transaction) (*spannerpb.ResultSetStats, []byte, error)) (*spannerpb.ResultSetStats, error) {
 	start := time.Now()
 	if req.GetQueryMode() == spannerpb.ExecuteSqlRequest_PLAN {
-		if _, _, err := run(req); err != nil {
+		estats, _, err := run(req, nil)
+		if err != nil {
 			return nil, err
 		}
 		p, err := s.buildQueryPlan(ctx, req)
 		if err != nil {
 			return nil, err
 		}
-		return &spannerpb.ResultSetStats{QueryPlan: &spannerpb.QueryPlan{PlanNodes: p.nodes}}, nil
+		return &spannerpb.ResultSetStats{QueryPlan: &spannerpb.QueryPlan{PlanNodes: p.nodes}, RowCount: estats.GetRowCount()}, nil
+	}
+	dml := isDML(req.GetSql())
+	tx := req.GetTransaction()
+	var began *spannerpb.Transaction
+	if dml && tx.GetBegin() != nil {
+		t, err := s.data.BeginTransaction(ctx, &spannerpb.BeginTransactionRequest{Session: req.GetSession(), Options: tx.GetBegin()})
+		if err != nil {
+			return nil, err
+		}
+		began = t
+		tx = &spannerpb.TransactionSelector{Selector: &spannerpb.TransactionSelector_Id{Id: t.GetId()}}
 	}
 	check := proto.Clone(req).(*spannerpb.ExecuteSqlRequest)
 	check.QueryMode = spannerpb.ExecuteSqlRequest_PLAN
-	if req.GetTransaction().GetId() == nil {
+	// the statement's own seqno is for its run: a transaction takes one
+	// request per seqno
+	check.Seqno = 0
+	switch {
+	case tx.GetId() != nil:
+		check.Transaction = tx
+	case !dml:
 		// validating begins no transaction
 		check.Transaction = singleUse()
 	}
@@ -360,24 +416,40 @@ func (s *Instances) servePlanned(ctx context.Context, req *spannerpb.ExecuteSqlR
 	if err != nil {
 		return nil, err
 	}
+	var st *planStats
+	if dml {
+		if st, err = s.measure(ctx, p, req, tx, -1); err != nil {
+			return nil, err
+		}
+	}
 	exec := proto.Clone(req).(*spannerpb.ExecuteSqlRequest)
 	exec.QueryMode = spannerpb.ExecuteSqlRequest_PROFILE
-	estats, began, err := run(exec)
+	exec.Transaction = tx
+	estats, beganID, err := run(exec, began)
 	if err != nil {
 		return nil, err
 	}
 	elapsed := time.Since(start)
 	returned, _ := strconv.ParseInt(estats.GetQueryStats().GetFields()["rows_returned"].GetStringValue(), 10, 64)
-	tx := req.GetTransaction()
-	switch {
-	case began != nil:
-		tx = &spannerpb.TransactionSelector{Selector: &spannerpb.TransactionSelector_Id{Id: began}}
-	case tx == nil || tx.GetSelector() == nil:
-		tx = singleUse()
-	}
-	st, err := s.measure(ctx, p, req, tx, returned)
-	if err != nil {
-		return nil, err
+	if !dml {
+		switch {
+		case beganID != nil:
+			tx = &spannerpb.TransactionSelector{Selector: &spannerpb.TransactionSelector_Id{Id: beganID}}
+		case tx == nil || tx.GetSelector() == nil:
+			tx = singleUse()
+		}
+		if st, err = s.measure(ctx, p, req, tx, returned); err != nil {
+			return nil, err
+		}
+	} else {
+		for o := range p.byOp {
+			if o.affected {
+				st.rows[o] = estats.GetRowCountExact()
+			}
+		}
+		if p.root.name == "Serialize Result" {
+			st.rows[p.root] = returned
+		}
 	}
 	scanned := applyExecutionStats(p, st)
 	if req.GetQueryMode() == spannerpb.ExecuteSqlRequest_WITH_PLAN_AND_STATS {
@@ -386,6 +458,6 @@ func (s *Instances) servePlanned(ctx context.Context, req *spannerpb.ExecuteSqlR
 			n.ExecutionStats = nil
 		}
 	}
-	return &spannerpb.ResultSetStats{QueryPlan: &spannerpb.QueryPlan{PlanNodes: p.nodes},
+	return &spannerpb.ResultSetStats{QueryPlan: &spannerpb.QueryPlan{PlanNodes: p.nodes}, RowCount: estats.GetRowCount(),
 		QueryStats: queryStats(req, p, elapsed, engineElapsed(estats), returned, scanned, true)}, nil
 }

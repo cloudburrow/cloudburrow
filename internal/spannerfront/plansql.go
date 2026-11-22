@@ -318,7 +318,38 @@ type unsupportedSQL struct{ what string }
 
 func (e unsupportedSQL) Error() string { return e.what }
 
+// sqlDML is an INSERT, UPDATE or DELETE.
+type sqlDML struct {
+	kind  string // INSERT, UPDATE, DELETE
+	table *sqlFrom
+	where *sqlExpr
+	set   []*sqlExpr // UPDATE's new values
+	cols  []string   // INSERT's columns
+	rows  int        // INSERT ... VALUES's rows
+	query *sqlQuery  // INSERT ... SELECT's query
+	// returning is THEN RETURN's (RETURNING's) list.
+	returning []sqlItem
+	lo, hi    int
+}
+
+type sqlStmt struct {
+	query *sqlQuery
+	dml   *sqlDML
+}
+
 func parseQuerySQL(src string, pg bool) (*sqlParser, *sqlQuery, error) {
+	ps, st, err := parseStatementSQL(src, pg)
+	if err != nil {
+		return nil, nil, err
+	}
+	if st.query == nil {
+		return nil, nil, unsupportedSQL{"a " + st.dml.kind + " statement where a query was expected"}
+	}
+	return ps, st.query, nil
+}
+
+// parseStatementSQL parses a query or a DML statement.
+func parseStatementSQL(src string, pg bool) (*sqlParser, *sqlStmt, error) {
 	toks, err := lexSQL(src, pg)
 	if err != nil {
 		return nil, nil, err
@@ -333,12 +364,22 @@ func parseQuerySQL(src string, pg bool) (*sqlParser, *sqlQuery, error) {
 	} else if ps.peek().kind == tkPGHint {
 		ps.stmtHints = parseHintBody(ps.next().text)
 	}
-	if !ps.isKw("SELECT") && !ps.isKw("WITH") && !ps.isP("(") {
+	st := &sqlStmt{}
+	switch {
+	case ps.isKw("INSERT") || ps.isKw("UPDATE") || ps.isKw("DELETE"):
+		d, err := ps.dml()
+		if err != nil {
+			return nil, nil, err
+		}
+		st.dml = d
+	case ps.isKw("SELECT") || ps.isKw("WITH") || ps.isP("("):
+		q, err := ps.query()
+		if err != nil {
+			return nil, nil, err
+		}
+		st.query = q
+	default:
 		return nil, nil, unsupportedSQL{fmt.Sprintf("a %s statement", strings.ToUpper(ps.peek().text))}
-	}
-	q, err := ps.query()
-	if err != nil {
-		return nil, nil, err
 	}
 	if ps.isP(";") {
 		ps.p++
@@ -346,7 +387,173 @@ func parseQuerySQL(src string, pg bool) (*sqlParser, *sqlQuery, error) {
 	if ps.peek().kind != tkEOF {
 		return nil, nil, ps.errAt("the end of the statement")
 	}
-	return ps, q, nil
+	return ps, st, nil
+}
+
+// dml parses INSERT, UPDATE and DELETE, in either dialect.
+func (ps *sqlParser) dml() (*sqlDML, error) {
+	d := &sqlDML{lo: ps.p, kind: strings.ToUpper(ps.next().text)}
+	target := func() error {
+		lo := ps.p
+		name, ok := ps.ident()
+		if !ok {
+			return ps.errAt("a table name")
+		}
+		f := &sqlFrom{kind: fromTable, name: []string{name}, lo: lo}
+		if err := ps.itemHints(f); err != nil {
+			return err
+		}
+		if d.kind != "INSERT" || ps.pg {
+			if ps.acceptKw("AS") {
+				a, ok := ps.ident()
+				if !ok {
+					return ps.errAt("an alias")
+				}
+				f.alias = a
+			} else if a, ok := ps.ident(); ok {
+				f.alias = a
+			}
+		}
+		f.hi = ps.p
+		d.table = f
+		return nil
+	}
+	switch d.kind {
+	case "DELETE":
+		ps.acceptKw("FROM")
+		if err := target(); err != nil {
+			return nil, err
+		}
+		if err := ps.expectKw("WHERE"); err != nil {
+			return nil, err
+		}
+		e, err := ps.expr()
+		if err != nil {
+			return nil, err
+		}
+		d.where = e
+	case "UPDATE":
+		if err := target(); err != nil {
+			return nil, err
+		}
+		if err := ps.expectKw("SET"); err != nil {
+			return nil, err
+		}
+		for {
+			if _, err := ps.postfix(); err != nil {
+				return nil, err
+			}
+			if err := ps.expectP("="); err != nil {
+				return nil, err
+			}
+			if ps.acceptKw("DEFAULT") {
+			} else {
+				e, err := ps.expr()
+				if err != nil {
+					return nil, err
+				}
+				d.set = append(d.set, e)
+			}
+			if !ps.acceptP(",") {
+				break
+			}
+		}
+		if err := ps.expectKw("WHERE"); err != nil {
+			return nil, err
+		}
+		e, err := ps.expr()
+		if err != nil {
+			return nil, err
+		}
+		d.where = e
+	case "INSERT":
+		if ps.acceptKw("OR") {
+			if !ps.acceptKw("IGNORE") && !ps.acceptKw("UPDATE") {
+				return nil, ps.errAt("IGNORE or UPDATE")
+			}
+		}
+		ps.acceptKw("INTO")
+		if err := target(); err != nil {
+			return nil, err
+		}
+		if err := ps.expectP("("); err != nil {
+			return nil, err
+		}
+		for {
+			c, ok := ps.ident()
+			if !ok {
+				return nil, ps.errAt("a column name")
+			}
+			d.cols = append(d.cols, c)
+			if !ps.acceptP(",") {
+				break
+			}
+		}
+		if err := ps.expectP(")"); err != nil {
+			return nil, err
+		}
+		if ps.acceptKw("VALUES") {
+			for {
+				if err := ps.expectP("("); err != nil {
+					return nil, err
+				}
+				for {
+					if !ps.acceptKw("DEFAULT") {
+						if _, err := ps.expr(); err != nil {
+							return nil, err
+						}
+					}
+					if !ps.acceptP(",") {
+						break
+					}
+				}
+				if err := ps.expectP(")"); err != nil {
+					return nil, err
+				}
+				d.rows++
+				if !ps.acceptP(",") {
+					break
+				}
+			}
+		} else {
+			q, err := ps.query()
+			if err != nil {
+				return nil, err
+			}
+			d.query = q
+		}
+		if ps.pg && ps.acceptKw("ON", "CONFLICT") {
+			return nil, unsupportedSQL{"INSERT ... ON CONFLICT"}
+		}
+	}
+	if ps.acceptKw("THEN", "RETURN") || ps.acceptKw("RETURNING") {
+		ps.acceptKw("WITH", "ACTION")
+		for {
+			var it sqlItem
+			lo := ps.p
+			if ps.acceptP("*") {
+				it.e = &sqlExpr{kind: exStar, lo: lo, hi: ps.p}
+			} else {
+				e, err := ps.expr()
+				if err != nil {
+					return nil, err
+				}
+				it.e = e
+			}
+			if ps.acceptKw("AS") {
+				a, _ := ps.ident()
+				it.alias = a
+			} else if a, ok := ps.ident(); ok {
+				it.alias = a
+			}
+			d.returning = append(d.returning, it)
+			if !ps.acceptP(",") {
+				break
+			}
+		}
+	}
+	d.hi = ps.p
+	return d, nil
 }
 
 func (ps *sqlParser) peek() token { return ps.toks[ps.p] }
@@ -431,6 +638,7 @@ var reservedSQL = map[string]bool{
 	"ON": true, "OR": true, "ORDER": true, "OUTER": true, "RIGHT": true, "SELECT": true, "TABLESAMPLE": true,
 	"THEN": true, "TRUE": true, "UNION": true, "UNNEST": true, "USING": true, "WHEN": true, "WHERE": true,
 	"WINDOW": true, "WITH": true, "QUALIFY": true, "ILIKE": true, "LATERAL": true,
+	"SET": true, "RETURNING": true, "VALUES": true, "DEFAULT": true,
 }
 
 func (ps *sqlParser) isReserved() bool {

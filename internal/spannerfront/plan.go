@@ -119,6 +119,9 @@ type planOp struct {
 	scan bool
 	// filtered is set on a Filter Scan with a residual condition.
 	filtered bool
+	// affected is set on Apply Mutations, whose rows are the rows the
+	// statement changed.
+	affected bool
 }
 
 type planScalar struct {
@@ -182,7 +185,10 @@ type planBuilder struct {
 	// orderFor are the ORDER BY expressions of the query a SELECT is the
 	// body of, which read its columns too.
 	orderFor map[*sqlSelect][]sqlOrder
-	next     int
+	// dmlTarget is the table a DML statement changes: its scan reads its
+	// key, which the mutations name.
+	dmlTarget *sqlFrom
+	next      int
 }
 
 type colRef struct {
@@ -261,6 +267,70 @@ func (b *planBuilder) buildPlan(q *sqlQuery) (*planOp, error) {
 		return nil, err
 	}
 	return b.serialize(f.items, q, f), nil
+}
+
+// buildDML plans an INSERT, UPDATE or DELETE: Apply Mutations (Google's
+// unary operators page: "the top operator in a query plan for a DML
+// statement") over the rows it changes or inserts, and Serialize Result
+// over it when THEN RETURN returns them.
+func (b *planBuilder) buildDML(d *sqlDML) (*planOp, error) {
+	var in *planOp
+	var items []*planItem
+	switch {
+	case d.kind == "INSERT" && d.query != nil:
+		f, err := b.planQuery(d.query, nil, topCount)
+		if err != nil {
+			return nil, err
+		}
+		in = b.gather(f)
+	case d.kind == "INSERT":
+		var inputs []planLink
+		for i := 0; i < d.rows; i++ {
+			u := op("Unit Relation", nil)
+			u.rows = topCount.count("SELECT 1")
+			inputs = append(inputs, rel(op("Union Input", nil, rel(u, "")), ""))
+		}
+		in = inputs[0].rel.firstRel()
+		if len(inputs) > 1 {
+			in = op("Union All", nil, inputs...)
+			in.rows = "SELECT " + fmt.Sprint(d.rows)
+		}
+	default:
+		// the rows a DELETE or UPDATE changes: its WHERE clause's
+		b.dmlTarget = d.table
+		var list []sqlItem
+		for _, e := range d.set {
+			list = append(list, sqlItem{e: e})
+		}
+		sel := &sqlSelect{list: list, from: d.table, where: d.where, lo: d.lo, hi: d.hi}
+		f, err := b.planSelect(sel, nil, topCount)
+		if err != nil {
+			return nil, err
+		}
+		items = f.items
+		in = b.gather(f)
+	}
+	am := op("Apply Mutations", nil, rel(in, ""))
+	am.affected = true
+	if len(d.returning) == 0 {
+		return am, nil
+	}
+	var outs []planLink
+	for _, it := range d.returning {
+		if it.e.kind == exStar {
+			if t := b.schema.table(d.table.name[0]); t != nil {
+				for _, c := range t.cols {
+					outs = append(outs, planLink{sc: &planScalar{name: "Reference", desc: "$" + c}})
+				}
+			}
+			continue
+		}
+		if items != nil {
+			b.resolve(it.e, items[0].scope)
+		}
+		outs = append(outs, planLink{sc: b.scalar(it.e, nil)})
+	}
+	return op("Serialize Result", nil, append([]planLink{rel(am, "")}, outs...)...), nil
 }
 
 // serialize puts Serialize Result on top of the query's plan: below its
@@ -633,9 +703,6 @@ func (b *planBuilder) planOutput(sel *sqlSelect, f *frag, scope *planScope, cc *
 			m := map[string]string{"iterator_type": iter}
 			if call != "" {
 				m["call_type"] = call
-			}
-			if len(sel.groupBy) == 0 {
-				m["scalar_aggregate"] = "true"
 			}
 			return m
 		}
@@ -1330,6 +1397,13 @@ func (b *planBuilder) access(it *planItem, scope *planScope, conds *[]*cond, nee
 	execs := ""
 	if bound != nil {
 		execs = cc.count(bound.rowsSQL())
+	}
+	if b.dmlTarget == it.from {
+		for _, p := range t.pk {
+			if !hasCol(needed, p.name) {
+				needed = append(append([]string{}, needed...), p.name)
+			}
+		}
 	}
 	scanCols := needed
 	if ix != nil && !covers(ix) {

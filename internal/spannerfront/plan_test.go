@@ -224,3 +224,57 @@ func TestPlanRefusesWhatItDoesNotKnow(t *testing.T) {
 		}
 	}
 }
+
+func TestPlanDML(t *testing.T) {
+	sc := docsSchema(false)
+	for _, c := range []struct{ sql, want string }{
+		{"DELETE FROM Singers WHERE BirthDate IS NULL", `
+Apply Mutations
+  Distributed Union(Global)
+    Distributed Union(Local)
+      Filter Scan
+        Scan[TableScan Singers full]
+        Residual Condition: $BirthDate IS NULL
+`},
+		{"DELETE FROM Singers WHERE FirstName = 'Alice'", `
+Apply Mutations
+  Distributed Union(Global)
+    Distributed Union(Local)
+      Filter Scan
+        Scan[IndexScan SingersByFirstLastName]
+        Seek Condition: $FirstName = 'Alice'
+`},
+		{"UPDATE Albums SET MarketingBudget = MarketingBudget * 2 WHERE SingerId = 1 THEN RETURN AlbumId", `
+Serialize Result
+  Apply Mutations
+    Distributed Union(Global)
+      Distributed Union(Local)
+        Filter Scan
+          Scan[TableScan Albums]
+          Seek Condition: $SingerId = 1
+`},
+		{"INSERT INTO Singers (SingerId, FirstName) VALUES (10, 'A'), (11, 'B')", `
+Apply Mutations
+  Union All
+    Union Input
+      Unit Relation
+    Union Input
+      Unit Relation
+`},
+	} {
+		ps, st, err := parseStatementSQL(c.sql, false)
+		if err != nil {
+			t.Fatalf("parse %q: %v", c.sql, err)
+		}
+		b := &planBuilder{ps: ps, schema: sc, ctes: map[string]*sqlCTE{}, cols: map[*sqlExpr]colRef{},
+			subPlans: map[*sqlExpr]*planOp{}, orderFor: map[*sqlSelect][]sqlOrder{}}
+		root, err := b.buildDML(st.dml)
+		if err != nil {
+			t.Fatalf("plan %q: %v", c.sql, err)
+		}
+		nodes, _ := planNodes(root)
+		if got := planTree(nodes); strings.TrimSpace(got) != strings.TrimSpace(c.want) {
+			t.Errorf("%s:\ngot\n%s\nwant\n%s", c.sql, got, c.want)
+		}
+	}
+}

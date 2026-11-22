@@ -389,6 +389,58 @@ func TestSpannerQueryPlans(t *testing.T) {
 					}
 				}
 			}
+			// DML (Google's unary operators page: Apply Mutations is "the top
+			// operator in a query plan for a DML statement"): PLAN changes
+			// nothing; PROFILE counts the rows before it changes them, in the
+			// transaction the client library begins inline.
+			upd := q(`UPDATE Albums SET MarketingBudget = 100 WHERE SingerId = 2 THEN RETURN AlbumId`,
+				`UPDATE albums SET marketingbudget = 100 WHERE singerid = 2 RETURNING albumid`)
+			del := q(`DELETE FROM Songs WHERE SingerId = 3`, `DELETE FROM songs WHERE singerid = 3`)
+			_, err := client.ReadWriteTransaction(ctx, func(ctx context.Context, txn *spanner.ReadWriteTransaction) error {
+				it := txn.QueryWithStats(ctx, spanner.Statement{SQL: upd})
+				var n int64
+				for {
+					_, err := it.Next()
+					if err == iterator.Done {
+						break
+					}
+					if err != nil {
+						return fmt.Errorf("UPDATE in PROFILE mode: %w", err)
+					}
+					n++
+				}
+				pp := planView{nodes: it.QueryPlan.GetPlanNodes()}
+				am := pp.named("Apply Mutations")
+				fs := pp.named("Filter Scan")
+				if n != 3 || it.RowCount != 3 || len(am) != 1 || len(fs) != 1 || statInt(am[0], "rows") != 3 || statInt(fs[0], "rows") != 3 {
+					t.Errorf("UPDATE ... THEN RETURN in PROFILE mode: %d rows, row count %d; want 3 and an Apply Mutations over a Filter Scan, each of 3 rows:\n%s", n, it.RowCount, pp)
+				}
+				plan, err := txn.AnalyzeQuery(ctx, spanner.Statement{SQL: del})
+				if err != nil {
+					return fmt.Errorf("DELETE in PLAN mode: %w", err)
+				}
+				if pv := (planView{nodes: plan.GetPlanNodes()}); len(pv.named("Apply Mutations")) != 1 || pv.nodes[0].GetDisplayName() != "Apply Mutations" {
+					t.Errorf("DELETE in PLAN mode: want Apply Mutations at the root:\n%s", pv)
+				}
+				var budget, songs int64
+				if err := txn.Query(ctx, spanner.Statement{SQL: q(`SELECT COUNT(*) FROM Albums WHERE MarketingBudget = 100`, `SELECT COUNT(*) FROM albums WHERE marketingbudget = 100`)}).Do(func(r *spanner.Row) error {
+					return r.Column(0, &budget)
+				}); err != nil {
+					return err
+				}
+				if err := txn.Query(ctx, spanner.Statement{SQL: q(`SELECT COUNT(*) FROM Songs WHERE SingerId = 3`, `SELECT COUNT(*) FROM songs WHERE singerid = 3`)}).Do(func(r *spanner.Row) error {
+					return r.Column(0, &songs)
+				}); err != nil {
+					return err
+				}
+				if budget != 3 || songs != 1 {
+					t.Errorf("in the transaction, %d albums have the new budget and %d songs of singer 3 are left; want 3 (the UPDATE ran) and 1 (PLAN deleted nothing)", budget, songs)
+				}
+				return nil
+			})
+			if err != nil {
+				t.Fatalf("ReadWriteTransaction: %v", err)
+			}
 		})
 	}
 }

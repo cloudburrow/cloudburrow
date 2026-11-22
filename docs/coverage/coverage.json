@@ -12053,7 +12053,8 @@
         "tests": [
           "test/compat/spannercmek1950_test.go:61 TestSpannerCMEK",
           "test/compat/spannerdata_test.go:137 TestSpannerUnaryQueryDMLAndRollback",
-          "test/compat/spannerprofile_test.go:35 TestSpannerQueryModes",
+          "test/compat/spannerplans2029_test.go:228 TestSpannerQueryPlans",
+          "test/compat/spannerprofile_test.go:31 TestSpannerQueryModes",
           "test/compat/spannerproto2017_test.go:59 TestSpannerProtoBundleColumns"
         ]
       },
@@ -12063,8 +12064,8 @@
         "tests": [
           "test/compat/iamenforcementround9_1879_test.go:159 TestIAMEnforcementSpanner",
           "test/compat/optional_test.go:264 TestSpannerSchemaAndQuery",
-          "test/compat/spannerplans2029_test.go:35 TestSpannerQueryPlansRefusedForEveryShape",
-          "test/compat/spannerprofile_test.go:35 TestSpannerQueryModes"
+          "test/compat/spannerplans2029_test.go:228 TestSpannerQueryPlans",
+          "test/compat/spannerprofile_test.go:31 TestSpannerQueryModes"
         ]
       },
       {

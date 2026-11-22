@@ -77,10 +77,16 @@ func (d cacheData) ExecuteSql(ctx context.Context, req *spannerpb.ExecuteSqlRequ
 func (d cacheData) execute(ctx context.Context, req *spannerpb.ExecuteSqlRequest) (*spannerpb.ResultSet, error) {
 	if planModes[req.GetQueryMode()] {
 		var rs *spannerpb.ResultSet
-		stats, err := d.s.servePlanned(ctx, req, func(r *spannerpb.ExecuteSqlRequest) (*spannerpb.ResultSetStats, []byte, error) {
+		stats, err := d.s.servePlanned(ctx, req, func(r *spannerpb.ExecuteSqlRequest, began *spannerpb.Transaction) (*spannerpb.ResultSetStats, []byte, error) {
 			out, err := d.s.data.ExecuteSql(ctx, r)
 			if err != nil {
 				return nil, nil, err
+			}
+			if began != nil {
+				if out.Metadata == nil {
+					out.Metadata = &spannerpb.ResultSetMetadata{}
+				}
+				out.Metadata.Transaction = began
 			}
 			rs = out
 			return out.GetStats(), out.GetMetadata().GetTransaction().GetId(), nil
@@ -110,12 +116,13 @@ func (d cacheData) ExecuteStreamingSql(req *spannerpb.ExecuteSqlRequest, stream 
 func (d cacheData) executeStreaming(ctx context.Context, req *spannerpb.ExecuteSqlRequest, send func(*spannerpb.PartialResultSet) error) error {
 	if planModes[req.GetQueryMode()] {
 		var last *spannerpb.PartialResultSet
-		stats, err := d.s.servePlanned(ctx, req, func(r *spannerpb.ExecuteSqlRequest) (*spannerpb.ResultSetStats, []byte, error) {
+		stats, err := d.s.servePlanned(ctx, req, func(r *spannerpb.ExecuteSqlRequest, began *spannerpb.Transaction) (*spannerpb.ResultSetStats, []byte, error) {
 			in, err := d.s.data.ExecuteStreamingSql(ctx, r)
 			if err != nil {
 				return nil, nil, err
 			}
-			var began []byte
+			var beganID []byte
+			first := true
 			for {
 				m, err := in.Recv()
 				if err == io.EOF {
@@ -124,8 +131,15 @@ func (d cacheData) executeStreaming(ctx context.Context, req *spannerpb.ExecuteS
 				if err != nil {
 					return nil, nil, err
 				}
-				if began == nil {
-					began = m.GetMetadata().GetTransaction().GetId()
+				if first {
+					first = false
+					if began != nil {
+						if m.Metadata == nil {
+							m.Metadata = &spannerpb.ResultSetMetadata{}
+						}
+						m.Metadata.Transaction = began
+					}
+					beganID = m.GetMetadata().GetTransaction().GetId()
 				}
 				if last != nil {
 					if err := send(last); err != nil {
@@ -134,7 +148,7 @@ func (d cacheData) executeStreaming(ctx context.Context, req *spannerpb.ExecuteS
 				}
 				last = m
 			}
-			return last.GetStats(), began, nil
+			return last.GetStats(), beganID, nil
 		})
 		if err != nil {
 			return err
