@@ -264,7 +264,7 @@ func TestIAPThroughTheBrowser2160(t *testing.T) {
 
 // TestCertificateManagerThroughTheBrowser2160 (#2160): Certificate
 // Manager's tabs are Google's (Certificates, Certificate Maps, DNS
-// Authorizations, Issuance Configs, Classic Certificates); Create
+// Authorizations, Issuance Configs, Trust Configs, Classic Certificates); Create
 // certificate map makes a map, listed, whose page has its entries tab.
 // The keyboard subtest moves along the tab strip with Tab.
 func TestCertificateManagerThroughTheBrowser2160(t *testing.T) {
@@ -272,9 +272,9 @@ func TestCertificateManagerThroughTheBrowser2160(t *testing.T) {
 	project := uniqueProject(t)
 	q := "?project=" + url.QueryEscape(project)
 	p := open(t)
-	want := "Certificates,Certificate Maps,DNS Authorizations,Issuance Configs,Classic Certificates"
+	want := "Certificates,Certificate Maps,DNS Authorizations,Issuance Configs,Trust Configs,Classic Certificates"
 	for i, path := range []string{"/security/ccm/list/certificates", "/security/ccm/list/certificateMaps", "/security/ccm/list/dnsAuthorizations",
-		"/security/ccm/list/issuanceConfigs", "/security/ccm/list/lbCertificates"} {
+		"/security/ccm/list/issuanceConfigs", "/security/ccm/list/trustConfigs", "/security/ccm/list/lbCertificates"} {
 		p.navigate(path + q)
 		p.waitFor(settled + ` && document.querySelector("#view nav.page-tabs") !== null`)
 		var strip string

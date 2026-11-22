@@ -88,6 +88,12 @@ type Options struct {
 	// (#2160, lbext.go); nil refuses every request through an IAP-enabled
 	// backend service.
 	IAP IAPGate
+	// NetSec is Network Security, which target HTTPS proxies'
+	// serverTlsPolicy and authorizationPolicy and backend services'
+	// securitySettings.clientTlsPolicy name, and whose authorization
+	// policies target forwarding rules (#2160, lbmtls.go); nil refuses
+	// those fields and authorizes every request.
+	NetSec NetworkSecurity
 }
 
 // obj is one resource, as its JSON is kept: link fields hold relative

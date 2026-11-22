@@ -416,6 +416,13 @@ func (s *Server) DeleteTrustConfig(_ context.Context, req *cmpb.DeleteTrustConfi
 		s.mu.Unlock()
 		return nil, apierror.Aborted("The etag '%s' does not match the trust config's current etag.", req.GetEtag())
 	}
+	users := s.trustUsers
 	s.mu.Unlock()
+	// Asked outside the lock: Network Security reads trust configs.
+	if users != nil && ok {
+		if u := users(req.GetName()); len(u) > 0 {
+			return nil, apierror.FailedPrecondition("TrustConfig '%s' is in use by '%s'.", req.GetName(), u[0])
+		}
+	}
 	return s.deleteUnused(collTrust, req.GetName())
 }

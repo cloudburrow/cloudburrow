@@ -139,7 +139,7 @@ const LB_TABS = ["/net-services/loadbalancing/list/loadBalancers", "/net-service
 // Certificate Manager's tabs (#2160): Certificates, Certificate Maps, DNS
 // Authorizations, Issuance Configs and Classic Certificates (#2153).
 const CCM_TABS = ["/security/ccm/list/certificates", "/security/ccm/list/certificateMaps", "/security/ccm/list/dnsAuthorizations",
-  "/security/ccm/list/issuanceConfigs", "/security/ccm/list/lbCertificates"];
+  "/security/ccm/list/issuanceConfigs", "/security/ccm/list/trustConfigs", "/security/ccm/list/lbCertificates"];
 // Cloud Armor's tabs (#2160): the policies, network edge security
 // services and the preconfigured WAF rule sets. The docs give gcloud only
 // for the last two: their tabs are UNVERIFIED (re-read 2026-11-22:
@@ -613,6 +613,10 @@ const ROUTES = [
     navHidden: true, navAs: "/security/ccm/list/certificates", pageTabs: CCM_TABS, section: "Security and identity", product: "certificatemanager", productTitle: "Certificate Manager" },
   { path: "/security/ccm/list/issuanceConfigs", service: "ccm-issuance", icon: "vpc", title: "Certificate Manager", tabTitle: "Issuance Configs", kind: "Certificate issuance config",
     navHidden: true, navAs: "/security/ccm/list/certificates", pageTabs: CCM_TABS, section: "Security and identity", product: "certificatemanager", productTitle: "Certificate Manager" },
+  // Trust configs (#2160): "the Trust configs tab on the Certificate
+  // Manager page" (certificate-manager/docs/trust-configs).
+  { path: "/security/ccm/list/trustConfigs", service: "ccm-trustconfigs", icon: "vpc", title: "Certificate Manager", tabTitle: "Trust Configs", kind: "Trust config",
+    navHidden: true, navAs: "/security/ccm/list/certificates", pageTabs: CCM_TABS, section: "Security and identity", product: "certificatemanager", productTitle: "Certificate Manager" },
   { path: "/security/ccm/list/lbCertificates", service: "netservices-lb-certs", icon: "vpc", title: "Certificate Manager", tabTitle: "Classic Certificates", kind: "Certificate",
     navHidden: true, navAs: "/security/ccm/list/certificates", pageTabs: CCM_TABS, section: "Security and identity", product: "certificatemanager", productTitle: "Certificate Manager" },
   // Identity-Aware Proxy (#2160): its HTTPS resources, and its SSH and TCP
@@ -634,6 +638,11 @@ const ROUTES = [
   // and columns are UNVERIFIED (re-read 2026-11-22: route-rule-map-concepts).
   { path: "/net-services/trafficdirector/routingRuleMaps", service: "servicemesh-routing", icon: "vpc", title: "Routing rule maps", kind: "Routing rule map",
     section: "Networking", product: "servicemesh", productTitle: "Cloud Service Mesh" },
+  // Client Authentication (#2160): Network Security's Authentication
+  // Configuration page, its Client Authentication tab (server TLS
+  // policies), as load-balancing/docs/https/setting-up-mtls-ccm has it.
+  { path: "/net-security/authconfig", service: "netsecurity-clientauth", icon: "vpc", title: "Authentication Configuration", tabTitle: "Client Authentication",
+    kind: "Client Authentication", pageTabs: ["/net-security/authconfig"], section: "Networking", product: "netsecurity", productTitle: "Network Security" },
   // Cloud CDN (#2160): Network services' Cloud CDN origins.
   { path: "/net-services/cdn/list", service: "netservices-cdn", icon: "vpc", title: "Cloud CDN", kind: "Origin",
     section: "Networking", product: "netservices", productTitle: "Network services" },

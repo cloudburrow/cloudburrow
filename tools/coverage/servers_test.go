@@ -22,6 +22,7 @@ import (
 	iamadminpb "cloud.google.com/go/iam/admin/apiv1/adminpb"
 	iamv2pb "cloud.google.com/go/iam/apiv2/iampb"
 	iamv3pb "cloud.google.com/go/iam/apiv3/iampb"
+	"cloud.google.com/go/networksecurity/apiv1/networksecuritypb"
 	"cloud.google.com/go/orgpolicy/apiv2/orgpolicypb"
 	pmpb "cloud.google.com/go/parametermanager/apiv1/parametermanagerpb"
 	rmpb "cloud.google.com/go/resourcemanager/apiv3/resourcemanagerpb"
@@ -56,6 +57,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/kmsinventory"
 	"github.com/cloudburrow/cloudburrow/internal/service/logging"
 	"github.com/cloudburrow/cloudburrow/internal/service/monitoring"
+	"github.com/cloudburrow/cloudburrow/internal/service/networksecurity"
 	"github.com/cloudburrow/cloudburrow/internal/service/parametermanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/privateca"
 	"github.com/cloudburrow/cloudburrow/internal/service/redisadmin"
@@ -144,6 +146,11 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 		t.Fatal(err)
 	}
 	certificatemanagerpb.RegisterCertificateManagerServer(srv, cmSrv)
+	nsSrv, err := networksecurity.New(networksecurity.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	networksecuritypb.RegisterNetworkSecurityServer(srv, nsSrv)
 	iapSrv, err := iap.New(iap.Options{})
 	if err != nil {
 		t.Fatal(err)

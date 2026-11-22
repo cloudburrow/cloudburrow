@@ -266,6 +266,8 @@ func (s *Server) lbTLSConfig(rule string) func(*tls.ClientHelloInfo) (*tls.Confi
 		}
 		minV, suites := tlsConfigOf(policy)
 		cfg := &tls.Config{Certificates: certs, MinVersion: minV, CipherSuites: suites, NextProtos: []string{"h2", "http/1.1"}}
+		// A target HTTPS proxy's frontend mutual TLS (#2160, lbmtls.go).
+		s.mtlsHandshake(proxy, cfg)
 		if hello.ServerName != "" {
 			for _, c := range certs {
 				if c.Leaf != nil && c.Leaf.VerifyHostname(hello.ServerName) == nil {

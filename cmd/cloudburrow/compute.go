@@ -22,6 +22,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/compute"
 	"github.com/cloudburrow/cloudburrow/internal/service/gke"
 	"github.com/cloudburrow/cloudburrow/internal/service/iap"
+	"github.com/cloudburrow/cloudburrow/internal/service/networksecurity"
 	"github.com/cloudburrow/cloudburrow/internal/service/redisadmin"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
@@ -55,6 +56,10 @@ type computeService struct {
 	// and enforce IAP on backend services (computecertiap.go).
 	certManager *certificatemanager.Server
 	iap         *iap.Server
+	// netSec is Network Security (networksecurity.googleapis.com, #2160):
+	// the server TLS policies, client TLS policies and authorization
+	// policies the load balancers here read (computenetsec.go).
+	netSec *networksecurity.Server
 	// iapEval and creds are the host's IAM evaluator and credentials, which
 	// IAP checks requests with; up sets them (useIAP).
 	iapEval *iameval.Evaluator
@@ -175,9 +180,14 @@ func (s *computeService) Start(ctx context.Context) error {
 		return err
 	}
 	s.iap = ia
+	ns, err := networksecurity.New(networksecurity.Options{State: dir("networksecurity.json")})
+	if err != nil {
+		return err
+	}
+	s.netSec = ns
 	api, err := compute.New(compute.Options{State: state, Extra: s.instanceGroupManagers, ExtraGroups: s.gkeGroups, NetworkUsers: s.networkUsers, VMs: s.vms,
 		ProjectOrganization: s.projectOrganization, LB: &computeLB{cfg: s.cfg, vms: s.vms},
-		CertMaps: cm, IAP: computeIAPGate{svc: s}})
+		CertMaps: cm, IAP: computeIAPGate{svc: s}, NetSec: computeNetSec{ns: ns, cm: cm}})
 	if err != nil {
 		return err
 	}
@@ -187,6 +197,7 @@ func (s *computeService) Start(ctx context.Context) error {
 	ia.SetBackendServices(func(rel string) bool { return backendServiceExists(api, rel) })
 	ia.SetNormalizer(s.iapNormalize)
 	s.tunnel = s.newIAPTunnel(api, ia)
+	useNetSec(api, ns, cm)
 	// The schedules' and autoscalers' loops (#2139); with no Addr, Start
 	// listens on nothing.
 	if err := api.Start(ctx); err != nil {
@@ -209,9 +220,14 @@ func (s *computeService) Start(ctx context.Context) error {
 	vrest := vpcaccess.NewRESTHandler(va)
 	cmrest := certificatemanager.NewRESTHandler(cm)
 	iaprest := iap.NewRESTHandler(ia)
+	nsrest := networksecurity.NewRESTHandler(ns)
 	var h http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if iap.Handles(r.URL.Path) {
 			iaprest.ServeHTTP(w, r)
+			return
+		}
+		if ns.Handles(r) {
+			nsrest.ServeHTTP(w, r)
 			return
 		}
 		if cm.Handles(r) {
@@ -368,6 +384,11 @@ func (r *computeResetter) ResetProject(_ context.Context, project string) error 
 	}
 	if cm := r.svc.certManager; cm != nil {
 		if err := cm.ResetProject(project); err != nil {
+			return err
+		}
+	}
+	if ns := r.svc.netSec; ns != nil {
+		if err := ns.ResetProject(project); err != nil {
 			return err
 		}
 	}

@@ -10,6 +10,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"errors"
+	"net/http"
 	"time"
 )
 
@@ -105,4 +106,59 @@ func (s *Server) IssueLocalCertificate(domains []string) (chainPEM, keyPEM strin
 	kd, _ := x509.MarshalECPrivateKey(k)
 	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})) + caPEM,
 		string(pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: kd})), tpl.NotAfter, nil
+}
+
+// NetworkSecurity is Network Security (networksecurity.googleapis.com) as
+// the load balancers read it (#2160): a target HTTPS proxy's
+// serverTlsPolicy (frontend mutual TLS) and the authorization policies
+// (authzPolicies) that target a forwarding rule.
+type NetworkSecurity interface {
+	// PolicyExists is whether a policy exists, by its name
+	// (projects/P/locations/L/serverTlsPolicies/X, .../authorizationPolicies/X
+	// or .../clientTlsPolicies/X).
+	PolicyExists(name string) bool
+	// ServerTLS is a server TLS policy with its trust config resolved; ok
+	// is false when there is no such policy.
+	ServerTLS(name string) (ServerTLSPolicy, bool)
+	// Authorize is whether the authorization policies that target r.Rule
+	// let r through.
+	Authorize(r AuthzRequest) bool
+}
+
+// ServerTLSPolicy is a server TLS policy as a TLS listener applies it.
+type ServerTLSPolicy struct {
+	// Mode is the mtlsPolicy's clientValidationMode:
+	// ALLOW_INVALID_OR_MISSING_CLIENT_CERT or REJECT_INVALID; "" asks for
+	// no client certificate.
+	Mode string
+	// TrustConfig is clientValidationTrustConfig; TrustFound is whether it
+	// exists.
+	TrustConfig string
+	TrustFound  bool
+	// Roots and Intermediates are the trust store's anchors and
+	// intermediate CAs; Allowlisted are the always-valid certificates.
+	Roots, Intermediates *x509.CertPool
+	Allowlisted          []*x509.Certificate
+}
+
+// ClientCert is the outcome of a request's client certificate check, as
+// the mTLS custom header variables report it.
+type ClientCert struct {
+	Present, Verified bool
+	// Error is client_cert_error's value, "" when there is none.
+	Error string
+	Leaf  *x509.Certificate
+	Chain []*x509.Certificate
+}
+
+// AuthzRequest is what an authorization policy matches a request on.
+type AuthzRequest struct {
+	// Rule is the forwarding rule's relative name.
+	Rule                 string
+	Host, Path, Method   string
+	Scheme, SNI          string
+	SourceIP, DestIP     string
+	SourcePort, DestPort int
+	Header               http.Header
+	Cert                 ClientCert
 }
