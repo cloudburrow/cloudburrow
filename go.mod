@@ -12,6 +12,7 @@ require (
 	cloud.google.com/go/backupdr v1.18.0
 	cloud.google.com/go/bigquery v1.85.0
 	cloud.google.com/go/bigtable v1.58.0
+	cloud.google.com/go/billing v1.28.1
 	cloud.google.com/go/cloudbuild v1.35.0
 	cloud.google.com/go/cloudquotas v1.14.1
 	cloud.google.com/go/cloudsqlconn v1.24.0
@@ -20,6 +21,7 @@ require (
 	cloud.google.com/go/compute/metadata v0.10.0
 	cloud.google.com/go/container v1.56.1
 	cloud.google.com/go/containeranalysis v0.21.1
+	cloud.google.com/go/dataform v1.9.0
 	cloud.google.com/go/datastore v1.27.0
 	cloud.google.com/go/developerconnect v1.2.0
 	cloud.google.com/go/documentai v1.49.0
@@ -110,8 +112,6 @@ require (
 )
 
 require (
-	cloud.google.com/go/billing v1.28.1 // indirect
-	cloud.google.com/go/dataform v1.9.0 // indirect
 	github.com/RoaringBitmap/roaring/v2 v2.26.0 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
 	github.com/apache/arrow/go/v15 v15.0.2 // indirect
