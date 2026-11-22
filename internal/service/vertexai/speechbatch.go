@@ -50,9 +50,8 @@ import (
 //   - Audio is transcribed with the recognizer's model on local whisper.cpp
 //     (speech.go), up to Google's 480 minutes a file, in pieces of at most
 //     speech.ChunkSeconds cut at the quietest point near each piece's end.
-//     MP3 and AAC stay limited by their decoders (internal/embedding's
-//     MaxAudioSeconds); WAV, FLAC and headerless audio reach 480 minutes,
-//     within batchMaxAudioBytes (1 GiB) an object.
+//     WAV, FLAC, headerless audio, MP3 and AAC reach 480 minutes (MP3 and
+//     AAC since #1799), within batchMaxAudioBytes (1 GiB) an object.
 //   - config_mask, on the request and on each file, is applied as
 //     Recognize's (speechrecognizers.go's effectiveConfig).
 //

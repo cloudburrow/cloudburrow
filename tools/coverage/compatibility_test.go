@@ -92,6 +92,7 @@ var compatSections = map[string]string{
 	"privateca":        "## Certificate Authority Service — `google.cloud.security.privateca.v1`",
 	"parametermanager": "## Parameter Manager — `google.cloud.parametermanager.v1`",
 	"dataform":         "## Dataform — `google.cloud.dataform.v1`",
+	"dataformv1beta1":  "## Dataform v1beta1 — `google.cloud.dataform.v1beta1`",
 	"apphub":           "## App Hub — `google.cloud.apphub.v1`",
 	"trace":            "## Cloud Trace — `google.devtools.cloudtrace.v1` and `v2`",
 	"workflows":        "## Workflows — `google.cloud.workflows.v1` and `google.cloud.workflows.executions.v1`",
@@ -103,6 +104,8 @@ var compatSections = map[string]string{
 	"monitoring": "## Cloud Monitoring — `google.monitoring.v3`",
 	// The Compute Engine API's VPC networking (#1936), by discovery ID.
 	"compute": "## Compute Engine VPC networking — `compute.googleapis.com` v1",
+	// The Network Connectivity API (#2141), named by gRPC method.
+	"networkconnectivity": "## Network Connectivity API — `google.cloud.networkconnectivity.v1`",
 	// The BigQuery Data Transfer Service (#1948), named by gRPC method.
 	"datatransfer": "## BigQuery Data Transfer Service — `google.cloud.bigquery.datatransfer.v1`",
 }

@@ -235,7 +235,7 @@ func (s *Server) networkUsersLocked(rel string) []string {
 			if str(r, "network") == rel && r["_auto"] == nil {
 				users = append(users, k)
 			}
-		case strings.Contains(k, "/global/firewalls/"), strings.Contains(k, "/addresses/"):
+		case strings.Contains(k, "/global/firewalls/"), strings.Contains(k, "/addresses/"), strings.Contains(k, "/forwardingRules/"):
 			if str(r, "network") == rel {
 				users = append(users, k)
 			}

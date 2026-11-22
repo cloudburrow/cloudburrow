@@ -3877,7 +3877,7 @@ func (p secretsProvider) Detail(_ context.Context, project string, path []string
 	}
 
 	versions := console.Listing{
-		Columns:      []string{"State", "Aliases", "Created", "Scheduled for destruction", "Destroyed"},
+		Columns:      []string{"State", "Aliases", "Created", "Scheduled for destruction on", "Destroyed"},
 		NameColumn:   "Version",
 		Noun:         "versions",
 		AlwaysStatus: true,
@@ -3908,11 +3908,11 @@ func (p secretsProvider) Detail(_ context.Context, project string, path []string
 				Status:     string(v.State),
 				Selectable: true,
 				Fields: map[string]string{
-					"State":                     string(v.State),
-					"Aliases":                   va,
-					"Created":                   v.Created.Format(time.RFC3339),
-					"Scheduled for destruction": scheduled,
-					"Destroyed":                 destroyed,
+					"State":                        string(v.State),
+					"Aliases":                      va,
+					"Created":                      v.Created.Format(time.RFC3339),
+					"Scheduled for destruction on": scheduled,
+					"Destroyed":                    destroyed,
 				},
 				Actions: secretVersionRowActions(secret, v, st.Now()),
 			})
@@ -3948,7 +3948,7 @@ func (p secretsProvider) Detail(_ context.Context, project string, path []string
 			Label:  "Edit secret",
 			Submit: "Update secret",
 			Layout: console.EditLayoutPage,
-			Fields: secretOptionalFields(&secret),
+			Fields: secretOptionalFieldsWith(&secret, secretVersionNumbers(versions)),
 			Note: "Replication cannot be changed after a secret is created, so it is not offered here; " +
 				"Change encryption keys changes its customer-managed keys.",
 		},
@@ -4046,8 +4046,8 @@ func (p secretsProvider) DetailActions(_ context.Context, project string, path [
 		if err != nil {
 			return nil
 		}
-		return append([]console.Action{secretAddVersionAction(), secretAdvanceClockAction(), secretKeysAction(sec)},
-			secretVersionSelectActions(sec, st.Now())...)
+		return append([]console.Action{secretAddVersionAction(), secretAdvanceClockAction(), secretKeysAction(sec),
+			pubsubLabelsAction(sec.Labels)}, secretVersionSelectActions(sec, st.Now())...)
 	case 2:
 		// What is offered depends on the version's current state. Enabling an
 		// enabled version and destroying a destroyed one are both buttons that
@@ -4097,6 +4097,14 @@ func (p secretsProvider) ActAt(_ context.Context, project string, path []string,
 		return actSecretVersions(st, project, id, strings.TrimSuffix(action, "versions"), values[secretVersionsField])
 	case actSecretKeys:
 		return setSecretKeys(st, project, id, values)
+	case actEditLabels:
+		// The info panel's Labels tab (#2142).
+		labels, err := console.ParseMap(values["labels"])
+		if err != nil {
+			return fmt.Errorf("labels: %w", err)
+		}
+		_, err = st.UpdateSecret(project, id, labels, nil, true, false)
+		return err
 	case actSecretAdvanceClock:
 		d, err := parseAdvance(values["duration"])
 		if err != nil {

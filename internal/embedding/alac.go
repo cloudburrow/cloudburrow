@@ -396,7 +396,7 @@ func decodeALACTrack(tr *soundTrack, e *mp4.AudioSampleEntryBox) (pcm []float32,
 		if len(ch) != channels {
 			return nil, 0, 0, nil, fmt.Errorf("the ALAC track's packet %d has %d channels of %d", i, len(ch), channels)
 		}
-		if len(pcm)/channels > (MaxAudioSeconds+60)*rate {
+		if len(pcm)/channels > (tr.limit+60)*rate {
 			return nil, 0, 0, nil, &tooLongError{float64(len(pcm)/channels) / float64(rate)}
 		}
 		for j := range ch[0] {

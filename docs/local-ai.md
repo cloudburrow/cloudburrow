@@ -69,6 +69,11 @@ download large weights" — the gating enforces it — but it also means acquisi
 token, and a gated model without one is refused up front rather than attempted and failing
 with an opaque 401 after a long wait.
 
+> **2026-11-22 (#2159):** on a Mac with Apple silicon, generation runs on the Apple GPU through a
+> macOS build of `cloudburrow_generate` (LiteRT-LM's GPU backend, WebGPU on Metal): Gemma 4 E2B
+> decodes at 150 tokens/s on an M4 Max's GPU against 32 on its CPU as a host process and 31 on CPU
+> in the runtime container. See [generation.md](generation.md#on-the-apple-gpu-macos-on-apple-silicon-2159).
+
 ## What is implemented
 
 `internal/localai` does the part that is genuinely useful and verifiable today:

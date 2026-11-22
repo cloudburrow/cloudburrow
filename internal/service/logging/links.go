@@ -412,7 +412,7 @@ func (s configServer) UpdateSettings(ctx context.Context, req *loggingpb.UpdateS
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	keyChanged := false
+	keyChanged, disableSet := false, false
 	for _, p := range paths {
 		switch p {
 		case "kms_key_name", "kmsKeyName":
@@ -425,6 +425,7 @@ func (s configServer) UpdateSettings(ctx context.Context, req *loggingpb.UpdateS
 			st.StorageLocation = in.GetStorageLocation()
 		case "disable_default_sink", "disableDefaultSink":
 			st.DisableDefaultSink = in.GetDisableDefaultSink()
+			disableSet = true
 		default:
 			return nil, apierror.Wrap(apierror.InvalidArgument("update_mask: %q is not a field UpdateSettings changes", p))
 		}
@@ -447,6 +448,12 @@ func (s configServer) UpdateSettings(ctx context.Context, req *loggingpb.UpdateS
 	}
 	if err := s.a.putSettings(project, st, version); err != nil {
 		return nil, apierror.Wrap(err)
+	}
+	if x := s.a.settingsExtra(project); disableSet && !x.DisableSet {
+		x.DisableSet = true
+		if err := s.a.putSettingsExtra(project, x); err != nil {
+			return nil, apierror.Wrap(err)
+		}
 	}
 	return s.a.settings(project)
 }

@@ -36,11 +36,9 @@ func TestParse(t *testing.T) {
 		{`{"model": "chirp", "languageCodes": ["en-US", "de-DE"], "autoDecodingConfig": {}}`, 400, "long, short and telephony"},
 		{`{"model": "long", "languageCodes": ["en-US", "de-DE", "fr-FR", "es-ES"], "autoDecodingConfig": {}}`, 400, "at most 3"},
 		{`{"model": "long", "languageCodes": ["en-US", "auto"], "autoDecodingConfig": {}}`, 400, "invalid language code"},
-		{`{"model": "chirp", "languageCodes": ["en-US"], "autoDecodingConfig": {}, "features": {"diarizationConfig": {}}}`, 501, "diarizationConfig"},
 		{`{"model": "chirp", "languageCodes": ["en-US"], "autoDecodingConfig": {}, "translationConfig": {"targetLanguage": "de-DE"}}`, 400, "chirp_2"},
 		{`{"model": "chirp_2", "languageCodes": ["en-US"], "autoDecodingConfig": {}, "translationConfig": {}}`, 400, "targetLanguage is required"},
 		{`{"model": "chirp_2", "languageCodes": ["en-US"], "autoDecodingConfig": {}, "translationConfig": {"targetLanguage": "fr-FR"}}`, 400, "not supported by chirp_2"},
-		{`{"model": "chirp_2", "languageCodes": ["en-US"], "autoDecodingConfig": {}, "denoiserConfig": {"denoiseAudio": true, "snrThreshold": 20}}`, 501, "snrThreshold"},
 		{`{"model": "chirp_2", "languageCodes": ["en-US"], "autoDecodingConfig": {}, "denoiserConfig": {"snrThreshold": -1}}`, 400, "out of range"},
 		{`{"model": "chirp", "languageCodes": ["en-US"], "explicitDecodingConfig": {"encoding": "WAV"}}`, 400, "invalid explicitDecodingConfig.encoding"},
 		{`{"model": "chirp", "languageCodes": ["en-US"], "autoDecodingConfig": {}, "features": {"maxAlternatives": 31}}`, 400, "maxAlternatives"},
@@ -53,6 +51,14 @@ func TestParse(t *testing.T) {
 		if code != tc.code || err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: %d %v, want %d %q", tc.cfg, code, err, tc.code, tc.want)
 		}
+	}
+}
+
+// TestParseSNRThreshold (#1799): denoiserConfig's snrThreshold is read.
+func TestParseSNRThreshold(t *testing.T) {
+	c, code, err := Parse([]byte(`{"model": "chirp_2", "languageCodes": ["en-US"], "autoDecodingConfig": {}, "denoiserConfig": {"denoiseAudio": true, "snrThreshold": 20}}`))
+	if code != 0 || err != nil || !c.Denoise || c.SNRThreshold != 20 {
+		t.Errorf("snrThreshold: %+v %d %v", c, code, err)
 	}
 }
 
@@ -114,7 +120,7 @@ func TestParseFeatures(t *testing.T) {
 }
 
 func TestFormat(t *testing.T) {
-	c := Config{Options: Options{ProfanityFilter: true, SpokenPunctuation: true, SpokenEmojis: true}}
+	c := Config{Model: "long", Options: Options{ProfanityFilter: true, SpokenPunctuation: true, SpokenEmojis: true, AutomaticPunctuation: true}}
 	for _, tc := range []struct{ in, code, want string }{
 		{"Hello, comma, how are you question mark", "en-us", "Hello, how are you?"},
 		{"what the fuck period new line next", "en-us", "what the f***.\nnext"},

@@ -101,7 +101,8 @@ var redisClusterNodeTypeLabels = map[string]string{"REDIS_SHARED_CORE_NANO": "re
 // Cluster size, Replicas (default 1), Set up connection, Security,
 // Certificate authority management, Encryption, ACL policy, Data
 // persistence strategy, Automated backups and Maintenance, then this
-// console's advanced options (Redis configs, Restore from backup).
+// console's advanced options (Redis configs, Restore from backup,
+// Secondary of).
 func (redisClusterProvider) CreateForm() (string, []console.Field) {
 	fields := []console.Field{
 		{Name: "id", Label: "Cluster ID", Type: "text", Required: true, Pattern: `^[a-z][a-z0-9\-]{2,61}[a-z0-9]$`,
@@ -131,7 +132,8 @@ func (redisClusterProvider) CreateForm() (string, []console.Field) {
 		console.Field{Name: "redisConfigs", Label: "Redis configs", Type: "map", Section: msSectionAdvanced,
 			Help: "Optional. One key=value per line, such as maxmemory-policy."},
 		console.Field{Name: "restoreBackup", Label: "Restore from backup", Type: "text", Section: msSectionAdvanced,
-			Help: "Optional. projects/{project}/locations/{location}/backupCollections/{collection}/backups/{backup}: the cluster starts with its keys."})
+			Help: "Optional. projects/{project}/locations/{location}/backupCollections/{collection}/backups/{backup}: the cluster starts with its keys."},
+		redisClusterSecondaryField)
 	return "Create cluster", fields
 }
 
@@ -228,6 +230,7 @@ func (p redisClusterProvider) Create(ctx context.Context, project string, values
 	if n := strings.TrimSpace(values["network"]); n != "" {
 		in.PscConfigs = []*clusterpb.PscConfig{{Network: n}}
 	}
+	redisClusterSecondaryOf(in, values)
 	region, id := strings.TrimSpace(values["region"]), strings.TrimSpace(values["id"])
 	op, err := api.CreateCluster(ctx, &clusterpb.CreateClusterRequest{Parent: "projects/" + project + "/locations/" + region, ClusterId: id, Cluster: in})
 	if err != nil {
@@ -338,6 +341,7 @@ func (p redisClusterProvider) Detail(ctx context.Context, project string, path [
 			ab.GetFixedFrequencySchedule().GetStartTime().GetHours(), ab.GetRetention().AsDuration())},
 		{Label: "Backup collection", Value: orDash(c.GetBackupCollection())},
 	}...)
+	config = append(config, redisClusterReplicationProps(c)...)
 	conns := []console.Property{
 		{Label: "Discovery endpoint", Value: redisClusterEndpoint(c)},
 		{Label: "PSC networks", Value: orDash(strings.Join(nets, ", "))},

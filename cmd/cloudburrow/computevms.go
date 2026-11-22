@@ -17,6 +17,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/components"
 	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/dockergc"
 	"github.com/cloudburrow/cloudburrow/internal/k8s"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/service/compute"
@@ -105,7 +106,8 @@ func (b *computeVMs) ensureImage(ctx context.Context, img compute.PublicImage) (
 		}
 		arch := runtime.GOARCH
 		if _, err := vmDocker(ctx, "build", "--platform", "linux/"+arch, "--build-arg", "BASE="+img.Base,
-			"--label", "cloudburrow.dev/owned=true", "--label", "cloudburrow.dev/vm-image="+img.Family, "-t", ref, dir); err != nil {
+			"--label", "cloudburrow.dev/owned=true", "--label", "cloudburrow.dev/vm-image="+img.Family,
+			"--label", dockergc.Label(b.cfg.Name), "-t", ref, dir); err != nil {
 			return "", fmt.Errorf("build the %s image: %w", img.Family, err)
 		}
 	}

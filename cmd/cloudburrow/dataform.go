@@ -437,6 +437,25 @@ func (b dataformBigQuery) Table(ctx context.Context, project, dataset, table str
 	return true, kind, cols, nil
 }
 
+// Modified is a table's lastModifiedTime, for v1beta1's table update
+// triggers.
+func (b dataformBigQuery) Modified(ctx context.Context, project, dataset, table string) (time.Time, bool, error) {
+	c, err := b.client(ctx, project)
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	defer c.Close()
+	md, err := c.Dataset(dataset).Table(table).Metadata(ctx)
+	var g *googleapi.Error
+	if errors.As(err, &g) && g.Code == http.StatusNotFound {
+		return time.Time{}, false, nil
+	}
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	return md.LastModifiedTime, true, nil
+}
+
 func (b dataformBigQuery) query(ctx context.Context, project, location, sql string) (*bigquery.Job, *bigquery.RowIterator, error) {
 	c, err := b.client(ctx, project)
 	if err != nil {

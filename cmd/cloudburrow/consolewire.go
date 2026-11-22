@@ -23,6 +23,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/metadata"
 	"github.com/cloudburrow/cloudburrow/internal/metrics"
 	"github.com/cloudburrow/cloudburrow/internal/modelgarden"
+	"github.com/cloudburrow/cloudburrow/internal/nbruntime"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/service/apikeys"
 	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
@@ -128,6 +129,9 @@ type consoleDeps struct {
 	// sqlAdmin is the Cloud SQL Admin API, which restores Backup and DR
 	// backups; nil unless a Cloud SQL service is enabled.
 	sqlAdmin *sqladmin.Server
+	// notebooks are BigQuery Studio's notebook runtimes (#2094); nil
+	// leaves Connect unavailable.
+	notebooks *nbruntime.Manager
 }
 
 // runAddrOf is the adapter's live address, or nothing when there is no
@@ -175,6 +179,13 @@ func buildConsole(d consoleDeps) *console.Server {
 	}
 	srv.SetHFModels(d.hfModels)
 	srv.SetModelGarden(d.garden, d.localAI, d.cfg.DefaultProject())
+	// Marketplace (#2149): Docker Hub, deployed to this instance's cluster
+	// or the project's Kubernetes Engine clusters as Applications.
+	srv.SetMarketplace(marketplaceFor(gkeClustersProvider{name: d.cfg.ClusterName(), kubeconfig: kubeconfig,
+		own: d.cfg.Cluster.Namespace, svc: d.gke, gkeDir: gkeDir(d.cfg)}, d.cfg.StateDir))
+	if d.gke != nil {
+		srv.SetHFGKE(gkeClustersProvider{name: d.cfg.ClusterName(), svc: d.gke, gkeDir: gkeDir(d.cfg)})
+	}
 	srv.SetMetrics(metrics)
 	// The history is the console's, not a browser tab's. Kept server-side so
 	// it survives a reload and so the sampling rate does not depend on how
@@ -353,7 +364,8 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		providers = append(providers, analyticsHubProvider{svc: d.analyticsHub}, cleanRoomsProvider{svc: d.analyticsHub}) // clean rooms: #2101
 	}
 	if enabled[config.ServicePrivateCA] && d.privateCA != nil {
-		providers = append(providers, privateCAProvider{svc: d.privateCA}, privateCATemplatesProvider{svc: d.privateCA})
+		pca := privateCAProvider{svc: d.privateCA}
+		providers = append(providers, pca, privateCACAsProvider{pca}, privateCACertsProvider{pca}, privateCATemplatesProvider{svc: d.privateCA})
 	}
 	// Parameter Manager (#2054), in process, under Secret Manager.
 	if enabled[config.ServiceParameterManager] && d.parameterManager != nil {
@@ -414,7 +426,7 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	if enabled[config.ServiceCompute] && d.compute != nil {
 		screen := computeScreen{svc: d.compute}
 		providers = append(providers, computeNetworksProvider{screen}, computeFirewallsProvider{screen},
-			computeRoutesProvider{screen}, computeAddressesProvider{screen},
+			computeRoutesProvider{screen}, computeAddressesProvider{screen}, computePSCProvider{screen}, ncPoliciesProvider{screen},
 			// Compute Engine (#1965): VM instances, disks, snapshots,
 			// images and machine types, over the same API.
 			computeInstancesProvider{screen}, computeDisksProvider{screen}, computeSnapshotsProvider{screen},
@@ -524,8 +536,11 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		// The emulator serves the instance's default project and no other, so
 		// the screen is told which one that is (#698).
 		{config.ServiceBigQuery, func(a string) console.Provider {
+			if d.notebooks != nil && d.notebooks.BigQuery == nil {
+				d.notebooks.BigQuery = func() string { return a }
+			}
 			return bigqueryProvider{endpoint: a, project: d.cfg.DefaultProject(), registry: d.projects,
-				savedQueries: filepath.Join(d.cfg.InstanceDir(), bqSavedQueriesFile)}
+				savedQueries: filepath.Join(d.cfg.InstanceDir(), bqSavedQueriesFile), notebooks: d.notebooks}
 		}},
 		// Job history, BigQuery's second screen (#993).
 		{config.ServiceBigQuery, func(a string) console.Provider {
@@ -560,7 +575,11 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			host = "127.0.0.1"
 		}
 		instances := cloudSQLInstancesProvider{
-			endpoint: net.JoinHostPort(host, strconv.Itoa(d.cfg.Endpoints.SQLAdmin)), versions: versions}
+			endpoint: net.JoinHostPort(host, strconv.Itoa(d.cfg.Endpoints.SQLAdmin)), versions: versions, srv: d.sqlAdmin,
+			metrics: monitoringAdmin{api: monitoringServerOf(d.monitoring)}}
+		if enabled[config.ServiceCompute] && d.compute != nil {
+			instances.compute = d.compute.API
+		}
 		// Cloud SQL's Backups page (#1860), the project's backups.
 		providers = append(providers, instances, cloudSQLBackupsProvider{instances: instances})
 	}

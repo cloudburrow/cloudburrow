@@ -1,11 +1,12 @@
 """Writes the SavedModels TestBigQueryMLTensorFlowImportGenerated imports
 (#1775), and TensorFlow's own serving_default output for its rows.
 
-The test runs it, with no network, in CloudBurrow's pinned TensorFlow
-converter image (deploy/tfconvert: TensorFlow 2.20.0 from PyPI,
-Apache-2.0), the image the instance converts with:
+The test runs it, on an --internal Docker network (no route out), in
+CloudBurrow's TensorFlow converter image (deploy/tfconvert: Google's
+tensorflow/tensorflow:2.20.0, pinned by digest, Apache-2.0), the image the
+instance converts with:
 
-  docker run --rm --network none --entrypoint python3 \
+  docker run --rm --network <internal> --entrypoint python3 \
     -v <this folder>:/w:ro -v <out>:/out cloudburrow/tfconvert:<tag> -I /w/gen_import.py /out
 
 <out>/cf:      control flow: x FLOAT32[None,3], n INT64[None]. A

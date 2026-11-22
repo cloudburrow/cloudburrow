@@ -29,6 +29,10 @@ var compatEnvExceptions = map[string]string{
 	// The host may pull the 1.8 GB apache/spark image for BigQuery's Spark
 	// procedures (#2104); no instance reports what the host may pull.
 	"CLOUDBURROW_TEST_SPARK": "opt-in switch: the host may pull the apache/spark image and run Spark procedures",
+	// The host is a Mac with Apple silicon whose GPU a test may use, and
+	// may download about 800 MB of models and runtimes (#2155); no instance
+	// reports what the host may download.
+	"CLOUDBURROW_TEST_METAL": "opt-in switch: darwin/arm64 host deploys GGUF and MLX models on the Apple GPU",
 	// Test data, not an instance: internal/isoconformance downloads ISO's
 	// conformance files only when it is set (#1754).
 	"CLOUDBURROW_TEST_DOWNLOADS": "opt-in switch: tests may download test data not cached yet",
@@ -68,7 +72,7 @@ var compatEnvExceptions = map[string]string{
 	"CLOUDBURROW_TEST_SKIP_RUN_PULL": "opt-out switch: skips the Cloud Run pull of the registry test",
 	// Model Garden's Hugging Face deploy test (#1840) downloads 1.3 GB of
 	// models and runs 6 GB of engine images, beyond a CI shard's budget.
-	"CLOUDBURROW_TEST_HF_DEPLOY": "opt-in switch: the Model Garden deploy test downloads 1.3 GB of models and 6 GB of images",
+	"CLOUDBURROW_TEST_HF_DEPLOY": "opt-in switch: the Model Garden deploy tests download 1.3 GB of models, 6 GB of images and the Python runtimes' packages",
 	// An opt-in switch for a slow test no CI shard runs (#678).
 	"CLOUDBURROW_TEST_FUNCTIONS": "opt-in switch",
 	// The signed URL tests' key and account, for the builtin storage-server

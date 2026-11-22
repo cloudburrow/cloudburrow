@@ -595,6 +595,10 @@ type Field struct {
 	// the Secret value typed or from Upload file (#1850). The value is still
 	// the textarea's, so nothing else about the form changes.
 	Upload string `json:"upload,omitempty"`
+	// Generate, on a password field, puts Google's Generate button beside
+	// it, which fills it with a random password, as Cloud SQL's Create
+	// instance has (#2141). Every password field has Show password.
+	Generate bool `json:"generate,omitempty"`
 	// Dialog is a button beside the field that opens a table, as
 	// Google's Spanner Create instance has Compare editions beside the
 	// edition (#1859).
@@ -624,11 +628,50 @@ type Field struct {
 	// PickFrom call gets {"seed": "<the parameter's value>"} and answers
 	// {"items": [...], "note": "..."}, every item then chosen.
 	SeedFrom string `json:"seedFrom,omitempty"`
+	// SecretPicker, on a textarea, is Parameter Manager's Secret picker
+	// (#2143): Ctrl+Space then Enter in the payload opens a side panel
+	// where a Secret and a Secret version (or, with Select regional secret,
+	// a regional one) are chosen, or a version entered by its resource ID,
+	// and Insert puts its __REF__ reference at the cursor, as Google's
+	// add-parameter-version describes.
+	SecretPicker *SecretPicker `json:"secretPicker,omitempty"`
+}
+
+// SecretPicker lists what Field.SecretPicker offers.
+type SecretPicker struct {
+	Secrets  []PickerSecret `json:"secrets"`
+	Regional []PickerSecret `json:"regional,omitempty"`
+	// CreateHref is the console's Create secret, opened in a new tab.
+	CreateHref string `json:"createHref,omitempty"`
+}
+
+// PickerSecret is a secret the picker offers: its resource name and the
+// versions a reference can name ("latest" and the enabled versions).
+type PickerSecret struct {
+	Name     string   `json:"name"`
+	Versions []string `json:"versions"`
 }
 
 // PicklistFieldType is the Type of a list of items chosen from a picker
 // (Field.PickFrom): one per line in the value.
 const PicklistFieldType = "picklist"
+
+// MultiSelectFieldType is the Type of a choice of several of Options
+// (#2146): a menu of them, each with a checkbox, under a filter, the chosen
+// ones drawn as chips, as Google's Create snooze picks alert policies. The
+// value is the chosen options, one per line (ParseMultiSelect).
+const MultiSelectFieldType = "multiselect"
+
+// ParseMultiSelect is a "multiselect" field's chosen options.
+func ParseMultiSelect(value string) []string {
+	var out []string
+	for _, v := range strings.FieldsFunc(value, func(r rune) bool { return r == '\n' || r == ',' }) {
+		if v = strings.TrimSpace(v); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
+}
 
 // FieldDialog is a Field's Dialog: Button opens a dialog titled Title, an
 // Intro above a table of Columns, each of Rows headed by its first cell.
@@ -1200,6 +1243,11 @@ type Section struct {
 	// Text is the content when Kind is KindText. Newlines are significant and
 	// the client renders it monospace.
 	Text string `json:"text,omitempty"`
+	// Download, on a KindText section, is the file name a Download button
+	// beside Copy saves Text as, labelled "Download" and the section's
+	// label: Google's issued certificate has Download certificate and
+	// Download certificate chain (#2144).
+	Download string `json:"download,omitempty"`
 	// Language, on a KindText section, is the language Text is in, which
 	// the console highlights: "workflows" is a workflow's source, YAML or
 	// JSON, drawn with its syntax highlighted beside the graph of its
@@ -1217,6 +1265,11 @@ type Section struct {
 	StepEntries []StepEntryView `json:"stepEntries,omitempty"`
 	// Series is the content when Kind is KindChart.
 	Series []ChartSeries `json:"series,omitempty"`
+	// SeriesTitle, on a listing section with Series, draws them as one
+	// chart of that title over its rows, a line per series: Cloud SQL's
+	// Query insights has its Database load chart over the top queries
+	// (#2141).
+	SeriesTitle string `json:"seriesTitle,omitempty"`
 	// Visualization is how a KindAnalytics section draws its rows: Bar,
 	// Line or Table (#2032).
 	Visualization string `json:"visualization,omitempty"`
@@ -2038,7 +2091,12 @@ type Server struct {
 	garden    *modelgarden.Manager
 	hfDeploy  HFDeployer
 	hfProject string
-	metrics   MetricsSource
+	// market is the Marketplace (#2149, marketplace.go); nil offers none.
+	market *Marketplace
+	// hfGKE lists the Kubernetes Engine clusters a model's GKE deployment
+	// can go to (#2148), nil when the API is not served.
+	hfGKE   HFGKE
+	metrics MetricsSource
 	// series is the retained history the charts draw. Nil means this
 	// instance keeps none, which the endpoint says rather than returning an
 	// empty array that looks like an idle cluster.
@@ -2182,9 +2240,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/ai/agent-garden", s.handleAgentGarden)
 	mux.HandleFunc("GET /api/ai/hf-models", s.handleHFModels)
 	mux.HandleFunc("GET /api/ai/hf-models/lookup", s.handleHFLookup)
+	mux.HandleFunc("GET /api/ai/hf-hub/models", s.handleHFHubSearch)
+	mux.HandleFunc("GET /api/ai/hf-hub/model", s.handleHFHubCard)
+	mux.HandleFunc("GET /api/ai/hf-hub/gke", s.handleHFGKEPlan)
+	mux.HandleFunc("POST /api/ai/hf-hub/gke-deploy", s.handleHFGKEDeploy)
 	mux.HandleFunc("POST /api/ai/hf-models/{action}", s.handleHFAction)
 	mux.HandleFunc("GET /api/ai/hf-deployments", s.handleHFDeployments)
 	mux.HandleFunc("POST /api/ai/hf-deployments/{action}", s.handleHFDeploymentAction)
+	s.marketplaceRoutes(mux)
 	mux.HandleFunc("POST /api/ai/local-models/{id}/{action}", s.handleLocalModelAction)
 	mux.HandleFunc("GET /api/ai/predict", s.handlePredictStatus)
 	mux.HandleFunc("POST /api/ai/predict", s.handlePredict)

@@ -646,9 +646,28 @@ instance are: not `ACTIVE`, `encryption_info.kms_key_primary_state` says why, an
 stopped, their data first kept as RDB files sealed with the data key; once the key can be used
 again new nodes are formed (`UPDATING`) and the data loaded, then `ACTIVE`.
 
-Not served: cross-cluster replication (UNIMPLEMENTED: a Valkey cluster-mode replica replicates
-only a primary of its own cluster, `CLUSTER REPLICATE` taking a node its gossip knows, so one
-cluster cannot be another's secondary).
+**Cross-region replication** (#1577), `cross_cluster_replication_config`, as Google documents it
+([about](https://docs.cloud.google.com/memorystore/docs/cluster/about-cross-region-replication),
+[working with](https://docs.cloud.google.com/memorystore/docs/cluster/working-with-cross-region-replication)):
+a cluster created with `cluster_role` `SECONDARY` and `primary_cluster` copies its primary's shard
+count, node type, authorization and in-transit encryption modes, `redis_configs` and persistence
+(its replica count, zones, maintenance, deletion protection and backups are its own), serves the
+primary's keys and refuses its clients' writes (NOPERM); a primary has up to two secondaries, and a
+secondary of a secondary is FAILED_PRECONDITION ("doesn't support cascading replicas"). Every
+member reports `membership`, the primary reports `secondary_clusters` and a secondary
+`primary_cluster`, each with its `uid`. Switchover and detach are `UpdateCluster` of
+`cross_cluster_replication_config`, as gcloud 587.0.0's `redis clusters switchover`, `detach` and
+`detach-secondaries` send them (their hooks read in the SDK's `clusters_ccr_util.py`): a secondary
+updated to `PRIMARY` with every other member as `secondary_clusters`, a secondary updated to
+`NONE`, and a primary updated to fewer `secondary_clusters` or to `NONE`; `CLUSTER_ROLE_UNSPECIFIED`
+is `NONE`, as the API documents it. A primary with secondaries is not deleted
+(FAILED_PRECONDITION: "detach or delete all secondaries"). The replication is Memorystore for
+Valkey's `CLUSTER` mode links (below). A `shard_count` change of the primary scales its secondaries
+with it, and its `node_type`, `redis_configs` and persistence are set on them, as Google syncs
+them; on a secondary these are FAILED_PRECONDITION. The console's Create cluster has **Secondary
+of**, a cluster's page shows its role, primary, secondaries and membership, with **Switchover**,
+**Detach** and **Detach secondaries** (`TestRedisClusterCrossClusterReplication`,
+`TestConsoleRedisClusterReplication`).
 
 **Across a restart** (#1557). After `cloudburrow stop` and `up` (persistent mode, the same state
 directory) a cluster is formed again with its users, policy and backups (`CREATING` until it
@@ -823,11 +842,26 @@ ends after it, finding the primary node a replica, does not fence it, and a fenc
 instance that is no longer checked (a secondary, a migration's target) is lifted at the next
 check, so its primary endpoint reaches its primary node instead of closing every connection
 (`TestValkeySwitchoverCheckLeavesEndpointOpen`).
-In `CLUSTER` mode it is 501, as a
-Redis cluster's (§8): Google documents it with the same shards and slots on both, but a
-cluster-mode Valkey node refuses `REPLICAOF` ("REPLICAOF not allowed in cluster mode", measured
-in `TestMemorystoreValkeyClusterUpgradeKeepsWrites` on 8.1) and its replicas follow only primaries
-of their own cluster, so a shard cannot replicate another cluster's primary.
+In `CLUSTER` mode (#1577) a secondary takes its primary's shard count and engine version, as
+Google's guide says they are copied. A cluster-mode Valkey node refuses `REPLICAOF` ("REPLICAOF
+not allowed in cluster mode", measured in `TestMemorystoreValkeyClusterUpgradeKeepsWrites`) and its
+replicas follow only primaries of their own cluster, so CloudBurrow runs a replication link per
+shard: it pauses the primary shard's writes (`CLIENT PAUSE WRITE`), asks it for a full
+resynchronization as a replica does (`PSYNC ? -1`, the RDB payload read past), copies every key
+with its TTL (`DUMP`, `RESTORE ... REPLACE`) and the functions (`FUNCTION DUMP`/`RESTORE`) into the
+secondary's shard of the same slots, emptied first, lets the writes resume, and applies the
+replication stream from the paused offset, acknowledging it (`REPLCONF ACK`) each second; a link
+that breaks starts again with a full copy. The secondary's clients are refused writes by ACL
+(`-@write` on every user, the default one included: NOPERM, as Google documents secondaries as
+read-only and names no error), and the links write as a user of their own. A switchover and a
+detach are the same updates as above (`TestMemorystoreValkeyClusterModeCrossRegionReplication`).
+A `shard_count` or `engine_version` change is made on the primary, and its secondaries are
+scaled or upgraded with it, as Google syncs them (#1577): the links stop, the primary and then
+each secondary are reshaped (their slots placed alike) or upgraded (rolling), and the links
+start again, each copying its primary shard anew; on a secondary either is FAILED_PRECONDITION
+(`TestMemorystoreValkeyClusterModeReplicaScaleAndUpgrade`). A secondary whose slots are placed
+otherwise than its primary's (a primary whose slots a migration placed) has its slots moved to
+match before its links start.
 
 **Migration** (`StartMigration`, `FinishMigration`, #1557) into a `CLUSTER_DISABLED` instance:
 its primary replicates `self_managed_source`'s `ip_address` and `port` (state `MIGRATING`,
@@ -838,11 +872,22 @@ instance, a node of a Valkey instance or Redis cluster) is named by the host add
 use and reached at its in-cluster address; any other address is replicated from as it is.
 `network_attachment` is checked and kept. A source with AUTH is not served:
 `self_managed_source` has no credentials (rechecked in googleapis' `memorystore/v1` proto,
-#1563), and Google's guide has AUTH and TLS turned off on the source. A `CLUSTER` mode target is
-501: Google's migration replicates each source shard into the target shard of the same slots,
-continuously until `FinishMigration`, which a cluster-mode node cannot do (it refuses
-`REPLICAOF`), and a keyspace scan would copy the keys once and lose the writes made during the
-migration. A target with in-transit encryption is 501 too (with the reason).
+#1563), and Google's guide has AUTH and TLS turned off on the source. A target with in-transit
+encryption is 501 (with the reason).
+
+Into a `CLUSTER` mode instance (#1577), as Google's
+[Migrate workloads](https://docs.cloud.google.com/memorystore/docs/valkey/migrate-workloads) guide
+documents it: the source is a cluster-mode server ("the cluster mode of the target instance must
+match the cluster mode of the source instance") of the same shard count ("the number of shards on
+the target instance must be identical"; the replicas may differ). `self_managed_source` names one
+node of it; its shards are read from it (`CLUSTER SLOTS`, or this CloudBurrow instance's own record
+when the node is one of its Valkey instances' or Redis clusters', reached at the nodes' host
+addresses), the instance's slots are moved to match the source's shards, and each shard is fed by
+the replication link of cross-region replication from the source shard of the same slots, while
+the instance refuses its clients' writes (a migration's target allows only reads).
+`FinishMigration` waits until each link has applied its source shard's offset at the time of the
+call (unless `force`), stops the links and lets the instance take writes. A source of another
+shard count fails the operation, `ROLLED_BACK` (`TestMemorystoreValkeyClusterModeMigration`).
 
 **gcloud, Terraform and the console** (#1557). gcloud 587.0.0's `memorystore instances create
 --kms-key`, `--engine-version`, `--cross-instance-replication-config-role=secondary

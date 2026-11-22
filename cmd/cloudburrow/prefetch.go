@@ -120,10 +120,10 @@ func runPrefetch(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		Runner: r,
 		Fetch:  components.FetchManifest,
 		BuildStorage: func(ctx context.Context) (string, error) {
-			return storageimage.Build(ctx, images.ExecRunner{}, plan.Arch)
+			return storageimage.Build(ctx, images.ExecRunner{}, plan.Arch, cfg.Name)
 		},
 		BuildBigQuery: func(ctx context.Context) (string, error) {
-			return bigqueryimage.Build(ctx, images.ExecRunner{}, plan.Arch)
+			return bigqueryimage.Build(ctx, images.ExecRunner{}, plan.Arch, cfg.Name)
 		},
 		Node:     throwawayNode(cfg.Cluster.NodeImage),
 		Platform: "linux/" + plan.Arch,

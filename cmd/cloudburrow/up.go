@@ -52,6 +52,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/doctor"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 	"github.com/cloudburrow/cloudburrow/internal/metadata"
+	"github.com/cloudburrow/cloudburrow/internal/nbruntime"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/prefetch"
 )
@@ -454,6 +455,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		appHubSvc.gke = gkeSvc
 		appHubSvc.live = boundAddrs
 		appHubSvc.bigquery = func() *netfwd.Forwarder { return forwarderFor(forwarders, "bigquery") }
+		if dataformSvc != nil {
+			appHubSvc.dataform = dataformSvc.Addr
+		}
 	}
 	appHubSvc.register(coord)
 	if gkeSvc != nil && runSvc != nil && runSvc.events != nil {
@@ -487,7 +491,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 		// A Redis before 6.0 with in-transit encryption is served TLS by
 		// a front from the storage image (#1768).
-		memorystoreAdminSvc.storageImage = lazyStorageImage(newStorageImageComponent(cfg.KubeconfigPath(), cfg.ClusterName(), comps, stdout), comps)
+		memorystoreAdminSvc.storageImage = lazyStorageImage(newStorageImageComponent(cfg.KubeconfigPath(), cfg.ClusterName(), cfg.Name, comps, stdout), comps)
 		// IAM auth (#1614) checks a token against the tokens these
 		// credentials minted and the project's IAM policy.
 		memorystoreAdminSvc.creds = creds
@@ -522,6 +526,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if serviceEnabled(cfg, config.ServiceFirestore) {
 			monitoringSvc.firestore = func() string { return forwardedAddr(forwarders, "firestore") }
 		}
+		// Groups' members are the products' resources, with their
+		// metadata (#2146).
+		monitoringSvc.inventory = &monitoringInventoryWiring{cfg: cfg, compute: computeSvc, gke: gkeSvc,
+			storage: func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") },
+			pubsub:  func() *netfwd.Forwarder { return forwarderFor(forwarders, "pubsub") }}
 	}
 	monitoringSvc.register(coord)
 	// Kubernetes Engine's container logs and system metrics, shipped to
@@ -924,12 +933,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// Between the cluster and the components: the image must be in the
 		// cluster before its Deployment is (#514). BigQuery's front (#902)
 		// and Pub/Sub's front (#873) run from it too.
-		imageComps = append(imageComps, newStorageImageComponent(cfg.KubeconfigPath(), cfg.ClusterName(), comps, stdout))
+		imageComps = append(imageComps, newStorageImageComponent(cfg.KubeconfigPath(), cfg.ClusterName(), cfg.Name, comps, stdout))
 	}
 	if serviceEnabled(cfg, config.ServiceBigQuery) {
 		// The emulator's image, built from the patched build this CLI
 		// embeds (#1061), in the cluster before its Deployment.
-		imageComps = append(imageComps, newBigQueryImageComponent(cfg.KubeconfigPath(), cfg.ClusterName(), comps, stdout))
+		imageComps = append(imageComps, newBigQueryImageComponent(cfg.KubeconfigPath(), cfg.ClusterName(), cfg.Name, comps, stdout))
 	}
 	coord.RegisterConcurrent(imageComps...)
 	// `kind create` returns before its node is Ready (#1588), so the
@@ -1170,10 +1179,19 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	sqlAdminSrv := newSQLAdminServer(cfg, forwarders, mysqlCreds, stderr)
 	if sqlAdminSrv != nil {
 		sqlAdminRef = sqlAdminSrv
+		// Cloud SQL's metrics in Cloud Monitoring (#2141).
+		if monitoringSvc != nil {
+			monitoringSvc.sql = func() *sqladmin.Server { return sqlAdminRef }
+		}
 		// settings.ipConfiguration.privateNetwork is checked against
 		// Compute Engine's networks when compute is served (#1936).
 		if computeSvc != nil {
 			sqlAdminSrv.SetNetworks(computeSvc.sqlNetworks)
+			// Its private IPs are reachable from the networks' VMs (#2141).
+			computeSvc.sql = func() *sqladmin.Server { return sqlAdminRef }
+			// pscAutoConnections, through the Network Connectivity API's
+			// service connection policies (#2141).
+			sqlAdminSrv.SetAutoConnector(sqlAutoConnections{svc: computeSvc})
 		}
 		// executeSql reads a user's password from Secret Manager (#1462).
 		if secretsSvc != nil {
@@ -1261,7 +1279,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	localAISrv = withPredictionEndpoints(cfg, localAISrv, runSvc, ingressAddr)
 	// Model Garden's Hugging Face downloads (#1840), shared by the console
 	// and ModelGardenService.Deploy, which serves them on that endpoint.
-	hfModels, garden := modelGardenFor(cfg, localAISrv)
+	hfModels, garden := modelGardenFor(cfg, localAISrv, loggingSvc)
 	// Document AI's processors and Speech-to-Text's recognizers (#1799),
 	// which ML.PROCESS_DOCUMENT and ML.TRANSCRIBE name, are kept with the
 	// instance's state.
@@ -1314,8 +1332,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 
 	// The console reads through the objects above rather than owning any of
 	// them, so it cannot answer from a store of its own.
+	// BigQuery Studio's notebook runtimes (#2094), deleted when up stops.
+	notebooks := &nbruntime.Manager{Instance: cfg.Name,
+		Logf: func(format string, args ...any) { fmt.Fprintf(stdout, "cloudburrow: "+format+"\n", args...) }}
+	defer notebooks.Close()
 	consoleSrv := buildConsole(consoleDeps{
-		cfg: cfg, iam: iamEnforcer, assetOut: assetOut, coord: coord, cluster: clusterComp, localAI: localAISrv, localModels: localModels,
+		cfg: cfg, iam: iamEnforcer, notebooks: notebooks, assetOut: assetOut, coord: coord, cluster: clusterComp, localAI: localAISrv, localModels: localModels,
 		hfModels: hfModels, garden: garden,
 		projects: projects,
 		tasks:    tasksSvc, secrets: secretsSvc, forwarders: forwarders,
@@ -1423,7 +1445,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			email = a.Email
 		}
 		return creds.MintAccessTokenFor(email, metadata.TokenTTL), nil
-	}, cmekKeys(kmsSvc, iamEnforcer).Usable)
+	}, cmekKeys(kmsSvc, iamEnforcer).Usable, func() string { return creds.MintAccessTokenFor(creds.Email, metadata.TokenTTL) })
 	if sparkRunner != nil {
 		coord.Register(sparkRunner)
 	}

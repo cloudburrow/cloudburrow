@@ -196,6 +196,37 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  # cloudburrow_generate for macOS arm64 (#2159): the LiteRT-LM runner the
+  # runtime image carries, built natively (Xcode's clang) from the same
+  # commit and patches by deploy/litert-lm/build-macos.sh, so Gemini
+  # generation runs on the Apple GPU. The darwin/arm64 archive carries it in
+  # litert-lm/ with the prebuilt dylibs it loads; sign-macos signs them all.
+  litert-lm-macos:
+    name: litert-lm runner darwin/arm64
+    needs: verify
+    runs-on: macos-latest
+    timeout-minutes: 150
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RELEASE_REF }}
+      - name: Build cloudburrow_generate for darwin/arm64
+        run: |
+          set -eu
+          df -h /
+          deploy/litert-lm/build-macos.sh "${RUNNER_TEMP}/litert-lm" "${RUNNER_TEMP}/litert-lm-darwin-arm64.tar.gz"
+          mkdir -p litert-lm-out
+          cp "${RUNNER_TEMP}/litert-lm-darwin-arm64.tar.gz" litert-lm-out/
+          (cd litert-lm-out && shasum -a 256 litert-lm-darwin-arm64.tar.gz > litert-lm-darwin-arm64.tar.gz.sha256)
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: litert-lm-darwin-arm64
+          path: litert-lm-out/*
+          if-no-files-found: error
+          retention-days: 7
+
   # Joins the per-arch images into one index under the release tag, attests
   # it, and hands its digest to the CLI build. The only job holding package
   # write and signing rights together, and it runs nothing from the source
@@ -318,12 +349,13 @@ jobs:
 
   build:
     name: build ${{ matrix.goos }}/${{ matrix.goarch }}
-    needs: [verify, runtime-image-publish, bigquery-emulator]
+    needs: [verify, runtime-image-publish, bigquery-emulator, litert-lm-macos]
     # A tag needs the runtime image's digest to stamp; a dry run, which
     # builds no image, builds the CLIs with the dev default.
     if: >-
       !cancelled() && needs.verify.result == 'success' &&
       needs.bigquery-emulator.result == 'success' &&
+      needs.litert-lm-macos.result == 'success' &&
       (needs.runtime-image-publish.result == 'success' ||
        (needs.runtime-image-publish.result == 'skipped' && !(startsWith(github.ref, 'refs/tags/v') || startsWith(inputs.release_tag, 'v'))))
     runs-on: ubuntu-latest
@@ -363,6 +395,13 @@ jobs:
           sha256sum -c SHA256SUMS
           cp bigquery-emulator-* "$GITHUB_WORKSPACE/internal/bigqueryimage/bin/"
 
+      # The Apple GPU runner (#2159), for the darwin/arm64 archive only.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: matrix.goos == 'darwin' && matrix.goarch == 'arm64'
+        with:
+          name: litert-lm-darwin-arm64
+          path: ${{ runner.temp }}/litert-lm
+
       - name: Build
         env:
           GOOS: ${{ matrix.goos }}
@@ -381,8 +420,10 @@ jobs:
           # The Linux storage server every CLI embeds, whatever its own
           # platform: `up` builds the in-cluster image from it (#514).
           for arch in amd64 arm64; do
-            GOOS=linux GOARCH=$arch CGO_ENABLED=0 go build -trimpath \
-              -ldflags "-s -w -X 'github.com/cloudburrow/cloudburrow/internal/version.version=${VERSION}'" \
+            # Reproducibly, as `make storage-binaries` (#2152): the image
+            # tag is the binary's content hash.
+            GOOS=linux GOARCH=$arch CGO_ENABLED=0 go build -trimpath -buildvcs=false \
+              -ldflags "-s -w -buildid=" \
               -o "internal/storageimage/bin/cloudburrow-storage-linux-${arch}" ./cmd/cloudburrow-storage
           done
           # The patched BigQuery emulator every CLI embeds (#1061), which
@@ -408,6 +449,14 @@ jobs:
           # Ship the component inventory: a release should say exactly which
           # upstream versions it was built and tested against.
           cp LICENSE NOTICE dependencies.json "dist/${NAME}/"
+          # darwin/arm64: cloudburrow_generate and its dylibs in litert-lm/,
+          # where the CLI looks beside itself (hostai.LiteRTLMRunner).
+          if [ "${GOOS}/${GOARCH}" = darwin/arm64 ]; then
+            (cd "$RUNNER_TEMP/litert-lm" && sha256sum -c litert-lm-darwin-arm64.tar.gz.sha256)
+            mkdir -p "dist/${NAME}/litert-lm"
+            tar -xzf "$RUNNER_TEMP/litert-lm/litert-lm-darwin-arm64.tar.gz" -C "dist/${NAME}/litert-lm"
+            [ -x "dist/${NAME}/litert-lm/cloudburrow_generate" ] || { echo "::error::no cloudburrow_generate in the litert-lm archive"; exit 1; }
+          fi
           # The embedded BigQuery emulator's licences and notices (#1061).
           gzip -dc internal/bigqueryimage/bin/bigquery-emulator-licenses.txt.gz > "dist/${NAME}/LICENSES-bigquery-emulator.txt"
           tar -czf "dist/${NAME}.tar.gz" -C dist "${NAME}"
@@ -548,7 +597,7 @@ jobs:
 
       # Hardened runtime and a secure timestamp are both required for
       # notarization. --force replaces the ad-hoc signature Go's linker adds.
-      - name: Sign both darwin binaries
+      - name: Sign the darwin binaries
         if: steps.secrets.outputs.present == 'true'
         env:
           IDENTITY: ${{ steps.identity.outputs.name }}
@@ -562,7 +611,14 @@ jobs:
             set -- "$@" "${archive}"
           done
           [ "$#" -eq 2 ] || { echo "::error::expected two darwin archives, got: $*"; exit 1; }
-          for bin in work/*/cloudburrow; do
+          # The arm64 archive's LiteRT-LM runner and the dylibs it loads
+          # (#2159): the dylibs first, then the executable, every one with
+          # the same identity, so the hardened runtime's library validation
+          # accepts them, and all of them in the notarized zip below.
+          runner=""
+          for r in work/cloudburrow_*_darwin_arm64/litert-lm/cloudburrow_generate; do [ -x "${r}" ] && runner="${r}"; done
+          [ -n "${runner}" ] || { echo "::error::the darwin/arm64 archive has no litert-lm/cloudburrow_generate"; exit 1; }
+          for bin in work/*/litert-lm/*.dylib work/*/litert-lm/cloudburrow_generate work/*/cloudburrow; do
             codesign --force --options runtime --timestamp --keychain "${keychain}" --sign "${IDENTITY}" "${bin}"
             codesign --verify --strict --verbose=2 "${bin}"
             details="$(codesign -dv --verbose=2 "${bin}" 2>&1)"

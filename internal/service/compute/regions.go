@@ -3,6 +3,8 @@ package compute
 import (
 	"sort"
 	"strings"
+
+	"github.com/cloudburrow/cloudburrow/internal/locations"
 )
 
 // autoRanges are the auto mode subnet ranges, by region, as the
@@ -26,16 +28,6 @@ var autoRanges = map[string]string{
 	"us-west1": "10.138.0.0/20", "us-west2": "10.168.0.0/20", "us-west3": "10.180.0.0/20", "us-west4": "10.182.0.0/20",
 }
 
-// zoneSuffixes are the zones of the regions whose zones are not -a, -b
-// and -c, as Google's regions and zones page lists them.
-var zoneSuffixes = map[string][]string{
-	"us-central1":  {"a", "b", "c", "f"},
-	"us-east1":     {"b", "c", "d"},
-	"europe-west1": {"b", "c", "d"},
-	"us-east4":     {"a", "b", "c"},
-	"europe-west2": {"a", "b", "c"},
-}
-
 // Regions are the regions served, sorted.
 func Regions() []string {
 	out := make([]string, 0, len(autoRanges))
@@ -47,17 +39,7 @@ func Regions() []string {
 }
 
 // Zones are a region's zones.
-func Zones(region string) []string {
-	suf, ok := zoneSuffixes[region]
-	if !ok {
-		suf = []string{"a", "b", "c"}
-	}
-	out := make([]string, len(suf))
-	for i, x := range suf {
-		out[i] = region + "-" + x
-	}
-	return out
-}
+func Zones(region string) []string { return locations.Zones(region) }
 
 // IsRegion reports whether r is a region served.
 func IsRegion(r string) bool { _, ok := autoRanges[r]; return ok }

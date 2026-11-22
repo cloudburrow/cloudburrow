@@ -53,20 +53,43 @@ func instanceDatabasesAndUsers(ctx context.Context, svc *sqladminapi.Service, pr
 		}
 		dbs.Total = len(dbs.Items)
 	}
-	users := console.Listing{Columns: []string{"Host", "Type", "Password status"}, NameColumn: "User", Noun: "users",
+	// Google's columns (https://docs.cloud.google.com/sql/docs/mysql/create-manage-users,
+	// read 2026-11-22): User name, Host name (MySQL's), Authentication and
+	// Password status.
+	userCols := []string{"Authentication", "Password status"}
+	if strings.HasPrefix(in.DatabaseVersion, "MYSQL_") {
+		userCols = append([]string{"Host name"}, userCols...)
+	}
+	users := console.Listing{Columns: userCols, NameColumn: "User name", Noun: "users",
 		Note: "The instance's users, through users.list. A password is never shown; Change password sets a new one."}
 	if list, err := svc.Users.List(project, in.Name).Context(ctx).Do(); err != nil {
 		users.Unavailable = sqlAPIError(err).Error()
 	} else {
 		for _, u := range list.Items {
 			users.Items = append(users.Items, console.Resource{Name: sqlUserRef(u), Fields: map[string]string{
-				"Host": orDash(u.Host), "Type": orDash(u.Type), "Password status": sqlUserStatus(u)}})
+				"Host name": orDash(u.Host), "Authentication": sqlUserAuthentication(u.Type), "Password status": sqlUserStatus(u)}})
 			userRefs = append(userRefs, sqlUserRef(u))
 		}
 		users.Total = len(users.Items)
 	}
 	return []console.Section{{ID: "databases", Label: "Databases", Kind: console.KindListing, Listing: dbs},
 		{ID: "users", Label: "Users", Kind: console.KindListing, Listing: users}}, dbNames, userRefs
+}
+
+// sqlUserAuthentication is a user's type as Google's Authentication
+// column names it.
+func sqlUserAuthentication(t string) string {
+	switch t {
+	case "", "BUILT_IN":
+		return "Built-in"
+	case "CLOUD_IAM_USER":
+		return "Cloud IAM (user)"
+	case "CLOUD_IAM_SERVICE_ACCOUNT":
+		return "Cloud IAM (service account)"
+	case "CLOUD_IAM_GROUP":
+		return "Cloud IAM (group)"
+	}
+	return t
 }
 
 // sqlDatabaseType is a database's type as the Databases page shows it:
@@ -101,7 +124,14 @@ func databaseUserActions(in *sqladminapi.DatabaseInstance, dbNames, userRefs []s
 		create = append(create, console.Field{Name: "charset", Label: "Character set", Type: "text", Help: "optional, such as utf8mb4"},
 			console.Field{Name: "collation", Label: "Collation", Type: "text", Help: "optional, such as utf8mb4_0900_ai_ci"})
 	}
-	acts := []console.Action{{ID: "create-database", Label: "Create database", Title: "New database", Submit: "Create", Fields: create}}
+	// PostgreSQL's dialog is "New database"; MySQL's "Create a database"
+	// (https://docs.cloud.google.com/sql/docs/mysql/create-manage-databases,
+	// read 2026-11-22).
+	title := "New database"
+	if mysql {
+		title = "Create a database"
+	}
+	acts := []console.Action{{ID: "create-database", Label: "Create database", Title: title, Submit: "Create", Fields: create}}
 	if len(dbNames) > 0 {
 		acts = append(acts, console.Action{ID: "drop-database", Label: "Delete database", Destructive: true, ConfirmTitle: "Delete database",
 			Confirm: "The database and every table in it are deleted.",

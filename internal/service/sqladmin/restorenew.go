@@ -167,11 +167,8 @@ func (s *Server) restoreToNewInstance(r *http.Request, base, project, dest strin
 	}
 	spec.Name, spec.Project = dest, project
 	spec.CreateTime, spec.SettingsVersion = time.Now().UTC().Format(time.RFC3339Nano), 1
-	if legacyMySQL(spec.DatabaseVersion) {
-		return nil, legacyUnimplemented("restoring a backup to a new instance")
-	}
-	if !SupportedVersions[spec.DatabaseVersion] {
-		return nil, unimplemented("restoring a "+spec.DatabaseVersion+" backup to a new instance", unservedVersionWhy(spec.DatabaseVersion))
+	if err := s.copyRefusal(spec.DatabaseVersion, "restoring a backup to a new instance"); err != nil {
+		return nil, err
 	}
 	if !s.engineServed(spec.DatabaseVersion) {
 		return nil, Errorf(http.StatusPreconditionFailed, "Invalid request: a %s instance runs an image this instance was not started with.",
@@ -187,6 +184,11 @@ func (s *Server) restoreToNewInstance(r *http.Request, base, project, dest strin
 	if s.engineLocked(dest) != nil || s.writes.sources[dest] != nil {
 		s.emu.Unlock()
 		return nil, Errorf(http.StatusConflict, "The Cloud SQL instance already exists.")
+	}
+	spec.PrivateIP = ""
+	if err := s.assignNetworkingLocked(&spec); err != nil {
+		s.emu.Unlock()
+		return nil, err
 	}
 	c := &created{spec: spec, engine: s.writes.prov.Engine(spec), state: "PENDING_CREATE"}
 	s.writes.byName[dest] = c
@@ -217,7 +219,7 @@ func (s *Server) restoreToNewInstance(r *http.Request, base, project, dest strin
 		}
 		s.setState(dest, "PENDING_CREATE")
 		ctx, cancel := context.WithTimeout(context.Background(), startTimeout)
-		err := b.dumper.Load(ctx, DumpTarget{Instance: dest, MySQL: spec.MySQL(), Created: true}, b.runDir(cp.ID))
+		err := b.dumper.Load(ctx, DumpTarget{Instance: dest, MySQL: spec.MySQL(), Created: true, Version: spec.DatabaseVersion}, b.runDir(cp.ID))
 		cancel()
 		if err == nil {
 			err = s.takePITRBase(dest)

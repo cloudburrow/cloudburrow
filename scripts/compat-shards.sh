@@ -110,7 +110,7 @@ COMPAT_LOCALAI_TEST_NAMES="
   BigQueryMLAnnotateImageDetections BigQueryMLAnnotateImageLabels
   BigQueryMLImportedONNXModel BigQueryMLImportedONNXModelOverImages
   BigQueryMLProcessDocument
-  BigQueryMLTensorFlowImportGenerated
+  BigQueryMLTensorFlowImportGenerated BigQueryMLTensorFlowKeras BigQueryMLTensorFlowRuntime
   BigQueryMLRemoteConnectionPermissions BigQueryMLRemoteDefaultConnection
   BigQueryMLRemoteGenerateEmbedding BigQueryMLRemoteGenerateText
   BigQueryMLRemoteGenerationOptions BigQueryMLTranscribe
@@ -162,8 +162,11 @@ COMPAT_LOCALAI_TEST_NAMES="
   GenerateContentThroughTheOfficialSDK
   GenerationNeverUsesApplicationDefaultCredentials
   MultimodalEmbeddingPredictThroughThePredictionClient
+  ModelGardenDeploysAHubModelOnTheCluster ModelGardenDeploysAGGUFModelOnLlamaCpp
+  ModelGardenDeploysOnHuggingFacePyTorchInference ModelGardenDeploysAnONNXModel
+  ModelGardenDeploysAnMLXModel ModelGardenHuggingFacePublisherModel
   RawPredictOnTheEmbeddingModel RawPredictOnTheGenerationModel
-  SpeechAdaptationBoost SpeechAdaptationResources SpeechBatchRecognize
+  SpeechAdaptationBoost SpeechAdaptationResources SpeechBatchRecognize SpeechDiarization2131
   SpeechRecognitionFeatures1799 SpeechRecognizers SpeechStreamingRecognize SpeechV1
   SpeechV1AdaptationResources
   StreamGenerateContentThroughTheOfficialSDK
@@ -215,8 +218,14 @@ COMPAT_CROSSSERVICE_TESTS="^Test((Gcloud|Terraform|GcloudAndTerraform)?Eventarc[
 
 # The sqlreplicas shard's tests, by name: every Cloud SQL test of high
 # availability, read replicas, blue-green deployments, external primaries,
-# switchover, demotion, failover and promotion.
-COMPAT_SQL_REPLICA_TESTS='^Test[A-Za-z]*SQL[A-Za-z0-9]*(HighAvailability|Replica|BlueGreen|External|Switchover|Demote|Failover|Promote)'
+# switchover, demotion, failover and promotion; and Cloud SQL's networking
+# with Compute Engine (#2141), SQL_COMPUTE here: private IP, Private
+# Service Connect endpoints, a VM reaching both, the Network Connectivity
+# API's service connection policies and the automatic endpoints made
+# through them, and managed connection pooling, which the sql shard (near
+# its COMPAT_TIMEOUT) had no time left for.
+COMPAT_SQL_NETWORK_TESTS='^Test(CloudSQLZonesPrivateIPAndPSCEndpoints|CloudSQLPrivateIPAndPSCReachableFromAVM|CloudSQLPSCAutoConnections|CloudSQLManagedConnectionPooling|NetworkConnectivity[A-Za-z]*)$'
+COMPAT_SQL_REPLICA_TESTS='^Test[A-Za-z]*SQL[A-Za-z0-9]*(HighAvailability|Replica|BlueGreen|External|Switchover|Demote|Failover|Promote)|'"$COMPAT_SQL_NETWORK_TESTS"
 
 # The console's headless-browser suite (#594) runs in the storage, run,
 # emulators, memorystore and sql shards: the Cloud KMS and Cloud Run

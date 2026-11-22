@@ -1,7 +1,8 @@
 # Release signing setup (macOS)
 
 The release workflow's `sign-macos` job signs both darwin binaries with a Developer ID Application
-certificate, notarizes them with Apple and re-packages the archives before `checksums.txt`, the
+certificate (and, in the darwin/arm64 archive, the LiteRT-LM runner `litert-lm/cloudburrow_generate`
+and its two dylibs, which the `litert-lm-macos` job builds, #2159; no new secret), notarizes them with Apple and re-packages the archives before `checksums.txt`, the
 attestations and the Homebrew formula are computed (#605). It does this only once the five
 repository secrets below exist. Until then every release ships unsigned darwin binaries, with a
 notice in the run. What users see, and how they check a binary, is in

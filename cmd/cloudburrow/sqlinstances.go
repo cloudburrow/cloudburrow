@@ -36,6 +36,9 @@ type sqlProvisioner struct {
 	// fwds are the tunnels, by instance name; up is which have started.
 	fwds map[string]*netfwd.Forwarder
 	up   map[string]bool
+	// pools are the managed connection poolers' tunnels (#2141), by
+	// instance name, while their instance pools connections.
+	pools map[string]*netfwd.Forwarder
 
 	// legacyOnce asks the node once whether it runs linux/amd64
 	// binaries; legacyWhy is why not, or "" (sqllegacy.go, #1524).
@@ -52,6 +55,7 @@ func newSQLProvisioner(cfg config.Config, logw io.Writer) *sqlProvisioner {
 		logw:       logw,
 		fwds:       map[string]*netfwd.Forwarder{},
 		up:         map[string]bool{},
+		pools:      map[string]*netfwd.Forwarder{},
 	}
 }
 
@@ -95,6 +99,62 @@ func (p *sqlProvisioner) forwarder(spec sqladmin.Spec) *netfwd.Forwarder {
 	return f
 }
 
+// poolerAddr is the host address of name's managed connection pooler,
+// "" while it has none (#2141).
+func (p *sqlProvisioner) poolerAddr(name string) func() string {
+	return func() string {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		if f := p.pools[name]; f != nil {
+			return f.HostAddr()
+		}
+		return ""
+	}
+}
+
+// syncPooler starts the tunnel of spec's managed connection pooler when
+// it pools connections, and stops it when it no longer does (#2141).
+func (p *sqlProvisioner) syncPooler(ctx context.Context, spec sqladmin.Spec) error {
+	srv := spec.ServerName()
+	p.mu.Lock()
+	f := p.pools[srv]
+	p.mu.Unlock()
+	if !spec.PoolingEnabled() {
+		if f != nil {
+			p.mu.Lock()
+			delete(p.pools, srv)
+			p.mu.Unlock()
+			_ = f.Stop(ctx)
+		}
+		return nil
+	}
+	if f != nil {
+		return nil
+	}
+	f = netfwd.New(netfwd.Target{Name: components.SQLInstancePrefix + srv, Namespace: p.inst.Namespace,
+		ServicePort: sqladmin.PoolerPort, Label: "cloudsql-pooler-" + srv}, p.cfg.KubeconfigPath(), p.cfg.BindAddress)
+	f.Logf = p.logf
+	if err := f.Start(ctx); err != nil {
+		return fmt.Errorf("the tunnel of instance %s's connection pooler: %w", spec.Name, err)
+	}
+	p.mu.Lock()
+	p.pools[srv] = f
+	p.mu.Unlock()
+	p.logf("Cloud SQL instance %s pools connections: its pooler (port %d) is at %s", spec.Name, sqladmin.PoolerPort, f.HostAddr())
+	return nil
+}
+
+// stopPooler stops name's pooler tunnel, if it has one.
+func (p *sqlProvisioner) stopPooler(ctx context.Context, name string) {
+	p.mu.Lock()
+	f := p.pools[name]
+	delete(p.pools, name)
+	p.mu.Unlock()
+	if f != nil {
+		_ = f.Stop(ctx)
+	}
+}
+
 func (p *sqlProvisioner) hostAddr(name string) func() string {
 	return func() string {
 		p.mu.Lock()
@@ -121,7 +181,8 @@ func (p *sqlProvisioner) Engine(spec sqladmin.Spec) sqladmin.Engine {
 		user = components.CloudSQLUser
 	}
 	pg := &sqladmin.Postgres{Name: spec.Name, Version: spec.DatabaseVersion,
-		User: user, Database: user, HostAddr: p.hostAddr(spec.ServerName()), Logical: spec.External != nil}
+		User: user, Database: user, HostAddr: p.hostAddr(spec.ServerName()), Logical: spec.External != nil,
+		PoolerHostAddr: p.poolerAddr(spec.ServerName())}
 	if spec.MasterInstanceName == "" {
 		// A primary's failed sign-ins lock a user with a lock after
 		// failed attempts (#2014); a replica's users are the primary's.
@@ -169,6 +230,11 @@ func (p *sqlProvisioner) backend(spec sqladmin.Spec) components.Backend {
 		flags = append(flags, components.SQLInstanceFlag{Name: f.Name, Value: f.Value})
 	}
 	b := components.CloudSQLInstanceBackend(spec.ServerName(), spec.DatabaseVersion, true, spec.RootPassword, flags)
+	if spec.PoolingEnabled() {
+		// Managed connection pooling (#2141): PgBouncer beside the
+		// server, on Google's 6432.
+		b.Sidecars = append(b.Sidecars, components.CloudSQLPooler(sqladmin.PoolerPort, spec.PoolerSettings()))
+	}
 	if spec.PITREnabled() && !spec.MySQL() {
 		if len(b.Args) == 0 {
 			b.Args = []string{"postgres"}
@@ -218,6 +284,19 @@ fi
 fi
 mysql $MYSQL_LOCAL -e "CHANGE REPLICATION SOURCE TO SOURCE_HOST = '$CLOUDSQL_PRIMARY_HOST', SOURCE_PORT = ${CLOUDSQL_PRIMARY_PORT:-3306}, SOURCE_USER = '${CLOUDSQL_PRIMARY_USER:-` +
 	components.SQLReplicaUser + `}', SOURCE_PASSWORD = '$CLOUDSQL_REPLICATION_PASSWORD', SOURCE_AUTO_POSITION = 1, SOURCE_SSL = 1; START REPLICA; SET PERSIST super_read_only = ON"
+`
+
+// mysqlLegacyFirstStart starts a MySQL 5.7 or 5.6 server's binary log
+// afresh at its first start (#1524): it runs with GTIDs from its
+// initialisation (legacyMySQLArgs), whose time zone tables the image's
+// entrypoint loads with the binary log on, and a new Cloud SQL instance
+// has no transaction of its own a replica, or the source it is demoted to
+// replicate from, would see. A marker on its volume records it.
+const mysqlLegacyFirstStart = `set -e
+` + mysqlRootEnv + `m=/var/lib/mysql/cloudsql-binlog-started
+[ -f "$m" ] && exit 0
+mysql $MYSQL_LOCAL -e 'RESET MASTER'
+touch "$m"
 `
 
 // mysqlSystemAccountsScript gives a MySQL server CloudBurrow's own
@@ -302,9 +381,16 @@ func (p *sqlProvisioner) Start(ctx context.Context, spec sqladmin.Spec) error {
 			return err
 		}
 	}
+	if sqladmin.IsLegacyMySQL(spec.DatabaseVersion) {
+		var out strings.Builder
+		if err := nodeExec(p.cfg, b.Name)(ctx, nil, &out, "sh", "-c", mysqlLegacyFirstStart); err != nil {
+			return fmt.Errorf("start the binary log of %s: %w %s", spec.Name, err, strings.TrimSpace(out.String()))
+		}
+	}
 	if script := replicaSetup(spec); script != "" {
 		// A replica of a source representation instance runs idle until
 		// startExternalSync (#1501).
+		script = sqladmin.MySQLDialect(spec.DatabaseVersion, script)
 		var out strings.Builder
 		if err := podExec(p.cfg, components.SQLInstancePrefix+spec.ServerName())(ctx, nil, &out, "sh", "-c", script); err != nil {
 			return fmt.Errorf("start replication of %s from %s: %w %s", spec.Name, spec.MasterInstanceName, err, strings.TrimSpace(out.String()))
@@ -327,6 +413,9 @@ func (p *sqlProvisioner) Start(ctx context.Context, spec sqladmin.Spec) error {
 	}
 	if sqladmin.IsSQLServer(spec.DatabaseVersion) {
 		return p.sqlServerSetup(ctx, spec)
+	}
+	if err := p.syncPooler(ctx, spec); err != nil {
+		return err
 	}
 	if err := p.standby(ctx, spec); err != nil {
 		return err
@@ -360,6 +449,11 @@ func (p *sqlProvisioner) Restart(ctx context.Context, spec sqladmin.Spec) error 
 		// Trace flags last until the server stops.
 		return p.sqlServerSetup(ctx, spec)
 	}
+	if sqladmin.IsLegacyMySQL(spec.DatabaseVersion) && spec.Regional() {
+		// MySQL 5.7 and 5.6 have no SET PERSIST (#1524): the primary's
+		// semi-synchronous replication is set again, as at its start.
+		return p.mysqlStandby(ctx, spec)
+	}
 	return nil
 }
 
@@ -382,6 +476,7 @@ func (p *sqlProvisioner) sqlServerSetup(ctx context.Context, spec sqladmin.Spec)
 func (p *sqlProvisioner) Stop(ctx context.Context, spec sqladmin.Spec) error {
 	srv := spec.ServerName()
 	sqladmin.StopSignInWatch(srv)
+	p.stopPooler(ctx, srv)
 	p.mu.Lock()
 	f := p.fwds[srv]
 	delete(p.fwds, srv)
@@ -418,6 +513,7 @@ var sqlServerOf = func(name string) string { return name }
 // Remove deletes server name (a Spec's ServerName) and its volume.
 func (p *sqlProvisioner) Remove(ctx context.Context, name string) error {
 	sqladmin.StopSignInWatch(name)
+	p.stopPooler(ctx, name)
 	p.mu.Lock()
 	f := p.fwds[name]
 	delete(p.fwds, name)
@@ -472,6 +568,10 @@ func (p *sqlProvisioner) Close() {
 	p.mu.Lock()
 	fs := p.fwds
 	p.fwds, p.up = map[string]*netfwd.Forwarder{}, map[string]bool{}
+	for k, f := range p.pools {
+		fs["pooler:"+k] = f
+	}
+	p.pools = map[string]*netfwd.Forwarder{}
 	p.mu.Unlock()
 	for _, f := range fs {
 		_ = f.Stop(context.Background())

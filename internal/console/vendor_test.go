@@ -19,6 +19,9 @@ var vendoredSHA256 = map[string]string{
 	"assets/vendor/xterm/LICENSE":           "b569f629d00f2626a8100df2a1798210535621e42164dfd426a6fe5aac7b0ccd",
 	"assets/vendor/xterm/addon-fit.js":      "ba3ea256ce0620a0992a197d6c9baea64823fc93d8da07a9e366ca9943c18527",
 	"assets/vendor/xterm/addon-fit.LICENSE": "e256f01188af527e4d06d21d06fbf785ae9c50d4b328bf03cbe0ba7f0aa4228f",
+	// Derived from Natural Earth's public-domain ne_110m_land (#2094,
+	// third_party/naturalearth) by tools/naturalearth/land.py.
+	"assets/vendor/naturalearth/land-110m.js": "b3a6dfc717e751f4ebcbd8a3f4ecce7a7339aaa867f08c7236ccc4715e0fde8f",
 }
 
 // TestVendoredAssetsAreLicensed ties every file under assets/vendor to a

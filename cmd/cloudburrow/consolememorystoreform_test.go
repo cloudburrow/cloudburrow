@@ -57,7 +57,7 @@ func TestMemorystoreCreateFormsFollowGoogle(t *testing.T) {
 	}
 	_, cluster := (redisClusterProvider{}).CreateForm()
 	if got, want := names(cluster), "id,region,zoneDistribution,zone,nodeType,shardCount,replicaCount,network,security,transitEncryption,caMode,caPool,"+
-		"encryption,kmsKey,aclPolicy,persistence,autoBackup,backupRetention,backupHour,maintenance,maintenanceDay,maintenanceHour,redisConfigs,restoreBackup"; got != want {
+		"encryption,kmsKey,aclPolicy,persistence,autoBackup,backupRetention,backupHour,maintenance,maintenanceDay,maintenanceHour,redisConfigs,restoreBackup,primaryCluster"; got != want {
 		t.Errorf("Create cluster fields = %s, want %s", got, want)
 	}
 	_, valkey := (valkeyProvider{}).CreateForm()

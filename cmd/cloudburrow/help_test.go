@@ -11,7 +11,7 @@ import (
 // helpCommands are the commands whose --help CloudBurrow prints itself.
 // terraform is not one: `cloudburrow terraform --help` is terraform's own.
 var helpCommands = []string{
-	"delete", "diagnose", "doctor", "env", "events", "gcloud-setup", "gcloud-teardown", "logs",
+	"delete", "diagnose", "doctor", "env", "events", "gc", "gcloud-setup", "gcloud-teardown", "logs",
 	"prefetch", "reset", "seed", "state", "status", "stop", "storage-server", "trust", "up", "wait",
 }
 

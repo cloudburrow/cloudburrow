@@ -190,7 +190,7 @@ func TestDeployServesVLLMAndUndeploys(t *testing.T) {
 		t.Errorf("predict without prompt = %v; want INVALID_ARGUMENT", err)
 	}
 
-	st, _, body, err := m.RawPredict(ctx, "p", "us-central1", p.Endpoint, []byte(`{"prompt":"x"}`))
+	st, _, body, err := m.RawPredict(ctx, "p", "us-central1", p.Endpoint, []byte(`{"prompt":"x"}`), "application/json")
 	if err != nil || st != 200 || !strings.Contains(string(body), `"model":"acme/tiny"`) {
 		t.Errorf("rawPredict = %d %s %v; want the served model filled in", st, body, err)
 	}

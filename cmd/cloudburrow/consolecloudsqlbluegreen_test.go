@@ -12,6 +12,7 @@ import (
 
 	sqladminapi "google.golang.org/api/sqladmin/v1"
 
+	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
 )
 
@@ -148,5 +149,45 @@ func TestRegionalReplicaStandbyKeepsItsServer(t *testing.T) {
 	}
 	if strings.Join(p.nodeBackend(green, 0).Args, " ") == strings.Join(p.nodeBackend(promoted, 0).Args, " ") {
 		t.Error("the replica's primary server is not a replica")
+	}
+}
+
+// TestCloudSQLConsoleLegacyMySQLActions (#1524): a MYSQL_5_7 primary's
+// page offers Create read replica and Create blue-green deployment, with
+// 5.7 itself as the green version, and its replica's Create read replica
+// (a cascading one); a MYSQL_5_6 primary's page offers Create read replica
+// but no blue-green deployment, and its replica's page no Create read
+// replica, as Cloud SQL has neither for 5.6.
+func TestCloudSQLConsoleLegacyMySQLActions(t *testing.T) {
+	ids := func(acts []console.Action) string {
+		var out []string
+		for _, a := range acts {
+			out = append(out, a.ID)
+		}
+		return strings.Join(out, ",")
+	}
+	primary := func(v string) *sqladminapi.DatabaseInstance {
+		return &sqladminapi.DatabaseInstance{Name: "p", DatabaseVersion: v, Region: "us-central1", Settings: &sqladminapi.Settings{}}
+	}
+	replica := func(v string) *sqladminapi.DatabaseInstance {
+		r := primary(v)
+		r.Name, r.MasterInstanceName = "r", "proj:p"
+		r.Settings.DatabaseReplicationEnabled = true
+		return r
+	}
+	bg := blueGreenActions(primary("MYSQL_5_7"))
+	if ids(bg) != "blue-green-create" || bg[0].Fields[1].Default != "MYSQL_5_7" {
+		t.Errorf("MYSQL_5_7 blue-green actions: %s %+v", ids(bg), bg)
+	}
+	if got := ids(blueGreenActions(primary("MYSQL_5_6"))); got != "" {
+		t.Errorf("MYSQL_5_6 blue-green actions: %q, want none", got)
+	}
+	for v, want := range map[string]string{"MYSQL_5_7": "create-replica,promote-replica,stop-replica", "MYSQL_5_6": "promote-replica,stop-replica"} {
+		if got := ids(replicaActions(replica(v))); got != want {
+			t.Errorf("a %s replica's actions: %s, want %s", v, got, want)
+		}
+		if got := ids(replicaActions(primary(v))); got != "create-replica" {
+			t.Errorf("a %s primary's actions: %s", v, got)
+		}
 	}
 }

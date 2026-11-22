@@ -117,6 +117,10 @@ type Registry struct {
 	// (serviceaccountprincipals.go).
 	onRewrite []func(from, to string) error
 	rewrites  []memberRewrite
+	// onCreated are the OnCreated hooks, and created the projects and
+	// folders made since r.mu was taken, whose hooks unlock runs.
+	onCreated []func(name string)
+	created   []string
 	// saTokenURI is the token endpoint a service account key file names
 	// (serviceaccountkeys.go).
 	saTokenURI string
@@ -211,6 +215,7 @@ func (r *Registry) registerLocked(p Project) (Project, error) {
 	if err := r.st.Put(key(p.ProjectID), b); err != nil {
 		return Project{}, apierror.Internal(err, "store project")
 	}
+	r.created = append(r.created, p.Name)
 	return p, nil
 }
 

@@ -81,7 +81,7 @@ var docAIGallery = []docAIGalleryType{
 	{"BANK_STATEMENT_PROCESSOR", "Bank Statement Parser", "Specialized", "Fields of bank statements"},
 	{"PAYSTUB_PROCESSOR", "Pay Slip Parser", "Specialized", "Fields of pay slips"},
 	{"UTILITY_PROCESSOR", "Utility Parser", "Specialized", "Fields of utility bills"},
-	{"W2_PROCESSOR", "W2 Parser", "Specialized", "Fields of US W-2 forms"},
+	{"FORM_W2_PROCESSOR", "W2 Parser", "Specialized", "Fields of US W-2 forms"},
 	{"FORM_W9_PROCESSOR", "W9 Parser", "Specialized", "Fields of US W-9 forms"},
 	{"US_DRIVER_LICENSE_PROCESSOR", "US Driver License Parser", "Specialized", "Fields of US driver licenses"},
 	{"US_PASSPORT_PROCESSOR", "US Passport Parser", "Specialized", "Fields of US passports"},
@@ -92,7 +92,9 @@ var docAIGallery = []docAIGalleryType{
 
 // docAINotLocal is why a type the endpoint does not serve is not available.
 const docAINotLocal = "Not available locally: this processor runs a model Google trains and hosts, which CloudBurrow has no " +
-	"local equivalent of, and it never calls Google. Enterprise Document OCR and Layout Parser run here, on Tesseract."
+	"local equivalent of, and it never calls Google. Enterprise Document OCR and Layout Parser run here, on Tesseract; " +
+	"the Form Parser and the Invoice, Expense, Bank Statement, Pay Slip, W2 and US Driver License parsers run on the local " +
+	"generation model where the instance has one (up --local-ai-model)."
 
 func docAIGalleryEntry(t string) (docAIGalleryType, bool) {
 	for _, g := range docAIGallery {
@@ -1112,16 +1114,46 @@ func docAIResult(doc *documentaipb.Document) *console.Listing {
 		for _, b := range pg.GetSymbols() {
 			add(pg.GetPageNumber(), "Symbol", b.GetLayout())
 		}
+		// The Form Parser's key-value pairs and tables (#1799).
+		for _, ff := range pg.GetFormFields() {
+			add(pg.GetPageNumber(), "Form field key", ff.GetFieldName())
+			kind := "Form field value"
+			if vt := ff.GetValueType(); vt != "" {
+				kind += " (" + vt + ")"
+			}
+			add(pg.GetPageNumber(), kind, ff.GetFieldValue())
+		}
+		for ti, tb := range pg.GetTables() {
+			for ri, row := range append(tb.GetHeaderRows(), tb.GetBodyRows()...) {
+				kind := fmt.Sprintf("Table %d, row %d", ti+1, ri+1)
+				if ri < len(tb.GetHeaderRows()) {
+					kind += " (header)"
+				}
+				for _, c := range row.GetCells() {
+					add(pg.GetPageNumber(), kind, c.GetLayout())
+				}
+			}
+		}
 	}
 	// A custom processor's entities: the extractor's values, the
 	// classifier's classes, the splitter's subdocuments (#2124).
+	// The Form Parser's generic entities and the specialized extractors'
+	// fields, a parent's properties after it (#1799).
+	var entities []*documentaipb.Document_Entity
 	for _, e := range doc.GetEntities() {
+		entities = append(append(entities, e), e.GetProperties()...)
+	}
+	for _, e := range entities {
 		var pages []string
 		for _, r := range e.GetPageAnchor().GetPageRefs() {
 			pages = append(pages, strconv.Itoa(int(r.GetPage())+1))
 		}
+		text := entityText(doc, e)
+		if nv := e.GetNormalizedValue().GetText(); nv != "" {
+			text += " (normalized: " + nv + ")"
+		}
 		out.Items = append(out.Items, console.Resource{Name: strconv.Itoa(len(out.Items) + 1), Fields: map[string]string{
-			"Page": strings.Join(pages, ", "), "Element": "Entity (" + e.GetType() + ")", "Text": entityText(doc, e),
+			"Page": strings.Join(pages, ", "), "Element": "Entity (" + e.GetType() + ")", "Text": text,
 			"Confidence": strconv.FormatFloat(float64(e.GetConfidence()), 'f', 2, 32)}})
 	}
 	// The layout parser's blocks and chunks.

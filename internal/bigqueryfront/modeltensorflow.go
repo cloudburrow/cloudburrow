@@ -44,16 +44,18 @@ import (
 // --port-tfconvert through cloudburrow-host, the front's --tfconvert)
 // runs Google's tf.lite.TFLiteConverter.from_saved_model on its
 // serving_default signature in a local container (deploy/tfconvert,
-// `docker run --network none`), with TensorFlow Lite's builtin operators
+// on an --internal Docker network), with TensorFlow Lite's builtin operators
 // alone. The flatbuffer is kept with the model and runs on
 // internal/tflitemodel exactly as an imported TENSORFLOW_LITE model does
 // (modeltflite.go): its inputs and outputs are serving_default's.
 //
-// What CloudBurrow cannot run is 501, never a different answer: a graph
-// that needs TensorFlow operators TensorFlow Lite has no builtin for
-// (Flex, SELECT_TF_OPS) or that the converter otherwise cannot lower,
-// with the converter's message; an operator internal/tflitemodel does not
-// run; and every model without the CLI's converter.
+// A graph that needs TensorFlow operators TensorFlow Lite has no builtin
+// for (Flex, SELECT_TF_OPS) or that the converter otherwise cannot lower
+// runs on TensorFlow itself, as BigQuery runs every SavedModel
+// (modeltfruntime.go), and so does ML.EXPLAIN_PREDICT. What CloudBurrow
+// cannot run is 501, never a different answer: an operator
+// internal/tflitemodel does not run, and every model without the CLI's
+// converter.
 //
 //   - "Models trained using a version of GraphDef earlier than version 20
 //     aren't supported" and "Models trained using an unreleased version of
@@ -100,22 +102,21 @@ import (
 // every value of the ARRAY (zeros too) at consecutive indices, as
 // tf.io.parse_example does for a VarLenFeature, and that a NULL is a
 // SparseTensor with no values; a SparseFeature or a SparseTensor of rank
-// other than 2 (501); ML.EXPLAIN_PREDICT, which Google runs on imported
-// TensorFlow models (troubleshoot-queries#tensorflow_worker_oom) but
-// whose attribution method for them no page documents (explain-predict,
-// xai-overview and e2e-journey-import re-read 2026-11-20), and other
-// functions the page does not name are 501; each row runs as a batch of
-// one.
+// other than 2 (501); functions the page does not name, other than
+// ML.PREDICT and ML.EXPLAIN_PREDICT (modeltfruntime.go), are 501; on
+// TensorFlow Lite each row runs as a batch of one.
 
 // tensorflowSparseMetadata is the converted model's metadata entry naming
 // its SparseTensor inputs (deploy/tfconvert/convert.py): {name: the dense
 // shape after the batch, -1 where free}.
 const tensorflowSparseMetadata = "cloudburrow_sparse_inputs"
 
-// tfConverter converts a SavedModel's files to TensorFlow Lite: the CLI's
-// converter, *tfconvert.Client.
+// tfConverter converts a SavedModel's files to a bundle (TensorFlow Lite,
+// or the SavedModel TensorFlow runs) and runs the TensorFlow runtime
+// (modeltfruntime.go): the CLI's converter, *tfconvert.Client.
 type tfConverter interface {
 	Convert(ctx context.Context, files []tfconvert.File) ([]byte, error)
+	Run(ctx context.Context, sum string, bundle func() ([]byte, error), req []byte) ([]byte, error)
 }
 
 // tensorflowUnsupportedFns are the functions the create-tensorflow page
@@ -260,9 +261,24 @@ func (f front) importTensorFlow(r *http.Request, d modelDDL) (*tfliteImport, []b
 		code, msg := tensorflowRefusal(uri, err)
 		return nil, nil, code, msg
 	}
-	imp, code, msg := tflitePorts(uri, data, "TensorFlow")
+	b, err := tfconvert.ReadBundle(data)
+	if err != nil {
+		return nil, nil, 500, "cloudburrow: the TensorFlow converter's answer is unreadable: " + err.Error()
+	}
+	var imp *tfliteImport
+	if b.TFLite != nil {
+		imp, code, msg = tflitePorts(uri, b.TFLite, "TensorFlow")
+	} else {
+		// TensorFlow Lite's builtins do not take it: it runs on TensorFlow,
+		// as on BigQuery (modeltfruntime.go).
+		imp, code, msg = tfSignaturePorts(uri, b.Signature)
+	}
 	if code != 0 {
 		return nil, nil, code, msg
+	}
+	imp.Bundle, imp.SHA256 = true, tfliteSum(data)
+	if b.TFLite == nil {
+		imp.Runtime, imp.Fallback = tfRuntimeTensorFlow, b.Fallback.Message
 	}
 	var size int64
 	for _, f := range files {

@@ -28,9 +28,9 @@ package logging
 //     than the key's (INVALID_ARGUMENT, the bucket rule). Existing buckets
 //     are not changed.
 //
-// Not served: the _Default and _Required buckets of new projects are not
-// re-created in the key's location (CloudBurrow's are global and implicit),
-// and the Log Router keeps no buffer of its own to encrypt.
+// The _Default and _Required buckets of a project or folder created after
+// the key is set are made in its location with it (defaults.go, #2108).
+// Not served: the Log Router keeps no buffer of its own to encrypt.
 
 import (
 	"context"

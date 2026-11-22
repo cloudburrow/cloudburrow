@@ -236,7 +236,7 @@ func (d *documentService) importDocuments(ctx context.Context, req *beta.ImportD
 				} else {
 					// The page images are kept, for the labeling tool's
 					// document viewer (#2124).
-					doc, err = readDocument(ctx, ocrProc, content, mt, nil, docAIBatchMaxPages, false)
+					doc, err = readDocument(ctx, ocrProc, content, mt, nil, docAIPageLimit{pages: docAIBatchMaxPages}, true)
 				}
 			}
 			if err != nil {

@@ -592,7 +592,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			f.insertTable(w, r, dataset, table, true)
 		case r.Method == http.MethodGet && m[4] != "" && m[5] == "" && f.serveObjectTableGet(w, r, dataset, table): // #1783, objecttables.go
 		case r.Method == http.MethodGet && m[4] != "" && m[5] == "":
-			f.getTable(w, r, dataset, table) // #1014, #1002
+			f.withModified(w, r, dataset, table, func(w http.ResponseWriter) { f.getTable(w, r, dataset, table) }) // #1014, #1002, #2105
 		case r.Method == http.MethodGet && m[3] != "" && m[4] == "" && strings.HasSuffix(r.URL.EscapedPath(), "/tables"):
 			if !f.objects.any() {
 				f.listTables(w, r, dataset) // #1002, snapshots.go

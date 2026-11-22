@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	sqladminapi "google.golang.org/api/sqladmin/v1"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/service/compute"
 	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
 )
 
@@ -29,6 +31,15 @@ type cloudSQLInstancesProvider struct {
 	endpoint string
 	// versions are the databaseVersion values the instance's images provide.
 	versions []string
+	// srv is the Admin API in this process, whose servers Query insights
+	// and System insights read (#2141); nil leaves them unavailable.
+	srv *sqladmin.Server
+	// metrics is the instance's Cloud Monitoring, whose cloudsql.googleapis.com
+	// series the Overview and System insights chart (#2141).
+	metrics monitoringAdmin
+	// compute is Compute Engine's API, whose VPC networks the private IP
+	// fields offer (#2141); nil without it.
+	compute func() *compute.Server
 }
 
 func (cloudSQLInstancesProvider) ID() string    { return "cloudsql-instances" }
@@ -181,8 +192,18 @@ func (p cloudSQLInstancesProvider) Create(ctx context.Context, project string, v
 		AvailabilityType: v["availabilityType"]}
 	if v["pitr"] == "true" || v["backupsEnabled"] == "true" {
 		// Point-in-time recovery needs automated backups.
-		st.BackupConfiguration = &sqladminapi.BackupConfiguration{Enabled: true}
+		st.BackupConfiguration = &sqladminapi.BackupConfiguration{Enabled: true, Location: strings.TrimSpace(v["backupLocation"])}
 		pitrConfig(st.BackupConfiguration, v["databaseVersion"], v["pitr"] == "true")
+		days := v["logRetentionDays"]
+		if v["pitr"] != "true" {
+			days = ""
+		}
+		if err := retentionConfig(st.BackupConfiguration, v["retainedBackups"], days); err != nil {
+			return "", err
+		}
+	}
+	if strings.HasPrefix(v["databaseVersion"], "MYSQL_") && v["rootPassword"] == "" && v["noPassword"] != "true" {
+		return "", fmt.Errorf("set a password for root, or check No password")
 	}
 	if err := sqlCreateSettings(st, v); err != nil {
 		return "", err
@@ -191,8 +212,14 @@ func (p cloudSQLInstancesProvider) Create(ctx context.Context, project string, v
 		Name: name, DatabaseVersion: v["databaseVersion"], RootPassword: v["rootPassword"], Region: regionOr(v["region"]), Settings: st,
 	}
 	withServerCAMode(st, nil, v)
+	sqlZonesConfig(st, v)
 	if err := sqlCreateConnections(st, v); err != nil {
 		return "", err
+	}
+	if v["engine"] == sqlEnginePostgres && v["edition"] == "ENTERPRISE_PLUS" {
+		if pc := sqlPoolConfig(v); pc != nil && pc.ConnectionPoolingEnabled {
+			st.ConnectionPoolConfig = pc
+		}
 	}
 	if v["encryption"] == sqlEncryptionCMEK && strings.TrimSpace(v["kmsKeyName"]) == "" {
 		return "", fmt.Errorf("choose the customer-managed encryption key")
@@ -245,7 +272,16 @@ func (p cloudSQLInstancesProvider) Actions(r console.Resource) []console.Action 
 	if r.Name == sqlAdminPostgresInstance || r.Name == sqlAdminMySQLInstance {
 		return nil
 	}
-	return []console.Action{{ID: "restart", Label: "Restart", Confirm: "Restarting the instance closes every connection to it."}}
+	// The row's More actions, as Google's (https://docs.cloud.google.com/sql/docs/postgres/replication/create-replica,
+	// https://docs.cloud.google.com/sql/docs/postgres/clone-instance, read
+	// 2026-11-22): Create read replica and Create clone open them on the
+	// instance's page.
+	page := "/cloudsql-instances/" + url.PathEscape(r.Name)
+	return []console.Action{
+		{ID: "row-create-replica", Label: "Create read replica", Href: page + "?tab=replicas&action=create-replica"},
+		{ID: "row-clone", Label: "Create clone", Href: page + "?tab=backups&action=clone"},
+		{ID: "restart", Label: "Restart", ConfirmTitle: "Restart database instance?", ConfirmStyle: console.DeleteConfirmClick,
+			Confirm: "Restarting the instance closes every connection to it."}}
 }
 
 // Act implements console.Actor.
@@ -274,7 +310,7 @@ func (p cloudSQLInstancesProvider) Detail(ctx context.Context, project string, p
 	if err != nil || in == nil || in.InstanceType == "ON_PREMISES_INSTANCE" {
 		return d, err
 	}
-	return googleLayout(ctx, svc, project, in, d), nil
+	return p.sqlChartsOnOverview(ctx, project, in, p.sqlInsightsLayout(ctx, project, in, googleLayout(ctx, svc, project, in, d))), nil
 }
 
 // detailAll is an instance's settings, its tabs, Edit instance on a created
@@ -414,15 +450,22 @@ func (p cloudSQLInstancesProvider) detailAllOf(ctx context.Context, project stri
 		d.Sections = append(secs, d.Sections...)
 		dbUserActs = databaseUserActions(in, dbNames, userRefs)
 	}
-	d.Actions = append(append(append(p.backupActions(ids), replicaActions(in)...), transferActions()...), certActions(fps, casSigned(in))...)
+	d.Actions = append(append(append(p.backupActions(ids, sqlOtherInstances(ctx, svc, project, in)), replicaActions(in)...), transferActions()...), certActions(fps, casSigned(in))...)
 	d.Actions = append(d.Actions, serverCertActions(in, otherServerCerts)...)
 	d.Actions = append(d.Actions, upgradeActions(in)...)
+	if !upSQLInstance(name) {
+		d.Actions = append(d.Actions, backupSettingsAction(backups == "On", start, retained, backupLoc))
+		if in.InstanceType != "ON_PREMISES_INSTANCE" {
+			d.Actions = append(d.Actions, p.networkingAction(project, in))
+		}
+	}
 	d.Actions = append(d.Actions, failoverActions(in)...)
 	d.Actions = append(d.Actions, drActions(in)...)
 	d.Actions = append(d.Actions, reencryptActions(in)...)
 	d.Actions = append(d.Actions, blueGreenActions(in)...)
 	d.Actions = append(d.Actions, externalSyncActions(in, externalReplica(ctx, svc, project, in))...)
 	d.Actions = append(d.Actions, demoteActions(in)...)
+	d.Actions = append(d.Actions, enableQueryInsights(in)...)
 	d.Actions = append(d.Actions, dataAPIActions(ctx, svc, project, in)...)
 	d.Actions = append(d.Actions, storageActions(in)...)
 	d.Actions = append(d.Actions, maintenanceActions(in)...)
@@ -455,6 +498,8 @@ func (p cloudSQLInstancesProvider) detailAllOf(ctx context.Context, project stri
 			{Name: "availabilityType", Label: "Zonal availability", Type: "select", Required: true,
 				Options: []string{"ZONAL", "REGIONAL"}, Default: availabilityOr(st.AvailabilityType),
 				Help: availabilityHelp + " Changing it adds or removes the standby."},
+			sqlZoneFields("", in.Region, sqlPreferredZone(st, false), sqlPreferredZone(st, true), st.AvailabilityType == "REGIONAL")[0],
+			sqlZoneFields("", in.Region, sqlPreferredZone(st, false), sqlPreferredZone(st, true), st.AvailabilityType == "REGIONAL")[1],
 			{Name: "backupsEnabled", Label: "Automated backups", Type: "checkbox", Default: strconv.FormatBool(backups == "On")},
 			{Name: "backupStartTime", Label: "Backup start time (UTC, HH:MM)", Type: "text", Default: start, Pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"},
 			{Name: "pitr", Label: "Point-in-time recovery", Type: "checkbox", Default: strconv.FormatBool(pitr == "On"),
@@ -547,6 +592,7 @@ func (p cloudSQLInstancesProvider) Edit(ctx context.Context, project string, pat
 		return sqlAPIError(err)
 	}
 	pitrConfig(st.BackupConfiguration, in.DatabaseVersion, v["pitr"] == "true")
+	sqlZonesConfig(st, v)
 	withServerCAMode(st, in, v)
 	if _, ok := v["enablePasswordPolicy"]; ok && in.MasterInstanceName == "" {
 		had := in.Settings != nil && in.Settings.PasswordValidationPolicy != nil
@@ -705,8 +751,14 @@ func replicaActions(in *sqladminapi.DatabaseInstance) []console.Action {
 	if in.MasterInstanceName == "" {
 		return []console.Action{create}
 	}
-	acts := []console.Action{create, {ID: "promote-replica", Label: "Promote", Destructive: true,
-		Confirm: "Promoting stops replication from the primary for good: the replica becomes a standalone primary that takes writes."}}
+	acts := []console.Action{create}
+	if in.DatabaseVersion == "MYSQL_5_6" {
+		// Cloud SQL logs a read replica's binary log on MySQL 5.7 and
+		// later only, so a 5.6 replica has no cascading replicas (#1524).
+		acts = nil
+	}
+	acts = append(acts, console.Action{ID: "promote-replica", Label: "Promote", Destructive: true,
+		Confirm: "Promoting stops replication from the primary for good: the replica becomes a standalone primary that takes writes."})
 	if st := in.Settings; st != nil && !st.DatabaseReplicationEnabled {
 		return append(acts, console.Action{ID: "start-replica", Label: "Start replication"})
 	}
@@ -739,8 +791,11 @@ func failoverActions(in *sqladminapi.DatabaseInstance) []console.Action {
 	if in.Settings == nil || in.Settings.AvailabilityType != "REGIONAL" {
 		return nil
 	}
-	return []console.Action{{ID: "failover", Label: "Failover", Destructive: true,
-		Confirm: "The standby becomes the primary, under the same connection name; connections are closed, " +
+	// Google's "Manually trigger a failover", the instance ID typed, ending
+	// in Trigger Failover (https://docs.cloud.google.com/sql/docs/postgres/configure-ha,
+	// read 2026-11-22).
+	return []console.Action{{ID: "failover", Label: "Failover", Destructive: true, ConfirmTitle: "Manually trigger a failover",
+		Submit: "Trigger Failover", Confirm: "The standby becomes the primary, under the same connection name; connections are closed, " +
 			"and the old primary is rebuilt as the new standby."}}
 }
 
@@ -840,7 +895,9 @@ func blueGreenState(ctx context.Context, svc *sqladminapi.Service, project strin
 func blueGreenActions(in *sqladminapi.DatabaseInstance) []console.Action {
 	di := in.DeploymentInfo
 	if di == nil {
-		if !strings.HasPrefix(in.DatabaseVersion, "MYSQL_") || in.MasterInstanceName != "" {
+		// Cloud SQL makes no blue-green deployment of a MySQL 5.6 instance
+		// ("version 5.7, 8.0, or 8.4", #1524).
+		if !strings.HasPrefix(in.DatabaseVersion, "MYSQL_") || in.MasterInstanceName != "" || in.DatabaseVersion == "MYSQL_5_6" {
 			return nil
 		}
 		versions := []string{in.DatabaseVersion}
@@ -986,22 +1043,74 @@ func certActions(fps []string, cas bool) []console.Action {
 			Confirm: "The upcoming server CA becomes the one the server's certificate is signed by; connectors fetch it on their next dial."})
 }
 
-func (p cloudSQLInstancesProvider) backupActions(ids []string) []console.Action {
+// sqlOtherInstances are the project's other instances of in's engine that
+// a backup of in can overwrite: primaries with a server, not the ones `up`
+// runs.
+func sqlOtherInstances(ctx context.Context, svc *sqladminapi.Service, project string, in *sqladminapi.DatabaseInstance) []string {
+	list, err := svc.Instances.List(project).Context(ctx).Do()
+	if err != nil {
+		return nil
+	}
+	engine, _, _ := strings.Cut(in.DatabaseVersion, "_")
+	var out []string
+	for _, o := range list.Items {
+		if o.Name == in.Name || upSQLInstance(o.Name) || o.InstanceType != "CLOUD_SQL_INSTANCE" || !strings.HasPrefix(o.DatabaseVersion, engine+"_") {
+			continue
+		}
+		out = append(out, o.Name)
+	}
+	return out
+}
+
+func (p cloudSQLInstancesProvider) backupActions(ids, others []string) []console.Action {
 	acts := []console.Action{{ID: "create-backup", Label: "Create backup", Submit: "Create",
 		Fields: []console.Field{{Name: "description", Label: "Description", Type: "text"}}},
-		{ID: "clone", Label: "Clone", Fields: []console.Field{{Name: "destination", Label: "New instance ID", Type: "text", Required: true,
-			Pattern: "^[a-z][a-z0-9\\-]{0,53}[a-z0-9]$", Help: "A new instance with this instance's settings and a copy of its databases as they are now."}}}}
+		// Google's Create a clone (https://docs.cloud.google.com/sql/docs/postgres/clone-instance,
+		// read 2026-11-22): Instance ID, then Clone current state of
+		// instance or Clone from an earlier point in time, ending in Create
+		// clone.
+		{ID: "clone", Label: "Clone", Title: "Create a clone", Submit: "Create clone", Fields: []console.Field{
+			{Name: "destination", Label: "Instance ID", Type: "text", Required: true,
+				Pattern: "^[a-z][a-z0-9\\-]{0,53}[a-z0-9]$", Help: "The clone, a new instance with this instance's settings and a copy of its databases."},
+			{Name: "cloneFrom", Label: "Choose the state of the instance to clone", Type: "radio", Default: "current",
+				Options: []string{"current", "earlier"}, OptionLabels: map[string]string{"current": "Clone current state of instance",
+					"earlier": "Clone from an earlier point in time"}},
+			{Name: "pointInTime", Label: "Point in time", Type: console.DateTimeFieldType, VisibleWhen: map[string]string{"cloneFrom": "earlier"},
+				Help: "A time since point-in-time recovery was enabled, within the transaction logs the instance keeps."}}}}
 	if len(ids) > 0 {
 		acts = append(acts,
-			console.Action{ID: "restore-backup", Label: "Restore", Destructive: true,
-				Confirm: "Restoring replaces every database of the instance with the backup's; what was written since is lost.",
-				Fields:  []console.Field{{Name: "backup", Label: "Backup ID", Type: "select", Required: true, Options: ids, Default: ids[0]}}},
+			// Google's Restore an instance from a backup (https://docs.cloud.google.com/sql/docs/postgres/backup-recovery/restoring,
+			// read 2026-11-22): Choose restore destination, ending in
+			// Restore.
+			console.Action{ID: "restore-backup", Label: "Restore", Destructive: true, Title: "Restore an instance from a backup",
+				Submit:  "Restore",
+				Confirm: "Restoring replaces every database of the destination instance with the backup's; what was written there since is lost.",
+				Fields:  restoreFields(ids, others)},
 			// Google's Delete backup window asks for the word Delete.
 			console.Action{ID: "delete-backup", Label: "Delete backup", Destructive: true, Confirm: "The backup's dump is deleted.",
 				ConfirmTitle: "Delete backup", ConfirmStyle: console.DeleteConfirmWordTitle,
 				Fields: []console.Field{{Name: "backup", Label: "Backup ID", Type: "select", Required: true, Options: ids, Default: ids[0]}}})
 	}
 	return acts
+}
+
+// restoreFields are Restore's Choose restore destination: Overwrite the
+// source instance, Restore to a new instance (its Instance ID) or
+// Overwrite an existing instance (Instance to be overwritten).
+func restoreFields(ids, others []string) []console.Field {
+	choices := []string{"source", "new", "existing"}
+	var disabled []string
+	if len(others) == 0 {
+		disabled = []string{"existing"}
+	}
+	return []console.Field{{Name: "backup", Label: "Backup ID", Type: "select", Required: true, Options: ids, Default: ids[0]},
+		{Name: "restoreTo", Label: "Choose restore destination", Type: "radio", Default: "source", Options: choices,
+			OptionLabels: map[string]string{"source": "Overwrite the source instance", "new": "Restore to a new instance",
+				"existing": "Overwrite an existing instance"}, DisabledOptions: disabled},
+		{Name: "newInstance", Label: "Instance ID", Type: "text", VisibleWhen: map[string]string{"restoreTo": "new"},
+			Pattern: "^[a-z][a-z0-9\\-]{0,53}[a-z0-9]$", Help: "A new instance with the source instance's settings, the backup loaded into it."},
+		{Name: "targetInstance", Label: "Instance to be overwritten", Type: "select", Options: others,
+			VisibleWhen: map[string]string{"restoreTo": "existing"}, Help: "Another instance of the same engine in this project."}}
 }
 
 // DetailActions implements console.PathActor.
@@ -1117,16 +1226,60 @@ func (p cloudSQLInstancesProvider) actAt(ctx context.Context, project string, pa
 		_, err = stopStart(svc, project, name, action).Context(ctx).Do()
 	case "restart":
 		_, err = svc.Instances.Restart(project, name).Context(ctx).Do()
+	case "enable-query-insights":
+		var c *sqladminapi.InsightsConfig
+		if c, err = sqlInsightsConfig(v); err != nil {
+			return err
+		}
+		_, err = svc.Instances.Patch(project, name, &sqladminapi.DatabaseInstance{Settings: &sqladminapi.Settings{InsightsConfig: c}}).Context(ctx).Do()
 	case "delete-instance":
+		if v["finalBackup"] == "true" {
+			_, err = dataAPIAct(ctx, svc, project, name, "delete-final-backup", v)
+			return err
+		}
 		_, err = svc.Instances.Delete(project, name).Context(ctx).Do()
+	case "edit-networking":
+		st := &sqladminapi.Settings{}
+		if err = editNetworking(st, v); err != nil {
+			return err
+		}
+		_, err = svc.Instances.Patch(project, name, &sqladminapi.DatabaseInstance{Settings: st}).Context(ctx).Do()
+	case "edit-backups":
+		var bc *sqladminapi.BackupConfiguration
+		if bc, err = backupSettingsOf(v); err != nil {
+			return err
+		}
+		_, err = svc.Instances.Patch(project, name, &sqladminapi.DatabaseInstance{Settings: &sqladminapi.Settings{BackupConfiguration: bc}}).Context(ctx).Do()
 	case "create-backup":
 		_, err = svc.BackupRuns.Insert(project, name, &sqladminapi.BackupRun{Description: strings.TrimSpace(v["description"])}).Context(ctx).Do()
 	case "restore-backup":
-		_, err = svc.Instances.RestoreBackup(project, name, &sqladminapi.InstancesRestoreBackupRequest{
-			RestoreBackupContext: &sqladminapi.RestoreBackupContext{BackupRunId: id, InstanceId: name, Project: project}}).Context(ctx).Do()
+		switch v["restoreTo"] {
+		case "new":
+			target := strings.TrimSpace(v["newInstance"])
+			if target == "" {
+				return fmt.Errorf("give the new instance's ID")
+			}
+			_, err = svc.Instances.RestoreBackup(project, target, &sqladminapi.InstancesRestoreBackupRequest{
+				Backup: "projects/" + project + "/backups/" + strconv.FormatInt(id, 10)}).Context(ctx).Do()
+		case "existing":
+			target := strings.TrimSpace(v["targetInstance"])
+			if target == "" {
+				return fmt.Errorf("choose the instance to be overwritten")
+			}
+			_, err = svc.Instances.RestoreBackup(project, target, &sqladminapi.InstancesRestoreBackupRequest{
+				RestoreBackupContext: &sqladminapi.RestoreBackupContext{BackupRunId: id, InstanceId: name, Project: project}}).Context(ctx).Do()
+		default:
+			_, err = svc.Instances.RestoreBackup(project, name, &sqladminapi.InstancesRestoreBackupRequest{
+				RestoreBackupContext: &sqladminapi.RestoreBackupContext{BackupRunId: id, InstanceId: name, Project: project}}).Context(ctx).Do()
+		}
 	case "clone":
-		_, err = svc.Instances.Clone(project, name, &sqladminapi.InstancesCloneRequest{
-			CloneContext: &sqladminapi.CloneContext{DestinationInstanceName: strings.TrimSpace(v["destination"])}}).Context(ctx).Do()
+		cc := &sqladminapi.CloneContext{DestinationInstanceName: strings.TrimSpace(v["destination"])}
+		if v["cloneFrom"] == "earlier" {
+			if cc.PointInTime = strings.TrimSpace(v["pointInTime"]); cc.PointInTime == "" {
+				return fmt.Errorf("choose the point in time to clone from")
+			}
+		}
+		_, err = svc.Instances.Clone(project, name, &sqladminapi.InstancesCloneRequest{CloneContext: cc}).Context(ctx).Do()
 	case "pitr-restore":
 		_, err = svc.Instances.Clone(project, name, &sqladminapi.InstancesCloneRequest{
 			CloneContext: &sqladminapi.CloneContext{DestinationInstanceName: strings.TrimSpace(v["destination"]),
@@ -1351,4 +1504,111 @@ func sqlBackupLocationField(current string) console.Field {
 	add(current, sqlBackupLocationLabel(current))
 	return console.Field{Name: "backupLocation", Label: "Backup location", Type: "select", Options: opts, OptionLabels: labels,
 		Default: current, Help: "Where automated and on-demand backups are stored. Changing it does not move the backups already taken."}
+}
+
+// backupSettingsAction is the Backups page's Edit, next to Settings
+// (https://docs.cloud.google.com/sql/docs/postgres/backup-recovery/backing-up,
+// read 2026-11-22): a page with Automate backups and its backup window,
+// and under Advanced options where the backups are stored (Multi-region,
+// the default, or Region, then the Location) and the Number of backups,
+// which "can't be less than the default (seven)", ending in Save (#2141).
+func backupSettingsAction(enabled bool, start, retained, location string) console.Action {
+	windows, labels := backupWindows(start)
+	if start == "" {
+		start = windows[0]
+	}
+	if retained == "" {
+		retained = "7"
+	}
+	where, multi, region := "multi", location, "us-central1"
+	if strings.Contains(location, "-") {
+		where, multi, region = "region", "", location
+	}
+	multiOpts := append([]string{""}, sqlBackupMultiRegions...)
+	multiLabels := map[string]string{"": "Multi-region nearest the instance (default)"}
+	var regions []string
+	regionLabels := map[string]string{}
+	for _, r := range bqRegionNames {
+		if strings.Contains(r[0], "-") {
+			regions = append(regions, r[0])
+			regionLabels[r[0]] = r[0] + " (" + r[1] + ")"
+		}
+	}
+	if !pmHas(regions, region) {
+		regions = append(regions, region)
+	}
+	return console.Action{ID: "edit-backups", Label: "Edit", Title: "Manage automated backups", Submit: "Save", Page: true, Fields: []console.Field{
+		{Name: "backupsEnabled", Label: "Automate backups", Type: "checkbox", Section: "Automated backups", Default: strconv.FormatBool(enabled),
+			Help: "Cleared, no automated backup is taken; on-demand backups can still be created."},
+		{Name: "backupStartTime", Label: "Choose a window for automated backups", Type: "select", Section: "Automated backups",
+			Options: windows, OptionLabels: labels, Default: start, VisibleWhen: map[string]string{"backupsEnabled": "true"},
+			Help: "In UTC: the backup can start any time in the 4-hour window."},
+		{Name: "locationType", Label: "Choose where to store your backups", Type: "radio", Section: "Advanced options", Default: where,
+			Options: []string{"multi", "region"}, OptionLabels: map[string]string{"multi": "Multi-region (default)", "region": "Region"},
+			Help: "Existing backups stay where they are."},
+		{Name: "multiRegion", Label: "Location", Type: "select", Section: "Advanced options", Options: multiOpts, OptionLabels: multiLabels,
+			Default: multi, VisibleWhen: map[string]string{"locationType": "multi"}},
+		{Name: "region", Label: "Location", Type: "select", Section: "Advanced options", Options: regions, OptionLabels: regionLabels,
+			Default: region, VisibleWhen: map[string]string{"locationType": "region"}},
+		{Name: "retainedBackups", Label: "Number of backups", Type: "number", Section: "Advanced options", Default: retained,
+			Help: "How many automated backups to store, 7 to 365; older ones are deleted."},
+	}}
+}
+
+// backupWindows are the 4-hour backup windows, each starting on the hour
+// (UTC), with the instance's own start time kept when it is not.
+func backupWindows(current string) ([]string, map[string]string) {
+	var opts []string
+	labels := map[string]string{}
+	for h := 0; h < 24; h++ {
+		o := fmt.Sprintf("%02d:00", h)
+		opts = append(opts, o)
+		labels[o] = fmt.Sprintf("%02d:00 – %02d:00", h, (h+4)%24)
+	}
+	if current != "" && labels[current] == "" {
+		opts = append(opts, current)
+		h, m := 0, 0
+		fmt.Sscanf(current, "%d:%d", &h, &m)
+		labels[current] = fmt.Sprintf("%s – %02d:%02d", current, (h+4)%24, m)
+	}
+	return opts, labels
+}
+
+// backupSettingsOf is the backup configuration the page saves.
+func backupSettingsOf(v map[string]string) (*sqladminapi.BackupConfiguration, error) {
+	bc := &sqladminapi.BackupConfiguration{Enabled: v["backupsEnabled"] == "true", ForceSendFields: []string{"Enabled"}}
+	if bc.Enabled {
+		bc.StartTime = strings.TrimSpace(v["backupStartTime"])
+	}
+	switch v["locationType"] {
+	case "region":
+		if bc.Location = strings.TrimSpace(v["region"]); bc.Location == "" {
+			return nil, fmt.Errorf("choose the region the backups are stored in")
+		}
+	default:
+		bc.Location = strings.TrimSpace(v["multiRegion"])
+		bc.ForceSendFields = append(bc.ForceSendFields, "Location")
+	}
+	if r := strings.TrimSpace(v["retainedBackups"]); r != "" {
+		n, err := strconv.ParseInt(r, 10, 64)
+		if err != nil || n < 7 || n > 365 {
+			return nil, fmt.Errorf("Number of backups must be from 7 to 365")
+		}
+	}
+	if err := retentionConfig(bc, v["retainedBackups"], ""); err != nil {
+		return nil, err
+	}
+	return bc, nil
+}
+
+// sqlPreferredZone is settings.locationPreference's zone, or its
+// secondaryZone.
+func sqlPreferredZone(st *sqladminapi.Settings, secondary bool) string {
+	if st == nil || st.LocationPreference == nil {
+		return ""
+	}
+	if secondary {
+		return st.LocationPreference.SecondaryZone
+	}
+	return st.LocationPreference.Zone
 }

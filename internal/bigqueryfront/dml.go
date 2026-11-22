@@ -604,6 +604,9 @@ func (f front) serveDML(w http.ResponseWriter, r *http.Request, q queryOptions, 
 			counts.deleted = before - n[0]
 		}
 	}
+	if counts.affected() > 0 {
+		f.noteWrite(ds, table) // lastModifiedTime (tablemodified.go, #2105)
+	}
 	client.dml = &counts
 	f.answer(w, rec, client)
 }

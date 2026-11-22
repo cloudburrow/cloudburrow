@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
@@ -9,7 +10,11 @@ import (
 	"time"
 
 	"cloud.google.com/go/container/apiv1/containerpb"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
+	"gopkg.in/yaml.v3"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
 )
@@ -96,10 +101,10 @@ func (p gkeClustersProvider) poolActions(c *containerpb.Cluster, np *containerpb
 		{ID: "resize", Label: "Resize", Submit: "Resize", Fields: []console.Field{
 			{Name: "nodes", Label: "Number of nodes (per zone)", Type: "text", Default: strconv.Itoa(int(np.GetInitialNodeCount())), Pattern: `^[0-9]+$`},
 		}},
-		{ID: "edit", Label: "Edit", Submit: "Save", Fields: []console.Field{
+		{ID: "edit", Label: "Edit", Submit: "Save", Fields: append([]console.Field{
 			{Name: "image", Label: "Image type", Type: "select", Options: gkeImageTypes, Default: image},
 			{Name: "labels", Label: "Labels", Type: "textarea", Default: strings.TrimSpace(labels), Help: "The nodes' resource labels, one key=value per line."},
-		}},
+		}, append(gkePoolNodeFields(np), gkeUpgradeStrategyFields(np)...)...)},
 		gkePoolAutoscalingAction(np),
 		gkePoolManagementAction(np),
 		gkePoolUpgrade(c, np, versions),
@@ -107,6 +112,313 @@ func (p gkeClustersProvider) poolActions(c *containerpb.Cluster, np *containerpb
 		gkePoolRollback(np),
 		{ID: "delete", Label: "Delete", Destructive: true, Confirm: np.GetName()},
 	}
+}
+
+// The Edit node pool page's machine type, boot disk size, Node zones,
+// Kubernetes labels and Node taints (#2100), as Google's console has them:
+// a machine or disk change recreates the nodes, changing the zones adds
+// and removes nodes, and the labels and taints are set on every node.
+const gkeNodesSection = "Nodes"
+
+// gkeDiskTypes are the node boot disk types the API takes.
+var gkeDiskTypes = []string{"pd-balanced", "pd-standard", "pd-ssd", "pd-extreme", "hyperdisk-balanced"}
+
+// gkeTaintEffects are a taint's effects as the API and gcloud write them.
+var gkeTaintEffects = map[string]containerpb.NodeTaint_Effect{
+	"NO_SCHEDULE": containerpb.NodeTaint_NO_SCHEDULE, "PREFER_NO_SCHEDULE": containerpb.NodeTaint_PREFER_NO_SCHEDULE,
+	"NO_EXECUTE": containerpb.NodeTaint_NO_EXECUTE,
+}
+
+func gkeTaintsText(ts []*containerpb.NodeTaint) string {
+	var lines []string
+	for _, t := range ts {
+		kv := t.GetKey()
+		if t.GetValue() != "" {
+			kv += "=" + t.GetValue()
+		}
+		lines = append(lines, kv+":"+t.GetEffect().String())
+	}
+	return strings.Join(lines, "\n")
+}
+
+func gkePoolNodeFields(np *containerpb.NodePool) []console.Field {
+	return []console.Field{
+		{Name: "machineType", Label: "Machine type", Type: "text", Default: np.GetConfig().GetMachineType(), Pattern: `^[a-z][a-z0-9]*-[a-z0-9]+(-[a-z0-9]+)*$`,
+			Section: gkeNodesSection, Help: "Changing it recreates the nodes with the pool's upgrade strategy; a local node has this machine's resources."},
+		{Name: "diskType", Label: "Boot disk type", Type: "select", Options: gkeDiskTypes, Default: unsetAs(np.GetConfig().GetDiskType(), "pd-balanced"),
+			Section: gkeNodesSection, Help: "Changing it recreates the nodes with the pool's upgrade strategy."},
+		{Name: "diskSize", Label: "Boot disk size (GB)", Type: "text", Default: strconv.Itoa(int(np.GetConfig().GetDiskSizeGb())), Pattern: `^[0-9]+$`,
+			Section: gkeNodesSection, Help: "At least 10. Changing it recreates the nodes with the pool's upgrade strategy."},
+		{Name: "zones", Label: "Node zones", Type: "text", Default: strings.Join(np.GetLocations(), ","), Section: gkeNodesSection,
+			Help: "The zones this node pool's nodes run in, comma-separated, in the cluster's region: each zone gets the pool's number of nodes."},
+		{Name: "kubeLabels", Label: "Kubernetes labels", Type: "textarea", Default: gkeLabelsText(np.GetConfig().GetLabels()), Section: gkeNodesSection,
+			Help: "Labels set on every node, one key=value per line."},
+		{Name: "taints", Label: "Node taints", Type: "textarea", Default: gkeTaintsText(np.GetConfig().GetTaints()), Section: gkeNodesSection,
+			Help: "One per line: key=value:EFFECT, the effect NO_SCHEDULE, PREFER_NO_SCHEDULE or NO_EXECUTE."},
+		{Name: "kubeletConfig", Label: "Kubelet configuration", Type: "textarea", Default: gkeKubeletText(np.GetConfig().GetKubeletConfig()), Section: gkeNodesSection,
+			Help: "YAML of the kubeletConfig fields (cpuManagerPolicy, podPidsLimit, containerLogMaxSize, evictionSoft, ...), as in a node system configuration file. Changing it recreates the nodes with the pool's upgrade strategy."},
+	}
+}
+
+// gkeKubeletText is a kubelet config as YAML, its API field names.
+func gkeKubeletText(kc *containerpb.NodeKubeletConfig) string {
+	if kc == nil {
+		return ""
+	}
+	j, err := protojson.Marshal(kc)
+	if err != nil {
+		return ""
+	}
+	var m map[string]any
+	if json.Unmarshal(j, &m) != nil || len(m) == 0 {
+		return ""
+	}
+	y, err := yaml.Marshal(m)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(y))
+}
+
+// gkeParseKubelet reads gkeKubeletText's YAML (a kubeletConfig: wrapper,
+// as a node system configuration file has, allowed).
+func gkeParseKubelet(text string) (*containerpb.NodeKubeletConfig, error) {
+	var m map[string]any
+	if err := yaml.Unmarshal([]byte(text), &m); err != nil {
+		return nil, fmt.Errorf("kubelet configuration: %v", err)
+	}
+	if inner, ok := m["kubeletConfig"].(map[string]any); ok && len(m) == 1 {
+		m = inner
+	}
+	j, err := json.Marshal(m)
+	if err != nil {
+		return nil, fmt.Errorf("kubelet configuration: %v", err)
+	}
+	kc := &containerpb.NodeKubeletConfig{}
+	if err := protojson.Unmarshal(j, kc); err != nil {
+		return nil, fmt.Errorf("kubelet configuration: %v", err)
+	}
+	return kc, nil
+}
+
+// gkeLabelsText is labels as key=value lines, sorted.
+func gkeLabelsText(m map[string]string) string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var lines []string
+	for _, k := range keys {
+		lines = append(lines, k+"="+m[k])
+	}
+	return strings.Join(lines, "\n")
+}
+
+// gkeParsePoolNodeFields adds to req what the Nodes section changed.
+func gkeParsePoolNodeFields(np *containerpb.NodePool, v map[string]string, req *containerpb.UpdateNodePoolRequest) error {
+	if m := strings.TrimSpace(v["machineType"]); m != "" && m != np.GetConfig().GetMachineType() {
+		req.MachineType = m
+	}
+	if d := strings.TrimSpace(v["diskType"]); d != "" && d != unsetAs(np.GetConfig().GetDiskType(), "pd-balanced") {
+		req.DiskType = d
+	}
+	if d := strings.TrimSpace(v["diskSize"]); d != "" {
+		n, err := strconv.Atoi(d)
+		if err != nil {
+			return fmt.Errorf("boot disk size %q is not a number", d)
+		}
+		if int32(n) != np.GetConfig().GetDiskSizeGb() {
+			req.DiskSizeGb = int64(n)
+		}
+	}
+	if z, ok := v["zones"]; ok {
+		var zones []string
+		for _, f := range strings.Split(z, ",") {
+			if f = strings.TrimSpace(f); f != "" {
+				zones = append(zones, f)
+			}
+		}
+		sort.Strings(zones)
+		if len(zones) == 0 {
+			return fmt.Errorf("a node pool needs at least one zone")
+		}
+		if strings.Join(zones, ",") != strings.Join(np.GetLocations(), ",") {
+			req.Locations = zones
+		}
+	}
+	if text, ok := v["kubeletConfig"]; ok {
+		if strings.TrimSpace(text) == "" {
+			if np.GetConfig().GetKubeletConfig() != nil {
+				req.KubeletConfig = &containerpb.NodeKubeletConfig{}
+			}
+		} else {
+			kc, err := gkeParseKubelet(text)
+			if err != nil {
+				return err
+			}
+			if !proto.Equal(kc, np.GetConfig().GetKubeletConfig()) {
+				req.KubeletConfig = kc
+			}
+		}
+	}
+	if l, ok := v["kubeLabels"]; ok {
+		labels, err := gkeParseLabels(l)
+		if err != nil {
+			return err
+		}
+		if gkeLabelsText(labels) != gkeLabelsText(np.GetConfig().GetLabels()) {
+			req.Labels = &containerpb.NodeLabels{Labels: labels}
+		}
+	}
+	if text, ok := v["taints"]; ok {
+		var ts []*containerpb.NodeTaint
+		for _, line := range strings.Split(text, "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			i := strings.LastIndex(line, ":")
+			if i < 0 {
+				return fmt.Errorf("taint %q is not key=value:EFFECT", line)
+			}
+			effect, ok := gkeTaintEffects[strings.ToUpper(strings.TrimSpace(line[i+1:]))]
+			if !ok {
+				return fmt.Errorf("taint %q's effect is not NO_SCHEDULE, PREFER_NO_SCHEDULE or NO_EXECUTE", line)
+			}
+			k, val, _ := strings.Cut(line[:i], "=")
+			ts = append(ts, &containerpb.NodeTaint{Key: strings.TrimSpace(k), Value: strings.TrimSpace(val), Effect: effect})
+		}
+		if gkeTaintsText(ts) != gkeTaintsText(np.GetConfig().GetTaints()) {
+			req.Taints = &containerpb.NodeTaints{Taints: ts}
+		}
+	}
+	return nil
+}
+
+// The Edit node pool page's Upgrade strategy, as Google's console has it
+// (re-read 2026-11-22: how-to/node-pool-upgrade-strategies): Surge
+// upgrade with Max surge and Max unavailable, or Blue-green upgrade with
+// its batch size, batch soak duration and node pool soak duration.
+const (
+	gkeSurgeStrategy     = "Surge upgrade"
+	gkeBlueGreenStrategy = "Blue-green upgrade"
+	gkeUpgradeSection    = "Upgrade strategy"
+)
+
+// gkeUpgradeStrategyFields are the Upgrade strategy section of a pool's
+// Edit, filled from its upgrade settings.
+func gkeUpgradeStrategyFields(np *containerpb.NodePool) []console.Field {
+	us := np.GetUpgradeSettings()
+	strategy := gkeSurgeStrategy
+	if us.GetStrategy() == containerpb.NodePoolUpdateStrategy_BLUE_GREEN {
+		strategy = gkeBlueGreenStrategy
+	}
+	surge, unavailable := "1", "0"
+	if us != nil {
+		surge, unavailable = strconv.Itoa(int(us.GetMaxSurge())), strconv.Itoa(int(us.GetMaxUnavailable()))
+	}
+	bg := us.GetBlueGreenSettings()
+	rp := bg.GetStandardRolloutPolicy()
+	batch := "1"
+	if n := rp.GetBatchNodeCount(); n > 0 {
+		batch = strconv.Itoa(int(n))
+	} else if f := rp.GetBatchPercentage(); f > 0 {
+		batch = strconv.Itoa(int(f*100+0.5)) + "%"
+	}
+	batchSoak := "0"
+	if rp.GetBatchSoakDuration() != nil {
+		batchSoak = strconv.FormatInt(rp.GetBatchSoakDuration().GetSeconds(), 10)
+	}
+	poolSoak := "3600"
+	if bg.GetNodePoolSoakDuration() != nil {
+		poolSoak = strconv.FormatInt(bg.GetNodePoolSoakDuration().GetSeconds(), 10)
+	}
+	return []console.Field{
+		{Name: "strategy", Label: "Upgrade strategy", Type: "radio", Options: []string{gkeSurgeStrategy, gkeBlueGreenStrategy}, Default: strategy,
+			Section: gkeUpgradeSection},
+		{Name: "maxSurge", ShowWhen: "strategy=" + gkeSurgeStrategy, Label: "Max surge", Type: "text", Default: surge, Pattern: `^[0-9]+$`, Section: gkeUpgradeSection,
+			Help: "Surge upgrade: how many nodes can be added above the pool's size while it upgrades."},
+		{Name: "maxUnavailable", ShowWhen: "strategy=" + gkeSurgeStrategy, Label: "Max unavailable", Type: "text", Default: unavailable, Pattern: `^[0-9]+$`, Section: gkeUpgradeSection,
+			Help: "Surge upgrade: how many nodes can be unavailable at once while it upgrades."},
+		{Name: "batchSize", ShowWhen: "strategy=" + gkeBlueGreenStrategy, Label: "Batch size", Type: "text", Default: batch, Pattern: `^[0-9]+%?$`, Section: gkeUpgradeSection,
+			Help: "Blue-green upgrade: the blue nodes drained in each batch, a number of nodes or a percentage of the pool."},
+		{Name: "batchSoak", ShowWhen: "strategy=" + gkeBlueGreenStrategy, Label: "Batch soak duration (seconds)", Type: "text", Default: batchSoak, Pattern: `^[0-9]+$`, Section: gkeUpgradeSection,
+			Help: "Blue-green upgrade: the wait after each batch is drained."},
+		{Name: "poolSoak", ShowWhen: "strategy=" + gkeBlueGreenStrategy, Label: "Node pool soak duration (seconds)", Type: "text", Default: poolSoak, Pattern: `^[0-9]+$`, Section: gkeUpgradeSection,
+			Help: "Blue-green upgrade: the wait after the last batch, before the blue nodes are deleted. Complete upgrade ends it early."},
+	}
+}
+
+// gkeParseUpgradeStrategy reads the Upgrade strategy section; nil when the
+// dialog has none (an older form) or nothing changed.
+func gkeParseUpgradeStrategy(np *containerpb.NodePool, v map[string]string) (*containerpb.NodePool_UpgradeSettings, error) {
+	st, ok := v["strategy"]
+	if !ok {
+		return nil, nil
+	}
+	num := func(field, label string) (int64, error) {
+		t := strings.TrimSpace(v[field])
+		if t == "" {
+			return 0, nil
+		}
+		n, err := strconv.ParseInt(t, 10, 32)
+		if err != nil || n < 0 {
+			return 0, fmt.Errorf("%s %q is not a number of 0 or more", label, t)
+		}
+		return n, nil
+	}
+	switch st {
+	case gkeSurgeStrategy:
+		surge, err := num("maxSurge", "Max surge")
+		if err != nil {
+			return nil, err
+		}
+		unavailable, err := num("maxUnavailable", "Max unavailable")
+		if err != nil {
+			return nil, err
+		}
+		s := containerpb.NodePoolUpdateStrategy_SURGE
+		return &containerpb.NodePool_UpgradeSettings{Strategy: &s, MaxSurge: int32(surge), MaxUnavailable: int32(unavailable)}, nil
+	case gkeBlueGreenStrategy:
+		rp := &containerpb.BlueGreenSettings_StandardRolloutPolicy{}
+		b := strings.TrimSpace(v["batchSize"])
+		if pct, ok := strings.CutSuffix(b, "%"); ok {
+			n, err := strconv.Atoi(pct)
+			if err != nil || n <= 0 || n > 100 {
+				return nil, fmt.Errorf("batch size %q is not a percentage from 1%% to 100%%", b)
+			}
+			rp.UpdateBatchSize = &containerpb.BlueGreenSettings_StandardRolloutPolicy_BatchPercentage{BatchPercentage: float32(n) / 100}
+		} else {
+			n, err := num("batchSize", "Batch size")
+			if err != nil {
+				return nil, err
+			}
+			if n == 0 {
+				n = 1
+			}
+			rp.UpdateBatchSize = &containerpb.BlueGreenSettings_StandardRolloutPolicy_BatchNodeCount{BatchNodeCount: int32(n)}
+		}
+		batchSoak, err := num("batchSoak", "Batch soak duration")
+		if err != nil {
+			return nil, err
+		}
+		poolSoak, err := num("poolSoak", "Node pool soak duration")
+		if err != nil {
+			return nil, err
+		}
+		rp.BatchSoakDuration = durationpb.New(time.Duration(batchSoak) * time.Second)
+		s := containerpb.NodePoolUpdateStrategy_BLUE_GREEN
+		us := &containerpb.NodePool_UpgradeSettings{Strategy: &s, MaxSurge: np.GetUpgradeSettings().GetMaxSurge(),
+			MaxUnavailable: np.GetUpgradeSettings().GetMaxUnavailable(), BlueGreenSettings: &containerpb.BlueGreenSettings{
+				RolloutPolicy:        &containerpb.BlueGreenSettings_StandardRolloutPolicy_{StandardRolloutPolicy: rp},
+				NodePoolSoakDuration: durationpb.New(time.Duration(poolSoak) * time.Second)}}
+		if us.MaxSurge == 0 && us.MaxUnavailable == 0 {
+			us.MaxSurge = 1
+		}
+		return us, nil
+	}
+	return nil, fmt.Errorf("upgrade strategy %q is neither %s nor %s", st, gkeSurgeStrategy, gkeBlueGreenStrategy)
 }
 
 // gkePoolCompleteUpgrade ends a blue-green upgrade's soak, as `gcloud
@@ -248,8 +560,16 @@ func (p gkeClustersProvider) poolAct(ctx context.Context, cluster string, c *con
 		if image == "" {
 			image = np.GetConfig().GetImageType()
 		}
-		_, err = api.UpdateNodePool(ctx, &containerpb.UpdateNodePoolRequest{Name: name, NodeVersion: np.GetVersion(), ImageType: image,
-			ResourceLabels: &containerpb.ResourceLabels{Labels: labels}})
+		us, err := gkeParseUpgradeStrategy(np, v)
+		if err != nil {
+			return err
+		}
+		req := &containerpb.UpdateNodePoolRequest{Name: name, NodeVersion: np.GetVersion(), ImageType: image,
+			ResourceLabels: &containerpb.ResourceLabels{Labels: labels}, UpgradeSettings: us}
+		if err := gkeParsePoolNodeFields(np, v, req); err != nil {
+			return err
+		}
+		_, err = api.UpdateNodePool(ctx, req)
 		return gkeStatusErr(err)
 	}
 	return fmt.Errorf("unknown node pool action %s", action)

@@ -112,12 +112,13 @@ func holdsOwn(ref bucketRef, e *loggingpb.LogEntry, hidden bool) bool {
 	return false
 }
 
-// requiredSink is p's _Required sink.
-func requiredSink(p parent) *loggingpb.LogSink {
+// requiredSink is p's _Required sink, to its _Required bucket wherever
+// p's default resource settings made it (defaults.go).
+func (a *Admin) requiredSink(p parent) *loggingpb.LogSink {
 	epoch := timestamppb.New(time.Unix(0, 0))
 	return &loggingpb.LogSink{
 		Name:        sinkRequired,
-		Destination: "logging.googleapis.com/" + (bucketRef{p, "global", bucketRequired}).name(),
+		Destination: "logging.googleapis.com/" + (bucketRef{p, a.builtinLoc(p), bucketRequired}).name(),
 		Filter:      RequiredSinkFilter,
 		CreateTime:  epoch,
 		UpdateTime:  epoch,

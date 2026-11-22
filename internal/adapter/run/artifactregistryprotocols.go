@@ -3,6 +3,7 @@ package run
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"crypto/md5"
 	"crypto/sha1"
 	"crypto/sha256"
@@ -21,6 +22,7 @@ import (
 	"net/url"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -29,6 +31,7 @@ import (
 	arpb "cloud.google.com/go/artifactregistry/apiv1/artifactregistrypb"
 	"github.com/cloudburrow/cloudburrow/internal/registry"
 	"github.com/google/uuid"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
@@ -191,7 +194,9 @@ func servePython(w http.ResponseWriter, r *http.Request, p *pkgRequest) {
 		names := map[string]bool{}
 		for _, repo := range p.readRepos() {
 			for _, f := range repoFilesOf(repo) {
-				names[f.Package] = true
+				if f.Package != "" { // a file UploadFile stored belongs to no package
+					names[f.Package] = true
+				}
 			}
 		}
 		sorted := make([]string, 0, len(names))
@@ -659,7 +664,8 @@ func mavenBytes(p *pkgRequest, path string) ([]byte, bool) {
 // Generic upload, and every format's download.
 
 var (
-	genericUploadRE = regexp.MustCompile(`^/upload/v1/(projects/[^/]+/locations/[^/]+/repositories/[^/]+)/genericArtifacts:create$`)
+	genericUploadRE = regexp.MustCompile(`^(?:/resumable)?/upload/v1/(projects/[^/]+/locations/[^/]+/repositories/[^/]+)/genericArtifacts:create$`)
+	fileUploadRE    = regexp.MustCompile(`^(?:/resumable)?/upload/v1/(projects/[^/]+/locations/[^/]+/repositories/[^/]+)/files:upload$`)
 	downloadRE      = regexp.MustCompile(`^(?:/download)?/v1/(projects/[^/]+/locations/[^/]+/repositories/[^/]+/files/[^/]+):download$`)
 	genericIDRE     = regexp.MustCompile(`^[a-z0-9]([a-z0-9._-]{0,126}[a-z0-9])?$`)
 )
@@ -676,6 +682,10 @@ func serveMediaAPI(w http.ResponseWriter, r *http.Request) bool {
 		genericUpload(w, r, m[1])
 		return true
 	}
+	if m := fileUploadRE.FindStringSubmatch(r.URL.Path); m != nil && (r.Method == http.MethodPost || r.Method == http.MethodPut) {
+		fileUpload(w, r, m[1])
+		return true
+	}
 	if m := downloadRE.FindStringSubmatch(r.URL.EscapedPath()); m != nil && r.Method == http.MethodGet {
 		downloadFile(w, r, m[1])
 		return true
@@ -683,16 +693,17 @@ func serveMediaAPI(w http.ResponseWriter, r *http.Request) bool {
 	return false
 }
 
-// uploadSessions are generic uploads begun with uploadType=resumable,
-// by upload ID, until their content arrives.
+// uploadSessions are media uploads begun with uploadType=resumable, by
+// upload ID, until their content arrives.
 var uploadSessions = struct {
 	sync.Mutex
 	m map[string]*uploadSession
 }{m: map[string]*uploadSession{}}
 
 type uploadSession struct {
-	meta genericMeta
-	buf  bytes.Buffer
+	meta   []byte
+	buf    bytes.Buffer
+	finish func(w http.ResponseWriter, meta, content []byte)
 }
 
 type genericMeta struct {
@@ -701,10 +712,7 @@ type genericMeta struct {
 	Filename  string `json:"filename"`
 }
 
-// genericUpload is UploadGenericArtifact's media upload, as
-// uploadType=multipart (the JSON metadata, then the file) or
-// uploadType=resumable (the metadata, then the file PUT to the session
-// URL the first response's Location names), which gcloud's uploads use.
+// genericUpload is UploadGenericArtifact's media upload.
 func genericUpload(w http.ResponseWriter, r *http.Request, repoName string) {
 	repo, ok := repoFormat(repoName)
 	if !ok {
@@ -715,6 +723,23 @@ func genericUpload(w http.ResponseWriter, r *http.Request, repoName string) {
 		apiError(w, http.StatusBadRequest, "FAILED_PRECONDITION", repoName+" is not a GENERIC repository")
 		return
 	}
+	mediaUpload(w, r, "packageId, versionId and filename", func(w http.ResponseWriter, raw, b []byte) {
+		var meta genericMeta
+		if err := json.Unmarshal(raw, &meta); err != nil {
+			apiError(w, http.StatusBadRequest, "INVALID_ARGUMENT", "the metadata must be JSON: packageId, versionId and filename")
+			return
+		}
+		finishGenericUpload(w, repoName, meta, b)
+	})
+}
+
+// mediaUpload reads a Google API media upload, as gcloud's apitools sends
+// it: uploadType=multipart (the JSON metadata, then the content), or
+// uploadType=resumable (the metadata, then the content PUT, whole or in
+// chunks, to the session URL the first response's Location names), and
+// calls finish with the metadata and the content once it has both. what
+// names the metadata's fields, for the refusal of a body that is none.
+func mediaUpload(w http.ResponseWriter, r *http.Request, what string, finish func(w http.ResponseWriter, meta, content []byte)) {
 	q := r.URL.Query()
 	if id := q.Get("upload_id"); id != "" {
 		uploadSessions.Lock()
@@ -740,19 +765,19 @@ func genericUpload(w http.ResponseWriter, r *http.Request, repoName string) {
 		uploadSessions.Lock()
 		delete(uploadSessions.m, id)
 		uploadSessions.Unlock()
-		finishGenericUpload(w, repoName, sess.meta, sess.buf.Bytes())
+		sess.finish(w, sess.meta, sess.buf.Bytes())
 		return
 	}
 	switch q.Get("uploadType") {
 	case "resumable":
-		var meta genericMeta
-		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&meta); err != nil {
-			apiError(w, http.StatusBadRequest, "INVALID_ARGUMENT", "the body must be the JSON metadata: packageId, versionId and filename")
+		raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+		if err != nil || !json.Valid(bytes.TrimSpace(orEmptyJSON(raw))) {
+			apiError(w, http.StatusBadRequest, "INVALID_ARGUMENT", "the body must be the JSON metadata: "+what)
 			return
 		}
 		id := uuid.NewString()
 		uploadSessions.Lock()
-		uploadSessions.m[id] = &uploadSession{meta: meta}
+		uploadSessions.m[id] = &uploadSession{meta: orEmptyJSON(raw), finish: finish}
 		uploadSessions.Unlock()
 		u := *r.URL
 		q.Set("upload_id", id)
@@ -767,9 +792,13 @@ func genericUpload(w http.ResponseWriter, r *http.Request, repoName string) {
 		return
 	}
 	mr := multipart.NewReader(r.Body, boundary)
-	var meta genericMeta
 	part, err := mr.NextPart()
-	if err != nil || json.NewDecoder(part).Decode(&meta) != nil {
+	if err != nil {
+		apiError(w, http.StatusBadRequest, "INVALID_ARGUMENT", "the first part must be the JSON metadata")
+		return
+	}
+	raw, err := io.ReadAll(io.LimitReader(part, 1<<20))
+	if err != nil || !json.Valid(orEmptyJSON(raw)) {
 		apiError(w, http.StatusBadRequest, "INVALID_ARGUMENT", "the first part must be the JSON metadata")
 		return
 	}
@@ -783,7 +812,95 @@ func genericUpload(w http.ResponseWriter, r *http.Request, repoName string) {
 		apiError(w, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error())
 		return
 	}
-	finishGenericUpload(w, repoName, meta, b)
+	finish(w, orEmptyJSON(raw), b)
+}
+
+// orEmptyJSON is b, or {} when b is blank: a request with no metadata.
+func orEmptyJSON(b []byte) []byte {
+	if len(bytes.TrimSpace(b)) == 0 {
+		return []byte("{}")
+	}
+	return b
+}
+
+// fileUpload is UploadFile's media upload, POST
+// /upload/v1/{parent}/files:upload, which `gcloud artifacts attachments
+// create` sends each of its --files with before CreateAttachment names
+// them (https://docs.cloud.google.com/artifact-registry/docs/reference/rest/v1/projects.locations.repositories.files/upload,
+// read 2026-11-22): its one field, fileId, is "The ID of the file. If
+// left empty will default to sha256 digest of the content uploaded", and
+// the response's operation completes once the file is stored, its
+// response the File. A DOCKER repository's files are its blobs, named by
+// their digest, so a fileId there must be the digest.
+func fileUpload(w http.ResponseWriter, r *http.Request, repoName string) {
+	repo, ok := repoFormat(repoName)
+	if !ok {
+		apiError(w, http.StatusNotFound, "NOT_FOUND", "Requested entity was not found.")
+		return
+	}
+	mediaUpload(w, r, "fileId", func(w http.ResponseWriter, raw, b []byte) { finishFileUpload(w, repo, raw, b) })
+}
+
+var fileIDRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:~+=@-]{0,255}$`)
+
+func finishFileUpload(w http.ResponseWriter, repo *arpb.Repository, raw, b []byte) {
+	var meta struct {
+		FileID string `json:"fileId"`
+	}
+	if err := json.Unmarshal(raw, &meta); err != nil {
+		apiError(w, http.StatusBadRequest, "INVALID_ARGUMENT", "the metadata must be JSON: fileId")
+		return
+	}
+	repoName, digest := repo.GetName(), registry.Digest(b)
+	id := strings.TrimSpace(meta.FileID)
+	switch {
+	case repo.GetFormat() == arpb.Repository_DOCKER && id != "" && id != digest:
+		apiError(w, http.StatusBadRequest, "INVALID_ARGUMENT", "invalid fileId "+strconv.Quote(id)+": a DOCKER repository's files are named by their digest, "+digest)
+		return
+	case id == "":
+		id = digest
+	case !fileIDRE.MatchString(id):
+		apiError(w, http.StatusBadRequest, "INVALID_ARGUMENT", "invalid fileId "+strconv.Quote(id))
+		return
+	}
+	if _, exists := fileByID(repoName, id); exists {
+		apiError(w, http.StatusConflict, "ALREADY_EXISTS", "the file "+id+" already exists in "+repoName)
+		return
+	}
+	if _, err := addFile(repoName, id, "", "", b, nil); err != nil {
+		apiError(w, http.StatusInternalServerError, "INTERNAL", err.Error())
+		return
+	}
+	name := fmtFileName(repoName, id)
+	if repo.GetFormat() == arpb.Repository_DOCKER {
+		name = repoName + "/files/" + digest
+	}
+	a := arServer.Load()
+	if a == nil || a.s == nil {
+		apiError(w, http.StatusServiceUnavailable, "UNAVAILABLE", "the Artifact Registry API is not served")
+		return
+	}
+	f, err := a.GetFile(context.Background(), &arpb.GetFileRequest{Name: name})
+	if err != nil {
+		apiError(w, http.StatusInternalServerError, "INTERNAL", err.Error())
+		return
+	}
+	loc := repoName[:strings.Index(repoName, "/repositories/")]
+	op := a.s.ops.Create(loc, name)
+	_ = a.s.ops.SetMetadata(op.Name, &arpb.OperationMetadata{})
+	_ = a.s.ops.Succeed(op.Name, f)
+	pop, err := a.s.toProtoOperation(op.Name)
+	if err != nil {
+		apiError(w, http.StatusInternalServerError, "INTERNAL", err.Error())
+		return
+	}
+	ob, err := protojson.Marshal(pop)
+	if err != nil {
+		apiError(w, http.StatusInternalServerError, "INTERNAL", err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	fmt.Fprintf(w, `{"operation":%s}`, ob)
 }
 
 func finishGenericUpload(w http.ResponseWriter, repoName string, meta genericMeta, b []byte) {

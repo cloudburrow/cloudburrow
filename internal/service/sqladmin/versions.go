@@ -29,7 +29,30 @@ var versionNames = map[string]string{
 	"POSTGRES_9_6": "PostgreSQL 9.6", "POSTGRES_10": "PostgreSQL 10", "POSTGRES_11": "PostgreSQL 11",
 	"POSTGRES_12": "PostgreSQL 12", "POSTGRES_13": "PostgreSQL 13", "POSTGRES_14": "PostgreSQL 14", "POSTGRES_15": "PostgreSQL 15",
 	"POSTGRES_16": "PostgreSQL 16", "POSTGRES_17": "PostgreSQL 17", "POSTGRES_18": "PostgreSQL 18",
-	"MYSQL_8_0": "MySQL 8.0", "MYSQL_8_4": "MySQL 8.4",
+	"MYSQL_5_6": "MySQL 5.6", "MYSQL_5_7": "MySQL 5.7", "MYSQL_8_0": "MySQL 8.0", "MYSQL_8_4": "MySQL 8.4",
+}
+
+// mysqlUpgradeOrder is MySQL's major versions in the order of their
+// upgrades (#1524), MYSQL_5_6 and MYSQL_5_7 included where the node runs
+// their images (legacymysql.go). Cloud SQL upgrades MySQL one major
+// version at a time: "You can upgrade only from one major version to the
+// next. MySQL doesn't support skipping major versions. You can't upgrade
+// directly from MySQL 5.6 to MySQL 8.0 or from MySQL 5.7 to MySQL 8.4."
+// (upgrade-major-db-version-inplace, re-read 2026-11-21).
+var mysqlUpgradeOrder = []string{"MYSQL_5_6", "MYSQL_5_7", "MYSQL_8_0", "MYSQL_8_4"}
+
+// upgradeRank is version's place in its engine's upgrade order, -1 for
+// none: versionIndex, with MySQL's versions before 8.0.
+func upgradeRank(version string) int {
+	if engineOf(version) == "MYSQL" {
+		for i, v := range mysqlUpgradeOrder {
+			if v == version {
+				return i
+			}
+		}
+		return -1
+	}
+	return versionIndex(version)
 }
 
 // SupportedVersions are the databaseVersion values a created instance can
@@ -91,14 +114,19 @@ func pgBefore12(version string) bool {
 }
 
 // upgradable is the upgradableDatabaseVersions of an instance of version:
-// every newer served version of its engine.
+// every newer served version of its engine, and for MySQL, which is
+// upgraded one major version at a time, the next one (#1524).
 func upgradable(version string) []any {
-	i := versionIndex(version)
+	i := upgradeRank(version)
 	if i < 0 {
 		return nil
 	}
+	next := engineVersions[engineOf(version)][versionIndex(version)+1:]
+	if engineOf(version) == "MYSQL" {
+		next = mysqlUpgradeOrder[i+1 : min(i+2, len(mysqlUpgradeOrder))]
+	}
 	var out []any
-	for _, v := range engineVersions[engineOf(version)][i+1:] {
+	for _, v := range next {
 		out = append(out, map[string]any{"majorVersion": v, "name": v, "displayName": versionNames[v]})
 	}
 	return out
@@ -118,20 +146,29 @@ type Upgrader interface {
 // with no read replicas that is not one.
 func (s *Server) checkUpgrade(c *created, version string, includeReplicas bool) error {
 	cur := c.spec.DatabaseVersion
-	if err := limitedUnimplemented(cur, "a major version upgrade"); err != nil {
-		return err
+	if IsSQLServer(cur) {
+		return sqlServerUnimplemented("a major version upgrade")
 	}
-	if !SupportedVersions[version] {
+	// MYSQL_5_7, from MYSQL_5_6, is a target where the node runs its
+	// image (#1524).
+	if ok, why := s.versionServed(version); !ok || IsSQLServer(version) {
 		if strings.HasPrefix(version, "POSTGRES_") || strings.HasPrefix(version, "MYSQL_") {
-			return unimplemented("upgrading to databaseVersion "+version, unservedVersionWhy(version))
+			return unimplemented("upgrading to databaseVersion "+version, why)
 		}
 		return Errorf(http.StatusBadRequest, "Invalid request: Invalid value for databaseVersion: %s.", version)
 	}
 	if engineOf(version) != engineOf(cur) {
 		return Errorf(http.StatusBadRequest, "Invalid request: an instance's database engine cannot be changed (%s to %s).", cur, version)
 	}
-	if versionIndex(version) < versionIndex(cur) {
+	if upgradeRank(version) < upgradeRank(cur) {
 		return Errorf(http.StatusBadRequest, "Invalid request: downgrading the major version of an instance is not supported (%s to %s).", cur, version)
+	}
+	if engineOf(cur) == "MYSQL" && upgradeRank(version) > upgradeRank(cur)+1 {
+		// "You can't upgrade directly from MySQL 5.6 to MySQL 8.0 or from
+		// MySQL 5.7 to MySQL 8.4." UNVERIFIED (re-read 2026-11-21, which
+		// documents no error): the code and wording of this refusal.
+		return Errorf(http.StatusBadRequest, "Invalid request: MySQL is upgraded one major version at a time, and %s cannot be upgraded "+
+			"directly to %s: upgrade it to %s first.", cur, version, mysqlUpgradeOrder[upgradeRank(cur)+1])
 	}
 	if _, ok := s.writes.prov.(Upgrader); !ok {
 		return unimplemented("changing databaseVersion", "this instance's provisioner cannot replace a server")

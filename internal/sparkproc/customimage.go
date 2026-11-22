@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"os"
@@ -31,10 +32,14 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
+	"github.com/google/go-containerregistry/pkg/v1/mutate"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/google/go-containerregistry/pkg/v1/tarball"
+
+	"github.com/cloudburrow/cloudburrow/internal/dockergc"
 )
 
 // customJavaHome is where a custom container is given the runtime's Java.
@@ -85,8 +90,14 @@ func (d *Docker) customImage(ctx context.Context, uri, runtimeImage string) (*cu
 	tr := &http.Transport{DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, network, addr)
 	}}
-	img, err := remote.Image(ref, remote.WithContext(ctx), remote.WithTransport(tr),
-		remote.WithPlatform(v1.Platform{OS: "linux", Architecture: runtime.GOARCH}))
+	opts := []remote.Option{remote.WithContext(ctx), remote.WithTransport(tr),
+		remote.WithPlatform(v1.Platform{OS: "linux", Architecture: runtime.GOARCH})}
+	if d.RegistryToken != nil {
+		if tok := d.RegistryToken(); tok != "" {
+			opts = append(opts, remote.WithAuth(&authn.Basic{Username: "oauth2accesstoken", Password: tok}))
+		}
+	}
+	img, err := remote.Image(ref, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("container_image %s cannot be read from Artifact Registry: %v", uri, err)
 	}
@@ -121,8 +132,24 @@ func (d *Docker) customImage(ctx context.Context, uri, runtimeImage string) (*cu
 	return &customImage{ref: local, env: env, spark: sparkDir, java: javaDir}, nil
 }
 
-// load writes img to `docker load` as tag.
+// load writes img to `docker load` as tag, labelled for the instance so
+// its stop or delete removes it (#2152).
 func (d *Docker) load(ctx context.Context, tag name.Tag, img v1.Image) error {
+	if d.Instance != "" {
+		cf, err := img.ConfigFile()
+		if err != nil {
+			return err
+		}
+		c := cf.Config
+		c.Labels = maps.Clone(c.Labels)
+		if c.Labels == nil {
+			c.Labels = map[string]string{}
+		}
+		c.Labels[dockergc.InstanceLabel] = d.Instance
+		if img, err = mutate.Config(img, c); err != nil {
+			return err
+		}
+	}
 	cmd := exec.CommandContext(ctx, "docker", "load")
 	pr, pw := io.Pipe()
 	cmd.Stdin = pr

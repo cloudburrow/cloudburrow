@@ -30,8 +30,8 @@ import (
 
 // appHubService serves App Hub (#2110) in the CLI process, gRPC and JSON
 // on one port. It discovers the resources this instance serves of the
-// types Google's supported-resources lists: Cloud Run services and jobs,
-// and Kubernetes Engine clusters.
+// types Google's supported-resources lists: Cloud Run and Kubernetes
+// Engine here, every other product's in apphubdiscover.go.
 type appHubService struct {
 	cfg       config.Config
 	tracing   *telemetry.Tracing
@@ -54,6 +54,9 @@ type appHubService struct {
 	live func() map[string]string
 	// bigquery is BigQuery's forwarder, whose datasets are discovered.
 	bigquery func() *netfwd.Forwarder
+	// dataform is Dataform's bound address, whose repositories are
+	// discovered; nil without it.
+	dataform func() string
 	server   *grpctransport.Server
 	api      *apphub.Server
 }

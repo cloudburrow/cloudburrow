@@ -18,18 +18,21 @@ import (
 	"time"
 )
 
-// Engine converts the SavedModel in dir to TensorFlow Lite.
+// Engine converts the SavedModel in dir to a bundle (bundle.go).
 type Engine interface {
 	Convert(ctx context.Context, dir string) ([]byte, error)
 }
 
 // Server serves POST /v1/convert: a tar of a SavedModel's files in, the
-// TensorFlow Lite flatbuffer out (200, application/octet-stream), or a
-// Refusal as JSON (422; 503 when the converter cannot run at all).
+// bundle out (200, application/x-tar), or a Refusal as JSON (422; 503
+// when the converter cannot run at all); and the TensorFlow runtime of
+// converted models, POST /v1/models and /v1/run (predict.go).
 type Server struct {
 	engine Engine
 	mu     sync.Mutex // one conversion at a time: TensorFlow is large
 	tmp    string
+
+	run runners // predict.go
 }
 
 // NewServer serves engine, with its SavedModels unpacked under tmp ("":
@@ -37,6 +40,14 @@ type Server struct {
 func NewServer(engine Engine, tmp string) *Server { return &Server{engine: engine, tmp: tmp} }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	switch r.URL.Path {
+	case "/v1/models":
+		s.serveLoad(w, r)
+		return
+	case "/v1/run":
+		s.serveRun(w, r)
+		return
+	}
 	if r.URL.Path != "/v1/convert" || r.Method != http.MethodPost {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
@@ -66,7 +77,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		refuse(w, http.StatusServiceUnavailable, &Refusal{Kind: "unavailable", Message: err.Error()})
 	default:
-		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Type", "application/x-tar")
 		_, _ = w.Write(data)
 	}
 }
@@ -141,9 +152,9 @@ type imageBuild struct {
 	err  error
 }
 
-// BuildTimeout bounds one build of the converter image: pulling the
-// Python base and pip-installing TensorFlow (about 1 GB of wheels). It is
-// not a caller's deadline: see ensure.
+// BuildTimeout bounds one build of the converter image: pulling Google's
+// tensorflow/tensorflow base (about 2.9 GB). It is not a caller's
+// deadline: see ensure.
 const BuildTimeout = 30 * time.Minute
 
 func (d *Docker) bin() string {
@@ -189,7 +200,7 @@ func (d *Docker) start() *imageBuild {
 // ensure waits, at most as long as ctx allows, for the image.
 //
 // The image is built on the first CREATE MODEL … TENSORFLOW, never by
-// `up`: it is 2.3 GB, which an instance that imports no TensorFlow model
+// `up`: it is 2.9 GB (Google's tensorflow/tensorflow), which an instance that imports no TensorFlow model
 // should not pay. The build itself runs under its own BuildTimeout, never
 // ctx: a cold build takes a minute or more (57 s on a workstation with the
 // base cached, longer on a 4-CPU CI runner), and killing it with the
@@ -243,9 +254,37 @@ func (d *Docker) buildImage() error {
 	return nil
 }
 
-// Convert runs the image on dir, with no network.
+// Network is the Docker network the converter runs on: created
+// --internal, so it has no route out of the host (no egress, no DNS to
+// the outside), and nothing but the converter joins it.
+const Network = "cloudburrow-tfconvert"
+
+// EnsureNetwork creates Network, --internal, when it is missing. Two
+// instances may race to create it; the loser finds it made.
+func (d *Docker) EnsureNetwork(ctx context.Context) error {
+	internal := func() (bool, bool) {
+		out, err := exec.CommandContext(ctx, d.bin(), "network", "inspect", "--format", "{{.Internal}}", Network).Output()
+		return err == nil, strings.TrimSpace(string(out)) == "true"
+	}
+	if ok, in := internal(); ok {
+		if !in {
+			return &Refusal{Kind: "unavailable", Message: "the Docker network " + Network + " exists but is not --internal; remove it so the converter can make it with no route out"}
+		}
+		return nil
+	}
+	out, err := exec.CommandContext(ctx, d.bin(), "network", "create", "--internal", Network).CombinedOutput()
+	if ok, in := internal(); ok && in {
+		return nil
+	}
+	return &Refusal{Kind: "unavailable", Message: fmt.Sprintf("could not create the --internal Docker network %s: %v: %s", Network, err, strings.TrimSpace(string(out)))}
+}
+
+// Convert runs the image on dir, on the --internal Network.
 func (d *Docker) Convert(ctx context.Context, dir string) ([]byte, error) {
 	if err := d.ensure(ctx); err != nil {
+		return nil, err
+	}
+	if err := d.EnsureNetwork(ctx); err != nil {
 		return nil, err
 	}
 	out := filepath.Join(filepath.Dir(dir), "out")
@@ -258,7 +297,7 @@ func (d *Docker) Convert(ctx context.Context, dir string) ([]byte, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, d.bin(), "run", "--rm", "--network", "none", "--read-only", "--tmpfs", "/tmp",
+	cmd := exec.CommandContext(ctx, d.bin(), "run", "--rm", "--network", Network, "--read-only", "--tmpfs", "/tmp",
 		"-e", "HOME=/tmp", "-e", "TF_CPP_MIN_LOG_LEVEL=2",
 		"-v", dir+":/model:ro", "-v", out+":/out", d.Image, "convert")
 	var log bytes.Buffer
@@ -273,9 +312,10 @@ func (d *Docker) Convert(ctx context.Context, dir string) ([]byte, error) {
 	if b, err := os.ReadFile(filepath.Join(out, "error.json")); err == nil {
 		return nil, decodeRefusal(b)
 	}
-	b, err := os.ReadFile(filepath.Join(out, "model.tflite"))
-	if err != nil {
+	if _, err := os.Stat(filepath.Join(out, "signature.json")); err != nil {
 		return nil, &Refusal{Kind: "convert", Message: "the TensorFlow converter wrote no model: " + strings.TrimSpace(log.String())}
 	}
-	return b, nil
+	// The bundle (bundle.go): the SavedModel, its signature, and the
+	// TensorFlow Lite flatbuffer or why there is none.
+	return tarDir(out)
 }

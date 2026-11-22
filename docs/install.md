@@ -456,6 +456,7 @@ Bigtable, like the others, starts from its pinned image with no network access (
 | `cloudburrow seed <file>` | Create the resources in a seed document in the running `up` |
 | `cloudburrow events` | Print the running `up`'s recent admin events |
 | `cloudburrow delete` | Destroy the cluster |
+| `cloudburrow gc` | List, and with `--yes` remove, the Docker images and volumes past CloudBurrow builds left ([configuration.md](configuration.md#docker-images-and-volumes)) |
 | `cloudburrow storage-server` | Run the builtin Cloud Storage server alone, without a cluster |
 | `cloudburrow version` | Print version information (`--short` for the version alone) |
 

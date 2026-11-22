@@ -55,7 +55,7 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 	config.ServiceCloudSQLMySQL: {Providers: []string{"cloudsql-mysql", "cloudsql-instances", "cloudsql-backups"}},
 	config.ServiceBackupDR: {Providers: []string{"backupdr-overview", "backupdr-vaulted", "backupdr-plans", "backupdr-associations",
 		"backupdr", "backupdr-jobs"}},
-	config.ServicePrivateCA:        {Providers: []string{"privateca", "privateca-templates"}},
+	config.ServicePrivateCA:        {Providers: []string{"privateca", "privateca-cas", "privateca-certs", "privateca-templates"}},
 	config.ServiceWorkflows:        {Providers: []string{"workflows"}},
 	config.ServiceParameterManager: {Providers: []string{"parametermanager", "parametermanager-templates"}},
 	config.ServiceDataform:         {Providers: []string{"dataform", "dataform-folders", "dataform-settings"}},
@@ -67,7 +67,7 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 	config.ServiceMonitoring: {Providers: []string{"monitoring-explorer", "monitoring-metrics", "monitoring-alerting", "monitoring-incidents",
 		"monitoring-channels", "monitoring-uptime", "monitoring-dashboards", "monitoring-groups", "monitoring-services", "monitoring-snoozes"}},
 	// VPC network (#1936): the Compute Engine API's networking.
-	config.ServiceCompute: {Providers: []string{"vpc-networks", "vpc-firewalls", "vpc-routes", "vpc-addresses",
+	config.ServiceCompute: {Providers: []string{"vpc-networks", "vpc-firewalls", "vpc-routes", "vpc-addresses", "vpc-psc", "psc-policies",
 		"compute-instances", "compute-disks", "compute-snapshots", "compute-images", "compute-machinetypes", "compute-metadata"}},
 }
 

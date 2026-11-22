@@ -122,6 +122,12 @@ const AP_ROUTES = agentPlatformRoutes();
 const GKE_DISCOVERY = ["/kubernetes/gateways", "/kubernetes/services", "/kubernetes/ingress"];
 // Secret Manager's page tabs (#1850): the global secrets and Regional secrets.
 const SECRET_TABS = ["/secrets", "/secrets-regional"];
+// Certificate Authority Service's tabs (#2144).
+const ALERTING_TABS = ["/monitoring/alerting", "/monitoring/alerting/incidents", "/monitoring/snoozes"];
+const CAS_TABS = ["/security/cas", "/security/cas/certificateAuthorities", "/security/cas/certificates", "/security/cas/templates"];
+// Private Service Connect's tabs (#2141): Connected endpoints and
+// Connection Policies, as Google's page has them.
+const PSC_TABS = ["/net-services/psc/list/consumers", "/net-services/psc/list/policies"];
 const GKE_STORAGE = ["/kubernetes/storage", "/kubernetes/storage-classes"];
 // Cloud Logging's Settings and its Log Scopes tab (#2020), as Google's
 // Settings page has a Log Scopes tab (log-scope/create-and-manage).
@@ -219,8 +225,9 @@ const ROUTES = [
   // Storage classes), the menu marking the page whose `navAs` they name.
   { path: "/kubernetes/clusters", service: "gkeclusters", title: "Kubernetes clusters", navTitle: "Clusters", kind: "Cluster", icon: "k8s", logs: true, section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine" },
   { path: "/kubernetes/workloads", service: "workloads", title: "Workloads", kind: "Workload", logs: true, section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine" },
-  { path: "/kubernetes/applications", screen: "unavailable", icon: "k8s", title: "Applications", section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine",
-    unavailable: "Applications are the Kubernetes Applications that GKE's Marketplace and Application Manager install, which CloudBurrow does not serve. A workload deployed with kubectl, Helm or Deploy is on Workloads." },
+  // Applications (#2149): the Kubernetes Applications (app.k8s.io/v1beta1)
+  // Marketplace deploys, and each one's page at .../{cluster}/{ns}/{name}.
+  { path: "/kubernetes/applications", screen: "gke-applications", tree: true, icon: "k8s", title: "Applications", section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine" },
   { path: "/kubernetes/config", service: "k8sconfig", icon: "secrets", title: "Secrets & ConfigMaps", kind: "Configuration", section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine" },
   { path: "/kubernetes/gateways", service: "k8sgateways", icon: "k8sservices", title: "Gateways, Services & Ingress", tabTitle: "Gateways", kind: "Gateway", navHidden: true, navAs: "/kubernetes/services", pageTabs: GKE_DISCOVERY, section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine" },
   { path: "/kubernetes/services", service: "k8sservices", title: "Gateways, Services & Ingress", tabTitle: "Services", kind: "Service", logs: true, pageTabs: GKE_DISCOVERY, section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine" },
@@ -516,6 +523,16 @@ const ROUTES = [
     section: "Networking", product: "vpc", productTitle: "VPC network" },
   { path: "/networking/addresses/list", service: "vpc-addresses", icon: "vpc", title: "IP addresses", kind: "IP address",
     section: "Networking", product: "vpc", productTitle: "VPC network" },
+  // Network services' Private Service Connect (#2141), at Google's path:
+  // its Connected endpoints, Connect endpoint.
+  { path: "/net-services/psc/list/consumers", service: "vpc-psc", icon: "vpc", title: "Private Service Connect", tabTitle: "Connected endpoints", kind: "Endpoint",
+    pageTabs: PSC_TABS, section: "Networking", product: "network-services", productTitle: "Network services" },
+  // Its Connection Policies tab (#2141): the Network Connectivity API's
+  // service connection policies ("Private Service Connect > Connection
+  // Policies > Create connection policy", configure-private-service-connect).
+  // The tab's path is UNVERIFIED (re-read 2026-11-22: configure-service-connection-policies).
+  { path: "/net-services/psc/list/policies", service: "psc-policies", icon: "vpc", title: "Private Service Connect", tabTitle: "Connection Policies", kind: "Connection policy",
+    navHidden: true, navAs: "/net-services/psc/list/consumers", pageTabs: PSC_TABS, section: "Networking", product: "network-services", productTitle: "Network services" },
 
   // Secret Manager (#1850): Google's menu, Secret Manager (the global
   // secrets), Regional secrets and Settings.
@@ -558,10 +575,20 @@ const ROUTES = [
   { path: "/kms/hsm", service: "kms-hsm", icon: "kms", title: "Single-tenant HSM", kind: "Single-tenant HSM instance", section: "Security and identity",
     product: "kms", productTitle: "Key Management" },
   // Certificate Authority Service (#1834): CA pools, their CAs and the
-  // certificates they issue, at Google's own path.
-  { path: "/security/cas", service: "privateca", title: "CA pools", section: "Security and identity",
+  // certificates they issue, at Google's own path. One page with Google's
+  // tabs (#2144): CA pool manager, CA manager, Private certificate manager
+  // and Template manager, as the CAS docs name them (read 2026-11-22).
+  { path: "/security/cas", service: "privateca", title: "Certificate Authority Service", navTitle: "Certificate Authority Service",
+    tabTitle: "CA pool manager", kind: "CA pool", pageTabs: CAS_TABS, section: "Security and identity",
     product: "privateca", productTitle: "Certificate Authority Service" },
-  { path: "/security/cas/templates", service: "privateca-templates", icon: "privateca", title: "Certificate templates",
+  { path: "/security/cas/certificateAuthorities", service: "privateca-cas", icon: "privateca", title: "Certificate Authority Service",
+    tabTitle: "CA manager", kind: "Certificate authority", navHidden: true, navAs: "/security/cas", pageTabs: CAS_TABS,
+    section: "Security and identity", product: "privateca", productTitle: "Certificate Authority Service" },
+  { path: "/security/cas/certificates", service: "privateca-certs", icon: "privateca", title: "Certificate Authority Service",
+    tabTitle: "Private certificate manager", kind: "Certificate", navHidden: true, navAs: "/security/cas", pageTabs: CAS_TABS,
+    section: "Security and identity", product: "privateca", productTitle: "Certificate Authority Service" },
+  { path: "/security/cas/templates", service: "privateca-templates", icon: "privateca", title: "Certificate Authority Service",
+    tabTitle: "Template manager", kind: "Certificate template", navHidden: true, navAs: "/security/cas", pageTabs: CAS_TABS,
     section: "Security and identity", product: "privateca", productTitle: "Certificate Authority Service" },
   // IAM & Admin (#1864): Google's menu, in Google's order. A page whose API
   // CloudBurrow does not serve is in Google's place and says so; Labels,
@@ -660,6 +687,10 @@ const ROUTES = [
   { path: "/iam-admin/principal-access-boundary", title: "Principal Access Boundary", service: null, requires: "iam", screen: "unavailable", icon: "iam", section: "IAM & Admin", product: "iam", productTitle: "IAM & Admin",
     unavailable: "Principal access boundary policies are the IAM v3 API's, which CloudBurrow does not serve." },
 
+  // Marketplace (#2149): Docker Hub's catalogue, deployed to the
+  // instance's Kubernetes clusters as Applications; its browse, product and
+  // Configure pages are below /marketplace.
+  { path: "/marketplace", screen: "marketplace", tree: true, icon: "marketplace", title: "Marketplace", section: "Management tools", product: "marketplace", productTitle: "Marketplace" },
   // App Hub (#2110), its menu in Google's order: Applications, Services
   // and workloads, Settings (the host project's service projects).
   { path: "/apphub/applications", service: "apphub", icon: "apphub", title: "Applications", kind: "Application",
@@ -684,10 +715,12 @@ const ROUTES = [
   // Alerting, its incidents and notification channels, Uptime checks,
   // Dashboards, Groups, Services (SLOs) and Snoozes (#1964), over the same
   // in-process API.
-  { path: "/monitoring/alerting", service: "monitoring-alerting", icon: "monitoring", title: "Alerting",
+  // Google's Alerting page holds the policies, the open alerts (Google's
+  // name for incidents) and the snoozes (#2146): here its tabs.
+  { path: "/monitoring/alerting", service: "monitoring-alerting", icon: "monitoring", title: "Alerting", tabTitle: "Policies", pageTabs: ALERTING_TABS,
     kind: "Alert policy", section: "Operations", product: "monitoring", productTitle: "Monitoring" },
-  { path: "/monitoring/alerting/incidents", service: "monitoring-incidents", icon: "monitoring", title: "Incidents",
-    kind: "Incident", section: "Operations", product: "monitoring", productTitle: "Monitoring" },
+  { path: "/monitoring/alerting/incidents", service: "monitoring-incidents", icon: "monitoring", title: "Alerting", tabTitle: "Alerts", pageTabs: ALERTING_TABS,
+    navHidden: true, navAs: "/monitoring/alerting", kind: "Alert", section: "Operations", product: "monitoring", productTitle: "Monitoring" },
   { path: "/monitoring/alerting/channels", service: "monitoring-channels", icon: "monitoring", title: "Notification channels",
     kind: "Notification channel", section: "Operations", product: "monitoring", productTitle: "Monitoring" },
   { path: "/monitoring/uptime", service: "monitoring-uptime", icon: "monitoring", title: "Uptime checks",
@@ -698,8 +731,8 @@ const ROUTES = [
     kind: "Group", section: "Operations", product: "monitoring", productTitle: "Monitoring" },
   { path: "/monitoring/services", service: "monitoring-services", icon: "monitoring", title: "Services",
     kind: "Service", section: "Operations", product: "monitoring", productTitle: "Monitoring" },
-  { path: "/monitoring/snoozes", service: "monitoring-snoozes", icon: "monitoring", title: "Snoozes",
-    kind: "Snooze", section: "Operations", product: "monitoring", productTitle: "Monitoring" },
+  { path: "/monitoring/snoozes", service: "monitoring-snoozes", icon: "monitoring", title: "Alerting", tabTitle: "Snoozes", pageTabs: ALERTING_TABS,
+    navHidden: true, navAs: "/monitoring/alerting", kind: "Snooze", section: "Operations", product: "monitoring", productTitle: "Monitoring" },
   // Cloud Logging's menu in Google's order (#1863): Logs Explorer, Log
   // Analytics, Logs Dashboard, Log-based Metrics, Log Router, Logs Storage,
   // then the pages Google keeps elsewhere that CloudBurrow serves here
@@ -934,6 +967,7 @@ const ICONS = {
   // Cloud Scheduler: a clock.
   scheduler: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   // Kubernetes Engine: the helm.
+  marketplace: '<path d="M4 9l1.5-5h13L20 9"/><path d="M4 9h16v2a2.7 2.7 0 0 1-5.3 0 2.7 2.7 0 0 1-5.4 0A2.7 2.7 0 0 1 4 11z"/><path d="M5.5 13v7h13v-7"/><path d="M10 20v-4h4v4"/>',
   k8s:       '<path d="M12 3l7.5 3.8v10.4L12 21l-7.5-3.8V6.8z"/><circle cx="12" cy="12" r="2.5"/><path d="M12 3v6.5M19.5 6.8l-5.4 4M19.5 17.2l-5.4-4M12 21v-6.5M4.5 17.2l5.4-4M4.5 6.8l5.4 4"/>',
   workloads: '<rect x="3" y="4" width="7" height="7" rx="1"/><rect x="14" y="4" width="7" height="7" rx="1"/><rect x="3" y="13" width="7" height="7" rx="1"/><rect x="14" y="13" width="7" height="7" rx="1"/>',
   pods:      '<path d="M12 3l7.5 3.8v10.4L12 21l-7.5-3.8V6.8z"/>',
@@ -4612,6 +4646,17 @@ async function renderDetail(view, route, resourcePath) {
     // tab draws its key usage summary over the protected resources (#2053).
     const cards = listingSummary(list);
     if (cards.length) note = note ? el("div", {}, note, ...cards) : el("div", {}, ...cards);
+    // A chart of the section's series over its rows (#2141): Cloud SQL's
+    // Query insights' database load, a line per wait class.
+    if (section.seriesTitle && (section.series || []).length) {
+      const rows = section.series.map((sv) => ({ name: sv.unit ? `${sv.label} (${sv.unit})` : sv.label,
+        fields: { points: JSON.stringify((sv.points || []).filter((p) => p.value !== undefined && p.value !== null)) } }));
+      const card = el("div", { class: "card query-load-chart" },
+        el("h2", { text: section.seriesTitle }),
+        section.series[0].unavailable ? el("p", { class: "unavailable", text: section.series[0].unavailable })
+          : explorerChart(rows, `${section.seriesTitle} for ${name}`));
+      note = note ? el("div", {}, note, card) : card;
+    }
     // A workflow execution's Steps (#2004): the visualization panel of
     // the revision that ran, over the step entries' table.
     if (section.graph) {
@@ -4806,13 +4851,35 @@ async function renderDetail(view, route, resourcePath) {
         emptyState(`No ${section.label.toLowerCase()}`,
                    `${name} reports none.`));
     }
-    setChildren(into, note, ...groups.map((group) =>
+    setChildren(into, note, overviewChart(section), ...groups.map((group) =>
       el("div", { class: "card properties" },
         group.heading ? el("h2", { text: group.heading }) : null,
         el("dl", {}, ...group.properties.flatMap((prop) => [
           el("dt", { text: prop.label }),
           propertyValue(prop),
         ])))));
+  };
+
+  // A properties section's chart (#2141): Cloud SQL's Overview draws one of
+  // the instance's Cloud Monitoring metrics above its cards, the metric
+  // chosen from a list (CPU utilization first), as Google's Overview does.
+  const overviewChart = (section) => {
+    const series = section.series || [];
+    if (!series.length) return null;
+    const holder = el("div", { class: "overview-chart" });
+    const pick = el("select", { id: "overview-chart-metric" },
+      ...series.map((sv, i) => el("option", { value: String(i), text: sv.label })));
+    const draw = () => {
+      const sv = series[Number(pick.value) || 0];
+      setChildren(holder, chartCard(sv.label, sv.points || [], {
+        label: `${sv.label} for ${name}`, max: sv.max || undefined,
+        foot: sv.unit ? `Measured in ${sv.unit}` : "", unavailable: sv.unavailable }));
+    };
+    pick.addEventListener("change", draw);
+    draw();
+    return el("div", { class: "card overview-chart-card" },
+      el("div", { class: "overview-chart-pick" }, el("label", { for: "overview-chart-metric", text: "Chart" }), pick),
+      holder);
   };
 
   // Preformatted: newlines are the content, and a YAML document that lost
@@ -4834,10 +4901,20 @@ async function renderDetail(view, route, resourcePath) {
             copyButton(section.text, `${section.label} for ${name}`)),
           wfSourceSection(section.text, `${section.label} of ${name}`)));
     }
+    // Download <label> saves the text as a file (#2144): Google's issued
+    // certificate has Download certificate and Download certificate chain.
+    const download = section.download ? el("button", { type: "button", class: "secondary", "data-download": section.download,
+      text: `Download ${section.label.charAt(0).toLowerCase()}${section.label.slice(1)}`, onclick: () => {
+        const a = el("a", { href: URL.createObjectURL(new Blob([section.text], { type: "application/x-pem-file" })), download: section.download });
+        document.body.append(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      } }) : null;
     setChildren(into, note,
       el("div", { class: "card text-section" },
         el("div", { class: "text-actions" },
-          copyButton(section.text, `${section.label} for ${name}`)),
+          copyButton(section.text, `${section.label} for ${name}`), download),
         el("pre", { class: "mono", text: section.text })));
   };
 
@@ -5109,7 +5186,10 @@ async function renderDetail(view, route, resourcePath) {
   // Create key ring goes on to the ring's Create key. The action is taken
   // off the address, so a reload or Back does not open it again.
   const asked = new URLSearchParams(location.search).get("action");
-  const opened = asked && (data.actions || []).find((a) => a.id === asked);
+  // Or one drawn on a tab (Section.Actions, its Tabs' too), as Cloud SQL's
+  // list row opens Create read replica on the instance's Replicas (#2141).
+  const opened = asked && [...(data.actions || []), ...(data.sections || []).flatMap((s) =>
+    [...(s.actions || []), ...(s.tabs || []).flatMap((t) => t.actions || [])])].find((a) => a.id === asked);
   // One that is a page of its own (Action.Page, #1851) is drawn in the
   // page's place and keeps its address, so a reload shows it again and
   // Back returns to the resource's page.
@@ -7625,6 +7705,120 @@ function attachCompletions(control, words) {
   control.addEventListener("blur", () => setTimeout(close, 150));
 }
 
+// attachSecretPicker is Parameter Manager's Secret picker (#2143), as
+// Google's add-parameter-version describes it: in the payload, Ctrl+Space
+// then Enter opens the Secret picker side panel, where the Secret and the
+// Secret version are chosen (a regional secret with Select regional
+// secret), or a secret entered by its resource ID, and Insert puts its
+// __REF__("//secretmanager.googleapis.com/...") reference at the cursor.
+function attachSecretPicker(control, picker) {
+  const list = el("ul", { class: "completions", role: "listbox", hidden: true, "aria-label": "Suggestions" });
+  list.id = `${control.id || control.name}-suggestions`;
+  control.setAttribute("aria-autocomplete", "list");
+  control.setAttribute("aria-controls", list.id);
+  control.setAttribute("aria-keyshortcuts", "Control+Space");
+  const item = el("li", { role: "option", id: `${list.id}-picker`, class: "active", text: "Secret picker: insert a secret reference" });
+  item.setAttribute("aria-selected", "true");
+  list.append(item);
+  let at = 0;
+  const close = () => { list.hidden = true; control.setAttribute("aria-expanded", "false"); control.removeAttribute("aria-activedescendant"); };
+  const show = () => {
+    if (!list.isConnected) control.after(list);
+    at = control.selectionStart ?? control.value.length;
+    list.hidden = false;
+    control.setAttribute("aria-expanded", "true");
+    control.setAttribute("aria-activedescendant", item.id);
+  };
+  const choose = () => { close(); openSecretPicker(control, picker, at); };
+  item.addEventListener("mousedown", (e) => { e.preventDefault(); choose(); });
+  control.addEventListener("keydown", (e) => {
+    if (e.ctrlKey && (e.key === " " || e.code === "Space")) { e.preventDefault(); show(); return; }
+    if (list.hidden) return;
+    if (e.key === "Enter") { e.preventDefault(); choose(); }
+    else if (e.key === "Escape") { e.preventDefault(); close(); }
+    else if (e.key !== "ArrowDown" && e.key !== "ArrowUp") close();
+  });
+  control.addEventListener("blur", () => setTimeout(close, 150));
+}
+
+// secretPickerLabel is a secret's ID, with its location when regional.
+function secretPickerLabel(name) {
+  const m = /^projects\/[^/]+\/(?:locations\/([^/]+)\/)?secrets\/([^/]+)$/.exec(name);
+  if (!m) return name;
+  return m[1] ? `${m[2]} (${m[1]})` : m[2];
+}
+
+// secretRef is a secret version's reference in a parameter payload.
+function secretRef(version) {
+  return `__REF__("//secretmanager.googleapis.com/${version.replace(/^\/\/secretmanager\.googleapis\.com\//, "")}")`;
+}
+
+function openSecretPicker(control, picker, at) {
+  MODAL_SIDE_NEXT = true;
+  const { dialog, close } = openModal({ labelledBy: "secret-picker-title" });
+  dialog.id = "secret-picker";
+  const regional = el("input", { type: "checkbox", id: "secret-picker-regional", role: "switch" });
+  const manual = el("input", { type: "checkbox", id: "secret-picker-manual" });
+  const secret = el("select", { id: "secret-picker-secret" });
+  const version = el("select", { id: "secret-picker-version" });
+  const resource = el("input", { type: "text", id: "secret-picker-resource", spellcheck: "false",
+    placeholder: "projects/PROJECT_ID/secrets/SECRET_ID/versions/VERSION", "aria-describedby": "secret-picker-resource-help" });
+  const error = el("p", { class: "form-field-error", id: "secret-picker-error", role: "alert", hidden: true });
+  const secrets = () => (regional.checked ? picker.regional : picker.secrets) || [];
+  const fillVersions = () => {
+    const s = secrets().find((x) => x.name === secret.value);
+    setChildren(version, ...((s && s.versions) || []).map((v) => el("option", { value: `${s.name}/versions/${v}`, text: v })));
+  };
+  const fillSecrets = () => {
+    const all = secrets();
+    setChildren(secret, ...(all.length ? all.map((s) => el("option", { value: s.name, text: secretPickerLabel(s.name) }))
+      : [el("option", { value: "", text: regional.checked ? "No regional secrets in this project" : "No secrets in this project" })]));
+    fillVersions();
+  };
+  regional.addEventListener("change", fillSecrets);
+  secret.addEventListener("change", fillVersions);
+  const pickRows = el("div", { class: "secret-picker-pick" },
+    el("div", { class: "form-row is-check" }, el("div", { class: "check-line" }, regional,
+      el("label", { for: "secret-picker-regional", text: "Select regional secret" }))),
+    el("div", { class: "form-row" }, el("label", { for: "secret-picker-secret", text: "Secret" }), secret),
+    el("div", { class: "form-row" }, el("label", { for: "secret-picker-version", text: "Secret version" }), version));
+  const manualRow = el("div", { class: "form-row", hidden: true },
+    el("label", { for: "secret-picker-resource", text: "Secret version resource ID" }), resource,
+    el("p", { class: "form-help", id: "secret-picker-resource-help",
+      text: "A secret version's resource name, such as projects/my-project/secrets/db_password/versions/1, or a regional secret's under locations/LOCATION." }));
+  manual.addEventListener("change", () => { pickRows.hidden = manual.checked; manualRow.hidden = !manual.checked; });
+  const insert = el("button", { type: "button", class: "primary", id: "secret-picker-insert", text: "Insert", onclick: () => {
+    const v = (manual.checked ? resource.value : version.value).trim();
+    if (!/^(\/\/secretmanager\.googleapis\.com\/)?projects\/[^/]+\/(locations\/[^/]+\/)?secrets\/[^/]+\/versions\/[^/]+$/.test(v)) {
+      error.textContent = manual.checked ? "Enter a secret version's resource name: projects/PROJECT_ID/secrets/SECRET_ID/versions/VERSION."
+        : "Choose a secret and a secret version.";
+      error.hidden = false;
+      return;
+    }
+    const ref = secretRef(v);
+    const pos = Math.min(at, control.value.length);
+    control.value = control.value.slice(0, pos) + ref + control.value.slice(pos);
+    close();
+    control.focus();
+    control.setSelectionRange(pos + ref.length, pos + ref.length);
+    control.dispatchEvent(new Event("input", { bubbles: true }));
+  } });
+  setChildren(dialog, el("div", { class: "modal-body secret-picker" },
+    el("h2", { id: "secret-picker-title", text: "Secret picker" }),
+    el("p", { class: "form-help", text: "The reference is replaced by the secret version's value when the parameter version is rendered." }),
+    pickRows,
+    el("div", { class: "form-row is-check" }, el("div", { class: "check-line" }, manual,
+      el("label", { for: "secret-picker-manual", text: "Enter secret manually" }))),
+    manualRow,
+    picker.createHref ? el("p", {}, el("a", { href: picker.createHref, id: "secret-picker-create", target: "_blank", rel: "noopener", text: "Create secret" })) : null,
+    error,
+    el("div", { class: "modal-actions" },
+      el("button", { type: "button", class: "secondary", id: "secret-picker-cancel", text: "Cancel", onclick: () => close() }),
+      insert)));
+  fillSecrets();
+  secret.focus();
+}
+
 function buildCreateForm(spec) {
   // A hidden field is what the form was drawn from, sent back unchanged so
   // the backend can refuse the change when that has changed since: a
@@ -7667,6 +7861,9 @@ function buildCreateForm(spec) {
     // Items chosen from a picker (#1864): Google's Create role and Edit
     // role permissions, each with a checkbox, and Add permissions.
     if (f.type === "picklist") return picklistEntry(f, id, errorId, helpId);
+    // Several of the listed options (#2146): Google's Create snooze picks
+    // its alert policies from a menu of the project's policies.
+    if (f.type === "multiselect") return multiselectEntry(f, id, errorId, helpId);
 
     // A textarea rather than an input wherever the value can hold newlines:
     // Enter inserts one instead of submitting the form, which is the whole
@@ -7695,6 +7892,8 @@ function buildCreateForm(spec) {
     // Ctrl+Space offers the field's completions at the cursor, as Google's
     // Query by GQL offers the namespace's kinds (#1846).
     if ((f.completions || []).length && !isCheck && !isSelect) attachCompletions(control, f.completions);
+    // Parameter Manager's Secret picker (#2143): Ctrl+Space, then Enter.
+    if (f.secretPicker && isArea && !isMap) attachSecretPicker(control, f.secretPicker);
     // An immutable field is shown so the operator can see which resource they
     // are editing, and refused so the form does not accept a change the API
     // will not apply. Disabled rather than hidden: hiding it would read as
@@ -7769,7 +7968,10 @@ function buildCreateForm(spec) {
           // in its location.
           : f.browse === "artifact-registry" ? el("div", { class: "browse-row" }, control,
             el("button", { type: "button", class: "secondary", id: `browse-${f.name}`, text: "Browse",
-              onclick: () => browseRepositories(control, entries) })) : control,
+              onclick: () => browseRepositories(control, entries) }))
+          // A password field (#2141): Show password, and Generate where
+          // Field.Generate asks, as Google's Cloud SQL Create instance has.
+          : f.type === "password" ? passwordRow(f, control) : control,
           templates, upload, help, error);
 
     return { field: f, control, node, error, helpId, errorId, isCheck };
@@ -8217,6 +8419,29 @@ function instantOf(local) {
 
 // uploadIntoTextarea is a textarea's Upload file control (Field.Upload,
 // #1850): a file chooser whose text file replaces the textarea's value.
+// passwordRow is a password control with Show password, which reveals
+// what is typed (aria-pressed), and Generate on a Field.Generate field,
+// which fills it with 20 random characters from the browser's CSPRNG.
+function passwordRow(f, control) {
+  const show = el("button", { type: "button", class: "secondary", id: `show-${f.name}`, text: "Show password",
+    "aria-pressed": "false", "aria-controls": control.id });
+  show.onclick = () => {
+    const shown = control.type === "password";
+    control.type = shown ? "text" : "password";
+    show.setAttribute("aria-pressed", String(shown));
+    show.textContent = shown ? "Hide password" : "Show password";
+  };
+  const gen = f.generate ? el("button", { type: "button", class: "secondary", id: `generate-${f.name}`, text: "Generate",
+    onclick: () => {
+      const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789-_.~";
+      const bytes = crypto.getRandomValues(new Uint8Array(20));
+      control.value = [...bytes].map((b) => chars[b % chars.length]).join("");
+      control.dispatchEvent(new Event("input", { bubbles: true }));
+      control.focus();
+    } }) : null;
+  return el("div", { class: "browse-row" }, control, show, gen);
+}
+
 function uploadIntoTextarea(f, control) {
   const input = el("input", { type: "file", id: `up-${f.name}`, class: "upload-into-input",
     "aria-label": `${f.upload} for ${f.label}` });
@@ -10039,6 +10264,83 @@ function picklistEntry(f, id, errorId, helpId) {
   return { field: f, control, node, error, helpId, errorId, isCheck: false, focus: () => toggle.focus() };
 }
 
+// multiselectEntry is a "multiselect" field: a menu button that opens the
+// options, each with a checkbox, under a filter; the chosen ones are chips
+// below it, each with a remove button. The value is the chosen options, one
+// per line, in a hidden textarea, so validation, dirtiness and submission
+// are every other field's.
+function multiselectEntry(f, id, errorId, helpId) {
+  const control = el("textarea", { id: `${id}-value`, name: f.name, hidden: true, class: "multiselect-value" });
+  const options = f.options || [];
+  const labelOf = (v) => (f.optionLabels || {})[v] || v;
+  const chosen = new Set((f.default || "").split(/[\n,]/).map((x) => x.trim()).filter((x) => options.includes(x)));
+  const menuId = `${id}-menu`;
+  const button = el("button", { type: "button", id, class: "secondary multiselect-button", "aria-haspopup": "true",
+    "aria-expanded": "false", "aria-controls": menuId, "aria-describedby": helpId || null });
+  const filterInput = el("input", { type: "text", id: `${id}-filter`, autocomplete: "off", spellcheck: "false",
+    placeholder: "Filter", "aria-label": `Filter ${f.label.toLowerCase()}` });
+  const list = el("ul", { class: "picklist-rows multiselect-options", role: "list", "aria-label": f.label });
+  const empty = el("p", { class: "form-help", "aria-live": "polite" });
+  const chips = el("ul", { class: "multiselect-chips", role: "list", "aria-label": `Selected ${f.label.toLowerCase()}` });
+  const sync = () => {
+    control.value = options.filter((o) => chosen.has(o)).join("\n");
+    button.textContent = chosen.size ? `${chosen.size} selected` : (f.addLabel || `Select ${f.label.toLowerCase()}`);
+    control.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  const drawChips = () => {
+    setChildren(chips, ...options.filter((o) => chosen.has(o)).map((o) => el("li", { class: "chip" },
+      el("span", { text: labelOf(o) }),
+      el("button", { type: "button", class: "chip-clear", "aria-label": `Remove ${labelOf(o)}`,
+        html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+        onclick: () => { chosen.delete(o); drawChips(); drawOptions(); sync(); button.focus(); } }))));
+    chips.hidden = chosen.size === 0;
+  };
+  const drawOptions = () => {
+    const q = filterInput.value.trim().toLowerCase();
+    const match = options.filter((o) => !q || labelOf(o).toLowerCase().includes(q) || o.toLowerCase().includes(q));
+    setChildren(list, ...match.map((o, n) => {
+      const box = el("input", { type: "checkbox", id: `${id}-opt-${n}`, "data-value": o });
+      box.checked = chosen.has(o);
+      box.addEventListener("change", () => {
+        if (box.checked) chosen.add(o); else chosen.delete(o);
+        drawChips();
+        sync();
+      });
+      return el("li", { class: "picklist-row" }, el("label", { class: "group-check", for: box.id }, box, el("span", { text: labelOf(o) })));
+    }));
+    empty.textContent = options.length === 0 ? "There is nothing to select." : (match.length ? "" : "No match.");
+  };
+  const close = () => {
+    menu.hidden = true;
+    button.setAttribute("aria-expanded", "false");
+  };
+  const menu = el("div", { class: "picklist-picker multiselect-menu", id: menuId, role: "group", "aria-label": f.label, hidden: true },
+    filterInput, empty, list,
+    el("div", { class: "picklist-actions" },
+      el("button", { type: "button", class: "primary", text: "OK", onclick: () => { close(); button.focus(); } })));
+  menu.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(); button.focus(); }
+  });
+  filterInput.addEventListener("keydown", (e) => { if (e.key === "Enter") e.preventDefault(); });
+  filterInput.addEventListener("input", drawOptions);
+  button.addEventListener("click", () => {
+    if (!menu.hidden) return close();
+    menu.hidden = false;
+    button.setAttribute("aria-expanded", "true");
+    drawOptions();
+    filterInput.focus();
+  });
+  const help = f.help ? el("p", { id: helpId, class: "form-help", text: f.help }) : null;
+  const error = el("p", { id: errorId, class: "form-field-error", hidden: true });
+  const node = el("div", { class: "form-row multiselect-field" },
+    el("label", { for: id, text: f.required ? `${f.label} *` : f.label }), button, menu, chips, control, help, error);
+  drawChips();
+  drawOptions();
+  sync();
+  f.default = control.value;
+  return { field: f, control, node, error, helpId, errorId, isCheck: false, focus: () => button.focus() };
+}
+
 // mapToLines renders a map field's JSON value as one "key=value" per line.
 function mapToLines(value) {
   if (!value) return "";
@@ -11446,7 +11748,7 @@ function routeFor(pathname) {
   // The longest prefix wins, so /kubernetes/workloads beats /kubernetes.
   let best = null;
   for (const r of ROUTES) {
-    if (!r.service || r.screen === "create") continue;
+    if ((!r.service && !r.tree) || r.screen === "create") continue;
     if (pathname === r.path || !pathname.startsWith(r.path + "/")) continue;
     if (!best || r.path.length > best.path.length) best = r;
   }
@@ -11485,6 +11787,7 @@ function dispatch(view) {
   stopPrediction();
   stopLocalModelsPoll();
   stopGardenPoll();
+  stopMarketPoll();
   REVEAL_SUSPENDED = false;
   if (!match) return notFound(view, location.pathname);
   if (match.screen === "search") return renderSearch(view);
@@ -11493,6 +11796,8 @@ function dispatch(view) {
   if (match.screen === "embeddings") return renderEmbeddings(view);
   if (match.screen === "local-models") return renderLocalModels(view);
   if (match.screen === "model-garden") return renderModelGarden(view);
+  if (match.screen === "marketplace") return renderMarketplace(view);
+  if (match.screen === "gke-applications") return renderGKEApplications(view);
   if (match.screen === "ap-endpoints") {
     // The registry's endpoints list and pages when served (#1940); Model
     // Garden's deployment page otherwise, and for ?endpoint=.
@@ -11538,6 +11843,9 @@ function dispatch(view) {
   if (match.screen === "apis-domains") return renderDomainVerification(view);
   if (match.screen === "apis-credentials" && !resourcePath.length) return renderAPICredentials(view);
   if (match.screen === "apis-credentials" && resourcePath[0] === "key" && resourcePath[1]) return renderAPIKeyPage(view, resourcePath[1]);
+  // Create API key and Create a copy (#2145).
+  if (match.screen === "apis-credentials" && resourcePath[0] === "apikey" && resourcePath[1] === "create") return renderAPIKeyCreate(view, "");
+  if (match.screen === "apis-credentials" && resourcePath[0] === "apikey" && resourcePath[1] === "copy" && resourcePath[2]) return renderAPIKeyCreate(view, resourcePath[2]);
   if (match.screen === "apis-credentials" && resourcePath[0] === "restore") return renderAPIKeysRestore(view);
   if (match.screen === "iam-page" && !resourcePath.length) return renderIAMPage(view, match);
   if (match.screen === "manage-resources" && !resourcePath.length) return renderManageResources(view, match);
@@ -18196,7 +18504,7 @@ async function hfDeploy(m) {
   const go = async () => {
     const resp = await fetch("/api/ai/hf-deployments/deploy", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: m.id, acceptEula: !!m.gated }),
+      body: JSON.stringify({ id: m.id, acceptEula: !!m.gated, local: true }),
     });
     const text = await resp.text();
     if (!resp.ok) throw new Error(errorMessageOf(text) || `HTTP ${resp.status}`);
@@ -18213,6 +18521,27 @@ async function hfDeploy(m) {
 let HF_EP_POLL = null;
 
 const HF_STATE_LABEL = { DEPLOYING: "Deploying", READY: "Ready", FAILED: "Failed" };
+
+// The serving runtimes' names (#2148), and which are OpenAI-compatible.
+const HF_ENGINE_TITLE = { vllm: "vLLM", tei: "Text Embeddings Inference", "hf-pytorch": "Hugging Face PyTorch Inference",
+  "llama-cpp": "llama.cpp", mlx: "MLX (mlx-lm)", onnx: "ONNX Runtime" };
+const HF_OPENAI = new Set(["vllm", "llama-cpp", "mlx"]);
+const METAL_LABEL = "Apple GPU (Metal), local";
+
+// A deployed model's accelerator (#2155): the Apple GPU, the GPU type it
+// stands for, or none.
+function hfAccelerator(d) {
+  if (!d) return "—";
+  if (d.device) return `${METAL_LABEL}: ${d.device} (${d.acceleratorType} × ${d.acceleratorCount || 1})`;
+  if (d.acceleratorType) return `${d.acceleratorType} × ${d.acceleratorCount || 1}, served on CPU`;
+  return "None (CPU)";
+}
+
+function hfRunsOn(d) {
+  if (!d) return "—";
+  if (d.runtime === "host") return "This Mac (Apple GPU)";
+  return d.runtime === "cluster" ? "Instance cluster" : "Docker";
+}
 
 // The Endpoints page (#1840): Model Garden's deployments with their state,
 // and the selected endpoint's details and test panel.
@@ -18246,7 +18575,9 @@ async function renderHFEndpoints(view) {
         onclick: (ev) => { ev.preventDefault(); navigate(ev.currentTarget.getAttribute("href")); } })),
       el("td", { class: "mono", text: e.id }),
       el("td", { class: "mono", text: e.model ? e.model.hfModelId : "—" }),
-      el("td", { text: e.model ? (e.model.engine === "tei" ? "Text Embeddings Inference" : "vLLM") : "—" }),
+      el("td", { text: e.model ? HF_ENGINE_TITLE[e.model.engine] || e.model.engine : "—" }),
+      el("td", { "data-runtime": d ? d.runtime || "docker" : "", text: hfRunsOn(d) }),
+      el("td", { "data-accelerator": d ? d.acceleratorType || "" : "", text: hfAccelerator(d) }),
       el("td", { "data-state": st },
         el("span", { text: st === "UNDEPLOYED" ? "No deployed model" : HF_STATE_LABEL[st] || st }),
         st === "DEPLOYING" ? el("span", { class: "unavailable", text: ` · ${d.message}` }) : null,
@@ -18254,9 +18585,9 @@ async function renderHFEndpoints(view) {
         st === "FAILED" ? el("p", { class: "unavailable", text: d.message }) : null));
   });
   const table = rows.length ? el("div", { class: "table-wrap" }, el("table", { id: "hf-endpoints" },
-    el("thead", {}, el("tr", {}, ...["Name", "ID", "Model", "Serving container", "State"].map((c) => el("th", { scope: "col", text: c })))),
+    el("thead", {}, el("tr", {}, ...["Name", "ID", "Model", "Serving container", "Runs on", "Accelerator", "State"].map((c) => el("th", { scope: "col", text: c })))),
     el("tbody", {}, ...rows)))
-    : el("p", { class: "unavailable", text: "No endpoints yet. Download a Hugging Face model in Model Garden, then Deploy it." });
+    : el("p", { class: "unavailable", text: "No endpoints yet. Deploy a Hugging Face model from Model Garden." });
 
   let detail = null;
   const ep = data.endpoints.find((e) => e.name === selected);
@@ -18278,9 +18609,26 @@ async function renderHFEndpoints(view) {
       el("dt", { text: "State" }), el("dd", { id: "hf-endpoint-state", text: st === "UNDEPLOYED" ? "No deployed model" : HF_STATE_LABEL[st] || st }),
       ep.model ? el("dt", { text: "Model" }) : null, ep.model ? el("dd", { class: "mono", text: `${ep.model.hfModelId} @ ${ep.model.revision.slice(0, 12)} (${ep.model.license})` }) : null,
       ep.model ? el("dt", { text: "Container" }) : null, ep.model ? el("dd", { class: "mono", text: ep.model.image }) : null,
+      ep.deployed ? el("dt", { text: "Runs on" }) : null,
+      ep.deployed ? el("dd", { id: "hf-endpoint-runtime", text: ep.deployed.runtime === "cluster"
+        ? `This instance's Kubernetes cluster: Deployment and Service ${ep.deployed.container}${ep.deployed.gated ? ", with the Hugging Face token in Secret " + ep.deployed.container + "-hf-token" : ""}`
+        : ep.deployed.runtime === "host"
+          ? `This Mac, on the Apple GPU: a supervised ${HF_ENGINE_TITLE[ep.model ? ep.model.engine : ""] || "model"} server on 127.0.0.1:${ep.deployed.hostPort || "…"}, which the cluster reaches as Service ${ep.deployed.container}`
+          : `Docker, beside the cluster: container ${ep.deployed.container}` }) : null,
+      ep.deployed ? el("dt", { text: "Machine type" }) : null,
+      ep.deployed ? el("dd", { class: "mono", id: "hf-endpoint-machine", text: ep.deployed.machineType }) : null,
+      ep.deployed ? el("dt", { text: "Accelerator type" }) : null,
+      ep.deployed ? el("dd", { id: "hf-endpoint-accelerator", text: ep.deployed.device
+        ? `${METAL_LABEL} (${ep.deployed.device}), as ${ep.deployed.acceleratorType}` : ep.deployed.acceleratorType || "None" }) : null,
+      ep.deployed && ep.deployed.acceleratorType ? el("dt", { text: "Accelerator count" }) : null,
+      ep.deployed && ep.deployed.acceleratorType ? el("dd", { id: "hf-endpoint-accelerator-count", text: String(ep.deployed.acceleratorCount || 1) }) : null,
+      ep.deployed && ep.deployed.acceleratorNote ? el("dd", { class: "unavailable", id: "hf-endpoint-accelerator-note", text: ep.deployed.acceleratorNote }) : null,
+      ep.deployed && st === "DEPLOYING" ? el("dt", { text: "Progress" }) : null,
+      ep.deployed && st === "DEPLOYING" ? el("dd", { id: "hf-endpoint-progress" }, el("span", { text: ep.deployed.message }),
+        ep.deployed.progress > 0 ? el("progress", { max: "100", value: String(ep.deployed.progress), "aria-label": "Deploy progress" }) : null) : null,
       el("dt", { text: "Predict" }), el("dd", { class: "mono", text: `POST ${rest}:predict, :rawPredict, :streamRawPredict` }),
-      ep.model && ep.model.engine === "vllm" ? el("dt", { text: "OpenAI-compatible" }) : null,
-      ep.model && ep.model.engine === "vllm" ? el("dd", { class: "mono", text: `POST /v1beta1/${ep.name}/chat/completions` }) : null);
+      ep.model && HF_OPENAI.has(ep.model.engine) ? el("dt", { text: "OpenAI-compatible" }) : null,
+      ep.model && HF_OPENAI.has(ep.model.engine) ? el("dd", { class: "mono", text: `POST /v1beta1/${ep.name}/chat/completions` }) : null);
     let test = null;
     if (st === "READY") {
       const tei = ep.model.engine === "tei";
@@ -18320,8 +18668,415 @@ async function renderHFEndpoints(view) {
   if (data.endpoints.some((e) => stateOf(e) === "DEPLOYING")) HF_EP_POLL = setTimeout(again, 2000);
 }
 
+// Model Garden's Hugging Face tab (#2148): every public model on
+// huggingface.co, searched through the Hub's anonymous API with Google's
+// filter chips (task, library, licence) and sorts, a page at a time; a
+// model's card with its README, licence, task, size and downloads; and its
+// deploy form, which for a gated model takes the end user's own Hugging
+// Face access token, as Google's does. The token is posted once to the
+// deploy and never kept in the page: it goes into a Kubernetes Secret in
+// this instance's cluster.
+const HF_TASKS = [
+  ["text-generation", "Text generation"], ["feature-extraction", "Feature extraction"],
+  ["sentence-similarity", "Sentence similarity"], ["image-text-to-text", "Image-text-to-text"],
+  ["text2text-generation", "Text2text generation"], ["text-to-image", "Text-to-image"],
+  ["text-classification", "Text classification"], ["automatic-speech-recognition", "Speech recognition"],
+];
+const HF_LIBRARIES = [
+  ["transformers", "Transformers"], ["sentence-transformers", "sentence-transformers"],
+  ["diffusers", "Diffusers"], ["gguf", "GGUF"], ["onnx", "ONNX"], ["mlx", "MLX"],
+];
+const HF_LICENSES = [
+  ["apache-2.0", "Apache 2.0"], ["mit", "MIT"], ["gemma", "Gemma"], ["llama3.1", "Llama 3.1"],
+  ["openrail", "OpenRAIL"], ["cc-by-4.0", "CC BY 4.0"], ["other", "Other"],
+];
+const HF_SORTS = [["trendingScore", "Trending"], ["downloads", "Most downloads"], ["likes", "Most likes"], ["lastModified", "Recently updated"]];
+const HF_TASK_LABEL = Object.fromEntries(HF_TASKS);
+
+const hfCount = (n) => {
+  if (n >= 1e9) return `${(n / 1e9).toFixed(1)}B`;
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(1)}k`;
+  return String(n || 0);
+};
+
+const hfGalleryPath = (params = {}) => {
+  const u = new URLSearchParams({ view: "hugging-face", ...params });
+  return `${AP_PATHS.modelGarden}?${u}`;
+};
+
+// A Hub model's card in the gallery.
+function hfHubCard(m) {
+  const href = hfGalleryPath({ model: m.id });
+  return el("article", { class: "card garden-card hf-card", "data-hf-hub-model": m.id, "data-gated": m.gated ? "true" : "false" },
+    el("h2", {}, el("a", { href, text: m.id })),
+    el("p", { class: "garden-provider", text: [HF_TASK_LABEL[m.task] || m.task, m.library].filter(Boolean).join(" · ") || "Task not stated" }),
+    el("p", { class: "garden-tags" },
+      m.gated ? el("span", { class: "garden-tag hf-gated", text: "Gated" }) : null,
+      el("span", { class: "garden-tag", text: m.license })),
+    el("p", { class: "hf-stats" },
+      el("span", { "data-stat": "downloads", text: `${hfCount(m.downloads)} downloads` }),
+      el("span", { "data-stat": "likes", text: `${hfCount(m.likes)} likes` }),
+      m.parameters ? el("span", { text: `${hfCount(m.parameters)} parameters` }) : null),
+    el("p", { class: m.unavailable ? "unavailable" : "hf-engine", text: m.unavailable
+      ? `Deploy unavailable: ${m.unavailable}` : `Deploys on ${m.engineTitle}` }));
+}
+
+// The gallery: search, sort, chips and pages of models.
+async function renderHFGallery(view) {
+  const params = new URLSearchParams(location.search);
+  const chosen = { task: params.get("task") || "", library: params.get("library") || "", license: params.get("license") || "" };
+  let sort = params.get("sort") || "trendingScore";
+  const search = el("input", { type: "search", id: "hf-hub-search", placeholder: "Search Hugging Face models",
+    "aria-label": "Search Hugging Face models", value: params.get("q") || "", autocomplete: "off" });
+  const sortSelect = el("select", { id: "hf-hub-sort", "aria-label": "Sort by" },
+    ...HF_SORTS.map(([v, label]) => el("option", { value: v, text: label, selected: v === sort ? true : null })));
+  const grid = el("div", { class: "garden-cards", id: "hf-hub-cards", "aria-live": "polite" });
+  const status = el("p", { class: "unavailable", id: "hf-hub-status", role: "status" });
+  const more = el("button", { class: "secondary", id: "hf-hub-more", text: "Load more", hidden: true });
+  let next = "";
+  let seq = 0;
+
+  const chipRow = (name, label, values) => el("div", { class: "library-categories hf-chips", role: "group", "aria-label": label, "data-chips": name },
+    el("span", { class: "hf-chips-label", text: label }),
+    ...values.map(([v, text]) => {
+      const on = chosen[name] === v;
+      return el("button", { type: "button", class: on ? "chip is-selected" : "chip", "data-chip": v, "aria-pressed": on ? "true" : "false", text,
+        onclick: () => { chosen[name] = chosen[name] === v ? "" : v; draw(true); } });
+    }));
+  const chips = el("div", { id: "hf-hub-chips" });
+
+  const load = async (reset) => {
+    const mine = ++seq;
+    const q = new URLSearchParams();
+    if (search.value.trim()) q.set("q", search.value.trim());
+    for (const k of ["task", "library", "license"]) if (chosen[k]) q.set(k, chosen[k]);
+    q.set("sort", sort);
+    if (!reset && next) q.set("cursor", next);
+    status.textContent = "Searching huggingface.co…";
+    more.hidden = true;
+    let r;
+    try {
+      r = await api("/api/ai/hf-hub/models?" + q);
+    } catch (err) {
+      if (mine === seq) status.textContent = `[error] ${err.message}`;
+      return;
+    }
+    if (mine !== seq) return;
+    if (reset) setChildren(grid);
+    grid.append(...r.models.map(hfHubCard));
+    next = r.next || "";
+    more.hidden = !next;
+    const shown = grid.children.length;
+    status.textContent = shown ? `${shown} models${next ? ", more on the next page" : ""}` : "No models match.";
+  };
+  const draw = (reset) => {
+    setChildren(chips, chipRow("task", "Tasks", HF_TASKS), chipRow("library", "Libraries", HF_LIBRARIES), chipRow("license", "Licenses", HF_LICENSES));
+    const url = new URL(location.href);
+    for (const k of ["task", "library", "license"]) { if (chosen[k]) url.searchParams.set(k, chosen[k]); else url.searchParams.delete(k); }
+    if (search.value.trim()) url.searchParams.set("q", search.value.trim()); else url.searchParams.delete("q");
+    url.searchParams.set("sort", sort);
+    history.replaceState(history.state, "", url);
+    if (reset) { next = ""; load(true); }
+  };
+  let typing = null;
+  search.addEventListener("input", () => { clearTimeout(typing); typing = setTimeout(() => draw(true), 300); });
+  sortSelect.addEventListener("change", () => { sort = sortSelect.value; draw(true); });
+  more.addEventListener("click", () => load(false));
+
+  setChildren(view,
+    pageHeader("Hugging Face", "Open models on Hugging Face: deploy any supported public model from huggingface.co to an endpoint on this instance."),
+    el("nav", { class: "hf-crumbs", "aria-label": "Breadcrumb" },
+      el("a", { href: AP_PATHS.modelGarden, text: "Model Garden" }), el("span", { text: " › Hugging Face" })),
+    el("div", { class: "card" }, el("p", { class: "unavailable", id: "hf-hub-note", text:
+      "Models are read anonymously from huggingface.co's public API. Deploy runs the model on this instance's Kubernetes cluster: " +
+      "Text Embeddings Inference for sentence-transformers and embedding models, vLLM for text generation. " +
+      "The serving pod downloads the weights from Hugging Face itself." })),
+    el("div", { class: "hf-toolbar" }, search, el("label", { for: "hf-hub-sort", text: "Sort by" }), sortSelect),
+    chips, status, grid, more);
+  draw(true);
+}
+
+// A small markdown renderer for model cards. Everything becomes text
+// nodes and a fixed set of elements; links are kept only when they are
+// http(s). The server has already stripped the README's HTML.
+function hfMarkdown(text, repo) {
+  const root = el("div", { class: "hf-readme", id: "hf-readme" });
+  const lines = text.split("\n");
+  const inline = (s) => {
+    const out = [];
+    const re = /(`[^`]+`)|(!?\[[^\]]*\]\([^)\s]+(?:\s+"[^"]*")?\))|(\*\*[^*]+\*\*)|(\*[^*\s][^*]*\*)/g;
+    let last = 0, m;
+    while ((m = re.exec(s))) {
+      if (m.index > last) out.push(document.createTextNode(s.slice(last, m.index)));
+      const t = m[0];
+      if (m[1]) out.push(el("code", { text: t.slice(1, -1) }));
+      else if (m[2]) {
+        const image = t.startsWith("!");
+        const label = t.slice(image ? 2 : 1, t.indexOf("]"));
+        let href = t.slice(t.indexOf("](") + 2, -1).split(/\s+/)[0];
+        // Only http(s) links are kept; a relative one is the repository's
+        // file; any other scheme (javascript:, data:) is its text alone.
+        const scheme = /^[a-z][a-z0-9+.-]*:/i.test(href);
+        if (!scheme && !href.startsWith("#")) href = `https://huggingface.co/${repo}/blob/main/${href.replace(/^\.?\//, "")}`;
+        if (href.startsWith("#") || (scheme && !/^https?:\/\//i.test(href))) out.push(document.createTextNode(label));
+        else out.push(el("a", { href, target: "_blank", rel: "noopener noreferrer nofollow", text: image ? `[image: ${label || "image"}]` : label || href }));
+      } else if (m[3]) out.push(el("strong", { text: t.slice(2, -2) }));
+      else out.push(el("em", { text: t.slice(1, -1) }));
+      last = m.index + t.length;
+    }
+    if (last < s.length) out.push(document.createTextNode(s.slice(last)));
+    return out;
+  };
+  let i = 0;
+  let para = [];
+  const flush = () => { if (para.length) { root.append(el("p", {}, ...inline(para.join(" ")))); para = []; } };
+  while (i < lines.length) {
+    const line = lines[i];
+    if (/^\s*```/.test(line)) {
+      flush();
+      const code = [];
+      i++;
+      while (i < lines.length && !/^\s*```/.test(lines[i])) code.push(lines[i++]);
+      i++;
+      root.append(el("pre", { class: "mono" }, el("code", { text: code.join("\n") })));
+      continue;
+    }
+    const h = /^(#{1,6})\s+(.*)$/.exec(line);
+    if (h) { flush(); root.append(el(`h${Math.min(6, h[1].length + 1)}`, {}, ...inline(h[2]))); i++; continue; }
+    if (/^\s*\|.*\|\s*$/.test(line) && i + 1 < lines.length && /^\s*\|?[\s:-]+\|[\s|:-]*$/.test(lines[i + 1])) {
+      flush();
+      const cells = (l) => l.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+      const head = cells(line);
+      i += 2;
+      const body = [];
+      while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) body.push(cells(lines[i++]));
+      root.append(el("div", { class: "table-wrap" }, el("table", {},
+        el("thead", {}, el("tr", {}, ...head.map((c) => el("th", { scope: "col" }, ...inline(c))))),
+        el("tbody", {}, ...body.map((r) => el("tr", {}, ...r.map((c) => el("td", {}, ...inline(c)))))))));
+      continue;
+    }
+    if (/^\s*([-*+]|\d+\.)\s+/.test(line)) {
+      flush();
+      const ordered = /^\s*\d+\./.test(line);
+      const list = el(ordered ? "ol" : "ul");
+      while (i < lines.length && /^\s*([-*+]|\d+\.)\s+/.test(lines[i])) {
+        list.append(el("li", {}, ...inline(lines[i].replace(/^\s*([-*+]|\d+\.)\s+/, ""))));
+        i++;
+      }
+      root.append(list);
+      continue;
+    }
+    if (/^\s*>\s?/.test(line)) { flush(); root.append(el("blockquote", {}, ...inline(line.replace(/^\s*>\s?/, "")))); i++; continue; }
+    if (/^\s*(---+|\*\*\*+)\s*$/.test(line)) { flush(); root.append(el("hr")); i++; continue; }
+    if (!line.trim()) { flush(); i++; continue; }
+    para.push(line.trim());
+    i++;
+  }
+  flush();
+  return root;
+}
+
+// A model's card and its deploy form.
+async function renderHFHubModel(view, id) {
+  const header = () => pageHeader(id, "Hugging Face model");
+  setChildren(view, header(), el("p", { class: "unavailable", text: `Reading ${id} from huggingface.co…` }));
+  let r;
+  try {
+    r = await api("/api/ai/hf-hub/model?" + new URLSearchParams({ id }));
+  } catch (err) {
+    return setChildren(view, header(), errorState("Model unavailable", String(err.message), () => renderHFHubModel(view, id)));
+  }
+  const m = r.model;
+  const message = el("p", { id: "hf-deploy-message", class: "unavailable", role: "status" });
+  const hubLink = `https://huggingface.co/${m.id}`;
+  const facts = el("dl", { id: "hf-card-facts" },
+    el("dt", { text: "Task" }), el("dd", { text: HF_TASK_LABEL[m.task] || m.task || "Not stated" }),
+    el("dt", { text: "Library" }), el("dd", { text: m.library || "Not stated" }),
+    el("dt", { text: "License" }), el("dd", {}, m.licenseLink ? el("a", { href: m.licenseLink, target: "_blank", rel: "noopener noreferrer", text: m.licenseName || m.license }) : document.createTextNode(m.license)),
+    el("dt", { text: "Access" }), el("dd", { id: "hf-card-access", text: m.gated
+      ? `Gated (${m.gated === "manual" ? "the author approves each request" : "approved on request"}): accept the license on huggingface.co, then deploy with your Hugging Face access token`
+      : "Public" }),
+    el("dt", { text: "Downloads" }), el("dd", { text: `${Number(m.downloads).toLocaleString()} (last 30 days)` }),
+    el("dt", { text: "Likes" }), el("dd", { text: Number(m.likes).toLocaleString() }),
+    el("dt", { text: "Model size" }), el("dd", { id: "hf-card-size", text: m.weightsBytes ? `${formatBytes(m.weightsBytes)} of weights` : "No transformers weights" }),
+    m.parameters ? el("dt", { text: "Parameters" }) : null, m.parameters ? el("dd", { text: Number(m.parameters).toLocaleString() }) : null,
+    el("dt", { text: "Repository" }), el("dd", {}, el("a", { href: hubLink, target: "_blank", rel: "noopener noreferrer", text: `huggingface.co/${m.id}` }),
+      document.createTextNode(` · ${formatBytes(m.bytes)} in ${m.files.length} files · revision ${m.revision.slice(0, 12)}`)),
+    el("dt", { text: "Serving container" }), el("dd", { text: r.engineTitle || "None: " + r.unavailable }));
+
+  const deployable = r.deploys && !r.unavailable;
+  const deploy = el("button", { class: "primary", text: "Deploy", "data-action": "hf-deploy", disabled: deployable ? null : true,
+    "aria-describedby": deployable ? null : "hf-card-why" });
+  const why = deployable ? null : el("p", { class: "unavailable", id: "hf-card-why", text: r.deploys
+    ? `Deploy is unavailable: ${r.unavailable}.` : "Deploy needs the local AI endpoint: start the instance with a local AI model or with --services including run." });
+  const form = el("form", { id: "hf-deploy-form", class: "card", hidden: true, "aria-label": "Deploy model", autocomplete: "off" });
+  deploy.addEventListener("click", () => { form.hidden = false; const f = form.querySelector("input"); if (f) f.focus(); });
+
+  // Google's deploy panel: the Deployment environment is Agent Platform
+  // (an endpoint) or GKE, whose manifests Model Garden generates and
+  // applies to a chosen Kubernetes Engine cluster.
+  const envAP = el("input", { type: "radio", id: "hf-env-ap", name: "hf-env", value: "vertex", checked: true });
+  const envGKE = el("input", { type: "radio", id: "hf-env-gke", name: "hf-env", value: "gke" });
+  const env = el("fieldset", { id: "hf-env" }, el("legend", { text: "Deployment environment" }),
+    el("div", { class: "garden-filter" }, envAP,
+      el("label", { for: "hf-env-ap", text: "Agent Platform: a managed endpoint, served from this instance's Kubernetes cluster" })),
+    el("div", { class: "garden-filter" }, envGKE,
+      el("label", { for: "hf-env-gke", text: "GKE: deploy to a Kubernetes Engine cluster with the generated Kubernetes manifests" })));
+  // Google's Accelerator type (machine_spec.accelerator_type, #2155): the
+  // Apple GPU, which CloudBurrow serves as NVIDIA_L4, or none (CPU).
+  const acc = r.accelerators || { metal: false, default: "none", metalType: "NVIDIA_L4", cpuMachine: "local-cpu", metalMachine: "local-metal",
+    metalNote: "this instance runs no host runtime" };
+  const accSelect = el("select", { id: "hf-accelerator", name: "hf-accelerator", "aria-describedby": "hf-accelerator-note" },
+    el("option", { value: acc.metalType, disabled: acc.metal ? null : true,
+      text: `${METAL_LABEL}${acc.device ? " · " + acc.device : ""} (as ${acc.metalType})` }),
+    el("option", { value: "none", text: "None (CPU)" }));
+  accSelect.value = acc.metal && acc.default !== "none" ? acc.metalType : "none";
+  const accNote = el("p", { class: "unavailable", id: "hf-accelerator-note", role: "status" });
+  const machineDD = el("dd", { class: "mono", id: "hf-machine-type" });
+  const countDD = el("dd", { id: "hf-accelerator-count" });
+  const onAcc = () => {
+    const gpu = accSelect.value !== "none";
+    machineDD.textContent = gpu && acc.engineMetal ? acc.metalMachine : acc.cpuMachine;
+    countDD.textContent = gpu ? "1" : "0";
+    accNote.textContent = !acc.metal
+      ? `The Apple GPU is not available: ${acc.metalNote}.`
+      : gpu && !acc.engineMetal
+        ? `${r.engineTitle || "This runtime"} has no Metal build, so it runs on CPU in the instance's cluster; the Apple GPU serves GGUF (llama.cpp) and MLX (mlx-lm) models.`
+        : gpu ? `Runs on this Mac's GPU as a host process, reached by the cluster through a Service.` : "Runs on CPU in the instance's cluster.";
+  };
+  accSelect.addEventListener("change", onAcc);
+  onAcc();
+  const apFields = el("dl", { id: "hf-ap-fields" },
+    el("dt", {}, el("label", { for: "hf-accelerator", text: "Accelerator type" })), el("dd", {}, accSelect, accNote),
+    el("dt", { text: "Accelerator count" }), countDD,
+    el("dt", { text: "Machine type" }), machineDD,
+    el("dt", { text: "Serving container" }), el("dd", { text: r.engineTitle || "" }),
+    el("dt", { text: "Region" }), el("dd", { class: "mono", text: r.location }));
+  const gkeCluster = el("select", { id: "hf-gke-cluster", "aria-label": "Cluster" });
+  const gkeYAML = el("code", { id: "hf-gke-yaml" });
+  const gkeSteps = el("ol", { id: "hf-gke-steps" });
+  const gkeNote = el("p", { class: "unavailable", id: "hf-gke-note", role: "status" });
+  const gkeCopy = el("button", { type: "button", class: "secondary", id: "hf-gke-copy", text: "Copy YAML", onclick: async () => {
+    try { await navigator.clipboard.writeText(gkeYAML.textContent); announce("Copied"); } catch { announce("Copy is not available here"); }
+  } });
+  const gkeFields = el("div", { id: "hf-gke-fields", hidden: true },
+    el("label", { for: "hf-gke-cluster", text: "Cluster" }), gkeCluster, gkeNote,
+    el("h3", { text: "Deployment instructions" }), gkeSteps,
+    el("div", { class: "hf-yaml-head" }, el("span", { class: "mono", id: "hf-gke-file", text: "" }), gkeCopy),
+    el("pre", { class: "mono hf-yaml", tabindex: "0", "aria-label": "Kubernetes manifests" }, gkeYAML));
+  let gkeData = null;
+  const loadGKE = async () => {
+    const q = new URLSearchParams({ id: m.id, project: currentProject() });
+    const [name, loc] = (gkeCluster.value || "").split("|");
+    if (name) { q.set("cluster", name); q.set("location", loc); }
+    gkeNote.textContent = "Generating the deployment configuration…";
+    try { gkeData = await api("/api/ai/hf-hub/gke?" + q); } catch (err) { gkeNote.textContent = `[error] ${err.message}`; return; }
+    const keep = gkeCluster.value;
+    setChildren(gkeCluster, ...gkeData.clusters.map((c) => el("option", { value: `${c.name}|${c.location}`, disabled: c.status !== "RUNNING" ? true : null,
+      text: `${c.name} (${c.location})${c.status !== "RUNNING" ? " · " + c.status.toLowerCase() : ""}` })));
+    if (keep) gkeCluster.value = keep;
+    const running = gkeData.clusters.filter((c) => c.status === "RUNNING");
+    gkeNote.textContent = !gkeData.served ? "The Kubernetes Engine API is not served by this instance: start it with gke among --services to deploy here; the manifests can still be copied."
+      : running.length ? "" : "This project has no running Kubernetes Engine cluster. Create one on Kubernetes Engine's Clusters page, or copy the manifests.";
+    const p = gkeData.plan;
+    const steps = [`Connect kubectl to the cluster: gcloud container clusters get-credentials ${name || (running[0] || {}).name || "CLUSTER_NAME"} --location ${loc || (running[0] || {}).location || "LOCATION"}`];
+    if (p.secretCommand) steps.push(`Create the Hugging Face token Secret: ${p.secretCommand}`);
+    steps.push(`Save the manifests below as ${p.name}.yaml and apply them: ${p.applyCommand}`);
+    steps.push(`When the Deployment is available, send requests through the Service: ${p.forwardCommand}`);
+    setChildren(gkeSteps, ...steps.map((t) => el("li", { class: "mono", text: t })));
+    document.getElementById("hf-gke-file") && (document.getElementById("hf-gke-file").textContent = `${p.name}.yaml · ${p.engineTitle}`);
+    gkeYAML.textContent = p.yaml;
+    submit.disabled = !running.length;
+  };
+  gkeCluster.addEventListener("change", loadGKE);
+  const onEnv = () => {
+    const gke = envGKE.checked;
+    apFields.hidden = gke; gkeFields.hidden = !gke;
+    if (gke) loadGKE(); else submit.disabled = false;
+  };
+  envAP.addEventListener("change", onEnv);
+  envGKE.addEventListener("change", onEnv);
+  const fields = [el("h2", { text: `Deploy ${m.id}` }), env, apFields, gkeFields];
+  let accept = null, token = null;
+  if (m.gated) {
+    accept = el("input", { type: "checkbox", id: "hf-accept-eula", required: true });
+    token = el("input", { type: "password", id: "hf-token", name: "hf-token", required: true, autocomplete: "off", spellcheck: "false",
+      "aria-describedby": "hf-token-help", placeholder: "hf_…" });
+    fields.push(
+      el("p", { id: "hf-gated-note" }, document.createTextNode(`${m.id} is gated. `),
+        el("a", { href: hubLink, target: "_blank", rel: "noopener noreferrer", text: "Accept its license on huggingface.co" }),
+        document.createTextNode(" with your account first."), m.gatedPrompt ? el("span", { class: "unavailable", text: ` ${m.gatedPrompt}` }) : null),
+      el("div", { class: "garden-filter" }, accept, el("label", { for: "hf-accept-eula", text: `I have accepted the ${m.licenseName || m.license} license on Hugging Face` })),
+      el("label", { for: "hf-token", text: "Hugging Face access token" }), token,
+      el("p", { class: "unavailable", id: "hf-token-help", text: "A read token of the account that accepted the license. It is stored only " +
+        "in a Kubernetes Secret in the cluster the model runs on (hf-secret on a GKE cluster), which the serving pod reads; CloudBurrow never logs, keeps or shows it." }));
+  }
+  const submit = el("button", { class: "primary", type: "submit", text: "Deploy", "data-action": "hf-deploy-submit" });
+  fields.push(el("div", { class: "garden-actions" }, submit,
+    el("button", { class: "secondary", type: "button", text: "Cancel", onclick: () => { form.hidden = true; if (token) token.value = ""; } })), message);
+  setChildren(form, ...fields);
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const gke = envGKE.checked;
+    const body = { id: m.id, acceptEula: !!(accept && accept.checked) };
+    if (!gke) body.accelerator = accSelect.value;
+    if (gke) body.project = currentProject();
+    if (gke) { const [cluster, loc] = gkeCluster.value.split("|"); body.cluster = cluster; body.location = loc; }
+    if (token) body.hfToken = token.value.trim();
+    if (token) token.value = "";
+    submit.disabled = true;
+    message.textContent = gke ? "Applying the manifests to the cluster…" : "Deploying…";
+    try {
+      const resp = await fetch(gke ? "/api/ai/hf-hub/gke-deploy" : "/api/ai/hf-deployments/deploy",
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const text = await resp.text();
+      if (!resp.ok) throw new Error(errorMessageOf(text) || `HTTP ${resp.status}`);
+      const out = JSON.parse(text);
+      if (gke) {
+        message.textContent = `Deployment ${out.deployment} and Service ${out.deployment} were created on cluster ${out.cluster}.`;
+        announce(message.textContent);
+        navigate(out.workloads);
+        return;
+      }
+      navigate(`${AP_PATHS.endpoints}?endpoint=${encodeURIComponent(out.endpoint)}`);
+    } catch (err) {
+      message.textContent = `[error] ${err.message}`;
+      announce(err.message);
+      submit.disabled = false;
+    }
+  });
+
+  setChildren(view, header(),
+    el("nav", { class: "hf-crumbs", "aria-label": "Breadcrumb" },
+      el("a", { href: AP_PATHS.modelGarden, text: "Model Garden" }), el("span", { text: " › " }),
+      el("a", { href: hfGalleryPath(), text: "Hugging Face" }), el("span", { text: ` › ${m.id}` })),
+    el("section", { class: "card", id: "hf-card", "aria-label": m.id },
+      el("p", { class: "garden-tags" }, m.gated ? el("span", { class: "garden-tag hf-gated", text: "Gated" }) : null,
+        ...(m.tags || []).slice(0, 10).map((t) => el("span", { class: "garden-tag", text: t }))),
+      facts, el("div", { class: "garden-actions" }, deploy), why),
+    form,
+    el("section", { class: "card", "aria-label": "Model card" }, el("h2", { text: "Model card" }),
+      m.readme ? hfMarkdown(m.readme, m.id) : el("p", { class: "unavailable", text: "This model has no README." })));
+}
+
+// The section on Model Garden's main page: Google's "Open models on
+// Hugging Face" and its Show more, which opens the Hugging Face tab. The
+// page itself does not call huggingface.co: only the tab searches it.
+function drawHFHubSection(host) {
+  setChildren(host, el("h2", { text: "Open models on Hugging Face" }),
+    el("p", { class: "unavailable", text: "Deploy open models from Hugging Face: search every public model on huggingface.co by task, " +
+      "library and license, read its model card, and deploy it to an endpoint served from this instance's Kubernetes cluster." }),
+    el("div", { class: "garden-actions" }, el("button", { id: "hf-hub-show-more", class: "secondary", text: "Show more",
+      onclick: () => navigate(hfGalleryPath()) })));
+}
+
 async function renderModelGarden(view) {
   stopGardenPoll();
+  const gardenView = new URLSearchParams(location.search);
+  if (gardenView.get("view") === "hugging-face") {
+    return gardenView.get("model") ? renderHFHubModel(view, gardenView.get("model")) : renderHFGallery(view);
+  }
   const header = () => pageHeader("Model Garden",
     "Discover, test, customize and deploy models. Deploy is enabled for the models this machine runs.");
   let data;
@@ -18345,6 +19100,7 @@ async function renderModelGarden(view) {
   const grid = el("div", { class: "garden-cards", id: "garden-cards" });
   const count = el("p", { class: "unavailable", id: "garden-count", role: "status" });
   const hfPanel = el("section", { class: "card", id: "hf-panel", "aria-label": "Deploy from Hugging Face" });
+  const hfHub = el("section", { class: "card", id: "hf-hub", "aria-label": "Open models on Hugging Face" });
 
   const card = (m) => {
     const deploy = gardenDeployAction(m, again, fail);
@@ -18408,8 +19164,9 @@ async function renderModelGarden(view) {
     message,
     el("div", { class: "garden" }, filters,
       el("div", { class: "garden-main" }, search, count, grid)),
-    hfPanel);
+    hfHub, hfPanel);
   draw();
+  drawHFHubSection(hfHub);
   drawHFPanel(hfPanel);
 
   if (data.models.some((m) => m.localState && m.localState.state === "downloading")) {
@@ -21198,7 +21955,7 @@ function bqHomeTab(ctx) {
     title: why, "aria-description": why, onclick: why ? null : run,
   });
   const notebook = bqDataformOn() ? null : BQ_NO_DATAFORM;
-  const spark = "Not available locally: an Apache Spark notebook runs on Serverless for Apache Spark, which CloudBurrow does not run.";
+  const spark = "Not available locally: an Apache Spark notebook's session is a Spark Connect session of Serverless for Apache Spark, which CloudBurrow does not serve.";
   // A dataset chooser for Create new's Table and Add your own data's
   // Load from a file, which act on a dataset.
   // The datasets arrive with the Explorer, after the tab is drawn: refresh
@@ -21237,8 +21994,8 @@ function bqHomeTab(ctx) {
         action("Notebook", () => ctx.openAsset("notebook", bqNotebookDoc([])), notebook),
         action("Apache Spark notebook", null, spark),
         action("Data canvas", () => ctx.openAsset("data_canvas", ""), notebook),
-        action("Data preparation", null, "Not available locally: data preparation files are Dataform's, which CloudBurrow's Dataform does not run."),
-        action("Pipeline", null, "Not available locally: pipelines are Dataform's, which Studio does not yet reach (#2105)."),
+        action("Data preparation", null, "Not available locally: a data preparation is a Dataform action, which CloudBurrow's Dataform does not run (#2105)."),
+        action("Pipeline", null, "Not available locally: a pipeline's tasks are a Dataform repository's definitions/actions.yaml, which CloudBurrow's Dataform does not compile (#2105)."),
         tableButton),
       dsLabel),
     card("Recent",
@@ -21286,8 +22043,6 @@ const BQ_DATAFORM_NOTE = "Kept in this instance's Dataform as a code asset: a re
   "with its Version history and permissions.";
 const BQ_NO_DATAFORM = "Saving notebooks and data canvases needs the Dataform API, which this instance does not serve " +
   "(start it with --services including dataform).";
-const BQ_NO_RUNTIME = "Not available locally: Python runs on a Colab Enterprise runtime, which CloudBurrow does not serve. " +
-  "SQL cells (%%bigquery) run against this instance's BigQuery.";
 const BQ_ASSET_KIND = { sql: "saved query", notebook: "notebook", data_canvas: "data canvas" };
 const BQ_STUDIO_CLOSED = "cloudburrow.bigquery.closed";
 
@@ -21490,20 +22245,28 @@ function bqSchemaText(tables) {
 
 // --- Notebooks -------------------------------------------------------------
 //
-// A notebook tab, as Google's Colab Enterprise notebook in Studio draws it:
-// Connect, + Code and + Text, Run all, Save and Version history over cells.
-// Kept as an .ipynb document in its Dataform asset. A code cell that starts
-// with %%bigquery is a SQL cell and runs against this instance's BigQuery
-// (its rows below it); any other code cell is Python, which needs a Colab
-// Enterprise runtime CloudBurrow does not serve, so it is kept and shown,
-// not run.
+// A notebook tab, as Google's Colab Enterprise notebook in Studio draws it
+// (https://docs.cloud.google.com/bigquery/docs/create-notebooks): Connect,
+// + Code and + Text, Run all, Save and Version history over cells. Kept as
+// an .ipynb document in its Dataform asset, each code cell's outputs and
+// execution count with it. Connect starts the notebook's runtime
+// (internal/nbruntime: IPython with Google's BigQuery client and
+// bigquery-magics, the stand-in for a Colab Enterprise runtime, whose only
+// route is this instance's BigQuery), and every code cell runs there: Python
+// with its state kept between cells, and %%bigquery cells as bigquery-magics
+// runs them. Running a cell connects first, as Colab does. Without a
+// runtime, a %%bigquery cell still runs its SQL on this instance's BigQuery.
+
+const BQ_RUNTIME_NOTE = "Python runs on this instance's notebook runtime (IPython, Google's BigQuery client and %%bigquery), " +
+  "CloudBurrow's stand-in for a Colab Enterprise runtime: its only route is this instance's BigQuery, so pip install and other downloads fail.";
 
 const BQ_NOTEBOOK_TEMPLATES = [
   ["Empty notebook", []],
   ["BigQuery template", [
-    ["markdown", "# Explore a table\nRun the SQL cells against this instance's BigQuery. Python cells need a Colab Enterprise runtime."],
+    ["markdown", "# Explore a table\nConnect, then run the cells: %%bigquery cells run their SQL on this instance's BigQuery and Python cells on the notebook runtime."],
     ["code", "%%bigquery\nSELECT table_schema, table_name, table_type\nFROM `region-us`.INFORMATION_SCHEMA.TABLES\nORDER BY table_schema, table_name"],
     ["code", "%%bigquery\nSELECT CURRENT_DATE() AS today, SESSION_USER() AS user"],
+    ["code", "from google.cloud import bigquery\n\nclient = bigquery.Client()\ndf = client.query(\"SELECT 1 AS x, 'a' AS y\").to_dataframe()\ndf"],
   ]],
 ];
 
@@ -21512,22 +22275,121 @@ function bqNotebookDoc(cells) {
     cells: cells.map(([cell_type, source]) => ({ cell_type, source, metadata: {}, ...(cell_type === "code" ? { outputs: [], execution_count: null } : {}) })) }, null, 1);
 }
 
+const bqRuntimeCall = (op, key, extra = {}) => bqStudioCall("runtime", { op, key, ...extra });
+
+// bqNotebookOutputs draws a code cell's outputs (nbformat 4): streams and
+// tracebacks as text, images as images, and HTML (a DataFrame's table) in
+// a sandboxed frame, never in the console's own page.
+function bqNotebookOutputs(outputs) {
+  const text = (v) => (Array.isArray(v) ? v.join("") : String(v == null ? "" : v));
+  return (outputs || []).map((o) => {
+    if (o.output_type === "stream") {
+      return el("pre", { class: "bq-nb-stream" + (o.name === "stderr" ? " is-stderr" : ""), text: text(o.text) });
+    }
+    if (o.output_type === "error") {
+      return el("pre", { class: "bq-nb-error", role: "alert", text: (o.traceback && o.traceback.length ? o.traceback.join("\n") : `${o.ename}: ${o.evalue}`) });
+    }
+    const data = o.data || {};
+    const img = ["image/png", "image/jpeg", "image/gif"].find((k) => data[k]);
+    if (img) return el("img", { class: "bq-nb-image", src: `data:${img};base64,${text(data[img]).replace(/\s+/g, "")}`, alt: text(data["text/plain"]) || "Cell output image" });
+    if (data["text/html"]) {
+      // Not a Tab stop: the frame is drawn at its content's full size, so
+      // there is nothing in it to scroll or reach.
+      const frame = el("iframe", { class: "bq-nb-html", sandbox: "allow-same-origin", title: "Cell output", referrerpolicy: "no-referrer", tabindex: "-1" });
+      frame.srcdoc = `<!doctype html><meta charset="utf-8"><style>body{font:13px/1.4 Roboto,Arial,sans-serif;margin:4px;color:#202124;background:#fff}` +
+        `table{border-collapse:collapse}th,td{border:1px solid #dadce0;padding:2px 6px;text-align:right}</style>${text(data["text/html"])}`;
+      frame.addEventListener("load", () => {
+        try {
+          const body = frame.contentDocument.body;
+          frame.style.height = (body.scrollHeight + 16) + "px";
+          frame.style.width = Math.max(frame.parentElement.clientWidth, body.scrollWidth + 16) + "px";
+        } catch { /* sandboxed */ }
+      });
+      return el("div", { class: "bq-nb-html-wrap" }, frame, el("details", {}, el("summary", { text: "Text" }), el("pre", { class: "bq-nb-stream", text: text(data["text/plain"]) })));
+    }
+    return el("pre", { class: "bq-nb-stream", text: text(data["text/plain"] || data["text/markdown"] || JSON.stringify(data)) });
+  });
+}
+
 function bqNotebookTab(tab, ctx) {
   let doc;
   try { doc = JSON.parse(tab.query || ""); } catch { doc = JSON.parse(bqNotebookDoc([])); }
   if (!Array.isArray(doc.cells)) doc.cells = [];
+  // The runtime's key: the saved notebook's, or one of its own, never the
+  // tab's number, which another browser's tab reuses.
+  if (!tab.runtimeKey) tab.runtimeKey = tab.savedId || `nb-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  const key = tab.runtimeKey;
   const text = (c) => (Array.isArray(c.source) ? c.source.join("") : String(c.source || ""));
   const keep = () => { tab.query = JSON.stringify(doc, null, 1); ctx.save(); };
   const cellsHost = el("ol", { class: "bq-nb-cells", "aria-label": "Cells" });
   const isSql = (c) => c.cell_type === "code" && /^\s*%%bigquery\b/.test(text(c));
-  const runCell = async (c, out) => {
-    if (c.cell_type !== "code") return;
-    if (!isSql(c)) { setChildren(out, el("p", { class: "unavailable", text: BQ_NO_RUNTIME })); return; }
-    const sql = text(c).replace(/^\s*%%bigquery[^\n]*\n?/, "");
+  let runtime = { state: "DISCONNECTED" };
+  const status = el("p", { class: "unavailable bq-nb-runtime", role: "status", "aria-live": "polite" });
+  const connectBtn = el("button", { type: "button", class: "secondary", text: "Connect" });
+  const interruptBtn = el("button", { type: "button", class: "secondary", text: "Interrupt execution" });
+  const restartBtn = el("button", { type: "button", class: "secondary", text: "Restart session" });
+  const deleteBtn = el("button", { type: "button", class: "secondary", text: "Disconnect and delete runtime" });
+  const showRuntime = (r) => {
+    runtime = r || { state: "DISCONNECTED" };
+    const on = runtime.state === "CONNECTED";
+    const busy = runtime.state === "BUILDING" || runtime.state === "STARTING";
+    connectBtn.textContent = on ? "Connected" : busy ? "Connecting…" : "Connect";
+    connectBtn.disabled = on || busy;
+    connectBtn.setAttribute("aria-pressed", on ? "true" : "false");
+    interruptBtn.hidden = restartBtn.hidden = deleteBtn.hidden = !on;
+    status.className = runtime.state === "FAILED" ? "form-error bq-nb-runtime" : "unavailable bq-nb-runtime";
+    status.textContent = on ? `Connected to a runtime: Python ${runtime.python}, project ${runtime.project}, idle shutdown after ${runtime.idleShutdown}.`
+      : busy ? (runtime.message || "Starting the runtime…")
+        : runtime.state === "FAILED" ? `The runtime failed: ${runtime.message}` : "Not connected.";
+  };
+  // connect starts the runtime and waits for it, as Colab's Connect does.
+  const connect = async () => {
+    let r = await bqRuntimeCall("connect", key);
+    showRuntime(r);
+    while (r.state === "BUILDING" || r.state === "STARTING") {
+      await new Promise((ok) => setTimeout(ok, 1000));
+      r = await bqRuntimeCall("status", key);
+      showRuntime(r);
+    }
+    if (r.state !== "CONNECTED") throw new Error(`The runtime failed: ${r.message || r.state}`);
+    announce("Connected to a runtime");
+    return r;
+  };
+  connectBtn.addEventListener("click", () => connect().catch((err) => { showRuntime({ state: "FAILED", message: err.message }); }));
+  interruptBtn.addEventListener("click", () => bqRuntimeCall("interrupt", key).then(() => announce("Interrupted")).catch((err) => notify(err.message, "error")));
+  restartBtn.addEventListener("click", async () => {
+    try {
+      showRuntime({ state: "STARTING", message: "Restarting the session…" });
+      showRuntime(await bqRuntimeCall("restart", key));
+      await connect();
+      for (const c of doc.cells) if (c.cell_type === "code") c.execution_count = null;
+      keep(); draw();
+      announce("Session restarted");
+    } catch (err) { showRuntime({ state: "FAILED", message: err.message }); }
+  });
+  deleteBtn.addEventListener("click", async () => {
+    showRuntime({ state: "STARTING", message: "Deleting the runtime…" });
+    try { await bqRuntimeCall("disconnect", key); showRuntime({ state: "DISCONNECTED" }); announce("Runtime deleted"); } catch (err) { showRuntime({ state: "FAILED", message: err.message }); }
+  });
+  const runCell = async (c, out, label) => {
+    if (c.cell_type !== "code") return true;
     setChildren(out, spinner("Running cell"));
     try {
+      if (runtime.state !== "CONNECTED" && !isSql(c)) await connect();
+      if (runtime.state === "CONNECTED") {
+        const res = await bqRuntimeCall("run", key, { code: text(c) });
+        c.outputs = res.outputs || [];
+        c.execution_count = res.execution_count;
+        keep();
+        if (label) label.textContent = `[${res.execution_count}]`;
+        setChildren(out, ...bqNotebookOutputs(c.outputs));
+        return res.status === "ok";
+      }
+      // No runtime: the SQL of a %%bigquery cell runs on this instance's
+      // BigQuery as a query job, its rows drawn under the cell.
+      const sql = text(c).replace(/^\s*%%bigquery[^\n]*\n?/, "");
       const res = await bqStudioCall("query", { query: sql, legacySql: false, priority: "INTERACTIVE" });
-      if (res.confirm) { setChildren(out, el("p", { class: "unavailable", text: "A statement that changes data runs from a SQL query tab, which asks first." })); return; }
+      if (res.confirm) { setChildren(out, el("p", { class: "unavailable", text: "A statement that changes data runs from a SQL query tab, which asks first, or on a connected runtime." })); return false; }
       const cols = (res.schema || []).map((f) => f.name);
       setChildren(out, el("p", { class: "unavailable", text: `${res.totalRows} rows` }),
         el("div", { class: "table-scroll" }, el("table", { class: "bq-nb-table" },
@@ -21535,32 +22397,45 @@ function bqNotebookTab(tab, ctx) {
           el("tbody", {}, ...(res.rows || []).slice(0, 100).map((r) => el("tr", {}, ...cols.map((k) => el("td", { text: cellText(r[k]) }))))))));
       c.outputs = [{ output_type: "execute_result", data: { "text/plain": `${res.totalRows} rows` }, metadata: {}, execution_count: null }];
       keep();
+      return true;
     } catch (err) {
       setChildren(out, el("p", { class: "form-error", role: "alert", text: err.message }));
+      return false;
     }
   };
   const draw = () => setChildren(cellsHost, ...doc.cells.map((c, i) => {
     const area = el("textarea", { class: "query-editor mono bq-nb-source", rows: String(Math.max(3, text(c).split("\n").length)),
       spellcheck: "false", "aria-label": `Cell ${i + 1}, ${c.cell_type === "markdown" ? "text" : isSql(c) ? "SQL" : "Python"}` });
     area.value = text(c);
-    const out = el("div", { class: "bq-nb-output", role: "status" });
+    const out = el("div", { class: "bq-nb-output", role: "status" }, ...(c.cell_type === "code" ? bqNotebookOutputs(c.outputs) : []));
+    const count = el("span", { class: "mono bq-nb-count", text: c.cell_type === "code" ? `[${c.execution_count == null ? " " : c.execution_count}]` : "" });
     area.addEventListener("input", () => { c.source = area.value; keep(); });
+    // Shift+Enter runs the cell, as in Colab.
+    area.addEventListener("keydown", (e) => { if (e.key === "Enter" && e.shiftKey && c.cell_type === "code") { e.preventDefault(); runCell(c, out, count); } });
     return el("li", { class: "bq-nb-cell bq-nb-" + c.cell_type },
-      el("div", { class: "bq-nb-cell-bar" },
+      el("div", { class: "bq-nb-cell-bar" }, count,
         el("span", { class: "unavailable", text: c.cell_type === "markdown" ? "Text" : isSql(c) ? "SQL (%%bigquery)" : "Python" }),
-        c.cell_type === "code" ? el("button", { type: "button", class: "secondary", text: "Run cell", "aria-label": `Run cell ${i + 1}`, onclick: () => runCell(c, out) }) : null,
+        c.cell_type === "code" ? el("button", { type: "button", class: "secondary", text: "Run cell", "aria-label": `Run cell ${i + 1}`, onclick: () => runCell(c, out, count) }) : null,
         el("button", { type: "button", class: "secondary", text: "Delete cell", "aria-label": `Delete cell ${i + 1}`, onclick: () => { doc.cells.splice(i, 1); keep(); draw(); } })),
       area, out);
   }));
   const addCell = (type, source) => { doc.cells.push({ cell_type: type, source, metadata: {}, ...(type === "code" ? { outputs: [], execution_count: null } : {}) }); keep(); draw(); };
   const runAll = async () => {
-    const outs = [...cellsHost.querySelectorAll(".bq-nb-output")];
-    for (let i = 0; i < doc.cells.length; i++) await runCell(doc.cells[i], outs[i]);
+    const items = [...cellsHost.querySelectorAll(".bq-nb-cell")];
+    for (let i = 0; i < doc.cells.length; i++) {
+      // Run all stops at the first cell that fails, as Colab's does.
+      if (!(await runCell(doc.cells[i], items[i].querySelector(".bq-nb-output"), items[i].querySelector(".bq-nb-count")))) { announce(`Run all stopped at cell ${i + 1}`); return; }
+    }
     announce("Run all finished");
   };
   draw();
+  showRuntime(runtime);
+  bqRuntimeCall("status", key).then(showRuntime).catch((err) => {
+    connectBtn.disabled = true;
+    status.textContent = `${err.message}. %%bigquery cells still run on this instance's BigQuery.`;
+  });
   const toolbar = el("div", { class: "bq-toolbar", role: "toolbar", "aria-label": "Notebook actions" },
-    el("button", { type: "button", class: "secondary", text: "Connect", disabled: true, title: BQ_NO_RUNTIME, "aria-description": BQ_NO_RUNTIME }),
+    connectBtn, interruptBtn, restartBtn, deleteBtn,
     el("button", { type: "button", class: "secondary", text: "+ Code", onclick: () => addCell("code", "") }),
     el("button", { type: "button", class: "secondary", text: "+ SQL", onclick: () => addCell("code", "%%bigquery\n") }),
     el("button", { type: "button", class: "secondary", text: "+ Text", onclick: () => addCell("markdown", "") }),
@@ -21569,8 +22444,8 @@ function bqNotebookTab(tab, ctx) {
     el("button", { type: "button", class: "secondary", text: "Version history", disabled: tab.savedId ? null : true,
       title: tab.savedId ? null : "Save the notebook first", onclick: () => bqVersionHistory({ id: tab.savedId, name: tab.title, kind: "notebook" }, (content, title) => ctx.openAsset("notebook", content, title)) }),
     tab.savedId ? el("button", { type: "button", class: "secondary", text: "Share", onclick: () => bqManagePermissions({ id: tab.savedId, name: tab.title }) }) : null);
-  return el("div", { class: "bq-notebook" }, toolbar,
-    el("p", { class: "unavailable bq-hint", text: BQ_NO_RUNTIME + " " + (bqDataformOn() ? BQ_DATAFORM_NOTE : BQ_NO_DATAFORM) }),
+  return el("div", { class: "bq-notebook" }, toolbar, status,
+    el("p", { class: "unavailable bq-hint", text: BQ_RUNTIME_NOTE + " " + (bqDataformOn() ? BQ_DATAFORM_NOTE : BQ_NO_DATAFORM) }),
     cellsHost);
 }
 
@@ -21578,20 +22453,57 @@ function bqNotebookTab(tab, ctx) {
 //
 // A data canvas tab, in Google's nodes
 // (https://docs.cloud.google.com/bigquery/docs/data-canvas, read
-// 2026-11-21): Search (tables of this project by name, or by a natural
+// 2026-11-22): Search (tables of this project by name, or by a natural
 // language question the local model answers), Table (schema and preview,
-// with Query these results, Join and Visualize), SQL (written, or
-// generated from a prompt by the local model, then Run), Visualization
-// (bar, line, pie or scatter of a parent's result) and Text. Each node
-// lists its parents, so the canvas is a directed graph, saved as JSON in
-// its Dataform asset. Google's natural language steps are Gemini in
-// BigQuery's; here they are the instance's local model, and unverified
-// against Google's.
+// with Query these results, Join, Visualize and Generate insights), SQL
+// (written, or generated from a prompt by the local model, then Run, Save
+// to table, Export as notebook), Destination (a SQL node's result saved to
+// a new or existing table of a new or existing dataset, kept updated when
+// its SQL node runs while its SQL toggle is on, or Detached into a table
+// node), Visualization (Auto-Chart, bar, heat map, line, pie or scatter of a
+// parent's result, Export as PNG), Insights (the parent's statistics and
+// data quality, computed by a query over the whole result, and a summary by
+// the local model) and Text. Each node lists its parents, so the canvas is
+// a directed graph, saved as JSON in its Dataform asset. The Data Canvas
+// Assistant (Open Data Canvas Assistant) takes a data question with its
+// Settings (Add Data, Instructions) and adds the nodes that answer it. The
+// natural language steps are Gemini in BigQuery's at Google; here they are
+// the instance's local model, and unverified against Google's.
+
+const BQ_CANVAS_CHARTS = ["Auto-Chart", "Bar", "Heat map", "Line", "Pie", "Scatter"];
+
+// bqAutoChart is Auto-Chart's choice: a line over time, a scatter of two
+// numbers, a pie of a few categories, else bars.
+function bqAutoChart(res, viz) {
+  const f = (res.schema || []).find((x) => x.name === viz.dimension) || {};
+  if (["TIMESTAMP", "DATE", "DATETIME", "TIME"].includes(f.type)) return "Line";
+  if (BQ_MEASURE_TYPES.includes(f.type)) return "Scatter";
+  const distinct = new Set((res.rows || []).map((r) => cellText(r[viz.dimension]))).size;
+  return distinct > 1 && distinct <= 6 && viz.measures.length === 1 ? "Pie" : "Bar";
+}
+
+// bqInsightsSQL profiles a query's whole result: its row count, then each
+// column's nulls and distinct values, and a number's minimum, maximum,
+// average and standard deviation.
+function bqInsightsSQL(sql, schema) {
+  const q = (n) => "`" + n.replace(/`/g, "") + "`";
+  const parts = ["COUNT(*) AS row_count"];
+  schema.filter((f) => (f.mode || "NULLABLE") !== "REPEATED" && f.type !== "RECORD" && f.type !== "STRUCT").forEach((f, i) => {
+    parts.push(`COUNTIF(${q(f.name)} IS NULL) AS c${i}_nulls`);
+    if (f.type !== "GEOGRAPHY" && f.type !== "JSON") parts.push(`COUNT(DISTINCT ${q(f.name)}) AS c${i}_distinct`);
+    if (BQ_MEASURE_TYPES.includes(f.type)) {
+      parts.push(`MIN(${q(f.name)}) AS c${i}_min`, `MAX(${q(f.name)}) AS c${i}_max`,
+        `AVG(CAST(${q(f.name)} AS FLOAT64)) AS c${i}_avg`, `STDDEV(CAST(${q(f.name)} AS FLOAT64)) AS c${i}_stddev`);
+    }
+  });
+  return `SELECT ${parts.join(", ")}\nFROM (\n${sql}\n)`;
+}
 
 function bqCanvasTab(tab, ctx) {
   let doc;
   try { doc = JSON.parse(tab.query || ""); } catch { doc = null; }
   if (!doc || !Array.isArray(doc.nodes)) doc = { nodes: [] };
+  if (!doc.assistant) doc.assistant = { tables: [], instructions: "", chat: [] };
   let next = doc.nodes.reduce((n, x) => Math.max(n, x.id), 0);
   const results = {};
   const keep = () => { tab.query = JSON.stringify(doc); ctx.save(); };
@@ -21603,67 +22515,146 @@ function bqCanvasTab(tab, ctx) {
     if (!t) return [];
     return t.datasets.flatMap((ds) => ds.tables.filter((x) => x.type !== "MODEL").map((x) => ({ ref: `${t.project}.${ds.id}.${x.id}`, dataset: ds.id, id: x.id })));
   };
-  const sqlOf = (n) => (n.type === "table" ? `SELECT * FROM \`${n.ref}\`` : n.sql || "");
+  const datasets = () => ((ctx.tree() || {}).datasets || []).map((d) => d.id);
+  const project = () => (ctx.tree() || {}).project || currentProject();
+  const q = (s) => "`" + String(s).replace(/`/g, "") + "`";
+  // A Destination node, once saved, reads as its table.
+  const refOf = (n) => (n.type === "table" ? n.ref : n.type === "dest" && n.saved ? `${project()}.${n.dataset}.${n.table}` : "");
+  const sqlOf = (n) => (refOf(n) ? `SELECT * FROM ${q(refOf(n))}` : n.sql || "");
+  const queryOf = async (sql, write) => {
+    const res = await bqStudioCall("query", { query: sql, legacySql: false, priority: "INTERACTIVE", write: !!write });
+    if (res.confirm) throw new Error("A statement that changes data runs from a SQL query tab, which asks first.");
+    return res;
+  };
   const runNode = async (n, out) => {
     setChildren(out, spinner("Running"));
     try {
-      const res = await bqStudioCall("query", { query: n.type === "table" ? `${sqlOf(n)} LIMIT 100` : sqlOf(n), legacySql: false, priority: "INTERACTIVE" });
-      if (res.confirm) { setChildren(out, el("p", { class: "unavailable", text: "A statement that changes data runs from a SQL query tab, which asks first." })); return; }
-      results[n.id] = res;
+      results[n.id] = await queryOf(refOf(n) ? `${sqlOf(n)} LIMIT 100` : sqlOf(n));
       drawResult(n, out);
+      // A Destination node with its SQL toggle on follows its SQL node.
+      if (n.type === "sql") {
+        for (const d of doc.nodes.filter((x) => x.type === "dest" && x.sync && x.saved && x.parents.includes(n.id))) await saveDest(d, null);
+      }
+      return true;
     } catch (err) {
       setChildren(out, el("p", { class: "form-error", role: "alert", text: err.message }));
+      return false;
     }
   };
   const drawResult = (n, out) => {
     const res = results[n.id];
-    if (!res) return;
+    if (!res || !out) return;
     const cols = (res.schema || []).map((f) => f.name);
     setChildren(out,
-      n.type === "table" ? el("p", { class: "unavailable", text: "Schema: " + (res.schema || []).map((f) => `${f.name} ${f.type}`).join(", ") }) : null,
+      refOf(n) ? el("p", { class: "unavailable", text: "Schema: " + (res.schema || []).map((f) => `${f.name} ${f.type}`).join(", ") }) : null,
       el("div", { class: "table-scroll" }, el("table", { class: "bq-nb-table" },
         el("thead", {}, el("tr", {}, ...cols.map((h) => el("th", { scope: "col", text: h })))),
         el("tbody", {}, ...(res.rows || []).slice(0, 20).map((r) => el("tr", {}, ...cols.map((k) => el("td", { text: cellText(r[k]) }))))))));
   };
-  const nodeTitle = (n) => ({ search: "Search", table: "Table", sql: "SQL", viz: "Visualization", text: "Text" })[n.type] + ` ${n.id}`;
+  const nodeTitle = (n) => ({ search: "Search", table: "Table", sql: "SQL", viz: "Visualization", text: "Text", dest: "Destination", insights: "Insights" })[n.type] + ` ${n.id}`;
   const nodeActions = (n, out) => {
-    if (!["table", "sql"].includes(n.type)) return null;
+    if (!["table", "sql"].includes(n.type) && !(n.type === "dest" && n.saved)) return null;
     return el("div", { class: "bq-canvas-actions" },
       el("button", { type: "button", class: "secondary", text: "Run", "aria-label": `Run ${nodeTitle(n)}`, onclick: () => runNode(n, out) }),
       el("button", { type: "button", class: "secondary", text: "Query these results", "aria-label": `Query these results of ${nodeTitle(n)}`,
         onclick: () => add({ type: "sql", parents: [n.id], sql: `SELECT *\nFROM (\n${sqlOf(n)}\n)\nLIMIT 1000` }) }),
       el("button", { type: "button", class: "secondary", text: "Join", "aria-label": `Join ${nodeTitle(n)}`, onclick: () => joinFrom(n) }),
       el("button", { type: "button", class: "secondary", text: "Visualize", "aria-label": `Visualize ${nodeTitle(n)}`,
-        onclick: () => add({ type: "viz", parents: [n.id], chart: "Bar" }) }));
+        onclick: () => add({ type: "viz", parents: [n.id], chart: "Auto-Chart" }) }),
+      el("button", { type: "button", class: "secondary", text: "Generate insights", "aria-label": `Generate insights of ${nodeTitle(n)}`,
+        onclick: () => add({ type: "insights", parents: [n.id] }) }),
+      n.type === "sql" ? el("button", { type: "button", class: "secondary", text: "Save to table", "aria-label": `Save ${nodeTitle(n)} to a table`,
+        onclick: () => add({ type: "dest", parents: [n.id], dataset: datasets()[0] || "", table: "", sync: true }) }) : null,
+      n.type === "sql" ? el("button", { type: "button", class: "secondary", text: "Export as notebook", "aria-label": `Export ${nodeTitle(n)} as notebook`,
+        onclick: () => ctx.openAsset("notebook", bqNotebookDoc([["code", "%%bigquery\n" + sqlOf(n)]]), `${tab.title} SQL ${n.id}`) }) : null);
   };
   const joinFrom = (n) => {
-    const others = doc.nodes.filter((x) => x.type === "table" && x.id !== n.id);
+    const others = doc.nodes.filter((x) => refOf(x) && x.id !== n.id);
     if (!others.length) { notify("Join needs a second table on the canvas: add one from a Search node.", "error"); return; }
     const o = others[0];
     add({ type: "sql", parents: [n.id, o.id], prompt: "", sql: `SELECT *\nFROM (${sqlOf(n)}) AS a\nJOIN (${sqlOf(o)}) AS b\nON a.<column> = b.<column>` });
+  };
+  // saveDest writes the parent SQL node's whole result to the node's table:
+  // the dataset made if it is new, the table made or replaced.
+  const saveDest = async (n, status) => {
+    const parent = byId(n.parents[0]);
+    const say = (cls, t) => { if (status) { status.className = cls; status.textContent = t; } };
+    if (!parent || parent.type !== "sql") { say("form-error", "A Destination node saves a SQL node's result: it has none."); return; }
+    if (!/^[A-Za-z0-9_]{1,1024}$/.test(n.dataset || "")) { say("form-error", "Dataset: letters, numbers and underscores only."); return; }
+    if (!/^[\p{L}\p{M}\p{N}\p{Pc}\p{Pd} ]{1,1024}$/u.test(n.table || "")) { say("form-error", "Table: enter a table name."); return; }
+    say("unavailable", "Saving…");
+    try {
+      if (!datasets().includes(n.dataset)) await queryOf(`CREATE SCHEMA IF NOT EXISTS ${q(project() + "." + n.dataset)}`, true);
+      await queryOf(`CREATE OR REPLACE TABLE ${q(`${project()}.${n.dataset}.${n.table}`)} AS\n${parent.sql}`, true);
+      n.saved = true; keep();
+      say("unavailable", `Saved to ${project()}.${n.dataset}.${n.table}.`);
+      announce(`Saved to table ${n.table}`);
+      if (status) draw();
+    } catch (err) { say("form-error", err.message); }
+  };
+  const runInsights = async (n, out) => {
+    const parent = byId(n.parents[0]);
+    if (!parent) { setChildren(out, el("p", { class: "form-error", role: "alert", text: "Insights need a table or SQL node." })); return; }
+    setChildren(out, spinner("Generating insights"));
+    try {
+      const sample = results[parent.id] || await queryOf(`${sqlOf(parent)} LIMIT 100`);
+      const schema = sample.schema || [];
+      const prof = await queryOf(bqInsightsSQL(sqlOf(parent), schema));
+      const row = (prof.rows || [])[0] || {};
+      const usable = schema.filter((f) => (f.mode || "NULLABLE") !== "REPEATED" && f.type !== "RECORD" && f.type !== "STRUCT");
+      const total = Number(row.row_count || 0);
+      const lines = usable.map((f, i) => {
+        const nulls = Number(row[`c${i}_nulls`] || 0), distinct = row[`c${i}_distinct`];
+        const facts = [`${nulls} null${nulls === 1 ? "" : "s"}${total ? ` (${((100 * nulls) / total).toFixed(1)}%)` : ""}`];
+        if (distinct !== undefined) facts.push(`${distinct} distinct`);
+        if (row[`c${i}_min`] !== undefined) facts.push(`min ${cellText(row[`c${i}_min`])}`, `max ${cellText(row[`c${i}_max`])}`,
+          `average ${bqShortNumber(Number(row[`c${i}_avg`] || 0))}`, `standard deviation ${row[`c${i}_stddev`] == null ? "n/a" : bqShortNumber(Number(row[`c${i}_stddev`]))}`);
+        const flags = [];
+        if (total && nulls / total > 0.2) flags.push("many nulls");
+        if (total > 1 && distinct !== undefined && Number(distinct) === total) flags.push("unique: a candidate key");
+        if (distinct !== undefined && Number(distinct) === 1 && total > 1) flags.push("one value");
+        return { name: f.name, type: f.type, text: facts.join(", "), flags };
+      });
+      n.insights = { rows: total, columns: lines };
+      keep();
+      const body = [el("p", { text: `${total} rows, ${usable.length} columns.` }),
+        el("ul", { class: "bq-canvas-stats" }, ...lines.map((l) => el("li", {}, el("strong", { text: `${l.name} (${l.type}): ` }),
+          el("span", { text: l.text }), l.flags.length ? el("span", { class: "bq-canvas-flag", text: ` · ${l.flags.join(", ")}` }) : null)))];
+      setChildren(out, ...body, spinner("Asking the local model for a summary"));
+      try {
+        n.summary = await bqLocalModel(`Summarize the trends, patterns, anomalies and data quality of this BigQuery result in at most five short bullet points.\n` +
+          `Rows: ${total}\nColumns:\n${lines.map((l) => `${l.name} ${l.type}: ${l.text}`).join("\n")}\nSample rows (JSON):\n${JSON.stringify((sample.rows || []).slice(0, 20))}`);
+        keep();
+        setChildren(out, ...body, el("h4", { text: "Summary (local model)" }), el("p", { class: "bq-canvas-summary", text: n.summary }));
+      } catch (err) {
+        setChildren(out, ...body, el("p", { class: "unavailable", text: err.message }));
+      }
+    } catch (err) {
+      setChildren(out, el("p", { class: "form-error", role: "alert", text: err.message }));
+    }
   };
   const drawNode = (n) => {
     const out = el("div", { class: "bq-nb-output", role: "status" });
     const parents = n.parents.map(byId).filter(Boolean);
     const body = [];
     if (n.type === "search") {
-      const q = el("input", { type: "search", id: `bq-canvas-q-${n.id}`, value: n.query || "", "aria-label": `Search ${n.id}: tables to find` });
+      const q2 = el("input", { type: "search", id: `bq-canvas-q-${n.id}`, value: n.query || "", "aria-label": `Search ${n.id}: tables to find` });
       const list = el("ul", { class: "bq-canvas-found" });
       const show = (refs) => setChildren(list, ...(refs.length ? refs.map((t) => el("li", {}, el("span", { class: "mono", text: t.ref + " " }),
         el("button", { type: "button", class: "secondary", text: "Add to canvas", "aria-label": `Add ${t.ref} to canvas`,
           onclick: () => add({ type: "table", parents: [n.id], ref: t.ref }) })))
         : [el("li", { class: "unavailable", text: "No tables match." })]));
-      const find = () => { n.query = q.value; keep(); const w = q.value.toLowerCase().split(/\s+/).filter(Boolean); show(tables().filter((t) => w.every((x) => t.ref.toLowerCase().includes(x)))); };
+      const find = () => { n.query = q2.value; keep(); const w = q2.value.toLowerCase().split(/\s+/).filter(Boolean); show(tables().filter((t) => w.every((x) => t.ref.toLowerCase().includes(x)))); };
       const ask = async () => {
-        n.query = q.value; keep();
+        n.query = q2.value; keep();
         setChildren(list, spinner("Asking the local model"));
         try {
           const all = tables();
-          const answer = await bqLocalModel(`Which of these BigQuery tables answer: "${q.value}"? Reply with the table names only, one per line.\n${all.map((t) => t.ref).join("\n")}`);
+          const answer = await bqLocalModel(`Which of these BigQuery tables answer: "${q2.value}"? Reply with the table names only, one per line.\n${all.map((t) => t.ref).join("\n")}`);
           show(all.filter((t) => answer.includes(t.ref) || answer.includes(t.id)));
         } catch (err) { setChildren(list, el("li", { class: "form-error", role: "alert", text: err.message })); }
       };
-      body.push(el("div", { class: "bq-canvas-row" }, q,
+      body.push(el("div", { class: "bq-canvas-row" }, q2,
         el("button", { type: "button", class: "secondary", text: "Search", onclick: find }),
         el("button", { type: "button", class: "secondary", text: "Ask in natural language", onclick: ask })), list);
     } else if (n.type === "table") {
@@ -21677,7 +22668,7 @@ function bqCanvasTab(tab, ctx) {
       const generate = async () => {
         n.prompt = prompt.value; keep();
         try {
-          const ctxTables = parents.filter((p) => p.type === "table").map((p) => ({ ref: p.ref, schema: (results[p.id] || {}).schema }));
+          const ctxTables = parents.filter((p) => refOf(p)).map((p) => ({ ref: refOf(p), schema: (results[p.id] || {}).schema }));
           const answer = await bqLocalModel(`Write one GoogleSQL query for BigQuery. Tables:\n${bqSchemaText(ctxTables.length ? ctxTables : tables())}\nRequest: ${prompt.value}\nAnswer with the SQL only.`);
           area.value = bqSqlOf(answer);
           n.sql = area.value; keep();
@@ -21685,19 +22676,52 @@ function bqCanvasTab(tab, ctx) {
         } catch (err) { notify(err.message, "error"); }
       };
       body.push(el("div", { class: "bq-canvas-row" }, prompt, el("button", { type: "button", class: "secondary", text: "Generate", onclick: generate })), area);
+    } else if (n.type === "dest") {
+      const id = `bq-canvas-d-${n.id}`;
+      const status = el("p", { class: "unavailable", role: "status", text: n.saved ? `Saved to ${project()}.${n.dataset}.${n.table}.` : "Not saved yet." });
+      const dsList = el("datalist", { id: `${id}-datasets` }, ...datasets().map((d) => el("option", { value: d })));
+      const ds = el("input", { type: "text", id: `${id}-ds`, value: n.dataset || "", list: `${id}-datasets`, autocomplete: "off" });
+      const tbList = el("datalist", { id: `${id}-tables` }, ...tables().filter((t) => t.dataset === n.dataset).map((t) => el("option", { value: t.id })));
+      const tb = el("input", { type: "text", id: `${id}-tb`, value: n.table || "", list: `${id}-tables`, autocomplete: "off" });
+      ds.addEventListener("input", () => { n.dataset = ds.value.trim(); n.saved = false; keep(); });
+      tb.addEventListener("input", () => { n.table = tb.value.trim(); n.saved = false; keep(); });
+      const sync = el("input", { type: "checkbox", id: `${id}-sync`, role: "switch" });
+      sync.checked = !!n.sync;
+      sync.addEventListener("change", () => { n.sync = sync.checked; keep(); });
+      body.push(el("div", { class: "bq-canvas-dest-fields" },
+        el("label", { for: `${id}-ds`, text: "Dataset (new or existing)" }), ds, dsList,
+        el("label", { for: `${id}-tb`, text: "Table (new or existing)" }), tb, tbList),
+        el("div", { class: "bq-canvas-row" },
+          el("label", { class: "check-line", for: `${id}-sync` }, sync, el("span", { text: " SQL: keep the table updated when the SQL node runs" }))),
+        el("div", { class: "bq-canvas-row" },
+          el("button", { type: "button", class: "primary", text: "Save", "aria-label": `Save ${nodeTitle(n)}`, onclick: () => saveDest(n, status) }),
+          el("button", { type: "button", class: "secondary", text: "Detach", "aria-label": `Detach ${nodeTitle(n)}`, disabled: n.saved ? null : true,
+            title: n.saved ? "A table node that no longer follows its SQL node" : "Save the table first",
+            onclick: () => { Object.assign(n, { type: "table", ref: refOf(n), parents: [] }); keep(); draw(); announce("Detached into a table node"); } })),
+        status);
+    } else if (n.type === "insights") {
+      body.push(el("div", { class: "bq-canvas-row" },
+        el("button", { type: "button", class: "secondary", text: "Run", "aria-label": `Run ${nodeTitle(n)}`, onclick: () => runInsights(n, out) })));
+      if (n.insights) {
+        setChildren(out, el("p", { text: `${n.insights.rows} rows, ${n.insights.columns.length} columns.` }),
+          el("ul", { class: "bq-canvas-stats" }, ...n.insights.columns.map((l) => el("li", {}, el("strong", { text: `${l.name} (${l.type}): ` }),
+            el("span", { text: l.text }), l.flags.length ? el("span", { class: "bq-canvas-flag", text: ` · ${l.flags.join(", ")}` }) : null))),
+          n.summary ? el("h4", { text: "Summary (local model)" }) : null, n.summary ? el("p", { class: "bq-canvas-summary", text: n.summary }) : null);
+      }
     } else if (n.type === "viz") {
       const chart = el("select", { id: `bq-canvas-c-${n.id}`, "aria-label": `Visualization ${n.id}: chart type`,
         onchange: (e) => { n.chart = e.target.value; keep(); draw(); } },
-        ...["Bar", "Line", "Scatter"].map((t) => { const o = el("option", { value: t, text: t }); o.selected = t === n.chart; return o; }));
+        ...BQ_CANVAS_CHARTS.map((t) => { const o = el("option", { value: t, text: t }); o.selected = t === (n.chart || "Auto-Chart"); return o; }));
       const chartHost = el("div", { class: "bq-chart-host" });
       const parent = parents[0];
       const drawIt = () => {
         const res = parent && results[parent.id];
         if (!res) { setChildren(chartHost, el("p", { class: "unavailable", text: "Run the parent node to chart its result." })); return; }
-        const viz = { type: n.chart || "Bar" };
+        const viz = { type: n.chart === "Auto-Chart" || !n.chart ? "Bar" : n.chart };
         const fit = bqVizDefaults(res, viz);
-        if (!fit.dims) { setChildren(chartHost, fit.empty); return; }
-        viz.type = n.chart || "Bar";
+        if (!fit.dims || viz.type === "Map") { setChildren(chartHost, fit.empty || el("p", { class: "unavailable", text: "Geomap charts aren't supported on a data canvas." })); return; }
+        viz.type = n.chart === "Auto-Chart" || !n.chart ? bqAutoChart(res, viz) : n.chart;
+        bqVizDefaults(res, viz);
         bqDrawChart(chartHost, res, fit.dims, viz);
       };
       body.push(el("div", { class: "bq-canvas-row" }, chart,
@@ -21723,20 +22747,100 @@ function bqCanvasTab(tab, ctx) {
     return node;
   };
   const draw = () => setChildren(host, ...(doc.nodes.length ? doc.nodes.map(drawNode)
-    : [el("li", { class: "unavailable", text: "Start with a Search, SQL or Text node from the toolbar." })]));
+    : [el("li", { class: "unavailable", text: "Start with a Search, SQL or Text node from the toolbar, or ask the Data Canvas Assistant." })]));
+
+  // The Data Canvas Assistant: a chat that adds nodes for a data question,
+  // over the tables chosen in its Settings (Add Data) and its Instructions.
+  const assistant = doc.assistant;
+  const chat = el("ol", { class: "bq-canvas-chat", "aria-label": "Assistant conversation" });
+  const drawChat = () => setChildren(chat, ...(assistant.chat.length ? assistant.chat.map((m) =>
+    el("li", { class: "bq-canvas-msg is-" + m.role }, el("strong", { text: m.role === "user" ? "You: " : "Assistant: " }), el("span", { text: m.text })))
+    : [el("li", { class: "unavailable", text: "Ask a data question about the tables in Settings." })]));
+  const settings = el("div", { class: "bq-canvas-settings", hidden: true });
+  const drawSettings = () => {
+    const all = tables();
+    setChildren(settings, el("h4", { text: "Add Data" }),
+      all.length ? el("ul", { class: "bq-canvas-found" }, ...all.map((t, i) => {
+        const box = el("input", { type: "checkbox", id: `bq-ca-t-${i}` });
+        box.checked = assistant.tables.includes(t.ref);
+        box.addEventListener("change", () => {
+          assistant.tables = box.checked ? [...new Set([...assistant.tables, t.ref])] : assistant.tables.filter((r) => r !== t.ref);
+          keep();
+        });
+        return el("li", {}, el("label", { class: "check-line", for: `bq-ca-t-${i}` }, box, el("span", { class: "mono", text: " " + t.ref })));
+      })) : el("p", { class: "unavailable", text: "This project has no tables." }),
+      el("label", { for: "bq-ca-instructions", text: "Instructions" }),
+      (() => { const a = el("textarea", { id: "bq-ca-instructions", rows: "3" }); a.value = assistant.instructions || ""; a.addEventListener("input", () => { assistant.instructions = a.value; keep(); }); return a; })());
+  };
+  const question = el("input", { type: "text", id: "bq-ca-question", placeholder: "Ask a data question", "aria-label": "Ask a data question" });
+  const ask = async () => {
+    const text = question.value.trim();
+    if (!text) return;
+    assistant.chat.push({ role: "user", text });
+    question.value = "";
+    keep(); drawChat();
+    try {
+      const chosen = tables().filter((t) => !assistant.tables.length || assistant.tables.includes(t.ref));
+      const withSchema = [];
+      for (const t of chosen.slice(0, 20)) {
+        let schema = [];
+        try { schema = (await queryOf(`SELECT * FROM ${q(t.ref)} LIMIT 0`)).schema || []; } catch { /* listed without columns */ }
+        withSchema.push({ ref: t.ref, schema });
+      }
+      const answer = await bqLocalModel("You build a BigQuery data canvas. Answer with JSON only: " +
+        '{"reply": "<one sentence>", "sql": "<one GoogleSQL query answering the question>", "chart": "Bar|Line|Pie|Scatter|Heat map|none"}.\n' +
+        `Tables:\n${bqSchemaText(withSchema)}\n` + (assistant.instructions ? `Instructions: ${assistant.instructions}\n` : "") + `Question: ${text}`);
+      let plan;
+      try { plan = JSON.parse((/\{[\s\S]*\}/.exec(answer) || [answer])[0]); } catch { plan = { reply: answer, sql: bqSqlOf(answer) }; }
+      const used = withSchema.filter((t) => plan.sql && plan.sql.includes(t.ref.split(".").pop()));
+      const parentIds = used.map((t) => (doc.nodes.find((x) => x.type === "table" && x.ref === t.ref) || add({ type: "table", ref: t.ref })).id);
+      let note = plan.reply || "Here is a query for that.";
+      if (plan.sql && /\bselect\b/i.test(plan.sql)) {
+        const sqlNode = add({ type: "sql", parents: parentIds, prompt: text, sql: String(plan.sql).trim() });
+        const ok = await runNode(sqlNode, host.querySelector(`[data-node="${sqlNode.id}"] .bq-nb-output`));
+        if (ok && plan.chart && plan.chart !== "none") add({ type: "viz", parents: [sqlNode.id], chart: BQ_CANVAS_CHARTS.includes(plan.chart) ? plan.chart : "Auto-Chart" });
+        note += ok ? ` Added SQL ${sqlNode.id}${plan.chart && plan.chart !== "none" ? " and a visualization" : ""}.` : ` SQL ${sqlNode.id} failed: edit it and run it again.`;
+      }
+      assistant.chat.push({ role: "assistant", text: note });
+    } catch (err) {
+      assistant.chat.push({ role: "assistant", text: err.message });
+    }
+    keep(); drawChat();
+  };
+  question.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); ask(); } });
+  const panel = el("aside", { class: "bq-canvas-assistant", "aria-label": "Data Canvas Assistant", hidden: true },
+    el("div", { class: "bq-nb-cell-bar" }, el("h3", { text: "Data Canvas Assistant" }),
+      el("button", { type: "button", class: "secondary", text: "Settings", "aria-expanded": "false", onclick: (e) => {
+        settings.hidden = !settings.hidden; e.target.setAttribute("aria-expanded", String(!settings.hidden)); if (!settings.hidden) drawSettings();
+      } })),
+    el("p", { class: "unavailable", text: "Answers come from this instance's local model; Google's assistant is Gemini, which is not run locally." }),
+    settings, chat,
+    el("div", { class: "bq-canvas-row" }, question, el("button", { type: "button", class: "primary", text: "Send", onclick: ask })));
+  const openAssistant = el("button", { type: "button", class: "secondary", text: "Open Data Canvas Assistant", "aria-expanded": "false", onclick: () => {
+    panel.hidden = !panel.hidden;
+    openAssistant.setAttribute("aria-expanded", String(!panel.hidden));
+    if (!panel.hidden) { drawChat(); question.focus(); }
+  } });
   draw();
   const toolbar = el("div", { class: "bq-toolbar", role: "toolbar", "aria-label": "Data canvas actions" },
     el("button", { type: "button", class: "secondary", text: "Search", "aria-label": "Add a Search node", onclick: () => add({ type: "search" }) }),
     el("button", { type: "button", class: "secondary", text: "SQL", "aria-label": "Add a SQL node", onclick: () => add({ type: "sql", sql: "" }) }),
     el("button", { type: "button", class: "secondary", text: "Text", "aria-label": "Add a Text node", onclick: () => add({ type: "text" }) }),
+    openAssistant,
+    el("button", { type: "button", class: "secondary", text: "Clear canvas", onclick: () => {
+      if (!doc.nodes.length) return;
+      confirmDestructive({ title: "Clear canvas?", detail: "Every node of this canvas is removed.", confirmLabel: "Clear", style: "confirm",
+        consequence: "Version history keeps the canvas as last saved.",
+        onConfirm: async () => { doc.nodes = []; keep(); draw(); announce("Canvas cleared"); } });
+    } }),
     el("button", { type: "button", class: "primary", text: "Save", onclick: () => bqSaveAsset(tab, "data_canvas", tab.query || JSON.stringify(doc), ctx.onSaved) }),
     el("button", { type: "button", class: "secondary", text: "Version history", disabled: tab.savedId ? null : true,
       title: tab.savedId ? null : "Save the canvas first", onclick: () => bqVersionHistory({ id: tab.savedId, name: tab.title, kind: "data_canvas" }, (content, title) => ctx.openAsset("data_canvas", content, title)) }),
     tab.savedId ? el("button", { type: "button", class: "secondary", text: "Share", onclick: () => bqManagePermissions({ id: tab.savedId, name: tab.title }) }) : null);
   return el("div", { class: "bq-canvas" }, toolbar,
-    el("p", { class: "unavailable bq-hint", text: "Natural language (Ask in natural language, Generate) uses this instance's local model; Google's uses Gemini in BigQuery, which is not run locally, so its answers are unverified against Google's. " +
+    el("p", { class: "unavailable bq-hint", text: "Natural language (Ask in natural language, Generate, Insights' summary, the Data Canvas Assistant) uses this instance's local model; Google's uses Gemini in BigQuery, which is not run locally, so its answers are unverified against Google's. " +
       (bqDataformOn() ? BQ_DATAFORM_NOTE : BQ_NO_DATAFORM) }),
-    host);
+    el("div", { class: "bq-canvas-body" }, host, panel));
 }
 
 // bqRepoFileTab is a file of a Dataform repository's workspace opened from
@@ -21778,9 +22882,27 @@ function bqRememberClosed(t) {
 //
 // The Map visualization of a GEOGRAPHY column: each row's WKT (POINT,
 // LINESTRING, POLYGON and their MULTI forms) drawn on longitude and
-// latitude, with a graticule. Google draws it over a Google Maps base map,
-// which CloudBurrow does not reach, so there is no base map here. Google's
+// latitude, with a graticule, over a base map of the world's land. Google
+// draws a Google Maps base map, which CloudBurrow does not reach; this one
+// is Natural Earth's public-domain 1:110m land
+// (/vendor/naturalearth/land-110m.js, third_party/naturalearth). Google's
 // limits apply: 20,000 features, 1,000,000 vertices.
+
+let BQ_LAND = null;
+// bqLand is the base map's land rings, fetched once.
+function bqLand() {
+  if (!BQ_LAND) {
+    BQ_LAND = new Promise((resolve) => {
+      if (window.CB_NATURAL_EARTH_LAND) { resolve(window.CB_NATURAL_EARTH_LAND); return; }
+      const tag = document.createElement("script");
+      tag.src = "/vendor/naturalearth/land-110m.js";
+      tag.onload = () => resolve(window.CB_NATURAL_EARTH_LAND || []);
+      tag.onerror = () => { BQ_LAND = null; resolve([]); };
+      document.head.append(tag);
+    });
+  }
+  return BQ_LAND;
+}
 
 function bqParseWKT(s) {
   const text = String(s || "").trim();
@@ -21828,7 +22950,11 @@ function bqDrawMap(host, res, column) {
   svg.setAttribute("class", "bq-chart bq-map");
   svg.setAttribute("aria-label", `Map of ${column}: ${features.length} features`);
   const add = (tag, attrs) => { const n = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, String(v)); svg.append(n); return n; };
-  add("rect", { x: 0, y: 0, width: W, height: H, fill: "#f1f3f4" });
+  add("rect", { x: 0, y: 0, width: W, height: H, fill: "#c6dcf5" });
+  const landLayer = document.createElementNS(NS, "g");
+  landLayer.setAttribute("class", "bq-map-land");
+  landLayer.setAttribute("aria-hidden", "true");
+  svg.append(landLayer);
   const step = [1, 2, 5, 10, 15, 30, 45, 90].find((s) => (x1 - x0) / s <= 8) || 90;
   for (let x = Math.ceil(x0 / step) * step; x <= x1; x += step) add("line", { x1: sx(x), x2: sx(x), y1: 0, y2: H, stroke: "#dadce0" });
   for (let y = Math.ceil(y0 / step) * step; y <= y1; y += step) add("line", { x1: 0, x2: W, y1: sy(y), y2: sy(y), stroke: "#dadce0" });
@@ -21838,12 +22964,27 @@ function bqDrawMap(host, res, column) {
     else if (f.type === "line") add("path", { d: path(f.coords), fill: "none", stroke: "#1a73e8", "stroke-width": 2 });
     else add("path", { d: f.rings.map((r) => path(r) + "Z").join(""), fill: "rgba(26,115,232,0.25)", stroke: "#1a73e8", "fill-rule": "evenodd" });
   }
-  setChildren(host, svg, el("p", { class: "unavailable", text: `${features.length} features. No base map: Google draws one from Google Maps, which CloudBurrow does not reach.` }));
+  setChildren(host, svg, el("p", { class: "unavailable", text: `${features.length} features. Base map: Natural Earth's 1:110m land (public domain); Google draws a Google Maps base map, which CloudBurrow does not reach.` }));
+  bqLand().then((rings) => {
+    const d = rings.filter((r) => r.some((c) => c[0] >= x0 && c[0] <= x1 && c[1] >= y0 && c[1] <= y1) ||
+      (Math.min(...r.map((c) => c[0])) <= x1 && Math.max(...r.map((c) => c[0])) >= x0 && Math.min(...r.map((c) => c[1])) <= y1 && Math.max(...r.map((c) => c[1])) >= y0))
+      .map((r) => path(r) + "Z").join("");
+    if (!d) return;
+    const land = document.createElementNS(NS, "path");
+    land.setAttribute("d", d);
+    land.setAttribute("fill", "#f8f9fa");
+    land.setAttribute("stroke", "#9aa0a6");
+    land.setAttribute("stroke-width", "0.5");
+    landLayer.append(land);
+  });
 }
 
 // BQ_WHATS_NEW is Check out what's new in Studio: what this Studio serves,
 // newest first, with Google's own list linked.
 const BQ_WHATS_NEW = [
+  ["Notebook runtime", "Connect a notebook to run its Python with Google's BigQuery client and %%bigquery"],
+  ["Data canvas nodes", "Destination, Insights, the Data Canvas Assistant, and pie and heat map charts"],
+  ["Map base map", "GEOGRAPHY results drawn over Natural Earth's land"],
   ["Notebooks and data canvases", "kept in Dataform as code assets, with Version history and Manage permissions"],
   ["Files and Source control", "Dataform folders and team folders, and Dataform repositories' workspaces"],
   ["Recent tabs", "reopen a tab you closed from the tab strip"],
@@ -22229,7 +23370,10 @@ function bqVizDefaults(res, viz) {
     const m = measures.find((f) => f.name !== viz.dimension) || measures[0];
     viz.measures = [m.name];
   }
-  if (!["Bar", "Line", "Scatter"].includes(viz.type)) viz.type = "Bar";
+  if (!["Bar", "Line", "Scatter", "Pie", "Heat map"].includes(viz.type)) viz.type = "Bar";
+  if (viz.type === "Heat map" && !dims.some((f) => f.name === viz.dimension2 && f.name !== viz.dimension)) {
+    viz.dimension2 = (dims.find((f) => f.name !== viz.dimension && !viz.measures.includes(f.name)) || {}).name || "";
+  }
   if (viz.legend === undefined) viz.legend = true;
   viz.zoom = viz.zoom || 1;
   return { dims, measures };
@@ -22307,6 +23451,7 @@ function bqVisualization(res, tab, save) {
 // SVG: Visualization's, Log Analytics' and a dashboard's Log Analytics
 // chart's (#2032).
 function bqDrawChart(chartHost, res, dims, viz) {
+  if (viz.type === "Pie" || viz.type === "Heat map") return bqDrawPieOrHeat(chartHost, res, viz);
   const rows = res.rows || [];
   const dimType = (dims.find((f) => f.name === viz.dimension) || {}).type;
   const numericDim = BQ_MEASURE_TYPES.includes(dimType);
@@ -22394,6 +23539,88 @@ function bqDrawChart(chartHost, res, dims, viz) {
   setChildren(chartHost, el("div", { class: "bq-chart-scroll" }, svg), legend,
     rows.length < res.totalRows
       ? el("p", { class: "unavailable", text: `Charted from the ${rows.length} rows read of ${res.totalRows}.` }) : null);
+}
+
+// bqDrawPieOrHeat draws the data canvas's Pie chart (the first measure,
+// summed per dimension value, a slice each) and Heat map (the dimension
+// across, a second dimension down, each cell the first measure's sum,
+// shaded from light to dark), as SVG.
+function bqDrawPieOrHeat(chartHost, res, viz) {
+  const rows = res.rows || [];
+  const m = viz.measures[0];
+  const NS = "http://www.w3.org/2000/svg";
+  const sum = (map, k, v) => { if (Number.isFinite(v)) map.set(k, (map.get(k) || 0) + v); };
+  const svg = document.createElementNS(NS, "svg");
+  const add = (tag, attrs, text) => {
+    const n = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, String(v));
+    if (text !== undefined) n.textContent = text;
+    svg.append(n);
+    return n;
+  };
+  const tip = (n, t) => n.append(Object.assign(document.createElementNS(NS, "title"), { textContent: t }));
+  let W, H, legend = null;
+  if (viz.type === "Pie") {
+    const by = new Map();
+    for (const r of rows) sum(by, cellText(r[viz.dimension]), Number(r[m]));
+    const slices = [...by].filter(([, v]) => v > 0);
+    const total = slices.reduce((a, [, v]) => a + v, 0);
+    W = 360; H = 320;
+    const cx = W / 2, cy = H / 2, rad = 140;
+    add("rect", { x: 0, y: 0, width: W, height: H, fill: "#ffffff" });
+    let a0 = -Math.PI / 2;
+    slices.forEach(([label, v], i) => {
+      const colour = BQ_SERIES_COLOURS[i % BQ_SERIES_COLOURS.length];
+      const a1 = a0 + (2 * Math.PI * v) / total;
+      const pct = `${label}: ${m} ${v} (${((100 * v) / total).toFixed(1)}%)`;
+      if (slices.length === 1) tip(add("circle", { cx, cy, r: rad, fill: colour }), pct);
+      else {
+        const large = a1 - a0 > Math.PI ? 1 : 0;
+        tip(add("path", { d: `M${cx},${cy}L${(cx + rad * Math.cos(a0)).toFixed(2)},${(cy + rad * Math.sin(a0)).toFixed(2)}` +
+          `A${rad},${rad} 0 ${large} 1 ${(cx + rad * Math.cos(a1)).toFixed(2)},${(cy + rad * Math.sin(a1)).toFixed(2)}Z`, fill: colour, stroke: "#ffffff" }), pct);
+      }
+      a0 = a1;
+    });
+    svg.setAttribute("aria-label", `Pie chart of ${m} by ${viz.dimension}, ${slices.length} slices`);
+    legend = viz.legend ? el("ul", { class: "bq-chart-legend" }, ...slices.map(([label, v], i) => el("li", {},
+      el("span", { class: "bq-swatch", style: `background:${BQ_SERIES_COLOURS[i % BQ_SERIES_COLOURS.length]}` }),
+      el("span", { text: ` ${label} (${((100 * v) / total).toFixed(1)}%)` })))) : null;
+  } else {
+    const xs = [], ys = [], cells = new Map();
+    for (const r of rows) {
+      const x = cellText(r[viz.dimension]), y = viz.dimension2 ? cellText(r[viz.dimension2]) : m;
+      if (!xs.includes(x)) xs.push(x);
+      if (!ys.includes(y)) ys.push(y);
+      sum(cells, x + "\u0000" + y, Number(r[m]));
+    }
+    const vals = [...cells.values()];
+    const lo = Math.min(...vals), hi = Math.max(...vals);
+    const L = 96, T = 16, B = 56, cw = Math.max(24, Math.min(64, 560 / Math.max(1, xs.length))), ch = 28;
+    W = L + cw * xs.length + 16; H = T + ch * ys.length + B;
+    add("rect", { x: 0, y: 0, width: W, height: H, fill: "#ffffff" });
+    // Light blue to Google blue: every cell's text stays readable.
+    const shade = (v) => { const t = hi === lo ? 1 : (v - lo) / (hi - lo); return `rgb(${Math.round(232 - 206 * t)},${Math.round(240 - 125 * t)},${Math.round(254 - 22 * t)})`; };
+    ys.forEach((y, j) => {
+      add("text", { x: L - 6, y: T + ch * j + ch / 2 + 4, "text-anchor": "end", "font-size": 11, fill: "#5f6368" }, y.length > 14 ? y.slice(0, 13) + "…" : y);
+      xs.forEach((x, i) => {
+        const v = cells.get(x + "\u0000" + y);
+        if (v === undefined) return;
+        tip(add("rect", { x: L + cw * i, y: T + ch * j, width: cw - 1, height: ch - 1, fill: shade(v) }), `${x}, ${y}: ${m} ${v}`);
+      });
+    });
+    xs.forEach((x, i) => add("text", { x: L + cw * i + cw / 2, y: T + ch * ys.length + 16, "text-anchor": "middle", "font-size": 11, fill: "#5f6368" },
+      x.length > 8 ? x.slice(0, 7) + "…" : x));
+    add("text", { x: L + (cw * xs.length) / 2, y: H - 8, "text-anchor": "middle", "font-size": 12, fill: "#202124" }, viz.dimension);
+    svg.setAttribute("aria-label", `Heat map of ${m} by ${viz.dimension}${viz.dimension2 ? " and " + viz.dimension2 : ""}, ${cells.size} cells`);
+    legend = viz.legend && vals.length ? el("p", { class: "unavailable", text: `${m}: ${bqShortNumber(lo)} (lightest) to ${bqShortNumber(hi)} (darkest)` }) : null;
+  }
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("width", String(W));
+  svg.setAttribute("height", String(H));
+  svg.setAttribute("style", `width:${W}px;height:${H}px;max-width:none`);
+  svg.setAttribute("role", "img");
+  svg.setAttribute("class", "bq-chart");
+  setChildren(chartHost, el("div", { class: "bq-chart-scroll" }, svg), legend);
 }
 
 // analyticsResultSet is a Log Analytics query's listing as a result set
@@ -24239,6 +25466,164 @@ function btSaveDialog({ title, label, value, regions, submit }) {
   });
 }
 
+// --- Spanner query plans (#2029) ----------------------------------------------
+//
+// The Explanation tab as Google's query plan visualizer draws a plan
+// (https://docs.cloud.google.com/spanner/docs/tune-query-with-visualizer):
+// a card per operator (iterator), the data flowing bottom-up; the local
+// distributed unions hidden ("hidden from the visual plan", Google's
+// distributed operators page); on each card the iterator's name, its table
+// or index ("on Songs"), "Full scan" with a warning triangle, the Highest
+// latency, CPU time and row count chips, Rows returned, and Latency and CPU
+// time with bars; an Expanded/Compact selector and Download JSON; and the
+// information panel: the Query summary, Prominent operators, and the
+// selected card's Iterator information.
+
+// spannerOpName is an operator's name as the visualizer writes it: "Table
+// scan", "Stream aggregate", "Distributed union".
+function spannerOpName(n) {
+  const m = n.meta || {};
+  if (n.name === "Scan") return { TableScan: "Table scan", IndexScan: "Index scan", BatchScan: "Batch scan" }[m.scan_type] || "Scan";
+  if (n.name === "Aggregate" && m.iterator_type) return `${m.iterator_type} aggregate`;
+  return n.name.charAt(0) + n.name.slice(1).toLowerCase();
+}
+
+// spannerMs writes a latency of msecs as the visualizer does: "<1 ms".
+function spannerMs(v) {
+  const f = parseFloat(v);
+  if (!Number.isFinite(f)) return "—";
+  return f < 1 ? "<1 ms" : `${f.toFixed(2)} ms`;
+}
+
+function spannerExplanation(r) {
+  const nodes = r.plan || [];
+  if (!nodes.length) {
+    return el("p", { class: "unavailable", id: "spanner-plan-note", text: r.planNote || "No query plan." });
+  }
+  // the visible tree: relational operators, the local distributed unions
+  // folded into their children
+  const visibleKids = (n) => (n.links || []).flatMap((l) => {
+    const c = nodes[l.child];
+    if (!c || c.kind !== "RELATIONAL") return [];
+    if (c.name === "Distributed Union" && (c.meta || {}).call_type === "Local") return visibleKids(c);
+    return [{ node: c, type: l.type || "" }];
+  });
+  const rel = nodes.filter((n) => n.kind === "RELATIONAL" && !(n.name === "Distributed Union" && (n.meta || {}).call_type === "Local"));
+  const num = (v) => parseFloat(v) || 0;
+  const most = (k) => rel.reduce((best, n) => (n.stats && num(n.stats[k]) > num(best && best.stats && best.stats[k]) ? n : best), null);
+  const top = { latency: most("latency"), cpu: most("cpu"), rows: most("rows") };
+  // a tie shares the chip, as Google's visualizer draws it
+  const ties = (k, key, n) => top[k] && n.stats && num(n.stats[key]) === num(top[k].stats[key]);
+  const totalLatency = rel.reduce((s, n) => s + num(n.stats && n.stats.latency), 0) || 1;
+  const totalCPU = rel.reduce((s, n) => s + num(n.stats && n.stats.cpu), 0) || 1;
+  let compact = false;
+  let selected = null;
+  const cards = new Map();
+  const info = el("section", { class: "spanner-plan-info", id: "spanner-plan-info", "aria-label": "Information panel" });
+  const graph = el("div", { class: "spanner-plan-graph", id: "spanner-plan-graph", role: "tree", "aria-label": "Query plan" });
+
+  const scalarText = (n, types) => (n.links || []).filter((l) => types.includes(l.type))
+    .map((l) => [l.type, (nodes[l.child] || {}).desc || ""]);
+  const card = (n) => {
+    const m = n.meta || {};
+    const st = n.stats;
+    const full = m["Full scan"] === "true";
+    const chips = [];
+    if (ties("latency", "latency", n)) chips.push("Highest latency");
+    if (ties("cpu", "cpu", n)) chips.push("Highest CPU time");
+    if (ties("rows", "rows", n)) chips.push("Highest row count");
+    const bar = (v, total) => el("span", { class: "spanner-plan-bar", style: `width:${Math.max(4, Math.round(100 * num(v) / total))}%` });
+    const c = el("button", { type: "button", class: "spanner-plan-card" + (full ? " is-full-scan" : ""), role: "treeitem",
+      "data-node": String(n.index), "aria-label": `${spannerOpName(n)}${m.scan_target ? ` on ${m.scan_target}` : ""}`,
+      onclick: () => select(n) },
+    el("span", { class: "spanner-plan-card-title" },
+      full ? el("span", { class: "spanner-plan-warning", title: "Full scan", "aria-label": "Warning: full scan", text: "⚠" }) : null,
+      el("span", { class: "spanner-plan-name", text: spannerOpName(n) })),
+    m.scan_target && n.name === "Scan" && m.scan_type !== "BatchScan" ? el("span", { class: "spanner-plan-target" }, "on ", el("span", { text: m.scan_target })) : null,
+    full ? el("span", { class: "spanner-plan-full", text: "Full scan" }) : null,
+    compact ? null : el("span", { class: "spanner-plan-chips" }, ...chips.map((t) => el("span", { class: "chip", text: t }))),
+    st ? el("span", { class: "spanner-plan-rows", text: `Rows returned: ${st.rows || "0"}` }) : null,
+    st && !compact ? el("span", { class: "spanner-plan-times" },
+      el("span", {}, el("span", { text: `Latency: ${spannerMs(st.latency)}` }), bar(st.latency, totalLatency)),
+      el("span", {}, el("span", { text: `CPU time: ${spannerMs(st.cpu)}` }), bar(st.cpu, totalCPU))) : null);
+    cards.set(n, c);
+    return c;
+  };
+  const subtree = (n, type) => {
+    const kids = visibleKids(n);
+    return el("li", { class: "spanner-plan-node" },
+      type ? el("span", { class: "spanner-plan-link", text: type }) : null,
+      card(n),
+      kids.length ? el("ul", { role: "group" }, ...kids.map((k) => subtree(k.node, k.type))) : null);
+  };
+  const st = r.stats || {};
+  const summary = () => el("section", { class: "spanner-query-summary", id: "spanner-query-summary", "aria-label": "Query summary" },
+    el("h3", { text: "Query summary" }),
+    el("dl", { class: "resource-summary" },
+      ...[["Total elapsed time", st.elapsedTime], ["CPU time", st.cpuTime], ["Plan creation time", st.planCreation],
+        ["Rows returned", st.rowsReturned], ["Rows scanned", st.rowsScanned]]
+        .filter(([, v]) => v)
+        .flatMap(([k, v]) => [el("dt", { text: k }), el("dd", { class: "mono", id: `spanner-stat-${k.toLowerCase().replaceAll(" ", "-")}`,
+          text: /msecs$/.test(v) ? v.replace(" msecs", " ms") : v })])),
+    st.rowsReturned ? el("h4", { text: "Prominent operators" }) : null,
+    st.rowsReturned ? el("dl", { class: "resource-summary", id: "spanner-prominent" },
+      ...[["Highest latency", top.latency, (n) => spannerMs(n.stats.latency)], ["Highest CPU time", top.cpu, (n) => spannerMs(n.stats.cpu)],
+        ["Highest row count", top.rows, (n) => n.stats.rows]].filter(([, n]) => n)
+        .flatMap(([k, n, v]) => [el("dt", { text: k }), el("dd", {}, el("button", { type: "button", class: "link-button",
+          "aria-label": `${k}: ${spannerOpName(n)}`, text: `${v(n)} (${spannerOpName(n)})`, onclick: () => select(n) }))])) : null,
+    r.planNote ? el("p", { class: "unavailable", id: "spanner-plan-note", text: r.planNote }) : null);
+  const iterator = (n) => {
+    const m = n.meta || {};
+    const props = [];
+    if (m.scan_target && n.name === "Scan") props.push([m.scan_type === "IndexScan" ? "Index" : "Table", m.scan_target]);
+    if (m["Full scan"] === "true") props.push(["Full scan", "true"]);
+    if (m.scan_method) props.push(["Scan method", m.scan_method]);
+    if (m.execution_method) props.push(["Execution method", m.execution_method]);
+    if (m.call_type) props.push(["Call type", m.call_type]);
+    if (m.iterator_type) props.push(["Iterator type", m.iterator_type]);
+    if (m.join_type) props.push(["Join type", m.join_type]);
+    if (m.distribution_table) props.push(["Distribution table", m.distribution_table]);
+    for (const [t, d] of scalarText(n, ["Seek Condition", "Residual Condition", "Condition", "Split Range", "Key", "Limit", "Offset"])) props.push([t, d]);
+    const vars = (n.links || []).filter((l) => l.variable).map((l) => l.variable);
+    if (vars.length) props.push(["Variable assignment", vars.join(", ")]);
+    const s = n.stats;
+    const stats = s ? [["Rows returned", s.rows], ["Latency", spannerMs(s.latency)], ["CPU time", spannerMs(s.cpu)],
+      ["Number of executions", s.executions], ...(s.scanned ? [["Scanned rows", s.scanned]] : [])] : [];
+    return el("section", { class: "spanner-iterator-info", id: "spanner-iterator-info", "aria-label": "Iterator information" },
+      el("h3", { text: spannerOpName(n) }),
+      m["Full scan"] === "true" ? el("p", { class: "callout callout-warning", text: "This operator performs a full scan. Consider adding an index, or revising the query or schema, to avoid reading the whole table." }) : null,
+      el("h4", { text: "Properties" }),
+      el("dl", { class: "resource-summary" }, ...props.flatMap(([k, v]) => [el("dt", { text: k }), el("dd", { class: "mono", text: v })])),
+      stats.length ? el("h4", { text: "Execution statistics" }) : null,
+      stats.length ? el("dl", { class: "resource-summary" }, ...stats.flatMap(([k, v]) => [el("dt", { text: k }), el("dd", { class: "mono", text: v || "—" })])) : null,
+      el("button", { type: "button", class: "link-button", text: "Back to the query summary", onclick: () => { selected = null; draw(); } }));
+  };
+  const select = (n) => { selected = n; draw(); const c = cards.get(n); if (c) c.focus(); };
+  const modes = el("div", { class: "segmented spanner-plan-mode", role: "radiogroup", "aria-label": "View" });
+  const draw = () => {
+    cards.clear();
+    setChildren(modes, ...[["Expanded", false], ["Compact", true]].map(([label, v]) => el("button", { type: "button", role: "radio",
+      class: "segment" + (compact === v ? " is-selected" : ""), "aria-checked": compact === v ? "true" : "false", text: label,
+      id: `spanner-plan-${label.toLowerCase()}`, onclick: () => { compact = v; draw(); } })));
+    setChildren(graph, el("ul", { class: "spanner-plan-tree" + (compact ? " is-compact" : "") }, subtree(nodes[0], "")));
+    for (const [n, c] of cards) if (n === selected) c.classList.add("is-selected");
+    setChildren(info, selected ? iterator(selected) : summary());
+  };
+  const download = el("button", { type: "button", class: "primary", id: "spanner-plan-download", text: "Download JSON",
+    onclick: () => {
+      const blob = new Blob([JSON.stringify(r.planJson || { planNodes: [] }, null, 2)], { type: "application/json" });
+      const a = el("a", { href: URL.createObjectURL(blob), download: "query-plan.json" });
+      document.body.append(a); a.click(); a.remove();
+    } });
+  draw();
+  return el("div", { class: "spanner-explanation", id: "spanner-explanation" },
+    el("div", { class: "spanner-plan-bar-top" },
+      r.elapsed ? el("span", { class: "spanner-plan-completed", text: `Statement completed (${r.elapsed} elapsed)` }) : null),
+    el("div", { class: "spanner-plan-layout" },
+      el("div", { class: "spanner-plan-main" }, modes, graph),
+      el("aside", { class: "spanner-plan-side" }, download, info)));
+}
+
 const STUDIO_SECTIONS = { spanner: renderSpannerStudio, "bigtable-instances": renderBigtableStudio };
 
 function renderSpannerStudio(panel, route, segments, project) {
@@ -24279,22 +25664,7 @@ function renderSpannerStudio(panel, route, segments, project) {
         text: resultTab === "results" ? "Run a statement to see its results." : "Explain a query to see its query plan." }));
     }
     if (r.error) return setChildren(results, el("p", { class: "form-error", role: "alert", text: r.error }));
-    if (resultTab === "explanation") {
-      // Google's Explanation tab: the Query summary (PROFILE mode's
-      // statistics, after Run) above the plan, which the emulator lacks.
-      const st = r.stats;
-      const summary = st ? el("section", { class: "spanner-query-summary", id: "spanner-query-summary", "aria-label": "Query summary" },
-        el("h3", { text: "Query summary" }),
-        el("dl", { class: "resource-summary" },
-          ...[["Rows returned", st.rowsReturned], ["Elapsed time", st.elapsedTime],
-            ["CPU time", st.cpuTime || "Not reported by the Spanner emulator"], ["Rows scanned", st.rowsScanned || "Not reported by the Spanner emulator"]]
-            .flatMap(([k, v]) => [el("dt", { text: k }), el("dd", { class: "mono", id: `spanner-stat-${k.toLowerCase().replaceAll(" ", "-")}`, text: v || "—" })]))) : null;
-      const plan = (r.plan || []).length
-        ? el("ol", { class: "spanner-plan" }, ...r.plan.map((n) =>
-          el("li", { text: `${n.index}: ${n.name} (${n.kind})` + ((n.children || []).length ? ` → ${n.children.join(", ")}` : "") })))
-        : el("p", { class: "unavailable", id: "spanner-plan-note", text: r.planNote || "No plan." });
-      return setChildren(results, summary, plan);
-    }
+    if (resultTab === "explanation") return setChildren(results, spannerExplanation(r));
     if (r.kind !== "query") {
       return setChildren(results, el("p", { class: "spanner-message", id: "spanner-message", text: `${r.message || "Done."} ${r.elapsed ? `(${r.elapsed})` : ""}` }));
     }
@@ -24342,7 +25712,8 @@ function renderSpannerStudio(panel, route, segments, project) {
         return;
       }
       last.results = res;
-      // Run is PROFILE mode: its statistics are the Explanation tab's.
+      // Run is PROFILE mode: its plan and statistics are the Explanation
+      // tab's.
       if (res.kind === "query") last.explanation = res;
       if (res.kind !== "query") loadExplorer();
       announce(res.kind === "query" ? `Query complete: ${(res.rows || []).length} rows` : (res.message || "Done"));
@@ -25402,7 +26773,7 @@ function renderAPICredentials(view) {
     "aria-expanded": "false", html: ICON_ADD }, el("span", { text: "Create credentials" }));
   const menu = el("div", { class: "overflow-menu", role: "menu", id: "credentials-create-menu", hidden: true },
     el("button", { type: "button", class: "overflow-item", role: "menuitem", id: "credentials-create-api-key", text: "API key",
-      onclick: () => { menu.hidden = true; trigger.setAttribute("aria-expanded", "false"); apiKeyCreate(project); } }),
+      onclick: () => { menu.hidden = true; trigger.setAttribute("aria-expanded", "false"); navigate("/apis/credentials/apikey/create"); } }),
     // Google's label, its reason as the tooltip and description, as every
     // row menu draws an item this instance cannot perform (#1868).
     el("a", { class: "overflow-item", role: "menuitem", id: "credentials-create-oauth", href: "/apis/credentials/consent/clients/create" + scopeSearch(), text: "OAuth client ID" }),
@@ -25651,16 +27022,6 @@ function apiKeyShow(title, keyString, id, extra) {
   field.select();
 }
 
-async function apiKeyCreate(project, after) {
-  const op = recordOperation(`Create an API key in ${project}`);
-  let k;
-  try { k = await apisCall("key-create", {}); op.succeeded(""); } catch (err) { op.failed(err.message); notify(err.message, "error"); return; }
-  apiKeyShow("API key created", k.keyString, k.id, "Use this key in your application by passing it with the key=API_KEY parameter or the x-goog-api-key header. " +
-    "It has no restrictions: restrict it on its page.");
-  notify("Created API key");
-  if (after) after(); else if (location.pathname === "/apis/credentials") navigate("/apis/credentials");
-}
-
 async function apiKeyReveal(id) {
   try {
     const d = await apisCall("key-string", { id });
@@ -25706,44 +27067,84 @@ function apiKeysTable(idPrefix) {
   return box;
 }
 
-// apiKeyLines are a textarea's non-empty lines.
-const apiKeyLines = (v) => v.split("\n").map((l) => l.trim()).filter(Boolean);
+// apiKeyItems is one application restriction's entries as Google's page
+// takes them (#2145): Add, the entry, Done; each done entry listed with
+// Edit and Delete. fields are the entry's inputs ([name, label] pairs);
+// values the entries it starts with, each an object of those names.
+function apiKeyItems(id, label, fields, values, help) {
+  const items = (values || []).map((v) => ({ ...v }));
+  const list = el("ul", { class: "api-key-items", id: `${id}-items`, "aria-label": label });
+  const editor = el("div", { class: "api-key-item-editor", id: `${id}-editor`, hidden: true });
+  const error = el("p", { class: "form-field-error", role: "alert", hidden: true });
+  let editing = -1;
+  const draw = () => setChildren(list, ...items.map((it, i) => el("li", { class: "api-key-item" },
+    el("span", { class: "mono", text: fields.map(([n]) => it[n]).filter(Boolean).join(" · ") }),
+    el("button", { type: "button", class: "link-button", text: "Edit", "aria-label": `Edit ${fields.map(([n]) => it[n]).join(" ")}`,
+      onclick: () => open(i) }),
+    el("button", { type: "button", class: "link-button", text: "Delete", "aria-label": `Delete ${fields.map(([n]) => it[n]).join(" ")}`,
+      onclick: () => { items.splice(i, 1); draw(); } }))));
+  const inputs = fields.map(([n, l]) => el("input", { type: "text", id: `${id}-${n}`, class: "mono", "aria-label": l }));
+  const open = (i) => {
+    editing = i;
+    inputs.forEach((inp, k) => { inp.value = i >= 0 ? items[i][fields[k][0]] || "" : ""; });
+    editor.hidden = false;
+    error.hidden = true;
+    inputs[0].focus();
+  };
+  const done = () => {
+    const it = Object.fromEntries(fields.map(([n], k) => [n, inputs[k].value.trim()]));
+    if (!it[fields[0][0]]) { error.textContent = `Enter ${fields[0][1].toLowerCase()}.`; error.hidden = false; return; }
+    if (editing >= 0) items[editing] = it; else items.push(it);
+    editor.hidden = true;
+    draw();
+  };
+  setChildren(editor, ...fields.map(([, l], k) => el("label", { class: "form-field" }, el("span", { class: "form-label", text: l }), inputs[k])), error,
+    el("div", { class: "form-actions" },
+      el("button", { type: "button", class: "primary", id: `${id}-done`, text: "Done", onclick: done }),
+      el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => { editor.hidden = true; } })));
+  draw();
+  const node = el("fieldset", { class: "form-field api-key-restriction", id },
+    el("legend", { class: "form-label", text: label }), help ? el("p", { class: "form-help", text: help }) : null, list, editor,
+    el("button", { type: "button", class: "secondary", id: `${id}-add`, html: ICON_ADD, onclick: () => open(-1) }, el("span", { text: "Add" })));
+  // Entries finished with Done, and one still being typed.
+  const value = () => {
+    const out = items.map((it) => ({ ...it }));
+    if (!editor.hidden) {
+      const it = Object.fromEntries(fields.map(([n], k) => [n, inputs[k].value.trim()]));
+      if (it[fields[0][0]]) out.push(it);
+    }
+    return out;
+  };
+  return { node, value };
+}
 
-async function renderAPIKeyPage(view, id) {
-  const project = currentProject();
-  const back = "/apis/credentials" + scopeSearch();
-  if (!project) return apisNeedProject(view, "Edit API key");
-  setChildren(view, pageHeader("Edit API key", "", { back }), loadingState(4, { what: id }));
-  let k, apis;
-  try {
-    k = await apisCall("key", { id });
-    apis = ((await apisCall("apis")).apis || []).filter((a) => a.state === "ENABLED");
-  } catch (err) {
-    setChildren(view, pageHeader("Edit API key", "", { back }), errorState(`Could not read API key ${id}`, err.message));
-    return;
-  }
-  const r = k.restrictions || {};
+// apiKeyForm is the key's form as Google's Create API key and Edit API key
+// pages have it (#2145): Name; on create, Authenticate API calls through a
+// service account; Key restrictions' Application restrictions (None,
+// Websites, IP addresses, Android apps, iOS apps, their entries added one
+// at a time) and API restrictions (Don't restrict key, Restrict key). It
+// answers the form and a read of what it holds.
+function apiKeyForm(view, k, apis, opts) {
+  const r = (k && k.restrictions) || {};
   const app = r.browserKeyRestrictions ? "browser" : r.serverKeyRestrictions ? "server" : r.androidKeyRestrictions ? "android" : r.iosKeyRestrictions ? "ios" : "none";
-  const error = el("p", { class: "form-error", role: "alert", hidden: true });
   const field = (label, input, help) => el("label", { class: "form-field" }, el("span", { class: "form-label", text: label }), input,
     help ? el("span", { class: "form-help", text: help }) : null);
-  const name = el("input", { type: "text", id: "api-key-name", value: k.displayName || "", maxlength: 63 });
-  const lines = (id, values, help, label) => {
-    const t = el("textarea", { id, rows: 4, class: "mono" });
-    t.value = (values || []).join("\n");
-    return { node: field(label, t, help), t };
-  };
-  const browser = lines("api-key-referrers", (r.browserKeyRestrictions || {}).allowedReferrers, "One website per line, such as *.example.com/* or www.example.com/path.", "Website restrictions");
-  const server = lines("api-key-ips", (r.serverKeyRestrictions || {}).allowedIps, "One IPv4 or IPv6 address or subnet (CIDR) per line.", "IP address restrictions");
-  const android = lines("api-key-android", ((r.androidKeyRestrictions || {}).allowedApplications || []).map((a) => `${a.packageName},${a.sha1Fingerprint}`),
-    "One app per line: package name, comma, SHA-1 certificate fingerprint.", "Android restrictions");
-  const ios = lines("api-key-ios", (r.iosKeyRestrictions || {}).allowedBundleIds, "One bundle ID per line, such as com.example.app.", "iOS restrictions");
+  const name = el("input", { type: "text", id: "api-key-name", value: opts.name || "", maxlength: 63 });
+  const browser = apiKeyItems("api-key-referrers", "Website restrictions", [["v", "Website"]],
+    ((r.browserKeyRestrictions || {}).allowedReferrers || []).map((v) => ({ v })), "Such as *.example.com/* or www.example.com/path: a wildcard only as a whole leading subdomain or after the path.");
+  const server = apiKeyItems("api-key-ips", "IP address restrictions", [["v", "IP address"]],
+    ((r.serverKeyRestrictions || {}).allowedIps || []).map((v) => ({ v })), "An IPv4 or IPv6 address or a subnet in CIDR notation. Internal addresses and localhost are not supported by Google.");
+  const android = apiKeyItems("api-key-android", "Android restrictions", [["packageName", "Package name"], ["sha1Fingerprint", "SHA-1 certificate fingerprint"]],
+    (r.androidKeyRestrictions || {}).allowedApplications || [], "The package name and the 20-byte SHA-1 fingerprint of its signing certificate.");
+  const ios = apiKeyItems("api-key-ios", "iOS restrictions", [["v", "Bundle ID"]],
+    ((r.iosKeyRestrictions || {}).allowedBundleIds || []).map((v) => ({ v })), "Such as com.example.app.");
   const appBoxes = { browser: browser.node, server: server.node, android: android.node, ios: ios.node };
   const show = () => {
     const v = (view.querySelector('input[name="api-key-app"]:checked') || {}).value;
     for (const [kname, node] of Object.entries(appBoxes)) node.hidden = kname !== v;
     const restrict = (view.querySelector('input[name="api-key-api"]:checked') || {}).value === "restrict";
     apiList.hidden = !restrict;
+    if (sa) saPick.hidden = !sa.checked;
   };
   const radio = (group, value, label, current) => el("label", { class: "check-line", for: `${group}-${value}` },
     el("input", { type: "radio", name: group, value, id: `${group}-${value}`, checked: value === current ? "checked" : null, onchange: show }),
@@ -25753,16 +27154,23 @@ async function renderAPIKeyPage(view, id) {
     ...apis.map((a) => el("label", { class: "check-line", for: `api-key-target-${a.name}` },
       el("input", { type: "checkbox", id: `api-key-target-${a.name}`, value: a.name, checked: targets.has(a.name) ? "checked" : null }),
       el("span", { text: `${a.title} (${a.name})` }))));
+  // Create API key's service account binding (an authorization key).
+  let sa = null, saPick = null, saSelect = null;
+  if (opts.create) {
+    sa = el("input", { type: "checkbox", id: "api-key-bind-sa", onchange: show });
+    saSelect = el("select", { id: "api-key-service-account" }, el("option", { value: "", text: "Select a service account" }),
+      ...(opts.serviceAccounts || []).map((e) => el("option", { value: e, text: e })));
+    saPick = el("div", { id: "api-key-sa-pick", hidden: true },
+      field("Select a service account", saSelect, opts.serviceAccounts && opts.serviceAccounts.length ? "" :
+        "This project has no service accounts on this instance; create one under IAM & Admin > Service Accounts."));
+  }
   const restrictions = () => {
     const out = {};
     const v = (view.querySelector('input[name="api-key-app"]:checked') || {}).value;
-    if (v === "browser") out.browserKeyRestrictions = { allowedReferrers: apiKeyLines(browser.t.value) };
-    if (v === "server") out.serverKeyRestrictions = { allowedIps: apiKeyLines(server.t.value) };
-    if (v === "android") out.androidKeyRestrictions = { allowedApplications: apiKeyLines(android.t.value).map((l) => {
-      const [packageName, sha1Fingerprint] = l.split(",").map((x) => (x || "").trim());
-      return { packageName, sha1Fingerprint };
-    }) };
-    if (v === "ios") out.iosKeyRestrictions = { allowedBundleIds: apiKeyLines(ios.t.value) };
+    if (v === "browser") out.browserKeyRestrictions = { allowedReferrers: browser.value().map((x) => x.v) };
+    if (v === "server") out.serverKeyRestrictions = { allowedIps: server.value().map((x) => x.v) };
+    if (v === "android") out.androidKeyRestrictions = { allowedApplications: android.value().map((x) => ({ packageName: x.packageName, sha1Fingerprint: x.sha1Fingerprint })) };
+    if (v === "ios") out.iosKeyRestrictions = { allowedBundleIds: ios.value().map((x) => x.v) };
     if ((view.querySelector('input[name="api-key-api"]:checked') || {}).value === "restrict") {
       const picked = [...apiList.querySelectorAll("input:checked")].map((c) => ({ service: c.value }));
       // Methods already on a kept target stay as they were.
@@ -25770,16 +27178,118 @@ async function renderAPIKeyPage(view, id) {
     }
     return out;
   };
+  const appCurrent = opts.create ? "none" : app;
+  const apiCurrent = (r.apiTargets || []).length || opts.create ? "restrict" : "none";
+  const body = [
+    field("Name", name, "A display name, at most 63 characters."),
+    sa ? el("label", { class: "check-line", for: "api-key-bind-sa" }, sa, el("span", { text: "Authenticate API calls through a service account" })) : null,
+    saPick,
+    el("h2", { text: "Key restrictions" }),
+    el("h3", { text: "Application restrictions" }),
+    el("div", { class: "radio-group", role: "radiogroup", "aria-label": "Application restrictions" },
+      radio("api-key-app", "none", "None", appCurrent), radio("api-key-app", "browser", "Websites", appCurrent), radio("api-key-app", "server", "IP addresses", appCurrent),
+      radio("api-key-app", "android", "Android apps", appCurrent), radio("api-key-app", "ios", "iOS apps", appCurrent)),
+    browser.node, server.node, android.node, ios.node,
+    el("h3", { text: "API restrictions" }),
+    el("div", { class: "radio-group", role: "radiogroup", "aria-label": "API restrictions" },
+      radio("api-key-api", "none", "Don't restrict key", apiCurrent), radio("api-key-api", "restrict", "Restrict key", apiCurrent)),
+    apiList,
+    el("p", { class: "form-help", text: "Restrictions apply to the APIs this instance serves, which refuse a request the key does not allow with Google's error." }),
+  ];
+  return { body, show, restrictions, name: () => name.value.trim(), serviceAccount: () => (sa && sa.checked ? saSelect.value : "") };
+}
+
+async function apiKeyFormData(id) {
+  const k = id ? await apisCall("key", { id }) : null;
+  const apis = ((await apisCall("apis")).apis || []).filter((a) => a.state === "ENABLED");
+  return { k, apis };
+}
+
+// renderAPIKeyCreate is Google's Create API key page (#2145): the name,
+// the service account binding and the restrictions, ending in Create and
+// the API key created dialog. Google's console asks for at least one API
+// restriction ("Add at least one API key restriction").
+async function renderAPIKeyCreate(view, copyOf) {
+  const project = currentProject();
+  const back = "/apis/credentials" + scopeSearch();
+  const title = copyOf ? "Create a copy" : "Create API key";
+  if (!project) return apisNeedProject(view, title);
+  setChildren(view, pageHeader(title, "", { back }), loadingState(4, { what: "APIs" }));
+  let d, accounts = [];
+  try {
+    d = await apiKeyFormData(copyOf);
+    if (SERVICES.some((sv) => sv.id === "iam-service-accounts")) {
+      try { accounts = ((await api(`/api/resources/iam-service-accounts?project=${encodeURIComponent(project)}`)).items || []).map((r) => r.name); } catch { accounts = []; }
+    }
+  } catch (err) {
+    setChildren(view, pageHeader(title, "", { back }), errorState("Could not read the project's APIs", err.message));
+    return;
+  }
+  const f = apiKeyForm(view, d.k, d.apis, { create: !copyOf, name: copyOf ? `${d.k.displayName || d.k.id} (copy)` : "API key", serviceAccounts: accounts });
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  const save = el("button", { type: "submit", class: "primary", id: "api-key-create", text: "Create" });
+  const form = el("form", { class: "create-form", id: "api-key-form", novalidate: true, onsubmit: async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    const rs = f.restrictions();
+    if (!rs.apiTargets || !rs.apiTargets.length) {
+      error.textContent = "Add at least one API key restriction: choose Restrict key and select the APIs the key may call.";
+      error.hidden = false;
+      return;
+    }
+    if (!copyOf && document.querySelector("#api-key-bind-sa").checked && !f.serviceAccount()) {
+      error.textContent = "Select a service account, or clear Authenticate API calls through a service account.";
+      error.hidden = false;
+      return;
+    }
+    save.disabled = true;
+    const op = recordOperation(copyOf ? `Copy API key ${copyOf}` : `Create an API key in ${project}`);
+    let k;
+    try {
+      k = copyOf ? await apisCall("key-copy", { id: copyOf, displayName: f.name(), restrictions: rs })
+        : await apisCall("key-create", { displayName: f.name(), restrictions: rs, serviceAccountEmail: f.serviceAccount() });
+      op.succeeded("");
+    } catch (err) {
+      op.failed(err.message);
+      error.textContent = err.message;
+      error.hidden = false;
+      save.disabled = false;
+      return;
+    }
+    notify("Created API key");
+    navigate("/apis/credentials");
+    apiKeyShow("API key created", k.keyString, k.id, "Use this key in your application by passing it with the key=API_KEY parameter or the x-goog-api-key header.");
+  } }, error, ...f.body,
+  el("div", { class: "form-actions" }, save, el("a", { class: "button secondary", href: back, text: "Cancel" })));
+  setChildren(view, pageHeader(title, copyOf ? `A new key with the restrictions of ${d.k.displayName || d.k.id}` : "", { back }), form);
+  f.show();
+  announce(title);
+}
+
+async function renderAPIKeyPage(view, id) {
+  const project = currentProject();
+  const back = "/apis/credentials" + scopeSearch();
+  if (!project) return apisNeedProject(view, "Edit API key");
+  setChildren(view, pageHeader("Edit API key", "", { back }), loadingState(4, { what: id }));
+  let k, apis;
+  try {
+    ({ k, apis } = await apiKeyFormData(id));
+  } catch (err) {
+    setChildren(view, pageHeader("Edit API key", "", { back }), errorState(`Could not read API key ${id}`, err.message));
+    return;
+  }
+  const f = apiKeyForm(view, k, apis, { name: k.displayName || "" });
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
   const save = el("button", { type: "submit", class: "primary", id: "api-key-save", text: "Save" });
   const form = el("form", { class: "create-form", id: "api-key-form", novalidate: true, onsubmit: async (e) => {
     e.preventDefault();
     error.hidden = true;
-    const rs = restrictions();
+    const rs = f.restrictions();
     if (rs.apiTargets && !rs.apiTargets.length) { error.textContent = "Select at least one API, or choose Don't restrict key."; error.hidden = false; return; }
     save.disabled = true;
     const op = recordOperation(`Update API key ${id}`);
     try {
-      await apisCall("key-update", { id, displayName: name.value.trim(), restrictions: rs });
+      await apisCall("key-update", { id, displayName: f.name(), restrictions: rs });
       op.succeeded("");
       notify("Saved API key");
       navigate("/apis/credentials");
@@ -25791,26 +27301,15 @@ async function renderAPIKeyPage(view, id) {
     }
   } },
   error,
-  field("Name", name, "A display name, at most 63 characters."),
-  el("h2", { text: "Key restrictions" }),
-  el("h3", { text: "Application restrictions" }),
-  el("div", { class: "radio-group", role: "radiogroup", "aria-label": "Application restrictions" },
-    radio("api-key-app", "none", "None", app), radio("api-key-app", "browser", "Websites", app), radio("api-key-app", "server", "IP addresses", app),
-    radio("api-key-app", "android", "Android apps", app), radio("api-key-app", "ios", "iOS apps", app)),
-  browser.node, server.node, android.node, ios.node,
-  el("h3", { text: "API restrictions" }),
-  el("div", { class: "radio-group", role: "radiogroup", "aria-label": "API restrictions" },
-    radio("api-key-api", "none", "Don't restrict key", (r.apiTargets || []).length ? "restrict" : "none"),
-    radio("api-key-api", "restrict", "Restrict key", (r.apiTargets || []).length ? "restrict" : "none")),
-  apiList,
-  el("p", { class: "form-help", text: "Restrictions apply to the APIs this instance serves, which refuse a request the key does not allow with Google's error." }),
+  k.serviceAccountEmail ? el("p", { class: "form-help", id: "api-key-bound", text: `Authorization key: API calls are authenticated as the service account ${k.serviceAccountEmail}.` }) : null,
+  ...f.body,
   el("div", { class: "form-actions" }, save, el("a", { class: "button secondary", href: back, text: "Cancel" })));
   const actions = [
     el("button", { type: "button", class: "header-button", id: "api-key-show", text: "Show key", onclick: () => apiKeyReveal(id) }),
     el("button", { type: "button", class: "header-button", id: "api-key-rotate", text: "Rotate key", onclick: () => mrForm({
       id: "api-key-rotate-form", title: "Rotate key", label: "Create",
       fields: [{ name: "displayName", label: "Name", default: `${k.displayName || k.id} (rotated)`, help: "The new key's name. It gets this key's restrictions." }],
-      note: "A new key is created with this key's restrictions. This key keeps working until you delete it from the new key's page (Delete the previous key).",
+      note: `The new key gets this key's restrictions: ${k.summary}. This key keeps working until you delete it from the new key's page (Delete the previous key).`,
       submit: async (v) => {
         const op = recordOperation(`Rotate API key ${id}`);
         let nk;
@@ -25818,6 +27317,7 @@ async function renderAPIKeyPage(view, id) {
         navigate(`/apis/credentials/key/${encodeURIComponent(nk.id)}`);
         apiKeyShow("API key created", nk.keyString, null, "Copy the new key into your applications, then delete the previous key.");
       } }) }),
+    el("a", { class: "header-button", id: "api-key-copy-button", href: `/apis/credentials/apikey/copy/${encodeURIComponent(id)}${scopeSearch()}`, text: "Create a copy" }),
     el("button", { type: "button", class: "header-button", id: "api-key-delete-button", text: "Delete", onclick: () => apiKeyDelete(k, () => navigate("/apis/credentials")) }),
   ];
   const previous = k.previous ? el("section", { class: "card", id: "api-key-previous" },
@@ -25829,7 +27329,7 @@ async function renderAPIKeyPage(view, id) {
       catch (err) { op.failed(err.message); notify(err.message, "error"); }
     } })) : null;
   setChildren(view, pageHeader("Edit API key", `${k.name} · created ${new Date(k.createTime).toLocaleString()}`, { back, actions }), previous, form);
-  show();
+  f.show();
   announce(`Edit API key ${k.displayName || k.id}`);
 }
 
@@ -25857,4 +27357,851 @@ async function renderAPIKeysRestore(view) {
         } }))))
         : [el("tr", {}, el("td", { colspan: "4", text: "No deleted credentials to restore" }))])))));
   announce("Restore deleted credentials");
+}
+
+// --- Marketplace (#2149) ------------------------------------------------
+//
+// Google Cloud Marketplace's pages, over CloudBurrow's catalogue sources
+// (Docker Hub first): the home and browse pages (Search Marketplace, the
+// Filter panel's Category, Type, Source and Publisher), a product's page
+// (Overview, Pricing, Documentation, Support and its versions) with
+// Configure, and the Configure page for a Kubernetes app
+// (https://docs.cloud.google.com/kubernetes-engine/docs/how-to/deploying-marketplace-app):
+// Deploy via Google Cloud, the cluster (or Create a new cluster), the
+// Namespace (an existing one or Create a namespace), the App instance name,
+// the app's parameters, then Deploy, after which the app is on Kubernetes
+// Engine > Applications, whose page shows its progress and components.
+
+let MARKET_POLL = null;
+function stopMarketPoll() {
+  if (MARKET_POLL) { clearTimeout(MARKET_POLL); MARKET_POLL = null; }
+}
+
+const MARKET_BADGES = { official: "Docker Official Image", verified_publisher: "Verified Publisher", open_source: "Sponsored OSS" };
+let MARKET_SOURCES = null;
+
+async function marketSources() {
+  if (!MARKET_SOURCES) MARKET_SOURCES = api("/api/marketplace/sources").catch((err) => { MARKET_SOURCES = null; throw err; });
+  return MARKET_SOURCES;
+}
+
+// marketProductPath is a product's address: its source, then its id's
+// segments (a Docker Hub namespace and repository).
+const marketProductPath = (source, id) => `/marketplace/product/${encodeURIComponent(source)}/${id.split("/").map(encodeURIComponent).join("/")}`;
+const marketConfigPath = (source, id) => `/marketplace/kubernetes/config/${encodeURIComponent(source)}/${id.split("/").map(encodeURIComponent).join("/")}`;
+
+// marketLogo is a product's logo through the console's own address (the
+// console loads nothing remote), or its initial when it has none.
+function marketLogo(p, size = 48) {
+  const box = el("div", { class: "mp-logo", style: `width:${size}px;height:${size}px`, "aria-hidden": "true" });
+  if (p.logo) {
+    const img = el("img", { alt: "", width: String(size), height: String(size),
+      src: `/api/marketplace/logo?u=${encodeURIComponent(p.logo)}` });
+    img.addEventListener("error", () => setChildren(box, el("span", { text: (p.name || "?").replace(/^.*\//, "").charAt(0).toUpperCase() })));
+    box.append(img);
+  } else {
+    box.append(el("span", { text: (p.name || "?").replace(/^.*\//, "").charAt(0).toUpperCase() }));
+  }
+  return box;
+}
+
+// A badge reads as its source names it: Docker Hub's "Docker Official
+// Image", Artifact Hub's "Official".
+function marketBadge(badge, source) {
+  if (!badge || !MARKET_BADGES[badge]) return null;
+  const text = badge === "official" && source && source !== "dockerhub" ? "Official" : MARKET_BADGES[badge];
+  return el("span", { class: `mp-badge mp-badge-${badge}`, "data-badge": badge, text });
+}
+
+const MARKET_SOURCE_LABELS = { dockerhub: "Docker Hub", artifacthub: "Artifact Hub", rancher: "Rancher", helm: "Helm" };
+const marketIsChart = (p) => p.type === "Kubernetes apps";
+
+function marketCard(p) {
+  return el("a", { class: "card mp-card", href: marketProductPath(p.source, p.id) + scopeSearch(), "data-product": p.id, "data-source": p.source },
+    el("div", { class: "mp-card-head" }, marketLogo(p),
+      el("div", { class: "mp-card-title" },
+        el("h3", { text: p.name }),
+        el("p", { class: "mp-publisher", text: p.publisher || "" }))),
+    el("p", { class: "mp-description", text: p.description || "" }),
+    el("div", { class: "mp-card-foot" },
+      el("span", { class: "mp-source", "data-source-label": p.sourceLabel, text: p.sourceLabel }),
+      el("span", { class: "mp-type", text: p.type }),
+      marketBadge(p.badge, p.source),
+      p.pulls ? el("span", { class: "mp-pulls", text: `${p.pulls} pulls` }) : null,
+      !p.pulls && p.stars ? el("span", { class: "mp-pulls", text: `${p.stars} stars` }) : null));
+}
+
+// marketFilters reads the browse page's filter=group:value parameters.
+function marketFilters(params) {
+  const out = { category: [], type: [], source: [], badge: [] };
+  for (const f of params.getAll("filter")) {
+    const i = f.indexOf(":");
+    if (i < 0) continue;
+    const k = f.slice(0, i);
+    if (out[k]) out[k].push(f.slice(i + 1));
+  }
+  return out;
+}
+
+function marketSearchBox(initial, onSearch) {
+  const input = el("input", { type: "search", id: "marketplace-search", class: "mp-search-input", placeholder: "Search Marketplace",
+    "aria-label": "Search Marketplace", value: initial || "", autocomplete: "off" });
+  const form = el("form", { class: "mp-search", role: "search", onsubmit: (e) => { e.preventDefault(); onSearch(input.value.trim()); } },
+    el("span", { class: "mp-search-icon", "aria-hidden": "true", html: '<svg viewBox="0 0 24 24" width="20" height="20"><circle cx="10.5" cy="10.5" r="6" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15 15l5 5" stroke="currentColor" stroke-width="2"/></svg>' }),
+    input);
+  return form;
+}
+
+function marketBrowseURL(q, filters, page) {
+  const u = new URLSearchParams(location.search);
+  for (const k of ["q", "filter", "page"]) u.delete(k);
+  if (q) u.set("q", q);
+  for (const [k, vs] of Object.entries(filters || {})) for (const v of vs) u.append("filter", `${k}:${v}`);
+  if (page && page > 1) u.set("page", String(page));
+  const s = u.toString();
+  return "/marketplace/browse" + (s ? "?" + s : "");
+}
+
+async function renderMarketplace(view) {
+  stopMarketPoll();
+  const rest = location.pathname.replace(/^\/marketplace\/?/, "").split("/").filter(Boolean).map(decodeURIComponent);
+  if (rest[0] === "product" && rest.length >= 3) return renderMarketProduct(view, rest[1], rest.slice(2).join("/"));
+  if (rest[0] === "kubernetes" && rest[1] === "config" && rest.length >= 4) return renderMarketConfigure(view, rest[2], rest.slice(3).join("/"));
+  if (rest[0] === "browse") return renderMarketBrowse(view);
+  if (rest[0] === "repositories" && rest.length === 1) return renderMarketRepos(view);
+  if (!rest.length) return renderMarketHome(view);
+  return notFound(view, location.pathname);
+}
+
+// marketOffline is Google's state when the catalogue cannot be read.
+function marketOffline(title, err, retry) {
+  return el("div", { class: "state error mp-error", role: "alert", id: "marketplace-error" },
+    el("h2", { text: title }),
+    el("p", { text: "Marketplace reads its catalogue online, from the source's public registry. Check that this machine can reach it, then try again." }),
+    el("pre", { text: err.message }),
+    retry ? el("button", { class: "secondary", type: "button", onclick: retry, text: "Try again" }) : null);
+}
+
+async function renderMarketHome(view) {
+  const header = pageHeader("Marketplace", "", {});
+  const search = marketSearchBox("", (q) => navigate(marketBrowseURL(q, {}, 1)));
+  const hero = el("div", { class: "mp-hero" },
+    el("h2", { text: "Explore, launch and manage solutions in just a few clicks" }),
+    el("p", { class: "subtitle", text: "Deploy container images and Kubernetes apps onto this instance's Kubernetes clusters." }), search);
+  const cats = el("div", { class: "mp-home-categories", id: "marketplace-categories" }, loadingState(1));
+  const popular = el("div", { class: "mp-grid", id: "marketplace-popular" }, loadingState(3, { what: "Marketplace" }));
+  setChildren(view, header, hero,
+    el("h2", { class: "mp-section-title", text: "Browse by category" }), cats,
+    el("div", { class: "mp-section-head" }, el("h2", { class: "mp-section-title", text: "Popular products" }),
+      el("a", { href: marketBrowseURL("", {}, 1), id: "marketplace-view-all", text: "View all" })), popular,
+    el("p", { class: "form-help mp-repos-link" }, "Kubernetes apps come from Artifact Hub, Rancher's chart repositories and ",
+      el("a", { href: "/marketplace/repositories" + scopeSearch(), id: "marketplace-repositories-link", text: "the Helm repositories you add" }), "."));
+  announce("Marketplace");
+  marketSources().then((s) => {
+    if (!s.configured) { setChildren(cats, emptyState("Marketplace is not available", "This instance serves no Marketplace.")); return; }
+    if (s.error && !(s.categories || []).length) { setChildren(cats, el("p", { class: "unavailable", text: `Categories could not be read: ${s.error}` })); return; }
+    setChildren(cats, ...(s.categories || []).map((c) => el("a", { class: "chip mp-category", "data-category": c.slug,
+      href: marketBrowseURL("", { category: [c.slug] }, 1), text: c.name })));
+  }).catch((err) => setChildren(cats, el("p", { class: "unavailable", text: err.message })));
+  const load = () => {
+    setChildren(popular, loadingState(3, { what: "Marketplace" }));
+    api("/api/marketplace/search?size=12", { deadline: 45000 }).then((r) => {
+      setChildren(popular, ...(r.items.length ? r.items.map(marketCard) : [emptyState("No products to display", "The catalogue returned no products.")]));
+    }).catch((err) => setChildren(popular, marketOffline("Marketplace could not be loaded", err, load)));
+  };
+  load();
+}
+
+async function renderMarketBrowse(view) {
+  const params = new URLSearchParams(location.search);
+  const q = params.get("q") || "";
+  const page = Math.max(1, parseInt(params.get("page") || "1", 10) || 1);
+  const filters = marketFilters(params);
+  const header = pageHeader("Marketplace", "", { back: "/marketplace" + scopeSearch() });
+  const search = marketSearchBox(q, (nq) => navigate(marketBrowseURL(nq, filters, 1)));
+  const panel = el("aside", { class: "mp-filters", id: "marketplace-filters", "aria-label": "Filter" }, el("h2", { text: "Filter" }), loadingState(4));
+  const results = el("section", { class: "mp-results", id: "marketplace-results", "aria-live": "polite" }, loadingState(4, { what: "results" }));
+  const chips = el("div", { class: "mp-active-filters", id: "marketplace-active-filters" });
+  setChildren(view, header, search, chips, el("div", { class: "mp-layout" }, panel, results));
+  announce(q ? `Marketplace results for ${q}` : "Marketplace");
+
+  let sources;
+  try { sources = await marketSources(); } catch (err) {
+    setChildren(panel, el("h2", { text: "Filter" }));
+    setChildren(results, marketOffline("Marketplace could not be loaded", err, () => renderMarketBrowse(view)));
+    return;
+  }
+  const catName = Object.fromEntries((sources.categories || []).map((c) => [c.slug, c.name]));
+  const groups = [
+    ["category", "Category", (sources.categories || []).map((c) => [c.slug, c.name])],
+    ["type", "Type", (sources.types || []).map((t) => [t, t])],
+    ["source", "Source", (sources.sources || []).map((s) => [s.id, s.label])],
+    ["badge", "Publisher", Object.entries(MARKET_BADGES)],
+  ];
+  const toggle = (k, v) => {
+    const next = { ...filters, [k]: filters[k].includes(v) ? filters[k].filter((x) => x !== v) : [...filters[k], v] };
+    navigate(marketBrowseURL(q, next, 1));
+  };
+  setChildren(panel, el("h2", { text: "Filter" }), ...groups.filter((g) => g[2].length).map(([k, label, opts]) =>
+    el("fieldset", { class: "mp-filter-group", "data-group": k },
+      el("legend", { text: label }),
+      ...opts.map(([v, text]) => {
+        const id = `mp-filter-${k}-${v}`.replace(/[^A-Za-z0-9_-]/g, "-");
+        return el("div", { class: "check-line" },
+          el("input", { type: "checkbox", id, "data-filter": `${k}:${v}`, checked: filters[k].includes(v) ? "checked" : null,
+            onchange: () => toggle(k, v) }),
+          el("label", { for: id, text }));
+      }))));
+  const active = Object.entries(filters).flatMap(([k, vs]) => vs.map((v) => [k, v]));
+  setChildren(chips, ...active.map(([k, v]) => el("button", { type: "button", class: "chip mp-filter-chip", "data-filter": `${k}:${v}`,
+    text: `${groups.find((g) => g[0] === k)[1]}: ${k === "category" ? catName[v] || v : k === "badge" ? MARKET_BADGES[v] || v
+      : k === "source" ? ((sources.sources || []).find((s) => s.id === v) || {}).label || v : v} ✕`,
+    onclick: () => toggle(k, v) })),
+    active.length ? el("button", { type: "button", class: "link-button", id: "marketplace-clear-filters", text: "Clear all",
+      onclick: () => navigate(marketBrowseURL(q, {}, 1)) }) : null);
+
+  const qs = new URLSearchParams({ q, page: String(page), size: "24" });
+  if (filters.category.length) qs.set("category", filters.category.join(","));
+  if (filters.badge.length) qs.set("badge", filters.badge.join(","));
+  if (filters.source.length) qs.set("source", filters.source.join(","));
+  if (filters.type.length === 1) qs.set("type", filters.type[0]);
+  let r;
+  try { r = await api(`/api/marketplace/search?${qs}`, { deadline: 45000 }); } catch (err) {
+    setChildren(results, marketOffline("Results could not be loaded", err, () => renderMarketBrowse(view)));
+    return;
+  }
+  // A Docker Hub namespace/repository typed into the search opens its
+  // page directly, so every public repository is reachable by name.
+  const direct = /^[a-z0-9]+(?:[._-][a-z0-9]+)*\/[a-z0-9]+(?:[._-]+[a-z0-9]+)*$/.test(q) && !r.items.some((p) => p.id === q)
+    && (sources.sources || []).some((s) => s.id === "dockerhub")
+    ? el("p", { class: "mp-direct" }, el("a", { id: "marketplace-open-direct", href: marketProductPath("dockerhub", q) + scopeSearch(), text: `Open ${q} on Docker Hub` })) : null;
+  const from = (page - 1) * r.size + 1;
+  const to = (page - 1) * r.size + r.items.length;
+  const pager = el("div", { class: "mp-pager" },
+    page > 1 ? el("a", { class: "button secondary", id: "marketplace-prev", href: marketBrowseURL(q, filters, page - 1), text: "Previous" }) : null,
+    r.items.length ? el("span", { text: `${from.toLocaleString()} – ${to.toLocaleString()}` }) : null,
+    r.hasMore && !r.limit ? el("a", { class: "button secondary", id: "marketplace-next", href: marketBrowseURL(q, filters, page + 1), text: "Next" }) : null);
+  setChildren(results,
+    el("p", { class: "mp-count", id: "marketplace-count", text: `${(r.total || 0).toLocaleString()} result${r.total === 1 ? "" : "s"}` + (q ? ` for "${q}"` : "") }),
+    direct,
+    r.limit ? el("p", { class: "unavailable", id: "marketplace-limit", text: `Docker Hub pages an anonymous search only so far (${r.limit}). Narrow the search or add a filter to reach the rest.` }) : null,
+    r.items.length ? el("div", { class: "mp-grid" }, ...r.items.map(marketCard))
+      : (r.limit ? null : emptyState("No results", q ? `No products match "${q}". Try other words or remove a filter.` : "No products match these filters.")),
+    pager);
+}
+
+// --- markdown, as text-only markup ---------------------------------------
+//
+// A README is untrusted. It is rendered by building elements with text
+// content only: raw HTML is dropped (its text kept), links keep http(s)
+// targets only, and images become links, as the console loads nothing
+// remote.
+
+function mdDecode(s) {
+  return s.replace(/&(amp|lt|gt|quot|#39|apos|nbsp);/g, (_, e) => ({ amp: "&", lt: "<", gt: ">", quot: '"', "#39": "'", apos: "'", nbsp: " " })[e]);
+}
+
+function mdSafeHref(u) {
+  try {
+    const url = new URL(u, "https://invalid.example/");
+    if (url.hostname === "invalid.example") return null;
+    return url.protocol === "https:" || url.protocol === "http:" ? url.href : null;
+  } catch { return null; }
+}
+
+function mdInline(text) {
+  const out = [];
+  const re = /(`+)([\s\S]*?)\1|!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)|\[([^\]]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)|<(https?:\/\/[^>\s]+)>|\*\*([^*]+)\*\*|__([^_]+)__|\*([^*\s][^*]*)\*|\b_([^_]+)_\b/g;
+  let last = 0;
+  let m;
+  while ((m = re.exec(text))) {
+    if (m.index > last) out.push(document.createTextNode(mdDecode(text.slice(last, m.index))));
+    if (m[1]) out.push(el("code", { text: m[2] }));
+    else if (m[4] !== undefined) {
+      const href = mdSafeHref(m[4]);
+      out.push(href ? el("a", { href, target: "_blank", rel: "noopener noreferrer", class: "md-image-link", text: m[3] ? `[image: ${mdDecode(m[3])}]` : "[image]" })
+        : document.createTextNode(m[3] || ""));
+    } else if (m[6] !== undefined) {
+      const href = mdSafeHref(m[6]);
+      const inner = mdInline(m[5]);
+      out.push(href ? el("a", { href, target: "_blank", rel: "noopener noreferrer" }, ...inner) : el("span", {}, ...inner));
+    } else if (m[7]) {
+      const href = mdSafeHref(m[7]);
+      out.push(href ? el("a", { href, target: "_blank", rel: "noopener noreferrer", text: m[7] }) : document.createTextNode(m[7]));
+    } else if (m[8] || m[9]) out.push(el("strong", {}, ...mdInline(m[8] || m[9])));
+    else if (m[10] || m[11]) out.push(el("em", {}, ...mdInline(m[10] || m[11])));
+    last = re.lastIndex;
+  }
+  if (last < text.length) out.push(document.createTextNode(mdDecode(text.slice(last))));
+  return out;
+}
+
+function renderMarkdown(src) {
+  const root = el("div", { class: "md" });
+  // Raw HTML outside code: comments and tags go, their text stays.
+  const lines = String(src || "").replace(/\r\n?/g, "\n").split("\n");
+  let i = 0;
+  const strip = (l) => l.replace(/<!--[\s\S]*?-->/g, "").replace(/<\/?[A-Za-z][^>]*>/g, "");
+  let para = [];
+  const flush = () => {
+    if (para.length) root.append(el("p", {}, ...mdInline(para.join(" "))));
+    para = [];
+  };
+  let inComment = false;
+  while (i < lines.length) {
+    let line = lines[i];
+    const fence = line.match(/^\s*(```|~~~)\s*([\w+-]*)/);
+    if (fence) {
+      flush();
+      const body = [];
+      i++;
+      while (i < lines.length && !lines[i].trim().startsWith(fence[1])) body.push(lines[i++]);
+      i++;
+      root.append(el("pre", { class: "md-code" }, el("code", { text: body.join("\n") })));
+      continue;
+    }
+    if (inComment) { if (line.includes("-->")) { inComment = false; line = line.slice(line.indexOf("-->") + 3); } else { i++; continue; } }
+    if (line.includes("<!--") && !line.includes("-->")) { inComment = true; line = line.slice(0, line.indexOf("<!--")); }
+    line = strip(line);
+    if (!line.trim()) { flush(); i++; continue; }
+    const h = line.match(/^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$/);
+    if (h) { flush(); root.append(el(`h${Math.min(6, h[1].length + 1)}`, {}, ...mdInline(h[2]))); i++; continue; }
+    if (/^\s{0,3}([-*_])(\s*\1){2,}\s*$/.test(line)) { flush(); root.append(el("hr")); i++; continue; }
+    if (/^\s*\|/.test(line) && i + 1 < lines.length && /^\s*\|?\s*:?-{3,}/.test(lines[i + 1])) {
+      flush();
+      const cells = (l) => l.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+      const head = cells(line);
+      i += 2;
+      const rows = [];
+      while (i < lines.length && /^\s*\|/.test(lines[i])) rows.push(cells(strip(lines[i++])));
+      root.append(el("div", { class: "table-wrap" }, el("table", { class: "table md-table" },
+        el("thead", {}, el("tr", {}, ...head.map((c) => el("th", { scope: "col" }, ...mdInline(c))))),
+        el("tbody", {}, ...rows.map((r) => el("tr", {}, ...r.map((c) => el("td", {}, ...mdInline(c)))))))));
+      continue;
+    }
+    const li = line.match(/^(\s*)([-*+]|\d+[.)])\s+(.*)$/);
+    if (li) {
+      flush();
+      const ordered = /\d/.test(li[2]);
+      const list = el(ordered ? "ol" : "ul");
+      while (i < lines.length) {
+        const m = strip(lines[i]).match(/^(\s*)([-*+]|\d+[.)])\s+(.*)$/);
+        if (m) { list.append(el("li", { class: m[1].replace(/\t/g, "  ").length >= 2 ? "md-nested" : null }, ...mdInline(m[3]))); i++; continue; }
+        const cont = strip(lines[i]);
+        if (cont.trim() && /^\s+/.test(cont) && list.lastChild) { list.lastChild.append(" ", ...mdInline(cont.trim())); i++; continue; }
+        break;
+      }
+      root.append(list);
+      continue;
+    }
+    if (/^\s*>/.test(line)) {
+      flush();
+      const body = [];
+      while (i < lines.length && /^\s*>/.test(lines[i])) body.push(strip(lines[i++]).replace(/^\s*>\s?/, ""));
+      root.append(el("blockquote", {}, ...mdInline(body.join(" "))));
+      continue;
+    }
+    para.push(line.trim());
+    i++;
+  }
+  flush();
+  return root;
+}
+
+// --- a product's page ----------------------------------------------------
+
+const MARKET_TABS = [["overview", "Overview"], ["pricing", "Pricing"], ["documentation", "Documentation"], ["support", "Support"], ["versions", "Tags"]];
+
+async function renderMarketProduct(view, source, id) {
+  const back = marketBrowseURL("", {}, 1);
+  setChildren(view, pageHeader("Product details", "", { back }), loadingState(5, { what: id }));
+  let p;
+  try { p = await api(`/api/marketplace/product?source=${encodeURIComponent(source)}&id=${encodeURIComponent(id)}`, { deadline: 60000 }); } catch (err) {
+    setChildren(view, pageHeader("Product details", "", { back }),
+      err.status === 404 ? emptyState("Product not found", err.message) : marketOffline("This product could not be loaded", err, () => renderMarketProduct(view, source, id)));
+    return;
+  }
+  const wanted = new URLSearchParams(location.search).get("tab") || "overview";
+  const current = MARKET_TABS.some((t) => t[0] === wanted) ? wanted : "overview";
+  const versionsWord = marketIsChart(p) ? "Versions" : "Tags";
+  const configure = el("a", { class: "button primary", id: "marketplace-configure", href: marketConfigPath(source, p.id) + scopeSearch(), text: "Configure" });
+  const head = el("div", { class: "mp-product-head", id: "marketplace-product" },
+    marketLogo(p, 72),
+    el("div", { class: "mp-product-title" },
+      el("h1", { text: p.name }),
+      el("p", { class: "mp-publisher", text: p.publisher }),
+      el("p", { class: "mp-description", text: p.description || "" }),
+      el("div", { class: "mp-card-foot" }, el("span", { class: "mp-source", text: p.sourceLabel }), el("span", { class: "mp-type", text: p.type }), marketBadge(p.badge, p.source)),
+      el("div", { class: "mp-product-actions" }, configure)));
+  const strip = el("div", { class: "tab-strip page-tabs", role: "tablist", "aria-label": "Product sections" },
+    ...MARKET_TABS.map(([tid, label]) => [tid, tid === "versions" ? versionsWord : label]).map(([tid, label]) => el("button", { type: "button", role: "tab", id: `marketplace-tab-${tid}`,
+      class: "tab" + (tid === current ? " is-selected" : ""), "aria-selected": String(tid === current), tabindex: tid === current ? "0" : "-1", text: label,
+      onclick: () => { const u = new URL(location.href); u.searchParams.set("tab", tid); history.replaceState(history.state, "", u); renderMarketProduct(view, source, id); } })));
+  const facts = el("aside", { class: "mp-facts", id: "marketplace-additional-details" },
+    el("h2", { text: "Additional details" }),
+    el("dl", {},
+      el("dt", { text: "Type" }), el("dd", { text: p.type }),
+      el("dt", { text: "Source" }), el("dd", { text: p.sourceLabel }),
+      p.updated ? el("dt", { text: "Last product update" }) : null, p.updated ? el("dd", { text: new Date(p.updated).toLocaleDateString() }) : null,
+      (p.categories || []).length ? el("dt", { text: "Category" }) : null,
+      (p.categories || []).length ? el("dd", {}, ...p.categories.map((c, i) => [i ? ", " : null,
+        el("a", { href: marketBrowseURL("", { category: [c.slug] }, 1), text: c.name })]).flat().filter(Boolean)) : null,
+      p.pulls ? el("dt", { text: "Pulls" }) : null, p.pulls ? el("dd", { text: p.pulls }) : null,
+      p.stars ? el("dt", { text: "Stars" }) : null, p.stars ? el("dd", { text: String(p.stars) }) : null,
+      p.pull ? el("dt", { text: marketIsChart(p) ? "Chart" : "Image" }) : null, p.pull ? el("dd", { class: "mono", text: p.pull }) : null));
+  let body;
+  if (current === "overview") {
+    body = el("div", { class: "mp-overview", id: "marketplace-overview" },
+      el("h2", { text: "Overview" }), p.overview ? renderMarkdown(p.overview) : el("p", { text: p.description || "This product has no overview." }));
+  } else if (current === "pricing") {
+    body = el("div", { id: "marketplace-pricing" }, el("h2", { text: "Pricing" }), el("p", { text: p.pricing }));
+  } else if (current === "documentation") {
+    body = el("div", { id: "marketplace-documentation" }, el("h2", { text: "Documentation" }),
+      el("ul", {}, ...(p.documentation || []).map((l) => el("li", {}, el("a", { href: l.url, target: "_blank", rel: "noopener noreferrer", text: l.label })))));
+  } else if (current === "support") {
+    body = el("div", { id: "marketplace-support" }, el("h2", { text: "Support" }),
+      el("p", { text: `${p.publisher} supports this product. Get support from its page:` }),
+      el("ul", {}, ...(p.support || []).map((l) => el("li", {}, el("a", { href: l.url, target: "_blank", rel: "noopener noreferrer", text: l.label })))));
+  } else {
+    body = el("div", { id: "marketplace-versions" }, el("h2", { text: versionsWord }));
+    const table = (vs) => el("div", { class: "table-wrap" }, el("table", { class: "table", id: "marketplace-tags" },
+      el("thead", {}, el("tr", {}, ...[marketIsChart(p) ? "Version" : "Tag", "Last updated", "Size", "Architectures", ""].map((h) => el("th", { scope: "col", text: h })))),
+      el("tbody", {}, ...vs.map((v) => el("tr", { "data-tag": v.name },
+        el("td", { class: "mono", text: v.name }), el("td", { text: v.updated ? new Date(v.updated).toLocaleString() : "—" }),
+        el("td", { text: v.size ? formatBytes(v.size) : "—" }), el("td", { text: (v.archs || []).join(", ") || "—" }),
+        el("td", {}, el("a", { href: marketConfigPath(source, p.id) + "?version=" + encodeURIComponent(v.name), text: "Configure" })))))));
+    let page = 1;
+    const holder = el("div", {}, table(p.versions || []));
+    const more = el("button", { type: "button", class: "secondary", id: "marketplace-more-tags", text: "Show more tags",
+      onclick: async () => {
+        setBusy(more, true);
+        try {
+          const r = await api(`/api/marketplace/versions?source=${encodeURIComponent(source)}&id=${encodeURIComponent(p.id)}&page=${page + 1}`);
+          page++;
+          holder.querySelector("tbody").append(...table(r.versions).querySelectorAll("tbody tr"));
+          if (page * 25 >= r.total) more.remove();
+        } catch (err) { notify(err.message, "error"); }
+        setBusy(more, false);
+      } });
+    if (marketIsChart(p)) more.textContent = "Show more versions";
+    body.append(el("p", { class: "form-help", text: `${(p.versionsTotal || 0).toLocaleString()} ${versionsWord.toLowerCase()}` }), holder,
+      (p.versionsTotal || 0) > 25 ? more : null);
+  }
+  setChildren(view, pageHeader("Product details", "", { back }), head, strip, el("div", { class: "mp-product-body" }, body, facts));
+  announce(`${p.name} in Marketplace`);
+}
+
+// --- the Configure page --------------------------------------------------
+
+function marketField(p, value) {
+  const id = `mp-param-${p.name}`;
+  let control;
+  if (p.type === "select") {
+    control = el("select", { id, name: p.name }, ...(p.options || []).map((o) => el("option", { value: o, text: o, selected: o === value ? "selected" : null })));
+  } else if (p.type === "textarea" || p.type === "yaml") {
+    control = el("textarea", { id, name: p.name, rows: p.type === "yaml" ? "16" : "4", spellcheck: "false",
+      class: p.type === "yaml" ? "mono mp-yaml" : null, "aria-describedby": p.help ? `${id}-help` : null });
+    control.value = value || "";
+  } else {
+    control = el("input", { id, name: p.name, type: "text", value: value || "", inputmode: p.type === "number" ? "numeric" : null,
+      required: p.required ? "required" : null, pattern: p.pattern || null, autocomplete: "off", spellcheck: "false" });
+  }
+  return el("div", { class: "form-row", "data-param": p.name },
+    el("label", { for: id }, el("span", { text: p.label }), p.required ? el("span", { class: "required-mark", "aria-hidden": "true", text: "*" }) : null),
+    control, p.help ? el("p", { class: "form-help", id: `${id}-help`, text: p.help }) : null);
+}
+
+async function renderMarketConfigure(view, source, id) {
+  const project = currentProject();
+  const params = new URLSearchParams(location.search);
+  const back = marketProductPath(source, id) + scopeSearch();
+  setChildren(view, pageHeader("Deploy", "", { back }), loadingState(6, { what: "the configuration" }));
+  let product;
+  let clusters;
+  try {
+    [product, clusters] = await Promise.all([
+      api(`/api/marketplace/product?source=${encodeURIComponent(source)}&id=${encodeURIComponent(id)}`, { deadline: 60000 }),
+      api(`/api/marketplace/clusters?project=${encodeURIComponent(project || "")}`),
+    ]);
+  } catch (err) {
+    setChildren(view, pageHeader("Deploy", "", { back }), marketOffline("The configuration could not be loaded", err, () => renderMarketConfigure(view, source, id)));
+    return;
+  }
+  const tab = params.get("tab") === "cli" ? "cli" : "gcp";
+  const strip = el("div", { class: "tab-strip page-tabs", role: "tablist", "aria-label": "Deploy" },
+    ...[["gcp", "Deploy via Google Cloud"], ["cli", "Deploy via command line"]].map(([tid, label]) => el("button", { type: "button", role: "tab",
+      id: `marketplace-deploy-tab-${tid}`, class: "tab" + (tid === tab ? " is-selected" : ""), "aria-selected": String(tid === tab), text: label,
+      onclick: () => { const u = new URL(location.href); u.searchParams.set("tab", tid); history.replaceState(history.state, "", u); renderMarketConfigure(view, source, id); } })));
+  const head = el("div", { class: "mp-config-head" }, marketLogo(product, 40),
+    el("div", {}, el("h2", { text: product.name }), el("p", { class: "mp-publisher", text: `${product.publisher} · ${product.sourceLabel}` })));
+  // latest, as `docker pull` and `helm install` take by default, unless a
+  // tag or version was chosen.
+  const chart = marketIsChart(product);
+  const version = params.get("version") || "latest";
+
+  if (tab === "cli" && chart) {
+    const ver = version === "latest" ? "" : ` --version ${version}`;
+    const ref = product.pull && product.pull.startsWith("oci://") ? product.pull.replace(/:[^:/]*$/, "") : `REPO/${id.split("/").pop()}`;
+    setChildren(view, pageHeader(`Deploy ${product.name}`, "", { back }), head, strip,
+      el("div", { class: "card", id: "marketplace-cli" },
+        el("p", { text: "Install the chart with Helm against the cluster's kubeconfig:" }),
+        el("pre", { class: "mono", text: (ref.startsWith("REPO/") ? `helm repo add REPO ${product.pull || "REPO_URL"}\n` : "") +
+          `helm install APP_INSTANCE_NAME ${ref}${ver} --namespace NAMESPACE --create-namespace -f values.yaml` }),
+        el("p", { class: "form-help", text: "Deploy via Google Cloud does the same through the Helm SDK and records the release as a Kubernetes Application (app.k8s.io/v1beta1), so it appears on Kubernetes Engine's Applications page." })));
+    return;
+  }
+  if (tab === "cli") {
+    const image = `${product.pull || id}:${version}`;
+    setChildren(view, pageHeader(`Deploy ${product.name}`, "", { back }), head, strip,
+      el("div", { class: "card", id: "marketplace-cli" },
+        el("p", { text: "Deploy the app with kubectl against the cluster's kubeconfig, then record it as an Application:" }),
+        el("pre", { class: "mono", text: `kubectl create namespace NAMESPACE\nkubectl create deployment APP_INSTANCE_NAME --image=${image} -n NAMESPACE\nkubectl expose deployment APP_INSTANCE_NAME --port=PORT -n NAMESPACE` }),
+        el("p", { class: "form-help", text: "Deploy via Google Cloud does the same and records the app as a Kubernetes Application (app.k8s.io/v1beta1), so it appears on Kubernetes Engine's Applications page." })));
+    return;
+  }
+
+  const clusterSel = el("select", { id: "marketplace-cluster", name: "cluster" },
+    ...clusters.clusters.map((c) => el("option", { value: c.name, text: `${c.name} (${c.location})${c.status !== "Running" ? ` — ${c.status}` : ""}` })),
+    el("option", { value: "__new__", text: "Create a new cluster" }));
+  const newCluster = el("div", { class: "mp-new-cluster", id: "marketplace-new-cluster", hidden: true });
+  const nsSel = el("select", { id: "marketplace-namespace", name: "namespace" });
+  const nsNew = el("input", { type: "text", id: "marketplace-new-namespace", name: "newNamespace", hidden: true, placeholder: "New namespace name", autocomplete: "off" });
+  const nameIn = el("input", { type: "text", id: "marketplace-app-name", name: "name", required: "required", autocomplete: "off", spellcheck: "false",
+    value: (id.split("/").pop() || "app").toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/^[^a-z]+/, "").slice(0, 40) + "-1" });
+  const paramsBox = el("div", { id: "marketplace-parameters" }, loadingState(3));
+  const error = el("p", { class: "form-error", role: "alert", id: "marketplace-deploy-error", hidden: true });
+  const deploy = el("button", { type: "submit", class: "primary", id: "marketplace-deploy", text: "Deploy" });
+  let paramDefs = [];
+
+  const loadNamespaces = async () => {
+    const c = clusterSel.value;
+    newCluster.hidden = c !== "__new__";
+    if (c === "__new__") { setChildren(nsSel); return; }
+    setChildren(nsSel, el("option", { text: "Loading…", value: "" }));
+    try {
+      const r = await api(`/api/marketplace/namespaces?project=${encodeURIComponent(project || "")}&cluster=${encodeURIComponent(c)}`);
+      const list = r.namespaces.filter((n) => !/^(kube-|local-path-storage|kourier-system|knative-|gke-|gmp-)/.test(n));
+      setChildren(nsSel, ...list.map((n) => el("option", { value: n, text: n, selected: n === "default" ? "selected" : null })),
+        el("option", { value: "__new__", text: "Create a namespace" }));
+    } catch (err) {
+      setChildren(nsSel, el("option", { value: "__new__", text: "Create a namespace" }));
+      error.textContent = err.message; error.hidden = false;
+    }
+    nsNew.hidden = nsSel.value !== "__new__";
+  };
+  nsSel.addEventListener("change", () => { nsNew.hidden = nsSel.value !== "__new__"; if (!nsNew.hidden) nsNew.focus(); });
+  clusterSel.addEventListener("change", loadNamespaces);
+
+  // Create a new cluster, as Google's Configure page makes one in a zone.
+  const zone = el("select", { id: "marketplace-new-cluster-zone" }, ...["us-central1-a", "us-central1-b", "us-east1-b", "europe-west1-b", "asia-east1-a"].map((z) => el("option", { value: z, text: z })));
+  const cname = el("input", { type: "text", id: "marketplace-new-cluster-name", value: "cluster-1", autocomplete: "off" });
+  const create = el("button", { type: "button", class: "secondary", id: "marketplace-create-cluster", text: "Create new cluster",
+    disabled: clusters.createUnavailable ? "disabled" : null,
+    onclick: async () => {
+      setBusy(create, true);
+      error.hidden = true;
+      try {
+        await send("/api/marketplace/clusters", "POST", { project, zone: zone.value, name: cname.value.trim() });
+        notify(`Creating cluster ${cname.value.trim()}`);
+        // The new cluster is offered while it provisions; Deploy waits for it.
+        const wait = async () => {
+          const r = await api(`/api/marketplace/clusters?project=${encodeURIComponent(project || "")}`);
+          const c = r.clusters.find((x) => x.name === cname.value.trim());
+          setChildren(clusterSel, ...r.clusters.map((x) => el("option", { value: x.name, text: `${x.name} (${x.location})${x.status !== "Running" ? ` — ${x.status}` : ""}` })),
+            el("option", { value: "__new__", text: "Create a new cluster" }));
+          clusterSel.value = cname.value.trim();
+          if (!c || c.status !== "Running") { if (view.isConnected) MARKET_POLL = setTimeout(wait, 3000); return; }
+          setBusy(create, false);
+          loadNamespaces();
+        };
+        wait();
+      } catch (err) { setBusy(create, false); error.textContent = err.message; error.hidden = false; }
+    } });
+  setChildren(newCluster,
+    el("div", { class: "form-row" }, el("label", { for: "marketplace-new-cluster-zone", text: "Zone" }), zone),
+    el("div", { class: "form-row" }, el("label", { for: "marketplace-new-cluster-name", text: "Cluster name" }), cname),
+    clusters.createUnavailable ? el("p", { class: "form-help form-unavailable", id: "marketplace-create-unavailable", text: clusters.createUnavailable })
+      : el("p", { class: "form-help", text: "A Standard Kubernetes Engine cluster of one node, a kind cluster on this machine." }),
+    create);
+
+  const loadParams = async (v) => {
+    setChildren(paramsBox, loadingState(3, { what: "the app's parameters" }));
+    try {
+      const r = await api(`/api/marketplace/parameters?source=${encodeURIComponent(source)}&id=${encodeURIComponent(id)}&version=${encodeURIComponent(v)}`, { deadline: 60000 });
+      paramDefs = r.parameters;
+      const sections = [];
+      for (const p of paramDefs) {
+        const s = p.section || "";
+        let sec = sections.find((x) => x.name === s);
+        if (!sec) sections.push(sec = { name: s, rows: [] });
+        sec.rows.push(marketField(p, p.default || ""));
+      }
+      setChildren(paramsBox, ...sections.map((s) => s.name
+        ? el("details", { class: "mp-param-section", open: null }, el("summary", { text: s.name }), ...s.rows)
+        : el("div", {}, ...s.rows)));
+    } catch (err) {
+      setChildren(paramsBox, marketOffline("The app's parameters could not be read", err, () => loadParams(v)));
+    }
+  };
+
+  const form = el("form", { class: "create-page mp-config-form", id: "marketplace-configure-form", novalidate: "novalidate",
+    onsubmit: async (e) => {
+      e.preventDefault();
+      error.hidden = true;
+      const cluster = clusterSel.value;
+      if (cluster === "__new__") { error.textContent = "Create the new cluster first, or select an existing one."; error.hidden = false; return; }
+      const creating = nsSel.value === "__new__";
+      const namespace = creating ? nsNew.value.trim() : nsSel.value;
+      const name = nameIn.value.trim();
+      const dns = /^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$/;
+      if (!dns.test(namespace)) { error.textContent = "Namespace: lowercase letters, digits and dashes, starting with a letter."; error.hidden = false; return; }
+      if (!dns.test(name)) { error.textContent = "App instance name: lowercase letters, digits and dashes, starting with a letter."; error.hidden = false; return; }
+      const values = {};
+      for (const p of paramDefs) {
+        const c = form.querySelector(`[name="${CSS.escape(p.name)}"]`);
+        if (!c) continue;
+        values[p.name] = c.value;
+        if (p.required && !c.value.trim()) { error.textContent = `${p.label} is required.`; error.hidden = false; c.focus(); return; }
+        if (p.pattern && c.value && !(new RegExp(p.pattern)).test(c.value)) { error.textContent = `${p.label}: ${p.help || "not a valid value"}`; error.hidden = false; c.focus(); return; }
+      }
+      setBusy(deploy, true);
+      const op = recordOperation(`Deploy ${product.name} as ${name}`);
+      try {
+        await send("/api/marketplace/deploy", "POST", { project, source, product: id, version: values.tag || values.chartVersion || version, cluster, namespace, createNamespace: creating, name, values });
+        op.succeeded("");
+        notify(`Deploying ${name}`);
+        navigate(`/kubernetes/applications/${encodeURIComponent(cluster)}/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`);
+      } catch (err) {
+        op.failed(err.message);
+        setBusy(deploy, false);
+        error.textContent = err.message;
+        error.hidden = false;
+      }
+    } },
+    el("div", { class: "form-row" }, el("label", { for: "marketplace-cluster" }, el("span", { text: "Cluster" })), clusterSel,
+      el("p", { class: "form-help", text: "Select the Kubernetes cluster that you want to deploy the app to." })),
+    newCluster,
+    el("div", { class: "form-row" }, el("label", { for: "marketplace-namespace" }, el("span", { text: "Namespace" })), nsSel, nsNew,
+      el("p", { class: "form-help", text: "Select or create a Namespace to use for the application." })),
+    el("div", { class: "form-row" }, el("label", { for: "marketplace-app-name" }, el("span", { text: "App instance name" }), el("span", { class: "required-mark", "aria-hidden": "true", text: "*" })), nameIn,
+      el("p", { class: "form-help", text: "The name must be unique within the namespace." })),
+    paramsBox, error,
+    el("div", { class: "form-actions" }, deploy));
+  setChildren(view, pageHeader(`Deploy ${product.name}`, "", { back }), head, strip, form);
+  announce(`Configure ${product.name}`);
+  loadNamespaces();
+  loadParams(version);
+}
+
+// --- Kubernetes Engine > Applications ------------------------------------
+
+const APP_STATUS_CLASS = { OK: "ok", Pending: "pending", Error: "error" };
+
+function appStatus(a) {
+  const label = a.status === "OK" ? "OK" : a.status === "Pending" ? "Deploying" : "Error";
+  return el("span", { class: `status ${APP_STATUS_CLASS[a.status] || ""}`, "data-status": a.status, text: label });
+}
+
+const appPath = (a) => `/kubernetes/applications/${encodeURIComponent(a.cluster)}/${encodeURIComponent(a.namespace)}/${encodeURIComponent(a.name)}`;
+
+async function renderGKEApplications(view) {
+  stopMarketPoll();
+  const rest = location.pathname.replace(/^\/kubernetes\/applications\/?/, "").split("/").filter(Boolean).map(decodeURIComponent);
+  if (rest.length === 3) return renderGKEApplication(view, rest[0], rest[1], rest[2]);
+  if (rest.length) return notFound(view, location.pathname);
+  const project = currentProject();
+  const deployBtn = el("a", { class: "header-button primary", id: "applications-deploy-marketplace", href: "/marketplace/browse?filter=type:Kubernetes%20apps", text: "Deploy from Marketplace" });
+  deployBtn.href = marketBrowseURL("", {}, 1);
+  const header = pageHeader("Applications", "", { actions: [deployBtn, refreshButton(() => renderGKEApplications(view))] });
+  setChildren(view, header, loadingState(4, { what: "applications" }));
+  let r;
+  try { r = await api(`/api/marketplace/applications?project=${encodeURIComponent(project || "")}`); } catch (err) {
+    setChildren(view, header, errorState("Could not read applications", err.message, () => renderGKEApplications(view)));
+    return;
+  }
+  const apps = r.applications || [];
+  const table = el("div", { class: "table-wrap" }, el("table", { class: "table", id: "applications-table" },
+    el("thead", {}, el("tr", {}, ...["Name", "Status", "Type", "Version", "Namespace", "Cluster"].map((h) => el("th", { scope: "col", text: h })))),
+    el("tbody", {}, ...apps.map((a) => el("tr", { "data-app": a.name, "data-cluster": a.cluster },
+      el("td", {}, el("a", { href: appPath(a) + scopeSearch(), text: a.name })),
+      el("td", {}, appStatus(a)), el("td", { text: a.type || "—" }), el("td", { text: a.version || "—" }),
+      el("td", { text: a.namespace }), el("td", { text: a.cluster }))))));
+  setChildren(view, header,
+    el("p", { class: "subtitle", text: "Applications are the Kubernetes Applications (app.k8s.io/v1beta1) on this instance's cluster and the project's Kubernetes Engine clusters, such as those Marketplace deploys." }),
+    (r.problems || []).map((p) => el("p", { class: "unavailable", text: p })),
+    apps.length ? table : el("div", { class: "state", id: "applications-empty" },
+      el("h2", { text: "No applications to display" }),
+      el("p", { text: "Deploy an app from Marketplace, and it appears here with its components." }),
+      el("a", { class: "button primary", href: marketBrowseURL("", {}, 1), text: "Deploy from Marketplace" })));
+  announce(`Applications: ${apps.length}`);
+}
+
+async function renderGKEApplication(view, cluster, namespace, name) {
+  const project = currentProject();
+  const back = "/kubernetes/applications" + scopeSearch();
+  const q = `project=${encodeURIComponent(project || "")}&cluster=${encodeURIComponent(cluster)}&namespace=${encodeURIComponent(namespace)}&name=${encodeURIComponent(name)}`;
+  let r;
+  try { r = await api(`/api/marketplace/application?${q}`); } catch (err) {
+    setChildren(view, pageHeader("Application details", "", { back }),
+      err.status === 404 ? emptyState("Application not found", err.message) : errorState("Could not read the application", err.message, () => renderGKEApplication(view, cluster, namespace, name)));
+    return;
+  }
+  const a = r.application;
+  const del = el("button", { type: "button", class: "header-button", id: "application-delete", text: "Delete",
+    onclick: () => confirmDestructive({ title: `Delete ${a.name}?`, style: "confirm",
+      detail: (a.release ? `The Helm release ${a.release} is uninstalled, and ` : "The application ") +
+        `${a.name} and its components (${(a.components || []).map((c) => `${c.kind} ${c.name}`).join(", ") || "none"}) are deleted from namespace ${a.namespace} of cluster ${a.cluster}.`,
+      onConfirm: async () => {
+        await send("/api/marketplace/application/delete", "POST", { project, cluster, namespace, name });
+        notify(`Deleted application ${a.name}`);
+        navigate("/kubernetes/applications");
+      } }) });
+  const wanted = new URLSearchParams(location.search).get("tab") || "details";
+  const tabs = [["details", "Details"], ["yaml", "YAML"]];
+  const current = tabs.some((t) => t[0] === wanted) ? wanted : "details";
+  const strip = el("div", { class: "tab-strip page-tabs", role: "tablist", "aria-label": "Application sections" },
+    ...tabs.map(([tid, label]) => el("button", { type: "button", role: "tab", id: `application-tab-${tid}`,
+      class: "tab" + (tid === current ? " is-selected" : ""), "aria-selected": String(tid === current), text: label,
+      onclick: () => { const u = new URL(location.href); u.searchParams.set("tab", tid); history.replaceState(history.state, "", u); renderGKEApplication(view, cluster, namespace, name); } })));
+  const progress = a.status === "Pending"
+    ? el("div", { class: "mp-progress", id: "application-progress", role: "status" },
+        el("div", { class: "mp-progress-bar", "aria-hidden": "true" }),
+        el("p", {}, el("strong", { text: "Deploying. " }), `${a.name}'s components are starting; the cluster is pulling ${a.image || "the images"}.`),
+        (a.pods || []).length ? el("ul", { class: "mp-pods" }, ...a.pods.map((p) => el("li", { text: `${p.name}: ${p.reason || p.phase} (${p.ready} ready)` }))) : null)
+    : a.status === "Error"
+      ? el("div", { class: "state error", id: "application-error", role: "alert" }, el("h2", { text: "The application has errors" }), el("p", { text: a.detail || "" }),
+          (a.pods || []).length ? el("ul", { class: "mp-pods" }, ...a.pods.map((p) => el("li", { text: `${p.name}: ${p.reason || p.phase} (${p.ready} ready)` }))) : null)
+      : null;
+  const info = el("div", { class: "card", id: "application-info" },
+    el("dl", { class: "api-facts" },
+      ...[["Status", appStatus(a)], ["Type", a.type], ["Version", a.version], ["Cluster", a.cluster], ["Namespace", a.namespace],
+        ["Created", a.created ? new Date(a.created).toLocaleString() : ""], ["Source", MARKET_SOURCE_LABELS[a.source] || a.source],
+        ["Image", a.image], ["Helm release", a.release ? `${a.release} (revision ${a.revision || "—"}, ${a.releaseStatus || "unknown"})` : ""],
+        ["Description", a.description]].filter(([, v]) => v).flatMap(([k, v]) => [el("dt", { text: k }),
+        el("dd", { class: k === "Image" ? "mono" : null }, v)])),
+    (a.links || []).length ? el("p", {}, ...a.links.map((l, i) => [i ? " · " : null, el("a", { href: l.url, target: "_blank", rel: "noopener noreferrer", text: l.description || l.url })]).flat().filter(Boolean)) : null,
+    a.source && a.product ? el("p", {}, el("a", { href: marketProductPath(a.source, a.product) + scopeSearch(), id: "application-product", text: "View in Marketplace" })) : null);
+  const compLink = (c) => {
+    if (!r.own || !c.name) return document.createTextNode(c.name || "—");
+    if (c.kind === "Service") return el("a", { href: `/kubernetes/services/${encodeURIComponent(c.name)}${scopeSearch()}`, text: c.name });
+    if (["Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob"].includes(c.kind)) return el("a", { href: `/kubernetes/workloads/${encodeURIComponent(c.name)}${scopeSearch()}`, text: c.name });
+    return document.createTextNode(c.name);
+  };
+  const components = el("div", { id: "application-components" }, el("h2", { text: "Components" }),
+    el("div", { class: "table-wrap" }, el("table", { class: "table", id: "application-components-table" },
+      el("thead", {}, el("tr", {}, ...["Name", "Kind", "Status", "Details", "Endpoints"].map((h) => el("th", { scope: "col", text: h })))),
+      el("tbody", {}, ...((a.components || []).length ? a.components.map((c) => el("tr", { "data-kind": c.kind, "data-name": c.name },
+        el("td", {}, compLink(c)), el("td", { text: c.kind }),
+        el("td", {}, el("span", { class: `status ${APP_STATUS_CLASS[c.status] || ""}`, text: c.status === "Pending" ? "Pending" : c.status })),
+        el("td", { text: c.detail || "—" }), el("td", { class: "mono", text: (c.endpoints || []).join("\n") || "—" })))
+        : [el("tr", {}, el("td", { colspan: "5", text: "No components to display" }))])))));
+  const body = current === "yaml"
+    ? el("pre", { class: "mono", id: "application-yaml", text: JSON.stringify(a.object ? redactForView(a.object) : {}, null, 2) })
+    : el("div", {}, progress, info, components);
+  // A Helm release is upgraded in place, as `helm upgrade` does: its
+  // chart version and values, starting from the release's own.
+  const upgrade = a.release && a.source && a.product ? el("button", { type: "button", class: "header-button", id: "application-upgrade", text: "Upgrade",
+    onclick: async () => {
+      setBusy(upgrade, true);
+      let cur;
+      try { cur = await api(`/api/marketplace/application/values?${q}`); } catch (err) { setBusy(upgrade, false); notify(err.message, "error"); return; }
+      setBusy(upgrade, false);
+      const ver = el("input", { type: "text", id: "application-upgrade-version", value: cur.version || "", autocomplete: "off", spellcheck: "false" });
+      const vals = el("textarea", { id: "application-upgrade-values", class: "mono mp-yaml", rows: "14", spellcheck: "false" });
+      vals.value = cur.values || "";
+      const err = el("p", { class: "form-error", role: "alert", hidden: true });
+      const go = el("button", { type: "submit", class: "primary", id: "application-upgrade-submit", text: "Upgrade" });
+      const panel = el("form", { class: "card mp-upgrade", id: "application-upgrade-form",
+        onsubmit: async (e) => {
+          e.preventDefault();
+          setBusy(go, true);
+          err.hidden = true;
+          const op = recordOperation(`Upgrade ${a.name}`);
+          try {
+            await send("/api/marketplace/application/upgrade", "POST", { project, cluster, namespace, name, version: ver.value.trim(),
+              values: { chartVersion: ver.value.trim(), values: vals.value } });
+            op.succeeded("");
+            notify(`Upgraded ${a.name}`);
+            renderGKEApplication(view, cluster, namespace, name);
+          } catch (x) { op.failed(x.message); setBusy(go, false); err.textContent = x.message; err.hidden = false; }
+        } },
+        el("h2", { text: `Upgrade ${a.name}` }),
+        el("div", { class: "form-row" }, el("label", { for: "application-upgrade-version", text: "Chart version" }), ver),
+        el("div", { class: "form-row" }, el("label", { for: "application-upgrade-values", text: "Values (YAML)" }), vals,
+          el("p", { class: "form-help", text: "The release's values. Upgrade installs the chart version with them, as helm upgrade does." })),
+        err, el("div", { class: "form-actions" }, go,
+          el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => panel.remove() })));
+      const old = view.querySelector("#application-upgrade-form");
+      if (old) old.remove();
+      strip.after(panel);
+      ver.focus();
+    } }) : null;
+  setChildren(view, pageHeader(a.name, "Application details", { back, actions: [upgrade, del, refreshButton(() => renderGKEApplication(view, cluster, namespace, name))].filter(Boolean) }), strip, body);
+  announce(`Application ${a.name}: ${a.status}`);
+  if (a.status === "Pending" && current === "details") {
+    stopMarketPoll();
+    MARKET_POLL = setTimeout(() => { if (view.isConnected && location.pathname === appPath(a)) renderGKEApplication(view, cluster, namespace, name); }, 2500);
+  }
+}
+
+// --- Helm repositories ---------------------------------------------------
+
+async function renderMarketRepos(view) {
+  const back = "/marketplace" + scopeSearch();
+  setChildren(view, pageHeader("Helm repositories", "", { back }), loadingState(3, { what: "repositories" }));
+  let r;
+  try { r = await api("/api/marketplace/repos"); } catch (err) {
+    setChildren(view, pageHeader("Helm repositories", "", { back }), errorState("Could not read the repositories", err.message, () => renderMarketRepos(view)));
+    return;
+  }
+  if (!r.configured) {
+    setChildren(view, pageHeader("Helm repositories", "", { back }), emptyState("Not available", "This instance's Marketplace takes no Helm repositories."));
+    return;
+  }
+  const row = (repo, removable) => el("tr", { "data-repo": repo.name },
+    el("td", { class: "mono", text: repo.name }), el("td", { class: "mono", text: repo.url }),
+    el("td", {}, removable ? el("button", { type: "button", class: "link-button", "data-remove": repo.name, text: "Remove",
+      onclick: () => confirmDestructive({ title: `Remove ${repo.name}?`, style: "confirm", confirmLabel: "Remove", consequence: "",
+        detail: `Marketplace stops listing ${repo.name}'s charts. Apps already deployed from it stay.`,
+        onConfirm: async () => { await send("/api/marketplace/repos/delete", "POST", { name: repo.name }); notify(`Removed ${repo.name}`); renderMarketRepos(view); } }) })
+      : el("span", { class: "form-help", text: "Rancher" })));
+  const name = el("input", { type: "text", id: "marketplace-repo-name", required: "required", autocomplete: "off", spellcheck: "false", placeholder: "bitnami" });
+  const url = el("input", { type: "url", id: "marketplace-repo-url", required: "required", autocomplete: "off", spellcheck: "false", placeholder: "https://charts.bitnami.com/bitnami" });
+  const err = el("p", { class: "form-error", role: "alert", hidden: true, id: "marketplace-repo-error" });
+  const add = el("button", { type: "submit", class: "primary", id: "marketplace-repo-add", text: "Add repository" });
+  const form = el("form", { class: "card", id: "marketplace-repo-form", novalidate: "novalidate",
+    onsubmit: async (e) => {
+      e.preventDefault();
+      err.hidden = true;
+      setBusy(add, true);
+      try {
+        await send("/api/marketplace/repos/add", "POST", { name: name.value.trim(), url: url.value.trim() });
+        MARKET_SOURCES = null;
+        notify(`Added ${name.value.trim()}`);
+        renderMarketRepos(view);
+      } catch (x) { setBusy(add, false); err.textContent = x.message; err.hidden = false; }
+    } },
+    el("h2", { text: "Add a repository" }),
+    el("div", { class: "form-row" }, el("label", { for: "marketplace-repo-name", text: "Name" }), name,
+      el("p", { class: "form-help", text: "Lowercase letters, digits and dashes. Its charts are listed under the Helm source as NAME/CHART." })),
+    el("div", { class: "form-row" }, el("label", { for: "marketplace-repo-url", text: "Repository URL" }), url,
+      el("p", { class: "form-help", text: "An https chart repository, the URL its index.yaml is under, as helm repo add takes. It is read anonymously." })),
+    err, el("div", { class: "form-actions" }, add));
+  const table = (rows, id) => el("div", { class: "table-wrap" }, el("table", { class: "table", id },
+    el("thead", {}, el("tr", {}, ...["Name", "URL", ""].map((h) => el("th", { scope: "col", text: h })))),
+    el("tbody", {}, ...rows)));
+  setChildren(view, pageHeader("Helm repositories", "", { back }),
+    el("p", { class: "subtitle", text: "Marketplace lists the charts of Artifact Hub, of Rancher's chart repositories and of the repositories added here, and installs them with Helm." }),
+    el("h2", { text: "Your repositories" }),
+    (r.repos || []).length ? table(r.repos.map((x) => row(x, true)), "marketplace-repos-table")
+      : el("p", { class: "form-help", id: "marketplace-repos-empty", text: "No repositories added." }),
+    form,
+    el("h2", { text: "Rancher" }), table((r.rancher || []).map((x) => row(x, false)), "marketplace-rancher-table"));
+  announce("Helm repositories");
+}
+
+function redactForView(o) {
+  const m = o && o.metadata && o.metadata.annotations;
+  if (m) delete m["kubectl.kubernetes.io/last-applied-configuration"];
+  return o;
 }

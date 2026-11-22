@@ -112,6 +112,10 @@ type Backend struct {
 	// and the backend's own container listens on Front.UpstreamPort, which
 	// the Service does not publish (#873).
 	Front *Front
+	// Sidecars are further containers of the pod, each serving its own
+	// port, which the Service publishes: Cloud SQL's managed connection
+	// pooler beside the server (#2141).
+	Sidecars []Sidecar
 	// Selects, when set, is the app label the Service selects in place of
 	// Name: a Cloud SQL high-availability instance's Service selects its
 	// primary's server, which a failover changes (#1408).
@@ -253,6 +257,18 @@ const PubSubFrontStateFile = "/var/lib/pubsub-front/state.json"
 
 // NamedPort is one additional port of a backend. Kubernetes requires every
 // port of a multi-port Service to be named.
+// Sidecar is a container beside the backend's, serving Port on the pod's
+// address; its readiness is a TCP check of Port.
+type Sidecar struct {
+	Name    string
+	Image   string
+	Command []string
+	Env     map[string]string
+	Port    int
+	// RunAsUser, when set, is the container's user and group.
+	RunAsUser int
+}
+
 type NamedPort struct {
 	Name string
 	Port int
@@ -761,6 +777,29 @@ spec:
 		}
 	}
 
+	for _, c := range b.Sidecars {
+		fmt.Fprintf(&sb, "        - name: %s\n          image: %s\n", c.Name, c.Image)
+		if len(c.Command) > 0 {
+			fmt.Fprintf(&sb, "          command: [%s]\n", quoteList(c.Command))
+		}
+		writeEnv(&sb, c.Env)
+		if c.RunAsUser != 0 {
+			fmt.Fprintf(&sb, "          securityContext:\n            runAsUser: %d\n            runAsGroup: %d\n", c.RunAsUser, c.RunAsUser)
+		}
+		fmt.Fprintf(&sb, `          ports:
+            - containerPort: %d
+          readinessProbe:
+            tcpSocket:
+              port: %d
+            initialDelaySeconds: 1
+            periodSeconds: 2
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+`, c.Port, c.Port)
+	}
+
 	if b.Persistent || b.dataMount() || (b.Front != nil && b.Front.StateDir != "") || b.supervised() || b.Sealed != nil {
 		sb.WriteString("      volumes:\n")
 	}
@@ -806,6 +845,9 @@ spec:
 `, b.Name, namespace, b.selects(), b.Port, b.Port)
 	for _, p := range b.ExtraPorts {
 		fmt.Fprintf(&sb, "    - name: %s\n      port: %d\n      targetPort: %d\n", p.Name, p.Port, p.Port)
+	}
+	for _, c := range b.Sidecars {
+		fmt.Fprintf(&sb, "    - name: %s\n      port: %d\n      targetPort: %d\n", c.Name, c.Port, c.Port)
 	}
 	if b.EgressTo != nil {
 		fmt.Fprintf(&sb, `---

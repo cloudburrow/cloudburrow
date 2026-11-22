@@ -225,6 +225,20 @@ func (e *Enforcer) Authorize(ctx context.Context, svc *Service, bearer, permissi
 	return svc.Deny(permission, resource)
 }
 
+// AuthorizeAnonymous checks a request with no credentials, which is
+// allUsers alone (Cloud Run invoke's and Artifact Registry's registry,
+// ADR-0006): nil when allUsers holds permission on resource (or
+// enforcement is off), else svc's denial.
+func (e *Enforcer) AuthorizeAnonymous(ctx context.Context, svc *Service, permission, resource string) error {
+	if e == nil || e.On == nil || !e.On() || permission == "" {
+		return nil
+	}
+	if e.holds(ctx, svc, Caller{}, permission, resource) {
+		return nil
+	}
+	return svc.Deny(permission, resource)
+}
+
 // AuthorizeCaller is Authorize for the caller of the call in ctx, whose
 // bearer token its incoming metadata carries (the JSON transcoder copies
 // the Authorization header there too).

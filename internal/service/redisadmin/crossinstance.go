@@ -37,12 +37,12 @@ import (
 // and its nodes trust every member's (cirConfig.PeerCAs, given to a node
 // at its start and to the running ones by CONFIG SET tls-ca-cert-file
 // before a switchover), so they replicate over TLS (tls-replication)
-// whichever member is the primary. In CLUSTER mode it keeps its 501: a
-// cluster-mode node refuses REPLICAOF ("REPLICAOF not allowed in cluster
-// mode", measured by TestMemorystoreValkeyClusterUpgradeKeepsWrites), and a
-// cluster-mode replica follows only a primary of its own cluster (CLUSTER
-// REPLICATE takes a node ID its gossip knows), so another cluster's shards
-// cannot be replicated, even with the same slot layout.
+// whichever member is the primary. In CLUSTER mode, where a node refuses
+// REPLICAOF ("REPLICAOF not allowed in cluster mode", measured by
+// TestMemorystoreValkeyClusterUpgradeKeepsWrites) and follows only a
+// primary of its own cluster, each shard of a secondary is fed by a
+// replication link CloudBurrow runs (crossclusterlink.go, #1577); the
+// switchover and detach are the same updates.
 //
 // Migration (StartMigration, FinishMigration) from a self-managed Valkey or
 // Redis server into a CLUSTER_DISABLED instance is the same replication:
@@ -104,8 +104,10 @@ type migration struct {
 	port int
 }
 
+// migrating is whether a migration is under way: neither MIGRATED nor
+// ROLLED_BACK, after which the instance is its own again (#1577).
 func (m *migration) migrating() bool {
-	return m != nil && m.State != memorystorepb.MigrationConfig_MIGRATED.String()
+	return m != nil && m.State != memorystorepb.MigrationConfig_MIGRATED.String() && m.State != memorystorepb.MigrationConfig_ROLLED_BACK.String()
 }
 
 func (v *valkeyFields) role() string {
@@ -170,9 +172,6 @@ func cirPrimary(in *memorystorepb.Instance, mode memorystorepb.Instance_Mode) (s
 	default:
 		return "", apierror.InvalidArgument("cross_instance_replication_config.instance_role %s is not an instance role", cfg.GetInstanceRole())
 	}
-	if mode == memorystorepb.Instance_CLUSTER {
-		return "", checkCrossCluster(true)
-	}
 	p := cfg.GetPrimaryInstance().GetInstance()
 	if instanceRE.FindStringSubmatch(p) == nil {
 		return "", apierror.InvalidArgument("cross_instance_replication_config.primary_instance.instance must be projects/{project}/locations/{location}/instances/{instance}, not %q", p)
@@ -187,15 +186,15 @@ func (c *clusters) checkPrimary(r *clusterRecord, name string) error {
 		return apierror.NotFound("primary instance %s was not found", name)
 	}
 	switch {
-	case !p.standalone():
-		return apierror.FailedPrecondition("primary instance %s is in CLUSTER mode: a secondary replicates a primary of its own mode, and only CLUSTER_DISABLED instances are served", name)
+	case p.standalone() != r.standalone():
+		return apierror.InvalidArgument("a secondary's mode must be its primary's: primary instance %s is %s", name, p.Valkey.Mode)
 	case p.state != clusterpb.Cluster_ACTIVE:
 		return apierror.FailedPrecondition("primary instance %s is %s, not ACTIVE", name, p.state)
 	case c.busy[name] != "":
 		// A switchover or detach of its replication, or its automatic
 		// failover, is re-pointing its nodes (checkIdle).
 		return apierror.FailedPrecondition("primary instance %s has an operation in progress", name)
-	case p.Valkey.role() == memorystorepb.CrossInstanceReplicationConfig_SECONDARY.String():
+	case p.cirRole() == memorystorepb.CrossInstanceReplicationConfig_SECONDARY.String():
 		return apierror.FailedPrecondition("instance %s is itself a secondary: a secondary's primary_instance must be a primary", name)
 	case (p.TransitCA != "") != (r.TransitCA != ""):
 		return apierror.InvalidArgument("a secondary's transit_encryption_mode must be its primary's: primary instance %s has %s", name, transitMode(p))
@@ -204,13 +203,27 @@ func (c *clusters) checkPrimary(r *clusterRecord, name string) error {
 	case p.Valkey.Migration.migrating():
 		return apierror.FailedPrecondition("primary instance %s is migrating", name)
 	}
-	if r.TransitCA != "" {
+	if !r.standalone() {
+		// In CLUSTER mode the shard count and engine version are the
+		// primary's, as Google's guide says a secondary's are copied from
+		// it, and the shards are fed by replication links
+		// (crossclusterlink.go).
+		r.ShardCount, r.Valkey.EngineVersion = p.ShardCount, p.Valkey.EngineVersion
+		r.Nodes, r.NextNode = nil, 0
+		for sh := 0; sh < int(r.ShardCount); sh++ {
+			for k := 0; k <= int(r.ReplicaCount); k++ {
+				r.Nodes = append(r.Nodes, &clusterNode{Server: clusterServerName(r.Name, r.NextNode), Shard: sh, Primary: k == 0})
+				r.NextNode++
+			}
+		}
+		r.setLinkPassword(newUID() + newUID())
+	} else if r.TransitCA != "" {
 		if _, ok := c.rt.(Shell); !ok {
 			return apierror.Unimplemented("cross-instance replication with in-transit encryption is not supported by this instance's servers")
 		}
 	}
-	r.Valkey.CIR = &cirConfig{Role: memorystorepb.CrossInstanceReplicationConfig_SECONDARY.String(),
-		Primary: &remoteInstance{p.Name, p.UID}, Updated: c.now(), PeerCAs: trustOf(append(c.membersOf(p), r))}
+	r.setCIR(&cirConfig{Role: memorystorepb.CrossInstanceReplicationConfig_SECONDARY.String(),
+		Primary: &remoteInstance{p.Name, p.UID}, Updated: c.now(), PeerCAs: trustOf(append(c.membersOf(p), r))})
 	return nil
 }
 
@@ -244,10 +257,10 @@ func trustOf(rs []*clusterRecord) string {
 // peerCAs is what r's nodes trust besides r's own CA: the CAs of its
 // cross-instance replication's members.
 func (r *clusterRecord) peerCAs() string {
-	if r.Valkey == nil || r.Valkey.CIR == nil {
+	if r.cir() == nil {
 		return ""
 	}
-	return r.Valkey.CIR.PeerCAs
+	return r.cir().PeerCAs
 }
 
 // trustFile is where a node's CA bundle with its peers' CAs is written.
@@ -290,14 +303,14 @@ func (c *clusters) setMembership(p *clusterRecord, secs []*clusterRecord) {
 	}
 	trust := trustOf(append([]*clusterRecord{p}, secs...))
 	if len(secs) == 0 {
-		p.Valkey.CIR = nil
+		p.setCIR(nil)
 	} else {
-		p.Valkey.CIR = &cirConfig{Role: memorystorepb.CrossInstanceReplicationConfig_PRIMARY.String(), Secondaries: rs, Updated: now, PeerCAs: trust}
+		p.setCIR(&cirConfig{Role: memorystorepb.CrossInstanceReplicationConfig_PRIMARY.String(), Secondaries: rs, Updated: now, PeerCAs: trust})
 	}
 	_ = c.save(p)
 	for _, s := range secs {
-		s.Valkey.CIR = &cirConfig{Role: memorystorepb.CrossInstanceReplicationConfig_SECONDARY.String(),
-			Primary: &remoteInstance{p.Name, p.UID}, Secondaries: rs, Updated: now, PeerCAs: trust}
+		s.setCIR(&cirConfig{Role: memorystorepb.CrossInstanceReplicationConfig_SECONDARY.String(),
+			Primary: &remoteInstance{p.Name, p.UID}, Secondaries: rs, Updated: now, PeerCAs: trust})
 		_ = c.save(s)
 	}
 }
@@ -306,8 +319,8 @@ func (c *clusters) setMembership(p *clusterRecord, secs []*clusterRecord) {
 func (c *clusters) secondariesOf(p string) []*clusterRecord {
 	var out []*clusterRecord
 	for _, r := range c.byName {
-		if r.Valkey != nil && r.Valkey.CIR != nil && r.Valkey.CIR.Primary != nil && r.Valkey.CIR.Primary.Name == p &&
-			r.Valkey.role() == memorystorepb.CrossInstanceReplicationConfig_SECONDARY.String() {
+		if r.cir() != nil && r.cir().Primary != nil && r.cir().Primary.Name == p &&
+			r.cirRole() == memorystorepb.CrossInstanceReplicationConfig_SECONDARY.String() {
 			out = append(out, r)
 		}
 	}
@@ -361,19 +374,40 @@ func (c *clusters) unlink(ctx context.Context, r *clusterRecord) error {
 func (c *clusters) linkSecondary(ctx context.Context, name string) error {
 	c.mu.Lock()
 	r := c.byName[name]
-	if r == nil || r.Valkey == nil || r.Valkey.role() != memorystorepb.CrossInstanceReplicationConfig_SECONDARY.String() || r.Valkey.CIR.Primary == nil {
+	if r == nil || r.cirRole() != memorystorepb.CrossInstanceReplicationConfig_SECONDARY.String() || r.cir().Primary == nil {
 		c.mu.Unlock()
 		return nil
 	}
-	p := c.byName[r.Valkey.CIR.Primary.Name]
+	p := c.byName[r.cir().Primary.Name]
 	if p == nil {
 		c.mu.Unlock()
-		return fmt.Errorf("primary instance %s was not found", r.Valkey.CIR.Primary.Name)
+		return fmt.Errorf("primary instance %s was not found", r.cir().Primary.Name)
 	}
 	src := c.sourceOf(p)
 	snap := *r
 	snap.Nodes = append([]*clusterNode(nil), r.Nodes...)
+	pname := p.Name
+	pnodes, ppass, pca := append([]*clusterNode(nil), p.Nodes...), p.password(), p.TransitCA
 	c.mu.Unlock()
+	if !snap.standalone() {
+		// CLUSTER mode: replication links feed the shards
+		// (crossclusterlink.go), of the same slots as the primary's.
+		if err := c.alignSecondary(ctx, &snap, pnodes, ppass, pca); err != nil {
+			return fmt.Errorf("place the secondary's slots as its primary's: %w", err)
+		}
+		if err := c.setWrites(ctx, &snap, snap.Nodes, true); err != nil {
+			return fmt.Errorf("refuse the secondary's writes: %w", err)
+		}
+		if err := c.crossClusterLink(ctx, name, pname); err != nil {
+			return fmt.Errorf("replicate primary instance %s: %w", pname, err)
+		}
+		c.mu.Lock()
+		if live := c.byName[pname]; live != nil {
+			c.setMembership(live, c.secondariesOf(pname))
+		}
+		c.mu.Unlock()
+		return nil
+	}
 	if src.host == "" {
 		return fmt.Errorf("primary instance %s has no running primary", p.Name)
 	}
@@ -501,17 +535,47 @@ func (c *clusters) unfence(r *clusterRecord) {
 }
 
 // updateCIR is an UpdateInstance of cross_instance_replication_config:
-// a switchover or a detach. Every member it touches is busy until it is
-// done. Call with mu held; r is ACTIVE and idle.
+// a switchover or a detach (updateReplication).
 func (s *MemorystoreServer) updateCIR(c *clusters, r *clusterRecord, want *memorystorepb.CrossInstanceReplicationConfig) (*longrunningpb.Operation, error) {
 	role := want.GetInstanceRole()
 	if role == memorystorepb.CrossInstanceReplicationConfig_INSTANCE_ROLE_UNSPECIFIED {
 		return nil, apierror.InvalidArgument("cross_instance_replication_config.instance_role is required")
 	}
-	cur := r.Valkey.role()
-	if !r.standalone() {
-		return nil, checkCrossCluster(true)
+	var asked []string
+	for _, x := range want.GetSecondaryInstances() {
+		asked = append(asked, x.GetInstance())
 	}
+	return c.updateReplication(s.api, r, role.String(), asked)
+}
+
+// cirWords are the API's words for cross-instance (Memorystore for Valkey)
+// or cross-cluster (Redis Cluster, crossclusterapi.go) replication.
+type cirWords struct{ kind, role, secondaries, primary, replication string }
+
+func (c *clusters) words() cirWords {
+	if c.valkey {
+		return cirWords{"instance", "instance_role", "secondary_instances", "primary_instance", "cross-instance replication"}
+	}
+	return cirWords{"cluster", "cluster_role", "secondary_clusters", "primary_cluster", "cross-cluster replication"}
+}
+
+// updateReplication is an update of a member's replication config to
+// role (NONE, PRIMARY or SECONDARY) with asked as its secondaries: a
+// switchover (a secondary updated to PRIMARY with every other member as
+// its secondaries) or a detach (a secondary updated to NONE; a primary
+// updated to NONE, or to fewer secondaries). Every member it touches is
+// busy until it is done. Call with mu held; r is ACTIVE and idle.
+func (c *clusters) updateReplication(api *Server, r *clusterRecord, role string, asked0 []string) (*longrunningpb.Operation, error) {
+	w := c.words()
+	const (
+		none      = "NONE"
+		primaryR  = "PRIMARY"
+		secondary = "SECONDARY"
+	)
+	if role != none && role != primaryR && role != secondary {
+		return nil, apierror.InvalidArgument("%s %s is not a role", w.role, role)
+	}
+	cur := r.cirRole()
 	type step struct {
 		unlink []*clusterRecord
 		link   []*clusterRecord // to the new primary
@@ -520,30 +584,30 @@ func (s *MemorystoreServer) updateCIR(c *clusters, r *clusterRecord, want *memor
 	var primary *clusterRecord
 	var members []*clusterRecord
 	asked := map[string]bool{}
-	for _, x := range want.GetSecondaryInstances() {
-		asked[x.GetInstance()] = true
+	for _, x := range asked0 {
+		asked[x] = true
 	}
 	switch {
-	case cur == role.String() && role == memorystorepb.CrossInstanceReplicationConfig_NONE:
+	case cur == role && role == none:
 		op := c.newOperation(r.Name, "update")
-		c.finish(op, c.renderValkey(r), nil)
-		return s.api.operation(op)
-	case cur == memorystorepb.CrossInstanceReplicationConfig_NONE.String():
-		return nil, apierror.InvalidArgument("instance %s is not in cross-instance replication: a secondary is created with instance_role SECONDARY and its primary_instance", r.Name)
-	case cur == memorystorepb.CrossInstanceReplicationConfig_SECONDARY.String() && role == memorystorepb.CrossInstanceReplicationConfig_NONE:
+		c.finish(op, c.output(r), nil)
+		return api.operation(op)
+	case cur == none:
+		return nil, apierror.InvalidArgument("%s %s is not in %s: a secondary is created with %s SECONDARY and its %s", w.kind, r.Name, w.replication, w.role, w.primary)
+	case cur == secondary && role == none:
 		// Detach this secondary.
 		st.unlink = []*clusterRecord{r}
-		primary = c.byName[r.Valkey.CIR.Primary.Name]
-		for _, x := range c.secondariesOf(r.Valkey.CIR.Primary.Name) {
+		primary = c.byName[r.cir().Primary.Name]
+		for _, x := range c.secondariesOf(r.cir().Primary.Name) {
 			if x != r {
 				members = append(members, x)
 			}
 		}
-	case cur == memorystorepb.CrossInstanceReplicationConfig_SECONDARY.String() && role == memorystorepb.CrossInstanceReplicationConfig_PRIMARY:
+	case cur == secondary && role == primaryR:
 		// Switchover: every other member becomes this one's secondary.
-		old := c.byName[r.Valkey.CIR.Primary.Name]
+		old := c.byName[r.cir().Primary.Name]
 		if old == nil {
-			return nil, apierror.FailedPrecondition("primary instance %s was not found", r.Valkey.CIR.Primary.Name)
+			return nil, apierror.FailedPrecondition("primary %s %s was not found", w.kind, r.cir().Primary.Name)
 		}
 		others := []*clusterRecord{old}
 		for _, x := range c.secondariesOf(old.Name) {
@@ -552,17 +616,17 @@ func (s *MemorystoreServer) updateCIR(c *clusters, r *clusterRecord, want *memor
 			}
 		}
 		if len(asked) != len(others) {
-			return nil, apierror.InvalidArgument("a switchover's secondary_instances must be every other member of the replication: the former primary %s and the other secondaries", old.Name)
+			return nil, apierror.InvalidArgument("a switchover's %s must be every other member of the replication: the former primary %s and the other secondaries", w.secondaries, old.Name)
 		}
 		for _, x := range others {
 			if !asked[x.Name] {
-				return nil, apierror.InvalidArgument("a switchover's secondary_instances must include %s", x.Name)
+				return nil, apierror.InvalidArgument("a switchover's %s must include %s", w.secondaries, x.Name)
 			}
 		}
 		st.unlink, st.link, primary, members = []*clusterRecord{r}, others, r, others
-	case cur == memorystorepb.CrossInstanceReplicationConfig_PRIMARY.String() && role == memorystorepb.CrossInstanceReplicationConfig_NONE:
+	case cur == primaryR && role == none:
 		st.unlink, primary = c.secondariesOf(r.Name), r
-	case cur == memorystorepb.CrossInstanceReplicationConfig_PRIMARY.String() && role == memorystorepb.CrossInstanceReplicationConfig_PRIMARY:
+	case cur == primaryR && role == primaryR:
 		primary = r
 		for _, x := range c.secondariesOf(r.Name) {
 			if asked[x.Name] {
@@ -573,13 +637,13 @@ func (s *MemorystoreServer) updateCIR(c *clusters, r *clusterRecord, want *memor
 			}
 		}
 		for n := range asked {
-			return nil, apierror.InvalidArgument("instance %s is not a secondary of %s: a secondary is added by creating it with instance_role SECONDARY", n, r.Name)
+			return nil, apierror.InvalidArgument("%s %s is not a secondary of %s: a secondary is added by creating it with %s SECONDARY", w.kind, n, r.Name, w.role)
 		}
 	default:
-		return nil, apierror.InvalidArgument("instance %s, a %s, cannot become %s: a primary is made by a switchover of one of its secondaries", r.Name, cur, role)
+		return nil, apierror.InvalidArgument("%s %s, a %s, cannot become %s: a primary is made by a switchover of one of its secondaries", w.kind, r.Name, cur, role)
 	}
 	if primary == nil {
-		return nil, apierror.FailedPrecondition("the primary of instance %s was not found", r.Name)
+		return nil, apierror.FailedPrecondition("the primary of %s %s was not found", w.kind, r.Name)
 	}
 	all := append(append([]*clusterRecord{primary}, st.unlink...), members...)
 	if err := c.checkIdle(all); err != nil {
@@ -588,6 +652,16 @@ func (s *MemorystoreServer) updateCIR(c *clusters, r *clusterRecord, want *memor
 	op := c.newOperation(r.Name, "update")
 	marked := c.markBusy(all, op)
 	r.state = clusterpb.Cluster_UPDATING
+	if !r.standalone() {
+		// Before the snapshots: a Redis cluster keeps it on its record,
+		// not in a Valkey part the snapshots share.
+		for _, x := range st.link {
+			if x.linkPassword() == "" {
+				x.setLinkPassword(newUID() + newUID())
+				_ = c.save(x)
+			}
+		}
+	}
 	snaps := map[*clusterRecord]*clusterRecord{}
 	for _, x := range all {
 		sn := *x
@@ -600,9 +674,28 @@ func (s *MemorystoreServer) updateCIR(c *clusters, r *clusterRecord, want *memor
 		linked = append(linked, snaps[x])
 	}
 	trust := trustOf(append([]*clusterRecord{primary}, members...))
-	return s.api.launch(op, func() {
+	return api.launch(op, func() {
 		ctx, cancel := context.WithTimeout(c.bg, clusterWait)
 		defer cancel()
+		if !r.standalone() {
+			err := c.relinkClusters(ctx, snaps, st.unlink, st.link, primary)
+			c.mu.Lock()
+			c.clearBusy(marked, op)
+			r.state = clusterpb.Cluster_ACTIVE
+			if err == nil {
+				for _, x := range st.unlink {
+					if x != primary {
+						x.setCIR(nil)
+						_ = c.save(x)
+					}
+				}
+				c.setMembership(primary, members)
+			}
+			out := c.output(r)
+			c.mu.Unlock()
+			c.finish(op, out, err)
+			return
+		}
 		// Over TLS, the members that will replicate the new primary trust
 		// its CA first.
 		err := c.shareTrust(ctx, append([]*clusterRecord{snaps[primary]}, linked...), trust)
@@ -628,7 +721,7 @@ func (s *MemorystoreServer) updateCIR(c *clusters, r *clusterRecord, want *memor
 		if err == nil {
 			for _, x := range st.unlink {
 				if x != primary {
-					x.Valkey.CIR = nil
+					x.setCIR(nil)
 					_ = c.save(x)
 				}
 			}
@@ -637,7 +730,7 @@ func (s *MemorystoreServer) updateCIR(c *clusters, r *clusterRecord, want *memor
 				c.unfence(x)
 			}
 		}
-		out := c.renderValkey(r)
+		out := c.output(r)
 		c.mu.Unlock()
 		c.finish(op, out, err)
 	})
@@ -715,11 +808,9 @@ func (s *MemorystoreServer) StartMigration(ctx context.Context, req *memorystore
 	}
 	defer c.mu.Unlock()
 	switch {
-	case !r.standalone():
-		return nil, apierror.Unimplemented("migration into an instance in CLUSTER mode is not served here: each source shard would have to replicate to a shard of the instance, and a cluster-mode node refuses REPLICAOF (CLUSTER_DISABLED instances are served)")
 	case r.Valkey.Migration.migrating():
 		return nil, apierror.FailedPrecondition("instance %s is already migrating", r.Name)
-	case r.Valkey.role() != memorystorepb.CrossInstanceReplicationConfig_NONE.String():
+	case r.cirRole() != memorystorepb.CrossInstanceReplicationConfig_NONE.String():
 		return nil, apierror.FailedPrecondition("instance %s is in cross-instance replication: detach it first", r.Name)
 	case r.TransitCA != "":
 		return nil, apierror.Unimplemented("migration into an instance with in-transit encryption is not served here: its primary would replicate the source over TLS")
@@ -738,12 +829,27 @@ func (s *MemorystoreServer) StartMigration(ctx context.Context, req *memorystore
 	return s.api.launch(op, func() {
 		ctx, cancel := context.WithTimeout(c.bg, clusterWait)
 		defer cancel()
-		err := c.linkTo(ctx, &snap, host, port, "")
+		var err error
+		if snap.standalone() {
+			err = c.linkTo(ctx, &snap, host, port, "")
+		} else {
+			// CLUSTER mode: each source shard feeds the instance's
+			// shard of the same slots (crossclustermigration.go).
+			// The source is read at the address its clients use.
+			err = c.migrateCluster(ctx, &snap, vf.Migration.IP, int(vf.Migration.Port))
+		}
 		c.mu.Lock()
 		delete(c.busy, snap.Name)
 		if err != nil {
 			vf.Migration.State = memorystorepb.MigrationConfig_ROLLED_BACK.String()
-			_ = c.unlink(ctx, &snap)
+			if snap.standalone() {
+				_ = c.unlink(ctx, &snap)
+			} else {
+				c.mu.Unlock()
+				c.crossClusterUnlink(snap.Name)
+				_ = c.setWrites(ctx, &snap, snap.Nodes, false)
+				c.mu.Lock()
+			}
 			err = fmt.Errorf("replicate the source %s: %w", net.JoinHostPort(vf.Migration.IP, strconv.Itoa(int(vf.Migration.Port))), err)
 		} else {
 			vf.Migration.State = memorystorepb.MigrationConfig_REPLICATION_ESTABLISHED.String()
@@ -780,11 +886,25 @@ func (s *MemorystoreServer) FinishMigration(ctx context.Context, req *memorystor
 		ctx, cancel := context.WithTimeout(c.bg, clusterWait)
 		defer cancel()
 		var err error
-		if !force {
+		switch {
+		case !snap.standalone():
+			// CLUSTER mode: each shard's link (crossclustermigration.go).
+			if !force {
+				err = c.linkCaughtUp(ctx, snap.Name)
+			}
+			if err == nil {
+				c.crossClusterUnlink(snap.Name)
+				open := snap
+				open.dropCIR()
+				err = c.setWrites(ctx, &open, open.Nodes, false)
+			}
+		case !force:
 			err = c.caughtUp(ctx, &snap, net.JoinHostPort(m.IP, strconv.Itoa(int(m.Port))))
-		}
-		if err == nil {
-			err = c.unlink(ctx, &snap)
+			fallthrough
+		default:
+			if err == nil {
+				err = c.unlink(ctx, &snap)
+			}
 		}
 		c.mu.Lock()
 		delete(c.busy, snap.Name)
@@ -824,13 +944,39 @@ func (c *clusters) caughtUp(ctx context.Context, r *clusterRecord, source string
 // valkeyVersions orders the engine versions.
 var valkeyVersions = map[string]int{"VALKEY_7_2": 1, "VALKEY_8_0": 2, "VALKEY_9_0": 3, "VALKEY_9_1": 4}
 
-// upgrade moves instance name to version as a rolling upgrade does: new
-// nodes of the version's image join as replicas of the old ones, each
-// shard's first new node is promoted once it has caught up, and the old
-// nodes, which serve and replicate every write until then, are removed.
+// upgrade moves instance name to version as a rolling upgrade does
+// (upgradeNodes), then completes op; cross-instance replication follows
+// the new nodes.
 func (c *clusters) upgrade(name, op, version string) {
 	ctx, cancel := context.WithTimeout(c.bg, 2*clusterWait)
 	defer cancel()
+	err := c.upgradeNodes(ctx, name, version)
+	c.mu.Lock()
+	delete(c.busy, name)
+	r := c.byName[name]
+	r.state, r.message = clusterpb.Cluster_ACTIVE, ""
+	secs := c.secondariesOf(name)
+	out := c.output(r)
+	c.mu.Unlock()
+	if err == nil {
+		// Cross-instance replication follows the new nodes.
+		if lerr := c.linkSecondary(ctx, name); lerr != nil {
+			err = lerr
+		}
+		for _, s := range secs {
+			if lerr := c.linkSecondary(ctx, s.Name); lerr != nil && err == nil {
+				err = lerr
+			}
+		}
+	}
+	c.finish(op, out, err)
+}
+
+// upgradeNodes moves instance name to version as a rolling upgrade does:
+// new nodes of the version's image join as replicas of the old ones, each
+// shard's first new node is promoted once it has caught up, and the old
+// nodes, which serve and replicate every write until then, are removed.
+func (c *clusters) upgradeNodes(ctx context.Context, name, version string) error {
 	c.mu.Lock()
 	r := c.byName[name]
 	snap := *r
@@ -848,8 +994,6 @@ func (c *clusters) upgrade(name, op, version string) {
 	c.mu.Unlock()
 	err := c.roll(ctx, &snap, old, fresh)
 	c.mu.Lock()
-	delete(c.busy, name)
-	r.state, r.message = clusterpb.Cluster_ACTIVE, ""
 	if err == nil {
 		v := *r.Valkey
 		v.EngineVersion, v.Updated = version, c.now()
@@ -865,25 +1009,13 @@ func (c *clusters) upgrade(name, op, version string) {
 			e.fenced, e.labelled = false, ""
 		}
 	}
-	secs := c.secondariesOf(name)
-	out := c.output(r)
 	c.mu.Unlock()
 	if err == nil {
 		c.removeNodes(old)
-		// Cross-instance replication follows the new nodes.
-		if lerr := c.linkSecondary(ctx, name); lerr != nil {
-			err = lerr
-		}
-		for _, s := range secs {
-			if lerr := c.linkSecondary(ctx, s.Name); lerr != nil && err == nil {
-				err = lerr
-			}
-		}
-	} else {
-		c.removeNodes(fresh)
-		err = fmt.Errorf("the engine upgrade did not complete: %w", err)
+		return nil
 	}
-	c.finish(op, out, err)
+	c.removeNodes(fresh)
+	return fmt.Errorf("the engine upgrade of %s did not complete: %w", name, err)
 }
 
 // roll moves r's data from its old nodes onto fresh ones: fresh replicate

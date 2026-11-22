@@ -368,7 +368,7 @@ func (s *Server) preCheckMajorVersionUpgrade(r *http.Request, base, project stri
 	if err != nil {
 		return nil, err
 	}
-	if versionIndex(target) >= 0 && versionIndex(target) <= versionIndex(c.spec.DatabaseVersion) && engineOf(target) == engineOf(c.spec.DatabaseVersion) {
+	if upgradeRank(target) >= 0 && upgradeRank(target) <= upgradeRank(c.spec.DatabaseVersion) && engineOf(target) == engineOf(c.spec.DatabaseVersion) {
 		return nil, Errorf(http.StatusBadRequest, "Invalid request: the target version %s is not a major version upgrade of %s.", target, c.spec.DatabaseVersion)
 	}
 	s.emu.RLock()

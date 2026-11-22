@@ -152,6 +152,8 @@ func (p loggingSinksProvider) List(ctx context.Context, project string) (console
 		row := console.Resource{Name: name, Target: []string{name}, Fields: f}
 		if requiredSinkName(name) {
 			row.Withheld = map[string]string{"edit": requiredSinkNoChange, "delete": requiredSinkNoChange}
+		} else if defaultSinkName(name) {
+			row.Withheld = map[string]string{"delete": defaultSinkNoDelete}
 		}
 		out.Items = append(out.Items, row)
 	}
@@ -356,6 +358,15 @@ func (p loggingSinksProvider) Actions(r console.Resource) []console.Action {
 const requiredSinkNoChange = "You can't modify or delete the _Required log sink."
 
 func requiredSinkName(name string) bool { return strings.HasSuffix(name, "/sinks/_Required") }
+
+// defaultSinkNoDelete is why the _Default sink's Delete is greyed out:
+// "You can't delete the _Default or the _Required sinks"
+// (docs.cloud.google.com/logging/docs/export/configure_export_v2, read
+// 2026-11-22; #2108). Its Edit and Disable are offered: "You can modify
+// and disable the _Default log sink".
+const defaultSinkNoDelete = "You can't delete the _Default or the _Required sinks."
+
+func defaultSinkName(name string) bool { return strings.HasSuffix(name, "/sinks/_Default") }
 
 // sinkToggleOf is sinkToggle, greyed out on the _Required sink.
 func sinkToggleOf(name string, enabled bool) console.Action {

@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"google.golang.org/protobuf/proto"
 	"io"
 	"os"
 	"strings"
@@ -277,7 +278,9 @@ func TestSpeechV1(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := stream.Send(&speechv1pb.StreamingRecognizeRequest{StreamingRequest: &speechv1pb.StreamingRecognizeRequest_StreamingConfig{
-		StreamingConfig: &speechv1pb.StreamingRecognitionConfig{Config: cfg, SingleUtterance: true}}}); err != nil {
+		// v1's supported languages table has no single utterance for en-US's
+		// default model (#2127): latest_long takes it.
+		StreamingConfig: &speechv1pb.StreamingRecognitionConfig{Config: v1LatestLong(cfg), SingleUtterance: true}}}); err != nil {
 		t.Fatal(err)
 	}
 	go func() {
@@ -315,4 +318,11 @@ func TestSpeechV1(t *testing.T) {
 	if !eou || len(finals) != 1 || !strings.Contains(finals[0], "Nyhuis") {
 		t.Errorf("single_utterance: END_OF_SINGLE_UTTERANCE %v, finals %q", eou, finals)
 	}
+}
+
+// v1LatestLong is a copy of a v1 config on the latest_long model.
+func v1LatestLong(c *speechv1pb.RecognitionConfig) *speechv1pb.RecognitionConfig {
+	out := proto.Clone(c).(*speechv1pb.RecognitionConfig)
+	out.Model = "latest_long"
+	return out
 }

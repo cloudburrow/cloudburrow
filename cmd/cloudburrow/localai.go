@@ -15,20 +15,27 @@ import (
 	"strings"
 	"sync"
 
+	"cloud.google.com/go/logging/apiv2/loggingpb"
+	"google.golang.org/genproto/googleapis/api/monitoredres"
+	ltype "google.golang.org/genproto/googleapis/logging/type"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/embedding"
 	"github.com/cloudburrow/cloudburrow/internal/hfmodels"
+	"github.com/cloudburrow/cloudburrow/internal/hostai"
 	"github.com/cloudburrow/cloudburrow/internal/imagedetect"
 	"github.com/cloudburrow/cloudburrow/internal/imagelabel"
 	"github.com/cloudburrow/cloudburrow/internal/localai"
 	"github.com/cloudburrow/cloudburrow/internal/modelgarden"
 	"github.com/cloudburrow/cloudburrow/internal/ocr"
 	"github.com/cloudburrow/cloudburrow/internal/service/vertexai"
+	"github.com/cloudburrow/cloudburrow/internal/speaker"
 	"github.com/cloudburrow/cloudburrow/internal/speech"
+	"github.com/cloudburrow/cloudburrow/internal/syntaxnet"
 )
 
 // buildLocalAI returns the local generation endpoint, or nil when no model is
@@ -55,24 +62,30 @@ func buildLocalAI(cfg config.Config) (*vertexai.Server, error) {
 		return nil, fmt.Errorf("resolve -local-ai-model: %w", err)
 	}
 
-	image := cfg.LocalAI.Image
-	if image == "" {
-		image = config.LocalAIImage()
-	}
-	if err := preflightLocalAI(modelPath, image); err != nil {
-		return nil, err
-	}
 	modelID := cfg.LocalAI.ModelID
 	if modelID == "" {
 		modelID = catalogueIDFor(modelPath)
 	}
-
-	dir, file := filepath.Split(modelPath)
-	gen := vertexai.NewDockerGenerator(image, filepath.Clean(dir), file, modelID)
+	// On the Apple GPU when the accelerator is metal (#2159): the macOS
+	// cloudburrow_generate, a host process; else, or when it cannot be
+	// used, the runtime image's, on CPU.
+	gen := hostGenerator(cfg, modelPath, modelID, os.Stderr)
+	if gen == nil {
+		image := cfg.LocalAI.Image
+		if image == "" {
+			image = config.LocalAIImage()
+		}
+		if err := preflightLocalAI(modelPath, image); err != nil {
+			return nil, err
+		}
+		dir, file := filepath.Split(modelPath)
+		gen = vertexai.NewDockerGenerator(image, filepath.Clean(dir), file, modelID)
+	}
 
 	addr := net.JoinHostPort(cfg.BindAddress, strconv.Itoa(cfg.Endpoints.LocalAI))
 	srv := newLocalAIServer(addr, gen)
 	attachSpeechModel(cfg) // ML.TRANSCRIBE's route is on every local AI endpoint (#1799)
+	attachSpeakerModel(cfg)
 	for _, a := range cfg.LocalAI.Aliases {
 		srv.Alias(a)
 	}
@@ -170,17 +183,36 @@ func withPredictionEndpoints(cfg config.Config, srv *vertexai.Server, run interf
 	return srv
 }
 
-// modelGardenFor returns the Hugging Face model cache and, when the local
-// AI endpoint serves custom prediction (Cloud Run is enabled, so Docker
-// runs the cluster), the Model Garden deployments it serves (#1840), their
-// engines restarted from the deployments file.
-func modelGardenFor(cfg config.Config, srv *vertexai.Server) (*hfmodels.Manager, *modelgarden.Manager) {
+// modelGardenFor returns the Hugging Face model cache and, when there is a
+// local AI endpoint, the Model Garden deployments it serves (#1840): new
+// ones run on the instance's cluster (#2148), every instance having one,
+// and the console's Deploy of a model downloaded to the host runs its
+// engine in Docker beside the cluster, as before. Both are restarted from
+// the deployments file.
+//
+// On a Mac with Apple silicon, a deployment on a GPU runs on the Apple GPU
+// as a supervised host process (#2155): its runtimes are installed in
+// hostai.CacheDir, its pid file and files kept with the instance's state,
+// and its output written to Cloud Logging when Logging is served.
+func modelGardenFor(cfg config.Config, srv *vertexai.Server, logs *loggingService) (*hfmodels.Manager, *modelgarden.Manager) {
 	hf := &hfmodels.Manager{Dir: filepath.Join(cfg.StateDir, "models", "huggingface")}
-	if srv == nil || !srv.ServesEndpoints() {
+	if srv == nil {
 		return hf, nil
 	}
 	g := &modelgarden.Manager{Instance: cfg.Name, StateFile: filepath.Join(cfg.StateDir, "modelgarden", "deployments.json"),
-		Models: hf, Docker: modelgarden.DockerCLI{}}
+		Models: hf, Docker: modelgarden.DockerCLI{},
+		Cluster: &modelgarden.KubeCluster{Kubeconfig: cfg.KubeconfigPath(), Namespace: cfg.Cluster.Namespace,
+			Instance: cfg.Name, ClusterName: cfg.ClusterName()},
+		Accelerator: cfg.LocalAI.Accelerator}
+	if ok, _ := hostai.Metal(); ok {
+		if dir, err := hostai.CacheDir(); err == nil {
+			g.Host = &modelgarden.HostAI{Installer: &hostai.Installer{Dir: dir},
+				Pids: &hostai.Pids{File: filepath.Join(cfg.StateDir, "modelgarden", "host-servers.json")}}
+		}
+	}
+	if logs != nil {
+		g.Log = predictionLogWriter(logs)
+	}
 	srv.SetModelGarden(g)
 	g.Restore()
 	return hf, g
@@ -231,6 +263,26 @@ func attachSpeechModel(cfg config.Config) {
 	})
 }
 
+// attachSpeakerModel lets Speech-to-Text diarize audio (#2131) in the onnx
+// build: 3D-Speaker's CAM++ speaker model is fetched the first time audio
+// is diarized, into <state-dir>/models, and checked against its pinned
+// SHA-256. The default build never fetches it: diarization is 501 there.
+func attachSpeakerModel(cfg config.Config) {
+	if !speaker.Available {
+		return
+	}
+	cache := embeddingCache(cfg)
+	speaker.SetModelSource(func(ctx context.Context) (string, error) {
+		m := localai.SpeakerCAMPlusPlus
+		f := m.Pin.Files[0]
+		if _, err := os.Stat(cache.PinnedPath(m, f)); err != nil {
+			fmt.Fprintf(os.Stderr, "fetching 3D-Speaker's CAM++ %s (%s release %s, Apache-2.0) for speaker diarization...\n",
+				f.Path, m.Repo, m.Pin.Revision)
+		}
+		return cache.FetchPinnedFile(ctx, m, f)
+	})
+}
+
 // attachLabelModel lets Vision's LABEL_DETECTION label an image (#1799):
 // MediaPipe's EfficientNet-Lite0 classifier is fetched from
 // storage.googleapis.com the first time one is labelled, into
@@ -253,11 +305,31 @@ func attachLabelModel(cfg config.Config) {
 	imagelabel.SetSource(pinned(localai.EfficientNetLite0, "LABEL_DETECTION"))
 	imagedetect.SetObjectSource(pinned(localai.EfficientDetLite0, "OBJECT_LOCALIZATION"))
 	imagedetect.SetFaceSource(pinned(localai.BlazeFaceShortRange, "FACE_DETECTION"))
+	attachSyntaxModel(cache)
+}
+
+// attachSyntaxModel lets Natural Language's analyzeSyntax parse English
+// (#1799): SyntaxNet's Parsey McParseface is fetched from Google's
+// tensorflow/models repository the first time a text is parsed, into
+// <state-dir>/models, and checked against its pinned SHA-256s.
+func attachSyntaxModel(cache localai.Cache) {
+	m := localai.ParseyMcParseface
+	syntaxnet.SetSource(func(ctx context.Context) (string, error) {
+		if cache.VerifyPinned(m) != nil {
+			fmt.Fprintf(os.Stderr, "fetching SyntaxNet's Parsey McParseface (tensorflow/models @ %s, Apache-2.0) for analyzeSyntax...\n",
+				m.Pin.Revision[:12])
+			if err := cache.FetchPinned(ctx, m, nil); err != nil {
+				return "", err
+			}
+		}
+		return cache.PinnedDir(m), nil
+	})
 }
 
 func attachEmbedder(srv *vertexai.Server, cfg config.Config) {
 	attachScriptModels(cfg)
 	attachSpeechModel(cfg)
+	attachSpeakerModel(cfg)
 	m, err := localai.Lookup(localai.EmbeddingGemmaONNXID)
 	if err != nil {
 		srv.SetEmbedder(nil, err)
@@ -308,6 +380,9 @@ func printLocalAI(w io.Writer, srv *vertexai.Server, cfg config.Config) {
 	fmt.Fprintf(w, "\nlocal AI:  http://%s\n", srv.Addr())
 	if srv.Model() != "" {
 		fmt.Fprintf(w, "  model:   %s\n", srv.Model())
+		if a := srv.Accelerator(); a != "" {
+			fmt.Fprintf(w, "  runs on: %s\n", a)
+		}
 	}
 
 	if m, err := localai.Lookup(srv.Model()); err == nil && m.Publisher == localai.PublisherCommunity {
@@ -535,4 +610,29 @@ func (o embedObjects) bucketMissing(ctx context.Context, bucket string) bool {
 	}
 	resp.Body.Close()
 	return resp.StatusCode == http.StatusNotFound
+}
+
+// predictionLogWriter writes a host model server's output (#2155) to Cloud
+// Logging as Agent Platform writes a prediction container's: the log
+// aiplatform.googleapis.com/prediction_container of the endpoint's
+// aiplatform.googleapis.com/Endpoint resource, a line a text entry, with
+// the deployed model's ID among its labels. Each line goes through the
+// WriteLogEntries the API serves, so exclusions and sinks apply.
+func predictionLogWriter(logs *loggingService) func(modelgarden.LogLine) {
+	return func(l modelgarden.LogLine) {
+		sev := ltype.LogSeverity_DEFAULT
+		if l.Stream == "supervisor" {
+			sev = ltype.LogSeverity_NOTICE
+		}
+		e := &loggingpb.LogEntry{
+			LogName: "projects/" + l.Project + "/logs/" + url.PathEscape("aiplatform.googleapis.com/prediction_container"),
+			Resource: &monitoredres.MonitoredResource{Type: "aiplatform.googleapis.com/Endpoint", Labels: map[string]string{
+				"resource_container": l.Project, "location": l.Location, "endpoint_id": l.Endpoint}},
+			Timestamp: timestamppb.Now(),
+			Labels:    map[string]string{"deployed_model_id": l.DeployedModel, "stream": l.Stream},
+			Severity:  sev,
+			Payload:   &loggingpb.LogEntry_TextPayload{TextPayload: l.Text},
+		}
+		_, _ = logs.api.WriteLogEntries(context.Background(), &loggingpb.WriteLogEntriesRequest{Entries: []*loggingpb.LogEntry{e}})
+	}
 }

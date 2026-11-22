@@ -58,24 +58,51 @@ type DeployedModel struct {
 	Message     string    `json:"message,omitempty"`
 	Progress    int       `json:"progress"` // percent, while deploying
 	Created     time.Time `json:"created"`
+	// Runtime is where the model runs: RuntimeCluster (a workload on the
+	// instance's cluster, Container naming it) or RuntimeDocker (a
+	// container beside it, mounting the host's download); "" is Docker, as
+	// every deployment was before #2148.
+	Runtime string `json:"runtime,omitempty"`
+	// Gated records that the deploy carried a token for a gated model.
+	// The token itself is in the workload's Secret, never here.
+	Gated bool `json:"gated,omitempty"`
+	// AcceleratorType and AcceleratorCount are the machine_spec's (#2155);
+	// Device names the GPU that serves it ("Apple M4 Max GPU (Metal)"),
+	// empty on CPU, and AcceleratorNote why a GPU asked for is not used.
+	AcceleratorType  string `json:"acceleratorType,omitempty"`
+	AcceleratorCount int32  `json:"acceleratorCount,omitempty"`
+	Device           string `json:"device,omitempty"`
+	AcceleratorNote  string `json:"acceleratorNote,omitempty"`
 }
+
+// OnCluster reports whether the deployed model is a cluster workload.
+func (d *DeployedModel) OnCluster() bool { return d.Runtime == RuntimeCluster }
+
+// OnHost reports whether the deployed model is a host process (#2155).
+func (d *DeployedModel) OnHost() bool { return d.Runtime == RuntimeHost }
 
 // Model is a Model registry entry.
 type Model struct {
-	Project     string            `json:"project"`
-	Location    string            `json:"location"`
-	ID          string            `json:"id"`
-	DisplayName string            `json:"displayName"`
-	HFModelID   string            `json:"hfModelId"`
-	Revision    string            `json:"revision"`
-	License     string            `json:"license"`
-	PipelineTag string            `json:"pipelineTag"`
-	Engine      string            `json:"engine"`
-	Image       string            `json:"image"`
-	Args        []string          `json:"args"`
-	Env         map[string]string `json:"env"`
-	Created     time.Time         `json:"created"`
-	Updated     time.Time         `json:"updated"`
+	Project     string `json:"project"`
+	Location    string `json:"location"`
+	ID          string `json:"id"`
+	DisplayName string `json:"displayName"`
+	HFModelID   string `json:"hfModelId"`
+	Revision    string `json:"revision"`
+	License     string `json:"license"`
+	PipelineTag string `json:"pipelineTag"`
+	Engine      string `json:"engine"`
+	// File is the GGUF or ONNX file a llama.cpp or ONNX Runtime deployment
+	// loads, a path in the repository.
+	File  string `json:"file,omitempty"`
+	Image string `json:"image"`
+	// HostFiles are the repository files a host deployment downloads
+	// (#2155).
+	HostFiles []hfmodels.File   `json:"hostFiles,omitempty"`
+	Args      []string          `json:"args"`
+	Env       map[string]string `json:"env"`
+	Created   time.Time         `json:"created"`
+	Updated   time.Time         `json:"updated"`
 }
 
 // Name is the model's resource name.
@@ -92,17 +119,28 @@ func PublisherModel(hfID string) string {
 
 // Request is a Deploy request, already decoded from either protocol.
 type Request struct {
-	Project, Location   string
-	HFModelID           string
-	AcceptEULA          bool
-	TokenSet            bool // hugging_face_access_token was set; it is refused, never kept
+	Project, Location string
+	HFModelID         string
+	AcceptEULA        bool
+	TokenSet          bool // hugging_face_access_token was set
+	// HFToken is model_config.hugging_face_access_token. On the cluster it
+	// goes into the workload's Secret and nowhere else; on Docker it is
+	// refused. It is never persisted, logged or returned.
+	HFToken string `json:"-"`
+	// Runtime forces RuntimeDocker (the console's Deploy of a downloaded
+	// model); "" deploys on the cluster when there is one.
+	Runtime             string
 	ModelDisplayName    string
 	ModelUserID         string
 	EndpointDisplayName string
 	EndpointUserID      string
 	DedicatedDisabled   bool
 	MachineType         string
-	Labels              map[string]string
+	// AcceleratorType and AcceleratorCount are machine_spec's (#2155): a
+	// GPU type is the Apple GPU on an Apple silicon Mac.
+	AcceleratorType  string
+	AcceleratorCount int32
+	Labels           map[string]string
 }
 
 // Prepared is a validated deploy whose resources exist, ready to Run.
@@ -110,6 +148,8 @@ type Prepared struct {
 	Endpoint, Model, DeployedModel string // IDs
 	PublisherModel                 string
 	EndpointName, ModelName        string
+	runtime                        string
+	token                          string // for Run only; never persisted
 }
 
 // Docker runs engine containers.
@@ -138,10 +178,26 @@ type Manager struct {
 	StateFile string
 	Models    *hfmodels.Manager
 	Docker    Docker
-	Client    *http.Client
+	// Cluster, when set, runs new deployments on the instance's cluster
+	// (#2148); Docker stays for the console's Deploy of a downloaded model
+	// and for deployments made before.
+	Cluster Cluster
+	Client  *http.Client
+	// Host, when set, runs deployments on the Apple GPU as host processes
+	// (#2155); Accelerator is the instance's default for a deploy with no
+	// machine_spec (AcceleratorMetal, AcceleratorCPU, or "": metal where
+	// the Apple GPU is available).
+	Host        Host
+	Accelerator string
+	// Log, when set, receives the host servers' output (Cloud Logging).
+	Log func(LogLine)
+	// HostModelsDir is where host deployments' files are kept;
+	// host-models beside the state file when empty.
+	HostModelsDir string
 	// ReadyTimeout bounds an engine's start; 20 minutes when zero.
 	ReadyTimeout time.Duration
 	now          func() time.Time
+	procs        map[string]HostProcess
 
 	mu        sync.Mutex
 	loaded    bool
@@ -242,7 +298,11 @@ const TokenRefusal = "model_config.hugging_face_access_token is not accepted by 
 // Prepare validates a deploy and creates its Endpoint and Model, with the
 // DeployedModel in DEPLOYING; Run then brings the engine up.
 func (m *Manager) Prepare(ctx context.Context, r Request) (Prepared, error) {
-	if r.TokenSet {
+	runtime := RuntimeDocker
+	if m.Cluster != nil && r.Runtime != RuntimeDocker {
+		runtime = RuntimeCluster
+	}
+	if (r.TokenSet || r.HFToken != "") && runtime != RuntimeCluster {
 		return Prepared{}, apierror.InvalidArgument("%s", TokenRefusal)
 	}
 	if r.HFModelID == "" {
@@ -261,21 +321,46 @@ func (m *Manager) Prepare(ctx context.Context, r Request) (Prepared, error) {
 	if m.Models == nil {
 		return Prepared{}, apierror.FailedPrecondition("Hugging Face models are not available on this instance")
 	}
-	_, info, ok := m.Models.Downloaded(r.HFModelID)
-	if !ok {
-		var err error
-		if info, err = m.Models.Lookup(ctx, r.HFModelID); err != nil {
-			return Prepared{}, lookupError(r.HFModelID, err)
-		}
-	}
-	if info.Gated != "" && !r.AcceptEULA {
-		return Prepared{}, apierror.FailedPrecondition("%s is gated on Hugging Face and needs its licence accepted: set "+
-			"model_config.accept_eula to true (and accept it on huggingface.co/%s, with HF_TOKEN set where CloudBurrow runs)",
-			r.HFModelID, r.HFModelID)
-	}
-	eng, err := EngineFor(info.PipelineTag)
+	accel, err := m.resolveAccelerator(r)
 	if err != nil {
-		return Prepared{}, apierror.InvalidArgument("cannot deploy %s: %v", r.HFModelID, err)
+		return Prepared{}, err
+	}
+	var info hfmodels.Info
+	var eng Engine
+	file := ""
+	if runtime == RuntimeCluster {
+		var err error
+		if info, eng, file, err = m.prepareCluster(ctx, r); err != nil {
+			return Prepared{}, err
+		}
+		switch {
+		case accel.Metal && hostEngine(eng.Name):
+			runtime = RuntimeHost
+		case accel.Metal:
+			accel.Metal, accel.Note = false, "Served on CPU in the cluster: "+eng.Title+" has no Metal build; "+
+				"the Apple GPU serves GGUF (llama.cpp) and MLX (mlx-lm) models"
+		}
+	} else {
+		if accel.Metal {
+			accel.Metal, accel.Note = false, "Served on CPU: a model downloaded to the host runs in Docker, which has no access to the Apple GPU"
+		}
+		_, local, ok := m.Models.Downloaded(r.HFModelID)
+		if !ok {
+			var err error
+			if local, err = m.Models.Lookup(ctx, r.HFModelID); err != nil {
+				return Prepared{}, lookupError(r.HFModelID, err)
+			}
+		}
+		info = local
+		if info.Gated != "" && !r.AcceptEULA {
+			return Prepared{}, apierror.FailedPrecondition("%s is gated on Hugging Face and needs its licence accepted: set "+
+				"model_config.accept_eula to true (and accept it on huggingface.co/%s, with HF_TOKEN set where CloudBurrow runs)",
+				r.HFModelID, r.HFModelID)
+		}
+		var err error
+		if eng, err = EngineFor(info.PipelineTag); err != nil {
+			return Prepared{}, apierror.InvalidArgument("cannot deploy %s: %v", r.HFModelID, err)
+		}
 	}
 
 	m.mu.Lock()
@@ -307,21 +392,39 @@ func (m *Manager) Prepare(ctx context.Context, r Request) (Prepared, error) {
 	}
 	machine := r.MachineType
 	if machine == "" {
-		machine = "local-cpu"
+		machine = CPUMachineType
+		if runtime == RuntimeHost {
+			machine = MetalMachineType
+		}
 	}
 	model := &Model{Project: r.Project, Location: r.Location, ID: modelID, DisplayName: modelName, HFModelID: r.HFModelID,
-		Revision: info.Revision, License: info.License, PipelineTag: info.PipelineTag, Engine: eng.Name, Image: eng.Image,
+		Revision: info.Revision, License: info.License, PipelineTag: info.PipelineTag, Engine: eng.Name, File: file, Image: eng.Image,
 		Env: eng.Env(r.HFModelID), Created: now, Updated: now}
+	if runtime == RuntimeCluster {
+		model.Env = eng.Pod(Plan{HFID: r.HFModelID, Revision: info.Revision, Task: info.PipelineTag, File: file}).Env
+	}
+	if runtime == RuntimeHost {
+		model.HostFiles = hostFiles(eng.Name, file, info.Files)
+		model.Env = map[string]string{"HF_HUB_OFFLINE": "1", "MODEL_ID": r.HFModelID}
+	}
 	dmID := numericID()
 	ep := &Endpoint{Project: r.Project, Location: r.Location, ID: epID, DisplayName: epName, Dedicated: !r.DedicatedDisabled,
 		Labels: r.Labels, Created: now, Updated: now,
 		Deployed: &DeployedModel{ID: dmID, ModelID: modelID, DisplayName: modelName, MachineType: machine,
-			Container: m.containerName(epID), State: StateDeploying, Message: "Preparing", Created: now}}
+			Container: m.containerName(epID), State: StateDeploying, Message: "Preparing", Created: now,
+			Runtime: runtime, Gated: info.Gated != "" && r.HFToken != "",
+			AcceleratorType: accel.Type, AcceleratorCount: accel.Count, AcceleratorNote: accel.Note}}
+	if runtime == RuntimeCluster || runtime == RuntimeHost {
+		ep.Deployed.Container = workloadName(epID)
+	}
+	if runtime == RuntimeHost {
+		ep.Deployed.Device = m.Host.Device() + " GPU (Metal)"
+	}
 	m.models[key(r.Project, r.Location, modelID)] = model
 	m.endpoints[key(r.Project, r.Location, epID)] = ep
 	m.save()
 	return Prepared{Endpoint: epID, Model: modelID, DeployedModel: dmID, PublisherModel: PublisherModel(r.HFModelID),
-		EndpointName: ep.Name(), ModelName: model.Name()}, nil
+		EndpointName: ep.Name(), ModelName: model.Name(), runtime: runtime, token: r.HFToken}, nil
 }
 
 func lookupError(id string, err error) error {
@@ -359,11 +462,11 @@ func (m *Manager) Run(ctx context.Context, project, location string, p Prepared)
 	err := m.run(ctx, project, location, p)
 	m.mu.Lock()
 	ep := m.endpoints[key(project, location, p.Endpoint)]
-	var container string
+	var container, runtime string
 	if ep != nil && ep.Deployed != nil && ep.Deployed.ID == p.DeployedModel {
 		if err != nil {
-			ep.Deployed.State, ep.Deployed.Message = StateFailed, err.Error()
-			container = ep.Deployed.Container
+			ep.Deployed.State, ep.Deployed.Message = StateFailed, scrub(err.Error(), p.token)
+			container, runtime = ep.Deployed.Container, ep.Deployed.Runtime
 		} else {
 			ep.Deployed.State, ep.Deployed.Message, ep.Deployed.Progress = StateReady, "Ready", 100
 		}
@@ -372,9 +475,32 @@ func (m *Manager) Run(ctx context.Context, project, location string, p Prepared)
 	}
 	m.mu.Unlock()
 	if container != "" {
-		_ = m.Docker.Remove(context.Background(), container)
+		m.removeRuntime(context.Background(), runtime, container, p.Endpoint)
+	}
+	if err != nil && p.token != "" {
+		e := *apierror.From(err)
+		e.Message, e.Cause = scrub(e.Message, p.token), nil
+		return &e
 	}
 	return err
+}
+
+// removeRuntime frees a deployed model's container, cluster workload or
+// host server (and its files).
+func (m *Manager) removeRuntime(ctx context.Context, runtime, name, epID string) error {
+	if runtime == RuntimeHost {
+		return m.stopHost(ctx, name, epID, true)
+	}
+	if runtime == RuntimeCluster {
+		if m.Cluster == nil {
+			return nil
+		}
+		return m.Cluster.Remove(ctx, name)
+	}
+	if m.Docker == nil {
+		return nil
+	}
+	return m.Docker.Remove(ctx, name)
 }
 
 func (m *Manager) run(ctx context.Context, project, location string, p Prepared) error {
@@ -386,7 +512,17 @@ func (m *Manager) run(ctx context.Context, project, location string, p Prepared)
 		return apierror.Aborted("the deployment was deleted while it was being deployed")
 	}
 	hfID, container := model.HFModelID, ep.Deployed.Container
+	onCluster, onHost := ep.Deployed.OnCluster(), ep.Deployed.OnHost()
 	m.mu.Unlock()
+	if onHost {
+		if m.Host == nil {
+			return apierror.FailedPrecondition("this deployment runs on the Apple GPU, which this instance does not use")
+		}
+		return m.runHost(ctx, project, location, p, model, container)
+	}
+	if onCluster {
+		return m.runCluster(ctx, project, location, p, model, container)
+	}
 
 	dir, err := m.ensureDownloaded(ctx, project, location, p.Endpoint, hfID)
 	if err != nil {
@@ -501,6 +637,10 @@ func (m *Manager) healthy(ctx context.Context, port int, eng Engine) bool {
 // Restore restarts the engines of READY deployments after an instance
 // restart, in the background.
 func (m *Manager) Restore() {
+	if m.Host != nil {
+		// Servers an abruptly ended CLI left behind are ended first.
+		m.Host.Reap()
+	}
 	m.mu.Lock()
 	m.load()
 	var todo []*Endpoint
@@ -521,7 +661,18 @@ func (m *Manager) Restore() {
 			if model == nil {
 				return
 			}
-			p := Prepared{Endpoint: ep.ID, Model: model.ID, DeployedModel: dm.ID}
+			p := Prepared{Endpoint: ep.ID, Model: model.ID, DeployedModel: dm.ID, runtime: dm.Runtime}
+			if dm.OnCluster() {
+				m.restoreCluster(ctx, ep, model, dm, p)
+				return
+			}
+			if dm.OnHost() {
+				m.mu.Lock()
+				ep.Deployed.State, ep.Deployed.Message = StateDeploying, "Restarting on the Apple GPU after an instance restart"
+				m.mu.Unlock()
+				_ = m.Run(ctx, ep.Project, ep.Location, p)
+				return
+			}
 			if dm.State == StateReady && m.Docker.Running(ctx, dm.Container) {
 				eng, _ := EngineByName(model.Engine)
 				if port, err := m.Docker.HostPort(ctx, dm.Container, containerPort); err == nil && m.healthy(ctx, port, eng) {
@@ -546,21 +697,37 @@ func (m *Manager) Restore() {
 	}
 }
 
-// Close removes every engine container (the instance is stopping), so
-// nothing of it outlives `cloudburrow stop` or `delete`; Restore starts
-// them again from the deployments file and the model cache.
+// Close removes every Docker engine container (the instance is stopping),
+// so nothing of it outlives `cloudburrow stop` or `delete`, and closes the
+// cluster workloads' tunnels; Restore starts them again from the
+// deployments file and the model cache, or the cluster.
 func (m *Manager) Close() {
 	m.mu.Lock()
 	m.load()
 	var names []string
 	for _, ep := range m.endpoints {
-		if ep.Deployed != nil {
+		if ep.Deployed != nil && ep.Deployed.Runtime != RuntimeCluster && ep.Deployed.Runtime != RuntimeHost {
 			names = append(names, ep.Deployed.Container)
 		}
+	}
+	hosts := make([]string, 0, len(m.procs))
+	for n := range m.procs {
+		hosts = append(hosts, n)
 	}
 	m.mu.Unlock()
 	for _, n := range names {
 		_ = m.Docker.Remove(context.Background(), n)
+	}
+	// The host servers end with the instance; Restore starts them again
+	// from their files. Their Services stay in the cluster, as its
+	// workloads do.
+	for _, n := range hosts {
+		_ = m.stopHost(context.Background(), n, "", false)
+	}
+	// Cluster workloads stay: the cluster stops with the instance and
+	// keeps them, and Restore reopens their tunnels. Only the tunnels go.
+	if m.Cluster != nil {
+		m.Cluster.UnforwardAll()
 	}
 }
 
@@ -675,12 +842,12 @@ func (m *Manager) Undeploy(ctx context.Context, project, location, epID, deploye
 		m.mu.Unlock()
 		return apierror.NotFound("deployed model %q is not deployed on endpoint %s", deployedModelID, e.Name())
 	}
-	container := e.Deployed.Container
+	container, runtime := e.Deployed.Container, e.Deployed.Runtime
 	e.Deployed, e.Updated = nil, m.clock()
 	m.save()
 	m.mu.Unlock()
-	if err := m.Docker.Remove(ctx, container); err != nil {
-		return apierror.Internal(err, "removing the engine container %s: %v", container, err)
+	if err := m.removeRuntime(ctx, runtime, container, epID); err != nil {
+		return apierror.Internal(err, "removing the serving workload %s: %v", container, err)
 	}
 	return nil
 }
@@ -726,6 +893,7 @@ func (m *Manager) DeleteModel(project, location, modelID string) error {
 // Serving is where a ready endpoint's engine answers.
 type Serving struct {
 	Engine          string
+	Task            string // the model's pipeline task
 	BaseURL         string
 	ServedModel     string // the Hugging Face ID, vLLM's --served-model-name
 	DeployedModelID string
@@ -754,6 +922,6 @@ func (m *Manager) Target(project, location, epID string) (Serving, error) {
 	if x == nil {
 		return Serving{}, apierror.FailedPrecondition("endpoint %s's model is gone", e.Name())
 	}
-	return Serving{Engine: x.Engine, BaseURL: fmt.Sprintf("http://127.0.0.1:%d", e.Deployed.HostPort), ServedModel: x.HFModelID,
+	return Serving{Engine: x.Engine, Task: x.PipelineTag, BaseURL: fmt.Sprintf("http://127.0.0.1:%d", e.Deployed.HostPort), ServedModel: x.HFModelID,
 		DeployedModelID: e.Deployed.ID, ModelName: x.Name(), ModelDisplay: x.DisplayName}, nil
 }

@@ -133,40 +133,70 @@ func parseMP3Stream(b []byte) (mp3Stream, error) {
 
 // decodeMP3 decodes an MP3 file to mono samples at its own rate.
 func decodeMP3(b []byte) (samples []float32, rate int, err error) {
-	s, err := parseMP3Stream(b)
+	pcm, channels, rate, err := decodeMP3Channels(b, MaxAudioSeconds)
 	if err != nil {
 		return nil, 0, err
+	}
+	if channels == 1 {
+		return pcm, rate, nil
+	}
+	out := make([]float32, len(pcm)/2)
+	for i := range out {
+		out[i] = float32(math.Sqrt2 * (float64(pcm[2*i]) + float64(pcm[2*i+1])) / 2) // as downmix does
+	}
+	return out, rate, nil
+}
+
+// DecodeMP3Channels decodes an MP3 file of at most maxSeconds to
+// interleaved samples (one or two channels) at its own rate, trimmed as
+// ffmpeg's mp3 demuxer trims it (the Info frame, the LAME delay and
+// padding). Longer audio is an error IsTooLong reports.
+func DecodeMP3Channels(data []byte, maxSeconds int) (pcm []float32, channels, rate int, err error) {
+	pcm, channels, rate, err = decodeMP3Channels(data, maxSeconds)
+	if err != nil && !IsTooLong(err) {
+		err = fmt.Errorf("the data is not a valid MP3 file: %v", err)
+	}
+	if err == nil && len(pcm)/channels > maxSeconds*rate {
+		return nil, 0, 0, &tooLongError{float64(len(pcm)/channels) / float64(rate)}
+	}
+	return pcm, channels, rate, err
+}
+
+func decodeMP3Channels(b []byte, maxSeconds int) (samples []float32, channels, rate int, err error) {
+	s, err := parseMP3Stream(b)
+	if err != nil {
+		return nil, 0, 0, err
 	}
 	defer func() {
 		// go-mp3 can index out of range on a corrupt frame.
 		if r := recover(); r != nil {
-			samples, rate, err = nil, 0, fmt.Errorf("a corrupt frame (%v)", r)
+			samples, channels, rate, err = nil, 0, 0, fmt.Errorf("a corrupt frame (%v)", r)
 		}
 	}()
 	d, err := mp3.NewDecoder(bytes.NewReader(b))
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, 0, err
 	}
 	rate = d.SampleRate()
 	if rate < 8000 || rate > 48000 {
-		return nil, 0, fmt.Errorf("a sample rate of %d Hz", rate)
+		return nil, 0, 0, fmt.Errorf("a sample rate of %d Hz", rate)
 	}
 	// The length is known before decoding (the decoder scans the frames),
 	// so a clip far past the limit is refused without decoding it; the
 	// second's slack covers the Info frame, delay and padding trimmed below,
 	// and DecodeAudio checks the trimmed clip exactly.
 	if n := d.Length(); n > 0 {
-		if secs := float64(n) / 4 / float64(rate); secs > MaxAudioSeconds+1 {
-			return nil, 0, &tooLongError{secs}
+		if secs := float64(n) / 4 / float64(rate); secs > float64(maxSeconds)+1 {
+			return nil, 0, 0, &tooLongError{secs}
 		}
 	}
 	pcm, err := io.ReadAll(d)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, 0, err
 	}
 	frames := len(pcm) / 4
 	if frames == 0 {
-		return nil, 0, errors.New("no audio samples")
+		return nil, 0, 0, errors.New("no audio samples")
 	}
 	// What ffmpeg keeps of the decoded samples.
 	start, end := 0, frames
@@ -180,20 +210,21 @@ func decodeMP3(b []byte) (samples []float32, rate int, err error) {
 		}
 	}
 	if start >= end {
-		return nil, 0, errors.New("no audio samples")
+		return nil, 0, 0, errors.New("no audio samples")
 	}
-	out := make([]float32, end-start)
-	for i := range out {
+	channels = 2
+	if s.mono {
+		channels = 1
+	}
+	out := make([]float32, (end-start)*channels)
+	for i := range end - start {
 		f := pcm[4*(start+i):]
-		l := float32(int16(binary.LittleEndian.Uint16(f))) / 32768
-		if s.mono {
-			out[i] = l
-			continue
+		out[i*channels] = float32(int16(binary.LittleEndian.Uint16(f))) / 32768
+		if channels == 2 {
+			out[2*i+1] = float32(int16(binary.LittleEndian.Uint16(f[2:]))) / 32768
 		}
-		r := float32(int16(binary.LittleEndian.Uint16(f[2:]))) / 32768
-		out[i] = float32(math.Sqrt2 * (float64(l) + float64(r)) / 2) // as downmix does
 	}
-	return out, rate, nil
+	return out, channels, rate, nil
 }
 
 // tooLongError is a clip past MaxAudioSeconds.
@@ -206,7 +237,7 @@ func (e *tooLongError) Error() string {
 // decodeMP3PCM decodes an MP3 stream to interleaved stereo samples at its
 // own rate (a mono stream in both channels), trimming nothing: an MP4's MP3
 // track is trimmed by its edit list instead.
-func decodeMP3PCM(b []byte) (samples []float32, rate int, err error) {
+func decodeMP3PCM(b []byte, limit int) (samples []float32, rate int, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			samples, rate, err = nil, 0, fmt.Errorf("a corrupt frame (%v)", r)
@@ -218,7 +249,7 @@ func decodeMP3PCM(b []byte) (samples []float32, rate int, err error) {
 	}
 	rate = d.SampleRate()
 	if n := d.Length(); n > 0 {
-		if secs := float64(n) / 4 / float64(rate); secs > MaxAudioSeconds+60 {
+		if secs := float64(n) / 4 / float64(rate); secs > float64(limit)+60 {
 			return nil, 0, &tooLongError{secs}
 		}
 	}

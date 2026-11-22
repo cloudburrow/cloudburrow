@@ -62,18 +62,21 @@ func TestBuild(t *testing.T) {
 		if !errors.Is(err, ErrNotEmbedded) {
 			t.Fatal(err)
 		}
-		if _, err := Build(context.Background(), &recordingRunner{}, "amd64"); !errors.Is(err, ErrNotEmbedded) {
+		if _, err := Build(context.Background(), &recordingRunner{}, "amd64", "w1"); !errors.Is(err, ErrNotEmbedded) {
 			t.Errorf("Build without an embedded binary = %v", err)
 		}
 		t.Skip("no embedded binary in this build (make storage-binaries)")
 	}
 	r := &recordingRunner{}
-	tag, err := Build(context.Background(), r, "amd64")
-	if err != nil || !strings.HasPrefix(tag, Repository) || len(r.calls) != 2 || !strings.Contains(r.calls[1], "docker build --platform linux/amd64 -t "+tag) {
+	tag, err := Build(context.Background(), r, "amd64", "w1")
+	if err != nil || !strings.HasPrefix(tag, Repository) || len(r.calls) != 2 || !strings.Contains(r.calls[1], "docker build --platform linux/amd64 --label io.cloudburrow.instance=w1 -t "+tag) {
 		t.Errorf("Build = %s, %v; calls %v", tag, err, r.calls)
 	}
+	// Another instance, or another worktree with the same binary, reuses
+	// the image the first built: the tag is the content's, not the
+	// instance's (#2152).
 	again := &recordingRunner{exists: true}
-	if _, err := Build(context.Background(), again, "amd64"); err != nil || len(again.calls) != 1 {
-		t.Errorf("a second Build rebuilt: %v %v", again.calls, err)
+	if got, err := Build(context.Background(), again, "amd64", "w2"); err != nil || got != tag || len(again.calls) != 1 {
+		t.Errorf("a second Build = %s, rebuilt: %v %v", got, again.calls, err)
 	}
 }

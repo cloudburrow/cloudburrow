@@ -305,6 +305,16 @@ func (s *Server) startMasterUpgradeLocked(p parsed, e *entry, to Version, u Upgr
 // automatic upgrade's: a surge one pauses when it runs past the end of the
 // maintenance window.
 func (s *Server) startPoolUpgradeLocked(p parsed, e *entry, np *containerpb.NodePool, to Version, u Upgrader, auto bool) *containerpb.Operation {
+	return s.startPoolReplaceLocked(p, e, np, to, u, auto, nil)
+}
+
+// startPoolReplaceLocked is startPoolUpgradeLocked; with before set, it
+// replaces every node of the pool, of its version or not (a machine type
+// or disk change, #2100: "GKE recreates nodes using the node pool's
+// upgrade strategy"), after running before.
+func (s *Server) startPoolReplaceLocked(p parsed, e *entry, np *containerpb.NodePool, to Version, u Upgrader, auto bool,
+	before func(ctx context.Context) error) *containerpb.Operation {
+	recreate := before != nil
 	c := e.cluster
 	c.Status = containerpb.Cluster_RECONCILING
 	np.Status = containerpb.NodePool_RECONCILING
@@ -322,7 +332,7 @@ func (s *Server) startPoolUpgradeLocked(p parsed, e *entry, np *containerpb.Node
 	// concepts/node-pool-upgrade-strategies): read that phase now, while
 	// s.mu is held, before the operation's goroutine rewrites it.
 	resume := containerpb.NodePool_UpdateInfo_BlueGreenInfo_CREATING_GREEN_POOL
-	if bgi := np.GetUpdateInfo().GetBlueGreenInfo(); bgi.GetGreenPoolVersion() == to.GKE &&
+	if bgi := np.GetUpdateInfo().GetBlueGreenInfo(); !recreate && bgi.GetGreenPoolVersion() == to.GKE &&
 		bgi.GetPhase() > resume && bgi.GetPhase() <= containerpb.NodePool_UpdateInfo_BlueGreenInfo_NODE_POOL_SOAKING {
 		resume = bgi.GetPhase()
 	}
@@ -354,6 +364,11 @@ func (s *Server) startPoolUpgradeLocked(p parsed, e *entry, np *containerpb.Node
 	}
 	from := np.Version
 	op := s.startOpLocked(p, containerpb.Operation_UPGRADE_NODES, np.SelfLink, e, func(ctx context.Context) error {
+		if recreate {
+			if err := before(ctx); err != nil {
+				return err
+			}
+		}
 		nodes, err := u.PoolNodes(ctx, kind, pool)
 		if err != nil {
 			return status.Errorf(codes.Internal, "Listing node pool %q's nodes failed: %v", pool, err)
@@ -361,7 +376,7 @@ func (s *Server) startPoolUpgradeLocked(p parsed, e *entry, np *containerpb.Node
 		var old []string
 		green := 0
 		for _, n := range nodes {
-			if n.Image != to.Image {
+			if recreate || n.Image != to.Image {
 				old = append(old, n.Name)
 			} else {
 				green++

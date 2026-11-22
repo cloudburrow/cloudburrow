@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/cloudburrow/cloudburrow/internal/hfmodels"
+	"github.com/cloudburrow/cloudburrow/internal/modelgarden"
 )
 
 // Hugging Face models in Model Garden (#1840): look a model up on
@@ -95,4 +96,71 @@ func hfStatus(err error) int {
 		return http.StatusConflict
 	}
 	return http.StatusBadGateway
+}
+
+// Browsing the whole Hub (#2148): Model Garden's Hugging Face tab searches
+// huggingface.co's public models anonymously, a page at a time, and opens a
+// model's card. Each model says whether Deploy can serve it, and with which
+// engine, from its task and library.
+
+type hubModelView struct {
+	hfmodels.HubModel
+	Engine      string `json:"engine,omitempty"`
+	EngineTitle string `json:"engineTitle,omitempty"`
+	Unavailable string `json:"unavailable,omitempty"`
+}
+
+func hubView(m hfmodels.HubModel) hubModelView {
+	v := hubModelView{HubModel: m}
+	if e, err := modelgarden.EngineForModel(m.Task, m.Library, m.Tags); err != nil {
+		v.Unavailable = err.Error()
+	} else {
+		v.Engine, v.EngineTitle = e.Name, e.Title
+	}
+	return v
+}
+
+func (s *Server) handleHFHubSearch(w http.ResponseWriter, r *http.Request) {
+	if s.hfModels == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Hugging Face is not available on this instance"})
+		return
+	}
+	q := r.URL.Query()
+	page, err := s.hfModels.Search(r.Context(), hfmodels.SearchQuery{Search: q.Get("q"), Task: q.Get("task"),
+		Library: q.Get("library"), License: q.Get("license"), Sort: q.Get("sort"), Cursor: q.Get("cursor")})
+	if err != nil {
+		writeJSON(w, hfStatus(err), map[string]string{"error": err.Error()})
+		return
+	}
+	out := make([]hubModelView, 0, len(page.Models))
+	for _, m := range page.Models {
+		out = append(out, hubView(m))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"models": out, "next": page.Next, "deploys": s.garden != nil})
+}
+
+func (s *Server) handleHFHubCard(w http.ResponseWriter, r *http.Request) {
+	if s.hfModels == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Hugging Face is not available on this instance"})
+		return
+	}
+	c, err := s.hfModels.Card(r.Context(), r.URL.Query().Get("id"))
+	if err != nil {
+		writeJSON(w, hfStatus(err), map[string]string{"error": err.Error()})
+		return
+	}
+	v := hubView(c.HubModel)
+	if c.Disabled {
+		v.Unavailable = "the model is disabled on Hugging Face"
+	}
+	out := map[string]any{"model": c, "engine": v.Engine, "engineTitle": v.EngineTitle,
+		"unavailable": v.Unavailable, "deploys": s.garden != nil, "project": s.hfProject, "location": HFLocation}
+	if s.garden != nil {
+		// The Accelerator type field (#2155): which runtimes the Apple GPU
+		// serves, for the form's note on the others.
+		a := s.acceleratorChoices()
+		a["engineMetal"] = v.Engine == modelgarden.EngineLlamaCpp || v.Engine == modelgarden.EngineMLX
+		out["accelerators"] = a
+	}
+	writeJSON(w, http.StatusOK, out)
 }

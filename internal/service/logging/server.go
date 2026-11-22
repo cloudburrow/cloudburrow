@@ -221,6 +221,13 @@ func (s *Store) bucketEntries(ref bucketRef) []*loggingpb.LogEntry {
 	return out
 }
 
+// ownBuiltins is what a write needs of an entry's parent: whether its
+// _Default sink is stored, and where its built-in buckets are.
+type ownBuiltins struct {
+	explicit bool
+	loc      string
+}
+
 // Server serves google.logging.v2.LoggingServiceV2.
 type Server struct {
 	loggingpb.UnimplementedLoggingServiceV2Server
@@ -402,6 +409,7 @@ func (s *Server) WriteLogEntries(ctx context.Context, req *loggingpb.WriteLogEnt
 	exclusions := map[parent]pred{}
 	sinks := map[parent][]sinkRoute{}
 	routes := map[*loggingpb.LogEntry]*route{}
+	owns := map[parent]ownBuiltins{}
 	var deliveries []delivery
 	var hits []sinkHit
 	out := make([]*loggingpb.LogEntry, 0, len(req.GetEntries()))
@@ -426,8 +434,24 @@ func (s *Server) WriteLogEntries(ctx context.Context, req *loggingpb.WriteLogEnt
 			continue
 		}
 		hits = append(hits, rt.hits...)
-		hidden := s.excluded(e, exclusions) || rt.intercepted
+		own := entryParent(e)
+		ownState, ok := owns[own]
+		if !ok {
+			ownState = ownBuiltins{explicit: s.admin.explicitDefault(own), loc: "global"}
+			if s.admin != nil {
+				ownState.loc = s.admin.builtinLoc(own)
+			}
+			owns[own] = ownState
+		}
+		// A stored _Default sink routed the entry among the sinks
+		// (defaults.go): nothing is in the parent's _Default implicitly.
+		hidden := s.excluded(e, exclusions) || rt.intercepted || ownState.explicit
 		buckets := rt.buckets
+		// A parent whose built-in buckets are not global holds its audit
+		// entries in its own _Required by name.
+		if ownState.loc != "global" && isRequiredLog(e) {
+			buckets = append(slices.Clip(buckets), (bucketRef{own, ownState.loc, bucketRequired}).name())
+		}
 		// Its own _Required bucket keeps an audit entry whatever hides it
 		// from _Default (required.go).
 		if hidden && len(buckets) == 0 && !isRequiredLog(e) {
@@ -726,7 +750,11 @@ func (s *Server) sources(names []string) ([]source, error) {
 		}
 		// A parent reads its own two buckets, _Default and _Required
 		// (required.go, #2108).
-		refs, view := []bucketRef{{parent: p, location: "global", bucket: bucketDefault}, {parent: p, location: "global", bucket: bucketRequired}}, viewAllLogs
+		loc := "global"
+		if s.admin != nil {
+			loc = s.admin.builtinLoc(p)
+		}
+		refs, view := []bucketRef{{parent: p, location: loc, bucket: bucketDefault}, {parent: p, location: loc, bucket: bucketRequired}}, viewAllLogs
 		if rest != "" {
 			ref, v, err := parseView("resource name", r)
 			if err != nil {
@@ -882,7 +910,9 @@ func (s *Server) follow(e *loggingpb.LogEntry, routes []sinkRoute, cache map[par
 				ex = s.admin.excluder(dp)
 				exclusions[dp] = ex
 			}
-			if def := (bucketRef{parent: dp, location: "global", bucket: bucketDefault}).name(); (ex == nil || !ex(e)) && !seen[def] && (dp != entryParent(e) || out.intercepted) {
+			// A project whose _Default sink is stored routes through it,
+			// among its sinks below (defaults.go).
+			if def := (bucketRef{parent: dp, location: "global", bucket: bucketDefault}).name(); !s.admin.explicitDefault(dp) && (ex == nil || !ex(e)) && !seen[def] && (dp != entryParent(e) || out.intercepted) {
 				seen[def] = true
 				out.buckets = append(out.buckets, def)
 			}

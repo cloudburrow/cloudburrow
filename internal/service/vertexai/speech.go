@@ -43,8 +43,9 @@ import (
 //   - features: enableWordTimeOffsets (each word's startOffset and
 //     endOffset, from whisper's token timestamps), enableWordConfidence,
 //     maxAlternatives (one alternative is returned, which the reference
-//     allows) and enableAutomaticPunctuation (whisper punctuates
-//     regardless) are read, and SEPARATE_RECOGNITION_PER_CHANNEL
+//     allows) and enableAutomaticPunctuation (without it, punctuation
+//     is removed except on the chirp models, which punctuate by
+//     themselves, #2127) are read, and SEPARATE_RECOGNITION_PER_CHANNEL
 //     transcribes each channel on its own (transcribeChannels, #1799);
 //     profanityFilter, enableSpokenPunctuation and enableSpokenEmojis
 //     rewrite each final transcript (speechconfig's Format, #1799), and
@@ -52,10 +53,14 @@ import (
 //     Translation API's model (translateSegments, #1799);
 //     denoiserConfig.denoiseAudio denoises the audio first (RNNoise,
 //     internal/speech/denoise.go, #1799), a non-zero snrThreshold is
-//     UNIMPLEMENTED; diarizationConfig is UNIMPLEMENTED (no permissive
-//     local model, docs/compatibility.md);
+//     UNIMPLEMENTED; diarizationConfig labels each word's speaker with
+//     3D-Speaker's CAM++ in the onnx build, and is UNIMPLEMENTED without
+//     it (speechdiarize.go, #2131);
 //     adaptation biases whisper (speechbias.go), and transcriptNormalization
 //     rewrites each final transcript (speechconfig's Normalize, #1799).
+//   - each model, location, language and feature is checked against
+//     Google's supported languages table (speechconfig's CheckV2, #2127):
+//     what the table does not mark is INVALID_ARGUMENT.
 //   - decoding (speech/audio.go): WAV, headerless LINEAR16, MULAW and ALAW,
 //     MP3, AAC in MP4, M4A or MOV, FLAC (internal/speech/flac.go, #1799),
 //     Opus in Ogg or WebM (internal/speech/opus.go, #1799), and AMR and
@@ -159,8 +164,32 @@ func (s *Server) recognizeAudio(ctx context.Context, name string, config json.Ra
 }
 
 // checkedConfig is the recognizer's config with config merged over it,
-// checked.
+// checked, against the supported languages table in the recognizer's
+// location too (speechconfig's CheckV2, #2127).
 func (s *Server) checkedConfig(name string, config json.RawMessage) (speechconfig.Config, error) {
+	cfg, err := s.parsedConfig(name, config)
+	if err != nil {
+		return cfg, err
+	}
+	if err := cfg.CheckV2(recognizerLocation(name)); err != nil {
+		return cfg, apierror.InvalidArgument("%v", err)
+	}
+	if err := cfg.Unserved(); err != nil {
+		return cfg, apierror.Unimplemented("%v", err)
+	}
+	return cfg, nil
+}
+
+// recognizerLocation is the location of a recognizer's full name.
+func recognizerLocation(name string) string {
+	_, rest, _ := strings.Cut(name, "/locations/")
+	loc, _, _ := strings.Cut(rest, "/")
+	return loc
+}
+
+// parsedConfig is checkedConfig without the supported languages table:
+// v1's config is checked against v1's table (v1Checked).
+func (s *Server) parsedConfig(name string, config json.RawMessage) (speechconfig.Config, error) {
 	if !strings.HasSuffix(name, "/recognizers/_") {
 		merged, err := s.recognizerConfig(name, config)
 		if err != nil {
@@ -181,10 +210,7 @@ func (s *Server) checkedConfig(name string, config json.RawMessage) (speechconfi
 		return cfg, err
 	}
 	if len(cfg.Candidates) > 0 {
-		loc := ""
-		if _, rest, ok := strings.Cut(name, "/locations/"); ok {
-			loc, _, _ = strings.Cut(rest, "/")
-		}
+		loc := recognizerLocation(name)
 		if !speechconfig.MultiLanguageLocations[loc] {
 			return cfg, apierror.InvalidArgument("several languageCodes are only available in the global location and the us and eu multi-regions, not %q", loc)
 		}
@@ -226,6 +252,9 @@ func (s *Server) transcribeAudioMax(ctx context.Context, name string, config jso
 	defer cancel()
 	res, cfg, err := transcribeBestFit(ctx, samples, opt, cfg)
 	if err != nil {
+		return none, nil, cfg, err
+	}
+	if err := diarizeSegments(ctx, samples, res.Segments, cfg); err != nil {
 		return none, nil, cfg, err
 	}
 	normalize(res.Segments, cfg, resultLanguage(cfg, res))
@@ -304,15 +333,21 @@ func transcribeBestFit(ctx context.Context, samples []float32, opt speech.Option
 
 // denoise is samples denoised when the config's denoiserConfig asks for it
 // (denoiseAudio, #1799; internal/speech's Denoise, RNNoise).
+// A snrThreshold silences the windows whose signal-to-noise ratio is
+// below it (speech.FilterSNR), denoised or not.
 func denoise(ctx context.Context, cfg speechconfig.Config, samples []float32) ([]float32, error) {
-	if !cfg.Denoise {
+	if !cfg.Denoise && cfg.SNRThreshold <= 0 {
 		return samples, nil
 	}
-	out, err := speech.Denoise(ctx, samples)
+	clean, err := speech.Denoise(ctx, samples)
 	if err != nil {
 		return nil, apierror.Internal(err, "denoising the audio failed: %v", err)
 	}
-	return out, nil
+	out := samples
+	if cfg.Denoise {
+		out = clean
+	}
+	return speech.FilterSNR(out, samples, clean, cfg.SNRThreshold), nil
 }
 
 // resultLanguage is the language code results are labelled with: the
@@ -373,7 +408,8 @@ func (s *Server) transcribeOptions(cfg speechconfig.Config) (speech.Options, err
 	if err != nil {
 		return speech.Options{}, err
 	}
-	return speech.Options{Language: cfg.Language, Words: cfg.Words, Phrases: phrases, Prompt: prompt}, nil
+	// Diarization labels whisper's words, so it needs their timestamps.
+	return speech.Options{Language: cfg.Language, Words: cfg.Words || cfg.Diarization, Phrases: phrases, Prompt: prompt}, nil
 }
 
 // checkLanguage refuses a language the local Whisper model does not know.
@@ -420,9 +456,29 @@ func (s *Server) transcribeChannels(ctx context.Context, cfg speechconfig.Config
 	}
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Hour)
 	defer cancel()
+	out, samples, cfg, err := transcribeEachChannel(ctx, cfg, opt, chans)
+	if err != nil {
+		return none, nil, cfg, err
+	}
+	normalize(out.Segments, cfg, resultLanguage(cfg, out))
+	if err := s.translateSegments(ctx, out.Segments, cfg, resultLanguage(cfg, out)); err != nil {
+		return none, nil, cfg, err
+	}
+	return out, samples, cfg, nil
+}
+
+// transcribeEachChannel transcribes (and diarizes, when cfg asks) each of
+// chans on its own, v2's transcribeChannels and v1's
+// enable_separate_recognition_per_channel (speechv1.go): each segment
+// tagged with its 1-based channel, ordered by end then channel, before
+// normalize. The samples are the channels one after another, so the
+// billed duration counts each.
+func transcribeEachChannel(ctx context.Context, cfg speechconfig.Config, opt speech.Options, chans [][]float32) (speech.Result, []float32, speechconfig.Config, error) {
 	var (
+		none    speech.Result
 		out     speech.Result
 		samples []float32
+		err     error
 	)
 	for c, ch := range chans {
 		if ch, err = denoise(ctx, cfg, ch); err != nil {
@@ -434,6 +490,10 @@ func (s *Server) transcribeChannels(ctx context.Context, cfg speechconfig.Config
 		}
 		if c == 0 {
 			cfg = chCfg
+		}
+		// Each channel's speakers, numbered from 1 in it (speechdiarize.go).
+		if err := diarizeSegments(ctx, ch, res.Segments, cfg); err != nil {
+			return none, nil, cfg, err
 		}
 		if out.Language == "" {
 			out.Language = res.Language
@@ -451,10 +511,6 @@ func (s *Server) transcribeChannels(ctx context.Context, cfg speechconfig.Config
 		}
 		return a.Channel < b.Channel
 	})
-	normalize(out.Segments, cfg, resultLanguage(cfg, out))
-	if err := s.translateSegments(ctx, out.Segments, cfg, resultLanguage(cfg, out)); err != nil {
-		return none, nil, cfg, err
-	}
 	return out, samples, cfg, nil
 }
 
@@ -465,6 +521,15 @@ func (s *Server) transcribeChannels(ctx context.Context, cfg speechconfig.Config
 func normalize(segs []speech.Segment, cfg speechconfig.Config, code string) {
 	for i := range segs {
 		segs[i].Text = cfg.Format(segs[i].Text, code)
+		if !cfg.Punctuated() {
+			words := segs[i].Words[:0]
+			for _, w := range segs[i].Words {
+				if w.Text = speechconfig.StripPunctuation(w.Text); w.Text != "" {
+					words = append(words, w)
+				}
+			}
+			segs[i].Words = words
+		}
 		if cfg.ProfanityFilter {
 			for j := range segs[i].Words {
 				segs[i].Words[j].Text = speechconfig.MaskWord(segs[i].Words[j].Text)
@@ -503,7 +568,7 @@ func recognizeResponse(res speech.Result, samples []float32, f speechconfig.Conf
 		if f.TranslateTo == "" {
 			alt["confidence"] = math.Round(seg.Confidence*1e6) / 1e6
 		}
-		if (f.WordOffsets || f.WordConfidence) && f.TranslateTo == "" {
+		if (f.WordOffsets || f.WordConfidence || f.Diarization) && f.TranslateTo == "" {
 			var words []any
 			for _, wd := range seg.Words {
 				m := map[string]any{"word": wd.Text}
@@ -512,6 +577,9 @@ func recognizeResponse(res speech.Result, samples []float32, f speechconfig.Conf
 				}
 				if f.WordConfidence {
 					m["confidence"] = math.Round(wd.Confidence*1e6) / 1e6
+				}
+				if wd.Speaker > 0 {
+					m["speakerLabel"] = strconv.Itoa(wd.Speaker)
 				}
 				words = append(words, m)
 			}

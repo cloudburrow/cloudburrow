@@ -20,9 +20,12 @@ import (
 const HFLocation = "us-central1"
 
 // HFDeployer runs ModelGardenService.Deploy for a Hugging Face model,
-// returning the operation and the endpoint's names.
+// returning the operation and the endpoint's names. token is the deploy
+// form's Hugging Face access token (a gated model's), which the deployer
+// puts in the workload's Secret and nowhere else; runtime is "" (the
+// instance's cluster) or modelgarden.RuntimeDocker (a downloaded model).
 type HFDeployer interface {
-	DeployHF(ctx context.Context, project, location, hfID string, acceptEULA bool) (op, endpoint string, err error)
+	DeployHF(ctx context.Context, project, location, hfID string, acceptEULA bool, token, runtime, accelerator string) (op, endpoint string, err error)
 }
 
 // SetModelGarden offers Deploy on downloaded Hugging Face models; a nil
@@ -43,8 +46,8 @@ type hfDeploymentView struct {
 func (s *Server) handleHFDeployments(w http.ResponseWriter, _ *http.Request) {
 	if s.garden == nil {
 		writeJSON(w, http.StatusOK, map[string]any{"configured": false, "endpoints": []any{},
-			"note": "Deploying Hugging Face models needs Cloud Run (Docker runs the vLLM and Text Embeddings Inference engines): " +
-				"start the instance with --services including run."})
+			"note": "Deploying Hugging Face models needs the local AI endpoint: start the instance with a local AI model " +
+				"(--local-ai-model or --local-ai-embeddings) or with --services including run."})
 		return
 	}
 	out := []hfDeploymentView{}
@@ -57,7 +60,8 @@ func (s *Server) handleHFDeployments(w http.ResponseWriter, _ *http.Request) {
 		}
 		out = append(out, v)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"configured": true, "endpoints": out, "project": s.hfProject, "location": HFLocation})
+	writeJSON(w, http.StatusOK, map[string]any{"configured": true, "endpoints": out, "project": s.hfProject, "location": HFLocation,
+		"accelerators": s.acceleratorChoices()})
 }
 
 func parseEndpointName(name string) (project, location, id string, ok bool) {
@@ -79,11 +83,20 @@ func (s *Server) handleHFDeploymentAction(w http.ResponseWriter, r *http.Request
 		return
 	}
 	var req struct {
-		ID         string          `json:"id"`
-		AcceptEULA bool            `json:"acceptEula"`
-		Endpoint   string          `json:"endpoint"`
-		Mode       string          `json:"mode"`
-		Body       json.RawMessage `json:"body"`
+		ID         string `json:"id"`
+		AcceptEULA bool   `json:"acceptEula"`
+		// Token is the deploy form's Hugging Face access token. It is
+		// passed to the deployer and dropped: never logged, kept or echoed.
+		Token string `json:"hfToken"`
+		// Local deploys a model downloaded to the host (#1840) in Docker.
+		Local bool `json:"local"`
+		// Accelerator is the form's Accelerator type (#2155): an
+		// accelerator type (NVIDIA_L4 is the Apple GPU), "none", or "" for
+		// the instance's default.
+		Accelerator string          `json:"accelerator"`
+		Endpoint    string          `json:"endpoint"`
+		Mode        string          `json:"mode"`
+		Body        json.RawMessage `json:"body"`
 	}
 	b, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if json.Unmarshal(b, &req) != nil {
@@ -92,7 +105,12 @@ func (s *Server) handleHFDeploymentAction(w http.ResponseWriter, r *http.Request
 	}
 	action := r.PathValue("action")
 	if action == "deploy" {
-		op, ep, err := s.hfDeploy.DeployHF(r.Context(), s.hfProject, HFLocation, req.ID, req.AcceptEULA)
+		runtime := ""
+		if req.Local {
+			runtime = modelgarden.RuntimeDocker
+		}
+		op, ep, err := s.hfDeploy.DeployHF(r.Context(), s.hfProject, HFLocation, req.ID, req.AcceptEULA, req.Token, runtime, req.Accelerator)
+		req.Token = ""
 		if err != nil {
 			writeAPIError(w, err)
 			return
@@ -159,4 +177,18 @@ func (s *Server) handleHFDeploymentAction(w http.ResponseWriter, r *http.Request
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such action"})
 	}
+}
+
+// acceleratorChoices are the deploy form's Accelerator type options
+// (#2155): the Apple GPU where it is available, CPU always, and which one a
+// deploy uses by default.
+func (s *Server) acceleratorChoices() map[string]any {
+	ok, why, device := s.garden.MetalAvailable()
+	def := s.garden.DefaultAccelerator()
+	if def == "" {
+		def = "none"
+	}
+	return map[string]any{"metal": ok, "metalNote": why, "device": device, "default": def,
+		"metalType": modelgarden.MetalAcceleratorType, "metalLabel": modelgarden.MetalLabel,
+		"metalMachine": modelgarden.MetalMachineType, "cpuMachine": modelgarden.CPUMachineType}
 }

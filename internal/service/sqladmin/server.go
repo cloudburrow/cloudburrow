@@ -111,6 +111,10 @@ type Server struct {
 	addr    string
 	engines []Engine
 
+	// epMu guards epLast, the private endpoints last read (privateip.go).
+	epMu   sync.Mutex
+	epLast endpoints
+
 	mu  sync.Mutex
 	ops map[string]map[string]any // by operation name
 	// opOrder is creation order, for operations.list.
@@ -131,6 +135,9 @@ type Server struct {
 	// networks are the Compute Engine networks private IP settings are
 	// checked against (vpc.go, #1936), nil for none; guarded by emu.
 	networks func() Networks
+	// autoConn makes Private Service Connect's automatic endpoints
+	// (autoconnect.go, #2141), nil for none; guarded by emu.
+	autoConn AutoConnector
 	// writes are the created instances, nil unless EnableInstanceWrites
 	// was called; emu guards them.
 	emu    sync.RWMutex

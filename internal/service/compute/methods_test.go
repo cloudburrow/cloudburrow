@@ -28,6 +28,8 @@ func TestEveryUnservedMethodIsNotImplemented(t *testing.T) {
 		{"compute.routes.testIamPermissions", "POST", "projects/p/global/routes/x/testIamPermissions"},
 		{"compute.addresses.move", "POST", "projects/p/regions/us-central1/addresses/x/move"},
 		{"compute.addresses.testIamPermissions", "POST", "projects/p/regions/us-central1/addresses/x/testIamPermissions"},
+		{"compute.forwardingRules.patch", "PATCH", "projects/p/regions/us-central1/forwardingRules/x"},
+		{"compute.forwardingRules.setTarget", "POST", "projects/p/regions/us-central1/forwardingRules/x/setTarget"},
 		{"compute.globalAddresses.move", "POST", "projects/p/global/addresses/x/move"},
 		{"compute.globalAddresses.testIamPermissions", "POST", "projects/p/global/addresses/x/testIamPermissions"},
 		{"compute.images.delete", "DELETE", "projects/debian-cloud/global/images/x"},

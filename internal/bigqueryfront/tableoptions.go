@@ -225,12 +225,20 @@ type tableSetting struct {
 	// VectorIndex is the table's vector index (vectorindex.go, #1952), or
 	// nil.
 	VectorIndex *vectorIndex `json:"vectorIndex,omitempty"`
+	// Fingerprint is the table's rows' fingerprint at its last tables.get,
+	// Modified the lastModifiedTime it gives (milliseconds), and Written
+	// the time of a lone DML statement on it since (tablemodified.go,
+	// #2105).
+	Fingerprint string `json:"fingerprint,omitempty"`
+	Modified    int64  `json:"modified,omitempty"`
+	Written     int64  `json:"written,omitempty"`
 }
 
 // zero reports whether t keeps nothing.
 func (t tableSetting) zero() bool {
 	return t.Created == "" && t.ChangeHistory == nil && t.FineGrainedMutations == nil && t.PrivacyPolicy == nil && !t.MVChanged &&
-		len(t.Transactions) == 0 && len(t.GovernanceTags) == 0 && t.Embedding == nil && t.VectorIndex == nil
+		len(t.Transactions) == 0 && len(t.GovernanceTags) == 0 && t.Embedding == nil && t.VectorIndex == nil &&
+		t.Fingerprint == "" && t.Written == 0
 }
 
 // tableSettings are the settings of every table, by project, dataset and

@@ -204,6 +204,22 @@ func (b gkeBackend) PlaceNodes(ctx context.Context, kind, pool string, zones []s
 	return b.g.PlaceNodes(ctx, kind, pool, zones)
 }
 
+func (b gkeBackend) ConfigureNodes(ctx context.Context, kind, pool string, labels map[string]string, taints []gke.NodeTaint, apply bool) error {
+	ts := make([]cluster.NodeTaint, 0, len(taints))
+	for _, t := range taints {
+		ts = append(ts, cluster.NodeTaint{Key: t.Key, Value: t.Value, Effect: t.Effect})
+	}
+	return b.g.ConfigureNodes(ctx, kind, pool, labels, ts, apply)
+}
+
+func (b gkeBackend) ConfigureKubelet(ctx context.Context, kind, pool string, settings map[string]any) error {
+	return b.g.ConfigureKubelet(ctx, kind, pool, settings)
+}
+
+func (b gkeBackend) KeepEndpoint(ctx context.Context, kind string) error {
+	return b.g.KeepEndpoint(ctx, kind)
+}
+
 func (b gkeBackend) Delete(ctx context.Context, kind string) error { return b.g.Delete(ctx, kind) }
 
 func (b gkeBackend) FreeBytes() (uint64, error) { return b.g.FreeBytes() }

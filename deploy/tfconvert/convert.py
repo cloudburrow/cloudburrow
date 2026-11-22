@@ -1,21 +1,26 @@
 """CloudBurrow's TensorFlow SavedModel converter (#1775).
 
-convert: reads the SavedModel at /model and writes /out/model.tflite, the
-         TensorFlow Lite flatbuffer Google's TFLiteConverter makes of its
-         serving_default signature with the builtin operators alone, or
-         /out/error.json, {"kind": ..., "message": ...}, when it cannot:
+convert: reads the SavedModel at /model and writes /out/savedmodel (the
+         SavedModel with its columns' inputs, after the rewrites below),
+         /out/signature.json (its serving_default's ports) and
+         /out/model.tflite, the TensorFlow Lite flatbuffer Google's
+         TFLiteConverter makes of its serving_default signature with the
+         builtin operators alone, or /out/fallback.json, {"kind": "flex"
+         (a graph needs TensorFlow ops, Flex or SELECT_TF_OPS, that
+         TensorFlow Lite's builtins do not have) or "convert" (the
+         converter cannot lower it), "message": ...}, when it cannot: the
+         model then runs on TensorFlow (serve, below), as BigQuery runs it.
+         A model BigQuery refuses writes /out/error.json:
            "format": /model is not a SavedModel;
            "signature": it has no serving_default signature;
            "custom": its graph uses an op TensorFlow does not register
                      (a custom or tf.contrib op);
-           "flex": a graph needs TensorFlow ops (Flex, SELECT_TF_OPS) that
-                   TensorFlow Lite's builtins do not have;
            "ragged": a RaggedTensor input or output, or a ragged
                      tf.train.Example feature ("RaggedTensors aren't
                      supported");
            "sparse": a SparseTensor input of a rank other than 2 or a
                      SparseTensor output, which no BigQuery column fills;
-           "convert": any other converter failure.
+           "convert": a rewrite below that cannot be made.
 SparseTensor inputs (a serving_default input whose TensorInfo is
 coo_sparse, as tf.compat.v1.saved_model.predict_signature_def writes a
 SparseTensor) and VarLenFeature tf.train.Example features: "You can pass
@@ -77,24 +82,187 @@ def convert():
     elif sparse_in:
         src, sparse = sparse_rewrite(fn, sparse_in)
     src = lower_sparse(src)
-    conv = tf.lite.TFLiteConverter.from_saved_model(src, signature_keys=["serving_default"])
-    conv.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
+    # The SavedModel BigQuery's own runtime would run, with the column
+    # inputs the rewrites above give it: kept with the model, for the
+    # TensorFlow runtime (serve) when TensorFlow Lite cannot take it, and
+    # for ML.EXPLAIN_PREDICT.
+    export(src, sparse)
+    data, msg = None, None
     try:
-        data = conv.convert()
+        data = to_tflite(src)
     except Exception as e:  # noqa: BLE001
         msg = str(e).strip()
+        if any(m in msg for m in TENSOR_LIST_STATIC):
+            # A tf.while_loop that writes a TensorArray of a free batch
+            # (Keras's LSTM, GRU and SimpleRNN layers) lowers to builtins
+            # only when the batch is known. The front runs a TensorFlow Lite
+            # model as a batch of one (modeltflite.go), so fixing it at 1
+            # changes no answer.
+            try:
+                dst, shapes, fn1 = batch_of_one(src)
+                data1 = to_tflite(dst)
+                if same_answers(data1, shapes, fn1):
+                    data, msg = data1, None
+                else:
+                    msg = ("the model's tf.while_loop writes a TensorArray of a free shape, which TensorFlow Lite's converter lowers "
+                           "only when it is known, and fixing the batch at one changes its answers")
+            except Exception as e2:  # noqa: BLE001
+                msg = str(e2).strip()
+    if data is None:
+        # BigQuery runs a SavedModel with TensorFlow itself, so what
+        # TensorFlow Lite's builtins cannot take still runs: on the
+        # TensorFlow runtime (serve), from /out/savedmodel. fallback.json
+        # says why.
         lines = [l.strip() for l in msg.splitlines() if l.strip()]
         # The converter names the ops it has no builtin for on its
         # "Custom ops: ...", "Flex ops: ..." and "TF Select ops: ..." lines.
         named = [l for l in lines if l.startswith(("Custom ops:", "Flex ops:", "TF Select ops:"))]
         if named or "ERROR_NEEDS_FLEX_OPS" in msg or "ERROR_NEEDS_CUSTOM_OPS" in msg or "nor a flex op" in msg:
-            fail("flex", "some ops are not TensorFlow Lite builtins (" + "; ".join(named or ["see the converter's log"]) + ")")
-        errs = [l for l in lines if "error:" in l] or lines[:3]
-        fail("convert", " ".join(errs)[:4000])
+            why = {"kind": "flex", "message": "some ops are not TensorFlow Lite builtins (" + "; ".join(named or ["see the converter's log"]) + ")"}
+        else:
+            errs = [l for l in lines if "error:" in l] or lines[:3]
+            why = {"kind": "convert", "message": " ".join(errs)[:4000]}
+        with open("/out/fallback.json", "w") as f:
+            json.dump(why, f)
+        return
     if sparse:
         data = with_metadata(data, "cloudburrow_sparse_inputs", json.dumps(sparse, sort_keys=True).encode())
     with open("/out/model.tflite", "wb") as f:
         f.write(data)
+
+
+def export(src, sparse):
+    """Copies the SavedModel at src to /out/savedmodel and writes
+    /out/signature.json: its serving_default's inputs and outputs, each
+    {"name", "dtype" (TensorFlow's name), "shape" (-1 where free, null for
+    an unknown rank)}, and "sparse", the SparseTensor inputs' metadata."""
+    import shutil
+
+    import tensorflow as tf
+
+    shutil.copytree(src, "/out/savedmodel")
+    fn = tf.saved_model.load(src).signatures["serving_default"]
+
+    def port(name, spec):
+        dims = None if spec.shape.rank is None else [-1 if d is None else d for d in spec.shape.as_list()]
+        return {"name": name, "dtype": spec.dtype.name, "shape": dims}
+
+    sig = {"inputs": [port(k, v) for k, v in sorted(fn.structured_input_signature[1].items())],
+           "outputs": [port(k, v) for k, v in sorted(fn.structured_outputs.items())], "sparse": sparse}
+    with open("/out/signature.json", "w") as f:
+        json.dump(sig, f, sort_keys=True)
+
+
+def to_tflite(src):
+    """The TensorFlow Lite flatbuffer of src's serving_default, of
+    TensorFlow Lite's builtin operators alone."""
+    import tensorflow as tf
+
+    conv = tf.lite.TFLiteConverter.from_saved_model(src, signature_keys=["serving_default"])
+    conv.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
+    return conv.convert()
+
+
+# What TFLiteConverter says of a TensorList (a TensorArray) whose element
+# shape is not known, as a tf.while_loop over a free batch writes one.
+TENSOR_LIST_STATIC = ("requires element_shape to be static", "Lowering tensor list ops is failed")
+
+
+def batch_of_one(src):
+    """Writes the SavedModel whose serving_default is src's with every
+    input's free first dimension fixed at 1 and the free first dimension
+    of each TensorList's element shape (a TensorArray's, as Keras's
+    recurrent layers write [batch, units]) fixed at 1 to match. Answers
+    its path, the input shapes it fixed and src's own function."""
+    import shutil
+
+    import tensorflow as tf
+    from tensorflow.core.protobuf import saved_model_pb2
+    from tensorflow.python.framework import tensor_util
+
+    patched = "/tmp/batch1_src"
+    shutil.copytree(src, patched)
+    pb = os.path.join(patched, "saved_model.pb")
+    sm = saved_model_pb2.SavedModel()
+    with open(pb, "rb") as f:
+        sm.ParseFromString(f.read())
+    for mg in sm.meta_graphs:
+        for nodes in [mg.graph_def.node] + [f.node_def for f in mg.graph_def.library.function]:
+            byname = {n.name: n for n in nodes}
+            for n in nodes:
+                if n.op not in TENSOR_LIST_SHAPED or len(n.input) <= TENSOR_LIST_SHAPED[n.op]:
+                    continue
+                c = byname.get(n.input[TENSOR_LIST_SHAPED[n.op]].split(":")[0])
+                if c is None or c.op != "Const":
+                    continue
+                v = tensor_util.MakeNdarray(c.attr["value"].tensor)
+                if v.ndim == 1 and len(v) >= 2 and v[0] == -1 and (v[1:] >= 0).all():
+                    v = v.copy()
+                    v[0] = 1
+                    c.attr["value"].tensor.CopyFrom(tensor_util.make_tensor_proto(v))
+    with open(pb, "wb") as f:
+        f.write(sm.SerializeToString())
+
+    module = tf.Module()
+    # The module holds the loaded model, whose variables and tables its
+    # function reads: a loaded object nothing refers to goes with them.
+    module.src = tf.saved_model.load(patched)
+    fn = module.src.signatures["serving_default"]
+    specs, shapes = {}, {}
+    for k, sp in fn.structured_input_signature[1].items():
+        dims = sp.shape.as_list() if sp.shape.rank is not None else None
+        if dims and dims[0] is None:
+            dims[0] = 1
+        shapes[k] = dims
+        specs[k] = tf.TensorSpec(dims, sp.dtype, name=k)
+    module.serve = tf.function(lambda **kw: fn(**kw)).get_concrete_function(**specs)
+    dst = "/tmp/batch1_model"
+    tf.saved_model.save(module, dst, signatures={"serving_default": module.serve})
+    loaded = tf.saved_model.load(src)
+    LOADED.append(loaded)
+    return dst, shapes, loaded.signatures["serving_default"]
+
+
+LOADED = []
+
+# The TensorList operators with an element_shape input, and its index.
+TENSOR_LIST_SHAPED = {"TensorListReserve": 0, "TensorListFromTensor": 1, "TensorListStack": 1, "TensorListGetItem": 2,
+                      "TensorListConcatV2": 1, "TensorListGather": 2}
+
+
+def same_answers(data, shapes, fn):
+    """Whether the flatbuffer answers what fn (TensorFlow itself) does for
+    a batch of one of seeded inputs: what batch_of_one fixed must change
+    no answer, or the model is refused rather than answered wrongly."""
+    import numpy as np
+    import tensorflow as tf
+
+    rng = np.random.default_rng(1775)
+    specs = fn.structured_input_signature[1]
+    feed = {}
+    for k, sp in specs.items():
+        dims = [d if d is not None else 1 for d in (shapes[k] or [])]
+        if sp.dtype == tf.string:
+            feed[k] = np.full(dims, b"", dtype=object)
+        elif sp.dtype.is_floating:
+            feed[k] = rng.normal(size=dims).astype(sp.dtype.as_numpy_dtype)
+        elif sp.dtype == tf.bool:
+            feed[k] = rng.integers(0, 2, size=dims).astype(bool)
+        else:
+            feed[k] = rng.integers(0, 3, size=dims).astype(sp.dtype.as_numpy_dtype)
+    want = {k: np.asarray(v.numpy()) for k, v in fn(**{k: tf.constant(v) for k, v in feed.items()}).items()}
+    run = tf.lite.Interpreter(model_content=data).get_signature_runner("serving_default")
+    got = run(**feed)
+    for k, w in want.items():
+        g = np.asarray(got.get(k))
+        if g.shape != w.shape and g.size != w.size:
+            return False
+        if w.dtype.kind == "f":
+            if not np.allclose(g.reshape(w.shape), w, rtol=1e-4, atol=1e-5):
+                return False
+        elif not (g.reshape(w.shape) == w).all():
+            return False
+    return True
 
 
 def coo_sparse_ports():
@@ -460,5 +628,179 @@ def predict():
     json.dump({k: v.numpy().tolist() if v.dtype != tf.string else [s.decode() for s in v.numpy().ravel()] for k, v in out.items()}, sys.stdout)
 
 
+# serve: the TensorFlow runtime of an imported model TensorFlow Lite's
+# builtins cannot take, and of ML.EXPLAIN_PREDICT (#1775). A long-lived
+# process (internal/tfconvert's predictor, one per model, on the --internal
+# network): loads the SavedModel at /model once, prints {"ready": true},
+# then answers one JSON line on stdout per request line on stdin:
+#
+#   {"op": "predict", "rows": [{input: {"shape": [...], "values": [...]}}]}
+#     -> {"rows": [{output: {"shape": [...], "values": [...]}}]}
+#   {"op": "explain", "rows": [...], "output": name, "steps": n}
+#     -> {"rows": [{"outputs": {...}, "attributions": {input: a},
+#                   "prediction": p, "baseline": b, "index": i}]}
+#   any failure -> {"error": message}
+#
+# Rows whose inputs share their shapes run as one batch when every input's
+# first dimension is the free batch. A float that JSON has no number for
+# is written "NaN", "Infinity" or "-Infinity".
+
+def serve():
+    import math
+
+    import numpy as np
+    import tensorflow as tf
+
+    # The protocol is this process's stdout alone: whatever TensorFlow or
+    # Python writes to fd 1 goes to stderr.
+    proto = os.fdopen(os.dup(1), "w")
+    os.dup2(2, 1)
+    loaded = tf.saved_model.load("/model")
+    fn = loaded.signatures["serving_default"]
+    specs = fn.structured_input_signature[1]
+    batchable = all(sp.shape.rank and sp.shape.as_list()[0] is None for sp in specs.values())
+
+    def tensor(name, v):
+        sp = specs[name]
+        if sp.dtype == tf.string:
+            a = np.array([s.encode() for s in v["values"]], dtype=object).reshape(v["shape"])
+        else:
+            vals = [float(x) if isinstance(x, str) else x for x in v["values"]]
+            a = np.array(vals, dtype=sp.dtype.as_numpy_dtype).reshape(v["shape"])
+        return a
+
+    def number(x):
+        if isinstance(x, float) and not math.isfinite(x):
+            return "NaN" if math.isnan(x) else ("Infinity" if x > 0 else "-Infinity")
+        return x
+
+    def value(t):
+        a = np.asarray(t.numpy())
+        if a.dtype == object:
+            vals = [b.decode("utf-8", "replace") if isinstance(b, bytes) else str(b) for b in a.ravel()]
+        elif a.dtype.kind == "c":
+            raise ValueError("a complex output, which BigQuery ML does not support")
+        else:
+            vals = [number(x) for x in a.ravel().tolist()]
+        return {"shape": list(a.shape), "values": vals}
+
+    def run(feed):
+        return fn(**{k: tf.constant(v, dtype=specs[k].dtype) for k, v in feed.items()})
+
+    def groups(rows):
+        """[(row indexes, {input: stacked array})], batched where it can."""
+        arrays = [{k: tensor(k, r[k]) for k in specs} for r in rows]
+        if not batchable:
+            return [([i], a) for i, a in enumerate(arrays)]
+        by = {}
+        for i, a in enumerate(arrays):
+            by.setdefault(tuple((k, a[k].shape) for k in sorted(a)), []).append(i)
+        out = []
+        for idx in by.values():
+            for j in range(0, len(idx), 256):
+                part = idx[j:j + 256]
+                out.append((part, {k: np.concatenate([arrays[i][k] for i in part], axis=0) for k in specs}))
+        return out
+
+    def split(outs, n):
+        """Each of n rows' outputs of a batch, or None when an output's
+        first dimension is not the batch."""
+        res = [{} for _ in range(n)]
+        for k, t in outs.items():
+            if t.shape.rank == 0 or t.shape[0] != n:
+                return None
+            for i in range(n):
+                res[i][k] = value(t[i:i + 1])
+        return res
+
+    def predict(rows):
+        res = [None] * len(rows)
+        for idx, feed in groups(rows):
+            outs = split(run(feed), len(idx))
+            if outs is None:
+                if len(idx) > 1:
+                    # Not batched after all: one row at a time.
+                    for i in idx:
+                        res[i] = {k: value(t) for k, t in run({k: tensor(k, rows[i][k]) for k in specs}).items()}
+                    continue
+                outs = [{k: value(t) for k, t in run(feed).items()}]
+            for i, o in zip(idx, outs):
+                res[i] = o
+        return {"rows": res}
+
+    def explain(rows, output, steps):
+        """Integrated Gradients (TensorFlow's own tutorial: the trapezoidal
+        Riemann sum over steps intervals) from a baseline of zeros of each
+        floating-point input to the row's value, for the output's predicted
+        element: the row's one value, or its ARRAY's largest."""
+        floats = [k for k, sp in specs.items() if sp.dtype.is_floating]
+        res = []
+        alphas = np.linspace(0.0, 1.0, steps + 1)
+        for r in rows:
+            x = {k: tensor(k, r[k]) for k in specs}
+            outs = run(x)
+            if output not in outs:
+                raise ValueError("the model has no output %s" % output)
+            y = np.asarray(outs[output].numpy()).ravel()
+            if y.dtype.kind not in "fiub" or y.size == 0:
+                raise ValueError("the output %s is not a number ML.EXPLAIN_PREDICT can attribute" % output)
+            idx = int(np.argmax(y)) if y.size > 1 else 0
+
+            grads = {k: [] for k in floats}
+            if floats and batchable:
+                # Every step at once: the steps are the batch.
+                n = len(alphas)
+                feed = {k: tf.constant(np.concatenate([x[k]] * n, axis=0), dtype=specs[k].dtype) for k in specs}
+                for k in floats:
+                    feed[k] = tf.constant(np.concatenate([a * x[k] for a in alphas], axis=0), dtype=specs[k].dtype)
+                with tf.GradientTape() as tape:
+                    for k in floats:
+                        tape.watch(feed[k])
+                    o = tf.reduce_sum(tf.reshape(tf.cast(fn(**feed)[output], tf.float64), [n, -1])[:, idx])
+                g = tape.gradient(o, [feed[k] for k in floats])
+                for k, gk in zip(floats, g):
+                    whole = np.zeros((n,) + x[k].shape[1:], np.float64) if gk is None else np.asarray(gk.numpy(), np.float64)
+                    grads[k] = [whole[j:j + 1] for j in range(n)]
+            elif floats:
+                for a in alphas:
+                    feed = {k: tf.constant(x[k], dtype=specs[k].dtype) for k in specs}
+                    for k in floats:
+                        feed[k] = tf.constant(a * x[k], dtype=specs[k].dtype)
+                    with tf.GradientTape() as tape:
+                        for k in floats:
+                            tape.watch(feed[k])
+                        o = tf.reshape(tf.cast(fn(**feed)[output], tf.float64), [-1])[idx]
+                    g = tape.gradient(o, [feed[k] for k in floats])
+                    for k, gk in zip(floats, g):
+                        grads[k].append(np.zeros_like(x[k], dtype=np.float64) if gk is None else np.asarray(gk.numpy(), dtype=np.float64))
+            attr = {}
+            for k in floats:
+                gs = np.stack(grads[k])
+                avg = (gs[:-1] + gs[1:]).mean(axis=0) / 2.0
+                attr[k] = number(float((x[k].astype(np.float64) * avg).sum()))
+            base = {k: (np.zeros_like(v) if k in floats else v) for k, v in x.items()}
+            b = float(np.asarray(run(base)[output].numpy(), dtype=np.float64).ravel()[idx])
+            res.append({"outputs": {k: value(t) for k, t in outs.items()}, "attributions": attr,
+                        "prediction": number(float(y[idx])), "baseline": number(b), "index": idx})
+        return {"rows": res}
+
+    proto.write(json.dumps({"ready": True}) + "\n")
+    proto.flush()
+    for line in sys.stdin:
+        if not line.strip():
+            continue
+        try:
+            req = json.loads(line)
+            if req.get("op") == "explain":
+                ans = explain(req["rows"], req["output"], int(req.get("steps") or 15))
+            else:
+                ans = predict(req["rows"])
+        except Exception as e:  # noqa: BLE001 - TensorFlow's message is the answer
+            msg = (str(e).strip().splitlines() or [type(e).__name__])
+            ans = {"error": " ".join(l.strip() for l in msg if l.strip())[:4000]}
+        proto.write(json.dumps(ans, allow_nan=False) + "\n")
+        proto.flush()
+
+
 if __name__ == "__main__":
-    {"convert": convert, "predict": predict}[sys.argv[1] if len(sys.argv) > 1 else "convert"]()
+    {"convert": convert, "predict": predict, "serve": serve}[sys.argv[1] if len(sys.argv) > 1 else "convert"]()

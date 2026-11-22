@@ -605,6 +605,15 @@ func (s *Server) Model() string {
 	return s.gen.Model()
 }
 
+// Accelerator names where generation runs (ExecGenerator.Accelerator),
+// empty for a generator that does not say.
+func (s *Server) Accelerator() string {
+	if a, ok := s.gen.(interface{ Accelerator() string }); ok {
+		return a.Accelerator()
+	}
+	return ""
+}
+
 // serveCacheREST serves the cachedContents paths through their transcoder.
 func (s *Server) serveCacheREST(w http.ResponseWriter, r *http.Request) {
 	s.cacheREST().ServeHTTP(w, r)

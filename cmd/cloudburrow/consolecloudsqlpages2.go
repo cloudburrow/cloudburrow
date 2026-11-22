@@ -196,6 +196,16 @@ func sqlConnectionsSection(in *sqladminapi.DatabaseInstance, certs *console.Sect
 		console.Property{Label: "Public IP connectivity", Value: public},
 		console.Property{Label: "Private IP connectivity", Value: private},
 		console.Property{Label: "SSL mode", Value: sqlSSLModeLabel(cfg.SslMode)})
+	if cfg.PrivateNetwork != "" {
+		n := cfg.PrivateNetwork
+		summary = append(summary, console.Property{Label: "Network", Value: n[strings.LastIndex(n, "/")+1:]})
+		if cfg.AllocatedIpRange != "" {
+			summary = append(summary, console.Property{Label: "Allocated IP range", Value: cfg.AllocatedIpRange})
+		}
+	}
+	if in.PscServiceAttachmentLink != "" {
+		summary = append(summary, console.Property{Label: "Service attachment", Value: in.PscServiceAttachmentLink, Copy: "Copy"})
+	}
 	nets := console.Listing{Columns: []string{"Network", "Expires"}, NameColumn: "Name", Noun: "authorized networks",
 		Note: "Authorized networks are recorded and shown: every connection reaches the server through its local tunnel or the connectors, whatever its address."}
 	for i, n := range cfg.AuthorizedNetworks {

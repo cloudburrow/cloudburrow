@@ -91,7 +91,7 @@ func (s *Server) takePITRBase(name string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), startTimeout)
 	defer cancel()
-	t := DumpTarget{Instance: name, MySQL: spec.MySQL(), Created: true}
+	t := DumpTarget{Instance: name, MySQL: spec.MySQL(), Created: true, Version: spec.DatabaseVersion}
 	if err := p.PITRBase(ctx, t); err != nil {
 		return err
 	}
@@ -419,7 +419,7 @@ func (s *Server) sweepRetention() {
 	if s.writes != nil {
 		for name, c := range s.writes.byName {
 			if c.spec.PITREnabled() && c.state == "RUNNABLE" {
-				dues = append(dues, due{DumpTarget{Instance: name, MySQL: c.spec.MySQL(), Created: true}, s.retentionStart(c.spec)})
+				dues = append(dues, due{DumpTarget{Instance: name, MySQL: c.spec.MySQL(), Created: true, Version: c.spec.DatabaseVersion}, s.retentionStart(c.spec)})
 			}
 		}
 	}

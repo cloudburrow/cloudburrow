@@ -5,8 +5,12 @@ name: ONNX build
 # default build leaves out and no other job compiles. `make onnx-compile`
 # fetches the pinned libtokenizers.a (checked by SHA-256, Makefile) and
 # builds and vets the onnx-tagged CLI; no model is downloaded and ONNX
-# Runtime is not needed to build. On a push to main, nightly and by hand,
-# never on pull requests: report-red-runs.yml reports a red run.
+# Runtime is not needed to build. `make onnx-test` then runs the unit tests
+# of the packages the tag changes (Makefile's ONNX_PKGS) with -tags onnx,
+# on ONNX Runtime's pinned library (scripts/localai-models.sh
+# --onnx-runtime-only), so a test that holds only without the tag cannot
+# hide (speechconfig's TestUnserved, #2131). On a push to main, nightly and
+# by hand, never on pull requests: report-red-runs.yml reports a red run.
 on:
   push:
     branches: [main]
@@ -38,3 +42,7 @@ jobs:
         run: make onnx-compile
       - name: The binary runs
         run: ./bin/cloudburrow-onnx version
+      - name: Fetch and check ONNX Runtime
+        run: scripts/localai-models.sh --onnx-runtime-only "$RUNNER_TEMP/onnxruntime" | tee -a "$GITHUB_ENV"
+      - name: Unit tests of the onnx-tagged packages
+        run: make onnx-test

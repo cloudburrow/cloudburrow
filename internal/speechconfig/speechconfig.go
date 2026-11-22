@@ -37,6 +37,17 @@ type Options struct {
 	// ProfanityFilter, SpokenPunctuation and SpokenEmojis are the
 	// features of those names, applied to each final transcript (Format).
 	ProfanityFilter, SpokenPunctuation, SpokenEmojis bool
+	// AutomaticPunctuation is features.enableAutomaticPunctuation:
+	// without it, a model that does not punctuate by itself
+	// (PunctuatesByDefault) answers with the punctuation removed.
+	AutomaticPunctuation bool
+	// Diarization is a features.diarizationConfig, served by
+	// internal/speaker in the onnx build and UNIMPLEMENTED (Unserved)
+	// without it, where the table allows it. MinSpeakers and MaxSpeakers
+	// bound the speakers found, 0 leaving them free: v1 sets them from its
+	// min_speaker_count and max_speaker_count; v2's are not used.
+	Diarization              bool
+	MinSpeakers, MaxSpeakers int
 }
 
 // Encodings are ExplicitDecodingConfig's AudioEncoding values, true for
@@ -58,6 +69,9 @@ type Config struct {
 	Options
 	// Model is the recognition model asked for.
 	Model string
+	// Codes are languageCodes as given ("auto" included), checked
+	// against the supported languages table (CheckV2).
+	Codes []string
 	// Adaptation is the config's SpeechAdaptation in JSON, nil for none:
 	// the Speech-to-Text front resolves its phrase sets and custom
 	// classes and biases whisper with them (#1930).
@@ -72,6 +86,9 @@ type Config struct {
 	// Denoise is denoiserConfig.denoiseAudio: the audio is denoised
 	// before it is transcribed (internal/speech's Denoise).
 	Denoise bool
+	// SNRThreshold is denoiserConfig.snrThreshold: windows of a lower
+	// signal-to-noise ratio are silenced (internal/speech's FilterSNR).
+	SNRThreshold float64
 	// TranslateTo is translationConfig.targetLanguage, "" for none: each
 	// final transcript is translated to it with the served Translation
 	// API's model.
@@ -84,10 +101,14 @@ type Candidate struct {
 	Whisper string // whisper's code for it
 }
 
-// Format applies the config's spoken punctuation and emojis, profanity
+// Format removes the punctuation local whisper.cpp writes when the config
+// does not ask for it (Punctuated), then applies the config's spoken punctuation and emojis, profanity
 // filter and transcriptNormalization, in that order, to a final transcript
 // recognised in the language code.
 func (c Config) Format(text, code string) string {
+	if !c.Punctuated() {
+		text = StripPunctuation(text)
+	}
 	if c.SpokenPunctuation {
 		text = SpokenPunctuation(text, code)
 	}
@@ -171,7 +192,7 @@ func Parse(raw []byte) (c Config, code int, err error) {
 	norm, _ := json.Marshal(camelKeys(generic))
 	var rc recognitionConfig
 	_ = json.Unmarshal(norm, &rc)
-	c = Config{Decoding: d, Language: lang, Options: opt, Model: rc.Model}
+	c = Config{Decoding: d, Language: lang, Options: opt, Model: rc.Model, Codes: rc.LanguageCodes}
 	if rc.TranscriptNormalization != nil {
 		c.Normalization = rc.TranscriptNormalization.Entries
 	}
@@ -190,7 +211,7 @@ func Parse(raw []byte) (c Config, code int, err error) {
 	if len(rc.DenoiserConfig) > 0 && string(rc.DenoiserConfig) != "null" {
 		var dc denoiserConfig
 		_ = json.Unmarshal(rc.DenoiserConfig, &dc)
-		c.Denoise = dc.DenoiseAudio
+		c.Denoise, c.SNRThreshold = dc.DenoiseAudio, dc.SnrThreshold
 	}
 	if len(rc.TranslationConfig) > 0 && string(rc.TranslationConfig) != "null" {
 		var tc struct {
@@ -397,16 +418,31 @@ func parse(raw []byte) (Decoding, string, Options, int, error) {
 	}
 	if f := c.Features; f != nil {
 		switch {
-		case f.DiarizationConfig != nil:
-			return unimpl("features.diarizationConfig")
 		case f.MultiChannelMode != "" && f.MultiChannelMode != "MULTI_CHANNEL_MODE_UNSPECIFIED" && f.MultiChannelMode != "SEPARATE_RECOGNITION_PER_CHANNEL":
 			return d, "", opt, 400, fmt.Errorf("invalid features.multiChannelMode %q", f.MultiChannelMode)
 		case f.MaxAlternatives < 0 || f.MaxAlternatives > 30:
 			return d, "", opt, 400, fmt.Errorf("features.maxAlternatives %d is out of range: valid values are 0-30", f.MaxAlternatives)
 		}
+		// v2's minSpeakerCount and maxSpeakerCount: "The system
+		// automatically determines the number of speakers. This value is
+		// not currently used" (SpeakerDiarizationConfig, v2 reference, read
+		// 2026-11-21), so they are type-checked and ignored; v1, whose
+		// reference does use them, sets MinSpeakers and MaxSpeakers itself.
+		if len(f.DiarizationConfig) > 0 && string(f.DiarizationConfig) != "null" {
+			var dz struct {
+				Min      int32 `json:"minSpeakerCount"`
+				Max      int32 `json:"maxSpeakerCount"`
+				MinSnake int32 `json:"min_speaker_count"`
+				MaxSnake int32 `json:"max_speaker_count"`
+			}
+			if err := json.Unmarshal(f.DiarizationConfig, &dz); err != nil {
+				return d, "", opt, 400, fmt.Errorf("invalid features.diarizationConfig: %v", err)
+			}
+		}
 		opt = Options{Words: f.EnableWordTimeOffsets || f.EnableWordConfidence, WordOffsets: f.EnableWordTimeOffsets, WordConfidence: f.EnableWordConfidence,
 			PerChannel:      f.MultiChannelMode == "SEPARATE_RECOGNITION_PER_CHANNEL",
-			ProfanityFilter: f.ProfanityFilter, SpokenPunctuation: f.EnableSpokenPunctuation, SpokenEmojis: f.EnableSpokenEmojis}
+			ProfanityFilter: f.ProfanityFilter, SpokenPunctuation: f.EnableSpokenPunctuation, SpokenEmojis: f.EnableSpokenEmojis,
+			AutomaticPunctuation: f.EnableAutomaticPunctuation, Diarization: f.DiarizationConfig != nil && string(f.DiarizationConfig) != "null"}
 	}
 	if e := c.ExplicitDecodingConfig; e != nil {
 		served, known := Encodings[e.Encoding]

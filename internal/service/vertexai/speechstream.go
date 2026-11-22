@@ -82,6 +82,12 @@ type streamEvent struct {
 	// segs are the utterance's segments, their times in the stream.
 	segs     []speech.Segment
 	language string
+	// samples are, on a final result, the stream's audio up to offset
+	// (v1's diarization labels every word said so far).
+	samples []float32
+	// channel is the result's or event's 1-based channel when the config
+	// recognises each channel on its own (cfg.PerChannel), else 0.
+	channel int
 }
 
 // streamSettings are a stream's recognition and endpointing settings.
@@ -162,15 +168,53 @@ func runStream(ctx context.Context, st streamSettings, recv func() ([]byte, erro
 			audio.add(b)
 		}
 	}()
-	s := &streamer{st: st, emit: emit, ctx: ctx}
+	// One streamer, or with cfg.PerChannel one a channel, made once the
+	// audio first decodes (a WAV or FLAC header names the channels).
+	var streamers []*streamer
+	if !st.cfg.PerChannel {
+		streamers = []*streamer{{st: st, emit: emit, ctx: ctx}}
+	}
+	var finished []bool
 	for {
 		data, closed, err := audio.snapshot()
 		if err != nil {
 			return err
 		}
-		done, err := s.step(data, closed)
+		chans, done, err := streamDecode(st.cfg, data, closed)
 		if err != nil || done {
 			return err
+		}
+		if streamers == nil && chans != nil {
+			for c := range chans {
+				tag := c + 1
+				streamers = append(streamers, &streamer{st: st, ctx: ctx, emit: func(ev streamEvent) error {
+					ev.channel = tag
+					return emit(ev)
+				}})
+			}
+		}
+		if finished == nil && streamers != nil {
+			finished = make([]bool, len(streamers))
+		}
+		left := 0
+		for i, s := range streamers {
+			if finished[i] {
+				continue
+			}
+			var samples []float32
+			if i < len(chans) {
+				samples = chans[i]
+			}
+			done, err := s.step(samples, closed)
+			if err != nil {
+				return err
+			}
+			if finished[i] = done; !done {
+				left++
+			}
+		}
+		if streamers != nil && left == 0 || streamers == nil && closed {
+			return nil
 		}
 		select {
 		case <-audio.wake:
@@ -197,23 +241,41 @@ type streamer struct {
 	language   string
 }
 
-// step reads the audio received so far; done ends the stream.
-func (s *streamer) step(data []byte, closed bool) (bool, error) {
-	var samples []float32
-	if len(data) > 0 {
-		var err error
-		samples, err = speech.DecodeMax(s.st.cfg.Decoding, data, int(streamMaxAudio/time.Second)+5)
-		switch {
-		case errors.Is(err, speech.ErrTooLong):
-			return true, streamTooLong()
-		case errors.Is(err, speech.ErrUnsupported):
-			return true, apierror.Unimplemented("Not implemented here: %v", err)
-		case err != nil && closed:
-			return true, apierror.InvalidArgument("Audio data does not appear to be in a supported encoding: %v", err)
-		case err != nil:
-			return false, nil // a container not yet complete enough
-		}
+// streamDecode decodes the audio received so far: its first channel, or
+// with cfg.PerChannel each channel. No channels and not done is a
+// container not yet complete enough, or no audio yet.
+func streamDecode(cfg speechconfig.Config, data []byte, closed bool) ([][]float32, bool, error) {
+	if len(data) == 0 {
+		return nil, false, nil
 	}
+	var (
+		chans [][]float32
+		err   error
+	)
+	limit := int(streamMaxAudio/time.Second) + 5
+	if cfg.PerChannel {
+		chans, err = speech.DecodeChannelsMax(cfg.Decoding, data, limit)
+	} else {
+		var samples []float32
+		samples, err = speech.DecodeMax(cfg.Decoding, data, limit)
+		chans = [][]float32{samples}
+	}
+	switch {
+	case errors.Is(err, speech.ErrTooLong):
+		return nil, true, streamTooLong()
+	case errors.Is(err, speech.ErrUnsupported):
+		return nil, true, apierror.Unimplemented("Not implemented here: %v", err)
+	case err != nil && closed:
+		return nil, true, apierror.InvalidArgument("Audio data does not appear to be in a supported encoding: %v", err)
+	case err != nil:
+		return nil, false, nil
+	}
+	return chans, false, nil
+}
+
+// step reads the samples of its channel received so far; done ends its
+// recognition.
+func (s *streamer) step(samples []float32, closed bool) (bool, error) {
 	if samplesDur(len(samples)) > streamMaxAudio {
 		return true, streamTooLong()
 	}
@@ -302,7 +364,7 @@ func (s *streamer) final(samples []float32, end int) error {
 		return err
 	}
 	normalize(segs, s.st.cfg, s.language) // final results only: interims are not stable
-	return s.emit(streamEvent{kind: evResult, final: true, offset: samplesDur(end), segs: segs, language: s.language})
+	return s.emit(streamEvent{kind: evResult, final: true, offset: samplesDur(end), segs: segs, language: s.language, samples: samples[:end]})
 }
 
 func (s *streamer) transcribe(samples []float32, start, end int) ([]speech.Segment, error) {

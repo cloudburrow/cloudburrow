@@ -61,7 +61,7 @@ func studioAsset(t *testing.T, project, display string) (kind, name, parent stri
 // TestDataformBigQueryStudioCodeAssetsThroughThePage (#2094), in a shard whose
 // instance serves Dataform beside BigQuery. From Studio's Home: a notebook
 // (Create new > Notebook, + SQL, Run cell against BigQuery, a Python cell
-// refused for want of a runtime, Save, Version history), a data canvas
+// kept, Save, Version history), a data canvas
 // (Search, Add to canvas, Join, a SQL node's Run, Query these results,
 // Visualize, Ask in natural language through the local model or its
 // reason, Save), a saved query kept in Dataform (Save query, Version
@@ -120,10 +120,10 @@ func TestDataformBigQueryStudioCodeAssetsThroughThePage(t *testing.T) {
 	p.setField(".bq-nb-cell:last-child .bq-nb-source", "%%bigquery\nSELECT 41 + 1 AS answer")
 	p.clickText(".bq-nb-cell:last-child button", "Run cell")
 	p.waitFor(`[...document.querySelectorAll(".bq-nb-cell:last-child .bq-nb-table td")].some((c) => c.textContent === "42")`)
+	// A Python cell is kept (it runs on a connected runtime:
+	// TestBigQueryStudioNotebookRuntimeThroughThePage).
 	p.clickText(".bq-notebook .bq-toolbar button", "+ Code")
 	p.setField(".bq-nb-cell:last-child .bq-nb-source", "print('hi')")
-	p.clickText(".bq-nb-cell:last-child button", "Run cell")
-	p.waitFor(`document.querySelector(".bq-nb-cell:last-child .bq-nb-output").textContent.includes("Colab Enterprise")`)
 	p.clickText(".bq-notebook .bq-toolbar button", "Save")
 	p.waitFor(`document.querySelector("#bq-asset-name") !== null`)
 	p.setField("#bq-asset-name", nbName)
@@ -299,7 +299,7 @@ func TestDataformBigQueryStudioCodeAssetsThroughThePage(t *testing.T) {
 	// The BigQuery notebook template.
 	p.clickText(".bq-tabs .tab", "Home")
 	p.clickText(".bq-home-templates button", "Notebook: BigQuery template")
-	p.waitFor(`document.querySelectorAll(".bq-nb-cell").length === 3`)
+	p.waitFor(`document.querySelectorAll(".bq-nb-cell").length === 4`)
 
 	// The Dataform pages: Folders, Settings, a repository's Code and
 	// Permissions.

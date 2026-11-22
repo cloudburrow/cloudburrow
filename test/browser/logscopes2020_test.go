@@ -48,14 +48,14 @@ func TestLoggingLogScopesTabAndExplorer(t *testing.T) {
 	p.waitFor(`document.querySelector("#view .page-tabs") !== null`)
 	var got string
 	p.eval(tabs, &got)
-	if got != "Settings*|Log Scopes|Trace Scopes" {
+	if got != "Settings*|Log Scopes|Trace Scopes|Observability Settings|Observability Buckets" {
 		t.Errorf("Settings' tabs = %q", got)
 	}
 	p.clickText("#view .page-tabs a", "Log Scopes")
 	row := fmt.Sprintf(`tr[aria-label=%q]`, "Inspect "+scope)
 	p.waitFor(fmt.Sprintf(`location.pathname === "/logs/log-scopes" && document.querySelector(%q) !== null`, row))
 	p.eval(tabs, &got)
-	if got != "Settings|Log Scopes*|Trace Scopes" {
+	if got != "Settings|Log Scopes*|Trace Scopes|Observability Settings|Observability Buckets" {
 		t.Errorf("on Log Scopes, the tabs = %q", got)
 	}
 	var current string

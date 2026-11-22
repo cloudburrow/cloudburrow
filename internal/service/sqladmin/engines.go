@@ -53,6 +53,18 @@ type Postgres struct {
 	// LogKey names the server it reads, Name when "".
 	SignInLog SignInLog
 	LogKey    string
+	// PoolerHostAddr, when set, is the host address of the instance's
+	// managed connection pooler, "" while it has none (#2141).
+	PoolerHostAddr func() string
+}
+
+// PoolerAddr is the address of the instance's managed connection pooler,
+// which the connectors reach on 3307 when it pools connections, or "".
+func (p *Postgres) PoolerAddr() string {
+	if p.PoolerHostAddr == nil {
+		return ""
+	}
+	return p.PoolerHostAddr()
 }
 
 func (p *Postgres) Instance() string        { return p.Name }
@@ -499,7 +511,7 @@ func (m *MySQL) exec(ctx context.Context, stmts ...string) error {
 	}
 	defer db.Close()
 	for _, s := range stmts {
-		if _, err := db.ExecContext(ctx, s); err != nil {
+		if _, err := db.ExecContext(ctx, MySQLDialect(m.Version, s)); err != nil {
 			return myError(err)
 		}
 	}
@@ -524,7 +536,7 @@ func (m *MySQL) execUnlogged(ctx context.Context, stmts ...string) error {
 	}
 	defer conn.Close()
 	for _, s := range append([]string{"SET SESSION sql_log_bin = 0"}, stmts...) {
-		if _, err := conn.ExecContext(ctx, s); err != nil {
+		if _, err := conn.ExecContext(ctx, MySQLDialect(m.Version, s)); err != nil {
 			return myError(err)
 		}
 	}

@@ -226,6 +226,9 @@ func (s *Server) createBlueGreen(r *http.Request, base, project, location string
 	if err := limitedUnimplemented(bc.spec.DatabaseVersion, "a blue-green deployment"); err != nil {
 		return nil, err
 	}
+	if bc.spec.DatabaseVersion == "MYSQL_5_6" {
+		return nil, mysql56BlueGreenErr(blue)
+	}
 	target := ""
 	if body.RequestedConfig != nil {
 		target = body.RequestedConfig.DatabaseVersion
@@ -323,8 +326,11 @@ func (s *Server) createBlueGreen(r *http.Request, base, project, location string
 		if s.engineLocked(green) != nil {
 			err = Errorf(http.StatusConflict, "The Cloud SQL instance already exists.")
 		} else {
-			s.writes.byName[green] = &created{spec: gspec, engine: s.writes.prov.Engine(gspec), state: "PENDING_CREATE"}
-			err = s.saveLocked()
+			gspec.PrivateIP = ""
+			if err = s.assignNetworkingLocked(&gspec); err == nil {
+				s.writes.byName[green] = &created{spec: gspec, engine: s.writes.prov.Engine(gspec), state: "PENDING_CREATE"}
+				err = s.saveLocked()
+			}
 		}
 		s.emu.Unlock()
 	}

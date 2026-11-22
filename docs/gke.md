@@ -13,6 +13,10 @@ The instance already runs on kind and pins its node image (`dependencies.json`),
 | Standard cluster | kind control plane, tainted `node-role.kubernetes.io/control-plane:NoSchedule`, plus one kind node per node pool node, labelled `cloud.google.com/gke-nodepool=POOL` |
 | Autopilot cluster | one schedulable kind node; node pools are Google's to manage, so their changes are refused |
 | Regional cluster | three zones (`REGION-a`, `-b`, `-c`): `initial_node_count` nodes per zone |
+| Zones (`locations`, `--node-locations`) | each node is labelled `topology.kubernetes.io/zone` and `region` when it joins; a new node goes to the pool's zone with the fewest nodes and keeps it; removing a zone (`SetLocations`, `UpdateNodePool` `locations`) deletes that zone's nodes; a pool may have zones of its own in the cluster's region |
+| Node labels and taints (`nodeConfig.labels`, `taints`, `--node-labels`, `--node-taints`) | set on every node of the pool, which registers with them; an update replaces them on the nodes it has |
+| Machine type, boot disk (`machineType`, `diskType`, `diskSizeGb`, `--machine-type`) | recorded, and each node labelled `node.kubernetes.io/instance-type` and `cloud.google.com/gke-boot-disk`; a node has this machine's CPU and memory; a change re-creates the nodes with the pool's upgrade strategy |
+| Kubelet configuration (`kubeletConfig`, `--system-config-from-file`) | the nodes' kubelets run it (their `/configz` shows it); a change re-creates the nodes with the pool's upgrade strategy, as GKE's standard strategy does |
 | `endpoint` | `127.0.0.1:PORT`, the kind API server (Google's is a bare IP on 443) |
 | `masterAuth.clusterCaCertificate` | kind's cluster CA |
 | `masterAuth.clientCertificate`/`clientKey` | kind's admin certificate, only with `clientCertificateConfig.issueClientCertificate` (`--issue-client-certificate`) |
@@ -76,4 +80,4 @@ An ephemeral instance deletes its clusters when it stops; a persistent one keeps
 
 ## Not yet
 
-Node pool autoscaling, choosing zones, rolling back a node pool upgrade, IP rotation and network policies answer 501. Node pool Kubernetes labels and taints, machine type changes and disk size changes answer 501 (`UpdateNodePool` takes the image type and resource labels).
+A local node has this machine's CPU and memory whatever its pool's machine type (a machine type change re-creates the nodes, labelled with the new type). The remaining differences (a rollback-safe upgrade cannot go back a minor version, the support end dates, monitoring components other than system components, the log forwarder running in the CLI) are listed in [docs/compatibility.md](compatibility.md#kubernetes-engine-api--googlecontainerv1).

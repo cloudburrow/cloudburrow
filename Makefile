@@ -31,10 +31,17 @@ help:
 	@grep -E '^## [a-z-]+:' $(MAKEFILE_LIST) | sed 's/## /  /' | sort
 
 ## storage-binaries: Cross-build the Linux storage server the CLI embeds (#514)
+# Reproducibly (#2152): the storage image's tag is the binary's content
+# hash, so the same sources must give the same bytes whatever the commit,
+# worktree or time. -buildvcs=false drops the commit and its time, and an
+# empty build ID drops the hash of the flags, which held the build date: with
+# them every `make build` gave `up` a new 113 MB image to build. The storage
+# server does not link internal/version, so it loses no version string.
+STORAGE_LDFLAGS := -s -w -buildid=
 .PHONY: storage-binaries
 storage-binaries:
 	for arch in amd64 arm64; do \
-		CGO_ENABLED=0 GOOS=linux GOARCH=$$arch go build -trimpath -ldflags "$(LDFLAGS)" \
+		CGO_ENABLED=0 GOOS=linux GOARCH=$$arch go build -trimpath -buildvcs=false -ldflags "$(STORAGE_LDFLAGS)" \
 			-o internal/storageimage/bin/cloudburrow-storage-linux-$$arch ./cmd/cloudburrow-storage || exit 1; \
 	done
 
@@ -123,6 +130,14 @@ TOKENIZERS_LIB_DIR ?= $(BIN_DIR)/tokenizers/$(TOKENIZERS_VERSION)/$(TOKENIZERS_P
 build-onnx: storage-binaries bigquery-binaries onnx-compile
 	@echo "built $(BIN_DIR)/$(BINARY)-onnx ($(VERSION)); run it with ONNXRUNTIME_LIB=/path/to/libonnxruntime"
 
+# ONNX_PKGS are the packages the onnx tag changes: those with a file under
+# an onnx build constraint, and the internal/ packages importing one, whose
+# behaviour follows it (speechconfig's Unserved follows speaker.Available).
+# test/repo's TestONNXPackages keeps the list complete.
+ONNX_PKGS := ./internal/admin/ ./internal/bigqueryfront/ ./internal/console/ ./internal/embedding/ \
+	./internal/localai/ ./internal/onnxmodel/... ./internal/onnxrunner/ ./internal/service/vertexai/ \
+	./internal/speaker/ ./internal/speech/ ./internal/speechconfig/ ./internal/videodecode/
+
 ## onnx-compile: Build and vet the onnx-tagged CLI alone, without making the embedded binaries (CI's onnx job)
 .PHONY: onnx-compile
 onnx-compile: $(TOKENIZERS_LIB_DIR)/libtokenizers.a
@@ -130,7 +145,14 @@ onnx-compile: $(TOKENIZERS_LIB_DIR)/libtokenizers.a
 	CGO_ENABLED=1 CGO_LDFLAGS="-L$(abspath $(TOKENIZERS_LIB_DIR)) $(CGO_LDFLAGS)" \
 		go build -tags onnx -trimpath -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/$(BINARY)-onnx ./cmd/$(BINARY)
 	CGO_ENABLED=1 CGO_LDFLAGS="-L$(abspath $(TOKENIZERS_LIB_DIR)) $(CGO_LDFLAGS)" \
-		go vet -tags onnx ./internal/embedding/ ./internal/localai/ ./internal/onnxmodel/... ./internal/onnxrunner/ ./internal/bigqueryfront/ ./cmd/$(BINARY)/
+		go vet -tags onnx $(ONNX_PKGS) ./cmd/$(BINARY)/
+
+## onnx-test: Run the unit tests of ONNX_PKGS with -tags onnx (CI's onnx job); needs ONNXRUNTIME_LIB (scripts/localai-models.sh --onnx-runtime-only on Linux amd64, Homebrew's onnxruntime on macOS)
+.PHONY: onnx-test
+onnx-test: $(TOKENIZERS_LIB_DIR)/libtokenizers.a
+	@test -n "$(ONNXRUNTIME_LIB)" || { echo "onnx-test: set ONNXRUNTIME_LIB to libonnxruntime"; exit 1; }
+	CGO_ENABLED=1 CGO_LDFLAGS="-L$(abspath $(TOKENIZERS_LIB_DIR)) $(CGO_LDFLAGS)" \
+		go test -tags onnx -p 4 $(ONNX_PKGS)
 
 $(BIN_DIR)/tokenizers/$(TOKENIZERS_VERSION)/%/libtokenizers.a:
 	@test -n "$(TOKENIZERS_ASSET_$*)" -a -n "$(TOKENIZERS_SHA256_$*)" || { echo "build-onnx: no pinned libtokenizers for $$(go env GOOS)/$$(go env GOARCH); set TOKENIZERS_LIB_DIR to a directory holding libtokenizers.a"; exit 1; }

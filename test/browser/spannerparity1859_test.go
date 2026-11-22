@@ -21,7 +21,7 @@ import (
 // from a DDL template. The database's menu is Google's, with no separate
 // Query tab; Spanner Studio's Explorer lists the table, Run updates the
 // schema and inserts a row after a confirmation, a query's Results hold
-// the row, and Explain says the emulator gives no plan. The table's Data
+// the row, and the Explanation tab has its plan. The table's Data
 // tab inserts, edits and deletes a row, each read back through the console
 // API.
 func TestSpannerConsoleParityPages(t *testing.T) {
@@ -134,14 +134,11 @@ func TestSpannerConsoleParityPages(t *testing.T) {
 	}
 	runSQL("INSERT INTO Singers (SingerId, FirstName, LastName) VALUES (1, 'Ada', 'Lovelace')", true, "1 row(s) affected")
 	runSQL("SELECT SingerId, FirstName FROM Singers", false, "Ada")
-	// Run is WITH_STATS mode (#2017): the Explanation tab's Query summary
-	// has the emulator's statistics, and no plan; Explain shows the front's
-	// refusal of query mode PLAN.
+	// Run is PROFILE mode (#2029): the Explanation tab has the plan and the
+	// Query summary (TestSpannerQueryPlanView draws the plan in detail).
 	p.run(chromedp.Click(chromedp.CSS(`#spanner-tab-explanation`)))
 	p.waitFor(`(document.querySelector("#spanner-stat-rows-returned") || {}).textContent === "1"`)
-	p.waitFor(`(document.querySelector("#spanner-plan-note") || {}).textContent?.includes("Not available locally")`)
-	p.run(chromedp.Click(chromedp.CSS(`#spanner-explain`)))
-	p.waitFor(`(document.querySelector("#spanner-plan-note") || {}).textContent?.includes("Query mode PLAN is not served here")`)
+	p.waitFor(`[...document.querySelectorAll(".spanner-plan-card")].some((c) => c.textContent.includes("Table scan"))`)
 
 	// The table's Data tab.
 	p.navigate("/spanner/" + inst + "/gdb/Singers" + q + "&tab=data")

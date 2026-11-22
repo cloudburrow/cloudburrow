@@ -29,6 +29,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 )
 
 // DefaultBase is Hugging Face's public endpoint.
@@ -325,10 +326,22 @@ func (m *Manager) download(ctx context.Context, st *State) {
 }
 
 func (m *Manager) fetch(ctx context.Context, st *State, dir string, f File) error {
+	return m.fetchWith(ctx, st, dir, f, m.token())
+}
+
+// fetchWith downloads one file with token (none when empty).
+func (m *Manager) fetchWith(ctx context.Context, st *State, dir string, f File, token string) error {
 	u := m.base() + "/" + st.ID + "/resolve/" + st.Revision + "/" + (&url.URL{Path: f.Path}).EscapedPath()
-	resp, err := m.get(ctx, u, true)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return err
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := m.client().Do(req)
+	if err != nil {
+		return fmt.Errorf("fetch %s: %s", f.Path, Scrub(err.Error(), token))
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -375,6 +388,81 @@ func (m *Manager) fetch(ctx context.Context, st *State, dir string, f File) erro
 		return fmt.Errorf("%s does not match its SHA-256 on Hugging Face", f.Path)
 	}
 	return out.Close()
+}
+
+// FetchFiles downloads files of model id at revision into dir, each
+// checked against its size and SHA-256, for a deployment that runs on the
+// host (#2155): into dir.partial, renamed to dir once every file is there,
+// so dir is complete or absent. token, a gated model's, is sent to the Hub
+// and nowhere else; empty, the instance's HF_TOKEN is used. progress, when
+// set, is told the bytes fetched so far, about once a second. A download
+// must leave the free-disk floor.
+func (m *Manager) FetchFiles(ctx context.Context, id, revision string, files []File, dir, token string,
+	progress func(done, total int64)) error {
+	if err := CheckID(id); err != nil {
+		return err
+	}
+	if !revisionPattern.MatchString(revision) {
+		return fmt.Errorf("%w: revision %q of %s", ErrNotFound, revision, id)
+	}
+	var total int64
+	for _, f := range files {
+		if !safePath(f.Path) {
+			return fmt.Errorf("%s: unsafe path %q", id, f.Path)
+		}
+		total += f.Size
+	}
+	if token == "" {
+		token = m.token()
+	}
+	parent := filepath.Dir(dir)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		return err
+	}
+	if free, err := m.free(parent); err == nil && free-total < m.minFree() {
+		return fmt.Errorf("%w: %s needs %s, and %s is free; a download must leave %s free", ErrDiskSpace, id,
+			gb(total), gb(free), gb(m.minFree()))
+	}
+	tmp := dir + ".partial"
+	if err := os.RemoveAll(tmp); err != nil {
+		return err
+	}
+	st := &State{Info: Info{ID: id, Revision: revision, Files: files, Bytes: total}}
+	stop := make(chan struct{})
+	if progress != nil {
+		go func() {
+			t := time.NewTicker(time.Second)
+			defer t.Stop()
+			for {
+				select {
+				case <-stop:
+					return
+				case <-t.C:
+					m.mu.Lock()
+					n := st.Downloaded
+					m.mu.Unlock()
+					progress(n, total)
+				}
+			}
+		}()
+	}
+	err := func() error {
+		for _, f := range files {
+			if err := m.fetchWith(ctx, st, tmp, f, token); err != nil {
+				return err
+			}
+		}
+		if err := os.RemoveAll(dir); err != nil {
+			return err
+		}
+		return os.Rename(tmp, dir)
+	}()
+	close(stop)
+	if err != nil {
+		_ = os.RemoveAll(tmp)
+		return errors.New(Scrub(err.Error(), token))
+	}
+	return nil
 }
 
 // Cancel stops a download.

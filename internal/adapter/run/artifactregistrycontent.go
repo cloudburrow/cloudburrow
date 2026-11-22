@@ -792,6 +792,10 @@ func repoFiles(st *registry.Store, repoName string) []*arpb.File {
 			}
 		}
 	}
+	// And what UploadFile stored, which no manifest names yet.
+	for _, f := range repoFilesOf(repoName) {
+		add(f.Digest, f.Size, "", f.Uploaded)
+	}
 	sort.Strings(order)
 	out := make([]*arpb.File, len(order))
 	for i, d := range order {

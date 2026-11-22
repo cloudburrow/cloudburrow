@@ -3,14 +3,17 @@ package logging
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"google.golang.org/genproto/googleapis/api/annotations"
 	"google.golang.org/grpc"
 
+	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
 )
 
@@ -59,7 +62,7 @@ func NewRESTHandler(register func(grpc.ServiceRegistrar)) http.Handler {
 			return
 		}
 		if settingsPathRe.MatchString(r.URL.Path) && (r.Method == http.MethodGet || r.Method == http.MethodPatch) {
-			serveSettingsJSON(t, w, r)
+			serveSettingsJSON(rec.admin, t, w, r)
 			return
 		}
 		if serveSinkJSON(rec.admin, t, w, r) { // interceptChildren, intercept.go
@@ -83,19 +86,115 @@ var settingsPathRe = regexp.MustCompile(`^/v2/(projects|organizations|folders|bi
 // It is the container's Log Router account, kmsServiceAccountId's
 // (UNVERIFIED: that Google names the same account in both).
 // Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/logging/docs/reference/v2/rest/v2/Settings
-func serveSettingsJSON(next http.Handler, w http.ResponseWriter, r *http.Request) {
+//
+// It also carries defaultSinkConfig (#2108, defaults.go), the JSON API's
+// Settings field the proto lacks: UpdateSettings takes it when the
+// updateMask names default_sink_config (or is empty and the body has it),
+// and both methods answer it.
+func serveSettingsJSON(a *Admin, next http.Handler, w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimPrefix(r.URL.Path, "/v2/")
+	var sinkConfig *SinkConfig
+	setSinkConfig := false
+	fwd := r
+	if a != nil && r.Method == http.MethodPatch {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			rest.WriteError(w, apierror.InvalidArgument("reading the request: %v", err))
+			return
+		}
+		var m map[string]json.RawMessage
+		_ = json.Unmarshal(body, &m)
+		raw, has := m["defaultSinkConfig"]
+		var paths, rest0 []string
+		named := false
+		for _, mask := range r.URL.Query()["updateMask"] {
+			for _, p := range strings.Split(mask, ",") {
+				switch p = strings.TrimSpace(p); p {
+				case "":
+				case "default_sink_config", "defaultSinkConfig":
+					named = true
+					paths = append(paths, p)
+				default:
+					paths = append(paths, p)
+					rest0 = append(rest0, p)
+				}
+			}
+		}
+		setSinkConfig = named || (len(paths) == 0 && has)
+		if len(paths) == 0 && has {
+			// An empty mask with a defaultSinkConfig: the other fields
+			// the body sends, as the mask.
+			named = true
+			for _, f := range []string{"kmsKeyName", "storageLocation", "disableDefaultSink"} {
+				if _, ok := m[f]; ok {
+					rest0 = append(rest0, f)
+				}
+			}
+		}
+		if setSinkConfig && has && string(raw) != "null" {
+			sinkConfig = &SinkConfig{}
+			dec := json.NewDecoder(bytes.NewReader(raw))
+			dec.DisallowUnknownFields()
+			if err := dec.Decode(sinkConfig); err != nil {
+				rest.WriteError(w, apierror.InvalidArgument("defaultSinkConfig: %v", err))
+				return
+			}
+			if err := a.CheckSinkConfig(sinkConfig); err != nil {
+				rest.WriteError(w, err)
+				return
+			}
+		}
+		if has {
+			delete(m, "defaultSinkConfig")
+			if b, err := json.Marshal(m); err == nil {
+				body = b
+			}
+		}
+		q := r.URL.Query()
+		q.Del("updateMask")
+		if len(rest0) > 0 {
+			q.Set("updateMask", strings.Join(rest0, ","))
+		}
+		if named && len(rest0) == 0 {
+			// Only the defaultSinkConfig changes: the rest is read.
+			fwd = r.Clone(r.Context())
+			fwd.Method, fwd.Body, fwd.ContentLength = http.MethodGet, http.NoBody, 0
+		} else {
+			fwd = r.Clone(r.Context())
+			fwd.Body, fwd.ContentLength = io.NopCloser(bytes.NewReader(body)), int64(len(body))
+		}
+		fwd.URL.RawQuery = q.Encode()
+	}
 	rec := httptest.NewRecorder()
-	next.ServeHTTP(rec, r)
+	next.ServeHTTP(rec, fwd)
 	body := rec.Body.Bytes()
+	if rec.Code == http.StatusOK && a != nil && setSinkConfig {
+		if err := a.SetSinkConfig(name, sinkConfig); err != nil {
+			rest.WriteError(w, err)
+			return
+		}
+	}
 	if rec.Code == http.StatusOK {
 		var m map[string]json.RawMessage
 		if json.Unmarshal(body, &m) == nil {
+			changed := false
 			if sa, ok := m["kmsServiceAccountId"]; ok {
 				if _, set := m["loggingServiceAccountId"]; !set {
 					m["loggingServiceAccountId"] = sa
-					if b, err := json.Marshal(m); err == nil {
-						body = b
+					changed = true
+				}
+			}
+			if a != nil {
+				if c, err := a.SinkConfigOf(name); err == nil && c != nil {
+					if raw, err := json.Marshal(c); err == nil {
+						m["defaultSinkConfig"] = raw
+						changed = true
 					}
+				}
+			}
+			if changed {
+				if b, err := json.Marshal(m); err == nil {
+					body = b
 				}
 			}
 		}

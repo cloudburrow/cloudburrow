@@ -292,8 +292,38 @@ func (p artifactRegistryProvider) versionDetail(st *registry.Store, repo registr
 		Summary: []console.Property{{Label: "Pull by digest", Value: pull},
 			{Label: "Uploaded", Value: stampAge(timestamppb.New(m.Uploaded))}},
 		Sections: append(append([]console.Section{overview}, vulnerabilitiesSections(repo, image, m.Digest)...),
-			dependenciesSection(repo, image, m.Digest), console.Section{ID: "files", Label: "Layers", Listing: files}, manifest),
+			dependenciesSection(repo, image, m.Digest), versionAttachmentsSection(repo, repoName, image, m.Digest),
+			console.Section{ID: "files", Label: "Layers", Listing: files}, manifest),
 	}, nil
+}
+
+// versionAttachmentsSection is an image version's Attachments tab (#2111):
+// "Open the image version and click the Attachments tab", where each
+// attachment's digest opens it, to delete it
+// (https://docs.cloud.google.com/artifact-registry/docs/manage-metadata-with-attachments,
+// read 2026-11-22). The attachments are those ListAttachments gives with
+// the version as their target: `oras attach`'s referrers and
+// CreateAttachment's, each an OCI artifact whose own version page opens.
+func versionAttachmentsSection(repo registry.Repo, repoName, image, digest string) console.Section {
+	l := console.Listing{Columns: []string{"Type", "Attachment", "Files", "Created"}, NameColumn: "Digest", Noun: "attachments"}
+	as, err := runadapter.ConfigServer().ListAttachments(context.Background(), &arpb.ListAttachmentsRequest{Parent: repoName,
+		Filter: `target="` + packageName(repo, image) + "/versions/" + digest + `"`})
+	if err != nil {
+		l.Unavailable = err.Error()
+		return console.Section{ID: "attachments", Label: "Attachments", Listing: l}
+	}
+	for _, x := range as.GetAttachments() {
+		row := console.Resource{Name: x.GetName()[strings.LastIndex(x.GetName(), "/")+1:], Fields: map[string]string{
+			"Type": x.GetType(), "Attachment": x.GetName()[strings.LastIndex(x.GetName(), "/")+1:],
+			"Files": strconv.Itoa(len(x.GetFiles())), "Created": arTime(x.GetCreateTime())}}
+		if v := x.GetOciVersionName(); v != "" {
+			d := v[strings.LastIndex(v, "/")+1:]
+			row.Name, row.Opens = d, []string{repo.Repository, image, d}
+		}
+		l.Items = append(l.Items, row)
+	}
+	l.Total = len(l.Items)
+	return console.Section{ID: "attachments", Label: "Attachments", Listing: l}
 }
 
 // vulnerabilitiesSections are an image version's Vulnerabilities tab

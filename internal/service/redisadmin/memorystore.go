@@ -100,6 +100,9 @@ type valkeyFields struct {
 	// (crossinstance.go); nil for none.
 	CIR       *cirConfig `json:"cir,omitempty"`
 	Migration *migration `json:"migration,omitempty"`
+	// LinkPassword is the password of the user a CLUSTER mode secondary's
+	// replication links write as (crossclusterlink.go).
+	LinkPassword string `json:"linkPassword,omitempty"`
 }
 
 type valkeyNetwork struct {
@@ -912,6 +915,20 @@ func (s *MemorystoreServer) UpdateInstance(ctx context.Context, req *memorystore
 	if next.ShardCount != r.ShardCount && next.ReplicaCount != r.ReplicaCount {
 		return nil, apierror.InvalidArgument("shard_count and replica_count cannot be changed in one update")
 	}
+	// In CLUSTER mode, a primary's secondaries are scaled and upgraded
+	// with it, and a secondary's shard count and engine version are its
+	// primary's (crossclusterapi.go).
+	var group []*clusterRecord
+	if next.ShardCount != r.ShardCount {
+		if group, err = c.replicaGroup(r, "shard_count"); err != nil {
+			return nil, err
+		}
+	}
+	if set["engine_version"] && in.GetEngineVersion() != vf.EngineVersion {
+		if group, err = c.replicaGroup(r, "engine_version"); err != nil {
+			return nil, err
+		}
+	}
 	if set["node_type"] {
 		if err := checkValkeyNodeType(in.GetNodeType()); err != nil {
 			return nil, err
@@ -1020,6 +1037,9 @@ func (s *MemorystoreServer) UpdateInstance(ctx context.Context, req *memorystore
 	if upgradeTo != "" && reshape {
 		return nil, apierror.InvalidArgument("engine_version and the instance's shape cannot be changed in one update")
 	}
+	if len(group) > 0 && (upgradeTo != "" || shards != r.ShardCount) {
+		return c.launchGroup(s.api, r, op, group, shards, upgradeTo)
+	}
 	if upgradeTo != "" {
 		r.state, r.message = clusterpb.Cluster_UPDATING, "upgrading the engine to "+upgradeTo
 		c.busy[r.Name] = op
@@ -1099,8 +1119,8 @@ func (s *MemorystoreServer) DeleteInstance(ctx context.Context, req *memorystore
 	if len(c.secondariesOf(r.Name)) > 0 {
 		return nil, apierror.FailedPrecondition("instance %s is the primary of cross-instance replication: detach its secondary instances first", r.Name)
 	}
-	if r.Valkey.role() == memorystorepb.CrossInstanceReplicationConfig_SECONDARY.String() && r.Valkey.CIR.Primary != nil {
-		if p := c.byName[r.Valkey.CIR.Primary.Name]; p != nil {
+	if r.cirRole() == memorystorepb.CrossInstanceReplicationConfig_SECONDARY.String() && r.cir().Primary != nil {
+		if p := c.byName[r.cir().Primary.Name]; p != nil {
 			var rest []*clusterRecord
 			for _, x := range c.secondariesOf(p.Name) {
 				if x != r {
@@ -1116,6 +1136,7 @@ func (s *MemorystoreServer) DeleteInstance(ctx context.Context, req *memorystore
 	nodes := append([]*clusterNode(nil), r.Nodes...)
 	name := r.Name
 	return s.api.launch(op, func() {
+		c.crossClusterUnlink(name)
 		c.removeNodes(nodes)
 		c.mu.Lock()
 		delete(c.busy, name)

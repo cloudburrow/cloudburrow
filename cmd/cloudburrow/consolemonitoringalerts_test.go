@@ -304,7 +304,7 @@ func TestConsoleMonitoringUptimeDashboardsGroupsServices(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(gd.Sections[0].Listing.Items) == 0 || gd.Sections[0].Listing.Items[0].Name != "global" {
+	if len(gd.Sections[0].Listing.Items) == 0 || gd.Sections[0].Listing.Items[0].Fields["Resource type"] != "global" {
 		t.Errorf("the group's members = %v", gd.Sections[0].Listing.Items)
 	}
 	if err := groups.Delete(ctx, project, gid); err != nil {

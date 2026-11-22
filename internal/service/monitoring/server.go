@@ -135,6 +135,10 @@ type Server struct {
 	promStates map[string]*promCondState
 
 	builtins []Builtin
+	// inventories are the products whose resources are group members.
+	inventories []ResourceInventory
+	// uptimeLog is where Log check failures go.
+	uptimeLog UptimeLogger
 	// now is the clock, for tests.
 	now func() time.Time
 }
@@ -220,7 +224,9 @@ func (s *Server) load() error {
 		}
 		for n, raw := range m {
 			o := newObject(kind)
-			if err := protojson.Unmarshal(raw, o); err != nil {
+			// Through the overlay, which keeps an uptime check's
+			// logCheckFailures and disabled (#2146).
+			if err := monitoringOverlay.Unmarshal(raw, o); err != nil {
 				return fmt.Errorf("parse %s %s: %w", kind, n, err)
 			}
 			s.put(kind, n, o)
@@ -257,7 +263,7 @@ func (s *Server) save() error {
 	for kind, m := range s.objects {
 		d.Objects[kind] = map[string]json.RawMessage{}
 		for n, o := range m {
-			b, err := protojson.Marshal(o)
+			b, err := monitoringOverlay.Marshal(o)
 			if err != nil {
 				return err
 			}

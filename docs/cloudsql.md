@@ -443,7 +443,8 @@ request), or **refused** with 400 or 501 naming it. A field the discovery docume
 | `settings.ipConfiguration` | Recorded (authorized networks, `ipv4Enabled`, `sslMode`, private network). `serverCaMode` `GOOGLE_MANAGED_INTERNAL_CA` and `GOOGLE_MANAGED_CAS_CA` are served (#1614), and `CUSTOMER_MANAGED_CAS_CA` with `serverCaPool` (#1834, below); `serverCertificateRotationMode` is checked and recorded. A patch whose `ipConfiguration` names none of the three keeps them. |
 | `settings.maintenanceWindow`, `denyMaintenancePeriods`, `autoUpgradeEnabled`, `insightsConfig`, `performanceCaptureConfig`, `dataCacheConfig`, `dataDiskType`, `dataDiskProvisionedIops`, `dataDiskProvisionedThroughput`, `storageAutoResize`, `storageAutoResizeLimit`, `locationPreference`, `pricingPlan`, `replicationType`, `replicationLagMaxSeconds`, `crashSafeReplicationEnabled`, `acceleratedReplicaMode`, `enableDataplexIntegration`, `authorizedGaeApplications` | Recorded and answered. They describe the machine, maintenance and monitoring Cloud SQL would give the instance; nothing here acts on them. |
 | `settings.connectorEnforcement` `REQUIRED` | 501: the server is reached through its host tunnel as well as the connectors, and direct connections are not refused. `NOT_REQUIRED` is taken. |
-| `settings.connectionPoolConfig`, `enableGoogleMlIntegration`, `readPoolAutoScaleConfig` | 501 when enabled: no managed pooling, Vertex AI integration or read pools. |
+| `settings.connectionPoolConfig` | Managed connection pooling (#2141): see [Managed connection pooling](#managed-connection-pooling). |
+| `settings.enableGoogleMlIntegration`, `readPoolAutoScaleConfig` | 501 when enabled: no Vertex AI integration or read pools. |
 | `settings.activeDirectoryConfig`, `advancedMachineFeatures`, `collation`, `entraidConfig`, `sqlServerAuditConfig`, `timeZone` | 400: SQL Server settings. |
 | `replicationCluster.failoverDrReplicaName` | Applied on a MySQL or PostgreSQL primary: see DR replicas and switchover. `drReplica` is answered on the DR replica; `psaWriteEndpoint`, a private services access DNS name, is never answered, as no instance has a private IP. |
 | `databaseCenterIntegrationEnabled`, `geminiConfig`, `maintenanceVersion`, `nodeCount`, `switchTransactionLogsToCloudStorageEnabled`, `tags` | 501 when set, each saying what is not served. |
@@ -881,16 +882,44 @@ because mysqld 5.7 sizes its tables from the open-files limit, and containerd's 
 OOMKilled.
 
 A MySQL 5.7 instance serves its server, databases, users, database flags, restarts and
-connections. These are 501 on it: read replicas, `REGIONAL`, `binaryLogEnabled`, clones, a major
-version upgrade, `demote`/`demoteMaster` and blue-green deployments. CloudBurrow builds them on
-MySQL 8.0's statements (`CHANGE REPLICATION SOURCE`, `START REPLICA`, `SET PERSIST`), which 5.7
-does not have. `flags.list` answers no flags for it. The console's version picker offers it.
+connections, backups and their restores, `instances.clone` and restores to a new instance (their
+`mysqldump` steps are 8.0's, with the accounts from `SHOW CREATE USER`), and a major version
+upgrade to `MYSQL_8_0` (#1524). Cloud SQL upgrades MySQL one major version at a time ("You can't
+upgrade directly from MySQL 5.6 to MySQL 8.0 or from MySQL 5.7 to MySQL 8.4"), so its
+`upgradableDatabaseVersions` is the next version only, and an upgrade that skips one is 400; the
+console's Upgrade action offers the same. Read replicas (cascading ones too), `REGIONAL` and its
+failover, `binaryLogEnabled` with clones to a point in time or to binary log coordinates,
+`demote`/`demoteMaster`, external replicas synced with `mysqldump` and blue-green deployments
+without a version change (Cloud SQL's "configuration staging", "MySQL 5.7 and later") are served
+too (#1524): CloudBurrow's MySQL 8.0 steps run in 5.7's statements (`CHANGE MASTER TO`, `START
+SLAVE`, `SHOW SLAVE STATUS`, `rpl_semi_sync_master`). A 5.7 or 5.6 server runs with its binary log
+(`mysql-bin`, row format, `log_slave_updates`) and GTIDs on from its start, as every Cloud SQL for
+MySQL instance has GTIDs and MySQL 5.6 turns them on only at startup, so GTID consistency is
+enforced, as on Cloud SQL; its binary log starts afresh after its initialisation. What 8.0 keeps
+with `SET PERSIST` is `SET GLOBAL` there: a REGIONAL instance's semi-synchronous replication is set
+again when its server restarts. A point-in-time recovery stops at the first transaction committed
+after the target by the binary log event's time, in seconds, as 5.7's and 5.6's GTID events carry no
+commit timestamp (8.0.1 added it). A physical (XtraBackup) external sync stays 501: CloudBurrow's
+XtraBackup images are 8.0's and 8.4's. `flags.list` answers no flags for it. The console's version
+picker offers it, and its instance page has the same Create read replica, high availability, point-in-
+time clone, Demote and Create blue-green deployment actions as 8.0's.
 
 **MySQL 5.6 (#1524)** is served the same way. Its official image, `mysql:5.6`, was last built in
 2021-12 (5.6.51), only for linux/amd64, and is pinned by that manifest's digest
 (`docker buildx imagetools inspect mysql:5.6`, 2026-11-18). It starts under the same open-files
-limit, and serves and refuses what a MySQL 5.7 instance does. `users.update` changes a password
-with `SET PASSWORD FOR ... = PASSWORD(...)`, because MySQL 5.6's `ALTER USER` only expires one.
+limit, and serves and refuses what a MySQL 5.7 instance does; its upgrade is to `MYSQL_5_7`. Two
+more are 400, as Cloud SQL documents them: a blue-green deployment ("your instance must run Cloud SQL
+for MySQL version 5.7, 8.0, or 8.4"), and a replica of a 5.6 read replica, as Cloud SQL logs a
+replica's binary log on "MySQL 5.7 and later only"; the console offers neither. MySQL 5.6 has no
+`super_read_only`, so a 5.6 replica is `read_only`; no `WAIT_FOR_EXECUTED_GTID_SET`, so a failover
+waits with `WAIT_UNTIL_SQL_THREAD_AFTER_GTIDS`; no lossless (`AFTER_SYNC`) semi-synchronous
+replication, so a REGIONAL 5.6 instance's standby acknowledges after the commit; no TLS certificate
+of its own, so its replicas connect in the clear; and no `CREATE USER IF NOT EXISTS`, so its
+replication users are made with `GRANT ... IDENTIFIED BY`.
+`users.update` changes a password with `SET PASSWORD FOR ... = PASSWORD(...)`, because MySQL 5.6's
+`ALTER USER` only expires one. MySQL 5.6 has no `SHOW CREATE USER`: a backup, a clone and an upgrade
+carry each account as `CREATE USER ... IDENTIFIED BY PASSWORD` with its password hash, which 5.6
+and 5.7 both read, and its `SHOW GRANTS` without that clause.
 
 `databaseInstalledVersion` is read from the server. `maintenanceVersion` and
 `availableMaintenanceVersions` are not answered: they name Cloud SQL's own releases
@@ -1673,4 +1702,25 @@ about 460 MB), checks it becomes `RUNNABLE`, makes a database and a user, and qu
 skips, and `TestCloudSQLServerRefusedWithoutEULA` checks the refusal instead; the unit tests in
 `internal/service/sqladmin`, `internal/config` and `cmd/cloudburrow` always check the refusal and that
 `ACCEPT_EULA` is never set without an acceptance on record.
+
+## Managed connection pooling
+
+`settings.connectionPoolConfig.connectionPoolingEnabled` on a Cloud SQL Enterprise Plus PostgreSQL instance runs a real pooler, PgBouncer 1.26.1 (ISC licence, the pinned `edoburu/pgbouncer` image), in a container of the instance's pod, as Google documents (<https://docs.cloud.google.com/sql/docs/postgres/managed-connection-pooling>, read 2026-11-22):
+
+- Port 6432 is the pooler, 5432 stays the server's. The Cloud SQL connectors and the Auth Proxy (3307) reach the pooler while pooling is on. The pooler's host address is logged when it starts (`... pools connections: its pooler (port 6432) is at 127.0.0.1:PORT`).
+- A user signs in with the password it has on the server (SCRAM or MD5): the pooler reads it from the server's `pg_shadow`.
+- The flags are Google's, with Google's defaults: `pool_mode` (`transaction`, the default, or `session`), `max_pool_size` (50), `min_pool_size` (0), `max_client_connections` (5000), `max_prepared_statements` (0), `client_connection_idle_timeout` (0), `server_connection_idle_timeout` (600), `query_wait_timeout` (120), `server_lifetime` (3600) and `ignore_startup_parameters`. The three timeouts take 0 to 2147483 seconds. An unknown flag, a repeated one or a value out of range is 400.
+- `poolerCount` (output only) is the tier's vCPUs divided by 4, at least 1. One PgBouncer process serves them all here.
+- Turning pooling on or off restarts the instance, as Google documents. So does changing a flag here, whether or not Google's does (the page does not say).
+- In transaction mode, Google's limitations are PgBouncer's: `SET`, `LISTEN`, session advisory locks and prepared statements without `max_prepared_statements` do not carry across transactions.
+
+An Enterprise instance is refused 400. SQL Server is refused 400.
+
+Cloud SQL for MySQL's managed connection pooling is a thread pool inside the server (<https://docs.cloud.google.com/sql/docs/mysql/managed-connection-pooling>). The community MySQL server has no thread pool, so it is refused 501.
+
+A VM does not reach the pooler at a private IP or a Private Service Connect endpoint. Only the server's port is in their NAT chains.
+
+The console has Connections' Enable Managed Connection Pool, with Advanced pooling options, on the create page and in Edit. The Overview's Connect to this instance shows whether the instance pools connections.
+
+`TestCloudSQLManagedConnectionPooling` (compat, the official `sqladmin/v1` client and Cloud SQL Go connector) shows it pools. Eight clients signed in through the connector share at most `max_pool_size` 2 server connections. With pooling off, each client has a server connection of its own.
 

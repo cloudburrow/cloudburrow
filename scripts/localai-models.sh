@@ -13,13 +13,20 @@
 # are fetched by the instance itself into <state-dir>/models, each by its
 # pin in internal/localai.
 #
-# Usage: scripts/localai-models.sh <dir>
+# Usage: scripts/localai-models.sh [--onnx-runtime-only] <dir>
 # Prints CLOUDBURROW_LOCALAI_MODEL=<path> and, on Linux amd64,
-# ONNXRUNTIME_LIB=<path>, for $GITHUB_ENV or eval. Requires curl, jq,
-# unzip on Linux, and sha256sum or shasum.
+# ONNXRUNTIME_LIB=<path>, for $GITHUB_ENV or eval. --onnx-runtime-only
+# fetches ONNX Runtime alone, without the generation model (onnx.yml's
+# `make onnx-test`). Requires curl, jq, unzip on Linux, and sha256sum or
+# shasum.
 set -euo pipefail
 
-dir=${1:?usage: scripts/localai-models.sh <dir>}
+runtime_only=
+if [ "${1:-}" = --onnx-runtime-only ]; then
+  runtime_only=1
+  shift
+fi
+dir=${1:?usage: scripts/localai-models.sh [--onnx-runtime-only] <dir>}
 root=$(cd "$(dirname "$0")/.." && pwd)
 deps="$root/dependencies.json"
 mkdir -p "$dir"
@@ -49,12 +56,14 @@ fetch() {
 
 pin() { jq -er ".components.localai.$1" "$deps"; }
 
-repo=$(pin generationModel.repo)
-artifact=$(pin generationModel.artifact)
-rev=$(pin generationModel.revision)
-model="$dir/$artifact"
-fetch "https://huggingface.co/$repo/resolve/$rev/$artifact" "$model" "$(pin generationModel.sha256)" "$(pin generationModel.sizeBytes)"
-echo "CLOUDBURROW_LOCALAI_MODEL=$model"
+if [ -z "$runtime_only" ]; then
+  repo=$(pin generationModel.repo)
+  artifact=$(pin generationModel.artifact)
+  rev=$(pin generationModel.revision)
+  model="$dir/$artifact"
+  fetch "https://huggingface.co/$repo/resolve/$rev/$artifact" "$model" "$(pin generationModel.sha256)" "$(pin generationModel.sizeBytes)"
+  echo "CLOUDBURROW_LOCALAI_MODEL=$model"
+fi
 
 if [ "$(uname -s)-$(uname -m)" = Linux-x86_64 ]; then
   ver=$(pin onnxRuntime.version)

@@ -8,18 +8,22 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/localai"
+	"github.com/cloudburrow/cloudburrow/internal/modelgarden"
 )
 
 // GetPublisherModel (#1940) describes a publisher model this endpoint
 // serves at projects/{p}/locations/{l}/publishers/google/models/{model}:
 // the local catalogue's models with a runtime (the embedding and
 // generation models of embeddings.md and generation.md). Any other model
-// is NOT_FOUND, as Predict on it is; nothing is substituted. Hugging Face
-// models (is_hugging_face_model) are Model Garden's Deploy, not served here.
-func (g *modelGardenService) GetPublisherModel(_ context.Context, req *aiplatformpb.GetPublisherModelRequest) (*aiplatformpb.PublisherModel, error) {
+// is NOT_FOUND, as Predict on it is; nothing is substituted. A Hugging Face
+// model (is_hugging_face_model, #2148) is read from the Hub and described
+// with its two deployment environments: supported_actions.deploy (the
+// serving container ModelGardenService.Deploy runs for it) and deploy_gke
+// (gke_yaml_configs, its GKE manifests).
+func (g *modelGardenService) GetPublisherModel(ctx context.Context, req *aiplatformpb.GetPublisherModelRequest) (*aiplatformpb.PublisherModel, error) {
 	if req.GetIsHuggingFaceModel() {
-		return nil, grpcError(apierror.Unimplemented("GetPublisherModel with is_hugging_face_model is not served: " +
-			"deploy a Hugging Face model with ModelGardenService.Deploy (hugging_face_model_id)"))
+		out, err := g.hfPublisherModel(ctx, req.GetName())
+		return out, grpcError(err)
 	}
 	pub, id, ok := parsePublisherModel(req.GetName())
 	if !ok {
@@ -65,4 +69,49 @@ func servedPublisherModels() []string {
 		}
 	}
 	return out
+}
+
+// hfPublisherModel describes a Hugging Face model: publishers/{author}/models/{name}
+// (or Model Garden's publishers/hf-{author}/...) is the Hub's {author}/{name}.
+func (g *modelGardenService) hfPublisherModel(ctx context.Context, name string) (*aiplatformpb.PublisherModel, error) {
+	m := g.s.modelGarden()
+	if m == nil {
+		return nil, gardenUnavailable()
+	}
+	pub, model, ok := parsePublisherModel(name)
+	if !ok {
+		return nil, apierror.InvalidArgument("name %q is not publishers/{publisher}/models/{model}", name)
+	}
+	hfID := strings.TrimPrefix(pub, "hf-") + "/" + model
+	arch := "amd64"
+	if m.Cluster != nil {
+		if a, err := m.Cluster.Arch(ctx); err == nil {
+			arch = a
+		}
+	}
+	plan, err := m.PlanGKE(ctx, hfID, arch)
+	if err != nil {
+		return nil, err
+	}
+	eng, _ := modelgarden.EngineByName(plan.Engine)
+	return &aiplatformpb.PublisherModel{
+		Name:               modelgarden.PublisherModel(hfID),
+		VersionId:          "001",
+		OpenSourceCategory: aiplatformpb.PublisherModel_THIRD_PARTY_OWNED_OSS,
+		LaunchStage:        aiplatformpb.PublisherModel_GA,
+		VersionState:       aiplatformpb.PublisherModel_VERSION_STATE_STABLE,
+		Frameworks:         []string{plan.Engine},
+		SupportedActions: &aiplatformpb.PublisherModel_CallToAction{
+			Deploy: &aiplatformpb.PublisherModel_CallToAction_Deploy{
+				Title: "Deploy " + hfID, ModelDisplayName: hfID,
+				ContainerSpec: &aiplatformpb.ModelContainerSpec{ImageUri: eng.ImageFor(arch),
+					HealthRoute: eng.HealthRoute, PredictRoute: eng.PredictRoute,
+					Ports: []*aiplatformpb.Port{{ContainerPort: 8080}}},
+				PredictionResources: &aiplatformpb.PublisherModel_CallToAction_Deploy_DedicatedResources{
+					DedicatedResources: &aiplatformpb.DedicatedResources{
+						MachineSpec: &aiplatformpb.MachineSpec{MachineType: "local-cpu"}, MinReplicaCount: 1, MaxReplicaCount: 1}},
+			},
+			DeployGke: &aiplatformpb.PublisherModel_CallToAction_DeployGke{GkeYamlConfigs: plan.Configs},
+		},
+	}, nil
 }

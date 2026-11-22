@@ -11,9 +11,13 @@ import (
 	"strings"
 	"time"
 
+	"cloud.google.com/go/logging/apiv2/loggingpb"
 	"google.golang.org/genproto/googleapis/api/monitoredres"
+	ltype "google.golang.org/genproto/googleapis/logging/type"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/types/known/structpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/config"
@@ -22,6 +26,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/service/logging"
 	"github.com/cloudburrow/cloudburrow/internal/service/monitoring"
+	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
 	"github.com/cloudburrow/cloudburrow/internal/service/tasks"
 	"github.com/cloudburrow/cloudburrow/internal/telemetry"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
@@ -57,6 +62,10 @@ type monitoringService struct {
 	stop      chan struct{}
 	// runStop ends the sampling of Cloud Run's metrics (#2049).
 	runStop chan struct{}
+	// sql is the instance's Cloud SQL Admin API, or nil, whose instances'
+	// servers are read for cloudsql.googleapis.com metrics (#2141).
+	sql     func() *sqladmin.Server
+	sqlStop chan struct{}
 	// pubsub is the instance's Pub/Sub tunnel, for Pub/Sub notification
 	// channels (#1964); nil, or nil from it, when Pub/Sub is not served.
 	pubsub func() *netfwd.Forwarder
@@ -66,6 +75,8 @@ type monitoringService struct {
 	// gke holds Kubernetes Engine's system metrics (#2100), recorded by the
 	// gkeMetricsSampler; nil when Kubernetes Engine is not served.
 	gke *monitoring.GKEBuiltin
+	// inventory is the products whose resources are group members (#2146).
+	inventory *monitoringInventoryWiring
 	// cancel stops alert evaluation and uptime checks.
 	cancel context.CancelFunc
 }
@@ -138,8 +149,16 @@ func (s *monitoringService) Start(ctx context.Context) error {
 	if s.firestore != nil {
 		api.AddBuiltin(monitoring.NewFirestoreBuiltin(monitoringFirestore{addr: s.firestore}))
 	}
+	if s.inventory != nil {
+		for _, inv := range s.inventory.inventories() {
+			api.AddResourceInventory(inv)
+		}
+	}
 	if s.logging != nil {
 		api.SetLogMatcher(monitoringLogs{svc: s.logging})
+		// Uptime checks' Log check failures (#2146) are entries in this
+		// instance's Cloud Logging.
+		api.SetUptimeLogger(monitoringLogs{svc: s.logging}.WriteUptimeFailure)
 	}
 	if s.pubsub != nil {
 		tunnel := s.pubsub
@@ -167,6 +186,26 @@ func (s *monitoringService) Start(ctx context.Context) error {
 	} else if s.counters != nil {
 		s.reqs = monitoring.NewRequestBuiltin(monitoringCounters{reg: s.counters}, s.cfg.DefaultProject(), time.Now)
 		api.AddBuiltin(s.reqs)
+	}
+	if s.sql != nil {
+		// Cloud SQL's servers, sampled every 60 seconds on their own, as
+		// a sample reads the cluster and each server (#2141).
+		sm := monitoring.NewSQLBuiltin(monitoringSQL{srv: s.sql, kubeconfig: s.cfg.KubeconfigPath(),
+			namespace: s.cfg.Cluster.Namespace, project: s.cfg.DefaultProject()}, time.Now)
+		api.AddBuiltin(sm)
+		s.sqlStop = make(chan struct{})
+		go func(stop chan struct{}) {
+			t := time.NewTicker(requestSampleInterval)
+			defer t.Stop()
+			for {
+				select {
+				case <-t.C:
+					sm.Sample()
+				case <-stop:
+					return
+				}
+			}
+		}(s.sqlStop)
 	}
 	if s.tasks != nil {
 		s.tasksMets = monitoring.NewTasksBuiltin(monitoringTasks{svc: s.tasks}, time.Now)
@@ -227,6 +266,10 @@ func (s *monitoringService) Stop(ctx context.Context) error {
 	if s.runStop != nil {
 		close(s.runStop)
 		s.runStop = nil
+	}
+	if s.sqlStop != nil {
+		close(s.sqlStop)
+		s.sqlStop = nil
 	}
 	if s.server == nil {
 		return nil
@@ -338,6 +381,29 @@ func (l monitoringLogs) MatchLogEntries(project, filter string, extractors map[s
 			Type: e.GetResource().GetType(), Resource: e.GetResource().GetLabels(), Labels: s.Labels, Summary: summary})
 	}
 	return out, nil
+}
+
+// WriteUptimeFailure writes an uptime check's failed run to the project's
+// log monitoring.googleapis.com/uptime_checks, through Cloud Logging's own
+// WriteLogEntries, so exclusions and sinks apply.
+func (l monitoringLogs) WriteUptimeFailure(ctx context.Context, project string, e monitoring.UptimeLogEntry) error {
+	api := l.api()
+	if api == nil {
+		return errors.New("Cloud Logging has not started")
+	}
+	payload, err := structpb.NewStruct(e.Payload)
+	if err != nil {
+		return err
+	}
+	_, err = api.WriteLogEntries(ctx, &loggingpb.WriteLogEntriesRequest{Entries: []*loggingpb.LogEntry{{
+		LogName:   "projects/" + project + "/logs/" + url.PathEscape(monitoring.UptimeLogID),
+		Resource:  e.Resource,
+		Labels:    e.Labels,
+		Severity:  ltype.LogSeverity_ERROR,
+		Timestamp: timestamppb.New(e.Time),
+		Payload:   &loggingpb.LogEntry_JsonPayload{JsonPayload: payload},
+	}}})
+	return err
 }
 
 func entryResource(r *monitoredres.MonitoredResource) *monitoredres.MonitoredResource {

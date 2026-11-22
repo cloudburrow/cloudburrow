@@ -84,7 +84,8 @@ func TestCloudSQLConsoleRound3(t *testing.T) {
 	if f := by["kmsKeyName"]; f.Section != "Encryption" || f.VisibleWhen["encryption"] != sqlEncryptionCMEK {
 		t.Errorf("CMEK key %+v; want it under Encryption, shown for CMEK", f)
 	}
-	if f := by["encryption"]; f.Default != sqlEncryptionGoogle || f.OptionLabels[sqlEncryptionGoogle] != "Google-managed encryption key" {
+	if f := by["encryption"]; f.Default != sqlEncryptionGoogle || f.OptionLabels[sqlEncryptionGoogle] != "Google-managed encryption" ||
+		f.OptionLabels[sqlEncryptionCMEK] != "Customer key-managed encryption key (CMEK)" {
 		t.Errorf("Encryption %+v; want Google-managed by default", f)
 	}
 	for _, n := range []string{"serverCaMode", "serverCaPool", "serverCertificateRotationMode"} {
@@ -128,7 +129,7 @@ func TestCloudSQLConsoleRound3(t *testing.T) {
 		t.Fatalf("inserts %q", inserts)
 	}
 	for _, s := range []string{`"ipv4Enabled":true`, `"value":"203.0.113.0/24"`, `"value":"198.51.100.7"`,
-		`"insightsConfig":{"queryInsightsEnabled":true}`} {
+		`"insightsConfig":{"queryInsightsEnabled":true,`} {
 		if !strings.Contains(inserts[0], s) {
 			t.Errorf("insert %s lacks %s", inserts[0], s)
 		}
@@ -144,8 +145,14 @@ func TestCloudSQLConsoleRound3(t *testing.T) {
 	for _, a := range databaseUserActions(&sqladminapi.DatabaseInstance{Name: "my", DatabaseVersion: "MYSQL_8_0"}, []string{"shop"}, []string{"root"}) {
 		acts[a.ID] = a
 	}
-	if a := acts["create-database"]; a.Title != "New database" || a.Submit != "Create" {
-		t.Errorf("Create database %+v; want New database, ending in Create", a)
+	// MySQL's is "Create a database"; PostgreSQL's "New database".
+	if a := acts["create-database"]; a.Title != "Create a database" || a.Submit != "Create" {
+		t.Errorf("Create database %+v; want Create a database, ending in Create", a)
+	}
+	for _, a := range databaseUserActions(&sqladminapi.DatabaseInstance{Name: "pg", DatabaseVersion: "POSTGRES_17"}, nil, nil) {
+		if a.ID == "create-database" && (a.Title != "New database" || a.Submit != "Create") {
+			t.Errorf("PostgreSQL's Create database %+v; want New database, ending in Create", a)
+		}
 	}
 	if _, ok := acts["add-iam-user"]; ok {
 		t.Error("Cloud IAM is still an action of its own, not Add user account's choice")
@@ -209,7 +216,7 @@ func TestCloudSQLConsoleRound3(t *testing.T) {
 		t.Errorf("the Studio's user actions %+v", a)
 	}
 	backups := map[string]console.Action{}
-	for _, a := range p.backupActions([]string{"7"}) {
+	for _, a := range p.backupActions([]string{"7"}, nil) {
 		backups[a.ID] = a
 	}
 	if a := backups["create-backup"]; a.Submit != "Create" || len(a.Fields) != 1 || a.Fields[0].Name != "description" {

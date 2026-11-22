@@ -219,58 +219,69 @@ func renderPage(inst pdfium.Pdfium, page requests.Page, wPt, hPt float64, dpi, m
 	return img, nil
 }
 
-// RenderPDFForOCR renders every page of a PDF at the resolution OCR reads
-// (300 DPI, capped as DecodePDF caps a scan), for Document AI's processors
-// (internal/service/vertexai/documentai.go, #1799). count is the PDF's page
-// count, set even when it is over maxPages, which returns no pages and
-// ErrTooManyPages.
-func RenderPDFForOCR(data []byte, maxPages int) (pages []image.Image, count int, err error) {
+// EachPDFPageForOCR renders a PDF's pages at the resolution OCR reads (300
+// DPI, capped as DecodePDF caps a scan), one at a time, for Document AI's
+// processors (internal/service/vertexai/documentai.go, #1799): want is
+// given the page count and answers the 0-based pages to render, in order,
+// and fn receives each page as it is rendered, so a long document is never
+// held in memory whole. count is the PDF's page count, set even when it is
+// over maxPages, which renders nothing and returns ErrTooManyPages.
+func EachPDFPageForOCR(data []byte, maxPages int, want func(count int) ([]int, error), fn func(index int, img image.Image) error) (count int, err error) {
 	if len(data) == 0 || !bytes.Contains(data[:min(len(data), 1024)], []byte("%PDF-")) {
-		return nil, 0, fmt.Errorf("the data is not a PDF")
+		return 0, fmt.Errorf("the data is not a PDF")
 	}
 	inst, err := pdfInstance()
 	if err != nil {
-		return nil, 0, err
+		return 0, err
 	}
 	defer inst.Close()
 	defer func() {
 		if r := recover(); r != nil {
-			pages, err = nil, fmt.Errorf("the data is not a valid PDF: %v", r)
+			err = fmt.Errorf("the data is not a valid PDF: %v", r)
 		}
 	}()
 	doc, err := inst.OpenDocument(&requests.OpenDocument{File: &data})
 	if err != nil {
-		return nil, 0, fmt.Errorf("the data is not a valid PDF: %v", err)
+		return 0, fmt.Errorf("the data is not a valid PDF: %v", err)
 	}
 	defer inst.FPDF_CloseDocument(&requests.FPDF_CloseDocument{Document: doc.Document})
 	pc, err := inst.FPDF_GetPageCount(&requests.FPDF_GetPageCount{Document: doc.Document})
 	if err != nil {
-		return nil, 0, fmt.Errorf("the data is not a valid PDF: %v", err)
+		return 0, fmt.Errorf("the data is not a valid PDF: %v", err)
 	}
 	count = pc.PageCount
 	if count == 0 {
-		return nil, 0, fmt.Errorf("the PDF has no pages")
+		return 0, fmt.Errorf("the PDF has no pages")
 	}
 	if count > maxPages {
-		return nil, count, ErrTooManyPages
+		return count, ErrTooManyPages
 	}
-	for i := 0; i < count; i++ {
+	pages, err := want(count)
+	if err != nil {
+		return count, err
+	}
+	for _, i := range pages {
+		if i < 0 || i >= count {
+			return count, fmt.Errorf("page %d is not in the PDF", i+1)
+		}
 		size, err := inst.FPDF_GetPageSizeByIndex(&requests.FPDF_GetPageSizeByIndex{Document: doc.Document, Index: i})
 		if err != nil {
-			return nil, count, fmt.Errorf("page %d: %v", i+1, err)
+			return count, fmt.Errorf("page %d: %v", i+1, err)
 		}
 		img, err := renderPage(inst, requests.Page{ByIndex: &requests.PageByIndex{Document: doc.Document, Index: i}},
 			size.Width, size.Height, ocrDPI, ocrMaxPixels)
 		if err != nil {
-			return nil, count, fmt.Errorf("page %d: %v", i+1, err)
+			return count, fmt.Errorf("page %d: %v", i+1, err)
 		}
-		pages = append(pages, img)
+		if err := fn(i, img); err != nil {
+			return count, err
+		}
 	}
-	return pages, count, nil
+	return count, nil
 }
 
-// ErrTooManyPages is RenderPDFForOCR's refusal of a PDF over its limit.
+// ErrTooManyPages is EachPDFPageForOCR's refusal of a PDF over its limit.
 var ErrTooManyPages = errors.New("the PDF has too many pages")
 
-// OCRDPI is the resolution RenderPDFForOCR renders at.
+// OCRDPI is the resolution EachPDFPageForOCR renders at.
 const OCRDPI = ocrDPI

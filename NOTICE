@@ -50,6 +50,12 @@ github.com/shopspring/decimal (MIT License). CloudBurrow does not ship or
 start Microsoft SQL Server itself: a Cloud SQL for SQL Server instance pulls
 Microsoft's image, whose licence its user accepts (#1916).
 
+CloudBurrow does not ship PgBouncer. A Cloud SQL for PostgreSQL instance
+with managed connection pooling pulls the edoburu/pgbouncer image by
+digest (#2141): PgBouncer, Copyright (c) 2007-2009 Marko Kreen, Skype
+Technologies OU, under the ISC License, in an image whose Dockerfile and
+entrypoint are under the MIT License.
+
 The binary is linked with Google's differential privacy library
 (github.com/google/differential-privacy/go/v4 v4.1.0), Copyright Google LLC,
 under the Apache License, Version 2.0, and with its dependencies
@@ -147,6 +153,25 @@ mediapipe/tasks/cc/text/language_detector/custom_ops), Copyright 2023 The
 MediaPipe Authors, under the Apache License, Version 2.0;
 third_party/mediapipe-langid/PROVENANCE.md records the source and digest.
 
+The -tags onnx build's speaker diarization (internal/speaker) runs 3D-Speaker's
+CAM++ speaker-embedding model (https://github.com/modelscope/3D-Speaker,
+iic/speech_campplus_sv_zh_en_16k-common_advanced), Copyright Alibaba DAMO
+Academy (Speech Lab), under the Apache License, Version 2.0, in the ONNX export
+published by the sherpa-onnx project (https://github.com/k2-fsa/sherpa-onnx,
+Copyright Xiaomi Corporation, Apache License, Version 2.0). The model is not
+embedded: it is fetched at run time and checked against the SHA-256 pinned in
+internal/localai/speaker.go. internal/speaker's filter-bank features
+reimplement Kaldi's compute-fbank-feats (https://github.com/kaldi-asr/kaldi,
+Apache License, Version 2.0) in Go.
+
+internal/syntaxnet runs SyntaxNet's Parsey McParseface tagger and parser
+(https://github.com/tensorflow/models, research/syntaxnet, tag v1.13.0),
+Copyright 2016 Google Inc., under the Apache License, Version 2.0: its feature
+definitions, arc-standard and tagger transitions, beam search and English
+tokenization rules are reimplemented in Go from SyntaxNet's sources, and the
+model files are not embedded but fetched at run time from that repository and
+checked against the SHA-256s pinned in internal/localai/syntaxparser.go.
+
 The binary embeds a holiday calendar (internal/bigqueryfront/holidaycal.tsv.gz)
 generated from the holidays package 0.84 (https://github.com/vacanza/holidays),
 Copyright (c) Vacanza Team and individual contributors, Copyright (c)
@@ -177,3 +202,74 @@ under CC0 1.0 Universal, and licence texts from the SPDX License List
 being made available by the Linux Foundation and its contributors under the
 Creative Commons Attribution 3.0 licence; the sources' digests are in
 third_party/ssm-templates/.
+
+The binary is linked with the Helm SDK, helm.sh/helm/v3 v3.22.1, Copyright
+The Helm Authors, under the Apache License, Version 2.0, which the console
+Marketplace uses to install Helm charts (#2149), and with its dependencies,
+among them the Kubernetes client libraries (k8s.io/*, Copyright The
+Kubernetes Authors, Apache License, Version 2.0), and
+github.com/cyphar/filepath-securejoin, github.com/hashicorp/errwrap and
+github.com/hashicorp/go-multierror, unmodified, under the Mozilla Public
+License, Version 2.0, whose source is at their upstream repositories.
+
+Model Garden's Hugging Face deployments (#1840, #2148) run, without
+CloudBurrow shipping or modifying them, the official images of vLLM
+(docker.io/vllm/vllm-openai-cpu, https://github.com/vllm-project/vllm) and
+Hugging Face Text Embeddings Inference
+(ghcr.io/huggingface/text-embeddings-inference, cpu and cpu-arm64 builds,
+https://github.com/huggingface/text-embeddings-inference), both under the
+Apache License, Version 2.0, pinned by digest in dependencies.json. The
+models they serve are pulled from huggingface.co under each model's own
+licence, which the console shows and, for a gated model, the end user
+accepts on huggingface.co.
+
+The Model Garden runtimes of #2148 run, without CloudBurrow shipping or
+modifying them: llama.cpp's server image (ghcr.io/ggml-org/llama.cpp,
+https://github.com/ggml-org/llama.cpp, MIT License); the official Python
+image (docker.io/library/python, Python Software Foundation License), into
+which a pod installs, from PyPI and PyTorch's CPU index, Hugging Face's
+huggingface-inference-toolkit (the server of Google's Hugging Face PyTorch
+Inference container, https://github.com/huggingface/huggingface-inference-toolkit,
+Apache License 2.0), transformers, diffusers, accelerate, huggingface_hub,
+optimum and optimum-onnx (Apache License 2.0), PyTorch and torchaudio (BSD
+3-Clause), ONNX Runtime (MIT License), MLX and mlx-lm (MIT License) and
+their dependencies, every version pinned in
+internal/modelgarden/runtime/constraints-*.txt; the images pinned by digest
+in dependencies.json. The start scripts and servers in
+internal/modelgarden/runtime are CloudBurrow's own.
+
+On macOS with Apple silicon, Model Garden's Apple GPU (Metal) runtimes of
+#2155 run on the host, without CloudBurrow shipping or modifying them:
+llama.cpp's official macOS arm64 release archive (llama-server,
+https://github.com/ggml-org/llama.cpp, MIT License), downloaded on first
+use and checked against the SHA-256 pinned in dependencies.json; and MLX,
+mlx-metal and mlx-lm (https://github.com/ml-explore/mlx and
+https://github.com/ml-explore/mlx-lm, MIT License) with their dependencies,
+installed from PyPI into a virtual environment of CloudBurrow's from the
+hash-pinned lock internal/hostai/mlx-lock.txt (MIT, BSD, Apache License
+2.0, PSF and MPL-2.0 licences).
+
+The binary embeds the base map of BigQuery Studio's Map visualization
+(internal/console/assets/vendor/naturalearth/land-110m.js), derived from
+Natural Earth's 1:110m land (https://github.com/nvkelso/natural-earth-vector,
+v5.1.2), which is in the public domain. Made with Natural Earth; the source's
+digest is in third_party/naturalearth/.
+
+BigQuery Studio's notebook runtime image (internal/nbruntime/image) is built
+locally on a notebook's first Connect; pip installs Google's
+google-cloud-bigquery and bigquery-magics (Apache License, Version 2.0),
+IPython, pandas (BSD 3-Clause License), pyarrow (Apache License, Version
+2.0), db-dtypes and matplotlib into it. None of them is part of this
+repository or of the binary.
+
+The darwin/arm64 release archive carries, in litert-lm/, a macOS build of
+cloudburrow_generate (#2159): Google's LiteRT-LM
+(https://github.com/google-ai-edge/LiteRT-LM, Apache License 2.0) at the
+commit dependencies.json pins, with CloudBurrow's patches and runner from
+deploy/litert-lm, statically linking llguidance
+(https://github.com/guidance-ai/llguidance, MIT License), beside LiteRT-LM's
+prebuilt libGemmaModelConstraintProvider.dylib (Apache License 2.0) and
+libwebgpu_dawn.dylib, Dawn (https://dawn.googlesource.com/dawn, Copyright
+2017-2026 The Dawn & Tint Authors, BSD 3-Clause License). Their licence
+texts ship beside them as LICENSE-LiteRT-LM, LICENSE-llguidance and
+LICENSE-Dawn.

@@ -29,7 +29,8 @@ import (
 //     {gcs_uri}/{operation ID}/{input index}/{input file name}-0.json, a
 //     Document in JSON.
 //   - The limits of https://docs.cloud.google.com/document-ai/limits: 5,000
-//     files a request, 1 GB a file, 500 pages a document; process_options
+//     files a request, 1 GB a file, and the processor type's batch pages a
+//     document (docAILimits: 500 for the OCR processor); process_options
 //     as ProcessDocument takes them. A disabled processor is
 //     FAILED_PRECONDITION before the operation starts.
 //   - The operation runs in the background: its BatchProcessMetadata goes
@@ -47,8 +48,10 @@ import (
 // the texts of the errors.
 
 const (
-	docAIBatchFiles    = 5000
-	docAIBatchBytes    = 1 << 30
+	docAIBatchFiles = 5000
+	docAIBatchBytes = 1 << 30
+	// docAIBatchMaxPages is the OCR processor's, which dataset imports
+	// read with.
 	docAIBatchMaxPages = 500
 )
 
@@ -77,6 +80,9 @@ func (s *Server) batchProcess(ctx context.Context, req *documentaipb.BatchProces
 		if err := s.customReady(p); err != nil {
 			return nil, err
 		}
+	}
+	if err := s.prebuiltReady(p.GetType()); err != nil {
+		return nil, err
 	}
 	if req.GetSkipHumanReview() {
 		review.StateMessage = humanReviewSkippedByRequest
@@ -225,7 +231,7 @@ func (s *Server) batchOne(ctx context.Context, p *documentaipb.Processor, opts *
 	if mt == "" {
 		mt = ct
 	}
-	doc, err := readDocument(ctx, p, content, mt, opts, docAIBatchMaxPages, false)
+	doc, err := readDocument(ctx, p, content, mt, opts, docAIPageLimit{pages: limitsOf(p.GetType()).batch}, true)
 	if err != nil {
 		return err
 	}
@@ -233,6 +239,9 @@ func (s *Server) batchOne(ctx context.Context, p *documentaipb.Processor, opts *
 		if err := s.applyCustom(ctx, p, doc); err != nil {
 			return err
 		}
+	}
+	if err := s.applyPrebuilt(ctx, p.GetType(), doc); err != nil {
+		return err
 	}
 	base := path.Base(object)
 	if i := strings.LastIndex(base, "."); i > 0 {

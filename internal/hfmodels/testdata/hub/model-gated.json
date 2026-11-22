@@ -1,0 +1,142 @@
+{
+ "_id": "67b79c8700245b72c5706777",
+ "id": "google/gemma-3-4b-it",
+ "private": false,
+ "pipeline_tag": "image-text-to-text",
+ "library_name": "transformers",
+ "tags": [
+  "transformers",
+  "safetensors",
+  "gemma3",
+  "image-text-to-text",
+  "conversational",
+  "base_model:google/gemma-3-4b-pt",
+  "base_model:finetune:google/gemma-3-4b-pt",
+  "license:gemma",
+  "eval-results",
+  "text-generation-inference",
+  "endpoints_compatible",
+  "deploy:sagemaker",
+  "region:us"
+ ],
+ "downloads": 1100073,
+ "likes": 1696,
+ "modelId": "google/gemma-3-4b-it",
+ "author": "google",
+ "sha": "093f9f388b31de276ce2de164bdc2081324b9767",
+ "lastModified": "2025-03-21T20:20:53.000Z",
+ "gated": "manual",
+ "disabled": false,
+ "cardData": {
+  "license": "gemma",
+  "extra_gated_heading": "Access Gemma on Hugging Face",
+  "extra_gated_prompt": "To access Gemma on Hugging Face, you\u2019re required to review and agree to Google\u2019s usage license. To do this, please ensure you\u2019re logged in to Hugging Face and click below. Requests are processed immediately.",
+  "library_name": "transformers",
+  "pipeline_tag": "image-text-to-text"
+ },
+ "siblings": [
+  {
+   "rfilename": ".gitattributes",
+   "blobId": "e6d43da7f2cc0124e691f2c7a2092990d8c69838",
+   "size": 1760
+  },
+  {
+   "rfilename": "README.md",
+   "blobId": "e953c1168aa2b47d8d48b2eb5417730f1dc114ee",
+   "size": 25122
+  },
+  {
+   "rfilename": "added_tokens.json",
+   "blobId": "e17bde03d42feda32d1abfca6d3b598b9a020df7",
+   "size": 35
+  },
+  {
+   "rfilename": "chat_template.json",
+   "blobId": "719b0cd0d7a373a400b0c119ee0e051f41ea88d9",
+   "size": 1615
+  },
+  {
+   "rfilename": "config.json",
+   "blobId": "fcdc8a6cd637c7ae460065204e7fd0d8c00a38fc",
+   "size": 855
+  },
+  {
+   "rfilename": "generation_config.json",
+   "blobId": "37a4c871d263a349f50e4a313db3e72164950702",
+   "size": 215
+  },
+  {
+   "rfilename": "model-00001-of-00002.safetensors",
+   "blobId": "325ea0681653014ec8f154acf3cb45e55d7d92ae",
+   "size": 4961251752,
+   "lfs": {
+    "sha256": "eb5fd5e97ddd07b56778733e9653c07312529cb00980a318fc3e1c4e3b5a8f1f",
+    "size": 4961251752,
+    "pointerSize": 135
+   }
+  },
+  {
+   "rfilename": "model-00002-of-00002.safetensors",
+   "blobId": "300ab0def99dbee79aa6c1de1f3c76c98852f992",
+   "size": 3639026128,
+   "lfs": {
+    "sha256": "fdde0e5aa5ced0fa203b3d50f4ab78168b7e3a3e08c6349f5cc9326666e1bb13",
+    "size": 3639026128,
+    "pointerSize": 135
+   }
+  },
+  {
+   "rfilename": "model.safetensors.index.json",
+   "blobId": "4b95241f208f06d324d17c9675568ec58dafd9fb",
+   "size": 90558
+  },
+  {
+   "rfilename": "preprocessor_config.json",
+   "blobId": "b1e00fc184f61b698181821169c6374cd5813e5c",
+   "size": 570
+  },
+  {
+   "rfilename": "processor_config.json",
+   "blobId": "453c7966d4b5d0b4a317c585989f64c58c2a6bf0",
+   "size": 70
+  },
+  {
+   "rfilename": "special_tokens_map.json",
+   "blobId": "1a6193244714d3d78be48666cb02cdbfac62ad86",
+   "size": 662
+  },
+  {
+   "rfilename": "tokenizer.json",
+   "blobId": "29401f984828a18bb09a6128d437c6766785eb66",
+   "size": 33384568,
+   "lfs": {
+    "sha256": "4667f2089529e8e7657cfb6d1c19910ae71ff5f28aa7ab2ff2763330affad795",
+    "size": 33384568,
+    "pointerSize": 133
+   }
+  },
+  {
+   "rfilename": "tokenizer.model",
+   "blobId": "14f810a829755bae3fafd6f97096dbd2eac556bd",
+   "size": 4689074,
+   "lfs": {
+    "sha256": "1299c11d7cf632ef3b4e11937501358ada021bbdf7c47638d13c0ee982f2e79c",
+    "size": 4689074,
+    "pointerSize": 132
+   }
+  },
+  {
+   "rfilename": "tokenizer_config.json",
+   "blobId": "7bdd14f0eaec30c8d2c56bc9d543587676e19c0f",
+   "size": 1156999
+  }
+ ],
+ "createdAt": "2025-02-20T21:20:07.000Z",
+ "safetensors": {
+  "parameters": {
+   "BF16": 4300079472
+  },
+  "total": 4300079472
+ },
+ "usedStorage": 50522179459
+}

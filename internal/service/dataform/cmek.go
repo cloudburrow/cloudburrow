@@ -106,7 +106,7 @@ func (s *Server) checkKey(ctx context.Context, resource string) error {
 // its policy, and the calls that name no repository's data.
 var keyFree = map[string]bool{
 	"CreateRepository": true, "GetRepository": true, "ListRepositories": true, "UpdateRepository": true,
-	"DeleteRepository": true, "MoveRepository": true, "GetIamPolicy": true, "SetIamPolicy": true, "TestIamPermissions": true,
+	"DeleteRepository": true, "DeleteRepositoryLongRunning": true, "MoveRepository": true, "GetIamPolicy": true, "SetIamPolicy": true, "TestIamPermissions": true,
 }
 
 // requestResource is the first string field of req naming a repository

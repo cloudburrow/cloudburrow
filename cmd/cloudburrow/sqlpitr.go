@@ -64,7 +64,12 @@ func pitrLock(deployment string) func() {
 	return mu.Unlock
 }
 
+// sh runs script in t's server; a MySQL 5.7 or 5.6 server runs MySQL
+// 8.0's statements in its own (sqladmin.MySQLDialect, #1524).
 func (d *sqlDumper) sh(ctx context.Context, t sqladmin.DumpTarget, stdin io.Reader, stdout io.Writer, script string, args ...string) error {
+	if t.MySQL {
+		script = sqladmin.MySQLDialect(t.Version, script)
+	}
 	argv := append([]string{"sh", "-c", script, "pitr"}, args...)
 	return d.exec(d.deployment(t))(ctx, stdin, stdout, argv...)
 }
@@ -271,7 +276,12 @@ const mysqlPITRUser = "cloudsqlpitr"
 // rotation, so every transaction up to now is in a closed file. It prints
 // the base's binary log file and position, then each binary log's name.
 const mysqlRecoverySource = mysqlPITRPrelude + `base="$R/base/$1.sql"
-mysql $MYSQL_LOCAL -e "CREATE USER IF NOT EXISTS '` + mysqlPITRUser + `'@'%' IDENTIFIED BY '$2'; ALTER USER '` + mysqlPITRUser + `'@'%' IDENTIFIED BY '$2'; GRANT REPLICATION SLAVE ON *.* TO '` + mysqlPITRUser + `'@'%'; FLUSH BINARY LOGS"
+case "$(mysql $MYSQL_LOCAL -N -B -e 'SELECT VERSION()')" in
+5.6*) # no CREATE USER IF NOT EXISTS, no ALTER USER ... IDENTIFIED BY (#1524)
+  mysql $MYSQL_LOCAL -e "GRANT REPLICATION SLAVE ON *.* TO '` + mysqlPITRUser + `'@'%' IDENTIFIED BY '$2'; FLUSH BINARY LOGS" ;;
+*)
+  mysql $MYSQL_LOCAL -e "CREATE USER IF NOT EXISTS '` + mysqlPITRUser + `'@'%' IDENTIFIED BY '$2'; ALTER USER '` + mysqlPITRUser + `'@'%' IDENTIFIED BY '$2'; GRANT REPLICATION SLAVE ON *.* TO '` + mysqlPITRUser + `'@'%'; FLUSH BINARY LOGS" ;;
+esac
 sed -n "s/.*SOURCE_LOG_FILE='\([^']*\)', SOURCE_LOG_POS=\([0-9]*\).*/\1 \2/p" "$base" | head -1
 dirname "$(mysql $MYSQL_LOCAL -N -B -e 'SELECT @@log_bin_basename')"
 mysql $MYSQL_LOCAL -N -B -e 'SHOW BINARY LOGS' | awk '{print $1}'`
@@ -426,7 +436,8 @@ func (d *sqlDumper) mysqlCopyTo(ctx context.Context, src, dst sqladmin.DumpTarge
 	}
 	password := randomHex(12)
 	defer func() {
-		_ = d.sh(context.Background(), src, nil, io.Discard, mysqlPITRPrelude+`mysql $MYSQL_LOCAL -e "DROP USER IF EXISTS '`+mysqlPITRUser+`'@'%'"`)
+		_ = d.sh(context.Background(), src, nil, io.Discard, mysqlPITRPrelude+`mysql $MYSQL_LOCAL -e "DROP USER IF EXISTS '`+mysqlPITRUser+`'@'%'" 2>/dev/null ||
+  mysql $MYSQL_LOCAL -e "DROP USER '`+mysqlPITRUser+`'@'%'"`)
 	}()
 	var info bytes.Buffer
 	if err := d.sh(ctx, src, nil, &info, mysqlRecoverySource, strconv.FormatInt(id, 10), password); err != nil {
@@ -540,12 +551,16 @@ func firstCommitAfter(raw []byte, from int64, at time.Time) (int64, bool, error)
 			// in 7 bytes, whose top bit says the original follows.
 			body := h[binlogHeaderLen:size]
 			const at = 1 + 16 + 8 + 1 + 8 + 8
-			if len(body) < at+7 {
-				return 0, false, fmt.Errorf("a GTID event at %d has no commit timestamp", off)
+			// MySQL 5.7's and 5.6's GTID events have no commit timestamp
+			// (8.0.1 added it), so theirs is the event's, in seconds: the
+			// time the transaction was written to the binary log at its
+			// commit (#1524).
+			ts := int64(binary.LittleEndian.Uint32(h[0:4])) * 1e6
+			if len(body) >= at+7 { // 5.7's is 42 bytes and its checksum, 5.6's 25 and it
+				var b [8]byte
+				copy(b[:7], body[at:at+7])
+				ts = int64(binary.LittleEndian.Uint64(b[:]) &^ (1 << 55))
 			}
-			var b [8]byte
-			copy(b[:7], body[at:at+7])
-			ts := int64(binary.LittleEndian.Uint64(b[:]) &^ (1 << 55))
 			if ts > target {
 				return off, true, nil
 			}

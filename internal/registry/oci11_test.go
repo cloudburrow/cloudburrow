@@ -169,7 +169,7 @@ func TestTokenAuth(t *testing.T) {
 		t.Fatal(err)
 	}
 	const good = "minted-token"
-	required := true
+	required, public := true, false
 	h := &Handler{Store: st, Lookup: func(loc, project, repo string) (Repo, bool) {
 		return Repo{"us-central1", project, repo}, project == "p"
 	}, Auth: &Auth{
@@ -181,12 +181,18 @@ func TestTokenAuth(t *testing.T) {
 		},
 		Authorize: func(bearer, perm, res string) error {
 			switch {
+			case bearer == AnonymousToken && !required:
+				return nil // enforcement off: nothing is checked
+			case bearer == AnonymousToken && perm == PermissionDownload && public, bearer == AnonymousToken && perm == "":
+				return nil
+			case bearer == AnonymousToken:
+				return &DeniedError{Permission: perm, Resource: res, Anonymous: true}
 			case bearer == "" || bearer == good:
 				return nil
 			case bearer == "reader" && (perm == PermissionDownload || perm == ""):
 				return nil
 			case bearer == "reader":
-				return &DeniedError{perm, res}
+				return &DeniedError{Permission: perm, Resource: res}
 			}
 			return ErrUnauthenticated
 		},
@@ -241,6 +247,47 @@ func TestTokenAuth(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != 401 || !strings.Contains(resp.Header.Get("WWW-Authenticate"), `scope="repository:p/r/app:pull"`) {
 		t.Errorf("tags without credentials, required = %d %v", resp.StatusCode, resp.Header)
+	}
+	// With credentials required, no credentials are allUsers: a pull of a
+	// repository that is not public is refused as Google refuses it, one
+	// that is public is served, and a push never is.
+	anon := crane.WithAuth(authn.Anonymous)
+	if _, err := crane.Digest(ref, anon); err == nil || !strings.Contains(err.Error(), "DENIED") ||
+		!strings.Contains(err.Error(), "Unauthenticated request. Unauthenticated requests do not have permission") {
+		t.Errorf("anonymous pull of a private repository = %v; want DENIED, unauthenticated", err)
+	}
+	public = true
+	if _, err := crane.Digest(ref, anon); err != nil {
+		t.Errorf("anonymous pull of a public repository: %v", err)
+	}
+	if err := crane.Push(img, host+"/p/r/app:anon", anon); err == nil || !strings.Contains(err.Error(), PermissionUpload) {
+		t.Errorf("anonymous push = %v; want DENIED %s", err, PermissionUpload)
+	}
+	public = false
+	// A cluster node's containerd pulls through the mirror (ns names
+	// {location}-docker.pkg.dev) as the instance's account, with or
+	// without the anonymous token.
+	mirror := srv.URL + "/v2/p/r/app/manifests/v1?ns=us-central1-docker.pkg.dev"
+	for _, auth := range []string{"", "Bearer " + AnonymousToken} {
+		req, _ := http.NewRequest(http.MethodHead, mirror, nil)
+		if auth != "" {
+			req.Header.Set("Authorization", auth)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != 200 {
+			t.Errorf("the cluster's pull through the mirror (%q) = %d; want 200", auth, resp.StatusCode)
+		}
+	}
+	req, _ := http.NewRequest(http.MethodPut, srv.URL+"/v2/p/r/app/manifests/v9?ns=us-central1-docker.pkg.dev", strings.NewReader("{}"))
+	req.Header.Set("Authorization", "Bearer "+AnonymousToken)
+	if resp, err := http.DefaultClient.Do(req); err != nil {
+		t.Fatal(err)
+	} else if resp.Body.Close(); resp.StatusCode != 403 {
+		t.Errorf("an anonymous push naming the mirror = %d; want 403", resp.StatusCode)
 	}
 	required = false
 	resp, _ = http.Get(srv.URL + "/v2/p/r/app/tags/list")
