@@ -53,8 +53,16 @@ func (s *Server) insertAddress(project, region string, b obj) (obj, error) {
 	default:
 		return nil, invalid("Invalid value for field 'resource.addressType': '%s'. Must be one of [EXTERNAL, INTERNAL]", typ)
 	}
-	if v := str(b, "ipVersion"); v != "" && v != "IPV4" {
-		return nil, unimplemented("ipVersion %s: IPv6 addresses are not served", v)
+	v6 := false
+	switch v := str(b, "ipVersion"); v {
+	case "", "IPV4":
+	case "IPV6":
+		if region == "" {
+			return nil, unimplemented("ipVersion IPV6 for a global address: global IPv6 addresses (load balancers) are not served")
+		}
+		v6 = true
+	default:
+		return nil, invalid("Invalid value for field 'resource.ipVersion': '%s'. Must be one of [IPV4, IPV6]", v)
 	}
 	tier := str(b, "networkTier")
 	o := obj{"kind": "compute#address", "name": name, "selfLink": rel, "addressType": typ, "status": "RESERVED"}
@@ -72,6 +80,12 @@ func (s *Server) insertAddress(project, region string, b obj) (obj, error) {
 	o["labelFingerprint"] = labelFingerprint(o["labels"])
 	purpose := str(b, "purpose")
 	addr := str(b, "address")
+	if v6 {
+		if err := s.regionalIPv6Locked(project, region, typ, b, o); err != nil {
+			return nil, err
+		}
+		typ = "IPV6" // filled: neither IPv4 case below applies
+	}
 	switch typ {
 	case "EXTERNAL":
 		switch tier {

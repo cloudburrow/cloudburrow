@@ -402,10 +402,11 @@ func TestComputeRegionalDisksThroughTheGoClient(t *testing.T) {
 // subnet with internal IPv6 (a /64 of the network's /48) and one with
 // external IPv6; an IPv4-only subnet patched to dual-stack; dual-stack VMs
 // given /96 addresses (ipv6Address, or an ipv6AccessConfigs entry), a
-// dual-stack interface on an IPv4-only subnet refused; and over the VPC
+// dual-stack interface on an IPv4-only subnet refused; a static internal
+// IPv6 address given to one of them, IN_USE; and over the VPC
 // network an IPv6 connection between two VMs that a rule of IPv6 ranges
 // allows, a port it does not allow refused by the implied deny.
-// covers-pending (EPF: make this "covers:" once run): compute.networks.insert, compute.networks.get, compute.subnetworks.insert, compute.subnetworks.get, compute.subnetworks.patch, compute.firewalls.insert, compute.instances.insert, compute.instances.get
+// covers-pending (EPF: make this "covers:" once run): compute.networks.insert, compute.networks.get, compute.subnetworks.insert, compute.subnetworks.get, compute.subnetworks.patch, compute.firewalls.insert, compute.instances.insert, compute.instances.get, compute.addresses.insert, compute.addresses.get
 func TestComputeIPv6ThroughTheGoClient(t *testing.T) {
 	h := New(t)
 	opts := computeOpts(t, h)
@@ -419,10 +420,12 @@ func TestComputeIPv6ThroughTheGoClient(t *testing.T) {
 	subs, _ := computeapi.NewSubnetworksRESTClient(ctx, opts...)
 	fws, _ := computeapi.NewFirewallsRESTClient(ctx, opts...)
 	insts, _ := computeapi.NewInstancesRESTClient(ctx, opts...)
+	addrs, _ := computeapi.NewAddressesRESTClient(ctx, opts...)
 	p := h.Project()
 	const zone, region = "us-central1-a", "us-central1"
 	sfx := fmt.Sprintf("%d", time.Now().UnixNano()%1e6)
 	nw := "a1-v6-" + sfx
+	ip6 := nw + "-ip"
 	in6, ex6, v4 := nw+"-in", nw+"-ex", nw+"-v4"
 	srv, cli, ext := "a1-v6s-"+sfx, "a1-v6c-"+sfx, "a1-v6x-"+sfx
 	fw := nw + "-allow6"
@@ -440,6 +443,9 @@ func TestComputeIPv6ThroughTheGoClient(t *testing.T) {
 			}()
 		}
 		wg.Wait()
+		if op, err := addrs.Delete(c, &computepb.DeleteAddressRequest{Project: p, Region: region, Address: ip6}); err == nil {
+			_ = op.Wait(c)
+		}
 		if op, err := fws.Delete(c, &computepb.DeleteFirewallRequest{Project: p, Firewall: fw}); err == nil {
 			_ = op.Wait(c)
 		}
@@ -495,12 +501,23 @@ func TestComputeIPv6ThroughTheGoClient(t *testing.T) {
 	sh := newA1SSH(t, addr, p)
 	script := "#!/bin/bash\nfor p in 8080 8081; do systemd-run --unit=listen6-$p nc -6 -lk $p; done\n"
 	md := []*computepb.Items{{Key: proto.String("ssh-keys"), Value: proto.String(sh.keyLine)}, {Key: proto.String("startup-script"), Value: proto.String(script)}}
+	// A static internal IPv6 address, the server's.
+	wait(addrs.Insert(ctx, &computepb.InsertAddressRequest{Project: p, Region: region, AddressResource: &computepb.Address{Name: proto.String(ip6),
+		AddressType: proto.String("INTERNAL"), IpVersion: proto.String("IPV6"), Subnetwork: proto.String("regions/" + region + "/subnetworks/" + in6)}}))
+	static6, err := addrs.Get(ctx, &computepb.GetAddressRequest{Project: p, Region: region, Address: ip6})
+	if err != nil || static6.GetPrefixLength() != 96 || static6.GetStatus() != "RESERVED" {
+		t.Fatalf("static internal IPv6 address: %v %v", static6, err)
+	}
 	var wg sync.WaitGroup
 	for _, v := range [][2]string{{srv, in6}, {cli, in6}, {ext, ex6}} {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			wait(insts.Insert(ctx, &computepb.InsertInstanceRequest{Project: p, Zone: zone, InstanceResource: a1VM(v[0], zone, dual(v[1]), md)}))
+			nic := dual(v[1])
+			if v[0] == srv {
+				nic.Ipv6Address = proto.String(static6.GetAddress())
+			}
+			wait(insts.Insert(ctx, &computepb.InsertInstanceRequest{Project: p, Zone: zone, InstanceResource: a1VM(v[0], zone, nic, md)}))
 		}()
 	}
 	wg.Wait()
@@ -518,6 +535,12 @@ func TestComputeIPv6ThroughTheGoClient(t *testing.T) {
 	sn, cn, xn := nicOf(srv), nicOf(cli), nicOf(ext)
 	if sn.GetStackType() != "IPV4_IPV6" || sn.GetIpv6AccessType() != "INTERNAL" || sn.GetInternalIpv6PrefixLength() != 96 || sn.GetIpv6Address() == "" || sn.GetIpv6Address() == cn.GetIpv6Address() {
 		t.Fatalf("internal dual-stack NICs: %v / %v", sn, cn)
+	}
+	if sn.GetIpv6Address() != static6.GetAddress() {
+		t.Fatalf("the server's IPv6 address %s, want the static %s", sn.GetIpv6Address(), static6.GetAddress())
+	}
+	if a, _ := addrs.Get(ctx, &computepb.GetAddressRequest{Project: p, Region: region, Address: ip6}); a.GetStatus() != "IN_USE" {
+		t.Fatalf("the static IPv6 address: %v", a)
 	}
 	if acs := xn.GetIpv6AccessConfigs(); len(acs) != 1 || acs[0].GetType() != "DIRECT_IPV6" || acs[0].GetExternalIpv6PrefixLength() != 96 || !strings.HasPrefix(acs[0].GetExternalIpv6(), "2600:190") {
 		t.Fatalf("external dual-stack NIC: %v", xn)

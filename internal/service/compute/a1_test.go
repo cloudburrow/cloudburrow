@@ -288,3 +288,54 @@ func TestIPv6DualStack(t *testing.T) {
 		t.Fatalf("the IPv6 rule is not compiled per family:\n%s", conf)
 	}
 }
+
+// TestStaticIPv6Addresses (#2140): a static internal IPv6 address of a
+// dual-stack subnet and an external one, given to VMs as their interface's
+// IPv6 address, IN_USE until the VM goes; the refusals.
+func TestStaticIPv6Addresses(t *testing.T) {
+	s, _, call := parityFixture(t)
+	call("POST", "global/networks", nil, obj{"name": "v6", "autoCreateSubnetworks": false, "enableUlaInternalIpv6": true})
+	call("POST", "regions/us-central1/subnetworks", nil, obj{"name": "in6", "network": "global/networks/v6", "ipCidrRange": "10.6.0.0/24",
+		"stackType": "IPV4_IPV6", "ipv6AccessType": "INTERNAL"})
+	call("POST", "regions/us-central1/subnetworks", nil, obj{"name": "ex6", "network": "global/networks/v6", "ipCidrRange": "10.7.0.0/24",
+		"stackType": "IPV4_IPV6", "ipv6AccessType": "EXTERNAL"})
+	call("POST", "regions/us-central1/subnetworks", nil, obj{"name": "v4", "network": "global/networks/v6", "ipCidrRange": "10.8.0.0/24"})
+	callErr(t, s, 400, "POST", "regions/us-central1/addresses", obj{"name": "x", "addressType": "INTERNAL", "ipVersion": "IPV6", "subnetwork": "v4"})
+	callErr(t, s, 400, "POST", "regions/us-central1/addresses", obj{"name": "x", "addressType": "EXTERNAL", "ipVersion": "IPV6", "subnetwork": "in6"})
+	callErr(t, s, 501, "POST", "global/addresses", obj{"name": "x", "ipVersion": "IPV6"})
+	call("POST", "regions/us-central1/addresses", nil, obj{"name": "i6", "addressType": "INTERNAL", "ipVersion": "IPV6", "subnetwork": "in6"})
+	call("POST", "regions/us-central1/addresses", nil, obj{"name": "e6", "addressType": "EXTERNAL", "ipVersion": "IPV6", "subnetwork": "regions/us-central1/subnetworks/ex6"})
+	i6 := call("GET", "regions/us-central1/addresses/i6", nil, nil)
+	e6 := call("GET", "regions/us-central1/addresses/e6", nil, nil)
+	sub := call("GET", "regions/us-central1/subnetworks/in6", nil, nil)
+	if i6["ipVersion"] != "IPV6" || i6["prefixLength"] != 96.0 || i6["status"] != "RESERVED" ||
+		!strings.HasPrefix(str(i6, "address"), strings.TrimSuffix(str(sub, "ipv6CidrRange"), "::/64")) {
+		t.Fatalf("i6 = %v", i6)
+	}
+	if e6["networkTier"] != "PREMIUM" || !strings.HasPrefix(str(e6, "address"), "2600:190") {
+		t.Fatalf("e6 = %v", e6)
+	}
+	callErr(t, s, 400, "POST", "regions/us-central1/addresses", obj{"name": "dup", "addressType": "INTERNAL", "ipVersion": "IPV6", "subnetwork": "in6", "address": i6["address"]})
+	call("POST", "zones/us-central1-a/instances", nil, vmBody("a", obj{"networkInterfaces": []any{map[string]any{
+		"subnetwork": "regions/us-central1/subnetworks/in6", "stackType": "IPV4_IPV6", "ipv6Address": i6["address"]}}}))
+	call("POST", "zones/us-central1-a/instances", nil, vmBody("b", obj{"networkInterfaces": []any{map[string]any{
+		"subnetwork": "regions/us-central1/subnetworks/ex6", "stackType": "IPV4_IPV6",
+		"ipv6AccessConfigs": []any{map[string]any{"type": "DIRECT_IPV6", "externalIpv6": e6["address"]}}}}}))
+	callErr(t, s, 400, "POST", "zones/us-central1-a/instances", vmBody("c", obj{"networkInterfaces": []any{map[string]any{
+		"subnetwork": "regions/us-central1/subnetworks/in6", "stackType": "IPV4_IPV6", "ipv6Address": i6["address"]}}}))
+	a := listOf(call("GET", "zones/us-central1-a/instances/a", nil, nil)["networkInterfaces"])[0].(map[string]any)
+	b := listOf(call("GET", "zones/us-central1-a/instances/b", nil, nil)["networkInterfaces"])[0].(map[string]any)
+	if a["ipv6Address"] != i6["address"] || listOf(b["ipv6AccessConfigs"])[0].(map[string]any)["externalIpv6"] != e6["address"] {
+		t.Fatalf("a %v, b %v", a, b)
+	}
+	for _, n := range []string{"i6", "e6"} {
+		if o := call("GET", "regions/us-central1/addresses/"+n, nil, nil); o["status"] != "IN_USE" {
+			t.Fatalf("%s = %v", n, o)
+		}
+	}
+	callErr(t, s, 400, "DELETE", "regions/us-central1/addresses/i6", nil)
+	call("DELETE", "zones/us-central1-a/instances/a", nil, nil)
+	if o := call("GET", "regions/us-central1/addresses/i6", nil, nil); o["status"] != "RESERVED" {
+		t.Fatalf("i6 after its VM's delete = %v", o)
+	}
+}

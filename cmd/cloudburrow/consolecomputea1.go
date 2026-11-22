@@ -278,3 +278,84 @@ func nicExternalIPv6(n map[string]any) string {
 	}
 	return ""
 }
+
+// subnetIpv6AccessEditField is Edit subnet's IPv6 access type: chosen when
+// the subnet becomes dual-stack, fixed once it is (Google's subnetworks.patch
+// does not change it, vpc/docs/create-modify-vpc-networks#add-ipv6, read
+// 2026-11-22).
+func subnetIpv6AccessEditField(s map[string]any) console.Field {
+	f := ipv6AccessTypeField("ipv6AccessType", "stackType")
+	if at := vpcStr(s, "ipv6AccessType"); at != "" {
+		f.Default = strings.ToUpper(at[:1]) + strings.ToLower(at[1:])
+		f.Immutable = true
+	}
+	return f
+}
+
+// subnetStackEdit changes a subnet's IP stack type (subnetworks.patch):
+// IPv4 to dual-stack with its IPv6 access type, or back while no interface
+// uses its IPv6 range, as the API refuses otherwise.
+func (p computeNetworksProvider) subnetStackEdit(project, base string, s map[string]any, values map[string]string) error {
+	st := values["stackType"]
+	if st == "" || st == vpcOr(vpcStr(s, "stackType"), "IPV4_ONLY") {
+		return nil
+	}
+	patch := map[string]any{"stackType": st, "fingerprint": vpcStr(s, "fingerprint")}
+	if st == "IPV4_IPV6" {
+		patch["ipv6AccessType"] = strings.ToUpper(vpcOr(values["ipv6AccessType"], "Internal"))
+	}
+	_, err := p.call("PATCH", project, base, nil, patch)
+	return err
+}
+
+// withStaticExternal adds the project's reserved regional external
+// addresses to Create an instance's External IPv4 address, as Google's
+// list offers them (compute/docs/ip-addresses/configure-static-external-ip-address,
+// read 2026-11-22): REGION/NAME, labelled with the address.
+func (p computeInstancesProvider) withStaticExternal(project string, fields []console.Field) []console.Field {
+	m, err := p.call("GET", project, "aggregated/addresses", nil, nil)
+	if err != nil {
+		return fields
+	}
+	addrs := aggregatedItems(m, "addresses")
+	for i := range fields {
+		if fields[i].Name != "externalIP" {
+			continue
+		}
+		f := &fields[i]
+		labels := map[string]string{}
+		for k, v := range f.OptionLabels {
+			labels[k] = v
+		}
+		for _, a := range addrs {
+			if vpcStr(a, "addressType") != "EXTERNAL" || vpcStr(a, "status") != "RESERVED" || vpcStr(a, "region") == "" {
+				continue
+			}
+			opt := vpcLast(vpcStr(a, "region")) + "/" + vpcStr(a, "name")
+			f.Options = append(f.Options, opt)
+			labels[opt] = vpcStr(a, "name") + " (" + vpcStr(a, "address") + ", " + vpcLast(vpcStr(a, "region")) + ")"
+		}
+		f.OptionLabels = labels
+		f.Help = "Ephemeral gives the instance an external IP of its own from 192.0.2.0/24; a reserved static address of the instance's region keeps its IP. Its port 22 is forwarded to a port on 127.0.0.1."
+	}
+	return fields
+}
+
+// createAccessConfig is the instance's access config for External IPv4
+// address: none, ephemeral of the tier chosen, or a reserved address
+// (natIP), of the address's own tier.
+func (p computeInstancesProvider) createAccessConfig(project string, values map[string]string) (map[string]any, error) {
+	ext := values["externalIP"]
+	if ext == "None" {
+		return nil, nil
+	}
+	ac := map[string]any{"name": "External NAT", "type": "ONE_TO_ONE_NAT", "networkTier": strings.ToUpper(vpcOr(values["networkTier"], "Premium"))}
+	if region, name, ok := strings.Cut(ext, "/"); ok {
+		a, err := p.call("GET", project, "regions/"+region+"/addresses/"+name, nil, nil)
+		if err != nil {
+			return nil, fmt.Errorf("external IPv4 address %s: %w", name, err)
+		}
+		ac["natIP"], ac["networkTier"] = vpcStr(a, "address"), vpcOr(vpcStr(a, "networkTier"), "PREMIUM")
+	}
+	return ac, nil
+}

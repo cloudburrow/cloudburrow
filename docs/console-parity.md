@@ -971,10 +971,11 @@ Audited against Google's public docs (vpc/docs, firewall/docs, read 2026-11-22).
 - [x] VPC networks: Networks in current project and Subnets in current project tabs; Create VPC network's preset firewall rules for a custom or auto network; a subnet's page with Edit.
 - [x] Firewall policies, its VPC firewall rules table; Create firewall rule as Google's form (direction, targets, source filters with a second filter, Allow all or Specified protocols and ports, Logs); the rules enforced on the VMs.
 - [x] Routes: Effective routes (by network and region, peering subnet routes included) and Route management tabs; Create route's Route type, IP version and next hop an instance (VPN tunnels and internal load balancers drawn unavailable).
-- [x] IP addresses: External and Internal tabs, each VM's ephemeral addresses listed (an external one its own 192.0.2.0/24 address); Promote to static IP address on an internal or external one; Reserve external static IP address's Attached to, assigning it to a VM; In use by; Reserve internal static IP address's IP version (IPv6 drawn unavailable), Assign automatically or Let me choose, Purpose.
+- [x] IP addresses: External and Internal tabs, each VM's ephemeral addresses listed (an external one its own 192.0.2.0/24 address); Promote to static IP address on an internal or external one; Reserve external static IP address's Attached to, assigning it to a VM; In use by; Reserve internal static IP address's IP version, Assign automatically or Let me choose, Purpose.
 - [x] VPC network peering: Create peering connection (this or another project, custom route exchange), Edit, Delete; ACTIVE once both sides exist; peered networks' VMs reach each other.
 - [x] IPv6: Create VPC network's ULA internal IPv6 range (automatic or given); a subnet's IP stack type IPv4 and IPv6 (dual-stack) with IPv6 access type Internal or External (Add subnet, Create VPC network); the Subnets list's IP stack type, Internal and External IPv6 ranges; Create an instance's network interface IP stack type; a VM's interfaces with their IPv6 addresses; firewall rules' IPv6 source and destination ranges; a dual-stack peering.
-- [ ] Not local: IPv6-only subnets, IPv6 routes and static internal IPv6 addresses (drawn unavailable with the reason), Cloud VPN and load balancer next hops (gaps.md).
+- [x] Edit subnet's IP stack type, IPv4 to dual-stack (its IPv6 access type then fixed) and back; Reserve internal static IP address's IP version IPv6; Create an instance's External IPv4 address offering the region's reserved addresses.
+- [ ] Not yet: IPv6 routes (drawn unavailable with the reason). Not local: IPv6-only subnets, Cloud VPN and load balancer next hops (gaps.md).
 
 #### Eventarc Advanced (#1947, #2006)
 

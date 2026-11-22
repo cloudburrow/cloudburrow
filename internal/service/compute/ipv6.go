@@ -80,6 +80,8 @@ func (s *Server) usedV6Locked() map[string]bool {
 			used[str(o, "internalIpv6Range")] = true
 		case strings.Contains(k, "/subnetworks/"):
 			used[str(o, "ipv6CidrRange")] = true
+		case strings.Contains(k, "/addresses/") && str(o, "ipVersion") == "IPV6":
+			used[str(o, "address")] = true
 		case strings.Contains(k, "/instances/"):
 			for _, e := range listOf(o["networkInterfaces"]) {
 				nic, _ := e.(map[string]any)
@@ -202,16 +204,21 @@ func (s *Server) nicV6Locked(e map[string]any, nic obj, sub obj, field string) e
 	if err != nil {
 		return invalid("Invalid value for field '%s.subnetwork': the subnetwork has no IPv6 range.", field)
 	}
-	used := s.usedV6Locked()
-	var addr string
-	for i := uint64(1); i < 1<<32; i++ {
-		if a := v6Add(base.IP, i, 32).String(); !used[a] {
-			addr = a
-			break
-		}
+	// An address asked for: a reserved static IPv6 address of the subnet
+	// (taken), or a free /96 of its range (ephemeral).
+	want, wantField := str(e, "ipv6Address"), field+".ipv6Address"
+	if acs := listOf(e["ipv6AccessConfigs"]); str(sub, "ipv6AccessType") == "EXTERNAL" && len(acs) > 0 {
+		ac, _ := acs[0].(map[string]any)
+		want, wantField = str(ac, "externalIpv6"), field+".ipv6AccessConfigs[0].externalIpv6"
+	} else if str(sub, "ipv6AccessType") == "EXTERNAL" {
+		want = ""
 	}
-	if addr == "" {
-		return errf(http.StatusBadRequest, "ipSpaceExhausted", "IPv6 space of '%s' is exhausted.", str(sub, "name"))
+	addr, static, err := s.wantV6Locked(sub, base, want, wantField)
+	if err != nil {
+		return err
+	}
+	if static != "" {
+		nic["_staticV6"] = static
 	}
 	nic["stackType"], nic["ipv6AccessType"] = "IPV4_IPV6", str(sub, "ipv6AccessType")
 	if str(sub, "ipv6AccessType") == "INTERNAL" {
@@ -318,4 +325,103 @@ func (s *Server) dualStackPeeringLocked(network, peer string) bool {
 		}
 	}
 	return false
+}
+
+// freeV6Locked is the first free /96 of a subnet's /64.
+func (s *Server) freeV6Locked(sub obj, base *net.IPNet) (string, error) {
+	used := s.usedV6Locked()
+	for i := uint64(1); i < 1<<32; i++ {
+		if a := v6Add(base.IP, i, 32).String(); !used[a] {
+			return a, nil
+		}
+	}
+	return "", errf(http.StatusBadRequest, "ipSpaceExhausted", "IPv6 space of '%s' is exhausted.", str(sub, "name"))
+}
+
+// wantV6Locked is the IPv6 address an interface gets on sub: want when
+// given (a RESERVED static address of the subnet, whose name it returns, or
+// a free /96 of its range), else the first free /96.
+func (s *Server) wantV6Locked(sub obj, base *net.IPNet, want, field string) (string, string, error) {
+	if want == "" {
+		a, err := s.freeV6Locked(sub, base)
+		return a, "", err
+	}
+	ip := net.ParseIP(want)
+	if ip == nil || ip.To4() != nil {
+		return "", "", invalid("Invalid value for field '%s': '%s'. Must be a valid IPv6 address.", field, want)
+	}
+	want = ip.String()
+	for k, a := range s.res {
+		if !strings.Contains(k, "/addresses/") || str(a, "ipVersion") != "IPV6" || str(a, "address") != want {
+			continue
+		}
+		if str(a, "subnetwork") != str(sub, "selfLink") {
+			return "", "", invalid("Invalid value for field '%s': '%s'. The address '%s' is not of subnetwork '%s'.", field, want, str(a, "name"), str(sub, "name"))
+		}
+		if str(a, "status") != "RESERVED" {
+			return "", "", invalid("Invalid value for field '%s': '%s'. The IP address '%s' is already being used by another resource.", field, want, want)
+		}
+		return want, k, nil
+	}
+	if !base.Contains(ip) {
+		return "", "", invalid("Invalid value for field '%s': '%s'. The address is not within the IPv6 range of subnetwork '%s' (%s).", field, want, str(sub, "name"), base)
+	}
+	if s.usedV6Locked()[want] {
+		return "", "", invalid("Invalid value for field '%s': '%s'. The IP address '%s' is already being used by another resource.", field, want, want)
+	}
+	return want, "", nil
+}
+
+// regionalIPv6Locked fills o, a new static regional IPv6 address
+// (vpc/docs/reserve-static-internal-ip-address#reserve_a_static_internal_ipv6_address,
+// compute/docs/ip-addresses/configure-ipv6-address, read 2026-11-22): of a
+// dual-stack subnet whose IPv6 access type is the address type's
+// (INTERNAL, or EXTERNAL in the Premium tier), a /96 of its range, given
+// or chosen.
+func (s *Server) regionalIPv6Locked(project, region, typ string, b, o obj) error {
+	sub := Rel(str(b, "subnetwork"), project)
+	if sub == "" {
+		return required("resource.subnetwork")
+	}
+	if !strings.Contains(sub, "/") {
+		sub = subnetRel(project, region, sub)
+	}
+	so, ok := s.res[sub]
+	if !ok {
+		return notFound(sub)
+	}
+	if lastSeg(str(so, "region")) != region {
+		return invalid("Invalid value for field 'resource.subnetwork': '%s'. The subnetwork must be in region '%s'.", sub, region)
+	}
+	if str(so, "stackType") != "IPV4_IPV6" || str(so, "ipv6AccessType") != typ {
+		return invalid("Invalid value for field 'resource.subnetwork': '%s'. An %s IPv6 address needs a dual-stack subnetwork whose IPv6 access type is %s.", sub, typ, typ)
+	}
+	if v, ok := b["prefixLength"].(float64); ok && v != 0 && v != 96 {
+		return invalid("Invalid value for field 'resource.prefixLength': '%v'. An IPv6 address of a VM is a /96.", v)
+	}
+	if p := str(b, "purpose"); p != "" && p != "GCE_ENDPOINT" {
+		return unimplemented("purpose %s for an IPv6 address", p)
+	}
+	if t := str(b, "networkTier"); typ == "EXTERNAL" && t != "" && t != "PREMIUM" {
+		return invalid("Invalid value for field 'resource.networkTier': '%s'. External IPv6 addresses are in the Premium tier.", t)
+	}
+	_, base, err := net.ParseCIDR(str(so, "ipv6CidrRange"))
+	if err != nil {
+		return invalid("Invalid value for field 'resource.subnetwork': the subnetwork has no IPv6 range.")
+	}
+	addr, static, err := s.wantV6Locked(so, base, str(b, "address"), "resource.address")
+	if err != nil {
+		return err
+	}
+	if static != "" {
+		return invalid("Invalid value for field 'resource.address': '%s'. The IP address is already reserved.", addr)
+	}
+	o["address"], o["ipVersion"], o["prefixLength"] = addr, "IPV6", 96.0
+	o["subnetwork"], o["network"], o["ipv6EndpointType"] = sub, str(so, "network"), "VM"
+	if typ == "INTERNAL" {
+		o["purpose"] = "GCE_ENDPOINT"
+	} else {
+		o["networkTier"] = "PREMIUM"
+	}
+	return nil
 }

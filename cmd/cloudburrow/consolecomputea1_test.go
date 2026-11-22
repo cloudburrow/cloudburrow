@@ -135,6 +135,23 @@ func TestConsoleComputeA1(t *testing.T) {
 		sr.Fields["External IPv6 ranges"] != "—" {
 		t.Fatalf("six-a's row = %+v", sr)
 	}
+	// Edit subnet: an IPv4 subnet made dual-stack, its access type then fixed.
+	if _, err := s.call("POST", project, "regions/us-central1/subnetworks", nil, map[string]any{"name": "six-b", "network": "global/networks/six",
+		"ipCidrRange": "10.61.0.0/24"}); err != nil {
+		t.Fatal(err)
+	}
+	sub := []string{"six", "subnets", "us-central1", "six-b"}
+	sd, _ := nets.Detail(ctx, project, sub)
+	if f := vpcField(sd.Edit.Fields, "stackType"); f == nil || f.Immutable || f.Default != "IPV4_ONLY" {
+		t.Fatalf("Edit subnet's IP stack type = %+v", f)
+	}
+	if err := nets.Edit(ctx, project, sub, map[string]string{"stackType": "IPV4_IPV6", "ipv6AccessType": "Internal", "ipCidrRange": "10.61.0.0/24"}); err != nil {
+		t.Fatal(err)
+	}
+	sd, _ = nets.Detail(ctx, project, sub)
+	if f := vpcField(sd.Edit.Fields, "ipv6AccessType"); f.Default != "Internal" || !f.Immutable || vpcField(sd.Edit.Fields, "stackType").Default != "IPV4_IPV6" {
+		t.Fatalf("six-b after Edit = %+v", sd.Edit.Fields)
+	}
 	if f := vpcField(nets.createFieldsForTest(), "subnetStackType"); f.UnavailableOptions["IPV4_IPV6"] != "" {
 		t.Error("dual-stack is still drawn unavailable")
 	}
@@ -186,6 +203,38 @@ func TestConsoleComputeA1(t *testing.T) {
 	el, _ := addrs.List(ctx, project)
 	if r := vpcRow(el, "app-ip"); r == nil || r.Fields["In use by"] != "app" {
 		t.Fatalf("app-ip's row = %+v", r)
+	}
+
+	// Create an instance with a reserved static external address.
+	if _, err := s.call("POST", project, "regions/us-central1/addresses", nil, map[string]any{"name": "free-ip"}); err != nil {
+		t.Fatal(err)
+	}
+	free, _ := s.call("GET", project, "regions/us-central1/addresses/free-ip", nil, nil)
+	ext := vpcField(vms.CreateFormFor(ctx, project), "externalIP")
+	if strings.Join(ext.Options, ",") != "Ephemeral,None,us-central1/free-ip" || !strings.Contains(ext.OptionLabels["us-central1/free-ip"], vpcStr(free, "address")) {
+		t.Fatalf("External IPv4 address = %v %v", ext.Options, ext.OptionLabels)
+	}
+	if _, err := vms.Create(ctx, project, map[string]string{"name": "fixed", "zone": "us-central1-a", "machineType": "e2-small", "externalIP": "us-central1/free-ip"}); err != nil {
+		t.Fatal(err)
+	}
+	settle(t, s, project)
+	if got := vmExternalIP(mustInstance(t, vms, project, "fixed")); got != vpcStr(free, "address") {
+		t.Fatalf("fixed's external IP = %s, want %s", got, vpcStr(free, "address"))
+	}
+
+	// Reserve internal static IP address, IPv6, on the dual-stack subnet.
+	for _, a := range addrs.ListActions(ctx, project) {
+		if f := vpcField(a.Fields, "ipVersion"); a.ID == "reserve-internal" && len(f.UnavailableOptions) != 0 {
+			t.Fatalf("IP version = %+v", f)
+		}
+	}
+	if err := addrs.ActAt(ctx, project, nil, "reserve-internal", map[string]string{"name": "six-ip", "ipVersion": "IPv6", "network": "six",
+		"region": "us-central1", "subnetwork": "six-a", "assign": "Assign automatically", "purpose": "Non-shared"}); err != nil {
+		t.Fatal(err)
+	}
+	il, _ := computeInternalAddressesProvider{addrs}.List(ctx, project)
+	if r := vpcRow(il, "six-ip"); r == nil || r.Fields["Version"] != "IPv6" || !strings.HasPrefix(r.Fields["IP address"], "fd2") || !strings.HasSuffix(r.Fields["IP address"], "/96") {
+		t.Fatalf("six-ip's row = %+v", r)
 	}
 }
 

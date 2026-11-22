@@ -458,7 +458,7 @@ func (p computeInstancesProvider) CreateFormFor(ctx context.Context, project str
 		_, f := p.CreateForm()
 		return f
 	}
-	return p.createFields(p.snapshotScheduleNames(project), p.networkNames(ctx, project))
+	return p.withStaticExternal(project, p.createFields(p.snapshotScheduleNames(project), p.networkNames(ctx, project)))
 }
 
 func (p computeInstancesProvider) createFields(schedules, networks []string) []console.Field {
@@ -597,9 +597,10 @@ func (p computeInstancesProvider) createBody(project string, values map[string]s
 	if s := strings.TrimSpace(values["subnetwork"]); s != "" {
 		nic["subnetwork"] = "regions/" + zone[:strings.LastIndex(zone, "-")] + "/subnetworks/" + s
 	}
-	if values["externalIP"] != "None" {
-		nic["accessConfigs"] = []any{map[string]any{"name": "External NAT", "type": "ONE_TO_ONE_NAT",
-			"networkTier": strings.ToUpper(vpcOr(values["networkTier"], "Premium"))}}
+	if ac, err := p.createAccessConfig(project, values); err != nil {
+		return nil, err
+	} else if ac != nil {
+		nic["accessConfigs"] = []any{ac}
 	}
 	if ip := strings.TrimSpace(values["internalIP"]); ip != "" {
 		nic["networkIP"] = ip

@@ -605,6 +605,9 @@ func (s *Server) insertInstance(c call, zone string) (obj, error) {
 		if st := str(e.(obj), "_staticNat"); st != "" {
 			s.takeAddressLocked(st, rel)
 		}
+		if st := str(e.(obj), "_staticV6"); st != "" {
+			s.takeAddressLocked(st, rel)
+		}
 	}
 	s.res[rel] = norm(o)
 	vm := s.vmSpecLocked(s.res[rel])

@@ -589,6 +589,9 @@ func (p computeNetworksProvider) subnetEdit(project string, path []string, value
 			return err
 		}
 	}
+	if err := p.subnetStackEdit(project, base, s, values); err != nil {
+		return err
+	}
 	if v, ok := values["privateGoogleAccess"]; ok && (v == "On") != (s["privateIpGoogleAccess"] == true) {
 		if _, err := p.call("POST", project, base+"/setPrivateIpGoogleAccess", nil, map[string]any{"privateIpGoogleAccess": v == "On"}); err != nil {
 			return err
@@ -688,7 +691,12 @@ func (p computeNetworksProvider) subnetDetail(project string, path []string) (co
 			Fields: []console.Field{
 				{Name: "ipCidrRange", Label: "IP address range", Type: "text", Required: true, Default: vpcStr(s, "ipCidrRange"),
 					Help: "A broader range containing the current one, for example 10.0.0.0/20 for 10.0.0.0/24."},
-				func() console.Field { f := stackTypeField("stackType"); f.Immutable = true; return f }(),
+				func() console.Field {
+					f := stackTypeField("stackType")
+					f.Default = vpcOr(vpcStr(s, "stackType"), "IPV4_ONLY")
+					return f
+				}(),
+				subnetIpv6AccessEditField(s),
 				func() console.Field { f := secondaryRangesField(""); f.Default = secondaryRows(s); return f }(),
 				{Name: "privateGoogleAccess", Label: "Private Google Access", Type: "radio", Default: vpcOnOff(s["privateIpGoogleAccess"] == true), Options: []string{"On", "Off"}},
 				flowLogsField("flowLogs", vpcOnOff(flowLogsOn(s))),
@@ -1544,7 +1552,7 @@ func (p computeAddressesProvider) listOf(project, accessType string) (console.Li
 			target := []string{region, vpcStr(a, "name")}
 			listing.Items = append(listing.Items, console.Resource{Name: vpcStr(a, "name"), Status: vpcTitle(vpcStr(a, "status")), Target: target,
 				Actions: p.addressActions(a),
-				Fields: map[string]string{"IP address": ip, "Access type": access, "Region": region, "Type": "Static", "Version": "IPv4",
+				Fields: map[string]string{"IP address": ip, "Access type": access, "Region": region, "Type": "Static", "Version": map[bool]string{true: "IPv6", false: "IPv4"}[vpcStr(a, "ipVersion") == "IPV6"],
 					"Purpose": vpcDash(vpcStr(a, "purpose")), "Network": vpcDash(vpcLast(vpcStr(a, "network"))), "Subnetwork": vpcDash(vpcLast(vpcStr(a, "subnetwork"))),
 					"Network tier": vpcDash(vpcTitle(vpcStr(a, "networkTier"))), "In use by": vpcDash(strings.Join(users, ", "))}})
 		}
@@ -1630,7 +1638,7 @@ func (p computeAddressesProvider) ListActions(ctx context.Context, project strin
 		// IP address (Assign automatically or Let me choose) and Purpose.
 		{ID: "reserve-internal", Label: "Reserve internal static IP address", Submit: "Reserve", Fields: []console.Field{name, desc,
 			{Name: "ipVersion", Label: "IP version", Type: "radio", Default: "IPv4", Options: []string{"IPv4", "IPv6"},
-				UnavailableOptions: map[string]string{"IPv6": "IPv6 is not served: addresses are IPv4 only."}},
+				Help: "IPv6 reserves a /96 of a dual-stack subnet with internal IPv6 access; give it to a VM as its interface's IPv6 address."},
 			netField, computeRegionField("region"),
 			{Name: "subnetwork", Label: "Subnetwork", Type: "text", Required: true, Default: "default", Help: "The subnet, in the region, the address is in."},
 			{Name: "assign", Label: "Static IP address", Type: "select", Default: "Assign automatically", Options: []string{"Assign automatically", "Let me choose"}},
@@ -1779,6 +1787,9 @@ func (p computeAddressesProvider) ActAt(ctx context.Context, project string, pat
 		}
 		if values["purpose"] == "Shared" {
 			b["purpose"] = "SHARED_LOADBALANCER_VIP"
+		}
+		if values["ipVersion"] == "IPv6" {
+			b["ipVersion"] = "IPV6"
 		}
 		_, err := p.call("POST", project, "regions/"+region+"/addresses", nil, b)
 		return err
