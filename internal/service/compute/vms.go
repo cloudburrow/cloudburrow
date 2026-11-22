@@ -386,7 +386,7 @@ func (s *Server) newDiskLocked(project, zone string, b obj, field string) (obj, 
 		if !ok || !strings.Contains(sr, "/disks/") {
 			return nil, notFound(sr)
 		}
-		if lastSeg(str(so, "zone")) != zone {
+		if !diskInZone(so, zone) {
 			return nil, invalid("Invalid value for field '%s.sourceDisk': '%s'. The source disk must be in zone '%s'.", field, str(b, "sourceDisk"), zone)
 		}
 		if str(so, "status") != "READY" {
@@ -562,7 +562,7 @@ func (s *Server) createSnapshot(project, diskRel string, b obj, scope string) (o
 	}
 	snap := obj{"kind": "compute#snapshot", "id": newID(), "name": name, "status": "CREATING", "selfLink": rel,
 		"sourceDisk": diskRel, "sourceDiskId": d["id"], "diskSizeGb": d["sizeGb"], "storageBytes": "0",
-		"storageBytesStatus": "UP_TO_DATE", "storageLocations": []any{regionOfZone(lastSeg(str(d, "zone")))},
+		"storageBytesStatus": "UP_TO_DATE", "storageLocations": []any{diskRegion(d)},
 		"creationTimestamp": s.stamp(), "architecture": arch(), "snapshotType": "STANDARD",
 		"labelFingerprint": labelFingerprint(nil)}
 	// Snapshot type and location (#2139, compute/docs/disks/create-snapshots):

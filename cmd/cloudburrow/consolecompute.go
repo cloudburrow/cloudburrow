@@ -234,7 +234,11 @@ func (computeNetworksProvider) CreateForm() (string, []console.Field) {
 		{Name: "mtu", Label: "Maximum transmission unit (MTU)", Type: "text", Required: true, Default: "1460", Pattern: `^[0-9]{4}$`,
 			VisibleWhen: map[string]string{"autoMtu": "false"}, Help: "1300 to 8896 bytes."},
 		{Name: "ulaIpv6", Label: "Configure a ULA internal IPv6 range for this VPC Network", Type: "checkbox", Section: "Private IPv6 address settings",
-			Unavailable: "IPv6 is not served: a network and its subnets are IPv4 only."},
+			Help: "A /48 of fd20::/20, from which its dual-stack subnets with internal IPv6 take their /64s."},
+		{Name: "ulaAllocation", Label: "Allocate internal IPv6 range", Type: "radio", Section: "Private IPv6 address settings", Default: "Automatically",
+			Options: []string{"Automatically", "Manually"}, VisibleWhen: map[string]string{"ulaIpv6": "true"}},
+		{Name: "internalIpv6Range", Label: "Internal IPv6 range", Type: "text", Section: "Private IPv6 address settings",
+			VisibleWhen: map[string]string{"ulaAllocation": "Manually"}, Help: "A /48 of fd20::/20, for example fd20:a:b::/48."},
 		{Name: "subnetMode", Label: "Subnet creation mode", Type: "radio", Section: "Subnets", Default: "Custom", Options: []string{"Custom", "Automatic"},
 			Help: "Automatic makes one subnet in each region, in 10.128.0.0/9; Custom makes only the subnets you add."},
 		sub(console.Field{Name: "subnetName", Label: "Name", Type: "text", Pattern: `^$|` + computeNamePattern,
@@ -242,6 +246,7 @@ func (computeNetworksProvider) CreateForm() (string, []console.Field) {
 		sub(console.Field{Name: "subnetDescription", Label: "Description", Type: "text"}),
 		sub(console.Field{Name: "subnetRegion", Label: "Region", Type: "select", Default: "us-central1", Options: compute.Regions()}),
 		sub(stackTypeField("subnetStackType")),
+		sub(ipv6AccessTypeField("subnetIpv6AccessType", "subnetStackType")),
 		sub(console.Field{Name: "subnetRange", Label: "IPv4 range", Type: "text", Help: "For example, 10.0.0.0/24"}),
 		sec,
 		sub(console.Field{Name: "privateGoogleAccess", Label: "Private Google Access", Type: "radio", Default: "Off", Options: []string{"On", "Off"}}),
@@ -285,13 +290,14 @@ func presetRule(network, kind string, ranges []any) map[string]any {
 	return b
 }
 
-// stackTypeField is a subnet's IP stack type; IPv6 is not served.
+// stackTypeField is a subnet's IP stack type: IPv4 or dual-stack
+// (consolecomputea1.go); IPv6-only subnets are not served.
 func stackTypeField(name string) console.Field {
 	return console.Field{Name: name, Label: "IP stack type", Type: "radio", Default: "IPV4_ONLY",
 		Options:      []string{"IPV4_ONLY", "IPV4_IPV6", "IPV6_ONLY"},
 		OptionLabels: map[string]string{"IPV4_ONLY": "IPv4 (single-stack)", "IPV4_IPV6": "IPv4 and IPv6 (dual-stack)", "IPV6_ONLY": "IPv6 (single-stack)"},
-		UnavailableOptions: map[string]string{"IPV4_IPV6": "IPv6 is not served: subnets are IPv4 only.",
-			"IPV6_ONLY": "IPv6 is not served: subnets are IPv4 only."}}
+		UnavailableOptions: map[string]string{
+			"IPV6_ONLY": "IPv6-only subnets are not served: a VM's guest keeps its IPv4 address for the metadata server and the cluster's DNS; use dual-stack."}}
 }
 
 // flowLogsField is a subnet's Flow logs, On or Off: the subnet's logConfig,
@@ -307,6 +313,12 @@ func (p computeNetworksProvider) Create(ctx context.Context, project string, val
 		"routingConfig": map[string]any{"routingMode": strings.ToUpper(vpcOr(values["routingMode"], "Regional"))}}
 	if d := strings.TrimSpace(values["description"]); d != "" {
 		body["description"] = d
+	}
+	if values["ulaIpv6"] == "true" {
+		body["enableUlaInternalIpv6"] = true
+		if r := strings.TrimSpace(values["internalIpv6Range"]); r != "" && values["ulaAllocation"] == "Manually" {
+			body["internalIpv6Range"] = r
+		}
 	}
 	if m := strings.TrimSpace(values["mtu"]); m != "" && values["autoMtu"] != "true" {
 		n, err := strconv.Atoi(m)
@@ -332,7 +344,7 @@ func (p computeNetworksProvider) Create(ctx context.Context, project string, val
 			}
 			if err := p.addSubnet(project, name, map[string]string{"name": sub, "description": values["subnetDescription"], "region": values["subnetRegion"],
 				"ipCidrRange": values["subnetRange"], "privateGoogleAccess": pga, "secondaryRanges": values["subnetSecondaryRanges"],
-				"stackType": values["subnetStackType"], "flowLogs": values["subnetFlowLogs"]}); err != nil {
+				"stackType": values["subnetStackType"], "ipv6AccessType": values["subnetIpv6AccessType"], "flowLogs": values["subnetFlowLogs"]}); err != nil {
 				return name, fmt.Errorf("the network %s was created, but not its subnet: %w", name, err)
 			}
 			ranges = []any{strings.TrimSpace(values["subnetRange"])}
@@ -369,6 +381,9 @@ func (p computeNetworksProvider) addSubnet(project, network string, values map[s
 		"ipCidrRange": strings.TrimSpace(values["ipCidrRange"]), "privateIpGoogleAccess": pga}
 	if st := values["stackType"]; st != "" {
 		body["stackType"] = st
+		if st == "IPV4_IPV6" {
+			body["ipv6AccessType"] = strings.ToUpper(vpcOr(values["ipv6AccessType"], "Internal"))
+		}
 	}
 	if values["flowLogs"] == "On" {
 		body["logConfig"] = map[string]any{"enable": true, "aggregationInterval": "INTERVAL_5_SEC", "flowSampling": 0.5, "metadata": "INCLUDE_ALL_METADATA"}
@@ -574,6 +589,9 @@ func (p computeNetworksProvider) subnetEdit(project string, path []string, value
 			return err
 		}
 	}
+	if err := p.subnetStackEdit(project, base, s, values); err != nil {
+		return err
+	}
 	if v, ok := values["privateGoogleAccess"]; ok && (v == "On") != (s["privateIpGoogleAccess"] == true) {
 		if _, err := p.call("POST", project, base+"/setPrivateIpGoogleAccess", nil, map[string]any{"privateIpGoogleAccess": v == "On"}); err != nil {
 			return err
@@ -659,7 +677,9 @@ func (p computeNetworksProvider) subnetDetail(project string, path []string) (co
 			{Label: "Private Google Access", Value: vpcOnOff(s["privateIpGoogleAccess"] == true)},
 			{Label: "Flow logs", Value: vpcOnOff(flowLogsOn(s))},
 			{Label: "Purpose", Value: vpcStr(s, "purpose")},
-			{Label: "IP stack type", Value: map[string]string{"IPV4_ONLY": "IPv4 (single-stack)"}[vpcStr(s, "stackType")]},
+			{Label: "IP stack type", Value: stackTypeText(vpcStr(s, "stackType"))},
+			{Label: "IPv6 access type", Value: vpcDash(vpcTitle(vpcStr(s, "ipv6AccessType")))},
+			{Label: "IPv6 range", Value: vpcDash(vpcStr(s, "ipv6CidrRange"))},
 			{Label: "Description", Value: vpcDash(vpcStr(s, "description"))},
 		},
 		Sections: []console.Section{{ID: "details", Label: "Details", Kind: console.KindProperties, Note: computeNote,
@@ -671,7 +691,12 @@ func (p computeNetworksProvider) subnetDetail(project string, path []string) (co
 			Fields: []console.Field{
 				{Name: "ipCidrRange", Label: "IP address range", Type: "text", Required: true, Default: vpcStr(s, "ipCidrRange"),
 					Help: "A broader range containing the current one, for example 10.0.0.0/20 for 10.0.0.0/24."},
-				func() console.Field { f := stackTypeField("stackType"); f.Immutable = true; return f }(),
+				func() console.Field {
+					f := stackTypeField("stackType")
+					f.Default = vpcOr(vpcStr(s, "stackType"), "IPV4_ONLY")
+					return f
+				}(),
+				subnetIpv6AccessEditField(s),
 				func() console.Field { f := secondaryRangesField(""); f.Default = secondaryRows(s); return f }(),
 				{Name: "privateGoogleAccess", Label: "Private Google Access", Type: "radio", Default: vpcOnOff(s["privateIpGoogleAccess"] == true), Options: []string{"On", "Off"}},
 				flowLogsField("flowLogs", vpcOnOff(flowLogsOn(s))),
@@ -694,6 +719,7 @@ func addSubnetAction(networks []string) console.Action {
 		console.Field{Name: "description", Label: "Description", Type: "text"},
 		computeRegionField("region"),
 		stackTypeField("stackType"),
+		ipv6AccessTypeField("ipv6AccessType", "stackType"),
 		console.Field{Name: "ipCidrRange", Label: "IPv4 range", Type: "text", Required: true, Help: "For example, 10.0.0.0/24"},
 		secondaryRangesField(""),
 		console.Field{Name: "privateGoogleAccess", Label: "Private Google Access", Type: "radio", Default: "Off", Options: []string{"On", "Off"}},
@@ -924,17 +950,16 @@ func (computeFirewallsProvider) CreateLayout() string {
 // (egress), Protocols and ports (Allow all / Deny all, or TCP, UDP and
 // Other) and Enforcement.
 const (
-	fwAllTargets  = "All instances in the network"
-	fwTargetTags  = "Specified target tags"
-	fwTargetSA    = "Specified service account"
-	fwIPv4        = "IPv4 ranges"
-	fwIPv6        = "IPv6 ranges"
-	fwSourceTags  = "Source tags"
-	fwSA          = "Service account"
-	fwNone        = "None"
-	fwAll         = "all"
-	fwSpecified   = "specified"
-	fwIPv6Refusal = "IPv6 ranges: IPv6 is not served, so a rule has IPv4 ranges only."
+	fwAllTargets = "All instances in the network"
+	fwTargetTags = "Specified target tags"
+	fwTargetSA   = "Specified service account"
+	fwIPv4       = "IPv4 ranges"
+	fwIPv6       = "IPv6 ranges"
+	fwSourceTags = "Source tags"
+	fwSA         = "Service account"
+	fwNone       = "None"
+	fwAll        = "all"
+	fwSpecified  = "specified"
 )
 
 // fwPorts splits a rule's entries into TCP ports, UDP ports and the other
@@ -1009,6 +1034,12 @@ func firewallFields(networks []string, cur map[string]any) []console.Field {
 		if len(vpcStrs(cur, "destinationRanges")) == 0 {
 			dest = fwNone
 		}
+		if r := vpcStrs(cur, "sourceRanges"); len(r) > 0 && strings.Contains(r[0], ":") {
+			source = fwIPv6
+		}
+		if r := vpcStrs(cur, "destinationRanges"); len(r) > 0 && strings.Contains(r[0], ":") {
+			dest = fwIPv6
+		}
 	}
 	tcp, udp, tcpPorts, udpPorts, other, all := fwPorts(entries)
 	mode := fwAll
@@ -1050,9 +1081,11 @@ func firewallFields(networks []string, cur map[string]any) []console.Field {
 		{Name: "targetServiceAccount", Label: "Target service account", Type: "text", Required: true, Default: sa("targetServiceAccounts"),
 			VisibleWhen: map[string]string{"targets": fwTargetSA}, Help: "The email of a service account in this project."},
 		{Name: "sourceFilter", Label: "Source filter", Type: "select", Default: source, Options: []string{fwIPv4, fwIPv6, fwSourceTags, fwSA, fwNone},
-			DisabledOptions: []string{fwIPv6}, VisibleWhen: ingress(map[string]string{}), Help: fwIPv6Refusal},
+			VisibleWhen: ingress(map[string]string{})},
 		{Name: "sourceRanges", Label: "Source IPv4 ranges", Type: "text", Required: true, Default: join("sourceRanges"),
 			VisibleWhen: ingress(map[string]string{"sourceFilter": fwIPv4}), Help: "Comma-separated, for example 0.0.0.0/0, 192.168.2.0/24."},
+		{Name: "sourceRanges6", Label: "Source IPv6 ranges", Type: "text", Required: true, Default: join("sourceRanges"),
+			VisibleWhen: ingress(map[string]string{"sourceFilter": fwIPv6}), Help: "Comma-separated, for example ::/0, fd20:a:b::/48."},
 		{Name: "sourceTags", Label: "Source tags", Type: "text", Required: true, Default: join("sourceTags"),
 			VisibleWhen: ingress(map[string]string{"sourceFilter": fwSourceTags})},
 		{Name: "sourceServiceAccount", Label: "Source service account", Type: "text", Required: true, Default: sa("sourceServiceAccounts"),
@@ -1064,9 +1097,11 @@ func firewallFields(networks []string, cur map[string]any) []console.Field {
 		{Name: "secondSourceServiceAccount", Label: "Source service account", Type: "text", Required: true, Default: sa("sourceServiceAccounts"),
 			VisibleWhen: ingress(map[string]string{"sourceFilter": fwIPv4, "secondSourceFilter": fwSA})},
 		{Name: "destinationFilter", Label: "Destination filter", Type: "select", Default: dest, Options: []string{fwIPv4, fwIPv6, fwNone},
-			DisabledOptions: []string{fwIPv6}, VisibleWhen: map[string]string{"direction": "Egress"}},
+			VisibleWhen: map[string]string{"direction": "Egress"}},
 		{Name: "destinationRanges", Label: "Destination IPv4 ranges", Type: "text", Required: true, Default: join("destinationRanges"),
 			VisibleWhen: map[string]string{"direction": "Egress", "destinationFilter": fwIPv4}},
+		{Name: "destinationRanges6", Label: "Destination IPv6 ranges", Type: "text", Required: true, Default: join("destinationRanges"),
+			VisibleWhen: map[string]string{"direction": "Egress", "destinationFilter": fwIPv6}},
 		{Name: "protocolsMode", Label: "Protocols and ports", Type: "radio", Default: mode, Options: []string{fwAll, fwSpecified},
 			OptionLabels: map[string]string{fwAll: "Allow all", fwSpecified: "Specified protocols and ports"},
 			LabelsBy:     "action", LabelsFor: map[string]map[string]string{"Deny": {fwAll: "Deny all"}}},
@@ -1174,12 +1209,18 @@ func firewallBody(values map[string]string) (map[string]any, error) {
 	}
 	b["sourceRanges"], b["sourceTags"], b["sourceServiceAccounts"], b["destinationRanges"] = nil, nil, nil, nil
 	if b["direction"] == "EGRESS" {
-		if values["destinationFilter"] != fwNone {
+		switch values["destinationFilter"] {
+		case fwNone:
+		case fwIPv6:
+			b["destinationRanges"] = list(values["destinationRanges6"])
+		default:
 			b["destinationRanges"] = list(values["destinationRanges"])
 		}
 		return b, nil
 	}
 	switch values["sourceFilter"] {
+	case fwIPv6:
+		b["sourceRanges"] = list(values["sourceRanges6"])
 	case fwIPv4, "":
 		b["sourceRanges"] = list(values["sourceRanges"])
 		switch values["secondSourceFilter"] {
@@ -1365,8 +1406,11 @@ func routeFields(networks, instances []string) []console.Field {
 		netField,
 		{Name: "routeType", Label: "Route type", Type: "select", Default: "Static route", Options: []string{"Static route"}},
 		{Name: "ipVersion", Label: "IP version", Type: "radio", Default: "IPv4", Options: []string{"IPv4", "IPv6"},
-			UnavailableOptions: map[string]string{"IPv6": "IPv6 is not served: routes are IPv4 only."}},
-		{Name: "destRange", Label: "Destination IPv4 range", Type: "text", Required: true, Help: "For example, 192.168.0.0/16. It may not match or fit within a subnet's range."},
+			Help: "An IPv6 route's next hop is the default internet gateway, an IPv6 address of a dual-stack subnet, or a dual-stack instance."},
+		{Name: "destRange", Label: "Destination IPv4 range", Type: "text", Required: true, VisibleWhen: map[string]string{"ipVersion": "IPv4"},
+			Help: "For example, 192.168.0.0/16. It may not match or fit within a subnet's range."},
+		{Name: "destRange6", Label: "Destination IPv6 range", Type: "text", Required: true, VisibleWhen: map[string]string{"ipVersion": "IPv6"},
+			Help: "For example, 2001:db8::/32. It may not match or fit within a subnet's IPv6 range."},
 		{Name: "priority", Label: "Priority", Type: "text", Required: true, Default: "1000", Pattern: `^[0-9]{1,5}$`, Help: "Priority can be 0 - 65535; a lower number is preferred."},
 		{Name: "tags", Label: "Instance tags", Type: "text", Help: "Optional, comma-separated: the route applies only to instances with one of these tags; blank applies it to all instances."},
 		{Name: "nextHop", Label: "Next hop", Type: "select", Default: hopGateway,
@@ -1374,7 +1418,7 @@ func routeFields(networks, instances []string) []console.Field {
 			Help: "VPN tunnels and internal passthrough Network Load Balancers are not served."},
 		instField,
 		{Name: "nextHopIp", Label: "Next hop IP address", Type: "text", Required: true, VisibleWhen: map[string]string{"nextHop": hopIP},
-			Help: "An internal IPv4 address in one of the network's subnets."},
+			Help: "An internal address in one of the network's subnets, of the route's IP version."},
 	}
 }
 
@@ -1404,6 +1448,9 @@ func (p computeRoutesProvider) Create(ctx context.Context, project string, value
 	name := strings.TrimSpace(values["name"])
 	b := map[string]any{"name": name, "network": "global/networks/" + strings.TrimSpace(vpcOr(values["network"], "default")),
 		"destRange": strings.TrimSpace(values["destRange"])}
+	if values["ipVersion"] == "IPv6" {
+		b["destRange"] = strings.TrimSpace(values["destRange6"])
+	}
 	if d := strings.TrimSpace(values["description"]); d != "" {
 		b["description"] = d
 	}
@@ -1511,7 +1558,7 @@ func (p computeAddressesProvider) listOf(project, accessType string) (console.Li
 			target := []string{region, vpcStr(a, "name")}
 			listing.Items = append(listing.Items, console.Resource{Name: vpcStr(a, "name"), Status: vpcTitle(vpcStr(a, "status")), Target: target,
 				Actions: p.addressActions(a),
-				Fields: map[string]string{"IP address": ip, "Access type": access, "Region": region, "Type": "Static", "Version": "IPv4",
+				Fields: map[string]string{"IP address": ip, "Access type": access, "Region": region, "Type": "Static", "Version": map[bool]string{true: "IPv6", false: "IPv4"}[vpcStr(a, "ipVersion") == "IPV6"],
 					"Purpose": vpcDash(vpcStr(a, "purpose")), "Network": vpcDash(vpcLast(vpcStr(a, "network"))), "Subnetwork": vpcDash(vpcLast(vpcStr(a, "subnetwork"))),
 					"Network tier": vpcDash(vpcTitle(vpcStr(a, "networkTier"))), "In use by": vpcDash(strings.Join(users, ", "))}})
 		}
@@ -1530,16 +1577,16 @@ func (p computeAddressesProvider) listOf(project, accessType string) (console.Li
 						ip, tier = vpcStr(ac, "natIP"), vpcTitle(vpcStr(ac, "networkTier"))
 					}
 				}
-				if ip == "" || (accessType == "INTERNAL" && static[ip]) {
+				if ip == "" || static[ip] {
 					continue
 				}
+				// Promote to static IP address (vpc/docs/reserve-static-external-ip-address
+				// and reserve-static-internal-ip-address, read 2026-11-22):
+				// Name and Description, then Reserve; the address keeps its IP
+				// and stays IN_USE by the VM.
 				promote := console.Action{ID: "promote", Label: "Promote to static IP address", Submit: "Reserve", Fields: []console.Field{
 					{Name: "name", Label: "Name", Type: "text", Required: true, Pattern: computeNamePattern, Help: computeNameHelp},
 					{Name: "description", Label: "Description", Type: "text"}}}
-				if accessType == "EXTERNAL" {
-					promote.Fields = nil
-					promote.Unavailable = "Every VM's external address is 127.0.0.1, this machine's loopback, with its SSH port forwarded: there is no address of its own to keep."
-				}
 				target := []string{"instance", zone, vpcStr(o, "name"), ip}
 				listing.Items = append(listing.Items, console.Resource{Name: "—", Status: "In use", Target: target, Actions: []console.Action{promote},
 					Fields: map[string]string{"IP address": ip, "Access type": vpcTitle(accessType), "Region": region, "Type": "Ephemeral", "Version": "IPv4",
@@ -1589,6 +1636,7 @@ func (p computeAddressesProvider) ListActions(ctx context.Context, project strin
 			{Name: "networkTier", Label: "Network Service Tier", Type: "radio", Default: "Premium", Options: []string{"Premium", "Standard"}},
 			{Name: "ipType", Label: "Type", Type: "radio", Default: "Regional", Options: []string{"Regional", "Global"}},
 			func() console.Field { f := computeRegionField("region"); f.VisibleWhen = regional; return f }(),
+			p.attachToField(project, regional),
 		}},
 		// Google's Reserve internal static IP address
 		// (vpc/docs/reserve-static-internal-ip-address, read 2026-11-22):
@@ -1596,7 +1644,7 @@ func (p computeAddressesProvider) ListActions(ctx context.Context, project strin
 		// IP address (Assign automatically or Let me choose) and Purpose.
 		{ID: "reserve-internal", Label: "Reserve internal static IP address", Submit: "Reserve", Fields: []console.Field{name, desc,
 			{Name: "ipVersion", Label: "IP version", Type: "radio", Default: "IPv4", Options: []string{"IPv4", "IPv6"},
-				UnavailableOptions: map[string]string{"IPv6": "IPv6 is not served: addresses are IPv4 only."}},
+				Help: "IPv6 reserves a /96 of a dual-stack subnet with internal IPv6 access; give it to a VM as its interface's IPv6 address."},
 			netField, computeRegionField("region"),
 			{Name: "subnetwork", Label: "Subnetwork", Type: "text", Required: true, Default: "default", Help: "The subnet, in the region, the address is in."},
 			{Name: "assign", Label: "Static IP address", Type: "select", Default: "Assign automatically", Options: []string{"Assign automatically", "Let me choose"}},
@@ -1636,13 +1684,15 @@ func addressScope(region string) string {
 
 func (p computeAddressesProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
 	if len(path) == 4 && path[0] == "instance" && p.api() != nil {
-		l, err := p.listOf(project, map[bool]string{true: "EXTERNAL", false: "INTERNAL"}[path[3] == "127.0.0.1"])
-		if err != nil {
-			return nil
-		}
-		for _, r := range l.Items {
-			if strings.Join(r.Target, "/") == strings.Join(path, "/") {
-				return r.Actions
+		for _, access := range []string{"EXTERNAL", "INTERNAL"} {
+			l, err := p.listOf(project, access)
+			if err != nil {
+				return nil
+			}
+			for _, r := range l.Items {
+				if strings.Join(r.Target, "/") == strings.Join(path, "/") {
+					return r.Actions
+				}
 			}
 		}
 		return nil
@@ -1689,7 +1739,21 @@ func (p computeAddressesProvider) ActAt(ctx context.Context, project string, pat
 		if err != nil {
 			return err
 		}
+		region := path[1][:strings.LastIndex(path[1], "-")]
 		for _, n := range vmMaps(o, "networkInterfaces") {
+			for _, ac := range vmMaps(n, "accessConfigs") {
+				if vpcStr(ac, "natIP") != path[3] {
+					continue
+				}
+				// An instance's ephemeral external address, promoted.
+				b := map[string]any{"name": strings.TrimSpace(values["name"]), "addressType": "EXTERNAL", "address": path[3],
+					"networkTier": vpcStr(ac, "networkTier")}
+				if d := strings.TrimSpace(values["description"]); d != "" {
+					b["description"] = d
+				}
+				_, err := p.call("POST", project, "regions/"+region+"/addresses", nil, b)
+				return err
+			}
 			if vpcStr(n, "networkIP") != path[3] {
 				continue
 			}
@@ -1717,8 +1781,10 @@ func (p computeAddressesProvider) ActAt(ctx context.Context, project string, pat
 			_, err := p.call("POST", project, "global/addresses", nil, b)
 			return err
 		}
-		_, err := p.call("POST", project, "regions/"+region+"/addresses", nil, b)
-		return err
+		if _, err := p.call("POST", project, "regions/"+region+"/addresses", nil, b); err != nil {
+			return err
+		}
+		return p.attachExternal(project, region, b["name"].(string), values["attachTo"])
 	case "reserve-internal":
 		b["addressType"] = "INTERNAL"
 		b["subnetwork"] = "regions/" + region + "/subnetworks/" + strings.TrimSpace(vpcOr(values["subnetwork"], "default"))
@@ -1727,6 +1793,9 @@ func (p computeAddressesProvider) ActAt(ctx context.Context, project string, pat
 		}
 		if values["purpose"] == "Shared" {
 			b["purpose"] = "SHARED_LOADBALANCER_VIP"
+		}
+		if values["ipVersion"] == "IPv6" {
+			b["ipVersion"] = "IPV6"
 		}
 		_, err := p.call("POST", project, "regions/"+region+"/addresses", nil, b)
 		return err

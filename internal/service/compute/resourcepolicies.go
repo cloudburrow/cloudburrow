@@ -339,7 +339,7 @@ func (s *Server) attachPolicies(project, scope, rel string, o obj, b obj, add bo
 	if len(refs) == 0 {
 		return nil, required("resourcePolicies")
 	}
-	region := regionOfZone(lastSeg(str(o, "zone")))
+	region := diskRegion(o) // a zonal or regional disk's, or an instance's
 	rels, err := s.checkPoliciesLocked(project, region, refs, "resourcePolicies", kind)
 	if err != nil {
 		return nil, err
@@ -486,7 +486,12 @@ func (s *Server) snapshotDueLocked(rel string, d obj, now time.Time) {
 		// Google's scheduled snapshot name: DISK-ZONE-TIMESTAMP-RANDOM
 		// (scheduled-snapshots, "snapshots ... named
 		// disk-name-zone-timestamp"), UNVERIFIED suffix (re-read 2026-11-22).
-		name := str(d, "name") + "-" + lastSeg(str(d, "zone")) + "-" + now.UTC().Format("20060102150405") + "-" + randHex(4)[:8]
+		loc, scope := lastSeg(str(d, "zone")), "zones/"+lastSeg(str(d, "zone"))
+		if loc == "" {
+			// A regional disk's (regiondisks.go): DISK-REGION-TIMESTAMP-RANDOM.
+			loc, scope = diskRegion(d), "regions/"+diskRegion(d)
+		}
+		name := str(d, "name") + "-" + loc + "-" + now.UTC().Format("20060102150405") + "-" + randHex(4)[:8]
 		if len(name) > 63 {
 			name = name[len(name)-63:]
 			name = "s" + strings.TrimLeft(name[1:], "-")
@@ -496,7 +501,7 @@ func (s *Server) snapshotDueLocked(rel string, d obj, now time.Time) {
 		if l, ok := props["labels"].(map[string]any); ok {
 			body["labels"] = l
 		}
-		if _, err := s.createSnapshot(project, rel, body, "zones/"+lastSeg(str(d, "zone"))); err == nil {
+		if _, err := s.createSnapshot(project, rel, body, scope); err == nil {
 			if snap, ok := s.res["projects/"+project+"/global/snapshots/"+name]; ok {
 				snap["autoCreated"] = true
 				snap["sourceSnapshotSchedulePolicy"] = pr

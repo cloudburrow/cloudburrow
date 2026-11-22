@@ -348,7 +348,7 @@ var linkKeys = map[string]bool{"selfLink": true, "network": true, "subnetwork": 
 	"subnetworks": true, "users": true, "zones": true, "machineType": true, "source": true, "sourceImage": true,
 	"sourceSnapshot": true, "sourceDisk": true, "type": true, "resourcePolicies": true, "sourceInstance": true,
 	"sourceInstanceTemplate": true, "sourceMachineImage": true, "instanceTemplate": true, "instanceGroup": true,
-	"sourceSnapshotSchedulePolicy": true, "instance": true, "replacement": true,
+	"sourceSnapshotSchedulePolicy": true, "instance": true, "replacement": true, "replicaZones": true,
 	// Private Service Connect (#2140, psc.go).
 	"target": true, "targetService": true, "natSubnets": true, "endpoint": true, "consumerNetwork": true}
 

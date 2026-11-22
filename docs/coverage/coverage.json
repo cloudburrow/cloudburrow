@@ -14474,8 +14474,8 @@
     "Key": "compute",
     "Title": "Compute Engine API (v1): VPC networking",
     "counts": {
-      "Implemented": 70,
-      "Unimplemented": 109,
+      "Implemented": 83,
+      "Unimplemented": 115,
       "Verified": 141
     },
     "rows": [
@@ -14633,7 +14633,7 @@
         "tests": [
           "test/compat/backupdrcompute_test.go:57 TestBackupDRComputeVMAndDiskRoundTrip",
           "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient",
-          "test/compat/computevmstools_test.go:176 TestTerraformComputeInstance"
+          "test/compat/computevmstools_test.go:178 TestTerraformComputeInstance"
         ]
       },
       {
@@ -15207,8 +15207,8 @@
       },
       {
         "method": "compute.instances.addAccessConfig",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.instances.addResourcePolicies",
@@ -15228,7 +15228,7 @@
         "tests": [
           "test/compat/backupdrcompute_test.go:57 TestBackupDRComputeVMAndDiskRoundTrip",
           "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient",
-          "test/compat/computevmstools_test.go:176 TestTerraformComputeInstance"
+          "test/compat/computevmstools_test.go:178 TestTerraformComputeInstance"
         ]
       },
       {
@@ -15247,15 +15247,15 @@
       },
       {
         "method": "compute.instances.deleteAccessConfig",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.instances.detachDisk",
         "status": "Verified",
         "tests": [
           "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient",
-          "test/compat/computevmstools_test.go:176 TestTerraformComputeInstance"
+          "test/compat/computevmstools_test.go:178 TestTerraformComputeInstance"
         ]
       },
       {
@@ -15265,7 +15265,7 @@
           "test/compat/backupdrcompute_test.go:57 TestBackupDRComputeVMAndDiskRoundTrip",
           "test/compat/computevmnet_test.go:33 TestComputeVMNetworkingThroughTheGoClient",
           "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient",
-          "test/compat/computevmstools_test.go:176 TestTerraformComputeInstance"
+          "test/compat/computevmstools_test.go:178 TestTerraformComputeInstance"
         ]
       },
       {
@@ -15356,7 +15356,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient",
-          "test/compat/computevmstools_test.go:176 TestTerraformComputeInstance"
+          "test/compat/computevmstools_test.go:178 TestTerraformComputeInstance"
         ]
       },
       {
@@ -15734,6 +15734,101 @@
         "tests": [
           "test/compat/computegroups2139_test.go:69 TestComputeRegionalGroupsThroughTheGoClient"
         ]
+      },
+      {
+        "method": "compute.regionDiskTypes.get",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionDiskTypes.list",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionDisks.addResourcePolicies",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionDisks.bulkInsert",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.regionDisks.createSnapshot",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionDisks.delete",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionDisks.get",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionDisks.getIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.regionDisks.insert",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionDisks.list",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionDisks.removeResourcePolicies",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionDisks.resize",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionDisks.setIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.regionDisks.setLabels",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionDisks.startAsyncReplication",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.regionDisks.stopAsyncReplication",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.regionDisks.stopGroupAsyncReplication",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.regionDisks.testIamPermissions",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.regionDisks.update",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "compute.regionInstanceGroupManagers.abandonInstances",
@@ -16378,7 +16473,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient",
-          "test/compat/computevmstools_test.go:176 TestTerraformComputeInstance"
+          "test/compat/computevmstools_test.go:178 TestTerraformComputeInstance"
         ]
       },
       {

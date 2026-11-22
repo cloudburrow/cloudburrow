@@ -80,14 +80,15 @@ The design (#1963, option A): **a VM is a systemd container** in the instance's 
 | `cos-stable`, Windows, Fedora CoreOS, licensed images | 501, with the reason |
 | Instance templates, managed and unmanaged instance groups, machine images (#2139) | Served as Google documents them: a managed group makes its VMs from its template, named `BASE_INSTANCE_NAME-xxxx`, and resizes, recreates, starts and stops them; setInstanceTemplate changes the template of new VMs only, and recreateInstances re-makes a VM of another template from the current one, by the same name. A regional group (`regionInstanceGroupManagers`, `regionInstanceGroups`) spreads its VMs, each a zonal instance, over its `distributionPolicy.zones` (three of the region's when none are given): EVEN (the default; PROACTIVE redistribution), BALANCED and ANY spread alike here (every zone has the capacity), ANY_SINGLE_ZONE keeps them in one zone. Named ports are checked as Google documents (a name of the RFC 1035 rule, a port 1-65535, a stale fingerprint 412). Autoscalers and regional autoscalers scale on the VMs' real CPU, read every 15 seconds from each VM's cgroup (`cpu.stat`): recommended size = ceil(serving VMs × average utilization / target), VMs in their initialization period (`coolDownPeriodSec`) left out, clamped to the minimum and maximum, scaling out at once and in only to the highest recommendation of the last 10 minutes and as `scaleInControl` allows; mode OFF still recommends, ONLY_SCALE_OUT only adds. A zonal group's resize is overridden by its autoscaler at its next pass; an autoscaled regional group's resize is refused, as Google refuses it. The same readings are `compute.googleapis.com/instance/cpu/utilization` in Cloud Monitoring (gce_instance), sampled every 60 seconds. Predictive autoscaling, custom metric, load balancing and schedule signals answer 501 |
 | Resource policies (#2139) | Snapshot schedules and instance schedules run every 30 seconds against their cron or hourly/daily/weekly rule: a scheduled snapshot is named `DISK-ZONE-TIMESTAMP-xxxxxxxx` with `autoCreated`, and snapshots past the retention are deleted; an instance schedule starts and stops its VMs in its time zone |
-| Spot VMs (`scheduling.provisioningModel: SPOT`) | Accepted with `instanceTerminationAction`, checked as Google documents; nothing preempts them here |
+| Spot VMs (`scheduling.provisioningModel: SPOT`) | Accepted with `instanceTerminationAction`, checked as Google documents; nothing preempts them here. `setScheduling` changes a VM between Standard and Spot only while it is stopped (`TERMINATED`), as Google requires; the console's Edit, under Availability policies, offers it then |
+| Labels | `setLabels` on instances, disks (zonal and regional), custom images and machine images, under the resource's `labelFingerprint` (a stale one answers 412), each label checked as Google documents: at most 64, keys of 1 to 63 lowercase letters, digits, `_` and `-` (international letters allowed) starting with a letter, values of at most 63 of the same characters (#2139) |
 | Machine types | The predefined e2, f1/g1, n1, n2, n2d and c3 types; the container's CPU and memory limits are the type's |
 | Boot disk | A PersistentVolumeClaim holding the guest's `/etc`, `/usr`, `/var`, `/home`, `/root`, `/opt` and `/srv`, seeded from the image at first boot: what the guest changes survives stop and start |
 | Attached disk | A PersistentVolumeClaim mounted at `/mnt/disks/DEVICE_NAME`: a directory, **not a block device** (no `mkfs`, no `/dev/disk/by-id/google-*`). Attaching or detaching on a running instance restarts its container |
 | Disk sizes | Checked as Google documents; kind's local-path storage neither enforces nor grows them |
 | Snapshot | A copy of the disk's files in a PersistentVolumeClaim of its own; a disk can be made from it |
 | Internal IP | Reserved in the instance's subnet as Google picks it, on the guest's `vpc0`, and routed to the other VMs of its network, with the network's firewall rules enforced: see [VM networking and firewall rules](#vm-networking-and-firewall-rules) |
-| External IP | `127.0.0.1`: the guest's port 22 is forwarded to a port on this machine, named in the instance's JSON as `cloudburrowSshAddress` |
+| External IP | An ephemeral `natIP` of the VM's own from `192.0.2.0/24` (TEST-NET-1, RFC 5737: never routed, so nothing that dials it leaves this machine), stable for the life of its access config, promotable to a static address; the guest's port 22 is forwarded to a port on this machine's `127.0.0.1`, named in the instance's JSON as `cloudburrowSshAddress` |
 | `startup-script` | Runs at every boot (`google-startup-scripts.service`), its output on the serial port as `google_metadata_script_runner` writes it |
 | `ssh-keys` | The guest agent's account manager (a script polling every 2 seconds) makes each user, its `authorized_keys` and passwordless sudo (`google-sudoers`); project keys apply unless `block-project-ssh-keys` |
 | Metadata server | The guest reads its instance and project attributes from the Compute port under a per-instance token (`CLOUDBURROW_GUEST_METADATA`); service account tokens come from the instance's metadata server, which `GCE_METADATA_HOST` names in the guest (in `/etc/environment` too). `metadata.google.internal` is not resolved in the guest |
@@ -189,13 +190,13 @@ Cloud Run services and jobs then name a connector in `template.vpcAccess.connect
 
 ### SSH
 
-The guest's port 22 is forwarded to a loopback port, named in `instances.get` and the aggregated list as `cloudburrowSshAddress` (and in the console's Connect column). The instance's `natIP` is `127.0.0.1`.
+The guest's port 22 is forwarded to a loopback port, named in `instances.get` and the aggregated list as `cloudburrowSshAddress` (and in the console's Connect column). The instance's `natIP` is its own unrouted `192.0.2.0/24` address (see [External IP addresses](#external-ip-addresses)), not the forwarded port's host.
 
-**gcloud compute ssh always dials port 22 of the natIP**: it has no port flag of its own, and the port cannot be put in the instance's address. Pass the forwarded port to its `ssh` with `--ssh-flag`:
+**gcloud compute ssh always dials port 22 of the natIP**: it has no port flag of its own, and the port cannot be put in the instance's address. Pass the forwarded port, and `127.0.0.1` in place of the natIP, to its `ssh` with `--ssh-flag` (the console's Connect shows this command):
 
 ```sh
 PORT=$(curl -s http://127.0.0.1:COMPUTE_PORT/compute/v1/projects/PROJECT/zones/us-central1-a/instances/vm-1 | jq -r .cloudburrowSshAddress | cut -d: -f2)
-gcloud compute ssh vm-1 --zone us-central1-a --ssh-flag="-p $PORT" --strict-host-key-checking=no
+gcloud compute ssh vm-1 --zone us-central1-a --ssh-flag="-p $PORT" --ssh-flag="-o HostName=127.0.0.1" --strict-host-key-checking=no
 ```
 
 gcloud makes its key (`~/.ssh/google_compute_engine`, or `--ssh-key-file`) and adds it to the project's `ssh-keys` metadata (`projects.setCommonInstanceMetadata`); the guest applies it within seconds. `--strict-host-key-checking=no` is needed because the host key gcloud records is per instance ID, and guest attributes (`hostkeys/`) are not served. `TestGcloudComputeInstances` runs exactly this, with `HOME` and the key in throwaway directories. `--internal-ip`, `--tunnel-through-iap` and OS Login are not served.
@@ -205,6 +206,51 @@ Plain `ssh` works the same with any key in `ssh-keys`:
 ```sh
 ssh -p PORT -i KEY USER@127.0.0.1
 ```
+
+### External IP addresses
+
+As Google documents (vpc/docs/reserve-static-external-ip-address, compute/docs/ip-addresses/configure-static-external-ip-address, read 2026-11-22), #2140:
+
+| Google | Here |
+|---|---|
+| Ephemeral external IP | An access config without `natIP` gets a distinct address of its own from `192.0.2.0/24`, recorded on the access config; it is a record, not a route (nothing outside the VPC data plane reaches a VM; SSH uses `cloudburrowSshAddress`) |
+| Promote an ephemeral IP to static | `addresses.insert` in the VM's region with `address` set to its `natIP`: the address keeps the IP, is `IN_USE` with `users` the instance, of the access config's `networkTier`; another region, or a different tier, is refused |
+| Assign a static external IP | `accessConfigs[].natIP` of a `RESERVED` regional `EXTERNAL` address of the VM's region, at insert or with `instances.addAccessConfig` (after `deleteAccessConfig`); one `IN_USE` or of another region is refused; the tier is the address's |
+| Release | `addresses.delete` is refused while `IN_USE`; deleting the VM, or `deleteAccessConfig`, returns the address to `RESERVED` |
+| A given external address (BYOIP) | 501: no address here is the project's own |
+
+The console's IP addresses page lists each VM's ephemeral external address with Promote to static IP address, the static ones with In use by, and Reserve external static IP address's Attached to assigns the new address to a VM of its region.
+
+### Regional disks
+
+As Google documents (compute/docs/disks/regional-persistent-disk, high-availability-regional-persistent-disk and the `regionDisks` reference, read 2026-11-22), #2139: `regionDisks` insert, get, list, delete, resize, setLabels, createSnapshot and add/removeResourcePolicies, and `regionDiskTypes` get and list.
+
+| Google | Here |
+|---|---|
+| `replicaZones` | Exactly two distinct zones of the disk's region, or 400 |
+| Types and sizes | `pd-balanced` and `pd-ssd` from 10 GB, `pd-standard` from 200 GB, to 65,536 GB; other types (`pd-extreme`, Hyperdisk) are refused for a regional disk |
+| Attaching | `instances.insert` and `attachDisk` with `source` `regions/REGION/disks/NAME`, from a VM of either replica zone; a VM of another zone is refused |
+| Synchronous replication | The region's zones are one cluster here, so a regional disk is **one** storage volume (a PersistentVolumeClaim) that the VMs of both replica zones mount: every write lands on the one copy, so the replicas are always in sync. A zone outage, and so failover (force-attach, `stopAsyncReplication`), is not simulated |
+| Snapshots | `createSnapshot` stores the snapshot in the disk's region; a regional or zonal disk can be made from it |
+
+The console's Create a disk takes Location type Single zone or Regional, with the Replica zone; the Disks list shows a regional disk's two zones, and Attach existing disk on a VM of either zone offers it.
+
+### IPv6
+
+As Google documents (vpc/docs/subnets#ipv6-ranges, create-modify-vpc-networks#ipv6, compute/docs/ip-addresses/configure-ipv6-address, read 2026-11-22), #2140:
+
+| Google | Here |
+|---|---|
+| ULA internal IPv6 (`enableUlaInternalIpv6`) | The network gets a `/48` of `fd20::/20` as `internalIpv6Range`, or the one given (in `fd20::/20`, not another network's); turning it off is refused while a subnet uses it |
+| Dual-stack subnet (`stackType: IPV4_IPV6`) | `ipv6AccessType` `INTERNAL` takes a `/64` of the network's ULA range (`internalIpv6Prefix`), `EXTERNAL` a `/64` of `2600:1900::/28` (`externalIpv6Prefix`); `ipv6CidrRange` is that range. An IPv4-only subnet can be patched to dual-stack, and back while no interface uses IPv6; the access type does not change. `IPV6_ONLY` is 501 |
+| Dual-stack VM | A `stackType: IPV4_IPV6` interface on a dual-stack subnet gets a `/96` of the subnet's `/64`: `ipv6Address` with `internalIpv6PrefixLength: 96` (internal), or an `ipv6AccessConfigs` entry `DIRECT_IPV6` with `externalIpv6` (external, Premium tier); an address asked for is a reserved static one of the subnet or a free one of its range; on an IPv4-only subnet it is refused |
+| Reachability | The address is on the guest's `vpc0` (`/128`, no DAD) with an on-link route for each IPv6 range of the network (and of a network peered with `stackType: IPV4_IPV6`), and a permanent neighbour for each running dual-stack peer: IPv6 frames ride the network's VXLAN segment, which runs over the cluster's IPv4 underlay, so the kind cluster (IPv4 only, kindnet) need not be dual-stack. External IPv6 addresses are carried between the network's VMs, not routed off the cluster |
+| Firewall rules | IPv6 ranges in `sourceRanges` and `destinationRanges` are compiled to `ip6` matches, IPv4 ones to `ip`, so one rule may hold both; a source tag or service account matches the VMs' IPv6 addresses too |
+| Static IPv6 addresses | `addresses.insert` with `ipVersion: IPV6` in a region: `INTERNAL` of a dual-stack subnet with internal IPv6, `EXTERNAL` (Premium) of one with external IPv6, a `/96` of its range, given or chosen; a VM takes it as its interface's `ipv6Address` (or `ipv6AccessConfigs[].externalIpv6`), `IN_USE` until the VM goes. A global IPv6 address (load balancers) is 501 |
+| IPv6 static routes | `routes.insert` with an IPv6 `destRange` outside the subnets' IPv6 ranges, its next hop the default internet gateway, an IPv6 address of a dual-stack subnet of the network (`nextHopIp`), or a dual-stack instance of it; an IPv4 next hop, or an IPv4-only instance, refused. Recorded and listed as IPv4 static routes are; like them, not applied in the guests |
+| Not served | `IPV6_ONLY` subnets (501, unavailable in the console with the reason) |
+
+The console's Create VPC network has ULA internal IPv6, its allocation and the range; a subnet's IP stack type and IPv6 access type; Edit subnet's IP stack type (IPv4 to dual-stack and back); Reserve internal static IP address's IPv6; Create an instance's network interface IP stack type and External IPv4 address (Ephemeral, None or a reserved address of the region); the Subnets list's IP stack type, Internal and External IPv6 ranges columns; a VM's network interfaces list its IPv6 addresses; firewall rules take IPv6 source and destination ranges.
 
 ### Terraform
 
