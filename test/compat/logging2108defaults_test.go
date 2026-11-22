@@ -161,17 +161,17 @@ func TestLoggingDefaultResourceSettings2108(t *testing.T) {
 		t.Fatalf("UpdateSettings(%s) = %v, %v", folder, st, err)
 	}
 	// defaultSinkConfig: OVERWRITE needs a filter; APPEND is kept and read back.
-	if _, err := js.Folders.UpdateSettings(folder+"/settings", &logging.Settings{DefaultSinkConfig: &logging.DefaultSinkConfig{Mode: "OVERWRITE"}}).
+	if _, err := js.Folders.UpdateSettings(folder, &logging.Settings{DefaultSinkConfig: &logging.DefaultSinkConfig{Mode: "OVERWRITE"}}).
 		UpdateMask("defaultSinkConfig").Context(ctx).Do(); err == nil || !strings.Contains(err.Error(), "400") {
 		t.Errorf("OVERWRITE without a filter = %v; want 400", err)
 	}
-	st, err := js.Folders.UpdateSettings(folder+"/settings", &logging.Settings{DefaultSinkConfig: &logging.DefaultSinkConfig{Mode: "APPEND",
+	st, err := js.Folders.UpdateSettings(folder, &logging.Settings{DefaultSinkConfig: &logging.DefaultSinkConfig{Mode: "APPEND",
 		Filter: "severity >= WARNING", Exclusions: []*logging.LogExclusion{{Name: "no-debug", Filter: `textPayload = "debug"`}}}}).
 		UpdateMask("defaultSinkConfig").Context(ctx).Do()
 	if err != nil || st.DefaultSinkConfig == nil || st.DefaultSinkConfig.Mode != "APPEND" || st.StorageLocation != "us-central1" || !st.DisableDefaultSink {
 		t.Fatalf("UpdateSettings defaultSinkConfig = %+v, %v", st, err)
 	}
-	if got, err := js.Folders.GetSettings(folder + "/settings").Context(ctx).Do(); err != nil || got.DefaultSinkConfig == nil ||
+	if got, err := js.Folders.GetSettings(folder).Context(ctx).Do(); err != nil || got.DefaultSinkConfig == nil ||
 		len(got.DefaultSinkConfig.Exclusions) != 1 || got.DefaultSinkConfig.Filter != "severity >= WARNING" {
 		t.Errorf("GetSettings = %+v, %v", got, err)
 	}

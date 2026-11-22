@@ -40,7 +40,7 @@ func TestLoggingDefaultSinkAndDefaultSettingsThroughTheBrowser(t *testing.T) {
 	p.waitFor(fmt.Sprintf(`document.querySelector(%q) !== null`, row))
 	var text string
 	p.eval(fmt.Sprintf(`document.querySelector(%q).textContent`, row), &text)
-	if !strings.Contains(text, `NOT LOG_ID("cloudaudit.googleapis.com/activity")`) || !strings.Contains(text, "/locations/global/buckets/_Default") {
+	if !strings.Contains(text, "/locations/global/buckets/_Default") || !strings.Contains(text, "Enabled") {
 		t.Errorf("the _Default row reads %q", text)
 	}
 	if got := p.menuItems(sink); !strings.Contains(got, "Delete sink (disabled)") || strings.Contains(got, "Edit sink (disabled)") ||
@@ -48,21 +48,15 @@ func TestLoggingDefaultSinkAndDefaultSettingsThroughTheBrowser(t *testing.T) {
 		t.Errorf("the _Default sink's menu = %q; want Delete sink alone greyed out", got)
 	}
 
-	t.Run("keyboard", func(t *testing.T) {
+	t.Run("keyboard menu", func(t *testing.T) {
 		k := open(t)
 		k.navigate("/logs/sinks?project=" + project)
 		k.waitFor(fmt.Sprintf(`document.querySelector(%q) !== null`, row))
 		k.eval(fmt.Sprintf(`document.querySelector(%q).focus(), true`, fmt.Sprintf(`button[aria-label=%q]`, "Actions for "+sink)), nil)
 		k.run(chromedp.KeyEvent(kb.Enter))
 		k.waitFor(`document.querySelector(".overflow-menu:not([hidden])") !== null`)
-		reached := false
-		for i := 0; i < 12 && !reached; i++ {
-			k.run(chromedp.KeyEvent(kb.ArrowDown))
-			k.eval(`(document.activeElement && document.activeElement.textContent.trim()) === "Disable sink"`, &reached)
-		}
-		if !reached {
-			t.Fatal("the arrow keys did not reach Disable sink in the row's menu")
-		}
+		// The menu's items are the next Tab stops; Enter chooses one.
+		k.tabTo(`a.getAttribute("role") === "menuitem" && a.textContent.trim() === "Disable sink"`)
 		k.run(chromedp.KeyEvent(kb.Enter))
 		var disabled bool
 		for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline) && !disabled; time.Sleep(300 * time.Millisecond) {
@@ -75,6 +69,15 @@ func TestLoggingDefaultSinkAndDefaultSettingsThroughTheBrowser(t *testing.T) {
 			t.Error("Disable sink, chosen by keyboard, did not disable the _Default sink")
 		}
 	})
+
+	// Its page: Google's filter, and an Edit sink form.
+	p.navigate("/logs/sinks/" + url.PathEscape(sink) + "?project=" + project)
+	p.waitFor(settled + ` && document.querySelector("#view").textContent.includes('NOT LOG_ID("cloudaudit.googleapis.com/activity")')`)
+	var editable bool
+	p.eval(`[...document.querySelectorAll("#view .page-actions button")].some((b) => b.textContent === "Edit sink")`, &editable)
+	if !editable {
+		t.Error("the _Default sink's page offers no Edit sink")
+	}
 
 	// Edit settings: the default sink configuration.
 	settings := "projects/" + project + "/settings"
