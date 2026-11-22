@@ -545,7 +545,7 @@ compat_shard() {
       SERVICES=bigquery,storage,logging,run,kms,dataproc
       TEST_VARS+=,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT,BIGQUERY_RESOURCEMANAGER,RESOURCEMANAGER,STORAGE,LOGGING,RUN,KMS,GCLOUD,DATAPROC
       export CLOUDBURROW_TEST_SPARK=1
-      COMPAT_RUN='^Test(BigQuerySpark|BqSpark|DataprocServerless)'
+      COMPAT_RUN='^Test(BigQuerySpark|BqSpark|Dataproc|GcloudDataproc)'
       COMPAT_TIMEOUT=150m ;;
     localai)
       # The local AI tests (#1985): BigQuery and Cloud Storage for the AI

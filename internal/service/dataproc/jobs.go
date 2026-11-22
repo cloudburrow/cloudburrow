@@ -572,14 +572,14 @@ func (s *Server) jobLocked(project, region, id string) (*dataprocpb.Job, error) 
 	return j, nil
 }
 
-func (s *Server) GetJob(_ context.Context, req *dataprocpb.GetJobRequest) (*dataprocpb.Job, error) {
+func (s *Server) GetJob(ctx context.Context, req *dataprocpb.GetJobRequest) (*dataprocpb.Job, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	j, err := s.jobLocked(req.GetProjectId(), req.GetRegion(), req.GetJobId())
 	if err != nil {
 		return nil, err
 	}
-	return clone(j), nil
+	return renderJob(ctx, j), nil
 }
 
 // jobFilter matches ListJobs' filter: status.state (ACTIVE or
@@ -635,7 +635,7 @@ func insertTime(j *dataprocpb.Job) time.Time {
 	return j.GetStatus().GetStateStartTime().AsTime()
 }
 
-func (s *Server) ListJobs(_ context.Context, req *dataprocpb.ListJobsRequest) (*dataprocpb.ListJobsResponse, error) {
+func (s *Server) ListJobs(ctx context.Context, req *dataprocpb.ListJobsRequest) (*dataprocpb.ListJobsResponse, error) {
 	if err := checkRegion(req.GetProjectId(), req.GetRegion()); err != nil {
 		return nil, err
 	}
@@ -667,7 +667,7 @@ func (s *Server) ListJobs(_ context.Context, req *dataprocpb.ListJobsRequest) (*
 				}
 			}
 		}
-		all = append(all, clone(j))
+		all = append(all, renderJob(ctx, j))
 	}
 	s.mu.Unlock()
 	sortNewest(all, func(j *dataprocpb.Job) *timestamppb.Timestamp { return timestamppb.New(insertTime(j)) })
@@ -679,7 +679,7 @@ func (s *Server) ListJobs(_ context.Context, req *dataprocpb.ListJobsRequest) (*
 }
 
 // UpdateJob: "Currently, labels is the only field that can be updated."
-func (s *Server) UpdateJob(_ context.Context, req *dataprocpb.UpdateJobRequest) (*dataprocpb.Job, error) {
+func (s *Server) UpdateJob(ctx context.Context, req *dataprocpb.UpdateJobRequest) (*dataprocpb.Job, error) {
 	paths := req.GetUpdateMask().GetPaths()
 	if len(paths) == 0 {
 		return nil, apierror.InvalidArgument("update_mask is required")
@@ -700,12 +700,12 @@ func (s *Server) UpdateJob(_ context.Context, req *dataprocpb.UpdateJobRequest) 
 	}
 	j.Labels = req.GetJob().GetLabels()
 	s.save()
-	return clone(j), nil
+	return renderJob(ctx, j), nil
 }
 
 // CancelJob starts a job's cancellation: CANCEL_PENDING, then
 // CANCEL_STARTED as its driver is stopped, then CANCELLED.
-func (s *Server) CancelJob(_ context.Context, req *dataprocpb.CancelJobRequest) (*dataprocpb.Job, error) {
+func (s *Server) CancelJob(ctx context.Context, req *dataprocpb.CancelJobRequest) (*dataprocpb.Job, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	j, err := s.jobLocked(req.GetProjectId(), req.GetRegion(), req.GetJobId())
@@ -725,7 +725,7 @@ func (s *Server) CancelJob(_ context.Context, req *dataprocpb.CancelJobRequest) 
 		s.endJobOpLocked(name, j)
 	}
 	s.save()
-	return clone(j), nil
+	return renderJob(ctx, j), nil
 }
 
 // DeleteJob: "Deletes the job from the project. If the job is active,
@@ -745,4 +745,18 @@ func (s *Server) DeleteJob(_ context.Context, req *dataprocpb.DeleteJobRequest) 
 	delete(s.jobOps, name)
 	s.save()
 	return &emptypb.Empty{}, nil
+}
+
+// renderJob is a job as the caller sees it: its Spark applications'
+// tracking URLs absolute, on the host the API was reached at.
+func renderJob(ctx context.Context, j *dataprocpb.Job) *dataprocpb.Job {
+	out := clone(j)
+	if host := authority(ctx); host != "" {
+		for _, a := range out.GetYarnApplications() {
+			if strings.HasPrefix(a.TrackingUrl, "/") {
+				a.TrackingUrl = "http://" + host + a.TrackingUrl
+			}
+		}
+	}
+	return out
 }

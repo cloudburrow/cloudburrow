@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -964,4 +965,33 @@ func lookup(m map[string]any, k string) (string, bool) {
 		}
 	}
 	return k, false
+}
+
+// WorkflowRuns are the workflow operations of the template name, its
+// instances (the console's Workflows list), newest first; name "" is
+// every workflow of parent (projects/P/regions/R).
+func (s *Server) WorkflowRuns(parent, name string) []*longrunningpb.Operation {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	type run struct {
+		op *longrunningpb.Operation
+		at time.Time
+	}
+	var runs []run
+	for opName, op := range s.ops {
+		if !strings.HasPrefix(opName, parent+"/operations/") {
+			continue
+		}
+		var md dataprocpb.WorkflowMetadata
+		if op.GetMetadata().UnmarshalTo(&md) != nil || (name != "" && md.GetTemplate() != name) {
+			continue
+		}
+		runs = append(runs, run{clone(op), md.GetStartTime().AsTime()})
+	}
+	sort.Slice(runs, func(i, j int) bool { return runs[i].at.After(runs[j].at) })
+	out := make([]*longrunningpb.Operation, len(runs))
+	for i, r := range runs {
+		out[i] = r.op
+	}
+	return out
 }

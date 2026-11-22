@@ -155,7 +155,15 @@ func (s *Server) CreateSession(ctx context.Context, req *dataprocpb.CreateSessio
 	switch x.GetSessionConfig().(type) {
 	case *dataprocpb.Session_SparkConnectSession:
 	case *dataprocpb.Session_JupyterSession:
-		return nil, status.Error(codes.Unimplemented, "Jupyter sessions are not served by CloudBurrow: create a Spark Connect session (spark_connect_session)")
+		// A Jupyter session (#2162) runs the same Spark Connect server; its
+		// IPython kernel is the console's notebook runtime, its spark a
+		// Spark Connect session of it. Scala has no kernel here.
+		if x.GetJupyterSession().GetKernel() == dataprocpb.JupyterConfig_SCALA {
+			return nil, status.Error(codes.Unimplemented, "the Scala kernel is not served by CloudBurrow: a Jupyter session's kernel is Python (kernel PYTHON)")
+		}
+		if x.GetJupyterSession().GetKernel() == dataprocpb.JupyterConfig_KERNEL_UNSPECIFIED {
+			x.GetJupyterSession().Kernel = dataprocpb.JupyterConfig_PYTHON
+		}
 	default:
 		return nil, apierror.InvalidArgument("session needs spark_connect_session or jupyter_session")
 	}
@@ -590,4 +598,20 @@ func (s *Server) DeleteSessionTemplate(_ context.Context, req *dataprocpb.Delete
 	delete(s.templates, t.Name)
 	s.save()
 	return &emptypb.Empty{}, nil
+}
+
+// KernelConnectURI is the Spark Connect URI a Jupyter session's kernel
+// reaches its ACTIVE session's server by, through this API's gRPC port at
+// addr (the Spark Connect proxy finds the session by its UUID).
+func (s *Server) KernelConnectURI(name, addr string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	x := s.sessions[name]
+	if x == nil {
+		return "", apierror.NotFound("Session %s not found", name)
+	}
+	if x.State != dataprocpb.Session_ACTIVE {
+		return "", status.Errorf(codes.FailedPrecondition, "Session %s is %s, not ACTIVE", name, x.State)
+	}
+	return "sc://" + addr + "/;session_id=" + x.Uuid, nil
 }

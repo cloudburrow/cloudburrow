@@ -34,7 +34,7 @@ func dataprocAPI(svc *dataprocService) (*dataproc.Server, error) {
 	return nil, errors.New(dataprocNotStarted)
 }
 
-var dataprocBatchTypes = map[string]string{"SPARK": "Spark", "PYSPARK": "PySpark", "SPARKR": "SparkR", "SPARKSQL": "Spark SQL"}
+var dataprocBatchTypes = map[string]string{"SPARK": "Spark", "PYSPARK": "PySpark", "SPARKR": "SparkR", "SPARKSQL": "Spark SQL", "NOTEBOOK": "PySpark notebook"}
 
 func dataprocBatchType(b *dataprocpb.Batch) string {
 	switch b.GetBatchConfig().(type) {
@@ -221,18 +221,22 @@ func (p dataprocBatchesProvider) CreateForm() (string, []console.Field) {
 			Help: "4 to 63 lower-case letters, numbers and hyphens. Left empty, one is generated."},
 		{Name: "region", Label: "Region", Type: "select", Required: true, Section: info, Options: dataproc.Locations(), Default: "us-central1"},
 		{Name: "batchType", Label: "Batch type", Type: "select", Required: true, Section: container, Default: "PYSPARK",
-			Options: []string{"SPARK", "PYSPARK", "SPARKR", "SPARKSQL"}, OptionLabels: dataprocBatchTypes},
+			Options: []string{"SPARK", "PYSPARK", "SPARKR", "SPARKSQL", "NOTEBOOK"}, OptionLabels: dataprocBatchTypes},
 		dataprocRuntimeField(container, ""),
 		{Name: "mainPythonFile", Label: "Main python file", Type: "text", Section: container, ShowWhen: "batchType=PYSPARK",
 			Help: "The gs:// URI of the main .py file, or a file:// path in the runtime image."},
 		{Name: "mainR", Label: "Main R file", Type: "text", Section: container, ShowWhen: "batchType=SPARKR", Help: "The gs:// URI of the main .R file."},
+		{Name: "notebook", Label: "Notebook file", Type: "text", Section: container, ShowWhen: "batchType=NOTEBOOK",
+			Help: "The gs:// URI of a Jupyter notebook (.ipynb); its code cells run in order as the batch's PySpark driver."},
+		{Name: "params", Label: "Notebook parameters", Type: "textarea", Section: container, ShowWhen: "batchType=NOTEBOOK",
+			Help: "One NAME=value a line, set after the cell tagged parameters."},
 		{Name: "queryFile", Label: "Query file", Type: "text", Section: container, ShowWhen: "batchType=SPARKSQL", Help: "The gs:// URI of the Spark SQL script."},
 		{Name: "queryVariables", Label: "Query parameters", Type: "textarea", Section: container, ShowWhen: "batchType=SPARKSQL",
 			Help: `One NAME=value a line, applied as SET NAME="value"; before the script.`},
 		{Name: "mainClass", Label: "Main class or jar", Type: "text", Section: container, ShowWhen: "batchType=SPARK",
 			Help: "A main class (with its jar in Jar files), or the gs:// URI of a jar whose manifest names one."},
 		{Name: "args", Label: "Arguments", Type: "textarea", Section: container, ShowWhen: "batchType=SPARK|PYSPARK|SPARKR", Help: "One argument a line."},
-		{Name: "pyFiles", Label: "Additional python files", Type: "textarea", Section: container, ShowWhen: "batchType=PYSPARK", Help: "gs:// URIs, one a line."},
+		{Name: "pyFiles", Label: "Additional python files", Type: "textarea", Section: container, ShowWhen: "batchType=PYSPARK|NOTEBOOK", Help: "gs:// URIs, one a line."},
 		{Name: "jarFiles", Label: "Jar files", Type: "textarea", Section: container, ShowWhen: "batchType=SPARK|PYSPARK|SPARKSQL", Help: "gs:// URIs, one a line."},
 		{Name: "files", Label: "Files", Type: "textarea", Section: container, ShowWhen: "batchType=SPARK|PYSPARK|SPARKR", Help: "gs:// URIs placed in each executor's working directory."},
 		{Name: "archives", Label: "Archive files", Type: "textarea", Section: container, ShowWhen: "batchType=SPARK|PYSPARK|SPARKR", Help: ".jar, .tar, .tar.gz, .tgz and .zip gs:// URIs, extracted in each executor's working directory."},
@@ -275,6 +279,13 @@ func (p dataprocBatchesProvider) Create(ctx context.Context, project string, val
 	case "SPARKR":
 		b.BatchConfig = &dataprocpb.Batch_SparkRBatch{SparkRBatch: &dataprocpb.SparkRBatch{MainRFileUri: strings.TrimSpace(values["mainR"]), Args: args,
 			FileUris: dataprocURIs(values["files"]), ArchiveUris: dataprocURIs(values["archives"])}}
+	case "NOTEBOOK":
+		params, err := dataprocPairs(values["params"])
+		if err != nil {
+			return "", fmt.Errorf("notebook parameters: %w", err)
+		}
+		b.BatchConfig = &dataprocpb.Batch_PysparkNotebookBatch{PysparkNotebookBatch: &dataprocpb.PySparkNotebookBatch{NotebookFileUri: strings.TrimSpace(values["notebook"]),
+			Params: params, PythonFileUris: dataprocURIs(values["pyFiles"])}}
 	case "SPARKSQL":
 		vars, err := dataprocPairs(values["queryVariables"])
 		if err != nil {
@@ -375,6 +386,9 @@ func (p dataprocBatchesProvider) Detail(ctx context.Context, project string, pat
 	case *dataprocpb.Batch_SparkRBatch:
 		workload = append(workload, console.Property{Label: "Main R file", Value: w.SparkRBatch.GetMainRFileUri()},
 			console.Property{Label: "Arguments", Value: kmsOrDash(strings.Join(w.SparkRBatch.GetArgs(), " "))})
+	case *dataprocpb.Batch_PysparkNotebookBatch:
+		workload = append(workload, console.Property{Label: "Notebook file", Value: w.PysparkNotebookBatch.GetNotebookFileUri()},
+			console.Property{Label: "Notebook parameters", Value: dataprocLabels(w.PysparkNotebookBatch.GetParams())})
 	case *dataprocpb.Batch_SparkSqlBatch:
 		workload = append(workload, console.Property{Label: "Query file", Value: w.SparkSqlBatch.GetQueryFileUri()},
 			console.Property{Label: "Query parameters", Value: dataprocLabels(w.SparkSqlBatch.GetQueryVariables())})
@@ -404,6 +418,7 @@ func (p dataprocBatchesProvider) Detail(ctx context.Context, project string, pat
 					{Label: "Version", Value: kmsOrDash(rc.GetVersion())}, {Label: "Container image", Value: kmsOrDash(rc.GetContainerImage())},
 					{Label: "Properties", Value: kmsOrDash(strings.ReplaceAll(dataprocPropsText(rc.GetProperties()), "\n", ", "))},
 					{Label: "Output URI", Value: kmsOrDash(b.GetRuntimeInfo().GetOutputUri()), Copy: "Copy URI"},
+					dataprocSparkUI(p.svc, b.GetUuid(), b.GetState() != dataprocpb.Batch_PENDING),
 					{Label: "Approximate usage", Value: fmt.Sprintf("%.3f DCU-hours, %.3f GB-hours of shuffle storage",
 						float64(usage.GetMilliDcuSeconds())/3.6e6, float64(usage.GetShuffleStorageGbSeconds())/3600)}}},
 				{Heading: "Execution configuration", Properties: []console.Property{
@@ -513,6 +528,9 @@ func (p dataprocSessionsProvider) CreateForm() (string, []console.Field) {
 		{Name: "sessionId", Label: "Name", Type: "text", Required: true, Section: info, Pattern: `^[a-z0-9\-]{4,63}$`,
 			Help: "4 to 63 lower-case letters, numbers and hyphens."},
 		{Name: "region", Label: "Region", Type: "select", Required: true, Section: info, Options: dataproc.Locations(), Default: "us-central1"},
+		{Name: "sessionType", Label: "Session type", Type: "radio", Section: info, Default: "SPARK_CONNECT", Options: []string{"SPARK_CONNECT", "JUPYTER"},
+			OptionLabels: map[string]string{"SPARK_CONNECT": "Spark Connect", "JUPYTER": "Jupyter (Python kernel)"}},
+		{Name: "displayName", Label: "Kernel display name", Type: "text", Section: info, ShowWhen: "sessionType=JUPYTER"},
 		{Name: "template", Label: "Session template", Type: "text", Section: info,
 			Help: "projects/P/locations/L/sessionTemplates/T, in the session's region; its settings apply where the session sets none."},
 		dataprocRuntimeField(runtime, "3.0"),
@@ -546,6 +564,10 @@ func (p dataprocSessionsProvider) Create(ctx context.Context, project string, va
 	}
 	x := &dataprocpb.Session{SessionTemplate: strings.TrimSpace(values["template"]),
 		SessionConfig: &dataprocpb.Session_SparkConnectSession{SparkConnectSession: &dataprocpb.SparkConnectConfig{}}}
+	if values["sessionType"] == "JUPYTER" {
+		x.SessionConfig = &dataprocpb.Session_JupyterSession{JupyterSession: &dataprocpb.JupyterConfig{Kernel: dataprocpb.JupyterConfig_PYTHON,
+			DisplayName: strings.TrimSpace(values["displayName"])}}
+	}
 	if x.SessionTemplate == "" || values["runtimeVersion"] != "" {
 		x.RuntimeConfig = &dataprocpb.RuntimeConfig{Version: values["runtimeVersion"]}
 	}
@@ -613,6 +635,14 @@ func (p dataprocSessionsProvider) Detail(ctx context.Context, project string, pa
 	rc, ec := x.GetRuntimeConfig(), x.GetEnvironmentConfig().GetExecutionConfig()
 	endpoint := x.GetRuntimeInfo().GetEndpoints()[dataproc.ConnectEndpoint]
 	conn := []console.Property{{Label: dataproc.ConnectEndpoint, Value: kmsOrDash(endpoint), Copy: "Copy endpoint"}}
+	if x.GetJupyterSession() != nil && x.GetState() == dataprocpb.Session_ACTIVE {
+		// A Jupyter session's kernel (#2162): a notebook of BigQuery Studio
+		// runs on the console's notebook runtime, whose relay reaches this
+		// API's gRPC port as host.docker.internal:8081.
+		conn = append(conn, console.Property{Label: "Kernel", Value: "Python (" + kmsOrDash(x.GetJupyterSession().GetDisplayName()) + ")"},
+			console.Property{Label: "Use in a notebook", Copy: "Copy", Link: "/bigquery-studio",
+				Value: fmt.Sprintf(`from pyspark.sql import SparkSession\nspark = SparkSession.builder.remote("sc://host.docker.internal:8081/;session_id=%s").getOrCreate()`, x.GetUuid())})
+	}
 	if endpoint != "" {
 		conn = append(conn, console.Property{Label: "Connect with PySpark", Copy: "Copy",
 			Value: fmt.Sprintf(`SparkSession.builder.remote("%s/;session_id=%s").getOrCreate()`, endpoint, x.GetUuid())})
@@ -636,7 +666,8 @@ func (p dataprocSessionsProvider) Detail(ctx context.Context, project string, pa
 				{Heading: "Connection", Properties: conn},
 				{Heading: "Runtime", Properties: []console.Property{
 					{Label: "Version", Value: kmsOrDash(rc.GetVersion())},
-					{Label: "Properties", Value: kmsOrDash(strings.ReplaceAll(dataprocPropsText(rc.GetProperties()), "\n", ", "))}}},
+					{Label: "Properties", Value: kmsOrDash(strings.ReplaceAll(dataprocPropsText(rc.GetProperties()), "\n", ", "))},
+					dataprocSparkUI(p.svc, x.GetUuid(), x.GetState() != dataprocpb.Session_CREATING)}},
 				{Heading: "Execution configuration", Properties: []console.Property{
 					{Label: "Service account", Value: kmsOrDash(ec.GetServiceAccount())},
 					{Label: "Max idle time", Value: dur(ec.GetIdleTtl())}, {Label: "Max session time", Value: dur(ec.GetTtl())}}}}},
@@ -873,4 +904,13 @@ func (p dataprocTemplatesProvider) ActAt(ctx context.Context, project string, pa
 		return err
 	}
 	return fmt.Errorf("unknown action %q", action)
+}
+
+// dataprocSparkUI is a batch's or session's View Spark UI: its
+// application in the instance's Spark History Server (#2162).
+func dataprocSparkUI(svc *dataprocService, uuid string, ran bool) console.Property {
+	if !ran || svc.Addr() == "" {
+		return console.Property{Label: "Spark UI", Value: "Available once the workload starts"}
+	}
+	return console.Property{Label: "Spark UI", Value: "View Spark UI", Link: "http://" + svc.Addr() + dataproc.SparkUIPath(uuid)}
 }

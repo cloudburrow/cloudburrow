@@ -19602,11 +19602,37 @@
   },
   {
     "Key": "dataproc",
-    "Title": "Dataproc: Serverless for Apache Spark (v1)",
+    "Title": "Dataproc (v1): clusters, jobs, workflow templates, autoscaling policies and Serverless for Apache Spark",
     "counts": {
+      "Implemented": 27,
       "Verified": 14
     },
     "rows": [
+      {
+        "method": "google.cloud.dataproc.v1.AutoscalingPolicyService/CreateAutoscalingPolicy",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.dataproc.v1.AutoscalingPolicyService/DeleteAutoscalingPolicy",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.dataproc.v1.AutoscalingPolicyService/GetAutoscalingPolicy",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.dataproc.v1.AutoscalingPolicyService/ListAutoscalingPolicies",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.dataproc.v1.AutoscalingPolicyService/UpdateAutoscalingPolicy",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
       {
         "method": "google.cloud.dataproc.v1.BatchController/CreateBatch",
         "status": "Verified",
@@ -19634,6 +19660,81 @@
         "tests": [
           "test/compat/dataproc2156_test.go:85 TestDataprocServerlessBatches"
         ]
+      },
+      {
+        "method": "google.cloud.dataproc.v1.ClusterController/CreateCluster",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.dataproc.v1.ClusterController/DeleteCluster",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.dataproc.v1.ClusterController/DiagnoseCluster",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.dataproc.v1.ClusterController/GetCluster",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.dataproc.v1.ClusterController/ListClusters",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.dataproc.v1.ClusterController/StartCluster",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.dataproc.v1.ClusterController/StopCluster",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.dataproc.v1.ClusterController/UpdateCluster",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.dataproc.v1.JobController/CancelJob",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.dataproc.v1.JobController/DeleteJob",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.dataproc.v1.JobController/GetJob",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.dataproc.v1.JobController/ListJobs",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.dataproc.v1.JobController/SubmitJob",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.dataproc.v1.JobController/SubmitJobAsOperation",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.dataproc.v1.JobController/UpdateJob",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "google.cloud.dataproc.v1.SessionController/CreateSession",
@@ -19704,6 +19805,41 @@
         "tests": [
           "test/compat/dataproc2156_test.go:417 TestDataprocServerlessSessions"
         ]
+      },
+      {
+        "method": "google.cloud.dataproc.v1.WorkflowTemplateService/CreateWorkflowTemplate",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.dataproc.v1.WorkflowTemplateService/DeleteWorkflowTemplate",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.dataproc.v1.WorkflowTemplateService/GetWorkflowTemplate",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.dataproc.v1.WorkflowTemplateService/InstantiateInlineWorkflowTemplate",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.dataproc.v1.WorkflowTemplateService/InstantiateWorkflowTemplate",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.dataproc.v1.WorkflowTemplateService/ListWorkflowTemplates",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.dataproc.v1.WorkflowTemplateService/UpdateWorkflowTemplate",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       }
     ]
   },

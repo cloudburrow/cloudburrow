@@ -345,3 +345,21 @@ func TestPoliciesAndWorkflows(t *testing.T) {
 		t.Error(err)
 	}
 }
+
+// TestNotebookScript: code cells in order, params after the cell tagged
+// parameters (or first), magics refused.
+func TestNotebookScript(t *testing.T) {
+	nb := `{"cells":[{"cell_type":"markdown","source":["# T"]},
+	{"cell_type":"code","metadata":{"tags":["parameters"]},"source":["n = 1\n"]},
+	{"cell_type":"code","metadata":{},"source":"print(n)"}]}`
+	got, err := notebookScript([]byte(nb), map[string]string{"n": "5"})
+	if err != nil || !strings.Contains(got, "n = 1\n\n# Parameters\nn = \"5\"\n\n# In[2]:\nprint(n)") {
+		t.Errorf("script %q %v", got, err)
+	}
+	if got, _ := notebookScript([]byte(`{"cells":[{"cell_type":"code","source":"print(n)"}]}`), map[string]string{"n": "5"}); !strings.Contains(got, "# Parameters\nn = \"5\"\n\n# In[1]:") {
+		t.Errorf("untagged %q", got)
+	}
+	if _, err := notebookScript([]byte(`{"cells":[{"cell_type":"code","source":"%pip install x"}]}`), nil); err == nil {
+		t.Error("magic accepted")
+	}
+}
