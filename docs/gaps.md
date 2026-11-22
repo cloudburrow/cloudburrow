@@ -325,7 +325,7 @@ latency and resource charts (#1267); the Artifact Registry repository Permission
 
 | Gap | Why open | Size |
 |---|---|---|
-| Cloud SQL: managed connection pooling for MySQL (a server thread pool the community MySQL server lacks; 501), and the pooler at a private IP or Private Service Connect endpoint (only the server's port is in a VM's NAT chains) (#2141) | no thread pool in community MySQL; pooler port not in the VPC model | M |
+| Cloud SQL: managed connection pooling's metrics in Cloud Monitoring (MySQL's `threads`, `pending_connection` and `avg_wait_time`, <https://docs.cloud.google.com/sql/docs/mysql/configure-mcp>; PostgreSQL's pooler's), not published (#2141, #2163) | the pools' figures are pod-local; no reader publishes them yet | S |
 
 ## Excluded on purpose
 

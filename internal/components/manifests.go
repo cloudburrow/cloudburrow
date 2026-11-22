@@ -116,6 +116,10 @@ type Backend struct {
 	// port, which the Service publishes: Cloud SQL's managed connection
 	// pooler beside the server (#2141).
 	Sidecars []Sidecar
+	// ServiceTargetPort, when set, is the pod port the Service's Port
+	// targets in place of Port: Cloud SQL for MySQL's thread pool, a
+	// sidecar in front of mysqld on every path a client takes (#2141).
+	ServiceTargetPort int
 	// Selects, when set, is the app label the Service selects in place of
 	// Name: a Cloud SQL high-availability instance's Service selects its
 	// primary's server, which a failover changes (#1408).
@@ -243,6 +247,14 @@ type Sidecar struct {
 	Port    int
 	// RunAsUser, when set, is the container's user and group.
 	RunAsUser int
+	// Args, when set, are the container's arguments.
+	Args []string
+	// PullPolicy, when set, is the container's imagePullPolicy: Never
+	// for a locally built image.
+	PullPolicy string
+	// Unpublished leaves the port off the Service: a sidecar the
+	// Service's own port targets (ServiceTargetPort) is reached on it.
+	Unpublished bool
 }
 
 type NamedPort struct {
@@ -730,8 +742,14 @@ spec:
 
 	for _, c := range b.Sidecars {
 		fmt.Fprintf(&sb, "        - name: %s\n          image: %s\n", c.Name, c.Image)
+		if c.PullPolicy != "" {
+			fmt.Fprintf(&sb, "          imagePullPolicy: %s\n", c.PullPolicy)
+		}
 		if len(c.Command) > 0 {
 			fmt.Fprintf(&sb, "          command: [%s]\n", quoteList(c.Command))
+		}
+		if len(c.Args) > 0 {
+			fmt.Fprintf(&sb, "          args: [%s]\n", quoteList(c.Args))
 		}
 		writeEnv(&sb, c.Env)
 		if c.RunAsUser != 0 {
@@ -786,11 +804,14 @@ spec:
     - name: api
       port: %d
       targetPort: %d
-`, b.Name, namespace, b.selects(), b.Port, b.Port)
+`, b.Name, namespace, b.selects(), b.Port, b.serviceTarget())
 	for _, p := range b.ExtraPorts {
 		fmt.Fprintf(&sb, "    - name: %s\n      port: %d\n      targetPort: %d\n", p.Name, p.Port, p.Port)
 	}
 	for _, c := range b.Sidecars {
+		if c.Unpublished {
+			continue
+		}
 		fmt.Fprintf(&sb, "    - name: %s\n      port: %d\n      targetPort: %d\n", c.Name, c.Port, c.Port)
 	}
 	if b.EgressTo != nil {
@@ -856,6 +877,14 @@ func quoteList(items []string) string {
 		q[i] = fmt.Sprintf("%q", s)
 	}
 	return strings.Join(q, ", ")
+}
+
+// serviceTarget is the pod port the Service's Port targets.
+func (b Backend) serviceTarget() int {
+	if b.ServiceTargetPort != 0 {
+		return b.ServiceTargetPort
+	}
+	return b.Port
 }
 
 func (b Backend) selects() string {

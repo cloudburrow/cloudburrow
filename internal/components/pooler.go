@@ -67,3 +67,24 @@ func CloudSQLPooler(port int, settings map[string]string) Sidecar {
 		// The image's postgres user (PgBouncer refuses to run as root).
 		RunAsUser: 70}
 }
+
+// MySQLThreadPoolPort is the pod port of Cloud SQL for MySQL's thread
+// pool (#2141), which the instance's Service's 3306 targets.
+const MySQLThreadPoolPort = 13306
+
+// MySQLThreadPoolContainer is the thread pool's container.
+const MySQLThreadPoolContainer = "thread-pool"
+
+// CloudSQLMySQLThreadPool puts Cloud SQL for MySQL's Managed Connection
+// Pooling, a thread pool of maxPoolSize threads (internal/mysqlpool, run
+// from image, the locally built cloudburrow-storage image), in front of
+// b's mysqld on every path to it: the Service's 3306 targets the pool,
+// which signs each client in to mysqld on the pod's 3306.
+func CloudSQLMySQLThreadPool(b Backend, image string, maxPoolSize int) Backend {
+	b.Sidecars = append(append([]Sidecar{}, b.Sidecars...), Sidecar{Name: MySQLThreadPoolContainer, Image: image, PullPolicy: "Never",
+		Port: MySQLThreadPoolPort, Unpublished: true,
+		Args: []string{"mysql-thread-pool", "--listen", "0.0.0.0:" + strconv.Itoa(MySQLThreadPoolPort),
+			"--upstream", "127.0.0.1:" + strconv.Itoa(CloudSQLMySQLPort), "--max-pool-size", strconv.Itoa(maxPoolSize)}})
+	b.ServiceTargetPort = MySQLThreadPoolPort
+	return b
+}

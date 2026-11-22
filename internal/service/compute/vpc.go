@@ -332,6 +332,11 @@ func withPrivateServices(fw string, eps []PrivateService) string {
 			continue
 		}
 		lines = append(lines, fmt.Sprintf("    ip daddr %s tcp dport %d dnat ip to %s:%d comment %q\n", e.IP, e.Port, e.TargetIP, e.TargetPort, e.Name))
+		for _, x := range e.ExtraPorts {
+			if x > 0 {
+				lines = append(lines, fmt.Sprintf("    ip daddr %s tcp dport %d dnat ip to %s:%d comment %q\n", e.IP, x, e.TargetIP, x, e.Name))
+			}
+		}
 		targets[e.TargetIP] = true
 	}
 	if len(lines) == 0 {

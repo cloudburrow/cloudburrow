@@ -206,7 +206,7 @@ COMPAT_CROSSSERVICE_TESTS="^Test((Gcloud|Terraform|GcloudAndTerraform)?Eventarc[
 # API's service connection policies and the automatic endpoints made
 # through them, and managed connection pooling, which the sql shard (near
 # its COMPAT_TIMEOUT) had no time left for.
-COMPAT_SQL_NETWORK_TESTS='^Test(CloudSQLZonesPrivateIPAndPSCEndpoints|CloudSQLPrivateIPAndPSCReachableFromAVM|CloudSQLPSCAutoConnections|CloudSQLManagedConnectionPooling|NetworkConnectivity[A-Za-z]*)$'
+COMPAT_SQL_NETWORK_TESTS='^Test(CloudSQLZonesPrivateIPAndPSCEndpoints|CloudSQLPrivateIPAndPSCReachableFromAVM|CloudSQLPSCAutoConnections|CloudSQLManagedConnectionPooling|CloudSQLMySQLManagedConnectionPooling|NetworkConnectivity[A-Za-z]*)$'
 COMPAT_SQL_REPLICA_TESTS='^Test[A-Za-z]*SQL[A-Za-z0-9]*(HighAvailability|Replica|BlueGreen|External|Switchover|Demote|Failover|Promote)|'"$COMPAT_SQL_NETWORK_TESTS"
 
 # The console's headless-browser suite (#594) runs in the storage, run,

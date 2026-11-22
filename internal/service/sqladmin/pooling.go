@@ -18,14 +18,23 @@ import (
 // only, is the instance's vCPUs divided by 4, at least 1. Enabling or
 // disabling it restarts the instance. CloudBurrow's pooler is PgBouncer
 // (ISC licence), whose settings these flags are; one pooler process
-// serves however many poolerCount says (UNVERIFIED: Google runs that
-// many, and max_client_connections is each one's).
+// serves however many poolerCount says (UNVERIFIED, re-read 2026-11-22:
+// Google runs that many, and max_client_connections is each one's).
 //
-// Cloud SQL for MySQL's managed connection pooling is a thread pool in the
-// server (https://docs.cloud.google.com/sql/docs/mysql/managed-connection-pooling),
-// which the community MySQL server CloudBurrow runs does not have: it is
-// refused 501. The wording of every error here is UNVERIFIED (the page
-// quotes none).
+// Cloud SQL for MySQL's managed connection pooling
+// (https://docs.cloud.google.com/sql/docs/mysql/managed-connection-pooling,
+// read 2026-11-22) is "a server-side thread pool rather than an external
+// connection multiplexer": "each open client connection still maintains a
+// dedicated server session and counts toward the max_connections limit",
+// on a Cloud SQL Enterprise Plus instance, and its one flag, max_pool_size,
+// "controls the amount of concurrency", its default depending "on the
+// number of vCPU cores" (CloudBurrow's: one thread a vCPU, UNVERIFIED,
+// re-read 2026-11-22).
+// Enabling it restarts the instance, and thread_cache_size defaults to 0.
+// The community MySQL server has no thread pool, so CloudBurrow's is a
+// front in the server's pod (internal/mysqlpool) on 3306 itself. The
+// wording of every error here is UNVERIFIED (re-read 2026-11-22: the
+// pages quote none).
 
 // PoolerPort is the pooler's port in the instance's pod: Google's 6432.
 const PoolerPort = 6432
@@ -44,7 +53,8 @@ type poolFlag struct {
 }
 
 // poolFlags are Google's flags, with its defaults and ranges. Ranges the
-// page does not give are any whole number from 0 (UNVERIFIED).
+// page does not give are any whole number from 0 (re-read 2026-11-22,
+// UNVERIFIED).
 var poolFlags = map[string]poolFlag{
 	"pool_mode":                      {setting: "pool_mode", values: []string{"transaction", "session"}, def: "transaction"},
 	"max_pool_size":                  {setting: "default_pool_size", min: 1, def: "50"},
@@ -64,10 +74,33 @@ func (s Spec) poolConfig() map[string]any {
 	return m
 }
 
-// PoolingEnabled reports whether spec runs the managed connection pooler.
+// PoolingEnabled reports whether spec runs managed connection pooling:
+// PostgreSQL's pooler or MySQL's thread pool.
 func (s Spec) PoolingEnabled() bool {
 	on, _ := s.poolConfig()["connectionPoolingEnabled"].(bool)
-	return on && !s.MySQL() && !IsSQLServer(s.DatabaseVersion)
+	return on && !IsSQLServer(s.DatabaseVersion)
+}
+
+// PGPooling reports whether spec runs PostgreSQL's pooler, on 6432.
+func (s Spec) PGPooling() bool { return s.PoolingEnabled() && !s.MySQL() }
+
+// MySQLThreadPool reports whether spec runs MySQL's thread pool.
+func (s Spec) MySQLThreadPool() bool { return s.PoolingEnabled() && s.MySQL() }
+
+// mysqlPoolFlags are Cloud SQL for MySQL's: max_pool_size alone, a whole
+// number from 1 (the page gives no range).
+var mysqlPoolFlags = map[string]poolFlag{
+	"max_pool_size": {setting: "max_pool_size", min: 1},
+}
+
+// MySQLPoolSize is a MySQL thread pool's max_pool_size: its flag, else
+// the instance's vCPUs.
+func (s Spec) MySQLPoolSize() int {
+	if v, err := strconv.Atoi(s.poolFlagValues()["max_pool_size"]); err == nil && v > 0 {
+		return v
+	}
+	cores, _ := TierShape(s.Tier)
+	return max(int(cores), 1)
 }
 
 // PoolerSettings are the pooler's PgBouncer settings, each flag's value or
@@ -101,6 +134,9 @@ func (s Spec) poolFlagValues() map[string]string {
 func (s Spec) poolingKey() string {
 	if !s.PoolingEnabled() {
 		return ""
+	}
+	if s.MySQL() {
+		return fmt.Sprintf("max_pool_size=%d", s.MySQLPoolSize())
 	}
 	set := s.PoolerSettings()
 	keys := make([]string, 0, len(set))
@@ -148,11 +184,12 @@ func checkConnectionPool(spec Spec) error {
 	switch {
 	case IsSQLServer(spec.DatabaseVersion):
 		return Errorf(http.StatusBadRequest, "Invalid request: Managed Connection Pooling is not supported for SQL Server instances.")
-	case spec.MySQL():
-		return unimplemented("settings.connectionPoolConfig on Cloud SQL for MySQL",
-			"Cloud SQL for MySQL's managed connection pooling is a server thread pool, which the community MySQL server run here does not have")
 	case editionOf(spec) != "ENTERPRISE_PLUS":
 		return Errorf(http.StatusBadRequest, "Invalid request: Managed Connection Pooling requires the Cloud SQL Enterprise Plus edition (settings.edition ENTERPRISE_PLUS).")
+	}
+	known := poolFlags
+	if spec.MySQL() {
+		known = mysqlPoolFlags
 	}
 	seen := map[string]bool{}
 	list, _ := pc["flags"].([]any)
@@ -161,7 +198,7 @@ func checkConnectionPool(spec Spec) error {
 		name, _ := m["name"].(string)
 		value, _ := m["value"].(string)
 		name, value = strings.TrimSpace(name), strings.TrimSpace(value)
-		f, ok := poolFlags[name]
+		f, ok := known[name]
 		if !ok {
 			return Errorf(http.StatusBadRequest, "Invalid request: connectionPoolConfig.flags[%d]: %q is not a Managed Connection Pooling flag.", i, name)
 		}
@@ -220,7 +257,7 @@ func withPoolerCount(st map[string]any, spec Spec) {
 		n[k] = v
 	}
 	delete(n, "poolerCount")
-	if spec.PoolingEnabled() {
+	if spec.PGPooling() {
 		n["poolerCount"] = spec.poolerCount()
 	}
 	st["connectionPoolConfig"] = n

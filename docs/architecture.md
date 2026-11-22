@@ -186,6 +186,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/lro/` | Long-running operations: pending, completed and failed. |
 | `internal/metadata/` | A local GCE metadata server and the fixture credentials that point Google tooling at CloudBurrow. |
 | `internal/metrics/` | Counts the calls CloudBurrow serves itself, in the Prometheus text format (#292). |
+| `internal/mysqlpool/` | Cloud SQL for MySQL's Managed Connection Pooling (#2141): a thread pool of `max_pool_size` threads in front of mysqld in the instance's pod, reading the MySQL client/server protocol so each statement runs on a thread while every client keeps its own server session. Run from the cloudburrow-storage image as `mysql-thread-pool`. |
 | `internal/netfwd/` | Publishes in-cluster Services on host loopback addresses (port-forward tunnels), with the Host check in front of the tunnels that carry HTTP (#725). |
 | `internal/orgpolicy/` | Evaluates organization policies where the services ask (#1890): a constraint's effective policy down the hierarchy, the checks each enforced list or boolean constraint makes, and custom constraints' CEL conditions on the fields each service documents (#1891, #1895). |
 | `internal/paging/` | Pagination with deterministic ordering; invalid page tokens refused. |

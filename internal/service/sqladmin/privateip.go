@@ -234,6 +234,10 @@ type PrivateEndpoint struct {
 	// Instance and Server name the instance and its server in the
 	// cluster; DatabaseVersion says which port it serves.
 	Instance, Server, DatabaseVersion string
+	// PoolerPort, when set, is the port of the instance's managed
+	// connection pooler beside its server's, which its private IP and its
+	// Private Service Connect endpoints serve too (#2141).
+	PoolerPort int
 }
 
 // PrivateEndpoints are every created instance's private IPs, for Compute
@@ -289,6 +293,9 @@ func (s *Server) endpointSnapshot() endpoints {
 			}
 			ep := PrivateEndpoint{Network: sp.PrivateNetwork, IP: sp.PrivateIP, Instance: sp.Name, Server: sp.ServerName(),
 				DatabaseVersion: sp.DatabaseVersion}
+			if sp.PGPooling() {
+				ep.PoolerPort = PoolerPort
+			}
 			if sp.PrivateIP != "" {
 				out.private = append(out.private, ep)
 			}

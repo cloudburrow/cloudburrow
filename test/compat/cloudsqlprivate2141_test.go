@@ -161,7 +161,12 @@ func TestCloudSQLZonesPrivateIPAndPSCEndpoints(t *testing.T) {
 // opens a TCP connection to a Cloud SQL instance's private IP on its
 // port, and to a Private Service Connect endpoint of another instance,
 // each reaching the instance's server (the startup script's lines read
-// back from the serial port).
+// back from the serial port). Both instances are Enterprise Plus with
+// managed connection pooling on, and the VM reaches each one's pooler on
+// 6432 at the same addresses, as Google's private IP and Private Service
+// Connect endpoints serve it: the pooler answers PostgreSQL's SSLRequest.
+// A MySQL instance pooling connections on a private IP greets the VM on
+// 3306 through its thread pool.
 func TestCloudSQLPrivateIPAndPSCReachableFromAVM(t *testing.T) {
 	h := New(t)
 	opts := sqlComputeOpts(t, h)
@@ -186,10 +191,11 @@ func TestCloudSQLPrivateIPAndPSCReachableFromAVM(t *testing.T) {
 	}
 	_ = op.Wait(ctx)
 	t.Cleanup(func() { _, _ = gaddrs.Delete(ctx, &computepb.DeleteGlobalAddressRequest{Project: p, Address: rng}) })
-	create := func(name string, ic *sqladmin.IpConfiguration) *sqladmin.DatabaseInstance {
+	create := func(name, version string, ic *sqladmin.IpConfiguration) *sqladmin.DatabaseInstance {
 		t.Helper()
-		op, err := svc.Instances.Insert(p, &sqladmin.DatabaseInstance{Name: name, DatabaseVersion: "POSTGRES_17", Region: region,
-			Settings: &sqladmin.Settings{Tier: "db-custom-1-3840", IpConfiguration: ic}}).Do()
+		op, err := svc.Instances.Insert(p, &sqladmin.DatabaseInstance{Name: name, DatabaseVersion: version, Region: region,
+			Settings: &sqladmin.Settings{Tier: "db-perf-optimized-N-2", Edition: "ENTERPRISE_PLUS", IpConfiguration: ic,
+				ConnectionPoolConfig: &sqladmin.ConnectionPoolConfig{ConnectionPoolingEnabled: true}}}).Do()
 		if err != nil {
 			t.Fatalf("create %s: %v", name, err)
 		}
@@ -205,15 +211,23 @@ func TestCloudSQLPrivateIPAndPSCReachableFromAVM(t *testing.T) {
 		}
 		return in
 	}
-	priv := create("ct-reach-priv-"+suffix, &sqladmin.IpConfiguration{Ipv4Enabled: false, ForceSendFields: []string{"Ipv4Enabled"},
-		PrivateNetwork: "projects/" + p + "/global/networks/default", AllocatedIpRange: rng})
-	var privateIP string
-	for _, a := range priv.IpAddresses {
-		if a.Type == "PRIVATE" {
-			privateIP = a.IpAddress
+	privateOf := func(in *sqladmin.DatabaseInstance) string {
+		for _, a := range in.IpAddresses {
+			if a.Type == "PRIVATE" {
+				return a.IpAddress
+			}
 		}
+		return ""
 	}
-	psc := create("ct-reach-psc-"+suffix, &sqladmin.IpConfiguration{Ipv4Enabled: false, ForceSendFields: []string{"Ipv4Enabled"},
+	priv := create("ct-reach-priv-"+suffix, "POSTGRES_17", &sqladmin.IpConfiguration{Ipv4Enabled: false, ForceSendFields: []string{"Ipv4Enabled"},
+		PrivateNetwork: "projects/" + p + "/global/networks/default", AllocatedIpRange: rng})
+	privateIP := privateOf(priv)
+	// MySQL's thread pool is on 3306 itself: the VM's connection to the
+	// private IP is greeted by the server through it.
+	my := create("ct-reach-my-"+suffix, "MYSQL_8_4", &sqladmin.IpConfiguration{Ipv4Enabled: false, ForceSendFields: []string{"Ipv4Enabled"},
+		PrivateNetwork: "projects/" + p + "/global/networks/default", AllocatedIpRange: rng})
+	myIP := privateOf(my)
+	psc := create("ct-reach-psc-"+suffix, "POSTGRES_17", &sqladmin.IpConfiguration{Ipv4Enabled: false, ForceSendFields: []string{"Ipv4Enabled"},
 		PscConfig: &sqladmin.PscConfig{PscEnabled: true, AllowedConsumerProjects: []string{p}}})
 	ep := "ct-reach-ep-" + suffix
 	op, err = rules.Insert(ctx, &computepb.InsertForwardingRuleRequest{Project: p, Region: region, ForwardingRuleResource: &computepb.ForwardingRule{
@@ -239,7 +253,17 @@ func TestCloudSQLPrivateIPAndPSCReachableFromAVM(t *testing.T) {
 		"  if timeout 3 bash -c '</dev/tcp/%s/5432' 2>/dev/null; then echo PRIVATE-IP-REACHED; break; fi; sleep 2\ndone\n"+
 		"for i in $(seq 1 40); do\n"+
 		"  if timeout 3 bash -c '</dev/tcp/%s/5432' 2>/dev/null; then echo PSC-ENDPOINT-REACHED; break; fi; sleep 2\ndone\n"+
-		"nft list chain inet cloudburrow private-services 2>&1 | sed 's/^/NFT: /'\necho REACH-DONE\n", privateIP, pscIP)
+		// The pooler: PostgreSQL's SSLRequest, which PgBouncer without
+		// client TLS answers N.
+		"pooler() { timeout 5 bash -c \"exec 3<>/dev/tcp/$1/6432; printf '\\\\x00\\\\x00\\\\x00\\\\x08\\\\x04\\\\xd2\\\\x16\\\\x2f' >&3; head -c1 <&3\" 2>/dev/null; }\n"+
+		"for i in $(seq 1 40); do\n"+
+		"  if [ \"$(pooler %s)\" = N ]; then echo PRIVATE-IP-POOLER-REACHED; break; fi; sleep 2\ndone\n"+
+		"for i in $(seq 1 40); do\n"+
+		"  if [ \"$(pooler %s)\" = N ]; then echo PSC-ENDPOINT-POOLER-REACHED; break; fi; sleep 2\ndone\n"+
+		"for i in $(seq 1 40); do\n"+
+		"  timeout 3 bash -c 'exec 3<>/dev/tcp/%s/3306; cat <&3' > /tmp/greeting 2>/dev/null\n"+
+		"  if tr -d '\\000' < /tmp/greeting | grep -q caching_sha2_password; then echo MYSQL-THREAD-POOL-REACHED; break; fi; sleep 2\ndone\n"+
+		"nft list chain inet cloudburrow private-services 2>&1 | sed 's/^/NFT: /'\necho REACH-DONE\n", privateIP, pscIP, privateIP, pscIP, myIP)
 	op, err = insts.Insert(ctx, &computepb.InsertInstanceRequest{Project: p, Zone: zone, InstanceResource: &computepb.Instance{
 		Name:        proto.String(vm),
 		MachineType: proto.String("zones/" + zone + "/machineTypes/e2-small"),
@@ -275,7 +299,8 @@ func TestCloudSQLPrivateIPAndPSCReachableFromAVM(t *testing.T) {
 		}
 		time.Sleep(3 * time.Second)
 	}
-	for _, w := range []string{"PRIVATE-IP-REACHED", "PSC-ENDPOINT-REACHED"} {
+	for _, w := range []string{"PRIVATE-IP-REACHED", "PSC-ENDPOINT-REACHED", "PRIVATE-IP-POOLER-REACHED", "PSC-ENDPOINT-POOLER-REACHED",
+		"MYSQL-THREAD-POOL-REACHED"} {
 		if !strings.Contains(serial, w) {
 			tail := serial
 			if len(tail) > 3000 {

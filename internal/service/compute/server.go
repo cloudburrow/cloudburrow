@@ -82,6 +82,10 @@ type PrivateService struct {
 	Port       int
 	TargetIP   string
 	TargetPort int
+	// ExtraPorts are further ports of the endpoint, each sent on to the
+	// same port of the target: a Cloud SQL instance's managed connection
+	// pooler, on 6432 beside its server (#2141).
+	ExtraPorts []int
 }
 
 // obj is one resource, as its JSON is kept: link fields hold relative
