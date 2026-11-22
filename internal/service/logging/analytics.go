@@ -721,7 +721,7 @@ func bucketsOf(es []*loggingpb.LogEntry, routes map[*loggingpb.LogEntry]*route) 
 	buckets := map[string]bucketRef{}
 	for _, e := range es {
 		r := routes[e]
-		if ref := ownBucket(e); r == nil || !r.hidden || ref.bucket == bucketRequired {
+		if ref := ownBucket(e); (r == nil || !r.hidden || ref.bucket == bucketRequired) && !named(r, ref) {
 			buckets[ref.name()] = ref
 			in[e] = append(in[e], ref.name())
 		}
@@ -735,6 +735,20 @@ func bucketsOf(es []*loggingpb.LogEntry, routes map[*loggingpb.LogEntry]*route) 
 		}
 	}
 	return in, buckets
+}
+
+// named is whether r routes its entry to a bucket of ref's parent's that
+// ref stands for by name: its _Required outside global (defaults.go).
+func named(r *route, ref bucketRef) bool {
+	if r == nil || ref.bucket != bucketRequired {
+		return false
+	}
+	for _, b := range r.buckets {
+		if strings.HasPrefix(b, ref.parent.String()+"/locations/") && strings.HasSuffix(b, "/buckets/"+bucketRequired) {
+			return true
+		}
+	}
+	return false
 }
 
 // linkWrites streams the entries just stored into the linked datasets of

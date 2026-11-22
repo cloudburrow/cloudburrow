@@ -167,7 +167,7 @@ func (a *Admin) getBucket(ref bucketRef) (*loggingpb.LogBucket, error) {
 	}
 	raw, err := a.db.Get(ref.key())
 	if errors.Is(err, store.ErrNotFound) {
-		if ref.location == "global" && builtinBucket(ref.bucket) {
+		if a.isBuiltin(ref) {
 			return a.defaultBucket(ref), nil
 		}
 		return nil, apierror.NotFound("bucket %s does not exist", ref.name())
@@ -246,9 +246,9 @@ func (a *Admin) buckets(project parent, location string) ([]*loggingpb.LogBucket
 		seen[ref.name()] = true
 		out = append(out, b)
 	}
-	if location == "-" || location == "global" {
+	if loc := a.builtinLoc(project); location == "-" || location == loc {
 		for _, id := range []string{bucketDefault, bucketRequired} {
-			ref := bucketRef{project, "global", id}
+			ref := bucketRef{project, loc, id}
 			if !seen[ref.name()] {
 				out = append(out, a.defaultBucket(ref))
 			}
@@ -363,7 +363,7 @@ func (s configServer) UpdateBucket(ctx context.Context, req *loggingpb.UpdateBuc
 	if len(req.GetUpdateMask().GetPaths()) == 0 {
 		return nil, apierror.Wrap(apierror.InvalidArgument("update_mask is required: name the fields to change"))
 	}
-	if ref.bucket == bucketRequired && ref.location == "global" {
+	if ref.bucket == bucketRequired && s.a.isBuiltin(ref) {
 		return nil, apierror.Wrap(refuseRequiredBucket(ref, req.GetUpdateMask().GetPaths()))
 	}
 	s.a.mu.Lock()
@@ -438,7 +438,7 @@ func (s configServer) DeleteBucket(_ context.Context, req *loggingpb.DeleteBucke
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	if builtinBucket(ref.bucket) && ref.location == "global" {
+	if s.a.isBuiltin(ref) {
 		return nil, apierror.Wrap(apierror.FailedPrecondition("bucket %s cannot be deleted", ref.name()))
 	}
 	s.a.mu.Lock()
@@ -729,7 +729,7 @@ func (s configServer) DeleteView(ctx context.Context, req *loggingpb.DeleteViewR
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	if builtinBucket(ref.bucket) && ref.location == "global" && id == viewAllLogs {
+	if s.a.isBuiltin(ref) && id == viewAllLogs {
 		return nil, apierror.Wrap(apierror.FailedPrecondition("view %s cannot be deleted", viewName(ref, id)))
 	}
 	s.a.mu.Lock()

@@ -78,9 +78,14 @@ func TestConsoleLoggingParityActions(t *testing.T) {
 	}
 	var l console.Listing
 	getJSON200(t, sinks, &l)
-	// The _Required sink is listed after it, Edit, Disable and Delete
+	// The _Default sink is listed after it, Delete greyed out, Edit and
+	// Disable offered; then the _Required sink, Edit, Disable and Delete
 	// greyed out (#2108).
-	if len(l.Items) != 2 || l.Items[1].Name != "projects/proj-1/sinks/_Required" || l.Items[1].Withheld["edit"] == "" || l.Items[1].Actions[1].Unavailable == "" {
+	if len(l.Items) != 3 || l.Items[1].Name != "projects/proj-1/sinks/_Default" || l.Items[1].Withheld["delete"] == "" || l.Items[1].Withheld["edit"] != "" ||
+		l.Items[1].Actions[1].Unavailable != "" {
+		t.Errorf("the _Default row = %+v", l.Items)
+	}
+	if len(l.Items) != 3 || l.Items[2].Name != "projects/proj-1/sinks/_Required" || l.Items[2].Withheld["edit"] == "" || l.Items[2].Actions[1].Unavailable == "" {
 		t.Errorf("the _Required row = %+v", l.Items)
 	}
 	if len(l.Items) < 1 || l.Items[0].Fields["Type"] != "Pub/Sub topic" || l.Items[0].Fields["Enabled"] != "Enabled" ||

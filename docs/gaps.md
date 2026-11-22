@@ -123,7 +123,9 @@ resources (#1403); sink delivery to Cloud Storage, Pub/Sub, BigQuery and another
 TailLogEntries on views and over JSON (#1410); `CopyLogEntries` from folder, organization and
 billing-account buckets (#1411); Log Analytics, a link making a read-only BigQuery linked dataset
 (#1423), with a view per log view, retention and DeleteLog applied to its rows, and links refused
-on folder and organization buckets, as Google refuses them (#1435).
+on folder and organization buckets, as Google refuses them (#1435); the `_Required` bucket and
+sink, custom indexes, Observability trace scopes, the `_Default` sink, and organizations' and
+folders' default resource settings applied to new projects and folders (#2108).
 
 | Gap | Why open | Size |
 |---|---|---|
