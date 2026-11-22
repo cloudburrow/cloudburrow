@@ -166,6 +166,16 @@
         "verification": "built-and-run",
         "skipDiscovery": "PyPI; depcheck only discovers GitHub-sourced components."
       },
+      "notebookRuntimeSparkPackages": {
+        "$comment": "pip install in internal/nbruntime/image/Dockerfile (#2156), for an Apache Spark notebook's DataprocSparkSession: Google's dataproc-spark-connect 1.1.0 (installed --no-deps) and google-cloud-dataproc 5.32.0 (Apache-2.0), with pyspark-client 4.0.1 (Apache-2.0, the Spark Connect client of the runtime 3.0 sessions' Spark 4.0.1), websockets 17.4 (BSD-3-Clause), tqdm 4.70.1 (MPL-2.0 AND MIT) and packaging 26.3 (Apache-2.0 OR BSD-2-Clause), and what pip resolves for them.",
+        "version": "dataproc-spark-connect 1.1.0, google-cloud-dataproc 5.32.0, pyspark-client 4.0.1",
+        "source": "https://pypi.org/project/dataproc-spark-connect/1.1.0/",
+        "license": "Apache-2.0 (Google's packages and pyspark-client); BSD-3-Clause, MPL-2.0 AND MIT, Apache-2.0 OR BSD-2-Clause (third-party)",
+        "redistribution": "not published: installed into the locally built notebook runtime image; nothing of it is in the CLI",
+        "updateFeed": "pypi",
+        "verification": "built-and-run",
+        "skipDiscovery": "PyPI; depcheck only discovers GitHub-sourced components."
+      },
       "tensorflow": {
         "$comment": "pip install tensorflow==2.20.0 in deploy/tfconvert/Dockerfile (#1775): Google's tf.lite.TFLiteConverter.from_saved_model converts imported SavedModels to TensorFlow Lite.",
         "version": "2.20.0",

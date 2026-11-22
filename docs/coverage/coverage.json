@@ -6420,6 +6420,7 @@
           "test/compat/backupdr1922_test.go:46 TestBackupDRRestoreToANewInstance",
           "test/compat/bigquerysparkprocs2104_test.go:125 TestBigQuerySparkStoredProcedures",
           "test/compat/consoleloggingviews_test.go:58 TestConsoleLogsExplorerThroughView",
+          "test/compat/dataproc2156_test.go:85 TestDataprocServerlessBatches",
           "test/compat/gcloudschedulerlogging_test.go:79 TestGcloudLogging",
           "test/compat/logging1521_test.go:63 TestLoggingInterceptingSinks",
           "test/compat/logging1595_test.go:27 TestLoggingOldTimestampsFollowEachBucketsRetention",
@@ -20210,6 +20211,113 @@
         "status": "Verified",
         "tests": [
           "test/compat/dataform_beta_test.go:103 TestDataformV1beta1WorkspacesAndBranches"
+        ]
+      }
+    ]
+  },
+  {
+    "Key": "dataproc",
+    "Title": "Dataproc: Serverless for Apache Spark (v1)",
+    "counts": {
+      "Verified": 14
+    },
+    "rows": [
+      {
+        "method": "google.cloud.dataproc.v1.BatchController/CreateBatch",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataproc2156_test.go:85 TestDataprocServerlessBatches"
+        ]
+      },
+      {
+        "method": "google.cloud.dataproc.v1.BatchController/DeleteBatch",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataproc2156_test.go:85 TestDataprocServerlessBatches"
+        ]
+      },
+      {
+        "method": "google.cloud.dataproc.v1.BatchController/GetBatch",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataproc2156_test.go:85 TestDataprocServerlessBatches"
+        ]
+      },
+      {
+        "method": "google.cloud.dataproc.v1.BatchController/ListBatches",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataproc2156_test.go:85 TestDataprocServerlessBatches"
+        ]
+      },
+      {
+        "method": "google.cloud.dataproc.v1.SessionController/CreateSession",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataproc2156_test.go:417 TestDataprocServerlessSessions"
+        ]
+      },
+      {
+        "method": "google.cloud.dataproc.v1.SessionController/DeleteSession",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataproc2156_test.go:417 TestDataprocServerlessSessions"
+        ]
+      },
+      {
+        "method": "google.cloud.dataproc.v1.SessionController/GetSession",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataproc2156_test.go:417 TestDataprocServerlessSessions"
+        ]
+      },
+      {
+        "method": "google.cloud.dataproc.v1.SessionController/ListSessions",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataproc2156_test.go:417 TestDataprocServerlessSessions"
+        ]
+      },
+      {
+        "method": "google.cloud.dataproc.v1.SessionController/TerminateSession",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataproc2156_test.go:417 TestDataprocServerlessSessions"
+        ]
+      },
+      {
+        "method": "google.cloud.dataproc.v1.SessionTemplateController/CreateSessionTemplate",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataproc2156_test.go:417 TestDataprocServerlessSessions"
+        ]
+      },
+      {
+        "method": "google.cloud.dataproc.v1.SessionTemplateController/DeleteSessionTemplate",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataproc2156_test.go:417 TestDataprocServerlessSessions"
+        ]
+      },
+      {
+        "method": "google.cloud.dataproc.v1.SessionTemplateController/GetSessionTemplate",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataproc2156_test.go:417 TestDataprocServerlessSessions"
+        ]
+      },
+      {
+        "method": "google.cloud.dataproc.v1.SessionTemplateController/ListSessionTemplates",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataproc2156_test.go:417 TestDataprocServerlessSessions"
+        ]
+      },
+      {
+        "method": "google.cloud.dataproc.v1.SessionTemplateController/UpdateSessionTemplate",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataproc2156_test.go:417 TestDataprocServerlessSessions"
         ]
       }
     ]

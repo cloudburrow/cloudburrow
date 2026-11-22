@@ -52,6 +52,8 @@ type LogEntry struct {
 	Severity  string
 	Text      string
 	Time      time.Time
+	// Spark is set for Spark's own log4j lines, beside the application's.
+	Spark bool
 }
 
 // Runtime is one runtime version's Spark: the official apache/spark
@@ -91,10 +93,12 @@ type Docker struct {
 	Log  func(LogEntry)
 	Logf func(format string, args ...any)
 
-	once      sync.Once
-	desktop   bool
-	desktopOK error
-	treeMu    sync.Mutex
+	// desktop says whether the daemon is Docker Desktop; probed is set
+	// once a probe has answered (a failed probe is retried next run).
+	probeMu sync.Mutex
+	probed  bool
+	desktop bool
+	treeMu  sync.Mutex
 }
 
 func (d *Docker) logf(format string, args ...any) {
@@ -129,30 +133,91 @@ func (d *Docker) Run(ctx context.Context, job Job) (Result, error) {
 	if job.KeyOnly {
 		return Result{}, nil
 	}
+	p, failed, err := d.prepare(ctx, job, "")
+	if err != nil || failed != nil {
+		if failed != nil {
+			return *failed, nil
+		}
+		return Result{}, err
+	}
+	defer p.close()
+	d.logf("spark: running %s (%s) on runtime %s in %s", job.Procedure, job.SparkJobID, p.version, p.image)
+	cmd := exec.CommandContext(ctx, "docker", p.run...)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return Result{}, err
+	}
+	cmd.Stderr = cmd.Stdout
+	if err := cmd.Start(); err != nil {
+		return Result{}, &Unavailable{Msg: "start the Spark container: " + err.Error()}
+	}
+	tail, output := d.follow(job, stdout, nil)
+	waitErr := cmd.Wait()
+	res := Result{Out: map[string]string{}, DriverOutput: output}
+	if b, err := os.ReadFile(filepath.Join(p.dir, "out", "params.json")); err == nil {
+		_ = json.Unmarshal(b, &res.Out)
+	}
+	if waitErr != nil {
+		var exit *exec.ExitError
+		if !errors.As(waitErr, &exit) {
+			return Result{}, &Unavailable{Msg: "the Spark container: " + waitErr.Error()}
+		}
+		if exit.ExitCode() == 125 {
+			return Result{}, &Unavailable{Msg: "the Spark container did not start: " + strings.Join(tail(), "\n")}
+		}
+		res.Failed = true
+		res.Message = failure(tail())
+	}
+	return res, nil
+}
+
+// prepared is a job made ready to run: its directory, its network and
+// relay up, and the docker run arguments of its Spark container.
+type prepared struct {
+	dir, network, relay, spark string
+	image, version             string
+	run                        []string
+	cleanup                    []func()
+}
+
+// close removes the container, the relay, the network and the directory.
+func (p *prepared) close() {
+	for i := len(p.cleanup) - 1; i >= 0; i-- {
+		p.cleanup[i]()
+	}
+	p.cleanup = nil
+}
+
+// prepare readies job: an error is an *Unavailable (or a host failure),
+// and failed a Result the job ends with before it runs (a RunAs that
+// cannot be minted, a custom container that cannot be read). inbound,
+// when set, is a port of the Spark container the relay publishes on the
+// host's loopback (a Spark Connect server's).
+func (d *Docker) prepare(ctx context.Context, job Job, inbound string) (_ *prepared, failed *Result, _ error) {
 	if _, err := exec.LookPath("docker"); err != nil {
-		return Result{}, &Unavailable{Msg: "docker is not on PATH: stored procedures for Apache Spark run in a local Spark container"}
+		return nil, nil, &Unavailable{Msg: "docker is not on PATH: Apache Spark workloads run in a local Spark container"}
 	}
 	rt, version, ok := d.runtime(job)
 	if !ok {
-		return Result{}, &Unavailable{Msg: "the Spark runner serves no runtime version " + version}
+		return nil, nil, &Unavailable{Msg: "the Spark runner serves no runtime version " + version}
 	}
 	jar, err := rt.Connector(ctx)
 	if err != nil {
-		return Result{}, &Unavailable{Msg: "the BigQuery connector for Spark is not available: " + err.Error()}
+		return nil, nil, &Unavailable{Msg: "the BigQuery connector for Spark is not available: " + err.Error()}
 	}
 	rest, storage := d.BigQuery(), d.Storage()
 	if rest == "" || storage == "" {
-		return Result{}, &Unavailable{Msg: "the instance's BigQuery REST and Storage API ports are not live"}
+		return nil, nil, &Unavailable{Msg: "the instance's BigQuery REST and Storage API ports are not live"}
 	}
 	token := accessToken
 	switch {
 	case job.RunAs != "":
 		if d.Mint == nil {
-			return Result{}, &Unavailable{Msg: "the Spark runner cannot mint a token for " + job.RunAs}
+			return nil, nil, &Unavailable{Msg: "the Spark runner cannot mint a token for " + job.RunAs}
 		}
 		tok, err := d.Mint(job.RunAs)
 		if err != nil {
-			return Result{Failed: true, Message: err.Error()}, nil
+			return nil, &Result{Failed: true, Message: err.Error()}, nil
 		}
 		token = tok
 	case job.AccessToken != "":
@@ -164,26 +229,34 @@ func (d *Docker) Run(ctx context.Context, job Job) (Result, error) {
 		if err != nil {
 			var u *Unavailable
 			if errors.As(err, &u) {
-				return Result{}, err
+				return nil, nil, err
 			}
-			return Result{Failed: true, Message: err.Error()}, nil
+			return nil, &Result{Failed: true, Message: err.Error()}, nil
 		}
 		custom = ci
 	}
+	p := &prepared{version: version}
+	ok = false
+	defer func() {
+		if !ok {
+			p.close()
+		}
+	}()
 	dir, err := os.MkdirTemp(d.Tmp, "cb-spark-")
 	if err != nil {
-		return Result{}, err
+		return nil, nil, err
 	}
-	defer os.RemoveAll(dir)
+	p.dir = dir
+	p.cleanup = append(p.cleanup, func() { _ = os.RemoveAll(dir) })
 	args, err := writeJob(dir, job)
 	if err != nil {
-		return Result{}, err
+		return nil, nil, err
 	}
 	if err := writeToken(dir, token); err != nil {
-		return Result{}, err
+		return nil, nil, err
 	}
 	if err := writeTLS(filepath.Join(dir, "tls")); err != nil {
-		return Result{}, err
+		return nil, nil, err
 	}
 	// Readable by the image's spark user (uid 185); out/ writable.
 	_ = filepath.Walk(dir, func(p string, info os.FileInfo, err error) error {
@@ -204,33 +277,42 @@ func (d *Docker) Run(ctx context.Context, job Job) (Result, error) {
 	}
 	suffix = strings.Trim(suffix, "-") + fmt.Sprintf("-%d", time.Now().UnixNano()%1e6)
 	network, relay, spark := "cb-spark-net-"+suffix, "cb-spark-relay-"+suffix, "cb-spark-"+suffix
+	p.network, p.relay, p.spark = network, relay, spark
 	label := "cloudburrow.instance=" + d.Instance
 
 	restTarget, storageTarget, stop, err := d.targets(ctx, rest, storage)
 	if err != nil {
-		return Result{}, &Unavailable{Msg: err.Error()}
+		return nil, nil, &Unavailable{Msg: err.Error()}
 	}
-	defer stop()
+	p.cleanup = append(p.cleanup, stop)
 
 	if out, err := d.docker(ctx, "network", "create", "--internal", "--label", label, network); err != nil {
-		return Result{}, &Unavailable{Msg: "create the Spark job's internal network: " + out}
+		return nil, nil, &Unavailable{Msg: "create the Spark job's internal network: " + out}
 	}
-	defer func() { _, _ = d.docker(context.Background(), "network", "rm", network) }()
+	p.cleanup = append(p.cleanup, func() { _, _ = d.docker(context.Background(), "network", "rm", network) })
 
 	relayArgs := []string{"run", "-d", "--name", relay, "--label", label, "-v", dir + ":/cb:ro", "--entrypoint", "python3"}
 	if !d.desktop {
 		relayArgs = append(relayArgs, "--add-host", "host.docker.internal:host-gateway")
 	}
-	relayArgs = append(relayArgs, rt.Image, "/cb/relay.py", restTarget, storageTarget)
-	if out, err := d.docker(ctx, relayArgs...); err != nil {
-		return Result{}, &Unavailable{Msg: "start the Spark job's relay: " + out}
+	if inbound != "" {
+		// Published from the default bridge, the relay's first network:
+		// a container on an --internal network publishes nothing.
+		relayArgs = append(relayArgs, "-p", "127.0.0.1::"+inbound)
 	}
-	defer func() { _, _ = d.docker(context.Background(), "rm", "-f", "-v", relay) }()
+	relayArgs = append(relayArgs, rt.Image, "/cb/relay.py", restTarget, storageTarget)
+	if inbound != "" {
+		relayArgs = append(relayArgs, spark+":"+inbound)
+	}
+	if out, err := d.docker(ctx, relayArgs...); err != nil {
+		return nil, nil, &Unavailable{Msg: "start the Spark job's relay: " + out}
+	}
+	p.cleanup = append(p.cleanup, func() { _, _ = d.docker(context.Background(), "rm", "-f", "-v", relay) })
 	if err := d.waitReady(ctx, relay); err != nil {
-		return Result{}, &Unavailable{Msg: err.Error()}
+		return nil, nil, &Unavailable{Msg: err.Error()}
 	}
 	if out, err := d.docker(ctx, "network", "connect", "--alias", restHost, "--alias", storageHost, network, relay); err != nil {
-		return Result{}, &Unavailable{Msg: "connect the Spark job's relay: " + out}
+		return nil, nil, &Unavailable{Msg: "connect the Spark job's relay: " + out}
 	}
 
 	run := []string{"run", "--name", spark, "--label", label, "--network", network,
@@ -270,35 +352,10 @@ func (d *Docker) Run(ctx context.Context, job Job) (Result, error) {
 	}
 	run = append(run, "--entrypoint", "/bin/bash", image, "/cb/run.sh")
 	run = append(run, submitArgs(job, args, token, conf)...)
-	d.logf("spark: running %s (%s) on runtime %s in %s", job.Procedure, job.SparkJobID, version, image)
-	defer func() { _, _ = d.docker(context.Background(), "rm", "-f", "-v", spark) }()
-	cmd := exec.CommandContext(ctx, "docker", run...)
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return Result{}, err
-	}
-	cmd.Stderr = cmd.Stdout
-	if err := cmd.Start(); err != nil {
-		return Result{}, &Unavailable{Msg: "start the Spark container: " + err.Error()}
-	}
-	tail, output := d.follow(job, stdout)
-	waitErr := cmd.Wait()
-	res := Result{Out: map[string]string{}, DriverOutput: output}
-	if b, err := os.ReadFile(filepath.Join(dir, "out", "params.json")); err == nil {
-		_ = json.Unmarshal(b, &res.Out)
-	}
-	if waitErr != nil {
-		var exit *exec.ExitError
-		if !errors.As(waitErr, &exit) {
-			return Result{}, &Unavailable{Msg: "the Spark container: " + waitErr.Error()}
-		}
-		if exit.ExitCode() == 125 {
-			return Result{}, &Unavailable{Msg: "the Spark container did not start: " + strings.Join(tail(), "\n")}
-		}
-		res.Failed = true
-		res.Message = failure(tail())
-	}
-	return res, nil
+	p.image, p.run = image, run
+	p.cleanup = append(p.cleanup, func() { _, _ = d.docker(context.Background(), "rm", "-f", "-v", spark) })
+	ok = true
+	return p, nil, nil
 }
 
 // targets are the relay's two targets, as the relay container reaches
@@ -307,10 +364,9 @@ func (d *Docker) Run(ctx context.Context, job Job) (Result, error) {
 // so the runner relays the two ports from the default bridge's gateway
 // address for the run (internal/hostrelay, as #575 does for the cluster).
 func (d *Docker) targets(ctx context.Context, rest, storage string) (string, string, func(), error) {
-	d.once.Do(func() {
-		out, err := d.docker(ctx, "info", "--format", "{{.OperatingSystem}}")
-		d.desktop, d.desktopOK = strings.Contains(out, "Docker Desktop"), err
-	})
+	if err := d.probeDesktop(); err != nil {
+		return "", "", nil, err
+	}
 	_, restPortHost, _ := net.SplitHostPort(rest)
 	_, storagePortHost, _ := net.SplitHostPort(storage)
 	if d.desktop {
@@ -342,6 +398,26 @@ func (d *Docker) targets(ctx context.Context, rest, storage string) (string, str
 	return r1.Addr(), r2.Addr(), func() { _ = r1.Close(); _ = r2.Close() }, nil
 }
 
+// probeDesktop asks the daemon whether it is Docker Desktop. The probe
+// has its own deadline rather than a job's context: a job cancelled
+// while it ran must not leave every later job relaying the wrong way.
+// Only an answer is kept, so a failed probe is retried by the next job.
+func (d *Docker) probeDesktop() error {
+	d.probeMu.Lock()
+	defer d.probeMu.Unlock()
+	if d.probed {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	out, err := d.docker(ctx, "info", "--format", "{{.OperatingSystem}}")
+	if err != nil {
+		return &Unavailable{Msg: "ask Docker which daemon it is: " + out}
+	}
+	d.desktop, d.probed = strings.Contains(out, "Docker Desktop"), true
+	return nil
+}
+
 func (d *Docker) docker(ctx context.Context, args ...string) (string, error) {
 	out, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput()
 	return strings.TrimSpace(string(out)), err
@@ -366,7 +442,7 @@ var log4jLine = regexp.MustCompile(`^\d\d/\d\d/\d\d \d\d:\d\d:\d\d (TRACE|DEBUG|
 
 // follow sends each line of r to Log, and returns the last lines read
 // and the output's last MaxDriverOutput bytes.
-func (d *Docker) follow(job Job, r io.Reader) (func() []string, string) {
+func (d *Docker) follow(job Job, r io.Reader, watch func(string)) (func() []string, string) {
 	var mu sync.Mutex
 	var last []string
 	var all []byte
@@ -374,8 +450,9 @@ func (d *Docker) follow(job Job, r io.Reader) (func() []string, string) {
 	sc.Buffer(make([]byte, 64<<10), 4<<20)
 	for sc.Scan() {
 		line := sc.Text()
-		component, severity := "DRIVER", "INFO"
+		component, severity, spark := "DRIVER", "INFO", false
 		if m := log4jLine.FindStringSubmatch(line); m != nil {
+			spark = true
 			severity = map[string]string{"TRACE": "DEBUG", "FATAL": "CRITICAL", "WARN": "WARNING"}[m[1]]
 			if severity == "" {
 				severity = m[1]
@@ -385,7 +462,10 @@ func (d *Docker) follow(job Job, r io.Reader) (func() []string, string) {
 			}
 		}
 		if d.Log != nil {
-			d.Log(LogEntry{Job: job, Component: component, Severity: severity, Text: line, Time: time.Now()})
+			d.Log(LogEntry{Job: job, Component: component, Severity: severity, Text: line, Time: time.Now(), Spark: spark})
+		}
+		if watch != nil {
+			watch(line)
 		}
 		mu.Lock()
 		last = append(last, line)
@@ -478,6 +558,26 @@ func writeJob(dir string, job Job) (jobArgs, error) {
 	}
 	var err error
 	switch {
+	case job.Kind == KindSparkSQL && job.Main != nil:
+		// query_variables, each "equivalent to the Spark SQL command: SET
+		// name="value";" (the API reference), set before the query file.
+		var pre strings.Builder
+		vars := make([]string, 0, len(job.QueryVariables))
+		for k := range job.QueryVariables {
+			vars = append(vars, k)
+		}
+		sort.Strings(vars)
+		for _, k := range vars {
+			fmt.Fprintf(&pre, "SET %s=\"%s\";\n", k, job.QueryVariables[k])
+		}
+		data := job.Main.Data
+		if local := localPath(job.Main.URI); local != "" {
+			pre.WriteString("SOURCE " + local + ";\n")
+			data = nil
+		}
+		a.main, err = put("main/query.sql", append([]byte(pre.String()), data...))
+	case job.Main != nil && localPath(job.Main.URI) != "":
+		a.main = localPath(job.Main.URI)
 	case job.Main != nil:
 		a.main, err = put("main/"+safeBase(job.Main.Base()), job.Main.Data)
 	case job.Code != "":
@@ -488,7 +588,10 @@ func writeJob(dir string, job Job) (jobArgs, error) {
 	}
 	for kind, files := range map[string][]File{"py": job.PyFiles, "jars": job.Jars, "files": job.Files, "archives": job.Archives} {
 		for i, f := range files {
-			p, err := put(fmt.Sprintf("%s/%d/%s", kind, i, safeBase(f.Base())), f.Data)
+			p := localPath(f.URI)
+			if p == "" {
+				p, err = put(fmt.Sprintf("%s/%d/%s", kind, i, safeBase(f.Base())), f.Data)
+			}
 			if err != nil {
 				return a, err
 			}
@@ -509,6 +612,24 @@ func writeJob(dir string, job Job) (jobArgs, error) {
 	sort.Strings(a.files)
 	sort.Strings(a.archiv)
 	return a, nil
+}
+
+// UsrLibSpark is where the runtime's own files are, as a batch names
+// them (file:///usr/lib/spark/examples/jars/spark-examples.jar): run.sh
+// links the image's Spark there under the names Google's runtime has.
+const usrLibSpark = "/tmp/cb-usr-lib-spark/"
+
+// localPath is a file:// URI's path in the Spark container, a file of the
+// runtime rather than of Cloud Storage, or "" for any other URI.
+func localPath(uri string) string {
+	p, ok := strings.CutPrefix(uri, "file://")
+	if !ok || !strings.HasPrefix(p, "/") {
+		return ""
+	}
+	if rest, ok := strings.CutPrefix(p, "/usr/lib/spark/"); ok {
+		return usrLibSpark + rest
+	}
+	return p
 }
 
 func safeBase(s string) string {
@@ -542,6 +663,9 @@ func submitArgs(job Job, a jobArgs, token string, extra map[string]string) []str
 		"spark.datasource.bigquery.project":                     job.Project,
 		"spark.ui.enabled":                                      "false",
 	}
+	if job.Kind == KindConnect {
+		conf["spark.connect.grpc.binding.port"] = ConnectPort
+	}
 	for k, v := range extra {
 		conf[k] = v
 	}
@@ -556,6 +680,14 @@ func submitArgs(job Job, a jobArgs, token string, extra map[string]string) []str
 	for _, k := range keys {
 		args = append(args, "--conf", k+"="+conf[k])
 	}
+	switch job.Kind {
+	case KindSparkSQL:
+		// What bin/spark-sql runs, the query file its -f.
+		return append(args, "--class", "org.apache.spark.sql.hive.thriftserver.SparkSQLCLIDriver", "spark-internal", "-f", a.main)
+	case KindConnect:
+		// What sbin/start-connect-server.sh runs, in the foreground.
+		return append(args, "--class", "org.apache.spark.sql.connect.service.SparkConnectServer", "spark-internal")
+	}
 	if job.MainClass != "" {
 		args = append(args, "--class", job.MainClass)
 		if a.main == "" && len(a.jars) > 0 {
@@ -563,7 +695,7 @@ func submitArgs(job Job, a jobArgs, token string, extra map[string]string) []str
 			a.main = a.jars[0]
 		}
 	}
-	return append(args, a.main)
+	return append(append(args, a.main), job.Args...)
 }
 
 // writeToken writes the connector's token as the application's
