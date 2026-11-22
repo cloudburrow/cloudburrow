@@ -463,7 +463,7 @@ func (p computeInstancesProvider) CreateFormFor(ctx context.Context, project str
 		_, f := p.CreateForm()
 		return f
 	}
-	return p.withStaticExternal(project, p.createFields(p.snapshotScheduleNames(project), p.networkNames(ctx, project)))
+	return p.withSharedVPC(project, p.withStaticExternal(project, p.createFields(p.snapshotScheduleNames(project), p.networkNames(ctx, project))))
 }
 
 func (p computeInstancesProvider) createFields(schedules, networks []string) []console.Field {
@@ -601,6 +601,14 @@ func (p computeInstancesProvider) createBody(project string, values map[string]s
 	nic := map[string]any{"network": "global/networks/" + strings.TrimSpace(vpcOr(values["network"], "default"))}
 	if s := strings.TrimSpace(values["subnetwork"]); s != "" {
 		nic["subnetwork"] = "regions/" + zone[:strings.LastIndex(zone, "-")] + "/subnetworks/" + s
+	}
+	if values["networkSource"] == vmNetShared {
+		// Shared VPC (#2140): the host's network and subnet.
+		shared, err := p.sharedNIC(project, zone, values)
+		if err != nil {
+			return nil, err
+		}
+		nic = shared
 	}
 	if ac, err := p.createAccessConfig(project, values); err != nil {
 		return nil, err

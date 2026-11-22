@@ -72,6 +72,13 @@ type Server struct {
 	mu         sync.Mutex
 	connectors map[string]*vpcaccesspb.Connector
 	ops        map[string]*longrunningpb.Operation
+
+	// umu guards uses, a copy of connectors that NetworkUsers reads:
+	// Compute Engine asks it with its own lock held, and connectors are
+	// checked against Compute Engine with mu held, so NetworkUsers must
+	// not take mu.
+	umu  sync.Mutex
+	uses map[string]*vpcaccesspb.Connector
 }
 
 // New returns a Server with its state restored.
@@ -83,6 +90,7 @@ func New(opts Options) (*Server, error) {
 	if err := s.restore(); err != nil {
 		return nil, err
 	}
+	s.refreshUsesLocked()
 	return s, nil
 }
 
@@ -464,6 +472,7 @@ func (s *Server) restore() error {
 }
 
 func (s *Server) saveLocked() error {
+	s.refreshUsesLocked()
 	if s.opts.State == "" {
 		return nil
 	}

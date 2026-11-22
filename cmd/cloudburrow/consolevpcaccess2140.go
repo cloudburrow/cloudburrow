@@ -94,7 +94,7 @@ func (p vpcAccessProvider) List(ctx context.Context, project string) (console.Li
 	}
 	for _, c := range cs {
 		r := connectorRow(c)
-		r.Actions = []console.Action{connectorDelete(r.Target)}
+		r.Actions = []console.Action{connectorEdit(c), connectorDelete(r.Target)}
 		listing.Items = append(listing.Items, r)
 	}
 	listing.Total = len(listing.Items)
@@ -236,20 +236,77 @@ func (p vpcAccessProvider) DetailActions(ctx context.Context, project string, pa
 	if p.va() == nil || len(path) != 2 {
 		return nil
 	}
-	if _, err := p.connector(ctx, project, path); err != nil {
+	c, err := p.connector(ctx, project, path)
+	if err != nil {
 		return nil
 	}
 	a := connectorDelete(path)
 	a.Leaves = true
-	return []console.Action{a}
+	return []console.Action{connectorEdit(c), a}
+}
+
+// connectorEdit is Google's Edit on a connector (vpc/docs/
+// configure-serverless-vpc-access "Update a connector", read 2026-11-22):
+// Minimum instances, Maximum instances and Instance type, the counts
+// offered only from their current values up, since "Decreasing the number
+// of instances for existing connectors is not supported".
+func connectorEdit(c *vpcaccesspb.Connector) console.Action {
+	from := func(lo, hi int) []string {
+		var out []string
+		for i := lo; i <= hi; i++ {
+			out = append(out, strconv.Itoa(i))
+		}
+		return out
+	}
+	lo, hi := int(c.GetMinInstances()), int(c.GetMaxInstances())
+	return console.Action{ID: "edit", Label: "Edit", Submit: "Save", Title: "Edit connector " + vpcLast(c.GetName()), Fields: []console.Field{
+		{Name: "minInstances", Label: "Minimum instances", Type: "select", Default: strconv.Itoa(lo), Options: from(max(lo, 2), 9),
+			Help: "At least the current minimum and below the maximum: a connector's instances cannot be decreased."},
+		{Name: "maxInstances", Label: "Maximum instances", Type: "select", Default: strconv.Itoa(hi), Options: from(max(hi, 3), 10),
+			Help: "At least the current maximum, at most 10."},
+		{Name: "machineType", Label: "Instance type", Type: "select", Default: c.GetMachineType(), Options: vpcaccess.MachineTypes,
+			Help: "Changing the machine type can cause some long-running connections to drop."},
+	}}
+}
+
+func (p vpcAccessProvider) editConnector(ctx context.Context, name string, values map[string]string) error {
+	c := &vpcaccesspb.Connector{MachineType: strings.TrimSpace(values["machineType"])}
+	var mask []string
+	if c.MachineType != "" {
+		mask = append(mask, "machine_type")
+	}
+	for k, f := range map[string]*int32{"minInstances": &c.MinInstances, "maxInstances": &c.MaxInstances} {
+		v := strings.TrimSpace(values[k])
+		if v == "" {
+			continue
+		}
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("%s: %q is not a number", k, v)
+		}
+		*f = int32(n)
+		if k == "minInstances" {
+			mask = append(mask, "min_instances")
+		} else {
+			mask = append(mask, "max_instances")
+		}
+	}
+	if len(mask) == 0 {
+		return errors.New("nothing to change")
+	}
+	_, err := p.va().UpdateConnector(ctx, name, c, mask)
+	return err
 }
 
 func (p vpcAccessProvider) ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error {
 	if p.va() == nil {
 		return errors.New(computeNotStarted)
 	}
-	if len(path) != 2 || action != "delete" {
+	if len(path) != 2 || (action != "delete" && action != "edit") {
 		return fmt.Errorf("%s is not available here", action)
+	}
+	if action == "edit" {
+		return p.editConnector(ctx, "projects/"+project+"/locations/"+path[0]+"/connectors/"+path[1], values)
 	}
 	_, err := p.va().DeleteConnector(ctx, &vpcaccesspb.DeleteConnectorRequest{Name: "projects/" + project + "/locations/" + path[0] + "/connectors/" + path[1]})
 	return err

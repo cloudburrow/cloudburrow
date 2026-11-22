@@ -706,7 +706,7 @@
           "test/compat/run_test.go:149 TestRunRevisions",
           "test/compat/runnames_test.go:36 TestRunNamesPerProject",
           "test/compat/runsettings_test.go:37 TestRunServiceStoredSettingsAndSubPath",
-          "test/compat/vpcaccess2140_test.go:230 TestRunVPCEgressThroughTheGoClient2140"
+          "test/compat/vpcaccess2140_test.go:234 TestRunVPCEgressThroughTheGoClient2140"
         ]
       },
       {
@@ -745,7 +745,7 @@
           "test/compat/runvolumes_test.go:115 TestRunServiceVolumesAndServiceAccount",
           "test/compat/terraform_cicd_test.go:218 TestTerraformRunServiceCloudSQLVolume",
           "test/compat/terraform_run_more_test.go:28 TestTerraformRunVolumesAndServiceAccount",
-          "test/compat/vpcaccess2140_test.go:230 TestRunVPCEgressThroughTheGoClient2140"
+          "test/compat/vpcaccess2140_test.go:234 TestRunVPCEgressThroughTheGoClient2140"
         ]
       },
       {
@@ -796,7 +796,7 @@
           "test/compat/runvolumes_test.go:115 TestRunServiceVolumesAndServiceAccount",
           "test/compat/terraform_cicd_test.go:218 TestTerraformRunServiceCloudSQLVolume",
           "test/compat/terraform_run_more_test.go:28 TestTerraformRunVolumesAndServiceAccount",
-          "test/compat/vpcaccess2140_test.go:230 TestRunVPCEgressThroughTheGoClient2140"
+          "test/compat/vpcaccess2140_test.go:234 TestRunVPCEgressThroughTheGoClient2140"
         ]
       },
       {
@@ -4484,7 +4484,7 @@
           "test/compat/listfilters1943_test.go:97 TestListFiltersFunctions",
           "test/compat/memorystoreops_test.go:34 TestMemorystoreLocationsOperationsMaintenance",
           "test/compat/schedulerlocations_test.go:23 TestSchedulerLocations",
-          "test/compat/vpcaccess2140_test.go:74 TestServerlessVPCAccessConnectorsThroughTheGoClient"
+          "test/compat/vpcaccess2140_test.go:78 TestServerlessVPCAccessConnectorsThroughTheGoClient"
         ]
       },
       {
@@ -5811,7 +5811,7 @@
           "test/compat/listfilters1943_test.go:97 TestListFiltersFunctions",
           "test/compat/memorystoreops_test.go:34 TestMemorystoreLocationsOperationsMaintenance",
           "test/compat/schedulerlocations_test.go:23 TestSchedulerLocations",
-          "test/compat/vpcaccess2140_test.go:74 TestServerlessVPCAccessConnectorsThroughTheGoClient"
+          "test/compat/vpcaccess2140_test.go:78 TestServerlessVPCAccessConnectorsThroughTheGoClient"
         ]
       },
       {
@@ -14474,8 +14474,8 @@
     "Key": "compute",
     "Title": "Compute Engine API (v1): VPC networking",
     "counts": {
-      "Implemented": 64,
-      "Unimplemented": 115,
+      "Implemented": 68,
+      "Unimplemented": 111,
       "Verified": 160
     },
     "rows": [
@@ -15010,8 +15010,8 @@
       },
       {
         "method": "compute.instanceGroupManagers.applyUpdatesToInstances",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.instanceGroupManagers.createInstances",
@@ -15071,8 +15071,8 @@
       },
       {
         "method": "compute.instanceGroupManagers.patch",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.instanceGroupManagers.patchPerInstanceConfigs",
@@ -15890,8 +15890,8 @@
       },
       {
         "method": "compute.regionInstanceGroupManagers.applyUpdatesToInstances",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.regionInstanceGroupManagers.createInstances",
@@ -15957,8 +15957,8 @@
       },
       {
         "method": "compute.regionInstanceGroupManagers.patch",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.regionInstanceGroupManagers.patchPerInstanceConfigs",
@@ -19144,28 +19144,28 @@
         "method": "google.cloud.vpcaccess.v1.VpcAccessService/CreateConnector",
         "status": "Verified",
         "tests": [
-          "test/compat/vpcaccess2140_test.go:74 TestServerlessVPCAccessConnectorsThroughTheGoClient"
+          "test/compat/vpcaccess2140_test.go:78 TestServerlessVPCAccessConnectorsThroughTheGoClient"
         ]
       },
       {
         "method": "google.cloud.vpcaccess.v1.VpcAccessService/DeleteConnector",
         "status": "Verified",
         "tests": [
-          "test/compat/vpcaccess2140_test.go:74 TestServerlessVPCAccessConnectorsThroughTheGoClient"
+          "test/compat/vpcaccess2140_test.go:78 TestServerlessVPCAccessConnectorsThroughTheGoClient"
         ]
       },
       {
         "method": "google.cloud.vpcaccess.v1.VpcAccessService/GetConnector",
         "status": "Verified",
         "tests": [
-          "test/compat/vpcaccess2140_test.go:74 TestServerlessVPCAccessConnectorsThroughTheGoClient"
+          "test/compat/vpcaccess2140_test.go:78 TestServerlessVPCAccessConnectorsThroughTheGoClient"
         ]
       },
       {
         "method": "google.cloud.vpcaccess.v1.VpcAccessService/ListConnectors",
         "status": "Verified",
         "tests": [
-          "test/compat/vpcaccess2140_test.go:74 TestServerlessVPCAccessConnectorsThroughTheGoClient"
+          "test/compat/vpcaccess2140_test.go:78 TestServerlessVPCAccessConnectorsThroughTheGoClient"
         ]
       }
     ]

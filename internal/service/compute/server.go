@@ -77,6 +77,9 @@ type Options struct {
 	// AutoscaleEvery is how often the VMs' CPU is read and the autoscalers
 	// run; 15 seconds when zero.
 	AutoscaleEvery time.Duration
+	// UpdateEvery is how often a managed instance group's PROACTIVE update
+	// takes its next step (#2139); 2s when zero.
+	UpdateEvery time.Duration
 }
 
 // obj is one resource, as its JSON is kept: link fields hold relative
@@ -143,9 +146,10 @@ func (s *Server) Start(context.Context) error {
 	if s.opts.VMs != nil && s.stopLoop == nil {
 		ctx, cancel := context.WithCancel(context.Background())
 		s.stopLoop = cancel
-		s.loops.Add(2)
+		s.loops.Add(3)
 		go func() { defer s.loops.Done(); s.scheduleLoop(ctx) }()
 		go func() { defer s.loops.Done(); s.autoscaleLoop(ctx) }()
+		go func() { defer s.loops.Done(); s.rollLoop(ctx) }()
 	}
 	if s.opts.Addr == "" {
 		return nil
