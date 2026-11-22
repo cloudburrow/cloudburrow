@@ -6858,7 +6858,8 @@
         "method": "google.cloud.aiplatform.v1.PredictionService/GenerateContent",
         "status": "Verified",
         "tests": [
-          "test/compat/generationgrpc_test.go:29 TestStreamGenerateContentThroughThePredictionClient"
+          "test/compat/generationgrpc_test.go:29 TestStreamGenerateContentThroughThePredictionClient",
+          "test/compat/generationmetal2159_test.go:27 TestGenerateContentOnTheAppleGPU"
         ]
       },
       {
@@ -6923,7 +6924,8 @@
         "method": "google.cloud.aiplatform.v1.PredictionService/StreamGenerateContent",
         "status": "Verified",
         "tests": [
-          "test/compat/generationgrpc_test.go:29 TestStreamGenerateContentThroughThePredictionClient"
+          "test/compat/generationgrpc_test.go:29 TestStreamGenerateContentThroughThePredictionClient",
+          "test/compat/generationmetal2159_test.go:27 TestGenerateContentOnTheAppleGPU"
         ]
       },
       {

@@ -51,7 +51,7 @@ Flags:
   -kubeconfig string
     	explicit kubeconfig path (never the developer default)
   -local-ai-accelerator string
-    	where Model Garden deployments with no machine spec run: metal (the Apple GPU, as host processes) or cpu (the cluster); default metal on macOS on Apple silicon, cpu elsewhere
+    	where Model Garden deployments with no machine spec and Gemini generation (-local-ai-model) run: metal (the Apple GPU, as host processes) or cpu (the cluster, and the runtime container); default metal on macOS on Apple silicon, cpu elsewhere
   -local-ai-alias string
     	comma-separated model IDs that resolve to the configured model (explicit substitution)
   -local-ai-embeddings

@@ -656,6 +656,9 @@ type LocalAI struct {
 	// runs (#2155): "metal", the Apple GPU, through host processes on a Mac
 	// with Apple silicon, or "cpu", the instance's cluster. Empty is metal
 	// where the Apple GPU is available (darwin/arm64), cpu elsewhere.
+	// Gemini generation (ModelPath) follows it (#2159): metal runs the macOS
+	// cloudburrow_generate on LiteRT-LM's GPU backend as a host process,
+	// cpu the runtime image's in a container.
 	Accelerator string `json:"accelerator,omitempty"`
 }
 

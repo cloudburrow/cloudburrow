@@ -1257,6 +1257,7 @@
         "runtimeLibraries": "litert_lm_main links libGemmaModelConstraintProvider.so, which upstream ships prebuilt under prebuilt/linux_{arm64,x86_64}/ and locates through a RUNPATH into Bazel's output tree. The runtime image must stage those libraries explicitly; copying only the binary builds an image that fails on first run.",
         "binaries": "cloudburrow_generate (generation, verified: deploy/litert-lm/runner, CloudBurrow's Apache-2.0 derivative of litert_lm_main.cc on LiteRT-LM's C++ API, setting the sampler, the token limit and llguidance constraints per request, #1797, #1779; whole conversations with tools, images, presence/frequency penalties and token counts over --request_stdin, #1937, built with --define=LITERT_LM_FST_CONSTRAINTS_DISABLED=1 so the LLGuidance tool-call grammar applies tool_choice), litert_lm_main (upstream's, kept in the image) and embedding_litert_lm_main (embeddings, runs but has no compatible model)",
         "patches": "deploy/litert-lm/patches/, CloudBurrow's own (Apache-2.0), applied with git apply in file-name order before the build, which fails when one no longer applies: 0001-decode-step-logprobs.patch adds runtime/core:decode_step_observer, which reports each external-sampler decode step's chosen and top-k tokens with the log-softmax of the model's logits before any constraint (responseLogprobs and logprobs, #2107). Provenance in deploy/litert-lm/patches/PROVENANCE.md.",
+        "macOS": "deploy/litert-lm/build-macos.sh builds cloudburrow_generate for darwin/arm64 from the same commit and patches with Xcode's clang (#2159), for LiteRT-LM's GPU backend (WebGPU on Dawn's Metal backend) as a host process; the release's litert-lm-macos job runs it and the darwin/arm64 archive carries the runner in litert-lm/ with upstream's prebuilt/macos_arm64 dylibs (libwebgpu_dawn, BSD-3-Clause; libGemmaModelConstraintProvider, Apache-2.0) and the LiteRT-LM, Dawn and llguidance licences. Measured on an Apple M4 Max with gemma-4-E2B-it: 150 tokens/s decode on the GPU, 32 on the host CPU, 31 on CPU in the runtime container.",
         "transitive": "Constrained decoding links upstream's own llguidance dependency (guidance-ai/llguidance, MIT), which LiteRT-LM's Bazel workspace fetches and builds; CloudBurrow adds no dependency of its own"
       },
       "litertLMBase": {
@@ -1285,9 +1286,10 @@
         "digest": null,
         "checksums": {
           "bazelisk-linux-amd64": "sha256:fd8fdff418a1758887520fa42da7e6ae39aefc788cf5e7f7bb8db6934d279fc4",
-          "bazelisk-linux-arm64": "sha256:4c8d966e40ac2c4efcc7f1a5a5cceef2c0a2f16b957e791fa7a867cce31e8fcb"
+          "bazelisk-linux-arm64": "sha256:4c8d966e40ac2c4efcc7f1a5a5cceef2c0a2f16b957e791fa7a867cce31e8fcb",
+          "bazelisk-darwin-arm64": "sha256:b13dd89c6ecd90944ca3539f5a2c715a18f69b7458878c471a902a8e482ceb4b"
         },
-        "notes": "The release publishes no checksum file and its assets carry no GitHub digest, so these are SHA-256s of the two release assets, downloaded (not run) on 2026-09-27. A new version needs the Dockerfile's sums and these updated together. Bazelisk then fetches bazel 7.6.1 per the LiteRT-LM repo's .bazelversion; that download is not checksummed here."
+        "notes": "The release publishes no checksum file and its assets carry no GitHub digest, so these are SHA-256s of the release assets, downloaded (not run): the Linux two on 2026-09-27, bazelisk-darwin-arm64 on 2026-11-22 for deploy/litert-lm/build-macos.sh (#2159), which checks it the same way. A new version needs the Dockerfile's sums and these updated together. Bazelisk then fetches bazel 7.6.1 per the LiteRT-LM repo's .bazelversion; that download is not checksummed here."
       },
       "speechSpokenInventories": {
         "$comment": "Google's spoken punctuation and spoken emoji inventories (#1799), the data of https://docs.cloud.google.com/speech-to-text/docs/spoken-punctuation and .../spoken-emoji, converted to internal/speechconfig/data/spoken_punctuation.tsv and spoken_emoji.tsv.gz (locale, symbol, |-separated forms).",

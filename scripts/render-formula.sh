@@ -61,6 +61,9 @@ class Cloudburrow < Formula
 
   def install
     bin.install "cloudburrow"
+    # The darwin/arm64 archive's LiteRT-LM runner for the Apple GPU (#2159),
+    # found by the CLI in libexec/cloudburrow/litert-lm.
+    (libexec/"cloudburrow").install "litert-lm" if File.directory?("litert-lm")
   end
 
   test do
