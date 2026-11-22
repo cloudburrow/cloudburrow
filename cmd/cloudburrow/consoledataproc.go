@@ -200,7 +200,7 @@ func (p dataprocBatchesProvider) List(ctx context.Context, project string) (cons
 			if terminal := b.GetState() == dataprocpb.Batch_SUCCEEDED || b.GetState() == dataprocpb.Batch_FAILED || b.GetState() == dataprocpb.Batch_CANCELLED; terminal {
 				end = b.GetStateTime().AsTime()
 			}
-			listing.Items = append(listing.Items, console.Resource{Name: b.GetName(), Status: b.GetState().String(), Fields: map[string]string{
+			listing.Items = append(listing.Items, console.Resource{Name: lastSegment(b.GetName()), Opens: []string{b.GetName()}, Status: b.GetState().String(), Fields: map[string]string{
 				"Batch ID": lastSegment(b.GetName()), "Status": dataprocState(b.GetState().String()), "Region": dataprocRegionOf(b.GetName()),
 				"Creation time": kmsTime(b.GetCreateTime()), "Elapsed time": dataprocElapsed(b.GetCreateTime().AsTime(), end),
 				"Type": dataprocBatchType(b), "Labels": dataprocLabels(b.GetLabels())}})
@@ -216,8 +216,8 @@ func (dataprocBatchesProvider) CreateTitle() string { return "Create batch" }
 
 func (p dataprocBatchesProvider) CreateForm() (string, []console.Field) {
 	const info, container, exec, props, labels = "Batch info", "Container", "Execution configuration", "Properties", "Labels"
-	return "Submit", []console.Field{
-		{Name: "batchId", Label: "Batch ID", Type: "text", Section: info, Pattern: `^[a-z0-9-]{4,63}$`,
+	return "Create", []console.Field{
+		{Name: "batchId", Label: "Batch ID", Type: "text", Section: info, Pattern: `^[a-z0-9\-]{4,63}$`,
 			Help: "4 to 63 lower-case letters, numbers and hyphens. Left empty, one is generated."},
 		{Name: "region", Label: "Region", Type: "select", Required: true, Section: info, Options: dataproc.Locations(), Default: "us-central1"},
 		{Name: "batchType", Label: "Batch type", Type: "select", Required: true, Section: container, Default: "PYSPARK",
@@ -484,7 +484,7 @@ func (p dataprocSessionsProvider) List(ctx context.Context, project string) (con
 			if x.GetState() == dataprocpb.Session_TERMINATED || x.GetState() == dataprocpb.Session_FAILED {
 				end = x.GetStateTime().AsTime()
 			}
-			listing.Items = append(listing.Items, console.Resource{Name: x.GetName(), Status: x.GetState().String(), Fields: map[string]string{
+			listing.Items = append(listing.Items, console.Resource{Name: lastSegment(x.GetName()), Opens: []string{x.GetName()}, Status: x.GetState().String(), Fields: map[string]string{
 				"Session ID": lastSegment(x.GetName()), "Status": dataprocState(x.GetState().String()), "Region": dataprocRegionOf(x.GetName()),
 				"Type": dataprocSessionType(x), "Creator": kmsOrDash(x.GetCreator()), "Creation time": kmsTime(x.GetCreateTime()),
 				"Elapsed time": dataprocElapsed(x.GetCreateTime().AsTime(), end), "Template": kmsOrDash(lastSegment(x.GetSessionTemplate()))}})
@@ -509,8 +509,8 @@ func (dataprocSessionsProvider) CreateTitle() string { return "Create interactiv
 
 func (p dataprocSessionsProvider) CreateForm() (string, []console.Field) {
 	const info, runtime, exec, props = "Session info", "Runtime configuration", "Execution configuration", "Properties"
-	return "Submit", []console.Field{
-		{Name: "sessionId", Label: "Name", Type: "text", Required: true, Section: info, Pattern: `^[a-z0-9-]{4,63}$`,
+	return "Create", []console.Field{
+		{Name: "sessionId", Label: "Name", Type: "text", Required: true, Section: info, Pattern: `^[a-z0-9\-]{4,63}$`,
 			Help: "4 to 63 lower-case letters, numbers and hyphens."},
 		{Name: "region", Label: "Region", Type: "select", Required: true, Section: info, Options: dataproc.Locations(), Default: "us-central1"},
 		{Name: "template", Label: "Session template", Type: "text", Section: info,
@@ -702,7 +702,7 @@ func (p dataprocTemplatesProvider) List(ctx context.Context, project string) (co
 			return console.Listing{}, err
 		}
 		for _, t := range resp.GetSessionTemplates() {
-			listing.Items = append(listing.Items, console.Resource{Name: t.GetName(), Fields: map[string]string{
+			listing.Items = append(listing.Items, console.Resource{Name: lastSegment(t.GetName()), Opens: []string{t.GetName()}, Fields: map[string]string{
 				"Name": lastSegment(t.GetName()), "Region": dataprocRegionOf(t.GetName()), "Type": dataprocSessionType(t),
 				"Runtime version": kmsOrDash(t.GetRuntimeConfig().GetVersion()), "Creator": kmsOrDash(t.GetCreator()), "Last updated": kmsTime(t.GetUpdateTime())}})
 		}
@@ -720,7 +720,7 @@ func dataprocTemplateFields(t *dataprocpb.SessionTemplate, withID bool) []consol
 	var fields []console.Field
 	if withID {
 		fields = append(fields,
-			console.Field{Name: "templateId", Label: "Name", Type: "text", Required: true, Section: info, Pattern: `^[a-zA-Z0-9]([a-zA-Z0-9_-]{0,62}[a-zA-Z0-9])?$`,
+			console.Field{Name: "templateId", Label: "Name", Type: "text", Required: true, Section: info, Pattern: `^[a-zA-Z0-9]([a-zA-Z0-9_\-]{0,62}[a-zA-Z0-9])?$`,
 				Help: "Letters, numbers, hyphens and underscores, starting and ending with a letter or number."},
 			console.Field{Name: "region", Label: "Region", Type: "select", Required: true, Section: info, Options: dataproc.Locations(), Default: "us-central1"})
 	}
@@ -769,7 +769,7 @@ func dataprocTemplateOf(name string, values map[string]string) (*dataprocpb.Sess
 }
 
 func (p dataprocTemplatesProvider) CreateForm() (string, []console.Field) {
-	return "Submit", dataprocTemplateFields(nil, true)
+	return "Create", dataprocTemplateFields(nil, true)
 }
 
 func (p dataprocTemplatesProvider) Create(ctx context.Context, project string, values map[string]string) (string, error) {

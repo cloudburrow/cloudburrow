@@ -81,7 +81,7 @@ print("counted", counts.count(), "words for", sys.argv[2])
 // failing batch ends FAILED. And the documented refusals: an ID of
 // capitals, a duplicate, an unknown runtime version.
 //
-// covers: google.cloud.dataproc.v1.BatchController/CreateBatch, google.cloud.dataproc.v1.BatchController/GetBatch, google.cloud.dataproc.v1.BatchController/ListBatches, google.cloud.dataproc.v1.BatchController/DeleteBatch, google.longrunning.Operations/GetOperation, google.longrunning.Operations/CancelOperation, google.logging.v2.LoggingServiceV2/ListLogEntries
+// covers: google.cloud.dataproc.v1.BatchController/CreateBatch, google.cloud.dataproc.v1.BatchController/GetBatch, google.cloud.dataproc.v1.BatchController/ListBatches, google.cloud.dataproc.v1.BatchController/DeleteBatch, google.logging.v2.LoggingServiceV2/ListLogEntries
 func TestDataprocServerlessBatches(t *testing.T) {
 	h, addr, project := dataprocEnv(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Minute)

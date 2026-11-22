@@ -181,6 +181,7 @@ func coverageDeps(t *testing.T) consoleDeps {
 		workflows:        &workflowsService{},
 		parameterManager: &parameterManagerService{},
 		dataform:         &dataformService{},
+		dataproc:         &dataprocService{},
 		appHub:           &appHubService{},
 		trace:            &traceService{},
 		// The APIs & Services page (#1352) reads the Service Usage server.

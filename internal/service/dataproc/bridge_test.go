@@ -126,7 +126,10 @@ func TestSparkConnectBridge(t *testing.T) {
 		t.Fatal(err)
 	}
 	ops := &operations{s: s}
-	wait(t, func() bool { o, _ := ops.GetOperation(ctx, &longrunningpb.GetOperationRequest{Name: op.Name}); return o.GetDone() })
+	wait(t, func() bool {
+		o, _ := ops.GetOperation(ctx, &longrunningpb.GetOperationRequest{Name: op.Name})
+		return o.GetDone()
+	})
 	x, err := s.GetSession(ctx, &dataprocpb.GetSessionRequest{Name: parent + "/sessions/bridge-1"})
 	if err != nil || x.State != dataprocpb.Session_ACTIVE {
 		t.Fatalf("session: %v %v", x, err)

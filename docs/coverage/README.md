@@ -59,6 +59,7 @@ Do not edit these files by hand.
 | [Certificate Authority Service (v1)](privateca.md) | 29 | 29 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Parameter Manager (v1)](parametermanager.md) | 22 | 22 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Dataform (v1)](dataform.md) | 74 | 73 | 0 | 0 | 1 | 0 | 0 | 0 |
+| [Dataproc: Serverless for Apache Spark (v1)](dataproc.md) | 14 | 14 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [App Hub (v1)](apphub.md) | 31 | 31 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Trace API (v1 and v2)](trace.md) | 5 | 5 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Workflows and Workflow Executions (v1)](workflows.md) | 10 | 10 | 0 | 0 | 0 | 0 | 0 | 0 |
