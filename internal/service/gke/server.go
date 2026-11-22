@@ -164,11 +164,6 @@ type entry struct {
 	scale *autoscaleState
 	// extra is kept with the record (upgradeinfo.go, rotation.go).
 	extra clusterExtra
-	// logsChanged is when the cluster's logging configuration was last
-	// changed, on the wall clock the container runtime stamps log lines
-	// by (TelemetryTarget.LogsSince); zero before any change since this
-	// process started.
-	logsChanged time.Time
 }
 
 type opEntry struct {

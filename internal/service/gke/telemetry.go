@@ -4,7 +4,6 @@ import (
 	"context"
 	"sort"
 	"strings"
-	"time"
 
 	"cloud.google.com/go/container/apiv1/containerpb"
 	"google.golang.org/grpc/codes"
@@ -72,10 +71,6 @@ type TelemetryTarget struct {
 	ControlPlaneLogs         map[string]bool
 	// SystemMetrics is whether system metrics are shipped.
 	SystemMetrics bool
-	// LogsSince is when the logging configuration last changed, on the
-	// wall clock, or zero: a kind of log turned on then is shipped from
-	// that moment, not from when the shipper next looks (gkelogs.go).
-	LogsSince time.Time
 }
 
 // Telemetry lists the running clusters and what of each is shipped.
@@ -94,7 +89,7 @@ func (s *Server) Telemetry() []TelemetryTarget {
 			continue
 		}
 		t := TelemetryTarget{Name: name, Project: e.project, Location: c.GetLocation(), Cluster: c.GetName(), Kind: e.kind,
-			ControlPlaneLogs: map[string]bool{}, LogsSince: e.logsChanged}
+			ControlPlaneLogs: map[string]bool{}}
 		if c.GetLoggingService() != telemetryNone {
 			for _, comp := range c.GetLoggingConfig().GetComponentConfig().GetEnableComponents() {
 				switch comp {
@@ -375,12 +370,7 @@ func (s *Server) changeTelemetry(p parsed, ch *telemetryChange) (*containerpb.Op
 		return nil, status.Error(codes.InvalidArgument, "For GKE Autopilot clusters, you cannot disable the collection of system metrics.")
 	}
 	c := e.cluster
-	logs := ch.loggingService != "" || ch.logging.GetComponentConfig() != nil
 	return s.startSettingLocked(p, e, containerpb.Operation_UPDATE_CLUSTER, func(context.Context) error { return nil }, func() {
-		if logs {
-			// The wall clock, not s.now(): the kubelet stamps the lines.
-			e.logsChanged = s.opts.Now()
-		}
 		c.LoggingService, c.LoggingConfig = next.LoggingService, next.LoggingConfig
 		c.MonitoringService, c.MonitoringConfig = next.MonitoringService, next.MonitoringConfig
 	}), nil
