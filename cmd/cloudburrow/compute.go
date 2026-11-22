@@ -54,6 +54,25 @@ type computeService struct {
 	registry func() *resourcemanager.Registry
 	srv      *http.Server
 	ln       net.Listener
+	// handler is the port's own handler, before IAM enforcement and the
+	// request log: the console's calls to the APIs served beside
+	// /compute/v1/ (Certificate Manager and IAP, #2160) go through it.
+	handler http.Handler
+}
+
+// v1Handler is the Compute port's handler as the console calls it: the
+// APIs served on the port, unwrapped; the Compute API's alone before Start
+// has built it (the console's tests). nil without compute.
+func (s *computeService) v1Handler() http.Handler {
+	switch {
+	case s == nil:
+		return nil
+	case s.handler != nil:
+		return s.handler
+	case s.api != nil:
+		return s.api
+	}
+	return nil
 }
 
 func newComputeService(cfg config.Config) *computeService {
@@ -148,6 +167,7 @@ func (s *computeService) Start(ctx context.Context) error {
 		}
 		api.ServeHTTP(w, r)
 	})
+	s.handler = h
 	if s.wrapJSON != nil {
 		h = s.wrapJSON(h)
 	}
