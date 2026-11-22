@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/chromedp/chromedp"
 )
 
 // dpDetail reads a Dataproc resource back through the console API.
@@ -232,6 +234,9 @@ func TestBigQuerySparkNotebookThroughThePage(t *testing.T) {
 	if out := cell(fmt.Sprintf(`print("rows", spark.read.format("bigquery").load("%s.%s.t").count())`, project, ds), 5*time.Minute); !strings.Contains(out, "rows 6") {
 		t.Errorf("reading BigQuery on the session: %q", out)
 	}
+	// The walk starts where a keyboard user is after running a cell: in
+	// its source, as the BigQuery notebook test walks (#2094).
+	p.run(chromedp.Focus(chromedp.CSS(".bq-nb-cell:last-child .bq-nb-source")))
 	for _, fl := range p.keyboardFailures() {
 		t.Errorf("Spark notebook: %s", fl)
 	}

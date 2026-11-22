@@ -26,7 +26,7 @@ c, err := dataproc.NewBatchControllerClient(ctx, option.WithEndpoint(os.Getenv("
 ## Where workloads run
 
 Batches and sessions run on the Spark runner of BigQuery's stored procedures
-for Apache Spark (`internal/sparkproc`, [bigquery.md](bigquery.md)). Each
+for Apache Spark (`internal/sparkproc`, [architecture.md](architecture.md)). Each
 one is `spark-submit --master local[*]` in the pinned `apache/spark` image of
 its runtime version, with Google's Spark BigQuery connector reading and
 writing the instance's BigQuery (its Storage Read and Write APIs). It runs on
