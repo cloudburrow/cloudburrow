@@ -114,7 +114,17 @@ func (s *Server) ruleTargetLocked(x lbCtx, scheme string, b obj) (target, bs str
 	coll := parts[len(parts)-2]
 	switch coll {
 	case "targetGrpcProxies":
-		return "", "", unimplemented("target gRPC proxies (proxyless gRPC, Traffic Director) are not served (#2153)")
+		if x.region != "" || scheme != "INTERNAL_SELF_MANAGED" {
+			return "", "", invalid("Invalid value for field 'resource.target': '%s'. A target gRPC proxy is the target of a global forwarding rule of the INTERNAL_SELF_MANAGED load balancing scheme.", t)
+		}
+		to, ok := s.res[rel]
+		if !ok {
+			return "", "", notFound(rel)
+		}
+		if err := s.checkRuleSchemesLocked(rel, scheme, str(to, "urlMap")); err != nil {
+			return "", "", err
+		}
+		return rel, "", nil
 	case "targetVpnGateways":
 		return "", "", unimplemented("Classic VPN is not served (#2153)")
 	}

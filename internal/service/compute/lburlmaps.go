@@ -22,7 +22,7 @@ import (
 func init() {
 	registerLB(&lbColl{coll: "urlMaps", kind: "compute#urlMap", global: true, regional: true, patch: true, update: true,
 		fingerprint: true, testIam: true, build: buildURLMap, decorate: nil, noun: "urlMap",
-		post: map[string]func(*Server, lbCtx, obj, obj) (obj, error){"validate": validateURLMap, "invalidateCache": invalidateCache}})
+		post: map[string]func(*Server, lbCtx, obj, obj) (obj, error){"validate": validateURLMap, "invalidateCache": invalidateCacheOn}})
 }
 
 var redirectCodes = map[string]int{"": 301, "MOVED_PERMANENTLY_DEFAULT": 301, "FOUND": 302, "SEE_OTHER": 303,
@@ -810,16 +810,6 @@ func validateURLMap(s *Server, x lbCtx, o, b obj) (obj, error) {
 		res["testFailures"] = l
 	}
 	return obj{"result": res}, nil
-}
-
-// invalidateCache is urlMaps.invalidateCache: nothing is cached here
-// (Cloud CDN is not served), so there is nothing to invalidate, and the
-// operation is done at once.
-func invalidateCache(s *Server, x lbCtx, o, b obj) (obj, error) {
-	if str(b, "path") == "" && str(b, "host") == "" && b["cacheTags"] == nil {
-		return nil, required("cacheInvalidationRule.path")
-	}
-	return s.done(x.project, "global", "invalidateCache", x.rel, o["id"])
 }
 
 // urlMapServicesLocked are every backend service and bucket a URL map

@@ -29,25 +29,17 @@ func init() {
 	registerLB(&lbColl{coll: "backendServices", kind: "compute#backendService", global: true, regional: true, patch: true, update: true,
 		fingerprint: true, iam: true, testIam: true, build: buildBackendService, decorate: withUsedBy, noun: "backendService",
 		post: map[string]func(*Server, lbCtx, obj, obj) (obj, error){"getHealth": backendServiceHealth,
-			"setSecurityPolicy": noSecurityPolicy, "setEdgeSecurityPolicy": noSecurityPolicy,
-			"addSignedUrlKey": noSignedURLKeys, "deleteSignedUrlKey": noSignedURLKeys},
-		get: map[string]func(*Server, lbCtx, obj, call) (obj, error){"getEffectiveSecurityPolicies": func(*Server, lbCtx, obj, call) (obj, error) {
-			return nil, unimplemented("Google Cloud Armor security policies are not served (#2153)")
-		}},
+			"setSecurityPolicy": setSecurityPolicyOn("securityPolicy", "CLOUD_ARMOR"),
+			"setEdgeSecurityPolicy": setSecurityPolicyOn("edgeSecurityPolicy", "CLOUD_ARMOR_EDGE"),
+			"addSignedUrlKey":       addSignedURLKey, "deleteSignedUrlKey": deleteSignedURLKey},
+		get: map[string]func(*Server, lbCtx, obj, call) (obj, error){"getEffectiveSecurityPolicies": effectiveSecurityPolicies},
 		collGet: map[string]func(*Server, lbCtx, call) (obj, error){"listUsable": listUsable("backendServices", "compute#usableBackendServiceList")}})
 	registerLB(&lbColl{coll: "backendBuckets", kind: "compute#backendBucket", global: true, patch: true, update: true,
 		iam: true, testIam: true, build: buildBackendBucket, decorate: withUsedBy, noun: "backendBucket",
-		post: map[string]func(*Server, lbCtx, obj, obj) (obj, error){"setEdgeSecurityPolicy": noSecurityPolicy,
-			"addSignedUrlKey": noSignedURLKeys, "deleteSignedUrlKey": noSignedURLKeys},
+		post: map[string]func(*Server, lbCtx, obj, obj) (obj, error){
+			"setEdgeSecurityPolicy": setSecurityPolicyOn("edgeSecurityPolicy", "CLOUD_ARMOR_EDGE"),
+			"addSignedUrlKey":       addSignedURLKey, "deleteSignedUrlKey": deleteSignedURLKey},
 		collGet: map[string]func(*Server, lbCtx, call) (obj, error){"listUsable": listUsable("backendBuckets", "compute#usableBackendBucketList")}})
-}
-
-func noSecurityPolicy(*Server, lbCtx, obj, obj) (obj, error) {
-	return nil, unimplemented("Google Cloud Armor security policies are not served (#2153)")
-}
-
-func noSignedURLKeys(*Server, lbCtx, obj, obj) (obj, error) {
-	return nil, unimplemented("Cloud CDN signed URL keys are not served: Cloud CDN caching is not served here (#2153)")
 }
 
 // listUsable is listUsable: the collection's records, as list returns them.
@@ -179,14 +171,37 @@ func buildBackendService(s *Server, x lbCtx, b, old obj) (obj, error) {
 	}
 	cd := objOf(b["connectionDraining"])
 	o["connectionDraining"] = obj{"drainingTimeoutSec": numOr(cd, "drainingTimeoutSec", 0)}
-	if sp := str(b, "securityPolicy"); sp != "" {
-		return nil, unimplemented("Google Cloud Armor security policies are not served (#2153)")
+	if err := s.buildPolicyFields(x, b, o, true); err != nil {
+		return nil, err
 	}
-	if iap := objOf(b["iap"]); iap != nil && iap["enabled"] == true {
-		return nil, unimplemented("Identity-Aware Proxy is not served: a backend service's iap cannot be enabled here (#2153)")
+	iap, err := buildIAP(b, old, scheme)
+	if err != nil {
+		return nil, err
 	}
-	copyFields(o, b, "enableCDN", "cdnPolicy", "customRequestHeaders", "customResponseHeaders", "logConfig", "outlierDetection",
-		"circuitBreakers", "compressionMode", "failoverPolicy", "connectionTrackingPolicy", "maxStreamDuration", "iap",
+	if iap != nil {
+		o["iap"] = iap
+	}
+	if b["enableCDN"] == true && (passthrough || scheme == "INTERNAL_MANAGED" || scheme == "INTERNAL_SELF_MANAGED" || !isHTTPProtocol(proto)) {
+		return nil, invalid("Invalid value for field 'resource.enableCDN': 'true'. Cloud CDN is supported only by external Application Load Balancers.")
+	}
+	if b["enableCDN"] == true && iap != nil && iap["enabled"] == true {
+		return nil, invalid("Invalid value for field 'resource.iap.enabled': 'true'. Identity-Aware Proxy and Cloud CDN cannot both be enabled on a backend service.")
+	}
+	cdn, err := buildCdnPolicy(objOf(b["cdnPolicy"]), b["enableCDN"] == true, false, old)
+	if err != nil {
+		return nil, err
+	}
+	if cdn != nil {
+		o["cdnPolicy"] = cdn
+	}
+	o["enableCDN"] = b["enableCDN"] == true
+	if old != nil {
+		if k := old["_signedUrlKeys"]; k != nil {
+			o["_signedUrlKeys"] = deepCopy(k)
+		}
+	}
+	copyFields(o, b, "customRequestHeaders", "customResponseHeaders", "logConfig", "outlierDetection",
+		"circuitBreakers", "compressionMode", "failoverPolicy", "connectionTrackingPolicy", "maxStreamDuration",
 		"securitySettings", "subsetting", "ipAddressSelectionPolicy", "strongSessionAffinityCookie")
 	for _, h := range append(strs(b, "customRequestHeaders"), strs(b, "customResponseHeaders")...) {
 		if i := strings.Index(h, ":"); i <= 0 {
@@ -420,10 +435,22 @@ func buildBackendBucket(s *Server, x lbCtx, b, old obj) (obj, error) {
 		return nil, invalid("Invalid value for field 'resource.bucketName': '%s'. Must be a valid Cloud Storage bucket name.", bucket)
 	}
 	o := obj{"bucketName": bucket}
-	if es := str(b, "edgeSecurityPolicy"); es != "" {
-		return nil, unimplemented("Google Cloud Armor edge security policies are not served (#2153)")
+	if err := s.buildPolicyFields(x, b, o, false); err != nil {
+		return nil, err
 	}
-	copyFields(o, b, "enableCdn", "cdnPolicy", "customResponseHeaders", "compressionMode", "loadBalancingScheme", "params")
+	cdn, err := buildCdnPolicy(objOf(b["cdnPolicy"]), b["enableCdn"] == true, true, old)
+	if err != nil {
+		return nil, err
+	}
+	if cdn != nil {
+		o["cdnPolicy"] = cdn
+	}
+	if old != nil {
+		if k := old["_signedUrlKeys"]; k != nil {
+			o["_signedUrlKeys"] = deepCopy(k)
+		}
+	}
+	copyFields(o, b, "enableCdn", "customResponseHeaders", "compressionMode", "loadBalancingScheme", "params")
 	for _, h := range strs(b, "customResponseHeaders") {
 		if i := strings.Index(h, ":"); i <= 0 {
 			return nil, invalid("Invalid value for field 'resource.customResponseHeaders': '%s'. A custom header is 'NAME:VALUE'.", h)

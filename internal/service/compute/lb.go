@@ -70,8 +70,7 @@ type lbColl struct {
 
 // lbUnservedVerbs answer 501 whether or not their record exists, as the
 // coverage table's unserved methods do.
-var lbUnservedVerbs = map[string]bool{"setSecurityPolicy": true, "setEdgeSecurityPolicy": true, "addSignedUrlKey": true,
-	"deleteSignedUrlKey": true, "setCertificateMap": true, "getEffectiveSecurityPolicies": true}
+var lbUnservedVerbs = map[string]bool{}
 
 // lbColls are the collections, by their path segment.
 var lbColls = map[string]*lbColl{}
@@ -98,7 +97,8 @@ func init() {
 	// are returned (server.go's render).
 	for _, k := range []string{"healthChecks", "backendService", "defaultService", "service", "urlMap", "sslCertificates",
 		"sslPolicy", "target", "group", "instances", "instance", "backupPool", "reference", "forwardingRule",
-		"producerForwardingRule", "targetService", "natSubnets", "baseForwardingRule", "healthCheck"} {
+		"producerForwardingRule", "targetService", "natSubnets", "baseForwardingRule", "healthCheck",
+		"securityPolicy", "edgeSecurityPolicy"} {
 		linkKeys[k] = true
 	}
 }
@@ -217,6 +217,18 @@ func (s *Server) lbServe(c call, lc *lbColl, x lbCtx, rest []string) (obj, error
 					// setBackup's failoverRatio is a query parameter.
 					b = deepCopy(b).(obj)
 					b["_failoverRatio"] = v
+				}
+				// patchRule's and removeRule's priority, and addRule's and
+				// patchRule's validateOnly, are query parameters.
+				for _, q := range []string{"priority", "validateOnly", "keyName"} {
+					if v := first(c.query, q); v != "" {
+						if b == nil {
+							b = obj{}
+						} else {
+							b = deepCopy(b).(obj)
+						}
+						b["_"+q] = v
+					}
 				}
 				return lc.post[verb](s, x, o, b)
 			}

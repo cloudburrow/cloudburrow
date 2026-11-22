@@ -64,7 +64,8 @@ func (h *lbHTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	rule := deepCopy(s.res[h.rule]).(obj)
 	proxy := s.res[str(rule, "target")]
-	m := deepCopy(s.res[str(proxy, "urlMap")]).(obj)
+	mapRel := str(proxy, "urlMap")
+	m := deepCopy(s.res[mapRel]).(obj)
 	s.mu.Unlock()
 	if m == nil {
 		lbError(w, http.StatusNotFound, "the target proxy has no URL map")
@@ -124,8 +125,30 @@ func (h *lbHTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		lbError(w, http.StatusNotFound, "no backend")
 		return
 	}
+	// Cloud Armor's edge security policy, then Cloud CDN's cache, then
+	// the backend security policy and IAP on a miss (#2160).
+	areq := newArmorReq(r, scheme)
+	extra, ok := s.armorCheck(w, areq, str(so, "edgeSecurityPolicy"))
+	if !ok {
+		return
+	}
+	headers = append(headers, extra...)
+	cw, done := h.cdnFront(w, r, so, mapRel, scheme)
+	if done {
+		return
+	}
+	defer cw.finish()
+	w = cw
 	if str(so, "kind") == "compute#backendBucket" {
 		h.serveBucket(w, r, so, newPath, headers)
+		return
+	}
+	extra, ok = s.armorCheck(w, areq, str(so, "securityPolicy"))
+	if !ok {
+		return
+	}
+	headers = append(headers, extra...)
+	if !s.iapCheck(w, r, so) {
 		return
 	}
 	s.mu.Lock()

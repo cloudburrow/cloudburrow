@@ -24,25 +24,21 @@ func init() {
 	registerLB(&lbColl{coll: "targetHttpsProxies", kind: "compute#targetHttpsProxy", global: true, regional: true, patch: true,
 		fingerprint: true, build: buildHTTPProxy(true), noun: "targetHttpsProxy",
 		post: lbPost{"setUrlMap": setURLMap, "setSslCertificates": setSslCertificates, "setSslPolicy": setSslPolicy,
-			"setQuicOverride": setQuicOverride, "setCertificateMap": noCertificateMap}})
+			"setQuicOverride": setQuicOverride, "setCertificateMap": setCertificateMap}})
 	registerLB(&lbColl{coll: "targetTcpProxies", kind: "compute#targetTcpProxy", global: true, regional: true,
 		testIam: true, build: buildStreamProxy(false), noun: "targetTcpProxy",
 		post: lbPost{"setBackendService": setProxyService, "setProxyHeader": setProxyHeader}})
 	registerLB(&lbColl{coll: "targetSslProxies", kind: "compute#targetSslProxy", global: true,
 		testIam: true, build: buildStreamProxy(true), noun: "targetSslProxy",
 		post: lbPost{"setBackendService": setProxyService, "setProxyHeader": setProxyHeader, "setSslCertificates": setSslCertificates,
-			"setSslPolicy": setSslPolicy, "setCertificateMap": noCertificateMap}})
+			"setSslPolicy": setSslPolicy, "setCertificateMap": setCertificateMap}})
 	registerLB(&lbColl{coll: "targetPools", kind: "compute#targetPool", regional: true, testIam: true, build: buildTargetPool,
 		noun: "targetPool",
 		post: lbPost{"addInstance": poolInstances(true), "removeInstance": poolInstances(false), "addHealthCheck": poolHealthCheck(true),
 			"removeHealthCheck": poolHealthCheck(false), "setBackup": setBackup, "getHealth": targetPoolHealth,
-			"setSecurityPolicy": noSecurityPolicy}})
+			"setSecurityPolicy": setSecurityPolicyOn("securityPolicy", "CLOUD_ARMOR_NETWORK")}})
 	registerLB(&lbColl{coll: "targetInstances", kind: "compute#targetInstance", zonal: true, testIam: true, build: buildTargetInstance,
-		noun: "targetInstance", post: lbPost{"setSecurityPolicy": noSecurityPolicy}})
-}
-
-func noCertificateMap(*Server, lbCtx, obj, obj) (obj, error) {
-	return nil, unimplemented("Certificate Manager certificate maps are not served: attach SSL certificates (sslCertificates) instead (#2153)")
+		noun: "targetInstance", post: lbPost{"setSecurityPolicy": setSecurityPolicyOn("securityPolicy", "CLOUD_ARMOR_NETWORK")}})
 }
 
 // lbSet changes one record in place and answers its operation.
@@ -82,6 +78,14 @@ func (s *Server) certRefs(x lbCtx, field string, refs []string) ([]any, error) {
 	}
 	var out []any
 	for i, r := range refs {
+		if isCMCert(r) {
+			ref, err := s.cmCertRef(x, field+"["+itoa(i)+"]", r)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, ref)
+			continue
+		}
 		rel, _, err := s.lbRef(x, field+"["+itoa(i)+"]", r, "sslCertificates")
 		if err != nil {
 			return nil, err
@@ -122,17 +126,12 @@ func buildHTTPProxy(tls bool) func(s *Server, x lbCtx, b, old obj) (obj, error) 
 		if !tls {
 			return o, nil
 		}
-		if str(b, "certificateMap") != "" {
-			return nil, unimplemented("Certificate Manager certificate maps are not served: attach SSL certificates (sslCertificates) instead (#2153)")
-		}
 		if str(b, "serverTlsPolicy") != "" || str(b, "authorizationPolicy") != "" {
 			return nil, unimplemented("mutual TLS (serverTlsPolicy) and authorization policies are not served (#2153)")
 		}
-		certs, err := s.certRefs(x, "resource.sslCertificates", strs(b, "sslCertificates"))
-		if err != nil {
+		if err := s.proxyCertFields(x, b, o); err != nil {
 			return nil, err
 		}
-		o["sslCertificates"] = certs
 		if sp := str(b, "sslPolicy"); sp != "" {
 			if o["sslPolicy"], err = s.sslPolicyRef(x, "resource.sslPolicy", sp); err != nil {
 				return nil, err
@@ -242,14 +241,9 @@ func buildStreamProxy(tls bool) func(s *Server, x lbCtx, b, old obj) (obj, error
 		if !tls {
 			return o, nil
 		}
-		if str(b, "certificateMap") != "" {
-			return nil, unimplemented("Certificate Manager certificate maps are not served: attach SSL certificates (sslCertificates) instead (#2153)")
-		}
-		certs, err := s.certRefs(x, "resource.sslCertificates", strs(b, "sslCertificates"))
-		if err != nil {
+		if err := s.proxyCertFields(x, b, o); err != nil {
 			return nil, err
 		}
-		o["sslCertificates"] = certs
 		if sp := str(b, "sslPolicy"); sp != "" {
 			if o["sslPolicy"], err = s.sslPolicyRef(x, "resource.sslPolicy", sp); err != nil {
 				return nil, err
@@ -341,8 +335,12 @@ func buildTargetPool(s *Server, x lbCtx, b, old obj) (obj, error) {
 		}
 		o["failoverRatio"] = v
 	}
-	if str(b, "securityPolicy") != "" {
-		return nil, unimplemented("Google Cloud Armor security policies are not served (#2153)")
+	if ref := str(b, "securityPolicy"); ref != "" {
+		rel, err := s.policyRef(x, "resource.securityPolicy", ref, "CLOUD_ARMOR_NETWORK")
+		if err != nil {
+			return nil, err
+		}
+		o["securityPolicy"] = rel
 	}
 	return o, nil
 }
@@ -503,8 +501,33 @@ func buildTargetInstance(s *Server, x lbCtx, b, old obj) (obj, error) {
 		}
 		o["network"] = n
 	}
-	if str(b, "securityPolicy") != "" {
-		return nil, unimplemented("Google Cloud Armor security policies are not served (#2153)")
+	if ref := str(b, "securityPolicy"); ref != "" {
+		rel, err := s.policyRef(x, "resource.securityPolicy", ref, "CLOUD_ARMOR_NETWORK")
+		if err != nil {
+			return nil, err
+		}
+		o["securityPolicy"] = rel
 	}
 	return o, nil
+}
+
+// proxyCertFields checks a TLS proxy's certificateMap and sslCertificates:
+// at least one is set; with a map, the certificates are kept but unused.
+func (s *Server) proxyCertFields(x lbCtx, b, o obj) error {
+	if ref := str(b, "certificateMap"); ref != "" {
+		m, err := s.certMapRef(x, "resource.certificateMap", ref)
+		if err != nil {
+			return err
+		}
+		o["certificateMap"] = m
+		if len(strs(b, "sslCertificates")) == 0 {
+			return nil
+		}
+	}
+	certs, err := s.certRefs(x, "resource.sslCertificates", strs(b, "sslCertificates"))
+	if err != nil {
+		return err
+	}
+	o["sslCertificates"] = certs
+	return nil
 }

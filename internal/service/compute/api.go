@@ -36,6 +36,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.serveLBCA(w, r)
 		return
 	}
+	if r.URL.Path == IAPKeysPath {
+		// The keys of IAP's signed headers (#2160).
+		s.serveIAPKeys(w, r)
+		return
+	}
 	if !strings.HasPrefix(r.URL.Path, Prefix) {
 		writeError(w, unimplemented("CloudBurrow's Compute Engine API serves %s only (%s %s).", Prefix, r.Method, r.URL.Path))
 		return
