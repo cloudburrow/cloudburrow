@@ -133,7 +133,7 @@ func TestGKELoggingAndMonitoring(t *testing.T) {
 	}
 	if c.GetLoggingService() != "logging.googleapis.com/kubernetes" || c.GetMonitoringService() != "monitoring.googleapis.com/kubernetes" ||
 		len(c.GetLoggingConfig().GetComponentConfig().GetEnableComponents()) != 2 ||
-		len(c.GetMonitoringConfig().GetComponentConfig().GetEnableComponents()) != 1 {
+		len(c.GetMonitoringConfig().GetComponentConfig().GetEnableComponents()) != 10 || !c.GetMonitoringConfig().GetManagedPrometheusConfig().GetEnabled() {
 		t.Errorf("a new cluster's logging %q %v, monitoring %q %v", c.GetLoggingService(), c.GetLoggingConfig(), c.GetMonitoringService(), c.GetMonitoringConfig())
 	}
 	kc := gkeKubeconfig(t, c)

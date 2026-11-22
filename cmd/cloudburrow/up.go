@@ -530,6 +530,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if gkeSvc != nil {
 		newGKELogFeeder(gkeDir(cfg), gkeSvc, loggingSvc).register(coord)
 		newGKEMetricsSampler(gkeDir(cfg), gkeSvc, monitoringSvc).register(coord)
+		newGKEPromCollector(gkeDir(cfg), gkeSvc, monitoringSvc).register(coord)
 	}
 	if loggingSvc != nil {
 		// CopyLogEntries writes to the instance's Cloud Storage (#1394).
