@@ -14,6 +14,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -44,6 +45,15 @@ type SystemStats struct {
 	TransactionIDUtilization float64
 	// DataBytes is the size of the server's databases.
 	DataBytes int64
+	// Backends are PostgreSQL's client connections by database; nil
+	// elsewhere (#2141, postgresql/num_backends).
+	Backends map[string]int64
+	// Commits and Rollbacks are PostgreSQL's transactions by database,
+	// as pg_stat_database counts them.
+	Commits, Rollbacks map[string]uint64
+	// Queries is MySQL's Queries status: statements executed since it
+	// started (mysql/queries).
+	Queries uint64
 }
 
 // insightsEngine is an engine that reads its own statistics.
@@ -162,6 +172,25 @@ func (p *Postgres) SystemStats(ctx context.Context) (SystemStats, error) {
 		return SystemStats{}, pgError(err)
 	}
 	st.PeakConnections = st.Connections
+	st.Backends, st.Commits, st.Rollbacks = map[string]int64{}, map[string]uint64{}, map[string]uint64{}
+	rows, err := c.Query(ctx, `SELECT /* cloudburrow-insights */ d.datname, d.xact_commit, d.xact_rollback,
+		(SELECT count(*) FROM pg_stat_activity a WHERE a.datid = d.datid AND a.backend_type = 'client backend')
+		FROM pg_stat_database d WHERE d.datname IS NOT NULL AND d.datname NOT IN ('template0', 'template1')`)
+	if err != nil {
+		return SystemStats{}, pgError(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var db string
+		var commit, rollback, n int64
+		if err := rows.Scan(&db, &commit, &rollback, &n); err != nil {
+			return SystemStats{}, err
+		}
+		st.Backends[db], st.Commits[db], st.Rollbacks[db] = n, uint64(commit), uint64(rollback)
+	}
+	if err := rows.Err(); err != nil {
+		return SystemStats{}, pgError(err)
+	}
 	return st, nil
 }
 
@@ -213,9 +242,83 @@ func (m *MySQL) SystemStats(ctx context.Context) (SystemStats, error) {
 		(SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME = 'Threads_connected'),
 		(SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME = 'Max_used_connections'),
 		@@max_connections,
-		(SELECT COALESCE(SUM(DATA_LENGTH + INDEX_LENGTH), 0) FROM information_schema.TABLES)`).
-		Scan(&st.Connections, &st.PeakConnections, &st.MaxConnections, &st.DataBytes); err != nil {
+		(SELECT COALESCE(SUM(DATA_LENGTH + INDEX_LENGTH), 0) FROM information_schema.TABLES),
+		(SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME = 'Queries')`).
+		Scan(&st.Connections, &st.PeakConnections, &st.MaxConnections, &st.DataBytes, &st.Queries); err != nil {
 		return SystemStats{}, myError(err)
 	}
 	return st, nil
+}
+
+// MetricInstance is an instance Cloud Monitoring's Cloud SQL metrics are
+// read for (#2141).
+type MetricInstance struct {
+	Project, Name, Region, DatabaseVersion, Tier string
+	// Server is its server's name in the cluster.
+	Server string
+	// State is its Cloud SQL state; Stopped whether its owner stopped it.
+	State   string
+	Stopped bool
+	// Cores and RAM are the tier's; DiskBytes the data disk's size.
+	Cores     float64
+	RAM       int64
+	DiskBytes int64
+}
+
+// MetricInstances are the instances created through the Admin API, in
+// every project, then the servers `up` runs, in project (theirs is every
+// project's; their Server is "", the cluster's name for them being the
+// service's).
+func (s *Server) MetricInstances(project string) []MetricInstance {
+	var out []MetricInstance
+	for _, e := range s.engines {
+		cores, ram := TierShape("db-custom-1-3840")
+		out = append(out, MetricInstance{Project: project, Name: e.Instance(), Region: Region, DatabaseVersion: e.DatabaseVersion(),
+			Tier: "db-custom-1-3840", State: "RUNNABLE", Cores: cores, RAM: ram, DiskBytes: minDiskGB << 30})
+	}
+	s.emu.RLock()
+	defer s.emu.RUnlock()
+	if s.writes == nil {
+		return out
+	}
+	for _, c := range s.writes.byName {
+		sp := c.spec
+		cores, ram := TierShape(sp.Tier)
+		out = append(out, MetricInstance{Project: sp.Project, Name: sp.Name, Region: sp.region(), DatabaseVersion: sp.DatabaseVersion,
+			Tier: sp.Tier, Server: sp.ServerName(), State: c.state, Stopped: sp.Stopped(), Cores: cores, RAM: ram,
+			DiskBytes: diskSizeGB(sp) << 30})
+	}
+	return out
+}
+
+// TierShape is a tier's vCPUs and memory: db-custom-CPUS-MEMORY_MIB, a
+// documented tier's RAM, the shared-core tiers' fractions (db-f1-micro
+// 0.2 vCPU, db-g1-small 0.5, as Google's machine series overview gives
+// them) and db-perf-optimized-N-CPUS.
+func TierShape(tier string) (cores float64, ram int64) {
+	for _, t := range documentedTiers {
+		if t.Tier == tier {
+			ram = t.RAM
+		}
+	}
+	switch tier {
+	case "db-f1-micro":
+		return 0.2, ram
+	case "db-g1-small":
+		return 0.5, ram
+	}
+	parts := strings.Split(tier, "-")
+	if strings.HasPrefix(tier, "db-custom-") && len(parts) == 4 {
+		c, err1 := strconv.ParseFloat(parts[2], 64)
+		m, err2 := strconv.ParseInt(parts[3], 10, 64)
+		if err1 == nil && err2 == nil {
+			return c, m << 20
+		}
+	}
+	if strings.HasPrefix(tier, "db-perf-optimized-N-") {
+		if c, err := strconv.ParseFloat(parts[len(parts)-1], 64); err == nil {
+			return c, ram
+		}
+	}
+	return 1, ram
 }

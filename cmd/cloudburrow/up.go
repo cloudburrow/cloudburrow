@@ -1049,6 +1049,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	sqlAdminSrv := newSQLAdminServer(cfg, forwarders, mysqlCreds, stderr)
 	if sqlAdminSrv != nil {
 		sqlAdminRef = sqlAdminSrv
+		// Cloud SQL's metrics in Cloud Monitoring (#2141).
+		if monitoringSvc != nil {
+			monitoringSvc.sql = func() *sqladmin.Server { return sqlAdminRef }
+		}
 		// settings.ipConfiguration.privateNetwork is checked against
 		// Compute Engine's networks when compute is served (#1936).
 		if computeSvc != nil {

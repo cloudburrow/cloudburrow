@@ -33,6 +33,9 @@ type cloudSQLInstancesProvider struct {
 	// srv is the Admin API in this process, whose servers Query insights
 	// and System insights read (#2141); nil leaves them unavailable.
 	srv *sqladmin.Server
+	// metrics is the instance's Cloud Monitoring, whose cloudsql.googleapis.com
+	// series the Overview and System insights chart (#2141).
+	metrics monitoringAdmin
 }
 
 func (cloudSQLInstancesProvider) ID() string    { return "cloudsql-instances" }
@@ -297,7 +300,7 @@ func (p cloudSQLInstancesProvider) Detail(ctx context.Context, project string, p
 	if err != nil || in == nil || in.InstanceType == "ON_PREMISES_INSTANCE" {
 		return d, err
 	}
-	return p.sqlInsightsLayout(ctx, project, in, googleLayout(ctx, svc, project, in, d)), nil
+	return p.sqlChartsOnOverview(ctx, project, in, p.sqlInsightsLayout(ctx, project, in, googleLayout(ctx, svc, project, in, d))), nil
 }
 
 // detailAll is an instance's settings, its tabs, Edit instance on a created

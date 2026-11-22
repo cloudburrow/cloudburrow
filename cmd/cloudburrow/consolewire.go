@@ -522,7 +522,8 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			host = "127.0.0.1"
 		}
 		instances := cloudSQLInstancesProvider{
-			endpoint: net.JoinHostPort(host, strconv.Itoa(d.cfg.Endpoints.SQLAdmin)), versions: versions, srv: d.sqlAdmin}
+			endpoint: net.JoinHostPort(host, strconv.Itoa(d.cfg.Endpoints.SQLAdmin)), versions: versions, srv: d.sqlAdmin,
+			metrics: monitoringAdmin{api: monitoringServerOf(d.monitoring)}}
 		// Cloud SQL's Backups page (#1860), the project's backups.
 		providers = append(providers, instances, cloudSQLBackupsProvider{instances: instances})
 	}

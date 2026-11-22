@@ -4700,13 +4700,35 @@ async function renderDetail(view, route, resourcePath) {
         emptyState(`No ${section.label.toLowerCase()}`,
                    `${name} reports none.`));
     }
-    setChildren(into, note, ...groups.map((group) =>
+    setChildren(into, note, overviewChart(section), ...groups.map((group) =>
       el("div", { class: "card properties" },
         group.heading ? el("h2", { text: group.heading }) : null,
         el("dl", {}, ...group.properties.flatMap((prop) => [
           el("dt", { text: prop.label }),
           propertyValue(prop),
         ])))));
+  };
+
+  // A properties section's chart (#2141): Cloud SQL's Overview draws one of
+  // the instance's Cloud Monitoring metrics above its cards, the metric
+  // chosen from a list (CPU utilization first), as Google's Overview does.
+  const overviewChart = (section) => {
+    const series = section.series || [];
+    if (!series.length) return null;
+    const holder = el("div", { class: "overview-chart" });
+    const pick = el("select", { id: "overview-chart-metric" },
+      ...series.map((sv, i) => el("option", { value: String(i), text: sv.label })));
+    const draw = () => {
+      const sv = series[Number(pick.value) || 0];
+      setChildren(holder, chartCard(sv.label, sv.points || [], {
+        label: `${sv.label} for ${name}`, max: sv.max || undefined,
+        foot: sv.unit ? `Measured in ${sv.unit}` : "", unavailable: sv.unavailable }));
+    };
+    pick.addEventListener("change", draw);
+    draw();
+    return el("div", { class: "card overview-chart-card" },
+      el("div", { class: "overview-chart-pick" }, el("label", { for: "overview-chart-metric", text: "Chart" }), pick),
+      holder);
   };
 
   // Preformatted: newlines are the content, and a YAML document that lost

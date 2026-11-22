@@ -6,10 +6,12 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	sqladminapi "google.golang.org/api/sqladmin/v1"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/service/monitoring"
 )
 
 // TestSQLInsightsConfig (#2141): Google's limits on the Query insights
@@ -52,7 +54,7 @@ func TestSQLInsightsSections(t *testing.T) {
 	if q := sqlQueryInsightsSection(ctx, nil, "p", my); strings.Contains(strings.Join(q.Listing.Columns, ","), "User") {
 		t.Errorf("MySQL columns %v", q.Listing.Columns)
 	}
-	if s := sqlSystemInsightsSection(ctx, nil, "p", my); s.Unavailable == "" {
+	if s := sqlSystemInsightsSection(ctx, nil, monitoringAdmin{}, "p", my); s.Unavailable == "" {
 		t.Errorf("System insights with no server: %+v", s)
 	}
 	ext := &sqladminapi.DatabaseInstance{Name: "ext", DatabaseVersion: "MYSQL_8_0", InstanceType: "ON_PREMISES_INSTANCE"}
@@ -173,5 +175,58 @@ func TestCloudSQLBackupSettingsPage(t *testing.T) {
 	if bc, err := backupSettingsOf(map[string]string{"backupsEnabled": "false", "locationType": "region", "region": "us-east1"}); err != nil ||
 		bc.Enabled || bc.Location != "us-east1" {
 		t.Errorf("disabled: %+v, %v", bc, err)
+	}
+}
+
+type fakeSQLSource struct{ in []monitoring.SQLInstance }
+
+func (f *fakeSQLSource) SQLInstances() []monitoring.SQLInstance { return f.in }
+
+// The Overview's chart reads the instance's cloudsql.googleapis.com series
+// from Cloud Monitoring: CPU utilization first, as a percent, then the
+// engine's own (#2141).
+func TestCloudSQLOverviewCharts(t *testing.T) {
+	api, err := monitoring.NewServer("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Add(-2 * time.Minute)
+	src := &fakeSQLSource{in: []monitoring.SQLInstance{{Project: "proj-1", Instance: "db", Region: "us-central1", Engine: "POSTGRES", Up: true,
+		HasPod: true, CPUSeconds: 1, ReservedCores: 1, MemoryQuota: 4 << 30, MemoryUsage: 1 << 30, DiskQuota: 10 << 30, DiskUsed: 1 << 30,
+		HasServer: true, Backends: map[string]int64{"postgres": 2}}}}
+	clock := now
+	b := monitoring.NewSQLBuiltin(src, func() time.Time { return clock })
+	api.AddBuiltin(b)
+	b.Sample()
+	clock = now.Add(time.Minute)
+	in := src.in[0]
+	in.CPUSeconds = 31
+	src.in = []monitoring.SQLInstance{in}
+	b.Sample()
+	m := monitoringAdmin{api: func() *monitoring.Server { return api }}
+	inst := &sqladminapi.DatabaseInstance{Name: "db", DatabaseVersion: "POSTGRES_17", State: "RUNNABLE"}
+	series, why := sqlCharts(context.Background(), m, "proj-1", inst, sqlOverviewCharts)
+	if why != "" || len(series) == 0 || series[0].Label != "CPU utilization" {
+		t.Fatalf("charts: %+v %q", series, why)
+	}
+	var cpu []float64
+	for _, pt := range series[0].Points {
+		if pt.Value != nil {
+			cpu = append(cpu, *pt.Value)
+		}
+	}
+	if len(cpu) != 1 || cpu[0] != 50 {
+		t.Errorf("CPU utilization points %v, want [50]: %+v", cpu, series[0])
+	}
+	for _, s := range series {
+		if s.Label == "Queries" {
+			t.Error("a PostgreSQL instance charts MySQL's queries")
+		}
+	}
+	if v, ok := sqlCPUPercentiles(context.Background(), m, "proj-1", "db"); !ok || v != "50.00% | 50.00%" {
+		t.Errorf("CPU P99 | P50 = %q, %v", v, ok)
+	}
+	if _, why := sqlCharts(context.Background(), monitoringAdmin{}, "p", inst, sqlOverviewCharts); why == "" {
+		t.Error("no Cloud Monitoring, and the charts did not say so")
 	}
 }

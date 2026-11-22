@@ -1,0 +1,312 @@
+package monitoring
+
+// ---- Cloud SQL: cloudsql.googleapis.com/database/* (#2141) ----
+//
+// Google's Cloud SQL metrics (https://docs.cloud.google.com/monitoring/api/metrics_gcp_c,
+// the cloudsql section, read 2026-11-22), "Sampled every 60 seconds", on
+// the cloudsql_database resource (project_id, database_id
+// "PROJECT:INSTANCE", region). They are read from an SQLSource: each
+// instance's server, its pod's own counters as the kubelet reports them
+// (CPU time, memory, network, its data volume) and the server's own
+// figures (its connections, by database on PostgreSQL, and its statement
+// and transaction counters). A GAUGE is the sample's reading; a DELTA the
+// change since the last sample (none across a restart, whose counters
+// start again from zero).
+
+import (
+	"sort"
+	"sync"
+	"time"
+
+	"cloud.google.com/go/monitoring/apiv3/v2/monitoringpb"
+	labelpb "google.golang.org/genproto/googleapis/api/label"
+	metricpb "google.golang.org/genproto/googleapis/api/metric"
+	"google.golang.org/genproto/googleapis/api/monitoredres"
+	"google.golang.org/protobuf/types/known/timestamppb"
+)
+
+// The Cloud SQL metric types served.
+const (
+	SQLCPUUtilization = "cloudsql.googleapis.com/database/cpu/utilization"
+	SQLCPUUsageTime   = "cloudsql.googleapis.com/database/cpu/usage_time"
+	SQLCPUReserved    = "cloudsql.googleapis.com/database/cpu/reserved_cores"
+	SQLMemoryUsage    = "cloudsql.googleapis.com/database/memory/usage"
+	SQLMemoryTotal    = "cloudsql.googleapis.com/database/memory/total_usage"
+	SQLMemoryQuota    = "cloudsql.googleapis.com/database/memory/quota"
+	SQLMemoryUtil     = "cloudsql.googleapis.com/database/memory/utilization"
+	SQLDiskBytesUsed  = "cloudsql.googleapis.com/database/disk/bytes_used"
+	SQLDiskQuota      = "cloudsql.googleapis.com/database/disk/quota"
+	SQLDiskUtil       = "cloudsql.googleapis.com/database/disk/utilization"
+	SQLConnections    = "cloudsql.googleapis.com/database/network/connections"
+	SQLPGBackends     = "cloudsql.googleapis.com/database/postgresql/num_backends"
+	SQLReceivedBytes  = "cloudsql.googleapis.com/database/network/received_bytes_count"
+	SQLSentBytes      = "cloudsql.googleapis.com/database/network/sent_bytes_count"
+	SQLUp             = "cloudsql.googleapis.com/database/up"
+	SQLUptime         = "cloudsql.googleapis.com/database/uptime"
+	SQLMySQLQueries   = "cloudsql.googleapis.com/database/mysql/queries"
+	SQLPGTransactions = "cloudsql.googleapis.com/database/postgresql/transaction_count"
+)
+
+// SQLInstance is one Cloud SQL instance's readings at one sample.
+type SQLInstance struct {
+	// Project, Instance and Region name the cloudsql_database resource.
+	Project, Instance, Region string
+	// Engine is "POSTGRES", "MYSQL" or "SQLSERVER".
+	Engine string
+	// Up is whether the server serves.
+	Up bool
+	// HasPod is whether the pod's counters below were read.
+	HasPod bool
+	// CPUSeconds is the server's CPU time since its pod started.
+	CPUSeconds float64
+	// ReservedCores and MemoryQuota are the tier's.
+	ReservedCores float64
+	MemoryQuota   int64
+	// MemoryUsage excludes the page cache (the working set); MemoryTotal
+	// includes it.
+	MemoryUsage, MemoryTotal int64
+	// RxBytes and TxBytes are the pod's network counters.
+	RxBytes, TxBytes uint64
+	// DiskUsed is the data in use; DiskQuota the data disk's size.
+	DiskUsed, DiskQuota int64
+	// HasServer is whether the server's own figures below were read.
+	HasServer bool
+	// Connections are the client connections (MySQL, SQL Server).
+	Connections int64
+	// Backends are PostgreSQL's connections, by database.
+	Backends map[string]int64
+	// Queries is MySQL's statements executed since it started.
+	Queries uint64
+	// Commits and Rollbacks are PostgreSQL's transactions since its
+	// statistics were reset, by database.
+	Commits, Rollbacks map[string]uint64
+}
+
+// SQLSource reads every Cloud SQL instance now.
+type SQLSource interface {
+	SQLInstances() []SQLInstance
+}
+
+// SQLBuiltin serves cloudsql.googleapis.com/database/* from an SQLSource,
+// sampled every 60 seconds; a read samples first when the last sample is
+// older than minGap.
+type SQLBuiltin struct {
+	src    SQLSource
+	now    func() time.Time
+	minGap time.Duration
+
+	mu     sync.Mutex
+	lastAt time.Time
+	prev   map[string]SQLInstance
+	series map[string]*monitoringpb.TimeSeries
+}
+
+// NewSQLBuiltin returns Cloud SQL's metrics, sampled from src.
+func NewSQLBuiltin(src SQLSource, now func() time.Time) *SQLBuiltin {
+	return &SQLBuiltin{src: src, now: now, minGap: 10 * time.Second, prev: map[string]SQLInstance{},
+		series: map[string]*monitoringpb.TimeSeries{}}
+}
+
+// Sample reads every instance once.
+func (b *SQLBuiltin) Sample() { b.sampleAt(b.now()) }
+
+func sqlResource(in SQLInstance) *monitoredres.MonitoredResource {
+	return &monitoredres.MonitoredResource{Type: "cloudsql_database", Labels: map[string]string{
+		"project_id": in.Project, "database_id": in.Project + ":" + in.Instance, "region": in.Region}}
+}
+
+func doubleValue(f float64) *monitoringpb.TypedValue {
+	return &monitoringpb.TypedValue{Value: &monitoringpb.TypedValue_DoubleValue{DoubleValue: f}}
+}
+
+func (b *SQLBuiltin) sampleAt(now time.Time) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	start := b.lastAt
+	if !start.IsZero() && !now.After(start) {
+		return
+	}
+	at := &monitoringpb.TimeInterval{StartTime: timestamppb.New(now), EndTime: timestamppb.New(now)}
+	span := &monitoringpb.TimeInterval{StartTime: timestamppb.New(start), EndTime: timestamppb.New(now)}
+	seen := map[string]bool{}
+	for _, in := range b.src.SQLInstances() {
+		key := in.Project + ":" + in.Instance
+		seen[key] = true
+		res := sqlResource(in)
+		pt := func(metric string, labels map[string]string, kind metricpb.MetricDescriptor_MetricKind,
+			vt metricpb.MetricDescriptor_ValueType, unit string, iv *monitoringpb.TimeInterval, v *monitoringpb.TypedValue) {
+			if labels == nil {
+				labels = map[string]string{}
+			}
+			ts := &monitoringpb.TimeSeries{Metric: &metricpb.Metric{Type: metric, Labels: labels}, Resource: clone(res),
+				MetricKind: kind, ValueType: vt, Unit: unit}
+			k := seriesKey(ts)
+			if cur := b.series[k]; cur != nil {
+				ts = cur
+			} else {
+				b.series[k] = ts
+			}
+			ts.Points = append(ts.Points, &monitoringpb.Point{Interval: iv, Value: v})
+			if len(ts.Points) > tasksRing {
+				ts.Points = ts.Points[len(ts.Points)-tasksRing:]
+			}
+		}
+		up := int64(0)
+		if in.Up {
+			up = 1
+		}
+		pt(SQLUp, nil, gauge, tInt, "1", at, int64Value(up))
+		prev, had := b.prev[key]
+		elapsed := now.Sub(start).Seconds()
+		if had && !start.IsZero() && in.Up && prev.Up {
+			pt(SQLUptime, nil, delta, tInt, "s", span, int64Value(int64(elapsed+0.5)))
+		}
+		if in.HasPod {
+			if in.ReservedCores > 0 {
+				pt(SQLCPUReserved, nil, gauge, tDouble, "1", at, doubleValue(in.ReservedCores))
+			}
+			if in.MemoryQuota > 0 {
+				pt(SQLMemoryQuota, nil, gauge, tInt, "By", at, int64Value(in.MemoryQuota))
+				pt(SQLMemoryUtil, nil, gauge, tDouble, "1", at, doubleValue(float64(in.MemoryUsage)/float64(in.MemoryQuota)))
+			}
+			pt(SQLMemoryUsage, nil, gauge, tInt, "By", at, int64Value(in.MemoryUsage))
+			pt(SQLMemoryTotal, nil, gauge, tInt, "By", at, int64Value(in.MemoryTotal))
+			if had && prev.HasPod && !start.IsZero() && in.CPUSeconds >= prev.CPUSeconds && elapsed > 0 {
+				used := in.CPUSeconds - prev.CPUSeconds
+				pt(SQLCPUUsageTime, nil, delta, tDouble, "s{CPU}", span, doubleValue(used))
+				if in.ReservedCores > 0 {
+					pt(SQLCPUUtilization, nil, gauge, tDouble, "10^2.%", at, doubleValue(used/elapsed/in.ReservedCores))
+				}
+			}
+			if had && prev.HasPod && !start.IsZero() && in.RxBytes >= prev.RxBytes && in.TxBytes >= prev.TxBytes {
+				pt(SQLReceivedBytes, nil, delta, tInt, "By", span, int64Value(int64(in.RxBytes-prev.RxBytes)))
+				pt(SQLSentBytes, map[string]string{"destination": ""}, delta, tInt, "By", span, int64Value(int64(in.TxBytes-prev.TxBytes)))
+			}
+		}
+		if in.DiskQuota > 0 {
+			pt(SQLDiskQuota, nil, gauge, tInt, "By", at, int64Value(in.DiskQuota))
+			if in.HasPod || in.HasServer {
+				pt(SQLDiskUtil, nil, gauge, tDouble, "1", at, doubleValue(float64(in.DiskUsed)/float64(in.DiskQuota)))
+			}
+		}
+		if in.HasPod || in.HasServer {
+			pt(SQLDiskBytesUsed, nil, gauge, tInt, "By", at, int64Value(in.DiskUsed))
+		}
+		if in.HasServer {
+			if in.Engine == "POSTGRES" {
+				for _, db := range sqlKeys(in.Backends) {
+					pt(SQLPGBackends, map[string]string{"database": db}, gauge, tInt, "1", at, int64Value(in.Backends[db]))
+				}
+				if had && prev.HasServer && !start.IsZero() {
+					for _, db := range sqlKeys(in.Commits) {
+						for typ, m := range map[string][2]map[string]uint64{"commit": {in.Commits, prev.Commits}, "rollback": {in.Rollbacks, prev.Rollbacks}} {
+							cur, old := m[0][db], m[1][db]
+							if _, ok := m[1][db]; ok && cur >= old {
+								pt(SQLPGTransactions, map[string]string{"database": db, "transaction_type": typ}, delta, tInt, "1", span, int64Value(int64(cur-old)))
+							}
+						}
+					}
+				}
+			} else {
+				pt(SQLConnections, nil, gauge, tInt, "1", at, int64Value(in.Connections))
+			}
+			if in.Engine == "MYSQL" && had && prev.HasServer && !start.IsZero() && in.Queries >= prev.Queries {
+				pt(SQLMySQLQueries, nil, delta, tInt, "1", span, int64Value(int64(in.Queries-prev.Queries)))
+			}
+		}
+		b.prev[key] = in
+	}
+	for k := range b.prev {
+		if !seen[k] {
+			delete(b.prev, k)
+		}
+	}
+	b.lastAt = now
+}
+
+func sqlKeys[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// sqlDescriptors are the descriptors, as Google publishes them.
+var sqlDescriptors = []struct {
+	typ, name, desc, unit string
+	kind                  metricpb.MetricDescriptor_MetricKind
+	vt                    metricpb.MetricDescriptor_ValueType
+	labels                []string
+}{
+	{SQLCPUUtilization, "CPU utilization", "Current CPU utilization represented as a percentage of the reserved CPU that is currently in use.", "10^2.%", gauge, tDouble, nil},
+	{SQLCPUUsageTime, "CPU usage", "Cumulative CPU usage time in seconds.", "s{CPU}", delta, tDouble, nil},
+	{SQLCPUReserved, "CPU reserved cores", "Number of cores reserved for the database.", "1", gauge, tDouble, nil},
+	{SQLMemoryUsage, "Memory usage", "RAM usage in bytes. This metric reports the RAM usage of the server, excluding buffer/cache.", "By", gauge, tInt, nil},
+	{SQLMemoryTotal, "Total memory usage", "Total RAM usage in bytes. This metric reports the RAM usage of the database process, including the buffer/cache.", "By", gauge, tInt, nil},
+	{SQLMemoryQuota, "Memory quota", "Maximum RAM size in bytes.", "By", gauge, tInt, nil},
+	{SQLMemoryUtil, "Memory utilization", "Memory utilization represented as a fraction of the memory quota that is currently in use.", "1", gauge, tDouble, nil},
+	{SQLDiskBytesUsed, "Bytes used", "Data utilization in bytes.", "By", gauge, tInt, nil},
+	{SQLDiskQuota, "Disk quota", "Maximum data disk size in bytes.", "By", gauge, tInt, nil},
+	{SQLDiskUtil, "Disk utilization", "The fraction of the disk quota that is currently in use.", "1", gauge, tDouble, nil},
+	{SQLConnections, "Cloud SQL Connections", "Number of connections to databases on the instance. Only applicable to MySQL and SQL Server.", "1", gauge, tInt, nil},
+	{SQLPGBackends, "PostgreSQL Connections", "Number of connections to the Cloud SQL PostgreSQL instance.", "1", gauge, tInt, []string{"database"}},
+	{SQLReceivedBytes, "Received bytes", "Delta count of bytes received through the network.", "By", delta, tInt, nil},
+	{SQLSentBytes, "Sent bytes", "Delta count of bytes sent through the network.", "By", delta, tInt, []string{"destination"}},
+	{SQLUp, "Server up", "Indicates if the server is up or not.", "1", gauge, tInt, nil},
+	{SQLUptime, "Uptime", "Delta count of the time in seconds the instance has been running.", "s", delta, tInt, nil},
+	{SQLMySQLQueries, "Queries", "Delta count of statements executed by the server.", "1", delta, tInt, nil},
+	{SQLPGTransactions, "Number of transactions", "Delta count of number of transactions.", "1", delta, tInt, []string{"database", "transaction_type"}},
+}
+
+func (b *SQLBuiltin) Descriptors(project string) []*metricpb.MetricDescriptor {
+	out := make([]*metricpb.MetricDescriptor, 0, len(sqlDescriptors))
+	for _, d := range sqlDescriptors {
+		md := &metricpb.MetricDescriptor{Name: descriptorName(project, d.typ), Type: d.typ, MetricKind: d.kind, ValueType: d.vt,
+			Unit: d.unit, DisplayName: d.name, Description: d.desc, MonitoredResourceTypes: []string{"cloudsql_database"}}
+		for _, l := range d.labels {
+			md.Labels = append(md.Labels, &labelpb.LabelDescriptor{Key: l, ValueType: labelpb.LabelDescriptor_STRING})
+		}
+		out = append(out, md)
+	}
+	return out
+}
+
+func (b *SQLBuiltin) Series(project, metricType string, start, end time.Time) ([]*monitoringpb.TimeSeries, error) {
+	known := false
+	for _, d := range sqlDescriptors {
+		known = known || d.typ == metricType
+	}
+	if !known {
+		return nil, nil
+	}
+	at := b.now()
+	b.mu.Lock()
+	stale := b.lastAt.IsZero() || at.Sub(b.lastAt) >= b.minGap
+	b.mu.Unlock()
+	if stale && !end.Before(at) {
+		b.sampleAt(at)
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	var out []*monitoringpb.TimeSeries
+	for _, ts := range b.series {
+		if ts.GetMetric().GetType() != metricType || ts.GetResource().GetLabels()["project_id"] != project {
+			continue
+		}
+		c := &monitoringpb.TimeSeries{Metric: clone(ts.Metric), Resource: clone(ts.Resource),
+			MetricKind: ts.MetricKind, ValueType: ts.ValueType, Unit: ts.Unit}
+		for _, p := range ts.Points {
+			e := p.GetInterval().GetEndTime().AsTime()
+			if !e.Before(start) && !e.After(end) {
+				c.Points = append(c.Points, clone(p))
+			}
+		}
+		if len(c.Points) > 0 {
+			out = append(out, c)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return seriesKey(out[i]) < seriesKey(out[j]) })
+	return out, nil
+}

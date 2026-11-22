@@ -151,13 +151,16 @@ func sqlStatsSource(in *sqladminapi.DatabaseInstance) string {
 }
 
 // sqlSystemInsightsSection is the System insights page's summary cards.
-func sqlSystemInsightsSection(ctx context.Context, srv *sqladmin.Server, project string, in *sqladminapi.DatabaseInstance) console.Section {
+func sqlSystemInsightsSection(ctx context.Context, srv *sqladmin.Server, metrics monitoringAdmin, project string, in *sqladminapi.DatabaseInstance) console.Section {
 	sec := console.Section{ID: "system-insights", Label: "System insights", Kind: console.KindProperties,
-		Note: "The server's figures now, read from it; Google's page charts each over a time range (1 day by default) from Cloud Monitoring."}
+		Note: "The summary cards are the server's figures now (CPU over the last day); the charts are Cloud Monitoring's cloudsql.googleapis.com series over the last hour, read from the running server."}
 	notLocal := func(label, why string) console.Property {
 		return console.Property{Label: label, Value: "Not available locally: " + why}
 	}
-	cpu := notLocal("CPU utilization - P99 | P50", "CPU percentiles are Cloud Monitoring's series, which a local server does not report.")
+	cpu := notLocal("CPU utilization - P99 | P50", "no cpu/utilization readings in Cloud Monitoring yet: the first is two samples (two minutes) after the server starts.")
+	if v, ok := sqlCPUPercentiles(ctx, metrics, project, in.Name); ok {
+		cpu = console.Property{Label: "CPU utilization - P99 | P50", Value: v}
+	}
 	logs := console.Property{Label: "Log errors", Value: "The server's log lines are on Logs.", Link: "/cloudsql-instances/" + in.Name + "?tab=logs"}
 	switch {
 	case in.InstanceType == "ON_PREMISES_INSTANCE":
@@ -187,6 +190,9 @@ func sqlSystemInsightsSection(ctx context.Context, srv *sqladmin.Server, project
 	}
 	props = append(props, disk, logs)
 	sec.Groups = []console.PropertyGroup{{Heading: "Summary", Properties: props}}
+	if series, why := sqlCharts(ctx, metrics, project, in, sqlSystemCharts); why == "" {
+		sec.Series = series
+	}
 	return sec
 }
 
@@ -197,7 +203,7 @@ func (p cloudSQLInstancesProvider) sqlInsightsLayout(ctx context.Context, projec
 		case "query-insights":
 			d.Sections[i] = sqlQueryInsightsSection(ctx, p.srv, project, in)
 		case "system-insights":
-			d.Sections[i] = sqlSystemInsightsSection(ctx, p.srv, project, in)
+			d.Sections[i] = sqlSystemInsightsSection(ctx, p.srv, p.metrics, project, in)
 		}
 	}
 	return d
