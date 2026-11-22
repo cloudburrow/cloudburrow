@@ -781,6 +781,7 @@ func (s *Server) RunSchedules(ctx context.Context, tick time.Duration) {
 		}
 		now := s.opts.Now()
 		s.fireDue(ctx, last, now)
+		s.evaluateTriggers(ctx, now)
 		last = now
 	}
 }

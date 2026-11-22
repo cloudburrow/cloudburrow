@@ -1,6 +1,6 @@
 # Dataform
 
-CloudBurrow serves Dataform v1 (`dataform.googleapis.com`, #2105) with
+CloudBurrow serves Dataform v1 and v1beta1 (`dataform.googleapis.com`, #2105) with
 `up --services dataform`, gRPC and JSON on `--port-dataform` (default
 `9058`). `cloudburrow env` exports `CLOUDBURROW_DATAFORM_ENDPOINT`; pass it to
 `option.WithEndpoint` with `option.WithoutAuthentication()`:
@@ -38,7 +38,37 @@ c, err := dataform.NewClient(ctx, option.WithEndpoint(os.Getenv("CLOUDBURROW_DAT
   authenticates the remote instead of a Secret Manager token.
 - **Cancelling** an invocation stops the running action's BigQuery job.
 
+## v1beta1
+
+The same port serves `google.cloud.dataform.v1beta1.Dataform` (gRPC, and
+JSON under `/v1beta1/`) over the same repositories: a repository made
+through one version is read through the other. v1beta1 adds:
+
+- **Branch management**: a workspace created with
+  `enable_branch_management` can `CheckoutWorkspaceBranch` (creating one
+  from `source_branch` if asked), `DeleteBranch`, and list its local and
+  remote (`origin/<branch>`) branches with `FetchWorkspaceBranches`. Pull
+  and push default to its checked-out branch.
+- **`original_branch` and shallow clones**: a workspace starts from
+  `original_branch` instead of the repository's default; with `depth` it
+  is a clone of that many commits (`shallow` true), deepened by
+  `SyncWorkspaceRefs` `deepen`. `FetchWorkspaceHistory` reports
+  `reaches_shallow_boundary`.
+- **Table update triggers**: a workflow config's `workflow_trigger_config`
+  runs its release's latest compilation when the BigQuery tables it names
+  change (any, or all of them, with `max_wait_duration` and
+  `min_execution_duration`). Triggers are evaluated every 15 seconds from
+  each table's `lastModifiedTime`, which the instance's BigQuery moves when
+  a table's rows change; a change is seen only after the trigger is set.
+- **`DeleteRepositoryLongRunning`**, and the `folder_id` and
+  `team_folder_id` `CreateFolder` and `CreateTeamFolder` take.
+
+The console shows the same on Dataform's pages: Create development
+workspace's advanced options, a workspace's Switch branch, Delete branch,
+Fetch, Branches and Commit history, and a workflow configuration's table
+update trigger and Trigger evaluations.
+
 Docker and git are required on the host. Files live in the instance's
 directory (`dataform/`); an ephemeral instance drops them at `up`.
 
-What is not served is listed in [compatibility.md](compatibility.md#dataform--googleclouddataformv1).
+What is not served is listed in [compatibility.md](compatibility.md#dataform--googleclouddataformv1) and its [v1beta1 section](compatibility.md#dataform-v1beta1--googleclouddataformv1beta1).
