@@ -328,8 +328,8 @@ addresses (#2139, #2140).
 
 | Gap | Why open | Size |
 |---|---|---|
-| Compute Engine methods served without a page yet (#2139): image and machine image labels after create, a managed group's Set instance template, Start, Stop, Suspend, Resume and Delete instances, an unmanaged group's named ports, and a VM's scheduling after create; each is in `docs/console-parity.md` §8 as a gap | not built yet | S |
-| Compute Engine choices drawn unavailable with the reason (#2139, #2140): regional disks and regional managed groups (replication across zones), autoscaling (no load signal), the Ops Agent, IPv6, image import from a Cloud Storage file or a virtual disk, and promoting an external ephemeral IP, which is `127.0.0.1` here | no emulator support | M |
+| Compute Engine methods served without a page yet (#2139): a managed group's Set instance template, Start, Stop, Suspend, Resume and Delete instances, and an unmanaged group's named ports; each is in `docs/console-parity.md` §8 as a gap | not built yet | S |
+| Compute Engine choices drawn unavailable with the reason (#2139, #2140): regional managed groups (replication across zones), autoscaling (no load signal), the Ops Agent, image import from a Cloud Storage file or a virtual disk; of IPv6, IPv6-only subnets (`IPV6_ONLY`, 501), IPv6 routes, static internal IPv6 addresses and external IPv6 reaching the host (an external IPv6 address is carried between the network's VMs, not routed off the cluster, which is IPv4 only); a regional disk's zone outage and failover (`stopAsyncReplication`, force-attach: its two replicas are one storage volume) | no emulator support | M |
 
 ## Excluded on purpose
 

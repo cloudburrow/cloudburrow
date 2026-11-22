@@ -80,7 +80,8 @@ The design (#1963, option A): **a VM is a systemd container** in the instance's 
 | `cos-stable`, Windows, Fedora CoreOS, licensed images | 501, with the reason |
 | Instance templates, managed and unmanaged instance groups, machine images (#2139) | Served as Google documents them: a managed group makes its VMs from its template, named `BASE_INSTANCE_NAME-xxxx`, and resizes, recreates, starts and stops them; a machine image copies its VM's disks. Regional managed groups and autoscalers are not served |
 | Resource policies (#2139) | Snapshot schedules and instance schedules run every 30 seconds against their cron or hourly/daily/weekly rule: a scheduled snapshot is named `DISK-ZONE-TIMESTAMP-xxxxxxxx` with `autoCreated`, and snapshots past the retention are deleted; an instance schedule starts and stops its VMs in its time zone |
-| Spot VMs (`scheduling.provisioningModel: SPOT`) | Accepted with `instanceTerminationAction`, checked as Google documents; nothing preempts them here |
+| Spot VMs (`scheduling.provisioningModel: SPOT`) | Accepted with `instanceTerminationAction`, checked as Google documents; nothing preempts them here. `setScheduling` changes a VM between Standard and Spot only while it is stopped (`TERMINATED`), as Google requires; the console's Edit, under Availability policies, offers it then |
+| Labels | `setLabels` on instances, disks (zonal and regional), custom images and machine images, under the resource's `labelFingerprint` (a stale one answers 412), each label checked as Google documents: at most 64, keys of 1 to 63 lowercase letters, digits, `_` and `-` (international letters allowed) starting with a letter, values of at most 63 of the same characters (#2139) |
 | Machine types | The predefined e2, f1/g1, n1, n2, n2d and c3 types; the container's CPU and memory limits are the type's |
 | Boot disk | A PersistentVolumeClaim holding the guest's `/etc`, `/usr`, `/var`, `/home`, `/root`, `/opt` and `/srv`, seeded from the image at first boot: what the guest changes survives stop and start |
 | Attached disk | A PersistentVolumeClaim mounted at `/mnt/disks/DEVICE_NAME`: a directory, **not a block device** (no `mkfs`, no `/dev/disk/by-id/google-*`). Attaching or detaching on a running instance restarts its container |
@@ -170,6 +171,35 @@ As Google documents (vpc/docs/reserve-static-external-ip-address, compute/docs/i
 | A given external address (BYOIP) | 501: no address here is the project's own |
 
 The console's IP addresses page lists each VM's ephemeral external address with Promote to static IP address, the static ones with In use by, and Reserve external static IP address's Attached to assigns the new address to a VM of its region.
+
+### Regional disks
+
+As Google documents (compute/docs/disks/regional-persistent-disk, high-availability-regional-persistent-disk and the `regionDisks` reference, read 2026-11-22), #2139: `regionDisks` insert, get, list, delete, resize, setLabels, createSnapshot and add/removeResourcePolicies, and `regionDiskTypes` get and list.
+
+| Google | Here |
+|---|---|
+| `replicaZones` | Exactly two distinct zones of the disk's region, or 400 |
+| Types and sizes | `pd-balanced` and `pd-ssd` from 10 GB, `pd-standard` from 200 GB, to 65,536 GB; other types (`pd-extreme`, Hyperdisk) are refused for a regional disk |
+| Attaching | `instances.insert` and `attachDisk` with `source` `regions/REGION/disks/NAME`, from a VM of either replica zone; a VM of another zone is refused |
+| Synchronous replication | The region's zones are one cluster here, so a regional disk is **one** storage volume (a PersistentVolumeClaim) that the VMs of both replica zones mount: every write lands on the one copy, so the replicas are always in sync. A zone outage, and so failover (force-attach, `stopAsyncReplication`), is not simulated |
+| Snapshots | `createSnapshot` stores the snapshot in the disk's region; a regional or zonal disk can be made from it |
+
+The console's Create a disk takes Location type Single zone or Regional, with the Replica zone; the Disks list shows a regional disk's two zones, and Attach existing disk on a VM of either zone offers it.
+
+### IPv6
+
+As Google documents (vpc/docs/subnets#ipv6-ranges, create-modify-vpc-networks#ipv6, compute/docs/ip-addresses/configure-ipv6-address, read 2026-11-22), #2140:
+
+| Google | Here |
+|---|---|
+| ULA internal IPv6 (`enableUlaInternalIpv6`) | The network gets a `/48` of `fd20::/20` as `internalIpv6Range`, or the one given (in `fd20::/20`, not another network's); turning it off is refused while a subnet uses it |
+| Dual-stack subnet (`stackType: IPV4_IPV6`) | `ipv6AccessType` `INTERNAL` takes a `/64` of the network's ULA range (`internalIpv6Prefix`), `EXTERNAL` a `/64` of `2600:1900::/28` (`externalIpv6Prefix`); `ipv6CidrRange` is that range. An IPv4-only subnet can be patched to dual-stack, and back while no interface uses IPv6; the access type does not change. `IPV6_ONLY` is 501 |
+| Dual-stack VM | A `stackType: IPV4_IPV6` interface on a dual-stack subnet gets a `/96` of the subnet's `/64`: `ipv6Address` with `internalIpv6PrefixLength: 96` (internal), or an `ipv6AccessConfigs` entry `DIRECT_IPV6` with `externalIpv6` (external, Premium tier); on an IPv4-only subnet it is refused |
+| Reachability | The address is on the guest's `vpc0` (`/128`, no DAD) with an on-link route for each IPv6 range of the network (and of a network peered with `stackType: IPV4_IPV6`), and a permanent neighbour for each running dual-stack peer: IPv6 frames ride the network's VXLAN segment, which runs over the cluster's IPv4 underlay, so the kind cluster (IPv4 only, kindnet) need not be dual-stack. External IPv6 addresses are carried between the network's VMs, not routed off the cluster |
+| Firewall rules | IPv6 ranges in `sourceRanges` and `destinationRanges` are compiled to `ip6` matches, IPv4 ones to `ip`, so one rule may hold both; a source tag or service account matches the VMs' IPv6 addresses too |
+| Not served | IPv6 routes, static internal IPv6 addresses, `IPV6_ONLY` subnets (501 or unavailable in the console, with the reason) |
+
+The console's Create VPC network has ULA internal IPv6, its allocation and the range; a subnet's IP stack type and IPv6 access type; Create an instance's network interface IP stack type; the Subnets list's IP stack type, Internal and External IPv6 ranges columns; a VM's network interfaces list its IPv6 addresses; firewall rules take IPv6 source and destination ranges.
 
 ### Terraform
 
