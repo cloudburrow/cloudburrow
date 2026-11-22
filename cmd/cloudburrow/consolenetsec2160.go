@@ -24,7 +24,7 @@ import (
 //     (clientTlsPolicies) on the Authentication Configuration page.
 //
 // Google's docs give these as gcloud and REST steps (import from YAML);
-// the console pages' layout, tabs and columns are UNVERIFIED (docs re-read
+// the console pages' layout, tabs and columns are UNVERIFIED (re-read 2026-11-22: load-balancing/docs/auth-policy/set-up-auth-policy) (docs re-read
 // 2026-11-22: load-balancing/docs/auth-policy/set-up-auth-policy,
 // service-mesh/docs/security/...). Their create and edit forms take the
 // resource's rules as the JSON that gcloud's import YAML holds.

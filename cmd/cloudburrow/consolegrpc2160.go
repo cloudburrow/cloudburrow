@@ -23,7 +23,7 @@ import (
 // 2026-11-22: "you cannot configure backend services and routing rule maps
 // with the gRPC protocol in the Google Cloud console"); CloudBurrow keeps
 // Create, Edit and Delete here so that every feature stays reachable from
-// the console (the UI parity rule), and marks them UNVERIFIED, as are the
+// the console (the UI parity rule), and marks them UNVERIFIED (re-read 2026-11-22: route-rule-map-concepts), as are the
 // page's columns.
 
 type grpcRoutingProvider struct{ computeScreen }

@@ -646,14 +646,14 @@ const ROUTES = [
   { path: "/net-security/authconfig", service: "netsecurity-clientauth", icon: "vpc", title: "Authentication Configuration", tabTitle: "Client Authentication",
     kind: "Client Authentication", pageTabs: NETSEC_AUTH_TABS, section: "Networking", product: "netsecurity", productTitle: "Network Security" },
   // Client TLS policies and service mesh authorization policies (#2160):
-  // the page's other tabs. The tabs are UNVERIFIED (docs re-read
+  // the page's other tabs. The tabs are UNVERIFIED (re-read 2026-11-22: service-mesh/docs/security) (docs re-read
   // 2026-11-22 give gcloud import steps only).
   { path: "/net-security/authconfig/clientTlsPolicies", service: "netsecurity-clienttls", icon: "vpc", title: "Authentication Configuration", tabTitle: "Client TLS policies",
     kind: "Client TLS policy", navHidden: true, navAs: "/net-security/authconfig", pageTabs: NETSEC_AUTH_TABS, section: "Networking", product: "netsecurity", productTitle: "Network Security" },
   { path: "/net-security/authconfig/authorizationPolicies", service: "netsecurity-meshauthz", icon: "vpc", title: "Authentication Configuration", tabTitle: "Service mesh authorization policies",
     kind: "Service mesh authorization policy", navHidden: true, navAs: "/net-security/authconfig", pageTabs: NETSEC_AUTH_TABS, section: "Networking", product: "netsecurity", productTitle: "Network Security" },
   // Authorization policies (#2160): the Application Load Balancers'
-  // authzPolicies (load-balancing/docs/auth-policy). UNVERIFIED path.
+  // authzPolicies (load-balancing/docs/auth-policy). UNVERIFIED (re-read 2026-11-22: load-balancing/docs/auth-policy) path.
   { path: "/net-security/authzpolicies", service: "netsecurity-authz", icon: "vpc", title: "Authorization policies", kind: "Authorization policy",
     section: "Networking", product: "netsecurity", productTitle: "Network Security" },
   // Cloud CDN (#2160): Network services' Cloud CDN origins.

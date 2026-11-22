@@ -18,7 +18,7 @@ import (
 // certificate and private key; a map's description and labels; a map
 // entry's description, labels and certificates; a DNS authorization's and
 // an issuance config's description and labels). The Edit forms' layout is
-// UNVERIFIED (the docs give no Console steps for them).
+// UNVERIFIED (re-read 2026-11-22: certificate-manager/docs; the docs give no Console steps for them).
 
 // ccmPatch is Update*: PATCH name?updateMask=... with body.
 func (c ccmScreen) ccmPatch(ctx context.Context, name string, mask []string, body map[string]any) error {

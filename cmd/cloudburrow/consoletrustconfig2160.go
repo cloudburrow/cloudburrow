@@ -33,7 +33,7 @@ import (
 //     third mode, Allow validation relaxations, is not in the v1 API this
 //     instance serves (docs/gaps.md).
 //
-// The lists' columns are UNVERIFIED (the docs name none).
+// The lists' columns are UNVERIFIED (re-read 2026-11-22: certificate-manager/docs/trust-configs) (the docs name none).
 
 const trustNote = "Trust configs validate client certificates for frontend mutual TLS: a Client Authentication resource (Network Security) names one, and a target HTTPS proxy's serverTlsPolicy names that, so this instance's load balancers check each client's certificate against it."
 
