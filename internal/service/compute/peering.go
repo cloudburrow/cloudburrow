@@ -93,7 +93,7 @@ func (s *Server) addPeering(project, name string, b obj) (obj, error) {
 		peerRel = networkRel(project, lastSeg(peerLink))
 	}
 	if peerRel == rel {
-		// UNVERIFIED wording (docs read 2026-11-22 give none).
+		// UNVERIFIED wording (re-read 2026-11-22: the docs give none).
 		return nil, invalid("Invalid value for field 'networkPeering.network': '%s'. A network cannot be peered with itself.", peerLink)
 	}
 	if _, ok := s.res[peerRel]; !ok {
@@ -111,7 +111,7 @@ func (s *Server) addPeering(project, name string, b obj) (obj, error) {
 	// Peered networks' subnet ranges may not overlap
 	// (https://docs.cloud.google.com/vpc/docs/vpc-peering: "a subnet IP
 	// range in one peered network cannot overlap with a subnet range in the
-	// other"). UNVERIFIED wording.
+	// other"). UNVERIFIED wording (re-read 2026-11-22).
 	for _, a := range s.rangesLocked(rel, "") {
 		for _, c := range s.rangesLocked(peerRel, "") {
 			if a.kind == "subnetwork" && c.kind == "subnetwork" && Overlaps(a.n, c.n) {
