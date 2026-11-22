@@ -18,11 +18,10 @@ import (
 	routev3 "github.com/envoyproxy/go-control-plane/envoy/config/route/v3"
 	routerv3 "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/http/router/v3"
 	hcmv3 "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/http_connection_manager/v3"
+	cswrrv3 "github.com/envoyproxy/go-control-plane/envoy/extensions/load_balancing_policies/client_side_weighted_round_robin/v3"
 	discoveryv3 "github.com/envoyproxy/go-control-plane/envoy/service/discovery/v3"
 	matcherv3 "github.com/envoyproxy/go-control-plane/envoy/type/matcher/v3"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -78,10 +77,6 @@ func XDSBootstrap(addr, project, network string) string {
 type xdsServer struct {
 	discoveryv3.UnimplementedAggregatedDiscoveryServiceServer
 	s *Server
-}
-
-func (x *xdsServer) DeltaAggregatedResources(discoveryv3.AggregatedDiscoveryService_DeltaAggregatedResourcesServer) error {
-	return status.Error(codes.Unimplemented, "delta xDS is not served; use the state of the world protocol")
 }
 
 // StreamAggregatedResources is the state of the world protocol: each
@@ -173,43 +168,65 @@ func (x *xdsServer) StreamAggregatedResources(st discoveryv3.AggregatedDiscovery
 // xdsResources are the resources of a type for names, and a version that
 // changes when they do.
 func (s *Server) xdsResources(typ string, names []string) ([]*anypb.Any, string) {
+	named := s.xdsNamedResources(typ, names)
+	h := sha256.New()
+	var out []*anypb.Any
+	for _, r := range named {
+		h.Write([]byte(r.version))
+		out = append(out, r.res)
+	}
+	return out, fmt.Sprintf("%x", h.Sum(nil))[:16]
+}
+
+// xdsNamed is one resource with its name and own version.
+type xdsNamed struct {
+	name, version string
+	res           *anypb.Any
+}
+
+// xdsNamedResources are the resources of a type for names that exist, in
+// the order of names, each with a version that changes when it does.
+func (s *Server) xdsNamedResources(typ string, names []string) []xdsNamed {
 	s.mu.Lock()
-	var msgs []proto.Message
-	switch typ {
-	case typeListener:
-		for _, n := range names {
+	type nm struct {
+		name string
+		msg  proto.Message
+	}
+	var msgs []nm
+	for _, n := range names {
+		var m proto.Message
+		switch typ {
+		case typeListener:
 			if l := s.xdsListenerLocked(n); l != nil {
-				msgs = append(msgs, l)
+				m = l
 			}
-		}
-	case typeRoute:
-		// Routes are inline in the listeners.
-	case typeCluster:
-		for _, n := range names {
+		case typeRoute:
+			// Routes are inline in the listeners.
+		case typeCluster:
 			if c := s.xdsClusterLocked(n); c != nil {
-				msgs = append(msgs, c)
+				m = c
+			}
+		case typeEndpoint:
+			if e := s.xdsEndpointsLocked(n); e != nil {
+				m = e
 			}
 		}
-	case typeEndpoint:
-		for _, n := range names {
-			if e := s.xdsEndpointsLocked(n); e != nil {
-				msgs = append(msgs, e)
-			}
+		if m != nil {
+			msgs = append(msgs, nm{n, m})
 		}
 	}
 	s.mu.Unlock()
-	h := sha256.New()
-	var out []*anypb.Any
+	var out []xdsNamed
 	for _, m := range msgs {
-		a, err := anypb.New(m)
+		a, err := anypb.New(m.msg)
 		if err != nil {
 			continue
 		}
 		b, _ := proto.MarshalOptions{Deterministic: true}.Marshal(a)
-		h.Write(b)
-		out = append(out, a)
+		sum := sha256.Sum256(b)
+		out = append(out, xdsNamed{name: m.name, version: fmt.Sprintf("%x", sum[:8]), res: a})
 	}
-	return out, fmt.Sprintf("%x", h.Sum(nil))[:16]
+	return out
 }
 
 // xdsClusterName is a backend service's cluster, as Google names them
@@ -415,10 +432,21 @@ func (s *Server) xdsClusterLocked(name string) *clusterv3.Cluster {
 	case "LEAST_REQUEST":
 		lb = clusterv3.Cluster_LEAST_REQUEST
 	}
-	return &clusterv3.Cluster{Name: name, ClusterDiscoveryType: &clusterv3.Cluster_Type{Type: clusterv3.Cluster_EDS},
+	c := &clusterv3.Cluster{Name: name, ClusterDiscoveryType: &clusterv3.Cluster_Type{Type: clusterv3.Cluster_EDS},
 		EdsClusterConfig: &clusterv3.Cluster_EdsClusterConfig{EdsConfig: &corev3.ConfigSource{
 			ConfigSourceSpecifier: &corev3.ConfigSource_Ads{Ads: &corev3.AggregatedConfigSource{}}}},
 		LbPolicy: lb}
+	if str(bs, "localityLbPolicy") == "WEIGHTED_ROUND_ROBIN" {
+		// The client weighs endpoints by the ORCA reports of its calls
+		// (gRPC's weighted round robin), as Google's xDS API configures
+		// it for WEIGHTED_ROUND_ROBIN.
+		if wrr, err := anypb.New(&cswrrv3.ClientSideWeightedRoundRobin{}); err == nil {
+			c.LbPolicy = clusterv3.Cluster_LOAD_BALANCING_POLICY_CONFIG
+			c.LoadBalancingPolicy = &clusterv3.LoadBalancingPolicy{Policies: []*clusterv3.LoadBalancingPolicy_Policy{{
+				TypedExtensionConfig: &corev3.TypedExtensionConfig{Name: "envoy.load_balancing_policies.client_side_weighted_round_robin", TypedConfig: wrr}}}}
+		}
+	}
+	return c
 }
 
 // xdsEndpointsLocked is a cluster's endpoints, by zone, healthy ones

@@ -139,6 +139,16 @@ func buildBackendService(s *Server, x lbCtx, b, old obj) (obj, error) {
 		}
 		o["localityLbPolicy"] = loc
 	}
+	if cms := listOf(b["customMetrics"]); len(cms) > 0 {
+		if !customMetricsScheme(scheme) || !isHTTPProtocol(proto) {
+			return nil, invalid("Invalid value for field 'resource.customMetrics': ''. Custom metrics are supported only by the backend services of Application Load Balancers (load balancing scheme EXTERNAL_MANAGED, INTERNAL_MANAGED or INTERNAL_SELF_MANAGED).")
+		}
+		l, err := checkCustomMetrics("resource.customMetrics", cms, false)
+		if err != nil {
+			return nil, err
+		}
+		o["customMetrics"] = l
+	}
 	if (aff == "HEADER_FIELD" || aff == "HTTP_COOKIE") && loc != "RING_HASH" && loc != "MAGLEV" {
 		return nil, invalid("Invalid value for field 'resource.sessionAffinity': '%s'. Session affinity %s requires localityLbPolicy RING_HASH or MAGLEV.", aff, aff)
 	}
@@ -310,7 +320,7 @@ func (s *Server) checkBackends(x lbCtx, b obj, proto, scheme string, passthrough
 			return nil, invalid("Invalid value for field '%s.capacityScaler': '%v'. Must be 0 or between 0.1 and 1.0.", field, capacity)
 		}
 		if gk != "serverless" && gk != "internet" && gk != "psc" {
-			mode, err := checkBalancing(field, be, nb, gk, proto, passthrough)
+			mode, err := checkBalancing(field, be, nb, gk, proto, scheme, passthrough)
 			if err != nil {
 				return nil, err
 			}
@@ -333,7 +343,7 @@ func (s *Server) checkBackends(x lbCtx, b obj, proto, scheme string, passthrough
 }
 
 // checkBalancing is a backend's balancing mode and its capacity fields.
-func checkBalancing(field string, be, nb obj, gk, proto string, passthrough bool) (string, error) {
+func checkBalancing(field string, be, nb obj, gk, proto, scheme string, passthrough bool) (string, error) {
 	def := "UTILIZATION"
 	switch {
 	case passthrough:
@@ -347,8 +357,31 @@ func checkBalancing(field string, be, nb obj, gk, proto string, passthrough bool
 	if err != nil {
 		return "", err
 	}
-	if mode == "CUSTOM_METRICS" {
-		return "", unimplemented("the CUSTOM_METRICS balancing mode is not served: backends report no custom metrics here (#2153)")
+	cms := listOf(be["customMetrics"])
+	if mode == "CUSTOM_METRICS" || len(cms) > 0 {
+		if !customMetricsScheme(scheme) || !isHTTPProtocol(proto) {
+			return "", invalid("Invalid value for field '%s.balancingMode': '%s'. Custom metrics are supported only by the backend services of Application Load Balancers (load balancing scheme EXTERNAL_MANAGED, INTERNAL_MANAGED or INTERNAL_SELF_MANAGED).", field, mode)
+		}
+		if gk != "ig" && gk != "zonalNEG" && gk != "hybrid" {
+			return "", invalid("Invalid value for field '%s.balancingMode': 'CUSTOM_METRICS'. Custom metrics are supported only by managed instance groups, zonal network endpoint groups (GCE_VM_IP_PORT) and hybrid connectivity network endpoint groups.", field)
+		}
+		l, err := checkCustomMetrics(field+".customMetrics", cms, true)
+		if err != nil {
+			return "", err
+		}
+		if mode != "CUSTOM_METRICS" {
+			return "", invalid("Invalid value for field '%s.customMetrics': ''. A backend's custom metrics need the CUSTOM_METRICS balancing mode.", field)
+		}
+		if len(l) == 0 {
+			return "", invalid("Invalid value for field '%s.customMetrics': ''. Balancing mode CUSTOM_METRICS needs at least one custom metric.", field)
+		}
+		for _, k := range []string{"maxUtilization", "maxRate", "maxRatePerInstance", "maxRatePerEndpoint", "maxConnections", "maxConnectionsPerInstance", "maxConnectionsPerEndpoint"} {
+			if _, ok := be[k]; ok {
+				return "", invalid("Invalid value for field '%s.%s': '%v'. Balancing mode CUSTOM_METRICS takes no %s.", field, k, be[k], k)
+			}
+		}
+		nb["customMetrics"] = l
+		return mode, nil
 	}
 	switch {
 	case passthrough && mode != "CONNECTION":

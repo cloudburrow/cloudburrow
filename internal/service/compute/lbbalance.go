@@ -169,6 +169,7 @@ type lbBalanceState struct {
 	rr       map[string]uint64
 	inflight map[string]int
 	rate     map[string]*rateWindow
+	orca     orcaStore
 }
 
 // rateWindow counts requests in the last second.
@@ -229,6 +230,10 @@ func (b *lbBalanceState) capacityOf(g lbGroup, now time.Time) (capacity, used fl
 		for _, ep := range g.healthy {
 			used += float64(b.inflight[ep.id])
 		}
+	case "CUSTOM_METRICS":
+		// Fullness is the reported utilization over maxUtilization.
+		capacity = scaler
+		used = b.customFullness(g, now) * scaler
 	default: // UTILIZATION, and serverless, internet and PSC backends
 		capacity = numOr(be, "maxUtilization", 1) * n * scaler * 100
 		for _, ep := range g.healthy {
@@ -334,6 +339,8 @@ func (b *lbBalanceState) pick(set lbBackendSet, key string, exclude map[string]b
 		switch str(set.bs, "localityLbPolicy") {
 		case "RANDOM":
 			ep = eps[rand.IntN(len(eps))]
+		case "WEIGHTED_ROUND_ROBIN":
+			ep = b.weightedPick(set, chosen.g.backend["group"].(string), eps, now)
 		case "LEAST_REQUEST":
 			ep = eps[0]
 			for _, e := range eps[1:] {
@@ -353,6 +360,40 @@ func (b *lbBalanceState) pick(set lbBackendSet, key string, exclude map[string]b
 	b.rate[ep.id].add(now)
 	b.inflight[ep.id]++
 	return ep, true
+}
+
+// weightedPick is WEIGHTED_ROUND_ROBIN's choice among eps: weighted by
+// the endpoints' ORCA reports (an endpoint without one weighs the mean of
+// the others), round robin while none has reported.
+func (b *lbBalanceState) weightedPick(set lbBackendSet, group string, eps []lbEndpoint, now time.Time) lbEndpoint {
+	w := make([]float64, len(eps))
+	sum, n := 0.0, 0
+	for i, e := range eps {
+		if w[i] = b.wrrWeight(set.bs, e, now); w[i] > 0 {
+			sum += w[i]
+			n++
+		}
+	}
+	if n == 0 {
+		k := b.rr[set.rel+"|"+group]
+		b.rr[set.rel+"|"+group] = k + 1
+		return eps[k%uint64(len(eps))]
+	}
+	mean := sum / float64(n)
+	total := 0.0
+	for i := range w {
+		if w[i] == 0 {
+			w[i] = mean
+		}
+		total += w[i]
+	}
+	r := rand.Float64() * total
+	for i := range w {
+		if r -= w[i]; r <= 0 {
+			return eps[i]
+		}
+	}
+	return eps[len(eps)-1]
 }
 
 // done ends a request or connection on ep.

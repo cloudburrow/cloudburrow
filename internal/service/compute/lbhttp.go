@@ -426,6 +426,9 @@ func (t *lbTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		st.tried[ep.id] = true
 		resp, err := t.send(req, body, st, ep)
 		t.s.lb.bal.done(ep)
+		if err == nil {
+			t.s.lb.bal.recordORCA(ep, resp)
+		}
 		retry := false
 		switch {
 		case err != nil:
