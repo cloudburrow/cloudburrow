@@ -315,6 +315,9 @@ func (s *Server) doLocked(c call) (obj, error) {
 				return s.expandSubnetwork(c.project, region, p[3], c.body)
 			case n == 5 && post && p[4] == "setPrivateIpGoogleAccess":
 				return s.setPrivateAccess(c.project, region, p[3], c.body)
+			case n == 5 && (p[4] == "getIamPolicy" || p[4] == "setIamPolicy" || p[4] == "testIamPermissions"):
+				// Subnet-level IAM (#2140, subnetiam.go).
+				return s.subnetIAM(c, rel+"/"+p[3], p[4])
 			}
 		case "addresses":
 			switch {
@@ -383,6 +386,8 @@ func (s *Server) doLocked(c call) (obj, error) {
 		if n >= 3 {
 			return s.zonal(c, zone)
 		}
+	case n == 3 && p[0] == "aggregated" && p[1] == "subnetworks" && p[2] == "listUsable" && get:
+		return s.listUsable(c)
 	case n == 2 && p[0] == "aggregated" && get:
 		return s.aggregated(c, p[1])
 	}

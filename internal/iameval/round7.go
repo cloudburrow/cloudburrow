@@ -144,13 +144,15 @@ func computeDeny(permission, resource string) error {
 // firewall patch's compute.networks.updatePolicy, natIP's
 // compute.addresses.use and an INTERNAL address's createInternal are the
 // thirteenth round's (cmd/cloudburrow/iamenforce13.go).
-// Compute keeps no resource-level policies on what is served, so the
-// project's and its ancestors' apply. Public images (debian-cloud,
+// A subnet keeps its own policy (subnetworks.setIamPolicy, Shared VPC's
+// Individual subnets, #2140): it applies to the subnet with the
+// project's and its ancestors'; nothing else served keeps one. Public images (debian-cloud,
 // ubuntu-os-cloud, rocky-linux-cloud) are readable by every caller, as
 // Google's are (the caller's wrapper skips them).
 var Compute = &Service{
-	Name: "compute.googleapis.com",
-	Deny: computeDeny,
+	Name:              "compute.googleapis.com",
+	PolicyCollections: []string{"subnetworks"},
+	Deny:              computeDeny,
 }
 
 // ComputeJSON are Compute's served methods by path, under /compute/v1/:
@@ -186,6 +188,12 @@ var ComputeJSON = func() []JSONMethod {
 	coll(global, "networks", "networks", false, map[string]string{"PATCH": "compute.networks.update", "switchToCustomMode": "compute.networks.switchToCustomMode"})
 	coll(region, "subnetworks", "subnetworks", true, map[string]string{"PATCH": "compute.subnetworks.update",
 		"expandIpCidrRange": "compute.subnetworks.expandIpCidrRange", "setPrivateIpGoogleAccess": "compute.subnetworks.setPrivateIpGoogleAccess"})
+	// A subnet's policy (#2140): testIamPermissions needs
+	// compute.subnetworks.list, as its reference page says.
+	subnet := `(` + p + region + `/subnetworks/[^/]+)`
+	add("GET", subnet+`/getIamPolicy`, "compute.subnetworks.getIamPolicy")
+	add("POST", subnet+`/setIamPolicy`, "compute.subnetworks.setIamPolicy")
+	add("POST", subnet+`/testIamPermissions`, "compute.subnetworks.list")
 	coll(global, "firewalls", "firewalls", false, map[string]string{"PATCH": "compute.firewalls.update", "PUT": "compute.firewalls.update"})
 	coll(global, "routes", "routes", false, nil)
 	coll(region, "addresses", "addresses", true, map[string]string{"setLabels": "compute.addresses.setLabels"})

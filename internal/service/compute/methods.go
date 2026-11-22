@@ -3,7 +3,7 @@ package compute
 // Method is one method of the Compute Engine v1 discovery document's
 // resources this package serves, by discovery ID, and whether it is
 // implemented: the coverage page's table (tools/coverage). The rest of
-// those resources' methods (peering, IAM, move, listUsable,
+// those resources' methods (peering, IAM, move,
 // getEffectiveFirewalls, per-instance configs) answer 501, as every other Compute resource does.
 type Method struct {
 	ID          string
@@ -30,14 +30,14 @@ var Methods = []Method{
 	{"compute.subnetworks.delete", true},
 	{"compute.subnetworks.expandIpCidrRange", true},
 	{"compute.subnetworks.get", true},
-	{"compute.subnetworks.getIamPolicy", false},
+	{"compute.subnetworks.getIamPolicy", true},
 	{"compute.subnetworks.insert", true},
 	{"compute.subnetworks.list", true},
-	{"compute.subnetworks.listUsable", false},
+	{"compute.subnetworks.listUsable", true},
 	{"compute.subnetworks.patch", true},
-	{"compute.subnetworks.setIamPolicy", false},
+	{"compute.subnetworks.setIamPolicy", true},
 	{"compute.subnetworks.setPrivateIpGoogleAccess", true},
-	{"compute.subnetworks.testIamPermissions", false},
+	{"compute.subnetworks.testIamPermissions", true},
 	{"compute.firewalls.delete", true},
 	{"compute.firewalls.get", true},
 	{"compute.firewalls.insert", true},
