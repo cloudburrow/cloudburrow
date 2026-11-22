@@ -63,7 +63,8 @@ func checkLabelKey(field, k string) error {
 }
 
 // checkNodeLabels refuses labels Kubernetes refuses. UNVERIFIED wording;
-// the rule is Kubernetes'.
+// the rule is Kubernetes' (docs.cloud.google.com/kubernetes-engine/docs/how-to/node-taints,
+// re-read 2026-11-22, quotes no error).
 func checkNodeLabels(field string, labels map[string]string) error {
 	for k, v := range labels {
 		if err := checkLabelKey(field, k); err != nil {
@@ -77,7 +78,8 @@ func checkNodeLabels(field string, labels map[string]string) error {
 }
 
 // nodeTaints checks taints and turns them into Kubernetes'. UNVERIFIED
-// wording; the rules are Kubernetes' and the API's effects.
+// wording; the rules are Kubernetes' and the API's effects (the node-taints
+// page, re-read 2026-11-22, quotes no error).
 func nodeTaints(field string, in []*containerpb.NodeTaint) ([]NodeTaint, error) {
 	var out []NodeTaint
 	seen := map[string]bool{}

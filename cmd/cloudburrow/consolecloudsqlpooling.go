@@ -2,7 +2,7 @@ package main
 
 // Managed connection pooling in Cloud SQL's console (#2141), as Google's
 // page has it (https://docs.cloud.google.com/sql/docs/postgres/managed-connection-pooling,
-// read 2026-11-22): on the create page and in Edit, Connections' Enable
+// re-read 2026-11-22): on the create page and in Edit, Connections' Enable
 // Managed Connection Pool, then Managed connection pool's Advanced
 // pooling options (the pool mode and the pooler flags); the Overview's
 // Connect to this instance shows whether the instance pools connections.

@@ -136,7 +136,7 @@ build-onnx: storage-binaries bigquery-binaries onnx-compile
 # test/repo's TestONNXPackages keeps the list complete.
 ONNX_PKGS := ./internal/admin/ ./internal/bigqueryfront/ ./internal/console/ ./internal/embedding/ \
 	./internal/localai/ ./internal/onnxmodel/... ./internal/onnxrunner/ ./internal/service/vertexai/ \
-	./internal/speaker/ ./internal/speech/ ./internal/speechconfig/
+	./internal/speaker/ ./internal/speech/ ./internal/speechconfig/ ./internal/videodecode/
 
 ## onnx-compile: Build and vet the onnx-tagged CLI alone, without making the embedded binaries (CI's onnx job)
 .PHONY: onnx-compile

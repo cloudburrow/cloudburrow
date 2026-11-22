@@ -38,7 +38,8 @@ import (
 // (docs.cloud.google.com/monitoring/uptime-checks/troubleshoot: query
 // resource.type="uptime_url", "UptimeCheckResult" and labels.check_id).
 // The log name and the payload's fields beyond those are not documented:
-// UNVERIFIED (console-parity §1).
+// UNVERIFIED (console-parity §1; the troubleshoot page, re-read 2026-11-22,
+// names neither).
 
 const (
 	fieldLogCheckFailures = "log_check_failures"

@@ -10,7 +10,7 @@ import (
 
 // Managed connection pooling (#2141), as Google documents it for
 // PostgreSQL (https://docs.cloud.google.com/sql/docs/postgres/managed-connection-pooling,
-// read 2026-11-22): settings.connectionPoolConfig.connectionPoolingEnabled
+// re-read 2026-11-22): settings.connectionPoolConfig.connectionPoolingEnabled
 // on a Cloud SQL Enterprise Plus instance runs a pooler beside the server,
 // on port 6432, which the connectors and the Auth Proxy reach on 3307;
 // 5432 stays the server's. Its flags are pool_mode (transaction, the
@@ -44,7 +44,8 @@ type poolFlag struct {
 }
 
 // poolFlags are Google's flags, with its defaults and ranges. Ranges the
-// page does not give are any whole number from 0 (UNVERIFIED).
+// page does not give are any whole number from 0 (UNVERIFIED; the page,
+// re-read 2026-11-22, gives ranges for the three timeouts alone).
 var poolFlags = map[string]poolFlag{
 	"pool_mode":                      {setting: "pool_mode", values: []string{"transaction", "session"}, def: "transaction"},
 	"max_pool_size":                  {setting: "default_pool_size", min: 1, def: "50"},
