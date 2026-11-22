@@ -9,6 +9,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/authplatform"
 	"github.com/cloudburrow/cloudburrow/internal/service/apikeys"
 	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
+	"github.com/cloudburrow/cloudburrow/internal/service/billing"
 	"github.com/cloudburrow/cloudburrow/internal/service/cloudquotas"
 	"github.com/cloudburrow/cloudburrow/internal/service/firebaserules"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
@@ -71,6 +72,8 @@ type adminDeps struct {
 	// Verification APIs (#2030).
 	cloudQuotas func() *cloudquotas.Server
 	siteVerify  func() *siteverification.Server
+	// billing is Cloud Billing and the Budget API (#2109).
+	billing func() *billing.Server
 	// authPlatform is Google Auth Platform's apps and clients (#2030).
 	authPlatform func() *authplatform.Store
 	// storageJobs is the Cloud Storage companion APIs (#1957), for their
@@ -89,6 +92,12 @@ type adminDeps struct {
 	workflows *workflowsService
 	// parameterManager is Parameter Manager (#2054), nil unless enabled.
 	parameterManager *parameterManagerService
+	// dataform is Dataform (#2105), nil unless enabled.
+	dataform *dataformService
+	// appHub is App Hub (#2110), nil unless enabled.
+	appHub *appHubService
+	// trace is Cloud Trace (#2118), nil unless enabled.
+	trace *traceService
 	// gke is the Kubernetes Engine API (#1913), nil unless enabled.
 	gke *gkeService
 	// monitoring is Cloud Monitoring (#1939), nil unless enabled.
@@ -200,6 +209,9 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 		api.RegisterResetter(&cloudQuotasResetter{srv: d.cloudQuotas}, &siteVerificationResetter{srv: d.siteVerify},
 			&authPlatformResetter{store: d.authPlatform})
 	}
+	if d.billing != nil {
+		api.RegisterResetter(&billingResetter{srv: d.billing})
+	}
 	if d.firebaseRules != nil && firebaseRulesEnabled(cfg) {
 		// Each project's rulesets and releases (#2048).
 		api.RegisterResetter(&firebaseRulesResetter{srv: d.firebaseRules})
@@ -228,6 +240,15 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 	}
 	if d.parameterManager != nil {
 		api.RegisterResetter(&parameterManagerResetter{svc: d.parameterManager})
+	}
+	if d.dataform != nil {
+		api.RegisterResetter(&dataformResetter{svc: d.dataform})
+	}
+	if d.appHub != nil {
+		api.RegisterResetter(&appHubResetter{svc: d.appHub})
+	}
+	if d.trace != nil {
+		api.RegisterResetter(&traceResetter{svc: d.trace})
 	}
 	if d.monitoring != nil {
 		api.RegisterResetter(&monitoringResetter{svc: d.monitoring})

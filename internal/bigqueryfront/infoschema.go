@@ -64,7 +64,7 @@ var infoSchemaBuilders map[string]func(front, *http.Request, string, *datasetMet
 func init() {
 	infoSchemaBuilders = map[string]func(front, *http.Request, string, *datasetMeta) (string, int, string){
 		"VIEWS":              front.viewsRows,
-		"TABLES":             tableRowsOf(tablesColumns, tablesRows),
+		"TABLES":             front.tablesViewRows,
 		"COLUMNS":            tableRowsOf(columnsColumns, columnsRows),
 		"COLUMN_FIELD_PATHS": tableRowsOf(fieldPathsColumns, fieldPathsRows),
 		"TABLE_OPTIONS":      tableRowsOf(tableOptionsColumns, tableOptionsRows),
@@ -298,6 +298,26 @@ const tablesColumns = "STRUCT<table_catalog STRING, table_schema STRING, table_n
 	"base_table_name STRING, snapshot_time_ms TIMESTAMP, replica_source_catalog STRING, replica_source_schema STRING, " +
 	"replica_source_name STRING, replication_status STRING, replication_error STRING, ddl STRING, " +
 	"default_collation_name STRING, sync_status JSON, upsert_stream_apply_watermark TIMESTAMP>"
+
+// tablesViewRows is TABLES of dataset, each table's
+// upsert_stream_apply_watermark that of change data capture
+// (storagewritecdc.go, #2104).
+func (f front) tablesViewRows(r *http.Request, dataset string, m *datasetMeta) (string, int, string) {
+	return tableRowsOf(tablesColumns, func(project, dataset string, t infoTable) [][]string {
+		rows := tablesRows(project, dataset, t)
+		created := ""
+		switch c := t["creationTime"].(type) {
+		case string:
+			created = c
+		case float64:
+			created = strconv.FormatInt(int64(c), 10)
+		}
+		if at, ok := f.cdcStreams.watermark(project, dataset, str(t, "tableId"), created); ok && len(rows) == 1 {
+			rows[0][len(rows[0])-1] = "TIMESTAMP_MICROS(" + strconv.FormatInt(at.UnixMicro(), 10) + ")"
+		}
+		return rows
+	})(f, r, dataset, m)
+}
 
 func tablesRows(project, dataset string, t infoTable) [][]string {
 	typ := tableTypes[str(t, "type")]
@@ -690,8 +710,13 @@ func returnType(def map[string]any) string {
 
 // argumentType is an argument's type, ANY TYPE for a templated one.
 func argumentType(a map[string]any) string {
-	if strings.EqualFold(str(a, "argumentKind"), "ANY_TYPE") {
+	switch strings.ToUpper(str(a, "argumentKind")) {
+	case "ANY_TYPE":
 		return "ANY TYPE"
+	case "ANY_TABLE": // #2120
+		return "ANY TABLE"
+	case "FIXED_TABLE":
+		return tableTypeSQL(a["tableType"])
 	}
 	dt, _ := a["dataType"].(map[string]any)
 	return standardType(dt)

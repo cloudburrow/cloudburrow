@@ -26,6 +26,9 @@ var serviceUsageAPIs = []struct {
 	// Manager port.
 	{"", serviceusage.API{Name: "cloudquotas.googleapis.com", Title: "Cloud Quotas API"}},
 	{"", serviceusage.API{Name: "siteverification.googleapis.com", Title: "Google Site Verification API"}},
+	// Cloud Billing and the Budget API (#2109), on the Resource Manager port.
+	{"", serviceusage.API{Name: "cloudbilling.googleapis.com", Title: "Cloud Billing API"}},
+	{"", serviceusage.API{Name: "billingbudgets.googleapis.com", Title: "Cloud Billing Budget API"}},
 	{config.ServiceStorage, serviceusage.API{Name: "storage.googleapis.com", Title: "Cloud Storage API"}},
 	// The Cloud Storage companion APIs (#1957), served with Cloud Storage.
 	{config.ServiceStorage, serviceusage.API{Name: "storagebatchoperations.googleapis.com", Title: "Storage Batch Operations API"}},
@@ -68,6 +71,10 @@ var serviceUsageAPIs = []struct {
 	{config.ServiceWorkflows, serviceusage.API{Name: "workflows.googleapis.com", Title: "Workflows API"}},
 	{config.ServiceWorkflows, serviceusage.API{Name: "workflowexecutions.googleapis.com", Title: "Workflow Executions API"}},
 	{config.ServiceParameterManager, serviceusage.API{Name: "parametermanager.googleapis.com", Title: "Parameter Manager API"}},
+	{config.ServiceDataform, serviceusage.API{Name: "dataform.googleapis.com", Title: "Dataform API"}},
+	{config.ServiceAppHub, serviceusage.API{Name: "apphub.googleapis.com", Title: "App Hub API"}},
+	{config.ServiceTrace, serviceusage.API{Name: "cloudtrace.googleapis.com", Title: "Cloud Trace API"}},
+	{config.ServiceTrace, serviceusage.API{Name: "telemetry.googleapis.com", Title: "Telemetry API"}},
 }
 
 // serviceUsageCatalog splits serviceUsageAPIs into what this instance

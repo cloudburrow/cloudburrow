@@ -252,8 +252,16 @@ func TestLoggingFolderOrganizationAndBillingParents(t *testing.T) {
 	_, _ = cc.UpdateSettings(context.Background(), &loggingpb.UpdateSettingsRequest{Name: localOrg + "/settings",
 		Settings: &loggingpb.Settings{StorageLocation: before.GetStorageLocation()}, UpdateMask: mask})
 
-	// A billing account: stored, with no children.
-	ba := "billingAccounts/0A0B0C-0D0E0F-" + fmt.Sprintf("%06d", time.Now().UnixNano()%1000000)
+	// A billing account Cloud Billing holds (#2109): stored, with no
+	// children; one it does not hold is NOT_FOUND.
+	// Resource Manager under the served shard's own name, so this part runs
+	// there, beside its Cloud Logging.
+	shardEndpoint(h, envLoggingResourceManager, EnvResourceManager)
+	ba := billingSubaccount(t, h, "logging parents")
+	_, err = cc.CreateSink(ctx, &loggingpb.CreateSinkRequest{Parent: "billingAccounts/0A0B0C-0D0E0F-FFFFFF", Sink: &loggingpb.LogSink{Name: "b", Destination: "storage.googleapis.com/some-bucket"}})
+	wantLoggingCode(t, "a sink of a billing account that does not exist", err, codes.NotFound)
+	_, err = cc.ListBuckets(ctx, &loggingpb.ListBucketsRequest{Parent: "billingAccounts/0A0B0C-0D0E0F-FFFFFF/locations/global"}).Next()
+	wantLoggingCode(t, "the buckets of a billing account that does not exist", err, codes.NotFound)
 	if _, err := cc.CreateSink(ctx, &loggingpb.CreateSinkRequest{Parent: ba, Sink: &loggingpb.LogSink{Name: "b", Destination: "storage.googleapis.com/some-bucket"}}); err != nil {
 		t.Errorf("CreateSink(billing account): %v", err)
 	} else if err := cc.DeleteSink(ctx, &loggingpb.DeleteSinkRequest{SinkName: ba + "/sinks/b"}); err != nil {

@@ -602,6 +602,36 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 			envVar{cliEndpointVar("parametermanager"), pm,
 				"Parameter Manager v1, global and regional, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint"})
 	}
+	// App Hub (#2110): gcloud apphub, the Go client, and Terraform's
+	// google_apphub_* through apphub_custom_endpoint.
+	if appHubEnabled(cfg) && cfg.Endpoints.AppHub != 0 {
+		ah := addr(cfg.Endpoints.AppHub)
+		vars = append(vars,
+			envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_APPHUB", "http://" + ah + "/", "read by gcloud; gcloud apphub"},
+			envVar{cliEndpointVar("apphub"), ah,
+				"App Hub v1, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint"})
+	}
+
+	// Dataform (#2105): the Go client, and Terraform's
+	// google_dataform_repository through dataform_custom_endpoint.
+	if dataformEnabled(cfg) && cfg.Endpoints.Dataform != 0 {
+		vars = append(vars,
+			envVar{cliEndpointVar("dataform"), addr(cfg.Endpoints.Dataform),
+				"Dataform v1, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint"})
+	}
+	// Cloud Trace (#2118): the Cloud Trace API v1 and v2 for the Go client
+	// and gcloud, and the Telemetry API's OTLP trace ingestion on the same
+	// port, for OpenTelemetry's OTLP exporters (OTLP/gRPC at the root,
+	// OTLP/HTTP at /v1/traces).
+	if traceEnabled(cfg) && cfg.Endpoints.Trace != 0 {
+		tr := addr(cfg.Endpoints.Trace)
+		vars = append(vars,
+			envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_CLOUDTRACE", "http://" + tr + "/", "read by gcloud; gcloud's Cloud Trace commands"},
+			envVar{cliEndpointVar("trace"), tr,
+				"Cloud Trace API v1 and v2, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint"},
+			envVar{"CLOUDBURROW_TELEMETRY_ENDPOINT", "http://" + tr,
+				"the Telemetry API's OTLP trace ingestion (telemetry.googleapis.com); set OTEL_EXPORTER_OTLP_ENDPOINT to it, with OTEL_EXPORTER_OTLP_INSECURE=true for gRPC"})
+	}
 
 	// The Kubernetes Engine API (#1913): gcloud container clusters and
 	// node-pools, and Terraform's google_container_* through
@@ -709,7 +739,14 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 			envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_CLOUDRESOURCEMANAGER", "http://" + rm + "/",
 				"read by gcloud; its projects commands use the v1 API, served here with v3"},
 			envVar{cliEndpointVar("resourcemanager"), rm,
-				"gRPC and REST, plaintext; read by no client library: pass it to option.WithEndpoint"})
+				"gRPC and REST, plaintext; read by no client library: pass it to option.WithEndpoint"},
+			// Cloud Billing and the Budget API (#2109), on the same port.
+			// gcloud billing budgets has no override (billingbudgets), so
+			// only the client libraries reach budgets here.
+			envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_CLOUDBILLING", "http://" + rm + "/",
+				"read by gcloud billing accounts and projects; Cloud Billing is served on the Resource Manager port"},
+			envVar{cliEndpointVar("billing"), rm,
+				"Cloud Billing and Budget APIs, gRPC and REST, plaintext; read by no client library: pass it to option.WithEndpoint"})
 	}
 
 	// Ingress is reported only when it is actually published, or a developer
@@ -842,12 +879,16 @@ func withLivePorts(cfg config.Config, live map[string]string) config.Config {
 		"analyticshub":           &e.AnalyticsHub,
 		"workflows":              &e.Workflows,
 		"parametermanager":       &e.ParameterManager,
+		"dataform":               &e.Dataform,
+		"apphub":                 &e.AppHub,
+		"trace":                  &e.Trace,
 		// The local AI endpoint, which serves Vertex AI's Model Registry
 		// and Endpoints (#1940) to gcloud-setup and terraform, and Document
 		// AI (#1953), which terraform points document_ai_custom_endpoint at.
 		"localai":   &e.LocalAI,
 		"onnx":      &e.ONNX,
 		"tfconvert": &e.TFConvert,
+		"spark":     &e.Spark,
 		// The ingress gateway, which kind publishes where `up` configured
 		// it: without this, `env --name x` for an instance started with
 		// --port-base exported the default ingress port (#863).

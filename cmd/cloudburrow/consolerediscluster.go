@@ -362,6 +362,7 @@ func (p redisClusterProvider) Detail(ctx context.Context, project string, path [
 	}
 	d.Sections = append(d.Sections, p.authSections(ctx, api, c)...)
 	d.Sections = append(d.Sections, memorystorePropsTab("maintenance", "Maintenance", redisClusterMaintenance(c).summary()), memorystoreMonitoring("cluster"))
+	memorystoreTabActions(&d, clusterPersistenceView(c).action(), redisClusterMaintenance(c))
 	d.Edit = &console.EditForm{
 		Label: "Edit", Title: "Edit cluster", Submit: "Save", Page: true,
 		Fields: []console.Field{

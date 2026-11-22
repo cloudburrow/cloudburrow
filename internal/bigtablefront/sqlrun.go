@@ -29,6 +29,8 @@ type source struct {
 	// pseudo are the columns SELECT * leaves out: _key, of a table with a
 	// row key schema (#1900).
 	pseudo map[string]bool
+	// protos is the table's schema bundles, which CAST names messages of.
+	protos *protoCatalog
 }
 
 // plan is a checked query.
@@ -407,7 +409,7 @@ func build(q *query, src *source, params map[string]*btpb.Type) (*plan, error) {
 			p.keyIndex = i
 		}
 	}
-	base := &scope{cols: src.cols, alias: q.alias, params: params}
+	base := &scope{cols: src.cols, alias: q.alias, params: params, protos: src.protos}
 	refusedCheck := func(e expr) error {
 		var err error
 		walk(e, func(x expr) bool {
@@ -436,6 +438,20 @@ func build(q *query, src *source, params map[string]*btpb.Type) (*plan, error) {
 	for _, it := range q.items {
 		if !it.star {
 			p.items = append(p.items, it)
+			continue
+		}
+		if it.e != nil {
+			// expression.*: a STRUCT's fields or a message's top-level
+			// fields (#2113).
+			t, err := it.e.check(base.noAggs("expression.*"))
+			if err != nil {
+				return nil, err
+			}
+			fs, err := starFields(src.protos, it.e, t)
+			if err != nil {
+				return nil, err
+			}
+			p.items = append(p.items, fs...)
 			continue
 		}
 		if it.alias != "" && it.alias != q.alias {
@@ -712,8 +728,10 @@ func encode(v any, t *btpb.Type) *btpb.Value {
 		return &btpb.Value{}
 	}
 	switch k := t.GetKind().(type) {
-	case *btpb.Type_BytesType:
+	case *btpb.Type_BytesType, *btpb.Type_ProtoType:
 		return &btpb.Value{Kind: &btpb.Value_BytesValue{BytesValue: asBytes(v)}}
+	case *btpb.Type_EnumType:
+		return &btpb.Value{Kind: &btpb.Value_IntValue{IntValue: v.(int64)}}
 	case *btpb.Type_StringType:
 		return &btpb.Value{Kind: &btpb.Value_StringValue{StringValue: string(asBytes(v))}}
 	case *btpb.Type_Int64Type:
@@ -758,6 +776,10 @@ func paramTypeOK(t *btpb.Type) bool {
 	case *btpb.Type_BytesType, *btpb.Type_StringType, *btpb.Type_Int64Type, *btpb.Type_Float32Type,
 		*btpb.Type_Float64Type, *btpb.Type_BoolType, *btpb.Type_TimestampType, *btpb.Type_DateType:
 		return true
+	case *btpb.Type_ProtoType:
+		return isProtoMsg(t)
+	case *btpb.Type_EnumType:
+		return true
 	case *btpb.Type_ArrayType:
 		e := t.GetArrayType().GetElementType()
 		return !isKind(e, "ARRAY<") && paramTypeOK(e)
@@ -771,7 +793,7 @@ func decode(v *btpb.Value, t *btpb.Type) (any, error) {
 	case nil:
 		return nil, nil
 	case *btpb.Value_BytesValue:
-		if isKind(t, "BYTES") {
+		if isKind(t, "BYTES") || isProtoMsg(t) {
 			return k.BytesValue, nil
 		}
 	case *btpb.Value_StringValue:
@@ -779,7 +801,7 @@ func decode(v *btpb.Value, t *btpb.Type) (any, error) {
 			return k.StringValue, nil
 		}
 	case *btpb.Value_IntValue:
-		if isKind(t, "INT64") {
+		if isKind(t, "INT64") || isProtoEnum(t) {
 			return k.IntValue, nil
 		}
 	case *btpb.Value_FloatValue:

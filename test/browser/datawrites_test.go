@@ -79,8 +79,8 @@ func (d dataPage) summary(label string) string {
 // listeners see it.
 func (p *tab) setField(sel, value string) {
 	p.t.Helper()
-	// A checkbox takes "true" or "false" as checked or not, as the form
-	// sends it.
+	// A checkbox is checked by "true" (#2098: Create pipeline's Apply a
+	// transformation), as the form reads it.
 	p.eval(fmt.Sprintf(`(() => { const f = document.querySelector(%q);
 		if (f.type === "checkbox") f.checked = %q === "true"; else f.value = %q;
 		f.dispatchEvent(new Event("input", { bubbles: true }));

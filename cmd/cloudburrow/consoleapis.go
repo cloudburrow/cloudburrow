@@ -6,12 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/metrics"
-	"github.com/cloudburrow/cloudburrow/internal/resource"
 )
 
 // The APIs & Services pages (#1866): Enabled APIs & services (the
@@ -37,12 +35,18 @@ var apiLibrary = map[string]apiLibraryInfo{
 	"apikeys.googleapis.com":              {"Security", "Manages the API keys of a project and their restrictions.", ""},
 	"cloudquotas.googleapis.com":          {"Management tools", "Lists the quotas of the APIs a project uses and adjusts them with quota preferences.", ""},
 	"siteverification.googleapis.com":     {"Developer tools", "Verifies that you own a website or a domain, and lists what you have verified.", ""},
+	"cloudbilling.googleapis.com":         {"Management tools", "Manages billing accounts, links projects to them and lists the services and SKUs of the pricing catalog.", ""},
+	"billingbudgets.googleapis.com":       {"Management tools", "Creates and manages budgets and their alert thresholds for a billing account.", ""},
 	"storage.googleapis.com":              {"Storage", "Stores and retrieves objects in buckets.", "storage"},
 	"pubsub.googleapis.com":               {"Big data", "Sends and receives messages between independent applications.", "pubsub"},
 	"cloudtasks.googleapis.com":           {"Developer tools", "Manages the execution of large numbers of distributed requests.", "tasks"},
 	"run.googleapis.com":                  {"Compute", "Deploys and manages containerized services and jobs.", "run"},
 	"secretmanager.googleapis.com":        {"Security", "Stores API keys, passwords, certificates and other sensitive data.", "secretmanager"},
 	"parametermanager.googleapis.com":     {"Security", "Stores, versions and renders configuration parameters, in plain text, JSON or YAML, with references to Secret Manager secrets.", "parametermanager"},
+	"dataform.googleapis.com":             {"Big data", "Develops, version controls and runs SQL workflows in BigQuery with SQLX.", "dataform"},
+	"apphub.googleapis.com":               {"Management tools", "Discovers a boundary's services and workloads and groups them into applications.", "apphub"},
+	"cloudtrace.googleapis.com":           {"Management tools", "Sends application latency data to Cloud Trace for viewing, and reads traces back.", "trace"},
+	"telemetry.googleapis.com":            {"Management tools", "Ingests OpenTelemetry (OTLP) traces into Cloud Trace.", "trace"},
 	"cloudkms.googleapis.com":             {"Security", "Manages cryptographic keys and performs operations with them.", "kms"},
 	"kmsinventory.googleapis.com":         {"Security", "Reports which resources Cloud KMS keys protect.", "kms"},
 	"cloudscheduler.googleapis.com":       {"Developer tools", "Runs jobs on a schedule: HTTP targets, Pub/Sub topics and App Engine.", "scheduler"},
@@ -340,16 +344,12 @@ func (p serviceUsageProvider) StudioCall(ctx context.Context, project, call stri
 				sort.Slice(methods, func(i, j int) bool { return methods[i].Method < methods[j].Method })
 			}
 			out["api"], out["methods"] = e, methods
-			// The request quotas this instance enforces (#2063).
-			out["requestQuotas"] = p.apiQuotas(e.Name, project)
 			if w != nil && e.MetricsService != "" {
 				out["charts"] = w.apiPageCharts(map[string]bool{e.MetricsService: true})
 			}
 			return out, nil
 		}
 		return nil, fmt.Errorf("CloudBurrow does not serve %s", strings.TrimSpace(req.Service))
-	case "setquota", "resetquota":
-		return p.quotaCall(project, call, body)
 	case "enable", "disable":
 		if req.Service == "" {
 			return nil, errors.New("a service is required")
@@ -374,63 +374,4 @@ func (p serviceUsageProvider) countersNote(project string) string {
 		note += " A call that named no project counts in this project, the instance's default."
 	}
 	return note + " History starts when the instance started."
-}
-
-// apiQuota is one request quota on an API's Quotas & System Limits tab
-// (#2063): the limit in force for the project, its default, and whether
-// the project has a value of its own.
-type apiQuota struct {
-	Metric     string `json:"metric"`
-	Title      string `json:"title"`
-	LimitTitle string `json:"limitTitle"`
-	Value      int64  `json:"value"`
-	Default    int64  `json:"default"`
-	Adjusted   bool   `json:"adjusted"`
-}
-
-// apiQuotas are service's request quotas as project has them.
-func (p serviceUsageProvider) apiQuotas(service, project string) []apiQuota {
-	out := []apiQuota{}
-	if p.requestQuotas == nil {
-		return out
-	}
-	number := strconv.FormatInt(resource.ProjectNumber(project), 10)
-	for _, q := range p.requestQuotas.Quotas() {
-		if q.Service != service {
-			continue
-		}
-		v, own := q.Projects[number]
-		if !own {
-			v = q.Value
-		}
-		out = append(out, apiQuota{Metric: q.Name, Title: q.Title, LimitTitle: q.LimitTitle, Value: v, Default: q.Default, Adjusted: own})
-	}
-	return out
-}
-
-// quotaCall is Edit quota (setquota {metric, limit}) and Reset to default
-// (resetquota {metric}) for the project, as /admin/quotas sets one.
-func (p serviceUsageProvider) quotaCall(project, call string, body json.RawMessage) (any, error) {
-	if p.requestQuotas == nil {
-		return nil, errors.New("this instance enforces no request quotas")
-	}
-	var req struct {
-		Metric string `json:"metric"`
-		Limit  string `json:"limit"`
-	}
-	if err := json.Unmarshal(body, &req); err != nil {
-		return nil, fmt.Errorf("bad request: %v", err)
-	}
-	if call == "resetquota" {
-		p.requestQuotas.Clear(req.Metric, project)
-		return map[string]any{"metric": req.Metric}, nil
-	}
-	n, err := strconv.ParseInt(strings.TrimSpace(req.Limit), 10, 64)
-	if err != nil {
-		return nil, fmt.Errorf("the value must be a whole number of requests per minute")
-	}
-	if err := p.requestQuotas.Set(req.Metric, project, n); err != nil {
-		return nil, err
-	}
-	return map[string]any{"metric": req.Metric, "value": n}, nil
 }

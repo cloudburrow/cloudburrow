@@ -1,11 +1,16 @@
 package main
 
-// Cloud Run: a service's Triggers tab (#1852, #1877). Google's tab lists the
-// Eventarc triggers whose destination is the service, and its Add trigger
-// makes one: here through the official Eventarc client on this instance's
-// Eventarc (served on the Run port over Pub/Sub, its transport), for the
-// providers it serves, Cloud Pub/Sub and Cloud Storage. Delete trigger
-// deletes one of the tab's triggers.
+// Cloud Run: a service's Triggers tab (#1852, #1877), which is a Cloud Run
+// function's too. Google's tab lists the Eventarc triggers whose
+// destination is the service, and its Add trigger makes one: here through
+// the official Eventarc client on this instance's Eventarc (served on the
+// Run port over Pub/Sub, its transport). Add trigger is Google's Eventarc
+// trigger pane (#2093), the one Cloud Run functions' Write a function and
+// Triggers tab have (consolefunctionseventarc.go): every event provider
+// and event type the instance's Eventarc lists through ListProviders, with
+// each type's filters, the channels of Custom and Third-party, the region
+// and the service account. Delete trigger deletes one of the tab's
+// triggers.
 
 import (
 	"context"
@@ -29,34 +34,14 @@ import (
 const (
 	runAddTrigger    = "add-trigger"
 	runDeleteTrigger = "delete-trigger"
-	// runPubSubEvent is Cloud Pub/Sub's event type.
-	runPubSubEvent = "google.cloud.pubsub.topic.v1.messagePublished"
 )
-
-// runEventTypes are the event types Add trigger offers, with Google's
-// provider and event names.
-var runEventTypes = []struct{ typ, provider, label string }{
-	{runPubSubEvent, "Cloud Pub/Sub", "Cloud Pub/Sub: google.cloud.pubsub.topic.v1.messagePublished"},
-	{"google.cloud.storage.object.v1.finalized", "Cloud Storage", "Cloud Storage: google.cloud.storage.object.v1.finalized"},
-	{"google.cloud.storage.object.v1.deleted", "Cloud Storage", "Cloud Storage: google.cloud.storage.object.v1.deleted"},
-	{"google.cloud.storage.object.v1.archived", "Cloud Storage", "Cloud Storage: google.cloud.storage.object.v1.archived"},
-	{"google.cloud.storage.object.v1.metadataUpdated", "Cloud Storage", "Cloud Storage: google.cloud.storage.object.v1.metadataUpdated"},
-}
-
-func runEventProvider(typ string) string {
-	for _, e := range runEventTypes {
-		if e.typ == typ {
-			return e.provider
-		}
-	}
-	return ""
-}
 
 // runTriggersNote says what a trigger is here.
 const runTriggersNote = "An Eventarc trigger delivers each event to the service as a CloudEvent (binary content " +
-	"mode, the ce-* headers), over a Pub/Sub push subscription Eventarc makes. This instance's Eventarc serves " +
-	"Cloud Pub/Sub's and Cloud Storage's direct events here; Eventarc's Triggers page also makes Cloud Audit Logs and " +
-	"Firestore triggers. Firebase events and channels are not served."
+	"mode, the ce-* headers), over a Pub/Sub push subscription Eventarc makes. Add trigger offers every event provider " +
+	"this instance's Eventarc lists: Cloud Pub/Sub, Cloud Storage, Cloud Firestore (and Datastore mode), Cloud Audit Logs " +
+	"of each served service, and the direct events of the services that have them, with Custom and Third-party channels. " +
+	"Firebase's providers are not served, so they are not offered."
 
 // eventarcClient is the official Eventarc client on the Run port.
 func (p runProvider) eventarcClient(ctx context.Context) (*eventarc.Client, error) {
@@ -86,6 +71,7 @@ func (p runProvider) triggersSection(ctx context.Context, project string, svc *k
 		sec.Listing.Unavailable = "cannot read Eventarc triggers: " + err.Error()
 		return sec
 	}
+	cat := p.eventarcCatalog(ctx, project)
 	for _, t := range ts {
 		typ, filters := "", []string{}
 		for _, f := range t.GetEventFilters() {
@@ -97,7 +83,7 @@ func (p runProvider) triggersSection(ctx context.Context, project string, svc *k
 		}
 		parts := strings.Split(t.GetName(), "/")
 		sec.Listing.Items = append(sec.Listing.Items, console.Resource{Name: lastSegment(t.GetName()), Fields: map[string]string{
-			"Event provider": runEventProvider(typ), "Event type": typ, "Filters": strings.Join(filters, ", "),
+			"Event provider": eventarcTriggerProvider(cat, t), "Event type": typ, "Filters": strings.Join(filters, ", "),
 			"Region": parts[3], "Service URL path": t.GetDestination().GetCloudRun().GetPath(),
 			"Transport topic": lastSegment(t.GetTransport().GetPubsub().GetTopic()),
 		}})
@@ -155,77 +141,31 @@ func (p runProvider) runTopics(ctx context.Context, project string) []string {
 	return out
 }
 
-// triggerActions are Google's Add trigger dialog and Delete trigger, on a
+// eventarcCatalog is what Add trigger offers in the instance's region,
+// with the project's topics for Cloud Pub/Sub's.
+func (p runProvider) eventarcCatalog(ctx context.Context, project string) eventarcPaneCatalog {
+	c, err := p.eventarcClient(ctx)
+	if err != nil {
+		return eventarcPaneCatalog{err: err.Error()}
+	}
+	defer func() { _ = c.Close() }()
+	cat := eventarcCatalogFrom(ctx, c, p.projectOr(project), p.location())
+	cat.topics = append([]string{}, p.runTopics(ctx, project)...)
+	return cat
+}
+
+// triggerActions are Google's Add trigger pane and Delete trigger, on a
 // service CloudBurrow created.
 func (p runProvider) triggerActions(ctx context.Context, project string, svc *ksvcStatus) []console.Action {
 	if p.pubsubAddr == "" || svc == nil || svc.Metadata.Labels[k8s.OwnedLabel] != k8s.OwnedValue {
 		return nil
 	}
-	types := make([]string, 0, len(runEventTypes))
-	labels := map[string]string{}
-	for _, e := range runEventTypes {
-		types = append(types, e.typ)
-		labels[e.typ] = e.label
-	}
-	topic := console.Field{Name: "topic", Label: "Select a Cloud Pub/Sub topic", Type: "select",
-		Options: append([]string{""}, p.runTopics(ctx, project)...), OptionLabels: map[string]string{"": "Create a topic (Eventarc makes one)"},
-		Help: "Cloud Pub/Sub events: each message published to the topic is delivered to the service."}
 	return []console.Action{
-		{ID: runAddTrigger, Label: "Add trigger", Submit: "Save trigger", Fields: []console.Field{
-			{Name: "name", Label: "Trigger name", Type: "text", Required: true, Pattern: `^[a-z][a-z0-9\-]{0,62}$`,
-				Help: "1 to 63 lowercase letters, digits and hyphens, starting with a letter."},
-			{Name: "eventType", Label: "Event type", Type: "select", Options: types, OptionLabels: labels, Default: runPubSubEvent,
-				Help: "Event provider and event: Cloud Pub/Sub and Cloud Storage's direct events are served locally."},
-			topic,
-			{Name: "bucket", Label: "Bucket", Type: "text", Pattern: `^[a-z0-9][a-z0-9._\-]{1,221}[a-z0-9]$`,
-				Help: "Cloud Storage events: the bucket whose objects' events are delivered."},
-			{Name: "region", Label: "Region", Type: "select", Options: []string{p.location()}, Default: p.location()},
-			{Name: "serviceAccount", Label: "Service account", Type: "text",
-				Help: "Optional. The account the delivery authenticates as, with an ID token for the service's URL; " +
-					"the default compute account when empty."},
-			{Name: "path", Label: "Service URL path", Type: "text", Pattern: `^/.*$`,
-				Help: "Optional. The path on the service the events are sent to, beginning with /."},
-		}},
+		{ID: runAddTrigger, Label: "Add trigger", Submit: "Save trigger", Fields: eventarcPane(p.eventarcCatalog(ctx, project), p.location())},
 		{ID: runDeleteTrigger, Label: "Delete trigger", Destructive: true, Fields: []console.Field{
 			{Name: "name", Label: "Trigger name", Type: "text", Required: true, Help: "A trigger on this tab."},
 		}},
 	}
-}
-
-// eventarcTrigger is Add trigger's trigger.
-func eventarcTrigger(project, service, region string, values map[string]string) (*eventarcpb.Trigger, error) {
-	typ := strings.TrimSpace(values["eventType"])
-	if typ == "" {
-		typ = runPubSubEvent
-	}
-	if runEventProvider(typ) == "" {
-		return nil, fmt.Errorf("event type %q is not offered locally", typ)
-	}
-	t := &eventarcpb.Trigger{EventFilters: []*eventarcpb.EventFilter{{Attribute: "type", Value: typ}},
-		ServiceAccount: strings.TrimSpace(values["serviceAccount"]),
-		Destination: &eventarcpb.Destination{Descriptor_: &eventarcpb.Destination_CloudRun{CloudRun: &eventarcpb.CloudRun{
-			Service: service, Region: region, Path: strings.TrimSpace(values["path"])}}}}
-	topic, bucket := strings.TrimSpace(values["topic"]), strings.TrimSpace(values["bucket"])
-	if typ == runPubSubEvent {
-		if bucket != "" {
-			return nil, errors.New("a Cloud Pub/Sub trigger takes a topic, not a bucket")
-		}
-		if topic != "" {
-			if !strings.HasPrefix(topic, "projects/") {
-				topic = "projects/" + project + "/topics/" + topic
-			}
-			t.Transport = &eventarcpb.Transport{Intermediary: &eventarcpb.Transport_Pubsub{Pubsub: &eventarcpb.Pubsub{Topic: topic}}}
-		}
-		return t, nil
-	}
-	if bucket == "" {
-		return nil, errors.New("a Cloud Storage trigger needs its bucket")
-	}
-	if topic != "" {
-		return nil, errors.New("a Cloud Storage trigger takes a bucket, not a topic")
-	}
-	t.EventFilters = append(t.EventFilters, &eventarcpb.EventFilter{Attribute: "bucket", Value: bucket})
-	return t, nil
 }
 
 // actOnTriggers performs Add trigger and Delete trigger.
@@ -272,14 +212,5 @@ func (p runProvider) actOnTriggers(ctx context.Context, project, service, action
 		_, err = op.Wait(ctx)
 		return err
 	}
-	t, err := eventarcTrigger(project, service, p.location(), values)
-	if err != nil {
-		return err
-	}
-	op, err := c.CreateTrigger(ctx, &eventarcpb.CreateTriggerRequest{Parent: parent, TriggerId: id, Trigger: t})
-	if err != nil {
-		return err
-	}
-	_, err = op.Wait(ctx)
-	return err
+	return savePaneTrigger(ctx, c, project, p.location(), service, "", values)
 }

@@ -20,7 +20,7 @@ import (
 type fakeHierarchy struct{}
 
 func (fakeHierarchy) Exists(name string) error {
-	if name == "organizations/1" || name == "folders/10" {
+	if name == "organizations/1" || name == "folders/10" || name == "billingAccounts/0A0B0C-0D0E0F-010203" {
 		return nil
 	}
 	return apierror.NotFound("%s not found", name)

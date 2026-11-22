@@ -37,27 +37,65 @@ import (
 )
 
 // Column is one column of a table: Type is a BigQuery type (INT64,
-// FLOAT64, BOOL, STRING, BYTES, NUMERIC, DATE, DATETIME, TIME, TIMESTAMP),
-// Scale a NUMERIC's (9 when unparameterized) and Precision its precision.
+// FLOAT64, BOOL, STRING, BYTES, NUMERIC, DATE, DATETIME, TIME, TIMESTAMP,
+// RECORD or STRUCT), Scale a NUMERIC's (9 when unparameterized) and
+// Precision its precision, Fields a RECORD's fields, and Repeated a
+// REPEATED column's (an ARRAY) (#2104).
 type Column struct {
 	Name      string
 	Type      string
 	Required  bool
+	Repeated  bool
 	Precision int
 	Scale     int
+	Fields    []Column
 }
 
 // Value types a row holds, by column type: INT64 int64, FLOAT64 float64,
 // BOOL bool, STRING string, BYTES []byte, NUMERIC *big.Int (unscaled),
 // DATE int32 (days since the epoch), DATETIME, TIME and TIMESTAMP int64
-// (microseconds; TIME since midnight). nil is NULL.
+// (microseconds; TIME since midnight), RECORD []any (a value a field), a
+// REPEATED column []any (a value an element). nil is NULL; a REPEATED
+// column's NULL is the empty array, as BigQuery's are never NULL.
 
 // IcebergType is the Iceberg type of a BigQuery type, as BigQuery's
 // documentation maps them
 // (https://cloud.google.com/bigquery/docs/iceberg-tables#data-types), or
 // false when it is not one this package writes.
 func IcebergType(c Column) (iceberg.Type, bool) {
+	id := 0
+	return icebergType(c, func() int { id++; return id })
+}
+
+// icebergType is IcebergType, the nested fields' IDs from next. A REPEATED
+// column is an Iceberg list of required elements (a BigQuery ARRAY holds
+// no NULL), a RECORD an Iceberg struct of its fields.
+func icebergType(c Column, next func() int) (iceberg.Type, bool) {
+	if c.Repeated {
+		elem := c
+		elem.Repeated = false
+		id := next()
+		t, ok := icebergType(elem, next)
+		if !ok {
+			return nil, false
+		}
+		return &iceberg.ListType{ElementID: id, Element: t, ElementRequired: true}, true
+	}
 	switch strings.ToUpper(c.Type) {
+	case "RECORD", "STRUCT":
+		if len(c.Fields) == 0 {
+			return nil, false
+		}
+		fields := make([]iceberg.NestedField, len(c.Fields))
+		for i, sub := range c.Fields {
+			id := next()
+			t, ok := icebergType(sub, next)
+			if !ok {
+				return nil, false
+			}
+			fields[i] = iceberg.NestedField{ID: id, Name: sub.Name, Type: t, Required: sub.Required && !sub.Repeated}
+		}
+		return &iceberg.StructType{FieldList: fields}, true
 	case "INT64", "INTEGER":
 		return iceberg.PrimitiveTypes.Int64, true
 	case "FLOAT64", "FLOAT":
@@ -228,17 +266,49 @@ func (c *catalog) CommitTable(_ context.Context, _ table.Identifier, reqs []tabl
 	return next, loc, nil
 }
 
-// Schema is the Iceberg schema of cols, its field IDs 1 to n in order.
+// Schema is the Iceberg schema of cols, its field IDs assigned as Iceberg
+// assigns a new table's (iceberg.AssignFreshSchemaIDs): 1 to n in order
+// for a schema of no nested type.
 func Schema(cols []Column) (*iceberg.Schema, error) {
 	fields := make([]iceberg.NestedField, len(cols))
+	id := len(cols)
+	next := func() int { id++; return id }
 	for i, c := range cols {
-		t, ok := IcebergType(c)
+		t, ok := icebergType(c, next)
 		if !ok {
 			return nil, fmt.Errorf("the column %s, of type %s, which a BigQuery table for Apache Iceberg does not hold here", c.Name, c.Type)
 		}
-		fields[i] = iceberg.NestedField{ID: i + 1, Name: c.Name, Type: t, Required: c.Required}
+		fields[i] = iceberg.NestedField{ID: i + 1, Name: c.Name, Type: t, Required: c.Required && !c.Repeated}
 	}
-	return iceberg.NewSchema(0, fields...), nil
+	return iceberg.AssignFreshSchemaIDs(iceberg.NewSchema(0, fields...), nil)
+}
+
+// sameType is whether a and b are one type, their field IDs aside.
+func sameType(a, b iceberg.Type) bool {
+	switch x := a.(type) {
+	case *iceberg.StructType:
+		y, ok := b.(*iceberg.StructType)
+		if !ok || len(x.FieldList) != len(y.FieldList) {
+			return false
+		}
+		for i, f := range x.FieldList {
+			g := y.FieldList[i]
+			if f.Name != g.Name || f.Required != g.Required || !sameType(f.Type, g.Type) {
+				return false
+			}
+		}
+		return true
+	case *iceberg.ListType:
+		y, ok := b.(*iceberg.ListType)
+		return ok && x.ElementRequired == y.ElementRequired && sameType(x.Element, y.Element)
+	}
+	return a.Equals(b)
+}
+
+// sameSchema is whether a and b have the same fields, their IDs aside.
+func sameSchema(a, b *iceberg.Schema) bool {
+	x, y := a.AsStruct(), b.AsStruct()
+	return sameType(&x, &y)
 }
 
 // Write commits rows, the table's rows now, as a snapshot of the Iceberg
@@ -267,7 +337,7 @@ func (s *Store) Write(ctx context.Context, location string, cols []Column, rows 
 			return nil, err
 		}
 		cat.current, cat.curLoc = tbl.Metadata(), loc
-		if !tbl.Schema().Equals(sc) {
+		if !sameSchema(tbl.Schema(), sc) {
 			// A column added or dropped (ALTER TABLE): the new schema,
 			// matched to the old by name, becomes current.
 			if tbl, err = evolve(ctx, tbl, sc); err != nil {
@@ -340,7 +410,7 @@ func evolve(ctx context.Context, tbl *table.Table, sc *iceberg.Schema) (*table.T
 		switch {
 		case !ok:
 			us = us.AddColumn([]string{f.Name}, f.Type, "", false, nil)
-		case !of.Type.Equals(f.Type):
+		case !sameType(of.Type, f.Type):
 			return nil, fmt.Errorf("the column %s changed its type from %s to %s", f.Name, of.Type, f.Type)
 		}
 	}
@@ -422,6 +492,9 @@ func record(schema *arrow.Schema, cols []Column, rows [][]any) (arrow.RecordBatc
 }
 
 func appendValue(fb array.Builder, c Column, v any) error {
+	if v == nil && c.Repeated {
+		v = []any{} // a NULL array is the empty one
+	}
 	if v == nil {
 		if c.Required {
 			return errors.New("NULL in a REQUIRED column")
@@ -431,6 +504,30 @@ func appendValue(fb array.Builder, c Column, v any) error {
 	}
 	bad := fmt.Errorf("a %T for %s", v, c.Type)
 	switch b := fb.(type) {
+	case *array.ListBuilder:
+		x, ok := v.([]any)
+		if !ok {
+			return bad
+		}
+		b.Append(true)
+		elem := c
+		elem.Repeated, elem.Required = false, true
+		for _, e := range x {
+			if err := appendValue(b.ValueBuilder(), elem, e); err != nil {
+				return err
+			}
+		}
+	case *array.StructBuilder:
+		x, ok := v.([]any)
+		if !ok || len(x) != len(c.Fields) {
+			return bad
+		}
+		b.Append(true)
+		for i, sub := range c.Fields {
+			if err := appendValue(b.FieldBuilder(i), sub, x[i]); err != nil {
+				return fmt.Errorf("%s: %w", sub.Name, err)
+			}
+		}
 	case *array.Int64Builder:
 		x, ok := v.(int64)
 		if !ok {

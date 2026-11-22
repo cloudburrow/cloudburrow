@@ -31,6 +31,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.serveGuest(w, r)
 		return
 	}
+	if r.URL.Path == LBCAPath {
+		// The certificate authority of Google-managed certificates (#2153).
+		s.serveLBCA(w, r)
+		return
+	}
 	if !strings.HasPrefix(r.URL.Path, Prefix) {
 		writeError(w, unimplemented("CloudBurrow's Compute Engine API serves %s only (%s %s).", Prefix, r.Method, r.URL.Path))
 		return
@@ -196,6 +201,13 @@ func (s *Server) doLocked(c call) (obj, error) {
 	if err := s.ensureProjectLocked(c.project); err != nil {
 		return nil, err
 	}
+	if rel := iamTarget(c); rel != "" {
+		return s.iamCall(c, rel)
+	}
+	if out, err, ok := s.lbRoute(c); ok {
+		// Cloud Load Balancing (#2153, lb.go).
+		return out, err
+	}
 	p := c.parts
 	get, post, del := c.method == http.MethodGet, c.method == http.MethodPost, c.method == http.MethodDelete
 	patch, put := c.method == http.MethodPatch, c.method == http.MethodPut
@@ -315,9 +327,6 @@ func (s *Server) doLocked(c call) (obj, error) {
 				return s.expandSubnetwork(c.project, region, p[3], c.body)
 			case n == 5 && post && p[4] == "setPrivateIpGoogleAccess":
 				return s.setPrivateAccess(c.project, region, p[3], c.body)
-			case n == 5 && (p[4] == "getIamPolicy" || p[4] == "setIamPolicy" || p[4] == "testIamPermissions"):
-				// Subnet-level IAM (#2140, subnetiam.go).
-				return s.subnetIAM(c, rel+"/"+p[3], p[4])
 			}
 		case "addresses":
 			switch {

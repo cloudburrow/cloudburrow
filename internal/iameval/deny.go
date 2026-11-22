@@ -146,9 +146,9 @@ func cutLast(s, sep string) (string, string, bool) {
 // for a service account, principalSet://goog/group/GROUP for each group,
 // principalSet://goog/cloudIdentityCustomerId/C for a member of a
 // customer's domain (DomainCustomers), and principalSet://goog/public:all
-// for everyone. Lowercased. A workforce pool's identifiers are never a
-// caller's: Workforce Identity Federation is not served (its token
-// exchange answers 501), so no caller is one.
+// for everyone. Lowercased. A federated caller's principal:// and
+// principalSet:// identifiers, workload (#1941) and workforce (#2056)
+// pools', are kept as they are.
 func denyIdentifiers(members map[string]bool) map[string]bool {
 	out := map[string]bool{"principalset://goog/public:all": true}
 	for m := range members {
@@ -237,16 +237,7 @@ func (e *Evaluator) deny(req Request, members map[string]bool, attrs iamcond.Att
 	if !ok || req.Project == "" && len(req.Own) == 0 {
 		return false, nil
 	}
-	var anc []string
-	if req.Project != "" {
-		anc = e.Source.Ancestry(req.Project)
-	} else {
-		for _, a := range req.Own {
-			if !strings.HasPrefix(a.Resource, "//") {
-				anc = append(anc, a.Resource)
-			}
-		}
-	}
+	anc := e.ancestry(req)
 	perm := V2Permission(req.Permission)
 	ids := denyIdentifiers(members)
 	denied := false

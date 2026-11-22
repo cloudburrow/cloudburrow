@@ -15,6 +15,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -22,10 +24,16 @@ import (
 
 	eventarc "cloud.google.com/go/eventarc/apiv1"
 	eventarcpb "cloud.google.com/go/eventarc/apiv1/eventarcpb"
+	runclient "cloud.google.com/go/run/apiv2"
+	runpb "cloud.google.com/go/run/apiv2/runpb"
 	"google.golang.org/api/iterator"
+	"google.golang.org/api/option"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
+	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/console"
 )
 
@@ -39,6 +47,8 @@ const eaAdvNote = "Eventarc Advanced runs on this instance: a message published 
 // eaIDPattern is the ID Google documents for a bus, pipeline, enrollment
 // and Google API source.
 const eaIDPattern = `^[a-z]([a-z0-9\-]{0,61}[a-z0-9])?$`
+
+var eaIDRE = regexp.MustCompile(eaIDPattern)
 
 // eaSeverities are LoggingConfig's log severities, as Google's Log
 // severity select names them.
@@ -388,8 +398,26 @@ type eaPipelinesProvider struct{ eaAdvBase }
 func (eaPipelinesProvider) ID() string    { return "eventarc-pipelines" }
 func (eaPipelinesProvider) Title() string { return "Pipelines" }
 
-// eaPipelineDestinations are Google's Destination select.
-var eaPipelineDestinations = []string{"HTTP endpoint", "Pub/Sub topic", "Message bus", "Workflows"}
+// Google's Destination types, in its order (#2098): "Destination type
+// options are HTTP endpoint, Eventarc Advanced bus, Workflows, Pub/Sub
+// topic, Cloud Run service (via HTTP), and Cloud Run job (via HTTP)".
+const (
+	eaDestHTTP    = "HTTP endpoint"
+	eaDestBus     = "Eventarc Advanced bus"
+	eaDestWorkflw = "Workflows"
+	eaDestTopic   = "Pub/Sub topic"
+	eaDestService = "Cloud Run service (via HTTP)"
+	eaDestJob     = "Cloud Run job (via HTTP)"
+)
+
+// eaPipelineDestinations are Google's Destination type select.
+var eaPipelineDestinations = []string{eaDestHTTP, eaDestBus, eaDestWorkflw, eaDestTopic, eaDestService, eaDestJob}
+
+// Google's Enable authentication choices.
+const (
+	eaAuthOAuth = "OAuth token"
+	eaAuthOIDC  = "OIDC token"
+)
 
 // eaPayloadFormats are the payload format selects.
 var eaPayloadFormats = []string{"None", "JSON", "Avro", "Protobuf"}
@@ -407,15 +435,96 @@ func (p eaPipelinesProvider) pipelines(ctx context.Context, project string) ([]*
 func eaPipelineDestination(d *eventarcpb.Pipeline_Destination) (string, string) {
 	switch {
 	case d.GetHttpEndpoint() != nil:
-		return "HTTP endpoint", d.GetHttpEndpoint().GetUri()
+		if job := runadapter.EventarcRunJobOf(d.GetHttpEndpoint().GetUri()); job != "" {
+			return eaDestJob, job
+		}
+		return eaDestHTTP, d.GetHttpEndpoint().GetUri()
 	case d.GetTopic() != "":
-		return "Pub/Sub topic", d.GetTopic()
+		return eaDestTopic, d.GetTopic()
 	case d.GetMessageBus() != "":
-		return "Message bus", d.GetMessageBus()
+		return eaDestBus, d.GetMessageBus()
 	case d.GetWorkflow() != "":
-		return "Workflows", d.GetWorkflow()
+		return eaDestWorkflw, d.GetWorkflow()
 	}
 	return "", ""
+}
+
+// eaRunChoices are the project's Cloud Run services (by name, with their
+// URLs) and jobs in the instance's location, which the Cloud Run service
+// and Cloud Run job destinations pick from.
+type eaRunChoices struct {
+	services map[string]string
+	jobs     []string
+}
+
+func (r eaRunChoices) serviceNames() []string { return sortedKeys(r.services) }
+
+// serviceAt is the service an endpoint URI is on, and the URI's path on
+// it; "" when it is on none.
+func (r eaRunChoices) serviceAt(uri string) (string, string) {
+	u, err := url.Parse(uri)
+	if err != nil || u.Host == "" {
+		return "", ""
+	}
+	for name, su := range r.services {
+		if s, err := url.Parse(su); err == nil && s.Host != "" && strings.EqualFold(s.Host, u.Host) {
+			path := u.RequestURI()
+			if path == "/" {
+				path = ""
+			}
+			return name, path
+		}
+	}
+	return "", ""
+}
+
+// destination is a destination's type as Google's page names it, and its
+// target: an HTTP endpoint on a Cloud Run service of the project is a Cloud
+// Run service (via HTTP).
+func (r eaRunChoices) destination(d *eventarcpb.Pipeline_Destination) (string, string) {
+	kind, target := eaPipelineDestination(d)
+	if kind == eaDestHTTP {
+		if name, path := r.serviceAt(target); name != "" {
+			return eaDestService, name + path
+		}
+	}
+	return kind, target
+}
+
+// runChoices reads the project's Cloud Run services and jobs; what cannot
+// be read is left out, and the form then takes a name as text.
+func (b eaAdvBase) runChoices(ctx context.Context, project string) eaRunChoices {
+	out := eaRunChoices{services: map[string]string{}}
+	if b.run.runEndpoint() == "" || b.project(project) == "" {
+		return out
+	}
+	parent := b.parent(project)
+	opts := []option.ClientOption{option.WithEndpoint(b.run.runEndpoint()), option.WithoutAuthentication(),
+		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials()))}
+	if sc, err := runclient.NewServicesClient(ctx, opts...); err == nil {
+		it := sc.ListServices(ctx, &runpb.ListServicesRequest{Parent: parent})
+		for {
+			s, err := it.Next()
+			if err != nil {
+				break
+			}
+			out.services[lastSegment(s.GetName())] = s.GetUri()
+		}
+		_ = sc.Close()
+	}
+	if jc, err := runclient.NewJobsClient(ctx, opts...); err == nil {
+		it := jc.ListJobs(ctx, &runpb.ListJobsRequest{Parent: parent})
+		for {
+			j, err := it.Next()
+			if err != nil {
+				break
+			}
+			out.jobs = append(out.jobs, lastSegment(j.GetName()))
+		}
+		_ = jc.Close()
+	}
+	sort.Strings(out.jobs)
+	return out
 }
 
 func eaFormatText(f *eventarcpb.Pipeline_MessagePayloadFormat) string {
@@ -438,10 +547,11 @@ func (p eaPipelinesProvider) List(ctx context.Context, project string) (console.
 		l.Unavailable = "cannot read the pipelines: " + consoleErr(err)
 		return l, nil
 	}
+	runs := p.runChoices(ctx, project)
 	for _, pl := range ps {
 		dest := "-"
 		if ds := pl.GetDestinations(); len(ds) > 0 {
-			kind, target := eaPipelineDestination(ds[0])
+			kind, target := runs.destination(ds[0])
 			dest = kind + ": " + target
 		}
 		l.Items = append(l.Items, console.Resource{Name: lastSegment(pl.GetName()), Status: "Active", Fields: map[string]string{
@@ -454,43 +564,68 @@ func (p eaPipelinesProvider) List(ctx context.Context, project string) (console.
 
 func (p eaPipelinesProvider) CreateForm() (string, []console.Field) {
 	fields := []console.Field{
-		{Name: "name", Label: "Pipeline name", Type: "text", Required: true, Pattern: eaIDPattern, Section: "Details",
+		{Name: "name", Label: "Pipeline name", Type: "text", Required: true, Pattern: eaIDPattern, Section: eaSecDetails,
 			Help: "Lowercase letters, digits and hyphens, starting with a letter, at most 63."},
 		p.regionField(),
 	}
-	return "Create pipeline", append(fields, eaPipelineFields(nil)...)
+	return "Create pipeline", append(fields, eaPipelineFields(nil, eaRunChoices{}, true, nil)...)
+}
+
+// CreateFormFor offers the project's buses to Add an enrollment, and its
+// Cloud Run services and jobs to the Cloud Run destinations.
+func (p eaPipelinesProvider) CreateFormFor(ctx context.Context, project string) []console.Field {
+	_, fields := p.CreateForm()
+	buses, _ := (eaEnrollmentsProvider{p.eaAdvBase}).choices(ctx, project)
+	return append(fields[:2], eaPipelineFields(nil, p.runChoices(ctx, project), true, buses)...)
 }
 
 // eaPipelineValues are the form values a pipeline holds, which Edit
 // pipeline's fields are prefilled with.
-func eaPipelineValues(pl *eventarcpb.Pipeline) map[string]string {
+func eaPipelineValues(pl *eventarcpb.Pipeline, runs eaRunChoices) map[string]string {
 	v := map[string]string{"destination": eaPipelineDestinations[0], "inputFormat": "None", "outputFormat": "None",
-		"maxAttempts": "5", "minRetryDelay": "1", "maxRetryDelay": "60"}
+		"maxAttempts": "5", "minRetryDelay": "1", "maxRetryDelay": "60", "transform": "false", "authEnabled": "false",
+		"authType": eaAuthOIDC}
 	if pl == nil {
 		return v
 	}
 	v["displayName"], v["cryptoKey"] = pl.GetDisplayName(), pl.GetCryptoKeyName()
 	if ds := pl.GetDestinations(); len(ds) > 0 {
 		d := ds[0]
-		kind, target := eaPipelineDestination(d)
+		kind, target := runs.destination(d)
 		v["destination"] = kind
 		switch kind {
-		case "HTTP endpoint":
+		case eaDestHTTP:
 			v["uri"] = target
-		case "Pub/Sub topic":
+		case eaDestService:
+			v["runService"], v["urlPath"] = runs.serviceAt(d.GetHttpEndpoint().GetUri())
+		case eaDestJob:
+			v["runJob"] = lastSegment(target)
+		case eaDestTopic:
 			v["topic"] = target
-		case "Message bus":
+		case eaDestBus:
 			v["bus"] = target
-		case "Workflows":
+		case eaDestWorkflw:
 			v["workflow"] = target
 		}
+		v["messageBinding"] = d.GetHttpEndpoint().GetMessageBindingTemplate()
 		v["networkAttachment"] = d.GetNetworkConfig().GetNetworkAttachment()
-		v["serviceAccount"] = d.GetAuthenticationConfig().GetGoogleOidc().GetServiceAccount()
+		ac := d.GetAuthenticationConfig()
+		switch {
+		case ac.GetGoogleOidc() != nil:
+			v["authEnabled"], v["authType"] = "true", eaAuthOIDC
+			v["serviceAccount"], v["audience"] = ac.GetGoogleOidc().GetServiceAccount(), ac.GetGoogleOidc().GetAudience()
+		case ac.GetOauthToken() != nil:
+			v["authEnabled"], v["authType"] = "true", eaAuthOAuth
+			v["serviceAccount"], v["scope"] = ac.GetOauthToken().GetServiceAccount(), ac.GetOauthToken().GetScope()
+		}
 		v["outputFormat"], v["outputSchema"] = eaFormatText(d.GetOutputPayloadFormat()), eaSchemaText(d.GetOutputPayloadFormat())
 	}
 	v["inputFormat"], v["inputSchema"] = eaFormatText(pl.GetInputPayloadFormat()), eaSchemaText(pl.GetInputPayloadFormat())
 	if ms := pl.GetMediations(); len(ms) > 0 {
 		v["transformation"] = ms[0].GetTransformation().GetTransformationTemplate()
+	}
+	if v["inputFormat"] != "None" || v["transformation"] != "" {
+		v["transform"] = "true"
 	}
 	rp := pl.GetRetryPolicy()
 	if rp.GetMaxAttempts() > 0 {
@@ -513,44 +648,118 @@ func eaSchemaText(f *eventarcpb.Pipeline_MessagePayloadFormat) string {
 	return f.GetProtobuf().GetSchemaDefinition()
 }
 
-// eaPipelineFields are Create pipeline's fields after its name and region,
-// and Edit pipeline's, prefilled with what the pipeline holds.
-func eaPipelineFields(pl *eventarcpb.Pipeline) []console.Field {
-	v := eaPipelineValues(pl)
-	dst, fmtSec, med, retry := "Destination", "Payload format", "Mediation", "Retry policy"
-	return []console.Field{
-		{Name: "displayName", Label: "Display name", Type: "text", Default: v["displayName"], Section: "Details"},
-		{Name: "destination", Label: "Destination", Type: "select", Options: eaPipelineDestinations, Default: v["destination"], Section: dst,
-			Help: "Where the pipeline delivers each message. A pipeline's Workflows destination is not served; a trigger's is."},
-		{Name: "uri", Label: "Destination URI", Type: "text", Default: v["uri"], Section: dst,
-			Help: "HTTP endpoint: an https URI, or the URL of a Cloud Run service of this instance, which is reached through the cluster's ingress."},
-		{Name: "networkAttachment", Label: "Network attachment", Type: "text", Default: v["networkAttachment"], Section: dst,
-			Help: "HTTP endpoint: optional. projects/P/regions/R/networkAttachments/NAME; recorded, not used."},
-		{Name: "serviceAccount", Label: "Authentication: Google OIDC service account", Type: "text", Default: v["serviceAccount"], Section: dst,
-			Help: "HTTP endpoint: optional. The account whose OIDC token each request carries (a Cloud Run service needs one)."},
-		{Name: "topic", Label: "Pub/Sub topic", Type: "text", Default: v["topic"], Section: dst, Help: "Pub/Sub topic: the topic ID, or projects/P/topics/T."},
-		{Name: "bus", Label: "Message bus", Type: "text", Default: v["bus"], Section: dst, Help: "Message bus: the bus ID in the pipeline's region, or its full name."},
-		{Name: "workflow", Label: "Workflow", Type: "text", Default: v["workflow"], Section: dst, Help: "Workflows: not served for a pipeline (a trigger's Workflows destination is)."},
-		{Name: "inputFormat", Label: "Input payload format", Type: "select", Options: eaPayloadFormats, Default: v["inputFormat"], Section: fmtSec},
-		{Name: "inputSchema", Label: "Input schema definition", Type: "textarea", Default: v["inputSchema"], Section: fmtSec,
-			Help: "Avro or Protobuf: the schema the input data is written in."},
-		{Name: "outputFormat", Label: "Output payload format", Type: "select", Options: eaPayloadFormats, Default: v["outputFormat"], Section: fmtSec,
-			Help: "None delivers the data in the input format; an output format needs an input format."},
-		{Name: "outputSchema", Label: "Output schema definition", Type: "textarea", Default: v["outputSchema"], Section: fmtSec},
-		{Name: "transformation", Label: "Transformation (CEL)", Type: "textarea", Default: v["transformation"], Section: med,
-			Help: `Optional. A CEL expression that builds the new message, such as message.setField("data.seen", true).`},
-		{Name: "maxAttempts", Label: "Maximum attempts", Type: "text", Default: v["maxAttempts"], Pattern: `^([1-9][0-9]?|100)?$`, Section: retry,
-			Help: "1 to 100; 5 by default."},
-		{Name: "minRetryDelay", Label: "Minimum retry delay (seconds)", Type: "text", Default: v["minRetryDelay"], Pattern: `^[0-9]*$`, Section: retry,
-			Help: "1 to 600; 1 by default."},
-		{Name: "maxRetryDelay", Label: "Maximum retry delay (seconds)", Type: "text", Default: v["maxRetryDelay"], Pattern: `^[0-9]*$`, Section: retry,
-			Help: "1 to 600; 60 by default."},
+// The sections of Google's Create pipeline, in its order: Pipeline details,
+// Enrollments (Create pipeline only), Event mediation, Destination.
+const (
+	eaSecDetails     = "Pipeline details"
+	eaSecEnrollments = "Enrollments"
+	eaSecMediation   = "Event mediation"
+	eaSecDestination = "Destination"
+)
+
+// eaHTTPKinds are the destination types that are an HTTP endpoint.
+var eaHTTPKinds = "destination=" + eaDestHTTP + "|" + eaDestService + "|" + eaDestJob
+
+// eaJobBindingExample is a message binding for a Cloud Run job: the
+// RunJobRequest the Cloud Run Admin API expects, the event's ID and type
+// passed to the job's container as arguments.
+const eaJobBindingExample = `{"body": {"overrides": {"containerOverrides": [{"args": [message.id, message.type]}]}}}`
+
+// eaEnrollmentsGroup is Create pipeline's Add an enrollment: per
+// enrollment, its name, the bus it subscribes to and its CEL expression.
+func eaEnrollmentsGroup(buses []string) console.Field {
+	bus := console.Field{Name: "bus", Label: "Message bus", Type: "text", Required: true,
+		Help: "The bus in the pipeline's region whose messages the enrollment matches."}
+	if len(buses) > 0 {
+		bus.Type, bus.Options, bus.Default = "select", buses, buses[0]
+	}
+	return console.Field{Name: "enrollments", Label: "Enrollments", Type: console.GroupFieldType, Section: eaSecEnrollments,
+		AddLabel: "Add an enrollment", Group: []console.Field{
+			{Name: "name", Label: "Enrollment name", Type: "text", Required: true, Pattern: eaIDPattern,
+				Help: "Lowercase letters, digits and hyphens, starting with a letter, at most 63."},
+			bus,
+			{Name: "celMatch", Label: "CEL expression", Type: "text", Default: "true",
+				Help: `The default, true, routes every message; such as message.type == "order.created".`},
+		},
+		Help: "Optional. Each enrollment subscribes the pipeline to a bus's messages that its CEL expression matches; more can be added on the Enrollments page."}
+}
+
+// eaPipelineFields are Create pipeline's fields after its name and region
+// (with Add an enrollment when buses is not nil), and Edit pipeline's,
+// prefilled with what the pipeline holds.
+func eaPipelineFields(pl *eventarcpb.Pipeline, runs eaRunChoices, create bool, buses []string) []console.Field {
+	v := eaPipelineValues(pl, runs)
+	choice := func(name, label string, options []string, showWhen, help string) console.Field {
+		f := console.Field{Name: name, Label: label, Type: "text", Default: v[name], Section: eaSecDestination, ShowWhen: showWhen, Help: help}
+		if len(options) > 0 {
+			f.Type, f.Options = "select", options
+			if f.Default == "" {
+				f.Default = options[0]
+			}
+		}
+		return f
+	}
+	fields := []console.Field{
+		{Name: "displayName", Label: "Display name", Type: "text", Default: v["displayName"], Section: eaSecDetails},
 		eaSeverityField(pl.GetLoggingConfig().GetLogSeverity()),
-		{Name: "cryptoKey", Label: "Cloud KMS key", Type: "text", Default: v["cryptoKey"], Section: "Encryption",
+		{Name: "maxAttempts", Label: "Maximum attempts", Type: "text", Default: v["maxAttempts"], Pattern: `^([1-9][0-9]?|100)?$`, Section: eaSecDetails,
+			Help: "Retry policy: 1 to 100; 5 by default."},
+		{Name: "minRetryDelay", Label: "Minimum retry delay (seconds)", Type: "text", Default: v["minRetryDelay"], Pattern: `^[0-9]*$`, Section: eaSecDetails,
+			Help: "1 to 600; 1 by default."},
+		{Name: "maxRetryDelay", Label: "Maximum retry delay (seconds)", Type: "text", Default: v["maxRetryDelay"], Pattern: `^[0-9]*$`, Section: eaSecDetails,
+			Help: "1 to 600; 60 by default."},
+		{Name: "cryptoKey", Label: "Cloud KMS key", Type: "text", Default: v["cryptoKey"], Section: eaSecDetails,
 			Pattern: `^(projects/[^\/]+/locations/[^\/]+/keyRings/[^\/]+/cryptoKeys/[^\/]+)?$`,
-			Help:    "Optional. A customer-managed key, projects/P/locations/L/keyRings/R/cryptoKeys/K; empty for a Google-managed key."},
+			Help:    "Encryption: optional. A customer-managed key, projects/P/locations/L/keyRings/R/cryptoKeys/K; empty for a Google-managed key."},
 		eaLabelsField(pl.GetLabels()),
 	}
+	fields[1].Section, fields[6].Section = eaSecDetails, eaSecDetails
+	if create {
+		fields = append(fields, eaEnrollmentsGroup(buses))
+	}
+	return append(fields,
+		console.Field{Name: "transform", Label: "Apply a transformation", Type: "checkbox", Default: v["transform"], Section: eaSecMediation,
+			Help: "Optional. Every message must then be in the inbound format."},
+		console.Field{Name: "inputFormat", Label: "Inbound format", Type: "select", Options: eaPayloadFormats, Default: v["inputFormat"],
+			Section: eaSecMediation, ShowWhen: "transform"},
+		console.Field{Name: "inputSchema", Label: "Inbound schema definition", Type: "textarea", Default: v["inputSchema"], Section: eaSecMediation,
+			ShowWhen: "transform&inputFormat=Avro|Protobuf", Help: "Avro or Protobuf: the schema the inbound data is written in."},
+		console.Field{Name: "transformation", Label: "Transformation (CEL)", Type: "textarea", Default: v["transformation"], Section: eaSecMediation,
+			ShowWhen: "transform", Help: `A CEL expression that builds the new message, such as message.setField("data.seen", true).`},
+		console.Field{Name: "destination", Label: "Destination type", Type: "select", Options: eaPipelineDestinations, Default: v["destination"],
+			Section: eaSecDestination, Help: "Where the pipeline delivers each message. A pipeline's Workflows destination is not served; a trigger's is."},
+		choice("uri", "Destination URI", nil, "destination="+eaDestHTTP,
+			"An https URI, or the URL of a Cloud Run service of this instance, which is reached through the cluster's ingress."),
+		choice("runService", "Cloud Run service", runs.serviceNames(), "destination="+eaDestService,
+			"A service of the project in the pipeline's region; events are sent to it as HTTP POST requests."),
+		choice("urlPath", "Relative URL path", nil, "destination="+eaDestService,
+			"Optional. The path on the service, such as /events; the root path (/) by default."),
+		choice("runJob", "Cloud Run job", runs.jobs, "destination="+eaDestJob,
+			"A job of the project in the pipeline's region, run through the Cloud Run Admin API's jobs.run, which needs a message binding and an OAuth token."),
+		choice("topic", "Pub/Sub topic", nil, "destination="+eaDestTopic, "The topic ID, or projects/P/topics/T."),
+		choice("bus", "Message bus", nil, "destination="+eaDestBus, "The bus ID in the pipeline's region, or its full name."),
+		choice("workflow", "Workflow", nil, "destination="+eaDestWorkflw, "Not served for a pipeline (a trigger's Workflows destination is)."),
+		choice("networkAttachment", "Network attachment", nil, "destination="+eaDestHTTP+"|"+eaDestService,
+			"Optional. projects/P/regions/R/networkAttachments/NAME; recorded, not used."),
+		console.Field{Name: "outputFormat", Label: "Outbound format", Type: "select", Options: eaPayloadFormats, Default: v["outputFormat"],
+			Section: eaSecDestination, ShowWhen: "transform", Help: "Available when an inbound format is set; None delivers the data in the inbound format."},
+		console.Field{Name: "outputSchema", Label: "Outbound schema definition", Type: "textarea", Default: v["outputSchema"], Section: eaSecDestination,
+			ShowWhen: "transform&outputFormat=Avro|Protobuf"},
+		console.Field{Name: "messageBinding", Label: "Message binding", Type: "textarea", Default: v["messageBinding"], Section: eaSecDestination,
+			ShowWhen: eaHTTPKinds, Help: "Optional for an HTTP endpoint or a Cloud Run service, required for a Cloud Run job: a CEL expression " +
+				`building the request's {"headers": ..., "body": ...} from message and headers, such as ` + eaJobBindingExample + "."},
+		console.Field{Name: "authEnabled", Label: "Enable authentication", Type: "checkbox", Default: v["authEnabled"], Section: eaSecDestination,
+			ShowWhen: eaHTTPKinds},
+		console.Field{Name: "authType", Label: "Auth header type", Type: "select", Options: []string{eaAuthOAuth, eaAuthOIDC}, Default: v["authType"],
+			Section: eaSecDestination, ShowWhen: eaHTTPKinds + "&authEnabled",
+			Help: "OAuth token for Google APIs on *.googleapis.com (a Cloud Run job); OIDC token for other endpoints (a Cloud Run service)."},
+		console.Field{Name: "scope", Label: "Scope", Type: "text", Default: v["scope"], Section: eaSecDestination,
+			ShowWhen: eaHTTPKinds + "&authEnabled&authType=" + eaAuthOAuth, Help: "Optional; https://www.googleapis.com/auth/cloud-platform by default."},
+		console.Field{Name: "audience", Label: "Audience", Type: "text", Default: v["audience"], Section: eaSecDestination,
+			ShowWhen: eaHTTPKinds + "&authEnabled&authType=" + eaAuthOIDC, Help: "Optional; the destination's URL by default."},
+		console.Field{Name: "serviceAccount", Label: "Service account", Type: "text", Default: v["serviceAccount"], Section: eaSecDestination,
+			ShowWhen: eaHTTPKinds + "&authEnabled", Help: "The service account that invokes the destination, such as NAME@PROJECT.iam.gserviceaccount.com."},
+	)
 }
 
 func (eaPipelinesProvider) CreateOnPage() bool   { return true }
@@ -592,48 +801,18 @@ func eaSeconds(v, name string) (*durationpb.Duration, error) {
 
 // eaFormPipeline is Create pipeline's pipeline.
 func eaFormPipeline(project, region string, values map[string]string) (*eventarcpb.Pipeline, error) {
-	d := &eventarcpb.Pipeline_Destination{}
-	switch kind := strings.TrimSpace(values["destination"]); kind {
-	case "", "HTTP endpoint":
-		uri := strings.TrimSpace(values["uri"])
-		if uri == "" {
-			return nil, errors.New("an HTTP endpoint destination needs its URI")
-		}
-		d.DestinationDescriptor = &eventarcpb.Pipeline_Destination_HttpEndpoint_{HttpEndpoint: &eventarcpb.Pipeline_Destination_HttpEndpoint{Uri: uri}}
-		if na := strings.TrimSpace(values["networkAttachment"]); na != "" {
-			d.NetworkConfig = &eventarcpb.Pipeline_Destination_NetworkConfig{NetworkAttachment: na}
-		}
-		if sa := strings.TrimSpace(values["serviceAccount"]); sa != "" {
-			d.AuthenticationConfig = &eventarcpb.Pipeline_Destination_AuthenticationConfig{AuthenticationMethodDescriptor: &eventarcpb.Pipeline_Destination_AuthenticationConfig_GoogleOidc{
-				GoogleOidc: &eventarcpb.Pipeline_Destination_AuthenticationConfig_OidcToken{ServiceAccount: sa}}}
-		}
-	case "Pub/Sub topic":
-		t := strings.TrimSpace(values["topic"])
-		if t == "" {
-			return nil, errors.New("a Pub/Sub topic destination needs its topic")
-		}
-		if !strings.HasPrefix(t, "projects/") {
-			t = "projects/" + project + "/topics/" + t
-		}
-		d.DestinationDescriptor = &eventarcpb.Pipeline_Destination_Topic{Topic: t}
-	case "Message bus":
-		b := eaFullName(project, region, "messageBuses", values["bus"])
-		if b == "" {
-			return nil, errors.New("a message bus destination needs its bus")
-		}
-		d.DestinationDescriptor = &eventarcpb.Pipeline_Destination_MessageBus{MessageBus: b}
-	case "Workflows":
-		w := eaFullName(project, region, "workflows", values["workflow"])
-		if w == "" {
-			return nil, errors.New("a Workflows destination needs its workflow")
-		}
-		d.DestinationDescriptor = &eventarcpb.Pipeline_Destination_Workflow{Workflow: w}
-	default:
-		return nil, fmt.Errorf("destination %q is not one of %v", kind, eaPipelineDestinations)
+	d, err := eaFormPipelineDestination(project, region, values)
+	if err != nil {
+		return nil, err
 	}
 	pl := &eventarcpb.Pipeline{DisplayName: strings.TrimSpace(values["displayName"]), CryptoKeyName: strings.TrimSpace(values["cryptoKey"]),
 		Destinations: []*eventarcpb.Pipeline_Destination{d}}
-	var err error
+	// Event mediation's fields count only under Apply a transformation;
+	// a form that sends no checkbox (an API caller) means what it sends.
+	mediate := values["transform"] != "false"
+	if !mediate {
+		values = eaWithout(values, "inputFormat", "inputSchema", "transformation", "outputFormat", "outputSchema")
+	}
 	if pl.InputPayloadFormat, err = eaFormFormat(values["inputFormat"], values["inputSchema"]); err != nil {
 		return nil, err
 	}
@@ -678,7 +857,16 @@ func (p eaPipelinesProvider) Create(ctx context.Context, project string, values 
 	if err != nil {
 		return "", err
 	}
+	if values, err = p.resolveRun(ctx, project, values); err != nil {
+		return "", err
+	}
 	pl, err := eaFormPipeline(p.project(project), region, values)
+	if err != nil {
+		return "", err
+	}
+	id := strings.TrimSpace(values["name"])
+	// Add an enrollment's rows are checked before the pipeline is made.
+	ens, order, err := eaFormEnrollments(p.project(project), region, id, values)
 	if err != nil {
 		return "", err
 	}
@@ -687,13 +875,25 @@ func (p eaPipelinesProvider) Create(ctx context.Context, project string, values 
 		return "", err
 	}
 	defer func() { _ = c.Close() }()
-	id := strings.TrimSpace(values["name"])
 	op, err := c.CreatePipeline(ctx, &eventarcpb.CreatePipelineRequest{Parent: p.parent(project), PipelineId: id, Pipeline: pl})
 	if err != nil {
 		return "", err
 	}
-	_, err = op.Wait(ctx)
-	return id, err
+	if _, err = op.Wait(ctx); err != nil {
+		return id, err
+	}
+	// Then its enrollments, as Google's Create does; one refused is
+	// named with the API's reason, the pipeline and the others kept.
+	for _, eid := range order {
+		eop, err := c.CreateEnrollment(ctx, &eventarcpb.CreateEnrollmentRequest{Parent: p.parent(project), EnrollmentId: eid, Enrollment: ens[eid]})
+		if err == nil {
+			_, err = eop.Wait(ctx)
+		}
+		if err != nil {
+			return id, fmt.Errorf("pipeline %s was created, but enrollment %s was not: %w", id, eid, err)
+		}
+	}
+	return id, nil
 }
 
 func (p eaPipelinesProvider) find(ctx context.Context, project, id string) (*eventarcpb.Pipeline, error) {
@@ -712,13 +912,22 @@ func (p eaPipelinesProvider) Detail(ctx context.Context, project string, path []
 	if err != nil {
 		return console.Detail{Unavailable: "cannot read the pipeline: " + consoleErr(err)}, nil
 	}
-	kind, target, out, auth, na := "-", "-", "None", "-", "-"
+	runs := p.runChoices(ctx, project)
+	kind, target, out, auth, na, binding, service := "-", "-", "None", "-", "-", "-", ""
 	if ds := pl.GetDestinations(); len(ds) > 0 {
-		kind, target = eaPipelineDestination(ds[0])
+		kind, _ = runs.destination(ds[0])
+		_, target = eaPipelineDestination(ds[0])
+		if name, _ := runs.serviceAt(ds[0].GetHttpEndpoint().GetUri()); name != "" {
+			service = name
+		}
 		out = eaFormatText(ds[0].GetOutputPayloadFormat())
 		if sa := ds[0].GetAuthenticationConfig().GetGoogleOidc().GetServiceAccount(); sa != "" {
 			auth = "Google OIDC: " + sa
 		}
+		if sa := ds[0].GetAuthenticationConfig().GetOauthToken().GetServiceAccount(); sa != "" {
+			auth = "OAuth token: " + sa
+		}
+		binding = orDash(ds[0].GetHttpEndpoint().GetMessageBindingTemplate())
 		na = orDash(ds[0].GetNetworkConfig().GetNetworkAttachment())
 	}
 	tmpl := "-"
@@ -742,7 +951,9 @@ func (p eaPipelinesProvider) Detail(ctx context.Context, project string, path []
 		{Label: "Region", Value: eaRegion(pl.GetName())},
 		{Label: "Destination type", Value: kind},
 		{Label: "Destination", Value: target},
+		{Label: "Cloud Run service", Value: service},
 		{Label: "Network attachment", Value: na},
+		{Label: "Message binding", Value: binding},
 		{Label: "Authentication", Value: auth},
 		{Label: "Input payload format", Value: eaFormatText(pl.GetInputPayloadFormat())},
 		{Label: "Output payload format", Value: out},
@@ -760,8 +971,8 @@ func (p eaPipelinesProvider) Detail(ctx context.Context, project string, path []
 	}, 5)
 	// Google's Pipeline details pane has Edit, which opens the pipeline's
 	// settings again and ends in Save.
-	d.Edit = &console.EditForm{Label: "Edit", Title: "Edit pipeline", Submit: "Save", Fields: eaPipelineFields(pl),
-		Note: "The pipeline's name and region cannot change, as on Google. Its enrollments are edited on the Enrollments page."}
+	d.Edit = &console.EditForm{Label: "Edit", Title: "Edit pipeline", Submit: "Save", Fields: eaPipelineFields(pl, runs, false, nil),
+		Note: "The pipeline's name and region cannot change, as on Google. Its enrollments, made with Create pipeline's Add an enrollment, are edited on the Enrollments page."}
 	return d, nil
 }
 
@@ -775,6 +986,9 @@ func (p eaPipelinesProvider) Edit(ctx context.Context, project string, path []st
 	}
 	cur, err := p.find(ctx, project, path[0])
 	if err != nil {
+		return err
+	}
+	if values, err = p.resolveRun(ctx, project, values); err != nil {
 		return err
 	}
 	pl, err := eaFormPipeline(p.project(project), eaRegion(cur.GetName()), values)

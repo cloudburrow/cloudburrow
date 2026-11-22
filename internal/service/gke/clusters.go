@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"cloud.google.com/go/container/apiv1/containerpb"
 	"google.golang.org/grpc/codes"
@@ -118,8 +119,8 @@ func (s *Server) newPool(np *containerpb.NodePool, zones []string, version Versi
 	if np.GetInitialNodeCount() == 0 && !np.GetAutoscaling().GetEnabled() {
 		return nil, status.Errorf(codes.InvalidArgument, "Node pool %q: initial_node_count must be greater than zero.", np.GetName())
 	}
-	if np.GetAutoscaling().GetEnabled() {
-		return nil, status.Error(codes.Unimplemented, "Node pool autoscaling is not available locally: CloudBurrow does not run the cluster autoscaler.")
+	if err := checkAutoscaling(np.GetAutoscaling(), len(zones), 0); err != nil {
+		return nil, err
 	}
 	if len(np.GetLocations()) > 0 {
 		return nil, status.Error(codes.Unimplemented, "Choosing a node pool's zones is not available locally.")
@@ -157,6 +158,9 @@ func (s *Server) newPool(np *containerpb.NodePool, zones []string, version Versi
 	}
 	if out.UpgradeSettings == nil {
 		out.UpgradeSettings = defaultUpgradeSettings()
+	}
+	if out.Autoscaling != nil {
+		out.Autoscaling = normAutoscaling(out.Autoscaling)
 	}
 	out.Status = containerpb.NodePool_PROVISIONING
 	return out, nil
@@ -231,6 +235,9 @@ func (s *Server) CreateCluster(_ context.Context, req *containerpb.CreateCluster
 	if err := s.checkClusterVPC(c, p.project, p.location); err != nil {
 		return nil, err
 	}
+	if err := checkCreateSettings(c); err != nil {
+		return nil, err
+	}
 	if c.MaintenancePolicy != nil {
 		if err := s.checkMaintenancePolicy(c.MaintenancePolicy); err != nil {
 			return nil, err
@@ -268,11 +275,9 @@ func (s *Server) CreateCluster(_ context.Context, req *containerpb.CreateCluster
 	if c.Subnetwork == "" {
 		c.Subnetwork = "default"
 	}
-	if c.LoggingService == "" {
-		c.LoggingService = "logging.googleapis.com/kubernetes"
-	}
-	if c.MonitoringService == "" {
-		c.MonitoringService = "monitoring.googleapis.com/kubernetes"
+	// Logging and monitoring, GKE's defaults or as given (telemetry.go).
+	if err := defaultTelemetry(c); err != nil {
+		return nil, err
 	}
 	c.ClusterIpv4Cidr = "10.244.0.0/16"
 	c.ServicesIpv4Cidr = "10.96.0.0/16"
@@ -315,6 +320,7 @@ func (s *Server) CreateCluster(_ context.Context, req *containerpb.CreateCluster
 		pools[i] = proto.Clone(np).(*containerpb.NodePool)
 	}
 	kind := e.kind
+	enforce, abac := enforcesNetworkPolicy(c), c.GetLegacyAbac().GetEnabled()
 	return s.startOpLocked(p, containerpb.Operation_CREATE_CLUSTER, c.SelfLink, e, func(ctx context.Context) error {
 		access, err := s.backend.Create(ctx, kind, version.Image, !autopilot)
 		if err != nil {
@@ -330,7 +336,7 @@ func (s *Server) CreateCluster(_ context.Context, req *containerpb.CreateCluster
 				return status.Errorf(codes.Internal, "Adding node pool %q's nodes failed: %v", np.Name, err)
 			}
 		}
-		return nil
+		return s.applyCreateSettings(ctx, kind, enforce, abac)
 	}, func(err error) {
 		if err != nil {
 			c.Status = containerpb.Cluster_ERROR
@@ -443,6 +449,9 @@ func (s *Server) DeleteCluster(_ context.Context, req *containerpb.DeleteCluster
 }
 
 func busyErr(e *entry) error {
+	if e.busy == autoscalerBusy {
+		return status.Errorf(codes.FailedPrecondition, "Cluster %q is being resized by the cluster autoscaler; retry when it is done.", e.cluster.Name)
+	}
 	if e.busy != "" {
 		return status.Errorf(codes.FailedPrecondition, "Cluster is running incompatible operation %s.", e.busy)
 	}
@@ -471,18 +480,24 @@ func (s *Server) doneOpLocked(p parsed, typ containerpb.Operation_Type, target s
 // supportedUpdates are the ClusterUpdate fields UpdateCluster applies; any
 // other answers UNIMPLEMENTED, naming it.
 var supportedUpdates = map[string]bool{
-	"desired_master_version":     true,
-	"desired_node_version":       true,
-	"desired_node_pool_id":       true,
-	"desired_image_type":         true,
-	"desired_logging_service":    true,
-	"desired_monitoring_service": true,
-	"desired_release_channel":    true,
+	"desired_master_version":        true,
+	"desired_rollback_safe_upgrade": true,
+	"desired_locations":             true,
+	"desired_node_version":          true,
+	"desired_node_pool_id":          true,
+	"desired_image_type":            true,
+	"desired_logging_service":       true,
+	"desired_monitoring_service":    true,
+	"desired_release_channel":       true,
+	"desired_addons_config":         true,
+	"desired_node_pool_autoscaling": true,
+	"desired_logging_config":        true,
+	"desired_monitoring_config":     true,
 }
 
 // UpdateCluster applies a ClusterUpdate: versions (to one served), the
 // release channel, the logging and monitoring services, the image type.
-func (s *Server) UpdateCluster(_ context.Context, req *containerpb.UpdateClusterRequest) (*containerpb.Operation, error) {
+func (s *Server) UpdateCluster(ctx context.Context, req *containerpb.UpdateClusterRequest) (*containerpb.Operation, error) {
 	p, err := parseName(req.GetName(), req.GetProjectId(), req.GetZone(), req.GetClusterId(), "", "", "cluster")
 	if err != nil {
 		return nil, err
@@ -507,6 +522,35 @@ func (s *Server) UpdateCluster(_ context.Context, req *containerpb.UpdateCluster
 		sort.Strings(unsupported)
 		return nil, status.Errorf(codes.Unimplemented, "Not available locally: updating %s.", strings.Join(unsupported, ", "))
 	}
+	// Logging and monitoring, as gcloud's --logging and --monitoring send
+	// them (telemetry.go): their own change.
+	if ch, err := telemetryUpdate(u, set); err != nil || ch != nil {
+		if err != nil {
+			return nil, err
+		}
+		return s.changeTelemetry(p, ch)
+	}
+	// The zones, as gcloud's --node-locations sends them (#2100).
+	if len(u.GetDesiredLocations()) > 0 {
+		if len(set) != 1 {
+			return nil, status.Error(codes.InvalidArgument, "desired_locations must be the only change of its update.")
+		}
+		return s.SetLocations(ctx, &containerpb.SetLocationsRequest{Name: req.GetName(), ProjectId: req.GetProjectId(), Zone: req.GetZone(),
+			ClusterId: req.GetClusterId(), Locations: u.GetDesiredLocations()})
+	}
+	// The add-ons and a pool's autoscaling, as gcloud's --update-addons
+	// and --enable-autoscaling send them (#2100): each its own change.
+	if u.GetDesiredAddonsConfig() != nil || u.GetDesiredNodePoolAutoscaling() != nil {
+		if u.GetDesiredAddonsConfig() != nil && len(set) == 1 {
+			return s.SetAddonsConfig(ctx, &containerpb.SetAddonsConfigRequest{Name: req.GetName(), ProjectId: req.GetProjectId(), Zone: req.GetZone(),
+				ClusterId: req.GetClusterId(), AddonsConfig: u.GetDesiredAddonsConfig()})
+		}
+		if u.GetDesiredNodePoolAutoscaling() != nil && len(set) == 2 && u.GetDesiredNodePoolId() != "" {
+			return s.SetNodePoolAutoscaling(ctx, &containerpb.SetNodePoolAutoscalingRequest{
+				Name: resourceName(p.project, p.location, p.cluster) + "/nodePools/" + u.GetDesiredNodePoolId(), Autoscaling: u.GetDesiredNodePoolAutoscaling()})
+		}
+		return nil, status.Error(codes.InvalidArgument, "desired_addons_config, or desired_node_pool_autoscaling with desired_node_pool_id, must be the only change of its update.")
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	e, err := s.readyLocked(p)
@@ -524,17 +568,27 @@ func (s *Server) UpdateCluster(_ context.Context, req *containerpb.UpdateCluster
 		if sv.GKE != c.CurrentMasterVersion {
 			// A real upgrade replaces the control plane's version: it is
 			// the only change of its operation, as Google runs it.
-			if len(set) > 1 {
+			rs := u.GetDesiredRollbackSafeUpgrade()
+			if len(set) > 1 && !(len(set) == 2 && rs != nil) {
 				return nil, status.Error(codes.InvalidArgument, "desired_master_version must be the only field of an update that upgrades the control plane.")
 			}
 			if err := checkMasterUpgrade(c, sv); err != nil {
 				return nil, err
 			}
+			var soak time.Duration
+			if rs != nil {
+				if soak, err = checkRollbackSafe(c, sv, rs); err != nil {
+					return nil, err
+				}
+				if _, ok := s.backend.(Emulator); !ok {
+					return nil, status.Error(codes.Unimplemented, "Rollback-safe upgrades are not available with this backend.")
+				}
+			}
 			up, err := s.upgrader()
 			if err != nil {
 				return nil, err
 			}
-			return s.startMasterUpgradeLocked(p, e, sv, up), nil
+			return s.startMasterUpgradeLocked(p, e, sv, up, false, soak), nil
 		}
 	}
 	if v := u.GetDesiredNodeVersion(); v != "" {
@@ -581,12 +635,6 @@ func (s *Server) UpdateCluster(_ context.Context, req *containerpb.UpdateCluster
 				np.Config.ImageType = t
 			}
 		}
-	}
-	if v := u.GetDesiredLoggingService(); v != "" {
-		c.LoggingService = v
-	}
-	if v := u.GetDesiredMonitoringService(); v != "" {
-		c.MonitoringService = v
 	}
 	if rc := u.GetDesiredReleaseChannel(); rc != nil {
 		c.ReleaseChannel = proto.Clone(rc).(*containerpb.ReleaseChannel)

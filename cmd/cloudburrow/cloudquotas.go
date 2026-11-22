@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -9,6 +10,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/authplatform"
 	"github.com/cloudburrow/cloudburrow/internal/quotalimit"
+	"github.com/cloudburrow/cloudburrow/internal/ratequota"
 	"github.com/cloudburrow/cloudburrow/internal/service/cloudquotas"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
@@ -37,8 +39,9 @@ func isSiteVerificationPath(r *http.Request) bool {
 
 // serveCloudQuotas mounts the Cloud Quotas API and the Site Verification
 // API (#2030) on the Resource Manager port, and makes the quotas the
-// services enforce read the granted preferences.
-func serveCloudQuotas(rm *resourcemanager.Server, reg *resourcemanager.Registry, su func() *serviceusage.Server, owner string, caller func(string) (string, bool)) (*cloudquotas.Server, *siteverification.Server) {
+// services enforce, the request quotas among them, read the granted
+// preferences.
+func serveCloudQuotas(rm *resourcemanager.Server, reg *resourcemanager.Registry, su func() *serviceusage.Server, requests *ratequota.Limiter, owner string, caller func(string) (string, bool)) (*cloudquotas.Server, *siteverification.Server) {
 	served := func(service string) bool {
 		if alwaysServedQuotaAPIs[service] {
 			return true
@@ -55,16 +58,52 @@ func serveCloudQuotas(rm *resourcemanager.Server, reg *resourcemanager.Registry,
 		return false
 	}
 	q := cloudquotas.NewServer(reg.Backing(), serviceUsageProjects{reg: reg}, served)
+	// The per-minute request quotas (#2090) are quotas of their services,
+	// which a preference sets.
+	if requests != nil {
+		q.AddQuotas(requestQuotaInfos(requests))
+	}
+	q.Hierarchy = quotasHierarchy{reg: reg}
 	rm.HandleService("google.api.cloudquotas.v1", isCloudQuotasPath,
 		resourcemanager.Impl{Desc: &pb.CloudQuotas_ServiceDesc, Impl: q},
 		resourcemanager.Impl{Desc: &pb.QuotaAdjusterSettingsManager_ServiceDesc, Impl: q.Adjuster()})
 	quotalimit.Use(q)
 	quotalimit.RegisterUsage(resourcemanager.ServiceAccountQuotaService, resourcemanager.ServiceAccountQuotaID,
 		func(project string, _ map[string]string) (int64, error) { return reg.LiveServiceAccounts(project) })
+	quotalimit.RegisterUsage(resourcemanager.ServiceAccountQuotaService, resourcemanager.WorkforcePoolQuotaID,
+		func(org string, _ map[string]string) (int64, error) { return reg.LiveWorkforcePools(org) })
 	sv := siteverification.NewServer(reg.Backing(), owner)
 	sv.Caller = caller
 	rm.HandleJSON(isSiteVerificationPath, sv)
 	return q, sv
+}
+
+// quotasHierarchy is the resource hierarchy the Cloud Quotas API reads
+// folders and organizations from (#2102): the local organization, its
+// active folders, and each project's parent.
+type quotasHierarchy struct{ reg *resourcemanager.Registry }
+
+func (h quotasHierarchy) Parent(container string) (string, error) {
+	switch {
+	case container == resourcemanager.OrganizationName:
+		return "", nil
+	case strings.HasPrefix(container, "folders/"):
+		f, err := h.reg.Folder(container)
+		if err != nil {
+			return "", err
+		}
+		if f.State != resourcemanager.StateActive {
+			return "", fmt.Errorf("folder %s is pending deletion", container)
+		}
+		return f.Parent, nil
+	case strings.HasPrefix(container, "projects/"):
+		p, err := h.reg.Get(strings.TrimPrefix(container, "projects/"))
+		if err != nil {
+			return "", err
+		}
+		return p.Parent, nil
+	}
+	return "", fmt.Errorf("%s not found; the local organization is %s", container, resourcemanager.OrganizationName)
 }
 
 // cloudQuotasResetter forgets each project's quota preferences (#2030).

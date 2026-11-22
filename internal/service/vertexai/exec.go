@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -112,6 +113,49 @@ func (g *ExecGenerator) Model() string { return g.ModelID }
 // HonoursOptions implements OptionsGenerator.
 func (g *ExecGenerator) HonoursOptions() bool { return g.Runner }
 
+// The sampling a request gets for each of temperature, topP and topK it
+// leaves unset (#2107): Google's documented configuration for the served
+// model, Gemma 4 ("Use the following standardized sampling configuration
+// across all use cases: temperature=1.0, top_p=0.95, top_k=64", the Gemma 4
+// model card), which are also the Gemini 2.5 models' Vertex defaults. Vertex
+// samples by default; the model file's own sampler has top-k 1 (measured:
+// "sampler type=2 k=1 p=0.95"), which is greedy, so without these every
+// unconfigured request, and every one of candidateCount's candidates, would
+// be the same answer. Temperature 0 stays greedy (the runner decodes it as
+// GREEDY whatever top-k and top-p say).
+const (
+	defaultTemperature = float32(1.0)
+	defaultTopP        = float32(0.95)
+	defaultTopK        = int32(64)
+)
+
+// withSamplingDefaults is req with Google's default sampling for each field
+// it leaves unset, and a random seed when it sets none, as Vertex draws one
+// ("By default, a random seed value is used", content generation
+// parameters), so that repeated unseeded requests are independent samples.
+// A request's own values are kept.
+func withSamplingDefaults(req Request) Request {
+	if req.Temperature == nil {
+		v := defaultTemperature
+		req.Temperature = &v
+	}
+	if req.TopP == nil {
+		v := defaultTopP
+		req.TopP = &v
+	}
+	if req.TopK == nil {
+		v := defaultTopK
+		req.TopK = &v
+	}
+	if req.Seed == nil {
+		var b [4]byte
+		_, _ = rand.Read(b[:])
+		v := int32(binary.LittleEndian.Uint32(b[:]) & 0x7fffffff)
+		req.Seed = &v
+	}
+	return req
+}
+
 // runnerFlags are a request's options as cloudburrow_generate's flags, which
 // are LiteRT-LM's own shared flag names.
 func runnerFlags(req Request) []string {
@@ -141,6 +185,18 @@ func runnerFlags(req Request) []string {
 	if req.FrequencyPenalty != nil {
 		out = append(out, "--frequency_penalty="+f32(*req.FrequencyPenalty))
 	}
+	if req.ResponseLogprobs {
+		out = append(out, "--response_logprobs")
+		if req.TopLogprobs > 0 {
+			out = append(out, "--logprobs="+strconv.Itoa(int(req.TopLogprobs)))
+		}
+	}
+	if req.Thinking != nil {
+		out = append(out, "--enable_thinking="+strconv.FormatBool(*req.Thinking))
+		if *req.Thinking {
+			out = append(out, "--thinking_budget="+strconv.Itoa(int(req.ThinkingBudget)))
+		}
+	}
 	if req.Conversation != nil {
 		out = append(out, "--request_stdin")
 		if req.Vision {
@@ -155,13 +211,20 @@ func runnerFlags(req Request) []string {
 // decodedMarker is cloudburrow_generate's last line on standard error.
 const decodedMarker = "cloudburrow_generate: decoded_tokens="
 
+// thoughtMarker is cloudburrow_generate's count of the thought channel's
+// tokens, written with thinking on (#2107).
+const thoughtMarker = "cloudburrow_generate: thought_tokens="
+
 // decodedTokens is the count cloudburrow_generate reported, or -1.
-func decodedTokens(stderr string) int {
-	i := strings.LastIndex(stderr, decodedMarker)
+func decodedTokens(stderr string) int { return markerCount(stderr, decodedMarker) }
+
+// markerCount is the number after the last marker on standard error, or -1.
+func markerCount(stderr, marker string) int {
+	i := strings.LastIndex(stderr, marker)
 	if i < 0 {
 		return -1
 	}
-	rest := stderr[i+len(decodedMarker):]
+	rest := stderr[i+len(marker):]
 	if j := strings.IndexAny(rest, "\r\n"); j >= 0 {
 		rest = rest[:j]
 	}
@@ -192,7 +255,7 @@ func (g *ExecGenerator) Generate(ctx context.Context, req Request) (<-chan Chunk
 		req.Conversation = nil
 	}
 	if g.Runner {
-		args = append(args, runnerFlags(req)...)
+		args = append(args, runnerFlags(withSamplingDefaults(req))...)
 	}
 	var stdin []byte
 	if conversation {
@@ -283,6 +346,9 @@ func (g *ExecGenerator) Generate(ctx context.Context, req Request) (<-chan Chunk
 		if conversation && usage.PromptTokens >= 0 {
 			u := *usage
 			u.CandidateTokens = decoded
+			if t := markerCount(stderr.String(), thoughtMarker); t > 0 && decoded >= 0 {
+				u.ThoughtTokens = min(t, decoded)
+			}
 			last = &u
 		}
 		select {
@@ -298,11 +364,32 @@ func (g *ExecGenerator) Generate(ctx context.Context, req Request) (<-chan Chunk
 type runnerLine struct {
 	PromptTokens *int              `json:"prompt_tokens"`
 	Text         *string           `json:"text"`
+	Thought      *string           `json:"thought"`
 	ToolCalls    []json.RawMessage `json:"tool_calls"`
-	Compute      []struct {
+	Logprob      *struct {
+		runnerToken
+		Top []runnerToken `json:"top"`
+	} `json:"logprob"`
+	Compute []struct {
 		IDs    []int64  `json:"ids"`
 		Tokens []string `json:"tokens"`
 	} `json:"compute"`
+}
+
+// runnerToken is one token of a logprob line: its bytes in base64, its id
+// and its log-probability.
+type runnerToken struct {
+	Token string  `json:"token"`
+	ID    int32   `json:"id"`
+	Score float32 `json:"score"`
+}
+
+func (t runnerToken) candidate() (LogprobsCandidate, error) {
+	tok, err := base64.StdEncoding.DecodeString(t.Token)
+	if err != nil {
+		return LogprobsCandidate{}, err
+	}
+	return LogprobsCandidate{Token: string(tok), TokenID: t.ID, LogProbability: t.Score}, nil
 }
 
 // streamJSONLines forwards cloudburrow_generate's JSON lines as chunks:
@@ -325,6 +412,22 @@ func streamJSONLines(ctx context.Context, r io.Reader, out chan<- Chunk, usage *
 			c.Usage = &u
 		case l.Text != nil:
 			c.Text = *l.Text
+		case l.Logprob != nil:
+			chosen, err := l.Logprob.candidate()
+			if err != nil {
+				return
+			}
+			step := LogprobStep{Chosen: chosen}
+			for _, t := range l.Logprob.Top {
+				tc, err := t.candidate()
+				if err != nil {
+					return
+				}
+				step.Top = append(step.Top, tc)
+			}
+			c.Logprobs = []LogprobStep{step}
+		case l.Thought != nil:
+			c.Thought = *l.Thought
 		case len(l.ToolCalls) > 0:
 			c.ToolCalls = parseToolCalls(l.ToolCalls)
 		default:

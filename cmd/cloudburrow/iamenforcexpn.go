@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/cloudburrow/cloudburrow/internal/iameval"
-	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
 )
 
 // Shared VPC's Individual subnets (#2140): a subnet's own policy
@@ -27,15 +25,10 @@ var (
 	computeListUsablePath    = regexp.MustCompile(`^/compute/v1/projects/[^/]+/aggregated/subnetworks/listUsable$`)
 )
 
-// useComputeSubnetIAM registers the subnet policies' reader and wraps the
-// API's testIamPermissions and listUsable answers.
+// useComputeSubnetIAM wraps the API's testIamPermissions and listUsable
+// answers. The subnet policies' reader is the one every Compute resource
+// with a policy shares (#2112, iamenforce7.go).
 func useComputeSubnetIAM(e *iameval.Enforcer, svc *computeService) {
-	e.Policies[iameval.Compute.Name] = func(_ context.Context, resource string) *iampolicy.Stored {
-		if svc.api == nil {
-			return nil
-		}
-		return svc.api.SubnetworkPolicy(resource)
-	}
 	prev := svc.wrapJSON
 	svc.wrapJSON = func(next http.Handler) http.Handler {
 		h := computeSubnetAnswers(e, next)

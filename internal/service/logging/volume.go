@@ -15,7 +15,8 @@ package logging
 //   - billing/bytes_ingested: the bytes of the entries written into log
 //     buckets, an entry counted once per bucket that stores it, by the
 //     entry's monitored resource type, in the bucket's project. Google
-//     leaves _Required out; no entry is written to _Required here.
+//     leaves _Required out (required.go), so the audit entries its sink
+//     routes are not counted.
 //
 // An entry's size is its LogEntry's protocol-buffer size, the measure the
 // 10 MB WriteLogEntries limit uses. Counts are kept per minute of the
@@ -154,7 +155,7 @@ func (s *Server) countIngestion(es []*loggingpb.LogEntry, routes map[*loggingpb.
 			rtype = "global"
 		}
 		r := routes[e]
-		if own := entryParent(e); own.isProject() && (r == nil || !r.hidden) {
+		if own := entryParent(e); own.isProject() && (r == nil || !r.hidden) && !isRequiredLog(e) {
 			add[key{own.id, rtype}] += size
 		}
 		if r == nil {

@@ -245,15 +245,22 @@ resource "google_logging_folder_settings" "f" {
 // `cloudburrow terraform` (egress blocked), are read back with the official
 // ConfigClient, plan clean, take a change in place, plan clean again, and are
 // destroyed: the sink and exclusion are NOT_FOUND and _Default stays. The
-// billing account is any ID of the documented form: Cloud Billing is not
-// served, so nothing checks it exists (#1395).
+// billing account is a subaccount Cloud Billing holds (#2109): Logging
+// checks it exists.
+// envStorageLogging is Cloud Logging as the storage shard exports it
+// (STORAGE_LOGGING), for TestTerraformLoggingBillingAccount alone.
+const envStorageLogging = "CLOUDBURROW_TEST_STORAGE_LOGGING"
+
 // covers: google.logging.v2.ConfigServiceV2/CreateSink, google.logging.v2.ConfigServiceV2/GetSink, google.logging.v2.ConfigServiceV2/UpdateSink, google.logging.v2.ConfigServiceV2/DeleteSink, google.logging.v2.ConfigServiceV2/CreateExclusion, google.logging.v2.ConfigServiceV2/GetExclusion, google.logging.v2.ConfigServiceV2/UpdateExclusion, google.logging.v2.ConfigServiceV2/DeleteExclusion, google.logging.v2.ConfigServiceV2/GetBucket, google.logging.v2.ConfigServiceV2/UpdateBucket
 func TestTerraformLoggingBillingAccount(t *testing.T) {
 	h := New(t)
+	// The storage shard's Cloud Logging, under its own name, beside its
+	// OpenTofu and Resource Manager, so the Logging suite stays in served.
+	shardEndpoint(h, envStorageLogging, EnvLogging)
 	config := loggingConfigClient(t, h)
 	ctx := h.Context()
-	accountID := fmt.Sprintf("0A0B0C-0D0E0F-%06d", time.Now().UnixNano()%1000000)
-	account := "billingAccounts/" + accountID
+	account := billingSubaccount(t, h, "terraform logging")
+	accountID := strings.TrimPrefix(account, "billingAccounts/")
 	module := func(severity, description string, retention int) string {
 		return fmt.Sprintf(`
 resource "google_logging_billing_account_sink" "s" {

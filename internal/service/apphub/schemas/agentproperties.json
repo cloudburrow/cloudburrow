@@ -1,0 +1,67 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "apphub.googleapis.com/AgentProperties",
+  "description": "The schema for apphub.googleapis.com/AgentProperties. Except for framework, the properties are derived from the A2A Agent Card.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "displayName": {
+      "type": "string",
+      "description": "The display name of the agent."
+    },
+    "description": {
+      "type": "string",
+      "description": "The description of the agent."
+    },
+    "version": {
+      "type": "string",
+      "description": "Contains the version of the Agent."
+    },
+    "framework": {
+      "type": "string",
+      "description": "The agent framework used to develop the agent."
+    },
+    "agentCardUri": {
+      "type": "string",
+      "description": "The URI of the agent card for the agent."
+    },
+    "skills": {
+      "type": "array",
+      "description": "A list of skills the agent possesses.",
+      "items": {
+        "type": "object",
+        "title": "Skills",
+        "description": "Defines a skill for an agent.",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "A unique identifier for the agent's skill."
+          },
+          "name": {
+            "type": "string",
+            "description": "A human readable name for the agent's skill."
+          },
+          "description": {
+            "type": "string",
+            "description": "A description of the agent's skill."
+          },
+          "tags": {
+            "type": "array",
+            "description": "A set of keywords describing the skill's capabilities.",
+            "items": {
+              "type": "string"
+            }
+          },
+          "examples": {
+            "type": "array",
+            "description": "Example prompts or scenarios that this skill can handle.",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  }
+}

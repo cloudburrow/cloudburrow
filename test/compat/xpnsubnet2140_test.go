@@ -20,7 +20,7 @@ import (
 // compute/apiv1 SubnetworksRESTClient: a host project's subnet starts with
 // the empty policy (an etag, no bindings), SetIamPolicy grants
 // roles/compute.networkUser on it, GetIamPolicy (requested version 3)
-// returns it with the new etag, a stale etag is refused (412),
+// returns it with the new etag, a stale etag is refused (409, as IAM's Policy concurrency documents),
 // TestIamPermissions answers for the instance's own account, and
 // ListUsable lists the host's subnets for its attached service project
 // (and, with serviceProject, on the host) across regions.
@@ -100,7 +100,7 @@ func TestSharedVPCIndividualSubnetsThroughTheGoClient2140(t *testing.T) {
 		t.Fatalf("GetIamPolicy: %v %v", got, err)
 	}
 	if _, err := subnets.SetIamPolicy(ctx, &computepb.SetIamPolicySubnetworkRequest{Project: host, Region: region, Resource: "default",
-		RegionSetPolicyRequestResource: &computepb.RegionSetPolicyRequest{Policy: &computepb.Policy{Etag: proto.String(empty)}}}); err == nil || !strings.Contains(err.Error(), "412") {
+		RegionSetPolicyRequestResource: &computepb.RegionSetPolicyRequest{Policy: &computepb.Policy{Etag: proto.String(empty)}}}); err == nil || !strings.Contains(err.Error(), "409") {
 		t.Fatalf("a stale etag: %v", err)
 	}
 	tp, err := subnets.TestIamPermissions(ctx, &computepb.TestIamPermissionsSubnetworkRequest{Project: host, Region: region, Resource: "default",

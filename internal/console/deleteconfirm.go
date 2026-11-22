@@ -68,6 +68,8 @@ var DeleteConfirmRules = map[string]DeleteConfirmRule{
 	"tags": unverified,
 	// UNVERIFIED: Google's Analytics Hub docs describe no dialog for deleting a data exchange (docs re-read 2026-11-20: https://docs.cloud.google.com/bigquery/docs/analytics-hub-manage-exchanges)
 	"bigquery-sharing": unverified,
+	// More actions > Delete, then enter delete to confirm (docs read 2026-11-21).
+	"bigquery-clean-rooms": {Style: DeleteConfirmWord, Source: "https://docs.cloud.google.com/bigquery/docs/data-clean-rooms", Verified: true},
 	// UNVERIFIED: "Select the checkbox for the roles ... click Delete." No dialog described (docs re-read 2026-11-19).
 	"iam-roles": unverified,
 	// "Confirm that you want to delete the group by clicking Confirm in the confirmation dialog."
@@ -75,6 +77,13 @@ var DeleteConfirmRules = map[string]DeleteConfirmRule{
 	// UNVERIFIED: no console steps for deleting an SSO profile or an assignment (https://knowledge.workspace.google.com/admin/apps/setting-up-sso re-read 2026-11-20)
 	"iam-sso-profiles":    unverified,
 	"iam-sso-assignments": unverified,
+	// UNVERIFIED (re-read 2026-11-21): the Admin console's Delete user,
+	// Delete device, a policy's and an allowlisted domain's removal
+	// describe no typed confirmation (https://knowledge.workspace.google.com/admin).
+	"iam-users":               unverified,
+	"iam-devices":             unverified,
+	"iam-identity-policies":   unverified,
+	"iam-allowlisted-domains": unverified,
 	// UNVERIFIED: "Select the service account ... click Delete." No dialog described (docs re-read 2026-11-19).
 	"iam-service-accounts": unverified,
 	// a label is removed with its delete icon, then Save: nothing typed.
@@ -147,6 +156,8 @@ var DeleteConfirmRules = map[string]DeleteConfirmRule{
 	"logging-saved-queries": unverified,
 	// UNVERIFIED: "select Delete scope, and then complete the dialog." Its contents not described (docs re-read 2026-11-19).
 	"logging-log-scopes": unverified,
+	// UNVERIFIED: "click More, and then select Delete scope." No dialog described (docs re-read 2026-11-21).
+	"logging-trace-scopes": unverified,
 	// "confirm deletion by typing the database ID in the text field."
 	"firestore-databases": {Style: DeleteConfirmName, Source: "https://docs.cloud.google.com/firestore/native/docs/manage-databases", Verified: true},
 	// "Click Delete, and then confirm you want to delete the Task entity."
@@ -193,6 +204,10 @@ var DeleteConfirmRules = map[string]DeleteConfirmRule{
 	// "Follow additional instructions"; the dialog itself is not described
 	// (https://docs.cloud.google.com/iam/docs/manage-workforce-identity-pools-providers).
 	"iam-workforce-identity": unverified,
+	// UNVERIFIED (re-read 2026-11-20): principal access boundary policies
+	// (#2057): the console steps for deleting a policy or a binding are not
+	// described (https://docs.cloud.google.com/iam/docs/principal-access-boundary-policies-create).
+	"iam-principal-access-boundary": unverified,
 	// Model Registry (#1940): "Click Delete on the confirmation screen."
 	"vertex-models": {Style: DeleteConfirmClick, Source: "https://docs.cloud.google.com/vertex-ai/docs/model-registry/delete-model", Verified: true},
 	// UNVERIFIED: "click Actions, and then click Delete endpoint." No dialog

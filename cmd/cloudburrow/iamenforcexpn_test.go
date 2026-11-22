@@ -35,7 +35,7 @@ func TestSharedVPCIndividualSubnetsEnforced(t *testing.T) {
 	}
 	src := xpnSource{"projects/svc": {Bindings: []iampolicy.Binding{{Role: "roles/editor", Members: []string{"user:dev@example.com"}}}}}
 	on := true
-	e := &iameval.Enforcer{Eval: &iameval.Evaluator{Source: src}, On: func() bool { return on }, Policies: map[string]iameval.PolicyGetter{},
+	e := &iameval.Enforcer{Eval: &iameval.Evaluator{Source: src}, On: func() bool { return on }, Policies: map[string]iameval.PolicyGetter{}, Resources: map[string]iameval.ResourceLister{},
 		CallerOf: func(b string) iameval.Caller { return iameval.Caller{Email: b} }, OwnerEmail: "owner@example.com"}
 	svc := &computeService{api: api}
 	iamEnforced7{compute: svc}.use(e)
@@ -90,9 +90,11 @@ func TestSharedVPCIndividualSubnetsEnforced(t *testing.T) {
 	if got := asString(tp["permissions"]); got != `["compute.subnetworks.use"]` {
 		t.Fatalf("testIamPermissions on a: %v", tp)
 	}
-	if code, _ := do("dev@example.com", "POST", "host/regions/us-central1/subnetworks/b/testIamPermissions",
-		map[string]any{"permissions": []any{"compute.subnetworks.use"}}); code != http.StatusForbidden {
-		t.Fatalf("testIamPermissions on b needs compute.subnetworks.list there: %d", code)
+	// On b, which is not shared with dev, it holds none (#2112's answer:
+	// what the caller holds, with no permission of its own needed).
+	if tb := mustOK(do("dev@example.com", "POST", "host/regions/us-central1/subnetworks/b/testIamPermissions",
+		map[string]any{"permissions": []any{"compute.subnetworks.use"}})); tb["permissions"] != nil {
+		t.Fatalf("testIamPermissions on b: %v", tb)
 	}
 	if code, _ := do("dev@example.com", "POST", "host/regions/us-central1/subnetworks/a/setIamPolicy", map[string]any{"policy": map[string]any{}}); code != http.StatusForbidden {
 		t.Fatalf("dev setIamPolicy: %d", code)

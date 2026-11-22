@@ -173,8 +173,19 @@ func (h hubLinker) do(ctx context.Context, method, path string, link *analyticsh
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if link != nil {
-		v, _ := json.Marshal(map[string]any{"sourceProject": link.SourceProject, "sourceDataset": link.SourceDataset, "tables": link.Tables,
-			"restricted": link.Restricted, "queryResult": link.RestrictQueryResult, "revoked": link.Revoked})
+		m := map[string]any{"sourceProject": link.SourceProject, "sourceDataset": link.SourceDataset, "tables": link.Tables,
+			"restricted": link.Restricted, "queryResult": link.RestrictQueryResult, "revoked": link.Revoked}
+		if link.CleanRoom {
+			// A data clean room's one linked dataset (#2101): each
+			// listing's table, view or routine, from its own dataset.
+			res := make([]map[string]any, 0, len(link.Resources))
+			for _, r := range link.Resources {
+				res = append(res, map[string]any{"sourceProject": r.SourceProject, "sourceDataset": r.SourceDataset,
+					"table": r.Table, "routine": r.Routine, "queryResult": r.RestrictQueryResult})
+			}
+			m["cleanRoom"], m["resources"] = true, res
+		}
+		v, _ := json.Marshal(m)
 		req.Header.Set(bigqueryfront.HubLinkHeader, string(v))
 	}
 	resp, err := h.client.Do(req)

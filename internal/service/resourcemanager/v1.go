@@ -26,10 +26,9 @@ import (
 // operations.get for the operations create returns, over the same Registry
 // the v3 API and the console use.
 //
-// Also served, because google_project reads it on every refresh: a Cloud
-// Billing projects.getBillingInfo that says billing is disabled. There is no
-// billing locally, and "disabled" is the honest answer to the question the
-// provider asks; nothing else of Cloud Billing is served.
+// Cloud Billing's projects.getBillingInfo, which google_project reads on
+// every refresh, is the Cloud Billing API's (internal/service/billing,
+// #2109), served on this port before these routes.
 
 // v1Ops remembers the completed operations v1 create returned, so a client
 // that polls operations.get finds them.
@@ -101,8 +100,6 @@ func (s *ProjectsServer) v1Routes(r *rest.Router, ops *v1Ops) {
 		}
 		return rest.WriteJSON(w, http.StatusOK, op)
 	})
-	// Cloud Billing's read of a project's billing, for google_project.
-	r.Handle("GET /v1/projects/{project}/billingInfo", s.billingInfo)
 	r.Handle("GET /v1/{rest...}", func(http.ResponseWriter, *http.Request) error {
 		return apierror.Unimplemented("this v1 method is not implemented")
 	})
@@ -314,21 +311,4 @@ func (s *ProjectsServer) v1Verb(w http.ResponseWriter, r *http.Request) error {
 		return serveIAM(w, r, s, "projects/"+id, verb)
 	}
 	return s.v1OrgPolicy(w, r, "projects/"+id, verb)
-}
-
-// billingInfo is Cloud Billing's projects.getBillingInfo. Billing is never
-// enabled locally.
-func (s *ProjectsServer) billingInfo(w http.ResponseWriter, r *http.Request) error {
-	id, err := rest.PathValue(r, "project")
-	if err != nil {
-		return err
-	}
-	if _, err := s.reg.Get(id); err != nil {
-		return err
-	}
-	return rest.WriteJSON(w, http.StatusOK, map[string]any{
-		"name":           "projects/" + id + "/billingInfo",
-		"projectId":      id,
-		"billingEnabled": false,
-	})
 }

@@ -255,8 +255,10 @@ type scriptNode struct {
 	forVar     string
 	caseExpr   []token
 	target     string // BREAK's or CONTINUE's label
-	// procSpan is a CREATE PROCEDURE's body, BEGIN ... END, in the script.
+	// procSpan is a CREATE PROCEDURE's body, BEGIN ... END, in the script;
+	// for a procedure for Apache Spark (spark), the whole statement.
 	procSpan [2]int
+	spark    bool
 }
 
 type scriptParser struct {
@@ -545,6 +547,9 @@ type scriptRun struct {
 	sql    string
 	scopes []map[string]scriptVar
 	steps  int
+	// sparkProps is @@spark_proc_properties, set before a CALL of a
+	// stored procedure for Apache Spark (sparkprocs.go, #2104).
+	sparkProps map[string]string
 	// depth is the procedure calls the statement running is in; loc the
 	// innermost procedure's project.dataset.name (procedures.go).
 	depth int
@@ -1715,6 +1720,9 @@ func (s *scriptRun) assigned() *scriptFlow {
 // set carries out SET x = expr and SET (a, b) = (expr, expr) or a STRUCT.
 func (s *scriptRun) set(toks []token) *scriptFlow {
 	body := toks[1:]
+	if len(body) > 2 && body[0].punct("@") && body[1].punct("@") && body[2].is("spark_proc_properties") {
+		return s.setSparkProcProperty(toks) // sparkprocs.go, #2104
+	}
 	if len(body) > 0 && body[0].punct("(") {
 		return s.setTuple(toks)
 	}

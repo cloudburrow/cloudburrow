@@ -24,9 +24,9 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/metrics"
 	"github.com/cloudburrow/cloudburrow/internal/modelgarden"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
-	"github.com/cloudburrow/cloudburrow/internal/ratequota"
 	"github.com/cloudburrow/cloudburrow/internal/service/apikeys"
 	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
+	"github.com/cloudburrow/cloudburrow/internal/service/billing"
 	"github.com/cloudburrow/cloudburrow/internal/service/cloudquotas"
 	"github.com/cloudburrow/cloudburrow/internal/service/datatransfer"
 	"github.com/cloudburrow/cloudburrow/internal/service/monitoring"
@@ -46,8 +46,10 @@ type consoleDeps struct {
 	cfg config.Config
 	// iam is the IAM evaluator Policy Troubleshooter and Policy Analyzer
 	// answer from (#1879); nil leaves those pages without answers.
-	iam     *iameval.Enforcer
-	localAI *vertexai.Server
+	iam *iameval.Enforcer
+	// assetOut are Cloud Asset's analysis destinations (#2112).
+	assetOut *assetOutputs
+	localAI  *vertexai.Server
 	// localModels manages the local AI models, shared with the admin API
 	// (#1396); nil makes one for the console alone.
 	localModels *localai.Manager
@@ -89,6 +91,8 @@ type consoleDeps struct {
 	// Domain verification.
 	cloudQuotas *cloudquotas.Server
 	siteVerify  *siteverification.Server
+	// billing (#2109) backs the Billing pages.
+	billing *billing.Server
 	// authPlatform backs the OAuth consent screen and OAuth clients.
 	authPlatform *authplatform.Store
 	// requestMetrics are the request counters, which APIs & Services
@@ -97,9 +101,6 @@ type consoleDeps struct {
 	// requestHistory is their one-minute history per project, which the
 	// APIs & Services charts read over a time range (#1866).
 	requestHistory *monitoring.RequestBuiltin
-	// requestQuotas are the request quotas (#2063), which an API's Quotas
-	// & System Limits tab lists and edits.
-	requestQuotas *ratequota.Limiter
 	// backupdr is the Backup and DR Service (#1433), nil unless enabled.
 	backupdr *backupdr.Server
 	// privateCA is Certificate Authority Service (#1834), nil unless enabled.
@@ -110,6 +111,12 @@ type consoleDeps struct {
 	workflows *workflowsService
 	// parameterManager is Parameter Manager (#2054), nil unless enabled.
 	parameterManager *parameterManagerService
+	// dataform is Dataform (#2105), nil unless enabled.
+	dataform *dataformService
+	// appHub is App Hub (#2110), nil unless enabled.
+	appHub *appHubService
+	// trace is Cloud Trace (#2118), nil unless enabled.
+	trace *traceService
 	// gke is the Kubernetes Engine API (#1913), nil unless enabled.
 	gke *gkeService
 	// monitoring is Cloud Monitoring (#1939), nil unless enabled.
@@ -201,9 +208,11 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			h.sinks = &loggingAdminScreen{svc: d.logging, faults: d.faults}
 		}
 		providers = append(providers, projectsProvider{registry: d.projects}, h, tagsProvider{registry: d.projects},
-			projectIAMProvider{registry: d.projects, iam: d.iam}, iamRolesProvider{registry: d.projects}, iamGroupsProvider{registry: d.projects},
+			projectIAMProvider{registry: d.projects, iam: d.iam, assetOut: d.assetOut}, iamRolesProvider{registry: d.projects}, iamGroupsProvider{registry: d.projects},
 			iamSSOProfilesProvider{registry: d.projects}, iamSSOAssignmentsProvider{registry: d.projects},
-			iamServiceAccountsProvider{registry: d.projects}, iamWorkloadIdentityProvider{registry: d.projects}, iamWorkforceIdentityProvider{registry: d.projects}, iamAuditProvider{registry: d.projects},
+			ciUsersProvider{registry: d.projects}, ciDevicesProvider{registry: d.projects}, ciInvitationsProvider{registry: d.projects},
+			ciPoliciesProvider{registry: d.projects}, ciAllowlistProvider{registry: d.projects},
+			iamServiceAccountsProvider{registry: d.projects}, iamWorkloadIdentityProvider{registry: d.projects}, iamWorkforceIdentityProvider{registry: d.projects}, iamPABProvider{registry: d.projects}, iamAuditProvider{registry: d.projects},
 			iamOrgPoliciesProvider{registry: d.projects}, iamLabelsProvider{registry: d.projects}, iamSettingsProvider{registry: d.projects})
 	}
 	if enabled[config.ServiceStorage] && storageAddr != "" {
@@ -341,7 +350,7 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	// Certificate Authority Service (#1834) runs in this process too.
 	// BigQuery's Sharing (Analytics Hub) page (#1960).
 	if d.analyticsHub != nil {
-		providers = append(providers, analyticsHubProvider{svc: d.analyticsHub})
+		providers = append(providers, analyticsHubProvider{svc: d.analyticsHub}, cleanRoomsProvider{svc: d.analyticsHub}) // clean rooms: #2101
 	}
 	if enabled[config.ServicePrivateCA] && d.privateCA != nil {
 		providers = append(providers, privateCAProvider{svc: d.privateCA}, privateCATemplatesProvider{svc: d.privateCA})
@@ -351,6 +360,16 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		providers = append(providers, parameterManagerProvider{svc: d.parameterManager},
 			parameterTemplatesProvider{svc: d.parameterManager})
 	}
+	// Dataform (#2105), in process, under BigQuery.
+	if enabled[config.ServiceDataform] && d.dataform != nil {
+		df := dataformProvider{svc: d.dataform}
+		providers = append(providers, df, dataformFoldersProvider{df: df}, dataformSettingsProvider{df: df})
+	}
+	// App Hub (#2110), in process: Applications, Services and workloads,
+	// Settings.
+	if enabled[config.ServiceAppHub] && d.appHub != nil {
+		providers = append(providers, appHubProvider{svc: d.appHub}, appHubDiscoveredProvider{svc: d.appHub}, appHubSettingsProvider{svc: d.appHub})
+	}
 	// Workflows (#1986), in process.
 	if enabled[config.ServiceWorkflows] && d.workflows != nil {
 		wp := workflowsProvider{svc: d.workflows, logs: d.logging, eventarc: workflowsEventarc}
@@ -359,6 +378,15 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			wp.scheduler = d.scheduler
 		}
 		providers = append(providers, wp)
+	}
+	// Cloud Trace (#2118), in process: the Trace Explorer and its trace
+	// details, whose trace scopes and log entries are Cloud Logging's.
+	if enabled[config.ServiceTrace] && d.trace != nil {
+		tp := traceExplorerProvider{svc: d.trace}
+		if enabled[config.ServiceLogging] {
+			tp.logging = d.logging
+		}
+		providers = append(providers, tp)
 	}
 	// Cloud Monitoring (#1939) runs in this process too: Metrics explorer
 	// and Metrics management.
@@ -393,6 +421,9 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			// Cloud Router and Cloud NAT (#2140).
 			computeRoutersProvider{screen}, computeNATProvider{screen}, computeSharedVPCProvider{screen},
 			computePSCEndpointsProvider{screen}, computePSCPublishedProvider{screen},
+			// Cloud Load Balancing (#2153, consolecomputelb2153.go).
+			computeLBProvider{screen}, computeLBBackendsProvider{screen}, computeLBFrontendsProvider{screen},
+			computeHealthChecksProvider{screen}, computeNEGsProvider{screen}, computeLBCertsProvider{screen},
 			// Serverless VPC Access (#2140), on the same port.
 			vpcAccessProvider{screen},
 			computeInternalAddressesProvider{computeAddressesProvider{screen}}, computeEffectiveRoutesProvider{screen},
@@ -411,9 +442,14 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	if enabled[config.ServiceScheduler] && d.scheduler != nil {
 		providers = append(providers, schedulerProvider{svc: d.scheduler, faults: d.faults, logs: d.logging})
 	}
+	// Billing (#2109): always served, on the Resource Manager port.
+	if d.billing != nil {
+		bc := billingConsole{srv: d.billing, catalog: billingCatalogRef, projects: d.projects}
+		providers = append(providers, billingAccountsProvider{bc}, billingProjectsProvider{bc}, billingBudgetsProvider{bc}, billingPricingProvider{bc})
+	}
 	// APIs & Services (#1352): always served, as projects are.
 	if d.serviceUsage != nil {
-		providers = append(providers, serviceUsageProvider{api: d.serviceUsage, metrics: d.requestMetrics, history: d.requestHistory, apiKeys: d.apiKeys, quotas: d.cloudQuotas, requestQuotas: d.requestQuotas, sites: d.siteVerify, auth: d.authPlatform, metaAddr: d.metaAddr}, serviceUsageOperationsProvider{api: d.serviceUsage})
+		providers = append(providers, serviceUsageProvider{api: d.serviceUsage, metrics: d.requestMetrics, history: d.requestHistory, apiKeys: d.apiKeys, quotas: d.cloudQuotas, sites: d.siteVerify, auth: d.authPlatform, metaAddr: d.metaAddr}, serviceUsageOperationsProvider{api: d.serviceUsage})
 	}
 	// Backup and DR (#1433), in process, restoring through Cloud SQL.
 	if enabled[config.ServiceBackupDR] && d.backupdr != nil {
@@ -441,7 +477,12 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			loggingSettingsProvider{screen},
 			// Saved queries and log scopes (#1519).
 			loggingSavedQueriesProvider{screen},
-			loggingLogScopesProvider{loggingAdminScreen: screen})
+			loggingLogScopesProvider{loggingAdminScreen: screen},
+			// Trace scopes (#2108), a tab of Settings beside Log Scopes.
+			loggingTraceScopesProvider{loggingAdminScreen: screen},
+			// The Observability API's settings and buckets (#2117), tabs
+			// of Settings too.
+			observabilitySettingsProvider{screen}, observabilityBucketsProvider{screen})
 		// Log Analytics (#1863), over the buckets' linked datasets in the
 		// instance's BigQuery; without BigQuery the page says it is not
 		// available.
@@ -557,7 +598,7 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			transcriptions.ws = speechWorkspaces{storage: storageProvider{endpoint: storageAddr}}
 		}
 		providers = append(providers, docAIOverviewProvider{d: docs}, docAIGalleryProvider{d: docs},
-			docAIProcessorsProvider{d: docs, analyses: &docAIAnalyses{}},
+			docAIProcessorsProvider{d: docs, analyses: &docAIAnalyses{}, labels: d.localAI},
 			transcriptions, speechRecognizersProvider{s: sp},
 			speechCustomClassesProvider{s: sp}, speechPhraseSetsProvider{s: sp})
 	}
@@ -795,6 +836,9 @@ var serviceTitles = map[config.Service]string{
 	config.ServiceCompute:          "VPC network",
 	config.ServiceWorkflows:        "Workflows",
 	config.ServiceParameterManager: "Parameter Manager",
+	config.ServiceDataform:         "Dataform",
+	config.ServiceAppHub:           "App Hub",
+	config.ServiceTrace:            "Cloud Trace",
 }
 
 func serviceTitle(s config.Service) string {

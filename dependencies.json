@@ -8,12 +8,124 @@
   ],
   "schemaVersion": 1,
   "lastVerified": "2026-09-21",
+  "project": {
+    "$comment": "CloudBurrow's own licence, which test/repo's TestLicence checks against LICENSE. Every component below keeps its own licence; the guard refuses GPL, LGPL and AGPL code in third_party/ and in the modules linked into the CLI.",
+    "name": "cloudburrow",
+    "license": "MIT",
+    "licenseFrom": "v0.6.0",
+    "earlierReleases": "v0.1.0 to v0.5.0: first published under Apache-2.0; their CloudBurrow code is also available under MIT"
+  },
   "mode": {
     "verified": "The pinned set below. Used by all ordinary, release and offline builds.",
     "latestCandidate": "Discovered by #31, tested in isolation, never used for release artifacts until promoted here."
   },
   "components": {
+    "videodecode": {
+      "debianBase": {
+        "$comment": "internal/videodecode/Dockerfile builds FROM this digest (#1651): the video decoder image the CLI builds locally on the first AVI, FLV, MPEG or WMV video sent to multimodalembedding@001's :predict.",
+        "image": "debian:trixie-slim",
+        "digest": "sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2",
+        "license": "DFSG-free Debian packages (see /usr/share/doc/*/copyright)",
+        "redistribution": "not published: built locally by `cloudburrow up` (tag cloudburrow/videodecode:<Dockerfile hash>) and run with --network none",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "notes": "Multi-arch OCI index, resolved 2026-11-21. The Docker official debian image, third-party: Google publishes no FFmpeg image.",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect debian:trixie-slim`."
+      },
+      "ffmpeg": {
+        "$comment": "apt-get install ffmpeg=7:7.1.5-0+deb13u1 from snapshot.debian.org 20261120T000000Z in internal/videodecode/Dockerfile (#1651): ffprobe lists a video's frames and ffmpeg decodes the sampled ones to raw planes.",
+        "version": "7:7.1.5-0+deb13u1",
+        "source": "https://snapshot.debian.org/archive/debian/20261120T000000Z/pool/main/f/ffmpeg/",
+        "license": "GPL-2.0-or-later and LGPL-2.1-or-later (Debian's build)",
+        "redistribution": "not published: installed into the locally built decoder image and run there as a separate program; no FFmpeg code is in the repository or linked into the CLI",
+        "updateFeed": "debian-snapshot",
+        "verification": "built-and-run",
+        "skipDiscovery": "Debian package; depcheck only discovers GitHub-sourced components."
+      }
+    },
     "bigqueryml": {
+      "sparkImage": {
+        "$comment": "BigQuery's stored procedures for Apache Spark (#2104), runtime versions 1.2, 2.2 and 2.3 (Spark 3.5): cmd/cloudburrow/sparkrunner.go runs spark-submit --master local[*] in this image, on a per-run docker network create --internal network, its one peer a relay (python3 in the same image) to the instance's BigQuery REST and Storage API ports.",
+        "image": "apache/spark:3.5.9-scala2.12-java17-python3-ubuntu",
+        "digest": "sha256:f3d6eaa8bab8ec2e38f3c3918a5b2f8b253c95bcb19f9e87ad0e0cdacf9df2d5",
+        "license": "Apache-2.0 (Apache Spark) and the Ubuntu and Eclipse Temurin packages it is built on",
+        "redistribution": "not published: pulled by digest by the local CLI on the first CALL of a Spark procedure",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "notes": "Resolved 2026-11-21. The Apache Software Foundation's official image; Google publishes no Spark image an instance may run (Serverless for Apache Spark's runtimes are not published images).",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve with `docker buildx imagetools inspect apache/spark:3.5.9-scala2.12-java17-python3-ubuntu`."
+      },
+      "sparkImage30": {
+        "$comment": "Runtime version 3.0 of BigQuery's stored procedures for Apache Spark (#2104, round 3): Spark 4.0.1 on Java 21, as https://docs.cloud.google.com/managed-spark/docs/concepts/versions/spark-runtime-3.0 lists runtime 3.0.14 (re-read 2026-11-21). cmd/cloudburrow/sparkrunner.go runs it as sparkImage is run.",
+        "image": "apache/spark:4.0.1-scala2.13-java21-python3-ubuntu",
+        "digest": "sha256:fb5c5e61e7bb1be94b7f3a31afe1f73c5b4d20b6008f4ffa7278fc085da08a9e",
+        "license": "Apache-2.0 (Apache Spark) and the Ubuntu and Eclipse Temurin packages it is built on",
+        "redistribution": "not published: pulled by digest by the local CLI on the first CALL of a runtime 3.0 Spark procedure",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "notes": "Resolved 2026-11-21 with docker buildx imagetools inspect.",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve with `docker buildx imagetools inspect apache/spark:4.0.1-scala2.13-java21-python3-ubuntu`."
+      },
+      "sparkImage40": {
+        "$comment": "Runtime version 4.0 of BigQuery's stored procedures for Apache Spark (#2104, round 3): Spark 4.2.0 on Java 25, as https://docs.cloud.google.com/managed-spark/docs/concepts/versions/spark-runtime-4.0 lists runtime 4.0.0 (re-read 2026-11-21).",
+        "image": "apache/spark:4.2.0-scala2.13-java25-python3-ubuntu",
+        "digest": "sha256:0a8fa37711b6afe90a1bfe4427a6415b0f315f51f6957ca1bee77d255ebb9e86",
+        "license": "Apache-2.0 (Apache Spark) and the Ubuntu and Eclipse Temurin packages it is built on",
+        "redistribution": "not published: pulled by digest by the local CLI on the first CALL of a runtime 4.0 Spark procedure",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "notes": "Resolved 2026-11-21 with docker buildx imagetools inspect.",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve with `docker buildx imagetools inspect apache/spark:4.2.0-scala2.13-java25-python3-ubuntu`."
+      },
+      "sparkBigQueryConnector40": {
+        "$comment": "Google's BigQuery connector for Apache Spark 4.0 (#2104, round 3), for runtime version 3.0's Spark procedures; fetched and checked as sparkBigQueryConnector is.",
+        "version": "0.46.2",
+        "source": "https://repo1.maven.org/maven2/com/google/cloud/spark/spark-4.0-bigquery/0.46.2/spark-4.0-bigquery-0.46.2.jar",
+        "sha256": "b09c4455875d7811971796091371d4dda646029b349c35ef95f578f133607e0e",
+        "license": "Apache-2.0",
+        "redistribution": "not published: downloaded by the local CLI; nothing of it is in the CLI or the repository",
+        "updateFeed": "maven-central",
+        "verification": "sha256",
+        "skipDiscovery": "Maven Central; depcheck only discovers GitHub-sourced components."
+      },
+      "sparkBigQueryConnector42": {
+        "$comment": "Google's BigQuery connector for Apache Spark 4.2 (#2104, round 3), for runtime version 4.0's Spark procedures; fetched and checked as sparkBigQueryConnector is.",
+        "version": "0.46.2",
+        "source": "https://repo1.maven.org/maven2/com/google/cloud/spark/spark-4.2-bigquery/0.46.2/spark-4.2-bigquery-0.46.2.jar",
+        "sha256": "45778166a2ebdf1a0e2d758fc0970ff65673f026bc3cb9014dcc242fcba00977",
+        "license": "Apache-2.0",
+        "redistribution": "not published: downloaded by the local CLI; nothing of it is in the CLI or the repository",
+        "updateFeed": "maven-central",
+        "verification": "sha256",
+        "skipDiscovery": "Maven Central; depcheck only discovers GitHub-sourced components."
+      },
+      "sparkBigQueryConnector": {
+        "$comment": "Google's BigQuery connector for Apache Spark (#2104), passed to spark-submit --jars: Spark procedures read and write the instance's BigQuery through it (bigQueryHttpEndpoint, bigQueryStorageGrpcEndpoint). Fetched by the CLI from Maven Central on the first CALL, checked against this SHA-256 (cmd/cloudburrow/sparkrunner.go) and kept in <state-dir>/models/spark.",
+        "version": "0.46.2",
+        "source": "https://repo1.maven.org/maven2/com/google/cloud/spark/spark-3.5-bigquery/0.46.2/spark-3.5-bigquery-0.46.2.jar",
+        "sha256": "817aafccd47b4756f7ae5bb51b509d5642140ead0fb3da06f1a20c24e9baa0ac",
+        "license": "Apache-2.0",
+        "redistribution": "not published: downloaded by the local CLI; nothing of it is in the CLI or the repository",
+        "updateFeed": "maven-central",
+        "verification": "sha256",
+        "skipDiscovery": "Maven Central; depcheck only discovers GitHub-sourced components."
+      },
       "tfconvertBase": {
         "$comment": "deploy/tfconvert/Dockerfile builds FROM this digest (#1775): the TensorFlow SavedModel converter image the CLI builds locally on the first imported TENSORFLOW model.",
         "image": "python:3.12-slim",
@@ -1151,6 +1263,7 @@
         "skipDiscovery": "Pinned by commit, not by release tag: releases publish no Linux artifact, so the tag is not what is consumed.",
         "runtimeLibraries": "litert_lm_main links libGemmaModelConstraintProvider.so, which upstream ships prebuilt under prebuilt/linux_{arm64,x86_64}/ and locates through a RUNPATH into Bazel's output tree. The runtime image must stage those libraries explicitly; copying only the binary builds an image that fails on first run.",
         "binaries": "cloudburrow_generate (generation, verified: deploy/litert-lm/runner, CloudBurrow's Apache-2.0 derivative of litert_lm_main.cc on LiteRT-LM's C++ API, setting the sampler, the token limit and llguidance constraints per request, #1797, #1779; whole conversations with tools, images, presence/frequency penalties and token counts over --request_stdin, #1937, built with --define=LITERT_LM_FST_CONSTRAINTS_DISABLED=1 so the LLGuidance tool-call grammar applies tool_choice), litert_lm_main (upstream's, kept in the image) and embedding_litert_lm_main (embeddings, runs but has no compatible model)",
+        "patches": "deploy/litert-lm/patches/, CloudBurrow's own (Apache-2.0), applied with git apply in file-name order before the build, which fails when one no longer applies: 0001-decode-step-logprobs.patch adds runtime/core:decode_step_observer, which reports each external-sampler decode step's chosen and top-k tokens with the log-softmax of the model's logits before any constraint (responseLogprobs and logprobs, #2107). Provenance in deploy/litert-lm/patches/PROVENANCE.md.",
         "transitive": "Constrained decoding links upstream's own llguidance dependency (guidance-ai/llguidance, MIT), which LiteRT-LM's Bazel workspace fetches and builds; CloudBurrow adds no dependency of its own"
       },
       "litertLMBase": {
@@ -1438,7 +1551,7 @@
         "digestNote": "SHA-256 of the versioned archive, computed on download 2026-11-19 (its tar, gunzipped: sha256 5f80cdf432eefca57f6e3b1755229ee7339c46a6de7937fab124ba32e6529574). Google publishes a checksum only for the unversioned google-cloud-cli-linux-x86_64.tar.gz. 593.0.0 replaced 586.0.0 for `gcloud alpha source-manager hooks` (#1927), which 586.0.0 does not have."
       },
       "hashicorpGoogleProvider": {
-        "version": "8.4.0",
+        "version": "8.12.0",
         "source": "https://github.com/hashicorp/terraform-provider-google",
         "registries": [
           "registry.terraform.io/hashicorp/google",
@@ -1447,7 +1560,7 @@
         "license": "MPL-2.0",
         "redistribution": "pull-only",
         "scope": "test-only",
-        "usedBy": "The Terraform and OpenTofu tests in test/compat: every module requires exactly this version (googleProviderVersion in test/compat/realtools_test.go) and inits against test/compat/testdata/terraform/.terraform.lock.hcl, except TestTerraformRunServiceScalingControls, which requires 8.5.0 (the first release with google_cloud_run_v2_service template.scaling cpu_utilization and concurrency_utilization, #1802) and inits against test/compat/testdata/terraform-8.5.0/.terraform.lock.hcl",
+        "usedBy": "The Terraform and OpenTofu tests in test/compat: every module requires exactly this version (googleProviderVersion in test/compat/realtools_test.go) and inits against test/compat/testdata/terraform/.terraform.lock.hcl. Bumped from 8.4.0 to 8.12.0 (2026-11-17, the latest on 2026-11-21) in #1578; internal/unserved's endpoint inventories were regenerated from its schema (design_center, gemini_data_analytics and saas_runtime are new, and refused).",
         "updateFeed": "github-releases",
         "verification": "lock-file-hashes",
         "digest": null,
@@ -1550,6 +1663,38 @@
             "size": 819766997
           }
         }
+      }
+    },
+    "dataform": {
+      "$comment": "Dataform (#2105): Google's Dataform core compiles SQLX projects in a no-network container of this Node image (cmd/cloudburrow/dataform.go).",
+      "dataformNode": {
+        "image": "node:24.21.0-alpine",
+        "version": "24.21.0",
+        "digest": "sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "license": "MIT (Node.js) and the Alpine Linux packages' own licences (see /usr/share/licenses and /lib/apk/db/installed)",
+        "redistribution": "pull-only",
+        "redistributionPlan": "Pulled from Docker Hub by digest by `cloudburrow up --services dataform` the first time a project compiles. Nothing is vendored or re-hosted.",
+        "usedBy": "cmd/cloudburrow/dataform.go (dataformNodeImage): npm installs and @dataform/cli compiles",
+        "choice": "The Docker official node image, third-party: Google publishes no Node.js image, and @dataform/cli needs Node.js.",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect node:24.21.0-alpine`."
+      },
+      "dataformCLI": {
+        "source": "https://github.com/dataform-co/dataform",
+        "package": "npm:@dataform/cli",
+        "version": "3.1.6",
+        "license": "Apache-2.0",
+        "redistribution": "not published: npm-installed (--ignore-scripts) into the instance's dataform/cli directory, inside the Node container; nothing of it is in the CLI",
+        "tarballIntegrity": "sha512-XoPdpDt9o7l9vNILjxpqiR3YRJ7vOvMpSQ1H2uqYAt2PwwfkV/8ibirVm2haAlnQk5Fxt5eEhOfjyWvLVf6ysw==",
+        "usedBy": "cmd/cloudburrow/dataform.go (dataformCLI): compiles projects; it installs the @dataform/core version (Apache-2.0) a project's workflow_settings.yaml names",
+        "updateFeed": "npm",
+        "verification": "npm-integrity",
+        "skipDiscovery": "npm registry; depcheck only discovers GitHub-sourced components."
       }
     }
   },

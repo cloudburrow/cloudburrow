@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/apienable"
+	"github.com/cloudburrow/cloudburrow/internal/faultgate"
 	"github.com/cloudburrow/cloudburrow/internal/iamcheck"
 	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 )
@@ -59,6 +60,9 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// Disabled APIs (#1914) are the host's too.
 		apienable.Use(&apienable.Remote{Base: *resourceManager})
 		defer apienable.Use(nil)
+		// Fault rules (#2113) are the host's, applied here.
+		faultgate.Use(&faultgate.Remote{Base: *resourceManager})
+		defer faultgate.Use(nil)
 	}
 	if *iamCheck != "" {
 		f.UseIAMCheck(&iamcheck.Client{Base: *iamCheck})

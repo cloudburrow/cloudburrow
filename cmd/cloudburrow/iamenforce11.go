@@ -38,7 +38,7 @@ func useIAMEnforcement11(e *iameval.Enforcer, rm *resourcemanager.Server, reg fu
 	e.Scopes[iameval.ResourceManager.Name] = func(resource string) iameval.Scope { return tagScope(reg(), resource) }
 	e.Scopes[iameval.IAM.Name] = func(resource string) iameval.Scope { return iamScope(reg(), resource) }
 	e.ParentOf = func(resource string) string { return parentOf(src, resource) }
-	for _, svc := range []*iameval.Service{iameval.ResourceManager, iameval.IAM, iameval.DenyPolicies, iameval.OrgPolicy} {
+	for _, svc := range []*iameval.Service{iameval.ResourceManager, iameval.IAM, iameval.DenyPolicies, iameval.OrgPolicy, iameval.PrincipalAccessBoundary} {
 		rm.Interpose(e.Interceptor(svc))
 		rm.WrapJSON(jsonEnforcer(e, svc, nil))
 	}
@@ -124,6 +124,11 @@ func iamScope(reg *resourcemanager.Registry, resource string) iameval.Scope {
 		// A workforce pool's (#2056, iamenforce_workforce.go).
 		return sc
 	}
+	if h, ok := v3Hierarchy(resource); ok {
+		// An IAM v3 policy or binding, or its parent (#2057): its
+		// project's, folder's or organization's ancestry applies.
+		return iameval.Scope{Resource: resource, Own: []string{}, Parent: h}
+	}
 	if strings.HasPrefix(resource, "policies/") {
 		if a := iameval.DenyAttachment(resource); a != "" {
 			return iameval.Scope{Resource: a, Own: []string{}, Parent: a}
@@ -154,6 +159,25 @@ func iamScope(reg *resourcemanager.Registry, resource string) iameval.Scope {
 		sc.Resource = canonical + "/" + suffix
 	}
 	return sc
+}
+
+// v3Hierarchy is the hierarchy resource an IAM v3 name
+// ("organizations/O/locations/global/principalAccessBoundaryPolicies/P",
+// "projects/P/locations/global[/policyBindings/B]") is below.
+func v3Hierarchy(resource string) (string, bool) {
+	parts := strings.Split(resource, "/")
+	if len(parts) < 4 || parts[2] != "locations" {
+		return "", false
+	}
+	switch parts[0] {
+	case "projects", "folders", "organizations":
+	default:
+		return "", false
+	}
+	if len(parts) > 4 && parts[4] != "principalAccessBoundaryPolicies" && parts[4] != "policyBindings" {
+		return "", false
+	}
+	return parts[0] + "/" + parts[1], true
 }
 
 // rmV1Resource is a Resource Manager v1 resource path and its custom verb.

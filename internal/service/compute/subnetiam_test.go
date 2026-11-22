@@ -67,11 +67,11 @@ func TestSubnetIAMAndListUsableThroughTheGoClient(t *testing.T) {
 	if err != nil || len(got.GetBindings()) != 1 || got.GetBindings()[0].GetMembers()[0] != "user:dev@example.com" || got.GetEtag() != set.GetEtag() {
 		t.Fatalf("getIamPolicy: %v %v", got, err)
 	}
-	if pol := s.SubnetworkPolicy("projects/host/regions/us-central1/subnetworks/a"); pol == nil || len(pol.Bindings) != 1 {
-		t.Fatalf("SubnetworkPolicy: %v", pol)
+	if pol := s.Policy("projects/host/regions/us-central1/subnetworks/a"); pol == nil || len(pol.Bindings) != 1 {
+		t.Fatalf("Policy: %v", pol)
 	}
 	if _, err := subnets.SetIamPolicy(ctx, &computepb.SetIamPolicySubnetworkRequest{Project: "host", Region: "us-central1", Resource: "a",
-		RegionSetPolicyRequestResource: &computepb.RegionSetPolicyRequest{Policy: &computepb.Policy{Etag: proto.String(empty)}}}); code(err) != 412 {
+		RegionSetPolicyRequestResource: &computepb.RegionSetPolicyRequest{Policy: &computepb.Policy{Etag: proto.String(empty)}}}); code(err) != 409 {
 		t.Fatalf("a stale etag: %v", err)
 	}
 	if _, err := subnets.GetIamPolicy(ctx, &computepb.GetIamPolicySubnetworkRequest{Project: "host", Region: "us-central1", Resource: "nope"}); code(err) != 404 {

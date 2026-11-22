@@ -46,7 +46,8 @@ func TestConsoleDocumentAIProcessors(t *testing.T) {
 		t.Fatalf("gallery: %+v", l)
 	}
 	for _, r := range l.Items {
-		served := r.Fields["Type"] == "OCR_PROCESSOR" || r.Fields["Type"] == "LAYOUT_PARSER_PROCESSOR"
+		// The custom types are served since #2106.
+		served := r.Fields["Type"] == "OCR_PROCESSOR" || r.Fields["Type"] == "LAYOUT_PARSER_PROCESSOR" || strings.HasPrefix(r.Fields["Type"], "CUSTOM_")
 		if served != (r.Status == "Available") || (!served && r.Status != "Not available locally") || served != (len(r.Actions) == 1) {
 			t.Errorf("gallery row %+v", r)
 		}

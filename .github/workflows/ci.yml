@@ -1216,7 +1216,9 @@ jobs:
           # their output back through (#1930, #1953).
           # Cloud Monitoring's Cloud Run metrics, and the kubeconfig that
           # port-forwards the gateway a service's URL is reached through (#2049).
-          if [ "$SHARD" = run ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT,RUN_SERVICEUSAGE,WORKFLOWS,STORAGE,MONITORING,KUBECONFIG; fi
+          # And the Firestore and Datastore emulators, where the Eventarc
+          # triggers made on a function's Add trigger have their events caused (#2093).
+          if [ "$SHARD" = run ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT,RUN_SERVICEUSAGE,WORKFLOWS,STORAGE,MONITORING,KUBECONFIG,RUN_FIRESTORE,RUN_DATASTORE; fi
           # The sql shard's read back through the Cloud SQL Admin API, the Backup
           # and DR Service and Secret Manager, which holds Run SQL's password,
           # and the Compute Engine API, whose VMs and disks Backup and DR backs
@@ -1226,7 +1228,7 @@ jobs:
           # pages make is removed through it by name whatever the test
           # reached, and the kubeconfig the Deploy test cleans up with
           # (#1913, #1925).
-          if [ "$SHARD" = served ]; then BROWSER_VARS+=,GKE,KUBECONFIG; fi
+          if [ "$SHARD" = served ]; then BROWSER_VARS+=,GKE,KUBECONFIG,TRACE,LOGGING; fi
           # The localai shard's: the Embeddings page's Cloud Storage objects,
           # and the local AI endpoints (#1985).
           if [ "$SHARD" = localai ]; then BROWSER_VARS+=,STORAGE,LOCALAI,EMBEDDINGS; fi
@@ -1396,8 +1398,13 @@ jobs:
           # left them here; all run locally. TestCloudSQLServerInstance
           # starts SQL Server, whose licence only the end user accepts
           # (CLOUDBURROW_ACCEPT_MSSQL_EULA=Y): CI never accepts it for them,
-          # so it skips in the sql shard and runs only locally.
-          never='^Test(FunctionsFrameworkBuiltWithBuildpacks|FunctionsRebuildReusesLayers|FunctionsBuildBrokenModulePathFails|StorageSignedURLV2RegisteredCert|StorageVersioningPersistentMode|FunctionsSubmitBuildBuildpacks|FunctionsNodejsBuiltWithBuildpacks|FunctionsPythonBuiltWithBuildpacks|FunctionsJavaBuiltWithBuildpacks|FunctionsRubyBuiltWithBuildpacks|FunctionsPHPBuiltWithBuildpacks|FunctionsDotnetBuiltWithBuildpacks|FunctionsAPIBuildsAndServes|GcloudFunctions|TerraformCloudFunctions2Function|FunctionsEventTriggerBuilds|GcloudFunctionsEventTriggers|CloudBuildHostStepsOff|FunctionsV1BuildsAndServes|GcloudFunctionsV1|ConsoleFunctionsV1|TerraformCloudFunctionsFunction|FunctionsSecretsBuildsAndMounts|ModelGardenDeploysHuggingFaceModels|CloudSQLServerInstance)$'
+          # so it skips in the sql shard and runs only locally. BigQuery's
+          # Spark procedures (#2104) run spark-submit in the 1.8 GB
+          # apache/spark image with Google's connector from Maven Central,
+          # on an --internal Docker network: CLOUDBURROW_TEST_SPARK, run
+          # nightly by nightly-sql-ephemeral.yml's spark job (the spark
+          # shard of scripts/compat-shards.sh) and locally.
+          never='^Test(FunctionsFrameworkBuiltWithBuildpacks|FunctionsRebuildReusesLayers|FunctionsBuildBrokenModulePathFails|StorageSignedURLV2RegisteredCert|StorageVersioningPersistentMode|FunctionsSubmitBuildBuildpacks|FunctionsNodejsBuiltWithBuildpacks|FunctionsPythonBuiltWithBuildpacks|FunctionsJavaBuiltWithBuildpacks|FunctionsRubyBuiltWithBuildpacks|FunctionsPHPBuiltWithBuildpacks|FunctionsDotnetBuiltWithBuildpacks|FunctionsAPIBuildsAndServes|GcloudFunctions|TerraformCloudFunctions2Function|FunctionsEventTriggerBuilds|GcloudFunctionsEventTriggers|CloudBuildHostStepsOff|FunctionsV1BuildsAndServes|GcloudFunctionsV1|ConsoleFunctionsV1|TerraformCloudFunctionsFunction|FunctionsSecretsBuildsAndMounts|ModelGardenDeploysHuggingFaceModels|CloudSQLServerInstance|BigQuerySparkStoredProcedures|BqSparkStoredProcedure|BigQuerySparkProcedureRuntimesAndTypes|BigQuerySparkProcedureContainerImage|BigQuerySparkProcedureInvoker|BigQuerySparkProcedureStagingAndCMEK)$'
           none=$(comm -23 all.txt ran.txt | grep -vE "$never" || true)
           if [ -n "$none" ]; then
             echo "tests that ran in no shard:"; echo "$none"; exit 1

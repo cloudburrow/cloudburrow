@@ -16,6 +16,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"github.com/cloudburrow/cloudburrow/internal/faultgate"
 )
 
 // Fault injection (#306): rules that make CloudBurrow-served calls fail or
@@ -549,4 +551,62 @@ func (f *Faults) handleDelete(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusNotFound, map[string]string{"error": "no fault rule " + id})
+}
+
+// InterposeRemote accepts rules for services served in the cluster whose
+// fronts apply them through the host (internal/faultgate, #2113): Pub/Sub,
+// Bigtable, Spanner, Firestore, Datastore and Cloud Storage.
+func (f *Faults) InterposeRemote(services ...string) {
+	for _, s := range services {
+		f.Interpose(s)
+	}
+}
+
+// RemoteRules implements faultgate.Host: what the fronts need to tell a
+// call a rule may match.
+func (f *Faults) RemoteRules() faultgate.Rules {
+	out := faultgate.Rules{Rules: []faultgate.Rule{}}
+	if f == nil {
+		return out
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, r := range f.rules {
+		if r.Count > 0 && r.Remaining == 0 {
+			continue
+		}
+		out.Rules = append(out.Rules, faultgate.Rule{Service: r.Service, Method: r.Method, Project: r.Project})
+	}
+	return out
+}
+
+// RemoteDecide implements faultgate.Host: one call of a front, decided as
+// an in-process call is, and its fault recorded.
+func (f *Faults) RemoteDecide(c faultgate.Call) faultgate.Decision {
+	if f == nil {
+		return faultgate.Decision{}
+	}
+	rule := f.decide(c.Service, c.Method, c.Resource)
+	if rule == nil {
+		return faultgate.Decision{}
+	}
+	d := faultgate.Decision{Fault: true, LatencyMs: rule.LatencyMs}
+	detail := map[string]string{"rule": rule.ID, "where": "cluster"}
+	if rule.LatencyMs > 0 {
+		detail["latency_ms"] = strconv.Itoa(rule.LatencyMs)
+	}
+	if rule.code != codes.OK {
+		d.Code = int(rule.code)
+		d.HTTPStatus = rule.HTTPStatus
+		if d.HTTPStatus == 0 {
+			d.HTTPStatus = codeToHTTP(rule.code)
+		}
+		d.Message = fmt.Sprintf("injected fault (rule %s): %s", rule.ID, rule.Code)
+		detail["code"] = rule.Code
+		if c.Service == "storage" {
+			detail["code"] = strconv.Itoa(d.HTTPStatus)
+		}
+	}
+	f.rec.Record(c.Service, "fault", c.Method, detail)
+	return d
 }

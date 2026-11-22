@@ -165,6 +165,9 @@ type onnxColumn struct {
 	typ   string // INT64, FLOAT64, BOOL or STRING
 	array bool
 	width int64 // an array's values per row, or -1 when the graph leaves it free
+	// image is set for an input read from an image STRUCT
+	// (ML.DECODE_IMAGE's, mlimage.go, #2104), reshaped to the tensor.
+	image bool
 }
 
 func (c onnxColumn) sqlType() string {
@@ -419,6 +422,16 @@ func (f front) onnxSubquery(r *http.Request, q queryOptions, md bqModel, c mlCal
 		if !ok {
 			return "", 400, "Invalid table-valued function ML.PREDICT Column " + p.Name + " is not found in the input data to the PREDICT function."
 		}
+		if bqColumnType(col.Type) == "RECORD" && ic.array && (ic.typ == "FLOAT64" || ic.typ == "INT64") {
+			// An image STRUCT (#2104): "The model must be a TensorFlow or
+			// TensorFlow Lite model, or a PyTorch model in ONNX format",
+			// its input "a shape of [batch_size, width, height, 3]"
+			// (https://docs.cloud.google.com/bigquery/docs/object-table-inference);
+			// checked by value, as TensorFlow Lite's (modeltflite.go).
+			ins[i].image = true
+			refs = append(refs, "_cbml_in."+sqlIdent(col.Name)+" AS c"+strconv.Itoa(i))
+			continue
+		}
 		if !onnxConvertible(col.Type, ic) {
 			return "", 400, fmt.Sprintf("Invalid table-valued function ML.PREDICT Column %s of type %s cannot be converted to the type the model's input %s expects, %s (ONNX %s %v)",
 				col.Name, bqColumnType(col.Type), p.Name, ic.sqlType(), p.Elem, p.Dims)
@@ -512,6 +525,7 @@ func runONNX(ctx context.Context, runner onnxRunner, model func() ([]byte, error
 	}
 	// values[k][i] are key k's values of input i.
 	values := make([][][]json.RawMessage, len(keys))
+	images := make([][]onnxImageValue, len(keys)) // key k's image inputs' shapes, in order
 	for k, key := range keys {
 		var m map[string]json.RawMessage
 		if len(ins) > 0 {
@@ -527,7 +541,14 @@ func runONNX(ctx context.Context, runner onnxRunner, model func() ([]byte, error
 				return nil, 400, "ML.PREDICT input column " + name + " is NULL in a row; the ONNX model's input " + name + " takes a value in every row"
 			}
 			var vs []json.RawMessage
-			if ic.array {
+			if ic.image {
+				img, why := onnxImageValues(imp.Inputs[i], raw)
+				if why != "" {
+					return nil, 400, "ML.PREDICT input column " + name + " " + why
+				}
+				images[k] = append(images[k], img)
+				vs = img.values
+			} else if ic.array {
 				if err := json.Unmarshal(raw, &vs); err != nil {
 					return nil, 500, "cloudburrow: could not read column " + name + ": " + err.Error()
 				}
@@ -545,7 +566,7 @@ func runONNX(ctx context.Context, runner onnxRunner, model func() ([]byte, error
 	// the rest fixed; otherwise one row at a time.
 	batch := true
 	for i, p := range imp.Inputs {
-		if len(p.Dims) == 0 || p.Dims[0] != -1 || ins[i].width < 0 {
+		if len(p.Dims) == 0 || p.Dims[0] != -1 || ins[i].width < 0 || ins[i].image {
 			batch = false
 		}
 	}
@@ -567,6 +588,9 @@ func runONNX(ctx context.Context, runner onnxRunner, model func() ([]byte, error
 				}
 			}
 			shape, why := onnxShape(p.Dims, n, len(values[start][i]))
+			if ins[i].image {
+				shape, why = images[start][onnxImageIndex(ins, i)].shape, ""
+			}
 			if why != "" {
 				return nil, 501, "Not implemented here: the ONNX model's input " + p.Name + " " + why + ". Nothing was run."
 			}
@@ -824,3 +848,61 @@ func (m *bqModels) dropBlobLocked(old *bqModel) {
 
 // timeRFC3339 is a time in milliseconds as RFC 3339.
 func timeRFC3339(ms int64) string { return time.UnixMilli(ms).UTC().Format(time.RFC3339Nano) }
+
+// onnxImageValue is an image STRUCT as an ONNX input's tensor of one row.
+type onnxImageValue struct {
+	values []json.RawMessage
+	shape  []int64
+}
+
+// onnxImageIndex is input i's place among the image inputs.
+func onnxImageIndex(ins []onnxColumn, i int) int {
+	n := 0
+	for _, ic := range ins[:i] {
+		if ic.image {
+			n++
+		}
+	}
+	return n
+}
+
+// onnxImageValues is an image STRUCT (mlimage.go) as input p's tensor of
+// one row: a batch of one of its height × width × channels for an input of
+// rank 4, "[batch_size, width, height, 3]" (object-table-inference), whose
+// fixed dimensions it must match, or its values flattened for one of rank
+// 2; why says what does not fit, after the column's name.
+func onnxImageValues(p onnxmodel.Port, raw json.RawMessage) (onnxImageValue, string) {
+	m, why := imageFromJSON(raw, onnxmodel.IsInt(p.Elem), "ML.PREDICT")
+	if why != "" {
+		return onnxImageValue{}, why
+	}
+	if m == nil {
+		return onnxImageValue{}, "is NULL; the ONNX model's input " + p.Name + " takes a value in every row"
+	}
+	var shape []int64
+	switch len(p.Dims) {
+	case 4:
+		shape = []int64{1, int64(m.h), int64(m.w), int64(m.c)}
+		if p.Dims[0] >= 0 && p.Dims[0] != 1 {
+			return onnxImageValue{}, fmt.Sprintf("is an image; the model's input %s of shape %v takes a batch of %d, and an image is a batch of one", p.Name, p.Dims, p.Dims[0])
+		}
+		for k := 1; k < 4; k++ {
+			if p.Dims[k] >= 0 && p.Dims[k] != shape[k] {
+				return onnxImageValue{}, fmt.Sprintf("is an image of %d × %d × %d (height, width, channels); the model's input %s of shape %v takes %d × %d × %d: "+
+					"resize it with ML.RESIZE_IMAGE", m.h, m.w, m.c, p.Name, p.Dims, p.Dims[1], p.Dims[2], p.Dims[3])
+			}
+		}
+	case 2:
+		shape = []int64{1, int64(len(m.v))}
+		if p.Dims[1] >= 0 && p.Dims[1] != int64(len(m.v)) {
+			return onnxImageValue{}, fmt.Sprintf("is an image of %d values; the model's input %s of shape %v takes %d", len(m.v), p.Name, p.Dims, p.Dims[1])
+		}
+	default:
+		return onnxImageValue{}, fmt.Sprintf("is an image; the model's input %s of shape %v is not one of an image (batch, height, width, channels)", p.Name, p.Dims)
+	}
+	vs := make([]json.RawMessage, len(m.v))
+	for j, x := range m.v {
+		vs[j] = json.RawMessage(strconv.FormatFloat(x, 'g', -1, 64))
+	}
+	return onnxImageValue{values: vs, shape: shape}, ""
+}

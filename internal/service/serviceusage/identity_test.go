@@ -72,6 +72,7 @@ func TestGenerateServiceIdentityEveryEntry(t *testing.T) {
 		"privateca.googleapis.com":              "gcp-sa-privateca.iam.gserviceaccount.com",
 		"container.googleapis.com":              "container-engine-robot.iam.gserviceaccount.com",
 		"monitoring.googleapis.com":             "gcp-sa-monitoring-notification.iam.gserviceaccount.com",
+		"cloudtrace.googleapis.com":             "gcp-sa-cloud-trace.iam.gserviceaccount.com",
 		"compute.googleapis.com":                "compute-system.iam.gserviceaccount.com",
 		"cloudkms.googleapis.com":               "gcp-sa-ekms.iam.gserviceaccount.com",
 		"pubsub.googleapis.com":                 "gcp-sa-pubsub.iam.gserviceaccount.com",
@@ -103,13 +104,18 @@ func TestGenerateServiceIdentityEveryEntry(t *testing.T) {
 		"cloudresourcemanager.googleapis.com":   "",
 		"serviceusage.googleapis.com":           "",
 		"cloudquotas.googleapis.com":            "",
+		"cloudbilling.googleapis.com":           "",
+		"billingbudgets.googleapis.com":         "",
 		"siteverification.googleapis.com":       "",
 		"analyticshub.googleapis.com":           "gcp-sa-analyticshub.iam.gserviceaccount.com",
 		"workflows.googleapis.com":              "gcp-sa-workflows.iam.gserviceaccount.com",
 		"parametermanager.googleapis.com":       "gcp-sa-pm.iam.gserviceaccount.com",
+		"dataform.googleapis.com":               "gcp-sa-dataform.iam.gserviceaccount.com",
+		"apphub.googleapis.com":                 "gcp-sa-apphub.iam.gserviceaccount.com",
 		"vpcaccess.googleapis.com":              "gcp-sa-vpcaccess.iam.gserviceaccount.com",
 		"workflowexecutions.googleapis.com":     "",
 		"kmsinventory.googleapis.com":           "",
+		"telemetry.googleapis.com":              "",
 	}
 	if len(want) != len(serviceAgents)+len(noPrimaryAgent) {
 		t.Fatalf("want has %d services; the tables have %d", len(want), len(serviceAgents)+len(noPrimaryAgent))

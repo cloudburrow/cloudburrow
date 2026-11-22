@@ -85,6 +85,9 @@ type Options struct {
 	// UpdateEvery is how often a managed instance group's PROACTIVE update
 	// takes its next step (#2139); 2s when zero.
 	UpdateEvery time.Duration
+	// LB reaches load balancers' backends (#2153, lbplane.go); nil
+	// reaches only those this package can itself.
+	LB LBBackends
 }
 
 // obj is one resource, as its JSON is kept: link fields hold relative
@@ -124,6 +127,8 @@ type Server struct {
 	// scale is the autoscalers' memory: the VMs' CPU readings and each
 	// autoscaler's recent recommendations and sizes (autoscalers.go).
 	scale scaleState
+	// lb is the load balancers' data plane (lbplane.go).
+	lb *lbPlane
 
 	srv *http.Server
 	ln  net.Listener
@@ -136,7 +141,7 @@ func New(opts Options) (*Server, error) {
 	}
 	s := &Server{opts: opts, res: map[string]obj{}, ops: map[string]obj{},
 		defaultDeleted: map[string]bool{}, seeded: map[string]bool{}, waiters: map[string]chan struct{}{},
-		queue: map[string]chan struct{}{}, queued: map[string]int{}}
+		queue: map[string]chan struct{}{}, queued: map[string]int{}, lb: newLBPlane()}
 	if err := s.restore(); err != nil {
 		return nil, err
 	}
@@ -156,6 +161,7 @@ func (s *Server) Start(context.Context) error {
 		go func() { defer s.loops.Done(); s.autoscaleLoop(ctx) }()
 		go func() { defer s.loops.Done(); s.rollLoop(ctx) }()
 	}
+	s.lbStart()
 	if s.opts.Addr == "" {
 		return nil
 	}
@@ -176,6 +182,7 @@ func (s *Server) Stop(ctx context.Context) error {
 		s.stopLoop = nil
 		s.loops.Wait()
 	}
+	s.lbStop()
 	if s.srv == nil {
 		return nil
 	}

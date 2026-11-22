@@ -74,6 +74,12 @@ type Spec struct {
 	// Valkey node in CLUSTER_DISABLED mode's, which the instance's role
 	// Services select by name (valkeyfailover.go). "" for none.
 	PortName string
+	// CMEKKey and CMEKWrapped are a Memorystore for Redis instance's
+	// customer-managed key and its data key as Cloud KMS wrapped it
+	// (#2113): the server's persistence files are kept sealed with the
+	// data key, which the server's pod asks Cloud KMS to unwrap.
+	CMEKKey     string
+	CMEKWrapped []byte
 }
 
 // Provisioner runs the server of an instance CreateInstance made.
@@ -185,7 +191,8 @@ func (r *record) spec() Spec {
 	return Spec{Server: r.Server, MaxMemory: maxMemory(r.MemorySizeGB, r.RedisConfigs),
 		Password: r.AuthString, Configs: serverConfigs(r.RedisConfigs), RDBSeconds: r.Persistence.seconds(), Version: r.version(),
 		NoPersistence: r.Persistence.seconds() == 0,
-		TransitCA:     r.TransitCA, TransitCAKey: r.TransitCAKey, TransitTrust: r.caPEM()}
+		TransitCA:     r.TransitCA, TransitCAKey: r.TransitCAKey, TransitTrust: r.caPEM(),
+		CMEKKey: r.CustomerManagedKey, CMEKWrapped: r.WrappedKey}
 }
 
 // binary is the prefix of the server's programs: valkey-server, ...

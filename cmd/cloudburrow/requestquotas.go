@@ -6,6 +6,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/ratequota"
+	"github.com/cloudburrow/cloudburrow/internal/service/cloudquotas"
 	"github.com/cloudburrow/cloudburrow/internal/service/parametermanager"
 )
 
@@ -29,4 +30,24 @@ func newRequestQuotas(cfg config.Config) (*ratequota.Limiter, error) {
 		}
 	}
 	return l, nil
+}
+
+// requestQuotaInfos makes the request quotas Cloud Quotas quotas (#2090):
+// each metric a QuotaInfo of its service, quota ID its limit's name, at
+// the value the configuration or /admin/quotas sets for the project, so a
+// QuotaPreference for it changes the limit its calls are charged against.
+func requestQuotaInfos(l *ratequota.Limiter) cloudquotas.Provider {
+	return func(project string) []cloudquotas.Quota {
+		ms := l.Metrics()
+		out := make([]cloudquotas.Quota, 0, len(ms))
+		for _, m := range ms {
+			v, _ := l.Configured(m.Name, project)
+			out = append(out, cloudquotas.Quota{
+				Service: m.Service, QuotaID: m.QuotaID(), Metric: m.Name, MetricDisplayName: m.Title,
+				QuotaDisplayName: m.LimitTitle, MetricUnit: "1/min/{project}", Default: v, RefreshInterval: "minute",
+				Enforced: true, Source: m.Source,
+			})
+		}
+		return out
+	}
 }

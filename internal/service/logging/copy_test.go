@@ -73,7 +73,7 @@ func TestCopyLogEntries(t *testing.T) {
 	t0 := time.Now().UTC().Add(-3 * time.Hour).Truncate(time.Hour).Add(15 * time.Minute)
 	write("app", t0, ltype.LogSeverity_ERROR, "one")
 	write("app", t0.Add(time.Minute), ltype.LogSeverity_INFO, "skipped by the filter")
-	write("cloudaudit.googleapis.com%2Factivity", t0.Add(time.Hour), ltype.LogSeverity_ERROR, "two")
+	write("cloudaudit.googleapis.com%2Fdata_access", t0.Add(time.Hour), ltype.LogSeverity_ERROR, "two")
 	if _, err := srv.WriteLogEntries(ctx, &loggingpb.WriteLogEntriesRequest{Resource: &monitoredres.MonitoredResource{Type: "global"}, Entries: []*loggingpb.LogEntry{{
 		LogName: "projects/proj-2/logs/app", Payload: &loggingpb.LogEntry_TextPayload{TextPayload: "another project"}}}}); err != nil {
 		t.Fatal(err)
@@ -110,7 +110,7 @@ func TestCopyLogEntries(t *testing.T) {
 	for k := range objs.objects {
 		names = append(names, k)
 	}
-	want := []string{"dest/app/" + hour(t0) + "_A0:", "dest/cloudaudit.googleapis.com/activity/" + hour(t0.Add(time.Hour)) + "_A0:",
+	want := []string{"dest/app/" + hour(t0) + "_A0:", "dest/cloudaudit.googleapis.com/data_access/" + hour(t0.Add(time.Hour)) + "_A0:",
 		"dest/app/" + hour(time.Now().UTC()) + "_S0.json"}
 	if len(names) != 3 {
 		t.Errorf("objects %v, want 3", names)

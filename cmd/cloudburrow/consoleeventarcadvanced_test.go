@@ -36,8 +36,9 @@ func TestEventarcAdvancedConsoleForms(t *testing.T) {
 	l, f := names(eaBusesProvider{base}.CreateForm())
 	check("Buses", l, f, "Bus name", "Region", "Display name", "Log severity", "Cloud KMS key", "Labels")
 	l, f = names(eaPipelinesProvider{base}.CreateForm())
-	check("Pipelines", l, f, "Pipeline name", "Destination", "Destination URI", "Network attachment", "Pub/Sub topic", "Message bus",
-		"Input payload format", "Output payload format", "Transformation (CEL)", "Maximum attempts", "Minimum retry delay", "Log severity")
+	check("Pipelines", l, f, "Pipeline name", "Destination type", "Destination URI", "Network attachment", "Pub/Sub topic", "Message bus",
+		"Enrollments", "Apply a transformation", "Inbound format", "Outbound format", "Transformation (CEL)", "Maximum attempts",
+		"Minimum retry delay", "Log severity", "Cloud Run service", "Cloud Run job", "Message binding", "Enable authentication")
 	l, f = names(eaEnrollmentsProvider{base}.CreateForm())
 	check("Enrollments", l, f, "Enrollment name", "Message bus", "CEL expression", "Destination pipeline")
 	l, f = names(eaSourcesProvider{base}.CreateForm())

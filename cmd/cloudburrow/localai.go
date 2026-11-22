@@ -291,7 +291,7 @@ func printLocalAI(w io.Writer, srv *vertexai.Server, cfg config.Config) {
 		fmt.Fprintf(w, "  custom prediction: PredictionService (gRPC) and POST /v1/projects/{p}/locations/{l}/endpoints/{service}:predict\n")
 		fmt.Fprintf(w, "              {service} is a deployed Cloud Run prediction container; see docs/prediction.md\n")
 	}
-	fmt.Fprintf(w, "  sampling, maxOutputTokens, stopSequences and JSON schemas are applied; other options are refused; see docs/generation.md\n")
+	fmt.Fprintf(w, "  sampling, maxOutputTokens, stopSequences, JSON schemas, candidateCount, thinking and context caching are applied; other options are refused; see docs/generation.md\n")
 }
 
 // dockerRun runs a docker command; replaced in tests.

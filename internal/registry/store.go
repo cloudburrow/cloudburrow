@@ -346,6 +346,10 @@ const (
 	MediaTypeDockerManifestList = "application/vnd.docker.distribution.manifest.list.v2+json"
 	MediaTypeOCIManifest        = "application/vnd.oci.image.manifest.v1+json"
 	MediaTypeOCIIndex           = "application/vnd.oci.image.index.v1+json"
+	// Docker Image Manifest V2, Schema 1, unsigned and signed (JWS), which
+	// Artifact Registry lists among its supported formats (#2111).
+	MediaTypeDockerSchema1       = "application/vnd.docker.distribution.manifest.v1+json"
+	MediaTypeDockerSchema1Signed = "application/vnd.docker.distribution.manifest.v1+prettyjws"
 )
 
 // Descriptor is an OCI content descriptor.
@@ -376,6 +380,16 @@ type ManifestDoc struct {
 	Layers        []Descriptor      `json:"layers,omitempty"`
 	Manifests     []Descriptor      `json:"manifests,omitempty"`
 	Annotations   map[string]string `json:"annotations,omitempty"`
+	// Subject is the manifest an OCI 1.1 referrer (an SBOM, a signature,
+	// an attestation) refers to (#2111).
+	Subject *Descriptor `json:"subject,omitempty"`
+	// FSLayers are a schema 1 manifest's layers.
+	FSLayers []FSLayer `json:"fsLayers,omitempty"`
+}
+
+// FSLayer is one of a schema 1 manifest's layers.
+type FSLayer struct {
+	BlobSum string `json:"blobSum"`
 }
 
 // IsIndex reports whether a media type is an image index or manifest list.
@@ -397,6 +411,9 @@ func ParseManifest(contentType string, b []byte) (*ManifestDoc, string, error) {
 	}
 	if mt == "" || mt == "application/json" || mt == "application/octet-stream" {
 		mt = m.MediaType
+		if mt == "" && m.SchemaVersion == 1 {
+			mt = schema1Type(b)
+		}
 		if mt == "" {
 			if m.Manifests != nil {
 				mt = MediaTypeOCIIndex
@@ -414,6 +431,12 @@ func ParseManifest(contentType string, b []byte) (*ManifestDoc, string, error) {
 		if m.SchemaVersion != 2 {
 			return nil, "", errors.New("an image index needs schemaVersion 2")
 		}
+	case MediaTypeDockerSchema1, MediaTypeDockerSchema1Signed:
+		if err := checkSchema1(mt, b); err != nil {
+			return nil, "", err
+		}
+		// A schema 1 manifest names no mediaType of its own.
+		return &m, mt, nil
 	default:
 		return nil, "", fmt.Errorf("manifest media type %q is not supported", mt)
 	}
@@ -443,7 +466,7 @@ func (s *Store) putManifest(r Repo, image, ref, contentType string, b []byte) (s
 	if err != nil {
 		return "", &ManifestInvalidError{err}
 	}
-	d := Digest(b)
+	d := ManifestDigest(mt, b)
 	isDigest := strings.HasPrefix(ref, "sha256:") || strings.Contains(ref, ":")
 	if isDigest && ref != d {
 		return "", ErrDigestInvalid
@@ -456,6 +479,9 @@ func (s *Store) putManifest(r Repo, image, ref, contentType string, b []byte) (s
 		refs = append(refs, *m.Config)
 	}
 	refs = append(refs, m.Layers...)
+	for _, l := range m.FSLayers {
+		refs = append(refs, Descriptor{Digest: l.BlobSum})
+	}
 	for _, x := range refs {
 		if _, err := s.RepoBlobSize(r, x.Digest); err != nil {
 			if errors.Is(err, ErrKeyUnavailable) {
@@ -466,7 +492,8 @@ func (s *Store) putManifest(r Repo, image, ref, contentType string, b []byte) (s
 	}
 	// The manifest's own content is written before the lock, as sealing
 	// it asks Encryption, which must not run under it.
-	if _, err := s.PutRepoBlob(r, b); err != nil {
+	content, err := s.PutRepoBlob(r, b)
+	if err != nil {
 		return "", err
 	}
 	imm := s.immutable(r)
@@ -486,7 +513,7 @@ func (s *Store) putManifest(r Repo, image, ref, contentType string, b []byte) (s
 	if err := os.MkdirAll(filepath.Dir(rev), 0o755); err != nil {
 		return "", err
 	}
-	if err := os.WriteFile(rev, []byte(mt), 0o644); err != nil {
+	if err := os.WriteFile(rev, []byte(revisionRecord(mt, d, content)), 0o644); err != nil {
 		return "", err
 	}
 	if !isDigest {
@@ -613,11 +640,24 @@ func (s *Store) Resolve(r Repo, image, ref string) (digest, mediaType string, er
 		}
 		digest = strings.TrimSpace(string(b))
 	}
-	mt, err := os.ReadFile(s.revisionPath(r, image, digest))
+	rec, err := os.ReadFile(s.revisionPath(r, image, digest))
 	if err != nil {
 		return "", "", ErrManifestUnknown
 	}
-	return digest, string(mt), nil
+	mediaType, _ = parseRevision(digest, rec)
+	return digest, mediaType, nil
+}
+
+// contentDigest is the digest a manifest's stored content is kept under:
+// its own digest, but for a signed schema 1 manifest, whose digest is its
+// payload's.
+func (s *Store) contentDigest(r Repo, image, digest string) string {
+	rec, err := os.ReadFile(s.revisionPath(r, image, digest))
+	if err != nil {
+		return digest
+	}
+	_, content := parseRevision(digest, rec)
+	return content
 }
 
 // GetManifest returns a manifest by tag or digest.
@@ -626,7 +666,7 @@ func (s *Store) GetManifest(r Repo, image, ref string) (b []byte, digest, mediaT
 	if err != nil {
 		return nil, "", "", err
 	}
-	b, err = s.ReadRepoBlob(r, digest)
+	b, err = s.ReadRepoBlob(r, s.contentDigest(r, image, digest))
 	if errors.Is(err, ErrKeyUnavailable) {
 		return nil, "", "", err
 	}
@@ -682,8 +722,22 @@ func (s *Store) DeleteTag(r Repo, image, tag string) error {
 }
 
 // DeleteManifest removes a manifest from an image, and every tag naming
-// it. The image itself goes when it holds no manifest.
+// it. The image itself goes when it holds no manifest. The manifests that
+// refer to it (its OCI 1.1 referrers) go with it, as Artifact Registry
+// deletes "all attachments with the deleted artifact's version name as
+// their target" (#2111).
 func (s *Store) DeleteManifest(r Repo, image, digest string) error {
+	refs := s.referrerDigests(r, image, digest)
+	if err := s.deleteManifest(r, image, digest); err != nil {
+		return err
+	}
+	for _, d := range refs {
+		_ = s.DeleteManifest(r, image, d)
+	}
+	return nil
+}
+
+func (s *Store) deleteManifest(r Repo, image, digest string) error {
 	if !ValidDigest(digest) {
 		return ErrManifestUnknown
 	}
@@ -888,12 +942,13 @@ func (s *Store) manifestInfo(r Repo, image, digest string) (ManifestInfo, error)
 		return ManifestInfo{}, ErrManifestUnknown
 	}
 	rev := s.revisionPath(r, image, digest)
-	mt, err := os.ReadFile(rev)
+	rec, err := os.ReadFile(rev)
 	if err != nil {
 		return ManifestInfo{}, ErrManifestUnknown
 	}
+	mt, content := parseRevision(digest, rec)
 	fi, _ := os.Stat(rev)
-	b, err := s.ReadRepoBlob(r, digest)
+	b, err := s.ReadRepoBlob(r, content)
 	if errors.Is(err, ErrKeyUnavailable) {
 		// Metadata stays readable while the key cannot be used: the
 		// version, its media type, time and size, not its content.

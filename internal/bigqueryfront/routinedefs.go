@@ -181,10 +181,26 @@ func routineFromDDL(text string, table bool) map[string]any {
 		}
 		arg := map[string]any{"name": t[i].text}
 		i++
-		if i+1 < len(t) && t[i].is("ANY") && t[i+1].is("TYPE") {
+		switch {
+		case i+1 < len(t) && t[i].is("ANY") && t[i+1].is("TYPE"):
 			arg["argumentKind"] = "ANY_TYPE"
 			i += 2
-		} else {
+		case i+1 < len(t) && t[i].is("ANY") && t[i+1].is("TABLE"):
+			// #2120: a table parameter of any columns, argumentKind
+			// ANY_TABLE ("The argument is any table type").
+			arg["argumentKind"] = "ANY_TABLE"
+			i += 2
+		case t[i].is("TABLE"):
+			// #2120: TABLE<column type, ...>, argumentKind FIXED_TABLE
+			// with its tableType ("Set if argument_kind == FIXED_TABLE",
+			// https://cloud.google.com/bigquery/docs/reference/rest/v2/routines#Argument).
+			cols, next := sqlFieldsAt(t, i+1)
+			if cols == nil {
+				return def
+			}
+			arg["argumentKind"], arg["tableType"] = "FIXED_TABLE", map[string]any{"columns": cols}
+			i = next
+		default:
 			typ, next := sqlTypeAt(t, i)
 			if typ == nil {
 				return def
@@ -677,4 +693,25 @@ func (f front) updateRoutine(w http.ResponseWriter, r *http.Request, project, da
 	f.functions.add(project, []string{dataset, id})
 	f.functions.setDef(project, []string{dataset, id}, made)
 	writeJSON(w, http.StatusOK, made)
+}
+
+// tableTypeSQL is a StandardSqlTableType as a table parameter's type,
+// TABLE<column type, ...> (#2120).
+func tableTypeSQL(tt any) string {
+	m, _ := tt.(map[string]any)
+	var cols []string
+	switch raw := m["columns"].(type) {
+	case []any:
+		for _, x := range raw {
+			c, _ := x.(map[string]any)
+			ct, _ := c["type"].(map[string]any)
+			cols = append(cols, quotePath([]string{str(c, "name")})+" "+standardType(ct))
+		}
+	case []map[string]any:
+		for _, c := range raw {
+			ct, _ := c["type"].(map[string]any)
+			cols = append(cols, quotePath([]string{str(c, "name")})+" "+standardType(ct))
+		}
+	}
+	return "TABLE<" + strings.Join(cols, ", ") + ">"
 }
