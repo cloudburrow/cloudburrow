@@ -3,12 +3,16 @@
 package browser
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
 	"testing"
+
+	ak "google.golang.org/api/apikeys/v2"
+	"google.golang.org/api/option"
 )
 
 // TestPrivateCAGoogleTabsThroughThePage (#2144), in the storage shard: the
@@ -111,4 +115,79 @@ func detail2144(t *testing.T, service, project string, path ...string) string {
 		t.Fatalf("decode %v: %v", path, err)
 	}
 	return body
+}
+
+// TestAPIKeysCreateACopyAndServiceAccount (#2145), in the storage shard: a
+// key's page has Create a copy, which makes a new key with its
+// restrictions under the name given, read back with the official API Keys
+// client; Create API key has Authenticate API calls through a service
+// account, which reveals Select a service account. The Create API key page
+// and a key's page pass the WCAG audit.
+func TestAPIKeysCreateACopyAndServiceAccount(t *testing.T) {
+	needService(t, "serviceusage")
+	hc := &http.Client{}
+	t.Cleanup(hc.CloseIdleConnections)
+	c, err := ak.NewService(context.Background(), option.WithEndpoint("http://"+endpoint(t, envAPIKeys)+"/"),
+		option.WithoutAuthentication(), option.WithHTTPClient(hc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	project := uniqueProject(t)
+	parent := "projects/" + project + "/locations/global"
+	op, err := c.Projects.Locations.Keys.Create(parent, &ak.V2Key{DisplayName: "Source key", Restrictions: &ak.V2Restrictions{
+		ServerKeyRestrictions: &ak.V2ServerKeyRestrictions{AllowedIps: []string{"198.51.100.0/24"}},
+		ApiTargets:            []*ak.V2ApiTarget{{Service: "serviceusage.googleapis.com"}}}}).Do()
+	if err != nil || !op.Done {
+		t.Fatalf("create the source key with the official client = %v, %v", op, err)
+	}
+	var made ak.V2Key
+	if err := json.Unmarshal(op.Response, &made); err != nil {
+		t.Fatal(err)
+	}
+	id := made.Name[strings.LastIndex(made.Name, "/")+1:]
+	t.Cleanup(func() {
+		if all, _ := c.Projects.Locations.Keys.List(parent).Do(); all != nil {
+			for _, k := range all.Keys {
+				_, _ = c.Projects.Locations.Keys.Delete(k.Name).Do()
+			}
+		}
+	})
+
+	p := open(t)
+	p.navigate("/apis/credentials/key/" + id + "?project=" + project)
+	p.waitFor(`document.querySelector("#api-key-copy-button") !== null`)
+	var ips string
+	p.eval(`document.querySelector("#api-key-ips-items").textContent`, &ips)
+	if !strings.Contains(ips, "198.51.100.0/24") {
+		t.Errorf("the key's page lists the IP addresses %q", ips)
+	}
+	p.clickExpr(`document.querySelector("#api-key-copy-button")`)
+	p.waitFor(`location.pathname.startsWith("/apis/credentials/apikey/copy/") && document.querySelector("#api-key-form") !== null`)
+	p.setField("#api-key-name", "Copied key")
+	p.clickExpr(`document.querySelector("#api-key-create")`)
+	p.waitFor(`document.querySelector("#api-key-string") !== null`)
+	list, err := c.Projects.Locations.Keys.List(parent).Do()
+	if err != nil || len(list.Keys) != 2 {
+		t.Fatalf("keys after Create a copy = %v, %v", list, err)
+	}
+	for _, k := range list.Keys {
+		if k.Name == made.Name {
+			continue
+		}
+		if k.DisplayName != "Copied key" || k.Restrictions == nil || k.Restrictions.ServerKeyRestrictions == nil ||
+			strings.Join(k.Restrictions.ServerKeyRestrictions.AllowedIps, ",") != "198.51.100.0/24" || len(k.Restrictions.ApiTargets) != 1 {
+			t.Errorf("the copy: %+v", k)
+		}
+	}
+	p.clickExpr(`document.querySelector("#api-key-close")`)
+
+	p.navigate("/apis/credentials/apikey/create?project=" + project)
+	p.waitFor(`document.querySelector("#api-key-bind-sa") !== null`)
+	p.clickExpr(`document.querySelector("#api-key-bind-sa")`)
+	p.waitFor(`!document.querySelector("#api-key-sa-pick").hidden && document.querySelector("#api-key-service-account") !== null`)
+
+	auditScreens(t, []a11yPage{
+		screen("Create API key", "/apis/credentials/apikey/create", project),
+		screen("Edit API key", "/apis/credentials/key/"+id, project),
+	})
 }
