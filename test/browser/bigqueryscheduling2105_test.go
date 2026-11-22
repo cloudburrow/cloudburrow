@@ -59,16 +59,22 @@ func TestBigQueryStudioPipelineTaskTypesThroughThePage(t *testing.T) {
 	p.waitFor(`[...document.querySelectorAll(".bq-pl-details h3")].some((h) => h.textContent === "Data quality test task")`)
 	p.setField("#bq-pl-tds", ds)
 	p.setField("#bq-pl-sql", `SELECT * FROM ${ref("kinds")} WHERE id IS NULL`)
-	// Unit test: kinds with one input row.
+	// Unit test: the view, with one input row standing in for kinds. The
+	// incremental table is not offered: Dataform core does not test one.
 	studioMenu(p, ".bq-pipeline", "Add task", "Unit test")
 	p.waitFor(`document.querySelector("#bq-pl-tested") !== null`)
-	p.eval(`document.querySelector("#bq-pl-tested").value = "kinds"`, nil)
+	var offered string
+	p.eval(`[...document.querySelectorAll("#bq-pl-tested option")].map((o) => o.value).join(",")`, &offered)
+	if offered != ",view_3" {
+		t.Errorf("Action to test offers %q, want only view_3", offered)
+	}
+	p.eval(`document.querySelector("#bq-pl-tested").value = "view_3"`, nil)
 	p.eval(`document.querySelector("#bq-pl-tested").dispatchEvent(new Event("change", { bubbles: true }))`, nil)
 	p.clickText(".bq-pl-details button", "Add input")
 	p.waitFor(`document.querySelector("#bq-pl-in-name-0") !== null`)
-	p.setField("#bq-pl-in-name-0", "events")
+	p.setField("#bq-pl-in-name-0", "kinds")
 	p.setField("#bq-pl-in-sql-0", "SELECT 7 AS id, 'z' AS kind")
-	p.setField("#bq-pl-sql", "SELECT 7 AS id, 'z' AS kind")
+	p.setField("#bq-pl-sql", "SELECT 1 AS n")
 	var count int
 	p.eval(`document.querySelectorAll(".bq-pl-task").length`, &count)
 	if count != 5 {
@@ -77,7 +83,7 @@ func TestBigQueryStudioPipelineTaskTypesThroughThePage(t *testing.T) {
 
 	// Run > Select tasks to run: the view, with its dependencies.
 	studioMenu(p, ".bq-pipeline", "Run", "Select tasks to run")
-	p.waitFor(`document.querySelector("#bq-runsel-title") !== null`)
+	p.waitFor(`document.querySelector(".modal.is-open #bq-runsel-title") !== null`)
 	var listed string
 	p.eval(`[...document.querySelectorAll(".bq-runsel-table tbody tr")].map((r) => r.textContent).join(",")`, &listed)
 	if strings.Contains(listed, "Unit test") || strings.Contains(listed, "Declare source") || !strings.Contains(listed, "View") {
@@ -91,10 +97,14 @@ func TestBigQueryStudioPipelineTaskTypesThroughThePage(t *testing.T) {
 			t.Errorf("Select tasks to run: %s", fl)
 		}
 	})
-	p.clickExpr(`[...document.querySelectorAll(".bq-runsel-table tbody tr")].find((r) => r.textContent.includes("view")).querySelector("input")`)
+	// dialogFailures ends with Escape, which closes the pane: open it again
+	// once the closing one has gone.
+	p.waitFor(`document.querySelector(".modal") === null`)
+	studioMenu(p, ".bq-pipeline", "Run", "Select tasks to run")
+	p.waitFor(`document.querySelector(".modal.is-open .bq-runsel-table") !== null`)
+	p.clickExpr(`[...document.querySelectorAll(".bq-runsel-table tbody tr")].find((r) => r.textContent.includes("view_")).querySelector("input")`)
 	p.clickExpr(`document.querySelector("#bq-runsel-deps")`)
-	p.clickText(".modal .modal-actions button", "Run")
-	studioSaveAs(p, name)
+	runSelected(p, "Select tasks to run", func() { studioSaveAs(p, name) })
 	if state := studioWaitExecution(p, ".bq-pl-runs", 6*time.Minute); state != "SUCCEEDED" {
 		t.Fatalf("the selected run is %s: %s", state, studioTaskStates(p, ".bq-pl-runs"))
 	}
@@ -110,7 +120,7 @@ func TestBigQueryStudioPipelineTaskTypesThroughThePage(t *testing.T) {
 	studioMenu(p, ".bq-pipeline", "Run", "Select tags to run")
 	p.waitFor(`document.querySelector(".bq-runsel-table") !== null`)
 	p.clickExpr(`document.querySelector(".bq-runsel-table tbody input")`)
-	p.clickText(".modal .modal-actions button", "Run")
+	runSelected(p, "Select tags to run", nil)
 	if state := studioWaitExecution(p, ".bq-pl-runs", 6*time.Minute); state != "SUCCEEDED" {
 		t.Fatalf("the tag run is %s: %s", state, studioTaskStates(p, ".bq-pl-runs"))
 	}
@@ -122,23 +132,18 @@ func TestBigQueryStudioPipelineTaskTypesThroughThePage(t *testing.T) {
 	studioMenu(p, ".bq-pipeline", "Run", "Run unit tests")
 	p.waitFor(`document.querySelector('input[name="bq-runsel-scope"]') !== null`)
 	p.clickExpr(`document.querySelector('input[name="bq-runsel-scope"][value="all"]')`)
-	p.clickText(".modal .modal-actions button", "Run")
+	runSelected(p, "Run unit tests", nil)
 	if state := studioWaitExecution(p, ".bq-pl-runs", 6*time.Minute); state != "SUCCEEDED" {
 		t.Fatalf("the unit test run is %s: %s", state, studioTaskStates(p, ".bq-pl-runs"))
 	}
-	if tasks := studioTaskStates(p, ".bq-pl-runs"); !strings.Contains(tasks, "kinds") || strings.Count(tasks, " | ") != 0 {
+	if tasks := studioTaskStates(p, ".bq-pl-runs"); !strings.Contains(tasks, "view_3") && !strings.Contains(tasks, "unit_test_5") || strings.Count(tasks, " | ") != 0 {
 		t.Errorf("Run unit tests ran: %s", tasks)
 	}
 
 	// Trigger: on updates of events, a 3 minute minimum.
 	trigger := fmt.Sprintf("on-events-%d", s.stamp)
 	p.clickText(".bq-pipeline .bq-toolbar button", "Trigger")
-	p.waitFor(`document.querySelector("#bq-trig-name") !== null`)
-	p.setField("#bq-trig-name", trigger)
-	p.setField("#bq-trig-search", ds+".events")
-	p.clickText(".modal button", "Add")
-	p.waitFor(`document.querySelector(".bq-trig-chosen .mono") !== null`)
-	p.clickExpr(`document.querySelector('input[name="bq-trig-cond"][value="ALL"]')`)
+	p.waitFor(`document.querySelector(".modal.is-open #bq-trig-name") !== null`)
 	t.Run("keyboard: Trigger", func(t *testing.T) {
 		parent := p.t
 		p.t = t
@@ -147,6 +152,14 @@ func TestBigQueryStudioPipelineTaskTypesThroughThePage(t *testing.T) {
 			t.Errorf("Trigger: %s", fl)
 		}
 	})
+	p.waitFor(`document.querySelector(".modal") === null`)
+	p.clickText(".bq-pipeline .bq-toolbar button", "Trigger")
+	p.waitFor(`document.querySelector(".modal.is-open #bq-trig-name") !== null`)
+	p.setField("#bq-trig-name", trigger)
+	p.setField("#bq-trig-search", ds+".events")
+	p.clickText(".modal button", "Add")
+	p.waitFor(`document.querySelector(".bq-trig-chosen .mono") !== null`)
+	p.clickExpr(`document.querySelector('input[name="bq-trig-cond"][value="ALL"]')`)
 	p.clickText(".modal .modal-actions button", "Create schedule")
 	p.waitFor(`document.querySelector("#bq-trig-name") === null`)
 
@@ -186,8 +199,11 @@ func TestBigQueryStudioPipelineTaskTypesThroughThePage(t *testing.T) {
 		p.run(chromedp.Focus(chromedp.CSS(`.bq-scheduling .bq-menu-button`)), chromedp.KeyEvent(kb.Enter))
 		p.waitFor(`document.activeElement && /^(Scheduled Query|Notebook schedule)$/.test(document.activeElement.textContent)`)
 		p.run(chromedp.KeyEvent(kb.Escape))
+		// The details are open from above: Enter draws them anew, and Past
+		// executions fills in after them. Walk once both have.
+		p.eval(`document.querySelector(".bq-sched-detail h2").dataset.stale = "1"`, nil)
 		p.run(chromedp.Focus(chromedp.CSS(`.bq-scheduling-table .link-button`)), chromedp.KeyEvent(kb.Enter))
-		p.waitFor(`document.querySelector(".bq-sched-detail h2") !== null`)
+		p.waitFor(`document.querySelector(".bq-sched-detail h2:not([data-stale])") !== null && (() => { const r = document.querySelector(".bq-sched-runs"); return r && r.childElementCount > 0 && !r.querySelector(".spinner"); })()`)
 		for _, fl := range p.keyboardFailures() {
 			t.Errorf("Scheduling: %s", fl)
 		}
@@ -200,4 +216,24 @@ func TestBigQueryStudioPipelineTaskTypesThroughThePage(t *testing.T) {
 			{"BigQuery Scheduling: schedule details", "/bigquery-scheduling" + s.q, row + ` !== null`, row + `.querySelector(".link-button").click()`},
 		})
 	})
+}
+
+// runSelected presses Run in Run's selection pane (answering the Save
+// dialog with save, when the pipeline is new) and waits for the pane to
+// close on a new execution, failing with the pane's error if it shows one.
+func runSelected(p *tab, pane string, save func()) {
+	p.t.Helper()
+	var before string
+	p.eval(`(document.querySelector(".bq-pl-runs") || {}).textContent || ""`, &before)
+	p.clickText(".modal .modal-actions button", "Run")
+	if save != nil {
+		save()
+	}
+	p.waitForWithin(`(() => { const d = document.querySelector(".modal.is-open"); return !d || !d.querySelector("#bq-runsel-title") || !d.querySelector(".form-error").hidden; })()`, 2*time.Minute)
+	var runErr string
+	p.eval(`(() => { const e = document.querySelector(".modal.is-open .form-error"); return e && !e.hidden ? e.textContent : ""; })()`, &runErr)
+	if runErr != "" {
+		p.t.Fatalf("%s: %s", pane, runErr)
+	}
+	p.waitForWithin(fmt.Sprintf(`(document.querySelector(".bq-pl-runs") || {}).textContent !== %q && document.querySelector(".bq-pl-runs .bq-exec-state") !== null`, before), 2*time.Minute)
 }

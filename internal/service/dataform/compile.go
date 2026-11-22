@@ -746,7 +746,7 @@ func (g *dfGraph) errors(project string) []*dfpb.CompilationResult_CompilationEr
 // is MERGE (Dataform core's `loadMode: { mode: "MERGE", uniqueKey: [...] }`,
 // BigQuery Studio's Upsert write mode), by target (targetKey).
 //
-// UNVERIFIED (read 2026-11-22: https://docs.cloud.google.com/dataform/reference/rest/v1/projects.locations.repositories.compilationResults/query,
+// UNVERIFIED (re-read 2026-11-22: https://docs.cloud.google.com/dataform/reference/rest/v1/projects.locations.repositories.compilationResults/query,
 // https://docs.cloud.google.com/bigquery/docs/data-prep-introduction): the
 // API's LoadConfig has only replace, append, maximum and unique, so a
 // MERGE data preparation's contents_sql carries no load config, and the

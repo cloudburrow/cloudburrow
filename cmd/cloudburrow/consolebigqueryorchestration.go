@@ -469,6 +469,15 @@ func pipelineFiles(project string, m studioPipeline) (map[string]string, error) 
 		}
 		switch t.Type {
 		case "sql", "table", "view", "declaration", "assertion", "unit_test":
+			if t.Type == "unit_test" {
+				// A unit test names the action it tests by its target;
+				// that task's dataset and project place it.
+				for _, x := range m.Tasks {
+					if (x.Type == "table" || x.Type == "view") && targetOf[x.Name] == strings.TrimSpace(t.TestedTask) {
+						t.Project, t.Dataset = x.Project, x.Dataset
+					}
+				}
+			}
 			f, err := pipelineTaskFile(t, depTargets)
 			if err != nil {
 				return nil, err

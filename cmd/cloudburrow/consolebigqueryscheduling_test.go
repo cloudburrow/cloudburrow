@@ -30,7 +30,7 @@ func TestPipelineTaskTypes(t *testing.T) {
 		"definitions/daily.sqlx":   {`type: "incremental"`, `uniqueKey: ["day", "id"]`, `tags: ["nightly"]`, `name: "daily_events"`},
 		"definitions/v.sqlx":       {`type: "view"`, `materialized: true`, `dependencies: ["daily_events"]`},
 		"definitions/dq.sqlx":      {`type: "assertion"`, `tags: ["dq"]`, `dependencies: ["daily_events"]`},
-		"definitions/ut.sqlx":      {`type: "test"`, `dataset: "daily_events"`, `input "events" {`},
+		"definitions/ut.sqlx":      {`type: "test"`, `dataset: { schema: "mart", name: "daily_events" }`, `input "events" {`},
 		"definitions/actions.yaml": {`name: "spark"`, `- name: "v"`, `tags:`, `- "spark"`},
 	} {
 		got, ok := files[path]

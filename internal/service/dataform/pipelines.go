@@ -531,7 +531,7 @@ func (s *Server) runDataPreparation(ctx context.Context, a *dfpb.CompilationResu
 // errorTableDDL creates a data preparation's error table: it "holds the
 // rows a step could not prepare".
 //
-// UNVERIFIED (read 2026-11-22: https://docs.cloud.google.com/bigquery/docs/data-prep-introduction):
+// UNVERIFIED (re-read 2026-11-22: https://docs.cloud.google.com/bigquery/docs/data-prep-introduction):
 // Google documents no error table schema; this one holds the time, the
 // failure and the row as JSON, partitioned by day so retention_days is
 // its partition expiration ("Error table partition expiration in days").

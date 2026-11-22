@@ -435,7 +435,7 @@ func TestBigQueryStudioDataPreparationUpsertValidationFlatten(t *testing.T) {
 	if body := s.query(t, fmt.Sprintf("SELECT COUNT(*) AS n, SUM(v) AS sv, SUM(s_a) AS sa FROM `%s.%s.up`", s.project, ds)); !strings.Contains(body, `"3"`) || !strings.Contains(body, `"9"`) || !strings.Contains(body, `"50"`) {
 		t.Errorf("the merged destination reads %s, want 3 rows, v summing to 9 and s_a to 50", body)
 	}
-	if body := s.query(t, fmt.Sprintf("SELECT error FROM `%s.%s.up_errors`", s.project, ds)); !strings.Contains(body, "Validation failed: v > 1") {
+	if body := s.query(t, fmt.Sprintf("SELECT error FROM `%s.%s.up_errors`", s.project, ds)); !strings.Contains(body, "Validation failed: v > 1") && !strings.Contains(body, `Validation failed: v \u003e 1`) {
 		t.Errorf("the error table reads %s", body)
 	}
 

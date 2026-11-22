@@ -2784,7 +2784,11 @@ tr.log-entry.is-located { outline: 2px solid var(--accent); outline-offset: -2px
 .bq-dp-runs, .bq-pl-runs, .bq-sched-runs { margin-top: 16px; }
 .bq-exec-summary { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 8px 0; }
 .bq-exec-summary dt { color: var(--text-muted); }
-.bq-exec-summary dd { margin: 0; }
+.bq-exec-summary dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+/* The scroll box holds its cells' screen-reader text too: positioned, it is
+   the containing block of their absolutely positioned .sr-only spans, which
+   would otherwise widen the page past a narrow window. */
+.bq-sched-wrap { position: relative; }
 .bq-auth, .bq-nb-options, .bq-frequency, .bq-pl-after, .bq-pl-settings fieldset { border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 12px; margin: 8px 0; }
 .input-with-button { display: flex; gap: 8px; align-items: center; }
 .input-with-button input { flex: 1; }

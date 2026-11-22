@@ -196,7 +196,18 @@ func pipelineTaskFile(t studioPipelineTask, deps []string) (string, error) {
 		}
 		// A test names the action it tests by its dataset field (Dataform
 		// core's TestConfig), and carries no dependencies of its own.
-		cfg = []string{`  type: "test"`, "  dataset: " + js(tested)}
+		// The tested action's dataset and project, when the pipeline gives
+		// it its own, name it in full ({schema, name, database}); a bare
+		// name is looked up in the default dataset.
+		ref := js(tested)
+		if d := strings.TrimSpace(t.Dataset); d != "" {
+			ref = "{ schema: " + js(d) + ", name: " + js(tested)
+			if p := strings.TrimSpace(t.Project); p != "" {
+				ref += ", database: " + js(p)
+			}
+			ref += " }"
+		}
+		cfg = []string{`  type: "test"`, "  dataset: " + ref}
 		out := "config {\n" + strings.Join(cfg, ",\n") + "\n}\n\n"
 		for _, in := range t.Inputs {
 			n, q := strings.TrimSpace(in.Name), strings.TrimSpace(in.SQL)

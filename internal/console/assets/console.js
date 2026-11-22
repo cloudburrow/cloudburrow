@@ -10181,6 +10181,21 @@ function startCreate(route, create, onDone) {
   // Create project is the New project page, as the picker's New project is.
   if (create.href) return navigate(create.href + scopeSearch());
   if (create.page) return navigate(`${route.path}/create`);
+  // A dialog whose choices are the selected project's (#2105: Colab
+  // Enterprise's Runtime template menu) reads them first, as the create
+  // page does, with the list's scope.
+  const project = currentProject();
+  if (create.perProject && project && route.service) {
+    const q = new URLSearchParams(location.search);
+    q.set("project", project);
+    api(`/api/createform/${route.service}?${q}`)
+      .then((data) => openCreateForm(route, { ...create, fields: data.fields || create.fields }, onDone))
+      .catch((err) => {
+        notify(`The form's choices could not be read for ${project}: ${err.message}`, "error");
+        openCreateForm(route, create, onDone);
+      });
+    return;
+  }
   openCreateForm(route, create, onDone);
 }
 
@@ -10256,7 +10271,7 @@ function openCreateForm(route, spec, onDone) {
   };
 
   dialog.append(el("form", { class: "modal-body", novalidate: true, onsubmit: submit },
-    el("h2", { id: "create-title", text: spec.label }),
+    el("h2", { id: "create-title", text: spec.title || spec.label }),
     error,
     ...fields.nodes,
     discard,
@@ -21978,7 +21993,11 @@ function bqDataPrepEditor(doc, onChange, ctx, { idPrefix = "bq-dp" } = {}) {
   // SQLX makes it an editable SQLX one, as Google migrates them.
   const drawYaml = () => setChildren(yamlHost, doc.yaml ? el("div", { class: "bq-hint", role: "status" },
     el("p", { text: "A YAML data preparation: its source, destination and error table are edited here and saved back to its YAML. Migrate it to SQLX to add steps." }),
-    el("button", { type: "button", class: "secondary", text: "Migrate to SQLX", onclick: () => { delete doc.yaml; changed(); drawForm(); drawView(); } })) : null);
+    el("button", { type: "button", class: "secondary", text: "Migrate to SQLX",
+      // The button goes with the banner: focus moves to the selected step
+      // rather than falling back to the page.
+      onclick: () => { delete doc.yaml; changed(); drawForm(); drawView();
+        (stepsHost.querySelector(".bq-dp-step.is-selected") || stepsHost.querySelector(".bq-dp-step"))?.focus(); } })) : null);
   const input = (id, label, value, set, { help = null, ...attrs } = {}) => {
     const c = el("input", { type: "text", id, value: value || "", ...attrs, oninput: () => { set(c.value); changed(); } });
     return bqField(id, label, c, help);
@@ -22492,7 +22511,9 @@ function bqPipelineTaskEditor(t, doc, keep, ctx) {
   }
   // A unit test: the action it tests, the inputs standing in for that
   // action's references, and the rows it is expected to return.
-  const actions = doc.tasks.filter((x) => x.type === "table" || x.type === "view").map((x) => x.table || x.name);
+  // Dataform core refuses a test of an incremental table ("Running tests
+  // on incremental datasets is not yet supported"), so it is not offered.
+  const actions = doc.tasks.filter((x) => (x.type === "table" && x.tableType !== "incremental") || x.type === "view").map((x) => x.table || x.name);
   const tested = el("select", { id: "bq-pl-tested", onchange: () => { t.testedTask = tested.value; keep(); } },
     el("option", { value: "", text: actions.length ? "Choose the action to test" : "Add a Table or View task first" }),
     ...actions.map((a) => el("option", { value: a, text: a })));
@@ -22510,7 +22531,7 @@ function bqPipelineTaskEditor(t, doc, keep, ctx) {
   el("button", { type: "button", class: "secondary", text: "Add input", onclick: () => { t.inputs.push({ name: "", sql: "SELECT 1 AS id" }); keep(); drawInputs(); } }));
   drawInputs();
   return el("div", { class: "bq-pl-task-form" },
-    bqField("bq-pl-tested", "Action to test", tested, "A Table or View task of this pipeline."),
+    bqField("bq-pl-tested", "Action to test", tested, "A Table (not an incremental one) or View task of this pipeline."),
     el("p", { class: "unavailable", text: `BigQuery Unit test: ${t.name}. Run > Run unit tests runs it (execution mode Unit tests).` }),
     inputs, sqlArea("Expected output (SELECT)", "The rows the tested action returns for these inputs: same columns, same rows, same values."));
 }
@@ -22832,7 +22853,9 @@ async function renderBigQueryScheduling(view) {
   const draw = () => {
     const visible = rows.filter((r) => !typeFilter || r.type === typeFilter);
     const cols = BQ_SCHED_COLUMNS.filter(([k]) => shown.includes(k));
-    setChildren(list, visible.length ? el("table", { class: "bq-history-table bq-scheduling-table" },
+    // The table scrolls in its own box on a narrow screen, as the
+    // resource lists do, so the page never scrolls sideways.
+    setChildren(list, visible.length ? el("div", { class: "table-wrap bq-sched-wrap" }, el("table", { class: "bq-history-table bq-scheduling-table" },
       el("caption", { class: "sr-only", text: "Schedules" }),
       el("thead", {}, el("tr", {}, el("th", { scope: "col", text: "Name" }), ...cols.map(([, h]) => el("th", { scope: "col", text: h })), el("th", { scope: "col", text: "Actions" }))),
       el("tbody", {}, ...visible.map((r) => el("tr", { "data-schedule": r.id },
@@ -22841,7 +22864,7 @@ async function renderBigQueryScheduling(view) {
         el("td", {}, bqMenu(`View actions for schedule ${r.id}`, [
           { label: r.disabled ? "Enable" : "Disable", run: () => toggle(r) },
           { label: "Delete", danger: true, run: () => remove(r) },
-        ]))))))
+        ])))))))
       : el("div", { class: "state" }, el("h2", { text: typeFilter ? `No ${typeFilter.toLowerCase()} schedules` : "No schedules" }),
         el("p", { text: "Schedule a query, notebook, pipeline or data preparation: Create, or Schedule in its Studio editor." })));
   };

@@ -418,6 +418,14 @@ func vertexSetDefault(ctx context.Context, addr, name string) error {
 	return nil
 }
 
+// Actions are a row's: Set as Default.
+func (colabTemplatesProvider) Actions(r console.Resource) []console.Action { return r.Actions }
+
+// Act performs a row's action.
+func (p colabTemplatesProvider) Act(ctx context.Context, project, name, action string) error {
+	return p.ActAt(ctx, project, []string{name}, action, nil)
+}
+
 // ---- Runtimes
 
 type colabRuntimesProvider struct{ api vertexAPI }
@@ -594,4 +602,12 @@ func (p colabRuntimesProvider) ActAt(ctx context.Context, project string, path [
 		return err
 	}
 	return fmt.Errorf("unknown action %q", action)
+}
+
+// Actions are a row's: Start or Stop, as its state allows.
+func (colabRuntimesProvider) Actions(r console.Resource) []console.Action { return r.Actions }
+
+// Act performs a row's action.
+func (p colabRuntimesProvider) Act(ctx context.Context, project, name, action string) error {
+	return p.ActAt(ctx, project, []string{name}, action, nil)
 }

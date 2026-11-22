@@ -19226,6 +19226,7 @@
           "test/compat/dataform_pipelines_test.go:100 TestDataformNotebooksTestsAndDataPreparations",
           "test/compat/dataform_pipelines_test.go:321 TestDataformPipelineConfig",
           "test/compat/dataform_pipelines_test.go:781 TestDataformDataPreparationMergeValidationAndYAML",
+          "test/compat/dataform_template_test.go:25 TestDataformNotebookOnRuntimeTemplate",
           "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke"
         ]
       },
@@ -19284,6 +19285,7 @@
           "test/compat/dataform_pipelines_test.go:100 TestDataformNotebooksTestsAndDataPreparations",
           "test/compat/dataform_pipelines_test.go:781 TestDataformDataPreparationMergeValidationAndYAML",
           "test/compat/dataform_runoptions_test.go:27 TestDataformInvocationRunOptions",
+          "test/compat/dataform_template_test.go:25 TestDataformNotebookOnRuntimeTemplate",
           "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke"
         ]
       },

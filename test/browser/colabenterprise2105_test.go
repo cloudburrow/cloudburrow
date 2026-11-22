@@ -85,7 +85,7 @@ func TestColabEnterpriseRuntimesThroughThePages(t *testing.T) {
 		t.Errorf("the create page's heading = %q, want Create new runtime template", heading)
 	}
 	var sections []string
-	p.eval(`[...document.querySelectorAll("#view form h2, #view form legend, #view form .step-title")].map((n) => n.textContent.trim())`, &sections)
+	p.eval(`[...document.querySelectorAll("#view form .create-step-title, #view form .form-section-title, #view form h2, #view form h3, #view form legend")].map((n) => n.textContent.trim())`, &sections)
 	for _, want := range []string{"Runtime basics", "Configure compute", "Environment", "Networking and security"} {
 		found := false
 		for _, s := range sections {
@@ -132,12 +132,10 @@ func TestColabEnterpriseRuntimesThroughThePages(t *testing.T) {
 	p.clickText("#view button", "Create")
 	p.waitFor(fmt.Sprintf(`[...document.querySelectorAll("#f-notebookRuntimeTemplate option")].some((o) => o.value === %q)`, id))
 	var dialogTitle string
-	p.eval(`(document.querySelector(".modal.is-open h2, #view h1") || {}).textContent || ""`, &dialogTitle)
+	p.eval(`(document.querySelector(".modal.is-open h2") || {}).textContent || ""`, &dialogTitle)
 	if dialogTitle != "Create Agent Platform runtime" {
 		t.Errorf("the create runtime title = %q", dialogTitle)
 	}
-	var createRuntimePath string
-	p.eval(`location.pathname + location.search`, &createRuntimePath)
 	runtimeName := "browser-runtime"
 	p.submitForm(map[string]string{"notebookRuntimeTemplate": id, "displayName": runtimeName}, "displayName")
 	p.waitForWithin(`location.pathname === "/agent-platform/colab/runtimes" && `+rowReady(runtimeName), 30*time.Minute)
@@ -173,8 +171,13 @@ func TestColabEnterpriseRuntimesThroughThePages(t *testing.T) {
 	p.navigate(runtimesPath)
 	p.colabRowItem(runtimeID, "Start")
 	p.waitForWithin(`document.querySelector(".modal.is-open") === null`, 10*time.Minute)
-	if s := status(); s != "Running" {
-		t.Errorf("after Start the runtime is %q", s)
+	// Start is an operation: the runtime is Starting until its container is up.
+	started := status()
+	for deadline := time.Now().Add(10 * time.Minute); started == "Starting" && time.Now().Before(deadline); started = status() {
+		time.Sleep(2 * time.Second)
+	}
+	if started != "Running" {
+		t.Errorf("after Start the runtime is %q", started)
 	}
 
 	auditScreens(t, []a11yPage{
@@ -185,7 +188,6 @@ func TestColabEnterpriseRuntimesThroughThePages(t *testing.T) {
 		{"create runtime dialog", runtimesPath, rowReady(runtimeName),
 			`[...document.querySelectorAll("#view button")].find((b) => b.textContent.trim() === "Create").click()`},
 	})
-	_ = createRuntimePath
 
 	// Delete, with Confirm, as Google's runtimes page asks.
 	p = open(t)
