@@ -14860,9 +14860,9 @@
     "Key": "compute",
     "Title": "Compute Engine API (v1): VPC networking",
     "counts": {
-      "Implemented": 288,
+      "Implemented": 286,
       "Unimplemented": 97,
-      "Verified": 179
+      "Verified": 181
     },
     "rows": [
       {
@@ -15069,7 +15069,8 @@
         "method": "compute.backendServices.get",
         "status": "Verified",
         "tests": [
-          "test/compat/computelb2153_test.go:50 TestComputeExternalHTTPLoadBalancerThroughTheGoClient"
+          "test/compat/computelb2153_test.go:50 TestComputeExternalHTTPLoadBalancerThroughTheGoClient",
+          "test/compat/custommetrics2160_test.go:35 TestCustomMetricsBalancingThroughTheGoClient"
         ]
       },
       {
@@ -15113,7 +15114,9 @@
         "status": "Verified",
         "tests": [
           "test/compat/computelb2160_test.go:337 TestCloudCDNCachesThroughTheGoClient",
-          "test/compat/computelb2160_test.go:404 TestIAPGuardsALoadBalancerThroughTheGoClient"
+          "test/compat/computelb2160_test.go:404 TestIAPGuardsALoadBalancerThroughTheGoClient",
+          "test/compat/custommetrics2160_test.go:35 TestCustomMetricsBalancingThroughTheGoClient",
+          "test/compat/iap2160_test.go:55 TestIAPBrowserSignInThroughAGoClient"
         ]
       },
       {
@@ -15284,7 +15287,8 @@
         "tests": [
           "test/compat/compute_test.go:299 TestGcloudComputeNetworks",
           "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient",
-          "test/compat/computevmnet_test.go:33 TestComputeVMNetworkingThroughTheGoClient"
+          "test/compat/computevmnet_test.go:33 TestComputeVMNetworkingThroughTheGoClient",
+          "test/compat/iap2160_test.go:224 TestGcloudStartIAPTunnel"
         ]
       },
       {
@@ -17685,8 +17689,10 @@
       },
       {
         "method": "compute.targetGrpcProxies.delete",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/custommetrics2160_test.go:113 TestDeltaXDSThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.targetGrpcProxies.get",
@@ -17695,8 +17701,10 @@
       },
       {
         "method": "compute.targetGrpcProxies.insert",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/custommetrics2160_test.go:113 TestDeltaXDSThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.targetGrpcProxies.list",
@@ -22320,6 +22328,241 @@
     ]
   },
   {
+    "Key": "networksecurity",
+    "Title": "Network Security (v1)",
+    "counts": {
+      "Implemented": 20,
+      "Unimplemented": 25
+    },
+    "rows": [
+      {
+        "method": "google.cloud.networksecurity.v1.NetworkSecurity/CreateAuthorizationPolicy",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.NetworkSecurity/CreateAuthzPolicy",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.NetworkSecurity/CreateBackendAuthenticationConfig",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): Backend Authenticated TLS (a backend service's tlsSettings.authenticationConfig) is not served yet: the load balancers here do not verify their backends' certificates (#2160)"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.NetworkSecurity/CreateClientTlsPolicy",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.NetworkSecurity/CreateGatewaySecurityPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): Secure Web Proxy's resources (gateway security policies and their rules, URL lists, TLS inspection policies); CloudBurrow serves no Secure Web Proxy gateway"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.NetworkSecurity/CreateGatewaySecurityPolicyRule",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): Secure Web Proxy's resources (gateway security policies and their rules, URL lists, TLS inspection policies); CloudBurrow serves no Secure Web Proxy gateway"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.NetworkSecurity/CreateServerTlsPolicy",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.NetworkSecurity/CreateTlsInspectionPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): Secure Web Proxy's resources (gateway security policies and their rules, URL lists, TLS inspection policies); CloudBurrow serves no Secure Web Proxy gateway"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.NetworkSecurity/CreateUrlList",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): Secure Web Proxy's resources (gateway security policies and their rules, URL lists, TLS inspection policies); CloudBurrow serves no Secure Web Proxy gateway"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.NetworkSecurity/DeleteAuthorizationPolicy",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.NetworkSecurity/DeleteAuthzPolicy",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.NetworkSecurity/DeleteBackendAuthenticationConfig",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): Backend Authenticated TLS (a backend service's tlsSettings.authenticationConfig) is not served yet: the load balancers here do not verify their backends' certificates (#2160)"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.NetworkSecurity/DeleteClientTlsPolicy",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.NetworkSecurity/DeleteGatewaySecurityPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): Secure Web Proxy's resources (gateway security policies and their rules, URL lists, TLS inspection policies); CloudBurrow serves no Secure Web Proxy gateway"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.NetworkSecurity/DeleteGatewaySecurityPolicyRule",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): Secure Web Proxy's resources (gateway security policies and their rules, URL lists, TLS inspection policies); CloudBurrow serves no Secure Web Proxy gateway"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.NetworkSecurity/DeleteServerTlsPolicy",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.NetworkSecurity/DeleteTlsInspectionPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): Secure Web Proxy's resources (gateway security policies and their rules, URL lists, TLS inspection policies); CloudBurrow serves no Secure Web Proxy gateway"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.NetworkSecurity/DeleteUrlList",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): Secure Web Proxy's resources (gateway security policies and their rules, URL lists, TLS inspection policies); CloudBurrow serves no Secure Web Proxy gateway"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.NetworkSecurity/GetAuthorizationPolicy",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.NetworkSecurity/GetAuthzPolicy",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.NetworkSecurity/GetBackendAuthenticationConfig",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): Backend Authenticated TLS (a backend service's tlsSettings.authenticationConfig) is not served yet: the load balancers here do not verify their backends' certificates (#2160)"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.NetworkSecurity/GetClientTlsPolicy",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.NetworkSecurity/GetGatewaySecurityPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): Secure Web Proxy's resources (gateway security policies and their rules, URL lists, TLS inspection policies); CloudBurrow serves no Secure Web Proxy gateway"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.NetworkSecurity/GetGatewaySecurityPolicyRule",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): Secure Web Proxy's resources (gateway security policies and their rules, URL lists, TLS inspection policies); CloudBurrow serves no Secure Web Proxy gateway"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.NetworkSecurity/GetServerTlsPolicy",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.NetworkSecurity/GetTlsInspectionPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): Secure Web Proxy's resources (gateway security policies and their rules, URL lists, TLS inspection policies); CloudBurrow serves no Secure Web Proxy gateway"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.NetworkSecurity/GetUrlList",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): Secure Web Proxy's resources (gateway security policies and their rules, URL lists, TLS inspection policies); CloudBurrow serves no Secure Web Proxy gateway"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.NetworkSecurity/ListAuthorizationPolicies",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.NetworkSecurity/ListAuthzPolicies",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.NetworkSecurity/ListBackendAuthenticationConfigs",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): Backend Authenticated TLS (a backend service's tlsSettings.authenticationConfig) is not served yet: the load balancers here do not verify their backends' certificates (#2160)"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.NetworkSecurity/ListClientTlsPolicies",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.NetworkSecurity/ListGatewaySecurityPolicies",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): Secure Web Proxy's resources (gateway security policies and their rules, URL lists, TLS inspection policies); CloudBurrow serves no Secure Web Proxy gateway"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.NetworkSecurity/ListGatewaySecurityPolicyRules",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): Secure Web Proxy's resources (gateway security policies and their rules, URL lists, TLS inspection policies); CloudBurrow serves no Secure Web Proxy gateway"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.NetworkSecurity/ListServerTlsPolicies",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.NetworkSecurity/ListTlsInspectionPolicies",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): Secure Web Proxy's resources (gateway security policies and their rules, URL lists, TLS inspection policies); CloudBurrow serves no Secure Web Proxy gateway"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.NetworkSecurity/ListUrlLists",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): Secure Web Proxy's resources (gateway security policies and their rules, URL lists, TLS inspection policies); CloudBurrow serves no Secure Web Proxy gateway"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.NetworkSecurity/UpdateAuthorizationPolicy",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.NetworkSecurity/UpdateAuthzPolicy",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.NetworkSecurity/UpdateBackendAuthenticationConfig",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): Backend Authenticated TLS (a backend service's tlsSettings.authenticationConfig) is not served yet: the load balancers here do not verify their backends' certificates (#2160)"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.NetworkSecurity/UpdateClientTlsPolicy",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.NetworkSecurity/UpdateGatewaySecurityPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): Secure Web Proxy's resources (gateway security policies and their rules, URL lists, TLS inspection policies); CloudBurrow serves no Secure Web Proxy gateway"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.NetworkSecurity/UpdateGatewaySecurityPolicyRule",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): Secure Web Proxy's resources (gateway security policies and their rules, URL lists, TLS inspection policies); CloudBurrow serves no Secure Web Proxy gateway"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.NetworkSecurity/UpdateServerTlsPolicy",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.NetworkSecurity/UpdateTlsInspectionPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): Secure Web Proxy's resources (gateway security policies and their rules, URL lists, TLS inspection policies); CloudBurrow serves no Secure Web Proxy gateway"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.NetworkSecurity/UpdateUrlList",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): Secure Web Proxy's resources (gateway security policies and their rules, URL lists, TLS inspection policies); CloudBurrow serves no Secure Web Proxy gateway"
+      }
+    ]
+  },
+  {
     "Key": "iap",
     "Title": "Identity-Aware Proxy (v1)",
     "counts": {
@@ -22373,7 +22616,9 @@
         "method": "google.cloud.iap.v1.IdentityAwareProxyAdminService/SetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/certmanageriap2160_test.go:271 TestIdentityAwareProxyThroughTheGoClient"
+          "test/compat/certmanageriap2160_test.go:271 TestIdentityAwareProxyThroughTheGoClient",
+          "test/compat/iap2160_test.go:224 TestGcloudStartIAPTunnel",
+          "test/compat/iap2160_test.go:55 TestIAPBrowserSignInThroughAGoClient"
         ]
       },
       {

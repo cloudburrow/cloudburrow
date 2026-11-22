@@ -430,6 +430,7 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			ccmCertsProvider{ccmScreen{screen}}, ccmMapsProvider{ccmScreen{screen}}, ccmDNSAuthProvider{ccmScreen{screen}}, ccmIssuanceProvider{ccmScreen{screen}},
 			// Trust configs and Client Authentication (#2160, consoletrustconfig2160.go).
 			ccmTrustProvider{ccmScreen{screen}}, netsecClientAuthProvider{ccmScreen{screen}},
+			newNetsecProvider(screen, "netsecurity-clienttls"), newNetsecProvider(screen, "netsecurity-meshauthz"), newNetsecProvider(screen, "netsecurity-authz"),
 			// Serverless VPC Access (#2140), on the same port.
 			vpcAccessProvider{screen},
 			computeInternalAddressesProvider{computeAddressesProvider{screen}}, computeEffectiveRoutesProvider{screen},

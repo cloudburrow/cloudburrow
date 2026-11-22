@@ -78,7 +78,7 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 		"netsecurity-armor", "netservices-cdn", "security-iap", "security-iap-tcp", "ccm-certificates", "ccm-maps", "ccm-dnsauth", "ccm-issuance",
 		"netsecurity-armor-edge", "netsecurity-armor-waf", "servicemesh-routing",
 		// Trust configs and Client Authentication (#2160).
-		"ccm-trustconfigs", "netsecurity-clientauth"}},
+		"ccm-trustconfigs", "netsecurity-clientauth", "netsecurity-clienttls", "netsecurity-meshauthz", "netsecurity-authz"}},
 }
 
 // clusterScreens are the registry's screens that belong to no selectable

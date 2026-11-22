@@ -145,6 +145,8 @@ const CCM_TABS = ["/security/ccm/list/certificates", "/security/ccm/list/certifi
 // for the last two: their tabs are UNVERIFIED (re-read 2026-11-22:
 // armor/docs/advanced-network-ddos, waf-rules).
 const ARMOR_TABS = ["/net-security/securitypolicies/list", "/net-security/securitypolicies/networkEdgeSecurityServices", "/net-security/securitypolicies/wafRules"];
+// Network Security's Authentication Configuration tabs (#2160).
+const NETSEC_AUTH_TABS = ["/net-security/authconfig", "/net-security/authconfig/clientTlsPolicies", "/net-security/authconfig/authorizationPolicies"];
 const GKE_STORAGE = ["/kubernetes/storage", "/kubernetes/storage-classes"];
 // Cloud Logging's Settings and its Log Scopes tab (#2020), as Google's
 // Settings page has a Log Scopes tab (log-scope/create-and-manage).
@@ -642,7 +644,18 @@ const ROUTES = [
   // Configuration page, its Client Authentication tab (server TLS
   // policies), as load-balancing/docs/https/setting-up-mtls-ccm has it.
   { path: "/net-security/authconfig", service: "netsecurity-clientauth", icon: "vpc", title: "Authentication Configuration", tabTitle: "Client Authentication",
-    kind: "Client Authentication", pageTabs: ["/net-security/authconfig"], section: "Networking", product: "netsecurity", productTitle: "Network Security" },
+    kind: "Client Authentication", pageTabs: NETSEC_AUTH_TABS, section: "Networking", product: "netsecurity", productTitle: "Network Security" },
+  // Client TLS policies and service mesh authorization policies (#2160):
+  // the page's other tabs. The tabs are UNVERIFIED (docs re-read
+  // 2026-11-22 give gcloud import steps only).
+  { path: "/net-security/authconfig/clientTlsPolicies", service: "netsecurity-clienttls", icon: "vpc", title: "Authentication Configuration", tabTitle: "Client TLS policies",
+    kind: "Client TLS policy", navHidden: true, navAs: "/net-security/authconfig", pageTabs: NETSEC_AUTH_TABS, section: "Networking", product: "netsecurity", productTitle: "Network Security" },
+  { path: "/net-security/authconfig/authorizationPolicies", service: "netsecurity-meshauthz", icon: "vpc", title: "Authentication Configuration", tabTitle: "Service mesh authorization policies",
+    kind: "Service mesh authorization policy", navHidden: true, navAs: "/net-security/authconfig", pageTabs: NETSEC_AUTH_TABS, section: "Networking", product: "netsecurity", productTitle: "Network Security" },
+  // Authorization policies (#2160): the Application Load Balancers'
+  // authzPolicies (load-balancing/docs/auth-policy). UNVERIFIED path.
+  { path: "/net-security/authzpolicies", service: "netsecurity-authz", icon: "vpc", title: "Authorization policies", kind: "Authorization policy",
+    section: "Networking", product: "netsecurity", productTitle: "Network Security" },
   // Cloud CDN (#2160): Network services' Cloud CDN origins.
   { path: "/net-services/cdn/list", service: "netservices-cdn", icon: "vpc", title: "Cloud CDN", kind: "Origin",
     section: "Networking", product: "netservices", productTitle: "Network services" },
