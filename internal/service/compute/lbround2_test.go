@@ -309,8 +309,8 @@ func (f fakeIAP) VerifyIDToken(tok string) (string, string, bool) {
 func (f fakeIAP) Allowed(_ context.Context, res, email string, _ IAPRequest) bool {
 	return res == "projects/p/iap_web/compute/services/app" && f.allow[email]
 }
-func (f fakeIAP) Settings(string) map[string]any    { return nil }
-func (f fakeIAP) ProjectNumber(p string) string { return "123456789" }
+func (f fakeIAP) Settings(string) map[string]any { return nil }
+func (f fakeIAP) ProjectNumber(p string) string  { return "123456789" }
 
 func TestIAPRefusesWithoutATokenAndSignsHeaders(t *testing.T) {
 	var seen atomic.Value
