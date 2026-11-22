@@ -13,8 +13,8 @@ Thank you for improving CloudBurrow. Contributions come as pull requests to
 
 ## Licence of contributions (inbound = outbound)
 
-From v0.6.0, CloudBurrow is licensed under the [MIT License](LICENSE); releases v0.1.0 to v0.5.0
-remain under the Apache License 2.0. By opening a pull request you agree that your contribution is
+CloudBurrow is licensed under the [MIT License](LICENSE). Releases v0.1.0 to v0.5.0 were first
+published under the Apache License 2.0, and their CloudBurrow code is now available under MIT too. By opening a pull request you agree that your contribution is
 licensed under the same MIT License as the rest of CloudBurrow's own code. No separate contributor
 licence agreement is needed.
 

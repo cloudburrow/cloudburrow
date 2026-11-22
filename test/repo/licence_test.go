@@ -13,8 +13,8 @@ import (
 	"github.com/google/licensecheck"
 )
 
-// The licence guard. From v0.6.0 CloudBurrow's own code is MIT-licensed
-// (v0.1.0 to v0.5.0 stay Apache 2.0), and third-party code keeps its own
+// The licence guard. CloudBurrow's own code is MIT-licensed (v0.1.0 to
+// v0.5.0 were first published under Apache 2.0), and third-party code keeps its own
 // licence, which must never be GPL, LGPL or AGPL in the repository or in
 // what the CLI links (AGENTS rules; CONTRIBUTING.md).
 

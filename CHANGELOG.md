@@ -88,8 +88,8 @@ tagging `vX.Y.Z` by hand, move the entries under **Unreleased** into a new
 
 ### Changed
 
-- Licence: from v0.6.0, CloudBurrow is licensed under the MIT License; v0.1.0–v0.5.0 remain under
-  Apache 2.0. Third-party code keeps its own licence (NOTICE, dependencies.json), and
+- Licence: CloudBurrow is now licensed under the MIT License. v0.1.0–v0.5.0 were first published
+  under Apache 2.0, and their CloudBurrow code is now available under MIT too. Third-party code keeps its own licence (NOTICE, dependencies.json), and
   [CONTRIBUTING.md](CONTRIBUTING.md) takes contributions under MIT with a Developer Certificate of
   Origin sign-off.
 

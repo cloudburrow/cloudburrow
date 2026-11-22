@@ -256,8 +256,8 @@ response.
 
 ## License
 
-From v0.6.0, CloudBurrow is licensed under the [MIT License](LICENSE). Releases v0.1.0 to
-v0.5.0 remain under the Apache License 2.0. Third-party code keeps its own licence: see
+CloudBurrow is licensed under the [MIT License](LICENSE). Releases v0.1.0 to v0.5.0 were first
+published under the Apache License 2.0, and their CloudBurrow code is now available under MIT too. Third-party code keeps its own licence: see
 [NOTICE](NOTICE) for attribution and trademark notes, and [dependencies.json](dependencies.json).
 
 ## Domains
