@@ -379,8 +379,8 @@ const minDiskSizeGb = 10
 // 2026-11-22: how-to/update-existing-nodepools, Vertically scale by
 // changing the node machine attributes), an UPGRADE_NODES operation that
 // replaces every node, surge or blue-green, through the same steps as an
-// upgrade. Locally a node has this machine's resources whatever its
-// machine type; the new nodes carry it as node.kubernetes.io/instance-type.
+// upgrade. The new nodes have the machine type's vCPUs and memory
+// (machine.go) and carry it as node.kubernetes.io/instance-type.
 func (s *Server) recreatePoolLocked(p parsed, e *entry, np *containerpb.NodePool, req *containerpb.UpdateNodePoolRequest,
 	sv Version, imageType string, kubelet map[string]any) (*containerpb.Operation, error) {
 	up, err := s.upgrader()
@@ -418,6 +418,9 @@ func (s *Server) recreatePoolLocked(p parsed, e *entry, np *containerpb.NodePool
 			if err := s.configureKubelet(ctx, kind, pool, kubelet); err != nil {
 				return err
 			}
+		}
+		if err := s.configureMachine(ctx, kind, pool, labels[instanceTypeLabel]); err != nil {
+			return err
 		}
 		return s.configurePool(ctx, kind, pool, labels, taints, false)
 	}), nil

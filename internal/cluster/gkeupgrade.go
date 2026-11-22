@@ -2,9 +2,11 @@ package cluster
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -271,6 +273,11 @@ echo $a`
 	if err != nil {
 		return fmt.Errorf("import the control-plane images: %w", err)
 	}
+	// What the control plane runs now is kept, for a rollback-safe
+	// upgrade's way back (RollbackControlPlane).
+	if _, err := r.Run(ctx, "docker", "exec", cp, "sh", "-c", keepPreviousScript); err != nil {
+		return fmt.Errorf("keep the control plane's %s: %w", "previous version", err)
+	}
 	if _, err := r.Run(ctx, "docker", "cp", filepath.Join(stage, "kubeadm"), cp+":/usr/bin/kubeadm"); err != nil {
 		return fmt.Errorf("install kubeadm %s: %w", version, err)
 	}
@@ -330,3 +337,108 @@ echo $a`
 		}
 	}
 }
+
+// previousDir is where a control plane upgrade keeps what the control
+// plane ran before it: the API server's, controller manager's and
+// scheduler's manifests, the kubelet, kubeadm and kubectl, and kube-proxy's
+// image.
+const previousDir = "/etc/kubernetes/cloudburrow-previous"
+
+// keepPreviousScript keeps them, before kubeadm upgrades anything.
+const keepPreviousScript = `set -e
+d=` + previousDir + `
+rm -rf "$d"; mkdir -p "$d"
+for c in kube-apiserver kube-controller-manager kube-scheduler; do cp /etc/kubernetes/manifests/$c.yaml "$d/"; done
+for b in kubelet kubeadm kubectl; do cp /usr/bin/$b "$d/$b"; done
+kubelet --version | awk '{print $2}' > "$d/version"
+kubectl --kubeconfig /etc/kubernetes/admin.conf -n kube-system get daemonset kube-proxy \
+  -o jsonpath='{.spec.template.spec.containers[?(@.name=="kube-proxy")].image}' > "$d/kube-proxy-image" || true
+`
+
+// restorePreviousScript puts them back, $1 being the version they are.
+const restorePreviousScript = `set -e
+d=` + previousDir + `
+[ "$(cat "$d/version")" = "$1" ] || { echo "the kept control plane is $(cat "$d/version"), not $1" >&2; exit 1; }
+for b in kubeadm kubectl; do cp "$d/$b" /usr/bin/$b; done
+for c in kube-apiserver kube-controller-manager kube-scheduler; do cp "$d/$c.yaml" /etc/kubernetes/manifests/$c.yaml; done
+cp "$d/kubelet" /usr/bin/kubelet
+systemctl daemon-reload
+systemctl restart kubelet
+`
+
+// RollbackControlPlane runs kind's control plane on the version it ran
+// before its last upgrade again (#2100), as a rollback-safe upgrade's way
+// back during its soak: the API server, controller manager and scheduler
+// from their kept manifests (their images are still on the node), the
+// kubelet, kubeadm and kubectl of that version, kube-proxy's image, and
+// kubeadm's record of the cluster's version. etcd keeps its data and its
+// version: the soak ran the new binaries with the previous version's
+// behaviour (--emulated-version), so what they stored is the previous
+// version's. image is the node image of the previous version.
+func (g *GKE) RollbackControlPlane(ctx context.Context, kind, image string) error {
+	if !strings.HasPrefix(kind, OwnerPrefix) {
+		return fmt.Errorf("%w: %q", ErrNotOwned, kind)
+	}
+	version := kubeVersion(image)
+	r := g.runner()
+	cp := kind + "-control-plane"
+	kc := g.kubeconfig(kind)
+	proxy, _ := r.Run(ctx, "docker", "exec", cp, "cat", previousDir+"/kube-proxy-image")
+	if _, err := r.Run(ctx, "docker", "exec", cp, "sh", "-c", restorePreviousScript, "sh", version); err != nil {
+		return fmt.Errorf("restore the control plane's %s: %w", version, err)
+	}
+	deadline := time.Now().Add(4 * time.Minute)
+	for {
+		out, err := r.Run(ctx, "kubectl", "--kubeconfig", kc, "get", "--raw", "/version")
+		var v struct {
+			GitVersion string `json:"gitVersion"`
+		}
+		if err == nil && json.Unmarshal([]byte(out), &v) == nil && v.GitVersion == version {
+			break
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("the API server did not come back on %s (%v)", version, err)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
+	}
+	// kubeadm's record of the version, which a later upgrade starts from.
+	cfg, err := r.Run(ctx, "kubectl", "--kubeconfig", kc, "-n", "kube-system", "get", "configmap", "kubeadm-config",
+		"-o", "jsonpath={.data.ClusterConfiguration}")
+	if err != nil {
+		return fmt.Errorf("read kubeadm's configuration: %w", err)
+	}
+	cfg = kubernetesVersionRE.ReplaceAllString(cfg, "${1}"+version)
+	patch, _ := json.Marshal(map[string]any{"data": map[string]string{"ClusterConfiguration": cfg}})
+	if _, err := r.Run(ctx, "kubectl", "--kubeconfig", kc, "-n", "kube-system", "patch", "configmap", "kubeadm-config",
+		"--type", "merge", "-p", string(patch)); err != nil {
+		return fmt.Errorf("record version %s in kubeadm's configuration: %w", version, err)
+	}
+	if p := strings.TrimSpace(proxy); p != "" {
+		if _, err := r.Run(ctx, "kubectl", "--kubeconfig", kc, "-n", "kube-system", "set", "image", "daemonset/kube-proxy", "kube-proxy="+p); err != nil {
+			return fmt.Errorf("run kube-proxy %s: %w", p, err)
+		}
+	}
+	deadline = time.Now().Add(3 * time.Minute)
+	for {
+		out, err := r.Run(ctx, "kubectl", "--kubeconfig", kc, "get", "node", cp, "-o",
+			`jsonpath={.status.nodeInfo.kubeletVersion} {.status.conditions[?(@.type=="Ready")].status}`)
+		if err == nil && strings.TrimSpace(out) == version+" True" {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("the control plane's node is not Ready on %s (%q, %v)", version, strings.TrimSpace(out), err)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
+	}
+}
+
+// kubernetesVersionRE is kubeadm's ClusterConfiguration version line.
+var kubernetesVersionRE = regexp.MustCompile(`(?m)^(kubernetesVersion:\s*)\S+`)

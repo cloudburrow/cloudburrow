@@ -597,6 +597,14 @@ func (s *Server) UpdateCluster(ctx context.Context, req *containerpb.UpdateClust
 			return nil, err
 		}
 		typ = containerpb.Operation_UPGRADE_MASTER
+		if sv.GKE != c.CurrentMasterVersion && e.extra.RollbackSafe != nil {
+			// During a rollback-safe upgrade's soak the control plane goes
+			// back to its previous version, and nowhere else.
+			if len(set) > 1 {
+				return nil, status.Error(codes.InvalidArgument, "desired_master_version must be the only field of an update that upgrades the control plane.")
+			}
+			return s.rollbackControlPlaneLocked(p, e, sv)
+		}
 		if sv.GKE != c.CurrentMasterVersion {
 			// A real upgrade replaces the control plane's version: it is
 			// the only change of its operation, as Google runs it.
@@ -791,8 +799,7 @@ func (s *Server) GetServerConfig(_ context.Context, req *containerpb.GetServerCo
 	}
 	for _, ch := range []containerpb.ReleaseChannel_Channel{containerpb.ReleaseChannel_RAPID, containerpb.ReleaseChannel_REGULAR,
 		containerpb.ReleaseChannel_STABLE, containerpb.ReleaseChannel_EXTENDED} {
-		cfg.Channels = append(cfg.Channels, &containerpb.ServerConfig_ReleaseChannelConfig{Channel: ch, DefaultVersion: def,
-			ValidVersions: versions, UpgradeTargetVersion: def})
+		cfg.Channels = append(cfg.Channels, channelConfig(versions, ch, s.now()))
 	}
 	return cfg, nil
 }

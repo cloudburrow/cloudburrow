@@ -130,6 +130,9 @@ type Options struct {
 	ScaleDownUnneeded time.Duration
 	// RepairAfter is DefaultRepairAfter when zero.
 	RepairAfter time.Duration
+	// MachineType looks a predefined machine type up in Compute Engine's
+	// catalog (machine.go); nil knows custom and shaped types only.
+	MachineType func(name string) (MachineShape, bool)
 }
 
 // Server is the Kubernetes Engine API.

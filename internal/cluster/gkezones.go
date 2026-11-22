@@ -37,6 +37,8 @@ type poolZones struct {
 	// Kubelet is the pool's kubelet settings, KubeletConfiguration
 	// fields its nodes join with.
 	Kubelet map[string]any `json:"kubelet,omitempty"`
+	// Machine is the machine type's resources its nodes are given.
+	Machine *NodeMachine `json:"machine,omitempty"`
 }
 
 // NodeTaint is a Kubernetes taint of a pool's nodes: Effect is NoSchedule,
@@ -84,6 +86,28 @@ func (g *GKE) ConfigureKubelet(_ context.Context, kind, pool string, settings ma
 	pz := g.readZones(kind, pool)
 	pz.Kubelet = settings
 	return g.writeZones(kind, pool, pz)
+}
+
+// ConfigureMachine records the machine pool's nodes get from now on
+// (#2100): the node container's CPU and memory limits, and the kubelet's
+// reservations, so the node's allocatable resources are a GKE node's of
+// that machine type.
+func (g *GKE) ConfigureMachine(_ context.Context, kind, pool string, m NodeMachine) error {
+	if !strings.HasPrefix(kind, OwnerPrefix) {
+		return fmt.Errorf("%w: %q", ErrNotOwned, kind)
+	}
+	zoneMu.Lock()
+	defer zoneMu.Unlock()
+	pz := g.readZones(kind, pool)
+	pz.Machine = &m
+	return g.writeZones(kind, pool, pz)
+}
+
+// poolMachine is pool's recorded machine, nil for none.
+func (g *GKE) poolMachine(kind, pool string) *NodeMachine {
+	zoneMu.Lock()
+	defer zoneMu.Unlock()
+	return g.readZones(kind, pool).Machine
 }
 
 // poolKubelet is pool's recorded kubelet settings.

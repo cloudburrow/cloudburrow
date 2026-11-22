@@ -27,9 +27,15 @@ import (
 //     minor version's behaviour (the API server, controller manager and
 //     scheduler run with --emulated-version, Kubernetes' compatibility
 //     versions); CompleteControlPlaneUpgrade, or the end of the soak, is
-//     step two, which drops the emulation. The end of standard and
-//     extended support is not published for the local versions and is
-//     left out.
+//     step two, which drops the emulation. Until step two the control
+//     plane can go back to its previous version ("The VERSION must be the
+//     exact patch version previously used", the rollbackSafeUpgradeStatus'
+//     previousVersion): the kept previous binaries and manifests run
+//     again, the data being the previous minor's; no other upgrade of the
+//     control plane runs meanwhile, and nodes are upgraded no further than
+//     the emulated version;
+//   - the end of standard and of extended support of the version's minor
+//     are GKE's release schedule's (schedule.go).
 
 // clusterExtra is what is kept of a cluster beside its record.
 type clusterExtra struct {
@@ -205,6 +211,8 @@ func (s *Server) FetchClusterUpgradeInfo(_ context.Context, req *containerpb.Fet
 		PausedReason:       reasons,
 		UpgradeDetails:     s.upgradeDetailsLocked(p, e, ""),
 	}
+	std, ext := supportEnds(c.CurrentMasterVersion)
+	info.EndOfStandardSupportTimestamp, info.EndOfExtendedSupportTimestamp = optString(std), optString(ext)
 	if rs := e.extra.RollbackSafe; rs != nil {
 		info.RollbackSafeUpgradeStatus = &containerpb.RollbackSafeUpgradeStatus{
 			Mode:                               containerpb.RollbackSafeUpgradeStatus_KCP_MINOR_UPGRADE_ROLLBACK_SAFE_MODE,
@@ -233,6 +241,8 @@ func (s *Server) FetchNodePoolUpgradeInfo(_ context.Context, req *containerpb.Fe
 		return nil, notFound(req.GetName())
 	}
 	info := &containerpb.NodePoolUpgradeInfo{UpgradeDetails: s.upgradeDetailsLocked(p, e, np.Name)}
+	std, ext := supportEnds(np.Version)
+	info.EndOfStandardSupportTimestamp, info.EndOfExtendedSupportTimestamp = optString(std), optString(ext)
 	if compareVersions(e.cluster.CurrentMasterVersion, np.Version) > 0 {
 		if minorDiffers(e.cluster.CurrentMasterVersion, np.Version) {
 			info.MinorTargetVersion = optString(e.cluster.CurrentMasterVersion)
@@ -344,4 +354,79 @@ func (s *Server) completeExpiredRollbacksLocked(now time.Time) []*containerpb.Op
 		ops = append(ops, s.completeRollbackSafeLocked(p, e, em, true))
 	}
 	return ops
+}
+
+// ControlPlaneRollbacker is what a Backend does to take a control plane
+// back to the version it ran before its last upgrade.
+type ControlPlaneRollbacker interface {
+	// RollbackControlPlane runs the control plane on image's version, the
+	// one it ran before its last upgrade, again.
+	RollbackControlPlane(ctx context.Context, kind, image string) error
+}
+
+// rollbackControlPlaneLocked answers an upgrade of the control plane
+// during a rollback-safe upgrade's soak: to the previous version it is the
+// rollback, an UPGRADE_MASTER operation; to any other it is refused.
+func (s *Server) rollbackControlPlaneLocked(p parsed, e *entry, to Version) (*containerpb.Operation, error) {
+	c := e.cluster
+	rs := e.extra.RollbackSafe
+	if to.GKE != rs.Previous {
+		if compareVersions(to.GKE, c.CurrentMasterVersion) < 0 {
+			// Documented rule; UNVERIFIED wording (re-read 2026-11-22:
+			// how-to/upgrading-a-cluster, "The VERSION must be the exact
+			// patch version previously used").
+			return nil, status.Errorf(codes.InvalidArgument,
+				"Master version %q: a rollback-safe upgrade rolls back to the exact patch version previously used, %s.", to.GKE, rs.Previous)
+		}
+		// UNVERIFIED wording; documented: "GKE doesn't perform any type of
+		// automatic upgrades to the control plane or nodes" until step two.
+		return nil, status.Errorf(codes.FailedPrecondition,
+			"The control plane is in a rollback-safe upgrade's soak until %s: complete the upgrade (CompleteControlPlaneUpgrade) or roll back to %s first.",
+			rs.End.UTC().Format(time.RFC3339), rs.Previous)
+	}
+	rb, ok := s.backend.(ControlPlaneRollbacker)
+	if !ok {
+		return nil, status.Error(codes.Unimplemented, "Rollback-safe upgrades are not available with this backend.")
+	}
+	for _, np := range c.GetNodePools() {
+		if compareVersions(np.GetVersion(), to.GKE) > 0 {
+			// Nodes are never newer than the emulated version, so this
+			// holds unless a pool was moved past it some other way.
+			return nil, status.Errorf(codes.FailedPrecondition, "Node pool %q runs %s, newer than %s.", np.GetName(), np.GetVersion(), to.GKE)
+		}
+	}
+	c.Status = containerpb.Cluster_RECONCILING
+	kind := e.kind
+	abac := c.GetLegacyAbac().GetEnabled()
+	from := c.CurrentMasterVersion
+	op := s.startOpLocked(p, containerpb.Operation_UPGRADE_MASTER, c.SelfLink, e, func(ctx context.Context) error {
+		s.progress(ctx, func(op *containerpb.Operation) {
+			op.Detail = "Rolling the control plane back to " + to.GKE + "."
+			op.Progress = &containerpb.OperationProgress{Name: "control-plane", Status: containerpb.Operation_RUNNING}
+		})
+		if err := rb.RollbackControlPlane(ctx, kind, to.Image); err != nil {
+			return status.Errorf(codes.Internal, "Rolling the control plane back to %s failed: %v", to.GKE, err)
+		}
+		if abac {
+			if ctl, ok := s.backend.(Controller); ok {
+				if err := ctl.SetLegacyAbac(ctx, kind, true); err != nil {
+					return status.Errorf(codes.Internal, "Enabling legacy ABAC after the rollback failed: %v", err)
+				}
+			}
+		}
+		return nil
+	}, func(err error) {
+		c.Status = containerpb.Cluster_RUNNING
+		if err != nil {
+			c.StatusMessage = status.Convert(err).Message()
+			return
+		}
+		c.StatusMessage = ""
+		c.CurrentMasterVersion = to.GKE
+		c.CurrentEmulatedVersion = to.GKE
+		e.extra.RollbackSafe = nil
+	})
+	r := s.recordUpgradeLocked(e, op, "", from, to.GKE, false)
+	r.FromEmulated, r.ToEmulated = rs.Previous, to.GKE
+	return op, nil
 }
