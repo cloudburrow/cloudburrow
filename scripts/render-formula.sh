@@ -35,7 +35,7 @@ cat <<EOF
 class Cloudburrow < Formula
   desc "Local Google Cloud emulator for development and testing"
   homepage "https://github.com/${repo}"
-  license "Apache-2.0"
+  license "MIT"
 
   on_macos do
     on_arm do

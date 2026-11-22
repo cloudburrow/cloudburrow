@@ -1,6 +1,6 @@
 # VM image build context (#1963)
 
-Written for CloudBurrow (Apache-2.0): the Dockerfiles and every file under `root/`.
+Written for CloudBurrow (MIT): the Dockerfiles and every file under `root/`.
 
 At first use, `docker build` on the user's machine pulls these official container images, pinned by index digest (read 2026-11-19 from Docker Hub), and installs the distribution's own packages (systemd, OpenSSH, sudo, curl, iproute2, procps) from that distribution's archive. None of it is vendored into this repository or linked into the CloudBurrow binary; the packages carry their own licences (several GPL) inside the built image only.
 
