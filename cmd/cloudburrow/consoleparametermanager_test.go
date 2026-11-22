@@ -34,7 +34,9 @@ func TestConsoleParameterManager(t *testing.T) {
 	p := parameterManagerProvider{svc: svc}
 
 	title, fields := p.CreateForm()
-	if title != "Create parameter" || len(fields) < 5 || fields[0].Name != "parameterId" || fields[2].Name != "format" {
+	// Google's order (#2143): the name, Parameter format, then Location.
+	if title != "Create parameter" || len(fields) < 7 || fields[0].Name != "parameterId" || fields[1].Name != "format" ||
+		fields[1].Section != "Parameter format" || fields[2].Name != "locationType" || fields[2].Section != "Location" {
 		t.Fatalf("Create parameter form: %q %+v", title, fields)
 	}
 	name, err := p.Create(ctx, "cp", map[string]string{"parameterId": "app", "location": "global", "format": "JSON",
@@ -113,7 +115,8 @@ func TestConsoleParameterTemplates(t *testing.T) {
 	}
 
 	title, fields := p.CreateForm()
-	if title != "Create template" || len(fields) < 4 || fields[0].Name != "templateId" || fields[2].Name != "format" {
+	if title != "Create template" || len(fields) < 6 || fields[0].Name != "templateId" || fields[1].Name != "format" ||
+		fields[1].Section != "Template format" || fields[2].Name != "locationType" {
 		t.Fatalf("Create template form: %q %+v", title, fields)
 	}
 	name, err := p.Create(ctx, "cp", map[string]string{"templateId": "tpl", "location": "global", "format": "TEMPLATE_FORMAT_YAML", "labels": `{"team":"burrow"}`})
@@ -149,14 +152,28 @@ func TestConsoleParameterTemplates(t *testing.T) {
 	if acts := p.DetailActions(ctx, "cp", []string{name, "tv1"}); acts[0].Unavailable == "" || acts[1].ID != "enable" {
 		t.Errorf("a disabled version's actions: %+v", acts)
 	}
-	if err := p.ActAt(ctx, "cp", []string{name}, "delete", nil); err == nil || !strings.Contains(err.Error(), "versions") {
+	// A version's Delete asks for the template's ID; a version row's menu
+	// is View payload, Render, Enable (it is disabled) and Delete (#2143).
+	if acts := p.DetailActions(ctx, "cp", []string{name, "tv1"}); acts[2].ID != "deleteversion" || acts[2].ConfirmWord != "tpl" {
+		t.Errorf("Delete version: %+v", acts[2])
+	}
+	tp, _ := p.Detail(ctx, "cp", []string{name})
+	var ids []string
+	for _, a := range workflowsSection(tp, "versions").Listing.Items[0].Actions {
+		ids = append(ids, a.ID)
+	}
+	if strings.Join(ids, ",") != "row-view,row-render,enable,deleteversion" {
+		t.Errorf("version row actions = %v", ids)
+	}
+	if err := p.ActAt(ctx, "cp", []string{name, "tv1"}, "enable", nil); err != nil {
+		t.Fatal(err)
+	}
+	// "Deleting a template also deletes all of its template versions."
+	if err := p.ActAt(ctx, "cp", []string{name}, "delete", nil); err != nil {
 		t.Fatalf("Delete of a template with a version: %v", err)
 	}
-	if err := p.ActAt(ctx, "cp", []string{name, "tv1"}, "deleteversion", nil); err != nil {
-		t.Fatal(err)
-	}
-	if err := p.ActAt(ctx, "cp", []string{name}, "delete", nil); err != nil {
-		t.Fatal(err)
+	if d, _ := p.Detail(ctx, "cp", []string{name, "tv1"}); d.Unavailable == "" {
+		t.Error("a deleted template's version still reads")
 	}
 	if err := p.ActAt(ctx, "other", []string{name}, "delete", nil); err == nil {
 		t.Error("another project's page acted on the template")

@@ -185,7 +185,7 @@ func (p cloudSQLInstancesProvider) sqlCreateForm() []console.Field {
 	for h := 0; h < 24; h++ {
 		hours, hourLabels = append(hours, strconv.Itoa(h)), append(hourLabels, fmt.Sprintf("%02d:00 UTC", h))
 	}
-	return withPasswordPolicy(infoSec, []console.Field{
+	return withPasswordPolicy(infoSec, append(append([]console.Field{
 		{Name: "engine", Label: "Database engine", Type: "radio", Section: engineSec, Default: sqlEnginePostgres,
 			Options:         []string{sqlEngineMySQL, sqlEnginePostgres, sqlEngineSQLServer},
 			OptionLabels:    zipLabels([]string{sqlEngineMySQL, sqlEnginePostgres, sqlEngineSQLServer}, engineLabels),
@@ -217,8 +217,12 @@ func (p cloudSQLInstancesProvider) sqlCreateForm() []console.Field {
 				{Label: "SQL Server licensing terms, by edition", URL: sqladmin.MSSQLLicensesURL}}},
 		{Name: "name", Label: "Instance ID", Type: "text", Required: true, Section: infoSec, Pattern: "^[a-z][a-z0-9\\-]{0,53}[a-z0-9]$",
 			Help: "Use lowercase letters, numbers, and hyphens. Start with a letter."},
-		{Name: "rootPassword", Label: "Password", Type: "password", Section: infoSec,
-			Help: "The password of the default user: postgres on PostgreSQL, root on MySQL, sqlserver on SQL Server (required there). Empty leaves MySQL's root without one."},
+		{Name: "rootPassword", Label: "Password", Type: "password", Section: infoSec, Generate: true,
+			Help: "The password of the default user: postgres on PostgreSQL, root on MySQL, sqlserver on SQL Server (required there). Generate makes a random one."},
+		// MySQL's No password (https://docs.cloud.google.com/sql/docs/mysql/create-instance,
+		// read 2026-11-22): root is left without one.
+		{Name: "noPassword", Label: "No password", Type: "checkbox", Section: infoSec, VisibleWhen: myOnly,
+			Help: "Leaves root without a password, which anyone who reaches the server can then sign in as."},
 		{Name: "region", Label: "Region", Type: "select", Section: regionSec, Options: sqlRegions, Default: "us-central1",
 			Help: "Reported, and part of the connection name; every server runs in this cluster."},
 		{Name: "availabilityType", Label: "Zonal availability", Type: "radio", Section: regionSec, Default: "ZONAL",
@@ -231,8 +235,10 @@ func (p cloudSQLInstancesProvider) sqlCreateForm() []console.Field {
 			Help: "Empty is 10 GB. Storage shrink, on the instance's page, makes it smaller later."},
 		{Name: "encryption", Label: "Encryption", Type: "radio", Section: encryptSec, Default: sqlEncryptionGoogle,
 			Options: []string{sqlEncryptionGoogle, sqlEncryptionCMEK},
-			OptionLabels: map[string]string{sqlEncryptionGoogle: "Google-managed encryption key",
-				sqlEncryptionCMEK: "Customer-managed encryption key (CMEK)"},
+			// Google's labels (https://docs.cloud.google.com/sql/docs/postgres/create-instance,
+			// read 2026-11-22).
+			OptionLabels: map[string]string{sqlEncryptionGoogle: "Google-managed encryption",
+				sqlEncryptionCMEK: "Customer key-managed encryption key (CMEK)"},
 			Help: "Google-managed: no key to manage. CMEK: a key of this instance's Cloud KMS, which you control."},
 		{Name: "kmsKeyName", Label: "Customer-managed encryption key", Type: "text", Section: encryptSec,
 			VisibleWhen: map[string]string{"encryption": sqlEncryptionCMEK}, Required: true,
@@ -243,6 +249,8 @@ func (p cloudSQLInstancesProvider) sqlCreateForm() []console.Field {
 		{Name: "authorizedNetworks", Label: "Authorized networks", Type: "text", Section: connSec,
 			VisibleWhen: map[string]string{"publicIp": "true"},
 			Help:        "CIDR ranges allowed to connect, separated by commas, such as 203.0.113.0/24. Recorded and shown on Connections > Networking."},
+		{Name: "allowDataApi", Label: "Allow Data API", Type: "checkbox", Section: connSec,
+			Help: "Lets instances.executeSql run statements on the instance (settings.dataApiAccess ALLOW_DATA_API); off by default, as Google's is."},
 		serverCAModeSection(serverCAModeField(internalCAMode), securitySec),
 		serverCAModeSection(serverCAPoolFields(nil)[0], securitySec), serverCAModeSection(serverCAPoolFields(nil)[1], securitySec),
 		{Name: "backupsEnabled", Label: "Automate daily backups", Type: "checkbox", Section: protectSec, Default: "true"},
@@ -250,13 +258,30 @@ func (p cloudSQLInstancesProvider) sqlCreateForm() []console.Field {
 			Help: "Keeps the transaction log, PostgreSQL's archived WAL or MySQL's binary log, so a clone can be restored to any time since the instance started."},
 		{Name: "deletionProtection", Label: "Enable deletion protection", Type: "checkbox", Section: protectSec, Default: "true",
 			Help: "The instance cannot be deleted until this is turned off."},
+		// Google's Data protection options (https://docs.cloud.google.com/sql/docs/postgres/create-instance,
+		// read 2026-11-22).
+		sqlCreateBackupLocation(protectSec),
+		{Name: "retainedBackups", Label: "Choose how many automated backups to store", Type: "number", Section: protectSec, Default: "7",
+			VisibleWhen: map[string]string{"backupsEnabled": "true"}, Help: "1 to 365 (backupRetentionSettings.retainedBackups)."},
+		{Name: "logRetentionDays", Label: "Choose how many days of logs to retain", Type: "number", Section: protectSec, Default: "7",
+			VisibleWhen: map[string]string{"pitr": "true"}, Help: "1 to 7 days of transaction logs (transactionLogRetentionDays); 35 on Enterprise Plus."},
+		{Name: "retainBackupsOnDelete", Label: "Enable retained backups after instance deletion", Type: "checkbox", Section: protectSec,
+			Help: "Keeps the instance's backups when it is deleted (settings.retainBackupsOnDelete), listed on the Backups page."},
 		{Name: "maintenanceDay", Label: "Window", Type: "select", Section: maintSec, Options: days, OptionLabels: zipLabels(days, dayLabels),
 			Help: "The day of the week maintenance may restart the instance."},
 		{Name: "maintenanceHour", Label: "Time", Type: "select", Section: maintSec, Options: hours, OptionLabels: zipLabels(hours, hourLabels)},
+		// Order of updates; the choices' labels are not in the docs
+		// (UNVERIFIED, re-read 2026-11-22:
+		// https://docs.cloud.google.com/sql/docs/postgres/set-maintenance-window).
+		{Name: "updateTrack", Label: "Order of updates", Type: "select", Section: maintSec,
+			Options:      []string{"", "canary", "stable", "week5"},
+			OptionLabels: map[string]string{"": "Any", "canary": "Earlier", "stable": "Later", "week5": "Week 5"},
+			Help:         "When this instance gets maintenance relative to Google's release (maintenanceWindow.updateTrack)."},
 		{Name: "flags", Label: "Database flags", Type: "text", Section: flagsSec,
 			Help: "name=value pairs, separated by commas, passed to the server."},
 		{Name: "queryInsightsEnabled", Label: "Enable Query insights", Type: "checkbox", Section: insightsSec,
-			Help: "Recorded on the instance (settings.insightsConfig). The Query insights page itself is not available locally."},
+			Help: "The instance's Query insights page lists its top queries, read from the server's own statistics."},
+	}, sqlInsightsFields(insightsSec)...), []console.Field{
 		{Name: "labels", Label: "Labels", Type: "text", Section: labelsSec, Help: "key=value pairs, separated by commas."},
 		{Name: "sourceHostPort", Label: "External server host:port", Type: "text", Section: externalSec,
 			Help: "Set to record a MySQL or PostgreSQL server outside Cloud SQL as a source representation instance (ON_PREMISES_INSTANCE) instead: " +
@@ -266,7 +291,18 @@ func (p cloudSQLInstancesProvider) sqlCreateForm() []console.Field {
 		{Name: "sourcePassword", Label: "Replication password", Type: "password", Section: externalSec},
 		{Name: "sourceDatabases", Label: "Databases to migrate (PostgreSQL)", Type: "text", Section: externalSec,
 			Help: "Comma-separated databases (selectedObjects); empty migrates every database but the templates."},
-	})
+	}...))
+}
+
+// sqlCreateBackupLocation is the create page's Choose where to store your
+// backups: Multi-region (the instance's region's, Cloud SQL's default) or a
+// Region.
+func sqlCreateBackupLocation(section string) console.Field {
+	f := sqlBackupLocationField("")
+	f.Label, f.Section = "Choose where to store your backups", section
+	f.OptionLabels[""] = "Multi-region (default)"
+	f.Help = "Where automated and on-demand backups are stored (backupConfiguration.location); empty is the multi-region of the instance's region."
+	return f
 }
 
 // The create page's Encryption choices.
@@ -297,7 +333,17 @@ func sqlCreateConnections(st *sqladminapi.Settings, v map[string]string) error {
 		st.IpConfiguration = ic
 	}
 	if v["queryInsightsEnabled"] == "true" {
-		st.InsightsConfig = &sqladminapi.InsightsConfig{QueryInsightsEnabled: true}
+		c, err := sqlInsightsConfig(v)
+		if err != nil {
+			return err
+		}
+		st.InsightsConfig = c
+	}
+	if v["allowDataApi"] == "true" {
+		st.DataApiAccess = "ALLOW_DATA_API"
+	}
+	if v["retainBackupsOnDelete"] == "true" {
+		st.RetainBackupsOnDelete = true
 	}
 	return nil
 }
@@ -351,6 +397,12 @@ func sqlCreateSettings(st *sqladminapi.Settings, v map[string]string) error {
 		mw.ForceSendFields = []string{"Day", "Hour"}
 		st.MaintenanceWindow = mw
 	}
+	if t := v["updateTrack"]; t != "" {
+		if st.MaintenanceWindow == nil {
+			st.MaintenanceWindow = &sqladminapi.MaintenanceWindow{}
+		}
+		st.MaintenanceWindow.UpdateTrack = t
+	}
 	if s := strings.TrimSpace(v["labels"]); s != "" {
 		pairs, err := parsePairs(s)
 		if err != nil {
@@ -380,6 +432,7 @@ func sqlCreateSettings(st *sqladminapi.Settings, v map[string]string) error {
 var sqlPlace = map[string]string{
 	"stop": "", "start": "", "import": "", "export": "", "restart": "", "clone": "", "failover": "", "promote-replica": "", "upgrade": "",
 	"delete-instance": "", "delete-final-backup": "",
+	"enable-query-insights": "query-insights",
 
 	"create-client-cert": "connections", "delete-client-cert": "connections", "reset-ssl": "connections",
 	"add-server-ca": "connections", "rotate-server-ca": "connections", "add-server-cert": "connections",
@@ -468,6 +521,18 @@ func googleLayout(ctx context.Context, svc *sqladminapi.Service, project string,
 			overview.Groups = append(overview.Groups, console.PropertyGroup{Heading: h, Properties: cards[h]})
 		}
 	}
+	// Google's Operations and logs card (https://docs.cloud.google.com/sql/docs/postgres/instance-info,
+	// read 2026-11-22): View all operations, and the engine's error logs.
+	engineName := "PostgreSQL"
+	if strings.HasPrefix(in.DatabaseVersion, "MYSQL_") {
+		engineName = "MySQL"
+	} else if strings.HasPrefix(in.DatabaseVersion, "SQLSERVER_") {
+		engineName = "SQL Server"
+	}
+	page := "/cloudsql-instances/" + in.Name
+	overview.Groups = append(overview.Groups, console.PropertyGroup{Heading: "Operations and logs", Properties: []console.Property{
+		{Label: "Operations", Value: "View all operations", Link: page + "?tab=operations"},
+		{Label: "Logs", Value: "View " + engineName + " error logs", Link: page + "?tab=logs"}}})
 	notLocal := func(id, label, why string) console.Section {
 		return console.Section{ID: id, Label: label, Kind: console.KindProperties,
 			Groups: []console.PropertyGroup{{Heading: "Not available locally", Properties: []console.Property{{Label: label, Value: why}}}}}
@@ -550,7 +615,7 @@ func googleLayout(ctx context.Context, svc *sqladminapi.Service, project string,
 func sqlAttachRowAction(s *console.Section, instance string, a console.Action, label, field string) {
 	for i := range s.Listing.Items {
 		r := &s.Listing.Items[i]
-		row := console.Action{ID: a.ID, Label: label, Destructive: a.Destructive, Confirm: a.Confirm, Submit: a.Submit,
+		row := console.Action{ID: a.ID, Label: label, Destructive: a.Destructive, Confirm: a.Confirm, Submit: a.Submit, Title: a.Title,
 			ConfirmTitle: a.ConfirmTitle, ConfirmStyle: a.ConfirmStyle}
 		row.Fields = []console.Field{{Name: field, Type: "hidden", Default: r.Name}}
 		for _, f := range a.Fields {
@@ -631,9 +696,19 @@ func instanceOps(in *sqladminapi.DatabaseInstance) []console.Action {
 		return nil
 	}
 	return append(stopStartActions(in),
-		console.Action{ID: "restart", Label: "Restart", Confirm: "Restarting the instance closes every connection to it."},
-		console.Action{ID: "delete-instance", Label: "Delete", Destructive: true, Leaves: true,
-			Confirm: "The instance, its databases and its automated backups are deleted."})
+		console.Action{ID: "restart", Label: "Restart", ConfirmTitle: "Restart database instance?", ConfirmStyle: console.DeleteConfirmClick,
+			Confirm: "Restarting the instance closes every connection to it."},
+		// Google's Delete instance (https://docs.cloud.google.com/sql/docs/postgres/delete-instance,
+		// read 2026-11-22): the instance ID typed, Take a final backup
+		// (checked), Retain for and Describe this backup, ending in Delete.
+		console.Action{ID: "delete-instance", Label: "Delete", Title: "Delete instance", Submit: "Delete", Destructive: true, Leaves: true, ConfirmTitle: "Delete instance",
+			Confirm: "The instance, its databases and its automated backups are deleted.",
+			Fields: []console.Field{
+				{Name: "finalBackup", Label: "Take a final backup", Type: "checkbox", Default: "true",
+					Help: "A FINAL backup of the instance, kept after it is deleted and listed on the Backups page."},
+				{Name: "ttlDays", Label: "Retain for (days)", Type: "number", Default: "30", VisibleWhen: map[string]string{"finalBackup": "true"},
+					Help: "1 to 365 days."},
+				{Name: "description", Label: "Describe this backup", Type: "textarea", VisibleWhen: map[string]string{"finalBackup": "true"}}}})
 }
 
 // cloudSQLBackupsProvider is Cloud SQL's Backups page (#1860): the

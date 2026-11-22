@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -29,6 +30,9 @@ type cloudSQLInstancesProvider struct {
 	endpoint string
 	// versions are the databaseVersion values the instance's images provide.
 	versions []string
+	// srv is the Admin API in this process, whose servers Query insights
+	// and System insights read (#2141); nil leaves them unavailable.
+	srv *sqladmin.Server
 }
 
 func (cloudSQLInstancesProvider) ID() string    { return "cloudsql-instances" }
@@ -181,8 +185,18 @@ func (p cloudSQLInstancesProvider) Create(ctx context.Context, project string, v
 		AvailabilityType: v["availabilityType"]}
 	if v["pitr"] == "true" || v["backupsEnabled"] == "true" {
 		// Point-in-time recovery needs automated backups.
-		st.BackupConfiguration = &sqladminapi.BackupConfiguration{Enabled: true}
+		st.BackupConfiguration = &sqladminapi.BackupConfiguration{Enabled: true, Location: strings.TrimSpace(v["backupLocation"])}
 		pitrConfig(st.BackupConfiguration, v["databaseVersion"], v["pitr"] == "true")
+		days := v["logRetentionDays"]
+		if v["pitr"] != "true" {
+			days = ""
+		}
+		if err := retentionConfig(st.BackupConfiguration, v["retainedBackups"], days); err != nil {
+			return "", err
+		}
+	}
+	if strings.HasPrefix(v["databaseVersion"], "MYSQL_") && v["rootPassword"] == "" && v["noPassword"] != "true" {
+		return "", fmt.Errorf("set a password for root, or check No password")
 	}
 	if err := sqlCreateSettings(st, v); err != nil {
 		return "", err
@@ -245,7 +259,16 @@ func (p cloudSQLInstancesProvider) Actions(r console.Resource) []console.Action 
 	if r.Name == sqlAdminPostgresInstance || r.Name == sqlAdminMySQLInstance {
 		return nil
 	}
-	return []console.Action{{ID: "restart", Label: "Restart", Confirm: "Restarting the instance closes every connection to it."}}
+	// The row's More actions, as Google's (https://docs.cloud.google.com/sql/docs/postgres/replication/create-replica,
+	// https://docs.cloud.google.com/sql/docs/postgres/clone-instance, read
+	// 2026-11-22): Create read replica and Create clone open them on the
+	// instance's page.
+	page := "/cloudsql-instances/" + url.PathEscape(r.Name)
+	return []console.Action{
+		{ID: "row-create-replica", Label: "Create read replica", Href: page + "?tab=replicas&action=create-replica"},
+		{ID: "row-clone", Label: "Create clone", Href: page + "?tab=backups&action=clone"},
+		{ID: "restart", Label: "Restart", ConfirmTitle: "Restart database instance?", ConfirmStyle: console.DeleteConfirmClick,
+			Confirm: "Restarting the instance closes every connection to it."}}
 }
 
 // Act implements console.Actor.
@@ -274,7 +297,7 @@ func (p cloudSQLInstancesProvider) Detail(ctx context.Context, project string, p
 	if err != nil || in == nil || in.InstanceType == "ON_PREMISES_INSTANCE" {
 		return d, err
 	}
-	return googleLayout(ctx, svc, project, in, d), nil
+	return p.sqlInsightsLayout(ctx, project, in, googleLayout(ctx, svc, project, in, d)), nil
 }
 
 // detailAll is an instance's settings, its tabs, Edit instance on a created
@@ -414,7 +437,7 @@ func (p cloudSQLInstancesProvider) detailAllOf(ctx context.Context, project stri
 		d.Sections = append(secs, d.Sections...)
 		dbUserActs = databaseUserActions(in, dbNames, userRefs)
 	}
-	d.Actions = append(append(append(p.backupActions(ids), replicaActions(in)...), transferActions()...), certActions(fps, casSigned(in))...)
+	d.Actions = append(append(append(p.backupActions(ids, sqlOtherInstances(ctx, svc, project, in)), replicaActions(in)...), transferActions()...), certActions(fps, casSigned(in))...)
 	d.Actions = append(d.Actions, serverCertActions(in, otherServerCerts)...)
 	d.Actions = append(d.Actions, upgradeActions(in)...)
 	d.Actions = append(d.Actions, failoverActions(in)...)
@@ -423,6 +446,7 @@ func (p cloudSQLInstancesProvider) detailAllOf(ctx context.Context, project stri
 	d.Actions = append(d.Actions, blueGreenActions(in)...)
 	d.Actions = append(d.Actions, externalSyncActions(in, externalReplica(ctx, svc, project, in))...)
 	d.Actions = append(d.Actions, demoteActions(in)...)
+	d.Actions = append(d.Actions, enableQueryInsights(in)...)
 	d.Actions = append(d.Actions, dataAPIActions(ctx, svc, project, in)...)
 	d.Actions = append(d.Actions, storageActions(in)...)
 	d.Actions = append(d.Actions, maintenanceActions(in)...)
@@ -739,8 +763,11 @@ func failoverActions(in *sqladminapi.DatabaseInstance) []console.Action {
 	if in.Settings == nil || in.Settings.AvailabilityType != "REGIONAL" {
 		return nil
 	}
-	return []console.Action{{ID: "failover", Label: "Failover", Destructive: true,
-		Confirm: "The standby becomes the primary, under the same connection name; connections are closed, " +
+	// Google's "Manually trigger a failover", the instance ID typed, ending
+	// in Trigger Failover (https://docs.cloud.google.com/sql/docs/postgres/configure-ha,
+	// read 2026-11-22).
+	return []console.Action{{ID: "failover", Label: "Failover", Destructive: true, ConfirmTitle: "Manually trigger a failover",
+		Submit: "Trigger Failover", Confirm: "The standby becomes the primary, under the same connection name; connections are closed, " +
 			"and the old primary is rebuilt as the new standby."}}
 }
 
@@ -986,22 +1013,74 @@ func certActions(fps []string, cas bool) []console.Action {
 			Confirm: "The upcoming server CA becomes the one the server's certificate is signed by; connectors fetch it on their next dial."})
 }
 
-func (p cloudSQLInstancesProvider) backupActions(ids []string) []console.Action {
+// sqlOtherInstances are the project's other instances of in's engine that
+// a backup of in can overwrite: primaries with a server, not the ones `up`
+// runs.
+func sqlOtherInstances(ctx context.Context, svc *sqladminapi.Service, project string, in *sqladminapi.DatabaseInstance) []string {
+	list, err := svc.Instances.List(project).Context(ctx).Do()
+	if err != nil {
+		return nil
+	}
+	engine, _, _ := strings.Cut(in.DatabaseVersion, "_")
+	var out []string
+	for _, o := range list.Items {
+		if o.Name == in.Name || upSQLInstance(o.Name) || o.InstanceType != "CLOUD_SQL_INSTANCE" || !strings.HasPrefix(o.DatabaseVersion, engine+"_") {
+			continue
+		}
+		out = append(out, o.Name)
+	}
+	return out
+}
+
+func (p cloudSQLInstancesProvider) backupActions(ids, others []string) []console.Action {
 	acts := []console.Action{{ID: "create-backup", Label: "Create backup", Submit: "Create",
 		Fields: []console.Field{{Name: "description", Label: "Description", Type: "text"}}},
-		{ID: "clone", Label: "Clone", Fields: []console.Field{{Name: "destination", Label: "New instance ID", Type: "text", Required: true,
-			Pattern: "^[a-z][a-z0-9\\-]{0,53}[a-z0-9]$", Help: "A new instance with this instance's settings and a copy of its databases as they are now."}}}}
+		// Google's Create a clone (https://docs.cloud.google.com/sql/docs/postgres/clone-instance,
+		// read 2026-11-22): Instance ID, then Clone current state of
+		// instance or Clone from an earlier point in time, ending in Create
+		// clone.
+		{ID: "clone", Label: "Clone", Title: "Create a clone", Submit: "Create clone", Fields: []console.Field{
+			{Name: "destination", Label: "Instance ID", Type: "text", Required: true,
+				Pattern: "^[a-z][a-z0-9\\-]{0,53}[a-z0-9]$", Help: "The clone, a new instance with this instance's settings and a copy of its databases."},
+			{Name: "cloneFrom", Label: "Choose the state of the instance to clone", Type: "radio", Default: "current",
+				Options: []string{"current", "earlier"}, OptionLabels: map[string]string{"current": "Clone current state of instance",
+					"earlier": "Clone from an earlier point in time"}},
+			{Name: "pointInTime", Label: "Point in time", Type: console.DateTimeFieldType, VisibleWhen: map[string]string{"cloneFrom": "earlier"},
+				Help: "A time since point-in-time recovery was enabled, within the transaction logs the instance keeps."}}}}
 	if len(ids) > 0 {
 		acts = append(acts,
-			console.Action{ID: "restore-backup", Label: "Restore", Destructive: true,
-				Confirm: "Restoring replaces every database of the instance with the backup's; what was written since is lost.",
-				Fields:  []console.Field{{Name: "backup", Label: "Backup ID", Type: "select", Required: true, Options: ids, Default: ids[0]}}},
+			// Google's Restore an instance from a backup (https://docs.cloud.google.com/sql/docs/postgres/backup-recovery/restoring,
+			// read 2026-11-22): Choose restore destination, ending in
+			// Restore.
+			console.Action{ID: "restore-backup", Label: "Restore", Destructive: true, Title: "Restore an instance from a backup",
+				Submit:  "Restore",
+				Confirm: "Restoring replaces every database of the destination instance with the backup's; what was written there since is lost.",
+				Fields:  restoreFields(ids, others)},
 			// Google's Delete backup window asks for the word Delete.
 			console.Action{ID: "delete-backup", Label: "Delete backup", Destructive: true, Confirm: "The backup's dump is deleted.",
 				ConfirmTitle: "Delete backup", ConfirmStyle: console.DeleteConfirmWordTitle,
 				Fields: []console.Field{{Name: "backup", Label: "Backup ID", Type: "select", Required: true, Options: ids, Default: ids[0]}}})
 	}
 	return acts
+}
+
+// restoreFields are Restore's Choose restore destination: Overwrite the
+// source instance, Restore to a new instance (its Instance ID) or
+// Overwrite an existing instance (Instance to be overwritten).
+func restoreFields(ids, others []string) []console.Field {
+	choices := []string{"source", "new", "existing"}
+	var disabled []string
+	if len(others) == 0 {
+		disabled = []string{"existing"}
+	}
+	return []console.Field{{Name: "backup", Label: "Backup ID", Type: "select", Required: true, Options: ids, Default: ids[0]},
+		{Name: "restoreTo", Label: "Choose restore destination", Type: "radio", Default: "source", Options: choices,
+			OptionLabels: map[string]string{"source": "Overwrite the source instance", "new": "Restore to a new instance",
+				"existing": "Overwrite an existing instance"}, DisabledOptions: disabled},
+		{Name: "newInstance", Label: "Instance ID", Type: "text", VisibleWhen: map[string]string{"restoreTo": "new"},
+			Pattern: "^[a-z][a-z0-9\\-]{0,53}[a-z0-9]$", Help: "A new instance with the source instance's settings, the backup loaded into it."},
+		{Name: "targetInstance", Label: "Instance to be overwritten", Type: "select", Options: others,
+			VisibleWhen: map[string]string{"restoreTo": "existing"}, Help: "Another instance of the same engine in this project."}}
 }
 
 // DetailActions implements console.PathActor.
@@ -1117,16 +1196,48 @@ func (p cloudSQLInstancesProvider) actAt(ctx context.Context, project string, pa
 		_, err = stopStart(svc, project, name, action).Context(ctx).Do()
 	case "restart":
 		_, err = svc.Instances.Restart(project, name).Context(ctx).Do()
+	case "enable-query-insights":
+		var c *sqladminapi.InsightsConfig
+		if c, err = sqlInsightsConfig(v); err != nil {
+			return err
+		}
+		_, err = svc.Instances.Patch(project, name, &sqladminapi.DatabaseInstance{Settings: &sqladminapi.Settings{InsightsConfig: c}}).Context(ctx).Do()
 	case "delete-instance":
+		if v["finalBackup"] == "true" {
+			_, err = dataAPIAct(ctx, svc, project, name, "delete-final-backup", v)
+			return err
+		}
 		_, err = svc.Instances.Delete(project, name).Context(ctx).Do()
 	case "create-backup":
 		_, err = svc.BackupRuns.Insert(project, name, &sqladminapi.BackupRun{Description: strings.TrimSpace(v["description"])}).Context(ctx).Do()
 	case "restore-backup":
-		_, err = svc.Instances.RestoreBackup(project, name, &sqladminapi.InstancesRestoreBackupRequest{
-			RestoreBackupContext: &sqladminapi.RestoreBackupContext{BackupRunId: id, InstanceId: name, Project: project}}).Context(ctx).Do()
+		switch v["restoreTo"] {
+		case "new":
+			target := strings.TrimSpace(v["newInstance"])
+			if target == "" {
+				return fmt.Errorf("give the new instance's ID")
+			}
+			_, err = svc.Instances.RestoreBackup(project, target, &sqladminapi.InstancesRestoreBackupRequest{
+				Backup: "projects/" + project + "/backups/" + strconv.FormatInt(id, 10)}).Context(ctx).Do()
+		case "existing":
+			target := strings.TrimSpace(v["targetInstance"])
+			if target == "" {
+				return fmt.Errorf("choose the instance to be overwritten")
+			}
+			_, err = svc.Instances.RestoreBackup(project, target, &sqladminapi.InstancesRestoreBackupRequest{
+				RestoreBackupContext: &sqladminapi.RestoreBackupContext{BackupRunId: id, InstanceId: name, Project: project}}).Context(ctx).Do()
+		default:
+			_, err = svc.Instances.RestoreBackup(project, name, &sqladminapi.InstancesRestoreBackupRequest{
+				RestoreBackupContext: &sqladminapi.RestoreBackupContext{BackupRunId: id, InstanceId: name, Project: project}}).Context(ctx).Do()
+		}
 	case "clone":
-		_, err = svc.Instances.Clone(project, name, &sqladminapi.InstancesCloneRequest{
-			CloneContext: &sqladminapi.CloneContext{DestinationInstanceName: strings.TrimSpace(v["destination"])}}).Context(ctx).Do()
+		cc := &sqladminapi.CloneContext{DestinationInstanceName: strings.TrimSpace(v["destination"])}
+		if v["cloneFrom"] == "earlier" {
+			if cc.PointInTime = strings.TrimSpace(v["pointInTime"]); cc.PointInTime == "" {
+				return fmt.Errorf("choose the point in time to clone from")
+			}
+		}
+		_, err = svc.Instances.Clone(project, name, &sqladminapi.InstancesCloneRequest{CloneContext: cc}).Context(ctx).Do()
 	case "pitr-restore":
 		_, err = svc.Instances.Clone(project, name, &sqladminapi.InstancesCloneRequest{
 			CloneContext: &sqladminapi.CloneContext{DestinationInstanceName: strings.TrimSpace(v["destination"]),

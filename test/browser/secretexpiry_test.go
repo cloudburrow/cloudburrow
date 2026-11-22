@@ -13,10 +13,11 @@ import (
 )
 
 // TestSecretManagerExpiryThroughTheForms (#1225), in the run shard: Create
-// secret, on its own page, offers an expire time and a TTL under Set
-// expiration date (#1850); a secret created with a TTL shows its
-// expiry on its page, and Edit secret, prefilled with that expire time,
-// clears it, after which the page says Never.
+// secret, on its own page, offers an expiration date and time under Set
+// expiration date (#1850), and no TTL, as Google's console (#2142); a
+// secret created expiring in 48 hours shows its expiry on its page, and
+// Edit secret, prefilled with that date, clears it, after which the page
+// says Never.
 func TestSecretManagerExpiryThroughTheForms(t *testing.T) {
 	needService(t, "secrets")
 	p := open(t)
@@ -27,18 +28,33 @@ func TestSecretManagerExpiryThroughTheForms(t *testing.T) {
 		consoleDo(t, http.MethodDelete, "/api/resources/secrets?project="+project+"&name="+id, "")
 	})
 	p.navigate("/secrets/create?project=" + project)
-	p.waitFor(`document.querySelector("#view #f-ttl") !== null && document.querySelector("#view #f-expireTime") !== null`)
+	// Google's console sets an expiration date and time only; a TTL is
+	// gcloud's and REST's (#2142).
+	p.waitFor(`document.querySelector("#view #f-expireTime") !== null`)
+	var ttl bool
+	p.eval(`document.querySelector("#view #f-ttl") !== null`, &ttl)
+	if ttl {
+		t.Error("Create secret offers a TTL; Google's page sets an expiration date only")
+	}
 	setField(p, "#view", "f-secretId", id)
 	setField(p, "#view", "f-payload", "value")
 	setField(p, "#view", "f-setExpiration", "true")
-	setField(p, "#view", "f-ttl", "48h")
+	var picked struct{ Local string }
+	p.eval(`(() => {
+		const f = document.querySelector("#view #f-expireTime");
+		const d = new Date(Date.now() + 48 * 3600 * 1000); d.setSeconds(0, 0);
+		const pad = (n) => String(n).padStart(2, "0");
+		const local = d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) + "T" + pad(d.getHours()) + ":" + pad(d.getMinutes());
+		f.value = local; f.dispatchEvent(new Event("input", { bubbles: true })); f.dispatchEvent(new Event("change", { bubbles: true }));
+		return { Local: local };
+	})()`, &picked)
 	p.run(chromedp.Click(chromedp.CSS(`#view button[type="submit"]`)))
 	p.waitFor(`location.pathname === "/secrets"`)
 
 	got := editDefaults(t, "secrets", project, name)
 	exp, err := time.Parse(time.RFC3339, got["expireTime"])
 	if err != nil || time.Until(exp) < 47*time.Hour || time.Until(exp) > 49*time.Hour {
-		t.Fatalf("a 48h TTL created in the browser reads expire time %q (%v)", got["expireTime"], err)
+		t.Fatalf("an expiration date 48h ahead set in the browser reads expire time %q (%v)", got["expireTime"], err)
 	}
 	if got["Expiration time"] != got["expireTime"] {
 		t.Errorf("the page shows expire time %q, the edit form %q", got["Expiration time"], got["expireTime"])
@@ -50,8 +66,8 @@ func TestSecretManagerExpiryThroughTheForms(t *testing.T) {
 	p.waitFor(`document.querySelector("#view form.create-page #f-expireTime") !== null`)
 	var prefilled string
 	p.eval(`document.querySelector("#view #f-expireTime").value`, &prefilled)
-	if prefilled != got["expireTime"] {
-		t.Errorf("Edit secret is prefilled with expire time %q, want %q", prefilled, got["expireTime"])
+	if prefilled != picked.Local {
+		t.Errorf("Edit secret is prefilled with expire time %q, want %q", prefilled, picked.Local)
 	}
 	setField(p, "#view", "f-expireTime", "")
 	p.clickText(`#view form.create-page button[type="submit"]`, "Update secret")

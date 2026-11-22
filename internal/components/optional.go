@@ -612,11 +612,18 @@ func cloudSQLBackend(persistent bool) Backend {
 			// PVC's lost+found makes it. A subdirectory avoids that.
 			"PGDATA": "/var/lib/postgresql/data/pgdata",
 		},
+		// pg_stat_statements preloaded, as Cloud SQL has it (CREATE
+		// EXTENSION pg_stat_statements needs no flag there): Query insights
+		// reads it (#2141).
+		Args:       []string{"postgres", "-c", pgPreload},
 		Persistent: persistent,
 		MountPath:  "/var/lib/postgresql/data",
 		OwnsClaim:  persistent,
 	}
 }
+
+// pgPreload is the PostgreSQL servers' shared_preload_libraries.
+const pgPreload = "shared_preload_libraries=pg_stat_statements"
 
 // memorystoreBackend runs Valkey in the cluster.
 //
@@ -1055,7 +1062,7 @@ func CloudSQLInstanceBackend(name, version string, persistent bool, rootPassword
 			// Cloud SQL 9.6 instance can have read replicas (#1524).
 			// Database flags, after them, still win.
 			b.Args = []string{"postgres", "-c", "wal_level=replica", "-c", "max_wal_senders=10",
-				"-c", "max_replication_slots=10", "-c", "hot_standby=on"}
+				"-c", "max_replication_slots=10", "-c", "hot_standby=on", "-c", pgPreload}
 		}
 		if len(flags) > 0 {
 			if len(b.Args) == 0 {

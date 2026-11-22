@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/chromedp/chromedp"
 )
 
 // TestParameterTemplatesThroughThePage (#2063), in a shard serving
@@ -47,8 +49,8 @@ func TestParameterTemplatesThroughThePage(t *testing.T) {
 	p.waitFor(`[...document.querySelectorAll('a[href^="/secrets-parameters/templates"]')].some((a) => a.textContent.includes("Parameter templates"))`)
 	p.navigate("/secrets-parameters/templates?project=" + project)
 	p.clickText("#view button", "Create template")
-	p.waitFor(`["f-templateId", "f-location", "f-labels"].every((id) => document.getElementById(id) !== null)`)
-	p.submitForm(map[string]string{"templateId": "browser-template", "location": "global"}, "templateId")
+	p.waitFor(`["f-templateId", "f-locationType", "f-region"].every((id) => document.getElementById(id) !== null)`)
+	p.submitForm(map[string]string{"templateId": "browser-template"}, "templateId")
 	p.waitFor(fmt.Sprintf(`location.pathname === "/secrets-parameters/templates" &&
 		[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q))`, name))
 	if got := detail("parametermanager-templates", name); !strings.Contains(got, "YAML") {
@@ -58,7 +60,11 @@ func TestParameterTemplatesThroughThePage(t *testing.T) {
 	var tplPath string
 	p.eval(`location.pathname + location.search`, &tplPath)
 	payload := "log: {{.level}}\n"
-	p.pageAction("New version", map[string]string{"versionId": "tv1", "payload": payload}, "")
+	// Google's Create version opens the Create template version page.
+	p.clickText(p.findAction("Create version"), "Create version")
+	p.waitFor(`new URLSearchParams(location.search).get("action") === "newversion"`)
+	p.submitForm(map[string]string{"versionId": "tv1", "payload": payload}, "versionId")
+	p.waitFor(`new URLSearchParams(location.search).get("action") === null`)
 	if got := detail("parametermanager-templates", name); !strings.Contains(got, "tv1") {
 		t.Fatalf("New version made no version: %s", got)
 	}
@@ -72,6 +78,8 @@ func TestParameterTemplatesThroughThePage(t *testing.T) {
 		t.Errorf("Render answered %q; want the rendered value, log: debug", rows)
 	}
 	p.clickText(p.findAction("Disable"), "Disable")
+	p.waitFor(`document.querySelector(".modal.is-open form[data-confirm=confirm]") !== null`)
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`[...document.querySelectorAll("#view .page-actions button")].some((b) => b.textContent.trim() === "Enable")`)
 	if got := detail("parametermanager-templates", name, "tv1"); !strings.Contains(got, "Disabled") {
 		t.Errorf("after Disable the version reads %s", got)

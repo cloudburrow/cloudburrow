@@ -251,13 +251,13 @@ func (s *Server) DeleteTemplate(ctx context.Context, req *pmpb.DeleteTemplateReq
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	rec, err := s.template(req.GetName())
-	if err != nil {
+	if _, err := s.template(req.GetName()); err != nil {
 		return nil, err
 	}
-	if n := len(rec.Versions); n > 0 {
-		return nil, apierror.FailedPrecondition("Template %s has %d versions: delete its versions, enabled or disabled, before the template", req.GetName(), n)
-	}
+	// "Deleting a template also deletes all of its template versions"
+	// (https://docs.cloud.google.com/secret-manager/parameter-manager/docs/delete-parameter-templates,
+	// read 2026-11-22): a template's versions are kept on it, and go with
+	// it. A parameter, unlike a template, refuses while it has versions.
 	delete(s.templates, req.GetName())
 	return &emptypb.Empty{}, apierror.Wrap(s.save())
 }

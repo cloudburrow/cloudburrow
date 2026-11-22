@@ -581,6 +581,10 @@ type Field struct {
 	// the Secret value typed or from Upload file (#1850). The value is still
 	// the textarea's, so nothing else about the form changes.
 	Upload string `json:"upload,omitempty"`
+	// Generate, on a password field, puts Google's Generate button beside
+	// it, which fills it with a random password, as Cloud SQL's Create
+	// instance has (#2141). Every password field has Show password.
+	Generate bool `json:"generate,omitempty"`
 	// Dialog is a button beside the field that opens a table, as
 	// Google's Spanner Create instance has Compare editions beside the
 	// edition (#1859).

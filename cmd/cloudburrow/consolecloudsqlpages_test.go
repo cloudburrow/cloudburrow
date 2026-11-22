@@ -152,7 +152,8 @@ func TestCloudSQLConsoleCreatePage(t *testing.T) {
 	}
 	ctx := context.Background()
 	if _, err := p.Create(ctx, "proj", map[string]string{"engine": "MySQL", "mysqlVersion": "MYSQL_8_4", "databaseVersion": "POSTGRES_17",
-		"name": "my", "edition": "ENTERPRISE", "preset": "Sandbox", "pitr": "true", "backupsEnabled": "true", "maintenanceDay": "7", "maintenanceHour": "3"}); err != nil {
+		"name": "my", "edition": "ENTERPRISE", "preset": "Sandbox", "pitr": "true", "backupsEnabled": "true", "maintenanceDay": "7", "maintenanceHour": "3",
+		"noPassword": "true"}); err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{`"databaseVersion":"MYSQL_8_4"`, `"tier":"db-f1-micro"`, `"edition":"ENTERPRISE"`, `"binaryLogEnabled":true`,

@@ -5259,7 +5259,7 @@
         "method": "google.cloud.resourcemanager.v3.TagBindings/ListEffectiveTags",
         "status": "Verified",
         "tests": [
-          "test/compat/parametermanager2063_test.go:197 TestParameterManagerTags",
+          "test/compat/parametermanager2063_test.go:208 TestParameterManagerTags",
           "test/compat/resourcemanagerdynamictags_test.go:28 TestResourceManagerDynamicTagValues",
           "test/compat/resourcemanagerregionaltags_test.go:54 TestResourceManagerRegionalTagBindings",
           "test/compat/resourcemanagertags_test.go:94 TestResourceManagerV3Tags",
@@ -5271,7 +5271,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/iamenforcementround12_1879_test.go:133 TestIAMEnforcementTagBindingsOnOtherResources",
-          "test/compat/parametermanager2063_test.go:197 TestParameterManagerTags",
+          "test/compat/parametermanager2063_test.go:208 TestParameterManagerTags",
           "test/compat/resourcemanagerdynamictags_test.go:28 TestResourceManagerDynamicTagValues",
           "test/compat/resourcemanagerregionaltags_test.go:54 TestResourceManagerRegionalTagBindings",
           "test/compat/resourcemanagertags_test.go:94 TestResourceManagerV3Tags",
@@ -17900,7 +17900,7 @@
         "method": "google.cloud.parametermanager.v1.ParameterManager/CreateParameter",
         "status": "Verified",
         "tests": [
-          "test/compat/parametermanager2063_test.go:197 TestParameterManagerTags",
+          "test/compat/parametermanager2063_test.go:208 TestParameterManagerTags",
           "test/compat/parametermanager_test.go:110 TestParameterManagerLifecycle",
           "test/compat/parametermanager_test.go:378 TestParameterManagerCMEK"
         ]
@@ -17932,7 +17932,7 @@
         "method": "google.cloud.parametermanager.v1.ParameterManager/DeleteParameter",
         "status": "Verified",
         "tests": [
-          "test/compat/parametermanager2063_test.go:197 TestParameterManagerTags",
+          "test/compat/parametermanager2063_test.go:208 TestParameterManagerTags",
           "test/compat/parametermanager_test.go:110 TestParameterManagerLifecycle"
         ]
       },
@@ -17961,7 +17961,7 @@
         "method": "google.cloud.parametermanager.v1.ParameterManager/GetParameter",
         "status": "Verified",
         "tests": [
-          "test/compat/parametermanager2063_test.go:197 TestParameterManagerTags",
+          "test/compat/parametermanager2063_test.go:208 TestParameterManagerTags",
           "test/compat/parametermanager_test.go:110 TestParameterManagerLifecycle"
         ]
       },

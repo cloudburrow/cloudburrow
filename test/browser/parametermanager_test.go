@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/chromedp/chromedp"
 )
 
 // TestParameterManagerThroughThePage (#2054), in the storage shard, whose
@@ -42,11 +44,14 @@ func TestParameterManagerThroughThePage(t *testing.T) {
 	p.waitFor(`[...document.querySelectorAll('a[href^="/secrets-parameters"]')].some((a) => a.textContent.includes("Parameter Manager"))`)
 	p.navigate("/secrets-parameters?project=" + project)
 	p.clickText("#view button", "Create parameter")
-	p.waitFor(`["f-parameterId", "f-location", "f-labels"].every((id) => document.getElementById(id) !== null) &&
+	// Google's Parameter format and Location sections (#2143): Multi-region
+	// global by default.
+	p.waitFor(`["f-parameterId", "f-locationType", "f-multiRegion", "f-region"].every((id) => document.getElementById(id) !== null) &&
+		[...document.querySelectorAll(".create-step-title, .form-section-title, legend, h2, h3")].some((h) => h.textContent.trim() === "Parameter format") &&
 		[...document.querySelectorAll('#view input[type="radio"]')].some((r) => r.value === "JSON")`)
 	p.eval(`(() => { const r = [...document.querySelectorAll('#view input[type="radio"]')].find((r) => r.value === "JSON");
 		r.click(); return true; })()`, nil)
-	p.submitForm(map[string]string{"parameterId": "browser-config", "location": "global"}, "parameterId")
+	p.submitForm(map[string]string{"parameterId": "browser-config"}, "parameterId")
 	p.waitFor(fmt.Sprintf(`location.pathname === "/secrets-parameters" &&
 		[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q))`, name))
 	if got := detail(name); !strings.Contains(got, "JSON") || !strings.Contains(got, "principal://parametermanager.googleapis.com/") {
@@ -56,7 +61,12 @@ func TestParameterManagerThroughThePage(t *testing.T) {
 	var paramPath string
 	p.eval(`location.pathname + location.search`, &paramPath)
 	payload := `{"password": "__REF__(\"//secretmanager.googleapis.com/projects/` + project + `/secrets/pm-browser-secret/versions/1\")"}`
-	p.pageAction("New version", map[string]string{"versionId": "v1", "payload": payload}, "")
+	// New version opens Google's Create parameter version page (#2143).
+	p.clickText(p.findAction("New version"), "New version")
+	p.waitFor(`new URLSearchParams(location.search).get("action") === "newversion" && document.querySelector("#view h1, #view h2") !== null &&
+		[...document.querySelectorAll("#view h1, #view h2")].some((h) => h.textContent.includes("Create parameter version"))`)
+	p.submitForm(map[string]string{"versionId": "v1", "payload": payload}, "versionId")
+	p.waitFor(`new URLSearchParams(location.search).get("action") === null`)
 	if got := detail(name); !strings.Contains(got, "v1") {
 		t.Fatalf("New version made no version: %s", got)
 	}
@@ -78,8 +88,10 @@ func TestParameterManagerThroughThePage(t *testing.T) {
 			t.Errorf("the Rendered payload tab reads %q", s.Text)
 		}
 	}
-	// Disable has no form: it acts when clicked.
+	// Disable asks for nothing typed, as Google's does (#2143).
 	p.clickText(p.findAction("Disable"), "Disable")
+	p.waitFor(`document.querySelector(".modal.is-open form[data-confirm=confirm]") !== null && document.querySelector(".modal.is-open #confirm-input") === null`)
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`[...document.querySelectorAll("#view .page-actions button")].some((b) => b.textContent.trim() === "Enable")`)
 	if got := detail(name, version); !strings.Contains(got, "Disabled") {
 		t.Errorf("after Disable the version reads %s", got)

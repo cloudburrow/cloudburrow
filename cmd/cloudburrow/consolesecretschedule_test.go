@@ -44,7 +44,8 @@ func TestConsoleSecretRotationAndDestroyDelay(t *testing.T) {
 	if text := detailText(d); !strings.Contains(text, next.Format(time.RFC3339)) || !strings.Contains(text, "48h0m0s") {
 		t.Errorf("the page does not show the schedule: %s", text)
 	}
-	for _, name := range []string{"nextRotationTime", "rotationPeriod", "versionDestroyTtl"} {
+	// The delay is Google's Destruction delay duration, in days (#2142).
+	for _, name := range []string{"nextRotationTime", "rotationPeriod", "destroyDelayDays"} {
 		if !hasField(d.Edit.Fields, name) {
 			t.Errorf("Edit secret has no %s field", name)
 		}

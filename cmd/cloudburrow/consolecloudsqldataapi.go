@@ -86,12 +86,8 @@ func dataAPIActions(ctx context.Context, svc *sqladminapi.Service, project strin
 			Confirm: "The log table's rows are deleted.", Fields: []console.Field{{Name: "logType", Label: "Log table", Type: "select",
 				Required: true, Options: []string{"MYSQL_GENERAL_TABLE", "MYSQL_SLOW_TABLE"}, Default: "MYSQL_GENERAL_TABLE"}}})
 	}
-	if created {
-		acts = append(acts, console.Action{ID: "delete-final-backup", Label: "Delete with final backup", Destructive: true, Leaves: true,
-			Confirm: "The instance is deleted after a FINAL backup of it is taken; the backup is kept until it expires.",
-			Fields: []console.Field{{Name: "description", Label: "Final backup description", Type: "text"},
-				{Name: "ttlDays", Label: "Keep for (days)", Type: "number", Default: "30"}}})
-	}
+	// The final backup is Delete's Take a final backup (#2141), as Google's
+	// Delete instance dialog has it; delete-final-backup stays its action.
 	if in.State == "RUNNABLE" {
 		acts = append(acts, console.Action{ID: "create-project-backup", Label: "Create project backup", Fields: []console.Field{
 			{Name: "description", Label: "Description", Type: "text"},

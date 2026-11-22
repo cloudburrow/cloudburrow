@@ -54,25 +54,27 @@ func (p parameterTemplatesProvider) List(ctx context.Context, project string) (c
 		for _, t := range resp.GetTemplates() {
 			listing.Items = append(listing.Items, console.Resource{Name: t.GetName(), Fields: map[string]string{
 				"Location": kmsLocation(t.GetName()), "Format": templateFormatLabels[t.GetFormat().String()],
-				"Labels": kmsOrDash(labelsText(t.GetLabels())), "Created": kmsTime(t.GetCreateTime())}})
+				"Labels": kmsOrDash(labelsText(t.GetLabels())), "Created": kmsTime(t.GetCreateTime())}, Actions: pmRowActions(templatesRoute, t.GetName()),
+				Info: pubsubInfoTabs(t.GetLabels(), "template", false)})
 		}
 	}
 	listing.Total = len(listing.Items)
 	listing.RowsOpenable = true
+	listing.InfoOnSelect = true // check a template, then Labels (#2143)
 	return listing, nil
 }
 
 func (p parameterTemplatesProvider) CreateForm() (string, []console.Field) {
 	const details = "Template details"
-	return "Create template", []console.Field{
+	// Google's Create parameter template (create-parameter-template, read
+	// 2026-11-22): the name, Template format, Location and Labels.
+	fields := []console.Field{
 		{Name: "templateId", Label: "Name", Type: "text", Required: true, Section: details, Pattern: `^[A-Za-z0-9_\-]{1,63}$`,
 			Help: "Letters, numbers, hyphens and underscores; at most 63 characters."},
-		{Name: "location", Label: "Location", Type: "select", Required: true, Default: "global", Section: details,
-			Options: parametermanager.Locations(), Help: "global, or a region for a regional template."},
-		{Name: "format", Label: "Format", Type: "radio", Default: "TEMPLATE_FORMAT_YAML", Section: details, Options: templateFormats,
+		{Name: "format", Label: "Template format", Type: "radio", Default: "TEMPLATE_FORMAT_YAML", Section: "Template format", Options: templateFormats,
 			OptionLabels: templateFormatLabels, Help: "A template's versions are YAML or JSON objects; unformatted text is not supported."},
-		labelsField(nil, details),
 	}
+	return "Create template", append(append(fields, pmLocationFields()...), pmLabelsField(nil))
 }
 
 func (p parameterTemplatesProvider) Create(ctx context.Context, project string, values map[string]string) (string, error) {
@@ -83,11 +85,11 @@ func (p parameterTemplatesProvider) Create(ctx context.Context, project string, 
 	if project == "" {
 		return "", fmt.Errorf("choose a project before creating a template")
 	}
-	labels, err := console.ParseMap(values["labels"])
+	labels, err := pmLabels(values["labels"])
 	if err != nil {
 		return "", err
 	}
-	out, err := s.CreateTemplate(ctx, &pmpb.CreateTemplateRequest{Parent: "projects/" + project + "/locations/" + strings.TrimSpace(values["location"]),
+	out, err := s.CreateTemplate(ctx, &pmpb.CreateTemplateRequest{Parent: "projects/" + project + "/locations/" + pmLocation(values),
 		TemplateId: strings.TrimSpace(values["templateId"]),
 		Template:   &pmpb.Template{Labels: labels, Format: pmpb.TemplateFormat(pmpb.TemplateFormat_value[values["format"]])}})
 	if err != nil {
@@ -134,7 +136,8 @@ func (p parameterTemplatesProvider) templateDetail(ctx context.Context, project,
 	if resp, err := s.ListTemplateVersions(ctx, &pmpb.ListTemplateVersionsRequest{Parent: name, PageSize: 1000}); err == nil {
 		for _, v := range resp.GetTemplateVersions() {
 			versions.Items = append(versions.Items, console.Resource{Name: lastSegment(v.GetName()), Status: templateVersionState(v),
-				Opens: []string{name, lastSegment(v.GetName())}, Fields: map[string]string{"State": templateVersionState(v), "Created": kmsTime(v.GetCreateTime())}})
+				Opens: []string{name, lastSegment(v.GetName())}, Fields: map[string]string{"State": templateVersionState(v), "Created": kmsTime(v.GetCreateTime())},
+				Actions: pmVersionRowActions(templatesRoute, name, lastSegment(v.GetName()), v.GetDisabled(), name)})
 		}
 	}
 	versions.Total = len(versions.Items)
@@ -215,15 +218,21 @@ func (p parameterTemplatesProvider) DetailActions(ctx context.Context, project s
 			return nil
 		}
 		return []console.Action{
-			{ID: "newversion", Label: "New version", Fields: []console.Field{
-				{Name: "versionId", Label: "Name", Type: "text", Required: true, Pattern: `^[A-Za-z0-9_][A-Za-z0-9_\-]{0,62}$`,
-					Help: "Letters, numbers, hyphens and underscores; at most 63 characters, not beginning with a hyphen."},
-				{Name: "payload", Label: "Payload", Type: "textarea", Required: true,
+			// Google's Create version, opening the Create template version
+			// page (add-parameter-template-version).
+			{ID: "newversion", Label: "Create version", Title: "Create template version", Submit: "Create", Page: true, Fields: []console.Field{
+				{Name: "versionId", Label: "Name", Type: "text", Required: true, Pattern: pmVersionIDPattern, Help: pmVersionIDHelp},
+				{Name: "payload", Label: "Payload", Type: "textarea", Required: true, Upload: "Browse",
 					Help: "A " + templateFormatLabels[t.GetFormat().String()] + " object of at most 1 MiB. Variables are {{.key}}, or {{.key1.key2}} for a nested value, at most 64; no control flow, and no Secret Manager references (put them in the parameter version)."},
 				{Name: "disabled", Label: "Disable this version", Type: "checkbox"}}},
-			{ID: "edit", Label: "Edit", Fields: []console.Field{labelsField(t.GetLabels(), "")}},
-			{ID: "delete", Label: "Delete", Destructive: true, Leaves: true,
-				Confirm: "A template can be deleted only once it has no versions, enabled or disabled."},
+			// Google's Edit parameter template page, ending in Save.
+			{ID: "edit", Label: "Edit", Title: "Edit parameter template", Submit: "Save", Page: true,
+				Fields: []console.Field{pmLabelsField(t.GetLabels())}},
+			// "Deleting a template also deletes all of its template
+			// versions" (delete-parameter-templates), the name typed.
+			{ID: "delete", Label: "Delete", Destructive: true, Leaves: true, ConfirmWord: lastSegment(path[0]),
+				Confirm: "Deleting a template also deletes all of its template versions."},
+			pubsubLabelsAction(t.GetLabels()),
 		}
 	case 2:
 		s, err := p.api()
@@ -234,18 +243,14 @@ func (p parameterTemplatesProvider) DetailActions(ctx context.Context, project s
 		if err != nil {
 			return nil
 		}
-		toggle := console.Action{ID: "disable", Label: "Disable"}
-		if v.GetDisabled() {
-			toggle = console.Action{ID: "enable", Label: "Enable"}
-		}
+		toggle := pmToggleAction(v.GetDisabled())
 		render := console.Action{ID: "render", Label: "Render", Title: "Render template version", Fields: []console.Field{
 			{Name: "parameterVersion", Label: "Parameter version", Type: "select", Required: true, Options: p.parameterVersionsIn(ctx, path[0]),
 				Help: "An enabled version of a JSON or YAML parameter in the template's location; its values replace the template's variables."}}}
 		if v.GetDisabled() {
 			render.Unavailable = "A disabled version cannot be rendered."
 		}
-		return []console.Action{render, toggle, {ID: "deleteversion", Label: "Delete", Destructive: true, Leaves: true,
-			Confirm: "Deleting a version cannot be undone."}}
+		return []console.Action{render, toggle, pmDeleteVersionAction(path[0])}
 	}
 	return nil
 }
@@ -286,8 +291,15 @@ func (p parameterTemplatesProvider) ActAt(ctx context.Context, project string, p
 			TemplateVersion: &pmpb.TemplateVersion{Disabled: values["disabled"] == "true",
 				Payload: &pmpb.TemplateVersionPayload{Data: []byte(values["payload"])}}})
 		return err
-	case "edit":
-		labels, err := console.ParseMap(values["labels"])
+	case "edit", actEditLabels:
+		raw := values["labels"]
+		if action == actEditLabels {
+			raw = strings.TrimSpace(raw)
+			if raw == "" {
+				raw = "{}"
+			}
+		}
+		labels, err := pmLabels(raw)
 		if err != nil {
 			return err
 		}

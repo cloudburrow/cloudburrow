@@ -35,8 +35,8 @@ tracks it; a closed issue is named only where it says what was built.
 | Spanner, Bigtable, Firestore, Datastore | 5 | 0 | 1 | 3 | 1 |
 | Cloud SQL, Memorystore | 6 | 1 | 4 | 1 | 0 |
 | Functions, credentials, tooling | 1 | 0 | 1 | 0 | 0 |
-| Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **65** | **5** | **18** | **36** | **6** |
+| Console | 4 | 3 | 1 | 0 | 0 |
+| **Total** | **69** | **8** | **19** | **36** | **6** |
 
 ## Cloud Storage
 
@@ -325,6 +325,10 @@ latency and resource charts (#1267); the Artifact Registry repository Permission
 
 | Gap | Why open | Size |
 |---|---|---|
+| Cloud SQL: an instance's backup settings have no Edit page of their own; they are set on the create page and through Edit (#2141) | not built yet | S |
+| Cloud SQL: Primary and secondary zones, Private service access, Private Service Connect and managed connection pooling on the create and Connections pages; System insights' CPU and log error charts and Query insights' database load chart (#2141) | no emulator support | M |
+| Secret Manager: the Secrets list's Tags column (Create secret's Tags section sets them; the list would read each secret's Resource Manager tag bindings) (#2142) | not built yet | S |
+| Parameter Manager: the payload editor's Secret picker (Ctrl+Space), and Render template version as a page of its own rather than a dialog (#2143) | not built yet | S |
 
 ## Excluded on purpose
 

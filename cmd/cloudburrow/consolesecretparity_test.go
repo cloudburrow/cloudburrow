@@ -35,7 +35,7 @@ func TestConsoleSecretParity(t *testing.T) {
 			sections = append(sections, f.Section)
 		}
 	}
-	want := "Replication policy,Encryption,Rotation,Notifications,Expiration,Labels,Annotations,Version aliases,Delayed destruction,Tags"
+	want := "Replication policy,Encryption,Rotation,Notifications,Expiration,Labels,Annotations,Version aliases,Delay secret version destroy,Tags"
 	if got := strings.Join(sections, ","); got != want {
 		t.Errorf("Create secret sections = %s\nwant %s", got, want)
 	}

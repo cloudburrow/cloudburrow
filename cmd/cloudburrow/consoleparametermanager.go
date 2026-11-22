@@ -63,11 +63,13 @@ func (p parameterManagerProvider) List(ctx context.Context, project string) (con
 			listing.Items = append(listing.Items, console.Resource{Name: prm.GetName(), Fields: map[string]string{
 				"Location": kmsLocation(prm.GetName()), "Format": parameterFormatLabels[prm.GetFormat().String()],
 				"Encryption": parameterEncryption(prm.GetKmsKey()), "Labels": kmsOrDash(labelsText(prm.GetLabels())),
-				"Created": kmsTime(prm.GetCreateTime())}})
+				"Created": kmsTime(prm.GetCreateTime())}, Actions: pmRowActions(parametersRoute, prm.GetName()),
+				Info: pubsubInfoTabs(prm.GetLabels(), "parameter", false)})
 		}
 	}
 	listing.Total = len(listing.Items)
 	listing.RowsOpenable = true
+	listing.InfoOnSelect = true // check a parameter, then Labels (#2143)
 	return listing, nil
 }
 
@@ -80,20 +82,23 @@ func parameterEncryption(key string) string {
 
 func (p parameterManagerProvider) CreateForm() (string, []console.Field) {
 	const details = "Parameter details"
-	return "Create parameter", []console.Field{
+	// Google's Create parameter (create-parameter, read 2026-11-22): the
+	// name, then the Parameter format and Location sections; Encryption
+	// and Labels' Add label rows.
+	fields := []console.Field{
 		{Name: "parameterId", Label: "Name", Type: "text", Required: true, Section: details, Pattern: `^[A-Za-z0-9_\-]{1,63}$`,
 			Help: "Letters, numbers, hyphens and underscores; at most 63 characters."},
-		{Name: "location", Label: "Location", Type: "select", Required: true, Default: "global", Section: details,
-			Options: parametermanager.Locations(), Help: "global, or a region for a regional parameter."},
-		{Name: "format", Label: "Format", Type: "radio", Default: "UNFORMATTED", Section: details, Options: parameterFormats,
+		{Name: "format", Label: "Parameter format", Type: "radio", Default: "UNFORMATTED", Section: "Parameter format", Options: parameterFormats,
 			OptionLabels: parameterFormatLabels, Help: "A JSON or YAML parameter's versions must parse as that format, and can reference Secret Manager secrets."},
-		{Name: "encryption", Label: "Encryption", Type: "radio", Default: "google", Section: details, Options: []string{"google", "cmek"},
+	}
+	fields = append(fields, pmLocationFields()...)
+	return "Create parameter", append(fields,
+		console.Field{Name: "encryption", Label: "Encryption", Type: "radio", Default: "google", Section: "Encryption", Options: []string{"google", "cmek"},
 			OptionLabels: map[string]string{"google": "Google-managed encryption key", "cmek": "Cloud KMS key"}},
-		{Name: "kmsKey", Label: "Cloud KMS key", Type: "text", Section: details, ShowWhen: "encryption=cmek", Browse: "kms",
+		console.Field{Name: "kmsKey", Label: "Cloud KMS key", Type: "text", Section: "Encryption", ShowWhen: "encryption=cmek", Browse: "kms",
 			Pattern: `^projects/[^\/]+/locations/[^\/]+/keyRings/[^\/]+/cryptoKeys/[^\/]+$`,
 			Help:    "A key of this instance's Cloud KMS in the parameter's location: projects/PROJECT/locations/LOCATION/keyRings/RING/cryptoKeys/KEY."},
-		labelsField(nil, details),
-	}
+		pmLabelsField(nil))
 }
 
 func (p parameterManagerProvider) Create(ctx context.Context, project string, values map[string]string) (string, error) {
@@ -104,7 +109,7 @@ func (p parameterManagerProvider) Create(ctx context.Context, project string, va
 	if project == "" {
 		return "", fmt.Errorf("choose a project before creating a parameter")
 	}
-	labels, err := console.ParseMap(values["labels"])
+	labels, err := pmLabels(values["labels"])
 	if err != nil {
 		return "", err
 	}
@@ -116,7 +121,7 @@ func (p parameterManagerProvider) Create(ctx context.Context, project string, va
 		}
 		prm.KmsKey = &key
 	}
-	out, err := s.CreateParameter(ctx, &pmpb.CreateParameterRequest{Parent: "projects/" + project + "/locations/" + strings.TrimSpace(values["location"]),
+	out, err := s.CreateParameter(ctx, &pmpb.CreateParameterRequest{Parent: "projects/" + project + "/locations/" + pmLocation(values),
 		ParameterId: strings.TrimSpace(values["parameterId"]), Parameter: prm})
 	if err != nil {
 		return "", err
@@ -156,7 +161,8 @@ func (p parameterManagerProvider) parameterDetail(ctx context.Context, project, 
 		for _, v := range resp.GetParameterVersions() {
 			versions.Items = append(versions.Items, console.Resource{Name: lastSegment(v.GetName()), Status: versionState(v),
 				Opens: []string{name, lastSegment(v.GetName())}, Fields: map[string]string{"State": versionState(v), "Created": kmsTime(v.GetCreateTime()),
-					"Encryption key version": kmsOrDash(v.GetKmsKeyVersion())}})
+					"Encryption key version": kmsOrDash(v.GetKmsKeyVersion())},
+				Actions: pmVersionRowActions(parametersRoute, name, lastSegment(v.GetName()), v.GetDisabled(), name)})
 		}
 	}
 	versions.Total = len(versions.Items)
@@ -230,21 +236,25 @@ func (p parameterManagerProvider) DetailActions(ctx context.Context, project str
 			enc = "cmek"
 		}
 		return []console.Action{
-			{ID: "newversion", Label: "New version", Fields: []console.Field{
-				{Name: "versionId", Label: "Name", Type: "text", Required: true, Pattern: `^[A-Za-z0-9_\-]{1,63}$`,
-					Help: "Letters, numbers, hyphens and underscores; at most 63 characters."},
-				{Name: "payload", Label: "Payload", Type: "textarea", Required: true,
+			// Google's Create parameter version page (add-parameter-version).
+			{ID: "newversion", Label: "New version", Title: "Create parameter version", Submit: "Create", Page: true, Fields: []console.Field{
+				{Name: "versionId", Label: "Name", Type: "text", Required: true, Pattern: pmVersionIDPattern, Help: pmVersionIDHelp},
+				{Name: "payload", Label: "Payload", Type: "textarea", Required: true, Upload: "Browse",
 					Help: "At most 1 MiB, in the parameter's format. In JSON or YAML, __REF__(\"//secretmanager.googleapis.com/projects/PROJECT/secrets/SECRET/versions/VERSION\") is replaced by the secret version when rendered."},
 				{Name: "disabled", Label: "Disable this version", Type: "checkbox"}}},
-			{ID: "edit", Label: "Edit", Fields: []console.Field{
+			// Google's Edit parameter page, ending in Save (edit-parameter).
+			{ID: "edit", Label: "Edit", Title: "Edit parameter", Submit: "Save", Page: true, Fields: []console.Field{
 				{Name: "encryption", Label: "Encryption", Type: "radio", Default: enc, Options: []string{"google", "cmek"},
 					OptionLabels: map[string]string{"google": "Google-managed encryption key", "cmek": "Cloud KMS key"},
 					Help:         "A new key encrypts new versions only; existing versions keep theirs."},
 				{Name: "kmsKey", Label: "Cloud KMS key", Type: "text", Default: key, ShowWhen: "encryption=cmek", Browse: "kms",
 					Pattern: `^projects/[^\/]+/locations/[^\/]+/keyRings/[^\/]+/cryptoKeys/[^\/]+$`},
-				labelsField(prm.GetLabels(), "")}},
-			{ID: "delete", Label: "Delete", Destructive: true, Leaves: true,
+				pmLabelsField(prm.GetLabels())}},
+			// Google's Delete parameter asks for the parameter's name.
+			{ID: "delete", Label: "Delete", Destructive: true, Leaves: true, ConfirmWord: lastSegment(path[0]),
 				Confirm: "A parameter can be deleted only once it has no versions, enabled or disabled."},
+			// The list's Labels panel (#2143).
+			pubsubLabelsAction(prm.GetLabels()),
 		}
 	case 2:
 		s, err := p.api()
@@ -255,12 +265,7 @@ func (p parameterManagerProvider) DetailActions(ctx context.Context, project str
 		if err != nil {
 			return nil
 		}
-		toggle := console.Action{ID: "disable", Label: "Disable"}
-		if v.GetDisabled() {
-			toggle = console.Action{ID: "enable", Label: "Enable"}
-		}
-		return []console.Action{toggle, {ID: "deleteversion", Label: "Delete", Destructive: true, Leaves: true,
-			Confirm: "Deleting a version cannot be undone."}}
+		return []console.Action{pmToggleAction(v.GetDisabled()), pmDeleteVersionAction(path[0])}
 	}
 	return nil
 }
@@ -280,7 +285,7 @@ func (p parameterManagerProvider) ActAt(ctx context.Context, project string, pat
 				Payload: &pmpb.ParameterVersionPayload{Data: []byte(values["payload"])}}})
 		return err
 	case "edit":
-		labels, err := console.ParseMap(values["labels"])
+		labels, err := pmLabels(values["labels"])
 		if err != nil {
 			return err
 		}
@@ -295,6 +300,15 @@ func (p parameterManagerProvider) ActAt(ctx context.Context, project string, pat
 		return err
 	case "delete":
 		_, err := s.DeleteParameter(ctx, &pmpb.DeleteParameterRequest{Name: path[0]})
+		return err
+	case actEditLabels:
+		// The list's Labels panel: the labels alone (#2143).
+		labels, err := console.ParseMap(values["labels"])
+		if err != nil {
+			return err
+		}
+		_, err = s.UpdateParameter(ctx, &pmpb.UpdateParameterRequest{Parameter: &pmpb.Parameter{Name: path[0], Labels: labels},
+			UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"labels"}}})
 		return err
 	}
 	if len(path) != 2 || strings.Contains(path[1], "/") {

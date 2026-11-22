@@ -168,16 +168,27 @@ func TestParameterManagerTemplates(t *testing.T) {
 				_, err = c.RenderTemplateVersion(ctx, &pmpb.RenderTemplateVersionRequest{Name: tv.GetName(), ParameterVersion: pv})
 				pmWantCode(t, "rendering a disabled version", err, codes.FailedPrecondition)
 
-				err = c.DeleteTemplate(ctx, &pmpb.DeleteTemplateRequest{Name: name})
-				pmWantCode(t, "deleting a template with versions", err, codes.FailedPrecondition)
-				if err := c.DeleteTemplateVersion(ctx, &pmpb.DeleteTemplateVersionRequest{Name: tv.GetName()}); err != nil {
+				// Deleting a template deletes its versions with it (#2143):
+				// "Deleting a template also deletes all of its template
+				// versions" (delete-parameter-templates, read 2026-11-22).
+				if err := c.DeleteTemplate(ctx, &pmpb.DeleteTemplateRequest{Name: name}); err != nil {
+					t.Fatalf("deleting a template with a version: %v", err)
+				}
+				_, err = c.GetTemplate(ctx, &pmpb.GetTemplateRequest{Name: name})
+				pmWantCode(t, "GetTemplate after delete", err, codes.NotFound)
+				_, err = c.GetTemplateVersion(ctx, &pmpb.GetTemplateVersionRequest{Name: tv.GetName()})
+				pmWantCode(t, "GetTemplateVersion of a deleted template", err, codes.NotFound)
+				// A template made again under the name starts with no
+				// versions.
+				if _, err := c.CreateTemplate(ctx, &pmpb.CreateTemplateRequest{Parent: parent, TemplateId: id, Template: &pmpb.Template{}}); err != nil {
 					t.Fatal(err)
+				}
+				if v, err := c.ListTemplateVersions(ctx, &pmpb.ListTemplateVersionsRequest{Parent: name}).Next(); err != iterator.Done {
+					t.Fatalf("a remade template's first version = %v, %v; want none", v, err)
 				}
 				if err := c.DeleteTemplate(ctx, &pmpb.DeleteTemplateRequest{Name: name}); err != nil {
 					t.Fatal(err)
 				}
-				_, err = c.GetTemplate(ctx, &pmpb.GetTemplateRequest{Name: name})
-				pmWantCode(t, "GetTemplate after delete", err, codes.NotFound)
 			})
 		}
 	}

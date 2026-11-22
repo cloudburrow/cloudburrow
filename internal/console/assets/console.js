@@ -5003,7 +5003,10 @@ async function renderDetail(view, route, resourcePath) {
   // Create key ring goes on to the ring's Create key. The action is taken
   // off the address, so a reload or Back does not open it again.
   const asked = new URLSearchParams(location.search).get("action");
-  const opened = asked && (data.actions || []).find((a) => a.id === asked);
+  // Or one drawn on a tab (Section.Actions, its Tabs' too), as Cloud SQL's
+  // list row opens Create read replica on the instance's Replicas (#2141).
+  const opened = asked && [...(data.actions || []), ...(data.sections || []).flatMap((s) =>
+    [...(s.actions || []), ...(s.tabs || []).flatMap((t) => t.actions || [])])].find((a) => a.id === asked);
   // One that is a page of its own (Action.Page, #1851) is drawn in the
   // page's place and keeps its address, so a reload shows it again and
   // Back returns to the resource's page.
@@ -7619,7 +7622,10 @@ function buildCreateForm(spec) {
           // in its location.
           : f.browse === "artifact-registry" ? el("div", { class: "browse-row" }, control,
             el("button", { type: "button", class: "secondary", id: `browse-${f.name}`, text: "Browse",
-              onclick: () => browseRepositories(control, entries) })) : control,
+              onclick: () => browseRepositories(control, entries) }))
+          // A password field (#2141): Show password, and Generate where
+          // Field.Generate asks, as Google's Cloud SQL Create instance has.
+          : f.type === "password" ? passwordRow(f, control) : control,
           templates, upload, help, error);
 
     return { field: f, control, node, error, helpId, errorId, isCheck };
@@ -8067,6 +8073,29 @@ function instantOf(local) {
 
 // uploadIntoTextarea is a textarea's Upload file control (Field.Upload,
 // #1850): a file chooser whose text file replaces the textarea's value.
+// passwordRow is a password control with Show password, which reveals
+// what is typed (aria-pressed), and Generate on a Field.Generate field,
+// which fills it with 20 random characters from the browser's CSPRNG.
+function passwordRow(f, control) {
+  const show = el("button", { type: "button", class: "secondary", id: `show-${f.name}`, text: "Show password",
+    "aria-pressed": "false", "aria-controls": control.id });
+  show.onclick = () => {
+    const shown = control.type === "password";
+    control.type = shown ? "text" : "password";
+    show.setAttribute("aria-pressed", String(shown));
+    show.textContent = shown ? "Hide password" : "Show password";
+  };
+  const gen = f.generate ? el("button", { type: "button", class: "secondary", id: `generate-${f.name}`, text: "Generate",
+    onclick: () => {
+      const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789-_.~";
+      const bytes = crypto.getRandomValues(new Uint8Array(20));
+      control.value = [...bytes].map((b) => chars[b % chars.length]).join("");
+      control.dispatchEvent(new Event("input", { bubbles: true }));
+      control.focus();
+    } }) : null;
+  return el("div", { class: "browse-row" }, control, show, gen);
+}
+
 function uploadIntoTextarea(f, control) {
   const input = el("input", { type: "file", id: `up-${f.name}`, class: "upload-into-input",
     "aria-label": `${f.upload} for ${f.label}` });
