@@ -35,8 +35,8 @@ tracks it; a closed issue is named only where it says what was built.
 | Spanner, Bigtable, Firestore, Datastore | 5 | 0 | 1 | 3 | 1 |
 | Cloud SQL, Memorystore | 6 | 1 | 4 | 1 | 0 |
 | Functions, credentials, tooling | 1 | 0 | 1 | 0 | 0 |
-| Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **65** | **4** | **18** | **37** | **6** |
+| Console | 2 | 1 | 1 | 0 | 0 |
+| **Total** | **67** | **5** | **19** | **37** | **6** |
 
 ## Cloud Storage
 
@@ -323,9 +323,18 @@ Cloud Functions v2 and v1 APIs (#1377, #1428); Pub/Sub and project IAM in Terraf
 
 Closed by the sweep: Test permissions on the Permissions tab (#1242), and the request-rate,
 latency and resource charts (#1267); the Artifact Registry repository Permissions tab (#1439).
+Compute Engine's instance templates, instance groups, machine images, custom images, snapshot and
+instance schedules, SSH keys, regional managed instance groups, autoscalers that scale on the VMs' real CPU, named ports, a managed group's Set instance template and per-VM actions, and VPC network peering, subnets, effective routes and internal
+addresses (#2139, #2140).
 
 | Gap | Why open | Size |
 |---|---|---|
+| Compute Engine methods served without a page yet (#2139): image and machine image labels after create, and a VM's scheduling after create; each is in `docs/console-parity.md` §8 as a gap | not built yet | S |
+| Compute Engine choices drawn unavailable with the reason (#2139, #2140): regional disks (replication across zones), the Ops Agent, IPv6, image import from a Cloud Storage file or a virtual disk, and promoting an external ephemeral IP, which is `127.0.0.1` here | no emulator support | M |
+| Cloud Router and Cloud NAT (#2140): BGP sessions never come up (no Cloud VPN, Interconnect or peer router exists locally, so every peer is `DOWN` and no route is learned); a gateway's VMs leave through this machine's own address, not the NAT IP, and NAT logs are not written; Private NAT, route policies and named sets are 501; a router appliance peer is not checked against a Network Connectivity Center spoke, which is not served | no emulator support (no BGP speaker, no public addresses) | M |
+| Private Service Connect (#2140): endpoints and service attachments are records: no internal load balancer is served, so a published service's `targetService` is not checked and no traffic reaches it through an endpoint, and VMs reach the local Google APIs over the host with or without an endpoint for Google APIs; Service Directory registration of endpoints, forwarding rules' patch and setTarget, and service attachments' IAM methods are 501 | no emulator support (no load balancers, no Service Directory) | M |
+| Serverless VPC Access and Cloud Run VPC egress (#2140): connectors are records, `READY` at once, and Cloud Run checks a service's or job's `vpcAccess` (the connector exists, is READY and is in its region; Direct VPC egress's network and subnet exist) and records it, but carries no traffic: no connector VMs run, and a Cloud Run container is a Knative pod whose egress is the kind cluster's, not a VPC network's, so it cannot reach a VM's internal IP (the VMs' VPC is a VXLAN segment inside their own pods, which the Run pods are not on) and `egress` changes nothing. A connector's custom IP range makes no hidden `aet-` subnet in the network, so a subnet created later may overlap it. `connectors.patch` and the Monitoring charts are not served | needs a VPC data plane for Knative pods | L |
+| Shared VPC (#2140): Individual subnets (subnet-level permissions) need `subnetworks.setIamPolicy`, not served; `subnetworks.listUsable` is 501 (the console's service project view lists the host's subnets itself) | not built yet | S |
 
 ## Excluded on purpose
 

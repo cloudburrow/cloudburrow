@@ -266,7 +266,7 @@ func writeFunctionPaneFields(pane []console.Field) []console.Field {
 func writeFunctionRunFields() []console.Field {
 	tabs := map[string]string{"executionEnvironment": runTabContainers, "cloudSqlInstances": runTabContainers,
 		"memoryVolumes": runTabVolumes, "gcsVolumes": runTabVolumes, "nfsVolumes": runTabVolumes,
-		"useHttp2": runTabNetworking, "vpcConnector": runTabNetworking, "vpcEgress": runTabNetworking, "sessionAffinity": runTabNetworking}
+		"useHttp2": runTabNetworking, "vpcMode": runTabNetworking, "vpcNetwork": runTabNetworking, "vpcSubnet": runTabNetworking, "vpcTags": runTabNetworking, "vpcConnector": runTabNetworking, "vpcEgress": runTabNetworking, "sessionAffinity": runTabNetworking}
 	var out []console.Field
 	add := func(f console.Field) {
 		if t, ok := tabs[f.Name]; ok {

@@ -45,6 +45,8 @@ type Server struct {
 	env Environment
 	// cloudSQL serves Cloud SQL volumes (#1346); nil refuses them.
 	cloudSQL CloudSQL
+	// vpc checks VPC access (#2140); nil records it unchecked.
+	vpc VPC
 	// aliases are the metadata server's names for each workload account
 	// (#1388).
 	aliases metadataAliases
@@ -119,6 +121,9 @@ func (s *Server) CreateService(ctx context.Context, req *runpb.CreateServiceRequ
 	// Output only: who made it (servicerecord.go, #2049).
 	svc.Creator = callerEmail(ctx)
 	svc.LastModifier = svc.Creator
+	if err := s.checkVPC(name, svc.GetTemplate().GetVpcAccess()); err != nil {
+		return nil, err
+	}
 	if err := s.ensurePlaceholder(ctx, svc.GetTemplate().GetContainers()); err != nil {
 		return nil, err
 	}
@@ -203,6 +208,9 @@ func (s *Server) UpdateService(ctx context.Context, req *runpb.UpdateServiceRequ
 	// keeps its ID as its Knative name (#1400).
 	kname := existing.Metadata.Name
 	svc.Creator, svc.LastModifier = existing.Metadata.Annotations[annCreator], callerEmail(ctx)
+	if err := s.checkVPC(svc.GetName(), svc.GetTemplate().GetVpcAccess()); err != nil {
+		return nil, err
+	}
 	if err := s.ensurePlaceholder(ctx, svc.GetTemplate().GetContainers()); err != nil {
 		return nil, err
 	}

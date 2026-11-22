@@ -54,6 +54,9 @@ type Options struct {
 	// the Kubernetes Engine API's node pool instance group managers
 	// (#1913). It reports whether it answered.
 	Extra func(w http.ResponseWriter, r *http.Request) bool
+	// ExtraGroups are a zone's Kubernetes Engine node-pool instance group
+	// managers, listed beside the zone's own managed instance groups.
+	ExtraGroups func(project, zone string) map[string]map[string]any
 	// NetworkUsers names the resources of other services that use a
 	// network (projects/P/global/networks/N), which a network's deletion is
 	// refused while they exist, as Google refuses it.
@@ -61,8 +64,19 @@ type Options struct {
 	// VMs runs VM instances and keeps their disks (#1963); nil answers
 	// instances, disks and snapshots with 501.
 	VMs VMBackend
+	// ProjectOrganization is the organization a project is in ("" for a
+	// project outside any) and whether the project is known, for Shared
+	// VPC's organization rule (xpn.go); nil allows every project.
+	ProjectOrganization func(project string) (org string, known bool)
 	// MinFreeBytes is DefaultMinFreeBytes when zero.
 	MinFreeBytes uint64
+	// CPU reads a running VM's CPU time in seconds since it booted, the
+	// autoscalers' load signal and compute.googleapis.com/instance/cpu/
+	// utilization's; nil uses VMs' CPUUsage when it has one (VMCPU).
+	CPU func(ctx context.Context, vm VMSpec) (float64, error)
+	// AutoscaleEvery is how often the VMs' CPU is read and the autoscalers
+	// run; 15 seconds when zero.
+	AutoscaleEvery time.Duration
 }
 
 // obj is one resource, as its JSON is kept: link fields hold relative
@@ -95,6 +109,14 @@ type Server struct {
 	// by instance.
 	pods map[string]podSeen
 
+	// stopLoop ends the schedules' runner (resourcepolicies.go) and the
+	// autoscalers' (autoscalers.go); loops is done once both have ended.
+	stopLoop context.CancelFunc
+	loops    sync.WaitGroup
+	// scale is the autoscalers' memory: the VMs' CPU readings and each
+	// autoscaler's recent recommendations and sizes (autoscalers.go).
+	scale scaleState
+
 	srv *http.Server
 	ln  net.Listener
 }
@@ -118,6 +140,13 @@ func (s *Server) Name() string { return "compute" }
 
 // Start listens on Options.Addr.
 func (s *Server) Start(context.Context) error {
+	if s.opts.VMs != nil && s.stopLoop == nil {
+		ctx, cancel := context.WithCancel(context.Background())
+		s.stopLoop = cancel
+		s.loops.Add(2)
+		go func() { defer s.loops.Done(); s.scheduleLoop(ctx) }()
+		go func() { defer s.loops.Done(); s.autoscaleLoop(ctx) }()
+	}
 	if s.opts.Addr == "" {
 		return nil
 	}
@@ -133,6 +162,11 @@ func (s *Server) Start(context.Context) error {
 
 // Stop stops listening.
 func (s *Server) Stop(ctx context.Context) error {
+	if s.stopLoop != nil {
+		s.stopLoop()
+		s.stopLoop = nil
+		s.loops.Wait()
+	}
 	if s.srv == nil {
 		return nil
 	}
@@ -312,7 +346,11 @@ func (s *Server) stamp() string {
 var linkKeys = map[string]bool{"selfLink": true, "network": true, "subnetwork": true, "region": true, "zone": true,
 	"targetLink": true, "nextHopGateway": true, "nextHopNetwork": true, "nextHopInstance": true, "nextHopVpnTunnel": true,
 	"subnetworks": true, "users": true, "zones": true, "machineType": true, "source": true, "sourceImage": true,
-	"sourceSnapshot": true, "sourceDisk": true, "type": true}
+	"sourceSnapshot": true, "sourceDisk": true, "type": true, "resourcePolicies": true, "sourceInstance": true,
+	"sourceInstanceTemplate": true, "sourceMachineImage": true, "instanceTemplate": true, "instanceGroup": true,
+	"sourceSnapshotSchedulePolicy": true, "instance": true, "replacement": true,
+	// Private Service Connect (#2140, psc.go).
+	"target": true, "targetService": true, "natSubnets": true, "endpoint": true, "consumerNetwork": true}
 
 // renderNested makes the link fields of objects inside lists and objects
 // absolute (an instance's disks and network interfaces).

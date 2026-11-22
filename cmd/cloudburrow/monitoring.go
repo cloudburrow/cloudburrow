@@ -20,6 +20,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 	"github.com/cloudburrow/cloudburrow/internal/metrics"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
+	"github.com/cloudburrow/cloudburrow/internal/service/compute"
 	"github.com/cloudburrow/cloudburrow/internal/service/logging"
 	"github.com/cloudburrow/cloudburrow/internal/service/monitoring"
 	"github.com/cloudburrow/cloudburrow/internal/service/tasks"
@@ -57,6 +58,11 @@ type monitoringService struct {
 	stop      chan struct{}
 	// runStop ends the sampling of Cloud Run's metrics (#2049).
 	runStop chan struct{}
+	// computeCPU is the Compute Engine API, for its VMs' CPU utilization
+	// (#2139); nil when Compute Engine is not served. computeStop ends
+	// its sampling.
+	computeCPU  func() *compute.Server
+	computeStop chan struct{}
 	// pubsub is the instance's Pub/Sub tunnel, for Pub/Sub notification
 	// channels (#1964); nil, or nil from it, when Pub/Sub is not served.
 	pubsub func() *netfwd.Forwarder
@@ -159,6 +165,10 @@ func (s *monitoringService) Start(ctx context.Context) error {
 		go sampleRunMetrics(api, monitoringRun{kubeconfig: s.cfg.KubeconfigPath(), namespace: runadapter.WorkloadNamespace,
 			project: s.cfg.DefaultProject(), region: "us-central1"}, s.runStop)
 	}
+	if s.computeCPU != nil {
+		s.computeStop = make(chan struct{})
+		go sampleComputeMetrics(api, monitoringCompute{api: s.computeCPU}, s.computeStop)
+	}
 	setRunMetricsEndpoint(s.Addr)
 	if s.reqs != nil {
 		// up's request history (#1866), which it samples itself, shared
@@ -227,6 +237,10 @@ func (s *monitoringService) Stop(ctx context.Context) error {
 	if s.runStop != nil {
 		close(s.runStop)
 		s.runStop = nil
+	}
+	if s.computeStop != nil {
+		close(s.computeStop)
+		s.computeStop = nil
 	}
 	if s.server == nil {
 		return nil

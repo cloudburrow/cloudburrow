@@ -48,7 +48,7 @@ Terraform's `google_compute_network` and `google_compute_subnetwork` run through
 
 ## Console
 
-The console's VPC network pages list and manage networks, subnets, firewall rules, routes and IP addresses, as Google's VPC network section does.
+The console's VPC network pages list and manage networks, subnets, firewall rules, routes and IP addresses, as Google's VPC network section does. Since #2140 they follow Google's tabs: VPC networks' Networks and Subnets in current project, Firewall policies with its VPC firewall rules table (Google's source and target filters, Allow all or Specified protocols and ports), Route management and Effective routes (a route's next hop may be an instance), External and Internal IP addresses (each VM's ephemeral addresses with Promote to static on an internal one), and **VPC network peering**.
 
 Compute Engine's pages (#1965), under **Compute** in the drawer, at Google's paths:
 
@@ -56,11 +56,16 @@ Compute Engine's pages (#1965), under **Compute** in the drawer, at Google's pat
 |---|---|
 | VM instances (`/compute/instances`) | Every instance of the project across zones (the aggregated list): status, zone, machine type, internal and external IP, Connect (the forwarded SSH port). Each row has **SSH**, which answers with the `gcloud compute ssh` and `ssh` commands for its port, and a menu with Start / Resume, Stop, Suspend and Reset as its status allows, and Delete. **Create instance** opens Google's *Create an instance* page: name, labels, region and zone, machine type, boot disk image, type and size, network and subnetwork, external IPv4 address, network tags, service account and access scopes, startup script, metadata, deletion protection |
 | An instance's page | Details (basic information, machine configuration, networking, metadata, service account, Connect), Storage, Networking and Serial port 1 (console) tabs; Edit (labels, network tags, the machine type while stopped, deletion protection, metadata); Attach existing disk, Detach disk, and the row's actions |
-| Disks (`/compute/disks`) | Every disk across zones with its type, size, zone and user; **Create disk** (blank, from an image or from a snapshot); Create snapshot, Edit size, Edit labels and Delete (unavailable while attached) |
+| Disks (`/compute/disks`) | Every disk across zones with its type, size, zone and user; **Create disk** (blank, from an image, a snapshot or another disk in its zone, with a snapshot schedule); Create snapshot, Clone disk, Create image, Edit snapshot schedule, Edit size, Edit labels and Delete (unavailable while attached) |
 | Snapshots (`/compute/snapshots`) | Each snapshot's status, location, sizes, source disk and creation time; Create snapshot, Create disk, Edit labels, Delete |
-| Images (`/compute/images`) | The public images served, and the image projects refused with their reasons |
+| Images (`/compute/images`) | The project's custom images and the public images served, and the image projects refused with their reasons; **Create image** from a disk, a snapshot or an image; Deprecate and Delete a custom image |
 | Machine types (`/compute/machineTypes`) | The predefined types with their vCPUs and memory (Google's console has no page of its own for them; its Create an instance page lists them) |
-| Metadata (`/compute/metadata`) | The project's common instance metadata, `ssh-keys` included, with Edit |
+| Metadata (`/compute/metadata`) | The project's common instance metadata, `ssh-keys` included, with Edit; the **SSH keys** tab (`/compute/metadata/sshKeys`) lists each key with its username and edits them as a list |
+| Instance schedules (`/compute/instanceSchedules`, VM instances' tab) | Each schedule's start, stop, time zone and VMs; Create schedule; Add and Remove instances; Delete while it holds none. The schedule starts and stops its VMs |
+| Instance templates (`/compute/instanceTemplates`) | Global and regional templates; Create an instance template (Create an instance's fields, no zone); a template's page; Create VM, Create similar, Delete |
+| Instance groups (`/compute/instanceGroups`) | Managed groups (stateless) made from a template, in a single zone or in multiple zones of a region (Target distribution shape Even, Balanced, Any or Any single zone), with autoscaling on CPU utilization (On, Only scale out, Off; minimum and maximum, target, initialization period, scale-in controls) or a fixed size; unmanaged groups of VMs; GKE's node pool groups; Port mapping (named ports); a group's page with its VMs and their template, Start, Stop, Suspend, Resume and Delete instance on checked VMs, Autoscaling (recommended size, status); Update VMs (set the template for new VMs), Edit autoscaling, Edit port mapping, Resize (not while autoscaled), Restart / Replace VMs, Add and Remove instances, Delete |
+| Snapshot schedules (`/compute/snapshotSchedules`, Snapshots' tab) | Hourly, daily or weekly schedules with their retention; a disk takes one at create or with Edit snapshot schedule; the schedule snapshots it and deletes snapshots past the retention |
+| Machine images (`/compute/machineImages`) | Each machine image's source VM and location; Create a machine image of a VM, its disks copied; Create instance from it; Delete |
 
 A change returns as soon as the API has started its operation, as Google's pages do: the list shows `PROVISIONING`, `STOPPING` and the like until the operation is done.
 
@@ -71,7 +76,11 @@ The design (#1963, option A): **a VM is a systemd container** in the instance's 
 | Google | Here |
 |---|---|
 | Public images `debian-12`, `ubuntu-2404-lts` (`-amd64`, `-arm64`), `rocky-linux-9` | A container image of the same distribution, built on this machine at first use from the official image pinned by digest, plus the distribution's systemd, OpenSSH, sudo and curl packages and the guest scripts in `internal/service/compute/guest` (no code of them is linked into CloudBurrow). Tagged `cloudburrow-vm-FAMILY:HASH` |
-| `cos-stable`, Windows, Fedora CoreOS, licensed images, custom images | 501, with the reason |
+| Custom images (`images.insert` from a disk, a snapshot or an image; families, `deprecate`) | A copy of the source's files in a PersistentVolumeClaim, from which disks are seeded as from a public image (#2139); `rawDisk` (a Cloud Storage tarball) is 501 |
+| `cos-stable`, Windows, Fedora CoreOS, licensed images | 501, with the reason |
+| Instance templates, managed and unmanaged instance groups, machine images (#2139) | Served as Google documents them: a managed group makes its VMs from its template, named `BASE_INSTANCE_NAME-xxxx`, and resizes, recreates, starts and stops them; setInstanceTemplate changes the template of new VMs only, and recreateInstances re-makes a VM of another template from the current one, by the same name. A regional group (`regionInstanceGroupManagers`, `regionInstanceGroups`) spreads its VMs, each a zonal instance, over its `distributionPolicy.zones` (three of the region's when none are given): EVEN (the default; PROACTIVE redistribution), BALANCED and ANY spread alike here (every zone has the capacity), ANY_SINGLE_ZONE keeps them in one zone. Named ports are checked as Google documents (a name of the RFC 1035 rule, a port 1-65535, a stale fingerprint 412). Autoscalers and regional autoscalers scale on the VMs' real CPU, read every 15 seconds from each VM's cgroup (`cpu.stat`): recommended size = ceil(serving VMs × average utilization / target), VMs in their initialization period (`coolDownPeriodSec`) left out, clamped to the minimum and maximum, scaling out at once and in only to the highest recommendation of the last 10 minutes and as `scaleInControl` allows; mode OFF still recommends, ONLY_SCALE_OUT only adds. A zonal group's resize is overridden by its autoscaler at its next pass; an autoscaled regional group's resize is refused, as Google refuses it. The same readings are `compute.googleapis.com/instance/cpu/utilization` in Cloud Monitoring (gce_instance), sampled every 60 seconds. Predictive autoscaling, custom metric, load balancing and schedule signals answer 501 |
+| Resource policies (#2139) | Snapshot schedules and instance schedules run every 30 seconds against their cron or hourly/daily/weekly rule: a scheduled snapshot is named `DISK-ZONE-TIMESTAMP-xxxxxxxx` with `autoCreated`, and snapshots past the retention are deleted; an instance schedule starts and stops its VMs in its time zone |
+| Spot VMs (`scheduling.provisioningModel: SPOT`) | Accepted with `instanceTerminationAction`, checked as Google documents; nothing preempts them here |
 | Machine types | The predefined e2, f1/g1, n1, n2, n2d and c3 types; the container's CPU and memory limits are the type's |
 | Boot disk | A PersistentVolumeClaim holding the guest's `/etc`, `/usr`, `/var`, `/home`, `/root`, `/opt` and `/srv`, seeded from the image at first boot: what the guest changes survives stop and start |
 | Attached disk | A PersistentVolumeClaim mounted at `/mnt/disks/DEVICE_NAME`: a directory, **not a block device** (no `mkfs`, no `/dev/disk/by-id/google-*`). Attaching or detaching on a running instance restarts its container |
@@ -89,7 +98,7 @@ The design (#1963, option A): **a VM is a systemd container** in the instance's 
 
 ### VM networking and firewall rules
 
-VMs on the same VPC network reach each other at their internal IPs, across the network's subnets, and at their internal DNS names; VMs on different networks cannot (network peering is not served). The network's firewall rules are enforced on each VM as Google evaluates them (https://docs.cloud.google.com/firewall/docs/firewalls, read 2026-11-19), #1968:
+VMs on the same VPC network reach each other at their internal IPs, across the network's subnets, and at their internal DNS names; VMs on different networks cannot, unless the networks are peered: an `ACTIVE` peering (both sides made, #2140) puts the two networks' VMs on one data plane, each side's firewall rules still applied, and exchanges their subnet routes. The network's firewall rules are enforced on each VM as Google evaluates them (https://docs.cloud.google.com/firewall/docs/firewalls, read 2026-11-19), #1968:
 
 | Google | Here |
 |---|---|
@@ -99,6 +108,21 @@ VMs on the same VPC network reach each other at their internal IPs, across the n
 | `default` network | Its `default-allow-internal` (`10.128.0.0/9`, every TCP and UDP port, ICMP), `-ssh`, `-rdp` and `-icmp` rules, at priority 65534, are enforced like any other |
 | Internal DNS | `INSTANCE.ZONE.c.PROJECT.internal` (and the short name) of every VM on the network, in a managed block of the guest's `/etc/hosts`; as on Google, a VM of another network does not resolve them |
 | Always allowed | The metadata server, and over the pod interface the cluster's own ranges (`10.244.0.0/16`, `10.96.0.0/12`: the guest's metadata and cluster DNS), are exempt from egress rules, as Google always allows `169.254.169.254` |
+
+### Cloud Router and Cloud NAT
+
+Routers (`compute.routers.*`, #2140) are served in the region they are made in, on a network of the project, many per region and network, as on Google (https://docs.cloud.google.com/network-connectivity/docs/router, https://docs.cloud.google.com/nat/docs/overview, read 2026-11-22):
+
+| Google | Here |
+|---|---|
+| `bgp` | `asn` an RFC 6996 private ASN (64512-65534, 4200000000-4294967294) or 16550, else 400; `keepaliveInterval` 20 by default, 20 to 60; `advertisedGroups` (`ALL_SUBNETS`) and `advertisedIpRanges` only with `advertiseMode: CUSTOM`; `identifierRange` link-local, /30 or larger |
+| `interfaces`, `bgpPeers` | An interface links at most one of a VPN tunnel, an Interconnect attachment or a subnetwork. Cloud VPN and Cloud Interconnect are not served, so the first two are refused 501; a subnetwork interface (a router appliance) is checked against the router's network and region, its `privateIpAddress` in the subnet. A peer names an interface, a `peerAsn`, and its addresses in the interface's range; Google's defaults: `advertisedRoutePriority` 100, `enable` `TRUE`, BFD `DISABLED` at 1000 ms and multiplier 5 |
+| `getRouterStatus` | Every BGP peer `DOWN` (no peer router exists locally), with the routes it would be advertised (the network's subnets in the region, or in every region with GLOBAL dynamic routing, or the custom groups and ranges); `bestRoutes` empty; each NAT gateway's addresses, its VMs and `minExtraNatIpsNeeded` |
+| `nats[]` | `sourceSubnetworkIpRangesToNat` `ALL_SUBNETWORKS_ALL_IP_RANGES`, `ALL_SUBNETWORKS_ALL_PRIMARY_IP_RANGES` or `LIST_OF_SUBNETWORKS` (subnets of the router's region and network, `ALL_IP_RANGES`, `PRIMARY_IP_RANGE` or named secondary ranges); a subnet is translated by one gateway only, and a gateway of all subnets is its region and network's only one. `MANUAL_ONLY` takes reserved regional external addresses, which become `IN_USE` with the router as user (and `RESERVED` again when the gateway, or the router, goes); `AUTO_ONLY` is given an address of the local pool. Ports: 64 per VM by default (2 to 57344), 32 to 65536 in powers of 2 with dynamic port allocation, which Endpoint-Independent Mapping excludes; the five timeouts (UDP 30, ICMP 30, TCP established 1200, transitory 30, TIME_WAIT 120 seconds by default); `logConfig` (`ALL`, `ERRORS_ONLY`, `TRANSLATIONS_ONLY`); `rules` with `MANUAL_ONLY`. `type: PRIVATE` (Network Connectivity Center and hybrid spokes) is refused 501 |
+| `getNatMappingInfo`, `getNatIpInfo` | Each translated VM (no external IP on its primary interface, on a subnet the gateway covers) given `minPortsPerVm` ports of a NAT IP from port 1024, as static allocation gives them |
+| Internet egress | **A VM whose primary interface has no external IP reaches the internet only through a Cloud NAT gateway of its subnet**, as on Google: until one translates it, its guest's ruleset drops egress over its pod interface to every address outside RFC 1918 and 100.64.0.0/10 (`no external IP and no Cloud NAT`), whatever the egress rules allow. Private addresses stay reachable, so the VM still reaches this machine's CloudBurrow endpoints. With a gateway (or an external IP) the VM's egress leaves through this machine's own address: no address translation to the NAT IP happens, and NAT logs are not written |
+
+The routers' console pages are Network Connectivity's **Cloud Routers** (`/hybrid/routers/list`: Create router, a router's Router details, BGP sessions, Cloud NAT gateways and Interfaces, Edit, Delete) and Network services' **Cloud NAT** (`/net-services/nat/list`: Create Cloud NAT gateway with Google's sections, Create new router inline, Automatic or Manual addresses, Advanced configurations; a gateway's details, Allocated external IP addresses and Mapping information, Edit, Delete).
 
 How it stays current: the guest's `cloudburrow-vpc.service` polls the Compute port every 2 seconds under its own token (`/cloudburrow/guest/TOKEN/cloudburrow/vpc`), reporting its pod IP and reading back its segment, peers, hosts and ruleset, and applies them when they change. A firewall rule inserted, patched or deleted, a VM's `setTags`, or a VM started or stopped takes effect on the other VMs within about 2 seconds (a stopped VM stops being a peer within 30).
 
@@ -128,6 +152,40 @@ gcloud compute instances delete vm-1 --zone us-central1-a
 ```
 
 `--image-family` sends the zonal image family view (`projects/debian-cloud/zones/-/imageFamilyViews/debian-12`) as the boot disk's source image, which is accepted as the family.
+
+### Shared VPC
+
+A project becomes a Shared VPC host with `projects.enableXpnHost`, and service projects attach to it with `enableXpnResource` (#2140), as https://docs.cloud.google.com/vpc/docs/shared-vpc and provisioning-shared-vpc describe (read 2026-11-22):
+
+| Google | Here |
+|---|---|
+| Organization | Shared VPC is for projects of an organization. A project the Resource Manager registry keeps without a parent (a top-level project) is refused as a host or service project (400); a project under the local organization or one of its folders may be either. A project the registry does not keep (made by another service's call only) is not checked |
+| Host and service projects | A host cannot be attached as a service project, a service project cannot be enabled as a host, and a service project attaches to one host ("A service project can only attach to one host project"); each refusal is 400 |
+| Detach and disable | `disableXpnResource` is refused while the service project's VMs or addresses use the host's network; `disableXpnHost` while any project is attached |
+| `getXpnHost`, `getXpnResources`, `listXpnHosts` | The service project's host (an empty project when none), the host's attached projects (`type` `PROJECT`, paged), and the organization's host projects (the body's `organization`, else the caller's own) |
+| Using the host's subnets | A service project's VM (`networkInterfaces[].subnetwork`, or `network` of an auto mode host network) and internal address (`subnetwork`) may name a subnet of its host project; any other project's subnet is refused: "Cross project referencing is not allowed for this resource". IAM enforcement checks `compute.subnetworks.use` on the host's subnet, as Google does. Such a VM is on the host network's data plane, reached by the host's other VMs and filtered by the host project's firewall rules |
+| Individual subnets (subnet-level permissions) | `subnetworks.setIamPolicy` is not served, so only Share all subnets (project-level `compute.networkUser`) is offered |
+
+The console's **Shared VPC** page (`/networking/xpn`, VPC network's menu) offers Set up Shared VPC (Enable host project, Select subnets, Project names) to a project that is neither; a host project's page has Subnets in host project and Attached projects tabs with Attach projects, Detach and Disable Shared VPC; a service project's lists the host's subnets it can use (as `gcloud compute networks subnets list-usable` does).
+
+### Private Service Connect
+
+Endpoints and published services (#2140), as https://docs.cloud.google.com/vpc/docs/private-service-connect and its configure pages describe (read 2026-11-22):
+
+| Google | Here |
+|---|---|
+| Endpoint for Google APIs | `globalForwardingRules.insert` with `target` `all-apis` or `vpc-sc`, no `loadBalancingScheme`, `network`, and `IPAddress` a global internal address of purpose `PRIVATE_SERVICE_CONNECT` (by link, name or address) in that network, which turns `IN_USE` with the rule as its user and `RESERVED` again when the rule is deleted; the name 1-20 lowercase letters and digits starting with a letter; `pscConnectionStatus` `ACCEPTED`, a `pscConnectionId`. Any other global target (a load balancer's proxy) is 501 |
+| Endpoint for a published service | `forwardingRules.insert` in a region with `target` a service attachment of that region (404 when it does not exist), `network`, and `IPAddress` a regional internal address or none (an address of `subnetwork` is chosen); `pscConnectionStatus` `ACCEPTED` under `ACCEPT_AUTOMATIC` or when `consumerAcceptLists` names the project (or one of its networks), `REJECTED` when `consumerRejectLists` names it, `PENDING` otherwise, re-decided at each patch of the attachment, `CLOSED` once it is deleted. Any other regional target (a target pool or backend service) is 501 |
+| Service attachment | `serviceAttachments` insert, get, list, aggregatedList, patch (under the fingerprint) and delete: `targetService` required, `natSubnets` subnets of purpose `PRIVATE_SERVICE_CONNECT` in its region, `connectionPreference` `ACCEPT_AUTOMATIC` or `ACCEPT_MANUAL`, accept and reject lists, `enableProxyProtocol`, `domainNames`; `connectedEndpoints` lists every endpoint targeting it with its status and consumer network. A subnet or network an endpoint or attachment uses cannot be deleted |
+| Traffic | Records only: internal load balancers are not served, so an attachment's `targetService` is kept as given and no packet travels from an endpoint to it; VMs reach the local Google APIs over the host whatever endpoint exists (docs/gaps.md) |
+
+Memorystore's PSC auto connections (`internal/service/redisadmin`) keep naming their forwarding rules as before, without a Compute resource behind them. The console's **Private Service Connect** page (`/net-services/psc/list`, Network services' menu) has the Connected endpoints tab with Connect endpoint (Target All Google APIs, VPC-SC or Published service, Endpoint name, Network, IP address reserved for it as Create IP address does) and the Published services tab with Publish service (Load balancer, Service name, Subnets, connection preference with accepted and rejected projects, Use Proxy Protocol, domain name), each with its page and Delete; a published service's page lists its connected endpoints and edits its accept and reject lists.
+
+### Serverless VPC Access
+
+Serverless VPC Access (`vpcaccess.googleapis.com` v1, #2140) is served on the Compute Engine port, JSON under `/v1/projects/P/locations/R/`: `connectors` create, get, list and delete, their operations and the locations. Use the REST transport of the official client (`vpcaccess.NewRESTClient` with `option.WithEndpoint("http://" + computeAddr)`); there is no gRPC listener. A connector needs a network and an unused /28 `ipCidrRange` of the private ranges, or an existing /28 `subnet` that nothing else uses; `minInstances` 2 to 9, `maxInstances` 3 to 10, the machine type `e2-micro`, `f1-micro` or `e2-standard-4`. It is `READY` at once. The console's VPC network menu has **Serverless VPC access** with Create connector.
+
+Cloud Run services and jobs then name a connector in `template.vpcAccess.connector` (or a bare connector ID, expanded), or use Direct VPC egress (`networkInterfaces` with a network and subnet of the region), each checked as Google checks it and recorded on the service and its revisions; the Run console's Networking tab shows and edits them. No traffic is carried: Cloud Run's pods are not on the VMs' VPC segment ([gaps.md](gaps.md)).
 
 ### SSH
 

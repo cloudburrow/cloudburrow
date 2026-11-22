@@ -522,6 +522,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if serviceEnabled(cfg, config.ServiceFirestore) {
 			monitoringSvc.firestore = func() string { return forwardedAddr(forwarders, "firestore") }
 		}
+		// Compute Engine VMs' CPU utilization, from the readings its
+		// autoscalers scale on (#2139).
+		if computeSvc != nil {
+			monitoringSvc.computeCPU = computeSvc.API
+		}
 	}
 	monitoringSvc.register(coord)
 	// Kubernetes Engine's container logs and system metrics, shipped to
@@ -567,6 +572,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	// A Cloud Build build's secrets (#1407).
 	runSvc.useBuildSecrets(secretsSvc, kmsSvc)
+	// VPC access is checked against Compute Engine's networks and
+	// Serverless VPC Access's connectors (#2140).
+	if computeSvc != nil {
+		runSvc.useVPC(computeRunVPC{svc: computeSvc})
+	}
 
 	// Admin routes must be mounted before the control server starts: it builds
 	// its mux at Start, so anything added afterwards is never routed.
@@ -582,6 +592,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	if dataTransfer != nil {
 		dataTransfer.registry = func() *resourcemanager.Registry { return projectRegistry }
+	}
+	if computeSvc != nil {
+		// Shared VPC's organization rule (#2140).
+		computeSvc.registry = func() *resourcemanager.Registry { return projectRegistry }
 	}
 	if memorystoreAdminSvc != nil {
 		memorystoreAdminSvc.registry = func() *resourcemanager.Registry { return projectRegistry }

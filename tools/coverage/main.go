@@ -123,6 +123,7 @@ import (
 	_ "cloud.google.com/go/speech/apiv2/speechpb"
 	_ "cloud.google.com/go/trace/apiv1/tracepb"
 	_ "cloud.google.com/go/trace/apiv2/tracepb"
+	_ "cloud.google.com/go/vpcaccess/apiv1/vpcaccesspb"
 	_ "cloud.google.com/go/workflows/apiv1/workflowspb"
 	_ "cloud.google.com/go/workflows/executions/apiv1/executionspb"
 	_ "google.golang.org/genproto/googleapis/cloud/location"
@@ -358,6 +359,10 @@ var areas = []area{
 	// one port, beside OTLP's ingestion (not a googleapis service).
 	{Key: "trace", Title: "Cloud Trace API (v1 and v2)", Own: true,
 		Services: []string{"google.devtools.cloudtrace.v1.TraceService", "google.devtools.cloudtrace.v2.TraceService"}},
+	// Serverless VPC Access (#2140): CloudBurrow's own, JSON on the Compute
+	// Engine port; its Locations and Operations mixins are other areas'
+	// rows.
+	{Key: "vpcaccess", Title: "Serverless VPC Access (v1)", Own: true, Services: []string{"google.cloud.vpcaccess.v1.VpcAccessService"}},
 	{Key: "workflows", Title: "Workflows and Workflow Executions (v1)", Own: true,
 		Services: []string{"google.cloud.workflows.v1.Workflows", "google.cloud.workflows.executions.v1.Executions"}},
 	// The Kubernetes Engine API (#1913): CloudBurrow's own, gRPC and JSON
