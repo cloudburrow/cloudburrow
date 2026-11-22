@@ -102,7 +102,7 @@ func (p vpcAccessProvider) List(ctx context.Context, project string) (console.Li
 }
 
 func connectorDelete(path []string) console.Action {
-	return console.Action{ID: "delete", Label: "Delete", Destructive: true, Confirm: "Delete connector " + path[1] + "?"}
+	return console.Action{ID: "delete", Label: "Delete", Destructive: true, ConfirmStyle: console.DeleteConfirmClick, Confirm: "Delete connector " + path[1] + "?"}
 }
 
 func (vpcAccessProvider) CreateOnPage() bool  { return true }

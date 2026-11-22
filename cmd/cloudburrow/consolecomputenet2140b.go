@@ -81,7 +81,7 @@ func routerRow(r map[string]any) console.Resource {
 }
 
 func routerDelete(path []string) console.Action {
-	return console.Action{ID: "delete", Label: "Delete", Destructive: true, Confirm: "Delete Cloud Router " + path[1] + "? Its BGP sessions and Cloud NAT gateways are deleted with it."}
+	return console.Action{ID: "delete", Label: "Delete", Destructive: true, ConfirmStyle: console.DeleteConfirmClick, Confirm: "Delete Cloud Router " + path[1] + "? Its BGP sessions and Cloud NAT gateways are deleted with it."}
 }
 
 func (p computeRoutersProvider) List(ctx context.Context, project string) (console.Listing, error) {
@@ -392,7 +392,7 @@ func natRow(r, n map[string]any) console.Resource {
 }
 
 func natDelete(path []string) console.Action {
-	return console.Action{ID: "delete", Label: "Delete", Destructive: true,
+	return console.Action{ID: "delete", Label: "Delete", Destructive: true, ConfirmStyle: console.DeleteConfirmClick,
 		Confirm: "Delete Cloud NAT gateway " + path[2] + "? Its Cloud Router " + path[1] + " is kept."}
 }
 

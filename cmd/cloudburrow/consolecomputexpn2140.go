@@ -111,7 +111,7 @@ func (p computeSharedVPCProvider) List(ctx context.Context, project string) (con
 			users := p.sharedUsers(id, project)
 			listing.Items = append(listing.Items, console.Resource{Name: id, Target: []string{id},
 				Fields:  map[string]string{"Project ID": id, "Resources on shared subnets": fmt.Sprint(users)},
-				Actions: []console.Action{{ID: "detach", Label: "Detach", Destructive: true, Confirm: "Detach service project " + id + " from this host project?"}}})
+				Actions: []console.Action{{ID: "detach", Label: "Detach", Destructive: true, ConfirmStyle: console.DeleteConfirmClick, Confirm: "Detach service project " + id + " from this host project?"}}})
 		}
 		listing.Total = len(listing.Items)
 		var groups []console.PropertyGroup
@@ -174,7 +174,7 @@ func (p computeSharedVPCProvider) ListActions(ctx context.Context, project strin
 	case "host":
 		return []console.Action{
 			{ID: "attach", Label: "Attach projects", Submit: "Save", Fields: []console.Field{projectNamesField(), sharingModeField()}},
-			{ID: "disable", Label: "Disable Shared VPC", Destructive: true, Confirm: "Disable Shared VPC for host project " + project + "? Detach every service project first."},
+			{ID: "disable", Label: "Disable Shared VPC", Destructive: true, ConfirmStyle: console.DeleteConfirmClick, Confirm: "Disable Shared VPC for host project " + project + "? Detach every service project first."},
 		}
 	case "service":
 		return nil

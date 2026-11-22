@@ -92,7 +92,7 @@ func pscEndpointRow(e map[string]any) console.Resource {
 }
 
 func pscEndpointDelete(path []string) console.Action {
-	return console.Action{ID: "delete", Label: "Delete", Destructive: true, Confirm: "Delete endpoint " + path[1] + "?"}
+	return console.Action{ID: "delete", Label: "Delete", Destructive: true, ConfirmStyle: console.DeleteConfirmClick, Confirm: "Delete endpoint " + path[1] + "?"}
 }
 
 func (p computePSCEndpointsProvider) List(ctx context.Context, project string) (console.Listing, error) {
@@ -284,7 +284,7 @@ func pscPublishedRow(a map[string]any) console.Resource {
 			"Connection preference": pscPreferenceText(vpcStr(a, "connectionPreference")),
 			"Connected endpoints":   strconv.Itoa(len(vmMaps(a, "connectedEndpoints"))),
 			"Service attachment":    pscRel(vpcStr(a, "selfLink"))},
-		Actions: []console.Action{{ID: "delete", Label: "Delete", Destructive: true, Confirm: "Delete published service " + target[1] + "?"}}}
+		Actions: []console.Action{{ID: "delete", Label: "Delete", Destructive: true, ConfirmStyle: console.DeleteConfirmClick, Confirm: "Delete published service " + target[1] + "?"}}}
 }
 
 func (p computePSCPublishedProvider) List(ctx context.Context, project string) (console.Listing, error) {
@@ -485,7 +485,7 @@ func (p computePSCPublishedProvider) DetailActions(ctx context.Context, project 
 	if _, err := p.attachment(project, path); err != nil {
 		return nil
 	}
-	return []console.Action{{ID: "delete", Label: "Delete", Destructive: true, Confirm: "Delete published service " + path[1] + "?", Leaves: true}}
+	return []console.Action{{ID: "delete", Label: "Delete", Destructive: true, ConfirmStyle: console.DeleteConfirmClick, Confirm: "Delete published service " + path[1] + "?", Leaves: true}}
 }
 
 func (p computePSCPublishedProvider) ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error {

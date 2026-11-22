@@ -138,7 +138,8 @@ func TestServerlessVPCAccessConnectorsThroughTheGoClient(t *testing.T) {
 		}
 	}
 	if _, err := c.CreateConnector(ctx, &vpcaccesspb.CreateConnectorRequest{Parent: parent, ConnectorId: id,
-		Connector: &vpcaccesspb.Connector{Network: "default", IpCidrRange: "10.8.243.0/28"}}); grpcCode(err) != codes.AlreadyExists {
+		Connector: &vpcaccesspb.Connector{Network: "default", IpCidrRange: "10.8.243.0/28"}}); grpcCode(err) != codes.AlreadyExists && computeCode(err) != 409 {
+		// Over REST, gax reads Google's 409 ALREADY_EXISTS as an HTTP 409.
 		t.Errorf("a duplicate connector: %v, want AlreadyExists", err)
 	}
 
