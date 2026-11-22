@@ -279,7 +279,11 @@ func (r *Registry) CreateFolder(parent, display string) (Folder, error) {
 	}
 	now := r.now().UTC().Format(time.RFC3339)
 	f := Folder{Name: "folders/" + id, Parent: parent, DisplayName: display, State: StateActive, CreateTime: now, UpdateTime: now}
-	return f, r.putFolder(f)
+	if err := r.putFolder(f); err != nil {
+		return f, err
+	}
+	r.created = append(r.created, f.Name)
+	return f, nil
 }
 
 // RenameFolder changes a folder's display name.

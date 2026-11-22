@@ -75,8 +75,8 @@ func TestInterceptingSinkRouting(t *testing.T) {
 		t.Fatal(err)
 	}
 	ls, err := cs.ListSinks(ctx, &loggingpb.ListSinksRequest{Parent: "folders/10"})
-	if err != nil || len(ls.GetSinks()) != 2 || ls.GetSinks()[1].GetName() != "_Required" {
-		t.Fatalf("ListSinks = %v, %v; want grab and _Required", ls, err)
+	if err != nil || len(ls.GetSinks()) != 3 || ls.GetSinks()[1].GetName() != "_Default" || ls.GetSinks()[2].GetName() != "_Required" {
+		t.Fatalf("ListSinks = %v, %v; want grab, _Default and _Required", ls, err)
 	}
 	if v, _ := requestIntercept(ctx, ls.GetSinks()[0]); v {
 		t.Error("intercept_children still set after an update clearing it")
@@ -142,7 +142,7 @@ func TestInterceptChildrenOverREST(t *testing.T) {
 		t.Errorf("get answered %v", got)
 	}
 	list := call(http.MethodGet, "/v2/folders/10/sinks", "")
-	if ss, _ := list["sinks"].([]any); len(ss) != 2 || ss[0].(map[string]any)["interceptChildren"] != true {
+	if ss, _ := list["sinks"].([]any); len(ss) != 3 || ss[0].(map[string]any)["interceptChildren"] != true {
 		t.Errorf("list answered %v", list)
 	}
 	if got := call(http.MethodPatch, "/v2/folders/10/sinks/grab?updateMask=intercept_children", `{"interceptChildren":false}`); got["interceptChildren"] != nil {

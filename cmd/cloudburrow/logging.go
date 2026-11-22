@@ -298,6 +298,9 @@ func (s *loggingService) Start(ctx context.Context) error {
 	s.admin = logging.NewAdmin(db)
 	if s.hierarchy != nil {
 		s.admin.UseHierarchy(loggingHierarchy{s.hierarchy})
+		// A new project or folder takes its parents' default resource
+		// settings (#2108).
+		s.hierarchy.OnCreated(s.admin.Born)
 	}
 	s.api.UseAdmin(s.admin)
 	if s.keys != nil {

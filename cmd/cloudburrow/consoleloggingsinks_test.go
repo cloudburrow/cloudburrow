@@ -111,7 +111,7 @@ func TestConsoleFolderAndOrganizationSinks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(l.Items) != 2 || l.Items[1].Name != folder+"/sinks/_Required" || l.Items[0].Name != name || l.Items[0].Fields["Intercept children"] != "Yes" || l.Items[0].Fields["Include children"] != "Yes" {
+	if len(l.Items) != 3 || l.Items[1].Name != folder+"/sinks/_Default" || l.Items[2].Name != folder+"/sinks/_Required" || l.Items[0].Name != name || l.Items[0].Fields["Intercept children"] != "Yes" || l.Items[0].Fields["Include children"] != "Yes" {
 		t.Fatalf("the folder's sinks are %+v", l.Items)
 	}
 	var d console.Detail
@@ -152,7 +152,7 @@ func TestConsoleFolderAndOrganizationSinks(t *testing.T) {
 			tab = &fd.Sections[i]
 		}
 	}
-	if tab == nil || len(tab.Listing.Items) != 2 || tab.Listing.Items[0].Link != sinkLink(name, folder) {
+	if tab == nil || len(tab.Listing.Items) != 3 || tab.Listing.Items[0].Link != sinkLink(name, folder) {
 		t.Fatalf("the folder's Log router tab is %+v", tab)
 	}
 	if !strings.Contains(loggingDetailText(fd), url.QueryEscape(folder)) {

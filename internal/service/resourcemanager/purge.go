@@ -49,7 +49,14 @@ func (r *Registry) unlock() {
 	r.numbersChanged = false
 	rewrites, rewriteHooks := r.rewrites, r.onRewrite
 	r.rewrites = nil
+	created, createdHooks := r.created, r.onCreated
+	r.created = nil
 	r.mu.Unlock()
+	for _, name := range created {
+		for _, fn := range createdHooks {
+			fn(name)
+		}
+	}
 	for _, rw := range rewrites {
 		for _, fn := range rewriteHooks {
 			if err := fn(rw.from, rw.to); err != nil {
@@ -67,6 +74,16 @@ func (r *Registry) unlock() {
 			slog.Warn("project purged, but not all of its state could be deleted", "project", id, "error", err)
 		}
 	}
+}
+
+// OnCreated registers fn to be called, without the registry's lock held,
+// with the resource name (projects/{id} or folders/{n}) of each project and
+// folder created afterwards: what Cloud Logging uses to give a new
+// resource its parents' default resource settings (#2108).
+func (r *Registry) OnCreated(fn func(name string)) {
+	r.mu.Lock()
+	defer r.unlock()
+	r.onCreated = append(r.onCreated, fn)
 }
 
 func runHooks(hooks []func(string) error, id string) error {

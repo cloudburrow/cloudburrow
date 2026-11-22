@@ -51,7 +51,7 @@ func TestSinkVolumeAndUsageAlert(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(l.Items) != 2 || !strings.HasSuffix(l.Items[0].Fields["Volume"], "B") || l.Items[0].Fields["Volume"] == "0 B" {
+	if len(l.Items) != 3 || !strings.HasSuffix(l.Items[0].Fields["Volume"], "B") || l.Items[0].Fields["Volume"] == "0 B" {
 		t.Errorf("the Log Router row = %+v; want a Volume", l.Items)
 	}
 	link := sinks.Actions(l.Items[0])[3]

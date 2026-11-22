@@ -677,13 +677,16 @@ func (s configServer) ListSinks(_ context.Context, req *loggingpb.ListSinksReque
 	resp := &loggingpb.ListSinksResponse{NextPageToken: next}
 	for _, m := range page {
 		sk := m.(*loggingpb.LogSink)
+		if sk.GetName() == sinkDefault {
+			continue // listed with _Required, below
+		}
 		markIntercept(sk, s.a.intercepts(project, sk.GetName()))
 		resp.Sinks = append(resp.Sinks, sk)
 	}
-	// The parent's _Required sink (required.go, #2108), after its own on
-	// the last page: Google documents no order.
+	// The parent's _Default and _Required sinks (defaults.go, required.go,
+	// #2108), after its own on the last page: Google documents no order.
 	if next == "" {
-		resp.Sinks = append(resp.Sinks, requiredSink(project))
+		resp.Sinks = append(resp.Sinks, s.a.defaultSink(project), s.a.requiredSink(project))
 	}
 	return resp, nil
 }
@@ -693,8 +696,11 @@ func (s configServer) GetSink(_ context.Context, req *loggingpb.GetSinkRequest) 
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	if id == sinkRequired {
-		return requiredSink(project), nil
+	switch id {
+	case sinkRequired:
+		return s.a.requiredSink(project), nil
+	case sinkDefault:
+		return s.a.defaultSink(project), nil
 	}
 	m, err := s.a.get(kindSink, project, id)
 	if err != nil {
@@ -795,6 +801,12 @@ func (s configServer) UpdateSink(ctx context.Context, req *loggingpb.UpdateSinkR
 	if req.GetSink() == nil {
 		return nil, apierror.Wrap(apierror.InvalidArgument("sink is required"))
 	}
+	if id == sinkDefault {
+		s.a.mu.Lock()
+		defer s.a.mu.Unlock()
+		sk, err := s.a.updateDefaultSink(project, req.GetSink(), req.GetUpdateMask().GetPaths())
+		return sk, apierror.Wrap(err)
+	}
 	mask := req.GetUpdateMask()
 	if len(mask.GetPaths()) == 0 {
 		mask = &fieldmaskpb.FieldMask{Paths: []string{"destination", "filter", "include_children"}}
@@ -847,8 +859,11 @@ func (s configServer) DeleteSink(_ context.Context, req *loggingpb.DeleteSinkReq
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	if id == sinkRequired {
+	switch id {
+	case sinkRequired:
 		return nil, apierror.Wrap(refuseRequiredSink(project, "deleted"))
+	case sinkDefault:
+		return nil, apierror.Wrap(apierror.FailedPrecondition("sink %s cannot be deleted: you can't delete the _Default or the _Required sinks", kindSink.name(project, id)))
 	}
 	s.a.mu.Lock()
 	defer s.a.mu.Unlock()
@@ -1045,6 +1060,12 @@ func (a *Admin) sinkRoutes(p parent, children bool) []sinkRoute {
 			partitioned: sk.GetBigqueryOptions().GetUsePartitionedTables(),
 			intercept:   children && a.intercepts(p, sk.GetName())}
 		var ex []pred
+		if sk.GetName() == sinkDefault {
+			// The parent's exclusions are its _Default sink's (defaults.go).
+			if own := a.excluder(p); own != nil {
+				ex = append(ex, own)
+			}
+		}
 		for _, e := range sk.GetExclusions() {
 			if c, err := compile(e.GetFilter()); err == nil && !e.GetDisabled() {
 				ex = append(ex, c)

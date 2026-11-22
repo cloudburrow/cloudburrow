@@ -69,7 +69,7 @@ func TestRequiredBucketAndSink(t *testing.T) {
 		t.Fatalf("GetSink _Required = %v, %v", sk, err)
 	}
 	ls, err := cs.ListSinks(ctx, &loggingpb.ListSinksRequest{Parent: "projects/proj-1"})
-	if err != nil || len(ls.GetSinks()) != 1 || ls.GetSinks()[0].GetName() != "_Required" {
+	if err != nil || len(ls.GetSinks()) != 2 || ls.GetSinks()[0].GetName() != "_Default" || ls.GetSinks()[1].GetName() != "_Required" {
 		t.Errorf("ListSinks = %v, %v", ls, err)
 	}
 	if _, err := cs.UpdateSink(ctx, &loggingpb.UpdateSinkRequest{SinkName: "projects/proj-1/sinks/_Required", Sink: &loggingpb.LogSink{Disabled: true},
