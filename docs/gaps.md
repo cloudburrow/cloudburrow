@@ -321,11 +321,10 @@ Cloud Functions v2 and v1 APIs (#1377, #1428); Pub/Sub and project IAM in Terraf
 ## Console
 
 Closed by the sweep: Test permissions on the Permissions tab (#1242), and the request-rate,
-latency and resource charts (#1267); the Artifact Registry repository Permissions tab (#1439).
+latency and resource charts (#1267); the Artifact Registry repository Permissions tab (#1439);
+Cloud SQL's managed connection pooling metrics in Cloud Monitoring and on the instance's Overview (#2163).
 
-| Gap | Why open | Size |
-|---|---|---|
-| Cloud SQL: managed connection pooling's metrics in Cloud Monitoring (MySQL's `threads`, `pending_connection` and `avg_wait_time`, <https://docs.cloud.google.com/sql/docs/mysql/configure-mcp>; PostgreSQL's pooler's), not published (#2141, #2163) | the pools' figures are pod-local; no reader publishes them yet | S |
+None is open.
 
 ## Excluded on purpose
 

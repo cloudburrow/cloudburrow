@@ -35,32 +35,51 @@ type sqlChart struct {
 	scale, max          float64
 	// engine limits it to "POSTGRES" or "MYSQL"; "" is every engine.
 	engine string
+	// pooling limits it to an instance with managed connection pooling
+	// on (#2163); status, when set, is the series' status label; perDB
+	// reads the cloudsql_instance_database resource (each database's
+	// series); mean averages the series' readings, where the others sum.
+	pooling, perDB, mean bool
+	status               string
 }
 
 // sqlOverviewCharts are the Overview's chart choices, in Google's order.
 var sqlOverviewCharts = []sqlChart{
-	{"CPU utilization", monitoring.SQLCPUUtilization, "percent", true, 100, 100, ""},
-	{"Memory usage", monitoring.SQLMemoryUsage, "bytes", true, 1, 0, ""},
-	{"Storage usage", monitoring.SQLDiskBytesUsed, "bytes", true, 1, 0, ""},
-	{"Ingress bytes", monitoring.SQLReceivedBytes, "bytes per minute", false, 1, 0, ""},
-	{"Egress bytes", monitoring.SQLSentBytes, "bytes per minute", false, 1, 0, ""},
-	{"Active connections", monitoring.SQLPGBackends, "connections", true, 1, 0, "POSTGRES"},
-	{"Active connections", monitoring.SQLConnections, "connections", true, 1, 0, "MYSQL"},
-	{"Transactions", monitoring.SQLPGTransactions, "transactions per minute", false, 1, 0, "POSTGRES"},
-	{"Queries", monitoring.SQLMySQLQueries, "queries per minute", false, 1, 0, "MYSQL"},
+	{label: "CPU utilization", metric: monitoring.SQLCPUUtilization, unit: "percent", gauge: true, scale: 100, max: 100},
+	{label: "Memory usage", metric: monitoring.SQLMemoryUsage, unit: "bytes", gauge: true, scale: 1},
+	{label: "Storage usage", metric: monitoring.SQLDiskBytesUsed, unit: "bytes", gauge: true, scale: 1},
+	{label: "Ingress bytes", metric: monitoring.SQLReceivedBytes, unit: "bytes per minute", scale: 1},
+	{label: "Egress bytes", metric: monitoring.SQLSentBytes, unit: "bytes per minute", scale: 1},
+	{label: "Active connections", metric: monitoring.SQLPGBackends, unit: "connections", gauge: true, scale: 1, engine: "POSTGRES"},
+	{label: "Active connections", metric: monitoring.SQLConnections, unit: "connections", gauge: true, scale: 1, engine: "MYSQL"},
+	{label: "Transactions", metric: monitoring.SQLPGTransactions, unit: "transactions per minute", scale: 1, engine: "POSTGRES"},
+	{label: "Queries", metric: monitoring.SQLMySQLQueries, unit: "queries per minute", scale: 1, engine: "MYSQL"},
+	// Managed connection pooling's metrics (#2163), with pooling on.
+	{label: "Connection pool threads (active)", metric: monitoring.SQLMySQLPoolThreads, unit: "threads", gauge: true, scale: 1, engine: "MYSQL", pooling: true, status: "active"},
+	{label: "Connection pool threads (idle)", metric: monitoring.SQLMySQLPoolThreads, unit: "threads", gauge: true, scale: 1, engine: "MYSQL", pooling: true, status: "idle"},
+	{label: "Connection pool pending connections", metric: monitoring.SQLMySQLPoolPending, unit: "connections", gauge: true, scale: 1, engine: "MYSQL", pooling: true},
+	{label: "Connection pool average wait time", metric: monitoring.SQLMySQLPoolAvgWait, unit: "milliseconds", gauge: true, scale: 1, engine: "MYSQL", pooling: true},
+	{label: "Client connections (active)", metric: monitoring.SQLPoolClientConns, unit: "connections", gauge: true, scale: 1, engine: "POSTGRES", pooling: true, perDB: true, status: "active"},
+	{label: "Client connections (waiting)", metric: monitoring.SQLPoolClientConns, unit: "connections", gauge: true, scale: 1, engine: "POSTGRES", pooling: true, perDB: true, status: "waiting"},
+	{label: "Server connections (active)", metric: monitoring.SQLPoolServerConns, unit: "connections", gauge: true, scale: 1, engine: "POSTGRES", pooling: true, perDB: true, status: "active"},
+	{label: "Server connections (idle)", metric: monitoring.SQLPoolServerConns, unit: "connections", gauge: true, scale: 1, engine: "POSTGRES", pooling: true, perDB: true, status: "idle"},
+	{label: "Number of connection pools", metric: monitoring.SQLPoolNumPools, unit: "pools", gauge: true, scale: 1, engine: "POSTGRES", pooling: true, perDB: true},
+	{label: "Average wait time", metric: monitoring.SQLPoolClientAvgWait, unit: "microseconds", gauge: true, scale: 1, engine: "POSTGRES", pooling: true, perDB: true, mean: true},
+	{label: "Client connection attempts count", metric: monitoring.SQLPoolClientAttempts, unit: "attempts since the count began", gauge: true, scale: 1, engine: "POSTGRES", pooling: true, perDB: true},
+	{label: "Error count", metric: monitoring.SQLPoolClientErrors, unit: "errors since the count began", gauge: true, scale: 1, engine: "POSTGRES", pooling: true, perDB: true},
 }
 
 // sqlSystemCharts are System insights' charts.
 var sqlSystemCharts = []sqlChart{
-	{"CPU utilization", monitoring.SQLCPUUtilization, "percent", true, 100, 100, ""},
-	{"Memory utilization", monitoring.SQLMemoryUtil, "percent", true, 100, 100, ""},
-	{"Disk utilization", monitoring.SQLDiskUtil, "percent", true, 100, 100, ""},
-	{"Connections", monitoring.SQLPGBackends, "connections", true, 1, 0, "POSTGRES"},
-	{"Connections", monitoring.SQLConnections, "connections", true, 1, 0, "MYSQL"},
-	{"Transactions", monitoring.SQLPGTransactions, "transactions per minute", false, 1, 0, "POSTGRES"},
-	{"Queries", monitoring.SQLMySQLQueries, "queries per minute", false, 1, 0, "MYSQL"},
-	{"Ingress bytes", monitoring.SQLReceivedBytes, "bytes per minute", false, 1, 0, ""},
-	{"Egress bytes", monitoring.SQLSentBytes, "bytes per minute", false, 1, 0, ""},
+	{label: "CPU utilization", metric: monitoring.SQLCPUUtilization, unit: "percent", gauge: true, scale: 100, max: 100},
+	{label: "Memory utilization", metric: monitoring.SQLMemoryUtil, unit: "percent", gauge: true, scale: 100, max: 100},
+	{label: "Disk utilization", metric: monitoring.SQLDiskUtil, unit: "percent", gauge: true, scale: 100, max: 100},
+	{label: "Connections", metric: monitoring.SQLPGBackends, unit: "connections", gauge: true, scale: 1, engine: "POSTGRES"},
+	{label: "Connections", metric: monitoring.SQLConnections, unit: "connections", gauge: true, scale: 1, engine: "MYSQL"},
+	{label: "Transactions", metric: monitoring.SQLPGTransactions, unit: "transactions per minute", scale: 1, engine: "POSTGRES"},
+	{label: "Queries", metric: monitoring.SQLMySQLQueries, unit: "queries per minute", scale: 1, engine: "MYSQL"},
+	{label: "Ingress bytes", metric: monitoring.SQLReceivedBytes, unit: "bytes per minute", scale: 1},
+	{label: "Egress bytes", metric: monitoring.SQLSentBytes, unit: "bytes per minute", scale: 1},
 }
 
 // sqlChartWindow is the charts' span, in one-minute points.
@@ -72,12 +91,24 @@ func sqlEngineOfInstance(in *sqladminapi.DatabaseInstance) string {
 
 // sqlSeries reads one metric of the instance over [start, now].
 func sqlSeries(ctx context.Context, a monitoringAdmin, project, instance, metric string, start time.Time) ([]*monitoringpb.TimeSeries, error) {
+	return sqlChartRead(ctx, a, project, instance, sqlChart{metric: metric}, start)
+}
+
+// sqlChartRead reads chart c's series of the instance over [start, now].
+func sqlChartRead(ctx context.Context, a monitoringAdmin, project, instance string, c sqlChart, start time.Time) ([]*monitoringpb.TimeSeries, error) {
 	srv, err := a.server()
 	if err != nil {
 		return nil, err
 	}
 	filter := fmt.Sprintf(`metric.type = %q AND resource.type = "cloudsql_database" AND resource.labels.database_id = %q`,
-		metric, project+":"+instance)
+		c.metric, project+":"+instance)
+	if c.perDB {
+		filter = fmt.Sprintf(`metric.type = %q AND resource.type = "cloudsql_instance_database" AND resource.labels.resource_id = %q`,
+			c.metric, project+":"+instance)
+	}
+	if c.status != "" {
+		filter += fmt.Sprintf(` AND metric.labels.status = %q`, c.status)
+	}
 	resp, err := srv.ListTimeSeries(ctx, &monitoringpb.ListTimeSeriesRequest{Name: "projects/" + project, Filter: filter,
 		Interval: &monitoringpb.TimeInterval{StartTime: timestamppb.New(start), EndTime: timestamppb.New(time.Now().UTC())},
 		View:     monitoringpb.ListTimeSeriesRequest_FULL, PageSize: 1000})
@@ -104,6 +135,7 @@ func sqlChartSeries(c sqlChart, series []*monitoringpb.TimeSeries, end time.Time
 	start := end.Add(-sqlChartWindow * time.Minute)
 	sums := make([]float64, sqlChartWindow)
 	seen := make([]bool, sqlChartWindow)
+	count := make([]int, sqlChartWindow)
 	for _, ts := range series {
 		last := map[int]time.Time{}
 		val := map[int]float64{}
@@ -124,6 +156,14 @@ func sqlChartSeries(c sqlChart, series []*monitoringpb.TimeSeries, end time.Time
 		}
 		for i, v := range val {
 			sums[i] += v
+			count[i]++
+		}
+	}
+	if c.mean {
+		for i := range sums {
+			if count[i] > 0 {
+				sums[i] /= float64(count[i])
+			}
 		}
 	}
 	out := console.ChartSeries{Label: c.label, Unit: c.unit, Max: c.max}
@@ -144,14 +184,15 @@ func sqlCharts(ctx context.Context, a monitoringAdmin, project string, in *sqlad
 		return nil, "Cloud Monitoring is not served by this instance, so the instance's metrics are not recorded. Start the instance with monitoring to chart them."
 	}
 	engine := sqlEngineOfInstance(in)
+	pooling := in.Settings != nil && in.Settings.ConnectionPoolConfig != nil && in.Settings.ConnectionPoolConfig.ConnectionPoolingEnabled
 	now := time.Now().UTC()
 	end := now.Truncate(time.Minute).Add(time.Minute)
 	var out []console.ChartSeries
 	for _, c := range charts {
-		if c.engine != "" && c.engine != engine {
+		if c.engine != "" && c.engine != engine || c.pooling && !pooling {
 			continue
 		}
-		ts, err := sqlSeries(ctx, a, project, in.Name, c.metric, end.Add(-sqlChartWindow*time.Minute))
+		ts, err := sqlChartRead(ctx, a, project, in.Name, c, end.Add(-sqlChartWindow*time.Minute))
 		if err != nil {
 			out = append(out, console.ChartSeries{Label: c.label, Unit: c.unit, Unavailable: err.Error()})
 			continue

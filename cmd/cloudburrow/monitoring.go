@@ -162,7 +162,7 @@ func (s *monitoringService) Start(ctx context.Context) error {
 		// Cloud SQL's servers, sampled every 60 seconds on their own, as
 		// a sample reads the cluster and each server (#2141).
 		sm := monitoring.NewSQLBuiltin(monitoringSQL{srv: s.sql, kubeconfig: s.cfg.KubeconfigPath(),
-			namespace: s.cfg.Cluster.Namespace, project: s.cfg.DefaultProject()}, time.Now)
+			namespace: s.cfg.Cluster.Namespace, project: s.cfg.DefaultProject(), logs: newSQLPoolerLogs()}, time.Now)
 		api.AddBuiltin(sm)
 		s.sqlStop = make(chan struct{})
 		go func(stop chan struct{}) {

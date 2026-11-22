@@ -18,6 +18,8 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -158,9 +160,50 @@ func podAddr(upstream string) string {
 func (f *Front) StatusHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		s := f.Pool.Stats()
-		fmt.Fprintf(w, "max_pool_size %d\nthreads_active %d\nthreads_idle %d\npending_connection %d\navg_wait_time_us %d\nmax_active %d\n",
-			s.Size, s.Active, s.Idle, s.Pending, s.AvgWait.Microseconds(), s.MaxActive)
+		fmt.Fprintf(w, "max_pool_size %d\nthreads_active %d\nthreads_idle %d\npending_connection %d\navg_wait_time_us %d\nmax_active %d\nwait_count %d\nwait_total_us %d\n",
+			s.Size, s.Active, s.Idle, s.Pending, s.AvgWait.Microseconds(), s.MaxActive, s.Waits, s.Waited.Microseconds())
 	})
+}
+
+// ParseStatus reads StatusHandler's page.
+func ParseStatus(page []byte) (Stats, error) {
+	var s Stats
+	seen := 0
+	for _, line := range strings.Split(string(page), "\n") {
+		name, v, ok := strings.Cut(strings.TrimSpace(line), " ")
+		if !ok {
+			continue
+		}
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			return Stats{}, fmt.Errorf("the pool's figures: %s: %w", name, err)
+		}
+		seen++
+		switch name {
+		case "max_pool_size":
+			s.Size = int(n)
+		case "threads_active":
+			s.Active = int(n)
+		case "threads_idle":
+			s.Idle = int(n)
+		case "pending_connection":
+			s.Pending = int(n)
+		case "avg_wait_time_us":
+			s.AvgWait = time.Duration(n) * time.Microsecond
+		case "max_active":
+			s.MaxActive = int(n)
+		case "wait_count":
+			s.Waits = n
+		case "wait_total_us":
+			s.Waited = time.Duration(n) * time.Microsecond
+		default:
+			seen--
+		}
+	}
+	if seen == 0 {
+		return Stats{}, errors.New("the pool's figures page is empty")
+	}
+	return s, nil
 }
 
 // SelfSigned is a certificate made now, as mysqld makes its own when it

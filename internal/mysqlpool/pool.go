@@ -132,17 +132,23 @@ func (p *Pool) releaser() func() {
 
 // Stats are the pool's figures, which Google's metrics name: the threads
 // active and idle, the connections waiting for one (pending_connection),
-// and the average time a statement waited (avg_wait_time).
+// and the average time a statement waited (avg_wait_time); Waits and
+// Waited are the statements given a thread since the pool started and the
+// time they waited in all, from which Cloud Monitoring's avg_wait_time is
+// each sample's average (#2163).
 type Stats struct {
 	Size, Active, Idle, Pending, MaxActive int
 	AvgWait                                time.Duration
+	Waits                                  int64
+	Waited                                 time.Duration
 }
 
 // Stats answers the pool's figures now.
 func (p *Pool) Stats() Stats {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	s := Stats{Size: p.size, Active: p.active, Idle: p.size - p.active, Pending: p.high.Len() + p.low.Len(), MaxActive: p.maxActive}
+	s := Stats{Size: p.size, Active: p.active, Idle: p.size - p.active, Pending: p.high.Len() + p.low.Len(), MaxActive: p.maxActive,
+		Waits: p.waits, Waited: p.waited}
 	if s.Idle < 0 {
 		s.Idle = 0
 	}
