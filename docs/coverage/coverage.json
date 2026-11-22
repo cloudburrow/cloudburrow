@@ -6924,7 +6924,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/documentai1953_test.go:69 TestDocumentAIBatchShardsAndFieldMask",
-          "test/compat/documentai_test.go:344 TestDocumentAIBatchProcess"
+          "test/compat/documentai_test.go:348 TestDocumentAIBatchProcess"
         ]
       },
       {
@@ -6948,7 +6948,7 @@
         "method": "google.cloud.documentai.v1.DocumentProcessorService/DeleteProcessorVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/documentai_test.go:276 TestDocumentAIProcessorVersions",
+          "test/compat/documentai_test.go:280 TestDocumentAIProcessorVersions",
           "test/compat/documentaicustom2106_test.go:97 TestDocumentAICustomProcessorsThroughTheOfficialClients"
         ]
       },
@@ -6956,7 +6956,7 @@
         "method": "google.cloud.documentai.v1.DocumentProcessorService/DeployProcessorVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/documentai_test.go:276 TestDocumentAIProcessorVersions",
+          "test/compat/documentai_test.go:280 TestDocumentAIProcessorVersions",
           "test/compat/documentaicustom2106_test.go:97 TestDocumentAICustomProcessorsThroughTheOfficialClients",
           "test/compat/documentaisplitter2124_test.go:67 TestDocumentAICustomSplitterThroughTheOfficialClient"
         ]
@@ -7017,8 +7017,9 @@
         "method": "google.cloud.documentai.v1.DocumentProcessorService/GetProcessorVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/documentai_test.go:276 TestDocumentAIProcessorVersions",
-          "test/compat/documentaicmek1950_test.go:67 TestDocumentAICMEK"
+          "test/compat/documentai_test.go:280 TestDocumentAIProcessorVersions",
+          "test/compat/documentaicmek1950_test.go:67 TestDocumentAICMEK",
+          "test/compat/documentaiform1799_test.go:86 TestDocumentAIFormParserAndExtractors"
         ]
       },
       {
@@ -7040,7 +7041,7 @@
         "method": "google.cloud.documentai.v1.DocumentProcessorService/ListProcessorVersions",
         "status": "Verified",
         "tests": [
-          "test/compat/documentai_test.go:276 TestDocumentAIProcessorVersions"
+          "test/compat/documentai_test.go:280 TestDocumentAIProcessorVersions"
         ]
       },
       {
@@ -7058,6 +7059,9 @@
           "test/compat/documentai_test.go:72 TestDocumentAIProcessors",
           "test/compat/documentaicmek1950_test.go:67 TestDocumentAICMEK",
           "test/compat/documentaicustom2106_test.go:97 TestDocumentAICustomProcessorsThroughTheOfficialClients",
+          "test/compat/documentaiform1799_test.go:240 TestBigQueryMLProcessDocumentLongPDF",
+          "test/compat/documentaiform1799_test.go:86 TestDocumentAIFormParserAndExtractors",
+          "test/compat/documentailayout1799_test.go:226 TestDocumentAILayoutParserOffice",
           "test/compat/documentaisplitter2124_test.go:67 TestDocumentAICustomSplitterThroughTheOfficialClient"
         ]
       },
@@ -7071,7 +7075,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/documentai1953_test.go:200 TestTerraformDocumentAIProcessorDefaultVersion",
-          "test/compat/documentai_test.go:276 TestDocumentAIProcessorVersions",
+          "test/compat/documentai_test.go:280 TestDocumentAIProcessorVersions",
           "test/compat/documentaicustom2106_test.go:97 TestDocumentAICustomProcessorsThroughTheOfficialClients"
         ]
       },
@@ -7079,7 +7083,7 @@
         "method": "google.cloud.documentai.v1.DocumentProcessorService/TrainProcessorVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/documentai_test.go:276 TestDocumentAIProcessorVersions",
+          "test/compat/documentai_test.go:280 TestDocumentAIProcessorVersions",
           "test/compat/documentaicustom2106_test.go:97 TestDocumentAICustomProcessorsThroughTheOfficialClients",
           "test/compat/documentaisplitter2124_test.go:67 TestDocumentAICustomSplitterThroughTheOfficialClient"
         ]
@@ -7088,7 +7092,7 @@
         "method": "google.cloud.documentai.v1.DocumentProcessorService/UndeployProcessorVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/documentai_test.go:276 TestDocumentAIProcessorVersions",
+          "test/compat/documentai_test.go:280 TestDocumentAIProcessorVersions",
           "test/compat/documentaicustom2106_test.go:97 TestDocumentAICustomProcessorsThroughTheOfficialClients"
         ]
       },
@@ -7200,7 +7204,7 @@
         "tests": [
           "test/compat/speech_test.go:321 TestSpeechBatchRecognize",
           "test/compat/speech_test.go:80 TestSpeechRecognizers",
-          "test/compat/speechfeatures_test.go:57 TestSpeechRecognitionFeatures1799",
+          "test/compat/speechfeatures_test.go:61 TestSpeechRecognitionFeatures1799",
           "test/compat/speechstream_test.go:58 TestSpeechAdaptationBoost"
         ]
       },
@@ -7410,7 +7414,7 @@
         "method": "google.cloud.speech.v1.Speech/Recognize",
         "status": "Verified",
         "tests": [
-          "test/compat/speechfeatures_test.go:57 TestSpeechRecognitionFeatures1799",
+          "test/compat/speechfeatures_test.go:61 TestSpeechRecognitionFeatures1799",
           "test/compat/speechstream_test.go:229 TestSpeechV1"
         ]
       },
@@ -12805,12 +12809,12 @@
           "test/compat/bigquerymlseries_test.go:140 TestBigQueryMLSeqSplit",
           "test/compat/bigquerymlseries_test.go:21 TestBigQueryMLXregDetectAnomalies",
           "test/compat/bigquerymlseries_test.go:72 TestBigQueryMLSeveralSeriesIDs",
-          "test/compat/bigquerymlservice_test.go:204 TestBigQueryMLAnnotateImageLabels",
-          "test/compat/bigquerymlservice_test.go:255 TestBigQueryMLAnnotateImageDetections",
-          "test/compat/bigquerymlservice_test.go:323 TestBigQueryMLTranscribe",
+          "test/compat/bigquerymlservice_test.go:210 TestBigQueryMLAnnotateImageLabels",
+          "test/compat/bigquerymlservice_test.go:261 TestBigQueryMLAnnotateImageDetections",
+          "test/compat/bigquerymlservice_test.go:329 TestBigQueryMLTranscribe",
           "test/compat/bigquerymlservice_test.go:41 TestBigQueryMLAnnotateImage",
-          "test/compat/bigquerymlservice_test.go:600 TestBigQueryMLTranslate",
-          "test/compat/bigquerymlservice_test.go:782 TestBigQueryMLUnderstandText",
+          "test/compat/bigquerymlservice_test.go:606 TestBigQueryMLTranslate",
+          "test/compat/bigquerymlservice_test.go:789 TestBigQueryMLUnderstandText",
           "test/compat/bigquerymltensorflow_test.go:41 TestBigQueryMLImportedTensorFlowModel",
           "test/compat/bigquerymltensorflowgen_test.go:67 TestBigQueryMLTensorFlowImportGenerated",
           "test/compat/bigquerymltflite_test.go:35 TestBigQueryMLImportedTFLiteModel",
@@ -12913,12 +12917,13 @@
           "test/compat/bigquerywrites_test.go:145 TestBigQueryBytesParameters",
           "test/compat/consolebigqueryorc_test.go:17 TestConsoleBigQueryLoadORCThroughTheForm",
           "test/compat/consolebigquerywrites_test.go:398 TestConsoleBigQueryReadWriteEditorRunsDML",
-          "test/compat/documentai_test.go:201 TestBigQueryMLProcessDocument",
+          "test/compat/documentai_test.go:205 TestBigQueryMLProcessDocument",
           "test/compat/iamenforcementround9_1879_test.go:367 TestIAMEnforcementBigQueryMLRemote",
           "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",
           "test/compat/logginganalyticsviews_test.go:191 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
           "test/compat/logginganalyticsviews_test.go:269 TestLoggingLinkedDatasetAcrossRestarts",
-          "test/compat/orgpolicycustom1891_test.go:436 TestOrgPolicyEnforcementBigQueryDDL"
+          "test/compat/orgpolicycustom1891_test.go:436 TestOrgPolicyEnforcementBigQueryDDL",
+          "test/compat/transcribe1799_test.go:32 TestBigQueryMLTranscribeLongAndAMR"
         ]
       },
       {
@@ -12963,7 +12968,7 @@
           "test/compat/bigquerymlseries_test.go:140 TestBigQueryMLSeqSplit",
           "test/compat/bigquerymlseries_test.go:72 TestBigQueryMLSeveralSeriesIDs",
           "test/compat/bigquerymlservice_test.go:41 TestBigQueryMLAnnotateImage",
-          "test/compat/bigquerymlservice_test.go:782 TestBigQueryMLUnderstandText",
+          "test/compat/bigquerymlservice_test.go:789 TestBigQueryMLUnderstandText",
           "test/compat/bigquerymltensorflow_test.go:41 TestBigQueryMLImportedTensorFlowModel",
           "test/compat/bigquerymltensorflowgen_test.go:67 TestBigQueryMLTensorFlowImportGenerated",
           "test/compat/bigquerymltflite_test.go:35 TestBigQueryMLImportedTFLiteModel",

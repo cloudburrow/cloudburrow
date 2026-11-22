@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	_ "golang.org/x/image/bmp"  // Document AI reads BMP
@@ -30,6 +31,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/embedding"
 	"github.com/cloudburrow/cloudburrow/internal/lro"
 	"github.com/cloudburrow/cloudburrow/internal/ocr"
+	"github.com/cloudburrow/cloudburrow/internal/officedoc"
 )
 
 // Document AI v1's DocumentProcessorService (#1799), on the local AI
@@ -44,10 +46,13 @@ import (
 //   - Processor types: OCR_PROCESSOR (Enterprise Document OCR) and
 //     LAYOUT_PARSER_PROCESSOR, in the us and eu locations, are served:
 //     FetchProcessorTypes, ListProcessorTypes and GetProcessorType name them.
-//     Every other Google type (the Form Parser, the specialized extractors,
-//     Custom Extractor, splitters, classifiers) has no local model: its
-//     CreateProcessor is UNIMPLEMENTED, naming it; an unknown type is
-//     INVALID_ARGUMENT.
+//     The custom processors are documentaicustom.go's. The Form Parser and
+//     the specialized extractors (documentaiprebuilt.go) are served where
+//     the instance runs a local generation model, and listed only there;
+//     without one their CreateProcessor and ProcessDocument are
+//     UNIMPLEMENTED. Every other Google type (the summarizer, ID proofing,
+//     the splitters) has no local model: its CreateProcessor is
+//     UNIMPLEMENTED, naming it; an unknown type is INVALID_ARGUMENT.
 //   - Processors: CreateProcessor (a 16-hex-digit ID, ENABLED, with its
 //     type's pretrained default version), GetProcessor, ListProcessors,
 //     DeleteProcessor, EnableProcessor and DisableProcessor (operations,
@@ -58,14 +63,23 @@ import (
 //     types (https://docs.cloud.google.com/document-ai/docs/file-types):
 //     PDF (each page rendered by PDFium at 300 DPI), PNG, JPEG, GIF, TIFF
 //     (its first page), BMP and WebP. Each page is read with Tesseract
-//     (internal/ocr), the LSTM engine Google developed. HTML and Office
-//     documents are UNIMPLEMENTED. The documented online limits are
+//     (internal/ocr), the LSTM engine Google developed. The Layout Parser
+//     also reads HTML, DOCX, PPTX, XLSX and XLSM (#1799, its documented
+//     inputs, layout-parse-chunk), parsed by internal/officedoc in pure Go;
+//     other processors refuse them (INVALID_ARGUMENT). The documented online limits are
 //     enforced (https://docs.cloud.google.com/document-ai/limits, read
-//     2026-11-19): 40 MB a file and 15 pages a request (30 for the OCR
-//     processor in imageless_mode). A disabled processor is
+//     2026-11-21): 40 MB a file, and each processor type's pages a request
+//     online, in imageless_mode and in batch (docAILimits: 15, 30 and 500
+//     for the OCR processor; 10 for the Expense Parser; 2 for the US Driver
+//     License Parser). BigQuery's ML.PROCESS_DOCUMENT reads up to 130 pages
+//     (bigqueryml-syntax-process-document, "can't process documents with
+//     more than 130 pages"), at most the processor's batch limit. Pages are
+//     rendered one at a time and read by docAIReaders Tesseract instances
+//     in parallel, so a long document is never held in memory whole. A
+//     disabled processor is
 //     FAILED_PRECONDITION. process_options' page_range selects pages;
 //     ocr_config.enable_symbol adds symbols; layout_config.chunking_config
-//     sets the chunk size; every other option is UNIMPLEMENTED rather
+//     sets the chunk size and include_ancestor_headings; every other option is UNIMPLEMENTED rather
 //     than ignored, as is schema_override. field_mask trims the Document
 //     (documentaioutput.go, #1953).
 //   - OCR_PROCESSOR answers Document.text and, a page each, pageNumber,
@@ -73,16 +87,16 @@ import (
 //     (each with textAnchor, confidence and boundingPoly, vertices and
 //     normalizedVertices), from Tesseract's layout, and the page's image
 //     (PNG; none in imageless_mode, #1930). LAYOUT_PARSER_PROCESSOR
-//     answers documentLayout (a paragraph textBlock a Tesseract paragraph,
-//     with blockId and pageSpan) and chunkedDocument (chunks of whole
-//     paragraphs of at most chunk_size words, 500 by default, with
-//     sourceBlockIds and pageSpan).
+//     answers documentLayout and chunkedDocument (documentailayout.go:
+//     headings with their blocks nested, lists, tables, page headers and
+//     footers; chunks of at most chunk_size words, 500 by default).
 //
 // UNVERIFIED (re-read 2026-11-19: the references define the fields, not
 // these values): text anchors count Unicode code points (as the client
-// samples slice Document.text); the layout parser's block types (Google's
-// model also finds headings, lists and tables; here every block is a
-// paragraph) and its default chunk size; the default processor version IDs;
+// samples slice Document.text); the layout parser's block classification
+// (Google's model; here Tesseract's layout and heuristics for PDFs and
+// images, the documents' own structure for HTML and Office) and its
+// default chunk size; the default processor version IDs;
 // processor type categories; that processEndpoint is left empty (Google's
 // names its regional host, which CloudBurrow never dials); the texts of the
 // errors.
@@ -97,7 +111,8 @@ var docAITypes = map[string]docAIType{
 	"OCR_PROCESSOR":           {category: "OCR", version: "pretrained-ocr-v2.0-2023-06-02"},
 	"LAYOUT_PARSER_PROCESSOR": {category: "GENERAL", version: "pretrained-layout-parser-v1.0-2024-06-03"},
 	// The custom processors (#2106, documentaicustom.go) have no version
-	// until one is trained.
+	// until one is trained. The Form Parser and specialized extractors are
+	// docAIPrebuilt's (documentaiprebuilt.go).
 	"CUSTOM_EXTRACTION_PROCESSOR":     {category: "CUSTOM"},
 	"CUSTOM_CLASSIFICATION_PROCESSOR": {category: "CUSTOM"},
 	"CUSTOM_SPLITTING_PROCESSOR":      {category: "CUSTOM"},
@@ -106,10 +121,9 @@ var docAITypes = map[string]docAIType{
 // docAIUnserved are Google's other processor types, which have no local
 // model.
 var docAIUnserved = map[string]bool{
-	"FORM_PARSER_PROCESSOR": true, "INVOICE_PROCESSOR": true, "EXPENSE_PROCESSOR": true, "SUMMARIZER_PROCESSOR": true,
-	"ID_PROOFING_PROCESSOR": true, "US_DRIVER_LICENSE_PROCESSOR": true, "US_PASSPORT_PROCESSOR": true,
-	"UTILITY_PROCESSOR": true, "BANK_STATEMENT_PROCESSOR": true, "PAYSTUB_PROCESSOR": true, "W2_PROCESSOR": true,
-	"FORM_W9_PROCESSOR": true, "LENDING_DOCUMENT_SPLIT_PROCESSOR": true, "PROCUREMENT_DOCUMENT_SPLIT_PROCESSOR": true,
+	"SUMMARIZER_PROCESSOR": true, "ID_PROOFING_PROCESSOR": true, "US_PASSPORT_PROCESSOR": true,
+	"UTILITY_PROCESSOR": true, "FORM_W9_PROCESSOR": true, "LENDING_DOCUMENT_SPLIT_PROCESSOR": true,
+	"PROCUREMENT_DOCUMENT_SPLIT_PROCESSOR": true,
 }
 
 // docAILocations are the served locations.
@@ -118,10 +132,62 @@ var docAILocations = map[string]bool{"us": true, "eu": true}
 // Document AI's online limits.
 const (
 	docAIMaxBytes          = 40 << 20
-	docAIMaxPages          = 15
-	docAIMaxImagelessPages = 30
 	docAIDefaultChunkWords = 500
+	// bigQueryMaxPages is ML.PROCESS_DOCUMENT's page limit.
+	bigQueryMaxPages = 130
+	// docAIReaders is how many pages are read with OCR at once.
+	docAIReaders = 4
 )
+
+// docAIPageLimits are a processor type's pages a request: online, in
+// imageless_mode online, and in batch, as
+// https://docs.cloud.google.com/document-ai/limits lists them (read
+// 2026-11-21).
+type docAIPageLimits struct{ online, imageless, batch int }
+
+var docAILimits = map[string]docAIPageLimits{
+	"OCR_PROCESSOR":                   {15, 30, 500},
+	"LAYOUT_PARSER_PROCESSOR":         {15, 30, 500},
+	"FORM_PARSER_PROCESSOR":           {15, 30, 100},
+	"CUSTOM_EXTRACTION_PROCESSOR":     {15, 30, 200},
+	"CUSTOM_CLASSIFICATION_PROCESSOR": {15, 30, 200},
+	"CUSTOM_SPLITTING_PROCESSOR":      {15, 30, 1000},
+	"INVOICE_PROCESSOR":               {15, 30, 200},
+	"EXPENSE_PROCESSOR":               {10, 10, 10},
+	"BANK_STATEMENT_PROCESSOR":        {15, 30, 30},
+	"FORM_W2_PROCESSOR":               {15, 15, 15},
+	"PAYSTUB_PROCESSOR":               {15, 30, 50},
+	"US_DRIVER_LICENSE_PROCESSOR":     {2, 2, 2},
+}
+
+func limitsOf(t string) docAIPageLimits {
+	if l, ok := docAILimits[t]; ok {
+		return l
+	}
+	return docAIPageLimits{15, 30, 500}
+}
+
+// docAIPageLimit is the pages a request may have, and the larger limit
+// imageless_mode would give (0 when it gives none).
+type docAIPageLimit struct {
+	pages, imagelessPages int
+	imageless             bool
+}
+
+// processDocumentCaller marks a :process request from BigQuery ML's
+// ML.PROCESS_DOCUMENT, which reads up to bigQueryMaxPages pages: the front
+// (internal/bigqueryfront/modelprocessdocument.go) sets callerHeader.
+type processDocumentCaller struct{}
+
+const (
+	callerHeader          = "X-Cloudburrow-Caller"
+	callerProcessDocument = "bigquery-ml.process-document"
+)
+
+func fromBigQuery(ctx context.Context) bool {
+	v, _ := ctx.Value(processDocumentCaller{}).(bool)
+	return v
+}
 
 // docAIStore is the processors and where they are kept.
 type docAIStore struct {
@@ -210,7 +276,10 @@ func docAIParent(name string) (string, string, error) {
 }
 
 func docAIProcessorType(parent, t string) *documentaipb.ProcessorType {
-	dt := docAITypes[t]
+	dt, ok := docAITypes[t]
+	if !ok {
+		dt = docAIType{category: docAIPrebuilt[t].category, version: docAIPrebuilt[t].version}
+	}
 	var locs []*documentaipb.ProcessorType_LocationInfo
 	for _, l := range []string{"eu", "us"} {
 		locs = append(locs, &documentaipb.ProcessorType_LocationInfo{LocationId: l})
@@ -219,10 +288,17 @@ func docAIProcessorType(parent, t string) *documentaipb.ProcessorType {
 		AvailableLocations: locs, AllowCreation: true}
 }
 
-func docAITypeNames() []string {
+// docAITypeNames are the served types: the Form Parser and specialized
+// extractors only where the local generation model runs.
+func (s *Server) docAITypeNames() []string {
 	var names []string
 	for t := range docAITypes {
 		names = append(names, t)
+	}
+	if s.generativeAvailable() {
+		for t := range docAIPrebuilt {
+			names = append(names, t)
+		}
 	}
 	sort.Strings(names)
 	return names
@@ -233,7 +309,7 @@ func (d *documentAIService) FetchProcessorTypes(_ context.Context, req *document
 		return nil, grpcError(err)
 	}
 	out := &documentaipb.FetchProcessorTypesResponse{}
-	for _, t := range docAITypeNames() {
+	for _, t := range d.s.docAITypeNames() {
 		out.ProcessorTypes = append(out.ProcessorTypes, docAIProcessorType(req.GetParent(), t))
 	}
 	return out, nil
@@ -244,7 +320,7 @@ func (d *documentAIService) ListProcessorTypes(_ context.Context, req *documenta
 		return nil, grpcError(err)
 	}
 	var all []*documentaipb.ProcessorType
-	for _, t := range docAITypeNames() {
+	for _, t := range d.s.docAITypeNames() {
 		all = append(all, docAIProcessorType(req.GetParent(), t))
 	}
 	page, next, err := docAIPage(all, req.GetPageSize(), req.GetPageToken())
@@ -263,7 +339,7 @@ func (d *documentAIService) GetProcessorType(_ context.Context, req *documentaip
 	if _, _, err := docAIParent(parent); err != nil {
 		return nil, grpcError(err)
 	}
-	if _, ok := docAITypes[t]; !ok {
+	if _, ok := docAITypes[t]; !ok && (!isPrebuiltType(t) || !d.s.generativeAvailable()) {
 		return nil, grpcError(apierror.NotFound("Processor type %s not found", req.GetName()))
 	}
 	return docAIProcessorType(parent, t), nil
@@ -303,10 +379,17 @@ func (d *documentAIService) CreateProcessor(ctx context.Context, req *documentai
 		return nil, grpcError(apierror.InvalidArgument("processor.display_name is required"))
 	}
 	dt, ok := docAITypes[t]
+	if pt, pre := docAIPrebuilt[t]; pre {
+		if err := d.s.prebuiltReady(t); err != nil {
+			return nil, grpcError(err)
+		}
+		dt, ok = docAIType{category: pt.category, version: pt.version}, true
+	}
 	if !ok {
 		if docAIUnserved[t] {
 			return nil, grpcError(apierror.Unimplemented("Not implemented here: processor type %s has no local model (CloudBurrow serves "+
-				"OCR_PROCESSOR and LAYOUT_PARSER_PROCESSOR, read with local Tesseract OCR) and never calls Google (#1799)", t))
+				"OCR_PROCESSOR, LAYOUT_PARSER_PROCESSOR, the custom processors and, with a local generation model, the Form Parser and "+
+				"specialized extractors) and never calls Google (#1799)", t))
 		}
 		return nil, grpcError(apierror.InvalidArgument("Invalid processor type %q", t))
 	}
@@ -505,6 +588,9 @@ func (s *Server) processDocument(ctx context.Context, req *documentaipb.ProcessR
 			return nil, err
 		}
 	}
+	if err := s.prebuiltReady(p.GetType()); err != nil {
+		return nil, err
+	}
 	if req.GetFieldMask() != nil {
 		if err := checkDocumentMask(req.GetFieldMask()); err != nil {
 			return nil, err
@@ -566,11 +652,21 @@ func (s *Server) processDocument(ctx context.Context, req *documentaipb.ProcessR
 	if len(content) > docAIMaxBytes {
 		return nil, apierror.InvalidArgument("Document size %d bytes exceeds the limit of %d bytes for online processing", len(content), docAIMaxBytes)
 	}
-	limit := docAIMaxPages
-	if req.GetImagelessMode() && p.GetType() == "OCR_PROCESSOR" {
-		limit = docAIMaxImagelessPages
+	l := limitsOf(p.GetType())
+	limit := docAIPageLimit{pages: l.online}
+	if l.imageless > l.online {
+		limit.imagelessPages = l.imageless
 	}
-	doc, err := readDocument(ctx, p, content, mimeType, opts, limit, req.GetImagelessMode())
+	images := !req.GetImagelessMode()
+	switch {
+	case fromBigQuery(ctx):
+		// BigQuery's own limit, within the processor's batch limit; the
+		// rows' results carry no page images.
+		limit, images = docAIPageLimit{pages: min(bigQueryMaxPages, l.batch)}, false
+	case req.GetImagelessMode():
+		limit = docAIPageLimit{pages: l.imageless, imageless: true}
+	}
+	doc, err := readDocument(ctx, p, content, mimeType, opts, limit, images)
 	if err != nil {
 		return nil, err
 	}
@@ -579,37 +675,132 @@ func (s *Server) processDocument(ctx context.Context, req *documentaipb.ProcessR
 			return nil, err
 		}
 	}
+	if err := s.applyPrebuilt(ctx, p.GetType(), doc); err != nil {
+		return nil, err
+	}
 	maskDocument(doc, req.GetFieldMask())
 	return doc, nil
 }
 
-// readDocument reads a document's pages, at most limit, with p's type.
+// readDocument reads a document's pages, at most limit, with p's type;
+// images keeps each page's image in the Document.
 func readDocument(ctx context.Context, p *documentaipb.Processor, content []byte, mimeType string, opts *documentaipb.ProcessOptions,
-	limit int, imageless bool) (*documentaipb.Document, error) {
-	pages, err := docAIPages(content, mimeType, limit, imageless)
-	if err != nil {
-		return nil, err
+	limit docAIPageLimit, images bool) (*documentaipb.Document, error) {
+	layout := p.GetType() == "LAYOUT_PARSER_PROCESSOR"
+	lo := layoutOptions{chunkWords: docAIDefaultChunkWords, ancestorHeadings: opts.GetLayoutConfig().GetChunkingConfig().GetIncludeAncestorHeadings()}
+	if cs := opts.GetLayoutConfig().GetChunkingConfig().GetChunkSize(); cs > 0 {
+		lo.chunkWords = int(cs)
 	}
-	numbers, err := selectPages(len(pages), opts)
-	if err != nil {
-		return nil, err
-	}
-	read := make([]ocr.Result, len(pages))
-	for _, n := range numbers {
-		r, err := ocr.ReadLayout(ctx, pages[n-1], embedding.OCRDPI)
+	if officedoc.Supported(mimeType) {
+		if !layout {
+			// HTML, DOCX, PPTX, XLSX and XLSM are the Layout Parser's
+			// inputs alone (#1799).
+			return nil, apierror.InvalidArgument("Unsupported input file format: %s: %s reads PDFs and images; the Layout Parser reads %s documents",
+				mimeType, p.GetType(), mimeType)
+		}
+		od, err := officedoc.Parse(content, mimeType)
 		if err != nil {
-			return nil, apierror.Internal(err, "reading page %d", n)
+			return nil, apierror.InvalidArgument("Unable to process the document: %v", err)
 		}
-		read[n-1] = r
+		return layoutFromBlocks(mimeType, od.Blocks, lo), nil
 	}
-	if p.GetType() == "LAYOUT_PARSER_PROCESSOR" {
-		size := docAIDefaultChunkWords
-		if cs := opts.GetLayoutConfig().GetChunkingConfig().GetChunkSize(); cs > 0 {
-			size = int(cs)
+	pages, err := readPages(ctx, content, mimeType, limit, opts, images && !layout)
+	if err != nil {
+		return nil, err
+	}
+	if layout {
+		return layoutFromBlocks(mimeType, ocrBlocks(pages), lo), nil
+	}
+	return ocrDocument(mimeType, pages, opts.GetOcrConfig().GetEnableSymbol()), nil
+}
+
+// docPage is a page read with OCR: its 1-based number, its size in pixels,
+// its layout and, when kept, its image as PNG.
+type docPage struct {
+	n    int
+	w, h int
+	png  []byte
+	read ocr.Result
+}
+
+// readPages renders the pages process_options selects, one at a time, and
+// reads them with docAIReaders Tesseract instances at once: at most a few
+// pages' pixels are held in memory, whatever the document's length.
+func readPages(ctx context.Context, content []byte, mimeType string, limit docAIPageLimit, opts *documentaipb.ProcessOptions,
+	images bool) ([]docPage, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	type job struct {
+		at  int
+		img image.Image
+	}
+	jobs := make(chan job)
+	var out []docPage
+	var mu sync.Mutex
+	var firstErr error
+	fail := func(err error) {
+		mu.Lock()
+		if firstErr == nil {
+			firstErr = err
 		}
-		return layoutDocument(mimeType, numbers, read, size), nil
+		mu.Unlock()
+		cancel()
 	}
-	return ocrDocument(mimeType, numbers, pages, read, opts.GetOcrConfig().GetEnableSymbol(), !imageless), nil
+	var wg sync.WaitGroup
+	for range docAIReaders {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := range jobs {
+				if ctx.Err() != nil {
+					continue
+				}
+				pg := &out[j.at]
+				r, err := ocr.ReadLayout(ctx, j.img, embedding.OCRDPI)
+				if err != nil {
+					fail(apierror.Internal(err, "reading page %d", pg.n))
+					continue
+				}
+				pg.read, pg.w, pg.h = r, j.img.Bounds().Dx(), j.img.Bounds().Dy()
+				if images {
+					var b bytes.Buffer
+					if pngEncoder.Encode(&b, j.img) == nil {
+						pg.png = b.Bytes()
+					}
+				}
+			}
+		}()
+	}
+	at := 0
+	err := eachDocPage(content, mimeType, limit, func(count int) ([]int, error) {
+		numbers, err := selectPages(count, opts)
+		if err != nil {
+			return nil, err
+		}
+		out = make([]docPage, len(numbers))
+		idx := make([]int, len(numbers))
+		for i, n := range numbers {
+			out[i].n, idx[i] = n, n-1
+		}
+		return idx, nil
+	}, func(_ int, img image.Image) error {
+		select {
+		case jobs <- job{at, img}:
+			at++
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	})
+	close(jobs)
+	wg.Wait()
+	if firstErr != nil {
+		return nil, firstErr
+	}
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // checkProcessOptions refuses the options that are not served.
@@ -688,40 +879,51 @@ func selectPages(n int, o *documentaipb.ProcessOptions) ([]int, error) {
 	return out, nil
 }
 
-// docAIPages decodes a document into its pages.
-func docAIPages(content []byte, mimeType string, limit int, imageless bool) ([]image.Image, error) {
+// eachDocPage decodes a document's pages: want is given the page count and
+// answers the 0-based pages to decode, which fn receives one at a time.
+func eachDocPage(content []byte, mimeType string, limit docAIPageLimit, want func(count int) ([]int, error),
+	fn func(index int, img image.Image) error) error {
 	mt := strings.ToLower(strings.TrimSpace(strings.Split(mimeType, ";")[0]))
 	switch mt {
 	case "":
-		return nil, apierror.InvalidArgument("mime_type is required")
+		return apierror.InvalidArgument("mime_type is required")
 	case "application/pdf":
-		pages, count, err := embedding.RenderPDFForOCR(content, limit)
+		count, err := embedding.EachPDFPageForOCR(content, limit.pages, want, fn)
 		if errors.Is(err, embedding.ErrTooManyPages) {
-			if imageless {
-				return nil, apierror.InvalidArgument("Document pages in imageless mode exceed the limit: %d got %d.", limit, count)
+			if limit.imageless {
+				return apierror.InvalidArgument("Document pages in imageless mode exceed the limit: %d got %d.", limit.pages, count)
 			}
-			if limit > docAIMaxImagelessPages {
-				return nil, apierror.InvalidArgument("Document pages exceed the limit: %d got %d.", limit, count)
+			if limit.imagelessPages <= limit.pages {
+				return apierror.InvalidArgument("Document pages exceed the limit: %d got %d.", limit.pages, count)
 			}
-			return nil, apierror.InvalidArgument("Document pages in non-imageless mode exceed the limit: %d got %d. "+
-				"Try using imageless mode to increase the limit to %d.", limit, count, docAIMaxImagelessPages)
+			return apierror.InvalidArgument("Document pages in non-imageless mode exceed the limit: %d got %d. "+
+				"Try using imageless mode to increase the limit to %d.", limit.pages, count, limit.imagelessPages)
+		}
+		var ae *apierror.Error
+		if errors.As(err, &ae) {
+			return err // want's refusal
 		}
 		if err != nil {
-			return nil, apierror.InvalidArgument("Unable to process the document: %v", err)
+			return apierror.InvalidArgument("Unable to process the document: %v", err)
 		}
-		return pages, nil
+		return nil
 	case "image/png", "image/jpeg", "image/gif", "image/tiff", "image/bmp", "image/webp":
 		img, _, err := image.Decode(bytes.NewReader(content))
 		if err != nil {
-			return nil, apierror.InvalidArgument("Unable to process the document: the %s data could not be decoded", mt)
+			return apierror.InvalidArgument("Unable to process the document: the %s data could not be decoded", mt)
 		}
-		return []image.Image{img}, nil
-	case "text/html", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-		"application/vnd.openxmlformats-officedocument.presentationml.presentation",
-		"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
-		return nil, apierror.Unimplemented("Not implemented here: %s documents: the local processors read PDFs and images", mt)
+		idx, err := want(1)
+		if err != nil {
+			return err
+		}
+		for _, i := range idx {
+			if err := fn(i, img); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
-	return nil, apierror.InvalidArgument("Unsupported input file format: %s", mimeType)
+	return apierror.InvalidArgument("Unsupported input file format: %s", mimeType)
 }
 
 // docText builds Document.text, counting code points for text anchors.
@@ -769,12 +971,11 @@ func wordText(w ocr.Word) (string, bool) {
 }
 
 // ocrDocument is the OCR processor's Document.
-func ocrDocument(mimeType string, numbers []int, imgs []image.Image, read []ocr.Result, symbols, images bool) *documentaipb.Document {
+func ocrDocument(mimeType string, pages []docPage, symbols bool) *documentaipb.Document {
 	doc := &documentaipb.Document{MimeType: mimeType}
 	t := &docText{}
-	for _, n := range numbers {
-		img, r := imgs[n-1], read[n-1]
-		w, h := img.Bounds().Dx(), img.Bounds().Dy()
+	for _, pg := range pages {
+		n, r, w, h := pg.n, pg.read, pg.w, pg.h
 		page := &documentaipb.Document_Page{PageNumber: int32(n),
 			Dimension: &documentaipb.Document_Page_Dimension{Width: float32(w), Height: float32(h), Unit: "pixels"}}
 		pageStart := t.n
@@ -819,13 +1020,10 @@ func ocrDocument(mimeType string, numbers []int, imgs []image.Image, read []ocr.
 		if symbols {
 			page.Symbols = docSymbols(r, pageStart, w, h)
 		}
-		if images {
+		if pg.png != nil {
 			// The page's image, as Google's OCR answers it unless
 			// imageless_mode is set (#1930).
-			var png bytes.Buffer
-			if pngEncoder.Encode(&png, img) == nil {
-				page.Image = &documentaipb.Document_Page_Image{Content: png.Bytes(), MimeType: "image/png", Width: int32(w), Height: int32(h)}
-			}
+			page.Image = &documentaipb.Document_Page_Image{Content: pg.png, MimeType: "image/png", Width: int32(w), Height: int32(h)}
 		}
 		doc.Pages = append(doc.Pages, page)
 	}
@@ -863,66 +1061,6 @@ func unionQuad(a, q ocr.Quad, first bool) ocr.Quad {
 	minX, minY := min(a[0].X, q[0].X), min(a[0].Y, q[0].Y)
 	maxX, maxY := max(a[2].X, q[2].X), max(a[2].Y, q[2].Y)
 	return ocr.Quad{{minX, minY}, {maxX, minY}, {maxX, maxY}, {minX, maxY}}
-}
-
-// layoutDocument is the layout parser's Document: a paragraph block a
-// Tesseract paragraph, and chunks of whole paragraphs.
-func layoutDocument(mimeType string, numbers []int, read []ocr.Result, chunkWords int) *documentaipb.Document {
-	type para struct {
-		id    string
-		text  string
-		words int
-		page  int32
-	}
-	var paras []para
-	layout := &documentaipb.Document_DocumentLayout{}
-	for _, n := range numbers {
-		for _, blk := range read[n-1].Blocks {
-			for _, p := range blk.Paragraphs {
-				var words []string
-				for _, w := range p.Words {
-					s, _ := wordText(w)
-					words = append(words, s)
-				}
-				if len(words) == 0 {
-					continue
-				}
-				id := strconv.Itoa(len(paras) + 1)
-				text := strings.Join(words, " ")
-				paras = append(paras, para{id: id, text: text, words: len(words), page: int32(n)})
-				layout.Blocks = append(layout.Blocks, &documentaipb.Document_DocumentLayout_DocumentLayoutBlock{BlockId: id,
-					PageSpan: &documentaipb.Document_DocumentLayout_DocumentLayoutBlock_LayoutPageSpan{PageStart: int32(n), PageEnd: int32(n)},
-					Block: &documentaipb.Document_DocumentLayout_DocumentLayoutBlock_TextBlock{
-						TextBlock: &documentaipb.Document_DocumentLayout_DocumentLayoutBlock_LayoutTextBlock{Text: text, Type: "paragraph"}}})
-			}
-		}
-	}
-	chunked := &documentaipb.Document_ChunkedDocument{}
-	var cur *documentaipb.Document_ChunkedDocument_Chunk
-	var texts []string
-	words := 0
-	flush := func() {
-		if cur != nil {
-			cur.Content = strings.Join(texts, "\n\n")
-			chunked.Chunks = append(chunked.Chunks, cur)
-		}
-		cur, texts, words = nil, nil, 0
-	}
-	for _, p := range paras {
-		if cur != nil && words+p.words > chunkWords {
-			flush()
-		}
-		if cur == nil {
-			cur = &documentaipb.Document_ChunkedDocument_Chunk{ChunkId: "c" + strconv.Itoa(len(chunked.Chunks)+1),
-				PageSpan: &documentaipb.Document_ChunkedDocument_Chunk_ChunkPageSpan{PageStart: p.page, PageEnd: p.page}}
-		}
-		cur.SourceBlockIds = append(cur.SourceBlockIds, p.id)
-		cur.PageSpan.PageEnd = p.page
-		texts = append(texts, p.text)
-		words += p.words
-	}
-	flush()
-	return &documentaipb.Document{MimeType: mimeType, DocumentLayout: layout, ChunkedDocument: chunked}
 }
 
 // Document AI's customer-managed keys (#1950), as

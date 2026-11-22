@@ -147,7 +147,16 @@ func keepShots(m *docModel, docs []*documentaipb.Document) {
 
 // genJSON asks the local model for JSON valid against schema, greedily.
 func (s *Server) genJSON(ctx context.Context, prompt string, schema map[string]any, out any) error {
-	sb, _ := json.Marshal(schema)
+	// No whitespace between JSON tokens: with it allowed, the model can
+	// write whitespace after the last value until its token limit (an
+	// Invoice Parser answer took 100 s instead of 11, #1799). llguidance,
+	// the runtime's constrained decoder, reads this from the schema.
+	strict := make(map[string]any, len(schema)+1)
+	for k, v := range schema {
+		strict[k] = v
+	}
+	strict["x-guidance"] = map[string]any{"whitespace_flexible": false}
+	sb, _ := json.Marshal(strict)
 	zero, one := float32(0), float32(1)
 	gr := GenerateContentRequest{
 		Contents:         []Content{{Role: "user", Parts: []Part{{Text: prompt}}}},
@@ -161,8 +170,15 @@ func (s *Server) genJSON(ctx context.Context, prompt string, schema map[string]a
 	if len(resp.Candidates) == 0 || len(resp.Candidates[0].Content.Parts) == 0 {
 		return apierror.Internal(nil, "the local model answered nothing")
 	}
-	if err := json.Unmarshal([]byte(strings.TrimSpace(resp.Candidates[0].Content.Parts[0].Text)), out); err != nil {
-		return apierror.Internal(err, "the local model answered JSON that does not match the schema")
+	text := strings.TrimSpace(resp.Candidates[0].Content.Parts[0].Text)
+	if err := json.Unmarshal([]byte(text), out); err != nil {
+		// An answer cut off by the model's context keeps its complete
+		// array elements.
+		if fixed, ok := truncatedJSON(text); ok && json.Unmarshal([]byte(fixed), out) == nil {
+			return nil
+		}
+		return apierror.Internal(err, "the local model answered JSON that does not match the schema (%d characters, finish reason %s: %v; it ends %q)",
+			len(text), resp.Candidates[0].FinishReason, err, text[max(0, len(text)-120):])
 	}
 	return nil
 }
@@ -453,4 +469,60 @@ func (s *Server) genSplit(ctx context.Context, m *docModel, d *documentaipb.Docu
 	}
 	flush()
 	return out, nil
+}
+
+// truncatedJSON closes JSON that ends early, dropping the array element or
+// object member being written: the text up to the last complete element
+// of an array, its open arrays and objects closed. ok is false when no
+// array element completed.
+func truncatedJSON(text string) (string, bool) {
+	var stack []byte
+	inStr, esc := false, false
+	cut, cutDepth := -1, 0
+	var cutStack []byte
+	for i := 0; i < len(text); i++ {
+		c := text[i]
+		if inStr {
+			switch {
+			case esc:
+				esc = false
+			case c == '\\':
+				esc = true
+			case c == '"':
+				inStr = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inStr = true
+		case '{', '[':
+			stack = append(stack, c)
+		case '}', ']':
+			if len(stack) == 0 {
+				return "", false
+			}
+			stack = stack[:len(stack)-1]
+			if len(stack) > 0 && stack[len(stack)-1] == '[' {
+				cut, cutDepth, cutStack = i+1, len(stack), append([]byte(nil), stack...)
+			}
+		case ',':
+			if len(stack) > 0 && stack[len(stack)-1] == '[' {
+				cut, cutDepth, cutStack = i, len(stack), append([]byte(nil), stack...)
+			}
+		}
+	}
+	if cut < 0 || cutDepth == 0 {
+		return "", false
+	}
+	var b strings.Builder
+	b.WriteString(text[:cut])
+	for i := len(cutStack) - 1; i >= 0; i-- {
+		if cutStack[i] == '[' {
+			b.WriteByte(']')
+		} else {
+			b.WriteByte('}')
+		}
+	}
+	return b.String(), true
 }

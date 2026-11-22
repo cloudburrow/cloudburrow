@@ -117,3 +117,42 @@ func Denoise(ctx context.Context, samples []float32) ([]float32, error) {
 	}
 	return embedding.Resample(clean[rnnoiseDelay:rnnoiseDelay+n], rnnoiseRate, SampleRate), nil
 }
+
+// snrWindow is the span the SNR filter measures, in samples at
+// SampleRate: half a second.
+const snrWindow = SampleRate / 2
+
+// FilterSNR is audio with each half-second window whose signal-to-noise
+// ratio is below threshold silenced (#1799, denoiserConfig.snrThreshold:
+// "Audio with an SNR below this threshold, meaning the speech is too
+// quiet, will be prevented from being sent to the transcription model",
+// the v2 reference's DenoiserConfig, read 2026-11-21). The signal is what
+// RNNoise keeps (clean), the noise what it removes (orig - clean), and the
+// ratio their powers' (linear, so the documented 0-1000 spans 0 to 30
+// dB). A window with no noise passes. UNVERIFIED (re-read 2026-11-21, the
+// same reference and Chirp 2's page, which give no formula): that Google's
+// SNR is a linear power ratio, and its window.
+func FilterSNR(audio, orig, clean []float32, threshold float64) []float32 {
+	if threshold <= 0 {
+		return audio
+	}
+	out := append([]float32(nil), audio...)
+	n := min(len(out), len(orig), len(clean))
+	for st := 0; st < n; st += snrWindow {
+		en := min(st+snrWindow, n)
+		var sig, noise float64
+		for i := st; i < en; i++ {
+			c := float64(clean[i])
+			d := float64(orig[i]) - c
+			sig += c * c
+			noise += d * d
+		}
+		if noise == 0 || sig/noise >= threshold {
+			continue
+		}
+		for i := st; i < en; i++ {
+			out[i] = 0
+		}
+	}
+	return out
+}

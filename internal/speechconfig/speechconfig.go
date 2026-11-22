@@ -72,6 +72,9 @@ type Config struct {
 	// Denoise is denoiserConfig.denoiseAudio: the audio is denoised
 	// before it is transcribed (internal/speech's Denoise).
 	Denoise bool
+	// SNRThreshold is denoiserConfig.snrThreshold: windows of a lower
+	// signal-to-noise ratio are silenced (internal/speech's FilterSNR).
+	SNRThreshold float64
 	// TranslateTo is translationConfig.targetLanguage, "" for none: each
 	// final transcript is translated to it with the served Translation
 	// API's model.
@@ -190,7 +193,7 @@ func Parse(raw []byte) (c Config, code int, err error) {
 	if len(rc.DenoiserConfig) > 0 && string(rc.DenoiserConfig) != "null" {
 		var dc denoiserConfig
 		_ = json.Unmarshal(rc.DenoiserConfig, &dc)
-		c.Denoise = dc.DenoiseAudio
+		c.Denoise, c.SNRThreshold = dc.DenoiseAudio, dc.SnrThreshold
 	}
 	if len(rc.TranslationConfig) > 0 && string(rc.TranslationConfig) != "null" {
 		var tc struct {
@@ -397,6 +400,9 @@ func parse(raw []byte) (Decoding, string, Options, int, error) {
 	}
 	if f := c.Features; f != nil {
 		switch {
+		case f.DiarizationConfig != nil && !diarizationModels[c.Model]:
+			return d, "", opt, 400, fmt.Errorf("Recognizer does not support feature: speaker_diarization: the %q model does not support "+
+				"diarization (Speech-to-Text's supported languages table lists it for chirp_3 alone among the served models)", c.Model)
 		case f.DiarizationConfig != nil:
 			return unimpl("features.diarizationConfig")
 		case f.MultiChannelMode != "" && f.MultiChannelMode != "MULTI_CHANNEL_MODE_UNSPECIFIED" && f.MultiChannelMode != "SEPARATE_RECOGNITION_PER_CHANNEL":

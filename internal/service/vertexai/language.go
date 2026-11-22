@@ -48,11 +48,10 @@ import (
 //     (words)" (classifying-text page); a token here is a word or a
 //     punctuation mark, which the BigQuery page's example sentence (19
 //     words and a full stop) needs to pass.
-//   - analyzeSyntax is UNIMPLEMENTED: no local, permissive part-of-speech
-//     tagger and dependency parser (Google's SyntaxNet needs TensorFlow) is
-//     available, and a language model's guesses at tags, lemmas and
-//     dependency edges would not be the API's. HTML documents,
-//     gcsContentUri and the V2 classification model are UNIMPLEMENTED too.
+//   - analyzeSyntax runs SyntaxNet's Parsey McParseface, Google's English
+//     tagger and parser, locally in pure Go (languagesyntax.go,
+//     internal/syntaxnet), not the generation model. HTML documents,
+//     gcsContentUri and the V2 classification model are UNIMPLEMENTED.
 //
 // UNVERIFIED (docs re-read 2026-11-18, the references define the fields, not these
 // values): the calibration of every score, magnitude, salience and
@@ -87,17 +86,14 @@ func (s *Server) language(w http.ResponseWriter, r *http.Request) {
 	}
 	var resp any
 	switch verb {
-	case "analyzeEntities", "analyzeEntitySentiment", "analyzeSentiment", "classifyText":
+	case "analyzeEntities", "analyzeEntitySentiment", "analyzeSentiment", "classifyText", "analyzeSyntax":
 		resp, err = s.understand(r, verb, body)
-	case "analyzeSyntax":
-		err = apierror.Unimplemented("analyzeSyntax: CloudBurrow has no local part-of-speech tagger and dependency parser " +
-			"that answers tokens, lemmas, morphology and dependency edges as the Natural Language API does")
 	case "annotateText", "moderateText":
-		err = apierror.Unimplemented("%s: CloudBurrow serves analyzeEntities, analyzeEntitySentiment, analyzeSentiment and classifyText, "+
-			"which BigQuery's ML.UNDERSTAND_TEXT sends", verb)
+		err = apierror.Unimplemented("%s: CloudBurrow serves analyzeEntities, analyzeEntitySentiment, analyzeSentiment, analyzeSyntax "+
+			"and classifyText, which BigQuery's ML.UNDERSTAND_TEXT sends", verb)
 	default:
 		err = apierror.NotFound("%s %s is not served: this endpoint serves Natural Language v1's analyzeEntities, "+
-			"analyzeEntitySentiment, analyzeSentiment and classifyText", r.Method, r.URL.Path)
+			"analyzeEntitySentiment, analyzeSentiment, analyzeSyntax and classifyText", r.Method, r.URL.Path)
 	}
 	if err != nil {
 		apierror.WriteJSON(w, err)
@@ -151,14 +147,17 @@ func (s *Server) understand(r *http.Request, verb string, body []byte) (any, err
 		lang = code
 	}
 	feature := map[string]string{"analyzeEntities": "entities", "analyzeEntitySentiment": "entitySentiment",
-		"analyzeSentiment": "sentiment", "classifyText": "classify"}[verb]
+		"analyzeSentiment": "sentiment", "classifyText": "classify", "analyzeSyntax": "syntax"}[verb]
 	if !nlSupports(feature, lang) {
 		what := map[string]string{"entities": "entity analysis", "entitySentiment": "entity sentiment analysis",
-			"sentiment": "sentiment analysis", "classify": "text classification"}[feature]
+			"sentiment": "sentiment analysis", "classify": "text classification", "syntax": "syntax analysis"}[feature]
 		return nil, apierror.InvalidArgument("The language %s is not supported for %s.", lang, what)
 	}
 	if verb == "classifyText" && nlTokens(text) < 20 {
 		return nil, apierror.InvalidArgument("Invalid text content: too few tokens (words) to process.")
+	}
+	if verb == "analyzeSyntax" {
+		return s.analyzeSyntax(r, text, lang, offsetFunc(text, enc)) // languagesyntax.go
 	}
 	if s.gen == nil || !honoursOptions(s.gen) {
 		return nil, apierror.Unimplemented("%s: this instance has no local generation model with constrained decoding, which "+

@@ -81,7 +81,9 @@ func TestDocumentAIProcessors(t *testing.T) {
 	}
 
 	types, err := g.FetchProcessorTypes(ctx, &documentaipb.FetchProcessorTypesRequest{Parent: parent})
-	if err != nil || len(types.GetProcessorTypes()) != 5 {
+	// Five types, and seven more (the Form Parser and the specialized
+	// extractors) where the instance runs the local generation model.
+	if n := len(types.GetProcessorTypes()); err != nil || n != 5 && n != 12 {
 		t.Fatalf("FetchProcessorTypes: %v %v", types, err)
 	}
 	var listed []string
@@ -94,7 +96,9 @@ func TestDocumentAIProcessors(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ListProcessorTypes: %v", err)
 		}
-		listed = append(listed, pt.GetType())
+		if pt.GetCategory() != "SPECIALIZED" && pt.GetType() != "FORM_PARSER_PROCESSOR" {
+			listed = append(listed, pt.GetType())
+		}
 	}
 	if strings.Join(listed, ",") != "CUSTOM_CLASSIFICATION_PROCESSOR,CUSTOM_EXTRACTION_PROCESSOR,CUSTOM_SPLITTING_PROCESSOR,LAYOUT_PARSER_PROCESSOR,OCR_PROCESSOR" {
 		t.Errorf("ListProcessorTypes: %v", listed)
@@ -103,8 +107,8 @@ func TestDocumentAIProcessors(t *testing.T) {
 		t.Errorf("GetProcessorType: %v %v", pt, err)
 	}
 	if _, err := g.CreateProcessor(ctx, &documentaipb.CreateProcessorRequest{Parent: parent,
-		Processor: &documentaipb.Processor{Type: "FORM_PARSER_PROCESSOR", DisplayName: "form"}}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("FORM_PARSER_PROCESSOR: %v", err)
+		Processor: &documentaipb.Processor{Type: "SUMMARIZER_PROCESSOR", DisplayName: "summarizer"}}); status.Code(err) != codes.Unimplemented {
+		t.Errorf("SUMMARIZER_PROCESSOR: %v", err)
 	}
 
 	ocrP := createDocumentProcessor(t, h, g, project, "OCR_PROCESSOR")

@@ -66,8 +66,17 @@ var docAIVersions = map[string][]docAIVersion{
 
 // resolveVersion is the version ID that id names for a processor type
 // ("stable" the newest), or "".
+// versionsOf are a type's pretrained versions: a Form Parser's or
+// specialized extractor's is its one docAIPrebuilt version.
+func versionsOf(t string) []docAIVersion {
+	if pt, ok := docAIPrebuilt[t]; ok {
+		return []docAIVersion{{pt.version, "Google Stable"}}
+	}
+	return docAIVersions[t]
+}
+
 func resolveVersion(t, id string) string {
-	vs := docAIVersions[t]
+	vs := versionsOf(t)
 	if id == "stable" && len(vs) > 0 {
 		return vs[len(vs)-1].id
 	}
@@ -81,7 +90,7 @@ func resolveVersion(t, id string) string {
 
 func versionProto(p *documentaipb.Processor, v docAIVersion) *documentaipb.ProcessorVersion {
 	out := &documentaipb.ProcessorVersion{Name: p.GetName() + "/processorVersions/" + v.id, DisplayName: v.display,
-		State: documentaipb.ProcessorVersion_DEPLOYED, GoogleManaged: true}
+		State: documentaipb.ProcessorVersion_DEPLOYED, GoogleManaged: true, DocumentSchema: prebuiltSchema(p.GetType())}
 	if i := strings.LastIndex(v.id, "-v"); i >= 0 {
 		if j := strings.Index(v.id[i+2:], "-"); j >= 0 {
 			if t, err := time.Parse("2006-01-02", v.id[i+2+j+1:]); err == nil {
@@ -109,7 +118,7 @@ func (s *Server) processorVersion(name string) (*documentaipb.Processor, docAIVe
 		return p, docAIVersion{id: id}, nil
 	}
 	rid := resolveVersion(p.GetType(), id)
-	for _, v := range docAIVersions[p.GetType()] {
+	for _, v := range versionsOf(p.GetType()) {
 		if v.id == rid {
 			return p, v, nil
 		}
@@ -144,7 +153,7 @@ func (d *documentAIService) ListProcessorVersions(ctx context.Context, req *docu
 		return nil, grpcError(err)
 	}
 	var all []*documentaipb.ProcessorVersion
-	for _, v := range docAIVersions[p.GetType()] {
+	for _, v := range versionsOf(p.GetType()) {
 		all = append(all, d.s.withKey(versionProto(p, v), p))
 	}
 	if isCustomType(p.GetType()) {

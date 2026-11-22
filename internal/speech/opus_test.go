@@ -332,8 +332,8 @@ func TestDecodeChannels(t *testing.T) {
 	if ch, err := DecodeChannelsMax(speechconfig.Decoding{Auto: true}, flac, MaxSeconds); err != nil || len(ch) != 2 {
 		t.Errorf("stereo FLAC: %d channels, %v", len(ch), err)
 	}
-	if _, err := DecodeChannelsMax(speechconfig.Decoding{Encoding: "MP3"}, []byte("ID3\x04"), MaxSeconds); !errors.Is(err, ErrUnsupported) {
-		t.Errorf("MP3: %v, want ErrUnsupported", err)
+	if _, err := DecodeChannelsMax(speechconfig.Decoding{Encoding: "MP3"}, []byte("ID3\x04"), MaxSeconds); err == nil || errors.Is(err, ErrUnsupported) {
+		t.Errorf("a broken MP3: %v, want a data error", err)
 	}
 	if _, err := DecodeChannelsMax(speechconfig.Decoding{Auto: true}, wav, 5); !errors.Is(err, ErrTooLong) {
 		t.Errorf("over 5 s: %v, want ErrTooLong", err)

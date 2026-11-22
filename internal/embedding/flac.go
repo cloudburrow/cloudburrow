@@ -518,7 +518,7 @@ func decodeFLACTrack(tr *soundTrack, e *mp4.AudioSampleEntryBox) (pcm []float32,
 		} else if len(f.ch) != channels {
 			return nil, 0, 0, nil, notDecodedf("its FLAC frames change from %d to %d channels, which is not decoded", channels, len(f.ch))
 		}
-		if len(pcm)/channels > (MaxAudioSeconds+60)*max(rate, 1) {
+		if len(pcm)/channels > (tr.limit+60)*max(rate, 1) {
 			return nil, 0, 0, nil, &tooLongError{float64(len(pcm)/channels) / float64(rate)}
 		}
 		scale, shift := float32(1.0/32768), 16-f.bits

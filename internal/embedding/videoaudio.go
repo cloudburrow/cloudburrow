@@ -107,17 +107,35 @@ type soundTrack struct {
 	// shift is the edit list's first media time, and keep its duration in
 	// the media's timescale (0: to the end).
 	shift, keep int64
+	// limit is the most seconds decoded (MaxAudioSeconds for embedding).
+	limit int
 }
 
 // decodeSoundTrack decodes a sound track to mono samples at its own rate.
 func decodeSoundTrack(f *mp4.File, trak *mp4.TrakBox, data []byte) ([]float32, int, error) {
+	pcm, channels, rate, layout, err := decodeSoundTrackChannels(f, trak, data, MaxAudioSeconds)
+	if err != nil {
+		return nil, 0, err
+	}
+	if layout != nil {
+		mono, err := downmixNamed(pcm, layout)
+		return mono, rate, err
+	}
+	return downmix(pcm, channels), rate, nil
+}
+
+// decodeSoundTrackChannels decodes a sound track of at most limit seconds
+// to interleaved samples at its own rate, the edit list applied, with its
+// channels' names where the codec fixes them. AC-3 and E-AC-3 tracks are
+// downmixed to one channel.
+func decodeSoundTrackChannels(f *mp4.File, trak *mp4.TrakBox, data []byte, limit int) ([]float32, int, int, []string, error) {
 	md := trak.Mdia
 	if md.Mdhd == nil || md.Mdhd.Timescale == 0 || md.Minf == nil || md.Minf.Stbl == nil ||
 		md.Minf.Stbl.Stsd == nil || len(md.Minf.Stbl.Stsd.Children) == 0 {
-		return nil, 0, fmt.Errorf("the track has no media header or sample description")
+		return nil, 0, 0, nil, fmt.Errorf("the track has no media header or sample description")
 	}
 	st := md.Minf.Stbl
-	tr := &soundTrack{timescale: md.Mdhd.Timescale}
+	tr := &soundTrack{timescale: md.Mdhd.Timescale, limit: limit}
 	if trak.Edts != nil && len(trak.Edts.Elst) > 0 {
 		for _, e := range trak.Edts.Elst[0].Entries {
 			if e.MediaTime < 0 {
@@ -132,7 +150,7 @@ func decodeSoundTrack(f *mp4.File, trak *mp4.TrakBox, data []byte) ([]float32, i
 	}
 	add := func(_ int64, _ uint32, _ int32, _ bool, sample []byte) { tr.samples = append(tr.samples, sample) }
 	if err := progressiveSamples(st, data, add); err != nil {
-		return nil, 0, err
+		return nil, 0, 0, nil, err
 	}
 	if f.IsFragmented() {
 		var trex *mp4.TrexBox
@@ -146,7 +164,7 @@ func decodeSoundTrack(f *mp4.File, trak *mp4.TrakBox, data []byte) ([]float32, i
 			for _, frag := range seg.Fragments {
 				fs, err := frag.GetFullSamples(trex)
 				if err != nil {
-					return nil, 0, fmt.Errorf("a fragment: %v", err)
+					return nil, 0, 0, nil, fmt.Errorf("a fragment: %v", err)
 				}
 				for _, s := range fs {
 					tr.samples = append(tr.samples, s.Data)
@@ -155,7 +173,7 @@ func decodeSoundTrack(f *mp4.File, trak *mp4.TrakBox, data []byte) ([]float32, i
 		}
 	}
 	if len(tr.samples) == 0 {
-		return nil, 0, fmt.Errorf("the track has no samples")
+		return nil, 0, 0, nil, fmt.Errorf("the track has no samples")
 	}
 
 	var (
@@ -170,7 +188,7 @@ func decodeSoundTrack(f *mp4.File, trak *mp4.TrakBox, data []byte) ([]float32, i
 	case "mp4a":
 		ase := st.Stsd.Mp4a
 		if ase == nil || ase.Esds == nil || ase.Esds.DecConfigDescriptor == nil {
-			return nil, 0, fmt.Errorf("the mp4a track has no esds")
+			return nil, 0, 0, nil, fmt.Errorf("the mp4a track has no esds")
 		}
 		dcd := ase.Esds.DecConfigDescriptor
 		switch dcd.ObjectType {
@@ -182,7 +200,7 @@ func decodeSoundTrack(f *mp4.File, trak *mp4.TrakBox, data []byte) ([]float32, i
 			pcm, rate, err = decodeAC3Track(tr)
 			channels = 1
 		default:
-			return nil, 0, notDecodedf("its codec (MPEG-4 object type 0x%02x) is not decoded; AAC, MP3, Opus, AC-3, E-AC-3, FLAC, ALAC, G.711 and PCM audio tracks are", dcd.ObjectType)
+			return nil, 0, 0, nil, notDecodedf("its codec (MPEG-4 object type 0x%02x) is not decoded; AAC, MP3, Opus, AC-3, E-AC-3, FLAC, ALAC, G.711 and PCM audio tracks are", dcd.ObjectType)
 		}
 	case ".mp3":
 		pcm, channels, rate, err = decodeMP3Track(tr)
@@ -202,13 +220,13 @@ func decodeSoundTrack(f *mp4.File, trak *mp4.TrakBox, data []byte) ([]float32, i
 		pcm, rate, err = decodeAC3Track(tr)
 		channels = 1
 	default:
-		return nil, 0, notDecodedf("its codec %q is not decoded; AAC, MP3, Opus, AC-3, E-AC-3, FLAC, ALAC, G.711 and PCM audio tracks are", entry.Type())
+		return nil, 0, 0, nil, notDecodedf("its codec %q is not decoded; AAC, MP3, Opus, AC-3, E-AC-3, FLAC, ALAC, G.711 and PCM audio tracks are", entry.Type())
 	}
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, 0, nil, err
 	}
 	if channels < 1 || rate < 1 {
-		return nil, 0, fmt.Errorf("no audio format")
+		return nil, 0, 0, nil, fmt.Errorf("no audio format")
 	}
 	frames := len(pcm) / channels
 	// The edit list, in the track's timescale, which for audio is almost
@@ -219,14 +237,10 @@ func decodeSoundTrack(f *mp4.File, trak *mp4.TrakBox, data []byte) ([]float32, i
 	if tr.keep > 0 {
 		end = min(end, start+int(math.Round(float64(tr.keep)*scale)))
 	}
-	if secs := float64(end-start) / float64(rate); secs > MaxAudioSeconds+1 {
-		return nil, 0, &tooLongError{secs}
+	if secs := float64(end-start) / float64(rate); secs > float64(limit)+1 {
+		return nil, 0, 0, nil, &tooLongError{secs}
 	}
-	if layout != nil {
-		mono, err := downmixNamed(pcm[start*channels:end*channels], layout)
-		return mono, rate, err
-	}
-	return downmix(pcm[start*channels:end*channels], channels), rate, nil
+	return pcm[start*channels : end*channels], channels, rate, layout, nil
 }
 
 // decodeAACTrack decodes an AAC track's raw access units with
@@ -273,7 +287,7 @@ func decodeAACTrack(tr *soundTrack, dcd *mp4.DecoderConfigDescriptor) (pcm []flo
 			return nil, 0, 0, nil, fmt.Errorf("the AAC track's access unit %d: %v", i, err)
 		}
 		pcm = append(pcm, p...)
-		if r, c := d.OutputSampleRate(), d.OutputChannels(); r > 0 && c > 0 && len(pcm) > (MaxAudioSeconds+60)*r*c {
+		if r, c := d.OutputSampleRate(), d.OutputChannels(); r > 0 && c > 0 && len(pcm) > (tr.limit+60)*r*c {
 			return nil, 0, 0, nil, &tooLongError{float64(len(pcm)) / float64(r) / float64(c)}
 		}
 	}
@@ -300,7 +314,7 @@ func decodeAC3Track(tr *soundTrack) (mono []float32, rate int, err error) {
 			return nil, 0, fmt.Errorf("the AC-3 track changes from %d channels at %d Hz to %d at %d at sample %d", channels, rate, ch, r, i+1)
 		}
 		pcm = append(pcm, p...)
-		if len(pcm) > (MaxAudioSeconds+60)*rate*channels {
+		if len(pcm) > (tr.limit+60)*rate*channels {
 			return nil, 0, &tooLongError{float64(len(pcm)) / float64(rate) / float64(channels)}
 		}
 	}
@@ -353,7 +367,7 @@ func decodeMP3Track(tr *soundTrack) (pcm []float32, channels, rate int, err erro
 	if err != nil {
 		return nil, 0, 0, fmt.Errorf("its MP3: %v", err)
 	}
-	interleaved, rate, err := decodeMP3PCM(stream)
+	interleaved, rate, err := decodeMP3PCM(stream, tr.limit)
 	if err != nil {
 		return nil, 0, 0, fmt.Errorf("its MP3: %v", err)
 	}
@@ -379,7 +393,7 @@ func decodeG711Track(tr *soundTrack, e *mp4.AudioSampleEntryBox) (pcm []float32,
 		return nil, 0, 0, notDecodedf("its G.711 format (%d channels at %d Hz) is not decoded", channels, rate)
 	}
 	raw := bytes.Join(tr.samples, nil)
-	if len(raw)/channels > (MaxAudioSeconds+60)*rate {
+	if len(raw)/channels > (tr.limit+60)*rate {
 		return nil, 0, 0, &tooLongError{float64(len(raw)/channels) / float64(rate)}
 	}
 	alaw := e.Type() == "alaw"
@@ -432,7 +446,7 @@ func decodePCMTrack(tr *soundTrack, e *mp4.AudioSampleEntryBox) (pcm []float32, 
 	raw := bytes.Join(tr.samples, nil)
 	bps := bits / 8
 	n := len(raw) / bps
-	if n/channels > (MaxAudioSeconds+60)*rate {
+	if n/channels > (tr.limit+60)*rate {
 		return nil, 0, 0, &tooLongError{float64(n/channels) / float64(rate)}
 	}
 	pcm = make([]float32, n)
@@ -525,7 +539,7 @@ func decodeOpusTrack(tr *soundTrack, e *mp4.AudioSampleEntryBox, edited bool) (p
 		for _, v := range out {
 			pcm = append(pcm, v*gain)
 		}
-		if len(pcm) > (MaxAudioSeconds+60)*opusRate*channels {
+		if len(pcm) > (tr.limit+60)*opusRate*channels {
 			return nil, 0, 0, &tooLongError{float64(len(pcm)) / opusRate / float64(channels)}
 		}
 	}
