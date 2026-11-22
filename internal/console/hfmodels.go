@@ -153,6 +153,14 @@ func (s *Server) handleHFHubCard(w http.ResponseWriter, r *http.Request) {
 	if c.Disabled {
 		v.Unavailable = "the model is disabled on Hugging Face"
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"model": c, "engine": v.Engine, "engineTitle": v.EngineTitle,
-		"unavailable": v.Unavailable, "deploys": s.garden != nil, "project": s.hfProject, "location": HFLocation})
+	out := map[string]any{"model": c, "engine": v.Engine, "engineTitle": v.EngineTitle,
+		"unavailable": v.Unavailable, "deploys": s.garden != nil, "project": s.hfProject, "location": HFLocation}
+	if s.garden != nil {
+		// The Accelerator type field (#2155): which runtimes the Apple GPU
+		// serves, for the form's note on the others.
+		a := s.acceleratorChoices()
+		a["engineMetal"] = v.Engine == modelgarden.EngineLlamaCpp || v.Engine == modelgarden.EngineMLX
+		out["accelerators"] = a
+	}
+	writeJSON(w, http.StatusOK, out)
 }

@@ -18206,6 +18206,27 @@ let HF_EP_POLL = null;
 
 const HF_STATE_LABEL = { DEPLOYING: "Deploying", READY: "Ready", FAILED: "Failed" };
 
+// The serving runtimes' names (#2148), and which are OpenAI-compatible.
+const HF_ENGINE_TITLE = { vllm: "vLLM", tei: "Text Embeddings Inference", "hf-pytorch": "Hugging Face PyTorch Inference",
+  "llama-cpp": "llama.cpp", mlx: "MLX (mlx-lm)", onnx: "ONNX Runtime" };
+const HF_OPENAI = new Set(["vllm", "llama-cpp", "mlx"]);
+const METAL_LABEL = "Apple GPU (Metal), local";
+
+// A deployed model's accelerator (#2155): the Apple GPU, the GPU type it
+// stands for, or none.
+function hfAccelerator(d) {
+  if (!d) return "—";
+  if (d.device) return `${METAL_LABEL}: ${d.device} (${d.acceleratorType} × ${d.acceleratorCount || 1})`;
+  if (d.acceleratorType) return `${d.acceleratorType} × ${d.acceleratorCount || 1}, served on CPU`;
+  return "None (CPU)";
+}
+
+function hfRunsOn(d) {
+  if (!d) return "—";
+  if (d.runtime === "host") return "This Mac (Apple GPU)";
+  return d.runtime === "cluster" ? "Instance cluster" : "Docker";
+}
+
 // The Endpoints page (#1840): Model Garden's deployments with their state,
 // and the selected endpoint's details and test panel.
 async function renderHFEndpoints(view) {
@@ -18238,8 +18259,9 @@ async function renderHFEndpoints(view) {
         onclick: (ev) => { ev.preventDefault(); navigate(ev.currentTarget.getAttribute("href")); } })),
       el("td", { class: "mono", text: e.id }),
       el("td", { class: "mono", text: e.model ? e.model.hfModelId : "—" }),
-      el("td", { text: e.model ? (e.model.engine === "tei" ? "Text Embeddings Inference" : "vLLM") : "—" }),
-      el("td", { "data-runtime": d ? d.runtime || "docker" : "", text: d ? (d.runtime === "cluster" ? "Instance cluster" : "Docker") : "—" }),
+      el("td", { text: e.model ? HF_ENGINE_TITLE[e.model.engine] || e.model.engine : "—" }),
+      el("td", { "data-runtime": d ? d.runtime || "docker" : "", text: hfRunsOn(d) }),
+      el("td", { "data-accelerator": d ? d.acceleratorType || "" : "", text: hfAccelerator(d) }),
       el("td", { "data-state": st },
         el("span", { text: st === "UNDEPLOYED" ? "No deployed model" : HF_STATE_LABEL[st] || st }),
         st === "DEPLOYING" ? el("span", { class: "unavailable", text: ` · ${d.message}` }) : null,
@@ -18247,7 +18269,7 @@ async function renderHFEndpoints(view) {
         st === "FAILED" ? el("p", { class: "unavailable", text: d.message }) : null));
   });
   const table = rows.length ? el("div", { class: "table-wrap" }, el("table", { id: "hf-endpoints" },
-    el("thead", {}, el("tr", {}, ...["Name", "ID", "Model", "Serving container", "Runs on", "State"].map((c) => el("th", { scope: "col", text: c })))),
+    el("thead", {}, el("tr", {}, ...["Name", "ID", "Model", "Serving container", "Runs on", "Accelerator", "State"].map((c) => el("th", { scope: "col", text: c })))),
     el("tbody", {}, ...rows)))
     : el("p", { class: "unavailable", text: "No endpoints yet. Deploy a Hugging Face model from Model Garden." });
 
@@ -18274,13 +18296,23 @@ async function renderHFEndpoints(view) {
       ep.deployed ? el("dt", { text: "Runs on" }) : null,
       ep.deployed ? el("dd", { id: "hf-endpoint-runtime", text: ep.deployed.runtime === "cluster"
         ? `This instance's Kubernetes cluster: Deployment and Service ${ep.deployed.container}${ep.deployed.gated ? ", with the Hugging Face token in Secret " + ep.deployed.container + "-hf-token" : ""}`
-        : `Docker, beside the cluster: container ${ep.deployed.container}` }) : null,
+        : ep.deployed.runtime === "host"
+          ? `This Mac, on the Apple GPU: a supervised ${HF_ENGINE_TITLE[ep.model ? ep.model.engine : ""] || "model"} server on 127.0.0.1:${ep.deployed.hostPort || "…"}, which the cluster reaches as Service ${ep.deployed.container}`
+          : `Docker, beside the cluster: container ${ep.deployed.container}` }) : null,
+      ep.deployed ? el("dt", { text: "Machine type" }) : null,
+      ep.deployed ? el("dd", { class: "mono", id: "hf-endpoint-machine", text: ep.deployed.machineType }) : null,
+      ep.deployed ? el("dt", { text: "Accelerator type" }) : null,
+      ep.deployed ? el("dd", { id: "hf-endpoint-accelerator", text: ep.deployed.device
+        ? `${METAL_LABEL} (${ep.deployed.device}), as ${ep.deployed.acceleratorType}` : ep.deployed.acceleratorType || "None" }) : null,
+      ep.deployed && ep.deployed.acceleratorType ? el("dt", { text: "Accelerator count" }) : null,
+      ep.deployed && ep.deployed.acceleratorType ? el("dd", { id: "hf-endpoint-accelerator-count", text: String(ep.deployed.acceleratorCount || 1) }) : null,
+      ep.deployed && ep.deployed.acceleratorNote ? el("dd", { class: "unavailable", id: "hf-endpoint-accelerator-note", text: ep.deployed.acceleratorNote }) : null,
       ep.deployed && st === "DEPLOYING" ? el("dt", { text: "Progress" }) : null,
       ep.deployed && st === "DEPLOYING" ? el("dd", { id: "hf-endpoint-progress" }, el("span", { text: ep.deployed.message }),
         ep.deployed.progress > 0 ? el("progress", { max: "100", value: String(ep.deployed.progress), "aria-label": "Deploy progress" }) : null) : null,
       el("dt", { text: "Predict" }), el("dd", { class: "mono", text: `POST ${rest}:predict, :rawPredict, :streamRawPredict` }),
-      ep.model && ep.model.engine === "vllm" ? el("dt", { text: "OpenAI-compatible" }) : null,
-      ep.model && ep.model.engine === "vllm" ? el("dd", { class: "mono", text: `POST /v1beta1/${ep.name}/chat/completions` }) : null);
+      ep.model && HF_OPENAI.has(ep.model.engine) ? el("dt", { text: "OpenAI-compatible" }) : null,
+      ep.model && HF_OPENAI.has(ep.model.engine) ? el("dd", { class: "mono", text: `POST /v1beta1/${ep.name}/chat/completions` }) : null);
     let test = null;
     if (st === "READY") {
       const tei = ep.model.engine === "tei";
@@ -18575,7 +18607,34 @@ async function renderHFHubModel(view, id) {
       el("label", { for: "hf-env-ap", text: "Agent Platform: a managed endpoint, served from this instance's Kubernetes cluster" })),
     el("div", { class: "garden-filter" }, envGKE,
       el("label", { for: "hf-env-gke", text: "GKE: deploy to a Kubernetes Engine cluster with the generated Kubernetes manifests" })));
-  const apFields = el("dl", { id: "hf-ap-fields" }, el("dt", { text: "Machine type" }), el("dd", { class: "mono", text: "local-cpu" }),
+  // Google's Accelerator type (machine_spec.accelerator_type, #2155): the
+  // Apple GPU, which CloudBurrow serves as NVIDIA_L4, or none (CPU).
+  const acc = r.accelerators || { metal: false, default: "none", metalType: "NVIDIA_L4", cpuMachine: "local-cpu", metalMachine: "local-metal",
+    metalNote: "this instance runs no host runtime" };
+  const accSelect = el("select", { id: "hf-accelerator", name: "hf-accelerator", "aria-describedby": "hf-accelerator-note" },
+    el("option", { value: acc.metalType, disabled: acc.metal ? null : true,
+      text: `${METAL_LABEL}${acc.device ? " · " + acc.device : ""} (as ${acc.metalType})` }),
+    el("option", { value: "none", text: "None (CPU)" }));
+  accSelect.value = acc.metal && acc.default !== "none" ? acc.metalType : "none";
+  const accNote = el("p", { class: "unavailable", id: "hf-accelerator-note", role: "status" });
+  const machineDD = el("dd", { class: "mono", id: "hf-machine-type" });
+  const countDD = el("dd", { id: "hf-accelerator-count" });
+  const onAcc = () => {
+    const gpu = accSelect.value !== "none";
+    machineDD.textContent = gpu && acc.engineMetal ? acc.metalMachine : acc.cpuMachine;
+    countDD.textContent = gpu ? "1" : "0";
+    accNote.textContent = !acc.metal
+      ? `The Apple GPU is not available: ${acc.metalNote}.`
+      : gpu && !acc.engineMetal
+        ? `${r.engineTitle || "This runtime"} has no Metal build, so it runs on CPU in the instance's cluster; the Apple GPU serves GGUF (llama.cpp) and MLX (mlx-lm) models.`
+        : gpu ? `Runs on this Mac's GPU as a host process, reached by the cluster through a Service.` : "Runs on CPU in the instance's cluster.";
+  };
+  accSelect.addEventListener("change", onAcc);
+  onAcc();
+  const apFields = el("dl", { id: "hf-ap-fields" },
+    el("dt", {}, el("label", { for: "hf-accelerator", text: "Accelerator type" })), el("dd", {}, accSelect, accNote),
+    el("dt", { text: "Accelerator count" }), countDD,
+    el("dt", { text: "Machine type" }), machineDD,
     el("dt", { text: "Serving container" }), el("dd", { text: r.engineTitle || "" }),
     el("dt", { text: "Region" }), el("dd", { class: "mono", text: r.location }));
   const gkeCluster = el("select", { id: "hf-gke-cluster", "aria-label": "Cluster" });
@@ -18645,6 +18704,7 @@ async function renderHFHubModel(view, id) {
     e.preventDefault();
     const gke = envGKE.checked;
     const body = { id: m.id, acceptEula: !!(accept && accept.checked) };
+    if (!gke) body.accelerator = accSelect.value;
     if (gke) body.project = currentProject();
     if (gke) { const [cluster, loc] = gkeCluster.value.split("|"); body.cluster = cluster; body.location = loc; }
     if (token) body.hfToken = token.value.trim();

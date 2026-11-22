@@ -25,7 +25,7 @@ const HFLocation = "us-central1"
 // puts in the workload's Secret and nowhere else; runtime is "" (the
 // instance's cluster) or modelgarden.RuntimeDocker (a downloaded model).
 type HFDeployer interface {
-	DeployHF(ctx context.Context, project, location, hfID string, acceptEULA bool, token, runtime string) (op, endpoint string, err error)
+	DeployHF(ctx context.Context, project, location, hfID string, acceptEULA bool, token, runtime, accelerator string) (op, endpoint string, err error)
 }
 
 // SetModelGarden offers Deploy on downloaded Hugging Face models; a nil
@@ -60,7 +60,8 @@ func (s *Server) handleHFDeployments(w http.ResponseWriter, _ *http.Request) {
 		}
 		out = append(out, v)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"configured": true, "endpoints": out, "project": s.hfProject, "location": HFLocation})
+	writeJSON(w, http.StatusOK, map[string]any{"configured": true, "endpoints": out, "project": s.hfProject, "location": HFLocation,
+		"accelerators": s.acceleratorChoices()})
 }
 
 func parseEndpointName(name string) (project, location, id string, ok bool) {
@@ -88,10 +89,14 @@ func (s *Server) handleHFDeploymentAction(w http.ResponseWriter, r *http.Request
 		// passed to the deployer and dropped: never logged, kept or echoed.
 		Token string `json:"hfToken"`
 		// Local deploys a model downloaded to the host (#1840) in Docker.
-		Local    bool            `json:"local"`
-		Endpoint string          `json:"endpoint"`
-		Mode     string          `json:"mode"`
-		Body     json.RawMessage `json:"body"`
+		Local bool `json:"local"`
+		// Accelerator is the form's Accelerator type (#2155): an
+		// accelerator type (NVIDIA_L4 is the Apple GPU), "none", or "" for
+		// the instance's default.
+		Accelerator string          `json:"accelerator"`
+		Endpoint    string          `json:"endpoint"`
+		Mode        string          `json:"mode"`
+		Body        json.RawMessage `json:"body"`
 	}
 	b, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if json.Unmarshal(b, &req) != nil {
@@ -104,7 +109,7 @@ func (s *Server) handleHFDeploymentAction(w http.ResponseWriter, r *http.Request
 		if req.Local {
 			runtime = modelgarden.RuntimeDocker
 		}
-		op, ep, err := s.hfDeploy.DeployHF(r.Context(), s.hfProject, HFLocation, req.ID, req.AcceptEULA, req.Token, runtime)
+		op, ep, err := s.hfDeploy.DeployHF(r.Context(), s.hfProject, HFLocation, req.ID, req.AcceptEULA, req.Token, runtime, req.Accelerator)
 		req.Token = ""
 		if err != nil {
 			writeAPIError(w, err)
@@ -172,4 +177,18 @@ func (s *Server) handleHFDeploymentAction(w http.ResponseWriter, r *http.Request
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such action"})
 	}
+}
+
+// acceleratorChoices are the deploy form's Accelerator type options
+// (#2155): the Apple GPU where it is available, CPU always, and which one a
+// deploy uses by default.
+func (s *Server) acceleratorChoices() map[string]any {
+	ok, why, device := s.garden.MetalAvailable()
+	def := s.garden.DefaultAccelerator()
+	if def == "" {
+		def = "none"
+	}
+	return map[string]any{"metal": ok, "metalNote": why, "device": device, "default": def,
+		"metalType": modelgarden.MetalAcceleratorType, "metalLabel": modelgarden.MetalLabel,
+		"metalMachine": modelgarden.MetalMachineType, "cpuMachine": modelgarden.CPUMachineType}
 }

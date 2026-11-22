@@ -14,13 +14,18 @@ import (
 	"strconv"
 	"strings"
 
+	"cloud.google.com/go/logging/apiv2/loggingpb"
+	"google.golang.org/genproto/googleapis/api/monitoredres"
+	ltype "google.golang.org/genproto/googleapis/logging/type"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/embedding"
 	"github.com/cloudburrow/cloudburrow/internal/hfmodels"
+	"github.com/cloudburrow/cloudburrow/internal/hostai"
 	"github.com/cloudburrow/cloudburrow/internal/imagedetect"
 	"github.com/cloudburrow/cloudburrow/internal/imagelabel"
 	"github.com/cloudburrow/cloudburrow/internal/localai"
@@ -135,7 +140,12 @@ func withPredictionEndpoints(cfg config.Config, srv *vertexai.Server, run interf
 // and the console's Deploy of a model downloaded to the host runs its
 // engine in Docker beside the cluster, as before. Both are restarted from
 // the deployments file.
-func modelGardenFor(cfg config.Config, srv *vertexai.Server) (*hfmodels.Manager, *modelgarden.Manager) {
+//
+// On a Mac with Apple silicon, a deployment on a GPU runs on the Apple GPU
+// as a supervised host process (#2155): its runtimes are installed in
+// hostai.CacheDir, its pid file and files kept with the instance's state,
+// and its output written to Cloud Logging when Logging is served.
+func modelGardenFor(cfg config.Config, srv *vertexai.Server, logs *loggingService) (*hfmodels.Manager, *modelgarden.Manager) {
 	hf := &hfmodels.Manager{Dir: filepath.Join(cfg.StateDir, "models", "huggingface")}
 	if srv == nil {
 		return hf, nil
@@ -143,7 +153,17 @@ func modelGardenFor(cfg config.Config, srv *vertexai.Server) (*hfmodels.Manager,
 	g := &modelgarden.Manager{Instance: cfg.Name, StateFile: filepath.Join(cfg.StateDir, "modelgarden", "deployments.json"),
 		Models: hf, Docker: modelgarden.DockerCLI{},
 		Cluster: &modelgarden.KubeCluster{Kubeconfig: cfg.KubeconfigPath(), Namespace: cfg.Cluster.Namespace,
-			Instance: cfg.Name, ClusterName: cfg.ClusterName()}}
+			Instance: cfg.Name, ClusterName: cfg.ClusterName()},
+		Accelerator: cfg.LocalAI.Accelerator}
+	if ok, _ := hostai.Metal(); ok {
+		if dir, err := hostai.CacheDir(); err == nil {
+			g.Host = &modelgarden.HostAI{Installer: &hostai.Installer{Dir: dir},
+				Pids: &hostai.Pids{File: filepath.Join(cfg.StateDir, "modelgarden", "host-servers.json")}}
+		}
+	}
+	if logs != nil {
+		g.Log = predictionLogWriter(logs)
+	}
 	srv.SetModelGarden(g)
 	g.Restore()
 	return hf, g
@@ -498,4 +518,29 @@ func (o embedObjects) bucketMissing(ctx context.Context, bucket string) bool {
 	}
 	resp.Body.Close()
 	return resp.StatusCode == http.StatusNotFound
+}
+
+// predictionLogWriter writes a host model server's output (#2155) to Cloud
+// Logging as Agent Platform writes a prediction container's: the log
+// aiplatform.googleapis.com/prediction_container of the endpoint's
+// aiplatform.googleapis.com/Endpoint resource, a line a text entry, with
+// the deployed model's ID among its labels. Each line goes through the
+// WriteLogEntries the API serves, so exclusions and sinks apply.
+func predictionLogWriter(logs *loggingService) func(modelgarden.LogLine) {
+	return func(l modelgarden.LogLine) {
+		sev := ltype.LogSeverity_DEFAULT
+		if l.Stream == "supervisor" {
+			sev = ltype.LogSeverity_NOTICE
+		}
+		e := &loggingpb.LogEntry{
+			LogName: "projects/" + l.Project + "/logs/" + url.PathEscape("aiplatform.googleapis.com/prediction_container"),
+			Resource: &monitoredres.MonitoredResource{Type: "aiplatform.googleapis.com/Endpoint", Labels: map[string]string{
+				"resource_container": l.Project, "location": l.Location, "endpoint_id": l.Endpoint}},
+			Timestamp: timestamppb.Now(),
+			Labels:    map[string]string{"deployed_model_id": l.DeployedModel, "stream": l.Stream},
+			Severity:  sev,
+			Payload:   &loggingpb.LogEntry_TextPayload{TextPayload: l.Text},
+		}
+		_, _ = logs.api.WriteLogEntries(context.Background(), &loggingpb.WriteLogEntriesRequest{Entries: []*loggingpb.LogEntry{e}})
+	}
 }

@@ -66,10 +66,20 @@ type DeployedModel struct {
 	// Gated records that the deploy carried a token for a gated model.
 	// The token itself is in the workload's Secret, never here.
 	Gated bool `json:"gated,omitempty"`
+	// AcceleratorType and AcceleratorCount are the machine_spec's (#2155);
+	// Device names the GPU that serves it ("Apple M4 Max GPU (Metal)"),
+	// empty on CPU, and AcceleratorNote why a GPU asked for is not used.
+	AcceleratorType  string `json:"acceleratorType,omitempty"`
+	AcceleratorCount int32  `json:"acceleratorCount,omitempty"`
+	Device           string `json:"device,omitempty"`
+	AcceleratorNote  string `json:"acceleratorNote,omitempty"`
 }
 
 // OnCluster reports whether the deployed model is a cluster workload.
 func (d *DeployedModel) OnCluster() bool { return d.Runtime == RuntimeCluster }
+
+// OnHost reports whether the deployed model is a host process (#2155).
+func (d *DeployedModel) OnHost() bool { return d.Runtime == RuntimeHost }
 
 // Model is a Model registry entry.
 type Model struct {
@@ -84,12 +94,15 @@ type Model struct {
 	Engine      string `json:"engine"`
 	// File is the GGUF or ONNX file a llama.cpp or ONNX Runtime deployment
 	// loads, a path in the repository.
-	File    string            `json:"file,omitempty"`
-	Image   string            `json:"image"`
-	Args    []string          `json:"args"`
-	Env     map[string]string `json:"env"`
-	Created time.Time         `json:"created"`
-	Updated time.Time         `json:"updated"`
+	File  string `json:"file,omitempty"`
+	Image string `json:"image"`
+	// HostFiles are the repository files a host deployment downloads
+	// (#2155).
+	HostFiles []hfmodels.File   `json:"hostFiles,omitempty"`
+	Args      []string          `json:"args"`
+	Env       map[string]string `json:"env"`
+	Created   time.Time         `json:"created"`
+	Updated   time.Time         `json:"updated"`
 }
 
 // Name is the model's resource name.
@@ -123,7 +136,11 @@ type Request struct {
 	EndpointUserID      string
 	DedicatedDisabled   bool
 	MachineType         string
-	Labels              map[string]string
+	// AcceleratorType and AcceleratorCount are machine_spec's (#2155): a
+	// GPU type is the Apple GPU on an Apple silicon Mac.
+	AcceleratorType  string
+	AcceleratorCount int32
+	Labels           map[string]string
 }
 
 // Prepared is a validated deploy whose resources exist, ready to Run.
@@ -166,9 +183,21 @@ type Manager struct {
 	// and for deployments made before.
 	Cluster Cluster
 	Client  *http.Client
+	// Host, when set, runs deployments on the Apple GPU as host processes
+	// (#2155); Accelerator is the instance's default for a deploy with no
+	// machine_spec (AcceleratorMetal, AcceleratorCPU, or "": metal where
+	// the Apple GPU is available).
+	Host        Host
+	Accelerator string
+	// Log, when set, receives the host servers' output (Cloud Logging).
+	Log func(LogLine)
+	// HostModelsDir is where host deployments' files are kept;
+	// host-models beside the state file when empty.
+	HostModelsDir string
 	// ReadyTimeout bounds an engine's start; 20 minutes when zero.
 	ReadyTimeout time.Duration
 	now          func() time.Time
+	procs        map[string]HostProcess
 
 	mu        sync.Mutex
 	loaded    bool
@@ -292,6 +321,10 @@ func (m *Manager) Prepare(ctx context.Context, r Request) (Prepared, error) {
 	if m.Models == nil {
 		return Prepared{}, apierror.FailedPrecondition("Hugging Face models are not available on this instance")
 	}
+	accel, err := m.resolveAccelerator(r)
+	if err != nil {
+		return Prepared{}, err
+	}
 	var info hfmodels.Info
 	var eng Engine
 	file := ""
@@ -300,7 +333,17 @@ func (m *Manager) Prepare(ctx context.Context, r Request) (Prepared, error) {
 		if info, eng, file, err = m.prepareCluster(ctx, r); err != nil {
 			return Prepared{}, err
 		}
+		switch {
+		case accel.Metal && hostEngine(eng.Name):
+			runtime = RuntimeHost
+		case accel.Metal:
+			accel.Metal, accel.Note = false, "Served on CPU in the cluster: "+eng.Title+" has no Metal build; "+
+				"the Apple GPU serves GGUF (llama.cpp) and MLX (mlx-lm) models"
+		}
 	} else {
+		if accel.Metal {
+			accel.Metal, accel.Note = false, "Served on CPU: a model downloaded to the host runs in Docker, which has no access to the Apple GPU"
+		}
 		_, local, ok := m.Models.Downloaded(r.HFModelID)
 		if !ok {
 			var err error
@@ -349,7 +392,10 @@ func (m *Manager) Prepare(ctx context.Context, r Request) (Prepared, error) {
 	}
 	machine := r.MachineType
 	if machine == "" {
-		machine = "local-cpu"
+		machine = CPUMachineType
+		if runtime == RuntimeHost {
+			machine = MetalMachineType
+		}
 	}
 	model := &Model{Project: r.Project, Location: r.Location, ID: modelID, DisplayName: modelName, HFModelID: r.HFModelID,
 		Revision: info.Revision, License: info.License, PipelineTag: info.PipelineTag, Engine: eng.Name, File: file, Image: eng.Image,
@@ -357,14 +403,22 @@ func (m *Manager) Prepare(ctx context.Context, r Request) (Prepared, error) {
 	if runtime == RuntimeCluster {
 		model.Env = eng.Pod(Plan{HFID: r.HFModelID, Revision: info.Revision, Task: info.PipelineTag, File: file}).Env
 	}
+	if runtime == RuntimeHost {
+		model.HostFiles = hostFiles(eng.Name, file, info.Files)
+		model.Env = map[string]string{"HF_HUB_OFFLINE": "1", "MODEL_ID": r.HFModelID}
+	}
 	dmID := numericID()
 	ep := &Endpoint{Project: r.Project, Location: r.Location, ID: epID, DisplayName: epName, Dedicated: !r.DedicatedDisabled,
 		Labels: r.Labels, Created: now, Updated: now,
 		Deployed: &DeployedModel{ID: dmID, ModelID: modelID, DisplayName: modelName, MachineType: machine,
 			Container: m.containerName(epID), State: StateDeploying, Message: "Preparing", Created: now,
-			Runtime: runtime, Gated: info.Gated != "" && r.HFToken != ""}}
-	if runtime == RuntimeCluster {
+			Runtime: runtime, Gated: info.Gated != "" && r.HFToken != "",
+			AcceleratorType: accel.Type, AcceleratorCount: accel.Count, AcceleratorNote: accel.Note}}
+	if runtime == RuntimeCluster || runtime == RuntimeHost {
 		ep.Deployed.Container = workloadName(epID)
+	}
+	if runtime == RuntimeHost {
+		ep.Deployed.Device = m.Host.Device() + " GPU (Metal)"
 	}
 	m.models[key(r.Project, r.Location, modelID)] = model
 	m.endpoints[key(r.Project, r.Location, epID)] = ep
@@ -408,12 +462,11 @@ func (m *Manager) Run(ctx context.Context, project, location string, p Prepared)
 	err := m.run(ctx, project, location, p)
 	m.mu.Lock()
 	ep := m.endpoints[key(project, location, p.Endpoint)]
-	var container string
-	onCluster := false
+	var container, runtime string
 	if ep != nil && ep.Deployed != nil && ep.Deployed.ID == p.DeployedModel {
 		if err != nil {
 			ep.Deployed.State, ep.Deployed.Message = StateFailed, scrub(err.Error(), p.token)
-			container, onCluster = ep.Deployed.Container, ep.Deployed.OnCluster()
+			container, runtime = ep.Deployed.Container, ep.Deployed.Runtime
 		} else {
 			ep.Deployed.State, ep.Deployed.Message, ep.Deployed.Progress = StateReady, "Ready", 100
 		}
@@ -422,7 +475,7 @@ func (m *Manager) Run(ctx context.Context, project, location string, p Prepared)
 	}
 	m.mu.Unlock()
 	if container != "" {
-		m.removeRuntime(context.Background(), onCluster, container)
+		m.removeRuntime(context.Background(), runtime, container, p.Endpoint)
 	}
 	if err != nil && p.token != "" {
 		e := *apierror.From(err)
@@ -432,9 +485,13 @@ func (m *Manager) Run(ctx context.Context, project, location string, p Prepared)
 	return err
 }
 
-// removeRuntime frees a deployed model's container or cluster workload.
-func (m *Manager) removeRuntime(ctx context.Context, onCluster bool, name string) error {
-	if onCluster {
+// removeRuntime frees a deployed model's container, cluster workload or
+// host server (and its files).
+func (m *Manager) removeRuntime(ctx context.Context, runtime, name, epID string) error {
+	if runtime == RuntimeHost {
+		return m.stopHost(ctx, name, epID, true)
+	}
+	if runtime == RuntimeCluster {
 		if m.Cluster == nil {
 			return nil
 		}
@@ -455,8 +512,14 @@ func (m *Manager) run(ctx context.Context, project, location string, p Prepared)
 		return apierror.Aborted("the deployment was deleted while it was being deployed")
 	}
 	hfID, container := model.HFModelID, ep.Deployed.Container
-	onCluster := ep.Deployed.OnCluster()
+	onCluster, onHost := ep.Deployed.OnCluster(), ep.Deployed.OnHost()
 	m.mu.Unlock()
+	if onHost {
+		if m.Host == nil {
+			return apierror.FailedPrecondition("this deployment runs on the Apple GPU, which this instance does not use")
+		}
+		return m.runHost(ctx, project, location, p, model, container)
+	}
 	if onCluster {
 		return m.runCluster(ctx, project, location, p, model, container)
 	}
@@ -574,6 +637,10 @@ func (m *Manager) healthy(ctx context.Context, port int, eng Engine) bool {
 // Restore restarts the engines of READY deployments after an instance
 // restart, in the background.
 func (m *Manager) Restore() {
+	if m.Host != nil {
+		// Servers an abruptly ended CLI left behind are ended first.
+		m.Host.Reap()
+	}
 	m.mu.Lock()
 	m.load()
 	var todo []*Endpoint
@@ -597,6 +664,13 @@ func (m *Manager) Restore() {
 			p := Prepared{Endpoint: ep.ID, Model: model.ID, DeployedModel: dm.ID, runtime: dm.Runtime}
 			if dm.OnCluster() {
 				m.restoreCluster(ctx, ep, model, dm, p)
+				return
+			}
+			if dm.OnHost() {
+				m.mu.Lock()
+				ep.Deployed.State, ep.Deployed.Message = StateDeploying, "Restarting on the Apple GPU after an instance restart"
+				m.mu.Unlock()
+				_ = m.Run(ctx, ep.Project, ep.Location, p)
 				return
 			}
 			if dm.State == StateReady && m.Docker.Running(ctx, dm.Container) {
@@ -632,13 +706,23 @@ func (m *Manager) Close() {
 	m.load()
 	var names []string
 	for _, ep := range m.endpoints {
-		if ep.Deployed != nil && !ep.Deployed.OnCluster() {
+		if ep.Deployed != nil && ep.Deployed.Runtime != RuntimeCluster && ep.Deployed.Runtime != RuntimeHost {
 			names = append(names, ep.Deployed.Container)
 		}
+	}
+	hosts := make([]string, 0, len(m.procs))
+	for n := range m.procs {
+		hosts = append(hosts, n)
 	}
 	m.mu.Unlock()
 	for _, n := range names {
 		_ = m.Docker.Remove(context.Background(), n)
+	}
+	// The host servers end with the instance; Restore starts them again
+	// from their files. Their Services stay in the cluster, as its
+	// workloads do.
+	for _, n := range hosts {
+		_ = m.stopHost(context.Background(), n, "", false)
 	}
 	// Cluster workloads stay: the cluster stops with the instance and
 	// keeps them, and Restore reopens their tunnels. Only the tunnels go.
@@ -758,11 +842,11 @@ func (m *Manager) Undeploy(ctx context.Context, project, location, epID, deploye
 		m.mu.Unlock()
 		return apierror.NotFound("deployed model %q is not deployed on endpoint %s", deployedModelID, e.Name())
 	}
-	container, onCluster := e.Deployed.Container, e.Deployed.OnCluster()
+	container, runtime := e.Deployed.Container, e.Deployed.Runtime
 	e.Deployed, e.Updated = nil, m.clock()
 	m.save()
 	m.mu.Unlock()
-	if err := m.removeRuntime(ctx, onCluster, container); err != nil {
+	if err := m.removeRuntime(ctx, runtime, container, epID); err != nil {
 		return apierror.Internal(err, "removing the serving workload %s: %v", container, err)
 	}
 	return nil

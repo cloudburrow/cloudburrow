@@ -40,6 +40,13 @@ const (
 // its endpoint, undeploying and deleting it all when the test ends.
 func hfDeployment(t *testing.T, h *Harness, ctx context.Context, hfID string) string {
 	t.Helper()
+	return hfDeploymentWith(t, h, ctx, hfID, nil)
+}
+
+// hfDeploymentWith is hfDeployment with the request's deploy_config (its
+// machine_spec and accelerator, #2155).
+func hfDeploymentWith(t *testing.T, h *Harness, ctx context.Context, hfID string, dc *aiplatformpb.DeployRequest_DeployConfig) string {
+	t.Helper()
 	opts := gardenOpts(h, EnvLocalAI)
 	mg, err := aiplatform.NewModelGardenClient(ctx, opts...)
 	if err != nil {
@@ -57,7 +64,7 @@ func hfDeployment(t *testing.T, h *Harness, ctx context.Context, hfID string) st
 	}
 	t.Cleanup(func() { _ = mc.Close() })
 	parent := runParent(h)
-	op, err := mg.Deploy(ctx, &aiplatformpb.DeployRequest{Destination: parent,
+	op, err := mg.Deploy(ctx, &aiplatformpb.DeployRequest{Destination: parent, DeployConfig: dc,
 		Artifacts: &aiplatformpb.DeployRequest_HuggingFaceModelId{HuggingFaceModelId: hfID}})
 	if err != nil {
 		t.Fatalf("Deploy %s: %v", hfID, err)

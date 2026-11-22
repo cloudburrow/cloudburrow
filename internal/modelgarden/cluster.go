@@ -95,6 +95,10 @@ type Cluster interface {
 	UnforwardAll()
 	// Remove deletes the workload, its Service and Secret, and its tunnel.
 	Remove(ctx context.Context, name string) error
+	// PublishHost puts a host server (#2155), listening on the host's
+	// loopback at port, in the cluster as the Service name, without a
+	// selector: its EndpointSlice is the address pods reach the host at.
+	PublishHost(ctx context.Context, name string, port int) error
 	Logs(ctx context.Context, name string, lines int) string
 }
 
@@ -132,6 +136,10 @@ type KubeCluster struct {
 	Tunnel func(ctx context.Context, name string) (int, func(), error)
 	// Meter, when set, replaces the image pull meter (tests).
 	Meter func(ctx context.Context, node, image string) (images.PullProgress, error)
+	// HostAddress, when set, is the address pods reach the host at;
+	// otherwise it is what host.docker.internal resolves to in the node
+	// (Docker Desktop, which forwards it to the host's loopback).
+	HostAddress func(ctx context.Context) (string, error)
 
 	mu   sync.Mutex
 	fwds map[string]func()
@@ -565,11 +573,74 @@ func (c *KubeCluster) UnforwardAll() {
 func (c *KubeCluster) Remove(ctx context.Context, name string) error {
 	c.Unforward(name)
 	kube := c.kube()
-	for _, o := range [][2]string{{"deployment", name}, {"service", name}, {"secret", secretName(name)},
+	for _, o := range [][2]string{{"deployment", name}, {"service", name}, {"endpointslice", name}, {"secret", secretName(name)},
 		{"configmap", configMapName(name)}} {
 		if err := kube.Delete(ctx, o[0], o[1], true); err != nil {
 			return fmt.Errorf("delete %s %s: %w", o[0], o[1], err)
 		}
+	}
+	return nil
+}
+
+// hostAddress is the address pods reach the host at.
+func (c *KubeCluster) hostAddress(ctx context.Context) (string, error) {
+	if c.HostAddress != nil {
+		return c.HostAddress(ctx)
+	}
+	out, err := images.ExecRunner{}.Run(ctx, "docker", "exec", c.ClusterName+"-control-plane", "getent", "ahostsv4", "host.docker.internal")
+	if err != nil {
+		return "", fmt.Errorf("host.docker.internal does not resolve in the cluster's node: %w", err)
+	}
+	if f := strings.Fields(out); len(f) > 0 && net.ParseIP(f[0]) != nil {
+		return f[0], nil
+	}
+	return "", fmt.Errorf("host.docker.internal does not resolve in the cluster's node (%q)", strings.TrimSpace(out))
+}
+
+// HostServiceManifests are a host server's Service, with no selector, on
+// the workload's port, and its EndpointSlice: address:port, the host.
+func (c *KubeCluster) HostServiceManifests(name, address string, port int) (service, slice []byte) {
+	labels := c.labels(Workload{Name: name})
+	labels[RuntimeLabel] = RuntimeHost
+	s := map[string]any{
+		"apiVersion": "v1", "kind": "Service",
+		"metadata": map[string]any{"name": name, "namespace": c.Namespace, "labels": labels},
+		"spec": map[string]any{"ports": []map[string]any{{"name": "http", "port": containerPort, "targetPort": port,
+			"protocol": "TCP"}}},
+	}
+	sl := map[string]string{"kubernetes.io/service-name": name, "endpointslice.kubernetes.io/managed-by": "cloudburrow.dev"}
+	for k, v := range labels {
+		sl[k] = v
+	}
+	e := map[string]any{
+		"apiVersion": "discovery.k8s.io/v1", "kind": "EndpointSlice",
+		"metadata":    map[string]any{"name": name, "namespace": c.Namespace, "labels": sl},
+		"addressType": "IPv4",
+		"endpoints":   []map[string]any{{"addresses": []string{address}, "conditions": map[string]any{"ready": true}}},
+		"ports":       []map[string]any{{"name": "http", "port": port, "protocol": "TCP"}},
+	}
+	service, _ = json.Marshal(s)
+	slice, _ = json.Marshal(e)
+	return service, slice
+}
+
+// RuntimeLabel marks a Service whose server runs on the host.
+const RuntimeLabel = "cloudburrow.dev/modelgarden-runtime"
+
+// PublishHost applies the host server's Service and EndpointSlice.
+func (c *KubeCluster) PublishHost(ctx context.Context, name string, port int) error {
+	addr, err := c.hostAddress(ctx)
+	if err != nil {
+		return err
+	}
+	svc, slice := c.HostServiceManifests(name, addr, port)
+	kube := c.kube()
+	opts := k8s.ApplyOptions{ServerSide: true, ForceConflicts: true, FieldManager: "cloudburrow-modelgarden"}
+	if err := kube.Apply(ctx, string(svc), opts); err != nil {
+		return fmt.Errorf("create the host server's Service: %w", err)
+	}
+	if err := kube.Apply(ctx, string(slice), opts); err != nil {
+		return fmt.Errorf("create the host server's EndpointSlice: %w", err)
 	}
 	return nil
 }

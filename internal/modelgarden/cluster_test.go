@@ -35,6 +35,8 @@ type fakeCluster struct {
 	tokens   map[string]string
 	seen     map[string]int
 	failWith string
+	// published are the host servers' Services (#2155), name to port.
+	published map[string]int
 }
 
 func (c *fakeCluster) Arch(context.Context) (string, error) { return "arm64", nil }
@@ -100,6 +102,16 @@ func (c *fakeCluster) Remove(_ context.Context, name string) error {
 }
 
 func (c *fakeCluster) Logs(context.Context, string, int) string { return "pod log" }
+
+func (c *fakeCluster) PublishHost(_ context.Context, name string, port int) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.published == nil {
+		c.published = map[string]int{}
+	}
+	c.published[name] = port
+	return nil
+}
 
 // hubCardStub serves a Hub model's card, its README and, for a gated
 // model, a config.json that only testToken opens.
@@ -424,7 +436,7 @@ func TestKubeClusterApplyAndObserve(t *testing.T) {
 	for _, call := range f.calls {
 		got = append(got, strings.Join(call[2:4], " "))
 	}
-	if strings.Join(got, ",") != "delete deployment,delete service,delete secret,delete configmap" {
+	if strings.Join(got, ",") != "delete deployment,delete service,delete endpointslice,delete secret,delete configmap" {
 		t.Errorf("remove = %v", f.calls)
 	}
 }

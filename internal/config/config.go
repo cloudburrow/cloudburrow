@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -651,7 +652,16 @@ type LocalAI struct {
 	// directory's models/ cache on first `up`. The runtime needs a build
 	// made with -tags onnx; without it every :predict is a 501.
 	Embeddings bool `json:"embeddings"`
+	// Accelerator is where a Model Garden deployment with no machine_spec
+	// runs (#2155): "metal", the Apple GPU, through host processes on a Mac
+	// with Apple silicon, or "cpu", the instance's cluster. Empty is metal
+	// where the Apple GPU is available (darwin/arm64), cpu elsewhere.
+	Accelerator string `json:"accelerator,omitempty"`
 }
+
+// MetalAvailable reports whether this machine has the Apple GPU that
+// LocalAI.Accelerator "metal" uses: macOS on Apple silicon.
+func MetalAvailable() bool { return runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" }
 
 // DefaultLocalAIImage is the tag `make litert-lm` produces. It is published
 // nowhere, so it is never pulled; it is the default for a build that was not
@@ -1227,6 +1237,16 @@ func (c *Config) Validate() error {
 	var problems []FieldError
 	add := func(field, value, msg string) {
 		problems = append(problems, FieldError{Field: field, Value: value, Message: msg})
+	}
+
+	switch c.LocalAI.Accelerator {
+	case "", "cpu":
+	case "metal":
+		if !MetalAvailable() {
+			add("localAI.accelerator", c.LocalAI.Accelerator, "metal is the Apple GPU, on macOS on Apple silicon only; use cpu here")
+		}
+	default:
+		add("localAI.accelerator", c.LocalAI.Accelerator, "must be metal or cpu")
 	}
 
 	if c.AppEngineURL != "" {
