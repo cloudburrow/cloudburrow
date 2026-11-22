@@ -28,8 +28,8 @@ import (
 //     pulls); Delete over the checked versions, confirmed by its button
 //     alone, deletes the checked version.
 //   - A version's page is Google's image digest page: Overview (format,
-//     location, repository, virtual size, tags), Vulnerabilities and
-//     Dependencies, then Layers and Manifest.
+//     location, repository, virtual size, tags), Vulnerabilities,
+//     Dependencies and Attachments (#2111), then Layers and Manifest.
 //
 // The edit page, the image page and the digest page's tabs pass the WCAG
 // 2.1 AA audit.
@@ -150,8 +150,8 @@ func TestCloudRunArtifactRegistryEditPageTagsAndDigestTabsThroughThePage(t *test
 	var tabs, overview string
 	p.eval(`[...document.querySelectorAll("#view [role=tab]")].map((x) => x.textContent.trim()).join(",")`, &tabs)
 	p.eval(`document.querySelector("#view [role=tabpanel]").textContent`, &overview)
-	if !strings.HasPrefix(tabs, "Overview,Vulnerabilities,Dependencies,Layers,Manifest") {
-		t.Errorf("the digest page's tabs are %q; want Google's Overview, Vulnerabilities, Dependencies first", tabs)
+	if !strings.HasPrefix(tabs, "Overview,Vulnerabilities,Dependencies,Attachments,Layers,Manifest") {
+		t.Errorf("the digest page's tabs are %q; want Google's Overview, Vulnerabilities, Dependencies, Attachments first", tabs)
 	}
 	for _, want := range []string{"Format", "Docker", "Location", "us-central1", "Repository", id, "Virtual size", "Tags", "prod, v1"} {
 		if !strings.Contains(overview, want) {

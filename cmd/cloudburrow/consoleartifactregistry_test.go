@@ -54,7 +54,8 @@ func TestConsoleArtifactRegistryImagesAndTags(t *testing.T) {
 		!strings.Contains(d.Panels[0].Text, "docker push us-central1-docker.pkg.localhost:") {
 		t.Fatalf("repository page = %+v, %v", d, err)
 	}
-	if d, err := p.Detail(ctx, "", []string{"images", "web", digest.String()}); err != nil || len(d.Sections) != 5 ||
+	if d, err := p.Detail(ctx, "", []string{"images", "web", digest.String()}); err != nil || len(d.Sections) != 6 ||
+		arSectionOf(d, "attachments").Label != "Attachments" ||
 		!strings.Contains(arSectionOf(d, "manifest").Text, `"layers"`) ||
 		!strings.Contains(arSectionOf(d, "vulnerabilities").Listing.Unavailable, "not active") ||
 		!strings.Contains(arSectionOf(d, "dependencies").Listing.Unavailable, "not active") {
@@ -90,8 +91,8 @@ func TestConsoleArtifactRegistryImagesAndTags(t *testing.T) {
 		t.Fatalf("version page = %+v, %v", d, err)
 	}
 	// Google's image digest page (#1855): Overview first, then
-	// Vulnerabilities and Dependencies.
-	if ids := fmt.Sprint(arSectionIDs(d)); ids != "[overview vulnerabilities dependencies files manifest]" {
+	// Vulnerabilities, Dependencies and Attachments (#2111).
+	if ids := fmt.Sprint(arSectionIDs(d)); ids != "[overview vulnerabilities dependencies attachments files manifest]" {
 		t.Errorf("version tabs = %s", ids)
 	}
 	if ov := fmt.Sprint(arSectionOf(d, "overview").Groups); !strings.Contains(ov, "Image digest") || !strings.Contains(ov, "Virtual size") || !strings.Contains(ov, "{Repository images /artifact-registry/images?project=console-ar") {

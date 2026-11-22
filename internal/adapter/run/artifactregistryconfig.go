@@ -137,7 +137,7 @@ func forgetUnder(name string) {
 		}
 	}
 	for k, a := range arConfig.attachments {
-		if under(k) || under(a.GetTarget()) {
+		if under(k) || under(a.GetTarget()) || (a.GetOciVersionName() != "" && under(a.GetOciVersionName())) {
 			delete(arConfig.attachments, k)
 			changed = true
 		}
@@ -542,6 +542,19 @@ func (a *ArtifactRegistryServer) CreateAttachment(ctx context.Context, req *arpb
 	}
 	now := timestamppb.New(time.Now())
 	at.Name, at.CreateTime, at.UpdateTime = req.GetParent()+"/attachments/"+req.GetAttachmentId(), now, now
+	at.OciVersionName = ""
+	if existing, _ := a.GetAttachment(ctx, &arpb.GetAttachmentRequest{Name: at.Name}); existing != nil {
+		return nil, apierror.AlreadyExists("the attachment already exists")
+	}
+	if !isPackageRepo(req.GetParent()) {
+		// A DOCKER repository's attachment is an OCI artifact referring
+		// to its target.
+		v, err := pushAttachmentArtifact(req.GetParent(), at)
+		if err != nil {
+			return nil, err
+		}
+		at.OciVersionName = v
+	}
 	arConfig.mu.Lock()
 	if _, ok := arConfig.attachments[at.Name]; ok {
 		arConfig.mu.Unlock()
@@ -563,15 +576,18 @@ func (a *ArtifactRegistryServer) CreateAttachment(ctx context.Context, req *arpb
 // GetAttachment reads an attachment.
 func (a *ArtifactRegistryServer) GetAttachment(_ context.Context, req *arpb.GetAttachmentRequest) (*arpb.Attachment, error) {
 	arConfig.mu.Lock()
-	defer arConfig.mu.Unlock()
 	at, ok := arConfig.attachments[req.GetName()]
-	if !ok {
-		if da := dockerAttachment(req.GetName()); da != nil {
-			return da, nil
-		}
-		return nil, apierror.NotFound("Requested entity was not found.")
+	if ok {
+		at = proto.Clone(at).(*arpb.Attachment)
 	}
-	return proto.Clone(at).(*arpb.Attachment), nil
+	arConfig.mu.Unlock()
+	if ok && !ociVersionGone(at) {
+		return at, nil
+	}
+	if da := dockerAttachment(req.GetName()); da != nil {
+		return da, nil
+	}
+	return nil, apierror.NotFound("Requested entity was not found.")
 }
 
 // attachmentFilter is the filter Artifact Registry documents for
@@ -603,20 +619,26 @@ func (a *ArtifactRegistryServer) ListAttachments(_ context.Context, req *arpb.Li
 		return nil, err
 	}
 	arConfig.mu.Lock()
-	var all []*arpb.Attachment
+	var stored []*arpb.Attachment
 	for n, at := range arConfig.attachments {
 		if !strings.HasPrefix(n, req.GetParent()+"/attachments/") {
 			continue
 		}
-		if t, ok := want["target"]; ok && at.GetTarget() != t {
+		if t, ok := want["target"]; ok && at.GetTarget() != dockerTarget(req.GetParent(), t) {
 			continue
 		}
 		if t, ok := want["type"]; ok && at.GetType() != t {
 			continue
 		}
-		all = append(all, proto.Clone(at).(*arpb.Attachment))
+		stored = append(stored, proto.Clone(at).(*arpb.Attachment))
 	}
 	arConfig.mu.Unlock()
+	var all []*arpb.Attachment
+	for _, at := range stored {
+		if !ociVersionGone(at) {
+			all = append(all, at)
+		}
+	}
 	for _, at := range dockerAttachments(req.GetParent()) {
 		if t, ok := want["target"]; ok && at.GetTarget() != dockerTarget(req.GetParent(), t) {
 			continue
@@ -650,9 +672,14 @@ func (a *ArtifactRegistryServer) DeleteAttachment(_ context.Context, req *arpb.D
 		repoName, _, _ := splitChild(req.GetName(), "attachments")
 		return a.doneEmpty(repoName, req.GetName())
 	}
+	gone := arConfig.attachments[req.GetName()]
 	delete(arConfig.attachments, req.GetName())
 	saveARConfigLocked()
 	arConfig.mu.Unlock()
+	// A Docker attachment's OCI artifact goes with it.
+	if err := deleteOCIVersion(gone); err != nil {
+		return nil, err
+	}
 	if a.s == nil {
 		return nil, nil // the console's call (ConfigServer)
 	}
