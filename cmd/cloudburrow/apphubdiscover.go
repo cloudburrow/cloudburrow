@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -14,7 +15,7 @@ import (
 )
 
 // App Hub's discovery of the other supported resource types this instance
-// serves (#2110, round 3), each read through its product's own JSON API on
+// serves (#2110, rounds 3 and 4), each read through its product's own JSON API on
 // this instance, as an SDK lists it, with no bearer token: an unauthenticated
 // in-process call is the instance's own account, so discovery sees every
 // resource under --iam-enforcement too, as Google's App Hub service agent
@@ -25,7 +26,8 @@ import (
 // Supported types this instance does not serve are not discovered: Compute
 // Engine forwarding rules, backend services, service attachments and
 // instance groups (Compute Engine serves VPC networking, VMs and disks
-// only; VM instances are not a supported type), AlloyDB, Memorystore for
+// only, load balancing is #2153; VM instances are not a supported type),
+// AlloyDB, Memorystore for
 // Memcached, Cloud Build connections and installations, Vertex AI's
 // datasets, featurestores, metadata stores, notebooks, tensorboards and
 // jobs, and the rest of the list. Cloud Scheduler jobs are supported but
@@ -326,6 +328,14 @@ func (s *appHubService) appHubOtherResources(ctx context.Context, project string
 	perLocation("aiplatform.googleapis.com", ai, "/v1/", "endpoints", "endpoints", number, false)
 	perLocation("aiplatform.googleapis.com", ai, "/v1/", "models", "models", number, false)
 
+	// Dataform repositories, by project ID, in their regions. Dataform
+	// takes no "-" location, so each location it lists is read.
+	if s.dataform != nil {
+		if a := s.dataform(); a != "" {
+			perLocation("dataform.googleapis.com", "http://"+dialable(a), "/v1/", "repositories", "repositories", project, false)
+		}
+	}
+
 	// Cloud Build private pools: workloads, by project number.
 	perLocation("cloudbuild.googleapis.com", base("cloudbuild"), "/v1/", "workerPools", "workerPools", number, true)
 
@@ -337,4 +347,17 @@ func (s *appHubService) appHubOtherResources(ctx context.Context, project string
 		}
 	}
 	return out
+}
+
+// dialable is a bound address as a client dials it: an unspecified host
+// (0.0.0.0, ::, none) is loopback.
+func dialable(addr string) string {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return addr
+	}
+	if ip := net.ParseIP(host); host == "" || (ip != nil && ip.IsUnspecified()) {
+		host = "127.0.0.1"
+	}
+	return net.JoinHostPort(host, port)
 }
