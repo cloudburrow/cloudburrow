@@ -3,7 +3,8 @@
 The Dockerfile (`deploy/litert-lm/Dockerfile`) applies every `*.patch` here,
 in file-name order, with `git apply` to the LiteRT-LM checkout at
 `LITERT_LM_REF` (dependencies.json `localai.litertLM.commit`), before the Bazel
-build. A patch that no longer applies fails the image build, so moving the
+build. `deploy/litert-lm/build-macos.sh` applies the same patches, the same way, to the same
+commit for the macOS arm64 build of `cloudburrow_generate` (#2159). A patch that no longer applies fails the image build, so moving the
 pin means re-cutting the patches against the new commit.
 
 | Patch | Upstream | Why | Author, licence |

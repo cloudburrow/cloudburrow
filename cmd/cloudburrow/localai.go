@@ -62,20 +62,25 @@ func buildLocalAI(cfg config.Config) (*vertexai.Server, error) {
 		return nil, fmt.Errorf("resolve -local-ai-model: %w", err)
 	}
 
-	image := cfg.LocalAI.Image
-	if image == "" {
-		image = config.LocalAIImage()
-	}
-	if err := preflightLocalAI(modelPath, image); err != nil {
-		return nil, err
-	}
 	modelID := cfg.LocalAI.ModelID
 	if modelID == "" {
 		modelID = catalogueIDFor(modelPath)
 	}
-
-	dir, file := filepath.Split(modelPath)
-	gen := vertexai.NewDockerGenerator(image, filepath.Clean(dir), file, modelID)
+	// On the Apple GPU when the accelerator is metal (#2159): the macOS
+	// cloudburrow_generate, a host process; else, or when it cannot be
+	// used, the runtime image's, on CPU.
+	gen := hostGenerator(cfg, modelPath, modelID, os.Stderr)
+	if gen == nil {
+		image := cfg.LocalAI.Image
+		if image == "" {
+			image = config.LocalAIImage()
+		}
+		if err := preflightLocalAI(modelPath, image); err != nil {
+			return nil, err
+		}
+		dir, file := filepath.Split(modelPath)
+		gen = vertexai.NewDockerGenerator(image, filepath.Clean(dir), file, modelID)
+	}
 
 	addr := net.JoinHostPort(cfg.BindAddress, strconv.Itoa(cfg.Endpoints.LocalAI))
 	srv := newLocalAIServer(addr, gen)
@@ -375,6 +380,9 @@ func printLocalAI(w io.Writer, srv *vertexai.Server, cfg config.Config) {
 	fmt.Fprintf(w, "\nlocal AI:  http://%s\n", srv.Addr())
 	if srv.Model() != "" {
 		fmt.Fprintf(w, "  model:   %s\n", srv.Model())
+		if a := srv.Accelerator(); a != "" {
+			fmt.Fprintf(w, "  runs on: %s\n", a)
+		}
 	}
 
 	if m, err := localai.Lookup(srv.Model()); err == nil && m.Publisher == localai.PublisherCommunity {

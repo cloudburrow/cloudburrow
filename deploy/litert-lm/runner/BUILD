@@ -9,8 +9,18 @@
 cc_binary(
     name = "cloudburrow_generate",
     srcs = ["cloudburrow_generate.cc"],
-    additional_linker_inputs = [":litert_lm_main.exported_symbols"],
-    linkopts = ["-Wl,--dynamic-list=$(location :litert_lm_main.exported_symbols)"],
+    additional_linker_inputs = select({
+        "@platforms//os:linux": [":litert_lm_main.exported_symbols"],
+        "//conditions:default": [],
+    }),
+    # litert_lm_main's own per-platform link options: the LiteRt* symbols
+    # are exported for the accelerator libraries it loads (the GPU one
+    # among them), by a dynamic list on Linux and ld64's -exported_symbol
+    # on macOS (#2159).
+    linkopts = select({
+        "@platforms//os:macos": ["-Wl,-exported_symbol,_LiteRt*"],
+        "//conditions:default": ["-Wl,--dynamic-list=$(location :litert_lm_main.exported_symbols)"],
+    }),
     deps = [
         "//runtime/components/constrained_decoding:constraint_provider_config",
         "//runtime/components/constrained_decoding:llg_constraint_config",

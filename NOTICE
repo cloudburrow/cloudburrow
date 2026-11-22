@@ -261,3 +261,15 @@ google-cloud-bigquery and bigquery-magics (Apache License, Version 2.0),
 IPython, pandas (BSD 3-Clause License), pyarrow (Apache License, Version
 2.0), db-dtypes and matplotlib into it. None of them is part of this
 repository or of the binary.
+
+The darwin/arm64 release archive carries, in litert-lm/, a macOS build of
+cloudburrow_generate (#2159): Google's LiteRT-LM
+(https://github.com/google-ai-edge/LiteRT-LM, Apache License 2.0) at the
+commit dependencies.json pins, with CloudBurrow's patches and runner from
+deploy/litert-lm, statically linking llguidance
+(https://github.com/guidance-ai/llguidance, MIT License), beside LiteRT-LM's
+prebuilt libGemmaModelConstraintProvider.dylib (Apache License 2.0) and
+libwebgpu_dawn.dylib, Dawn (https://dawn.googlesource.com/dawn, Copyright
+2017-2026 The Dawn & Tint Authors, BSD 3-Clause License). Their licence
+texts ship beside them as LICENSE-LiteRT-LM, LICENSE-llguidance and
+LICENSE-Dawn.

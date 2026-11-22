@@ -367,9 +367,10 @@ mlx-community/Qwen2.5-0.5B-Instruct-4bit on MLX's Metal backend: 234–245 token
 
 **What stays on CPU, and why.**
 
-- Gemini on LiteRT-LM (`cloudburrow_generate`) runs in its container: LiteRT-LM's macOS release has
-  a GPU backend, but CloudBurrow's runner is built from source with its own patches (per-request
-  sampler, logprobs, constraints) for Linux only; a macOS build of the runner is #2159.
+- Gemini on LiteRT-LM is no longer among them (#2159): with `--local-ai-accelerator metal` it runs
+  a macOS build of CloudBurrow's patched `cloudburrow_generate` on LiteRT-LM's GPU backend, as a
+  host process (150 tokens/s against 31 on CPU in its container, Gemma 4 E2B on an M4 Max); see
+  [generation.md](generation.md#on-the-apple-gpu-macos-on-apple-silicon-2159).
 - Embeddings on ONNX Runtime (the `onnx` build) stay on CPU: ONNX Runtime's Core ML execution
   provider was measured slower than its CPU provider on the shipped int8 EmbeddingGemma model
   (8 × 128 tokens: 782 ms on CPU, 989 ms with Core ML on CPU and GPU, 3028 ms on all units),

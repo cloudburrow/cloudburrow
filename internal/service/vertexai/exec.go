@@ -78,6 +78,29 @@ func NewDockerGenerator(image, modelDir, modelFile, modelID string) *ExecGenerat
 // (deploy/litert-lm/runner).
 const RunnerPath = "/usr/local/bin/cloudburrow_generate"
 
+// LiteRT-LM's executor backends, as cloudburrow_generate's --backend takes
+// them.
+const (
+	BackendCPU = "cpu"
+	BackendGPU = "gpu"
+)
+
+// NewHostGenerator returns a generator that runs a native
+// cloudburrow_generate (runner) on the host, one process per request as in
+// the container, with LiteRT-LM's backend: gpu is the Apple GPU through
+// WebGPU on Metal, on a Mac (#2159). Each request's process is a host
+// process: cancelling the request ends it directly, with no daemon between.
+func NewHostGenerator(runner, modelPath, modelID, backend string) *ExecGenerator {
+	return &ExecGenerator{
+		Command: runner,
+		Args:    []string{"--backend=" + backend, "--model_path=" + modelPath},
+		ModelID: modelID,
+		Runner:  true,
+		Backend: backend,
+		Host:    true,
+	}
+}
+
 // ExecGenerator runs the LiteRT-LM runtime as a subprocess, one process per
 // request, and streams its standard output.
 //
@@ -105,6 +128,22 @@ type ExecGenerator struct {
 	// standard output. Without it the command is litert_lm_main, whose
 	// output is parsed for its prompt echo, and options are refused.
 	Runner bool
+	// Backend is the LiteRT-LM backend the runner was given (BackendCPU
+	// when empty), and Host marks a runner running natively on the host
+	// rather than in the runtime container (NewHostGenerator).
+	Backend string
+	Host    bool
+}
+
+// Accelerator names where generation runs, for `up`'s summary.
+func (g *ExecGenerator) Accelerator() string {
+	switch {
+	case g.Host && g.Backend == BackendGPU:
+		return "the Apple GPU (LiteRT-LM GPU backend, WebGPU on Metal), a host process"
+	case g.Host:
+		return "CPU, a host process"
+	}
+	return "CPU, in the runtime container"
 }
 
 // Model implements Generator.
@@ -682,4 +721,21 @@ func lastLines(s string, n int) string {
 		lines = lines[len(lines)-n:]
 	}
 	return strings.Join(lines, "; ")
+}
+
+// Probe generates a single token with g and returns what failed, if
+// anything: a backend that cannot run the model (the GPU delegate, #2159)
+// fails here, at startup, rather than on the first request.
+func Probe(ctx context.Context, g Generator) error {
+	one := int32(1)
+	ch, errf, err := g.Generate(ctx, Request{Prompt: "Hi", MaxOutputTokens: &one})
+	if err != nil {
+		return err
+	}
+	for range ch {
+	}
+	if err := errf(); err != nil {
+		return err
+	}
+	return ctx.Err()
 }
