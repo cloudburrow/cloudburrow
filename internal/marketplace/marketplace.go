@@ -38,7 +38,7 @@ const (
 
 // LogoHosts are the hosts the console reads a product's logo from: Docker
 // Hub's logo CDN.
-var LogoHosts = map[string]bool{"djeqr6to3dedg.cloudfront.net": true}
+var LogoHosts = map[string]bool{"djeqr6to3dedg.cloudfront.net": true, "artifacthub.io": true}
 
 // Query is one search of a source.
 type Query struct {
@@ -142,6 +142,8 @@ type AppMeta struct {
 // Application's descriptor.
 type Plan struct {
 	Manifests []map[string]any
+	// Chart is a Helm chart's install, in place of Manifests.
+	Chart *ChartPlan
 	// Kinds are the components' group/kinds, the Application's
 	// componentKinds.
 	Kinds []GroupKind

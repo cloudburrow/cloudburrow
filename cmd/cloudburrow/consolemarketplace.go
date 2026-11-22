@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"path/filepath"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/marketplace"
@@ -53,12 +54,18 @@ func (m marketClusters) CreateCluster(ctx context.Context, project, zone, name s
 	return err
 }
 
-// marketplaceFor is the console's Marketplace: Docker Hub, deploying to
-// the clusters through kubectl.
-func marketplaceFor(p gkeClustersProvider) *console.Marketplace {
+// marketplaceFor is the console's Marketplace: Docker Hub, Artifact Hub's
+// Helm charts, Rancher's chart repositories and the Helm repositories a
+// user adds (kept in the state directory), deploying to the clusters
+// through kubectl and the Helm SDK.
+func marketplaceFor(p gkeClustersProvider, stateDir string) *console.Marketplace {
+	repos := &marketplace.UserRepos{File: filepath.Join(stateDir, "marketplace", "helm-repositories.json")}
 	return &console.Marketplace{
-		Catalog:  marketplace.NewCatalog(&marketplace.DockerHub{}),
+		Catalog: marketplace.NewCatalog(&marketplace.DockerHub{}, &marketplace.ArtifactHub{},
+			&marketplace.HelmIndex{SourceID: "rancher", SourceLabel: "Rancher", Repos: func() []marketplace.HelmRepo { return marketplace.RancherRepos }},
+			&marketplace.HelmIndex{SourceID: "helm", SourceLabel: "Helm", Repos: repos.List}),
 		Kube:     marketplace.Kube{Invoker: kubeInvoker},
 		Clusters: marketClusters{p: p},
+		Repos:    repos,
 	}
 }

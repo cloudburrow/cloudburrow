@@ -2432,6 +2432,12 @@ var parityRows = []parityRow{
 			"or Create a new cluster, Namespace or Create a namespace, App instance name, the image's tag, replicas, ports from its EXPOSE, Service type, " +
 			"environment, arguments and resources), then Deploy, which applies a Deployment, a Service and an app.k8s.io/v1beta1 Application (#2149)",
 		Tests: []string{"TestMarketplaceBrowseSearchAndProduct", "TestMarketplaceDeploysToApplications", "TestMarketplaceOffline"}},
+	{Resource: "Marketplace: Kubernetes apps from Helm charts", Screen: "/marketplace/repositories",
+		Offers: "Marketplace's Kubernetes apps: Helm charts from Artifact Hub, Rancher's chart repositories and the Helm repositories added on " +
+			"Helm repositories (/marketplace/repositories), each card labelled by its source; Configure with the chart version, its values.schema.json " +
+			"as fields and its values.yaml in an editor; Deploy installs the release with the Helm SDK and records it as an Application, whose page " +
+			"offers Upgrade and Delete, which uninstalls it (#2149)",
+		Tests: []string{"TestMarketplaceDeploysHelmChart"}},
 	{Resource: "Kubernetes Engine: Applications", Screen: "/kubernetes/applications",
 		Offers: "Applications (/kubernetes/applications): the Kubernetes Applications of the instance's cluster and the project's Kubernetes Engine " +
 			"clusters (name, status, type, version, namespace, cluster), Deploy from Marketplace; an application's page with its deploy progress " +

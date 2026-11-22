@@ -51,6 +51,9 @@ type Marketplace struct {
 	Catalog  *marketplace.Catalog
 	Kube     marketplace.Kube
 	Clusters MarketClusters
+	// Repos are the Helm repositories a user added (the Helm source); nil
+	// offers no setting.
+	Repos *marketplace.UserRepos
 }
 
 // SetMarketplace offers the Marketplace and the Applications page; nil
@@ -71,6 +74,116 @@ func (s *Server) marketplaceRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/marketplace/application", s.handleMarketApplication)
 	mux.HandleFunc("POST /api/marketplace/application/delete", s.handleMarketDeleteApplication)
 	mux.HandleFunc("GET /api/marketplace/logo", s.handleMarketLogo)
+	mux.HandleFunc("GET /api/marketplace/repos", s.handleMarketRepos)
+	mux.HandleFunc("POST /api/marketplace/repos/{action}", s.handleMarketRepoAction)
+	mux.HandleFunc("GET /api/marketplace/application/values", s.handleMarketAppValues)
+	mux.HandleFunc("POST /api/marketplace/application/upgrade", s.handleMarketUpgrade)
+}
+
+func (s *Server) handleMarketRepos(w http.ResponseWriter, _ *http.Request) {
+	if s.market == nil || s.market.Repos == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"configured": false, "repos": []any{}})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"configured": true, "repos": s.market.Repos.List(), "rancher": marketplace.RancherRepos})
+}
+
+func (s *Server) handleMarketRepoAction(w http.ResponseWriter, r *http.Request) {
+	if s.market == nil || s.market.Repos == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Helm repositories are not available on this instance"})
+		return
+	}
+	var req struct{ Name, URL string }
+	b, _ := io.ReadAll(io.LimitReader(r.Body, 4096))
+	if json.Unmarshal(b, &req) != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "the request is not JSON"})
+		return
+	}
+	var err error
+	switch r.PathValue("action") {
+	case "add":
+		err = s.market.Repos.Add(req.Name, req.URL)
+	case "delete":
+		err = s.market.Repos.Remove(req.Name)
+	default:
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such action"})
+		return
+	}
+	if err != nil {
+		marketError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"repos": s.market.Repos.List()})
+}
+
+func (s *Server) handleMarketAppValues(w http.ResponseWriter, r *http.Request) {
+	if s.market == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Applications are not available on this instance"})
+		return
+	}
+	v := r.URL.Query()
+	t, _, err := s.marketTarget(r.Context(), v.Get("project"), v.Get("cluster"))
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+	a, err := s.market.Kube.Application(r.Context(), t, v.Get("namespace"), v.Get("name"))
+	if err != nil {
+		marketError(w, err)
+		return
+	}
+	if a.Release == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": a.Name + " is not a Helm release"})
+		return
+	}
+	values, version, err := s.market.Kube.ReleaseValues(t, a.Namespace, a.Release)
+	if err != nil {
+		marketError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"values": values, "version": version, "source": a.Source, "product": a.Product})
+}
+
+func (s *Server) handleMarketUpgrade(w http.ResponseWriter, r *http.Request) {
+	if s.marketOff(w) {
+		return
+	}
+	var req struct {
+		Project, Cluster, Namespace, Name, Version string
+		Values                                     map[string]string
+	}
+	b, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if json.Unmarshal(b, &req) != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "the request is not JSON"})
+		return
+	}
+	t, _, err := s.marketTarget(r.Context(), req.Project, req.Cluster)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 6*time.Minute)
+	defer cancel()
+	a, err := s.market.Kube.Application(ctx, t, req.Namespace, req.Name)
+	if err != nil {
+		marketError(w, err)
+		return
+	}
+	src, err := s.market.Catalog.Source(a.Source)
+	if err != nil || a.Release == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": a.Name + " is not a Helm release from a Marketplace source"})
+		return
+	}
+	plan, err := src.Plan(ctx, a.Product, req.Version, marketplace.AppMeta{Name: a.Name, Namespace: a.Namespace}, req.Values)
+	if err != nil {
+		marketError(w, err)
+		return
+	}
+	if err := s.market.Kube.UpgradeApplication(ctx, t, a.Namespace, a.Name, plan); err != nil {
+		marketError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"upgraded": a.Name})
 }
 
 // logoCache holds the logos read, by URL.

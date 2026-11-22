@@ -170,3 +170,12 @@ under CC0 1.0 Universal, and licence texts from the SPDX License List
 being made available by the Linux Foundation and its contributors under the
 Creative Commons Attribution 3.0 licence; the sources' digests are in
 third_party/ssm-templates/.
+
+The binary is linked with the Helm SDK, helm.sh/helm/v3 v3.22.1, Copyright
+The Helm Authors, under the Apache License, Version 2.0, which the console
+Marketplace uses to install Helm charts (#2149), and with its dependencies,
+among them the Kubernetes client libraries (k8s.io/*, Copyright The
+Kubernetes Authors, Apache License, Version 2.0), and
+github.com/cyphar/filepath-securejoin, github.com/hashicorp/errwrap and
+github.com/hashicorp/go-multierror, unmodified, under the Mozilla Public
+License, Version 2.0, whose source is at their upstream repositories.

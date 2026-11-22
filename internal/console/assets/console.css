@@ -2839,3 +2839,6 @@ tr.log-entry.is-located { outline: 2px solid var(--accent); outline-offset: -2px
 @keyframes mp-indeterminate { from { background-position: 100% 0; } to { background-position: -100% 0; } }
 .mp-pods { margin: 8px 0 0; padding-left: 20px; font-family: var(--mono); font-size: var(--text-caption-size); }
 #application-components-table td.mono { white-space: pre-line; }
+.mp-yaml { width: 100%; min-height: 16rem; font-size: 0.8125rem; line-height: 1.45; tab-size: 2; white-space: pre; }
+.mp-upgrade { margin: 16px 0; }
+.mp-repos-link { margin-top: 24px; }

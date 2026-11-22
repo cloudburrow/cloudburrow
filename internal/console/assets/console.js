@@ -25906,10 +25906,16 @@ function marketLogo(p, size = 48) {
   return box;
 }
 
-function marketBadge(badge) {
+// A badge reads as its source names it: Docker Hub's "Docker Official
+// Image", Artifact Hub's "Official".
+function marketBadge(badge, source) {
   if (!badge || !MARKET_BADGES[badge]) return null;
-  return el("span", { class: `mp-badge mp-badge-${badge}`, "data-badge": badge, text: MARKET_BADGES[badge] });
+  const text = badge === "official" && source && source !== "dockerhub" ? "Official" : MARKET_BADGES[badge];
+  return el("span", { class: `mp-badge mp-badge-${badge}`, "data-badge": badge, text });
 }
+
+const MARKET_SOURCE_LABELS = { dockerhub: "Docker Hub", artifacthub: "Artifact Hub", rancher: "Rancher", helm: "Helm" };
+const marketIsChart = (p) => p.type === "Kubernetes apps";
 
 function marketCard(p) {
   return el("a", { class: "card mp-card", href: marketProductPath(p.source, p.id) + scopeSearch(), "data-product": p.id, "data-source": p.source },
@@ -25921,8 +25927,9 @@ function marketCard(p) {
     el("div", { class: "mp-card-foot" },
       el("span", { class: "mp-source", "data-source-label": p.sourceLabel, text: p.sourceLabel }),
       el("span", { class: "mp-type", text: p.type }),
-      marketBadge(p.badge),
-      p.pulls ? el("span", { class: "mp-pulls", text: `${p.pulls} pulls` }) : null));
+      marketBadge(p.badge, p.source),
+      p.pulls ? el("span", { class: "mp-pulls", text: `${p.pulls} pulls` }) : null,
+      !p.pulls && p.stars ? el("span", { class: "mp-pulls", text: `${p.stars} stars` }) : null));
 }
 
 // marketFilters reads the browse page's filter=group:value parameters.
@@ -25962,6 +25969,7 @@ async function renderMarketplace(view) {
   if (rest[0] === "product" && rest.length >= 3) return renderMarketProduct(view, rest[1], rest.slice(2).join("/"));
   if (rest[0] === "kubernetes" && rest[1] === "config" && rest.length >= 4) return renderMarketConfigure(view, rest[2], rest.slice(3).join("/"));
   if (rest[0] === "browse") return renderMarketBrowse(view);
+  if (rest[0] === "repositories" && rest.length === 1) return renderMarketRepos(view);
   if (!rest.length) return renderMarketHome(view);
   return notFound(view, location.pathname);
 }
@@ -25986,7 +25994,9 @@ async function renderMarketHome(view) {
   setChildren(view, header, hero,
     el("h2", { class: "mp-section-title", text: "Browse by category" }), cats,
     el("div", { class: "mp-section-head" }, el("h2", { class: "mp-section-title", text: "Popular products" }),
-      el("a", { href: marketBrowseURL("", {}, 1), id: "marketplace-view-all", text: "View all" })), popular);
+      el("a", { href: marketBrowseURL("", {}, 1), id: "marketplace-view-all", text: "View all" })), popular,
+    el("p", { class: "form-help mp-repos-link" }, "Kubernetes apps come from Artifact Hub, Rancher's chart repositories and ",
+      el("a", { href: "/marketplace/repositories" + scopeSearch(), id: "marketplace-repositories-link", text: "the Helm repositories you add" }), "."));
   announce("Marketplace");
   marketSources().then((s) => {
     if (!s.configured) { setChildren(cats, emptyState("Marketplace is not available", "This instance serves no Marketplace.")); return; }
@@ -26214,6 +26224,7 @@ async function renderMarketProduct(view, source, id) {
   }
   const wanted = new URLSearchParams(location.search).get("tab") || "overview";
   const current = MARKET_TABS.some((t) => t[0] === wanted) ? wanted : "overview";
+  const versionsWord = marketIsChart(p) ? "Versions" : "Tags";
   const configure = el("a", { class: "button primary", id: "marketplace-configure", href: marketConfigPath(source, p.id) + scopeSearch(), text: "Configure" });
   const head = el("div", { class: "mp-product-head", id: "marketplace-product" },
     marketLogo(p, 72),
@@ -26221,10 +26232,10 @@ async function renderMarketProduct(view, source, id) {
       el("h1", { text: p.name }),
       el("p", { class: "mp-publisher", text: p.publisher }),
       el("p", { class: "mp-description", text: p.description || "" }),
-      el("div", { class: "mp-card-foot" }, el("span", { class: "mp-source", text: p.sourceLabel }), el("span", { class: "mp-type", text: p.type }), marketBadge(p.badge)),
+      el("div", { class: "mp-card-foot" }, el("span", { class: "mp-source", text: p.sourceLabel }), el("span", { class: "mp-type", text: p.type }), marketBadge(p.badge, p.source)),
       el("div", { class: "mp-product-actions" }, configure)));
   const strip = el("div", { class: "tab-strip page-tabs", role: "tablist", "aria-label": "Product sections" },
-    ...MARKET_TABS.map(([tid, label]) => el("button", { type: "button", role: "tab", id: `marketplace-tab-${tid}`,
+    ...MARKET_TABS.map(([tid, label]) => [tid, tid === "versions" ? versionsWord : label]).map(([tid, label]) => el("button", { type: "button", role: "tab", id: `marketplace-tab-${tid}`,
       class: "tab" + (tid === current ? " is-selected" : ""), "aria-selected": String(tid === current), tabindex: tid === current ? "0" : "-1", text: label,
       onclick: () => { const u = new URL(location.href); u.searchParams.set("tab", tid); history.replaceState(history.state, "", u); renderMarketProduct(view, source, id); } })));
   const facts = el("aside", { class: "mp-facts", id: "marketplace-additional-details" },
@@ -26238,7 +26249,7 @@ async function renderMarketProduct(view, source, id) {
         el("a", { href: marketBrowseURL("", { category: [c.slug] }, 1), text: c.name })]).flat().filter(Boolean)) : null,
       p.pulls ? el("dt", { text: "Pulls" }) : null, p.pulls ? el("dd", { text: p.pulls }) : null,
       p.stars ? el("dt", { text: "Stars" }) : null, p.stars ? el("dd", { text: String(p.stars) }) : null,
-      p.pull ? el("dt", { text: "Image" }) : null, p.pull ? el("dd", { class: "mono", text: p.pull }) : null));
+      p.pull ? el("dt", { text: marketIsChart(p) ? "Chart" : "Image" }) : null, p.pull ? el("dd", { class: "mono", text: p.pull }) : null));
   let body;
   if (current === "overview") {
     body = el("div", { class: "mp-overview", id: "marketplace-overview" },
@@ -26253,9 +26264,9 @@ async function renderMarketProduct(view, source, id) {
       el("p", { text: `${p.publisher} supports this product. Get support from its page:` }),
       el("ul", {}, ...(p.support || []).map((l) => el("li", {}, el("a", { href: l.url, target: "_blank", rel: "noopener noreferrer", text: l.label })))));
   } else {
-    body = el("div", { id: "marketplace-versions" }, el("h2", { text: "Tags" }));
+    body = el("div", { id: "marketplace-versions" }, el("h2", { text: versionsWord }));
     const table = (vs) => el("div", { class: "table-wrap" }, el("table", { class: "table", id: "marketplace-tags" },
-      el("thead", {}, el("tr", {}, ...["Tag", "Last updated", "Size", "Architectures", ""].map((h) => el("th", { scope: "col", text: h })))),
+      el("thead", {}, el("tr", {}, ...[marketIsChart(p) ? "Version" : "Tag", "Last updated", "Size", "Architectures", ""].map((h) => el("th", { scope: "col", text: h })))),
       el("tbody", {}, ...vs.map((v) => el("tr", { "data-tag": v.name },
         el("td", { class: "mono", text: v.name }), el("td", { text: v.updated ? new Date(v.updated).toLocaleString() : "—" }),
         el("td", { text: v.size ? formatBytes(v.size) : "—" }), el("td", { text: (v.archs || []).join(", ") || "—" }),
@@ -26273,7 +26284,8 @@ async function renderMarketProduct(view, source, id) {
         } catch (err) { notify(err.message, "error"); }
         setBusy(more, false);
       } });
-    body.append(el("p", { class: "form-help", text: `${(p.versionsTotal || 0).toLocaleString()} tags` }), holder,
+    if (marketIsChart(p)) more.textContent = "Show more versions";
+    body.append(el("p", { class: "form-help", text: `${(p.versionsTotal || 0).toLocaleString()} ${versionsWord.toLowerCase()}` }), holder,
       (p.versionsTotal || 0) > 25 ? more : null);
   }
   setChildren(view, pageHeader("Product details", "", { back }), head, strip, el("div", { class: "mp-product-body" }, body, facts));
@@ -26287,8 +26299,9 @@ function marketField(p, value) {
   let control;
   if (p.type === "select") {
     control = el("select", { id, name: p.name }, ...(p.options || []).map((o) => el("option", { value: o, text: o, selected: o === value ? "selected" : null })));
-  } else if (p.type === "textarea") {
-    control = el("textarea", { id, name: p.name, rows: "4", spellcheck: "false" });
+  } else if (p.type === "textarea" || p.type === "yaml") {
+    control = el("textarea", { id, name: p.name, rows: p.type === "yaml" ? "16" : "4", spellcheck: "false",
+      class: p.type === "yaml" ? "mono mp-yaml" : null, "aria-describedby": p.help ? `${id}-help` : null });
     control.value = value || "";
   } else {
     control = el("input", { id, name: p.name, type: "text", value: value || "", inputmode: p.type === "number" ? "numeric" : null,
@@ -26296,7 +26309,7 @@ function marketField(p, value) {
   }
   return el("div", { class: "form-row", "data-param": p.name },
     el("label", { for: id }, el("span", { text: p.label }), p.required ? el("span", { class: "required-mark", "aria-hidden": "true", text: "*" }) : null),
-    control, p.help ? el("p", { class: "form-help", text: p.help }) : null);
+    control, p.help ? el("p", { class: "form-help", id: `${id}-help`, text: p.help }) : null);
 }
 
 async function renderMarketConfigure(view, source, id) {
@@ -26322,9 +26335,22 @@ async function renderMarketConfigure(view, source, id) {
       onclick: () => { const u = new URL(location.href); u.searchParams.set("tab", tid); history.replaceState(history.state, "", u); renderMarketConfigure(view, source, id); } })));
   const head = el("div", { class: "mp-config-head" }, marketLogo(product, 40),
     el("div", {}, el("h2", { text: product.name }), el("p", { class: "mp-publisher", text: `${product.publisher} · ${product.sourceLabel}` })));
-  // latest, as `docker pull` takes by default, unless a tag was chosen.
+  // latest, as `docker pull` and `helm install` take by default, unless a
+  // tag or version was chosen.
+  const chart = marketIsChart(product);
   const version = params.get("version") || "latest";
 
+  if (tab === "cli" && chart) {
+    const ver = version === "latest" ? "" : ` --version ${version}`;
+    const ref = product.pull && product.pull.startsWith("oci://") ? product.pull.replace(/:[^:/]*$/, "") : `REPO/${id.split("/").pop()}`;
+    setChildren(view, pageHeader(`Deploy ${product.name}`, "", { back }), head, strip,
+      el("div", { class: "card", id: "marketplace-cli" },
+        el("p", { text: "Install the chart with Helm against the cluster's kubeconfig:" }),
+        el("pre", { class: "mono", text: (ref.startsWith("REPO/") ? `helm repo add REPO ${product.pull || "REPO_URL"}\n` : "") +
+          `helm install APP_INSTANCE_NAME ${ref}${ver} --namespace NAMESPACE --create-namespace -f values.yaml` }),
+        el("p", { class: "form-help", text: "Deploy via Google Cloud does the same through the Helm SDK and records the release as a Kubernetes Application (app.k8s.io/v1beta1), so it appears on Kubernetes Engine's Applications page." })));
+    return;
+  }
   if (tab === "cli") {
     const image = `${product.pull || id}:${version}`;
     setChildren(view, pageHeader(`Deploy ${product.name}`, "", { back }), head, strip,
@@ -26442,7 +26468,7 @@ async function renderMarketConfigure(view, source, id) {
       setBusy(deploy, true);
       const op = recordOperation(`Deploy ${product.name} as ${name}`);
       try {
-        await send("/api/marketplace/deploy", "POST", { project, source, product: id, version: values.tag || version, cluster, namespace, createNamespace: creating, name, values });
+        await send("/api/marketplace/deploy", "POST", { project, source, product: id, version: values.tag || values.chartVersion || version, cluster, namespace, createNamespace: creating, name, values });
         op.succeeded("");
         notify(`Deploying ${name}`);
         navigate(`/kubernetes/applications/${encodeURIComponent(cluster)}/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`);
@@ -26524,7 +26550,8 @@ async function renderGKEApplication(view, cluster, namespace, name) {
   const a = r.application;
   const del = el("button", { type: "button", class: "header-button", id: "application-delete", text: "Delete",
     onclick: () => confirmDestructive({ title: `Delete ${a.name}?`, style: "confirm",
-      detail: `The application ${a.name} and its components (${(a.components || []).map((c) => `${c.kind} ${c.name}`).join(", ") || "none"}) are deleted from namespace ${a.namespace} of cluster ${a.cluster}.`,
+      detail: (a.release ? `The Helm release ${a.release} is uninstalled, and ` : "The application ") +
+        `${a.name} and its components (${(a.components || []).map((c) => `${c.kind} ${c.name}`).join(", ") || "none"}) are deleted from namespace ${a.namespace} of cluster ${a.cluster}.`,
       onConfirm: async () => {
         await send("/api/marketplace/application/delete", "POST", { project, cluster, namespace, name });
         notify(`Deleted application ${a.name}`);
@@ -26549,8 +26576,9 @@ async function renderGKEApplication(view, cluster, namespace, name) {
   const info = el("div", { class: "card", id: "application-info" },
     el("dl", { class: "api-facts" },
       ...[["Status", appStatus(a)], ["Type", a.type], ["Version", a.version], ["Cluster", a.cluster], ["Namespace", a.namespace],
-        ["Created", a.created ? new Date(a.created).toLocaleString() : ""], ["Source", { dockerhub: "Docker Hub" }[a.source] || a.source],
-        ["Image", a.image], ["Description", a.description]].filter(([, v]) => v).flatMap(([k, v]) => [el("dt", { text: k }),
+        ["Created", a.created ? new Date(a.created).toLocaleString() : ""], ["Source", MARKET_SOURCE_LABELS[a.source] || a.source],
+        ["Image", a.image], ["Helm release", a.release ? `${a.release} (revision ${a.revision || "—"}, ${a.releaseStatus || "unknown"})` : ""],
+        ["Description", a.description]].filter(([, v]) => v).flatMap(([k, v]) => [el("dt", { text: k }),
         el("dd", { class: k === "Image" ? "mono" : null }, v)])),
     (a.links || []).length ? el("p", {}, ...a.links.map((l, i) => [i ? " · " : null, el("a", { href: l.url, target: "_blank", rel: "noopener noreferrer", text: l.description || l.url })]).flat().filter(Boolean)) : null,
     a.source && a.product ? el("p", {}, el("a", { href: marketProductPath(a.source, a.product) + scopeSearch(), id: "application-product", text: "View in Marketplace" })) : null);
@@ -26571,12 +26599,106 @@ async function renderGKEApplication(view, cluster, namespace, name) {
   const body = current === "yaml"
     ? el("pre", { class: "mono", id: "application-yaml", text: JSON.stringify(a.object ? redactForView(a.object) : {}, null, 2) })
     : el("div", {}, progress, info, components);
-  setChildren(view, pageHeader(a.name, "Application details", { back, actions: [del, refreshButton(() => renderGKEApplication(view, cluster, namespace, name))] }), strip, body);
+  // A Helm release is upgraded in place, as `helm upgrade` does: its
+  // chart version and values, starting from the release's own.
+  const upgrade = a.release && a.source && a.product ? el("button", { type: "button", class: "header-button", id: "application-upgrade", text: "Upgrade",
+    onclick: async () => {
+      setBusy(upgrade, true);
+      let cur;
+      try { cur = await api(`/api/marketplace/application/values?${q}`); } catch (err) { setBusy(upgrade, false); notify(err.message, "error"); return; }
+      setBusy(upgrade, false);
+      const ver = el("input", { type: "text", id: "application-upgrade-version", value: cur.version || "", autocomplete: "off", spellcheck: "false" });
+      const vals = el("textarea", { id: "application-upgrade-values", class: "mono mp-yaml", rows: "14", spellcheck: "false" });
+      vals.value = cur.values || "";
+      const err = el("p", { class: "form-error", role: "alert", hidden: true });
+      const go = el("button", { type: "submit", class: "primary", id: "application-upgrade-submit", text: "Upgrade" });
+      const panel = el("form", { class: "card mp-upgrade", id: "application-upgrade-form",
+        onsubmit: async (e) => {
+          e.preventDefault();
+          setBusy(go, true);
+          err.hidden = true;
+          const op = recordOperation(`Upgrade ${a.name}`);
+          try {
+            await send("/api/marketplace/application/upgrade", "POST", { project, cluster, namespace, name, version: ver.value.trim(),
+              values: { chartVersion: ver.value.trim(), values: vals.value } });
+            op.succeeded("");
+            notify(`Upgraded ${a.name}`);
+            renderGKEApplication(view, cluster, namespace, name);
+          } catch (x) { op.failed(x.message); setBusy(go, false); err.textContent = x.message; err.hidden = false; }
+        } },
+        el("h2", { text: `Upgrade ${a.name}` }),
+        el("div", { class: "form-row" }, el("label", { for: "application-upgrade-version", text: "Chart version" }), ver),
+        el("div", { class: "form-row" }, el("label", { for: "application-upgrade-values", text: "Values (YAML)" }), vals,
+          el("p", { class: "form-help", text: "The release's values. Upgrade installs the chart version with them, as helm upgrade does." })),
+        err, el("div", { class: "form-actions" }, go,
+          el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => panel.remove() })));
+      const old = view.querySelector("#application-upgrade-form");
+      if (old) old.remove();
+      strip.after(panel);
+      ver.focus();
+    } }) : null;
+  setChildren(view, pageHeader(a.name, "Application details", { back, actions: [upgrade, del, refreshButton(() => renderGKEApplication(view, cluster, namespace, name))].filter(Boolean) }), strip, body);
   announce(`Application ${a.name}: ${a.status}`);
   if (a.status === "Pending" && current === "details") {
     stopMarketPoll();
     MARKET_POLL = setTimeout(() => { if (view.isConnected && location.pathname === appPath(a)) renderGKEApplication(view, cluster, namespace, name); }, 2500);
   }
+}
+
+// --- Helm repositories ---------------------------------------------------
+
+async function renderMarketRepos(view) {
+  const back = "/marketplace" + scopeSearch();
+  setChildren(view, pageHeader("Helm repositories", "", { back }), loadingState(3, { what: "repositories" }));
+  let r;
+  try { r = await api("/api/marketplace/repos"); } catch (err) {
+    setChildren(view, pageHeader("Helm repositories", "", { back }), errorState("Could not read the repositories", err.message, () => renderMarketRepos(view)));
+    return;
+  }
+  if (!r.configured) {
+    setChildren(view, pageHeader("Helm repositories", "", { back }), emptyState("Not available", "This instance's Marketplace takes no Helm repositories."));
+    return;
+  }
+  const row = (repo, removable) => el("tr", { "data-repo": repo.name },
+    el("td", { class: "mono", text: repo.name }), el("td", { class: "mono", text: repo.url }),
+    el("td", {}, removable ? el("button", { type: "button", class: "link-button", "data-remove": repo.name, text: "Remove",
+      onclick: () => confirmDestructive({ title: `Remove ${repo.name}?`, style: "confirm", confirmLabel: "Remove", consequence: "",
+        detail: `Marketplace stops listing ${repo.name}'s charts. Apps already deployed from it stay.`,
+        onConfirm: async () => { await send("/api/marketplace/repos/delete", "POST", { name: repo.name }); notify(`Removed ${repo.name}`); renderMarketRepos(view); } }) })
+      : el("span", { class: "form-help", text: "Rancher" })));
+  const name = el("input", { type: "text", id: "marketplace-repo-name", required: "required", autocomplete: "off", spellcheck: "false", placeholder: "bitnami" });
+  const url = el("input", { type: "url", id: "marketplace-repo-url", required: "required", autocomplete: "off", spellcheck: "false", placeholder: "https://charts.bitnami.com/bitnami" });
+  const err = el("p", { class: "form-error", role: "alert", hidden: true, id: "marketplace-repo-error" });
+  const add = el("button", { type: "submit", class: "primary", id: "marketplace-repo-add", text: "Add repository" });
+  const form = el("form", { class: "card", id: "marketplace-repo-form", novalidate: "novalidate",
+    onsubmit: async (e) => {
+      e.preventDefault();
+      err.hidden = true;
+      setBusy(add, true);
+      try {
+        await send("/api/marketplace/repos/add", "POST", { name: name.value.trim(), url: url.value.trim() });
+        MARKET_SOURCES = null;
+        notify(`Added ${name.value.trim()}`);
+        renderMarketRepos(view);
+      } catch (x) { setBusy(add, false); err.textContent = x.message; err.hidden = false; }
+    } },
+    el("h2", { text: "Add a repository" }),
+    el("div", { class: "form-row" }, el("label", { for: "marketplace-repo-name", text: "Name" }), name,
+      el("p", { class: "form-help", text: "Lowercase letters, digits and dashes. Its charts are listed under the Helm source as NAME/CHART." })),
+    el("div", { class: "form-row" }, el("label", { for: "marketplace-repo-url", text: "Repository URL" }), url,
+      el("p", { class: "form-help", text: "An https chart repository, the URL its index.yaml is under, as helm repo add takes. It is read anonymously." })),
+    err, el("div", { class: "form-actions" }, add));
+  const table = (rows, id) => el("div", { class: "table-wrap" }, el("table", { class: "table", id },
+    el("thead", {}, el("tr", {}, ...["Name", "URL", ""].map((h) => el("th", { scope: "col", text: h })))),
+    el("tbody", {}, ...rows)));
+  setChildren(view, pageHeader("Helm repositories", "", { back }),
+    el("p", { class: "subtitle", text: "Marketplace lists the charts of Artifact Hub, of Rancher's chart repositories and of the repositories added here, and installs them with Helm." }),
+    el("h2", { text: "Your repositories" }),
+    (r.repos || []).length ? table(r.repos.map((x) => row(x, true)), "marketplace-repos-table")
+      : el("p", { class: "form-help", id: "marketplace-repos-empty", text: "No repositories added." }),
+    form,
+    el("h2", { text: "Rancher" }), table((r.rancher || []).map((x) => row(x, false)), "marketplace-rancher-table"));
+  announce("Helm repositories");
 }
 
 function redactForView(o) {

@@ -178,7 +178,7 @@ func buildConsole(d consoleDeps) *console.Server {
 	// Marketplace (#2149): Docker Hub, deployed to this instance's cluster
 	// or the project's Kubernetes Engine clusters as Applications.
 	srv.SetMarketplace(marketplaceFor(gkeClustersProvider{name: d.cfg.ClusterName(), kubeconfig: kubeconfig,
-		own: d.cfg.Cluster.Namespace, svc: d.gke, gkeDir: gkeDir(d.cfg)}))
+		own: d.cfg.Cluster.Namespace, svc: d.gke, gkeDir: gkeDir(d.cfg)}, d.cfg.StateDir))
 	srv.SetMetrics(metrics)
 	// The history is the console's, not a browser tab's. Kept server-side so
 	// it survives a reload and so the sampling rate does not depend on how

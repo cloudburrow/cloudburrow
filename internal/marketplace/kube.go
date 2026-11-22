@@ -75,6 +75,8 @@ type Kube struct {
 	Invoker k8s.Invoker
 	// Wait bounds the wait for the CRD to be established.
 	Wait time.Duration
+	// Helm makes the Helm SDK's configuration; nil reads the kubeconfig.
+	Helm HelmConfigFunc
 }
 
 func (k Kube) runner(kubeconfig, namespace string) *k8s.Runner {
@@ -164,16 +166,23 @@ func (k Kube) Deploy(ctx context.Context, t Target, app AppMeta, createNamespace
 		if !createNamespace {
 			return fmt.Errorf("%w: namespace %s does not exist; choose Create a namespace", ErrBadRequest, app.Namespace)
 		}
+		if plan.Chart != nil {
+			goto checked // Helm's install creates it
+		}
 		ns, _ := json.Marshal(map[string]any{"apiVersion": "v1", "kind": "Namespace", "metadata": map[string]any{"name": app.Namespace}})
 		if err := root.Apply(ctx, string(ns), k8s.ApplyOptions{}); err != nil {
 			return fmt.Errorf("create namespace %s: %w", app.Namespace, cause(err))
 		}
 	}
+checked:
 	r := k.runner(t.Kubeconfig, app.Namespace)
 	if _, err := r.Get(ctx, AppResource, app.Name, "name"); err == nil {
 		return fmt.Errorf("%w: an application named %s already exists in namespace %s; the name must be unique within the namespace", ErrBadRequest, app.Name, app.Namespace)
 	} else if !k8s.IsNotFound(err) {
 		return fmt.Errorf("read application %s: %w", app.Name, cause(err))
+	}
+	if plan.Chart != nil {
+		return k.deployChart(ctx, t, app, createNamespace, plan)
 	}
 	kinds := make([]any, 0, len(plan.Kinds))
 	for _, gk := range plan.Kinds {
@@ -232,26 +241,29 @@ func (k Kube) Deploy(ctx context.Context, t Target, app AppMeta, createNamespace
 
 // App is one Application's row and page.
 type App struct {
-	Name        string            `json:"name"`
-	Namespace   string            `json:"namespace"`
-	Cluster     string            `json:"cluster"`
-	Type        string            `json:"type"`
-	Version     string            `json:"version"`
-	Description string            `json:"description,omitempty"`
-	Created     string            `json:"created"`
-	Phase       string            `json:"phase"`
-	Status      string            `json:"status"`
-	Detail      string            `json:"detail,omitempty"`
-	Source      string            `json:"source,omitempty"`
-	Product     string            `json:"product,omitempty"`
-	Image       string            `json:"image,omitempty"`
-	Release     string            `json:"release,omitempty"`
-	Links       []AppLink         `json:"links,omitempty"`
-	Labels      map[string]string `json:"labels,omitempty"`
-	Kinds       []GroupKind       `json:"componentKinds,omitempty"`
-	Components  []Component       `json:"components,omitempty"`
-	Pods        []Pod             `json:"pods,omitempty"`
-	Object      json.RawMessage   `json:"object,omitempty"`
+	Name        string `json:"name"`
+	Namespace   string `json:"namespace"`
+	Cluster     string `json:"cluster"`
+	Type        string `json:"type"`
+	Version     string `json:"version"`
+	Description string `json:"description,omitempty"`
+	Created     string `json:"created"`
+	Phase       string `json:"phase"`
+	Status      string `json:"status"`
+	Detail      string `json:"detail,omitempty"`
+	Source      string `json:"source,omitempty"`
+	Product     string `json:"product,omitempty"`
+	Image       string `json:"image,omitempty"`
+	Release     string `json:"release,omitempty"`
+	// ReleaseStatus and Revision are a Helm release's (deployed, 2).
+	ReleaseStatus string            `json:"releaseStatus,omitempty"`
+	Revision      int               `json:"revision,omitempty"`
+	Links         []AppLink         `json:"links,omitempty"`
+	Labels        map[string]string `json:"labels,omitempty"`
+	Kinds         []GroupKind       `json:"componentKinds,omitempty"`
+	Components    []Component       `json:"components,omitempty"`
+	Pods          []Pod             `json:"pods,omitempty"`
+	Object        json.RawMessage   `json:"object,omitempty"`
 }
 
 // Component is one of an app's objects.
@@ -394,7 +406,13 @@ func (k Kube) fill(ctx context.Context, t Target, a *App) {
 	r := k.runner(t.Kubeconfig, a.Namespace)
 	sel := LabelNameKey + "=" + a.Name
 	pending, failed := false, ""
-	for _, gk := range a.Kinds {
+	kinds := a.Kinds
+	if a.Release != "" {
+		sel = "app.kubernetes.io/instance=" + a.Name
+		pending = k.releaseComponents(ctx, t, a)
+		kinds = nil
+	}
+	for _, gk := range kinds {
 		out, err := r.List(ctx, kindResource(gk), sel, "json")
 		if err != nil {
 			a.Components = append(a.Components, Component{Kind: gk.Kind, Group: gk.Group, Status: StatusFailed, Detail: cause(err).Error()})
@@ -548,6 +566,12 @@ func (k Kube) DeleteApplication(ctx context.Context, t Target, namespace, name s
 		return err
 	}
 	r := k.runner(t.Kubeconfig, namespace)
+	if a.Release != "" {
+		if err := k.uninstall(t, namespace, a.Release); err != nil {
+			return err
+		}
+		a.Kinds = nil
+	}
 	for _, gk := range a.Kinds {
 		if err := r.DeleteSelected(ctx, kindResource(gk), LabelNameKey+"="+name, true); err != nil {
 			return fmt.Errorf("delete %s's %s: %w", name, gk.Kind, cause(err))
