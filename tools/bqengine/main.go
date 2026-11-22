@@ -79,9 +79,21 @@ type Patched struct {
 	Dir string `json:"dir"`
 	// Patches are applied in order, relative to the wrapper module.
 	Patches []string `json:"patches"`
+	// Rewrites run, in order, after the patches: a change to generated
+	// code too wide for a patch (keepalive.go, #2134).
+	Rewrites []Rewrite `json:"rewrites,omitempty"`
 	// Files replace whole files of the copy after the patches: a binary
 	// file, which a patch cannot change (#2008).
 	Files []File `json:"files,omitempty"`
+}
+
+// Rewrite is one of the rewrites bqengine knows, run on one file of a
+// patched copy.
+type Rewrite struct {
+	// Name is the rewrite's name in rewrites.
+	Name string `json:"name"`
+	// Path is the file in the copy, relative to its root.
+	Path string `json:"path"`
 }
 
 // File is one file of a patched copy replaced by a file in the wrapper
@@ -250,6 +262,13 @@ func inputHash(dir string, src Sources) (string, error) {
 	files := []string{"sources.json", "go.mod", "go.sum"}
 	for _, p := range src.Patched {
 		files = append(files, p.Patches...)
+		for _, r := range p.Rewrites {
+			rw, ok := rewrites[r.Name]
+			if !ok {
+				return "", fmt.Errorf("sources.json: %s: no rewrite %q", p.Path, r.Name)
+			}
+			fmt.Fprintf(h, "rewrite %s %s %s\n", r.Name, rw.version, r.Path)
+		}
 		for _, f := range p.Files {
 			files = append(files, f.From)
 		}
@@ -355,6 +374,12 @@ func prepare(ctx context.Context, dir string, src Sources) error {
 			}
 			fmt.Printf("bqengine: applied %s to %s@%s\n", name, p.Path, p.Version)
 		}
+		for _, r := range p.Rewrites {
+			if err := applyRewrite(dst, r); err != nil {
+				return fmt.Errorf("%s: rewrite %s of %s: %w", p.Path, r.Name, r.Path, err)
+			}
+			fmt.Printf("bqengine: rewrote %s of %s@%s (%s)\n", r.Path, p.Path, p.Version, r.Name)
+		}
 		for _, f := range p.Files {
 			if err := replaceFile(dir, dst, f); err != nil {
 				return fmt.Errorf("%s: %w", p.Path, err)
@@ -382,6 +407,28 @@ func prepare(ctx context.Context, dir string, src Sources) error {
 		}
 	}
 	return nil
+}
+
+// applyRewrite runs the rewrite r names on its file in the copy at dst.
+func applyRewrite(dst string, r Rewrite) error {
+	rw, ok := rewrites[r.Name]
+	if !ok {
+		return fmt.Errorf("no such rewrite")
+	}
+	target := filepath.Join(dst, filepath.FromSlash(r.Path))
+	info, err := os.Stat(target)
+	if err != nil {
+		return err
+	}
+	b, err := os.ReadFile(target)
+	if err != nil {
+		return err
+	}
+	out, err := rw.apply(b)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(target, out, info.Mode().Perm())
 }
 
 // replaceFile writes f.From over f.Path in the copy at dst, once its hash
