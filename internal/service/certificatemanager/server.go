@@ -109,6 +109,8 @@ type Server struct {
 	targets func(project string) []Target
 	// issuing are the certificates being issued, outside the lock.
 	issuing map[string]bool
+	// trustUsers names what uses a trust config (UseTrustUsers).
+	trustUsers func(name string) []string
 }
 
 // New returns a Server with its state restored.

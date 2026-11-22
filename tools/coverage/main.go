@@ -108,6 +108,7 @@ import (
 	_ "cloud.google.com/go/memorystore/apiv1/memorystorepb"
 	_ "cloud.google.com/go/monitoring/apiv3/v2/monitoringpb"
 	_ "cloud.google.com/go/monitoring/dashboard/apiv1/dashboardpb"
+	_ "cloud.google.com/go/networksecurity/apiv1/networksecuritypb"
 	_ "cloud.google.com/go/parametermanager/apiv1/parametermanagerpb"
 	_ "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	_ "cloud.google.com/go/redis/apiv1/redispb"
@@ -369,6 +370,11 @@ var areas = []area{
 	// own, JSON on the Compute Engine port; Certificate Manager's Locations
 	// and Operations mixins are other areas' rows.
 	{Key: "certificatemanager", Title: "Certificate Manager (v1)", Own: true, Services: []string{"google.cloud.certificatemanager.v1.CertificateManager"}},
+	// Network Security (#2160): CloudBurrow's own, JSON on the Compute
+	// Engine port; the parts Cloud Load Balancing reads (TLS policies and
+	// authorization policies). Its Locations and Operations mixins are
+	// other areas' rows.
+	{Key: "networksecurity", Title: "Network Security (v1)", Own: true, Services: []string{"google.cloud.networksecurity.v1.NetworkSecurity"}},
 	{Key: "iap", Title: "Identity-Aware Proxy (v1)", Own: true,
 		Services: []string{"google.cloud.iap.v1.IdentityAwareProxyAdminService", "google.cloud.iap.v1.IdentityAwareProxyOAuthService"}},
 	{Key: "workflows", Title: "Workflows and Workflow Executions (v1)", Own: true,

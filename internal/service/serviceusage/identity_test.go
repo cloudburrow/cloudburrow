@@ -114,6 +114,7 @@ func TestGenerateServiceIdentityEveryEntry(t *testing.T) {
 		"apphub.googleapis.com":                 "gcp-sa-apphub.iam.gserviceaccount.com",
 		"vpcaccess.googleapis.com":              "gcp-sa-vpcaccess.iam.gserviceaccount.com",
 		"certificatemanager.googleapis.com":     "gcp-sa-certificatemanager.iam.gserviceaccount.com",
+		"networksecurity.googleapis.com":        "gcp-sa-networksecurity.iam.gserviceaccount.com",
 		"iap.googleapis.com":                    "gcp-sa-iap.iam.gserviceaccount.com",
 		"workflowexecutions.googleapis.com":     "",
 		"kmsinventory.googleapis.com":           "",

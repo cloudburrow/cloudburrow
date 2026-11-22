@@ -126,8 +126,8 @@ func buildHTTPProxy(tls bool) func(s *Server, x lbCtx, b, old obj) (obj, error) 
 		if !tls {
 			return o, nil
 		}
-		if str(b, "serverTlsPolicy") != "" || str(b, "authorizationPolicy") != "" {
-			return nil, unimplemented("mutual TLS (serverTlsPolicy) and authorization policies are not served (#2153)")
+		if err := s.proxyNSFields(x, b, o); err != nil {
+			return nil, err
 		}
 		if err := s.proxyCertFields(x, b, o); err != nil {
 			return nil, err

@@ -37,6 +37,7 @@ require (
 	cloud.google.com/go/logging v1.20.0
 	cloud.google.com/go/longrunning v1.5.0
 	cloud.google.com/go/memorystore v1.7.0
+	cloud.google.com/go/networksecurity v0.21.1
 	cloud.google.com/go/observability v0.1.1
 	cloud.google.com/go/orgpolicy v1.22.1
 	cloud.google.com/go/parametermanager v1.2.1
