@@ -64,6 +64,9 @@ var serviceUsageAPIs = []struct {
 	{config.ServiceGKE, serviceusage.API{Name: "container.googleapis.com", Title: "Kubernetes Engine API"}},
 	{config.ServiceMonitoring, serviceusage.API{Name: "monitoring.googleapis.com", Title: "Cloud Monitoring API"}},
 	{config.ServiceCompute, serviceusage.API{Name: "compute.googleapis.com", Title: "Compute Engine API"}},
+	// The Network Connectivity API's service connectivity automation
+	// (#2141), on the Compute Engine port.
+	{config.ServiceCompute, serviceusage.API{Name: "networkconnectivity.googleapis.com", Title: "Network Connectivity API"}},
 	{config.ServiceWorkflows, serviceusage.API{Name: "workflows.googleapis.com", Title: "Workflows API"}},
 	{config.ServiceWorkflows, serviceusage.API{Name: "workflowexecutions.googleapis.com", Title: "Workflow Executions API"}},
 	{config.ServiceParameterManager, serviceusage.API{Name: "parametermanager.googleapis.com", Title: "Parameter Manager API"}},

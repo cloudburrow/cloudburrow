@@ -100,6 +100,9 @@ type Server struct {
 	defaultDeleted map[string]bool
 	// seeded are the projects whose default network has been made.
 	seeded map[string]bool
+	// automated are the forwarding rules service connectivity automation
+	// made (#2141), which are not deleted directly.
+	automated map[string]bool
 	// waiters are the running operations, closed when each is done.
 	waiters map[string]chan struct{}
 	// queue is, by resource, the last operation started on it, closed when
@@ -124,7 +127,7 @@ func New(opts Options) (*Server, error) {
 		opts.Now = time.Now
 	}
 	s := &Server{opts: opts, res: map[string]obj{}, ops: map[string]obj{},
-		defaultDeleted: map[string]bool{}, seeded: map[string]bool{}, waiters: map[string]chan struct{}{},
+		defaultDeleted: map[string]bool{}, seeded: map[string]bool{}, automated: map[string]bool{}, waiters: map[string]chan struct{}{},
 		queue: map[string]chan struct{}{}, queued: map[string]int{}}
 	if err := s.restore(); err != nil {
 		return nil, err
@@ -172,6 +175,9 @@ type state struct {
 	Operations     map[string]obj  `json:"operations"`
 	DefaultDeleted map[string]bool `json:"defaultDeleted,omitempty"`
 	Seeded         map[string]bool `json:"seeded,omitempty"`
+	// Automated are the Private Service Connect endpoints service
+	// connectivity automation made (#2141, autoendpoints.go).
+	Automated map[string]bool `json:"automated,omitempty"`
 }
 
 func (s *Server) restore() error {
@@ -198,6 +204,9 @@ func (s *Server) restore() error {
 	if st.DefaultDeleted != nil {
 		s.defaultDeleted = st.DefaultDeleted
 	}
+	if st.Automated != nil {
+		s.automated = st.Automated
+	}
 	if st.Seeded != nil {
 		s.seeded = st.Seeded
 	}
@@ -209,7 +218,7 @@ func (s *Server) saveLocked() error {
 	if s.opts.State == "" {
 		return nil
 	}
-	b, err := json.Marshal(state{Resources: s.res, Operations: s.ops, DefaultDeleted: s.defaultDeleted, Seeded: s.seeded})
+	b, err := json.Marshal(state{Resources: s.res, Operations: s.ops, DefaultDeleted: s.defaultDeleted, Seeded: s.seeded, Automated: s.automated})
 	if err != nil {
 		return err
 	}
@@ -229,10 +238,15 @@ func (s *Server) ResetProject(project string) error {
 	defer s.mu.Unlock()
 	if project == "" {
 		s.res, s.ops = map[string]obj{}, map[string]obj{}
-		s.defaultDeleted, s.seeded = map[string]bool{}, map[string]bool{}
+		s.defaultDeleted, s.seeded, s.automated = map[string]bool{}, map[string]bool{}, map[string]bool{}
 		return s.saveLocked()
 	}
 	prefix := "projects/" + project + "/"
+	for k := range s.automated {
+		if strings.HasPrefix(k, prefix) {
+			delete(s.automated, k)
+		}
+	}
 	for k := range s.res {
 		if strings.HasPrefix(k, prefix) {
 			delete(s.res, k)

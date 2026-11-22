@@ -66,6 +66,7 @@ var apiLibrary = map[string]apiLibraryInfo{
 	"workflows.googleapis.com":            {"Developer tools", "Manages workflow definitions: orchestrates and automates Google Cloud and HTTP-based API services with serverless workflows.", "workflows"},
 	"workflowexecutions.googleapis.com":   {"Developer tools", "Executes workflows, lists their executions, their step entries and callbacks, and cancels them.", "workflows"},
 	"compute.googleapis.com":              {"Compute", "Creates and runs virtual machines on Google Cloud Platform; CloudBurrow serves its VPC networking: networks, subnets, firewall rules, routes and IP addresses.", ""},
+	"networkconnectivity.googleapis.com":  {"Networking", "Connects VPC networks to Google and partner services through service connection policies, which make Private Service Connect endpoints for them.", ""},
 	"container.googleapis.com":            {"Compute", "Builds and manages container-based applications, powered by the open source Kubernetes technology.", ""},
 	"containeranalysis.googleapis.com":    {"Developer tools", "Stores and reads the notes and occurrences of software artifacts, vulnerabilities among them.", ""},
 	"containerscanning.googleapis.com":    {"Security", "Scans the container images pushed to Artifact Registry for vulnerabilities.", ""},

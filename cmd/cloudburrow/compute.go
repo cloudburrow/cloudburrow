@@ -11,11 +11,16 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c"
+	"google.golang.org/grpc"
+
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 	"github.com/cloudburrow/cloudburrow/internal/service/compute"
 	"github.com/cloudburrow/cloudburrow/internal/service/gke"
+	"github.com/cloudburrow/cloudburrow/internal/service/networkconnectivity"
 	"github.com/cloudburrow/cloudburrow/internal/service/redisadmin"
 	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
 	"github.com/cloudburrow/cloudburrow/internal/sysparams"
@@ -49,6 +54,10 @@ type computeService struct {
 	// reach (#2141); nil without Cloud SQL.
 	sql    func() *sqladmin.Server
 	svcIPs *serviceIPs
+	// nc is the Network Connectivity API (#2141), served on this port,
+	// and ncGRPC its gRPC server.
+	nc     *networkconnectivity.Server
+	ncGRPC *grpc.Server
 }
 
 func newComputeService(cfg config.Config) *computeService {
@@ -117,10 +126,17 @@ func (s *computeService) Start(ctx context.Context) error {
 	if s.wrapJSON != nil {
 		h = s.wrapJSON(h)
 	}
+	// The Network Connectivity API (#2141), gRPC and JSON, on this port.
+	h, err = s.startNetworkConnectivity(api, h)
+	if err != nil {
+		_ = ln.Close()
+		return err
+	}
 	if s.requests != nil {
 		h = rest.Observe(h, s.requests)
 	}
-	s.srv = &http.Server{Handler: hostguard.Wrap(sysparams.Wrap(h, sysparams.Options{V1Errors: true})), ReadHeaderTimeout: 10 * time.Second}
+	s.srv = &http.Server{Handler: h2c.NewHandler(hostguard.Wrap(sysparams.Wrap(h, sysparams.Options{V1Errors: true})), &http2.Server{}),
+		ReadHeaderTimeout: 10 * time.Second}
 	go func() { _ = s.srv.Serve(ln) }()
 	return nil
 }
@@ -135,6 +151,7 @@ func (s *computeService) Stop(ctx context.Context) error {
 	if s.srv == nil {
 		return nil
 	}
+	defer s.stopNetworkConnectivity()
 	return s.srv.Shutdown(ctx)
 }
 
@@ -203,6 +220,13 @@ func (r *computeResetter) ResetProject(_ context.Context, project string) error 
 	api := r.svc.API()
 	if api == nil {
 		return errors.New("the Compute Engine API has not started")
+	}
+	// The Network Connectivity API's policies and maps (#2141) first:
+	// they remove the endpoints they made.
+	if nc := r.svc.NetworkConnectivity(); nc != nil {
+		if err := nc.ResetProject(project); err != nil {
+			return err
+		}
 	}
 	return api.ResetProject(project)
 }

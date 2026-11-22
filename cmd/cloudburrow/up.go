@@ -1059,6 +1059,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			sqlAdminSrv.SetNetworks(computeSvc.sqlNetworks)
 			// Its private IPs are reachable from the networks' VMs (#2141).
 			computeSvc.sql = func() *sqladmin.Server { return sqlAdminRef }
+			// pscAutoConnections, through the Network Connectivity API's
+			// service connection policies (#2141).
+			sqlAdminSrv.SetAutoConnector(sqlAutoConnections{svc: computeSvc})
 		}
 		// executeSql reads a user's password from Secret Manager (#1462).
 		if secretsSvc != nil {

@@ -138,6 +138,9 @@ func (s *Server) assignNetworkingLocked(next *Spec) error {
 	if err := checkZones(*next); err != nil {
 		return err
 	}
+	if err := checkAutoConnections(*next); err != nil {
+		return err
+	}
 	pn := next.privateNetwork()
 	if !next.publicIP() && pn == "" && !next.pscEnabled() {
 		// UNVERIFIED wording (re-read 2026-11-22:
@@ -298,6 +301,9 @@ func (s *Server) endpointSnapshot() endpoints {
 						allowed = append(allowed, v)
 					}
 				}
+				// The projects of its automatic endpoints, which the
+				// instance asked for.
+				allowed = append(allowed, sp.autoConsumerProjects()...)
 				ep.Network, ep.IP = "", ""
 				out.psc[pscServiceAttachment(sp)] = pscAttachment{ep: ep, allowed: allowed}
 			}

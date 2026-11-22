@@ -356,6 +356,8 @@ cloud.google.com/go/monitoring v1.25.0/go.mod h1:wlj6rX+JGyusw/8+2duW4cJ6kmDHGmd
 cloud.google.com/go/monitoring v1.30.0 h1:r/d+JUbyKmJ8b07iznuKfzVzrIXTWxHQ3lBRm3x2LlY=
 cloud.google.com/go/monitoring v1.30.0/go.mod h1:htlUR0QWVMrjFzZmN4LGnMAve9xB/eduwjmINxVZ8RM=
 cloud.google.com/go/networkconnectivity v1.27.0/go.mod h1:pCnczH2W/cnLSlnsnN+VzBoXlM81ZoUGuuacFBGThyw=
+cloud.google.com/go/networkconnectivity v1.30.1 h1:UYdM0jDU4hsdm/dtuv3qfwwSemlth239+QAQ+lBY1MI=
+cloud.google.com/go/networkconnectivity v1.30.1/go.mod h1:p5bjDcVluVF+B60zdO3XOode1wPumrNomWGD/10BuyU=
 cloud.google.com/go/networkmanagement v1.30.0/go.mod h1:3SBf5T7jyGzw5jqJWE7TUDRhIl2E029jggbeoFEgt5E=
 cloud.google.com/go/networksecurity v0.19.0/go.mod h1:VWDFX+stDgzZYDsCX1Wy/JO9Tlw7g/V1UHbiORVgqq0=
 cloud.google.com/go/notebooks v1.18.0/go.mod h1:fXU6A3TJ2YobFy6fxOr4tKZZ8QgTjdJAqDIykOB85Gk=

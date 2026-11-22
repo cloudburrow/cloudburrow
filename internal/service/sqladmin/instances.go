@@ -358,7 +358,12 @@ func (s *Server) settle(c *created, opID string, err error) {
 			c.state, c.failure = "RUNNABLE", ""
 		}
 	}
+	spec, ok := c.spec, s.writes.byName[c.spec.Name] == c && c.state == "RUNNABLE"
 	s.emu.Unlock()
+	if ok {
+		// Its automatic Private Service Connect endpoints (#2141).
+		s.syncAutoConnections(spec, false)
+	}
 	if opID != "" {
 		s.finish(opID, err)
 	}
@@ -1061,6 +1066,9 @@ func (s *Server) patchInstance(r *http.Request, base, project, name string, repl
 	}
 	opType := "UPDATE"
 	if !restart {
+		// Its automatic Private Service Connect endpoints follow the
+		// change (#2141); a restart's are made once it serves.
+		s.syncAutoConnections(next, false)
 		return s.done(base, project, c.engine, opType, name), nil
 	}
 	// The flags are the server's arguments: the server is started again
@@ -1141,6 +1149,10 @@ func (s *Server) deleteInstance(r *http.Request, base, project, name string) (an
 		s.emu.Unlock()
 		if err == nil && s.conn != nil {
 			s.conn.removeInstance(name)
+		}
+		if err == nil {
+			// Its automatic endpoints go with it (#2141).
+			s.syncAutoConnections(c.spec, true)
 		}
 		if err == nil {
 			s.removeInstanceBackups(project, name, retainBackups(c.spec))
@@ -1233,6 +1245,10 @@ func (s *Server) createdJSON(ctx context.Context, base string, c *created) (map[
 	in["ipAddresses"] = ipAddressesJSON(spec, host)
 	if spec.pscEnabled() {
 		in["pscServiceAttachmentLink"] = pscServiceAttachment(spec)
+	}
+	if st, ok := in["settings"].(map[string]any); ok {
+		// Each automatic endpoint's address and state (#2141).
+		s.withAutoConnections(st, spec)
 	}
 	// A replica is upgraded on its own: MySQL's (#1462), and PostgreSQL's
 	// (#1524), which then waits for its primary's upgrade.
