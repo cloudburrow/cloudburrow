@@ -219,20 +219,20 @@ func (s *computeService) Start(ctx context.Context) error {
 	if s.requests != nil {
 		h = rest.Observe(h, s.requests)
 	}
-	guarded := hostguard.Wrap(sysparams.Wrap(h, sysparams.Options{V1Errors: true}))
+	jsonAPI := sysparams.Wrap(h, sysparams.Options{V1Errors: true})
 	// gRPC over HTTP/2 without TLS is the xDS API of proxyless gRPC
-	// (#2160), which its clients reach at this port with no Host header
-	// the guard knows, so it is served before the JSON API's wrappers.
+	// (#2160), served beside the JSON API, ahead of its system
+	// parameters.
 	var protos http.Protocols
 	protos.SetHTTP1(true)
 	protos.SetUnencryptedHTTP2(true)
-	s.srv = &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	s.srv = &http.Server{Handler: hostguard.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.ProtoMajor == 2 && strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
 			api.XDSHandler().ServeHTTP(w, r)
 			return
 		}
-		guarded.ServeHTTP(w, r)
-	}), ReadHeaderTimeout: 10 * time.Second, Protocols: &protos}
+		jsonAPI.ServeHTTP(w, r)
+	})), ReadHeaderTimeout: 10 * time.Second, Protocols: &protos}
 	go func() { _ = s.srv.Serve(ln) }()
 	return nil
 }

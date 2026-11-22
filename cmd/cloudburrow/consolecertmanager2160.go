@@ -23,8 +23,8 @@ import (
 // each a hostname or the primary entry with its certificates), DNS
 // Authorizations (the CNAME record each asks for), Issuance Configs (a
 // private CA pool's issuance) and Classic Certificates (#2153). The
-// columns, and the map and issuance config forms, are UNVERIFIED (re-read
-// 2026-11-22: the docs give gcloud only for them). A Google-managed
+// columns, and the map and issuance config forms, are
+// UNVERIFIED (re-read 2026-11-22: the docs give gcloud only for them). A Google-managed
 // certificate is issued by this instance's certificate authority
 // (/cloudburrow/lb/ca.pem) once it is authorized, a private one by the
 // issuance config's CA pool.
