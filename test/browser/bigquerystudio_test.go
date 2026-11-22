@@ -242,7 +242,12 @@ func TestBigQueryStudioExplorerEditorAndHistory(t *testing.T) {
 // element there is the element, one of its descendants, an ancestor (an
 // input drawn by its label or container) or one of its labels. Anything
 // else (gone, inert, covered by the dialog replacing it, without a box) is
-// looked for again within waitFor's 30 seconds (main CI 44926873355). The
+// looked for again within waitFor's 30 seconds (main CI 44926873355). An
+// inline element that wraps, as a long ID's link does in a narrow column,
+// is aimed at the middle of one of its own line boxes: the middle of its
+// bounding box can fall between its lines, on the cell around it, which
+// counted as an ancestor and took the click instead of the link (main CI
+// 44966435794: Scheduled queries' config ID on four lines). The
 // mouse click at that point is sent once and never retried: the page has
 // it then, and a second one could submit a form twice. Clicking by a mark
 // (chromedp.Click on [data-cb-click]) instead waited on a node the page
@@ -254,9 +259,15 @@ func (p *tab) clickExpr(expr string) {
 	aim := `(() => { const n = ` + expr + `;
 		if (!n || !n.isConnected || n.closest("[inert]")) return null;
 		n.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
+		const root = n.getRootNode();
+		for (const b of n.getClientRects()) {
+			if (!b.width || !b.height) continue;
+			const x = b.left + b.width / 2, y = b.top + b.height / 2, hit = root.elementFromPoint(x, y);
+			if (hit && n.contains(hit)) return { X: x, Y: y };
+		}
 		const r = n.getBoundingClientRect();
 		if (!r.width || !r.height) return null;
-		const x = r.left + r.width / 2, y = r.top + r.height / 2, hit = n.getRootNode().elementFromPoint(x, y);
+		const x = r.left + r.width / 2, y = r.top + r.height / 2, hit = root.elementFromPoint(x, y);
 		const reaches = !!hit && (n.contains(hit) || hit.contains(n) || [...(n.labels || [])].some((l) => l.contains(hit)));
 		return reaches ? { X: x, Y: y } : null; })()`
 	deadline := time.Now().Add(30 * time.Second)
