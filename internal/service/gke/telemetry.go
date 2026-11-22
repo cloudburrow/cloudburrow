@@ -290,7 +290,7 @@ func checkLoggingComponents(comps []containerpb.LoggingComponentConfig_Component
 // 1.25 or later, re-read 2026-11-22: managed-prometheus/setup-managed).
 func checkManagedPrometheus(c *containerpb.Cluster) error {
 	if c.GetAutopilot().GetEnabled() && !c.GetMonitoringConfig().GetManagedPrometheusConfig().GetEnabled() {
-		// UNVERIFIED wording.
+		// UNVERIFIED wording, re-read 2026-11-22: managed-prometheus/setup-managed.
 		return status.Error(codes.InvalidArgument, "For GKE Autopilot clusters, you can't turn off Managed Service for Prometheus managed collection.")
 	}
 	return nil

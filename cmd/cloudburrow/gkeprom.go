@@ -99,6 +99,16 @@ var (
 		"kubelet_volume_stats_used_bytes"}
 )
 
+// controlPlaneScrape reads a control plane component's /metrics on port
+// $1 of the control plane node, as the cluster's administrator (kubeadm's
+// admin.conf client certificate): the components authorize /metrics
+// through the API server.
+const controlPlaneScrape = `d=$(mktemp -d) || exit 1
+trap 'rm -rf "$d"' EXIT
+awk '/client-certificate-data:/ {print $2}' /etc/kubernetes/admin.conf | base64 -d > "$d/c"
+awk '/client-key-data:/ {print $2}' /etc/kubernetes/admin.conf | base64 -d > "$d/k"
+curl -sSfk --max-time 20 --cert "$d/c" --key "$d/k" "https://127.0.0.1:$1/metrics"`
+
 func keepSet(names []string) map[string]bool {
 	out := make(map[string]bool, len(names))
 	for _, n := range names {
@@ -253,9 +263,7 @@ func (c *gkePromCollector) collect(ctx context.Context, t gke.TelemetryTarget, n
 			if !t.ControlPlaneMetrics[comp] {
 				continue
 			}
-			out, err := c.docker(cctx, "exec", cp, "curl", "-sSfk", "--max-time", "20",
-				"--cert", "/etc/kubernetes/pki/apiserver-kubelet-client.crt", "--key", "/etc/kubernetes/pki/apiserver-kubelet-client.key",
-				"https://127.0.0.1:"+strconv.Itoa(m.port)+"/metrics")
+			out, err := c.docker(cctx, "exec", cp, "sh", "-c", controlPlaneScrape, "sh", strconv.Itoa(m.port))
 			if err != nil {
 				continue
 			}
@@ -487,17 +495,18 @@ type gmpPod struct {
 	} `json:"status"`
 }
 
-// container is the container whose port p is (by name or number).
-func (p gmpPod) container(port string) (string, bool) {
+// container is the container whose port p is (by name or number), and
+// the port's number: the API server's pod proxy takes a number only.
+func (p gmpPod) container(port string) (string, string, bool) {
 	for _, c := range p.Spec.Containers {
 		for _, cp := range c.Ports {
 			if cp.Name == port || strconv.Itoa(cp.ContainerPort) == port {
-				return c.Name, true
+				return c.Name, strconv.Itoa(cp.ContainerPort), true
 			}
 		}
 	}
 	_, err := strconv.Atoi(port)
-	return "", err == nil
+	return "", port, err == nil
 }
 
 // managed serves managed collection on cluster t: the CRDs and
@@ -565,12 +574,12 @@ func (c *gkePromCollector) managed(ctx context.Context, t gke.TelemetryTarget, n
 					!m.Spec.Selector.matches(p.Metadata.Labels) {
 					continue
 				}
-				ctr, ok := p.container(port)
+				ctr, number, ok := p.container(port)
 				if !ok {
 					continue
 				}
 				out, err := c.kubectl(ctx, t.Kind, "get", "--raw",
-					"/api/v1/namespaces/"+p.Metadata.Namespace+"/pods/"+scheme+p.Metadata.Name+":"+port+"/proxy"+path)
+					"/api/v1/namespaces/"+p.Metadata.Namespace+"/pods/"+scheme+p.Metadata.Name+":"+number+"/proxy"+path)
 				if err != nil {
 					continue
 				}

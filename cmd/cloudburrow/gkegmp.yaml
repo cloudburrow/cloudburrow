@@ -32,7 +32,7 @@ spec:
     subresources:
       status: {}
     schema:
-      openAPIV3Schema: &schema
+      openAPIV3Schema:
         type: object
         required: [spec]
         properties:
@@ -167,4 +167,118 @@ spec:
     subresources:
       status: {}
     schema:
-      openAPIV3Schema: *schema
+      openAPIV3Schema:
+        type: object
+        required: [spec]
+        properties:
+          apiVersion: {type: string}
+          kind: {type: string}
+          metadata: {type: object}
+          spec:
+            type: object
+            required: [selector, endpoints]
+            properties:
+              selector:
+                type: object
+                properties:
+                  matchLabels:
+                    type: object
+                    additionalProperties: {type: string}
+                  matchExpressions:
+                    type: array
+                    items:
+                      type: object
+                      required: [key, operator]
+                      properties:
+                        key: {type: string}
+                        operator: {type: string, enum: [In, NotIn, Exists, DoesNotExist]}
+                        values:
+                          type: array
+                          items: {type: string}
+              endpoints:
+                type: array
+                minItems: 1
+                items:
+                  type: object
+                  required: [port]
+                  properties:
+                    port:
+                      x-kubernetes-int-or-string: true
+                    path: {type: string}
+                    scheme: {type: string, enum: [http, https]}
+                    interval: {type: string, pattern: '^((([0-9]+)y)?(([0-9]+)w)?(([0-9]+)d)?(([0-9]+)h)?(([0-9]+)m)?(([0-9]+)s)?(([0-9]+)ms)?|0)$'}
+                    timeout: {type: string, pattern: '^((([0-9]+)y)?(([0-9]+)w)?(([0-9]+)d)?(([0-9]+)h)?(([0-9]+)m)?(([0-9]+)s)?(([0-9]+)ms)?|0)$'}
+                    params:
+                      type: object
+                      additionalProperties:
+                        type: array
+                        items: {type: string}
+                    metricRelabeling:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          sourceLabels:
+                            type: array
+                            items: {type: string}
+                          separator: {type: string}
+                          regex: {type: string}
+                          modulus: {type: integer, format: int64}
+                          targetLabel: {type: string}
+                          replacement: {type: string}
+                          action: {type: string, enum: [replace, lowercase, uppercase, keep, drop, keepequal, dropequal, hashmod, labelmap, labeldrop, labelkeep]}
+                    authorization:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                    basicAuth:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                    oauth2:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                    tls:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                    proxyUrl: {type: string}
+              targetLabels:
+                type: object
+                properties:
+                  fromPod:
+                    type: array
+                    items:
+                      type: object
+                      required: [from]
+                      properties:
+                        from: {type: string}
+                        to: {type: string}
+                  metadata:
+                    type: array
+                    items: {type: string, enum: [pod, container, node, top_level_controller_name, top_level_controller_type]}
+              limits:
+                type: object
+                properties:
+                  samples: {type: integer, format: int64}
+                  labels: {type: integer, format: int64}
+                  labelNameLength: {type: integer, format: int64}
+                  labelValueLength: {type: integer, format: int64}
+              filterRunning: {type: boolean}
+          status:
+            type: object
+            properties:
+              observedGeneration: {type: integer, format: int64}
+              conditions:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    type: {type: string}
+                    status: {type: string}
+                    lastUpdateTime: {type: string, format: date-time}
+                    lastTransitionTime: {type: string, format: date-time}
+                    reason: {type: string}
+                    message: {type: string}
+              endpointStatuses:
+                type: array
+                items:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true

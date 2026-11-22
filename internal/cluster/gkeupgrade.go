@@ -359,9 +359,8 @@ kubectl --kubeconfig /etc/kubernetes/admin.conf -n kube-system get daemonset kub
 const restorePreviousScript = `set -e
 d=` + previousDir + `
 [ "$(cat "$d/version")" = "$1" ] || { echo "the kept control plane is $(cat "$d/version"), not $1" >&2; exit 1; }
-for b in kubeadm kubectl; do cp "$d/$b" /usr/bin/$b; done
+for b in kubeadm kubectl kubelet; do cp "$d/$b" /usr/bin/$b.previous; mv -f /usr/bin/$b.previous /usr/bin/$b; done
 for c in kube-apiserver kube-controller-manager kube-scheduler; do cp "$d/$c.yaml" /etc/kubernetes/manifests/$c.yaml; done
-cp "$d/kubelet" /usr/bin/kubelet
 systemctl daemon-reload
 systemctl restart kubelet
 `

@@ -17,7 +17,9 @@ import (
 
 	"cloud.google.com/go/container/apiv1/containerpb"
 	"cloud.google.com/go/monitoring/apiv3/v2/monitoringpb"
+	"google.golang.org/api/iterator"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -128,12 +130,27 @@ spec:
         image: `+pause+`
         imagePullPolicy: Never
 `, "apply", "-f", "-")
+	// A type not written yet is NOT_FOUND, as Google answers: no series.
 	series := func(metricType, filter string) []*monitoringpb.TimeSeries {
-		return listAll(t, mc.ListTimeSeries(ctx, &monitoringpb.ListTimeSeriesRequest{
+		it := mc.ListTimeSeries(ctx, &monitoringpb.ListTimeSeriesRequest{
 			Name:     "projects/" + project,
 			Filter:   fmt.Sprintf(`metric.type=%q AND resource.type="prometheus_target" AND resource.labels.cluster=%q`, metricType, cluster) + filter,
 			Interval: &monitoringpb.TimeInterval{StartTime: timestamppb.New(time.Now().Add(-10 * time.Minute)), EndTime: timestamppb.New(time.Now())},
-		}))
+		})
+		var out []*monitoringpb.TimeSeries
+		for {
+			ts, err := it.Next()
+			if err == iterator.Done {
+				return out
+			}
+			if status.Code(err) == codes.NotFound {
+				return nil
+			}
+			if err != nil {
+				t.Fatalf("ListTimeSeries %s: %v", metricType, err)
+			}
+			out = append(out, ts)
+		}
 	}
 	waitSeries := func(what, metricType, filter string, ok func([]*monitoringpb.TimeSeries) bool) []*monitoringpb.TimeSeries {
 		t.Helper()
@@ -196,6 +213,9 @@ spec:
 	if r := promQuery(fmt.Sprintf(`sum by (verb) (apiserver_request_total{cluster=%q})`, cluster)); len(r) == 0 {
 		t.Error("PromQL over apiserver_request_total answered nothing")
 	}
+	// A rate needs two readings: wait for the histogram's second scrape.
+	waitSeries("the API server's latency", "prometheus.googleapis.com/apiserver_request_duration_seconds/histogram", ` AND metric.labels.verb="LIST"`,
+		func(s []*monitoringpb.TimeSeries) bool { return len(s) > 0 && len(s[0].GetPoints()) >= 2 })
 	if r := promQuery(fmt.Sprintf(`histogram_quantile(0.9, sum by (le) (rate(apiserver_request_duration_seconds_bucket{cluster=%q}[10m])))`, cluster)); len(r) != 1 {
 		t.Errorf("PromQL over the API server's latency histogram answered %v", r)
 	}

@@ -204,7 +204,14 @@ func TestGKEServedZonesRotationAndTelemetryThroughTheBrowser(t *testing.T) {
 	p = open(t)
 	p.navigate(page)
 	p.waitFor(detailReady)
-	p.pageActionWithin("Edit Cloud Monitoring", map[string]string{"system": "false"}, "", 3*time.Minute)
+	// A new cluster's components are GKE's defaults: every one is turned
+	// off, as Cloud Monitoring off is, managed collection staying on.
+	off := map[string]string{}
+	for _, f := range []string{"system", "apiserver", "scheduler", "controllermanager", "storage", "pod", "deployment", "statefulset",
+		"daemonset", "hpa", "jobset", "cadvisor", "kubelet", "dcgm"} {
+		off[f] = "false"
+	}
+	p.pageActionWithin("Edit Cloud Monitoring", off, "", 3*time.Minute)
 	gkeIdle(t, project, name, 4*time.Minute)
 	if ms, _ := read()["monitoringService"].(string); ms != "none" {
 		t.Errorf("monitoringService after turning system metrics off = %q", ms)

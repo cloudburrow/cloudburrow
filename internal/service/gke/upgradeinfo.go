@@ -378,7 +378,8 @@ func (s *Server) rollbackControlPlaneLocked(p parsed, e *entry, to Version) (*co
 			return nil, status.Errorf(codes.InvalidArgument,
 				"Master version %q: a rollback-safe upgrade rolls back to the exact patch version previously used, %s.", to.GKE, rs.Previous)
 		}
-		// UNVERIFIED wording; documented: "GKE doesn't perform any type of
+		// UNVERIFIED wording, re-read 2026-11-22: how-to/upgrading-a-cluster;
+		// documented: "GKE doesn't perform any type of
 		// automatic upgrades to the control plane or nodes" until step two.
 		return nil, status.Errorf(codes.FailedPrecondition,
 			"The control plane is in a rollback-safe upgrade's soak until %s: complete the upgrade (CompleteControlPlaneUpgrade) or roll back to %s first.",

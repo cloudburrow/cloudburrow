@@ -297,7 +297,9 @@ func ksmPoints(t gke.TelemetryTarget, raw []byte, now time.Time) []monitoring.Pr
 				g(o, "kube_jobset_specified_replicas", float64(r), map[string]string{"jobset_name": name, "replicated_job_name": rj.Name})
 			}
 			for _, rs := range st.ReplicatedJobsStat {
-				l := func() map[string]string { return map[string]string{"jobset_name": name, "replicated_job_name": rs.Name} }
+				l := func() map[string]string {
+					return map[string]string{"jobset_name": name, "replicated_job_name": rs.Name}
+				}
 				g(o, "kube_jobset_ready_replicas", float64(rs.Ready), l())
 				g(o, "kube_jobset_succeeded_replicas", float64(rs.Succeeded), l())
 				g(o, "kube_jobset_failed_replicas", float64(rs.Failed), l())
