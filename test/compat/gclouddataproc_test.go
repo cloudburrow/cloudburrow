@@ -34,7 +34,10 @@ func TestGcloudDataproc(t *testing.T) {
 	}
 	run := func(args ...string) (string, error) {
 		cmd := exec.Command(gcloud, append(args, "--quiet", "--project", project)...)
-		cmd.Env = append(gcloudTargetEnv(os.Environ()), "CLOUDSDK_CONFIG="+gdir, "CLOUDSDK_ACTIVE_CONFIG_NAME="+conf)
+		// The configuration refuses every API this instance does not serve
+		// (gcloud-setup), and the proxy refuses anything else bound off the
+		// loopback.
+		cmd.Env = append(gcloudTargetEnv(noGoogleEgress()), "CLOUDSDK_CONFIG="+gdir, "CLOUDSDK_ACTIVE_CONFIG_NAME="+conf)
 		b, err := cmd.CombinedOutput()
 		return string(b), err
 	}

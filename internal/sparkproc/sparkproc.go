@@ -105,8 +105,9 @@ type Job struct {
 	// QueryVariables are a Spark SQL batch's query_variables, each set
 	// first as "SET name=\"value\";", as the API reference says they are.
 	QueryVariables map[string]string `json:"queryVariables,omitempty"`
-	// AppID is the Spark application's ID (spark.app.id) a batch or
-	// session runs as, the one its Spark UI shows; "" lets Spark choose.
+	// AppID is the workload ID a batch or session runs as, recorded in
+	// its event log as WorkloadProperty so its Spark UI is found by it
+	// ("" for none).
 	AppID string `json:"appId,omitempty"`
 	// Log names the Cloud Logging resource and logs the job's output is
 	// written to; nil is a procedure's bigquery.googleapis.com/SparkJob.
@@ -195,3 +196,7 @@ func decodeUnavailable(b []byte) error {
 	u.Msg = m.Message
 	return &u
 }
+
+// WorkloadProperty is the Spark property a batch's or session's driver
+// carries its workload's application ID (Job.AppID) in.
+const WorkloadProperty = "spark.cloudburrow.workload"

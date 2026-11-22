@@ -1,11 +1,15 @@
-# Serverless for Apache Spark (Dataproc batches and sessions)
+# Dataproc: clusters, jobs, workflows and Serverless for Apache Spark
 
-CloudBurrow serves the serverless surface of the Dataproc API
-(`dataproc.googleapis.com` v1), which Google's console calls Serverless for
-Apache Spark (the product is being renamed Managed Service for Apache Spark):
-batch workloads, interactive Spark Connect sessions and session templates
-(#2156). Clusters, cluster jobs, workflow templates, autoscaling policies and
-node groups are not served.
+CloudBurrow serves the Dataproc API (`dataproc.googleapis.com` v1):
+
+- **Serverless for Apache Spark** (#2156; the product is being renamed
+  Managed Service for Apache Spark): batch workloads, interactive Spark
+  Connect and Jupyter sessions, and session templates;
+- **Dataproc on Compute Engine** (#2162): clusters, jobs on them, workflow
+  templates and autoscaling policies;
+- the **Spark UI** of every workload, in Apache Spark's History Server.
+
+Node groups and Dataproc on GKE (virtual clusters) are not served.
 
 It is opt-in, in the CLI process, beside BigQuery:
 
@@ -106,8 +110,35 @@ A version Google does not list is `INVALID_ARGUMENT`.
   days) end the session.
 - `TerminateSession`, `GetSession`, `ListSessions` (with a `filter`) and
   `DeleteSession`. Delete terminates the session first.
-- `jupyter_session` is `UNIMPLEMENTED`: a Jupyter session's kernel is served
-  through Google's Jupyter gateway, which no local instance has.
+- `jupyter_session` (#2162) runs the same Spark Connect server, with the
+  Python kernel (`kernel` `PYTHON`, the default). Its kernel is a notebook
+  of the console's notebook runtime (`internal/nbruntime`): the session's
+  page gives the line that binds `spark` to the session there,
+  `SparkSession.builder.remote("sc://host.docker.internal:8081/;session_id=UUID")`,
+  and any Spark Connect client reaches it on the API's port by its UUID.
+  Google documents no `runtime_info.endpoints` key for a Jupyter session's
+  kernel gateway, so it has none. `kernel` `SCALA` is `UNIMPLEMENTED`: no
+  Scala kernel runs locally.
+
+## Notebook and SparkR batches
+
+- `pyspark_notebook_batch` (#2162) runs a Jupyter notebook (`.ipynb`) from
+  Cloud Storage as the batch's PySpark driver. Its code cells run in order
+  in one Python process on the runtime; markdown and raw cells are skipped.
+  - `params` are set as papermill sets them: a cell of `NAME = "VALUE"`
+    lines after the cell tagged `parameters`, or first when no cell is
+    tagged. A key that is not a Python identifier is `INVALID_ARGUMENT`.
+  - `python_file_uris`, `jar_file_uris`, `file_uris` and `archive_uris` are
+    as for a PySpark batch.
+  - IPython magics and shell commands (`%` and `!` lines) have no IPython
+    to run on in the Spark runtime's Python. A notebook with one fails,
+    naming the cell.
+  - Google does not say where an executed notebook is written. The driver
+    output is the batch's `output_uri`, as for any batch.
+- `spark_r_batch` runs in the official `apache/spark` image of the runtime's
+  Spark with Python and R (`-python3-r-ubuntu`, pinned by digest in
+  `dependencies.json`). R runs in that container only: nothing of R is in
+  the CLI or the repository.
 
 ## Session templates
 
@@ -115,7 +146,189 @@ A version Google does not list is `INVALID_ARGUMENT`.
 `UpdateSessionTemplate` (a full replacement) and `DeleteSessionTemplate`. The
 template ID starts and ends with a letter or digit.
 
+## Clusters
+
+A Dataproc cluster (#2162) is an Apache Spark standalone cluster in
+containers:
+
+- a **master** container (`CLUSTER-m`) runs Spark's Master and History
+  Server;
+- each **worker** container (`CLUSTER-w-N`) runs a Spark Worker with its
+  machine type's vCPUs and memory (4 GB a vCPU for `standard` types, 8 for
+  `highmem`, 1 for `highcpu`; 2 cores and 2 GB otherwise);
+- they run on a `docker network create --internal` network whose one peer
+  relays the instance's BigQuery and Cloud Storage ports, as for a batch;
+- the image is the official `apache/spark` image of the image version's
+  Spark, with Python and R, and Google's BigQuery connector for that Spark.
+
+| Image version | Spark | Image |
+|---|---|---|
+| `2.1-debian11`, `-ubuntu20`, `-rocky8` | 3.3 | `3.3.3-scala2.12-java11-python3-r-ubuntu` |
+| `2.2-debian12`, `-ubuntu22`, `-rocky9` | 3.5 | `3.5.9-scala2.12-java17-python3-r-ubuntu` |
+| `2.3-debian12`, `-ubuntu22`, `-rocky9` | 3.5 | as 2.2 |
+| `3.0-debian13` (default), `-ubuntu24`, `-rocky9` | 4.1 | `4.1.2-scala2.13-java21-python3-r-ubuntu` |
+
+The image version list gives each version's Spark (re-read 2026-11-22:
+<https://docs.cloud.google.com/dataproc/docs/concepts/versioning/dataproc-version-clusters>).
+The default is "the latest generally available Debian-based" image. 1.x and
+2.0 are past their end of support, and are `INVALID_ARGUMENT`. The operating
+system names the image version only: every container runs the Spark
+image's Ubuntu.
+
+- `CreateCluster` is a long-running operation. Its metadata is a
+  `ClusterOperationMetadata` of type `CREATE`, and its response the
+  `Cluster`, which goes from `CREATING` to `RUNNING`.
+  - The name starts with a lower-case letter, has at most 51 lower-case
+    letters, digits and hyphens, and does not end with a hyphen.
+  - The cluster types are Standard (1 master and at least 2 workers, 2 by
+    default), High Availability (3 masters) and Single Node
+    (`dataproc:dataproc.allow.zero.workers=true` and no workers). A High
+    Availability cluster's three masters are one Spark master here.
+  - `config_bucket` and `temp_bucket` default to
+    `dataproc-staging-REGION-NUMBER-SUFFIX` and
+    `dataproc-temp-REGION-NUMBER-SUFFIX` in the instance's Cloud Storage.
+  - The labels `goog-dataproc-cluster-name`, `-cluster-uuid` and `-location`
+    are added, as Google adds them.
+  - `software_config.properties` with the `spark:` prefix become the
+    cluster's `spark-defaults.conf`.
+  - `endpoint_config.enable_http_port_access` (the component gateway) gives
+    `http_ports["Spark History Server"]`: the cluster's History Server, at
+    `/component-gateway/UUID/sparkhistory/` on the API's port.
+  - Optional components, Dataproc on GKE (`virtual_cluster_config`) and
+    node groups are `UNIMPLEMENTED`: no pinned image runs them.
+- `GetCluster`, `ListClusters` and `DeleteCluster`. `ListClusters` takes a
+  `filter` on `status.state`, `clusterName` and `labels.KEY`, joined by
+  `AND`.
+- `UpdateCluster` takes the update masks Google documents:
+  - `labels`;
+  - `config.worker_config.num_instances`, which resizes the cluster by
+    starting or stopping workers, and
+    `config.secondary_worker_config.num_instances`;
+  - `config.autoscaling_config.policy_uri`;
+  - the lifecycle fields: `config.lifecycle_config.idle_delete_ttl`,
+    `auto_delete_ttl` and `auto_delete_time`, and their stop counterparts.
+- `StopCluster` and `StartCluster` stop the containers and start them
+  again. The cluster's files are kept.
+- `DiagnoseCluster` writes a tarball to the staging bucket and returns its
+  `output_uri`. The tarball holds `summary.txt`, each node's Spark log and
+  `spark-defaults.conf`.
+- Scheduled deletion and stop: a cluster idle (no job running) for
+  `idle_delete_ttl`, or older than `auto_delete_ttl`, is deleted. The stop
+  fields stop it instead.
+- In a persistent instance, clusters are kept and started again with the
+  instance.
+
+## Jobs
+
+- `SubmitJob` and `SubmitJobAsOperation` run a job on the cluster its
+  `placement` names, by `cluster_name` or `cluster_labels`. The driver is a
+  container in client mode against the cluster's master.
+  - PySpark, Spark, SparkSql (a query file or a query list, with
+    `script_variables`) and SparkR jobs run.
+  - Hadoop, Hive, Pig, Presto, Trino and Flink jobs are `UNIMPLEMENTED`,
+    with the reason: they need YARN or their components, which a Spark
+    standalone cluster does not run. Presto is not available at all on
+    image version 2.1 and later.
+  - A job on a cluster that is not `RUNNING` is `FAILED_PRECONDITION`.
+- State: `PENDING`, `SETUP_DONE` and `RUNNING`, then `DONE`, `ERROR` or
+  `CANCELLED`, each recorded in `status_history`.
+  `scheduling.max_failures_per_hour` restarts a failed driver
+  (`ATTEMPT_FAILURE`).
+- Driver output: `driver_output_resource_uri` is
+  `gs://CONFIG_BUCKET/google-cloud-dataproc-metainfo/CLUSTER_UUID/jobs/JOB_ID/driveroutput`,
+  written as `driveroutput.000000000`, where gcloud reads it.
+- `yarn_applications` holds the Spark application. Its `tracking_url` is the
+  application's page in the cluster's History Server.
+- `GetJob`, `ListJobs`, `UpdateJob` (`labels`), `CancelJob` and
+  `DeleteJob`. `ListJobs` takes `cluster_name`, `job_state_matcher`, and a
+  `filter` on `status.state` and `labels.KEY`. Deleting a job that has not
+  ended is `FAILED_PRECONDITION`.
+- With `dataproc:dataproc.logging.stackdriver.job.driver.enable=true`, the
+  driver's output is in Cloud Logging too, under resource
+  `cloud_dataproc_job`, log `dataproc.job.driver`.
+
+## Workflow templates
+
+- `CreateWorkflowTemplate`, `GetWorkflowTemplate` (with `version`),
+  `ListWorkflowTemplates`, `UpdateWorkflowTemplate` and
+  `DeleteWorkflowTemplate`. An update must carry the current `version`.
+  - Step IDs are unique. Prerequisites must name steps and form no cycle.
+  - `parameters` name fields of the template, such as
+    `jobs['STEP'].pysparkJob.args[0]`, and validate their values by regex
+    or by a list of values.
+  - `dag_timeout` is 10 minutes to 24 hours.
+  - A stored template may be created without a placement or jobs, as
+    gcloud's `workflow-templates create` makes one before
+    `set-managed-cluster` and `add-job`. Instantiating it then is
+    `INVALID_ARGUMENT`. An inline template needs both.
+- `InstantiateWorkflowTemplate` and `InstantiateInlineWorkflowTemplate` run
+  the workflow. The operation's `WorkflowMetadata` records its graph.
+  - A **managed cluster** is created as `PREFIX-SUFFIX`, runs the jobs, and
+    is deleted after.
+  - A **cluster selector** runs them on a running cluster with those
+    labels.
+  - Each step's job ID is `STEP-SUFFIX`, labelled
+    `goog-dataproc-workflow-template-id`, `-instance-id` and `-step-id`.
+  - A failed job, a cancel (`operations.cancel`) or the DAG timeout ends the
+    workflow and cancels the jobs still running.
+
+## Autoscaling policies
+
+- `CreateAutoscalingPolicy`, `GetAutoscalingPolicy`,
+  `ListAutoscalingPolicies`, `UpdateAutoscalingPolicy` and
+  `DeleteAutoscalingPolicy`. A policy a cluster uses cannot be deleted. The
+  bounds are Google's: factors from 0.0 to 1.0, a graceful decommission
+  timeout of at most 1 day, a cooldown of 2 minutes to 1 day.
+- A cluster with `autoscaling_config.policy_uri` is scaled by its policy.
+  After each cooldown, the scaler reads the master's pending and available
+  cores and resizes the workers within the policy's bounds. A Spark
+  standalone cluster has no YARN memory metrics, so the factors apply to
+  cores.
+
+## The Spark UI and the History Server
+
+- Every workload's Spark event log is kept.
+- A cluster's History Server runs on its master, at its component gateway
+  path.
+- The instance's own History Server shows the batches' and sessions'. It
+  starts when first opened, at `/sparkhistory/` on the API's port. A
+  batch's or session's **View Spark UI** opens
+  `/sparkhistory/history/app-UUID/jobs/` there.
+- A **Persistent History Server** is a cluster whose
+  `spark:spark.history.fs.logDirectory` is a `gs://` path, in which a `*`
+  matches one path segment. Its History Server reads the event logs there.
+  - A cluster's jobs write theirs to `spark:spark.eventLog.dir`, or else to
+    the temp bucket's `CLUSTER_UUID/spark-job-history`.
+  - A batch's or session's
+    `peripherals_config.spark_history_server_config.dataproc_cluster`
+    copies its log to that cluster.
+- The Serverless Spark UI page did not load: UNVERIFIED (docs re-read 2026-11-22:
+  <https://docs.cloud.google.com/dataproc-serverless/docs/concepts/spark-ui>).
+  The History Server's pages stand in for it.
+
 ## Console
+
+Dataproc's menu:
+
+- **Clusters**: every region's clusters.
+  - **Create cluster** is a page of its own, in Google's steps:
+    - Set up cluster: the name, region, zone, cluster type, image version,
+      component gateway and autoscaling policy;
+    - Configure nodes;
+    - Customize cluster: scheduled deletion, properties and labels.
+  - A cluster's page has Jobs, VM instances, Configuration and Web
+    interfaces (the Spark History Server). Its actions are Submit job, Edit
+    (worker nodes, autoscaling policy, labels), Start, Stop, Diagnose and
+    Delete.
+- **Jobs**: every region's jobs, and **Submit job**. A job's page has its
+  Output (from Cloud Storage), Configuration (with its Spark UI) and Status
+  history, with Stop and Delete.
+- **Workflows**: workflow templates.
+  - Create a template with a managed cluster or a cluster selector, its
+    jobs and their prerequisites.
+  - A template's page has Configuration, Jobs, Parameters and Workflows
+    (its runs), with Run and Delete.
+- **Autoscaling policies**: Create, Edit and Delete.
 
 Dataproc's Serverless menu:
 
@@ -125,11 +338,15 @@ Dataproc's Serverless menu:
     labels.
   - A batch's page has Summary, State history, Output (the driver output,
     read from Cloud Storage) and Job logs (the Cloud Logging filter),
-    with Cancel and Delete.
+    with Cancel and Delete. Summary's View Spark UI opens the batch in the
+    History Server.
+  - A PySpark notebook batch takes its notebook file and parameters.
 - **Interactive sessions**:
-  - Create from a template or a runtime version;
+  - Create a Spark Connect or a Jupyter session, from a template or a
+    runtime version;
   - a session's page shows its Spark Connect endpoint and a PySpark line
-    to connect with;
+    to connect with (for a Jupyter session, the line a BigQuery Studio
+    notebook binds `spark` with), and View Spark UI;
   - Terminate and Delete.
 - **Session templates**: Create, Edit and Delete.
 
@@ -151,13 +368,12 @@ the WebSocket bridge at it, with local credentials, as it does for BigQuery.
 
 ## What is not served
 
-- Jupyter sessions, as above.
-- `pyspark_notebook_batch`, which is `UNIMPLEMENTED`.
+- Jupyter sessions' Scala kernel, and a Jupyter kernel gateway endpoint.
+- IPython magics in notebook batches.
+- Hadoop, Hive, Pig, Presto, Trino and Flink jobs, and every optional
+  component.
+- Node groups and Dataproc on GKE.
 - Network settings (`subnetwork_uri`, `network_tags`), which are accepted
   and kept but have no effect: a local run has no VPC.
-- Autoscaling, which is not run. The executors are `local[*]` threads of
-  the driver's container.
-- The Spark UI and persistent history server (`peripherals_config`).
-- SparkR: the `apache/spark` images carry no R, so an R batch fails with
-  the runner's error.
-- Clusters and the rest of the Dataproc API: not served.
+- Serverless autoscaling, which is not run. A batch's executors are
+  `local[*]` threads of the driver's container.

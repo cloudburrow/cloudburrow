@@ -2,6 +2,7 @@ package dataproc
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -361,5 +362,17 @@ func TestNotebookScript(t *testing.T) {
 	}
 	if _, err := notebookScript([]byte(`{"cells":[{"cell_type":"code","source":"%pip install x"}]}`), nil); err == nil {
 		t.Error("magic accepted")
+	}
+}
+
+func TestMachineShape(t *testing.T) {
+	for uri, want := range map[string]string{
+		"n4-standard-4": "4 16g", "https://www.googleapis.com/compute/v1/projects/p/zones/us-central1-a/machineTypes/n2-highmem-2": "2 16g",
+		"e2-highcpu-8": "8 8g", "e2-medium": "0 ", "": "0 ",
+	} {
+		c, m := machineShape(uri)
+		if got := fmt.Sprint(c) + " " + m; got != want {
+			t.Errorf("%s: %q, want %q", uri, got, want)
+		}
 	}
 }

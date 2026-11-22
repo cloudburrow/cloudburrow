@@ -205,12 +205,11 @@ func (s *Server) checkCluster(project, region string, c *dataprocpb.Cluster) err
 		return err
 	}
 	cfg.SoftwareConfig.ImageVersion = full
-	for _, comp := range cfg.SoftwareConfig.GetOptionalComponents() {
-		switch comp {
-		case dataprocpb.Component_JUPYTER, dataprocpb.Component_DOCKER, dataprocpb.Component_ZOOKEEPER:
-		default:
-			return status.Errorf(codes.Unimplemented, "The %s optional component is not served by CloudBurrow: a local cluster runs Apache Spark (and its History Server) only", comp)
-		}
+	// No optional component runs: a local cluster's image is Apache
+	// Spark's, with its History Server, and the components' software
+	// (Jupyter, Docker, ZooKeeper, Flink, Trino...) is in no pinned image.
+	if comps := cfg.SoftwareConfig.GetOptionalComponents(); len(comps) > 0 {
+		return status.Errorf(codes.Unimplemented, "The %s optional component is not served by CloudBurrow: a local cluster runs Apache Spark (and its History Server) only", comps[0])
 	}
 	if cfg.MasterConfig == nil {
 		cfg.MasterConfig = &dataprocpb.InstanceGroupConfig{}
@@ -294,8 +293,9 @@ func defaultMachine(project, region string) string {
 }
 
 // TempBucket is a project's temp bucket in a region, when a cluster names
-// none: prefixed dataproc-temp- (the staging and temp buckets page); the
-// rest of its name, like the staging bucket's, is UNVERIFIED.
+// none: prefixed dataproc-temp- (the staging and temp buckets page). The
+// rest of its name, like the staging bucket's, is
+// UNVERIFIED (docs re-read 2026-11-22: https://docs.cloud.google.com/dataproc/docs/concepts/configuring-clusters/staging-bucket).
 func (s *Server) TempBucket(project, location string) string {
 	return strings.Replace(s.StagingBucket(project, location), "dataproc-staging-", "dataproc-temp-", 1)
 }
@@ -405,8 +405,34 @@ func clusterSpec(c *dataprocpb.Cluster) sparkproc.ClusterSpec {
 	if m != nil {
 		project, region = m[1], m[2]
 	}
+	ig := c.GetConfig().GetWorkerConfig()
+	if workerCount(c) == 0 {
+		ig = c.GetConfig().GetMasterConfig()
+	}
+	cores, mem := machineShape(ig.GetMachineTypeUri())
 	return sparkproc.ClusterSpec{ID: c.GetClusterUuid(), Name: c.GetClusterName(), Project: project, Location: region,
-		ImageVersion: mm, Workers: workerCount(c), Properties: sparkProps(c), HistoryBase: gatewayBase(c.GetClusterUuid()) + "sparkhistory"}
+		ImageVersion: mm, Workers: workerCount(c), WorkerCores: cores, WorkerMemory: mem,
+		Properties: sparkProps(c), HistoryBase: gatewayBase(c.GetClusterUuid()) + "sparkhistory"}
+}
+
+var machineRE = regexp.MustCompile(`(?:^|/)[a-z0-9]+-(standard|highmem|highcpu)-(\d+)$`)
+
+// machineShape is a worker's Spark cores and memory from its machine
+// type: its vCPUs, and 4 GB of memory a vCPU for a standard type (8 for
+// highmem, 1 for highcpu), as Compute Engine's general-purpose families
+// have them; a type of another shape (e2-medium, a custom type) gets
+// Spark's 2 cores and 2g.
+func machineShape(uri string) (int, string) {
+	m := machineRE.FindStringSubmatch(uri)
+	if m == nil {
+		return 0, ""
+	}
+	n, err := strconv.Atoi(m[2])
+	if err != nil || n <= 0 {
+		return 0, ""
+	}
+	per := map[string]int{"standard": 4, "highmem": 8, "highcpu": 1}[m[1]]
+	return n, strconv.Itoa(n*per) + "g"
 }
 
 func regionOfCluster(c *dataprocpb.Cluster) string { return c.GetLabels()["goog-dataproc-location"] }

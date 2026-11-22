@@ -160,11 +160,12 @@ cat("groups", nrow(collect(count(groupBy(df, "y")))), "\n")
 // with its arguments, DONE, its driver output in Cloud Storage at
 // driverOutputResourceUri, its Spark application's tracking URL the
 // History Server's page of it; a SparkR job runs as an operation; a failing
-// job ends ERROR with the driver's error; a Hive job is UNIMPLEMENTED (no
+// job ends ERROR with the driver's error; a running job is cancelled,
+// CANCELLED; a Hive job is UNIMPLEMENTED (no
 // YARN or Hive). The cluster is resized to 3 workers over REST, stopped,
 // started, diagnosed (a tarball in the staging bucket) and deleted.
 //
-// covers: google.cloud.dataproc.v1.ClusterController/CreateCluster, google.cloud.dataproc.v1.ClusterController/GetCluster, google.cloud.dataproc.v1.ClusterController/ListClusters, google.cloud.dataproc.v1.ClusterController/UpdateCluster, google.cloud.dataproc.v1.ClusterController/StopCluster, google.cloud.dataproc.v1.ClusterController/StartCluster, google.cloud.dataproc.v1.ClusterController/DiagnoseCluster, google.cloud.dataproc.v1.ClusterController/DeleteCluster, google.cloud.dataproc.v1.JobController/SubmitJob, google.cloud.dataproc.v1.JobController/SubmitJobAsOperation, google.cloud.dataproc.v1.JobController/GetJob, google.cloud.dataproc.v1.JobController/ListJobs, google.cloud.dataproc.v1.JobController/UpdateJob, google.cloud.dataproc.v1.JobController/DeleteJob, google.cloud.dataproc.v1.AutoscalingPolicyService/CreateAutoscalingPolicy, google.cloud.dataproc.v1.AutoscalingPolicyService/GetAutoscalingPolicy, google.cloud.dataproc.v1.AutoscalingPolicyService/ListAutoscalingPolicies, google.cloud.dataproc.v1.AutoscalingPolicyService/UpdateAutoscalingPolicy, google.cloud.dataproc.v1.AutoscalingPolicyService/DeleteAutoscalingPolicy
+// covers: google.cloud.dataproc.v1.ClusterController/CreateCluster, google.cloud.dataproc.v1.ClusterController/GetCluster, google.cloud.dataproc.v1.ClusterController/ListClusters, google.cloud.dataproc.v1.ClusterController/UpdateCluster, google.cloud.dataproc.v1.ClusterController/StopCluster, google.cloud.dataproc.v1.ClusterController/StartCluster, google.cloud.dataproc.v1.ClusterController/DiagnoseCluster, google.cloud.dataproc.v1.ClusterController/DeleteCluster, google.cloud.dataproc.v1.JobController/SubmitJob, google.cloud.dataproc.v1.JobController/SubmitJobAsOperation, google.cloud.dataproc.v1.JobController/GetJob, google.cloud.dataproc.v1.JobController/ListJobs, google.cloud.dataproc.v1.JobController/UpdateJob, google.cloud.dataproc.v1.JobController/CancelJob, google.cloud.dataproc.v1.JobController/DeleteJob, google.cloud.dataproc.v1.AutoscalingPolicyService/CreateAutoscalingPolicy, google.cloud.dataproc.v1.AutoscalingPolicyService/GetAutoscalingPolicy, google.cloud.dataproc.v1.AutoscalingPolicyService/ListAutoscalingPolicies, google.cloud.dataproc.v1.AutoscalingPolicyService/UpdateAutoscalingPolicy, google.cloud.dataproc.v1.AutoscalingPolicyService/DeleteAutoscalingPolicy
 func TestDataprocClusters(t *testing.T) {
 	h, addr, project := dataprocEnv(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
@@ -373,6 +374,30 @@ func TestDataprocClusters(t *testing.T) {
 	}
 	if bad, err = dataprocWaitJob(ctx, jc, project, region, bad.GetReference().GetJobId()); err != nil || bad.GetStatus().GetState() != dataprocpb.JobStatus_ERROR {
 		t.Errorf("the failing job: %v %v", bad, err)
+	}
+	// A long job, cancelled while it runs: CANCEL_PENDING or CANCEL_STARTED,
+	// then CANCELLED.
+	slow, err := jc.SubmitJob(ctx, &dataprocpb.SubmitJobRequest{ProjectId: project, Region: region, Job: &dataprocpb.Job{
+		Placement: &dataprocpb.JobPlacement{ClusterName: name},
+		TypeJob: &dataprocpb.Job_PysparkJob{PysparkJob: &dataprocpb.PySparkJob{MainPythonFileUri: dataprocPut(t, ctx, bh, "slow.py",
+			"import time\nfrom pyspark.sql import SparkSession\nSparkSession.builder.getOrCreate()\ntime.sleep(600)\n")}}}})
+	if err != nil {
+		t.Fatalf("SubmitJob: %v", err)
+	}
+	slowID := slow.GetReference().GetJobId()
+	for slow.GetStatus().GetState() != dataprocpb.JobStatus_RUNNING && !slow.GetDone() && ctx.Err() == nil {
+		time.Sleep(2 * time.Second)
+		if slow, err = jc.GetJob(ctx, &dataprocpb.GetJobRequest{ProjectId: project, Region: region, JobId: slowID}); err != nil {
+			t.Fatalf("GetJob: %v", err)
+		}
+	}
+	if c, err := jc.CancelJob(ctx, &dataprocpb.CancelJobRequest{ProjectId: project, Region: region, JobId: slowID}); err != nil {
+		t.Errorf("CancelJob: %v", err)
+	} else if st := c.GetStatus().GetState(); st != dataprocpb.JobStatus_CANCEL_PENDING && st != dataprocpb.JobStatus_CANCEL_STARTED && st != dataprocpb.JobStatus_CANCELLED {
+		t.Errorf("CancelJob answered state %v", st)
+	}
+	if slow, err = dataprocWaitJob(ctx, jc, project, region, slowID); err != nil || slow.GetStatus().GetState() != dataprocpb.JobStatus_CANCELLED {
+		t.Errorf("the cancelled job: %v %v", slow, err)
 	}
 	if _, err := jc.SubmitJob(ctx, &dataprocpb.SubmitJobRequest{ProjectId: project, Region: region, Job: &dataprocpb.Job{
 		Placement: &dataprocpb.JobPlacement{ClusterName: name},

@@ -341,7 +341,11 @@ func (d *Docker) prepare(ctx context.Context, job Job, inbound string) (_ *prepa
 		run = append(run, "-v", d.History+":/cb-history")
 		conf["spark.eventLog.enabled"], conf["spark.eventLog.dir"] = "true", "file:/cb-history"
 		if job.AppID != "" {
-			conf["spark.app.id"] = job.AppID
+			// Spark's local scheduler names its application local-MILLIS
+			// whatever spark.app.id says, so the workload's ID is a
+			// property of its own, which the event log's environment
+			// records and the Spark UI's path is resolved by.
+			conf[WorkloadProperty] = job.AppID
 		}
 	}
 	pythonPath := "/cb/lib"

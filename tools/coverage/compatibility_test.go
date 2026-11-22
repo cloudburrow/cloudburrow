@@ -92,7 +92,7 @@ var compatSections = map[string]string{
 	"privateca":        "## Certificate Authority Service — `google.cloud.security.privateca.v1`",
 	"parametermanager": "## Parameter Manager — `google.cloud.parametermanager.v1`",
 	"dataform":         "## Dataform — `google.cloud.dataform.v1`",
-	"dataproc":         "## Serverless for Apache Spark — `google.cloud.dataproc.v1` batches and sessions",
+	"dataproc":         "## Dataproc — `google.cloud.dataproc.v1` clusters, jobs, workflows and Serverless for Apache Spark",
 	"apphub":           "## App Hub — `google.cloud.apphub.v1`",
 	"trace":            "## Cloud Trace — `google.devtools.cloudtrace.v1` and `v2`",
 	"workflows":        "## Workflows — `google.cloud.workflows.v1` and `google.cloud.workflows.executions.v1`",

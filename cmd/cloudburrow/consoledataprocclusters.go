@@ -193,7 +193,7 @@ func (p dataprocClustersProvider) CreateForm() (string, []console.Field) {
 	const setup, nodes, custom = "Set up cluster", "Configure nodes", "Customize cluster"
 	versions, versionLabels := dataprocImageVersions()
 	return "Create", []console.Field{
-		{Name: "clusterName", Label: "Name", Type: "text", Required: true, Section: setup, Pattern: `^[a-z]([a-z0-9-]{0,49}[a-z0-9])?$`,
+		{Name: "clusterName", Label: "Name", Type: "text", Required: true, Section: setup, Pattern: `^[a-z]([a-z0-9\-]{0,49}[a-z0-9])?$`,
 			Help: "Starts with a lower-case letter; up to 51 lower-case letters, numbers and hyphens; cannot end with a hyphen."},
 		{Name: "region", Label: "Region", Type: "select", Required: true, Section: setup, Options: dataproc.Locations(), Default: "us-central1"},
 		{Name: "zone", Label: "Zone", Type: "text", Section: setup, Help: "A zone of the region, such as us-central1-a. Left empty, Any: Dataproc picks one."},
@@ -204,7 +204,6 @@ func (p dataprocClustersProvider) CreateForm() (string, []console.Field) {
 			Help: "2.1 runs Apache Spark 3.3, 2.2 and 2.3 Spark 3.5, 3.0 Spark 4.1."},
 		{Name: "componentGateway", Label: "Enable component gateway", Type: "checkbox", Section: setup, Default: "true",
 			Help: "Opens the cluster's web interfaces, the Spark History Server, from its Web interfaces tab."},
-		{Name: "jupyter", Label: "Jupyter Notebook", Type: "checkbox", Section: setup, Help: "An optional component."},
 		{Name: "autoscalingPolicy", Label: "Autoscaling policy", Type: "text", Section: setup,
 			Help: "An autoscaling policy's ID in the cluster's region, or its resource name. Left empty, none."},
 		{Name: "masterMachineType", Label: "Manager node machine type", Type: "text", Section: nodes, Default: "n4-standard-4"},
@@ -266,9 +265,6 @@ func (p dataprocClustersProvider) Create(ctx context.Context, project string, va
 			cfg.SoftwareConfig.Properties = map[string]string{}
 		}
 		cfg.SoftwareConfig.Properties[k] = v
-	}
-	if values["jupyter"] == "true" {
-		cfg.SoftwareConfig.OptionalComponents = []dataprocpb.Component{dataprocpb.Component_JUPYTER}
 	}
 	if values["componentGateway"] == "true" {
 		cfg.EndpointConfig = &dataprocpb.EndpointConfig{EnableHttpPortAccess: true}
@@ -620,7 +616,7 @@ func (dataprocJobsProvider) CreateTitle() string { return "Submit a job" }
 func (p dataprocJobsProvider) CreateForm() (string, []console.Field) {
 	const info, job, props = "Job info", "Job", "Properties"
 	return "Submit", []console.Field{
-		{Name: "jobId", Label: "Job ID", Type: "text", Section: info, Pattern: `^[a-zA-Z0-9_-]{1,100}$`, Help: "Letters, numbers, underscores and hyphens, at most 100. Left empty, one is generated."},
+		{Name: "jobId", Label: "Job ID", Type: "text", Section: info, Pattern: `^[a-zA-Z0-9_\-]{1,100}$`, Help: "Letters, numbers, underscores and hyphens, at most 100. Left empty, one is generated."},
 		{Name: "region", Label: "Region", Type: "select", Required: true, Section: info, Options: dataproc.Locations(), Default: "us-central1"},
 		{Name: "cluster", Label: "Cluster", Type: "text", Required: true, Section: info, Help: "The name of a running cluster in the region."},
 		{Name: "jobType", Label: "Job type", Type: "select", Required: true, Section: job, Default: "PYSPARK",
@@ -881,7 +877,7 @@ func (p dataprocWorkflowsProvider) CreateForm() (string, []console.Field) {
 	const info, cluster, job = "Template info", "Cluster", "Jobs"
 	versions, versionLabels := dataprocImageVersions()
 	return "Create", []console.Field{
-		{Name: "templateId", Label: "Template ID", Type: "text", Required: true, Section: info, Pattern: `^[a-zA-Z0-9_-]{3,50}$`,
+		{Name: "templateId", Label: "Template ID", Type: "text", Required: true, Section: info, Pattern: `^[a-zA-Z0-9_\-]{3,50}$`,
 			Help: "3 to 50 letters, numbers, underscores and hyphens; starts and ends with a letter or number."},
 		{Name: "region", Label: "Region", Type: "select", Required: true, Section: info, Options: dataproc.Locations(), Default: "us-central1"},
 		{Name: "placement", Label: "Cluster", Type: "radio", Required: true, Section: cluster, Default: "MANAGED", Options: []string{"MANAGED", "SELECTOR"},
@@ -891,7 +887,7 @@ func (p dataprocWorkflowsProvider) CreateForm() (string, []console.Field) {
 		{Name: "workers", Label: "Worker nodes", Type: "number", Section: cluster, ShowWhen: "placement=MANAGED", Default: "2"},
 		{Name: "selector", Label: "Cluster labels", Type: "textarea", Section: cluster, ShowWhen: "placement=SELECTOR", Help: "One key=value a line; a cluster with all of them runs the jobs."},
 		{Name: "jobs", Label: "Jobs", Type: "textarea", Required: true, Section: job,
-			Help: "One job a line: STEP_ID TYPE MAIN_FILE [ARGS...] [after=STEP,STEP], TYPE pyspark, spark (a main class or jar), sparkr or sparksql. Example: prepare pyspark gs://bucket/prepare.py 10"},
+			Help: "One job a line: STEP_ID TYPE MAIN [ARGS...] [jars=URI,URI] [after=STEP,STEP], TYPE pyspark, spark (MAIN a main class or a jar), sparkr or sparksql. Example: prepare pyspark gs://bucket/prepare.py 10"},
 		{Name: "labels", Label: "Labels", Type: "textarea", Section: info, Help: "One key=value a line."},
 	}
 }
@@ -905,19 +901,23 @@ func dataprocOrderedJobs(text string) ([]*dataprocpb.OrderedJob, error) {
 			return nil, fmt.Errorf("job %q: give STEP_ID TYPE MAIN_FILE", line)
 		}
 		j := &dataprocpb.OrderedJob{StepId: f[0]}
-		var args []string
+		var args, jars []string
 		for _, a := range f[3:] {
 			if after, ok := strings.CutPrefix(a, "after="); ok {
 				j.PrerequisiteStepIds = strings.Split(after, ",")
+				continue
+			}
+			if js, ok := strings.CutPrefix(a, "jars="); ok {
+				jars = strings.Split(js, ",")
 				continue
 			}
 			args = append(args, a)
 		}
 		switch strings.ToLower(f[1]) {
 		case "pyspark":
-			j.JobType = &dataprocpb.OrderedJob_PysparkJob{PysparkJob: &dataprocpb.PySparkJob{MainPythonFileUri: f[2], Args: args}}
+			j.JobType = &dataprocpb.OrderedJob_PysparkJob{PysparkJob: &dataprocpb.PySparkJob{MainPythonFileUri: f[2], Args: args, JarFileUris: jars}}
 		case "spark":
-			w := &dataprocpb.SparkJob{Args: args}
+			w := &dataprocpb.SparkJob{Args: args, JarFileUris: jars}
 			if strings.Contains(f[2], "://") {
 				w.Driver = &dataprocpb.SparkJob_MainJarFileUri{MainJarFileUri: f[2]}
 			} else {
@@ -1076,7 +1076,7 @@ func (p dataprocWorkflowsProvider) DetailActions(ctx context.Context, project st
 	if err != nil {
 		return nil
 	}
-	run := console.Action{ID: "run", Label: "Run", Confirm: "The template's jobs run on its cluster; the run is listed on the Workflows tab."}
+	run := console.Action{ID: "run", Label: "Run"}
 	for _, prm := range t.GetParameters() {
 		run.Fields = append(run.Fields, console.Field{Name: "param." + prm.GetName(), Label: prm.GetName(), Type: "text", Required: true, Help: prm.GetDescription()})
 	}
@@ -1173,7 +1173,7 @@ func dataprocPolicyFields(x *dataprocpb.AutoscalingPolicy) []console.Field {
 
 func (p dataprocPoliciesProvider) CreateForm() (string, []console.Field) {
 	return "Create", append([]console.Field{
-		{Name: "policyId", Label: "Policy name", Type: "text", Required: true, Section: "Policy", Pattern: `^[a-zA-Z0-9_-]{3,50}$`,
+		{Name: "policyId", Label: "Policy name", Type: "text", Required: true, Section: "Policy", Pattern: `^[a-zA-Z0-9_\-]{3,50}$`,
 			Help: "3 to 50 letters, numbers, underscores and hyphens; starts and ends with a letter or number."},
 		{Name: "region", Label: "Region", Type: "select", Required: true, Section: "Policy", Options: dataproc.Locations(), Default: "us-central1"},
 	}, dataprocPolicyFields(nil)...)

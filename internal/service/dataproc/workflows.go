@@ -116,10 +116,15 @@ func (s *Server) checkWorkflow(t *dataprocpb.WorkflowTemplate, inline bool) erro
 			return apierror.InvalidArgument("placement.cluster_selector.cluster_labels is required")
 		}
 	default:
-		return apierror.InvalidArgument("placement is required: managed_cluster or cluster_selector")
+		// A stored template may be made without them, as gcloud's
+		// workflow-templates create makes one and set-managed-cluster
+		// and add-job complete it; it runs only once complete.
+		if inline {
+			return errNoPlacement
+		}
 	}
-	if len(t.GetJobs()) == 0 {
-		return apierror.InvalidArgument("jobs is required: a template has at least one job")
+	if len(t.GetJobs()) == 0 && inline {
+		return errNoJobs
 	}
 	steps := map[string]bool{}
 	for _, j := range t.GetJobs() {
@@ -467,8 +472,19 @@ func (s *Server) InstantiateWorkflowTemplate(ctx context.Context, req *dataprocp
 	}
 	t = clone(t)
 	s.mu.Unlock()
+	if t.GetPlacement().GetPlacement() == nil {
+		return nil, errNoPlacement
+	}
+	if len(t.GetJobs()) == 0 {
+		return nil, errNoJobs
+	}
 	return s.instantiate(t, req.GetParameters(), req.GetRequestId())
 }
+
+var (
+	errNoPlacement = apierror.InvalidArgument("placement is required: managed_cluster or cluster_selector")
+	errNoJobs      = apierror.InvalidArgument("jobs is required: a template has at least one job")
+)
 
 func (s *Server) InstantiateInlineWorkflowTemplate(ctx context.Context, req *dataprocpb.InstantiateInlineWorkflowTemplateRequest) (*longrunningpb.Operation, error) {
 	m := regionRE.FindStringSubmatch(req.GetParent())

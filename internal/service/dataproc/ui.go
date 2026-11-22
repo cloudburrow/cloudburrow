@@ -17,7 +17,10 @@ package dataproc
 // https://docs.cloud.google.com/dataproc/docs/concepts/jobs/history-server).
 
 import (
+	"bufio"
+	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -29,6 +32,8 @@ import (
 	"time"
 
 	dataprocpb "cloud.google.com/go/dataproc/v2/apiv1/dataprocpb"
+
+	"github.com/klauspost/compress/zstd"
 
 	"github.com/cloudburrow/cloudburrow/internal/sparkproc"
 )
@@ -59,8 +64,9 @@ func (h *historyServer) close() {
 	}
 }
 
-// appID is the Spark application ID a batch or session runs as: its UUID,
-// so its Spark UI is found by it.
+// appID is the workload ID a batch or session runs as, from its UUID: the
+// path its Spark UI is opened at, resolved to the Spark application whose
+// event log records it (resolveApp).
 func appID(uuid string) string { return "app-" + strings.ReplaceAll(uuid, "-", "") }
 
 // SparkUIPath is the path of a batch's or session's Spark UI on this API's
@@ -101,6 +107,88 @@ func (s *Server) instanceHistory(ctx context.Context) (string, error) {
 	return addr, nil
 }
 
+// workloadRE is a workload's Spark UI path on the instance's History
+// Server.
+var workloadRE = regexp.MustCompile(`^` + HistoryBase + `/history/(app-[0-9a-f]{32})(/.*)?$`)
+
+// resolveApp is the Spark application ID whose event log in the
+// instance's history directory records workload ID w, or "". Spark's
+// local scheduler names a batch's or session's application local-MILLIS,
+// so the workload's own ID is a property of its environment, read from
+// the log's SparkListenerEnvironmentUpdate (a plain or zstd log, Spark's
+// default event log codec).
+func (s *Server) resolveApp(w string) string {
+	s.mu.Lock()
+	if id, ok := s.apps[w]; ok {
+		s.mu.Unlock()
+		return id
+	}
+	s.mu.Unlock()
+	dir := s.opts.HistoryDir
+	entries, err := os.ReadDir(dir)
+	if dir == "" || err != nil {
+		return ""
+	}
+	needle := []byte(`"` + sparkproc.WorkloadProperty + `":"` + w + `"`)
+	for _, e := range entries {
+		file, app := filepath.Join(dir, e.Name()), strings.TrimSuffix(e.Name(), ".inprogress")
+		if e.IsDir() {
+			app = strings.TrimPrefix(e.Name(), "eventlog_v2_")
+			if app == e.Name() {
+				continue
+			}
+			parts, _ := filepath.Glob(filepath.Join(file, "events_1_*"))
+			if len(parts) == 0 {
+				continue
+			}
+			file = parts[0]
+		}
+		for _, ext := range []string{".zstd", ".lz4", ".snappy", ".lzf"} {
+			app = strings.TrimSuffix(app, ext)
+		}
+		if logRecords(file, needle) {
+			s.mu.Lock()
+			if s.apps == nil {
+				s.apps = map[string]string{}
+			}
+			s.apps[w] = app
+			s.mu.Unlock()
+			return app
+		}
+	}
+	return ""
+}
+
+// logRecords is whether an event log's lines up to its environment hold
+// needle.
+func logRecords(file string, needle []byte) bool {
+	f, err := os.Open(file)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	var r io.Reader = f
+	if strings.HasSuffix(file, ".zstd") || strings.Contains(file, ".zstd.") {
+		d, err := zstd.NewReader(f)
+		if err != nil {
+			return false
+		}
+		defer d.Close()
+		r = d
+	}
+	br := bufio.NewReaderSize(r, 1<<20)
+	for n := 0; n < 64; n++ {
+		line, err := br.ReadBytes('\n')
+		if bytes.Contains(line, needle) {
+			return true
+		}
+		if err != nil || bytes.Contains(line, []byte(`"SparkListenerEnvironmentUpdate"`)) {
+			return false
+		}
+	}
+	return false
+}
+
 var errStopping = &sparkproc.Unavailable{Msg: "the instance is stopping"}
 
 var gatewayRE = regexp.MustCompile(`^/component-gateway/([0-9a-f-]{36})/sparkhistory(/.*)?$`)
@@ -116,6 +204,15 @@ func (s *Server) WebUI(next http.Handler) http.Handler {
 			a, err := s.instanceHistory(r.Context())
 			if err != nil {
 				http.Error(w, "The Spark UI is not available: "+err.Error(), http.StatusServiceUnavailable)
+				return
+			}
+			if m := workloadRE.FindStringSubmatch(p); m != nil {
+				app := s.resolveApp(m[1])
+				if app == "" {
+					http.Error(w, "No Spark application of this workload has been recorded yet: its Spark UI shows once its driver has started", http.StatusNotFound)
+					return
+				}
+				http.Redirect(w, r, HistoryBase+"/history/"+app+m[2]+query(r.URL), http.StatusFound)
 				return
 			}
 			addr, base = a, HistoryBase
@@ -300,7 +397,7 @@ func (s *Server) copyToPHS(phs, uuid string) {
 	if nodes == nil || c == nil {
 		return
 	}
-	for _, f := range eventLogs(s.opts.HistoryDir, appID(uuid)) {
+	for _, f := range eventLogs(s.opts.HistoryDir, s.resolveApp(appID(uuid))) {
 		b, err := os.ReadFile(f)
 		if err != nil {
 			continue

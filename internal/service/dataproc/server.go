@@ -143,8 +143,9 @@ type Server struct {
 	policies  map[string]*dataprocpb.AutoscalingPolicy
 	workflows map[string][]*dataprocpb.WorkflowTemplate // every version, the current last
 	history   *historyServer
-	wfCancel  map[string]bool // workflow operations cancelled
-	stop      chan struct{}   // closed by Close
+	apps      map[string]string // workload ID to Spark application ID (resolveApp)
+	wfCancel  map[string]bool   // workflow operations cancelled
+	stop      chan struct{}     // closed by Close
 	closed    bool
 	wg        sync.WaitGroup
 

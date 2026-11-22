@@ -64,7 +64,9 @@ func TestDataprocBatchesThroughThePage(t *testing.T) {
 	}
 	project := uniqueProject(t)
 	p := openWithin(t, 20*time.Minute)
-	p.navigateByDrawer("Databases", "/dataproc/batches", "Dataproc")
+	// Dataproc's drawer row opens Clusters (#2162); Batches is its menu's.
+	p.navigateByDrawer("Databases", "/dataproc/clusters", "Dataproc")
+	p.waitFor(`document.querySelector('a[href^="/dataproc/batches"]') !== null`)
 	p.waitFor(`[...document.querySelectorAll('a[href^="/dataproc/interactive"]')].some((a) => a.textContent.includes("Interactive sessions"))`)
 
 	p.navigate("/dataproc/batches?project=" + project)

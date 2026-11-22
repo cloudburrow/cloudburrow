@@ -119,6 +119,103 @@
         "verification": "sha256",
         "skipDiscovery": "Maven Central; depcheck only discovers GitHub-sourced components."
       },
+      "sparkRImage": {
+        "$comment": "SparkR workloads and Dataproc clusters of Spark 3.5 (#2162): runtime versions 1.2, 2.2 and 2.3's SparkR batches and image versions 2.2 and 2.3's clusters (cmd/cloudburrow/sparkrunner.go, rImage).",
+        "image": "apache/spark:3.5.9-scala2.12-java17-python3-r-ubuntu",
+        "digest": "sha256:2442368ef4a5ca60e81604cf48d22d847344d009237cd21a1943b060278898bb",
+        "license": "Apache-2.0 (Apache Spark) and the Ubuntu and Eclipse Temurin packages it is built on; R (GPL-2.0-or-later) is an Ubuntu package in the image",
+        "redistribution": "not published: pulled by digest by the local CLI on the first SparkR workload or Dataproc cluster of its Spark; R runs in the container at runtime only, and no R code is in the CLI or the repository",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "notes": "Resolved 2026-11-22 with docker buildx imagetools inspect. The Apache Software Foundation's official image with Python and R.",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve with `docker buildx imagetools inspect apache/spark:3.5.9-scala2.12-java17-python3-r-ubuntu`."
+      },
+      "sparkRImage30": {
+        "$comment": "Runtime version 3.0's SparkR workloads (#2162), Spark 4.0.1.",
+        "image": "apache/spark:4.0.1-scala2.13-java21-python3-r-ubuntu",
+        "digest": "sha256:b374a4f28ed5852cbe036c14fd41e29a02fdb7e4fd7cf0e233bcc22f0272b967",
+        "license": "Apache-2.0 (Apache Spark) and the Ubuntu and Eclipse Temurin packages it is built on; R (GPL-2.0-or-later) is an Ubuntu package in the image",
+        "redistribution": "not published: pulled by digest by the local CLI on the first SparkR workload or Dataproc cluster of its Spark; R runs in the container at runtime only, and no R code is in the CLI or the repository",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "notes": "Resolved 2026-11-22 with docker buildx imagetools inspect. The Apache Software Foundation's official image with Python and R.",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve with `docker buildx imagetools inspect apache/spark:4.0.1-scala2.13-java21-python3-r-ubuntu`."
+      },
+      "sparkRImage40": {
+        "$comment": "Runtime version 4.0's SparkR workloads (#2162), Spark 4.2.0.",
+        "image": "apache/spark:4.2.0-scala2.13-java25-python3-r-ubuntu",
+        "digest": "sha256:0686eefef011f8c2bd272f255e30adf911731c574582116c8d8dc9182c7c9565",
+        "license": "Apache-2.0 (Apache Spark) and the Ubuntu and Eclipse Temurin packages it is built on; R (GPL-2.0-or-later) is an Ubuntu package in the image",
+        "redistribution": "not published: pulled by digest by the local CLI on the first SparkR workload or Dataproc cluster of its Spark; R runs in the container at runtime only, and no R code is in the CLI or the repository",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "notes": "Resolved 2026-11-22 with docker buildx imagetools inspect. The Apache Software Foundation's official image with Python and R.",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve with `docker buildx imagetools inspect apache/spark:4.2.0-scala2.13-java25-python3-r-ubuntu`."
+      },
+      "sparkClusterImage21": {
+        "$comment": "Dataproc image version 2.1's clusters (#2162): Spark 3.3 (the image version list names Spark 3.3.2; 3.3.3 is the official image of that line, on Java 11).",
+        "image": "apache/spark:3.3.3-scala2.12-java11-python3-r-ubuntu",
+        "digest": "sha256:563f9fdb447a9238c50bdb79301368f26df186cbae197f57eb1da0e6efcb7287",
+        "license": "Apache-2.0 (Apache Spark) and the Ubuntu and Eclipse Temurin packages it is built on; R (GPL-2.0-or-later) is an Ubuntu package in the image",
+        "redistribution": "not published: pulled by digest by the local CLI on the first SparkR workload or Dataproc cluster of its Spark; R runs in the container at runtime only, and no R code is in the CLI or the repository",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "notes": "Resolved 2026-11-22 with docker buildx imagetools inspect. The Apache Software Foundation's official image with Python and R.",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve with `docker buildx imagetools inspect apache/spark:3.3.3-scala2.12-java11-python3-r-ubuntu`."
+      },
+      "sparkClusterImage30": {
+        "$comment": "Dataproc image version 3.0's clusters (#2162): Spark 4.1.2 on Java 21, as the image version list has it.",
+        "image": "apache/spark:4.1.2-scala2.13-java21-python3-r-ubuntu",
+        "digest": "sha256:4db9a9d28c9fb0a386e224d4201a79e07df825761574b5fd8873c78a2d5b60ea",
+        "license": "Apache-2.0 (Apache Spark) and the Ubuntu and Eclipse Temurin packages it is built on; R (GPL-2.0-or-later) is an Ubuntu package in the image",
+        "redistribution": "not published: pulled by digest by the local CLI on the first SparkR workload or Dataproc cluster of its Spark; R runs in the container at runtime only, and no R code is in the CLI or the repository",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "notes": "Resolved 2026-11-22 with docker buildx imagetools inspect. The Apache Software Foundation's official image with Python and R.",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve with `docker buildx imagetools inspect apache/spark:4.1.2-scala2.13-java21-python3-r-ubuntu`."
+      },
+      "sparkBigQueryConnector33": {
+        "$comment": "Google's BigQuery connector for Apache Spark 3.3 (#2162), for image version 2.1's clusters; fetched and checked as sparkBigQueryConnector is.",
+        "version": "0.46.2",
+        "source": "https://repo1.maven.org/maven2/com/google/cloud/spark/spark-3.3-bigquery/0.46.2/spark-3.3-bigquery-0.46.2.jar",
+        "sha256": "fb700b2d4899ea4823b6f3650273301913323ca0752fc53e8e83e02cee7d1e0a",
+        "license": "Apache-2.0",
+        "redistribution": "not published: downloaded by the local CLI; nothing of it is in the CLI or the repository",
+        "updateFeed": "maven-central",
+        "verification": "sha256",
+        "skipDiscovery": "Maven Central; depcheck only discovers GitHub-sourced components."
+      },
+      "sparkBigQueryConnector41": {
+        "$comment": "Google's BigQuery connector for Apache Spark 4.1 (#2162), for image version 3.0's clusters; fetched and checked as sparkBigQueryConnector is.",
+        "version": "0.46.2",
+        "source": "https://repo1.maven.org/maven2/com/google/cloud/spark/spark-4.1-bigquery/0.46.2/spark-4.1-bigquery-0.46.2.jar",
+        "sha256": "4bcfadd6898f98141a44d696824f807bb3d0565e7ec590854ef9d7a7b294b6da",
+        "license": "Apache-2.0",
+        "redistribution": "not published: downloaded by the local CLI; nothing of it is in the CLI or the repository",
+        "updateFeed": "maven-central",
+        "verification": "sha256",
+        "skipDiscovery": "Maven Central; depcheck only discovers GitHub-sourced components."
+      },
       "tfconvertBase": {
         "$comment": "deploy/tfconvert/Dockerfile builds FROM this digest (#1775): the TensorFlow SavedModel converter image the CLI builds locally on the first imported TENSORFLOW model.",
         "image": "python:3.12-slim",
