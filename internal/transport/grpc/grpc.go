@@ -58,13 +58,25 @@ type Server struct {
 	gateService string
 	srv         *grpc.Server
 	ln          net.Listener
-	done        chan struct{}
+	// held is a listener already bound to addr (UseListener), which Start
+	// serves instead of binding addr again.
+	held net.Listener
+	done chan struct{}
 }
 
 // New returns a server bound to addr when started.
 func New(addr string) *Server { return &Server{addr: addr} }
 
 func (s *Server) Name() string { return "grpc" }
+
+// UseListener makes Start serve ln, already bound to the server's address,
+// rather than bind that address itself: the caller that chose the port
+// holds it from then on, so nothing else can take it in between.
+func (s *Server) UseListener(ln net.Listener) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.held = ln
+}
 
 // Register exposes the underlying server so services can register themselves.
 //
@@ -196,16 +208,19 @@ func (s *Server) Start(ctx context.Context) error {
 		s.mu.Unlock()
 		return errors.New("no services registered")
 	}
-	srv, jsonAPI := s.srv, s.http
+	srv, jsonAPI, ln := s.srv, s.http, s.held
+	s.held = nil
 	if jsonAPI != nil && s.gate != nil {
 		jsonAPI = apienable.Gate(s.gate, s.gateService, jsonAPI)
 	}
 	s.mu.Unlock()
 
-	var lc net.ListenConfig
-	ln, err := lc.Listen(ctx, "tcp", s.addr)
-	if err != nil {
-		return fmt.Errorf("bind gRPC %s: %w", s.addr, err)
+	if ln == nil {
+		var lc net.ListenConfig
+		var err error
+		if ln, err = lc.Listen(ctx, "tcp", s.addr); err != nil {
+			return fmt.Errorf("bind gRPC %s: %w", s.addr, err)
+		}
 	}
 	done := make(chan struct{})
 
