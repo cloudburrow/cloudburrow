@@ -207,10 +207,16 @@ func (s *computeService) register(coord *lifecycle.Coordinator) {
 // networkUsers are the Kubernetes Engine clusters on a network or subnet,
 // which keep it from being deleted, as on Google.
 func (s *computeService) networkUsers(rel string) []string {
+	var users []string
 	if api := s.gke.API(); api != nil {
-		return api.NetworkUsers(rel)
+		users = api.NetworkUsers(rel)
 	}
-	return nil
+	// Serverless VPC Access connectors keep their network and subnet
+	// (#2140).
+	if s.vpcAccess != nil {
+		users = append(users, s.vpcAccess.NetworkUsers(rel)...)
+	}
+	return users
 }
 
 // The networks each service checks against: nil interfaces (not a nil

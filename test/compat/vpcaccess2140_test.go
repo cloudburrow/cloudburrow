@@ -4,7 +4,9 @@ package compat
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"testing"
@@ -16,8 +18,10 @@ import (
 	"cloud.google.com/go/run/apiv2/runpb"
 	vpcaccess "cloud.google.com/go/vpcaccess/apiv1"
 	"cloud.google.com/go/vpcaccess/apiv1/vpcaccesspb"
+	"google.golang.org/api/googleapi"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
+	vpcaccessv1 "google.golang.org/api/vpcaccess/v1"
 	locationpb "google.golang.org/genproto/googleapis/cloud/location"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/proto"
@@ -296,5 +300,116 @@ func TestRunVPCEgressThroughTheGoClient2140(t *testing.T) {
 		if err != nil || !tc.want(g.GetTemplate().GetVpcAccess()) {
 			t.Errorf("GetService(%s) = %v, %v", tc.id, g.GetTemplate().GetVpcAccess(), err)
 		}
+	}
+}
+
+// TestServerlessVPCAccessUpdateConnectorThroughTheGoClient2140 (#2140):
+// projects.locations.connectors.patch, which the v1 REST discovery document
+// publishes and the apiv1 client does not bind, through Google's
+// discovery-based google.golang.org/api/vpcaccess/v1 client: the machine
+// type and the instance counts raised, as vpc/docs/
+// configure-serverless-vpc-access "Update a connector" allows; a decrease,
+// a maximum above 10 and a field outside the three refused 400; then
+// deleting the connector's network with the compute client refused with
+// resourceInUseByAnotherResource until the connector is gone.
+// covers-pending (EPF: make this "covers:" once run): vpcaccess.projects.locations.connectors.patch, compute.networks.delete
+func TestServerlessVPCAccessUpdateConnectorThroughTheGoClient2140(t *testing.T) {
+	h := New(t)
+	c := vpcAccessClient(t, h)
+	addr := h.Endpoint(EnvCompute)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	t.Cleanup(cancel)
+	p := h.Project()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano()%1e5)
+	opts := computeOpts(t, h)
+	nets, err := computeapi.NewNetworksRESTClient(ctx, opts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = nets.Close() })
+	netName := "ct-svu-" + suffix
+	nop, err := nets.Insert(ctx, &computepb.InsertNetworkRequest{Project: p, NetworkResource: &computepb.Network{Name: proto.String(netName), AutoCreateSubnetworks: proto.Bool(false)}})
+	if err != nil || nop.Wait(ctx) != nil {
+		t.Fatalf("network: %v", err)
+	}
+	t.Cleanup(func() {
+		if op, err := nets.Delete(h.Context(), &computepb.DeleteNetworkRequest{Project: p, Network: netName}); err == nil {
+			_ = op.Wait(h.Context())
+		}
+	})
+	parent := "projects/" + p + "/locations/us-central1"
+	id := "ct-up-" + suffix
+	name := parent + "/connectors/" + id
+	cop, err := c.CreateConnector(ctx, &vpcaccesspb.CreateConnectorRequest{Parent: parent, ConnectorId: id,
+		Connector: &vpcaccesspb.Connector{Network: netName, IpCidrRange: "10.8.240.0/28", MinInstances: 2, MaxInstances: 4}})
+	if err != nil {
+		t.Fatalf("CreateConnector: %v", err)
+	}
+	if _, err := cop.Wait(ctx); err != nil {
+		t.Fatal(err)
+	}
+	deleted := false
+	t.Cleanup(func() {
+		if !deleted {
+			if op, err := c.DeleteConnector(h.Context(), &vpcaccesspb.DeleteConnectorRequest{Name: name}); err == nil {
+				_ = op.Wait(h.Context())
+			}
+		}
+	})
+
+	d, err := vpcaccessv1.NewService(ctx, option.WithEndpoint("http://"+addr+"/"), option.WithoutAuthentication())
+	if err != nil {
+		t.Fatal(err)
+	}
+	conns := d.Projects.Locations.Connectors
+	op, err := conns.Patch(name, &vpcaccessv1.Connector{MinInstances: 3, MaxInstances: 6, MachineType: "e2-standard-4"}).
+		UpdateMask("minInstances,maxInstances,machineType").Context(ctx).Do()
+	if err != nil {
+		t.Fatalf("Patch: %v", err)
+	}
+	if !op.Done || op.Error != nil || !strings.Contains(string(op.Metadata), "UpdateConnector") {
+		t.Errorf("the patch operation is %+v", op)
+	}
+	got, err := c.GetConnector(ctx, &vpcaccesspb.GetConnectorRequest{Name: name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.GetMinInstances() != 3 || got.GetMaxInstances() != 6 || got.GetMachineType() != "e2-standard-4" ||
+		got.GetMinThroughput() != 300 || got.GetMaxThroughput() != 600 || got.GetIpCidrRange() != "10.8.240.0/28" {
+		t.Errorf("after the patch the connector is %v", got)
+	}
+	for what, call := range map[string]*vpcaccessv1.ProjectsLocationsConnectorsPatchCall{
+		"a lower maximum":     conns.Patch(name, &vpcaccessv1.Connector{MaxInstances: 5}).UpdateMask("maxInstances"),
+		"a lower minimum":     conns.Patch(name, &vpcaccessv1.Connector{MinInstances: 2}).UpdateMask("minInstances"),
+		"a maximum above 10":  conns.Patch(name, &vpcaccessv1.Connector{MaxInstances: 11}).UpdateMask("maxInstances"),
+		"the IP range":        conns.Patch(name, &vpcaccessv1.Connector{IpCidrRange: "10.8.241.0/28"}).UpdateMask("ipCidrRange"),
+		"an unknown machine":  conns.Patch(name, &vpcaccessv1.Connector{MachineType: "n2-standard-2"}).UpdateMask("machineType"),
+		"the minimum at max":  conns.Patch(name, &vpcaccessv1.Connector{MinInstances: 6}).UpdateMask("minInstances"),
+		"a missing connector": conns.Patch(parent+"/connectors/none-"+suffix, &vpcaccessv1.Connector{MaxInstances: 10}).UpdateMask("maxInstances"),
+	} {
+		_, err := call.Context(ctx).Do()
+		var ge *googleapi.Error
+		want := http.StatusBadRequest
+		if what == "a missing connector" {
+			want = http.StatusNotFound
+		}
+		if !errors.As(err, &ge) || ge.Code != want {
+			t.Errorf("%s: %v, want %d", what, err, want)
+		}
+	}
+
+	// The network is kept while the connector uses it.
+	_, err = nets.Delete(ctx, &computepb.DeleteNetworkRequest{Project: p, Network: netName})
+	if err == nil || !strings.Contains(err.Error(), "resourceInUseByAnotherResource") || !strings.Contains(err.Error(), id) {
+		t.Errorf("deleting the connector's network: %v, want resourceInUseByAnotherResource naming the connector", err)
+	}
+	dop, err := c.DeleteConnector(ctx, &vpcaccesspb.DeleteConnectorRequest{Name: name})
+	if err != nil || dop.Wait(ctx) != nil {
+		t.Fatalf("DeleteConnector: %v", err)
+	}
+	deleted = true
+	nd, err := nets.Delete(ctx, &computepb.DeleteNetworkRequest{Project: p, Network: netName})
+	if err != nil || nd.Wait(ctx) != nil {
+		t.Errorf("deleting the network once its connector is gone: %v", err)
 	}
 }

@@ -76,11 +76,17 @@ func Transcoder() *rest.Transcoder {
 // Routes is every bound route.
 func Routes() []rest.Route { return Transcoder().Routes() }
 
-// NewRESTHandler is the JSON API over s.
+// NewRESTHandler is the JSON API over s, with connectors.patch, which the
+// proto does not bind (update.go).
 func NewRESTHandler(s *Server) http.Handler {
 	t := Transcoder()
 	s.Register(t)
-	return t
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.servePatch(w, r) {
+			return
+		}
+		t.ServeHTTP(w, r)
+	})
 }
 
 // Handles is whether path is one of this API's (/v1/projects/P/locations
