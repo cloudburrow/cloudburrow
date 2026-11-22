@@ -133,12 +133,23 @@ func TestPrivateServiceConnectThroughTheGoClient2140(t *testing.T) {
 	}
 
 	// A producer's attachments, and endpoints to them.
-	attach := func(name, pref, nat string) error {
+	// The producer's forwarding rule. Its existence is checked where
+	// internal load balancers are served (#2153), whose branch makes a real
+	// one here; this branch checks its shape and region.
+	ilbTarget := "projects/" + p + "/regions/" + region + "/forwardingRules/ilb"
+	attachTo := func(name, pref, nat, target string) error {
 		return wait(sas.Insert(ctx, &computepb.InsertServiceAttachmentRequest{Project: p, Region: region, ServiceAttachmentResource: &computepb.ServiceAttachment{
-			Name: proto.String(name), TargetService: proto.String("projects/" + p + "/regions/" + region + "/forwardingRules/ilb"),
+			Name: proto.String(name), TargetService: proto.String(target),
 			ConnectionPreference: proto.String(pref), NatSubnets: []string{"regions/" + region + "/subnetworks/" + nat}}}))
 	}
+	attach := func(name, pref, nat string) error { return attachTo(name, pref, nat, ilbTarget) }
 	auto, manual := "auto-"+sfx, "manual-"+sfx
+	if err := attachTo("bad-"+sfx, "ACCEPT_AUTOMATIC", "nat-"+sfx, "projects/"+p+"/regions/europe-west1/forwardingRules/ilb"); computeCode(err) != 400 {
+		t.Fatalf("a target service of another region: %v, want 400", err)
+	}
+	if err := attachTo("bad-"+sfx, "ACCEPT_AUTOMATIC", "nat-"+sfx, "projects/"+p+"/global/backendServices/x"); computeCode(err) != 400 {
+		t.Fatalf("a target service that is no forwarding rule: %v, want 400", err)
+	}
 	if err := attach("bad-"+sfx, "ACCEPT_AUTOMATIC", "main-"+sfx); computeCode(err) != 400 {
 		t.Fatalf("a NAT subnet without PSC purpose: %v", err)
 	}

@@ -352,6 +352,17 @@ func (s *Server) insertServiceAttachment(project, region string, b obj) (obj, er
 	if ts == "" {
 		return nil, required("resource.targetService")
 	}
+	// Google's targetService is the producer's forwarding rule, of the
+	// attachment's own region (vpc/docs/configure-private-service-connect-producer).
+	// Its existence is checked where internal load balancers are served
+	// (#2153); here its shape and region are.
+	tparts := strings.Split(Rel(ts, project), "/")
+	if len(tparts) != 6 || tparts[0] != "projects" || tparts[2] != "regions" || tparts[4] != "forwardingRules" {
+		return nil, invalid("Invalid value for field 'resource.targetService': '%s'. Must be the URL of a forwarding rule.", ts)
+	}
+	if tparts[3] != region {
+		return nil, invalid("Invalid value for field 'resource.targetService': '%s'. The forwarding rule must be in the service attachment's region '%s'.", ts, region)
+	}
 	id := newID()
 	o := obj{"kind": "compute#serviceAttachment", "name": name, "selfLink": rel, "region": "projects/" + project + "/" + scope,
 		"targetService": Rel(ts, project), "enableProxyProtocol": false, "fingerprint": newFingerprint(),

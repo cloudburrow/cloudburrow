@@ -24,7 +24,7 @@ import (
 // TestIamPermissions answers for the instance's own account, and
 // ListUsable lists the host's subnets for its attached service project
 // (and, with serviceProject, on the host) across regions.
-// covers-pending (EPF: make this "covers:" once run): compute.subnetworks.getIamPolicy, compute.subnetworks.setIamPolicy, compute.subnetworks.testIamPermissions, compute.subnetworks.listUsable
+// covers: compute.subnetworks.getIamPolicy, compute.subnetworks.setIamPolicy, compute.subnetworks.testIamPermissions, compute.subnetworks.listUsable
 func TestSharedVPCIndividualSubnetsThroughTheGoClient2140(t *testing.T) {
 	h := New(t)
 	opts := computeOpts(t, h)

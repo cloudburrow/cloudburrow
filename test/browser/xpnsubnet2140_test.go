@@ -24,7 +24,7 @@ func TestSharedVPCIndividualSubnetsThroughTheBrowser2140(t *testing.T) {
 	q := "?project=" + url.QueryEscape(host)
 	p := open(t)
 
-	p.navigate("/networking/xpn" + q)
+	p.navigate("/networking/xpn" + q + "&tab=attached") // the actions are on Attached projects, as Google's are
 	p.clickText("#view button", "Attach projects")
 	p.waitFor(`document.querySelector(".modal.is-open #f-sharing-1") !== null`)
 	var disabled bool
@@ -32,10 +32,10 @@ func TestSharedVPCIndividualSubnetsThroughTheBrowser2140(t *testing.T) {
 	if disabled {
 		t.Fatal("Individual subnets (subnet-level permissions) is still unavailable")
 	}
-	p.clickExpr(`document.querySelector(".modal.is-open #f-sharing-1")`)
+	p.eval(`document.querySelector(".modal.is-open #f-sharing-1").click()`, nil)
 	p.waitFor(`(() => { const c = document.querySelector('.modal.is-open [id="f-subnet:us-central1/default"]');
 		return !!c && !c.closest(".form-row").hidden; })()`)
-	p.navigate("/networking/xpn" + q)
+	p.navigate("/networking/xpn" + q + "&tab=attached") // the actions are on Attached projects, as Google's are
 
 	p.clickText("#view button", "Share subnets")
 	p.waitFor(`document.querySelector('[id="f-subnet:us-central1/default"]') !== null`)

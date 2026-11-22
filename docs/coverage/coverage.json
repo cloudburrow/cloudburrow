@@ -14474,9 +14474,9 @@
     "Key": "compute",
     "Title": "Compute Engine API (v1): VPC networking",
     "counts": {
-      "Implemented": 68,
+      "Implemented": 64,
       "Unimplemented": 107,
-      "Verified": 164
+      "Verified": 168
     },
     "rows": [
       {
@@ -16477,8 +16477,10 @@
       },
       {
         "method": "compute.subnetworks.getIamPolicy",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/xpnsubnet2140_test.go:28 TestSharedVPCIndividualSubnetsThroughTheGoClient2140"
+        ]
       },
       {
         "method": "compute.subnetworks.insert",
@@ -16499,8 +16501,10 @@
       },
       {
         "method": "compute.subnetworks.listUsable",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/xpnsubnet2140_test.go:28 TestSharedVPCIndividualSubnetsThroughTheGoClient2140"
+        ]
       },
       {
         "method": "compute.subnetworks.patch",
@@ -16513,8 +16517,10 @@
       },
       {
         "method": "compute.subnetworks.setIamPolicy",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/xpnsubnet2140_test.go:28 TestSharedVPCIndividualSubnetsThroughTheGoClient2140"
+        ]
       },
       {
         "method": "compute.subnetworks.setPrivateIpGoogleAccess",
@@ -16526,8 +16532,10 @@
       },
       {
         "method": "compute.subnetworks.testIamPermissions",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/xpnsubnet2140_test.go:28 TestSharedVPCIndividualSubnetsThroughTheGoClient2140"
+        ]
       },
       {
         "method": "compute.zoneOperations.delete",
