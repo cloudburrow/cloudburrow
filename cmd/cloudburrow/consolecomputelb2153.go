@@ -395,7 +395,7 @@ func lbCreateFields(groups, hcs, buckets []string) []console.Field {
 			VisibleWhen:  map[string]string{"backendType": "instanceGroup"}},
 		{Name: "maxRatePerInstance", Label: "Maximum RPS per instance", Type: "text", Section: s3, VisibleWhen: map[string]string{"balancingMode": "RATE"}},
 		{Name: "customMetricName", Label: "Custom metric name", Type: "text", Section: s3, VisibleWhen: map[string]string{"balancingMode": "CUSTOM_METRICS"},
-			Pattern: `^[a-z]([-_.a-z0-9]*[a-z0-9])?$`,
+			Pattern: `^[a-z]([\-_.a-z0-9]*[a-z0-9])?$`,
 			Help:    "The metric your backends report in their ORCA load report (the endpoint-load-metrics response header), such as orca.cpu_utilization or a named metric."},
 		{Name: "customMetricMaxUtilization", Label: "Max utilization", Type: "text", Default: "0.8", Section: s3, VisibleWhen: map[string]string{"balancingMode": "CUSTOM_METRICS"},
 			Help: "The target value of the metric, between 0.0 and 1.0."},
