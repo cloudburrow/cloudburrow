@@ -149,7 +149,7 @@ func TestBigQueryMLTranscribeLongAndAMR(t *testing.T) {
 
 	if err := run(fmt.Sprintf(`SELECT * FROM ML.TRANSCRIBE(MODEL `+"`%s.speech`, TABLE `%s.amr`"+`, recognition_config => (JSON '{"language_codes": ["en-US"], `+
 		`"model": "chirp", "auto_decoding_config": {}, "features": {"diarization_config": {"min_speaker_count": 2, "max_speaker_count": 2}}}'))`, ds, ds)); err == nil ||
-		!strings.Contains(err.Error(), "speaker_diarization") {
+		!strings.Contains(err.Error(), "features.diarizationConfig") {
 		t.Errorf("diarization_config on chirp: %v", err)
 	}
 }

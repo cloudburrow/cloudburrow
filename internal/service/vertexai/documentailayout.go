@@ -25,6 +25,9 @@ package vertexai
 // only headings so far, and holds at most chunk_size words (a token here is
 // a whitespace-separated word: UNVERIFIED how Google counts them); a block
 // longer than that is split, a table by rows with its header rows repeated.
+// Docs re-read 2026-11-21, still unanswered: ChunkingConfig.chunkSize gives
+// no unit (https://cloud.google.com/document-ai/docs/reference/rest/v1/ProcessOptions,
+// https://cloud.google.com/document-ai/docs/layout-parse-chunk).
 
 import (
 	"regexp"

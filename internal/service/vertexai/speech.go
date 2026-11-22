@@ -43,8 +43,9 @@ import (
 //   - features: enableWordTimeOffsets (each word's startOffset and
 //     endOffset, from whisper's token timestamps), enableWordConfidence,
 //     maxAlternatives (one alternative is returned, which the reference
-//     allows) and enableAutomaticPunctuation (whisper punctuates
-//     regardless) are read, and SEPARATE_RECOGNITION_PER_CHANNEL
+//     allows) and enableAutomaticPunctuation (without it, punctuation
+//     is removed except on the chirp models, which punctuate by
+//     themselves, #2127) are read, and SEPARATE_RECOGNITION_PER_CHANNEL
 //     transcribes each channel on its own (transcribeChannels, #1799);
 //     profanityFilter, enableSpokenPunctuation and enableSpokenEmojis
 //     rewrite each final transcript (speechconfig's Format, #1799), and
@@ -56,6 +57,9 @@ import (
 //     local model, docs/compatibility.md);
 //     adaptation biases whisper (speechbias.go), and transcriptNormalization
 //     rewrites each final transcript (speechconfig's Normalize, #1799).
+//   - each model, location, language and feature is checked against
+//     Google's supported languages table (speechconfig's CheckV2, #2127):
+//     what the table does not mark is INVALID_ARGUMENT.
 //   - decoding (speech/audio.go): WAV, headerless LINEAR16, MULAW and ALAW,
 //     MP3, AAC in MP4, M4A or MOV, FLAC (internal/speech/flac.go, #1799),
 //     Opus in Ogg or WebM (internal/speech/opus.go, #1799), and AMR and
@@ -159,8 +163,32 @@ func (s *Server) recognizeAudio(ctx context.Context, name string, config json.Ra
 }
 
 // checkedConfig is the recognizer's config with config merged over it,
-// checked.
+// checked, against the supported languages table in the recognizer's
+// location too (speechconfig's CheckV2, #2127).
 func (s *Server) checkedConfig(name string, config json.RawMessage) (speechconfig.Config, error) {
+	cfg, err := s.parsedConfig(name, config)
+	if err != nil {
+		return cfg, err
+	}
+	if err := cfg.CheckV2(recognizerLocation(name)); err != nil {
+		return cfg, apierror.InvalidArgument("%v", err)
+	}
+	if err := cfg.Unserved(); err != nil {
+		return cfg, apierror.Unimplemented("%v", err)
+	}
+	return cfg, nil
+}
+
+// recognizerLocation is the location of a recognizer's full name.
+func recognizerLocation(name string) string {
+	_, rest, _ := strings.Cut(name, "/locations/")
+	loc, _, _ := strings.Cut(rest, "/")
+	return loc
+}
+
+// parsedConfig is checkedConfig without the supported languages table:
+// v1's config is checked against v1's table (v1Checked).
+func (s *Server) parsedConfig(name string, config json.RawMessage) (speechconfig.Config, error) {
 	if !strings.HasSuffix(name, "/recognizers/_") {
 		merged, err := s.recognizerConfig(name, config)
 		if err != nil {
@@ -181,10 +209,7 @@ func (s *Server) checkedConfig(name string, config json.RawMessage) (speechconfi
 		return cfg, err
 	}
 	if len(cfg.Candidates) > 0 {
-		loc := ""
-		if _, rest, ok := strings.Cut(name, "/locations/"); ok {
-			loc, _, _ = strings.Cut(rest, "/")
-		}
+		loc := recognizerLocation(name)
 		if !speechconfig.MultiLanguageLocations[loc] {
 			return cfg, apierror.InvalidArgument("several languageCodes are only available in the global location and the us and eu multi-regions, not %q", loc)
 		}
@@ -471,6 +496,15 @@ func (s *Server) transcribeChannels(ctx context.Context, cfg speechconfig.Config
 func normalize(segs []speech.Segment, cfg speechconfig.Config, code string) {
 	for i := range segs {
 		segs[i].Text = cfg.Format(segs[i].Text, code)
+		if !cfg.Punctuated() {
+			words := segs[i].Words[:0]
+			for _, w := range segs[i].Words {
+				if w.Text = speechconfig.StripPunctuation(w.Text); w.Text != "" {
+					words = append(words, w)
+				}
+			}
+			segs[i].Words = words
+		}
 		if cfg.ProfanityFilter {
 			for j := range segs[i].Words {
 				segs[i].Words[j].Text = speechconfig.MaskWord(segs[i].Words[j].Text)

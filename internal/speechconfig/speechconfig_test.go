@@ -36,8 +36,6 @@ func TestParse(t *testing.T) {
 		{`{"model": "chirp", "languageCodes": ["en-US", "de-DE"], "autoDecodingConfig": {}}`, 400, "long, short and telephony"},
 		{`{"model": "long", "languageCodes": ["en-US", "de-DE", "fr-FR", "es-ES"], "autoDecodingConfig": {}}`, 400, "at most 3"},
 		{`{"model": "long", "languageCodes": ["en-US", "auto"], "autoDecodingConfig": {}}`, 400, "invalid language code"},
-		{`{"model": "chirp", "languageCodes": ["en-US"], "autoDecodingConfig": {}, "features": {"diarizationConfig": {}}}`, 400, "speaker_diarization"},
-		{`{"model": "chirp_3", "languageCodes": ["en-US"], "autoDecodingConfig": {}, "features": {"diarizationConfig": {}}}`, 501, "diarizationConfig"},
 		{`{"model": "chirp", "languageCodes": ["en-US"], "autoDecodingConfig": {}, "translationConfig": {"targetLanguage": "de-DE"}}`, 400, "chirp_2"},
 		{`{"model": "chirp_2", "languageCodes": ["en-US"], "autoDecodingConfig": {}, "translationConfig": {}}`, 400, "targetLanguage is required"},
 		{`{"model": "chirp_2", "languageCodes": ["en-US"], "autoDecodingConfig": {}, "translationConfig": {"targetLanguage": "fr-FR"}}`, 400, "not supported by chirp_2"},
@@ -122,7 +120,7 @@ func TestParseFeatures(t *testing.T) {
 }
 
 func TestFormat(t *testing.T) {
-	c := Config{Options: Options{ProfanityFilter: true, SpokenPunctuation: true, SpokenEmojis: true}}
+	c := Config{Model: "long", Options: Options{ProfanityFilter: true, SpokenPunctuation: true, SpokenEmojis: true, AutomaticPunctuation: true}}
 	for _, tc := range []struct{ in, code, want string }{
 		{"Hello, comma, how are you question mark", "en-us", "Hello, how are you?"},
 		{"what the fuck period new line next", "en-us", "what the f***.\nnext"},

@@ -20,17 +20,6 @@ import (
 // maxLanguageCodes is the most languageCodes a config can list.
 const maxLanguageCodes = 3
 
-// diarizationModels are the served models that support speaker
-// diarization: the Diarization column of
-// https://docs.cloud.google.com/speech-to-text/docs/speech-to-text-supported-languages
-// (read 2026-11-21) marks it for chirp_3 (and medical_conversation, not
-// served) and leaves it empty for chirp, chirp_2, long, short and
-// telephony, so a diarizationConfig with those is INVALID_ARGUMENT, as is
-// ML.TRANSCRIBE's (its model is chirp). UNVERIFIED (re-read 2026-11-21:
-// that table and .../speech-to-text/docs/multiple-voices, which quote no
-// error): Google's error text.
-var diarizationModels = map[string]bool{"chirp_3": true}
-
 // multiLanguageModels are the models that take several languageCodes.
 var multiLanguageModels = map[string]bool{"long": true, "short": true, "telephony": true}
 

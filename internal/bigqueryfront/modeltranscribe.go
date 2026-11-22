@@ -61,6 +61,24 @@ import (
 // transcribeLocations are ML.TRANSCRIBE's documented locations.
 var transcribeLocations = map[string]bool{"asia-southeast1": true, "europe-west4": true, "us-central1": true, "us": true, "eu": true}
 
+// speechLocation is the Speech-to-Text location ML.TRANSCRIBE's default
+// recognizer runs in for the remote model's location: the region itself,
+// and for the US and EU multi-regions us-central1 and europe-west4, as
+// Speech-to-Text's supported languages table offers chirp in those regions
+// and not in its us and eu multi-regions (#2127).
+// UNVERIFIED (re-read 2026-11-21: the ML.TRANSCRIBE page, which lists US and EU among its
+// locations and says nothing of the recognizer's): which region Google
+// uses.
+func speechLocation(loc string) string {
+	switch loc = strings.ToLower(loc); loc {
+	case "us":
+		return "us-central1"
+	case "eu":
+		return "europe-west4"
+	}
+	return loc
+}
+
 // recognitionConfigText reads recognition_config's value: (JSON '...'),
 // JSON '...' or a string literal.
 func recognitionConfigText(v string) (string, bool) {
@@ -118,11 +136,21 @@ func (f front) transcribeSubquery(r *http.Request, q queryOptions, md bqModel, c
 	if !transcribeLocations[strings.ToLower(md.Remote.Location)] {
 		return "", 400, fmt.Sprintf("%s is not supported in location %s: it runs in asia-southeast1, europe-west4, us-central1, US and EU", fname, md.Remote.Location)
 	}
+	loc := speechLocation(md.Remote.Location)
+	if rec := md.Remote.Recognizer; rec != "" {
+		_, rest, _ := strings.Cut(rec, "/locations/")
+		loc, _, _ = strings.Cut(rest, "/")
+	}
+	if err := cfg.CheckV2(loc); err != nil {
+		return "", 400, "Invalid recognition_config: " + err.Error()
+	}
+	if err := cfg.Unserved(); err != nil {
+		return "", 501, err.Error() + ". Nothing was run."
+	}
 	src, objects, code, msg := f.serviceObjects(r, q, md, c, fname)
 	if code != 0 {
 		return "", code, msg
 	}
-	loc := strings.ToLower(md.Remote.Location)
 	var lits []string
 	for _, o := range objects {
 		var res []byte

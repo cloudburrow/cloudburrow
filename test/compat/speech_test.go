@@ -86,7 +86,7 @@ func TestSpeechRecognizers(t *testing.T) {
 	// test's own cleanups that still use ctx.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	t.Cleanup(cancel)
-	parent := "projects/" + h.Project() + "/locations/us"
+	parent := "projects/" + h.Project() + "/locations/us-central1" // chirp's (#2127)
 	wav, err := os.ReadFile("../../internal/speech/testdata/jfk.wav")
 	if err != nil {
 		t.Fatal(err)
@@ -281,7 +281,7 @@ func TestSpeechAdaptationResources(t *testing.T) {
 		t.Errorf("updated: %v %v", up, err)
 	}
 	if _, err := g.Recognize(ctx, &speechpb.RecognizeRequest{Recognizer: parent + "/recognizers/_",
-		Config: &speechpb.RecognitionConfig{Model: "chirp_3", LanguageCodes: []string{"en-US"},
+		Config: &speechpb.RecognitionConfig{Model: "long", LanguageCodes: []string{"en-US"},
 			DecodingConfig: &speechpb.RecognitionConfig_AutoDecodingConfig{AutoDecodingConfig: &speechpb.AutoDetectDecodingConfig{}},
 			Adaptation: &speechpb.SpeechAdaptation{PhraseSets: []*speechpb.SpeechAdaptation_AdaptationPhraseSet{{
 				Value: &speechpb.SpeechAdaptation_AdaptationPhraseSet_PhraseSet{PhraseSet: ps.GetName()}}}}},
@@ -342,7 +342,9 @@ func TestSpeechBatchRecognize(t *testing.T) {
 	if err := w.Close(); err != nil {
 		t.Fatalf("upload: %v", err)
 	}
-	rec := "projects/" + h.Project() + "/locations/global/recognizers/_"
+	// us: chirp_3 and the long, short and telephony models are offered
+	// there; chirp_2 in us-central1 (the supported languages table, #2127).
+	rec := "projects/" + h.Project() + "/locations/us/recognizers/_"
 	cfg := func(model string) *speechpb.RecognitionConfig {
 		return &speechpb.RecognitionConfig{Model: model, LanguageCodes: []string{"en-US"},
 			DecodingConfig: &speechpb.RecognitionConfig_AutoDecodingConfig{AutoDecodingConfig: &speechpb.AutoDetectDecodingConfig{}}}
@@ -408,7 +410,11 @@ func TestSpeechBatchRecognize(t *testing.T) {
 
 	// Inline, through REST, with each served general model.
 	for _, model := range []string{"long", "short", "telephony", "chirp_2", "chirp_3"} {
-		op, err := r.BatchRecognize(ctx, &speechpb.BatchRecognizeRequest{Recognizer: rec, Config: cfg(model), Files: file(b + "/audio/jfk.flac"),
+		recognizer := rec
+		if model == "chirp_2" {
+			recognizer = "projects/" + h.Project() + "/locations/us-central1/recognizers/_"
+		}
+		op, err := r.BatchRecognize(ctx, &speechpb.BatchRecognizeRequest{Recognizer: recognizer, Config: cfg(model), Files: file(b + "/audio/jfk.flac"),
 			RecognitionOutputConfig: inline})
 		if err != nil {
 			t.Fatalf("BatchRecognize %s (REST): %v", model, err)
