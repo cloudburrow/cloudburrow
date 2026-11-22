@@ -14474,8 +14474,8 @@
     "Key": "compute",
     "Title": "Compute Engine API (v1): VPC networking",
     "counts": {
-      "Implemented": 64,
-      "Unimplemented": 111,
+      "Implemented": 68,
+      "Unimplemented": 107,
       "Verified": 164
     },
     "rows": [
@@ -16477,8 +16477,8 @@
       },
       {
         "method": "compute.subnetworks.getIamPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.subnetworks.insert",
@@ -16499,8 +16499,8 @@
       },
       {
         "method": "compute.subnetworks.listUsable",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.subnetworks.patch",
@@ -16513,8 +16513,8 @@
       },
       {
         "method": "compute.subnetworks.setIamPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.subnetworks.setPrivateIpGoogleAccess",
@@ -16526,8 +16526,8 @@
       },
       {
         "method": "compute.subnetworks.testIamPermissions",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.zoneOperations.delete",
