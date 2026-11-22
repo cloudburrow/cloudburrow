@@ -129,17 +129,21 @@ func withPredictionEndpoints(cfg config.Config, srv *vertexai.Server, run interf
 	return srv
 }
 
-// modelGardenFor returns the Hugging Face model cache and, when the local
-// AI endpoint serves custom prediction (Cloud Run is enabled, so Docker
-// runs the cluster), the Model Garden deployments it serves (#1840), their
-// engines restarted from the deployments file.
+// modelGardenFor returns the Hugging Face model cache and, when there is a
+// local AI endpoint, the Model Garden deployments it serves (#1840): new
+// ones run on the instance's cluster (#2148), every instance having one,
+// and the console's Deploy of a model downloaded to the host runs its
+// engine in Docker beside the cluster, as before. Both are restarted from
+// the deployments file.
 func modelGardenFor(cfg config.Config, srv *vertexai.Server) (*hfmodels.Manager, *modelgarden.Manager) {
 	hf := &hfmodels.Manager{Dir: filepath.Join(cfg.StateDir, "models", "huggingface")}
-	if srv == nil || !srv.ServesEndpoints() {
+	if srv == nil {
 		return hf, nil
 	}
 	g := &modelgarden.Manager{Instance: cfg.Name, StateFile: filepath.Join(cfg.StateDir, "modelgarden", "deployments.json"),
-		Models: hf, Docker: modelgarden.DockerCLI{}}
+		Models: hf, Docker: modelgarden.DockerCLI{},
+		Cluster: &modelgarden.KubeCluster{Kubeconfig: cfg.KubeconfigPath(), Namespace: cfg.Cluster.Namespace,
+			Instance: cfg.Name, ClusterName: cfg.ClusterName()}}
 	srv.SetModelGarden(g)
 	g.Restore()
 	return hf, g

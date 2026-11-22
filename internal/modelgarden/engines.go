@@ -31,6 +31,10 @@ const (
 	// (Apache-2.0). It is published for linux/amd64 only, so an arm64 host
 	// runs it emulated.
 	TEIImage = "ghcr.io/huggingface/text-embeddings-inference:cpu-1.9@sha256:2538ea1c9640d3763b15af668039d24172d063b42337b0c27796fc2be180c78d"
+	// TEIArm64Image is the same release's arm64 CPU build (Apache-2.0,
+	// dependencies.json localai.modelGardenTEIArm64), which a cluster whose
+	// node is linux/arm64 runs natively (#2148).
+	TEIArm64Image = "ghcr.io/huggingface/text-embeddings-inference:cpu-arm64-1.9@sha256:798cd7615e060a72ccbdf19aa0ada52289c6a0147490195bafaece6ce04d70f1"
 )
 
 // Engine names.
@@ -88,6 +92,88 @@ func EngineFor(pipelineTag string) (Engine, error) {
 		"image-text-to-text models on vLLM and feature-extraction and sentence-similarity models on Text Embeddings Inference", pipelineTag)
 }
 
+// EngineForModel picks the engine for a Hub model from its task, library
+// and tags (#2148): a sentence-transformers model, or a feature-extraction
+// or sentence-similarity one, on Text Embeddings Inference; a causal or
+// seq2seq LM, or an image-text-to-text model, on vLLM, which loads
+// transformers weights (safetensors or PyTorch), not a GGUF, MLX or ONNX
+// export alone. Everything else is refused with the reason, which Model
+// Garden's card shows beside a disabled Deploy.
+func EngineForModel(task, library string, tags []string) (Engine, error) {
+	has := map[string]bool{}
+	for _, t := range tags {
+		has[t] = true
+	}
+	switch library {
+	case "gguf", "mlx", "onnx", "openvino", "llama.cpp", "ctranslate2":
+		if !has["safetensors"] && !has["pytorch"] {
+			return Engine{}, fmt.Errorf("the model is published as %s only; vLLM and Text Embeddings Inference load "+
+				"transformers weights (safetensors or PyTorch)", library)
+		}
+	}
+	if library == "sentence-transformers" && (task == "" || task == "feature-extraction" || task == "sentence-similarity") {
+		return engines[EngineTEI], nil
+	}
+	if library == "diffusers" {
+		return Engine{}, fmt.Errorf("diffusers models (%s) need Model Garden's diffusers container, which is not served locally", task)
+	}
+	return EngineFor(task)
+}
+
+// ImageFor is the engine's image for a node architecture (amd64, arm64).
+func (e Engine) ImageFor(arch string) string {
+	if e.Name == EngineTEI && arch == "arm64" {
+		return TEIArm64Image
+	}
+	return e.Image
+}
+
+// PodArgs are the engine's arguments in a cluster pod, which pulls the
+// weights itself from the Hub at revision into /data (#2148), with the
+// rest of Model Garden's serving arguments as Args gives them.
+func (e Engine) PodArgs(hfID, revision string, contextLen int) []string {
+	switch e.Name {
+	case EngineVLLM:
+		n := maxModelLen
+		if contextLen > 0 && contextLen < n {
+			n = contextLen
+		}
+		return []string{"--host=0.0.0.0", "--port=" + strconv.Itoa(containerPort), "--model=" + hfID,
+			"--revision=" + revision, "--served-model-name=" + hfID, "--max-model-len=" + strconv.Itoa(n),
+			"--dtype=auto", "--max-num-seqs=256", "--disable-log-stats", "--download-dir=/data"}
+	case EngineTEI:
+		return []string{"--model-id=" + hfID, "--revision=" + revision, "--hostname=0.0.0.0",
+			"--port=" + strconv.Itoa(containerPort), "--huggingface-hub-cache=/data"}
+	}
+	return nil
+}
+
+// PodEnv is the pod's environment: Model Garden's MODEL_ID and the Hub
+// cache. HF_TOKEN is not here: a gated model's comes from its Secret.
+func (e Engine) PodEnv(hfID string) map[string]string {
+	env := map[string]string{"MODEL_ID": hfID, "HF_HOME": "/data", "HF_HUB_DISABLE_TELEMETRY": "1"}
+	if e.Name == EngineVLLM {
+		env["VLLM_CPU_KVCACHE_SPACE"] = "2"
+		env["VLLM_NO_USAGE_STATS"] = "1"
+		env["DO_NOT_TRACK"] = "1"
+	}
+	return env
+}
+
+// ContextLength reads a config.json's context length, or 0.
+func ContextLength(config []byte) int {
+	var c map[string]any
+	if json.Unmarshal(config, &c) != nil {
+		return 0
+	}
+	for _, k := range []string{"max_position_embeddings", "n_positions", "max_sequence_length", "seq_length"} {
+		if f, ok := c[k].(float64); ok && f > 0 {
+			return int(f)
+		}
+	}
+	return 0
+}
+
 // maxModelLen is Model Garden's vLLM default (max_model_len = 4096), capped
 // at the model's own context length so a short-context model still starts.
 const maxModelLen = 4096
@@ -98,16 +184,7 @@ func contextLength(dir string) int {
 	if err != nil {
 		return 0
 	}
-	var c map[string]any
-	if json.Unmarshal(b, &c) != nil {
-		return 0
-	}
-	for _, k := range []string{"max_position_embeddings", "n_positions", "max_sequence_length", "seq_length"} {
-		if f, ok := c[k].(float64); ok && f > 0 {
-			return int(f)
-		}
-	}
-	return 0
+	return ContextLength(b)
 }
 
 // Args are the engine's serving arguments for a model mounted at /model and

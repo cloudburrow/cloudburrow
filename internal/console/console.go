@@ -2182,6 +2182,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/ai/agent-garden", s.handleAgentGarden)
 	mux.HandleFunc("GET /api/ai/hf-models", s.handleHFModels)
 	mux.HandleFunc("GET /api/ai/hf-models/lookup", s.handleHFLookup)
+	mux.HandleFunc("GET /api/ai/hf-hub/models", s.handleHFHubSearch)
+	mux.HandleFunc("GET /api/ai/hf-hub/model", s.handleHFHubCard)
 	mux.HandleFunc("POST /api/ai/hf-models/{action}", s.handleHFAction)
 	mux.HandleFunc("GET /api/ai/hf-deployments", s.handleHFDeployments)
 	mux.HandleFunc("POST /api/ai/hf-deployments/{action}", s.handleHFDeploymentAction)

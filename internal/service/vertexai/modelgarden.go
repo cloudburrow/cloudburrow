@@ -64,8 +64,8 @@ func (s *Server) gardenEndpoint(project, location, endpoint string) *modelgarden
 }
 
 func gardenUnavailable() error {
-	return apierror.Unimplemented("Model Garden deployments are not served on this instance: they need the Hugging Face " +
-		"model cache and Docker (start with --services including run)")
+	return apierror.Unimplemented("Model Garden deployments are not served on this instance: they need the local AI " +
+		"endpoint (start with a local AI model, or --services including run)")
 }
 
 // parent parses projects/{p}/locations/{l}.
@@ -187,20 +187,26 @@ func (g *modelGardenService) Deploy(ctx context.Context, req *aiplatformpb.Deplo
 			"Model Garden picks for the model's task (vLLM or Text Embeddings Inference)"))
 	}
 	r := modelgarden.Request{Project: project, Location: location, HFModelID: req.GetHuggingFaceModelId(),
-		AcceptEULA: mc.GetAcceptEula(), TokenSet: mc.GetHuggingFaceAccessToken() != "",
+		AcceptEULA: mc.GetAcceptEula(), TokenSet: mc.GetHuggingFaceAccessToken() != "", HFToken: mc.GetHuggingFaceAccessToken(),
 		ModelDisplayName: mc.GetModelDisplayName(), ModelUserID: mc.GetModelUserId(),
 		EndpointDisplayName: ec.GetEndpointDisplayName(), EndpointUserID: ec.GetEndpointUserId(),
 		DedicatedDisabled: ec.GetDedicatedEndpointDisabled(),
 		MachineType:       dc.GetDedicatedResources().GetMachineSpec().GetMachineType(), Labels: dc.GetSystemLabels()}
+	return g.deploy(ctx, m, req.GetDestination(), r)
+}
+
+// deploy prepares r and runs it in the background, under an operation.
+func (g *modelGardenService) deploy(ctx context.Context, m *modelgarden.Manager, destination string, r modelgarden.Request) (*longrunningpb.Operation, error) {
+	project, location := r.Project, r.Location
 	p, err := m.Prepare(ctx, r)
 	if err != nil {
 		return nil, grpcError(err)
 	}
-	name := g.s.newOp(req.GetDestination())
+	name := g.s.newOp(destination)
 	created := time.Now()
 	meta := func() *aiplatformpb.DeployOperationMetadata {
 		return &aiplatformpb.DeployOperationMetadata{GenericMetadata: genericMeta(created, time.Now()),
-			PublisherModel: p.PublisherModel, Destination: req.GetDestination(), ModelId: p.Model}
+			PublisherModel: p.PublisherModel, Destination: destination, ModelId: p.Model}
 	}
 	_ = g.s.ops.SetMetadata(name, meta())
 	go func() {
@@ -218,13 +224,17 @@ func (g *modelGardenService) Deploy(ctx context.Context, req *aiplatformpb.Deplo
 }
 
 // DeployHF runs Deploy for the console, returning the operation name and
-// the endpoint's resource name.
-func (s *Server) DeployHF(ctx context.Context, project, location, hfID string, acceptEULA bool) (op, endpoint string, err error) {
+// the endpoint's resource name. token is the deploy form's Hugging Face
+// access token, which goes into the workload's Secret and nowhere else;
+// runtime forces modelgarden.RuntimeDocker for a downloaded model.
+func (s *Server) DeployHF(ctx context.Context, project, location, hfID string, acceptEULA bool, token, runtime string) (op, endpoint string, err error) {
+	m := s.modelGarden()
+	if m == nil {
+		return "", "", gardenUnavailable()
+	}
 	g := &modelGardenService{s: s}
-	o, err := g.Deploy(ctx, &aiplatformpb.DeployRequest{
-		Artifacts:   &aiplatformpb.DeployRequest_HuggingFaceModelId{HuggingFaceModelId: hfID},
-		Destination: "projects/" + project + "/locations/" + location,
-		ModelConfig: &aiplatformpb.DeployRequest_ModelConfig{AcceptEula: acceptEULA}})
+	o, err := g.deploy(ctx, m, "projects/"+project+"/locations/"+location, modelgarden.Request{Project: project, Location: location,
+		HFModelID: hfID, AcceptEULA: acceptEULA, TokenSet: token != "", HFToken: token, Runtime: runtime})
 	if err != nil {
 		return "", "", err
 	}

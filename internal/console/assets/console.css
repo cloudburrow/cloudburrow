@@ -2769,3 +2769,20 @@ tr.log-entry.is-located { outline: 2px solid var(--accent); outline-offset: -2px
 .bq-map { display: block; }
 .trace-kv td, .trace-kv th { overflow-wrap: anywhere; word-break: break-word; }
 .trace-kv { table-layout: fixed; width: 100%; }
+
+/* Model Garden's Hugging Face tab (#2148): search and sort, filter chips,
+   model cards with their counts, and a model card's README. */
+.hf-crumbs { margin: 0 0 12px; color: var(--text-muted); }
+.hf-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 16px 0 8px; }
+.hf-toolbar input[type="search"] { flex: 1 1 280px; max-width: 480px; min-width: 0; }
+.hf-chips { align-items: center; margin: 8px 0; }
+.hf-chips-label { font-weight: 500; min-width: 80px; }
+.hf-stats { display: flex; flex-wrap: wrap; gap: 12px; color: var(--text-muted); font-size: var(--text-caption-size); }
+.hf-engine { color: var(--text-muted); font-size: var(--text-caption-size); }
+.garden-tag.hf-gated { border-color: var(--warning, var(--border)); font-weight: 500; }
+.hf-card h2 a { overflow-wrap: anywhere; }
+#hf-deploy-form label[for="hf-token"] { display: block; font-weight: 500; margin-top: 12px; }
+#hf-deploy-form input[type="password"] { width: 100%; max-width: 480px; }
+.hf-readme { overflow-wrap: anywhere; }
+.hf-readme pre { overflow-x: auto; padding: 12px; background: var(--surface-variant, var(--surface)); }
+.hf-readme blockquote { margin: 8px 0; padding-left: 12px; border-left: 3px solid var(--border); color: var(--text-muted); }
