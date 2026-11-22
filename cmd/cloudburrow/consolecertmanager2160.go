@@ -232,7 +232,7 @@ func (p ccmCertsProvider) Detail(ctx context.Context, project string, path []str
 		{Label: "Location", Value: ccmLocationText(path[0])}, {Label: "Scope", Value: vpcOr(vpcStr(o, "scope"), "DEFAULT")},
 		{Label: "Type", Value: ccmCertType(o)}, {Label: "Status", Value: ccmCertStatus(o)},
 		{Label: "Domain names", Value: vpcDash(strings.Join(vpcStrs(o, "sanDnsnames"), ", "))},
-		{Label: "Expires", Value: vpcDash(vpcStr(o, "expireTime"))}}
+		{Label: "Expires", Value: vpcDash(vpcStr(o, "expireTime"))}, ccmLabelsProperty(o)}
 	auth := console.Listing{Columns: []string{"State", "Details"}, NameColumn: "Domain", Noun: "domain authorizations", Items: []console.Resource{}}
 	m := vmMap(o, "managed")
 	for _, a := range vmMaps(m, "authorizationAttemptInfo") {
@@ -251,7 +251,7 @@ func (p ccmCertsProvider) Detail(ctx context.Context, project string, path []str
 	if pem := vpcStr(o, "pemCertificate"); pem != "" {
 		secs = append(secs, console.Section{ID: "pem", Label: "Certificate", Kind: console.KindText, Text: pem})
 	}
-	return console.Detail{Title: path[1], Heading: "Certificate details", Sections: secs}, nil
+	return console.Detail{Title: path[1], Heading: "Certificate details", Sections: secs, Edit: certEditForm(o)}, nil
 }
 
 func lastAll(l []string) []string {
@@ -371,6 +371,9 @@ func (p ccmMapsProvider) Detail(ctx context.Context, project string, path []stri
 	if p.api() == nil {
 		return console.Detail{Unavailable: computeNotStarted}, nil
 	}
+	if len(path) == 4 && path[2] == "entry" {
+		return p.entryDetail(ctx, project, path)
+	}
 	if len(path) != 2 {
 		return console.Detail{Unavailable: "a certificate map is addressed by its location and name"}, nil
 	}
@@ -380,7 +383,7 @@ func (p ccmMapsProvider) Detail(ctx context.Context, project string, path []stri
 	}
 	props := []console.Property{{Label: "Name", Value: path[1]}, {Label: "Description", Value: vpcDash(vpcStr(o, "description"))},
 		{Label: "Location", Value: ccmLocationText(path[0])}, {Label: "Targets", Value: vpcDash(strings.Join(ccmTargets(o), ", "))},
-		{Label: "Created", Value: vpcDash(vpcStr(o, "createTime"))}}
+		{Label: "Created", Value: vpcDash(vpcStr(o, "createTime"))}, ccmLabelsProperty(o)}
 	ents := console.Listing{Columns: []string{"Hostname", "Certificates", "State"}, NameColumn: "Entry", Noun: "certificate map entries", Items: []console.Resource{}}
 	for _, e := range p.entries(ctx, project, path) {
 		id := vpcLast(vpcStr(e, "name"))
@@ -388,7 +391,7 @@ func (p ccmMapsProvider) Detail(ctx context.Context, project string, path []stri
 		if vpcStr(e, "matcher") == "PRIMARY" {
 			host = "Primary entry"
 		}
-		ents.Items = append(ents.Items, console.Resource{Name: id, Target: []string{path[0], path[1], "entry", id},
+		ents.Items = append(ents.Items, console.Resource{Name: id, Target: []string{path[0], path[1], "entry", id}, Opens: []string{path[0], path[1], "entry", id},
 			Fields: map[string]string{"Hostname": vpcDash(host), "Certificates": vpcDash(strings.Join(lastAll(vpcStrs(e, "certificates")), ", ")),
 				"State": vpcTitle(strings.ToLower(vpcOr(vpcStr(e, "state"), "ACTIVE")))},
 			Actions: []console.Action{{ID: "deleteentry", Label: "Delete", Destructive: true, ConfirmStyle: console.DeleteConfirmClick, Confirm: "Delete certificate map entry " + id + "?"}}})
@@ -396,7 +399,8 @@ func (p ccmMapsProvider) Detail(ctx context.Context, project string, path []stri
 	ents.Total = len(ents.Items)
 	return console.Detail{Title: path[1], Heading: "Certificate map details",
 		Sections: []console.Section{{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Properties: props}}},
-			{ID: "entries", Label: "Certificate map entries", Listing: ents, Actions: []console.Action{ccmAddEntryAction()}}}}, nil
+			{ID: "entries", Label: "Certificate map entries", Listing: ents, Actions: []console.Action{ccmAddEntryAction()}}},
+		Edit: ccmEdit("Edit certificate map", ccmEditFields(o))}, nil
 }
 
 func (p ccmMapsProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
@@ -476,7 +480,7 @@ func (p ccmDNSAuthProvider) List(ctx context.Context, project string) (console.L
 	for _, o := range l {
 		path := ccmPath(vpcStr(o, "name"))
 		rec := vmMap(o, "dnsResourceRecord")
-		listing.Items = append(listing.Items, console.Resource{Name: path[1], Target: path,
+		listing.Items = append(listing.Items, console.Resource{Name: path[1], Target: path, Opens: path,
 			Fields: map[string]string{"Domain": vpcStr(o, "domain"), "Location": ccmLocationText(path[0]), "Type": vpcTitle(strings.ToLower(strings.ReplaceAll(vpcOr(vpcStr(o, "type"), "FIXED_RECORD"), "_", " "))),
 				"DNS record name": vpcDash(vpcStr(rec, "name")), "DNS record type": vpcDash(vpcStr(rec, "type")), "DNS record data": vpcDash(vpcStr(rec, "data"))},
 			Actions: []console.Action{ccmDelete("DNS authorization", path)}})
@@ -544,7 +548,7 @@ func (p ccmIssuanceProvider) List(ctx context.Context, project string) (console.
 	for _, o := range l {
 		path := ccmPath(vpcStr(o, "name"))
 		pool := vpcStr(vmMap(vmMap(o, "certificateAuthorityConfig"), "certificateAuthorityServiceConfig"), "caPool")
-		listing.Items = append(listing.Items, console.Resource{Name: path[1], Target: path,
+		listing.Items = append(listing.Items, console.Resource{Name: path[1], Target: path, Opens: path,
 			Fields: map[string]string{"Location": ccmLocationText(path[0]), "CA pool": vpcDash(pool), "Lifetime": vpcDash(vpcStr(o, "lifetime")),
 				"Rotation window": vpcDash(num2s(o, "rotationWindowPercentage")) + map[bool]string{true: "%", false: ""}[num2s(o, "rotationWindowPercentage") != ""],
 				"Key algorithm":   vpcDash(vpcStr(o, "keyAlgorithm"))},
