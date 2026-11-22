@@ -114,7 +114,7 @@ func (s *Server) GetCertificateMap(_ context.Context, req *cmpb.GetCertificateMa
 }
 
 func (s *Server) ListCertificateMaps(_ context.Context, req *cmpb.ListCertificateMapsRequest) (*cmpb.ListCertificateMapsResponse, error) {
-	project, _, err := parseParent(req.GetParent(), false)
+	project, _, err := parseListParent(req.GetParent())
 	if err != nil {
 		return nil, err
 	}

@@ -164,6 +164,15 @@ func validLocation(l string) bool {
 	return compute.IsRegion(l)
 }
 
+// parseListParent is parseParent for a list, which also takes the
+// location "-", every location (AIP-159), as the console lists them.
+func parseListParent(parent string) (project, location string, err error) {
+	if p := strings.TrimSuffix(parent, "/locations/-"); p != parent && strings.HasPrefix(p, "projects/") && !strings.Contains(p[len("projects/"):], "/") {
+		return p[len("projects/"):], "-", nil
+	}
+	return parseParent(parent, false)
+}
+
 // parseParent checks a collection's parent, projects/P/locations/L.
 func parseParent(parent string, globalOnly bool) (project, location string, err error) {
 	m := parentRE.FindStringSubmatch(parent)
@@ -231,6 +240,14 @@ func (s *Server) childrenLocked(parent, coll string) []string {
 	prefix := parent + "/" + coll + "/"
 	var out []string
 	for k := range s.res {
+		if p := strings.TrimSuffix(parent, "/locations/-"); p != parent {
+			// Every location's: projects/P/locations/L/coll/ID.
+			rest, ok := strings.CutPrefix(k, p+"/locations/")
+			if parts := strings.Split(rest, "/"); ok && len(parts) == 3 && parts[1] == coll {
+				out = append(out, k)
+			}
+			continue
+		}
 		if strings.HasPrefix(k, prefix) && !strings.Contains(k[len(prefix):], "/") {
 			out = append(out, k)
 		}

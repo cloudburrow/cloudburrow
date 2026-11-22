@@ -374,7 +374,7 @@ func (s *Server) GetCertificate(_ context.Context, req *cmpb.GetCertificateReque
 }
 
 func (s *Server) ListCertificates(_ context.Context, req *cmpb.ListCertificatesRequest) (*cmpb.ListCertificatesResponse, error) {
-	project, _, err := parseParent(req.GetParent(), false)
+	project, _, err := parseListParent(req.GetParent())
 	if err != nil {
 		return nil, err
 	}

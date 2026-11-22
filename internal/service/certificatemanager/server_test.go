@@ -345,3 +345,21 @@ func TestNoDeadlockWithComputesLock(t *testing.T) {
 	}
 	t.Fatal("the certificate was never issued")
 }
+
+func TestListEveryLocation(t *testing.T) {
+	s, err := New(Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if _, err := s.CreateCertificateMap(ctx, &cmpb.CreateCertificateMapRequest{Parent: "projects/p/locations/global", CertificateMapId: "m"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.ListCertificateMaps(ctx, &cmpb.ListCertificateMapsRequest{Parent: "projects/p/locations/-"})
+	if err != nil || len(got.GetCertificateMaps()) != 1 {
+		t.Fatalf("list in every location: %v %v", got, err)
+	}
+	if _, err := s.CreateCertificateMap(ctx, &cmpb.CreateCertificateMapRequest{Parent: "projects/p/locations/-", CertificateMapId: "n"}); err == nil {
+		t.Fatal("a create in location - was accepted")
+	}
+}

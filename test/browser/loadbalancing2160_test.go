@@ -287,7 +287,7 @@ func TestCertificateManagerThroughTheBrowser2160(t *testing.T) {
 	}
 	name := fmt.Sprintf("map-%d", time.Now().UnixNano()%1e6)
 	p.navigate("/security/ccm/list/certificateMaps" + q)
-	p.clickText("#view button", "Create certificate map")
+	p.clickText("#view button", "Create")
 	p.waitFor(`document.querySelector("#f-name") !== null`)
 	setField(p, "#view", "f-name", name)
 	p.run(chromedp.Click(chromedp.CSS(`#view form button[type="submit"].primary`)))

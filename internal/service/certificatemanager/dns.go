@@ -96,7 +96,7 @@ func (s *Server) GetDnsAuthorization(_ context.Context, req *cmpb.GetDnsAuthoriz
 }
 
 func (s *Server) ListDnsAuthorizations(_ context.Context, req *cmpb.ListDnsAuthorizationsRequest) (*cmpb.ListDnsAuthorizationsResponse, error) {
-	if _, _, err := parseParent(req.GetParent(), false); err != nil {
+	if _, _, err := parseListParent(req.GetParent()); err != nil {
 		return nil, err
 	}
 	s.mu.Lock()
@@ -224,7 +224,7 @@ func (s *Server) GetCertificateIssuanceConfig(_ context.Context, req *cmpb.GetCe
 }
 
 func (s *Server) ListCertificateIssuanceConfigs(_ context.Context, req *cmpb.ListCertificateIssuanceConfigsRequest) (*cmpb.ListCertificateIssuanceConfigsResponse, error) {
-	if _, _, err := parseParent(req.GetParent(), false); err != nil {
+	if _, _, err := parseListParent(req.GetParent()); err != nil {
 		return nil, err
 	}
 	s.mu.Lock()
@@ -363,7 +363,7 @@ func (s *Server) GetTrustConfig(_ context.Context, req *cmpb.GetTrustConfigReque
 }
 
 func (s *Server) ListTrustConfigs(_ context.Context, req *cmpb.ListTrustConfigsRequest) (*cmpb.ListTrustConfigsResponse, error) {
-	if _, _, err := parseParent(req.GetParent(), false); err != nil {
+	if _, _, err := parseListParent(req.GetParent()); err != nil {
 		return nil, err
 	}
 	s.mu.Lock()
