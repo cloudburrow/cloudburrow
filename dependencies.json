@@ -8,6 +8,13 @@
   ],
   "schemaVersion": 1,
   "lastVerified": "2026-09-21",
+  "project": {
+    "$comment": "CloudBurrow's own licence, which test/repo's TestLicence checks against LICENSE. Every component below keeps its own licence; the guard refuses GPL, LGPL and AGPL code in third_party/ and in the modules linked into the CLI.",
+    "name": "cloudburrow",
+    "license": "MIT",
+    "licenseFrom": "v0.6.0",
+    "earlierReleases": "v0.1.0 to v0.5.0: Apache-2.0, unchanged"
+  },
   "mode": {
     "verified": "The pinned set below. Used by all ordinary, release and offline builds.",
     "latestCandidate": "Discovered by #31, tested in isolation, never used for release artifacts until promoted here."

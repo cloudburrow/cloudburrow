@@ -1,6 +1,7 @@
 # CloudBurrow
 
 [![CI](https://github.com/cloudburrow/cloudburrow/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/cloudburrow/cloudburrow/actions/workflows/ci.yml?query=branch%3Amain)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 A local Google Cloud emulator for development and testing.
 
@@ -244,6 +245,8 @@ No CI job receives publishing credentials, and none can reach Google Cloud.
 Work is tracked by issue on the [project board](https://github.com/orgs/cloudburrow/projects/1),
 one issue per pull request. Read [AGENTS.md](AGENTS.md) before starting — it covers scope,
 testing expectations, and the project's rule against claiming unverified compatibility.
+[CONTRIBUTING.md](CONTRIBUTING.md) says how contributions are licensed (MIT, inbound = outbound)
+and how to sign off your commits (Developer Certificate of Origin).
 
 ## Security
 
@@ -253,7 +256,9 @@ response.
 
 ## License
 
-[Apache License 2.0](LICENSE). See [NOTICE](NOTICE) for attribution and trademark notes.
+From v0.6.0, CloudBurrow is licensed under the [MIT License](LICENSE). Releases v0.1.0 to
+v0.5.0 remain under the Apache License 2.0. Third-party code keeps its own licence: see
+[NOTICE](NOTICE) for attribution and trademark notes, and [dependencies.json](dependencies.json).
 
 ## Domains
 
