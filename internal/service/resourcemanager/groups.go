@@ -30,8 +30,8 @@ import (
 // grants a nested group's members what the outer group holds
 // (Principals). Groups are Google Groups (the
 // cloudidentity.googleapis.com/groups.discussion_forum label, with the
-// optional groups.security label); dynamic and identity-mapped groups are
-// refused 501.
+// optional groups.security label), dynamic groups (dynamicgroups.go,
+// #2103) and identity-mapped groups (identitymapped.go, #2103).
 
 const (
 	groupPrefix = "resourcemanager/cloudidentity/groups/"
@@ -39,8 +39,10 @@ const (
 	// group, and LabelSecurity a security group (Group.labels).
 	LabelDiscussionForum = "cloudidentity.googleapis.com/groups.discussion_forum"
 	LabelSecurity        = "cloudidentity.googleapis.com/groups.security"
-	labelDynamic         = "cloudidentity.googleapis.com/groups.dynamic"
-	labelLocked          = "cloudidentity.googleapis.com/groups.locked"
+	labelDynamic         = LabelDynamic
+	// LabelDynamic marks a dynamic group (#2103).
+	LabelDynamic = "cloudidentity.googleapis.com/groups.dynamic"
+	labelLocked  = "cloudidentity.googleapis.com/groups.locked"
 	// CustomerName is the parent of the instance's groups.
 	CustomerName = "customers/" + OrganizationCustomerID
 	// maxGroupDescription is Group.description's limit ("Must not be
@@ -69,7 +71,16 @@ type Group struct {
 	// MemberRestriction is the security settings' member restriction
 	// query (groupsecurity.go, #1959); empty for none.
 	MemberRestriction string `json:"memberRestriction,omitempty"`
+	// DynamicQuery is a dynamic group's USER query (#2103); its
+	// memberships are computed from it.
+	DynamicQuery string `json:"dynamicQuery,omitempty"`
+	// Namespace is an identity-mapped group's identity source,
+	// identitysources/{id} (#2103); empty for a Google Group.
+	Namespace string `json:"namespace,omitempty"`
 }
+
+// Dynamic is whether g is a dynamic group.
+func (g *Group) Dynamic() bool { return g.DynamicQuery != "" }
 
 // Name is the group's resource name, groups/{id}.
 func (g *Group) Name() string { return "groups/" + g.ID }
@@ -86,6 +97,8 @@ type GroupMember struct {
 	// (MembershipRole.expiryDetail, "only supported for MEMBER"); nil for
 	// never.
 	ExpireTime *time.Time `json:"expireTime,omitempty"`
+	// Namespace is an identity-mapped member's identity source (#2103).
+	Namespace string `json:"namespace,omitempty"`
 }
 
 // expired is whether m's MEMBER role has expired at now.
@@ -200,6 +213,9 @@ func (r *Registry) loadGroupLocked(id string) (*Group, error) {
 	// A membership whose MEMBER role has expired is gone.
 	now := r.now()
 	g.Members = slices.DeleteFunc(g.Members, func(m GroupMember) bool { return m.expired(now) })
+	if g.Dynamic() {
+		g.Members = r.dynamicMembersLocked(&g)
+	}
 	return &g, nil
 }
 
@@ -240,7 +256,24 @@ func (r *Registry) groupByEmailLocked(email string) (*Group, error) {
 		return nil, err
 	}
 	for _, g := range gs {
-		if g.Email == email {
+		if g.Email == email && g.Namespace == "" {
+			return g, nil
+		}
+	}
+	return nil, nil
+}
+
+// groupByKeyLocked is the group whose key is (id, namespace).
+func (r *Registry) groupByKeyLocked(id, namespace string) (*Group, error) {
+	if namespace == "" {
+		return r.groupByEmailLocked(normEmail(id))
+	}
+	gs, err := r.groupsLocked()
+	if err != nil {
+		return nil, err
+	}
+	for _, g := range gs {
+		if g.Namespace == namespace && g.Email == id {
 			return g, nil
 		}
 	}
@@ -268,15 +301,23 @@ type GroupInput struct {
 	Email, Namespace, Parent, DisplayName, Description string
 	Labels                                             map[string]string
 	Dynamic                                            bool
+	// DynamicQueries are dynamicGroupMetadata.queries: resource type and
+	// query.
+	DynamicQueries [][2]string
 }
 
 // CreateGroup creates a Google Group under the instance's customer.
 func (r *Registry) CreateGroup(in GroupInput) (*Group, error) {
 	if in.Namespace != "" || strings.HasPrefix(in.Parent, "identitysources/") {
-		return nil, apierror.Unimplemented("Not implemented here: identity-mapped groups (identitysources/*) need an identity source, which this instance does not have; Google Groups under %s are served.", CustomerName)
+		return r.createMappedGroup(in)
 	}
+	var query string
 	if in.Dynamic {
-		return nil, apierror.Unimplemented("Not implemented here: dynamic groups (dynamicGroupMetadata, the %s label) are not evaluated; Google Groups are served.", labelDynamic)
+		q, err := dynamicQueryOf(in)
+		if err != nil {
+			return nil, err
+		}
+		query = q
 	}
 	in.Parent = customerParent(in.Parent)
 	if in.Parent == "" {
@@ -298,12 +339,12 @@ func (r *Registry) CreateGroup(in GroupInput) (*Group, error) {
 	if _, d, _ := strings.Cut(email, "@"); d != OrganizationDomain {
 		return nil, apierror.InvalidArgument("Invalid group email %q: the customer's groups are created in its domain, %s.", in.Email, OrganizationDomain)
 	}
-	if _, ok := in.Labels[LabelDiscussionForum]; !ok {
+	if _, ok := in.Labels[LabelDiscussionForum]; !ok && query == "" {
 		return nil, apierror.InvalidArgument("Request contains an invalid argument: labels must contain %s (a Google Group).", LabelDiscussionForum)
 	}
 	for k, v := range in.Labels {
 		switch k {
-		case LabelDiscussionForum, LabelSecurity, labelLocked:
+		case LabelDiscussionForum, LabelSecurity, labelLocked, labelDynamic:
 		default:
 			return nil, apierror.InvalidArgument("Invalid label %q: a Google Group's labels are %s, %s and %s.", k, LabelDiscussionForum, LabelSecurity, labelLocked)
 		}
@@ -321,9 +362,14 @@ func (r *Registry) CreateGroup(in GroupInput) (*Group, error) {
 	} else if g != nil {
 		return nil, apierror.AlreadyExists("Error(4003): Cannot create group which already exists.")
 	}
+	if query != "" {
+		if err := r.dynamicLimitLocked(); err != nil {
+			return nil, err
+		}
+	}
 	now := r.now().UTC()
 	g := &Group{ID: newIdentityID(), Email: email, DisplayName: in.DisplayName, Description: in.Description,
-		Labels: map[string]string{}, CreateTime: now, UpdateTime: now}
+		Labels: map[string]string{}, CreateTime: now, UpdateTime: now, DynamicQuery: query}
 	for k := range in.Labels {
 		g.Labels[k] = ""
 	}
@@ -347,7 +393,7 @@ func (r *Registry) ListGroups(parent string) ([]*Group, error) {
 		return nil, apierror.InvalidArgument("Request contains an invalid argument: parent is required.")
 	}
 	if strings.HasPrefix(parent, "identitysources/") {
-		return nil, nil
+		return r.listMappedGroups(parent)
 	}
 	if !strings.HasPrefix(parent, "customers/C") {
 		return nil, apierror.InvalidArgument("Invalid parent %q: it must be customers/{customer_id}, the customer ID beginning with C.", parent)
@@ -357,7 +403,23 @@ func (r *Registry) ListGroups(parent string) ([]*Group, error) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.groupsLocked()
+	return r.customerGroupsLocked()
+}
+
+// customerGroupsLocked are the customer's groups, without the
+// identity-mapped ones.
+func (r *Registry) customerGroupsLocked() ([]*Group, error) {
+	gs, err := r.groupsLocked()
+	if err != nil {
+		return nil, err
+	}
+	out := gs[:0]
+	for _, g := range gs {
+		if g.Namespace == "" {
+			out = append(out, g)
+		}
+	}
+	return out, nil
 }
 
 // LookupGroup is the name of the group whose email is email.
@@ -365,12 +427,9 @@ func (r *Registry) LookupGroup(email, namespace string) (string, error) {
 	if email == "" {
 		return "", apierror.InvalidArgument("Request contains an invalid argument: groupKey.id is required.")
 	}
-	if namespace != "" {
-		return "", permissionDenied(email)
-	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	g, err := r.groupByEmailLocked(normEmail(email))
+	g, err := r.groupByKeyLocked(email, namespace)
 	if err != nil {
 		return "", err
 	}
@@ -404,7 +463,19 @@ func (r *Registry) UpdateGroup(name string, in GroupInput, mask []string) (*Grou
 				return nil, err
 			}
 			g.Description = in.Description
+		case "dynamic_group_metadata", "dynamicGroupMetadata":
+			if !g.Dynamic() {
+				return nil, apierror.InvalidArgument("Request contains an invalid argument: dynamicGroupMetadata is a dynamic group's; %s is not one.", g.Email)
+			}
+			q, err := dynamicQueryOf(in)
+			if err != nil {
+				return nil, err
+			}
+			g.DynamicQuery = q
 		case "labels":
+			if g.Dynamic() || g.Namespace != "" {
+				return nil, apierror.InvalidArgument("Request contains an invalid argument: a dynamic or identity-mapped group's labels cannot be changed.")
+			}
 			if _, ok := in.Labels[LabelDiscussionForum]; !ok {
 				return nil, apierror.InvalidArgument("Request contains an invalid argument: labels must contain %s (a Google Group).", LabelDiscussionForum)
 			}
@@ -440,7 +511,13 @@ func (r *Registry) UpdateGroup(name string, in GroupInput, mask []string) (*Grou
 		}
 	}
 	g.UpdateTime = r.now().UTC()
-	return g, r.putGroupLocked(g)
+	if err := r.putGroupLocked(g); err != nil {
+		return nil, err
+	}
+	if g.Dynamic() {
+		g.Members = r.dynamicMembersLocked(g)
+	}
+	return g, nil
 }
 
 // DeleteGroup deletes a group, and its memberships of other groups.
@@ -457,7 +534,7 @@ func (r *Registry) DeleteGroup(name string) error {
 	}
 	for _, o := range all {
 		n := len(o.Members)
-		o.Members = slices.DeleteFunc(o.Members, func(m GroupMember) bool { return m.Email == g.Email })
+		o.Members = slices.DeleteFunc(o.Members, func(m GroupMember) bool { return m.Email == g.Email && m.Namespace == g.Namespace })
 		if len(o.Members) != n {
 			if err := r.putGroupLocked(o); err != nil {
 				return err
@@ -539,7 +616,7 @@ func (r *Registry) CreateMembershipExpiring(parent, email, namespace string, rol
 		return nil, GroupMember{}, err
 	}
 	if namespace != "" {
-		return nil, GroupMember{}, apierror.Unimplemented("Not implemented here: identity-mapped members (preferredMemberKey.namespace) need an identity source, which this instance does not have.")
+		return r.createMappedMembership(parent, email, namespace, roles, expire)
 	}
 	email = normEmail(email)
 	if email == "" {
@@ -558,8 +635,21 @@ func (r *Registry) CreateMembershipExpiring(parent, email, namespace string, rol
 	if err != nil {
 		return nil, GroupMember{}, err
 	}
+	if g.Dynamic() {
+		return nil, GroupMember{}, dynamicMembershipsRefused(g)
+	}
+	if g.Namespace != "" {
+		return nil, GroupMember{}, apierror.InvalidArgument("Invalid preferredMemberKey: an identity-mapped group's members are of its identity source, %s; set preferredMemberKey.namespace.", g.Namespace)
+	}
 	if email == g.Email {
 		return nil, GroupMember{}, apierror.InvalidArgument("A group cannot be a member of itself.")
+	}
+	if inner, err := r.groupByEmailLocked(email); err != nil {
+		return nil, GroupMember{}, err
+	} else if inner != nil && inner.Dynamic() {
+		// "You cannot add a dynamic group as a member of a regular Google
+		// Group."
+		return nil, GroupMember{}, apierror.FailedPrecondition("A dynamic group cannot be a member of a Google Group: %s is a dynamic group.", email)
 	}
 	for _, m := range g.Members {
 		if m.Email == email {
@@ -622,6 +712,9 @@ func (r *Registry) DeleteMembership(name string) error {
 	if err != nil {
 		return err
 	}
+	if g.Dynamic() {
+		return dynamicMembershipsRefused(g)
+	}
 	g.Members = slices.Delete(g.Members, i, i+1)
 	return r.putGroupLocked(g)
 }
@@ -644,11 +737,9 @@ func (r *Registry) LookupMembership(parent, email, namespace string) (string, er
 	if err != nil {
 		return "", err
 	}
-	if namespace == "" {
-		for _, m := range g.Members {
-			if m.Email == normEmail(email) {
-				return MembershipName(g, m), nil
-			}
+	for _, m := range g.Members {
+		if m.Namespace == namespace && (m.Email == normEmail(email) || (namespace != "" && m.Email == email)) {
+			return MembershipName(g, m), nil
 		}
 	}
 	return "", permissionDenied(parent + "/memberships/" + email)
@@ -690,7 +781,7 @@ func (r *Registry) transitiveLocked(email string) ([]GroupRelation, error) {
 	queue := []string{}
 	for _, g := range all {
 		for _, m := range g.Members {
-			if m.Email == email {
+			if m.Email == email && m.Namespace == "" {
 				add(g, true, m.Roles)
 				queue = append(queue, g.Email)
 			}
@@ -706,7 +797,7 @@ func (r *Registry) transitiveLocked(email string) ([]GroupRelation, error) {
 		visited[inner] = true
 		for _, g := range all {
 			for _, m := range g.Members {
-				if m.Email == inner {
+				if m.Email == inner && m.Namespace == "" {
 					add(g, false, nil)
 					queue = append(queue, g.Email)
 				}

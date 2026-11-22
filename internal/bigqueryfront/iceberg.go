@@ -42,11 +42,15 @@ import (
 //     and manifests, which an Iceberg reader opens. As in BigQuery, the
 //     metadata is in storage only once exported.
 //
-// The instance has no BigQuery Connection API: the connection is kept as
-// biglakeConfiguration.connectionId, never checked, and the bucket is
-// written with the instance's own access. Columns of a type outside
-// bqiceberg.IcebergType (BIGNUMERIC, JSON, GEOGRAPHY, INTERVAL, RANGE, a
-// RECORD or REPEATED column) are 501 at CREATE.
+// The connection is kept as biglakeConfiguration.connectionId and the
+// bucket is written with the instance's own access. Columns are mapped as
+// bqiceberg.IcebergType maps them, a RECORD to an Iceberg struct and a
+// REPEATED column to a list (#2104); "Iceberg managed tables don't support
+// the following table schema: Schema with BIGNUMERIC, INTERVAL, JSON,
+// RANGE, or GEOGRAPHY data types"
+// (https://docs.cloud.google.com/bigquery/docs/iceberg-tables#limitations,
+// read 2026-11-21), so a column of one, nested too, is refused 400 at
+// CREATE, nothing made (icebergUnsupportedTypes).
 
 // icebergTable is one table for Apache Iceberg the front writes the files
 // of.
@@ -178,13 +182,9 @@ func icebergConfig(raw json.RawMessage) (uri string, ok bool, msg string) {
 func icebergColumns(fields []field) ([]bqiceberg.Column, string) {
 	cols := make([]bqiceberg.Column, len(fields))
 	for i, fl := range fields {
-		c := bqiceberg.Column{Name: fl.Name, Type: strings.ToUpper(fl.Type), Required: strings.EqualFold(fl.Mode, "REQUIRED")}
-		if p, err := strconv.Atoi(string(fl.Precision)); err == nil && p > 0 {
-			c.Precision = p
-			c.Scale, _ = strconv.Atoi(string(fl.Scale))
-		}
-		if strings.EqualFold(fl.Mode, "REPEATED") {
-			return nil, fl.Name + " (ARRAY<" + fl.Type + ">)"
+		c, bad := icebergColumn(fl)
+		if bad != "" {
+			return nil, bad
 		}
 		if _, ok := bqiceberg.IcebergType(c); !ok {
 			return nil, fl.Name + " (" + fl.Type + ")"
@@ -194,10 +194,74 @@ func icebergColumns(fields []field) ([]bqiceberg.Column, string) {
 	return cols, ""
 }
 
-// icebergValue is a tabledata.list value of c as bqiceberg takes it.
+// icebergUnsupportedTypes are the types Google documents a table for
+// Apache Iceberg cannot hold (above), by tables.get's type names.
+var icebergUnsupportedTypes = map[string]string{"BIGNUMERIC": "BIGNUMERIC", "INTERVAL": "INTERVAL", "JSON": "JSON",
+	"RANGE": "RANGE", "GEOGRAPHY": "GEOGRAPHY"}
+
+// icebergColumn is fl as bqiceberg takes it, or the column (its path and
+// type) a table for Apache Iceberg cannot hold.
+func icebergColumn(fl field) (bqiceberg.Column, string) {
+	c := bqiceberg.Column{Name: fl.Name, Type: strings.ToUpper(fl.Type), Required: strings.EqualFold(fl.Mode, "REQUIRED"),
+		Repeated: strings.EqualFold(fl.Mode, "REPEATED")}
+	if p, err := strconv.Atoi(string(fl.Precision)); err == nil && p > 0 {
+		c.Precision = p
+		c.Scale, _ = strconv.Atoi(string(fl.Scale))
+	}
+	if t := icebergUnsupportedTypes[c.Type]; t != "" {
+		return c, fl.Name + " (" + t + ")"
+	}
+	for _, sub := range fl.Fields {
+		sc, bad := icebergColumn(sub)
+		if bad != "" {
+			return c, fl.Name + "." + bad
+		}
+		c.Fields = append(c.Fields, sc)
+	}
+	return c, ""
+}
+
+// icebergValue is a tabledata.list value of c as bqiceberg takes it: a
+// REPEATED column's [{"v": ...}] an []any of its elements, a RECORD's
+// {"f": [{"v": ...}]} an []any of its fields.
 func icebergValue(c bqiceberg.Column, v any) (any, error) {
 	if v == nil {
 		return nil, nil
+	}
+	if c.Repeated {
+		cells, ok := v.([]any)
+		if !ok {
+			return nil, fmt.Errorf("a %T value for an ARRAY", v)
+		}
+		elem := c
+		elem.Repeated = false
+		out := make([]any, len(cells))
+		for i, cell := range cells {
+			m, _ := cell.(map[string]any)
+			x, err := icebergValue(elem, m["v"])
+			if err != nil {
+				return nil, err
+			}
+			out[i] = x
+		}
+		return out, nil
+	}
+	if c.Type == "RECORD" || c.Type == "STRUCT" {
+		m, ok := v.(map[string]any)
+		cells, _ := m["f"].([]any)
+		if !ok || len(cells) != len(c.Fields) {
+			return nil, fmt.Errorf("a %T value for a STRUCT", v)
+		}
+		out := make([]any, len(cells))
+		for i, cell := range cells {
+			cm, _ := cell.(map[string]any)
+			x, err := icebergValue(c.Fields[i], cm["v"])
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", c.Fields[i].Name, err)
+			}
+			out[i] = x
+		}
+		return out, nil
 	}
 	s, ok := v.(string)
 	if !ok {
@@ -282,8 +346,6 @@ func (t *icebergTables) syncAll(r *http.Request, mk func(base string) front) (in
 func icebergWriteError(it icebergTable, msg string) (int, rowError) {
 	status, reason := http.StatusBadRequest, "invalid"
 	switch {
-	case strings.HasPrefix(msg, "the column "):
-		status, reason = http.StatusNotImplemented, "notImplemented"
 	case strings.Contains(msg, "Cloud Storage answered 404"):
 		status, reason = http.StatusNotFound, "notFound"
 	case strings.Contains(msg, "Cloud Storage answered 403"):
@@ -592,7 +654,7 @@ func (f front) insertIcebergTable(w http.ResponseWriter, r *http.Request, datase
 	}
 	if body.Schema != nil {
 		if _, bad := icebergColumns(body.Schema.Fields); bad != "" {
-			writeError(w, http.StatusNotImplemented, "notImplemented", icebergColumnRefused(bad))
+			writeError(w, http.StatusBadRequest, "invalid", icebergColumnRefused(bad))
 			return
 		}
 	}
@@ -644,12 +706,12 @@ func (d ddlOptions) checkIceberg() string {
 	return msg
 }
 
-// icebergColumnRefused is the 501 of bad, icebergColumns's, at the table's
-// making.
+// icebergColumnRefused is the 400 of bad, icebergColumns's, at the table's
+// making: Google documents the types refused, not its wording (UNVERIFIED
+// (docs re-read 2026-11-21: https://docs.cloud.google.com/bigquery/docs/iceberg-tables)).
 func icebergColumnRefused(bad string) string {
-	return "Not implemented here: the column " + bad + " of a BigQuery table for Apache Iceberg: CloudBurrow writes " +
-		"INT64, FLOAT64, BOOL, STRING, BYTES, NUMERIC, DATE, DATETIME, TIME and TIMESTAMP columns to Apache Iceberg. " +
-		"Nothing was made."
+	return "The column " + bad + " is not supported in a BigQuery table for Apache Iceberg: Iceberg managed tables don't " +
+		"support a schema with BIGNUMERIC, INTERVAL, JSON, RANGE, or GEOGRAPHY data types."
 }
 
 // iceberg is whether d makes a BigQuery table for Apache Iceberg: its
@@ -772,4 +834,43 @@ func (f front) defaultConnection(r *http.Request, dataset string) string {
 	loc := strings.ToLower(cmp.Or(f.datasetLocation(r, dataset), "us"))
 	id := cmp.Or(f.settings.effective(project, loc, "default_cloud_resource_connection_id"), defaultConnectionID)
 	return project + "." + loc + "." + id
+}
+
+// storageURI is d's storage_uri, or "".
+func (d ddlOptions) storageURI() string {
+	for _, o := range d.more {
+		if part, ok := o.value.(map[string]any); ok && o.key == "biglakeConfiguration" {
+			if u, ok := part["storageUri"].(string); ok {
+				return u
+			}
+		}
+	}
+	return ""
+}
+
+// ensureIcebergDefault makes the default connection a table for Apache
+// Iceberg of dataset names (WITH CONNECTION DEFAULT) when it is missing,
+// as BigQuery does ("When the default connection is missing, BigQuery
+// creates a new connection"), and grants its service account
+// roles/storage.legacyBucketWriter and roles/storage.legacyObjectOwner on
+// the storage_uri's bucket ("Apache Iceberg managed tables", the default
+// connections page, read 2026-11-21) (#2104): 0, or a refusal's code and
+// message, nothing made.
+func (f front) ensureIcebergDefault(r *http.Request, dataset, storageURI string) (int, string) {
+	if f.connections == nil {
+		return 0, ""
+	}
+	project := projectOf(f.base)
+	parts := strings.SplitN(f.defaultConnection(r, dataset), ".", 3)
+	number := connectionProject(project, f.numbers)
+	cn, _ := f.connections.lookup(number, parts[1], parts[2])
+	bucket, _, _ := strings.Cut(strings.TrimPrefix(storageURI, "gs://"), "/")
+	grant := f.grantBucketRoles(r.Context(), project, []string{bucket}, defaultIcebergRoles)
+	if _, code, msg := f.ensureDefaultConnectionFor(r.Context(), project, number, parts[1], parts[2], cn, grant); code != 0 {
+		if code >= 500 {
+			code = http.StatusInternalServerError
+		}
+		return code, msg
+	}
+	return 0, ""
 }

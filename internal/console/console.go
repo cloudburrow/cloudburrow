@@ -110,6 +110,11 @@ type Resource struct {
 	// Label: Google's Vulnerabilities rows link View or View Fixed, which
 	// open the Vulnerability details panel (#2066).
 	Panel *SidePanel `json:"panel,omitempty"`
+	// Withheld draws the row's Edit ("edit") or Delete ("delete") menu
+	// item disabled with the reason given, where the provider offers it on
+	// other rows: Google's Logs Storage greys out Edit bucket and Delete
+	// bucket on _Required, and Log Router the _Required sink's (#2108).
+	Withheld map[string]string `json:"withheld,omitempty"`
 }
 
 // SidePanel is a panel drawn at the side of the page, over the info
@@ -265,6 +270,11 @@ type Listing struct {
 	// row it checks, as Google's Spanner Instances list does: "Select the
 	// checkbox for the instance. The Info panel appears" (#1859).
 	InfoOnSelect bool `json:"infoOnSelect,omitempty"`
+	// PermissionsButton gives each row a checkbox and the list a
+	// Permissions button that opens the info panel's Permissions tab on the
+	// checked rows, as Google's VM instances list does: "For a VM instance,
+	// click Permissions" (#2125). The rows carry that tab in their Info.
+	PermissionsButton bool `json:"permissionsButton,omitempty"`
 	// Actions are the list screen's own actions, on no existing resource,
 	// drawn beside Create (ListActor, #1289). The server sets them.
 	Actions []Action `json:"actions,omitempty"`
@@ -519,8 +529,12 @@ type Field struct {
 	// Google's Create service account derives the ID from the name.
 	DeriveFrom string `json:"deriveFrom,omitempty"`
 	// Browse names what the field's Browse button chooses from: "storage" is
-	// a bucket of this instance's Cloud Storage, filled in as gs://BUCKET/,
-	// as Google's Choose Destination does (#1845); "kms" is a symmetric key
+	// a bucket or folder of this instance's Cloud Storage, filled in as
+	// gs://BUCKET/ or gs://BUCKET/FOLDER/, as Google's Choose Destination and
+	// Select folder do (#1845, #2097); "storage-object" an object, filled in
+	// as gs://BUCKET/OBJECT (Select object); "storage-path" a folder or an
+	// object; "storage-bucket" a bucket, filled in as its bare name. All four
+	// open the one shared picker (console.js browseBuckets); "kms" is a symmetric key
 	// of this instance's Cloud KMS in the location the form's
 	// locationType, multiRegion and region fields hold, filled in as its
 	// resource name (#1881); "artifact-registry" is a standard
@@ -1221,6 +1235,12 @@ type Section struct {
 	// Permissions is the content when Kind is KindPermissions, set by the
 	// server from the provider's PolicyEditor (#793).
 	Permissions *PermissionsView `json:"permissions,omitempty"`
+	// LabelAction, on a KindResult section, is the ID of one of its
+	// Actions that a box drawn over a page image opens, with the page and
+	// the box (fractions of the page: x, y, w, h) filled in: Document AI's
+	// labeling tool, whose bounding box tool draws a box and then asks
+	// which field it is (#2124).
+	LabelAction string `json:"labelAction,omitempty"`
 	// Actions are drawn at the top of this tab rather than beside the page
 	// title, as Google's Lifecycle tab has Add a rule (#1843). The provider's
 	// DetailActions must offer them too, as for the page's own actions.
@@ -2154,6 +2174,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/ai/playground", s.handlePlayground)
 	mux.HandleFunc("POST /api/ai/playground", s.handlePlaygroundGenerate)
 	mux.HandleFunc("POST /api/ai/playground/tokens", s.handlePlaygroundTokens)
+	mux.HandleFunc("/api/ai/playground/caches", s.handlePlaygroundCaches)
 	mux.HandleFunc("GET /api/ai/embeddings", s.handleEmbeddingsStatus)
 	mux.HandleFunc("POST /api/ai/embeddings", s.handleEmbeddingsPredict)
 	mux.HandleFunc("GET /api/ai/local-models", s.handleLocalModels)

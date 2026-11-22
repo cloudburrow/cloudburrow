@@ -129,7 +129,31 @@ type Backend struct {
 	// so each can remove the other's files in the volume they share
 	// (#1615).
 	RunAsUser int
+	// Sealed, when set, keeps the backend's files sealed on its volume
+	// (#2113): see Sealed.
+	Sealed *Sealed
 }
+
+// Sealed runs a backend's process under a keeper that keeps its files
+// sealed: `cloudburrow-storage` from Image, copied into the backend's
+// container by an init container as the supervisor is, runs with Args,
+// then "--", then the backend's Command and Args. The backend's MountPath
+// is then a memory volume (an emptyDir of medium Memory), so the files the
+// process writes in the clear never reach a disk, and its claim (an
+// emptyDir in ephemeral mode) is mounted at Dir instead, where the keeper
+// alone writes their sealed copies. A Memorystore for Redis server with a
+// customer-managed key (internal/rediscmek).
+type Sealed struct {
+	Image, PullPolicy string
+	Dir               string
+	Args              []string
+}
+
+// Where the keeper is put in a sealed backend's container.
+const (
+	keeperDir  = "/cloudburrow-keeper"
+	keeperPath = keeperDir + "/cloudburrow-storage"
+)
 
 // Front is a container that stands in front of a backend in its pod.
 type Front struct {
@@ -574,9 +598,27 @@ spec:
 		fmt.Fprintf(&sb, "      annotations:\n        kubectl.kubernetes.io/default-container: %s\n", b.Name)
 	}
 	sb.WriteString("    spec:\n")
+	if b.supervised() || b.Sealed != nil {
+		sb.WriteString("      initContainers:\n")
+	}
+	if b.Sealed != nil {
+		fmt.Fprintf(&sb, "        - name: keeper\n          image: %s\n", b.Sealed.Image)
+		if b.Sealed.PullPolicy != "" {
+			fmt.Fprintf(&sb, "          imagePullPolicy: %s\n", b.Sealed.PullPolicy)
+		}
+		fmt.Fprintf(&sb, `          args: [%s]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+          volumeMounts:
+            - name: keeper
+              mountPath: %s
+`, quoteList([]string{"install-self", keeperPath}), keeperDir)
+	}
 	if b.supervised() {
 		f := b.Front
-		fmt.Fprintf(&sb, "      initContainers:\n        - name: supervisor\n          image: %s\n", f.Image)
+		fmt.Fprintf(&sb, "        - name: supervisor\n          image: %s\n", f.Image)
 		if f.PullPolicy != "" {
 			fmt.Fprintf(&sb, "          imagePullPolicy: %s\n", f.PullPolicy)
 		}
@@ -598,7 +640,10 @@ spec:
 	if b.PullPolicy != "" {
 		fmt.Fprintf(&sb, "          imagePullPolicy: %s\n", b.PullPolicy)
 	}
-	if b.supervised() {
+	if b.Sealed != nil {
+		keeper := append([]string{keeperPath}, b.Sealed.Args...)
+		fmt.Fprintf(&sb, "          command: [%s]\n", quoteList(append(append(keeper, "--"), b.Command...)))
+	} else if b.supervised() {
 		sup := []string{supervisorPath, "supervise"}
 		if b.Front.BackendLivenessPath != "" {
 			sup = append(sup, "--liveness", fmt.Sprintf("http://127.0.0.1:%d%s", b.Port, b.Front.BackendLivenessPath))
@@ -672,10 +717,14 @@ spec:
 	// the front's container starts, so it can never land under the front
 	// (#915, TestPersistentBackendWithFrontMountsEachVolumeInItsOwnContainer).
 	shared := b.sharesState()
-	if b.dataMount() || b.supervised() || shared {
+	if b.dataMount() || b.supervised() || shared || b.Sealed != nil {
 		sb.WriteString("          volumeMounts:\n")
 	}
-	if b.dataMount() {
+	if b.Sealed != nil {
+		fmt.Fprintf(&sb, "            - name: plain\n              mountPath: %s\n", b.MountPath)
+		fmt.Fprintf(&sb, "            - name: data\n              mountPath: %s\n", b.Sealed.Dir)
+		fmt.Fprintf(&sb, "            - name: keeper\n              mountPath: %s\n              readOnly: true\n", keeperDir)
+	} else if b.dataMount() {
 		fmt.Fprintf(&sb, "            - name: data\n              mountPath: %s\n", b.MountPath)
 	}
 	if shared {
@@ -712,8 +761,15 @@ spec:
 		}
 	}
 
-	if b.Persistent || b.dataMount() || (b.Front != nil && b.Front.StateDir != "") || b.supervised() {
+	if b.Persistent || b.dataMount() || (b.Front != nil && b.Front.StateDir != "") || b.supervised() || b.Sealed != nil {
 		sb.WriteString("      volumes:\n")
+	}
+	if b.Sealed != nil {
+		sb.WriteString("        - name: plain\n          emptyDir:\n            medium: Memory\n")
+		sb.WriteString("        - name: keeper\n          emptyDir: {}\n")
+		if !b.dataMount() {
+			sb.WriteString("        - name: data\n          emptyDir: {}\n")
+		}
 	}
 	switch {
 	case b.dataMount():

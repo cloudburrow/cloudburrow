@@ -68,6 +68,10 @@ type Entry struct {
 	// Google's Logs Explorer does (#1849). Empty for a pod's line.
 	ResourceType   string            `json:"resourceType,omitempty"`
 	ResourceLabels map[string]string `json:"resourceLabels,omitempty"`
+	// Trace and SpanID are a Cloud Logging entry's trace and spanId
+	// (#2118): the Logs Explorer links the entry to its trace details.
+	Trace  string `json:"trace,omitempty"`
+	SpanID string `json:"spanId,omitempty"`
 }
 
 // RedactJSON is a JSON payload with Redact applied to its text, or nil when

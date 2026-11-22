@@ -50,6 +50,12 @@ func (p iamGroupsProvider) group(row string) (*resourcemanager.Group, error) {
 }
 
 func groupType(g *resourcemanager.Group) string {
+	if g.Dynamic() {
+		return "Dynamic"
+	}
+	if g.Namespace != "" {
+		return "Identity-mapped"
+	}
 	if _, ok := g.Labels[resourcemanager.LabelSecurity]; ok {
 		return "Security"
 	}
@@ -105,6 +111,9 @@ func (iamGroupsProvider) CreateForm() (string, []console.Field) {
 		{Name: "description", Label: "Group description", Type: "text", Section: "Group details", Help: "Optional. At most 4,096 characters."},
 		{Name: "security", Label: "Security group", Type: "select", Options: []string{"No", "Yes"}, Default: "No", Section: "Group details",
 			Help: "Adds the groups.security label, which cannot be removed afterwards."},
+		{Name: "dynamicQuery", Label: "Dynamic membership query", Type: "textarea", Section: "Group details",
+			Help: "Optional: makes a dynamic group, whose members are the users this query names, such as " +
+				"user.organizations.exists(org, org.department=='engineering'). Its members follow the users' attributes and cannot be added by hand."},
 		{Name: "members", Label: "Member email", Type: "textarea", Section: "Add members",
 			Help: "Optional: users, service accounts or groups to add, one per line or separated by commas."},
 		{Name: "memberRole", Label: "Google Groups role", Type: "select", Options: []string{"MEMBER", "MANAGER", "OWNER"},
@@ -136,8 +145,16 @@ func (p iamGroupsProvider) Create(_ context.Context, _ string, values map[string
 	if values["security"] == "Yes" {
 		labels[resourcemanager.LabelSecurity] = ""
 	}
-	g, err := p.registry.CreateGroup(resourcemanager.GroupInput{Email: values["email"], Parent: resourcemanager.CustomerName,
-		DisplayName: values["displayName"], Description: values["description"], Labels: labels})
+	in := resourcemanager.GroupInput{Email: values["email"], Parent: resourcemanager.CustomerName,
+		DisplayName: values["displayName"], Description: values["description"], Labels: labels}
+	if q := strings.TrimSpace(values["dynamicQuery"]); q != "" {
+		in.Dynamic, in.Labels = true, map[string]string{resourcemanager.LabelDynamic: ""}
+		in.DynamicQueries = [][2]string{{"USER", q}}
+		if strings.TrimSpace(values["members"]) != "" {
+			return "", errors.New("a dynamic group's members are its query's: leave Member email empty")
+		}
+	}
+	g, err := p.registry.CreateGroup(in)
 	if err != nil {
 		return "", err
 	}
@@ -175,7 +192,7 @@ func (p iamGroupsProvider) Detail(_ context.Context, _ string, path []string) (c
 		members.Items = append(members.Items, console.Resource{Name: m.Email,
 			Fields: map[string]string{"Type": m.Type, "Roles": strings.Join(m.Roles, ", "), "Expires": memberExpiry(m),
 				"Restriction": orDash(p.registry.MemberEvaluation(g, m.Email))},
-			Actions: memberActions(m), Selectable: true})
+			Actions: groupMemberActions(g, m), Selectable: !g.Dynamic()})
 	}
 	members.Total = len(members.Items)
 	var labels []string
@@ -189,6 +206,9 @@ func (p iamGroupsProvider) Detail(_ context.Context, _ string, path []string) (c
 		{Label: "Display name", Value: orDash(g.DisplayName)},
 		{Label: "Description", Value: orDash(g.Description)},
 		{Label: "Labels", Value: strings.Join(labels, ", ")},
+		{Label: "Type", Value: groupType(g)},
+		{Label: "Dynamic membership query", Value: orDash(g.DynamicQuery)},
+		{Label: "Identity source", Value: orDash(g.Namespace)},
 		{Label: "Created", Value: g.CreateTime.UTC().Format("2006-01-02 15:04:05 UTC")},
 	}
 	// The groups this group belongs to, directly or through nested
@@ -231,6 +251,14 @@ const groupMembersField = "members"
 // addMembersAction is Google's Add members: member emails and their
 // Google Groups role.
 func addMembersAction(g *resourcemanager.Group) console.Action {
+	a := addMembersActionOf(g)
+	if g.Dynamic() {
+		a.Unavailable = "A dynamic group's members are the users its query names; they cannot be added by hand."
+	}
+	return a
+}
+
+func addMembersActionOf(g *resourcemanager.Group) console.Action {
 	return console.Action{ID: "add-members", Label: "Add members", Submit: "Add", Fields: []console.Field{
 		{Name: "members", Label: "Member email", Type: "textarea", Required: true,
 			Help: addMemberHelp(g) + " Separate several with commas or lines."},
@@ -249,6 +277,15 @@ func groupSelectActions(g *resourcemanager.Group) []console.Action {
 
 // groupPageActions are the group page's Add members, Remove members,
 // View in Google Groups (not served) and Delete group.
+// groupMemberActions are a member row's actions: none on a dynamic
+// group, whose memberships are its query's.
+func groupMemberActions(g *resourcemanager.Group, m resourcemanager.GroupMember) []console.Action {
+	if g.Dynamic() {
+		return nil
+	}
+	return memberActions(m)
+}
+
 func groupPageActions(g *resourcemanager.Group) []console.Action {
 	out := []console.Action{addMembersAction(g)}
 	out = append(out, groupSelectActions(g)...)

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -151,18 +152,33 @@ func TestPubSubExpirationDefaults(t *testing.T) {
 		{nil, expireAfterDays, "31"},
 		{&pubsubpb.ExpirationPolicy{}, expireNever, "31"},
 		{&pubsubpb.ExpirationPolicy{Ttl: durationpb.New(72 * time.Hour)}, expireAfterDays, "3"},
-		{&pubsubpb.ExpirationPolicy{Ttl: durationpb.New(36 * time.Hour)}, expireAfterDays, "2"},
+		{&pubsubpb.ExpirationPolicy{Ttl: durationpb.New(36 * time.Hour)}, expireAfterDays, ""},
 	} {
 		if m, d := expirationDefaults(tc.p); m != tc.mode || d != tc.days {
 			t.Errorf("expirationDefaults(%v) = %s %s; want %s %s", tc.p, m, d, tc.mode, tc.days)
 		}
 	}
-	// A 36h period saved with its days untouched is left as it is.
+	// A 36h period (#2095): no whole number of days, so the days are
+	// empty and the field says the period exactly; saved with the days
+	// untouched it is left as it is.
 	cur := &pubsubpb.Subscription{Name: "projects/p/subscriptions/s", Topic: "projects/p/topics/t",
 		ExpirationPolicy: &pubsubpb.ExpirationPolicy{Ttl: durationpb.New(36 * time.Hour)}}
-	out, err := subscriptionEditValues("p", cur, map[string]string{"deliveryType": deliveryPull, "expirationMode": expireAfterDays, "expirationDays": "2"})
+	if got := expirationWords(cur.GetExpirationPolicy()); got != "36 hours" {
+		t.Errorf("a 36h period is listed as %q; want 36 hours", got)
+	}
+	for _, f := range subscriptionEditForm(cur).Fields {
+		if f.Name == "expirationDays" && (f.Default != "" || !strings.HasPrefix(f.Help, "Now 36 hours, not a whole number of days") ||
+			f.Pattern != `^[0-9]{1,5}$`) {
+			t.Errorf("Edit's Days for a 36h period is %+v; want empty, saying 36 hours, whole days only", f)
+		}
+	}
+	out, err := subscriptionEditValues("p", cur, map[string]string{"deliveryType": deliveryPull, "expirationMode": expireAfterDays, "expirationDays": ""})
 	if _, has := out["expiration"]; err != nil || has {
 		t.Errorf("an untouched 36h period sends %v, %v; want no expiration", out, err)
+	}
+	out, _ = subscriptionEditValues("p", cur, map[string]string{"deliveryType": deliveryPull, "expirationMode": expireAfterDays, "expirationDays": "2"})
+	if out["expiration"] != "2d" {
+		t.Errorf("2 days typed over a 36h period sends %v; want 2d", out)
 	}
 	out, _ = subscriptionEditValues("p", cur, map[string]string{"deliveryType": deliveryPull, "expirationMode": expireAfterDays, "expirationDays": "5"})
 	if out["expiration"] != "5d" || out["pushEndpoint"] != "" {

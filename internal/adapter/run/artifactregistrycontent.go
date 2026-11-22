@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	arpb "cloud.google.com/go/artifactregistry/apiv1/artifactregistrypb"
@@ -71,8 +72,16 @@ func RegistryHandler() http.Handler {
 	if st == nil {
 		return nil
 	}
-	return &registry.Handler{Store: st, Lookup: lookupRegistryRepo, Remote: lookupRegistryUpstream, Virtual: lookupRegistryVirtual}
+	return &registry.Handler{Store: st, Lookup: lookupRegistryRepo, Remote: lookupRegistryUpstream, Virtual: lookupRegistryVirtual,
+		Auth: registryAuth.Load()}
 }
+
+// registryAuth is the registry's token auth, which the host sets (#2111).
+var registryAuth atomic.Pointer[registry.Auth]
+
+// UseRegistryAuth sets the registry's token auth; nil asks for and checks
+// no credential.
+func UseRegistryAuth(a *registry.Auth) { registryAuth.Store(a) }
 
 // RegistryHandlerOr serves the registry's /v2/ paths and passes every other
 // request to next.

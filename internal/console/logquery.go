@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/logfilter"
@@ -42,6 +43,12 @@ func LogEntryFields(e Entry) map[string]string {
 	if e.OperationID != "" {
 		f["operation.id"] = e.OperationID
 	}
+	if e.Trace != "" {
+		f["trace"] = e.Trace
+	}
+	if e.SpanID != "" {
+		f["spanId"] = e.SpanID
+	}
 	// A Cloud Logging entry's own monitored resource (#1849).
 	if e.ResourceType != "" {
 		f["resource.type"] = e.ResourceType
@@ -52,8 +59,25 @@ func LogEntryFields(e Entry) map[string]string {
 		}
 		f["resource.labels."+k] = v
 	}
+	if of := appHubFields.Load(); of != nil && *of != nil && e.ResourceType != "" {
+		for k, v := range (*of)(e.ResourceType, e.ResourceLabels) {
+			f[k] = v
+		}
+	}
 	return f
 }
+
+// AppHubFieldsFunc is an entry's App Hub metadata (#2096), the
+// output-only LogEntry.apphub, flattened to its paths
+// (apphub.application.id, ...), from its monitored resource; nil is none.
+// The Fields pane's Application and Workload / Service dimensions are made
+// from it.
+type AppHubFieldsFunc func(resourceType string, labels map[string]string) map[string]string
+
+var appHubFields atomic.Pointer[AppHubFieldsFunc]
+
+// SetAppHubFields sets the instance's AppHubFieldsFunc.
+func SetAppHubFields(f AppHubFieldsFunc) { appHubFields.Store(&f) }
 
 // logEntryJSON nests LogEntryFields back into the LogEntry shape, for the
 // expanded entry; an entry with a jsonPayload has that, and no textPayload,

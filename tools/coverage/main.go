@@ -54,12 +54,14 @@ import (
 	bqv2 "google.golang.org/api/bigquery/v2"
 	bqconnection "google.golang.org/api/bigqueryconnection/v1"
 	crmv1 "google.golang.org/api/cloudresourcemanager/v1"
+	observabilityv1 "google.golang.org/api/observability/v1"
 	runv1 "google.golang.org/api/run/v1"
 	sitev1 "google.golang.org/api/siteverification/v1"
 
 	apikeyssvc "github.com/cloudburrow/cloudburrow/internal/service/apikeys"
 	computesvc "github.com/cloudburrow/cloudburrow/internal/service/compute"
 	firebaserulessvc "github.com/cloudburrow/cloudburrow/internal/service/firebaserules"
+	loggingsvc "github.com/cloudburrow/cloudburrow/internal/service/logging"
 	rmsvc "github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	serviceusagesvc "github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
 	siteverificationsvc "github.com/cloudburrow/cloudburrow/internal/service/siteverification"
@@ -70,19 +72,24 @@ import (
 
 	_ "cloud.google.com/go/aiplatform/apiv1/aiplatformpb"
 	_ "cloud.google.com/go/aiplatform/apiv1beta1/aiplatformpb"
+	_ "cloud.google.com/go/apphub/apiv1/apphubpb"
 	_ "cloud.google.com/go/artifactregistry/apiv1/artifactregistrypb"
 	_ "cloud.google.com/go/bigquery/analyticshub/apiv1/analyticshubpb"
 	_ "cloud.google.com/go/bigquery/datatransfer/apiv1/datatransferpb"
 	_ "cloud.google.com/go/bigtable/admin/apiv2/adminpb"
 	_ "cloud.google.com/go/bigtable/apiv2/bigtablepb"
+	_ "cloud.google.com/go/billing/apiv1/billingpb"
+	_ "cloud.google.com/go/billing/budgets/apiv1/budgetspb"
 	_ "cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
 	_ "cloud.google.com/go/cloudquotas/apiv1/cloudquotaspb"
 	_ "cloud.google.com/go/cloudtasks/apiv2/cloudtaskspb"
 	_ "cloud.google.com/go/container/apiv1/containerpb"
+	_ "cloud.google.com/go/dataform/apiv1/dataformpb"
 	_ "cloud.google.com/go/datastore/admin/apiv1/adminpb"
 	_ "cloud.google.com/go/datastore/apiv1/datastorepb"
 	_ "cloud.google.com/go/developerconnect/apiv1/developerconnectpb"
 	_ "cloud.google.com/go/documentai/apiv1/documentaipb"
+	_ "cloud.google.com/go/documentai/apiv1beta3/documentaipb"
 	_ "cloud.google.com/go/eventarc/apiv1/eventarcpb"
 	_ "cloud.google.com/go/eventarc/publishing/apiv1/publishingpb"
 	_ "cloud.google.com/go/firestore/apiv1/admin/adminpb"
@@ -114,6 +121,8 @@ import (
 	_ "cloud.google.com/go/spanner/apiv1/spannerpb"
 	_ "cloud.google.com/go/speech/apiv1/speechpb"
 	_ "cloud.google.com/go/speech/apiv2/speechpb"
+	_ "cloud.google.com/go/trace/apiv1/tracepb"
+	_ "cloud.google.com/go/trace/apiv2/tracepb"
 	_ "cloud.google.com/go/workflows/apiv1/workflowspb"
 	_ "cloud.google.com/go/workflows/executions/apiv1/executionspb"
 	_ "google.golang.org/genproto/googleapis/cloud/location"
@@ -222,15 +231,20 @@ var areas = []area{
 		"google.cloud.aiplatform.v1.ModelGardenService", "google.cloud.aiplatform.v1.EndpointService", "google.cloud.aiplatform.v1.ModelService",
 		"google.cloud.documentai.v1.DocumentProcessorService", "google.cloud.speech.v2.Speech",
 		// countTokens and computeTokens (#1937).
-		"google.cloud.aiplatform.v1.LlmUtilityService"}},
+		"google.cloud.aiplatform.v1.LlmUtilityService",
+		// Context caching (#2107).
+		"google.cloud.aiplatform.v1.GenAiCacheService"}},
 	// v1beta1's PredictionService, for ChatCompletions on those endpoints
 	// (#1840) and v1's methods bridged (#1937): a page of its own, since
 	// its method names repeat v1's.
 	// Speech-to-Text v1 on the same port (#1930): a page of its own, since
 	// its method names repeat v2's.
-	{Key: "speechv1", Title: "Speech-to-Text v1", Own: true, Services: []string{"google.cloud.speech.v1.Speech"}},
+	// Document AI's datasets, v1beta3's DocumentService (#2106), on the
+	// same port: a page of its own, since it is another API version.
+	{Key: "documentaiv1beta3", Title: "Document AI v1beta3 datasets", Own: true, Services: []string{"google.cloud.documentai.v1beta3.DocumentService"}},
+	{Key: "speechv1", Title: "Speech-to-Text v1", Own: true, Services: []string{"google.cloud.speech.v1.Speech", "google.cloud.speech.v1.Adaptation"}},
 	{Key: "vertexaiv1beta1", Title: "Vertex AI PredictionService v1beta1", Own: true, Services: []string{"google.cloud.aiplatform.v1beta1.PredictionService",
-		"google.cloud.aiplatform.v1beta1.LlmUtilityService"}},
+		"google.cloud.aiplatform.v1beta1.LlmUtilityService", "google.cloud.aiplatform.v1beta1.GenAiCacheService"}},
 	// The Memorystore for Redis admin API (#1302), over the one Valkey
 	// server --services memorystore runs, and Memorystore for Redis
 	// Cluster and Memorystore for Valkey (#1519) on the same port.
@@ -307,10 +321,18 @@ var areas = []area{
 	// Resource Manager's port.
 	{Key: "cloudquotas", Title: "Cloud Quotas API (v1)", Own: true, Services: []string{"google.api.cloudquotas.v1.CloudQuotas",
 		"google.api.cloudquotas.v1.QuotaAdjusterSettingsManager"}},
+	// Cloud Billing and the Budget API (#2109): CloudBurrow's own, gRPC and
+	// JSON on Resource Manager's port.
+	{Key: "billing", Title: "Cloud Billing API and Budget API (v1)", Own: true, Services: []string{"google.cloud.billing.v1.CloudBilling",
+		"google.cloud.billing.v1.CloudCatalog", "google.cloud.billing.budgets.v1.BudgetService"}},
 	// The Site Verification API (#2030): CloudBurrow's own, JSON only, on
 	// Resource Manager's port. Its methods are the official generated
 	// client's (google.golang.org/api/siteverification/v1).
 	{Key: "siteverification", Title: "Site Verification API (v1)", Own: true, Methods: discoveryMethods("siteVerification", reflect.TypeOf(sitev1.Service{}))},
+	// The Observability API (#2020, #2108, #2117): CloudBurrow's own, JSON
+	// only, on the Logging port. Its methods are the official generated
+	// client's (google.golang.org/api/observability/v1).
+	{Key: "observability", Title: "Observability API (v1)", Own: true, Methods: discoveryMethods("observability", reflect.TypeOf(observabilityv1.Service{}))},
 	// Workload Identity Federation (#1941): the IAM API's workload
 	// identity pools, JSON only, on Resource Manager's port, and the
 	// Security Token Service's token method on the metadata port. Its
@@ -326,6 +348,16 @@ var areas = []area{
 	// Parameter Manager (#2054): CloudBurrow's own, gRPC and JSON on one
 	// port; its Locations mixin is another area's row.
 	{Key: "parametermanager", Title: "Parameter Manager (v1)", Own: true, Services: []string{"google.cloud.parametermanager.v1.ParameterManager"}},
+	// Dataform (#2105): CloudBurrow's own, gRPC and JSON on one port;
+	// Dataform core compiles, BigQuery runs the invocations.
+	{Key: "dataform", Title: "Dataform (v1)", Own: true, Services: []string{"google.cloud.dataform.v1.Dataform"}},
+	// App Hub (#2110): CloudBurrow's own, gRPC and JSON on one port; its
+	// Locations, Operations and IAM mixins are other areas' rows.
+	{Key: "apphub", Title: "App Hub (v1)", Own: true, Services: []string{"google.cloud.apphub.v1.AppHub"}},
+	// Cloud Trace (#2118): CloudBurrow's own, v1 and v2 gRPC and JSON on
+	// one port, beside OTLP's ingestion (not a googleapis service).
+	{Key: "trace", Title: "Cloud Trace API (v1 and v2)", Own: true,
+		Services: []string{"google.devtools.cloudtrace.v1.TraceService", "google.devtools.cloudtrace.v2.TraceService"}},
 	{Key: "workflows", Title: "Workflows and Workflow Executions (v1)", Own: true,
 		Services: []string{"google.cloud.workflows.v1.Workflows", "google.cloud.workflows.executions.v1.Executions"}},
 	// The Kubernetes Engine API (#1913): CloudBurrow's own, gRPC and JSON
@@ -855,7 +887,7 @@ func loadRegistry(root string) (map[string]string, error) {
 	// The Cloud SQL Admin API's too (#1301), and Service Usage's (#1352).
 	// And Cloud Run v1's (#1533).
 	for _, statuses := range []map[string]bool{sqladminsvc.MethodStatuses(), serviceusagesvc.MethodStatuses(), apikeyssvc.MethodStatuses(), firebaserulessvc.MethodStatuses(), computesvc.MethodStatuses(), storagejobssvc.MethodStatuses(), backupdrStatuses, runadapter.V1MethodStatuses(),
-		rmsvc.CloudIdentityMethodStatuses(), rmsvc.WorkloadIdentityMethodStatuses(), siteverificationsvc.MethodStatuses()} {
+		rmsvc.CloudIdentityMethodStatuses(), rmsvc.WorkloadIdentityMethodStatuses(), siteverificationsvc.MethodStatuses(), loggingsvc.ObservabilityMethodStatuses()} {
 		for id, isBuilt := range statuses {
 			if isBuilt {
 				r[id] = regImplemented

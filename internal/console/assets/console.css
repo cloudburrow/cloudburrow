@@ -665,7 +665,8 @@ td a { color: var(--accent); }
 .state { padding: 40px 24px; text-align: center; border: 1px solid var(--border);
          border-radius: var(--radius); background: var(--surface); }
 .state h2 { font-size: var(--text-heading-size); font-weight: 500; margin: 0 0 6px; }
-.state p { color: var(--text-muted); margin: 0 0 16px; }
+/* An empty state names its resource ("projects/P/locations/global/applications/A reports no ..."): wrap it rather than widen a narrow page. */
+.state p { color: var(--text-muted); margin: 0 0 16px; overflow-wrap: anywhere; }
 .state.error { border-color: var(--error); }
 .state.error h2 { color: var(--error); }
 .state pre { text-align: left; font-family: var(--mono); font-size: var(--text-caption-size);
@@ -1206,9 +1207,13 @@ td.mono { word-break: break-word; }
    a narrow one. */
 .pg-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
 @media (min-width: 1100px) { .pg-layout { grid-template-columns: minmax(0, 1fr) 300px; align-items: start; } }
-.pg-main { display: grid; gap: 16px; min-width: 0; }
+.pg-main { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; }
 .pg-main > .card, .pg-layout > .card { margin: 0; }
 .pg-stack { display: grid; gap: 8px; margin: 8px 0; }
+/* A response's log probabilities (#2122): the table scrolls in its own
+   wrapper rather than widening the page. */
+#pg-logprobs-out, .pg-logprobs { grid-template-columns: minmax(0, 1fr); min-width: 0; }
+.pg-logprobs { display: grid; gap: 4px; }
 .pg-field { display: grid; gap: 4px; margin: 8px 0; }
 .pg-field > span:first-child { color: var(--text-muted); font-size: var(--text-caption-size); line-height: var(--text-caption-line); }
 .pg-field input, .pg-field select, .pg-field textarea { max-width: 100%; box-sizing: border-box; }
@@ -2139,6 +2144,62 @@ dd.has-property-action { display: flex; flex-wrap: wrap; align-items: baseline; 
 .explorer-table th, .explorer-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); word-break: break-word; }
 @media (max-width: 720px) { .explorer { grid-template-columns: minmax(0, 1fr); } }
 
+/* Trace Explorer (#2118): the toolbar, the span chart, and the trace
+   details' timeline of latency bars, as Google's page draws them. */
+.trace-toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+.trace-id-lookup { display: flex; gap: 8px; align-items: end; }
+/* The latency heatmap: darker cells hold more spans (5 levels of the
+   accent), with its legend; the Chart view's percentile and rate lines. */
+.trace-chart-toolbar { display: flex; justify-content: flex-end; }
+.trace-cell { cursor: pointer; stroke: none; }
+.trace-cell.level-1, .trace-swatch.level-1 { fill: color-mix(in srgb, var(--accent) 20%, var(--surface)); background: color-mix(in srgb, var(--accent) 20%, var(--surface)); }
+.trace-cell.level-2, .trace-swatch.level-2 { fill: color-mix(in srgb, var(--accent) 40%, var(--surface)); background: color-mix(in srgb, var(--accent) 40%, var(--surface)); }
+.trace-cell.level-3, .trace-swatch.level-3 { fill: color-mix(in srgb, var(--accent) 60%, var(--surface)); background: color-mix(in srgb, var(--accent) 60%, var(--surface)); }
+.trace-cell.level-4, .trace-swatch.level-4 { fill: color-mix(in srgb, var(--accent) 80%, var(--surface)); background: color-mix(in srgb, var(--accent) 80%, var(--surface)); }
+.trace-cell.level-5, .trace-swatch.level-5 { fill: var(--accent); background: var(--accent); }
+.trace-cell:hover, .trace-cell:focus-visible, .trace-cell.is-selected { stroke: var(--text); stroke-width: 2; }
+.trace-cell:focus-visible, .trace-node:focus-visible { outline: 2px solid var(--text); outline-offset: 1px; }
+.trace-heatmap-legend { display: flex; align-items: center; gap: 4px; justify-content: flex-end; font-size: var(--text-caption-size); color: var(--text-muted); }
+.trace-swatch { display: inline-block; width: 16px; height: 10px; border: 1px solid var(--border); }
+.trace-line { stroke-width: 2; }
+.trace-line-p50, .trace-key.trace-line-p50 { stroke: #1967d2; background: #1967d2; }
+.trace-line-p90, .trace-key.trace-line-p90 { stroke: #188038; background: #188038; }
+.trace-line-p95, .trace-key.trace-line-p95 { stroke: #b06000; background: #b06000; }
+.trace-line-p99, .trace-key.trace-line-p99 { stroke: #a142f4; background: #a142f4; }
+.trace-line-ok, .trace-key.trace-line-ok { stroke: var(--ok); background: var(--ok); }
+.trace-line-error, .trace-key.trace-line-error { stroke: var(--error); background: var(--error); }
+.trace-series-legend { display: flex; flex-wrap: wrap; gap: 12px; list-style: none; padding: 0; margin: 4px 0 0; font-size: var(--text-caption-size); }
+.trace-series-legend li { display: flex; align-items: center; gap: 4px; }
+.trace-key { display: inline-block; width: 16px; height: 3px; }
+.trace-selection-chip { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 8px 0; padding: 4px 8px; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface-alt); }
+/* The trace details' toolbar, Find in Trace and the Graph view. */
+.trace-details-toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; margin: 8px 0; }
+.trace-find { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.trace-find-count { color: var(--text-muted); min-width: 8ch; }
+.trace-find-mark { background: var(--warn); color: var(--on-warn); padding: 0 1px; border-radius: 2px; }
+.trace-row.is-match { box-shadow: inset 3px 0 0 #b06000; }
+.trace-row.is-current-match { background: color-mix(in srgb, #fdd663 30%, transparent); }
+.trace-kv tr.is-match { background: color-mix(in srgb, #fdd663 20%, transparent); }
+.trace-graph-host { overflow: auto; max-height: 480px; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface); }
+.trace-edge { stroke: var(--field-border); stroke-width: 1.5; }
+.trace-node { cursor: pointer; }
+.trace-node rect { fill: var(--surface-alt); stroke: var(--accent); stroke-width: 1.5; }
+.trace-node.is-error rect { stroke: var(--error); fill: color-mix(in srgb, var(--error) 10%, var(--surface)); }
+.trace-node.is-match rect { fill: color-mix(in srgb, #fdd663 40%, var(--surface)); }
+.trace-node.is-selected rect, .trace-node:focus-visible rect { stroke-width: 3; }
+.trace-node-name { font-size: var(--text-caption-size); fill: var(--text); }
+.trace-node-latency { font-size: var(--text-overline-size); fill: var(--text-muted); }
+.trace-details { margin-top: 16px; }
+.trace-timeline td { vertical-align: middle; }
+.trace-bar-cell { width: 45%; min-width: 120px; }
+.trace-bar-track { position: relative; height: 12px; background: var(--border); border-radius: 2px; }
+.trace-bar { position: absolute; top: 0; height: 12px; background: #1a73e8; border-radius: 2px; }
+.trace-bar.is-error { background: var(--error); }
+.trace-bar-dot { position: absolute; right: -4px; top: 2px; width: 8px; height: 8px; border-radius: 50%; background: var(--text, #202124); border: 1px solid #fff; }
+.trace-row.is-selected { background: var(--surface-2, rgba(26, 115, 232, 0.08)); }
+.trace-span-id { color: var(--text-muted); font-size: 0.85em; }
+.trace-events { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+
 /* A repeatable group of fields (Field.Group, #1863): a row per exclusion filter. */
 .group-rows { display: grid; gap: 8px; margin-bottom: 8px; }
 .group-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; padding: 8px; border: 1px solid var(--border, var(--text-muted)); border-radius: var(--radius-control); }
@@ -2374,6 +2435,12 @@ svg.bq-chart { display: block; border: 1px solid var(--border); border-radius: v
 }
 .browse-row { display: flex; gap: 8px; align-items: center; }
 .browse-row > input { flex: 1; min-width: 0; }
+/* The Cloud Storage picker (#2097): Google's Select folder / Select object. */
+.browse-trail { margin: 8px 0; }
+.browse-filter { width: 100%; margin-bottom: 8px; }
+#browse-list { max-height: 50vh; overflow-y: auto; }
+.browse-open { flex: none; font-size: 20px; line-height: 1; }
+.fs-row-link[disabled] { cursor: default; color: var(--text-muted); }
 
 /* Ctrl+Space completions at a text control's cursor (#1846). */
 .completions { list-style: none; margin: 2px 0 0; padding: 4px 0; max-height: 220px; overflow-y: auto;
@@ -2472,6 +2539,11 @@ svg.bq-chart { display: block; border: 1px solid var(--border); border-radius: v
 .result-box.kind-paragraph { border-color: #188038; }
 .result-box.kind-line { border-color: #e37400; }
 .result-box.is-lit { background: rgba(26, 115, 232, 0.25); border-width: 2.5px; }
+/* Document AI's labeling tool (#2124): labels in purple, the box being drawn dashed, and a crosshair over a page to label. */
+.result-box.kind-label { border-color: #9334e6; background: rgba(147, 52, 230, 0.08); }
+.result-box.kind-drawing { border: 2px dashed #9334e6; pointer-events: none; }
+.result-page-frame.is-labeling { cursor: crosshair; touch-action: none; user-select: none; }
+.result-page-frame.is-labeling img { pointer-events: none; }
 #action-result-table tr.is-lit { background: var(--nav-selected); }
 
 /* Workflows' source editor and graph (#2004): the source on the left, its
@@ -2677,3 +2749,23 @@ tr.log-entry.is-located { outline: 2px solid var(--accent); outline-offset: -2px
 .card-filter { width: min(360px, 100%); }
 .row-delete-icon svg { fill: none; stroke: currentColor; stroke-width: 1.6; }
 .listing-summary:has(> .card-pin) > h2 { padding-right: 40px; }
+
+/* BigQuery Studio's notebooks, data canvases, Files and Recent tabs (#2094). */
+.bq-nb-cells, .bq-canvas-nodes { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.bq-nb-cell, .bq-canvas-node { border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; background: var(--surface); }
+.bq-nb-cell-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 6px; }
+.bq-nb-cell-bar h3 { margin: 0; font-size: var(--text-body-size); }
+.bq-nb-source { width: 100%; box-sizing: border-box; }
+.bq-nb-output { margin-top: 6px; overflow-x: auto; }
+.bq-nb-table { border-collapse: collapse; font-size: var(--text-caption-size); }
+.bq-nb-table th, .bq-nb-table td { border: 1px solid var(--border); padding: 2px 6px; text-align: left; }
+.bq-canvas-row, .bq-canvas-actions, .bq-files-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 6px 0; }
+.bq-canvas-row input[type="search"], .bq-canvas-row input[type="text"] { flex: 1 1 200px; min-width: 0; }
+.bq-canvas-found { list-style: none; padding: 0; margin: 4px 0; }
+.bq-canvas-found li { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 2px 0; }
+.bq-home-whatsnew { margin: 0; padding-left: 18px; }
+.bq-file-kind { font-size: var(--text-caption-size); }
+.bq-source .button { display: inline-block; margin: 4px 0 8px; }
+.bq-map { display: block; }
+.trace-kv td, .trace-kv th { overflow-wrap: anywhere; word-break: break-word; }
+.trace-kv { table-layout: fixed; width: 100%; }

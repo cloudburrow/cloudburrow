@@ -69,17 +69,35 @@ func (m clusterMaintenance) summary() []console.Property {
 	return out
 }
 
-// actions are the maintenance actions.
+// actions are the maintenance actions. Edit maintenance window is
+// Google's dialog (#2099): "Next to the Maintenance window field, click
+// Edit ... Select Custom. From the Day menu, select the day ... From the
+// Time menu, select the hour ... Click Update cluster"
+// (https://docs.cloud.google.com/memorystore/docs/cluster/find-and-set-maintenance-windows,
+// read 2026-11-21); Default removes the window.
 func (m clusterMaintenance) actions() []console.Action {
-	day, hour := "NONE", ""
-	if m.hasWindow {
-		day, hour = m.day.String(), strconv.Itoa(int(m.hour))
+	window := memorystoreMaintenanceFields()
+	for i := range window {
+		window[i].Section = ""
+		switch window[i].Name {
+		case "maintenance":
+			if m.hasWindow {
+				window[i].Default = "CUSTOM"
+			}
+			window[i].Help = "Custom sets the weekly one-hour window (maintenance_policy) in which Memorystore schedules maintenance; Default removes it."
+		case "maintenanceDay":
+			if m.hasWindow {
+				window[i].Default = m.day.String()
+			}
+		case "maintenanceHour":
+			window[i].Label = "Time"
+			if m.hasWindow {
+				window[i].Default = strconv.Itoa(int(m.hour))
+			}
+		}
 	}
 	acts := []console.Action{
-		{ID: "maintenance-window", Label: "Set maintenance window", Fields: []console.Field{
-			{Name: "maintenanceDay", Label: "Maintenance window day", Type: "select", Default: day, Options: memorystoreWindowDays,
-				Help: "The weekly one-hour maintenance window (maintenance_policy); NONE for no window."},
-			{Name: "maintenanceHour", Label: "Maintenance window hour (UTC)", Type: "number", Pattern: `^([0-9]|1[0-9]|2[0-3])$`, Default: hour, Help: "0 to 23."}}},
+		{ID: "maintenance-window", Label: "Edit maintenance window", Title: "Edit maintenance window", Fields: window},
 		{ID: "schedule-maintenance", Label: "Schedule maintenance (CloudBurrow)", Fields: []console.Field{
 			{Name: "startTime", Label: "Start time (UTC, RFC 3339)", Type: "text",
 				Help: "CloudBurrow only, standing in for an update Memorystore schedules: empty for the first maintenance window a week away. At this time every node is replaced, shard by shard: a new replica first, a coordinated failover for a primary, then the old node is removed."}}},
@@ -97,10 +115,11 @@ func (m clusterMaintenance) actions() []console.Action {
 	return acts
 }
 
-// clusterMaintenanceWindow reads Set maintenance window's day and hour.
+// clusterMaintenanceWindow reads Edit maintenance window's day and hour:
+// none for Default (or the older form's NONE).
 func clusterMaintenanceWindow(v map[string]string) (dayofweek.DayOfWeek, int32, bool, error) {
 	day := v["maintenanceDay"]
-	if day == "NONE" || day == "" {
+	if day == "NONE" || day == "" || v["maintenance"] == "DEFAULT" {
 		return 0, 0, false, nil
 	}
 	d, ok := dayofweek.DayOfWeek_value[day]

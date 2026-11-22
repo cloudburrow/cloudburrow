@@ -62,13 +62,6 @@ func TestV1ProjectsThroughTheOfficialClient(t *testing.T) {
 		t.Errorf("v1 list with OR = %v, want 400", err)
 	}
 
-	bi, err := http.Get("http://" + srv.Addr() + "/v1/projects/v1-made-one/billingInfo")
-	if err != nil || bi.StatusCode != http.StatusOK {
-		t.Errorf("billingInfo = %v, %v", bi, err)
-	} else {
-		_ = bi.Body.Close()
-	}
-
 	if p, err := c.Projects.GetIamPolicy("v1-made-one", &crmv1.GetIamPolicyRequest{}).Context(ctx).Do(); err != nil || len(p.Bindings) != 0 || p.Etag == "" {
 		t.Errorf("v1 getIamPolicy = %+v, %v; want an empty policy with an etag", p, err)
 	}

@@ -27,7 +27,7 @@ const EnvGcloud = "CLOUDBURROW_TEST_GCLOUD"
 // googleProviderVersion is the hashicorp/google release every Terraform and
 // OpenTofu test module requires, and testdata/terraform/.terraform.lock.hcl
 // locks. dependencies.json records it as hashicorpGoogleProvider.
-const googleProviderVersion = "8.4.0"
+const googleProviderVersion = "8.12.0"
 
 // googleProviderRequirement begins every test module.
 const googleProviderRequirement = `terraform {

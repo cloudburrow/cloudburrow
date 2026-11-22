@@ -101,7 +101,7 @@ func (p loggingBucketsProvider) List(ctx context.Context, project string) (conso
 			"Region": loc, "Retention period": fmt.Sprintf("%d days", b.GetRetentionDays()), "Status": bucketStatus(b),
 			"State": bucketState(b), "Description": orDash(b.GetDescription()),
 			"Observability Analytics available": analytics, "Linked dataset in BigQuery": linked,
-		}})
+		}, Withheld: bucketWithheld(b.GetName())})
 	}
 	out.Total = len(out.Items)
 	out.RowsOpenable = true
@@ -135,7 +135,80 @@ func (loggingBucketsProvider) CreateForm() (string, []console.Field) {
 			Help: "A Cloud KMS key of this instance in the bucket's region, projects/P/locations/L/keyRings/R/cryptoKeys/K, which the Logging service account " +
 				"can use (roles/cloudkms.cryptoKeyEncrypterDecrypter). The entries routed to the bucket are encrypted with it; while its key version is disabled or destroyed, the bucket cannot be read."},
 		{Name: "retention", Label: "Retention period", Type: "number", Default: "30", Section: retention, Help: "1 to 3650 days."},
+		indexesField("", retention),
 	}
+}
+
+// Google's words for what can't be done to the built-in buckets
+// (docs.cloud.google.com/logging/docs/store-log-entries, read 2026-11-21).
+const (
+	requiredNoChange = "You can't change the retention period of the _Required log bucket, and you can't modify which log entries are stored in it."
+	builtinNoDelete  = "You can't delete this log bucket."
+)
+
+// bucketWithheld greys out what a built-in bucket's row can't do (#2108):
+// _Required is neither edited nor deleted, _Default not deleted.
+func bucketWithheld(name string) map[string]string {
+	switch {
+	case strings.HasSuffix(name, "/locations/global/buckets/_Required"):
+		return map[string]string{"edit": requiredNoChange, "delete": builtinNoDelete}
+	case strings.HasSuffix(name, "/locations/global/buckets/_Default"):
+		return map[string]string{"delete": builtinNoDelete}
+	}
+	return nil
+}
+
+// Custom indexes (#2108): a bucket's index_configs, a row per field with
+// its Field path and Type, as gcloud's --index=fieldPath=…,type=… and the
+// custom-index page describe them (docs.cloud.google.com/logging/docs/
+// analyze/custom-index, read 2026-11-21): up to 20 fields.
+var indexTypeLabels = map[string]string{
+	loggingpb.IndexType_INDEX_TYPE_STRING.String():  "String",
+	loggingpb.IndexType_INDEX_TYPE_INTEGER.String(): "Integer",
+}
+
+func indexesField(def, section string) console.Field {
+	return console.Field{Name: "indexes", Label: "Custom indexes", Type: console.GroupFieldType, Default: def, Section: section,
+		AddLabel: "Add index", RemoveLabel: "Delete", Group: []console.Field{
+			{Name: "fieldPath", Label: "Field path", Type: "text", Required: true, Help: "a LogEntry field path, such as jsonPayload.req_status"},
+			{Name: "type", Label: "Type", Type: "select", Options: []string{loggingpb.IndexType_INDEX_TYPE_STRING.String(), loggingpb.IndexType_INDEX_TYPE_INTEGER.String()},
+				OptionLabels: indexTypeLabels},
+		},
+		Help: "Up to 20 string or integer fields. A query of this bucket compares an indexed field as the index's type, an hour after the index is added, for entries received after it."}
+}
+
+// formatIndexes is a bucket's index_configs as the group field's value.
+func formatIndexes(ics []*loggingpb.IndexConfig) string {
+	rows := make([]map[string]string, 0, len(ics))
+	for _, ic := range ics {
+		rows = append(rows, map[string]string{"fieldPath": ic.GetFieldPath(), "type": ic.GetType().String()})
+	}
+	return console.FormatGroup(rows)
+}
+
+// parseIndexes reads the group field's value into index_configs.
+func parseIndexes(v string) ([]*loggingpb.IndexConfig, error) {
+	rows, err := console.ParseGroup(v)
+	if err != nil {
+		return nil, fmt.Errorf("custom indexes: %w", err)
+	}
+	var out []*loggingpb.IndexConfig
+	for _, r := range rows {
+		out = append(out, &loggingpb.IndexConfig{FieldPath: strings.TrimSpace(r["fieldPath"]),
+			Type: loggingpb.IndexType(loggingpb.IndexType_value[r["type"]])})
+	}
+	return out, nil
+}
+
+// indexListing is the bucket page's Custom indexes table.
+func indexListing(ics []*loggingpb.IndexConfig) console.Listing {
+	l := console.Listing{Columns: []string{"Type", "Created"}, NameColumn: "Field path", Noun: "custom indexes"}
+	for _, ic := range ics {
+		l.Items = append(l.Items, console.Resource{Name: ic.GetFieldPath(), Fields: map[string]string{
+			"Type": indexTypeLabels[ic.GetType().String()], "Created": loggingTime(ic.GetCreateTime())}})
+	}
+	l.Total = len(l.Items)
+	return l
 }
 
 // CreateOnPage implements console.PageCreator: Google's Create log bucket
@@ -171,7 +244,11 @@ func (p loggingBucketsProvider) Create(ctx context.Context, project string, valu
 		return "", err
 	}
 	analytics := values["analytics"] == "true"
-	in := &loggingpb.LogBucket{Description: values["description"], RetentionDays: days, AnalyticsEnabled: analytics}
+	indexes, err := parseIndexes(values["indexes"])
+	if err != nil {
+		return "", err
+	}
+	in := &loggingpb.LogBucket{Description: values["description"], RetentionDays: days, AnalyticsEnabled: analytics, IndexConfigs: indexes}
 	if values["encryption"] == arEncCMEK {
 		in.CmekSettings = &loggingpb.CmekSettings{KmsKeyName: strings.TrimSpace(values["kmsKey"])}
 	}
@@ -255,6 +332,7 @@ func (p loggingBucketsProvider) Detail(ctx context.Context, project string, path
 					{Label: "Description", Value: orDash(b.GetDescription())},
 					{Label: "Retention period", Value: fmt.Sprintf("%d days", b.GetRetentionDays())},
 					{Label: "Lock", Value: lockedWord(b.GetLocked())},
+					{Label: "Custom indexes", Value: strconv.Itoa(len(b.GetIndexConfigs()))},
 					{Label: "State", Value: bucketState(b)},
 					{Label: "Observability Analytics", Value: map[bool]string{true: "Enabled", false: "Disabled"}[b.GetAnalyticsEnabled()]},
 					{Label: "Encryption", Value: bucketEncryptionWord(b)},
@@ -262,6 +340,7 @@ func (p loggingBucketsProvider) Detail(ctx context.Context, project string, path
 					{Label: "Created", Value: loggingTime(b.GetCreateTime())},
 					{Label: "Updated", Value: loggingTime(b.GetUpdateTime())},
 				}}}, Note: bucketNote},
+			{ID: "indexes", Label: "Custom indexes", Listing: indexListing(b.GetIndexConfigs())},
 			{ID: "views", Label: "Views", Listing: views},
 			{ID: "links", Label: "Linked datasets", Listing: p.links(ctx, path[0])},
 			{ID: "copies", Label: "Copy operations", Listing: p.copies(ctx, path[0])},
@@ -273,7 +352,12 @@ func (p loggingBucketsProvider) Detail(ctx context.Context, project string, path
 			{Name: "retention", Label: "Retention", Type: "number", Default: strconv.Itoa(int(b.GetRetentionDays())), Help: "1 to 3650 days."},
 			{Name: "locked", Label: "Lock the bucket (cannot be undone)", Type: "checkbox", Default: strconv.FormatBool(b.GetLocked())},
 			{Name: "analytics", Label: "Upgrade to use Observability Analytics (needed to link a BigQuery dataset)", Type: "checkbox", Default: strconv.FormatBool(b.GetAnalyticsEnabled())},
+			indexesField(formatIndexes(b.GetIndexConfigs()), ""),
 		}}
+	}
+	if strings.HasSuffix(path[0], "/locations/global/buckets/_Required") {
+		// No Edit bucket: Google's is greyed out here (#2108).
+		d.Sections[0].Note = requiredNoChange + " " + builtinNoDelete + " " + bucketNote
 	}
 	return d, nil
 }
@@ -300,9 +384,16 @@ func (p loggingBucketsProvider) Edit(ctx context.Context, project string, path [
 	if _, ok := values["analytics"]; ok {
 		mask = append(mask, "analytics_enabled")
 	}
+	var indexes []*loggingpb.IndexConfig
+	if v, ok := values["indexes"]; ok {
+		if indexes, err = parseIndexes(v); err != nil {
+			return err
+		}
+		mask = append(mask, "index_configs")
+	}
 	_, err = a.ConfigServer().UpdateBucket(ctx, &loggingpb.UpdateBucketRequest{Name: path[0],
 		Bucket: &loggingpb.LogBucket{Description: values["description"], RetentionDays: days, Locked: values["locked"] == "true",
-			AnalyticsEnabled: values["analytics"] == "true"},
+			AnalyticsEnabled: values["analytics"] == "true", IndexConfigs: indexes},
 		UpdateMask: &fieldmaskpb.FieldMask{Paths: mask}})
 	return err
 }

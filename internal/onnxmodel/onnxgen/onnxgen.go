@@ -93,6 +93,15 @@ func intAttr(name string, v int64) []byte {
 	return msg{}.str(1, name).varint(3, uint64(v)).varint(20, 2)
 }
 
+// intsAttr is an AttributeProto: name = 1, ints = 8, type = 20 (INTS = 7).
+func intsAttr(name string, vs ...int64) []byte {
+	var packed []byte
+	for _, v := range vs {
+		packed = protowire.AppendVarint(packed, uint64(v))
+	}
+	return msg{}.str(1, name).bytes(8, packed).varint(20, 7)
+}
+
 // node is a NodeProto: input = 1, output = 2, name = 3, op_type = 4,
 // attribute = 5.
 func node(op, name string, in, out []string, attrs ...[]byte) []byte {
@@ -185,4 +194,26 @@ func SequenceOutput() []byte {
 	inputs := [][]byte{valueInfo("a", tensorType(typeFloat, -1, 1))}
 	outputs := [][]byte{valueInfo("y", sequenceType(tensorType(typeFloat, -1, 1)))}
 	return model("sequence", nodes, inits, inputs, outputs)
+}
+
+// ImageMean takes an image as BigQuery's object table inference documents
+// a model's input, "a shape of [batch_size, width, height, 3]" (#2104): a
+// FLOAT input named input of [N, 2, 2, 3], channels last, and returns
+//
+//	rgb        = the mean of each channel   FLOAT [N, 3]  (an ARRAY<FLOAT64>)
+//	brightness = the mean of every value    FLOAT [N]     (a FLOAT64 column)
+//
+// computed as ReduceMean over axes 1 and 2, and over axes 1, 2 and 3, with
+// keepdims 0.
+func ImageMean() []byte {
+	nodes := [][]byte{
+		node("ReduceMean", "rgb", []string{"input"}, []string{"rgb"}, intsAttr("axes", 1, 2), intAttr("keepdims", 0)),
+		node("ReduceMean", "brightness", []string{"input"}, []string{"brightness"}, intsAttr("axes", 1, 2, 3), intAttr("keepdims", 0)),
+	}
+	inputs := [][]byte{valueInfo("input", tensorType(typeFloat, -1, 2, 2, 3))}
+	outputs := [][]byte{
+		valueInfo("rgb", tensorType(typeFloat, -1, 3)),
+		valueInfo("brightness", tensorType(typeFloat, -1)),
+	}
+	return model("image_mean", nodes, nil, inputs, outputs)
 }

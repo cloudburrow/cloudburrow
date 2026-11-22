@@ -83,13 +83,13 @@ func TestEventarcAdvancedPagesThroughTheBrowser(t *testing.T) {
 
 	// Pipelines.
 	labels = labelsOn("/eventarc/pipelines/create")
-	for _, want := range []string{"Pipeline name", "Destination", "Destination URI", "Pub/Sub topic", "Input payload format",
-		"Output payload format", "Transformation (CEL)", "Maximum attempts", "Log severity"} {
+	for _, want := range []string{"Pipeline name", "Destination type", "Destination URI", "Pub/Sub topic", "Apply a transformation",
+		"Inbound format", "Outbound format", "Transformation (CEL)", "Maximum attempts", "Log severity"} {
 		if !strings.Contains(labels, want) {
 			t.Errorf("Create pipeline has no %q field: %s", want, labels)
 		}
 	}
-	p.submitForm(map[string]string{"name": pipeline, "destination": "Pub/Sub topic", "topic": "orders-" + n, "inputFormat": "JSON",
+	p.submitForm(map[string]string{"name": pipeline, "destination": "Pub/Sub topic", "topic": "orders-" + n, "transform": "true", "inputFormat": "JSON",
 		"transformation": `message.setField("data.seen", true)`, "maxAttempts": "3"}, "name")
 	p.waitFor(`!location.pathname.endsWith("/create")`)
 	if row := listed("/eventarc/pipelines", pipeline, "Region", "Destination", "Input format"); !strings.Contains(row, "Pub/Sub topic: projects/"+project+"/topics/orders-"+n) ||

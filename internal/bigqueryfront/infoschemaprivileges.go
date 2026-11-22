@@ -37,8 +37,9 @@ import (
 // (unqualifiedSchemataLinks, #1392).
 //
 // SCHEMATA_LINKS is always empty: its rows are datasets linked through
-// BigQuery sharing (Analytics Hub), which an instance does not serve; a
-// Logging bucket's link (#1292) makes no BigQuery dataset.
+// BigQuery sharing (Analytics Hub), which is served but whose linked
+// datasets are not listed here yet; a Logging bucket's link (#1292) makes
+// no BigQuery dataset.
 
 const objectPrivilegesColumns = "STRUCT<object_catalog STRING, object_schema STRING, object_name STRING, " +
 	"object_type STRING, privilege_type STRING, grantee STRING>"

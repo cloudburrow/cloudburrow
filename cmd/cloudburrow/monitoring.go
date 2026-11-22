@@ -63,6 +63,9 @@ type monitoringService struct {
 	// firestore is the Firestore front's host address, for Firestore's
 	// document metrics (#2048); nil when Firestore is not served.
 	firestore func() string
+	// gke holds Kubernetes Engine's system metrics (#2100), recorded by the
+	// gkeMetricsSampler; nil when Kubernetes Engine is not served.
+	gke *monitoring.GKEBuiltin
 	// cancel stops alert evaluation and uptime checks.
 	cancel context.CancelFunc
 }
@@ -95,6 +98,15 @@ func (s *monitoringService) API() *monitoring.Server {
 	return s.api
 }
 
+// gkeMetrics is where Kubernetes Engine's system metrics are recorded,
+// made on first use; called before Start.
+func (s *monitoringService) gkeMetrics() *monitoring.GKEBuiltin {
+	if s.gke == nil {
+		s.gke = monitoring.NewGKEBuiltin()
+	}
+	return s.gke
+}
+
 // Addr is the bound address.
 func (s *monitoringService) Addr() string {
 	if s == nil || s.server == nil {
@@ -119,6 +131,9 @@ func (s *monitoringService) Start(ctx context.Context) error {
 	s.api = api
 	if s.logging != nil {
 		api.AddBuiltin(monitoring.NewLogBuiltin(monitoringLogs{svc: s.logging}))
+	}
+	if s.gke != nil {
+		api.AddBuiltin(s.gke)
 	}
 	if s.firestore != nil {
 		api.AddBuiltin(monitoring.NewFirestoreBuiltin(monitoringFirestore{addr: s.firestore}))

@@ -3,9 +3,14 @@
 package compat
 
 import (
+	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"testing"
+
+	arapi "google.golang.org/api/artifactregistry/v1"
+	"google.golang.org/api/option"
 )
 
 // TestTerraformRefusesHardCodedDataSources (#1578): three data sources whose
@@ -186,6 +191,91 @@ resource "google_bigquery_table" "t" {
 
 // interceptServed reports whether the wrapper's intercept says it served
 // at least one request to bigquery.googleapis.com.
-func interceptServed(out string) bool {
-	return strings.Contains(out, " request(s) to bigquery.googleapis.com locally") && !strings.Contains(out, "served 0 request(s)")
+func interceptServed(out string) bool { return interceptServedHost(out, "bigquery.googleapis.com") }
+
+// interceptServedHost reports whether the wrapper's intercept says it
+// served at least one request to host.
+func interceptServedHost(out, host string) bool {
+	suffix := " request(s) to " + host + " locally"
+	return strings.Contains(out, suffix) && !strings.Contains(out, "served 0"+suffix)
+}
+
+// covers: run.projects.locations.list, google.cloud.location.Locations/ListLocations
+//
+// TestTerraformLocationsIntercepted (#1578): with `cloudburrow terraform
+// --intercept-hardcoded`, the data sources google_cloud_run_locations and
+// google_artifact_registry_locations, which hashicorp/google builds from
+// https://run.googleapis.com/v1/ and https://artifactregistry.googleapis.com/v1/
+// whatever its custom endpoints say, are no longer refused: the wrapper's
+// local intercept serves both hosts from the Run port, and each lists what
+// the official generated client's first page lists (Cloud Run v1's
+// projects.locations.list, and Artifact Registry's under its own prefix),
+// as the provider, which does not page, reads Google's. Without the flag
+// they stay refused (TestTerraformRefusesHardCodedDataSources). On macOS a
+// provider built with a Go before 1.27 ignores SSL_CERT_FILE, which the
+// wrapper names; the test then skips. Linux, CI's, honours it.
+func TestTerraformLocationsIntercepted(t *testing.T) {
+	h := New(t)
+	shardEndpoint(h, envRunResourceManager, EnvResourceManager)
+	endpoint := h.Endpoint(EnvRun) // skips where the Run port is not served
+	rv1 := runV1Client(t, h)
+	rl, err := rv1.Projects.Locations.List("projects/" + h.Project()).Context(h.Context()).Do()
+	if err != nil {
+		t.Fatalf("run v1 projects.locations.list: %v", err)
+	}
+	ar, err := arapi.NewService(h.Context(), option.WithEndpoint("http://"+endpoint+"/artifactregistry/"), option.WithoutAuthentication())
+	if err != nil {
+		t.Fatal(err)
+	}
+	al, err := ar.Projects.Locations.List("projects/" + h.Project()).Context(h.Context()).Do()
+	if err != nil {
+		t.Fatalf("artifactregistry projects.locations.list: %v", err)
+	}
+	var wantRun, wantAR []string
+	for _, l := range rl.Locations {
+		wantRun = append(wantRun, l.LocationId)
+	}
+	for _, l := range al.Locations {
+		wantAR = append(wantAR, l.LocationId)
+	}
+	sort.Strings(wantRun)
+	sort.Strings(wantAR)
+	if len(wantRun) == 0 || len(wantAR) == 0 {
+		t.Fatalf("the clients list %d Cloud Run and %d Artifact Registry locations", len(wantRun), len(wantAR))
+	}
+
+	m := newTFModule(t)
+	m.flags = append(m.flags, "--intercept-hardcoded")
+	m.write(`
+data "google_cloud_run_locations" "run" {}
+data "google_artifact_registry_locations" "ar" {}
+output "run" { value = data.google_cloud_run_locations.run.locations }
+output "ar"  { value = data.google_artifact_registry_locations.ar.locations }
+`)
+	m.must("init", "-input=false", "-no-color")
+	out, err := m.tf("apply", "-auto-approve", "-input=false", "-no-color")
+	if strings.Contains(out, "ignores SSL_CERT_FILE") {
+		t.Skipf("the provider cannot trust the intercept's CA on this OS:\n%s", lastLines(out, 5))
+	}
+	if err != nil {
+		t.Fatalf("apply: %v\n%s", err, lastLines(out, 30))
+	}
+	for _, host := range []string{"run.googleapis.com", "artifactregistry.googleapis.com"} {
+		if !interceptServedHost(out, host) {
+			t.Errorf("the data sources' calls to %s did not go through the intercept:\n%s", host, lastLines(out, 30))
+		}
+	}
+	for _, c := range []struct {
+		name string
+		want []string
+	}{{"run", wantRun}, {"ar", wantAR}} {
+		var got []string
+		if err := json.Unmarshal([]byte(m.must("output", "-json", c.name)), &got); err != nil {
+			t.Fatalf("output %s: %v", c.name, err)
+		}
+		if strings.Join(got, ",") != strings.Join(c.want, ",") {
+			t.Errorf("output %s = %v; the official client lists %v", c.name, got, c.want)
+		}
+	}
+	m.planClean()
 }

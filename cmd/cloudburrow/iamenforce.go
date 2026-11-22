@@ -10,6 +10,7 @@ import (
 	ahpb "cloud.google.com/go/bigquery/analyticshub/apiv1/analyticshubpb"
 	"cloud.google.com/go/iam/apiv1/iampb"
 	iamv2 "cloud.google.com/go/iam/apiv2/iampb"
+	"cloud.google.com/go/kms/apiv1/kmspb"
 	"google.golang.org/genproto/googleapis/api/annotations"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -98,22 +99,23 @@ func (s registrySource) Ancestry(project string) []string {
 
 // HierarchyAncestry is a folder's, the organization's or a billing
 // account's ancestry (#1879): a folder, its parent folders and the
-// organization; the organization alone; a billing account and the
-// organization, as "the billing account inherits IAM permissions from its
-// parent organization" (https://docs.cloud.google.com/billing/docs/how-to/billing-access,
-// read 2026-11-20). Cloud Billing is not served, so nothing here keeps a
-// billing account's own policy, and every billing account is taken to be
-// the instance's organization's (UNVERIFIED for an account Google holds
-// under no organization, re-read 2026-11-20).
+// organization; the organization alone; a billing account as Cloud
+// Billing holds it (#2109): itself, a subaccount's parent account, and
+// the organization it belongs to, as "the billing account inherits IAM
+// permissions from its parent organization" (https://docs.cloud.google.com/billing/docs/how-to/billing-access,
+// read 2026-11-21). An account Cloud Billing does not hold has none.
 func (s registrySource) HierarchyAncestry(root string) []string {
 	reg := s.registry()
 	switch {
+	case strings.HasPrefix(root, "billingAccounts/"):
+		if b := billingAccounts.Load(); b != nil {
+			return b.Ancestry(root)
+		}
+		return nil
 	case reg == nil:
 		return nil
 	case root == resourcemanager.OrganizationName:
 		return []string{root}
-	case strings.HasPrefix(root, "billingAccounts/"):
-		return []string{root, resourcemanager.OrganizationName}
 	case !strings.HasPrefix(root, "folders/"):
 		return nil
 	}
@@ -133,6 +135,13 @@ func (s registrySource) HierarchyAncestry(root string) []string {
 }
 
 func (s registrySource) Policy(resource string) *iampolicy.Stored {
+	if strings.HasPrefix(resource, "billingAccounts/") && !strings.Contains(strings.TrimPrefix(resource, "billingAccounts/"), "/") {
+		// A billing account's own policy, as Cloud Billing keeps it.
+		if b := billingAccounts.Load(); b != nil {
+			return b.Policy(resource)
+		}
+		return nil
+	}
 	reg := s.registry()
 	if reg == nil {
 		return nil
@@ -238,6 +247,7 @@ func newIAMEnforcer(cfg config.Config, creds *metadata.Credentials, reg func() *
 			},
 		},
 		OwnerEmail: owner,
+		Resources:  map[string]iameval.ResourceLister{},
 	}
 }
 
@@ -335,6 +345,38 @@ func (s iamEnforced) use(e *iameval.Enforcer) {
 			}
 			return a.ArtifactRegistry().GetIamPolicy
 		})
+		// Cloud Asset's analysis under a scope (#2112) lists them.
+		e.Resources[iameval.Run.Name] = func(ctx context.Context, project string) []iameval.ChildResource {
+			a := s.run.adapter.Load()
+			if a == nil {
+				return nil
+			}
+			var out []iameval.ChildResource
+			for _, n := range a.ProjectResourceNames(ctx, project) {
+				out = append(out, iameval.ChildResource{Name: n})
+			}
+			return out
+		}
+		e.Resources[iameval.Functions.Name] = func(_ context.Context, project string) []iameval.ChildResource {
+			if s.run.functions.Load() == nil {
+				return nil
+			}
+			var out []iameval.ChildResource
+			for _, f := range runadapter.Functions(project) {
+				out = append(out, iameval.ChildResource{Name: f.GetName()})
+			}
+			return out
+		}
+		e.Resources[iameval.ArtifactRegistry.Name] = func(_ context.Context, project string) []iameval.ChildResource {
+			if s.run.adapter.Load() == nil {
+				return nil
+			}
+			var out []iameval.ChildResource
+			for _, n := range runadapter.RepositoryNames(project) {
+				out = append(out, iameval.ChildResource{Name: n})
+			}
+			return out
+		}
 		s.run.interpose = append(s.run.interpose, runCheck, e.Interceptor(iameval.Functions), e.Interceptor(iameval.Eventarc),
 			e.Interceptor(iameval.ArtifactRegistry), e.Interceptor(iameval.CloudBuild))
 		run, functions := jsonEnforcer(e, iameval.Run, nil), jsonEnforcer(e, iameval.Functions, nil)
@@ -412,6 +454,18 @@ func useIAMEnforcement(e *iameval.Enforcer, secretsSvc *secretsService, kmsSvc *
 			}
 			return secrets.NewGRPCServer(st).GetIamPolicy
 		})
+		e.Resources[iameval.SecretManager.Name] = func(_ context.Context, project string) []iameval.ChildResource {
+			st := secretsSvc.Store()
+			if st == nil {
+				return nil
+			}
+			list, _ := st.ListSecrets(project)
+			out := make([]iameval.ChildResource, 0, len(list))
+			for _, x := range list {
+				out = append(out, iameval.ChildResource{Name: x.Name})
+			}
+			return out
+		}
 	}
 	if kmsSvc != nil {
 		kmsSvc.interpose = append(kmsSvc.interpose, e.Interceptor(iameval.KMS))
@@ -423,6 +477,36 @@ func useIAMEnforcement(e *iameval.Enforcer, secretsSvc *secretsService, kmsSvc *
 			}
 			return api.IAMPolicy().GetIamPolicy
 		})
+		e.Resources[iameval.KMS.Name] = func(ctx context.Context, project string) []iameval.ChildResource {
+			api := kmsSvc.API()
+			if api == nil {
+				return nil
+			}
+			rings, _ := api.KeyRingsInProject(project)
+			var out []iameval.ChildResource
+			for _, r := range rings {
+				out = append(out, iameval.ChildResource{Name: r.GetName()})
+				keys, err := api.ListCryptoKeys(ctx, &kmspb.ListCryptoKeysRequest{Parent: r.GetName(), PageSize: 1000})
+				if err != nil {
+					continue
+				}
+				for _, k := range keys.GetCryptoKeys() {
+					out = append(out, iameval.ChildResource{Name: k.GetName(), Parent: r.GetName()})
+				}
+				jobs, err := api.ListImportJobs(ctx, &kmspb.ListImportJobsRequest{Parent: r.GetName(), PageSize: 1000})
+				if err != nil {
+					continue
+				}
+				for _, j := range jobs.GetImportJobs() {
+					out = append(out, iameval.ChildResource{Name: j.GetName(), Parent: r.GetName()})
+				}
+			}
+			conns, _ := api.EkmConnectionsInProject(project)
+			for _, c := range conns {
+				out = append(out, iameval.ChildResource{Name: c.GetName()})
+			}
+			return out
+		}
 	}
 	if tasksSvc != nil {
 		tasksSvc.interpose = append(tasksSvc.interpose, e.Interceptor(iameval.Tasks))
@@ -434,6 +518,20 @@ func useIAMEnforcement(e *iameval.Enforcer, secretsSvc *secretsService, kmsSvc *
 			}
 			return tasks.NewGRPCServer(st).GetIamPolicy
 		})
+		e.Resources[iameval.Tasks.Name] = func(_ context.Context, project string) []iameval.ChildResource {
+			st := tasksSvc.Store()
+			if st == nil {
+				return nil
+			}
+			all, _ := st.AllQueues()
+			var out []iameval.ChildResource
+			for _, q := range all {
+				if strings.HasPrefix(q.Name, "projects/"+project+"/") {
+					out = append(out, iameval.ChildResource{Name: q.Name})
+				}
+			}
+			return out
+		}
 	}
 }
 

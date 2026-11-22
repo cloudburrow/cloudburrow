@@ -123,3 +123,27 @@ func TestCompileQueryMonitoredResource(t *testing.T) {
 		}
 	}
 }
+
+// An entry's App Hub metadata (#2096) is matched and shown under apphub.
+func TestCompileQueryAppHub(t *testing.T) {
+	SetAppHubFields(func(typ string, labels map[string]string) map[string]string {
+		if typ == "pubsub_topic" && labels["topic_id"] == "orders" {
+			return map[string]string{"apphub.application.id": "shop", "apphub.service.id": "orders-topic"}
+		}
+		return nil
+	})
+	t.Cleanup(func() { SetAppHubFields(nil) })
+	e := Entry{Project: "p1", ResourceType: "pubsub_topic", ResourceLabels: map[string]string{"project_id": "p1", "topic_id": "orders"}}
+	other := Entry{Project: "p1", ResourceType: "pubsub_topic", ResourceLabels: map[string]string{"project_id": "p1", "topic_id": "audit"}}
+	match, err := CompileQuery(`apphub.application.id="shop"`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !match(e) || match(other) {
+		t.Errorf("apphub.application.id matches %v and %v; want true and false", match(e), match(other))
+	}
+	app, _ := logEntryJSON(e)["apphub"].(map[string]any)
+	if app == nil || app["application"].(map[string]any)["id"] != "shop" {
+		t.Errorf("logEntry apphub = %v", logEntryJSON(e)["apphub"])
+	}
+}

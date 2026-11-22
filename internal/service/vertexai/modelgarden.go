@@ -11,6 +11,7 @@ import (
 	"cloud.google.com/go/aiplatform/apiv1/aiplatformpb"
 	betapb "cloud.google.com/go/aiplatform/apiv1beta1/aiplatformpb"
 	"cloud.google.com/go/documentai/apiv1/documentaipb"
+	documentaibetapb "cloud.google.com/go/documentai/apiv1beta3/documentaipb"
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
 	"cloud.google.com/go/speech/apiv2/speechpb"
 	"google.golang.org/genproto/googleapis/api/annotations"
@@ -605,7 +606,7 @@ func opRule(pattern string) *annotations.HttpRule {
 // restTranscoder serves the JSON surface of the registered services.
 func (s *Server) restTranscoder() *rest.Transcoder {
 	s.restOnce.Do(func() {
-		t := &rest.Transcoder{Packages: []string{"google.cloud.aiplatform.v1", "google.cloud.documentai.v1", "google.cloud.speech.v2"}, Mixins: []*annotations.HttpRule{
+		t := &rest.Transcoder{Packages: []string{"google.cloud.aiplatform.v1", "google.cloud.documentai.v1", "google.cloud.documentai.v1beta3", "google.cloud.speech.v2"}, Mixins: []*annotations.HttpRule{
 			opRule("/v2/{name=projects/*/locations/*/operations/*}"),
 			opRule("/v1/{name=projects/*/locations/*/operations/*}"),
 			opRule("/v1/{name=projects/*/locations/*/endpoints/*/operations/*}"),
@@ -624,6 +625,7 @@ func (s *Server) restTranscoder() *rest.Transcoder {
 		}}
 		s.registerModelGarden(t)
 		documentaipb.RegisterDocumentProcessorServiceServer(t, &documentAIService{s: s}) // documentai.go, #1799
+		documentaibetapb.RegisterDocumentServiceServer(t, &documentService{s: s})        // documentaidataset.go, #2106
 		speechpb.RegisterSpeechServer(t, &speechService{s: s})                           // speechrecognizers.go, #1799
 		longrunningpb.RegisterOperationsServer(t, &operations{s: s})
 		s.rest = t
@@ -643,6 +645,8 @@ func documentAIPath(p string) bool {
 func (s *Server) serveREST(w http.ResponseWriter, r *http.Request, body []byte) {
 	v2 := strings.HasPrefix(r.URL.Path, "/v2/") && (strings.Contains(r.URL.Path, "/recognizers") || strings.Contains(r.URL.Path, "/customClasses") ||
 		strings.Contains(r.URL.Path, "/phraseSets") || strings.Contains(r.URL.Path, "/operations/") || strings.HasSuffix(r.URL.Path, "/config"))
+	// Document AI's datasets, v1beta3's DocumentService (#2106).
+	v2 = v2 || (strings.HasPrefix(r.URL.Path, "/v1beta3/") && strings.Contains(r.URL.Path, "/processors/") && strings.Contains(r.URL.Path, "/dataset"))
 	// gcloud ai endpoints deploy-model polls its operation under v1beta1
 	// (#1940).
 	// The Python SDK polls its operations under /ui (#1940).

@@ -201,11 +201,19 @@ const (
 // ensureDefaultConnection makes the project's default connection in loc
 // when it is missing (a CLOUD_RESOURCE connection named id, by default
 // __default_cloudresource_connection__), and grants its service account
-// roles/aiplatform.user on the project when it lacks it, as BigQuery does
-// for a remote model over Vertex AI: each only when the caller may (the
-// connection's create permission; the project's setIamPolicy), else the
-// refusal names what is missing (#1765).
+// what the resource needs, as BigQuery does (grant; nil for a remote model
+// over Vertex AI: roles/aiplatform.user on the project, when it lacks it):
+// each only when the caller may (the connection's create permission; the
+// project's or bucket's setIamPolicy), else the refusal names what is
+// missing (#1765, #2104).
 func (f front) ensureDefaultConnection(ctx context.Context, project string, number int64, loc, id string, cn *bqConnection) (*bqConnection, int, string) {
+	return f.ensureDefaultConnectionFor(ctx, project, number, loc, id, cn, nil)
+}
+
+// ensureDefaultConnectionFor is ensureDefaultConnection with grant, which
+// grants the connection's service account sa the roles its resource needs.
+func (f front) ensureDefaultConnectionFor(ctx context.Context, project string, number int64, loc, id string, cn *bqConnection,
+	grant func(sa string) (int, string)) (*bqConnection, int, string) {
 	proj, code, msg := f.projectBindings(ctx, project)
 	if code != 0 {
 		return nil, code, msg
@@ -222,6 +230,14 @@ func (f front) ensureDefaultConnection(ctx context.Context, project string, numb
 		}
 	}
 	sa := cn.serviceAccount()
+	if grant != nil {
+		if sa != "" {
+			if code, msg := grant(sa); code != 0 {
+				return nil, code, msg
+			}
+		}
+		return cn, 0, ""
+	}
 	if sa != "" && !bindingsGrant(proj, f.members(ctx, "serviceAccount:"+sa), permVertexPredict) && bindingsGrant(proj, caller, permProjectSetIAM) {
 		if code, msg := f.grantProjectRole(ctx, project, "roles/aiplatform.user", "serviceAccount:"+sa); code != 0 {
 			return nil, code, msg
@@ -323,4 +339,97 @@ func callerMemberOf(ctx context.Context, project string) string {
 		return "serviceAccount:" + email
 	}
 	return "user:" + email
+}
+
+// Default connection roles on Cloud Storage (#2104): "Cloud Storage
+// BigLake tables" and "Object tables": roles/storage.legacyBucketReader and
+// roles/storage.legacyObjectReader; "Apache Iceberg managed tables":
+// roles/storage.legacyBucketWriter and roles/storage.legacyObjectOwner, on
+// the bucket; setting them needs storage.buckets.getIamPolicy and
+// storage.buckets.setIamPolicy
+// (https://docs.cloud.google.com/bigquery/docs/default-connections, read
+// 2026-11-21).
+var (
+	defaultReaderRoles  = []string{"roles/storage.legacyBucketReader", "roles/storage.legacyObjectReader"}
+	defaultIcebergRoles = []string{"roles/storage.legacyBucketWriter", "roles/storage.legacyObjectOwner"}
+)
+
+const permBucketSetIAM = "storage.buckets.setIamPolicy"
+
+// grantBucketRoles is the default connection's grant (above) of roles on
+// each bucket to sa, a role it already holds there left as it is. A
+// caller who may not set the bucket's policy (its project's, as the
+// instance's buckets inherit) is refused, as BigQuery's statement fails
+// "if you don't have administrative privileges on the Cloud Storage ...
+// resource" (wording CloudBurrow's, UNVERIFIED (docs re-read 2026-11-21:
+// https://docs.cloud.google.com/bigquery/docs/default-connections)).
+func (f front) grantBucketRoles(ctx context.Context, project string, buckets []string, roles []string) func(sa string) (int, string) {
+	return func(sa string) (int, string) {
+		if f.storage == nil {
+			return 0, ""
+		}
+		proj, code, msg := f.projectBindings(ctx, project)
+		if code != 0 {
+			return code, msg
+		}
+		caller := f.members(ctx, "serviceAccount:"+callerIdentity(project))
+		member := "serviceAccount:" + sa
+		seen := map[string]bool{}
+		for _, bucket := range buckets {
+			if bucket == "" || seen[bucket] {
+				continue
+			}
+			seen[bucket] = true
+			u := strings.TrimRight(f.storage.base, "/") + "/storage/v1/b/" + url.PathEscape(bucket) + "/iam"
+			status, body, err := serviceCall(ctx, "Cloud Storage getIamPolicy of "+bucket, http.MethodGet, u, "", nil)
+			if err != nil || status != http.StatusOK {
+				if status == http.StatusNotFound {
+					return 404, "Not found: Cloud Storage bucket " + bucket
+				}
+				return 500, "cloudburrow: could not read the IAM policy of the bucket " + bucket + ": " + errorMessage(body, status)
+			}
+			var p map[string]any
+			if json.Unmarshal(body, &p) != nil {
+				return 500, "cloudburrow: the IAM policy of the bucket " + bucket + " is unreadable"
+			}
+			bindings, _ := p["bindings"].([]any)
+			changed := false
+			for _, role := range roles {
+				held := false
+				for _, b := range bindings {
+					m, _ := b.(map[string]any)
+					if m["role"] != role || m["condition"] != nil {
+						continue
+					}
+					ms, _ := m["members"].([]any)
+					for _, x := range ms {
+						held = held || x == member
+					}
+					if !held {
+						m["members"] = append(ms, member)
+						held, changed = true, true
+					}
+					break
+				}
+				if !held {
+					bindings = append(bindings, map[string]any{"role": role, "members": []any{member}})
+					changed = true
+				}
+			}
+			if !changed {
+				continue
+			}
+			if !bindingsGrant(proj, caller, permBucketSetIAM) {
+				return 403, fmt.Sprintf("Access Denied: Bucket %s: granting the default connection's service account %s %s needs "+
+					"permission %s on the bucket.", bucket, sa, strings.Join(roles, " and "), permBucketSetIAM)
+			}
+			p["bindings"] = bindings
+			req, _ := json.Marshal(p)
+			status, body, err = serviceCall(ctx, "Cloud Storage setIamPolicy of "+bucket, http.MethodPut, u, "application/json", req)
+			if err != nil || status != http.StatusOK {
+				return 500, "cloudburrow: could not grant " + strings.Join(roles, " and ") + " on the bucket " + bucket + ": " + errorMessage(body, status)
+			}
+		}
+		return 0, ""
+	}
 }

@@ -19,10 +19,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"unicode"
 
+	eventarc "cloud.google.com/go/eventarc/apiv1"
 	eventarcpb "cloud.google.com/go/eventarc/apiv1/eventarcpb"
 	"google.golang.org/api/iterator"
 
@@ -37,11 +39,20 @@ const (
 	eventarcPubSubProvider = "pubsub.googleapis.com"
 	eventarcAuditEvent     = "google.cloud.audit.log.v1.written"
 
+	// Google's Resource choice of a Cloud Audit Logs trigger: any
+	// resource, one resource name (an exact filter) or a path pattern
+	// (match-path-pattern).
+	eventarcAnyResource      = "Any resource"
+	eventarcSpecificResource = "Specific resource"
+	eventarcPathPattern      = "Path pattern"
+
 	// The pane's field names. Each provider's event type is
 	// eventarcEventTypeField+provider, each of its filters
 	// eventarcFilterField+provider+"."+attribute.
 	eventarcEventTypeField = "eventType."
 	eventarcFilterField    = "filter."
+	// eventarcResourceField+provider is an audit-log trigger's Resource.
+	eventarcResourceField = "resource."
 )
 
 // eventarcPaneCatalog is what the pane offers: the providers and channels
@@ -50,19 +61,28 @@ type eventarcPaneCatalog struct {
 	providers []*eventarcpb.Provider
 	// custom are channels with no provider, thirdParty those with one.
 	custom, thirdParty []*eventarcpb.Channel
+	// topics, when listed, are the project's topic IDs, which Cloud Pub/Sub's
+	// "Select a Cloud Pub/Sub topic" offers; nil leaves it a text field.
+	topics []string
 	// err is why the catalog could not be read, "" when it was.
 	err string
 }
 
 // eventarcCatalog reads the catalog through the official Eventarc client.
 func (p functionsProvider) eventarcCatalog(ctx context.Context, project, region string) eventarcPaneCatalog {
-	var cat eventarcPaneCatalog
 	c, err := p.eventarcClient(ctx)
 	if err != nil {
-		cat.err = err.Error()
-		return cat
+		return eventarcPaneCatalog{err: err.Error()}
 	}
 	defer func() { _ = c.Close() }()
+	return eventarcCatalogFrom(ctx, c, project, region)
+}
+
+// eventarcCatalogFrom reads the catalog through an open Eventarc client:
+// every provider ListProviders names, with its event types, so the pane
+// offers what the instance's Eventarc serves and nothing else (#2093).
+func eventarcCatalogFrom(ctx context.Context, c *eventarc.Client, project, region string) eventarcPaneCatalog {
+	var cat eventarcPaneCatalog
 	parent := "projects/" + project + "/locations/" + region
 	pit := c.ListProviders(ctx, &eventarcpb.ListProvidersRequest{Parent: parent})
 	for {
@@ -214,10 +234,29 @@ func eventarcPane(cat eventarcPaneCatalog, region string) []console.Field {
 		}
 		fields = append(fields, et)
 		if id == eventarcPubSubProvider {
-			fields = append(fields, console.Field{Name: "topic", Label: "Select a Cloud Pub/Sub topic", Type: "text", Section: sec,
-				ShowWhen: on, Help: "A topic ID in this project, or projects/{project}/topics/{topic}; empty, Eventarc makes one."})
+			topic := console.Field{Name: "topic", Label: "Select a Cloud Pub/Sub topic", Type: "text", Section: sec,
+				ShowWhen: on, Help: "A topic ID in this project, or projects/{project}/topics/{topic}; empty, Eventarc makes one."}
+			if cat.topics != nil {
+				topic.Type, topic.Options = "select", append([]string{""}, cat.topics...)
+				topic.OptionLabels = map[string]string{"": "Create a topic (Eventarc makes one)"}
+				topic.Help = "Each message published to the topic is delivered; Create a topic has Eventarc make one."
+			}
+			fields = append(fields, topic)
 		}
 		for _, a := range attrs {
+			if a.GetAttribute() == "resourceName" && slices.Equal(withAttr["resourceName"], []string{eventarcAuditEvent}) {
+				// Google's audit-log pane: Resource, then the resource
+				// name or path pattern it asks for.
+				show := on + "&" + et.Name + "=" + eventarcAuditEvent
+				filters = append(filters,
+					console.Field{Name: eventarcResourceField + id, Label: "Resource", Type: "select", Section: sec, ShowWhen: show,
+						Options: []string{eventarcAnyResource, eventarcSpecificResource, eventarcPathPattern}, Default: eventarcAnyResource,
+						Help: "Any resource of the service, one resource name, or a path pattern such as projects/_/secrets/{secret}."},
+					console.Field{Name: eventarcFilterField + id + ".resourceName", Label: "Resource name or path pattern", Type: "text",
+						Section: sec, ShowWhen: show + "&" + eventarcResourceField + id + "=" + eventarcSpecificResource + "|" + eventarcPathPattern,
+						Help: a.GetDescription() + ", such as projects/my-project/secrets/my-secret, or a path pattern of it"})
+				continue
+			}
 			f := console.Field{Name: eventarcFilterField + id + "." + a.GetAttribute(), Label: eventarcAttrLabel(a.GetAttribute()),
 				Type: "text", Required: a.GetRequired(), Section: sec,
 				ShowWhen: on + "&" + et.Name + "=" + strings.Join(withAttr[a.GetAttribute()], "|"),
@@ -254,6 +293,46 @@ func providerLabel(pr *eventarcpb.Provider) string {
 		return d
 	}
 	return lastSegment(pr.GetName())
+}
+
+// eventarcTriggerProvider is the display name of a trigger's event
+// provider: an audit-log trigger's service, or the provider listing its
+// event type; a channel's trigger is Custom or the channel's provider.
+func eventarcTriggerProvider(cat eventarcPaneCatalog, t *eventarcpb.Trigger) string {
+	if ch := t.GetChannel(); ch != "" {
+		for _, c := range cat.thirdParty {
+			if c.GetName() == ch {
+				return lastSegment(c.GetProvider())
+			}
+		}
+		return eventarcCustom
+	}
+	typ, service := "", ""
+	for _, f := range t.GetEventFilters() {
+		switch f.GetAttribute() {
+		case "type":
+			typ = f.GetValue()
+		case "serviceName":
+			service = f.GetValue()
+		}
+	}
+	for _, pr := range cat.providers {
+		if typ == eventarcAuditEvent {
+			if lastSegment(pr.GetName()) == service {
+				return providerLabel(pr) + " (via Cloud Audit Logs)"
+			}
+			continue
+		}
+		for _, et := range pr.GetEventTypes() {
+			if et.GetType() == typ {
+				return providerLabel(pr)
+			}
+		}
+	}
+	if typ == eventarcAuditEvent && service != "" {
+		return service + " (via Cloud Audit Logs)"
+	}
+	return "-"
 }
 
 func containsString(list []string, v string) bool {
@@ -340,6 +419,22 @@ func eventarcPaneTrigger(cat eventarcPaneCatalog, project, region, service strin
 		if eventarcFixedFilter(typ, attr) {
 			value = id
 		}
+		pattern := a.GetPathPatternSupported() && strings.ContainsAny(value, "*{")
+		if typ == eventarcAuditEvent && attr == "resourceName" {
+			switch choice := val(eventarcResourceField + id); choice {
+			case "":
+				// No Resource choice (an API caller): a pattern by its form.
+			case eventarcAnyResource:
+				value = ""
+			case eventarcSpecificResource, eventarcPathPattern:
+				if value == "" {
+					return nil, fmt.Errorf("%s needs the resource name or path pattern", choice)
+				}
+				pattern = choice == eventarcPathPattern
+			default:
+				return nil, fmt.Errorf("resource %q is not one of %s, %s and %s", choice, eventarcAnyResource, eventarcSpecificResource, eventarcPathPattern)
+			}
+		}
 		if value == "" {
 			if a.GetRequired() {
 				return nil, fmt.Errorf("the %s event needs its %s", typ, eventarcAttrLabel(attr))
@@ -347,7 +442,7 @@ func eventarcPaneTrigger(cat eventarcPaneCatalog, project, region, service strin
 			continue
 		}
 		f := &eventarcpb.EventFilter{Attribute: attr, Value: value}
-		if a.GetPathPatternSupported() && strings.ContainsAny(value, "*{") {
+		if pattern {
 			f.Operator = functionPathPatternOp
 		}
 		t.EventFilters = append(t.EventFilters, f)
@@ -372,11 +467,24 @@ func (p functionsProvider) createEventarcTrigger(ctx context.Context, project, r
 }
 
 func (p functionsProvider) createEventarcTriggerTo(ctx context.Context, project, region, service, function string, v map[string]string) error {
+	c, err := p.eventarcClient(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = c.Close() }()
+	return savePaneTrigger(ctx, c, project, region, service, function, v)
+}
+
+// savePaneTrigger is the pane's Save trigger through an open Eventarc
+// client: the trigger checked against the catalog, then CreateTrigger,
+// waited on. Its destination is the Cloud Run service, or the function
+// when one is named.
+func savePaneTrigger(ctx context.Context, c *eventarc.Client, project, region, service, function string, v map[string]string) error {
 	id := strings.TrimSpace(v["name"])
 	if id == "" {
 		return errors.New("a trigger name is required")
 	}
-	cat := p.eventarcCatalog(ctx, project, region)
+	cat := eventarcCatalogFrom(ctx, c, project, region)
 	if cat.err != "" {
 		return errors.New(cat.err)
 	}
@@ -387,11 +495,6 @@ func (p functionsProvider) createEventarcTriggerTo(ctx context.Context, project,
 	if function != "" {
 		t.Destination = &eventarcpb.Destination{Descriptor_: &eventarcpb.Destination_CloudFunction{CloudFunction: function}}
 	}
-	c, err := p.eventarcClient(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = c.Close() }()
 	op, err := c.CreateTrigger(ctx, &eventarcpb.CreateTriggerRequest{Parent: "projects/" + project + "/locations/" + region,
 		TriggerId: id, Trigger: t})
 	if err != nil {

@@ -105,9 +105,25 @@ func TestBigQueryStudioHomeTabsVisualizationAndSavedQueries(t *testing.T) {
 	p.setField(".modal.is-open #bq-save-name", saveName+" b")
 	p.clickText(".modal.is-open button", "Save")
 	p.waitFor(`[...` + queries + `.querySelectorAll(".bq-node-name")].filter((n) => n.textContent.startsWith(` + fmt.Sprintf("%q", saveName) + `)).length === 2`)
-	code, body := consoleDo(t, http.MethodPost, "/api/studio/bigquery?call=savedqueries&project="+url.QueryEscape(project), "{}")
-	if code != http.StatusOK || !strings.Contains(body, saveName) || !strings.Contains(body, "UNION ALL SELECT 'south'") {
-		t.Errorf("the saved queries read back as %d %s", code, body)
+	if hasService(t, "dataform") {
+		// Kept in Dataform as code assets (#2094).
+		_, name, _ := studioAsset(t, project, saveName)
+		body := studioContent(t, project, name, "UNION ALL SELECT 'south'")
+		if !strings.Contains(body, "UNION ALL SELECT 'south'") {
+			t.Errorf("the saved query reads back as %s", body)
+		}
+		t.Cleanup(func() {
+			for _, e := range studioAssets(t, project) {
+				if strings.HasPrefix(e.DisplayName, saveName) {
+					consoleDo(t, http.MethodPost, "/api/studio/dataform?call=delete&project="+url.QueryEscape(project), `{"name":"`+e.Name+`"}`)
+				}
+			}
+		})
+	} else {
+		code, body := consoleDo(t, http.MethodPost, "/api/studio/bigquery?call=savedqueries&project="+url.QueryEscape(project), "{}")
+		if code != http.StatusOK || !strings.Contains(body, saveName) || !strings.Contains(body, "UNION ALL SELECT 'south'") {
+			t.Errorf("the saved queries read back as %d %s", code, body)
+		}
 	}
 
 	// Edit > Query settings.
@@ -151,7 +167,7 @@ func TestBigQueryStudioHomeTabsVisualizationAndSavedQueries(t *testing.T) {
 	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	madeNode := fmt.Sprintf(`document.querySelector('[data-node=%q]')`, project+"."+made)
 	p.waitFor(madeNode + ` !== null`)
-	code, body = consoleDo(t, http.MethodGet, "/api/detail/bigquery?"+url.Values{"project": {project}, "name": {made}}.Encode(), "")
+	code, body := consoleDo(t, http.MethodGet, "/api/detail/bigquery?"+url.Values{"project": {project}, "name": {made}}.Encode(), "")
 	if code != http.StatusOK || !strings.Contains(body, "asia-northeast1") {
 		t.Errorf("the panel's dataset is not in asia-northeast1: %d %s", code, body)
 	}

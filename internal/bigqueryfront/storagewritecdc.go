@@ -194,6 +194,9 @@ func (w *storageWrite) changeTable(ctx context.Context, t readTable) cdcTable {
 type cdcKeys struct {
 	Created string             `json:"created"`
 	Keys    map[string]cdcSeen `json:"keys"`
+	// Applied is when the table's changes were last applied, its
+	// upsert_stream_apply_watermark (#2104).
+	Applied time.Time `json:"applied,omitzero"`
 }
 
 type cdcSeen struct {
@@ -228,6 +231,11 @@ func (w *storageWrite) cdcFile(t readTable) string {
 	if dir == "" {
 		return ""
 	}
+	return cdcKeysFile(dir, t)
+}
+
+// cdcKeysFile is where dir keeps t's cdcKeys.
+func cdcKeysFile(dir string, t readTable) string {
 	h := sha256.Sum256([]byte(t.path()))
 	return filepath.Join(dir, "cdc-"+hex.EncodeToString(h[:12])+".json")
 }
@@ -428,6 +436,11 @@ func (w *storageWrite) applyChanges(ctx context.Context, t readTable, tbl cdcTab
 		final[c.key] = c
 	}
 	if len(order) == 0 {
+		// An apply that changed no row (every change numbered below its
+		// key's) still applied the append: the watermark moves.
+		keys.Applied = now
+		w.saveKeys(t, keys)
+		w.active.applied(t, tbl.created, now)
 		return nil
 	}
 	ctx = asInternal(context.WithValue(ctx, changeApplyKey{}, true))
@@ -451,7 +464,9 @@ func (w *storageWrite) applyChanges(ctx context.Context, t readTable, tbl cdcTab
 	for k, s := range seen {
 		keys.Keys[k] = s
 	}
+	keys.Applied = now
 	w.saveKeys(t, keys)
+	w.active.applied(t, tbl.created, now)
 	return nil
 }
 
@@ -559,6 +574,67 @@ func paramText(v any) string {
 type cdcStreams struct {
 	mu   sync.Mutex
 	open map[string]int
+	// marks are each table's upsert_stream_apply_watermark (#2104), by
+	// cdcStreamKey, and dir the --state-dir the Write API keeps cdcKeys
+	// in, read for a table whose changes were applied before a restart.
+	marks map[string]cdcMark
+	dir   string
+}
+
+// cdcMark is when the changes of the table made at created were last
+// applied.
+type cdcMark struct {
+	created string
+	at      time.Time
+}
+
+// upsert_stream_apply_watermark (#2104): "the time at which the last apply
+// job occurred, which is represented by the table's
+// upsert_stream_apply_watermark timestamp", read from INFORMATION_SCHEMA.TABLES
+// (https://docs.cloud.google.com/bigquery/docs/change-data-capture, read
+// 2026-11-21). CloudBurrow's apply job is the one each append runs before
+// it is answered (applyChanges), so the watermark is the time of the last
+// append that carried changes, by the instance's clock; every change
+// streamed before it is applied, which is what a query within
+// max_staleness reads. A table that never received a change has none:
+// NULL (Google does not document the value before the first apply,
+// UNVERIFIED (docs re-read 2026-11-21: https://docs.cloud.google.com/bigquery/docs/change-data-capture)).
+
+// applied records that the changes of t, made at created, were applied at.
+func (s *cdcStreams) applied(t readTable, created string, at time.Time) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.marks == nil {
+		s.marks = map[string]cdcMark{}
+	}
+	s.marks[cdcStreamKey(t.project, t.dataset, t.table)] = cdcMark{created: created, at: at}
+}
+
+// watermark is the upsert_stream_apply_watermark of the table made at
+// created, or false when its changes were never applied.
+func (s *cdcStreams) watermark(project, dataset, table, created string) (time.Time, bool) {
+	if s == nil {
+		return time.Time{}, false
+	}
+	s.mu.Lock()
+	m, ok := s.marks[cdcStreamKey(project, dataset, table)]
+	dir := s.dir
+	s.mu.Unlock()
+	if ok {
+		return m.at, m.created == created && !m.at.IsZero()
+	}
+	if dir == "" {
+		return time.Time{}, false
+	}
+	b, err := os.ReadFile(cdcKeysFile(dir, readTable{project, dataset, table}))
+	var kept cdcKeys
+	if err != nil || json.Unmarshal(b, &kept) != nil {
+		return time.Time{}, false
+	}
+	return kept.Applied, kept.Created == created && !kept.Applied.IsZero()
 }
 
 func cdcStreamKey(project, dataset, table string) string {

@@ -266,6 +266,16 @@ func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, 
 	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && !dryRun(r, insert) && f.partitionReads(w, r, q, insert) { // #1273, #1276, #1277, partitionreads.go
 		return
 	}
+	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && !dryRun(r, insert) {
+		if v, msg, ok := parseViewColumnOptions(q.Query); ok { // #2104, viewcolumnoptions.go
+			if msg != "" {
+				writeError(w, http.StatusBadRequest, "invalidQuery", msg)
+				return
+			}
+			f.alterViewColumn(w, r, q, v, insert)
+			return
+		}
+	}
 	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && r.Context().Value(optionsKey{}) == nil && !dryRun(r, insert) {
 		if d, msg, ok := parseDDLOptions(q.Query); ok { // #1251, ddloptions.go
 			if d.invalid != "" && msg == "" { // #1390
@@ -319,6 +329,10 @@ func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, 
 		return
 	}
 	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && dryRun(r, insert) {
+		if stmt, ok := loneSparkProc(q.Query); ok { // #2104, sparkprocs.go
+			f.dryRunSparkProc(w, r, q, stmt, insert)
+			return
+		}
 		if stmt, ok := loneAlterTable(q.Query); ok { // #1416, altertabledry.go
 			f.dryRunAlter(w, r, q, stmt, insert)
 			return

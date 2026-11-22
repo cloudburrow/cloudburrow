@@ -71,6 +71,10 @@ type LifecycleComponent struct {
 	// address (host:port), which BigQuery's front converts imported
 	// TENSORFLOW models on (#1775), or "".
 	tfConverter string
+	// sparkRunner is the Spark procedure runner's in-cluster address
+	// (host:port, #2104), which the BigQuery front runs stored procedures
+	// for Apache Spark on.
+	sparkRunner string
 	// vertexAI is the local Vertex AI endpoint's in-cluster address
 	// (host:port), given to the BigQuery front for remote models (#1760).
 	vertexAI string
@@ -157,6 +161,10 @@ func (c *LifecycleComponent) SetServiceAccountCerts(addr string) { c.serviceAcco
 // SetTFConverter records the in-cluster address of the TensorFlow
 // SavedModel converter, for BigQuery's front (#1775).
 func (c *LifecycleComponent) SetTFConverter(addr string) { c.tfConverter = addr }
+
+// SetSparkRunner records the in-cluster address of the Spark procedure
+// runner (#2104).
+func (c *LifecycleComponent) SetSparkRunner(addr string) { c.sparkRunner = addr }
 
 // SetVertexAI records the in-cluster address of the instance's local
 // Vertex AI endpoint, which BigQuery ML's remote models run on (#1760).
@@ -375,6 +383,11 @@ func (c *LifecycleComponent) Backends() []Backend {
 					// converter (#1775).
 					if c.tfConverter != "" {
 						b.Front.Args = append(b.Front.Args, "--tfconvert", "http://"+c.tfConverter)
+					}
+					// Stored procedures for Apache Spark run on the
+					// host's Spark runner (#2104).
+					if c.sparkRunner != "" {
+						b.Front.Args = append(b.Front.Args, "--spark", "http://"+c.sparkRunner)
 					}
 					// Remote models run on the local Vertex AI (#1760).
 					if c.vertexAI != "" {

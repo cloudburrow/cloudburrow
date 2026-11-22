@@ -142,7 +142,8 @@
         "patches/googlesqlite/0103-catalog-sync-on-an-older-snapshot.patch",
         "patches/googlesqlite/0104-new-columns-in-the-catalog.patch",
         "patches/googlesqlite/0106-ten-thousand-columns.patch",
-        "patches/googlesqlite/0107-spec-case-watchdog.patch"
+        "patches/googlesqlite/0107-spec-case-watchdog.patch",
+        "patches/googlesqlite/0109-table-function-table-parameters.patch"
       ]
     },
     {

@@ -7,9 +7,9 @@ import (
 
 // BillingAccounts are the billing accounts Logging holds anything for: an
 // entry written to one of its logs, or stored configuration (a bucket, view,
-// sink, exclusion or settings) under it. Cloud Billing is not served, so
-// nothing else on the instance names a billing account; the console's log
-// bucket screen offers these in its scope picker (#1411).
+// sink, exclusion or settings) under it. The console's log bucket screen
+// offers these in its scope picker (#1411), with Cloud Billing's accounts
+// (#2109).
 func (s *Server) BillingAccounts() []string {
 	seen := map[string]bool{}
 	for _, e := range s.store.snapshot() {

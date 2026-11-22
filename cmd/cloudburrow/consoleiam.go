@@ -35,6 +35,8 @@ type projectIAMProvider struct {
 	registry *resourcemanager.Registry
 	// iam answers Policy Troubleshooter and Policy Analyzer (#1879).
 	iam *iameval.Enforcer
+	// assetOut are analyzeIamPolicyLongrunning's destinations (#2112).
+	assetOut *assetOutputs
 }
 
 func (projectIAMProvider) ID() string    { return "iam" }

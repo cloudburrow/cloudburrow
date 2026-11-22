@@ -106,7 +106,7 @@ func TestEventarcAdvancedDeliveryThroughTheBrowser(t *testing.T) {
 	// Edit on the pipeline's page.
 	p.navigate("/eventarc/pipelines/" + pipeline + q)
 	p.waitFor(`document.querySelector("#view").textContent.includes("` + uri + `")`)
-	p.pageAction("Edit", map[string]string{"maxAttempts": "4", "transformation": `message.setField("data.seen", true)`}, "")
+	p.pageAction("Edit", map[string]string{"maxAttempts": "4", "transform": "true", "transformation": `message.setField("data.seen", true)`}, "")
 	if got := eaDetailValue(t, "eventarc-pipelines", project, pipeline, "Maximum attempts"); got != "4" {
 		t.Errorf("the pipeline's maximum attempts after Edit = %q", got)
 	}

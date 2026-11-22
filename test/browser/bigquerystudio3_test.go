@@ -76,12 +76,17 @@ func TestBigQueryStudioLeftPaneJobHistoryOverviewAndDestination(t *testing.T) {
 	p.clickText(".bq-files .bq-node-name", saveName)
 	p.waitFor(`document.querySelector(".bq-tabs .tab.is-selected").textContent === ` + fmt.Sprintf("%q", saveName))
 
-	// Source control: not served, and says why.
+	// Source control: Dataform's repositories where Dataform is served
+	// (#2094), otherwise not served, and says why.
 	p.clickText(".bq-pane-tabs .tab", "Source control")
 	p.waitFor(`document.querySelector("#bq-pane .unavailable") !== null`)
 	var source string
 	p.eval(`document.querySelector("#bq-pane").textContent`, &source)
-	if !strings.Contains(source, "Not available locally") || !strings.Contains(source, "Dataform") {
+	if hasService(t, "dataform") {
+		if !strings.Contains(source, "Dataform repositories") {
+			t.Errorf("Source control says %q", source)
+		}
+	} else if !strings.Contains(source, "Not available locally") || !strings.Contains(source, "Dataform") {
 		t.Errorf("Source control says %q", source)
 	}
 

@@ -47,6 +47,10 @@ var serviceAgents = map[string]string{
 	// Parameter Manager Service Agent, which uses a parameter's customer-managed
 	// key (docs.cloud.google.com/secret-manager/parameter-manager/docs/cmek).
 	"parametermanager.googleapis.com": "gcp-sa-pm.iam.gserviceaccount.com",
+	"dataform.googleapis.com":         "gcp-sa-dataform.iam.gserviceaccount.com",
+	// App Hub Service Account, the primary agent of apphub.googleapis.com
+	// (docs.cloud.google.com/iam/docs/service-agents, read 2026-11-21).
+	"apphub.googleapis.com": "gcp-sa-apphub.iam.gserviceaccount.com",
 	// Kubernetes Engine Service Agent, the primary agent of
 	// container.googleapis.com.
 	"container.googleapis.com": "container-engine-robot.iam.gserviceaccount.com",
@@ -102,12 +106,17 @@ var serviceAgents = map[string]string{
 	"containerscanning.googleapis.com": "gcp-sa-containerscanning.iam.gserviceaccount.com",
 	// Cloud Observability Service Account (#2020).
 	"observability.googleapis.com": "gcp-sa-observability.iam.gserviceaccount.com",
+	// Cloud Trace Service Account, primary for cloudtrace.googleapis.com
+	// (#2118).
+	"cloudtrace.googleapis.com": "gcp-sa-cloud-trace.iam.gserviceaccount.com",
 }
 
 // noPrimaryAgent are the served services
 // https://cloud.google.com/iam/docs/service-agents gives no primary
 // service agent, so generateServiceIdentity names none for them.
 var noPrimaryAgent = map[string]string{
+	// The page lists no agent of the Telemetry API (#2118).
+	"telemetry.googleapis.com": "Telemetry API",
 	// The Inventory API's agent is the Cloud KMS organization service
 	// agent, granted roles/cloudkms.orgServiceAgent on an organization
 	// (view-key-usage), not a project's primary agent (#2053).
@@ -141,6 +150,10 @@ var noPrimaryAgent = map[string]string{
 	// (read 2026-11-20, #2030).
 	"cloudquotas.googleapis.com":      "Cloud Quotas",
 	"siteverification.googleapis.com": "Site Verification",
+	// Cloud Billing and its Budget API have no project-level primary
+	// service agent (#2109).
+	"cloudbilling.googleapis.com":   "Cloud Billing",
+	"billingbudgets.googleapis.com": "Cloud Billing Budget",
 }
 
 // ServiceAgent is the email of svc's primary service agent in project, or

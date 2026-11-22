@@ -14,12 +14,13 @@ import (
 )
 
 // TestCloudRunEventarcTriggersThroughTheBrowser (#1852, #1877): a service's
-// Triggers tab lists its Eventarc triggers. Add trigger offers Cloud
-// Pub/Sub's and Cloud Storage's event types, a topic (or one Eventarc
-// makes), a bucket, the region, the account and the service URL path,
-// ending in Save trigger; a Pub/Sub trigger with no topic is saved, and the
-// tab then lists it with its provider, event type, path and the topic
-// Eventarc made. Delete trigger removes it.
+// Triggers tab lists its Eventarc triggers. Add trigger is Google's
+// Eventarc pane (#2093): its event providers are every one the instance's
+// Eventarc lists, Cloud Pub/Sub's with a topic (or one Eventarc makes) and
+// Cloud Storage's with a bucket, then the region, the account and the
+// service URL path, ending in Save trigger; a Pub/Sub trigger with no
+// topic is saved, and the tab then lists it with its provider, event type,
+// path and the topic Eventarc made. Delete trigger removes it.
 func TestCloudRunEventarcTriggersThroughTheBrowser(t *testing.T) {
 	needService(t, "run")
 	needService(t, "pubsub")
@@ -42,22 +43,22 @@ func TestCloudRunEventarcTriggersThroughTheBrowser(t *testing.T) {
 	tab := "/run/" + id + "?project=" + project + "&tab=triggers"
 	p.navigate(tab)
 	p.clickText("#view .section-actions button", "Add trigger")
-	p.waitFor(`document.querySelector(".modal.is-open #f-eventType") !== null`)
+	p.waitFor(`document.querySelector(".modal.is-open #f-provider") !== null`)
 	var form struct {
-		Types, Labels      []string
+		Providers, Labels  []string
 		Submit, Topic, Pub string
 	}
 	p.eval(`(() => { const m = document.querySelector(".modal.is-open"); return {
-		Types: [...m.querySelectorAll("#f-eventType option")].map((o) => o.value),
+		Providers: [...m.querySelectorAll("#f-provider option")].map((o) => o.value),
 		Labels: [...m.querySelectorAll("label")].map((n) => n.textContent.trim()),
 		Topic: m.querySelector("#f-topic").selectedOptions[0].textContent,
-		Pub: m.querySelector("#f-eventType").selectedOptions[0].textContent,
+		Pub: m.querySelector("#f-eventType\\.pubsub\\.googleapis\\.com").selectedOptions[0].textContent,
 		Submit: m.querySelector('button[type="submit"]').textContent }; })()`, &form)
 	labels := strings.Join(form.Labels, "|")
-	if len(form.Types) != 5 || form.Types[0] != "google.cloud.pubsub.topic.v1.messagePublished" ||
-		form.Types[1] != "google.cloud.storage.object.v1.finalized" || form.Submit != "Save trigger" ||
-		!strings.Contains(form.Topic, "Eventarc makes one") || !strings.HasPrefix(form.Pub, "Cloud Pub/Sub: ") ||
-		!strings.Contains(labels, "Bucket") || !strings.Contains(labels, "Service URL path") {
+	if !strings.Contains(","+strings.Join(form.Providers, ",")+",", ",pubsub.googleapis.com,") ||
+		!strings.Contains(","+strings.Join(form.Providers, ",")+",", ",storage.googleapis.com,") || form.Submit != "Save trigger" ||
+		!strings.Contains(form.Topic, "Eventarc makes one") || !strings.HasPrefix(form.Pub, "google.cloud.pubsub.topic.v1.messagePublished") ||
+		!strings.Contains(labels, "Bucket") || !strings.Contains(labels, "Event provider") || !strings.Contains(labels, "Service URL path") {
 		t.Errorf("Add trigger reads %+v", form)
 	}
 	trigger := "tr-" + id[len(id)-6:]

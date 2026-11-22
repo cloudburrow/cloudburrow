@@ -519,7 +519,9 @@ func (p functionsProvider) triggersSection(ctx context.Context, fn *functionspb.
 		sec.Actions = p.triggerActions(ctx, fn)
 		if sec.Note == "" {
 			sec.Note = "Each event reaches the function as a CloudEvent (binary content mode) over a Pub/Sub push subscription Eventarc makes. " +
-				"Cloud Pub/Sub, Cloud Storage, Cloud Firestore and Cloud Audit Logs (Admin Activity) events are delivered locally."
+				"Add trigger offers every event provider this instance's Eventarc lists: Cloud Pub/Sub, Cloud Storage, Cloud Firestore " +
+				"(and Datastore mode), Cloud Audit Logs (Admin Activity) of each served service, and the direct events of the services " +
+				"that have them, with Custom and Third-party channels."
 		}
 	}
 	sec.Listing.Total = len(sec.Listing.Items)

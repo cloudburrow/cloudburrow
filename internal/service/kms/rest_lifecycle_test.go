@@ -62,7 +62,7 @@ func TestRESTLifecycle(t *testing.T) {
 		{"DeleteCryptoKey with versions", "DELETE", key, "", 400, "FAILED_PRECONDITION", "DeleteCryptoKeyVersion first"},
 		{"DeleteCryptoKeyVersion not destroyed", "DELETE", key + "/cryptoKeyVersions/1", "", 400, "FAILED_PRECONDITION", "DESTROYED"},
 		{"unknown body field", "PATCH", key + "?updateMask=labels", `{"labels":{},"bogus":1}`, 400, "INVALID_ARGUMENT", "CryptoKey"},
-		{"snake_case mask", "PATCH", key + "?updateMask=version_template.algorithm", `{}`, 400, "INVALID_ARGUMENT", "updateMask"},
+		{"mask in neither form", "PATCH", key + "?updateMask=Version-Template.algorithm", `{}`, 400, "INVALID_ARGUMENT", "updateMask"}, // snake_case paths are taken (#2108)
 		{"name conflict", "PATCH", key + "?updateMask=labels", `{"name":"projects/demo-project/locations/global/keyRings/r/cryptoKeys/other"}`, 400, "INVALID_ARGUMENT", "differs"},
 		{"destroy name conflict", "POST", key + "/cryptoKeyVersions/1:destroy", `{"name":"projects/demo-project/locations/global/keyRings/r/cryptoKeys/k/cryptoKeyVersions/9"}`, 400, "INVALID_ARGUMENT", "differs"},
 	} {

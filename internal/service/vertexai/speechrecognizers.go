@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
+	speechv1pb "cloud.google.com/go/speech/apiv1/speechpb"
 	"cloud.google.com/go/speech/apiv2/speechpb"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
@@ -67,6 +68,10 @@ type speechStore struct {
 	// (speechadaptation.go, #1930), kept beside file.
 	classes    map[string]*speechpb.CustomClass
 	phraseSets map[string]*speechpb.PhraseSet
+	// v1PhraseSets and v1Classes are v1 Adaptation's resources
+	// (speechv1adaptation.go, #2106), loaded when first used.
+	v1PhraseSets map[string]*speechv1pb.PhraseSet
+	v1Classes    map[string]*speechv1pb.CustomClass
 	// configs are each location's Config, by name; sealed the encrypted
 	// parts of the resources with a customer-managed key, by name; locked
 	// those loaded without their part, until it is opened (speechcmek.go,
