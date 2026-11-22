@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/cloudburrow/cloudburrow/internal/console"
 )
 
 // Private NAT and Route policies (#2140): Create Cloud NAT gateway with NAT
@@ -71,9 +73,20 @@ func TestConsolePrivateNATAndRoutePolicies2140(t *testing.T) {
 		t.Errorf("edited rules = %v", rl)
 	}
 
-	if _, err := screen.call("POST", project, "regions/us-central1/routers/pr/updateRoutePolicy", nil, map[string]any{"name": "imp",
-		"type": "ROUTE_POLICY_TYPE_IMPORT", "terms": []any{map[string]any{"priority": 10.0, "actions": []any{map[string]any{"expression": "drop()"}}}}}); err != nil {
+	rpath := []string{"us-central1", "pr"}
+	if acts := routers.DetailActions(ctx, project, rpath); len(acts) != 2 || acts[0].ID != "createRoutePolicy" {
+		t.Fatalf("router actions = %+v", acts)
+	}
+	if err := routers.ActAt(ctx, project, rpath, "createRoutePolicy", map[string]string{"policyName": "bad", "policyType": "ROUTE_POLICY_TYPE_IMPORT",
+		"terms": console.FormatGroup([]map[string]string{{"priority": "1", "actions": "accept("}})}); err == nil {
+		t.Error("a malformed CEL action was accepted")
+	}
+	if err := routers.ActAt(ctx, project, rpath, "createRoutePolicy", map[string]string{"policyName": "imp", "policyType": "ROUTE_POLICY_TYPE_IMPORT",
+		"terms": console.FormatGroup([]map[string]string{{"priority": "10", "match": "destination.inAnyRange(prefix('10.0.0.0/8'))", "actions": "med.set(5); accept()"}, {"priority": "20", "actions": "drop()"}})}); err != nil {
 		t.Fatal(err)
+	}
+	if acts := routers.DetailActions(ctx, project, rpath); len(acts) != 3 || acts[1].ID != "deleteRoutePolicy" || acts[1].Fields[0].Options[0] != "imp" {
+		t.Fatalf("router actions with a policy = %+v", acts)
 	}
 	rd, err := routers.Detail(ctx, project, []string{"us-central1", "pr"})
 	if err != nil {
@@ -88,5 +101,11 @@ func TestConsolePrivateNATAndRoutePolicies2140(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("Route policies tab = %+v", rd.Sections)
+	}
+	if err := routers.ActAt(ctx, project, rpath, "deleteRoutePolicy", map[string]string{"policyName": "imp"}); err != nil {
+		t.Fatal(err)
+	}
+	if names := routers.routePolicyNames(project, rpath); len(names) != 0 {
+		t.Errorf("after Delete route policy: %v", names)
 	}
 }

@@ -339,10 +339,13 @@ func (p computeRoutersProvider) DetailActions(ctx context.Context, project strin
 	}
 	a := routerDelete(path)
 	a.Leaves = true
-	return []console.Action{a}
+	return append(routePolicyActions(p.routePolicyNames(project, path)), a)
 }
 
 func (p computeRoutersProvider) ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error {
+	if len(path) == 2 && (action == "createRoutePolicy" || action == "deleteRoutePolicy") {
+		return p.actRoutePolicy(project, path, action, values)
+	}
 	if len(path) != 2 || action != "delete" {
 		return fmt.Errorf("%s is not available here", action)
 	}

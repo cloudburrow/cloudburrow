@@ -83,7 +83,7 @@ func natTypeFields(c natChoices, cur map[string]any, fields []console.Field) []c
 			OptionLabels: map[string]string{"HYBRID": "Hybrid connectivity (Cloud VPN, Cloud Interconnect)", "HUB": "Network Connectivity Center hub"},
 			VisibleWhen:  when(nil)},
 		console.Field{Name: "hub", Label: "Hub", Type: "text", Required: true, Section: rules, Default: hub, VisibleWhen: when(map[string]string{"nextHop": "HUB"}),
-			Pattern: `^projects/[a-z0-9-]+/locations/global/hubs/[a-z]([-a-z0-9]*[a-z0-9])?$`,
+			Pattern: `^projects/[a-z0-9\-]+/locations/global/hubs/[a-z]([a-z0-9\-]*[a-z0-9])?$`,
 			Help:    "projects/PROJECT_ID/locations/global/hubs/HUB. Network Connectivity Center is not served, so the hub is recorded as given."},
 		subField)
 }
@@ -170,4 +170,81 @@ func (p computeRoutersProvider) routePoliciesSection(project string, path []stri
 	}
 	l.Total = len(l.Items)
 	return console.Section{ID: "routepolicies", Label: "Route policies", Listing: l}
+}
+
+// routePolicyActions are the router page's Create route policy and Delete
+// route policy, as Google's Route policies tab offers them; names are the
+// router's policies.
+func routePolicyActions(names []string) []console.Action {
+	create := console.Action{ID: "createRoutePolicy", Label: "Create route policy", Title: "Create route policy", Submit: "Create",
+		Fields: []console.Field{
+			{Name: "policyName", Label: "Name", Type: "text", Required: true, Pattern: computeNamePattern, Help: computeNameHelp},
+			{Name: "policyType", Label: "Policy type", Type: "radio", Default: "ROUTE_POLICY_TYPE_IMPORT",
+				Options:      []string{"ROUTE_POLICY_TYPE_IMPORT", "ROUTE_POLICY_TYPE_EXPORT"},
+				OptionLabels: map[string]string{"ROUTE_POLICY_TYPE_IMPORT": "Import", "ROUTE_POLICY_TYPE_EXPORT": "Export"}},
+			{Name: "policyDescription", Label: "Description", Type: "text"},
+			{Name: "terms", Label: "Terms", Type: console.GroupFieldType, AddLabel: "Add term", Group: []console.Field{
+				{Name: "priority", Label: "Priority", Type: "text", Required: true, Pattern: `^[0-9]+$`},
+				{Name: "match", Label: "Match (CEL)", Type: "text"},
+				{Name: "actions", Label: "Actions (CEL, separated by ;)", Type: "text", Required: true}}},
+		}}
+	out := []console.Action{create}
+	if len(names) > 0 {
+		out = append(out, console.Action{ID: "deleteRoutePolicy", Label: "Delete route policy", Title: "Delete route policy", Submit: "Delete",
+			Destructive: true, Fields: []console.Field{{Name: "policyName", Label: "Route policy", Type: "select", Required: true, Options: names}}})
+	}
+	return out
+}
+
+// actRoutePolicy runs Create route policy or Delete route policy on the
+// router at path.
+func (p computeRoutersProvider) actRoutePolicy(project string, path []string, action string, values map[string]string) error {
+	base := "regions/" + path[0] + "/routers/" + path[1] + "/"
+	name := strings.TrimSpace(values["policyName"])
+	if action == "deleteRoutePolicy" {
+		_, err := p.call("POST", project, base+"deleteRoutePolicy", map[string][]string{"policy": {name}}, nil)
+		return err
+	}
+	rows, err := console.ParseGroup(values["terms"])
+	if err != nil {
+		return err
+	}
+	var terms []any
+	for _, r := range rows {
+		pr, err := strconv.Atoi(strings.TrimSpace(r["priority"]))
+		if err != nil {
+			return fmt.Errorf("Priority: enter a number")
+		}
+		t := map[string]any{"priority": float64(pr)}
+		if m := strings.TrimSpace(r["match"]); m != "" {
+			t["match"] = map[string]any{"expression": m}
+		}
+		var acts []any
+		for _, a := range strings.Split(r["actions"], ";") {
+			if a = strings.TrimSpace(a); a != "" {
+				acts = append(acts, map[string]any{"expression": a})
+			}
+		}
+		t["actions"] = acts
+		terms = append(terms, t)
+	}
+	body := map[string]any{"name": name, "type": vpcOr(values["policyType"], "ROUTE_POLICY_TYPE_IMPORT"), "terms": terms}
+	if d := strings.TrimSpace(values["policyDescription"]); d != "" {
+		body["description"] = d
+	}
+	_, err = p.call("POST", project, base+"updateRoutePolicy", nil, body)
+	return err
+}
+
+// routePolicyNames are the router's route policies' names.
+func (p computeRoutersProvider) routePolicyNames(project string, path []string) []string {
+	m, err := p.call("GET", project, "regions/"+path[0]+"/routers/"+path[1]+"/listRoutePolicies", nil, nil)
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, rp := range vmMaps(m, "result") {
+		names = append(names, vpcStr(rp, "name"))
+	}
+	return names
 }
