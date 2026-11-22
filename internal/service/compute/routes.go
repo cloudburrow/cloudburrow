@@ -13,7 +13,7 @@ import (
 // cannot; a static route has one next hop: the default internet gateway or
 // an internal IP address in one of the network's subnets, or an instance
 // of the network (#2140); IPv6 routes take an IPv6 next hop or a
-// dual-stack instance (#2140 A1). Next hops on VPN tunnels and load
+// dual-stack instance (#2140). Next hops on VPN tunnels and load
 // balancers are not served (501). A static route's destination may not
 // match or fit within a subnet's range.
 

@@ -245,7 +245,7 @@ func TestConsoleVPCParity2140(t *testing.T) {
 		}
 	}
 	// The external ephemeral address: its own 192.0.2.0/24 IP, promoted
-	// to static IN_USE by hop (#2140, A1).
+	// to static IN_USE by hop (#2140).
 	el2, _ := addrs.List(ctx, project)
 	var ext *console.Resource
 	for i, it := range el2.Items {

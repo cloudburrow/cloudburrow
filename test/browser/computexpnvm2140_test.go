@@ -54,7 +54,7 @@ func TestCreateInstanceOnSharedSubnetThroughTheBrowser2140(t *testing.T) {
 		}
 		time.Sleep(2 * time.Second)
 	}
-	vmRowMenu(p, vm, "Delete", nil, byButton)
+	vmRowMenu(p, vm, "Delete", map[string]string{"noGracefulShutdown": "false"}, "")
 }
 
 // sharedVPCProjects registers a host and a service project in the

@@ -24,7 +24,7 @@ import (
 // same name; RECREATE with a surge refused; a regional group's fixed
 // maxSurge below its number of zones refused, its defaults the number of
 // zones.
-// covers-pending (EPF: make this "covers:" once run): compute.instanceGroupManagers.patch, compute.instanceGroupManagers.applyUpdatesToInstances, compute.instanceGroupManagers.listManagedInstances, compute.regionInstanceGroupManagers.patch
+// covers: compute.instanceGroupManagers.patch, compute.instanceGroupManagers.applyUpdatesToInstances, compute.instanceGroupManagers.listManagedInstances, compute.regionInstanceGroupManagers.patch
 func TestComputeRollingUpdatesThroughTheGoClient2139(t *testing.T) {
 	h := New(t)
 	opts := computeOpts(t, h) // skips without CLOUDBURROW_TEST_COMPUTE

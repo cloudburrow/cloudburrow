@@ -312,7 +312,9 @@ func TestRunVPCEgressThroughTheGoClient2140(t *testing.T) {
 // a maximum above 10 and a field outside the three refused 400; then
 // deleting the connector's network with the compute client refused with
 // resourceInUseByAnotherResource until the connector is gone.
-// covers-pending (EPF: make this "covers:" once run): vpcaccess.projects.locations.connectors.patch, compute.networks.delete
+// connectors.patch is not in the v1 proto, so the coverage tool cannot
+// name it; docs/compatibility.md cites this test for it.
+// covers: compute.networks.delete
 func TestServerlessVPCAccessUpdateConnectorThroughTheGoClient2140(t *testing.T) {
 	h := New(t)
 	c := vpcAccessClient(t, h)
@@ -400,7 +402,14 @@ func TestServerlessVPCAccessUpdateConnectorThroughTheGoClient2140(t *testing.T) 
 
 	// The network is kept while the connector uses it.
 	_, err = nets.Delete(ctx, &computepb.DeleteNetworkRequest{Project: p, Network: netName})
-	if err == nil || !strings.Contains(err.Error(), "resourceInUseByAnotherResource") || !strings.Contains(err.Error(), id) {
+	var inUse *googleapi.Error
+	reason := ""
+	if errors.As(err, &inUse) {
+		for _, e := range inUse.Errors {
+			reason = e.Reason
+		}
+	}
+	if err == nil || computeCode(err) != http.StatusBadRequest || reason != "resourceInUseByAnotherResource" || !strings.Contains(err.Error(), id) {
 		t.Errorf("deleting the connector's network: %v, want resourceInUseByAnotherResource naming the connector", err)
 	}
 	dop, err := c.DeleteConnector(ctx, &vpcaccesspb.DeleteConnectorRequest{Name: name})

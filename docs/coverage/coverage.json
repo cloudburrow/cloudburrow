@@ -14474,9 +14474,9 @@
     "Key": "compute",
     "Title": "Compute Engine API (v1): VPC networking",
     "counts": {
-      "Implemented": 68,
+      "Implemented": 64,
       "Unimplemented": 111,
-      "Verified": 160
+      "Verified": 164
     },
     "rows": [
       {
@@ -15010,8 +15010,10 @@
       },
       {
         "method": "compute.instanceGroupManagers.applyUpdatesToInstances",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computeupdates2139_test.go:28 TestComputeRollingUpdatesThroughTheGoClient2139"
+        ]
       },
       {
         "method": "compute.instanceGroupManagers.createInstances",
@@ -15061,8 +15063,10 @@
       },
       {
         "method": "compute.instanceGroupManagers.listManagedInstances",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computeupdates2139_test.go:28 TestComputeRollingUpdatesThroughTheGoClient2139"
+        ]
       },
       {
         "method": "compute.instanceGroupManagers.listPerInstanceConfigs",
@@ -15071,8 +15075,10 @@
       },
       {
         "method": "compute.instanceGroupManagers.patch",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computeupdates2139_test.go:28 TestComputeRollingUpdatesThroughTheGoClient2139"
+        ]
       },
       {
         "method": "compute.instanceGroupManagers.patchPerInstanceConfigs",
@@ -15573,7 +15579,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/compute_test.go:384 TestTerraformComputeNetworkAndSubnetwork",
-          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient",
+          "test/compat/vpcaccess2140_test.go:318 TestServerlessVPCAccessUpdateConnectorThroughTheGoClient2140"
         ]
       },
       {
@@ -15957,8 +15964,10 @@
       },
       {
         "method": "compute.regionInstanceGroupManagers.patch",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computeupdates2139_test.go:28 TestComputeRollingUpdatesThroughTheGoClient2139"
+        ]
       },
       {
         "method": "compute.regionInstanceGroupManagers.patchPerInstanceConfigs",
