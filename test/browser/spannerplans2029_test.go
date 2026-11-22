@@ -25,7 +25,8 @@ import (
 // Rows returned, Rows scanned) and Prominent operators; Expanded and
 // Compact; and Download JSON. Explain (PLAN mode) of a query through an
 // index draws its Index scan, and selecting a card shows its Iterator
-// information, with the Seek Condition.
+// information, with the Seek Condition. An INTERSECT and a TABLESAMPLE
+// query draw their operators too.
 func TestSpannerQueryPlanView(t *testing.T) {
 	needService(t, "spanner")
 	project := uniqueProject(t)
@@ -118,4 +119,18 @@ func TestSpannerQueryPlanView(t *testing.T) {
 	p.eval(`(() => { [...document.querySelectorAll(".spanner-plan-card")].find((c) => c.textContent.includes("Filter scan")).click(); return true })()`, nil)
 	p.waitFor(`(document.querySelector("#spanner-iterator-info") || {}).textContent?.includes("Seek Condition")`)
 	p.waitFor(`document.querySelector("#spanner-iterator-info").textContent.includes("$LastName = 'Smith'")`)
+
+	// A set operation and a sample, which the first planner refused:
+	// INTERSECT's Union all of Union inputs under a Hash aggregate and a
+	// Filter, and TABLESAMPLE's Random id assign under a Sort limit.
+	setSQL("SELECT FirstName FROM Singers INTERSECT DISTINCT SELECT FirstName FROM Singers WHERE SingerId > 1")
+	p.run(chromedp.Click(chromedp.CSS(`#spanner-explain`)))
+	p.waitFor(`(() => { const n = [...document.querySelectorAll(".spanner-plan-card .spanner-plan-name")].map((e) => e.textContent);
+		return ["Filter", "Hash aggregate", "Union all", "Union input"].every((w) => n.includes(w)) })()`)
+	setSQL("SELECT FirstName FROM Singers TABLESAMPLE RESERVOIR (2 ROWS)")
+	p.run(chromedp.Click(chromedp.CSS(`#spanner-run`)))
+	p.run(chromedp.Click(chromedp.CSS(`#spanner-tab-explanation`)))
+	p.waitFor(`(() => { const c = [...document.querySelectorAll(".spanner-plan-card")];
+		const s = c.find((e) => e.querySelector(".spanner-plan-name").textContent === "Sort limit");
+		return s && s.textContent.includes("Rows returned: 2") && c.some((e) => e.querySelector(".spanner-plan-name").textContent === "Random id assign") })()`)
 }

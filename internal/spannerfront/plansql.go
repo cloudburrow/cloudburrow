@@ -239,7 +239,9 @@ type sqlQuery struct {
 	order  []sqlOrder
 	limit  *sqlExpr
 	offset *sqlExpr
-	lo, hi int
+	// forUpdate is a trailing FOR UPDATE, outside [lo, hi)
+	forUpdate bool
+	lo, hi    int
 }
 
 type sqlCTE struct {
@@ -300,7 +302,17 @@ type sqlFrom struct {
 	left, right *sqlFrom
 	on          *sqlExpr
 	using       []string
-	lo, hi      int
+	// sample is a table's TABLESAMPLE clause, which [lo, hi) leaves out
+	// and [lo, sampleHi) takes in
+	sample   *sqlSample
+	sampleHi int
+	lo, hi   int
+}
+
+// sqlSample is a TABLESAMPLE clause.
+type sqlSample struct {
+	method string // BERNOULLI or RESERVOIR
+	size   *sqlExpr
 }
 
 // --- The parser -----------------------------------------------------------
@@ -327,6 +339,9 @@ type sqlDML struct {
 	cols  []string   // INSERT's columns
 	rows  int        // INSERT ... VALUES's rows
 	query *sqlQuery  // INSERT ... SELECT's query
+	// conflict is an INSERT's ON CONFLICT action: DO NOTHING or DO UPDATE,
+	// whose SET values are set and condition where
+	conflict string
 	// returning is THEN RETURN's (RETURNING's) list.
 	returning []sqlItem
 	lo, hi    int
@@ -403,7 +418,7 @@ func (ps *sqlParser) dml() (*sqlDML, error) {
 		if err := ps.itemHints(f); err != nil {
 			return err
 		}
-		if d.kind != "INSERT" || ps.pg {
+		if d.kind != "INSERT" || ps.pg || ps.isKw("AS") {
 			if ps.acceptKw("AS") {
 				a, ok := ps.ident()
 				if !ok {
@@ -522,8 +537,15 @@ func (ps *sqlParser) dml() (*sqlDML, error) {
 			}
 			d.query = q
 		}
-		if ps.pg && ps.acceptKw("ON", "CONFLICT") {
-			return nil, unsupportedSQL{"INSERT ... ON CONFLICT"}
+		if ps.acceptKw("ON", "CONFLICT") {
+			if err := ps.onConflict(d); err != nil {
+				return nil, err
+			}
+		}
+		if ps.acceptKw("ASSERT_ROWS_MODIFIED") {
+			if _, err := ps.expr(); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if ps.acceptKw("THEN", "RETURN") || ps.acceptKw("RETURNING") {
@@ -554,6 +576,68 @@ func (ps *sqlParser) dml() (*sqlDML, error) {
 	}
 	d.hi = ps.p
 	return d, nil
+}
+
+// onConflict reads an INSERT's ON CONFLICT clause after its keywords:
+// [(columns) | ON UNIQUE CONSTRAINT name | ON CONSTRAINT name] [WHERE ...]
+// DO NOTHING | DO UPDATE SET ... [WHERE ...] (the DML syntax pages of
+// both dialects).
+func (ps *sqlParser) onConflict(d *sqlDML) error {
+	d.conflict = "DO NOTHING"
+	switch {
+	case ps.isP("("):
+		if err := ps.skipBalanced("(", ")"); err != nil {
+			return err
+		}
+		if ps.pg && ps.acceptKw("WHERE") {
+			if _, err := ps.expr(); err != nil {
+				return err
+			}
+		}
+	case ps.acceptKw("ON", "UNIQUE", "CONSTRAINT"), ps.acceptKw("ON", "CONSTRAINT"):
+		if _, ok := ps.ident(); !ok {
+			return ps.errAt("a constraint name")
+		}
+	}
+	if err := ps.expectKw("DO"); err != nil {
+		return err
+	}
+	if ps.acceptKw("NOTHING") {
+		return nil
+	}
+	if err := ps.expectKw("UPDATE"); err != nil {
+		return err
+	}
+	if err := ps.expectKw("SET"); err != nil {
+		return err
+	}
+	d.conflict = "DO UPDATE"
+	for {
+		if _, err := ps.postfix(); err != nil {
+			return err
+		}
+		if err := ps.expectP("="); err != nil {
+			return err
+		}
+		if !ps.acceptKw("DEFAULT") {
+			e, err := ps.expr()
+			if err != nil {
+				return err
+			}
+			d.set = append(d.set, e)
+		}
+		if !ps.acceptP(",") {
+			break
+		}
+	}
+	if ps.acceptKw("WHERE") {
+		e, err := ps.expr()
+		if err != nil {
+			return err
+		}
+		d.where = e
+	}
+	return nil
 }
 
 func (ps *sqlParser) peek() token { return ps.toks[ps.p] }
@@ -641,9 +725,18 @@ var reservedSQL = map[string]bool{
 	"SET": true, "RETURNING": true, "VALUES": true, "DEFAULT": true,
 }
 
+// reservedGoogleSQL are GoogleSQL's reserved join keywords, which are
+// names in PostgreSQL.
+var reservedGoogleSQL = map[string]bool{"HASH": true, "LOOKUP": true, "NATURAL": true}
+
+func (ps *sqlParser) reserved(word string) bool {
+	w := strings.ToUpper(word)
+	return reservedSQL[w] || !ps.pg && reservedGoogleSQL[w]
+}
+
 func (ps *sqlParser) isReserved() bool {
 	t := ps.peek()
-	return t.kind == tkIdent && reservedSQL[strings.ToUpper(t.text)]
+	return t.kind == tkIdent && ps.reserved(t.text)
 }
 
 func (ps *sqlParser) ident() (string, bool) {
@@ -652,7 +745,7 @@ func (ps *sqlParser) ident() (string, bool) {
 	case t.kind == tkQIdent:
 		ps.p++
 		return t.text, true
-	case t.kind == tkIdent && !reservedSQL[strings.ToUpper(t.text)]:
+	case t.kind == tkIdent && !ps.reserved(t.text):
 		ps.p++
 		if ps.pg {
 			return strings.ToLower(t.text), true
@@ -746,43 +839,60 @@ func (ps *sqlParser) query() (*sqlQuery, error) {
 		}
 		break
 	}
-	if ps.isKw("FOR") {
-		return nil, unsupportedSQL{"FOR UPDATE"}
-	}
 	q.hi = ps.p
+	// FOR UPDATE locks the rows it reads (in serializable isolation); it
+	// changes no operator of the plan, and the counts read the query without
+	// it, as a subquery cannot take it
+	if ps.acceptKw("FOR", "UPDATE") {
+		q.forUpdate = true
+	}
 	return q, nil
 }
 
+// setExpr parses set operations, left to right, INTERSECT binding tighter
+// than UNION and EXCEPT as PostgreSQL's grammar has it (GoogleSQL needs
+// parentheses to mix set operators, so the order is the same there).
 func (ps *sqlParser) setExpr() (*sqlSet, error) {
-	left, err := ps.setPrimary()
+	left, err := ps.setTerm()
 	if err != nil {
 		return nil, err
 	}
-	for {
-		var op string
-		switch {
-		case ps.isKw("UNION"):
-			op = "UNION"
-		case ps.isKw("INTERSECT"):
-			op = "INTERSECT"
-		case ps.isKw("EXCEPT"):
-			op = "EXCEPT"
-		default:
-			return left, nil
-		}
-		ps.p++
-		all := false
-		if ps.acceptKw("ALL") {
-			all = true
-		} else {
-			ps.acceptKw("DISTINCT")
-		}
-		right, err := ps.setPrimary()
+	for ps.isKw("UNION") || ps.isKw("EXCEPT") {
+		op := strings.ToUpper(ps.next().text)
+		all := ps.setQuantifier()
+		right, err := ps.setTerm()
 		if err != nil {
 			return nil, err
 		}
 		left = &sqlSet{op: op, all: all, left: left, right: right, lo: left.lo, hi: ps.p}
 	}
+	return left, nil
+}
+
+func (ps *sqlParser) setTerm() (*sqlSet, error) {
+	left, err := ps.setPrimary()
+	if err != nil {
+		return nil, err
+	}
+	for ps.isKw("INTERSECT") {
+		ps.p++
+		all := ps.setQuantifier()
+		right, err := ps.setPrimary()
+		if err != nil {
+			return nil, err
+		}
+		left = &sqlSet{op: "INTERSECT", all: all, left: left, right: right, lo: left.lo, hi: ps.p}
+	}
+	return left, nil
+}
+
+// setQuantifier reads ALL or DISTINCT; DISTINCT is PostgreSQL's default.
+func (ps *sqlParser) setQuantifier() bool {
+	if ps.acceptKw("ALL") {
+		return true
+	}
+	ps.acceptKw("DISTINCT")
+	return false
 }
 
 func (ps *sqlParser) setPrimary() (*sqlSet, error) {
@@ -977,22 +1087,48 @@ func (ps *sqlParser) fromList() (*sqlFrom, error) {
 			j.jtype = "COMMA"
 		case ps.acceptKw("CROSS", "JOIN"):
 			j.jtype = "CROSS"
-		case ps.acceptKw("JOIN"), ps.acceptKw("INNER", "JOIN"):
-			j.jtype = "INNER"
-		case ps.acceptKw("LEFT", "OUTER", "JOIN"), ps.acceptKw("LEFT", "JOIN"):
-			j.jtype = "LEFT"
-		case ps.acceptKw("RIGHT", "OUTER", "JOIN"), ps.acceptKw("RIGHT", "JOIN"):
-			j.jtype = "RIGHT"
-		case ps.acceptKw("FULL", "OUTER", "JOIN"), ps.acceptKw("FULL", "JOIN"):
-			j.jtype = "FULL"
-		case ps.isKw("HASH") || ps.isKw("LOOKUP") || ps.isKw("NATURAL"):
+		case ps.isKw("NATURAL") || ps.isKw("LOOKUP"):
+			// neither is in Spanner's grammar, and the engine refuses both
+			// before a plan is asked for
 			return nil, unsupportedSQL{strings.ToUpper(ps.peek().text) + " joins"}
 		default:
-			return left, nil
+			// [join_type] [join_method] JOIN (GoogleSQL's join_method is HASH)
+			save := ps.p
+			switch {
+			case ps.acceptKw("INNER"):
+				j.jtype = "INNER"
+			case ps.acceptKw("LEFT"):
+				j.jtype = "LEFT"
+			case ps.acceptKw("RIGHT"):
+				j.jtype = "RIGHT"
+			case ps.acceptKw("FULL"):
+				j.jtype = "FULL"
+			default:
+				j.jtype = "INNER"
+			}
+			if j.jtype != "INNER" {
+				ps.acceptKw("OUTER")
+			}
+			hash := !ps.pg && ps.acceptKw("HASH")
+			if !ps.acceptKw("JOIN") {
+				ps.p = save
+				return left, nil
+			}
+			if hash {
+				j.hints = map[string]string{"JOIN_METHOD": "HASH_JOIN"}
+			}
 		}
 		if j.jtype != "COMMA" {
+			h := j.hints
 			if err := ps.itemHints(j); err != nil {
 				return nil, err
+			}
+			if h != nil {
+				if j.hints == nil {
+					j.hints = h
+				} else if j.hints["JOIN_METHOD"] == "" {
+					j.hints["JOIN_METHOD"] = h["JOIN_METHOD"]
+				}
 			}
 		}
 		right, err := ps.fromItem()
@@ -1105,11 +1241,53 @@ func (ps *sqlParser) fromItem() (*sqlFrom, error) {
 			ps.ident()
 		}
 	}
-	if ps.isKw("TABLESAMPLE") {
-		return nil, unsupportedSQL{"TABLESAMPLE"}
-	}
 	f.hi = ps.p
+	f.sampleHi = ps.p
+	if ps.acceptKw("TABLESAMPLE") {
+		if f.kind != fromTable {
+			return nil, unsupportedSQL{"TABLESAMPLE on a subquery"}
+		}
+		s, err := ps.tableSample()
+		if err != nil {
+			return nil, err
+		}
+		f.sample = s
+		f.sampleHi = ps.p
+	}
 	return f, nil
+}
+
+// tableSample reads a TABLESAMPLE clause after its keyword: GoogleSQL's
+// {BERNOULLI | RESERVOIR} (size {PERCENT | ROWS}), PostgreSQL's
+// {BERNOULLI | SPANNER.RESERVOIR} (size).
+func (ps *sqlParser) tableSample() (*sqlSample, error) {
+	s := &sqlSample{}
+	switch {
+	case ps.acceptKw("BERNOULLI"):
+		s.method = "BERNOULLI"
+	case ps.acceptKw("RESERVOIR") && !ps.pg:
+		s.method = "RESERVOIR"
+	case ps.pg && ps.isKw("SPANNER") && ps.peekN(1).text == "." && ps.isKwN(2, "RESERVOIR"):
+		ps.p += 3
+		s.method = "RESERVOIR"
+	default:
+		return nil, ps.errAt("BERNOULLI or RESERVOIR")
+	}
+	if err := ps.expectP("("); err != nil {
+		return nil, err
+	}
+	e, err := ps.expr()
+	if err != nil {
+		return nil, err
+	}
+	s.size = e
+	if !ps.pg && !ps.acceptKw("PERCENT") && !ps.acceptKw("ROWS") {
+		return nil, ps.errAt("PERCENT or ROWS")
+	}
+	if err := ps.expectP(")"); err != nil {
+		return nil, err
+	}
+	return s, nil
 }
 
 // looksLikeQuery says whether the parenthesis at p opens a query, rather

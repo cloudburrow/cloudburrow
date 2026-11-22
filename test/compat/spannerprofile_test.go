@@ -5,14 +5,11 @@ package compat
 import (
 	"errors"
 	"io"
-	"net/http"
 	"os"
-	"strings"
 	"testing"
 
 	sp "cloud.google.com/go/spanner/apiv1"
 	"cloud.google.com/go/spanner/apiv1/spannerpb"
-	"google.golang.org/api/googleapi"
 	"google.golang.org/api/option"
 )
 
@@ -144,11 +141,18 @@ func TestSpannerQueryModes(t *testing.T) {
 		t.Fatalf("REST ExecuteSql PROFILE = %v, %v; want 3 rows", rs, err)
 	}
 	checkPlan(t, "REST ExecuteSql PROFILE", spannerpb.ExecuteSqlRequest_PROFILE, rs.GetStats())
-	// a query the planner does not know is refused by name
-	_, err = rc.ExecuteSql(ctx, &spannerpb.ExecuteSqlRequest{Session: s, Sql: "SELECT Id FROM Items INTERSECT DISTINCT SELECT Id FROM Items", QueryMode: spannerpb.ExecuteSqlRequest_PLAN})
-	var ge *googleapi.Error
-	if !errors.As(err, &ge) || ge.Code != http.StatusNotImplemented || !strings.Contains(err.Error(), "INTERSECT") {
-		t.Errorf("REST ExecuteSql PLAN of an INTERSECT = %v, want 501 naming it", err)
+	// a set operation is planned over REST too (#2029)
+	rs, err = rc.ExecuteSql(ctx, &spannerpb.ExecuteSqlRequest{Session: s, Sql: "SELECT Id FROM Items INTERSECT DISTINCT SELECT Id FROM Items", QueryMode: spannerpb.ExecuteSqlRequest_PLAN})
+	if err != nil {
+		t.Errorf("REST ExecuteSql PLAN of an INTERSECT: %v", err)
+	} else {
+		union := false
+		for _, n := range rs.GetStats().GetQueryPlan().GetPlanNodes() {
+			union = union || n.GetDisplayName() == "Union All"
+		}
+		if !union {
+			t.Errorf("REST ExecuteSql PLAN of an INTERSECT: no Union All in %v", rs.GetStats().GetQueryPlan())
+		}
 	}
 	rs, err = rc.ExecuteSql(ctx, &spannerpb.ExecuteSqlRequest{Session: s, Sql: query, QueryMode: spannerpb.ExecuteSqlRequest_WITH_STATS})
 	if err != nil {

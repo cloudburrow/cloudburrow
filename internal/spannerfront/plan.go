@@ -157,8 +157,15 @@ type planItem struct {
 	alias string // what columns are qualified with
 	table *planTable
 	from  *sqlFrom
-	cols  []string // the columns it offers, for a subquery or UNNEST
+	cols  []string // the columns it offers, for a subquery, a view or UNNEST
 	scope *planScope
+	view  *planView
+}
+
+// planView is a view's definition, parsed from its own text.
+type planView struct {
+	ps *sqlParser
+	q  *sqlQuery
 }
 
 type planScope struct {
@@ -188,7 +195,13 @@ type planBuilder struct {
 	// dmlTarget is the table a DML statement changes: its scan reads its
 	// key, which the mutations name.
 	dmlTarget *sqlFrom
-	next      int
+	// quant are a graph query's quantified edge patterns, by the
+	// lower-case alias of the FROM item they became (plangraph.go)
+	quant map[string]*graphQuant
+	// topSel is the top-level query's SELECT, when the query returns all
+	// its rows (no LIMIT or OFFSET)
+	topSel *sqlSelect
+	next   int
 }
 
 type colRef struct {
@@ -257,8 +270,23 @@ func (f *frag) outSQL() string {
 
 func (b *planBuilder) text(e *sqlExpr) string { return b.ps.exprText(e) }
 
+// rowsReturned, as an operator's rows, is the rows the query returned.
+const rowsReturned = "@returned"
+
+func (b *planBuilder) aggregates(sel *sqlSelect) bool {
+	for _, it := range sel.list {
+		if hasAggregate(it.e) {
+			return true
+		}
+	}
+	return false
+}
+
 // buildPlan plans the parsed top-level query.
 func (b *planBuilder) buildPlan(q *sqlQuery) (*planOp, error) {
+	if q.body.sel != nil && q.limit == nil && q.offset == nil {
+		b.topSel = q.body.sel
+	}
 	for i := range q.with {
 		b.ctes[strings.ToLower(q.with[i].name)] = &q.with[i]
 	}
@@ -504,7 +532,7 @@ func (b *planBuilder) planSet(s *sqlSet, outer *planScope, cc *countCtx) (*frag,
 		return f, nil
 	}
 	if s.op != "UNION" {
-		return nil, unsupportedSQL{s.op + " set operations"}
+		return b.planIntersectExcept(s, outer, cc)
 	}
 	var inputs []*planOp
 	var flatten func(x *sqlSet) error
@@ -554,6 +582,82 @@ func (b *planBuilder) planSet(s *sqlSet, outer *planScope, cc *countCtx) (*frag,
 	return &frag{op: u}, nil
 }
 
+// planIntersectExcept plans INTERSECT and EXCEPT. Google's operator pages
+// give neither an operator of its own, so the plan is made of the ones
+// they document: the inputs' Union All, each Union Input tagging its rows
+// with its side ($set_input); a Hash Aggregate counting, for each distinct
+// row, the rows of each side; a Filter keeping the rows the operation
+// keeps; and, for ALL, a Cross Apply over an Array Unnest that returns
+// each kept row as many times as the operation keeps it (INTERSECT ALL:
+// MIN(m, n), EXCEPT ALL: MAX(m - n, 0), the query syntax pages).
+func (b *planBuilder) planIntersectExcept(s *sqlSet, outer *planScope, cc *countCtx) (*frag, error) {
+	var inputs []planLink
+	var sum []string
+	for i, side := range []*sqlSet{s.left, s.right} {
+		f, err := b.planSet(side, outer, cc)
+		if err != nil {
+			return nil, err
+		}
+		in := op("Union Input", nil, rel(b.gather(f), ""), planLink{sc: &planScalar{name: "Constant", desc: fmt.Sprint(i)}, variable: "set_input"})
+		in.rows = cc.count(b.setRows(side))
+		inputs = append(inputs, rel(in, ""))
+		sum = append(sum, "("+in.rows+")")
+	}
+	u := op("Union All", nil, inputs...)
+	u.rows = "SELECT " + strings.Join(sum, " + ")
+	var keys []planLink
+	for _, c := range b.setCols(s) {
+		keys = append(keys, planLink{sc: &planScalar{name: "Reference", desc: "$" + c}, typ: "Key"})
+	}
+	aggs := []planLink{
+		{sc: &planScalar{name: "Aggregate", desc: "COUNTIF($set_input = 0)"}, typ: "Agg", variable: "left_count"},
+		{sc: &planScalar{name: "Aggregate", desc: "COUNTIF($set_input = 1)"}, typ: "Agg", variable: "right_count"},
+	}
+	agg := op("Aggregate", map[string]string{"iterator_type": "Hash", "call_type": "Global"}, append(append([]planLink{rel(u, "Input")}, keys...), aggs...)...)
+	l, r := b.ps.text(s.left.lo, s.left.hi), b.ps.text(s.right.lo, s.right.hi)
+	agg.rows = cc.count("SELECT 1 FROM ((" + l + ") UNION DISTINCT (" + r + ")) AS cb_s")
+	cond := "($left_count > 0) AND ($right_count > 0)"
+	switch {
+	case s.op == "EXCEPT" && s.all:
+		cond = "($left_count > $right_count)"
+	case s.op == "EXCEPT":
+		cond = "($left_count > 0) AND ($right_count = 0)"
+	}
+	fl := op("Filter", nil, rel(agg, ""), planLink{sc: &planScalar{name: "Function", desc: cond}, typ: "Condition"})
+	all := b.setRows(s)
+	if !s.all {
+		fl.rows = cc.count(all)
+		return &frag{op: fl}, nil
+	}
+	// the distinct rows the operation keeps
+	st := b.ps.text(s.lo, s.hi)
+	fl.rows = cc.count("SELECT 1 FROM ((" + st + ") INTERSECT DISTINCT (" + st + ")) AS cb_s")
+	times := "LEAST($left_count, $right_count)"
+	if s.op == "EXCEPT" {
+		times = "$left_count - $right_count"
+	}
+	un := op("Array Unnest", nil, planLink{sc: &planScalar{name: "Function", desc: "GENERATE_ARRAY(1, " + times + ")"}})
+	un.rows, un.execs = cc.count(all), fl.rows
+	ca := op("Cross Apply", nil, rel(fl, "Input"), rel(un, "Map"))
+	ca.rows = cc.count(all)
+	return &frag{op: ca}, nil
+}
+
+// setCols are a set operation's column names: its first input's.
+func (b *planBuilder) setCols(s *sqlSet) []string {
+	for s.sel == nil && s.paren == nil && s.left != nil {
+		s = s.left
+	}
+	var cols []string
+	switch {
+	case s.sel != nil:
+		cols = b.queryCols(&sqlQuery{body: s})
+	case s.paren != nil:
+		cols = b.queryCols(s.paren)
+	}
+	return cols
+}
+
 func (b *planBuilder) setRows(s *sqlSet) string {
 	return "SELECT 1 FROM (" + b.ps.text(s.lo, s.hi) + ") AS cb_s"
 }
@@ -595,6 +699,12 @@ func (b *planBuilder) planSelect(sel *sqlSelect, outer *planScope, cc *countCtx)
 	f, err := b.planFrom(sel.from, scope, &conds, needed, cc, nil)
 	if err != nil {
 		return nil, err
+	}
+	// BERNOULLI keeps a different share of the rows each run, so when a
+	// sample is all the query returns, its rows are the rows returned
+	if sel == b.topSel && sel.from.kind == fromTable && sel.from.sample != nil && sel.from.sample.method == "BERNOULLI" &&
+		sel.where == nil && len(sel.groupBy) == 0 && sel.having == nil && !sel.distinct && !b.aggregates(sel) {
+		f.op.rows = rowsReturned
 	}
 	// what the FROM did not apply
 	var semis, filters []*cond
@@ -823,8 +933,16 @@ func (b *planBuilder) collectItems(f *sqlFrom, scope *planScope) error {
 			} else if cte := b.ctes[strings.ToLower(name)]; cte != nil {
 				it.cols = b.queryCols(cte.q)
 			} else if v, ok := b.schema.views[strings.ToLower(name)]; ok {
-				_ = v
-				return unsupportedSQL{fmt.Sprintf("a query on view %s", name)}
+				// a view is planned as its definition, inlined
+				vps, vq, err := parseQuerySQL(v, b.schema.pg)
+				if err != nil {
+					if u, ok := err.(unsupportedSQL); ok {
+						return unsupportedSQL{fmt.Sprintf("view %s, whose definition has %s", name, u.what)}
+					}
+					return err
+				}
+				it.view = &planView{ps: vps, q: vq}
+				it.cols = b.queryCols(vq)
 			} else {
 				return unsupportedSQL{fmt.Sprintf("table %s, which is not in the schema", name)}
 			}
@@ -1267,6 +1385,19 @@ func (b *planBuilder) planLeaf(f *sqlFrom, scope *planScope, conds *[]*cond, nee
 		}
 		return out, nil
 	}
+	if q := b.quant[strings.ToLower(f.alias)]; q != nil && f.kind == fromSub {
+		return b.recursiveUnion(f, it, q, cc), nil
+	}
+	if it.view != nil {
+		vb := &planBuilder{ps: it.view.ps, schema: b.schema, ctes: map[string]*sqlCTE{}, cols: map[*sqlExpr]colRef{},
+			subPlans: map[*sqlExpr]*planOp{}, orderFor: map[*sqlSelect][]sqlOrder{}, next: b.next}
+		sub, err := vb.planQuery(it.view.q, nil, cc)
+		b.next = vb.next
+		if err != nil {
+			return nil, err
+		}
+		return &frag{op: vb.gather(sub), items: []*planItem{it}, from: b.itemSQL(f)}, nil
+	}
 	// a subquery or a WITH clause's query
 	q := f.sub
 	if q == nil {
@@ -1294,6 +1425,11 @@ func (b *planBuilder) access(it *planItem, scope *planScope, conds *[]*cond, nee
 	// parameters and literals
 	var local []*cond
 	for _, c := range *conds {
+		// a sampled table's rows are sampled before the WHERE clause
+		// filters them, so no condition reaches its scan
+		if it.from.sample != nil {
+			break
+		}
 		if c.applied || c.subq || !c.items[it] {
 			continue
 		}
@@ -1498,7 +1634,37 @@ func (b *planBuilder) access(it *planItem, scope *planScope, conds *[]*cond, nee
 		f.op, f.dist, f.root, f.split, f.keyOrder = dca, false, "", nil, nil
 		f.conds = condSQL(allConds)
 	}
+	if it.from.sample != nil {
+		b.sample(f, it, cc, bound)
+	}
 	return f, nil
+}
+
+// sample plans TABLESAMPLE over a table's read (Google's unary operators
+// page, Random ID Assign): the rows are gathered, a Random Id Assign adds
+// a random number to each, and a Filter on it keeps BERNOULLI's share of
+// them, or a Sort Limit on it RESERVOIR's number of rows.
+func (b *planBuilder) sample(f *frag, it *planItem, cc *countCtx, bound *frag) {
+	sm := it.from.sample
+	in := b.gather(f)
+	ra := op("Random Id Assign", nil, rel(in, ""))
+	size := b.text(sm.size)
+	sampled := b.ps.text(it.from.lo, it.from.sampleHi)
+	var o *planOp
+	if sm.method == "BERNOULLI" {
+		o = op("Filter", nil, rel(ra, ""), planLink{sc: &planScalar{name: "Function", desc: "($random_id < (" + size + " / 100))"}, typ: "Condition"})
+	} else {
+		o = op("Sort Limit", nil, rel(ra, ""), planLink{sc: &planScalar{name: "Reference", desc: "$random_id ASC"}, typ: "Key"},
+			planLink{sc: b.scalar(sm.size, nil), typ: "Limit"})
+	}
+	if bound == nil {
+		o.rows = cc.count("SELECT 1 FROM " + sampled)
+	} else {
+		o.rows = cc.count("SELECT 1 FROM " + bound.from + " CROSS JOIN " + sampled + whereSQL(bound.conds))
+		o.execs = cc.count(bound.rowsSQL())
+	}
+	f.op, f.dist, f.root, f.split, f.keyOrder = o, false, "", nil, nil
+	f.from, f.conds = sampled, nil
 }
 
 func keyColNames(k []keyCol) []string {
@@ -1758,4 +1924,61 @@ func planNodes(root *planOp) ([]*spannerpb.PlanNode, map[*planOp]*spannerpb.Plan
 	}
 	addOp(root)
 	return nodes, byOp
+}
+
+// recursiveUnion plans a quantified edge pattern's paths as Google's
+// binary operators page draws them: a Recursive Union of its base input,
+// the paths' first edges (a scan of the edge table), and its recursive
+// input, a Cross Apply that joins each row of the previous iteration (a
+// Recursive Spool Scan) to the edges leaving the node it reached, seeking
+// on the edge table's source key. It runs until the upper bound; a lower
+// bound above 1 is a Filter on the paths' length.
+func (b *planBuilder) recursiveUnion(f *sqlFrom, it *planItem, q *graphQuant, cc *countCtx) *frag {
+	e := q.table
+	count := func(lo, hi int) string {
+		if lo > hi {
+			return "SELECT 0"
+		}
+		return cc.count(q.pathsSQL(lo, hi))
+	}
+	var cols []string
+	cols = append(cols, e.KeyColumns...)
+	scan := func() *planOp {
+		var links []planLink
+		for _, c := range cols {
+			links = append(links, planLink{sc: &planScalar{name: "Reference", desc: c}, variable: c})
+		}
+		s := op("Scan", map[string]string{"scan_type": "TableScan", "scan_target": e.BaseTableName, "scan_method": "Automatic"}, links...)
+		s.scan = true
+		return s
+	}
+	root := e.BaseTableName
+	if t := b.schema.table(e.BaseTableName); t != nil {
+		root = b.schema.root(t)
+	}
+	bs := scan()
+	bs.meta["Full scan"] = "true"
+	bs.rows = count(1, 1)
+	base := b.distUnion(bs, &frag{root: root})
+	spool := op("Scan", map[string]string{"scan_type": "RecursiveSpoolScan", "scan_target": "$" + q.alias})
+	spool.rows = count(1, q.max-1)
+	spool.execs = fmt.Sprintf("SELECT %d", q.max-1)
+	ms := scan()
+	ms.rows, ms.execs = count(2, q.max), spool.rows
+	var seek []string
+	for i, c := range e.Source.EdgeCols {
+		seek = append(seek, "($"+c+" = $"+q.alias+"."+e.Dest.EdgeCols[i]+")")
+	}
+	fs := op("Filter Scan", nil, rel(ms, ""), planLink{sc: &planScalar{name: "Function", desc: strings.Join(seek, " AND ")}, typ: "Seek Condition"})
+	fs.rows, fs.execs = ms.rows, spool.rows
+	ca := op("Cross Apply", nil, rel(spool, "Input"), rel(b.distUnion(fs, &frag{root: root}), "Map"))
+	ca.rows, ca.execs = ms.rows, spool.execs
+	ru := op("Recursive Union", map[string]string{"upper_bound": fmt.Sprint(q.max)}, rel(base, "Base"), rel(ca, "Recursive"))
+	ru.rows = count(1, q.max)
+	o := ru
+	if q.min > 1 {
+		o = op("Filter", nil, rel(ru, ""), planLink{sc: &planScalar{name: "Function", desc: fmt.Sprintf("($path_length >= %d)", q.min)}, typ: "Condition"})
+		o.rows = count(q.min, q.max)
+	}
+	return &frag{op: o, items: []*planItem{it}, from: b.itemSQL(f)}
 }

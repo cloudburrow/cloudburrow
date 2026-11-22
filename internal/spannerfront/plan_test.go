@@ -211,7 +211,11 @@ func TestPlanRefusesWhatItDoesNotKnow(t *testing.T) {
 	for _, sql := range []string{
 		"SELECT a FROM t1 INTERSECT DISTINCT SELECT a FROM t1",
 		"INSERT INTO Singers (SingerId) VALUES (1)",
+		// not Spanner's: the engine refuses them before a plan is asked for
 		"SELECT ROW_NUMBER() OVER (ORDER BY SingerId) FROM Singers",
+		"WITH RECURSIVE t AS (SELECT 1 AS n) SELECT n FROM t",
+		"SELECT * FROM Singers NATURAL JOIN Albums",
+		"SELECT * FROM Singers LOOKUP JOIN Albums USING (SingerId)",
 	} {
 		ps, q, err := parseQuerySQL(sql, false)
 		if err == nil {
@@ -276,5 +280,126 @@ Apply Mutations
 		if got := planTree(nodes); strings.TrimSpace(got) != strings.TrimSpace(c.want) {
 			t.Errorf("%s:\ngot\n%s\nwant\n%s", c.sql, got, c.want)
 		}
+	}
+}
+
+// TestPlanRefusedShapes (#2029): the shapes the first planner refused.
+func TestPlanRefusedShapes(t *testing.T) {
+	sc := docsSchema(false)
+	sc.views["singernames"] = "SELECT Singers.SingerId AS SingerId, Singers.FirstName AS FirstName FROM Singers"
+	for _, c := range []struct{ sql, want string }{
+		{"SELECT SingerId FROM Albums INTERSECT DISTINCT SELECT SingerId FROM Songs", `
+Serialize Result
+  Filter
+    Aggregate(Global){Hash}
+      Input: Union All
+        Union Input
+          Distributed Union(Global)
+            Distributed Union(Local)
+              Scan[TableScan Albums full]
+        Union Input
+          Distributed Union(Global)
+            Distributed Union(Local)
+              Scan[TableScan Songs full]
+    Condition: ($left_count > 0) AND ($right_count > 0)
+`},
+		{"SELECT SingerId FROM Albums EXCEPT ALL SELECT SingerId FROM Songs", `
+Serialize Result
+  Cross Apply
+    Input: Filter
+      Aggregate(Global){Hash}
+        Input: Union All
+          Union Input
+            Distributed Union(Global)
+              Distributed Union(Local)
+                Scan[TableScan Albums full]
+          Union Input
+            Distributed Union(Global)
+              Distributed Union(Local)
+                Scan[TableScan Songs full]
+      Condition: ($left_count > $right_count)
+    Map: Array Unnest
+`},
+		{"SELECT FirstName FROM SingerNames WHERE SingerId = 1", `
+Serialize Result
+  Filter
+    Distributed Union(Global)
+      Distributed Union(Local)
+        Scan[TableScan Singers full]
+    Condition: $SingerId = 1
+`},
+		{"SELECT s.SongName FROM Songs AS s TABLESAMPLE RESERVOIR (2 ROWS)", `
+Serialize Result
+  Sort Limit
+    Random Id Assign
+      Distributed Union(Global)
+        Distributed Union(Local)
+          Scan[TableScan Songs full]
+`},
+		{"SELECT s.SongName FROM Songs AS s TABLESAMPLE BERNOULLI (10 PERCENT) WHERE s.Duration > 200", `
+Serialize Result
+  Filter
+    Filter
+      Random Id Assign
+        Distributed Union(Global)
+          Distributed Union(Local)
+            Scan[TableScan Songs full]
+      Condition: ($random_id < (10 / 100))
+    Condition: $Duration > 200
+`},
+		{"SELECT LastName FROM Singers WHERE SingerId = 1 FOR UPDATE", `
+Distributed Union(Global)
+  Distributed Union(Local)
+    Serialize Result
+      Filter Scan
+        Scan[TableScan Singers]
+        Seek Condition: $SingerId = 1
+`},
+		{"SELECT a.AlbumTitle FROM Albums AS a LEFT OUTER HASH JOIN Songs AS s ON a.SingerId = s.SingerId", `
+Serialize Result
+  Hash Join
+    Build: Distributed Union(Global)
+      Distributed Union(Local)
+        Scan[TableScan Albums full]
+    Probe: Distributed Union(Global)
+      Distributed Union(Local)
+        Scan[TableScan Songs full]
+    Condition: $SingerId = $SingerId
+`},
+	} {
+		nodes, _ := planFor(t, sc, c.sql)
+		if got := planTree(nodes); strings.TrimSpace(got) != strings.TrimSpace(c.want) {
+			t.Errorf("%s:\ngot\n%s\nwant\n%s", c.sql, got, c.want)
+		}
+	}
+	// INSERT ... ON CONFLICT plans as the INSERT it is
+	for _, sql := range []string{
+		"INSERT INTO Singers (SingerId, FirstName) VALUES (1, 'X') ON CONFLICT (SingerId) DO NOTHING",
+		"INSERT INTO Singers AS s (SingerId, FirstName) VALUES (1, 'X') ON CONFLICT (SingerId) DO UPDATE SET FirstName = excluded.FirstName WHERE s.FirstName IS NULL THEN RETURN SingerId",
+	} {
+		ps, st, err := parseStatementSQL(sql, false)
+		if err != nil {
+			t.Fatalf("parse %q: %v", sql, err)
+		}
+		b := &planBuilder{ps: ps, schema: sc, ctes: map[string]*sqlCTE{}, cols: map[*sqlExpr]colRef{},
+			subPlans: map[*sqlExpr]*planOp{}, orderFor: map[*sqlSelect][]sqlOrder{}}
+		root, err := b.buildDML(st.dml)
+		if err != nil {
+			t.Fatalf("plan %q: %v", sql, err)
+		}
+		nodes, _ := planNodes(root)
+		if got := planTree(nodes); !strings.Contains(got, "Apply Mutations\n") || !strings.Contains(got, "Unit Relation") {
+			t.Errorf("%s:\n%s", sql, got)
+		}
+	}
+	// PostgreSQL: INTERSECT binds tighter than UNION; TABLESAMPLE SPANNER.RESERVOIR
+	pg := docsSchema(true)
+	nodes, _ := planFor(t, pg, "SELECT singerid FROM albums UNION ALL SELECT singerid FROM songs INTERSECT SELECT singerid FROM singers")
+	if got := planTree(nodes); !strings.Contains(got, "Union All\n    Union Input\n") || strings.Count(got, "Union All") != 2 || !strings.Contains(got, "Filter") {
+		t.Errorf("PostgreSQL UNION ALL over INTERSECT:\n%s", got)
+	}
+	nodes, _ = planFor(t, pg, "SELECT s.songname FROM songs AS s TABLESAMPLE spanner.reservoir (2)")
+	if got := planTree(nodes); !strings.Contains(got, "Sort Limit\n    Random Id Assign") {
+		t.Errorf("PostgreSQL SPANNER.RESERVOIR:\n%s", got)
 	}
 }

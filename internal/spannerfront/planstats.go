@@ -146,6 +146,24 @@ func (s *Instances) readPlanSchema(ctx context.Context, session string) (*planSc
 	return sc, nil
 }
 
+// readGraphs reads the database's property graphs.
+func (s *Instances) readGraphs(ctx context.Context, session string) (map[string]*graphMeta, error) {
+	rows, _, err := s.engineSQL(ctx, session, singleUse(),
+		"SELECT PROPERTY_GRAPH_NAME, TO_JSON_STRING(PROPERTY_GRAPH_METADATA_JSON) FROM INFORMATION_SCHEMA.PROPERTY_GRAPHS WHERE PROPERTY_GRAPH_SCHEMA = ''", nil, nil)
+	if err != nil {
+		return nil, fmt.Errorf("reading the property graphs: %w", err)
+	}
+	out := map[string]*graphMeta{}
+	for _, r := range rows {
+		g, err := parseGraphMeta(r[1])
+		if err != nil {
+			return nil, err
+		}
+		out[strings.ToLower(r[0])] = g
+	}
+	return out, nil
+}
+
 // builtPlan is a query's plan, ready to serve.
 type builtPlan struct {
 	root    *planOp
@@ -161,10 +179,25 @@ func (s *Instances) buildQueryPlan(ctx context.Context, req *spannerpb.ExecuteSq
 	if err != nil {
 		return nil, err
 	}
-	ps, stmt, err := parseStatementSQL(req.GetSql(), sc.pg)
+	src := req.GetSql()
+	var quant map[string]*graphQuant
+	if !sc.pg && mentionsGraph(src) {
+		// a graph query is planned as the SQL query that reads its rows
+		// (plangraph.go); property graphs are GoogleSQL's only
+		graphs, gerr := s.readGraphs(ctx, req.GetSession())
+		if gerr != nil {
+			return nil, gerr
+		}
+		src, quant, err = graphToSQLQuant(src, graphs)
+	}
+	var ps *sqlParser
+	var stmt *sqlStmt
+	if err == nil {
+		ps, stmt, err = parseStatementSQL(src, sc.pg)
+	}
 	if err == nil {
 		b := &planBuilder{ps: ps, schema: sc, ctes: map[string]*sqlCTE{}, cols: map[*sqlExpr]colRef{},
-			subPlans: map[*sqlExpr]*planOp{}, orderFor: map[*sqlSelect][]sqlOrder{}}
+			subPlans: map[*sqlExpr]*planOp{}, orderFor: map[*sqlSelect][]sqlOrder{}, quant: quant}
 		var root *planOp
 		if stmt.dml != nil {
 			root, err = b.buildDML(stmt.dml)
@@ -223,8 +256,8 @@ func (s *Instances) measure(ctx context.Context, p *builtPlan, req *spannerpb.Ex
 		}
 		st.cum[o] = kidsCum
 		switch {
-		case o == p.root && returned >= 0:
-			st.rows[o] = returned
+		case o == p.root && returned >= 0, o.rows == rowsReturned:
+			st.rows[o] = max(returned, 0)
 		case o.rows != "":
 			n, d, err := count(o.rows)
 			if err != nil {
@@ -331,6 +364,20 @@ func queryStats(req *spannerpb.ExecuteSqlRequest, p *builtPlan, elapsed, engine 
 }
 
 // isDML says whether sql is an INSERT, UPDATE or DELETE.
+// forUpdate says whether a statement has a FOR UPDATE clause.
+func forUpdate(sql string) bool {
+	toks, err := lexSQL(sql, false)
+	if err != nil {
+		return false
+	}
+	for i := 0; i+1 < len(toks); i++ {
+		if toks[i].kind == tkIdent && strings.EqualFold(toks[i].text, "FOR") && toks[i+1].kind == tkIdent && strings.EqualFold(toks[i+1].text, "UPDATE") {
+			return true
+		}
+	}
+	return false
+}
+
 func isDML(sql string) bool {
 	toks, err := lexSQL(sql, false)
 	if err != nil {
@@ -389,7 +436,10 @@ func (s *Instances) servePlanned(ctx context.Context, req *spannerpb.ExecuteSqlR
 	dml := isDML(req.GetSql())
 	tx := req.GetTransaction()
 	var began *spannerpb.Transaction
-	if dml && tx.GetBegin() != nil {
+	// a DML statement, or a query that locks (FOR UPDATE, which a
+	// read-only transaction refuses), is validated and counted in its own
+	// read-write transaction
+	if (dml || forUpdate(req.GetSql())) && tx.GetBegin() != nil {
 		t, err := s.data.BeginTransaction(ctx, &spannerpb.BeginTransactionRequest{Session: req.GetSession(), Options: tx.GetBegin()})
 		if err != nil {
 			return nil, err
