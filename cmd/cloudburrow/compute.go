@@ -13,9 +13,13 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
+	"github.com/cloudburrow/cloudburrow/internal/iameval"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
+	"github.com/cloudburrow/cloudburrow/internal/metadata"
+	"github.com/cloudburrow/cloudburrow/internal/service/certificatemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/compute"
 	"github.com/cloudburrow/cloudburrow/internal/service/gke"
+	"github.com/cloudburrow/cloudburrow/internal/service/iap"
 	"github.com/cloudburrow/cloudburrow/internal/service/redisadmin"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
@@ -43,6 +47,16 @@ type computeService struct {
 	// #2140), served on this port beside /compute/v1/, as its connectors
 	// live in the networks served here.
 	vpcAccess *vpcaccess.Server
+	// certManager is Certificate Manager (certificatemanager.googleapis.com)
+	// and iap Identity-Aware Proxy (iap.googleapis.com), #2160, served on
+	// this port too: the load balancers here serve their certificate maps
+	// and enforce IAP on backend services (computecertiap.go).
+	certManager *certificatemanager.Server
+	iap         *iap.Server
+	// iapEval and creds are the host's IAM evaluator and credentials, which
+	// IAP checks requests with; up sets them (useIAP).
+	iapEval *iameval.Evaluator
+	creds   *metadata.Credentials
 	// vms runs the VM instances (#1963); guestBase and metadataHost are
 	// set by up once the cluster host is known.
 	vms          *computeVMs
@@ -115,12 +129,33 @@ func (s *computeService) Start(ctx context.Context) error {
 		}
 		return s.metadataHost()
 	}
+	dir := func(name string) string {
+		if state == "" {
+			return ""
+		}
+		return filepath.Join(s.cfg.InstanceDir(), name)
+	}
+	cm, err := certificatemanager.New(certificatemanager.Options{State: dir("certificatemanager.json")})
+	if err != nil {
+		return err
+	}
+	s.certManager = cm
+	ia, err := iap.New(iap.Options{State: dir("iap.json")})
+	if err != nil {
+		return err
+	}
+	s.iap = ia
 	api, err := compute.New(compute.Options{State: state, Extra: s.instanceGroupManagers, ExtraGroups: s.gkeGroups, NetworkUsers: s.networkUsers, VMs: s.vms,
-		ProjectOrganization: s.projectOrganization, LB: &computeLB{cfg: s.cfg, vms: s.vms}})
+		ProjectOrganization: s.projectOrganization, LB: &computeLB{cfg: s.cfg, vms: s.vms},
+		CertMaps: cm, IAP: computeIAPGate{svc: s}})
 	if err != nil {
 		return err
 	}
 	s.api = api
+	cm.UseIssuer(api)
+	cm.UseTargets(func(project string) []certificatemanager.Target { return certMapTargets(api, project) })
+	ia.SetBackendServices(func(rel string) bool { return backendServiceExists(api, rel) })
+	ia.SetNormalizer(s.iapNormalize)
 	// The schedules' and autoscalers' loops (#2139); with no Addr, Start
 	// listens on nothing.
 	if err := api.Start(ctx); err != nil {
@@ -141,7 +176,17 @@ func (s *computeService) Start(ctx context.Context) error {
 	}
 	s.ln = ln
 	vrest := vpcaccess.NewRESTHandler(va)
+	cmrest := certificatemanager.NewRESTHandler(cm)
+	iaprest := iap.NewRESTHandler(ia)
 	var h http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if iap.Handles(r.URL.Path) {
+			iaprest.ServeHTTP(w, r)
+			return
+		}
+		if cm.Handles(r) {
+			cmrest.ServeHTTP(w, r)
+			return
+		}
 		if vpcaccess.Handles(r.URL.Path) {
 			vrest.ServeHTTP(w, r)
 			return
@@ -266,7 +311,17 @@ func (r *computeResetter) ResetProject(_ context.Context, project string) error 
 		return err
 	}
 	if va := r.svc.VPCAccess(); va != nil {
-		return va.ResetProject(project)
+		if err := va.ResetProject(project); err != nil {
+			return err
+		}
+	}
+	if cm := r.svc.certManager; cm != nil {
+		if err := cm.ResetProject(project); err != nil {
+			return err
+		}
+	}
+	if ia := r.svc.iap; ia != nil {
+		return ia.ResetProject(project)
 	}
 	return nil
 }

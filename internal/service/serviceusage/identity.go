@@ -50,8 +50,12 @@ var serviceAgents = map[string]string{
 	"dataform.googleapis.com":         "gcp-sa-dataform.iam.gserviceaccount.com",
 	// App Hub Service Account, the primary agent of apphub.googleapis.com
 	// (docs.cloud.google.com/iam/docs/service-agents, read 2026-11-21).
-	"apphub.googleapis.com": "gcp-sa-apphub.iam.gserviceaccount.com",
-	"vpcaccess.googleapis.com":        "gcp-sa-vpcaccess.iam.gserviceaccount.com",
+	"apphub.googleapis.com":    "gcp-sa-apphub.iam.gserviceaccount.com",
+	"vpcaccess.googleapis.com": "gcp-sa-vpcaccess.iam.gserviceaccount.com",
+	// Certificate Manager's and Identity-Aware Proxy's primary agents
+	// (docs.cloud.google.com/iam/docs/service-agents, read 2026-11-22, #2160).
+	"certificatemanager.googleapis.com": "gcp-sa-certificatemanager.iam.gserviceaccount.com",
+	"iap.googleapis.com":                "gcp-sa-iap.iam.gserviceaccount.com",
 	// Kubernetes Engine Service Agent, the primary agent of
 	// container.googleapis.com.
 	"container.googleapis.com": "container-engine-robot.iam.gserviceaccount.com",

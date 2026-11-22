@@ -164,6 +164,8 @@ cloud.google.com/go/billing v1.28.1 h1:NYO8hmjuuB4KjGmf+0oQDvVY42WenHWPJbE41FMdV
 cloud.google.com/go/billing v1.28.1/go.mod h1:R/wsa4kNdgNKudxRUIt3LwZsoJVMx/vIu/1+jJgZY3w=
 cloud.google.com/go/binaryauthorization v1.16.0/go.mod h1:E+iC5Avu4pdItdzGiSGHnh6TfQrl+KmPxDDg/T/VuHs=
 cloud.google.com/go/certificatemanager v1.15.0/go.mod h1:8dfGG2/TbUpCNqsCF/TIMOGV0OVvU6nhkZWTU4MmCXU=
+cloud.google.com/go/certificatemanager v1.17.1 h1:u0WC0kVKzuokBPYt8xs9RC++VysYD+S1VEO/PohR5Cg=
+cloud.google.com/go/certificatemanager v1.17.1/go.mod h1:hYOt1CqtqdI4/wtZoEgaTErjavi/2JuujtG2d/Qk8ws=
 cloud.google.com/go/channel v1.27.0/go.mod h1:9ekufBLXuQ6j1oyqtDSIp29qWU5EwCi8WUi9qkLn3MA=
 cloud.google.com/go/cloudbuild v1.32.0/go.mod h1:mYgcM8CMaPmAnO7GxSQ9ADAxVRwS+1b7s6WVkt29OXY=
 cloud.google.com/go/cloudbuild v1.35.0 h1:D4qZsyuOPqMkdnsh6jgOJBi8IN0NZOXVi1I/2EnYVVM=
@@ -299,6 +301,8 @@ cloud.google.com/go/iam v1.12.0/go.mod h1:FEZ4lXpADAC2AIpQY7LANNjjwyQ2jK439CI2Va
 cloud.google.com/go/iam v1.14.0 h1:YRIB1/4xxwJ+NfI6RQr1WaOoHHeV0MizJEj940nBXJA=
 cloud.google.com/go/iam v1.14.0/go.mod h1:JTPZfbHdGXJrOYREtkRoFzCDGaBdbA7ILLKO/DDuav0=
 cloud.google.com/go/iap v1.17.0/go.mod h1:b+r+yjrss2WmAEzNrQQjlEdD5E9B8c47mOF7XnqT+z0=
+cloud.google.com/go/iap v1.19.1 h1:5mlV0gADXFcKHexTtQBnkqHf3QPgQy0XF+yRP696J4Q=
+cloud.google.com/go/iap v1.19.1/go.mod h1:2eIuqgRhDRdy6Qn6vgaUbstAIVY/4U0ZM9qwc3X7lGs=
 cloud.google.com/go/ids v1.11.0/go.mod h1:+drdvU0pQ4x5uYiWCv364VOeIpTN/PETBrdR51D4Tjk=
 cloud.google.com/go/iot v1.13.0/go.mod h1:62W4n2fe/Ct66NWJEfCB5suZ3XsL5Atx+MxFjScr+9s=
 cloud.google.com/go/kms v1.20.5/go.mod h1:C5A8M1sv2YWYy1AE6iSrnddSG9lRGdJq5XEdBy28Lmw=
