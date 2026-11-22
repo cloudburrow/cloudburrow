@@ -1903,6 +1903,103 @@ func TestStatusReportsTheIdentityTheInstanceIssued(t *testing.T) {
 	}
 }
 
+// startingProvider starts its "deploy" action and answers before the
+// operation ends: the test closes release to end it, with fail's error.
+type startingProvider struct {
+	editableProvider
+	release chan struct{}
+	fail    error
+}
+
+func (startingProvider) Starts(action string) bool { return action == "deploy" }
+
+func (p startingProvider) StartAt(_ context.Context, _ string, path []string, action string, _ map[string]string) (func(context.Context) error, error) {
+	if len(path) != 1 || path[0] == "refused" {
+		return nil, errors.New("the endpoint does not exist")
+	}
+	return func(ctx context.Context) error {
+		select {
+		case <-p.release:
+			return p.fail
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}, nil
+}
+
+// TestStartedActionsAnswerBeforeTheirOperationEnds: Deploy to endpoint
+// answers once its long-running operation has started (main CI
+// 44966435794, where waiting for the container inside the request
+// outlasted the page's 70 seconds), and the console's record of it is
+// PENDING until the operation ends, then SUCCEEDED or FAILED with its
+// error; a refusal to start is a 400 as any action's.
+func TestStartedActionsAnswerBeforeTheirOperationEnds(t *testing.T) {
+	for _, tc := range []struct {
+		name, state string
+		fail        error
+	}{{"succeeds", "SUCCEEDED", nil}, {"fails", "FAILED", errors.New("the container never answered its health route")}} {
+		t.Run(tc.name, func(t *testing.T) {
+			var applied, edited []string
+			release := make(chan struct{})
+			srv := serve(t, startingProvider{editableProvider: editableProvider{
+				fakeProvider: fakeProvider{id: "svc", title: "Service"},
+				applied:      &applied, edited: &edited,
+				offer: []Action{{ID: "deploy", Label: "Deploy to endpoint"}},
+			}, release: release, fail: tc.fail})
+			code, body := post(t, srv, "/api/actions/svc", `{"Path":["model"],"Action":"deploy"}`)
+			if code != http.StatusOK {
+				t.Fatalf("act status = %d: %s", code, body)
+			}
+			var res struct {
+				Operation string
+				Pending   bool
+			}
+			if err := json.Unmarshal([]byte(body), &res); err != nil || !res.Pending || res.Operation == "" {
+				t.Fatalf("response = %s (%v); want pending with its operation", body, err)
+			}
+			if len(applied) != 0 {
+				t.Errorf("ActAt was called as well as StartAt: %v", applied)
+			}
+			state := func() (string, string) {
+				_, ops := get(t, srv, "/api/operations", nil)
+				var out struct{ Operations []Operation }
+				if err := json.Unmarshal([]byte(ops), &out); err != nil {
+					t.Fatalf("operations = %s: %v", ops, err)
+				}
+				for _, o := range out.Operations {
+					if o.ID == res.Operation {
+						return string(o.State), o.Error
+					}
+				}
+				t.Fatalf("operation %s is not in the ledger: %s", res.Operation, ops)
+				return "", ""
+			}
+			if st, _ := state(); st != "PENDING" {
+				t.Fatalf("the operation is %s before it ended; want PENDING", st)
+			}
+			close(release)
+			deadline := time.Now().Add(10 * time.Second)
+			for {
+				st, msg := state()
+				if st == tc.state {
+					if tc.fail != nil && !strings.Contains(msg, tc.fail.Error()) {
+						t.Errorf("the failed operation's error = %q; want %q", msg, tc.fail)
+					}
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("the operation is %s after it ended; want %s", st, tc.state)
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+			code, body = post(t, srv, "/api/actions/svc", `{"Path":["refused"],"Action":"deploy"}`)
+			if code != http.StatusBadRequest || !strings.Contains(body, "does not exist") {
+				t.Errorf("a refused start = %d: %s; want 400 with the API's message", code, body)
+			}
+		})
+	}
+}
+
 // resultProvider answers an action with rows.
 type resultProvider struct{ editableProvider }
 

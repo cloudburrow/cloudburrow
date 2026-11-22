@@ -1863,6 +1863,26 @@ type ResultActor interface {
 	ActAtResult(ctx context.Context, project string, path []string, action string, values map[string]string) (*Listing, error)
 }
 
+// StartingActor is a PathActor with actions that answer once the
+// long-running operation they begin has started, as Google's API and its
+// console do: a model's Deploy to endpoint returns its operation at once,
+// and the deployment goes on, shown in the console's notifications, for as
+// long as the container takes to answer its health route. Waiting for it
+// inside the request outlasted the page's 70 seconds for a mutation on a
+// loaded machine (main CI 44966435794).
+//
+// The console's own record of the operation stays PENDING until the wait
+// StartAt returns has ended, then is SUCCEEDED or FAILED with its error,
+// so Activity follows the deployment to its end.
+type StartingActor interface {
+	PathActor
+	// Starts reports whether action is one StartAt performs.
+	Starts(action string) bool
+	// StartAt begins action and returns the wait for its operation's end,
+	// which runs after the response, under the provider's mutation budget.
+	StartAt(ctx context.Context, project string, path []string, action string, values map[string]string) (func(context.Context) error, error)
+}
+
 // Revealer is a provider that can return a resource's own secret value.
 //
 // Separate from Detail on purpose. A payload included in a detail response is
@@ -3036,6 +3056,11 @@ func (s *Server) actAtPath(w http.ResponseWriter, r *http.Request, p Provider, p
 	}
 	opID := s.logs.StartOperation(action, name, project)
 
+	if sa, ok := actor.(StartingActor); ok && sa.Starts(action) {
+		s.startAtPath(ctx, w, p, sa, project, path, name, action, values, opID)
+		return
+	}
+
 	var result *Listing
 	var err error
 	if ra, ok := actor.(ResultActor); ok {
@@ -3067,6 +3092,52 @@ func (s *Server) actAtPath(w http.ResponseWriter, r *http.Request, p Provider, p
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"applied": action, "operation": opID})
+}
+
+// startAtPath performs an action of a StartingActor: it answers once the
+// action's operation has started, with "pending", and its record opID is
+// finished when the operation ends, as the wait reports it.
+func (s *Server) startAtPath(ctx context.Context, w http.ResponseWriter, p Provider, sa StartingActor, project string, path []string, name, action string, values map[string]string, opID string) {
+	fail := func(err error) {
+		s.logs.FinishOperation(opID, OperationFailed, userMessage(err))
+		s.logs.Log(Entry{
+			Severity: SeverityError, Source: p.ID(), Project: project, Resource: name,
+			OperationID: opID, Message: action + " failed: " + userMessage(err),
+		})
+	}
+	wait, err := sa.StartAt(ctx, project, path, action, values)
+	if err != nil {
+		fail(err)
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": userMessage(err), "operation": opID,
+		})
+		return
+	}
+	s.logs.Log(Entry{
+		Severity: SeverityInfo, Source: p.ID(), Project: project, Resource: name,
+		OperationID: opID, Message: action + " started on " + name,
+	})
+	if wait != nil {
+		// The request's context ends with its response; the wait has the
+		// provider's budget of its own.
+		budget := budgetFor(p)
+		go func() {
+			wctx, cancel := context.WithTimeout(context.Background(), budget)
+			defer cancel()
+			if err := wait(wctx); err != nil {
+				fail(err)
+				return
+			}
+			s.logs.FinishOperation(opID, OperationSucceeded, "")
+			s.logs.Log(Entry{
+				Severity: SeverityInfo, Source: p.ID(), Project: project, Resource: name,
+				OperationID: opID, Message: action + " applied to " + name,
+			})
+		}()
+	} else {
+		s.logs.FinishOperation(opID, OperationSucceeded, "")
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"applied": action, "operation": opID, "pending": wait != nil})
 }
 
 // handlePage continues a listing past its first page.

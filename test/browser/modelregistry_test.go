@@ -140,9 +140,36 @@ func TestModelRegistryAndEndpointsThroughThePages(t *testing.T) {
 	if rows := p.pageAction("View evaluation", map[string]string{"evaluation": evalID}, ""); !strings.Contains(rows, "0.25") {
 		t.Errorf("View evaluation answered %q; want the metric imported", rows)
 	}
-	// The deploy answers once the model's container is ready, which on a
-	// loaded machine takes longer than a dialog's usual 30 seconds.
-	p.pageActionWithin("Deploy to endpoint", map[string]string{"endpoint": epID, "displayName": "browser-linear-v1"}, "", 4*time.Minute)
+	// Deploy answers once its operation has started, as Google's does (main
+	// CI 44966435794: waiting for the container inside the request outlasted
+	// the page's 70 seconds); the console's record of it then follows the
+	// deployment, which on a loaded machine takes minutes, to its end.
+	p.pageAction("Deploy to endpoint", map[string]string{"endpoint": epID, "displayName": "browser-linear-v1"}, "")
+	var deployOp string
+	for deadline := time.Now().Add(4 * time.Minute); ; time.Sleep(2 * time.Second) {
+		code, body := consoleDo(t, http.MethodGet, "/api/operations?project="+project, "")
+		var ops struct {
+			Operations []struct{ ID, Kind, Resource, State, Error string }
+		}
+		if code != http.StatusOK || json.Unmarshal([]byte(body), &ops) != nil {
+			t.Fatalf("read the console's operations = %d: %s", code, body)
+		}
+		state := ""
+		for _, o := range ops.Operations {
+			if o.Kind == "deploy" && o.Resource == model {
+				deployOp, state = o.ID, o.State
+				if o.State == "FAILED" {
+					t.Fatalf("the console's Deploy to endpoint operation failed: %s", o.Error)
+				}
+			}
+		}
+		if state == "SUCCEEDED" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the console's Deploy to endpoint operation %q is %q after 4 minutes", deployOp, state)
+		}
+	}
 	var ep struct {
 		Sections []struct {
 			Listing struct {
