@@ -55,6 +55,8 @@ func cliEndpointVar(service string) string {
 		return "CLOUDBURROW_WORKFLOWS_ENDPOINT"
 	case "dataform":
 		return "CLOUDBURROW_DATAFORM_ENDPOINT"
+	case "dataproc":
+		return "CLOUDBURROW_DATAPROC_ENDPOINT"
 	case "parametermanager":
 		return "CLOUDBURROW_PARAMETERMANAGER_ENDPOINT"
 	case "apphub":

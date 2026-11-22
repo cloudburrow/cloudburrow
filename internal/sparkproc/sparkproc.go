@@ -94,6 +94,40 @@ type Job struct {
 	KeyAgent string `json:"keyAgent,omitempty"`
 	// KeyOnly asks for the key's check alone: nothing is run.
 	KeyOnly bool `json:"keyOnly,omitempty"`
+
+	// Kind is "" for a stored procedure, or the Dataproc workload a job
+	// of Serverless for Apache Spark (#2156) runs: KindPySpark,
+	// KindSpark, KindSparkR or KindSparkSQL for a batch, KindConnect for
+	// a Spark Connect session (Docker.StartConnect).
+	Kind string `json:"kind,omitempty"`
+	// Args are a batch's application arguments, after its main file.
+	Args []string `json:"args,omitempty"`
+	// QueryVariables are a Spark SQL batch's query_variables, each set
+	// first as "SET name=\"value\";", as the API reference says they are.
+	QueryVariables map[string]string `json:"queryVariables,omitempty"`
+	// Log names the Cloud Logging resource and logs the job's output is
+	// written to; nil is a procedure's bigquery.googleapis.com/SparkJob.
+	Log *LogTarget `json:"log,omitempty"`
+}
+
+// The kinds of Dataproc workload (Job.Kind).
+const (
+	KindPySpark  = "pyspark"
+	KindSpark    = "spark"
+	KindSparkR   = "sparkr"
+	KindSparkSQL = "sparksql"
+	KindConnect  = "connect"
+)
+
+// LogTarget is where a Dataproc workload's lines go: its monitored
+// resource (cloud_dataproc_batch or cloud_dataproc_session, with their
+// labels) and its logs, the driver's output in Output and Spark's own
+// log4j lines in Spark.
+type LogTarget struct {
+	Type   string            `json:"type"`
+	Labels map[string]string `json:"labels"`
+	Output string            `json:"output"`
+	Spark  string            `json:"spark"`
 }
 
 // File is one Cloud Storage object of a job, by its gs:// URI.

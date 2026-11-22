@@ -114,6 +114,9 @@ type consoleDeps struct {
 	parameterManager *parameterManagerService
 	// dataform is Dataform (#2105), nil unless enabled.
 	dataform *dataformService
+	// dataproc is the Dataproc API's serverless surface (#2156), nil
+	// unless enabled.
+	dataproc *dataprocService
 	// appHub is App Hub (#2110), nil unless enabled.
 	appHub *appHubService
 	// trace is Cloud Trace (#2118), nil unless enabled.
@@ -830,6 +833,7 @@ var serviceTitles = map[config.Service]string{
 	config.ServiceWorkflows:        "Workflows",
 	config.ServiceParameterManager: "Parameter Manager",
 	config.ServiceDataform:         "Dataform",
+	config.ServiceDataproc:         "Serverless for Apache Spark",
 	config.ServiceAppHub:           "App Hub",
 	config.ServiceTrace:            "Cloud Trace",
 }
