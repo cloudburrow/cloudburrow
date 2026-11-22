@@ -21190,7 +21190,7 @@ function bqHomeTab(ctx) {
     title: why, "aria-description": why, onclick: why ? null : run,
   });
   const notebook = bqDataformOn() ? null : BQ_NO_DATAFORM;
-  const spark = "Not available locally: an Apache Spark notebook runs on Serverless for Apache Spark, which CloudBurrow does not run.";
+  const spark = "Not available locally: an Apache Spark notebook's session is a Spark Connect session of Serverless for Apache Spark, which CloudBurrow does not serve.";
   // A dataset chooser for Create new's Table and Add your own data's
   // Load from a file, which act on a dataset.
   // The datasets arrive with the Explorer, after the tab is drawn: refresh
@@ -21229,8 +21229,8 @@ function bqHomeTab(ctx) {
         action("Notebook", () => ctx.openAsset("notebook", bqNotebookDoc([])), notebook),
         action("Apache Spark notebook", null, spark),
         action("Data canvas", () => ctx.openAsset("data_canvas", ""), notebook),
-        action("Data preparation", null, "Not available locally: data preparation files are Dataform's, which CloudBurrow's Dataform does not run."),
-        action("Pipeline", null, "Not available locally: pipelines are Dataform's, which Studio does not yet reach (#2105)."),
+        action("Data preparation", null, "Not available locally: a data preparation is a Dataform action, which CloudBurrow's Dataform does not run (#2105)."),
+        action("Pipeline", null, "Not available locally: a pipeline's tasks are a Dataform repository's definitions/actions.yaml, which CloudBurrow's Dataform does not compile (#2105)."),
         tableButton),
       dsLabel),
     card("Recent",
@@ -21278,8 +21278,6 @@ const BQ_DATAFORM_NOTE = "Kept in this instance's Dataform as a code asset: a re
   "with its Version history and permissions.";
 const BQ_NO_DATAFORM = "Saving notebooks and data canvases needs the Dataform API, which this instance does not serve " +
   "(start it with --services including dataform).";
-const BQ_NO_RUNTIME = "Not available locally: Python runs on a Colab Enterprise runtime, which CloudBurrow does not serve. " +
-  "SQL cells (%%bigquery) run against this instance's BigQuery.";
 const BQ_ASSET_KIND = { sql: "saved query", notebook: "notebook", data_canvas: "data canvas" };
 const BQ_STUDIO_CLOSED = "cloudburrow.bigquery.closed";
 
@@ -21482,20 +21480,28 @@ function bqSchemaText(tables) {
 
 // --- Notebooks -------------------------------------------------------------
 //
-// A notebook tab, as Google's Colab Enterprise notebook in Studio draws it:
-// Connect, + Code and + Text, Run all, Save and Version history over cells.
-// Kept as an .ipynb document in its Dataform asset. A code cell that starts
-// with %%bigquery is a SQL cell and runs against this instance's BigQuery
-// (its rows below it); any other code cell is Python, which needs a Colab
-// Enterprise runtime CloudBurrow does not serve, so it is kept and shown,
-// not run.
+// A notebook tab, as Google's Colab Enterprise notebook in Studio draws it
+// (https://docs.cloud.google.com/bigquery/docs/create-notebooks): Connect,
+// + Code and + Text, Run all, Save and Version history over cells. Kept as
+// an .ipynb document in its Dataform asset, each code cell's outputs and
+// execution count with it. Connect starts the notebook's runtime
+// (internal/nbruntime: IPython with Google's BigQuery client and
+// bigquery-magics, the stand-in for a Colab Enterprise runtime, whose only
+// route is this instance's BigQuery), and every code cell runs there: Python
+// with its state kept between cells, and %%bigquery cells as bigquery-magics
+// runs them. Running a cell connects first, as Colab does. Without a
+// runtime, a %%bigquery cell still runs its SQL on this instance's BigQuery.
+
+const BQ_RUNTIME_NOTE = "Python runs on this instance's notebook runtime (IPython, Google's BigQuery client and %%bigquery), " +
+  "CloudBurrow's stand-in for a Colab Enterprise runtime: its only route is this instance's BigQuery, so pip install and other downloads fail.";
 
 const BQ_NOTEBOOK_TEMPLATES = [
   ["Empty notebook", []],
   ["BigQuery template", [
-    ["markdown", "# Explore a table\nRun the SQL cells against this instance's BigQuery. Python cells need a Colab Enterprise runtime."],
+    ["markdown", "# Explore a table\nConnect, then run the cells: %%bigquery cells run their SQL on this instance's BigQuery and Python cells on the notebook runtime."],
     ["code", "%%bigquery\nSELECT table_schema, table_name, table_type\nFROM `region-us`.INFORMATION_SCHEMA.TABLES\nORDER BY table_schema, table_name"],
     ["code", "%%bigquery\nSELECT CURRENT_DATE() AS today, SESSION_USER() AS user"],
+    ["code", "from google.cloud import bigquery\n\nclient = bigquery.Client()\ndf = client.query(\"SELECT 1 AS x, 'a' AS y\").to_dataframe()\ndf"],
   ]],
 ];
 
@@ -21504,22 +21510,121 @@ function bqNotebookDoc(cells) {
     cells: cells.map(([cell_type, source]) => ({ cell_type, source, metadata: {}, ...(cell_type === "code" ? { outputs: [], execution_count: null } : {}) })) }, null, 1);
 }
 
+const bqRuntimeCall = (op, key, extra = {}) => bqStudioCall("runtime", { op, key, ...extra });
+
+// bqNotebookOutputs draws a code cell's outputs (nbformat 4): streams and
+// tracebacks as text, images as images, and HTML (a DataFrame's table) in
+// a sandboxed frame, never in the console's own page.
+function bqNotebookOutputs(outputs) {
+  const text = (v) => (Array.isArray(v) ? v.join("") : String(v == null ? "" : v));
+  return (outputs || []).map((o) => {
+    if (o.output_type === "stream") {
+      return el("pre", { class: "bq-nb-stream" + (o.name === "stderr" ? " is-stderr" : ""), text: text(o.text) });
+    }
+    if (o.output_type === "error") {
+      return el("pre", { class: "bq-nb-error", role: "alert", text: (o.traceback && o.traceback.length ? o.traceback.join("\n") : `${o.ename}: ${o.evalue}`) });
+    }
+    const data = o.data || {};
+    const img = ["image/png", "image/jpeg", "image/gif"].find((k) => data[k]);
+    if (img) return el("img", { class: "bq-nb-image", src: `data:${img};base64,${text(data[img]).replace(/\s+/g, "")}`, alt: text(data["text/plain"]) || "Cell output image" });
+    if (data["text/html"]) {
+      // Not a Tab stop: the frame is drawn at its content's full size, so
+      // there is nothing in it to scroll or reach.
+      const frame = el("iframe", { class: "bq-nb-html", sandbox: "allow-same-origin", title: "Cell output", referrerpolicy: "no-referrer", tabindex: "-1" });
+      frame.srcdoc = `<!doctype html><meta charset="utf-8"><style>body{font:13px/1.4 Roboto,Arial,sans-serif;margin:4px;color:#202124;background:#fff}` +
+        `table{border-collapse:collapse}th,td{border:1px solid #dadce0;padding:2px 6px;text-align:right}</style>${text(data["text/html"])}`;
+      frame.addEventListener("load", () => {
+        try {
+          const body = frame.contentDocument.body;
+          frame.style.height = (body.scrollHeight + 16) + "px";
+          frame.style.width = Math.max(frame.parentElement.clientWidth, body.scrollWidth + 16) + "px";
+        } catch { /* sandboxed */ }
+      });
+      return el("div", { class: "bq-nb-html-wrap" }, frame, el("details", {}, el("summary", { text: "Text" }), el("pre", { class: "bq-nb-stream", text: text(data["text/plain"]) })));
+    }
+    return el("pre", { class: "bq-nb-stream", text: text(data["text/plain"] || data["text/markdown"] || JSON.stringify(data)) });
+  });
+}
+
 function bqNotebookTab(tab, ctx) {
   let doc;
   try { doc = JSON.parse(tab.query || ""); } catch { doc = JSON.parse(bqNotebookDoc([])); }
   if (!Array.isArray(doc.cells)) doc.cells = [];
+  // The runtime's key: the saved notebook's, or one of its own, never the
+  // tab's number, which another browser's tab reuses.
+  if (!tab.runtimeKey) tab.runtimeKey = tab.savedId || `nb-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  const key = tab.runtimeKey;
   const text = (c) => (Array.isArray(c.source) ? c.source.join("") : String(c.source || ""));
   const keep = () => { tab.query = JSON.stringify(doc, null, 1); ctx.save(); };
   const cellsHost = el("ol", { class: "bq-nb-cells", "aria-label": "Cells" });
   const isSql = (c) => c.cell_type === "code" && /^\s*%%bigquery\b/.test(text(c));
-  const runCell = async (c, out) => {
-    if (c.cell_type !== "code") return;
-    if (!isSql(c)) { setChildren(out, el("p", { class: "unavailable", text: BQ_NO_RUNTIME })); return; }
-    const sql = text(c).replace(/^\s*%%bigquery[^\n]*\n?/, "");
+  let runtime = { state: "DISCONNECTED" };
+  const status = el("p", { class: "unavailable bq-nb-runtime", role: "status", "aria-live": "polite" });
+  const connectBtn = el("button", { type: "button", class: "secondary", text: "Connect" });
+  const interruptBtn = el("button", { type: "button", class: "secondary", text: "Interrupt execution" });
+  const restartBtn = el("button", { type: "button", class: "secondary", text: "Restart session" });
+  const deleteBtn = el("button", { type: "button", class: "secondary", text: "Disconnect and delete runtime" });
+  const showRuntime = (r) => {
+    runtime = r || { state: "DISCONNECTED" };
+    const on = runtime.state === "CONNECTED";
+    const busy = runtime.state === "BUILDING" || runtime.state === "STARTING";
+    connectBtn.textContent = on ? "Connected" : busy ? "Connecting…" : "Connect";
+    connectBtn.disabled = on || busy;
+    connectBtn.setAttribute("aria-pressed", on ? "true" : "false");
+    interruptBtn.hidden = restartBtn.hidden = deleteBtn.hidden = !on;
+    status.className = runtime.state === "FAILED" ? "form-error bq-nb-runtime" : "unavailable bq-nb-runtime";
+    status.textContent = on ? `Connected to a runtime: Python ${runtime.python}, project ${runtime.project}, idle shutdown after ${runtime.idleShutdown}.`
+      : busy ? (runtime.message || "Starting the runtime…")
+        : runtime.state === "FAILED" ? `The runtime failed: ${runtime.message}` : "Not connected.";
+  };
+  // connect starts the runtime and waits for it, as Colab's Connect does.
+  const connect = async () => {
+    let r = await bqRuntimeCall("connect", key);
+    showRuntime(r);
+    while (r.state === "BUILDING" || r.state === "STARTING") {
+      await new Promise((ok) => setTimeout(ok, 1000));
+      r = await bqRuntimeCall("status", key);
+      showRuntime(r);
+    }
+    if (r.state !== "CONNECTED") throw new Error(`The runtime failed: ${r.message || r.state}`);
+    announce("Connected to a runtime");
+    return r;
+  };
+  connectBtn.addEventListener("click", () => connect().catch((err) => { showRuntime({ state: "FAILED", message: err.message }); }));
+  interruptBtn.addEventListener("click", () => bqRuntimeCall("interrupt", key).then(() => announce("Interrupted")).catch((err) => notify(err.message, "error")));
+  restartBtn.addEventListener("click", async () => {
+    try {
+      showRuntime({ state: "STARTING", message: "Restarting the session…" });
+      showRuntime(await bqRuntimeCall("restart", key));
+      await connect();
+      for (const c of doc.cells) if (c.cell_type === "code") c.execution_count = null;
+      keep(); draw();
+      announce("Session restarted");
+    } catch (err) { showRuntime({ state: "FAILED", message: err.message }); }
+  });
+  deleteBtn.addEventListener("click", async () => {
+    showRuntime({ state: "STARTING", message: "Deleting the runtime…" });
+    try { await bqRuntimeCall("disconnect", key); showRuntime({ state: "DISCONNECTED" }); announce("Runtime deleted"); } catch (err) { showRuntime({ state: "FAILED", message: err.message }); }
+  });
+  const runCell = async (c, out, label) => {
+    if (c.cell_type !== "code") return true;
     setChildren(out, spinner("Running cell"));
     try {
+      if (runtime.state !== "CONNECTED" && !isSql(c)) await connect();
+      if (runtime.state === "CONNECTED") {
+        const res = await bqRuntimeCall("run", key, { code: text(c) });
+        c.outputs = res.outputs || [];
+        c.execution_count = res.execution_count;
+        keep();
+        if (label) label.textContent = `[${res.execution_count}]`;
+        setChildren(out, ...bqNotebookOutputs(c.outputs));
+        return res.status === "ok";
+      }
+      // No runtime: the SQL of a %%bigquery cell runs on this instance's
+      // BigQuery as a query job, its rows drawn under the cell.
+      const sql = text(c).replace(/^\s*%%bigquery[^\n]*\n?/, "");
       const res = await bqStudioCall("query", { query: sql, legacySql: false, priority: "INTERACTIVE" });
-      if (res.confirm) { setChildren(out, el("p", { class: "unavailable", text: "A statement that changes data runs from a SQL query tab, which asks first." })); return; }
+      if (res.confirm) { setChildren(out, el("p", { class: "unavailable", text: "A statement that changes data runs from a SQL query tab, which asks first, or on a connected runtime." })); return false; }
       const cols = (res.schema || []).map((f) => f.name);
       setChildren(out, el("p", { class: "unavailable", text: `${res.totalRows} rows` }),
         el("div", { class: "table-scroll" }, el("table", { class: "bq-nb-table" },
@@ -21527,32 +21632,45 @@ function bqNotebookTab(tab, ctx) {
           el("tbody", {}, ...(res.rows || []).slice(0, 100).map((r) => el("tr", {}, ...cols.map((k) => el("td", { text: cellText(r[k]) }))))))));
       c.outputs = [{ output_type: "execute_result", data: { "text/plain": `${res.totalRows} rows` }, metadata: {}, execution_count: null }];
       keep();
+      return true;
     } catch (err) {
       setChildren(out, el("p", { class: "form-error", role: "alert", text: err.message }));
+      return false;
     }
   };
   const draw = () => setChildren(cellsHost, ...doc.cells.map((c, i) => {
     const area = el("textarea", { class: "query-editor mono bq-nb-source", rows: String(Math.max(3, text(c).split("\n").length)),
       spellcheck: "false", "aria-label": `Cell ${i + 1}, ${c.cell_type === "markdown" ? "text" : isSql(c) ? "SQL" : "Python"}` });
     area.value = text(c);
-    const out = el("div", { class: "bq-nb-output", role: "status" });
+    const out = el("div", { class: "bq-nb-output", role: "status" }, ...(c.cell_type === "code" ? bqNotebookOutputs(c.outputs) : []));
+    const count = el("span", { class: "mono bq-nb-count", text: c.cell_type === "code" ? `[${c.execution_count == null ? " " : c.execution_count}]` : "" });
     area.addEventListener("input", () => { c.source = area.value; keep(); });
+    // Shift+Enter runs the cell, as in Colab.
+    area.addEventListener("keydown", (e) => { if (e.key === "Enter" && e.shiftKey && c.cell_type === "code") { e.preventDefault(); runCell(c, out, count); } });
     return el("li", { class: "bq-nb-cell bq-nb-" + c.cell_type },
-      el("div", { class: "bq-nb-cell-bar" },
+      el("div", { class: "bq-nb-cell-bar" }, count,
         el("span", { class: "unavailable", text: c.cell_type === "markdown" ? "Text" : isSql(c) ? "SQL (%%bigquery)" : "Python" }),
-        c.cell_type === "code" ? el("button", { type: "button", class: "secondary", text: "Run cell", "aria-label": `Run cell ${i + 1}`, onclick: () => runCell(c, out) }) : null,
+        c.cell_type === "code" ? el("button", { type: "button", class: "secondary", text: "Run cell", "aria-label": `Run cell ${i + 1}`, onclick: () => runCell(c, out, count) }) : null,
         el("button", { type: "button", class: "secondary", text: "Delete cell", "aria-label": `Delete cell ${i + 1}`, onclick: () => { doc.cells.splice(i, 1); keep(); draw(); } })),
       area, out);
   }));
   const addCell = (type, source) => { doc.cells.push({ cell_type: type, source, metadata: {}, ...(type === "code" ? { outputs: [], execution_count: null } : {}) }); keep(); draw(); };
   const runAll = async () => {
-    const outs = [...cellsHost.querySelectorAll(".bq-nb-output")];
-    for (let i = 0; i < doc.cells.length; i++) await runCell(doc.cells[i], outs[i]);
+    const items = [...cellsHost.querySelectorAll(".bq-nb-cell")];
+    for (let i = 0; i < doc.cells.length; i++) {
+      // Run all stops at the first cell that fails, as Colab's does.
+      if (!(await runCell(doc.cells[i], items[i].querySelector(".bq-nb-output"), items[i].querySelector(".bq-nb-count")))) { announce(`Run all stopped at cell ${i + 1}`); return; }
+    }
     announce("Run all finished");
   };
   draw();
+  showRuntime(runtime);
+  bqRuntimeCall("status", key).then(showRuntime).catch((err) => {
+    connectBtn.disabled = true;
+    status.textContent = `${err.message}. %%bigquery cells still run on this instance's BigQuery.`;
+  });
   const toolbar = el("div", { class: "bq-toolbar", role: "toolbar", "aria-label": "Notebook actions" },
-    el("button", { type: "button", class: "secondary", text: "Connect", disabled: true, title: BQ_NO_RUNTIME, "aria-description": BQ_NO_RUNTIME }),
+    connectBtn, interruptBtn, restartBtn, deleteBtn,
     el("button", { type: "button", class: "secondary", text: "+ Code", onclick: () => addCell("code", "") }),
     el("button", { type: "button", class: "secondary", text: "+ SQL", onclick: () => addCell("code", "%%bigquery\n") }),
     el("button", { type: "button", class: "secondary", text: "+ Text", onclick: () => addCell("markdown", "") }),
@@ -21561,8 +21679,8 @@ function bqNotebookTab(tab, ctx) {
     el("button", { type: "button", class: "secondary", text: "Version history", disabled: tab.savedId ? null : true,
       title: tab.savedId ? null : "Save the notebook first", onclick: () => bqVersionHistory({ id: tab.savedId, name: tab.title, kind: "notebook" }, (content, title) => ctx.openAsset("notebook", content, title)) }),
     tab.savedId ? el("button", { type: "button", class: "secondary", text: "Share", onclick: () => bqManagePermissions({ id: tab.savedId, name: tab.title }) }) : null);
-  return el("div", { class: "bq-notebook" }, toolbar,
-    el("p", { class: "unavailable bq-hint", text: BQ_NO_RUNTIME + " " + (bqDataformOn() ? BQ_DATAFORM_NOTE : BQ_NO_DATAFORM) }),
+  return el("div", { class: "bq-notebook" }, toolbar, status,
+    el("p", { class: "unavailable bq-hint", text: BQ_RUNTIME_NOTE + " " + (bqDataformOn() ? BQ_DATAFORM_NOTE : BQ_NO_DATAFORM) }),
     cellsHost);
 }
 
@@ -21570,20 +21688,57 @@ function bqNotebookTab(tab, ctx) {
 //
 // A data canvas tab, in Google's nodes
 // (https://docs.cloud.google.com/bigquery/docs/data-canvas, read
-// 2026-11-21): Search (tables of this project by name, or by a natural
+// 2026-11-22): Search (tables of this project by name, or by a natural
 // language question the local model answers), Table (schema and preview,
-// with Query these results, Join and Visualize), SQL (written, or
-// generated from a prompt by the local model, then Run), Visualization
-// (bar, line, pie or scatter of a parent's result) and Text. Each node
-// lists its parents, so the canvas is a directed graph, saved as JSON in
-// its Dataform asset. Google's natural language steps are Gemini in
-// BigQuery's; here they are the instance's local model, and unverified
-// against Google's.
+// with Query these results, Join, Visualize and Generate insights), SQL
+// (written, or generated from a prompt by the local model, then Run, Save
+// to table, Export as notebook), Destination (a SQL node's result saved to
+// a new or existing table of a new or existing dataset, kept updated when
+// its SQL node runs while its SQL toggle is on, or Detached into a table
+// node), Visualization (Auto-Chart, bar, heat map, line, pie or scatter of a
+// parent's result, Export as PNG), Insights (the parent's statistics and
+// data quality, computed by a query over the whole result, and a summary by
+// the local model) and Text. Each node lists its parents, so the canvas is
+// a directed graph, saved as JSON in its Dataform asset. The Data Canvas
+// Assistant (Open Data Canvas Assistant) takes a data question with its
+// Settings (Add Data, Instructions) and adds the nodes that answer it. The
+// natural language steps are Gemini in BigQuery's at Google; here they are
+// the instance's local model, and unverified against Google's.
+
+const BQ_CANVAS_CHARTS = ["Auto-Chart", "Bar", "Heat map", "Line", "Pie", "Scatter"];
+
+// bqAutoChart is Auto-Chart's choice: a line over time, a scatter of two
+// numbers, a pie of a few categories, else bars.
+function bqAutoChart(res, viz) {
+  const f = (res.schema || []).find((x) => x.name === viz.dimension) || {};
+  if (["TIMESTAMP", "DATE", "DATETIME", "TIME"].includes(f.type)) return "Line";
+  if (BQ_MEASURE_TYPES.includes(f.type)) return "Scatter";
+  const distinct = new Set((res.rows || []).map((r) => cellText(r[viz.dimension]))).size;
+  return distinct > 1 && distinct <= 6 && viz.measures.length === 1 ? "Pie" : "Bar";
+}
+
+// bqInsightsSQL profiles a query's whole result: its row count, then each
+// column's nulls and distinct values, and a number's minimum, maximum,
+// average and standard deviation.
+function bqInsightsSQL(sql, schema) {
+  const q = (n) => "`" + n.replace(/`/g, "") + "`";
+  const parts = ["COUNT(*) AS row_count"];
+  schema.filter((f) => (f.mode || "NULLABLE") !== "REPEATED" && f.type !== "RECORD" && f.type !== "STRUCT").forEach((f, i) => {
+    parts.push(`COUNTIF(${q(f.name)} IS NULL) AS c${i}_nulls`);
+    if (f.type !== "GEOGRAPHY" && f.type !== "JSON") parts.push(`COUNT(DISTINCT ${q(f.name)}) AS c${i}_distinct`);
+    if (BQ_MEASURE_TYPES.includes(f.type)) {
+      parts.push(`MIN(${q(f.name)}) AS c${i}_min`, `MAX(${q(f.name)}) AS c${i}_max`,
+        `AVG(CAST(${q(f.name)} AS FLOAT64)) AS c${i}_avg`, `STDDEV(CAST(${q(f.name)} AS FLOAT64)) AS c${i}_stddev`);
+    }
+  });
+  return `SELECT ${parts.join(", ")}\nFROM (\n${sql}\n)`;
+}
 
 function bqCanvasTab(tab, ctx) {
   let doc;
   try { doc = JSON.parse(tab.query || ""); } catch { doc = null; }
   if (!doc || !Array.isArray(doc.nodes)) doc = { nodes: [] };
+  if (!doc.assistant) doc.assistant = { tables: [], instructions: "", chat: [] };
   let next = doc.nodes.reduce((n, x) => Math.max(n, x.id), 0);
   const results = {};
   const keep = () => { tab.query = JSON.stringify(doc); ctx.save(); };
@@ -21595,67 +21750,146 @@ function bqCanvasTab(tab, ctx) {
     if (!t) return [];
     return t.datasets.flatMap((ds) => ds.tables.filter((x) => x.type !== "MODEL").map((x) => ({ ref: `${t.project}.${ds.id}.${x.id}`, dataset: ds.id, id: x.id })));
   };
-  const sqlOf = (n) => (n.type === "table" ? `SELECT * FROM \`${n.ref}\`` : n.sql || "");
+  const datasets = () => ((ctx.tree() || {}).datasets || []).map((d) => d.id);
+  const project = () => (ctx.tree() || {}).project || currentProject();
+  const q = (s) => "`" + String(s).replace(/`/g, "") + "`";
+  // A Destination node, once saved, reads as its table.
+  const refOf = (n) => (n.type === "table" ? n.ref : n.type === "dest" && n.saved ? `${project()}.${n.dataset}.${n.table}` : "");
+  const sqlOf = (n) => (refOf(n) ? `SELECT * FROM ${q(refOf(n))}` : n.sql || "");
+  const queryOf = async (sql, write) => {
+    const res = await bqStudioCall("query", { query: sql, legacySql: false, priority: "INTERACTIVE", write: !!write });
+    if (res.confirm) throw new Error("A statement that changes data runs from a SQL query tab, which asks first.");
+    return res;
+  };
   const runNode = async (n, out) => {
     setChildren(out, spinner("Running"));
     try {
-      const res = await bqStudioCall("query", { query: n.type === "table" ? `${sqlOf(n)} LIMIT 100` : sqlOf(n), legacySql: false, priority: "INTERACTIVE" });
-      if (res.confirm) { setChildren(out, el("p", { class: "unavailable", text: "A statement that changes data runs from a SQL query tab, which asks first." })); return; }
-      results[n.id] = res;
+      results[n.id] = await queryOf(refOf(n) ? `${sqlOf(n)} LIMIT 100` : sqlOf(n));
       drawResult(n, out);
+      // A Destination node with its SQL toggle on follows its SQL node.
+      if (n.type === "sql") {
+        for (const d of doc.nodes.filter((x) => x.type === "dest" && x.sync && x.saved && x.parents.includes(n.id))) await saveDest(d, null);
+      }
+      return true;
     } catch (err) {
       setChildren(out, el("p", { class: "form-error", role: "alert", text: err.message }));
+      return false;
     }
   };
   const drawResult = (n, out) => {
     const res = results[n.id];
-    if (!res) return;
+    if (!res || !out) return;
     const cols = (res.schema || []).map((f) => f.name);
     setChildren(out,
-      n.type === "table" ? el("p", { class: "unavailable", text: "Schema: " + (res.schema || []).map((f) => `${f.name} ${f.type}`).join(", ") }) : null,
+      refOf(n) ? el("p", { class: "unavailable", text: "Schema: " + (res.schema || []).map((f) => `${f.name} ${f.type}`).join(", ") }) : null,
       el("div", { class: "table-scroll" }, el("table", { class: "bq-nb-table" },
         el("thead", {}, el("tr", {}, ...cols.map((h) => el("th", { scope: "col", text: h })))),
         el("tbody", {}, ...(res.rows || []).slice(0, 20).map((r) => el("tr", {}, ...cols.map((k) => el("td", { text: cellText(r[k]) }))))))));
   };
-  const nodeTitle = (n) => ({ search: "Search", table: "Table", sql: "SQL", viz: "Visualization", text: "Text" })[n.type] + ` ${n.id}`;
+  const nodeTitle = (n) => ({ search: "Search", table: "Table", sql: "SQL", viz: "Visualization", text: "Text", dest: "Destination", insights: "Insights" })[n.type] + ` ${n.id}`;
   const nodeActions = (n, out) => {
-    if (!["table", "sql"].includes(n.type)) return null;
+    if (!["table", "sql"].includes(n.type) && !(n.type === "dest" && n.saved)) return null;
     return el("div", { class: "bq-canvas-actions" },
       el("button", { type: "button", class: "secondary", text: "Run", "aria-label": `Run ${nodeTitle(n)}`, onclick: () => runNode(n, out) }),
       el("button", { type: "button", class: "secondary", text: "Query these results", "aria-label": `Query these results of ${nodeTitle(n)}`,
         onclick: () => add({ type: "sql", parents: [n.id], sql: `SELECT *\nFROM (\n${sqlOf(n)}\n)\nLIMIT 1000` }) }),
       el("button", { type: "button", class: "secondary", text: "Join", "aria-label": `Join ${nodeTitle(n)}`, onclick: () => joinFrom(n) }),
       el("button", { type: "button", class: "secondary", text: "Visualize", "aria-label": `Visualize ${nodeTitle(n)}`,
-        onclick: () => add({ type: "viz", parents: [n.id], chart: "Bar" }) }));
+        onclick: () => add({ type: "viz", parents: [n.id], chart: "Auto-Chart" }) }),
+      el("button", { type: "button", class: "secondary", text: "Generate insights", "aria-label": `Generate insights of ${nodeTitle(n)}`,
+        onclick: () => add({ type: "insights", parents: [n.id] }) }),
+      n.type === "sql" ? el("button", { type: "button", class: "secondary", text: "Save to table", "aria-label": `Save ${nodeTitle(n)} to a table`,
+        onclick: () => add({ type: "dest", parents: [n.id], dataset: datasets()[0] || "", table: "", sync: true }) }) : null,
+      n.type === "sql" ? el("button", { type: "button", class: "secondary", text: "Export as notebook", "aria-label": `Export ${nodeTitle(n)} as notebook`,
+        onclick: () => ctx.openAsset("notebook", bqNotebookDoc([["code", "%%bigquery\n" + sqlOf(n)]]), `${tab.title} SQL ${n.id}`) }) : null);
   };
   const joinFrom = (n) => {
-    const others = doc.nodes.filter((x) => x.type === "table" && x.id !== n.id);
+    const others = doc.nodes.filter((x) => refOf(x) && x.id !== n.id);
     if (!others.length) { notify("Join needs a second table on the canvas: add one from a Search node.", "error"); return; }
     const o = others[0];
     add({ type: "sql", parents: [n.id, o.id], prompt: "", sql: `SELECT *\nFROM (${sqlOf(n)}) AS a\nJOIN (${sqlOf(o)}) AS b\nON a.<column> = b.<column>` });
+  };
+  // saveDest writes the parent SQL node's whole result to the node's table:
+  // the dataset made if it is new, the table made or replaced.
+  const saveDest = async (n, status) => {
+    const parent = byId(n.parents[0]);
+    const say = (cls, t) => { if (status) { status.className = cls; status.textContent = t; } };
+    if (!parent || parent.type !== "sql") { say("form-error", "A Destination node saves a SQL node's result: it has none."); return; }
+    if (!/^[A-Za-z0-9_]{1,1024}$/.test(n.dataset || "")) { say("form-error", "Dataset: letters, numbers and underscores only."); return; }
+    if (!/^[\p{L}\p{M}\p{N}\p{Pc}\p{Pd} ]{1,1024}$/u.test(n.table || "")) { say("form-error", "Table: enter a table name."); return; }
+    say("unavailable", "Saving…");
+    try {
+      if (!datasets().includes(n.dataset)) await queryOf(`CREATE SCHEMA IF NOT EXISTS ${q(project() + "." + n.dataset)}`, true);
+      await queryOf(`CREATE OR REPLACE TABLE ${q(`${project()}.${n.dataset}.${n.table}`)} AS\n${parent.sql}`, true);
+      n.saved = true; keep();
+      say("unavailable", `Saved to ${project()}.${n.dataset}.${n.table}.`);
+      announce(`Saved to table ${n.table}`);
+      if (status) draw();
+    } catch (err) { say("form-error", err.message); }
+  };
+  const runInsights = async (n, out) => {
+    const parent = byId(n.parents[0]);
+    if (!parent) { setChildren(out, el("p", { class: "form-error", role: "alert", text: "Insights need a table or SQL node." })); return; }
+    setChildren(out, spinner("Generating insights"));
+    try {
+      const sample = results[parent.id] || await queryOf(`${sqlOf(parent)} LIMIT 100`);
+      const schema = sample.schema || [];
+      const prof = await queryOf(bqInsightsSQL(sqlOf(parent), schema));
+      const row = (prof.rows || [])[0] || {};
+      const usable = schema.filter((f) => (f.mode || "NULLABLE") !== "REPEATED" && f.type !== "RECORD" && f.type !== "STRUCT");
+      const total = Number(row.row_count || 0);
+      const lines = usable.map((f, i) => {
+        const nulls = Number(row[`c${i}_nulls`] || 0), distinct = row[`c${i}_distinct`];
+        const facts = [`${nulls} null${nulls === 1 ? "" : "s"}${total ? ` (${((100 * nulls) / total).toFixed(1)}%)` : ""}`];
+        if (distinct !== undefined) facts.push(`${distinct} distinct`);
+        if (row[`c${i}_min`] !== undefined) facts.push(`min ${cellText(row[`c${i}_min`])}`, `max ${cellText(row[`c${i}_max`])}`,
+          `average ${bqShortNumber(Number(row[`c${i}_avg`] || 0))}`, `standard deviation ${row[`c${i}_stddev`] == null ? "n/a" : bqShortNumber(Number(row[`c${i}_stddev`]))}`);
+        const flags = [];
+        if (total && nulls / total > 0.2) flags.push("many nulls");
+        if (total > 1 && distinct !== undefined && Number(distinct) === total) flags.push("unique: a candidate key");
+        if (distinct !== undefined && Number(distinct) === 1 && total > 1) flags.push("one value");
+        return { name: f.name, type: f.type, text: facts.join(", "), flags };
+      });
+      n.insights = { rows: total, columns: lines };
+      keep();
+      const body = [el("p", { text: `${total} rows, ${usable.length} columns.` }),
+        el("ul", { class: "bq-canvas-stats" }, ...lines.map((l) => el("li", {}, el("strong", { text: `${l.name} (${l.type}): ` }),
+          el("span", { text: l.text }), l.flags.length ? el("span", { class: "bq-canvas-flag", text: ` · ${l.flags.join(", ")}` }) : null)))];
+      setChildren(out, ...body, spinner("Asking the local model for a summary"));
+      try {
+        n.summary = await bqLocalModel(`Summarize the trends, patterns, anomalies and data quality of this BigQuery result in at most five short bullet points.\n` +
+          `Rows: ${total}\nColumns:\n${lines.map((l) => `${l.name} ${l.type}: ${l.text}`).join("\n")}\nSample rows (JSON):\n${JSON.stringify((sample.rows || []).slice(0, 20))}`);
+        keep();
+        setChildren(out, ...body, el("h4", { text: "Summary (local model)" }), el("p", { class: "bq-canvas-summary", text: n.summary }));
+      } catch (err) {
+        setChildren(out, ...body, el("p", { class: "unavailable", text: err.message }));
+      }
+    } catch (err) {
+      setChildren(out, el("p", { class: "form-error", role: "alert", text: err.message }));
+    }
   };
   const drawNode = (n) => {
     const out = el("div", { class: "bq-nb-output", role: "status" });
     const parents = n.parents.map(byId).filter(Boolean);
     const body = [];
     if (n.type === "search") {
-      const q = el("input", { type: "search", id: `bq-canvas-q-${n.id}`, value: n.query || "", "aria-label": `Search ${n.id}: tables to find` });
+      const q2 = el("input", { type: "search", id: `bq-canvas-q-${n.id}`, value: n.query || "", "aria-label": `Search ${n.id}: tables to find` });
       const list = el("ul", { class: "bq-canvas-found" });
       const show = (refs) => setChildren(list, ...(refs.length ? refs.map((t) => el("li", {}, el("span", { class: "mono", text: t.ref + " " }),
         el("button", { type: "button", class: "secondary", text: "Add to canvas", "aria-label": `Add ${t.ref} to canvas`,
           onclick: () => add({ type: "table", parents: [n.id], ref: t.ref }) })))
         : [el("li", { class: "unavailable", text: "No tables match." })]));
-      const find = () => { n.query = q.value; keep(); const w = q.value.toLowerCase().split(/\s+/).filter(Boolean); show(tables().filter((t) => w.every((x) => t.ref.toLowerCase().includes(x)))); };
+      const find = () => { n.query = q2.value; keep(); const w = q2.value.toLowerCase().split(/\s+/).filter(Boolean); show(tables().filter((t) => w.every((x) => t.ref.toLowerCase().includes(x)))); };
       const ask = async () => {
-        n.query = q.value; keep();
+        n.query = q2.value; keep();
         setChildren(list, spinner("Asking the local model"));
         try {
           const all = tables();
-          const answer = await bqLocalModel(`Which of these BigQuery tables answer: "${q.value}"? Reply with the table names only, one per line.\n${all.map((t) => t.ref).join("\n")}`);
+          const answer = await bqLocalModel(`Which of these BigQuery tables answer: "${q2.value}"? Reply with the table names only, one per line.\n${all.map((t) => t.ref).join("\n")}`);
           show(all.filter((t) => answer.includes(t.ref) || answer.includes(t.id)));
         } catch (err) { setChildren(list, el("li", { class: "form-error", role: "alert", text: err.message })); }
       };
-      body.push(el("div", { class: "bq-canvas-row" }, q,
+      body.push(el("div", { class: "bq-canvas-row" }, q2,
         el("button", { type: "button", class: "secondary", text: "Search", onclick: find }),
         el("button", { type: "button", class: "secondary", text: "Ask in natural language", onclick: ask })), list);
     } else if (n.type === "table") {
@@ -21669,7 +21903,7 @@ function bqCanvasTab(tab, ctx) {
       const generate = async () => {
         n.prompt = prompt.value; keep();
         try {
-          const ctxTables = parents.filter((p) => p.type === "table").map((p) => ({ ref: p.ref, schema: (results[p.id] || {}).schema }));
+          const ctxTables = parents.filter((p) => refOf(p)).map((p) => ({ ref: refOf(p), schema: (results[p.id] || {}).schema }));
           const answer = await bqLocalModel(`Write one GoogleSQL query for BigQuery. Tables:\n${bqSchemaText(ctxTables.length ? ctxTables : tables())}\nRequest: ${prompt.value}\nAnswer with the SQL only.`);
           area.value = bqSqlOf(answer);
           n.sql = area.value; keep();
@@ -21677,19 +21911,52 @@ function bqCanvasTab(tab, ctx) {
         } catch (err) { notify(err.message, "error"); }
       };
       body.push(el("div", { class: "bq-canvas-row" }, prompt, el("button", { type: "button", class: "secondary", text: "Generate", onclick: generate })), area);
+    } else if (n.type === "dest") {
+      const id = `bq-canvas-d-${n.id}`;
+      const status = el("p", { class: "unavailable", role: "status", text: n.saved ? `Saved to ${project()}.${n.dataset}.${n.table}.` : "Not saved yet." });
+      const dsList = el("datalist", { id: `${id}-datasets` }, ...datasets().map((d) => el("option", { value: d })));
+      const ds = el("input", { type: "text", id: `${id}-ds`, value: n.dataset || "", list: `${id}-datasets`, autocomplete: "off" });
+      const tbList = el("datalist", { id: `${id}-tables` }, ...tables().filter((t) => t.dataset === n.dataset).map((t) => el("option", { value: t.id })));
+      const tb = el("input", { type: "text", id: `${id}-tb`, value: n.table || "", list: `${id}-tables`, autocomplete: "off" });
+      ds.addEventListener("input", () => { n.dataset = ds.value.trim(); n.saved = false; keep(); });
+      tb.addEventListener("input", () => { n.table = tb.value.trim(); n.saved = false; keep(); });
+      const sync = el("input", { type: "checkbox", id: `${id}-sync`, role: "switch" });
+      sync.checked = !!n.sync;
+      sync.addEventListener("change", () => { n.sync = sync.checked; keep(); });
+      body.push(el("div", { class: "bq-canvas-dest-fields" },
+        el("label", { for: `${id}-ds`, text: "Dataset (new or existing)" }), ds, dsList,
+        el("label", { for: `${id}-tb`, text: "Table (new or existing)" }), tb, tbList),
+        el("div", { class: "bq-canvas-row" },
+          el("label", { class: "check-line", for: `${id}-sync` }, sync, el("span", { text: " SQL: keep the table updated when the SQL node runs" }))),
+        el("div", { class: "bq-canvas-row" },
+          el("button", { type: "button", class: "primary", text: "Save", "aria-label": `Save ${nodeTitle(n)}`, onclick: () => saveDest(n, status) }),
+          el("button", { type: "button", class: "secondary", text: "Detach", "aria-label": `Detach ${nodeTitle(n)}`, disabled: n.saved ? null : true,
+            title: n.saved ? "A table node that no longer follows its SQL node" : "Save the table first",
+            onclick: () => { Object.assign(n, { type: "table", ref: refOf(n), parents: [] }); keep(); draw(); announce("Detached into a table node"); } })),
+        status);
+    } else if (n.type === "insights") {
+      body.push(el("div", { class: "bq-canvas-row" },
+        el("button", { type: "button", class: "secondary", text: "Run", "aria-label": `Run ${nodeTitle(n)}`, onclick: () => runInsights(n, out) })));
+      if (n.insights) {
+        setChildren(out, el("p", { text: `${n.insights.rows} rows, ${n.insights.columns.length} columns.` }),
+          el("ul", { class: "bq-canvas-stats" }, ...n.insights.columns.map((l) => el("li", {}, el("strong", { text: `${l.name} (${l.type}): ` }),
+            el("span", { text: l.text }), l.flags.length ? el("span", { class: "bq-canvas-flag", text: ` · ${l.flags.join(", ")}` }) : null))),
+          n.summary ? el("h4", { text: "Summary (local model)" }) : null, n.summary ? el("p", { class: "bq-canvas-summary", text: n.summary }) : null);
+      }
     } else if (n.type === "viz") {
       const chart = el("select", { id: `bq-canvas-c-${n.id}`, "aria-label": `Visualization ${n.id}: chart type`,
         onchange: (e) => { n.chart = e.target.value; keep(); draw(); } },
-        ...["Bar", "Line", "Scatter"].map((t) => { const o = el("option", { value: t, text: t }); o.selected = t === n.chart; return o; }));
+        ...BQ_CANVAS_CHARTS.map((t) => { const o = el("option", { value: t, text: t }); o.selected = t === (n.chart || "Auto-Chart"); return o; }));
       const chartHost = el("div", { class: "bq-chart-host" });
       const parent = parents[0];
       const drawIt = () => {
         const res = parent && results[parent.id];
         if (!res) { setChildren(chartHost, el("p", { class: "unavailable", text: "Run the parent node to chart its result." })); return; }
-        const viz = { type: n.chart || "Bar" };
+        const viz = { type: n.chart === "Auto-Chart" || !n.chart ? "Bar" : n.chart };
         const fit = bqVizDefaults(res, viz);
-        if (!fit.dims) { setChildren(chartHost, fit.empty); return; }
-        viz.type = n.chart || "Bar";
+        if (!fit.dims || viz.type === "Map") { setChildren(chartHost, fit.empty || el("p", { class: "unavailable", text: "Geomap charts aren't supported on a data canvas." })); return; }
+        viz.type = n.chart === "Auto-Chart" || !n.chart ? bqAutoChart(res, viz) : n.chart;
+        bqVizDefaults(res, viz);
         bqDrawChart(chartHost, res, fit.dims, viz);
       };
       body.push(el("div", { class: "bq-canvas-row" }, chart,
@@ -21715,20 +21982,100 @@ function bqCanvasTab(tab, ctx) {
     return node;
   };
   const draw = () => setChildren(host, ...(doc.nodes.length ? doc.nodes.map(drawNode)
-    : [el("li", { class: "unavailable", text: "Start with a Search, SQL or Text node from the toolbar." })]));
+    : [el("li", { class: "unavailable", text: "Start with a Search, SQL or Text node from the toolbar, or ask the Data Canvas Assistant." })]));
+
+  // The Data Canvas Assistant: a chat that adds nodes for a data question,
+  // over the tables chosen in its Settings (Add Data) and its Instructions.
+  const assistant = doc.assistant;
+  const chat = el("ol", { class: "bq-canvas-chat", "aria-label": "Assistant conversation" });
+  const drawChat = () => setChildren(chat, ...(assistant.chat.length ? assistant.chat.map((m) =>
+    el("li", { class: "bq-canvas-msg is-" + m.role }, el("strong", { text: m.role === "user" ? "You: " : "Assistant: " }), el("span", { text: m.text })))
+    : [el("li", { class: "unavailable", text: "Ask a data question about the tables in Settings." })]));
+  const settings = el("div", { class: "bq-canvas-settings", hidden: true });
+  const drawSettings = () => {
+    const all = tables();
+    setChildren(settings, el("h4", { text: "Add Data" }),
+      all.length ? el("ul", { class: "bq-canvas-found" }, ...all.map((t, i) => {
+        const box = el("input", { type: "checkbox", id: `bq-ca-t-${i}` });
+        box.checked = assistant.tables.includes(t.ref);
+        box.addEventListener("change", () => {
+          assistant.tables = box.checked ? [...new Set([...assistant.tables, t.ref])] : assistant.tables.filter((r) => r !== t.ref);
+          keep();
+        });
+        return el("li", {}, el("label", { class: "check-line", for: `bq-ca-t-${i}` }, box, el("span", { class: "mono", text: " " + t.ref })));
+      })) : el("p", { class: "unavailable", text: "This project has no tables." }),
+      el("label", { for: "bq-ca-instructions", text: "Instructions" }),
+      (() => { const a = el("textarea", { id: "bq-ca-instructions", rows: "3" }); a.value = assistant.instructions || ""; a.addEventListener("input", () => { assistant.instructions = a.value; keep(); }); return a; })());
+  };
+  const question = el("input", { type: "text", id: "bq-ca-question", placeholder: "Ask a data question", "aria-label": "Ask a data question" });
+  const ask = async () => {
+    const text = question.value.trim();
+    if (!text) return;
+    assistant.chat.push({ role: "user", text });
+    question.value = "";
+    keep(); drawChat();
+    try {
+      const chosen = tables().filter((t) => !assistant.tables.length || assistant.tables.includes(t.ref));
+      const withSchema = [];
+      for (const t of chosen.slice(0, 20)) {
+        let schema = [];
+        try { schema = (await queryOf(`SELECT * FROM ${q(t.ref)} LIMIT 0`)).schema || []; } catch { /* listed without columns */ }
+        withSchema.push({ ref: t.ref, schema });
+      }
+      const answer = await bqLocalModel("You build a BigQuery data canvas. Answer with JSON only: " +
+        '{"reply": "<one sentence>", "sql": "<one GoogleSQL query answering the question>", "chart": "Bar|Line|Pie|Scatter|Heat map|none"}.\n' +
+        `Tables:\n${bqSchemaText(withSchema)}\n` + (assistant.instructions ? `Instructions: ${assistant.instructions}\n` : "") + `Question: ${text}`);
+      let plan;
+      try { plan = JSON.parse((/\{[\s\S]*\}/.exec(answer) || [answer])[0]); } catch { plan = { reply: answer, sql: bqSqlOf(answer) }; }
+      const used = withSchema.filter((t) => plan.sql && plan.sql.includes(t.ref.split(".").pop()));
+      const parentIds = used.map((t) => (doc.nodes.find((x) => x.type === "table" && x.ref === t.ref) || add({ type: "table", ref: t.ref })).id);
+      let note = plan.reply || "Here is a query for that.";
+      if (plan.sql && /\bselect\b/i.test(plan.sql)) {
+        const sqlNode = add({ type: "sql", parents: parentIds, prompt: text, sql: String(plan.sql).trim() });
+        const ok = await runNode(sqlNode, host.querySelector(`[data-node="${sqlNode.id}"] .bq-nb-output`));
+        if (ok && plan.chart && plan.chart !== "none") add({ type: "viz", parents: [sqlNode.id], chart: BQ_CANVAS_CHARTS.includes(plan.chart) ? plan.chart : "Auto-Chart" });
+        note += ok ? ` Added SQL ${sqlNode.id}${plan.chart && plan.chart !== "none" ? " and a visualization" : ""}.` : ` SQL ${sqlNode.id} failed: edit it and run it again.`;
+      }
+      assistant.chat.push({ role: "assistant", text: note });
+    } catch (err) {
+      assistant.chat.push({ role: "assistant", text: err.message });
+    }
+    keep(); drawChat();
+  };
+  question.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); ask(); } });
+  const panel = el("aside", { class: "bq-canvas-assistant", "aria-label": "Data Canvas Assistant", hidden: true },
+    el("div", { class: "bq-nb-cell-bar" }, el("h3", { text: "Data Canvas Assistant" }),
+      el("button", { type: "button", class: "secondary", text: "Settings", "aria-expanded": "false", onclick: (e) => {
+        settings.hidden = !settings.hidden; e.target.setAttribute("aria-expanded", String(!settings.hidden)); if (!settings.hidden) drawSettings();
+      } })),
+    el("p", { class: "unavailable", text: "Answers come from this instance's local model; Google's assistant is Gemini, which is not run locally." }),
+    settings, chat,
+    el("div", { class: "bq-canvas-row" }, question, el("button", { type: "button", class: "primary", text: "Send", onclick: ask })));
+  const openAssistant = el("button", { type: "button", class: "secondary", text: "Open Data Canvas Assistant", "aria-expanded": "false", onclick: () => {
+    panel.hidden = !panel.hidden;
+    openAssistant.setAttribute("aria-expanded", String(!panel.hidden));
+    if (!panel.hidden) { drawChat(); question.focus(); }
+  } });
   draw();
   const toolbar = el("div", { class: "bq-toolbar", role: "toolbar", "aria-label": "Data canvas actions" },
     el("button", { type: "button", class: "secondary", text: "Search", "aria-label": "Add a Search node", onclick: () => add({ type: "search" }) }),
     el("button", { type: "button", class: "secondary", text: "SQL", "aria-label": "Add a SQL node", onclick: () => add({ type: "sql", sql: "" }) }),
     el("button", { type: "button", class: "secondary", text: "Text", "aria-label": "Add a Text node", onclick: () => add({ type: "text" }) }),
+    openAssistant,
+    el("button", { type: "button", class: "secondary", text: "Clear canvas", onclick: () => {
+      if (!doc.nodes.length) return;
+      confirmDestructive({ title: "Clear canvas?", detail: "Every node of this canvas is removed.", confirmLabel: "Clear", style: "confirm",
+        consequence: "Version history keeps the canvas as last saved.",
+        onConfirm: async () => { doc.nodes = []; keep(); draw(); announce("Canvas cleared"); } });
+    } }),
     el("button", { type: "button", class: "primary", text: "Save", onclick: () => bqSaveAsset(tab, "data_canvas", tab.query || JSON.stringify(doc), ctx.onSaved) }),
     el("button", { type: "button", class: "secondary", text: "Version history", disabled: tab.savedId ? null : true,
       title: tab.savedId ? null : "Save the canvas first", onclick: () => bqVersionHistory({ id: tab.savedId, name: tab.title, kind: "data_canvas" }, (content, title) => ctx.openAsset("data_canvas", content, title)) }),
     tab.savedId ? el("button", { type: "button", class: "secondary", text: "Share", onclick: () => bqManagePermissions({ id: tab.savedId, name: tab.title }) }) : null);
   return el("div", { class: "bq-canvas" }, toolbar,
-    el("p", { class: "unavailable bq-hint", text: "Natural language (Ask in natural language, Generate) uses this instance's local model; Google's uses Gemini in BigQuery, which is not run locally, so its answers are unverified against Google's. " +
+    el("p", { class: "unavailable bq-hint", text: "Natural language (Ask in natural language, Generate, Insights' summary, the Data Canvas Assistant) uses this instance's local model; Google's uses Gemini in BigQuery, which is not run locally, so its answers are unverified against Google's. " +
       (bqDataformOn() ? BQ_DATAFORM_NOTE : BQ_NO_DATAFORM) }),
-    host);
+    el("div", { class: "bq-canvas-body" }, host, panel));
 }
 
 // bqRepoFileTab is a file of a Dataform repository's workspace opened from
@@ -21770,9 +22117,27 @@ function bqRememberClosed(t) {
 //
 // The Map visualization of a GEOGRAPHY column: each row's WKT (POINT,
 // LINESTRING, POLYGON and their MULTI forms) drawn on longitude and
-// latitude, with a graticule. Google draws it over a Google Maps base map,
-// which CloudBurrow does not reach, so there is no base map here. Google's
+// latitude, with a graticule, over a base map of the world's land. Google
+// draws a Google Maps base map, which CloudBurrow does not reach; this one
+// is Natural Earth's public-domain 1:110m land
+// (/vendor/naturalearth/land-110m.js, third_party/naturalearth). Google's
 // limits apply: 20,000 features, 1,000,000 vertices.
+
+let BQ_LAND = null;
+// bqLand is the base map's land rings, fetched once.
+function bqLand() {
+  if (!BQ_LAND) {
+    BQ_LAND = new Promise((resolve) => {
+      if (window.CB_NATURAL_EARTH_LAND) { resolve(window.CB_NATURAL_EARTH_LAND); return; }
+      const tag = document.createElement("script");
+      tag.src = "/vendor/naturalearth/land-110m.js";
+      tag.onload = () => resolve(window.CB_NATURAL_EARTH_LAND || []);
+      tag.onerror = () => { BQ_LAND = null; resolve([]); };
+      document.head.append(tag);
+    });
+  }
+  return BQ_LAND;
+}
 
 function bqParseWKT(s) {
   const text = String(s || "").trim();
@@ -21820,7 +22185,11 @@ function bqDrawMap(host, res, column) {
   svg.setAttribute("class", "bq-chart bq-map");
   svg.setAttribute("aria-label", `Map of ${column}: ${features.length} features`);
   const add = (tag, attrs) => { const n = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, String(v)); svg.append(n); return n; };
-  add("rect", { x: 0, y: 0, width: W, height: H, fill: "#f1f3f4" });
+  add("rect", { x: 0, y: 0, width: W, height: H, fill: "#c6dcf5" });
+  const landLayer = document.createElementNS(NS, "g");
+  landLayer.setAttribute("class", "bq-map-land");
+  landLayer.setAttribute("aria-hidden", "true");
+  svg.append(landLayer);
   const step = [1, 2, 5, 10, 15, 30, 45, 90].find((s) => (x1 - x0) / s <= 8) || 90;
   for (let x = Math.ceil(x0 / step) * step; x <= x1; x += step) add("line", { x1: sx(x), x2: sx(x), y1: 0, y2: H, stroke: "#dadce0" });
   for (let y = Math.ceil(y0 / step) * step; y <= y1; y += step) add("line", { x1: 0, x2: W, y1: sy(y), y2: sy(y), stroke: "#dadce0" });
@@ -21830,12 +22199,27 @@ function bqDrawMap(host, res, column) {
     else if (f.type === "line") add("path", { d: path(f.coords), fill: "none", stroke: "#1a73e8", "stroke-width": 2 });
     else add("path", { d: f.rings.map((r) => path(r) + "Z").join(""), fill: "rgba(26,115,232,0.25)", stroke: "#1a73e8", "fill-rule": "evenodd" });
   }
-  setChildren(host, svg, el("p", { class: "unavailable", text: `${features.length} features. No base map: Google draws one from Google Maps, which CloudBurrow does not reach.` }));
+  setChildren(host, svg, el("p", { class: "unavailable", text: `${features.length} features. Base map: Natural Earth's 1:110m land (public domain); Google draws a Google Maps base map, which CloudBurrow does not reach.` }));
+  bqLand().then((rings) => {
+    const d = rings.filter((r) => r.some((c) => c[0] >= x0 && c[0] <= x1 && c[1] >= y0 && c[1] <= y1) ||
+      (Math.min(...r.map((c) => c[0])) <= x1 && Math.max(...r.map((c) => c[0])) >= x0 && Math.min(...r.map((c) => c[1])) <= y1 && Math.max(...r.map((c) => c[1])) >= y0))
+      .map((r) => path(r) + "Z").join("");
+    if (!d) return;
+    const land = document.createElementNS(NS, "path");
+    land.setAttribute("d", d);
+    land.setAttribute("fill", "#f8f9fa");
+    land.setAttribute("stroke", "#9aa0a6");
+    land.setAttribute("stroke-width", "0.5");
+    landLayer.append(land);
+  });
 }
 
 // BQ_WHATS_NEW is Check out what's new in Studio: what this Studio serves,
 // newest first, with Google's own list linked.
 const BQ_WHATS_NEW = [
+  ["Notebook runtime", "Connect a notebook to run its Python with Google's BigQuery client and %%bigquery"],
+  ["Data canvas nodes", "Destination, Insights, the Data Canvas Assistant, and pie and heat map charts"],
+  ["Map base map", "GEOGRAPHY results drawn over Natural Earth's land"],
   ["Notebooks and data canvases", "kept in Dataform as code assets, with Version history and Manage permissions"],
   ["Files and Source control", "Dataform folders and team folders, and Dataform repositories' workspaces"],
   ["Recent tabs", "reopen a tab you closed from the tab strip"],
@@ -22221,7 +22605,10 @@ function bqVizDefaults(res, viz) {
     const m = measures.find((f) => f.name !== viz.dimension) || measures[0];
     viz.measures = [m.name];
   }
-  if (!["Bar", "Line", "Scatter"].includes(viz.type)) viz.type = "Bar";
+  if (!["Bar", "Line", "Scatter", "Pie", "Heat map"].includes(viz.type)) viz.type = "Bar";
+  if (viz.type === "Heat map" && !dims.some((f) => f.name === viz.dimension2 && f.name !== viz.dimension)) {
+    viz.dimension2 = (dims.find((f) => f.name !== viz.dimension && !viz.measures.includes(f.name)) || {}).name || "";
+  }
   if (viz.legend === undefined) viz.legend = true;
   viz.zoom = viz.zoom || 1;
   return { dims, measures };
@@ -22299,6 +22686,7 @@ function bqVisualization(res, tab, save) {
 // SVG: Visualization's, Log Analytics' and a dashboard's Log Analytics
 // chart's (#2032).
 function bqDrawChart(chartHost, res, dims, viz) {
+  if (viz.type === "Pie" || viz.type === "Heat map") return bqDrawPieOrHeat(chartHost, res, viz);
   const rows = res.rows || [];
   const dimType = (dims.find((f) => f.name === viz.dimension) || {}).type;
   const numericDim = BQ_MEASURE_TYPES.includes(dimType);
@@ -22386,6 +22774,88 @@ function bqDrawChart(chartHost, res, dims, viz) {
   setChildren(chartHost, el("div", { class: "bq-chart-scroll" }, svg), legend,
     rows.length < res.totalRows
       ? el("p", { class: "unavailable", text: `Charted from the ${rows.length} rows read of ${res.totalRows}.` }) : null);
+}
+
+// bqDrawPieOrHeat draws the data canvas's Pie chart (the first measure,
+// summed per dimension value, a slice each) and Heat map (the dimension
+// across, a second dimension down, each cell the first measure's sum,
+// shaded from light to dark), as SVG.
+function bqDrawPieOrHeat(chartHost, res, viz) {
+  const rows = res.rows || [];
+  const m = viz.measures[0];
+  const NS = "http://www.w3.org/2000/svg";
+  const sum = (map, k, v) => { if (Number.isFinite(v)) map.set(k, (map.get(k) || 0) + v); };
+  const svg = document.createElementNS(NS, "svg");
+  const add = (tag, attrs, text) => {
+    const n = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, String(v));
+    if (text !== undefined) n.textContent = text;
+    svg.append(n);
+    return n;
+  };
+  const tip = (n, t) => n.append(Object.assign(document.createElementNS(NS, "title"), { textContent: t }));
+  let W, H, legend = null;
+  if (viz.type === "Pie") {
+    const by = new Map();
+    for (const r of rows) sum(by, cellText(r[viz.dimension]), Number(r[m]));
+    const slices = [...by].filter(([, v]) => v > 0);
+    const total = slices.reduce((a, [, v]) => a + v, 0);
+    W = 360; H = 320;
+    const cx = W / 2, cy = H / 2, rad = 140;
+    add("rect", { x: 0, y: 0, width: W, height: H, fill: "#ffffff" });
+    let a0 = -Math.PI / 2;
+    slices.forEach(([label, v], i) => {
+      const colour = BQ_SERIES_COLOURS[i % BQ_SERIES_COLOURS.length];
+      const a1 = a0 + (2 * Math.PI * v) / total;
+      const pct = `${label}: ${m} ${v} (${((100 * v) / total).toFixed(1)}%)`;
+      if (slices.length === 1) tip(add("circle", { cx, cy, r: rad, fill: colour }), pct);
+      else {
+        const large = a1 - a0 > Math.PI ? 1 : 0;
+        tip(add("path", { d: `M${cx},${cy}L${(cx + rad * Math.cos(a0)).toFixed(2)},${(cy + rad * Math.sin(a0)).toFixed(2)}` +
+          `A${rad},${rad} 0 ${large} 1 ${(cx + rad * Math.cos(a1)).toFixed(2)},${(cy + rad * Math.sin(a1)).toFixed(2)}Z`, fill: colour, stroke: "#ffffff" }), pct);
+      }
+      a0 = a1;
+    });
+    svg.setAttribute("aria-label", `Pie chart of ${m} by ${viz.dimension}, ${slices.length} slices`);
+    legend = viz.legend ? el("ul", { class: "bq-chart-legend" }, ...slices.map(([label, v], i) => el("li", {},
+      el("span", { class: "bq-swatch", style: `background:${BQ_SERIES_COLOURS[i % BQ_SERIES_COLOURS.length]}` }),
+      el("span", { text: ` ${label} (${((100 * v) / total).toFixed(1)}%)` })))) : null;
+  } else {
+    const xs = [], ys = [], cells = new Map();
+    for (const r of rows) {
+      const x = cellText(r[viz.dimension]), y = viz.dimension2 ? cellText(r[viz.dimension2]) : m;
+      if (!xs.includes(x)) xs.push(x);
+      if (!ys.includes(y)) ys.push(y);
+      sum(cells, x + "\u0000" + y, Number(r[m]));
+    }
+    const vals = [...cells.values()];
+    const lo = Math.min(...vals), hi = Math.max(...vals);
+    const L = 96, T = 16, B = 56, cw = Math.max(24, Math.min(64, 560 / Math.max(1, xs.length))), ch = 28;
+    W = L + cw * xs.length + 16; H = T + ch * ys.length + B;
+    add("rect", { x: 0, y: 0, width: W, height: H, fill: "#ffffff" });
+    // Light blue to Google blue: every cell's text stays readable.
+    const shade = (v) => { const t = hi === lo ? 1 : (v - lo) / (hi - lo); return `rgb(${Math.round(232 - 206 * t)},${Math.round(240 - 125 * t)},${Math.round(254 - 22 * t)})`; };
+    ys.forEach((y, j) => {
+      add("text", { x: L - 6, y: T + ch * j + ch / 2 + 4, "text-anchor": "end", "font-size": 11, fill: "#5f6368" }, y.length > 14 ? y.slice(0, 13) + "…" : y);
+      xs.forEach((x, i) => {
+        const v = cells.get(x + "\u0000" + y);
+        if (v === undefined) return;
+        tip(add("rect", { x: L + cw * i, y: T + ch * j, width: cw - 1, height: ch - 1, fill: shade(v) }), `${x}, ${y}: ${m} ${v}`);
+      });
+    });
+    xs.forEach((x, i) => add("text", { x: L + cw * i + cw / 2, y: T + ch * ys.length + 16, "text-anchor": "middle", "font-size": 11, fill: "#5f6368" },
+      x.length > 8 ? x.slice(0, 7) + "…" : x));
+    add("text", { x: L + (cw * xs.length) / 2, y: H - 8, "text-anchor": "middle", "font-size": 12, fill: "#202124" }, viz.dimension);
+    svg.setAttribute("aria-label", `Heat map of ${m} by ${viz.dimension}${viz.dimension2 ? " and " + viz.dimension2 : ""}, ${cells.size} cells`);
+    legend = viz.legend && vals.length ? el("p", { class: "unavailable", text: `${m}: ${bqShortNumber(lo)} (lightest) to ${bqShortNumber(hi)} (darkest)` }) : null;
+  }
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("width", String(W));
+  svg.setAttribute("height", String(H));
+  svg.setAttribute("style", `width:${W}px;height:${H}px;max-width:none`);
+  svg.setAttribute("role", "img");
+  svg.setAttribute("class", "bq-chart");
+  setChildren(chartHost, el("div", { class: "bq-chart-scroll" }, svg), legend);
 }
 
 // analyticsResultSet is a Log Analytics query's listing as a result set

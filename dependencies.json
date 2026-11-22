@@ -134,6 +134,31 @@
         "notes": "Multi-arch OCI index, resolved 2026-11-18. The Docker official python image, third-party: Google publishes no TensorFlow image for this Python on linux/arm64, and Google's own PyPI tensorflow wheel is what runs.",
         "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect python:3.12-slim`."
       },
+      "notebookRuntimeBase": {
+        "$comment": "internal/nbruntime/image/Dockerfile builds FROM this digest (#2094): BigQuery Studio's notebook runtime, CloudBurrow's stand-in for a Colab Enterprise runtime, built locally on a notebook's first Connect.",
+        "image": "python:3.12-slim",
+        "digest": "sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b",
+        "license": "PSF-2.0 (CPython) and DFSG-free Debian packages (see /usr/share/doc/*/copyright)",
+        "redistribution": "not published: built locally by the console (tag cloudburrow/notebook-runtime:<context hash>) and run on a docker network create --internal network whose one peer relays the instance's BigQuery REST port",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "notes": "The same digest as tfconvertBase. Google publishes no Colab Enterprise runtime image an instance may run.",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect python:3.12-slim`."
+      },
+      "notebookRuntimePackages": {
+        "$comment": "pip install in internal/nbruntime/image/Dockerfile (#2094): Google's google-cloud-bigquery 3.47.0 and bigquery-magics 0.15.2 (Apache-2.0: %%bigquery and the client a notebook's Python uses), with IPython 9.9.0 (BSD-3-Clause, the cells' shell), pandas 2.3.3 (BSD-3-Clause), pyarrow 22.0.0 (Apache-2.0), db-dtypes 1.9.0 (Apache-2.0) and matplotlib 3.10.7 (the PSF-based Matplotlib licence), and what pip resolves for them.",
+        "version": "google-cloud-bigquery 3.47.0, bigquery-magics 0.15.2",
+        "source": "https://pypi.org/project/bigquery-magics/0.15.2/",
+        "license": "Apache-2.0 (Google's packages); BSD-3-Clause, Apache-2.0 and the Matplotlib licence (third-party)",
+        "redistribution": "not published: installed into the locally built notebook runtime image; nothing of it is in the CLI",
+        "updateFeed": "pypi",
+        "verification": "built-and-run",
+        "skipDiscovery": "PyPI; depcheck only discovers GitHub-sourced components."
+      },
       "tensorflow": {
         "$comment": "pip install tensorflow==2.20.0 in deploy/tfconvert/Dockerfile (#1775): Google's tf.lite.TFLiteConverter.from_saved_model converts imported SavedModels to TensorFlow Lite.",
         "version": "2.20.0",
@@ -1562,6 +1587,17 @@
     },
     "consoleData": {
       "$comment": "Data embedded for the console and its backends, derived from openly licensed sources because Google publishes none.",
+      "naturalEarthLand": {
+        "$comment": "BigQuery Studio's Map visualization base map (#2094): tools/naturalearth/land.py writes internal/console/assets/vendor/naturalearth/land-110m.js from ne_110m_land.geojson, a stand-in for Google's Google Maps base map, which a local instance does not reach (third_party/naturalearth/PROVENANCE.md).",
+        "version": "v5.1.2",
+        "source": "https://github.com/nvkelso/natural-earth-vector",
+        "license": "public domain (Natural Earth terms of use)",
+        "digest": "sha256:9e0729ee253ca7d7a5c4ae9395fb1902264c5377c52e224d13dd85010e2835d9",
+        "redistribution": "derived data only: the land rings are embedded in the console's assets (third_party/naturalearth/LICENSE.md); no code",
+        "updateFeed": "none",
+        "verification": "checksum",
+        "skipDiscovery": "Pinned to the v5.1.2 tag's geojson/ne_110m_land.geojson; re-generated with tools/naturalearth/land.py."
+      },
       "ssmGitignoreTemplates": {
         "$comment": "Secure Source Manager initial_config gitignores (#2071): tools/ssmtemplates/generate.py writes internal/adapter/run/ssmtemplates.tar.gz, an UNVERIFIED (docs re-read 2026-11-20) stand-in for Google's templates (third_party/ssm-templates/PROVENANCE.md).",
         "source": "https://github.com/github/gitignore",
