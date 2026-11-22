@@ -179,7 +179,7 @@ jobs:
             --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
             --label "org.opencontainers.image.revision=$(git rev-parse HEAD)" \
             --label "org.opencontainers.image.version=${RELEASE_TAG}" \
-            --label "org.opencontainers.image.licenses=Apache-2.0" \
+            --label "org.opencontainers.image.licenses=MIT" \
             --metadata-file metadata.json \
             --output "type=image,name=${LOCAL_AI_IMAGE},push-by-digest=true,name-canonical=true,push=true"
           df -h /
@@ -239,7 +239,7 @@ jobs:
             --annotation "index:org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
             --annotation "index:org.opencontainers.image.revision=${REVISION}" \
             --annotation "index:org.opencontainers.image.version=${RELEASE_TAG}" \
-            --annotation "index:org.opencontainers.image.licenses=Apache-2.0" \
+            --annotation "index:org.opencontainers.image.licenses=MIT" \
             --annotation "index:org.opencontainers.image.description=LiteRT-LM runtime for CloudBurrow's local generation endpoint" \
             "$@"
           digest="$(docker buildx imagetools inspect "${LOCAL_AI_IMAGE}:${RELEASE_TAG}" --format '{{json .Manifest}}' | jq -r .digest)"

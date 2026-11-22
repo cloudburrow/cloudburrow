@@ -86,6 +86,13 @@ tagging `vX.Y.Z` by hand, move the entries under **Unreleased** into a new
   and `FACE_DETECTION` on Google's MediaPipe models. Models are downloaded once into
   `<state-dir>/models` and checked against pinned SHA-256s.
 
+### Changed
+
+- Licence: CloudBurrow is now licensed under the MIT License. v0.1.0–v0.5.0 were first published
+  under Apache 2.0, and their CloudBurrow code is now available under MIT too. Third-party code keeps its own licence (NOTICE, dependencies.json), and
+  [CONTRIBUTING.md](CONTRIBUTING.md) takes contributions under MIT with a Developer Certificate of
+  Origin sign-off.
+
 ### Fixed
 
 - **BigQuery: `CREATE VECTOR INDEX` works as a project's first statement** (#2045): on a fresh
