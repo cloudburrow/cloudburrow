@@ -23,7 +23,7 @@ import (
 // under their fingerprint (a stale one 412), used by a BGP peer's
 // importPolicies (an export policy refused), not deletable while used,
 // then deleted.
-// covers-pending (EPF: make this "covers:" once run): compute.routers.updateRoutePolicy, compute.routers.getRoutePolicy, compute.routers.listRoutePolicies, compute.routers.patchRoutePolicy, compute.routers.deleteRoutePolicy
+// covers: compute.routers.updateRoutePolicy, compute.routers.getRoutePolicy, compute.routers.listRoutePolicies, compute.routers.patchRoutePolicy, compute.routers.deleteRoutePolicy
 func TestPrivateNATAndRoutePoliciesThroughTheGoClient(t *testing.T) {
 	h := New(t)
 	opts := computeOpts(t, h)
@@ -179,7 +179,7 @@ func TestPrivateNATAndRoutePoliciesThroughTheGoClient(t *testing.T) {
 // attachment and refuses another; an endpoint for Google APIs refuses
 // global access and a new bundle by globalForwardingRules.patch and
 // setTarget.
-// covers-pending (EPF: make this "covers:" once run): compute.forwardingRules.patch, compute.forwardingRules.setTarget, compute.globalForwardingRules.patch, compute.globalForwardingRules.setTarget
+// covers: compute.forwardingRules.patch, compute.forwardingRules.setTarget, compute.globalForwardingRules.patch, compute.globalForwardingRules.setTarget
 func TestPSCEndpointPatchAndSetTargetThroughTheGoClient(t *testing.T) {
 	h := New(t)
 	opts := computeOpts(t, h)

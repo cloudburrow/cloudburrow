@@ -38,7 +38,7 @@ import (
 //
 // Needs Compute Engine (with VMs) and Cloud Storage served, and docker on
 // this machine.
-// covers-pending (EPF: make this "covers:" once run): compute.images.insert, compute.images.get, compute.images.delete, compute.globalOperations.get, compute.instances.insert, compute.instances.getSerialPortOutput, compute.instances.delete
+// covers: compute.images.insert, compute.images.get, compute.images.delete, compute.globalOperations.get, compute.instances.insert, compute.instances.getSerialPortOutput, compute.instances.delete
 func TestComputeImageImportFromCloudStorageThroughTheGoClient(t *testing.T) {
 	h := New(t)
 	opts := computeOpts(t, h)
@@ -149,7 +149,10 @@ func TestComputeImageImportFromCloudStorageThroughTheGoClient(t *testing.T) {
 		Name:        proto.String(vmName),
 		MachineType: proto.String("zones/" + zone + "/machineTypes/e2-small"),
 		Disks: []*computepb.AttachedDisk{{Boot: proto.Bool(true), AutoDelete: proto.Bool(true),
-			InitializeParams: &computepb.AttachedDiskInitializeParams{SourceImage: proto.String("global/images/" + imgName)}}},
+			InitializeParams: &computepb.AttachedDiskInitializeParams{SourceImage: proto.String("global/images/" + imgName),
+				// The 3 GB image is below pd-balanced's 10 GB minimum, which
+				// Google enforces on the disk, so the disk is sized.
+				DiskSizeGb: proto.Int64(10)}}},
 		NetworkInterfaces: []*computepb.NetworkInterface{{Network: proto.String("global/networks/default")}},
 		Metadata: &computepb.Metadata{Items: []*computepb.Items{{Key: proto.String("startup-script"),
 			Value: proto.String("#!/bin/bash\ncat /etc/cloudburrow-imported\n")}}},

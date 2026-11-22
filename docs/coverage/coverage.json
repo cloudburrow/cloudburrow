@@ -14474,9 +14474,9 @@
     "Key": "compute",
     "Title": "Compute Engine API (v1): VPC networking",
     "counts": {
-      "Implemented": 78,
+      "Implemented": 69,
       "Unimplemented": 93,
-      "Verified": 168
+      "Verified": 177
     },
     "rows": [
       {
@@ -14796,8 +14796,10 @@
       },
       {
         "method": "compute.forwardingRules.patch",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/routepolicies2140_test.go:183 TestPSCEndpointPatchAndSetTargetThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.forwardingRules.setLabels",
@@ -14808,8 +14810,10 @@
       },
       {
         "method": "compute.forwardingRules.setTarget",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/routepolicies2140_test.go:183 TestPSCEndpointPatchAndSetTargetThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.globalAddresses.delete",
@@ -14884,8 +14888,10 @@
       },
       {
         "method": "compute.globalForwardingRules.patch",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/routepolicies2140_test.go:183 TestPSCEndpointPatchAndSetTargetThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.globalForwardingRules.setLabels",
@@ -14896,8 +14902,10 @@
       },
       {
         "method": "compute.globalForwardingRules.setTarget",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/routepolicies2140_test.go:183 TestPSCEndpointPatchAndSetTargetThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.globalOperations.aggregatedList",
@@ -14915,6 +14923,7 @@
         "tests": [
           "test/compat/compute_test.go:384 TestTerraformComputeNetworkAndSubnetwork",
           "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient",
+          "test/compat/computeimageimport_test.go:42 TestComputeImageImportFromCloudStorageThroughTheGoClient",
           "test/compat/computevmstools_test.go:30 TestGcloudComputeInstances"
         ]
       },
@@ -14934,7 +14943,8 @@
         "method": "compute.images.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/computea1_test.go:101 TestComputeLabelsSchedulingAndExternalIPsThroughTheGoClient"
+          "test/compat/computea1_test.go:101 TestComputeLabelsSchedulingAndExternalIPsThroughTheGoClient",
+          "test/compat/computeimageimport_test.go:42 TestComputeImageImportFromCloudStorageThroughTheGoClient"
         ]
       },
       {
@@ -14947,6 +14957,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/computea1_test.go:101 TestComputeLabelsSchedulingAndExternalIPsThroughTheGoClient",
+          "test/compat/computeimageimport_test.go:42 TestComputeImageImportFromCloudStorageThroughTheGoClient",
           "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
         ]
       },
@@ -14966,7 +14977,8 @@
         "method": "compute.images.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/computea1_test.go:101 TestComputeLabelsSchedulingAndExternalIPsThroughTheGoClient"
+          "test/compat/computea1_test.go:101 TestComputeLabelsSchedulingAndExternalIPsThroughTheGoClient",
+          "test/compat/computeimageimport_test.go:42 TestComputeImageImportFromCloudStorageThroughTheGoClient"
         ]
       },
       {
@@ -15262,6 +15274,7 @@
         "method": "compute.instances.delete",
         "status": "Verified",
         "tests": [
+          "test/compat/computeimageimport_test.go:42 TestComputeImageImportFromCloudStorageThroughTheGoClient",
           "test/compat/computevmnet_test.go:33 TestComputeVMNetworkingThroughTheGoClient",
           "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient",
           "test/compat/routers2140_test.go:211 TestCloudNATGivesVMsWithoutExternalIPsEgress"
@@ -15318,6 +15331,7 @@
         "method": "compute.instances.getSerialPortOutput",
         "status": "Verified",
         "tests": [
+          "test/compat/computeimageimport_test.go:42 TestComputeImageImportFromCloudStorageThroughTheGoClient",
           "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
         ]
       },
@@ -15332,6 +15346,7 @@
         "tests": [
           "test/compat/backupdrcompute_test.go:57 TestBackupDRComputeVMAndDiskRoundTrip",
           "test/compat/computea1_test.go:410 TestComputeIPv6ThroughTheGoClient",
+          "test/compat/computeimageimport_test.go:42 TestComputeImageImportFromCloudStorageThroughTheGoClient",
           "test/compat/computevmnet_test.go:33 TestComputeVMNetworkingThroughTheGoClient",
           "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient",
           "test/compat/routers2140_test.go:211 TestCloudNATGivesVMsWithoutExternalIPsEgress"
@@ -16193,8 +16208,10 @@
       },
       {
         "method": "compute.routers.deleteRoutePolicy",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/routepolicies2140_test.go:27 TestPrivateNATAndRoutePoliciesThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.routers.get",
@@ -16225,8 +16242,10 @@
       },
       {
         "method": "compute.routers.getRoutePolicy",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/routepolicies2140_test.go:27 TestPrivateNATAndRoutePoliciesThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.routers.getRouterStatus",
@@ -16263,8 +16282,10 @@
       },
       {
         "method": "compute.routers.listRoutePolicies",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/routepolicies2140_test.go:27 TestPrivateNATAndRoutePoliciesThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.routers.patch",
@@ -16280,8 +16301,10 @@
       },
       {
         "method": "compute.routers.patchRoutePolicy",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/routepolicies2140_test.go:27 TestPrivateNATAndRoutePoliciesThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.routers.preview",
@@ -16304,8 +16327,10 @@
       },
       {
         "method": "compute.routers.updateRoutePolicy",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/routepolicies2140_test.go:27 TestPrivateNATAndRoutePoliciesThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.routes.delete",
