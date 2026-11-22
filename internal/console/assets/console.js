@@ -211,8 +211,9 @@ const ROUTES = [
   // Storage classes), the menu marking the page whose `navAs` they name.
   { path: "/kubernetes/clusters", service: "gkeclusters", title: "Kubernetes clusters", navTitle: "Clusters", kind: "Cluster", icon: "k8s", logs: true, section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine" },
   { path: "/kubernetes/workloads", service: "workloads", title: "Workloads", kind: "Workload", logs: true, section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine" },
-  { path: "/kubernetes/applications", screen: "unavailable", icon: "k8s", title: "Applications", section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine",
-    unavailable: "Applications are the Kubernetes Applications that GKE's Marketplace and Application Manager install, which CloudBurrow does not serve. A workload deployed with kubectl, Helm or Deploy is on Workloads." },
+  // Applications (#2149): the Kubernetes Applications (app.k8s.io/v1beta1)
+  // Marketplace deploys, and each one's page at .../{cluster}/{ns}/{name}.
+  { path: "/kubernetes/applications", screen: "gke-applications", tree: true, icon: "k8s", title: "Applications", section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine" },
   { path: "/kubernetes/config", service: "k8sconfig", icon: "secrets", title: "Secrets & ConfigMaps", kind: "Configuration", section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine" },
   { path: "/kubernetes/gateways", service: "k8sgateways", icon: "k8sservices", title: "Gateways, Services & Ingress", tabTitle: "Gateways", kind: "Gateway", navHidden: true, navAs: "/kubernetes/services", pageTabs: GKE_DISCOVERY, section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine" },
   { path: "/kubernetes/services", service: "k8sservices", title: "Gateways, Services & Ingress", tabTitle: "Services", kind: "Service", logs: true, pageTabs: GKE_DISCOVERY, section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine" },
@@ -652,6 +653,10 @@ const ROUTES = [
   { path: "/iam-admin/principal-access-boundary", title: "Principal Access Boundary", service: null, requires: "iam", screen: "unavailable", icon: "iam", section: "IAM & Admin", product: "iam", productTitle: "IAM & Admin",
     unavailable: "Principal access boundary policies are the IAM v3 API's, which CloudBurrow does not serve." },
 
+  // Marketplace (#2149): Docker Hub's catalogue, deployed to the
+  // instance's Kubernetes clusters as Applications; its browse, product and
+  // Configure pages are below /marketplace.
+  { path: "/marketplace", screen: "marketplace", tree: true, icon: "marketplace", title: "Marketplace", section: "Management tools", product: "marketplace", productTitle: "Marketplace" },
   // App Hub (#2110), its menu in Google's order: Applications, Services
   // and workloads, Settings (the host project's service projects).
   { path: "/apphub/applications", service: "apphub", icon: "apphub", title: "Applications", kind: "Application",
@@ -926,6 +931,7 @@ const ICONS = {
   // Cloud Scheduler: a clock.
   scheduler: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   // Kubernetes Engine: the helm.
+  marketplace: '<path d="M4 9l1.5-5h13L20 9"/><path d="M4 9h16v2a2.7 2.7 0 0 1-5.3 0 2.7 2.7 0 0 1-5.4 0A2.7 2.7 0 0 1 4 11z"/><path d="M5.5 13v7h13v-7"/><path d="M10 20v-4h4v4"/>',
   k8s:       '<path d="M12 3l7.5 3.8v10.4L12 21l-7.5-3.8V6.8z"/><circle cx="12" cy="12" r="2.5"/><path d="M12 3v6.5M19.5 6.8l-5.4 4M19.5 17.2l-5.4-4M12 21v-6.5M4.5 17.2l5.4-4M4.5 6.8l5.4 4"/>',
   workloads: '<rect x="3" y="4" width="7" height="7" rx="1"/><rect x="14" y="4" width="7" height="7" rx="1"/><rect x="3" y="13" width="7" height="7" rx="1"/><rect x="14" y="13" width="7" height="7" rx="1"/>',
   pods:      '<path d="M12 3l7.5 3.8v10.4L12 21l-7.5-3.8V6.8z"/>',
@@ -11438,7 +11444,7 @@ function routeFor(pathname) {
   // The longest prefix wins, so /kubernetes/workloads beats /kubernetes.
   let best = null;
   for (const r of ROUTES) {
-    if (!r.service || r.screen === "create") continue;
+    if ((!r.service && !r.tree) || r.screen === "create") continue;
     if (pathname === r.path || !pathname.startsWith(r.path + "/")) continue;
     if (!best || r.path.length > best.path.length) best = r;
   }
@@ -11477,6 +11483,7 @@ function dispatch(view) {
   stopPrediction();
   stopLocalModelsPoll();
   stopGardenPoll();
+  stopMarketPoll();
   REVEAL_SUSPENDED = false;
   if (!match) return notFound(view, location.pathname);
   if (match.screen === "search") return renderSearch(view);
@@ -11485,6 +11492,8 @@ function dispatch(view) {
   if (match.screen === "embeddings") return renderEmbeddings(view);
   if (match.screen === "local-models") return renderLocalModels(view);
   if (match.screen === "model-garden") return renderModelGarden(view);
+  if (match.screen === "marketplace") return renderMarketplace(view);
+  if (match.screen === "gke-applications") return renderGKEApplications(view);
   if (match.screen === "ap-endpoints") {
     // The registry's endpoints list and pages when served (#1940); Model
     // Garden's deployment page otherwise, and for ?endpoint=.
@@ -25849,4 +25858,729 @@ async function renderAPIKeysRestore(view) {
         } }))))
         : [el("tr", {}, el("td", { colspan: "4", text: "No deleted credentials to restore" }))])))));
   announce("Restore deleted credentials");
+}
+
+// --- Marketplace (#2149) ------------------------------------------------
+//
+// Google Cloud Marketplace's pages, over CloudBurrow's catalogue sources
+// (Docker Hub first): the home and browse pages (Search Marketplace, the
+// Filter panel's Category, Type, Source and Publisher), a product's page
+// (Overview, Pricing, Documentation, Support and its versions) with
+// Configure, and the Configure page for a Kubernetes app
+// (https://docs.cloud.google.com/kubernetes-engine/docs/how-to/deploying-marketplace-app):
+// Deploy via Google Cloud, the cluster (or Create a new cluster), the
+// Namespace (an existing one or Create a namespace), the App instance name,
+// the app's parameters, then Deploy, after which the app is on Kubernetes
+// Engine > Applications, whose page shows its progress and components.
+
+let MARKET_POLL = null;
+function stopMarketPoll() {
+  if (MARKET_POLL) { clearTimeout(MARKET_POLL); MARKET_POLL = null; }
+}
+
+const MARKET_BADGES = { official: "Docker Official Image", verified_publisher: "Verified Publisher", open_source: "Sponsored OSS" };
+let MARKET_SOURCES = null;
+
+async function marketSources() {
+  if (!MARKET_SOURCES) MARKET_SOURCES = api("/api/marketplace/sources").catch((err) => { MARKET_SOURCES = null; throw err; });
+  return MARKET_SOURCES;
+}
+
+// marketProductPath is a product's address: its source, then its id's
+// segments (a Docker Hub namespace and repository).
+const marketProductPath = (source, id) => `/marketplace/product/${encodeURIComponent(source)}/${id.split("/").map(encodeURIComponent).join("/")}`;
+const marketConfigPath = (source, id) => `/marketplace/kubernetes/config/${encodeURIComponent(source)}/${id.split("/").map(encodeURIComponent).join("/")}`;
+
+// marketLogo is a product's logo through the console's own address (the
+// console loads nothing remote), or its initial when it has none.
+function marketLogo(p, size = 48) {
+  const box = el("div", { class: "mp-logo", style: `width:${size}px;height:${size}px`, "aria-hidden": "true" });
+  if (p.logo) {
+    const img = el("img", { alt: "", width: String(size), height: String(size),
+      src: `/api/marketplace/logo?u=${encodeURIComponent(p.logo)}` });
+    img.addEventListener("error", () => setChildren(box, el("span", { text: (p.name || "?").replace(/^.*\//, "").charAt(0).toUpperCase() })));
+    box.append(img);
+  } else {
+    box.append(el("span", { text: (p.name || "?").replace(/^.*\//, "").charAt(0).toUpperCase() }));
+  }
+  return box;
+}
+
+function marketBadge(badge) {
+  if (!badge || !MARKET_BADGES[badge]) return null;
+  return el("span", { class: `mp-badge mp-badge-${badge}`, "data-badge": badge, text: MARKET_BADGES[badge] });
+}
+
+function marketCard(p) {
+  return el("a", { class: "card mp-card", href: marketProductPath(p.source, p.id) + scopeSearch(), "data-product": p.id, "data-source": p.source },
+    el("div", { class: "mp-card-head" }, marketLogo(p),
+      el("div", { class: "mp-card-title" },
+        el("h3", { text: p.name }),
+        el("p", { class: "mp-publisher", text: p.publisher || "" }))),
+    el("p", { class: "mp-description", text: p.description || "" }),
+    el("div", { class: "mp-card-foot" },
+      el("span", { class: "mp-source", "data-source-label": p.sourceLabel, text: p.sourceLabel }),
+      el("span", { class: "mp-type", text: p.type }),
+      marketBadge(p.badge),
+      p.pulls ? el("span", { class: "mp-pulls", text: `${p.pulls} pulls` }) : null));
+}
+
+// marketFilters reads the browse page's filter=group:value parameters.
+function marketFilters(params) {
+  const out = { category: [], type: [], source: [], badge: [] };
+  for (const f of params.getAll("filter")) {
+    const i = f.indexOf(":");
+    if (i < 0) continue;
+    const k = f.slice(0, i);
+    if (out[k]) out[k].push(f.slice(i + 1));
+  }
+  return out;
+}
+
+function marketSearchBox(initial, onSearch) {
+  const input = el("input", { type: "search", id: "marketplace-search", class: "mp-search-input", placeholder: "Search Marketplace",
+    "aria-label": "Search Marketplace", value: initial || "", autocomplete: "off" });
+  const form = el("form", { class: "mp-search", role: "search", onsubmit: (e) => { e.preventDefault(); onSearch(input.value.trim()); } },
+    el("span", { class: "mp-search-icon", "aria-hidden": "true", html: '<svg viewBox="0 0 24 24" width="20" height="20"><circle cx="10.5" cy="10.5" r="6" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15 15l5 5" stroke="currentColor" stroke-width="2"/></svg>' }),
+    input);
+  return form;
+}
+
+function marketBrowseURL(q, filters, page) {
+  const u = new URLSearchParams(location.search);
+  for (const k of ["q", "filter", "page"]) u.delete(k);
+  if (q) u.set("q", q);
+  for (const [k, vs] of Object.entries(filters || {})) for (const v of vs) u.append("filter", `${k}:${v}`);
+  if (page && page > 1) u.set("page", String(page));
+  const s = u.toString();
+  return "/marketplace/browse" + (s ? "?" + s : "");
+}
+
+async function renderMarketplace(view) {
+  stopMarketPoll();
+  const rest = location.pathname.replace(/^\/marketplace\/?/, "").split("/").filter(Boolean).map(decodeURIComponent);
+  if (rest[0] === "product" && rest.length >= 3) return renderMarketProduct(view, rest[1], rest.slice(2).join("/"));
+  if (rest[0] === "kubernetes" && rest[1] === "config" && rest.length >= 4) return renderMarketConfigure(view, rest[2], rest.slice(3).join("/"));
+  if (rest[0] === "browse") return renderMarketBrowse(view);
+  if (!rest.length) return renderMarketHome(view);
+  return notFound(view, location.pathname);
+}
+
+// marketOffline is Google's state when the catalogue cannot be read.
+function marketOffline(title, err, retry) {
+  return el("div", { class: "state error mp-error", role: "alert", id: "marketplace-error" },
+    el("h2", { text: title }),
+    el("p", { text: "Marketplace reads its catalogue online, from the source's public registry. Check that this machine can reach it, then try again." }),
+    el("pre", { text: err.message }),
+    retry ? el("button", { class: "secondary", type: "button", onclick: retry, text: "Try again" }) : null);
+}
+
+async function renderMarketHome(view) {
+  const header = pageHeader("Marketplace", "", {});
+  const search = marketSearchBox("", (q) => navigate(marketBrowseURL(q, {}, 1)));
+  const hero = el("div", { class: "mp-hero" },
+    el("h2", { text: "Explore, launch and manage solutions in just a few clicks" }),
+    el("p", { class: "subtitle", text: "Deploy container images and Kubernetes apps onto this instance's Kubernetes clusters." }), search);
+  const cats = el("div", { class: "mp-home-categories", id: "marketplace-categories" }, loadingState(1));
+  const popular = el("div", { class: "mp-grid", id: "marketplace-popular" }, loadingState(3, { what: "Marketplace" }));
+  setChildren(view, header, hero,
+    el("h2", { class: "mp-section-title", text: "Browse by category" }), cats,
+    el("div", { class: "mp-section-head" }, el("h2", { class: "mp-section-title", text: "Popular products" }),
+      el("a", { href: marketBrowseURL("", {}, 1), id: "marketplace-view-all", text: "View all" })), popular);
+  announce("Marketplace");
+  marketSources().then((s) => {
+    if (!s.configured) { setChildren(cats, emptyState("Marketplace is not available", "This instance serves no Marketplace.")); return; }
+    if (s.error && !(s.categories || []).length) { setChildren(cats, el("p", { class: "unavailable", text: `Categories could not be read: ${s.error}` })); return; }
+    setChildren(cats, ...(s.categories || []).map((c) => el("a", { class: "chip mp-category", "data-category": c.slug,
+      href: marketBrowseURL("", { category: [c.slug] }, 1), text: c.name })));
+  }).catch((err) => setChildren(cats, el("p", { class: "unavailable", text: err.message })));
+  const load = () => {
+    setChildren(popular, loadingState(3, { what: "Marketplace" }));
+    api("/api/marketplace/search?size=12", { deadline: 45000 }).then((r) => {
+      setChildren(popular, ...(r.items.length ? r.items.map(marketCard) : [emptyState("No products to display", "The catalogue returned no products.")]));
+    }).catch((err) => setChildren(popular, marketOffline("Marketplace could not be loaded", err, load)));
+  };
+  load();
+}
+
+async function renderMarketBrowse(view) {
+  const params = new URLSearchParams(location.search);
+  const q = params.get("q") || "";
+  const page = Math.max(1, parseInt(params.get("page") || "1", 10) || 1);
+  const filters = marketFilters(params);
+  const header = pageHeader("Marketplace", "", { back: "/marketplace" + scopeSearch() });
+  const search = marketSearchBox(q, (nq) => navigate(marketBrowseURL(nq, filters, 1)));
+  const panel = el("aside", { class: "mp-filters", id: "marketplace-filters", "aria-label": "Filter" }, el("h2", { text: "Filter" }), loadingState(4));
+  const results = el("section", { class: "mp-results", id: "marketplace-results", "aria-live": "polite" }, loadingState(4, { what: "results" }));
+  const chips = el("div", { class: "mp-active-filters", id: "marketplace-active-filters" });
+  setChildren(view, header, search, chips, el("div", { class: "mp-layout" }, panel, results));
+  announce(q ? `Marketplace results for ${q}` : "Marketplace");
+
+  let sources;
+  try { sources = await marketSources(); } catch (err) {
+    setChildren(panel, el("h2", { text: "Filter" }));
+    setChildren(results, marketOffline("Marketplace could not be loaded", err, () => renderMarketBrowse(view)));
+    return;
+  }
+  const catName = Object.fromEntries((sources.categories || []).map((c) => [c.slug, c.name]));
+  const groups = [
+    ["category", "Category", (sources.categories || []).map((c) => [c.slug, c.name])],
+    ["type", "Type", (sources.types || []).map((t) => [t, t])],
+    ["source", "Source", (sources.sources || []).map((s) => [s.id, s.label])],
+    ["badge", "Publisher", Object.entries(MARKET_BADGES)],
+  ];
+  const toggle = (k, v) => {
+    const next = { ...filters, [k]: filters[k].includes(v) ? filters[k].filter((x) => x !== v) : [...filters[k], v] };
+    navigate(marketBrowseURL(q, next, 1));
+  };
+  setChildren(panel, el("h2", { text: "Filter" }), ...groups.filter((g) => g[2].length).map(([k, label, opts]) =>
+    el("fieldset", { class: "mp-filter-group", "data-group": k },
+      el("legend", { text: label }),
+      ...opts.map(([v, text]) => {
+        const id = `mp-filter-${k}-${v}`.replace(/[^A-Za-z0-9_-]/g, "-");
+        return el("div", { class: "check-line" },
+          el("input", { type: "checkbox", id, "data-filter": `${k}:${v}`, checked: filters[k].includes(v) ? "checked" : null,
+            onchange: () => toggle(k, v) }),
+          el("label", { for: id, text }));
+      }))));
+  const active = Object.entries(filters).flatMap(([k, vs]) => vs.map((v) => [k, v]));
+  setChildren(chips, ...active.map(([k, v]) => el("button", { type: "button", class: "chip mp-filter-chip", "data-filter": `${k}:${v}`,
+    text: `${groups.find((g) => g[0] === k)[1]}: ${k === "category" ? catName[v] || v : k === "badge" ? MARKET_BADGES[v] || v
+      : k === "source" ? ((sources.sources || []).find((s) => s.id === v) || {}).label || v : v} ✕`,
+    onclick: () => toggle(k, v) })),
+    active.length ? el("button", { type: "button", class: "link-button", id: "marketplace-clear-filters", text: "Clear all",
+      onclick: () => navigate(marketBrowseURL(q, {}, 1)) }) : null);
+
+  const qs = new URLSearchParams({ q, page: String(page), size: "24" });
+  if (filters.category.length) qs.set("category", filters.category.join(","));
+  if (filters.badge.length) qs.set("badge", filters.badge.join(","));
+  if (filters.source.length) qs.set("source", filters.source.join(","));
+  if (filters.type.length === 1) qs.set("type", filters.type[0]);
+  let r;
+  try { r = await api(`/api/marketplace/search?${qs}`, { deadline: 45000 }); } catch (err) {
+    setChildren(results, marketOffline("Results could not be loaded", err, () => renderMarketBrowse(view)));
+    return;
+  }
+  // A Docker Hub namespace/repository typed into the search opens its
+  // page directly, so every public repository is reachable by name.
+  const direct = /^[a-z0-9]+(?:[._-][a-z0-9]+)*\/[a-z0-9]+(?:[._-]+[a-z0-9]+)*$/.test(q) && !r.items.some((p) => p.id === q)
+    && (sources.sources || []).some((s) => s.id === "dockerhub")
+    ? el("p", { class: "mp-direct" }, el("a", { id: "marketplace-open-direct", href: marketProductPath("dockerhub", q) + scopeSearch(), text: `Open ${q} on Docker Hub` })) : null;
+  const from = (page - 1) * r.size + 1;
+  const to = (page - 1) * r.size + r.items.length;
+  const pager = el("div", { class: "mp-pager" },
+    page > 1 ? el("a", { class: "button secondary", id: "marketplace-prev", href: marketBrowseURL(q, filters, page - 1), text: "Previous" }) : null,
+    r.items.length ? el("span", { text: `${from.toLocaleString()} – ${to.toLocaleString()}` }) : null,
+    r.hasMore && !r.limit ? el("a", { class: "button secondary", id: "marketplace-next", href: marketBrowseURL(q, filters, page + 1), text: "Next" }) : null);
+  setChildren(results,
+    el("p", { class: "mp-count", id: "marketplace-count", text: `${(r.total || 0).toLocaleString()} result${r.total === 1 ? "" : "s"}` + (q ? ` for "${q}"` : "") }),
+    direct,
+    r.limit ? el("p", { class: "unavailable", id: "marketplace-limit", text: `Docker Hub pages an anonymous search only so far (${r.limit}). Narrow the search or add a filter to reach the rest.` }) : null,
+    r.items.length ? el("div", { class: "mp-grid" }, ...r.items.map(marketCard))
+      : (r.limit ? null : emptyState("No results", q ? `No products match "${q}". Try other words or remove a filter.` : "No products match these filters.")),
+    pager);
+}
+
+// --- markdown, as text-only markup ---------------------------------------
+//
+// A README is untrusted. It is rendered by building elements with text
+// content only: raw HTML is dropped (its text kept), links keep http(s)
+// targets only, and images become links, as the console loads nothing
+// remote.
+
+function mdDecode(s) {
+  return s.replace(/&(amp|lt|gt|quot|#39|apos|nbsp);/g, (_, e) => ({ amp: "&", lt: "<", gt: ">", quot: '"', "#39": "'", apos: "'", nbsp: " " })[e]);
+}
+
+function mdSafeHref(u) {
+  try {
+    const url = new URL(u, "https://invalid.example/");
+    if (url.hostname === "invalid.example") return null;
+    return url.protocol === "https:" || url.protocol === "http:" ? url.href : null;
+  } catch { return null; }
+}
+
+function mdInline(text) {
+  const out = [];
+  const re = /(`+)([\s\S]*?)\1|!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)|\[([^\]]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)|<(https?:\/\/[^>\s]+)>|\*\*([^*]+)\*\*|__([^_]+)__|\*([^*\s][^*]*)\*|\b_([^_]+)_\b/g;
+  let last = 0;
+  let m;
+  while ((m = re.exec(text))) {
+    if (m.index > last) out.push(document.createTextNode(mdDecode(text.slice(last, m.index))));
+    if (m[1]) out.push(el("code", { text: m[2] }));
+    else if (m[4] !== undefined) {
+      const href = mdSafeHref(m[4]);
+      out.push(href ? el("a", { href, target: "_blank", rel: "noopener noreferrer", class: "md-image-link", text: m[3] ? `[image: ${mdDecode(m[3])}]` : "[image]" })
+        : document.createTextNode(m[3] || ""));
+    } else if (m[6] !== undefined) {
+      const href = mdSafeHref(m[6]);
+      const inner = mdInline(m[5]);
+      out.push(href ? el("a", { href, target: "_blank", rel: "noopener noreferrer" }, ...inner) : el("span", {}, ...inner));
+    } else if (m[7]) {
+      const href = mdSafeHref(m[7]);
+      out.push(href ? el("a", { href, target: "_blank", rel: "noopener noreferrer", text: m[7] }) : document.createTextNode(m[7]));
+    } else if (m[8] || m[9]) out.push(el("strong", {}, ...mdInline(m[8] || m[9])));
+    else if (m[10] || m[11]) out.push(el("em", {}, ...mdInline(m[10] || m[11])));
+    last = re.lastIndex;
+  }
+  if (last < text.length) out.push(document.createTextNode(mdDecode(text.slice(last))));
+  return out;
+}
+
+function renderMarkdown(src) {
+  const root = el("div", { class: "md" });
+  // Raw HTML outside code: comments and tags go, their text stays.
+  const lines = String(src || "").replace(/\r\n?/g, "\n").split("\n");
+  let i = 0;
+  const strip = (l) => l.replace(/<!--[\s\S]*?-->/g, "").replace(/<\/?[A-Za-z][^>]*>/g, "");
+  let para = [];
+  const flush = () => {
+    if (para.length) root.append(el("p", {}, ...mdInline(para.join(" "))));
+    para = [];
+  };
+  let inComment = false;
+  while (i < lines.length) {
+    let line = lines[i];
+    const fence = line.match(/^\s*(```|~~~)\s*([\w+-]*)/);
+    if (fence) {
+      flush();
+      const body = [];
+      i++;
+      while (i < lines.length && !lines[i].trim().startsWith(fence[1])) body.push(lines[i++]);
+      i++;
+      root.append(el("pre", { class: "md-code" }, el("code", { text: body.join("\n") })));
+      continue;
+    }
+    if (inComment) { if (line.includes("-->")) { inComment = false; line = line.slice(line.indexOf("-->") + 3); } else { i++; continue; } }
+    if (line.includes("<!--") && !line.includes("-->")) { inComment = true; line = line.slice(0, line.indexOf("<!--")); }
+    line = strip(line);
+    if (!line.trim()) { flush(); i++; continue; }
+    const h = line.match(/^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$/);
+    if (h) { flush(); root.append(el(`h${Math.min(6, h[1].length + 1)}`, {}, ...mdInline(h[2]))); i++; continue; }
+    if (/^\s{0,3}([-*_])(\s*\1){2,}\s*$/.test(line)) { flush(); root.append(el("hr")); i++; continue; }
+    if (/^\s*\|/.test(line) && i + 1 < lines.length && /^\s*\|?\s*:?-{3,}/.test(lines[i + 1])) {
+      flush();
+      const cells = (l) => l.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+      const head = cells(line);
+      i += 2;
+      const rows = [];
+      while (i < lines.length && /^\s*\|/.test(lines[i])) rows.push(cells(strip(lines[i++])));
+      root.append(el("div", { class: "table-wrap" }, el("table", { class: "table md-table" },
+        el("thead", {}, el("tr", {}, ...head.map((c) => el("th", { scope: "col" }, ...mdInline(c))))),
+        el("tbody", {}, ...rows.map((r) => el("tr", {}, ...r.map((c) => el("td", {}, ...mdInline(c)))))))));
+      continue;
+    }
+    const li = line.match(/^(\s*)([-*+]|\d+[.)])\s+(.*)$/);
+    if (li) {
+      flush();
+      const ordered = /\d/.test(li[2]);
+      const list = el(ordered ? "ol" : "ul");
+      while (i < lines.length) {
+        const m = strip(lines[i]).match(/^(\s*)([-*+]|\d+[.)])\s+(.*)$/);
+        if (m) { list.append(el("li", { class: m[1].replace(/\t/g, "  ").length >= 2 ? "md-nested" : null }, ...mdInline(m[3]))); i++; continue; }
+        const cont = strip(lines[i]);
+        if (cont.trim() && /^\s+/.test(cont) && list.lastChild) { list.lastChild.append(" ", ...mdInline(cont.trim())); i++; continue; }
+        break;
+      }
+      root.append(list);
+      continue;
+    }
+    if (/^\s*>/.test(line)) {
+      flush();
+      const body = [];
+      while (i < lines.length && /^\s*>/.test(lines[i])) body.push(strip(lines[i++]).replace(/^\s*>\s?/, ""));
+      root.append(el("blockquote", {}, ...mdInline(body.join(" "))));
+      continue;
+    }
+    para.push(line.trim());
+    i++;
+  }
+  flush();
+  return root;
+}
+
+// --- a product's page ----------------------------------------------------
+
+const MARKET_TABS = [["overview", "Overview"], ["pricing", "Pricing"], ["documentation", "Documentation"], ["support", "Support"], ["versions", "Tags"]];
+
+async function renderMarketProduct(view, source, id) {
+  const back = marketBrowseURL("", {}, 1);
+  setChildren(view, pageHeader("Product details", "", { back }), loadingState(5, { what: id }));
+  let p;
+  try { p = await api(`/api/marketplace/product?source=${encodeURIComponent(source)}&id=${encodeURIComponent(id)}`, { deadline: 60000 }); } catch (err) {
+    setChildren(view, pageHeader("Product details", "", { back }),
+      err.status === 404 ? emptyState("Product not found", err.message) : marketOffline("This product could not be loaded", err, () => renderMarketProduct(view, source, id)));
+    return;
+  }
+  const wanted = new URLSearchParams(location.search).get("tab") || "overview";
+  const current = MARKET_TABS.some((t) => t[0] === wanted) ? wanted : "overview";
+  const configure = el("a", { class: "button primary", id: "marketplace-configure", href: marketConfigPath(source, p.id) + scopeSearch(), text: "Configure" });
+  const head = el("div", { class: "mp-product-head", id: "marketplace-product" },
+    marketLogo(p, 72),
+    el("div", { class: "mp-product-title" },
+      el("h1", { text: p.name }),
+      el("p", { class: "mp-publisher", text: p.publisher }),
+      el("p", { class: "mp-description", text: p.description || "" }),
+      el("div", { class: "mp-card-foot" }, el("span", { class: "mp-source", text: p.sourceLabel }), el("span", { class: "mp-type", text: p.type }), marketBadge(p.badge)),
+      el("div", { class: "mp-product-actions" }, configure)));
+  const strip = el("div", { class: "tab-strip page-tabs", role: "tablist", "aria-label": "Product sections" },
+    ...MARKET_TABS.map(([tid, label]) => el("button", { type: "button", role: "tab", id: `marketplace-tab-${tid}`,
+      class: "tab" + (tid === current ? " is-selected" : ""), "aria-selected": String(tid === current), tabindex: tid === current ? "0" : "-1", text: label,
+      onclick: () => { const u = new URL(location.href); u.searchParams.set("tab", tid); history.replaceState(history.state, "", u); renderMarketProduct(view, source, id); } })));
+  const facts = el("aside", { class: "mp-facts", id: "marketplace-additional-details" },
+    el("h2", { text: "Additional details" }),
+    el("dl", {},
+      el("dt", { text: "Type" }), el("dd", { text: p.type }),
+      el("dt", { text: "Source" }), el("dd", { text: p.sourceLabel }),
+      p.updated ? el("dt", { text: "Last product update" }) : null, p.updated ? el("dd", { text: new Date(p.updated).toLocaleDateString() }) : null,
+      (p.categories || []).length ? el("dt", { text: "Category" }) : null,
+      (p.categories || []).length ? el("dd", {}, ...p.categories.map((c, i) => [i ? ", " : null,
+        el("a", { href: marketBrowseURL("", { category: [c.slug] }, 1), text: c.name })]).flat().filter(Boolean)) : null,
+      p.pulls ? el("dt", { text: "Pulls" }) : null, p.pulls ? el("dd", { text: p.pulls }) : null,
+      p.stars ? el("dt", { text: "Stars" }) : null, p.stars ? el("dd", { text: String(p.stars) }) : null,
+      p.pull ? el("dt", { text: "Image" }) : null, p.pull ? el("dd", { class: "mono", text: p.pull }) : null));
+  let body;
+  if (current === "overview") {
+    body = el("div", { class: "mp-overview", id: "marketplace-overview" },
+      el("h2", { text: "Overview" }), p.overview ? renderMarkdown(p.overview) : el("p", { text: p.description || "This product has no overview." }));
+  } else if (current === "pricing") {
+    body = el("div", { id: "marketplace-pricing" }, el("h2", { text: "Pricing" }), el("p", { text: p.pricing }));
+  } else if (current === "documentation") {
+    body = el("div", { id: "marketplace-documentation" }, el("h2", { text: "Documentation" }),
+      el("ul", {}, ...(p.documentation || []).map((l) => el("li", {}, el("a", { href: l.url, target: "_blank", rel: "noopener noreferrer", text: l.label })))));
+  } else if (current === "support") {
+    body = el("div", { id: "marketplace-support" }, el("h2", { text: "Support" }),
+      el("p", { text: `${p.publisher} supports this product. Get support from its page:` }),
+      el("ul", {}, ...(p.support || []).map((l) => el("li", {}, el("a", { href: l.url, target: "_blank", rel: "noopener noreferrer", text: l.label })))));
+  } else {
+    body = el("div", { id: "marketplace-versions" }, el("h2", { text: "Tags" }));
+    const table = (vs) => el("div", { class: "table-wrap" }, el("table", { class: "table", id: "marketplace-tags" },
+      el("thead", {}, el("tr", {}, ...["Tag", "Last updated", "Size", "Architectures", ""].map((h) => el("th", { scope: "col", text: h })))),
+      el("tbody", {}, ...vs.map((v) => el("tr", { "data-tag": v.name },
+        el("td", { class: "mono", text: v.name }), el("td", { text: v.updated ? new Date(v.updated).toLocaleString() : "—" }),
+        el("td", { text: v.size ? formatBytes(v.size) : "—" }), el("td", { text: (v.archs || []).join(", ") || "—" }),
+        el("td", {}, el("a", { href: marketConfigPath(source, p.id) + "?version=" + encodeURIComponent(v.name), text: "Configure" })))))));
+    let page = 1;
+    const holder = el("div", {}, table(p.versions || []));
+    const more = el("button", { type: "button", class: "secondary", id: "marketplace-more-tags", text: "Show more tags",
+      onclick: async () => {
+        setBusy(more, true);
+        try {
+          const r = await api(`/api/marketplace/versions?source=${encodeURIComponent(source)}&id=${encodeURIComponent(p.id)}&page=${page + 1}`);
+          page++;
+          holder.querySelector("tbody").append(...table(r.versions).querySelectorAll("tbody tr"));
+          if (page * 25 >= r.total) more.remove();
+        } catch (err) { notify(err.message, "error"); }
+        setBusy(more, false);
+      } });
+    body.append(el("p", { class: "form-help", text: `${(p.versionsTotal || 0).toLocaleString()} tags` }), holder,
+      (p.versionsTotal || 0) > 25 ? more : null);
+  }
+  setChildren(view, pageHeader("Product details", "", { back }), head, strip, el("div", { class: "mp-product-body" }, body, facts));
+  announce(`${p.name} in Marketplace`);
+}
+
+// --- the Configure page --------------------------------------------------
+
+function marketField(p, value) {
+  const id = `mp-param-${p.name}`;
+  let control;
+  if (p.type === "select") {
+    control = el("select", { id, name: p.name }, ...(p.options || []).map((o) => el("option", { value: o, text: o, selected: o === value ? "selected" : null })));
+  } else if (p.type === "textarea") {
+    control = el("textarea", { id, name: p.name, rows: "4", spellcheck: "false" });
+    control.value = value || "";
+  } else {
+    control = el("input", { id, name: p.name, type: "text", value: value || "", inputmode: p.type === "number" ? "numeric" : null,
+      required: p.required ? "required" : null, pattern: p.pattern || null, autocomplete: "off", spellcheck: "false" });
+  }
+  return el("div", { class: "form-row", "data-param": p.name },
+    el("label", { for: id }, el("span", { text: p.label }), p.required ? el("span", { class: "required-mark", "aria-hidden": "true", text: "*" }) : null),
+    control, p.help ? el("p", { class: "form-help", text: p.help }) : null);
+}
+
+async function renderMarketConfigure(view, source, id) {
+  const project = currentProject();
+  const params = new URLSearchParams(location.search);
+  const back = marketProductPath(source, id) + scopeSearch();
+  setChildren(view, pageHeader("Deploy", "", { back }), loadingState(6, { what: "the configuration" }));
+  let product;
+  let clusters;
+  try {
+    [product, clusters] = await Promise.all([
+      api(`/api/marketplace/product?source=${encodeURIComponent(source)}&id=${encodeURIComponent(id)}`, { deadline: 60000 }),
+      api(`/api/marketplace/clusters?project=${encodeURIComponent(project || "")}`),
+    ]);
+  } catch (err) {
+    setChildren(view, pageHeader("Deploy", "", { back }), marketOffline("The configuration could not be loaded", err, () => renderMarketConfigure(view, source, id)));
+    return;
+  }
+  const tab = params.get("tab") === "cli" ? "cli" : "gcp";
+  const strip = el("div", { class: "tab-strip page-tabs", role: "tablist", "aria-label": "Deploy" },
+    ...[["gcp", "Deploy via Google Cloud"], ["cli", "Deploy via command line"]].map(([tid, label]) => el("button", { type: "button", role: "tab",
+      id: `marketplace-deploy-tab-${tid}`, class: "tab" + (tid === tab ? " is-selected" : ""), "aria-selected": String(tid === tab), text: label,
+      onclick: () => { const u = new URL(location.href); u.searchParams.set("tab", tid); history.replaceState(history.state, "", u); renderMarketConfigure(view, source, id); } })));
+  const head = el("div", { class: "mp-config-head" }, marketLogo(product, 40),
+    el("div", {}, el("h2", { text: product.name }), el("p", { class: "mp-publisher", text: `${product.publisher} · ${product.sourceLabel}` })));
+  // latest, as `docker pull` takes by default, unless a tag was chosen.
+  const version = params.get("version") || "latest";
+
+  if (tab === "cli") {
+    const image = `${product.pull || id}:${version}`;
+    setChildren(view, pageHeader(`Deploy ${product.name}`, "", { back }), head, strip,
+      el("div", { class: "card", id: "marketplace-cli" },
+        el("p", { text: "Deploy the app with kubectl against the cluster's kubeconfig, then record it as an Application:" }),
+        el("pre", { class: "mono", text: `kubectl create namespace NAMESPACE\nkubectl create deployment APP_INSTANCE_NAME --image=${image} -n NAMESPACE\nkubectl expose deployment APP_INSTANCE_NAME --port=PORT -n NAMESPACE` }),
+        el("p", { class: "form-help", text: "Deploy via Google Cloud does the same and records the app as a Kubernetes Application (app.k8s.io/v1beta1), so it appears on Kubernetes Engine's Applications page." })));
+    return;
+  }
+
+  const clusterSel = el("select", { id: "marketplace-cluster", name: "cluster" },
+    ...clusters.clusters.map((c) => el("option", { value: c.name, text: `${c.name} (${c.location})${c.status !== "Running" ? ` — ${c.status}` : ""}` })),
+    el("option", { value: "__new__", text: "Create a new cluster" }));
+  const newCluster = el("div", { class: "mp-new-cluster", id: "marketplace-new-cluster", hidden: true });
+  const nsSel = el("select", { id: "marketplace-namespace", name: "namespace" });
+  const nsNew = el("input", { type: "text", id: "marketplace-new-namespace", name: "newNamespace", hidden: true, placeholder: "New namespace name", autocomplete: "off" });
+  const nameIn = el("input", { type: "text", id: "marketplace-app-name", name: "name", required: "required", autocomplete: "off", spellcheck: "false",
+    value: (id.split("/").pop() || "app").toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/^[^a-z]+/, "").slice(0, 40) + "-1" });
+  const paramsBox = el("div", { id: "marketplace-parameters" }, loadingState(3));
+  const error = el("p", { class: "form-error", role: "alert", id: "marketplace-deploy-error", hidden: true });
+  const deploy = el("button", { type: "submit", class: "primary", id: "marketplace-deploy", text: "Deploy" });
+  let paramDefs = [];
+
+  const loadNamespaces = async () => {
+    const c = clusterSel.value;
+    newCluster.hidden = c !== "__new__";
+    if (c === "__new__") { setChildren(nsSel); return; }
+    setChildren(nsSel, el("option", { text: "Loading…", value: "" }));
+    try {
+      const r = await api(`/api/marketplace/namespaces?project=${encodeURIComponent(project || "")}&cluster=${encodeURIComponent(c)}`);
+      const list = r.namespaces.filter((n) => !/^(kube-|local-path-storage|kourier-system|knative-|gke-|gmp-)/.test(n));
+      setChildren(nsSel, ...list.map((n) => el("option", { value: n, text: n, selected: n === "default" ? "selected" : null })),
+        el("option", { value: "__new__", text: "Create a namespace" }));
+    } catch (err) {
+      setChildren(nsSel, el("option", { value: "__new__", text: "Create a namespace" }));
+      error.textContent = err.message; error.hidden = false;
+    }
+    nsNew.hidden = nsSel.value !== "__new__";
+  };
+  nsSel.addEventListener("change", () => { nsNew.hidden = nsSel.value !== "__new__"; if (!nsNew.hidden) nsNew.focus(); });
+  clusterSel.addEventListener("change", loadNamespaces);
+
+  // Create a new cluster, as Google's Configure page makes one in a zone.
+  const zone = el("select", { id: "marketplace-new-cluster-zone" }, ...["us-central1-a", "us-central1-b", "us-east1-b", "europe-west1-b", "asia-east1-a"].map((z) => el("option", { value: z, text: z })));
+  const cname = el("input", { type: "text", id: "marketplace-new-cluster-name", value: "cluster-1", autocomplete: "off" });
+  const create = el("button", { type: "button", class: "secondary", id: "marketplace-create-cluster", text: "Create new cluster",
+    disabled: clusters.createUnavailable ? "disabled" : null,
+    onclick: async () => {
+      setBusy(create, true);
+      error.hidden = true;
+      try {
+        await send("/api/marketplace/clusters", "POST", { project, zone: zone.value, name: cname.value.trim() });
+        notify(`Creating cluster ${cname.value.trim()}`);
+        // The new cluster is offered while it provisions; Deploy waits for it.
+        const wait = async () => {
+          const r = await api(`/api/marketplace/clusters?project=${encodeURIComponent(project || "")}`);
+          const c = r.clusters.find((x) => x.name === cname.value.trim());
+          setChildren(clusterSel, ...r.clusters.map((x) => el("option", { value: x.name, text: `${x.name} (${x.location})${x.status !== "Running" ? ` — ${x.status}` : ""}` })),
+            el("option", { value: "__new__", text: "Create a new cluster" }));
+          clusterSel.value = cname.value.trim();
+          if (!c || c.status !== "Running") { if (view.isConnected) MARKET_POLL = setTimeout(wait, 3000); return; }
+          setBusy(create, false);
+          loadNamespaces();
+        };
+        wait();
+      } catch (err) { setBusy(create, false); error.textContent = err.message; error.hidden = false; }
+    } });
+  setChildren(newCluster,
+    el("div", { class: "form-row" }, el("label", { for: "marketplace-new-cluster-zone", text: "Zone" }), zone),
+    el("div", { class: "form-row" }, el("label", { for: "marketplace-new-cluster-name", text: "Cluster name" }), cname),
+    clusters.createUnavailable ? el("p", { class: "form-help form-unavailable", id: "marketplace-create-unavailable", text: clusters.createUnavailable })
+      : el("p", { class: "form-help", text: "A Standard Kubernetes Engine cluster of one node, a kind cluster on this machine." }),
+    create);
+
+  const loadParams = async (v) => {
+    setChildren(paramsBox, loadingState(3, { what: "the app's parameters" }));
+    try {
+      const r = await api(`/api/marketplace/parameters?source=${encodeURIComponent(source)}&id=${encodeURIComponent(id)}&version=${encodeURIComponent(v)}`, { deadline: 60000 });
+      paramDefs = r.parameters;
+      const sections = [];
+      for (const p of paramDefs) {
+        const s = p.section || "";
+        let sec = sections.find((x) => x.name === s);
+        if (!sec) sections.push(sec = { name: s, rows: [] });
+        sec.rows.push(marketField(p, p.default || ""));
+      }
+      setChildren(paramsBox, ...sections.map((s) => s.name
+        ? el("details", { class: "mp-param-section", open: null }, el("summary", { text: s.name }), ...s.rows)
+        : el("div", {}, ...s.rows)));
+    } catch (err) {
+      setChildren(paramsBox, marketOffline("The app's parameters could not be read", err, () => loadParams(v)));
+    }
+  };
+
+  const form = el("form", { class: "create-page mp-config-form", id: "marketplace-configure-form", novalidate: "novalidate",
+    onsubmit: async (e) => {
+      e.preventDefault();
+      error.hidden = true;
+      const cluster = clusterSel.value;
+      if (cluster === "__new__") { error.textContent = "Create the new cluster first, or select an existing one."; error.hidden = false; return; }
+      const creating = nsSel.value === "__new__";
+      const namespace = creating ? nsNew.value.trim() : nsSel.value;
+      const name = nameIn.value.trim();
+      const dns = /^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$/;
+      if (!dns.test(namespace)) { error.textContent = "Namespace: lowercase letters, digits and dashes, starting with a letter."; error.hidden = false; return; }
+      if (!dns.test(name)) { error.textContent = "App instance name: lowercase letters, digits and dashes, starting with a letter."; error.hidden = false; return; }
+      const values = {};
+      for (const p of paramDefs) {
+        const c = form.querySelector(`[name="${CSS.escape(p.name)}"]`);
+        if (!c) continue;
+        values[p.name] = c.value;
+        if (p.required && !c.value.trim()) { error.textContent = `${p.label} is required.`; error.hidden = false; c.focus(); return; }
+        if (p.pattern && c.value && !(new RegExp(p.pattern)).test(c.value)) { error.textContent = `${p.label}: ${p.help || "not a valid value"}`; error.hidden = false; c.focus(); return; }
+      }
+      setBusy(deploy, true);
+      const op = recordOperation(`Deploy ${product.name} as ${name}`);
+      try {
+        await send("/api/marketplace/deploy", "POST", { project, source, product: id, version: values.tag || version, cluster, namespace, createNamespace: creating, name, values });
+        op.succeeded("");
+        notify(`Deploying ${name}`);
+        navigate(`/kubernetes/applications/${encodeURIComponent(cluster)}/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`);
+      } catch (err) {
+        op.failed(err.message);
+        setBusy(deploy, false);
+        error.textContent = err.message;
+        error.hidden = false;
+      }
+    } },
+    el("div", { class: "form-row" }, el("label", { for: "marketplace-cluster" }, el("span", { text: "Cluster" })), clusterSel,
+      el("p", { class: "form-help", text: "Select the Kubernetes cluster that you want to deploy the app to." })),
+    newCluster,
+    el("div", { class: "form-row" }, el("label", { for: "marketplace-namespace" }, el("span", { text: "Namespace" })), nsSel, nsNew,
+      el("p", { class: "form-help", text: "Select or create a Namespace to use for the application." })),
+    el("div", { class: "form-row" }, el("label", { for: "marketplace-app-name" }, el("span", { text: "App instance name" }), el("span", { class: "required-mark", "aria-hidden": "true", text: "*" })), nameIn,
+      el("p", { class: "form-help", text: "The name must be unique within the namespace." })),
+    paramsBox, error,
+    el("div", { class: "form-actions" }, deploy));
+  setChildren(view, pageHeader(`Deploy ${product.name}`, "", { back }), head, strip, form);
+  announce(`Configure ${product.name}`);
+  loadNamespaces();
+  loadParams(version);
+}
+
+// --- Kubernetes Engine > Applications ------------------------------------
+
+const APP_STATUS_CLASS = { OK: "ok", Pending: "pending", Error: "error" };
+
+function appStatus(a) {
+  const label = a.status === "OK" ? "OK" : a.status === "Pending" ? "Deploying" : "Error";
+  return el("span", { class: `status ${APP_STATUS_CLASS[a.status] || ""}`, "data-status": a.status, text: label });
+}
+
+const appPath = (a) => `/kubernetes/applications/${encodeURIComponent(a.cluster)}/${encodeURIComponent(a.namespace)}/${encodeURIComponent(a.name)}`;
+
+async function renderGKEApplications(view) {
+  stopMarketPoll();
+  const rest = location.pathname.replace(/^\/kubernetes\/applications\/?/, "").split("/").filter(Boolean).map(decodeURIComponent);
+  if (rest.length === 3) return renderGKEApplication(view, rest[0], rest[1], rest[2]);
+  if (rest.length) return notFound(view, location.pathname);
+  const project = currentProject();
+  const deployBtn = el("a", { class: "header-button primary", id: "applications-deploy-marketplace", href: "/marketplace/browse?filter=type:Kubernetes%20apps", text: "Deploy from Marketplace" });
+  deployBtn.href = marketBrowseURL("", {}, 1);
+  const header = pageHeader("Applications", "", { actions: [deployBtn, refreshButton(() => renderGKEApplications(view))] });
+  setChildren(view, header, loadingState(4, { what: "applications" }));
+  let r;
+  try { r = await api(`/api/marketplace/applications?project=${encodeURIComponent(project || "")}`); } catch (err) {
+    setChildren(view, header, errorState("Could not read applications", err.message, () => renderGKEApplications(view)));
+    return;
+  }
+  const apps = r.applications || [];
+  const table = el("div", { class: "table-wrap" }, el("table", { class: "table", id: "applications-table" },
+    el("thead", {}, el("tr", {}, ...["Name", "Status", "Type", "Version", "Namespace", "Cluster"].map((h) => el("th", { scope: "col", text: h })))),
+    el("tbody", {}, ...apps.map((a) => el("tr", { "data-app": a.name, "data-cluster": a.cluster },
+      el("td", {}, el("a", { href: appPath(a) + scopeSearch(), text: a.name })),
+      el("td", {}, appStatus(a)), el("td", { text: a.type || "—" }), el("td", { text: a.version || "—" }),
+      el("td", { text: a.namespace }), el("td", { text: a.cluster }))))));
+  setChildren(view, header,
+    el("p", { class: "subtitle", text: "Applications are the Kubernetes Applications (app.k8s.io/v1beta1) on this instance's cluster and the project's Kubernetes Engine clusters, such as those Marketplace deploys." }),
+    (r.problems || []).map((p) => el("p", { class: "unavailable", text: p })),
+    apps.length ? table : el("div", { class: "state", id: "applications-empty" },
+      el("h2", { text: "No applications to display" }),
+      el("p", { text: "Deploy an app from Marketplace, and it appears here with its components." }),
+      el("a", { class: "button primary", href: marketBrowseURL("", {}, 1), text: "Deploy from Marketplace" })));
+  announce(`Applications: ${apps.length}`);
+}
+
+async function renderGKEApplication(view, cluster, namespace, name) {
+  const project = currentProject();
+  const back = "/kubernetes/applications" + scopeSearch();
+  const q = `project=${encodeURIComponent(project || "")}&cluster=${encodeURIComponent(cluster)}&namespace=${encodeURIComponent(namespace)}&name=${encodeURIComponent(name)}`;
+  let r;
+  try { r = await api(`/api/marketplace/application?${q}`); } catch (err) {
+    setChildren(view, pageHeader("Application details", "", { back }),
+      err.status === 404 ? emptyState("Application not found", err.message) : errorState("Could not read the application", err.message, () => renderGKEApplication(view, cluster, namespace, name)));
+    return;
+  }
+  const a = r.application;
+  const del = el("button", { type: "button", class: "header-button", id: "application-delete", text: "Delete",
+    onclick: () => confirmDestructive({ title: `Delete ${a.name}?`, style: "confirm",
+      detail: `The application ${a.name} and its components (${(a.components || []).map((c) => `${c.kind} ${c.name}`).join(", ") || "none"}) are deleted from namespace ${a.namespace} of cluster ${a.cluster}.`,
+      onConfirm: async () => {
+        await send("/api/marketplace/application/delete", "POST", { project, cluster, namespace, name });
+        notify(`Deleted application ${a.name}`);
+        navigate("/kubernetes/applications");
+      } }) });
+  const wanted = new URLSearchParams(location.search).get("tab") || "details";
+  const tabs = [["details", "Details"], ["yaml", "YAML"]];
+  const current = tabs.some((t) => t[0] === wanted) ? wanted : "details";
+  const strip = el("div", { class: "tab-strip page-tabs", role: "tablist", "aria-label": "Application sections" },
+    ...tabs.map(([tid, label]) => el("button", { type: "button", role: "tab", id: `application-tab-${tid}`,
+      class: "tab" + (tid === current ? " is-selected" : ""), "aria-selected": String(tid === current), text: label,
+      onclick: () => { const u = new URL(location.href); u.searchParams.set("tab", tid); history.replaceState(history.state, "", u); renderGKEApplication(view, cluster, namespace, name); } })));
+  const progress = a.status === "Pending"
+    ? el("div", { class: "mp-progress", id: "application-progress", role: "status" },
+        el("div", { class: "mp-progress-bar", "aria-hidden": "true" }),
+        el("p", {}, el("strong", { text: "Deploying. " }), `${a.name}'s components are starting; the cluster is pulling ${a.image || "the images"}.`),
+        (a.pods || []).length ? el("ul", { class: "mp-pods" }, ...a.pods.map((p) => el("li", { text: `${p.name}: ${p.reason || p.phase} (${p.ready} ready)` }))) : null)
+    : a.status === "Error"
+      ? el("div", { class: "state error", id: "application-error", role: "alert" }, el("h2", { text: "The application has errors" }), el("p", { text: a.detail || "" }),
+          (a.pods || []).length ? el("ul", { class: "mp-pods" }, ...a.pods.map((p) => el("li", { text: `${p.name}: ${p.reason || p.phase} (${p.ready} ready)` }))) : null)
+      : null;
+  const info = el("div", { class: "card", id: "application-info" },
+    el("dl", { class: "api-facts" },
+      ...[["Status", appStatus(a)], ["Type", a.type], ["Version", a.version], ["Cluster", a.cluster], ["Namespace", a.namespace],
+        ["Created", a.created ? new Date(a.created).toLocaleString() : ""], ["Source", { dockerhub: "Docker Hub" }[a.source] || a.source],
+        ["Image", a.image], ["Description", a.description]].filter(([, v]) => v).flatMap(([k, v]) => [el("dt", { text: k }),
+        el("dd", { class: k === "Image" ? "mono" : null }, v)])),
+    (a.links || []).length ? el("p", {}, ...a.links.map((l, i) => [i ? " · " : null, el("a", { href: l.url, target: "_blank", rel: "noopener noreferrer", text: l.description || l.url })]).flat().filter(Boolean)) : null,
+    a.source && a.product ? el("p", {}, el("a", { href: marketProductPath(a.source, a.product) + scopeSearch(), id: "application-product", text: "View in Marketplace" })) : null);
+  const compLink = (c) => {
+    if (!r.own || !c.name) return document.createTextNode(c.name || "—");
+    if (c.kind === "Service") return el("a", { href: `/kubernetes/services/${encodeURIComponent(c.name)}${scopeSearch()}`, text: c.name });
+    if (["Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob"].includes(c.kind)) return el("a", { href: `/kubernetes/workloads/${encodeURIComponent(c.name)}${scopeSearch()}`, text: c.name });
+    return document.createTextNode(c.name);
+  };
+  const components = el("div", { id: "application-components" }, el("h2", { text: "Components" }),
+    el("div", { class: "table-wrap" }, el("table", { class: "table", id: "application-components-table" },
+      el("thead", {}, el("tr", {}, ...["Name", "Kind", "Status", "Details", "Endpoints"].map((h) => el("th", { scope: "col", text: h })))),
+      el("tbody", {}, ...((a.components || []).length ? a.components.map((c) => el("tr", { "data-kind": c.kind, "data-name": c.name },
+        el("td", {}, compLink(c)), el("td", { text: c.kind }),
+        el("td", {}, el("span", { class: `status ${APP_STATUS_CLASS[c.status] || ""}`, text: c.status === "Pending" ? "Pending" : c.status })),
+        el("td", { text: c.detail || "—" }), el("td", { class: "mono", text: (c.endpoints || []).join("\n") || "—" })))
+        : [el("tr", {}, el("td", { colspan: "5", text: "No components to display" }))])))));
+  const body = current === "yaml"
+    ? el("pre", { class: "mono", id: "application-yaml", text: JSON.stringify(a.object ? redactForView(a.object) : {}, null, 2) })
+    : el("div", {}, progress, info, components);
+  setChildren(view, pageHeader(a.name, "Application details", { back, actions: [del, refreshButton(() => renderGKEApplication(view, cluster, namespace, name))] }), strip, body);
+  announce(`Application ${a.name}: ${a.status}`);
+  if (a.status === "Pending" && current === "details") {
+    stopMarketPoll();
+    MARKET_POLL = setTimeout(() => { if (view.isConnected && location.pathname === appPath(a)) renderGKEApplication(view, cluster, namespace, name); }, 2500);
+  }
+}
+
+function redactForView(o) {
+  const m = o && o.metadata && o.metadata.annotations;
+  if (m) delete m["kubectl.kubernetes.io/last-applied-configuration"];
+  return o;
 }

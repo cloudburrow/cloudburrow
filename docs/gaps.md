@@ -35,7 +35,7 @@ tracks it; a closed issue is named only where it says what was built.
 | Spanner, Bigtable, Firestore, Datastore | 5 | 0 | 1 | 3 | 1 |
 | Cloud SQL, Memorystore | 6 | 1 | 4 | 1 | 0 |
 | Functions, credentials, tooling | 1 | 0 | 1 | 0 | 0 |
-| Console | 0 | 0 | 0 | 0 | 0 |
+| Console | 1 | 1 | 0 | 0 | 0 |
 | **Total** | **65** | **4** | **18** | **37** | **6** |
 
 ## Cloud Storage
@@ -326,6 +326,7 @@ latency and resource charts (#1267); the Artifact Registry repository Permission
 
 | Gap | Why open | Size |
 |---|---|---|
+| Marketplace's Helm sources (#2149): Artifact Hub's charts (Bitnami, Rancher's charts and partner-charts and the other Helm repositories it lists), Rancher's chart repositories read from their `index.yaml`, a user-added repository URL, and Deploy of a chart with the Helm Go SDK (values.schema.json as fields, a YAML editor otherwise) recorded as an Application with Helm upgrade and uninstall on its page. Docker Hub is served | not built yet | M |
 
 ## Excluded on purpose
 

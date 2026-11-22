@@ -2769,3 +2769,73 @@ tr.log-entry.is-located { outline: 2px solid var(--accent); outline-offset: -2px
 .bq-map { display: block; }
 .trace-kv td, .trace-kv th { overflow-wrap: anywhere; word-break: break-word; }
 .trace-kv { table-layout: fixed; width: 100%; }
+
+/* Marketplace (#2149): Google Cloud Marketplace's home, browse, product and
+   Configure pages, and Kubernetes Engine's Applications. */
+.mp-hero { margin: 8px 0 24px; }
+.mp-hero h2 { font-size: var(--text-heading-size); font-weight: 400; margin: 0 0 4px; }
+.mp-search { display: flex; align-items: center; gap: 8px; max-width: 720px; border: 1px solid var(--field-border); border-radius: 24px;
+  padding: 4px 16px; background: var(--surface); margin: 12px 0 16px; }
+.mp-search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.mp-search-icon { color: var(--text-muted); display: inline-flex; }
+.mp-search-input { flex: 1; border: 0; background: transparent; color: var(--text); font: inherit; padding: 8px 0; min-width: 0; }
+.mp-section-title { font-size: var(--text-title-size, 16px); font-weight: 500; margin: 24px 0 12px; }
+.mp-section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.mp-home-categories { display: flex; flex-wrap: wrap; gap: 8px; }
+.mp-category { border: 1px solid var(--border); background: var(--surface); color: var(--text); padding: 6px 14px; text-decoration: none; }
+.mp-layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 24px; align-items: start; }
+@media (max-width: 760px) { .mp-layout { grid-template-columns: minmax(0, 1fr); } }
+.mp-filters { border-right: 1px solid var(--border); padding-right: 16px; }
+.mp-filters h2 { font-size: var(--text-body-size); font-weight: 500; margin: 0 0 8px; }
+.mp-filter-group { border: 0; margin: 0 0 16px; padding: 0; min-width: 0; }
+.mp-filter-group legend { font-weight: 500; margin-bottom: 6px; padding: 0; }
+.mp-filter-group .check-line { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+.mp-filter-group .check-line input { width: auto; margin: 0; }
+.mp-filter-group { max-height: 340px; overflow-y: auto; }
+.mp-active-filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; align-items: center; }
+.mp-filter-chip { border: 1px solid var(--border); background: var(--surface-alt); color: var(--text); padding: 4px 10px; cursor: pointer; font: inherit; }
+.mp-count { color: var(--text-muted); margin: 0 0 12px; }
+.mp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+.mp-card { display: flex; flex-direction: column; gap: 8px; color: var(--text); text-decoration: none; padding: 16px; min-width: 0; }
+.mp-card:hover { box-shadow: var(--shadow-menu); }
+.mp-card-head { display: flex; gap: 12px; align-items: center; min-width: 0; }
+.mp-card-title { min-width: 0; }
+.mp-card-title h3 { margin: 0; font-size: var(--text-body-size); font-weight: 500; overflow-wrap: anywhere; }
+.mp-publisher { margin: 2px 0 0; color: var(--text-muted); font-size: var(--text-caption-size); }
+.mp-description { margin: 0; color: var(--text); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.mp-card-foot { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: auto; font-size: var(--text-caption-size); color: var(--text-muted); }
+.mp-source, .mp-type { border: 1px solid var(--border); border-radius: var(--radius-control); padding: 1px 6px; }
+.mp-badge { border-radius: var(--radius-control); padding: 1px 6px; background: var(--nav-selected); color: var(--nav-selected-text); }
+.mp-logo { flex: none; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-control); background: var(--surface-alt);
+  color: var(--text-muted); font-weight: 500; overflow: hidden; }
+.mp-logo img { width: 100%; height: 100%; object-fit: contain; }
+.mp-pager { display: flex; gap: 12px; align-items: center; justify-content: flex-end; margin: 16px 0; }
+.mp-direct { margin: 0 0 12px; }
+.mp-product-head { display: flex; gap: 20px; align-items: flex-start; margin: 8px 0 16px; }
+.mp-product-title h1 { margin: 0; font-size: var(--text-heading-size); font-weight: 400; overflow-wrap: anywhere; }
+.mp-product-title .mp-description { -webkit-line-clamp: unset; margin: 8px 0; }
+.mp-product-actions { margin-top: 12px; display: flex; gap: 8px; }
+.mp-product-body { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 32px; align-items: start; }
+@media (max-width: 900px) { .mp-product-body { grid-template-columns: minmax(0, 1fr); } }
+.mp-facts h2, .mp-product-body h2 { font-size: var(--text-title-size, 16px); font-weight: 500; }
+.mp-facts dl { margin: 0; }
+.mp-facts dt { color: var(--text-muted); font-size: var(--text-caption-size); margin-top: 12px; }
+.mp-facts dd { margin: 2px 0 0; overflow-wrap: anywhere; }
+.md { overflow-wrap: anywhere; line-height: 1.5; }
+.md pre.md-code { background: var(--surface-alt); padding: 12px; border-radius: var(--radius); overflow-x: auto; font-family: var(--mono); }
+.md code { font-family: var(--mono); background: var(--surface-alt); padding: 0 3px; border-radius: var(--radius-control); }
+.md pre code { background: none; padding: 0; }
+.md blockquote { border-left: 3px solid var(--border); margin: 8px 0; padding: 0 12px; color: var(--text-muted); }
+.md li.md-nested { margin-left: 20px; }
+.mp-config-head { display: flex; gap: 12px; align-items: center; margin: 8px 0 12px; }
+.mp-config-head h2 { margin: 0; font-size: var(--text-title-size, 16px); font-weight: 500; }
+.mp-new-cluster { border-left: 2px solid var(--border); padding-left: 16px; margin: 0 0 16px; }
+.mp-param-section { margin: 0 0 16px; }
+.mp-param-section summary { cursor: pointer; font-weight: 500; margin-bottom: 12px; }
+.mp-progress { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 16px; margin-bottom: 16px; }
+.mp-progress-bar { height: 4px; background: linear-gradient(90deg, var(--accent) 30%, transparent 30%); background-size: 200% 100%;
+  margin: -12px -16px 12px; }
+@media (prefers-reduced-motion: no-preference) { .mp-progress-bar { animation: mp-indeterminate 1.4s linear infinite; } }
+@keyframes mp-indeterminate { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+.mp-pods { margin: 8px 0 0; padding-left: 20px; font-family: var(--mono); font-size: var(--text-caption-size); }
+#application-components-table td.mono { white-space: pre-line; }
