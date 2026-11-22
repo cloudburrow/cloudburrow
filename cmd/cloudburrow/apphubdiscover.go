@@ -22,10 +22,9 @@ import (
 // project ID or number as it writes it.
 // Docs re-read 2026-11-21: https://docs.cloud.google.com/app-hub/docs/supported-resources.
 //
-// Supported types this instance does not serve are not discovered: Compute
-// Engine forwarding rules, backend services, service attachments and
-// instance groups (Compute Engine serves VPC networking, VMs and disks
-// only; VM instances are not a supported type), AlloyDB, Memorystore for
+// Compute Engine's types are in apphubcompute.go (#2153); VM instances
+// are not a supported type. Supported types this instance does not serve
+// are not discovered: AlloyDB, Memorystore for
 // Memcached, Cloud Build connections and installations, Vertex AI's
 // datasets, featurestores, metadata stores, notebooks, tensorboards and
 // jobs, and the rest of the list. Cloud Scheduler jobs are supported but
@@ -328,6 +327,9 @@ func (s *appHubService) appHubOtherResources(ctx context.Context, project string
 
 	// Cloud Build private pools: workloads, by project number.
 	perLocation("cloudbuild.googleapis.com", base("cloudbuild"), "/v1/", "workerPools", "workerPools", number, true)
+
+	// Compute Engine's load balancing and instance groups (#2153).
+	out = append(out, appHubComputeResources(ctx, l, base("compute"), project)...)
 
 	// Service Usage: the project's enabled services, by project number.
 	for _, it := range l.list(ctx, base("serviceusage"), "/v1/projects/"+p+"/services?filter=state:ENABLED", "services") {

@@ -116,7 +116,7 @@ func (s *computeService) Start(ctx context.Context) error {
 		return s.metadataHost()
 	}
 	api, err := compute.New(compute.Options{State: state, Extra: s.instanceGroupManagers, ExtraGroups: s.gkeGroups, NetworkUsers: s.networkUsers, VMs: s.vms,
-		ProjectOrganization: s.projectOrganization})
+		ProjectOrganization: s.projectOrganization, LB: &computeLB{cfg: s.cfg, vms: s.vms}})
 	if err != nil {
 		return err
 	}

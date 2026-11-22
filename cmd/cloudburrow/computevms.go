@@ -45,11 +45,14 @@ type computeVMs struct {
 	mu     sync.Mutex
 	built  map[string]bool
 	tunnel map[string]*netfwd.Forwarder
-	build  sync.Mutex
+	// lbTunnels are load balancers' tunnels to instances' ports (#2153,
+	// computelb.go), by instance key and port.
+	lbTunnels map[string]*netfwd.Forwarder
+	build     sync.Mutex
 }
 
 func newComputeVMs(cfg config.Config, bg context.Context) *computeVMs {
-	return &computeVMs{cfg: cfg, bg: bg, built: map[string]bool{}, tunnel: map[string]*netfwd.Forwarder{},
+	return &computeVMs{cfg: cfg, bg: bg, built: map[string]bool{}, tunnel: map[string]*netfwd.Forwarder{}, lbTunnels: map[string]*netfwd.Forwarder{},
 		installer: &components.Installer{Kubeconfig: cfg.KubeconfigPath(), Namespace: cfg.Cluster.Namespace, Instance: cfg.Name}}
 }
 
@@ -306,6 +309,7 @@ func (b *computeVMs) Stop(ctx context.Context, vm compute.VMSpec) error {
 	if f != nil {
 		_ = f.Stop(context.Background())
 	}
+	b.stopLBTunnels(ctx, vm)
 	// A suspended guest is thawed first, so it can shut down.
 	_ = b.freeze(ctx, vm, false)
 	if _, err := b.kubectl(ctx, "delete", "pod,service", vm.Key, "--ignore-not-found", "--wait=true", "--timeout=2m"); err != nil {
@@ -414,5 +418,9 @@ func (b *computeVMs) stopAll() {
 	for k, f := range b.tunnel {
 		_ = f.Stop(context.Background())
 		delete(b.tunnel, k)
+	}
+	for k, f := range b.lbTunnels {
+		_ = f.Stop(context.Background())
+		delete(b.lbTunnels, k)
 	}
 }

@@ -73,6 +73,14 @@ func (p computePSCEndpointsProvider) endpoints(project string) []map[string]any 
 	if m, err := p.call("GET", project, "aggregated/forwardingRules", nil, nil); err == nil {
 		out = append(out, aggregatedItems(m, "forwardingRules")...)
 	}
+	// A load balancer's forwarding rules (#2153) are Load balancing's.
+	kept := out[:0]
+	for _, e := range out {
+		if vpcStr(e, "loadBalancingScheme") == "" {
+			kept = append(kept, e)
+		}
+	}
+	out = kept
 	sort.Slice(out, func(i, j int) bool { return vpcStr(out[i], "name") < vpcStr(out[j], "name") })
 	return out
 }

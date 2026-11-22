@@ -23,6 +23,7 @@ var guardedElsewhere = map[string]string{
 	"internal/service/resourcemanager/api.go": "top serves hostguard.Wrap(both), except for HandleUnguarded's matches: Kourier's invoke check (#1879), which forwards any routed Host and answers only allow or deny",
 	"internal/service/vertexai/lifecycle.go":  "mixedHandler serves hostguard.Wrap'd REST and gRPC",
 	"internal/netfwd/guard.go":                "the guard itself: guardHandler checks Host and Origin",
+	"internal/service/compute/lbplane.go":     "a load balancer's forwarding rule (#2153) is the user's own front end, which on Google any client on the internet reaches under any Host; it serves only what the user's URL map routes to their backends, holds no CloudBurrow API and no credential, and listens on 127.0.0.1 only",
 	"cmd/cloudburrow/terraform_intercept.go":  "the --intercept-hardcoded proxy (#1578) lives for one terraform run and answers only CONNECT to an intercepted host (a browser cannot send CONNECT); the inner server has no listener, only those tunnels, and serves only an intercepted Host",
 }
 

@@ -31,6 +31,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.serveGuest(w, r)
 		return
 	}
+	if r.URL.Path == LBCAPath {
+		// The certificate authority of Google-managed certificates (#2153).
+		s.serveLBCA(w, r)
+		return
+	}
 	if !strings.HasPrefix(r.URL.Path, Prefix) {
 		writeError(w, unimplemented("CloudBurrow's Compute Engine API serves %s only (%s %s).", Prefix, r.Method, r.URL.Path))
 		return
@@ -198,6 +203,10 @@ func (s *Server) doLocked(c call) (obj, error) {
 	}
 	if rel := iamTarget(c); rel != "" {
 		return s.iamCall(c, rel)
+	}
+	if out, err, ok := s.lbRoute(c); ok {
+		// Cloud Load Balancing (#2153, lb.go).
+		return out, err
 	}
 	p := c.parts
 	get, post, del := c.method == http.MethodGet, c.method == http.MethodPost, c.method == http.MethodDelete

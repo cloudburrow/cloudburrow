@@ -103,10 +103,6 @@ func TestEveryUnservedMethodIsNotImplemented(t *testing.T) {
 		{"compute.routers.updateNamedSet", "POST", "projects/p/regions/us-central1/routers/x/updateNamedSet"},
 		{"compute.routers.updateRoutePolicy", "POST", "projects/p/regions/us-central1/routers/x/updateRoutePolicy"},
 		{"compute.projects.moveDisk", "POST", "projects/p/moveDisk"},
-		{"compute.globalForwardingRules.patch", "PATCH", "projects/p/global/forwardingRules/x"},
-		{"compute.globalForwardingRules.setTarget", "POST", "projects/p/global/forwardingRules/x/setTarget"},
-		{"compute.forwardingRules.patch", "PATCH", "projects/p/regions/us-central1/forwardingRules/x"},
-		{"compute.forwardingRules.setTarget", "POST", "projects/p/regions/us-central1/forwardingRules/x/setTarget"},
 		{"compute.serviceAttachments.getIamPolicy", "GET", "projects/p/regions/us-central1/serviceAttachments/x/getIamPolicy"},
 		{"compute.serviceAttachments.setIamPolicy", "POST", "projects/p/regions/us-central1/serviceAttachments/x/setIamPolicy"},
 		{"compute.serviceAttachments.testIamPermissions", "POST", "projects/p/regions/us-central1/serviceAttachments/x/testIamPermissions"},
@@ -114,6 +110,7 @@ func TestEveryUnservedMethodIsNotImplemented(t *testing.T) {
 		{"compute.projects.setDefaultNetworkTier", "POST", "projects/p/setDefaultNetworkTier"},
 		{"compute.projects.setUsageExportBucket", "POST", "projects/p/setUsageExportBucket"},
 	}
+	unserved = append(unserved, lbUnserved...)
 	listed := map[string]bool{}
 	for _, u := range unserved {
 		listed[u.id] = true

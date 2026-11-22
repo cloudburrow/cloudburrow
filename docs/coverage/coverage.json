@@ -14860,9 +14860,9 @@
     "Key": "compute",
     "Title": "Compute Engine API (v1): VPC networking",
     "counts": {
-      "Implemented": 79,
-      "Unimplemented": 97,
-      "Verified": 144
+      "Implemented": 261,
+      "Unimplemented": 110,
+      "Verified": 161
     },
     "rows": [
       {
@@ -14968,6 +14968,169 @@
         "tests": [
           "test/compat/computegroups2139_test.go:346 TestComputeAutoscalerScalesOnRealCPU"
         ]
+      },
+      {
+        "method": "compute.backendBuckets.addSignedUrlKey",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.backendBuckets.aggregatedList",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.backendBuckets.delete",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.backendBuckets.deleteSignedUrlKey",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.backendBuckets.get",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.backendBuckets.getIamPolicy",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.backendBuckets.insert",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.backendBuckets.list",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.backendBuckets.listUsable",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.backendBuckets.patch",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.backendBuckets.setEdgeSecurityPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.backendBuckets.setIamPolicy",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.backendBuckets.testIamPermissions",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.backendBuckets.update",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.backendServices.addSignedUrlKey",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.backendServices.aggregatedList",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.backendServices.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computelb2153_test.go:50 TestComputeExternalHTTPLoadBalancerThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.backendServices.deleteSignedUrlKey",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.backendServices.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computelb2153_test.go:50 TestComputeExternalHTTPLoadBalancerThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.backendServices.getEffectiveSecurityPolicies",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.backendServices.getHealth",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computelb2153_test.go:50 TestComputeExternalHTTPLoadBalancerThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.backendServices.getIamPolicy",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.backendServices.insert",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computelb2153_test.go:50 TestComputeExternalHTTPLoadBalancerThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.backendServices.list",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.backendServices.listUsable",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.backendServices.patch",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.backendServices.setEdgeSecurityPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.backendServices.setIamPolicy",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.backendServices.setSecurityPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.backendServices.testIamPermissions",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.backendServices.update",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.diskTypes.aggregatedList",
@@ -15176,8 +15339,8 @@
       },
       {
         "method": "compute.forwardingRules.patch",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.forwardingRules.setLabels",
@@ -15188,8 +15351,8 @@
       },
       {
         "method": "compute.forwardingRules.setTarget",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.globalAddresses.delete",
@@ -15238,6 +15401,7 @@
         "method": "compute.globalForwardingRules.delete",
         "status": "Verified",
         "tests": [
+          "test/compat/computelb2153_test.go:50 TestComputeExternalHTTPLoadBalancerThroughTheGoClient",
           "test/compat/psc2140_test.go:32 TestPrivateServiceConnectThroughTheGoClient2140"
         ]
       },
@@ -15245,6 +15409,7 @@
         "method": "compute.globalForwardingRules.get",
         "status": "Verified",
         "tests": [
+          "test/compat/computelb2153_test.go:50 TestComputeExternalHTTPLoadBalancerThroughTheGoClient",
           "test/compat/psc2140_test.go:32 TestPrivateServiceConnectThroughTheGoClient2140"
         ]
       },
@@ -15252,6 +15417,7 @@
         "method": "compute.globalForwardingRules.insert",
         "status": "Verified",
         "tests": [
+          "test/compat/computelb2153_test.go:50 TestComputeExternalHTTPLoadBalancerThroughTheGoClient",
           "test/compat/psc2140_test.go:32 TestPrivateServiceConnectThroughTheGoClient2140"
         ]
       },
@@ -15264,8 +15430,8 @@
       },
       {
         "method": "compute.globalForwardingRules.patch",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.globalForwardingRules.setLabels",
@@ -15276,8 +15442,43 @@
       },
       {
         "method": "compute.globalForwardingRules.setTarget",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.globalNetworkEndpointGroups.attachNetworkEndpoints",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.globalNetworkEndpointGroups.delete",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.globalNetworkEndpointGroups.detachNetworkEndpoints",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.globalNetworkEndpointGroups.get",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.globalNetworkEndpointGroups.insert",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.globalNetworkEndpointGroups.list",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.globalNetworkEndpointGroups.listNetworkEndpoints",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.globalOperations.aggregatedList",
@@ -15309,6 +15510,122 @@
         "tests": [
           "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
         ]
+      },
+      {
+        "method": "compute.healthChecks.aggregatedList",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.healthChecks.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computelb2153_test.go:50 TestComputeExternalHTTPLoadBalancerThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.healthChecks.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computelb2153_test.go:50 TestComputeExternalHTTPLoadBalancerThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.healthChecks.insert",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computelb2153_test.go:50 TestComputeExternalHTTPLoadBalancerThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.healthChecks.list",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.healthChecks.patch",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.healthChecks.testIamPermissions",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.healthChecks.update",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.httpHealthChecks.delete",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.httpHealthChecks.get",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.httpHealthChecks.insert",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.httpHealthChecks.list",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.httpHealthChecks.patch",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.httpHealthChecks.testIamPermissions",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.httpHealthChecks.update",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.httpsHealthChecks.delete",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.httpsHealthChecks.get",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.httpsHealthChecks.insert",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.httpsHealthChecks.list",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.httpsHealthChecks.patch",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.httpsHealthChecks.testIamPermissions",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.httpsHealthChecks.update",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.images.delete",
@@ -15912,6 +16229,51 @@
         ]
       },
       {
+        "method": "compute.networkEndpointGroups.aggregatedList",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.networkEndpointGroups.attachNetworkEndpoints",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.networkEndpointGroups.delete",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.networkEndpointGroups.detachNetworkEndpoints",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.networkEndpointGroups.get",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.networkEndpointGroups.insert",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.networkEndpointGroups.list",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.networkEndpointGroups.listNetworkEndpoints",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.networkEndpointGroups.testIamPermissions",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
         "method": "compute.networks.addPeering",
         "status": "Implemented",
         "note": "no official-SDK test proves it yet"
@@ -16122,6 +16484,101 @@
         ]
       },
       {
+        "method": "compute.regionBackendServices.delete",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionBackendServices.get",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionBackendServices.getHealth",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionBackendServices.getIamPolicy",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionBackendServices.insert",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionBackendServices.list",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionBackendServices.listUsable",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionBackendServices.patch",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionBackendServices.setIamPolicy",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionBackendServices.setSecurityPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.regionBackendServices.testIamPermissions",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionBackendServices.update",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionHealthChecks.delete",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionHealthChecks.get",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionHealthChecks.insert",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionHealthChecks.list",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionHealthChecks.patch",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionHealthChecks.testIamPermissions",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionHealthChecks.update",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
         "method": "compute.regionInstanceGroupManagers.abandonInstances",
         "status": "Unimplemented",
         "note": "returns UNIMPLEMENTED (in-process check)"
@@ -16316,6 +16773,47 @@
         "note": "no official-SDK test proves it yet"
       },
       {
+        "method": "compute.regionNetworkEndpointGroups.attachNetworkEndpoints",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionNetworkEndpointGroups.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computelb2153_test.go:50 TestComputeExternalHTTPLoadBalancerThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.regionNetworkEndpointGroups.detachNetworkEndpoints",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionNetworkEndpointGroups.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computelb2153_test.go:50 TestComputeExternalHTTPLoadBalancerThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.regionNetworkEndpointGroups.insert",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computelb2153_test.go:50 TestComputeExternalHTTPLoadBalancerThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.regionNetworkEndpointGroups.list",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionNetworkEndpointGroups.listNetworkEndpoints",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
         "method": "compute.regionOperations.delete",
         "status": "Implemented",
         "note": "no official-SDK test proves it yet"
@@ -16339,6 +16837,186 @@
         "tests": [
           "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
         ]
+      },
+      {
+        "method": "compute.regionSslCertificates.delete",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionSslCertificates.get",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionSslCertificates.insert",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionSslCertificates.list",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionSslPolicies.delete",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionSslPolicies.get",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionSslPolicies.getIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.regionSslPolicies.insert",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionSslPolicies.list",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionSslPolicies.listAvailableFeatures",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionSslPolicies.patch",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionSslPolicies.setIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.regionSslPolicies.testIamPermissions",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionTargetHttpProxies.delete",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionTargetHttpProxies.get",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionTargetHttpProxies.insert",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionTargetHttpProxies.list",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionTargetHttpProxies.setUrlMap",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionTargetHttpsProxies.delete",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionTargetHttpsProxies.get",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionTargetHttpsProxies.insert",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionTargetHttpsProxies.list",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionTargetHttpsProxies.patch",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionTargetHttpsProxies.setSslCertificates",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionTargetHttpsProxies.setUrlMap",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionTargetTcpProxies.delete",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionTargetTcpProxies.get",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionTargetTcpProxies.insert",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionTargetTcpProxies.list",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionUrlMaps.delete",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionUrlMaps.get",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionUrlMaps.insert",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionUrlMaps.list",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionUrlMaps.patch",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionUrlMaps.update",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionUrlMaps.validate",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.regions.get",
@@ -16672,6 +17350,81 @@
         "note": "no official-SDK test proves it yet"
       },
       {
+        "method": "compute.sslCertificates.aggregatedList",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.sslCertificates.delete",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.sslCertificates.get",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.sslCertificates.insert",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.sslCertificates.list",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.sslPolicies.aggregatedList",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.sslPolicies.delete",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.sslPolicies.get",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.sslPolicies.getIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.sslPolicies.insert",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.sslPolicies.list",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.sslPolicies.listAvailableFeatures",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.sslPolicies.patch",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.sslPolicies.setIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.sslPolicies.testIamPermissions",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
         "method": "compute.subnetworks.aggregatedList",
         "status": "Verified",
         "tests": [
@@ -16758,6 +17511,350 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudasset2112_everytype_test.go:39 TestCloudAssetAnalyzeIamPolicyEveryAssetType"
+        ]
+      },
+      {
+        "method": "compute.targetHttpProxies.aggregatedList",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetHttpProxies.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computelb2153_test.go:50 TestComputeExternalHTTPLoadBalancerThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.targetHttpProxies.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computelb2153_test.go:50 TestComputeExternalHTTPLoadBalancerThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.targetHttpProxies.insert",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computelb2153_test.go:50 TestComputeExternalHTTPLoadBalancerThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.targetHttpProxies.list",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetHttpProxies.patch",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetHttpProxies.setUrlMap",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetHttpsProxies.aggregatedList",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetHttpsProxies.delete",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetHttpsProxies.get",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetHttpsProxies.insert",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetHttpsProxies.list",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetHttpsProxies.patch",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetHttpsProxies.setCertificateMap",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.targetHttpsProxies.setQuicOverride",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetHttpsProxies.setSslCertificates",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetHttpsProxies.setSslPolicy",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetHttpsProxies.setUrlMap",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetInstances.aggregatedList",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetInstances.delete",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetInstances.get",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetInstances.insert",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetInstances.list",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetInstances.setSecurityPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.targetInstances.testIamPermissions",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetPools.addHealthCheck",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetPools.addInstance",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetPools.aggregatedList",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetPools.delete",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetPools.get",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetPools.getHealth",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetPools.insert",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetPools.list",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetPools.removeHealthCheck",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetPools.removeInstance",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetPools.setBackup",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetPools.setSecurityPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.targetPools.testIamPermissions",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetSslProxies.delete",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetSslProxies.get",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetSslProxies.insert",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetSslProxies.list",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetSslProxies.setBackendService",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetSslProxies.setCertificateMap",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.targetSslProxies.setProxyHeader",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetSslProxies.setSslCertificates",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetSslProxies.setSslPolicy",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetSslProxies.testIamPermissions",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetTcpProxies.aggregatedList",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetTcpProxies.delete",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetTcpProxies.get",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetTcpProxies.insert",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetTcpProxies.list",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetTcpProxies.setBackendService",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetTcpProxies.setProxyHeader",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.targetTcpProxies.testIamPermissions",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.urlMaps.aggregatedList",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.urlMaps.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computelb2153_test.go:50 TestComputeExternalHTTPLoadBalancerThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.urlMaps.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computelb2153_test.go:50 TestComputeExternalHTTPLoadBalancerThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.urlMaps.insert",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computelb2153_test.go:50 TestComputeExternalHTTPLoadBalancerThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.urlMaps.invalidateCache",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.urlMaps.list",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.urlMaps.patch",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.urlMaps.testIamPermissions",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.urlMaps.update",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.urlMaps.validate",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computelb2153_test.go:50 TestComputeExternalHTTPLoadBalancerThroughTheGoClient"
         ]
       },
       {

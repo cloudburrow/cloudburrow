@@ -421,6 +421,9 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			// Cloud Router and Cloud NAT (#2140).
 			computeRoutersProvider{screen}, computeNATProvider{screen}, computeSharedVPCProvider{screen},
 			computePSCEndpointsProvider{screen}, computePSCPublishedProvider{screen},
+			// Cloud Load Balancing (#2153, consolecomputelb2153.go).
+			computeLBProvider{screen}, computeLBBackendsProvider{screen}, computeLBFrontendsProvider{screen},
+			computeHealthChecksProvider{screen}, computeNEGsProvider{screen}, computeLBCertsProvider{screen},
 			// Serverless VPC Access (#2140), on the same port.
 			vpcAccessProvider{screen},
 			computeInternalAddressesProvider{computeAddressesProvider{screen}}, computeEffectiveRoutesProvider{screen},

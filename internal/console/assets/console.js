@@ -132,6 +132,8 @@ const VPC_ADDRESS_TABS = ["/networking/addresses/list", "/networking/addresses/i
 // Published services (vpc/docs/configure-private-service-connect-apis,
 // configure-private-service-connect-producer, read 2026-11-22).
 const PSC_TABS = ["/net-services/psc/list", "/net-services/psc/published"];
+// Load balancing's tabs (#2153): Load balancers, Backends and Frontends.
+const LB_TABS = ["/net-services/loadbalancing/list/loadBalancers", "/net-services/loadbalancing/list/backends", "/net-services/loadbalancing/list/frontends"];
 const GKE_STORAGE = ["/kubernetes/storage", "/kubernetes/storage-classes"];
 // Cloud Logging's Settings and its Log Scopes tab (#2020), as Google's
 // Settings page has a Log Scopes tab (log-scope/create-and-manage).
@@ -507,6 +509,12 @@ const ROUTES = [
     section: "Compute", product: "compute", productTitle: "Compute Engine" },
   { path: "/compute/instanceGroups", service: "compute-instance-groups", icon: "compute", title: "Instance groups", kind: "Instance group",
     section: "Compute", product: "compute", productTitle: "Compute Engine" },
+  // Health checks and Network endpoint groups (#2153), Compute Engine's
+  // pages for load balancing's backends.
+  { path: "/compute/healthChecks", service: "compute-healthchecks", icon: "compute", title: "Health checks", kind: "Health check",
+    section: "Compute", product: "compute", productTitle: "Compute Engine" },
+  { path: "/compute/networkendpointgroups/list", service: "compute-negs", icon: "compute", title: "Network endpoint groups", kind: "Network endpoint group",
+    section: "Compute", product: "compute", productTitle: "Compute Engine" },
   { path: "/compute/disks", service: "compute-disks", icon: "compute", title: "Disks", kind: "Disk",
     section: "Compute", product: "compute", productTitle: "Compute Engine" },
   { path: "/compute/snapshots", service: "compute-snapshots", icon: "compute", title: "Snapshots", tabTitle: "Snapshots", kind: "Snapshot",
@@ -575,6 +583,19 @@ const ROUTES = [
     pageTabs: PSC_TABS, section: "Networking", product: "netservices", productTitle: "Network services" },
   { path: "/net-services/psc/published", service: "netservices-psc-published", icon: "vpc", title: "Private Service Connect", tabTitle: "Published services", kind: "Published service",
     navHidden: true, navAs: "/net-services/psc/list", pageTabs: PSC_TABS, section: "Networking", product: "netservices", productTitle: "Network services" },
+
+  // Cloud Load Balancing (#2153): Network services' Load balancing page
+  // and its tabs.
+  { path: "/net-services/loadbalancing/list/loadBalancers", service: "netservices-lb", icon: "vpc", title: "Load balancing", tabTitle: "Load balancers", kind: "Load balancer",
+    pageTabs: LB_TABS, section: "Networking", product: "netservices", productTitle: "Network services" },
+  { path: "/net-services/loadbalancing/list/backends", service: "netservices-lb-backends", icon: "vpc", title: "Load balancing", tabTitle: "Backends", kind: "Backend",
+    navHidden: true, navAs: "/net-services/loadbalancing/list/loadBalancers", pageTabs: LB_TABS, section: "Networking", product: "netservices", productTitle: "Network services" },
+  { path: "/net-services/loadbalancing/list/frontends", service: "netservices-lb-frontends", icon: "vpc", title: "Load balancing", tabTitle: "Frontends", kind: "Frontend",
+    navHidden: true, navAs: "/net-services/loadbalancing/list/loadBalancers", pageTabs: LB_TABS, section: "Networking", product: "netservices", productTitle: "Network services" },
+  // Certificate Manager's Classic Certificates (#2153): Compute Engine SSL
+  // certificates.
+  { path: "/security/ccm/list/lbCertificates", service: "netservices-lb-certs", icon: "vpc", title: "Certificate Manager", tabTitle: "Classic Certificates", kind: "Certificate",
+    section: "Security and identity", product: "certificatemanager", productTitle: "Certificate Manager" },
 
   // Secret Manager (#1850): Google's menu, Secret Manager (the global
   // secrets), Regional secrets and Settings.

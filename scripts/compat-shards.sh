@@ -269,13 +269,14 @@ COMPAT_SQL_REPLICA_TESTS='^Test[A-Za-z]*SQL[A-Za-z0-9]*(HighAvailability|Replica
 # Monitoring, which only the run shard's instance serves together.
 # Cloud Trace's pages (TestTraceExplorer*, #2118) and the Compute Engine
 # Permissions panel (TestComputePermissions*, #2125, which needs Compute
-# Engine) run in served, and only there. The Cloud Storage picker over
+# Engine) run in served, and only there, as do Cloud Load Balancing's
+# pages (TestLoadBalancing*, #2153). The Cloud Storage picker over
 # Document AI and Speech-to-Text (TestStoragePicker*, #2097), whose screens
 # are drawn where Cloud Run serves the local AI endpoint, and Logging's App
 # Hub dimensions (TestLoggingAppHub*, #2096), which need App Hub, run in run.
 COMPAT_BROWSER_SHARDS="storage served run emulators memorystore sql localai"
-COMPAT_BROWSER_SERVED_SHARD_TESTS='^Test(GKEServed|KubernetesEnginePages|VPCNetwork|ComputeEngine|ComputePermissions|TraceExplorer)'
-COMPAT_BROWSER_SERVED_ONLY_TESTS='^Test(GKEServed|VPCNetwork|ComputeEngine|ComputePermissions|TraceExplorer)'
+COMPAT_BROWSER_SERVED_SHARD_TESTS='^Test(GKEServed|KubernetesEnginePages|VPCNetwork|ComputeEngine|ComputePermissions|TraceExplorer|LoadBalancing)'
+COMPAT_BROWSER_SERVED_ONLY_TESTS='^Test(GKEServed|VPCNetwork|ComputeEngine|ComputePermissions|TraceExplorer|LoadBalancing)'
 COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|CloudBuild|LoggingAdmin|LoggingConsole|LoggingAppHub|SecretManager|Eventarc|DocumentAI|Speech|StoragePicker|Workflows|ModelRegistry|Dataform|AppHub)'
 COMPAT_BROWSER_EMULATORS_SHARD_TESTS='^Test(BigQuery|Firestore|Datastore|Bigtable|Spanner)'
 COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS='^TestMemorystore'
@@ -421,10 +422,11 @@ compat_shard() {
       # git remotes are Secure Source Manager's (Cloud Run's) and their
       # access tokens Secret Manager's.
       # App Hub (#2110), which discovers this shard's Cloud Run services
-      # and jobs.
+      # and jobs, and, with compute as RUN_COMPUTE (#2153), the load
+      # balancers in front of its Cloud Run services and VMs.
       # trace (#2118): Cloud Run's request spans, exported by Knative's
       # queue-proxy to Cloud Trace, read back as RUN_TRACE.
-      SERVICES=run,secretmanager,tasks,storage,pubsub,firestore,datastore,gke,memorystore,kms,scheduler,logging,bigquery,cloudsql,cloudsql-mysql,workflows,monitoring,dataform,apphub,trace
+      SERVICES=run,secretmanager,tasks,storage,pubsub,firestore,datastore,gke,memorystore,kms,scheduler,logging,bigquery,cloudsql,cloudsql-mysql,workflows,monitoring,dataform,apphub,trace,compute
       # Cloud Run (#336). For the revisions that reach Storage and Pub/Sub
       # with no client options (#576) and call KMS, Scheduler and Logging
       # (#681), the RUN_* names, so those suites do not run a second time
@@ -461,7 +463,7 @@ compat_shard() {
       # without a model, for the Document AI and Speech-to-Text
       # customer-managed key tests (with RUN_KMS); LOCALAI, which the
       # generation tests read, is not exported, so they still skip.
-      TEST_VARS+=,RUN,SECRETS,TASKS,RUN_STORAGE,RUN_PUBSUB,RUN_FIRESTORE,RUN_DATASTORE,RUN_GKE,RUN_MEMORYSTORE_ADMIN,RUN_KMS,RUN_LOCALAI,RUN_SCHEDULER,RUN_LOGGING,RUN_BIGQUERY,RUN_SQLADMIN,RUN_RESOURCEMANAGER,RUN_SERVICEUSAGE,RUN_APIKEYS,RUN_MYSQL,MYSQL_PASSWORD,BIGQUERY_PROJECT,APPENGINE_URL,WORKFLOWS,DATAFORM,APPHUB,RUN_TRACE
+      TEST_VARS+=,RUN,SECRETS,TASKS,RUN_STORAGE,RUN_PUBSUB,RUN_FIRESTORE,RUN_DATASTORE,RUN_GKE,RUN_MEMORYSTORE_ADMIN,RUN_KMS,RUN_LOCALAI,RUN_SCHEDULER,RUN_LOGGING,RUN_BIGQUERY,RUN_SQLADMIN,RUN_RESOURCEMANAGER,RUN_SERVICEUSAGE,RUN_APIKEYS,RUN_MYSQL,MYSQL_PASSWORD,BIGQUERY_PROJECT,APPENGINE_URL,WORKFLOWS,DATAFORM,APPHUB,RUN_TRACE,RUN_COMPUTE
       if [ "$1" = crossservice ]; then
         # The run shard's instance again, for COMPAT_CROSSSERVICE_TESTS only, with
         # the plain names of the services they read: COMPAT_RUN keeps every
