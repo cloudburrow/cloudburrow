@@ -88,11 +88,15 @@ func availabilityGroup(o map[string]any) console.PropertyGroup {
 // attachToField is Reserve external static IP address's Attached to
 // (vpc/docs/reserve-static-external-ip-address, read 2026-11-22: "Attached
 // to: None, or a VM instance"): the project's VMs, by ZONE/NAME, whose
-// external address the new one replaces.
+// external address the new one replaces; an IPv6-only VM has none to
+// replace.
 func (p computeAddressesProvider) attachToField(project string, visible map[string]string) console.Field {
 	opts := []string{"None"}
 	if m, err := p.call("GET", project, "aggregated/instances", nil, nil); err == nil {
 		for _, o := range aggregatedItems(m, "instances") {
+			if nics := vmMaps(o, "networkInterfaces"); len(nics) > 0 && vpcStr(nics[0], "stackType") == "IPV6_ONLY" {
+				continue // no IPv4 interface to take an IPv4 address
+			}
 			opts = append(opts, zoneOf(vpcStr(o, "zone"))+"/"+vpcStr(o, "name"))
 		}
 	}
@@ -254,19 +258,22 @@ func stackTypeText(st string) string {
 // network must have) or External.
 func ipv6AccessTypeField(name, stackField string) console.Field {
 	return console.Field{Name: name, Label: "IPv6 access type", Type: "radio", Default: "Internal", Options: []string{"Internal", "External"},
-		VisibleWhen: map[string]string{stackField: "IPV4_IPV6"},
-		Help:        "Internal takes a /64 of the network's ULA internal IPv6 range; External a /64 of 2600:1900::/28, reached only from the network's own VMs here."}
+		ShowWhen: stackField + "=IPV4_IPV6|IPV6_ONLY",
+		Help:     "Internal takes a /64 of the network's ULA internal IPv6 range; External a /64 of 2600:1900::/28, reached only from the network's own VMs here."}
 }
 
 // vmStackTypeField is Create an instance's network interface IP stack type
 // (compute/docs/ip-addresses/configure-ipv6-address, read 2026-11-22): a
 // dual-stack interface needs a dual-stack subnet, and gets an internal or
-// external IPv6 address as the subnet's IPv6 access type says.
+// external IPv6 address as the subnet's IPv6 access type says; an IPv6-only
+// one (IPv6 (single-stack)) a dual-stack or IPv6-only subnet, and no IPv4
+// address at all.
 func vmStackTypeField(section string) console.Field {
 	return console.Field{Name: "stackType", Label: "IP stack type", Type: "radio", Section: section, Default: "IPV4_ONLY",
-		Options:      []string{"IPV4_ONLY", "IPV4_IPV6"},
-		OptionLabels: map[string]string{"IPV4_ONLY": "IPv4 (single-stack)", "IPV4_IPV6": "IPv4 and IPv6 (dual-stack)"},
-		Help:         "Dual-stack needs a dual-stack subnetwork; the VM gets a /96 of its IPv6 range, reachable from the network's other dual-stack VMs."}
+		Options:      []string{"IPV4_ONLY", "IPV4_IPV6", "IPV6_ONLY"},
+		OptionLabels: map[string]string{"IPV4_ONLY": "IPv4 (single-stack)", "IPV4_IPV6": "IPv4 and IPv6 (dual-stack)", "IPV6_ONLY": "IPv6 (single-stack)"},
+		Help: "Dual-stack needs a dual-stack subnetwork; IPv6 (single-stack) a dual-stack or IPv6-only one and a Debian or Ubuntu image. " +
+			"The VM gets a /96 of its IPv6 range, reachable from the network's other IPv6 VMs."}
 }
 
 // nicExternalIPv6 is a network interface's external IPv6 address, or "".
@@ -297,8 +304,12 @@ func subnetIpv6AccessEditField(s map[string]any) console.Field {
 // uses its IPv6 range, as the API refuses otherwise.
 func (p computeNetworksProvider) subnetStackEdit(project, base string, s map[string]any, values map[string]string) error {
 	st := values["stackType"]
-	if st == "" || st == vpcOr(vpcStr(s, "stackType"), "IPV4_ONLY") {
+	cur := vpcOr(vpcStr(s, "stackType"), "IPV4_ONLY")
+	if st == "" || st == cur {
 		return nil
+	}
+	if st == "IPV6_ONLY" || cur == "IPV6_ONLY" {
+		return fmt.Errorf("IP stack type: a subnet cannot be changed to or from IPv6 (single-stack)")
 	}
 	patch := map[string]any{"stackType": st, "fingerprint": vpcStr(s, "fingerprint")}
 	if st == "IPV4_IPV6" {

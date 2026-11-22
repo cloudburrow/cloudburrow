@@ -127,6 +127,29 @@ func (s *Server) insertSubnetwork(project, region string, b obj) (obj, error) {
 	if err := s.dualStackLocked(netObj, b, v6, "resource"); err != nil {
 		return nil, err
 	}
+	if str(v6, "stackType") == "IPV6_ONLY" {
+		// An IPv6-only subnet has its /64 and no IPv4 range
+		// (vpc/docs/subnets, "Types of subnets").
+		for _, k := range []string{"ipCidrRange", "secondaryIpRanges"} {
+			if v, ok := b[k]; ok && v != "" && v != nil {
+				return nil, invalid("Invalid value for field 'resource.%s': '%v'. An IPv6-only subnetwork has no IPv4 range.", k, v)
+			}
+		}
+		in := obj{"name": name, "network": nw, "description": str(b, "description"),
+			"privateIpGoogleAccess": b["privateIpGoogleAccess"] == true}
+		for _, k := range []string{"purpose", "role", "logConfig"} {
+			if v, ok := b[k]; ok {
+				in[k] = v
+			}
+		}
+		o := s.addSubnetLocked(project, region, in, false)
+		for k, v := range v6 {
+			if k != "selfLink" {
+				o[k] = v
+			}
+		}
+		return s.done(project, "regions/"+region, "insert", rel, o["id"])
+	}
 	if str(b, "ipCidrRange") == "" {
 		return nil, required("resource.ipCidrRange")
 	}
@@ -212,12 +235,14 @@ func checkSecondaries(v any, primary *net.IPNet, ranges []netRange, field string
 // place in its network's subnetworks.
 func (s *Server) addSubnetLocked(project, region string, in obj, auto bool) obj {
 	rel := subnetRel(project, region, str(in, "name"))
-	n, _ := ParseCIDR(str(in, "ipCidrRange"))
+	n, v4ok := ParseCIDR(str(in, "ipCidrRange"))
 	o := obj{"kind": "compute#subnetwork", "id": newID(), "creationTimestamp": s.stamp(), "name": in["name"],
-		"network": in["network"], "ipCidrRange": n.String(), "gatewayAddress": gateway(n),
-		"region": "projects/" + project + "/regions/" + region, "selfLink": rel,
+		"network": in["network"], "region": "projects/" + project + "/regions/" + region, "selfLink": rel,
 		"privateIpGoogleAccess": in["privateIpGoogleAccess"] == true, "fingerprint": newFingerprint(),
 		"purpose": "PRIVATE", "stackType": "IPV4_ONLY", "privateIpv6GoogleAccess": "DISABLE_GOOGLE_ACCESS"}
+	if v4ok {
+		o["ipCidrRange"], o["gatewayAddress"] = n.String(), gateway(n)
+	}
 	if d := str(in, "description"); d != "" {
 		o["description"] = d
 	}
@@ -236,6 +261,11 @@ func (s *Server) addSubnetLocked(project, region string, in obj, auto bool) obj 
 	s.res[rel] = o
 	if nw, ok := s.res[str(in, "network")]; ok {
 		nw["subnetworks"] = append(nw["subnetworks"].([]any), rel)
+	}
+	if !v4ok {
+		// An IPv6-only subnet: its /64's route is the generated one
+		// (routes.go, subnetV6RangesLocked).
+		return o
 	}
 	s.addRouteLocked(project, obj{"name": "default-route-" + randHex(8), "network": in["network"], "destRange": n.String(),
 		"priority": 0.0, "nextHopNetwork": in["network"],
@@ -341,6 +371,9 @@ func (s *Server) patchSubnetwork(project, region, name string, b obj) (obj, erro
 				next[k] = v
 			}
 		case "secondaryIpRanges":
+			if l, _ := v.([]any); len(l) > 0 && str(o, "stackType") == "IPV6_ONLY" {
+				return nil, invalid("Invalid value for field 'resource.secondaryIpRanges': an IPv6-only subnetwork has no IPv4 range.")
+			}
 			primary, _ := ParseCIDR(str(o, "ipCidrRange"))
 			sec, err := checkSecondaries(v, primary, s.rangesLocked(str(o, "network"), rel), "resource")
 			if err != nil {
@@ -374,6 +407,9 @@ func (s *Server) expandSubnetwork(project, region, name string, b obj) (obj, err
 	o, rel, err := s.subnetLocked(project, region, name)
 	if err != nil {
 		return nil, err
+	}
+	if str(o, "stackType") == "IPV6_ONLY" {
+		return nil, invalid("Invalid value for field 'ipCidrRange': the subnetwork '%s' is IPv6-only and has no IPv4 range to expand.", name)
 	}
 	cur, _ := ParseCIDR(str(o, "ipCidrRange"))
 	want := str(b, "ipCidrRange")

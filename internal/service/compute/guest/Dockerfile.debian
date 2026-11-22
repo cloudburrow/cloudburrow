@@ -10,10 +10,24 @@ RUN apt-get update \
  && apt-get clean && rm -rf /var/lib/apt/lists/* \
  && rm -f /etc/ssh/ssh_host_* \
  && (userdel -r ubuntu 2>/dev/null || true)
+# Google's Ops Agent (#2139), pinned, from Google's own package repository
+# as add-google-cloud-ops-agent-repo.sh adds it (signed by Google's apt
+# key), with rsyslog for its default syslog receiver (/var/log/syslog) and
+# perl-base for the agent's in-guest metadata relay. It runs only behind
+# CloudBurrow's egress fence (usr/lib/cloudburrow/ops-agent).
+ARG OPS_AGENT_VERSION=2.73.0
+RUN . /etc/os-release \
+ && curl -fsS --retry 3 https://packages.cloud.google.com/apt/doc/apt-key.gpg --create-dirs -o /etc/apt/keyrings/google-cloud-ops-agent.asc \
+ && echo "deb [signed-by=/etc/apt/keyrings/google-cloud-ops-agent.asc] https://packages.cloud.google.com/apt google-cloud-ops-agent-${VERSION_CODENAME}-all main" > /etc/apt/sources.list.d/google-cloud-ops-agent.list \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends rsyslog perl-base "google-cloud-ops-agent=${OPS_AGENT_VERSION}~${ID}${VERSION_ID}" \
+ && apt-get clean && rm -rf /var/lib/apt/lists/* \
+ && groupadd -r cloudburrow-opsagent
 COPY root/ /
 RUN chmod 0755 /usr/lib/cloudburrow/* \
  && systemctl mask systemd-udevd.service systemd-udevd-kernel.socket systemd-udevd-control.socket getty.target console-getty.service systemd-logind.service \
  && systemctl enable cloudburrow-network.service cloudburrow-vpc.service cloudburrow-guest-agent.service google-startup-scripts.service \
+    cloudburrow-ops-agent-fence.service cloudburrow-ops-agent-metadata.service google-cloud-ops-agent.service \
  && (systemctl enable ssh.service 2>/dev/null || systemctl enable sshd.service) \
  && echo '%google-sudoers ALL=(ALL:ALL) NOPASSWD:ALL' > /etc/sudoers.d/google_sudoers && chmod 0440 /etc/sudoers.d/google_sudoers \
  && groupadd -f google-sudoers

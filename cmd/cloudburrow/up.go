@@ -532,6 +532,16 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// Kubernetes Engine's container logs and system metrics, shipped to
 	// this instance's Cloud Logging and Cloud Monitoring while both sides
 	// are served, as GKE ships them (#2100).
+	if computeSvc != nil && loggingSvc != nil {
+		// Cloud NAT's flow logs (#2140, computenat.go).
+		computeSvc.natLogs = func(ctx context.Context, req *loggingpb.WriteLogEntriesRequest) error {
+			if loggingSvc.api == nil {
+				return fmt.Errorf("logging is not running")
+			}
+			_, err := loggingSvc.api.WriteLogEntries(ctx, req)
+			return err
+		}
+	}
 	if gkeSvc != nil {
 		newGKELogFeeder(gkeDir(cfg), gkeSvc, loggingSvc).register(coord)
 		newGKEMetricsSampler(gkeDir(cfg), gkeSvc, monitoringSvc).register(coord)
@@ -1587,6 +1597,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// account's tokens from the metadata server (#1963).
 		if computeEnabled(cfg) {
 			published["compute"], published["metadata"] = true, true
+			// Its Ops Agent writes to Cloud Logging and Cloud Monitoring
+			// (#2139, computeopsagent.go), when they are served.
+			published["logging"], published["monitoring"] = true, true
 		}
 		hostComp = newClusterHost(cfg, stdout, func() map[string]string {
 			out := map[string]string{}
@@ -1620,6 +1633,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			return ""
 		}
 		computeSvc.metadataHost = func() string { return hostComp.InCluster("metadata") }
+		computeSvc.opsAgentHosts = func() (string, string) {
+			return hostComp.InCluster("logging"), hostComp.InCluster("monitoring")
+		}
+		computeSvc.guestReach = hostComp.Reach
 		computeSvc.storage = func() string {
 			if f := forwarderFor(forwarders, "storage"); f != nil {
 				return f.HostAddr()

@@ -183,6 +183,9 @@ func (s *Server) nicLocked(project, zone string, e map[string]any, i int) (obj, 
 		// host's for a service project's VM (#2140).
 		sub = subnetRel(strings.Split(rel, "/")[1], region, lastSeg(rel))
 	}
+	if str(e, "stackType") == "IPV6_ONLY" {
+		return s.nicV6OnlyLocked(project, region, sub, e, i, field)
+	}
 	tmp := obj{}
 	if err := s.regionalInternal(project, region, obj{"subnetwork": sub}, tmp, "", str(e, "networkIP")); err != nil {
 		return nil, err
@@ -527,6 +530,11 @@ func (s *Server) insertInstance(c call, zone string) (obj, error) {
 			return nil, err
 		}
 		nics = append(nics, nic)
+		if str(nic, "stackType") == "IPV6_ONLY" && !s.debianOrUbuntuLocked(disks[0].(obj), newDisks) {
+			// "IPv6-only instances are supported with only Ubuntu and
+			// Debian OS images" (compute/docs/ip-addresses/configure-ipv6-address).
+			return nil, invalid("Invalid value for field 'resource.networkInterfaces[%d].stackType': 'IPV6_ONLY'. IPv6-only instances are supported with only Ubuntu and Debian OS images.", i)
+		}
 	}
 	md, err := checkMetadata("resource.metadata", b["metadata"])
 	if err != nil {
@@ -886,4 +894,52 @@ func (s *Server) decorateList(list obj) {
 	for i, it := range items {
 		items[i] = s.decorate(it)
 	}
+}
+
+// nicV6OnlyLocked resolves an IPV6_ONLY networkInterfaces[] entry (#2140,
+// compute/docs/instances/create-ipv6-instance#create-vm-ipv6-only): its
+// subnet, IPv6-only or dual-stack, and its IPv6 address; it has no IPv4
+// address, internal or external.
+func (s *Server) nicV6OnlyLocked(project, region, sub string, e map[string]any, i int, field string) (obj, error) {
+	sub = Rel(sub, project)
+	if !strings.Contains(sub, "/") {
+		sub = subnetRel(project, region, sub)
+	}
+	so, ok := s.res[sub]
+	if !ok {
+		return nil, notFound(sub)
+	}
+	if err := s.checkSharedSubnetLocked(project, sub, field+".subnetwork"); err != nil {
+		return nil, err
+	}
+	if lastSeg(str(so, "region")) != region {
+		return nil, invalid("Invalid value for field '%s.subnetwork': '%s'. The subnetwork must be in region '%s'.", field, sub, region)
+	}
+	if ip := str(e, "networkIP"); ip != "" {
+		return nil, invalid("Invalid value for field '%s.networkIP': '%s'. An IPv6-only network interface has no IPv4 address.", field, ip)
+	}
+	if acs, _ := e["accessConfigs"].([]any); len(acs) > 0 {
+		return nil, invalid("Invalid value for field '%s.accessConfigs': an IPv6-only network interface has no external IPv4 address; use ipv6AccessConfigs.", field)
+	}
+	nic := obj{"kind": "compute#networkInterface", "name": "nic" + strconv.Itoa(i), "network": str(so, "network"),
+		"subnetwork": sub, "fingerprint": newFingerprint()}
+	if err := s.nicV6Locked(e, nic, so, field); err != nil {
+		return nil, err
+	}
+	return nic, nil
+}
+
+// debianOrUbuntuLocked is whether the boot disk ad (one of newDisks, or an
+// existing disk) is of a Debian or Ubuntu image, by its source image or
+// licenses.
+func (s *Server) debianOrUbuntuLocked(ad obj, newDisks []obj) bool {
+	src := str(ad, "source")
+	d := s.res[src]
+	for _, nd := range newDisks {
+		if str(nd, "selfLink") == src {
+			d = nd
+		}
+	}
+	text := str(d, "sourceImage") + " " + str(d, "_sourceImage") + " " + strings.Join(strs(d, "licenses"), " ")
+	return strings.Contains(text, "debian") || strings.Contains(text, "ubuntu")
 }

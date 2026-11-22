@@ -177,3 +177,11 @@ under CC0 1.0 Universal, and licence texts from the SPDX License List
 being made available by the Linux Foundation and its contributors under the
 Creative Commons Attribution 3.0 licence; the sources' digests are in
 third_party/ssm-templates/.
+
+Cloud Router's BGP sessions with router appliances (#2140) run GoBGP
+(https://github.com/osrg/gobgp, v3.37.0), Copyright (C) 2014-2021 Nippon
+Telegraph and Telephone Corporation, under the Apache
+License, Version 2.0. GoBGP is not part of this repository, of the binary or
+of a release archive: the CLI builds gobgpd and gobgp from the module at that
+version (checked against sum.golang.org) into a local image the first time a
+router needs a BGP speaker (dependencies.json, cloudRouterBGP).

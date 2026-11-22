@@ -247,8 +247,8 @@ func (computeNetworksProvider) CreateForm() (string, []console.Field) {
 		sub(console.Field{Name: "subnetRegion", Label: "Region", Type: "select", Default: "us-central1", Options: compute.Regions()}),
 		sub(stackTypeField("subnetStackType")),
 		sub(ipv6AccessTypeField("subnetIpv6AccessType", "subnetStackType")),
-		sub(console.Field{Name: "subnetRange", Label: "IPv4 range", Type: "text", Help: "For example, 10.0.0.0/24"}),
-		sec,
+		sub(withIPv4(console.Field{Name: "subnetRange", Label: "IPv4 range", Type: "text", Help: "For example, 10.0.0.0/24"}, "subnetStackType")),
+		withIPv4(sec, "subnetStackType"),
 		sub(console.Field{Name: "privateGoogleAccess", Label: "Private Google Access", Type: "radio", Default: "Off", Options: []string{"On", "Off"}}),
 		sub(flowLogsField("subnetFlowLogs", "Off")),
 		presetRuleField("custom", "Each rule ticked is made with the network, at priority 65534. allow-custom admits the network's own subnet ranges (10.128.0.0/9 in automatic mode)."),
@@ -290,14 +290,22 @@ func presetRule(network, kind string, ranges []any) map[string]any {
 	return b
 }
 
-// stackTypeField is a subnet's IP stack type: IPv4 or dual-stack
-// (consolecomputea1.go); IPv6-only subnets are not served.
+// stackTypeField is a subnet's IP stack type: IPv4, dual-stack
+// (consolecomputea1.go) or IPv6 (single-stack), whose subnet has no IPv4
+// range ("Add an IPv6-only subnet", vpc/docs/create-modify-vpc-networks,
+// read 2026-11-22).
 func stackTypeField(name string) console.Field {
 	return console.Field{Name: name, Label: "IP stack type", Type: "radio", Default: "IPV4_ONLY",
 		Options:      []string{"IPV4_ONLY", "IPV4_IPV6", "IPV6_ONLY"},
-		OptionLabels: map[string]string{"IPV4_ONLY": "IPv4 (single-stack)", "IPV4_IPV6": "IPv4 and IPv6 (dual-stack)", "IPV6_ONLY": "IPv6 (single-stack)"},
-		UnavailableOptions: map[string]string{
-			"IPV6_ONLY": "IPv6-only subnets are not served: a VM's guest keeps its IPv4 address for the metadata server and the cluster's DNS; use dual-stack."}}
+		OptionLabels: map[string]string{"IPV4_ONLY": "IPv4 (single-stack)", "IPV4_IPV6": "IPv4 and IPv6 (dual-stack)", "IPV6_ONLY": "IPv6 (single-stack)"}}
+}
+
+// withIPv4 shows f, an IPv4 range field, only while the stack type field
+// stack has IPv4: an IPv6-only subnet is given none, as Google's form asks
+// for none.
+func withIPv4(f console.Field, stack string) console.Field {
+	f.ShowWhen = stack + "=IPV4_ONLY|IPV4_IPV6"
+	return f
 }
 
 // flowLogsField is a subnet's Flow logs, On or Off: the subnet's logConfig,
@@ -328,7 +336,7 @@ func (p computeNetworksProvider) Create(ctx context.Context, project string, val
 		body["mtu"] = float64(n)
 	}
 	sub := strings.TrimSpace(values["subnetName"])
-	if values["subnetMode"] != "Automatic" && sub != "" && strings.TrimSpace(values["subnetRange"]) == "" {
+	if values["subnetMode"] != "Automatic" && sub != "" && values["subnetStackType"] != "IPV6_ONLY" && strings.TrimSpace(values["subnetRange"]) == "" {
 		return "", errors.New("the new subnet needs an IPv4 range")
 	}
 	if _, err := p.call("POST", project, "global/networks", nil, body); err != nil {
@@ -347,7 +355,9 @@ func (p computeNetworksProvider) Create(ctx context.Context, project string, val
 				"stackType": values["subnetStackType"], "ipv6AccessType": values["subnetIpv6AccessType"], "flowLogs": values["subnetFlowLogs"]}); err != nil {
 				return name, fmt.Errorf("the network %s was created, but not its subnet: %w", name, err)
 			}
-			ranges = []any{strings.TrimSpace(values["subnetRange"])}
+			if values["subnetStackType"] != "IPV6_ONLY" {
+				ranges = []any{strings.TrimSpace(values["subnetRange"])}
+			}
 		}
 	}
 	for _, kind := range presetRuleKinds {
@@ -381,8 +391,12 @@ func (p computeNetworksProvider) addSubnet(project, network string, values map[s
 		"ipCidrRange": strings.TrimSpace(values["ipCidrRange"]), "privateIpGoogleAccess": pga}
 	if st := values["stackType"]; st != "" {
 		body["stackType"] = st
-		if st == "IPV4_IPV6" {
+		if st == "IPV4_IPV6" || st == "IPV6_ONLY" {
 			body["ipv6AccessType"] = strings.ToUpper(vpcOr(values["ipv6AccessType"], "Internal"))
+		}
+		if st == "IPV6_ONLY" {
+			// Only the /64: no IPv4 range, primary or secondary.
+			delete(body, "ipCidrRange")
 		}
 	}
 	if values["flowLogs"] == "On" {
@@ -395,7 +409,7 @@ func (p computeNetworksProvider) addSubnet(project, network string, values map[s
 	if err != nil {
 		return err
 	}
-	if len(sec) > 0 {
+	if len(sec) > 0 && values["stackType"] != "IPV6_ONLY" {
 		body["secondaryIpRanges"] = sec
 	}
 	_, err = p.call("POST", project, "regions/"+region+"/subnetworks", nil, body)
@@ -688,20 +702,34 @@ func (p computeNetworksProvider) subnetDetail(project string, path []string) (co
 		// 2026-11-22): the IP address range widened (never narrowed), the
 		// IP stack type, Private Google Access and Flow logs.
 		Edit: &console.EditForm{Label: "Edit", Note: "An IP address range can be widened, never narrowed or replaced; the change cannot be undone.",
-			Fields: []console.Field{
-				{Name: "ipCidrRange", Label: "IP address range", Type: "text", Required: true, Default: vpcStr(s, "ipCidrRange"),
-					Help: "A broader range containing the current one, for example 10.0.0.0/20 for 10.0.0.0/24."},
-				func() console.Field {
-					f := stackTypeField("stackType")
-					f.Default = vpcOr(vpcStr(s, "stackType"), "IPV4_ONLY")
-					return f
-				}(),
-				subnetIpv6AccessEditField(s),
-				func() console.Field { f := secondaryRangesField(""); f.Default = secondaryRows(s); return f }(),
-				{Name: "privateGoogleAccess", Label: "Private Google Access", Type: "radio", Default: vpcOnOff(s["privateIpGoogleAccess"] == true), Options: []string{"On", "Off"}},
-				flowLogsField("flowLogs", vpcOnOff(flowLogsOn(s))),
-			}},
+			Fields: subnetEditFields(s)},
 	}, nil
+}
+
+// subnetEditFields are Edit subnet's fields for s. An IPv6-only subnet has
+// no IPv4 range to widen and keeps its stack type, and no subnet becomes
+// IPv6-only: "You can't change a dual-stack or IPv4-only subnet to
+// IPv6-only", nor back (vpc/docs/create-modify-vpc-networks, read
+// 2026-11-22).
+func subnetEditFields(s map[string]any) []console.Field {
+	st := stackTypeField("stackType")
+	st.Default = vpcOr(vpcStr(s, "stackType"), "IPV4_ONLY")
+	tail := []console.Field{
+		{Name: "privateGoogleAccess", Label: "Private Google Access", Type: "radio", Default: vpcOnOff(s["privateIpGoogleAccess"] == true), Options: []string{"On", "Off"}},
+		flowLogsField("flowLogs", vpcOnOff(flowLogsOn(s))),
+	}
+	if st.Default == "IPV6_ONLY" {
+		st.Immutable = true
+		return append([]console.Field{st, subnetIpv6AccessEditField(s)}, tail...)
+	}
+	st.Options = []string{"IPV4_ONLY", "IPV4_IPV6"}
+	return append([]console.Field{
+		{Name: "ipCidrRange", Label: "IP address range", Type: "text", Required: true, Default: vpcStr(s, "ipCidrRange"),
+			Help: "A broader range containing the current one, for example 10.0.0.0/20 for 10.0.0.0/24."},
+		st,
+		subnetIpv6AccessEditField(s),
+		func() console.Field { f := secondaryRangesField(""); f.Default = secondaryRows(s); return f }(),
+	}, tail...)
 }
 
 // addSubnetAction is Google's Add subnet (vpc/docs/create-modify-vpc-networks,
@@ -720,8 +748,8 @@ func addSubnetAction(networks []string) console.Action {
 		computeRegionField("region"),
 		stackTypeField("stackType"),
 		ipv6AccessTypeField("ipv6AccessType", "stackType"),
-		console.Field{Name: "ipCidrRange", Label: "IPv4 range", Type: "text", Required: true, Help: "For example, 10.0.0.0/24"},
-		secondaryRangesField(""),
+		withIPv4(console.Field{Name: "ipCidrRange", Label: "IPv4 range", Type: "text", Required: true, Help: "For example, 10.0.0.0/24"}, "stackType"),
+		withIPv4(secondaryRangesField(""), "stackType"),
 		console.Field{Name: "privateGoogleAccess", Label: "Private Google Access", Type: "radio", Default: "Off", Options: []string{"On", "Off"}},
 		flowLogsField("flowLogs", "Off"))
 	return console.Action{ID: "addsubnet", Label: "Add subnet", Submit: "Add", Fields: fields}

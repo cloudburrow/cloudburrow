@@ -16,7 +16,7 @@ import (
 // only the target an endpoint already has.
 func TestForwardingRulePatchAndSetTarget(t *testing.T) {
 	ctx := context.Background()
-	_, opts := newTestServer(t, Options{})
+	s, opts := newTestServer(t, Options{})
 	gaddrs, err := computeapi.NewGlobalAddressesRESTClient(ctx, opts...)
 	if err != nil {
 		t.Fatal(err)
@@ -38,6 +38,7 @@ func TestForwardingRulePatchAndSetTarget(t *testing.T) {
 		Purpose: proto.String("PRIVATE_SERVICE_CONNECT")}})); err != nil {
 		t.Fatal(err)
 	}
+	producerILB(t, s, producer, region)
 	att := "projects/" + producer + "/regions/" + region + "/serviceAttachments/svc"
 	for _, n := range []string{"svc", "svc2"} {
 		if err := wait(sas.Insert(ctx, &computepb.InsertServiceAttachmentRequest{Project: producer, Region: region, ServiceAttachmentResource: &computepb.ServiceAttachment{

@@ -276,6 +276,18 @@ func TestNamedSets(t *testing.T) {
 	if m, _ := sliceOf(l["result"])[0].(map[string]any); str(m, "description") != "nets" || len(sliceOf(m["elements"])) != 1 {
 		t.Errorf("patched set = %v", m)
 	}
+	// A route policy naming the set keeps it ("Manage named sets").
+	if _, err := call("POST", base+"updateRoutePolicy", nil, obj{"name": "uses-pfx", "type": "ROUTE_POLICY_TYPE_IMPORT",
+		"terms": []any{obj{"priority": 1.0, "match": obj{"expression": "destination.inAnyRange(prefixSets('pfx'))"},
+			"actions": []any{obj{"expression": "accept()"}}}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("POST", base+"deleteNamedSet", map[string][]string{"namedSet": {"pfx"}}, nil); ErrorStatus(err) != 400 {
+		t.Errorf("deleting a set a policy uses: %v", err)
+	}
+	if _, err := call("POST", base+"deleteRoutePolicy", map[string][]string{"policy": {"uses-pfx"}}, nil); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := call("POST", base+"deleteNamedSet", map[string][]string{"namedSet": {"pfx"}}, nil); err != nil {
 		t.Fatal(err)
 	}

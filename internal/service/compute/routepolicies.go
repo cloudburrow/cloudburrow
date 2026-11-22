@@ -116,6 +116,17 @@ func (s *Server) routePolicies(c call, region, router, method string) (obj, erro
 				}
 			}
 		}
+		if k.hidden != routePolicyKind.hidden {
+			// A named set a route policy references (prefixSets('NAME') or
+			// communitySets('NAME') in a term) cannot be removed ("Manage
+			// named sets", update-named-sets, read 2026-11-22).
+			for pn, pv := range routePoliciesOf(r) {
+				if usesNamedSet(pv, name) {
+					return nil, errf(http.StatusBadRequest, "resourceInUseByAnotherResource",
+						"Named set '%s' is used by route policy '%s' of router '%s'.", name, pn, rel)
+				}
+			}
+		}
 		delete(all, name)
 		return s.done(c.project, "regions/"+region, method, rel, r["id"])
 	}
@@ -493,4 +504,43 @@ func (s *Server) checkPrivateNatRules(project, region, network, f string, l []an
 		out = append(out, o)
 	}
 	return out, nil
+}
+
+// routePoliciesOf are router r's route policies by name.
+func routePoliciesOf(r obj) map[string]any {
+	all, _ := r[routePolicyKind.hidden].(map[string]any)
+	return all
+}
+
+// usesNamedSet is whether a route policy's terms name the named set name in
+// prefixSets('NAME') or communitySets('NAME') (bgp-route-policy-reference).
+func usesNamedSet(policy any, name string) bool {
+	var exprs []string
+	var walk func(v any)
+	walk = func(v any) {
+		switch t := v.(type) {
+		case map[string]any:
+			for k, e := range t {
+				if s, ok := e.(string); ok && k == "expression" {
+					exprs = append(exprs, s)
+				}
+				walk(e)
+			}
+		case []any:
+			for _, e := range t {
+				walk(e)
+			}
+		}
+	}
+	walk(policy)
+	for _, e := range exprs {
+		for _, f := range []string{"prefixSets", "communitySets"} {
+			for _, q := range []string{"'", `"`} {
+				if strings.Contains(strings.ReplaceAll(e, " ", ""), f+"("+q+name+q+")") {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }

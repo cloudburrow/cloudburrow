@@ -348,6 +348,9 @@ func (s *Server) insertLBRule(x lbCtx, b obj) (obj, error) {
 		o["labels"] = l
 	}
 	o["labelFingerprint"] = labelFingerprint(o["labels"])
+	if err := s.ruleIPVersionLocked(x, b, o, internal); err != nil {
+		return nil, err
+	}
 	if err := s.ruleAddressLocked(x, b, o, internal, ports); err != nil {
 		return nil, err
 	}
@@ -430,10 +433,22 @@ func (s *Server) ruleAddressLocked(x lbCtx, b, o obj, internal bool, ports []int
 				return errf(http.StatusBadRequest, "invalid", "IP address '%s' and port are already being used by forwarding rule '%s'.", str(a, "address"), u)
 			}
 		}
+		if v6 := str(a, "ipVersion") == "IPV6"; v6 != (str(o, "ipVersion") == "IPV6") {
+			return invalid("Invalid value for field 'resource.IPAddress': '%s'. The address's IP version (%s) is not the forwarding rule's ipVersion.", ref, map[bool]string{true: "IPV6", false: "IPV4"}[v6])
+		}
 		o["IPAddress"], o["_address"] = str(a, "address"), addrRel
 		if internal {
 			o["subnetwork"] = str(a, "subnetwork")
 		}
+		return nil
+	}
+	if !internal && str(o, "ipVersion") == "IPV6" {
+		// An ephemeral global IPv6 address, as a reserved one is chosen.
+		a, err := s.freeGlobalV6Locked(x.rel)
+		if err != nil {
+			return err
+		}
+		o["IPAddress"] = a
 		return nil
 	}
 	if !internal {
@@ -561,4 +576,40 @@ func (s *Server) setLBRuleTarget(x lbCtx, o, b obj) (obj, error) {
 		return nil, invalid("Invalid value for field 'targetReference.target': '%s'. The new target must be of the same type (%s).", str(b, "target"), oldK)
 	}
 	return s.lbSet(x, o, "setTarget", func(o obj) error { o["target"] = t; return nil })
+}
+
+// ruleIPVersionLocked sets a rule's ipVersion (IPV4 or IPV6): given, or
+// IPV6 when its IPAddress is an IPv6 address or a reserved global IPv6
+// one (vpc/docs/reserve-static-external-ip-address). An IPv6 rule here is
+// a global external one, on a global IPv6 address (ipv6.go); its traffic
+// arrives at its listeners as every rule's does (lbplane.go).
+func (s *Server) ruleIPVersionLocked(x lbCtx, b, o obj, internal bool) error {
+	v := str(b, "ipVersion")
+	if v == "" {
+		ref := str(b, "IPAddress")
+		if ip := net.ParseIP(ref); ip != nil && ip.To4() == nil {
+			v = "IPV6"
+		} else if ref != "" && ip == nil {
+			rel := Rel(ref, x.project)
+			if !strings.Contains(rel, "/") {
+				rel = "projects/" + x.project + "/" + x.scope + "/addresses/" + ref
+			}
+			if str(s.res[rel], "ipVersion") == "IPV6" {
+				v = "IPV6"
+			}
+		}
+	}
+	switch v {
+	case "":
+		return nil
+	case "IPV4":
+	case "IPV6":
+		if internal || x.region != "" {
+			return unimplemented("ipVersion IPV6 for a regional or internal forwarding rule: IPv6 load balancing is served for global external forwarding rules (#2140)")
+		}
+	default:
+		return invalid("Invalid value for field 'resource.ipVersion': '%s'. Must be one of [IPV4, IPV6].", v)
+	}
+	o["ipVersion"] = v
+	return nil
 }

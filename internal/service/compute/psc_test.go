@@ -20,7 +20,7 @@ import (
 // goes.
 func TestPrivateServiceConnectThroughTheGoClient(t *testing.T) {
 	ctx := context.Background()
-	_, opts := newTestServer(t, Options{})
+	s, opts := newTestServer(t, Options{})
 	gaddrs, err := computeapi.NewGlobalAddressesRESTClient(ctx, opts...)
 	if err != nil {
 		t.Fatal(err)
@@ -74,6 +74,7 @@ func TestPrivateServiceConnectThroughTheGoClient(t *testing.T) {
 		t.Fatalf("address after delete = %v", a.GetStatus())
 	}
 
+	producerILB(t, s, producer, region)
 	// The producer: a PSC NAT subnet and an attachment.
 	if err := wait(subs.Insert(ctx, &computepb.InsertSubnetworkRequest{Project: producer, Region: region, SubnetworkResource: &computepb.Subnetwork{
 		Name: proto.String("plain"), Network: proto.String("global/networks/default"), IpCidrRange: proto.String("10.0.1.0/24")}})); err != nil {

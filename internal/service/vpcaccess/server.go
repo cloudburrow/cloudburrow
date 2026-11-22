@@ -142,7 +142,38 @@ func (s *Server) CreateConnector(_ context.Context, req *vpcaccesspb.CreateConne
 	}
 	c.Name, c.State, c.ConnectedProjects = name, vpcaccesspb.Connector_READY, nil
 	s.connectors[name] = c
+	// The connector's firewall rules (the Compute API never calls back
+	// into this one, so its lock may be taken under this one's).
+	defer s.firewalls(name, c, true)
 	return s.opLocked(req.GetParent(), "CreateConnector", name, c)
+}
+
+// FirewallKeeper is the Compute API's part in a connector's firewall
+// rules (compute.Server.SetConnectorFirewalls).
+type FirewallKeeper interface {
+	SetConnectorFirewalls(network, region, name, cidr string, on bool) error
+}
+
+// firewalls makes or removes connector name's firewall rules: Google makes
+// them for a connector in a standalone network or a Shared VPC host
+// project's, not for one on a service project's subnet
+// (vpc/docs/serverless-vpc-access, "Firewall rules").
+func (s *Server) firewalls(name string, c *vpcaccesspb.Connector, on bool) {
+	fk, ok := s.opts.Networks.(FirewallKeeper)
+	if !ok || c.GetNetwork() == "" {
+		return
+	}
+	project, region := projectOf(name), regionOf(name)
+	cidr := c.GetIpCidrRange()
+	if c.GetSubnet().GetName() != "" {
+		if subnetProject(c, name) != project {
+			return
+		}
+		if _, r, ok := s.opts.Networks.SubnetRange(c.GetSubnet().GetName(), project, region); ok {
+			cidr = r
+		}
+	}
+	_ = fk.SetConnectorFirewalls("projects/"+project+"/global/networks/"+lastSeg(c.GetNetwork()), region, lastSeg(name), cidr, on)
 }
 
 // checkLocked validates c, filling its defaults.
@@ -332,10 +363,12 @@ func (s *Server) DeleteConnector(_ context.Context, req *vpcaccesspb.DeleteConne
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.connectors[req.GetName()]; !ok {
+	c, ok := s.connectors[req.GetName()]
+	if !ok {
 		return nil, apierror.NotFound("Connector '%s' was not found.", req.GetName())
 	}
 	delete(s.connectors, req.GetName())
+	defer s.firewalls(req.GetName(), c, false)
 	return s.opLocked("projects/"+m[1]+"/locations/"+m[2], "DeleteConnector", req.GetName(), &emptypb.Empty{})
 }
 

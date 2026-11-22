@@ -1,6 +1,7 @@
 package compute
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"hash/fnv"
 	"net"
@@ -76,6 +77,8 @@ type vmNet struct {
 	rel, name, zone, project string
 	network, ip, sa          string
 	ip6                      string // the interface's IPv6 address, if dual-stack (ipv6.go)
+	gateway                  bool   // a Cloud Run gateway (gateways.go), not a VM
+	speaker                  bool   // a Cloud Router interface's BGP speaker (bgpspeakers.go)
 	tags                     []string
 	running                  bool
 	// noInternet is a VM whose primary interface has no external IP and
@@ -109,6 +112,33 @@ func vmNetOf(rel string, o obj) (vmNet, bool) {
 
 func (v vmNet) fqdn() string { return v.name + "." + v.zone + ".c." + v.project + ".internal" }
 
+// vmNetAny is vmNetOf, also for an IPv6-only interface (ipv6.go), which
+// has an IPv6 address and no IPv4 one.
+func vmNetAny(rel string, o obj) (vmNet, bool) {
+	v, _ := vmNetOf(rel, o)
+	return v, v.network != "" && (v.ip != "" || v.ip6 != "")
+}
+
+// mac is the MAC address v's vpc0 takes: of its IPv4 address (macOf), or,
+// IPv6-only, 42:02 and four bytes of a hash of its IPv6 address, apart
+// from every IPv4-derived one.
+func (v vmNet) mac() string {
+	if v.ip != "" {
+		return macOf(v.ip)
+	}
+	h := sha256.Sum256([]byte(v.ip6))
+	return fmt.Sprintf("42:02:%02x:%02x:%02x:%02x", h[0], h[1], h[2], h[3])
+}
+
+// dnsIP is the address v's internal DNS name resolves to on its network:
+// its IPv4 address, or its IPv6 one when it has none.
+func (v vmNet) dnsIP() string {
+	if v.ip != "" {
+		return v.ip
+	}
+	return v.ip6
+}
+
 // serveVPC answers a guest's poll for its network configuration.
 func (s *Server) serveVPC(w http.ResponseWriter, r *http.Request, inst obj) {
 	s.mu.Lock()
@@ -127,7 +157,7 @@ func (s *Server) serveVPC(w http.ResponseWriter, r *http.Request, inst obj) {
 // reported pod IP.
 func (s *Server) vpcConfigLocked(inst obj, pod string) (string, bool) {
 	rel := str(inst, "selfLink")
-	self, ok := vmNetOf(rel, inst)
+	self, ok := vmNetAny(rel, inst)
 	if !ok {
 		return "", false
 	}
@@ -163,13 +193,42 @@ func (s *Server) vpcConfigLocked(inst obj, pod string) (string, bool) {
 		if !strings.Contains(k, "/instances/") {
 			continue
 		}
-		if v, ok := vmNetOf(k, o); ok && reach[v.network] {
+		if v, ok := vmNetAny(k, o); ok && reach[v.network] {
 			reachable = append(reachable, v)
 			if v.network == self.network {
 				members = append(members, v)
 			}
 		}
 	}
+	// Cloud Run's gateways (gateways.go) are members too.
+	for _, v := range s.gatewayVMNetsLocked() {
+		if reach[v.network] {
+			reachable = append(reachable, v)
+			if v.network == self.network {
+				members = append(members, v)
+			}
+		}
+	}
+	// So are Cloud Router's BGP speakers (bgpspeakers.go).
+	for _, v := range s.speakerVMNetsLocked() {
+		if reach[v.network] {
+			reachable = append(reachable, v)
+			if v.network == self.network {
+				members = append(members, v)
+			}
+		}
+	}
+	// And Cloud NAT gateways' pods (natgateways.go), of their own network.
+	for _, v := range s.natVMNetsLocked() {
+		if v.network == self.network {
+			reachable = append(reachable, v)
+			members = append(members, v)
+		}
+	}
+	_, isGateway := inst["_gateway"].(string)
+	natKey, isNAT := inst["_natGateway"].(string)
+	self.gateway = isGateway || isNAT
+	_, self.speaker = inst["_speaker"].(string)
 	sort.Slice(members, func(i, j int) bool { return members[i].rel < members[j].rel })
 	sort.Slice(reachable, func(i, j int) bool { return reachable[i].rel < reachable[j].rel })
 	var subnets, subnets6 []string
@@ -184,6 +243,7 @@ func (s *Server) vpcConfigLocked(inst obj, pod string) (string, bool) {
 			}
 		}
 	}
+	subnets = append(subnets, s.gatewayRangesLocked(reach)...)
 	sort.Strings(subnets)
 	sort.Strings(subnets6)
 	mtu := 1460
@@ -191,10 +251,17 @@ func (s *Server) vpcConfigLocked(inst obj, pod string) (string, bool) {
 		mtu = int(v)
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "vni %d\nmtu %d\naddr %s\nmac %s\n", vniOf(s.segmentIDLocked(self.network, str(nw, "id"))), mtu, self.ip, macOf(self.ip))
-	for _, c := range subnets {
-		fmt.Fprintf(&b, "route %s\n", c)
+	fmt.Fprintf(&b, "vni %d\nmtu %d\n", vniOf(s.segmentIDLocked(self.network, str(nw, "id"))), mtu)
+	if self.ip != "" {
+		// An IPv6-only interface has no IPv4 address and no IPv4 route.
+		fmt.Fprintf(&b, "addr %s\n", self.ip)
+		for _, c := range subnets {
+			fmt.Fprintf(&b, "route %s\n", c)
+		}
+		// Dynamic routes Cloud Router learned (bgpspeakers.go).
+		b.WriteString(s.routeViaLocked(self))
 	}
+	fmt.Fprintf(&b, "mac %s\n", self.mac())
 	if self.ip6 != "" {
 		// IPv6 on the same segment (ipv6.go): the guest's address, the
 		// network's dual-stack /64s on-link, and each peer's address.
@@ -206,24 +273,62 @@ func (s *Server) vpcConfigLocked(inst obj, pod string) (string, bool) {
 	var peerPods []string
 	now := s.opts.Now()
 	for _, m := range reachable {
-		if m.network == self.network {
+		if m.network == self.network && !m.gateway && !m.speaker {
 			// Internal DNS names are the network's own: a peer's are not
 			// shared without DNS peering, as on Google.
-			fmt.Fprintf(&b, "host %s %s %s\n", m.ip, m.fqdn(), m.name)
+			fmt.Fprintf(&b, "host %s %s %s\n", m.dnsIP(), m.fqdn(), m.name)
 		}
 		if m.rel == rel || !m.running {
 			continue
 		}
 		if p, ok := s.pods[m.rel]; ok && now.Sub(p.seen) < podFresh {
-			fmt.Fprintf(&b, "peer %s %s %s\n", m.ip, macOf(m.ip), p.ip)
+			// Each family only where both ends have it; peer6 carries the
+			// pod too, for an IPv6-only end's forwarding entry.
+			if m.ip != "" && self.ip != "" {
+				fmt.Fprintf(&b, "peer %s %s %s\n", m.ip, m.mac(), p.ip)
+			}
 			if m.ip6 != "" && self.ip6 != "" {
-				fmt.Fprintf(&b, "peer6 %s %s\n", m.ip6, macOf(m.ip))
+				fmt.Fprintf(&b, "peer6 %s %s %s\n", m.ip6, m.mac(), p.ip)
 			}
 			peerPods = append(peerPods, p.ip)
 		}
 	}
+	hook := "output"
+	var table string
+	if isNAT {
+		// A Cloud NAT gateway's pod translates (natgateways.go).
+		var lines string
+		lines, table = s.natPodConfigLocked(natKey, peerPods)
+		b.WriteString(lines)
+		hook = ""
+	} else if self.gateway {
+		// A gateway forwards (gateways.go): what it carries leaves for the
+		// internet only through Cloud NAT, as a VM without an external IP.
+		g := s.gateways[inst["_gateway"].(string)]
+		internet := g != nil && g.AllTraffic && s.natInternetLocked(obj{"zone": inst["zone"],
+			"networkInterfaces": []any{obj{"network": g.Network, "subnetwork": g.Subnetwork}}})
+		b.WriteString("forward\n")
+		table = gatewayNFT(self, peerPods, internet)
+		hook = "prerouting"
+	} else if self.speaker {
+		table = speakerNFT(peerPods)
+	} else {
+		// Cloud NAT's route to the internet (natgateways.go): until its
+		// gateway's pod runs, the VM has none, as without Cloud NAT.
+		natConf := s.natVMConfigLocked(inst, self)
+		if nics := sliceOf(inst["networkInterfaces"]); natConf == "" && len(nics) > 0 && len(sliceOf(objOf(nics[0])["accessConfigs"])) == 0 {
+			self.noInternet = true
+		}
+		table = firewallNFT(self, members, s.firewallsOfLocked(self.network), peerPods)
+		b.WriteString(natConf)
+	}
 	b.WriteString("nft\n")
-	b.WriteString(firewallNFT(self, members, s.firewallsOfLocked(self.network), peerPods))
+	if svc := servicesNFT(s.vpcServicesLocked(self, reach), hook); hook != "" && svc != "" {
+		// Internal load balancers and endpoints (vpcservices.go), in the
+		// same table, before its closing brace.
+		table = strings.TrimSuffix(table, "}\n") + svc + "}\n"
+	}
+	b.WriteString(table)
 	return b.String(), true
 }
 
@@ -387,7 +492,9 @@ func firewallNFT(self vmNet, members []vmNet, rules []obj, peerPods []string) st
 		tags, sas := strsAny(r.o["sourceTags"]), strsAny(r.o["sourceServiceAccounts"])
 		for _, m := range members {
 			if (len(tags) > 0 && anyIn(m.tags, tags)) || (len(sas) > 0 && m.sa != "" && hasStr(sas, m.sa)) {
-				src = append(src, m.ip)
+				if m.ip != "" {
+					src = append(src, m.ip)
+				}
 				if m.ip6 != "" {
 					src = append(src, m.ip6)
 				}
@@ -438,7 +545,9 @@ func firewallNFT(self vmNet, members []vmNet, rules []obj, peerPods []string) st
 			if len(src) > 0 && len(fsrc) == 0 {
 				continue
 			}
-			match := kw + " daddr " + nftSet(fdst)
+			// The original destination: an internal load balancer's or
+			// endpoint's address, before vpcservices.go's rewrite.
+			match := "ct original " + kw + " daddr " + nftSet(fdst)
 			if len(fsrc) > 0 {
 				match += " " + kw + " saddr " + nftSet(fsrc)
 			}

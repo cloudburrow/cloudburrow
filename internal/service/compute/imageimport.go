@@ -2,6 +2,7 @@ package compute
 
 import (
 	"archive/tar"
+	"bufio"
 	"compress/gzip"
 	"context"
 	"errors"
@@ -157,7 +158,22 @@ func (s *Server) insertRawImageLocked(c call, rel string, o obj) (obj, error) {
 			return err
 		}
 		archive = n
-		size, err = checkRawTar(r)
+		br := bufio.NewReader(r)
+		if magic, _ := br.Peek(2); len(magic) < 2 || magic[0] != 0x1f || magic[1] != 0x8b {
+			// Not a gzip archive: a virtual disk (VMDK, VHD, VHDX),
+			// converted to its raw disk here (virtualdisk.go).
+			d, done, err := s.openVirtualDisk(br, n)
+			_ = r.Close()
+			if err != nil {
+				return err
+			}
+			defer done()
+			size = d.Size
+			gb := (size + 1<<30 - 1) >> 30
+			osRelease, err = imp.ImportRaw(ctx, key, gb, func(context.Context) (io.ReadCloser, error) { return rawTarGz(d), nil })
+			return err
+		}
+		size, err = checkRawTar(br)
 		_ = r.Close()
 		if err != nil {
 			return err

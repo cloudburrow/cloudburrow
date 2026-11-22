@@ -57,9 +57,6 @@ func (s *Server) insertAddress(project, region string, b obj) (obj, error) {
 	switch v := str(b, "ipVersion"); v {
 	case "", "IPV4":
 	case "IPV6":
-		if region == "" {
-			return nil, unimplemented("ipVersion IPV6 for a global address: global IPv6 addresses (load balancers) are not served")
-		}
 		v6 = true
 	default:
 		return nil, invalid("Invalid value for field 'resource.ipVersion': '%s'. Must be one of [IPV4, IPV6]", v)
@@ -71,7 +68,7 @@ func (s *Server) insertAddress(project, region string, b obj) (obj, error) {
 	}
 	if region != "" {
 		o["region"] = "projects/" + project + "/regions/" + region
-	} else {
+	} else if !v6 {
 		o["ipVersion"] = "IPV4"
 	}
 	if l, ok := b["labels"].(map[string]any); ok && len(l) > 0 {
@@ -80,7 +77,12 @@ func (s *Server) insertAddress(project, region string, b obj) (obj, error) {
 	o["labelFingerprint"] = labelFingerprint(o["labels"])
 	purpose := str(b, "purpose")
 	addr := str(b, "address")
-	if v6 {
+	if v6 && region == "" {
+		if err := s.globalIPv6Locked(typ, b, o); err != nil {
+			return nil, err
+		}
+		typ = "IPV6"
+	} else if v6 {
 		if err := s.regionalIPv6Locked(project, region, typ, b, o); err != nil {
 			return nil, err
 		}
@@ -173,6 +175,9 @@ func (s *Server) regionalInternal(project, region string, b, o obj, purpose, add
 	if lastSeg(str(so, "region")) != region {
 		return invalid("Invalid value for field 'resource.subnetwork': '%s'. The subnetwork must be in region '%s'.", sub, region)
 	}
+	if str(so, "stackType") == "IPV6_ONLY" {
+		return invalid("Invalid value for field 'resource.subnetwork': '%s'. The subnetwork is IPv6-only: it has no IPv4 addresses (use stackType IPV6_ONLY for an interface, ipVersion IPV6 for an address).", sub)
+	}
 	o["subnetwork"], o["network"] = sub, str(so, "network")
 	n, _ := ParseCIDR(str(so, "ipCidrRange"))
 	used := s.usedInSubnetLocked(sub)
@@ -236,6 +241,15 @@ func (s *Server) usedInSubnetLocked(sub string) map[string]string {
 			for _, e := range nics {
 				if nic, ok := e.(map[string]any); ok && str(nic, "subnetwork") == sub {
 					used[str(nic, "networkIP")] = k
+				}
+			}
+		}
+		if strings.Contains(k, "/routers/") {
+			// A Cloud Router interface's address, where its BGP speaker is
+			// (bgpspeakers.go).
+			for _, e := range sliceOf(a["interfaces"]) {
+				if i := objOf(e); str(i, "subnetwork") == sub && str(i, "privateIpAddress") != "" {
+					used[str(i, "privateIpAddress")] = k
 				}
 			}
 		}

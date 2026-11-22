@@ -506,13 +506,13 @@ func (p computeInstancesProvider) createFields(schedules, networks []string) []c
 		{Name: "subnetwork", Label: "Subnetwork", Type: "text", Section: nw,
 			Help: "Optional: a subnet of the network in the instance's region; empty uses the network's subnet there."},
 		vmStackTypeField(nw),
-		{Name: "internalIP", Label: "Primary internal IPv4 address", Type: "text", Section: nw, Pattern: `^$|^[0-9.]+$`,
+		{Name: "internalIP", Label: "Primary internal IPv4 address", Type: "text", Section: nw, Pattern: `^$|^[0-9.]+$`, ShowWhen: "stackType=IPV4_ONLY|IPV4_IPV6",
 			Help: "Optional: Ephemeral (Automatic) when empty, or an address of the subnet, a reserved static internal one among them."},
-		{Name: "externalIP", Label: "External IPv4 address", Type: "select", Section: nw, Default: "Ephemeral", Options: []string{"Ephemeral", "None"},
+		{Name: "externalIP", Label: "External IPv4 address", Type: "select", Section: nw, Default: "Ephemeral", Options: []string{"Ephemeral", "None"}, ShowWhen: "stackType=IPV4_ONLY|IPV4_IPV6",
 			Help: "Ephemeral gives the instance an external IP of its own from 192.0.2.0/24 (promote it to static on the IP addresses page); its port 22 is forwarded to a port on 127.0.0.1."},
 		{Name: "networkTier", Label: "Network Service Tier", Type: "radio", Section: nw, Default: "Premium", Options: []string{"Premium", "Standard"}, VisibleWhen: external},
-		{Name: "opsAgent", Label: "Install Ops Agent for Monitoring and Logging", Type: "checkbox", Section: ob,
-			Unavailable: "The Ops Agent is not served: Cloud Monitoring and Cloud Logging do not collect a VM's metrics or logs here; its serial port output is on its page."},
+		{Name: "opsAgent", Label: "Install Ops Agent for Monitoring and Logging", Type: "checkbox", Section: ob, Default: "true",
+			Help: "Google's Ops Agent is installed in every image here (#2139): the VM's syslog reaches Cloud Logging and its metrics Cloud Monitoring while they are served, whether or not this is checked."},
 		{Name: "serviceAccount", Label: "Service account", Type: "select", Section: sec, Default: "Compute Engine default service account",
 			Options: []string{"Compute Engine default service account", "No service account"}},
 		{Name: "scopes", Label: "Access scopes", Type: "radio", Section: sec, Default: "Allow default access",
@@ -618,8 +618,15 @@ func (p computeInstancesProvider) createBody(project string, values map[string]s
 	if ip := strings.TrimSpace(values["internalIP"]); ip != "" {
 		nic["networkIP"] = ip
 	}
-	if values["stackType"] == "IPV4_IPV6" {
+	switch values["stackType"] {
+	case "IPV4_IPV6":
 		nic["stackType"] = "IPV4_IPV6"
+	case "IPV6_ONLY":
+		// No IPv4 at all: no internal IPv4 address, no external IPv4
+		// access config (compute/docs/ip-addresses/configure-ipv6-address).
+		nic["stackType"] = "IPV6_ONLY"
+		delete(nic, "networkIP")
+		delete(nic, "accessConfigs")
 	}
 	body := map[string]any{"name": name, "machineType": "zones/" + zone + "/machineTypes/" + strings.TrimSpace(vpcOr(values["machineType"], "e2-medium")),
 		"disks": []any{map[string]any{"boot": true, "autoDelete": true, "deviceName": name, "initializeParams": map[string]any{

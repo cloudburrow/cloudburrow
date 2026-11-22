@@ -1,9 +1,11 @@
 package run
 
 import (
+	"encoding/json"
 	"strings"
 
 	"cloud.google.com/go/run/apiv2/runpb"
+	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 )
@@ -101,4 +103,23 @@ func (s *Server) checkVPC(resource string, v *runpb.VpcAccess) error {
 		}
 	}
 	return nil
+}
+
+// annVPCEgress is on a revision's and an execution's pods when the
+// template has vpcAccess (#2140): the Cloud Run resource's name and its
+// vpcAccess as protojson, which cmd/cloudburrow/computerunegress.go reads
+// to carry the pod's traffic onto the VPC network through a gateway.
+const annVPCEgress = "cloudburrow.dev/vpc-egress"
+
+// vpcEgressAnnotation is annVPCEgress's value, "" without vpcAccess.
+func vpcEgressAnnotation(name string, v *runpb.VpcAccess) string {
+	if v == nil || (v.GetConnector() == "" && len(v.GetNetworkInterfaces()) == 0) {
+		return ""
+	}
+	raw, err := protojson.Marshal(v)
+	if err != nil {
+		return ""
+	}
+	out, _ := json.Marshal(map[string]any{"name": name, "vpcAccess": json.RawMessage(raw)})
+	return string(out)
 }

@@ -34,10 +34,10 @@ import (
 //     connectionPreference ACCEPT_AUTOMATIC or ACCEPT_MANUAL, and lists the
 //     endpoints connected to it (connectedEndpoints).
 //
-// What is recorded and what is carried: no internal load balancer is
-// served, so an attachment's targetService is recorded as given, and no
-// packet travels from an endpoint to it; VMs reach the local Google API
-// endpoints over the host whatever endpoint exists (docs/gaps.md).
+// What is carried: an endpoint for a published service takes a consumer
+// VM's TCP connections at its IP address to the attachment's producer
+// load balancer (vpcservices.go); VMs reach the local Google API endpoints
+// over the host whatever endpoint for Google APIs exists (docs/gaps.md).
 
 // pscGoogleName is the name rule of an endpoint for Google APIs.
 var pscGoogleName = regexp.MustCompile(`^[a-z][a-z0-9]{0,19}$`)
@@ -363,15 +363,23 @@ func (s *Server) insertServiceAttachment(project, region string, b obj) (obj, er
 		return nil, required("resource.targetService")
 	}
 	// Google's targetService is the producer's forwarding rule, of the
-	// attachment's own region (vpc/docs/configure-private-service-connect-producer).
-	// Its existence is checked where internal load balancers are served
-	// (#2153); here its shape and region are.
+	// attachment's own region (vpc/docs/configure-private-service-connect-producer):
+	// an internal passthrough Network Load Balancer's, a regional internal
+	// proxy load balancer's or internal protocol forwarding's, all served
+	// since #2153, so it must exist and be one of those.
 	tparts := strings.Split(Rel(ts, project), "/")
 	if len(tparts) != 6 || tparts[0] != "projects" || tparts[2] != "regions" || tparts[4] != "forwardingRules" {
 		return nil, invalid("Invalid value for field 'resource.targetService': '%s'. Must be the URL of a forwarding rule.", ts)
 	}
 	if tparts[3] != region {
 		return nil, invalid("Invalid value for field 'resource.targetService': '%s'. The forwarding rule must be in the service attachment's region '%s'.", ts, region)
+	}
+	fr, ok := s.res[Rel(ts, project)]
+	if !ok {
+		return nil, notFound(Rel(ts, project))
+	}
+	if sch := str(fr, "loadBalancingScheme"); fr["_lb"] != true || (sch != "INTERNAL" && sch != "INTERNAL_MANAGED") {
+		return nil, invalid("Invalid value for field 'resource.targetService': '%s'. The producer forwarding rule must be the forwarding rule of an internal passthrough Network Load Balancer, a regional internal proxy load balancer or internal protocol forwarding.", ts)
 	}
 	id := newID()
 	o := obj{"kind": "compute#serviceAttachment", "name": name, "selfLink": rel, "region": "projects/" + project + "/" + scope,

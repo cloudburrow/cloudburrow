@@ -45,8 +45,8 @@ func TestConsoleComputeParity2139(t *testing.T) {
 	if mt := vpcField(fields, "machineType"); mt.OptionsBy != "series" || len(mt.OptionsFor["N1"]) == 0 || mt.OptionsFor["E2"][0] != "e2-micro" {
 		t.Fatalf("machine type by series = %+v", mt)
 	}
-	if f := vpcField(fields, "opsAgent"); f == nil || f.Unavailable == "" {
-		t.Error("the Ops Agent is offered as if it were served")
+	if f := vpcField(fields, "opsAgent"); f == nil || f.Unavailable != "" || f.Default != "true" {
+		t.Errorf("the Ops Agent, installed in every image, = %+v", f)
 	}
 	if _, err := vms.Create(ctx, project, map[string]string{"name": "web", "zone": "us-central1-a", "machineType": "e2-small",
 		"provisioningModel": "Spot", "terminationAction": "Delete", "allowHttp": "true", "networkTags": "app"}); err != nil {

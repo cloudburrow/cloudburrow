@@ -22,7 +22,7 @@ import (
 // lists' columns are not named in the docs (UNVERIFIED, re-read 2026-11-22).
 
 const pscNote = "An endpoint for Google APIs (All Google APIs or VPC-SC) holds a PRIVATE_SERVICE_CONNECT address of its network; an endpoint for a published service connects to a service attachment, accepted as the attachment's connection preference decides. " +
-	"Endpoints and attachments are records: no internal load balancer is served, so no traffic reaches a published service through them, and VMs reach the local Google APIs whatever endpoint exists."
+	"A published service's target is an internal load balancer's forwarding rule in its region; VMs reach the local Google APIs whatever endpoint exists."
 
 func pscStatusText(s string) string {
 	switch s {
@@ -153,6 +153,8 @@ func pscEndpointFields(networks []string) []console.Field {
 		{Name: "region", Label: "Region", Type: "select", Default: "us-central1", Options: computeRegionField("").Options, VisibleWhen: published},
 		{Name: "subnetwork", Label: "Subnetwork", Type: "text", Default: "default", VisibleWhen: published,
 			Help: "The subnet of the network the endpoint's address is chosen in, when IP address is empty."},
+		{Name: "allowPscGlobalAccess", Label: "Enable global access", Type: "checkbox", VisibleWhen: published,
+			Help: "Makes the endpoint available from any region."},
 		{Name: "ipAddress", Label: "IP address", Type: "text",
 			Help: "For Google APIs: an address outside the network's subnets, such as 10.255.255.254, or the name of a reserved PRIVATE_SERVICE_CONNECT address; a new address is reserved for it (Create IP address). For a published service: a reserved internal address's name, or empty to choose one."},
 		{Name: "serviceDirectoryRegion", Label: "Service Directory region", Type: "text",
@@ -168,6 +170,9 @@ func (p computePSCEndpointsProvider) Create(ctx context.Context, project string,
 	if values["target"] == "published" {
 		region := vpcOr(values["region"], "us-central1")
 		rule["target"] = strings.TrimSpace(values["targetService"])
+		if values["allowPscGlobalAccess"] == "true" {
+			rule["allowPscGlobalAccess"] = true
+		}
 		if ip != "" {
 			rule["IPAddress"] = "regions/" + region + "/addresses/" + ip
 		} else {
@@ -233,9 +238,17 @@ func (p computePSCEndpointsProvider) Detail(ctx context.Context, project string,
 	}
 	props = append(props, console.Property{Label: "Subnetwork", Value: vpcDash(vpcLast(vpcStr(e, "subnetwork")))},
 		console.Property{Label: "Description", Value: vpcDash(vpcStr(e, "description"))})
+	if path[0] != "global" {
+		ga := "Disabled"
+		if e["allowPscGlobalAccess"] == true {
+			ga = "Enabled"
+		}
+		props = append(props, console.Property{Label: "Global access", Value: ga})
+	}
 	return console.Detail{Title: path[1], Heading: "Endpoint details",
 		Sections: []console.Section{{ID: "details", Label: "Details", Kind: console.KindProperties,
-			Groups: []console.PropertyGroup{{Properties: props}}}}}, nil
+			Groups: []console.PropertyGroup{{Properties: props}}}},
+		Edit: pscEndpointEdit(e, path)}, nil
 }
 
 func (p computePSCEndpointsProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
@@ -325,11 +338,12 @@ func (computePSCPublishedProvider) CreateOnPage() bool  { return true }
 func (computePSCPublishedProvider) CreateTitle() string { return "Publish service" }
 
 func (computePSCPublishedProvider) CreateForm() (string, []console.Field) {
-	return "Add service", pscPublishFields(nil)
+	return "Add service", pscPublishFields(nil, nil, nil)
 }
 
 func (p computePSCPublishedProvider) CreateFormFor(ctx context.Context, project string) []console.Field {
-	return pscPublishFields(p.pscSubnets(project))
+	ilbs, labels := p.internalLBs(project)
+	return pscPublishFields(p.pscSubnets(project), ilbs, labels)
 }
 
 // pscSubnets are the project's subnets of purpose PRIVATE_SERVICE_CONNECT,
@@ -360,25 +374,23 @@ func pscAcceptFields(accepted, rejected string) []console.Field {
 }
 
 // pscPublishFields are Google's Publish service's: Target details (the
-// load balancer's forwarding rule, recorded: no internal load balancer is
-// served), Service name, the Private Service Connect subnets, the
+// load balancer type and the internal load balancer, pscTargetFields),
+// Service name, the Private Service Connect subnets, the
 // connection preference with accepted and rejected projects, Use Proxy
 // Protocol and Advanced configuration's domain name.
-func pscPublishFields(subnets []string) []console.Field {
+func pscPublishFields(subnets []string, ilbs map[string][]string, labels map[string]string) []console.Field {
 	subField := console.Field{Name: "natSubnets", Label: "Subnets", Type: "select", Required: true, Options: subnets,
 		Help: "A subnet of purpose PRIVATE_SERVICE_CONNECT in the service's region (Reserve new subnet: add one with that purpose to the network)."}
 	if subnets == nil {
 		subField.Type = "text"
 	}
-	return append([]console.Field{
-		{Name: "targetService", Label: "Load balancer", Type: "text", Required: true, Section: "Target details",
-			Help: "The internal load balancer's forwarding rule: projects/PROJECT/regions/REGION/forwardingRules/NAME. Internal load balancers are not served, so it is recorded as given."},
+	return append(append(pscTargetFields(ilbs, labels), []console.Field{
 		{Name: "name", Label: "Service name", Type: "text", Required: true, Pattern: computeNamePattern, Help: computeNameHelp},
 		subField,
 		{Name: "connectionPreference", Label: "Connection preference", Type: "radio", Default: "ACCEPT_AUTOMATIC",
 			Options:      []string{"ACCEPT_AUTOMATIC", "ACCEPT_MANUAL"},
 			OptionLabels: map[string]string{"ACCEPT_AUTOMATIC": "Automatically accept all connections", "ACCEPT_MANUAL": "Accept connections for selected projects"}},
-	}, append(pscAcceptFields("", ""),
+	}...), append(pscAcceptFields("", ""),
 		console.Field{Name: "enableProxyProtocol", Label: "Use Proxy Protocol", Type: "checkbox", Default: "false"},
 		console.Field{Name: "domainName", Label: "Domain name", Type: "text", Section: "Advanced configuration", Help: "With a trailing dot, such as example.com."})...)
 }

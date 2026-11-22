@@ -88,6 +88,12 @@ type Options struct {
 	// LB reaches load balancers' backends (#2153, lbplane.go); nil
 	// reaches only those this package can itself.
 	LB LBBackends
+	// GuestReach is the address (IP:port) at which a VM's pod reaches the
+	// listener at loopback (127.0.0.1:port) on this machine, "" when it
+	// cannot: internal load balancers and Private Service Connect
+	// endpoints are carried from VMs to their listeners through it
+	// (vpcservices.go). nil carries neither.
+	GuestReach func(loopback string) string
 }
 
 // obj is one resource, as its JSON is kept: link fields hold relative
@@ -106,6 +112,12 @@ type Server struct {
 	defaultDeleted map[string]bool
 	// seeded are the projects whose default network has been made.
 	seeded map[string]bool
+	// gateways are Cloud Run's ways onto VPC networks, by key
+	// (gateways.go).
+	gateways map[string]*runGateway
+	// bgpStates are what Cloud Router's speakers reported, by speaker key
+	// (bgpspeakers.go).
+	bgpStates map[string]BGPState
 	// waiters are the running operations, closed when each is done.
 	waiters map[string]chan struct{}
 	// queue is, by resource, the last operation started on it, closed when

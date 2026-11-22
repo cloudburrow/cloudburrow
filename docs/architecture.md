@@ -252,6 +252,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/transport/grpc/` | The gRPC server CloudBurrow's own services run on: one listener, shared interceptors and message-size limit. |
 | `internal/transport/rest/` | Shared HTTP plumbing for CloudBurrow's own REST surfaces: routing, size limits, JSON, Google-style error bodies. |
 | `internal/trust/` | Which directories' configuration and hooks the developer has agreed to run (#598). |
+| `internal/vdisk/` | Reads VMDK (monolithic sparse, stream-optimized), VHD (fixed, dynamic) and VHDX files as the raw disks they hold, written from VMware's and Microsoft's published format specifications, for Compute Engine's image import of a virtual disk (#2139); refuses differencing disks and VMDKs whose data is in other files. No qemu-img. |
 | `internal/version/` | Build identification, injected at link time. |
 | `tools/bqengine/` | Builds the Linux BigQuery emulator the CLI embeds from `third_party/bigquery-emulator`: pinned, checksummed modules with CloudBurrow's patches applied strictly (#1061). |
 | `third_party/bigquery-emulator/` | The pins (a Go module of its own), patches, licences and provenance of the BigQuery emulator CloudBurrow builds (#1061); no upstream source is committed. |

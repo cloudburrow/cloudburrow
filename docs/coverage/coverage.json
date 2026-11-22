@@ -748,7 +748,8 @@
           "test/compat/runvolumes_test.go:115 TestRunServiceVolumesAndServiceAccount",
           "test/compat/terraform_cicd_test.go:218 TestTerraformRunServiceCloudSQLVolume",
           "test/compat/terraform_run_more_test.go:28 TestTerraformRunVolumesAndServiceAccount",
-          "test/compat/vpcaccess2140_test.go:234 TestRunVPCEgressThroughTheGoClient2140"
+          "test/compat/vpcaccess2140_test.go:234 TestRunVPCEgressThroughTheGoClient2140",
+          "test/compat/vpctraffic2140_test.go:320 TestRunReachesVMsThroughConnectorsAndDirectVPCEgress2140"
         ]
       },
       {
@@ -763,7 +764,8 @@
           "test/compat/runvolumegc_test.go:125 TestRunCloudStorageVolumeObjectsGoWithTheirLastWorkload",
           "test/compat/runvolumegc_test.go:204 TestRunNFSVolumeObjectsGoWithTheirLastService",
           "test/compat/terraform_cicd_test.go:218 TestTerraformRunServiceCloudSQLVolume",
-          "test/compat/terraform_run_more_test.go:28 TestTerraformRunVolumesAndServiceAccount"
+          "test/compat/terraform_run_more_test.go:28 TestTerraformRunVolumesAndServiceAccount",
+          "test/compat/vpctraffic2140_test.go:320 TestRunReachesVMsThroughConnectorsAndDirectVPCEgress2140"
         ]
       },
       {
@@ -14860,9 +14862,9 @@
     "Key": "compute",
     "Title": "Compute Engine API (v1): VPC networking",
     "counts": {
-      "Implemented": 256,
+      "Implemented": 250,
       "Unimplemented": 101,
-      "Verified": 194
+      "Verified": 200
     },
     "rows": [
       {
@@ -15319,21 +15321,24 @@
         "method": "compute.forwardingRules.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/psc2140_test.go:32 TestPrivateServiceConnectThroughTheGoClient2140"
+          "test/compat/psc2140_test.go:32 TestPrivateServiceConnectThroughTheGoClient2140",
+          "test/compat/vpctraffic2140_test.go:162 TestInternalLBAndPSCEndpointCarryVMTraffic2140"
         ]
       },
       {
         "method": "compute.forwardingRules.get",
         "status": "Verified",
         "tests": [
-          "test/compat/psc2140_test.go:32 TestPrivateServiceConnectThroughTheGoClient2140"
+          "test/compat/psc2140_test.go:32 TestPrivateServiceConnectThroughTheGoClient2140",
+          "test/compat/vpctraffic2140_test.go:162 TestInternalLBAndPSCEndpointCarryVMTraffic2140"
         ]
       },
       {
         "method": "compute.forwardingRules.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/psc2140_test.go:32 TestPrivateServiceConnectThroughTheGoClient2140"
+          "test/compat/psc2140_test.go:32 TestPrivateServiceConnectThroughTheGoClient2140",
+          "test/compat/vpctraffic2140_test.go:162 TestInternalLBAndPSCEndpointCarryVMTraffic2140"
         ]
       },
       {
@@ -15369,14 +15374,16 @@
         "status": "Verified",
         "tests": [
           "test/compat/compute_test.go:299 TestGcloudComputeNetworks",
-          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient",
+          "test/compat/vpcipv6_2140_test.go:38 TestIPv6OnlyVMsAndGlobalIPv6LoadBalancing2140"
         ]
       },
       {
         "method": "compute.globalAddresses.get",
         "status": "Verified",
         "tests": [
-          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient",
+          "test/compat/vpcipv6_2140_test.go:38 TestIPv6OnlyVMsAndGlobalIPv6LoadBalancing2140"
         ]
       },
       {
@@ -15384,7 +15391,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/compute_test.go:299 TestGcloudComputeNetworks",
-          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient",
+          "test/compat/vpcipv6_2140_test.go:38 TestIPv6OnlyVMsAndGlobalIPv6LoadBalancing2140"
         ]
       },
       {
@@ -15412,7 +15420,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/computelb2153_test.go:50 TestComputeExternalHTTPLoadBalancerThroughTheGoClient",
-          "test/compat/psc2140_test.go:32 TestPrivateServiceConnectThroughTheGoClient2140"
+          "test/compat/psc2140_test.go:32 TestPrivateServiceConnectThroughTheGoClient2140",
+          "test/compat/vpcipv6_2140_test.go:38 TestIPv6OnlyVMsAndGlobalIPv6LoadBalancing2140"
         ]
       },
       {
@@ -15420,7 +15429,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/computelb2153_test.go:50 TestComputeExternalHTTPLoadBalancerThroughTheGoClient",
-          "test/compat/psc2140_test.go:32 TestPrivateServiceConnectThroughTheGoClient2140"
+          "test/compat/psc2140_test.go:32 TestPrivateServiceConnectThroughTheGoClient2140",
+          "test/compat/vpcipv6_2140_test.go:38 TestIPv6OnlyVMsAndGlobalIPv6LoadBalancing2140"
         ]
       },
       {
@@ -15428,7 +15438,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/computelb2153_test.go:50 TestComputeExternalHTTPLoadBalancerThroughTheGoClient",
-          "test/compat/psc2140_test.go:32 TestPrivateServiceConnectThroughTheGoClient2140"
+          "test/compat/psc2140_test.go:32 TestPrivateServiceConnectThroughTheGoClient2140",
+          "test/compat/vpcipv6_2140_test.go:38 TestIPv6OnlyVMsAndGlobalIPv6LoadBalancing2140"
         ]
       },
       {
@@ -15511,6 +15522,7 @@
           "test/compat/compute_test.go:384 TestTerraformComputeNetworkAndSubnetwork",
           "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient",
           "test/compat/computeimageimport_test.go:42 TestComputeImageImportFromCloudStorageThroughTheGoClient",
+          "test/compat/computeimagevdisk_test.go:40 TestComputeImageImportFromAVirtualDiskThroughTheGoClient",
           "test/compat/computevmstools_test.go:30 TestGcloudComputeInstances"
         ]
       },
@@ -15647,7 +15659,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/computea1_test.go:101 TestComputeLabelsSchedulingAndExternalIPsThroughTheGoClient",
-          "test/compat/computeimageimport_test.go:42 TestComputeImageImportFromCloudStorageThroughTheGoClient"
+          "test/compat/computeimageimport_test.go:42 TestComputeImageImportFromCloudStorageThroughTheGoClient",
+          "test/compat/computeimagevdisk_test.go:40 TestComputeImageImportFromAVirtualDiskThroughTheGoClient"
         ]
       },
       {
@@ -15661,6 +15674,7 @@
         "tests": [
           "test/compat/computea1_test.go:101 TestComputeLabelsSchedulingAndExternalIPsThroughTheGoClient",
           "test/compat/computeimageimport_test.go:42 TestComputeImageImportFromCloudStorageThroughTheGoClient",
+          "test/compat/computeimagevdisk_test.go:40 TestComputeImageImportFromAVirtualDiskThroughTheGoClient",
           "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
         ]
       },
@@ -15681,7 +15695,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/computea1_test.go:101 TestComputeLabelsSchedulingAndExternalIPsThroughTheGoClient",
-          "test/compat/computeimageimport_test.go:42 TestComputeImageImportFromCloudStorageThroughTheGoClient"
+          "test/compat/computeimageimport_test.go:42 TestComputeImageImportFromCloudStorageThroughTheGoClient",
+          "test/compat/computeimagevdisk_test.go:40 TestComputeImageImportFromAVirtualDiskThroughTheGoClient"
         ]
       },
       {
@@ -15849,8 +15864,10 @@
       },
       {
         "method": "compute.instanceGroups.addInstances",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/vpctraffic2140_test.go:162 TestInternalLBAndPSCEndpointCarryVMTraffic2140"
+        ]
       },
       {
         "method": "compute.instanceGroups.aggregatedList",
@@ -15869,8 +15886,10 @@
       },
       {
         "method": "compute.instanceGroups.insert",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/vpctraffic2140_test.go:162 TestInternalLBAndPSCEndpointCarryVMTraffic2140"
+        ]
       },
       {
         "method": "compute.instanceGroups.list",
@@ -15978,8 +15997,10 @@
         "status": "Verified",
         "tests": [
           "test/compat/computeimageimport_test.go:42 TestComputeImageImportFromCloudStorageThroughTheGoClient",
+          "test/compat/computeimagevdisk_test.go:40 TestComputeImageImportFromAVirtualDiskThroughTheGoClient",
           "test/compat/computevmnet_test.go:33 TestComputeVMNetworkingThroughTheGoClient",
           "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient",
+          "test/compat/routerbgp2140_test.go:37 TestCloudRouterBGPWithARouterApplianceVM2140",
           "test/compat/routers2140_test.go:211 TestCloudNATGivesVMsWithoutExternalIPsEgress"
         ]
       },
@@ -16007,7 +16028,8 @@
           "test/compat/computea1_test.go:410 TestComputeIPv6ThroughTheGoClient",
           "test/compat/computevmnet_test.go:33 TestComputeVMNetworkingThroughTheGoClient",
           "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient",
-          "test/compat/computevmstools_test.go:178 TestTerraformComputeInstance"
+          "test/compat/computevmstools_test.go:178 TestTerraformComputeInstance",
+          "test/compat/vpcipv6_2140_test.go:38 TestIPv6OnlyVMsAndGlobalIPv6LoadBalancing2140"
         ]
       },
       {
@@ -16035,6 +16057,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/computeimageimport_test.go:42 TestComputeImageImportFromCloudStorageThroughTheGoClient",
+          "test/compat/computeimagevdisk_test.go:40 TestComputeImageImportFromAVirtualDiskThroughTheGoClient",
           "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
         ]
       },
@@ -16050,9 +16073,12 @@
           "test/compat/backupdrcompute_test.go:57 TestBackupDRComputeVMAndDiskRoundTrip",
           "test/compat/computea1_test.go:410 TestComputeIPv6ThroughTheGoClient",
           "test/compat/computeimageimport_test.go:42 TestComputeImageImportFromCloudStorageThroughTheGoClient",
+          "test/compat/computeimagevdisk_test.go:40 TestComputeImageImportFromAVirtualDiskThroughTheGoClient",
           "test/compat/computevmnet_test.go:33 TestComputeVMNetworkingThroughTheGoClient",
           "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient",
-          "test/compat/routers2140_test.go:211 TestCloudNATGivesVMsWithoutExternalIPsEgress"
+          "test/compat/routerbgp2140_test.go:37 TestCloudRouterBGPWithARouterApplianceVM2140",
+          "test/compat/routers2140_test.go:211 TestCloudNATGivesVMsWithoutExternalIPsEgress",
+          "test/compat/vpcipv6_2140_test.go:38 TestIPv6OnlyVMsAndGlobalIPv6LoadBalancing2140"
         ]
       },
       {
@@ -16542,8 +16568,10 @@
       },
       {
         "method": "compute.regionBackendServices.delete",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/vpctraffic2140_test.go:162 TestInternalLBAndPSCEndpointCarryVMTraffic2140"
+        ]
       },
       {
         "method": "compute.regionBackendServices.get",
@@ -16562,8 +16590,10 @@
       },
       {
         "method": "compute.regionBackendServices.insert",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/vpctraffic2140_test.go:162 TestInternalLBAndPSCEndpointCarryVMTraffic2140"
+        ]
       },
       {
         "method": "compute.regionBackendServices.list",
@@ -16715,8 +16745,10 @@
       },
       {
         "method": "compute.regionHealthChecks.delete",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/vpctraffic2140_test.go:162 TestInternalLBAndPSCEndpointCarryVMTraffic2140"
+        ]
       },
       {
         "method": "compute.regionHealthChecks.get",
@@ -16725,8 +16757,10 @@
       },
       {
         "method": "compute.regionHealthChecks.insert",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/vpctraffic2140_test.go:162 TestInternalLBAndPSCEndpointCarryVMTraffic2140"
+        ]
       },
       {
         "method": "compute.regionHealthChecks.list",
@@ -17261,6 +17295,8 @@
         "method": "compute.routers.delete",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudnat2140_test.go:103 TestCloudNATTranslatesVMTraffic2140",
+          "test/compat/routerbgp2140_test.go:37 TestCloudRouterBGPWithARouterApplianceVM2140",
           "test/compat/routers2140_test.go:211 TestCloudNATGivesVMsWithoutExternalIPsEgress",
           "test/compat/routers2140_test.go:34 TestCloudRouterAndNATThroughTheGoClient"
         ]
@@ -17293,6 +17329,7 @@
         "method": "compute.routers.getNatIpInfo",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudnat2140_test.go:103 TestCloudNATTranslatesVMTraffic2140",
           "test/compat/routers2140_test.go:34 TestCloudRouterAndNATThroughTheGoClient"
         ]
       },
@@ -17300,6 +17337,7 @@
         "method": "compute.routers.getNatMappingInfo",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudnat2140_test.go:103 TestCloudNATTranslatesVMTraffic2140",
           "test/compat/routers2140_test.go:211 TestCloudNATGivesVMsWithoutExternalIPsEgress",
           "test/compat/routers2140_test.go:34 TestCloudRouterAndNATThroughTheGoClient"
         ]
@@ -17315,6 +17353,7 @@
         "method": "compute.routers.getRouterStatus",
         "status": "Verified",
         "tests": [
+          "test/compat/routerbgp2140_test.go:37 TestCloudRouterBGPWithARouterApplianceVM2140",
           "test/compat/routers2140_test.go:211 TestCloudNATGivesVMsWithoutExternalIPsEgress",
           "test/compat/routers2140_test.go:34 TestCloudRouterAndNATThroughTheGoClient"
         ]
@@ -17323,6 +17362,8 @@
         "method": "compute.routers.insert",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudnat2140_test.go:103 TestCloudNATTranslatesVMTraffic2140",
+          "test/compat/routerbgp2140_test.go:37 TestCloudRouterBGPWithARouterApplianceVM2140",
           "test/compat/routers2140_test.go:211 TestCloudNATGivesVMsWithoutExternalIPsEgress",
           "test/compat/routers2140_test.go:34 TestCloudRouterAndNATThroughTheGoClient"
         ]
@@ -17440,7 +17481,8 @@
         "method": "compute.serviceAttachments.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/psc2140_test.go:32 TestPrivateServiceConnectThroughTheGoClient2140"
+          "test/compat/psc2140_test.go:32 TestPrivateServiceConnectThroughTheGoClient2140",
+          "test/compat/vpctraffic2140_test.go:162 TestInternalLBAndPSCEndpointCarryVMTraffic2140"
         ]
       },
       {
@@ -17459,7 +17501,8 @@
         "method": "compute.serviceAttachments.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/psc2140_test.go:32 TestPrivateServiceConnectThroughTheGoClient2140"
+          "test/compat/psc2140_test.go:32 TestPrivateServiceConnectThroughTheGoClient2140",
+          "test/compat/vpctraffic2140_test.go:162 TestInternalLBAndPSCEndpointCarryVMTraffic2140"
         ]
       },
       {
@@ -17619,7 +17662,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/compute_test.go:384 TestTerraformComputeNetworkAndSubnetwork",
-          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient",
+          "test/compat/vpcipv6_2140_test.go:38 TestIPv6OnlyVMsAndGlobalIPv6LoadBalancing2140"
         ]
       },
       {
@@ -17636,7 +17680,8 @@
         "tests": [
           "test/compat/compute_test.go:384 TestTerraformComputeNetworkAndSubnetwork",
           "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient",
-          "test/compat/computea1_test.go:410 TestComputeIPv6ThroughTheGoClient"
+          "test/compat/computea1_test.go:410 TestComputeIPv6ThroughTheGoClient",
+          "test/compat/vpcipv6_2140_test.go:38 TestIPv6OnlyVMsAndGlobalIPv6LoadBalancing2140"
         ]
       },
       {
@@ -17654,7 +17699,8 @@
           "test/compat/compute_test.go:384 TestTerraformComputeNetworkAndSubnetwork",
           "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient",
           "test/compat/computea1_test.go:410 TestComputeIPv6ThroughTheGoClient",
-          "test/compat/computevmnet_test.go:33 TestComputeVMNetworkingThroughTheGoClient"
+          "test/compat/computevmnet_test.go:33 TestComputeVMNetworkingThroughTheGoClient",
+          "test/compat/vpcipv6_2140_test.go:38 TestIPv6OnlyVMsAndGlobalIPv6LoadBalancing2140"
         ]
       },
       {
@@ -17677,7 +17723,8 @@
         "tests": [
           "test/compat/compute_test.go:384 TestTerraformComputeNetworkAndSubnetwork",
           "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient",
-          "test/compat/computea1_test.go:410 TestComputeIPv6ThroughTheGoClient"
+          "test/compat/computea1_test.go:410 TestComputeIPv6ThroughTheGoClient",
+          "test/compat/vpcipv6_2140_test.go:38 TestIPv6OnlyVMsAndGlobalIPv6LoadBalancing2140"
         ]
       },
       {
@@ -22087,14 +22134,16 @@
         "method": "google.cloud.vpcaccess.v1.VpcAccessService/CreateConnector",
         "status": "Verified",
         "tests": [
-          "test/compat/vpcaccess2140_test.go:78 TestServerlessVPCAccessConnectorsThroughTheGoClient"
+          "test/compat/vpcaccess2140_test.go:78 TestServerlessVPCAccessConnectorsThroughTheGoClient",
+          "test/compat/vpctraffic2140_test.go:320 TestRunReachesVMsThroughConnectorsAndDirectVPCEgress2140"
         ]
       },
       {
         "method": "google.cloud.vpcaccess.v1.VpcAccessService/DeleteConnector",
         "status": "Verified",
         "tests": [
-          "test/compat/vpcaccess2140_test.go:78 TestServerlessVPCAccessConnectorsThroughTheGoClient"
+          "test/compat/vpcaccess2140_test.go:78 TestServerlessVPCAccessConnectorsThroughTheGoClient",
+          "test/compat/vpctraffic2140_test.go:320 TestRunReachesVMsThroughConnectorsAndDirectVPCEgress2140"
         ]
       },
       {

@@ -222,7 +222,7 @@ func TestIPv6DualStack(t *testing.T) {
 	callErr(t, s, 400, "POST", "regions/us-central1/subnetworks", obj{"name": "x", "network": "global/networks/v4", "ipCidrRange": "10.5.0.0/24",
 		"stackType": "IPV4_IPV6", "ipv6AccessType": "INTERNAL"})
 	callErr(t, s, 400, "POST", "regions/us-central1/subnetworks", obj{"name": "x", "network": "global/networks/v6", "ipCidrRange": "10.5.0.0/24", "stackType": "IPV4_IPV6"})
-	callErr(t, s, 501, "POST", "regions/us-central1/subnetworks", obj{"name": "x", "network": "global/networks/v6", "ipCidrRange": "10.5.0.0/24", "stackType": "IPV6_ONLY"})
+	callErr(t, s, 400, "POST", "regions/us-central1/subnetworks", obj{"name": "x", "network": "global/networks/v6", "ipCidrRange": "10.5.0.0/24", "stackType": "IPV6_ONLY", "ipv6AccessType": "INTERNAL"})
 	call("POST", "regions/us-central1/subnetworks", nil, obj{"name": "in6", "network": "global/networks/v6", "ipCidrRange": "10.6.0.0/24",
 		"stackType": "IPV4_IPV6", "ipv6AccessType": "INTERNAL"})
 	call("POST", "regions/us-central1/subnetworks", nil, obj{"name": "ex6", "network": "global/networks/v6", "ipCidrRange": "10.7.0.0/24",
@@ -280,7 +280,7 @@ func TestIPv6DualStack(t *testing.T) {
 	conf, ok := s.vpcConfigLocked(inst, "10.244.0.8")
 	s.mu.Unlock()
 	if !ok || !strings.Contains(conf, "addr6 "+str(a6, "ipv6Address")+"\n") || !strings.Contains(conf, "route6 "+str(in6, "ipv6CidrRange")+"\n") ||
-		!strings.Contains(conf, "peer6 "+str(b6, "ipv6Address")+" "+macOf(str(b6, "networkIP"))+"\n") {
+		!strings.Contains(conf, "peer6 "+str(b6, "ipv6Address")+" "+macOf(str(b6, "networkIP"))+" 10.244.0.9\n") {
 		t.Fatalf("a6's configuration:\n%s", conf)
 	}
 	if !strings.Contains(conf, "ip6 saddr { "+str(in6, "ipv6CidrRange")+" } meta l4proto tcp th dport { 8080 } accept") ||
@@ -302,7 +302,7 @@ func TestStaticIPv6Addresses(t *testing.T) {
 	call("POST", "regions/us-central1/subnetworks", nil, obj{"name": "v4", "network": "global/networks/v6", "ipCidrRange": "10.8.0.0/24"})
 	callErr(t, s, 400, "POST", "regions/us-central1/addresses", obj{"name": "x", "addressType": "INTERNAL", "ipVersion": "IPV6", "subnetwork": "v4"})
 	callErr(t, s, 400, "POST", "regions/us-central1/addresses", obj{"name": "x", "addressType": "EXTERNAL", "ipVersion": "IPV6", "subnetwork": "in6"})
-	callErr(t, s, 501, "POST", "global/addresses", obj{"name": "x", "ipVersion": "IPV6"})
+	callErr(t, s, 400, "POST", "global/addresses", obj{"name": "x", "ipVersion": "IPV6", "addressType": "INTERNAL"})
 	call("POST", "regions/us-central1/addresses", nil, obj{"name": "i6", "addressType": "INTERNAL", "ipVersion": "IPV6", "subnetwork": "in6"})
 	call("POST", "regions/us-central1/addresses", nil, obj{"name": "e6", "addressType": "EXTERNAL", "ipVersion": "IPV6", "subnetwork": "regions/us-central1/subnetworks/ex6"})
 	i6 := call("GET", "regions/us-central1/addresses/i6", nil, nil)

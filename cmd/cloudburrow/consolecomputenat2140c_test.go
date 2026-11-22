@@ -74,7 +74,7 @@ func TestConsolePrivateNATAndRoutePolicies2140(t *testing.T) {
 	}
 
 	rpath := []string{"us-central1", "pr"}
-	if acts := routers.DetailActions(ctx, project, rpath); len(acts) != 2 || acts[0].ID != "createRoutePolicy" {
+	if acts := routers.DetailActions(ctx, project, rpath); len(acts) != 3 || acts[0].ID != "createRoutePolicy" || acts[1].ID != "createNamedSet" {
 		t.Fatalf("router actions = %+v", acts)
 	}
 	if err := routers.ActAt(ctx, project, rpath, "createRoutePolicy", map[string]string{"policyName": "bad", "policyType": "ROUTE_POLICY_TYPE_IMPORT",
@@ -85,7 +85,7 @@ func TestConsolePrivateNATAndRoutePolicies2140(t *testing.T) {
 		"terms": console.FormatGroup([]map[string]string{{"priority": "10", "match": "destination.inAnyRange(prefix('10.0.0.0/8'))", "actions": "med.set(5); accept()"}, {"priority": "20", "actions": "drop()"}})}); err != nil {
 		t.Fatal(err)
 	}
-	if acts := routers.DetailActions(ctx, project, rpath); len(acts) != 3 || acts[1].ID != "deleteRoutePolicy" || acts[1].Fields[0].Options[0] != "imp" {
+	if acts := routers.DetailActions(ctx, project, rpath); len(acts) != 4 || acts[1].ID != "deleteRoutePolicy" || acts[1].Fields[0].Options[0] != "imp" {
 		t.Fatalf("router actions with a policy = %+v", acts)
 	}
 	rd, err := routers.Detail(ctx, project, []string{"us-central1", "pr"})

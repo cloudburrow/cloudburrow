@@ -226,9 +226,12 @@ func TestLBHealthChecksNeedTheProbeRangesAllowed(t *testing.T) {
 		}
 		return len(l) == 2
 	})
-	if code, body, _ := get(t, http.DefaultClient, base+"/"); code != http.StatusServiceUnavailable || body != "no healthy upstream" {
-		t.Fatalf("no healthy backend: %d %q", code, body)
-	}
+	// The proxy reads health as of its own last sync, so it may take a
+	// request or two before it answers 503.
+	waitFor(t, "503 with no healthy backend", func() bool {
+		code, body, _ := get(t, http.DefaultClient, base+"/")
+		return code == http.StatusServiceUnavailable && body == "no healthy upstream"
+	})
 }
 
 func TestLBRefusesDeletingWhatIsInUse(t *testing.T) {

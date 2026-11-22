@@ -242,9 +242,10 @@ func TestPSCEndpointPatchAndSetTargetThroughTheGoClient(t *testing.T) {
 	att := func(a string) string {
 		return "projects/" + p + "/regions/" + region + "/serviceAttachments/" + vpc + "-" + a
 	}
+	ilb := internalLB(ctx, t, opts, p, region, netLink, vpc+"-ilb", "", 80)
 	for _, a := range []string{"svc", "svc2"} {
 		must(wait(sas.Insert(ctx, &computepb.InsertServiceAttachmentRequest{Project: p, Region: region, ServiceAttachmentResource: &computepb.ServiceAttachment{
-			Name: proto.String(vpc + "-" + a), TargetService: proto.String("projects/" + p + "/regions/" + region + "/forwardingRules/ilb"),
+			Name: proto.String(vpc + "-" + a), TargetService: proto.String(ilb),
 			ConnectionPreference: proto.String("ACCEPT_AUTOMATIC"), NatSubnets: []string{"regions/" + region + "/subnetworks/" + vpc + "-nat"}}})))
 	}
 	must(wait(fr.Insert(ctx, &computepb.InsertForwardingRuleRequest{Project: p, Region: region, ForwardingRuleResource: &computepb.ForwardingRule{

@@ -8,10 +8,25 @@ ENV container=docker
 RUN dnf -y install --setopt=install_weak_deps=False systemd openssh-server openssh-clients sudo iproute procps-ng passwd shadow-utils less nftables nmap-ncat \
  && dnf clean all && rm -rf /var/cache/dnf \
  && rm -f /etc/ssh/ssh_host_*
+# Google's Ops Agent (#2139), pinned, from Google's own package repository
+# as add-google-cloud-ops-agent-repo.sh adds it (gpgcheck with Google's
+# keys), with rsyslog for its default syslog receiver (/var/log/messages)
+# and Perl for the agent's in-guest metadata relay. It runs only behind
+# CloudBurrow's egress fence (usr/lib/cloudburrow/ops-agent).
+ARG OPS_AGENT_VERSION=2.73.0
+RUN printf '%s\n' '[google-cloud-ops-agent]' 'name=Google Cloud Ops Agent Repository' \
+      'baseurl=https://packages.cloud.google.com/yum/repos/google-cloud-ops-agent-el9-$basearch-all' \
+      'enabled=1' 'gpgcheck=1' 'repo_gpgcheck=0' \
+      'gpgkey=https://packages.cloud.google.com/yum/doc/yum-key.gpg' \
+      '       https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg' > /etc/yum.repos.d/google-cloud-ops-agent.repo \
+ && dnf -y install --setopt=install_weak_deps=False rsyslog gawk perl-interpreter perl-IO perl-Socket "google-cloud-ops-agent-${OPS_AGENT_VERSION}-1.el9" \
+ && dnf clean all && rm -rf /var/cache/dnf \
+ && groupadd -r cloudburrow-opsagent
 COPY root/ /
 RUN chmod 0755 /usr/lib/cloudburrow/* \
  && systemctl mask systemd-udevd.service systemd-udevd-kernel.socket systemd-udevd-control.socket getty.target console-getty.service systemd-logind.service \
  && systemctl enable cloudburrow-network.service cloudburrow-vpc.service cloudburrow-guest-agent.service google-startup-scripts.service sshd.service \
+    cloudburrow-ops-agent-fence.service cloudburrow-ops-agent-metadata.service google-cloud-ops-agent.service \
  && echo '%google-sudoers ALL=(ALL:ALL) NOPASSWD:ALL' > /etc/sudoers.d/google_sudoers && chmod 0440 /etc/sudoers.d/google_sudoers \
  && groupadd -f google-sudoers
 STOPSIGNAL SIGRTMIN+3

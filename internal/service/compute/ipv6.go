@@ -21,13 +21,17 @@ import (
 //     INTERNAL takes a /64 of its network's ULA /48 (internalIpv6Prefix),
 //     which needs enableUlaInternalIpv6; EXTERNAL a /64 of Google's
 //     2600:1900::/28 (externalIpv6Prefix); ipv6CidrRange is the /64 either
-//     way. An IPv4-only subnet is made dual-stack by patch; IPV6_ONLY
-//     subnets are not served;
+//     way. An IPv4-only subnet is made dual-stack by patch. An IPv6-only
+//     subnet (IPV6_ONLY) has the /64 and no IPv4 range, secondary range or
+//     gateway; no stack type changes to or from IPV6_ONLY, and neither
+//     kind of IPv6 subnet is allowed on an auto mode network;
 //   - a VM's network interface of stackType IPV4_IPV6, on a dual-stack
 //     subnet, gets a /96 of the subnet's /64: ipv6Address (and
 //     internalIpv6PrefixLength 96) on an INTERNAL subnet, an
 //     ipv6AccessConfigs entry (DIRECT_IPV6, externalIpv6, prefix length 96)
-//     on an EXTERNAL one;
+//     on an EXTERNAL one; an IPV6_ONLY interface, on an IPv6-only or a
+//     dual-stack subnet, has the IPv6 address only (no networkIP, no IPv4
+//     accessConfigs), and its guest's vpc0 holds no IPv4 address;
 //   - firewall rules take IPv6 ranges, matched against IPv6 traffic only.
 //
 // The data plane (vpc.go) carries the VMs' IPv6 addresses on the same
@@ -40,6 +44,11 @@ import (
 var (
 	ulaPool      = mustCIDR("fd20::/20")
 	externalPool = mustCIDR("2600:1900::/28")
+	// globalV6Pool is where global external IPv6 addresses (global load
+	// balancers') are taken from, a /64 each: a /32 of Google's
+	// 2600:1900::/28 that no subnet's /64 is chosen from (subnetV6Locked
+	// skips it).
+	globalV6Pool = mustCIDR("2600:1901::/32")
 )
 
 func mustCIDR(s string) *net.IPNet {
@@ -140,7 +149,7 @@ func (s *Server) subnetV6Locked(netObj obj, access, seed string) (string, error)
 	case "EXTERNAL":
 		start := hashIndex(seed, 36)
 		for i := uint64(0); i < 1<<20; i++ {
-			if n := v6Block(externalPool, (start+i)&(1<<36-1), 64); !used[n.String()] {
+			if n := v6Block(externalPool, (start+i)&(1<<36-1), 64); !used[n.String()] && !globalV6Pool.Contains(n.IP) {
 				return n.String(), nil
 			}
 		}
@@ -158,11 +167,14 @@ func (s *Server) dualStackLocked(netObj, b, o obj, field string) error {
 			return invalid("Invalid value for field '%s.ipv6AccessType': '%s'. An IPv4-only subnetwork has no IPv6 access type.", field, at)
 		}
 		return nil
-	case "IPV4_IPV6":
-	case "IPV6_ONLY":
-		return unimplemented("stackType IPV6_ONLY: IPv6-only subnets are not served; use IPV4_IPV6 (dual-stack)")
+	case "IPV4_IPV6", "IPV6_ONLY":
 	default:
 		return invalid("Invalid value for field '%s.stackType': '%s'. Must be one of [IPV4_ONLY, IPV4_IPV6, IPV6_ONLY].", field, st)
+	}
+	if auto, _ := netObj["autoCreateSubnetworks"].(bool); auto {
+		// "Subnets with IPv6 address ranges aren't supported on auto mode
+		// VPC networks or legacy networks" (vpc/docs/subnets).
+		return invalid("Invalid value for field '%s.stackType': '%s'. Subnetworks with IPv6 address ranges aren't supported on auto mode VPC networks; convert the network '%s' to custom mode first.", field, st, str(netObj, "name"))
 	}
 	at := str(b, "ipv6AccessType")
 	if at != "INTERNAL" && at != "EXTERNAL" {
@@ -191,14 +203,15 @@ func (s *Server) nicV6Locked(e map[string]any, nic obj, sub obj, field string) e
 	switch st {
 	case "", "IPV4_ONLY":
 		return nil
-	case "IPV4_IPV6":
-	case "IPV6_ONLY":
-		return unimplemented("stackType IPV6_ONLY: IPv6-only network interfaces are not served; use IPV4_IPV6")
+	case "IPV4_IPV6", "IPV6_ONLY":
 	default:
 		return invalid("Invalid value for field '%s.stackType': '%s'.", field, st)
 	}
-	if str(sub, "stackType") != "IPV4_IPV6" {
-		return invalid("Invalid value for field '%s.stackType': 'IPV4_IPV6'. The subnetwork '%s' does not have IPv6 enabled: its stack type is IPV4_ONLY.", field, str(sub, "name"))
+	switch sst := str(sub, "stackType"); {
+	case sst == "IPV6_ONLY" && st == "IPV4_IPV6":
+		return invalid("Invalid value for field '%s.stackType': 'IPV4_IPV6'. The subnetwork '%s' is IPv6-only: it takes IPv6-only interfaces.", field, str(sub, "name"))
+	case sst != "IPV4_IPV6" && sst != "IPV6_ONLY":
+		return invalid("Invalid value for field '%s.stackType': '%s'. The subnetwork '%s' does not have IPv6 enabled: its stack type is IPV4_ONLY.", field, st, str(sub, "name"))
 	}
 	_, base, err := net.ParseCIDR(str(sub, "ipv6CidrRange"))
 	if err != nil {
@@ -220,7 +233,7 @@ func (s *Server) nicV6Locked(e map[string]any, nic obj, sub obj, field string) e
 	if static != "" {
 		nic["_staticV6"] = static
 	}
-	nic["stackType"], nic["ipv6AccessType"] = "IPV4_IPV6", str(sub, "ipv6AccessType")
+	nic["stackType"], nic["ipv6AccessType"] = st, str(sub, "ipv6AccessType")
 	if str(sub, "ipv6AccessType") == "INTERNAL" {
 		nic["ipv6Address"], nic["internalIpv6PrefixLength"] = addr, 96.0
 		return nil
@@ -290,6 +303,12 @@ func (s *Server) patchStackLocked(rel string, cur, next, b obj) error {
 		}
 		return nil
 	}
+	if want == "IPV6_ONLY" || str(cur, "stackType") == "IPV6_ONLY" {
+		// "You can't change a dual-stack or IPv4-only subnet to IPv6-only.
+		// Conversely, you can't change an IPv6-only subnet to IPv4-only or
+		// dual-stack" (vpc/docs/subnets, read 2026-11-22).
+		return invalid("Invalid value for field 'resource.stackType': '%s'. The stack type of subnetwork '%s' (%s) cannot be changed to or from IPV6_ONLY.", want, str(cur, "name"), str(cur, "stackType"))
+	}
 	if want == "IPV4_ONLY" {
 		for k, o := range s.res {
 			if !strings.Contains(k, "/instances/") {
@@ -297,7 +316,7 @@ func (s *Server) patchStackLocked(rel string, cur, next, b obj) error {
 			}
 			for _, e := range listOf(o["networkInterfaces"]) {
 				nic, _ := e.(map[string]any)
-				if str(nic, "subnetwork") == rel && str(nic, "stackType") == "IPV4_IPV6" {
+				if str(nic, "subnetwork") == rel && (str(nic, "stackType") == "IPV4_IPV6" || str(nic, "stackType") == "IPV6_ONLY") {
 					return errf(http.StatusBadRequest, "resourceInUseByAnotherResource",
 						"The subnetwork's IPv6 range is in use by instance '%s'.", k)
 				}
@@ -393,7 +412,7 @@ func (s *Server) regionalIPv6Locked(project, region, typ string, b, o obj) error
 	if lastSeg(str(so, "region")) != region {
 		return invalid("Invalid value for field 'resource.subnetwork': '%s'. The subnetwork must be in region '%s'.", sub, region)
 	}
-	if str(so, "stackType") != "IPV4_IPV6" || str(so, "ipv6AccessType") != typ {
+	if (str(so, "stackType") != "IPV4_IPV6" && str(so, "stackType") != "IPV6_ONLY") || str(so, "ipv6AccessType") != typ {
 		return invalid("Invalid value for field 'resource.subnetwork': '%s'. An %s IPv6 address needs a dual-stack subnetwork whose IPv6 access type is %s.", sub, typ, typ)
 	}
 	if v, ok := b["prefixLength"].(float64); ok && v != 0 && v != 96 {
@@ -424,4 +443,49 @@ func (s *Server) regionalIPv6Locked(project, region, typ string, b, o obj) error
 		o["networkTier"] = "PREMIUM"
 	}
 	return nil
+}
+
+// globalIPv6Locked fills o, a new global external IPv6 address
+// (vpc/docs/reserve-static-external-ip-address, read 2026-11-22: "--global
+// --ip-version=IPV6", a /64 of Google's pool, for global load balancers
+// only): a free /64 of globalV6Pool, its first address the address. No
+// address can be given and it is in the Premium tier; there are no global
+// internal IPv6 addresses.
+func (s *Server) globalIPv6Locked(typ string, b, o obj) error {
+	if typ != "EXTERNAL" {
+		return invalid("Invalid value for field 'resource.addressType': '%s'. A global IPv6 address is external.", typ)
+	}
+	if a := str(b, "address"); a != "" {
+		return invalid("Invalid value for field 'resource.address': '%s'. A global IPv6 address is chosen from Google's pool and cannot be given.", a)
+	}
+	if t := str(b, "networkTier"); t != "" && t != "PREMIUM" {
+		return invalid("Invalid value for field 'resource.networkTier': '%s'. A global address must be in the Premium network tier.", t)
+	}
+	if p := str(b, "purpose"); p != "" {
+		return invalid("Invalid value for field 'resource.purpose': '%s'. Purpose is set only for internal addresses.", p)
+	}
+	a, err := s.freeGlobalV6Locked(str(o, "selfLink"))
+	if err != nil {
+		return err
+	}
+	o["address"], o["ipVersion"], o["networkTier"] = a, "IPV6", "PREMIUM"
+	return nil
+}
+
+// freeGlobalV6Locked is the first address of a free /64 of globalV6Pool,
+// starting at seed's hash.
+func (s *Server) freeGlobalV6Locked(seed string) (string, error) {
+	used := s.usedV6Locked()
+	for k, o := range s.res {
+		if strings.Contains(k, "/forwardingRules/") && str(o, "ipVersion") == "IPV6" {
+			used[str(o, "IPAddress")] = true
+		}
+	}
+	start := hashIndex(seed, 32)
+	for i := uint64(0); i < 1<<20; i++ {
+		if n := v6Block(globalV6Pool, (start+i)&(1<<32-1), 64); !used[n.IP.String()] {
+			return n.IP.String(), nil
+		}
+	}
+	return "", errf(http.StatusBadRequest, "ipSpaceExhausted", "No free global IPv6 address.")
 }

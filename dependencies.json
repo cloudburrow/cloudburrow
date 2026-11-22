@@ -20,6 +20,67 @@
     "latestCandidate": "Discovered by #31, tested in isolation, never used for release artifacts until promoted here."
   },
   "components": {
+    "computeGuest": {
+      "opsAgent": {
+        "$comment": "Google's Ops Agent (#2139), installed into the locally built VM images (internal/service/compute/guest/Dockerfile.debian and Dockerfile.rocky) from Google's own package repository, as add-google-cloud-ops-agent-repo.sh adds it: apt google-cloud-ops-agent-<codename>-all (Debian 12 bookworm, Ubuntu 24.04 noble), yum google-cloud-ops-agent-el9-<arch>-all (Rocky Linux 9). It runs in the guest only behind CloudBurrow's egress fence (usr/lib/cloudburrow/ops-agent), which lets its processes reach this instance's Cloud Logging and Cloud Monitoring and nothing else.",
+        "version": "2.73.0",
+        "packages": {
+          "debian12": "google-cloud-ops-agent=2.73.0~debian12",
+          "ubuntu2404": "google-cloud-ops-agent=2.73.0~ubuntu24.04",
+          "rocky9": "google-cloud-ops-agent-2.73.0-1.el9"
+        },
+        "source": "https://github.com/GoogleCloudPlatform/ops-agent/tree/2.73.0 (packages: https://packages.cloud.google.com/apt, https://packages.cloud.google.com/yum)",
+        "license": "Apache-2.0 (the agent, Fluent Bit and the OpenTelemetry Collector it bundles)",
+        "googlePublished": true,
+        "redistribution": "not published: installed into the VM images `cloudburrow up` builds on the user's machine; nothing of it is in the repository or linked into the CLI",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "provides": "A VM's syslog and host metrics in the local Cloud Logging and Cloud Monitoring, as the agent writes them on Google Cloud.",
+        "verification": "built-and-run",
+        "updateFeed": "github-releases",
+        "skipDiscovery": "Distribution packages in Google's repositories; re-resolve the version from https://github.com/GoogleCloudPlatform/ops-agent/releases and the repositories' Packages and primary.xml."
+      },
+      "rsyslog": {
+        "$comment": "The distribution's rsyslog, installed beside the Ops Agent (#2139) so its default syslog receiver (/var/log/syslog on Debian and Ubuntu, /var/log/messages on Rocky) has the system log to read.",
+        "source": "the distribution's own archive (Debian, Ubuntu, Rocky Linux)",
+        "license": "GPL-3.0-or-later, LGPL-3.0-or-later and Apache-2.0 (rsyslog's parts)",
+        "redistribution": "not published: installed into the locally built VM images only; no rsyslog code is in the repository or linked into the CLI",
+        "verification": "built-and-run",
+        "skipDiscovery": "Distribution package."
+      }
+    },
+    "cloudRouterBGP": {
+      "gobgp": {
+        "$comment": "GoBGP's gobgpd and gobgp (#2140): Cloud Router's BGP speaker for router appliance peers. cmd/cloudburrow/computebgp.go builds them with `go install github.com/osrg/gobgp/v3/cmd/gobgpd@v3.37.0 github.com/osrg/gobgp/v3/cmd/gobgp@v3.37.0` (CGO_ENABLED=0, checked against sum.golang.org) into a FROM scratch image the first time a router has a subnetwork interface with BGP peers, and runs gobgpd in a pod on the network's VXLAN segment at the interface's address. NOT a Google-published component: Google publishes no Cloud Router software.",
+        "module": "github.com/osrg/gobgp/v3",
+        "version": "v3.37.0",
+        "source": "https://github.com/osrg/gobgp",
+        "license": "Apache-2.0",
+        "redistribution": "not published: built locally by the CLI (tag cloudburrow-gobgp:<Dockerfile hash>, label cloudburrow.dev/gobgp=v3.37.0) and loaded into the kind cluster; nothing of GoBGP is in the repository or linked into the CLI",
+        "verification": "compat-tested",
+        "updateFeed": "github-releases",
+        "notGooglePublished": "Verified 2026-11-22: Google documents Cloud Router's BGP behaviour (network-connectivity/docs/router) but publishes no BGP speaker; GoBGP is the Apache-2.0 Go implementation.",
+        "notes": "Its module requirements (BurntSushi/toml, spf13/viper, grpc, protobuf and others, MIT, BSD and Apache-2.0) are built into the image only. A bump changes the two @v3.37.0 in gobgpDockerfile, which changes the image tag.",
+        "skipDiscovery": "Built by go install at a pinned version; the current version is .Version in https://proxy.golang.org/github.com/osrg/gobgp/v3/@latest."
+      },
+      "golangBuild": {
+        "$comment": "The build stage of the GoBGP image (cmd/cloudburrow/computebgp.go, gobgpDockerfile): Go 1.24 on Alpine, by digest; not in the image that runs.",
+        "image": "golang:1.24-alpine",
+        "digest": "sha256:8bee1901f1e530bfb4a7850aa7a479d17ae3a18beb6e09064ed54cfd245b7191",
+        "source": "https://hub.docker.com/_/golang",
+        "license": "BSD-3-Clause (Go); the image also carries Alpine Linux and its packages",
+        "redistribution": "build stage only; not in the published image",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "verification": "image-digest",
+        "updateFeed": "docker-hub-tag-list",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect golang:1.24-alpine`."
+      }
+    },
     "videodecode": {
       "debianBase": {
         "$comment": "internal/videodecode/Dockerfile builds FROM this digest (#1651): the video decoder image the CLI builds locally on the first AVI, FLV, MPEG or WMV video sent to multimodalembedding@001's :predict.",

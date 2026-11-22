@@ -326,11 +326,22 @@ func (p computeRoutersProvider) Detail(ctx context.Context, project string, path
 			{ID: "nat", Label: "Cloud NAT gateways", Listing: nats},
 			{ID: "interfaces", Label: "Interfaces", Listing: ifaces},
 			p.routePoliciesSection(project, path),
+			p.namedSetsSection(project, path),
 		},
 		Edit: &console.EditForm{Label: "Edit", Note: "A router's name, network and region are fixed.", Fields: routerFields(nil, r)}}, nil
 }
 
 func (p computeRoutersProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
+	if p.api() != nil && len(path) == 4 && path[2] == namedSetsTab {
+		// A named set's row: its Edit elements and Delete, which the
+		// console checks a row action against.
+		for _, ns := range p.namedSetsOrNil(project, path[:2]) {
+			if vpcStr(ns, "name") == path[3] {
+				return namedSetRowActions(path[3], ns)
+			}
+		}
+		return nil
+	}
 	if p.api() == nil || len(path) != 2 {
 		return nil
 	}
@@ -339,12 +350,15 @@ func (p computeRoutersProvider) DetailActions(ctx context.Context, project strin
 	}
 	a := routerDelete(path)
 	a.Leaves = true
-	return append(routePolicyActions(p.routePolicyNames(project, path)), a)
+	return append(append(routePolicyActions(p.routePolicyNames(project, path)), namedSetCreate()), a)
 }
 
 func (p computeRoutersProvider) ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error {
 	if len(path) == 2 && (action == "createRoutePolicy" || action == "deleteRoutePolicy") {
 		return p.actRoutePolicy(project, path, action, values)
+	}
+	if isNamedSetAction(path, action) {
+		return p.actNamedSet(project, path, action, values)
 	}
 	if len(path) != 2 || action != "delete" {
 		return fmt.Errorf("%s is not available here", action)

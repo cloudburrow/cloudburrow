@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -151,8 +152,48 @@ func TestConsoleComputeA1(t *testing.T) {
 	if f := vpcField(sd.Edit.Fields, "ipv6AccessType"); f.Default != "Internal" || !f.Immutable || vpcField(sd.Edit.Fields, "stackType").Default != "IPV4_IPV6" {
 		t.Fatalf("six-b after Edit = %+v", sd.Edit.Fields)
 	}
-	if f := vpcField(nets.createFieldsForTest(), "subnetStackType"); f.UnavailableOptions["IPV4_IPV6"] != "" {
-		t.Error("dual-stack is still drawn unavailable")
+	if f := vpcField(nets.createFieldsForTest(), "subnetStackType"); len(f.UnavailableOptions) != 0 {
+		t.Errorf("a stack type is still drawn unavailable: %v", f.UnavailableOptions)
+	}
+	// IPv6 (single-stack): a subnet with no IPv4 range ("Add an IPv6-only
+	// subnet"), whose Edit keeps its stack type, and an IPv6-only VM on it.
+	if f := vpcField(nets.createFieldsForTest(), "subnetRange"); f.ShowWhen != "subnetStackType=IPV4_ONLY|IPV4_IPV6" {
+		t.Errorf("IPv4 range shows for IPv6-only: %+v", f)
+	}
+	if f := vpcField(nets.createFieldsForTest(), "subnetIpv6AccessType"); f.ShowWhen != "subnetStackType=IPV4_IPV6|IPV6_ONLY" {
+		t.Errorf("IPv6 access type = %+v", f)
+	}
+	if err := nets.ActAt(ctx, project, []string{"six"}, "addsubnet", map[string]string{"name": "six-c", "region": "us-central1",
+		"stackType": "IPV6_ONLY", "ipv6AccessType": "Internal", "ipCidrRange": "", "secondaryRanges": "", "privateGoogleAccess": "Off", "flowLogs": "Off"}); err != nil {
+		t.Fatal(err)
+	}
+	c6, err := s.call("GET", project, "regions/us-central1/subnetworks/six-c", nil, nil)
+	if err != nil || vpcStr(c6, "stackType") != "IPV6_ONLY" || vpcStr(c6, "ipCidrRange") != "" || vpcStr(c6, "ipv6AccessType") != "INTERNAL" {
+		t.Fatalf("six-c = %v, %v", c6, err)
+	}
+	cd, _ := nets.Detail(ctx, project, []string{"six", "subnets", "us-central1", "six-c"})
+	if f := vpcField(cd.Edit.Fields, "stackType"); f == nil || !f.Immutable || f.Default != "IPV6_ONLY" || vpcField(cd.Edit.Fields, "ipCidrRange") != nil {
+		t.Fatalf("Edit of an IPv6-only subnet = %+v", cd.Edit.Fields)
+	}
+	if f := vpcField(sd.Edit.Fields, "stackType"); slices.Contains(f.Options, "IPV6_ONLY") {
+		t.Errorf("a dual-stack subnet's Edit offers IPv6-only: %v", f.Options)
+	}
+	if err := nets.Edit(ctx, project, sub, map[string]string{"stackType": "IPV6_ONLY", "ipCidrRange": "10.61.0.0/24"}); err == nil {
+		t.Error("a dual-stack subnet was made IPv6-only")
+	}
+	if f := vpcField(vms.CreateFormFor(ctx, project), "stackType"); !slices.Contains(f.Options, "IPV6_ONLY") ||
+		vpcField(vms.CreateFormFor(ctx, project), "internalIP").ShowWhen == "" {
+		t.Errorf("Create an instance's IP stack type = %+v", f)
+	}
+	if _, err := vms.Create(ctx, project, map[string]string{"name": "v6only", "zone": "us-central1-a", "machineType": "e2-small",
+		"network": "six", "subnetwork": "six-c", "stackType": "IPV6_ONLY", "externalIP": "Ephemeral", "internalIP": ""}); err != nil {
+		t.Fatal(err)
+	}
+	settle(t, s, project)
+	v6, _ := s.call("GET", project, "zones/us-central1-a/instances/v6only", nil, nil)
+	if n := vmMaps(v6, "networkInterfaces"); len(n) != 1 || vpcStr(n[0], "stackType") != "IPV6_ONLY" || vpcStr(n[0], "networkIP") != "" ||
+		len(vmMaps(n[0], "accessConfigs")) != 0 {
+		t.Fatalf("v6only = %v", v6)
 	}
 	if _, err := vms.Create(ctx, project, map[string]string{"name": "v6vm", "zone": "us-central1-a", "machineType": "e2-small",
 		"network": "six", "subnetwork": "six-a", "stackType": "IPV4_IPV6"}); err != nil {

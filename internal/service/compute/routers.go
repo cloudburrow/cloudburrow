@@ -28,9 +28,13 @@ import (
 //     subnetwork interface is checked against the router's network and
 //     region. A BGP peer names an existing interface, a peer ASN, and on a
 //     subnetwork interface the router appliance VM it peers with.
-//   - BGP sessions never come up: no peer router exists locally, so
-//     getRouterStatus answers every peer DOWN, with the routes the router
-//     would advertise to it.
+//   - a router appliance peer's BGP session is real (bgpspeakers.go):
+//     GoBGP speaks for each subnetwork interface at its privateIpAddress
+//     on the network's VXLAN segment, getRouterStatus reports each
+//     session's state, uptime and learned routes, and the network's VMs
+//     route what the peers advertise to the appliance. A peer whose
+//     speaker has not reported is DOWN, with the routes the router would
+//     advertise to it.
 //   - a NAT gateway (nats[]) translates the subnets it names, in the
 //     router's region and network; a subnet is NAT'd by one gateway only,
 //     and a gateway of ALL_SUBNETWORKS_* is a region and network's only one.
@@ -1077,7 +1081,7 @@ func (s *Server) natAutoIPsLocked() map[string]bool {
 
 // natVM is a VM a gateway translates.
 type natVM struct {
-	rel, name, ip string
+	rel, name, ip, zone, subnet string
 }
 
 // natCovers reports whether the gateway m of a router in network and
@@ -1117,7 +1121,7 @@ func (s *Server) natVMsLocked(r obj, m map[string]any) []natVM {
 			continue
 		}
 		if natCovers(m, str(nic, "subnetwork")) {
-			out = append(out, natVM{rel: k, name: str(o, "name"), ip: str(nic, "networkIP")})
+			out = append(out, natVM{rel: k, name: str(o, "name"), ip: str(nic, "networkIP"), zone: lastSeg(str(o, "zone")), subnet: str(nic, "subnetwork")})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].rel < out[j].rel })
@@ -1182,11 +1186,12 @@ func (s *Server) routerOf(project, region, name string) (obj, string, error) {
 	return r, rel, nil
 }
 
-// routerStatus is getRouterStatus: no BGP session ever comes up locally,
-// so every peer is DOWN, with what it would be advertised; each NAT
-// gateway's addresses and the VMs it translates.
+// routerStatus is getRouterStatus: each peer's session as its speaker
+// reported it (bgpspeakers.go), DOWN until it has, with what it is
+// advertised; the routes the router learned; each NAT gateway's
+// addresses and the VMs it translates.
 func (s *Server) routerStatus(project, region, name string) (obj, error) {
-	r, _, err := s.routerOf(project, region, name)
+	r, rel, err := s.routerOf(project, region, name)
 	if err != nil {
 		return nil, err
 	}
@@ -1202,7 +1207,8 @@ func (s *Server) routerStatus(project, region, name string) (obj, error) {
 			}
 		}
 		if str(m, "enable") != "FALSE" {
-			// The routers it would advertise once the session is up.
+			s.peerStatusLocked(rel, r, m, ps)
+			// The routes it is advertised (once the session is up).
 			var routes []any
 			for _, c := range advertisedFor(m, r, adv) {
 				routes = append(routes, obj{"kind": "compute#route", "destRange": c, "nextHopIp": str(m, "ipAddress"),
@@ -1217,8 +1223,9 @@ func (s *Server) routerStatus(project, region, name string) (obj, error) {
 	var nats []any
 	for _, e := range sliceOf(r["nats"]) {
 		m, _ := e.(map[string]any)
-		ips, resources := s.natIPsOf(m)
-		vms := s.natVMsLocked(r, m)
+		_, resources := s.natIPsOf(m)
+		ips, slots := s.natAllocLocked(r, m)
+		vms := slots
 		ns := obj{"name": str(m, "name"), "numVmEndpointsWithNatMappings": float64(len(vms)), "minExtraNatIpsNeeded": 0.0}
 		if str(m, "natIpAllocateOption") == natAutoOnly {
 			ns["autoAllocatedNatIps"] = toAny(ips)
@@ -1232,8 +1239,7 @@ func (s *Server) routerStatus(project, region, name string) (obj, error) {
 			if len(drain) > 0 {
 				ns["drainUserAllocatedNatIps"] = drain
 			}
-			need := (len(vms)*natMinPorts(m) + natPortsPerIP - 1) / natPortsPerIP
-			if need > len(ips) {
+			if need := natNeed(m, len(vms)); need > len(ips) {
 				ns["minExtraNatIpsNeeded"] = float64(need - len(ips))
 			}
 		}
@@ -1252,7 +1258,8 @@ func (s *Server) routerStatus(project, region, name string) (obj, error) {
 		}
 		nats = append(nats, ns)
 	}
-	res := obj{"network": str(r, "network"), "bestRoutes": []any{}, "bestRoutesForRouter": []any{}}
+	best, mine := s.routerBestRoutesLocked(rel, r)
+	res := obj{"network": str(r, "network"), "bestRoutes": best, "bestRoutesForRouter": mine}
 	if len(peers) > 0 {
 		res["bgpPeerStatus"] = peers
 	}
@@ -1317,18 +1324,15 @@ func (s *Server) natMappingInfo(c call, region, name string) (obj, error) {
 		if (only != "" && str(m, "name") != only) || natTypeOf(m) == natTypePrivate {
 			continue
 		}
-		ips, _ := s.natIPsOf(m)
-		ports := natMinPorts(m)
-		slots := natPortsPerIP / ports
-		for i, vm := range s.natVMsLocked(r, m) {
-			mp := obj{"sourceVirtualIp": vm.ip, "numTotalNatPorts": float64(ports), "numTotalDrainNatPorts": 0.0, "natIpPortRanges": []any{}}
-			if slots > 0 && i/slots < len(ips) {
-				lo := 1024 + (i%slots)*ports
-				mp["natIpPortRanges"] = []any{fmt.Sprintf("%s:%d-%d", ips[i/slots], lo, lo+ports-1)}
+		_, slots := s.natAllocLocked(r, m)
+		for _, sl := range slots {
+			mp := obj{"sourceVirtualIp": sl.vm.ip, "numTotalNatPorts": float64(sl.hi - sl.lo + 1), "numTotalDrainNatPorts": 0.0, "natIpPortRanges": []any{}}
+			if sl.ip != "" {
+				mp["natIpPortRanges"] = []any{fmt.Sprintf("%s:%d-%d", sl.ip, sl.lo, sl.hi)}
 			} else {
 				mp["numTotalNatPorts"] = 0.0
 			}
-			all = append(all, obj{"instanceName": vm.name, "interfaceNatMappings": []any{mp}})
+			all = append(all, obj{"instanceName": sl.vm.name, "interfaceNatMappings": []any{mp}})
 		}
 	}
 	items, next, err := page(all, c.query)
@@ -1358,16 +1362,16 @@ func (s *Server) natIPInfo(c call, region, name string) (obj, error) {
 		if only != "" && str(m, "name") != only {
 			continue
 		}
-		used := len(s.natVMsLocked(r, m)) > 0
 		var mappings []any
-		ips, _ := s.natIPsOf(m)
+		ips, slots := s.natAllocLocked(r, m)
+		used := natUsage(slots)
 		origin := "MANUAL"
 		if str(m, "natIpAllocateOption") == natAutoOnly {
 			origin = "AUTO"
 		}
 		for _, ip := range ips {
 			usage := "UNUSED"
-			if used {
+			if used[ip] {
 				usage = "IN_USE"
 			}
 			mappings = append(mappings, obj{"natIp": ip, "mode": "ACTIVE", "usage": usage, "origin": origin})

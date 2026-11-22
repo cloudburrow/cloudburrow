@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"cloud.google.com/go/logging/apiv2/loggingpb"
+
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
@@ -48,6 +50,15 @@ type computeService struct {
 	vms          *computeVMs
 	guestBase    func() string
 	metadataHost func() string
+	// opsAgentHosts are the in-cluster Cloud Logging and Cloud Monitoring
+	// addresses a VM's Ops Agent writes to (#2139, computeopsagent.go).
+	opsAgentHosts func() (logging, monitoring string)
+	// guestReach is where a VM's pod reaches a loopback listener of this
+	// machine (clusterHost.Reach, #2140).
+	guestReach func(loopback string) string
+	// natLogs writes Cloud NAT's nat_flows entries to Cloud Logging
+	// (computenat.go); set by up while Logging is served.
+	natLogs func(context.Context, *loggingpb.WriteLogEntriesRequest) error
 	// storage is the Cloud Storage port's host address, for image import
 	// (#2139); set by up, "" or nil when Storage is not served.
 	storage func() string
@@ -118,13 +129,20 @@ func (s *computeService) Start(ctx context.Context) error {
 		}
 		return s.metadataHost()
 	}
+	s.vms.opsAgentHosts = s.telemetryHosts
 	api, err := compute.New(compute.Options{State: state, Extra: s.instanceGroupManagers, ExtraGroups: s.gkeGroups, NetworkUsers: s.networkUsers, VMs: s.vms,
 		ProjectOrganization: s.projectOrganization, ReadObject: imageObjectReader(func() string {
 			if s.storage == nil {
 				return ""
 			}
 			return s.storage()
-		}), LB: &computeLB{cfg: s.cfg, vms: s.vms}})
+		}), LB: &computeLB{cfg: s.cfg, vms: s.vms},
+		GuestReach: func(loopback string) string {
+			if s.guestReach == nil {
+				return ""
+			}
+			return s.guestReach(loopback)
+		}})
 	if err != nil {
 		return err
 	}
@@ -143,6 +161,13 @@ func (s *computeService) Start(ctx context.Context) error {
 		return err
 	}
 	s.vpcAccess = va
+	// Cloud Run's pods onto VPC networks through connectors and Direct
+	// VPC egress (#2140, computerunegress.go).
+	s.startRunEgress(bg)
+	s.startNAT(bg)
+	// Cloud Router's BGP sessions with router appliances (#2140,
+	// computebgp.go).
+	s.startRouterBGP(bg)
 	ln, err := net.Listen("tcp", net.JoinHostPort(s.cfg.BindAddress, strconv.Itoa(s.cfg.Endpoints.Compute)))
 	if err != nil {
 		return fmt.Errorf("compute: %w", err)

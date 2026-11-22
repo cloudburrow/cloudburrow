@@ -68,6 +68,23 @@ const (
 // userDomains are the metric domains user-defined metrics may use.
 var userDomains = []string{"custom.googleapis.com/", "external.googleapis.com/", "workload.googleapis.com/"}
 
+// agentDomain is the Ops Agent's metrics' domain
+// (https://docs.cloud.google.com/monitoring/api/metrics_opsagent, #2139):
+// Google defines them, and the agent in a VM writes them with
+// CreateTimeSeries against the VM's gce_instance (or, on AWS,
+// aws_ec2_instance). They are written as the agent writes them, their
+// descriptors made from the first write as Google's are predefined; a
+// descriptor of the domain still cannot be created or deleted.
+const agentDomain = "agent.googleapis.com/"
+
+// agentResources are the monitored resources agent metrics are written for.
+var agentResources = map[string]bool{"gce_instance": true, "aws_ec2_instance": true}
+
+// isAgentMetric is whether t is an Ops Agent metric.
+func isAgentMetric(t string) bool {
+	return strings.HasPrefix(t, agentDomain) && len(t) > len(agentDomain)
+}
+
 // isUserDefined is whether a metric type is user-defined.
 func isUserDefined(t string) bool {
 	for _, d := range userDomains {

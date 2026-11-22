@@ -106,7 +106,10 @@ func TestConsoleServerlessVPCAccess2140(t *testing.T) {
 		"subnet": "custom", "ipCidrRange": "10.20.0.0/28"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := screen.call("DELETE", project, "global/networks/lone", nil, nil); err == nil || !strings.Contains(err.Error(), "connectors/lone-conn") {
+	if _, err := screen.call("DELETE", project, "global/networks/lone", nil, nil); err == nil ||
+		(!strings.Contains(err.Error(), "connectors/lone-conn") && !strings.Contains(err.Error(), "firewalls/aet-us-east1-lone-conn-")) {
+		// The connector, or one of the firewall rules it made in the
+		// network (connectorfw.go), keeps the network.
 		t.Fatalf("deleting the connector's network: %v", err)
 	}
 	if err := p.ActAt(ctx, project, []string{"us-east1", "lone-conn"}, "delete", nil); err != nil {
