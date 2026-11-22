@@ -405,6 +405,15 @@ func (s *Server) hasProxyOnlySubnetLocked(network, region string) bool {
 func (s *Server) ruleAddressLocked(x lbCtx, b, o obj, internal bool, ports []int) error {
 	ref := str(b, "IPAddress")
 	scope := x.scope
+	if str(o, "loadBalancingScheme") == "INTERNAL_SELF_MANAGED" && strings.Contains(str(o, "target"), "/targetGrpcProxies/") {
+		// Proxyless gRPC's rule: 0.0.0.0, its clients' xDS matching by
+		// port alone (proxyless-overview).
+		if ref != "" && ref != "0.0.0.0" {
+			return invalid("Invalid value for field 'resource.IPAddress': '%s'. A forwarding rule of a target gRPC proxy must have the address 0.0.0.0.", ref)
+		}
+		o["IPAddress"] = "0.0.0.0"
+		return nil
+	}
 	var addrRel string
 	if ref != "" && net.ParseIP(ref) == nil {
 		addrRel = Rel(ref, x.project)

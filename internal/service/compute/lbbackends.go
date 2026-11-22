@@ -29,10 +29,10 @@ func init() {
 	registerLB(&lbColl{coll: "backendServices", kind: "compute#backendService", global: true, regional: true, patch: true, update: true,
 		fingerprint: true, iam: true, testIam: true, build: buildBackendService, decorate: withUsedBy, noun: "backendService",
 		post: map[string]func(*Server, lbCtx, obj, obj) (obj, error){"getHealth": backendServiceHealth,
-			"setSecurityPolicy": setSecurityPolicyOn("securityPolicy", "CLOUD_ARMOR"),
+			"setSecurityPolicy":     setSecurityPolicyOn("securityPolicy", "CLOUD_ARMOR"),
 			"setEdgeSecurityPolicy": setSecurityPolicyOn("edgeSecurityPolicy", "CLOUD_ARMOR_EDGE"),
 			"addSignedUrlKey":       addSignedURLKey, "deleteSignedUrlKey": deleteSignedURLKey},
-		get: map[string]func(*Server, lbCtx, obj, call) (obj, error){"getEffectiveSecurityPolicies": effectiveSecurityPolicies},
+		get:     map[string]func(*Server, lbCtx, obj, call) (obj, error){"getEffectiveSecurityPolicies": effectiveSecurityPolicies},
 		collGet: map[string]func(*Server, lbCtx, call) (obj, error){"listUsable": listUsable("backendServices", "compute#usableBackendServiceList")}})
 	registerLB(&lbColl{coll: "backendBuckets", kind: "compute#backendBucket", global: true, patch: true, update: true,
 		iam: true, testIam: true, build: buildBackendBucket, decorate: withUsedBy, noun: "backendBucket",

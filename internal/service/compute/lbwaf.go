@@ -124,7 +124,7 @@ var wafFamilies = map[string][]wafSig{
 	"xss": {
 		sig(crs33+"941100-xss", 1, argsAll|tHeaders, `<\s*script|javascript\s*:|<[^>]+\bon\w+\s*=|<\s*(?:iframe|svg|img|body|object|embed)\b[^>]*>`),
 		sig(crs33+"941110-xss", 1, argsAll|tHeaders, `<\s*script[^>]*>`),
-		sig(crs33+"941120-xss", 1, argsAll|tHeaders, `[\s"'` + "`" + `;/0-9=]on[a-z]+\s*=`),
+		sig(crs33+"941120-xss", 1, argsAll|tHeaders, `[\s"'`+"`"+`;/0-9=]on[a-z]+\s*=`),
 		sig(crs33+"941130-xss", 1, argsAll|tHeaders, `[\s\S](?:xmlns|xlink:href|!entity|formaction|@import|;base64)\b`),
 		sig(crs33+"941140-xss", 1, argsAll|tHeaders, `(?:javascript|vbscript)\s*:|url\s*\(\s*['"]?\s*javascript`),
 		sig(crs33+"941160-xss", 1, argsAll|tHeaders, `<\s*(?:applet|audio|base|bgsound|blink|body|embed|frame|frameset|iframe|ilayer|img|input|isindex|layer|link|marquee|meta|object|script|style|svg|video|xml)\b`),
@@ -257,7 +257,7 @@ var wafCVE = []wafSig{
 
 // wafJSONSQLi is json-sqli-canary's signature.
 var wafJSONSQLi = []wafSig{
-	sig("owasp-crs-id942550-sqli", 2, argsAll|tBody, `[\"'` + "`" + `][\[\{].*[\]\}][\"'` + "`" + `].*(?:::.*jsonb?)?.*(?:(?:@|->?)>|<@|\?[&|]?|#>>?|[<>]|<-)|(?:(?:@|->?)>|<@|\?[&|]?|#>>?|[<>]|<-)[\"'` + "`" + `][\[\{].*[\]\}][\"'` + "`" + `]|json_extract.*\(.*\)`),
+	sig("owasp-crs-id942550-sqli", 2, argsAll|tBody, `[\"'`+"`"+`][\[\{].*[\]\}][\"'`+"`"+`].*(?:::.*jsonb?)?.*(?:(?:@|->?)>|<@|\?[&|]?|#>>?|[<>]|<-)|(?:(?:@|->?)>|<@|\?[&|]?|#>>?|[<>]|<-)[\"'`+"`"+`][\[\{].*[\]\}][\"'`+"`"+`]|json_extract.*\(.*\)`),
 }
 
 var wafVersions = []string{"-v422-stable", "-v422-canary", "-v33-stable", "-v33-canary", "-stable", "-canary"}
