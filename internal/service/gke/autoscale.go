@@ -413,13 +413,21 @@ func (s *Server) scaleOnce(ctx context.Context, key string, nodes []k8sNode, pod
 		c.Status = containerpb.Cluster_RECONCILING
 		kind, image, pool := e.kind, s.NodeImage(grow.Version), grow.Name
 		st.lastScaleUp = now
+		// The pool's size first, as GKE resizes the pool's instance group
+		// before its new node registers: the node is Ready, and its pods
+		// run, a moment before Resize returns (join polls Ready every two
+		// seconds), and a GetNodePool then read the old size (main run
+		// 45023269046, TestGKEClusterSettings: "initialNodeCount 1" with
+		// the pool's two nodes running the deployment).
+		grow.InitialNodeCount = count
+		_ = s.saveLocked()
 		s.mu.Unlock()
 		err := s.backend.Resize(ctx, kind, image, pool, int(count)*zones)
 		s.mu.Lock()
 		e.busy = ""
 		c.Status = containerpb.Cluster_RUNNING
-		if err == nil {
-			grow.InitialNodeCount = count
+		if err != nil {
+			grow.InitialNodeCount = count - 1
 		}
 		c.CurrentNodeCount = int32(clusterNodes(c))
 		st.lastScaleUp = s.now()

@@ -177,3 +177,35 @@ func TestIcebergRowsInAnotherOrderAreNoChange(t *testing.T) {
 		t.Errorf("a change after them wrote %d data files in all, want 2", e.data)
 	}
 }
+
+// TestIcebergWriteFailureIsTheChangingRequests (main run 45023269046): a
+// request that cannot have made the change, such as Data Transfer's read
+// of BigQuery's clock (POST clock:advance), still writes the files but
+// does not take the failure: the request of the table's project that
+// syncs next answers it, once.
+func TestIcebergWriteFailureIsTheChangingRequests(t *testing.T) {
+	e := &icebergFake{rows: func(int) string { return `[{"f":[{"v":"1"}]}]` }}
+	tables, _, _ := icebergFakeTables(t, e)
+	gcs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"error":{"code":404,"message":"The specified bucket does not exist."}}`, http.StatusNotFound)
+	}))
+	t.Cleanup(gcs.Close)
+	host := strings.TrimPrefix(gcs.URL, "http://")
+	mk := func(base string) front { return front{next: http.HandlerFunc(e.engine), base: base, storageHost: host} }
+
+	clock := httptest.NewRequest(http.MethodPost, "/cloudburrow/bigquery/v2/clock:advance", nil)
+	if status, why := tables.syncAll(clock, mk); status != 0 {
+		t.Errorf("the clock read took the failure: %d %+v", status, why)
+	}
+	other := httptest.NewRequest(http.MethodPost, "/bigquery/v2/projects/q/datasets/d/tables/x/insertAll", nil)
+	if status, why := tables.syncAll(other, mk); status != 0 {
+		t.Errorf("another project's insertAll took the failure: %d %+v", status, why)
+	}
+	query := httptest.NewRequest(http.MethodPost, "/bigquery/v2/projects/p/queries", nil)
+	if status, _ := tables.syncAll(query, mk); status != http.StatusNotFound {
+		t.Errorf("the query of the table's project answered %d, want 404", status)
+	}
+	if status, _ := tables.syncAll(query, mk); status != 0 {
+		t.Errorf("the failure was answered twice: %d", status)
+	}
+}

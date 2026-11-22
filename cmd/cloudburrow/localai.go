@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
 	"google.golang.org/grpc/codes"
 
@@ -45,7 +46,7 @@ func buildLocalAI(cfg config.Config) (*vertexai.Server, error) {
 		// Embeddings only: no generation runtime, so generateContent
 		// answers FAILED_PRECONDITION as it does with no model.
 		addr := net.JoinHostPort(cfg.BindAddress, strconv.Itoa(cfg.Endpoints.LocalAI))
-		srv := vertexai.NewServerOn(addr, nil)
+		srv := newLocalAIServer(addr, nil)
 		attachEmbedder(srv, cfg)
 		return srv, nil
 	}
@@ -70,7 +71,7 @@ func buildLocalAI(cfg config.Config) (*vertexai.Server, error) {
 	gen := vertexai.NewDockerGenerator(image, filepath.Clean(dir), file, modelID)
 
 	addr := net.JoinHostPort(cfg.BindAddress, strconv.Itoa(cfg.Endpoints.LocalAI))
-	srv := vertexai.NewServerOn(addr, gen)
+	srv := newLocalAIServer(addr, gen)
 	attachSpeechModel(cfg) // ML.TRANSCRIBE's route is on every local AI endpoint (#1799)
 	for _, a := range cfg.LocalAI.Aliases {
 		srv.Alias(a)
@@ -91,17 +92,57 @@ func localAIServed(cfg config.Config) bool {
 // pinLocalAIPort gives an OS-assigned (0) local AI port a fixed one before
 // anything starts, so the BigQuery front can be told where to reach it
 // through cloudburrow-host (#1760): the front's arguments are written
-// before the endpoint binds.
+// before the endpoint binds. The port stays bound (holdPort) until the
+// endpoint serves it.
 func pinLocalAIPort(cfg *config.Config) error {
 	if cfg.Endpoints.LocalAI != 0 {
 		return nil
 	}
-	l, err := net.Listen("tcp", net.JoinHostPort(cfg.BindAddress, "0"))
+	port, err := holdPort(cfg.BindAddress)
 	if err != nil {
 		return fmt.Errorf("choose a port for the local AI endpoint: %w", err)
 	}
-	cfg.Endpoints.LocalAI = l.Addr().(*net.TCPAddr).Port
-	return l.Close()
+	cfg.Endpoints.LocalAI = port
+	return nil
+}
+
+// heldPorts are the listeners of the ports chosen before anything starts
+// (holdPort), by address, kept bound until their server takes them
+// (takeHeldPort). A port chosen and closed at once is free for anything
+// else to bind in the minutes before its server does: in main run
+// 45023269046 the local AI endpoint's 41367 was taken while its embedding
+// model downloaded, and `up` failed "bind: address already in use".
+var heldPorts sync.Map
+
+// holdPort binds an OS-assigned port of bind and keeps it bound; it
+// returns the port.
+func holdPort(bind string) (int, error) {
+	l, err := net.Listen("tcp", net.JoinHostPort(bind, "0"))
+	if err != nil {
+		return 0, err
+	}
+	port := l.Addr().(*net.TCPAddr).Port
+	heldPorts.Store(net.JoinHostPort(bind, strconv.Itoa(port)), l)
+	return port, nil
+}
+
+// takeHeldPort returns the listener holdPort keeps bound to addr, once, or
+// nil.
+func takeHeldPort(addr string) net.Listener {
+	if l, ok := heldPorts.LoadAndDelete(addr); ok {
+		return l.(net.Listener)
+	}
+	return nil
+}
+
+// newLocalAIServer is the local AI endpoint on addr, serving the port
+// pinLocalAIPort holds when it chose addr's.
+func newLocalAIServer(addr string, gen vertexai.Generator) *vertexai.Server {
+	srv := vertexai.NewServerOn(addr, gen)
+	if l := takeHeldPort(addr); l != nil {
+		srv.UseListener(l)
+	}
+	return srv
 }
 
 // withPredictionEndpoints makes srv serve custom prediction endpoints when
@@ -117,7 +158,7 @@ func withPredictionEndpoints(cfg config.Config, srv *vertexai.Server, run interf
 	}
 	if srv == nil {
 		attachLabelModel(cfg)
-		srv = vertexai.NewServerOn(net.JoinHostPort(cfg.BindAddress, strconv.Itoa(cfg.Endpoints.LocalAI)), nil)
+		srv = newLocalAIServer(net.JoinHostPort(cfg.BindAddress, strconv.Itoa(cfg.Endpoints.LocalAI)), nil)
 		attachSpeechModel(cfg)
 	}
 	srv.SetEndpoints(endpointResolver{src: predictionSource{run: runProvider{
