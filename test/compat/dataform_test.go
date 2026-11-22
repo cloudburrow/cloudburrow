@@ -708,7 +708,15 @@ func TestDataformSecureSourceManagerRemote(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for transport, c := range clients {
+	// gRPC first, then REST, not a map's random order: the two share one
+	// remote, which is empty until the gRPC workspace pushes main, and the
+	// REST workspace's PullGitCommits then pulls that branch. In the other
+	// order the pull found no main ("couldn't find remote ref").
+	for _, transport := range []string{"grpc", "rest"} {
+		c := clients[transport]
+		if c == nil {
+			t.Fatalf("no %s Dataform client", transport)
+		}
 		t.Run(transport, func(t *testing.T) {
 			dfParent := fmt.Sprintf("projects/%s/locations/us-central1", h.Project())
 			if _, err := c.CreateRepository(ctx, &dfpb.CreateRepositoryRequest{Parent: dfParent, RepositoryId: "elsewhere" + transport,

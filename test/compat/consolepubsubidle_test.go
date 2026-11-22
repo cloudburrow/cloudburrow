@@ -123,8 +123,8 @@ func TestConsolePubSubIdleTimeAndPushAttributes(t *testing.T) {
 			}
 		}
 	}
-	if got["Expiration period"] != "2d" {
-		t.Errorf("the page shows the expiration period %q, want 2d", got["Expiration period"])
+	if got["Expiration period"] != "2 days" {
+		t.Errorf("the page shows the expiration period %q, want 2 days", got["Expiration period"])
 	}
 	if !regexp.MustCompile(`^(\d+d)?\d+h(\d+m)?(\d+s)?$`).MatchString(got["Idle for"]) {
 		t.Errorf("the page shows idle for %q, want the 2h or more the front counted", got["Idle for"])

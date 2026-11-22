@@ -3,8 +3,8 @@
 # None of this authenticates anything: CloudBurrow serves every caller,
 # and the credentials file exists only so tools that insist on having one
 # can run offline. See docs/credentials.md.
-export ="127.0.0.1:9007"  # Cloud Billing and Budget APIs, gRPC and REST, plaintext; read by no client library: pass it to option.WithEndpoint
 export CLOUDBURROW_APIKEYS_ENDPOINT="127.0.0.1:9029"  # the API Keys API v2, REST, plaintext; read by no client library: pass http://127.0.0.1:9029/ to option.WithEndpoint
+export CLOUDBURROW_BILLING_ENDPOINT="127.0.0.1:9007"  # Cloud Billing and Budget APIs, gRPC and REST, plaintext; read by no client library: pass it to option.WithEndpoint
 export CLOUDBURROW_DOMAIN="cloudburrow.localhost"  # services are named <service>.<namespace>.cloudburrow.localhost
 export CLOUDBURROW_INGRESS="http://127.0.0.1:9080"  # Cloud Run services are served here; see docs/networking.md
 export CLOUDBURROW_RESOURCEMANAGER_ENDPOINT="127.0.0.1:9007"  # gRPC and REST, plaintext; read by no client library: pass it to option.WithEndpoint

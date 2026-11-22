@@ -91,6 +91,19 @@ func TestBigQueryCleanRoomsThroughThePage(t *testing.T) {
 	q := "?project=" + url.QueryEscape(project)
 
 	p := open(t)
+	// Clean rooms are reached from the sharing page, as Google's docs
+	// reach them ("go to the Sharing (Analytics Hub) page"): its Clean
+	// rooms tab, with Analytics Hub marked in BigQuery's menu, which has
+	// no item of their own.
+	p.navigate("/bigquery-sharing" + q)
+	p.waitFor(`document.querySelector("#view .page-tabs") !== null`)
+	p.clickText("#view .page-tabs a", "Clean rooms")
+	p.waitFor(`location.pathname === "/bigquery-clean-rooms"`)
+	var marked string
+	p.eval(`document.querySelector("#product-nav a[aria-current=page]").textContent`, &marked)
+	if marked != "Analytics Hub" {
+		t.Errorf("on the Clean rooms tab BigQuery's menu marks %q, want Analytics Hub", marked)
+	}
 	p.navigate("/bigquery-clean-rooms/create" + q)
 	p.waitFor(`document.querySelector("#view #f-id") !== null`)
 	setField(p, "#view", "f-id", id)

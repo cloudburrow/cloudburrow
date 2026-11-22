@@ -348,7 +348,8 @@ func (f *Front) Server() *grpc.Server {
 			// Disabled APIs (#1914), by the call's routing headers, after
 			// the call log, so a refused call is logged as the client
 			// sees it.
-			apienable.StreamInterceptor(nil, "pubsub.googleapis.com"),
+			// The state calls of CloudBurrow itself pass (StateHeader).
+			skipForStateCalls(apienable.StreamInterceptor(nil, "pubsub.googleapis.com")),
 			// Fault rules (#2113), the host's.
 			faultgate.StreamInterceptor("pubsub")),
 		grpc.MaxRecvMsgSize(math.MaxInt32), grpc.MaxSendMsgSize(math.MaxInt32),

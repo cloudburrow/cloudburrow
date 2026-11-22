@@ -35,6 +35,10 @@ func cliEndpointVar(service string) string {
 		return "CLOUDBURROW_LOGGING_ENDPOINT"
 	case "resourcemanager":
 		return "CLOUDBURROW_RESOURCEMANAGER_ENDPOINT"
+	case "billing":
+		// Cloud Billing and the Budget API (#2109), on the Resource
+		// Manager port.
+		return "CLOUDBURROW_BILLING_ENDPOINT"
 	case "sqladmin":
 		return "CLOUDBURROW_SQLADMIN_ENDPOINT"
 	case "serviceusage":
