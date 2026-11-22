@@ -505,6 +505,12 @@ func (c *connector) serve(s *Server, raw net.Conn) {
 		return
 	}
 	addr := target.Addr()
+	// With managed connection pooling, 3307 is the pooler's (#2141).
+	if pl, ok := target.(interface{ PoolerAddr() string }); ok {
+		if a := pl.PoolerAddr(); a != "" {
+			addr = a
+		}
+	}
 	if addr == "" {
 		return
 	}

@@ -201,9 +201,16 @@ type (
 
 // Register serves the API, its operations and locations on g.
 func (s *Server) Register(g grpc.ServiceRegistrar) {
-	ncpb.RegisterCrossNetworkAutomationServiceServer(g, s)
 	longrunningpb.RegisterOperationsServer(g, &operations{s: s})
 	locations.Register(g, locationsServer{})
+	s.RegisterAPI(g)
+}
+
+// RegisterAPI registers the API's own services, without its Locations and
+// Operations mixins: CrossNetworkAutomationService, and the others, whose
+// every method answers UNIMPLEMENTED.
+func (s *Server) RegisterAPI(g grpc.ServiceRegistrar) {
+	ncpb.RegisterCrossNetworkAutomationServiceServer(g, s)
 	ncpb.RegisterHubServiceServer(g, hubs{})
 	ncpb.RegisterPolicyBasedRoutingServiceServer(g, routing{})
 	ncpb.RegisterInternalRangeServiceServer(g, ranges{})

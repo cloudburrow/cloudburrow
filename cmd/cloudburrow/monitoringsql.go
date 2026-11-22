@@ -143,6 +143,12 @@ func (m monitoringSQL) SQLInstances() []monitoring.SQLInstance {
 				r.Up, r.HasServer = true, true
 				r.Connections, r.Backends, r.Queries = ss.Connections, ss.Backends, ss.Queries
 				r.Commits, r.Rollbacks = ss.Commits, ss.Rollbacks
+				for _, l := range ss.Load {
+					r.Load = append(r.Load, monitoring.SQLLoad{User: l.User, Database: l.Database, ExecUs: l.ExecUs, IOReadUs: l.IOReadUs, IOWriteUs: l.IOWriteUs})
+				}
+				for _, w := range ss.Waits {
+					r.Waits = append(r.Waits, monitoring.SQLWait{User: w.User, Database: w.Database, LockType: w.LockType, Sessions: w.Sessions})
+				}
 				if r.DiskUsed == 0 {
 					r.DiskUsed = ss.DataBytes
 				}

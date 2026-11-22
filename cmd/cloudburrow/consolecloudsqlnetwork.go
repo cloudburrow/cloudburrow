@@ -14,6 +14,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -178,7 +179,66 @@ func sqlPrivateIPFields(section string, nets []string, ranges map[string][]strin
 		{Name: "pscAllowedProjects", Label: "Allowed projects", Type: "text", Section: section, Default: projects,
 			VisibleWhen: map[string]string{"privateIp": "true", "privateMethod": sqlPrivatePSC},
 			Help:        "The consumer projects allowed to connect to the instance's service attachment, separated by commas (pscConfig.allowedConsumerProjects)."},
+		sqlAutoEndpointsField(section, nets, netLabels, cur),
 	}
+}
+
+// sqlAutoEndpointsField is Endpoint setup's Add an Endpoint (#2141): each
+// New Endpoint card a Project and a Network, made through the network's
+// google-cloud-sql connection policy (pscConfig.pscAutoConnections).
+func sqlAutoEndpointsField(section string, nets []string, netLabels map[string]string, cur *sqladminapi.IpConfiguration) console.Field {
+	netField := console.Field{Name: "network", Label: "Network", Type: "select", Required: true, Options: nets, OptionLabels: netLabels}
+	if len(nets) == 0 {
+		netField.Type, netField.Options, netField.OptionLabels = "text", nil, nil
+	}
+	f := console.Field{Name: "pscAutoConnections", Label: "Endpoint setup", Type: console.GroupFieldType, Section: section, AddLabel: "Add an Endpoint",
+		VisibleWhen: map[string]string{"privateIp": "true", "privateMethod": sqlPrivatePSC},
+		Group: []console.Field{
+			{Name: "project", Label: "Project", Type: "text", Required: true, Pattern: `^[a-z][a-z0-9\-]{4,28}[a-z0-9]$`},
+			netField,
+		},
+		Help: "Endpoints Cloud SQL creates for you in a network, through the network's connection policy for the google-cloud-sql service class " +
+			"(Network services, Private Service Connect, Connection Policies). Without a policy the endpoint is not created until one is."}
+	if cur != nil && cur.PscConfig != nil && len(cur.PscConfig.PscAutoConnections) > 0 {
+		var rows []map[string]string
+		for _, a := range cur.PscConfig.PscAutoConnections {
+			project := a.ConsumerProject
+			if project == "" {
+				if p := strings.Split(a.ConsumerNetwork, "/"); len(p) > 1 {
+					project = p[1]
+				}
+			}
+			rows = append(rows, map[string]string{"project": project, "network": a.ConsumerNetwork})
+		}
+		if b, err := json.Marshal(rows); err == nil {
+			f.Default = string(b)
+		}
+	}
+	return f
+}
+
+// sqlAutoEndpointRows is the form's endpoints as pscAutoConnections.
+func sqlAutoEndpointRows(v string) ([]*sqladminapi.PscAutoConnectionConfig, error) {
+	if strings.TrimSpace(v) == "" {
+		return nil, nil
+	}
+	rows, err := console.ParseGroup(v)
+	if err != nil {
+		return nil, err
+	}
+	var out []*sqladminapi.PscAutoConnectionConfig
+	for i, r := range rows {
+		n := strings.TrimSpace(r["network"])
+		project := strings.TrimSpace(r["project"])
+		if n == "" {
+			return nil, fmt.Errorf("endpoint %d: choose a network", i+1)
+		}
+		if !strings.HasPrefix(n, "projects/") {
+			n = "projects/" + project + "/global/networks/" + n
+		}
+		out = append(out, &sqladminapi.PscAutoConnectionConfig{ConsumerNetwork: n, ConsumerProject: project})
+	}
+	return out, nil
 }
 
 // sqlPrivateIPConfig applies the Private IP fields to ic.
@@ -198,6 +258,11 @@ func sqlPrivateIPConfig(ic *sqladminapi.IpConfiguration, v map[string]string) er
 				pc.AllowedConsumerProjects = append(pc.AllowedConsumerProjects, p)
 			}
 		}
+		auto, err := sqlAutoEndpointRows(v["pscAutoConnections"])
+		if err != nil {
+			return err
+		}
+		pc.PscAutoConnections = auto
 		ic.PscConfig = pc
 		return nil
 	}
@@ -244,8 +309,11 @@ func (p cloudSQLInstancesProvider) networkingAction(project string, in *sqladmin
 	}
 	fields := append([]console.Field{{Name: "publicIp", Label: "Public IP", Type: "checkbox", Default: public,
 		Help: "The instance's public address (ipv4Enabled)."}}, sqlPrivateIPFields("", nets, ranges, ic)...)
+	if sqlPoolable(in) {
+		fields = append(fields, sqlPoolFields("", nil, in.Settings.ConnectionPoolConfig)...)
+	}
 	return console.Action{ID: "edit-networking", Label: "Edit", Title: "Networking", Submit: "Save", Fields: fields,
-		Confirm: "Changing private IP restarts the instance."}
+		Confirm: "Changing private IP or managed connection pooling restarts the instance."}
 }
 
 // editNetworking saves the Networking tab.
@@ -255,5 +323,6 @@ func editNetworking(st *sqladminapi.Settings, v map[string]string) error {
 		return err
 	}
 	st.IpConfiguration = ic
+	st.ConnectionPoolConfig = sqlPoolConfig(v)
 	return nil
 }

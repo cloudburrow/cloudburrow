@@ -80,7 +80,7 @@ func (s Spec) autoConsumerProjects() []string {
 // Service Connect, and an entry whose consumerNetwork is not a network's
 // path ("This must be a resource path that includes both the host project
 // and the network name", the Admin API reference). The wording is
-// UNVERIFIED.
+// UNVERIFIED (re-read 2026-11-22: the reference quotes no error).
 func checkAutoConnections(spec Spec) error {
 	cs := spec.autoConsumers()
 	if len(cs) == 0 {

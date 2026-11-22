@@ -29,7 +29,7 @@ import (
 // Compute Engine port, where the API is served (#2141).
 func ncClient(t *testing.T, h *Harness) *networkconnectivity.CrossNetworkAutomationClient {
 	t.Helper()
-	addr := h.Endpoint(EnvCompute) // skips without Compute Engine
+	addr := sqlComputeEndpoint(h) // skips without Compute Engine
 	g, err := networkconnectivity.NewCrossNetworkAutomationClient(h.Context(), option.WithEndpoint(addr), option.WithoutAuthentication(),
 		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
 	if err != nil {
@@ -42,7 +42,7 @@ func ncClient(t *testing.T, h *Harness) *networkconnectivity.CrossNetworkAutomat
 // ncNetwork makes a custom mode network with one subnet in us-central1.
 func ncNetwork(t *testing.T, h *Harness, name, cidr string) (network, subnet string) {
 	t.Helper()
-	opts := computeOpts(t, h)
+	opts := sqlComputeOpts(t, h)
 	ctx := h.Context()
 	p := h.Project()
 	nets, _ := computeapi.NewNetworksRESTClient(ctx, opts...)
@@ -93,6 +93,7 @@ func TestNetworkConnectivityServiceConnectionPolicies(t *testing.T) {
 	parent := "projects/" + p + "/locations/us-central1"
 	for i, tr := range []string{"grpc"} {
 		t.Run(tr, func(t *testing.T) {
+			h := h.For(t)
 			suffix := fmt.Sprintf("%d", time.Now().UnixNano()%1e6)
 			network, subnet := ncNetwork(t, h, "ct-nc-"+tr+"-"+suffix, fmt.Sprintf("10.%d.0.0/28", 150+i))
 			one := int64(1)
@@ -279,7 +280,7 @@ func TestCloudSQLPSCAutoConnections(t *testing.T) {
 	svc := sqlAdminService(t, h)
 	ctx := h.Context()
 	p := h.Project()
-	opts := computeOpts(t, h)
+	opts := sqlComputeOpts(t, h)
 	rules, err := computeapi.NewForwardingRulesRESTClient(ctx, opts...)
 	if err != nil {
 		t.Fatal(err)
@@ -391,10 +392,11 @@ func TestCloudSQLPSCAutoConnections(t *testing.T) {
 // Engine port: a policy created, read, listed, patched (its limit) and
 // deleted, each operation read back done, and a second policy for the
 // network and class refused with 409.
-// covers: networkconnectivity.projects.locations.serviceConnectionPolicies.create, networkconnectivity.projects.locations.serviceConnectionPolicies.get, networkconnectivity.projects.locations.serviceConnectionPolicies.list, networkconnectivity.projects.locations.serviceConnectionPolicies.patch, networkconnectivity.projects.locations.serviceConnectionPolicies.delete, networkconnectivity.projects.locations.operations.get
+// The REST methods are the gRPC ones' JSON bindings, the page's rows.
+// covers: google.cloud.networkconnectivity.v1.CrossNetworkAutomationService/CreateServiceConnectionPolicy, google.cloud.networkconnectivity.v1.CrossNetworkAutomationService/GetServiceConnectionPolicy, google.cloud.networkconnectivity.v1.CrossNetworkAutomationService/ListServiceConnectionPolicies, google.cloud.networkconnectivity.v1.CrossNetworkAutomationService/UpdateServiceConnectionPolicy, google.cloud.networkconnectivity.v1.CrossNetworkAutomationService/DeleteServiceConnectionPolicy
 func TestNetworkConnectivityPoliciesThroughTheRESTClient(t *testing.T) {
 	h := New(t)
-	addr := h.Endpoint(EnvCompute)
+	addr := sqlComputeEndpoint(h)
 	svc, err := ncrest.NewService(h.Context(), option.WithEndpoint("http://"+addr+"/"), option.WithoutAuthentication())
 	if err != nil {
 		t.Fatal(err)

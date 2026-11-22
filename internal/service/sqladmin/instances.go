@@ -696,6 +696,10 @@ func (s *Server) insertInstance(r *http.Request, base, project string) (any, err
 		}
 		spec.MSSQLEULA, spec.SAPassword = eula, NewSAPassword()
 	}
+	if err := checkConnectionPool(spec); err != nil {
+
+		return nil, err
+	}
 	if err := checkPasswordPolicy(spec); err != nil {
 		return nil, err
 	}
@@ -1014,6 +1018,10 @@ func (s *Server) patchInstance(r *http.Request, base, project, name string, repl
 		s.emu.Unlock()
 		return nil, err
 	}
+	if err := checkConnectionPool(next); err != nil {
+		s.emu.Unlock()
+		return nil, err
+	}
 	if err := checkPasswordPolicy(next); err != nil {
 		s.emu.Unlock()
 		return nil, err
@@ -1041,7 +1049,10 @@ func (s *Server) patchInstance(r *http.Request, base, project, name string, repl
 	// Stopping or starting the instance (#1875) shuts its server down, or
 	// starts it with its data.
 	activation := next.Stopped() != c.spec.Stopped()
-	restart := !flagsEqual(serverFlags(next.Flags), serverFlags(c.spec.Flags)) || c.state == "FAILED" || haChange || activation
+	// Managed connection pooling on or off, or its flags changed, starts
+	// the server again with its pooler (#2141).
+	pooling := next.poolingKey() != c.spec.poolingKey()
+	restart := !flagsEqual(serverFlags(next.Flags), serverFlags(c.spec.Flags)) || c.state == "FAILED" || haChange || activation || pooling
 	if restart && !next.Stopped() {
 		// A server whose key cannot be used is not started again (#1538).
 		if err := s.keyUsableWith(s.kms, next); err != nil {
@@ -1246,10 +1257,6 @@ func (s *Server) createdJSON(ctx context.Context, base string, c *created) (map[
 	if spec.pscEnabled() {
 		in["pscServiceAttachmentLink"] = pscServiceAttachment(spec)
 	}
-	if st, ok := in["settings"].(map[string]any); ok {
-		// Each automatic endpoint's address and state (#2141).
-		s.withAutoConnections(st, spec)
-	}
 	// A replica is upgraded on its own: MySQL's (#1462), and PostgreSQL's
 	// (#1524), which then waits for its primary's upgrade.
 	if up := upgradable(spec.DatabaseVersion); len(up) > 0 {
@@ -1284,6 +1291,9 @@ func (s *Server) createdJSON(ctx context.Context, base string, c *created) (map[
 			st[k] = v
 		}
 	}
+	// Each automatic endpoint's address and state (#2141).
+	s.withAutoConnections(st, spec)
+	withPoolerCount(st, spec)
 	st["tier"] = spec.Tier
 	st["activationPolicy"] = "ALWAYS"
 	if spec.ActivationPolicy != "" {

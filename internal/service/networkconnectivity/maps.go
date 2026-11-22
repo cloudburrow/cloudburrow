@@ -18,7 +18,7 @@ import (
 // serviceClassUri is output; the service class is the producer project's
 // ServiceClass of that name in the map's location, made with the map's
 // first use of it (the API has no ServiceClasses.Create: how a class comes
-// to exist is UNVERIFIED), and a class a map still names is not deleted.
+// to exist is UNVERIFIED, re-read 2026-11-22: the v1 reference), and a class a map still names is not deleted.
 
 const (
 	maps    = "serviceConnectionMaps"
@@ -327,8 +327,8 @@ func (s *Server) DeleteServiceClass(_ context.Context, req *ncpb.DeleteServiceCl
 
 // ---- Service connection tokens ----
 
-// tokenLifetime is how long a token is valid. UNVERIFIED: the reference
-// documents expireTime as output only, with no lifetime.
+// tokenLifetime is how long a token is valid. UNVERIFIED (re-read 2026-11-22: the v1 reference
+// documents expireTime as output only, with no lifetime).
 const tokenLifetime = 7 * 24 * time.Hour
 
 func (s *Server) CreateServiceConnectionToken(_ context.Context, req *ncpb.CreateServiceConnectionTokenRequest) (*longrunningpb.Operation, error) {

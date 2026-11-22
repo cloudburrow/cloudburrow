@@ -9,8 +9,8 @@ package main
 // Assign automatically or Let me choose a Custom IP address), Enable
 // global access, then Add endpoint. A Cloud SQL instance with Private
 // Service Connect publishes the service attachment its Connections page
-// shows. The list's columns are not in the docs (UNVERIFIED, re-read
-// 2026-11-22: the same page). Service Directory namespaces are not
+// shows. The list's columns are not in the docs (UNVERIFIED,
+// re-read 2026-11-22: the same page). Service Directory namespaces are not
 // served, so the form has no Namespace.
 
 import (

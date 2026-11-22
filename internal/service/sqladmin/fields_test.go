@@ -232,7 +232,7 @@ var settingsSamples = map[string][2]string{
 	"entraidConfig":             {`{"tenantId":"t"}`, "refuse"},
 	"sqlServerAuditConfig":      {`{"bucket":"gs://b"}`, "refuse"},
 	"timeZone":                  {`"UTC"`, "refuse"},
-	"connectionPoolConfig":      {`{"connectionPoolingEnabled":true}`, "refuse"},
+	"connectionPoolConfig":      {`{"connectionPoolingEnabled":false}`, "echo"},
 	"connectorEnforcement":      {`"REQUIRED"`, "refuse"},
 	"enableGoogleMlIntegration": {`true`, "refuse"},
 	"passwordValidationPolicy":  {`{"enablePasswordPolicy":true,"minLength":12}`, "echo"},

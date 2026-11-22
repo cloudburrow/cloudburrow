@@ -55,6 +55,9 @@ var serviceAgents = map[string]string{
 	// Compute Engine Service Agent, the primary agent of
 	// compute.googleapis.com (#1936).
 	"compute.googleapis.com": "compute-system.iam.gserviceaccount.com",
+	// Network Connectivity Service Account, the primary agent of
+	// networkconnectivity.googleapis.com (#2141; read 2026-11-22).
+	"networkconnectivity.googleapis.com": "gcp-sa-networkconnectivity.iam.gserviceaccount.com",
 	// External Key Management Service Service Account, Cloud KMS's primary
 	// agent, not the Cloud KMS Service Agent (gcp-sa-cloudkms, which is not
 	// primary): https://cloud.google.com/kms/docs/create-ekm-connection runs

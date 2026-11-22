@@ -230,6 +230,10 @@ var DeleteConfirmRules = map[string]DeleteConfirmRule{
 	// not described (docs re-read 2026-11-22:
 	// https://docs.cloud.google.com/vpc/docs/configure-private-service-connect-services).
 	"vpc-psc": unverified,
+	// Service connection policies (#2141). UNVERIFIED: the dialog is not
+	// described (docs re-read 2026-11-22:
+	// https://docs.cloud.google.com/vpc/docs/configure-service-connection-policies).
+	"psc-policies": unverified,
 	// Compute Engine snapshots (#1965). UNVERIFIED: "Select one or more
 	// snapshots that you want to delete. At the top of the Snapshots page,
 	// click Delete." No dialog described (docs re-read 2026-11-20:

@@ -122,6 +122,9 @@ const AP_ROUTES = agentPlatformRoutes();
 const GKE_DISCOVERY = ["/kubernetes/gateways", "/kubernetes/services", "/kubernetes/ingress"];
 // Secret Manager's page tabs (#1850): the global secrets and Regional secrets.
 const SECRET_TABS = ["/secrets", "/secrets-regional"];
+// Private Service Connect's tabs (#2141): Connected endpoints and
+// Connection Policies, as Google's page has them.
+const PSC_TABS = ["/net-services/psc/list/consumers", "/net-services/psc/list/policies"];
 const GKE_STORAGE = ["/kubernetes/storage", "/kubernetes/storage-classes"];
 // Cloud Logging's Settings and its Log Scopes tab (#2020), as Google's
 // Settings page has a Log Scopes tab (log-scope/create-and-manage).
@@ -500,8 +503,14 @@ const ROUTES = [
     section: "Networking", product: "vpc", productTitle: "VPC network" },
   // Network services' Private Service Connect (#2141), at Google's path:
   // its Connected endpoints, Connect endpoint.
-  { path: "/net-services/psc/list/consumers", service: "vpc-psc", icon: "vpc", title: "Private Service Connect", kind: "Endpoint",
-    section: "Networking", product: "network-services", productTitle: "Network services" },
+  { path: "/net-services/psc/list/consumers", service: "vpc-psc", icon: "vpc", title: "Private Service Connect", tabTitle: "Connected endpoints", kind: "Endpoint",
+    pageTabs: PSC_TABS, section: "Networking", product: "network-services", productTitle: "Network services" },
+  // Its Connection Policies tab (#2141): the Network Connectivity API's
+  // service connection policies ("Private Service Connect > Connection
+  // Policies > Create connection policy", configure-private-service-connect).
+  // The tab's path is UNVERIFIED (re-read 2026-11-22: configure-service-connection-policies).
+  { path: "/net-services/psc/list/policies", service: "psc-policies", icon: "vpc", title: "Private Service Connect", tabTitle: "Connection Policies", kind: "Connection policy",
+    navHidden: true, navAs: "/net-services/psc/list/consumers", pageTabs: PSC_TABS, section: "Networking", product: "network-services", productTitle: "Network services" },
 
   // Secret Manager (#1850): Google's menu, Secret Manager (the global
   // secrets), Regional secrets and Settings.
@@ -4510,6 +4519,17 @@ async function renderDetail(view, route, resourcePath) {
     // tab draws its key usage summary over the protected resources (#2053).
     const cards = listingSummary(list);
     if (cards.length) note = note ? el("div", {}, note, ...cards) : el("div", {}, ...cards);
+    // A chart of the section's series over its rows (#2141): Cloud SQL's
+    // Query insights' database load, a line per wait class.
+    if (section.seriesTitle && (section.series || []).length) {
+      const rows = section.series.map((sv) => ({ name: sv.unit ? `${sv.label} (${sv.unit})` : sv.label,
+        fields: { points: JSON.stringify((sv.points || []).filter((p) => p.value !== undefined && p.value !== null)) } }));
+      const card = el("div", { class: "card query-load-chart" },
+        el("h2", { text: section.seriesTitle }),
+        section.series[0].unavailable ? el("p", { class: "unavailable", text: section.series[0].unavailable })
+          : explorerChart(rows, `${section.seriesTitle} for ${name}`));
+      note = note ? el("div", {}, note, card) : card;
+    }
     // A workflow execution's Steps (#2004): the visualization panel of
     // the revision that ran, over the step entries' table.
     if (section.graph) {

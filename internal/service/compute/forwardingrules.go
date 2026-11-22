@@ -235,7 +235,8 @@ func (s *Server) forwardingRulesLocked(c call, region string, p []string, get, p
 		if s.automated[rel+"/"+p[3]] {
 			// "You cannot directly delete Private Service Connect endpoints
 			// that are created through service connectivity automation"
-			// (about-service-connection-policies). The wording is UNVERIFIED.
+			// (about-service-connection-policies). The wording is UNVERIFIED
+			// (re-read 2026-11-22: the same page quotes no error).
 			return nil, errf(http.StatusBadRequest, "resourceInUseByAnotherResource",
 				"The forwarding rule '%s' was created by service connectivity automation and cannot be deleted directly: "+
 					"decommission the service instance that uses it.", rel+"/"+p[3])

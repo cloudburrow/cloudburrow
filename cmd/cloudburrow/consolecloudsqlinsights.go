@@ -90,12 +90,12 @@ func sqlInsightsConfig(v map[string]string) (*sqladminapi.InsightsConfig, error)
 
 // sqlQueryInsightsSection is the Query insights page: the top queries by
 // total execution time, each one's share of the load.
-func sqlQueryInsightsSection(ctx context.Context, srv *sqladmin.Server, project string, in *sqladminapi.DatabaseInstance) console.Section {
+func sqlQueryInsightsSection(ctx context.Context, srv *sqladmin.Server, metrics monitoringAdmin, project string, in *sqladminapi.DatabaseInstance) console.Section {
 	sec := console.Section{ID: "query-insights", Label: "Query insights", Actions: enableQueryInsights(in)}
 	l := console.Listing{TableTitle: "Top queries", NameColumn: "Query", Noun: "queries",
 		Columns: []string{"Database", "User", "Load by total time", "Avg execution time (ms)", "Times called", "Avg rows returned"},
 		Note: "Each normalized query's totals since the server started, from " + sqlStatsSource(in) +
-			"; Google's page charts them over a chosen time range, and its database load chart, CPU, IO wait and lock wait, from Cloud Monitoring, which no local server reports."}
+			"; Google's page totals them over a chosen time range."}
 	if strings.HasPrefix(in.DatabaseVersion, "MYSQL_") {
 		// MySQL's statement digests do not keep the user.
 		l.Columns = append(l.Columns[:1:1], l.Columns[2:]...)
@@ -140,6 +140,16 @@ func sqlQueryInsightsSection(ctx context.Context, srv *sqladmin.Server, project 
 		l.Total = len(l.Items)
 	}
 	sec.Listing = l
+	// The Database load chart over the queries (#2141), PostgreSQL's,
+	// from the server's own statement and wait figures.
+	if !strings.HasPrefix(in.DatabaseVersion, "MYSQL_") && !strings.HasPrefix(in.DatabaseVersion, "SQLSERVER_") &&
+		in.InstanceType != "ON_PREMISES_INSTANCE" && sqlInsightsEnabled(in) {
+		sec.SeriesTitle = "Database load - all top queries"
+		sec.Series = sqlLoadSeries(ctx, metrics, project, in)
+		sec.Listing.Note += " The Database load chart is the time the server's statements spent each second, read every minute: their execution time " +
+			"(pg_stat_statements), its IO wait (counted with the track_io_timing flag on) and its lock wait (backends seen waiting on a lock in pg_stat_activity at each reading), " +
+			"from the postgresql/insights/aggregate metrics in Cloud Monitoring."
+	}
 	return sec
 }
 
@@ -201,7 +211,7 @@ func (p cloudSQLInstancesProvider) sqlInsightsLayout(ctx context.Context, projec
 	for i, s := range d.Sections {
 		switch s.ID {
 		case "query-insights":
-			d.Sections[i] = sqlQueryInsightsSection(ctx, p.srv, project, in)
+			d.Sections[i] = sqlQueryInsightsSection(ctx, p.srv, p.metrics, project, in)
 		case "system-insights":
 			d.Sections[i] = sqlSystemInsightsSection(ctx, p.srv, p.metrics, project, in)
 		}

@@ -206,7 +206,7 @@ func (s *Server) policyForLocked(network, region, class string) *ncpb.ServiceCon
 // connect through pol: by default only one in the policy's own project
 // ("Connections must be in the same project as the producer instance"),
 // else one in a listed project. A folder or organization in the list is
-// not resolved to its projects here, so it admits none: UNVERIFIED gap,
+// not resolved to its projects here, so it admits none: UNVERIFIED gap (re-read 2026-11-22: about-service-connection-policies),
 // named in docs/gaps.md.
 func inScope(pol *ncpb.ServiceConnectionPolicy, project string) bool {
 	pc := pol.GetPscConfig()
@@ -239,7 +239,7 @@ func mapRegion(name string) string {
 }
 
 // endpointName is an automated endpoint's forwarding rule name, stable
-// for its map, consumer and attachment. The form is UNVERIFIED: Google's
+// for its map, consumer and attachment. The form is UNVERIFIED (re-read 2026-11-22): Google's
 // documentation does not name the forwarding rules automation makes.
 func endpointName(k string) string {
 	return fmt.Sprintf("sca-auto-fr-%08x", crc32.ChecksumIEEE([]byte(k)))

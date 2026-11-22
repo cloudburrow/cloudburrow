@@ -24,6 +24,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/service/monitoring"
+	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
 )
 
 // sqlChart is one chart: its label, metric, unit, how its minute is read,
@@ -204,4 +205,91 @@ func (p cloudSQLInstancesProvider) sqlChartsOnOverview(ctx context.Context, proj
 		}
 	}
 	return d
+}
+
+// sqlLoadSeries are Query insights' Database load chart (#2141), Google's
+// "Database load - all top queries": over the last hour, a point a
+// minute, the time the server's statements spent each second, from the
+// postgresql/insights/aggregate metrics (CPU and CPU wait the execution
+// time less its IO and lock time, IO wait, Lock wait), with the tier's
+// CPU capacity. The series' names are Google's
+// (https://docs.cloud.google.com/sql/docs/postgres/using-query-insights,
+// read 2026-11-22); the axis' unit is UNVERIFIED (re-read 2026-11-22:
+// the same page names none).
+func sqlLoadSeries(ctx context.Context, a monitoringAdmin, project string, in *sqladminapi.DatabaseInstance) []console.ChartSeries {
+	if _, err := a.server(); err != nil {
+		return []console.ChartSeries{{Label: "Database load", Unavailable: "Cloud Monitoring is not served by this instance, so the server's load is not recorded. Start the instance with monitoring to chart it."}}
+	}
+	end := time.Now().UTC().Truncate(time.Minute).Add(time.Minute)
+	start := end.Add(-sqlChartWindow * time.Minute)
+	rate := func(metric string) ([]float64, []bool, error) {
+		srv, err := a.server()
+		if err != nil {
+			return nil, nil, err
+		}
+		filter := fmt.Sprintf(`metric.type = %q AND resource.type = "cloudsql_instance_database" AND resource.labels.resource_id = %q`,
+			metric, project+":"+in.Name)
+		resp, err := srv.ListTimeSeries(ctx, &monitoringpb.ListTimeSeriesRequest{Name: "projects/" + project, Filter: filter,
+			Interval: &monitoringpb.TimeInterval{StartTime: timestamppb.New(start.Add(-5 * time.Minute)), EndTime: timestamppb.New(time.Now().UTC())},
+			View:     monitoringpb.ListTimeSeriesRequest_FULL, PageSize: 1000})
+		if err != nil {
+			return nil, nil, err
+		}
+		sums, seen := make([]float64, sqlChartWindow), make([]bool, sqlChartWindow)
+		for _, ts := range resp.GetTimeSeries() {
+			pts := append([]*monitoringpb.Point{}, ts.GetPoints()...)
+			sort.Slice(pts, func(i, j int) bool {
+				return pts[i].GetInterval().GetEndTime().AsTime().Before(pts[j].GetInterval().GetEndTime().AsTime())
+			})
+			for k := 1; k < len(pts); k++ {
+				prev, cur := pts[k-1], pts[k]
+				at := cur.GetInterval().GetEndTime().AsTime()
+				i := int(at.Sub(start) / time.Minute)
+				if i < 0 || i >= sqlChartWindow || !cur.GetInterval().GetStartTime().AsTime().Equal(prev.GetInterval().GetStartTime().AsTime()) {
+					continue
+				}
+				d := sqlPointValue(cur.GetValue()) - sqlPointValue(prev.GetValue())
+				if d < 0 {
+					continue
+				}
+				sums[i] += d / 1e6 / 60 // microseconds over the minute: seconds a second
+				seen[i] = true
+			}
+		}
+		return sums, seen, nil
+	}
+	exec, seenE, err := rate(monitoring.SQLPGInsightsExecTime)
+	if err != nil {
+		return []console.ChartSeries{{Label: "Database load", Unavailable: err.Error()}}
+	}
+	io, _, _ := rate(monitoring.SQLPGInsightsIOTime)
+	lock, _, _ := rate(monitoring.SQLPGInsightsLockTime)
+	cores := 0.0
+	if in.Settings != nil {
+		cores, _ = sqladmin.TierShape(in.Settings.Tier)
+	}
+	mk := func(label string, v func(i int) float64) console.ChartSeries {
+		out := console.ChartSeries{Label: label}
+		for i := 0; i < sqlChartWindow; i++ {
+			pt := console.ChartPoint{At: start.Add(time.Duration(i+1) * time.Minute).Format(time.RFC3339)}
+			if seenE[i] {
+				x := v(i)
+				pt.Value = &x
+			}
+			out.Points = append(out.Points, pt)
+		}
+		return out
+	}
+	val := func(s []float64, i int) float64 {
+		if s == nil {
+			return 0
+		}
+		return s[i]
+	}
+	return []console.ChartSeries{
+		mk("CPU capacity", func(int) float64 { return cores }),
+		mk("CPU and CPU wait", func(i int) float64 { return math.Max(0, exec[i]-val(io, i)-val(lock, i)) }),
+		mk("IO wait", func(i int) float64 { return val(io, i) }),
+		mk("Lock wait", func(i int) float64 { return val(lock, i) }),
+	}
 }

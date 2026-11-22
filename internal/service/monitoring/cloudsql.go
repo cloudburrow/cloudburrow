@@ -15,6 +15,7 @@ package monitoring
 
 import (
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -45,7 +46,34 @@ const (
 	SQLUptime         = "cloudsql.googleapis.com/database/uptime"
 	SQLMySQLQueries   = "cloudsql.googleapis.com/database/mysql/queries"
 	SQLPGTransactions = "cloudsql.googleapis.com/database/postgresql/transaction_count"
+
+	// Query insights' aggregate metrics (#2141), on the
+	// cloudsql_instance_database resource, by user and client_addr:
+	// execution_time and io_time (io_type read or write) are
+	// pg_stat_statements' totals, since the server's statistics were
+	// reset; lock_time (lock_type lw, hw or buffer_pin) is the time the
+	// server's backends were seen waiting on LWLock, Lock or BufferPin in
+	// pg_stat_activity at each sample, times the time since the last one:
+	// an estimate, where Cloud SQL measures it. client_addr is "": the
+	// statistics do not keep it.
+	SQLPGInsightsExecTime = "cloudsql.googleapis.com/database/postgresql/insights/aggregate/execution_time"
+	SQLPGInsightsIOTime   = "cloudsql.googleapis.com/database/postgresql/insights/aggregate/io_time"
+	SQLPGInsightsLockTime = "cloudsql.googleapis.com/database/postgresql/insights/aggregate/lock_time"
 )
+
+// SQLLoad is one user's statement totals in one database, in
+// microseconds.
+type SQLLoad struct {
+	User, Database              string
+	ExecUs, IOReadUs, IOWriteUs int64
+}
+
+// SQLWait is the backends of one user in one database seen waiting on a
+// lock of one type (lw, hw or buffer_pin) at the sample.
+type SQLWait struct {
+	User, Database, LockType string
+	Sessions                 int64
+}
 
 // SQLInstance is one Cloud SQL instance's readings at one sample.
 type SQLInstance struct {
@@ -80,6 +108,9 @@ type SQLInstance struct {
 	// Commits and Rollbacks are PostgreSQL's transactions since its
 	// statistics were reset, by database.
 	Commits, Rollbacks map[string]uint64
+	// Load and Waits are Query insights' readings (PostgreSQL).
+	Load  []SQLLoad
+	Waits []SQLWait
 }
 
 // SQLSource reads every Cloud SQL instance now.
@@ -99,12 +130,16 @@ type SQLBuiltin struct {
 	lastAt time.Time
 	prev   map[string]SQLInstance
 	series map[string]*monitoringpb.TimeSeries
+	// cumStart is each cumulative insights series' start, and locks the
+	// lock time it has accumulated, by series key.
+	cumStart map[string]time.Time
+	cumLast  map[string]int64
 }
 
 // NewSQLBuiltin returns Cloud SQL's metrics, sampled from src.
 func NewSQLBuiltin(src SQLSource, now func() time.Time) *SQLBuiltin {
 	return &SQLBuiltin{src: src, now: now, minGap: 10 * time.Second, prev: map[string]SQLInstance{},
-		series: map[string]*monitoringpb.TimeSeries{}}
+		series: map[string]*monitoringpb.TimeSeries{}, cumStart: map[string]time.Time{}, cumLast: map[string]int64{}}
 }
 
 // Sample reads every instance once.
@@ -214,6 +249,9 @@ func (b *SQLBuiltin) sampleAt(now time.Time) {
 				pt(SQLMySQLQueries, nil, delta, tInt, "1", span, int64Value(int64(in.Queries-prev.Queries)))
 			}
 		}
+		if in.HasServer && in.Engine == "POSTGRES" {
+			b.insightsLocked(in, now, start, had && prev.HasServer)
+		}
 		b.prev[key] = in
 	}
 	for k := range b.prev {
@@ -222,6 +260,61 @@ func (b *SQLBuiltin) sampleAt(now time.Time) {
 		}
 	}
 	b.lastAt = now
+}
+
+// insightsLocked records in's Query insights metrics at now.
+func (b *SQLBuiltin) insightsLocked(in SQLInstance, now, last time.Time, hadServer bool) {
+	add := func(metric, user, db string, extra [2]string, value int64, accumulate bool) {
+		labels := map[string]string{"user": user, "client_addr": ""}
+		if extra[0] != "" {
+			labels[extra[0]] = extra[1]
+		}
+		res := &monitoredres.MonitoredResource{Type: "cloudsql_instance_database", Labels: map[string]string{
+			"project_id": in.Project, "location": in.Region, "resource_id": in.Project + ":" + in.Instance, "database": db}}
+		ts := &monitoringpb.TimeSeries{Metric: &metricpb.Metric{Type: metric, Labels: labels}, Resource: res,
+			MetricKind: cumulative, ValueType: tInt, Unit: "us"}
+		if metric == SQLPGInsightsExecTime {
+			ts.Unit = "us{CPU}"
+		}
+		k := seriesKey(ts)
+		if cur := b.series[k]; cur != nil {
+			ts = cur
+		} else {
+			b.series[k] = ts
+		}
+		if accumulate {
+			value += b.cumLast[k]
+		} else if value < b.cumLast[k] {
+			// The statistics were reset: the series starts again.
+			delete(b.cumStart, k)
+		}
+		st, ok := b.cumStart[k]
+		if !ok {
+			st = now
+			if accumulate && !last.IsZero() {
+				st = last
+			}
+			b.cumStart[k] = st
+		}
+		b.cumLast[k] = value
+		ts.Points = append(ts.Points, &monitoringpb.Point{Interval: &monitoringpb.TimeInterval{StartTime: timestamppb.New(st),
+			EndTime: timestamppb.New(now)}, Value: int64Value(value)})
+		if len(ts.Points) > tasksRing {
+			ts.Points = ts.Points[len(ts.Points)-tasksRing:]
+		}
+	}
+	for _, l := range in.Load {
+		add(SQLPGInsightsExecTime, l.User, l.Database, [2]string{}, l.ExecUs, false)
+		add(SQLPGInsightsIOTime, l.User, l.Database, [2]string{"io_type", "read"}, l.IOReadUs, false)
+		add(SQLPGInsightsIOTime, l.User, l.Database, [2]string{"io_type", "write"}, l.IOWriteUs, false)
+	}
+	if !hadServer || last.IsZero() {
+		return
+	}
+	us := now.Sub(last).Microseconds()
+	for _, w := range in.Waits {
+		add(SQLPGInsightsLockTime, w.User, w.Database, [2]string{"lock_type", w.LockType}, w.Sessions*us, true)
+	}
 }
 
 func sqlKeys[V any](m map[string]V) []string {
@@ -258,6 +351,9 @@ var sqlDescriptors = []struct {
 	{SQLUptime, "Uptime", "Delta count of the time in seconds the instance has been running.", "s", delta, tInt, nil},
 	{SQLMySQLQueries, "Queries", "Delta count of statements executed by the server.", "1", delta, tInt, nil},
 	{SQLPGTransactions, "Number of transactions", "Delta count of number of transactions.", "1", delta, tInt, []string{"database", "transaction_type"}},
+	{SQLPGInsightsExecTime, "Execution time", "Accumulated query execution time per user per database. This is the sum of cpu time, io wait time, lock wait time, process context switch, and scheduling for all the processes involved in the query execution.", "us{CPU}", cumulative, tInt, []string{"user", "client_addr"}},
+	{SQLPGInsightsIOTime, "IO time", "Accumulated IO time per user per database.", "us", cumulative, tInt, []string{"user", "client_addr", "io_type"}},
+	{SQLPGInsightsLockTime, "Aggregated lock time", "Accumulated lock wait time per user per database.", "us", cumulative, tInt, []string{"user", "client_addr", "lock_type"}},
 }
 
 func (b *SQLBuiltin) Descriptors(project string) []*metricpb.MetricDescriptor {
@@ -265,6 +361,9 @@ func (b *SQLBuiltin) Descriptors(project string) []*metricpb.MetricDescriptor {
 	for _, d := range sqlDescriptors {
 		md := &metricpb.MetricDescriptor{Name: descriptorName(project, d.typ), Type: d.typ, MetricKind: d.kind, ValueType: d.vt,
 			Unit: d.unit, DisplayName: d.name, Description: d.desc, MonitoredResourceTypes: []string{"cloudsql_database"}}
+		if strings.Contains(d.typ, "/insights/") {
+			md.MonitoredResourceTypes = []string{"cloudsql_instance_database"}
+		}
 		for _, l := range d.labels {
 			md.Labels = append(md.Labels, &labelpb.LabelDescriptor{Key: l, ValueType: labelpb.LabelDescriptor_STRING})
 		}

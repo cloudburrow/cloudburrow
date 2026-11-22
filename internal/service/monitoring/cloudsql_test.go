@@ -70,3 +70,59 @@ func TestSQLBuiltin(t *testing.T) {
 		t.Errorf("%d descriptors", n)
 	}
 }
+
+// Query insights' aggregate metrics (#2141): execution and IO time are
+// the server's totals, cumulative from the first sample on, starting
+// again when they fall (a statistics reset); lock time accumulates the
+// backends seen waiting times the time between samples, on
+// cloudsql_instance_database.
+func TestSQLBuiltinInsights(t *testing.T) {
+	now := time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC)
+	t0 := now
+	src := &fakeSQL{in: []SQLInstance{{Project: "p", Instance: "db", Region: "us-central1", Engine: "POSTGRES", Up: true, HasServer: true,
+		Load: []SQLLoad{{User: "u", Database: "d", ExecUs: 1000, IOReadUs: 100, IOWriteUs: 10}}}}}
+	b := NewSQLBuiltin(src, func() time.Time { return now })
+	b.Sample()
+	now = now.Add(time.Minute)
+	in := src.in[0]
+	in.Load = []SQLLoad{{User: "u", Database: "d", ExecUs: 61_000_000, IOReadUs: 2_000_000, IOWriteUs: 10}}
+	in.Waits = []SQLWait{{User: "u", Database: "d", LockType: "hw", Sessions: 2}}
+	src.in = []SQLInstance{in}
+	b.Sample()
+	now = now.Add(time.Minute)
+	in.Load = []SQLLoad{{User: "u", Database: "d", ExecUs: 5, IOReadUs: 0, IOWriteUs: 0}}
+	src.in = []SQLInstance{in}
+	b.Sample()
+	read := func(metric string, label, value string) (vals []int64, starts []time.Time) {
+		ss, err := b.Series("p", metric, now.Add(-time.Hour), now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, s := range ss {
+			r := s.GetResource()
+			if r.GetType() != "cloudsql_instance_database" || r.GetLabels()["resource_id"] != "p:db" || r.GetLabels()["database"] != "d" ||
+				s.GetMetric().GetLabels()["user"] != "u" || s.GetMetricKind().String() != "CUMULATIVE" {
+				t.Errorf("%s: %v %v", metric, r, s.GetMetric())
+			}
+			if label != "" && s.GetMetric().GetLabels()[label] != value {
+				continue
+			}
+			for _, p := range s.GetPoints() {
+				vals = append(vals, p.GetValue().GetInt64Value())
+				starts = append(starts, p.GetInterval().GetStartTime().AsTime())
+			}
+		}
+		return vals, starts
+	}
+	vals, starts := read(SQLPGInsightsExecTime, "", "")
+	if len(vals) != 3 || vals[1] != 61_000_000 || !starts[1].Equal(t0) || vals[2] != 5 || !starts[2].Equal(t0.Add(2*time.Minute)) {
+		t.Errorf("execution_time %v from %v", vals, starts)
+	}
+	if vals, _ := read(SQLPGInsightsIOTime, "io_type", "read"); len(vals) != 3 || vals[1] != 2_000_000 {
+		t.Errorf("io_time read %v", vals)
+	}
+	if vals, starts := read(SQLPGInsightsLockTime, "lock_type", "hw"); len(vals) != 2 || vals[0] != 120_000_000 || vals[1] != 240_000_000 ||
+		!starts[0].Equal(t0) {
+		t.Errorf("lock_time hw %v from %v", vals, starts)
+	}
+}

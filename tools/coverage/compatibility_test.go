@@ -95,6 +95,8 @@ var compatSections = map[string]string{
 	"monitoring": "## Cloud Monitoring — `google.monitoring.v3`",
 	// The Compute Engine API's VPC networking (#1936), by discovery ID.
 	"compute": "## Compute Engine VPC networking — `compute.googleapis.com` v1",
+	// The Network Connectivity API (#2141), named by gRPC method.
+	"networkconnectivity": "## Network Connectivity API — `google.cloud.networkconnectivity.v1`",
 	// The BigQuery Data Transfer Service (#1948), named by gRPC method.
 	"datatransfer": "## BigQuery Data Transfer Service — `google.cloud.bigquery.datatransfer.v1`",
 }

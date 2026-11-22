@@ -325,7 +325,7 @@ latency and resource charts (#1267); the Artifact Registry repository Permission
 
 | Gap | Why open | Size |
 |---|---|---|
-| Cloud SQL: Private Service Connect's automatic endpoints (Add an Endpoint on the create page, `pscAutoConnections`, through Network Connectivity's service connection policies), managed connection pooling, and Query insights' database load chart (#2141) | no emulator support | M |
+| Cloud SQL: managed connection pooling for MySQL (a server thread pool the community MySQL server lacks; 501), and the pooler at a private IP or Private Service Connect endpoint (only the server's port is in a VM's NAT chains) (#2141) | no thread pool in community MySQL; pooler port not in the VPC model | M |
 
 ## Excluded on purpose
 

@@ -255,7 +255,9 @@ func (p cloudSQLInstancesProvider) sqlCreateFormIn(project string) []console.Fie
 		{Name: "authorizedNetworks", Label: "Authorized networks", Type: "text", Section: connSec,
 			VisibleWhen: map[string]string{"publicIp": "true"},
 			Help:        "CIDR ranges allowed to connect, separated by commas, such as 203.0.113.0/24. Recorded and shown on Connections > Networking."},
-	}, sqlPrivateIPFields(connSec, nets, ranges, nil)...), append([]console.Field{
+	}, append(sqlPrivateIPFields(connSec, nets, ranges, nil),
+		// Managed connection pooling (#2141): Enterprise Plus PostgreSQL.
+		sqlPoolFields(connSec, map[string]string{"engine": sqlEnginePostgres, "edition": "ENTERPRISE_PLUS"}, nil)...)...), append([]console.Field{
 		{Name: "allowDataApi", Label: "Allow Data API", Type: "checkbox", Section: connSec,
 			Help: "Lets instances.executeSql run statements on the instance (settings.dataApiAccess ALLOW_DATA_API); off by default, as Google's is."},
 		serverCAModeSection(serverCAModeField(internalCAMode), securitySec),
@@ -521,7 +523,7 @@ func googleLayout(ctx context.Context, svc *sqladminapi.Service, project string,
 	if st := in.Settings; st != nil && st.Edition != "" {
 		cards["Configuration"] = append([]console.Property{{Label: "Cloud SQL edition", Value: sqlEditionLabel(st.Edition)}}, cards["Configuration"]...)
 	}
-	cards["Connect to this instance"] = append(sqlAddresses(in), cards["Connect to this instance"]...)
+	cards["Connect to this instance"] = append(append(sqlAddresses(in), cards["Connect to this instance"]...), sqlPoolingProperty(in)...)
 	if in.ServiceAccountEmailAddress != "" {
 		cards["Service account"] = []console.Property{{Label: "Service account", Value: in.ServiceAccountEmailAddress}}
 	}

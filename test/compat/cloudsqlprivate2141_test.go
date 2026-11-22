@@ -26,7 +26,7 @@ import (
 // covers: compute.forwardingRules.insert, compute.forwardingRules.get, compute.forwardingRules.list, compute.forwardingRules.aggregatedList, compute.forwardingRules.delete
 func TestCloudSQLZonesPrivateIPAndPSCEndpoints(t *testing.T) {
 	h := New(t)
-	opts := computeOpts(t, h)
+	opts := sqlComputeOpts(t, h)
 	svc := sqlAdminService(t, h)
 	ctx := h.Context()
 	p := h.Project()
@@ -164,7 +164,7 @@ func TestCloudSQLZonesPrivateIPAndPSCEndpoints(t *testing.T) {
 // back from the serial port).
 func TestCloudSQLPrivateIPAndPSCReachableFromAVM(t *testing.T) {
 	h := New(t)
-	opts := computeOpts(t, h)
+	opts := sqlComputeOpts(t, h)
 	svc := sqlAdminService(t, h)
 	ctx := h.Context()
 	p := h.Project()

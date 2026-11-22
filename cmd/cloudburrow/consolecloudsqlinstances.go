@@ -216,6 +216,11 @@ func (p cloudSQLInstancesProvider) Create(ctx context.Context, project string, v
 	if err := sqlCreateConnections(st, v); err != nil {
 		return "", err
 	}
+	if v["engine"] == sqlEnginePostgres && v["edition"] == "ENTERPRISE_PLUS" {
+		if pc := sqlPoolConfig(v); pc != nil && pc.ConnectionPoolingEnabled {
+			st.ConnectionPoolConfig = pc
+		}
+	}
 	if v["encryption"] == sqlEncryptionCMEK && strings.TrimSpace(v["kmsKeyName"]) == "" {
 		return "", fmt.Errorf("choose the customer-managed encryption key")
 	}

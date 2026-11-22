@@ -43,6 +43,12 @@ github.com/shopspring/decimal (MIT License). CloudBurrow does not ship or
 start Microsoft SQL Server itself: a Cloud SQL for SQL Server instance pulls
 Microsoft's image, whose licence its user accepts (#1916).
 
+CloudBurrow does not ship PgBouncer. A Cloud SQL for PostgreSQL instance
+with managed connection pooling pulls the edoburu/pgbouncer image by
+digest (#2141): PgBouncer, Copyright (c) 2007-2009 Marko Kreen, Skype
+Technologies OU, under the ISC License, in an image whose Dockerfile and
+entrypoint are under the MIT License.
+
 The binary is linked with Google's differential privacy library
 (github.com/google/differential-privacy/go/v4 v4.1.0), Copyright Google LLC,
 under the Apache License, Version 2.0, and with its dependencies

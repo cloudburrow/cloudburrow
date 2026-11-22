@@ -39,7 +39,7 @@ func TestSQLInsightsConfig(t *testing.T) {
 func TestSQLInsightsSections(t *testing.T) {
 	ctx := context.Background()
 	pg := &sqladminapi.DatabaseInstance{Name: "made", DatabaseVersion: "POSTGRES_17", State: "RUNNABLE", Settings: &sqladminapi.Settings{}}
-	q := sqlQueryInsightsSection(ctx, nil, "p", pg)
+	q := sqlQueryInsightsSection(ctx, nil, monitoringAdmin{}, "p", pg)
 	if q.Listing.Prompt == "" || len(q.Actions) != 1 || q.Actions[0].ID != "enable-query-insights" || q.Actions[0].Submit != "Enable" {
 		t.Errorf("Query insights off: %+v", q)
 	}
@@ -47,12 +47,15 @@ func TestSQLInsightsSections(t *testing.T) {
 		t.Errorf("columns %v", q.Listing.Columns)
 	}
 	pg.Settings.InsightsConfig = &sqladminapi.InsightsConfig{QueryInsightsEnabled: true}
-	if q := sqlQueryInsightsSection(ctx, nil, "p", pg); q.Listing.Unavailable == "" || len(q.Actions) != 0 {
+	if q := sqlQueryInsightsSection(ctx, nil, monitoringAdmin{}, "p", pg); q.Listing.Unavailable == "" || len(q.Actions) != 0 {
 		t.Errorf("no server: %+v", q)
+	} else if q.SeriesTitle != "Database load - all top queries" || len(q.Series) != 1 || q.Series[0].Unavailable == "" {
+		// The Database load chart says why it has no readings.
+		t.Errorf("Database load without Cloud Monitoring: %q %+v", q.SeriesTitle, q.Series)
 	}
 	my := &sqladminapi.DatabaseInstance{Name: "made", DatabaseVersion: "MYSQL_8_4", State: "STOPPED",
 		Settings: &sqladminapi.Settings{InsightsConfig: &sqladminapi.InsightsConfig{QueryInsightsEnabled: true}}}
-	if q := sqlQueryInsightsSection(ctx, nil, "p", my); strings.Contains(strings.Join(q.Listing.Columns, ","), "User") {
+	if q := sqlQueryInsightsSection(ctx, nil, monitoringAdmin{}, "p", my); strings.Contains(strings.Join(q.Listing.Columns, ","), "User") {
 		t.Errorf("MySQL columns %v", q.Listing.Columns)
 	}
 	if s := sqlSystemInsightsSection(ctx, nil, monitoringAdmin{}, "p", my); s.Unavailable == "" {

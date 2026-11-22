@@ -1229,6 +1229,11 @@ type Section struct {
 	StepEntries []StepEntryView `json:"stepEntries,omitempty"`
 	// Series is the content when Kind is KindChart.
 	Series []ChartSeries `json:"series,omitempty"`
+	// SeriesTitle, on a listing section with Series, draws them as one
+	// chart of that title over its rows, a line per series: Cloud SQL's
+	// Query insights has its Database load chart over the top queries
+	// (#2141).
+	SeriesTitle string `json:"seriesTitle,omitempty"`
 	// Visualization is how a KindAnalytics section draws its rows: Bar,
 	// Line or Table (#2032).
 	Visualization string `json:"visualization,omitempty"`

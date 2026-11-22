@@ -16,6 +16,8 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // QueryStat is one normalized query's totals.
@@ -54,6 +56,27 @@ type SystemStats struct {
 	// Queries is MySQL's Queries status: statements executed since it
 	// started (mysql/queries).
 	Queries uint64
+	// Load is PostgreSQL's statement time by user and database, from
+	// pg_stat_statements; Waits its backends waiting on a lock now, from
+	// pg_stat_activity (Query insights' database load, #2141). Nil
+	// elsewhere, or before pg_stat_statements is made.
+	Load  []LoadStat
+	Waits []WaitStat
+}
+
+// LoadStat is one user's statement time in one database, in
+// microseconds: execution, and reading and writing blocks (counted only
+// with the track_io_timing flag on, as PostgreSQL counts them).
+type LoadStat struct {
+	User, Database              string
+	ExecUs, IOReadUs, IOWriteUs int64
+}
+
+// WaitStat is the backends of one user in one database waiting on a lock
+// of one type: lw (LWLock), hw (Lock) or buffer_pin (BufferPin).
+type WaitStat struct {
+	User, Database, LockType string
+	Sessions                 int64
 }
 
 // insightsEngine is an engine that reads its own statistics.
@@ -191,7 +214,62 @@ func (p *Postgres) SystemStats(ctx context.Context) (SystemStats, error) {
 	if err := rows.Err(); err != nil {
 		return SystemStats{}, pgError(err)
 	}
+	rows.Close()
+	st.Load, st.Waits = pgLoad(ctx, c)
 	return st, nil
+}
+
+// pgLoad reads the server's statement time by user and database and its
+// backends waiting on locks; none where pg_stat_statements is not made
+// (QueryStats makes it) or cannot be read.
+func pgLoad(ctx context.Context, c *pgx.Conn) ([]LoadStat, []WaitStat) {
+	var num int
+	var has bool
+	if err := c.QueryRow(ctx, `SELECT /* cloudburrow-insights */ current_setting('server_version_num')::int,
+		EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_statements')`).Scan(&num, &has); err != nil {
+		return nil, nil
+	}
+	var load []LoadStat
+	if has {
+		exec, read, write := "s.total_exec_time", "s.blk_read_time", "s.blk_write_time"
+		switch {
+		case num < 130000:
+			exec = "s.total_time"
+		case num >= 170000:
+			read, write = "s.shared_blk_read_time + s.local_blk_read_time + s.temp_blk_read_time",
+				"s.shared_blk_write_time + s.local_blk_write_time + s.temp_blk_write_time"
+		}
+		rows, err := c.Query(ctx, `SELECT /* cloudburrow-insights */ r.rolname, d.datname,
+			(sum(`+exec+`) * 1000)::bigint, (sum(`+read+`) * 1000)::bigint, (sum(`+write+`) * 1000)::bigint
+			FROM pg_stat_statements s JOIN pg_database d ON d.oid = s.dbid JOIN pg_roles r ON r.oid = s.userid
+			WHERE s.query NOT LIKE '%cloudburrow-insights%' AND s.query NOT LIKE '%pg_stat_statements%'
+			GROUP BY r.rolname, d.datname ORDER BY 1, 2`)
+		if err == nil {
+			for rows.Next() {
+				var l LoadStat
+				if rows.Scan(&l.User, &l.Database, &l.ExecUs, &l.IOReadUs, &l.IOWriteUs) == nil {
+					load = append(load, l)
+				}
+			}
+			rows.Close()
+		}
+	}
+	var waits []WaitStat
+	rows, err := c.Query(ctx, `SELECT /* cloudburrow-insights */ COALESCE(usename, ''), COALESCE(datname, ''),
+		CASE wait_event_type WHEN 'LWLock' THEN 'lw' WHEN 'Lock' THEN 'hw' ELSE 'buffer_pin' END, count(*)
+		FROM pg_stat_activity WHERE state = 'active' AND backend_type = 'client backend'
+		AND wait_event_type IN ('LWLock', 'Lock', 'BufferPin') AND pid <> pg_backend_pid()
+		GROUP BY 1, 2, 3 ORDER BY 1, 2, 3`)
+	if err == nil {
+		for rows.Next() {
+			var w WaitStat
+			if rows.Scan(&w.User, &w.Database, &w.LockType, &w.Sessions) == nil {
+				waits = append(waits, w)
+			}
+		}
+		rows.Close()
+	}
+	return load, waits
 }
 
 // QueryStats reads performance_schema's statement digests, whose timers
