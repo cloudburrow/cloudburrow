@@ -138,6 +138,11 @@ const LB_TABS = ["/net-services/loadbalancing/list/loadBalancers", "/net-service
 // Authorizations, Issuance Configs and Classic Certificates (#2153).
 const CCM_TABS = ["/security/ccm/list/certificates", "/security/ccm/list/certificateMaps", "/security/ccm/list/dnsAuthorizations",
   "/security/ccm/list/issuanceConfigs", "/security/ccm/list/lbCertificates"];
+// Cloud Armor's tabs (#2160): the policies, network edge security
+// services and the preconfigured WAF rule sets. The docs give gcloud only
+// for the last two: their tabs are UNVERIFIED (re-read 2026-11-22:
+// armor/docs/advanced-network-ddos, waf-rules).
+const ARMOR_TABS = ["/net-security/securitypolicies/list", "/net-security/securitypolicies/networkEdgeSecurityServices", "/net-security/securitypolicies/wafRules"];
 const GKE_STORAGE = ["/kubernetes/storage", "/kubernetes/storage-classes"];
 // Cloud Logging's Settings and its Log Scopes tab (#2020), as Google's
 // Settings page has a Log Scopes tab (log-scope/create-and-manage).
@@ -612,8 +617,18 @@ const ROUTES = [
   { path: "/security/iap", service: "security-iap", icon: "vpc", title: "Identity-Aware Proxy", tabTitle: "HTTPS resources", kind: "HTTPS resource",
     section: "Security and identity", product: "iap", productTitle: "Identity-Aware Proxy" },
   // Cloud Armor (#2160): Network Security's Cloud Armor policies.
-  { path: "/net-security/securitypolicies/list", service: "netsecurity-armor", icon: "vpc", title: "Cloud Armor policies", kind: "Security policy",
-    section: "Networking", product: "netsecurity", productTitle: "Network Security" },
+  { path: "/net-security/securitypolicies/list", service: "netsecurity-armor", icon: "vpc", title: "Cloud Armor policies", tabTitle: "Security policies", kind: "Security policy",
+    pageTabs: ARMOR_TABS, section: "Networking", product: "netsecurity", productTitle: "Network Security" },
+  { path: "/net-security/securitypolicies/networkEdgeSecurityServices", service: "netsecurity-armor-edge", icon: "vpc", title: "Cloud Armor policies", tabTitle: "Network edge security services",
+    kind: "Network edge security service", navHidden: true, navAs: "/net-security/securitypolicies/list", pageTabs: ARMOR_TABS, section: "Networking", product: "netsecurity", productTitle: "Network Security" },
+  { path: "/net-security/securitypolicies/wafRules", service: "netsecurity-armor-waf", icon: "vpc", title: "Cloud Armor policies", tabTitle: "Preconfigured WAF rules",
+    kind: "Rule set", navHidden: true, navAs: "/net-security/securitypolicies/list", pageTabs: ARMOR_TABS, section: "Networking", product: "netsecurity", productTitle: "Network Security" },
+  // Cloud Service Mesh's Routing rule maps (#2160): the target gRPC
+  // proxies of proxyless gRPC (and target HTTP proxies of Envoy), each
+  // with its INTERNAL_SELF_MANAGED forwarding rule and URL map. The path
+  // and columns are UNVERIFIED (re-read 2026-11-22: route-rule-map-concepts).
+  { path: "/net-services/trafficdirector/routingRuleMaps", service: "servicemesh-routing", icon: "vpc", title: "Routing rule maps", kind: "Routing rule map",
+    section: "Networking", product: "servicemesh", productTitle: "Cloud Service Mesh" },
   // Cloud CDN (#2160): Network services' Cloud CDN origins.
   { path: "/net-services/cdn/list", service: "netservices-cdn", icon: "vpc", title: "Cloud CDN", kind: "Origin",
     section: "Networking", product: "netservices", productTitle: "Network services" },

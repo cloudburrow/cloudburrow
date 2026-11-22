@@ -76,7 +76,48 @@ func (p computeArmorProvider) armorTargets(project string, policy map[string]any
 			}
 		}
 	}
+	if vpcStr(policy, "type") == "CLOUD_ARMOR_NETWORK" {
+		for _, t := range p.armorPassthroughTargets(project) {
+			if lbRel(vpcStr(t.rec, "securityPolicy")) == self {
+				out = append(out, []string{t.coll, t.scope, t.name, "securityPolicy"})
+			}
+		}
+	}
 	return out
+}
+
+// armorPassthroughTargets are the project's target pools and target
+// instances, which a network edge security policy (CLOUD_ARMOR_NETWORK)
+// is attached to directly.
+func (p computeArmorProvider) armorPassthroughTargets(project string) []armorPassTarget {
+	var out []armorPassTarget
+	for _, o := range p.lbAll(project, "targetPools", false, true) {
+		sp := lbScopePath(o)
+		out = append(out, armorPassTarget{"targetPools", sp[0], sp[1], o})
+	}
+	if m, err := p.call("GET", project, "aggregated/targetInstances", nil, nil); err == nil {
+		for _, o := range aggregatedItems(m, "targetInstances") {
+			out = append(out, armorPassTarget{"targetInstances", vpcLast(vpcStr(o, "zone")), vpcStr(o, "name"), o})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].name < out[j].name })
+	return out
+}
+
+// armorPassTarget is a target pool (scope its region) or target instance
+// (scope its zone).
+type armorPassTarget struct {
+	coll, scope, name string
+	rec               map[string]any
+}
+
+// armorTargetColl is a target's collection path: global/C, regions/R/C or,
+// for target instances, zones/Z/C.
+func armorTargetColl(coll, scope string) string {
+	if coll == "targetInstances" {
+		return "zones/" + scope + "/" + coll
+	}
+	return lbScopeColl(scope, coll)
 }
 
 func (p computeArmorProvider) List(ctx context.Context, project string) (console.Listing, error) {
@@ -144,7 +185,7 @@ func armorRuleFields(section string, r map[string]any, withPriority bool) []cons
 	}
 	adv := map[string]string{"mode": "advanced"}
 	basic := map[string]string{"mode": "basic"}
-	rate := "action=throttle|action=rate_based_ban"
+	rate := "action=throttle|rate_based_ban"
 	fields := []console.Field{
 		{Name: "description", Label: "Description", Type: "text", Default: vpcStr(r, "description"), Section: section, Help: "Optional. Enter a description of the rule."},
 		{Name: "mode", Label: "Mode", Type: "radio", Default: mode, Section: section, Options: []string{"basic", "advanced"},
@@ -163,7 +204,7 @@ func armorRuleFields(section string, r map[string]any, withPriority bool) []cons
 			Options: []string{"10", "30", "60", "120", "180", "240", "300", "600", "900", "1200", "1800", "2700", "3600"}},
 		{Name: "enforceOnKey", Label: "Enforce on key", Type: "select", Default: vpcOr(vpcStr(rl, "enforceOnKey"), "IP"), Section: section, ShowWhen: rate,
 			Options: []string{"ALL", "IP", "HTTP_HEADER", "XFF_IP", "HTTP_COOKIE", "HTTP_PATH", "SNI", "REGION_CODE"}},
-		{Name: "enforceOnKeyName", Label: "Key name", Type: "text", Default: vpcStr(rl, "enforceOnKeyName"), Section: section, ShowWhen: "enforceOnKey=HTTP_HEADER|enforceOnKey=HTTP_COOKIE",
+		{Name: "enforceOnKeyName", Label: "Key name", Type: "text", Default: vpcStr(rl, "enforceOnKeyName"), Section: section, ShowWhen: "enforceOnKey=HTTP_HEADER|HTTP_COOKIE",
 			Help: "The header or cookie whose value keys the rate limit."},
 		{Name: "exceedAction", Label: "Exceed action", Type: "select", Default: vpcOr(vpcStr(rl, "exceedAction"), "deny(429)"), Section: section, ShowWhen: rate,
 			Options: []string{"deny(403)", "deny(404)", "deny(429)", "deny(502)"}},
@@ -201,11 +242,12 @@ func armorCreateFields(targets []string) []console.Field {
 	fields := []console.Field{
 		{Name: "name", Label: "Name", Type: "text", Required: true, Pattern: computeNamePattern, Help: computeNameHelp, Section: s1},
 		{Name: "description", Label: "Description", Type: "text", Section: s1},
-		{Name: "type", Label: "Policy type", Type: "radio", Default: "CLOUD_ARMOR", Section: s1, Options: []string{"CLOUD_ARMOR", "CLOUD_ARMOR_EDGE"},
-			OptionLabels: map[string]string{"CLOUD_ARMOR": "Backend security policy", "CLOUD_ARMOR_EDGE": "Edge security policy"},
-			Help:         "An edge security policy filters requests before Cloud CDN's cache, by IP ranges and region codes only; it is global."},
+		{Name: "type", Label: "Policy type", Type: "radio", Default: "CLOUD_ARMOR", Section: s1, Options: []string{"CLOUD_ARMOR", "CLOUD_ARMOR_EDGE", "CLOUD_ARMOR_NETWORK"},
+			OptionLabels: map[string]string{"CLOUD_ARMOR": "Backend security policy", "CLOUD_ARMOR_EDGE": "Edge security policy", "CLOUD_ARMOR_NETWORK": "Network edge security policy"},
+			Help: "An edge security policy filters requests before Cloud CDN's cache, by IP ranges and region codes only; it is global. " +
+				"A network edge security policy is regional: it filters the packets of the region's external passthrough Network Load Balancers, through the region's network edge security service or on a target pool or instance."},
 		{Name: "scope", Label: "Scope", Type: "radio", Default: "global", Section: s1, Options: []string{"global", "regional"},
-			OptionLabels: map[string]string{"global": "Global", "regional": "Regional"}, VisibleWhen: map[string]string{"type": "CLOUD_ARMOR"}},
+			OptionLabels: map[string]string{"global": "Global", "regional": "Regional"}, ShowWhen: "type=CLOUD_ARMOR|CLOUD_ARMOR_NETWORK"},
 		{Name: "region", Label: "Region", Type: "select", Default: "us-central1", Options: computeRegionField("").Options, Section: s1, VisibleWhen: regional},
 		{Name: "defaultAction", Label: "Default rule action", Type: "radio", Default: "allow", Section: s1, Options: []string{"allow", "deny"},
 			OptionLabels: map[string]string{"allow": "Allow", "deny": "Deny"}},
@@ -301,17 +343,26 @@ func (p computeArmorProvider) Create(ctx context.Context, project string, v map[
 	}
 	typ := vpcOr(v["type"], "CLOUD_ARMOR")
 	scope := "global"
-	if typ == "CLOUD_ARMOR" && v["scope"] == "regional" {
+	if typ != "CLOUD_ARMOR_EDGE" && v["scope"] == "regional" {
 		scope = vpcOr(v["region"], "us-central1")
+	}
+	if typ == "CLOUD_ARMOR_NETWORK" && scope == "global" {
+		return "", errors.New("Scope: a network edge security policy is regional; choose Regional and its region")
 	}
 	def := "allow"
 	if v["defaultAction"] == "deny" {
 		def = "deny(" + vpcOr(v["denyStatus"], "403") + ")"
 	}
-	rules := []any{map[string]any{"priority": float64(armorDefaultPriority), "action": def, "description": "Default rule, higher priority overrides it",
-		"match": map[string]any{"versionedExpr": "SRC_IPS_V1", "config": map[string]any{"srcIpRanges": []any{"*"}}}}}
+	network := typ == "CLOUD_ARMOR_NETWORK"
+	defRule := map[string]any{"priority": float64(armorDefaultPriority), "action": def, "description": "Default rule, higher priority overrides it",
+		"match": map[string]any{"versionedExpr": "SRC_IPS_V1", "config": map[string]any{"srcIpRanges": []any{"*"}}}}
+	if network {
+		delete(defRule, "match")
+		defRule["networkMatch"] = map[string]any{"srcIpRanges": []any{"*"}}
+	}
+	rules := []any{defRule}
 	if strings.TrimSpace(v["rule_priority"]) != "" {
-		r, err := armorRule(v, "rule_")
+		r, err := armorRuleFor(v, "rule_", network)
 		if err != nil {
 			return "", err
 		}
@@ -377,6 +428,9 @@ func (p computeArmorProvider) Detail(ctx context.Context, project string, path [
 	if p.api() == nil {
 		return console.Detail{Unavailable: computeNotStarted}, nil
 	}
+	if len(path) == 4 && path[2] == "rule" {
+		return p.ruleDetail(project, path)
+	}
 	if len(path) != 2 {
 		return console.Detail{Unavailable: "a security policy is addressed by its scope and name"}, nil
 	}
@@ -399,41 +453,120 @@ func (p computeArmorProvider) Detail(ctx context.Context, project string, path [
 			def = armorActionText(vpcStr(r, "action"))
 			typ = "Default"
 		}
-		row := console.Resource{Name: "Priority " + pri, Target: []string{path[0], path[1], "rule", pri},
+		row := console.Resource{Name: "Priority " + pri, Target: []string{path[0], path[1], "rule", pri}, Opens: []string{path[0], path[1], "rule", pri},
 			Fields: map[string]string{"Action": armorActionText(vpcStr(r, "action")), "Type": typ, "Match": vpcDash(match),
 				"Description": vpcDash(vpcStr(r, "description")), "Priority": pri, "Preview": map[bool]string{true: "Enabled", false: "—"}[r["preview"] == true]}}
-		row.Actions = p.ruleActions(path, r)
+		row.Actions = p.ruleActions(path, r, armorIsNetwork(o))
 		rules.Items = append(rules.Items, row)
 	}
 	rules.Total = len(rules.Items)
-	targets := console.Listing{Columns: []string{"Type", "Scope", "Policy field"}, NameColumn: "Target", Noun: "targets", Items: []console.Resource{},
-		Note: "Apply policy to new target attaches the policy to a backend service, or an edge policy to a backend service or bucket."}
+	targets := console.Listing{Columns: []string{"Type", "Scope", "Policy field", "Effective policies"}, NameColumn: "Target", Noun: "targets", Items: []console.Resource{},
+		Note: "Apply policy to new target attaches the policy to a backend service, an edge policy to a backend service or bucket, and a network edge security policy to a target pool or target instance."}
 	for _, t := range p.armorTargets(project, o) {
-		kind := map[string]string{"backendServices": "Backend service", "backendBuckets": "Backend bucket"}[t[0]]
+		kind := map[string]string{"backendServices": "Backend service", "backendBuckets": "Backend bucket", "targetPools": "Target pool", "targetInstances": "Target instance"}[t[0]]
 		targets.Items = append(targets.Items, console.Resource{Name: t[2], Target: []string{path[0], path[1], "target", t[0], t[1], t[2]},
-			Fields: map[string]string{"Type": kind, "Scope": lbScopeText(t[1]), "Policy field": t[3]},
+			Fields: map[string]string{"Type": kind, "Scope": lbScopeText(t[1]), "Policy field": t[3], "Effective policies": p.effectivePolicies(project, t)},
 			Actions: []console.Action{{ID: "removetarget", Label: "Remove", Destructive: true, ConfirmStyle: console.DeleteConfirmClick, ConfirmTitle: "Remove target",
 				Confirm: "Remove the policy from " + t[2] + "? Its requests are then no longer filtered by it."}}})
 	}
 	targets.Total = len(targets.Items)
 	props := []console.Property{{Label: "Name", Value: path[1]}, {Label: "Description", Value: vpcDash(vpcStr(o, "description"))},
 		{Label: "Policy type", Value: armorTypeText(vpcStr(o, "type"))}, {Label: "Scope", Value: lbScopeText(path[0])},
-		{Label: "Default rule action", Value: vpcDash(def)}}
+		{Label: "Default rule action", Value: vpcDash(def)}, {Label: "Labels", Value: vpcDash(labelsText(armorLabels(o)))}}
 	return console.Detail{Title: path[1], Heading: "Policy details",
 		Sections: []console.Section{{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Properties: props}}},
-			{ID: "rules", Label: "Rules", Listing: rules, Actions: []console.Action{p.addRuleAction()}, Note: armorNote},
+			{ID: "rules", Label: "Rules", Listing: rules, Actions: []console.Action{p.addRuleAction(armorIsNetwork(o))}, Note: armorNote},
 			{ID: "targets", Label: "Targets", Listing: targets, Actions: []console.Action{p.applyTargetAction(project, o)}}},
 		OpenTab: "rules"}, nil
 }
 
-func (p computeArmorProvider) addRuleAction() console.Action {
-	return console.Action{ID: "addrule", Label: "Add rule", Title: "Add rule", Submit: "Add", Fields: armorRuleFields("", nil, true)}
+func (p computeArmorProvider) addRuleAction(network bool) console.Action {
+	return console.Action{ID: "addrule", Label: "Add rule", Title: "Add rule", Submit: "Add", Fields: armorRuleFieldsFor(nil, true, network)}
+}
+
+func armorIsNetwork(o map[string]any) bool { return vpcStr(o, "type") == "CLOUD_ARMOR_NETWORK" }
+
+// armorRuleFieldsFor are a rule's inputs; a network edge security
+// policy's rules match packets (networkMatch): source and destination IP
+// ranges, IP protocols and ports, and allow or deny.
+func armorRuleFieldsFor(r map[string]any, withPriority, network bool) []console.Field {
+	fields := armorRuleFields("", r, withPriority)
+	if !network {
+		return fields
+	}
+	nm := vmMap(r, "networkMatch")
+	var out []console.Field
+	for _, f := range fields {
+		switch f.Name {
+		case "mode", "expression", "rateCount", "rateInterval", "enforceOnKey", "enforceOnKeyName", "exceedAction", "banDurationSec", "redirectType", "redirectTarget", "responseCode":
+			continue
+		case "srcIpRanges":
+			f.Label, f.VisibleWhen, f.Default = "Source IP ranges", nil, strings.Join(vpcStrs(nm, "srcIpRanges"), ", ")
+			out = append(out, f,
+				console.Field{Name: "destIpRanges", Label: "Destination IP ranges", Type: "text", Default: strings.Join(vpcStrs(nm, "destIpRanges"), ", "),
+					Help: "Optional: the load balancers' or VMs' addresses, comma separated."},
+				console.Field{Name: "ipProtocols", Label: "IP protocols", Type: "text", Default: strings.Join(vpcStrs(nm, "ipProtocols"), ", "),
+					Help: "Optional: such as tcp, udp or icmp, comma separated."},
+				console.Field{Name: "destPorts", Label: "Destination ports", Type: "text", Default: strings.Join(vpcStrs(nm, "destPorts"), ", "),
+					Help: "Optional: ports or ranges, such as 80 or 8000-8080, comma separated."})
+			continue
+		case "action":
+			act, _ := armorSplitAction(vpcOr(vpcStr(r, "action"), "allow"))
+			f.Options, f.Default = []string{"allow", "deny"}, act
+		}
+		out = append(out, f)
+	}
+	return out
+}
+
+// armorRuleFor is armorRule, or for a network edge security policy a
+// rule of networkMatch.
+func armorRuleFor(v map[string]string, prefix string, network bool) (map[string]any, error) {
+	if !network {
+		return armorRule(v, prefix)
+	}
+	g := func(k string) string { return strings.TrimSpace(v[prefix+k]) }
+	nm := map[string]any{}
+	for _, k := range []string{"srcIpRanges", "destIpRanges", "ipProtocols", "destPorts"} {
+		if l := vpcList(g(k)); len(l) > 0 {
+			nm[k] = l
+		}
+	}
+	if len(nm) == 0 {
+		return nil, errors.New("Match: give at least a source IP range, destination, protocol or port")
+	}
+	a := "allow"
+	if g("action") == "deny" {
+		a = "deny"
+	}
+	r := map[string]any{"description": g("description"), "preview": g("preview") == "true", "action": a, "networkMatch": nm}
+	if ps := g("priority"); ps != "" {
+		n, err := strconv.ParseInt(ps, 10, 64)
+		if err != nil || n < 0 || n >= armorDefaultPriority {
+			return nil, errors.New("Priority: an integer from 0 to 2,147,483,646")
+		}
+		r["priority"] = float64(n)
+	}
+	return r, nil
 }
 
 func (p computeArmorProvider) applyTargetAction(project string, o map[string]any) console.Action {
 	var opts []string
 	edge := vpcStr(o, "type") == "CLOUD_ARMOR_EDGE"
 	region := vpcLast(vpcStr(o, "region"))
+	if vpcStr(o, "type") == "CLOUD_ARMOR_NETWORK" {
+		for _, t := range p.armorPassthroughTargets(project) {
+			if t.scope == region || strings.HasPrefix(t.scope, region+"-") {
+				opts = append(opts, armorTargetColl(t.coll, t.scope)+"/"+t.name)
+			}
+		}
+		f := console.Field{Name: "target", Label: "Target", Type: "select", Required: true, Options: opts,
+			Help: "The target pool or target instance of the policy's region whose packets the policy filters."}
+		if len(opts) == 0 {
+			f.Type, f.Options = "text", nil
+		}
+		return console.Action{ID: "applytarget", Label: "Apply policy to new target", Title: "Add target", Submit: "Add", Fields: []console.Field{f}}
+	}
 	for _, b := range append(p.lbAll(project, "backendServices", true, true), p.lbAll(project, "backendBuckets", true, false)...) {
 		sp := lbScopePath(b)
 		bucket := vpcStr(b, "kind") == "compute#backendBucket"
@@ -452,28 +585,117 @@ func (p computeArmorProvider) applyTargetAction(project string, o map[string]any
 	return console.Action{ID: "applytarget", Label: "Apply policy to new target", Title: "Add target", Submit: "Add", Fields: []console.Field{f}}
 }
 
-func (p computeArmorProvider) ruleActions(path []string, r map[string]any) []console.Action {
+func (p computeArmorProvider) ruleActions(path []string, r map[string]any, network bool) []console.Action {
 	if num2s(r, "priority") == strconv.Itoa(armorDefaultPriority) {
 		def, code := armorSplitAction(vpcStr(r, "action"))
-		return []console.Action{{ID: "editrule", Label: "Edit", Title: "Edit rule", Submit: "Update", Fields: []console.Field{
+		fields := []console.Field{
 			{Name: "action", Label: "Action", Type: "radio", Default: def, Options: []string{"allow", "deny"}, OptionLabels: map[string]string{"allow": "Allow", "deny": "Deny"}},
 			{Name: "responseCode", Label: "Response code", Type: "select", Default: vpcOr(code, "403"), Options: []string{"403", "404", "502"},
 				VisibleWhen: map[string]string{"action": "deny"}},
-		}}}
+		}
+		if network {
+			fields = fields[:1]
+		}
+		return []console.Action{{ID: "editrule", Label: "Edit", Title: "Edit rule", Submit: "Update", Fields: fields}}
 	}
-	return []console.Action{{ID: "editrule", Label: "Edit", Title: "Edit rule", Submit: "Update", Fields: armorRuleFields("", r, false)},
+	return []console.Action{{ID: "editrule", Label: "Edit", Title: "Edit rule", Submit: "Update", Fields: armorRuleFieldsFor(r, false, network)},
 		{ID: "deleterule", Label: "Delete", Destructive: true, ConfirmStyle: console.DeleteConfirmClick, ConfirmTitle: "Delete rule",
 			Confirm: "Delete the rule of priority " + num2s(r, "priority") + "?"}}
 }
 
 // policyActions are a policy row's menu items and its page's.
 func (p computeArmorProvider) policyActions(project string, path []string, o map[string]any) []console.Action {
-	return []console.Action{p.editPolicyAction(o), p.addRuleAction(), p.applyTargetAction(project, o)}
+	return []console.Action{p.editPolicyAction(o), p.addRuleAction(armorIsNetwork(o)), p.applyTargetAction(project, o)}
 }
 
 func (p computeArmorProvider) editPolicyAction(o map[string]any) console.Action {
 	return console.Action{ID: "editpolicy", Label: "Edit", Title: "Edit policy", Submit: "Update", Fields: []console.Field{
-		{Name: "description", Label: "Description", Type: "text", Default: vpcStr(o, "description")}}}
+		{Name: "description", Label: "Description", Type: "text", Default: vpcStr(o, "description")},
+		arLabelsField(console.FormatMap(armorLabels(o)))}}
+}
+
+// armorLabels are a policy's labels.
+func armorLabels(o map[string]any) map[string]string {
+	out := map[string]string{}
+	for k, v := range vmMap(o, "labels") {
+		if s, ok := v.(string); ok {
+			out[k] = s
+		}
+	}
+	return out
+}
+
+// effectivePolicies is a backend service's getEffectiveSecurityPolicies,
+// the policies' names; "—" for other targets.
+func (p computeArmorProvider) effectivePolicies(project string, t []string) string {
+	if t[0] != "backendServices" {
+		return "—"
+	}
+	m, err := p.call("GET", project, lbScopeColl(t[1], t[0])+"/"+t[2]+"/getEffectiveSecurityPolicies", nil, nil)
+	if err != nil {
+		return "—"
+	}
+	var names []string
+	for _, e := range vmMaps(m, "securityPolicies") {
+		names = append(names, vpcOr(vpcStr(e, "shortName"), vpcStr(e, "name")))
+	}
+	return vpcDash(strings.Join(names, ", "))
+}
+
+// ruleDetail is a rule's own page, by its priority (getRule): its match,
+// action and options, and Edit rule, Google's page ending in Update.
+func (p computeArmorProvider) ruleDetail(project string, path []string) (console.Detail, error) {
+	r, err := p.call("GET", project, armorRelOf(path)+"/getRule", url.Values{"priority": {path[3]}}, nil)
+	if err != nil {
+		return console.Detail{Unavailable: err.Error()}, nil
+	}
+	typ, match := armorMatchText(r)
+	isDefault := path[3] == strconv.Itoa(armorDefaultPriority)
+	if isDefault {
+		typ = "Default"
+	}
+	props := []console.Property{{Label: "Priority", Value: path[3]}, {Label: "Description", Value: vpcDash(vpcStr(r, "description"))},
+		{Label: "Mode", Value: typ}, {Label: "Match", Value: vpcDash(match)}, {Label: "Action", Value: armorActionText(vpcStr(r, "action"))},
+		{Label: "Preview", Value: map[bool]string{true: "Enabled", false: "Disabled"}[r["preview"] == true]}}
+	if rl := vmMap(r, "rateLimitOptions"); len(rl) > 0 {
+		thr := vmMap(rl, "rateLimitThreshold")
+		props = append(props, console.Property{Label: "Threshold", Value: num2s(thr, "count") + " requests per " + num2s(thr, "intervalSec") + " seconds"},
+			console.Property{Label: "Enforce on key", Value: vpcOr(vpcStr(rl, "enforceOnKey"), "ALL")},
+			console.Property{Label: "Exceed action", Value: vpcDash(vpcStr(rl, "exceedAction"))})
+		if b := num2s(rl, "banDurationSec"); b != "" {
+			props = append(props, console.Property{Label: "Ban duration", Value: b + " seconds"})
+		}
+	}
+	if ro := vmMap(r, "redirectOptions"); len(ro) > 0 {
+		props = append(props, console.Property{Label: "Redirect type", Value: vpcStr(ro, "type")}, console.Property{Label: "Target", Value: vpcDash(vpcStr(ro, "target"))})
+	}
+	pol, _ := p.policy(project, path)
+	network := armorIsNetwork(pol)
+	if network {
+		nm := vmMap(r, "networkMatch")
+		var parts []string
+		for _, k := range []string{"srcIpRanges", "destIpRanges", "ipProtocols", "destPorts"} {
+			if l := vpcStrs(nm, k); len(l) > 0 {
+				parts = append(parts, k+": "+strings.Join(l, ", "))
+			}
+		}
+		props[2], props[3] = console.Property{Label: "Mode", Value: map[bool]string{true: "Default", false: "Network match"}[isDefault]}, console.Property{Label: "Match", Value: vpcDash(strings.Join(parts, "; "))}
+	}
+	fields := armorRuleFieldsFor(r, false, network)
+	if isDefault {
+		fields = p.ruleActions(path, r, network)[0].Fields
+	}
+	return console.Detail{Title: "Priority " + path[3], Heading: "Rule details",
+		Sections: []console.Section{{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Properties: props}}}},
+		Edit:     &console.EditForm{Label: "Edit", Title: "Edit rule", Submit: "Update", Page: true, Fields: fields}}, nil
+}
+
+// Edit is the rule page's Edit rule (Update).
+func (p computeArmorProvider) Edit(ctx context.Context, project string, path []string, v map[string]string) error {
+	if len(path) != 4 || path[2] != "rule" {
+		return errors.New("Edit applies to a rule")
+	}
+	return p.ActAt(ctx, project, path, "editrule", v)
 }
 
 func (p computeArmorProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
@@ -492,7 +714,7 @@ func (p computeArmorProvider) DetailActions(ctx context.Context, project string,
 	case len(path) == 4 && path[2] == "rule":
 		for _, r := range vmMaps(o, "rules") {
 			if num2s(r, "priority") == path[3] {
-				return p.ruleActions(path, r)
+				return p.ruleActions(path, r, armorIsNetwork(o))
 			}
 		}
 	case len(path) == 6 && path[2] == "target":
@@ -515,10 +737,36 @@ func (p computeArmorProvider) ActAt(ctx context.Context, project string, path []
 		if err != nil {
 			return err
 		}
-		_, err = p.call("PATCH", project, base, nil, map[string]any{"description": strings.TrimSpace(v["description"]), "fingerprint": vpcStr(o, "fingerprint")})
-		return err
+		if d := strings.TrimSpace(v["description"]); d != vpcStr(o, "description") {
+			if _, err = p.call("PATCH", project, base, nil, map[string]any{"description": d, "fingerprint": vpcStr(o, "fingerprint")}); err != nil {
+				return err
+			}
+		}
+		if lv, ok := v["labels"]; ok {
+			labels, err := console.ParseMap(lv)
+			if err != nil {
+				return fmt.Errorf("Labels: %v", err)
+			}
+			if labelsText(labels) != labelsText(armorLabels(o)) {
+				cur, err := p.policy(project, path)
+				if err != nil {
+					return err
+				}
+				l := map[string]any{}
+				for k, x := range labels {
+					l[k] = x
+				}
+				_, err = p.call("POST", project, base+"/setLabels", nil, map[string]any{"labels": l, "labelFingerprint": vpcStr(cur, "labelFingerprint")})
+				return err
+			}
+		}
+		return nil
 	case "addrule":
-		r, err := armorRule(v, "")
+		o, err := p.policy(project, path)
+		if err != nil {
+			return err
+		}
+		r, err := armorRuleFor(v, "", armorIsNetwork(o))
 		if err != nil {
 			return err
 		}
@@ -536,11 +784,18 @@ func (p computeArmorProvider) ActAt(ctx context.Context, project string, path []
 			a := "allow"
 			if v["action"] == "deny" {
 				a = "deny(" + vpcOr(v["responseCode"], "403") + ")"
+				if o, err := p.policy(project, path); err == nil && armorIsNetwork(o) {
+					a = "deny"
+				}
 			}
 			_, err := p.call("POST", project, base+"/patchRule", q, map[string]any{"action": a})
 			return err
 		}
-		r, err := armorRule(v, "")
+		o, err := p.policy(project, path)
+		if err != nil {
+			return err
+		}
+		r, err := armorRuleFor(v, "", armorIsNetwork(o))
 		if err != nil {
 			return err
 		}
@@ -572,7 +827,7 @@ func (p computeArmorProvider) ActAt(ctx context.Context, project string, path []
 		if err != nil {
 			return err
 		}
-		return p.attach(project, []string{path[0], ""}, vpcStr(o, "type"), lbScopeColl(path[4], path[3])+"/"+path[5])
+		return p.attach(project, []string{path[0], ""}, vpcStr(o, "type"), armorTargetColl(path[3], path[4])+"/"+path[5])
 	}
 	return fmt.Errorf("%s is not available here", action)
 }
