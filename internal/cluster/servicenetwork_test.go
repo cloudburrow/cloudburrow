@@ -37,7 +37,7 @@ func TestKubeletsNeverVerifyPulledImages(t *testing.T) {
 	if got := RenderConfig(nil); !strings.Contains(got, "apiVersion: kubelet.config.k8s.io/v1beta1\n    "+want) {
 		t.Errorf("rendered config has no KubeletConfiguration patch with %q:\n%s", want, got)
 	}
-	if got := joinConfig("k", "n", "10.0.0.2", "t", "p"); !strings.Contains(got, "imagePullCredentialsVerificationPolicy: NeverVerify\nkind: KubeletConfiguration\n") {
+	if got := joinConfig("k", "n", "10.0.0.2", "t", "p", nil); !strings.Contains(got, "imagePullCredentialsVerificationPolicy: NeverVerify\nkind: KubeletConfiguration\n") {
 		t.Errorf("a node pool's kubelet configuration does not set NeverVerify:\n%s", got)
 	}
 }

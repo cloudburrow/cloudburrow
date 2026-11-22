@@ -123,7 +123,18 @@ func (s *Server) newPool(np *containerpb.NodePool, zones []string, version Versi
 		return nil, err
 	}
 	if len(np.GetLocations()) > 0 {
-		return nil, status.Error(codes.Unimplemented, "Choosing a node pool's zones is not available locally.")
+		// node_pool.locations replaces the cluster's for this pool (#2100):
+		// "If this value is unspecified during node pool creation, the
+		// Cluster.Locations value will be used" (REST reference, NodePool).
+		own := append([]string(nil), np.GetLocations()...)
+		if err := checkPoolZones(regionOf(zones[0]), own); err != nil {
+			return nil, err
+		}
+		sort.Strings(own)
+		zones = own
+		if err := checkAutoscaling(np.GetAutoscaling(), len(zones), 0); err != nil {
+			return nil, err
+		}
 	}
 	v := version
 	if np.GetVersion() != "" {
@@ -152,6 +163,15 @@ func (s *Server) newPool(np *containerpb.NodePool, zones []string, version Versi
 	}
 	if out.Management == nil {
 		out.Management = &containerpb.NodeManagement{AutoUpgrade: true, AutoRepair: true}
+	}
+	if err := checkNodeLabels("node_config.labels", out.Config.GetLabels()); err != nil {
+		return nil, err
+	}
+	if _, err := nodeTaints("node_config.taints", out.Config.GetTaints()); err != nil {
+		return nil, err
+	}
+	if _, err := kubeletSettings("node_config.kubelet_config", out.Config.GetKubeletConfig()); err != nil {
+		return nil, err
 	}
 	if err := checkUpgradeSettings(out.UpgradeSettings); err != nil {
 		return nil, err
@@ -187,12 +207,18 @@ func (s *Server) CreateCluster(_ context.Context, req *containerpb.CreateCluster
 	if err != nil {
 		return nil, err
 	}
-	if len(in.GetLocations()) > 0 {
-		return nil, status.Error(codes.Unimplemented, "Choosing a cluster's node zones (cluster.locations) is not available locally.")
-	}
 	c := proto.Clone(in).(*containerpb.Cluster)
 	autopilot := c.GetAutopilot().GetEnabled()
 	zones := zonesOf(p.location)
+	if len(in.GetLocations()) > 0 {
+		// cluster.locations, gcloud's --node-locations: the zones every
+		// node pool has its node count in by default (#2100).
+		zones = append([]string(nil), in.GetLocations()...)
+		if err := checkZones(p.location, zones); err != nil {
+			return nil, err
+		}
+		sort.Strings(zones)
+	}
 	if autopilot {
 		// Autopilot clusters are regional, and Google manages their nodes
 		// (re-read 2026-11-19:
@@ -332,6 +358,12 @@ func (s *Server) CreateCluster(_ context.Context, req *containerpb.CreateCluster
 		for _, np := range pools {
 			// A pool made on an older version than the control plane's
 			// (node_pools[].version) runs that version's nodes.
+			if err := s.placePool(ctx, kind, np.Name, np.Locations); err != nil {
+				return err
+			}
+			if err := s.configurePoolOf(ctx, kind, np); err != nil {
+				return err
+			}
 			if err := s.backend.Resize(ctx, kind, s.NodeImage(np.Version), np.Name, poolNodes(np, len(np.Locations))); err != nil {
 				return status.Errorf(codes.Internal, "Adding node pool %q's nodes failed: %v", np.Name, err)
 			}

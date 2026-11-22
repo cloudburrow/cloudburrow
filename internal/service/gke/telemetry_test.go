@@ -45,7 +45,8 @@ func TestLoggingAndMonitoring(t *testing.T) {
 	if got := c.GetLoggingConfig().GetComponentConfig().GetEnableComponents(); len(got) != 2 {
 		t.Errorf("logging components = %v, want SYSTEM_COMPONENTS and WORKLOADS", got)
 	}
-	if tt := target(); !tt.SystemLogs || !tt.WorkloadLogs || !tt.SystemMetrics || tt.Kind == "" || tt.Project != "p" || tt.Cluster != "c1" {
+	if tt := target(); !tt.SystemLogs || !tt.WorkloadLogs || !tt.SystemMetrics || tt.Kind == "" || tt.Project != "p" || tt.Cluster != "c1" ||
+		!tt.LoggingChanged.IsZero() {
 		t.Errorf("target = %+v", tt)
 	}
 
@@ -61,6 +62,15 @@ func TestLoggingAndMonitoring(t *testing.T) {
 	if tt := target(); tt.SystemLogs || tt.WorkloadLogs {
 		t.Errorf("logs still shipped: %+v", tt)
 	}
+	// The change's time is the shippers' start for what it turns on.
+	now = now.Add(time.Minute)
+	op, err = s.SetLoggingService(ctx, &containerpb.SetLoggingServiceRequest{Name: name, LoggingService: loggingKubernetes})
+	mustDone(t, s, loc, op, err)
+	if tt := target(); !tt.LoggingChanged.Equal(now) || !tt.WorkloadLogs {
+		t.Errorf("logging back on: changed %v, want %v (%+v)", tt.LoggingChanged, now, tt)
+	}
+	op, err = s.SetLoggingService(ctx, &containerpb.SetLoggingServiceRequest{Name: name, LoggingService: "none"})
+	mustDone(t, s, loc, op, err)
 
 	// gcloud's --logging=SYSTEM: system logs only.
 	op, err = s.UpdateCluster(ctx, &containerpb.UpdateClusterRequest{Name: name, Update: &containerpb.ClusterUpdate{

@@ -62,7 +62,7 @@ Do not edit these files by hand.
 | [App Hub (v1)](apphub.md) | 31 | 31 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Trace API (v1 and v2)](trace.md) | 5 | 5 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Workflows and Workflow Executions (v1)](workflows.md) | 10 | 10 | 0 | 0 | 0 | 0 | 0 | 0 |
-| [Kubernetes Engine API (v1)](gke.md) | 37 | 36 | 0 | 0 | 1 | 0 | 0 | 0 |
+| [Kubernetes Engine API (v1)](gke.md) | 37 | 37 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [BigQuery sharing (Analytics Hub) API (v1)](analyticshub.md) | 29 | 28 | 0 | 0 | 1 | 0 | 0 | 0 |
 | [Cloud Monitoring API (v3) and Dashboards API (v1)](monitoring.md) | 56 | 55 | 0 | 1 | 0 | 0 | 0 | 0 |
 | [BigQuery Data Transfer Service (v1)](datatransfer.md) | 16 | 15 | 0 | 0 | 1 | 0 | 0 | 0 |

@@ -123,6 +123,9 @@ type Options struct {
 	// look at the clusters (autoscale.go): ten seconds when zero, never
 	// when negative.
 	AutoscaleInterval time.Duration
+	// EndpointInterval is how often a rotated cluster's endpoint rules are
+	// put back (EndpointKeeper); 0 is 30 seconds, negative never.
+	EndpointInterval time.Duration
 	// ScaleDownUnneeded is DefaultScaleDownUnneeded when zero.
 	ScaleDownUnneeded time.Duration
 	// RepairAfter is DefaultRepairAfter when zero.
@@ -164,6 +167,9 @@ type entry struct {
 	scale *autoscaleState
 	// extra is kept with the record (upgradeinfo.go, rotation.go).
 	extra clusterExtra
+	// loggingChanged is when the cluster's logging was last changed in
+	// this process (TelemetryTarget.LoggingChanged).
+	loggingChanged time.Time
 }
 
 type opEntry struct {
@@ -208,6 +214,13 @@ func NewServer(backend Backend, opts Options) (*Server, error) {
 	if _, ok := backend.(Upgrader); ok && opts.AutoUpgradeInterval > 0 {
 		s.wg.Add(1)
 		go s.autoUpgradeLoop(opts.AutoUpgradeInterval)
+	}
+	if opts.EndpointInterval == 0 {
+		opts.EndpointInterval = 30 * time.Second
+	}
+	if _, ok := backend.(EndpointKeeper); ok && opts.EndpointInterval > 0 {
+		s.wg.Add(1)
+		go s.keepEndpointsLoop(opts.EndpointInterval)
 	}
 	if opts.AutoscaleInterval == 0 {
 		opts.AutoscaleInterval = 10 * time.Second

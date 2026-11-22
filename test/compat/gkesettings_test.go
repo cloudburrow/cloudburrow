@@ -261,8 +261,13 @@ spec:
 		t.Fatalf("the autoscaler did not add a node for the pending pod: nodes %v", gkeNodes(t, kc, "default-pool"))
 	}
 	gkeKubectl(t, kc, "", "rollout", "status", "deployment/load", "--timeout=180s")
-	if np, _ := g.GetNodePool(ctx, &containerpb.GetNodePoolRequest{Name: pool}); np.GetAutoscaling().GetMaxNodeCount() != 2 ||
-		np.GetAutoscaling().GetLocationPolicy() != containerpb.NodePoolAutoscaling_BALANCED || np.GetInitialNodeCount() != 2 {
+	// The pod can run on the new node a poll before the scale-up, which
+	// waits for the node to be Ready, records the pool's new size.
+	var np *containerpb.NodePool
+	if !gkeEventually(30*time.Second, func() bool {
+		np, _ = g.GetNodePool(ctx, &containerpb.GetNodePoolRequest{Name: pool})
+		return np.GetInitialNodeCount() == 2
+	}) || np.GetAutoscaling().GetMaxNodeCount() != 2 || np.GetAutoscaling().GetLocationPolicy() != containerpb.NodePoolAutoscaling_BALANCED {
 		t.Errorf("the pool after the scale-up: autoscaling %v, initialNodeCount %d", np.GetAutoscaling(), np.GetInitialNodeCount())
 	}
 	gkeKubectl(t, kc, "", "scale", "deployment/load", "--replicas=3")

@@ -308,6 +308,68 @@ func TestUpgradeBlueGreenWithCompleteNodePoolUpgrade(t *testing.T) {
 	}
 }
 
+// TestUpdateNodePoolSettingsOnly (#2100): gcloud's `node-pools update
+// --enable-blue-green-upgrade` sends upgrade_settings with neither
+// node_version nor image_type; GKE keeps the pool's and only changes the
+// settings, starting no upgrade. A malformed image type is still refused.
+func TestUpdateNodePoolSettingsOnly(t *testing.T) {
+	s, f := newUpServer(t, nil)
+	ctx := context.Background()
+	name := makeOld(t, s, "c9", 1, nil, nil)
+	pool := name + "/nodePools/default-pool"
+	before, _ := s.GetNodePool(ctx, &containerpb.GetNodePoolRequest{Name: pool})
+	bg := containerpb.NodePoolUpdateStrategy_BLUE_GREEN
+	op, err := s.UpdateNodePool(ctx, &containerpb.UpdateNodePoolRequest{Name: pool, UpgradeSettings: &containerpb.NodePool_UpgradeSettings{Strategy: &bg,
+		BlueGreenSettings: &containerpb.BlueGreenSettings{NodePoolSoakDuration: durationpb.New(10 * time.Minute)}}})
+	if err != nil {
+		t.Fatalf("UpdateNodePool with upgrade_settings only: %v", err)
+	}
+	if got := wait(t, s, "p", "us-central1-a", op); got.Error != nil {
+		t.Fatal(got.Error)
+	}
+	np, _ := s.GetNodePool(ctx, &containerpb.GetNodePoolRequest{Name: pool})
+	if np.Version != before.Version || np.GetConfig().GetImageType() != before.GetConfig().GetImageType() ||
+		np.GetUpgradeSettings().GetStrategy() != bg || np.GetUpgradeSettings().GetBlueGreenSettings().GetNodePoolSoakDuration().AsDuration() != 10*time.Minute {
+		t.Errorf("after a settings-only update: version %s image %s settings %v", np.Version, np.GetConfig().GetImageType(), np.GetUpgradeSettings())
+	}
+	if e := f.events(); strings.Contains(e, "add") || strings.Contains(e, "drain") {
+		t.Errorf("a settings-only update touched nodes: %s", e)
+	}
+	_, err = s.UpdateNodePool(ctx, &containerpb.UpdateNodePoolRequest{Name: pool, ImageType: "WINDOWS_95"})
+	wantCode(t, "a bad image type", err, codes.InvalidArgument)
+}
+
+// TestMachineTypeChangeRecreatesNodes (#2100): a node pool's machine type
+// (or disk size) change is an UPGRADE_NODES operation that replaces every
+// node through its upgrade strategy, on the same version: with surge, a
+// node is added before each old one is drained and removed. The pool
+// reads the new machine type and keeps its version.
+func TestMachineTypeChangeRecreatesNodes(t *testing.T) {
+	s, f := newUpServer(t, nil)
+	ctx := context.Background()
+	name := makeOld(t, s, "c10", 2, nil, nil)
+	pool := name + "/nodePools/default-pool"
+	before, _ := s.GetNodePool(ctx, &containerpb.GetNodePoolRequest{Name: pool})
+	op, err := s.UpdateNodePool(ctx, &containerpb.UpdateNodePoolRequest{Name: pool, MachineType: "e2-standard-4", DiskSizeGb: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if op.GetOperationType() != containerpb.Operation_UPGRADE_NODES {
+		t.Errorf("operation type = %s", op.GetOperationType())
+	}
+	if got := wait(t, s, "p", "us-central1-a", op); got.Error != nil {
+		t.Fatal(got.Error)
+	}
+	if e := f.events(); strings.Count(e, "add ") != 2 || strings.Count(e, "remove ") != 2 || !strings.HasPrefix(e, "add ") {
+		t.Errorf("events = %s, want each of the two nodes replaced, surge first", e)
+	}
+	np, _ := s.GetNodePool(ctx, &containerpb.GetNodePoolRequest{Name: pool})
+	if np.GetConfig().GetMachineType() != "e2-standard-4" || np.GetConfig().GetDiskSizeGb() != 50 || np.Version != before.Version ||
+		np.GetStatus() != containerpb.NodePool_RUNNING {
+		t.Errorf("after the change: %s %d GB, version %s, %s", np.GetConfig().GetMachineType(), np.GetConfig().GetDiskSizeGb(), np.Version, np.GetStatus())
+	}
+}
+
 func TestAutoUpgradeRespectsWindowsAndExclusions(t *testing.T) {
 	now := time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC) // a Friday
 	clock := func() time.Time { return now }

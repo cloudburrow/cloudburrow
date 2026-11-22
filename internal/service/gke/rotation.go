@@ -197,3 +197,45 @@ func (s *Server) Rotation(name string) (time.Time, bool) {
 	}
 	return e.extra.Rotation.Start, true
 }
+
+// EndpointKeeper is what a Backend does to keep a rotated cluster's
+// endpoints: the rules that serve and refuse them live in the control
+// plane's network namespace, which a restarted container loses.
+type EndpointKeeper interface {
+	KeepEndpoint(ctx context.Context, kind string) error
+}
+
+// keepEndpointsLoop puts back every running cluster's endpoint rules each
+// interval, so a control plane container restarted (by Docker, or with
+// the machine) serves the endpoints its rotation left it, and refuses the
+// old one again, within a minute.
+func (s *Server) keepEndpointsLoop(every time.Duration) {
+	defer s.wg.Done()
+	keeper := s.backend.(EndpointKeeper)
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		s.mu.Lock()
+		var kinds []string
+		for _, e := range s.clusters {
+			if e.access.Endpoint == "" {
+				continue
+			}
+			switch e.cluster.GetStatus() {
+			case containerpb.Cluster_RUNNING, containerpb.Cluster_RECONCILING, containerpb.Cluster_DEGRADED:
+				kinds = append(kinds, e.kind)
+			}
+		}
+		s.mu.Unlock()
+		for _, kind := range kinds {
+			ctx, cancel := context.WithTimeout(s.bg, 30*time.Second)
+			_ = keeper.KeepEndpoint(ctx, kind)
+			cancel()
+		}
+		select {
+		case <-s.bg.Done():
+			return
+		case <-t.C:
+		}
+	}
+}

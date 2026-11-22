@@ -194,9 +194,13 @@ func (g *GKE) RemoveNode(ctx context.Context, kind, name string) error {
 		return fmt.Errorf("%w: node %q is not cluster %q's", ErrNotOwned, name, kind)
 	}
 	r := g.runner()
+	pool, _ := r.Run(ctx, "docker", "inspect", "-f", `{{index .Config.Labels "`+poolLabel+`"}}`, name)
 	_, _ = r.Run(ctx, "kubectl", "--kubeconfig", g.kubeconfig(kind), "delete", "node", name, "--ignore-not-found")
 	if _, err := r.Run(ctx, "docker", "rm", "-f", "-v", name); err != nil {
 		return fmt.Errorf("remove node %s: %w", name, err)
+	}
+	if p := strings.TrimSpace(pool); p != "" {
+		g.forgetNode(kind, p, name)
 	}
 	return nil
 }
