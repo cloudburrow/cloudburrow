@@ -100,8 +100,25 @@ func (s *Server) insertRoute(project string, b obj) (obj, error) {
 			return nil, invalid("Invalid value for field 'resource.nextHopIp': '%s'. The next hop IP address must be in a subnetwork of network '%s'.", ip, lastSeg(nw))
 		}
 		o["nextHopIp"] = ip.String()
+	case str(b, "nextHopInstance") != "":
+		// An instance of the route's network (#2140), as Google requires
+		// (https://docs.cloud.google.com/vpc/docs/routes#next-hops, read
+		// 2026-11-22: "an instance in the same VPC network as the route").
+		ir := Rel(str(b, "nextHopInstance"), project)
+		io, ok := s.res[ir]
+		if !ok || !strings.Contains(ir, "/instances/") {
+			return nil, invalid("Invalid value for field 'resource.nextHopInstance': '%s'. The instance does not exist.", str(b, "nextHopInstance"))
+		}
+		v, ok := vmNetOf(ir, io)
+		if !ok || v.network != nw {
+			// UNVERIFIED wording (re-read 2026-11-22:
+			// https://docs.cloud.google.com/vpc/docs/routes#next_hop_instance).
+			return nil, invalid("Invalid value for field 'resource.nextHopInstance': '%s'. The instance must be in network '%s'.", str(b, "nextHopInstance"), lastSeg(nw))
+		}
+		o["nextHopInstance"] = ir
+		o["nextHopNetwork"] = nw
 	default:
-		return nil, unimplemented("a next hop on a VM instance, VPN tunnel or internal load balancer: those resources are not served")
+		return nil, unimplemented("a next hop on a VPN tunnel or internal load balancer: those resources are not served")
 	}
 	if ones, _ := dn.Mask.Size(); ones > 0 {
 		for _, r := range s.rangesLocked(nw, "") {

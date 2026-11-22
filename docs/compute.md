@@ -48,7 +48,7 @@ Terraform's `google_compute_network` and `google_compute_subnetwork` run through
 
 ## Console
 
-The console's VPC network pages list and manage networks, subnets, firewall rules, routes and IP addresses, as Google's VPC network section does.
+The console's VPC network pages list and manage networks, subnets, firewall rules, routes and IP addresses, as Google's VPC network section does. Since #2140 they follow Google's tabs: VPC networks' Networks and Subnets in current project, Firewall policies with its VPC firewall rules table (Google's source and target filters, Allow all or Specified protocols and ports), Route management and Effective routes (a route's next hop may be an instance), External and Internal IP addresses (each VM's ephemeral addresses with Promote to static on an internal one), and **VPC network peering**.
 
 Compute Engine's pages (#1965), under **Compute** in the drawer, at Google's paths:
 
@@ -56,11 +56,16 @@ Compute Engine's pages (#1965), under **Compute** in the drawer, at Google's pat
 |---|---|
 | VM instances (`/compute/instances`) | Every instance of the project across zones (the aggregated list): status, zone, machine type, internal and external IP, Connect (the forwarded SSH port). Each row has **SSH**, which answers with the `gcloud compute ssh` and `ssh` commands for its port, and a menu with Start / Resume, Stop, Suspend and Reset as its status allows, and Delete. **Create instance** opens Google's *Create an instance* page: name, labels, region and zone, machine type, boot disk image, type and size, network and subnetwork, external IPv4 address, network tags, service account and access scopes, startup script, metadata, deletion protection |
 | An instance's page | Details (basic information, machine configuration, networking, metadata, service account, Connect), Storage, Networking and Serial port 1 (console) tabs; Edit (labels, network tags, the machine type while stopped, deletion protection, metadata); Attach existing disk, Detach disk, and the row's actions |
-| Disks (`/compute/disks`) | Every disk across zones with its type, size, zone and user; **Create disk** (blank, from an image or from a snapshot); Create snapshot, Edit size, Edit labels and Delete (unavailable while attached) |
+| Disks (`/compute/disks`) | Every disk across zones with its type, size, zone and user; **Create disk** (blank, from an image, a snapshot or another disk in its zone, with a snapshot schedule); Create snapshot, Clone disk, Create image, Edit snapshot schedule, Edit size, Edit labels and Delete (unavailable while attached) |
 | Snapshots (`/compute/snapshots`) | Each snapshot's status, location, sizes, source disk and creation time; Create snapshot, Create disk, Edit labels, Delete |
-| Images (`/compute/images`) | The public images served, and the image projects refused with their reasons |
+| Images (`/compute/images`) | The project's custom images and the public images served, and the image projects refused with their reasons; **Create image** from a disk, a snapshot or an image; Deprecate and Delete a custom image |
 | Machine types (`/compute/machineTypes`) | The predefined types with their vCPUs and memory (Google's console has no page of its own for them; its Create an instance page lists them) |
-| Metadata (`/compute/metadata`) | The project's common instance metadata, `ssh-keys` included, with Edit |
+| Metadata (`/compute/metadata`) | The project's common instance metadata, `ssh-keys` included, with Edit; the **SSH keys** tab (`/compute/metadata/sshKeys`) lists each key with its username and edits them as a list |
+| Instance schedules (`/compute/instanceSchedules`, VM instances' tab) | Each schedule's start, stop, time zone and VMs; Create schedule; Add and Remove instances; Delete while it holds none. The schedule starts and stops its VMs |
+| Instance templates (`/compute/instanceTemplates`) | Global and regional templates; Create an instance template (Create an instance's fields, no zone); a template's page; Create VM, Create similar, Delete |
+| Instance groups (`/compute/instanceGroups`) | Managed groups (stateless, single zone, a fixed size) made from a template, unmanaged groups of VMs, and GKE's node pool groups; Resize, Restart / Replace VMs, Add and Remove instances, Delete |
+| Snapshot schedules (`/compute/snapshotSchedules`, Snapshots' tab) | Hourly, daily or weekly schedules with their retention; a disk takes one at create or with Edit snapshot schedule; the schedule snapshots it and deletes snapshots past the retention |
+| Machine images (`/compute/machineImages`) | Each machine image's source VM and location; Create a machine image of a VM, its disks copied; Create instance from it; Delete |
 
 A change returns as soon as the API has started its operation, as Google's pages do: the list shows `PROVISIONING`, `STOPPING` and the like until the operation is done.
 
@@ -71,7 +76,11 @@ The design (#1963, option A): **a VM is a systemd container** in the instance's 
 | Google | Here |
 |---|---|
 | Public images `debian-12`, `ubuntu-2404-lts` (`-amd64`, `-arm64`), `rocky-linux-9` | A container image of the same distribution, built on this machine at first use from the official image pinned by digest, plus the distribution's systemd, OpenSSH, sudo and curl packages and the guest scripts in `internal/service/compute/guest` (no code of them is linked into CloudBurrow). Tagged `cloudburrow-vm-FAMILY:HASH` |
-| `cos-stable`, Windows, Fedora CoreOS, licensed images, custom images | 501, with the reason |
+| Custom images (`images.insert` from a disk, a snapshot or an image; families, `deprecate`) | A copy of the source's files in a PersistentVolumeClaim, from which disks are seeded as from a public image (#2139); `rawDisk` (a Cloud Storage tarball) is 501 |
+| `cos-stable`, Windows, Fedora CoreOS, licensed images | 501, with the reason |
+| Instance templates, managed and unmanaged instance groups, machine images (#2139) | Served as Google documents them: a managed group makes its VMs from its template, named `BASE_INSTANCE_NAME-xxxx`, and resizes, recreates, starts and stops them; a machine image copies its VM's disks. Regional managed groups and autoscalers are not served |
+| Resource policies (#2139) | Snapshot schedules and instance schedules run every 30 seconds against their cron or hourly/daily/weekly rule: a scheduled snapshot is named `DISK-ZONE-TIMESTAMP-xxxxxxxx` with `autoCreated`, and snapshots past the retention are deleted; an instance schedule starts and stops its VMs in its time zone |
+| Spot VMs (`scheduling.provisioningModel: SPOT`) | Accepted with `instanceTerminationAction`, checked as Google documents; nothing preempts them here |
 | Machine types | The predefined e2, f1/g1, n1, n2, n2d and c3 types; the container's CPU and memory limits are the type's |
 | Boot disk | A PersistentVolumeClaim holding the guest's `/etc`, `/usr`, `/var`, `/home`, `/root`, `/opt` and `/srv`, seeded from the image at first boot: what the guest changes survives stop and start |
 | Attached disk | A PersistentVolumeClaim mounted at `/mnt/disks/DEVICE_NAME`: a directory, **not a block device** (no `mkfs`, no `/dev/disk/by-id/google-*`). Attaching or detaching on a running instance restarts its container |
@@ -89,7 +98,7 @@ The design (#1963, option A): **a VM is a systemd container** in the instance's 
 
 ### VM networking and firewall rules
 
-VMs on the same VPC network reach each other at their internal IPs, across the network's subnets, and at their internal DNS names; VMs on different networks cannot (network peering is not served). The network's firewall rules are enforced on each VM as Google evaluates them (https://docs.cloud.google.com/firewall/docs/firewalls, read 2026-11-19), #1968:
+VMs on the same VPC network reach each other at their internal IPs, across the network's subnets, and at their internal DNS names; VMs on different networks cannot, unless the networks are peered: an `ACTIVE` peering (both sides made, #2140) puts the two networks' VMs on one data plane, each side's firewall rules still applied, and exchanges their subnet routes. The network's firewall rules are enforced on each VM as Google evaluates them (https://docs.cloud.google.com/firewall/docs/firewalls, read 2026-11-19), #1968:
 
 | Google | Here |
 |---|---|

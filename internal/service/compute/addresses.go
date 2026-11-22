@@ -164,7 +164,22 @@ func (s *Server) regionalInternal(project, region string, b, o obj, purpose, add
 			return invalid("Invalid value for field 'resource.address': '%s'. The address is reserved by Google Cloud in subnetwork '%s'.", addr, lastSeg(sub))
 		}
 		if u := used[ip.String()]; u != "" {
-			return errf(http.StatusBadRequest, "invalid", "IP address '%s' is already being used by another resource.", ip)
+			switch {
+			case str(o, "kind") == "compute#address" && strings.Contains(u, "/instances/"):
+				// Promoting an instance's ephemeral internal address to a
+				// static one (vpc/docs/reserve-static-internal-ip-address,
+				// "Promote an ephemeral internal IP address", read
+				// 2026-11-22): the address is reserved IN_USE by it (#2140).
+				o["status"], o["users"] = "IN_USE", []any{u}
+			case str(o, "kind") != "compute#address" && strings.Contains(u, "/addresses/") && str(s.res[u], "status") == "RESERVED" &&
+				str(s.res[u], "purpose") == "GCE_ENDPOINT":
+				// An instance given a reserved static internal address as
+				// its networkIP takes it (#2140); insertInstance marks it
+				// IN_USE.
+				o["_static"] = u
+			default:
+				return errf(http.StatusBadRequest, "invalid", "IP address '%s' is already being used by another resource.", ip)
+			}
 		}
 		o["address"] = ip.String()
 		return nil

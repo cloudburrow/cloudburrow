@@ -218,6 +218,8 @@ func (s *Server) deleteNetwork(project, name string) (obj, error) {
 		}
 	}
 	delete(s.res, rel)
+	// Its peers' peerings to it go INACTIVE (#2140).
+	s.resyncPeersLocked(rel)
 	if name == "default" {
 		s.defaultDeleted[project] = true
 	}

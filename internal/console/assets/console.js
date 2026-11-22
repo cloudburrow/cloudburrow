@@ -122,6 +122,12 @@ const AP_ROUTES = agentPlatformRoutes();
 const GKE_DISCOVERY = ["/kubernetes/gateways", "/kubernetes/services", "/kubernetes/ingress"];
 // Secret Manager's page tabs (#1850): the global secrets and Regional secrets.
 const SECRET_TABS = ["/secrets", "/secrets-regional"];
+const COMPUTE_INSTANCE_TABS = ["/compute/instances", "/compute/instanceSchedules"];
+const COMPUTE_SNAPSHOT_TABS = ["/compute/snapshots", "/compute/snapshotSchedules"];
+const COMPUTE_METADATA_TABS = ["/compute/metadata", "/compute/metadata/sshKeys"];
+const VPC_NETWORK_TABS = ["/networking/networks/list", "/networking/subnets/list"];
+const VPC_ROUTE_TABS = ["/networking/routes/effective", "/networking/routes/list"];
+const VPC_ADDRESS_TABS = ["/networking/addresses/list", "/networking/addresses/internal"];
 const GKE_STORAGE = ["/kubernetes/storage", "/kubernetes/storage-classes"];
 // Cloud Logging's Settings and its Log Scopes tab (#2020), as Google's
 // Settings page has a Log Scopes tab (log-scope/create-and-manage).
@@ -471,32 +477,69 @@ const ROUTES = [
     section: "AI and machine learning", product: "speech", productTitle: "Speech-to-Text" },
   // Compute Engine (#1965): Google's menu, at Google's paths: VM
   // instances (an instance's page has its Details, Storage, Networking and
-  // Serial port tabs), Disks, Snapshots, Images, and Machine types, over the
-  // Compute Engine API in process.
-  { path: "/compute/instances", service: "compute-instances", icon: "compute", title: "VM instances", kind: "Instance",
+  // Serial port tabs), Instance templates, Instance groups, Disks,
+  // Snapshots, Images, Machine images and Machine types, over the Compute
+  // Engine API in process. The VM instances, Snapshots and Metadata pages'
+  // tabs (#2139): Instances and Instance schedules
+  // (compute/docs/instances/schedule-instance-start-stop), Snapshots and
+  // Snapshot schedules (disks/scheduled-snapshots), Metadata and SSH keys
+  // (connect/add-ssh-keys).
+  { path: "/compute/instances", service: "compute-instances", icon: "compute", title: "VM instances", tabTitle: "Instances", kind: "Instance",
+    pageTabs: COMPUTE_INSTANCE_TABS, section: "Compute", product: "compute", productTitle: "Compute Engine" },
+  { path: "/compute/instanceSchedules", service: "compute-instance-schedules", icon: "compute", title: "VM instances", tabTitle: "Instance schedules",
+    kind: "Instance schedule", navHidden: true, navAs: "/compute/instances", pageTabs: COMPUTE_INSTANCE_TABS,
+    section: "Compute", product: "compute", productTitle: "Compute Engine" },
+  { path: "/compute/instanceTemplates", service: "compute-instance-templates", icon: "compute", title: "Instance templates", kind: "Instance template",
+    section: "Compute", product: "compute", productTitle: "Compute Engine" },
+  { path: "/compute/instanceGroups", service: "compute-instance-groups", icon: "compute", title: "Instance groups", kind: "Instance group",
     section: "Compute", product: "compute", productTitle: "Compute Engine" },
   { path: "/compute/disks", service: "compute-disks", icon: "compute", title: "Disks", kind: "Disk",
     section: "Compute", product: "compute", productTitle: "Compute Engine" },
-  { path: "/compute/snapshots", service: "compute-snapshots", icon: "compute", title: "Snapshots", kind: "Snapshot",
+  { path: "/compute/snapshots", service: "compute-snapshots", icon: "compute", title: "Snapshots", tabTitle: "Snapshots", kind: "Snapshot",
+    pageTabs: COMPUTE_SNAPSHOT_TABS, section: "Compute", product: "compute", productTitle: "Compute Engine" },
+  { path: "/compute/snapshotSchedules", service: "compute-snapshot-schedules", icon: "compute", title: "Snapshots", tabTitle: "Snapshot schedules",
+    kind: "Snapshot schedule", navHidden: true, navAs: "/compute/snapshots", pageTabs: COMPUTE_SNAPSHOT_TABS,
     section: "Compute", product: "compute", productTitle: "Compute Engine" },
   { path: "/compute/images", service: "compute-images", icon: "compute", title: "Images", kind: "Image",
     section: "Compute", product: "compute", productTitle: "Compute Engine" },
+  { path: "/compute/machineImages", service: "compute-machine-images", icon: "compute", title: "Machine images", kind: "Machine image",
+    section: "Compute", product: "compute", productTitle: "Compute Engine" },
   { path: "/compute/machineTypes", service: "compute-machinetypes", icon: "compute", title: "Machine types", kind: "Machine type",
     section: "Compute", product: "compute", productTitle: "Compute Engine" },
-  { path: "/compute/metadata", service: "compute-metadata", icon: "compute", title: "Metadata", kind: "Metadata item",
-    section: "Compute", product: "compute", productTitle: "Compute Engine" },
+  { path: "/compute/metadata", service: "compute-metadata", icon: "compute", title: "Metadata", tabTitle: "Metadata", kind: "Metadata item",
+    pageTabs: COMPUTE_METADATA_TABS, section: "Compute", product: "compute", productTitle: "Compute Engine" },
+  { path: "/compute/metadata/sshKeys", service: "compute-ssh-keys", icon: "compute", title: "Metadata", tabTitle: "SSH keys", kind: "SSH key",
+    navHidden: true, navAs: "/compute/metadata", pageTabs: COMPUTE_METADATA_TABS, section: "Compute", product: "compute", productTitle: "Compute Engine" },
 
   // VPC network (#1936): Google's menu, at Google's paths: VPC networks
   // (a network's page has its subnets, firewall rules and routes),
   // Firewall, Routes and IP addresses, over the Compute Engine API's VPC
   // networking in process.
-  { path: "/networking/networks/list", service: "vpc-networks", icon: "vpc", title: "VPC networks", kind: "VPC network",
+  // The VPC networks page's tabs (#2140): the networks, and "Subnets in
+  // current project" (vpc/docs/create-modify-vpc-networks, read
+  // 2026-11-22); the first tab's name is not in the docs (UNVERIFIED,
+  // re-read 2026-11-22: https://docs.cloud.google.com/vpc/docs/create-modify-vpc-networks).
+  { path: "/networking/networks/list", service: "vpc-networks", icon: "vpc", title: "VPC networks", tabTitle: "Networks in current project", kind: "VPC network",
+    pageTabs: VPC_NETWORK_TABS, section: "Networking", product: "vpc", productTitle: "VPC network" },
+  { path: "/networking/subnets/list", service: "vpc-subnets", icon: "vpc", title: "VPC networks", tabTitle: "Subnets in current project", kind: "Subnet",
+    navHidden: true, navAs: "/networking/networks/list", pageTabs: VPC_NETWORK_TABS, section: "Networking", product: "vpc", productTitle: "VPC network" },
+  { path: "/networking/firewalls/list", service: "vpc-firewalls", icon: "vpc", title: "Firewall policies", kind: "Firewall rule",
     section: "Networking", product: "vpc", productTitle: "VPC network" },
-  { path: "/networking/firewalls/list", service: "vpc-firewalls", icon: "vpc", title: "Firewall", kind: "Firewall rule",
-    section: "Networking", product: "vpc", productTitle: "VPC network" },
-  { path: "/networking/routes/list", service: "vpc-routes", icon: "vpc", title: "Routes", kind: "Route",
-    section: "Networking", product: "vpc", productTitle: "VPC network" },
-  { path: "/networking/addresses/list", service: "vpc-addresses", icon: "vpc", title: "IP addresses", kind: "IP address",
+  // Routes' tabs (#2140, vpc/docs/using-routes): Effective routes and Route
+  // management.
+  { path: "/networking/routes/effective", service: "vpc-routes-effective", icon: "vpc", title: "Routes", tabTitle: "Effective routes", kind: "Route",
+    navHidden: true, navAs: "/networking/routes/list", pageTabs: VPC_ROUTE_TABS, section: "Networking", product: "vpc", productTitle: "VPC network" },
+  { path: "/networking/routes/list", service: "vpc-routes", icon: "vpc", title: "Routes", tabTitle: "Route management", kind: "Route",
+    pageTabs: VPC_ROUTE_TABS, section: "Networking", product: "vpc", productTitle: "VPC network" },
+  // IP addresses' tabs (#2140): External IP addresses and Internal IP
+  // addresses (vpc/docs/reserve-static-external-ip-address,
+  // reserve-static-internal-ip-address, read 2026-11-22).
+  { path: "/networking/addresses/list", service: "vpc-addresses", icon: "vpc", title: "IP addresses", tabTitle: "External IP addresses", kind: "IP address",
+    pageTabs: VPC_ADDRESS_TABS, section: "Networking", product: "vpc", productTitle: "VPC network" },
+  { path: "/networking/addresses/internal", service: "vpc-addresses-internal", icon: "vpc", title: "IP addresses", tabTitle: "Internal IP addresses", kind: "IP address",
+    navHidden: true, navAs: "/networking/addresses/list", pageTabs: VPC_ADDRESS_TABS, section: "Networking", product: "vpc", productTitle: "VPC network" },
+  // VPC network peering (#2140, vpc/docs/using-vpc-peering).
+  { path: "/networking/peering/list", service: "vpc-peering", icon: "vpc", title: "VPC network peering", kind: "Peering connection",
     section: "Networking", product: "vpc", productTitle: "VPC network" },
 
   // Secret Manager (#1850): Google's menu, Secret Manager (the global
@@ -7529,7 +7572,10 @@ function buildCreateForm(spec) {
           // An empty option (an optional choice left unset) is named, so
           // it is not read as a blank item (#1604); optionLabels name an
           // option as Google's console does (#1852, #1860).
-          ...(f.options || []).map((o) => el("option", { value: o, text: (f.optionLabels || {})[o] || o || "None" })))
+          // A disabled option is one Google offers that this instance
+          // cannot serve, drawn but not choosable (#2140).
+          ...(f.options || []).map((o) => el("option", { value: o, text: (f.optionLabels || {})[o] || o || "None",
+                                                         disabled: (f.disabledOptions || []).includes(o) })))
       : el("input", {
           // A zoned date and time (#1850) is the browser's datetime-local
           // picker; plain datetime-local fields stay UTC wall-clock times.
@@ -7837,6 +7883,24 @@ function buildCreateForm(spec) {
     };
     other.control.addEventListener("change", relist);
     relist();
+  }
+
+  // A radio whose option labels follow another field (labelsBy, #2140):
+  // a firewall rule's Protocols and ports reads Allow all or Deny all as its
+  // Action on match is Allow or Deny, as Google's Create firewall rule does.
+  for (const entry of entries) {
+    const by = entry.field.labelsBy;
+    const other = by && byName.get(by);
+    if (!other || !entry.isRadio) continue;
+    const labels = [...entry.node.querySelectorAll(".check-line > label")];
+    const relabel = () => {
+      const m = (entry.field.labelsFor || {})[valueText(other)] || {};
+      (entry.field.options || []).forEach((o, i) => {
+        if (labels[i]) labels[i].textContent = m[o] || (entry.field.optionLabels || {})[o] || o;
+      });
+    };
+    other.control.addEventListener("change", relabel);
+    relabel();
   }
 
   // A checkbox checked and held while another field holds a value

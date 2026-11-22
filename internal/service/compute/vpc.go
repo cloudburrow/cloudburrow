@@ -125,19 +125,36 @@ func (s *Server) vpcConfigLocked(inst obj, pod string) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	var members []vmNet
+	// An ACTIVE peering (#2140) puts the peer network's VMs and subnet
+	// ranges beside the network's own: its subnet routes are exchanged, as
+	// Google always exchanges them, and every network of a peering group
+	// shares one VXLAN segment. Peering is not transitive: only directly
+	// peered networks' VMs get forwarding entries and routes, so a third
+	// network peered with the peer stays unreachable. The network's own
+	// firewall rules still decide, and their source tags and service
+	// accounts select its own VMs only, as Google's do across a peering.
+	peered := s.peeredNetworksLocked(self.network)
+	reach := map[string]bool{self.network: true}
+	for _, n := range peered {
+		reach[n] = true
+	}
+	var members, reachable []vmNet
 	for k, o := range s.res {
 		if !strings.Contains(k, "/instances/") {
 			continue
 		}
-		if v, ok := vmNetOf(k, o); ok && v.network == self.network {
-			members = append(members, v)
+		if v, ok := vmNetOf(k, o); ok && reach[v.network] {
+			reachable = append(reachable, v)
+			if v.network == self.network {
+				members = append(members, v)
+			}
 		}
 	}
 	sort.Slice(members, func(i, j int) bool { return members[i].rel < members[j].rel })
+	sort.Slice(reachable, func(i, j int) bool { return reachable[i].rel < reachable[j].rel })
 	var subnets []string
 	for k, o := range s.res {
-		if strings.Contains(k, "/subnetworks/") && str(o, "network") == self.network {
+		if strings.Contains(k, "/subnetworks/") && reach[str(o, "network")] {
 			if c := str(o, "ipCidrRange"); c != "" {
 				subnets = append(subnets, c)
 			}
@@ -149,14 +166,18 @@ func (s *Server) vpcConfigLocked(inst obj, pod string) (string, bool) {
 		mtu = int(v)
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "vni %d\nmtu %d\naddr %s\nmac %s\n", vniOf(str(nw, "id")), mtu, self.ip, macOf(self.ip))
+	fmt.Fprintf(&b, "vni %d\nmtu %d\naddr %s\nmac %s\n", vniOf(s.segmentIDLocked(self.network, str(nw, "id"))), mtu, self.ip, macOf(self.ip))
 	for _, c := range subnets {
 		fmt.Fprintf(&b, "route %s\n", c)
 	}
 	var peerPods []string
 	now := s.opts.Now()
-	for _, m := range members {
-		fmt.Fprintf(&b, "host %s %s %s\n", m.ip, m.fqdn(), m.name)
+	for _, m := range reachable {
+		if m.network == self.network {
+			// Internal DNS names are the network's own: a peer's are not
+			// shared without DNS peering, as on Google.
+			fmt.Fprintf(&b, "host %s %s %s\n", m.ip, m.fqdn(), m.name)
+		}
 		if m.rel == rel || !m.running {
 			continue
 		}
@@ -168,6 +189,54 @@ func (s *Server) vpcConfigLocked(inst obj, pod string) (string, bool) {
 	b.WriteString("nft\n")
 	b.WriteString(firewallNFT(self, members, s.firewallsOfLocked(self.network), peerPods))
 	return b.String(), true
+}
+
+// peeredNetworksLocked are the networks network has an ACTIVE peering
+// with (#2140), sorted.
+func (s *Server) peeredNetworksLocked(network string) []string {
+	o, ok := s.res[network]
+	if !ok {
+		return nil
+	}
+	var out []string
+	for _, e := range s.peeringsLocked(o) {
+		if m, _ := e.(map[string]any); str(m, "state") == "ACTIVE" {
+			out = append(out, Rel(str(m, "network"), ""))
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// segmentIDLocked is the ID the VXLAN segment of network's peering group
+// is numbered by: the network's own when it has no ACTIVE peering, else
+// that of the group's first network by name, so every network of the group
+// shares one segment.
+func (s *Server) segmentIDLocked(network, own string) string {
+	seen := map[string]bool{network: true}
+	queue := []string{network}
+	for len(queue) > 0 {
+		n := queue[0]
+		queue = queue[1:]
+		for _, p := range s.peeredNetworksLocked(n) {
+			if !seen[p] {
+				if _, ok := s.res[p]; ok {
+					seen[p] = true
+					queue = append(queue, p)
+				}
+			}
+		}
+	}
+	if len(seen) == 1 {
+		return own
+	}
+	first := ""
+	for n := range seen {
+		if first == "" || n < first {
+			first = n
+		}
+	}
+	return str(s.res[first], "id")
 }
 
 // firewallsOfLocked is the network's enabled firewall rules.

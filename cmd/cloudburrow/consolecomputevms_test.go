@@ -144,7 +144,7 @@ func TestConsoleComputeVMs(t *testing.T) {
 	}
 	settle(t, s, project)
 	dl, _ := disks.List(ctx, project)
-	if r := vpcRow(dl, "data-1"); r == nil || r.Fields["In use by"] != "web-1" || r.Fields["Size"] != "20 GB" || r.Actions[3].Unavailable == "" {
+	if r := vpcRow(dl, "data-1"); r == nil || r.Fields["In use by"] != "web-1" || r.Fields["Size"] != "20 GB" || r.Actions[len(r.Actions)-1].ID != "delete" || r.Actions[len(r.Actions)-1].Unavailable == "" {
 		t.Fatalf("the attached disk's row: %+v", r)
 	}
 	if err := vms.ActAt(ctx, project, path, "detachdisk", map[string]string{"deviceName": "data"}); err != nil {

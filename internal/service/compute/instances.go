@@ -120,8 +120,9 @@ func (s *Server) attachedDiskLocked(project, zone, instance string, e map[string
 			}
 		}
 		b := obj{"name": name, "sourceImage": str(ip, "sourceImage"), "sourceSnapshot": str(ip, "sourceSnapshot"),
-			"type": str(ip, "diskType"), "sizeGb": ip["diskSizeGb"], "labels": ip["labels"], "description": str(ip, "description")}
-		if boot && str(ip, "sourceImage") == "" && str(ip, "sourceSnapshot") == "" {
+			"type": str(ip, "diskType"), "sizeGb": ip["diskSizeGb"], "labels": ip["labels"], "description": str(ip, "description"),
+			"resourcePolicies": ip["resourcePolicies"], "_seedKey": ip["_seedKey"], "_seedImage": ip["_seedImage"]}
+		if boot && str(ip, "sourceImage") == "" && str(ip, "sourceSnapshot") == "" && str(ip, "_seedKey") == "" {
 			return nil, nil, required(field + ".initializeParams.sourceImage")
 		}
 		if d, err = s.newDiskLocked(project, zone, b, field+".initializeParams"); err != nil {
@@ -185,6 +186,9 @@ func (s *Server) nicLocked(project, zone string, e map[string]any, i int) (obj, 
 	nic := obj{"kind": "compute#networkInterface", "name": "nic" + strconv.Itoa(i), "network": tmp["network"],
 		"subnetwork": tmp["subnetwork"], "networkIP": tmp["address"], "stackType": "IPV4_ONLY",
 		"fingerprint": newFingerprint()}
+	if st, ok := tmp["_static"]; ok {
+		nic["_static"] = st
+	}
 	if acs, _ := e["accessConfigs"].([]any); len(acs) > 0 {
 		var out []any
 		for _, a := range acs {
@@ -332,6 +336,19 @@ func (s *Server) instances(c call, zone string) (obj, error) {
 		return s.attachDisk(c, scope, rel, o)
 	case post && verb == "detachDisk":
 		return s.detachDisk(c, scope, rel, o)
+	case post && (verb == "addResourcePolicies" || verb == "removeResourcePolicies"):
+		return s.attachPolicies(c.project, scope, rel, o, c.body, verb == "addResourcePolicies", "instanceSchedulePolicy")
+	case post && verb == "setScheduling":
+		sched, _ := o["scheduling"].(obj)
+		if status != stTerminated && str(c.body, "provisioningModel") != "" && str(c.body, "provisioningModel") != str(sched, "provisioningModel") {
+			return nil, notReady(rel, status)
+		}
+		next, err := checkScheduling(c.body, sched)
+		if err != nil {
+			return nil, err
+		}
+		o["scheduling"] = next
+		return s.done(c.project, scope, "setScheduling", rel, o["id"])
 	}
 	return nil, unimplemented("%s on instances/%s is not served (#1963)", c.method, strings.Join(p[3:], "/"))
 }
@@ -339,7 +356,54 @@ func (s *Server) instances(c call, zone string) (obj, error) {
 // servedInstanceVerbs are the instance methods served under instances/NAME/.
 var servedInstanceVerbs = map[string]bool{"serialPort": true, "start": true, "stop": true, "reset": true, "suspend": true,
 	"resume": true, "setMetadata": true, "setLabels": true, "setTags": true, "setDeletionProtection": true,
-	"setMachineType": true, "attachDisk": true, "detachDisk": true}
+	"setMachineType": true, "attachDisk": true, "detachDisk": true, "addResourcePolicies": true, "removeResourcePolicies": true,
+	"setScheduling": true}
+
+// checkScheduling merges a scheduling update into cur as Google validates
+// it (compute/docs/instances/create-use-spot, read 2026-11-22): a Spot VM
+// cannot restart automatically or live-migrate, and takes an
+// instanceTerminationAction of STOP (the default) or DELETE.
+func checkScheduling(in map[string]any, cur obj) (obj, error) {
+	next := obj{}
+	for k, v := range cur {
+		next[k] = v
+	}
+	for k, v := range in {
+		next[k] = v
+	}
+	pm := vpcOrStr(str(next, "provisioningModel"), "STANDARD")
+	if pm != "STANDARD" && pm != "SPOT" {
+		return nil, invalid("Invalid value for field 'resource.scheduling.provisioningModel': '%s'. Must be STANDARD or SPOT.", pm)
+	}
+	next["provisioningModel"] = pm
+	if pm == "SPOT" || next["preemptible"] == true {
+		if _, set := in["automaticRestart"]; !set {
+			next["automaticRestart"] = false
+		}
+		if _, set := in["onHostMaintenance"]; !set {
+			next["onHostMaintenance"] = "TERMINATE"
+		}
+		if next["automaticRestart"] == true {
+			return nil, invalid("Invalid value for field 'resource.scheduling.automaticRestart': 'true'. Spot and preemptible instances cannot be restarted automatically.")
+		}
+		if str(next, "onHostMaintenance") != "TERMINATE" {
+			return nil, invalid("Invalid value for field 'resource.scheduling.onHostMaintenance': '%s'. Spot and preemptible instances must terminate on host maintenance.", str(next, "onHostMaintenance"))
+		}
+	}
+	if pm == "SPOT" {
+		ta := vpcOrStr(str(next, "instanceTerminationAction"), "STOP")
+		if ta != "STOP" && ta != "DELETE" {
+			return nil, invalid("Invalid value for field 'resource.scheduling.instanceTerminationAction': '%s'. Must be STOP or DELETE.", ta)
+		}
+		next["instanceTerminationAction"] = ta
+	} else {
+		if ta := str(in, "instanceTerminationAction"); ta != "" {
+			return nil, invalid("Invalid value for field 'resource.scheduling.instanceTerminationAction': '%s'. Only Spot VMs take a termination action.", ta)
+		}
+		delete(next, "instanceTerminationAction")
+	}
+	return next, nil
+}
 
 func notReady(rel, status string) error {
 	return errf(http.StatusBadRequest, "resourceNotReady", "The resource '%s' is not ready (it is %s)", rel, status)
@@ -375,9 +439,9 @@ func (s *Server) transition(project, scope, opType, rel string, o obj, during, a
 }
 
 func (s *Server) insertInstance(c call, zone string) (obj, error) {
-	b := c.body
-	if first(c.query, "sourceInstanceTemplate") != "" || str(b, "sourceMachineImage") != "" {
-		return nil, unimplemented("instances made from instance templates or machine images are not served (#1963)")
+	b, srcKind, srcRel, err := s.fromSourceLocked(c, zone)
+	if err != nil {
+		return nil, err
 	}
 	name := str(b, "name")
 	if err := checkName("resource.name", name); err != nil {
@@ -472,6 +536,9 @@ func (s *Server) insertInstance(c call, zone string) (obj, error) {
 			o[k] = v
 		}
 	}
+	if srcKind != "" {
+		o[srcKind] = srcRel
+	}
 	if l, ok := b["labels"].(map[string]any); ok && len(l) > 0 {
 		o["labels"], o["labelFingerprint"] = l, labelFingerprint(l)
 	}
@@ -479,10 +546,18 @@ func (s *Server) insertInstance(c call, zone string) (obj, error) {
 		o["tags"] = obj{"items": t["items"], "fingerprint": newFingerprint()}
 	}
 	if sc, ok := b["scheduling"].(map[string]any); ok {
-		sched := o["scheduling"].(obj)
-		for k, v := range sc {
-			sched[k] = v
+		next, err := checkScheduling(sc, o["scheduling"].(obj))
+		if err != nil {
+			return nil, err
 		}
+		o["scheduling"] = next
+	}
+	if pols := strsAny(b["resourcePolicies"]); len(pols) > 0 {
+		rels, err := s.checkPoliciesLocked(c.project, regionOfZone(zone), pols, "resource.resourcePolicies", "instanceSchedulePolicy")
+		if err != nil {
+			return nil, err
+		}
+		o["resourcePolicies"] = toAny(rels)
 	}
 	if sas, ok := b["serviceAccounts"].([]any); ok {
 		var out []any
@@ -510,6 +585,15 @@ func (s *Server) insertInstance(c call, zone string) (obj, error) {
 		if d, ok := s.res[src]; ok && !hasStr(created, src) {
 			d["users"] = append(toAny(strs(d, "users")), rel)
 			d["lastAttachTimestamp"] = s.stamp()
+		}
+	}
+	// A reserved static internal address the instance took is IN_USE by
+	// it (#2140).
+	for _, e := range nics {
+		if st := str(e.(obj), "_static"); st != "" {
+			if a, ok := s.res[st]; ok {
+				a["status"], a["users"] = "IN_USE", []any{rel}
+			}
 		}
 	}
 	s.res[rel] = norm(o)
@@ -542,6 +626,7 @@ func (s *Server) insertInstance(c call, zone string) (obj, error) {
 				delete(s.res, d)
 			}
 			s.releaseDisksLocked(rel)
+			s.releaseAddressesLocked(rel)
 			return
 		}
 		if cur, ok := s.res[rel]; ok {
@@ -565,6 +650,18 @@ func toAny(l []string) []any {
 		out[i] = v
 	}
 	return out
+}
+
+// releaseAddressesLocked returns every static address instance used to
+// RESERVED, as deleting an instance releases its static addresses
+// (#2140).
+func (s *Server) releaseAddressesLocked(instance string) {
+	for k, a := range s.res {
+		if strings.Contains(k, "/addresses/") && hasStr(strs(a, "users"), instance) {
+			a["status"] = "RESERVED"
+			delete(a, "users")
+		}
+	}
 }
 
 // releaseDisksLocked removes instance from every disk's users.
@@ -630,6 +727,7 @@ func (s *Server) deleteInstance(project, scope, rel string, o obj) (obj, error) 
 		}
 		delete(s.res, rel)
 		s.releaseDisksLocked(rel)
+		s.releaseAddressesLocked(rel)
 		for _, d := range autoDel {
 			delete(s.res, d)
 		}

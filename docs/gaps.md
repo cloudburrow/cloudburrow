@@ -35,8 +35,8 @@ tracks it; a closed issue is named only where it says what was built.
 | Spanner, Bigtable, Firestore, Datastore | 5 | 0 | 1 | 3 | 1 |
 | Cloud SQL, Memorystore | 6 | 1 | 4 | 1 | 0 |
 | Functions, credentials, tooling | 1 | 0 | 1 | 0 | 0 |
-| Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **65** | **5** | **18** | **36** | **6** |
+| Console | 2 | 1 | 1 | 0 | 0 |
+| **Total** | **67** | **6** | **19** | **36** | **6** |
 
 ## Cloud Storage
 
@@ -322,9 +322,14 @@ Cloud Functions v2 and v1 APIs (#1377, #1428); Pub/Sub and project IAM in Terraf
 
 Closed by the sweep: Test permissions on the Permissions tab (#1242), and the request-rate,
 latency and resource charts (#1267); the Artifact Registry repository Permissions tab (#1439).
+Compute Engine's instance templates, instance groups, machine images, custom images, snapshot and
+instance schedules, SSH keys, and VPC network peering, subnets, effective routes and internal
+addresses (#2139, #2140).
 
 | Gap | Why open | Size |
 |---|---|---|
+| Compute Engine methods served without a page yet (#2139): image and machine image labels after create, a managed group's Set instance template, Start, Stop, Suspend, Resume and Delete instances, an unmanaged group's named ports, and a VM's scheduling after create; each is in `docs/console-parity.md` §8 as a gap | not built yet | S |
+| Compute Engine choices drawn unavailable with the reason (#2139, #2140): regional disks and regional managed groups (replication across zones), autoscaling (no load signal), the Ops Agent, IPv6, image import from a Cloud Storage file or a virtual disk, and promoting an external ephemeral IP, which is `127.0.0.1` here | no emulator support | M |
 
 ## Excluded on purpose
 

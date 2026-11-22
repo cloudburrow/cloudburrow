@@ -187,10 +187,14 @@ func LookupImage(ref string) (PublicImage, error) {
 }
 
 // images serves images.list, images.get and images.getFromFamily of a
-// public image project; images.insert and every other method is 501.
+// public image project, and a project's own custom images
+// (customimages.go).
 func (s *Server) images(c call) (obj, error) {
 	p := c.parts
 	n := len(p)
+	if !isPublicImageProject(c.project) {
+		return s.customImages(c)
+	}
 	if why, ok := refusedImageProjects[c.project]; ok {
 		return nil, unimplemented("images of %s are not served: %s.", c.project, why)
 	}
@@ -228,7 +232,7 @@ func (s *Server) images(c call) (obj, error) {
 		}
 		return imageObj(img), nil
 	case n == 2 && c.method == http.MethodPost:
-		return nil, unimplemented("images.insert is not served: custom images are not built from a VM's disk yet (#1963); use the public images of debian-cloud, ubuntu-os-cloud and rocky-linux-cloud.")
+		return nil, errf(http.StatusForbidden, "forbidden", "Required 'compute.images.create' permission for 'projects/%s/global/images'", c.project)
 	}
 	return nil, unimplemented("%s on images of %s is not served (#1963)", c.method, c.project)
 }

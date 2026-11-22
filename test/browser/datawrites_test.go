@@ -79,9 +79,12 @@ func (d dataPage) summary(label string) string {
 // listeners see it.
 func (p *tab) setField(sel, value string) {
 	p.t.Helper()
+	// A checkbox takes "true" or "false" as checked or not, as the form
+	// sends it.
 	p.eval(fmt.Sprintf(`(() => { const f = document.querySelector(%q);
-		f.value = %q; f.dispatchEvent(new Event("input", { bubbles: true }));
-		f.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`, sel, value), nil)
+		if (f.type === "checkbox") f.checked = %q === "true"; else f.value = %q;
+		f.dispatchEvent(new Event("input", { bubbles: true }));
+		f.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`, sel, value, value), nil)
 }
 
 // servedProject is the one project the BigQuery emulator serves: the

@@ -223,6 +223,12 @@ func (s *Server) doLocked(c call) (obj, error) {
 				return s.patchNetwork(c.project, p[2], c.body)
 			case n == 4 && post && p[3] == "switchToCustomMode":
 				return s.switchToCustomMode(c.project, p[2])
+			case n == 4 && post && p[3] == "addPeering":
+				return s.addPeering(c.project, p[2], c.body)
+			case n == 4 && post && p[3] == "removePeering":
+				return s.removePeering(c.project, p[2], c.body)
+			case n == 4 && patch && p[3] == "updatePeering":
+				return s.updatePeering(c.project, p[2], c.body)
 			}
 		case "firewalls":
 			switch {
@@ -265,6 +271,10 @@ func (s *Server) doLocked(c call) (obj, error) {
 			return s.operation(c, rel)
 		case "snapshots":
 			return s.snapshots(c)
+		case "instanceTemplates":
+			return s.instanceTemplates(c, "global")
+		case "machineImages":
+			return s.machineImages(c)
 		}
 	case n >= 1 && p[0] == "regions":
 		if n == 1 && get {
@@ -313,6 +323,10 @@ func (s *Server) doLocked(c call) (obj, error) {
 			case n == 5 && post && p[4] == "setLabels":
 				return s.setLabels(c.project, scope, rel+"/"+p[3], c.body)
 			}
+		case "resourcePolicies":
+			return s.resourcePolicies(c, region)
+		case "instanceTemplates":
+			return s.instanceTemplates(c, "regions/"+region)
 		case "operations":
 			return s.operation(c, rel)
 		}
@@ -434,6 +448,14 @@ func (s *Server) aggregated(c call, coll string) (obj, error) {
 		m, kind = s.res, "compute#instanceAggregatedList"
 	case "disks":
 		m, kind = s.res, "compute#diskAggregatedList"
+	case "resourcePolicies":
+		m, kind = s.res, "compute#resourcePolicyAggregatedList"
+	case "instanceTemplates":
+		m, kind = s.res, "compute#instanceTemplateAggregatedList"
+	case "instanceGroups":
+		m, kind = s.res, "compute#instanceGroupAggregatedList"
+	case "instanceGroupManagers":
+		m, kind = s.res, "compute#instanceGroupManagerAggregatedList"
 	default:
 		return nil, unimplemented("aggregated/%s is not served", coll)
 	}

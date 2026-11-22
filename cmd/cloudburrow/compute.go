@@ -97,7 +97,7 @@ func (s *computeService) Start(ctx context.Context) error {
 		}
 		return s.metadataHost()
 	}
-	api, err := compute.New(compute.Options{State: state, Extra: s.instanceGroupManagers, NetworkUsers: s.networkUsers, VMs: s.vms})
+	api, err := compute.New(compute.Options{State: state, Extra: s.instanceGroupManagers, ExtraGroups: s.gkeGroups, NetworkUsers: s.networkUsers, VMs: s.vms})
 	if err != nil {
 		return err
 	}
@@ -133,9 +133,11 @@ func (s *computeService) Stop(ctx context.Context) error {
 }
 
 // instanceGroupManagers answers Kubernetes Engine's instance group
-// managers (#1913) on the Compute port.
+// managers (#1913) on the Compute port, when the compute service runs
+// without VMs; with them, the Compute API serves its own managed instance
+// groups and lists GKE's beside them (gkeGroups, #2139).
 func (s *computeService) instanceGroupManagers(w http.ResponseWriter, r *http.Request) bool {
-	if !strings.Contains(r.URL.Path, "/instanceGroupManagers") {
+	if !strings.Contains(r.URL.Path, "/instanceGroupManagers") || s.vms != nil {
 		return false
 	}
 	api := s.gke.API()
@@ -143,6 +145,14 @@ func (s *computeService) instanceGroupManagers(w http.ResponseWriter, r *http.Re
 		return false
 	}
 	return api.ServeInstanceGroupManagers(w, r)
+}
+
+// gkeGroups are a zone's Kubernetes Engine node-pool groups.
+func (s *computeService) gkeGroups(project, zone string) map[string]map[string]any {
+	if api := s.gke.API(); api != nil {
+		return api.InstanceGroupManagers(project, zone)
+	}
+	return nil
 }
 
 func (s *computeService) register(coord *lifecycle.Coordinator) {
