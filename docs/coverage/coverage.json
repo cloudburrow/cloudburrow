@@ -19108,7 +19108,7 @@
         "method": "google.cloud.dataform.v1.Dataform/CreateFolder",
         "status": "Verified",
         "tests": [
-          "test/compat/dataform_test.go:770 TestDataformFoldersAndConfig"
+          "test/compat/dataform_test.go:778 TestDataformFoldersAndConfig"
         ]
       },
       {
@@ -19132,7 +19132,7 @@
         "method": "google.cloud.dataform.v1.Dataform/CreateTeamFolder",
         "status": "Verified",
         "tests": [
-          "test/compat/dataform_test.go:770 TestDataformFoldersAndConfig"
+          "test/compat/dataform_test.go:778 TestDataformFoldersAndConfig"
         ]
       },
       {
@@ -19162,14 +19162,14 @@
         "method": "google.cloud.dataform.v1.Dataform/DeleteFolder",
         "status": "Verified",
         "tests": [
-          "test/compat/dataform_test.go:770 TestDataformFoldersAndConfig"
+          "test/compat/dataform_test.go:778 TestDataformFoldersAndConfig"
         ]
       },
       {
         "method": "google.cloud.dataform.v1.Dataform/DeleteFolderTree",
         "status": "Verified",
         "tests": [
-          "test/compat/dataform_test.go:770 TestDataformFoldersAndConfig"
+          "test/compat/dataform_test.go:778 TestDataformFoldersAndConfig"
         ]
       },
       {
@@ -19193,14 +19193,14 @@
         "method": "google.cloud.dataform.v1.Dataform/DeleteTeamFolder",
         "status": "Verified",
         "tests": [
-          "test/compat/dataform_test.go:770 TestDataformFoldersAndConfig"
+          "test/compat/dataform_test.go:778 TestDataformFoldersAndConfig"
         ]
       },
       {
         "method": "google.cloud.dataform.v1.Dataform/DeleteTeamFolderTree",
         "status": "Verified",
         "tests": [
-          "test/compat/dataform_test.go:770 TestDataformFoldersAndConfig"
+          "test/compat/dataform_test.go:778 TestDataformFoldersAndConfig"
         ]
       },
       {
@@ -19271,7 +19271,7 @@
         "method": "google.cloud.dataform.v1.Dataform/GetConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/dataform_test.go:770 TestDataformFoldersAndConfig",
+          "test/compat/dataform_test.go:778 TestDataformFoldersAndConfig",
           "test/compat/dataformkeys_test.go:147 TestDataformCustomerManagedKey"
         ]
       },
@@ -19279,7 +19279,7 @@
         "method": "google.cloud.dataform.v1.Dataform/GetFolder",
         "status": "Verified",
         "tests": [
-          "test/compat/dataform_test.go:770 TestDataformFoldersAndConfig"
+          "test/compat/dataform_test.go:778 TestDataformFoldersAndConfig"
         ]
       },
       {
@@ -19308,7 +19308,7 @@
         "method": "google.cloud.dataform.v1.Dataform/GetTeamFolder",
         "status": "Verified",
         "tests": [
-          "test/compat/dataform_test.go:770 TestDataformFoldersAndConfig"
+          "test/compat/dataform_test.go:778 TestDataformFoldersAndConfig"
         ]
       },
       {
@@ -19405,14 +19405,14 @@
         "method": "google.cloud.dataform.v1.Dataform/MoveFolder",
         "status": "Verified",
         "tests": [
-          "test/compat/dataform_test.go:770 TestDataformFoldersAndConfig"
+          "test/compat/dataform_test.go:778 TestDataformFoldersAndConfig"
         ]
       },
       {
         "method": "google.cloud.dataform.v1.Dataform/MoveRepository",
         "status": "Verified",
         "tests": [
-          "test/compat/dataform_test.go:770 TestDataformFoldersAndConfig"
+          "test/compat/dataform_test.go:778 TestDataformFoldersAndConfig"
         ]
       },
       {
@@ -19450,7 +19450,7 @@
         "method": "google.cloud.dataform.v1.Dataform/QueryFolderContents",
         "status": "Verified",
         "tests": [
-          "test/compat/dataform_test.go:770 TestDataformFoldersAndConfig"
+          "test/compat/dataform_test.go:778 TestDataformFoldersAndConfig"
         ]
       },
       {
@@ -19464,14 +19464,14 @@
         "method": "google.cloud.dataform.v1.Dataform/QueryTeamFolderContents",
         "status": "Verified",
         "tests": [
-          "test/compat/dataform_test.go:770 TestDataformFoldersAndConfig"
+          "test/compat/dataform_test.go:778 TestDataformFoldersAndConfig"
         ]
       },
       {
         "method": "google.cloud.dataform.v1.Dataform/QueryUserRootContents",
         "status": "Verified",
         "tests": [
-          "test/compat/dataform_test.go:770 TestDataformFoldersAndConfig"
+          "test/compat/dataform_test.go:778 TestDataformFoldersAndConfig"
         ]
       },
       {
@@ -19528,7 +19528,7 @@
         "method": "google.cloud.dataform.v1.Dataform/SearchTeamFolders",
         "status": "Verified",
         "tests": [
-          "test/compat/dataform_test.go:770 TestDataformFoldersAndConfig"
+          "test/compat/dataform_test.go:778 TestDataformFoldersAndConfig"
         ]
       },
       {
@@ -19549,7 +19549,7 @@
         "method": "google.cloud.dataform.v1.Dataform/UpdateConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/dataform_test.go:770 TestDataformFoldersAndConfig",
+          "test/compat/dataform_test.go:778 TestDataformFoldersAndConfig",
           "test/compat/dataformkeys_test.go:147 TestDataformCustomerManagedKey"
         ]
       },
@@ -19557,7 +19557,7 @@
         "method": "google.cloud.dataform.v1.Dataform/UpdateFolder",
         "status": "Verified",
         "tests": [
-          "test/compat/dataform_test.go:770 TestDataformFoldersAndConfig"
+          "test/compat/dataform_test.go:778 TestDataformFoldersAndConfig"
         ]
       },
       {
@@ -19579,7 +19579,7 @@
         "method": "google.cloud.dataform.v1.Dataform/UpdateTeamFolder",
         "status": "Verified",
         "tests": [
-          "test/compat/dataform_test.go:770 TestDataformFoldersAndConfig"
+          "test/compat/dataform_test.go:778 TestDataformFoldersAndConfig"
         ]
       },
       {
