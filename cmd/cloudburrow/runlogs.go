@@ -28,7 +28,6 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"net/url"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -37,13 +36,11 @@ import (
 
 	"cloud.google.com/go/logging/apiv2/loggingpb"
 	"google.golang.org/genproto/googleapis/api/monitoredres"
-	ltype "google.golang.org/genproto/googleapis/logging/type"
-	"google.golang.org/protobuf/types/known/structpb"
-	"google.golang.org/protobuf/types/known/timestamppb"
 
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/k8s"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
+	"github.com/cloudburrow/cloudburrow/internal/logagent"
 	"github.com/cloudburrow/cloudburrow/internal/resource"
 	"github.com/cloudburrow/cloudburrow/internal/service/logging"
 )
@@ -186,72 +183,7 @@ func cloneLabels(m map[string]string) map[string]string {
 
 // runLogEntry makes the entry Cloud Run writes for one line of a stream.
 func runLogEntry(src runLogSource, stream string, ts time.Time, line string) *loggingpb.LogEntry {
-	e := &loggingpb.LogEntry{
-		LogName:   "projects/" + src.project + "/logs/" + url.PathEscape(stream),
-		Resource:  src.resource,
-		Timestamp: timestamppb.New(ts),
-		Labels:    cloneLabels(src.labels),
-		Severity:  ltype.LogSeverity_DEFAULT,
-	}
-	var obj map[string]any
-	trimmed := strings.TrimSpace(line)
-	if strings.HasPrefix(trimmed, "{") && json.Unmarshal([]byte(trimmed), &obj) == nil {
-		structured(e, obj)
-		if p, err := structpb.NewStruct(obj); err == nil {
-			e.Payload = &loggingpb.LogEntry_JsonPayload{JsonPayload: p}
-			return e
-		}
-	}
-	e.Payload = &loggingpb.LogEntry_TextPayload{TextPayload: line}
-	return e
-}
-
-// structured reads the special fields of Google's structured logging out of
-// a JSON line into the entry, removing each it uses, as the logging agent
-// does; message and every other field stay in the payload.
-func structured(e *loggingpb.LogEntry, obj map[string]any) {
-	if s, ok := obj["severity"].(string); ok {
-		if v, ok := ltype.LogSeverity_value[strings.ToUpper(s)]; ok {
-			e.Severity = ltype.LogSeverity(v)
-			delete(obj, "severity")
-		} else if strings.EqualFold(s, "WARN") {
-			e.Severity = ltype.LogSeverity_WARNING
-			delete(obj, "severity")
-		}
-	}
-	if m, ok := obj["logging.googleapis.com/labels"].(map[string]any); ok {
-		for k, v := range m {
-			if s, ok := v.(string); ok {
-				e.Labels[k] = s
-			}
-		}
-		delete(obj, "logging.googleapis.com/labels")
-	}
-	if s, ok := obj["logging.googleapis.com/trace"].(string); ok {
-		e.Trace = s
-		delete(obj, "logging.googleapis.com/trace")
-	}
-	if s, ok := obj["logging.googleapis.com/spanId"].(string); ok {
-		e.SpanId = s
-		delete(obj, "logging.googleapis.com/spanId")
-	}
-	if b, ok := obj["logging.googleapis.com/trace_sampled"].(bool); ok {
-		e.TraceSampled = b
-		delete(obj, "logging.googleapis.com/trace_sampled")
-	}
-	if s, ok := obj["logging.googleapis.com/insertId"].(string); ok {
-		e.InsertId = s
-		delete(obj, "logging.googleapis.com/insertId")
-	}
-	for _, f := range []string{"time", "timestamp"} {
-		if s, ok := obj[f].(string); ok {
-			if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
-				e.Timestamp = timestamppb.New(t)
-				delete(obj, f)
-				break
-			}
-		}
-	}
+	return logagent.Entry(src.project, stream, src.resource, src.labels, ts, line)
 }
 
 // runLogFeeder follows Cloud Run containers into Cloud Logging.
@@ -500,16 +432,5 @@ func (f *runLogFeeder) read(ctx context.Context, r io.Reader, s runLogSource, si
 
 // parseCRILine splits one line of a container runtime log file.
 func parseCRILine(l string) (ts time.Time, stream, text string, complete, ok bool) {
-	parts := strings.SplitN(l, " ", 4)
-	if len(parts) < 3 {
-		return time.Time{}, "", "", false, false
-	}
-	t, err := time.Parse(time.RFC3339Nano, parts[0])
-	if err != nil || (parts[1] != "stdout" && parts[1] != "stderr") {
-		return time.Time{}, "", "", false, false
-	}
-	if len(parts) == 4 {
-		text = parts[3]
-	}
-	return t, parts[1], text, parts[2] != "P", true
+	return logagent.ParseCRILine(l)
 }

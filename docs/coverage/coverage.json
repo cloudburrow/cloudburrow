@@ -20192,7 +20192,7 @@
         "method": "google.container.v1.ClusterManager/SetLoggingService",
         "status": "Verified",
         "tests": [
-          "test/compat/gketelemetry_test.go:257 TestGcloudContainerClusterLoggingAndMonitoring",
+          "test/compat/gketelemetry_test.go:269 TestGcloudContainerClusterLoggingAndMonitoring",
           "test/compat/gketelemetry_test.go:95 TestGKELoggingAndMonitoring"
         ]
       },
@@ -20215,7 +20215,7 @@
         "method": "google.container.v1.ClusterManager/SetMonitoringService",
         "status": "Verified",
         "tests": [
-          "test/compat/gketelemetry_test.go:257 TestGcloudContainerClusterLoggingAndMonitoring",
+          "test/compat/gketelemetry_test.go:269 TestGcloudContainerClusterLoggingAndMonitoring",
           "test/compat/gketelemetry_test.go:95 TestGKELoggingAndMonitoring"
         ]
       },

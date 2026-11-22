@@ -38,6 +38,14 @@ storage-binaries:
 			-o internal/storageimage/bin/cloudburrow-storage-linux-$$arch ./cmd/cloudburrow-storage || exit 1; \
 	done
 
+## logging-agent-binaries: Cross-build the Linux Kubernetes Engine logging agent the CLI embeds (#2100)
+.PHONY: logging-agent-binaries
+logging-agent-binaries:
+	for arch in amd64 arm64; do \
+		CGO_ENABLED=0 GOOS=linux GOARCH=$$arch go build -trimpath -ldflags "$(LDFLAGS)" \
+			-o internal/logagentimage/bin/cloudburrow-logging-agent-linux-$$arch ./cmd/cloudburrow-logging-agent || exit 1; \
+	done
+
 ## bigquery-binaries: Build the patched Linux BigQuery emulator the CLI embeds, from pinned, checksummed sources (#1061)
 # goccy/bigquery-emulator v0.8.1 with CloudBurrow's patches to its SQL
 # engine (third_party/bigquery-emulator). About two minutes from an empty Go
@@ -80,7 +88,7 @@ bigquery-patch-tests:
 
 ## build: Build the binary into bin/, with the Linux storage server and BigQuery emulator embedded
 .PHONY: build
-build: storage-binaries bigquery-binaries
+build: storage-binaries logging-agent-binaries bigquery-binaries
 	@mkdir -p $(BIN_DIR)
 	go build -trimpath -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/$(BINARY) ./cmd/$(BINARY)
 	@echo "built $(BIN_DIR)/$(BINARY) ($(VERSION))"
@@ -120,7 +128,7 @@ TOKENIZERS_SHA256_linux-amd64 := 72556cdca798dd4ea7cdaba308e5f0d68a8cb93b67c96ed
 TOKENIZERS_SHA256_linux-arm64 := e96545ad05930c26f51f63d932ee6d3bbd32bbed149e102c5290d587a2293067
 TOKENIZERS_LIB_DIR ?= $(BIN_DIR)/tokenizers/$(TOKENIZERS_VERSION)/$(TOKENIZERS_PLATFORM)
 .PHONY: build-onnx
-build-onnx: storage-binaries bigquery-binaries onnx-compile
+build-onnx: storage-binaries logging-agent-binaries bigquery-binaries onnx-compile
 	@echo "built $(BIN_DIR)/$(BINARY)-onnx ($(VERSION)); run it with ONNXRUNTIME_LIB=/path/to/libonnxruntime"
 
 ## onnx-compile: Build and vet the onnx-tagged CLI alone, without making the embedded binaries (CI's onnx job)
@@ -143,7 +151,7 @@ $(BIN_DIR)/tokenizers/$(TOKENIZERS_VERSION)/%/libtokenizers.a:
 
 ## install: Install the binary into GOBIN
 .PHONY: install
-install: storage-binaries bigquery-binaries
+install: storage-binaries logging-agent-binaries bigquery-binaries
 	go install -trimpath -ldflags "$(LDFLAGS)" ./cmd/$(BINARY)
 
 ## compat-python: Run the official Python SDK suite against a running instance (CLOUDBURROW_ARGS names it)

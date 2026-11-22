@@ -168,6 +168,13 @@ func TestGKELoggingAndMonitoring(t *testing.T) {
 	if e.Labels["k8s-pod/app"] != "telemetry-2100" || e.Labels["compute.googleapis.com/resource_name"] == "" {
 		t.Errorf("entry labels = %v", e.Labels)
 	}
+	// Shipped by the cluster's own agent, as GKE's: the kube-system
+	// DaemonSet fluentbit-gke, one ready pod on each node.
+	if ds := gkeKubectl(t, kc, "", "get", "daemonset", "-n", "kube-system", "fluentbit-gke", "-o",
+		"jsonpath={.status.desiredNumberScheduled} {.status.numberReady}"); len(strings.Fields(ds)) != 2 ||
+		strings.Fields(ds)[0] != strings.Fields(ds)[1] || strings.Fields(ds)[0] == "0" {
+		t.Errorf("kube-system/fluentbit-gke desired and ready = %q", ds)
+	}
 	if !gkeEventually(30*time.Second, func() bool { got = gkeLogEntries(ctx, t, ac, cluster, err1); return len(got) > 0 }) {
 		t.Fatalf("the pod's standard error is not in Cloud Logging")
 	}
@@ -204,6 +211,11 @@ func TestGKELoggingAndMonitoring(t *testing.T) {
 		t.Errorf("after none: %q %v", c.GetLoggingService(), c.GetLoggingConfig())
 	}
 	time.Sleep(5 * time.Second)
+	if !gkeEventually(60*time.Second, func() bool {
+		return gkeKubectl(t, kc, "", "get", "daemonset", "-n", "kube-system", "fluentbit-gke", "--ignore-not-found", "-o", "name") == ""
+	}) {
+		t.Error("the fluentbit-gke DaemonSet is still there with logging none")
+	}
 	out2 := "stdout-" + stamp + "-2"
 	gkeLogPod(t, kc, "lg2", out2, "")
 	time.Sleep(20 * time.Second)

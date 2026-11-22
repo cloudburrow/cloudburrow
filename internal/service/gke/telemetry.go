@@ -10,6 +10,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/cloudburrow/cloudburrow/internal/logagent"
 )
 
 // Logging and monitoring (#2100): a cluster's logs go to Cloud Logging and
@@ -89,10 +91,7 @@ var defaultMonitoring = []containerpb.MonitoringComponentConfig_Component{
 }
 
 // SystemNamespaces are the namespaces whose pods' logs are system logs.
-var SystemNamespaces = map[string]bool{
-	"kube-system": true, "istio-system": true, "knative-serving": true,
-	"gke-system": true, "config-management-system": true,
-}
+var SystemNamespaces = logagent.SystemNamespaces
 
 // TelemetryTarget is a running cluster and what is shipped of it.
 type TelemetryTarget struct {
