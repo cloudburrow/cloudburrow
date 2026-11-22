@@ -24,8 +24,11 @@ const registryTokenTTL = time.Hour
 // the key's account. With --iam-enforcement=on, credentials the instance
 // does not accept are refused, and each request is checked against the
 // repository's policy and its project's, through the one evaluator, as
-// Artifact Registry's API is; with it off, any credentials are taken and
-// nothing is checked, as for every other service.
+// Artifact Registry's API is, and a request with no credentials is
+// allUsers alone, which pulls only from a repository whose policy grants
+// it and never pushes (ADR-0006, Artifact Registry's amendment); with it
+// off, any credentials are taken and nothing is checked, as for every
+// other service.
 func useRegistryAuth(e *iameval.Enforcer, creds *metadata.Credentials) {
 	on := func() bool { return e != nil && e.On != nil && e.On() }
 	runadapter.UseRegistryAuth(&registry.Auth{
@@ -50,6 +53,19 @@ func useRegistryAuth(e *iameval.Enforcer, creds *metadata.Credentials) {
 		Authorize: func(bearer, permission, resource string) error {
 			if !on() {
 				return nil
+			}
+			if bearer == registry.AnonymousToken {
+				// No credentials: allUsers alone, which may pull from a
+				// repository whose policy grants it, and never push
+				// (ADR-0006, Artifact Registry's amendment).
+				if permission == "" {
+					return nil
+				}
+				if permission == registry.PermissionDownload &&
+					e.AuthorizeAnonymous(context.Background(), iameval.ArtifactRegistry, permission, resource) == nil {
+					return nil
+				}
+				return &registry.DeniedError{Permission: permission, Resource: resource, Anonymous: true}
 			}
 			if permission == "" {
 				// Only the token's validity: the ping.

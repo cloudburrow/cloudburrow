@@ -78,6 +78,12 @@ type Docker struct {
 	// Mint mints a token of the instance for a service account that
 	// exists, for a job's RunAs; nil refuses RunAs.
 	Mint func(email string) (string, error)
+	// RegistryToken is the access token a container_image is read from
+	// the Artifact Registry with: the instance's own account's, standing
+	// for the service agent that reads it on Google, since a request with
+	// no credentials is allUsers under --iam-enforcement=on (ADR-0006).
+	// nil reads it with none.
+	RegistryToken func() string
 	// KeyCheck checks a job's customer-managed key for its agent
 	// (cmek.Keys.Usable on the host's Cloud KMS), or is nil, when a job
 	// with a key is refused: the instance serves no Cloud KMS.

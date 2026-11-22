@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -280,7 +281,12 @@ func TestArtifactRegistryReferrers(t *testing.T) {
 // artifactregistry.repositories.downloadArtifacts; Artifact Registry
 // Reader on the repository's own policy lets it pull and still not push
 // (uploadArtifacts); Writer on the project lets it push. A _json_key
-// login with a key of the account's is the account too.
+// login with a key of the account's is the account too. A request with
+// no credentials is allUsers (ADR-0006): an anonymous pull of the private
+// repository is 403 "Unauthenticated request", as Google refuses it;
+// after `gcloud artifacts repositories add-iam-policy-binding --member
+// allUsers --role roles/artifactregistry.reader` it pulls, and an
+// anonymous push is still refused.
 func TestIAMEnforcementArtifactRegistryDocker(t *testing.T) {
 	h := New(t)
 	h.Endpoint(EnvRun)
@@ -308,12 +314,6 @@ func TestIAMEnforcementArtifactRegistryDocker(t *testing.T) {
 		t.Fatalf("GET /v2/ = %d, WWW-Authenticate %q; want 401 and the Bearer challenge", resp.StatusCode, ch)
 	}
 
-	// The instance's own account pushes (no credentials: the owner).
-	img, _ := random.Image(256, 1)
-	if err := crane.Push(img, local+":v1", append(registryOptions(h), crane.WithAuth(authn.Anonymous))...); err != nil {
-		t.Fatalf("push as the instance's account: %v", err)
-	}
-	p := newIAMPrincipal(t, h, project, "iear")
 	as := func(tok string) []crane.Option {
 		return append(registryOptions(h), crane.WithAuth(&authn.Basic{Username: "oauth2accesstoken", Password: tok}))
 	}
@@ -324,6 +324,72 @@ func TestIAMEnforcementArtifactRegistryDocker(t *testing.T) {
 			t.Fatalf("%s = %v; want %d %s", what, err, code, perm)
 		}
 	}
+	// The instance's own account pushes with its token.
+	_, owner := instanceAccount(t)
+	ownerTok, err := owner.Token()
+	if err != nil {
+		t.Fatalf("the instance account's token: %v", err)
+	}
+	img, _ := random.Image(256, 1)
+	if err := crane.Push(img, local+":v1", as(ownerTok.AccessToken)...); err != nil {
+		t.Fatalf("push as the instance's account: %v", err)
+	}
+
+	// No credentials: allUsers, which the private repository refuses
+	// until its policy grants allUsers Artifact Registry Reader.
+	anon := append(registryOptions(h), crane.WithAuth(authn.Anonymous))
+	unauth := `Unauthenticated request. Unauthenticated requests do not have permission `
+	_, err = crane.Digest(local+":v1", anon...)
+	wantStatus("anonymous pull of a private repository", err, 403,
+		unauth+`"artifactregistry.repositories.downloadArtifacts" on resource "`+repoName+`"`)
+	anonImg, _ := random.Image(64, 1)
+	err = crane.Push(anonImg, local+":anon", anon...)
+	wantStatus("anonymous push to a private repository", err, 403, "")
+	// The push's first request with no credentials is the challenge, and
+	// with the anonymous token the token endpoint issues, the refusal.
+	uploads := "http://" + strings.Replace(local, "/", "/v2/", 1) + "/blobs/uploads/"
+	anonUpload := func(auth string) (int, string, string) {
+		req, _ := http.NewRequest(http.MethodPost, uploads, nil)
+		if auth != "" {
+			req.Header.Set("Authorization", auth)
+		}
+		resp, err := (&http.Client{Transport: rt}).Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, resp.Header.Get("WWW-Authenticate"), string(b)
+	}
+	if code, ch, _ := anonUpload(""); code != 401 || !strings.Contains(ch, ":push,pull\"") {
+		t.Errorf("an upload with no credentials = %d %q; want 401 and the challenge for push", code, ch)
+	}
+	if code, _, body := anonUpload("Bearer anonymous"); code != 403 || !strings.Contains(body, "DENIED") ||
+		!strings.Contains(body, unauth+`\"artifactregistry.repositories.uploadArtifacts\"`) {
+		t.Errorf("an upload with the anonymous token = %d %s; want 403 DENIED, unauthenticated, uploadArtifacts", code, body)
+	}
+	g := newGcloudSession(t, h)
+	repoFlags := []string{"enforced", "--project", project, "--location", "us-central1", "--member", "allUsers",
+		"--role", "roles/artifactregistry.reader"}
+	g.must(append([]string{"artifacts", "repositories", "add-iam-policy-binding"}, repoFlags...)...)
+	waitGranted(t, "anonymous pull of a public repository", func() error {
+		_, err := crane.Digest(local+":v1", anon...)
+		return err
+	})
+	if _, err := crane.Pull(local+":v1", anon...); err != nil {
+		t.Errorf("anonymous pull of the public repository's image: %v", err)
+	}
+	err = crane.Push(anonImg, local+":anon", anon...)
+	wantStatus("anonymous push to a public repository", err, 403, unauth+`"artifactregistry.repositories.uploadArtifacts"`)
+	g.must(append([]string{"artifacts", "repositories", "remove-iam-policy-binding"}, repoFlags...)...)
+	waitGranted(t, "anonymous pull refused again", func() error {
+		if _, err := crane.Digest(local+":v1", anon...); err == nil {
+			return errors.New("an anonymous pull still succeeds")
+		}
+		return nil
+	})
+
+	p := newIAMPrincipal(t, h, project, "iear")
 	_, err = crane.Digest(local+":v1", as(p.token)...)
 	wantStatus("pull without a role", err, 403, `Permission "artifactregistry.repositories.downloadArtifacts" denied on resource "`+repoName+`"`)
 	_, err = crane.Digest(local+":v1", as("cbl_not-minted-here")...)

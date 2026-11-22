@@ -604,3 +604,32 @@ own account as well, which is otherwise the owner of everything. Which permissio
 and their v2 names, are Google's published list, embedded. Policy Troubleshooter v3 explains the
 deny policies rule by rule. The rule that nothing is enforced unless `--iam-enforcement=on` is
 unchanged: with enforcement off, deny policies are stored and explained but refuse nothing.
+
+## Amendment: anonymous Artifact Registry requests (#2111, 2026-11-22)
+
+With `--iam-enforcement=on`, a Docker or OCI registry request with no credentials (no
+`Authorization` header, or the anonymous token the token endpoint issues for none) is `allUsers`
+alone, as Cloud Run invoke's is above, rather than the instance's own account. That is what
+Google does: an anonymous pull of a private repository is asked for a token (401 with the Bearer
+challenge), and the anonymous token is then refused, `403 DENIED` "Unauthenticated request.
+Unauthenticated requests do not have permission "artifactregistry.repositories.downloadArtifacts"
+on resource …"; a repository is made public by granting `allUsers` Artifact Registry Reader
+(https://docs.cloud.google.com/artifact-registry/docs/access-control, "Configuring public access
+to a repository", read 2026-11-22), and then anyone pulls it. An anonymous push, upload or delete
+is always refused: Google documents public access as read-only, and an anonymous write is never
+served (*UNVERIFIED, re-read 2026-11-22: https://docs.cloud.google.com/artifact-registry/docs/access-control
+does not say what Google answers an anonymous write to a repository whose policy grants `allUsers`
+more than Reader*). The anonymous `_catalog` lists only public repositories, and a
+cross-repository mount from a repository `allUsers` cannot read falls back to an upload.
+
+Two callers are not anonymous although they send no credentials of a principal, because on Google
+a service agent makes their pull: a cluster node's containerd, which reaches the registry as a
+mirror of `{location}-docker.pkg.dev` (its `ns` parameter names that host) for a Cloud Run
+revision or a Vertex AI prediction container, pulls as the instance's account (the stand-in for the
+Cloud Run service agent; a pull only, since the mirror has only the pull and resolve capabilities);
+and a BigQuery Spark procedure's `container_image` is read with a token minted for the instance's
+account. With enforcement off nothing changes: no credentials are served, as everything is.
+Required tests: `TestIAMEnforcementArtifactRegistryDocker` (an anonymous pull refused, allowed after
+`gcloud artifacts repositories add-iam-policy-binding --member=allUsers
+--role=roles/artifactregistry.reader`, refused again after its removal; an anonymous push refused
+throughout), `TestTokenAuth` in `internal/registry`, `TestAuthorizeAnonymous` in `internal/iameval`.

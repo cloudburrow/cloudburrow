@@ -31,6 +31,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
@@ -85,8 +86,14 @@ func (d *Docker) customImage(ctx context.Context, uri, runtimeImage string) (*cu
 	tr := &http.Transport{DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, network, addr)
 	}}
-	img, err := remote.Image(ref, remote.WithContext(ctx), remote.WithTransport(tr),
-		remote.WithPlatform(v1.Platform{OS: "linux", Architecture: runtime.GOARCH}))
+	opts := []remote.Option{remote.WithContext(ctx), remote.WithTransport(tr),
+		remote.WithPlatform(v1.Platform{OS: "linux", Architecture: runtime.GOARCH})}
+	if d.RegistryToken != nil {
+		if tok := d.RegistryToken(); tok != "" {
+			opts = append(opts, remote.WithAuth(&authn.Basic{Username: "oauth2accesstoken", Password: tok}))
+		}
+	}
+	img, err := remote.Image(ref, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("container_image %s cannot be read from Artifact Registry: %v", uri, err)
 	}

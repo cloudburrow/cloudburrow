@@ -396,14 +396,15 @@ jobs:
       - name: shellcheck the release scripts
         if: runner.os == 'Linux'
         run: |
-          # scripts/compat-env.sh, compat-shards.sh, verify-local.sh, localai-models.sh and
-          # bigquery-engine-soak.sh are bash, and checked as bash below.
-          find scripts -maxdepth 1 -name '*.sh' ! -name compat-env.sh ! -name compat-shards.sh ! -name verify-local.sh ! -name bigquery-engine-soak.sh ! -name endpoint-inventory.sh ! -name localai-models.sh -exec shellcheck -s sh {} +
+          # scripts/compat-env.sh, compat-shards.sh, verify-local.sh, localai-models.sh,
+          # oci-tools.sh and bigquery-engine-soak.sh are bash, and checked as bash below.
+          find scripts -maxdepth 1 -name '*.sh' ! -name compat-env.sh ! -name compat-shards.sh ! -name verify-local.sh ! -name bigquery-engine-soak.sh ! -name endpoint-inventory.sh ! -name localai-models.sh ! -name oci-tools.sh -exec shellcheck -s sh {} +
           # Bash helpers the workflows source (#675), and the compat
           # environment generator (#711), checked as bash.
           shellcheck -s bash .github/scripts/*.sh scripts/compat-env.sh
-          # The BigQuery engine soak that reproduces #989, and the localai shard's model fetch (#1985), as bash.
-          shellcheck -s bash scripts/bigquery-engine-soak.sh scripts/localai-models.sh
+          # The BigQuery engine soak that reproduces #989, the localai shard's model fetch (#1985) and
+          # the iam shard's registry clients (#2111), as bash.
+          shellcheck -s bash scripts/bigquery-engine-soak.sh scripts/localai-models.sh scripts/oci-tools.sh
           # The endpoint inventory of the pinned tools (#1975), as bash.
           shellcheck -s bash scripts/endpoint-inventory.sh
           # The compat job's shards and their local run (#705), as bash.
@@ -619,11 +620,15 @@ jobs:
       # emulators shard, and gcloud sql's, in the sql shard. The versioned release archive,
       # checked against its pinned SHA-256 before it is unpacked, and never
       # given credentials. 88 MB and a few seconds to unpack, so it is not
-      # cached: restoring the unpacked 460 MB would take longer. 593.0.0
+      # cached: restoring the unpacked 460 MB would take longer. The iam
+      # shard has it for TestIAMEnforcementArtifactRegistryOCIClients'
+      # `gcloud auth print-access-token`, docker-credential-gcloud and
+      # `gcloud artifacts attachments`, and the allUsers binding
+      # TestIAMEnforcementArtifactRegistryDocker adds (#2111). 593.0.0
       # since 586.0.0 had no `gcloud alpha source-manager hooks`, which
       # TestGcloudSourceManagerHooks drives (#1927; main run 44645694075).
       - name: Install the Google Cloud CLI
-        if: matrix.shard == 'storage' || matrix.shard == 'served' || matrix.shard == 'run' || matrix.shard == 'crossservice' || matrix.shard == 'scale' || matrix.shard == 'emulators' || matrix.shard == 'memorystore' || matrix.shard == 'sql' || matrix.shard == 'sqlreplicas'
+        if: matrix.shard == 'storage' || matrix.shard == 'served' || matrix.shard == 'run' || matrix.shard == 'crossservice' || matrix.shard == 'scale' || matrix.shard == 'emulators' || matrix.shard == 'memorystore' || matrix.shard == 'sql' || matrix.shard == 'sqlreplicas' || matrix.shard == 'iam'
         run: |
           curl --retry 5 --retry-all-errors -fsSLo "$RUNNER_TEMP/gcloud.tar.gz" https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-593.0.0-linux-x86_64.tar.gz
           echo "42c32b7553c712f71fcf6f124546c0519437f53755f47f9bd0c957998cd6b826  $RUNNER_TEMP/gcloud.tar.gz" | sha256sum -c -
@@ -638,6 +643,18 @@ jobs:
           printf '[component_manager]\ndisable_update_check = true\n' >> "$RUNNER_TEMP/google-cloud-sdk/properties"
           echo "$RUNNER_TEMP/google-cloud-sdk/bin" >> "$GITHUB_PATH"
           "$RUNNER_TEMP/google-cloud-sdk/bin/gcloud" version
+
+      # The real registry clients TestIAMEnforcementArtifactRegistryOCIClients
+      # runs in the iam shard (#2111): oras 1.2.3, cosign 2.4.3 and crane
+      # 0.20.3 (Apache-2.0, each project's linux release binary, checked
+      # against the SHA-256 its release's checksums file publishes, which
+      # dependencies.json's realTools records) in CB_OCI_TOOLS, and the
+      # docker:27.5.1-dind image pulled by its digest, CB_OCI_CLIENT_IMAGE.
+      # Nothing signs in to a registry; the clients run on an internal
+      # Docker network whose one route is the instance.
+      - name: Fetch the OCI registry clients
+        if: matrix.shard == 'iam'
+        run: scripts/oci-tools.sh "$RUNNER_TEMP/oci-tools" | tee -a "$GITHUB_ENV"
 
       # Google's Cloud SQL Auth Proxy binary for TestCloudSQLAuthProxyBinary
       # (#1421), in the shard that runs the Cloud SQL suite, sql (#1472): `make
