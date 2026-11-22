@@ -1517,6 +1517,84 @@
     },
     "realTools": {
       "$comment": "The real tools compatibility.md's Verified real-tool rows name (#694). Test-only: CI installs or resolves them for the compat job, never with credentials; cloudburrow never ships or pulls them. A bump changes the pin here, in ci.yml or the test, and the versions in compatibility.md together.",
+      "oras": {
+        "version": "1.2.3",
+        "source": "https://github.com/oras-project/oras",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "license": "Apache-2.0",
+        "redistribution": "not-redistributed",
+        "scope": "test-only",
+        "usedBy": ".github/workflows/ci.yml, compat job, iam shard: scripts/oci-tools.sh downloads it, checks it against this pin and puts it in CB_OCI_TOOLS for TestIAMEnforcementArtifactRegistryOCIClients (#2111), which runs it in a container on an internal Docker network whose one route is a relay to the instance",
+        "updateFeed": "github-releases",
+        "verification": "release-checksum",
+        "checksumsFile": "https://github.com/oras-project/oras/releases/download/v1.2.3/oras_1.2.3_checksums.txt",
+        "checksums": {
+          "oras_1.2.3_linux_amd64.tar.gz": "sha256:b4efc97a91f471f323f193ea4b4d63d8ff443ca3aab514151a30751330852827",
+          "oras_1.2.3_linux_arm64.tar.gz": "sha256:90e24e234dc6dffe73365533db66fd14449d2c9ae77381081596bf92f40f6b82"
+        },
+        "checksumsNote": "Copied from the release's published checksums file on 2026-11-22, and matched by the arm64 archive downloaded then."
+      },
+      "cosign": {
+        "version": "v2.4.3",
+        "source": "https://github.com/sigstore/cosign",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "license": "Apache-2.0",
+        "redistribution": "not-redistributed",
+        "scope": "test-only",
+        "usedBy": ".github/workflows/ci.yml, compat job, iam shard: scripts/oci-tools.sh downloads it, checks it against this pin and puts it in CB_OCI_TOOLS for TestIAMEnforcementArtifactRegistryOCIClients (#2111), which runs it in a container on an internal Docker network whose one route is a relay to the instance",
+        "updateFeed": "github-releases",
+        "verification": "release-checksum",
+        "checksumsFile": "https://github.com/sigstore/cosign/releases/download/v2.4.3/cosign_checksums.txt",
+        "checksums": {
+          "cosign-linux-amd64": "sha256:caaad125acef1cb81d58dcdc454a1e429d09a750d1e9e2b3ed1aed8964454708",
+          "cosign-linux-arm64": "sha256:bd0f9763bca54de88699c3656ade2f39c9a1c7a2916ff35601caf23a79be0629"
+        },
+        "checksumsNote": "Copied from the release's published checksums file on 2026-11-22, and matched by the arm64 binary downloaded then."
+      },
+      "crane": {
+        "version": "v0.20.3",
+        "source": "https://github.com/google/go-containerregistry",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "license": "Apache-2.0",
+        "redistribution": "not-redistributed",
+        "scope": "test-only",
+        "usedBy": ".github/workflows/ci.yml, compat job, iam shard: scripts/oci-tools.sh downloads it, checks it against this pin and puts it in CB_OCI_TOOLS for TestIAMEnforcementArtifactRegistryOCIClients (#2111), which runs it in a container on an internal Docker network whose one route is a relay to the instance; Google's go-containerregistry, whose Go module the CLI already links, at its release's crane binary",
+        "updateFeed": "github-releases",
+        "verification": "release-checksum",
+        "checksumsFile": "https://github.com/google/go-containerregistry/releases/download/v0.20.3/checksums.txt",
+        "checksums": {
+          "go-containerregistry_Linux_x86_64.tar.gz": "sha256:36c67a932f489b3f2724b64af90b599a8ef2aa7b004872597373c0ad694dc059",
+          "go-containerregistry_Linux_arm64.tar.gz": "sha256:d2235f7779cd39c6e40f43701d2512c997409f629fb53e621ede0d57d3f995e2"
+        },
+        "checksumsNote": "Copied from the release's published checksums file on 2026-11-22, and matched by the arm64 archive downloaded then."
+      },
+      "dockerDind": {
+        "image": "docker:27.5.1-dind",
+        "version": "27.5.1",
+        "digest": "sha256:aa3df78ecf320f5fafdce71c659f1629e96e9de0968305fe1de670e0ca9176ce",
+        "source": "https://hub.docker.com/_/docker",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "license": "Apache-2.0 (Docker Engine, Moby); the image also carries Alpine and its packages",
+        "redistribution": "not-redistributed",
+        "redistributionPlan": "Pulled from Docker Hub by digest by scripts/oci-tools.sh, in CI's iam shard or by a developer; never by cloudburrow.",
+        "scope": "test-only",
+        "usedBy": ".github/workflows/ci.yml, compat job, iam shard: CB_OCI_CLIENT_IMAGE for TestIAMEnforcementArtifactRegistryOCIClients (#2111): the image the oras, cosign and crane binaries and the relay run in, and the docker daemon docker login, push and pull run in",
+        "verification": "image-digest",
+        "updateFeed": "docker-hub-tags",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest (the multi-platform index's) with `docker buildx imagetools inspect docker:<version>-dind`."
+      },
       "googleCloudCli": {
         "version": "593.0.0",
         "source": "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-593.0.0-linux-x86_64.tar.gz",
@@ -1531,7 +1609,7 @@
         "license": "google-cloud-cli-terms",
         "redistribution": "pull-only",
         "scope": "test-only",
-        "usedBy": ".github/workflows/ci.yml, compat job, storage, served, run and emulators shards: the gcloud, gsutil and bq tests in test/compat, through CLOUDBURROW_TEST_GCLOUD; test/compat/testdata/envdns/Dockerfile (TestEnvResolvesNoGoogleName, #2038), which checks the archive for its architecture against checksums",
+        "usedBy": ".github/workflows/ci.yml, compat job, storage, served, run, emulators and iam shards: the gcloud, gsutil and bq tests in test/compat, through CLOUDBURROW_TEST_GCLOUD; test/compat/testdata/envdns/Dockerfile (TestEnvResolvesNoGoogleName, #2038), which checks the archive for its architecture against checksums",
         "updateFeed": "gcloud-component-snapshot",
         "skipDiscovery": "Released through Google's Cloud SDK channel, not GitHub; the current version is .version in https://dl.google.com/dl/cloudsdk/channels/rapid/components-2.json.",
         "verification": "release-checksum",

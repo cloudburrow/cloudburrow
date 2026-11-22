@@ -89,7 +89,7 @@ type sparkRunnerService struct {
 // invoker's @@spark_proc_properties.service_account. keyCheck checks a
 // job's customer-managed key on the instance's Cloud KMS (cmekKeys' Usable).
 func newSparkRunner(cfg config.Config, out io.Writer, live func() map[string]string, mint func(email string) (string, error),
-	keyCheck func(ctx context.Context, project, agent, key string) error) *sparkRunnerService {
+	keyCheck func(ctx context.Context, project, agent, key string) error, registryToken func() string) *sparkRunnerService {
 	if !sparkRunnerEnabled(cfg) {
 		return nil
 	}
@@ -114,11 +114,13 @@ func newSparkRunner(cfg config.Config, out io.Writer, live func() map[string]str
 		Storage:  addr("bigquery-storage"),
 		Registry: addr("run"),
 		Mint:     mint,
-		KeyCheck: keyCheck,
-		Instance: cfg.Name,
-		Cache:    cache,
-		Logf:     func(format string, args ...any) { fmt.Fprintf(out, "cloudburrow: "+format+"\n", args...) },
-		Log:      sparkLogger(func() string { return live()["logging"] }),
+		// The registry reads a container_image as the instance's account.
+		RegistryToken: registryToken,
+		KeyCheck:      keyCheck,
+		Instance:      cfg.Name,
+		Cache:         cache,
+		Logf:          func(format string, args ...any) { fmt.Fprintf(out, "cloudburrow: "+format+"\n", args...) },
+		Log:           sparkLogger(func() string { return live()["logging"] }),
 	}
 	return &sparkRunnerService{addr: net.JoinHostPort(cfg.BindAddress, strconv.Itoa(cfg.Endpoints.Spark)), h: sparkproc.NewServer(d)}
 }

@@ -35,7 +35,10 @@ const (
 )
 
 // AnonymousToken is the token issued to a client that sends no
-// credentials; a request bearing it is one with no credentials.
+// credentials; a request bearing it, or sending none, is anonymous, which
+// Auth.Authorize is given as this token: with --iam-enforcement=on it is
+// allUsers alone, as Google's registry takes it (ADR-0006, Artifact
+// Registry's amendment).
 const AnonymousToken = "anonymous"
 
 // TokenPath is the token endpoint, the realm /v2/ names.
@@ -44,11 +47,22 @@ const TokenPath = "/v2/token"
 // ErrUnauthenticated is credentials the instance does not accept.
 var ErrUnauthenticated = errors.New("authentication failed")
 
-// DeniedError is a caller without a permission on a repository.
-type DeniedError struct{ Permission, Resource string }
+// DeniedError is a caller without a permission on a repository;
+// Anonymous is a request with no credentials.
+type DeniedError struct {
+	Permission, Resource string
+	Anonymous            bool
+}
 
 func (e *DeniedError) Error() string {
-	// Google's wording of the Docker registry's refusal.
+	// Google's wording of the Docker registry's refusals: an anonymous
+	// pull of a repository that is not public is refused with
+	// "Unauthenticated request. Unauthenticated requests do not have
+	// permission ...".
+	if e.Anonymous {
+		return fmt.Sprintf("Unauthenticated request. Unauthenticated requests do not have permission %q on resource %q (or it may not exist).",
+			e.Permission, e.Resource)
+	}
 	return fmt.Sprintf("Permission %q denied on resource %q (or it may not exist).", e.Permission, e.Resource)
 }
 
@@ -57,10 +71,12 @@ type Auth struct {
 	// Login turns a username and password into a bearer token:
 	// ErrUnauthenticated for credentials it does not accept.
 	Login func(username, password string) (token string, err error)
-	// Authorize checks that the caller of bearer ("" for a request with
-	// no credentials) holds permission on the repository resource
-	// (projects/P/locations/L/repositories/R): nil, ErrUnauthenticated
-	// or a *DeniedError.
+	// Authorize checks that the caller of bearer holds permission on the
+	// repository resource (projects/P/locations/L/repositories/R): nil,
+	// ErrUnauthenticated or a *DeniedError. bearer is AnonymousToken for
+	// a request with no credentials, and "" for the cluster's own pulls
+	// (containerd's, through the mirror: Cloud Run's service agent),
+	// which are the instance's account.
 	Authorize func(bearer, permission, resource string) error
 	// Required reports whether a request with no credentials is asked
 	// for them (--iam-enforcement=on), as Google's registry asks for a
@@ -118,26 +134,46 @@ func (h *Handler) challenge(w http.ResponseWriter, r *http.Request, scope, msg s
 }
 
 // credentials are a request's: its bearer token, or the token its Basic
-// credentials log in to. present is false when it sends none.
+// credentials log in to, AnonymousToken for none. present is false when
+// it sends no Authorization header.
 func (h *Handler) credentials(r *http.Request) (bearer string, present bool, err error) {
 	v := r.Header.Get("Authorization")
 	if v == "" {
-		return "", false, nil
+		if clusterPull(r) {
+			return "", false, nil
+		}
+		return AnonymousToken, false, nil
 	}
 	if tok, ok := cutScheme(v, "Bearer"); ok {
-		if tok == AnonymousToken {
+		if tok == AnonymousToken && clusterPull(r) {
 			return "", true, nil
 		}
 		return tok, true, nil
 	}
 	if u, p, ok := r.BasicAuth(); ok {
 		tok, err := h.login(u, p)
-		if tok == AnonymousToken {
+		if tok == AnonymousToken && clusterPull(r) {
 			tok = ""
 		}
 		return tok, true, err
 	}
 	return "", true, ErrUnauthenticated
+}
+
+// clusterPull reports whether r is a pull by a cluster node's containerd,
+// which reaches the registry as a mirror of {location}-docker.pkg.dev and
+// so names that registry in the ns parameter (clusterhost.go's
+// hosts.toml). Google's pull for a Cloud Run revision (or a Vertex AI
+// prediction container) is its service agent's, not an anonymous one, so
+// the node's pull is the instance's account, as it was before anonymous
+// requests became allUsers. Only a pull is: the mirror has only the pull
+// and resolve capabilities.
+func clusterPull(r *http.Request) bool {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		return false
+	}
+	ns := r.URL.Query().Get("ns")
+	return LocationOf(ns) != "" && strings.HasSuffix(strings.ToLower(ns), "-docker.pkg.dev")
 }
 
 func cutScheme(v, scheme string) (string, bool) {
@@ -165,7 +201,7 @@ func (h *Handler) ping(w http.ResponseWriter, r *http.Request) bool {
 		h.challenge(w, r, "", "authentication required")
 		return false
 	}
-	if err == nil && bearer != "" && h.Auth.Authorize != nil {
+	if err == nil && bearer != "" && bearer != AnonymousToken && h.Auth.Authorize != nil {
 		// A bearer token the instance did not mint.
 		err = h.Auth.Authorize(bearer, "", "")
 	}
@@ -228,7 +264,7 @@ func (h *Handler) authorize(w http.ResponseWriter, r *http.Request, repo Repo, n
 	}
 	scope := "repository:" + name + ":" + action
 	bearer, present, err := h.credentials(r)
-	if !present && h.Auth.Required != nil && h.Auth.Required() {
+	if !present && bearer == AnonymousToken && h.Auth.Required != nil && h.Auth.Required() {
 		h.challenge(w, r, scope, "authentication required")
 		return false
 	}

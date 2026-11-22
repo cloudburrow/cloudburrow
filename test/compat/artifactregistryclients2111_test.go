@@ -6,9 +6,18 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
+	"math/big"
 	"net"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -34,7 +43,11 @@ import (
 //     (Apache-2.0) and crane (go-containerregistry's, Apache-2.0), each
 //     from its project's own release page; a missing one's steps skip;
 //   - CB_OCI_CLIENT_IMAGE, or a local docker:*dind* image, runs them and
-//     the relay, and is the docker daemon docker login and push run in.
+//     the relays, and is the docker daemon docker login and push run in.
+//
+// scripts/oci-tools.sh fetches both by dependencies.json's realTools pins
+// (each binary checked against its release's published SHA-256, the image
+// pulled by digest), as CI's iam shard does.
 
 // ociClientEnv is the tools directory and the image, skipping the test
 // when either is missing.
@@ -72,6 +85,9 @@ type ociRunner struct {
 	ctx                   context.Context
 	tools, image, network string
 	work                  string
+	// env is more environment for every client (SSL_CERT_FILE, once
+	// the TLS relay is up).
+	env []string
 }
 
 // has reports whether the tools directory holds bin.
@@ -89,7 +105,11 @@ func (o *ociRunner) run(home, stdin, bin string, args ...string) (string, error)
 	o.t.Helper()
 	a := []string{"run", "--rm", "-i", "--network", o.network, "-v", o.tools + ":/tools:ro", "-v", o.work + ":/work", "-w", "/work",
 		"-e", "HOME=/work/" + home, "-e", "DOCKER_CONFIG=/work/" + home + "/.docker", "-e", "COSIGN_PASSWORD=", "-e", "COSIGN_YES=true", "-e", "COSIGN_EXPERIMENTAL=1",
-		"--entrypoint", "/tools/" + bin, o.image}
+		"--entrypoint", "/tools/" + bin}
+	for _, e := range o.env {
+		a = append(a, "-e", e)
+	}
+	a = append(a, o.image)
 	cmd := exec.CommandContext(o.ctx, "docker", append(a, args...)...)
 	cmd.Stdin = strings.NewReader(stdin)
 	out, err := cmd.CombinedOutput()
@@ -118,6 +138,141 @@ func redactToken(s string) string {
 		}
 	}
 	return s
+}
+
+// tlsRelaySource is a reverse proxy, on :443 with the certificate and key
+// its first two arguments name (once they are written: the certificate
+// names the relay's address on the internal network, known only once it
+// is connected), to the plain HTTP registry at its third,
+// saying X-Forwarded-Proto: https so the registry's Bearer challenge names
+// an https token endpoint. Clients that dial HTTPS whatever their insecure
+// flags say (cosign's OCI 1.1 mode) reach the registry through it.
+const tlsRelaySource = `package main
+
+import (
+	"net"
+	"net/http"
+	"net/http/httputil"
+	"net/url"
+	"os"
+	"time"
+)
+
+func main() {
+	host, port, err := net.SplitHostPort(os.Args[3])
+	if err != nil {
+		panic(err)
+	}
+	addrs, err := net.LookupHost(host)
+	if err != nil {
+		panic(err)
+	}
+	target := &url.URL{Scheme: "http", Host: net.JoinHostPort(addrs[0], port)}
+	p := httputil.NewSingleHostReverseProxy(target)
+	direct := p.Director
+	p.Director = func(r *http.Request) { direct(r); r.Header.Set("X-Forwarded-Proto", "https") }
+	p.FlushInterval = -1
+	for {
+		if _, err := os.Stat(os.Args[2]); err == nil {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	ln, err := net.Listen("tcp", ":443")
+	if err != nil {
+		panic(err)
+	}
+	println("ready", target.Host)
+	panic(http.ServeTLS(ln, p, os.Args[1], os.Args[2]))
+}
+`
+
+// tlsRelay serves the registry on the Run port over TLS to o's network at
+// the relay's address there, which it returns (the registry answers an IP
+// address, ADR-0004's DNS-rebinding defence refusing other names): the
+// relay built for the daemon's architecture and run as internalNetwork
+// runs its own, a CA and a leaf certificate for that address made here
+// (never trusted outside the test), and SSL_CERT_FILE set for every later
+// client to the CA, so they verify the registry's certificate rather than
+// skip verification.
+func (o *ociRunner) tlsRelay(port string) string {
+	t := o.t
+	t.Helper()
+	dir := filepath.Join(o.work, "tls")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	arch, err := exec.CommandContext(o.ctx, "docker", "version", "--format", "{{.Server.Arch}}").Output()
+	if err != nil {
+		t.Fatalf("docker version: %v", err)
+	}
+	src := t.TempDir()
+	if err := os.WriteFile(filepath.Join(src, "main.go"), []byte(tlsRelaySource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "go.mod"), []byte("module tlsrelay\n\ngo 1.21\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	build := exec.CommandContext(o.ctx, "go", "build", "-o", filepath.Join(dir, "relay"), ".")
+	build.Dir = src
+	build.Env = append(os.Environ(), "GOOS=linux", "GOARCH="+strings.TrimSpace(string(arch)), "CGO_ENABLED=0", "GOFLAGS=")
+	if b, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build the TLS relay: %v\n%s", err, b)
+	}
+	relay := fmt.Sprintf("cb-tlsrelay-%d", time.Now().UnixNano()%1e9)
+	args := append([]string{"run", "-d", "--name", relay, "-v", dir + ":/relay:ro", "--entrypoint", "/relay/relay"}, hostRelayArgs(t, o.ctx)...)
+	args = append(args, o.image, "/relay/cert.pem", "/relay/key.pem", "host.docker.internal:"+port)
+	if b, err := exec.CommandContext(o.ctx, "docker", args...).CombinedOutput(); err != nil {
+		t.Fatalf("start the TLS relay: %v\n%s", err, b)
+	}
+	t.Cleanup(func() { _ = exec.Command("docker", "rm", "-f", "-v", relay).Run() })
+	if b, err := exec.CommandContext(o.ctx, "docker", "network", "connect", o.network, relay).CombinedOutput(); err != nil {
+		t.Fatalf("connect the TLS relay: %v\n%s", err, b)
+	}
+	b, err := exec.CommandContext(o.ctx, "docker", "inspect", "--format", "{{(index .NetworkSettings.Networks \""+o.network+"\").IPAddress}}", relay).Output()
+	ip := net.ParseIP(strings.TrimSpace(string(b)))
+	if err != nil || ip == nil {
+		t.Fatalf("the TLS relay's address on %s = %q, %v", o.network, b, err)
+	}
+	caKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	ca := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "CloudBurrow test registry CA"},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(24 * time.Hour), IsCA: true, BasicConstraintsValid: true,
+		KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature}
+	caDER, err := x509.CreateCertificate(rand.Reader, ca, ca, &caKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caCert, _ := x509.ParseCertificate(caDER)
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	leaf := &x509.Certificate{SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: ip.String()}, IPAddresses: []net.IP{ip},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(24 * time.Hour),
+		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
+	leafDER, err := x509.CreateCertificate(rand.Reader, leaf, caCert, &key.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyDER, _ := x509.MarshalECPrivateKey(key)
+	// The key last: the relay starts serving once it is there.
+	for _, f := range []struct {
+		name string
+		b    *pem.Block
+	}{{"ca.pem", &pem.Block{Type: "CERTIFICATE", Bytes: caDER}}, {"cert.pem", &pem.Block{Type: "CERTIFICATE", Bytes: leafDER}},
+		{"key.pem", &pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}}} {
+		if err := os.WriteFile(filepath.Join(dir, f.name), pem.EncodeToMemory(f.b), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(200 * time.Millisecond) {
+		logs, _ := exec.CommandContext(o.ctx, "docker", "logs", relay).CombinedOutput()
+		if strings.Contains(string(logs), "ready") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the TLS relay did not start:\n%s", logs)
+		}
+	}
+	o.env = append(o.env, "SSL_CERT_FILE=/work/tls/ca.pem")
+	return ip.String()
 }
 
 // layerTar is a one-file tar layer.
@@ -151,7 +306,11 @@ func layerTar(t *testing.T, name, content string) []byte {
 //     official client's ListAttachments lists;
 //   - cosign: generate-key-pair, sign with the key (no transparency log;
 //     the network has no route out), verify, attach sbom, tree (its
-//     sha256-<hex>.sig and .sbom tags);
+//     sha256-<hex>.sig and .sbom tags); then, over TLS through a relay
+//     whose certificate a CA made here signs (cosign trusts it by
+//     SSL_CERT_FILE, no insecure flag), sign
+//     --registry-referrers-mode=oci-1-1, which the referrers API lists
+//     and ListAttachments has, and verify --experimental-oci11;
 //   - docker, in a docker:dind daemon on the same network: `docker login
 //     -u oauth2accesstoken --password-stdin` with gcloud's `gcloud auth
 //     print-access-token`, as Google documents, then import, push, pull;
@@ -331,11 +490,39 @@ func TestIAMEnforcementArtifactRegistryOCIClients(t *testing.T) {
 		if out := o.must("owner", "", "cosign", append([]string{"tree"}, append(flags, subject)...)...); !strings.Contains(out, "Signatures") || !strings.Contains(out, "SBOMs") {
 			t.Errorf("cosign tree = %q; want its signatures and SBOMs", out)
 		}
-		// cosign sign --registry-referrers-mode=oci-1-1 is not run: cosign
-		// 2.4 dials that mode's registry over HTTPS whatever
-		// --allow-http-registry says ("server gave HTTP response to HTTPS
-		// client"), and this registry is plain HTTP on loopback. oras
-		// covers the referrers API.
+
+		// cosign's OCI 1.1 mode dials HTTPS whatever --allow-http-registry
+		// says ("server gave HTTP response to HTTPS client"), so it runs
+		// through the TLS relay, with the test CA trusted and no insecure
+		// flag: the signature is an OCI 1.1 artifact whose subject is the
+		// image, which the referrers API lists and verify finds there.
+		tlsHost := o.tlsRelay(port)
+		tsubject := tlsHost + "/" + project + "/oci-clients/app@" + digest
+		o.must("owner", ownerTok.AccessToken+"\n", "cosign", "login", tlsHost, "-u", "oauth2accesstoken", "--password-stdin")
+		o.must("owner", "", "cosign", "sign", "--key", "cosign.key", "--tlog-upload=false", "--registry-referrers-mode=oci-1-1", tsubject)
+		if out := o.must("owner", "", "cosign", "verify", "--experimental-oci11", "--key", "cosign.pub", "--insecure-ignore-tlog=true",
+			tsubject); !strings.Contains(out, digest) {
+			t.Errorf("cosign verify --experimental-oci11 = %q; want the signed digest", out)
+		}
+		const sigType = "application/vnd.dev.cosign.artifact.sig.v1+json"
+		req, _ := http.NewRequest(http.MethodGet, "http://"+strings.SplitN(local, "/", 2)[0]+"/v2/"+project+"/oci-clients/app/referrers/"+digest+
+			"?artifactType="+url.QueryEscape(sigType), nil)
+		req.SetBasicAuth("oauth2accesstoken", ownerTok.AccessToken)
+		resp, err := (&http.Client{Transport: registryTransport(h)}).Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var idx struct {
+			Manifests []struct{ ArtifactType string } `json:"manifests"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&idx)
+		resp.Body.Close()
+		if resp.StatusCode != 200 || len(idx.Manifests) != 1 || idx.Manifests[0].ArtifactType != sigType {
+			t.Errorf("referrers of the image with artifactType %s = %d %+v; want cosign's OCI 1.1 signature", sigType, resp.StatusCode, idx.Manifests)
+		}
+		if a := listAttachments()[sigType]; a == nil || !strings.HasSuffix(a.GetTarget(), "/versions/"+digest) {
+			t.Errorf("ListAttachments has cosign's OCI 1.1 signature as %v; want an attachment of the image's version", a)
+		}
 	}
 
 	// docker, in a docker:dind daemon on the network.
