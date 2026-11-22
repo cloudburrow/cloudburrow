@@ -449,6 +449,16 @@ func (s *Server) refreshManagedLocked(mgr string, o obj, tpl string) {
 // settledLocked is whether every VM of a manager is RUNNING with no
 // operation of its own running.
 func (s *Server) settledLocked(rel string) bool {
+	prefix := rel[:strings.Index(rel, "/instanceGroupManagers/")]
+	prefix = prefix[:strings.LastIndex(prefix, "/")] // projects/P/zones or projects/P/regions
+	prefix = prefix[:strings.LastIndex(prefix, "/")] + "/zones/"
+	for vm, n := range s.queued {
+		// A VM being made again (recreateManagedFromLocked) is not yet
+		// listed; its group is not settled until it is.
+		if n > 0 && strings.HasPrefix(vm, prefix) && s.res[vm] == nil && strings.Contains(vm, "/instances/") {
+			return false
+		}
+	}
 	for _, vm := range s.managedLocked(rel) {
 		o := s.res[vm]
 		if o == nil || o["_deleting"] == true || s.queued[vm] > 0 || str(o, "status") != stRunning {

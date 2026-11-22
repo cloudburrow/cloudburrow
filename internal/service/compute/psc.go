@@ -84,10 +84,14 @@ func (s *Server) forwardingRules(c call, region string) (obj, error) {
 		return s.getRes(rel + "/" + p[base])
 	case n == base+1 && del:
 		return s.deleteForwardingRule(c.project, scope, rel+"/"+p[base])
+	case n == base+1 && c.method == http.MethodPatch:
+		return s.patchForwardingRule(c.project, scope, rel+"/"+p[base], c.body)
 	case n == base+2 && post && p[base+1] == "setLabels":
 		return s.setLabels(c.project, scope, rel+"/"+p[base], c.body)
+	case n == base+2 && post && p[base+1] == "setTarget":
+		return s.setForwardingRuleTarget(c.project, scope, rel+"/"+p[base], c.body)
 	}
-	return nil, unimplemented("%s %s/%s is not served: forwarding rules are Private Service Connect endpoints here (insert, get, list, delete, setLabels)",
+	return nil, unimplemented("%s %s/%s is not served: forwarding rules are Private Service Connect endpoints here (insert, get, list, patch, delete, setLabels, setTarget)",
 		c.method, rel, strings.Join(p[base:], "/"))
 }
 
@@ -142,6 +146,9 @@ func (s *Server) insertForwardingRule(project, region string, b obj) (obj, error
 		if str(addr, "purpose") != "PRIVATE_SERVICE_CONNECT" {
 			return nil, invalid("Invalid value for field 'resource.IPAddress': '%s'. The address of an endpoint for Google APIs must be a global internal address of purpose PRIVATE_SERVICE_CONNECT.", str(b, "IPAddress"))
 		}
+		if b["allowPscGlobalAccess"] == true {
+			return nil, invalid("Invalid value for field 'resource.allowPscGlobalAccess': true. Global access applies to endpoints for published services only.")
+		}
 		o["target"], o["IPAddress"], o["pscConnectionStatus"] = target, str(addr, "address"), "ACCEPTED"
 		o["_address"] = str(addr, "selfLink")
 		addr["status"], addr["users"] = "IN_USE", []any{rel}
@@ -185,6 +192,9 @@ func (s *Server) insertForwardingRule(project, region string, b obj) (obj, error
 			o["IPAddress"], o["subnetwork"] = tmp["address"], tmp["subnetwork"]
 		}
 		o["pscConnectionStatus"] = pscStatus(a, project)
+		if b["allowPscGlobalAccess"] == true {
+			o["allowPscGlobalAccess"] = true
+		}
 	}
 	o["id"], o["creationTimestamp"] = newID(), s.stamp()
 	s.res[rel] = norm(o)

@@ -14474,8 +14474,8 @@
     "Key": "compute",
     "Title": "Compute Engine API (v1): VPC networking",
     "counts": {
-      "Implemented": 64,
-      "Unimplemented": 107,
+      "Implemented": 78,
+      "Unimplemented": 93,
       "Verified": 168
     },
     "rows": [
@@ -14796,8 +14796,8 @@
       },
       {
         "method": "compute.forwardingRules.patch",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.forwardingRules.setLabels",
@@ -14808,8 +14808,8 @@
       },
       {
         "method": "compute.forwardingRules.setTarget",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.globalAddresses.delete",
@@ -14884,8 +14884,8 @@
       },
       {
         "method": "compute.globalForwardingRules.patch",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.globalForwardingRules.setLabels",
@@ -14896,8 +14896,8 @@
       },
       {
         "method": "compute.globalForwardingRules.setTarget",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.globalOperations.aggregatedList",
@@ -16188,13 +16188,13 @@
       },
       {
         "method": "compute.routers.deleteNamedSet",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.routers.deleteRoutePolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.routers.get",
@@ -16205,8 +16205,8 @@
       },
       {
         "method": "compute.routers.getNamedSet",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.routers.getNatIpInfo",
@@ -16225,8 +16225,8 @@
       },
       {
         "method": "compute.routers.getRoutePolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.routers.getRouterStatus",
@@ -16258,13 +16258,13 @@
       },
       {
         "method": "compute.routers.listNamedSets",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.routers.listRoutePolicies",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.routers.patch",
@@ -16275,13 +16275,13 @@
       },
       {
         "method": "compute.routers.patchNamedSet",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.routers.patchRoutePolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.routers.preview",
@@ -16299,13 +16299,13 @@
       },
       {
         "method": "compute.routers.updateNamedSet",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.routers.updateRoutePolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.routes.delete",

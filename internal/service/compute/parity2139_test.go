@@ -44,6 +44,12 @@ func waitIdle(t *testing.T, s *Server) {
 	for {
 		s.mu.Lock()
 		n := len(s.waiters)
+		for vm, q := range s.queued {
+			// A managed VM being made again (recreateManagedFromLocked).
+			if _, listed := s.res[vm]; q > 0 && !listed {
+				n++
+			}
+		}
 		s.mu.Unlock()
 		if n == 0 {
 			return

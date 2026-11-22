@@ -855,10 +855,19 @@ func (s *Server) recreateManagedFromLocked(project, mgr string, m obj, vm string
 	}
 	mgrAction(o, "RECREATING")
 	opRel := str(op, "selfLink")
+	// Until it is made again, the VM is pending (queued under its own
+	// name), so no loop takes the group for settled and short of a VM
+	// in between and makes one of a new name.
+	s.queued[vm]++
 	go func() {
 		s.waitOp(context.Background(), opRel)
 		s.mu.Lock()
 		defer s.mu.Unlock()
+		defer func() {
+			if s.queued[vm]--; s.queued[vm] <= 0 {
+				delete(s.queued, vm)
+			}
+		}()
 		cur, ok := s.res[mgr]
 		if !ok {
 			return
