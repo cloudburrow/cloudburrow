@@ -1186,6 +1186,11 @@ type Section struct {
 	// Text is the content when Kind is KindText. Newlines are significant and
 	// the client renders it monospace.
 	Text string `json:"text,omitempty"`
+	// Download, on a KindText section, is the file name a Download button
+	// beside Copy saves Text as, labelled "Download" and the section's
+	// label: Google's issued certificate has Download certificate and
+	// Download certificate chain (#2144).
+	Download string `json:"download,omitempty"`
 	// Language, on a KindText section, is the language Text is in, which
 	// the console highlights: "workflows" is a workflow's source, YAML or
 	// JSON, drawn with its syntax highlighted beside the graph of its

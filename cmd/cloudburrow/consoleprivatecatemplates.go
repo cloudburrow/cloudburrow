@@ -50,20 +50,58 @@ func (p privateCATemplatesProvider) List(ctx context.Context, project string) (c
 
 var privateCAUsages = []string{"digital_signature", "key_encipherment", "server_auth", "client_auth", "code_signing", "email_protection"}
 
+// CreateForm is Google's Create template (creating-certificate-template,
+// read 2026-11-22): Region and Certificate template ID; the predefined
+// values; the extension constraints; the identity constraints.
 func (privateCATemplatesProvider) CreateForm() (string, []console.Field) {
-	return "Create template", []console.Field{
-		{Name: "certificateTemplateId", Label: "Template ID", Type: "text", Required: true, Pattern: privateCAIDPattern},
-		{Name: "location", Label: "Region", Type: "select", Required: true, Default: "us-central1", Options: privateCALocations()},
-		{Name: "description", Label: "Description", Type: "text"},
-		{Name: "usages", Label: "Key usages", Type: "text", Default: "digital_signature,server_auth",
-			Help: "Comma-separated predefined values: " + strings.Join(privateCAUsages, ", ") + ". They override the request's."},
-		{Name: "allowSubjectPassthrough", Label: "Allow the request's subject", Type: "checkbox", Default: "true"},
-		{Name: "allowSansPassthrough", Label: "Allow the request's subject alternative names", Type: "checkbox", Default: "true"},
-		{Name: "celExpression", Label: "Identity CEL expression", Type: "textarea", Help: privateCACELHelp},
-		{Name: "passthroughExtensions", Label: "Passthrough extensions", Type: "text", Help: privateCAExtensionsHelp},
-		{Name: "maximumLifetimeDays", Label: "Maximum lifetime (days)", Type: "text", Pattern: `^[0-9]{0,5}$`},
-		labelsField(nil, ""),
+	const first, pre, ext, ident = "Region and ID", "Configure predefined values", "Configure extension constraints", "Configure identity constraints"
+	fields := []console.Field{
+		{Name: "location", Label: "Region", Type: "select", Required: true, Default: "us-central1", Options: privateCALocations(), Section: first,
+			Help: "It must match the location of the CA pools that use the template."},
+		{Name: "certificateTemplateId", Label: "Certificate template ID", Type: "text", Required: true, Pattern: privateCAIDPattern, Section: first},
+		{Name: "description", Label: "Description", Type: "text", Section: first},
+		{Name: "maximumLifetimeDays", Label: "Maximum lifetime (days)", Type: "text", Pattern: `^[0-9]{0,5}$`, Section: first},
+		{Name: "includePredefined", Label: "Include predefined values in certificates issued using this certificate template", Type: "checkbox", Section: pre},
 	}
+	for _, f := range privateCAX509Fields("includePredefined") {
+		f.Section = pre
+		fields = append(fields, f)
+	}
+	return "Create template", append(fields,
+		console.Field{Name: "extensionMode", Label: "Extension constraints", Type: "radio", Default: "copyAll", Section: ext,
+			Options: []string{"copyAll", "dropAll", "specific"},
+			OptionLabels: map[string]string{"copyAll": "Copy all the extensions from certificate requests to the certificate",
+				"dropAll": "Drop all extensions from certificate requests", "specific": "Copy specific extensions from certificate requests to the certificate"}},
+		console.Field{Name: "knownExtensions", Label: "Known certificate extensions", Type: "text", ShowWhen: "extensionMode=specific", Section: ext,
+			Help: "Comma-separated: BASE_KEY_USAGE, EXTENDED_KEY_USAGE, CA_OPTIONS, POLICY_IDS, AIA_OCSP_SERVERS, NAME_CONSTRAINTS."},
+		console.Field{Name: "customExtensions", Label: "Custom extensions", Type: "text", ShowWhen: "extensionMode=specific", Section: ext,
+			Help: "Comma-separated dotted object identifiers."},
+		console.Field{Name: "allowSubjectPassthrough", Label: "Copy subject from the certificate requests to the certificate", Type: "checkbox", Default: "true", Section: ident},
+		console.Field{Name: "allowSansPassthrough", Label: "Copy subject alternative names (SAN) from the certificate requests to the certificate", Type: "checkbox", Default: "true", Section: ident},
+		console.Field{Name: "celExpression", Label: "CEL expression", Type: "textarea", Help: privateCACELHelp, Section: ident},
+		withSection(labelsField(nil, ""), ident),
+	)
+}
+
+// privateCATemplateExtensions reads Configure extension constraints: Copy
+// all is no constraint, Drop all an empty one, Copy specific the ones
+// named. The old passthroughExtensions text is still read when it is
+// given (the template's Edit).
+func privateCATemplateExtensions(values map[string]string) (*privatecapb.CertificateExtensionConstraints, error) {
+	switch values["extensionMode"] {
+	case "dropAll":
+		return &privatecapb.CertificateExtensionConstraints{}, nil
+	case "specific":
+		ext, err := privateCAParseExtensions(values["knownExtensions"] + "," + values["customExtensions"])
+		if err != nil {
+			return nil, err
+		}
+		if ext == nil {
+			return nil, fmt.Errorf("name at least one known or custom extension to copy")
+		}
+		return ext, nil
+	}
+	return privateCAParseExtensions(values["passthroughExtensions"])
 }
 
 // privateCATemplateValues are predefined values from a usages list.
@@ -99,7 +137,13 @@ func (p privateCATemplatesProvider) Create(ctx context.Context, project string, 
 	if project == "" {
 		return "", fmt.Errorf("choose a project before creating a template")
 	}
-	pv, err := privateCATemplateValues(values["usages"])
+	var pv *privatecapb.X509Parameters
+	var err error
+	if values["includePredefined"] == "true" {
+		pv, err = privateCAX509FromForm(values)
+	} else if values["usages"] != "" {
+		pv, err = privateCATemplateValues(values["usages"])
+	}
 	if err != nil {
 		return "", err
 	}
@@ -111,7 +155,7 @@ func (p privateCATemplatesProvider) Create(ctx context.Context, project string, 
 	if err != nil {
 		return "", err
 	}
-	ext, err := privateCAParseExtensions(values["passthroughExtensions"])
+	ext, err := privateCATemplateExtensions(values)
 	if err != nil {
 		return "", err
 	}
@@ -188,7 +232,8 @@ func (p privateCATemplatesProvider) Detail(ctx context.Context, project string, 
 				{Label: "Request's SANs allowed", Value: fmt.Sprint(ic == nil || ic.GetAllowSubjectAltNamesPassthrough())},
 				{Label: "Identity CEL expression", Value: kmsOrDash(ic.GetCelExpression().GetExpression())},
 				{Label: "Passthrough extensions", Value: kmsOrDash(privateCAExtensionsText(t.GetPassthroughExtensions()))},
-				{Label: "Maximum lifetime", Value: life}, {Label: "Labels", Value: kmsOrDash(labelsText(t.GetLabels()))}}}}}},
+				{Label: "Maximum lifetime", Value: life}, {Label: "Labels", Value: kmsOrDash(labelsText(t.GetLabels()))}}},
+			{Heading: "Predefined values", Properties: privateCAX509Text(t.GetPredefinedValues())}}}},
 	}, nil
 }
 

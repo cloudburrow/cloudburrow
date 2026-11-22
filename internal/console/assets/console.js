@@ -122,6 +122,8 @@ const AP_ROUTES = agentPlatformRoutes();
 const GKE_DISCOVERY = ["/kubernetes/gateways", "/kubernetes/services", "/kubernetes/ingress"];
 // Secret Manager's page tabs (#1850): the global secrets and Regional secrets.
 const SECRET_TABS = ["/secrets", "/secrets-regional"];
+// Certificate Authority Service's tabs (#2144).
+const CAS_TABS = ["/security/cas", "/security/cas/certificateAuthorities", "/security/cas/certificates", "/security/cas/templates"];
 const GKE_STORAGE = ["/kubernetes/storage", "/kubernetes/storage-classes"];
 // Cloud Logging's Settings and its Log Scopes tab (#2020), as Google's
 // Settings page has a Log Scopes tab (log-scope/create-and-manage).
@@ -540,10 +542,20 @@ const ROUTES = [
   { path: "/kms/hsm", service: "kms-hsm", icon: "kms", title: "Single-tenant HSM", kind: "Single-tenant HSM instance", section: "Security and identity",
     product: "kms", productTitle: "Key Management" },
   // Certificate Authority Service (#1834): CA pools, their CAs and the
-  // certificates they issue, at Google's own path.
-  { path: "/security/cas", service: "privateca", title: "CA pools", section: "Security and identity",
+  // certificates they issue, at Google's own path. One page with Google's
+  // tabs (#2144): CA pool manager, CA manager, Private certificate manager
+  // and Template manager, as the CAS docs name them (read 2026-11-22).
+  { path: "/security/cas", service: "privateca", title: "Certificate Authority Service", navTitle: "Certificate Authority Service",
+    tabTitle: "CA pool manager", kind: "CA pool", pageTabs: CAS_TABS, section: "Security and identity",
     product: "privateca", productTitle: "Certificate Authority Service" },
-  { path: "/security/cas/templates", service: "privateca-templates", icon: "privateca", title: "Certificate templates",
+  { path: "/security/cas/certificateAuthorities", service: "privateca-cas", icon: "privateca", title: "Certificate Authority Service",
+    tabTitle: "CA manager", kind: "Certificate authority", navHidden: true, navAs: "/security/cas", pageTabs: CAS_TABS,
+    section: "Security and identity", product: "privateca", productTitle: "Certificate Authority Service" },
+  { path: "/security/cas/certificates", service: "privateca-certs", icon: "privateca", title: "Certificate Authority Service",
+    tabTitle: "Private certificate manager", kind: "Certificate", navHidden: true, navAs: "/security/cas", pageTabs: CAS_TABS,
+    section: "Security and identity", product: "privateca", productTitle: "Certificate Authority Service" },
+  { path: "/security/cas/templates", service: "privateca-templates", icon: "privateca", title: "Certificate Authority Service",
+    tabTitle: "Template manager", kind: "Certificate template", navHidden: true, navAs: "/security/cas", pageTabs: CAS_TABS,
     section: "Security and identity", product: "privateca", productTitle: "Certificate Authority Service" },
   // IAM & Admin (#1864): Google's menu, in Google's order. A page whose API
   // CloudBurrow does not serve is in Google's place and says so; Labels,
@@ -4728,10 +4740,20 @@ async function renderDetail(view, route, resourcePath) {
             copyButton(section.text, `${section.label} for ${name}`)),
           wfSourceSection(section.text, `${section.label} of ${name}`)));
     }
+    // Download <label> saves the text as a file (#2144): Google's issued
+    // certificate has Download certificate and Download certificate chain.
+    const download = section.download ? el("button", { type: "button", class: "secondary", "data-download": section.download,
+      text: `Download ${section.label.charAt(0).toLowerCase()}${section.label.slice(1)}`, onclick: () => {
+        const a = el("a", { href: URL.createObjectURL(new Blob([section.text], { type: "application/x-pem-file" })), download: section.download });
+        document.body.append(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      } }) : null;
     setChildren(into, note,
       el("div", { class: "card text-section" },
         el("div", { class: "text-actions" },
-          copyButton(section.text, `${section.label} for ${name}`)),
+          copyButton(section.text, `${section.label} for ${name}`), download),
         el("pre", { class: "mono", text: section.text })));
   };
 

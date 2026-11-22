@@ -344,7 +344,8 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		providers = append(providers, analyticsHubProvider{svc: d.analyticsHub})
 	}
 	if enabled[config.ServicePrivateCA] && d.privateCA != nil {
-		providers = append(providers, privateCAProvider{svc: d.privateCA}, privateCATemplatesProvider{svc: d.privateCA})
+		pca := privateCAProvider{svc: d.privateCA}
+		providers = append(providers, pca, privateCACAsProvider{pca}, privateCACertsProvider{pca}, privateCATemplatesProvider{svc: d.privateCA})
 	}
 	// Parameter Manager (#2054), in process, under Secret Manager.
 	if enabled[config.ServiceParameterManager] && d.parameterManager != nil {

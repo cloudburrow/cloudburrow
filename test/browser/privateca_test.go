@@ -24,7 +24,7 @@ import (
 // page Create CA, which is STAGED; Enable on the CA's page; Request
 // certificate from a CSR on the pool's page; and on the certificate's page
 // Revoke; a subordinate CA signed by the root through Create CA; and
-// Create template on the Certificate templates page. The console API reads each change back from the same server the
+// Create template on the Template manager tab. The console API reads each change back from the same server the
 // SDK calls, and the certificate the page shows verifies against the CA's.
 func TestPrivateCAThroughThePage(t *testing.T) {
 	needService(t, "privateca")
@@ -60,6 +60,7 @@ func TestPrivateCAThroughThePage(t *testing.T) {
 	p.waitFor(`location.pathname.endsWith("/certificateAuthorities/root")`)
 	p.waitFor(`document.querySelector("#view").textContent.includes("STAGED")`)
 	p.clickText("#view .page-actions button", "Enable")
+	p.clickText(".modal.is-open button", "Confirm")
 	p.waitFor(`document.querySelector("#view").textContent.includes("ENABLED")`)
 	ca := detail(pool, "certificateAuthorities", "root")
 	if !strings.Contains(fmt.Sprint(ca["summary"]), "ENABLED") {
@@ -115,16 +116,17 @@ func TestPrivateCAThroughThePage(t *testing.T) {
 		t.Errorf("the subordinate made on the page reads %s; want it activated, STAGED", got)
 	}
 
-	// The Certificate templates page.
-	// The product's pages, reached from its drawer row: CA pools and
-	// Certificate templates.
+	// The Template manager tab of the Certificate Authority Service page
+	// (#2144), reached from its drawer row.
 	p.navigateByDrawer("Security and identity", "/security/cas", "Certificate Authority Service")
-	p.waitFor(`document.querySelectorAll("#product-nav a").length > 0`)
-	p.clickText("#product-nav a", "Certificate templates")
+	p.clickText("nav.page-tabs a", "Template manager")
 	p.waitFor(`location.pathname === "/security/cas/templates"`)
 	p.navigate("/security/cas/templates?project=" + project)
 	p.clickText("#view button", "Create template")
-	p.submitForm(map[string]string{"certificateTemplateId": "browser-tmpl", "location": "us-east1", "usages": "digital_signature,client_auth"}, "certificateTemplateId")
+	p.waitFor(`document.querySelector("#f-certificateTemplateId") !== null`)
+	p.eval(`(() => { for (const id of ["includePredefined", "specifyBaseKeyUsage", "kuDigitalSignature", "writeExtendedKeyUsage", "ekuClientAuth"]) {
+		const f = document.querySelector("#f-" + id); f.checked = true; f.dispatchEvent(new Event("change", { bubbles: true })); } return true; })()`, nil)
+	p.submitForm(map[string]string{"certificateTemplateId": "browser-tmpl", "location": "us-east1"}, "certificateTemplateId")
 	tmpl := "projects/" + project + "/locations/us-east1/certificateTemplates/browser-tmpl"
 	p.waitFor(fmt.Sprintf(`location.pathname === "/security/cas/templates" &&
 		[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q))`, tmpl))
@@ -139,7 +141,7 @@ func TestPrivateCAThroughThePage(t *testing.T) {
 	p.clickText(`#view [role="tab"]`, "Certificates")
 	p.follow("web")
 	p.waitFor(`document.querySelector("#view").textContent.includes("CN=web.example.com")`)
-	p.pageAction("Revoke", map[string]string{"reason": "SUPERSEDED"}, "web")
+	p.pageAction("Revoke", map[string]string{"reason": "SUPERSEDED"}, "")
 	p.waitFor(`document.querySelector("#view").textContent.includes("SUPERSEDED") && document.querySelector("#view").textContent.includes("Revoked")`)
 	if got := fmt.Sprint(detail(pool, "certificates", "web")["summary"]); !strings.Contains(got, "Revoked") {
 		t.Errorf("the certificate after Revoke reads %s", got)
@@ -224,6 +226,7 @@ func TestPrivateCAKMSKeyCMEKBucketAndRulesThroughThePage(t *testing.T) {
 	p.waitFor(`document.querySelector("#view").textContent.includes("STAGED")`)
 	p.waitFor(fmt.Sprintf(`document.querySelector("#view").textContent.includes(%q)`, version))
 	p.clickText("#view .page-actions button", "Enable")
+	p.clickText(".modal.is-open button", "Confirm")
 	p.waitFor(`document.querySelector("#view").textContent.includes("ENABLED")`)
 	ca := read("privateca", pool, "certificateAuthorities", "root")
 	for _, want := range []string{"Cloud KMS key version", version, `"Publishing bucket","value":"` + bucket + `"`, "/" + bucket + "/", "C=US,O=CloudBurrow,CN=KMS Root"} {
@@ -248,8 +251,9 @@ func TestPrivateCAKMSKeyCMEKBucketAndRulesThroughThePage(t *testing.T) {
 
 	p.navigate("/security/cas/templates?project=" + project)
 	p.clickText("#view button", "Create template")
-	p.submitForm(map[string]string{"certificateTemplateId": "cel-tmpl", "location": "us-central1", "usages": "digital_signature",
-		"celExpression": cel, "passthroughExtensions": "BASE_KEY_USAGE"}, "certificateTemplateId")
+	p.waitFor(`document.querySelector("#f-certificateTemplateId") !== null`)
+	p.submitForm(map[string]string{"certificateTemplateId": "cel-tmpl", "location": "us-central1",
+		"celExpression": cel, "extensionMode": "specific", "knownExtensions": "BASE_KEY_USAGE"}, "certificateTemplateId")
 	tmpl := "projects/" + project + "/locations/us-central1/certificateTemplates/cel-tmpl"
 	p.waitFor(fmt.Sprintf(`location.pathname === "/security/cas/templates" &&
 		[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q))`, tmpl))
