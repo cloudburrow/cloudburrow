@@ -33,3 +33,20 @@ func TestMachineKubelet(t *testing.T) {
 		t.Errorf("a machine larger than the host reserves %v", r)
 	}
 }
+
+// A pool's Static memory manager keeps its reservedMemory equal to the
+// reservations and eviction threshold once the machine's are added.
+func TestMachineKubeletStaticMemoryManager(t *testing.T) {
+	pool := map[string]any{"memoryManagerPolicy": "Static", "kubeReserved": map[string]any{"memory": "100Mi"},
+		"evictionHard":   map[string]any{"memory.available": "100Mi"},
+		"reservedMemory": []any{map[string]any{"numaNode": 0, "limits": map[string]any{"memory": "200Mi"}}}}
+	got := mergeKubelet(pool, map[string]any{"systemReserved": map[string]any{"cpu": "500m", "memory": "1000Mi"},
+		"evictionHard": map[string]any{"memory.available": "100Mi"}})
+	rm := got["reservedMemory"].([]any)[0].(map[string]any)["limits"].(map[string]any)["memory"]
+	if rm != "1200Mi" {
+		t.Errorf("reservedMemory = %v, want 1200Mi", rm)
+	}
+	if pool["reservedMemory"].([]any)[0].(map[string]any)["limits"].(map[string]any)["memory"] != "200Mi" {
+		t.Error("the pool's settings were changed")
+	}
+}

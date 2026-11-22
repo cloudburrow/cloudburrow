@@ -66,7 +66,31 @@ func mergeKubelet(pool, machine map[string]any) map[string]any {
 		}
 		out[k] = v
 	}
+	// The Static memory manager needs its reservedMemory to be the
+	// kube and system reservations and the hard eviction threshold
+	// together, which the machine's reservation has grown.
+	if _, ok := out["reservedMemory"]; ok && out["memoryManagerPolicy"] == "Static" {
+		total := 0
+		for _, q := range []any{sub(out, "kubeReserved")["memory"], sub(out, "systemReserved")["memory"], sub(out, "evictionHard")["memory.available"]} {
+			if q == nil {
+				continue
+			}
+			s, _ := q.(string)
+			n, err := strconv.Atoi(strings.TrimSuffix(s, "Mi"))
+			if err != nil || !strings.HasSuffix(s, "Mi") {
+				return out
+			}
+			total += n
+		}
+		out["reservedMemory"] = []any{map[string]any{"numaNode": 0, "limits": map[string]any{"memory": strconv.Itoa(total) + "Mi"}}}
+	}
 	return out
+}
+
+// sub is m's map k, nil when it has none.
+func sub(m map[string]any, k string) map[string]any {
+	v, _ := m[k].(map[string]any)
+	return v
 }
 
 // hostCapacity is the CPUs (millicores) and memory (MiB) the kubelet of
