@@ -79,8 +79,8 @@ func TestBigQueryStudioScheduleThroughThePage(t *testing.T) {
 	// Google's toolbar has no Schedule button: Schedule is in File.
 	var toolbar []string
 	p.eval(`[...[...document.querySelectorAll(".bq-toolbar")].find((b) => b.offsetParent !== null).querySelectorAll(".bq-menu-button")].map((b) => b.getAttribute("aria-label"))`, &toolbar)
-	if strings.Join(toolbar, "|") != "Save|Share|File|Edit" {
-		t.Errorf("the query editor's menus are %v, want Save, Share, File, Edit", toolbar)
+	if strings.Join(toolbar, "|") != "Save|Share|File|Edit|Tools" {
+		t.Errorf("the query editor's menus are %v, want Save, Share, File, Edit, Tools", toolbar)
 	}
 	fileMenu()
 	// On a query that is no scheduled query's, File > Schedule is one item

@@ -21159,13 +21159,28 @@ function bqMenu(label, items) {
     menu.querySelectorAll(".bq-submenu").forEach((m) => { m.hidden = true; });
     menu.querySelectorAll("[aria-haspopup=menu]").forEach((b) => b.setAttribute("aria-expanded", "false"));
   };
+  // An item with checked (a function) is a checkbox item, as Tools >
+  // Parser-based auto-completion and Edit > Query mode's modes are: its
+  // check mark is drawn from checked() each time the menu opens.
+  const checks = [];
+  const itemButton = (it) => {
+    const b = el("button", {
+      type: "button", role: it.checked ? "menuitemcheckbox" : "menuitem", class: "bq-menu-item" + (it.danger ? " danger" : "") + (it.checked ? " bq-menu-check" : ""),
+      text: it.label, disabled: it.disabled || null, title: it.title || null,
+      onclick: (e) => { e.stopPropagation(); close(); it.run(); },
+    });
+    if (it.checked) {
+      const mark = el("span", { class: "bq-menu-mark", "aria-hidden": "true" });
+      b.prepend(mark);
+      const sync = () => { const on = !!it.checked(); b.setAttribute("aria-checked", on ? "true" : "false"); mark.textContent = on ? "✓" : ""; };
+      sync();
+      checks.push(sync);
+    }
+    return b;
+  };
   for (const item of items) {
     if (!item.items) {
-      menu.append(el("button", {
-        type: "button", role: "menuitem", class: "bq-menu-item" + (item.danger ? " danger" : ""),
-        text: item.label, disabled: item.disabled || null, title: item.title || null,
-        onclick: (e) => { e.stopPropagation(); close(); item.run(); },
-      }));
+      menu.append(itemButton(item));
       continue;
     }
     // An item with items is a submenu (File > Schedule > Update scheduled
@@ -21184,13 +21199,7 @@ function bqMenu(label, items) {
     const closeSub = () => { sub.hidden = true; parent.setAttribute("aria-expanded", "false"); parent.focus(); };
     parent.addEventListener("click", (e) => { e.stopPropagation(); if (sub.hidden) openSub(); else closeSub(); });
     parent.addEventListener("keydown", (e) => { if (e.key === "ArrowRight") { e.preventDefault(); e.stopPropagation(); openSub(); } });
-    for (const it of item.items) {
-      sub.append(el("button", {
-        type: "button", role: "menuitem", class: "bq-menu-item" + (it.danger ? " danger" : ""),
-        text: it.label, disabled: it.disabled || null, title: it.title || null,
-        onclick: (e) => { e.stopPropagation(); close(); it.run(); },
-      }));
-    }
+    for (const it of item.items) sub.append(itemButton(it));
     sub.addEventListener("keydown", (e) => {
       if (e.key === "Escape" || e.key === "ArrowLeft") { e.preventDefault(); e.stopPropagation(); closeSub(); return; }
       const step = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
@@ -21208,6 +21217,7 @@ function bqMenu(label, items) {
     document.querySelectorAll(".bq-menu").forEach((m) => { m.hidden = true; });
     menu.hidden = !open;
     button.setAttribute("aria-expanded", open ? "true" : "false");
+    checks.forEach((sync) => sync());
     if (open) {
       const first = menu.querySelector("button:not([disabled])");
       if (first) first.focus();
@@ -23988,6 +23998,54 @@ function bqNotebookOutputs(outputs) {
 const BQ_NO_COLAB = "Connecting to a Colab Enterprise runtime needs Colab Enterprise's runtimes, which this instance does not serve " +
   "(they run on the local Agent Platform endpoint).";
 
+// bqManageSessions is Manage sessions' Active sessions dialog (#2094):
+// "In the Active sessions dialog, click the terminate icon, then click
+// Terminate" (https://docs.cloud.google.com/bigquery/docs/use-spark, read
+// 2026-11-23). It lists the project's interactive sessions that are
+// creating or active, over the Dataproc API's sessions.list, and
+// Terminate is sessions.terminate. The dialog's columns are not documented
+// (UNVERIFIED (re-read 2026-11-23: https://docs.cloud.google.com/bigquery/docs/use-spark)): they are the Interactive sessions page's.
+function bqManageSessions() {
+  const project = currentProject();
+  const { dialog, close } = openModal({ labelledBy: "bq-sessions-title" });
+  const body = el("div", { class: "bq-sessions", role: "status", "aria-live": "polite" }, spinner("Loading sessions"));
+  const load = async () => {
+    try {
+      const res = await api(`/api/resources/dataproc-sessions?project=${encodeURIComponent(project)}`);
+      const active = (res.items || []).filter((r) => r.status === "ACTIVE" || r.status === "CREATING");
+      if (!active.length) { setChildren(body, el("p", { class: "unavailable", text: "There are no active sessions." })); return; }
+      setChildren(body, el("div", { class: "table-scroll" }, el("table", { class: "bq-sessions-table" },
+        el("thead", {}, el("tr", {}, ...["Session ID", "Status", "Region", "Type", "Creation time", "Elapsed time"].map((h) => el("th", { scope: "col", text: h })),
+          el("th", { scope: "col" }, el("span", { class: "sr-only", text: "Actions" })))),
+        el("tbody", {}, ...active.map((r) => {
+          const f = r.fields || {};
+          const full = (r.opens || [])[0] || r.name;
+          return el("tr", {},
+            el("td", { class: "mono", text: f["Session ID"] || r.name }),
+            el("td", { text: f.Status || r.status }), el("td", { text: f.Region || "" }), el("td", { text: f.Type || "" }),
+            el("td", { text: f["Creation time"] || "" }), el("td", { text: f["Elapsed time"] || "" }),
+            el("td", {}, el("button", { type: "button", class: "icon-button", "aria-label": `Terminate session ${r.name}`, title: "Terminate",
+              html: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>',
+              onclick: () => confirmDestructive({ title: "Terminate session?", detail: r.name, style: "confirm", confirmLabel: "Terminate",
+                consequence: "The session's Spark Connect server stops; a notebook on it loses its Spark session.",
+                onConfirm: async () => {
+                  await send(`/api/actions/dataproc-sessions?project=${encodeURIComponent(project)}`, "POST", { Path: [full], Action: "terminate" });
+                  announce(`Session ${r.name} terminated`);
+                  load();
+                } }) })));
+        })))));
+    } catch (err) { setChildren(body, el("p", { class: "form-error", role: "alert", text: err.message })); }
+  };
+  const closeBtn = el("button", { type: "button", class: "primary", text: "Close", onclick: () => close() });
+  dialog.append(el("div", { class: "modal-body" },
+    el("h2", { id: "bq-sessions-title", text: "Active sessions" }),
+    body,
+    el("div", { class: "modal-actions" },
+      el("button", { type: "button", class: "secondary", text: "Refresh", onclick: () => { setChildren(body, spinner("Loading sessions")); load(); } }), closeBtn)));
+  closeBtn.focus();
+  load();
+}
+
 // bqConnectToRuntime is Connect to a runtime
 // (https://docs.cloud.google.com/bigquery/docs/create-notebooks and
 // https://docs.cloud.google.com/colab/docs/connect-to-runtime, read
@@ -24212,6 +24270,13 @@ function bqNotebookTab(tab, ctx) {
         try { await connect(); } catch (err) { tab.colabRuntime = ""; ctx.save(); showRuntime({ state: "FAILED", message: err.message }); }
       }) }
       : { label: "Connect to a runtime", disabled: true, title: BQ_NO_COLAB, run: () => {} },
+    // "Click the runtime selector, then click Manage sessions"
+    // (https://docs.cloud.google.com/bigquery/docs/use-spark, End the Spark
+    // session, read 2026-11-23): the Spark Connect sessions of
+    // Serverless for Apache Spark that an Apache Spark notebook runs on.
+    bqSparkOn()
+      ? { label: "Manage sessions", run: () => bqManageSessions() }
+      : { label: "Manage sessions", disabled: true, title: BQ_NO_SPARK, run: () => {} },
   ]);
   const moreBtn = more.querySelector("button");
   moreBtn.classList.remove("bq-node-menu");
@@ -25194,7 +25259,7 @@ function bqQueryTab(tab, ctx) {
     const legacy = settings.legacySql === true;
     return { legacySql: legacy, priority: settings.priority || "INTERACTIVE", location: settings.location || "",
              destinationDataset: settings.destinationDataset || "", destinationTable: settings.destinationTable || "",
-             writeDisposition: settings.writeDisposition || "", defaultDataset: "" };
+             writeDisposition: settings.writeDisposition || "", defaultDataset: "", queryMode: settings.queryMode || "" };
   };
 
   let timer = null;
@@ -25303,11 +25368,43 @@ function bqQueryTab(tab, ctx) {
   // Edit > Query settings, where Google's docs put it ("click Edit > Query
   // settings", https://docs.cloud.google.com/bigquery/docs/running-queries,
   // read 2026-11-19).
+  // Edit > Query mode (#2094): "click Edit > Query mode > Optional job
+  // creation. To confirm this choice, click Confirm" and "click Edit >
+  // Query mode > Continuous query. To confirm this choice, click Confirm"
+  // (https://docs.cloud.google.com/bigquery/docs/running-queries and
+  // https://docs.cloud.google.com/bigquery/docs/continuous-queries, read
+  // 2026-11-23). The docs name these two modes; the one chosen is checked,
+  // and choosing it again goes back to an ordinary query job. The
+  // confirmation's wording is not documented (UNVERIFIED (re-read 2026-11-23:
+  // https://docs.cloud.google.com/bigquery/docs/running-queries, https://docs.cloud.google.com/bigquery/docs/continuous-queries)).
+  const setMode = (mode) => {
+    if ((settings.queryMode || "") === mode) return;
+    const apply = () => { settings.queryMode = mode; save(); drawDialect(); announce(mode ? `Query mode: ${BQ_QUERY_MODES[mode]}` : "Query mode: a query job"); };
+    if (!mode) { apply(); return; }
+    confirmDestructive({ title: `Switch to ${BQ_QUERY_MODES[mode]}?`, style: "confirm", confirmLabel: "Confirm",
+      detail: mode === "optional"
+        ? "BigQuery runs a query without creating a job unless it determines that one is needed; a query run so has a query ID and no job history."
+        : "The query runs as a continuous query, on a reservation with a CONTINUOUS assignment, processing new data as it arrives.",
+      consequence: "Choose the mode again in Edit > Query mode to go back.",
+      onConfirm: async () => apply() });
+  };
   const edit = bqMenu("Edit", [
     { label: "Query settings", run: () => bqQuerySettings(settings, () => { save(); validate(); drawDialect(); }) },
+    { label: "Query mode", items: Object.entries(BQ_QUERY_MODES).map(([mode, label]) => ({
+      label, checked: () => (settings.queryMode || "") === mode,
+      run: () => setMode((settings.queryMode || "") === mode ? "" : mode) })) },
     { label: "Clear query", run: () => { editor.value = ""; tab.query = ""; save(); validate(); setChildren(results); } },
   ]);
   bqMenuButton(edit, "Edit", "Edit");
+
+  // Tools > Parser-based auto-completion (#2094), on by default; its
+  // suggestions are attachSqlCompletion's.
+  const tools = bqMenu("Tools", [
+    { label: "Parser-based auto-completion", checked: () => bqAutocompleteOn(),
+      run: () => { const on = !bqAutocompleteOn(); writeStored(BQ_AUTOCOMPLETE, on ? "on" : "off"); announce(on ? "Parser-based auto-completion on" : "Parser-based auto-completion off"); } },
+  ]);
+  bqMenuButton(tools, "Tools", "Tools");
+  attachSqlCompletion(editor, () => settings.defaultDataset || "");
 
   // File, Google's menu of the query editor (#2094), holds Schedule: "click
   // File > Schedule" opens the New scheduled query pane, and on a query
@@ -25328,17 +25425,133 @@ function bqQueryTab(tab, ctx) {
   bqMenuButton(file, "File", "File");
 
   const dialect = el("span", { class: "unavailable bq-dialect" });
-  const drawDialect = () => { dialect.textContent = settings.legacySql ? "Legacy SQL" : "GoogleSQL"; };
+  const modeTag = el("span", { class: "bq-mode", role: "status" });
+  const drawDialect = () => {
+    dialect.textContent = settings.legacySql ? "Legacy SQL" : "GoogleSQL";
+    modeTag.textContent = settings.queryMode ? BQ_QUERY_MODES[settings.queryMode] || "" : "";
+    modeTag.hidden = !settings.queryMode;
+  };
   drawDialect();
   const toolbar = el("div", { class: "bq-toolbar", role: "toolbar", "aria-label": "Query editor actions" },
-    run, saveMenu, share, file, edit, dialect);
+    run, saveMenu, share, file, edit, tools, dialect, modeTag);
   validate();
   return el("div", { class: "bq-query-tab" },
-    toolbar, editor, validator,
+    toolbar, el("div", { class: "bq-editor-wrap" }, editor), validator,
     el("p", { class: "unavailable bq-hint",
       text: (tab.savedId ? bqSavedNote() + " " : "") +
         "⌘/Ctrl + Enter runs; ⌘/Ctrl + S saves." }),
     results);
+}
+
+// BQ_QUERY_MODES are Edit > Query mode's modes, in Google's words.
+const BQ_QUERY_MODES = { optional: "Optional job creation", continuous: "Continuous query" };
+
+// Tools > Parser-based auto-completion's setting, kept in this browser.
+const BQ_AUTOCOMPLETE = "cloudburrow.bigquery.autocomplete";
+const bqAutocompleteOn = () => readStored(BQ_AUTOCOMPLETE, "on") !== "off";
+
+// attachSqlCompletion is Parser-based auto-completion (#2094) in the
+// query editor: while it is on, typing a name, a dot or a space after a
+// keyword opens the suggestions for that place in the statement, which the
+// instance reads from the GoogleSQL statement and its catalog (POST
+// /api/studio/bigquery?call=complete); Ctrl+Space opens them on demand.
+// Up and Down move, Enter or Tab inserts, Escape closes. Turned off, no
+// suggestion opens as you type, project names included.
+function attachSqlCompletion(editor, defaultDataset) {
+  const list = el("ul", { class: "completions bq-sql-completions", role: "listbox", hidden: true, "aria-label": "Suggestions" });
+  list.id = `bq-sql-completions-${Math.random().toString(36).slice(2, 9)}`;
+  editor.setAttribute("aria-autocomplete", "list");
+  editor.setAttribute("aria-controls", list.id);
+  editor.setAttribute("aria-expanded", "false");
+  editor.setAttribute("aria-keyshortcuts", "Control+Space");
+  let shown = [], active = 0, replace = "", timer = null, seq = 0;
+  const close = () => { list.hidden = true; shown = []; editor.setAttribute("aria-expanded", "false"); editor.removeAttribute("aria-activedescendant"); };
+  const choose = (it) => {
+    const at = editor.selectionStart;
+    const start = at - replace.length;
+    let insert = it.insert;
+    // A table path's closing backtick already typed is not doubled.
+    editor.setRangeText(insert, start, at, "end");
+    editor.dispatchEvent(new Event("input", { bubbles: true }));
+    close();
+    editor.focus();
+    // A dataset or a project inserts its dot: the next names follow.
+    if (insert.endsWith(".") && bqAutocompleteOn()) request(false);
+  };
+  const draw = () => {
+    setChildren(list, ...shown.map((it, i) => {
+      const li = el("li", { role: "option", id: `${list.id}-${i}`, class: i === active ? "active" : "", "aria-selected": String(i === active) },
+        el("span", { class: "mono", text: it.label }),
+        el("span", { class: "bq-completion-kind", text: it.detail ? `${it.kind} · ${it.detail}` : it.kind }));
+      li.addEventListener("mousedown", (e) => { e.preventDefault(); choose(it); });
+      return li;
+    }));
+    editor.setAttribute("aria-activedescendant", `${list.id}-${active}`);
+    const cur = list.children[active];
+    if (cur && cur.scrollIntoView) cur.scrollIntoView({ block: "nearest" });
+  };
+  const request = async (explicit) => {
+    const mine = ++seq;
+    const at = editor.selectionStart;
+    if (at !== editor.selectionEnd) { close(); return; }
+    try {
+      const res = await bqStudioCall("complete", { before: editor.value.slice(0, at), after: editor.value.slice(at), defaultDataset: defaultDataset() });
+      if (mine !== seq || document.activeElement !== editor) return;
+      shown = (res.items || []).slice(0, 100);
+      replace = res.replace || "";
+      // Typed out in full, a lone suggestion has nothing to add.
+      if (!explicit && shown.length === 1 && shown[0].insert === replace) shown = [];
+      // Nothing typed yet where only a keyword can follow: not offered
+      // unasked.
+      if (!explicit && !replace && shown.every((it) => it.kind === "Keyword")) shown = [];
+      if (!shown.length) { close(); if (explicit) announce("No suggestions"); return; }
+      active = 0;
+      if (!list.isConnected) editor.after(list);
+      // Under the line the cursor is on.
+      const lines = editor.value.slice(0, at).split("\n").length;
+      const lh = parseFloat(getComputedStyle(editor).lineHeight) || 20;
+      list.style.top = `${Math.min(editor.offsetTop + lines * lh + 8 - editor.scrollTop, editor.offsetTop + editor.offsetHeight)}px`;
+      list.style.left = `${editor.offsetLeft + 16}px`;
+      draw();
+      list.hidden = false;
+      editor.setAttribute("aria-expanded", "true");
+    } catch { if (mine === seq) close(); }
+  };
+  editor.addEventListener("keydown", (e) => {
+    if (e.ctrlKey && (e.key === " " || e.code === "Space")) { e.preventDefault(); request(true); return; }
+    if (list.hidden) return;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      active = (active + (e.key === "ArrowDown" ? 1 : shown.length - 1)) % shown.length;
+      draw();
+    } else if ((e.key === "Enter" && !e.metaKey && !e.ctrlKey) || e.key === "Tab") {
+      e.preventDefault();
+      // The key's own line break, should one still arrive, is not typed.
+      swallow = true;
+      choose(shown[active]);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      close();
+    }
+  });
+  editor.addEventListener("input", (e) => {
+    clearTimeout(timer);
+    if (!bqAutocompleteOn()) { close(); return; }
+    if (e.isTrusted === false && e.inputType === undefined) return;
+    const at = editor.selectionStart;
+    const c = editor.value[at - 1] || "";
+    // A name being typed, a dot, a backtick, or a space or comma after a
+    // word: the places a suggestion is due.
+    if (!/[A-Za-z0-9_.`, ]/.test(c)) { close(); return; }
+    timer = setTimeout(() => request(false), 150);
+  });
+  let swallow = false;
+  editor.addEventListener("beforeinput", (e) => {
+    if (swallow && (e.inputType === "insertLineBreak" || e.inputType === "insertParagraph" || e.inputType === "insertText" && e.data === "\t")) e.preventDefault();
+  });
+  editor.addEventListener("keyup", () => { swallow = false; });
+  editor.addEventListener("blur", () => setTimeout(close, 150));
 }
 
 // bqMenuButton turns a bqMenu's button into a labelled text button, as

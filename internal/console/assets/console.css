@@ -2287,6 +2287,16 @@ tr.log-entry.is-pinned { background: var(--state-hover); }
   font: inherit; color: var(--text); cursor: pointer; white-space: nowrap; }
 .bq-menu-item:hover { background: var(--state-hover); }
 .bq-menu-item.danger { color: var(--error); }
+/* A checkbox item's check mark sits in the gutter before its label. */
+.bq-menu-item.bq-menu-check { position: relative; padding-left: 36px; }
+.bq-menu-mark { position: absolute; left: 12px; }
+.bq-mode { font-weight: 500; }
+.bq-sql-completions { position: absolute; z-index: 25; min-width: 260px; max-width: 480px; }
+.bq-sql-completions li { display: flex; gap: 12px; justify-content: space-between; color: var(--text); }
+.completions.bq-sql-completions li.active, .completions.bq-sql-completions li:hover { background: var(--nav-selected); color: var(--nav-selected-text); }
+.bq-sql-completions .bq-completion-kind { color: var(--text-muted); font-family: var(--font); font-size: var(--text-caption-size); }
+.bq-sql-completions li.active .bq-completion-kind { color: inherit; }
+.bq-editor-wrap { position: relative; }
 .bq-submenu-wrap { position: relative; }
 .bq-connect-group { display: inline-flex; align-items: stretch; }
 .bq-nb-header { display: flex; align-items: center; gap: 8px; }

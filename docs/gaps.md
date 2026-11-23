@@ -31,14 +31,14 @@ tracks it; a closed issue is named only where it says what was built.
 | Resource Manager | 2 | 0 | 0 | 2 | 0 |
 | IAM custom roles | 9 | 0 | 1 | 8 | 0 |
 | Vertex AI | 3 | 2 | 1 | 0 | 0 |
-| BigQuery | 25 | 3 | 7 | 15 | 0 |
+| BigQuery | 26 | 4 | 7 | 15 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 5 | 0 | 1 | 3 | 1 |
 | Cloud SQL, Memorystore | 6 | 1 | 4 | 1 | 0 |
 | Functions, credentials, tooling | 1 | 0 | 1 | 0 | 0 |
 | App Hub | 5 | 1 | 1 | 3 | 0 |
 | Dataform | 6 | 0 | 2 | 4 | 0 |
 | Console | 3 | 1 | 2 | 0 | 0 |
-| **Total** | **82** | **8** | **24** | **44** | **6** |
+| **Total** | **83** | **9** | **24** | **44** | **6** |
 
 ## Cloud Storage
 
@@ -276,6 +276,7 @@ options and materialized views (#1389, #1390, #1401, #1409, #1415), `JOBS_BY_FOL
 | Project configurations: `ALTER PROJECT` / `ALTER ORGANIZATION` inside a `BEGIN` block, `LOOP`, `REPEAT` or `CASE` of a script in a dry run is 501, BigQuery's dry-run rules not naming those blocks (one inside an `IF`, `FOR` or `WHILE` is answered, the dry run stopping before it, since fix/last-not-built; docs re-read 2026-10-17, 2026-11-17 and 2026-11-18: https://docs.cloud.google.com/bigquery/docs/multi-statement-queries); `EFFECTIVE_PROJECT_OPTIONS` gives no `DEFAULT` rows, which Google does not document; `default_kms_key_name` reaches every table made (a script's and an upload load's since #1456) (#1456) (#1577) | not documented by Google | S |
 | Jobs that outlive their request (#1819, built: `jobs.query` and `jobs.getQueryResults` honour `timeoutMs` and answer `jobComplete: false`, `jobs.get` answers `RUNNING`, `jobs.cancel` ends a running job `stopped`, and `jobs.list` and `INFORMATION_SCHEMA.JOBS` list it `RUNNING`): the engine runs one statement at a time, so while it runs a query, DML statement or script, another job, a `jobs.list` and an `INFORMATION_SCHEMA.JOBS` query wait for it, where BigQuery runs them side by side (#1823; measured: a JOBS query and a `jobs.list` sent during a 20 s query answered at its end); a running job is listed `RUNNING` only while the engine is free (the front's own work: a TensorFlow import, a load it reads, an extract it writes). The jobs running are kept in memory only, so a restart of the front's container ends them. A `jobs.query` whose job the front names itself (a script, a statement the front carries out) and that outlasts `timeoutMs` is known by the ID it answered in `jobs.get`, `jobs.getQueryResults` and `jobs.cancel`, but `jobs.list` and `INFORMATION_SCHEMA.JOBS` list it, once done, by its own. A resumable upload's load job is carried out within its last request | no emulator support | M |
 | A table's `lastModifiedTime` after a change to its rows (#2105, built: the front fingerprints a TABLE's rows at each `tables.get` and moves it when they changed, to the time of the lone DML statement that changed them): a change by a script, a load, a streaming insert or the Storage Write API is dated at the first `tables.get` after it, not when it was made, and one that leaves the same rows is not seen; the emulator itself never moves it after creation (measured 2026-11-22) | no emulator support | M |
+| Continuous queries (#2193): a query job with `continuous` set, which Studio's Edit > Query mode > Continuous query sends (#2094), is refused, since BigQuery runs one only on a reservation with a CONTINUOUS assignment and this instance serves no Reservation API, so every project is billed on demand; the Reservation API and a continuous query engine are not built | not built yet | L |
 
 ## Spanner, Bigtable, Firestore, Datastore
 
