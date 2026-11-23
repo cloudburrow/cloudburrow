@@ -56,6 +56,16 @@ BQENGINE_FLAGS ?=
 bigquery-binaries:
 	go run ./tools/bqengine -out internal/bigqueryimage/bin $(BQENGINE_FLAGS)
 
+## spanner-emulator-image: Build CloudBurrow's patched Cloud Spanner emulator image from source (#2029)
+# Google's emulator v1.5.58 and the GoogleSQL it builds, with the patches in
+# third_party/spanner-emulator, for the host's architecture (SPANNER_PLATFORM
+# overrides it, e.g. linux/amd64). up runs the image when Docker has it.
+# Measured 2026-11-23 on 8 Docker CPUs: see third_party/spanner-emulator/PROVENANCE.md.
+SPANNER_PLATFORM ?=
+.PHONY: spanner-emulator-image
+spanner-emulator-image:
+	bash scripts/spanner-emulator-image.sh $(if $(SPANNER_PLATFORM),-platform $(SPANNER_PLATFORM))
+
 ## bigquery-patch-tests: Run the BigQuery emulator patches' regression tests and the patched modules' suites (#1132)
 # In the patched copies tools/bqengine writes under
 # third_party/bigquery-emulator/build/, which `go test ./...` here does not

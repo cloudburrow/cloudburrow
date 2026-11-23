@@ -1,0 +1,64 @@
+CloudBurrow patch 2 of 3 to the Cloud Spanner emulator v1.5.58
+(GoogleCloudPlatform/cloud-spanner-emulator, commit
+a081a7e71aba5f4d05fc8c6b21ef1a269dcbac28, Apache-2.0).
+
+Upstream files: backend/query/feature_filter/gsql_supported_functions.cc,
+backend/query/analyzer_options.cc, backend/query/query_engine.cc.
+
+Why (cloudburrow/cloudburrow#2029): Spanner Graph documents these, and
+GoogleSQL's reference evaluator implements them, but the emulator refused
+them:
+- PROPERTY_EXISTS, ALL_DIFFERENT, SAME, IS SOURCE OF and IS DESTINATION OF
+  (graph-operators page) were missing from the emulator's list of supported
+  GoogleSQL functions ("Unsupported built-in function: PROPERTY_EXISTS").
+  Their GoogleSQL names are property_exists, all_different, same,
+  $is_source_node and $is_dest_node.
+- ANY CHEAPEST and an edge pattern's COST (graph-patterns page) need
+  FEATURE_SQL_GRAPH_CHEAPEST_PATH, which the emulator did not enable ("Cost
+  definition is not supported"). It is enabled in both places the emulator
+  builds its analyzer options.
+
+diff --git a/backend/query/analyzer_options.cc b/backend/query/analyzer_options.cc
+index 328696f..425d86f 100644
+--- a/backend/query/analyzer_options.cc
++++ b/backend/query/analyzer_options.cc
+@@ -105,6 +105,8 @@ googlesql::LanguageOptions MakeGoogleSqlLanguageOptions() {
+       googlesql::FEATURE_SQL_GRAPH_DYNAMIC_ELEMENT_TYPE,
+       googlesql::FEATURE_SQL_GRAPH_RETURN_EXTENSIONS,
+       googlesql::FEATURE_SQL_GRAPH_CALL,
++      // CloudBurrow (#2029): ANY CHEAPEST and edge COST, as Spanner serves.
++      googlesql::FEATURE_SQL_GRAPH_CHEAPEST_PATH,
+       googlesql::FEATURE_UUID_TYPE,
+       googlesql::FEATURE_FOR_UPDATE,
+       googlesql::FEATURE_INLINE_LAMBDA_ARGUMENT,
+diff --git a/backend/query/feature_filter/gsql_supported_functions.cc b/backend/query/feature_filter/gsql_supported_functions.cc
+index a544852..1e0be53 100644
+--- a/backend/query/feature_filter/gsql_supported_functions.cc
++++ b/backend/query/feature_filter/gsql_supported_functions.cc
+@@ -278,6 +278,12 @@ const absl::flat_hash_set<absl::string_view>* SupportedGoogleSQLFunctions() {
+         "destination_node_id",
+         "path_first",
+         "path_last",
++        // CloudBurrow (#2029): Spanner Graph's documented predicates.
++        "property_exists",
++        "all_different",
++        "same",
++        "$is_source_node",
++        "$is_dest_node",
+         "new_uuid",
+           // clang-format on
+       };
+diff --git a/backend/query/query_engine.cc b/backend/query/query_engine.cc
+index fcf8206..b387b66 100644
+--- a/backend/query/query_engine.cc
++++ b/backend/query/query_engine.cc
+@@ -185,6 +185,9 @@ absl::StatusOr<googlesql::AnalyzerOptions> MakeAnalyzerOptionsWithParameters(
+       googlesql::FEATURE_SQL_GRAPH_DYNAMIC_LABEL_PROPERTIES_IN_DDL);
+   options.mutable_language()->EnableLanguageFeature(
+       googlesql::FEATURE_SQL_GRAPH_DYNAMIC_LABEL_EXTENSION_IN_DDL);
++  // CloudBurrow (#2029): ANY CHEAPEST and edge COST, as Spanner serves.
++  options.mutable_language()->EnableLanguageFeature(
++      googlesql::FEATURE_SQL_GRAPH_CHEAPEST_PATH);
+   if (EmulatorFeatureFlags::instance().flags().enable_insert_on_conflict_dml) {
+     options.mutable_language()->EnableLanguageFeature(
+         googlesql::FEATURE_INSERT_ON_CONFLICT_CLAUSE);

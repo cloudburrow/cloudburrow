@@ -135,6 +135,7 @@ type graphQuant struct {
 	arrs     []string // properties collected as arrays
 	withLen  bool     // the paths' lengths are read (cb_len)
 	withIDs  bool     // the paths' edges' keys are read (cb_ids)
+	cost     string   // the edge pattern's COST, on cb_hop: each path's sum is cb_cost
 	trail    bool     // no edge twice (TRAIL)
 	acyc     bool     // no node twice (ACYCLIC)
 }
@@ -159,6 +160,9 @@ func (q *graphQuant) hopsSQL(k int) string {
 		}
 		if q.withIDs {
 			cols = append(cols, "ARRAY<STRING>[] AS cb_ids")
+		}
+		if q.cost != "" {
+			cols = append(cols, "0 AS cb_cost")
 		}
 		return "SELECT " + strings.Join(cols, ", ") + " FROM " + n.BaseTableName + " AS cb_e0"
 	}
@@ -189,6 +193,13 @@ func (q *graphQuant) hopsSQL(k int) string {
 			ids = append(ids, "FORMAT('%T', STRUCT("+strings.Join(ks, ", ")+"))")
 		}
 		cols = append(cols, "["+strings.Join(ids, ", ")+"] AS cb_ids")
+	}
+	if q.cost != "" {
+		var cs []string
+		for i := 1; i <= k; i++ {
+			cs = append(cs, strings.ReplaceAll(q.cost, "cb_hop.", fmt.Sprintf("cb_e%d.", i)))
+		}
+		cols = append(cols, "("+strings.Join(cs, " + ")+") AS cb_cost")
 	}
 	for i := 1; i <= k; i++ {
 		froms = append(froms, fmt.Sprintf("%s AS cb_e%d", e.BaseTableName, i))

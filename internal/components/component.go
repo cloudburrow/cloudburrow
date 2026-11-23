@@ -37,6 +37,9 @@ type LifecycleComponent struct {
 	// bigQueryImage is the BigQuery emulator's locally built image
 	// (#1061), from the patched build this CLI embeds.
 	bigQueryImage string
+	// spannerImage is CloudBurrow's patched Spanner emulator image
+	// (#2029), loaded into the cluster; "" runs Google's.
+	spannerImage string
 	// signingKeys are the public keys the storage server verifies RSA
 	// signed URLs against, by service account email (#577).
 	signingKeys map[string][]byte
@@ -187,6 +190,10 @@ func (c *LifecycleComponent) BuiltinStorageImage() string { return c.storageImag
 // SetBigQueryImage records the locally built image of the BigQuery emulator
 // (#1061), which `up` builds and loads before installing.
 func (c *LifecycleComponent) SetBigQueryImage(ref string) { c.bigQueryImage = ref }
+
+// SetSpannerImage records CloudBurrow's patched Spanner emulator image
+// (#2029), which `up` loads into the cluster when Docker has it.
+func (c *LifecycleComponent) SetSpannerImage(ref string) { c.spannerImage = ref }
 
 // SetMySQLCredentials supplies the passwords the MySQL backend is started
 // with.
@@ -345,6 +352,11 @@ func (c *LifecycleComponent) Backends() []Backend {
 				if (s == config.ServiceFirestore || s == config.ServiceDatastore || s == config.ServiceSpanner || s == config.ServiceBigtable) &&
 					c.iamCheck && c.resourceManager != "" && b.Front != nil {
 					b.Front.Args = append(append([]string{}, b.Front.Args...), "--iam-check", "http://"+c.resourceManager)
+				}
+				// The patched Spanner emulator, when up loaded it (#2029).
+				if s == config.ServiceSpanner && c.spannerImage != "" {
+					b.Image = c.spannerImage
+					b.PullPolicy = "Never"
 				}
 				// BigQuery's front runs from the storage image (#902).
 				if s == config.ServiceBigQuery {

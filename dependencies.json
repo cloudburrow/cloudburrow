@@ -316,6 +316,15 @@
         "source": "https://github.com/GoogleCloudPlatform/cloud-spanner-emulator",
         "license": "Apache-2.0",
         "licenseNote": "The emulator's source is published under Apache-2.0, unlike the Cloud SDK emulators, whose licence could not be established.",
+        "patchedBuild": {
+          "$comment": "#2029: CloudBurrow's patched build of the same release, from source (third_party/spanner-emulator: sources.json pins the tag v1.5.58 = a081a7e71aba5f4d05fc8c6b21ef1a269dcbac28 and GoogleSQL 2026.7.2; PROVENANCE.md lists each patch). scripts/spanner-emulator-image.sh builds it as dev.local/cloudburrow-spanner-emulator:1.5.58-cb.<patch hash>; up runs it when Docker has it, Google's image otherwise.",
+          "source": "https://github.com/GoogleCloudPlatform/cloud-spanner-emulator",
+          "tag": "v1.5.58",
+          "commit": "a081a7e71aba5f4d05fc8c6b21ef1a269dcbac28",
+          "license": "Apache-2.0",
+          "googlesql": {"source": "https://github.com/google/googlesql", "tag": "2026.7.2", "license": "Apache-2.0"},
+          "redistribution": "not-redistributed"
+        },
         "redistribution": "not-redistributed",
         "redistributionPlan": "Pulled from Google's registry by digest at run time. Nothing is vendored or re-hosted.",
         "platforms": [

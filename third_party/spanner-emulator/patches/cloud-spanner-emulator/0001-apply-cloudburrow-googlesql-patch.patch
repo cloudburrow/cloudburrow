@@ -1,0 +1,30 @@
+CloudBurrow patch 1 of 3 to the Cloud Spanner emulator v1.5.58
+(GoogleCloudPlatform/cloud-spanner-emulator, commit
+a081a7e71aba5f4d05fc8c6b21ef1a269dcbac28, Apache-2.0).
+
+Upstream file: MODULE.bazel.
+
+Why (cloudburrow/cloudburrow#2029): the emulator builds GoogleSQL 2026.7.2
+from its release archive with its own build/bazel/googlesql.patch. This adds
+CloudBurrow's GoogleSQL patch (patches/googlesql/0001, which the build copies
+to build/bazel/cloudburrow_googlesql.patch) after it, so a GQL
+`RETURN ... ORDER BY` keeps its order and COUNT takes a group variable.
+
+diff --git a/MODULE.bazel b/MODULE.bazel
+index f2cd635..240580d 100644
+--- a/MODULE.bazel
++++ b/MODULE.bazel
+@@ -235,7 +235,12 @@ archive_override(
+     # - Give visibility to GoogleSQL's base library to reuse some utilities
+     integrity = "sha256-9zT65nfWcsYaJ41WJHO/iuLQF/R9TdKzf6Jh5RNoUng=",
+     patch_strip = 1,
+-    patches = ["//build/bazel:googlesql.patch"],
++    # - CloudBurrow (#2029): keep a GQL RETURN ... ORDER BY's order, and take
++    #   graph elements in GQL's functions (COUNT of a group variable).
++    patches = [
++        "//build/bazel:googlesql.patch",
++        "//build/bazel:cloudburrow_googlesql.patch",
++    ],
+     strip_prefix = "googlesql-2026.7.2",
+     urls = ["https://github.com/google/googlesql/archive/refs/tags/2026.7.2.zip"],
+ )
