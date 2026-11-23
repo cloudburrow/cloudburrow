@@ -252,10 +252,6 @@ func (b *computeVMs) podManifest(vm compute.VMSpec, ref string) string {
 		"metadata": map[string]any{"name": vm.Key, "namespace": b.ns(), "labels": labels,
 			"annotations": map[string]string{"cloudburrow.dev/compute-instance": "projects/" + vm.Project + "/zones/" + vm.Zone + "/instances/" + vm.Name}},
 		"spec": map[string]any{"hostname": host, "restartPolicy": "Always", "terminationGracePeriodSeconds": 30,
-			// metadata.google.internal (and metadata, under the
-			// google.internal search domain) is the metadata server, as on
-			// Compute Engine (#2177).
-			"hostAliases": []any{map[string]any{"ip": "169.254.169.254", "hostnames": []string{"metadata.google.internal", "metadata"}}},
 			"automountServiceAccountToken": false, "enableServiceLinks": false,
 			"initContainers": []any{map[string]any{"name": "seed", "image": ref, "imagePullPolicy": "Never",
 				"command":      []string{"/bin/sh", "-c", seed},
@@ -265,6 +261,10 @@ func (b *computeVMs) podManifest(vm compute.VMSpec, ref string) string {
 				"resources": map[string]any{"limits": map[string]string{"cpu": strconv.Itoa(cpu), "memory": strconv.Itoa(mem) + "Mi"},
 					"requests": map[string]string{"cpu": "50m", "memory": "64Mi"}}}},
 			"volumes": volumes}}
+	// metadata.google.internal (and metadata, under the google.internal
+	// search domain) is the metadata server, as on Compute Engine (#2177).
+	pod["spec"].(map[string]any)["hostAliases"] = []any{map[string]any{"ip": "169.254.169.254",
+		"hostnames": []string{"metadata.google.internal", "metadata"}}}
 	svc := map[string]any{"apiVersion": "v1", "kind": "Service",
 		"metadata": map[string]any{"name": vm.Key, "namespace": b.ns(), "labels": labels},
 		"spec": map[string]any{"selector": map[string]string{"cloudburrow.dev/vm": vm.Key},

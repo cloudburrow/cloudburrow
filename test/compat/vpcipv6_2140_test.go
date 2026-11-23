@@ -142,11 +142,9 @@ func TestIPv6OnlyVMsAndGlobalIPv6LoadBalancing2140(t *testing.T) {
 		t.Errorf("the IPv6-only VM has an IPv4 address on vpc0: %s", out)
 	}
 	vms.eventually("the metadata server's ipv6s", a,
-		// The instance's own metadata, as the guest environment reads it
-		// (its guest URL, which an SSH session's environment lacks: it is
-		// read from init's); GCE_METADATA_HOST names the shared metadata
-		// server, for service account tokens.
-		`M=$(sudo cat /proc/1/environ | tr '\0' '\n' | sed -n 's/^CLOUDBURROW_GUEST_METADATA=//p'); curl -s -H 'Metadata-Flavor: Google' "$M/computeMetadata/v1/instance/network-interfaces/0/ipv6s"`, v6[a])
+		// The instance's own metadata server, which GCE_METADATA_HOST
+		// names in the guest (#2177).
+		`curl -s -H 'Metadata-Flavor: Google' "http://$GCE_METADATA_HOST/computeMetadata/v1/instance/network-interfaces/0/ipv6s"`, v6[a])
 	curl6 := func(ip string) string { return "curl -s -m 5 -g http://[" + ip + "]:8080/ || echo UNREACHABLE" }
 	vms.eventually("the IPv6-only VMs reach each other", a, curl6(v6[b]), "V6-"+b)
 	vms.eventually("the dual-stack VM reaches an IPv6-only one", c, curl6(v6[a]), "V6-"+a)

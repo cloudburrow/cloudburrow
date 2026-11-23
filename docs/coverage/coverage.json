@@ -14863,8 +14863,8 @@
     "Title": "Compute Engine API (v1): VPC networking",
     "counts": {
       "Implemented": 250,
-      "Unimplemented": 101,
-      "Verified": 200
+      "Unimplemented": 100,
+      "Verified": 201
     },
     "rows": [
       {
@@ -16042,8 +16042,10 @@
       },
       {
         "method": "compute.instances.getGuestAttributes",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/vmmetadata2177_test.go:38 TestVMMetadataServerFromInsideTheVM2177"
+        ]
       },
       {
         "method": "compute.instances.getIamPolicy",
