@@ -170,7 +170,7 @@ func filestoreInstanceFields(fromBackup bool) []console.Field {
 			Options: []string{"READ_WRITE", "READ_ONLY"}, OptionLabels: map[string]string{"READ_WRITE": "Admin (read-write)", "READ_ONLY": "Viewer (read-only)"}},
 		{Name: "squashMode", Label: "Root squash", Type: "select", Default: "NO_ROOT_SQUASH", Section: "Configure your file share", ShowWhen: "access=restrict",
 			Options: []string{"NO_ROOT_SQUASH", "ROOT_SQUASH"}, OptionLabels: map[string]string{"NO_ROOT_SQUASH": "No root squash", "ROOT_SQUASH": "Root squash"}},
-		{Name: "labels", Label: "Labels", Type: "map", Section: "Labels", Help: "Optional. One key=value per line."},
+		{Name: "labels", Label: "Labels", Type: "map", Section: "Labels"},
 		{Name: "deletionProtection", Label: "Enable deletion protection", Type: "checkbox", Section: "Deletion protection"},
 	}
 	if fromBackup {

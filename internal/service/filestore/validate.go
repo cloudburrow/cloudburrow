@@ -100,7 +100,7 @@ func checkLabels(labels map[string]string) error {
 func tierName(t filestorepb.Instance_Tier) string { return t.String() }
 
 // checkCapacity checks capacity (GiB) is in one of the tier's ranges and
-// on its step. UNVERIFIED wording.
+// on its step. UNVERIFIED (docs re-read 2026-11-23: <https://docs.cloud.google.com/filestore/docs/service-tiers>) wording.
 func checkCapacity(t filestorepb.Instance_Tier, capacity int64) error {
 	info := tiers[t]
 	for _, b := range info.bands {

@@ -16,7 +16,7 @@ import (
 
 func (s *Server) noBackend() error {
 	if s.opts.Backend == nil {
-		return apierror.Unimplemented("Filestore instances need the NFS server backend, which runs in Docker beside the instance's cluster; start CloudBurrow with --services filestore")
+		return apierror.FailedPrecondition("Filestore instances need the NFS server backend, which runs in Docker beside the instance's cluster; start CloudBurrow with --services filestore")
 	}
 	return nil
 }

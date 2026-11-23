@@ -302,8 +302,8 @@ COMPAT_SQL_REPLICA_TESTS='^Test[A-Za-z]*SQL[A-Za-z0-9]*(HighAvailability|Replica
 # are drawn where Cloud Run serves the local AI endpoint, and Logging's App
 # Hub dimensions (TestLoggingAppHub*, #2096), which need App Hub, run in run.
 COMPAT_BROWSER_SHARDS="storage served run emulators memorystore sql localai"
-COMPAT_BROWSER_SERVED_SHARD_TESTS='^Test(GKEServed|KubernetesEnginePages|VPCNetwork|ComputeEngine|ComputePermissions|TraceExplorer)'
-COMPAT_BROWSER_SERVED_ONLY_TESTS='^Test(GKEServed|VPCNetwork|ComputeEngine|ComputePermissions|TraceExplorer)'
+COMPAT_BROWSER_SERVED_SHARD_TESTS='^Test(GKEServed|KubernetesEnginePages|VPCNetwork|ComputeEngine|ComputePermissions|TraceExplorer|Filestore)'
+COMPAT_BROWSER_SERVED_ONLY_TESTS='^Test(GKEServed|VPCNetwork|ComputeEngine|ComputePermissions|TraceExplorer|Filestore)'
 COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|CloudBuild|LoggingAdmin|LoggingConsole|LoggingAppHub|SecretManager|Eventarc|DocumentAI|Speech|StoragePicker|Workflows|ModelRegistry|Dataform|AppHub)'
 COMPAT_BROWSER_EMULATORS_SHARD_TESTS='^Test(BigQuery|Firestore|Datastore|Bigtable|Spanner)'
 COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS='^TestMemorystore'

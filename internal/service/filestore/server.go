@@ -37,7 +37,7 @@
 //     basic tier instance, new or existing; the other tiers' backups
 //     restore only to a new instance.
 //
-// Error texts Google's pages do not quote are marked UNVERIFIED where they
+// Error texts Google's pages do not quote are marked UNVERIFIED (docs re-read 2026-11-23: <https://docs.cloud.google.com/filestore/docs/reference/rest/v1/projects.locations.instances>) where they
 // are made.
 package filestore
 
@@ -450,4 +450,14 @@ func (s *Server) Instances() []*filestorepb.Instance {
 		out = append(out, cloneInst(s.instances[name].I))
 	}
 	return out
+}
+
+// ServerKey is the backend key of the instance named name, or "".
+func (s *Server) ServerKey(name string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if r, ok := s.instances[name]; ok {
+		return r.Key
+	}
+	return ""
 }

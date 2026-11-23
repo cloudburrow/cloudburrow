@@ -36,9 +36,10 @@ tracks it; a closed issue is named only where it says what was built.
 | Cloud SQL, Memorystore | 6 | 1 | 4 | 1 | 0 |
 | Functions, credentials, tooling | 1 | 0 | 1 | 0 | 0 |
 | App Hub | 5 | 1 | 1 | 3 | 0 |
+| Filestore | 6 | 4 | 2 | 0 | 0 |
 | Dataform | 7 | 0 | 2 | 4 | 1 |
 | Console | 9 | 7 | 2 | 0 | 0 |
-| **Total** | **89** | **14** | **24** | **44** | **7** |
+| **Total** | **95** | **18** | **26** | **44** | **7** |
 
 ## Cloud Storage
 
@@ -343,6 +344,23 @@ LogEntry `apphub` on entries.list and in every Logging filter, and the console's
 | LogEntry `apphubDestination` and `apphubSource` are never set: Google documents them for "edge"-like logs such as VPC Flow Logs, which this instance does not produce | no emulator support | M |
 | LogEntry `apphub` is in the JSON API's answers only: `google/logging/v2/log_entry.proto` in googleapis and `cloud.google.com/go/logging` (through v1.21.1) have no such field, so a gRPC answer cannot carry it, though gRPC filters on `apphub.*` match | not documented by Google | S |
 | Where each discovered type is placed (a location-less resource in `global`, Spanner's and Firestore's multi-regions in `global`), the cluster namespaces discovery skips (`kube-*`, `gke-*`, `gmp-*`), the `apphub_workload_id` Monitoring label, and the denial wording under IAM enforcement are CloudBurrow's choices (compatibility.md's App Hub section dates each) | not documented by Google | S |
+
+## Filestore
+
+Built (#2192): the Filestore v1 API over gRPC and JSON with Google's tier, capacity, share, protocol,
+network and export option rules; each instance a real NFS-Ganesha server (NFSv3 and NFSv4.1) in
+Docker on the clusters' network, mounted from Kubernetes Engine pods; snapshots, revert, regional
+backups and restore; data kept across `stop` and `up` in persistent mode; the console's Filestore
+pages.
+
+| Gap | Why open | Size |
+|---|---|---|
+| The GKE Filestore CSI driver (`filestore.csi.storage.gke.io`, `standard-rwx` and its StorageClasses) is not installed in clusters; pods mount a share with Kubernetes' `nfs` volume or a PersistentVolume (#2192) | not built yet | L |
+| gcloud `filestore` and Terraform `google_filestore_instance`, `_snapshot` and `_backup` are not driven by a test (#2192) | not built yet | M |
+| Backup and DR protection of Filestore instances (#1524) | not built yet | M |
+| Customer-managed encryption keys, tags, replication (`PromoteReplica`) and `performance_config` limits are refused or not enforced (#2192) | not built yet | M |
+| The server's address is on the local `kind` Docker network, not inside `reserved_ip_range`: the range is checked and recorded but routes nothing | no emulator support | M |
+| Export options' `ip_ranges` match a client's node address on the `kind` network, so ranges of VPC addresses admit no local client | no emulator support | S |
 
 ## Dataform
 

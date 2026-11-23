@@ -73,7 +73,7 @@ func (s *Server) startOpLocked(location, target, verb string, work func(ctx cont
 }
 
 // busyLocked refuses a call on a resource another operation is changing.
-// UNVERIFIED wording.
+// UNVERIFIED (docs re-read 2026-11-23: <https://docs.cloud.google.com/filestore/docs/reference/rest/v1/projects.locations.instances>) wording.
 func (s *Server) busyLocked(names ...string) error {
 	for _, n := range names {
 		if op, ok := s.busy[n]; ok {
@@ -221,7 +221,7 @@ func opFilter(filter string) (func(*longrunningpb.Operation) bool, error) {
 }
 
 // DeleteOperation forgets a done operation; a running one is
-// FAILED_PRECONDITION. UNVERIFIED wording.
+// FAILED_PRECONDITION. UNVERIFIED (docs re-read 2026-11-23: <https://docs.cloud.google.com/filestore/docs/reference/rest/v1/projects.locations.instances>) wording.
 func (o *OperationsServer) DeleteOperation(_ context.Context, req *longrunningpb.DeleteOperationRequest) (*emptypb.Empty, error) {
 	s := o.api
 	s.mu.Lock()
