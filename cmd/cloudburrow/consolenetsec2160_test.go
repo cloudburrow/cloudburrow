@@ -77,12 +77,33 @@ func TestConsoleNetworkSecurityPolicies2160(t *testing.T) {
 		t.Skip("the fixture has no global forwarding rule")
 	}
 	rule := strAny(items[0].(map[string]any)["selfLink"])
-	spec := `{"target": {"loadBalancingScheme": "EXTERNAL_MANAGED", "resources": ["` + relOf(rule) + `"]}, "action": "DENY", "httpRules": [{"to": {"operations": [{"paths": [{"prefix": "/admin"}]}]}}]}`
-	if _, err := p.Create(ctx, project, map[string]string{"name": "deny-admin", "location": "global", "spec": spec}); err != nil {
+	spec := `{"target": {"loadBalancingScheme": "EXTERNAL_MANAGED", "resources": ["` + relOf(rule) + `"]}, "httpRules": [{"to": {"operations": [{"paths": [{"prefix": "/admin"}]}]}}]}`
+	if _, err := p.Create(ctx, project, map[string]string{"name": "deny-admin", "location": "global", "action": "DENY", "spec": spec}); err != nil {
 		t.Fatal(err)
 	}
 	l, _ := p.List(ctx, project)
 	if len(l.Items) != 1 || l.Items[0].Fields["Action"] != "DENY" || l.Items[0].Fields["Rules"] != "1" || l.Items[0].Fields["Targets"] == "—" {
+		t.Fatalf("authz list %+v", l.Items)
+	}
+	// CUSTOM with Cloud IAP, from the form's selects; CUSTOM without a
+	// provider is refused.
+	if _, err := p.Create(ctx, project, map[string]string{"name": "iap", "location": "global", "action": "CUSTOM", "spec": spec}); err == nil {
+		t.Fatal("CUSTOM without a provider accepted")
+	}
+	if _, err := p.Create(ctx, project, map[string]string{"name": "iap", "location": "global", "action": "CUSTOM", "customProvider": "cloudIap", "spec": spec}); err != nil {
+		t.Fatal(err)
+	}
+	d, _ := p.Detail(ctx, project, []string{"global", "iap"})
+	var prov string
+	for _, f := range d.Edit.Fields {
+		if f.Name == "customProvider" {
+			prov = f.Default
+		}
+	}
+	if prov != "cloudIap" {
+		t.Fatalf("the edit form's provider: %+v", d.Edit.Fields)
+	}
+	if l, _ := p.List(ctx, project); len(l.Items) != 2 || l.Items[1].Fields["Custom provider"] != "Cloud IAP" {
 		t.Fatalf("authz list %+v", l.Items)
 	}
 }

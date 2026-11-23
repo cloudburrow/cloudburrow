@@ -37,20 +37,98 @@ type netsecKind struct {
 	// rulesField is the JSON field the form edits; template its example.
 	fields   []string
 	template string
+	// form are fields the form asks for beside the JSON, and set puts
+	// their values in the body (authzPolicies' action and custom
+	// provider).
+	form func(o map[string]any) []console.Field
+	set  func(v map[string]string, body map[string]any) error
+}
+
+// authzForm is an authorization policy's action, profile and custom
+// provider, as the fields of gcloud's import YAML (action, policyProfile,
+// customProvider.cloudIap, customProvider.authzExtension.resources).
+func authzForm(o map[string]any) []console.Field {
+	action, profile, provider, ext := "ALLOW", "REQUEST_AUTHZ", "", ""
+	if o != nil {
+		action, profile = vpcStr(o, "action"), vpcStr(o, "policyProfile")
+		cp := vmMap(o, "customProvider")
+		if vmMap(cp, "cloudIap") != nil || cp["cloudIap"] != nil {
+			provider = "cloudIap"
+		}
+		if ae := vmMap(cp, "authzExtension"); ae != nil {
+			provider, ext = "authzExtension", strings.Join(listStrings(ae["resources"]), ",")
+		}
+	}
+	return []console.Field{
+		{Name: "action", Label: "Action", Type: "select", Required: true, Default: action, Options: []string{"ALLOW", "DENY", "CUSTOM"},
+			Help: "CUSTOM delegates the decision to Cloud IAP or an authorization extension; the CUSTOM policies are evaluated first, then DENY, then ALLOW."},
+		{Name: "policyProfile", Label: "Policy profile", Type: "select", Default: profile, Options: []string{"REQUEST_AUTHZ", "CONTENT_AUTHZ"},
+			OptionLabels: map[string]string{"REQUEST_AUTHZ": "Request authorization (headers)", "CONTENT_AUTHZ": "Content authorization (headers and body, CUSTOM only)"},
+			Immutable:    o != nil},
+		{Name: "customProvider", Label: "Custom provider", Type: "select", Default: provider, Options: []string{"", "cloudIap", "authzExtension"},
+			OptionLabels: map[string]string{"": "None", "cloudIap": "Cloud IAP", "authzExtension": "Authorization extension"},
+			VisibleWhen:  map[string]string{"action": "CUSTOM"}},
+		{Name: "authzExtension", Label: "Authorization extension", Type: "text", Default: ext, VisibleWhen: map[string]string{"customProvider": "authzExtension"},
+			Help: "With an authorization extension provider: projects/PROJECT/locations/LOCATION/authzExtensions/EXTENSION, in the policy's location."},
+	}
+}
+
+func authzSet(v map[string]string, body map[string]any) error {
+	if a := strings.TrimSpace(v["action"]); a != "" {
+		body["action"] = a
+	}
+	if pp := strings.TrimSpace(v["policyProfile"]); pp != "" {
+		body["policyProfile"] = pp
+	}
+	provider := v["customProvider"]
+	if body["action"] != "CUSTOM" {
+		provider = "" // the field shows for CUSTOM only
+	}
+	switch provider {
+	case "cloudIap":
+		body["customProvider"] = map[string]any{"cloudIap": map[string]any{}}
+	case "authzExtension":
+		ext := strings.TrimSpace(v["authzExtension"])
+		if ext == "" {
+			return errors.New("Authorization extension: name the extension")
+		}
+		body["customProvider"] = map[string]any{"authzExtension": map[string]any{"resources": []any{ext}}}
+	case "":
+		if _, ok := body["customProvider"]; !ok && body["action"] == "CUSTOM" {
+			return errors.New("Custom provider: the CUSTOM action needs Cloud IAP or an authorization extension")
+		}
+	}
+	return nil
+}
+
+func listStrings(v any) []string {
+	var out []string
+	for _, x := range listAny(v) {
+		out = append(out, strAny(x))
+	}
+	return out
 }
 
 var netsecKinds = map[string]netsecKind{
 	"netsecurity-authz": {id: "netsecurity-authz", title: "Authorization policies", coll: "authzPolicies", idParam: "authzPolicyId",
 		noun: "Authorization policy", nounPlural: "authorization policies",
-		note:    "An authorization policy allows or denies the requests through the load balancers whose forwarding rules it targets, by their source and HTTP request; this instance's proxy enforces ALLOW and DENY (a denied request is answered 403).",
-		columns: []string{"Location", "Action", "Load balancing scheme", "Targets", "Rules"},
+		note:    "An authorization policy allows, denies or delegates the requests through the load balancers whose forwarding rules it targets, by their source (IP ranges, client certificates, and on internal load balancers the source VM's service account or secure tags) and HTTP request; this instance's proxy enforces it: CUSTOM policies first (Cloud IAP, or an authorization extension the load balancer calls), then DENY, then ALLOW (a denied request is answered 403).",
+		columns: []string{"Location", "Action", "Custom provider", "Load balancing scheme", "Targets", "Rules"},
 		column: func(o map[string]any) map[string]string {
 			t := vmMap(o, "target")
-			return map[string]string{"Action": vpcDash(vpcStr(o, "action")), "Load balancing scheme": vpcDash(vpcStr(t, "loadBalancingScheme")),
+			cp := vmMap(o, "customProvider")
+			prov := "—"
+			if _, ok := cp["cloudIap"]; ok {
+				prov = "Cloud IAP"
+			} else if ae := vmMap(cp, "authzExtension"); ae != nil {
+				prov = "Authorization extension " + strings.Join(lastAllAny(listAny(ae["resources"])), ", ")
+			}
+			return map[string]string{"Action": vpcDash(vpcStr(o, "action")), "Custom provider": prov, "Load balancing scheme": vpcDash(vpcStr(t, "loadBalancingScheme")),
 				"Targets": vpcDash(strings.Join(lastAllAny(listAny(t["resources"])), ", ")), "Rules": fmt.Sprint(len(listAny(o["httpRules"])))}
 		},
-		fields:   []string{"target", "action", "httpRules", "customProvider"},
-		template: `{"target": {"loadBalancingScheme": "EXTERNAL_MANAGED", "resources": ["projects/PROJECT/global/forwardingRules/RULE"]}, "action": "DENY", "httpRules": [{"to": {"operations": [{"paths": [{"prefix": "/admin"}]}]}}]}`},
+		fields:   []string{"target", "httpRules"},
+		template: `{"target": {"loadBalancingScheme": "INTERNAL_MANAGED", "resources": ["projects/PROJECT/regions/REGION/forwardingRules/RULE"]}, "httpRules": [{"from": {"sources": [{"resources": [{"iamServiceAccount": {"exact": "web@PROJECT.iam.gserviceaccount.com"}}, {"tagValueIdSet": {"ids": ["TAG_VALUE_ID"]}}]}]}, "to": {"operations": [{"paths": [{"prefix": "/admin"}]}]}}]}`,
+		form:     authzForm, set: authzSet},
 	"netsecurity-meshauthz": {id: "netsecurity-meshauthz", title: "Authentication Configuration", coll: "authorizationPolicies", idParam: "authorizationPolicyId",
 		noun: "Service mesh authorization policy", nounPlural: "service mesh authorization policies",
 		note:    "Cloud Service Mesh's (Traffic Director's) authorization policies, which its Envoy and proxyless gRPC clients enforce.",
@@ -133,6 +211,9 @@ func (p netsecProvider) CreateForm() (string, []console.Field) {
 		{Name: "description", Label: "Description", Type: "text", Help: "Optional."},
 	}
 	fields = append(fields, ccmLocationFields("")...)
+	if p.k.form != nil {
+		fields = append(fields, p.k.form(nil)...)
+	}
 	return "Create", append(fields, console.Field{Name: "spec", Label: "Policy", Type: "textarea", Required: true, Default: p.k.template,
 		Help: "The policy's " + strings.Join(p.k.fields, ", ") + " as JSON, as gcloud's import file holds them."})
 }
@@ -156,6 +237,11 @@ func (p netsecProvider) netsecSpec(v map[string]string) (map[string]any, error) 
 	}
 	if d := strings.TrimSpace(v["description"]); d != "" {
 		body["description"] = d
+	}
+	if p.k.set != nil {
+		if err := p.k.set(v, body); err != nil {
+			return nil, err
+		}
 	}
 	return body, nil
 }
@@ -203,9 +289,19 @@ func (p netsecProvider) Detail(ctx context.Context, project string, path []strin
 	return console.Detail{Title: path[1], Heading: p.k.noun + " details",
 		Sections: []console.Section{{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Properties: props},
 			{Heading: "Policy", Properties: []console.Property{{Label: "JSON", Value: string(js)}}}}}},
-		Edit: &console.EditForm{Label: "Edit", Title: "Edit " + strings.ToLower(p.k.noun), Submit: "Save", Page: true, Fields: []console.Field{
-			{Name: "description", Label: "Description", Type: "text", Default: vpcStr(o, "description"), Help: "Optional."},
-			{Name: "spec", Label: "Policy", Type: "textarea", Required: true, Default: string(js)}}}}, nil
+		Edit: &console.EditForm{Label: "Edit", Title: "Edit " + strings.ToLower(p.k.noun), Submit: "Save", Page: true, Fields: p.editFields(o, string(js))}}, nil
+}
+
+func (p netsecProvider) editFields(o map[string]any, js string) []console.Field {
+	f := []console.Field{{Name: "description", Label: "Description", Type: "text", Default: vpcStr(o, "description"), Help: "Optional."}}
+	if p.k.form != nil {
+		for _, x := range p.k.form(o) {
+			if x.Name != "policyProfile" { // immutable
+				f = append(f, x)
+			}
+		}
+	}
+	return append(f, console.Field{Name: "spec", Label: "Policy", Type: "textarea", Required: true, Default: js})
 }
 
 func (p netsecProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
@@ -228,7 +324,14 @@ func (p netsecProvider) Edit(ctx context.Context, project string, path []string,
 		return err
 	}
 	body["description"] = strings.TrimSpace(v["description"])
+	delete(body, "policyProfile")
 	mask := append([]string{"description"}, p.k.fields...)
+	if p.k.set != nil {
+		mask = append(mask, "action", "customProvider")
+		if _, ok := body["customProvider"]; !ok {
+			body["customProvider"] = nil
+		}
+	}
 	_, err = p.v1(ctx, "PATCH", "/v1/"+ccmName(project, path, p.k.coll)+"?updateMask="+url.QueryEscape(strings.Join(mask, ",")), body)
 	return err
 }

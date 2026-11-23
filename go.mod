@@ -121,6 +121,7 @@ require (
 
 require (
 	cloud.google.com/go/accesscontextmanager v1.15.0 // indirect
+	cloud.google.com/go/networkservices v1.8.1 // indirect
 	cloud.google.com/go/osconfig v1.22.0 // indirect
 	github.com/RoaringBitmap/roaring/v2 v2.26.0 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
