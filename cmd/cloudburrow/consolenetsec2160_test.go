@@ -19,7 +19,7 @@ func TestConsoleNetworkSecurityPolicies2160(t *testing.T) {
 	screen, project := lb2160Fixture(t)
 	cm, _ := certificatemanager.New(certificatemanager.Options{})
 	ns, _ := networksecurity.New(networksecurity.Options{})
-	useNetSec(screen.svc.api, ns, cm)
+	useNetSec(screen.svc.api, ns, cm, nil)
 	nsrest, api := networksecurity.NewRESTHandler(ns), screen.svc.api
 	screen.svc.handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if ns.Handles(r) {

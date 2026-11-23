@@ -14,6 +14,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/certificatemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/compute"
 	"github.com/cloudburrow/cloudburrow/internal/service/networksecurity"
+	"github.com/cloudburrow/cloudburrow/internal/service/networkservices"
 )
 
 // Network Security (#2160), served on the Compute Engine port beside
@@ -203,8 +204,19 @@ func trustPools(tc *cmpb.TrustConfig) (roots, inter *x509.CertPool, allow []*x50
 
 // useNetSec wires the hooks between Network Security, Certificate Manager
 // and the Compute Engine API.
-func useNetSec(api *compute.Server, ns *networksecurity.Server, cm *certificatemanager.Server) {
+// nsv, when not nil, is Network Services: the authorization extensions a
+// CUSTOM authorization policy delegates to.
+func useNetSec(api *compute.Server, ns *networksecurity.Server, cm *certificatemanager.Server, nsv *networkservices.Server) {
+	var authzExt func(rel string) (string, bool)
+	if nsv != nil {
+		authzExt = func(rel string) (string, bool) {
+			e, ok := nsv.AuthzExtension(rel)
+			return e.LoadBalancingScheme, ok
+		}
+		api.UseAuthzExtensions(netSvcAuthzExtensions{nsv})
+	}
 	ns.UseHooks(networksecurity.Hooks{
+		AuthzExtension:    authzExt,
 		TrustConfigExists: func(name string) bool { _, ok := cm.TrustConfig(name); return ok },
 		ForwardingRule: func(rel string) (string, bool) {
 			p := strings.Split(rel, "/")

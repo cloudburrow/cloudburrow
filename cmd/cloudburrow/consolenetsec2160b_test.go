@@ -20,7 +20,7 @@ func netsecFixture2160b(t *testing.T) (computeScreen, string, *certificatemanage
 		t.Fatal(err)
 	}
 	screen, project := computeScreen{svc: &computeService{api: api0}}, "lb2-console"
-	useNetSec(screen.svc.api, ns, cm)
+	useNetSec(screen.svc.api, ns, cm, nil)
 	nsrest, cmrest, api := networksecurity.NewRESTHandler(ns), certificatemanager.NewRESTHandler(cm), screen.svc.api
 	screen.svc.handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {

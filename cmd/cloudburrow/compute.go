@@ -23,6 +23,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/gke"
 	"github.com/cloudburrow/cloudburrow/internal/service/iap"
 	"github.com/cloudburrow/cloudburrow/internal/service/networksecurity"
+	"github.com/cloudburrow/cloudburrow/internal/service/networkservices"
 	"github.com/cloudburrow/cloudburrow/internal/service/redisadmin"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
@@ -60,6 +61,10 @@ type computeService struct {
 	// the server TLS policies, client TLS policies and authorization
 	// policies the load balancers here read (computenetsec.go).
 	netSec *networksecurity.Server
+	// netSvc is Network Services (networkservices.googleapis.com, #2160):
+	// Secure Web Proxy's gateways, each a forward proxy here, and Service
+	// Extensions' authorization extensions (computenetsvc.go).
+	netSvc *networkservices.Server
 	// iapEval and creds are the host's IAM evaluator and credentials, which
 	// IAP checks requests with; up sets them (useIAP).
 	iapEval *iameval.Evaluator
@@ -191,9 +196,14 @@ func (s *computeService) Start(ctx context.Context) error {
 	if state != "" {
 		xdsCredDir = filepath.Join(filepath.Dir(state), "xds-credentials")
 	}
+	nsv, err := networkservices.New(networkservices.Options{State: dir("networkservices.json"), Bind: s.cfg.BindAddress})
+	if err != nil {
+		return err
+	}
+	s.netSvc = nsv
 	api, err := compute.New(compute.Options{State: state, Extra: s.instanceGroupManagers, ExtraGroups: s.gkeGroups, NetworkUsers: s.networkUsers, VMs: s.vms,
 		ProjectOrganization: s.projectOrganization, LB: &computeLB{cfg: s.cfg, vms: s.vms},
-		CertMaps: cm, IAP: computeIAPGate{svc: s}, NetSec: computeNetSec{ns: ns, cm: cm}, XDSCredentialDir: xdsCredDir, SourceTags: s.sourceTags})
+		CertMaps: cm, IAP: computeIAPGate{svc: s}, NetSec: computeNetSec{ns: ns, cm: cm, endpoints: xdsEndpointPolicies(nsv)}, XDSCredentialDir: xdsCredDir, SourceTags: s.sourceTags})
 	if err != nil {
 		return err
 	}
@@ -203,7 +213,9 @@ func (s *computeService) Start(ctx context.Context) error {
 	ia.SetBackendServices(func(rel string) bool { return backendServiceExists(api, rel) })
 	ia.SetNormalizer(s.iapNormalize)
 	s.tunnel = s.newIAPTunnel(api, ia)
-	useNetSec(api, ns, cm)
+	useNetSec(api, ns, cm, nsv)
+	s.useNetSvc(api, ns, nsv, cm)
+	nsv.Start()
 	// The schedules' and autoscalers' loops (#2139); with no Addr, Start
 	// listens on nothing.
 	if err := api.Start(ctx); err != nil {
@@ -233,6 +245,7 @@ func (s *computeService) Start(ctx context.Context) error {
 	cmrest := certificatemanager.NewRESTHandler(cm)
 	iaprest := iap.NewRESTHandler(ia)
 	nsrest := networksecurity.NewRESTHandler(ns)
+	nsvrest := networkservices.NewRESTHandler(nsv)
 	var h http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if iap.Handles(r.URL.Path) {
 			iaprest.ServeHTTP(w, r)
@@ -240,6 +253,10 @@ func (s *computeService) Start(ctx context.Context) error {
 		}
 		if ns.Handles(r) {
 			nsrest.ServeHTTP(w, r)
+			return
+		}
+		if nsv.Handles(r) {
+			nsvrest.ServeHTTP(w, r)
 			return
 		}
 		if cm.Handles(r) {
@@ -297,6 +314,9 @@ func (s *computeService) Start(ctx context.Context) error {
 func (s *computeService) Stop(ctx context.Context) error {
 	if s.api != nil {
 		_ = s.api.Stop(ctx)
+	}
+	if s.netSvc != nil {
+		s.netSvc.Stop()
 	}
 	if s.vms != nil {
 		s.vms.stopAll()
@@ -412,6 +432,11 @@ func (r *computeResetter) ResetProject(_ context.Context, project string) error 
 	}
 	if ns := r.svc.netSec; ns != nil {
 		if err := ns.ResetProject(project); err != nil {
+			return err
+		}
+	}
+	if nsv := r.svc.netSvc; nsv != nil {
+		if err := nsv.ResetProject(project); err != nil {
 			return err
 		}
 	}

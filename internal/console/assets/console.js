@@ -146,6 +146,10 @@ const CCM_TABS = ["/security/ccm/list/certificates", "/security/ccm/list/certifi
 // armor/docs/advanced-network-ddos, waf-rules).
 const ARMOR_TABS = ["/net-security/securitypolicies/list", "/net-security/securitypolicies/networkEdgeSecurityServices", "/net-security/securitypolicies/wafRules"];
 // Network Security's Authentication Configuration tabs (#2160).
+// Secure Web Proxy (#2160): Web Proxies and SWP Policies (the quickstart's
+// console links), URL lists and TLS inspection policies (UNVERIFIED
+// (re-read 2026-11-22: secure-web-proxy/docs/url-list-syntax-reference) paths).
+const SWP_TABS = ["/net-security/swp/web-proxies/list", "/net-security/swp/policies/list", "/net-security/swp/urllists/list", "/net-security/swp/tls-inspection/list"];
 const NETSEC_AUTH_TABS = ["/net-security/authconfig", "/net-security/authconfig/backendAuthentication", "/net-security/authconfig/clientTlsPolicies", "/net-security/authconfig/authorizationPolicies"];
 const GKE_STORAGE = ["/kubernetes/storage", "/kubernetes/storage-classes"];
 // Cloud Logging's Settings and its Log Scopes tab (#2020), as Google's
@@ -665,6 +669,16 @@ const ROUTES = [
   // authzPolicies (load-balancing/docs/auth-policy). UNVERIFIED (re-read 2026-11-22: load-balancing/docs/auth-policy) path.
   { path: "/net-security/authzpolicies", service: "netsecurity-authz", icon: "vpc", title: "Authorization policies", kind: "Authorization policy",
     section: "Networking", product: "netsecurity", productTitle: "Network Security" },
+  // Secure Web Proxy (#2160): Web Proxies, SWP Policies (with their
+  // rules), URL lists and TLS inspection policies, one nav entry.
+  { path: "/net-security/swp/web-proxies/list", service: "netsecurity-swp-proxies", icon: "vpc", title: "Secure Web Proxy", tabTitle: "Web proxies",
+    kind: "Web proxy", pageTabs: SWP_TABS, section: "Networking", product: "netsecurity", productTitle: "Network Security" },
+  { path: "/net-security/swp/policies/list", service: "netsecurity-swp-policies", icon: "vpc", title: "Secure Web Proxy", tabTitle: "Policies",
+    kind: "Policy", navHidden: true, navAs: "/net-security/swp/web-proxies/list", pageTabs: SWP_TABS, section: "Networking", product: "netsecurity", productTitle: "Network Security" },
+  { path: "/net-security/swp/urllists/list", service: "netsecurity-swp-urllists", icon: "vpc", title: "Secure Web Proxy", tabTitle: "URL lists",
+    kind: "URL list", navHidden: true, navAs: "/net-security/swp/web-proxies/list", pageTabs: SWP_TABS, section: "Networking", product: "netsecurity", productTitle: "Network Security" },
+  { path: "/net-security/swp/tls-inspection/list", service: "netsecurity-swp-tls", icon: "vpc", title: "Secure Web Proxy", tabTitle: "TLS inspection policies",
+    kind: "TLS inspection policy", navHidden: true, navAs: "/net-security/swp/web-proxies/list", pageTabs: SWP_TABS, section: "Networking", product: "netsecurity", productTitle: "Network Security" },
   // Cloud CDN (#2160): Network services' Cloud CDN origins.
   { path: "/net-services/cdn/list", service: "netservices-cdn", icon: "vpc", title: "Cloud CDN", kind: "Origin",
     section: "Networking", product: "netservices", productTitle: "Network services" },

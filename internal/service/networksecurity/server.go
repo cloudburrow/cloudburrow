@@ -102,6 +102,10 @@ type Hooks struct {
 	// (DEFAULT, EDGE_CACHE, ALL_REGIONS or CLIENT_AUTH); ok is false
 	// when there is none.
 	CertificateScope func(name string) (scope string, ok bool)
+	// CAPoolExists is whether a Certificate Authority Service CA pool
+	// exists (projects/P/locations/L/caPools/X), for a TLS inspection
+	// policy.
+	CAPoolExists func(name string) bool
 }
 
 // Server is the Network Security API.
@@ -113,6 +117,17 @@ type Server struct {
 	res   map[string]proto.Message
 	ops   map[string]*longrunningpb.Operation
 	hooks Hooks
+	// gatewayUsers are the Secure Web Proxy gateways that name a gateway
+	// security policy (UseGatewayUsers).
+	gatewayUsers func(name string) []string
+}
+
+// UseGatewayUsers sets which gateways name a gateway security policy,
+// which keeps it from being deleted.
+func (s *Server) UseGatewayUsers(f func(name string) []string) {
+	s.mu.Lock()
+	s.gatewayUsers = f
+	s.mu.Unlock()
 }
 
 // New returns a Server with its state restored.
@@ -148,15 +163,20 @@ const (
 	collAuthzALB  = "authzPolicies"
 	collAddrGroup = "addressGroups"
 	collBackendAu = "backendAuthenticationConfigs"
+	// Secure Web Proxy's (swp.go).
+	collGSP        = "gatewaySecurityPolicies"
+	collURLList    = "urlLists"
+	collTLSInspect = "tlsInspectionPolicies"
 )
 
 var colls = map[string]bool{collServerTLS: true, collClientTLS: true, collAuthz: true, collAuthzALB: true,
-	collAddrGroup: true, collBackendAu: true}
+	collAddrGroup: true, collBackendAu: true, collGSP: true, collURLList: true, collTLSInspect: true}
 
 // noun is a collection's resource in Google's messages.
 var noun = map[string]string{collServerTLS: "ServerTlsPolicy", collClientTLS: "ClientTlsPolicy",
 	collAuthz: "AuthorizationPolicy", collAuthzALB: "AuthzPolicy", collAddrGroup: "AddressGroup",
-	collBackendAu: "BackendAuthenticationConfig"}
+	collBackendAu: "BackendAuthenticationConfig", collGSP: "GatewaySecurityPolicy", collURLList: "UrlList",
+	collTLSInspect: "TlsInspectionPolicy", collRules: "GatewaySecurityPolicyRule"}
 
 var (
 	parentRE = regexp.MustCompile(`^projects/([^/]+)/locations/([^/]+)$`)
@@ -310,7 +330,7 @@ func (s *Server) list(parent, coll string) ([]proto.Message, error) {
 	var keys []string
 	for k := range s.res {
 		p := strings.Split(k, "/")
-		if p[4] != coll {
+		if len(p) != 6 || p[4] != coll {
 			continue
 		}
 		if all && strings.HasPrefix(k, strings.TrimSuffix(parent, "/locations/-")+"/locations/") || !all && strings.Join(p[:4], "/") == parent {
@@ -386,6 +406,9 @@ func (s *Server) delete(coll, name string) (*longrunningpb.Operation, error) {
 	s.mu.Lock()
 	_, ok := s.res[name]
 	users := s.hooks.Users
+	if coll == collGSP {
+		users = s.gatewayUsers
+	}
 	s.mu.Unlock()
 	if !ok {
 		return nil, notFound(coll, name)
@@ -476,6 +499,9 @@ type state struct {
 
 func newOf(name string) proto.Message {
 	p := strings.Split(name, "/")
+	if len(p) == 8 && p[4] == collGSP && p[6] == "rules" {
+		return &nspb.GatewaySecurityPolicyRule{}
+	}
 	if len(p) != 6 {
 		return nil
 	}
@@ -492,6 +518,12 @@ func newOf(name string) proto.Message {
 		return &nspb.AddressGroup{}
 	case collBackendAu:
 		return &nspb.BackendAuthenticationConfig{}
+	case collGSP:
+		return &nspb.GatewaySecurityPolicy{}
+	case collURLList:
+		return &nspb.UrlList{}
+	case collTLSInspect:
+		return &nspb.TlsInspectionPolicy{}
 	}
 	return nil
 }

@@ -433,6 +433,9 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			newNetsecProvider(screen, "netsecurity-clienttls"), newNetsecProvider(screen, "netsecurity-meshauthz"), newNetsecProvider(screen, "netsecurity-authz"),
 			// Address groups and Backend Authentication (#2160, consolenetsec2160b.go).
 			netsecAddressGroupsProvider{ccmScreen{screen}}, netsecBackendAuthProvider{ccmScreen{screen}},
+			// Secure Web Proxy (#2160, consoleswp2160.go).
+			swpProxiesProvider{swpScreen{ccmScreen{screen}}}, swpPoliciesProvider{swpScreen{ccmScreen{screen}}},
+			swpURLListsProvider{swpScreen{ccmScreen{screen}}}, swpTLSProvider{swpScreen{ccmScreen{screen}}},
 			// Serverless VPC Access (#2140), on the same port.
 			vpcAccessProvider{screen},
 			computeInternalAddressesProvider{computeAddressesProvider{screen}}, computeEffectiveRoutesProvider{screen},

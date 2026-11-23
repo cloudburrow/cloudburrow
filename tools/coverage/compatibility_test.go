@@ -97,6 +97,7 @@ var compatSections = map[string]string{
 	"vpcaccess":          "## Serverless VPC Access — `google.cloud.vpcaccess.v1`",
 	"certificatemanager": "## Certificate Manager — `google.cloud.certificatemanager.v1`",
 	"networksecurity":    "## Network Security — `google.cloud.networksecurity.v1`",
+	"networkservices":    "## Network Services — `google.cloud.networkservices.v1`",
 	"iap":                "## Identity-Aware Proxy — `google.cloud.iap.v1`",
 	"workflows":          "## Workflows — `google.cloud.workflows.v1` and `google.cloud.workflows.executions.v1`",
 	// The Kubernetes Engine API (#1913), named by gRPC method.

@@ -23,6 +23,7 @@ import (
 	iamv2pb "cloud.google.com/go/iam/apiv2/iampb"
 	iamv3pb "cloud.google.com/go/iam/apiv3/iampb"
 	"cloud.google.com/go/networksecurity/apiv1/networksecuritypb"
+	"cloud.google.com/go/networkservices/apiv1/networkservicespb"
 	"cloud.google.com/go/orgpolicy/apiv2/orgpolicypb"
 	pmpb "cloud.google.com/go/parametermanager/apiv1/parametermanagerpb"
 	rmpb "cloud.google.com/go/resourcemanager/apiv3/resourcemanagerpb"
@@ -58,6 +59,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/logging"
 	"github.com/cloudburrow/cloudburrow/internal/service/monitoring"
 	"github.com/cloudburrow/cloudburrow/internal/service/networksecurity"
+	"github.com/cloudburrow/cloudburrow/internal/service/networkservices"
 	"github.com/cloudburrow/cloudburrow/internal/service/parametermanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/privateca"
 	"github.com/cloudburrow/cloudburrow/internal/service/redisadmin"
@@ -151,6 +153,12 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 		t.Fatal(err)
 	}
 	networksecuritypb.RegisterNetworkSecurityServer(srv, nsSrv)
+	nsvSrv, err := networkservices.New(networkservices.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	networkservicespb.RegisterNetworkServicesServer(srv, nsvSrv)
+	networkservicespb.RegisterDepServiceServer(srv, nsvSrv)
 	iapSrv, err := iap.New(iap.Options{})
 	if err != nil {
 		t.Fatal(err)

@@ -17,14 +17,15 @@ import (
 // with hostguard.Wrap (the Host check of #676 and the Origin check of
 // #1586) or listed here with its reason.
 var guardedElsewhere = map[string]string{
-	"internal/console/console.go":             "s.Handler() returns hostguard.Wrap(sameOriginOnly(...))",
-	"internal/metadata/server.go":             "s.Handler() returns hostguard.Wrap, except for a pod's own workload host",
-	"internal/service/secrets/server.go":      "s.handler() returns h2c.NewHandler(hostguard.Wrap(...))",
-	"internal/service/resourcemanager/api.go": "top serves hostguard.Wrap(both), except for HandleUnguarded's matches: Kourier's invoke check (#1879), which forwards any routed Host and answers only allow or deny",
-	"internal/service/vertexai/lifecycle.go":  "mixedHandler serves hostguard.Wrap'd REST and gRPC",
-	"internal/netfwd/guard.go":                "the guard itself: guardHandler checks Host and Origin",
-	"internal/service/compute/lbplane.go":     "a load balancer's forwarding rule (#2153) is the user's own front end, which on Google any client on the internet reaches under any Host; it serves only what the user's URL map routes to their backends, holds no CloudBurrow API and no credential, and listens on 127.0.0.1 only",
-	"cmd/cloudburrow/terraform_intercept.go":  "the --intercept-hardcoded proxy (#1578) lives for one terraform run and answers only CONNECT to an intercepted host (a browser cannot send CONNECT); the inner server has no listener, only those tunnels, and serves only an intercepted Host",
+	"internal/console/console.go":               "s.Handler() returns hostguard.Wrap(sameOriginOnly(...))",
+	"internal/metadata/server.go":               "s.Handler() returns hostguard.Wrap, except for a pod's own workload host",
+	"internal/service/secrets/server.go":        "s.handler() returns h2c.NewHandler(hostguard.Wrap(...))",
+	"internal/service/resourcemanager/api.go":   "top serves hostguard.Wrap(both), except for HandleUnguarded's matches: Kourier's invoke check (#1879), which forwards any routed Host and answers only allow or deny",
+	"internal/service/vertexai/lifecycle.go":    "mixedHandler serves hostguard.Wrap'd REST and gRPC",
+	"internal/netfwd/guard.go":                  "the guard itself: guardHandler checks Host and Origin",
+	"internal/service/compute/lbplane.go":       "a load balancer's forwarding rule (#2153) is the user's own front end, which on Google any client on the internet reaches under any Host; it serves only what the user's URL map routes to their backends, holds no CloudBurrow API and no credential, and listens on 127.0.0.1 only",
+	"internal/service/networkservices/proxy.go": "a secure web proxy's listener (#2160) is the user's own forward proxy, which on Google its clients reach under any Host: it answers only CONNECT (a browser page cannot send one) and absolute-URI requests (a page's fetch to it sends origin-form, refused with 400), forwards only what the user's policy allows, through the egress guard, never to Google, holds no CloudBurrow API and no credential",
+	"cmd/cloudburrow/terraform_intercept.go":    "the --intercept-hardcoded proxy (#1578) lives for one terraform run and answers only CONNECT to an intercepted host (a browser cannot send CONNECT); the inner server has no listener, only those tunnels, and serves only an intercepted Host",
 }
 
 // TestEveryHTTPListenerIsGuarded (#1586): three in-process REST APIs
