@@ -21,13 +21,14 @@ import (
 )
 
 // TestBigQueryStudioScheduleThroughThePage (#2094, 2026-11-23 round): the
-// query editor's Schedule > Create new scheduled query opens Google's New
-// scheduled query pane, whose Save makes a scheduled_query transfer config
+// query editor's File > Schedule opens Google's New scheduled query pane
+// (File, not a Schedule button: "click File > Schedule", scheduling-queries), whose Save makes a scheduled_query transfer config
 // the official client reads back (name, a weekly schedule, the destination
 // table and its write preference); the Scheduled query details page's
-// Edit opens the query in the editor, and Schedule > Update scheduled
-// query saves it back (the query changed, Repeats On-demand). WCAG 2.1 AA
-// for the open pane, and the pane opened, filled and closed by keyboard.
+// Edit opens the query in the editor, and File > Schedule > Update
+// scheduled query (a submenu there) saves it back (the query changed, Repeats On-demand). WCAG 2.1 AA
+// for the open pane, and the pane opened, filled and closed by keyboard,
+// the File menu and its Schedule submenu walked with Enter and the arrows.
 func TestBigQueryStudioScheduleThroughThePage(t *testing.T) {
 	needService(t, "bigquery")
 	c, err := datatransfer.NewClient(context.Background(), option.WithEndpoint(endpoint(t, envDataTransfer)),
@@ -71,18 +72,25 @@ func TestBigQueryStudioScheduleThroughThePage(t *testing.T) {
 	p.waitFor(`document.querySelector(".bq-home") !== null && document.querySelector(".bq-tree") !== null`)
 	p.clickText(".bq-new-query", "SQL query")
 	p.setField(".bq-editor", "SELECT 1 AS n")
-	scheduleMenu := func(item string) {
+	fileMenu := func() {
 		t.Helper()
-		p.clickExpr(`[...document.querySelectorAll(".bq-toolbar .bq-menu-button[aria-label=Schedule]")].find((b) => b.offsetParent !== null)`)
-		p.clickText(".bq-menu-item", item)
+		p.clickExpr(`[...document.querySelectorAll(".bq-toolbar .bq-menu-button[aria-label=File]")].find((b) => b.offsetParent !== null)`)
 	}
-	// Update scheduled query needs a scheduled query opened with Edit.
-	var updateOff bool
-	p.eval(`[...document.querySelectorAll(".bq-menu-item")].some((b) => b.textContent === "Update scheduled query" && b.disabled)`, &updateOff)
-	if !updateOff {
-		t.Error("Update scheduled query is offered on a query that is not a scheduled query's")
+	// Google's toolbar has no Schedule button: Schedule is in File.
+	var toolbar []string
+	p.eval(`[...[...document.querySelectorAll(".bq-toolbar")].find((b) => b.offsetParent !== null).querySelectorAll(".bq-menu-button")].map((b) => b.getAttribute("aria-label"))`, &toolbar)
+	if strings.Join(toolbar, "|") != "Save|Share|File|Edit" {
+		t.Errorf("the query editor's menus are %v, want Save, Share, File, Edit", toolbar)
 	}
-	scheduleMenu("Create new scheduled query")
+	fileMenu()
+	// On a query that is no scheduled query's, File > Schedule is one item
+	// that opens the pane; Update scheduled query is not offered.
+	var fileItems []string
+	p.eval(`[...document.querySelectorAll(".bq-menu:not([hidden]) > .bq-menu-item, .bq-menu:not([hidden]) > .bq-submenu-wrap > .bq-menu-item")].map((b) => b.textContent + (b.getAttribute("aria-haspopup") ? ">" : ""))`, &fileItems)
+	if strings.Join(fileItems, "|") != "Schedule" {
+		t.Errorf("File's items are %v, want Schedule alone (a plain item)", fileItems)
+	}
+	p.clickText(".bq-menu:not([hidden]) .bq-menu-item", "Schedule")
 	p.waitFor(`document.querySelector("#bq-sq-pane") !== null && document.querySelector("#bq-sq-title").textContent === "New scheduled query"`)
 	var labels string
 	p.eval(`[...document.querySelectorAll("#bq-sq-pane label, #bq-sq-pane legend, #bq-sq-pane h3, #bq-sq-pane summary")].map((l) => l.textContent.trim()).join("|")`, &labels)
@@ -138,7 +146,16 @@ func TestBigQueryStudioScheduleThroughThePage(t *testing.T) {
 	p.waitFor(`[...document.querySelectorAll(".bq-editor")].some((e) => e.offsetParent !== null && e.value === "SELECT 1 AS n")`)
 	p.eval(`(() => { const e = [...document.querySelectorAll(".bq-editor")].find((x) => x.offsetParent !== null);
 		e.value = "SELECT 2 AS n"; e.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`, nil)
-	scheduleMenu("Update scheduled query")
+	// Here File > Schedule is a submenu: Update scheduled query, then New
+	// scheduled query.
+	fileMenu()
+	p.clickText(".bq-menu:not([hidden]) .bq-menu-parent", "Schedule ▸")
+	var subItems []string
+	p.eval(`[...document.querySelectorAll(".bq-submenu:not([hidden]) .bq-menu-item")].map((b) => b.textContent)`, &subItems)
+	if strings.Join(subItems, "|") != "Update scheduled query|New scheduled query" {
+		t.Errorf("File > Schedule's submenu is %v, want Update scheduled query, New scheduled query", subItems)
+	}
+	p.clickText(".bq-submenu:not([hidden]) .bq-menu-item", "Update scheduled query")
 	p.waitFor(`document.querySelector("#bq-sq-title") !== null && document.querySelector("#bq-sq-title").textContent === "Update scheduled query"`)
 	var filled []string
 	p.eval(`["#bq-sq-name", "#bq-sq-repeats", "#bq-sq-day", "#bq-sq-at", "#bq-sq-dataset", "#bq-sq-table"].map((s) => document.querySelector(s).value)`, &filled)
@@ -157,10 +174,21 @@ func TestBigQueryStudioScheduleThroughThePage(t *testing.T) {
 			got.GetScheduleOptions().GetDisableAutoScheduling())
 	}
 
-	// By keyboard: Schedule opens its menu on Enter with focus on its
-	// first item, Enter opens the pane with focus in Name, Escape closes it.
-	p.run(chromedp.Focus(chromedp.CSS(`.bq-split-left .bq-toolbar .bq-menu-button[aria-label=Schedule]`)), chromedp.KeyEvent(kb.Enter))
-	p.waitFor(`document.activeElement && document.activeElement.textContent === "Create new scheduled query"`)
+	// By keyboard, on this scheduled query's tab: File opens on Enter with
+	// focus on Schedule, Right opens its submenu on Update scheduled query,
+	// Down moves to New scheduled query, Left closes it back to Schedule,
+	// and Right, Down and Enter open the pane with focus in Name; Escape
+	// closes it.
+	p.run(chromedp.Focus(chromedp.CSS(`.bq-split-left .bq-toolbar .bq-menu-button[aria-label=File]`)), chromedp.KeyEvent(kb.Enter))
+	p.waitFor(`document.activeElement && document.activeElement.getAttribute("aria-label") === "Schedule"`)
+	p.run(chromedp.KeyEvent(kb.ArrowRight))
+	p.waitFor(`document.activeElement && document.activeElement.textContent === "Update scheduled query"`)
+	p.run(chromedp.KeyEvent(kb.ArrowDown))
+	p.waitFor(`document.activeElement && document.activeElement.textContent === "New scheduled query"`)
+	p.run(chromedp.KeyEvent(kb.ArrowLeft))
+	p.waitFor(`document.activeElement && document.activeElement.getAttribute("aria-label") === "Schedule" && document.querySelector(".bq-submenu:not([hidden])") === null`)
+	p.run(chromedp.KeyEvent(kb.ArrowRight), chromedp.KeyEvent(kb.ArrowDown))
+	p.waitFor(`document.activeElement && document.activeElement.textContent === "New scheduled query"`)
 	p.run(chromedp.KeyEvent(kb.Enter))
 	p.waitFor(`document.activeElement && document.activeElement.id === "bq-sq-name"`)
 	// Advanced options open, so the walk reaches their fields too.
@@ -174,8 +202,8 @@ func TestBigQueryStudioScheduleThroughThePage(t *testing.T) {
 	auditScreens(t, []a11yPage{
 		{"Studio New scheduled query pane", "/bigquery-studio" + q, `document.querySelector(".bq-tree") !== null`,
 			`[...document.querySelectorAll(".bq-new-query")].find((b) => b.textContent.includes("SQL query")).click();
-			 setTimeout(() => { const b = [...document.querySelectorAll(".bq-toolbar .bq-menu-button[aria-label=Schedule]")].find((x) => x.offsetParent !== null); b.click();
-			   [...document.querySelectorAll(".bq-menu-item")].find((x) => x.textContent === "Create new scheduled query" && x.offsetParent !== null).click();
+			 setTimeout(() => { const b = [...document.querySelectorAll(".bq-toolbar .bq-menu-button[aria-label=File]")].find((x) => x.offsetParent !== null); b.click();
+			   [...document.querySelectorAll(".bq-menu-item")].find((x) => x.textContent === "Schedule" && x.offsetParent !== null).click();
 			   setTimeout(() => { document.querySelector("#bq-sq-dest-on").click(); document.querySelector(".bq-sq-advanced").open = true; }, 300); }, 300)`},
 	})
 }

@@ -21154,13 +21154,53 @@ function bqMenu(label, items) {
     "aria-haspopup": "menu", "aria-expanded": "false",
     html: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>',
   });
-  const close = () => { menu.hidden = true; button.setAttribute("aria-expanded", "false"); };
+  const close = () => {
+    menu.hidden = true; button.setAttribute("aria-expanded", "false");
+    menu.querySelectorAll(".bq-submenu").forEach((m) => { m.hidden = true; });
+    menu.querySelectorAll("[aria-haspopup=menu]").forEach((b) => b.setAttribute("aria-expanded", "false"));
+  };
   for (const item of items) {
-    menu.append(el("button", {
-      type: "button", role: "menuitem", class: "bq-menu-item" + (item.danger ? " danger" : ""),
-      text: item.label, disabled: item.disabled || null, title: item.title || null,
-      onclick: (e) => { e.stopPropagation(); close(); item.run(); },
-    }));
+    if (!item.items) {
+      menu.append(el("button", {
+        type: "button", role: "menuitem", class: "bq-menu-item" + (item.danger ? " danger" : ""),
+        text: item.label, disabled: item.disabled || null, title: item.title || null,
+        onclick: (e) => { e.stopPropagation(); close(); item.run(); },
+      }));
+      continue;
+    }
+    // An item with items is a submenu (File > Schedule > Update scheduled
+    // query): Enter, a click or Right opens it beside the item, with focus
+    // on its first item; Left or Escape closes it back to the item.
+    const sub = el("div", { class: "bq-menu bq-submenu", role: "menu", "aria-label": item.label, hidden: true });
+    const parent = el("button", {
+      type: "button", role: "menuitem", class: "bq-menu-item bq-menu-parent", "aria-haspopup": "menu", "aria-expanded": "false",
+      text: item.label + " ▸", "aria-label": item.label, disabled: item.disabled || null, title: item.title || null,
+    });
+    const openSub = () => {
+      sub.hidden = false; parent.setAttribute("aria-expanded", "true");
+      const first = sub.querySelector("button:not([disabled])");
+      if (first) first.focus();
+    };
+    const closeSub = () => { sub.hidden = true; parent.setAttribute("aria-expanded", "false"); parent.focus(); };
+    parent.addEventListener("click", (e) => { e.stopPropagation(); if (sub.hidden) openSub(); else closeSub(); });
+    parent.addEventListener("keydown", (e) => { if (e.key === "ArrowRight") { e.preventDefault(); e.stopPropagation(); openSub(); } });
+    for (const it of item.items) {
+      sub.append(el("button", {
+        type: "button", role: "menuitem", class: "bq-menu-item" + (it.danger ? " danger" : ""),
+        text: it.label, disabled: it.disabled || null, title: it.title || null,
+        onclick: (e) => { e.stopPropagation(); close(); it.run(); },
+      }));
+    }
+    sub.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" || e.key === "ArrowLeft") { e.preventDefault(); e.stopPropagation(); closeSub(); return; }
+      const step = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
+      if (!step) return;
+      e.preventDefault(); e.stopPropagation();
+      const all = [...sub.querySelectorAll("button:not([disabled])")];
+      const i = all.indexOf(document.activeElement);
+      if (all.length) all[(i + step + all.length) % all.length].focus();
+    });
+    menu.append(el("div", { class: "bq-submenu-wrap", role: "none" }, parent, sub));
   }
   button.addEventListener("click", (e) => {
     e.stopPropagation();
@@ -21179,7 +21219,7 @@ function bqMenu(label, items) {
     const step = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
     if (!step) return;
     e.preventDefault();
-    const all = [...menu.querySelectorAll("button:not([disabled])")];
+    const all = [...menu.querySelectorAll(":scope > button:not([disabled]), :scope > .bq-submenu-wrap > button:not([disabled])")];
     const i = all.indexOf(document.activeElement);
     if (all.length) all[(i + step + all.length) % all.length].focus();
   });
@@ -21987,7 +22027,7 @@ function renderBigQueryStudio(view) {
   drawTabs();
   loadExplorer().then(async () => {
     // A scheduled query's Edit (its Scheduled query details page) opens its
-    // query in a tab whose Schedule > Update scheduled query saves it back.
+    // query in a tab whose File > Schedule > Update scheduled query saves it back.
     const linkedScheduled = params.get("scheduledQuery");
     if (linkedScheduled) {
       try {
@@ -23944,6 +23984,84 @@ function bqNotebookOutputs(outputs) {
   });
 }
 
+// BQ_NO_COLAB says why Connect to a runtime is off.
+const BQ_NO_COLAB = "Connecting to a Colab Enterprise runtime needs Colab Enterprise's runtimes, which this instance does not serve " +
+  "(they run on the local Agent Platform endpoint).";
+
+// bqConnectToRuntime is Connect to a runtime
+// (https://docs.cloud.google.com/bigquery/docs/create-notebooks and
+// https://docs.cloud.google.com/colab/docs/connect-to-runtime, read
+// 2026-11-23): the Connect to Agent Platform runtime dialog, with Connect
+// to an existing runtime (Runtimes: the region's running runtimes) or
+// Create new runtime (Runtime Template, Runtime name), which assigns a
+// runtime from the template through Colab Enterprise's NotebookService.
+// onConnect gets the runtime's resource name.
+function bqConnectToRuntime(tab, onConnect) {
+  const project = currentProject();
+  const { dialog, close } = openModal({ labelledBy: "bq-rt-title" });
+  const region = el("select", { id: "bq-rt-region" }, ...COLAB_REGIONS.map((r) => el("option", { value: r, text: r })));
+  const runtimes = el("select", { id: "bq-rt-runtimes" });
+  const template = el("select", { id: "bq-rt-template" });
+  const name = el("input", { type: "text", id: "bq-rt-name", maxlength: "128" });
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  const primary = el("button", { type: "submit", class: "primary", text: "Connect" });
+  const choice = (value, label, checked) => el("label", { class: "check-line" },
+    el("input", { type: "radio", name: "bq-rt-mode", value, checked: checked || null, onchange: () => sync() }), el("span", { text: label }));
+  const existing = el("div", { class: "form-row" }, el("label", { for: "bq-rt-runtimes", text: "Runtimes" }), runtimes);
+  const fresh = el("div", {},
+    el("div", { class: "form-row" }, el("label", { for: "bq-rt-template", text: "Runtime Template" }), template),
+    el("div", { class: "form-row" }, el("label", { for: "bq-rt-name", text: "Runtime name" }), name));
+  const mode = () => dialog.querySelector('input[name="bq-rt-mode"]:checked').value;
+  const sync = () => { existing.hidden = mode() !== "existing"; fresh.hidden = mode() !== "new"; };
+  const q = () => `project=${encodeURIComponent(project)}&region=${encodeURIComponent(region.value)}`;
+  const load = async () => {
+    setChildren(runtimes, el("option", { value: "", text: "Loading…" }));
+    setChildren(template, el("option", { value: "", text: "Loading…" }));
+    try {
+      const [rs, ts] = await Promise.all([api(`/api/resources/colab-runtimes?${q()}`), api(`/api/resources/colab-templates?${q()}`)]);
+      const running = (rs.items || []).filter((r) => r.status === "Running");
+      setChildren(runtimes, ...(running.length ? running.map((r) => el("option", { value: r.name, text: `${(r.fields || {})["Runtime name"] || r.name} (${r.name})` }))
+        : [el("option", { value: "", text: `No running runtimes in ${region.value}` })]));
+      setChildren(template, ...((ts.items || []).length ? ts.items.map((t) => el("option", { value: t.name, text: `${(t.fields || {})["Display name"] || t.name} (${t.name})` }))
+        : [el("option", { value: "", text: `No runtime templates in ${region.value}: create one on Colab Enterprise's Runtime templates page` })]));
+    } catch (err) { error.textContent = err.message; error.hidden = false; }
+  };
+  region.addEventListener("change", load);
+  dialog.append(el("form", { class: "modal-body", novalidate: true, onsubmit: async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    const fail = (m) => { error.textContent = m; error.hidden = false; };
+    if (mode() === "existing") {
+      if (!runtimes.value) return fail("Choose a running runtime, or create a new one.");
+      close();
+      return onConnect(`projects/${project}/locations/${region.value}/notebookRuntimes/${runtimes.value}`);
+    }
+    if (!template.value) return fail("Choose a runtime template.");
+    if (!name.value.trim()) return fail("Runtime name is required.");
+    setBusy(primary, true);
+    try {
+      const made = await send(`/api/resources/colab-runtimes?${q()}`, "POST", { notebookRuntimeTemplate: template.value, displayName: name.value.trim() });
+      close();
+      onConnect(`projects/${project}/locations/${region.value}/notebookRuntimes/${made.name}`);
+    } catch (err) {
+      setBusy(primary, false);
+      fail(err.message);
+    }
+  } },
+    el("h2", { id: "bq-rt-title", text: "Connect to Agent Platform runtime" }),
+    el("div", { class: "form-row" }, el("label", { for: "bq-rt-region", text: "Region" }), region),
+    el("fieldset", {}, el("legend", { text: "Select a runtime" }),
+      choice("existing", "Connect to an existing runtime", true), choice("new", "Create new runtime")),
+    existing, fresh,
+    el("p", { class: "form-help", text: "A Colab Enterprise runtime of this instance: a container on this machine whose only route is this instance's BigQuery." }),
+    error,
+    el("div", { class: "modal-actions" },
+      el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }), primary)));
+  sync();
+  load();
+  region.focus();
+}
+
 function bqNotebookTab(tab, ctx) {
   let doc;
   try { doc = JSON.parse(tab.query || ""); } catch { doc = JSON.parse(bqNotebookDoc([])); }
@@ -23952,6 +24070,9 @@ function bqNotebookTab(tab, ctx) {
   // tab's number, which another browser's tab reuses.
   if (!tab.runtimeKey) tab.runtimeKey = tab.savedId || `nb-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   const key = tab.runtimeKey;
+  // rc is a runtime call: on the default runtime, or on the Colab
+  // Enterprise runtime Connect to a runtime connected the tab to.
+  const rc = (op, extra = {}) => bqRuntimeCall(op, key, { runtime: tab.colabRuntime || "", ...extra });
   const text = (c) => (Array.isArray(c.source) ? c.source.join("") : String(c.source || ""));
   const keep = () => { tab.query = JSON.stringify(doc, null, 1); ctx.save(); };
   const cellsHost = el("ol", { class: "bq-nb-cells", "aria-label": "Cells" });
@@ -23971,17 +24092,18 @@ function bqNotebookTab(tab, ctx) {
     connectBtn.setAttribute("aria-pressed", on ? "true" : "false");
     interruptBtn.hidden = restartBtn.hidden = deleteBtn.hidden = !on;
     status.className = runtime.state === "FAILED" ? "form-error bq-nb-runtime" : "unavailable bq-nb-runtime";
-    status.textContent = on ? `Connected to a runtime: Python ${runtime.python}, project ${runtime.project}, idle shutdown after ${runtime.idleShutdown}.`
+    const which = tab.colabRuntime ? `the runtime ${tab.colabRuntime.split("/").pop()}` : "a runtime";
+    status.textContent = on ? `Connected to ${which}: Python ${runtime.python}, project ${runtime.project}, idle shutdown after ${runtime.idleShutdown}.`
       : busy ? (runtime.message || "Starting the runtime…")
         : runtime.state === "FAILED" ? `The runtime failed: ${runtime.message}` : "Not connected.";
   };
   // connect starts the runtime and waits for it, as Colab's Connect does.
   const connect = async () => {
-    let r = await bqRuntimeCall("connect", key);
+    let r = await rc("connect");
     showRuntime(r);
     while (r.state === "BUILDING" || r.state === "STARTING") {
       await new Promise((ok) => setTimeout(ok, 1000));
-      r = await bqRuntimeCall("status", key);
+      r = await rc("status");
       showRuntime(r);
     }
     if (r.state !== "CONNECTED") throw new Error(`The runtime failed: ${r.message || r.state}`);
@@ -23989,11 +24111,11 @@ function bqNotebookTab(tab, ctx) {
     return r;
   };
   connectBtn.addEventListener("click", () => connect().catch((err) => { showRuntime({ state: "FAILED", message: err.message }); }));
-  interruptBtn.addEventListener("click", () => bqRuntimeCall("interrupt", key).then(() => announce("Interrupted")).catch((err) => notify(err.message, "error")));
+  interruptBtn.addEventListener("click", () => rc("interrupt").then(() => announce("Interrupted")).catch((err) => notify(err.message, "error")));
   restartBtn.addEventListener("click", async () => {
     try {
       showRuntime({ state: "STARTING", message: "Restarting the session…" });
-      showRuntime(await bqRuntimeCall("restart", key));
+      showRuntime(await rc("restart"));
       await connect();
       for (const c of doc.cells) if (c.cell_type === "code") c.execution_count = null;
       keep(); draw();
@@ -24002,7 +24124,18 @@ function bqNotebookTab(tab, ctx) {
   });
   deleteBtn.addEventListener("click", async () => {
     showRuntime({ state: "STARTING", message: "Deleting the runtime…" });
-    try { await bqRuntimeCall("disconnect", key); showRuntime({ state: "DISCONNECTED" }); announce("Runtime deleted"); } catch (err) { showRuntime({ state: "FAILED", message: err.message }); }
+    try {
+      await rc("disconnect");
+      // A Colab Enterprise runtime is deleted through its API, as Colab's
+      // Disconnect and delete runtime deletes it.
+      if (tab.colabRuntime) {
+        const [, project, , region, , id] = tab.colabRuntime.split("/");
+        await send(`/api/resources/colab-runtimes?project=${encodeURIComponent(project)}&region=${encodeURIComponent(region)}&name=${encodeURIComponent(id)}`, "DELETE");
+        tab.colabRuntime = "";
+        ctx.save();
+      }
+      showRuntime({ state: "DISCONNECTED" }); announce("Runtime deleted");
+    } catch (err) { showRuntime({ state: "FAILED", message: err.message }); }
   });
   const runCell = async (c, out, label) => {
     if (c.cell_type !== "code") return true;
@@ -24010,7 +24143,7 @@ function bqNotebookTab(tab, ctx) {
     try {
       if (runtime.state !== "CONNECTED" && !isSql(c)) await connect();
       if (runtime.state === "CONNECTED") {
-        const res = await bqRuntimeCall("run", key, { code: text(c) });
+        const res = await rc("run", { code: text(c) });
         c.outputs = res.outputs || [];
         c.execution_count = res.execution_count;
         keep();
@@ -24063,12 +24196,30 @@ function bqNotebookTab(tab, ctx) {
   };
   draw();
   showRuntime(runtime);
-  bqRuntimeCall("status", key).then(showRuntime).catch((err) => {
+  rc("status").then(showRuntime).catch((err) => {
     connectBtn.disabled = true;
     status.textContent = `${err.message}. %%bigquery cells still run on this instance's BigQuery.`;
   });
+  // The arrow beside Connect: "click the drop-down next to Connect and
+  // then click Connect to a runtime"
+  // (https://docs.cloud.google.com/bigquery/docs/create-notebooks, read
+  // 2026-11-23), which connects the notebook to a Colab Enterprise runtime:
+  // an existing one, or a new one from a runtime template.
+  const more = bqMenu("Additional connection options", [
+    SERVICES.some((sv) => sv.id === "colab-runtimes")
+      ? { label: "Connect to a runtime", run: () => bqConnectToRuntime(tab, async (name) => {
+        tab.colabRuntime = name; ctx.save();
+        try { await connect(); } catch (err) { tab.colabRuntime = ""; ctx.save(); showRuntime({ state: "FAILED", message: err.message }); }
+      }) }
+      : { label: "Connect to a runtime", disabled: true, title: BQ_NO_COLAB, run: () => {} },
+  ]);
+  const moreBtn = more.querySelector("button");
+  moreBtn.classList.remove("bq-node-menu");
+  moreBtn.classList.add("bq-connect-more");
+  moreBtn.setAttribute("title", "Additional connection options");
+  moreBtn.textContent = "▾";
   const toolbar = el("div", { class: "bq-toolbar", role: "toolbar", "aria-label": "Notebook actions" },
-    connectBtn, interruptBtn, restartBtn, deleteBtn,
+    el("span", { class: "bq-connect-group" }, connectBtn, more), interruptBtn, restartBtn, deleteBtn,
     el("button", { type: "button", class: "secondary", text: "+ Code", onclick: () => addCell("code", "") }),
     el("button", { type: "button", class: "secondary", text: "+ SQL", onclick: () => addCell("code", "%%bigquery\n") }),
     el("button", { type: "button", class: "secondary", text: "+ Text", onclick: () => addCell("markdown", "") }),
@@ -25059,29 +25210,35 @@ function bqQueryTab(tab, ctx) {
   ]);
   bqMenuButton(edit, "Edit", "Edit");
 
-  // Schedule > Create new scheduled query, or Update scheduled query for a
-  // query opened from its Scheduled query details page's Edit (#2094):
-  // Google's New scheduled query pane over this instance's BigQuery Data
-  // Transfer Service.
-  const schedule = bqMenu("Schedule", [
-    { label: "Create new scheduled query", run: () => bqScheduledQueryPane(editor.value, null, (sq) => { tab.scheduledQuery = sq.name; save(); }) },
+  // File, Google's menu of the query editor (#2094), holds Schedule: "click
+  // File > Schedule" opens the New scheduled query pane, and on a query
+  // opened with a scheduled query page's Edit, "click File > Schedule >
+  // Update scheduled query" saves it back
+  // (https://docs.cloud.google.com/bigquery/docs/scheduling-queries, read
+  // 2026-11-23). Both over this instance's BigQuery Data Transfer Service.
+  // The docs name no other File item.
+  const createScheduled = () => bqScheduledQueryPane(editor.value, null, (sq) => { tab.scheduledQuery = sq.name; save(); });
+  const file = bqMenu("File", [
     tab.scheduledQuery
-      ? { label: "Update scheduled query", run: () => bqScheduledQueryPane(editor.value, tab.scheduledQuery, () => {}) }
-      : { label: "Update scheduled query", disabled: true, title: "Open a scheduled query with Edit on its Scheduled query details page first.", run: () => {} },
+      ? { label: "Schedule", items: [
+          { label: "Update scheduled query", run: () => bqScheduledQueryPane(editor.value, tab.scheduledQuery, () => {}) },
+          { label: "New scheduled query", run: createScheduled },
+        ] }
+      : { label: "Schedule", run: createScheduled },
   ]);
-  bqMenuButton(schedule, "Schedule", "Schedule");
+  bqMenuButton(file, "File", "File");
 
   const dialect = el("span", { class: "unavailable bq-dialect" });
   const drawDialect = () => { dialect.textContent = settings.legacySql ? "Legacy SQL" : "GoogleSQL"; };
   drawDialect();
   const toolbar = el("div", { class: "bq-toolbar", role: "toolbar", "aria-label": "Query editor actions" },
-    run, saveMenu, share, schedule, edit, dialect);
+    run, saveMenu, share, file, edit, dialect);
   validate();
   return el("div", { class: "bq-query-tab" },
     toolbar, editor, validator,
     el("p", { class: "unavailable bq-hint",
       text: (tab.savedId ? bqSavedNote() + " " : "") +
-        "Schedule is not available locally (the Data Transfer Service is not run). ⌘/Ctrl + Enter runs; ⌘/Ctrl + S saves." }),
+        "⌘/Ctrl + Enter runs; ⌘/Ctrl + S saves." }),
     results);
 }
 

@@ -592,9 +592,11 @@ func (m *Manager) Restart(key string) Status {
 	if s == nil {
 		return Status{State: StateDisconnected}
 	}
-	project := s.project
+	// The new kernel keeps the runtime's template options (a Colab
+	// Enterprise runtime's idle shutdown and environment).
+	project, opts := s.project, s.opts
 	_ = m.Disconnect(key)
-	return m.Connect(key, project)
+	return m.ConnectWith(key, project, opts)
 }
 
 // Disconnect deletes the notebook's runtime (Disconnect and delete

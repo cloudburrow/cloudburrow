@@ -2287,6 +2287,11 @@ tr.log-entry.is-pinned { background: var(--state-hover); }
   font: inherit; color: var(--text); cursor: pointer; white-space: nowrap; }
 .bq-menu-item:hover { background: var(--state-hover); }
 .bq-menu-item.danger { color: var(--error); }
+.bq-submenu-wrap { position: relative; }
+.bq-connect-group { display: inline-flex; align-items: stretch; }
+.bq-connect-group > .secondary { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.bq-connect-more { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: -1px; min-width: 32px; }
+.bq-menu.bq-submenu { left: 100%; right: auto; top: 0; }
 .bq-workspace { min-width: 0; display: grid; gap: 12px; }
 /* Split tabs (#2005): two panes side by side, each its own strip and
    panel; below 960px, where the Explorer stacks, the panes stack too. */
