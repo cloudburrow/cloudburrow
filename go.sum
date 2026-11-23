@@ -374,6 +374,8 @@ cloud.google.com/go/networkmanagement v1.30.0/go.mod h1:3SBf5T7jyGzw5jqJWE7TUDRh
 cloud.google.com/go/networksecurity v0.19.0/go.mod h1:VWDFX+stDgzZYDsCX1Wy/JO9Tlw7g/V1UHbiORVgqq0=
 cloud.google.com/go/networksecurity v0.21.1 h1:JxSuA18POs4fNsQDnvhxOfIw61Fyu3VIybRTMtP3DPQ=
 cloud.google.com/go/networksecurity v0.21.1/go.mod h1:BaE1G3QAqCmwZEKGQvjaxOvlt5uG/3rW+yxx1Syp3a4=
+cloud.google.com/go/networkservices v1.8.1 h1:qDYYmNrmv4FRm57r0KH4bngBJRt+Lz9T2DA2yi0Bx7E=
+cloud.google.com/go/networkservices v1.8.1/go.mod h1:54h+HnbSqaBtWZ2GYOV6Mr0WjDNXJbwQxCoztQg94oY=
 cloud.google.com/go/notebooks v1.18.0/go.mod h1:fXU6A3TJ2YobFy6fxOr4tKZZ8QgTjdJAqDIykOB85Gk=
 cloud.google.com/go/observability v0.1.1 h1:re04sRki2fw5eLHmDHrCyaQlzv7hfPm30jC1bbmWZFg=
 cloud.google.com/go/observability v0.1.1/go.mod h1:KUgvGdlQNiQa9IPvpC7YozjXWOZmmqNdKX/L1xcKK3Y=

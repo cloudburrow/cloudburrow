@@ -28,7 +28,12 @@
 //   - an authorization policy of the Application Load Balancers
 //     (authzPolicies) targets forwarding rules (EXTERNAL_MANAGED or
 //     INTERNAL_MANAGED) and is enforced on each request through them: the
-//     DENY policies first, then the ALLOW ones (ForwardingRulePolicies).
+//     CUSTOM policies first (Cloud IAP, or a Service Extensions
+//     authorization extension the load balancer calls over ext_proc or
+//     ext_authz; a CONTENT_AUTHZ policy's last, with the body), then the
+//     DENY policies, then the ALLOW ones (ForwardingRulePolicies); a
+//     rule's source resources match the instance whose internal address a
+//     request comes from, by its service account and its tags' value IDs.
 //
 // Every create, update and delete is a long-running operation, done at
 // once.
@@ -84,6 +89,11 @@ type Hooks struct {
 	// Users are the Compute Engine resources that name a policy (target
 	// HTTPS proxies, backend services), which keep it from being deleted.
 	Users func(name string) []string
+	// AuthzExtension is a Service Extensions authorization extension's
+	// load balancing scheme, by its relative name
+	// (projects/P/locations/L/authzExtensions/E); ok is false when there is
+	// none.
+	AuthzExtension func(rel string) (scheme string, ok bool)
 }
 
 // Server is the Network Security API.

@@ -3,10 +3,12 @@ package main
 import (
 	"crypto/x509"
 	"encoding/pem"
+	"strconv"
 	"strings"
 
 	cmpb "cloud.google.com/go/certificatemanager/apiv1/certificatemanagerpb"
 
+	"github.com/cloudburrow/cloudburrow/internal/resource"
 	"github.com/cloudburrow/cloudburrow/internal/service/certificatemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/compute"
 	"github.com/cloudburrow/cloudburrow/internal/service/networksecurity"
@@ -30,7 +32,45 @@ type computeNetSec struct {
 
 func (c computeNetSec) PolicyExists(name string) bool { return c.ns.Exists(name) }
 
-func (c computeNetSec) Authorize(r compute.AuthzRequest) bool { return c.ns.Authorize(r) }
+func (c computeNetSec) Authorize(r compute.AuthzRequest) compute.AuthzVerdict {
+	return c.ns.Authorize(r)
+}
+
+// sourceTags are the permanent IDs of the tag values a resource carries,
+// for an authorization policy's source resources (#2160).
+func (s *computeService) sourceTags(full string) []int64 {
+	if s.registry == nil {
+		return nil
+	}
+	reg := s.registry()
+	if reg == nil {
+		return nil
+	}
+	// A binding names the instance by its project's number, as Google's
+	// how-to does, or by its ID.
+	names := []string{full}
+	if p := strings.Split(full, "/"); len(p) > 4 && p[2] == "compute.googleapis.com" && p[3] == "projects" {
+		if n := resource.ProjectNumber(p[4]); n != 0 {
+			p[4] = strconv.FormatInt(n, 10)
+			names = append(names, strings.Join(p, "/"))
+		}
+	}
+	seen := map[int64]bool{}
+	var out []int64
+	for _, name := range names {
+		tags, err := reg.EffectiveTags(name)
+		if err != nil {
+			continue
+		}
+		for _, t := range tags {
+			if id, err := strconv.ParseInt(strings.TrimPrefix(t.GetTagValue(), "tagValues/"), 10, 64); err == nil && !seen[id] {
+				seen[id] = true
+				out = append(out, id)
+			}
+		}
+	}
+	return out
+}
 
 func (c computeNetSec) ServerTLS(name string) (compute.ServerTLSPolicy, bool) {
 	p, ok := c.ns.ServerTLSPolicy(name)

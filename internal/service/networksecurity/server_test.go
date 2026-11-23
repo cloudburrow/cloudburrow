@@ -75,11 +75,11 @@ func TestAuthzPolicyEnforcement(t *testing.T) {
 		t.Fatal(err)
 	}
 	req := compute.AuthzRequest{Rule: rule, Host: "a.example.com", Path: "/admin/x", Method: "GET", SourceIP: "127.0.0.1", Header: http.Header{}}
-	if s.Authorize(req) {
+	if s.Authorize(req).Allowed {
 		t.Error("DENY /admin let through")
 	}
 	req.Path = "/public"
-	if !s.Authorize(req) {
+	if !s.Authorize(req).Allowed {
 		t.Error("no ALLOW policy: denied")
 	}
 	allow := &nspb.AuthzPolicy{Target: target, Action: nspb.AuthzPolicy_ALLOW, HttpRules: []*nspb.AuthzPolicy_AuthzRule{{
@@ -89,15 +89,15 @@ func TestAuthzPolicyEnforcement(t *testing.T) {
 	if _, err := s.CreateAuthzPolicy(ctx, &nspb.CreateAuthzPolicyRequest{Parent: g, AuthzPolicyId: "allow", AuthzPolicy: allow}); err != nil {
 		t.Fatal(err)
 	}
-	if s.Authorize(req) {
+	if s.Authorize(req).Allowed {
 		t.Error("ALLOW from 10/8 let 127.0.0.1 through")
 	}
 	req.SourceIP = "10.1.2.3"
-	if s.Authorize(req) {
+	if s.Authorize(req).Allowed {
 		t.Error("when not met: let through")
 	}
 	req.Header.Set("X-Team", "blue")
-	if !s.Authorize(req) {
+	if !s.Authorize(req).Allowed {
 		t.Error("ALLOW matched: denied")
 	}
 	// The documented refusals.
