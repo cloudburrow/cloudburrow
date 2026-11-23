@@ -295,3 +295,41 @@ func (t *gqlTranslator) pathUsedAsValue(names ...string) bool {
 	}
 	return false
 }
+
+// sameSQL is SAME(a, b, ...) (every element the same) or ALL_DIFFERENT
+// (no two the same).
+func sameSQL(els []*gqlBind, different bool) string {
+	var cs []string
+	for i := range els {
+		for j := i + 1; j < len(els); j++ {
+			if different {
+				cs = append(cs, "NOT "+elemEqual(els[i], els[j]))
+			} else if j == i+1 {
+				cs = append(cs, elemEqual(els[i], els[j]))
+			}
+		}
+	}
+	if len(cs) == 0 {
+		return "TRUE"
+	}
+	return "(" + strings.Join(cs, " AND ") + ")"
+}
+
+// endpointSQL is node IS SOURCE OF edge (source) or IS DESTINATION OF.
+func endpointSQL(n, e *gqlBind, source bool) (string, error) {
+	if n.table == nil || e.table == nil {
+		return "", unsupportedSQL{"IS SOURCE OF or IS DESTINATION OF an element of several element tables"}
+	}
+	ep := e.table.Dest
+	if source {
+		ep = e.table.Source
+	}
+	if ep == nil || !strings.EqualFold(ep.Node, n.table.Name) {
+		return "FALSE", nil
+	}
+	var cs []string
+	for j, c := range ep.EdgeCols {
+		cs = append(cs, e.col(c)+" = "+n.col(ep.NodeCols[j]))
+	}
+	return "(" + strings.Join(cs, " AND ") + ")", nil
+}

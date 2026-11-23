@@ -980,6 +980,26 @@ func (t *gqlTranslator) render(br *gqlBranch, lo, hi int) (string, error) {
 				emit(i, i+5, propertyExistsSQL(arg, ps.toks[i+4].text))
 				i += 5
 				continue
+			case (fn == "SAME" || fn == "ALL_DIFFERENT") && arg != nil && arg.kind == bElem:
+				var els []*gqlBind
+				j := i + 2
+				for ; j < hi; j += 2 {
+					b := bindAt(j)
+					if b == nil || b.kind != bElem || j+1 >= hi || (ps.toks[j+1].text != "," && ps.toks[j+1].text != ")") {
+						els = nil
+						break
+					}
+					els = append(els, b)
+					if ps.toks[j+1].text == ")" {
+						break
+					}
+				}
+				if len(els) == 0 {
+					break
+				}
+				emit(i, j+1, sameSQL(els, fn == "ALL_DIFFERENT"))
+				i = j + 1
+				continue
 			case fn == "COUNT" && arg != nil && arg.kind == bGroup && i+3 < hi && ps.toks[i+3].text == ")":
 				// horizontal: the group variable's edges
 				v, err := t.exportValue(&gqlExport{kind: bGroup}, arg, "len")
@@ -1035,6 +1055,33 @@ func (t *gqlTranslator) render(br *gqlBranch, lo, hi int) (string, error) {
 			emit(i, i+2, col)
 			i += 2
 			continue
+		}
+		// node IS [NOT] SOURCE|DESTINATION [OF] edge
+		if i+3 < hi && strings.EqualFold(ps.toks[i+1].text, "IS") {
+			j := i + 2
+			neg := strings.EqualFold(ps.toks[j].text, "NOT")
+			if neg {
+				j++
+			}
+			end := strings.ToUpper(ps.toks[j].text)
+			if (end == "SOURCE" || end == "DESTINATION") && j+1 < hi {
+				j++
+				if strings.EqualFold(ps.toks[j].text, "OF") {
+					j++
+				}
+				if w := bindAt(j); w != nil && w.kind == bElem && w.edge && !v.edge {
+					c, err := endpointSQL(v, w, end == "SOURCE")
+					if err != nil {
+						return "", err
+					}
+					if neg {
+						c = "(NOT " + c + ")"
+					}
+					emit(i, j, c)
+					i = j
+					continue
+				}
+			}
 		}
 		if i+2 < hi && (ps.toks[i+1].text == "=" || ps.toks[i+1].text == "!=" || ps.toks[i+1].text == "<>") {
 			if w := bindAt(i + 2); w != nil && w.kind == bElem && !(i+3 < hi && ps.toks[i+3].text == ".") {

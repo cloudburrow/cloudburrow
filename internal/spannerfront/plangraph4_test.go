@@ -45,6 +45,10 @@ func TestGraphPlansOfQuantifiedPathsCostsAndPathValues(t *testing.T) {
 		// PROPERTY_EXISTS is the element table's: Person has name, Account does not
 		{"GRAPH FinGraph MATCH (n:Person) RETURN PROPERTY_EXISTS(n, name) AS x", "SELECT TRUE AS x"},
 		{"GRAPH FinGraph MATCH (n:Account) RETURN PROPERTY_EXISTS(n, name) AS x", "SELECT FALSE AS x"},
+		// the graph operators page's predicates
+		{"GRAPH FinGraph MATCH (src:Account)<-[transfer:Transfers]-(dest:Account) WHERE NOT SAME(src, dest) RETURN src.id AS source_id, dest.id AS destination_id", "NOT (((src.id = dest.id)))"},
+		{"GRAPH FinGraph MATCH (a:Account)-[transfer:Transfers]-(b:Account) WHERE a IS SOURCE of transfer RETURN a.id AS a_id, b.id AS b_id", "(transfer.id = a.id)"},
+		{"GRAPH FinGraph MATCH (a1:Account)-[t1:Transfers]->(a2:Account)-[t2:Transfers]->(a3:Account)-[t3:Transfers]->(a4:Account) WHERE a1.id < a4.id RETURN ALL_DIFFERENT(t1, t2, t3) AS results", "NOT "},
 		// COUNT of a group variable counts its edges
 		{"GRAPH FinGraph MATCH (a:Account)-[t:Transfers]->{1,2}(b:Account) RETURN COUNT(t) AS n", "cb_len AS n"},
 	} {

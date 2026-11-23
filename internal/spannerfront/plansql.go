@@ -1387,6 +1387,21 @@ func (ps *sqlParser) cmpExpr() (*sqlExpr, error) {
 				l = ps.bin(op, l, r)
 				continue
 			}
+			if ps.isKw("SOURCE") || ps.isKw("DESTINATION") {
+				// GQL's node IS [NOT] SOURCE|DESTINATION [OF] edge
+				end := strings.ToUpper(ps.next().text)
+				ps.acceptKw("OF")
+				r, err := ps.bitOr()
+				if err != nil {
+					return nil, err
+				}
+				op := "IS " + end + " OF"
+				if neg {
+					op = "IS NOT " + end + " OF"
+				}
+				l = ps.bin(op, l, r)
+				continue
+			}
 			v := ps.next()
 			if v.kind != tkIdent {
 				return nil, ps.errAt("NULL, TRUE, FALSE or UNKNOWN")
