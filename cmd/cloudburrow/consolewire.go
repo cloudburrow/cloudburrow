@@ -116,6 +116,8 @@ type consoleDeps struct {
 	dataform *dataformService
 	// appHub is App Hub (#2110), nil unless enabled.
 	appHub *appHubService
+	// filestore is Filestore (#2192), nil unless enabled.
+	filestore *filestoreService
 	// trace is Cloud Trace (#2118), nil unless enabled.
 	trace *traceService
 	// gke is the Kubernetes Engine API (#1913), nil unless enabled.
@@ -376,6 +378,10 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	if enabled[config.ServiceDataform] && d.dataform != nil {
 		df := dataformProvider{svc: d.dataform}
 		providers = append(providers, df, dataformFoldersProvider{df: df}, dataformSettingsProvider{df: df})
+	}
+	// Filestore (#2192), in process: Instances, Backups, Snapshots.
+	if enabled[config.ServiceFilestore] && d.filestore != nil {
+		providers = append(providers, filestoreProvider{svc: d.filestore}, filestoreBackupsProvider{svc: d.filestore}, filestoreSnapshotsProvider{svc: d.filestore})
 	}
 	// App Hub (#2110), in process: Applications, Services and workloads,
 	// Settings.
@@ -843,6 +849,7 @@ var serviceTitles = map[config.Service]string{
 	config.ServiceParameterManager: "Parameter Manager",
 	config.ServiceDataform:         "Dataform",
 	config.ServiceAppHub:           "App Hub",
+	config.ServiceFilestore:        "Filestore",
 	config.ServiceTrace:            "Cloud Trace",
 }
 

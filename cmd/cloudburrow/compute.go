@@ -19,6 +19,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 	"github.com/cloudburrow/cloudburrow/internal/service/compute"
+	"github.com/cloudburrow/cloudburrow/internal/service/filestore"
 	"github.com/cloudburrow/cloudburrow/internal/service/gke"
 	"github.com/cloudburrow/cloudburrow/internal/service/networkconnectivity"
 	"github.com/cloudburrow/cloudburrow/internal/service/redisadmin"
@@ -188,6 +189,13 @@ func (s *computeService) networkUsers(rel string) []string {
 // *compute.Server in one) without Compute, so each checks nothing.
 
 func (s *computeService) memorystoreNetworks() redisadmin.Networks {
+	if api := s.API(); api != nil {
+		return api
+	}
+	return nil
+}
+
+func (s *computeService) filestoreNetworks() filestore.Networks {
 	if api := s.API(); api != nil {
 		return api
 	}

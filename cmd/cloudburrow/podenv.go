@@ -63,6 +63,8 @@ func cliEndpointVar(service string) string {
 		return "CLOUDBURROW_PARAMETERMANAGER_ENDPOINT"
 	case "apphub":
 		return "CLOUDBURROW_APPHUB_ENDPOINT"
+	case "filestore":
+		return "CLOUDBURROW_FILESTORE_ENDPOINT"
 	case "trace":
 		return "CLOUDBURROW_TRACE_ENDPOINT"
 	case "gke":

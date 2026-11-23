@@ -411,7 +411,7 @@ compat_shard() {
     served|gke)
       # Cloud Trace (#2118), beside the Cloud Logging its spans' log
       # entries are correlated with.
-      SERVICES=kms,logging,privateca,gke,monitoring,compute,trace
+      SERVICES=kms,logging,privateca,gke,monitoring,compute,trace,filestore
       # The Kubernetes Engine API (#1913): its clusters are kind clusters
       # beside the instance's. Service Usage as GKE_SERVICEUSAGE, which
       # `gcloud container clusters create` asks whether
@@ -428,7 +428,9 @@ compat_shard() {
       # 38910752877: in storage gcloud had no logging override).
       # Cloud KMS Autokey's folder and project tests (#1568) make their
       # folder with it too.
-      TEST_VARS+=,KMS,LOGGING,LOGGING_RESOURCEMANAGER,PRIVATECA,GKE,GKE_SERVICEUSAGE,MONITORING,COMPUTE,TRACE
+      # Filestore (#2192), in process: its NFS servers are mounted from
+      # Kubernetes Engine clusters' pods (TestGKEFilestore*, gke shard).
+      TEST_VARS+=,KMS,LOGGING,LOGGING_RESOURCEMANAGER,PRIVATECA,GKE,GKE_SERVICEUSAGE,MONITORING,COMPUTE,TRACE,FILESTORE
       if [ "$1" = gke ]; then
         # The served shard's instance again, for the Kubernetes Engine
         # tests alone (COMPAT_GKE_TESTS).
