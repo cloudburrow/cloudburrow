@@ -242,7 +242,7 @@ func (s *Server) checkNetwork(in *filestorepb.Instance, project, name string) er
 	r := n.GetReservedIpRange()
 	switch {
 	case r == "":
-		n.ReservedIpRange = defaultRange(name, prefix)
+		// Chosen with the instance's address (placeLocked).
 	case strings.Contains(r, "/"):
 		ip, cidr, err := net.ParseCIDR(r)
 		if err != nil || ip.To4() == nil {

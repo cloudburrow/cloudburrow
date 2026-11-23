@@ -80,7 +80,7 @@ func (s *filestoreService) Start(ctx context.Context) error {
 	if s.cfg.Mode == config.ModePersistent {
 		state = filepath.Join(s.cfg.InstanceDir(), "filestore.json")
 	}
-	s.backend = &filestoreserver.Docker{Instance: s.cfg.Name, Dir: filepath.Join(s.cfg.InstanceDir(), "filestore", "backups")}
+	s.backend = &filestoreserver.Docker{Instance: s.cfg.Name, Cluster: s.cfg.ClusterName(), Dir: filepath.Join(s.cfg.InstanceDir(), "filestore", "backups")}
 	s.backend.Logf = s.logf
 	opts := filestore.Options{Backend: s.backend, Networks: s.networks}
 	api, err := filestore.NewServer(state, opts)

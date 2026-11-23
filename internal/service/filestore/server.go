@@ -48,6 +48,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"sort"
@@ -81,6 +82,9 @@ type Export struct {
 
 // Spec is what an instance's NFS server serves.
 type Spec struct {
+	// Address is the instance's address on its VPC network, in its
+	// reserved range, which the backend makes reach the server.
+	Address string
 	// NFSv41 serves NFSv4.1 (and NFSv3); otherwise NFSv3 alone.
 	NFSv41 bool
 	Shares []Share
@@ -127,6 +131,14 @@ type Networks interface {
 	// HasNetwork reports whether the network ref exists, in project when
 	// ref is a bare name.
 	HasNetwork(ref, project string) bool
+	// Conflict names what on network (projects/P/global/networks/N) n
+	// overlaps: a subnetwork or an allocated range; "" when nothing.
+	Conflict(network string, n *net.IPNet) string
+	// AllocatedRange is the range of the VPC_PEERING global address name
+	// allocated for private services access on network.
+	AllocatedRange(network, name string) (*net.IPNet, bool)
+	// AllocatedRanges are every such range on network, by name.
+	AllocatedRanges(network string) map[string]*net.IPNet
 }
 
 // Server serves CloudFilestoreManager.
@@ -150,9 +162,13 @@ type Server struct {
 
 type instRecord struct {
 	I *filestorepb.Instance
-	// Key names its NFS server; IP is the server's address.
+	// Key names its NFS server; IP is the server's address on the Docker
+	// network, which only the backend uses.
 	Key string
 	IP  string
+	// Block is the instance's range on its VPC network and Addr its
+	// address there, the one it serves at.
+	Block, Addr string
 }
 
 type snapRecord struct {
@@ -210,7 +226,7 @@ func (s *Server) Resume(ctx context.Context) {
 	s.mu.Unlock()
 	for _, r := range recs {
 		s.mu.Lock()
-		spec, key, ip := specOf(r.I), r.Key, r.IP
+		spec, key, ip := r.spec(), r.Key, r.IP
 		s.mu.Unlock()
 		got, err := s.opts.Backend.Ensure(ctx, key, ip, spec)
 		s.mu.Lock()
@@ -218,7 +234,7 @@ func (s *Server) Resume(ctx context.Context) {
 			r.I.State, r.I.StatusMessage = filestorepb.Instance_ERROR, "The NFS server did not start: "+err.Error()
 		} else {
 			r.IP = got
-			setIP(r.I, got)
+			r.setIP()
 			r.I.State, r.I.StatusMessage = filestorepb.Instance_READY, ""
 		}
 		_ = s.saveLocked()
@@ -244,6 +260,8 @@ type stateInst struct {
 	Instance json.RawMessage `json:"instance"`
 	Key      string          `json:"key"`
 	IP       string          `json:"ip"`
+	Block    string          `json:"block,omitempty"`
+	Address  string          `json:"address,omitempty"`
 }
 
 type stateSnap struct {
@@ -273,7 +291,7 @@ func (s *Server) load() error {
 		if err := protojson.Unmarshal(x.Instance, in); err != nil {
 			return fmt.Errorf("filestore: parse state %s: %w", s.state, err)
 		}
-		s.instances[in.GetName()] = &instRecord{I: in, Key: x.Key, IP: x.IP}
+		s.instances[in.GetName()] = &instRecord{I: in, Key: x.Key, IP: x.IP, Block: x.Block, Addr: x.Address}
 	}
 	for _, x := range f.Snapshots {
 		sn := &filestorepb.Snapshot{}
@@ -303,7 +321,7 @@ func (s *Server) saveLocked() error {
 		if err != nil {
 			return err
 		}
-		f.Instances = append(f.Instances, stateInst{Instance: b, Key: r.Key, IP: r.IP})
+		f.Instances = append(f.Instances, stateInst{Instance: b, Key: r.Key, IP: r.IP, Block: r.Block, Address: r.Addr})
 	}
 	for _, name := range sortedKeys(s.snapshots) {
 		r := s.snapshots[name]
@@ -392,9 +410,24 @@ func specOf(in *filestorepb.Instance) Spec {
 	return spec
 }
 
-func setIP(in *filestorepb.Instance, ip string) {
-	if len(in.GetNetworks()) > 0 && ip != "" {
-		in.Networks[0].IpAddresses = []string{ip}
+// spec is what the instance's NFS server serves, at its address.
+func (r *instRecord) spec() Spec { return r.specFor(r.I) }
+
+func (r *instRecord) specFor(in *filestorepb.Instance) Spec {
+	spec := specOf(in)
+	spec.Address = r.Addr
+	return spec
+}
+
+// setIP answers the instance's address on its network (the server's own,
+// for an instance a release before #2192's addresses made).
+func (r *instRecord) setIP() {
+	ip := r.Addr
+	if ip == "" {
+		ip = r.IP
+	}
+	if len(r.I.GetNetworks()) > 0 && ip != "" {
+		r.I.Networks[0].IpAddresses = []string{ip}
 	}
 }
 

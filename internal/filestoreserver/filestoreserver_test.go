@@ -66,3 +66,18 @@ func TestNamesAreCheckedBeforeTheyReachAShell(t *testing.T) {
 		t.Error("a bad key was accepted")
 	}
 }
+
+func TestRulesSendEachAddressOnToItsServer(t *testing.T) {
+	got := Rules(map[string]string{"10.0.0.2": "172.18.200.7", "10.0.1.2": "172.18.200.9"})
+	want := "*nat\n:CLOUDBURROW-FILESTORE - [0:0]\n" +
+		"-A CLOUDBURROW-FILESTORE -d 10.0.0.2/32 -j DNAT --to-destination 172.18.200.7\n" +
+		"-A CLOUDBURROW-FILESTORE -d 10.0.1.2/32 -j DNAT --to-destination 172.18.200.9\nCOMMIT\n"
+	if got != want {
+		t.Fatalf("Rules = %q, want %q", got, want)
+	}
+	for c, want := range map[string]bool{"cloudburrow-x": true, "cloudburrow-x-gke-0a1b2c3d": true, "cloudburrow-x-gke-zz": false, "cloudburrow-xy": false, "cloudburrow-y-gke-0a1b2c3d": false} {
+		if ownCluster("cloudburrow-x", c) != want {
+			t.Errorf("ownCluster(%q) = %v", c, !want)
+		}
+	}
+}

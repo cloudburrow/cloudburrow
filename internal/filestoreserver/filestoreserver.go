@@ -94,11 +94,24 @@ type Docker struct {
 	Runner Runner
 	// Logf reports progress; nil is silent.
 	Logf func(format string, args ...any)
+	// Cluster is the instance's kind cluster's name: its nodes and its
+	// Kubernetes Engine clusters' (Cluster-gke-HASH) are the clients the
+	// instances' addresses are routed on (clients.go); "" routes none.
+	Cluster string
 
 	mu    sync.Mutex
 	built string
 	// locks serialise the work on one instance's server.
 	locks map[string]*sync.Mutex
+
+	rmu sync.Mutex
+	// addrs maps each instance's VPC address to its server's (or its
+	// tombstone's) address on the Docker network; owners each key to its
+	// VPC address.
+	addrs, owners map[string]string
+	stopLoop      context.CancelFunc
+	wake          chan struct{}
+	loopDone      chan struct{}
 }
 
 var _ filestore.Backend = (*Docker)(nil)
@@ -206,8 +219,11 @@ func (d *Docker) Ensure(ctx context.Context, key, ip string, spec filestore.Spec
 				if _, err := d.docker(ctx, "start", name); err != nil {
 					return "", err
 				}
-				return ip, d.waitReady(ctx, name)
+				if err := d.waitReady(ctx, name); err != nil {
+					return "", err
+				}
 			}
+			d.own(key, spec.Address, ip)
 			return ip, nil
 		}
 		if _, err := d.docker(ctx, "rm", "-f", name); err != nil {
@@ -233,7 +249,22 @@ func (d *Docker) Ensure(ctx context.Context, key, ip string, spec filestore.Spec
 	if err != nil {
 		return "", fmt.Errorf("start the NFS server: %w", err)
 	}
-	return ip, d.waitReady(ctx, name)
+	if err := d.waitReady(ctx, name); err != nil {
+		return "", err
+	}
+	d.own(key, spec.Address, ip)
+	return ip, nil
+}
+
+// own records key's address and routes it to ip.
+func (d *Docker) own(key, address, ip string) {
+	d.rmu.Lock()
+	if d.owners == nil {
+		d.owners = map[string]string{}
+	}
+	d.owners[key] = address
+	d.rmu.Unlock()
+	d.route(address, ip)
 }
 
 // waitReady waits until the server has registered NFS with rpcbind.
@@ -312,15 +343,34 @@ func pickIP(subnets []string, key string, inUse map[string]bool) (string, error)
 	return "", fmt.Errorf("the %s network has no IPv4 subnet", Network)
 }
 
-// Remove deletes key's server, volume and snapshots.
+// Remove deletes key's server, volume and snapshots. When a client still
+// mounts its share, a tombstone answers its address (clients.go).
 func (d *Docker) Remove(ctx context.Context, key string) error {
 	defer d.lock(key)()
 	name := d.container(key)
+	ip, _ := d.docker(ctx, "container", "inspect", "--format", `{{with index .NetworkSettings.Networks "kind"}}{{with .IPAMConfig}}{{.IPv4Address}}{{end}}{{end}}`, name)
+	d.rmu.Lock()
+	address := d.owners[key]
+	delete(d.owners, key)
+	d.rmu.Unlock()
 	if _, err := d.docker(ctx, "rm", "-f", "-v", name); err != nil && !strings.Contains(err.Error(), "No such container") {
 		return err
 	}
 	if _, err := d.docker(ctx, "volume", "rm", d.volume(key)); err != nil && !strings.Contains(err.Error(), "no such volume") {
 		return err
+	}
+	if ip == "" {
+		return nil
+	}
+	if busy, err := d.mounted(ctx, address, ip); err == nil && busy {
+		d.logf("filestore: a client still mounts %s: a tombstone answers it until none does", address)
+		return d.bury(ctx, key, address, ip)
+	}
+	d.rmu.Lock()
+	mine := address != "" && d.addrs[address] == ip
+	d.rmu.Unlock()
+	if mine {
+		d.unroute(address)
 	}
 	return nil
 }
@@ -450,15 +500,23 @@ func (d *Docker) DeleteBackup(_ context.Context, backup string) error {
 // Stop stops the instance's NFS servers, keeping their volumes (persistent
 // mode), or removes servers, volumes and backups (remove).
 func (d *Docker) Stop(ctx context.Context, remove bool) error {
-	names, err := d.docker(ctx, "ps", "-a", "--filter", "label="+d.label(), "--format", "{{.Names}}")
+	d.endLoop()
+	names, err := d.docker(ctx, "ps", "-a", "--filter", "label="+d.label(), "--format", `{{.Names}} {{.Label "`+tombLabel+`"}}`)
 	if err != nil {
 		return err
 	}
 	var errs []error
-	list := strings.Fields(names)
+	var list []string
+	tombs := map[string]bool{}
+	for _, line := range strings.Split(names, "\n") {
+		if f := strings.Fields(line); len(f) > 0 {
+			list = append(list, f[0])
+			tombs[f[0]] = len(f) > 1
+		}
+	}
 	sort.Strings(list)
 	for _, n := range list {
-		if remove {
+		if remove || tombs[n] {
 			_, err = d.docker(ctx, "rm", "-f", "-v", n)
 		} else {
 			_, err = d.docker(ctx, "stop", "-t", "5", n)

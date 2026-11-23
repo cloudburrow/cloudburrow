@@ -133,12 +133,15 @@ func (s *Server) CreateInstance(_ context.Context, req *filestorepb.CreateInstan
 	in.SuspensionReasons = nil
 	in.CustomPerformanceSupported = in.GetTier() == filestorepb.Instance_ZONAL || in.GetTier() == filestorepb.Instance_REGIONAL
 	rec := &instRecord{I: in, Key: keyOf("fs-", name, now)}
+	if err := s.placeLocked(in, m[1], rec); err != nil {
+		return nil, err
+	}
 	s.instances[name] = rec
 	if err := s.saveLocked(); err != nil {
 		delete(s.instances, name)
 		return nil, err
 	}
-	key, spec, share := rec.Key, specOf(in), fs.GetName()
+	key, spec, share := rec.Key, rec.spec(), fs.GetName()
 	var backupKey string
 	if source != nil {
 		backupKey = source.Key
@@ -163,7 +166,7 @@ func (s *Server) CreateInstance(_ context.Context, req *filestorepb.CreateInstan
 			rec.I.State, rec.I.StatusMessage = filestorepb.Instance_ERROR, apierror.From(err).Message
 			return nil
 		}
-		setIP(rec.I, rec.IP)
+		rec.setIP()
 		rec.I.State = filestorepb.Instance_READY
 		return cloneInst(rec.I)
 	}), nil
@@ -300,7 +303,7 @@ func (s *Server) UpdateInstance(_ context.Context, req *filestorepb.UpdateInstan
 	if !next.GetDeletionProtectionEnabled() && next.GetDeletionProtectionReason() != "" {
 		return nil, apierror.InvalidArgument("deletion_protection_reason can be set only with deletion_protection_enabled")
 	}
-	key, ip, spec := r.Key, r.IP, specOf(next)
+	key, ip, spec := r.Key, r.IP, r.specFor(next)
 	b := s.opts.Backend
 	return s.startOpLocked(locationOf(r.I.GetName()), r.I.GetName(), "update", func(ctx context.Context) error {
 		if !reconfigure {
