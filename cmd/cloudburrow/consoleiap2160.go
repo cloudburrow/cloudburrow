@@ -29,7 +29,8 @@ func (iapProvider) Title() string { return "Identity-Aware Proxy" }
 
 const iapNote = "IAP is enforced by the load balancers' proxy on this machine: a request through a backend service with IAP on needs an identity token this instance issued " +
 	"(gcloud auth print-identity-token, the metadata server, or IAM Credentials' generateIdToken) in Authorization or Proxy-Authorization, of a principal with IAP-secured Web App User on the resource; " +
-	"the backend then gets Google's x-goog-iap-jwt-assertion and x-goog-authenticated-user-email headers."
+	"the backend then gets Google's x-goog-iap-jwt-assertion and x-goog-authenticated-user-email headers. " +
+	"A browser without IAP's session is sent to this instance's sign-in page (Google's is accounts.google.com), never to Google."
 
 // iapResource is a backend service's IAP resource name: projects/P/iap_web/
 // compute/services/S, or compute-REGION for a regional one.

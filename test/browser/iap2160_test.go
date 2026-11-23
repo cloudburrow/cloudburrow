@@ -52,7 +52,7 @@ func TestIAPTCPThroughTheBrowser2160(t *testing.T) {
 		t.Errorf("the group made on the page reads %d %s", code, body)
 	}
 	p.navigate("/security/iap/tcp/locations/us-central1/" + name + q)
-	p.waitFor(`document.querySelector("#view h1") !== null && document.querySelector("#view h1").textContent.includes(` + jsString(name) + `)`)
+	p.waitFor(`document.querySelector("#view h1") !== null && document.querySelector("#view h1").textContent.includes("Destination group details") && document.querySelector("#view").textContent.includes(` + jsString(name) + `)`)
 	p.clickText("#view button", "Edit")
 	p.waitFor(`document.querySelector(".modal.is-open #f-cidrs") !== null`)
 	setField(p, ".modal.is-open", "f-cidrs", "10.9.0.0/16")
@@ -123,6 +123,9 @@ func TestIAPBrowserSignIn2160(t *testing.T) {
 		t.Fatalf("after Turn on IAP: %d %s", code, body)
 	}
 	app := "http://" + lbLocalAddress(t, project, lb)
+	// IAP's refusals of a browser without its session, as Google answers
+	// them, are the page's own 403s.
+	forbidden := []string{"status of 403 (Forbidden) " + app + "/", "/favicon.ico"}
 	signIn := func(p *tab, keyboard bool) {
 		p.t.Helper()
 		p.run(chromedp.Navigate(app + "/?gcp-iap-mode=IDENTITY"))
@@ -151,6 +154,7 @@ func TestIAPBrowserSignIn2160(t *testing.T) {
 		}
 	}
 	p := open(t)
+	p.expected = forbidden
 	signIn(p, false)
 	var id map[string]string
 	var text string
@@ -171,6 +175,7 @@ func TestIAPBrowserSignIn2160(t *testing.T) {
 
 	t.Run("keyboard", func(t *testing.T) {
 		k := open(t)
+		k.expected = forbidden
 		k.run(chromedp.Navigate(app + "/?gcp-iap-mode=CLEAR_LOGIN_COOKIE"))
 		signIn(k, true)
 	})

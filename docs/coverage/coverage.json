@@ -14860,9 +14860,9 @@
     "Key": "compute",
     "Title": "Compute Engine API (v1): VPC networking",
     "counts": {
-      "Implemented": 286,
+      "Implemented": 285,
       "Unimplemented": 97,
-      "Verified": 181
+      "Verified": 182
     },
     "rows": [
       {
@@ -17784,8 +17784,10 @@
       },
       {
         "method": "compute.targetHttpsProxies.patch",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer"
+        ]
       },
       {
         "method": "compute.targetHttpsProxies.setCertificateMap",
@@ -22131,8 +22133,8 @@
     "Key": "certificatemanager",
     "Title": "Certificate Manager (v1)",
     "counts": {
-      "Implemented": 10,
-      "Verified": 20
+      "Implemented": 5,
+      "Verified": 25
     },
     "rows": [
       {
@@ -22170,8 +22172,10 @@
       },
       {
         "method": "google.cloud.certificatemanager.v1.CertificateManager/CreateTrustConfig",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer"
+        ]
       },
       {
         "method": "google.cloud.certificatemanager.v1.CertificateManager/DeleteCertificate",
@@ -22208,8 +22212,10 @@
       },
       {
         "method": "google.cloud.certificatemanager.v1.CertificateManager/DeleteTrustConfig",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer"
+        ]
       },
       {
         "method": "google.cloud.certificatemanager.v1.CertificateManager/GetCertificate",
@@ -22246,8 +22252,10 @@
       },
       {
         "method": "google.cloud.certificatemanager.v1.CertificateManager/GetTrustConfig",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer"
+        ]
       },
       {
         "method": "google.cloud.certificatemanager.v1.CertificateManager/ListCertificateIssuanceConfigs",
@@ -22284,8 +22292,10 @@
       },
       {
         "method": "google.cloud.certificatemanager.v1.CertificateManager/ListTrustConfigs",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer"
+        ]
       },
       {
         "method": "google.cloud.certificatemanager.v1.CertificateManager/UpdateCertificate",
@@ -22322,8 +22332,10 @@
       },
       {
         "method": "google.cloud.certificatemanager.v1.CertificateManager/UpdateTrustConfig",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer"
+        ]
       }
     ]
   },
@@ -22331,19 +22343,23 @@
     "Key": "networksecurity",
     "Title": "Network Security (v1)",
     "counts": {
-      "Implemented": 20,
-      "Unimplemented": 25
+      "Unimplemented": 25,
+      "Verified": 20
     },
     "rows": [
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/CreateAuthorizationPolicy",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer"
+        ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/CreateAuthzPolicy",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer"
+        ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/CreateBackendAuthenticationConfig",
@@ -22352,8 +22368,10 @@
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/CreateClientTlsPolicy",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer"
+        ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/CreateGatewaySecurityPolicy",
@@ -22367,8 +22385,10 @@
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/CreateServerTlsPolicy",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer"
+        ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/CreateTlsInspectionPolicy",
@@ -22382,13 +22402,17 @@
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/DeleteAuthorizationPolicy",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer"
+        ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/DeleteAuthzPolicy",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer"
+        ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/DeleteBackendAuthenticationConfig",
@@ -22397,8 +22421,10 @@
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/DeleteClientTlsPolicy",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer"
+        ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/DeleteGatewaySecurityPolicy",
@@ -22412,8 +22438,10 @@
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/DeleteServerTlsPolicy",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer"
+        ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/DeleteTlsInspectionPolicy",
@@ -22427,13 +22455,17 @@
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/GetAuthorizationPolicy",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer"
+        ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/GetAuthzPolicy",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer"
+        ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/GetBackendAuthenticationConfig",
@@ -22442,8 +22474,10 @@
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/GetClientTlsPolicy",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer"
+        ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/GetGatewaySecurityPolicy",
@@ -22457,8 +22491,10 @@
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/GetServerTlsPolicy",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer"
+        ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/GetTlsInspectionPolicy",
@@ -22472,13 +22508,17 @@
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/ListAuthorizationPolicies",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer"
+        ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/ListAuthzPolicies",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer"
+        ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/ListBackendAuthenticationConfigs",
@@ -22487,8 +22527,10 @@
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/ListClientTlsPolicies",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer"
+        ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/ListGatewaySecurityPolicies",
@@ -22502,8 +22544,10 @@
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/ListServerTlsPolicies",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer"
+        ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/ListTlsInspectionPolicies",
@@ -22517,13 +22561,17 @@
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/UpdateAuthorizationPolicy",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer"
+        ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/UpdateAuthzPolicy",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer"
+        ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/UpdateBackendAuthenticationConfig",
@@ -22532,8 +22580,10 @@
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/UpdateClientTlsPolicy",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer"
+        ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/UpdateGatewaySecurityPolicy",
@@ -22547,8 +22597,10 @@
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/UpdateServerTlsPolicy",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer"
+        ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/UpdateTlsInspectionPolicy",

@@ -61,6 +61,10 @@ const (
 // TunnelPaths are the paths gcloud's --iap-tunnel-url-override reaches.
 var TunnelPaths = []string{"/v4/connect", "/v4/reconnect"}
 
+// TunnelOrigin is the Origin gcloud sends on the tunnel's WebSocket
+// (TUNNEL_CLOUDPROXY_ORIGIN in iap_tunnel_websocket_helper.py).
+const TunnelOrigin = "bot:iap-tunneler"
+
 // ErrTunnelNotFound and ErrTunnelStopped are a destination's lookups that
 // close the tunnel with 4047.
 var (

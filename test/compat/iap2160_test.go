@@ -232,7 +232,15 @@ func TestGcloudStartIAPTunnel(t *testing.T) {
 	}
 	gdir, home := t.TempDir(), t.TempDir()
 	name := gcloudSetup(t, cli, gdir)
-	env := append(gcloudTargetEnv(noGoogleEgress()), "CLOUDSDK_CONFIG="+gdir, "CLOUDSDK_ACTIVE_CONFIG_NAME="+name, "HOME="+home)
+	// gcloud-setup disables credentials (CloudBurrow authenticates no API
+	// call), but a tunnel needs its caller's access token, as IAP does:
+	// gcloud then loads the configuration's credential file and refreshes
+	// it at this instance's token endpoint (auth/token_host).
+	env := append(gcloudTargetEnv(noGoogleEgress()), "CLOUDSDK_CONFIG="+gdir, "CLOUDSDK_ACTIVE_CONFIG_NAME="+name, "HOME="+home,
+		"CLOUDSDK_AUTH_DISABLE_CREDENTIALS=false",
+		// gcloud prints "Listening on port" to stdout, which Python
+		// buffers when it is a pipe.
+		"PYTHONUNBUFFERED=1")
 	override := "--iap-tunnel-url-override=ws://" + addr
 	run := func(args ...string) (string, error) {
 		if !hasStr(args, "--project") {
@@ -258,10 +266,17 @@ func TestGcloudStartIAPTunnel(t *testing.T) {
 		_, _ = run("compute", "instances", "delete", vm, "--zone", zone)
 		_, _ = run("compute", "firewall-rules", "delete", fw)
 	})
-	server := `nohup perl -MIO::Socket::INET -e '$s=IO::Socket::INET->new(LocalPort=>8080,Listen=>5,ReuseAddr=>1) or die $!; while($c=$s->accept){print $c "IAP-TUNNEL-OK\n"; close $c}' >/dev/null 2>&1 &`
+	// The server echoes the client's line, so the tunnel is checked in
+	// both directions.
+	server := `nohup perl -MIO::Socket::INET -e '$s=IO::Socket::INET->new(LocalPort=>8080,Listen=>5,ReuseAddr=>1) or die $!; while($c=$s->accept){$l=<$c>; print $c "IAP-TUNNEL-OK $l"; close $c}' >/dev/null 2>&1 &`
+	// From a file: --metadata splits its value at the script's commas.
+	script := filepath.Join(t.TempDir(), "startup.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/bash\n"+server+"\necho IAP-SERVER-STARTED\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	gc("compute", "instances", "create", vm, "--zone", zone, "--machine-type", "e2-small",
 		"--image-family", "debian-12", "--image-project", "debian-cloud",
-		"--metadata", "startup-script=#!/bin/bash\n"+server+"\necho IAP-SERVER-STARTED")
+		"--metadata-from-file", "startup-script="+script)
 	gc("compute", "firewall-rules", "create", fw, "--network", "default", "--direction", "INGRESS",
 		"--source-ranges", "35.235.240.0/20", "--allow", "tcp:22,tcp:8080")
 	deadline := time.Now().Add(3 * time.Minute)
@@ -317,11 +332,21 @@ func TestGcloudStartIAPTunnel(t *testing.T) {
 		time.Sleep(300 * time.Millisecond)
 	}
 
-	account := strings.TrimSpace(gc("config", "get-value", "account"))
-	member := "user:" + account
-	if strings.HasSuffix(account, ".gserviceaccount.com") {
-		member = "serviceAccount:" + account
+	// gcloud-setup sets no core/account: gcloud's caller is the service
+	// account of its auth/credential_file_override.
+	lines := strings.Split(strings.TrimSpace(gc("config", "get-value", "auth/credential_file_override")), "\n")
+	credFile := strings.TrimSpace(lines[len(lines)-1]) // after gcloud's "Your active configuration" note
+	raw, err := os.ReadFile(credFile)
+	if err != nil {
+		t.Fatalf("reading gcloud's credential file: %v", err)
 	}
+	var cred struct {
+		ClientEmail string `json:"client_email"`
+	}
+	if err := json.Unmarshal(raw, &cred); err != nil || cred.ClientEmail == "" {
+		t.Fatalf("gcloud's credential file names no client_email (%v)", err)
+	}
+	member := "serviceAccount:" + cred.ClientEmail
 	ctx := context.Background()
 	admin, err := iap.NewIdentityAwareProxyAdminRESTClient(ctx, opts...)
 	if err != nil {
@@ -350,9 +375,10 @@ func TestGcloudStartIAPTunnel(t *testing.T) {
 		c, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 5*time.Second)
 		if err == nil {
 			_ = c.SetDeadline(time.Now().Add(20 * time.Second))
+			_, _ = c.Write([]byte("PING\n"))
 			line, _ = bufio.NewReader(c).ReadString('\n')
 			c.Close()
-			if strings.TrimSpace(line) == "IAP-TUNNEL-OK" {
+			if strings.TrimSpace(line) == "IAP-TUNNEL-OK PING" {
 				break
 			}
 		}

@@ -637,7 +637,8 @@ func (p *tab) waitForWithin(expr string, limit time.Duration) {
 func contextReplaced(err error) bool {
 	msg := err.Error()
 	return strings.Contains(msg, "Cannot find context with specified id") ||
-		strings.Contains(msg, "Execution context was destroyed")
+		strings.Contains(msg, "Execution context was destroyed") ||
+		strings.Contains(msg, "Inspected target navigated or closed")
 }
 
 // tabTo presses Tab until the focused element, bound to a, satisfies pred.

@@ -126,7 +126,7 @@ func TestCloudArmorRound3ThroughTheBrowser2160(t *testing.T) {
 	}
 	svc := fmt.Sprintf("ddos-%d", time.Now().UnixNano()%1e6)
 	p.navigate("/net-security/securitypolicies/networkEdgeSecurityServices" + q)
-	p.clickText("#view button", "Create network edge security service")
+	p.clickText("#view button", "Create")
 	p.waitFor(`document.querySelector("#f-name") !== null`)
 	setField(p, "#view", "f-name", svc)
 	setField(p, "#view", "f-securityPolicy", "regions/us-central1/securityPolicies/"+nname)
@@ -135,7 +135,7 @@ func TestCloudArmorRound3ThroughTheBrowser2160(t *testing.T) {
 
 	// The WAF rule sets.
 	p.navigate("/net-security/securitypolicies/wafRules" + q)
-	p.waitFor(rowReady("sqli-v33-stable"))
+	p.waitFor(rowReady("cve-canary"))
 	p.navigate("/net-security/securitypolicies/wafRules/sqli-v33-stable" + q + "&tab=signatures")
 	p.waitFor(settled + ` && document.querySelector("#view tbody tr") !== null`)
 	p.eval(`document.querySelector("#view").textContent`, &text)
@@ -170,7 +170,7 @@ func TestRoutingRuleMapsThroughTheBrowser2160(t *testing.T) {
 		"healthChecks": []any{"global/healthChecks/" + hc}})
 	p := open(t)
 	p.navigate("/net-services/trafficdirector/routingRuleMaps" + q)
-	p.clickText("#view button", "Create routing rule map")
+	p.clickText("#view button", "Create")
 	p.waitFor(`document.querySelector("#f-name") !== null`)
 	setField(p, "#view", "f-name", um)
 	setField(p, "#view", "f-rule", rule)
@@ -201,7 +201,7 @@ func TestRoutingRuleMapsThroughTheBrowser2160(t *testing.T) {
 		k := open(t)
 		k.navigate("/net-services/trafficdirector/routingRuleMaps" + q)
 		k.waitFor(rowReady(rule))
-		k.tabTo(`a.tagName === "BUTTON" && a.textContent.trim() === "Create routing rule map"`)
+		k.tabTo(`a.tagName === "BUTTON" && a.textContent.trim() === "Create"`)
 	})
 }
 

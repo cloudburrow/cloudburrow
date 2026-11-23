@@ -254,18 +254,28 @@ func (s *computeService) Start(ctx context.Context) error {
 	var protos http.Protocols
 	protos.SetHTTP1(true)
 	protos.SetUnencryptedHTTP2(true)
-	s.srv = &http.Server{Handler: hostguard.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	guarded := hostguard.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.ProtoMajor == 2 && strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
 			api.XDSHandler().ServeHTTP(w, r)
 			return
 		}
-		if slices.Contains(iap.TunnelPaths, r.URL.Path) {
-			// IAP TCP forwarding (#2160): gcloud's
-			// --iap-tunnel-url-override=ws://THIS_PORT.
-			s.tunnel.ServeHTTP(w, r)
+		jsonAPI.ServeHTTP(w, r)
+	}))
+	// IAP TCP forwarding (#2160): gcloud's
+	// --iap-tunnel-url-override=ws://THIS_PORT. gcloud opens the
+	// WebSocket with Origin: bot:iap-tunneler, which is no browser
+	// origin, so the tunnel takes it beside the usual cross-site rule;
+	// the Host check still applies.
+	s.srv = &http.Server{Handler: hostguard.WrapHost(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !slices.Contains(iap.TunnelPaths, r.URL.Path) {
+			guarded.ServeHTTP(w, r)
 			return
 		}
-		jsonAPI.ServeHTTP(w, r)
+		if r.Header.Get("Origin") != iap.TunnelOrigin && !hostguard.CrossSiteAllowed(r) {
+			hostguard.RefuseOrigin(w, r)
+			return
+		}
+		s.tunnel.ServeHTTP(w, r)
 	})), ReadHeaderTimeout: 10 * time.Second, Protocols: &protos}
 	go func() { _ = s.srv.Serve(ln) }()
 	return nil

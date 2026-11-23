@@ -120,7 +120,7 @@ func (grpcRoutingProvider) CreateOnPage() bool  { return true }
 func (grpcRoutingProvider) CreateTitle() string { return "Create routing rule map" }
 
 func (p grpcRoutingProvider) CreateForm() (string, []console.Field) {
-	return "Save", grpcCreateFields(nil)
+	return "Create", grpcCreateFields(nil)
 }
 
 func (p grpcRoutingProvider) CreateFormFor(ctx context.Context, project string) []console.Field {
