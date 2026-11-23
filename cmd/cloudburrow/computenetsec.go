@@ -23,6 +23,9 @@ import (
 type computeNetSec struct {
 	ns *networksecurity.Server
 	cm *certificatemanager.Server
+	// endpoints are Network Services' endpoint policies of a project, for
+	// proxyless gRPC servers (computexds.go); nil when none are served.
+	endpoints func(project string) []compute.XDSEndpointPolicy
 }
 
 func (c computeNetSec) PolicyExists(name string) bool { return c.ns.Exists(name) }
