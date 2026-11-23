@@ -153,6 +153,10 @@ func TestCompatShardListsLiveInOneFile(t *testing.T) {
 	if !strings.Contains(string(raw), `"$COMPAT_BROWSER_RUN_SHARD_TESTS"`) {
 		t.Error("scripts/verify-local.sh does not split the browser suite as CI does")
 	}
+	if !strings.Contains(ci["compat"], "CROSSSERVICE_SHARD_TESTS=$COMPAT_BROWSER_CROSSSERVICE_SHARD_TESTS") ||
+		!strings.Contains(string(raw), `"$COMPAT_BROWSER_CROSSSERVICE_SHARD_TESTS"`) {
+		t.Error("ci.yml's browser step or scripts/verify-local.sh does not take the crossservice shard's browser tests from scripts/compat-shards.sh")
+	}
 	if !strings.Contains(ci["check"], "shellcheck -x -s bash scripts/compat-shards.sh scripts/verify-local.sh") {
 		t.Error("ci.yml's check job does not shellcheck scripts/compat-shards.sh and scripts/verify-local.sh as bash")
 	}

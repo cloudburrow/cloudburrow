@@ -466,7 +466,9 @@ browser_suite() {  # <shard> <dir> <flags...>
   case "$shard" in
     # The localai shard's tests are kept out of run, as in CI: TestSpeech*
     # names one, whose transcription needs that shard's local models.
-    run) select=-run pattern="$COMPAT_BROWSER_RUN_SHARD_TESTS" skip=(-skip "$COMPAT_BROWSER_LOCALAI_SHARD_TESTS|$COMPAT_BROWSER_NEVER_TESTS") ;;
+    # And the run instance's tests the crossservice shard runs, as in CI.
+    run) select=-run pattern="$COMPAT_BROWSER_RUN_SHARD_TESTS" skip=(-skip "$COMPAT_BROWSER_CROSSSERVICE_SHARD_TESTS|$COMPAT_BROWSER_LOCALAI_SHARD_TESTS|$COMPAT_BROWSER_NEVER_TESTS") ;;
+    crossservice) select=-run pattern="$COMPAT_BROWSER_CROSSSERVICE_SHARD_TESTS" skip=(-skip "$COMPAT_BROWSER_LOCALAI_SHARD_TESTS|$COMPAT_BROWSER_NEVER_TESTS") ;;
     emulators) select=-run pattern="$COMPAT_BROWSER_EMULATORS_SHARD_TESTS" ;;
     memorystore) select=-run pattern="$COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS" ;;
     sql) select=-run pattern="$COMPAT_BROWSER_SQL_SHARD_TESTS" ;;
@@ -504,7 +506,7 @@ browser_suite() {  # <shard> <dir> <flags...>
   # Cloud Storage, for the Document AI and Speech batch pages' output, Cloud
   # Monitoring's Cloud Run metrics, and the kubeconfig that port-forwards the
   # gateway a service's URL is reached through (#2049).
-  if [ "$shard" = run ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT,RUN_SERVICEUSAGE,WORKFLOWS,STORAGE,MONITORING,KUBECONFIG,RUN_FIRESTORE,RUN_DATASTORE; fi
+  if [ "$shard" = run ] || [ "$shard" = crossservice ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT,RUN_SERVICEUSAGE,WORKFLOWS,STORAGE,MONITORING,KUBECONFIG,RUN_FIRESTORE,RUN_DATASTORE; fi
   # The sql shard's read back through the Cloud SQL Admin API, the Backup
   # and DR Service and Secret Manager, which holds Run SQL's password, and
   # the Compute Engine API for Backup and DR's VM and disk pages.
@@ -516,9 +518,9 @@ browser_suite() {  # <shard> <dir> <flags...>
   BROWSER_ENV=$(scripts/compat-env.sh --only "$BROWSER_VARS" --cli "$CLI" -- "$@" 2>/dev/null)
   (
     eval "$BROWSER_ENV"
-    # As in CI: 30m in run and storage (#2080), 20m in served and sql, 10m elsewhere.
+    # As in CI: 30m in run, crossservice and storage (#2080), 20m in served and sql, 10m elsewhere.
     local timeout=10m
-    case "$shard" in served|sql) timeout=20m ;; run|storage) timeout=30m ;; esac
+    case "$shard" in served|sql) timeout=20m ;; run|crossservice|storage) timeout=30m ;; esac
     # As in CI: what the restarted instance needs before its tests (#1985).
     compat_browser_prepare "$shard" 2>> "$dir/browser-prepare.err" || true
     export CLOUDBURROW_TEST_CHROME="$chrome" CLOUDBURROW_TEST_SCREENSHOTS="$dir/browser-screenshots"
@@ -529,6 +531,7 @@ browser_suite() {  # <shard> <dir> <flags...>
   # that never ran (a panic, a timeout) is a failure too.
   local not=$COMPAT_BROWSER_NEVER_TESTS
   [ "$shard" = localai ] || not="$COMPAT_BROWSER_LOCALAI_SHARD_TESTS|$COMPAT_BROWSER_NEVER_TESTS"
+  if [ "$shard" = run ]; then not="$COMPAT_BROWSER_CROSSSERVICE_SHARD_TESTS|$not"; fi
   for pick in $(go test -tags=browser -list '.*' ./test/browser/ | grep '^Test' | grep -vE "$not" |
     if [ "$select" = -run ]; then grep -E "$pattern"; else grep -vE "$pattern"; fi); do
     grep -q -- "^--- [A-Z]*: $pick (" "$dir/browser.log" || check "browser test $pick ran" fail "no result"

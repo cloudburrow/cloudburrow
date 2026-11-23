@@ -301,10 +301,22 @@ COMPAT_SQL_REPLICA_TESTS='^Test[A-Za-z]*SQL[A-Za-z0-9]*(HighAvailability|Replica
 # Document AI and Speech-to-Text (TestStoragePicker*, #2097), whose screens
 # are drawn where Cloud Run serves the local AI endpoint, and Logging's App
 # Hub dimensions (TestLoggingAppHub*, #2096), which need App Hub, run in run.
-COMPAT_BROWSER_SHARDS="storage served run emulators memorystore sql localai"
+# The run shard's instance draws all of those screens, and the crossservice
+# shard brings up the same instance (compat_shard), so the run instance's
+# browser tests are split between them: the Cloud Run screens' (TestCloudRun*,
+# whose Artifact Registry tabs need the vulnerability scanner only the run
+# shard prefetches) in run, and the rest of COMPAT_BROWSER_RUN_SHARD_TESTS
+# (COMPAT_BROWSER_CROSSSERVICE_SHARD_TESTS) in crossservice. The run shard's
+# 104 took 1,347 s and 1,690 s in main runs 45171873407 and 45147981577, and
+# passed the step's 30m in 45202563361 with no test hung (its job took 71
+# and 83 of its 90 minutes; crossservice's, with no browser step, 44 to 56):
+# the Cloud Run screens' 38 took 657 s and 765 s of them, the other 66 690 s
+# and 925 s.
+COMPAT_BROWSER_SHARDS="storage served run crossservice emulators memorystore sql localai"
 COMPAT_BROWSER_SERVED_SHARD_TESTS='^Test(GKEServed|KubernetesEnginePages|VPCNetwork|ComputeEngine|ComputePermissions|TraceExplorer)'
 COMPAT_BROWSER_SERVED_ONLY_TESTS='^Test(GKEServed|VPCNetwork|ComputeEngine|ComputePermissions|TraceExplorer)'
 COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|CloudBuild|LoggingAdmin|LoggingConsole|LoggingAppHub|SecretManager|Eventarc|DocumentAI|Speech|StoragePicker|Workflows|ModelRegistry|Dataform|AppHub)'
+COMPAT_BROWSER_CROSSSERVICE_SHARD_TESTS='^Test(KMS|CloudBuild|LoggingAdmin|LoggingConsole|LoggingAppHub|SecretManager|Eventarc|DocumentAI|Speech|StoragePicker|Workflows|ModelRegistry|Dataform|AppHub)'
 COMPAT_BROWSER_EMULATORS_SHARD_TESTS='^Test(BigQuery|Firestore|Datastore|Bigtable|Spanner)'
 COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS='^TestMemorystore'
 # Private Service Connect's Connection Policies with Cloud SQL's create

@@ -1033,11 +1033,11 @@ jobs:
 
           # The flags naming this instance, one per line, for the console
           # browser step below, which brings it up again (#594): in the
-          # storage shard, and in the run, emulators, memorystore and sql
-          # shards for the screens only their instances serve (#700, #854,
-          # #1472, #1568).
+          # storage shard, and in the run, crossservice, emulators,
+          # memorystore and sql shards for the screens only their instances
+          # serve (#700, #854, #1472, #1568).
           case "$SHARD" in
-            storage|served|run|emulators|memorystore|sql|localai) printf '%s\n' "${CB[@]}" > "$RUNNER_TEMP/cb-args" ;;
+            storage|served|run|crossservice|emulators|memorystore|sql|localai) printf '%s\n' "${CB[@]}" > "$RUNNER_TEMP/cb-args" ;;
           esac
           if [ "$SHARD" = storage ]; then
             # The official Python clients against the same instance (#287),
@@ -1178,11 +1178,14 @@ jobs:
       # only by the served shard's, so TestGKEServed* runs there, with
       # TestKubernetesEnginePages*, which also runs in storage (#1913, #1925);
       # and the Studio's and Embeddings page's local models only by the
-      # localai shard's (#1985).
+      # localai shard's (#1985). The crossservice shard brings up the run
+      # shard's instance, so the run instance's tests other than
+      # TestCloudRun* run there (COMPAT_BROWSER_CROSSSERVICE_SHARD_TESTS):
+      # the run shard's step took 1,690 s of its 30m in main run 45147981577.
       # Every test selected for the shard must pass: go test
       # exits 0 on a skip, and each skips without its variables or its screen.
       - name: Console in a headless browser
-        if: matrix.shard == 'storage' || matrix.shard == 'served' || matrix.shard == 'run' || matrix.shard == 'emulators' || matrix.shard == 'memorystore' || matrix.shard == 'sql' || matrix.shard == 'localai'
+        if: matrix.shard == 'storage' || matrix.shard == 'served' || matrix.shard == 'run' || matrix.shard == 'crossservice' || matrix.shard == 'emulators' || matrix.shard == 'memorystore' || matrix.shard == 'sql' || matrix.shard == 'localai'
         run: |
           set -o pipefail
           # ubuntu-latest ships Google Chrome: it is in the runner image's
@@ -1243,7 +1246,9 @@ jobs:
           # port-forwards the gateway a service's URL is reached through (#2049).
           # And the Firestore and Datastore emulators, where the Eventarc
           # triggers made on a function's Add trigger have their events caused (#2093).
-          if [ "$SHARD" = run ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT,RUN_SERVICEUSAGE,WORKFLOWS,STORAGE,MONITORING,KUBECONFIG,RUN_FIRESTORE,RUN_DATASTORE; fi
+          # The crossservice shard's instance is the run shard's, and its
+          # tests are the rest of the run instance's.
+          if [ "$SHARD" = run ] || [ "$SHARD" = crossservice ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT,RUN_SERVICEUSAGE,WORKFLOWS,STORAGE,MONITORING,KUBECONFIG,RUN_FIRESTORE,RUN_DATASTORE; fi
           # The sql shard's read back through the Cloud SQL Admin API, the Backup
           # and DR Service and Secret Manager, which holds Run SQL's password,
           # and the Compute Engine API, whose VMs and disks Backup and DR backs
@@ -1268,6 +1273,7 @@ jobs:
           # What the restarted instance needs before its tests (#1985).
           compat_browser_prepare "$SHARD"
           RUN_SHARD_TESTS=$COMPAT_BROWSER_RUN_SHARD_TESTS
+          CROSSSERVICE_SHARD_TESTS=$COMPAT_BROWSER_CROSSSERVICE_SHARD_TESTS
           EMULATORS_SHARD_TESTS=$COMPAT_BROWSER_EMULATORS_SHARD_TESTS
           MEMORYSTORE_SHARD_TESTS=$COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS
           SQL_SHARD_TESTS=$COMPAT_BROWSER_SQL_SHARD_TESTS
@@ -1279,7 +1285,9 @@ jobs:
             # The localai shard's tests are kept out of run, whose pattern
             # (TestSpeech*) names one of them: its transcription needs the
             # local models only that shard starts.
-            run) SELECT=(-run "$RUN_SHARD_TESTS" -skip "$LOCALAI_SHARD_TESTS|$NEVER_TESTS"); PICK=(grep -E "$RUN_SHARD_TESTS") ;;
+            # And the run instance's tests crossservice runs are kept out of run.
+            run) SELECT=(-run "$RUN_SHARD_TESTS" -skip "$CROSSSERVICE_SHARD_TESTS|$LOCALAI_SHARD_TESTS|$NEVER_TESTS"); PICK=(grep -E "$RUN_SHARD_TESTS") ;;
+            crossservice) SELECT=(-run "$CROSSSERVICE_SHARD_TESTS" -skip "$LOCALAI_SHARD_TESTS|$NEVER_TESTS"); PICK=(grep -E "$CROSSSERVICE_SHARD_TESTS") ;;
             emulators) SELECT=(-run "$EMULATORS_SHARD_TESTS" -skip "$NEVER_TESTS"); PICK=(grep -E "$EMULATORS_SHARD_TESTS") ;;
             memorystore) SELECT=(-run "$MEMORYSTORE_SHARD_TESTS" -skip "$NEVER_TESTS"); PICK=(grep -E "$MEMORYSTORE_SHARD_TESTS") ;;
             sql) SELECT=(-run "$SQL_SHARD_TESTS" -skip "$NEVER_TESTS"); PICK=(grep -E "$SQL_SHARD_TESTS") ;;
@@ -1289,6 +1297,7 @@ jobs:
           esac
           rc=0
           NOT=$NEVER_TESTS; [ "$SHARD" = localai ] || NOT="$LOCALAI_SHARD_TESTS|$NEVER_TESTS"
+          if [ "$SHARD" = run ]; then NOT="$CROSSSERVICE_SHARD_TESTS|$NOT"; fi
           # 10m, and 20m in served, whose test makes a Kubernetes Engine
           # cluster and node pool, real kind nodes, through the pages (#1913,
           # #1925): about a minute on a laptop, several on a runner. And 20m
@@ -1307,7 +1316,14 @@ jobs:
           # And 30m in storage: 1,169 s of its 1,200 in main run
           # 45102950103, then past 20m in 45126544176 with no test hung (the
           # 200 it reached took 1,187 s; the seven it did not, 43 s before).
-          BROWSER_TIMEOUT=10m; case "$SHARD" in served|sql) BROWSER_TIMEOUT=20m ;; run|storage) BROWSER_TIMEOUT=30m ;; esac
+          # And 30m in crossservice, which took the run instance's tests
+          # other than TestCloudRun* from run: 690 s and 925 s of run's
+          # 1,347 s and 1,690 s in main runs 45171873407 and 45147981577,
+          # before run passed its 30m in 45202563361 with no test hung.
+          # Each is now about half its 30m, and each job (71 and 83 of its 90
+          # minutes for run then, 44 to 56 for crossservice, whose compat
+          # suite took 1,930 s and 2,145 s) about a quarter of an hour from it.
+          BROWSER_TIMEOUT=10m; case "$SHARD" in served|sql) BROWSER_TIMEOUT=20m ;; run|crossservice|storage) BROWSER_TIMEOUT=30m ;; esac
           go test -tags=browser -count=1 -timeout "$BROWSER_TIMEOUT" -v "${SELECT[@]}" ./test/browser/ | tee browser.log || rc=1
           for t in $(go test -tags=browser -list '.*' ./test/browser/ | grep '^Test' | "${PICK[@]}" | grep -vE "$NOT"); do
             grep -q -- "^--- PASS: $t (" browser.log ||
@@ -1318,7 +1334,7 @@ jobs:
           echo "== browser ($SHARD): $(grep -c -- '^--- PASS' browser.log) console tests passed in $("$CHROME" --version)"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: failure() && (matrix.shard == 'storage' || matrix.shard == 'served' || matrix.shard == 'run' || matrix.shard == 'emulators' || matrix.shard == 'memorystore' || matrix.shard == 'sql' || matrix.shard == 'localai')
+        if: failure() && (matrix.shard == 'storage' || matrix.shard == 'served' || matrix.shard == 'run' || matrix.shard == 'crossservice' || matrix.shard == 'emulators' || matrix.shard == 'memorystore' || matrix.shard == 'sql' || matrix.shard == 'localai')
         with:
           name: browser-screenshots-${{ matrix.shard }}
           path: |
