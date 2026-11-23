@@ -52,7 +52,10 @@ type dataprocService struct {
 	caller func(ctx context.Context) string
 	// gke is the Kubernetes Engine API, Dataproc on GKE's clusters' (nil:
 	// none served).
-	gke    func() *gke.Server
+	gke func() *gke.Server
+	// kms is the instance's Cloud KMS, which decrypts the RANGER
+	// component's admin password (nil: none served).
+	kms    *kmsService
 	server *grpctransport.Server
 	api    *dataproc.Server
 }
@@ -109,6 +112,9 @@ func (s *dataprocService) Start(ctx context.Context) error {
 	}
 	opts.InstanceID = s.cfg.Name
 	opts.AllowUnconfinedContainers = s.cfg.AllowUnconfinedContainers
+	if s.kms != nil {
+		opts.Decrypt = buildKMSDecrypter{svc: s.kms}.Decrypt
+	}
 	if s.gke != nil {
 		opts.Virtual = dataprocGKE{api: s.gke, dir: filepath.Join(s.cfg.InstanceDir(), "dataproc-gke")}
 	}

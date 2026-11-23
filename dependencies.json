@@ -362,6 +362,42 @@
         "notes": "Resolved 2026-11-23 with docker pull by digest on linux/arm64.",
         "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve with `docker buildx imagetools inspect apache/zeppelin:0.12.1`."
       },
+      "dataprocRangerSource": {
+        "$comment": "The RANGER optional component (#2162, internal/sparkproc/ranger.go): internal/sparkproc/ranger/Dockerfile builds the Ranger Admin server on this machine from this source release (a Maven build of the whole reactor, -C strict checksums, whose distro admin-web assembly is unpacked into the image), the first time a cluster with RANGER starts. Apache publishes the SHA-512 c00acf627bd7f1cddebfd15b628faa54bf6ea4933457c8ad21ea0280986b8860627a58109be753e07a01d45f576bce72289627a5bb5ff0e3698296aad88e9cf4; the Dockerfile's ADD --checksum pins the SHA-256 of the same verified file.",
+        "version": "2.8.0",
+        "source": "https://archive.apache.org/dist/ranger/2.8.0/apache-ranger-2.8.0.tar.gz",
+        "sha256": "069ed1550160ac0da87980411c346d1e607466cb823720c73458a7b3b95b34aa",
+        "license": "Apache-2.0",
+        "redistribution": "not published: built into a local image (tag cloudburrow/dataproc-ranger:<context hash>); nothing of it is in the CLI or the repository",
+        "updateFeed": "apache-dist",
+        "verification": "sha256",
+        "skipDiscovery": "Apache distribution site; depcheck only discovers GitHub-sourced components."
+      },
+      "dataprocRangerBuildImage": {
+        "$comment": "The RANGER component's build and runtime base (internal/sparkproc/ranger/Dockerfile): the Docker official maven image 3.9.11-eclipse-temurin-8 (Ranger 2.8 builds with Java 8).",
+        "image": "maven:3.9.11-eclipse-temurin-8",
+        "digest": "sha256:e3c149f44c95b0e9dd131862b3df67b3f061f7f6f3898a87b170564b3a943611",
+        "license": "Apache-2.0 (Maven), GPL-2.0 with the Classpath Exception (the Eclipse Temurin JDK) and the packages of the image's Ubuntu base",
+        "redistribution": "not published: the local build's base; nothing of it is in the CLI or the repository",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components."
+      },
+      "dataprocRangerMySQLConnector": {
+        "$comment": "The RANGER component's JDBC driver (internal/sparkproc/ranger/Dockerfile), Ranger's own pin, ADDed by SHA-256 into the locally built image only, never into the repository or the CLI.",
+        "version": "8.0.28",
+        "source": "https://repo1.maven.org/maven2/mysql/mysql-connector-java/8.0.28/mysql-connector-java-8.0.28.jar",
+        "sha256": "a00ccdf537ff50e50067b989108c2235197ffb65e197149bbb669db843cd1c3e",
+        "license": "GPL-2.0-only WITH Universal-FOSS-exception-1.0",
+        "redistribution": "not published: downloaded into the locally built Ranger image only; nothing of it is in the CLI or the repository",
+        "updateFeed": "maven-central",
+        "verification": "sha256",
+        "skipDiscovery": "Maven Central; depcheck only discovers GitHub-sourced components."
+      },
       "dataprocGcsConnector": {
         "$comment": "Google's Cloud Storage connector for Hadoop (#2162), on Hadoop, Hive and Pig jobs' class path: gs:// reads and writes go to the instance's Cloud Storage through the cluster's relay. Fetched by the CLI on the first such job, checked against this SHA-256 and kept in <state-dir>/models/spark/dataproc.",
         "version": "hadoop3-2.2.30",

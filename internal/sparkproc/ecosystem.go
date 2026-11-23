@@ -73,6 +73,11 @@ type Ecosystem struct {
 	// Docker is the DOCKER component's dind-rootless image of an image
 	// version (MAJOR.MINOR), "" when not served.
 	Docker func(imageVersion string) string
+	// Ranger returns the RANGER component's Admin server image, built on
+	// the first use (RangerImage), or is nil when not served; RangerMySQL
+	// is the MySQL image of its database.
+	Ranger      func(ctx context.Context) (string, error)
+	RangerMySQL string
 }
 
 // The optional components (SoftwareConfig.optional_components) a
@@ -97,6 +102,7 @@ var componentPorts = map[string]struct{ key, listen, port string }{
 	ComponentJupyter:     {"jupyter", "8123", "8123"},
 	ComponentZeppelin:    {"zeppelin", "18090", "8080"},
 	ComponentSolr:        {"solr", "8983", "8983"},
+	ComponentRanger:      {"ranger", "6080", "6080"},
 	ComponentHiveWebHCat: {"webhcat", "50111", "50111"},
 }
 
@@ -425,6 +431,11 @@ func (c *Cluster) startComponents(ctx context.Context) error {
 			return err
 		}
 		if err := c.waitLog(ctx, c.component("solr"), regexp.MustCompile(`Started Solr server|o.e.j.s.Server Started`), 5*time.Minute); err != nil {
+			return err
+		}
+	}
+	if c.has(ComponentRanger) {
+		if err := c.startRanger(ctx, e); err != nil {
 			return err
 		}
 	}

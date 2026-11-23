@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	dataprocpb "cloud.google.com/go/dataproc/v2/apiv1/dataprocpb"
 	longrunningpb "cloud.google.com/go/longrunning/autogen/longrunningpb"
@@ -210,6 +211,9 @@ func (s *Server) checkCluster(project, region string, c *dataprocpb.Cluster) err
 		return err
 	}
 	cfg.SoftwareConfig.ImageVersion = full
+	if err := checkRanger(cfg.SoftwareConfig); err != nil {
+		return err
+	}
 	if err := checkComponents(mm, cfg.SoftwareConfig.GetOptionalComponents(), s.opts.AllowUnconfinedContainers); err != nil {
 		return err
 	}
@@ -324,16 +328,57 @@ var componentImages = map[dataprocpb.Component]func(mm string) bool{
 // servedComponents run as containers on a local cluster
 // (internal/sparkproc's Ecosystem).
 var servedComponents = map[dataprocpb.Component]bool{
-	dataprocpb.Component_FLINK: true, dataprocpb.Component_HIVE_WEBHCAT: true, dataprocpb.Component_JUPYTER: true,
+	dataprocpb.Component_FLINK: true, dataprocpb.Component_HIVE_WEBHCAT: true, dataprocpb.Component_JUPYTER: true, dataprocpb.Component_RANGER: true,
 	dataprocpb.Component_PIG: true, dataprocpb.Component_SOLR: true, dataprocpb.Component_TRINO: true,
 	dataprocpb.Component_ZOOKEEPER: true, dataprocpb.Component_DELTA: true, dataprocpb.Component_ICEBERG: true,
 	dataprocpb.Component_HUDI: true, dataprocpb.Component_ZEPPELIN: true, dataprocpb.Component_DOCKER: true,
 }
 
 // unservedComponents are why the other components do not run.
-var unservedComponents = map[dataprocpb.Component]string{
-	dataprocpb.Component_RANGER: "Apache Ranger publishes no official image, and its Admin server built from the pinned source release is not built yet (docs/gaps.md)",
+var unservedComponents = map[dataprocpb.Component]string{}
+
+// checkRanger checks the RANGER component's documented requirements
+// (https://docs.cloud.google.com/dataproc/docs/concepts/components/ranger,
+// read 2026-11-23): "The Ranger component requires the installation of the
+// Solr component", and the admin password, a Cloud Storage object
+// encrypted with a Cloud KMS key, named by dataproc:ranger.kms.key.uri
+// (projects/P/locations/global/keyRings/R/cryptoKeys/K) and
+// dataproc:ranger.admin.password.uri (gs://...). Google documents no
+// message for these, so the messages are CloudBurrow's.
+func checkRanger(sc *dataprocpb.SoftwareConfig) error {
+	var ranger, solr bool
+	for _, c := range sc.GetOptionalComponents() {
+		ranger = ranger || c == dataprocpb.Component_RANGER
+		solr = solr || c == dataprocpb.Component_SOLR
+	}
+	if !ranger {
+		return nil
+	}
+	if !solr {
+		return apierror.InvalidArgument("The Ranger component requires the installation of the Solr component: add SOLR to optional_components")
+	}
+	props := sc.GetProperties()
+	key := props["dataproc:ranger.kms.key.uri"]
+	if key == "" {
+		return apierror.InvalidArgument("The Ranger component requires the cluster property dataproc:ranger.kms.key.uri, the Cloud KMS key that encrypts the Ranger admin password")
+	}
+	if !rangerKeyRE.MatchString(key) {
+		return apierror.InvalidArgument("Invalid value %q for property dataproc:ranger.kms.key.uri: want projects/PROJECT/locations/LOCATION/keyRings/KEY_RING/cryptoKeys/KEY", key)
+	}
+	for _, p := range []string{"dataproc:ranger.admin.password.uri", "dataproc:ranger.db.admin.password.uri", "dataproc:ranger.cloud-sql.root.password.uri"} {
+		v, set := props[p]
+		if p == "dataproc:ranger.admin.password.uri" && v == "" {
+			return apierror.InvalidArgument("The Ranger component requires the cluster property dataproc:ranger.admin.password.uri, the Cloud Storage URI of the KMS-encrypted Ranger admin password")
+		}
+		if set && !strings.HasPrefix(v, "gs://") {
+			return apierror.InvalidArgument("Invalid value %q for property %s: want a gs:// URI of a KMS-encrypted file", v, p)
+		}
+	}
+	return nil
 }
+
+// rangerKeyRE is a Cloud KMS key's resource name.
+var rangerKeyRE = regexp.MustCompile(`^projects/[^/]+/locations/[^/]+/keyRings/[^/]+/cryptoKeys/[^/]+$`)
 
 // UnconfinedFlag is the `up` flag that lets the DOCKER component run.
 const UnconfinedFlag = "--allow-unconfined-containers"
@@ -368,7 +413,7 @@ func checkComponents(mm string, comps []dataprocpb.Component, allowUnconfined bo
 			return apierror.FailedPrecondition("%s", dockerRefusal)
 		}
 		if !servedComponents[comp] {
-			return status.Errorf(codes.Unimplemented, "The %s optional component is not served by CloudBurrow (%s): a local cluster runs Delta Lake, Docker, Flink, Hive WebHCat, Hudi, Iceberg, Jupyter, Pig, Solr, Trino, Zeppelin and ZooKeeper", comp, unservedComponents[comp])
+			return status.Errorf(codes.Unimplemented, "The %s optional component is not served by CloudBurrow (%s): a local cluster runs Delta Lake, Docker, Flink, Hive WebHCat, Hudi, Iceberg, Jupyter, Pig, Ranger, Solr, Trino, Zeppelin and ZooKeeper", comp, unservedComponents[comp])
 		}
 	}
 	return nil
@@ -588,6 +633,15 @@ func (s *Server) startCluster(name, opName string, restart bool) {
 	case hasComponent(c, sparkproc.ComponentDocker) && !s.opts.AllowUnconfinedContainers:
 		// A cluster made with the opt-in, restarted by an instance without it.
 		err = &sparkproc.Unavailable{Msg: dockerRefusal}
+	case hasComponent(c, sparkproc.ComponentRanger) && spec.RangerPassword == "":
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		spec.RangerPassword, err = s.rangerPassword(ctx, c)
+		cancel()
+		if err == nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute+sparkproc.RangerBuildTimeout)
+			nodes, err = ce.StartCluster(ctx, spec)
+			cancel()
+		}
 	default:
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 		nodes, err = ce.StartCluster(ctx, spec)
@@ -648,14 +702,16 @@ func gatewayBase(uuid string) string { return "/component-gateway/" + uuid + "/"
 // gatewayKeys the Nodes.Web key each path is served from.
 var (
 	gatewayPaths = map[string]string{"Jupyter": "jupyter/tree", "JupyterLab": "jupyter/lab", "Zeppelin": "zeppelin/",
-		"Flink": "flink/", "Trino": "trino/ui/", "Solr": "solr/", "WebHCat": "webhcat/templeton/v1/status"}
+		"Flink": "flink/", "Trino": "trino/ui/", "Solr": "solr/", "WebHCat": "webhcat/templeton/v1/status",
+		"Ranger": "ranger/"}
 	gatewayKeys = map[string]string{"sparkhistory": "history", "jupyter": "jupyter", "zeppelin": "zeppelin", "flink": "flink",
-		"trino": "trino", "solr": "solr", "webhcat": "webhcat", "yarn": "yarn", "jobhistory": "jobhistory", "apphistory": "apphistory"}
+		"trino": "trino", "solr": "solr", "webhcat": "webhcat", "yarn": "yarn", "jobhistory": "jobhistory", "apphistory": "apphistory",
+		"ranger": "ranger"}
 	// gatewayRewritten are the Hadoop web interfaces, which have no base
 	// path setting: their pages' root-relative links and their own
 	// absolute URLs (http://CLUSTER-m:8088/...) are rewritten to their
 	// gateway paths.
-	gatewayRewritten = map[string]string{"yarn": "8088", "jobhistory": "19888", "apphistory": "8188"}
+	gatewayRewritten = map[string]string{"yarn": "8088", "jobhistory": "19888", "apphistory": "8188", "ranger": "6080"}
 	// gatewayFull are the components served at their full path (their
 	// base URL configured to it), the rest with it stripped.
 	gatewayFull = map[string]bool{"jupyter": true, "zeppelin": true}
@@ -678,7 +734,7 @@ func (s *Server) fillEndpointsLocked(c *dataprocpb.Cluster) {
 	// re-read 2026-11-22: the Component Gateway page lists only the
 	// Hadoop, Spark and Tez interfaces' keys).
 	for key, comp := range map[string]string{"Jupyter": "JUPYTER", "JupyterLab": "JUPYTER", "Zeppelin": "ZEPPELIN",
-		"Flink": "FLINK", "Trino": "TRINO", "Solr": "SOLR", "WebHCat": "HIVE_WEBHCAT"} {
+		"Flink": "FLINK", "Trino": "TRINO", "Solr": "SOLR", "WebHCat": "HIVE_WEBHCAT", "Ranger": "RANGER"} {
 		if hasComponent(c, comp) {
 			ec.HttpPorts[key] = base + gatewayPaths[key]
 		}
@@ -1353,4 +1409,55 @@ func (s *Server) watchCluster(name, uuid string) {
 func atoi32(n string) int32 {
 	v, _ := strconv.Atoi(n)
 	return int32(v)
+}
+
+// rangerPassword is the RANGER component's admin password: the object
+// dataproc:ranger.admin.password.uri names, decrypted with the Cloud KMS
+// key dataproc:ranger.kms.key.uri names, as the component page documents
+// (read 2026-11-23), checked against its rules: at least 8 characters,
+// with an uppercase and a lowercase letter and a digit on image versions
+// 2.2 and later, a letter and a digit before.
+func (s *Server) rangerPassword(ctx context.Context, c *dataprocpb.Cluster) (string, error) {
+	props := c.GetConfig().GetSoftwareConfig().GetProperties()
+	uri, key := props["dataproc:ranger.admin.password.uri"], props["dataproc:ranger.kms.key.uri"]
+	if s.opts.Storage == nil {
+		return "", &sparkproc.Unavailable{Msg: "dataproc:ranger.admin.password.uri cannot be read: this instance serves no Cloud Storage"}
+	}
+	if s.opts.Decrypt == nil {
+		return "", &sparkproc.Unavailable{Msg: "dataproc:ranger.kms.key.uri cannot be used: this instance serves no Cloud KMS (start it with kms in --services)"}
+	}
+	ct, err := s.opts.Storage.Read(ctx, uri)
+	if err != nil {
+		return "", &sparkproc.Unavailable{Msg: "read dataproc:ranger.admin.password.uri " + uri + ": " + err.Error()}
+	}
+	pt, err := s.opts.Decrypt(ctx, key, ct)
+	if err != nil {
+		return "", &sparkproc.Unavailable{Msg: "decrypt " + uri + " with " + key + ": " + err.Error()}
+	}
+	pw := strings.TrimRight(string(pt), "\r\n")
+	if msg := rangerPasswordRule(imageMMOf(c), pw); msg != "" {
+		return "", &sparkproc.Unavailable{Msg: msg}
+	}
+	return pw, nil
+}
+
+// rangerPasswordRule is why pw is not a Ranger admin password on image
+// version mm, "" when it is one.
+func rangerPasswordRule(mm, pw string) string {
+	var upper, lower, digit bool
+	for _, r := range pw {
+		upper = upper || unicode.IsUpper(r)
+		lower = lower || unicode.IsLower(r)
+		digit = digit || unicode.IsDigit(r)
+	}
+	if mm >= "2.2" {
+		if len(pw) < 8 || !upper || !lower || !digit {
+			return "The Ranger admin password must have a minimum of 8 characters, with at least one uppercase letter, one lowercase letter and one numeric character"
+		}
+		return ""
+	}
+	if len(pw) < 8 || !(upper || lower) || !digit {
+		return "The Ranger admin password must have a minimum of 8 characters, with at least one alphabetic and one numeric character"
+	}
+	return ""
 }

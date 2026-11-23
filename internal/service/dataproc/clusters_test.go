@@ -456,7 +456,7 @@ func TestCheckComponents(t *testing.T) {
 		{"2.1", []dataprocpb.Component{dataprocpb.Component_HUDI}, codes.OK},
 		{"3.0", []dataprocpb.Component{dataprocpb.Component_ICEBERG, dataprocpb.Component_ZEPPELIN, dataprocpb.Component_DOCKER}, codes.OK},
 		{"2.2", []dataprocpb.Component{dataprocpb.Component_DOCKER}, codes.OK},
-		{"3.0", []dataprocpb.Component{dataprocpb.Component_RANGER}, codes.Unimplemented},
+		{"3.0", []dataprocpb.Component{dataprocpb.Component_RANGER, dataprocpb.Component_SOLR}, codes.OK},
 		{"3.0", []dataprocpb.Component{dataprocpb.Component_DELTA, dataprocpb.Component_HUDI}, codes.OK},
 	} {
 		if err := checkComponents(c.mm, c.comps, false); c.code == codes.OK && hasDocker(c.comps) && status.Code(err) != codes.FailedPrecondition {
@@ -534,4 +534,89 @@ func hasDocker(comps []dataprocpb.Component) bool {
 		}
 	}
 	return false
+}
+
+// TestCheckRanger (#2162): RANGER needs SOLR and the KMS-encrypted admin
+// password's two properties, as the Ranger component page documents.
+func TestCheckRanger(t *testing.T) {
+	key := "projects/p/locations/global/keyRings/r/cryptoKeys/k"
+	both := []dataprocpb.Component{dataprocpb.Component_SOLR, dataprocpb.Component_RANGER}
+	for _, c := range []struct {
+		comps []dataprocpb.Component
+		props map[string]string
+		want  string // "" is OK
+	}{
+		{[]dataprocpb.Component{dataprocpb.Component_SOLR}, nil, ""},
+		{[]dataprocpb.Component{dataprocpb.Component_RANGER}, map[string]string{"dataproc:ranger.kms.key.uri": key, "dataproc:ranger.admin.password.uri": "gs://b/pw"}, "requires the installation of the Solr component"},
+		{both, map[string]string{"dataproc:ranger.admin.password.uri": "gs://b/pw"}, "dataproc:ranger.kms.key.uri"},
+		{both, map[string]string{"dataproc:ranger.kms.key.uri": "k", "dataproc:ranger.admin.password.uri": "gs://b/pw"}, "Invalid value"},
+		{both, map[string]string{"dataproc:ranger.kms.key.uri": key}, "dataproc:ranger.admin.password.uri"},
+		{both, map[string]string{"dataproc:ranger.kms.key.uri": key, "dataproc:ranger.admin.password.uri": "/tmp/pw"}, "gs://"},
+		{both, map[string]string{"dataproc:ranger.kms.key.uri": key, "dataproc:ranger.admin.password.uri": "gs://b/pw"}, ""},
+	} {
+		err := checkRanger(&dataprocpb.SoftwareConfig{OptionalComponents: c.comps, Properties: c.props})
+		switch {
+		case c.want == "" && err != nil:
+			t.Errorf("%v %v: %v", c.comps, c.props, err)
+		case c.want != "" && (status.Code(err) != codes.InvalidArgument || !strings.Contains(err.Error(), c.want)):
+			t.Errorf("%v %v: %v, want INVALID_ARGUMENT with %q", c.comps, c.props, err, c.want)
+		}
+	}
+}
+
+// TestRangerPassword (#2162): a RANGER cluster's admin password is read
+// from dataproc:ranger.admin.password.uri, decrypted with
+// dataproc:ranger.kms.key.uri and given to the engine; one that breaks the
+// image version's rules, or a key that does not decrypt it, fails the
+// cluster with the reason.
+func TestRangerPassword(t *testing.T) {
+	s, eng, st := newClusterServer(t)
+	key := "projects/p/locations/global/keyRings/r/cryptoKeys/k"
+	s.opts.Decrypt = func(_ context.Context, k string, ct []byte) ([]byte, error) {
+		if k != key {
+			return nil, fmt.Errorf("NOT_FOUND: %s", k)
+		}
+		return []byte(strings.TrimPrefix(string(ct), "enc:")), nil
+	}
+	st.objects["gs://b/good"] = []byte("enc:Ranger2026\n")
+	st.objects["gs://b/weak"] = []byte("enc:ranger2026")
+	ctx := context.Background()
+	create := func(name, uri, k string) *dataprocpb.Cluster {
+		t.Helper()
+		op, err := s.CreateCluster(ctx, &dataprocpb.CreateClusterRequest{ProjectId: "p", Region: "us-central1", Cluster: &dataprocpb.Cluster{ClusterName: name,
+			Config: &dataprocpb.ClusterConfig{SoftwareConfig: &dataprocpb.SoftwareConfig{ImageVersion: "2.3",
+				OptionalComponents: []dataprocpb.Component{dataprocpb.Component_SOLR, dataprocpb.Component_RANGER},
+				Properties:         map[string]string{"dataproc:ranger.kms.key.uri": k, "dataproc:ranger.admin.password.uri": uri}}}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		waitOp(t, s, op.Name)
+		c, err := s.GetCluster(ctx, &dataprocpb.GetClusterRequest{ProjectId: "p", Region: "us-central1", ClusterName: name})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	if c := create("good", "gs://b/good", key); c.GetStatus().GetState() != dataprocpb.ClusterStatus_RUNNING {
+		t.Fatalf("good: %v", c.GetStatus())
+	}
+	if got := eng.clusters[len(eng.clusters)-1].spec.RangerPassword; got != "Ranger2026" {
+		t.Errorf("the engine got password %q", got)
+	}
+	for _, c := range []struct{ name, uri, key, want string }{
+		{"weak", "gs://b/weak", key, "one uppercase letter"},
+		{"nokey", "gs://b/good", key + "x", "NOT_FOUND"},
+		{"noobject", "gs://b/none", key, "gs://b/none"},
+	} {
+		got := create(c.name, c.uri, c.key)
+		if got.GetStatus().GetState() != dataprocpb.ClusterStatus_ERROR || !strings.Contains(got.GetStatus().GetDetail(), c.want) {
+			t.Errorf("%s: %v; want ERROR with %q", c.name, got.GetStatus(), c.want)
+		}
+	}
+	if msg := rangerPasswordRule("2.1", "ranger2026"); msg != "" {
+		t.Errorf("2.1 lowercase and digits: %s", msg)
+	}
+	if msg := rangerPasswordRule("2.1", "rangerrr"); msg == "" {
+		t.Errorf("2.1 no digit accepted")
+	}
 }

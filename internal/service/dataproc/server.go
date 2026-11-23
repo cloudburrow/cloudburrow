@@ -110,6 +110,9 @@ type Options struct {
 	// event logs are written to (sparkproc.Docker.History), which the
 	// instance's History Server reads; "" serves no Spark UI for them.
 	HistoryDir string
+	// Decrypt decrypts with the instance's Cloud KMS (the RANGER
+	// component's admin password), or is nil when it serves none.
+	Decrypt func(ctx context.Context, key string, ciphertext []byte) ([]byte, error)
 	// AllowUnconfinedContainers is `up --allow-unconfined-containers`
 	// (#2162): only with it does a cluster run the DOCKER optional
 	// component, whose daemons run with seccomp, AppArmor and the /proc and

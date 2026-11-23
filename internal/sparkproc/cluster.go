@@ -71,6 +71,9 @@ type ClusterSpec struct {
 	// IcebergVersion is the ICEBERG component's version
 	// (dataproc:dataproc.iceberg.version, "" for the image's default).
 	IcebergVersion string
+	// RangerPassword is the RANGER component's admin password, decrypted
+	// from dataproc:ranger.admin.password.uri.
+	RangerPassword string
 }
 
 // Cluster is a running cluster.

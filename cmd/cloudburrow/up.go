@@ -439,6 +439,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	dataprocSvc := newDataprocService(cfg)
 	if dataprocSvc != nil {
 		dataprocSvc.live = boundAddrs
+		dataprocSvc.kms = kmsSvc
 	}
 	dataprocSvc.register(coord)
 	// The Kubernetes Engine API (#1913), in process; its clusters are
