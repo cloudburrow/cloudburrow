@@ -505,14 +505,8 @@ func SetSourceManagerHookServiceAccountAuth(hook string, on bool) error {
 	if ssmState.hooks[hook] == nil {
 		return apierror.NotFound("hook %q not found", hook)
 	}
-	if on {
-		r := ssmState.repos[ssmRepoOf(hook)]
-		if r.GetServiceAccount() == "" {
-			return apierror.FailedPrecondition("service account authentication needs the repository's service account: the repository %s has none", lastSegmentOf(ssmRepoOf(hook)))
-		}
-		ssmExtra.HookAuth[hook] = true
-	} else {
-		delete(ssmExtra.HookAuth, hook)
+	if err := setHookAuthLocked(hook, on); err != nil {
+		return err
 	}
 	saveSSMLocked()
 	return nil

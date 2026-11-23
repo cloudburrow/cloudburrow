@@ -14,12 +14,14 @@ import (
 	"time"
 
 	containeranalysis "cloud.google.com/go/containeranalysis/apiv1"
+	adminpb "cloud.google.com/go/firestore/apiv1/admin/adminpb"
 	iam2 "cloud.google.com/go/iam/apiv2"
 	iamv2 "cloud.google.com/go/iam/apiv2/iampb"
 	iam3 "cloud.google.com/go/iam/apiv3"
 	iamv3 "cloud.google.com/go/iam/apiv3/iampb"
 	ncpb "cloud.google.com/go/networkconnectivity/apiv1/networkconnectivitypb"
 	"cloud.google.com/go/orgpolicy/apiv2/orgpolicypb"
+	ssmpb "cloud.google.com/go/securesourcemanager/apiv1/securesourcemanagerpb"
 	"cloud.google.com/go/storagebatchoperations/apiv1/storagebatchoperationspb"
 	gpb "google.golang.org/genproto/googleapis/grafeas/v1"
 	"google.golang.org/grpc/codes"
@@ -427,7 +429,6 @@ resource "google_iam_workforce_pool_provider" "o" {
 // Creator on the account. The ID token's audience
 // and the JWT's claims are read back, the plan is clean, and destroy
 // removes the account.
-// covers: iamcredentials.projects.serviceAccounts.generateAccessToken, iamcredentials.projects.serviceAccounts.generateIdToken, iamcredentials.projects.serviceAccounts.signJwt
 func TestTerraformServiceAccountAccessToken(t *testing.T) {
 	h := New(t)
 	h.Endpoint(EnvMetadata)
@@ -739,5 +740,139 @@ resource "google_network_connectivity_service_connection_policy" "p" {
 	m.must("destroy", "-auto-approve", "-input=false", "-no-color")
 	if _, err := c.GetServiceConnectionPolicy(ctx, &ncpb.GetServiceConnectionPolicyRequest{Name: name}); status.Code(err) != codes.NotFound {
 		t.Errorf("GetServiceConnectionPolicy after destroy = %v; want NOT_FOUND", err)
+	}
+}
+
+// TestTerraformSecureSourceManagerBranchRuleAndHook (#1578): a branch rule
+// and a webhook on a repository of an instance, all made by the module;
+// the official securesourcemanager client reads them, the plan is clean,
+// the rule's approvals and the hook's events change in place, and destroy
+// removes them. No push happens, so the hook delivers nothing.
+// covers: google.cloud.securesourcemanager.v1.SecureSourceManager/CreateBranchRule, google.cloud.securesourcemanager.v1.SecureSourceManager/GetBranchRule, google.cloud.securesourcemanager.v1.SecureSourceManager/UpdateBranchRule, google.cloud.securesourcemanager.v1.SecureSourceManager/DeleteBranchRule, google.cloud.securesourcemanager.v1.SecureSourceManager/CreateHook, google.cloud.securesourcemanager.v1.SecureSourceManager/GetHook, google.cloud.securesourcemanager.v1.SecureSourceManager/UpdateHook, google.cloud.securesourcemanager.v1.SecureSourceManager/DeleteHook
+func TestTerraformSecureSourceManagerBranchRuleAndHook(t *testing.T) {
+	h := New(t)
+	_ = runClient(t, h) // skips without CLOUDBURROW_TEST_RUN
+	c := ssmClient(t, h)
+	m := newTFModule(t)
+	ctx := h.Context()
+	suffix := strings.TrimPrefix(h.Project(), "cb-test-")
+	repo := runParent(h) + "/repositories/tfbr-" + suffix
+	module := func(approvals int, event string) string {
+		return fmt.Sprintf(`
+resource "google_secure_source_manager_instance" "i" {
+  project         = %[1]q
+  location        = "us-central1"
+  instance_id     = "tfbr-%[2]s"
+  deletion_policy = "DELETE"
+}
+
+resource "google_secure_source_manager_repository" "r" {
+  project         = %[1]q
+  location        = "us-central1"
+  repository_id   = "tfbr-%[2]s"
+  instance        = google_secure_source_manager_instance.i.name
+  deletion_policy = "DELETE"
+}
+
+resource "google_secure_source_manager_branch_rule" "b" {
+  project                 = %[1]q
+  location                = "us-central1"
+  repository_id           = google_secure_source_manager_repository.r.repository_id
+  branch_rule_id          = "tf-main"
+  include_pattern         = "main"
+  require_pull_request    = true
+  minimum_approvals_count = %[3]d
+  minimum_reviews_count   = 1
+  require_linear_history  = true
+}
+
+resource "google_secure_source_manager_hook" "w" {
+  project       = %[1]q
+  location      = "us-central1"
+  repository_id = google_secure_source_manager_repository.r.repository_id
+  hook_id       = "tf-hook"
+  target_uri    = "https://hooks.example.com/ssm"
+  events        = [%[4]q]
+  push_option {
+    branch_filter = "main"
+  }
+}
+`, h.Project(), suffix, approvals, event)
+	}
+	m.write(module(1, "PUSH"))
+	m.must("init", "-input=false", "-no-color")
+	m.apply()
+	read := func(approvals int32, event ssmpb.Hook_HookEventType) {
+		t.Helper()
+		r, err := c.GetBranchRule(ctx, &ssmpb.GetBranchRuleRequest{Name: repo + "/branchRules/tf-main"})
+		if err != nil || r.GetIncludePattern() != "main" || !r.GetRequirePullRequest() || r.GetMinimumApprovalsCount() != approvals || !r.GetRequireLinearHistory() {
+			t.Fatalf("GetBranchRule = %v, %v; want %d approvals", r, err, approvals)
+		}
+		w, err := c.GetHook(ctx, &ssmpb.GetHookRequest{Name: repo + "/hooks/tf-hook"})
+		if err != nil || w.GetTargetUri() != "https://hooks.example.com/ssm" || len(w.GetEvents()) != 1 || w.GetEvents()[0] != event ||
+			w.GetPushOption().GetBranchFilter() != "main" {
+			t.Fatalf("GetHook = %v, %v; want %v", w, err, event)
+		}
+	}
+	read(1, ssmpb.Hook_PUSH)
+	m.planClean()
+	m.write(module(2, "PULL_REQUEST"))
+	m.apply()
+	read(2, ssmpb.Hook_PULL_REQUEST)
+	m.planClean()
+	m.must("destroy", "-auto-approve", "-input=false", "-no-color")
+	if _, err := c.GetBranchRule(ctx, &ssmpb.GetBranchRuleRequest{Name: repo + "/branchRules/tf-main"}); status.Code(err) != codes.NotFound {
+		t.Errorf("GetBranchRule after destroy = %v; want NOT_FOUND", err)
+	}
+}
+
+// TestTerraformFirestoreUserCreds (#1578): user credentials of an
+// Enterprise edition database for its MongoDB compatibility, made by the
+// module with the database; the official admin client reads them, the
+// generated password is in the state and never in the read, the plan is
+// clean, and destroy removes them with the database.
+// covers: google.firestore.admin.v1.FirestoreAdmin/CreateUserCreds, google.firestore.admin.v1.FirestoreAdmin/GetUserCreds, google.firestore.admin.v1.FirestoreAdmin/DeleteUserCreds
+func TestTerraformFirestoreUserCreds(t *testing.T) {
+	h := New(t)
+	h.Endpoint(EnvFirestore)
+	c := firestoreAdmin(t, h)
+	m := newTFModule(t)
+	ctx := h.Context()
+	db := tfID("tf-ent-", 30)
+	m.write(fmt.Sprintf(`
+resource "google_firestore_database" "d" {
+  project                 = %[1]q
+  name                    = %[2]q
+  location_id             = "nam5"
+  type                    = "FIRESTORE_NATIVE"
+  database_edition        = "ENTERPRISE"
+  delete_protection_state = "DELETE_PROTECTION_DISABLED"
+  deletion_policy         = "DELETE"
+}
+
+resource "google_firestore_user_creds" "u" {
+  project  = %[1]q
+  database = google_firestore_database.d.name
+  name     = "tf-user"
+}
+
+output "has_password" {
+  value = nonsensitive(length(google_firestore_user_creds.u.secure_password) > 0)
+}
+`, h.Project(), db))
+	m.must("init", "-input=false", "-no-color")
+	m.apply()
+	name := "projects/" + h.Project() + "/databases/" + db + "/userCreds/tf-user"
+	uc, err := c.GetUserCreds(ctx, &adminpb.GetUserCredsRequest{Name: name})
+	if err != nil || uc.GetState() != adminpb.UserCreds_ENABLED || uc.GetSecurePassword() != "" {
+		t.Fatalf("GetUserCreds = %v, %v; want ENABLED with no password", uc, err)
+	}
+	if got := m.must("output", "-raw", "has_password"); got != "true" {
+		t.Errorf("the state has no password: %q", got)
+	}
+	m.planClean()
+	m.must("destroy", "-auto-approve", "-input=false", "-no-color")
+	if _, err := c.GetUserCreds(ctx, &adminpb.GetUserCredsRequest{Name: name}); status.Code(err) != codes.NotFound {
+		t.Errorf("GetUserCreds after destroy = %v; want NOT_FOUND", err)
 	}
 }

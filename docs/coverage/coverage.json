@@ -1648,14 +1648,16 @@
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/CreateBranchRule",
         "status": "Verified",
         "tests": [
-          "test/compat/securesourcemanagercontent_test.go:249 TestSecureSourceManagerPullRequestsAndBranchRules"
+          "test/compat/securesourcemanagercontent_test.go:249 TestSecureSourceManagerPullRequestsAndBranchRules",
+          "test/compat/terraform_served1578_test.go:752 TestTerraformSecureSourceManagerBranchRuleAndHook"
         ]
       },
       {
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/CreateHook",
         "status": "Verified",
         "tests": [
-          "test/compat/securesourcemanagerreviews_test.go:128 TestSecureSourceManagerReviewsAndHooks"
+          "test/compat/securesourcemanagerreviews_test.go:128 TestSecureSourceManagerReviewsAndHooks",
+          "test/compat/terraform_served1578_test.go:752 TestTerraformSecureSourceManagerBranchRuleAndHook"
         ]
       },
       {
@@ -1712,14 +1714,16 @@
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/DeleteBranchRule",
         "status": "Verified",
         "tests": [
-          "test/compat/securesourcemanagercontent_test.go:249 TestSecureSourceManagerPullRequestsAndBranchRules"
+          "test/compat/securesourcemanagercontent_test.go:249 TestSecureSourceManagerPullRequestsAndBranchRules",
+          "test/compat/terraform_served1578_test.go:752 TestTerraformSecureSourceManagerBranchRuleAndHook"
         ]
       },
       {
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/DeleteHook",
         "status": "Verified",
         "tests": [
-          "test/compat/securesourcemanagerreviews_test.go:128 TestSecureSourceManagerReviewsAndHooks"
+          "test/compat/securesourcemanagerreviews_test.go:128 TestSecureSourceManagerReviewsAndHooks",
+          "test/compat/terraform_served1578_test.go:752 TestTerraformSecureSourceManagerBranchRuleAndHook"
         ]
       },
       {
@@ -1784,14 +1788,16 @@
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/GetBranchRule",
         "status": "Verified",
         "tests": [
-          "test/compat/securesourcemanagercontent_test.go:249 TestSecureSourceManagerPullRequestsAndBranchRules"
+          "test/compat/securesourcemanagercontent_test.go:249 TestSecureSourceManagerPullRequestsAndBranchRules",
+          "test/compat/terraform_served1578_test.go:752 TestTerraformSecureSourceManagerBranchRuleAndHook"
         ]
       },
       {
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/GetHook",
         "status": "Verified",
         "tests": [
-          "test/compat/securesourcemanagerreviews_test.go:128 TestSecureSourceManagerReviewsAndHooks"
+          "test/compat/securesourcemanagerreviews_test.go:128 TestSecureSourceManagerReviewsAndHooks",
+          "test/compat/terraform_served1578_test.go:752 TestTerraformSecureSourceManagerBranchRuleAndHook"
         ]
       },
       {
@@ -1969,14 +1975,16 @@
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/UpdateBranchRule",
         "status": "Verified",
         "tests": [
-          "test/compat/securesourcemanagercontent_test.go:249 TestSecureSourceManagerPullRequestsAndBranchRules"
+          "test/compat/securesourcemanagercontent_test.go:249 TestSecureSourceManagerPullRequestsAndBranchRules",
+          "test/compat/terraform_served1578_test.go:752 TestTerraformSecureSourceManagerBranchRuleAndHook"
         ]
       },
       {
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/UpdateHook",
         "status": "Verified",
         "tests": [
-          "test/compat/securesourcemanagerreviews_test.go:128 TestSecureSourceManagerReviewsAndHooks"
+          "test/compat/securesourcemanagerreviews_test.go:128 TestSecureSourceManagerReviewsAndHooks",
+          "test/compat/terraform_served1578_test.go:752 TestTerraformSecureSourceManagerBranchRuleAndHook"
         ]
       },
       {
@@ -2593,7 +2601,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/containeranalysis_test.go:290 TestContainerAnalysisNotesAndOccurrences",
-          "test/compat/iamenforcementround12_source_1879_test.go:271 TestIAMEnforcementContainerAnalysis"
+          "test/compat/iamenforcementround12_source_1879_test.go:271 TestIAMEnforcementContainerAnalysis",
+          "test/compat/terraform_served1578_test.go:609 TestTerraformContainerAnalysisNoteAndOccurrence"
         ]
       },
       {
@@ -2601,14 +2610,16 @@
         "status": "Verified",
         "tests": [
           "test/compat/containeranalysis_test.go:290 TestContainerAnalysisNotesAndOccurrences",
-          "test/compat/iamenforcementround12_source_1879_test.go:271 TestIAMEnforcementContainerAnalysis"
+          "test/compat/iamenforcementround12_source_1879_test.go:271 TestIAMEnforcementContainerAnalysis",
+          "test/compat/terraform_served1578_test.go:609 TestTerraformContainerAnalysisNoteAndOccurrence"
         ]
       },
       {
         "method": "grafeas.v1.Grafeas/DeleteNote",
         "status": "Verified",
         "tests": [
-          "test/compat/containeranalysis_test.go:290 TestContainerAnalysisNotesAndOccurrences"
+          "test/compat/containeranalysis_test.go:290 TestContainerAnalysisNotesAndOccurrences",
+          "test/compat/terraform_served1578_test.go:609 TestTerraformContainerAnalysisNoteAndOccurrence"
         ]
       },
       {
@@ -2616,7 +2627,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/containeranalysis_test.go:290 TestContainerAnalysisNotesAndOccurrences",
-          "test/compat/iamenforcementround12_source_1879_test.go:271 TestIAMEnforcementContainerAnalysis"
+          "test/compat/iamenforcementround12_source_1879_test.go:271 TestIAMEnforcementContainerAnalysis",
+          "test/compat/terraform_served1578_test.go:609 TestTerraformContainerAnalysisNoteAndOccurrence"
         ]
       },
       {
@@ -2624,14 +2636,16 @@
         "status": "Verified",
         "tests": [
           "test/compat/containeranalysis_test.go:150 TestArtifactRegistryVulnerabilityScanning",
-          "test/compat/iamenforcementround12_source_1879_test.go:271 TestIAMEnforcementContainerAnalysis"
+          "test/compat/iamenforcementround12_source_1879_test.go:271 TestIAMEnforcementContainerAnalysis",
+          "test/compat/terraform_served1578_test.go:609 TestTerraformContainerAnalysisNoteAndOccurrence"
         ]
       },
       {
         "method": "grafeas.v1.Grafeas/GetOccurrence",
         "status": "Verified",
         "tests": [
-          "test/compat/containeranalysis_test.go:150 TestArtifactRegistryVulnerabilityScanning"
+          "test/compat/containeranalysis_test.go:150 TestArtifactRegistryVulnerabilityScanning",
+          "test/compat/terraform_served1578_test.go:609 TestTerraformContainerAnalysisNoteAndOccurrence"
         ]
       },
       {
@@ -2668,7 +2682,8 @@
         "method": "grafeas.v1.Grafeas/UpdateNote",
         "status": "Verified",
         "tests": [
-          "test/compat/containeranalysis_test.go:290 TestContainerAnalysisNotesAndOccurrences"
+          "test/compat/containeranalysis_test.go:290 TestContainerAnalysisNotesAndOccurrences",
+          "test/compat/terraform_served1578_test.go:609 TestTerraformContainerAnalysisNoteAndOccurrence"
         ]
       },
       {
@@ -4590,14 +4605,16 @@
           "test/compat/orgpolicy1890_test.go:101 TestOrgPolicyV2",
           "test/compat/orgpolicycustom1891_test.go:319 TestOrgPolicyCustomConstraintRefusals",
           "test/compat/orgpolicycustom1891_test.go:85 TestOrgPolicyCustomConstraintsStorage",
-          "test/compat/orgpolicycustom1895_test.go:326 TestGcloudOrgPoliciesCustomConstraintsSchemaJob"
+          "test/compat/orgpolicycustom1895_test.go:326 TestGcloudOrgPoliciesCustomConstraintsSchemaJob",
+          "test/compat/terraform_served1578_test.go:125 TestTerraformOrgPolicyPolicyAndCustomConstraint"
         ]
       },
       {
         "method": "google.cloud.orgpolicy.v2.OrgPolicy/CreatePolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/orgpolicy1890_test.go:101 TestOrgPolicyV2"
+          "test/compat/orgpolicy1890_test.go:101 TestOrgPolicyV2",
+          "test/compat/terraform_served1578_test.go:125 TestTerraformOrgPolicyPolicyAndCustomConstraint"
         ]
       },
       {
@@ -4605,21 +4622,24 @@
         "status": "Verified",
         "tests": [
           "test/compat/orgpolicy1890_test.go:101 TestOrgPolicyV2",
-          "test/compat/orgpolicycustom1891_test.go:85 TestOrgPolicyCustomConstraintsStorage"
+          "test/compat/orgpolicycustom1891_test.go:85 TestOrgPolicyCustomConstraintsStorage",
+          "test/compat/terraform_served1578_test.go:125 TestTerraformOrgPolicyPolicyAndCustomConstraint"
         ]
       },
       {
         "method": "google.cloud.orgpolicy.v2.OrgPolicy/DeletePolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/orgpolicy1890_test.go:101 TestOrgPolicyV2"
+          "test/compat/orgpolicy1890_test.go:101 TestOrgPolicyV2",
+          "test/compat/terraform_served1578_test.go:125 TestTerraformOrgPolicyPolicyAndCustomConstraint"
         ]
       },
       {
         "method": "google.cloud.orgpolicy.v2.OrgPolicy/GetCustomConstraint",
         "status": "Verified",
         "tests": [
-          "test/compat/orgpolicy1890_test.go:101 TestOrgPolicyV2"
+          "test/compat/orgpolicy1890_test.go:101 TestOrgPolicyV2",
+          "test/compat/terraform_served1578_test.go:125 TestTerraformOrgPolicyPolicyAndCustomConstraint"
         ]
       },
       {
@@ -4633,7 +4653,8 @@
         "method": "google.cloud.orgpolicy.v2.OrgPolicy/GetPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/orgpolicy1890_test.go:101 TestOrgPolicyV2"
+          "test/compat/orgpolicy1890_test.go:101 TestOrgPolicyV2",
+          "test/compat/terraform_served1578_test.go:125 TestTerraformOrgPolicyPolicyAndCustomConstraint"
         ]
       },
       {
@@ -4661,14 +4682,16 @@
         "method": "google.cloud.orgpolicy.v2.OrgPolicy/UpdateCustomConstraint",
         "status": "Verified",
         "tests": [
-          "test/compat/orgpolicy1890_test.go:101 TestOrgPolicyV2"
+          "test/compat/orgpolicy1890_test.go:101 TestOrgPolicyV2",
+          "test/compat/terraform_served1578_test.go:125 TestTerraformOrgPolicyPolicyAndCustomConstraint"
         ]
       },
       {
         "method": "google.cloud.orgpolicy.v2.OrgPolicy/UpdatePolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/orgpolicy1890_test.go:101 TestOrgPolicyV2"
+          "test/compat/orgpolicy1890_test.go:101 TestOrgPolicyV2",
+          "test/compat/terraform_served1578_test.go:125 TestTerraformOrgPolicyPolicyAndCustomConstraint"
         ]
       },
       {
@@ -4955,7 +4978,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/iamdenypolicies1886_test.go:50 TestIAMEnforcementDenyPolicies",
-          "test/compat/iamenforcementround11_1879_test.go:195 TestIAMEnforcementOwnerRepairs"
+          "test/compat/iamenforcementround11_1879_test.go:195 TestIAMEnforcementOwnerRepairs",
+          "test/compat/terraform_served1578_test.go:203 TestTerraformIAMDenyPolicy"
         ]
       },
       {
@@ -4963,14 +4987,16 @@
         "status": "Verified",
         "tests": [
           "test/compat/iamdenypolicies1886_test.go:50 TestIAMEnforcementDenyPolicies",
-          "test/compat/iamenforcementround11_1879_test.go:195 TestIAMEnforcementOwnerRepairs"
+          "test/compat/iamenforcementround11_1879_test.go:195 TestIAMEnforcementOwnerRepairs",
+          "test/compat/terraform_served1578_test.go:203 TestTerraformIAMDenyPolicy"
         ]
       },
       {
         "method": "google.iam.v2.Policies/GetPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/iamdenypolicies1886_test.go:50 TestIAMEnforcementDenyPolicies"
+          "test/compat/iamdenypolicies1886_test.go:50 TestIAMEnforcementDenyPolicies",
+          "test/compat/terraform_served1578_test.go:203 TestTerraformIAMDenyPolicy"
         ]
       },
       {
@@ -4985,28 +5011,32 @@
         "method": "google.iam.v2.Policies/UpdatePolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/iamdenypolicies1886_test.go:50 TestIAMEnforcementDenyPolicies"
+          "test/compat/iamdenypolicies1886_test.go:50 TestIAMEnforcementDenyPolicies",
+          "test/compat/terraform_served1578_test.go:203 TestTerraformIAMDenyPolicy"
         ]
       },
       {
         "method": "google.iam.v3.PolicyBindings/CreatePolicyBinding",
         "status": "Verified",
         "tests": [
-          "test/compat/iampab2057_test.go:34 TestIAMEnforcementPrincipalAccessBoundary"
+          "test/compat/iampab2057_test.go:34 TestIAMEnforcementPrincipalAccessBoundary",
+          "test/compat/terraform_served1578_test.go:270 TestTerraformIAMPrincipalAccessBoundary"
         ]
       },
       {
         "method": "google.iam.v3.PolicyBindings/DeletePolicyBinding",
         "status": "Verified",
         "tests": [
-          "test/compat/iampab2057_test.go:34 TestIAMEnforcementPrincipalAccessBoundary"
+          "test/compat/iampab2057_test.go:34 TestIAMEnforcementPrincipalAccessBoundary",
+          "test/compat/terraform_served1578_test.go:270 TestTerraformIAMPrincipalAccessBoundary"
         ]
       },
       {
         "method": "google.iam.v3.PolicyBindings/GetPolicyBinding",
         "status": "Verified",
         "tests": [
-          "test/compat/iampab2057_test.go:34 TestIAMEnforcementPrincipalAccessBoundary"
+          "test/compat/iampab2057_test.go:34 TestIAMEnforcementPrincipalAccessBoundary",
+          "test/compat/terraform_served1578_test.go:270 TestTerraformIAMPrincipalAccessBoundary"
         ]
       },
       {
@@ -5027,28 +5057,32 @@
         "method": "google.iam.v3.PolicyBindings/UpdatePolicyBinding",
         "status": "Verified",
         "tests": [
-          "test/compat/iampab2057_test.go:34 TestIAMEnforcementPrincipalAccessBoundary"
+          "test/compat/iampab2057_test.go:34 TestIAMEnforcementPrincipalAccessBoundary",
+          "test/compat/terraform_served1578_test.go:270 TestTerraformIAMPrincipalAccessBoundary"
         ]
       },
       {
         "method": "google.iam.v3.PrincipalAccessBoundaryPolicies/CreatePrincipalAccessBoundaryPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/iampab2057_test.go:34 TestIAMEnforcementPrincipalAccessBoundary"
+          "test/compat/iampab2057_test.go:34 TestIAMEnforcementPrincipalAccessBoundary",
+          "test/compat/terraform_served1578_test.go:270 TestTerraformIAMPrincipalAccessBoundary"
         ]
       },
       {
         "method": "google.iam.v3.PrincipalAccessBoundaryPolicies/DeletePrincipalAccessBoundaryPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/iampab2057_test.go:34 TestIAMEnforcementPrincipalAccessBoundary"
+          "test/compat/iampab2057_test.go:34 TestIAMEnforcementPrincipalAccessBoundary",
+          "test/compat/terraform_served1578_test.go:270 TestTerraformIAMPrincipalAccessBoundary"
         ]
       },
       {
         "method": "google.iam.v3.PrincipalAccessBoundaryPolicies/GetPrincipalAccessBoundaryPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/iampab2057_test.go:34 TestIAMEnforcementPrincipalAccessBoundary"
+          "test/compat/iampab2057_test.go:34 TestIAMEnforcementPrincipalAccessBoundary",
+          "test/compat/terraform_served1578_test.go:270 TestTerraformIAMPrincipalAccessBoundary"
         ]
       },
       {
@@ -5069,7 +5103,8 @@
         "method": "google.iam.v3.PrincipalAccessBoundaryPolicies/UpdatePrincipalAccessBoundaryPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/iampab2057_test.go:34 TestIAMEnforcementPrincipalAccessBoundary"
+          "test/compat/iampab2057_test.go:34 TestIAMEnforcementPrincipalAccessBoundary",
+          "test/compat/terraform_served1578_test.go:270 TestTerraformIAMPrincipalAccessBoundary"
         ]
       }
     ]
@@ -10542,7 +10577,8 @@
         "method": "google.firestore.admin.v1.FirestoreAdmin/CreateUserCreds",
         "status": "Verified",
         "tests": [
-          "test/compat/firestorepipeline_test.go:173 TestFirestoreAdminUserCreds"
+          "test/compat/firestorepipeline_test.go:173 TestFirestoreAdminUserCreds",
+          "test/compat/terraform_served1578_test.go:835 TestTerraformFirestoreUserCreds"
         ]
       },
       {
@@ -10580,7 +10616,8 @@
         "method": "google.firestore.admin.v1.FirestoreAdmin/DeleteUserCreds",
         "status": "Verified",
         "tests": [
-          "test/compat/firestorepipeline_test.go:173 TestFirestoreAdminUserCreds"
+          "test/compat/firestorepipeline_test.go:173 TestFirestoreAdminUserCreds",
+          "test/compat/terraform_served1578_test.go:835 TestTerraformFirestoreUserCreds"
         ]
       },
       {
@@ -10663,7 +10700,8 @@
         "method": "google.firestore.admin.v1.FirestoreAdmin/GetUserCreds",
         "status": "Verified",
         "tests": [
-          "test/compat/firestorepipeline_test.go:173 TestFirestoreAdminUserCreds"
+          "test/compat/firestorepipeline_test.go:173 TestFirestoreAdminUserCreds",
+          "test/compat/terraform_served1578_test.go:835 TestTerraformFirestoreUserCreds"
         ]
       },
       {
@@ -16056,7 +16094,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/networkconnectivity2141_test.go:397 TestNetworkConnectivityPoliciesThroughTheRESTClient",
-          "test/compat/networkconnectivity2141_test.go:88 TestNetworkConnectivityServiceConnectionPolicies"
+          "test/compat/networkconnectivity2141_test.go:88 TestNetworkConnectivityServiceConnectionPolicies",
+          "test/compat/terraform_served1578_test.go:685 TestTerraformNetworkConnectivityServiceConnectionPolicy"
         ]
       },
       {
@@ -16085,7 +16124,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/networkconnectivity2141_test.go:397 TestNetworkConnectivityPoliciesThroughTheRESTClient",
-          "test/compat/networkconnectivity2141_test.go:88 TestNetworkConnectivityServiceConnectionPolicies"
+          "test/compat/networkconnectivity2141_test.go:88 TestNetworkConnectivityServiceConnectionPolicies",
+          "test/compat/terraform_served1578_test.go:685 TestTerraformNetworkConnectivityServiceConnectionPolicy"
         ]
       },
       {
@@ -16114,7 +16154,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/networkconnectivity2141_test.go:397 TestNetworkConnectivityPoliciesThroughTheRESTClient",
-          "test/compat/networkconnectivity2141_test.go:88 TestNetworkConnectivityServiceConnectionPolicies"
+          "test/compat/networkconnectivity2141_test.go:88 TestNetworkConnectivityServiceConnectionPolicies",
+          "test/compat/terraform_served1578_test.go:685 TestTerraformNetworkConnectivityServiceConnectionPolicy"
         ]
       },
       {
@@ -16172,7 +16213,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/networkconnectivity2141_test.go:397 TestNetworkConnectivityPoliciesThroughTheRESTClient",
-          "test/compat/networkconnectivity2141_test.go:88 TestNetworkConnectivityServiceConnectionPolicies"
+          "test/compat/networkconnectivity2141_test.go:88 TestNetworkConnectivityServiceConnectionPolicies",
+          "test/compat/terraform_served1578_test.go:685 TestTerraformNetworkConnectivityServiceConnectionPolicy"
         ]
       },
       {
@@ -16441,7 +16483,8 @@
           "test/compat/storagejobs_batch_test.go:198 TestStorageBatchOperationsJobs",
           "test/compat/storagejobs_batch_test.go:362 TestStorageBatchOperationsRefusals",
           "test/compat/storagejobs_batch_test.go:426 TestStorageBatchOperationsRewriteToKMSKey",
-          "test/compat/storagejobs_cli_test.go:76 TestGcloudStorageBatchOperations"
+          "test/compat/storagejobs_cli_test.go:76 TestGcloudStorageBatchOperations",
+          "test/compat/terraform_served1578_test.go:543 TestTerraformStorageBatchOperationsJob"
         ]
       },
       {
@@ -16449,7 +16492,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/storagejobs_batch_test.go:198 TestStorageBatchOperationsJobs",
-          "test/compat/storagejobs_cli_test.go:76 TestGcloudStorageBatchOperations"
+          "test/compat/storagejobs_cli_test.go:76 TestGcloudStorageBatchOperations",
+          "test/compat/terraform_served1578_test.go:543 TestTerraformStorageBatchOperationsJob"
         ]
       },
       {
@@ -16459,7 +16503,8 @@
           "test/compat/iamenforcementround12_backup_1879_test.go:142 TestIAMEnforcementStorageCompanions",
           "test/compat/storagejobs_batch_test.go:198 TestStorageBatchOperationsJobs",
           "test/compat/storagejobs_batch_test.go:426 TestStorageBatchOperationsRewriteToKMSKey",
-          "test/compat/storagejobs_cli_test.go:76 TestGcloudStorageBatchOperations"
+          "test/compat/storagejobs_cli_test.go:76 TestGcloudStorageBatchOperations",
+          "test/compat/terraform_served1578_test.go:543 TestTerraformStorageBatchOperationsJob"
         ]
       },
       {
@@ -17547,7 +17592,8 @@
           "test/compat/cloudidentity2103_test.go:76 TestCloudIdentityDynamicGroups2103",
           "test/compat/cloudidentityrules_test.go:32 TestCloudIdentityMembershipRules",
           "test/compat/cloudidentitysearch1812_test.go:178 TestCloudIdentityInitialOwner1812",
-          "test/compat/iamenforcementround12_identity_1879_test.go:110 TestIAMEnforcementCloudIdentity"
+          "test/compat/iamenforcementround12_identity_1879_test.go:110 TestIAMEnforcementCloudIdentity",
+          "test/compat/terraform_served1578_test.go:52 TestTerraformCloudIdentityGroupAndMembership"
         ]
       },
       {
@@ -17555,7 +17601,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudidentity1812_test.go:64 TestCloudIdentityGroups1812",
-          "test/compat/iamenforcementround12_identity_1879_test.go:110 TestIAMEnforcementCloudIdentity"
+          "test/compat/iamenforcementround12_identity_1879_test.go:110 TestIAMEnforcementCloudIdentity",
+          "test/compat/terraform_served1578_test.go:52 TestTerraformCloudIdentityGroupAndMembership"
         ]
       },
       {
@@ -17564,7 +17611,8 @@
         "tests": [
           "test/compat/cloudidentity1812_test.go:64 TestCloudIdentityGroups1812",
           "test/compat/cloudidentity2103_test.go:76 TestCloudIdentityDynamicGroups2103",
-          "test/compat/iamenforcementround12_identity_1879_test.go:110 TestIAMEnforcementCloudIdentity"
+          "test/compat/iamenforcementround12_identity_1879_test.go:110 TestIAMEnforcementCloudIdentity",
+          "test/compat/terraform_served1578_test.go:52 TestTerraformCloudIdentityGroupAndMembership"
         ]
       },
       {
@@ -17606,21 +17654,24 @@
           "test/compat/cloudidentity2103_test.go:189 TestCloudIdentityMappedGroups2103",
           "test/compat/cloudidentity2103_test.go:76 TestCloudIdentityDynamicGroups2103",
           "test/compat/cloudidentityrules_test.go:32 TestCloudIdentityMembershipRules",
-          "test/compat/iamenforcementround12_identity_1879_test.go:110 TestIAMEnforcementCloudIdentity"
+          "test/compat/iamenforcementround12_identity_1879_test.go:110 TestIAMEnforcementCloudIdentity",
+          "test/compat/terraform_served1578_test.go:52 TestTerraformCloudIdentityGroupAndMembership"
         ]
       },
       {
         "method": "cloudidentity.groups.memberships.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudidentity1812_test.go:64 TestCloudIdentityGroups1812"
+          "test/compat/cloudidentity1812_test.go:64 TestCloudIdentityGroups1812",
+          "test/compat/terraform_served1578_test.go:52 TestTerraformCloudIdentityGroupAndMembership"
         ]
       },
       {
         "method": "cloudidentity.groups.memberships.get",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudidentity1812_test.go:64 TestCloudIdentityGroups1812"
+          "test/compat/cloudidentity1812_test.go:64 TestCloudIdentityGroups1812",
+          "test/compat/terraform_served1578_test.go:52 TestTerraformCloudIdentityGroupAndMembership"
         ]
       },
       {
@@ -17684,7 +17735,8 @@
           "test/compat/cloudidentity1812_test.go:64 TestCloudIdentityGroups1812",
           "test/compat/cloudidentity2103_test.go:76 TestCloudIdentityDynamicGroups2103",
           "test/compat/cloudidentityrules_test.go:32 TestCloudIdentityMembershipRules",
-          "test/compat/iamenforcementround12_identity_1879_test.go:110 TestIAMEnforcementCloudIdentity"
+          "test/compat/iamenforcementround12_identity_1879_test.go:110 TestIAMEnforcementCloudIdentity",
+          "test/compat/terraform_served1578_test.go:52 TestTerraformCloudIdentityGroupAndMembership"
         ]
       },
       {
@@ -18531,7 +18583,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/iamworkforceidentity2056_test.go:523 TestGcloudIAMWorkforcePools",
-          "test/compat/iamworkforceidentity2056_test.go:54 TestWorkforcePools"
+          "test/compat/iamworkforceidentity2056_test.go:54 TestWorkforcePools",
+          "test/compat/terraform_served1578_test.go:357 TestTerraformIAMWorkforcePool"
         ]
       },
       {
@@ -18539,7 +18592,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/iamworkforceidentity2056_test.go:523 TestGcloudIAMWorkforcePools",
-          "test/compat/iamworkforceidentity2056_test.go:54 TestWorkforcePools"
+          "test/compat/iamworkforceidentity2056_test.go:54 TestWorkforcePools",
+          "test/compat/terraform_served1578_test.go:357 TestTerraformIAMWorkforcePool"
         ]
       },
       {
@@ -18548,7 +18602,8 @@
         "tests": [
           "test/compat/iamworkforceidentity2056_test.go:523 TestGcloudIAMWorkforcePools",
           "test/compat/iamworkforceidentity2056_test.go:54 TestWorkforcePools",
-          "test/compat/iamworkforceidentity2056_test.go:580 TestIAMEnforcementWorkforceIdentity"
+          "test/compat/iamworkforceidentity2056_test.go:580 TestIAMEnforcementWorkforceIdentity",
+          "test/compat/terraform_served1578_test.go:357 TestTerraformIAMWorkforcePool"
         ]
       },
       {
@@ -18581,7 +18636,8 @@
         "tests": [
           "test/compat/iamworkforceidentity2056_test.go:523 TestGcloudIAMWorkforcePools",
           "test/compat/iamworkforceidentity2056_test.go:54 TestWorkforcePools",
-          "test/compat/iamworkforceidentity2056_test.go:580 TestIAMEnforcementWorkforceIdentity"
+          "test/compat/iamworkforceidentity2056_test.go:580 TestIAMEnforcementWorkforceIdentity",
+          "test/compat/terraform_served1578_test.go:357 TestTerraformIAMWorkforcePool"
         ]
       },
       {
@@ -18589,7 +18645,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/iamworkforceidentity2056_test.go:523 TestGcloudIAMWorkforcePools",
-          "test/compat/iamworkforceidentity2056_test.go:54 TestWorkforcePools"
+          "test/compat/iamworkforceidentity2056_test.go:54 TestWorkforcePools",
+          "test/compat/terraform_served1578_test.go:357 TestTerraformIAMWorkforcePool"
         ]
       },
       {
@@ -18597,7 +18654,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/iamworkforceidentity2056_test.go:523 TestGcloudIAMWorkforcePools",
-          "test/compat/iamworkforceidentity2056_test.go:54 TestWorkforcePools"
+          "test/compat/iamworkforceidentity2056_test.go:54 TestWorkforcePools",
+          "test/compat/terraform_served1578_test.go:357 TestTerraformIAMWorkforcePool"
         ]
       },
       {
@@ -18605,7 +18663,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/iamworkforceidentity2056_test.go:523 TestGcloudIAMWorkforcePools",
-          "test/compat/iamworkforceidentity2056_test.go:54 TestWorkforcePools"
+          "test/compat/iamworkforceidentity2056_test.go:54 TestWorkforcePools",
+          "test/compat/terraform_served1578_test.go:357 TestTerraformIAMWorkforcePool"
         ]
       },
       {
@@ -18672,7 +18731,8 @@
         "tests": [
           "test/compat/iamworkforceidentity2056_test.go:523 TestGcloudIAMWorkforcePools",
           "test/compat/iamworkforceidentity2056_test.go:54 TestWorkforcePools",
-          "test/compat/iamworkforcescimapi2068_test.go:83 TestWorkforceScimProvisioning"
+          "test/compat/iamworkforcescimapi2068_test.go:83 TestWorkforceScimProvisioning",
+          "test/compat/terraform_served1578_test.go:357 TestTerraformIAMWorkforcePool"
         ]
       },
       {
