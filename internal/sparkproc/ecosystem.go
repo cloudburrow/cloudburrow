@@ -68,6 +68,8 @@ type Ecosystem struct {
 	// Metastore42 is the Hive Metastore 4.2 image whose Iceberg REST
 	// catalog is image 3.0's default_iceberg catalog (ICEBERG on 3.0).
 	Metastore42 string
+	// Zeppelin30 is image 3.0's Zeppelin image.
+	Zeppelin30 string
 	// Docker is the DOCKER component's dind-rootless image of an image
 	// version (MAJOR.MINOR), "" when not served.
 	Docker func(imageVersion string) string
@@ -435,10 +437,14 @@ func (c *Cluster) startComponents(ctx context.Context) error {
 		}
 	}
 	if c.has(ComponentZeppelin) {
-		if err := need(e.Zeppelin, "Zeppelin"); err != nil {
+		image, spark4 := e.Zeppelin, c.spec.ImageVersion >= "3.0"
+		if spark4 {
+			image = e.Zeppelin30
+		}
+		if err := need(image, "Zeppelin"); err != nil {
 			return err
 		}
-		if err := c.startZeppelin(ctx, e.Zeppelin); err != nil {
+		if err := c.startZeppelin(ctx, image, spark4); err != nil {
 			return err
 		}
 	}

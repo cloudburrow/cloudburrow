@@ -22,6 +22,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 	"github.com/cloudburrow/cloudburrow/internal/resource"
 	"github.com/cloudburrow/cloudburrow/internal/service/dataproc"
+	"github.com/cloudburrow/cloudburrow/internal/service/gke"
 	"github.com/cloudburrow/cloudburrow/internal/sparkproc"
 	"github.com/cloudburrow/cloudburrow/internal/telemetry"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
@@ -49,6 +50,9 @@ type dataprocService struct {
 	live func() map[string]string
 	// caller is a request's principal, a resource's creator.
 	caller func(ctx context.Context) string
+	// gke is the Kubernetes Engine API, Dataproc on GKE's clusters' (nil:
+	// none served).
+	gke    func() *gke.Server
 	server *grpctransport.Server
 	api    *dataproc.Server
 }
@@ -104,6 +108,9 @@ func (s *dataprocService) Start(ctx context.Context) error {
 		}
 	}
 	opts.InstanceID = s.cfg.Name
+	if s.gke != nil {
+		opts.Virtual = dataprocGKE{api: s.gke, dir: filepath.Join(s.cfg.InstanceDir(), "dataproc-gke")}
+	}
 	if s.live != nil && serviceEnabled(s.cfg, config.ServiceStorage) {
 		opts.Storage = &dataprocStorage{live: s.live}
 	}

@@ -5,7 +5,10 @@ package sparkproc
 // image (Apache-2.0, pinned by digest in dependencies.json). The image is
 // published for linux/amd64 only, so on an arm64 machine Docker runs it
 // under emulation, and it is 3.7 GB compressed (12 GB unpacked); it is
-// pulled on the first cluster with the component.
+// pulled on the first cluster with the component. Image 3.0's Zeppelin
+// is 0.12.0; its official image is linux/amd64 only and its Java 11
+// cannot run Spark 4.1's driver, so 3.0 runs 0.12.1, the patch release
+// published for both architectures (startZeppelin).
 //
 // As on a Dataproc cluster, Zeppelin runs on the master (its container
 // shares the master's network) at its Component Gateway path
@@ -31,10 +34,24 @@ import (
 )
 
 // startZeppelin starts Zeppelin and configures its Spark interpreter.
-func (c *Cluster) startZeppelin(ctx context.Context, image string) error {
+// On image 3.0 (Spark 4.1, which needs Java 17 or later) image is
+// Zeppelin 0.12.1, whose official image is published for linux/arm64 as
+// well as linux/amd64, so it runs natively; its Spark is the cluster's
+// Spark image mounted read-only (a Docker image mount), whose Java runs
+// the interpreter (its JAVA_HOME interpreter property: Zeppelin passes
+// upper-case properties to the interpreter's process as its environment).
+func (c *Cluster) startZeppelin(ctx context.Context, image string, spark4 bool) error {
 	home := filepath.Join(c.dir, "zeppelin-spark")
-	if out, err := c.d.docker(ctx, "cp", c.master+":/opt/spark", home); err != nil {
-		return &Unavailable{Msg: "copy the cluster's Spark for Zeppelin: " + out}
+	sparkHome := "/cb-spark"
+	var mounts []string
+	if spark4 {
+		sparkHome = "/cb-sparkimg/opt/spark"
+		mounts = []string{"--mount", "type=image,source=" + c.rt.Image + ",target=/cb-sparkimg"}
+	} else {
+		if out, err := c.d.docker(ctx, "cp", c.master+":/opt/spark", home); err != nil {
+			return &Unavailable{Msg: "copy the cluster's Spark for Zeppelin: " + out}
+		}
+		mounts = []string{"--platform", "linux/amd64", "-v", home + ":/cb-spark:ro"}
 	}
 	master := c.nodeAlias(-1)
 	base := strings.TrimSuffix(c.spec.GatewayBase, "/") + "/zeppelin"
@@ -53,14 +70,13 @@ func (c *Cluster) startZeppelin(ctx context.Context, image string) error {
 		submit += " --conf " + k + "=" + v
 	}
 	submit += " --jars " + strings.Join(jars, ",")
-	args := []string{"--platform", "linux/amd64", "-v", home + ":/cb-spark:ro", "-v", c.jar + ":/cb-connector/spark-bigquery.jar:ro",
-		"-v", c.HistoryDir() + ":/cb-history"}
+	args := append(mounts, "-v", c.jar+":/cb-connector/spark-bigquery.jar:ro", "-v", c.HistoryDir()+":/cb-history")
 	args = append(args, c.lakeMounts...)
 	args = append(args, "-e", "ZEPPELIN_ADDR=0.0.0.0", "-e", "ZEPPELIN_PORT=8080",
 		// Its web apps unpack under the context path, which the image's
 		// user cannot write in /opt/zeppelin/webapps.
 		"-e", "ZEPPELIN_WAR_TEMPDIR=/tmp/zeppelin-webapps", "-e", "ZEPPELIN_SERVER_CONTEXT_PATH="+base,
-		"-e", "ZEPPELIN_MEM=-Xmx1024m", "-e", "SPARK_HOME=/cb-spark", "-e", "SPARK_MASTER=spark://"+master+":7077",
+		"-e", "ZEPPELIN_MEM=-Xmx1024m", "-e", "SPARK_HOME="+sparkHome, "-e", "SPARK_MASTER=spark://"+master+":7077",
 		"-e", "SPARK_SUBMIT_OPTIONS="+submit, "-e", "PYSPARK_PYTHON=python3", image)
 	start := time.Now()
 	if err := c.runComponent(ctx, "zeppelin", "", args...); err != nil {
@@ -69,14 +85,22 @@ func (c *Cluster) startZeppelin(ctx context.Context, image string) error {
 	if err := c.waitLog(ctx, c.component("zeppelin"), regexp.MustCompile(`Done, zeppelin server started`), 10*time.Minute); err != nil {
 		return err
 	}
-	c.d.logf("spark: cluster %s's Zeppelin started in %s (linux/amd64 under emulation)", c.spec.Name, time.Since(start).Round(time.Second))
+	c.d.logf("spark: cluster %s's Zeppelin started in %s", c.spec.Name, time.Since(start).Round(time.Second))
 	addr := c.Web(ctx)["zeppelin"]
 	if addr == "" {
 		return &Unavailable{Msg: "the cluster's Zeppelin port is not published"}
 	}
-	return configureZeppelinSpark(ctx, "http://"+addr+base, map[string]string{
-		"zeppelin.spark.enableSupportedVersionCheck": "false", "zeppelin.spark.useHiveContext": "false",
-		"zeppelin.spark.scala.color": "false"})
+	props := map[string]string{"zeppelin.spark.enableSupportedVersionCheck": "false", "zeppelin.spark.useHiveContext": "false",
+		"zeppelin.spark.scala.color": "false"}
+	if spark4 {
+		props["JAVA_HOME"] = "/cb-sparkimg/opt/java/openjdk"
+		// Spark 4.1's PySpark needs Python 3.9 or later: the image's
+		// conda base Python (its default environment's is 3.7) runs the
+		// driver, the executors the Spark image's python3.
+		props["spark.pyspark.driver.python"] = "/opt/conda/bin/python3.9"
+		props["spark.pyspark.python"] = "python3"
+	}
+	return configureZeppelinSpark(ctx, "http://"+addr+base, props)
 }
 
 // configureZeppelinSpark sets properties of Zeppelin's spark interpreter

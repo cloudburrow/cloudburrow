@@ -1,11 +1,14 @@
 # Almond 0.14.5's class path for Scala 2.13.16 (#2162): every jar of
 # coursier fetch -r jitpack sh.almond:scala-kernel_2.13.16:0.14.5, in its order,
 # by SHA-256 and URL. The kernel image's Dockerfile fetches and checks each.
+# scala-library and scala-reflect are held at 2.13.16, the compiler's: coursier
+# resolves them to 2.13.18, which the 2.13.16 compiler fails with
+# (NoSuchMethodError HasFlags.isPackage).
 199d169d054e4cd46d660024e33b6cda99b13b9a1dd24cb3f5aea5a397456d84 https://repo1.maven.org/maven2/sh/almond/scala-kernel_2.13.16/0.14.5/scala-kernel_2.13.16-0.14.5.jar
 7aefb244065c83550b53a6e62611cd446271af710485162837a41ea2b26e24b2 https://repo1.maven.org/maven2/com/github/alexarchambault/case-app_2.13/2.1.0/case-app_2.13-2.1.0.jar
 56683e225197f6be8e4da8f82d182090c7fd00c33ee3458e3a291161f4c0ce7b https://repo1.maven.org/maven2/io/get-coursier/class-path-util_2.13/0.1.4/class-path-util_2.13-0.1.4.jar
 f953acd468bf2f897f70964f1bc7a5dffdeb45db581799dc959fa32f7fb3b405 https://repo1.maven.org/maven2/org/scalameta/scalafmt-dynamic_2.13/3.9.6/scalafmt-dynamic_2.13-3.9.6.jar
-4e85d96ff7bc7dc627985523c3541b9917aaa08e956391380c42db21a2c4e5a0 https://repo1.maven.org/maven2/org/scala-lang/scala-library/2.13.18/scala-library-2.13.18.jar
+1ebb2b6f9e4eb4022497c19b1e1e825019c08514f962aaac197145f88ed730f1 https://repo1.maven.org/maven2/org/scala-lang/scala-library/2.13.16/scala-library-2.13.16.jar
 3858d163dd11327de220f4333610fb72a15f4eea8c34ad13f076d21d387aefb2 https://repo1.maven.org/maven2/sh/almond/kernel_2.13/0.14.5/kernel_2.13-0.14.5.jar
 9a259e0fa69886f74a6374a794da49b9483eee98cfdb896009f0535ecc98a51c https://repo1.maven.org/maven2/sh/almond/scala-interpreter_2.13.16/0.14.5/scala-interpreter_2.13.16-0.14.5.jar
 bd4e99aef8267a410b6ed716c487cf5256f801425f158a8c9cbd056eb032d80d https://repo1.maven.org/maven2/com/lihaoyi/sourcecode_2.13/0.4.4/sourcecode_2.13-0.4.4.jar
@@ -30,7 +33,7 @@ a3182060b7a8cd61117217edcf7faeac22dd4617dd1df796f8fffd873c86ead4 https://repo1.m
 198c0212523ba5c31250d58ced2b93a5c5afbef9ee6a5336fe2f64b5730a9871 https://repo1.maven.org/maven2/sh/almond/scala-kernel-api_2.13.16/0.14.5/scala-kernel-api_2.13.16-0.14.5.jar
 8c44a4bd4a0abb7470616491db25f3a8adee6a4a2584e5d575a09a744c8dcf20 https://repo1.maven.org/maven2/sh/almond/shared-directives_2.13/0.14.5/shared-directives_2.13-0.14.5.jar
 1470af390241c2d5fc5b7d0b938e220bb55363f1c078b2f85b9fa01888ba71af https://repo1.maven.org/maven2/sh/almond/toree-hooks_2.13/0.14.5/toree-hooks_2.13-0.14.5.jar
-6935ff1982b2ac93d695f15aa66921be2f602921277afe002f018fd8c7d6e29b https://repo1.maven.org/maven2/org/scala-lang/scala-reflect/2.13.18/scala-reflect-2.13.18.jar
+fb49ccd9cac7464486ab993cda20a3c1569d8ef26f052e897577ad2a4970fb1d https://repo1.maven.org/maven2/org/scala-lang/scala-reflect/2.13.16/scala-reflect-2.13.16.jar
 b822a853c81e2447a76ac2aa560d920f2056efd0c64175ecae9f03e17f805d74 https://repo1.maven.org/maven2/com/chuusai/shapeless_2.13/2.3.13/shapeless_2.13-2.3.13.jar
 d3ef575e3e4979678dc01bf1dcce51021493b4d11fb7f1be8ad982877c16a1c0 https://repo1.maven.org/maven2/org/slf4j/slf4j-api/1.7.36/slf4j-api-1.7.36.jar
 c711e4a08b56f1269253f26a416863e986fcfee6953e461c8e99e5586322f70a https://repo1.maven.org/maven2/org/scodec/scodec-bits_2.13/1.1.38/scodec-bits_2.13-1.1.38.jar

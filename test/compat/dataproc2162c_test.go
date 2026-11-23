@@ -290,12 +290,20 @@ func zeppelinCall(t *testing.T, ctx context.Context, method, u string, body any)
 // (https://docs.cloud.google.com/dataproc/docs/concepts/components/zeppelin),
 // through the official Go client and Zeppelin's REST API at its Component
 // Gateway URL: a note's %spark paragraph runs Scala on the cluster's Spark
-// and a %md paragraph renders; ZEPPELIN on image 3.0 is refused. Zeppelin's
-// image is linux/amd64 only: on arm64 it runs under emulation, and the
-// test logs how long it took to start and to run.
+// and a %md paragraph renders. Image 2.2's Zeppelin (0.10.1) is
+// linux/amd64 only: on arm64 it runs under emulation, and the test logs
+// how long it took to start and to run.
 //
 // covers: google.cloud.dataproc.v1.ClusterController/CreateCluster, google.cloud.dataproc.v1.ClusterController/GetCluster
-func TestDataprocZeppelin(t *testing.T) {
+func TestDataprocZeppelin(t *testing.T) { dataprocZeppelinTest(t, "2.2", "zp-") }
+
+// TestDataprocZeppelin30 (#2162): ZEPPELIN on image 3.0 (Spark 4.1):
+// %spark Scala and %pyspark paragraphs run on the cluster's Spark 4.1.
+//
+// covers: google.cloud.dataproc.v1.ClusterController/CreateCluster, google.cloud.dataproc.v1.ClusterController/GetCluster
+func TestDataprocZeppelin30(t *testing.T) { dataprocZeppelinTest(t, "3.0", "zp30-") }
+
+func dataprocZeppelinTest(t *testing.T, version, prefix string) {
 	h, addr, project := dataprocEnv(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
 	defer cancel()
@@ -306,15 +314,10 @@ func TestDataprocZeppelin(t *testing.T) {
 	t.Cleanup(func() { _ = cc.Close() })
 	const region = "us-central1"
 	suffix := dataprocSuffix(h, 30)
-	if _, err := cc.CreateCluster(ctx, &dataprocpb.CreateClusterRequest{ProjectId: project, Region: region, Cluster: &dataprocpb.Cluster{
-		ProjectId: project, ClusterName: "zp-bad-" + suffix, Config: &dataprocpb.ClusterConfig{SoftwareConfig: &dataprocpb.SoftwareConfig{
-			ImageVersion: "3.0", OptionalComponents: []dataprocpb.Component{dataprocpb.Component_ZEPPELIN}}}}}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("ZEPPELIN on 3.0: %v", err)
-	}
-	name := "zp-" + suffix
+	name := prefix + suffix
 	start := time.Now()
 	dataprocClusterUp(t, ctx, h, cc, project, region, &dataprocpb.Cluster{ProjectId: project, ClusterName: name,
-		Config: &dataprocpb.ClusterConfig{SoftwareConfig: &dataprocpb.SoftwareConfig{ImageVersion: "2.2",
+		Config: &dataprocpb.ClusterConfig{SoftwareConfig: &dataprocpb.SoftwareConfig{ImageVersion: version,
 			Properties: map[string]string{"dataproc:dataproc.allow.zero.workers": "true"}, OptionalComponents: []dataprocpb.Component{dataprocpb.Component_ZEPPELIN}},
 			EndpointConfig: &dataprocpb.EndpointConfig{EnableHttpPortAccess: true}}})
 	t.Logf("the cluster with Zeppelin was RUNNING after %s", time.Since(start).Round(time.Second))
@@ -347,9 +350,14 @@ func TestDataprocZeppelin(t *testing.T) {
 		_ = enc.Encode(res)
 		return b.String()
 	}
-	if out := run(para("%spark\nval n = sc.parallelize(1 to 100, 4).map(_ * 2).sum\nprintln(s\"sum=$n workers=${sc.master}\")")); !strings.Contains(out, "sum=10100.0") ||
+	if out := run(para("%spark\nval n = sc.parallelize(1 to 100, 4).map(_ * 2).sum\nprintln(s\"sum=$n workers=${sc.master} spark=${sc.version}\")")); !strings.Contains(out, "sum=10100.0") ||
 		!strings.Contains(out, "spark://"+name+"-m:7077") {
 		t.Errorf("the %%spark paragraph: %s", out)
+	}
+	if version >= "3.0" {
+		if out := run(para("%pyspark\nprint('py', spark.range(6).count(), spark.version)")); !strings.Contains(out, "py 6 4.1.") {
+			t.Errorf("the %%pyspark paragraph: %s", out)
+		}
 	}
 	if out := run(para("%md\n## Hello from Zeppelin")); !strings.Contains(out, "<h2>Hello from Zeppelin</h2>") {
 		t.Errorf("the %%md paragraph: %s", out)

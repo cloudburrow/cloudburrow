@@ -296,6 +296,9 @@ func (s *Server) submitJob(ctx context.Context, req *dataprocpb.SubmitJobRequest
 	if err != nil {
 		return nil, nil, err
 	}
+	if virtual(c) && !virtualJob(j) {
+		return nil, nil, apierror.InvalidArgument("%s jobs cannot run on Dataproc on GKE cluster %s, which runs Spark, PySpark, SparkR and Spark SQL jobs", JobType(j), c.ClusterName)
+	}
 	if err := checkDriverScheduling(j, c); err != nil {
 		return nil, nil, err
 	}
@@ -304,7 +307,7 @@ func (s *Server) submitJob(ctx context.Context, req *dataprocpb.SubmitJobRequest
 	}
 	j.Placement.ClusterName, j.Placement.ClusterUuid = c.ClusterName, c.ClusterUuid
 	j.JobUuid, j.Done, j.StatusHistory, j.YarnApplications = newUUID(), false, nil, nil
-	control := "gs://" + c.GetConfig().GetConfigBucket() + "/google-cloud-dataproc-metainfo/" + c.ClusterUuid + "/jobs/" + j.Reference.JobId + "/"
+	control := "gs://" + configBucket(c) + "/google-cloud-dataproc-metainfo/" + c.ClusterUuid + "/jobs/" + j.Reference.JobId + "/"
 	j.DriverControlFilesUri, j.DriverOutputResourceUri = control, control+"driveroutput"
 	j.Status = &dataprocpb.JobStatus{State: dataprocpb.JobStatus_PENDING, StateStartTime: timestamppb.New(s.now())}
 	s.jobs[name] = j
@@ -555,7 +558,7 @@ func (s *Server) writeDriverOutput(j *dataprocpb.Job, project, region string, c 
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	bucket := c.GetConfig().GetConfigBucket()
+	bucket := configBucket(c)
 	if bucket == s.StagingBucket(project, region) {
 		if err := s.opts.Storage.EnsureBucket(ctx, project, bucket, region); err != nil {
 			s.logf("dataproc: staging bucket %s: %v", bucket, err)

@@ -444,6 +444,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// The Kubernetes Engine API (#1913), in process; its clusters are
 	// kind clusters of their own.
 	gkeSvc := newGKEService(cfg)
+	if dataprocSvc != nil && gkeSvc != nil {
+		dataprocSvc.gke = gkeSvc.API
+	}
 	// The Compute Engine API's VPC networking (#1936), in process, before
 	// the services that check their networks against it.
 	computeSvc := newComputeService(cfg)

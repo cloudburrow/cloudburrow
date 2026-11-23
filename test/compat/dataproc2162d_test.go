@@ -4,7 +4,6 @@ package compat
 
 import (
 	"context"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -120,9 +119,6 @@ func TestDataprocSparkAndHiveOnYarn(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("the Hive job's output has no %q:\n%s", want, out)
 		}
-	}
-	if os.Getenv("CB_DEBUG_HOLD") != "" && t.Failed() {
-		time.Sleep(10 * time.Minute)
 	}
 }
 

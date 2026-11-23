@@ -190,7 +190,10 @@ func (s *Server) checkCluster(project, region string, c *dataprocpb.Cluster) err
 		if c.GetConfig() != nil {
 			return apierror.InvalidArgument("Exactly one of config and virtual_cluster_config must be specified")
 		}
-		return status.Error(codes.Unimplemented, "Dataproc on GKE virtual clusters (virtual_cluster_config) are not served by CloudBurrow: create a cluster of Compute Engine instances (config)")
+		if len(c.GetLabels()) > maxLabels {
+			return apierror.InvalidArgument("No more than %d labels can be associated with a cluster", maxLabels)
+		}
+		return s.checkVirtual(project, region, c)
 	}
 	if len(c.GetLabels()) > maxLabels {
 		return apierror.InvalidArgument("No more than %d labels can be associated with a cluster", maxLabels)
@@ -332,11 +335,6 @@ var unservedComponents = map[dataprocpb.Component]string{
 	dataprocpb.Component_RANGER: "Apache Ranger publishes no official image",
 }
 
-// zeppelin30 is why ZEPPELIN is not served on image 3.0, whose Zeppelin
-// is 0.12.0: its official image is linux/amd64 only and 3.3 GB
-// compressed, a second one beside 0.10.1's (the machine's disk budget).
-const zeppelin30 = "image 3.0's Zeppelin 0.12.0 is not pinned: its official image is linux/amd64 only and 3.3 GB compressed, beside the 3.7 GB of 2.x's Zeppelin 0.10.1"
-
 // checkComponents checks a cluster's optional components against its
 // image version.
 func checkComponents(mm string, comps []dataprocpb.Component) error {
@@ -355,9 +353,6 @@ func checkComponents(mm string, comps []dataprocpb.Component) error {
 		}
 	}
 	for _, comp := range comps {
-		if comp == dataprocpb.Component_ZEPPELIN && mm >= "3.0" {
-			return status.Errorf(codes.Unimplemented, "The ZEPPELIN optional component is not served by CloudBurrow on image version %s (%s)", mm, zeppelin30)
-		}
 		if !servedComponents[comp] {
 			return status.Errorf(codes.Unimplemented, "The %s optional component is not served by CloudBurrow (%s): a local cluster runs Delta Lake, Docker, Flink, Hive WebHCat, Hudi, Iceberg, Jupyter, Pig, Solr, Trino, Zeppelin and ZooKeeper", comp, unservedComponents[comp])
 		}
@@ -461,12 +456,13 @@ func (s *Server) CreateCluster(ctx context.Context, req *dataprocpb.CreateCluste
 func (s *Server) createClusterLocked(_ context.Context, project, region string, c *dataprocpb.Cluster, key, requestID string) (*longrunningpb.Operation, error) {
 	name := clusterKey(project, region, c.ClusterName)
 	c.ProjectId, c.ClusterUuid, c.StatusHistory = project, newUUID(), nil
-	cfg := c.Config
-	if cfg.ConfigBucket == "" {
-		cfg.ConfigBucket = s.StagingBucket(project, region)
-	}
-	if cfg.TempBucket == "" {
-		cfg.TempBucket = s.TempBucket(project, region)
+	if cfg := c.Config; cfg != nil {
+		if cfg.ConfigBucket == "" {
+			cfg.ConfigBucket = s.StagingBucket(project, region)
+		}
+		if cfg.TempBucket == "" {
+			cfg.TempBucket = s.TempBucket(project, region)
+		}
 	}
 	if c.Labels == nil {
 		c.Labels = map[string]string{}
@@ -479,6 +475,9 @@ func (s *Server) createClusterLocked(_ context.Context, project, region string, 
 	desc := fmt.Sprintf("Create cluster with %d workers", workers)
 	if singleNode(c) {
 		desc = "Create single node cluster"
+	}
+	if virtual(c) {
+		desc = "Create virtual cluster"
 	}
 	op := s.newClusterOpLocked(project, region, c, "CREATE", desc)
 	s.clusters[name] = c
@@ -554,15 +553,25 @@ func (s *Server) startCluster(name, opName string, restart bool) {
 		s.mu.Unlock()
 		return
 	}
-	spec := clusterSpec(c)
+	spec := sparkproc.ClusterSpec{}
+	if !virtual(c) {
+		spec = clusterSpec(c)
+	}
 	s.runOpLocked(opName)
 	s.mu.Unlock()
 	var nodes Nodes
 	var err error
 	ce, ok := s.opts.Engine.(ClusterEngine)
-	if !ok || s.opts.Engine == nil {
+	switch {
+	case virtual(c) && s.opts.Virtual == nil:
+		err = &sparkproc.Unavailable{Msg: "this instance serves no Kubernetes Engine for Dataproc on GKE"}
+	case virtual(c):
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+		nodes, err = s.opts.Virtual.StartVirtual(ctx, virtualSpec(c))
+		cancel()
+	case !ok || s.opts.Engine == nil:
 		err = &sparkproc.Unavailable{Msg: "this instance runs no Apache Spark"}
-	} else {
+	default:
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 		nodes, err = ce.StartCluster(ctx, spec)
 		cancel()
@@ -849,6 +858,9 @@ func (s *Server) UpdateCluster(ctx context.Context, req *dataprocpb.UpdateCluste
 	if c.GetStatus().GetState() != dataprocpb.ClusterStatus_RUNNING {
 		return nil, apierror.FailedPrecondition("Cluster %s is in state %s: the cluster must be RUNNING to be updated", c.ClusterName, c.GetStatus().GetState())
 	}
+	if virtual(c) {
+		return nil, apierror.InvalidArgument("Cluster %s is a Dataproc on GKE cluster, which cannot be updated", c.ClusterName)
+	}
 	nc := clone(c)
 	in := req.GetCluster()
 	if nc.Config == nil {
@@ -999,6 +1011,9 @@ func (s *Server) stopStart(project, region, clusterName, uuid, requestID string,
 		return nil, err
 	}
 	verb := map[bool]string{true: "stop", false: "start"}[stop]
+	if virtual(c) {
+		return nil, apierror.InvalidArgument("Cluster %s is a Dataproc on GKE cluster, which cannot be %s", c.ClusterName, map[bool]string{true: "stopped", false: "started"}[stop])
+	}
 	key := project + "/" + region + "|" + verb + "|" + requestID
 	if requestID != "" {
 		if op, ok := s.ops[s.requests[key]]; ok {
@@ -1156,12 +1171,12 @@ func (s *Server) DiagnoseCluster(ctx context.Context, req *dataprocpb.DiagnoseCl
 	task := newUUID()
 	if dir == "" {
 		// "a task-specific directory in the cluster's staging bucket"
-		dir = "gs://" + c.GetConfig().GetConfigBucket() + "/google-cloud-dataproc-metainfo/" + c.ClusterUuid + "/tasks/" + task
+		dir = "gs://" + configBucket(c) + "/google-cloud-dataproc-metainfo/" + c.ClusterUuid + "/tasks/" + task
 	}
 	uri := dir + "/diagnostic.tar.gz"
 	name := clusterKey(req.GetProjectId(), req.GetRegion(), c.ClusterName)
 	summary := s.diagnoseSummaryLocked(c, req)
-	project, region, bucketMade := req.GetProjectId(), req.GetRegion(), dir == "" || strings.HasPrefix(dir, "gs://"+c.GetConfig().GetConfigBucket()+"/")
+	project, region, bucketMade := req.GetProjectId(), req.GetRegion(), dir == "" || strings.HasPrefix(dir, "gs://"+configBucket(c)+"/")
 	s.save()
 	s.wg.Add(1)
 	go func() {

@@ -94,6 +94,9 @@ type Options struct {
 	// Engine runs the workloads; nil fails each batch and session with
 	// Spark's unavailability.
 	Engine Engine
+	// Virtual starts Dataproc on GKE clusters, or is nil when the
+	// instance serves no Kubernetes Engine.
+	Virtual VirtualEngine
 	// Storage is the instance's Cloud Storage, or nil when it serves none.
 	Storage Storage
 	// ProjectNumber is a project's number, for the staging bucket's name.

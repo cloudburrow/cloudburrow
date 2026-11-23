@@ -53,8 +53,12 @@ const (
 	// docker:24.0-dind-rootless and docker:28.1-dind-rootless, the DOCKER
 	// component's daemons: Docker 24.0 is image 2.2's (and 2.1's), 28.1
 	// 2.3's and 3.0's.
-	dataprocDocker24Image    = "docker@sha256:e162081c6623cdd809c09d549b742fa08d9d3e1da47e55b8d42fe87a676ff80e"
-	dataprocDocker28Image    = "docker@sha256:921cf550ca1fda0b9e6999ffd4a97cc0e248207479c73febbf5bf105108c2fe5"
+	dataprocDocker24Image = "docker@sha256:e162081c6623cdd809c09d549b742fa08d9d3e1da47e55b8d42fe87a676ff80e"
+	dataprocDocker28Image = "docker@sha256:921cf550ca1fda0b9e6999ffd4a97cc0e248207479c73febbf5bf105108c2fe5"
+	// dataprocZeppelin30Image is apache/zeppelin:0.12.1, image 3.0's
+	// Zeppelin (the release notes list 0.12.0, whose image is linux/amd64
+	// only on Java 11; 0.12.1 is published for linux/arm64 too), 2.7 GB.
+	dataprocZeppelin30Image  = "apache/zeppelin@sha256:ebb76b9b98f1b5457cd10c118fc6624269918a3602711a08d9f237673c0c0abb"
 	dataprocMetastore42Image = "apache/hive@sha256:6ec027489678f06404c8e201010c10e6c67e507b77e41b7e69233d7652453fdf"
 
 	gcsConnectorURL  = "https://repo1.maven.org/maven2/com/google/cloud/bigdataoss/gcs-connector/hadoop3-2.2.30/gcs-connector-hadoop3-2.2.30-shaded.jar"
@@ -73,7 +77,7 @@ func dataprocEcosystem(cache, instance string, out io.Writer) *sparkproc.Ecosyst
 	return &sparkproc.Ecosystem{
 		Hive: dataprocHiveImage, Trino: dataprocTrinoImage, Flink: dataprocFlinkImage,
 		Zookeeper: dataprocZookeeperImage, Solr: dataprocSolrImage, Zeppelin: dataprocZeppelinImage,
-		Metastore42: dataprocMetastore42Image,
+		Metastore42: dataprocMetastore42Image, Zeppelin30: dataprocZeppelin30Image,
 		Docker: func(v string) string {
 			if v >= "2.3" {
 				return dataprocDocker28Image

@@ -159,7 +159,7 @@ func (c *Cluster) startIcebergREST(ctx context.Context, image string) error {
 	_ = os.Chmod(filepath.Join(c.dir, "warehouse", "iceberg"), 0o777)
 	if err := c.runComponent(ctx, "iceberg-rest", "", "-v", filepath.Join(c.dir, "warehouse")+":/cb-warehouse",
 		"-e", "DEFAULT_FS=file://", "-e", "HIVE_WAREHOUSE_PATH=/cb-warehouse/iceberg", "-e", "METASTORE_PORT=9084",
-		"-e", "SERVICE_OPTS=-Xmx512m", image); err != nil {
+		"-e", "SERVICE_OPTS=-Xmx512m -Dhive.metastore.warehouse.dir=file:///cb-warehouse/iceberg -Dhive.metastore.warehouse.external.dir=file:///cb-warehouse/iceberg", image); err != nil {
 		return err
 	}
 	return c.waitPort(ctx, c.component("iceberg-rest"), icebergRESTPort, 5*time.Minute)
