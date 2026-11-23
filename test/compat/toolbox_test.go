@@ -374,7 +374,10 @@ func startToolBox() (box *toolBoxState, skip string, err error) {
 
 	suffix := fmt.Sprintf("%d-%d", os.Getpid(), time.Now().UnixNano()%1e6)
 	box.network = "cb-toolbox-" + suffix
-	if out, err := boxDocker(ctx, "network", "create", "--internal", box.network); err != nil {
+	// The label names this process, so a run killed before TestMain's
+	// cleanup (a go test timeout) leaves boxes its owner can find.
+	label := "cloudburrow.compat.toolbox=" + strconv.Itoa(os.Getpid())
+	if out, err := boxDocker(ctx, "network", "create", "--internal", "--label", label, box.network); err != nil {
 		return box, "Docker could not create an --internal network (" + strings.TrimSpace(out) + ")", nil
 	}
 	box.cleanup = append(box.cleanup, func() { _ = exec.Command("docker", "network", "rm", box.network).Run() })
@@ -383,7 +386,7 @@ func startToolBox() (box *toolBoxState, skip string, err error) {
 	}
 
 	box.relay = "cb-toolbox-relay-" + suffix
-	relayRun := append([]string{"run", "-d", "--name", box.relay, "-v", boxDir + ":/box:ro", "--entrypoint", "/box/boxd"}, relayArgs...)
+	relayRun := append([]string{"run", "-d", "--name", box.relay, "--label", label, "-v", boxDir + ":/box:ro", "--entrypoint", "/box/boxd"}, relayArgs...)
 	relayRun = append(relayRun, image, "relay", "-listen", ":7000", "-target", "host.docker.internal:"+muxPort)
 	if _, err := boxDocker(ctx, relayRun...); err != nil {
 		return box, "", fmt.Errorf("start the relay: %v", err)
@@ -394,7 +397,7 @@ func startToolBox() (box *toolBoxState, skip string, err error) {
 	}
 
 	box.container = "cb-toolbox-" + suffix
-	run := []string{"run", "-d", "--name", box.container, "--network", box.network, "--cap-add", "NET_ADMIN",
+	run := []string{"run", "-d", "--name", box.container, "--label", label, "--network", box.network, "--cap-add", "NET_ADMIN",
 		"--sysctl", "net.ipv6.conf.all.disable_ipv6=1",
 		"-e", "BOX_TOKEN=" + token, "-e", "BOX_UID=" + strconv.Itoa(os.Getuid()), "-e", "BOX_GID=" + strconv.Itoa(os.Getgid()),
 		"-v", boxDir + ":/box:ro"}
