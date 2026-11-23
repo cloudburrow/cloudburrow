@@ -157,6 +157,13 @@ func (c *Cluster) yarnConf(jars []string) (yarn, mapred map[string]string) {
 		"mapreduce.reduce.java.opts":                   "-Xmx400m",
 		"mapreduce.job.reduce.slowstart.completedmaps": "0.95",
 	}
+	// With RANGER, the ResourceManager authorizes queue access with
+	// Ranger's YARN plugin (startYARN loads it).
+	if c.has(ComponentRanger) {
+		for k, v := range rangerYarnSite() {
+			yarn[k] = v
+		}
+	}
 	for k, v := range c.confProps("yarn") {
 		yarn[k] = v
 	}
@@ -195,7 +202,23 @@ func (c *Cluster) startYARN(ctx context.Context) error {
 		return &Unavailable{Msg: "Google's Cloud Storage connector for Hadoop is not available: " + err.Error()}
 	}
 	args := append([]string{"--user", "0:0"}, c.yarnMounts(gcs)...)
-	args = append(args, "-e", "HADOOP_CONF_DIR=/cb-conf", "-e", "HADOOP_CLASSPATH=/cb-gcs/gcs-connector.jar",
+	cp := "/cb-gcs/gcs-connector.jar"
+	// With RANGER, the ResourceManager loads Ranger's YARN plugin, as
+	// enable-yarn-plugin.sh installs it on a Dataproc master: its lib
+	// directory on the class path, read from the Ranger Admin image (a
+	// Docker image mount: nothing copied out of it).
+	if c.has(ComponentRanger) {
+		if e.Ranger == nil {
+			return &Unavailable{Msg: "the Spark runner serves no Ranger Admin image"}
+		}
+		image, err := e.Ranger(ctx)
+		if err != nil {
+			return &Unavailable{Msg: "build the Ranger Admin image from the Apache Ranger 2.8.0 source release: " + err.Error()}
+		}
+		args = append(args, "--mount", "type=image,source="+image+",target=/cb-ranger")
+		cp += ":/cb-ranger" + rangerYarnPlugin + "/*"
+	}
+	args = append(args, "-e", "HADOOP_CONF_DIR=/cb-conf", "-e", "HADOOP_CLASSPATH="+cp,
 		"-e", "YARN_RESOURCEMANAGER_HEAPSIZE=512", "-e", "HADOOP_JOB_HISTORYSERVER_HEAPSIZE=256",
 		"--entrypoint", "/bin/bash", e.Hive, "-c",
 		"mkdir -p /cb-shared/staging /cb-shared/history && (/opt/hadoop/bin/mapred historyserver &) && "+

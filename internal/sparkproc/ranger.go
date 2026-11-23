@@ -265,3 +265,45 @@ func (c *Cluster) rangerHiveConf() map[string]map[string]string {
 		},
 	}
 }
+
+// rangerYarnPlugin is where the Ranger Admin image has the YARN plugin's
+// lib directory: its shim and class loader, with the plugin itself in
+// ranger-yarn-plugin-impl beside them, where the shim's class loader
+// looks for it.
+const rangerYarnPlugin = "/opt/ranger/ranger-2.8.0-yarn-plugin/lib"
+
+// rangerYarnSite are the yarn-site.xml properties Ranger's
+// enable-yarn-plugin.sh sets (its yarn-site-changes.cfg): YARN's ACLs on,
+// authorized by Ranger's YARN plugin. A queue access no Ranger policy
+// decides falls back to the queue's own ACLs (ranger.add-yarn-authorization,
+// true by default), so a deny policy denies and the rest is as before.
+func rangerYarnSite() map[string]string {
+	return map[string]string{
+		"yarn.acl.enable":             "true",
+		"yarn.authorization-provider": "org.apache.ranger.authorization.yarn.authorizer.RangerYarnAuthorizer",
+	}
+}
+
+// rangerYarnConf is the ResourceManager's configuration for Ranger's YARN
+// plugin, as enable-yarn-plugin.sh writes it: the plugin's service
+// (yarn-dataproc), the Admin server on the master's 6080, and the audit
+// log to Solr's ranger_audits.
+func (c *Cluster) rangerYarnConf() map[string]map[string]string {
+	return map[string]map[string]string{
+		"ranger-yarn-security.xml": {
+			"ranger.plugin.yarn.service.name":                            "yarn-dataproc",
+			"ranger.plugin.yarn.policy.source.impl":                      "org.apache.ranger.admin.client.RangerAdminRESTClient",
+			"ranger.plugin.yarn.policy.rest.url":                         "http://" + c.nodeAlias(-1) + ":6080",
+			"ranger.plugin.yarn.policy.pollIntervalMs":                   "5000",
+			"ranger.plugin.yarn.policy.cache.dir":                        "/tmp/ranger-yarn-policycache",
+			"ranger.plugin.yarn.policy.rest.client.connection.timeoutMs": "120000",
+			"ranger.plugin.yarn.policy.rest.client.read.timeoutMs":       "30000",
+		},
+		"ranger-yarn-audit.xml": {
+			"xasecure.audit.is.enabled":                           "true",
+			"xasecure.audit.destination.solr":                     "true",
+			"xasecure.audit.destination.solr.urls":                "http://localhost:8983/solr/ranger_audits",
+			"xasecure.audit.destination.solr.batch.filespool.dir": "/tmp/ranger-yarn-audit-spool",
+		},
+	}
+}

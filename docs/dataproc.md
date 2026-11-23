@@ -277,6 +277,14 @@ image's Ubuntu.
       `ranger-hive-security.xml`, `ranger-hive-audit.xml`): every Hive
       query is authorized by the `hive-dataproc` policies, polled every 5
       seconds, and a denial is audited to Solr.
+    - Ranger's YARN plugin in the ResourceManager (`yarn.acl.enable`,
+      `yarn.authorization-provider` in `yarn-site.xml`,
+      `ranger-yarn-security.xml`, `ranger-yarn-audit.xml`; its lib
+      directory on the class path from a mount of the Ranger image): every
+      queue access is authorized by the `yarn-dataproc` policies, and one
+      no policy decides falls back to the queue's own ACL, as
+      `ranger.add-yarn-authorization` does by default. A denial is
+      audited to Solr.
     The image (`internal/sparkproc/ranger/Dockerfile`) is built on this
     machine, the first time a RANGER cluster starts, from the pinned Apache
     Ranger 2.8.0 source release. Ranger's own reactor does not build as
@@ -518,9 +526,10 @@ the WebSocket bridge at it, with local credentials, as it does for BigQuery.
 
 ## What is not served
 
-- RANGER's HDFS and YARN plugins enforce nothing: a local cluster runs no
-  HDFS NameNode, and the YARN ResourceManager does not load the plugin
-  (docs/gaps.md). Their Ranger services exist and take policies.
+- RANGER's HDFS plugin enforces nothing: a local cluster runs no HDFS
+  (`fs.defaultFS` is `file:///`), so there is no NameNode to load it into
+  (docs/gaps.md, #2186). The `hadoop-dataproc` service exists and stores
+  policies.
 - A Dataproc on GKE cluster's `auxiliary_services_config` (a Spark History
   Server and a metastore of other clusters) is kept but not used, and its
   jobs' code reaches Cloud Storage only through the job's files.

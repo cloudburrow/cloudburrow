@@ -252,6 +252,11 @@ func (c *Cluster) writeConf(dir string, job map[string]string, jars []string) er
 	if yarn != nil {
 		files["yarn-site.xml"] = yarn
 		files["capacity-scheduler.xml"] = c.capacityScheduler()
+		if c.has(ComponentRanger) {
+			for name, props := range c.rangerYarnConf() {
+				files[name] = props
+			}
+		}
 	}
 	for name, props := range files {
 		if err := os.WriteFile(filepath.Join(dir, name), siteXML(props), 0o644); err != nil {

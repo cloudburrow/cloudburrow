@@ -207,3 +207,27 @@ func TestRangerHiveConf(t *testing.T) {
 		t.Error("the authorizer must not be in hive-site.xml, which Spark and the drivers read")
 	}
 }
+
+// TestRangerYarnConf (#2162): with RANGER, the ResourceManager authorizes
+// queue access with Ranger's YARN plugin against the yarn-dataproc
+// service on the master's Admin server, auditing to Solr; without it,
+// YARN's ACLs stay off.
+func TestRangerYarnConf(t *testing.T) {
+	c := &Cluster{spec: ClusterSpec{Name: "rg", Components: []string{ComponentSolr, ComponentRanger}}}
+	yarn, _ := c.yarnConf(nil)
+	if yarn["yarn.acl.enable"] != "true" || yarn["yarn.authorization-provider"] != "org.apache.ranger.authorization.yarn.authorizer.RangerYarnAuthorizer" {
+		t.Errorf("yarn-site.xml with RANGER = %v", yarn)
+	}
+	conf := c.rangerYarnConf()
+	sec := conf["ranger-yarn-security.xml"]
+	if sec["ranger.plugin.yarn.service.name"] != "yarn-dataproc" || sec["ranger.plugin.yarn.policy.rest.url"] != "http://rg-m:6080" {
+		t.Errorf("ranger-yarn-security.xml = %v", sec)
+	}
+	if conf["ranger-yarn-audit.xml"]["xasecure.audit.destination.solr.urls"] != "http://localhost:8983/solr/ranger_audits" {
+		t.Errorf("ranger-yarn-audit.xml = %v", conf["ranger-yarn-audit.xml"])
+	}
+	plain := &Cluster{spec: ClusterSpec{Name: "pl"}}
+	if y, _ := plain.yarnConf(nil); y["yarn.acl.enable"] != "" || y["yarn.authorization-provider"] != "" {
+		t.Errorf("yarn-site.xml without RANGER = %v", y)
+	}
+}

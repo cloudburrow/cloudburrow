@@ -245,4 +245,53 @@ func TestDataprocRangerComponent(t *testing.T) {
 		}
 		time.Sleep(10 * time.Second)
 	}
+
+	// YARN: the ResourceManager authorizes with Ranger's YARN plugin. A
+	// Hadoop job runs while no policy decides root's access to the
+	// default queue (the queue's own ACL lets everyone submit).
+	in := dataprocPut(t, ctx, bh, "rg-in/words.txt", dataprocWords)
+	inDir := strings.TrimSuffix(in, "words.txt")
+	wordcount := func(out string) *dataprocpb.Job {
+		n++
+		return dataprocRunJob(t, ctx, jc, project, region, &dataprocpb.Job{Placement: &dataprocpb.JobPlacement{ClusterName: good.ClusterName},
+			Reference: &dataprocpb.JobReference{JobId: fmt.Sprintf("rgyarn%d-%s", n, suffix)},
+			TypeJob: &dataprocpb.Job_HadoopJob{HadoopJob: &dataprocpb.HadoopJob{
+				Driver: &dataprocpb.HadoopJob_MainJarFileUri{MainJarFileUri: "file:///usr/lib/hadoop-mapreduce/hadoop-mapreduce-examples.jar"},
+				Args:   []string{"wordcount", inDir, "gs://" + bh.BucketName() + "/" + out}}}})
+	}
+	if wc := wordcount("rg-out1"); wc.GetStatus().GetState() != dataprocpb.JobStatus_DONE {
+		t.Fatalf("Hadoop job before the YARN deny policy: %v\n%s", wc.GetStatus(), output(wc))
+	}
+	// A policy of yarn-dataproc, made through the API, denying root
+	// submit-app on the default queue: the job is refused by YARN.
+	yarnDeny := map[string]any{"service": "yarn-dataproc", "name": "cb-deny-default-queue", "isEnabled": true,
+		"resources":       map[string]any{"queue": map[string]any{"values": []string{"root.default"}}},
+		"denyPolicyItems": []any{map[string]any{"users": []string{"root"}, "accesses": []any{map[string]any{"type": "submit-app", "isAllowed": true}}}}}
+	if code, body := rest(http.MethodPost, "/service/public/v2/api/policy", password, yarnDeny); code != http.StatusOK {
+		t.Fatalf("create the YARN deny policy = %d %.500s", code, body)
+	}
+	var refused *dataprocpb.Job
+	for i := 0; i < 6; i++ {
+		refused = wordcount(fmt.Sprintf("rg-out-denied%d", i))
+		if refused.GetStatus().GetState() == dataprocpb.JobStatus_ERROR {
+			break
+		}
+		time.Sleep(10 * time.Second)
+	}
+	if out := output(refused); refused.GetStatus().GetState() != dataprocpb.JobStatus_ERROR ||
+		!strings.Contains(out, "User root does not have permission to submit") || !strings.Contains(out, "to queue default") {
+		t.Fatalf("Hadoop job the YARN policy denies: %v\n%s", refused.GetStatus(), out)
+	}
+	// The denial, in the access audit of yarn-dataproc.
+	deadline = time.Now().Add(3 * time.Minute)
+	for {
+		code, body := rest(http.MethodGet, "/service/assets/accessAudit?pageSize=100&sortBy=eventTime&sortType=desc&repoName=yarn-dataproc", password, nil)
+		if code == http.StatusOK && strings.Contains(body, `"resourcePath":"root.default"`) && strings.Contains(body, `"accessResult":0`) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("YARN access audit = %d %.800s", code, body)
+		}
+		time.Sleep(10 * time.Second)
+	}
 }
