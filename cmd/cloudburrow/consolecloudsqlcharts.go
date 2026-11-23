@@ -138,6 +138,22 @@ func sqlChartSeries(c sqlChart, series []*monitoringpb.TimeSeries, end time.Time
 	return out
 }
 
+// sqlUnavailableCharts are the charts of in that apply to its engine, each
+// unavailable for why: the Overview's list offers every metric whether or
+// not it can be drawn, as Google's does, so the choice does not shrink to
+// CPU utilization alone when Cloud Monitoring is not served.
+func sqlUnavailableCharts(in *sqladminapi.DatabaseInstance, charts []sqlChart, why string) []console.ChartSeries {
+	engine := sqlEngineOfInstance(in)
+	var out []console.ChartSeries
+	for _, c := range charts {
+		if c.engine != "" && c.engine != engine {
+			continue
+		}
+		out = append(out, console.ChartSeries{Label: c.label, Unit: c.unit, Max: c.max, Unavailable: why})
+	}
+	return out
+}
+
 // sqlCharts are the charts of in that apply to its engine.
 func sqlCharts(ctx context.Context, a monitoringAdmin, project string, in *sqladminapi.DatabaseInstance, charts []sqlChart) ([]console.ChartSeries, string) {
 	if _, err := a.server(); err != nil {
@@ -197,7 +213,7 @@ func (p cloudSQLInstancesProvider) sqlChartsOnOverview(ctx context.Context, proj
 		}
 		series, why := sqlCharts(ctx, p.metrics, project, in, sqlOverviewCharts)
 		if why != "" {
-			series = []console.ChartSeries{{Label: "CPU utilization", Unit: "percent", Unavailable: why}}
+			series = sqlUnavailableCharts(in, sqlOverviewCharts, why)
 		}
 		d.Sections[i].Series = series
 		if d.Sections[i].Note == "" {

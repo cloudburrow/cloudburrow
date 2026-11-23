@@ -233,6 +233,22 @@ func TestCloudSQLOverviewCharts(t *testing.T) {
 	if _, why := sqlCharts(context.Background(), monitoringAdmin{}, "p", inst, sqlOverviewCharts); why == "" {
 		t.Error("no Cloud Monitoring, and the charts did not say so")
 	}
+
+	// Without Cloud Monitoring the Overview still offers every metric,
+	// CPU utilization first, each saying why it is not drawn (the sql
+	// shard, which serves no Cloud Monitoring, saw only CPU utilization:
+	// main run 45171873407).
+	d := cloudSQLInstancesProvider{}.sqlChartsOnOverview(context.Background(), "p", inst,
+		console.Detail{Sections: []console.Section{{ID: "overview"}}})
+	off := d.Sections[0].Series
+	if len(off) < 2 || off[0].Label != "CPU utilization" {
+		t.Fatalf("the Overview without Cloud Monitoring offers %+v; want every metric, CPU utilization first", off)
+	}
+	for _, s := range off {
+		if s.Unavailable == "" || s.Label == "Queries" {
+			t.Errorf("chart %q: unavailable %q", s.Label, s.Unavailable)
+		}
+	}
 }
 
 // TestCloudSQLZonesAndPrivateIPFields is #2141: the create page's Specify
