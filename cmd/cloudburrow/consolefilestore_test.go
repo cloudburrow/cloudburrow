@@ -151,4 +151,28 @@ func TestConsoleFilestore(t *testing.T) {
 	if err := inst.ActAt(ctx, project, []string{basic}, "restore", map[string]string{"backup": "us-central1/bb"}); err != nil {
 		t.Fatalf("Restore in place: %v", err)
 	}
+
+	// Replication (#2192): Create replica on a Regional instance, the
+	// pair's Replication group, and Promote replica.
+	if _, err := inst.Create(ctx, project, form(map[string]string{"instanceId": "reg", "tier": "REGIONAL", "capacityGb": "1024"})); err != nil {
+		t.Fatalf("Create a Regional instance: %v", err)
+	}
+	if !ids("us-central1/reg")["replica"] {
+		t.Fatal("a Regional instance offers no Create replica")
+	}
+	if err := inst.ActAt(ctx, project, []string{"us-central1/reg"}, "replica", map[string]string{"instanceId": "reg-r", "region": "us-east1"}); err != nil {
+		t.Fatalf("Create replica: %v", err)
+	}
+	if d, _ := inst.Detail(ctx, project, []string{"us-east1/reg-r"}); !strings.Contains(appHubPageText(d), "Replica (standby)") {
+		t.Fatalf("the replica's page shows no replication: %s", appHubPageText(d))
+	}
+	if !ids("us-east1/reg-r")["promote"] {
+		t.Fatal("the replica offers no Promote replica")
+	}
+	if err := inst.ActAt(ctx, project, []string{"us-east1/reg-r"}, "promote", nil); err != nil {
+		t.Fatalf("Promote replica: %v", err)
+	}
+	if d, _ := inst.Detail(ctx, project, []string{"us-central1/reg"}); strings.Contains(appHubPageText(d), "Peer instance") {
+		t.Fatal("after promotion the active instance still shows a replica")
+	}
 }

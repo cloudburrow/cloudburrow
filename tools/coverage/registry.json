@@ -440,7 +440,7 @@
   "google.cloud.filestore.v1.CloudFilestoreManager/ListBackups": "implemented",
   "google.cloud.filestore.v1.CloudFilestoreManager/ListInstances": "implemented",
   "google.cloud.filestore.v1.CloudFilestoreManager/ListSnapshots": "implemented",
-  "google.cloud.filestore.v1.CloudFilestoreManager/PromoteReplica": "unimplemented",
+  "google.cloud.filestore.v1.CloudFilestoreManager/PromoteReplica": "implemented",
   "google.cloud.filestore.v1.CloudFilestoreManager/RestoreInstance": "implemented",
   "google.cloud.filestore.v1.CloudFilestoreManager/RevertInstance": "implemented",
   "google.cloud.filestore.v1.CloudFilestoreManager/UpdateBackup": "implemented",

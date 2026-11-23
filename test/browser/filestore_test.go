@@ -42,7 +42,7 @@ func TestFilestoreThroughThePage(t *testing.T) {
 
 	p.navigate("/filestore/instances?project=" + project)
 	p.clickText("#view button, #view a", "Create instance")
-	p.waitFor(`["f-instanceId", "f-tier", "f-capacityGb", "f-shareName"].every((id) => document.getElementById(id) !== null)`)
+	p.waitFor(`["f-instanceId", "f-tier", "f-capacityGb", "f-shareName", "f-tags"].every((id) => document.getElementById(id) !== null)`)
 	p.submitForm(map[string]string{"instanceId": "browser-fs", "tier": "ZONAL", "protocol": "NFS_V4_1"}, "instanceId")
 	p.waitForWithin(`location.pathname === "/filestore/instances" &&
 		[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes("browser-fs"))`, 5*time.Minute)

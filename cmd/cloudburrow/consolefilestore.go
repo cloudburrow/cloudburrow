@@ -170,7 +170,12 @@ func filestoreInstanceFields(fromBackup bool) []console.Field {
 			Options: []string{"READ_WRITE", "READ_ONLY"}, OptionLabels: map[string]string{"READ_WRITE": "Admin (read-write)", "READ_ONLY": "Viewer (read-only)"}},
 		{Name: "squashMode", Label: "Root squash", Type: "select", Default: "NO_ROOT_SQUASH", Section: "Configure your file share", ShowWhen: "access=restrict",
 			Options: []string{"NO_ROOT_SQUASH", "ROOT_SQUASH"}, OptionLabels: map[string]string{"NO_ROOT_SQUASH": "No root squash", "ROOT_SQUASH": "Root squash"}},
+		{Name: "encryption", Label: "Encryption", Type: "radio", Default: "google", Section: "Encryption", ShowWhen: "tier=ZONAL|REGIONAL|ENTERPRISE",
+			Options: []string{"google", "cmek"}, OptionLabels: map[string]string{"google": "Google-managed encryption key", "cmek": "Cloud KMS key"}},
+		{Name: "kmsKey", Label: "Cloud KMS key", Type: "text", Section: "Encryption", ShowWhen: "encryption=cmek",
+			Help: "projects/PROJECT/locations/REGION/keyRings/RING/cryptoKeys/KEY, in the instance's region; the Filestore service agent needs Cloud KMS CryptoKey Encrypter/Decrypter on it."},
 		{Name: "labels", Label: "Labels", Type: "map", Section: "Labels"},
+		{Name: "tags", Label: "Tags", Type: "map", Section: "Tags", Help: "Tag key namespaced names (ORG_ID/KEY or PROJECT_ID/KEY) and value short names; bound to the instance in Resource Manager."},
 		{Name: "deletionProtection", Label: "Enable deletion protection", Type: "checkbox", Section: "Deletion protection"},
 	}
 	if fromBackup {
@@ -233,9 +238,16 @@ func filestoreCreate(ctx context.Context, svc *filestoreService, project string,
 			AccessMode: filestorepb.NfsExportOptions_AccessMode(filestorepb.NfsExportOptions_AccessMode_value[values["accessMode"]]),
 			SquashMode: filestorepb.NfsExportOptions_SquashMode(filestorepb.NfsExportOptions_SquashMode_value[values["squashMode"]])}}
 	}
-	in := &filestorepb.Instance{Description: values["description"], Tier: tier, Labels: labels, FileShares: []*filestorepb.FileShareConfig{fs},
+	tags, err := console.ParseMap(values["tags"])
+	if err != nil {
+		return "", err
+	}
+	in := &filestorepb.Instance{Description: values["description"], Tier: tier, Labels: labels, Tags: tags, FileShares: []*filestorepb.FileShareConfig{fs},
 		Networks:                  []*filestorepb.NetworkConfig{{Network: strings.TrimSpace(values["network"]), ReservedIpRange: strings.TrimSpace(values["reservedIpRange"])}},
 		DeletionProtectionEnabled: values["deletionProtection"] == "true"}
+	if values["encryption"] == "cmek" {
+		in.KmsKeyName = strings.TrimSpace(values["kmsKey"])
+	}
 	if tier != filestorepb.Instance_BASIC_HDD && tier != filestorepb.Instance_BASIC_SSD {
 		in.Protocol = filestorepb.Instance_FileProtocol(filestorepb.Instance_FileProtocol_value[values["protocol"]])
 	}
@@ -313,6 +325,7 @@ func (p filestoreProvider) Detail(ctx context.Context, project string, path []st
 			{Label: "Service tier", Value: filestoreTierLabels[in.GetTier().String()]}, {Label: "Location", Value: strings.Split(in.GetName(), "/")[3]},
 			{Label: "Protocol", Value: filestoreProtocolLabels[in.GetProtocol().String()]}, {Label: "Created", Value: kmsTime(in.GetCreateTime())},
 			{Label: "Deletion protection", Value: map[bool]string{true: "Enabled", false: "Disabled"}[in.GetDeletionProtectionEnabled()]},
+			{Label: "Encryption", Value: map[bool]string{true: "Cloud KMS key " + in.GetKmsKeyName(), false: "Google-managed"}[in.GetKmsKeyName() != ""]},
 			{Label: "Labels", Value: kmsOrDash(labelsText(in.GetLabels()))}}},
 		{Heading: "File share", Properties: []console.Property{{Label: "File share name", Value: fs.GetName()},
 			{Label: "Capacity", Value: filestoreCapacity(fs.GetCapacityGb())}, {Label: "Used", Value: used},
@@ -321,6 +334,15 @@ func (p filestoreProvider) Detail(ctx context.Context, project string, path []st
 		{Heading: "Networking", Properties: []console.Property{{Label: "VPC network", Value: net.GetNetwork()},
 			{Label: "IP address", Value: ip}, {Label: "Reserved IP range", Value: net.GetReservedIpRange()},
 			{Label: "Connect mode", Value: net.GetConnectMode().String()}}},
+	}
+	if rp := in.GetReplication(); rp != nil {
+		props := []console.Property{{Label: "Role", Value: map[bool]string{true: "Replica (standby)", false: "Active"}[isStandbyRole(rp)]}}
+		for _, r := range rp.GetReplicas() {
+			props = append(props, console.Property{Label: "Peer instance", Value: filestoreConsoleName(r.GetPeerInstance())},
+				console.Property{Label: "Replication state", Value: filestoreState(r.GetState().String())},
+				console.Property{Label: "Last active sync", Value: kmsTime(r.GetLastActiveSyncTime())})
+		}
+		overview = append(overview, console.PropertyGroup{Heading: "Replication", Properties: props})
 	}
 	sections := []console.Section{{ID: "overview", Label: "Overview", Kind: console.KindProperties, Groups: overview}}
 	if !strings.HasPrefix(in.GetTier().String(), "BASIC") && in.GetTier() != filestorepb.Instance_STANDARD && in.GetTier() != filestorepb.Instance_PREMIUM {
@@ -393,6 +415,14 @@ func (p filestoreProvider) DetailActions(ctx context.Context, project string, pa
 		}
 		acts = append(acts, restore)
 	}
+	if rp := in.GetReplication(); rp != nil {
+		acts = append(acts, console.Action{ID: "promote", Label: "Promote replica", Title: "Promote replica", Submit: "Promote", Destructive: true,
+			Confirm: "Replication stops: the replica becomes an independent read-write instance with the data of the last replicated sync."})
+	} else if in.GetTier() == filestorepb.Instance_REGIONAL || in.GetTier() == filestorepb.Instance_ENTERPRISE {
+		acts = append(acts, console.Action{ID: "replica", Label: "Create replica", Title: "Create a replica", Submit: "Create", Fields: []console.Field{
+			{Name: "instanceId", Label: "Replica instance ID", Type: "text", Required: true, Pattern: `^[a-z]([a-z0-9\-]{0,61}[a-z0-9])?$`},
+			{Name: "region", Label: "Region", Type: "text", Required: true, Help: "The replica's region, other than the instance's."}}})
+	}
 	del := console.Action{ID: "delete", Label: "Delete", Destructive: true, Leaves: true, ConfirmWord: lastSegment(in.GetName()),
 		Confirm: "The instance and its file share's data are deleted. Backups are kept.",
 		Fields:  []console.Field{{Name: "force", Label: "Also delete the instance's snapshots", Type: "checkbox"}}}
@@ -446,6 +476,20 @@ func (p filestoreProvider) ActAt(ctx context.Context, project string, path []str
 		}
 		op, err := s.RestoreInstance(ctx, &filestorepb.RestoreInstanceRequest{Name: in.GetName(), FileShare: in.GetFileShares()[0].GetName(),
 			Source: &filestorepb.RestoreInstanceRequest_SourceBackup{SourceBackup: b}})
+		return filestoreWait(ctx, s, op, err)
+	case "replica":
+		rep := &filestorepb.Instance{Tier: in.GetTier(), Protocol: in.GetProtocol(), Networks: []*filestorepb.NetworkConfig{{Network: in.GetNetworks()[0].GetNetwork()}},
+			FileShares:  []*filestorepb.FileShareConfig{{Name: in.GetFileShares()[0].GetName(), CapacityGb: in.GetFileShares()[0].GetCapacityGb()}},
+			Replication: &filestorepb.Replication{Role: filestorepb.Replication_STANDBY, Replicas: []*filestorepb.ReplicaConfig{{PeerInstance: in.GetName()}}}}
+		op, err := s.CreateInstance(ctx, &filestorepb.CreateInstanceRequest{Parent: "projects/" + project + "/locations/" + strings.TrimSpace(values["region"]),
+			InstanceId: strings.TrimSpace(values["instanceId"]), Instance: rep})
+		return filestoreWait(ctx, s, op, err)
+	case "promote":
+		req := &filestorepb.PromoteReplicaRequest{Name: in.GetName()}
+		if !isStandbyRole(in.GetReplication()) && len(in.GetReplication().GetReplicas()) > 0 {
+			req.PeerInstance = in.GetReplication().GetReplicas()[0].GetPeerInstance()
+		}
+		op, err := s.PromoteReplica(ctx, req)
 		return filestoreWait(ctx, s, op, err)
 	case "delete":
 		op, err := s.DeleteInstance(ctx, &filestorepb.DeleteInstanceRequest{Name: in.GetName(), Force: values["force"] == "true"})
@@ -628,4 +672,8 @@ func (p filestoreSnapshotsProvider) Act(ctx context.Context, project, name, acti
 	op, err := s.DeleteSnapshot(ctx, &filestorepb.DeleteSnapshotRequest{
 		Name: "projects/" + project + "/locations/" + parts[0] + "/instances/" + parts[1] + "/snapshots/" + parts[2]})
 	return filestoreWait(ctx, s, op, err)
+}
+
+func isStandbyRole(rp *filestorepb.Replication) bool {
+	return rp.GetRole() == filestorepb.Replication_STANDBY
 }

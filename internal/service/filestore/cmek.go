@@ -47,8 +47,8 @@ func agentOf(project string) string {
 // keyError is a key refusal as the API answers it.
 func keyError(field string, err error) error {
 	if e := cmek.As(err); e != nil {
-		// UNVERIFIED wording: the CMEK page quotes no error (re-read
-		// 2026-11-23: https://docs.cloud.google.com/filestore/docs/cmek).
+		// UNVERIFIED wording (re-read 2026-11-23): the CMEK page quotes no
+		// error (https://docs.cloud.google.com/filestore/docs/cmek).
 		out := apierror.InvalidArgument("%s %s cannot be used: %s", field, e.Key, e.Msg)
 		out.Code = e.Code()
 		return out

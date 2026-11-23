@@ -344,8 +344,9 @@ func TestGKEFilestoreMountFromAPod(t *testing.T) {
 	zone := "projects/" + project + "/locations/us-central1-a"
 	region := "projects/" + project + "/locations/us-central1"
 
-	// The instances first, so that their cleanups run after the cluster's:
-	// a node whose NFS server is gone waits on it forever, as on Google.
+	// The instances first, so that their cleanups run after the cluster's,
+	// the order a careful user deletes in; the other order is
+	// TestGKEFilestoreDeleteTheInstanceBeforeThePodAndTheCluster's.
 	zonal := fsInstance(t, fg, zone, "ct-fs-pod", &filestorepb.Instance{Tier: filestorepb.Instance_ZONAL, Protocol: filestorepb.Instance_NFS_V4_1,
 		FileShares: fsShare("vol1", 1024), Networks: fsNetwork})
 	basic := fsInstance(t, fg, zone, "ct-fs-pod3", &filestorepb.Instance{Tier: filestorepb.Instance_BASIC_HDD,

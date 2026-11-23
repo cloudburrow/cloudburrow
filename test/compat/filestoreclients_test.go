@@ -180,8 +180,8 @@ func TestGKEFilestoreDeleteTheInstanceBeforeThePodAndTheCluster(t *testing.T) {
 // instance (pvc-UID) through the served API, its PersistentVolume the
 // driver's (modeInstance/LOCATION/INSTANCE/vol1), mounted by a pod that
 // writes and reads it; a pre-provisioned PersistentVolume naming an
-// instance made through the API mounts too; deleting a claim deletes its
-// instance.
+// instance made through the API mounts too; growing a claim resizes its
+// instance; deleting a claim deletes its instance.
 func TestGKEFilestoreCSIDriverProvisionsThroughTheServedAPI(t *testing.T) {
 	h := New(t)
 	fg, _ := filestoreClients(t, h)
@@ -320,6 +320,23 @@ spec:
 			t.Fatalf("instance %s = %v %d %v", pv, in.GetTier(), in.GetFileShares()[0].GetCapacityGb(), in.GetLabels())
 		}
 		insts[claim] = in.GetName()
+	}
+	// standard-rwx allows expansion: a claim asking for more resizes its
+	// instance, and the claim and its volume then hold the new capacity.
+	if out, err := kubectlRun(kc, "", time.Minute, "patch", "pvc", "ct-basic", "--type=merge", "-p", `{"spec":{"resources":{"requests":{"storage":"1280Gi"}}}}`); err != nil {
+		t.Fatalf("expand ct-basic: %v\n%s", err, out)
+	}
+	deadline = time.Now().Add(2 * time.Minute)
+	for {
+		in, err := fg.GetInstance(ctx, &filestorepb.GetInstanceRequest{Name: insts["ct-basic"]})
+		got, _ := kubectlRun(kc, "", time.Minute, "get", "pvc", "ct-basic", "-o", "jsonpath={.status.capacity.storage}")
+		if err == nil && in.GetFileShares()[0].GetCapacityGb() == 1280 && got == "1280Gi" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("after expansion the instance is %v (%v) and the claim holds %q", in.GetFileShares(), err, got)
+		}
+		time.Sleep(2 * time.Second)
 	}
 	// Deleting a claim deletes its instance.
 	for _, claim := range []string{"ct-basic", "ct-zonal", "ct-static"} {

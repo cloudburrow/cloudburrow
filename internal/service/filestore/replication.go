@@ -27,7 +27,7 @@ import (
 //
 // Replication is offered by the Regional and Enterprise tiers, and the
 // replica has its active instance's tier, protocol and capacity (the
-// reference does not say; UNVERIFIED). The standby's share is read-only
+// reference does not say; UNVERIFIED, re-read 2026-11-23). The standby's share is read-only
 // to its clients. Its data is a copy of the active share's, taken every
 // ReplicationEvery.
 

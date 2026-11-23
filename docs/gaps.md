@@ -36,10 +36,10 @@ tracks it; a closed issue is named only where it says what was built.
 | Cloud SQL, Memorystore | 6 | 1 | 4 | 1 | 0 |
 | Functions, credentials, tooling | 1 | 0 | 1 | 0 | 0 |
 | App Hub | 5 | 1 | 1 | 3 | 0 |
-| Filestore | 7 | 4 | 3 | 0 | 0 |
+| Filestore | 7 | 2 | 4 | 1 | 0 |
 | Dataform | 7 | 0 | 2 | 4 | 1 |
 | Console | 9 | 7 | 2 | 0 | 0 |
-| **Total** | **96** | **18** | **27** | **44** | **7** |
+| **Total** | **96** | **16** | **28** | **45** | **7** |
 
 ## Cloud Storage
 
@@ -349,19 +349,22 @@ LogEntry `apphub` on entries.list and in every Logging filter, and the console's
 
 Built (#2192): the Filestore v1 API over gRPC and JSON with Google's tier, capacity, share, protocol,
 network and export option rules; each instance a real NFS-Ganesha server (NFSv3 and NFSv4.1) in
-Docker on the clusters' network, mounted from Kubernetes Engine pods; snapshots, revert, regional
-backups and restore; data kept across `stop` and `up` in persistent mode; the console's Filestore
-pages.
+Docker, reached at its address inside `reserved_ip_range` (or the allocated range of private
+services access) from the instance's and its Kubernetes Engine clusters' nodes; snapshots, revert,
+regional backups and restore; customer-managed keys (suspension on a key's loss, encrypted backups),
+tags as Resource Manager bindings, replication and `PromoteReplica`; the GKE Filestore CSI driver
+with dynamic provisioning; gcloud `filestore` and Terraform `google_filestore_*` driven by tests;
+data kept across `stop` and `up` in persistent mode; the console's Filestore pages.
 
 | Gap | Why open | Size |
 |---|---|---|
-| The GKE Filestore CSI driver (`filestore.csi.storage.gke.io`, `standard-rwx` and its StorageClasses) is not installed in clusters; pods mount a share with Kubernetes' `nfs` volume or a PersistentVolume (#2192) | not built yet | L |
-| gcloud `filestore` and Terraform `google_filestore_instance`, `_snapshot` and `_backup` are not driven by a test (#2192) | not built yet | M |
 | Backup and DR protection of Filestore instances (#1524) | not built yet | M |
-| Customer-managed encryption keys, tags, replication (`PromoteReplica`) and `performance_config` limits are refused or not enforced (#2192) | not built yet | M |
-| The server's address is on the local `kind` Docker network, not inside `reserved_ip_range`: the range is checked and recorded but routes nothing | no emulator support | M |
+| The CSI driver installs `standard-rwx`, `premium-rwx`, `zonal-rwx`, `regional-rwx` and `enterprise-rwx`, not `enterprise-multishare-rwx` (multishares, several shares an Enterprise instance) (#2192) | not built yet | M |
+| `performance_config` and `performance_limits` (IOPS, throughput) are recorded, not enforced: the share is a local Docker volume | no emulator support | S |
+| A customer-managed key protects backups (sealed with a data key Cloud KMS wraps) and the instance's service (suspended while the key cannot be used), but the live share's volume is not encrypted at rest with it | no emulator support | M |
 | Export options' `ip_ranges` match a client's node address on the `kind` network, so ranges of VPC addresses admit no local client | no emulator support | S |
-| A node still mounting a deleted instance's NFSv4.1 share hangs in the kernel (hard mount, as on Google), and Docker then cannot remove that node's container, so deleting its cluster fails until Docker restarts; deleting the pods first avoids it | no emulator support | M |
+| The address inside `reserved_ip_range` is routed (DNAT) in the nodes of the instance's kind cluster and its Kubernetes Engine clusters; elsewhere on the machine the server answers only at its `kind` network address | no emulator support | S |
+| A deleted instance whose share a node still mounts leaves a stand-in server answering ESTALE at its address until the mount is gone; the error texts of CMEK, replication and tag refusals, and a replica's tier, protocol and capacity matching its active instance's, are CloudBurrow's (UNVERIFIED in compatibility.md) | not documented by Google | S |
 
 ## Dataform
 

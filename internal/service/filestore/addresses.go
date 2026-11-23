@@ -137,9 +137,9 @@ func (s *Server) placeLocked(in *filestorepb.Instance, project string, rec *inst
 			if a, ok := nets.AllocatedRange(network, r); ok {
 				ranges[r] = a
 			} else {
-				// UNVERIFIED wording; the reference says only that the
-				// range "must be one of the ranges associated with the
-				// private service access connection" (re-read
+				// UNVERIFIED wording (re-read 2026-11-23): the reference
+				// says only that the range "must be one of the ranges
+				// associated with the private service access connection" (read
 				// 2026-11-23).
 				return apierror.InvalidArgument("reserved_ip_range %q is not an IP range allocated for private services access on %s", r, network)
 			}

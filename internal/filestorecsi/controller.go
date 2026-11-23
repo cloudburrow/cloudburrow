@@ -17,6 +17,7 @@ import (
 	longrunningpb "cloud.google.com/go/longrunning/autogen/longrunningpb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )
 
 // API is the served Filestore API the controller provisions through.
@@ -24,6 +25,7 @@ type API interface {
 	CreateInstance(context.Context, *filestorepb.CreateInstanceRequest) (*longrunningpb.Operation, error)
 	GetInstance(context.Context, *filestorepb.GetInstanceRequest) (*filestorepb.Instance, error)
 	DeleteInstance(context.Context, *filestorepb.DeleteInstanceRequest) (*longrunningpb.Operation, error)
+	UpdateInstance(context.Context, *filestorepb.UpdateInstanceRequest) (*longrunningpb.Operation, error)
 	WaitDone(ctx context.Context, name string)
 	Operation(name string) (*longrunningpb.Operation, error)
 }
@@ -265,7 +267,8 @@ type pvc struct {
 		} `json:"resources"`
 	} `json:"spec"`
 	Status struct {
-		Phase string `json:"phase"`
+		Phase    string            `json:"phase"`
+		Capacity map[string]string `json:"capacity"`
 	} `json:"status"`
 }
 
@@ -316,7 +319,19 @@ func (c *Controller) provision(ctx context.Context, cl Cluster) error {
 	if err != nil {
 		return err
 	}
+	vols, err := getList[pv](ctx, c, cl, "pv")
+	if err != nil {
+		return err
+	}
 	for _, p := range claims {
+		if p.Status.Phase == "Bound" && p.Spec.StorageClassName != nil {
+			if _, ok := mine[*p.Spec.StorageClassName]; ok {
+				if err := c.expand(ctx, cl, p, vols); err != nil {
+					c.event(ctx, cl, p, err)
+				}
+			}
+			continue
+		}
 		if p.Status.Phase != "Pending" || p.Spec.VolumeName != "" || p.Spec.StorageClassName == nil {
 			continue
 		}
@@ -331,10 +346,6 @@ func (c *Controller) provision(ctx context.Context, cl Cluster) error {
 		if err := c.provisionOne(ctx, cl, sc, p); err != nil {
 			c.event(ctx, cl, p, err)
 		}
-	}
-	vols, err := getList[pv](ctx, c, cl, "pv")
-	if err != nil {
-		return err
 	}
 	for _, v := range vols {
 		if v.Spec.CSI == nil || v.Spec.CSI.Driver != Driver || v.Status.Phase != "Released" || v.Spec.PersistentVolumeReclaimPolicy != "Delete" {
@@ -607,5 +618,67 @@ func (c *Controller) deleteOne(ctx context.Context, cl Cluster, pvName, handle s
 		return err
 	}
 	c.logf("filestore CSI: deleted %s and its instance %s", pvName, name)
+	return nil
+}
+
+// expand grows a bound claim's instance when the claim asks for more than
+// its volume holds (allowVolumeExpansion, as GKE's classes allow): the
+// instance's share is resized through the API, then the volume's and the
+// claim's capacity are set to it.
+func (c *Controller) expand(ctx context.Context, cl Cluster, p pvc, vols []pv) error {
+	want, err := GiB(p.Spec.Resources.Requests["storage"])
+	if err != nil || p.Status.Capacity["storage"] == "" {
+		return nil
+	}
+	have, err := GiB(p.Status.Capacity["storage"])
+	if err != nil || want <= have {
+		return nil
+	}
+	var handle string
+	for _, v := range vols {
+		if v.Metadata.Name == p.Spec.VolumeName && v.Spec.CSI != nil && v.Spec.CSI.Driver == Driver {
+			handle = v.Spec.CSI.VolumeHandle
+		}
+	}
+	parts := strings.Split(handle, "/")
+	if len(parts) != 4 || parts[0] != "modeInstance" {
+		return nil
+	}
+	api := c.API()
+	if api == nil {
+		return fmt.Errorf("the Filestore API is not served")
+	}
+	name := "projects/" + cl.Project + "/locations/" + parts[1] + "/instances/" + parts[2]
+	in, err := api.GetInstance(ctx, &filestorepb.GetInstanceRequest{Name: name})
+	if err != nil {
+		return err
+	}
+	fs := in.GetFileShares()[0]
+	if fs.GetCapacityGb() < want {
+		fs.CapacityGb = want
+		op, err := api.UpdateInstance(ctx, &filestorepb.UpdateInstanceRequest{Instance: &filestorepb.Instance{Name: name, FileShares: []*filestorepb.FileShareConfig{fs}},
+			UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"file_shares"}}})
+		if err != nil {
+			return fmt.Errorf("resize %s to %d GiB: %w", name, want, err)
+		}
+		api.WaitDone(ctx, op.GetName())
+		done, err := api.Operation(op.GetName())
+		if err != nil {
+			return err
+		}
+		if e := done.GetError(); e != nil {
+			return fmt.Errorf("resize %s to %d GiB: %s", name, want, e.GetMessage())
+		}
+	}
+	size := strconv.FormatInt(max(want, fs.GetCapacityGb()), 10) + "Gi"
+	patch := `{"spec":{"capacity":{"storage":"` + size + `"}}}`
+	if _, err := c.kubectl(ctx, cl, "", "patch", "pv", p.Spec.VolumeName, "--type=merge", "-p", patch); err != nil {
+		return err
+	}
+	patch = `{"status":{"capacity":{"storage":"` + size + `"}}}`
+	if _, err := c.kubectl(ctx, cl, "", "patch", "pvc", p.Metadata.Name, "-n", p.Metadata.Namespace, "--subresource=status", "--type=merge", "-p", patch); err != nil {
+		return err
+	}
+	c.logf("filestore CSI: expanded %s/%s to %s", p.Metadata.Namespace, p.Metadata.Name, size)
 	return nil
 }
