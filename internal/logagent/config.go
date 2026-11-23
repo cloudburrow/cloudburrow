@@ -12,7 +12,9 @@ const (
 	Namespace = "kube-system"
 	// Name is the DaemonSet's, its ServiceAccount's, ClusterRole's and
 	// pods' k8s-app label: GKE's agent's (observed on GKE nodes as
-	// kube-system/fluentbit-gke; not named on a Google page: UNVERIFIED).
+	// kube-system/fluentbit-gke; UNVERIFIED, re-read 2026-11-22:
+	// https://docs.cloud.google.com/kubernetes-engine/docs/concepts/about-logs
+	// names a fluentbit-based agent and no DaemonSet).
 	Name = "fluentbit-gke"
 	// ConfigMap is the configuration the CLI writes; ConfigKey its key.
 	ConfigMap = "fluentbit-gke-config"
