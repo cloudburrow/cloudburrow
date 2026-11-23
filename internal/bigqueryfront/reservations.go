@@ -309,15 +309,15 @@ func alreadyExists(format string, a ...any) *resvErr {
 
 // resvRequest is one call of the API, parsed from its path.
 type resvRequest struct {
-	method                  string
-	project, location       string // canonical
-	parent                  string // projects/P/locations/L
-	collection              string // reservations, capacityCommitments, reservationGroups, biReservation, assignments
-	id                      string // the reservation, commitment or group
-	assignment              string // under reservations/id/assignments
-	verb                    string // after ':'
-	query                   map[string][]string
-	body                    []byte
+	method                   string
+	project, location        string // canonical
+	parent                   string // projects/P/locations/L
+	collection               string // reservations, capacityCommitments, reservationGroups, biReservation, assignments
+	id                       string // the reservation, commitment or group
+	assignment               string // under reservations/id/assignments
+	verb                     string // after ':'
+	query                    map[string][]string
+	body                     []byte
 	onCollection, onLocation bool
 }
 

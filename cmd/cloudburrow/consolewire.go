@@ -566,6 +566,13 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		{config.ServiceBigQuery, func(a string) console.Provider {
 			return bigqueryJobsProvider{bq: bigqueryProvider{endpoint: a, project: d.cfg.DefaultProject()}}
 		}},
+		// Capacity management: slot reservations and commitments (#2193).
+		{config.ServiceBigQuery, func(a string) console.Provider {
+			return bqCapacityProvider{bq: bigqueryProvider{endpoint: a, project: d.cfg.DefaultProject()}}
+		}},
+		{config.ServiceBigQuery, func(a string) console.Provider {
+			return bqCommitmentsProvider{bq: bigqueryProvider{endpoint: a, project: d.cfg.DefaultProject()}}
+		}},
 	} {
 		if !enabled[db.service] {
 			continue

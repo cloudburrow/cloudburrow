@@ -66,11 +66,11 @@ import (
 // (timeout here).
 
 const (
-	cqPoll           = time.Second
-	cqLag            = time.Second
-	cqSlotsPerJob    = 10
-	cqMaxRunUser     = 2 * 24 * time.Hour
-	cqMaxRunAccount  = 150 * 24 * time.Hour
+	cqPoll            = time.Second
+	cqLag             = time.Second
+	cqSlotsPerJob     = 10
+	cqMaxRunUser      = 2 * 24 * time.Hour
+	cqMaxRunAccount   = 150 * 24 * time.Hour
 	cqMaxWatermarkLag = 48 * time.Hour
 )
 
@@ -302,8 +302,8 @@ func (f front) continuous(w http.ResponseWriter, r *http.Request, project string
 		ms := strconv.FormatInt(created, 10)
 		writeJSON(w, http.StatusOK, map[string]any{"kind": "bigquery#job", "jobReference": map[string]any{"projectId": project, "jobId": job.JobReference.JobID, "location": location},
 			"configuration": map[string]any{"query": map[string]any{"query": q.Query, "useLegacySql": false, "continuous": true}, "dryRun": true, "jobType": "QUERY"},
-			"status":     map[string]any{"state": "DONE"},
-			"statistics": map[string]any{"creationTime": ms, "totalBytesProcessed": "0", "query": map[string]any{"statementType": stmt, "totalBytesProcessed": "0"}}})
+			"status":        map[string]any{"state": "DONE"},
+			"statistics":    map[string]any{"creationTime": ms, "totalBytesProcessed": "0", "query": map[string]any{"statementType": stmt, "totalBytesProcessed": "0"}}})
 		return true
 	}
 	var sink cqSink

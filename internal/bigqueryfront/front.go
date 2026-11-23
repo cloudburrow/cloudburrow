@@ -299,7 +299,6 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		icebergs.keep(o.stateDir, o.logf)                          // iceberg.go, #1427
 		models.keep(modelsStateFile(o.stateDir), o.logf)           // models.go, #1465
 		connections.keep(connectionsStateFile(o.stateDir), o.logf) // connections.go, #1755
-		reservations.keep(reservationsStateFile(o.stateDir), o.logf) // reservations.go, #2193
 		objects.keep(o.stateDir, o.logf)                           // objecttables.go, #1783
 		tables.keep(tableSettingsStateFile(o.stateDir), o.logf)    // tableoptions.go, #1390
 		buffers.keep(streamBuffersStateFile(o.stateDir), o.logf)   // streamingbuffer.go, #1273
@@ -315,6 +314,8 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		linked.keep(linkedDatasetsStateFile(o.stateDir), o.logf)   // loglinks.go, #1435
 		hubs.keep(hubLinksStateFile(o.stateDir), o.logf)           // hublinks.go, #1960
 		numbers.keep(projectNumbersStateFile(o.stateDir), o.logf)  // projectnumbers.go, #1551
+		// reservations.go, #2193: the Reservation API's state.
+		reservations.keep(reservationsStateFile(o.stateDir), o.logf)
 	}
 	ids := o.ids // #1063
 	if ids == nil {

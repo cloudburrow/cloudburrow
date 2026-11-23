@@ -678,7 +678,6 @@ func (s *spannerSink) describe(ctx context.Context) error {
 	return nil
 }
 
-
 // spannerUnsupported are the BigQuery types Spanner does not take.
 var spannerUnsupported = map[string]bool{"RECORD": true, "STRUCT": true, "GEOGRAPHY": true, "DATETIME": true, "RANGE": true, "TIME": true, "BIGNUMERIC": true}
 

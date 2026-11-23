@@ -160,6 +160,9 @@ const GKE_STORAGE = ["/kubernetes/storage", "/kubernetes/storage-classes"];
 // 2026-11-22), never from a menu item of their own. The tabs' names are
 // CloudBurrow's (UNVERIFIED, re-read 2026-11-22: the same page).
 const SHARING_TABS = ["/bigquery-sharing", "/bigquery-clean-rooms"];
+// BigQuery's Capacity management (#2193): its Slot reservations and Slot
+// commitments tabs.
+const CAPACITY_TABS = ["/bigquery-capacity", "/bigquery-commitments"];
 const LOGGING_SETTINGS = ["/logs/settings", "/logs/log-scopes", "/logs/trace-scopes", "/logs/observability-settings", "/logs/observability-buckets"];
 
 
@@ -438,6 +441,12 @@ const ROUTES = [
     section: "Databases", product: "bigquery", productTitle: "BigQuery" },
   { path: "/bigquery-scheduled-queries", service: "bigquery-scheduled-queries", icon: "bigquery", title: "Scheduled queries",
     kind: "Scheduled query", section: "Databases", product: "bigquery", productTitle: "BigQuery" },
+  // Capacity management (#2193): slot reservations with their
+  // assignments (CONTINUOUS for continuous queries), and slot commitments.
+  { path: "/bigquery-capacity", service: "bigquery-capacity", icon: "bigquery", title: "Capacity management", tabTitle: "Slot reservations",
+    kind: "Reservation", pageTabs: CAPACITY_TABS, section: "Databases", product: "bigquery", productTitle: "BigQuery" },
+  { path: "/bigquery-commitments", service: "bigquery-commitments", icon: "bigquery", title: "Capacity management", tabTitle: "Slot commitments",
+    kind: "Commitment", navHidden: true, navAs: "/bigquery-capacity", pageTabs: CAPACITY_TABS, section: "Databases", product: "bigquery", productTitle: "BigQuery" },
   // BigQuery sharing (Analytics Hub, #1960): exchanges, their listings
   // and subscriptions.
   { path: "/bigquery-sharing", service: "bigquery-sharing", icon: "bigquery", title: "Analytics Hub", tabTitle: "Exchanges", kind: "Exchange",
@@ -25259,7 +25268,8 @@ function bqQueryTab(tab, ctx) {
     const legacy = settings.legacySql === true;
     return { legacySql: legacy, priority: settings.priority || "INTERACTIVE", location: settings.location || "",
              destinationDataset: settings.destinationDataset || "", destinationTable: settings.destinationTable || "",
-             writeDisposition: settings.writeDisposition || "", defaultDataset: "", queryMode: settings.queryMode || "" };
+             writeDisposition: settings.writeDisposition || "", defaultDataset: "", queryMode: settings.queryMode || "",
+             serviceAccount: settings.queryMode === "continuous" ? settings.serviceAccount || "" : "" };
   };
 
   let timer = null;
@@ -25817,6 +25827,20 @@ function bqQuerySettings(settings, onSave) {
     el("label", { for: "bq-dest-write", text: "Destination table write preference" }), disposition);
   const location = el("input", { type: "text", id: "bq-location", value: settings.location || "",
                                  placeholder: "Automatic location selection" });
+  // Continuous query > Use service account (#2193): "In the Continuous
+  // query section, select the Use service account box … select the
+  // service account" (https://docs.cloud.google.com/bigquery/docs/continuous-queries,
+  // read 2026-11-23); shown in Continuous query mode.
+  const useSA = el("input", { type: "checkbox", id: "bq-use-sa" });
+  useSA.checked = !!settings.serviceAccount;
+  const saEmail = el("input", { type: "email", id: "bq-sa", value: settings.serviceAccount || "",
+                                placeholder: "name@project.iam.gserviceaccount.com" });
+  const saFields = el("div", { class: "bq-dest-fields", hidden: useSA.checked ? null : true },
+    el("label", { for: "bq-sa", text: "Service account" }), saEmail);
+  const continuousSet = settings.queryMode === "continuous"
+    ? el("fieldset", {}, el("legend", { text: "Continuous query" }),
+        el("label", { class: "bq-radio" }, useSA, el("span", { text: " Use service account" })), saFields)
+    : null;
   const form = el("form", { class: "modal-body bq-settings", onsubmit: (e) => {
     e.preventDefault();
     const fd = new FormData(form);
@@ -25827,6 +25851,7 @@ function bqQuerySettings(settings, onSave) {
     settings.priority = fd.get("bq-priority");
     settings.legacySql = fd.get("bq-dialect") === "legacy";
     settings.location = location.value.trim();
+    if (continuousSet) settings.serviceAccount = useSA.checked ? saEmail.value.trim() : "";
     close();
     onSave();
   } },
@@ -25844,11 +25869,13 @@ function bqQuerySettings(settings, onSave) {
       radio("bq-dialect", "standard", "GoogleSQL", !settings.legacySql),
       radio("bq-dialect", "legacy", "Legacy SQL", !!settings.legacySql),
       el("label", { for: "bq-location", text: "Data location" }), location),
+    continuousSet,
     el("div", { class: "modal-actions" },
       el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }),
       el("button", { type: "submit", class: "primary", text: "Save" })));
   form.addEventListener("change", () => {
     destFields.hidden = new FormData(form).get("bq-dest") !== "table";
+    saFields.hidden = !useSA.checked;
   });
   dialog.append(form);
 }

@@ -380,7 +380,7 @@ func parseCQQuery(q string) (*cqQuery, error) {
 			}
 		}
 	}
-	calls, ok := changeFuncs(q, "", "")
+	calls, ok := changeCalls(q)
 	if !ok {
 		return nil, &cqRefusal{400, "Syntax error: an APPENDS or CHANGES call cannot be read"}
 	}
