@@ -332,8 +332,16 @@ func (n *virtualNodes) Submit(ctx context.Context, job sparkproc.Job) (sparkproc
 		desc, _ := n.kubectl(ctx, nil, "-n", ns, "describe", "pod", pod)
 		return sparkproc.Result{}, fmt.Errorf("the driver pod did not start: %v: %s\n%s", err, out, desc)
 	}
-	if out, err := n.kubectl(ctx, nil, "-n", ns, "cp", stage+"/.", pod+":/work", "-c", "driver"); err != nil {
-		return sparkproc.Result{}, fmt.Errorf("copy the job's files to the driver: %v: %s", err, out)
+	// Each file on its own: copying the directory would set /work's
+	// mode, which the image's user may not.
+	staged, err := os.ReadDir(stage)
+	if err != nil {
+		return sparkproc.Result{}, err
+	}
+	for _, f := range staged {
+		if out, err := n.kubectl(ctx, nil, "-n", ns, "cp", filepath.Join(stage, f.Name()), pod+":/work/"+f.Name(), "-c", "driver"); err != nil {
+			return sparkproc.Result{}, fmt.Errorf("copy %s to the driver: %v: %s", f.Name(), err, out)
+		}
 	}
 	if out, err := n.kubectl(ctx, nil, "-n", ns, "exec", pod, "-c", "driver", "--", "touch", "/work/.cb-go"); err != nil {
 		return sparkproc.Result{}, fmt.Errorf("start the driver: %v: %s", err, out)
