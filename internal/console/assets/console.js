@@ -8343,7 +8343,23 @@ function uploadIntoTextarea(f, control) {
 // Variables & Secrets, Volumes, Networking and Security (#1852). Every field
 // stays in the form whichever tab shows, so Create submits them all.
 function formTabs(section, entries) {
-  const plain = entries.filter((e) => !e.field.tab).map((e) => e.slot || (e.slot === undefined ? e.node : null)).filter(Boolean);
+  // Consecutive fields of one subsection are a titled fieldset (#2181):
+  // Create an instance's Security pane has Shielded VM over its checkboxes.
+  const plain = [];
+  let sub = null;
+  for (const e of entries.filter((x) => !x.field.tab)) {
+    const node = e.slot || (e.slot === undefined ? e.node : null);
+    if (!node) continue;
+    const name = e.field.subsection || "";
+    if (!name) { sub = null; plain.push(node); continue; }
+    if (!sub || sub.dataset.subsection !== name) {
+      sub = el("fieldset", { class: "form-subsection", "data-subsection": name },
+        el("legend", { class: "form-subsection-title", text: name }),
+        e.field.subsectionNote ? el("p", { class: "form-help form-subsection-note", text: e.field.subsectionNote }) : null);
+      plain.push(sub);
+    }
+    sub.append(node);
+  }
   const tabs = [];
   for (const e of entries.filter((x) => x.field.tab)) {
     let t = tabs.find((x) => x.name === e.field.tab);

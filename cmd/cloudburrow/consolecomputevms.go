@@ -478,7 +478,7 @@ func (p computeInstancesProvider) createFields(schedules, networks []string) []c
 	backup := console.Field{Name: "snapshotSchedule", Label: "Back up your data", Type: "select", Section: dp, Default: noBackups,
 		Options: append([]string{noBackups}, schedules...),
 		Help:    "A snapshot schedule of the region takes the boot disk's snapshots; create one on the Snapshots page's Snapshot schedules tab."}
-	return []console.Field{
+	return withShieldedVM(sec, []console.Field{
 		{Name: "name", Label: "Name", Type: "text", Section: mc, Required: true, Pattern: computeNamePattern, Help: computeNameHelp},
 		vmLabelsField(nil, mc),
 		{Name: "region", Label: "Region", Type: "select", Section: mc, Required: true, Default: "us-central1", Options: compute.Regions()},
@@ -524,7 +524,7 @@ func (p computeInstancesProvider) createFields(schedules, networks []string) []c
 			{Name: "key", Label: "Key", Type: "text", Required: true},
 			{Name: "value", Label: "Value", Type: "textarea"},
 		}},
-	}
+	})
 }
 
 // noBackups is Data protection's choice of no snapshot schedule
@@ -686,6 +686,9 @@ func (p computeInstancesProvider) createBody(project string, values map[string]s
 		}
 		body["serviceAccounts"] = []any{map[string]any{"email": "default", "scopes": scopes}}
 	}
+	if sh := shieldedCreateBody(values); sh != nil {
+		body["shieldedInstanceConfig"] = sh
+	}
 	items, err := metadataBody(values["metadata"], values["startupScript"])
 	if err != nil {
 		return nil, err
@@ -770,6 +773,7 @@ func (p computeInstancesProvider) Detail(ctx context.Context, project string, pa
 		}},
 		availabilityGroup(o),
 		{Heading: "Metadata", Properties: mdProps},
+		shieldedGroup(o),
 		{Heading: "API and identity management", Properties: []console.Property{
 			{Label: "Service account", Value: sa}, {Label: "Cloud API access scopes", Value: scopes}}},
 		{Heading: "Connect", Properties: []console.Property{
@@ -835,7 +839,7 @@ func (p computeInstancesProvider) Detail(ctx context.Context, project string, pa
 			{ID: "storage", Label: "Storage", Listing: disks},
 			{ID: "networking", Label: "Networking", Listing: nics},
 			serial},
-		Edit: &console.EditForm{Label: "Edit", Note: "The machine type and the VM provisioning model change only while the instance is stopped.", Fields: []console.Field{
+		Edit: &console.EditForm{Label: "Edit", Note: "The machine type, the VM provisioning model and the Shielded VM settings change only while the instance is stopped.", Fields: append([]console.Field{
 			vmLabelsField(vmLabels(o), ""),
 			{Name: "networkTags", Label: "Network tags", Type: "text", Default: tags},
 			{Name: "machineType", Label: "Machine type", Type: "select", Default: vpcLast(vpcStr(o, "machineType")), Options: machineTypeNames()},
@@ -846,7 +850,7 @@ func (p computeInstancesProvider) Detail(ctx context.Context, project string, pa
 				{Name: "key", Label: "Key", Type: "text", Required: true},
 				{Name: "value", Label: "Value", Type: "textarea"},
 			}},
-		}},
+		}, shieldedEditFields(o)...)},
 	}, nil
 }
 
@@ -864,7 +868,9 @@ func sshCommands(project, zone, name string, o map[string]any) (sshCmd, gcloudCm
 
 // Edit is the instance page's Edit: labels (setLabels), network tags
 // (setTags), the machine type (setMachineType, stopped only), deletion
-// protection and metadata (setMetadata), each sent only when it changed.
+// protection, metadata (setMetadata) and the Shielded VM settings
+// (updateShieldedInstanceConfig, stopped only, #2181), each sent only when
+// it changed.
 func (p computeInstancesProvider) Edit(ctx context.Context, project string, path []string, values map[string]string) error {
 	o, err := p.instance(project, path)
 	if err != nil {
@@ -903,6 +909,11 @@ func (p computeInstancesProvider) Edit(ctx context.Context, project string, path
 	}
 	if err := p.editProvisioningModel(project, base, o, values); err != nil {
 		return err
+	}
+	if sh := shieldedEditBody(o, values); sh != nil {
+		if _, err := p.call("PATCH", project, base+"/updateShieldedInstanceConfig", nil, sh); err != nil {
+			return err
+		}
 	}
 	if dp := values["deletionProtection"] == "true"; dp != (o["deletionProtection"] == true) {
 		if _, err := p.call("POST", project, base+"/setDeletionProtection", url.Values{"deletionProtection": {strconv.FormatBool(dp)}}, nil); err != nil {
