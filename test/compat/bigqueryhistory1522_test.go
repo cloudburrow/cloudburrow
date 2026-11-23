@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -380,4 +381,87 @@ func TestBigQueryAlterSchemaTimeTravelLetsGoFirst(t *testing.T) {
 			t.Errorf("insert %v: FOR SYSTEM_TIME AS OF before the new insert: %q", insert, got)
 		}
 	}
+}
+
+// TestBigQueryAlterSchemaTimeTravelBesideOtherJobs (#1522): the same
+// ALTER SCHEMA as TestBigQueryAlterSchemaTimeTravelLetsGoFirst while other
+// jobs write to another table, as other clients' jobs do on BigQuery.
+// APPENDS from before the 48-hour window reads only what the window kept,
+// every round. Main CI's emulators shard failed the test above in 3 of 4
+// runs: the engine read the history the front counts first, to let it go,
+// as a read beside the writer, and the read failed "database is locked"
+// whenever another job committed then (bigquery-emulator patch 0110), so
+// nothing was let go. Measured here: every round read the changes before
+// the window, and some APPENDS failed "database is locked".
+//
+// covers: bigquery.jobs.query, bigquery.datasets.insert
+func TestBigQueryAlterSchemaTimeTravelBesideOtherJobs(t *testing.T) {
+	h := New(t)
+	c, _ := bigqueryClient(t, h)
+	advanceBigQueryClock(t, h, 0)
+	ctx := h.Context()
+	other := validationDataset(t, h, c)
+	if err := bqRun(ctx, c, "CREATE TABLE `"+other.DatasetID+".busy` (n INT64)", false); err != nil {
+		t.Fatalf("CREATE TABLE: %v", err)
+	}
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	writeErrs := make(chan error, 2)
+	for w := 0; w < 2; w++ {
+		wg.Add(1)
+		go func(w int) {
+			defer wg.Done()
+			for i := 0; ; i++ {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				if err := bqRun(ctx, c, fmt.Sprintf("INSERT INTO `%s.busy` VALUES (%d)", other.DatasetID, w*1000000+i), false); err != nil {
+					writeErrs <- fmt.Errorf("INSERT beside the ALTER SCHEMA: %v", err)
+					return
+				}
+			}
+		}(w)
+	}
+	done := func() {
+		close(stop)
+		wg.Wait()
+		close(writeErrs)
+		for err := range writeErrs {
+			t.Error(err)
+		}
+	}
+	defer func() {
+		if stop != nil {
+			done()
+		}
+	}()
+	for round := 0; round < 4; round++ {
+		ds := c.Dataset(fmt.Sprintf("%s_alter_beside_%d", strings.ReplaceAll(h.Project(), "-", "_"), round))
+		if err := ds.Create(ctx, &bigquery.DatasetMetadata{MaxTimeTravel: 48 * time.Hour}); err != nil {
+			t.Fatalf("create dataset: %v", err)
+		}
+		t.Cleanup(func() { _ = ds.DeleteWithContents(h.Context()) })
+		ref := "`" + ds.DatasetID + ".kept`"
+		run := func(sql string) {
+			t.Helper()
+			if err := bqRun(ctx, c, sql, false); err != nil {
+				t.Fatalf("round %d: %s: %v", round, sql, err)
+			}
+		}
+		run("CREATE TABLE " + ref + " (product STRING, inventory INT64) OPTIONS(enable_change_history = TRUE)")
+		start := currentMicros(t, h, c)
+		run("INSERT INTO " + ref + " VALUES ('apples', 10), ('pears', 20)")
+		run("DELETE " + ref + " WHERE product = 'pears'")
+		advanceBigQueryClock(t, h, 49*time.Hour)
+		run("INSERT INTO " + ref + " VALUES ('figs', 3)")
+		run("ALTER SCHEMA `" + ds.DatasetID + "` SET OPTIONS (max_time_travel_hours = 168)")
+		got := strings.Join(changeRows(t, rows(t, ctx, c, "SELECT product, inventory, _CHANGE_TYPE FROM APPENDS(TABLE "+ref+", "+start+", NULL) ORDER BY product")), "; ")
+		if got != "figs 3 INSERT" {
+			t.Errorf("round %d: APPENDS from before the 48-hour window, after ALTER SCHEMA made it 168 hours beside other jobs: %q", round, got)
+		}
+	}
+	done()
+	stop = nil
 }
