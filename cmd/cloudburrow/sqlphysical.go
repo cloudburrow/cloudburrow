@@ -18,7 +18,7 @@ import (
 // A physical external sync (#1570): an XtraBackup backup of the source is
 // prepared and copied back into the replica's data directory by a Job of
 // the official percona/percona-xtrabackup image of the replica's major
-// version, on the replica's volume. The backup's files, when they are in
+// version (2.4 for MySQL 5.7, #1524; 8.0 for 8.0), on the replica's volume. The backup's files, when they are in
 // Cloud Storage, are first written onto that volume through the replica's
 // own running server's pod; with none, the Job takes the backup itself,
 // with the source's volume mounted and the replication user. The replica's
@@ -38,10 +38,12 @@ const (
 )
 
 // PhysicalUnsupported is why spec's server cannot be given a physical
-// backup: there is no XtraBackup image of its version.
+// backup: there is no XtraBackup image of its version. MySQL 5.7's,
+// XtraBackup 2.4, is linux/amd64 only, as its server's image is, so it
+// runs wherever a MYSQL_5_7 instance can be created (sqllegacy.go).
 func (p *sqlProvisioner) PhysicalUnsupported(spec sqladmin.Spec) string {
 	if components.XtraBackupImage(spec.DatabaseVersion) == "" {
-		return "there is no Percona XtraBackup image for " + spec.DatabaseVersion + "; MYSQL_8_0 and MYSQL_8_4 are served"
+		return "there is no Percona XtraBackup image for " + spec.DatabaseVersion + "; MYSQL_5_7 and MYSQL_8_0 are served"
 	}
 	return ""
 }
@@ -167,7 +169,8 @@ const physicalScript = `set -euo pipefail
 B=/replica/` + physicalBackupDir + `
 if [ -n "${CLOUDSQL_TAKE_BACKUP:-}" ]; then
   rm -rf "$B" && mkdir -p "$B"
-  xtrabackup --backup --no-server-version-check --datadir=/var/lib/mysql/data --target-dir="$B" \
+  ` + physicalVersionCheck + `
+  xtrabackup --backup $nsvc --datadir=/var/lib/mysql/data --target-dir="$B" \
     --host="$CLOUDSQL_PRIMARY_HOST" --port="${CLOUDSQL_PRIMARY_PORT:-3306}" --user="$CLOUDSQL_PRIMARY_USER" --password="$CLOUDSQL_REPLICATION_PASSWORD"
 fi
 if [ -n "$(find "$B" -name '*.zst' -print -quit)" ]; then
@@ -186,10 +189,16 @@ chown -R 999:999 /replica
 echo "restored the backup at GTIDs $gtid"
 `
 
+// physicalVersionCheck sets nsvc to --no-server-version-check when the
+// image's XtraBackup has it (8.0's), and to nothing otherwise: XtraBackup
+// 2.4 (#1524) is built for MySQL 5.7, the only server it backs up here.
+const physicalVersionCheck = `nsvc=; if xtrabackup --help 2>/dev/null | grep -q -- --no-server-version-check; then nsvc=--no-server-version-check; fi`
+
 // physicalInitSQL sets the root accounts back to the instance's password,
 // and gives the restored copy CloudBurrow's own account (#1993), unlogged,
-// so the server CloudBurrow reaches answers again.
-func physicalInitSQL(rootPassword string) string {
+// so the server CloudBurrow reaches answers again. version is the
+// replica's: MySQL 5.7 (#1524) or 8.0, whose statements are the same.
+func physicalInitSQL(version, rootPassword string) string {
 	pw := "'" + strings.NewReplacer(`\`, `\\`, `'`, `''`).Replace(rootPassword) + "'"
 	var sb strings.Builder
 	sb.WriteString("SET sql_log_bin = 0;\n")
@@ -198,15 +207,14 @@ func physicalInitSQL(rootPassword string) string {
 		fmt.Fprintf(&sb, "CREATE USER IF NOT EXISTS %s IDENTIFIED BY %s;\nALTER USER %s IDENTIFIED BY %s;\nGRANT ALL PRIVILEGES ON *.* TO %s WITH GRANT OPTION;\n",
 			u, pw, u, pw, u)
 	}
-	// XtraBackup's servers are MySQL 8.0 and later.
-	sb.WriteString(strings.TrimPrefix(sqladmin.MySQLSystemAccountsSQL("MYSQL_8_0", rootPassword), "SET SESSION sql_log_bin = 0;\n"))
+	sb.WriteString(strings.TrimPrefix(sqladmin.MySQLSystemAccountsSQL(version, rootPassword), "SET SESSION sql_log_bin = 0;\n"))
 	return sb.String()
 }
 
 // physicalJob is the XtraBackup Job's manifest.
 func physicalJob(namespace, instance, job string, spec sqladmin.Spec, take bool) string {
 	ext := spec.External
-	env := map[string]string{"CLOUDSQL_INIT_SQL": physicalInitSQL(spec.RootPassword)}
+	env := map[string]string{"CLOUDSQL_INIT_SQL": physicalInitSQL(spec.DatabaseVersion, spec.RootPassword)}
 	volumes := fmt.Sprintf("        - name: replica\n          persistentVolumeClaim:\n            claimName: %s\n",
 		nodeName(spec.ServerName(), spec.PrimaryNode())+"-data")
 	mounts := "            - name: replica\n              mountPath: /replica\n"
@@ -314,6 +322,16 @@ if [ -s ` + physicalInitFile + ` ]; then set -- "$@" --init-file=/var/lib/mysql/
 exec docker-entrypoint.sh "$@"
 `
 
+// physicalStart is physicalWrapper for a server of version: MySQL 5.7's
+// (#1524) starts under cloudSQLMySQL57Command's open-files limit, which
+// this command replaces, as mysqld 5.7 sizes its tables from it.
+func physicalStart(version string) string {
+	if sqladmin.IsLegacyMySQL(version) {
+		return strings.Replace(physicalWrapper, "set -e\n", "set -e\nulimit -n 1048576\n", 1)
+	}
+	return physicalWrapper
+}
+
 // scratchPhysical is whether spec's server is an ephemeral instance's
 // physically synced MySQL replica, which physicalWrapper starts.
 func (p *sqlProvisioner) scratchPhysical(spec sqladmin.Spec) bool {
@@ -368,7 +386,8 @@ done
 [ -n "$pid" ] || { echo "no mysqld in the source's pod" >&2; exit 1; }
 rm -rf /var/lib/mysql && mkdir -p /var/lib && ln -s "/proc/$pid/root/var/lib/mysql" /var/lib/mysql
 mkdir -p /tmp/xb
-xtrabackup --backup --stream=xbstream --no-server-version-check --datadir=/var/lib/mysql/data --target-dir=/tmp/xb \
+` + physicalVersionCheck + `
+xtrabackup --backup --stream=xbstream $nsvc --datadir=/var/lib/mysql/data --target-dir=/tmp/xb \
   --host=127.0.0.1 --port=3306 --user="$1" --password="$2"
 `
 
@@ -532,7 +551,7 @@ func (p *sqlProvisioner) physicalRestoreEphemeral(ctx context.Context, spec sqla
 		}
 	}
 	out.Reset()
-	env := []string{"env", "CLOUDSQL_INIT_SQL=" + physicalInitSQL(spec.RootPassword)}
+	env := []string{"env", "CLOUDSQL_INIT_SQL=" + physicalInitSQL(spec.DatabaseVersion, spec.RootPassword)}
 	if take {
 		env = append(env, "CLOUDSQL_TAKEN=1")
 	}

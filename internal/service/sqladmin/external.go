@@ -600,6 +600,9 @@ func (s *Server) startExternalSync(r *http.Request, base, project, name string) 
 	}
 	physical := req.MigrationType == "PHYSICAL"
 	if physical && spec.MySQL() {
+		if !physicalVersionSupported(spec.DatabaseVersion) {
+			return nil, physicalVersionErr(spec.DatabaseVersion)
+		}
 		if err := s.physicalUnsupported(spec); err != nil {
 			return nil, err
 		}

@@ -160,18 +160,20 @@ func TestLegacyMySQLServed(t *testing.T) {
 		t.Errorf("a standalone ZONAL MYSQL_5_7 instance: %v", err)
 	}
 	// Read replicas, REGIONAL and external replicas run in 5.7's and
-	// 5.6's statements (#1524); a physical sync is XtraBackup 8.0's.
+	// 5.6's statements (#1524); a physical sync of 5.7 is XtraBackup
+	// 2.4's, and of 5.6 400, as Google supports none.
 	replica, regional, external, physical := base, base, base, base
 	replica.MasterInstanceName, regional.AvailabilityType = "p", "REGIONAL"
 	external.External = &ExternalSource{}
 	physical.External = &ExternalSource{Physical: true}
-	for _, sp := range []Spec{replica, regional, external} {
+	for _, sp := range []Spec{replica, regional, external, physical} {
 		if err := legacyRefusal(sp); err != nil {
 			t.Errorf("%+v: %v", sp, err)
 		}
 	}
-	if err := legacyRefusal(physical); err == nil || !strings.Contains(errStatus(err), "501") {
-		t.Errorf("a MYSQL_5_7 physical external sync: %v, want 501", err)
+	physical.DatabaseVersion = "MYSQL_5_6"
+	if err := legacyRefusal(physical); err == nil || !strings.Contains(errStatus(err), "400") {
+		t.Errorf("a MYSQL_5_6 physical external sync: %v, want 400", err)
 	}
 	// A major version upgrade goes one version at a time: 5.6 to 5.7, 5.7
 	// to 8.0, where the node runs the images.

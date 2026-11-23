@@ -163,23 +163,31 @@ var cloudSQLMySQL57Command = []string{"bash", "-c", `ulimit -n 1048576 && exec d
 
 // The Percona XtraBackup images a Cloud SQL for MySQL instance's physical
 // external sync (#1570) runs as a Job, the official percona/percona-xtrabackup
-// of the instance's major version, pinned by the index digest, which
-// carries linux/amd64 and linux/arm64 (checked with docker buildx
-// imagetools inspect, 2026-10-17): XtraBackup 8.0.35-36 and 8.4.0-7. A
-// node pulls one only when a physical sync runs.
+// of the instance's major version, as Google's guide names them ("For MySQL
+// 5.7, install Percona XtraBackup 2.4"; for 8.0, XtraBackup 8.0,
+// docs.cloud.google.com/sql/docs/mysql/migrate-xtrabackup-physical-file,
+// re-read 2026-11-23). 8.0's is pinned by the index digest, which carries
+// linux/amd64 and linux/arm64 (docker buildx imagetools inspect,
+// 2026-10-17): XtraBackup 8.0.35-36. 2.4's (#1524), XtraBackup 2.4.29, is a
+// single linux/amd64 manifest, pinned by its digest (imagetools inspect,
+// 2026-11-23), and runs where MYSQL_5_7's own image does: on a node that
+// runs linux/amd64 binaries, natively or through binfmt_misc emulation. A
+// node pulls one only when a physical sync runs. Google supports no
+// physical migration of MySQL 5.6 or 8.4 ("MySQL 5.6 and 8.4 are not
+// supported"), so neither has one.
 const (
 	XtraBackup80Image = "percona/percona-xtrabackup:8.0@sha256:368c3429c4ccddc46eb88e7f6afb0dd31db28e5611a053f4bb6401e4251a3319"
-	XtraBackup84Image = "percona/percona-xtrabackup:8.4@sha256:bf1478c188271b2478faddb92a27e8378364b672b8e399c0df1c17fef8cb0ceb"
+	XtraBackup24Image = "percona/percona-xtrabackup:2.4@sha256:11b92a7f7362379fc6b0de92382706153f2ac007ebf0d7ca25bac2c7303fdf10" // 2.4.29
 )
 
 // XtraBackupImage is the XtraBackup image for a MySQL databaseVersion, or
-// "" for one it has none for.
+// "" for one Google supports no physical migration of.
 func XtraBackupImage(version string) string {
 	switch {
 	case strings.HasPrefix(version, "MYSQL_8_0"):
 		return XtraBackup80Image
-	case strings.HasPrefix(version, "MYSQL_8_4"):
-		return XtraBackup84Image
+	case version == "MYSQL_5_7":
+		return XtraBackup24Image
 	}
 	return ""
 }

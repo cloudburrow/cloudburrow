@@ -116,6 +116,36 @@ func (s *Server) physicalBackup(ctx context.Context, ext *ExternalSource) (Physi
 	return b, errs
 }
 
+// physicalVersionSupported is whether Cloud SQL migrates version from a
+// physical backup: "Cloud SQL supports physical file-based migration for
+// MySQL 5.7 and 8.0. MySQL 5.6 and 8.4 are not supported", and "MySQL 8.4
+// migrations aren't supported" among its limitations
+// (docs.cloud.google.com/sql/docs/mysql/migrate-xtrabackup-physical-file,
+// re-read 2026-11-23).
+func physicalVersionSupported(version string) bool {
+	switch versionMajor(version) {
+	case "5.7", "8.0":
+		return true
+	}
+	return false
+}
+
+// physicalVersionDetail says why a replica of version has no physical
+// migration, in the guide's words.
+func physicalVersionDetail(version string) string {
+	return "the replica is " + version + ": Cloud SQL supports physical file-based migration for MySQL 5.7 and 8.0; " +
+		"MySQL 5.6 and 8.4 are not supported, so migrate it with migrationType LOGICAL"
+}
+
+// physicalVersionErr is startExternalSync's 400 for a physical sync of a
+// replica of version, which Google does not support. UNVERIFIED (re-read
+// 2026-11-23): the guide documents the limit, not Cloud SQL's answer, so
+// the status is the one this API gives an invalid request and the
+// wording is CloudBurrow's.
+func physicalVersionErr(version string) error {
+	return Errorf(http.StatusBadRequest, "Invalid request: migrationType PHYSICAL: %s.", physicalVersionDetail(version))
+}
+
 // physicalInfoVersion is the server_version xtrabackup_info records.
 var physicalInfoVersion = regexp.MustCompile(`(?m)^server_version\s*=\s*(\S+)`)
 
@@ -162,6 +192,10 @@ func (s *Server) verifyPhysicalSync(ctx context.Context, spec Spec, addr, instal
 		return append(errs, syncError("UNSUPPORTED_MIGRATION_TYPE",
 			"migrationType PHYSICAL is for a MySQL source; a PostgreSQL source is migrated LOGICAL"))
 	}
+	if !physicalVersionSupported(spec.DatabaseVersion) {
+		return append(errs, syncError("UNSUPPORTED_MIGRATION_TYPE", physicalVersionDetail(spec.DatabaseVersion)))
+	}
+	legacy := versionMajor(spec.DatabaseVersion) == "5.7"
 	if offline {
 		errs = append(errs, syncError("UNSUPPORTED_MIGRATION_TYPE",
 			"migrationType PHYSICAL restores a backup and then replicates from the source; it has no OFFLINE syncMode"))
@@ -249,7 +283,15 @@ func (s *Server) verifyPhysicalSync(ctx context.Context, spec Spec, addr, instal
 	all := strings.Contains(grants.String(), "GRANT ALL PRIVILEGES ON *.*")
 	// SELECT, so verification sees every table's engine.
 	need := []string{"REPLICATION SLAVE", "REPLICATION CLIENT", "SELECT"}
-	if take {
+	switch {
+	case take && legacy:
+		// What XtraBackup 2.4 needs of the user it backs a MySQL 5.7
+		// source up as: RELOAD and LOCK TABLES for FLUSH TABLES WITH READ
+		// LOCK, REPLICATION CLIENT for the binary log position (above),
+		// PROCESS for SHOW ENGINE INNODB STATUS (Percona's "Connection and
+		// privileges needed", XtraBackup 2.4). 5.7 has no BACKUP_ADMIN.
+		need = append(need, "RELOAD", "LOCK TABLES", "PROCESS")
+	case take:
 		// What XtraBackup needs of the user it backs the source up as.
 		need = append(need, "RELOAD", "PROCESS", "BACKUP_ADMIN")
 	}
@@ -258,7 +300,9 @@ func (s *Server) verifyPhysicalSync(ctx context.Context, spec Spec, addr, instal
 			errs = append(errs, syncError("INSUFFICIENT_PRIVILEGE", "the replication user "+ext.User+" lacks "+p+" ON *.*"))
 		}
 	}
-	if take {
+	if take && !legacy {
+		// XtraBackup 8.0 reads performance_schema.log_status, which MySQL
+		// 5.7 has not.
 		var n int
 		if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM performance_schema.log_status").Scan(&n); err != nil {
 			errs = append(errs, syncError("INSUFFICIENT_PRIVILEGE",
