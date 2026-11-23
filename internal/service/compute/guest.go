@@ -126,6 +126,9 @@ func (s *Server) project(c call) (obj, error) {
 	}
 	out := copyObj(o)
 	out["selfLink"] = "projects/" + c.project
+	if str(out, "cloudArmorTier") == "" {
+		out["cloudArmorTier"] = "CA_STANDARD"
+	}
 	return out, nil
 }
 

@@ -378,6 +378,19 @@ func (s *Server) CertificateExists(name string) bool {
 	return ok
 }
 
+// CertificateScope is a certificate's scope (DEFAULT, EDGE_CACHE,
+// ALL_REGIONS or CLIENT_AUTH), for a backend authentication config's
+// clientCertificate; ok is false when there is none.
+func (s *Server) CertificateScope(name string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c, ok := s.res[normMap(name)].(*cmpb.Certificate)
+	if !ok {
+		return "", false
+	}
+	return c.GetScope().String(), true
+}
+
 // certsLocked are the ready certificates of names. A handshake that names
 // a managed certificate not yet issued means a load balancer serves it,
 // as Google provisions a load-balancer-authorized one only then: it is

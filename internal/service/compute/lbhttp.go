@@ -546,6 +546,12 @@ func (t *lbTransport) send(req *http.Request, body []byte, st *lbRequestState, e
 		case "H2C", "GRPC":
 			rt = h2cTransport
 		}
+		if tlsBackend {
+			// Backend authenticated TLS and mTLS (lbbackendtls.go).
+			if bt, ok := t.s.backendTLSTransport(st.set, proto == "HTTP2"); ok {
+				rt = bt
+			}
+		}
 	}
 	return rt.RoundTrip(out)
 }

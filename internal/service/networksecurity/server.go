@@ -94,6 +94,14 @@ type Hooks struct {
 	// (projects/P/locations/L/authzExtensions/E); ok is false when there is
 	// none.
 	AuthzExtension func(rel string) (scheme string, ok bool)
+	// AddressGroupReferences are the Cloud Armor security policy rules
+	// that match an address group (evaluateAddressGroup), which keep it
+	// from being deleted.
+	AddressGroupReferences func(name string) []AddressGroupReference
+	// CertificateScope is a Certificate Manager certificate's scope
+	// (DEFAULT, EDGE_CACHE, ALL_REGIONS or CLIENT_AUTH); ok is false
+	// when there is none.
+	CertificateScope func(name string) (scope string, ok bool)
 }
 
 // Server is the Network Security API.
@@ -138,16 +146,23 @@ const (
 	collClientTLS = "clientTlsPolicies"
 	collAuthz     = "authorizationPolicies"
 	collAuthzALB  = "authzPolicies"
+	collAddrGroup = "addressGroups"
+	collBackendAu = "backendAuthenticationConfigs"
 )
 
-var colls = map[string]bool{collServerTLS: true, collClientTLS: true, collAuthz: true, collAuthzALB: true}
+var colls = map[string]bool{collServerTLS: true, collClientTLS: true, collAuthz: true, collAuthzALB: true,
+	collAddrGroup: true, collBackendAu: true}
 
 // noun is a collection's resource in Google's messages.
 var noun = map[string]string{collServerTLS: "ServerTlsPolicy", collClientTLS: "ClientTlsPolicy",
-	collAuthz: "AuthorizationPolicy", collAuthzALB: "AuthzPolicy"}
+	collAuthz: "AuthorizationPolicy", collAuthzALB: "AuthzPolicy", collAddrGroup: "AddressGroup",
+	collBackendAu: "BackendAuthenticationConfig"}
 
 var (
 	parentRE = regexp.MustCompile(`^projects/([^/]+)/locations/([^/]+)$`)
+	// orgParentRE is an organization's location, the parent of its
+	// address groups (OrganizationAddressGroupService).
+	orgParentRE = regexp.MustCompile(`^organizations/([^/]+)/locations/([^/]+)$`)
 	// idRE is the IDs' rule: "1-63 characters long, containing only
 	// letters, numbers, hyphens, and underscores, and should not start
 	// with a number".
@@ -171,10 +186,25 @@ func parseParent(parent string) (project, location string, err error) {
 	return m[1], m[2], nil
 }
 
-// checkName checks an item's name, projects/P/locations/L/<coll>/ID.
+// parseOrgParent checks an organization's location,
+// organizations/O/locations/L.
+func parseOrgParent(parent string) (location string, err error) {
+	m := orgParentRE.FindStringSubmatch(parent)
+	if m == nil {
+		return "", apierror.InvalidArgument("Invalid resource field value in the request: parent %q must be organizations/{organization}/locations/{location}.", parent)
+	}
+	if !validLocation(m[2]) {
+		return "", apierror.InvalidArgument("Location '%s' is not supported.", m[2])
+	}
+	return m[2], nil
+}
+
+// checkName checks an item's name, projects/P/locations/L/<coll>/ID
+// (or organizations/O/... for an address group).
 func checkName(name, coll string) error {
 	p := strings.Split(name, "/")
-	if len(p) != 6 || p[0] != "projects" || p[2] != "locations" || p[4] != coll || p[5] == "" {
+	root := len(p) > 0 && (p[0] == "projects" || p[0] == "organizations" && coll == collAddrGroup)
+	if len(p) != 6 || !root || p[2] != "locations" || p[4] != coll || p[5] == "" {
 		return apierror.InvalidArgument("Invalid resource field value in the request: name %q is not a %s name.", name, noun[coll])
 	}
 	return nil
@@ -215,7 +245,13 @@ func setName(m proto.Message, name string) {
 
 // create adds m (a clone) as parent/coll/id after check.
 func (s *Server) create(parent, coll, idField, id string, m proto.Message, check func(m proto.Message, location string) error) (*longrunningpb.Operation, error) {
-	_, loc, err := parseParent(parent)
+	var loc string
+	var err error
+	if coll == collAddrGroup && strings.HasPrefix(parent, "organizations/") {
+		loc, err = parseOrgParent(parent)
+	} else {
+		_, loc, err = parseParent(parent)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -253,9 +289,18 @@ func (s *Server) get(coll, name string) (proto.Message, error) {
 // list are parent's coll items (every location's for "-"), sorted, copies.
 func (s *Server) list(parent, coll string) ([]proto.Message, error) {
 	all := strings.HasSuffix(parent, "/locations/-")
+	org := coll == collAddrGroup && strings.HasPrefix(parent, "organizations/")
 	if all {
-		if p := strings.TrimSuffix(parent, "/locations/-"); !strings.HasPrefix(p, "projects/") || strings.Contains(p[len("projects/"):], "/") {
-			return nil, apierror.InvalidArgument("Invalid resource field value in the request: parent %q must be projects/{project}/locations/{location}.", parent)
+		root := "projects/"
+		if org {
+			root = "organizations/"
+		}
+		if p := strings.TrimSuffix(parent, "/locations/-"); !strings.HasPrefix(p, root) || strings.Contains(p[len(root):], "/") {
+			return nil, apierror.InvalidArgument("Invalid resource field value in the request: parent %q must be %s{id}/locations/{location}.", parent, root)
+		}
+	} else if org {
+		if _, err := parseOrgParent(parent); err != nil {
+			return nil, err
 		}
 	} else if _, _, err := parseParent(parent); err != nil {
 		return nil, err
@@ -386,7 +431,7 @@ func (s *Server) opLocked(target, verb string, resp proto.Message) (*longrunning
 	}
 	var b [12]byte
 	_, _ = rand.Read(b[:])
-	name := fmt.Sprintf("projects/%s/locations/%s/operations/operation-%d-%s", projectOf(target), locationOf(target), now.UnixMilli(), hex.EncodeToString(b[:]))
+	name := fmt.Sprintf("%s/%s/locations/%s/operations/operation-%d-%s", strings.Split(target, "/")[0], projectOf(target), locationOf(target), now.UnixMilli(), hex.EncodeToString(b[:]))
 	op := &longrunningpb.Operation{Name: name, Metadata: md, Done: true, Result: &longrunningpb.Operation_Response{Response: r}}
 	s.ops[name] = op
 	if err := s.saveLocked(); err != nil {
@@ -443,6 +488,10 @@ func newOf(name string) proto.Message {
 		return &nspb.AuthorizationPolicy{}
 	case collAuthzALB:
 		return &nspb.AuthzPolicy{}
+	case collAddrGroup:
+		return &nspb.AddressGroup{}
+	case collBackendAu:
+		return &nspb.BackendAuthenticationConfig{}
 	}
 	return nil
 }

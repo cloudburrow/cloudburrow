@@ -30,3 +30,12 @@ func (s *Server) UseTrustUsers(f func(name string) []string) {
 	s.trustUsers = f
 	s.mu.Unlock()
 }
+
+// UseCertificateUsers sets what names the resources beside the target
+// proxies that use a certificate (a backend authentication config's
+// clientCertificate), which keep it from being deleted.
+func (s *Server) UseCertificateUsers(f func(name string) []string) {
+	s.mu.Lock()
+	s.certUsers = f
+	s.mu.Unlock()
+}

@@ -237,6 +237,9 @@ func (s *Server) doLocked(c call) (obj, error) {
 		return s.project(c)
 	case n == 1 && post && p[0] == "setCommonInstanceMetadata":
 		return s.setCommonInstanceMetadata(c)
+	case n == 1 && post && p[0] == "setCloudArmorTier":
+		// Cloud Armor Enterprise (#2160, lbaddressgroups.go).
+		return s.setCloudArmorTier(c)
 	case n == 1 && xpnMethod(p[0]):
 		// Shared VPC (#2140, xpn.go).
 		return s.xpn(c)

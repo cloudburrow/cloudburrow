@@ -624,13 +624,17 @@ func (s *Server) ForwardingRulePolicies(rel string) []*nspb.AuthzPolicy {
 	return out
 }
 
-// TrustConfigUsers are the server TLS policies that name a trust config.
+// TrustConfigUsers are the server TLS policies and backend
+// authentication configs that name a trust config.
 func (s *Server) TrustConfigUsers(name string) []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out []string
 	for _, k := range sortedKeys(s.res) {
 		if p, ok := s.res[k].(*nspb.ServerTlsPolicy); ok && p.GetMtlsPolicy().GetClientValidationTrustConfig() == name {
+			out = append(out, k)
+		}
+		if c, ok := s.res[k].(*nspb.BackendAuthenticationConfig); ok && c.GetTrustConfig() == name {
 			out = append(out, k)
 		}
 	}

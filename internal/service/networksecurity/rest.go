@@ -25,6 +25,9 @@ import (
 // Register serves the API, its operations and locations on g.
 func (s *Server) Register(g grpc.ServiceRegistrar) {
 	nspb.RegisterNetworkSecurityServer(g, s)
+	ag := &addressGroups{s: s}
+	nspb.RegisterAddressGroupServiceServer(g, ag)
+	nspb.RegisterOrganizationAddressGroupServiceServer(g, &orgAddressGroups{addressGroups: ag})
 	longrunningpb.RegisterOperationsServer(g, &operations{s: s})
 	locations.Register(g, &locationsServer{})
 }
@@ -109,7 +112,7 @@ func (o *operations) CancelOperation(_ context.Context, req *longrunningpb.Cance
 }
 
 func (o *operations) ListOperations(_ context.Context, req *longrunningpb.ListOperationsRequest) (*longrunningpb.ListOperationsResponse, error) {
-	if !parentRE.MatchString(req.GetName()) {
+	if !parentRE.MatchString(req.GetName()) && !orgParentRE.MatchString(req.GetName()) {
 		return nil, apierror.InvalidArgument("name %q must be projects/{project}/locations/{location}", req.GetName())
 	}
 	o.s.mu.Lock()
@@ -147,6 +150,15 @@ var mixins = []*annotations.HttpRule{
 		Pattern: &annotations.HttpRule_Get{Get: "/v1/{name=projects/*/locations/*/operations/*}"}},
 	{Selector: "google.longrunning.Operations.ListOperations",
 		Pattern: &annotations.HttpRule_Get{Get: "/v1/{name=projects/*/locations/*}/operations"}},
+	// The organizations' operations (organization address groups).
+	{Selector: "google.longrunning.Operations.CancelOperation",
+		Pattern: &annotations.HttpRule_Post{Post: "/v1/{name=organizations/*/locations/*/operations/*}:cancel"}, Body: "*"},
+	{Selector: "google.longrunning.Operations.DeleteOperation",
+		Pattern: &annotations.HttpRule_Delete{Delete: "/v1/{name=organizations/*/locations/*/operations/*}"}},
+	{Selector: "google.longrunning.Operations.GetOperation",
+		Pattern: &annotations.HttpRule_Get{Get: "/v1/{name=organizations/*/locations/*/operations/*}"}},
+	{Selector: "google.longrunning.Operations.ListOperations",
+		Pattern: &annotations.HttpRule_Get{Get: "/v1/{name=organizations/*/locations/*}/operations"}},
 }
 
 // Mixins are the bindings beyond the API's own.
@@ -173,7 +185,7 @@ func NewRESTHandler(s *Server) http.Handler {
 // /v1/projects/P/locations paths there, and answer the locations.
 func (s *Server) Handles(r *http.Request) bool {
 	path := r.URL.Path
-	if !strings.HasPrefix(path, "/v1/projects/") {
+	if !strings.HasPrefix(path, "/v1/projects/") && !strings.HasPrefix(path, "/v1/organizations/") {
 		return false
 	}
 	p := strings.Split(strings.TrimPrefix(path, "/v1/"), "/")

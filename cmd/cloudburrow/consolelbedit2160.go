@@ -225,6 +225,11 @@ func (p computeLBProvider) lbEditForm(project string, lm lbModel) *console.EditF
 					Default: strconv.FormatBool(vmMap(o, "iap")["enabled"] == true), Section: back,
 					Help: "Requests then need an identity token of a principal with IAP-secured Web App User (roles/iap.httpsResourceAccessor)."})
 			}
+			if proto := vpcStr(o, "protocol"); !bucket && (proto == "HTTPS" || proto == "HTTP2") {
+				// Advanced configurations › Backend authentication
+				// (load-balancing/docs/backend-authenticated-tls-setup).
+				fields = append(fields, lbBackendAuthFields(p.ccmBackendAuthNames(project, scope), o)...)
+			}
 		}
 	}
 	if lm.kind == "urlMap" {
@@ -317,6 +322,9 @@ func (p computeLBProvider) Edit(ctx context.Context, project string, path []stri
 		}
 		if changed("iap") {
 			patch["iap"] = map[string]any{"enabled": v["iap"] == "true"}
+		}
+		if changed("backendAuth") || changed("tlsSni") || changed("tlsSans") || changed("tlsAuthConfig") {
+			patch["tlsSettings"] = lbTLSSettings(project, scope, v)
 		}
 		if len(patch) > 0 {
 			if _, err := p.call("PATCH", project, relPath(svc), nil, patch); err != nil {
@@ -411,4 +419,81 @@ func (p computeLBProvider) Edit(ctx context.Context, project string, path []stri
 		}
 	}
 	return nil
+}
+
+// lbBackendAuthFields are the Edit page's Backend authentication section
+// of an HTTPS or HTTP/2 backend service: Enable, the SNI hostname, the
+// accepted SANs and the backend authentication config.
+func lbBackendAuthFields(configs []string, o map[string]any) []console.Field {
+	const sec = "Backend authentication"
+	ts := vmMap(o, "tlsSettings")
+	on := map[string]string{"backendAuth": "true"}
+	var sans []string
+	for _, x := range vmMaps(ts, "subjectAltNames") {
+		sans = append(sans, vpcOr(vpcStr(x, "dnsName"), vpcStr(x, "uniformResourceIdentifier")))
+	}
+	return []console.Field{
+		{Name: "backendAuth", Label: "Enable", Type: "checkbox", Default: strconv.FormatBool(ts != nil), Section: sec,
+			Help: "The load balancer then verifies its backends' certificates, and with a client certificate presents its own (backend mTLS)."},
+		{Name: "tlsSni", Label: "SNI hostname", Type: "text", Default: vpcStr(ts, "sni"), Section: sec, VisibleWhen: on, Help: "Optional."},
+		{Name: "tlsSans", Label: "Accepted SANs", Type: "text", Default: strings.Join(sans, ", "), Section: sec, VisibleWhen: on,
+			Help: "Optional, at most 5, comma separated: DNS names, or URIs such as spiffe://example.org/ns/backend. They replace the SNI hostname in the check."},
+		{Name: "tlsAuthConfig", Label: "Backend authentication config", Type: "select", Default: vpcLast(vpcStr(ts, "authenticationConfig")),
+			Options: configs, OptionLabels: map[string]string{"": "None"}, Section: sec, VisibleWhen: on},
+	}
+}
+
+// lbTLSSettings is tlsSettings from the Edit page's values; nil clears it.
+func lbTLSSettings(project, scope string, v map[string]string) any {
+	if v["backendAuth"] != "true" {
+		return nil
+	}
+	ts := map[string]any{}
+	if s := strings.TrimSpace(v["tlsSni"]); s != "" {
+		ts["sni"] = s
+	}
+	var sans []any
+	for _, x := range strings.Split(v["tlsSans"], ",") {
+		if x = strings.TrimSpace(x); x == "" {
+			continue
+		}
+		if strings.Contains(x, "://") {
+			sans = append(sans, map[string]any{"uniformResourceIdentifier": x})
+		} else {
+			sans = append(sans, map[string]any{"dnsName": x})
+		}
+	}
+	if len(sans) > 0 {
+		ts["subjectAltNames"] = sans
+	}
+	if c := strings.TrimSpace(v["tlsAuthConfig"]); c != "" {
+		loc := "global"
+		if strings.HasPrefix(scope, "regions/") {
+			loc = strings.TrimPrefix(scope, "regions/")
+		} else if scope != "global" && scope != "" {
+			loc = scope
+		}
+		ts["authenticationConfig"] = "//networksecurity.googleapis.com/projects/" + project + "/locations/" + loc + "/backendAuthenticationConfigs/" + c
+	}
+	return ts
+}
+
+// ccmBackendAuthNames are the backend authentication configs of a
+// scope's location, by name, after "" (None).
+func (p computeLBProvider) ccmBackendAuthNames(project, scope string) []string {
+	loc := "global"
+	if strings.HasPrefix(scope, "regions/") {
+		loc = strings.TrimPrefix(scope, "regions/")
+	} else if scope != "global" && scope != "" {
+		loc = scope
+	}
+	out := []string{""}
+	m, err := p.v1(context.Background(), "GET", "/v1/projects/"+project+"/locations/"+loc+"/backendAuthenticationConfigs?pageSize=500", nil)
+	if err != nil {
+		return out
+	}
+	for _, c := range vmMaps(m, "backendAuthenticationConfigs") {
+		out = append(out, vpcLast(vpcStr(c, "name")))
+	}
+	return out
 }

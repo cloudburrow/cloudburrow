@@ -66,6 +66,12 @@ var armorEnv = func() *cel.Env {
 			cel.Overload("armor_waf_string", []*cel.Type{cel.StringType}, cel.BoolType, cel.LateFunctionBinding()),
 			cel.Overload("armor_waf_string_map", []*cel.Type{cel.StringType, cel.MapType(cel.StringType, cel.DynType)}, cel.BoolType, cel.LateFunctionBinding()),
 			cel.Overload("armor_waf_string_list", []*cel.Type{cel.StringType, cel.ListType(cel.StringType)}, cel.BoolType, cel.LateFunctionBinding())),
+		cel.Function("evaluateAddressGroup",
+			cel.Overload("armor_ag_string_string", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType, cel.LateFunctionBinding()),
+			cel.Overload("armor_ag_string_string_list", []*cel.Type{cel.StringType, cel.StringType, cel.ListType(cel.StringType)}, cel.BoolType, cel.LateFunctionBinding())),
+		cel.Function("evaluateOrganizationAddressGroup",
+			cel.Overload("armor_oag_string_string", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType, cel.LateFunctionBinding()),
+			cel.Overload("armor_oag_string_string_list", []*cel.Type{cel.StringType, cel.StringType, cel.ListType(cel.StringType)}, cel.BoolType, cel.LateFunctionBinding())),
 		cel.Function("evaluatePreconfiguredExpr",
 			cel.Overload("armor_expr_string", []*cel.Type{cel.StringType}, cel.BoolType, cel.LateFunctionBinding()),
 			cel.Overload("armor_expr_string_list", []*cel.Type{cel.StringType, cel.ListType(cel.StringType)}, cel.BoolType, cel.LateFunctionBinding())),
@@ -177,6 +183,10 @@ type armorReq struct {
 	body     []byte
 	params   map[string]string
 	vars     map[string]any
+	// s and project resolve the address groups of the policy being
+	// evaluated (lbaddressgroups.go).
+	s       *Server
+	project string
 }
 
 // newArmorReq reads r's attributes; the body (up to the policy's
@@ -317,7 +327,12 @@ func (a *armorReq) ruleMatches(policy, rule obj) bool {
 		}
 		return types.Bool(a.wafMatch(string(name), opts))
 	}
-	act, err := cel.FunctionVars(vars, map[string]cel.LateBoundFunction{"evaluatePreconfiguredWaf": waf, "evaluatePreconfiguredExpr": waf})
+	fns := map[string]cel.LateBoundFunction{"evaluatePreconfiguredWaf": waf, "evaluatePreconfiguredExpr": waf}
+	if a.s != nil {
+		fns["evaluateAddressGroup"] = a.s.addressGroupBinding("evaluateAddressGroup", a.project, a)
+		fns["evaluateOrganizationAddressGroup"] = a.s.addressGroupBinding("evaluateOrganizationAddressGroup", a.project, a)
+	}
+	act, err := cel.FunctionVars(vars, fns)
 	if err != nil {
 		return false
 	}
@@ -372,6 +387,9 @@ type armorVerdict struct {
 
 // evaluate applies a policy's rules, in priority order, to a request.
 func (s *Server) armorEvaluate(policyRel string, policy obj, a *armorReq, sni string) armorVerdict {
+	if p := strings.Split(policyRel, "/"); len(p) > 1 {
+		a.s, a.project = s, p[1]
+	}
 	for _, e := range listOf(policy["rules"]) {
 		rule := objOf(e)
 		if !a.ruleMatches(policy, rule) {
