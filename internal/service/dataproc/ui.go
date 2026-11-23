@@ -225,7 +225,7 @@ func (s *Server) WebUI(next http.Handler) http.Handler {
 			for name, c := range s.clusters {
 				if c.ClusterUuid == m[1] {
 					nodes = s.nodes[name]
-					clusterName = c.ClusterName
+					clusterName = masterName(c)
 				}
 			}
 			s.mu.Unlock()
@@ -273,7 +273,7 @@ func (s *Server) WebUI(next http.Handler) http.Handler {
 			}
 		}, ModifyResponse: func(resp *http.Response) error {
 			if rewrite != "" {
-				return rewriteHadoop(resp, rewrite, base, clusterName+"-m")
+				return rewriteHadoop(resp, rewrite, base, clusterName)
 			}
 			// The History Server redirects to its own paths, which the
 			// proxy base prefixes.

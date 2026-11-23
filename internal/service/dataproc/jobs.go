@@ -473,7 +473,7 @@ func (s *Server) runJob(ctx context.Context, name string) {
 				appName = ya.ID
 			}
 			j.YarnApplications = append(j.YarnApplications, &dataprocpb.YarnApplication{Name: appName, State: st, Progress: ya.Progress / 100,
-				TrackingUrl: "http://" + cluster.GetClusterName() + "-m:8088/proxy/" + ya.ID + "/"})
+				TrackingUrl: "http://" + masterName(cluster) + ":8088/proxy/" + ya.ID + "/"})
 		}
 		if len(j.YarnApplications) > 0 && len(res.YarnApps) == 0 {
 			app := j.YarnApplications[0]

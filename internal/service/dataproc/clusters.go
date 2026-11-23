@@ -178,6 +178,35 @@ func instanceNames(cluster, group string, n int) []string {
 	return out
 }
 
+// checkLocalSSDs checks each instance group's local SSDs as DiskConfig
+// documents them: num_local_ssds "from 0 to 8", local_ssd_interface
+// "scsi" (the default) or "nvme".
+func checkLocalSSDs(cfg *dataprocpb.ClusterConfig) error {
+	for _, g := range []struct {
+		field string
+		ig    *dataprocpb.InstanceGroupConfig
+	}{{"master_config", cfg.GetMasterConfig()}, {"worker_config", cfg.GetWorkerConfig()}, {"secondary_worker_config", cfg.GetSecondaryWorkerConfig()}} {
+		d := g.ig.GetDiskConfig()
+		if n := d.GetNumLocalSsds(); n < 0 || n > 8 {
+			return apierror.InvalidArgument("%s.disk_config.num_local_ssds must be from 0 to 8, not %d", g.field, n)
+		}
+		if i := d.GetLocalSsdInterface(); i != "" && i != "scsi" && i != "nvme" {
+			return apierror.InvalidArgument("%s.disk_config.local_ssd_interface must be scsi or nvme, not %q", g.field, i)
+		}
+	}
+	return nil
+}
+
+// masterName is the host name of the cluster's (first) master,
+// CLUSTER-m, or CLUSTER-m-0 on a High Availability cluster, where the
+// ResourceManager and the other master daemons' web interfaces are.
+func masterName(c *dataprocpb.Cluster) string {
+	if names := c.GetConfig().GetMasterConfig().GetInstanceNames(); len(names) > 0 {
+		return names[0]
+	}
+	return c.GetClusterName() + "-m"
+}
+
 // checkCluster checks a cluster to create and fills in what Dataproc
 // sets by default.
 func (s *Server) checkCluster(project, region string, c *dataprocpb.Cluster) error {
@@ -223,6 +252,9 @@ func (s *Server) checkCluster(project, region string, c *dataprocpb.Cluster) err
 		return apierror.InvalidArgument("Invalid value %q for property dataproc:dataproc.iceberg.version: the supported Iceberg versions are 1.6 and 1.10", v)
 	}
 	if err := checkAuxiliaryGroups(project, region, c); err != nil {
+		return err
+	}
+	if err := checkLocalSSDs(cfg); err != nil {
 		return err
 	}
 	if cfg.MasterConfig == nil {
@@ -579,7 +611,12 @@ func clusterSpec(c *dataprocpb.Cluster) sparkproc.ClusterSpec {
 		Properties: sparkProps(c), HistoryBase: gatewayBase(c.GetClusterUuid()) + "sparkhistory",
 		GatewayBase: gatewayBase(c.GetClusterUuid()), Components: comps, ConfProperties: conf,
 		BootDiskGB:     int(ig.GetDiskConfig().GetBootDiskSizeGb()),
-		IcebergVersion: c.GetConfig().GetSoftwareConfig().GetProperties()["dataproc:dataproc.iceberg.version"]}
+		IcebergVersion: c.GetConfig().GetSoftwareConfig().GetProperties()["dataproc:dataproc.iceberg.version"],
+		Masters:        int(c.GetConfig().GetMasterConfig().GetNumInstances()),
+		LocalSSDs:      int(ig.GetDiskConfig().GetNumLocalSsds()),
+		// "Whether to mount local SSDs as Hadoop/Spark temp directories
+		// and HDFS data directories (default: true)."
+		LocalSSDsUnmounted: c.GetConfig().GetSoftwareConfig().GetProperties()["dataproc:dataproc.localssd.mount.enable"] == "false"}
 }
 
 var machineRE = regexp.MustCompile(`(?:^|/)[a-z0-9]+-(standard|highmem|highcpu)-(\d+)$`)
@@ -655,7 +692,10 @@ func (s *Server) startCluster(name, opName string, restart bool) {
 	c = s.clusters[name]
 	if c == nil || c.GetStatus().GetState() == dataprocpb.ClusterStatus_DELETING {
 		if nodes != nil {
-			go nodes.Delete()
+			go func() {
+				nodes.Delete()
+				s.deleteDisks(spec.ID)
+			}()
 		}
 		return
 	}
@@ -1217,6 +1257,8 @@ func (s *Server) deleteClusterLocked(project, region string, c *dataprocpb.Clust
 		if nodes != nil {
 			nodes.Delete()
 		}
+		// The nodes' disks go with the cluster.
+		s.deleteDisks(c.ClusterUuid)
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		if cur := s.clusters[name]; cur != nil && cur.ClusterUuid == c.ClusterUuid {

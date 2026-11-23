@@ -229,6 +229,10 @@ func (c *Cluster) writeConf(dir string, job map[string]string, jars []string) er
 			"tez.task.resource.memory.mb": "512", "tez.cluster.additional.classpath.prefix": "/cb-gcs/gcs-connector.jar",
 			"tez.am.container.reuse.enabled": "true", "tez.session.am.dag.submit.timeout.secs": "60"}
 	}
+	if yarn != nil && c.ha() {
+		// ZKFC's ensemble, on the masters.
+		core["ha.zookeeper.quorum"] = c.zkQuorum()
+	}
 	for k, v := range c.confProps("tez") {
 		tez[k] = v
 	}
@@ -460,7 +464,9 @@ func (c *Cluster) startComponents(ctx context.Context) error {
 			return err
 		}
 	}
-	if c.has(ComponentZookeeper) {
+	if c.has(ComponentZookeeper) && !c.ha() {
+		// A High Availability cluster's masters run the ensemble already
+		// (startHAQuorum).
 		if err := need(e.Zookeeper, "ZooKeeper"); err != nil {
 			return err
 		}

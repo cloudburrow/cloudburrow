@@ -295,3 +295,78 @@ func TestAllDecommissioned(t *testing.T) {
 		t.Error("decommissioned or absent host not counted")
 	}
 }
+
+// TestHDFSHighAvailabilityConf (#2188): a High Availability cluster's
+// core-site.xml names its nameservice (hdfs://CLUSTER) and the masters'
+// ZooKeeper ensemble, its hdfs-site.xml the NameNodes nn0 on -m-0 and nn1
+// on -m-1, the three masters' JournalNodes and automatic failover; and
+// HDFS checks no permissions without Ranger.
+func TestHDFSHighAvailabilityConf(t *testing.T) {
+	dir := t.TempDir()
+	c := &Cluster{d: &Docker{Ecosystem: &Ecosystem{Hive: "hive", GCS: func(context.Context) (string, error) { return "", nil }}},
+		dir: dir, spec: ClusterSpec{Name: "ha", Workers: 2, Masters: 3}}
+	if err := c.writeConf(filepath.Join(dir, "conf"), nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	read := func(name string) string {
+		b, err := os.ReadFile(filepath.Join(dir, "conf", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	for name, want := range map[string][]string{
+		"core-site.xml": {"<name>fs.defaultFS</name><value>hdfs://ha</value>",
+			"<name>ha.zookeeper.quorum</name><value>ha-m-0:2181,ha-m-1:2181,ha-m-2:2181</value>"},
+		"hdfs-site.xml": {"<name>dfs.nameservices</name><value>ha</value>", "<name>dfs.ha.namenodes.ha</name><value>nn0,nn1</value>",
+			"<name>dfs.namenode.rpc-address.ha.nn0</name><value>ha-m-0:8020</value>",
+			"<name>dfs.namenode.rpc-address.ha.nn1</name><value>ha-m-1:8020</value>",
+			"<name>dfs.namenode.http-address.ha.nn1</name><value>ha-m-1:9870</value>",
+			"<name>dfs.namenode.shared.edits.dir</name><value>qjournal://ha-m-0:8485;ha-m-1:8485;ha-m-2:8485/ha</value>",
+			"<name>dfs.ha.automatic-failover.enabled</name><value>true</value>",
+			"<name>dfs.client.failover.proxy.provider.ha</name><value>org.apache.hadoop.hdfs.server.namenode.ha.ConfiguredFailoverProxyProvider</value>",
+			"<name>dfs.permissions.enabled</name><value>false</value>"},
+		"yarn-site.xml": {"<name>yarn.resourcemanager.hostname</name><value>ha-m-0</value>"},
+	} {
+		got := read(name)
+		for _, w := range want {
+			if !strings.Contains(got, w) {
+				t.Errorf("%s lacks %s:\n%s", name, w, got)
+			}
+		}
+	}
+	if strings.Contains(read("hdfs-site.xml"), "<name>dfs.namenode.rpc-address</name>") {
+		t.Error("a High Availability cluster's hdfs-site.xml names one NameNode")
+	}
+	if got := c.masterNode(2); got != c.master+"-2" {
+		t.Errorf("masterNode(2) = %q", got)
+	}
+	if got := (&Cluster{spec: ClusterSpec{Name: "one", Masters: 1}}).nodeAlias(-1); got != "one-m" {
+		t.Errorf("a standard cluster's master = %q", got)
+	}
+}
+
+// TestLocalSSDs (#2188): a node's local SSDs are mounted at /mnt/N from
+// its disk's directory, and the NodeManager's scratch is on them, unless
+// dataproc:dataproc.localssd.mount.enable is false.
+func TestLocalSSDs(t *testing.T) {
+	root := t.TempDir()
+	c := &Cluster{d: &Docker{Disks: root}, spec: ClusterSpec{ID: "uuid-1", Name: "ssd", LocalSSDs: 2}}
+	m := c.ssdMounts("ssd-w-0")
+	want := []string{"-v", filepath.Join(root, "uuid-1", "ssd-w-0", "local-ssd-1") + ":/mnt/1",
+		"-v", filepath.Join(root, "uuid-1", "ssd-w-0", "local-ssd-2") + ":/mnt/2"}
+	if strings.Join(m, " ") != strings.Join(want, " ") {
+		t.Errorf("ssdMounts = %v; want %v", m, want)
+	}
+	if got := c.nmLocalDirs(); got != "/mnt/1/hadoop/yarn/nm-local-dir,/mnt/2/hadoop/yarn/nm-local-dir" {
+		t.Errorf("nmLocalDirs = %q", got)
+	}
+	c.spec.LocalSSDsUnmounted = true
+	if got := c.nmLocalDirs(); got != "/tmp/yarn-local" || len(c.ssdMounts("ssd-w-0")) != 0 {
+		t.Errorf("unmounted SSDs: %q %v", got, c.ssdMounts("ssd-w-0"))
+	}
+	c.d.RemoveDisks("uuid-1")
+	if _, err := os.Stat(filepath.Join(root, "uuid-1")); !os.IsNotExist(err) {
+		t.Errorf("the cluster's disks after RemoveDisks: %v", err)
+	}
+}

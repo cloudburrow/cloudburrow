@@ -15,6 +15,14 @@
 # With the RANGER component, Ranger's HDFS plugin (its shim and class
 # loader, the plugin in ranger-hdfs-plugin-impl beside them) is on the
 # NameNode's class path: CB_RANGER_HDFS is its lib directory.
+# On a High Availability cluster (CB_HA set), the NameNode on -m-0
+# (CB_HA=active) formats the name directory and the JournalNodes' shared
+# edits, the one on -m-1 (CB_HA=standby) copies it (-bootstrapStandby),
+# and each runs a ZKFailoverController beside it, which elects the active
+# NameNode through the masters' ZooKeeper ensemble.
+#   journalnode - on each master of a High Availability cluster.
+# A node's disk is mounted at /hadoop, its local SSDs at /mnt/N: with
+# CB_SSDS, the DataNode's volumes are each SSD's /mnt/N/hadoop/dfs/data.
 set -euo pipefail
 role="$1"
 export HADOOP_CONF_DIR=/cb-conf HADOOP_LOG_DIR=/tmp/hadoop-logs HADOOP_USER_NAME=hdfs
@@ -28,12 +36,42 @@ namenode)
   fi
   mkdir -p /hadoop/dfs/name
   if [ ! -f /hadoop/dfs/name/current/VERSION ]; then
-    "$hdfs" namenode -format -nonInteractive -force -clusterid "${CB_CLUSTER_ID:?}"
+    if [ "${CB_HA:-}" = standby ]; then
+      # The standby's name directory is the active one's, copied once
+      # that NameNode answers.
+      until "$hdfs" namenode -bootstrapStandby -nonInteractive -force; do
+        sleep 3
+      done
+    else
+      "$hdfs" namenode -format -nonInteractive -force -clusterid "${CB_CLUSTER_ID:?}"
+    fi
+  fi
+  if [ -n "${CB_HA:-}" ]; then
+    # ZKFC's parent znode, once per ensemble (made again on an ensemble
+    # that lost it; refused where it is there).
+    until "$hdfs" zkfc -formatZK -nonInteractive >/tmp/formatzk.log 2>&1 || grep -q 'already exists' /tmp/formatzk.log; do
+      sleep 2
+    done
   fi
   "$hdfs" namenode &
   nn=$!
+  if [ -n "${CB_HA:-}" ]; then
+    (
+      while kill -0 "$nn" 2>/dev/null; do
+        "$hdfs" zkfc || true
+        sleep 2
+      done
+    ) &
+  fi
   (
-    until "$hdfs" dfsadmin -safemode wait >/dev/null 2>&1; do
+    if [ -n "${CB_HA:-}" ]; then
+      # Through the nameservice: the active NameNode, out of safe mode.
+      until "$hdfs" dfs -mkdir -p /tmp >/dev/null 2>&1; do
+        kill -0 "$nn" 2>/dev/null || exit 1
+        sleep 2
+      done
+    fi
+    until "$hdfs" dfsadmin -safemode wait >/dev/null 2>&1 || [ -n "${CB_HA:-}" ]; do
       kill -0 "$nn" 2>/dev/null || exit 1
       sleep 2
     done
@@ -54,14 +92,30 @@ namenode)
   ) &
   wait "$nn"
   ;;
+journalnode)
+  export HADOOP_HEAPSIZE_MAX=256m
+  mkdir -p /hadoop/dfs/journalnode
+  exec "$hdfs" journalnode
+  ;;
 datanode)
   export HADOOP_HEAPSIZE_MAX=384m
-  mkdir -p /hadoop/dfs/data
+  data=/hadoop/dfs/data
   args=(-D "dfs.datanode.hostname=${CB_HOSTNAME:?}")
+  if [ -n "${CB_SSDS:-}" ]; then
+    # Each local SSD a volume, as Dataproc mounts them.
+    dirs=()
+    for i in $(seq 1 "$CB_SSDS"); do
+      mkdir -p "/mnt/$i/hadoop/dfs/data"
+      dirs+=("file:///mnt/$i/hadoop/dfs/data")
+    done
+    data=/mnt/1/hadoop/dfs/data
+    args+=(-D "dfs.datanode.data.dir=$(IFS=,; echo "${dirs[*]}")")
+  fi
+  mkdir -p "$data"
   if [ -n "${CB_DISK_GB:-}" ]; then
-    # The DataNode's capacity is its disk's: the node's boot disk size,
-    # the rest of the file system it is on reserved.
-    size=$(df -P -B1 /hadoop/dfs/data | awk 'NR==2 {print $2}')
+    # Each volume's capacity is its disk's: the node's boot disk size, or
+    # a local SSD's, the rest of the file system it is on reserved.
+    size=$(df -P -B1 "$data" | awk 'NR==2 {print $2}')
     want=$((CB_DISK_GB * 1024 * 1024 * 1024))
     if [ "$size" -gt "$want" ]; then
       args+=(-D "dfs.datanode.du.reserved=$((size - want))")

@@ -78,6 +78,16 @@ type ClusterSpec struct {
 	// cluster's master's), each DataNode's capacity; 0 is
 	// DefaultBootDiskGB.
 	BootDiskGB int
+	// Masters is the number of masters: 1, or 3 for a High Availability
+	// cluster (0 is 1).
+	Masters int
+	// LocalSSDs is the number of local SSDs of the primary workers (a
+	// single node cluster's master's), where their DataNodes and
+	// NodeManagers keep HDFS's blocks and YARN's scratch;
+	// LocalSSDsUnmounted is dataproc:dataproc.localssd.mount.enable=false,
+	// which leaves them unused.
+	LocalSSDs          int
+	LocalSSDsUnmounted bool
 }
 
 // Cluster is a running cluster.
@@ -96,6 +106,7 @@ type Cluster struct {
 	mu      sync.Mutex
 	workers []string // worker container names, in order
 	extras  []string // the components' containers, in start order
+	masters []string // a High Availability cluster's -m-1 and -m-2 nodes
 	stopped bool
 	gone    bool
 
@@ -119,7 +130,7 @@ type Cluster struct {
 // nodeAlias is a node's host name on the cluster's network.
 func (c *Cluster) nodeAlias(i int) string {
 	if i < 0 {
-		return c.spec.Name + "-m"
+		return c.masterAlias(0)
 	}
 	return fmt.Sprintf("%s-w-%d", c.spec.Name, i)
 }
@@ -307,6 +318,8 @@ func (d *Docker) StartCluster(ctx context.Context, spec ClusterSpec) (_ *Cluster
 		}
 		if c.yarnEnabled() {
 			// HDFS first: the JobHistory Server's directories are in it.
+			// It leaves safe mode once the DataNodes (Scale) report the
+			// blocks a disk kept, and the JobHistory Server starts then.
 			if err := c.startHDFS(ctx); err != nil {
 				return nil, err
 			}
@@ -316,6 +329,14 @@ func (d *Docker) StartCluster(ctx context.Context, spec ClusterSpec) (_ *Cluster
 		}
 		if err := c.Scale(ctx, spec.Workers); err != nil {
 			return nil, err
+		}
+		if c.yarnEnabled() {
+			if err := c.waitHDFS(ctx); err != nil {
+				return nil, err
+			}
+			if err := c.waitHistoryServers(ctx); err != nil {
+				return nil, err
+			}
 		}
 		if err := c.startComponents(ctx); err != nil {
 			return nil, err
@@ -438,6 +459,10 @@ func (c *Cluster) Scale(ctx context.Context, n int) error {
 			_, _ = c.d.docker(context.Background(), "rm", "-f", "-v", dockerd(last))
 		}
 		_, _ = c.d.docker(context.Background(), "rm", "-f", "-v", last)
+		if yarn {
+			// The node's disk goes with it.
+			c.d.removeDir(c.disk(c.nodeAlias(len(c.workers) - 1)))
+		}
 		c.workers = c.workers[:len(c.workers)-1]
 	}
 	for _, w := range c.workers {
@@ -453,7 +478,7 @@ func (c *Cluster) Scale(ctx context.Context, n int) error {
 
 // nodes are every container of the cluster, the relay first.
 func (c *Cluster) nodesLocked() []string {
-	nodes := append(append(append([]string{c.relay, c.master}, c.workers...), c.extras...), c.groupContainersLocked()...)
+	nodes := append(append(append(append([]string{c.relay, c.master}, c.masters...), c.workers...), c.extras...), c.groupContainersLocked()...)
 	return append(append(append(nodes, c.dataNodesLocked()...), c.nodeManagersLocked()...), c.dockerdsLocked()...)
 }
 
@@ -478,7 +503,7 @@ func (c *Cluster) Start(ctx context.Context) error {
 	workers := append([]string(nil), c.workers...)
 	var first []string
 	if c.hdfsEnabled() {
-		first = append(append(append([]string{c.relay, c.master}, c.workers...), c.nameNode()), c.dataNodesLocked()...)
+		first = c.hdfsFirstLocked()
 	}
 	c.mu.Unlock()
 	since := time.Now().Add(-5 * time.Second).UTC().Format(time.RFC3339)

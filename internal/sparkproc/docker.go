@@ -118,6 +118,10 @@ type Docker struct {
 	// Tmp holds each job's directory ("": the system's); Cache the Spark
 	// and Java trees a custom container is given ("": under Tmp).
 	Tmp, Cache string
+	// Disks holds the Dataproc clusters' nodes' disks, by cluster UUID
+	// and host name, which outlive the instance's restart ("": each
+	// cluster's own directory, removed with it).
+	Disks string
 	// Log receives each line of output; Logf the runner's own notes.
 	Log  func(LogEntry)
 	Logf func(format string, args ...any)

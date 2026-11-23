@@ -173,10 +173,15 @@ func newSparkRunner(cfg config.Config, out io.Writer, live func() map[string]str
 	} else {
 		history = ""
 	}
+	// The Dataproc clusters' nodes' disks (#2188), which outlive the
+	// instance's restart in persistent mode, as the clusters do; an
+	// ephemeral instance's clusters start afresh, and so do their disks.
+	disks := filepath.Join(cfg.InstanceDir(), "dataproc-disks")
 	d := &sparkproc.Docker{
 		Runtimes: runtimes,
 		Clusters: clusters,
 		History:  history,
+		Disks:    disks,
 		Default:  sparkDefaultRuntime,
 		BigQuery: addr("bigquery"),
 		Storage:  addr("bigquery-storage"),
@@ -192,6 +197,9 @@ func newSparkRunner(cfg config.Config, out io.Writer, live func() map[string]str
 		Cache:     cache,
 		Logf:      func(format string, args ...any) { fmt.Fprintf(out, "cloudburrow: "+format+"\n", args...) },
 		Log:       sparkLogger(func() string { return live()["logging"] }),
+	}
+	if cfg.Mode != config.ModePersistent {
+		d.RemoveDisks("")
 	}
 	return &sparkRunnerService{docker: d, addr: net.JoinHostPort(cfg.BindAddress, strconv.Itoa(cfg.Endpoints.Spark)), h: sparkproc.NewServer(d)}
 }

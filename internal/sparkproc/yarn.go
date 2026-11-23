@@ -107,6 +107,8 @@ func (c *Cluster) yarnConf(jars []string) (yarn, mapred map[string]string) {
 		mem = 4096
 	}
 	master := c.nodeAlias(-1)
+	// yarn.nodemanager.local-dirs is each NodeManager's own (nmLocalDirs,
+	// its -Dcb.nm.local.dirs): on its node's local SSDs when it has them.
 	yarn = map[string]string{
 		"yarn.resourcemanager.hostname":                                                 master,
 		"yarn.resourcemanager.bind-host":                                                "0.0.0.0",
@@ -118,7 +120,7 @@ func (c *Cluster) yarnConf(jars []string) (yarn, mapred map[string]string) {
 		"yarn.scheduler.minimum-allocation-mb":                                          "256",
 		"yarn.scheduler.maximum-allocation-mb":                                          strconv.Itoa(mem),
 		"yarn.nodemanager.vmem-check-enabled":                                           "false",
-		"yarn.nodemanager.local-dirs":                                                   "/tmp/yarn-local",
+		"yarn.nodemanager.local-dirs":                                                   "${cb.nm.local.dirs}",
 		"yarn.nodemanager.log-dirs":                                                     "/tmp/yarn-logs",
 		"yarn.nodemanager.disk-health-checker.max-disk-utilization-per-disk-percentage": "99.9",
 		"yarn.nodemanager.env-whitelist":                                                "JAVA_HOME,HADOOP_COMMON_HOME,HADOOP_HDFS_HOME,HADOOP_CONF_DIR,CLASSPATH_PREPEND_DISTCACHE,HADOOP_YARN_HOME,HADOOP_HOME,PATH,LANG,TZ,HADOOP_MAPRED_HOME",
@@ -219,14 +221,21 @@ func (c *Cluster) startYARN(ctx context.Context) error {
 	args = append(args, "-e", "HADOOP_CONF_DIR=/cb-conf", "-e", "HADOOP_CLASSPATH="+cp,
 		"-e", "YARN_RESOURCEMANAGER_HEAPSIZE=512", "-e", "HADOOP_JOB_HISTORYSERVER_HEAPSIZE=256",
 		"--entrypoint", "/bin/bash", e.Hive, "-c",
-		"(/opt/hadoop/bin/mapred historyserver &) && "+
+		// The JobHistory Server once HDFS, where its directories are, is
+		// out of safe mode and has them.
+		"(until /opt/hadoop/bin/hdfs dfsadmin -safemode get 2>/dev/null | grep -q 'Safe mode is OFF' && "+
+			"/opt/hadoop/bin/hdfs dfs -test -d /tmp/hadoop-yarn/staging/history/done_intermediate 2>/dev/null; do sleep 2; done; "+
+			"exec /opt/hadoop/bin/mapred historyserver) & "+
 			"(YARN_TIMELINESERVER_HEAPSIZE=256 /opt/hadoop/bin/yarn timelineserver &) && exec /opt/hadoop/bin/yarn resourcemanager")
 	if err := c.runComponent(ctx, "yarn", "", args...); err != nil {
 		return err
 	}
-	if err := c.waitPort(ctx, c.component("yarn"), yarnWebPort, 3*time.Minute); err != nil {
-		return err
-	}
+	return c.waitPort(ctx, c.component("yarn"), yarnWebPort, 3*time.Minute)
+}
+
+// waitHistoryServers waits for the JobHistory Server, which starts once
+// HDFS is ready, and the Timeline Server.
+func (c *Cluster) waitHistoryServers(ctx context.Context) error {
 	if err := c.waitPort(ctx, c.component("yarn"), jobHistoryWebPort, 3*time.Minute); err != nil {
 		return err
 	}
@@ -259,10 +268,11 @@ func (c *Cluster) startNodeManager(ctx context.Context, node, host string) error
 		"-v", c.HistoryDir() + ":/cb-history", "-v", filepath.Join(c.dir, "warehouse") + ":/cb-warehouse",
 		"-v", c.jar + ":/cb-connector/spark-bigquery.jar:ro"}
 	args = append(args, c.yarnMounts(gcs)...)
+	args = append(args, c.ssdMounts(host)...)
 	args = append(args, c.lakeMounts...)
 	args = append(args, c.dockerClient(true)...)
 	args = append(args, "-e", "HADOOP_CONF_DIR=/cb-conf", "-e", "HADOOP_CLASSPATH=/cb-gcs/gcs-connector.jar",
-		"-e", "YARN_NODEMANAGER_HEAPSIZE=384", "-e", "YARN_NODEMANAGER_OPTS=-Dyarn.nodemanager.hostname="+host,
+		"-e", "YARN_NODEMANAGER_HEAPSIZE=384", "-e", "YARN_NODEMANAGER_OPTS=-Dyarn.nodemanager.hostname="+host+" -Dcb.nm.local.dirs="+c.nmLocalDirs(),
 		"-e", "PYSPARK_PYTHON=python3", "--entrypoint", "/bin/bash", c.rt.Image, "/cb/nodemanager.sh")
 	if out, err := c.d.docker(ctx, args...); err != nil {
 		return &Unavailable{Msg: "start the NodeManager of " + host + ": " + out}

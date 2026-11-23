@@ -63,6 +63,20 @@ type Conn interface {
 // Docker is the Engine of a sparkproc.Docker.
 type Docker struct{ D *sparkproc.Docker }
 
+// DeleteDisks removes a deleted cluster's nodes' disks.
+func (d Docker) DeleteDisks(uuid string) { d.D.RemoveDisks(uuid) }
+
+// diskDeleter is an Engine whose clusters' disks outlive their nodes'
+// containers (the instance's restart), until the cluster is deleted.
+type diskDeleter interface{ DeleteDisks(uuid string) }
+
+// deleteDisks removes cluster uuid's disks, where the engine keeps them.
+func (s *Server) deleteDisks(uuid string) {
+	if d, ok := s.opts.Engine.(diskDeleter); ok && uuid != "" {
+		d.DeleteDisks(uuid)
+	}
+}
+
 func (d Docker) Run(ctx context.Context, job sparkproc.Job) (sparkproc.Result, error) {
 	return d.D.Run(ctx, job)
 }
@@ -274,14 +288,20 @@ func (s *Server) Reset(project string) error {
 			delete(s.nodes, name)
 		}
 	}
+	var disks []string
 	defer func() {
 		for _, n := range drop {
 			n.Delete()
 		}
+		// The forgotten clusters' disks go with them.
+		for _, uuid := range disks {
+			s.deleteDisks(uuid)
+		}
 	}()
-	for k := range s.clusters {
+	for k, c := range s.clusters {
 		if match(k) {
 			delete(s.clusters, k)
+			disks = append(disks, c.ClusterUuid)
 		}
 	}
 	for k := range s.jobs {
@@ -635,6 +655,7 @@ func (s *Server) restartClusters() {
 		switch c.GetStatus().GetState() {
 		case dataprocpb.ClusterStatus_DELETING:
 			delete(s.clusters, name)
+			go s.deleteDisks(c.ClusterUuid)
 		case dataprocpb.ClusterStatus_STOPPING:
 			s.setClusterStateLocked(c, dataprocpb.ClusterStatus_STOPPED, "")
 		case dataprocpb.ClusterStatus_STOPPED, dataprocpb.ClusterStatus_ERROR:
