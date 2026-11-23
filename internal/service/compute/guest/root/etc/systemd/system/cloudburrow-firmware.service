@@ -6,6 +6,7 @@ Before=google-guest-agent-manager.service google-guest-agent.service
 
 [Service]
 Type=oneshot
+TimeoutStartSec=200
 RemainAfterExit=yes
 PassEnvironment=CLOUDBURROW_GUEST_METADATA
 ExecStart=/usr/lib/cloudburrow/firmware

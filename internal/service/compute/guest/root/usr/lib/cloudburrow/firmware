@@ -1,6 +1,7 @@
 #!/bin/sh
 # A Shielded VM's firmware and vTPM in the guest (#2179), before Google's
-# guest agent starts (cloudburrow-firmware.service):
+# guest agent starts (cloudburrow-firmware.service); the root
+# certificate's answer waits for a first boot's vTPM to be provisioned:
 #
 #   - the vTPM: swtpm's command socket, which the vTPM container beside
 #     the guest serves at /run/vtpm/tpm.sock, is named /dev/tpm0 and
@@ -26,7 +27,7 @@ else
   exit 0
 fi
 [ -n "${CLOUDBURROW_GUEST_METADATA:-}" ] || exit 0
-root=$(curl -fsS --max-time 20 --retry 5 -H 'Metadata-Flavor: Google' "$CLOUDBURROW_GUEST_METADATA/cloudburrow/firmware/InstanceRootCACertificate") || {
+root=$(curl -fsS --max-time 150 --retry 5 -H 'Metadata-Flavor: Google' "$CLOUDBURROW_GUEST_METADATA/cloudburrow/firmware/InstanceRootCACertificate") || {
   log "no HTTPS metadata server root certificate"
   exit 0
 }

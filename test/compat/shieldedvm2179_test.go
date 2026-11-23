@@ -128,7 +128,6 @@ func (v *shieldedVM) must(cmd string) string {
 // compute client, returns the vTPM's endorsement and signing keys, whose
 // certificates certify those keys; guest attributes are held to their
 // size and rate limits.
-// covers: compute.instances.getShieldedInstanceIdentity, compute.instances.setShieldedInstanceIntegrityPolicy, compute.instances.updateShieldedInstanceConfig
 func TestShieldedVMHTTPSMetadataServer2179(t *testing.T) {
 	h := New(t)
 	opts := computeOpts(t, h)

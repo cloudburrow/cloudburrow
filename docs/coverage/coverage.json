@@ -14862,8 +14862,8 @@
     "Key": "compute",
     "Title": "Compute Engine API (v1): VPC networking",
     "counts": {
-      "Implemented": 250,
-      "Unimplemented": 100,
+      "Implemented": 253,
+      "Unimplemented": 97,
       "Verified": 201
     },
     "rows": [
@@ -16068,8 +16068,8 @@
       },
       {
         "method": "compute.instances.getShieldedInstanceIdentity",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.instances.insert",
@@ -16173,8 +16173,8 @@
       },
       {
         "method": "compute.instances.setShieldedInstanceIntegrityPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.instances.setTags",
@@ -16243,8 +16243,8 @@
       },
       {
         "method": "compute.instances.updateShieldedInstanceConfig",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "compute.machineImages.delete",

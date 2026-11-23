@@ -572,20 +572,41 @@ func (s *Server) rotateMDSRootLocked(o obj) error {
 
 // serveFirmware answers the guest firmware unit's read of a Google UEFI
 // variable (GuestPrefix TOKEN/cloudburrow/firmware/NAME): the instance's
-// root certificate, InstanceRootCACertificate.
-func (s *Server) serveFirmware(w http.ResponseWriter, rel, name string) {
-	s.mu.Lock()
-	inst, ok := s.res[rel]
-	var p mdsPKI
-	var have bool
-	if ok {
-		p, have = pkiOf(inst)
-	}
-	s.mu.Unlock()
-	if name != "InstanceRootCACertificate" || !have {
+// root certificate, InstanceRootCACertificate. It waits, as
+// serveMDSCredentials does, for a first boot's vTPM to be provisioned:
+// on Compute Engine the firmware and the vTPM are there from power on, so
+// Google's guest agent, which starts after the firmware unit and asks for
+// its credentials once, finds the credentials endpoint ready.
+func (s *Server) serveFirmware(w http.ResponseWriter, r *http.Request, rel, name string) {
+	if name != "InstanceRootCACertificate" {
 		http.NotFound(w, nil)
 		return
 	}
-	w.Header().Set("Content-Type", "application/x-pem-file")
-	_, _ = w.Write([]byte(p.RootCert))
+	deadline := time.Now().Add(2 * time.Minute)
+	for {
+		s.mu.Lock()
+		inst, ok := s.res[rel]
+		var p mdsPKI
+		var have bool
+		var ek string
+		if ok {
+			p, have = pkiOf(inst)
+			ek = str(objOf(inst["_vtpm"]), "ekEccPub")
+		}
+		s.mu.Unlock()
+		if !have {
+			http.NotFound(w, nil)
+			return
+		}
+		if ek != "" || time.Now().After(deadline) {
+			w.Header().Set("Content-Type", "application/x-pem-file")
+			_, _ = w.Write([]byte(p.RootCert))
+			return
+		}
+		select {
+		case <-r.Context().Done():
+			return
+		case <-time.After(time.Second):
+		}
+	}
 }

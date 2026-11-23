@@ -66,7 +66,7 @@ func (s *Server) serveGuest(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Missing Metadata-Flavor:Google header.", http.StatusForbidden)
 			return
 		}
-		s.serveFirmware(w, rel, name)
+		s.serveFirmware(w, r, rel, name)
 		return
 	}
 	s.serveInstanceMetadata(w, r, rel, path)
