@@ -28,6 +28,7 @@ func (s *Server) vmSpecLocked(o obj) VMSpec {
 	if h := str(o, "hostname"); h != "" {
 		sp.Hostname = h
 	}
+	sp.VTPM = vtpmOn(o)
 	if nics, _ := o["networkInterfaces"].([]any); len(nics) > 0 {
 		nic, _ := nics[0].(map[string]any)
 		sp.InternalIP = str(nic, "networkIP")
@@ -259,6 +260,12 @@ func (s *Server) instances(c call, zone string) (obj, error) {
 		return s.serialPort(c, rel, o)
 	case get && verb == "getGuestAttributes":
 		return s.getGuestAttributes(c, rel, o)
+	case get && verb == "getShieldedInstanceIdentity":
+		return s.getShieldedInstanceIdentity(rel, o)
+	case (post || c.method == http.MethodPatch) && verb == "setShieldedInstanceIntegrityPolicy":
+		return s.setIntegrityPolicy(c, scope, rel, o)
+	case c.method == http.MethodPatch && verb == "updateShieldedInstanceConfig":
+		return s.updateShieldedConfig(c, scope, rel, o, status)
 	case post && verb == "start":
 		if status == stRunning {
 			return s.done(c.project, scope, "start", rel, o["id"])
@@ -266,8 +273,14 @@ func (s *Server) instances(c call, zone string) (obj, error) {
 		if status != stTerminated {
 			return nil, notReady(rel, status)
 		}
+		if err := s.rotateMDSRootLocked(o); err != nil {
+			return nil, err
+		}
 		return s.transition(c.project, scope, "start", rel, o, stProvisioning, stRunning, stTerminated, func(ctx context.Context, vm VMSpec) error {
-			return s.opts.VMs.Start(ctx, vm)
+			if err := s.opts.VMs.Start(ctx, vm); err != nil {
+				return err
+			}
+			return s.bootVTPM(ctx, rel, vm)
 		})
 	case post && verb == "stop":
 		if status == stTerminated {
@@ -283,11 +296,17 @@ func (s *Server) instances(c call, zone string) (obj, error) {
 		if status != stRunning {
 			return nil, notReady(rel, status)
 		}
+		if err := s.rotateMDSRootLocked(o); err != nil {
+			return nil, err
+		}
 		return s.transition(c.project, scope, "reset", rel, o, stRunning, stRunning, stRunning, func(ctx context.Context, vm VMSpec) error {
 			if err := s.opts.VMs.Stop(ctx, vm); err != nil {
 				return err
 			}
-			return s.opts.VMs.Start(ctx, vm)
+			if err := s.opts.VMs.Start(ctx, vm); err != nil {
+				return err
+			}
+			return s.bootVTPM(ctx, rel, vm)
 		})
 	case post && verb == "suspend":
 		if status != stRunning {
@@ -371,7 +390,8 @@ func (s *Server) instances(c call, zone string) (obj, error) {
 var servedInstanceVerbs = map[string]bool{"serialPort": true, "getGuestAttributes": true, "start": true, "stop": true, "reset": true, "suspend": true,
 	"resume": true, "setMetadata": true, "setLabels": true, "setTags": true, "setDeletionProtection": true,
 	"setMachineType": true, "attachDisk": true, "detachDisk": true, "addResourcePolicies": true, "removeResourcePolicies": true,
-	"setScheduling": true, "addAccessConfig": true, "deleteAccessConfig": true}
+	"setScheduling": true, "addAccessConfig": true, "deleteAccessConfig": true,
+	"getShieldedInstanceIdentity": true, "setShieldedInstanceIntegrityPolicy": true, "updateShieldedInstanceConfig": true}
 
 // checkScheduling merges a scheduling update into cur as Google validates
 // it (compute/docs/instances/create-use-spot, read 2026-11-22): a Spot VM
@@ -542,7 +562,11 @@ func (s *Server) insertInstance(c call, zone string) (obj, error) {
 	if err != nil {
 		return nil, err
 	}
-	o := obj{"kind": "compute#instance", "id": newID(), "name": name, "zone": "projects/" + c.project + "/zones/" + zone,
+	shielded, err := checkShieldedConfig("resource.shieldedInstanceConfig", objOf(b["shieldedInstanceConfig"]), nil)
+	if err != nil {
+		return nil, err
+	}
+	o := obj{"shieldedInstanceConfig": shielded, "shieldedInstanceIntegrityPolicy": obj{"updateAutoLearnPolicy": true}, "kind": "compute#instance", "id": newID(), "name": name, "zone": "projects/" + c.project + "/zones/" + zone,
 		"machineType": zoneRel(c.project, zone, "machineTypes", mt), "status": stProvisioning, "selfLink": rel,
 		"creationTimestamp": s.stamp(), "disks": disks, "networkInterfaces": nics, "metadata": md,
 		"fingerprint": newFingerprint(), "labelFingerprint": labelFingerprint(nil), "canIpForward": b["canIpForward"] == true,
@@ -621,6 +645,9 @@ func (s *Server) insertInstance(c call, zone string) (obj, error) {
 			s.takeAddressLocked(st, rel)
 		}
 	}
+	if err := s.rotateMDSRootLocked(o); err != nil {
+		return nil, err
+	}
 	s.res[rel] = norm(o)
 	vm := s.vmSpecLocked(s.res[rel])
 	var specs []DiskSpec
@@ -636,8 +663,15 @@ func (s *Server) insertInstance(c call, zone string) (obj, error) {
 				return err
 			}
 		}
-		if err := s.opts.VMs.Start(ctx, vm); err != nil {
+		err := s.opts.VMs.Start(ctx, vm)
+		if err == nil {
+			err = s.bootVTPM(ctx, rel, vm)
+		}
+		if err != nil {
 			_ = s.opts.VMs.Stop(context.Background(), vm)
+			if t, ok := s.opts.VMs.(VMTPM); ok && vm.VTPM {
+				_ = t.DeleteTPM(context.Background(), vm)
+			}
 			for _, m := range specs {
 				_ = s.opts.VMs.DeleteDisk(context.Background(), m)
 			}
@@ -736,6 +770,11 @@ func (s *Server) deleteInstance(project, scope, rel string, o obj) (obj, error) 
 	return s.runOpLocked(project, scope, "delete", rel, func(ctx context.Context) error {
 		if err := s.opts.VMs.Stop(ctx, vm); err != nil {
 			return err
+		}
+		if t, ok := s.opts.VMs.(VMTPM); ok {
+			if err := t.DeleteTPM(ctx, vm); err != nil {
+				return err
+			}
 		}
 		for _, d := range specs {
 			if err := s.opts.VMs.DeleteDisk(ctx, d); err != nil {

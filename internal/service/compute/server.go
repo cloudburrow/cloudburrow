@@ -98,6 +98,11 @@ type Options struct {
 	// hands out for its service account (#2177, guestmetadata.go); nil
 	// answers them 503.
 	Tokens GuestTokens
+	// IntegrityEvents writes a Shielded VM's integrity monitoring event
+	// (#2179, vtpm.go), the jsonPayload of a
+	// compute.googleapis.com/shielded_vm_integrity entry of the
+	// instance's gce_instance resource; nil writes none.
+	IntegrityEvents func(ctx context.Context, project, zone, instanceID string, payload map[string]any)
 }
 
 // obj is one resource, as its JSON is kept: link fields hold relative
@@ -152,6 +157,10 @@ type Server struct {
 
 	srv *http.Server
 	ln  net.Listener
+	// ca issues the vTPMs' EK and AK certificates (vtpm.go).
+	ca *vtpmCA
+	// gaRate is each instance's guest attribute writes (guestmetadata.go).
+	gaRate map[string][]time.Time
 }
 
 // New returns a Server with its state restored.
@@ -189,6 +198,7 @@ func (s *Server) Start(context.Context) error {
 	if err != nil {
 		return fmt.Errorf("compute: %w", err)
 	}
+	ln = newMDSListener(s, ln)
 	s.ln = ln
 	s.srv = &http.Server{Handler: hostguard.Wrap(sysparams.Wrap(s, sysparams.Options{V1Errors: true})), ReadHeaderTimeout: 10 * time.Second}
 	go func() { _ = s.srv.Serve(ln) }()

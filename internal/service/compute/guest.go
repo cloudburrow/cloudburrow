@@ -14,6 +14,10 @@ import (
 // (#2177, guestmetadata.go).
 const GuestPrefix = "/cloudburrow/guest/"
 
+// firmwarePrefix is where the guest's firmware unit reads the instance's
+// Google UEFI variables (#2179, mdsmtls.go).
+const firmwarePrefix = "cloudburrow/firmware/"
+
 // serveGuest answers a guest's metadata read.
 func (s *Server) serveGuest(w http.ResponseWriter, r *http.Request) {
 	rest := strings.TrimPrefix(r.URL.Path, GuestPrefix)
@@ -55,6 +59,14 @@ func (s *Server) serveGuest(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 	if path == vpcSuffix {
 		s.serveVPC(w, r, inst)
+		return
+	}
+	if name, ok := strings.CutPrefix(path, firmwarePrefix); ok {
+		if r.Header.Get("Metadata-Flavor") != "Google" {
+			http.Error(w, "Missing Metadata-Flavor:Google header.", http.StatusForbidden)
+			return
+		}
+		s.serveFirmware(w, rel, name)
 		return
 	}
 	s.serveInstanceMetadata(w, r, rel, path)

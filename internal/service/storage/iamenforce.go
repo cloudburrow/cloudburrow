@@ -126,6 +126,10 @@ func (s *Server) authorizeCaller(r *http.Request, bearer, signer string, t targe
 	if d.Unauthenticated {
 		return unauthenticated()
 	}
+	if d.ScopeInsufficient {
+		// A token whose scopes do not cover the call (#2179).
+		return errorf(http.StatusForbidden, "insufficientPermissions", "Request had insufficient authentication scopes.")
+	}
 	for _, p := range all {
 		if d.Holds(p) || (hasBucket && !uniformAccess(b) && aclGrants(p, t, b, objACL, aclMembers(d, b))) {
 			continue

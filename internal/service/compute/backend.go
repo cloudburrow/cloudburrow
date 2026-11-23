@@ -85,4 +85,7 @@ type VMSpec struct {
 	GuestToken string
 	// ServiceAccount is the first serviceAccounts[] email, or "".
 	ServiceAccount string
+	// VTPM is a Shielded VM's vTPM (shieldedInstanceConfig.enableVtpm,
+	// #2179): the backend runs one beside the guest (VMTPM).
+	VTPM bool
 }

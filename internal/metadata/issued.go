@@ -44,6 +44,10 @@ type IssuedToken struct {
 	// Issued is when it was minted (#2056: a workforce subject's revoked
 	// sessions); zero in a log written before it was kept.
 	Issued time.Time `json:"issued,omitempty"`
+	// Scopes are the OAuth scopes it was minted with (#2179: a Compute
+	// Engine VM's token carries its access scopes); nil is a token whose
+	// scopes are not limited.
+	Scopes []string `json:"scopes,omitempty"`
 }
 
 // issuedLog is the instance's minted tokens.
@@ -94,9 +98,9 @@ func (c *Credentials) issued() *issuedLog {
 // record keeps a minted token and tells every hook, before the token is
 // handed out, so a service that checks it already knows it when the
 // client first sends it.
-func (l *issuedLog) record(tok, email string, ttl time.Duration) {
+func (l *issuedLog) record(tok, email string, ttl time.Duration, scopes ...string) {
 	issued := time.Now()
-	it := IssuedToken{Hash: TokenHash(tok), Email: email, Expires: issued.Add(ttl), Issued: issued}
+	it := IssuedToken{Hash: TokenHash(tok), Email: email, Expires: issued.Add(ttl), Issued: issued, Scopes: scopes}
 	l.mu.Lock()
 	now := time.Now()
 	for h, t := range l.tokens {
@@ -153,6 +157,32 @@ func (c *Credentials) MintAccessTokenFor(email string, ttl time.Duration) string
 	tok := c.MintAccessToken()
 	c.issued().record(tok, email, ttl)
 	return tok
+}
+
+// MintAccessTokenScoped is MintAccessTokenFor a token limited to scopes
+// (#2179): with IAM enforcement on, a call no scope of the token covers is
+// refused, as Google refuses it (ACCESS_TOKEN_SCOPE_INSUFFICIENT).
+func (c *Credentials) MintAccessTokenScoped(email string, scopes []string, ttl time.Duration) string {
+	tok := c.MintAccessToken()
+	if len(scopes) == 0 {
+		// A token with no scope covers nothing.
+		scopes = []string{"openid"}
+	}
+	c.issued().record(tok, email, ttl, scopes...)
+	return tok
+}
+
+// TokenScopes are the scopes a live token this instance minted carries,
+// nil for one whose scopes are not limited; ok is false for a token it
+// did not mint.
+func (c *Credentials) TokenScopes(tok string, now time.Time) (scopes []string, ok bool) {
+	h := TokenHash(tok)
+	for _, t := range c.LiveTokens(now) {
+		if t.Hash == h {
+			return t.Scopes, true
+		}
+	}
+	return nil, false
 }
 
 // assertionAccount is the account a JWT-bearer assertion names, when it is
