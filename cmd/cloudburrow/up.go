@@ -1229,6 +1229,16 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if alloyDBSvc != nil {
 		// AUTO_IAM connections present a token this instance minted.
 		alloyDBSvc.creds = creds
+		// Exports and imports (#2191) go to and from the instance's own
+		// Cloud Storage, through its tunnel's bound address.
+		if serviceEnabled(cfg, config.ServiceStorage) {
+			alloyDBSvc.storage = func() string {
+				if f := forwarderFor(forwarders, "storage"); f != nil {
+					return f.HostAddr()
+				}
+				return ""
+			}
+		}
 		alloyDBSvc.register(coord)
 	}
 	// The Backup and DR Service (#1433), over the Admin API's backups.

@@ -62,8 +62,14 @@ func (s *Server) createInstance(req *alloydbpb.CreateInstanceRequest) (*longrunn
 		return nil, apierror.FailedPrecondition("cluster %s is %s, not READY", c.GetName(), c.GetState())
 	}
 	primary := s.primaryOf(c.GetName())
+	secondary := c.GetClusterType() == alloydbpb.Cluster_SECONDARY
 	switch in.GetInstanceType() {
 	case alloydbpb.Instance_PRIMARY:
+		if secondary {
+			// UNVERIFIED: Google's message.
+			// (re-read 2026-11-23: docs.cloud.google.com/alloydb/docs/cross-region-replication/work-with-cross-region-replication.)
+			return nil, apierror.InvalidArgument("cluster %s is a SECONDARY cluster: its writable instance is a SECONDARY instance (CreateSecondaryInstance)", c.GetName())
+		}
 		if primary != nil {
 			// UNVERIFIED: Google's message.
 			// (re-read 2026-11-23: docs.cloud.google.com/alloydb/docs/reference/rest.)
@@ -81,11 +87,30 @@ func (s *Server) createInstance(req *alloydbpb.CreateInstanceRequest) (*longrunn
 			return nil, apierror.InvalidArgument("read_pool_config.node_count must be between 1 and %d", maxReadPoolNodes)
 		}
 	case alloydbpb.Instance_SECONDARY:
-		return nil, apierror.Unimplemented("SECONDARY instances are not implemented yet in CloudBurrow (#2191): there are no secondary clusters")
+		if !secondary {
+			return nil, apierror.InvalidArgument("cluster %s is a PRIMARY cluster: a SECONDARY instance belongs to a SECONDARY cluster", c.GetName())
+		}
+		if primary != nil {
+			return nil, apierror.AlreadyExists("cluster %s already has a secondary instance, %s", c.GetName(), primary.GetName())
+		}
+		if in.GetReadPoolConfig() != nil {
+			return nil, apierror.InvalidArgument("read_pool_config is only for READ_POOL instances")
+		}
+		src := s.primaryOf(c.GetSecondaryConfig().GetPrimaryClusterName())
+		if src == nil || src.GetState() != alloydbpb.Instance_READY {
+			return nil, apierror.FailedPrecondition("the primary cluster %s has no READY primary instance to replicate", c.GetSecondaryConfig().GetPrimaryClusterName())
+		}
+		if in.GetMachineConfig() == nil {
+			// The primary's machine, by default (work-with-cross-region-replication).
+			in.MachineConfig = clone(src.GetMachineConfig())
+		}
 	default:
-		return nil, apierror.InvalidArgument("instance.instance_type must be PRIMARY or READ_POOL")
+		return nil, apierror.InvalidArgument("instance.instance_type must be PRIMARY, READ_POOL or SECONDARY")
 	}
 	if err := checkMachine(in); err != nil {
+		return nil, err
+	}
+	if err := checkPooling(in); err != nil {
 		return nil, err
 	}
 	if in.GetGceZone() != "" && in.GetAvailabilityType() == alloydbpb.Instance_REGIONAL {
@@ -197,6 +222,7 @@ func (s *Server) stampInstance(name string, in *alloydbpb.Instance, c *alloydbpb
 	in.CreateTime, in.UpdateTime = now, now
 	in.State = alloydbpb.Instance_CREATING
 	in.Reconciling = true
+	in.IpAddress, in.PublicIpAddress = "", "" // OUTPUT_ONLY
 	if in.AvailabilityType == alloydbpb.Instance_AVAILABILITY_TYPE_UNSPECIFIED && in.GetInstanceType() == alloydbpb.Instance_PRIMARY {
 		in.AvailabilityType = alloydbpb.Instance_REGIONAL
 	}
@@ -216,6 +242,7 @@ func (s *Server) stampInstance(name string, in *alloydbpb.Instance, c *alloydbpb
 			CaSource: alloydbpb.SslConfig_CA_SOURCE_MANAGED}
 	}
 	s.stampAddresses(in, c)
+	stampPooling(in)
 	in.Etag = etag()
 }
 
@@ -226,7 +253,12 @@ func (s *Server) stampAddresses(in *alloydbpb.Instance, c *alloydbpb.Cluster) {
 		region = m[3]
 	}
 	host := s.connectorHost()
-	in.IpAddress = host
+	if in.GetIpAddress() == "" && !c.GetPscConfig().GetPscEnabled() {
+		in.IpAddress = s.allocateAddress()
+	}
+	if in.GetIpAddress() != "" {
+		host = in.GetIpAddress()
+	}
 	in.PublicIpAddress = ""
 	if in.GetNetworkConfig().GetEnablePublicIp() {
 		in.PublicIpAddress = host
@@ -299,10 +331,15 @@ func (s *Server) specOf(in *alloydbpb.Instance) (ServerSpec, error) {
 	for k, v := range in.GetDatabaseFlags() {
 		spec.Flags[k] = v
 	}
-	if in.GetInstanceType() == alloydbpb.Instance_READ_POOL {
-		p := s.primaryOf(m[1])
+	spec.Epoch = s.epochs[in.GetName()]
+	if t := in.GetInstanceType(); t == alloydbpb.Instance_READ_POOL || t == alloydbpb.Instance_SECONDARY {
+		source := m[1]
+		if t == alloydbpb.Instance_SECONDARY {
+			source = c.GetSecondaryConfig().GetPrimaryClusterName()
+		}
+		p := s.primaryOf(source)
 		if p == nil {
-			return ServerSpec{}, apierror.FailedPrecondition("cluster %s has no primary instance", m[1])
+			return ServerSpec{}, apierror.FailedPrecondition("cluster %s has no primary instance", source)
 		}
 		spec.ReplicaOf = serverName(p.GetName())
 		// A hot standby refuses to recover with a lower setting of these
@@ -325,6 +362,7 @@ func (s *Server) specOf(in *alloydbpb.Instance) (ServerSpec, error) {
 	} else {
 		spec.PITR = c.GetContinuousBackupConfig().GetEnabled()
 	}
+	spec.Pooler = poolerOf(in)
 	return spec, nil
 }
 
@@ -398,7 +436,7 @@ var instancePaths = map[string]struct {
 	"network_config":           {func(d, s *alloydbpb.Instance) { d.NetworkConfig = s.NetworkConfig }, false},
 	"activation_policy":        {func(d, s *alloydbpb.Instance) { d.ActivationPolicy = s.ActivationPolicy }, false},
 	"psc_instance_config":      {func(d, s *alloydbpb.Instance) { d.PscInstanceConfig = s.PscInstanceConfig }, false},
-	"connection_pool_config":   {func(d, s *alloydbpb.Instance) { d.ConnectionPoolConfig = s.ConnectionPoolConfig }, false},
+	"connection_pool_config":   {func(d, s *alloydbpb.Instance) { d.ConnectionPoolConfig = s.ConnectionPoolConfig }, true},
 	"gce_zone":                 {func(d, s *alloydbpb.Instance) { d.GceZone = s.GceZone }, false},
 }
 
@@ -464,6 +502,10 @@ func (s *Server) UpdateInstance(ctx context.Context, req *alloydbpb.UpdateInstan
 	if err := checkMachine(next); err != nil {
 		return nil, err
 	}
+	if err := checkPooling(next); err != nil {
+		return nil, err
+	}
+	stampPooling(next)
 	c := s.clusters[m[1]]
 	if err := checkFlags(next.GetDatabaseFlags(), c.GetDatabaseVersion()); err != nil {
 		return nil, err
@@ -544,6 +586,12 @@ func (s *Server) DeleteInstance(_ context.Context, req *alloydbpb.DeleteInstance
 		return nil, apierror.Aborted("etag %q does not match the instance's", req.GetEtag())
 	}
 	m := instanceRE.FindStringSubmatch(in.GetName())
+	if in.GetInstanceType() == alloydbpb.Instance_SECONDARY {
+		// UNVERIFIED: Google's message; Terraform deletes a secondary
+		// cluster with its secondary instance by deletion_policy FORCE.
+		// (re-read 2026-11-23: registry.terraform.io/providers/hashicorp/google/latest/docs/resources/alloydb_instance.)
+		return nil, apierror.FailedPrecondition("instance %s is a secondary instance: delete its secondary cluster with force, or promote the cluster first", in.GetName())
+	}
 	if in.GetInstanceType() == alloydbpb.Instance_PRIMARY {
 		for _, k := range sortedKeys(s.instances, m[1]+"/instances/") {
 			if s.instances[k].GetInstanceType() == alloydbpb.Instance_READ_POOL {
@@ -574,7 +622,11 @@ func (s *Server) DeleteInstance(_ context.Context, req *alloydbpb.DeleteInstance
 			}
 			return nil, err
 		}
+		if in, ok := s.instances[name]; ok {
+			s.releaseAddress(in)
+		}
 		delete(s.instances, name)
+		delete(s.epochs, name)
 		return nil, nil
 	})
 	return op, nil

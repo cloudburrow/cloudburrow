@@ -132,6 +132,7 @@ func (f *fakePG) saw(sub string) bool {
 // PostgreSQL, and dumps are marker files.
 type fakeEngine struct {
 	pg      *fakePG
+	pool    *fakePG
 	mu      sync.Mutex
 	running map[string]ServerSpec
 	calls   []string
@@ -201,6 +202,21 @@ func (e *fakeEngine) Load(_ context.Context, server, dir string) error {
 	e.record("load " + server)
 	return nil
 }
+func (e *fakeEngine) Promote(_ context.Context, server string) error {
+	e.record("promote " + server)
+	return nil
+}
+func (e *fakeEngine) PoolerAddr(server string, connectors bool) string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if spec, ok := e.running[server]; !ok || spec.Pooler == nil {
+		return ""
+	}
+	if connectors {
+		return e.pool.ln.Addr().String()
+	}
+	return e.pool.ln.Addr().String()
+}
 func (e *fakeEngine) PITRBase(_ context.Context, server string) error {
 	e.record("base " + server)
 	return nil
@@ -223,7 +239,7 @@ type fixture struct {
 func newFixture(t *testing.T, opts Options) *fixture {
 	t.Helper()
 	pg := newFakePG(t)
-	eng := &fakeEngine{pg: pg, running: map[string]ServerSpec{}}
+	eng := &fakeEngine{pg: pg, pool: newFakePG(t), running: map[string]ServerSpec{}}
 	dir := t.TempDir()
 	opts.Engine = eng
 	opts.BackupsDir = filepath.Join(dir, "backups")
@@ -599,13 +615,13 @@ func TestRESTVersions(t *testing.T) {
 	if op["done"] != true || r["@type"] != "type.googleapis.com/google.cloud.alloydb.v1beta.Cluster" {
 		t.Fatalf("v1beta operation = %v", op)
 	}
-	// Unimplemented methods stay UNIMPLEMENTED (501).
+	// An export with no database is refused (INVALID_ARGUMENT, 400).
 	resp, err = http.Post(srv.URL+"/v1/"+cluster+":export", "application/json", strings.NewReader(`{}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusNotImplemented {
+	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("export = %d", resp.StatusCode)
 	}
 }

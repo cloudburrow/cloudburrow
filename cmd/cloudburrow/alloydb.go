@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -41,6 +42,9 @@ type alloyDBService struct {
 	// creds mints the instance's access tokens, which an AUTO_IAM
 	// connection's token must be one of; nil checks none.
 	creds *metadata.Credentials
+	// storage is the address of the instance's Cloud Storage, for
+	// ExportCluster and ImportCluster; nil serves neither.
+	storage func() string
 
 	server    *grpctransport.Server
 	api       *alloydb.Server
@@ -112,6 +116,10 @@ func (s *alloyDBService) Start(ctx context.Context) error {
 	if net.ParseIP(s.cfg.BindAddress) == nil || net.ParseIP(s.cfg.BindAddress).IsUnspecified() {
 		opts.ConnectorHost = "127.0.0.1"
 	}
+	if s.storage != nil {
+		opts.Transfers = alloyDBTransfers{e: s.engine}
+		opts.Objects = alloyDBObjects{f: storageSourceFetcher{cfg: s.cfg, client: &http.Client{Timeout: 10 * time.Minute}, addr: s.storage}}
+	}
 	if s.creds != nil {
 		creds := s.creds
 		opts.IAMToken = func(token string) (string, bool) {
@@ -123,6 +131,12 @@ func (s *alloyDBService) Start(ctx context.Context) error {
 			}
 			return "", false
 		}
+	}
+	opts.InstanceAddresses = alloydb.DefaultInstanceAddresses()
+	if v := strings.TrimSpace(os.Getenv("CLOUDBURROW_ALLOYDB_INSTANCE_ADDRESSES")); v != "" {
+		// The addresses instances take, in order: on macOS those an
+		// administrator aliased onto lo0 (docs/alloydb.md).
+		opts.InstanceAddresses = strings.Split(v, ",")
 	}
 	api, err := alloydb.NewServer(state, filepath.Join(s.cfg.InstanceDir(), "alloydb-ca.json"), opts)
 	if err != nil {
@@ -220,12 +234,15 @@ type alloyDBEngine struct {
 	mu   sync.Mutex
 	fwds map[string]*netfwd.Forwarder
 	up   map[string]bool
+	// pools are the managed connection poolers' tunnels, by server and
+	// then by port, while their server pools connections.
+	pools map[string]map[int]*netfwd.Forwarder
 }
 
 func newAlloyDBEngine(cfg config.Config, logw io.Writer) *alloyDBEngine {
 	e := &alloyDBEngine{cfg: cfg, logw: logw,
 		inst: &components.Installer{Kubeconfig: cfg.KubeconfigPath(), Namespace: cfg.Cluster.Namespace, Instance: cfg.Name},
-		fwds: map[string]*netfwd.Forwarder{}, up: map[string]bool{}}
+		fwds: map[string]*netfwd.Forwarder{}, up: map[string]bool{}, pools: map[string]map[int]*netfwd.Forwarder{}}
 	// sqlDumper names a created instance's server sqlinst-<name>; an
 	// AlloyDB server's Deployment is its name alone.
 	e.dump = &sqlDumper{cfg: cfg, exec: func(d string) func(context.Context, io.Reader, io.Writer, ...string) error {
@@ -263,7 +280,12 @@ func (e *alloyDBEngine) backend(spec alloydb.ServerSpec) components.Backend {
 		b.Args = append(append([]string{}, b.Args...), pgPITRArgs()...)
 	}
 	if spec.ReplicaOf != "" {
-		b = components.CloudSQLReplicaBackend(b, false, components.SQLReplicaSource{Host: spec.ReplicaOf})
+		b = components.CloudSQLReplicaBackend(b, false, components.SQLReplicaSource{Host: spec.ReplicaOf, Epoch: int(spec.Epoch)})
+	}
+	if spec.Pooler != nil {
+		// Managed connection pooling: PgBouncer beside the server, as
+		// Cloud SQL's (#2141), with the connectors' pool beside it.
+		b.Sidecars = append(b.Sidecars, components.AlloyDBPoolers(spec.Pooler)...)
 	}
 	return b
 }
@@ -387,7 +409,78 @@ func (e *alloyDBEngine) Start(ctx context.Context, spec alloydb.ServerSpec) erro
 		e.mu.Unlock()
 		e.logf("AlloyDB server %s (port %d) is at %s", spec.Server, components.CloudSQLPort, f.HostAddr())
 	}
-	return e.serves(ctx, spec.Server)
+	if err := e.serves(ctx, spec.Server); err != nil {
+		return err
+	}
+	return e.syncPoolers(ctx, spec)
+}
+
+// syncPoolers starts the tunnels of spec's poolers when it pools
+// connections, and stops them when it does not.
+func (e *alloyDBEngine) syncPoolers(ctx context.Context, spec alloydb.ServerSpec) error {
+	if spec.Pooler == nil {
+		e.stopPoolers(ctx, spec.Server)
+		return nil
+	}
+	for _, port := range []int{components.AlloyDBPoolerPort, components.AlloyDBConnectorPoolerPort} {
+		e.mu.Lock()
+		f := e.pools[spec.Server][port]
+		e.mu.Unlock()
+		if f != nil {
+			continue
+		}
+		f = netfwd.New(netfwd.Target{Name: spec.Server, Namespace: e.inst.Namespace, ServicePort: port,
+			Label: fmt.Sprintf("alloydb-pooler-%s-%d", spec.Server, port)}, e.cfg.KubeconfigPath(), e.cfg.BindAddress)
+		f.Logf = e.logf
+		if err := f.Start(ctx); err != nil {
+			return fmt.Errorf("the tunnel of %s's connection pooler: %w", spec.Server, err)
+		}
+		e.mu.Lock()
+		if e.pools[spec.Server] == nil {
+			e.pools[spec.Server] = map[int]*netfwd.Forwarder{}
+		}
+		e.pools[spec.Server][port] = f
+		e.mu.Unlock()
+		e.logf("AlloyDB server %s pools connections: its pooler (port %d) is at %s", spec.Server, port, f.HostAddr())
+	}
+	return nil
+}
+
+func (e *alloyDBEngine) stopPoolers(ctx context.Context, server string) {
+	e.mu.Lock()
+	fs := e.pools[server]
+	delete(e.pools, server)
+	e.mu.Unlock()
+	for _, f := range fs {
+		_ = f.Stop(ctx)
+	}
+}
+
+func (e *alloyDBEngine) PoolerAddr(server string, connectors bool) string {
+	port := components.AlloyDBPoolerPort
+	if connectors {
+		port = components.AlloyDBConnectorPoolerPort
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if f := e.pools[server][port]; f != nil {
+		return f.HostAddr()
+	}
+	return ""
+}
+
+// Promote ends server's recovery, and waits until it takes writes.
+func (e *alloyDBEngine) Promote(ctx context.Context, server string) error {
+	_, err := e.psql(ctx, server, `DO $$BEGIN
+  IF pg_is_in_recovery() THEN
+    PERFORM pg_promote(true, 120);
+  END IF;
+END$$;
+SELECT pg_is_in_recovery();`)
+	if err != nil {
+		return fmt.Errorf("promote %s: %w", server, err)
+	}
+	return nil
 }
 
 func (e *alloyDBEngine) stopTunnel(ctx context.Context, server string) {
@@ -399,6 +492,7 @@ func (e *alloyDBEngine) stopTunnel(ctx context.Context, server string) {
 	if f != nil {
 		_ = f.Stop(ctx)
 	}
+	e.stopPoolers(ctx, server)
 }
 
 func (e *alloyDBEngine) Stop(ctx context.Context, server string) error {
@@ -470,9 +564,15 @@ func (e *alloyDBEngine) RecoverTo(ctx context.Context, server string, at time.Ti
 func (e *alloyDBEngine) Close() {
 	e.mu.Lock()
 	fs := e.fwds
-	e.fwds, e.up = map[string]*netfwd.Forwarder{}, map[string]bool{}
+	pools := e.pools
+	e.fwds, e.up, e.pools = map[string]*netfwd.Forwarder{}, map[string]bool{}, map[string]map[int]*netfwd.Forwarder{}
 	e.mu.Unlock()
 	for _, f := range fs {
 		_ = f.Stop(context.Background())
+	}
+	for _, m := range pools {
+		for _, f := range m {
+			_ = f.Stop(context.Background())
+		}
 	}
 }

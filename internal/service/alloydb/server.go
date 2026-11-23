@@ -77,6 +77,13 @@ type ServerSpec struct {
 	// Password is the postgres user's password (the cluster's initial
 	// user), "" for none.
 	Password string
+	// Epoch, for a replica, rebuilds its data from ReplicaOf when it
+	// differs from the one it was last built at: a switchover's former
+	// primary, and the replicas that follow it.
+	Epoch int64
+	// Pooler, when not nil, runs the managed connection pooler beside the
+	// server, with these PgBouncer settings.
+	Pooler map[string]string
 }
 
 // Engine runs the instances' PostgreSQL servers. Every method may take
@@ -103,6 +110,13 @@ type Engine interface {
 	PITRBase(ctx context.Context, server string) error
 	// RecoverTo dumps, into dir, the server's databases as they were at at.
 	RecoverTo(ctx context.Context, server string, at time.Time, dir string) error
+	// Promote ends a replica's recovery: it then takes writes. Start, with
+	// its spec's ReplicaOf "", follows to keep it so.
+	Promote(ctx context.Context, server string) error
+	// PoolerAddr is the host address the server's managed connection
+	// pooler answers on (the connectors' pool when connectors), "" while
+	// it has none.
+	PoolerAddr(server string, connectors bool) string
 }
 
 // Options are the server's collaborators.
@@ -120,6 +134,16 @@ type Options struct {
 	// IAMToken resolves an OAuth 2.0 access token minted by this instance
 	// to its principal's email; nil knows none.
 	IAMToken func(token string) (email string, ok bool)
+	// InstanceAddresses are the addresses instances take for their own,
+	// in order (DefaultInstanceAddresses); those the host does not have
+	// are skipped. With none, every instance has ConnectorHost.
+	InstanceAddresses []string
+	// Ports, for tests, move the instance addresses' ports.
+	Ports *ListenPorts
+	// Transfers and Objects run ExportCluster and ImportCluster; nil
+	// refuses them with FAILED_PRECONDITION.
+	Transfers Transfers
+	Objects   Objects
 	// Logf logs background failures; nil discards them.
 	Logf func(format string, args ...any)
 }
@@ -149,11 +173,16 @@ type Server struct {
 	versions map[string]string
 	// lastAuto is each cluster's last automated backup time.
 	lastAuto map[string]time.Time
+	// epochs are the rebuild epochs of replicas a switchover rebuilt, by
+	// instance name (ServerSpec.Epoch).
+	epochs map[string]int64
 	// bases are the times of each cluster's first continuous backup base
 	// on its current primary: the earliest it can be recovered to.
 	bases map[string]time.Time
 
 	ca *authority
+	// conn is the listeners, once ServeConnector runs.
+	conn *Connector
 	// work tracks the background operations, for Close.
 	work sync.WaitGroup
 }
@@ -188,6 +217,7 @@ func (s *Server) clear() {
 	s.versions = map[string]string{}
 	s.lastAuto = map[string]time.Time{}
 	s.bases = map[string]time.Time{}
+	s.epochs = map[string]int64{}
 }
 
 // Wait waits for the background operations started so far.
@@ -435,6 +465,7 @@ type diskState struct {
 	Versions  map[string]string    `json:"versions,omitempty"`
 	LastAuto  map[string]time.Time `json:"lastAuto,omitempty"`
 	Bases     map[string]time.Time `json:"bases,omitempty"`
+	Epochs    map[string]int64     `json:"epochs,omitempty"`
 }
 
 func marshalAll[T proto.Message](m map[string]T) ([]json.RawMessage, error) {
@@ -483,6 +514,7 @@ func (s *Server) save() error {
 		return err
 	}
 	st.Requests, st.Restores, st.Passwords, st.Versions, st.LastAuto, st.Bases = s.requests, s.restores, s.passwords, s.versions, s.lastAuto, s.bases
+	st.Epochs = s.epochs
 	b, err := json.MarshalIndent(st, "", "  ")
 	if err != nil {
 		return err
@@ -537,6 +569,9 @@ func (s *Server) load() error {
 	for k, v := range st.Bases {
 		s.bases[k] = v
 	}
+	for k, v := range st.Epochs {
+		s.epochs[k] = v
+	}
 	// An operation a restart interrupted ends in error, and its resource
 	// is left as it was recorded. UNVERIFIED: Google's operations survive
 	// its restarts.
@@ -570,7 +605,7 @@ func (s *Server) Resume(ctx context.Context) {
 		name, cluster string
 		spec          ServerSpec
 	}
-	var primaries, pools []job
+	var primaries, secondaries, pools []job
 	for _, name := range sortedKeys(s.instances, "") {
 		in := s.instances[name]
 		if in.GetActivationPolicy() == alloydbpb.Instance_NEVER {
@@ -581,9 +616,12 @@ func (s *Server) Resume(ctx context.Context) {
 			continue
 		}
 		cluster := instanceRE.FindStringSubmatch(name)[1]
-		if in.GetInstanceType() == alloydbpb.Instance_READ_POOL {
+		switch in.GetInstanceType() {
+		case alloydbpb.Instance_READ_POOL:
 			pools = append(pools, job{name, cluster, spec})
-		} else {
+		case alloydbpb.Instance_SECONDARY:
+			secondaries = append(secondaries, job{name, cluster, spec})
+		default:
 			primaries = append(primaries, job{name, cluster, spec})
 		}
 	}
@@ -591,7 +629,7 @@ func (s *Server) Resume(ctx context.Context) {
 	if s.opts.Engine == nil {
 		return
 	}
-	for _, j := range append(primaries, pools...) {
+	for _, j := range append(append(primaries, secondaries...), pools...) {
 		if err := s.opts.Engine.Start(ctx, j.spec); err != nil {
 			s.logf("alloydb: resuming instance %s: %v", j.name, err)
 			continue
@@ -617,6 +655,7 @@ func (s *Server) ResetProject(ctx context.Context, project string) error {
 	for k := range s.instances {
 		if strings.HasPrefix(k, prefix) {
 			servers = append(servers, serverName(k))
+			s.releaseAddress(s.instances[k])
 			delete(s.instances, k)
 		}
 	}

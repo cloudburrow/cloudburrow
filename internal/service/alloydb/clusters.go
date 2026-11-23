@@ -425,10 +425,13 @@ func locationOf(name string) string {
 	return strings.Join(parts[:4], "/")
 }
 
-// primaryOf is cluster's primary instance, or nil; the caller holds mu.
+// primaryOf is cluster's primary instance, or a secondary cluster's
+// secondary instance (the instance its read pools replicate), or nil; the
+// caller holds mu.
 func (s *Server) primaryOf(cluster string) *alloydbpb.Instance {
 	for _, k := range sortedKeys(s.instances, cluster+"/instances/") {
-		if in := s.instances[k]; in.GetInstanceType() == alloydbpb.Instance_PRIMARY {
+		if t := s.instances[k].GetInstanceType(); t == alloydbpb.Instance_PRIMARY || t == alloydbpb.Instance_SECONDARY {
+			in := s.instances[k]
 			return in
 		}
 	}
@@ -447,6 +450,12 @@ func (s *Server) DeleteCluster(_ context.Context, req *alloydbpb.DeleteClusterRe
 	}
 	if c.GetEtag() != "" && req.GetEtag() != "" && req.GetEtag() != c.GetEtag() {
 		return nil, apierror.Aborted("etag %q does not match the cluster's", req.GetEtag())
+	}
+	if n := c.GetPrimaryConfig().GetSecondaryClusterNames(); len(n) > 0 {
+		// UNVERIFIED: Google's message; the docs do not say what deleting
+		// a primary cluster with secondaries does.
+		// (re-read 2026-11-23: docs.cloud.google.com/alloydb/docs/cross-region-replication/work-with-cross-region-replication.)
+		return nil, apierror.FailedPrecondition("cluster %s has secondary clusters (%s); delete or promote them first", c.GetName(), strings.Join(n, ", "))
 	}
 	insts := sortedKeys(s.instances, c.GetName()+"/instances/")
 	if len(insts) > 0 && !req.GetForce() {
@@ -488,7 +497,14 @@ func (s *Server) DeleteCluster(_ context.Context, req *alloydbpb.DeleteClusterRe
 			return nil, err
 		}
 		for _, k := range insts {
+			if in, ok := s.instances[k]; ok {
+				s.releaseAddress(in)
+			}
 			delete(s.instances, k)
+			delete(s.epochs, k)
+		}
+		if c, ok := s.clusters[name]; ok && c.GetClusterType() == alloydbpb.Cluster_SECONDARY {
+			s.unlinkPrimaryOf(c)
 		}
 		for _, k := range sortedKeys(s.users, name+"/users/") {
 			delete(s.users, k)
@@ -762,28 +778,4 @@ func (s *Server) UpgradeCluster(_ context.Context, req *alloydbpb.UpgradeCluster
 			Message: "Cluster upgraded from " + from.String() + " to " + c.GetDatabaseVersion().String()}, nil
 	})
 	return op, nil
-}
-
-func (s *Server) ExportCluster(context.Context, *alloydbpb.ExportClusterRequest) (*longrunningpb.Operation, error) {
-	return nil, apierror.Unimplemented("ExportCluster is not implemented yet in CloudBurrow (#2191): exports to Cloud Storage are not served")
-}
-
-func (s *Server) ImportCluster(context.Context, *alloydbpb.ImportClusterRequest) (*longrunningpb.Operation, error) {
-	return nil, apierror.Unimplemented("ImportCluster is not implemented yet in CloudBurrow (#2191): imports from Cloud Storage are not served")
-}
-
-func (s *Server) CreateSecondaryCluster(context.Context, *alloydbpb.CreateSecondaryClusterRequest) (*longrunningpb.Operation, error) {
-	return nil, apierror.Unimplemented("CreateSecondaryCluster is not implemented yet in CloudBurrow (#2191): cross-region replication is not served")
-}
-
-func (s *Server) PromoteCluster(context.Context, *alloydbpb.PromoteClusterRequest) (*longrunningpb.Operation, error) {
-	return nil, apierror.Unimplemented("PromoteCluster is not implemented yet in CloudBurrow (#2191): there are no secondary clusters")
-}
-
-func (s *Server) SwitchoverCluster(context.Context, *alloydbpb.SwitchoverClusterRequest) (*longrunningpb.Operation, error) {
-	return nil, apierror.Unimplemented("SwitchoverCluster is not implemented yet in CloudBurrow (#2191): there are no secondary clusters")
-}
-
-func (s *Server) CreateSecondaryInstance(context.Context, *alloydbpb.CreateSecondaryInstanceRequest) (*longrunningpb.Operation, error) {
-	return nil, apierror.Unimplemented("CreateSecondaryInstance is not implemented yet in CloudBurrow (#2191): there are no secondary clusters")
 }

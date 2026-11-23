@@ -31,7 +31,6 @@ package alloydb
 // cluster's ca_cert is that CA. Keys never leave the host.
 
 import (
-	"bufio"
 	"context"
 	"crypto"
 	"crypto/ecdsa"
@@ -50,7 +49,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -248,127 +246,6 @@ func (s *Server) GenerateClientCertificate(_ context.Context, req *alloydbpb.Gen
 	return &alloydbpb.GenerateClientCertificateResponse{PemCertificateChain: []string{leaf, s.ca.certPEM}, CaCert: s.ca.certPEM}, nil
 }
 
-// Connector is the server-side proxy's listener.
-type Connector struct {
-	s  *Server
-	ln net.Listener
-	wg sync.WaitGroup
-}
-
-// ServeConnector listens on addr (host:5433) for the connectors, until
-// Close.
-func (s *Server) ServeConnector(addr string) (*Connector, error) {
-	ln, err := net.Listen("tcp", addr)
-	if err != nil {
-		return nil, err
-	}
-	c := &Connector{s: s, ln: ln}
-	c.wg.Add(1)
-	go c.accept()
-	return c, nil
-}
-
-// Addr is the bound address.
-func (c *Connector) Addr() string {
-	if c == nil || c.ln == nil {
-		return ""
-	}
-	return c.ln.Addr().String()
-}
-
-// Close stops the listener; connections in progress go on.
-func (c *Connector) Close() error {
-	if c == nil {
-		return nil
-	}
-	err := c.ln.Close()
-	c.wg.Wait()
-	return err
-}
-
-func (c *Connector) accept() {
-	defer c.wg.Done()
-	for {
-		conn, err := c.ln.Accept()
-		if err != nil {
-			return
-		}
-		go c.serve(conn)
-	}
-}
-
-func (c *Connector) tlsConfig(local string) *tls.Config {
-	return &tls.Config{
-		MinVersion: tls.VersionTLS13,
-		ClientAuth: tls.RequireAndVerifyClientCert,
-		ClientCAs:  c.s.ca.pool,
-		GetCertificate: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
-			name := hello.ServerName
-			if name == "" {
-				name = local
-			}
-			return c.s.ca.serverCert(name)
-		},
-	}
-}
-
-func (c *Connector) serve(raw net.Conn) {
-	defer raw.Close()
-	host := hostOnly(raw.LocalAddr().String())
-	if h := c.s.connectorHost(); net.ParseIP(h) != nil {
-		host = h
-	}
-	_ = raw.SetDeadline(time.Now().Add(30 * time.Second))
-	conn := tls.Server(raw, c.tlsConfig(host))
-	if err := conn.Handshake(); err != nil {
-		return
-	}
-	st := conn.ConnectionState()
-	if len(st.PeerCertificates) == 0 {
-		return
-	}
-	client := st.PeerCertificates[0]
-	cluster := client.Subject.CommonName
-	mdx := false
-	for _, ou := range client.Subject.OrganizationalUnit {
-		mdx = mdx || ou == mdxMarker
-	}
-	r := bufio.NewReader(conn)
-	var authType connectorspb.MetadataExchangeRequest_AuthType
-	var token string
-	if mdx {
-		req, err := readMDX(r)
-		if err != nil {
-			return
-		}
-		authType, token = req.GetAuthType(), req.GetOauth2Token()
-	}
-	addr, err := c.s.route(cluster, st.ServerName, authType, token)
-	if mdx {
-		resp := &connectorspb.MetadataExchangeResponse{ResponseCode: connectorspb.MetadataExchangeResponse_OK}
-		if err != nil {
-			resp = &connectorspb.MetadataExchangeResponse{ResponseCode: connectorspb.MetadataExchangeResponse_ERROR, Error: err.Error()}
-		}
-		if werr := writeMDX(conn, resp); werr != nil {
-			return
-		}
-	}
-	if err != nil {
-		return
-	}
-	_ = raw.SetDeadline(time.Time{})
-	backend, err := net.DialTimeout("tcp", addr, 10*time.Second)
-	if err != nil {
-		return
-	}
-	defer backend.Close()
-	done := make(chan struct{}, 2)
-	go func() { _, _ = io.Copy(backend, r); closeWrite(backend); done <- struct{}{} }()
-	go func() { _, _ = io.Copy(conn, backend); _ = conn.CloseWrite(); done <- struct{}{} }()
-	<-done
-	<-done
-}
-
 func closeWrite(c net.Conn) {
 	if t, ok := c.(*net.TCPConn); ok {
 		_ = t.CloseWrite()
@@ -404,63 +281,4 @@ func writeMDX(w io.Writer, resp *connectorspb.MetadataExchangeResponse) error {
 	binary.BigEndian.PutUint32(out, uint32(len(b)))
 	_, err = w.Write(append(out, b...))
 	return err
-}
-
-// route is the PostgreSQL address of the instance a connection reaches:
-// the instance whose PSC DNS name serverName is, or the primary of
-// cluster. An AUTO_IAM connection's token must be one this instance minted,
-// for a principal the cluster has an IAM user for.
-func (s *Server) route(cluster, sni string, auth connectorspb.MetadataExchangeRequest_AuthType, token string) (string, error) {
-	s.mu.Lock()
-	var in *alloydbpb.Instance
-	if sni != "" && net.ParseIP(sni) == nil {
-		for _, k := range sortedKeys(s.instances, cluster+"/instances/") {
-			if PSCDNSName(k) == strings.TrimSuffix(strings.ToLower(sni), ".") {
-				in = s.instances[k]
-			}
-		}
-		if in == nil {
-			s.mu.Unlock()
-			return "", fmt.Errorf("no instance of cluster %s is named %s", cluster, sni)
-		}
-	} else {
-		in = s.primaryOf(cluster)
-	}
-	if in == nil {
-		s.mu.Unlock()
-		return "", fmt.Errorf("cluster %s has no primary instance", cluster)
-	}
-	if in.GetState() != alloydbpb.Instance_READY {
-		s.mu.Unlock()
-		return "", fmt.Errorf("instance %s is %s", in.GetName(), in.GetState())
-	}
-	server := serverName(in.GetName())
-	var iamUsers []string
-	for _, k := range sortedKeys(s.users, cluster+"/users/") {
-		if s.users[k].GetUserType() == alloydbpb.User_ALLOYDB_IAM_USER {
-			iamUsers = append(iamUsers, strings.ToLower(k[strings.LastIndex(k, "/")+1:]))
-		}
-	}
-	s.mu.Unlock()
-	if auth == connectorspb.MetadataExchangeRequest_AUTO_IAM {
-		if s.opts.IAMToken == nil {
-			return "", errors.New("IAM database authentication: no token can be checked here")
-		}
-		email, ok := s.opts.IAMToken(token)
-		if !ok {
-			return "", errors.New("IAM database authentication failed: the OAuth 2.0 token is not valid")
-		}
-		found := false
-		for _, u := range iamUsers {
-			found = found || u == strings.ToLower(email)
-		}
-		if !found {
-			return "", fmt.Errorf("IAM database authentication failed: %s is not an IAM user of cluster %s", email, cluster)
-		}
-	}
-	addr := s.opts.Engine.Addr(server)
-	if addr == "" {
-		return "", fmt.Errorf("instance %s does not answer", in.GetName())
-	}
-	return addr, nil
 }

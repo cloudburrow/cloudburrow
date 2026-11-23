@@ -67,3 +67,27 @@ func CloudSQLPooler(port int, settings map[string]string) Sidecar {
 		// The image's postgres user (PgBouncer refuses to run as root).
 		RunAsUser: 70}
 }
+
+// AlloyDBPoolerPort is AlloyDB's managed connection pooler's port (#2191):
+// Google's 6432, which clients connect to directly.
+const AlloyDBPoolerPort = 6432
+
+// AlloyDBConnectorPoolerPort is the pool the AlloyDB connectors and the
+// Auth Proxy are pooled in: Google keeps them a pool of their own
+// (authproxy_pooler_count). Its clients have been authenticated by the
+// connectors' server-side proxy (the client certificate, and the token of
+// an IAM connection), as Google's is, so it checks no password: only
+// that the role exists.
+const AlloyDBConnectorPoolerPort = 6435
+
+// AlloyDBPoolers are the managed connection poolers beside an AlloyDB
+// instance's server: PgBouncer on AlloyDBPoolerPort, which checks each
+// client's password against the server's (as Cloud SQL's does), and on
+// AlloyDBConnectorPoolerPort for the connectors, with the same settings.
+func AlloyDBPoolers(settings map[string]string) []Sidecar {
+	direct := CloudSQLPooler(AlloyDBPoolerPort, settings)
+	proxied := CloudSQLPooler(AlloyDBConnectorPoolerPort, settings)
+	proxied.Name = PoolerContainer + "-connectors"
+	proxied.Command = []string{"sh", "-c", strings.Replace(poolerScript, "auth_type = md5", "auth_type = trust", 1)}
+	return []Sidecar{direct, proxied}
+}
