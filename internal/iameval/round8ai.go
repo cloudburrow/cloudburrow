@@ -186,8 +186,8 @@ func colabMethods() map[string]Method {
 		// Vertex AI Pipelines (#2173): each pipelineJobs method's page,
 		// aiplatform.pipelineJobs.create on the parent, .get, .delete and
 		// .cancel on the job, .list on the parent; the batches the
-		// permission of each job on the parent (UNVERIFIED, re-read
-		// 2026-11-22: the batchDelete and batchCancel pages name
+		// permission of each job on the parent (UNVERIFIED, re-read 2026-11-22:
+		// the batchDelete and batchCancel pages name
 		// aiplatform.pipelineJobs.delete and .cancel on the parent).
 		p + "PipelineService/": {
 			"CreatePipelineJob": {"aiplatform.pipelineJobs.create", "parent"}, "GetPipelineJob": {"aiplatform.pipelineJobs.get", "name"},

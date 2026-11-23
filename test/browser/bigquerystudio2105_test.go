@@ -536,8 +536,36 @@ func TestBigQueryStudioDataPreparationSuggestions(t *testing.T) {
 	} else {
 		p.waitForWithin(`document.querySelector(".bq-dp-suggestions .bq-dp-card, .bq-dp-suggestions [role=status], .bq-dp-suggestions [role=alert]") !== null &&
 			document.querySelector(".bq-dp-suggestions .spinner") === null`, 10*time.Minute)
-		var cards int
-		p.eval(`document.querySelectorAll(".bq-dp-card").length`, &cards)
+		var steps []string
+		p.eval(`[...document.querySelectorAll(".bq-dp-card")].map((c) => c.dataset.step)`, &steps)
+		cards := len(steps)
+		if cards == 0 {
+			var why string
+			p.eval(`document.querySelector(".bq-dp-suggestions").textContent`, &why)
+			t.Fatalf("the local model made no suggestion card: %s", why)
+		}
+		// Each suggestion is a step for this table: the SQL the data
+		// preparation compiles with it (Preview's) runs on it (#2173).
+		for _, st := range steps {
+			var step map[string]any
+			if err := json.Unmarshal([]byte(st), &step); err != nil {
+				t.Fatalf("a card's step %q: %v", st, err)
+			}
+			doc, _ := json.Marshal(map[string]any{"source": ds + ".src", "steps": []any{step}, "destination": "", "loadMode": "REPLACE"})
+			body, _ := json.Marshal(map[string]any{"content": string(doc)})
+			code, out := consoleDo(t, http.MethodPost, "/api/studio/dataform?call=dataprepsql&project="+url.QueryEscape(s.project), string(body))
+			var gen struct{ SQL string }
+			if code != http.StatusOK || json.Unmarshal([]byte(out), &gen) != nil || gen.SQL == "" {
+				t.Errorf("the suggestion %s does not compile: %d %s", st, code, out)
+				continue
+			}
+			q, _ := json.Marshal(map[string]any{"query": gen.SQL + "\n|> LIMIT 100", "legacySql": false})
+			if code, out := consoleDo(t, http.MethodPost, "/api/studio/bigquery?project="+url.QueryEscape(s.project)+"&call=query", string(q)); code != http.StatusOK {
+				t.Errorf("the suggestion %s is not a valid step for the table: its SQL %q = %d %s", st, gen.SQL, code, out)
+			} else {
+				t.Logf("suggestion %s: valid", st)
+			}
+		}
 		if cards > 0 {
 			var buttons []string
 			p.eval(`[...document.querySelectorAll(".bq-dp-card")[0].querySelectorAll("button")].map((b) => b.textContent)`, &buttons)
@@ -546,10 +574,6 @@ func TestBigQueryStudioDataPreparationSuggestions(t *testing.T) {
 			}
 			p.clickText(".bq-dp-card button", "Apply")
 			p.waitFor(`document.querySelectorAll(".bq-dp-steps li").length === 3`)
-		} else {
-			var why string
-			p.eval(`document.querySelector(".bq-dp-suggestions").textContent`, &why)
-			t.Logf("the local model made no suggestion card: %s", why)
 		}
 	}
 

@@ -2535,6 +2535,17 @@ var parityRows = []parityRow{
 			"aiplatform.projects.locations.notebookRuntimeTemplates.testIamPermissions"},
 		Provider: "colab-templates", Offers: "A runtime template's Permissions: Add principal (Grant access: New principals, Select a role) and Remove principal",
 		Tests: []string{"TestColabEnterpriseExecutionsThroughThePages"}},
+	// Vertex AI Pipelines (#2173).
+	{Resource: "Vertex AI Pipelines: runs", Service: "vertexai",
+		Methods: []string{"PipelineService/CreatePipelineJob", "PipelineService/GetPipelineJob", "PipelineService/ListPipelineJobs",
+			"PipelineService/CancelPipelineJob", "PipelineService/DeletePipelineJob"},
+		Provider: "vertex-pipeline-runs", Offers: "Pipelines' Runs: a Region menu, Create run (Create pipeline run: Upload file or Import from Cloud Storage, " +
+			"Run name, Run schedule, Advanced options' service account, Cloud storage location, Failure policy, Pipeline parameters), a run's tasks, Cancel and Delete; " +
+			"the Schedules tab (vertex-pipeline-schedules, the schedule methods' Colab row) with Pause, Resume and Delete",
+		Tests: []string{"TestVertexAIPipelinesThroughThePages"}},
+	{Resource: "Vertex AI Pipelines: batch delete and cancel", Service: "vertexai",
+		Methods:  []string{"PipelineService/BatchDeletePipelineJobs", "PipelineService/BatchCancelPipelineJobs"},
+		Excluded: "Google's Pipelines docs describe no bulk action (https://docs.cloud.google.com/vertex-ai/docs/pipelines/run-pipeline); the API's batch methods are served"},
 	{Resource: "Colab Enterprise: runtime upgrade", Service: "vertexai", Methods: []string{"NotebookService/UpgradeNotebookRuntime"},
 		Excluded: "a runtime here is always on the instance's runtime image (is_upgradable false), so Google's Upgrade, offered only for an upgradable runtime, never shows"},
 	// The Model Registry and Endpoints (#1940).

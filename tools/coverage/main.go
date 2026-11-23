@@ -238,7 +238,9 @@ var areas = []area{
 		"google.cloud.aiplatform.v1.GenAiCacheService",
 		// Colab Enterprise's runtime templates and runtimes (#2105), and
 		// its schedules of notebook executions.
-		"google.cloud.aiplatform.v1.NotebookService", "google.cloud.aiplatform.v1.ScheduleService"},
+		"google.cloud.aiplatform.v1.NotebookService", "google.cloud.aiplatform.v1.ScheduleService",
+		// Vertex AI Pipelines' pipeline jobs (#2173).
+		"google.cloud.aiplatform.v1.PipelineService"},
 		// The runtime templates' IAM policies (#2105): the IAMPolicy mixin,
 		// whose keys the kms area holds, so named by their discovery IDs.
 		Extra: []string{"aiplatform.projects.locations.notebookRuntimeTemplates.getIamPolicy",

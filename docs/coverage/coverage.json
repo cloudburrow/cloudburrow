@@ -6530,8 +6530,8 @@
     "Title": "Vertex AI PredictionService",
     "counts": {
       "Implemented": 3,
-      "Unimplemented": 7,
-      "Verified": 112
+      "Unimplemented": 12,
+      "Verified": 119
     },
     "rows": [
       {
@@ -6928,7 +6928,8 @@
         "method": "google.cloud.aiplatform.v1.NotebookService/StopNotebookRuntime",
         "status": "Verified",
         "tests": [
-          "test/compat/colabenterprise2105_test.go:199 TestColabEnterpriseRuntimes"
+          "test/compat/colabenterprise2105_test.go:199 TestColabEnterpriseRuntimes",
+          "test/compat/pipelines2173_test.go:356 TestIAMEnforcementVertexAIRunIdentity"
         ]
       },
       {
@@ -6944,6 +6945,80 @@
         "tests": [
           "test/compat/colabenterprise2105_test.go:199 TestColabEnterpriseRuntimes"
         ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.PipelineService/BatchCancelPipelineJobs",
+        "status": "Verified",
+        "tests": [
+          "test/compat/pipelines2173_test.go:158 TestVertexAIPipelineJobs"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.PipelineService/BatchDeletePipelineJobs",
+        "status": "Verified",
+        "tests": [
+          "test/compat/pipelines2173_test.go:158 TestVertexAIPipelineJobs"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.PipelineService/CancelPipelineJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/pipelines2173_test.go:158 TestVertexAIPipelineJobs"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.PipelineService/CancelTrainingPipeline",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): Vertex AI's TrainingPipelines (AutoML and custom training) are not served: CloudBurrow runs no training service; PipelineService's pipeline jobs are (#2173). Answered UNIMPLEMENTED"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.PipelineService/CreatePipelineJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/pipelines2173_test.go:158 TestVertexAIPipelineJobs"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.PipelineService/CreateTrainingPipeline",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): Vertex AI's TrainingPipelines (AutoML and custom training) are not served: CloudBurrow runs no training service; PipelineService's pipeline jobs are (#2173). Answered UNIMPLEMENTED"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.PipelineService/DeletePipelineJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/pipelines2173_test.go:158 TestVertexAIPipelineJobs"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.PipelineService/DeleteTrainingPipeline",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): Vertex AI's TrainingPipelines (AutoML and custom training) are not served: CloudBurrow runs no training service; PipelineService's pipeline jobs are (#2173). Answered UNIMPLEMENTED"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.PipelineService/GetPipelineJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/pipelines2173_test.go:158 TestVertexAIPipelineJobs"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.PipelineService/GetTrainingPipeline",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): Vertex AI's TrainingPipelines (AutoML and custom training) are not served: CloudBurrow runs no training service; PipelineService's pipeline jobs are (#2173). Answered UNIMPLEMENTED"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.PipelineService/ListPipelineJobs",
+        "status": "Verified",
+        "tests": [
+          "test/compat/pipelines2173_test.go:158 TestVertexAIPipelineJobs"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.PipelineService/ListTrainingPipelines",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): Vertex AI's TrainingPipelines (AutoML and custom training) are not served: CloudBurrow runs no training service; PipelineService's pipeline jobs are (#2173). Answered UNIMPLEMENTED"
       },
       {
         "method": "google.cloud.aiplatform.v1.PredictionService/DirectPredict",
@@ -7081,7 +7156,8 @@
         "method": "google.cloud.aiplatform.v1.ScheduleService/CreateSchedule",
         "status": "Verified",
         "tests": [
-          "test/compat/colabexecutions2105_test.go:260 TestColabEnterpriseSchedules"
+          "test/compat/colabexecutions2105_test.go:260 TestColabEnterpriseSchedules",
+          "test/compat/pipelines2173_test.go:277 TestVertexAIPipelineSchedules"
         ]
       },
       {

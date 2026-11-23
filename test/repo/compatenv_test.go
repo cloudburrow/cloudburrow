@@ -23,6 +23,9 @@ import (
 // has a value for them: each is a test-mode switch or a fixture a job makes
 // for itself. Each must still be listed in test/compat/README.md.
 var compatEnvExceptions = map[string]string{
+	// The image Vertex AI Pipelines' tasks run (#2173), which must already
+	// be on the host's Docker; no instance reports what the host holds.
+	"CLOUDBURROW_TEST_PIPELINE_IMAGE": "opt-in: an image on the host's Docker for pipeline tasks (default python:3-alpine)",
 	// The instance under test is a `-tags onnx` build whose BigQuery
 	// imports ONNX models (#1711); no instance reports which build it is.
 	"CLOUDBURROW_TEST_ONNX": "opt-in switch: the instance is an onnx build run with ONNXRUNTIME_LIB",

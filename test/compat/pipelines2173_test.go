@@ -360,7 +360,7 @@ func TestIAMEnforcementVertexAIRunIdentity(t *testing.T) {
 	h.Endpoint(EnvMetadata)
 	requireIAMEnforcement(t)
 	image := pipelineImage(t)
-	ctx, cancel := context.WithTimeout(h.Context(), 15*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	t.Cleanup(cancel)
 	project := iamProject(t, h, "ierunas-")
 	p := newIAMPrincipal(t, h, project, "ierunas")

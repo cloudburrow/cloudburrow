@@ -22090,7 +22090,7 @@ function bqDataPrepEditor(doc, onChange, ctx, { idPrefix = "bq-dp" } = {}) {
     if (!suggestions.length) return setChildren(suggestHost, head, el("p", { class: "unavailable", role: "status", text: "The local model has no suggestions for this sample." }), again);
     const col = suggestFor.startsWith("column:") ? suggestFor.slice(7) : "";
     setChildren(suggestHost, head, col ? el("p", { class: "form-help", text: `Suggestions for the column ${col}.` }) : null,
-      el("ul", { class: "bq-dp-cards", "aria-label": "Suggested steps" }, ...suggestions.map((sg, k) => el("li", { class: "bq-dp-card" },
+      el("ul", { class: "bq-dp-cards", "aria-label": "Suggested steps" }, ...suggestions.map((sg, k) => el("li", { class: "bq-dp-card", "data-step": JSON.stringify(sg.step) },
         el("p", { class: "bq-dp-card-title", text: sg.description }),
         el("p", { class: "mono bq-dp-card-step", text: stepLabel(sg.step) }),
         el("div", { class: "bq-toolbar" },
