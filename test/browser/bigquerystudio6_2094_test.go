@@ -314,13 +314,21 @@ func TestBigQuerySparkNotebookManageSessionsThroughThePage(t *testing.T) {
 	p.waitFor(`document.querySelector(".bq-notebook") !== null`)
 	more := `.bq-notebook .bq-toolbar button[aria-label="Additional connection options"]`
 	p.run(chromedp.Focus(chromedp.CSS(more)), chromedp.KeyEvent(kb.Enter))
-	p.waitFor(`document.activeElement && document.activeElement.textContent === "Connect to a runtime"`)
+	// Focus is on the first item that is enabled: Connect to a runtime
+	// when Colab Enterprise's runtimes are served, else Manage sessions.
+	p.waitFor(`document.activeElement && document.activeElement.closest(".bq-menu:not([hidden])") !== null`)
 	var opts []string
 	p.eval(`[...document.querySelectorAll(".bq-menu:not([hidden]) > .bq-menu-item")].map((b) => b.textContent)`, &opts)
 	if strings.Join(opts, "|") != "Connect to a runtime|Manage sessions" {
 		t.Errorf("the runtime selector's items are %v", opts)
 	}
-	p.run(chromedp.KeyEvent(kb.ArrowDown), chromedp.KeyEvent(kb.Enter))
+	var first string
+	p.eval(`document.activeElement.textContent`, &first)
+	if first != "Manage sessions" {
+		p.run(chromedp.KeyEvent(kb.ArrowDown))
+	}
+	p.waitFor(`document.activeElement.textContent === "Manage sessions"`)
+	p.run(chromedp.KeyEvent(kb.Enter))
 	p.waitFor(`document.querySelector("#bq-sessions-title") !== null`)
 	var title string
 	p.eval(`document.querySelector("#bq-sessions-title").textContent`, &title)
@@ -329,6 +337,7 @@ func TestBigQuerySparkNotebookManageSessionsThroughThePage(t *testing.T) {
 	}
 	term := fmt.Sprintf(`.bq-sessions button[aria-label="Terminate session %s"]`, id)
 	p.waitFor(fmt.Sprintf(`document.querySelector(%q) !== null`, term))
+	p.waitFor(`document.getAnimations().every((a) => a.playState !== "running")`)
 	for _, fl := range p.keyboardFailures() {
 		t.Errorf("Active sessions: %s", fl)
 	}
@@ -339,7 +348,10 @@ func TestBigQuerySparkNotebookManageSessionsThroughThePage(t *testing.T) {
 		t.Errorf("Active sessions: an unnamed %s", u)
 	}
 	p.run(chromedp.Focus(chromedp.CSS(term)), chromedp.KeyEvent(kb.Enter))
-	p.pressConfirm("Terminate")
+	// The confirmation opens over Active sessions, which stays open.
+	p.confirmOnlyDialogLabelled("Terminate")
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open form[data-confirm] .modal-actions button.danger`)))
+	p.waitFor(`document.querySelector(".modal.is-open form[data-confirm]") === null && document.querySelector("#bq-sessions-title") !== null`)
 	deadline = time.Now().Add(3 * time.Minute)
 	for st := state(); st != "TERMINATED" && st != "TERMINATING"; st = state() {
 		if time.Now().After(deadline) {
@@ -348,4 +360,11 @@ func TestBigQuerySparkNotebookManageSessionsThroughThePage(t *testing.T) {
 		time.Sleep(2 * time.Second)
 	}
 	p.waitForWithin(fmt.Sprintf(`document.querySelector(%q) === null`, term), time.Minute)
+
+	auditScreens(t, []a11yPage{
+		{"Studio Active sessions", "/bigquery-studio" + q, `document.querySelector(".bq-tree") !== null`,
+			`[...document.querySelectorAll(".bq-home-action")].find((b) => b.textContent.trim() === "Apache Spark notebook").click();
+			 setTimeout(() => { document.querySelector(` + fmt.Sprintf("%q", more) + `).click();
+			   [...document.querySelectorAll(".bq-menu-item")].find((x) => x.textContent === "Manage sessions" && x.offsetParent !== null).click(); }, 300)`},
+	})
 }

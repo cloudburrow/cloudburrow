@@ -125,14 +125,15 @@ func TestBigQueryStudioExplorerEditorAndHistory(t *testing.T) {
 		t.Errorf("the validator says %q", validator)
 	}
 
-	// Schedule is Google's menu, served since #2094 (2026-11-23): Create
-	// new scheduled query, and Update scheduled query for a scheduled
-	// query's own tab (TestBigQueryStudioScheduleThroughThePage saves both).
+	// Schedule is in Google's File menu (#2094, 2026-11-23): File >
+	// Schedule on a query that is no scheduled query's, a plain item
+	// (TestBigQueryStudioScheduleThroughThePage saves it and its Update
+	// scheduled query).
 	var schedule string
-	p.eval(`(() => { const b = document.querySelector(".bq-toolbar .bq-menu-button[aria-label=Schedule]");
+	p.eval(`(() => { const b = [...document.querySelectorAll(".bq-toolbar .bq-menu-button[aria-label=File]")].find((x) => x.offsetParent !== null);
 		return b && !b.disabled ? [...b.parentNode.querySelectorAll(".bq-menu-item")].map((i) => i.textContent).join("|") : ""; })()`, &schedule)
-	if schedule != "Create new scheduled query|Update scheduled query" {
-		t.Errorf("Schedule's menu is %q", schedule)
+	if schedule != "Schedule" {
+		t.Errorf("File's menu is %q, want Schedule", schedule)
 	}
 
 	// Run: Query results with Google's tabs, on Results.
