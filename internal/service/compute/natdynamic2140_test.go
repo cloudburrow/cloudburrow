@@ -64,6 +64,9 @@ func TestNATDynamicPortsAndEndpointIndependentMapping2140(t *testing.T) {
 		return out
 	}
 	key := s.NATGateways()[0].Key
+	if g := s.NATGateways()[0]; !strings.Contains(natNFT(g, nil), "snat ip to "+g.VMs[0].NatIP+":1024-1055 random comment") {
+		t.Fatalf("without Endpoint-Independent Mapping the mapping is not per connection:\n%s", natNFT(g, nil))
+	}
 	if pr := ports(); pr[ip["a"]] != [2]int{1024, 1055} || pr[ip["b"]] != [2]int{1056, 1087} {
 		t.Fatalf("initial: %v", pr)
 	}

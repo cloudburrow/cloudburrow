@@ -75,7 +75,7 @@ func TestIPv6LoadBalancerFrontendThroughTheBrowser2140(t *testing.T) {
 		k.tabTo(`a.closest(".create-step-continue") !== null && a.textContent.trim() === "Continue"`)
 		k.run(chromedp.KeyEvent(kb.Enter))
 		k.waitFor(`(() => { const f = document.querySelector("#f-ipVersion-0"); return !!f && f.getClientRects().length > 0; })()`)
-		k.tabTo(`a.name === "ipVersion"`)
+		k.tabTo(`a.name === "f-ipVersion-choice"`)
 		k.run(chromedp.KeyEvent(kb.ArrowRight))
 		k.waitFor(`document.querySelector("#f-ipVersion-1").checked && !document.querySelector("#f-subnetwork").closest(".form-row").hidden`)
 		k.tabTo(`a.id === "f-subnetwork"`)

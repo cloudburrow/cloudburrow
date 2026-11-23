@@ -585,7 +585,11 @@ func natNFT(g NATGateway, peerPods []string) string {
 			}
 			fmt.Fprintf(&b, " } comment %q\n", v.Name)
 		} else {
-			fmt.Fprintf(&b, "    oifname \"eth0\" ip saddr %s meta l4proto { tcp, udp } snat ip to %s:%d-%d comment %q\n", v.IP, v.NatIP, v.PortLo, v.PortHi, v.Name)
+			// Without it the mapping is per connection: "random" keeps
+			// Linux from reusing an internal IP:port's earlier mapping for
+			// a new destination (find_appropriate_src), which would be
+			// endpoint-independent.
+			fmt.Fprintf(&b, "    oifname \"eth0\" ip saddr %s meta l4proto { tcp, udp } snat ip to %s:%d-%d random comment %q\n", v.IP, v.NatIP, v.PortLo, v.PortHi, v.Name)
 		}
 		fmt.Fprintf(&b, "    oifname \"eth0\" ip saddr %s snat ip to %s\n", v.IP, v.NatIP)
 	}
