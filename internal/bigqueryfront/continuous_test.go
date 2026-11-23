@@ -151,6 +151,12 @@ func TestReservationAPIRules(t *testing.T) {
 		{"POST", base + "/capacityCommitments?capacityCommitmentId=c1", `{"slotCount":"100","plan":"ANNUAL"}`, 200},
 		{"DELETE", base + "/capacityCommitments/c1", ``, 400},
 		{"POST", base + "/capacityCommitments/c1:split", `{"slotCount":"50"}`, 200},
+		{"POST", base + ":upgradeEdition", `{"reservations":["projects/p/locations/US/reservations/big"],"targetEdition":"STANDARD"}`, 400},
+		{"POST", base + ":upgradeEdition", `{"reservations":["projects/p/locations/US/reservations/big"],"targetEdition":"ENTERPRISE"}`, 400},
+		{"POST", base + ":upgradeEdition", `{"reservations":["projects/p/locations/US/reservations/big"],"targetEdition":"ENTERPRISE_PLUS"}`, 400},
+		{"POST", base + ":upgradeEdition", `{"reservations":["projects/p/locations/US/reservations/gone"],"targetEdition":"ENTERPRISE_PLUS"}`, 404},
+		{"POST", base + ":upgradeEdition", `{"reservations":["projects/p/locations/US/reservations/std"]}`, 200},
+		{"GET", base + ":upgradeEdition", ``, 405},
 	}
 	for _, c := range cases {
 		code, out := resvCall(t, s, c.method, c.path, c.body)

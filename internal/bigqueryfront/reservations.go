@@ -340,7 +340,7 @@ func (s *bqReservations) serve(w http.ResponseWriter, r *http.Request) bool {
 	rest := parts[4:]
 	switch {
 	case len(rest) == 0:
-		if req.verb != "searchAssignments" && req.verb != "searchAllAssignments" {
+		if req.verb != "searchAssignments" && req.verb != "searchAllAssignments" && req.verb != "upgradeEdition" {
 			return false
 		}
 		req.onLocation = true
@@ -457,6 +457,12 @@ func bodyKeys(b []byte) []string {
 
 func (s *bqReservations) call(req resvRequest) (any, error) {
 	if req.onLocation {
+		if req.verb == "upgradeEdition" {
+			if req.method != http.MethodPost {
+				return nil, methodNotAllowed(req)
+			}
+			return s.upgradeEdition(req)
+		}
 		if req.method != http.MethodGet {
 			return nil, methodNotAllowed(req)
 		}
@@ -592,6 +598,9 @@ func (s *bqReservations) callReservation(req resvRequest) (any, error) {
 			if err := decodeInto(req.body, rv); err != nil {
 				return nil, err
 			}
+			if err := checkSecondary(rv.GetEdition(), req.location, rv.GetSecondaryLocation()); err != nil {
+				return nil, err
+			}
 			if err := checkSlots(rv); err != nil {
 				return nil, err
 			}
@@ -644,8 +653,8 @@ func (s *bqReservations) callReservation(req resvRequest) (any, error) {
 		rv.UpdateTime = now
 		return rv, nil
 	case "getIamPolicy", "setIamPolicy", "testIamPermissions":
-		if req.method != http.MethodPost {
-			return nil, methodNotAllowed(req)
+		if err := iamMethod(req); err != nil {
+			return nil, err
 		}
 		return s.iam(name, req)
 	default:
@@ -691,6 +700,9 @@ func (s *bqReservations) callReservation(req resvRequest) (any, error) {
 					return nil, invalidArg("The edition of a reservation cannot be changed: delete the reservation and create it again")
 				}
 			case "secondary_location", "secondaryLocation":
+				if err := checkSecondary(rv.GetEdition(), req.location, in.GetSecondaryLocation()); err != nil {
+					return nil, err
+				}
 				next.SecondaryLocation = in.GetSecondaryLocation()
 			case "max_slots", "maxSlots":
 				next.MaxSlots = in.MaxSlots
@@ -883,6 +895,11 @@ func (s *bqReservations) callAssignment(req resvRequest) (any, error) {
 	}
 	switch req.verb {
 	case "":
+	case "getIamPolicy", "setIamPolicy", "testIamPermissions":
+		if err := iamMethod(req); err != nil {
+			return nil, err
+		}
+		return s.iam(name, req)
 	case "move":
 		if req.method != http.MethodPost {
 			return nil, methodNotAllowed(req)
@@ -1249,6 +1266,19 @@ func (s *bqReservations) callGroup(req resvRequest) (any, error) {
 	switch req.method {
 	case http.MethodGet:
 		return g, nil
+	case http.MethodPatch:
+		// A group has no field but its name, which is its identity: a
+		// patch changes nothing, and a mask naming any field is refused.
+		in := &reservationpb.ReservationGroup{}
+		if err := decodeInto(req.body, in); err != nil {
+			return nil, err
+		}
+		for _, f := range strings.Split(first(req.query["updateMask"]), ",") {
+			if f = strings.TrimSpace(f); f != "" {
+				return nil, invalidArg("Invalid update_mask path %q: a reservation group's %s cannot be updated", f, f)
+			}
+		}
+		return g, nil
 	case http.MethodDelete:
 		// "A reservation group can be deleted only when it has no
 		// members" (reservations-tasks).
@@ -1395,4 +1425,205 @@ func (s *bqReservations) continuousReservation(project, location string, ancesto
 		}
 	}
 	return nil, false
+}
+
+// editionRank orders the editions for upgradeEdition: an unspecified
+// edition and STANDARD lowest, then ENTERPRISE, then ENTERPRISE_PLUS.
+func editionRank(e reservationpb.Edition) int {
+	switch e {
+	case reservationpb.Edition_ENTERPRISE:
+		return 1
+	case reservationpb.Edition_ENTERPRISE_PLUS:
+		return 2
+	}
+	return 0
+}
+
+// asEnterprise is an edition, EDITION_UNSPECIFIED being ENTERPRISE ("Default
+// value, which will be treated as ENTERPRISE").
+func asEnterprise(e reservationpb.Edition) reservationpb.Edition {
+	if e == reservationpb.Edition_EDITION_UNSPECIFIED {
+		return reservationpb.Edition_ENTERPRISE
+	}
+	return e
+}
+
+// flexibleSlots is, per edition, the baseline slots of a location's
+// reservations beyond its ACTIVE commitments' slots: what is billed as
+// pay-as-you-go capacity.
+func flexibleSlots(reservations map[string]*reservationpb.Reservation, commitments map[string]*reservationpb.CapacityCommitment, parent string) map[reservationpb.Edition]int64 {
+	base, committed := map[reservationpb.Edition]int64{}, map[reservationpb.Edition]int64{}
+	for n, rv := range reservations {
+		if strings.HasPrefix(n, parent+"/reservations/") {
+			base[asEnterprise(rv.GetEdition())] += rv.GetSlotCapacity()
+		}
+	}
+	for n, c := range commitments {
+		if strings.HasPrefix(n, parent+"/capacityCommitments/") && c.GetState() == reservationpb.CapacityCommitment_ACTIVE {
+			committed[asEnterprise(c.GetEdition())] += c.GetSlotCount()
+		}
+	}
+	out := map[reservationpb.Edition]int64{}
+	for e, b := range base {
+		if b > committed[e] {
+			out[e] = b - committed[e]
+		}
+	}
+	return out
+}
+
+// upgradeEdition answers projects.locations.upgradeEdition, as the
+// method's reference documents it: the reservations and capacity
+// commitments named, which must exist under the parent (commitments
+// ACTIVE), move to targetEdition, ENTERPRISE or ENTERPRISE_PLUS
+// (EDITION_UNSPECIFIED is ENTERPRISE); never down nor to the edition they
+// have; every reservation of a reservation group is upgraded together;
+// and the upgrade may not raise the flexible (uncommitted) slots summed
+// over the original and target editions. Otherwise FAILED_PRECONDITION.
+// Nothing changes unless all of it can.
+func (s *bqReservations) upgradeEdition(req resvRequest) (any, error) {
+	var in struct {
+		CapacityCommitments []string `json:"capacityCommitments"`
+		Reservations        []string `json:"reservations"`
+		TargetEdition       string   `json:"targetEdition"`
+	}
+	if len(strings.TrimSpace(string(req.body))) > 0 {
+		dec := json.NewDecoder(strings.NewReader(string(req.body)))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&in); err != nil {
+			return nil, invalidArg("Invalid JSON payload received. %v", err)
+		}
+	}
+	target := reservationpb.Edition_ENTERPRISE
+	switch in.TargetEdition {
+	case "", "EDITION_UNSPECIFIED", "ENTERPRISE":
+	case "ENTERPRISE_PLUS":
+		target = reservationpb.Edition_ENTERPRISE_PLUS
+	case "STANDARD":
+		return nil, invalidArg("Invalid target edition STANDARD: the supported values are ENTERPRISE and ENTERPRISE_PLUS")
+	default:
+		return nil, invalidArg("Invalid value at 'target_edition', %q", in.TargetEdition)
+	}
+	if len(in.Reservations) == 0 && len(in.CapacityCommitments) == 0 {
+		return nil, invalidArg("Name at least one reservation or capacity commitment to upgrade")
+	}
+	reservations := map[string]*reservationpb.Reservation{}
+	for n, rv := range s.reservation {
+		reservations[n] = proto.Clone(rv).(*reservationpb.Reservation)
+	}
+	commitments := map[string]*reservationpb.CapacityCommitment{}
+	for n, c := range s.commitment {
+		commitments[n] = proto.Clone(c).(*reservationpb.CapacityCommitment)
+	}
+	original := map[reservationpb.Edition]bool{}
+	upgraded := map[string]bool{}
+	var outR []*reservationpb.Reservation
+	for _, n := range in.Reservations {
+		n = s.canonicalName(n)
+		if !strings.HasPrefix(n, req.parent+"/reservations/") || strings.Count(strings.TrimPrefix(n, req.parent+"/reservations/"), "/") != 0 {
+			return nil, invalidArg("Reservation %s is not under %s", n, req.parent)
+		}
+		rv, ok := reservations[n]
+		if !ok {
+			return nil, notFoundErr("Reservation %s not found", n)
+		}
+		if editionRank(rv.GetEdition()) >= editionRank(target) && rv.GetEdition() != reservationpb.Edition_EDITION_UNSPECIFIED {
+			return nil, failedPrecondition("Reservation %s is %s: an edition can only be upgraded, to a higher one than %s", n, rv.GetEdition(), target)
+		}
+		original[asEnterprise(rv.GetEdition())] = true
+		rv.Edition, rv.UpdateTime = target, timestamppb.New(s.now())
+		upgraded[n] = true
+		outR = append(outR, rv)
+	}
+	for _, rv := range outR {
+		if g := rv.GetReservationGroup(); g != "" {
+			for n, other := range reservations {
+				if other.GetReservationGroup() == g && !upgraded[n] {
+					return nil, failedPrecondition("Reservation %s is in reservation group %s with %s: the group's reservations are upgraded together", rv.GetName(), g, n)
+				}
+			}
+		}
+	}
+	var outC []*reservationpb.CapacityCommitment
+	for _, n := range in.CapacityCommitments {
+		n = s.canonicalName(n)
+		if !strings.HasPrefix(n, req.parent+"/capacityCommitments/") {
+			return nil, invalidArg("Capacity commitment %s is not under %s", n, req.parent)
+		}
+		c, ok := commitments[n]
+		if !ok {
+			return nil, notFoundErr("Capacity commitment %s not found", n)
+		}
+		if c.GetState() != reservationpb.CapacityCommitment_ACTIVE {
+			return nil, failedPrecondition("Capacity commitment %s is %s: only an ACTIVE commitment is upgraded", n, c.GetState())
+		}
+		if editionRank(c.GetEdition()) >= editionRank(target) && c.GetEdition() != reservationpb.Edition_EDITION_UNSPECIFIED {
+			return nil, failedPrecondition("Capacity commitment %s is %s: an edition can only be upgraded, to a higher one than %s", n, c.GetEdition(), target)
+		}
+		original[asEnterprise(c.GetEdition())] = true
+		c.Edition = target
+		outC = append(outC, c)
+	}
+	before, after := flexibleSlots(s.reservation, s.commitment, req.parent), flexibleSlots(reservations, commitments, req.parent)
+	original[target] = true
+	var sumBefore, sumAfter int64
+	for e := range original {
+		sumBefore += before[e]
+		sumAfter += after[e]
+	}
+	if sumAfter > sumBefore {
+		return nil, failedPrecondition("The upgrade raises the flexible slots across the original and target editions from %d to %d: "+
+			"upgrade the reservations' capacity commitments with them", sumBefore, sumAfter)
+	}
+	s.reservation, s.commitment = reservations, commitments
+	out := map[string]any{}
+	if len(outR) > 0 {
+		var rs []json.RawMessage
+		for _, rv := range outR {
+			b, _ := protojson.Marshal(rv)
+			rs = append(rs, b)
+		}
+		out["reservations"] = rs
+	}
+	if len(outC) > 0 {
+		var cs []json.RawMessage
+		for _, c := range outC {
+			b, _ := protojson.Marshal(c)
+			cs = append(cs, b)
+		}
+		out["capacityCommitments"] = cs
+	}
+	return out, nil
+}
+
+// checkSecondary holds a reservation's secondary location to managed
+// disaster recovery's rules
+// (https://docs.cloud.google.com/bigquery/docs/managed-disaster-recovery,
+// read 2026-11-23): an Enterprise Plus reservation's only, and another
+// location than its primary.
+func checkSecondary(edition reservationpb.Edition, primary, secondary string) error {
+	if secondary == "" {
+		return nil
+	}
+	if edition != reservationpb.Edition_ENTERPRISE_PLUS {
+		return invalidArg("A secondary location needs an ENTERPRISE_PLUS reservation: managed disaster recovery is an Enterprise Plus feature")
+	}
+	if strings.EqualFold(secondary, primary) {
+		return invalidArg("The secondary location %s is the reservation's primary location", secondary)
+	}
+	return nil
+}
+
+// iamMethod checks an IAM verb's HTTP method as bigqueryreservation v1
+// binds it: getIamPolicy is a GET (its options.requestedPolicyVersion a
+// query parameter), setIamPolicy and testIamPermissions POSTs.
+func iamMethod(req resvRequest) error {
+	want := http.MethodPost
+	if req.verb == "getIamPolicy" {
+		want = http.MethodGet
+	}
+	if req.method != want {
+		return methodNotAllowed(req)
+	}
+	return nil
 }

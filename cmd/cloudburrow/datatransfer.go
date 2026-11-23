@@ -212,8 +212,9 @@ var connectionAPIPath = regexp.MustCompile(`^/v1/projects/[^/]+/locations/[^/]+/
 // reservationAPIPath is a BigQuery Reservation API v1 path (#2193), the
 // BigQuery front's (internal/bigqueryfront/reservations.go): reservations
 // and their assignments, capacity commitments, reservation groups, the BI
-// reservation and the assignment searches. None is Data Transfer's.
-var reservationAPIPath = regexp.MustCompile(`^/v1/projects/[^/]+/locations/[^/:]+(?:/(?:reservations|capacityCommitments|reservationGroups|biReservation)(?:[/:]|$)|:search(?:All)?Assignments$)`)
+// reservation, the assignment searches and upgradeEdition. None is Data
+// Transfer's.
+var reservationAPIPath = regexp.MustCompile(`^/v1/projects/[^/]+/locations/[^/:]+(?:/(?:reservations|capacityCommitments|reservationGroups|biReservation)(?:[/:]|$)|:(?:search(?:All)?Assignments|upgradeEdition)$)`)
 
 func (s *dataTransferSvc) Stop(ctx context.Context) error {
 	var errs []error

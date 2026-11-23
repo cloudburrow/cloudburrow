@@ -18,9 +18,11 @@ import (
 	"cloud.google.com/go/bigquery"
 	reservation "cloud.google.com/go/bigquery/reservation/apiv1"
 	"cloud.google.com/go/bigquery/reservation/apiv1/reservationpb"
+	"cloud.google.com/go/iam/apiv1/iampb"
 	"cloud.google.com/go/pubsub/v2"
 	"cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	"cloud.google.com/go/spanner"
+	bqresv "google.golang.org/api/bigqueryreservation/v1"
 	"google.golang.org/api/googleapi"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
@@ -679,4 +681,162 @@ func runDML(ctx context.Context, q *bigquery.Query) error {
 		return err
 	}
 	return st.Err()
+}
+
+// covers: bigqueryreservation.projects.locations.reservationGroups.create, bigqueryreservation.projects.locations.reservationGroups.get, bigqueryreservation.projects.locations.reservationGroups.list, bigqueryreservation.projects.locations.reservationGroups.patch, bigqueryreservation.projects.locations.reservationGroups.delete, bigqueryreservation.projects.locations.reservations.failoverReservation, bigqueryreservation.projects.locations.reservations.getIamPolicy, bigqueryreservation.projects.locations.reservations.setIamPolicy, bigqueryreservation.projects.locations.reservations.testIamPermissions, bigqueryreservation.projects.locations.reservations.assignments.getIamPolicy, bigqueryreservation.projects.locations.reservations.assignments.setIamPolicy, bigqueryreservation.projects.locations.reservations.assignments.testIamPermissions, bigqueryreservation.projects.locations.upgradeEdition
+//
+// TestBigQueryReservationGroupsFailoverIAMAndUpgrade (#2193): reservation
+// groups (a group with a member is not deleted), an Enterprise Plus
+// reservation's secondary location and failoverReservation (a secondary
+// location on an Enterprise reservation refused), the IAM policies of a
+// reservation and an assignment, through the REST and the gRPC client; and
+// upgradeEdition through Google's discovery client
+// (google.golang.org/api/bigqueryreservation/v1), which the Go gapic
+// client does not have: a reservation upgraded alone while its commitment
+// stays is refused for raising the flexible slots, and the two together
+// are upgraded.
+func TestBigQueryReservationGroupsFailoverIAMAndUpgrade(t *testing.T) {
+	h := New(t)
+	rest, gc, project := reservationClients(t, h)
+	ctx := h.Context()
+	suffix := strings.ToLower(strings.ReplaceAll(h.Project(), "_", "-"))
+	if len(suffix) > 40 {
+		suffix = suffix[len(suffix)-40:]
+	}
+	parent := "projects/" + project + "/locations/us-central1"
+	for _, c := range []struct {
+		name string
+		cl   *reservation.Client
+	}{{"rest", rest}, {"grpc", gc}} {
+		t.Run(c.name, func(t *testing.T) {
+			cl := c.cl
+			gid := "g" + c.name + "-" + suffix
+			g, err := cl.CreateReservationGroup(ctx, &reservationpb.CreateReservationGroupRequest{Parent: parent, ReservationGroupId: gid,
+				ReservationGroup: &reservationpb.ReservationGroup{}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				_ = cl.DeleteReservationGroup(h.Context(), &reservationpb.DeleteReservationGroupRequest{Name: g.GetName()})
+			})
+			if got, err := cl.GetReservationGroup(ctx, &reservationpb.GetReservationGroupRequest{Name: g.GetName()}); err != nil || got.GetName() != parent+"/reservationGroups/"+gid {
+				t.Errorf("get group: %v %v", got, err)
+			}
+			git := cl.ListReservationGroups(ctx, &reservationpb.ListReservationGroupsRequest{Parent: parent})
+			found := false
+			for x, err := git.Next(); err == nil; x, err = git.Next() {
+				found = found || x.GetName() == g.GetName()
+			}
+			if !found {
+				t.Error("the group is not listed")
+			}
+			if _, err := cl.UpdateReservationGroup(ctx, &reservationpb.UpdateReservationGroupRequest{ReservationGroup: g}); err != nil {
+				t.Errorf("patch group: %v", err)
+			}
+
+			id := "f" + c.name + "-" + suffix
+			if _, err := cl.CreateReservation(ctx, &reservationpb.CreateReservationRequest{Parent: parent, ReservationId: id + "-e",
+				Reservation: &reservationpb.Reservation{SlotCapacity: 50, Edition: reservationpb.Edition_ENTERPRISE, SecondaryLocation: "us-west1"}}); resvCode(err) != codes.InvalidArgument {
+				t.Errorf("a secondary location on an Enterprise reservation: %v, want INVALID_ARGUMENT", err)
+			}
+			rv, err := cl.CreateReservation(ctx, &reservationpb.CreateReservationRequest{Parent: parent, ReservationId: id,
+				Reservation: &reservationpb.Reservation{SlotCapacity: 50, Edition: reservationpb.Edition_ENTERPRISE_PLUS,
+					SecondaryLocation: "us-west1", ReservationGroup: g.GetName()}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				_ = cl.DeleteReservation(h.Context(), &reservationpb.DeleteReservationRequest{Name: rv.GetName()})
+			})
+			if err := cl.DeleteReservationGroup(ctx, &reservationpb.DeleteReservationGroupRequest{Name: g.GetName()}); resvCode(err) != codes.FailedPrecondition {
+				t.Errorf("delete a group with a member: %v, want FAILED_PRECONDITION", err)
+			}
+			fo, err := cl.FailoverReservation(ctx, &reservationpb.FailoverReservationRequest{Name: rv.GetName()})
+			if err != nil || fo.GetPrimaryLocation() != "us-west1" || fo.GetSecondaryLocation() != "us-central1" {
+				t.Errorf("failover: %v %v", fo, err)
+			}
+
+			a, err := cl.CreateAssignment(ctx, &reservationpb.CreateAssignmentRequest{Parent: rv.GetName(),
+				Assignment: &reservationpb.Assignment{Assignee: "projects/" + project, JobType: reservationpb.Assignment_QUERY}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				_ = cl.DeleteAssignment(h.Context(), &reservationpb.DeleteAssignmentRequest{Name: a.GetName()})
+			})
+			for _, resource := range []string{rv.GetName(), a.GetName()} {
+				pol, err := cl.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: resource})
+				if err != nil {
+					t.Fatalf("getIamPolicy %s: %v", resource, err)
+				}
+				pol.Bindings = []*iampb.Binding{{Role: "roles/bigquery.resourceViewer", Members: []string{"user:viewer@example.com"}}}
+				set, err := cl.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: resource, Policy: pol})
+				if err != nil || len(set.GetBindings()) != 1 || len(set.GetEtag()) == 0 {
+					t.Errorf("setIamPolicy %s: %v %v", resource, set, err)
+				}
+				if got, err := cl.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: resource}); err != nil || len(got.GetBindings()) != 1 ||
+					got.GetBindings()[0].GetMembers()[0] != "user:viewer@example.com" {
+					t.Errorf("getIamPolicy after set %s: %v %v", resource, got, err)
+				}
+				pol.Etag = []byte("stale")
+				if _, err := cl.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: resource, Policy: pol}); err == nil {
+					t.Errorf("setIamPolicy %s with a stale etag succeeded", resource)
+				}
+				if tp, err := cl.TestIamPermissions(ctx, &iampb.TestIamPermissionsRequest{Resource: resource,
+					Permissions: []string{"bigquery.reservations.get"}}); err != nil || tp == nil {
+					t.Errorf("testIamPermissions %s: %v %v", resource, tp, err)
+				}
+			}
+		})
+	}
+
+	t.Run("upgradeEdition", func(t *testing.T) {
+		endpoint := h.Endpoint(EnvBigQuery)
+		u, err := url.Parse(endpoint)
+		if err != nil || u.Host == "" {
+			t.Fatalf("BigQuery endpoint %q: %v", endpoint, err)
+		}
+		svc, err := bqresv.NewService(ctx, option.WithEndpoint(u.Scheme+"://"+u.Host+"/"), option.WithoutAuthentication())
+		if err != nil {
+			t.Fatal(err)
+		}
+		loc := "projects/" + project + "/locations/europe-west1"
+		id := "u-" + suffix
+		rv, err := rest.CreateReservation(ctx, &reservationpb.CreateReservationRequest{Parent: loc, ReservationId: id,
+			Reservation: &reservationpb.Reservation{SlotCapacity: 100, Edition: reservationpb.Edition_ENTERPRISE}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			_ = rest.DeleteReservation(h.Context(), &reservationpb.DeleteReservationRequest{Name: rv.GetName()})
+		})
+		cm, err := rest.CreateCapacityCommitment(ctx, &reservationpb.CreateCapacityCommitmentRequest{Parent: loc,
+			CapacityCommitment: &reservationpb.CapacityCommitment{SlotCount: 100, Plan: reservationpb.CapacityCommitment_FLEX,
+				Edition: reservationpb.Edition_ENTERPRISE}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := svc.Projects.Locations.UpgradeEdition(loc, &bqresv.UpgradeEditionRequest{Reservations: []string{rv.GetName()},
+			TargetEdition: "STANDARD"}).Context(ctx).Do(); resvCode(err) != codes.InvalidArgument {
+			t.Errorf("to STANDARD: %v, want INVALID_ARGUMENT", err)
+		}
+		if _, err := svc.Projects.Locations.UpgradeEdition(loc, &bqresv.UpgradeEditionRequest{Reservations: []string{rv.GetName()},
+			TargetEdition: "ENTERPRISE_PLUS"}).Context(ctx).Do(); resvCode(err) != codes.FailedPrecondition {
+			t.Errorf("the reservation alone, its commitment left: %v, want FAILED_PRECONDITION", err)
+		}
+		up, err := svc.Projects.Locations.UpgradeEdition(loc, &bqresv.UpgradeEditionRequest{Reservations: []string{rv.GetName()},
+			CapacityCommitments: []string{cm.GetName()}, TargetEdition: "ENTERPRISE_PLUS"}).Context(ctx).Do()
+		if err != nil || len(up.Reservations) != 1 || up.Reservations[0].Edition != "ENTERPRISE_PLUS" ||
+			len(up.CapacityCommitments) != 1 || up.CapacityCommitments[0].Edition != "ENTERPRISE_PLUS" {
+			t.Fatalf("upgrade both: %v %v", up, err)
+		}
+		if got, err := rest.GetReservation(ctx, &reservationpb.GetReservationRequest{Name: rv.GetName()}); err != nil ||
+			got.GetEdition() != reservationpb.Edition_ENTERPRISE_PLUS {
+			t.Errorf("after upgradeEdition: %v %v", got, err)
+		}
+		if _, err := svc.Projects.Locations.UpgradeEdition(loc, &bqresv.UpgradeEditionRequest{Reservations: []string{rv.GetName()},
+			CapacityCommitments: []string{cm.GetName()}, TargetEdition: "ENTERPRISE"}).Context(ctx).Do(); resvCode(err) != codes.FailedPrecondition {
+			t.Errorf("a downgrade: %v, want FAILED_PRECONDITION", err)
+		}
+	})
 }

@@ -120,7 +120,7 @@ func maxReservationSize(rv *reservationpb.Reservation) int64 {
 
 func (p bqCapacityProvider) CreateForm() (string, []console.Field) {
 	return "Create reservation", []console.Field{
-		{Name: "id", Label: "Reservation name", Type: "text", Required: true, Pattern: `^[a-z]([a-z0-9-]{0,62}[a-z0-9])?$`,
+		{Name: "id", Label: "Reservation name", Type: "text", Required: true, Pattern: `^[a-z]([a-z0-9\-]{0,62}[a-z0-9])?$`,
 			Help: "Lower case letters, numbers and dashes; starts with a letter, does not end with a dash; at most 64 characters."},
 		{Name: "location", Label: "Location", Type: "select", Required: true, Options: capacityLocations, Default: "US"},
 		{Name: "edition", Label: "Edition", Type: "select", Required: true, Options: []string{"STANDARD", "ENTERPRISE", "ENTERPRISE_PLUS"}, Default: "ENTERPRISE",

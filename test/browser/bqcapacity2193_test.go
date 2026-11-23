@@ -174,13 +174,14 @@ func TestBigQueryCapacityManagementThroughThePage(t *testing.T) {
 
 	// The assignment, then the reservation, deleted from the page.
 	p.navigate(page)
-	p.pageAction("Delete assignment", nil, "US/"+id)
+	p.pageAction("Delete assignment", nil, "")
 	if it := rc.ListAssignments(ctx, &reservationpb.ListAssignmentsRequest{Parent: resv}); func() bool { _, err := it.Next(); return err == nil }() {
 		t.Errorf("an assignment is left after Delete assignment")
 	}
-	p.navigate(page)
-	p.clickAction("Delete", "US/"+id)
-	p.waitFor(`location.pathname === "/bigquery-capacity"`)
+	p.navigate("/bigquery-capacity" + q)
+	p.openRowDelete("US/"+id, "Delete")
+	p.confirmByName("US/" + id)
+	p.waitFor(fmt.Sprintf(`![...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q))`, id))
 	if _, err := rc.GetReservation(ctx, &reservationpb.GetReservationRequest{Name: resv}); err == nil {
 		t.Errorf("the reservation is left after Delete")
 	}

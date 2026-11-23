@@ -200,6 +200,11 @@ var resvRoutes = map[string]resvRoute{
 			r := m.(*reservationpb.ListReservationGroupsRequest)
 			return http.MethodGet, r.GetParent() + "/reservationGroups", pageQuery(r.GetPageSize(), r.GetPageToken()), nil
 		}},
+	"UpdateReservationGroup": {func() proto.Message { return &reservationpb.UpdateReservationGroupRequest{} }, func() proto.Message { return &reservationpb.ReservationGroup{} },
+		func(m proto.Message) (string, string, url.Values, proto.Message) {
+			r := m.(*reservationpb.UpdateReservationGroupRequest)
+			return http.MethodPatch, r.GetReservationGroup().GetName(), maskQuery(r.GetUpdateMask().GetPaths()), r.GetReservationGroup()
+		}},
 	"DeleteReservationGroup": {func() proto.Message { return &reservationpb.DeleteReservationGroupRequest{} }, func() proto.Message { return &emptypb.Empty{} },
 		func(m proto.Message) (string, string, url.Values, proto.Message) {
 			return http.MethodDelete, m.(*reservationpb.DeleteReservationGroupRequest).GetName(), nil, nil
@@ -207,7 +212,11 @@ var resvRoutes = map[string]resvRoute{
 	"GetIamPolicy": {func() proto.Message { return &iampb.GetIamPolicyRequest{} }, func() proto.Message { return &iampb.Policy{} },
 		func(m proto.Message) (string, string, url.Values, proto.Message) {
 			r := m.(*iampb.GetIamPolicyRequest)
-			return http.MethodPost, r.GetResource() + ":getIamPolicy", nil, &iampb.GetIamPolicyRequest{Options: r.GetOptions()}
+			var q url.Values
+			if v := r.GetOptions().GetRequestedPolicyVersion(); v != 0 {
+				q = url.Values{"options.requestedPolicyVersion": {strconv.Itoa(int(v))}}
+			}
+			return http.MethodGet, r.GetResource() + ":getIamPolicy", q, nil
 		}},
 	"SetIamPolicy": {func() proto.Message { return &iampb.SetIamPolicyRequest{} }, func() proto.Message { return &iampb.Policy{} },
 		func(m proto.Message) (string, string, url.Values, proto.Message) {
