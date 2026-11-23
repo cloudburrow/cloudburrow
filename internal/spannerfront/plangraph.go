@@ -134,6 +134,7 @@ type graphQuant struct {
 	hopConds []string
 	arrs     []string // properties collected as arrays
 	withLen  bool     // the paths' lengths are read (cb_len)
+	withIDs  bool     // the paths' edges' keys are read (cb_ids)
 	trail    bool     // no edge twice (TRAIL)
 	acyc     bool     // no node twice (ACYCLIC)
 }
@@ -156,6 +157,9 @@ func (q *graphQuant) hopsSQL(k int) string {
 		for _, p := range q.arrs {
 			cols = append(cols, "[] AS cb_arr_"+p)
 		}
+		if q.withIDs {
+			cols = append(cols, "ARRAY<STRING>[] AS cb_ids")
+		}
 		return "SELECT " + strings.Join(cols, ", ") + " FROM " + n.BaseTableName + " AS cb_e0"
 	}
 	for _, c := range e.Source.EdgeCols {
@@ -174,6 +178,17 @@ func (q *graphQuant) hopsSQL(k int) string {
 			vals = append(vals, fmt.Sprintf("cb_e%d.%s", i, col))
 		}
 		cols = append(cols, "["+strings.Join(vals, ", ")+"] AS cb_arr_"+p)
+	}
+	if q.withIDs {
+		var ids []string
+		for i := 1; i <= k; i++ {
+			var ks []string
+			for _, c := range e.KeyColumns {
+				ks = append(ks, fmt.Sprintf("cb_e%d.%s", i, c))
+			}
+			ids = append(ids, "FORMAT('%T', STRUCT("+strings.Join(ks, ", ")+"))")
+		}
+		cols = append(cols, "["+strings.Join(ids, ", ")+"] AS cb_ids")
 	}
 	for i := 1; i <= k; i++ {
 		froms = append(froms, fmt.Sprintf("%s AS cb_e%d", e.BaseTableName, i))

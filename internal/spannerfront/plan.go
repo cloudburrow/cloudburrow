@@ -2034,25 +2034,58 @@ func (b *planBuilder) recursiveUnion(f *sqlFrom, it *planItem, q *graphQuant, cc
 	if t := b.schema.table(e.BaseTableName); t != nil {
 		root = b.schema.root(t)
 	}
-	bs := scan()
-	bs.meta["Full scan"] = "true"
-	bs.rows = count(1, 1)
-	base := b.distUnion(bs, &frag{root: root})
+	// the edge pattern's own conditions, on each edge it reads
+	residual := func(o *planOp) *planOp {
+		if len(q.hopConds) == 0 {
+			return o
+		}
+		desc := strings.ReplaceAll(strings.Join(q.hopConds, " AND "), "cb_hop.", "$")
+		if o.name != "Filter Scan" {
+			return op("Filter Scan", nil, rel(o, ""), planLink{sc: &planScalar{name: "Function", desc: desc}, typ: "Residual Condition"})
+		}
+		o.kids = append(o.kids, planLink{sc: &planScalar{name: "Function", desc: desc}, typ: "Residual Condition"})
+		return o
+	}
+	// the base: the first edges, or for a lower bound of 0 the start
+	// nodes (the paths of no edge)
+	first := 1
+	var base *planOp
+	if q.min == 0 && q.node != nil {
+		first = 0
+		ns := op("Scan", map[string]string{"scan_type": "TableScan", "scan_target": q.node.BaseTableName, "scan_method": "Automatic", "Full scan": "true"})
+		ns.scan = true
+		ns.rows = count(0, 0)
+		nroot := q.node.BaseTableName
+		if t := b.schema.table(q.node.BaseTableName); t != nil {
+			nroot = b.schema.root(t)
+		}
+		base = b.distUnion(ns, &frag{root: nroot})
+	} else {
+		bs := scan()
+		bs.meta["Full scan"] = "true"
+		bs.rows = count(1, 1)
+		bo := residual(bs)
+		if bo != bs {
+			// the scan reads every edge; the residual keeps the first ones
+			bo.rows, bs.rows = bs.rows, cc.count("SELECT 1 FROM "+e.BaseTableName)
+		}
+		base = b.distUnion(bo, &frag{root: root})
+	}
 	spool := op("Scan", map[string]string{"scan_type": "RecursiveSpoolScan", "scan_target": "$" + q.alias})
-	spool.rows = count(1, q.max-1)
-	spool.execs = fmt.Sprintf("SELECT %d", q.max-1)
+	spool.rows = count(first, q.max-1)
+	spool.execs = fmt.Sprintf("SELECT %d", q.max-first)
 	ms := scan()
-	ms.rows, ms.execs = count(2, q.max), spool.rows
+	ms.rows, ms.execs = count(first+1, q.max), spool.rows
 	var seek []string
 	for i, c := range e.Source.EdgeCols {
 		seek = append(seek, "($"+c+" = $"+q.alias+"."+e.Dest.EdgeCols[i]+")")
 	}
-	fs := op("Filter Scan", nil, rel(ms, ""), planLink{sc: &planScalar{name: "Function", desc: strings.Join(seek, " AND ")}, typ: "Seek Condition"})
+	fs := residual(op("Filter Scan", nil, rel(ms, ""), planLink{sc: &planScalar{name: "Function", desc: strings.Join(seek, " AND ")}, typ: "Seek Condition"}))
 	fs.rows, fs.execs = ms.rows, spool.rows
 	ca := op("Cross Apply", nil, rel(spool, "Input"), rel(b.distUnion(fs, &frag{root: root}), "Map"))
 	ca.rows, ca.execs = ms.rows, spool.execs
 	ru := op("Recursive Union", map[string]string{"upper_bound": fmt.Sprint(q.max)}, rel(base, "Base"), rel(ca, "Recursive"))
-	ru.rows = count(1, q.max)
+	ru.rows = count(first, q.max)
 	o := ru
 	if q.min > 1 {
 		o = op("Filter", nil, rel(ru, ""), planLink{sc: &planScalar{name: "Function", desc: fmt.Sprintf("($path_length >= %d)", q.min)}, typ: "Condition"})

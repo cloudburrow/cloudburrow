@@ -110,10 +110,15 @@ func (t *gqlTranslator) exportOf(name, from string) (*gqlExport, error) {
 		}
 	case bGroup:
 		x.suffixes = append(x.suffixes, "len")
+		ids := false
 		for _, br := range t.branches {
 			if b := br.binds[from]; b != nil && b.quant != nil {
 				b.quant.withLen = true
+				ids = ids || b.quant.withIDs
 			}
+		}
+		if ids {
+			x.suffixes = append(x.suffixes, "ids")
 		}
 		for _, p := range sortedKeys(props) {
 			x.suffixes = append(x.suffixes, "a_"+p)
@@ -162,6 +167,12 @@ func (t *gqlTranslator) exportValue(x *gqlExport, b *gqlBind, suffix string) (st
 		if suffix == "len" {
 			b.quant.withLen = true
 			return b.alias + ".cb_len", nil
+		}
+		if suffix == "ids" {
+			if !b.quant.withIDs {
+				return "NULL", nil
+			}
+			return b.alias + ".cb_ids", nil
 		}
 		p := strings.TrimPrefix(suffix, "a_")
 		if !hasCol(b.quant.arrs, p) {
@@ -525,7 +536,7 @@ func (t *gqlTranslator) projectInto(br *gqlBranch, names []string, alias map[str
 	if distinct {
 		s = "SELECT DISTINCT" + strings.TrimPrefix(s, "SELECT")
 	}
-	if len(group) > 0 {
+	if group = dedupe(group); len(group) > 0 {
 		s += " GROUP BY " + strings.Join(group, ", ")
 	}
 	s += tail
@@ -750,7 +761,7 @@ func (t *gqlTranslator) project(with bool) error {
 // query's select list.
 func (t *gqlTranslator) finalReturn() (string, error) {
 	ps := t.ps
-	if t.columns {
+	if t.parens {
 		if err := ps.expectP("("); err != nil {
 			return "", err
 		}
@@ -759,14 +770,14 @@ func (t *gqlTranslator) finalReturn() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if t.columns {
+	if t.parens {
 		if err := ps.expectP(")"); err != nil {
 			return "", err
 		}
 	}
 	var group []*sqlExpr
 	var tl gqlTail
-	if !t.columns {
+	if !t.parens {
 		if group, err = t.groupBy(); err != nil {
 			return "", err
 		}
@@ -824,7 +835,7 @@ func (t *gqlTranslator) finalReturn() (string, error) {
 			keys = append(keys, k...)
 		}
 	}
-	if len(keys) > 0 {
+	if keys = dedupe(keys); len(keys) > 0 {
 		s += " GROUP BY " + strings.Join(keys, ", ")
 	}
 	tail, err := t.tailSQL(&tl, br)
@@ -1003,4 +1014,14 @@ func labelsSQL(b *gqlBind) string {
 		w = append(w, "WHEN '"+e.Name+"' THEN "+arr(e))
 	}
 	return "(CASE " + b.qual + "." + b.prefix + "__t " + strings.Join(w, " ") + " END)"
+}
+
+func dedupe(xs []string) []string {
+	var out []string
+	for _, x := range xs {
+		if !hasCol(out, x) {
+			out = append(out, x)
+		}
+	}
+	return out
 }
