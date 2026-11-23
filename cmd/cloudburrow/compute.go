@@ -65,6 +65,8 @@ type computeService struct {
 	// Secure Web Proxy's gateways, each a forward proxy here, and Service
 	// Extensions' authorization extensions (computenetsvc.go).
 	netSvc *networkservices.Server
+	// apisGRPC is the gRPC surface of the APIs on this port (computegrpc.go).
+	apisGRPC *computeGRPC
 	// iapEval and creds are the host's IAM evaluator and credentials, which
 	// IAP checks requests with; up sets them (useIAP).
 	iapEval *iameval.Evaluator
@@ -284,9 +286,18 @@ func (s *computeService) Start(ctx context.Context) error {
 	protos.SetHTTP1(true)
 	protos.SetUnencryptedHTTP2(true)
 	protos.SetHTTP2(true)
+	// Network Security's, Network Services', Certificate Manager's, IAP's
+	// and Serverless VPC Access's gRPC APIs beside it (computegrpc.go).
+	s.apisGRPC = newComputeGRPC(api.XDSHandler(),
+		computeGRPCAPI{pkg: "google.cloud.networksecurity.v1", g: computeGRPCServer(ns.Register), owns: ns.HasOperation, isLoc: true},
+		computeGRPCAPI{pkg: "google.cloud.networkservices.v1", g: computeGRPCServer(nsv.Register), owns: nsv.HasOperation},
+		computeGRPCAPI{pkg: "google.cloud.certificatemanager.v1", g: computeGRPCServer(cm.Register), owns: cm.HasOperation},
+		computeGRPCAPI{pkg: "google.cloud.iap.v1", g: computeGRPCServer(ia.Register)},
+		computeGRPCAPI{pkg: "google.cloud.vpcaccess.v1", g: computeGRPCServer(va.Register), owns: func(string) bool { return true }})
+	apisGRPC := s.apisGRPC
 	guarded := hostguard.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.ProtoMajor == 2 && strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
-			api.XDSHandler().ServeHTTP(w, r)
+			apisGRPC.ServeHTTP(w, r)
 			return
 		}
 		jsonAPI.ServeHTTP(w, r)
@@ -317,6 +328,9 @@ func (s *computeService) Stop(ctx context.Context) error {
 	}
 	if s.netSvc != nil {
 		s.netSvc.Stop()
+	}
+	if s.apisGRPC != nil {
+		s.apisGRPC.Stop()
 	}
 	if s.vms != nil {
 		s.vms.stopAll()
