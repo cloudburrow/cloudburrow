@@ -321,7 +321,7 @@ func swpRuleFields(r map[string]any, create bool) []console.Field {
 			Help: "Optional: a CEL expression on the request, such as request.path.contains('index.html')."},
 		console.Field{Name: "tlsInspectionEnabled", Label: "TLS inspection", Type: "radio", Default: tls, Options: []string{"false", "true"},
 			OptionLabels: map[string]string{"false": "Disabled", "true": "Enabled"},
-			Help:         "Only under a policy with a TLS inspection policy. Tunnels are not inspected on this machine (docs/gaps.md)."})
+			Help:         "Only under a policy with a TLS inspection policy: the proxy decrypts the connection with a certificate from its CA pool, so the application match applies to HTTPS requests."})
 }
 
 func swpRuleBody(v map[string]string) (map[string]any, error) {
@@ -557,7 +557,7 @@ func (swpTLSProvider) Title() string { return "TLS inspection policies" }
 
 func (p swpTLSProvider) List(ctx context.Context, project string) (console.Listing, error) {
 	listing := console.Listing{Columns: []string{"Region", "CA pool", "Trust config", "Description"}, NameColumn: "Name", Noun: "TLS inspection policies",
-		Note: "A TLS inspection policy names the CA pool that issues interception certificates. This instance keeps it, but inspects no tunnel (docs/gaps.md)."}
+		Note: "A TLS inspection policy names the CA pool that issues interception certificates (Certificate Authority Service). Its trust config and TLS settings are kept but, as on Google Cloud, not yet honoured."}
 	if p.api() == nil {
 		return listing, errors.New(computeNotStarted)
 	}

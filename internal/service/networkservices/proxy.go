@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"io"
 	"net"
@@ -40,8 +41,8 @@ import (
 //   - for a CONNECT, host() is the CONNECT target and the request
 //     attributes are not known, so a rule with an applicationMatcher
 //     matches a tunnel only with TLS inspection (tlsInspectionEnabled and
-//     the policy's tlsInspectionPolicy), which is not served here: such a
-//     rule never matches a tunnel (docs/gaps.md);
+//     the policy's tlsInspectionPolicy, tlsinspect.go), which decrypts it
+//     and matches each request inside it;
 //   - the proxy dials out through CloudBurrow's egress guard: a request
 //     to a googleapis.com API served here goes to this instance, and no
 //     connection is ever opened to Google (502 Bad Gateway instead).
@@ -121,6 +122,9 @@ type proxyPlane struct {
 	dial      func(ctx context.Context, network, addr string) (net.Conn, error)
 	started   bool
 	m         matchers
+	issuer    LeafIssuer     // TLS inspection's CA pool issuer (tlsinspect.go)
+	roots     *x509.CertPool // an inspected server's CA set; nil: the system's
+	leaves    leafCache
 }
 
 type swpListener struct {
@@ -373,8 +377,13 @@ func (h *swpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodConnect {
 		host, port := splitHostPort(r.Host, 443)
 		in := matchInput{host: host, destPort: port, srcIP: srcIP, srcPort: srcPort}
-		if !h.p.allowed(h.gateway, in) {
+		d := h.p.decideTunnel(h.gateway, in)
+		if !d.allow {
 			deny(w)
+			return
+		}
+		if d.inspect {
+			h.inspect(w, r, d, host, port, srcIP, srcPort)
 			return
 		}
 		h.tunnel(w, r, net.JoinHostPort(host, strconv.Itoa(port)))
@@ -578,17 +587,26 @@ func (p *proxyPlane) allowed(gateway string, in matchInput) bool {
 	return false
 }
 
-func (p *proxyPlane) ruleMatches(pols Policies, r GatewayRule, in matchInput) bool {
-	if r.Application != "" && in.req == nil {
-		return false
-	}
-	vars := map[string]any{
+// sessionMatches is whether a rule's sessionMatcher matches in.
+func (p *proxyPlane) sessionMatches(pols Policies, r GatewayRule, in matchInput) bool {
+	return p.eval(pols, r.Session, false, sessionVars(in))
+}
+
+func sessionVars(in matchInput) map[string]any {
+	return map[string]any{
 		"source":      map[string]any{"ip": in.srcIP, "port": int64(in.srcPort)},
 		"destination": map[string]any{"port": int64(in.destPort)},
 		varHost:       strings.ToLower(in.host),
 		varTags:       nonNil(in.tags),
 		varSAs:        nonNil(in.serviceAccounts),
 	}
+}
+
+func (p *proxyPlane) ruleMatches(pols Policies, r GatewayRule, in matchInput) bool {
+	if r.Application != "" && in.req == nil {
+		return false
+	}
+	vars := sessionVars(in)
 	if !p.eval(pols, r.Session, false, vars) {
 		return false
 	}

@@ -440,6 +440,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	computeSvc := newComputeService(cfg)
 	if computeSvc != nil {
 		computeSvc.gke = gkeSvc
+		// Secure Web Proxy's TLS inspection issues its leaves from a CA
+		// pool of Certificate Authority Service (#2160).
+		computeSvc.privateca = privateCASvc
 		if gkeSvc != nil {
 			gkeSvc.networks = computeSvc.gkeNetworks
 		}

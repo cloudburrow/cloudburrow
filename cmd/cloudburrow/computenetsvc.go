@@ -1,7 +1,17 @@
 package main
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"strings"
+	"time"
+
+	"cloud.google.com/go/security/privateca/apiv1/privatecapb"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/cloudburrow/cloudburrow/internal/service/certificatemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/compute"
@@ -70,6 +80,9 @@ func (s *computeService) useNetSvc(api *compute.Server, ns *networksecurity.Serv
 	nsv.UsePolicies(ns)
 	nsv.UseCertificates(cm.Certificates)
 	nsv.UseSource(func(ip string) ([]string, []string) { return s.instanceIdentity(api, ip) })
+	if s.privateca != nil {
+		nsv.UseLeafIssuer(swpLeafIssuer(s.privateca))
+	}
 	ns.UseGatewayUsers(nsv.GatewaySecurityPolicyUsers)
 }
 
@@ -161,5 +174,28 @@ func xdsEndpointPolicies(nsv *networkservices.Server) func(project string) []com
 				Ports: e.GetTrafficPortSelector().GetPorts(), ServerTLSPolicy: e.GetServerTlsPolicy()})
 		}
 		return out
+	}
+}
+
+// swpLeafIssuer issues Secure Web Proxy's interception certificates from a
+// CA pool of this instance's Certificate Authority Service, one
+// certificate request per host, as Google's direct leaf provisioning does
+// (secure-web-proxy/docs/tls-inspection-overview): each is a Certificate of
+// the pool (an Enterprise pool keeps it, a DevOps pool does not).
+func swpLeafIssuer(ca *privateCAService) func(ctx context.Context, pool, csrPEM string, lifetime time.Duration) ([]string, error) {
+	return func(ctx context.Context, pool, csrPEM string, lifetime time.Duration) ([]string, error) {
+		srv := ca.API()
+		if srv == nil {
+			return nil, status.Error(codes.Unavailable, "Certificate Authority Service has not started yet")
+		}
+		sum := sha256.Sum256([]byte(csrPEM))
+		id := fmt.Sprintf("swp-%d-%s", time.Now().Unix(), hex.EncodeToString(sum[:6]))
+		c, err := srv.API().CreateCertificate(ctx, &privatecapb.CreateCertificateRequest{Parent: pool, CertificateId: id,
+			Certificate: &privatecapb.Certificate{CertificateConfig: &privatecapb.Certificate_PemCsr{PemCsr: csrPEM},
+				Lifetime: durationpb.New(lifetime)}})
+		if err != nil {
+			return nil, err
+		}
+		return append([]string{c.GetPemCertificate()}, c.GetPemCertificateChain()...), nil
 	}
 }
