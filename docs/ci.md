@@ -292,7 +292,9 @@ job passed or was skipped by design, and the compatibility shards, the check tha
 ran in a shard, the integration suite and `ci-green` all passed. A pull request's `ci-green` is not
 enough, because pull-request CI runs the fast jobs only, and a push run cancelled by the next push to
 `main` proves nothing. `scripts/require-ci-green.sh --main-push <sha>` is the check, and
-`release.yml` applies it to every release, a tag pushed by hand included.
+`release.yml` applies it to every release, a tag pushed by hand included. It tries each GitHub API
+listing three times, and when a run's jobs cannot be listed (the jobs endpoint can answer HTTP 502
+for a run with several attempts), it reads the latest check runs of the run's check suite instead.
 
 **When.** Nothing happens when that commit is already tagged or is not newer than the last release,
 or while the last release (its tag's date) is under 24 hours old. From 24 to 48 hours, the commit is
