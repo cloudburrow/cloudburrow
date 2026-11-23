@@ -6,9 +6,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/service/certificatemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/compute"
 	"github.com/cloudburrow/cloudburrow/internal/service/networksecurity"
+	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 )
 
 func netsecFixture2160b(t *testing.T) (computeScreen, string, *certificatemanager.Server) {
@@ -156,5 +158,65 @@ func TestConsoleBackendAuthentication2160(t *testing.T) {
 	}
 	if err := p.ActAt(ctx, project, []string{"global", "public"}, "delete", nil); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestConsoleOrganizationAddressGroups2160: with the organization chosen
+// in the resource selector, the Address groups page creates, lists,
+// shows, edits and deletes the organization's groups
+// (organizations/N/locations/L/addressGroups), which the project's
+// listing does not show; a folder has none.
+func TestConsoleOrganizationAddressGroups2160(t *testing.T) {
+	screen, project, _ := netsecFixture2160b(t)
+	p := netsecAddressGroupsProvider{ccmScreen{screen}}
+	org := console.WithScopeValue(context.Background(), scopeOrgParam, strings.TrimPrefix(resourcemanager.OrganizationName, "organizations/"))
+	if _, err := p.Create(org, project, map[string]string{"name": "org-bad", "location": "global", "type": "IPV4", "purposeArmor": "true",
+		"capacity": "10", "items": "198.51.100.0/24"}); err != nil {
+		t.Fatal(err)
+	}
+	l, err := p.List(org, project)
+	if err != nil || len(l.Items) != 1 || l.Items[0].Name != "org-bad" || l.Items[0].Fields["Items"] != "1" {
+		t.Fatalf("the organization's list: %+v %v", l, err)
+	}
+	if !strings.Contains(l.Note, "evaluateOrganizationAddressGroup") || len(p.ListActions(org, project)) != 0 {
+		t.Errorf("the organization's page: note %q, actions %+v", l.Note, p.ListActions(org, project))
+	}
+	if pl, _ := p.List(context.Background(), project); len(pl.Items) != 0 {
+		t.Errorf("the project lists the organization's group: %+v", pl.Items)
+	}
+	if o, err := screen.v1(context.Background(), "GET", "/v1/"+resourcemanager.OrganizationName+"/locations/global/addressGroups/org-bad", nil); err != nil || num2s(o, "capacity") != "10" {
+		t.Fatalf("the API's group: %v %v", o, err)
+	}
+	d, _ := p.Detail(org, project, []string{"global", "org-bad"})
+	if d.Unavailable != "" || d.Edit == nil {
+		t.Fatalf("detail: %+v", d)
+	}
+	if err := p.Edit(org, project, []string{"global", "org-bad"}, map[string]string{"items": "198.51.100.0/24\n192.0.2.1"}); err != nil {
+		t.Fatal(err)
+	}
+	if l, _ = p.List(org, project); l.Items[0].Fields["Items"] != "2" {
+		t.Errorf("after the edit: %+v", l.Items[0].Fields)
+	}
+	// Clone items from a project's group into the organization's.
+	if _, err := p.Create(context.Background(), project, map[string]string{"name": "proj-src", "location": "global", "type": "IPV4", "purposeArmor": "true",
+		"capacity": "10", "items": "203.0.113.9"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.ActAt(org, project, []string{"global", "org-bad"}, "clone-items",
+		map[string]string{"source": "projects/" + project + "/locations/global/addressGroups/proj-src"}); err != nil {
+		t.Fatal(err)
+	}
+	if l, _ = p.List(org, project); l.Items[0].Fields["Items"] != "3" {
+		t.Errorf("after Clone items: %+v", l.Items[0].Fields)
+	}
+	if err := p.ActAt(org, project, []string{"global", "org-bad"}, "delete", nil); err != nil {
+		t.Fatal(err)
+	}
+	if l, _ = p.List(org, project); len(l.Items) != 0 {
+		t.Errorf("after the delete: %+v", l.Items)
+	}
+	folder := console.WithScopeValue(context.Background(), scopeFolderParam, "123")
+	if l, _ = p.List(folder, project); !strings.Contains(l.Prompt, "not a folder") {
+		t.Errorf("a folder's page: %+v", l)
 	}
 }

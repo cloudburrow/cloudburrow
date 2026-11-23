@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 )
 
 // Network Security's address groups and backend authentication configs
@@ -26,6 +27,13 @@ import (
 //     steps for it, so its order is UNVERIFIED (re-read 2026-11-22: firewall/docs/use-address-groups-firewall-policies). The list's Cloud Armor
 //     tier action is projects.setCloudArmorTier, which address groups for
 //     Cloud Armor need (armor/docs/address-groups-overview).
+//     Organization address groups are the same page with the organization
+//     chosen in the toolbar's resource selector, as the same docs' steps
+//     have it ("select your organization from the project selector menu"):
+//     the page then lists, creates, shows, edits and deletes
+//     organizations/N/locations/L/addressGroups
+//     (OrganizationAddressGroupService), and evaluateOrganizationAddressGroup
+//     matches them. A folder has no address groups.
 //   - Backend Authentication, the Authentication Configuration page's tab
 //     (load-balancing/docs/backend-authenticated-tls-setup, read
 //     2026-11-22): Create, then a name, Location Global or Regional,
@@ -53,6 +61,52 @@ func addressGroupPurposes(o map[string]any) string {
 	return strings.Join(out, ", ")
 }
 
+// agParent is the parent the page works on: the organization when the
+// toolbar's resource selector chose it, else the project; scope says
+// which, and prompt is set when neither can hold address groups.
+func agParent(ctx context.Context, project string) (parent string, org bool, prompt string) {
+	if console.ScopeValue(ctx, scopeFolderParam) != "" {
+		return "", false, "Address groups belong to a project or the organization, not a folder. Choose a project or the organization in the toolbar."
+	}
+	if id := console.ScopeValue(ctx, scopeOrgParam); id != "" {
+		if "organizations/"+id != resourcemanager.OrganizationName {
+			return "", true, fmt.Sprintf("Organization %s not found; the local organization is %s.", id, resourcemanager.OrganizationName)
+		}
+		return resourcemanager.OrganizationName, true, ""
+	}
+	if project == "" {
+		return "", false, "Address groups are listed per project or for the organization. Choose one in the toolbar."
+	}
+	return "projects/" + project, false, ""
+}
+
+// agName is the group at path ([location, id]) under parent.
+func agName(parent string, path []string) string {
+	return parent + "/locations/" + path[0] + "/addressGroups/" + path[1]
+}
+
+// agList is parent's groups in every location, sorted.
+func (p netsecAddressGroupsProvider) agList(ctx context.Context, parent string) ([]map[string]any, error) {
+	var out []map[string]any
+	token := ""
+	for {
+		u := "/v1/" + parent + "/locations/-/addressGroups?pageSize=500"
+		if token != "" {
+			u += "&pageToken=" + url.QueryEscape(token)
+		}
+		m, err := p.v1(ctx, "GET", u, nil)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, vmMaps(m, "addressGroups")...)
+		if token = vpcStr(m, "nextPageToken"); token == "" {
+			break
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return vpcStr(out[i], "name") < vpcStr(out[j], "name") })
+	return out, nil
+}
+
 // inUseBy are a group's references as the console names them.
 func (p netsecAddressGroupsProvider) inUseBy(ctx context.Context, name string) string {
 	m, err := p.v1(ctx, "GET", "/v1/"+name+":listReferences", nil)
@@ -77,17 +131,21 @@ func (p netsecAddressGroupsProvider) List(ctx context.Context, project string) (
 	if p.api() == nil {
 		return listing, errors.New(computeNotStarted)
 	}
-	if project == "" {
-		listing.Prompt = "Address groups are listed per project. Choose one in the toolbar."
+	parent, org, prompt := agParent(ctx, project)
+	if prompt != "" {
+		listing.Prompt = prompt
 		return listing, nil
 	}
-	l, err := p.ccmList(ctx, project, "addressGroups")
+	if org {
+		listing.Note = "Organization address groups are named lists of IP address ranges that every project's Cloud Armor rules in the organization match with evaluateOrganizationAddressGroup; this instance's load balancers apply them to every request."
+	}
+	l, err := p.agList(ctx, parent)
 	if err != nil {
 		listing.Unavailable = err.Error()
 		return listing, nil
 	}
 	for _, o := range l {
-		path := ccmPath(vpcStr(o, "name"))
+		path := agPath(vpcStr(o, "name"))
 		listing.Items = append(listing.Items, console.Resource{Name: path[1], Target: path,
 			Fields: map[string]string{"Location": ccmLocationText(path[0]), "Type": vpcOr(addressGroupTypeLabels[vpcStr(o, "type")], vpcStr(o, "type")),
 				"Purpose": addressGroupPurposes(o), "Capacity": num2s(o, "capacity"), "Items": strconv.Itoa(len(vpcStrs(o, "items"))),
@@ -131,7 +189,20 @@ func splitItems(s string) []any {
 	return out
 }
 
+// agPath is a group's [location, id], under a project or the organization.
+func agPath(name string) []string {
+	p := strings.Split(name, "/")
+	if len(p) < 6 {
+		return []string{"global", vpcLast(name)}
+	}
+	return []string{p[3], p[5]}
+}
+
 func (p netsecAddressGroupsProvider) Create(ctx context.Context, project string, v map[string]string) (string, error) {
+	parent, _, prompt := agParent(ctx, project)
+	if prompt != "" {
+		return "", errors.New(prompt)
+	}
 	name := strings.TrimSpace(v["name"])
 	if name == "" {
 		return "", errors.New("Name: give one")
@@ -157,7 +228,7 @@ func (p netsecAddressGroupsProvider) Create(ctx context.Context, project string,
 	if d := strings.TrimSpace(v["description"]); d != "" {
 		body["description"] = d
 	}
-	if err := p.ccmCreate(ctx, project, ccmLocation(v), "addressGroups", "addressGroupId", name, body); err != nil {
+	if _, err := p.v1(ctx, "POST", "/v1/"+parent+"/locations/"+ccmLocation(v)+"/addressGroups?addressGroupId="+url.QueryEscape(name), body); err != nil {
 		return "", err
 	}
 	return name, nil
@@ -170,7 +241,11 @@ func (p netsecAddressGroupsProvider) Detail(ctx context.Context, project string,
 	if len(path) != 2 {
 		return console.Detail{Unavailable: "an address group is addressed by its location and name"}, nil
 	}
-	name := ccmName(project, path, "addressGroups")
+	parent, _, prompt := agParent(ctx, project)
+	if prompt != "" {
+		return console.Detail{Unavailable: prompt}, nil
+	}
+	name := agName(parent, path)
 	o, err := p.v1(ctx, "GET", "/v1/"+name, nil)
 	if err != nil {
 		return console.Detail{Unavailable: err.Error()}, nil
@@ -206,7 +281,14 @@ func (p netsecAddressGroupsProvider) DetailActions(ctx context.Context, project 
 	}
 	a := ccmDelete("address group", path)
 	a.Leaves = true
-	return []console.Action{a}
+	// Clone items (cloneItems): copy another group's items into this one.
+	// Google's docs give gcloud only for it (gcloud network-security
+	// address-groups clone-items), so the action is UNVERIFIED (re-read
+	// 2026-11-22: firewall/docs/use-address-groups-firewall-policies).
+	clone := console.Action{ID: "clone-items", Label: "Clone items", Title: "Clone items", Fields: []console.Field{{
+		Name: "source", Label: "Source address group", Type: "text", Required: true,
+		Help: "The full name of the group whose items are copied: projects/PROJECT/locations/LOCATION/addressGroups/NAME, or organizations/ORGANIZATION/locations/LOCATION/addressGroups/NAME."}}}
+	return []console.Action{clone, a}
 }
 
 // Edit implements console.Editor: Save adds the new items and removes the
@@ -215,7 +297,11 @@ func (p netsecAddressGroupsProvider) Edit(ctx context.Context, project string, p
 	if len(path) != 2 {
 		return errors.New("Edit applies to an address group")
 	}
-	name := ccmName(project, path, "addressGroups")
+	parent, _, prompt := agParent(ctx, project)
+	if prompt != "" {
+		return errors.New(prompt)
+	}
+	name := agName(parent, path)
 	o, err := p.v1(ctx, "GET", "/v1/"+name, nil)
 	if err != nil {
 		return err
@@ -259,8 +345,8 @@ func (p netsecAddressGroupsProvider) Edit(ctx context.Context, project string, p
 // ListActions is the page's Cloud Armor tier action
 // (projects.setCloudArmorTier).
 func (p netsecAddressGroupsProvider) ListActions(ctx context.Context, project string) []console.Action {
-	if p.api() == nil || project == "" {
-		return nil
+	if _, org, prompt := agParent(ctx, project); p.api() == nil || org || prompt != "" {
+		return nil // the tier is a project's
 	}
 	tier := "CA_STANDARD"
 	if o, err := p.call("GET", project, "", nil, nil); err == nil {
@@ -273,12 +359,19 @@ func (p netsecAddressGroupsProvider) ListActions(ctx context.Context, project st
 }
 
 func (p netsecAddressGroupsProvider) ActAt(ctx context.Context, project string, path []string, action string, v map[string]string) error {
+	parent, org, prompt := agParent(ctx, project)
+	if prompt != "" {
+		return errors.New(prompt)
+	}
 	switch {
-	case len(path) == 0 && action == "armor-tier":
+	case len(path) == 0 && action == "armor-tier" && !org:
 		_, err := p.call("POST", project, "setCloudArmorTier", nil, map[string]any{"cloudArmorTier": v["tier"]})
 		return err
 	case len(path) == 2 && action == "delete":
-		_, err := p.v1(ctx, "DELETE", "/v1/"+ccmName(project, path, "addressGroups"), nil)
+		_, err := p.v1(ctx, "DELETE", "/v1/"+agName(parent, path), nil)
+		return err
+	case len(path) == 2 && action == "clone-items":
+		_, err := p.v1(ctx, "POST", "/v1/"+agName(parent, path)+":cloneItems", map[string]any{"sourceAddressGroup": strings.TrimSpace(v["source"])})
 		return err
 	}
 	return fmt.Errorf("%s is not available here", action)

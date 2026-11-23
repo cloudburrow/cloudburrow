@@ -257,6 +257,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/transport/rest/` | Shared HTTP plumbing for CloudBurrow's own REST surfaces: routing, size limits, JSON, Google-style error bodies. |
 | `internal/trust/` | Which directories' configuration and hooks the developer has agreed to run (#598). |
 | `internal/version/` | Build identification, injected at link time. |
+| `internal/vmrelay/` | Carries a VM's identity from its guest to the load balancers' and Secure Web Proxy's listeners (#2160): the PROXY protocol v2 header with the guest token, the relay listener that trusts it, and the listener wrapper connections are handed to. |
 | `tools/bqengine/` | Builds the Linux BigQuery emulator the CLI embeds from `third_party/bigquery-emulator`: pinned, checksummed modules with CloudBurrow's patches applied strictly (#1061). |
 | `third_party/bigquery-emulator/` | The pins (a Go module of its own), patches, licences and provenance of the BigQuery emulator CloudBurrow builds (#1061); no upstream source is committed. |
 | `tools/coverage/` | Generates per-service API coverage from the proto surface (#288); `make docs-check` fails when it is stale. |

@@ -91,7 +91,8 @@ var lb2ParityRows = []parityRow{
 			"OrganizationAddressGroupService/UpdateAddressGroup", "OrganizationAddressGroupService/AddAddressGroupItems", "OrganizationAddressGroupService/RemoveAddressGroupItems",
 			"OrganizationAddressGroupService/CloneAddressGroupItems", "OrganizationAddressGroupService/ListAddressGroupReferences", "OrganizationAddressGroupService/DeleteAddressGroup",
 			"AddressGroupService/CloneAddressGroupItems"},
-		Issue: 2160},
+		Provider: "netsecurity-addressgroups", Offers: "The Address groups page (/net-security/addressgroups?organizationId=N) with the organization chosen in the resource selector, as firewall/docs/use-address-groups-firewall-policies has it (select your organization from the project selector menu): the organization's groups with location, type, purpose, capacity, items and In use by; Create; a group's details; Edit, ending in Save; Delete; and, on any group, Clone items (cloneItems; UNVERIFIED (re-read 2026-11-22: the docs give gcloud only for it)) (#2160)",
+		Tests: []string{"TestConsoleOrganizationAddressGroups2160", "TestOrganizationAddressGroupsThroughTheBrowser2160", "TestNetworkSecurityRound4MeetsWCAG2160"}},
 	// Round 4 (#2160): Secure Web Proxy, Service Extensions' authorization
 	// extensions and endpoint policies.
 	{Resource: "Web proxies", Service: "networkservices",
