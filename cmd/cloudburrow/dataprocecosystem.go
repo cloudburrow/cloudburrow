@@ -45,6 +45,17 @@ const (
 	// image versions 2.1 to 2.3: linux/amd64 only (run under emulation on
 	// arm64), 3.7 GB compressed.
 	dataprocZeppelinImage = "apache/zeppelin@sha256:9c1b5ddd6225ad45cedc327a853f6f13e45797ff419260d20bb9c14f5cbe3a87"
+	// dataprocMetastore42Image is apache/hive:standalone-metastore-4.2.0,
+	// the Hive Metastore 4.2.0 of image version 3.0, whose Iceberg REST
+	// catalog (port 9001, /iceberg) is the ICEBERG component's
+	// default_iceberg catalog on 3.0.
+	// dataprocDocker24Image and dataprocDocker28Image are
+	// docker:24.0-dind-rootless and docker:28.1-dind-rootless, the DOCKER
+	// component's daemons: Docker 24.0 is image 2.2's (and 2.1's), 28.1
+	// 2.3's and 3.0's.
+	dataprocDocker24Image    = "docker@sha256:e162081c6623cdd809c09d549b742fa08d9d3e1da47e55b8d42fe87a676ff80e"
+	dataprocDocker28Image    = "docker@sha256:921cf550ca1fda0b9e6999ffd4a97cc0e248207479c73febbf5bf105108c2fe5"
+	dataprocMetastore42Image = "apache/hive@sha256:6ec027489678f06404c8e201010c10e6c67e507b77e41b7e69233d7652453fdf"
 
 	gcsConnectorURL  = "https://repo1.maven.org/maven2/com/google/cloud/bigdataoss/gcs-connector/hadoop3-2.2.30/gcs-connector-hadoop3-2.2.30-shaded.jar"
 	gcsConnectorSHA  = "dd7959e4d59a74023781c9e0666e8c2207528a0e7871eaf5f9b42eea0430a079"
@@ -62,6 +73,13 @@ func dataprocEcosystem(cache, instance string, out io.Writer) *sparkproc.Ecosyst
 	return &sparkproc.Ecosystem{
 		Hive: dataprocHiveImage, Trino: dataprocTrinoImage, Flink: dataprocFlinkImage,
 		Zookeeper: dataprocZookeeperImage, Solr: dataprocSolrImage, Zeppelin: dataprocZeppelinImage,
+		Metastore42: dataprocMetastore42Image,
+		Docker: func(v string) string {
+			if v >= "2.3" {
+				return dataprocDocker28Image
+			}
+			return dataprocDocker24Image
+		},
 		GCS: func(ctx context.Context) (string, error) {
 			mu.Lock()
 			defer mu.Unlock()
@@ -111,7 +129,7 @@ func (j lakeJar) file() string { return filepath.Base(j.path) }
 // -2.2, -2.3 and -3.0): Delta Lake 3.2.1, Iceberg 1.6.1 (1.10 by
 // dataproc:dataproc.iceberg.version) and Hudi 0.15.0 on 2.2 and 2.3
 // (Spark 3.5, Scala 2.12); Hudi 0.12.3 on 2.1 (Spark 3.3); Delta Lake
-// 4.2.0 and Hudi 1.2.0 on 3.0 (Spark 4.1, Scala 2.13).
+// 4.2.0, Iceberg 1.11.0 and Hudi 1.2.0 on 3.0 (Spark 4.1, Scala 2.13).
 var lakeJars = map[string][]lakeJar{
 	"DELTA/2.2": {{"io/delta/delta-spark_2.12/3.2.1/delta-spark_2.12-3.2.1.jar", "088e187da689a347a6a8556dcb22318e3dfcfb995d807f5e2c19b4d0a7ee9499"},
 		{"io/delta/delta-storage/3.2.1/delta-storage-3.2.1.jar", "4dcc179fc4076bda5060a4038f979c53e1f5916cf04971e28f9441db390763c7"}},
@@ -120,6 +138,10 @@ var lakeJars = map[string][]lakeJar{
 	"ICEBERG/2.2": {{"org/apache/iceberg/iceberg-spark-runtime-3.5_2.12/1.6.1/iceberg-spark-runtime-3.5_2.12-1.6.1.jar", "87e7184f31ef0caac415bbdfcf1bc4943346a58b98d747dc83434f7139e12acb"}},
 	"ICEBERG/2.2/1.10": {{"org/apache/iceberg/iceberg-spark-runtime-3.5_2.12/1.10.0/iceberg-spark-runtime-3.5_2.12-1.10.0.jar",
 		"70f9471870b2d456167d703c829f098a446b86bb1379eee338c0efa03a341026"}},
+	// Iceberg 1.11.0 on 3.0 (Spark 4.1, Scala 2.13), as the 3.0 release
+	// notes list it.
+	"ICEBERG/3.0": {{"org/apache/iceberg/iceberg-spark-runtime-4.1_2.13/1.11.0/iceberg-spark-runtime-4.1_2.13-1.11.0.jar",
+		"d6ea6c5d099288daeb7d5a92061bd3d7d8f296492632b42378e5f2f0e3066242"}},
 	"HUDI/2.1": {{"org/apache/hudi/hudi-spark3.3-bundle_2.12/0.12.3/hudi-spark3.3-bundle_2.12-0.12.3.jar", "99142b2f0f67d8b48bf7114f7e8fee8859772b9e288064abb28b07655bb0277c"}},
 	"HUDI/2.2": {{"org/apache/hudi/hudi-spark3.5-bundle_2.12/0.15.0/hudi-spark3.5-bundle_2.12-0.15.0.jar", "aab6ecdb5c65fcd20406b980b31ccec294fae95693de947d5778f0b3fb4e302a"}},
 	"HUDI/3.0": {{"org/apache/hudi/hudi-spark4.1-bundle_2.13/1.2.0/hudi-spark4.1-bundle_2.13-1.2.0.jar", "69ba6fa7e29096c15737614a98e85536935365f044dc4d647dfdec6bcc24f6ce"}},

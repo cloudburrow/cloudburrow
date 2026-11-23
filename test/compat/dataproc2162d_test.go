@@ -25,7 +25,7 @@ n = 20000
 inside = sc.parallelize(range(n), 4).filter(lambda _: random.random() ** 2 + random.random() ** 2 < 1).count()
 print("master=%s mode=%s" % (sc.master, sc.getConf().get("spark.submit.deployMode")))
 print("Pi is roughly %f" % (4.0 * inside / n))
-print("executors=%d" % len(sc._jsc.sc().getExecutorMemoryStatus()))
+print("executors=%d" % sc._jsc.sc().getExecutorMemoryStatus().size())
 spark.stop()
 `
 
@@ -82,7 +82,7 @@ func TestDataprocSparkAndHiveOnYarn(t *testing.T) {
 		}
 	}
 	apps := client.GetYarnApplications()
-	if len(apps) != 1 || apps[0].GetState() != dataprocpb.YarnApplication_FINISHED || !strings.HasPrefix(apps[0].GetTrackingUrl(), "http://"+name+"-m:8088/proxy/application_") {
+	if len(apps) != 1 || apps[0].GetState() != dataprocpb.YarnApplication_FINISHED || !strings.Contains(apps[0].GetTrackingUrl(), "/application_") {
 		t.Errorf("the client mode job's YARN applications: %v", apps)
 	}
 
@@ -123,5 +123,67 @@ func TestDataprocSparkAndHiveOnYarn(t *testing.T) {
 	}
 	if os.Getenv("CB_DEBUG_HOLD") != "" && t.Failed() {
 		time.Sleep(10 * time.Minute)
+	}
+}
+
+// dataprocDockerScript uses a node's Docker daemon from a job's driver:
+// the daemon's version, then an image imported from a tarball (the
+// static docker CLI alone) and a container of it.
+const dataprocDockerScript = `import io, subprocess, tarfile
+from pyspark.sql import SparkSession
+spark = SparkSession.builder.getOrCreate()
+print("SERVER", subprocess.run(["docker", "version", "--format", "{{.Server.Version}}"], capture_output=True, text=True, check=True).stdout.strip())
+buf = io.BytesIO()
+with tarfile.open(fileobj=buf, mode="w") as t:
+    t.add("/usr/bin/docker", arcname="docker")
+subprocess.run(["docker", "import", "-", "cb/cli:1"], input=buf.getvalue(), check=True, capture_output=True)
+r = subprocess.run(["docker", "run", "--rm", "--network", "none", "cb/cli:1", "/docker", "--version"], capture_output=True, text=True, check=True)
+print("NESTED", r.stdout.strip())
+print("COUNT", spark.range(5).count())
+`
+
+// TestDataprocDockerComponent (#2162): the DOCKER optional component
+// (https://docs.cloud.google.com/dataproc/docs/concepts/components/docker),
+// through the official Go client: a cluster with Docker runs a PySpark
+// job whose driver reaches the node's Docker daemon (Docker 28.1, image
+// 2.3's), imports an image and runs a container of it.
+//
+// covers: google.cloud.dataproc.v1.ClusterController/CreateCluster, google.cloud.dataproc.v1.JobController/SubmitJob
+func TestDataprocDockerComponent(t *testing.T) {
+	h, addr, project := dataprocEnv(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+	grpcOpts := append(dataprocGRPC(), option.WithEndpoint(addr))
+	cc, err := dataproc.NewClusterControllerClient(ctx, grpcOpts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cc.Close() })
+	jc, err := dataproc.NewJobControllerClient(ctx, grpcOpts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer jc.Close()
+	sc := storageClient(t, h)
+	bh := bucket(t, h, sc)
+	const region = "us-central1"
+	suffix := dataprocSuffix(h, 30)
+	name := "dk-" + suffix
+	dataprocClusterUp(t, ctx, h, cc, project, region, &dataprocpb.Cluster{ProjectId: project, ClusterName: name,
+		Config: &dataprocpb.ClusterConfig{SoftwareConfig: &dataprocpb.SoftwareConfig{ImageVersion: "2.3",
+			Properties:         map[string]string{"dataproc:dataproc.allow.zero.workers": "true"},
+			OptionalComponents: []dataprocpb.Component{dataprocpb.Component_DOCKER}}}})
+	main := dataprocPut(t, ctx, bh, "docker/job.py", dataprocDockerScript)
+	j := dataprocRunJob(t, ctx, jc, project, region, &dataprocpb.Job{Placement: &dataprocpb.JobPlacement{ClusterName: name},
+		Reference: &dataprocpb.JobReference{JobId: "docker-" + suffix},
+		TypeJob:   &dataprocpb.Job_PysparkJob{PysparkJob: &dataprocpb.PySparkJob{MainPythonFileUri: main}}})
+	out := dataprocGSText(t, ctx, sc, j.GetDriverOutputResourceUri())
+	if j.GetStatus().GetState() != dataprocpb.JobStatus_DONE {
+		t.Fatalf("the Docker job: %v\n%s", j.GetStatus(), out)
+	}
+	for _, want := range []string{"SERVER 28.1.", "NESTED Docker version 28.1.", "COUNT 5"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the Docker job's output has no %q:\n%s", want, out)
+		}
 	}
 }

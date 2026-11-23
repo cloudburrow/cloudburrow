@@ -290,6 +290,11 @@ func (d *Docker) StartCluster(ctx context.Context, spec ClusterSpec) (_ *Cluster
 		return nil, err
 	}
 	if !spec.HistoryOnly {
+		if err := c.startDockerd(ctx, c.master); err != nil {
+			return nil, err
+		}
+	}
+	if !spec.HistoryOnly {
 		if err := c.waitLog(ctx, c.master, regexp.MustCompile(`I have been elected leader|Starting Spark master`), 3*time.Minute); err != nil {
 			return nil, err
 		}
@@ -326,6 +331,7 @@ func (c *Cluster) startNode(ctx context.Context, name, alias, role string) error
 		"-e", fmt.Sprintf("CB_CORES=%d", cores), "-e", "CB_MEMORY=" + mem, "-e", "CB_MASTER=" + c.nodeAlias(-1),
 		"-e", "CB_HISTORY_BASE=" + c.spec.HistoryBase}
 	args = append(args, c.lakeMounts...)
+	args = append(args, c.dockerClient(true)...)
 	args = append(args, "--entrypoint", "/bin/bash", c.rt.Image, "/cb/node.sh", role)
 	if out, err := c.d.docker(ctx, args...); err != nil {
 		return &Unavailable{Msg: "start the cluster's node " + alias + ": " + out}
@@ -376,6 +382,9 @@ func (c *Cluster) Scale(ctx context.Context, n int) error {
 			return err
 		}
 		c.workers = append(c.workers, name)
+		if err := c.startDockerd(ctx, name); err != nil {
+			return err
+		}
 		if yarn {
 			if err := c.startNodeManager(ctx, name, c.nodeAlias(i)); err != nil {
 				return err
@@ -396,6 +405,9 @@ func (c *Cluster) Scale(ctx context.Context, n int) error {
 		if yarn {
 			_, _ = c.d.docker(context.Background(), "rm", "-f", "-v", nodeManager(last))
 		}
+		if c.dockerImage() != "" {
+			_, _ = c.d.docker(context.Background(), "rm", "-f", "-v", dockerd(last))
+		}
 		_, _ = c.d.docker(context.Background(), "rm", "-f", "-v", last)
 		c.workers = c.workers[:len(c.workers)-1]
 	}
@@ -410,7 +422,7 @@ func (c *Cluster) Scale(ctx context.Context, n int) error {
 // nodes are every container of the cluster, the relay first.
 func (c *Cluster) nodesLocked() []string {
 	nodes := append(append(append([]string{c.relay, c.master}, c.workers...), c.extras...), c.groupContainersLocked()...)
-	return append(nodes, c.nodeManagersLocked()...)
+	return append(append(nodes, c.nodeManagersLocked()...), c.dockerdsLocked()...)
 }
 
 // Stop stops the cluster's containers, keeping them.
@@ -620,6 +632,7 @@ func (c *Cluster) Submit(ctx context.Context, job Job) (Result, error) {
 			"-e", "HADOOP_CONF_DIR=/cb-conf")
 	}
 	run = append(run, c.lakeMounts...)
+	run = append(run, c.dockerClient(false)...)
 	run = append(run,
 		"-e", "CB_SPARK_OUT=/cb/out/params.json", "-e", "CB_SPARK_TYPES=/cb/types.json", "-e", "PYTHONPATH=/cb/lib", "-e", "PYSPARK_PYTHON=python3",
 		"--entrypoint", "/bin/bash", c.rt.Image, "/cb/run.sh")

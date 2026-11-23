@@ -65,6 +65,12 @@ type Ecosystem struct {
 	// version (MAJOR.MINOR), fetching them on the first use; iceberg is
 	// dataproc:dataproc.iceberg.version ("" for the default).
 	Lake func(ctx context.Context, component, imageVersion, iceberg string) ([]string, error)
+	// Metastore42 is the Hive Metastore 4.2 image whose Iceberg REST
+	// catalog is image 3.0's default_iceberg catalog (ICEBERG on 3.0).
+	Metastore42 string
+	// Docker is the DOCKER component's dind-rootless image of an image
+	// version (MAJOR.MINOR), "" when not served.
+	Docker func(imageVersion string) string
 }
 
 // The optional components (SoftwareConfig.optional_components) a
@@ -201,10 +207,11 @@ func (c *Cluster) writeConf(dir string, job map[string]string, jars []string) er
 		// Hive on Tez on YARN, as a Dataproc image runs Hive: each query a
 		// Tez DAG whose ApplicationMaster and tasks are YARN containers,
 		// Tez's jars localized from the NodeManagers' /opt/tez, the query
-		// plans and Hive's jars in the shared scratch and install
-		// directories.
+		// plans, Hive's jars and the query results cache in the shared
+		// scratch, install and cache directories.
 		for k, v := range map[string]string{"tez.local.mode": "false", "hive.exec.scratchdir": "/cb-shared/hive-scratch",
-			"hive.user.install.directory": "/cb-shared/hive-install", "hive.tez.container.size": "512", "hive.tez.java.opts": "-Xmx400m"} {
+			"hive.user.install.directory": "/cb-shared/hive-install", "hive.query.results.cache.directory": "/cb-shared/hive-resultscache",
+			"hive.tez.container.size": "512", "hive.tez.java.opts": "-Xmx400m"} {
 			hive[k] = v
 		}
 		tez = map[string]string{"tez.lib.uris": "file:///opt/tez,file:///opt/tez/lib", "tez.use.cluster.hadoop-libs": "true",
@@ -416,6 +423,14 @@ func (c *Cluster) startComponents(ctx context.Context) error {
 			return err
 		}
 		if err := c.waitLog(ctx, c.component("solr"), regexp.MustCompile(`Started Solr server|o.e.j.s.Server Started`), 5*time.Minute); err != nil {
+			return err
+		}
+	}
+	if c.icebergREST() {
+		if err := need(e.Metastore42, "Hive Metastore 4.2"); err != nil {
+			return err
+		}
+		if err := c.startIcebergREST(ctx, e.Metastore42); err != nil {
 			return err
 		}
 	}

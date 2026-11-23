@@ -38,6 +38,23 @@ print("ICEBERG_VERSION", spark._jvm.org.apache.iceberg.IcebergBuild.version())
 print("EXTENSIONS", spark.conf.get("spark.sql.extensions"))
 `
 
+// dataprocIceberg30Script makes and reads an Iceberg table through
+// image 3.0's default_iceberg catalog, as the Iceberg component page's
+// 3.0 example does.
+const dataprocIceberg30Script = `from pyspark.sql import SparkSession
+spark = SparkSession.builder.getOrCreate()
+spark.sql("CREATE NAMESPACE IF NOT EXISTS default_iceberg.db")
+spark.sql("CREATE TABLE default_iceberg.db.t (id BIGINT, v STRING) USING iceberg")
+spark.sql("INSERT INTO default_iceberg.db.t VALUES (1, 'x'), (2, 'y')")
+spark.sql("INSERT INTO default_iceberg.db.t VALUES (3, 'z')")
+print("ICEBERG_ROWS", spark.sql("SELECT count(*) FROM default_iceberg.db.t").first()[0])
+print("ICEBERG_SNAPSHOTS", spark.sql("SELECT count(*) FROM default_iceberg.db.t.snapshots").first()[0])
+print("ICEBERG_VERSION", spark._jvm.org.apache.iceberg.IcebergBuild.version())
+print("CATALOG_TYPE", spark.conf.get("spark.sql.catalog.default_iceberg.type"))
+print("EXTENSIONS", spark.conf.get("spark.sql.extensions"))
+print("TABLES", ",".join(r.tableName for r in spark.sql("SHOW TABLES IN default_iceberg.db").collect()))
+`
+
 // dataprocHudiScript upserts a Hudi table in Cloud Storage twice and
 // reads it, at its latest commit and at its first, as the Hudi page's
 // example does.
@@ -67,8 +84,10 @@ print("SERIALIZER", spark.conf.get("spark.serializer"))
 // PySpark job that writes a Delta table and an Iceberg table (a hadoop
 // catalog of the job's properties) in Cloud Storage and reads their
 // history and snapshots; a cluster with Hudi upserts a Hudi table and
-// reads it at two commits; an invalid Iceberg version and ICEBERG on
-// image 3.0 are refused.
+// reads it at two commits; on image 3.0, Iceberg 1.11's default_iceberg
+// catalog is the master's Iceberg REST catalog (the Hive Metastore 4.2
+// of 3.0's Hive), a table made and read through it; an invalid Iceberg
+// version is refused.
 //
 // covers: google.cloud.dataproc.v1.ClusterController/CreateCluster, google.cloud.dataproc.v1.JobController/SubmitJob
 func TestDataprocTableFormats(t *testing.T) {
@@ -99,7 +118,7 @@ func TestDataprocTableFormats(t *testing.T) {
 		code    codes.Code
 	}{
 		{"2.2", map[string]string{"dataproc:dataproc.iceberg.version": "0.9"}, codes.InvalidArgument},
-		{"3.0", nil, codes.Unimplemented},
+		{"3.0", map[string]string{"dataproc:dataproc.iceberg.version": "2.0"}, codes.InvalidArgument},
 	} {
 		_, err := cc.CreateCluster(ctx, &dataprocpb.CreateClusterRequest{ProjectId: project, Region: region, Cluster: &dataprocpb.Cluster{
 			ProjectId: project, ClusterName: "lake-bad-" + suffix, Config: &dataprocpb.ClusterConfig{SoftwareConfig: &dataprocpb.SoftwareConfig{
@@ -144,6 +163,19 @@ func TestDataprocTableFormats(t *testing.T) {
 	}
 	if meta := dataprocGSText(t, ctx, sc, bucketURI+"/iceberg/db/t/metadata/version-hint.text"); strings.TrimSpace(meta) == "" {
 		t.Error("the Iceberg table has no metadata in Cloud Storage")
+	}
+
+	// Iceberg on image 3.0: the default_iceberg REST catalog.
+	ice30 := "ice30-" + suffix
+	dataprocClusterUp(t, ctx, h, cc, project, region, &dataprocpb.Cluster{ProjectId: project, ClusterName: ice30,
+		Config: &dataprocpb.ClusterConfig{SoftwareConfig: &dataprocpb.SoftwareConfig{ImageVersion: "3.0", Properties: single,
+			OptionalComponents: []dataprocpb.Component{dataprocpb.Component_ICEBERG}}}})
+	out = run(ice30, "ice30", dataprocIceberg30Script, nil)
+	for _, want := range []string{"ICEBERG_ROWS 3", "ICEBERG_SNAPSHOTS 2", "ICEBERG_VERSION 1.11.0", "CATALOG_TYPE rest",
+		"EXTENSIONS org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions", "TABLES t"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the image 3.0 Iceberg job's output has no %q:\n%s", want, out)
+		}
 	}
 
 	// Hudi.
@@ -332,7 +364,8 @@ func TestDataprocZeppelin(t *testing.T) {
 // Go client for the session templates: the region's Jupyter session
 // templates are its kernelspecs; a PYTHON template's kernel runs PySpark
 // on its session's Spark Connect server, and a SCALA template's kernel
-// (Almond) runs Scala on its own; deleting a kernel terminates its session.
+// (Almond) runs Scala on its own, on runtime 2.2 (Spark 3.5) and on
+// Spark 4's runtimes 3.0 and 4.0; deleting a kernel terminates its session.
 //
 // covers: google.cloud.dataproc.v1.SessionTemplateController/CreateSessionTemplate, google.cloud.dataproc.v1.SessionController/ListSessions
 func TestDataprocKernelGateway(t *testing.T) {
@@ -352,12 +385,12 @@ func TestDataprocKernelGateway(t *testing.T) {
 	defer sc.Close()
 	suffix := dataprocSuffix(h, 20)
 	parent := "projects/" + project + "/locations/us-central1"
-	tpl := func(id, display string, kernel dataprocpb.JupyterConfig_Kernel) {
+	tpl := func(id, display, version string, kernel dataprocpb.JupyterConfig_Kernel) {
 		t.Helper()
 		x, err := tc.CreateSessionTemplate(ctx, &dataprocpb.CreateSessionTemplateRequest{Parent: parent, SessionTemplate: &dataprocpb.SessionTemplate{
 			Name:          parent + "/sessionTemplates/" + id,
 			SessionConfig: &dataprocpb.SessionTemplate_JupyterSession{JupyterSession: &dataprocpb.JupyterConfig{Kernel: kernel, DisplayName: display}},
-			RuntimeConfig: &dataprocpb.RuntimeConfig{Version: "2.2"}}})
+			RuntimeConfig: &dataprocpb.RuntimeConfig{Version: version}}})
 		if err != nil {
 			t.Fatalf("CreateSessionTemplate %s: %v", id, err)
 		}
@@ -366,8 +399,14 @@ func TestDataprocKernelGateway(t *testing.T) {
 		})
 	}
 	py, scala := "py-"+suffix, "scala-"+suffix
-	tpl(py, "PySpark on Serverless Spark", dataprocpb.JupyterConfig_PYTHON)
-	tpl(scala, "Scala on Serverless Spark", dataprocpb.JupyterConfig_SCALA)
+	tpl(py, "PySpark on Serverless Spark", "2.2", dataprocpb.JupyterConfig_PYTHON)
+	tpl(scala, "Scala on Serverless Spark", "2.2", dataprocpb.JupyterConfig_SCALA)
+	// Spark 4's runtimes: 3.0 (Spark 4.0.1) and 4.0 (Spark 4.2.0).
+	spark4 := map[string][2]string{"3.0": {"py30-" + suffix, "scala30-" + suffix}, "4.0": {"py40-" + suffix, "scala40-" + suffix}}
+	for v, ids := range spark4 {
+		tpl(ids[0], "PySpark "+v, v, dataprocpb.JupyterConfig_PYTHON)
+		tpl(ids[1], "Scala "+v, v, dataprocpb.JupyterConfig_SCALA)
+	}
 
 	gw := "http://" + addr + "/kernels/" + project + "-dot-us-central1/"
 	var specs struct {
@@ -398,6 +437,18 @@ func TestDataprocKernelGateway(t *testing.T) {
 		t.Errorf("the Scala kernel: %q %v", out, err)
 	}
 
+	for v, ids := range spark4 {
+		want := map[string]string{"3.0": "4.0.1", "4.0": "4.2.0"}[v]
+		out, err := jupyterRun(ctx, gw, ids[0], `print("count", spark.range(5).count(), type(spark).__module__, spark.version)`)
+		if err != nil || !strings.Contains(out, "count 5 pyspark.sql.connect.session "+want) {
+			t.Errorf("the PySpark kernel on runtime %s: %q %v", v, out, err)
+		}
+		out, err = jupyterRun(ctx, gw, ids[1], `println("count " + spark.range(7).count() + " " + spark.version + " " + spark.getClass.getName)`)
+		if err != nil || !strings.Contains(out, "count 7 "+want+" org.apache.spark.sql.") {
+			t.Errorf("the Scala kernel on runtime %s: %q %v", v, out, err)
+		}
+	}
+
 	// Each kernel ran in a session of its own, terminated with it.
 	deadline := time.Now().Add(3 * time.Minute)
 	for {
@@ -408,8 +459,7 @@ func TestDataprocKernelGateway(t *testing.T) {
 			if err != nil {
 				break
 			}
-			if !strings.Contains(x.Name, "/sessions/kernel-") || x.GetSessionTemplate() == "" ||
-				!strings.HasSuffix(x.GetSessionTemplate(), py) && !strings.HasSuffix(x.GetSessionTemplate(), scala) {
+			if !strings.Contains(x.Name, "/sessions/kernel-") || !strings.HasSuffix(x.GetSessionTemplate(), suffix) {
 				continue
 			}
 			seen++
@@ -417,7 +467,7 @@ func TestDataprocKernelGateway(t *testing.T) {
 				live++
 			}
 		}
-		if seen == 2 && live == 0 {
+		if seen == 6 && live == 0 {
 			break
 		}
 		if time.Now().After(deadline) {

@@ -239,6 +239,7 @@ func (c *Cluster) startNodeManager(ctx context.Context, node, host string) error
 		"-v", c.jar + ":/cb-connector/spark-bigquery.jar:ro"}
 	args = append(args, c.yarnMounts(gcs)...)
 	args = append(args, c.lakeMounts...)
+	args = append(args, c.dockerClient(true)...)
 	args = append(args, "-e", "HADOOP_CONF_DIR=/cb-conf", "-e", "HADOOP_CLASSPATH=/cb-gcs/gcs-connector.jar",
 		"-e", "YARN_NODEMANAGER_HEAPSIZE=384", "-e", "YARN_NODEMANAGER_OPTS=-Dyarn.nodemanager.hostname="+host,
 		"-e", "PYSPARK_PYTHON=python3", "--entrypoint", "/bin/bash", c.rt.Image, "/cb/nodemanager.sh")

@@ -12,7 +12,12 @@ package sparkproc
 //   - ICEBERG (image 2.x): spark.sql.extensions
 //     org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions
 //     and the runtime jar on spark.driver.extraClassPath and
-//     spark.executor.extraClassPath (/usr/lib/iceberg/lib/);
+//     spark.executor.extraClassPath (/usr/lib/iceberg/lib/); on image 3.0
+//     also the default_iceberg catalog, an Iceberg REST catalog
+//     (spark.sql.catalog.default_iceberg org.apache.iceberg.spark.SparkCatalog,
+//     .type rest, .uri env:ICEBERG_REST_CATALOG_URI), which is the Iceberg
+//     REST catalog of a Hive Metastore 4.2 (image 3.0's Hive) on the
+//     master, ICEBERG_REST_CATALOG_URI set on every node and driver;
 //   - HUDI: spark.serializer KryoSerializer, spark.sql.catalog.spark_catalog
 //     org.apache.spark.sql.hudi.catalog.HoodieCatalog, spark.sql.extensions
 //     org.apache.spark.sql.hudi.HoodieSparkSessionExtension and the Spark
@@ -25,9 +30,11 @@ package sparkproc
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 // The table formats' components.
@@ -98,6 +105,14 @@ func (c *Cluster) setupLake(ctx context.Context) error {
 			c.lakeMounts = append(c.lakeMounts, "-v", j+":"+in+":ro")
 			classPath = append(classPath, in)
 		}
+		if comp == ComponentIceberg && c.icebergREST() {
+			for k, v := range map[string]string{"spark.sql.catalog.default_iceberg": "org.apache.iceberg.spark.SparkCatalog",
+				"spark.sql.catalog.default_iceberg.type": "rest", "spark.sql.catalog.default_iceberg.uri": "env:ICEBERG_REST_CATALOG_URI"} {
+				props[k] = v
+			}
+			c.lakeMounts = append(c.lakeMounts, "-e", "ICEBERG_REST_CATALOG_URI=http://"+c.nodeAlias(-1)+":"+icebergRESTPort+"/iceberg",
+				"-v", filepath.Join(c.dir, "warehouse")+":/cb-warehouse")
+		}
 		for k, v := range lakeProps[comp] {
 			if k == "spark.sql.extensions" {
 				extensions = append(extensions, v)
@@ -118,4 +133,34 @@ func (c *Cluster) setupLake(ctx context.Context) error {
 	props["spark.executor.extraClassPath"] = cp
 	c.lakeProps = props
 	return nil
+}
+
+// icebergRESTPort is the Hive Metastore's Iceberg REST catalog port
+// (metastore.catalog.servlet.port).
+const icebergRESTPort = "9001"
+
+// icebergREST says whether the cluster's ICEBERG component has image
+// 3.0's Iceberg REST catalog.
+func (c *Cluster) icebergREST() bool {
+	return c.has(ComponentIceberg) && c.spec.ImageVersion >= "3.0"
+}
+
+// startIcebergREST starts the Hive Metastore 4.2 whose Iceberg REST
+// catalog (http://CLUSTER-m:9001/iceberg, metastore.catalog.servlet.auth
+// none, as the image's own configuration has it) is image 3.0's
+// default_iceberg catalog: a container sharing the master's network,
+// its thrift port 9084 (the Hive services' metastore has 9083), its
+// warehouse the cluster's (file:///cb-warehouse/iceberg), which every
+// node and driver mounts.
+func (c *Cluster) startIcebergREST(ctx context.Context, image string) error {
+	if err := os.MkdirAll(filepath.Join(c.dir, "warehouse", "iceberg"), 0o777); err != nil {
+		return err
+	}
+	_ = os.Chmod(filepath.Join(c.dir, "warehouse", "iceberg"), 0o777)
+	if err := c.runComponent(ctx, "iceberg-rest", "", "-v", filepath.Join(c.dir, "warehouse")+":/cb-warehouse",
+		"-e", "DEFAULT_FS=file://", "-e", "HIVE_WAREHOUSE_PATH=/cb-warehouse/iceberg", "-e", "METASTORE_PORT=9084",
+		"-e", "SERVICE_OPTS=-Xmx512m", image); err != nil {
+		return err
+	}
+	return c.waitPort(ctx, c.component("iceberg-rest"), icebergRESTPort, 5*time.Minute)
 }

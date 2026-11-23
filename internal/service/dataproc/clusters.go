@@ -324,13 +324,11 @@ var servedComponents = map[dataprocpb.Component]bool{
 	dataprocpb.Component_FLINK: true, dataprocpb.Component_HIVE_WEBHCAT: true, dataprocpb.Component_JUPYTER: true,
 	dataprocpb.Component_PIG: true, dataprocpb.Component_SOLR: true, dataprocpb.Component_TRINO: true,
 	dataprocpb.Component_ZOOKEEPER: true, dataprocpb.Component_DELTA: true, dataprocpb.Component_ICEBERG: true,
-	dataprocpb.Component_HUDI: true, dataprocpb.Component_ZEPPELIN: true,
+	dataprocpb.Component_HUDI: true, dataprocpb.Component_ZEPPELIN: true, dataprocpb.Component_DOCKER: true,
 }
 
 // unservedComponents are why the other components do not run.
 var unservedComponents = map[dataprocpb.Component]string{
-	dataprocpb.Component_DOCKER: "a Docker daemon on a node's container needs a privileged container: the official docker:dind and docker:dind-rootless images both " +
-		"need --privileged, and a non-privileged runtime for system containers (Sysbox's sysbox-runc) is not one of the machine's Docker runtimes",
 	dataprocpb.Component_RANGER: "Apache Ranger publishes no official image",
 }
 
@@ -338,12 +336,6 @@ var unservedComponents = map[dataprocpb.Component]string{
 // is 0.12.0: its official image is linux/amd64 only and 3.3 GB
 // compressed, a second one beside 0.10.1's (the machine's disk budget).
 const zeppelin30 = "image 3.0's Zeppelin 0.12.0 is not pinned: its official image is linux/amd64 only and 3.3 GB compressed, beside the 3.7 GB of 2.x's Zeppelin 0.10.1"
-
-// icebergREST is why ICEBERG is not served on image 3.0: its Spark's
-// default_iceberg catalog is the Hive Metastore's Iceberg REST catalog
-// (the Iceberg component page, read 2026-11-23), which the Hive 4.0.1 of
-// the pinned apache/hive image does not serve.
-const icebergREST = "image 3.0's default_iceberg catalog is the Hive Metastore's Iceberg REST catalog, which the local cluster's Hive 4.0.1 metastore does not serve"
 
 // checkComponents checks a cluster's optional components against its
 // image version.
@@ -366,11 +358,8 @@ func checkComponents(mm string, comps []dataprocpb.Component) error {
 		if comp == dataprocpb.Component_ZEPPELIN && mm >= "3.0" {
 			return status.Errorf(codes.Unimplemented, "The ZEPPELIN optional component is not served by CloudBurrow on image version %s (%s)", mm, zeppelin30)
 		}
-		if comp == dataprocpb.Component_ICEBERG && mm >= "3.0" {
-			return status.Errorf(codes.Unimplemented, "The ICEBERG optional component is not served by CloudBurrow on image version %s (%s)", mm, icebergREST)
-		}
 		if !servedComponents[comp] {
-			return status.Errorf(codes.Unimplemented, "The %s optional component is not served by CloudBurrow (%s): a local cluster runs Delta Lake, Flink, Hive WebHCat, Hudi, Iceberg, Jupyter, Pig, Solr, Trino, Zeppelin and ZooKeeper", comp, unservedComponents[comp])
+			return status.Errorf(codes.Unimplemented, "The %s optional component is not served by CloudBurrow (%s): a local cluster runs Delta Lake, Docker, Flink, Hive WebHCat, Hudi, Iceberg, Jupyter, Pig, Solr, Trino, Zeppelin and ZooKeeper", comp, unservedComponents[comp])
 		}
 	}
 	return nil
