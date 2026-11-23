@@ -19688,9 +19688,10 @@
           "test/compat/dataproc2162e_test.go:42 TestDataprocOnGKE",
           "test/compat/dataproc2162f_test.go:55 TestDataprocRangerComponent",
           "test/compat/dataproc2186_test.go:33 TestDataprocHDFS",
-          "test/compat/dataproc2188_test.go:117 TestDataprocHDFSHighAvailability",
-          "test/compat/dataproc2188_test.go:225 TestDataprocHDFSLocalSSDs",
-          "test/compat/dataproc2188_test.go:287 TestDataprocHDFSRestartSetup"
+          "test/compat/dataproc2188_test.go:119 TestDataprocHDFSHighAvailability",
+          "test/compat/dataproc2188_test.go:227 TestDataprocHDFSLocalSSDs",
+          "test/compat/dataproc2188_test.go:289 TestDataprocHDFSRestartSetup",
+          "test/compat/dataproc2189_test.go:68 TestDataprocYARNHighAvailability"
         ]
       },
       {
@@ -19699,7 +19700,7 @@
         "tests": [
           "test/compat/dataproc2162_test.go:169 TestDataprocClusters",
           "test/compat/dataproc2186_test.go:33 TestDataprocHDFS",
-          "test/compat/dataproc2188_test.go:314 TestDataprocHDFSAcrossRestart"
+          "test/compat/dataproc2188_test.go:316 TestDataprocHDFSAcrossRestart"
         ]
       },
       {
@@ -19717,8 +19718,9 @@
           "test/compat/dataproc2162b_test.go:289 TestDataprocOptionalComponents",
           "test/compat/dataproc2162c_test.go:298 TestDataprocZeppelin",
           "test/compat/dataproc2162c_test.go:304 TestDataprocZeppelin30",
-          "test/compat/dataproc2188_test.go:117 TestDataprocHDFSHighAvailability",
-          "test/compat/dataproc2188_test.go:314 TestDataprocHDFSAcrossRestart"
+          "test/compat/dataproc2188_test.go:119 TestDataprocHDFSHighAvailability",
+          "test/compat/dataproc2188_test.go:316 TestDataprocHDFSAcrossRestart",
+          "test/compat/dataproc2189_test.go:68 TestDataprocYARNHighAvailability"
         ]
       },
       {
@@ -19772,7 +19774,8 @@
         "tests": [
           "test/compat/dataproc2162_test.go:169 TestDataprocClusters",
           "test/compat/dataproc2162b_test.go:74 TestDataprocHadoopHivePigJobs",
-          "test/compat/dataproc2162d_test.go:46 TestDataprocSparkAndHiveOnYarn"
+          "test/compat/dataproc2162d_test.go:46 TestDataprocSparkAndHiveOnYarn",
+          "test/compat/dataproc2189_test.go:68 TestDataprocYARNHighAvailability"
         ]
       },
       {
@@ -19794,10 +19797,11 @@
           "test/compat/dataproc2162e_test.go:42 TestDataprocOnGKE",
           "test/compat/dataproc2162f_test.go:55 TestDataprocRangerComponent",
           "test/compat/dataproc2186_test.go:33 TestDataprocHDFS",
-          "test/compat/dataproc2188_test.go:117 TestDataprocHDFSHighAvailability",
-          "test/compat/dataproc2188_test.go:225 TestDataprocHDFSLocalSSDs",
-          "test/compat/dataproc2188_test.go:287 TestDataprocHDFSRestartSetup",
-          "test/compat/dataproc2188_test.go:314 TestDataprocHDFSAcrossRestart"
+          "test/compat/dataproc2188_test.go:119 TestDataprocHDFSHighAvailability",
+          "test/compat/dataproc2188_test.go:227 TestDataprocHDFSLocalSSDs",
+          "test/compat/dataproc2188_test.go:289 TestDataprocHDFSRestartSetup",
+          "test/compat/dataproc2188_test.go:316 TestDataprocHDFSAcrossRestart",
+          "test/compat/dataproc2189_test.go:68 TestDataprocYARNHighAvailability"
         ]
       },
       {

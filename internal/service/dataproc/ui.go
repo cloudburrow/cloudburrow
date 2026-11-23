@@ -200,7 +200,7 @@ func (s *Server) WebUI(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := r.URL.Path
 		var addr, base, strip, rewrite string
-		var clusterName string
+		var masters []string
 		switch {
 		case p == HistoryBase || strings.HasPrefix(p, HistoryBase+"/"):
 			a, err := s.instanceHistory(r.Context())
@@ -225,7 +225,7 @@ func (s *Server) WebUI(next http.Handler) http.Handler {
 			for name, c := range s.clusters {
 				if c.ClusterUuid == m[1] {
 					nodes = s.nodes[name]
-					clusterName = masterName(c)
+					masters = masterNames(c)
 				}
 			}
 			s.mu.Unlock()
@@ -273,7 +273,7 @@ func (s *Server) WebUI(next http.Handler) http.Handler {
 			}
 		}, ModifyResponse: func(resp *http.Response) error {
 			if rewrite != "" {
-				return rewriteHadoop(resp, rewrite, base, clusterName)
+				return rewriteHadoop(resp, rewrite, base, masters)
 			}
 			// The History Server redirects to its own paths, which the
 			// proxy base prefixes.
@@ -440,13 +440,21 @@ func (s *Server) copyToPHS(phs, uuid string) {
 // rewriteHadoop rewrites a Hadoop web interface's response for its
 // Component Gateway path base (gateway is the cluster's gateway base):
 // its redirects, its pages' root-relative links, and the absolute URLs of
-// the master's interfaces (http://CLUSTER-m:8088/proxy/..., the
-// JobHistory Server's http://CLUSTER-m:19888/jobhistory/...), each to its
-// own gateway path.
-func rewriteHadoop(resp *http.Response, gateway, base, master string) error {
+// the masters' interfaces (http://CLUSTER-m:8088/proxy/..., the
+// JobHistory Server's http://CLUSTER-m:19888/jobhistory/...; on a High
+// Availability cluster the active ResourceManager's, on any of the
+// masters), each to its own gateway path.
+func rewriteHadoop(resp *http.Response, gateway, base string, masters []string) error {
+	hosts := func(port string) []string {
+		out := []string{"0.0.0.0:" + port, "localhost:" + port}
+		for _, m := range masters {
+			out = append(out, m+":"+port)
+		}
+		return out
+	}
 	abs := func(u string) string {
 		for key, port := range gatewayRewritten {
-			for _, host := range []string{master + ":" + port, "0.0.0.0:" + port, "localhost:" + port} {
+			for _, host := range hosts(port) {
 				if rest, ok := strings.CutPrefix(u, "http://"+host); ok {
 					return gateway + key + rest
 				}
@@ -475,7 +483,10 @@ func rewriteHadoop(resp *http.Response, gateway, base, master string) error {
 	}
 	page := string(b)
 	for key, port := range gatewayRewritten {
-		for _, host := range []string{master + ":" + port, "0.0.0.0:" + port} {
+		for _, host := range hosts(port) {
+			if strings.HasPrefix(host, "localhost:") {
+				continue
+			}
 			page = strings.ReplaceAll(page, "http://"+host, strings.TrimSuffix(gateway, "/")+"/"+key)
 		}
 	}

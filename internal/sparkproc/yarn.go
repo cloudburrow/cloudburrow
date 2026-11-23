@@ -157,7 +157,14 @@ func (c *Cluster) yarnConf(jars []string) (yarn, mapred map[string]string) {
 		"mapreduce.reduce.java.opts":                   "-Xmx400m",
 		"mapreduce.job.reduce.slowstart.completedmaps": "0.95",
 	}
-	// With RANGER, the ResourceManager authorizes queue access with
+	if c.ha() {
+		for k, v := range c.yarnHASite() {
+			yarn[k] = v
+		}
+		delete(yarn, "yarn.resourcemanager.hostname")
+		delete(yarn, "yarn.resourcemanager.webapp.address")
+	}
+	// With RANGER, each ResourceManager authorizes queue access with
 	// Ranger's YARN plugin (startYARN loads it).
 	if c.has(ComponentRanger) {
 		for k, v := range rangerYarnSite() {
@@ -168,6 +175,43 @@ func (c *Cluster) yarnConf(jars []string) (yarn, mapred map[string]string) {
 		yarn[k] = v
 	}
 	return yarn, mapred
+}
+
+// haResourceManagers are a High Availability cluster's ResourceManagers'
+// IDs (yarn.resourcemanager.ha.rm-ids), rmN on master N.
+var haResourceManagers = []string{"rm0", "rm1", "rm2"}
+
+// yarnHASite are a High Availability cluster's ResourceManager HA
+// properties, as Hadoop's ResourceManager High Availability page
+// documents them: a ResourceManager on each master ("all masters run
+// ResourceManager"), electing the active one through the masters'
+// ZooKeeper ensemble (the embedded elector), the applications' state in
+// ZooKeeper (ZKRMStateStore) so the new active one recovers them,
+// work-preserving: their containers keep running. NodeManagers, drivers
+// and clients find the active one by trying each in turn
+// (ConfiguredRMFailoverProxyProvider, the default).
+func (c *Cluster) yarnHASite() map[string]string {
+	props := map[string]string{
+		"yarn.resourcemanager.ha.enabled":                         "true",
+		"yarn.resourcemanager.ha.automatic-failover.enabled":      "true",
+		"yarn.resourcemanager.ha.automatic-failover.embedded":     "true",
+		"yarn.resourcemanager.cluster-id":                         c.spec.Name,
+		"yarn.resourcemanager.ha.rm-ids":                          strings.Join(haResourceManagers, ","),
+		"yarn.resourcemanager.recovery.enabled":                   "true",
+		"yarn.resourcemanager.work-preserving-recovery.enabled":   "true",
+		"yarn.resourcemanager.store.class":                        "org.apache.hadoop.yarn.server.resourcemanager.recovery.ZKRMStateStore",
+		"hadoop.zk.address":                                       c.zkQuorum(),
+		"yarn.client.failover-proxy-provider":                     "org.apache.hadoop.yarn.client.ConfiguredRMFailoverProxyProvider",
+		"yarn.resourcemanager.connect.retry-interval.ms":          "2000",
+		"yarn.client.failover-sleep-base-ms":                      "500",
+		"yarn.resourcemanager.zk-state-store.parent-path":         "/rmstore",
+		"yarn.resourcemanager.ha.automatic-failover.zk-base-path": "/yarn-leader-election",
+	}
+	for i, id := range haResourceManagers {
+		props["yarn.resourcemanager.hostname."+id] = c.masterAlias(i)
+		props["yarn.resourcemanager.webapp.address."+id] = c.masterAlias(i) + ":" + yarnWebPort
+	}
+	return props
 }
 
 // capacityScheduler is capacity-scheduler.xml: the one default queue.
@@ -194,16 +238,17 @@ func (c *Cluster) yarnMounts(gcs string) []string {
 }
 
 // startYARN starts the ResourceManager and JobHistory Server on the
-// master and waits for the ResourceManager's web UI.
+// master (on a High Availability cluster, a ResourceManager on each
+// master) and waits for the ResourceManagers' web UIs.
 func (c *Cluster) startYARN(ctx context.Context) error {
 	e := c.d.Ecosystem
 	gcs, err := e.GCS(ctx)
 	if err != nil {
 		return &Unavailable{Msg: "Google's Cloud Storage connector for Hadoop is not available: " + err.Error()}
 	}
-	args := append([]string{"--user", "0:0"}, c.yarnMounts(gcs)...)
+	common := c.yarnMounts(gcs)
 	cp := "/cb-gcs/gcs-connector.jar"
-	// With RANGER, the ResourceManager loads Ranger's YARN plugin, as
+	// With RANGER, each ResourceManager loads Ranger's YARN plugin, as
 	// enable-yarn-plugin.sh installs it on a Dataproc master: its lib
 	// directory on the class path, read from the Ranger Admin image (a
 	// Docker image mount: nothing copied out of it).
@@ -215,23 +260,59 @@ func (c *Cluster) startYARN(ctx context.Context) error {
 		if err != nil {
 			return &Unavailable{Msg: "build the Ranger Admin image from the Apache Ranger 2.8.0 source release: " + err.Error()}
 		}
-		args = append(args, "--mount", "type=image,source="+image+",target=/cb-ranger")
+		common = append(common, "--mount", "type=image,source="+image+",target=/cb-ranger")
 		cp += ":/cb-ranger" + rangerYarnPlugin + "/*"
 	}
-	args = append(args, "-e", "HADOOP_CONF_DIR=/cb-conf", "-e", "HADOOP_CLASSPATH="+cp,
-		"-e", "YARN_RESOURCEMANAGER_HEAPSIZE=512", "-e", "HADOOP_JOB_HISTORYSERVER_HEAPSIZE=256",
-		"--entrypoint", "/bin/bash", e.Hive, "-c",
-		// The JobHistory Server once HDFS, where its directories are, is
-		// out of safe mode and has them.
-		"(until /opt/hadoop/bin/hdfs dfsadmin -safemode get 2>/dev/null | grep -q 'Safe mode is OFF' && "+
-			"/opt/hadoop/bin/hdfs dfs -test -d /tmp/hadoop-yarn/staging/history/done_intermediate 2>/dev/null; do sleep 2; done; "+
-			"exec /opt/hadoop/bin/mapred historyserver) & "+
-			"(YARN_TIMELINESERVER_HEAPSIZE=256 /opt/hadoop/bin/yarn timelineserver &) && exec /opt/hadoop/bin/yarn resourcemanager")
-	if err := c.runComponent(ctx, "yarn", "", args...); err != nil {
-		return err
+	common = append(common, "-e", "HADOOP_CONF_DIR=/cb-conf", "-e", "HADOOP_CLASSPATH="+cp, "-e", "YARN_RESOURCEMANAGER_HEAPSIZE=512")
+	// The JobHistory Server once HDFS, where its directories are, is out
+	// of safe mode and has them; then the Timeline Server and the
+	// ResourceManager. rm1 and rm2, on -m-1 and -m-2, run the
+	// ResourceManager alone, as a Dataproc High Availability cluster's
+	// other masters do.
+	first := "(until /opt/hadoop/bin/hdfs dfsadmin -safemode get 2>/dev/null | grep -q 'Safe mode is OFF' && " +
+		"/opt/hadoop/bin/hdfs dfs -test -d /tmp/hadoop-yarn/staging/history/done_intermediate 2>/dev/null; do sleep 2; done; " +
+		"exec /opt/hadoop/bin/mapred historyserver) & " +
+		"(YARN_TIMELINESERVER_HEAPSIZE=256 /opt/hadoop/bin/yarn timelineserver &) && exec /opt/hadoop/bin/yarn resourcemanager"
+	for i := range c.resourceManagers() {
+		args := append([]string{"--user", "0:0"}, common...)
+		cmd := "exec /opt/hadoop/bin/yarn resourcemanager"
+		if i == 0 {
+			args = append(args, "-e", "HADOOP_JOB_HISTORYSERVER_HEAPSIZE=256")
+			cmd = first
+		}
+		if c.ha() {
+			// Which of yarn.resourcemanager.ha.rm-ids this one is.
+			args = append(args, "-e", "YARN_RESOURCEMANAGER_OPTS=-Dyarn.resourcemanager.ha.id="+haResourceManagers[i])
+		}
+		args = append(args, "--entrypoint", "/bin/bash", e.Hive, "-c", cmd)
+		if err := c.runComponent(ctx, masterPart(i, "yarn"), c.masterNode(i), args...); err != nil {
+			return err
+		}
 	}
-	return c.waitPort(ctx, c.component("yarn"), yarnWebPort, 3*time.Minute)
+	for i := range c.resourceManagers() {
+		if err := c.waitPort(ctx, c.resourceManagerOf(i), yarnWebPort, 3*time.Minute); err != nil {
+			return err
+		}
+	}
+	return nil
 }
+
+// resourceManagers are the masters whose ResourceManager runs: every
+// master of a High Availability cluster, the master of the others.
+func (c *Cluster) resourceManagers() []string {
+	if !c.ha() {
+		return []string{c.masterAlias(0)}
+	}
+	out := make([]string, len(haResourceManagers))
+	for i := range out {
+		out[i] = c.masterAlias(i)
+	}
+	return out
+}
+
+// resourceManagerOf is master i's ResourceManager container (-m-0's
+// also runs the JobHistory and Timeline Servers).
+func (c *Cluster) resourceManagerOf(i int) string { return c.component(masterPart(i, "yarn")) }
 
 // waitHistoryServers waits for the JobHistory Server, which starts once
 // HDFS is ready, and the Timeline Server.

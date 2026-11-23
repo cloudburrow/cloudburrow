@@ -83,13 +83,15 @@ func dataprocNodeContainers(t *testing.T, ctx context.Context, uuid, host string
 	}
 	var node, rest []string
 	for _, n := range strings.Fields(string(out)) {
-		if strings.HasSuffix(n, "-m-1") || strings.HasSuffix(n, "-m-2") {
+		// -m-0's node is the master's own container (…-m), the others'
+		// …-m-1 and …-m-2.
+		if strings.HasSuffix(n, "-m") || strings.HasSuffix(n, "-m-1") || strings.HasSuffix(n, "-m-2") {
 			node = append(node, n)
 		} else {
 			rest = append(rest, n)
 		}
 	}
-	if len(node) > 1 || len(rest) == 0 || (len(node) == 0 && !strings.HasSuffix(host, "-m-0")) {
+	if len(node) != 1 || len(rest) == 0 {
 		t.Fatalf("node %s's containers: %q", host, out)
 	}
 	return append(node, rest...)

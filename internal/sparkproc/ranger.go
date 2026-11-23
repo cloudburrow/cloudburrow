@@ -302,7 +302,7 @@ func (c *Cluster) rangerYarnConf() map[string]map[string]string {
 		"ranger-yarn-audit.xml": {
 			"xasecure.audit.is.enabled":                           "true",
 			"xasecure.audit.destination.solr":                     "true",
-			"xasecure.audit.destination.solr.urls":                "http://localhost:8983/solr/ranger_audits",
+			"xasecure.audit.destination.solr.urls":                "http://" + c.nodeAlias(-1) + ":8983/solr/ranger_audits",
 			"xasecure.audit.destination.solr.batch.filespool.dir": "/tmp/ranger-yarn-audit-spool",
 		},
 	}

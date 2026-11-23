@@ -223,7 +223,7 @@ func TestRangerYarnConf(t *testing.T) {
 	if sec["ranger.plugin.yarn.service.name"] != "yarn-dataproc" || sec["ranger.plugin.yarn.policy.rest.url"] != "http://rg-m:6080" {
 		t.Errorf("ranger-yarn-security.xml = %v", sec)
 	}
-	if conf["ranger-yarn-audit.xml"]["xasecure.audit.destination.solr.urls"] != "http://localhost:8983/solr/ranger_audits" {
+	if conf["ranger-yarn-audit.xml"]["xasecure.audit.destination.solr.urls"] != "http://rg-m:8983/solr/ranger_audits" {
 		t.Errorf("ranger-yarn-audit.xml = %v", conf["ranger-yarn-audit.xml"])
 	}
 	plain := &Cluster{spec: ClusterSpec{Name: "pl"}}
@@ -260,7 +260,7 @@ func TestHDFSConf(t *testing.T) {
 		"hive-site.xml":            {"<name>hive.metastore.warehouse.dir</name><value>/user/hive/warehouse</value>"},
 		"mapred-site.xml":          {"<name>yarn.app.mapreduce.am.staging-dir</name><value>/tmp/hadoop-yarn/staging</value>"},
 		"ranger-hdfs-security.xml": {"<name>ranger.plugin.hdfs.service.name</name><value>hadoop-dataproc</value>"},
-		"ranger-hdfs-audit.xml":    {"<name>xasecure.audit.destination.solr.urls</name><value>http://localhost:8983/solr/ranger_audits</value>"},
+		"ranger-hdfs-audit.xml":    {"<name>xasecure.audit.destination.solr.urls</name><value>http://hd-m:8983/solr/ranger_audits</value>"},
 	} {
 		got := read(name)
 		for _, w := range want {
@@ -326,7 +326,7 @@ func TestHDFSHighAvailabilityConf(t *testing.T) {
 			"<name>dfs.ha.automatic-failover.enabled</name><value>true</value>",
 			"<name>dfs.client.failover.proxy.provider.ha</name><value>org.apache.hadoop.hdfs.server.namenode.ha.ConfiguredFailoverProxyProvider</value>",
 			"<name>dfs.permissions.enabled</name><value>false</value>"},
-		"yarn-site.xml": {"<name>yarn.resourcemanager.hostname</name><value>ha-m-0</value>"},
+		"yarn-site.xml": {"<name>yarn.resourcemanager.ha.rm-ids</name><value>rm0,rm1,rm2</value>", "<name>yarn.resourcemanager.hostname.rm1</name><value>ha-m-1</value>"},
 	} {
 		got := read(name)
 		for _, w := range want {
@@ -368,5 +368,49 @@ func TestLocalSSDs(t *testing.T) {
 	c.d.RemoveDisks("uuid-1")
 	if _, err := os.Stat(filepath.Join(root, "uuid-1")); !os.IsNotExist(err) {
 		t.Errorf("the cluster's disks after RemoveDisks: %v", err)
+	}
+}
+
+// TestYarnHAConf (#2189): a High Availability cluster's yarn-site.xml
+// names a ResourceManager on each master (rm0, rm1, rm2), electing the
+// active one and keeping the applications' state in the masters'
+// ZooKeeper ensemble; with RANGER each loads Ranger's YARN plugin and
+// audits to the Solr of -m-0. A standard cluster's has the one
+// ResourceManager on the master.
+func TestYarnHAConf(t *testing.T) {
+	c := &Cluster{spec: ClusterSpec{Name: "ha", Masters: 3, Components: []string{ComponentSolr, ComponentRanger}}}
+	yarn, _ := c.yarnConf(nil)
+	for k, want := range map[string]string{
+		"yarn.resourcemanager.ha.enabled":                    "true",
+		"yarn.resourcemanager.ha.automatic-failover.enabled": "true",
+		"yarn.resourcemanager.ha.rm-ids":                     "rm0,rm1,rm2",
+		"yarn.resourcemanager.cluster-id":                    "ha",
+		"yarn.resourcemanager.hostname.rm0":                  "ha-m-0",
+		"yarn.resourcemanager.hostname.rm2":                  "ha-m-2",
+		"yarn.resourcemanager.webapp.address.rm1":            "ha-m-1:8088",
+		"yarn.resourcemanager.recovery.enabled":              "true",
+		"yarn.resourcemanager.store.class":                   "org.apache.hadoop.yarn.server.resourcemanager.recovery.ZKRMStateStore",
+		"hadoop.zk.address":                                  "ha-m-0:2181,ha-m-1:2181,ha-m-2:2181",
+		"yarn.authorization-provider":                        "org.apache.ranger.authorization.yarn.authorizer.RangerYarnAuthorizer",
+	} {
+		if yarn[k] != want {
+			t.Errorf("%s = %q; want %q", k, yarn[k], want)
+		}
+	}
+	for _, k := range []string{"yarn.resourcemanager.hostname", "yarn.resourcemanager.webapp.address"} {
+		if v, ok := yarn[k]; ok {
+			t.Errorf("an HA cluster's %s = %q", k, v)
+		}
+	}
+	if got := c.rangerYarnConf()["ranger-yarn-audit.xml"]["xasecure.audit.destination.solr.urls"]; got != "http://ha-m-0:8983/solr/ranger_audits" {
+		t.Errorf("rm1's and rm2's audit = %q", got)
+	}
+	if got := c.resourceManagers(); strings.Join(got, ",") != "ha-m-0,ha-m-1,ha-m-2" {
+		t.Errorf("resourceManagers = %v", got)
+	}
+	std := &Cluster{spec: ClusterSpec{Name: "st"}}
+	y, _ := std.yarnConf(nil)
+	if y["yarn.resourcemanager.hostname"] != "st-m" || y["yarn.resourcemanager.ha.enabled"] != "" {
+		t.Errorf("a standard cluster's yarn-site.xml = %v", y)
 	}
 }

@@ -275,7 +275,13 @@ func (d *Docker) StartCluster(ctx context.Context, spec ClusterSpec) (_ *Cluster
 	if c.yarnEnabled() {
 		for _, p := range yarnPorts {
 			relayArgs = append(relayArgs, "-p", "127.0.0.1::"+p.port)
-			relays = append(relays, alias+":"+p.port)
+			target := alias
+			if p.key == "yarn" {
+				// The active ResourceManager's (of each master's on a
+				// High Availability cluster).
+				target = strings.Join(c.resourceManagers(), "|")
+			}
+			relays = append(relays, target+":"+p.port)
 		}
 	}
 	if len(targets) > 2 {
@@ -356,7 +362,7 @@ func (c *Cluster) startNode(ctx context.Context, name, alias, role string) error
 		mem = "2g"
 	}
 	args := []string{"run", "-d", "--name", name, "--hostname", alias, "--network-alias", alias, "--label", c.label,
-		"--label", "cloudburrow.dataproc.cluster=" + c.spec.ID, "--network", c.network,
+		"--label", "cloudburrow.dataproc.cluster=" + c.spec.ID, "--label", "cloudburrow.dataproc.node=" + alias, "--network", c.network,
 		"-v", filepath.Join(c.dir, "tls") + ":/cb/tls:ro", "-v", filepath.Join(c.dir, "node.sh") + ":/cb/node.sh:ro",
 		"-v", c.HistoryDir() + ":/cb/history",
 		"-e", "PYSPARK_PYTHON=python3", "-e", "SPARK_LOCAL_HOSTNAME=" + alias,

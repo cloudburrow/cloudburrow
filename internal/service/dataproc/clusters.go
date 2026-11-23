@@ -207,6 +207,16 @@ func masterName(c *dataprocpb.Cluster) string {
 	return c.GetClusterName() + "-m"
 }
 
+// masterNames are the host names of the cluster's masters: CLUSTER-m, or
+// a High Availability cluster's -m-0, -m-1 and -m-2, each of which runs a
+// ResourceManager.
+func masterNames(c *dataprocpb.Cluster) []string {
+	if names := c.GetConfig().GetMasterConfig().GetInstanceNames(); len(names) > 0 {
+		return append([]string(nil), names...)
+	}
+	return []string{masterName(c)}
+}
+
 // checkCluster checks a cluster to create and fills in what Dataproc
 // sets by default.
 func (s *Server) checkCluster(project, region string, c *dataprocpb.Cluster) error {

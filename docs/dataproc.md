@@ -277,7 +277,7 @@ image's Ubuntu.
       `ranger-hive-security.xml`, `ranger-hive-audit.xml`): every Hive
       query is authorized by the `hive-dataproc` policies, polled every 5
       seconds, and a denial is audited to Solr.
-    - Ranger's YARN plugin in the ResourceManager (`yarn.acl.enable`,
+    - Ranger's YARN plugin in each ResourceManager (`yarn.acl.enable`,
       `yarn.authorization-provider` in `yarn-site.xml`,
       `ranger-yarn-security.xml`, `ranger-yarn-audit.xml`; its lib
       directory on the class path from a mount of the Ranger image): every
@@ -426,7 +426,23 @@ service must be on):
     is the nameservice `hdfs://CLUSTER` (`dfs.nameservices`,
     `ConfiguredFailoverProxyProvider`, `ha.zookeeper.quorum`), and when the
     active NameNode's master stops, the other NameNode becomes active.
-    The ResourceManager and the other master daemons run on `-m-0`.
+  - YARN ResourceManager High Availability (#2189): "all masters run
+    ResourceManager" (Google's High Availability page), `rm0`, `rm1` and
+    `rm2` on `-m-0`, `-m-1` and `-m-2`, configured as Hadoop's
+    ResourceManager High Availability page documents it
+    (`yarn.resourcemanager.ha.enabled`, `yarn.resourcemanager.ha.rm-ids`,
+    `yarn.resourcemanager.hostname.rmN`, `yarn.resourcemanager.cluster-id`
+    the cluster's name): the embedded elector picks the active one through
+    the masters' ZooKeeper ensemble (`hadoop.zk.address`), and
+    `yarn.resourcemanager.recovery.enabled` keeps the applications' state
+    in it (`ZKRMStateStore`), work-preserving, so when the active
+    ResourceManager's master stops another becomes active, recovers the
+    running applications and their ApplicationMasters and containers keep
+    running. NodeManagers, job drivers and clients find the active one
+    (`ConfiguredRMFailoverProxyProvider`); so does the Component Gateway's
+    `YARN ResourceManager` link. With RANGER, each ResourceManager loads
+    Ranger's YARN plugin, auditing to `-m-0`'s Solr. The MapReduce
+    JobHistory and YARN Timeline Servers run on `-m-0`.
   - Local SSDs (#2188), as [Google's local SSDs
     page](https://docs.cloud.google.com/dataproc/docs/concepts/compute/dataproc-local-ssds)
     has them: a node's `disk_config.num_local_ssds` (0 to 8;
@@ -585,10 +601,7 @@ the WebSocket bridge at it, with local credentials, as it does for BigQuery.
 
 ## What is not served
 
-- YARN ResourceManager High Availability: a High Availability cluster's
-  ResourceManager runs on `-m-0` only (Google runs one on each master,
-  #2189).
-  Local SSDs are directories on the host's one disk, so they are not
+- Local SSDs are directories on the host's one disk, so they are not
   faster than the boot disk.
 - A Dataproc on GKE cluster's `auxiliary_services_config` (a Spark History
   Server and a metastore of other clusters) is kept but not used, and its

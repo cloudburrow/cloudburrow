@@ -312,14 +312,21 @@ func (c *Cluster) component(name string) string { return c.master + "-" + name }
 
 // runComponent runs a component's container in the master's network
 // (or node's, when set), detached; it is the cluster's to stop, start and
-// remove.
+// remove. A master's component is labelled with the master's host name
+// (nodeLabel), as part of that node.
 func (c *Cluster) runComponent(ctx context.Context, name, node string, args ...string) error {
 	if node == "" {
 		node = c.master
 	}
 	full := c.component(name)
-	run := append([]string{"run", "-d", "--name", full, "--label", c.label, "--label", "cloudburrow.dataproc.cluster=" + c.spec.ID,
-		"--network", "container:" + node}, args...)
+	run := []string{"run", "-d", "--name", full, "--label", c.label, "--label", "cloudburrow.dataproc.cluster=" + c.spec.ID,
+		"--network", "container:" + node}
+	for i := 0; i < 3; i++ {
+		if node == c.masterNode(i) {
+			run = append(run, nodeLabel(c.masterAlias(i))...)
+		}
+	}
+	run = append(run, args...)
 	if out, err := c.d.docker(ctx, run...); err != nil {
 		return &Unavailable{Msg: "start the cluster's " + name + ": " + out}
 	}
