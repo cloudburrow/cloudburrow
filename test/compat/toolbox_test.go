@@ -429,7 +429,12 @@ func startToolBox() (box *toolBoxState, skip string, err error) {
 		"mounts": box.mounts, "tools": tools,
 		"path": boxPath(box.sdk),
 		"env": []string{"HOME=/home/box", "TF_CLI_CONFIG_FILE=/opt/box/terraformrc", "CHECKPOINT_DISABLE=1",
-			"PLUGIN_UNIX_SOCKET_DIR=/run/box/plugins", "CLOUDSDK_PYTHON=/usr/bin/python3", "BOX_TOKEN="},
+			"PLUGIN_UNIX_SOCKET_DIR=/run/box/plugins", "BOX_TOKEN="},
+	}
+	if runtime.GOOS != "linux" {
+		// A macOS SDK's bundled Python is a macOS binary: the image's
+		// runs it. On Linux gcloud picks its own, as on the host.
+		conf["env"] = append(conf["env"].([]string), "CLOUDSDK_PYTHON=/usr/bin/python3")
 	}
 	raw, _ := json.MarshalIndent(conf, "", "  ")
 	if err := os.WriteFile(filepath.Join(toolDir, "box.json"), raw, 0o644); err != nil {

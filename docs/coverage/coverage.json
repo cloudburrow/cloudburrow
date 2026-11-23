@@ -9130,8 +9130,8 @@
           "test/compat/storageipfiltertools_test.go:145 TestTerraformStorageBucketIPFilter",
           "test/compat/storagesoftdelete_test.go:137 TestStorageBucketDeleteIgnoresSoftDeleted",
           "test/compat/terraform_batch9_test.go:77 TestTerraformStorageBucketIAM",
-          "test/compat/terraformstorage_test.go:124 TestTerraformStorageResources",
-          "test/compat/terraformstorage_test.go:257 TestTerraformForceDestroyVersionedBucket"
+          "test/compat/terraformstorage_test.go:122 TestTerraformStorageResources",
+          "test/compat/terraformstorage_test.go:255 TestTerraformForceDestroyVersionedBucket"
         ],
         "unverified": [
           {
@@ -9176,7 +9176,7 @@
           "test/compat/sysparams1954_test.go:283 TestSystemParametersStorage",
           "test/compat/terraform_batch10_test.go:164 TestTerraformDataSourcesBatch10",
           "test/compat/terraform_batch9_test.go:77 TestTerraformStorageBucketIAM",
-          "test/compat/terraformstorage_test.go:124 TestTerraformStorageResources"
+          "test/compat/terraformstorage_test.go:122 TestTerraformStorageResources"
         ]
       },
       {
@@ -9189,7 +9189,7 @@
           "test/compat/storageiam_test.go:94 TestStorageBucketIAMConditions",
           "test/compat/terraform_batch9_test.go:77 TestTerraformStorageBucketIAM",
           "test/compat/terraform_iam_more_test.go:32 TestTerraformStoredIAM",
-          "test/compat/terraformstorage_test.go:124 TestTerraformStorageResources"
+          "test/compat/terraformstorage_test.go:122 TestTerraformStorageResources"
         ]
       },
       {
@@ -9219,7 +9219,7 @@
           "test/compat/storagexmlpost_test.go:33 TestStorageXMLBucketPutAndServiceGet",
           "test/compat/sysparams1954_test.go:283 TestSystemParametersStorage",
           "test/compat/terraform_batch9_test.go:77 TestTerraformStorageBucketIAM",
-          "test/compat/terraformstorage_test.go:124 TestTerraformStorageResources"
+          "test/compat/terraformstorage_test.go:122 TestTerraformStorageResources"
         ],
         "unverified": [
           {
@@ -9323,7 +9323,7 @@
           "test/compat/storageretention_test.go:35 TestStorageRetentionBlocksDelete",
           "test/compat/storageretention_test.go:61 TestStorageLockRetentionPolicy",
           "test/compat/storageversioning_test.go:114 TestStorageVersioningDisableKeepsExisting",
-          "test/compat/terraformstorage_test.go:124 TestTerraformStorageResources"
+          "test/compat/terraformstorage_test.go:122 TestTerraformStorageResources"
         ],
         "unverified": [
           {
@@ -9384,7 +9384,7 @@
           "test/compat/storageiam_test.go:94 TestStorageBucketIAMConditions",
           "test/compat/terraform_batch9_test.go:77 TestTerraformStorageBucketIAM",
           "test/compat/terraform_iam_more_test.go:32 TestTerraformStoredIAM",
-          "test/compat/terraformstorage_test.go:124 TestTerraformStorageResources"
+          "test/compat/terraformstorage_test.go:122 TestTerraformStorageResources"
         ],
         "unverified": [
           {
@@ -9656,14 +9656,14 @@
         "status": "Verified",
         "tests": [
           "test/compat/notifications_test.go:158 TestNotificationConfigsCRUDThroughTheSDK",
-          "test/compat/terraformstorage_test.go:124 TestTerraformStorageResources"
+          "test/compat/terraformstorage_test.go:122 TestTerraformStorageResources"
         ]
       },
       {
         "method": "storage.notifications.get",
         "status": "Verified",
         "tests": [
-          "test/compat/terraformstorage_test.go:124 TestTerraformStorageResources"
+          "test/compat/terraformstorage_test.go:122 TestTerraformStorageResources"
         ]
       },
       {
@@ -9673,7 +9673,7 @@
           "test/compat/notifications_test.go:158 TestNotificationConfigsCRUDThroughTheSDK",
           "test/compat/storagenotifyevents_test.go:75 TestNotificationArchiveOnVersionedOverwrite",
           "test/compat/storagenotifyevents_test.go:95 TestNotificationDeleteAndMetadataUpdate",
-          "test/compat/terraformstorage_test.go:124 TestTerraformStorageResources"
+          "test/compat/terraformstorage_test.go:122 TestTerraformStorageResources"
         ]
       },
       {
@@ -9770,8 +9770,8 @@
           "test/compat/storageversioning_test.go:87 TestStorageVersioningDeleteKeepsNoncurrent",
           "test/compat/terraform_batch5_test.go:103 TestTerraformStorageObjectCustomerKey",
           "test/compat/terraform_batch6_test.go:178 TestTerraformStorageObjectRetention",
-          "test/compat/terraformstorage_test.go:124 TestTerraformStorageResources",
-          "test/compat/terraformstorage_test.go:257 TestTerraformForceDestroyVersionedBucket"
+          "test/compat/terraformstorage_test.go:122 TestTerraformStorageResources",
+          "test/compat/terraformstorage_test.go:255 TestTerraformForceDestroyVersionedBucket"
         ]
       },
       {
@@ -9794,7 +9794,7 @@
           "test/compat/terraform_batch5_test.go:103 TestTerraformStorageObjectCustomerKey",
           "test/compat/terraform_batch6_test.go:178 TestTerraformStorageObjectRetention",
           "test/compat/terraform_batch6_test.go:477 TestTerraformDataSources",
-          "test/compat/terraformstorage_test.go:124 TestTerraformStorageResources"
+          "test/compat/terraformstorage_test.go:122 TestTerraformStorageResources"
         ],
         "unverified": [
           {
@@ -9829,7 +9829,7 @@
           "test/compat/sysparams1954_test.go:283 TestSystemParametersStorage",
           "test/compat/terraform_batch5_test.go:103 TestTerraformStorageObjectCustomerKey",
           "test/compat/terraform_batch6_test.go:178 TestTerraformStorageObjectRetention",
-          "test/compat/terraformstorage_test.go:124 TestTerraformStorageResources"
+          "test/compat/terraformstorage_test.go:122 TestTerraformStorageResources"
         ]
       },
       {
@@ -9851,7 +9851,7 @@
           "test/compat/sysparams1954_test.go:283 TestSystemParametersStorage",
           "test/compat/terraform_batch10_test.go:164 TestTerraformDataSourcesBatch10",
           "test/compat/terraform_batch11_test.go:930 TestTerraformStorageObjectContentsDataSource",
-          "test/compat/terraformstorage_test.go:257 TestTerraformForceDestroyVersionedBucket"
+          "test/compat/terraformstorage_test.go:255 TestTerraformForceDestroyVersionedBucket"
         ],
         "unverified": [
           {
@@ -9887,7 +9887,7 @@
           "test/compat/terraform_batch5_test.go:103 TestTerraformStorageObjectCustomerKey",
           "test/compat/terraform_batch6_test.go:178 TestTerraformStorageObjectRetention",
           "test/compat/terraform_iam_more_test.go:169 TestTerraformStorageACLLists",
-          "test/compat/terraformstorage_test.go:124 TestTerraformStorageResources"
+          "test/compat/terraformstorage_test.go:122 TestTerraformStorageResources"
         ]
       },
       {
@@ -9948,7 +9948,7 @@
           "test/compat/storagehmac_test.go:33 TestStorageHMACKeyLifecycle",
           "test/compat/storagehmac_test.go:69 TestStorageHMACKeyLimit",
           "test/compat/storagesigned_test.go:62 TestStorageSignedURLV4HMAC",
-          "test/compat/terraformstorage_test.go:124 TestTerraformStorageResources"
+          "test/compat/terraformstorage_test.go:122 TestTerraformStorageResources"
         ]
       },
       {
@@ -9957,7 +9957,7 @@
         "tests": [
           "test/compat/gcloudstorage_test.go:288 TestGcloudStorageHMAC",
           "test/compat/storagehmac_test.go:33 TestStorageHMACKeyLifecycle",
-          "test/compat/terraformstorage_test.go:124 TestTerraformStorageResources"
+          "test/compat/terraformstorage_test.go:122 TestTerraformStorageResources"
         ]
       },
       {
@@ -9965,7 +9965,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/storagehmac_test.go:33 TestStorageHMACKeyLifecycle",
-          "test/compat/terraformstorage_test.go:124 TestTerraformStorageResources"
+          "test/compat/terraformstorage_test.go:122 TestTerraformStorageResources"
         ]
       },
       {
@@ -9982,7 +9982,7 @@
         "tests": [
           "test/compat/gcloudstorage_test.go:288 TestGcloudStorageHMAC",
           "test/compat/storagehmac_test.go:33 TestStorageHMACKeyLifecycle",
-          "test/compat/terraformstorage_test.go:124 TestTerraformStorageResources"
+          "test/compat/terraformstorage_test.go:122 TestTerraformStorageResources"
         ]
       },
       {

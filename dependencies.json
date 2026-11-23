@@ -1654,6 +1654,23 @@
         "notes": "Multi-arch OCI index, resolved 2026-11-20 with docker buildx imagetools inspect.",
         "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect node:24.11.1-bookworm-slim`."
       },
+      "toolboxBase": {
+        "$comment": "test/compat/testdata/toolbox/Dockerfile builds FROM this digest (both stages): the compat harness's tool box (#2174), the container every gcloud, gsutil, bq and Terraform command of test/compat runs in, on an --internal Docker network.",
+        "image": "debian:trixie-slim",
+        "digest": "sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "license": "DFSG-free Debian packages (see /usr/share/doc/*/copyright)",
+        "redistribution": "not published: built locally by the compat test only",
+        "scope": "test-only",
+        "usedBy": "test/compat/toolbox_test.go (#2174); Debian 13 for Python 3.13, which gcloud runs on macOS hosts (google.api_core warns on 3.11)",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "notes": "Multi-arch OCI index, resolved 2026-11-22 with docker buildx imagetools inspect.",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect debian:trixie-slim`."
+      },
       "iso14496_26Conformance": {
         "version": "ISO/IEC 14496-26:2024 (2nd edition), mpeg4audio-conformance2ndEd_20230125",
         "source": "https://standards.iso.org/iso-iec/14496/-26/ed-2/en/",
@@ -1696,6 +1713,46 @@
           "oras_1.2.3_linux_arm64.tar.gz": "sha256:90e24e234dc6dffe73365533db66fd14449d2c9ae77381081596bf92f40f6b82"
         },
         "checksumsNote": "Copied from the release's published checksums file on 2026-11-22, and matched by the arm64 archive downloaded then."
+      },
+      "toolboxTerraform": {
+        "version": "1.16.6",
+        "source": "https://github.com/hashicorp/terraform",
+        "checksums": {
+          "terraform_1.16.6_linux_amd64.zip": "sha256:38034b38d03096399a7a1264a14561a8029b2b496fd1f169452656e53968f1b7",
+          "terraform_1.16.6_linux_arm64.zip": "sha256:a750b5a11038f165846b2658c40c88cd7070aa67a61bab431a14ba27928ea9ea"
+        },
+        "checksumsFile": "https://releases.hashicorp.com/terraform/1.16.6/terraform_1.16.6_SHA256SUMS",
+        "checksumsNote": "Copied from the release's published checksums file on 2026-11-22; the arm64 archive built the image then.",
+        "license": "BUSL-1.1",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "redistribution": "not-redistributed",
+        "scope": "test-only",
+        "updateFeed": "github-releases",
+        "usedBy": "test/compat/testdata/toolbox/Dockerfile downloads it and checks it against this pin for the compat tool box (#2174), where every Terraform compat test runs, on an --internal Docker network; the version ci.yml's setup-terraform step installs",
+        "verification": "release-checksum"
+      },
+      "toolboxOpenTofu": {
+        "version": "v1.12.6",
+        "source": "https://github.com/opentofu/opentofu",
+        "checksums": {
+          "tofu_1.12.6_linux_amd64.tar.gz": "sha256:50a6106fa4de523d09c87af85f3db1dd47535fc005727fdca6852146476b88ec",
+          "tofu_1.12.6_linux_arm64.tar.gz": "sha256:9bd0228a81bcd0c88f7045c74378f45a815779f19897191dff7d9efba9976b9e"
+        },
+        "checksumsFile": "https://github.com/opentofu/opentofu/releases/download/v1.12.6/tofu_1.12.6_SHA256SUMS",
+        "checksumsNote": "Copied from the release's published checksums file on 2026-11-22; the amd64 one is the one ci.yml checks.",
+        "license": "MPL-2.0",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "redistribution": "not-redistributed",
+        "scope": "test-only",
+        "updateFeed": "github-releases",
+        "usedBy": "test/compat/testdata/toolbox/Dockerfile downloads it and checks it against this pin for the compat tool box (#2174), where every --binary tofu compat test runs; the version ci.yml installs",
+        "verification": "release-checksum"
       },
       "cosign": {
         "version": "v2.4.3",

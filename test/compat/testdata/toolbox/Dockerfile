@@ -12,7 +12,7 @@
 # Everything is fetched here, at build time, from HashiCorp's and
 # OpenTofu's release servers and registries; nothing from Google.
 # dependencies.json's testOracles.compatToolbox* entries record the pins.
-FROM debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc AS fetch
+FROM debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2 AS fetch
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl unzip \
  && rm -rf /var/lib/apt/lists/*
 ARG TERRAFORM_VERSION=1.16.6
@@ -37,7 +37,7 @@ RUN set -eu; case "$(uname -m)" in \
     tofu providers mirror -platform=linux_$a /mirror; \
     rm -rf /m
 
-FROM debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc
+FROM debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2
 RUN apt-get update && apt-get install -y --no-install-recommends python3 iptables iproute2 ca-certificates openssh-client \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=fetch /usr/local/bin/terraform /usr/local/bin/tofu /usr/local/bin/

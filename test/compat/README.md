@@ -57,6 +57,12 @@ instance:
   `gcloud-setup`'s configuration that match the harness's endpoint for their service. An
   override for another endpoint fails the test before gcloud runs. An override for a service
   without a harness variable is dropped, so the egress guard refuses that call instead.
+- gcloud, gsutil, bq, docker-credential-gcloud, Terraform and OpenTofu never run on the host:
+  they run in the tool box, a container on an `--internal` Docker network with no route out
+  (`toolbox_test.go`, #2174; [docs/ci.md](../../docs/ci.md#network-blocking-for-gcloud-and-terraform)).
+  A test gets the tool from `gcloudBinary`, `realTool`, `terraformTool` or `tofuBinary`; from
+  `TestMain` on, the first directory on `PATH` holds a stub under each name that refuses to run
+  until the box replaces it. Without Docker, those tests skip.
 
 A test skips when a variable it needs is unset. An instance started with the default services
 leaves most suites skipped, so start one with the services your change touches (`--services`),
