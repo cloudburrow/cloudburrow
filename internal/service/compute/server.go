@@ -115,6 +115,9 @@ type Options struct {
 	// RelayBind is the address the relay listens on, 127.0.0.1 when
 	// empty: where VMs' pods reach this machine (vmrelay.go).
 	RelayBind string
+	// FirewallLog writes a Firewall Rules Logging record to Cloud Logging
+	// (#2180, relayfirewall.go); nil logs nothing.
+	FirewallLog func(FirewallLogEntry)
 }
 
 // obj is one resource, as its JSON is kept: link fields hold relative
@@ -167,6 +170,9 @@ type Server struct {
 	relay *vmrelay.Server
 	// relayAt is the relay's in-cluster address (UseRelayAddress).
 	relayAt func() string
+	// fwDenied is when each denied relayed 5-tuple was last logged
+	// (relayfirewall.go).
+	fwDenied map[string]time.Time
 }
 
 // New returns a Server with its state restored.

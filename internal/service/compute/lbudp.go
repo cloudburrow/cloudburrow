@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"net"
+	"net/netip"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/cloudburrow/cloudburrow/internal/vmrelay"
 )
 
 // UDP passthrough Network Load Balancers (#2160), as
@@ -326,4 +329,58 @@ func networkMatch(m obj, proto, ip string, sport, dport int, dst string) bool {
 		anyIn(strs(m, "ipProtocols"), func(v string) bool { return strings.EqualFold(v, proto) }) &&
 		anyIn(strs(m, "srcPorts"), func(v string) bool { return portIn(v, sport) }) &&
 		anyIn(strs(m, "destPorts"), func(v string) bool { return portIn(v, dport) })
+}
+
+// relayUDPFlow serves one VM's UDP flow to a rule's port, relayed with
+// the VM's identity (#2180, vmrelay.go): its datagrams arrive as frames
+// on c, and the backend's replies go back the same way, so the flow is
+// the VM's (src, its internal IP and its client's port), as a passthrough
+// load balancer sees it: the network edge security policy, the session
+// affinity and the backend's choice all see the VM. The flow ends when
+// the guest closes it, or after the backend service's connection
+// tracking idle timeout without a datagram.
+func (s *Server) relayUDPFlow(rule string, port int, src netip.AddrPort, c net.Conn) {
+	defer c.Close()
+	from := net.UDPAddrFromAddrPort(src)
+	if !s.l4Allowed(rule, "UDP", from, port) {
+		return
+	}
+	up, ep, err := s.udpDial(rule, port, from)
+	if err != nil {
+		return
+	}
+	defer func() {
+		_ = up.Close()
+		if ep.id != "" {
+			s.lb.bal.done(ep)
+		}
+	}()
+	idle := s.udpIdle(rule)
+	var wmu sync.Mutex
+	go func() {
+		for {
+			b, err := up.Recv()
+			if err != nil {
+				_ = c.Close()
+				return
+			}
+			wmu.Lock()
+			_ = c.SetDeadline(time.Now().Add(idle))
+			err = vmrelay.WriteFrame(c, b)
+			wmu.Unlock()
+			if err != nil {
+				return
+			}
+		}
+	}()
+	for {
+		_ = c.SetReadDeadline(time.Now().Add(idle))
+		b, err := vmrelay.ReadFrame(c)
+		if err != nil {
+			return
+		}
+		if err := up.Send(b); err != nil {
+			return
+		}
+	}
 }

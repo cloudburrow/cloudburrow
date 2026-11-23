@@ -90,7 +90,10 @@ type computeService struct {
 	metadataHost func() string
 	// relayAt is the VM relay's in-cluster address (#2160), set by up.
 	relayAt func() string
-	cancel  context.CancelFunc
+	// firewallLog writes Firewall Rules Logging records to this
+	// instance's Cloud Logging (#2180), set by up when it is served.
+	firewallLog func(compute.FirewallLogEntry)
+	cancel      context.CancelFunc
 	// registry is the project registry, for Shared VPC's organization
 	// rule (#2140); nil allows every project.
 	registry func() *resourcemanager.Registry
@@ -219,7 +222,11 @@ func (s *computeService) Start(ctx context.Context) error {
 	api, err := compute.New(compute.Options{State: state, Extra: s.instanceGroupManagers, ExtraGroups: s.gkeGroups, NetworkUsers: s.networkUsers, VMs: s.vms,
 		ProjectOrganization: s.projectOrganization, LB: &computeLB{cfg: s.cfg, vms: s.vms},
 		CertMaps: cm, IAP: computeIAPGate{svc: s}, NetSec: computeNetSec{ns: ns, cm: cm, endpoints: xdsEndpointPolicies(nsv)}, XDSCredentialDir: xdsCredDir, SourceTags: s.sourceTags,
-		RelayBind: s.cfg.BindAddress})
+		RelayBind: s.cfg.BindAddress, FirewallLog: func(e compute.FirewallLogEntry) {
+			if s.firewallLog != nil {
+				s.firewallLog(e)
+			}
+		}})
 	if err != nil {
 		return err
 	}

@@ -17,7 +17,9 @@
 #     CloudBurrow's relay port and begins it with the PROXY protocol
 #     version 2 header CloudBurrow gave for it (the instance's internal IP,
 #     the address dialled and the instance's guest token), so the load
-#     balancer or proxy sees this instance as the connection's source.
+#     balancer or proxy sees this instance as the connection's source;
+#     each UDP one (#2180) to a local udprelay, which carries each client's
+#     datagrams as one framed flow with the same kind of header.
 set -u
 URL="${CLOUDBURROW_GUEST_METADATA}/cloudburrow/vpc"
 RUN=/run/cloudburrow-vpc
@@ -81,13 +83,15 @@ apply() {
   relays
 }
 
-# relays keeps one local socat per "relay LOCAL ADDRESS PORT HEADER" line,
-# restarting them all when the lines or the relay's port change.
+# relays keeps one local socat per "relay LOCAL ADDRESS PORT HEADER" line
+# and one udprelay per "relayudp ..." line, restarting them all when the
+# lines or the relay's port change.
 relays() {
   umask 077
   sed -n 's/^relay //p' "$RUN/conf" > "$RUN/relays.new"
+  sed -n 's/^relayudp //p' "$RUN/conf" > "$RUN/relays-udp.new"
   rport=$(val relayport)
-  key="$(val relayhost) $rport $(cat "$RUN/relays.new")"
+  key="$(val relayhost) $rport $(cat "$RUN/relays.new" "$RUN/relays-udp.new")"
   [ "$key" = "$(cat "$RUN/relays.key" 2>/dev/null)" ] && return 0
   if [ -f "$RUN/relays.pids" ]; then
     while read -r pid; do kill "$pid" 2>/dev/null; done < "$RUN/relays.pids"
@@ -106,9 +110,18 @@ relays() {
         SYSTEM:"cat $RUN/relay-$lp.hdr - | socat -t 30 - TCP\:$host\:$rport" </dev/null >/dev/null 2>&1 &
       echo $! >> "$RUN/relays.pids"
     done < "$RUN/relays.new"
+    while read -r lp ip port hdr; do
+      printf '%s' "$hdr" | base64 -d > "$RUN/relay-udp-$lp.hdr"
+      if ! command -v perl >/dev/null 2>&1; then
+        log "cannot relay UDP to $ip:$port: no perl in this image"
+        continue
+      fi
+      perl /usr/lib/cloudburrow/udprelay "$lp" "$host" "$rport" "$RUN/relay-udp-$lp.hdr" </dev/null >/dev/null 2>&1 &
+      echo $! >> "$RUN/relays.pids"
+    done < "$RUN/relays-udp.new"
   fi
   printf '%s' "$key" > "$RUN/relays.key"
-  log "relaying $(wc -l < "$RUN/relays.new") load balancer and gateway addresses"
+  log "relaying $(wc -l < "$RUN/relays.new") load balancer and gateway addresses, $(wc -l < "$RUN/relays-udp.new") UDP"
 }
 
 last=""

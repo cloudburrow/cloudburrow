@@ -130,7 +130,20 @@ func (s *Server) firewallFrom(project, rel string, b obj) (obj, error) {
 	o := obj{"kind": "compute#firewall", "name": lastSeg(rel), "network": nw, "selfLink": rel, "direction": dir,
 		"priority": prio, "disabled": b["disabled"] == true, "logConfig": map[string]any{"enable": false}}
 	if lc, ok := b["logConfig"].(map[string]any); ok {
-		o["logConfig"] = lc
+		// Firewall Rules Logging (#2180): metadata is INCLUDE_ALL_METADATA
+		// (the default once logging is on) or EXCLUDE_ALL_METADATA.
+		out := map[string]any{"enable": lc["enable"] == true}
+		switch m := str(lc, "metadata"); m {
+		case "":
+			if lc["enable"] == true {
+				out["metadata"] = "INCLUDE_ALL_METADATA"
+			}
+		case "INCLUDE_ALL_METADATA", "EXCLUDE_ALL_METADATA":
+			out["metadata"] = m
+		default:
+			return nil, invalid("Invalid value for field 'resource.logConfig.metadata': '%s'. Must be one of [EXCLUDE_ALL_METADATA, INCLUDE_ALL_METADATA]", m)
+		}
+		o["logConfig"] = out
 	}
 	if d := str(b, "description"); d != "" {
 		o["description"] = d
