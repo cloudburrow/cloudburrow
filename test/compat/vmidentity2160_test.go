@@ -314,7 +314,9 @@ func TestVMIdentityThroughALoadBalancerAndSecureWebProxy(t *testing.T) {
 		}
 		if !same() {
 			t.Fatalf("%s: got %v, want %v; web's relay: %s", what, got, want,
-				run(n("web"), "sudo nft list chain inet cloudburrow relay; ss -ltn | grep ':470'; sudo journalctl -u cloudburrow-vpc --no-pager | tail -5"))
+				run(n("web"), "sudo nft list chain inet cloudburrow relay; ss -ltn | grep ':470'; sudo journalctl -u cloudburrow-vpc --no-pager | tail -5; "+
+					"sudo ls -l /run/cloudburrow-vpc; ps -eo args | grep [s]ocat; curl -sv -m 5 "+args+" 2>&1 | tail -15; "+
+					"sudo cat /run/cloudburrow-vpc/relay-47000.hdr | od -c | head -3; echo test | curl -sv -m 5 http://127.0.0.1:47000/ 2>&1 | tail -5"))
 		}
 	}
 	lbURL := "http://" + vip + "/hello"

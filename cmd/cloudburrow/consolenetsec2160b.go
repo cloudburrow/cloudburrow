@@ -283,8 +283,8 @@ func (p netsecAddressGroupsProvider) DetailActions(ctx context.Context, project 
 	a.Leaves = true
 	// Clone items (cloneItems): copy another group's items into this one.
 	// Google's docs give gcloud only for it (gcloud network-security
-	// address-groups clone-items), so the action is UNVERIFIED (re-read
-	// 2026-11-22: firewall/docs/use-address-groups-firewall-policies).
+	// address-groups clone-items), so the action is
+	// UNVERIFIED (re-read 2026-11-22: firewall/docs/use-address-groups-firewall-policies).
 	clone := console.Action{ID: "clone-items", Label: "Clone items", Title: "Clone items", Fields: []console.Field{{
 		Name: "source", Label: "Source address group", Type: "text", Required: true,
 		Help: "The full name of the group whose items are copied: projects/PROJECT/locations/LOCATION/addressGroups/NAME, or organizations/ORGANIZATION/locations/LOCATION/addressGroups/NAME."}}}

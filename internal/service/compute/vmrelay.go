@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/netip"
 	"sort"
@@ -68,8 +69,10 @@ func (s *Server) startRelay() {
 	}
 	r, err := vmrelay.Listen(net.JoinHostPort(host, "0"), s.relayResolve)
 	if err != nil {
+		log.Printf("compute: the VM relay cannot listen: %v", err)
 		return
 	}
+	r.Refused = func(err error) { log.Printf("compute: a VM's relayed connection was refused: %v", err) }
 	s.mu.Lock()
 	s.relay = r
 	s.mu.Unlock()
@@ -166,7 +169,7 @@ func (s *Server) relayConfigLocked(self vmNet, token string, reach map[string]bo
 		hdr := vmrelay.Encode(vmrelay.Header{Src: netip.AddrPortFrom(src, 0), Dst: v.dst, Token: token})
 		fmt.Fprintf(&b, "relay %d %s %d %s\n", v.local, v.dst.Addr(), v.dst.Port(), base64.StdEncoding.EncodeToString(hdr))
 	}
-	n.WriteString("  chain relay {\n    type nat hook output priority dstnat; policy accept;\n")
+	n.WriteString("  chain relay {\n    type nat hook output priority -100; policy accept;\n")
 	for _, v := range vips {
 		fmt.Fprintf(&n, "    ip daddr %s tcp dport %d redirect to :%d\n", v.dst.Addr(), v.dst.Port(), v.local)
 	}

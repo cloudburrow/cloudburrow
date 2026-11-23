@@ -10836,7 +10836,9 @@ function currentProject() {
 // does not work at the folder's or organization's level drops the choice,
 // so the toolbar always names what the page reads.
 const RESOURCE_SCOPE_KEYS = ["folder", "organizationId"];
-const RESOURCE_SCOPED_PATHS = ["/iam-admin/iam", "/iam-admin/orgpolicies", "/iam-admin/tags", "/tags", "/iam-admin/quotas"];
+// Network Security's Address groups list the organization's groups when
+// it is chosen (firewall/docs/use-address-groups-firewall-policies, #2160).
+const RESOURCE_SCOPED_PATHS = ["/iam-admin/iam", "/iam-admin/orgpolicies", "/iam-admin/tags", "/tags", "/iam-admin/quotas", "/net-security/addressgroups"];
 const resourceScopedPath = (pathname) => RESOURCE_SCOPED_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/"));
 // RESOURCE_NAMES are the folders' and the organization's display names, as
 // the picker last read them: "folder:N" and "organization:N".
@@ -12313,6 +12315,15 @@ function navigate(path) {
   if (project) url.searchParams.set("project", project);
   const scoped = scopeServiceOfPath(url.pathname);
   if (scoped && scopeServiceOfPath(location.pathname) === scoped) carryScope(url, scoped);
+  // The folder or organization chosen in the toolbar stays chosen from one
+  // page that works at its level to another (#2160: an organization address
+  // group's Create returns to the organization's list).
+  if (resourceScopedPath(location.pathname) && resourceScopedPath(url.pathname)) {
+    const here = new URLSearchParams(location.search);
+    for (const k of RESOURCE_SCOPE_KEYS) {
+      if (here.get(k) && !url.searchParams.has(k)) url.searchParams.set(k, here.get(k));
+    }
+  }
   history.pushState({}, "", url);
   // Focus lands on the main region first and the screen is drawn after, so a
   // screen that wants focus somewhere specific — a form's first field — is

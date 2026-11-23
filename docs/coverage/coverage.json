@@ -5346,7 +5346,8 @@
           "test/compat/iamenforcementround12_1879_test.go:133 TestIAMEnforcementTagBindingsOnOtherResources",
           "test/compat/resourcemanagerdynamictags_test.go:28 TestResourceManagerDynamicTagValues",
           "test/compat/resourcemanagerregionaltags_test.go:54 TestResourceManagerRegionalTagBindings",
-          "test/compat/resourcemanagertags_test.go:94 TestResourceManagerV3Tags"
+          "test/compat/resourcemanagertags_test.go:94 TestResourceManagerV3Tags",
+          "test/compat/vmidentity2160_test.go:45 TestVMIdentityThroughALoadBalancerAndSecureWebProxy"
         ]
       },
       {
@@ -22431,7 +22432,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/authzcustom2160_test.go:82 TestCustomAuthorizationThroughALoadBalancer",
-          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer"
+          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer",
+          "test/compat/vmidentity2160_test.go:45 TestVMIdentityThroughALoadBalancerAndSecureWebProxy"
         ]
       },
       {
@@ -22459,7 +22461,8 @@
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/CreateGatewaySecurityPolicyRule",
         "status": "Verified",
         "tests": [
-          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients",
+          "test/compat/vmidentity2160_test.go:45 TestVMIdentityThroughALoadBalancerAndSecureWebProxy"
         ]
       },
       {
@@ -22684,7 +22687,8 @@
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/UpdateAuthzPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer"
+          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer",
+          "test/compat/vmidentity2160_test.go:45 TestVMIdentityThroughALoadBalancerAndSecureWebProxy"
         ]
       },
       {
@@ -22712,7 +22716,8 @@
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/UpdateGatewaySecurityPolicyRule",
         "status": "Verified",
         "tests": [
-          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients",
+          "test/compat/vmidentity2160_test.go:45 TestVMIdentityThroughALoadBalancerAndSecureWebProxy"
         ]
       },
       {
@@ -22919,7 +22924,8 @@
         "method": "google.cloud.networkservices.v1.NetworkServices/CreateGateway",
         "status": "Verified",
         "tests": [
-          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients",
+          "test/compat/vmidentity2160_test.go:45 TestVMIdentityThroughALoadBalancerAndSecureWebProxy"
         ]
       },
       {

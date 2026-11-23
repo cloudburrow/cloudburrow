@@ -137,7 +137,15 @@ func TestVMRelayCarriesTheInstanceIdentity(t *testing.T) {
 		}
 	}
 	// The gateway's address goes to Secure Web Proxy.
-	go send(vmrelay.Header{Src: src, Dst: gw.at, Token: "tok-a"})
+	go func() {
+		c, err := net.Dial("tcp", "127.0.0.1:"+strconv.Itoa(r.Port()))
+		if err != nil {
+			return
+		}
+		defer c.Close()
+		_, _ = c.Write(vmrelay.Encode(vmrelay.Header{Src: src, Dst: gw.at, Token: "tok-a"}))
+		_, _ = io.ReadAll(c)
+	}()
 	select {
 	case c := <-gw.got:
 		if c.RemoteAddr().(*net.TCPAddr).IP.String() != "10.0.0.2" {
