@@ -63,6 +63,9 @@ func (s *Server) CreateBackup(ctx context.Context, req *filestorepb.CreateBackup
 	if bk.GetKmsKey() != "" && tiers[r.I.GetTier()].basic {
 		return nil, apierror.InvalidArgument("Customer-managed encryption keys are not supported for backups of tier %s instances", tierName(r.I.GetTier()))
 	}
+	if err := multiRefused(r); err != nil {
+		return nil, err
+	}
 	fs := r.I.GetFileShares()[0]
 	if fs.GetName() != bk.GetSourceFileShare() {
 		return nil, apierror.InvalidArgument("source_file_share %q is not a file share of %s; its share is %q", bk.GetSourceFileShare(), r.I.GetName(), fs.GetName())
@@ -216,7 +219,7 @@ func (s *Server) DeleteBackup(_ context.Context, req *filestorepb.DeleteBackupRe
 	}
 	for _, in := range s.instances {
 		if in.I.GetState() == filestorepb.Instance_CREATING || in.I.GetState() == filestorepb.Instance_RESTORING {
-			if s.busy[in.I.GetName()] != "" && in.I.GetFileShares()[0].GetSourceBackup() == r.B.GetName() {
+			if s.busy[in.I.GetName()] != "" && len(in.I.GetFileShares()) > 0 && in.I.GetFileShares()[0].GetSourceBackup() == r.B.GetName() {
 				return nil, apierror.FailedPrecondition("Backup %s is being restored to %s", r.B.GetName(), in.I.GetName())
 			}
 		}

@@ -16,8 +16,10 @@
 package filestoreserver
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
+	"crypto/sha512"
 	_ "embed"
 	"encoding/base64"
 	"encoding/hex"
@@ -198,13 +200,93 @@ func (d *Docker) volume(key string) string { return d.container(key) }
 
 func (d *Docker) label() string { return Label + "=" + d.Instance }
 
+// maxDisk is the largest share file: ext4's largest file, on the Docker
+// disk the volume lives on, less a margin.
+const maxDisk = 16<<40 - 1<<30
+
+// envOf is the server's environment for spec, besides its configuration:
+// its shares' sizes, whether they are encrypted, and its limits
+// (image/entrypoint.sh).
+func envOf(key string, spec filestore.Spec) []string {
+	env := []string{"CB_ID=" + key}
+	locked := spec.Encrypted && spec.DataKey == nil
+	var shares []string
+	for _, sh := range spec.Shares {
+		if sh.CapacityBytes <= 0 || locked {
+			continue
+		}
+		shares = append(shares, sh.Name+":"+strconv.FormatInt(min(sh.CapacityBytes, maxDisk), 10))
+	}
+	if len(shares) > 0 {
+		env = append(env, "SHARES="+strings.Join(shares, " "))
+		if spec.Encrypted {
+			env = append(env, "CRYPT=1")
+		}
+		if io := ioMax(spec.Limits); io != "" {
+			env = append(env, "IO_MAX="+io)
+		}
+	}
+	if spec.Limits.ReadBps > 0 && len(spec.Shares) > 0 && !locked {
+		env = append(env, "READ_BPS="+strconv.FormatInt(spec.Limits.ReadBps, 10))
+	}
+	return env
+}
+
+// ioMax is the cgroup v2 io.max line of l's limits.
+func ioMax(l filestore.Limits) string {
+	v := func(n int64) string {
+		if n <= 0 {
+			return "max"
+		}
+		return strconv.FormatInt(n, 10)
+	}
+	if l == (filestore.Limits{}) {
+		return ""
+	}
+	return "rbps=" + v(l.ReadBps) + " wbps=" + v(l.WriteBps) + " riops=" + v(l.ReadIOPS) + " wiops=" + v(l.WriteIOPS)
+}
+
+// ShareKey is share's 512-bit dm-crypt key (aes-xts-plain64), from the
+// instance's data key.
+func ShareKey(dek []byte, share string) []byte {
+	h := sha512.New()
+	h.Write([]byte("cloudburrow filestore share key\x00"))
+	h.Write(dek)
+	h.Write([]byte{0})
+	h.Write([]byte(share))
+	return h.Sum(nil)
+}
+
+// deliverKeys writes each share's key into the server's tmpfs, where its
+// entrypoint waits for them.
+func (d *Docker) deliverKeys(ctx context.Context, name string, spec filestore.Spec) error {
+	if !spec.Encrypted || spec.DataKey == nil {
+		return nil
+	}
+	for _, sh := range spec.Shares {
+		if sh.CapacityBytes <= 0 {
+			continue
+		}
+		if err := checkNames(sh.Name); err != nil {
+			return err
+		}
+		if err := d.runner().Run(ctx, bytes.NewReader(ShareKey(spec.DataKey, sh.Name)), io.Discard, "docker", "exec", "-i", name, "sh", "-c",
+			`umask 077; mkdir -p /run/filestore/keys; cat > "/run/filestore/keys/$1.tmp"; mv "/run/filestore/keys/$1.tmp" "/run/filestore/keys/$1"`, "sh", sh.Name); err != nil {
+			return fmt.Errorf("deliver the share's key: %w", err)
+		}
+	}
+	_, err := d.docker(ctx, "exec", name, "touch", "/run/filestore/keys/.ready")
+	return err
+}
+
 // Ensure runs key's server with spec's configuration, at ip if given:
 // unchanged when its container already runs that configuration, or made
 // again over the same volume.
 func (d *Docker) Ensure(ctx context.Context, key, ip string, spec filestore.Spec) (string, error) {
 	defer d.lock(key)()
 	conf := Config(spec)
-	sum := sha256.Sum256([]byte(conf))
+	env := envOf(key, spec)
+	sum := sha256.Sum256([]byte(conf + "\x00" + strings.Join(env, "\x00")))
 	confHash := hex.EncodeToString(sum[:8])
 	name := d.container(key)
 	img, err := d.image(ctx)
@@ -219,6 +301,9 @@ func (d *Docker) Ensure(ctx context.Context, key, ip string, spec filestore.Spec
 				if _, err := d.docker(ctx, "start", name); err != nil {
 					return "", err
 				}
+				if err := d.deliverKeys(ctx, name, spec); err != nil {
+					return "", err
+				}
 				if err := d.waitReady(ctx, name); err != nil {
 					return "", err
 				}
@@ -226,6 +311,8 @@ func (d *Docker) Ensure(ctx context.Context, key, ip string, spec filestore.Spec
 			d.own(key, spec.Address, ip)
 			return ip, nil
 		}
+		// Stopped first, so its shares' filesystems and mappings close.
+		_, _ = d.docker(ctx, "stop", "-t", "30", name)
 		if _, err := d.docker(ctx, "rm", "-f", name); err != nil {
 			return "", err
 		}
@@ -240,14 +327,21 @@ func (d *Docker) Ensure(ctx context.Context, key, ip string, spec filestore.Spec
 			return "", err
 		}
 	}
-	_, err = d.docker(ctx, "run", "-d", "--name", name, "--hostname", "filestore-"+key,
-		"--label", d.label(), "--label", "cloudburrow.dev/owned=true", "--label", "io.cloudburrow.filestore.config="+confHash,
+	args := []string{"run", "-d", "--name", name, "--hostname", "filestore-" + key,
+		"--label", d.label(), "--label", "cloudburrow.dev/owned=true", "--label", "io.cloudburrow.filestore.config=" + confHash,
 		"--privileged", "--network", Network, "--ip", ip,
-		"--sysctl", "net.ipv6.conf.all.disable_ipv6=1",
-		"-e", "GANESHA_CONFIG="+base64.StdEncoding.EncodeToString([]byte(conf)),
-		"-v", d.volume(key)+":/export", img)
-	if err != nil {
+		"--sysctl", "net.ipv6.conf.all.disable_ipv6=1", "--stop-timeout", "30",
+		"--tmpfs", "/run/filestore:size=1m,mode=0700",
+		"-e", "GANESHA_CONFIG=" + base64.StdEncoding.EncodeToString([]byte(conf))}
+	for _, e := range env {
+		args = append(args, "-e", e)
+	}
+	args = append(args, "-v", d.volume(key)+":/export", img)
+	if _, err = d.docker(ctx, args...); err != nil {
 		return "", fmt.Errorf("start the NFS server: %w", err)
+	}
+	if err := d.deliverKeys(ctx, name, spec); err != nil {
+		return "", err
 	}
 	if err := d.waitReady(ctx, name); err != nil {
 		return "", err
@@ -353,6 +447,7 @@ func (d *Docker) Remove(ctx context.Context, key string) error {
 	address := d.owners[key]
 	delete(d.owners, key)
 	d.rmu.Unlock()
+	_, _ = d.docker(ctx, "stop", "-t", "30", name)
 	if _, err := d.docker(ctx, "rm", "-f", "-v", name); err != nil && !strings.Contains(err.Error(), "No such container") {
 		return err
 	}
@@ -399,11 +494,22 @@ func (d *Docker) Usage(ctx context.Context, key, share string) (int64, error) {
 	if err := checkNames(share, key); err != nil {
 		return 0, err
 	}
-	out, err := d.exec(ctx, key, `du -sb "/export/data/$1" | cut -f1`, share)
+	out, err := d.exec(ctx, key, `du -sb "/export/fs/$1/data" | cut -f1`, share)
 	if err != nil {
 		return 0, err
 	}
 	return strconv.ParseInt(strings.TrimSpace(out), 10, 64)
+}
+
+// RemoveShare deletes a share's filesystem, which the server no longer
+// mounts.
+func (d *Docker) RemoveShare(ctx context.Context, key, share string) error {
+	if err := checkNames(share, key); err != nil {
+		return err
+	}
+	defer d.lock(key)()
+	_, err := d.exec(ctx, key, `set -e; if grep -q " /export/fs/$1 " /proc/mounts; then echo "share $1 is still mounted" >&2; exit 1; fi; rm -f "/export/disks/$1.img"; rm -rf "/export/fs/$1"`, share)
+	return err
 }
 
 // Snapshot copies the share's files, hard links kept, as snap.
@@ -412,7 +518,7 @@ func (d *Docker) Snapshot(ctx context.Context, key, share, snap string) error {
 		return err
 	}
 	defer d.lock(key)()
-	_, err := d.exec(ctx, key, `set -e; mkdir -p "/export/snapshots/$1"; rm -rf "/export/snapshots/$1/$2.tmp"; cp -a "/export/data/$1/." "/export/snapshots/$1/$2.tmp/"; mv "/export/snapshots/$1/$2.tmp" "/export/snapshots/$1/$2"; sync`, share, snap)
+	_, err := d.exec(ctx, key, `set -e; mkdir -p "/export/fs/$1/snapshots"; rm -rf "/export/fs/$1/snapshots/$2.tmp"; cp -a "/export/fs/$1/data/." "/export/fs/$1/snapshots/$2.tmp/"; mv "/export/fs/$1/snapshots/$2.tmp" "/export/fs/$1/snapshots/$2"; sync`, share, snap)
 	return err
 }
 
@@ -422,7 +528,7 @@ func (d *Docker) DeleteSnapshot(ctx context.Context, key, share, snap string) er
 		return err
 	}
 	defer d.lock(key)()
-	_, err := d.exec(ctx, key, `rm -rf "/export/snapshots/$1/$2"`, share, snap)
+	_, err := d.exec(ctx, key, `rm -rf "/export/fs/$1/snapshots/$2"`, share, snap)
 	return err
 }
 
@@ -433,7 +539,7 @@ func (d *Docker) Revert(ctx context.Context, key, share, snap string) error {
 		return err
 	}
 	defer d.lock(key)()
-	_, err := d.exec(ctx, key, `set -e; test -d "/export/snapshots/$1/$2"; find "/export/data/$1" -mindepth 1 -delete; cp -a "/export/snapshots/$1/$2/." "/export/data/$1/"; sync`, share, snap)
+	_, err := d.exec(ctx, key, `set -e; test -d "/export/fs/$1/snapshots/$2"; find "/export/fs/$1/data" -mindepth 1 -delete; cp -a "/export/fs/$1/snapshots/$2/." "/export/fs/$1/data/"; sync`, share, snap)
 	return err
 }
 
@@ -463,7 +569,7 @@ func (d *Docker) Backup(ctx context.Context, key, share, backup string, dek []by
 		}
 		w = sw
 	}
-	err = d.runner().Run(ctx, nil, w, "docker", "exec", d.container(key), "tar", "-C", "/export/data/"+share, "--numeric-owner", "-cf", "-", ".")
+	err = d.runner().Run(ctx, nil, w, "docker", "exec", d.container(key), "tar", "-C", "/export/fs/"+share+"/data", "--numeric-owner", "-cf", "-", ".")
 	if sw != nil && err == nil {
 		err = sw.Close()
 	}
@@ -502,7 +608,7 @@ func (d *Docker) Restore(ctx context.Context, key, share, backup string, dek []b
 	}
 	defer d.lock(key)()
 	return d.runner().Run(ctx, r, nil, "docker", "exec", "-i", d.container(key), "sh", "-c",
-		`set -e; find "/export/data/$1" -mindepth 1 -delete; tar -C "/export/data/$1" --numeric-owner -xpf -; sync`, "sh", share)
+		`set -e; find "/export/fs/$1/data" -mindepth 1 -delete; tar -C "/export/fs/$1/data" --numeric-owner -xpf -; sync`, "sh", share)
 }
 
 // Replicate replaces to's share's files with a copy of from's, streamed
@@ -514,14 +620,14 @@ func (d *Docker) Replicate(ctx context.Context, from, to, share string) error {
 	pr, pw := io.Pipe()
 	errc := make(chan error, 1)
 	go func() {
-		err := d.runner().Run(ctx, nil, pw, "docker", "exec", d.container(from), "tar", "-C", "/export/data/"+share, "--numeric-owner", "-cf", "-", ".")
+		err := d.runner().Run(ctx, nil, pw, "docker", "exec", d.container(from), "tar", "-C", "/export/fs/"+share+"/data", "--numeric-owner", "-cf", "-", ".")
 		pw.CloseWithError(err)
 		errc <- err
 	}()
 	defer d.lock(to)()
 	err := d.runner().Run(ctx, pr, nil, "docker", "exec", "-i", d.container(to), "sh", "-c",
-		`set -e; mkdir -p "/export/data/$1.in"; find "/export/data/$1.in" -mindepth 1 -delete; tar -C "/export/data/$1.in" --numeric-owner -xpf -; `+
-			`find "/export/data/$1" -mindepth 1 -delete; (cd "/export/data/$1.in" && find . -mindepth 1 -maxdepth 1 -exec mv {} "/export/data/$1/" \;); rmdir "/export/data/$1.in"; sync`, "sh", share)
+		`set -e; mkdir -p "/export/fs/$1/.in"; find "/export/fs/$1/.in" -mindepth 1 -delete; tar -C "/export/fs/$1/.in" --numeric-owner -xpf -; `+
+			`find "/export/fs/$1/data" -mindepth 1 -delete; (cd "/export/fs/$1/.in" && find . -mindepth 1 -maxdepth 1 -exec mv {} "/export/fs/$1/data/" \;); rmdir "/export/fs/$1/.in"; sync`, "sh", share)
 	_ = pr.Close()
 	if serr := <-errc; err == nil {
 		err = serr
@@ -559,10 +665,10 @@ func (d *Docker) Stop(ctx context.Context, remove bool) error {
 	}
 	sort.Strings(list)
 	for _, n := range list {
-		if remove || tombs[n] {
+		if tombs[n] {
 			_, err = d.docker(ctx, "rm", "-f", "-v", n)
-		} else {
-			_, err = d.docker(ctx, "stop", "-t", "5", n)
+		} else if _, err = d.docker(ctx, "stop", "-t", "30", n); err == nil && remove {
+			_, err = d.docker(ctx, "rm", "-f", "-v", n)
 		}
 		errs = append(errs, err)
 	}
@@ -624,7 +730,7 @@ NFSv4 {
 	for i, sh := range spec.Shares {
 		fmt.Fprintf(&b, `EXPORT {
   Export_Id = %d;
-  Path = /export/data/%s;
+  Path = /export/fs/%s/data;
   Pseudo = /%s;
   Protocols = %s;
   Transports = TCP;

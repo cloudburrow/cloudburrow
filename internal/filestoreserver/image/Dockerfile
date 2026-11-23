@@ -18,7 +18,7 @@ RUN printf '%s\n' \
  && rm -f /etc/apt/sources.list.d/debian.sources \
  && apt-get update \
  && apt-get install -y --no-install-recommends \
-      nfs-ganesha=6.5-5 nfs-ganesha-vfs=6.5-5 rpcbind=1.2.7-1 nfs-common=1:2.8.3-1 dbus=1.16.2-2 netbase=6.5 \
+      nfs-ganesha=6.5-5 nfs-ganesha-vfs=6.5-5 rpcbind=1.2.7-1 nfs-common=1:2.8.3-1 dbus=1.16.2-2 netbase=6.5 cryptsetup-bin=2:2.7.5-2 e2fsprogs=1.47.2-3+b12 iproute2=6.15.0-1 \
  && rm -rf /var/lib/apt/lists/*
 
 COPY entrypoint.sh /usr/local/bin/filestore-nfs

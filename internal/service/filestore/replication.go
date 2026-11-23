@@ -69,6 +69,9 @@ func (s *Server) checkReplicaLocked(in *filestorepb.Instance) (*instRecord, erro
 	if a.I.GetTier() != in.GetTier() || a.I.GetProtocol() != in.GetProtocol() {
 		return nil, apierror.InvalidArgument("A replica must have its active instance's tier and protocol: %s %s", tierName(a.I.GetTier()), a.I.GetProtocol())
 	}
+	if a.Multi != nil || len(in.GetFileShares()) == 0 {
+		return nil, apierror.InvalidArgument("Instance %s is a multishare instance: replication is not supported for multishare instances", peer)
+	}
 	if a.I.GetFileShares()[0].GetCapacityGb() != in.GetFileShares()[0].GetCapacityGb() || a.I.GetFileShares()[0].GetName() != in.GetFileShares()[0].GetName() {
 		return nil, apierror.InvalidArgument("A replica's file share must have its active instance's name and capacity: %s, %d GiB",
 			a.I.GetFileShares()[0].GetName(), a.I.GetFileShares()[0].GetCapacityGb())
@@ -205,7 +208,7 @@ func (s *Server) PromoteReplica(_ context.Context, req *filestorepb.PromoteRepli
 	key, ip, spec := standby.Key, standby.IP, standby.specFor(next)
 	b := s.opts.Backend
 	return s.startOpLocked(locationOf(standby.I.GetName()), standby.I.GetName(), "promote", func(ctx context.Context) error {
-		_, err := b.Ensure(ctx, key, ip, spec)
+		_, err := s.ensure(ctx, b, standby, key, ip, spec)
 		return err
 	}, func(err error) proto.Message {
 		standby.I.State = filestorepb.Instance_READY

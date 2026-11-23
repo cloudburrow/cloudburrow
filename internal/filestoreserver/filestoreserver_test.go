@@ -11,7 +11,7 @@ import (
 func TestConfigServesTheSharesAsFilestoreClientsMountThem(t *testing.T) {
 	conf := Config(filestore.Spec{Shares: []filestore.Share{{Name: "vol1"}}})
 	for _, want := range []string{"Protocols = 3;", "Mount_Path_Pseudo = true;", "Enable_UDP = false;",
-		"Path = /export/data/vol1;", "Pseudo = /vol1;", "Access_Type = RW;", "Squash = No_Root_Squash;"} {
+		"Path = /export/fs/vol1/data;", "Pseudo = /vol1;", "Access_Type = RW;", "Squash = No_Root_Squash;"} {
 		if !strings.Contains(conf, want) {
 			t.Errorf("config lacks %q:\n%s", want, conf)
 		}

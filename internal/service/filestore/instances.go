@@ -2,6 +2,8 @@ package filestore
 
 import (
 	"context"
+	"errors"
+	"reflect"
 	"strings"
 	"time"
 
@@ -34,6 +36,13 @@ func checkParent(parent string) ([]string, error) {
 
 // CreateInstance creates an instance and starts its NFS server.
 func (s *Server) CreateInstance(ctx context.Context, req *filestorepb.CreateInstanceRequest) (*longrunningpb.Operation, error) {
+	return s.createInstance(ctx, req, nil, nil)
+}
+
+// createInstance creates an instance of one file share, or a multishare
+// instance (multi, from v1beta1), its operation's answer made by answer
+// (the v1 instance when nil).
+func (s *Server) createInstance(ctx context.Context, req *filestorepb.CreateInstanceRequest, multi *multiState, answer func(*filestorepb.Instance) proto.Message) (*longrunningpb.Operation, error) {
 	m, err := checkParent(req.GetParent())
 	if err != nil {
 		return nil, err
@@ -74,18 +83,25 @@ func (s *Server) CreateInstance(ctx context.Context, req *filestorepb.CreateInst
 	default:
 		return nil, apierror.InvalidArgument("Protocol %s is not supported", in.GetProtocol())
 	}
-	if len(in.GetFileShares()) != 1 {
-		return nil, apierror.InvalidArgument("file_shares must have exactly one entry: for this version, only a single file share is supported")
-	}
-	fs := in.FileShares[0]
-	if err := checkShareName(in.GetTier(), fs.GetName()); err != nil {
-		return nil, err
-	}
-	if err := checkCapacity(in.GetTier(), fs.GetCapacityGb()); err != nil {
-		return nil, err
-	}
-	if err := checkExports(fs.GetNfsExportOptions()); err != nil {
-		return nil, err
+	fs := &filestorepb.FileShareConfig{}
+	if multi != nil {
+		if err := multi.checkNew(in); err != nil {
+			return nil, err
+		}
+	} else {
+		if len(in.GetFileShares()) != 1 {
+			return nil, apierror.InvalidArgument("file_shares must have exactly one entry: for this version, only a single file share is supported")
+		}
+		fs = in.FileShares[0]
+		if err := checkShareName(in.GetTier(), fs.GetName()); err != nil {
+			return nil, err
+		}
+		if err := checkCapacity(in.GetTier(), fs.GetCapacityGb()); err != nil {
+			return nil, err
+		}
+		if err := checkExports(fs.GetNfsExportOptions()); err != nil {
+			return nil, err
+		}
 	}
 	if err := checkLabels(in.GetLabels()); err != nil {
 		return nil, err
@@ -143,7 +159,8 @@ func (s *Server) CreateInstance(ctx context.Context, req *filestorepb.CreateInst
 	in.SatisfiesPzi = false
 	in.SuspensionReasons = nil
 	in.CustomPerformanceSupported = in.GetTier() == filestorepb.Instance_ZONAL || in.GetTier() == filestorepb.Instance_REGIONAL
-	rec := &instRecord{I: in, Key: keyOf("fs-", name, now)}
+	rec := &instRecord{I: in, Key: keyOf("fs-", name, now), Multi: multi}
+	rec.setLimits(in)
 	if err := s.placeLocked(in, m[1], rec); err != nil {
 		return nil, err
 	}
@@ -166,8 +183,12 @@ func (s *Server) CreateInstance(ctx context.Context, req *filestorepb.CreateInst
 	var synced time.Time
 	b := s.opts.Backend
 	return s.startOpLocked(req.GetParent(), name, "create", func(ctx context.Context) error {
-		ip, err := b.Ensure(ctx, key, "", spec)
+		ip, err := s.ensure(ctx, b, rec, key, "", spec)
 		if err != nil {
+			var ae *apierror.Error
+			if errors.As(err, &ae) {
+				return err
+			}
 			return apierror.Internal(err, "The NFS server did not start: %v", err)
 		}
 		s.mu.Lock()
@@ -203,6 +224,9 @@ func (s *Server) CreateInstance(ctx context.Context, req *filestorepb.CreateInst
 			pair(active, rec, synced)
 		}
 		s.bindTags(name, tags)
+		if answer != nil {
+			return answer(cloneInst(rec.I))
+		}
 		return cloneInst(rec.I)
 	}), nil
 }
@@ -299,6 +323,9 @@ func (s *Server) UpdateInstance(_ context.Context, req *filestorepb.UpdateInstan
 			if r.I.GetReplication() != nil {
 				return nil, apierror.FailedPrecondition("Instance %s is replicated: its file share cannot be changed while it has a replica or is one", r.I.GetName())
 			}
+			if r.Multi != nil {
+				return nil, apierror.InvalidArgument("Instance %s is a multishare instance: its shares are changed through its shares, not file_shares", r.I.GetName())
+			}
 			if len(in.GetFileShares()) != 1 {
 				return nil, apierror.InvalidArgument("file_shares must have exactly one entry")
 			}
@@ -341,13 +368,17 @@ func (s *Server) UpdateInstance(_ context.Context, req *filestorepb.UpdateInstan
 	if !next.GetDeletionProtectionEnabled() && next.GetDeletionProtectionReason() != "" {
 		return nil, apierror.InvalidArgument("deletion_protection_reason can be set only with deletion_protection_enabled")
 	}
+	r.setLimits(next)
+	if !reflect.DeepEqual(r.specFor(next), r.spec()) {
+		reconfigure = true
+	}
 	key, ip, spec := r.Key, r.IP, r.specFor(next)
 	b := s.opts.Backend
 	return s.startOpLocked(locationOf(r.I.GetName()), r.I.GetName(), "update", func(ctx context.Context) error {
 		if !reconfigure {
 			return nil
 		}
-		_, err := b.Ensure(ctx, key, ip, spec)
+		_, err := s.ensure(ctx, b, r, key, ip, spec)
 		return err
 	}, func(err error) proto.Message {
 		if err != nil {
@@ -491,6 +522,9 @@ func (s *Server) RestoreInstance(_ context.Context, req *filestorepb.RestoreInst
 	if req.GetSourceBackup() == "" {
 		return nil, apierror.InvalidArgument("source_backup is required")
 	}
+	if err := multiRefused(r); err != nil {
+		return nil, err
+	}
 	fs := r.I.GetFileShares()[0]
 	if req.GetFileShare() != fs.GetName() {
 		return nil, apierror.InvalidArgument("file_share %q is not a file share of %s; its share is %q", req.GetFileShare(), r.I.GetName(), fs.GetName())
@@ -599,6 +633,19 @@ func (s *Server) Usage(ctx context.Context, name string) (int64, error) {
 	if !ok || s.opts.Backend == nil || r.I.GetState() != filestorepb.Instance_READY {
 		s.mu.Unlock()
 		return 0, apierror.NotFound("Resource '%s' was not found", name)
+	}
+	if r.Multi != nil {
+		var total int64
+		key, shares := r.Key, r.Multi.mounts()
+		s.mu.Unlock()
+		for _, sh := range shares {
+			n, err := s.opts.Backend.Usage(ctx, key, sh)
+			if err != nil {
+				return 0, err
+			}
+			total += n
+		}
+		return total, nil
 	}
 	key, share := r.Key, r.I.GetFileShares()[0].GetName()
 	s.mu.Unlock()
