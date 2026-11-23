@@ -19689,8 +19689,8 @@
           "test/compat/dataproc2162f_test.go:55 TestDataprocRangerComponent",
           "test/compat/dataproc2186_test.go:33 TestDataprocHDFS",
           "test/compat/dataproc2188_test.go:117 TestDataprocHDFSHighAvailability",
-          "test/compat/dataproc2188_test.go:205 TestDataprocHDFSLocalSSDs",
-          "test/compat/dataproc2188_test.go:267 TestDataprocHDFSRestartSetup"
+          "test/compat/dataproc2188_test.go:225 TestDataprocHDFSLocalSSDs",
+          "test/compat/dataproc2188_test.go:287 TestDataprocHDFSRestartSetup"
         ]
       },
       {
@@ -19699,7 +19699,7 @@
         "tests": [
           "test/compat/dataproc2162_test.go:169 TestDataprocClusters",
           "test/compat/dataproc2186_test.go:33 TestDataprocHDFS",
-          "test/compat/dataproc2188_test.go:293 TestDataprocHDFSAcrossRestart"
+          "test/compat/dataproc2188_test.go:314 TestDataprocHDFSAcrossRestart"
         ]
       },
       {
@@ -19718,7 +19718,7 @@
           "test/compat/dataproc2162c_test.go:298 TestDataprocZeppelin",
           "test/compat/dataproc2162c_test.go:304 TestDataprocZeppelin30",
           "test/compat/dataproc2188_test.go:117 TestDataprocHDFSHighAvailability",
-          "test/compat/dataproc2188_test.go:293 TestDataprocHDFSAcrossRestart"
+          "test/compat/dataproc2188_test.go:314 TestDataprocHDFSAcrossRestart"
         ]
       },
       {
@@ -19795,9 +19795,9 @@
           "test/compat/dataproc2162f_test.go:55 TestDataprocRangerComponent",
           "test/compat/dataproc2186_test.go:33 TestDataprocHDFS",
           "test/compat/dataproc2188_test.go:117 TestDataprocHDFSHighAvailability",
-          "test/compat/dataproc2188_test.go:205 TestDataprocHDFSLocalSSDs",
-          "test/compat/dataproc2188_test.go:267 TestDataprocHDFSRestartSetup",
-          "test/compat/dataproc2188_test.go:293 TestDataprocHDFSAcrossRestart"
+          "test/compat/dataproc2188_test.go:225 TestDataprocHDFSLocalSSDs",
+          "test/compat/dataproc2188_test.go:287 TestDataprocHDFSRestartSetup",
+          "test/compat/dataproc2188_test.go:314 TestDataprocHDFSAcrossRestart"
         ]
       },
       {

@@ -89,7 +89,7 @@ func dataprocNodeContainers(t *testing.T, ctx context.Context, uuid, host string
 			rest = append(rest, n)
 		}
 	}
-	if len(node) != 1 || len(rest) == 0 {
+	if len(node) > 1 || len(rest) == 0 || (len(node) == 0 && !strings.HasSuffix(host, "-m-0")) {
 		t.Fatalf("node %s's containers: %q", host, out)
 	}
 	return append(node, rest...)
@@ -132,6 +132,7 @@ func TestDataprocHDFSHighAvailability(t *testing.T) {
 
 	// The nameservice is fs.defaultFS; a file written through it.
 	in := dataprocPut(t, ctx, bucket(t, h, d.sc), "ha/words.txt", dataprocWords)
+	d.hadoop(h, name, dataprocpb.JobStatus_DONE, fsShell, "-mkdir", "-p", "/data")
 	d.hadoop(h, name, dataprocpb.JobStatus_DONE, fsShell, "-cp", in, "hdfs:///data/words.txt")
 	if out := d.hadoop(h, name, dataprocpb.JobStatus_DONE, fsShell, "-ls", "hdfs://"+name+"/data"); !strings.Contains(out, "hdfs://"+name+"/data/words.txt") {
 		t.Fatalf("hdfs://%s/data: %s", name, out)
@@ -148,8 +149,27 @@ func TestDataprocHDFSHighAvailability(t *testing.T) {
 		t.Fatalf("the NameNodes' states: %s", out)
 	}
 
-	// A graceful failover to nn1 through the ZKFCs.
-	d.hadoop(h, name, dataprocpb.JobStatus_DONE, haAdmin, "-failover", "nn0", "nn1")
+	// A graceful failover to nn1 through the ZKFCs: refused to a job's
+	// user (root), as HDFS lets only its administrators fail over; the
+	// hdfs superuser's, on -m-0 (as `sudo -u hdfs hdfs haadmin` there).
+	if out := d.hadoop(h, name, dataprocpb.JobStatus_ERROR, haAdmin, "-failover", "nn0", "nn1"); !strings.Contains(out, "Not listed in dfs.cluster.administrators") {
+		t.Errorf("root's failover: %s", out)
+	}
+	failover := func(from, to string) {
+		t.Helper()
+		nn := ""
+		for _, c := range dataprocNodeContainers(t, ctx, uuid, name+"-m-0") {
+			if strings.HasSuffix(c, "-m-hdfs") {
+				nn = c
+			}
+		}
+		if nn == "" {
+			t.Fatalf("no NameNode container on %s-m-0", name)
+		}
+		dockerRun(t, ctx, "exec", "-e", "HADOOP_USER_NAME=hdfs", "-e", "HADOOP_CONF_DIR=/cb-conf", nn,
+			"/opt/hadoop/bin/hdfs", "haadmin", "-failover", from, to)
+	}
+	failover("nn0", "nn1")
 	if out := d.hadoop(h, name, dataprocpb.JobStatus_DONE, haAdmin, "-getServiceState", "nn1"); !strings.Contains(out, "active") {
 		t.Fatalf("nn1 after the failover: %s", out)
 	}
@@ -187,7 +207,7 @@ func TestDataprocHDFSHighAvailability(t *testing.T) {
 		}
 		time.Sleep(5 * time.Second)
 	}
-	d.hadoop(h, name, dataprocpb.JobStatus_DONE, haAdmin, "-failover", "nn0", "nn1")
+	failover("nn0", "nn1")
 	if out := d.hadoop(h, name, dataprocpb.JobStatus_DONE, fsShell, "-cat", "/data/after-failover.txt"); !strings.Contains(out, "cherry apple banana") {
 		t.Errorf("nn1, active again, lacks the file written while it was down: %s", out)
 	}
@@ -283,6 +303,7 @@ func TestDataprocHDFSRestartSetup(t *testing.T) {
 		t.Fatalf("CreateCluster: %v", err)
 	}
 	in := dataprocPut(t, ctx, bucket(t, h, d.sc), "restart/words.txt", dataprocWords)
+	d.hadoop(h, dataprocHDFSRestarted, dataprocpb.JobStatus_DONE, fsShell, "-mkdir", "-p", "/data")
 	d.hadoop(h, dataprocHDFSRestarted, dataprocpb.JobStatus_DONE, fsShell, "-cp", in, "/data/before-restart.txt")
 }
 

@@ -586,7 +586,8 @@ the WebSocket bridge at it, with local credentials, as it does for BigQuery.
 ## What is not served
 
 - YARN ResourceManager High Availability: a High Availability cluster's
-  ResourceManager runs on `-m-0` only (Google runs one on each master).
+  ResourceManager runs on `-m-0` only (Google runs one on each master,
+  #2189).
   Local SSDs are directories on the host's one disk, so they are not
   faster than the boot disk.
 - A Dataproc on GKE cluster's `auxiliary_services_config` (a Spark History
