@@ -147,7 +147,7 @@ func (m *multiState) spec() []Share {
 // checkCapacity checks a multishare instance's capacity.
 func checkMultiCapacity(gb int64) error {
 	if gb < multiMinGB || gb > multiMaxGB || gb%multiStepGB != 0 {
-		// UNVERIFIED wording (https://docs.cloud.google.com/filestore/docs/multishares).
+		// UNVERIFIED wording (re-read 2026-11-23: https://docs.cloud.google.com/filestore/docs/multishares).
 		return apierror.InvalidArgument("capacity_gb %d is invalid: a multishare instance is %d GiB to %d GiB, in steps of %d GiB", gb, multiMinGB, multiMaxGB, multiStepGB)
 	}
 	return nil
@@ -176,7 +176,7 @@ func (m *multiState) checkNew(in *filestorepb.Instance) error {
 // multiRefused refuses what a multishare instance does not support.
 func multiRefused(r *instRecord) error {
 	if r.Multi != nil {
-		// UNVERIFIED wording: "Snapshots are not yet supported for Filestore
+		// UNVERIFIED wording (re-read 2026-11-23): "Snapshots are not yet supported for Filestore
 		// multishares" (https://docs.cloud.google.com/filestore/docs/multishares).
 		return apierror.FailedPrecondition("Instance %s is a multishare instance: snapshots, backups and restores of its file shares are not supported for multishare instances", r.I.GetName())
 	}
@@ -532,7 +532,7 @@ func (b *BetaServer) GetShare(_ context.Context, req *betapb.GetShareRequest) (*
 // checkShare checks a share's capacity, export options and labels.
 func checkShare(m *multiState, sh *betapb.Share) error {
 	if c := sh.GetCapacityGb(); c < shareMinGB || c > m.maxShareGB() {
-		// UNVERIFIED wording (https://docs.cloud.google.com/filestore/docs/multishares).
+		// UNVERIFIED wording (re-read 2026-11-23: https://docs.cloud.google.com/filestore/docs/multishares).
 		return apierror.InvalidArgument("capacity_gb %d is invalid: a share of this instance is %d GiB to %d GiB", c, shareMinGB, m.maxShareGB())
 	}
 	if err := checkExports(exportsToV1(sh.GetNfsExportOptions())); err != nil {
@@ -740,4 +740,20 @@ func (b *BetaServer) DeleteShare(_ context.Context, req *betapb.DeleteShareReque
 		r.Multi.Shares = without(r.Multi.Shares, sh.GetName())
 		return nil
 	}), nil
+}
+
+// Multishare is a multishare instance's capacity, max_share_count and
+// shares, for the console; ok is false for an instance of one file share.
+func (s *Server) Multishare(name string) (capacityGB, maxShares int64, shares []*betapb.Share, ok bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r := s.instances[name]
+	if r == nil || r.Multi == nil {
+		return 0, 0, nil, false
+	}
+	for _, sh := range r.Multi.Shares {
+		shares = append(shares, proto.Clone(sh).(*betapb.Share))
+	}
+	sort.Slice(shares, func(i, j int) bool { return shares[i].GetName() < shares[j].GetName() })
+	return r.Multi.CapacityGB, r.Multi.MaxShareCount, shares, true
 }

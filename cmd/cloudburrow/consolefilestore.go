@@ -14,6 +14,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/service/filestore"
+	betapb "github.com/cloudburrow/cloudburrow/internal/service/filestore/filestorev1beta1pb"
 )
 
 // The console's Filestore pages (#2192), Google's menu in its order:
@@ -120,15 +121,20 @@ func (p filestoreProvider) List(_ context.Context, project string) (console.List
 		if !strings.HasPrefix(in.GetName(), "projects/"+project+"/") {
 			continue
 		}
-		fs := in.GetFileShares()[0]
+		share, capacity := "—", int64(0)
+		if fss := in.GetFileShares(); len(fss) > 0 {
+			share, capacity = fss[0].GetName(), fss[0].GetCapacityGb()
+		} else if c, _, shares, ok := s.Multishare(in.GetName()); ok {
+			share, capacity = fmt.Sprintf("Multishare (%d shares)", len(shares)), c
+		}
 		ip := "—"
 		if n := in.GetNetworks(); len(n) > 0 && len(n[0].GetIpAddresses()) > 0 {
 			ip = n[0].GetIpAddresses()[0]
 		}
 		l.Items = append(l.Items, console.Resource{Name: filestoreConsoleName(in.GetName()), Status: filestoreState(in.GetState().String()),
 			Fields: map[string]string{"Status": filestoreState(in.GetState().String()), "Service tier": filestoreTierLabels[in.GetTier().String()],
-				"Location": strings.Split(in.GetName(), "/")[3], "IP address": ip, "File share name": fs.GetName(),
-				"Capacity": filestoreCapacity(fs.GetCapacityGb()), "Protocol": filestoreProtocolLabels[in.GetProtocol().String()],
+				"Location": strings.Split(in.GetName(), "/")[3], "IP address": ip, "File share name": share,
+				"Capacity": filestoreCapacity(capacity), "Protocol": filestoreProtocolLabels[in.GetProtocol().String()],
 				"Labels": kmsOrDash(labelsText(in.GetLabels())), "Created": kmsTime(in.GetCreateTime())}})
 	}
 	l.Total = len(l.Items)
@@ -151,6 +157,8 @@ func filestoreInstanceFields(fromBackup bool) []console.Field {
 			Help: "Basic HDD and Basic SSD are zonal, NFSv3, 1 TiB (2.5 TiB for SSD) to 63.9 TiB, scaled up only, with backups and no snapshots. Zonal is zonal; Regional and Enterprise are regional; these take NFSv4.1, snapshots and revert."},
 		{Name: "capacityGb", Label: "Capacity (GiB)", Type: "number", Required: true, Default: "1024", Pattern: `^[0-9]{3,6}$`, Section: "Allocate capacity",
 			Help: "Basic HDD 1024 to 65434 GiB; Basic SSD 2560 to 65434 GiB, in 1 GiB steps. Zonal 1024 to 9984 GiB in 256 GiB steps or 10240 to 102400 GiB in 2560 GiB steps; Regional 100 to 10239 GiB in 1 GiB steps or 10240 to 102400 in 2560 GiB steps; Enterprise 1024 to 10240 GiB in 256 GiB steps."},
+		{Name: "multiShare", Label: "Enable multishares", Type: "checkbox", Section: "Allocate capacity", ShowWhen: "tier=ENTERPRISE",
+			Help: "Several file shares (10 GiB to 1 TiB each) on one instance, as GKE's enterprise-multishare-rwx class provisions them; create the shares on the instance's page."},
 		{Name: "region", Label: "Region", Type: "text", Required: true, Default: "us-central1", Section: "Choose where to store your data"},
 		{Name: "zone", Label: "Zone", Type: "text", Default: "us-central1-a", Section: "Choose where to store your data", ShowWhen: "tier=BASIC_HDD|BASIC_SSD|ZONAL",
 			Help: "Basic and Zonal instances are in a zone of the region."},
@@ -165,7 +173,7 @@ func filestoreInstanceFields(fromBackup bool) []console.Field {
 		{Name: "access", Label: "Access controls", Type: "radio", Default: "all", Section: "Configure your file share", Options: []string{"all", "restrict"},
 			OptionLabels: map[string]string{"all": "Grant access to all clients on the VPC network", "restrict": "Restrict access by IP address or range"}},
 		{Name: "ipRanges", Label: "IP address or range", Type: "text", Section: "Configure your file share", ShowWhen: "access=restrict",
-			Help: "Comma-separated IPv4 addresses or CIDR ranges. Local clients reach the server from their node's address on the kind Docker network."},
+			Help: "Comma-separated IPv4 addresses or CIDR ranges. VMs reach the server from their internal IP, Kubernetes Engine pods from their pod address and nodes (PersistentVolume mounts) from their InternalIP."},
 		{Name: "accessMode", Label: "Access level", Type: "select", Default: "READ_WRITE", Section: "Configure your file share", ShowWhen: "access=restrict",
 			Options: []string{"READ_WRITE", "READ_ONLY"}, OptionLabels: map[string]string{"READ_WRITE": "Admin (read-write)", "READ_ONLY": "Viewer (read-only)"}},
 		{Name: "squashMode", Label: "Root squash", Type: "select", Default: "NO_ROOT_SQUASH", Section: "Configure your file share", ShowWhen: "access=restrict",
@@ -251,8 +259,19 @@ func filestoreCreate(ctx context.Context, svc *filestoreService, project string,
 	if tier != filestorepb.Instance_BASIC_HDD && tier != filestorepb.Instance_BASIC_SSD {
 		in.Protocol = filestorepb.Instance_FileProtocol(filestorepb.Instance_FileProtocol_value[values["protocol"]])
 	}
-	op, err := s.CreateInstance(ctx, &filestorepb.CreateInstanceRequest{Parent: "projects/" + project + "/locations/" + loc,
-		InstanceId: strings.TrimSpace(values["instanceId"]), Instance: in})
+	var op *longrunningpb.Operation
+	if tier == filestorepb.Instance_ENTERPRISE && values["multiShare"] == "true" && backup == "" {
+		beta := &betapb.Instance{Description: in.Description, Tier: betapb.Instance_ENTERPRISE, Labels: labels, Tags: tags,
+			MultiShareEnabled: true, CapacityGb: capacity, MaxShareCount: 10, KmsKeyName: in.KmsKeyName,
+			Protocol:                  betapb.Instance_FileProtocol(in.Protocol),
+			Networks:                  []*betapb.NetworkConfig{{Network: in.Networks[0].Network, ReservedIpRange: in.Networks[0].ReservedIpRange}},
+			DeletionProtectionEnabled: in.DeletionProtectionEnabled}
+		op, err = s.Beta().CreateInstance(ctx, &betapb.CreateInstanceRequest{Parent: "projects/" + project + "/locations/" + loc,
+			InstanceId: strings.TrimSpace(values["instanceId"]), Instance: beta})
+	} else {
+		op, err = s.CreateInstance(ctx, &filestorepb.CreateInstanceRequest{Parent: "projects/" + project + "/locations/" + loc,
+			InstanceId: strings.TrimSpace(values["instanceId"]), Instance: in})
+	}
 	if err := filestoreWait(ctx, s, op, err); err != nil {
 		return "", err
 	}
@@ -280,7 +299,11 @@ func (p filestoreProvider) Detail(ctx context.Context, project string, path []st
 	if err != nil {
 		return console.Detail{Unavailable: "cannot read the instance: " + consoleErr(err)}, nil
 	}
-	fs := in.GetFileShares()[0]
+	multiCap, maxShares, shares, multi := s.Multishare(in.GetName())
+	fs := &filestorepb.FileShareConfig{}
+	if len(in.GetFileShares()) > 0 {
+		fs = in.GetFileShares()[0]
+	}
 	net := in.GetNetworks()[0]
 	ip := "—"
 	if len(net.GetIpAddresses()) > 0 {
@@ -327,10 +350,8 @@ func (p filestoreProvider) Detail(ctx context.Context, project string, path []st
 			{Label: "Deletion protection", Value: map[bool]string{true: "Enabled", false: "Disabled"}[in.GetDeletionProtectionEnabled()]},
 			{Label: "Encryption", Value: map[bool]string{true: "Cloud KMS key " + in.GetKmsKeyName(), false: "Google-managed"}[in.GetKmsKeyName() != ""]},
 			{Label: "Labels", Value: kmsOrDash(labelsText(in.GetLabels()))}}},
-		{Heading: "File share", Properties: []console.Property{{Label: "File share name", Value: fs.GetName()},
-			{Label: "Capacity", Value: filestoreCapacity(fs.GetCapacityGb())}, {Label: "Used", Value: used},
-			{Label: "Access controls", Value: access}, {Label: "Source backup", Value: kmsOrDash(fs.GetSourceBackup())},
-			{Label: "Mount command", Value: mount}}},
+		filestoreShareGroup(multi, fs, multiCap, maxShares, len(shares), used, access, mount),
+		filestorePerformanceGroup(in),
 		{Heading: "Networking", Properties: []console.Property{{Label: "VPC network", Value: net.GetNetwork()},
 			{Label: "IP address", Value: ip}, {Label: "Reserved IP range", Value: net.GetReservedIpRange()},
 			{Label: "Connect mode", Value: net.GetConnectMode().String()}}},
@@ -345,6 +366,19 @@ func (p filestoreProvider) Detail(ctx context.Context, project string, path []st
 		overview = append(overview, console.PropertyGroup{Heading: "Replication", Properties: props})
 	}
 	sections := []console.Section{{ID: "overview", Label: "Overview", Kind: console.KindProperties, Groups: overview}}
+	if multi {
+		l := console.Listing{Columns: []string{"State", "Mount name", "Capacity", "Mount command", "Labels", "Created"}, NameColumn: "Share", Noun: "shares"}
+		for _, sh := range shares {
+			l.Items = append(l.Items, console.Resource{Name: lastSegment(sh.GetName()), Status: filestoreState(sh.GetState().String()),
+				Fields: map[string]string{"State": filestoreState(sh.GetState().String()), "Mount name": sh.GetMountName(),
+					"Capacity": filestoreCapacity(sh.GetCapacityGb()), "Mount command": "sudo mount -o rw,intr " + ip + ":/" + sh.GetMountName() + " /mnt/" + strings.ToLower(sh.GetMountName()),
+					"Labels": kmsOrDash(labelsText(sh.GetLabels())), "Created": kmsTime(sh.GetCreateTime())}})
+		}
+		l.Total = len(l.Items)
+		sections = append(sections, console.Section{ID: "shares", Label: "Shares", Listing: l})
+		return console.Detail{Summary: []console.Property{{Label: "Status", Value: filestoreState(in.GetState().String())}, {Label: "IP address", Value: ip}},
+			Sections: sections}, nil
+	}
 	if !strings.HasPrefix(in.GetTier().String(), "BASIC") && in.GetTier() != filestorepb.Instance_STANDARD && in.GetTier() != filestorepb.Instance_PREMIUM {
 		sections = append(sections, console.Section{ID: "snapshots", Label: "Snapshots", Listing: snaps})
 	}
@@ -360,6 +394,9 @@ func (p filestoreProvider) DetailActions(ctx context.Context, project string, pa
 	s, in, err := p.instance(ctx, project, path[0])
 	if err != nil {
 		return nil
+	}
+	if multiCap, _, shares, ok := s.Multishare(in.GetName()); ok {
+		return filestoreMultishareActions(in, multiCap, shares)
 	}
 	fs := in.GetFileShares()[0]
 	basic := in.GetTier() == filestorepb.Instance_BASIC_HDD || in.GetTier() == filestorepb.Instance_BASIC_SSD ||
@@ -439,6 +476,9 @@ func (p filestoreProvider) ActAt(ctx context.Context, project string, path []str
 	s, in, err := p.instance(ctx, project, path[0])
 	if err != nil {
 		return err
+	}
+	if _, _, _, ok := s.Multishare(in.GetName()); ok && action != "delete" {
+		return filestoreMultishareAct(ctx, s, in, action, values)
 	}
 	switch action {
 	case "edit":
@@ -676,4 +716,131 @@ func (p filestoreSnapshotsProvider) Act(ctx context.Context, project, name, acti
 
 func isStandbyRole(rp *filestorepb.Replication) bool {
 	return rp.GetRole() == filestorepb.Replication_STANDBY
+}
+
+// filestoreShareGroup is the instance's file share, or its multishare
+// capacity and share count.
+func filestoreShareGroup(multi bool, fs *filestorepb.FileShareConfig, capGB, maxShares int64, n int, used, access, mount string) console.PropertyGroup {
+	if multi {
+		return console.PropertyGroup{Heading: "Multishare", Properties: []console.Property{{Label: "Multishares", Value: "Enabled"},
+			{Label: "Capacity", Value: filestoreCapacity(capGB)}, {Label: "Shares", Value: fmt.Sprintf("%d of at most %d", n, maxShares)},
+			{Label: "Used", Value: used}}}
+	}
+	return console.PropertyGroup{Heading: "File share", Properties: []console.Property{{Label: "File share name", Value: fs.GetName()},
+		{Label: "Capacity", Value: filestoreCapacity(fs.GetCapacityGb())}, {Label: "Used", Value: used},
+		{Label: "Access controls", Value: access}, {Label: "Source backup", Value: kmsOrDash(fs.GetSourceBackup())},
+		{Label: "Mount command", Value: mount}}}
+}
+
+// filestorePerformanceGroup is the instance's performance limits.
+func filestorePerformanceGroup(in *filestorepb.Instance) console.PropertyGroup {
+	pl := in.GetPerformanceLimits()
+	mibps := func(b int64) string { return strconv.FormatFloat(float64(b)/(1<<20), 'f', 1, 64) + " MiB/s" }
+	custom := "Capacity-based"
+	switch {
+	case in.GetPerformanceConfig().GetIopsPerTb() != nil:
+		custom = fmt.Sprintf("Custom: %d IOPS per TiB", in.GetPerformanceConfig().GetIopsPerTb().GetMaxIopsPerTb())
+	case in.GetPerformanceConfig().GetFixedIops() != nil:
+		custom = fmt.Sprintf("Custom: %d IOPS", in.GetPerformanceConfig().GetFixedIops().GetMaxIops())
+	}
+	return console.PropertyGroup{Heading: "Performance", Properties: []console.Property{{Label: "Performance", Value: custom},
+		{Label: "Max read IOPS", Value: strconv.FormatInt(pl.GetMaxReadIops(), 10)}, {Label: "Max write IOPS", Value: strconv.FormatInt(pl.GetMaxWriteIops(), 10)},
+		{Label: "Max read throughput", Value: mibps(pl.GetMaxReadThroughputBps())}, {Label: "Max write throughput", Value: mibps(pl.GetMaxWriteThroughputBps())}}}
+}
+
+// filestoreMultishareActions are a multishare instance's actions: edit its
+// capacity, create and delete shares, delete it.
+func filestoreMultishareActions(in *filestorepb.Instance, capGB int64, shares []*betapb.Share) []console.Action {
+	var ids []string
+	for _, sh := range shares {
+		ids = append(ids, lastSegment(sh.GetName()))
+	}
+	editShare := console.Action{ID: "editShare", Label: "Edit share", Title: "Edit a share", Submit: "Save"}
+	if len(ids) == 0 {
+		editShare.Unavailable = "The instance has no share."
+	} else {
+		editShare.Fields = []console.Field{{Name: "share", Label: "Share", Type: "select", Required: true, Options: ids, Default: ids[0]},
+			{Name: "capacityGb", Label: "Capacity (GiB)", Type: "number", Required: true, Default: strconv.FormatInt(shares[0].GetCapacityGb(), 10),
+				Help: "10 to 1024 GiB, within the instance's capacity."},
+			{Name: "description", Label: "Description", Type: "text", Help: "Optional."},
+			{Name: "labels", Label: "Labels", Type: "map"}}
+	}
+	delShare := console.Action{ID: "deleteShare", Label: "Delete share", Title: "Delete a share", Submit: "Delete", Destructive: true,
+		ConfirmStyle: console.DeleteConfirmClick, ConfirmTitle: "Delete share?", Confirm: "The share and its files are deleted."}
+	if len(ids) == 0 {
+		delShare.Unavailable = "The instance has no share."
+	} else {
+		delShare.Fields = []console.Field{{Name: "share", Label: "Share", Type: "select", Required: true, Options: ids, Default: ids[0]}}
+	}
+	del := console.Action{ID: "delete", Label: "Delete", Destructive: true, Leaves: true, ConfirmWord: lastSegment(in.GetName()),
+		Confirm: "The instance and its shares' data are deleted."}
+	if in.GetDeletionProtectionEnabled() {
+		del.Unavailable = "Deletion protection is enabled: disable it with Edit first."
+	}
+	return []console.Action{
+		{ID: "edit", Label: "Edit", Title: "Edit instance", Submit: "Save", Page: true, Fields: []console.Field{
+			{Name: "description", Label: "Description", Type: "text", Default: in.GetDescription()},
+			{Name: "capacityGb", Label: "Capacity (GiB)", Type: "number", Required: true, Default: strconv.FormatInt(capGB, 10),
+				Help: "1024 to 10240 GiB in 256 GiB steps, at least what the shares take."},
+			{Name: "labels", Label: "Labels", Type: "map", Default: console.FormatMap(in.GetLabels())},
+			{Name: "deletionProtection", Label: "Enable deletion protection", Type: "checkbox", Default: strconv.FormatBool(in.GetDeletionProtectionEnabled())}}},
+		{ID: "createShare", Label: "Create share", Title: "Create a share", Submit: "Create", Fields: []console.Field{
+			{Name: "shareId", Label: "Share ID", Type: "text", Required: true, Pattern: `^[a-z]([a-z0-9\-]{0,61}[a-z0-9])?$`},
+			{Name: "mountName", Label: "Mount name", Type: "text", Required: true, Pattern: `^[A-Za-z][A-Za-z0-9_]{0,62}$`,
+				Help: "Clients mount IP_ADDRESS:/MOUNT_NAME."},
+			{Name: "capacityGb", Label: "Capacity (GiB)", Type: "number", Required: true, Default: "100", Help: "10 to 1024 GiB."}}},
+		editShare, delShare, del,
+	}
+}
+
+// filestoreMultishareAct runs a multishare instance's action.
+func filestoreMultishareAct(ctx context.Context, s *filestore.Server, in *filestorepb.Instance, action string, values map[string]string) error {
+	b := s.Beta()
+	gb := func() (int64, error) {
+		v, err := strconv.ParseInt(strings.TrimSpace(values["capacityGb"]), 10, 64)
+		if err != nil {
+			return 0, fmt.Errorf("capacity %q is not a number of GiB", values["capacityGb"])
+		}
+		return v, nil
+	}
+	switch action {
+	case "edit":
+		capacity, err := gb()
+		if err != nil {
+			return err
+		}
+		labels, err := console.ParseMap(values["labels"])
+		if err != nil {
+			return err
+		}
+		op, err := b.UpdateInstance(ctx, &betapb.UpdateInstanceRequest{Instance: &betapb.Instance{Name: in.GetName(), Description: values["description"],
+			Labels: labels, CapacityGb: capacity, DeletionProtectionEnabled: values["deletionProtection"] == "true"},
+			UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"description", "labels", "capacity_gb", "deletion_protection_enabled"}}})
+		return filestoreWait(ctx, s, op, err)
+	case "createShare":
+		capacity, err := gb()
+		if err != nil {
+			return err
+		}
+		op, err := b.CreateShare(ctx, &betapb.CreateShareRequest{Parent: in.GetName(), ShareId: strings.TrimSpace(values["shareId"]),
+			Share: &betapb.Share{MountName: strings.TrimSpace(values["mountName"]), CapacityGb: capacity}})
+		return filestoreWait(ctx, s, op, err)
+	case "editShare":
+		capacity, err := gb()
+		if err != nil {
+			return err
+		}
+		labels, err := console.ParseMap(values["labels"])
+		if err != nil {
+			return err
+		}
+		op, err := b.UpdateShare(ctx, &betapb.UpdateShareRequest{Share: &betapb.Share{Name: in.GetName() + "/shares/" + values["share"],
+			CapacityGb: capacity, Description: values["description"], Labels: labels},
+			UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"capacity_gb", "description", "labels"}}})
+		return filestoreWait(ctx, s, op, err)
+	case "deleteShare":
+		op, err := b.DeleteShare(ctx, &betapb.DeleteShareRequest{Name: in.GetName() + "/shares/" + values["share"]})
+		return filestoreWait(ctx, s, op, err)
+	}
+	return fmt.Errorf("action %q is not available on a multishare instance", action)
 }

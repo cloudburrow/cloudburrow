@@ -49,6 +49,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/dataform"
 	"github.com/cloudburrow/cloudburrow/internal/service/datatransfer"
 	"github.com/cloudburrow/cloudburrow/internal/service/filestore"
+	"github.com/cloudburrow/cloudburrow/internal/service/filestore/filestorev1beta1pb"
 	"github.com/cloudburrow/cloudburrow/internal/service/gke"
 	"github.com/cloudburrow/cloudburrow/internal/service/kms"
 	"github.com/cloudburrow/cloudburrow/internal/service/kmsinventory"
@@ -129,6 +130,7 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 		t.Fatal(err)
 	}
 	filestorepb.RegisterCloudFilestoreManagerServer(srv, fst)
+	filestorev1beta1pb.RegisterCloudFilestoreManagerServer(srv, fst.Beta())
 	// Cloud Trace (#2118): v1 and v2.
 	tr, err := trace.NewServer("")
 	if err != nil {

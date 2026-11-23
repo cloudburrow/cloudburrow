@@ -36,7 +36,7 @@ import (
 // (max_iops 9000: max_read_throughput_bps 221184000,
 // max_write_throughput_bps 73728000). A ZONAL or REGIONAL instance below
 // 1 TiB without performance_config takes the lowest custom performance,
-// 4,000 IOPS a TiB (UNVERIFIED: the page says only that custom performance
+// 4,000 IOPS a TiB (UNVERIFIED, re-read 2026-11-23: the page says only that custom performance
 // cannot be turned off there).
 
 const mib = 1 << 20

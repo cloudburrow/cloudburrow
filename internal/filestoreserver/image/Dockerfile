@@ -4,6 +4,12 @@
 # and the repo holds none of its code, only this recipe, which installs
 # Debian's build at run time on the machine that runs it.
 #
+# Each share is an ext4 filesystem of its own size (e2fsprogs, GPL-2.0
+# programs run, not linked), on a loop device, encrypted with dm-crypt
+# under the instance's CMEK-sealed key (cryptsetup-bin, GPL-2.0, likewise
+# run only) (#2194); iproute2's tc and the cgroup's io.max hold the server
+# to its tier's performance limits.
+#
 # The base is the Docker official debian image, pinned by its multi-arch
 # index digest (dependencies.json's filestore.serverBase records the same
 # digest); the packages are pinned to one Debian version through

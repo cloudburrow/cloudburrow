@@ -54,7 +54,7 @@ func TestServerSnapshotsBacksUpAndRestores(t *testing.T) {
 		t.Fatal(err)
 	}
 	client("echo two > /m/f")
-	if n, err := d.Backup(ctx, key, "vol1", "backup-01"); err != nil || n == 0 {
+	if n, err := d.Backup(ctx, key, "vol1", "backup-01", nil); err != nil || n == 0 {
 		t.Fatalf("backup: %d, %v", n, err)
 	}
 	if err := d.Revert(ctx, key, "vol1", "snap-01"); err != nil {
@@ -63,7 +63,7 @@ func TestServerSnapshotsBacksUpAndRestores(t *testing.T) {
 	if got := client("cat /m/f"); got != "one" {
 		t.Fatalf("after revert: %q", got)
 	}
-	if err := d.Restore(ctx, key, "vol1", "backup-01"); err != nil {
+	if err := d.Restore(ctx, key, "vol1", "backup-01", nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := client("cat /m/f"); got != "two" {
