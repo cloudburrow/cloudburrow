@@ -11,6 +11,8 @@ Flags:
     	accept Microsoft's End-User Licensing Agreement for SQL Server (https://go.microsoft.com/fwlink/?LinkId=746388) yourself, for the Cloud SQL for SQL Server instances this instance creates: their servers run Microsoft's SQL Server image, which starts only once it is accepted; who accepted and when is recorded on each instance (also CLOUDBURROW_ACCEPT_MSSQL_EULA=Y)
   -allow-remote
     	permit binding a non-loopback address (unsafe)
+  -allow-unconfined-containers
+    	let the Dataproc DOCKER optional component run each node's Docker daemon with seccomp, AppArmor and the /proc and /sys masks unconfined, which weakens the isolation between those containers and this machine (unsafe; also CLOUDBURROW_ALLOW_UNCONFINED_CONTAINERS=true)
   -appengine-url string
     	base URL of a local HTTP server standing in for the App Engine app, such as http://localhost:8080: Cloud Tasks and Cloud Scheduler deliver App Engine targets there (default: none, and every App Engine attempt fails 404)
   -artifact-registry-cleanup-interval duration
