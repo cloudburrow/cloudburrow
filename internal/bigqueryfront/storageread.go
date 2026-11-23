@@ -241,6 +241,9 @@ func (s *storageRead) handle(_ any, ss grpc.ServerStream) error {
 	if strings.HasPrefix(method, connectionService) {
 		return s.connection(ss, method) // connectiongrpc.go, #1766
 	}
+	if strings.HasPrefix(method, reservationService) {
+		return s.reservation(ss, method) // reservationgrpc.go, #2193
+	}
 	ctx, cancel := context.WithCancel(ss.Context())
 	defer cancel()
 	if md, ok := metadata.FromIncomingContext(ctx); ok {

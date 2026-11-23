@@ -393,6 +393,17 @@ func (c *LifecycleComponent) Backends() []Backend {
 					if c.vertexAI != "" {
 						b.Front.Args = append(b.Front.Args, "--vertexai", "http://"+c.vertexAI)
 					}
+					// Continuous queries export to the instance's
+					// Pub/Sub, Bigtable and Spanner (#2193).
+					if c.enabled(config.ServicePubSub) {
+						b.Front.Args = append(b.Front.Args, "--pubsub", InClusterPubSubHost(c.installer.Namespace))
+					}
+					if c.enabled(config.ServiceBigtable) {
+						b.Front.Args = append(b.Front.Args, "--bigtable", InClusterFrontHost(c.installer.Namespace, "bigtable", BigtablePort))
+					}
+					if c.enabled(config.ServiceSpanner) {
+						b.Front.Args = append(b.Front.Args, "--spanner", InClusterFrontHost(c.installer.Namespace, "spanner", SpannerPort))
+					}
 				}
 				out = append(out, b)
 			}

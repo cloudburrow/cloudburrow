@@ -240,11 +240,13 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	dropped := &droppedStore{}                                        // dropped.go, #1460
 	models := &bqModels{}                                             // models.go, #1465
 	connections := &bqConnections{resourceManager: o.resourceManager} // connections.go, #1755
+	reservations := &bqReservations{}                                 // reservations.go, #2193
 	objects := &objectTables{storage: storage}                        // objecttables.go, #1783
 	objects.public = o.storagePublic                                  // signedurls.go, #1786
 	wireJobsTable(texts, records, own, jobRows)
 	numbers := &projectNumbers{} // projectnumbers.go, #1551
 	known.numbers = numbers
+	reservations.numbers, reservations.now = numbers, func() time.Time { return buffers.clock() }
 	// Jobs that outlive their request (asyncjobs.go, #1819).
 	async := &asyncJobs{location: settings.defaultLocation, made: jobRows.noteMade, clock: func() time.Time { return buffers.clock() }}
 	async.stopped = func(r *http.Request, j *asyncJob, e rowError) {
@@ -297,6 +299,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		icebergs.keep(o.stateDir, o.logf)                          // iceberg.go, #1427
 		models.keep(modelsStateFile(o.stateDir), o.logf)           // models.go, #1465
 		connections.keep(connectionsStateFile(o.stateDir), o.logf) // connections.go, #1755
+		reservations.keep(reservationsStateFile(o.stateDir), o.logf) // reservations.go, #2193
 		objects.keep(o.stateDir, o.logf)                           // objecttables.go, #1783
 		tables.keep(tableSettingsStateFile(o.stateDir), o.logf)    // tableoptions.go, #1390
 		buffers.keep(streamBuffersStateFile(o.stateDir), o.logf)   // streamingbuffer.go, #1273
@@ -367,6 +370,9 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			return
 		}
 		if connections.serve(w, r, numbers) { // connections.go, #1755: the BigQuery Connection API
+			return
+		}
+		if reservations.serve(w, r) { // reservations.go, #2193: the BigQuery Reservation API
 			return
 		}
 		if iam.serveRewriteMember(w, r, next, connections) { // iam.go, datasetaccessrewrite.go and connectionrewrite.go, #1751, #1795
@@ -459,7 +465,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 				listJobs: listJobs, iam: iam, buffers: buffers, settings: settings, jobsTable: jobRows, newest: newest, open: open,
 				resourceManager: o.resourceManager, tables: tables, linked: linked, hubs: hubs, icebergs: icebergs, dropped: dropped, models: models,
 				onnx: o.onnx, tfconvert: o.tfconvert, spark: o.spark, vertexai: o.vertexai, connections: connections, numbers: numbers, objects: objects,
-				cdcStreams: o.cdcStreams}
+				cdcStreams: o.cdcStreams, reservations: reservations, sinks: o.sinks}
 			if j[3] == "jobs" {
 				f.withDefaultJobKey(w, r, func(w http.ResponseWriter) { f.insertJob(w, r) }) // #1456, defaultjobkey.go
 			} else {
@@ -635,7 +641,11 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		o.restarts.onRestart(iamChecks.resetCreators)
 	}
 	engine := next
-	return iamChecks.handler(engine, async.handler(known.client(withRequestReads(jobErrors(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { // #1581, errorcodes.go; #1582, engineerrors.go
+	// The whole front, which a continuous query's runs go through
+	// (continuousjob.go, #2193).
+	var whole http.Handler
+	defer func() { cqRegistry.rest = whole }()
+	whole = iamChecks.handler(engine, async.handler(known.client(withRequestReads(jobErrors(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { // #1581, errorcodes.go; #1582, engineerrors.go
 		buffers.syncPending(next, r) // #1513: the clock a restarted front kept
 		// The files of the tables for Apache Iceberg whose rows the
 		// request changed are written before it is answered; a failure is
@@ -660,6 +670,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			inner.ServeHTTP(w, r)
 		}
 	}), next, settings, failed)))))
+	return whole
 }
 
 // now is the instance's clock (#1487): the front's, which the CloudBurrow
@@ -766,6 +777,12 @@ type front struct {
 	// objects are the object tables (objecttables.go, #1783), or nil.
 	objects *objectTables
 	numbers *projectNumbers
+	// reservations are the Reservation API's (reservations.go, #2193),
+	// whose CONTINUOUS assignments continuous queries run on; sinks the
+	// instance's Pub/Sub, Bigtable and Spanner they export to
+	// (continuousexport.go).
+	reservations *bqReservations
+	sinks        continuousSinks
 }
 
 // Option is an option of Wrap.
@@ -821,6 +838,9 @@ type options struct {
 	// vertexai is the local Vertex AI endpoint remote models run on, or ""
 	// (modelremote.go, #1760).
 	vertexai string
+	// sinks are the instance's Pub/Sub, Bigtable and Spanner, which
+	// continuous queries export to (continuousexport.go, #2193).
+	sinks continuousSinks
 }
 
 // WithStorage gives the front the instance's Cloud Storage JSON API, at

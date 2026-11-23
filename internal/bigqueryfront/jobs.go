@@ -122,7 +122,7 @@ func (f front) insertJob(w http.ResponseWriter, r *http.Request) {
 	if project == "" {
 		project = projectOf(f.base)
 	}
-	if refuseContinuous(w, project, job) { // #2094, continuousjob.go
+	if f.continuous(w, r, project, job, created) { // #2094, #2193, continuousjob.go
 		return
 	}
 	if f.duplicateJob(w, r, project, given) { // #1622

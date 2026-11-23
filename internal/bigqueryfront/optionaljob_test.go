@@ -72,20 +72,3 @@ func TestOptionalJobCreation(t *testing.T) {
 		t.Errorf("deleted %v, want only j1", deleted)
 	}
 }
-
-// TestContinuousQueryJobIsRefused (#2094): a query job with continuous set
-// is refused, as in a project with no CONTINUOUS reservation assignment.
-func TestContinuousQueryJobIsRefused(t *testing.T) {
-	var job jobBody
-	if err := json.Unmarshal([]byte(`{"configuration":{"query":{"query":"INSERT INTO d.t SELECT 1","continuous":true}}}`), &job); err != nil {
-		t.Fatal(err)
-	}
-	rec := httptest.NewRecorder()
-	if !refuseContinuous(rec, "p", job) || rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "CONTINUOUS assignment") {
-		t.Fatalf("continuous job: %d %s", rec.Code, rec.Body.String())
-	}
-	job.Configuration.Query.Continuous = false
-	if refuseContinuous(httptest.NewRecorder(), "p", job) {
-		t.Fatal("refused an ordinary query job")
-	}
-}

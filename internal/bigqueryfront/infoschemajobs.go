@@ -248,6 +248,9 @@ func jobRow(project string, job map[string]any, settings *projectOptions) []stri
 		}
 	}
 	state := jobStateOf(job)
+	// A continuous query's continuous, continuous_query_info,
+	// reservation_id and edition (continuousjob.go, #2193).
+	cqContinuous, cqInfo, cqReservation, cqEdition := continuousInfo(project, str(ref, "jobId"), qc)
 	cache := "FALSE"
 	if b, _ := qs["cacheHit"].(bool); b {
 		cache = "TRUE"
@@ -291,16 +294,16 @@ func jobRow(project string, job map[string]any, settings *projectOptions) []stri
 		errResult, "NULL", sqlString(str(ref, "jobId")), sqlOrNull(jobType),
 		"ARRAY<STRUCT<key STRING, value STRING>>[" + strings.Join(labels, ", ") + "]", sqlOrNull(str(stats, "parentJobId")),
 		priority, sqlString(project), "NULL", sqlOrNull(str(qc, "query")), tableRefsSQL(qs["referencedTables"]),
-		tableRefsSQL(nil), "NULL", "ARRAY<STRING>[]", "NULL", millisTimestamp(stats["startTime"]), sqlOrNull(state),
+		tableRefsSQL(nil), cqReservation, "ARRAY<STRING>[]", cqEdition, millisTimestamp(stats["startTime"]), sqlOrNull(state),
 		sqlOrNull(str(qs, "statementType")), int64Or(qs["totalBytesBilled"]), int64Or(bytesProcessed), "NULL",
-		int64Or(stats["totalSlotMs"]), "NULL", tx, sqlOrNull(str(job, "user_email")), "NULL", "NULL", dialect, "FALSE",
+		int64Or(stats["totalSlotMs"]), "NULL", tx, sqlOrNull(str(job, "user_email")), "NULL", "NULL", dialect, cqContinuous,
 		// bi_engine_statistics: "If the project is configured to use the BI
 		// Engine, then this field contains BiEngineStatistics. Otherwise
-		// NULL"; an instance has no BI Engine. continuous_query_info: no
-		// job is continuous (continuous FALSE). ml_statistics.model_type:
-		// "For all other jobs" than a model's creation "the value is NULL"
-		// (#1458).
-		"NULL", sessionInfoSQL(stats), "NULL", modelTypeSQL(qs),
+		// NULL"; an instance has no BI Engine. continuous_query_info: a
+		// continuous query's output watermark (continuousjob.go, #2193).
+		// ml_statistics.model_type: "For all other jobs" than a model's
+		// creation "the value is NULL" (#1458).
+		"NULL", sessionInfoSQL(stats), cqInfo, modelTypeSQL(qs),
 		// global_query_info: "Information about a global query"; an
 		// instance runs every query in the region it names, so no job is
 		// one (NULL, UNVERIFIED that BigQuery gives NULL, docs re-read 2026-11-17).
