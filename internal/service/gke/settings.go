@@ -709,7 +709,7 @@ func (s *Server) applyCreateSettings(ctx context.Context, kind string, enforce, 
 // add-on is enabled (#2192).
 type FilestoreCSICluster struct {
 	// Name is projects/P/locations/L/clusters/C; Kind its kind cluster.
-	Name, Kind string
+	Name, Kind                 string
 	Project, Location, Network string
 }
 
