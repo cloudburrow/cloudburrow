@@ -328,14 +328,19 @@ var componentImages = map[dataprocpb.Component]func(mm string) bool{
 // servedComponents run as containers on a local cluster
 // (internal/sparkproc's Ecosystem).
 var servedComponents = map[dataprocpb.Component]bool{
-	dataprocpb.Component_FLINK: true, dataprocpb.Component_HIVE_WEBHCAT: true, dataprocpb.Component_JUPYTER: true, dataprocpb.Component_RANGER: true,
+	dataprocpb.Component_FLINK: true, dataprocpb.Component_HIVE_WEBHCAT: true, dataprocpb.Component_JUPYTER: true,
 	dataprocpb.Component_PIG: true, dataprocpb.Component_SOLR: true, dataprocpb.Component_TRINO: true,
 	dataprocpb.Component_ZOOKEEPER: true, dataprocpb.Component_DELTA: true, dataprocpb.Component_ICEBERG: true,
 	dataprocpb.Component_HUDI: true, dataprocpb.Component_ZEPPELIN: true, dataprocpb.Component_DOCKER: true,
 }
 
 // unservedComponents are why the other components do not run.
-var unservedComponents = map[dataprocpb.Component]string{}
+var unservedComponents = map[dataprocpb.Component]string{
+	dataprocpb.Component_RANGER: "Apache publishes no Ranger Admin image, and the pinned Apache Ranger 2.8.0 source release does not build as published: " +
+		"its Maven reactor (internal/sparkproc/ranger/Dockerfile) ran 49.5 minutes on this machine and failed at ranger-kylin-plugin, whose " +
+		"org.roaringbitmap:RoaringBitmap:0.7.36-os-kylin-r1 is published only in repo.spring.io/libs-snapshot, which now refuses anonymous downloads (401); " +
+		"the distro's admin assembly needs that module (docs/gaps.md, #2162)",
+}
 
 // checkRanger checks the RANGER component's documented requirements
 // (https://docs.cloud.google.com/dataproc/docs/concepts/components/ranger,
@@ -413,7 +418,7 @@ func checkComponents(mm string, comps []dataprocpb.Component, allowUnconfined bo
 			return apierror.FailedPrecondition("%s", dockerRefusal)
 		}
 		if !servedComponents[comp] {
-			return status.Errorf(codes.Unimplemented, "The %s optional component is not served by CloudBurrow (%s): a local cluster runs Delta Lake, Docker, Flink, Hive WebHCat, Hudi, Iceberg, Jupyter, Pig, Ranger, Solr, Trino, Zeppelin and ZooKeeper", comp, unservedComponents[comp])
+			return status.Errorf(codes.Unimplemented, "The %s optional component is not served by CloudBurrow (%s): a local cluster runs Delta Lake, Docker, Flink, Hive WebHCat, Hudi, Iceberg, Jupyter, Pig, Solr, Trino, Zeppelin and ZooKeeper", comp, unservedComponents[comp])
 		}
 	}
 	return nil

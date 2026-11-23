@@ -80,10 +80,10 @@ func dataprocEcosystem(cache, instance string, allowUnconfined bool, out io.Writ
 		Hive: dataprocHiveImage, Trino: dataprocTrinoImage, Flink: dataprocFlinkImage,
 		Zookeeper: dataprocZookeeperImage, Solr: dataprocSolrImage, Zeppelin: dataprocZeppelinImage,
 		Metastore42: dataprocMetastore42Image, Zeppelin30: dataprocZeppelin30Image,
-		// RANGER (#2162): the Admin server built from Apache Ranger's
-		// pinned source release, its database the MySQL 8.0 image Cloud
-		// SQL for MySQL 8.0 runs.
-		Ranger:      func(ctx context.Context) (string, error) { return sparkproc.RangerImage(ctx, instance) },
+		// RANGER (#2162): its database the MySQL 8.0 image Cloud SQL for
+		// MySQL 8.0 runs. Ranger (the Admin image, sparkproc.RangerImage)
+		// stays nil until the pinned source release builds (docs/gaps.md),
+		// and the API refuses RANGER.
 		RangerMySQL: components.CloudSQLMySQL80Image,
 		Docker: func(v string) string {
 			if v >= "2.3" {

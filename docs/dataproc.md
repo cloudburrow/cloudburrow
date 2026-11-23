@@ -259,7 +259,18 @@ image's Ubuntu.
     opted-in instance left running goes to `ERROR` with that message when
     an instance without it restarts it. See
     [security.md](security.md#unconfined-containers-opt-in-2162).
-  - RANGER is `UNIMPLEMENTED`, with its reason (docs/gaps.md).
+  - RANGER: `CreateCluster` checks what the Ranger component page
+    documents (SOLR required, `dataproc:ranger.kms.key.uri` and
+    `dataproc:ranger.admin.password.uri` required, `INVALID_ARGUMENT`
+    otherwise), and a valid RANGER cluster is then `UNIMPLEMENTED`, with
+    its reason: the Admin server's image
+    (`internal/sparkproc/ranger/Dockerfile`, a Maven build of the pinned
+    Apache Ranger 2.8.0 source release) does not build as published
+    (docs/gaps.md). What runs once it does is written: MySQL 8.0 and the
+    Admin server on the master, Solr's `ranger_audits` core, the
+    Component Gateway's `Ranger` (6080), and the admin password read from
+    Cloud Storage and decrypted with the instance's Cloud KMS, checked
+    against the image version's password rules.
   - Every cluster has a Hive metastore (Derby, in the cluster's files) and
     HiveServer2 on its master, started with its first Hive job or with a
     component that uses them.

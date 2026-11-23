@@ -456,7 +456,7 @@ func TestCheckComponents(t *testing.T) {
 		{"2.1", []dataprocpb.Component{dataprocpb.Component_HUDI}, codes.OK},
 		{"3.0", []dataprocpb.Component{dataprocpb.Component_ICEBERG, dataprocpb.Component_ZEPPELIN, dataprocpb.Component_DOCKER}, codes.OK},
 		{"2.2", []dataprocpb.Component{dataprocpb.Component_DOCKER}, codes.OK},
-		{"3.0", []dataprocpb.Component{dataprocpb.Component_RANGER, dataprocpb.Component_SOLR}, codes.OK},
+		{"3.0", []dataprocpb.Component{dataprocpb.Component_RANGER, dataprocpb.Component_SOLR}, codes.Unimplemented},
 		{"3.0", []dataprocpb.Component{dataprocpb.Component_DELTA, dataprocpb.Component_HUDI}, codes.OK},
 	} {
 		if err := checkComponents(c.mm, c.comps, false); c.code == codes.OK && hasDocker(c.comps) && status.Code(err) != codes.FailedPrecondition {
@@ -570,6 +570,10 @@ func TestCheckRanger(t *testing.T) {
 // image version's rules, or a key that does not decrypt it, fails the
 // cluster with the reason.
 func TestRangerPassword(t *testing.T) {
+	// RANGER is refused until its Admin image builds (unservedComponents);
+	// the path it takes once served is tested here.
+	servedComponents[dataprocpb.Component_RANGER] = true
+	t.Cleanup(func() { delete(servedComponents, dataprocpb.Component_RANGER) })
 	s, eng, st := newClusterServer(t)
 	key := "projects/p/locations/global/keyRings/r/cryptoKeys/k"
 	s.opts.Decrypt = func(_ context.Context, k string, ct []byte) ([]byte, error) {
