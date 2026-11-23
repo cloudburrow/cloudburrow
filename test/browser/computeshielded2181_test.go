@@ -45,7 +45,9 @@ func TestShieldedVMConsole2181(t *testing.T) {
 	}
 	status := func() string {
 		_, body := consoleDo(t, http.MethodGet, "/api/resources/compute-instances"+q, "")
-		var l struct{ Items []struct{ Name, Status string } }
+		var l struct {
+			Items []struct{ Name, Status string }
+		}
 		_ = json.Unmarshal([]byte(body), &l)
 		for _, r := range l.Items {
 			if r.Name == vm {
@@ -74,9 +76,9 @@ func TestShieldedVMConsole2181(t *testing.T) {
 	p.waitFor(`document.querySelector('#view fieldset.form-subsection[data-subsection="Shielded VM"]') !== null`)
 	var pane struct {
 		Pane, Legend, Note string
-		Labels         []string
-		Checked        []bool
-		AfterSA        bool
+		Labels             []string
+		Checked            []bool
+		AfterSA            bool
 	}
 	p.eval(`(() => { const fs = document.querySelector('#view fieldset.form-subsection[data-subsection="Shielded VM"]');
 		const ids = ["enableSecureBoot", "enableVtpm", "enableIntegrityMonitoring"];
