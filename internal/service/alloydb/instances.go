@@ -317,6 +317,26 @@ func PSCDNSName(instance string) string {
 // (postgresql.org/docs/current/hot-standby.html#HOT-STANDBY-ADMIN).
 var standbyFloorFlags = []string{"max_connections", "max_prepared_transactions", "max_locks_per_transaction", "max_wal_senders", "max_worker_processes"}
 
+// floorFlags raises a standby's flags to its primary's: a hot standby
+// refuses to recover with a lower setting of standbyFloorFlags than its
+// primary's (PostgreSQL's "insufficient parameter settings"), so a read
+// pool's or a secondary's server takes the primary's where it is higher.
+func floorFlags(flags, primary map[string]string) {
+	for _, k := range standbyFloorFlags {
+		pv, ok := primary[k]
+		if !ok {
+			continue
+		}
+		pn, _ := strconv.ParseInt(pv, 10, 64)
+		if own, ok := flags[k]; ok {
+			if n, err := strconv.ParseInt(own, 10, 64); err == nil && n >= pn {
+				continue
+			}
+		}
+		flags[k] = pv
+	}
+}
+
 func (s *Server) specOf(in *alloydbpb.Instance) (ServerSpec, error) {
 	m := instanceRE.FindStringSubmatch(in.GetName())
 	if m == nil {
@@ -342,23 +362,7 @@ func (s *Server) specOf(in *alloydbpb.Instance) (ServerSpec, error) {
 			return ServerSpec{}, apierror.FailedPrecondition("cluster %s has no primary instance", source)
 		}
 		spec.ReplicaOf = serverName(p.GetName())
-		// A hot standby refuses to recover with a lower setting of these
-		// than its primary's (PostgreSQL's "insufficient parameter
-		// settings"), so a read pool's nodes take the primary's where it
-		// is higher.
-		for _, k := range standbyFloorFlags {
-			pv, ok := p.GetDatabaseFlags()[k]
-			if !ok {
-				continue
-			}
-			pn, _ := strconv.ParseInt(pv, 10, 64)
-			if own, ok := spec.Flags[k]; ok {
-				if n, err := strconv.ParseInt(own, 10, 64); err == nil && n >= pn {
-					continue
-				}
-			}
-			spec.Flags[k] = pv
-		}
+		floorFlags(spec.Flags, p.GetDatabaseFlags())
 	} else {
 		spec.PITR = c.GetContinuousBackupConfig().GetEnabled()
 	}

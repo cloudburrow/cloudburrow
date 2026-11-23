@@ -338,25 +338,27 @@ func (s *Server) SwitchoverCluster(_ context.Context, req *alloydbpb.SwitchoverC
 		spec ServerSpec
 	}
 	var followers []follower
-	follow := func(inst *alloydbpb.Instance, source string) {
-		sp, err := s.specOf(inst)
-		if err != nil {
-			return
+	follow := func(inst *alloydbpb.Instance, source string, sourceFlags map[string]string) {
+		cl := s.clusters[instanceRE.FindStringSubmatch(inst.GetName())[1]]
+		sp := s.primarySpec(inst, cl)
+		sp.ReplicaOf, sp.PITR, sp.Epoch, sp.Pooler = source, false, epoch, nil
+		if inst.GetInstanceType() == alloydbpb.Instance_READ_POOL {
+			sp.Pooler = poolerOf(inst)
 		}
-		sp.ReplicaOf, sp.PITR, sp.Epoch = source, false, epoch
+		floorFlags(sp.Flags, sourceFlags)
 		followers = append(followers, follower{inst.GetName(), sp})
 	}
 	oldAsSecondary := clone(old)
 	oldAsSecondary.InstanceType = alloydbpb.Instance_SECONDARY
-	follow(oldAsSecondary, newSpec.Server)
+	follow(oldAsSecondary, newSpec.Server, in.GetDatabaseFlags())
 	for _, k := range sortedKeys(s.instances, oldName+"/instances/") {
 		if r := s.instances[k]; r.GetInstanceType() == alloydbpb.Instance_READ_POOL {
-			follow(r, serverName(oldInst))
+			follow(r, serverName(oldInst), old.GetDatabaseFlags())
 		}
 	}
 	for _, o := range others {
 		if si := s.primaryOf(o); si != nil {
-			follow(si, newSpec.Server)
+			follow(si, newSpec.Server, in.GetDatabaseFlags())
 		}
 	}
 	oldServer := serverName(oldInst)
