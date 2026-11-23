@@ -479,16 +479,29 @@ func (e *alloyDBEngine) PoolerAddr(server string, connectors bool) string {
 
 // Promote ends server's recovery, and waits until it takes writes.
 func (e *alloyDBEngine) Promote(ctx context.Context, server string) error {
-	_, err := e.psql(ctx, server, `DO $$BEGIN
+	// The block promotes only a server still in recovery, so it is run
+	// again when kubectl exec fails to start it: a pod's exec can fail
+	// once ("OCI runtime exec failed ... broken pipe") while the node is
+	// busy.
+	var err error
+	for attempt := 0; attempt < 5; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("promote %s: %w", server, err)
+			case <-time.After(3 * time.Second):
+			}
+		}
+		if _, err = e.psql(ctx, server, `DO $$BEGIN
   IF pg_is_in_recovery() THEN
     PERFORM pg_promote(true, 120);
   END IF;
 END$$;
-SELECT pg_is_in_recovery();`)
-	if err != nil {
-		return fmt.Errorf("promote %s: %w", server, err)
+SELECT pg_is_in_recovery();`); err == nil {
+			return nil
+		}
 	}
-	return nil
+	return fmt.Errorf("promote %s: %w", server, err)
 }
 
 func (e *alloyDBEngine) stopTunnel(ctx context.Context, server string) {

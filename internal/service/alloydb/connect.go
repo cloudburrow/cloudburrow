@@ -289,4 +289,6 @@ func (s *Server) CACertPEM() string { return s.ca.certPEM }
 
 // ServerCertificate is a certificate the authority signs for name, a DNS
 // name or an IP address.
-func (s *Server) ServerCertificate(name string) (*tls.Certificate, error) { return s.ca.serverCert(name) }
+func (s *Server) ServerCertificate(name string) (*tls.Certificate, error) {
+	return s.ca.serverCert(name)
+}

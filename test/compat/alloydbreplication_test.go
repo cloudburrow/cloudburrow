@@ -332,6 +332,9 @@ func TestAlloyDBSecondaryClusters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// After the switchover and the promotion it is a cluster of its own,
+	// which the primary's cleanup no longer reaches.
+	t.Cleanup(func() { alloyDBDelete(t, clients["grpc"], sloc+"/clusters/"+sid) })
 	if sc.GetClusterType() != alloydbpb.Cluster_SECONDARY || sc.GetSecondaryConfig().GetPrimaryClusterName() != pname || sc.GetDatabaseVersion() != alloydbpb.DatabaseVersion_POSTGRES_16 {
 		t.Errorf("the secondary cluster: %v", sc)
 	}

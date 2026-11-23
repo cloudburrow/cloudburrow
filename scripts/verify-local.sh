@@ -507,8 +507,9 @@ browser_suite() {  # <shard> <dir> <flags...>
   if [ "$shard" = run ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT,RUN_SERVICEUSAGE,WORKFLOWS,STORAGE,MONITORING,KUBECONFIG,RUN_FIRESTORE,RUN_DATASTORE; fi
   # The sql shard's read back through the Cloud SQL Admin API, the Backup
   # and DR Service and Secret Manager, which holds Run SQL's password, and
-  # the Compute Engine API for Backup and DR's VM and disk pages.
-  if [ "$shard" = sql ]; then BROWSER_VARS+=,SQLADMIN,BACKUPDR,SECRETS,COMPUTE; fi
+  # the Compute Engine API for Backup and DR's VM and disk pages, and Cloud
+  # Storage, which AlloyDB's Export writes to (#2191).
+  if [ "$shard" = sql ]; then BROWSER_VARS+=,SQLADMIN,BACKUPDR,SECRETS,COMPUTE,STORAGE; fi
   # The served shard's: the Kubernetes Engine API and the kubeconfig (#1913).
   if [ "$shard" = served ]; then BROWSER_VARS+=,GKE,KUBECONFIG,TRACE,LOGGING; fi
   # The localai shard's: the Embeddings page's Cloud Storage objects (#1985).
@@ -516,9 +517,10 @@ browser_suite() {  # <shard> <dir> <flags...>
   BROWSER_ENV=$(scripts/compat-env.sh --only "$BROWSER_VARS" --cli "$CLI" -- "$@" 2>/dev/null)
   (
     eval "$BROWSER_ENV"
-    # As in CI: 30m in run and storage (#2080), 20m in served and sql, 10m elsewhere.
+    # As in CI: 30m in run, storage (#2080) and sql (AlloyDB's clusters,
+    # #2191), 20m in served, 10m elsewhere.
     local timeout=10m
-    case "$shard" in served|sql) timeout=20m ;; run|storage) timeout=30m ;; esac
+    case "$shard" in served) timeout=20m ;; run|storage|sql) timeout=30m ;; esac
     # As in CI: what the restarted instance needs before its tests (#1985).
     compat_browser_prepare "$shard" 2>> "$dir/browser-prepare.err" || true
     export CLOUDBURROW_TEST_CHROME="$chrome" CLOUDBURROW_TEST_SCREENSHOTS="$dir/browser-screenshots"

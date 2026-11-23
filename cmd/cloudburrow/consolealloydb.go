@@ -483,6 +483,9 @@ func (p alloyDBProvider) DetailActions(ctx context.Context, project string, path
 	}
 	promote := console.Action{ID: "promote", Label: "Promote", Confirm: "Replication from the primary cluster stops: this cluster becomes a standalone primary cluster, and its secondary instance takes writes."}
 	switchover := console.Action{ID: "switchover", Label: "Switchover", Confirm: "This cluster becomes the primary cluster, and the primary cluster its secondary. Stop writing to the primary first."}
+	// Each is confirmed by the cluster's ID typed back, as Google's dialogs
+	// ask.
+	promote.ConfirmWord, switchover.ConfirmWord = lastSegment(c.GetName()), lastSegment(c.GetName())
 	if !secondary {
 		promote.Unavailable = "Only a secondary cluster is promoted."
 		switchover.Unavailable = "Only a secondary cluster switches over."
