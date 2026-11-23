@@ -38,6 +38,8 @@ type filestoreService struct {
 	requests  func(rest.Request)
 	// networks are Compute Engine's networks; nil checks none.
 	networks func() filestore.Networks
+	// clients are the VMs' pod and internal IPs (#2194); nil is none.
+	clients func() []filestoreserver.Client
 	// keys are the customer-managed keys (Cloud KMS); registry binds
 	// tags (Resource Manager).
 	keys     *cmek.Keys
@@ -97,6 +99,7 @@ func (s *filestoreService) Start(ctx context.Context) error {
 	}
 	s.backend = &filestoreserver.Docker{Instance: s.cfg.Name, Cluster: s.cfg.ClusterName(), Dir: filepath.Join(s.cfg.InstanceDir(), "filestore", "backups")}
 	s.backend.Logf = s.logf
+	s.backend.Clients = s.clients
 	opts := filestore.Options{Backend: s.backend, Networks: s.networks, Keys: s.keys}
 	if s.registry != nil {
 		opts.Tags = func() filestore.TagBinder {
@@ -145,7 +148,12 @@ func (s *filestoreService) startCSI() {
 	}
 	dir := gkeDir(s.cfg)
 	s.csi = &filestorecsi.Controller{
-		API: func() filestorecsi.API { return s.api },
+		API: func() filestorecsi.API {
+			if s.api == nil {
+				return nil
+			}
+			return csiAPI{s.api}
+		},
 		Clusters: func() []filestorecsi.Cluster {
 			var out []filestorecsi.Cluster
 			for _, c := range s.gke() {
@@ -165,6 +173,12 @@ func (s *filestoreService) startCSI() {
 		s.csi.Run(ctx)
 	}()
 }
+
+// csiAPI is the served API as the CSI driver uses it: v1, and v1beta1 for
+// multishare volumes (#2194).
+type csiAPI struct{ *filestore.Server }
+
+func (a csiAPI) MultishareAPI() filestorecsi.BetaAPI { return a.Server.Beta() }
 
 func (s *filestoreService) Stop(ctx context.Context) error {
 	if s.server == nil {

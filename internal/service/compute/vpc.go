@@ -383,3 +383,33 @@ func anyIn(have, want []string) bool {
 	}
 	return false
 }
+
+// VMAddress is a running VM's internal IP on its network and the pod IP
+// its guest last reported (#2194): Filestore makes the VM's NFS traffic
+// arrive from its internal IP, so export options' ip_ranges match it.
+type VMAddress struct {
+	Network, InternalIP, PodIP string
+}
+
+// VMAddresses are the running VMs whose guests reported their pod IP
+// recently.
+func (s *Server) VMAddresses() []VMAddress {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := s.opts.Now()
+	var out []VMAddress
+	for k, o := range s.res {
+		if !strings.Contains(k, "/instances/") {
+			continue
+		}
+		v, ok := vmNetOf(k, o)
+		if !ok || !v.running {
+			continue
+		}
+		if p, ok := s.pods[k]; ok && now.Sub(p.seen) < podFresh {
+			out = append(out, VMAddress{Network: v.network, InternalIP: v.ip, PodIP: p.ip})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].PodIP < out[j].PodIP })
+	return out
+}

@@ -18,7 +18,7 @@
 // 	protoc        v7.36.2
 // source: google/cloud/filestore/v1beta1/cloud_filestore_service.proto
 
-package filestorepb
+package filestorev1beta1pb
 
 import (
 	longrunningpb "cloud.google.com/go/longrunning/autogen/longrunningpb"

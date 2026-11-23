@@ -13,6 +13,18 @@ package filestoreserver
 // seconds, so a node made after the instance (a new cluster, a new pool)
 // gets them before its first pod mounts.
 //
+// Source addresses (#2194). On Google an instance's clients reach it from
+// their VPC addresses, which its export options' ip_ranges name. Here a
+// VM's NFS traffic leaves its pod from the pod's IP, and a pod's would be
+// masqueraded to its node's. So each node, in a chain of its own in nat
+// POSTROUTING (before kind's masquerade), translates the traffic its VMs'
+// pods send to an NFS server to the VM's internal IP, and leaves a
+// Kubernetes Engine pod's own IP (an address of the cluster's pod range,
+// cluster_ipv4_cidr) untouched; the servers route those addresses back to
+// the node they came from. A Kubernetes Engine node's own traffic (the
+// kubelet's mounts for PersistentVolumes) arrives from the node's
+// InternalIP, as `kubectl get nodes` reports it.
+//
 // Deleted instances. On Google, deleting an instance leaves the clients
 // that still mount its share with stale file handles, while the VMs and
 // clusters that mount it can still be deleted. A Linux NFS client whose
@@ -28,6 +40,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"net"
 	"sort"
 	"strings"
 	"time"
@@ -98,6 +111,56 @@ func Rules(routes map[string]string) string {
 	b.WriteString("COMMIT\n")
 	return b.String()
 }
+
+// srcChain is the nodes' source translation chain.
+const srcChain = "CLOUDBURROW-FILESTORE-SRC"
+
+// srcScript loads the node's source rules: stdin is "server IP" and "vm
+// POD_IP INTERNAL_IP" lines; $1 is 1 on a Kubernetes Engine node. It
+// prints "route ADDRESS" for each address the servers must route back to
+// this node: its VMs' internal IPs, and its pods' IPs on a Kubernetes
+// Engine node.
+const srcScript = `set -e
+servers=""; vms=""
+while read -r kind a b; do
+  case "$kind" in
+    server) servers="$servers $a" ;;
+    vm) vms="$vms $a,$b" ;;
+  esac
+done
+local=$(ip -4 route show | awk '$2 == "dev" && $3 ~ /^veth/ {print $1}')
+rules="*nat
+:` + srcChain + ` - [0:0]"
+for v in $vms; do
+  pod=${v%,*}; vpc=${v#*,}
+  if printf '%s\n' $local | grep -qx "$pod"; then
+    for s in $servers; do rules="$rules
+-A ` + srcChain + ` -s $pod/32 -d $s/32 -p tcp -j SNAT --to-source $vpc"; done
+    echo "route $vpc"
+  fi
+done
+if [ "$1" = 1 ]; then
+  for s in $servers; do rules="$rules
+-A ` + srcChain + ` -s 10.244.0.0/16 -d $s/32 -j RETURN"; done
+  for p in $local; do echo "route $p"; done
+fi
+printf '%s\nCOMMIT\n' "$rules" | iptables-restore --noflush
+iptables -t nat -C POSTROUTING -j ` + srcChain + ` 2>/dev/null || iptables -t nat -I POSTROUTING 1 -j ` + srcChain
+
+// routeScript sets the server's routes back to its clients: stdin is
+// "ADDRESS NODE_IP" lines; routes of protocol 199 not among them go.
+const routeScript = `set -e
+want=$(cat)
+for a in $(ip -4 route show proto 199 | awk '{print $1}'); do
+  printf '%s\n' "$want" | awk '{print $1}' | grep -qx "$a" || ip route del "$a" proto 199 2>/dev/null || true
+done
+printf '%s\n' "$want" | while read -r a n; do
+  [ -n "$a" ] && ip route replace "$a" via "$n" proto 199
+done
+true`
+
+// Client is a VM's pod IP and its internal IP on its VPC network.
+type Client struct{ PodIP, InternalIP string }
 
 // applyScript loads the rules (stdin) into the node's chain, which the
 // declaration flushes first, and jumps to it from PREROUTING and OUTPUT.
@@ -181,10 +244,13 @@ func (d *Docker) loop(ctx context.Context, wake <-chan struct{}, done chan<- str
 	defer close(done)
 	applied := map[string]string{}
 	appliedAt := map[string]time.Time{}
+	srcApplied := map[string]string{}
+	routesApplied := map[string]string{}
 	t := time.NewTicker(loopEvery)
 	defer t.Stop()
 	for {
 		d.syncNodes(ctx, applied, appliedAt)
+		d.syncSources(ctx, srcApplied, routesApplied)
 		d.sweepTombstones(ctx)
 		select {
 		case <-ctx.Done():
@@ -223,6 +289,91 @@ func (d *Docker) syncNodes(ctx context.Context, applied map[string]string, appli
 			delete(appliedAt, n)
 		}
 	}
+}
+
+// syncSources loads each node's source rules and each server's routes
+// back to its clients, where they changed.
+func (d *Docker) syncSources(ctx context.Context, applied, routesApplied map[string]string) {
+	nodes, err := d.nodes(ctx)
+	if err != nil {
+		return
+	}
+	d.rmu.Lock()
+	servers := map[string]bool{}
+	for _, ip := range d.addrs {
+		servers[ip] = true
+	}
+	d.rmu.Unlock()
+	if len(servers) == 0 {
+		return
+	}
+	var in strings.Builder
+	for _, ip := range sortedSet(servers) {
+		fmt.Fprintf(&in, "server %s\n", ip)
+	}
+	if d.Clients != nil {
+		for _, c := range d.Clients() {
+			fmt.Fprintf(&in, "vm %s %s\n", c.PodIP, c.InternalIP)
+		}
+	}
+	routes := map[string]string{}
+	for _, n := range nodes {
+		gke := "0"
+		if !strings.HasPrefix(n, d.Cluster+"-control-plane") && !strings.HasPrefix(n, d.Cluster+"-worker") {
+			gke = "1"
+		}
+		nodeIP, err := d.docker(ctx, "container", "inspect", "--format", `{{with index .NetworkSettings.Networks "kind"}}{{.IPAddress}}{{end}}`, n)
+		if err != nil || nodeIP == "" {
+			continue
+		}
+		var out strings.Builder
+		if err := d.runner().Run(ctx, strings.NewReader(in.String()), &out, "docker", "exec", "-i", n, "sh", "-c", srcScript, "sh", gke); err != nil {
+			d.logf("filestore: node %s: source rules: %v", n, err)
+			continue
+		}
+		applied[n] = in.String()
+		for _, line := range strings.Split(out.String(), "\n") {
+			if a, ok := strings.CutPrefix(line, "route "); ok && net.ParseIP(a) != nil {
+				routes[a] = nodeIP
+			}
+		}
+	}
+	var rb strings.Builder
+	for _, a := range sortedSet(keysOf(routes)) {
+		fmt.Fprintf(&rb, "%s %s\n", a, routes[a])
+	}
+	want := rb.String()
+	out, err := d.docker(ctx, "ps", "--filter", "label="+d.label(), "--format", "{{.Names}}")
+	if err != nil {
+		return
+	}
+	for _, name := range strings.Fields(out) {
+		if routesApplied[name] == want {
+			continue
+		}
+		if err := d.runner().Run(ctx, strings.NewReader(want), io.Discard, "docker", "exec", "-i", name, "sh", "-c", routeScript); err != nil {
+			d.logf("filestore: server %s: routes: %v", name, err)
+			continue
+		}
+		routesApplied[name] = want
+	}
+}
+
+func keysOf(m map[string]string) map[string]bool {
+	out := map[string]bool{}
+	for k := range m {
+		out[k] = true
+	}
+	return out
+}
+
+func sortedSet(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // Synced is whether every node has taken the current rules, for tests.

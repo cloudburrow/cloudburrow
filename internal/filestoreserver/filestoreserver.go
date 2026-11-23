@@ -100,6 +100,9 @@ type Docker struct {
 	// Kubernetes Engine clusters' (Cluster-gke-HASH) are the clients the
 	// instances' addresses are routed on (clients.go); "" routes none.
 	Cluster string
+	// Clients are the VMs whose NFS traffic arrives from their internal
+	// IPs (clients.go); nil is none.
+	Clients func() []Client
 
 	mu    sync.Mutex
 	built string
