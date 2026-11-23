@@ -27,7 +27,7 @@ import (
 )
 
 // authzCallout is the test's authorization extension: an ext_proc server
-// that denies a request whose path starts with /blocked (403, its own
+// that denies a request whose path starts with /api/blocked (403, its own
 // body) and tags the others with x-authz-user.
 type authzCallout struct {
 	extprocpb.UnimplementedExternalProcessorServer
@@ -54,7 +54,7 @@ func (a *authzCallout) Process(st extprocpb.ExternalProcessor_ProcessServer) err
 		case a.calls <- path:
 		default:
 		}
-		if strings.HasPrefix(path, "/blocked") {
+		if strings.HasPrefix(path, "/api/blocked") {
 			return st.Send(&extprocpb.ProcessingResponse{Response: &extprocpb.ProcessingResponse_ImmediateResponse{
 				ImmediateResponse: &extprocpb.ImmediateResponse{Status: &typepb.HttpStatus{Code: typepb.StatusCode_Forbidden}, Body: []byte("blocked by the callout")}}})
 		}
@@ -66,7 +66,7 @@ func (a *authzCallout) Process(st extprocpb.ExternalProcessor_ProcessServer) err
 	}
 }
 
-// covers: google.cloud.networksecurity.v1.NetworkSecurity/CreateAuthzPolicy, google.cloud.networksecurity.v1.NetworkSecurity/DeleteAuthzPolicy
+// covers: google.cloud.networksecurity.v1.NetworkSecurity/CreateAuthzPolicy, google.cloud.networksecurity.v1.NetworkSecurity/DeleteAuthzPolicy, google.cloud.networkservices.v1.DepService/CreateAuthzExtension, google.cloud.networkservices.v1.DepService/DeleteAuthzExtension
 //
 // TestCustomAuthorizationThroughALoadBalancer (#2160), the official
 // compute, networkservices and networksecurity REST clients, as
@@ -212,8 +212,10 @@ func TestCustomAuthorizationThroughALoadBalancer(t *testing.T) {
 		t.Fatalf("the Cloud IAP policy: %v", err)
 	}
 	waitFor(t, "IAP to refuse a request without a token", time.Minute, func() bool {
-		code, _, _ := l.get("/api/x", map[string]string{"Accept": "application/json"})
-		return code == 401 || code == 302
+		// The client follows IAP's 302 to the sign-in, this instance's
+		// consent page.
+		code, body, _ := l.get("/api/x", map[string]string{"Accept": "application/json"})
+		return code == 401 || code == 302 || code == 200 && strings.Contains(body, `id="oauth-title"`)
 	})
 	if code, body, _ := l.get("/api/x", map[string]string{"Authorization": "Bearer not-a-token"}); code != 401 {
 		t.Errorf("a bad token: %d %q", code, body)

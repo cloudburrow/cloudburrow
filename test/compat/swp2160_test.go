@@ -35,8 +35,7 @@ import (
 // target is a server on this machine's loopback: the proxy never reaches
 // the internet in this test.
 //
-// Its covers line is added once the compute shard has run it green (#2160):
-// until then every method stays Implemented.
+// covers: google.cloud.networksecurity.v1.NetworkSecurity/CreateUrlList, google.cloud.networksecurity.v1.NetworkSecurity/GetUrlList, google.cloud.networksecurity.v1.NetworkSecurity/ListUrlLists, google.cloud.networksecurity.v1.NetworkSecurity/UpdateUrlList, google.cloud.networksecurity.v1.NetworkSecurity/DeleteUrlList, google.cloud.networksecurity.v1.NetworkSecurity/CreateGatewaySecurityPolicy, google.cloud.networksecurity.v1.NetworkSecurity/GetGatewaySecurityPolicy, google.cloud.networksecurity.v1.NetworkSecurity/ListGatewaySecurityPolicies, google.cloud.networksecurity.v1.NetworkSecurity/UpdateGatewaySecurityPolicy, google.cloud.networksecurity.v1.NetworkSecurity/DeleteGatewaySecurityPolicy, google.cloud.networksecurity.v1.NetworkSecurity/CreateGatewaySecurityPolicyRule, google.cloud.networksecurity.v1.NetworkSecurity/GetGatewaySecurityPolicyRule, google.cloud.networksecurity.v1.NetworkSecurity/ListGatewaySecurityPolicyRules, google.cloud.networksecurity.v1.NetworkSecurity/UpdateGatewaySecurityPolicyRule, google.cloud.networksecurity.v1.NetworkSecurity/DeleteGatewaySecurityPolicyRule, google.cloud.networksecurity.v1.NetworkSecurity/CreateTlsInspectionPolicy, google.cloud.networksecurity.v1.NetworkSecurity/GetTlsInspectionPolicy, google.cloud.networksecurity.v1.NetworkSecurity/ListTlsInspectionPolicies, google.cloud.networksecurity.v1.NetworkSecurity/UpdateTlsInspectionPolicy, google.cloud.networksecurity.v1.NetworkSecurity/DeleteTlsInspectionPolicy, google.cloud.networkservices.v1.NetworkServices/CreateGateway, google.cloud.networkservices.v1.NetworkServices/GetGateway, google.cloud.networkservices.v1.NetworkServices/ListGateways, google.cloud.networkservices.v1.NetworkServices/UpdateGateway, google.cloud.networkservices.v1.NetworkServices/DeleteGateway, google.cloud.networkservices.v1.DepService/CreateAuthzExtension, google.cloud.networkservices.v1.DepService/GetAuthzExtension, google.cloud.networkservices.v1.DepService/ListAuthzExtensions, google.cloud.networkservices.v1.DepService/UpdateAuthzExtension, google.cloud.networkservices.v1.DepService/DeleteAuthzExtension, google.cloud.networkservices.v1.NetworkServices/CreateEndpointPolicy, google.cloud.networkservices.v1.NetworkServices/GetEndpointPolicy, google.cloud.networkservices.v1.NetworkServices/ListEndpointPolicies, google.cloud.networkservices.v1.NetworkServices/UpdateEndpointPolicy, google.cloud.networkservices.v1.NetworkServices/DeleteEndpointPolicy
 func TestSecureWebProxyThroughTheGoClients(t *testing.T) {
 	h := New(t)
 	computeAddr := h.Endpoint(EnvCompute) // skips without it
@@ -60,9 +59,9 @@ func TestSecureWebProxyThroughTheGoClients(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = nets.Close() }()
+	t.Cleanup(func() { _ = nets.Close() })
 	subs, _ := computeapi.NewSubnetworksRESTClient(ctx, opts...)
-	defer func() { _ = subs.Close() }()
+	t.Cleanup(func() { _ = subs.Close() })
 	wait := func(what string, op *computeapi.Operation, err error) {
 		t.Helper()
 		if err != nil {
@@ -96,17 +95,17 @@ func TestSecureWebProxyThroughTheGoClients(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = ns.Close() }()
+	t.Cleanup(func() { _ = ns.Close() })
 	nsv, err := networkservices.NewRESTClient(ctx, opts...)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = nsv.Close() }()
+	t.Cleanup(func() { _ = nsv.Close() })
 	dep, err := networkservices.NewDepRESTClient(ctx, opts...)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = dep.Close() }()
+	t.Cleanup(func() { _ = dep.Close() })
 
 	// A URL list.
 	lop, err := ns.CreateUrlList(ctx, &networksecuritypb.CreateUrlListRequest{Parent: parent, UrlListId: n("list"),
@@ -328,7 +327,7 @@ func TestSecureWebProxyThroughTheGoClients(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer func() { _ = cn.Close() }()
+		t.Cleanup(func() { _ = cn.Close() })
 		_ = cn.SetDeadline(time.Now().Add(20 * time.Second))
 		fmt.Fprintf(cn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", target, target)
 		b := make([]byte, 1024)
@@ -351,7 +350,7 @@ func TestSecureWebProxyThroughTheGoClients(t *testing.T) {
 	// An authorization extension (Service Extensions) on a regional
 	// backend service.
 	rbs, _ := computeapi.NewRegionBackendServicesRESTClient(ctx, opts...)
-	defer func() { _ = rbs.Close() }()
+	t.Cleanup(func() { _ = rbs.Close() })
 	op, err = rbs.Insert(ctx, &computepb.InsertRegionBackendServiceRequest{Project: project, Region: region, BackendServiceResource: &computepb.BackendService{
 		Name: proto.String(n("authz")), Protocol: proto.String("HTTP2"), LoadBalancingScheme: proto.String("INTERNAL_MANAGED")}})
 	wait("the callout backend service", op, err)

@@ -54,7 +54,7 @@ func TestSecureWebProxyThroughTheBrowser2160(t *testing.T) {
 	p.clickText("#view button", "Add rule")
 	p.waitFor(`document.querySelector(".modal.is-open #f-sessionMatcher") !== null`)
 	var labels string
-	p.eval(`[...document.querySelectorAll(".modal.is-open label")].map((l) => l.textContent.trim()).filter((s) => s).join("|")`, &labels)
+	p.eval(`[...document.querySelectorAll(".modal.is-open label, .modal.is-open legend")].map((l) => l.textContent.trim()).filter((s) => s).join("|")`, &labels)
 	for _, l := range []string{"Priority", "Name", "Description", "Action", "Status", "Session Match", "Application Match"} {
 		if !strings.Contains(labels, l) {
 			t.Errorf("Add rule has no %q: %s", l, labels)
