@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -10,6 +11,8 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/cloudquotas"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/store"
+
+	pb "cloud.google.com/go/cloudquotas/apiv1/cloudquotaspb"
 )
 
 // TestConsoleQuotasAtTheOrganization (#2102): with the organization chosen
@@ -70,5 +73,40 @@ func TestConsoleQuotasAtTheOrganization(t *testing.T) {
 	fctx := console.WithScopeValue(context.Background(), scopeFolderParam, f.ID())
 	if got, err := p.quotasCall(fctx, "p1", "quotas", nil); err != nil || len(got.(map[string]any)["quotas"].([]consoleQuota)) != 0 {
 		t.Errorf("folder quotas = %v, %v", got, err)
+	}
+}
+
+// Edit quotas changes the preference that holds the quota, whoever made it,
+// as often as it is used: Cloud Quotas refuses a second preference on one
+// quota and dimensions, and main run 45171873407's page got 400 editing an
+// organization quota whose preference had another ID.
+func TestConsoleQuotaEditUpdatesTheExistingPreference(t *testing.T) {
+	st := store.NewMemory()
+	reg := resourcemanager.New(st)
+	q := cloudquotas.NewServer(st, nil, nil)
+	q.Hierarchy = quotasHierarchy{reg: reg}
+	p := serviceUsageProvider{quotas: q}
+	ctx := console.WithScopeValue(context.Background(), scopeOrgParam, resourcemanager.OrganizationNumber)
+	parent := resourcemanager.OrganizationName + "/locations/global"
+	if _, err := q.CreateQuotaPreference(ctx, &pb.CreateQuotaPreferenceRequest{Parent: parent, QuotaPreferenceId: "made-by-gcloud",
+		QuotaPreference: &pb.QuotaPreference{Service: "iam.googleapis.com", QuotaId: cloudquotas.WorkforcePoolQuotaID,
+			QuotaConfig: &pb.QuotaConfig{PreferredValue: 120}}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range []int64{150, 170} {
+		set, err := p.quotasCall(ctx, "p1", "quota-set", json.RawMessage(fmt.Sprintf(`{"service":"iam.googleapis.com","quotaId":%q,"value":"%d"}`, cloudquotas.WorkforcePoolQuotaID, v)))
+		if err != nil {
+			t.Fatalf("edit to %d: %v", v, err)
+		}
+		if name := set.(map[string]any)["name"].(string); !strings.HasSuffix(name, "/quotaPreferences/made-by-gcloud") {
+			t.Errorf("edit to %d changed %s, not the existing preference", v, name)
+		}
+		if got, ok := q.Value(resourcemanager.OrganizationName, "iam.googleapis.com", cloudquotas.WorkforcePoolQuotaID, nil); !ok || got != v {
+			t.Errorf("after the edit to %d the quota is %d, %v", v, got, ok)
+		}
+	}
+	prefs, err := q.PreferencesOf(resourcemanager.OrganizationName)
+	if err != nil || len(prefs) != 1 {
+		t.Errorf("preferences = %v, %v; want the one", prefs, err)
 	}
 }

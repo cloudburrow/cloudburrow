@@ -150,10 +150,26 @@ func (p serviceUsageProvider) quotasCall(ctx context.Context, project, call stri
 		if req.Region != "" {
 			dims["region"] = req.Region
 		}
+		// The console edits the preference that holds the quota and
+		// dimensions, whoever made it (gcloud, Terraform, the API), and
+		// makes one only where there is none: Cloud Quotas keeps one per
+		// quota and dimensions and refuses a second (main run
+		// 45171873407: an organization quota with a preference under
+		// another ID could no longer be edited through the page).
+		name := parent + "/quotaPreferences/" + quotaPreferenceID(req.Service, req.QuotaID, req.Region)
+		prefs, err := p.quotas.PreferencesOf(scope)
+		if err != nil {
+			return nil, err
+		}
+		for _, o := range prefs {
+			if o.GetService() == req.Service && o.GetQuotaId() == req.QuotaID && sameDims(o.GetDimensions(), dims) {
+				name = o.GetName()
+			}
+		}
 		pr, err := p.quotas.UpdateQuotaPreference(ctx, &pb.UpdateQuotaPreferenceRequest{
 			AllowMissing: true,
 			UpdateMask:   &fieldmaskpb.FieldMask{Paths: []string{"quota_config.preferred_value", "justification"}},
-			QuotaPreference: &pb.QuotaPreference{Name: parent + "/quotaPreferences/" + quotaPreferenceID(req.Service, req.QuotaID, req.Region),
+			QuotaPreference: &pb.QuotaPreference{Name: name,
 				Service: req.Service, QuotaId: req.QuotaID, Dimensions: dims, Justification: req.Justification,
 				QuotaConfig: &pb.QuotaConfig{PreferredValue: v, RequestOrigin: pb.QuotaConfig_CLOUD_CONSOLE}},
 		})
