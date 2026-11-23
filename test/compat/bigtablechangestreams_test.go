@@ -531,9 +531,7 @@ func TestConsoleBigtableChangeStream(t *testing.T) {
 func TestTerraformBigtableTableChangeStream(t *testing.T) {
 	h := New(t)
 	t.Setenv("BIGTABLE_EMULATOR_HOST", h.Endpoint(EnvBigtable))
-	if _, err := exec.LookPath("terraform"); err != nil {
-		t.Skip("terraform is not on PATH")
-	}
+	terraformTool(t, "terraform") // in the tool box (#2174)
 	cli := os.Getenv(EnvCLI)
 	if cli == "" {
 		t.Skipf("%s is not set", EnvCLI)

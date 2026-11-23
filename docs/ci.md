@@ -157,6 +157,58 @@ which flags each CLI version gets.
 The release workflow calls the same self-test once a tag is published, with `version` set to that
 tag, so each release is tested with the action at its own ref (#679).
 
+### Network blocking for gcloud and Terraform
+
+The compat tests drive the real gcloud, gsutil, bq, docker-credential-gcloud, Terraform and
+OpenTofu, and none of them runs on the runner itself: each command runs in the *tool box*
+(`test/compat/toolbox_test.go`, #2174), a container on a network made with
+`docker network create --internal`, which has no route off the machine. Proxy variables are not
+an egress block (on 2026-11-20 a Node client ignored `HTTPS_PROXY` and reached Google); in the box
+a client that ignores them, a provider plugin, a subprocess or a metadata probe has nowhere to go.
+
+- **The only way out is to the instance.** A relay container, on the internal network and
+  Docker's bridge, is the one thing the box can reach. The box's nat table redirects every TCP
+  connection to `127.0.0.0/8`, where the harness's variables and `gcloud-setup`'s configuration
+  name the instance, to `boxd` (`testdata/toolbox/boxd`), which sends it through the relay, with
+  the box's token and the port, to a listener of the test process on the host; that listener
+  connects to the same port on the host's loopback and nowhere else. On Linux the relay reaches
+  the host at the bridge network's gateway; Docker Desktop's `host.docker.internal` reaches the
+  host's loopback.
+- **DNS is a second layer.** Every query goes to `boxd`'s resolver, which answers `REFUSED` for
+  `*.googleapis.com`, `*.google.com`, `metadata.google.internal` and Google's other domains, and
+  `NXDOMAIN` for any other name outside the machine.
+- **The filter table is a third.** It rejects every packet that leaves the box by anything but
+  its loopback, except `boxd`'s own connections to the relay; IPv6 is off. The tools run as the
+  runner's user, who cannot change the rules.
+- **The proxy guards stay.** `egressGuard` and `noGoogleEgress` still set the proxy variables, and
+  fail a test on any request a tool tries to send off the machine.
+
+gcloud is the harness's own (`CLOUDBURROW_TEST_GCLOUD`, CI's pinned 593.0.0, or gcloud on `PATH`),
+mounted read-only at its host path (on macOS an APFS clone of it under the temporary directory,
+which Docker Desktop shares) and run by the image's Python. Terraform 1.16.6 and OpenTofu 1.12.6
+are the image's (`testdata/toolbox/Dockerfile`, the versions ci.yml installs), with
+hashicorp/google and google-beta 8.12.0 already in a filesystem mirror made when the image was
+built, from HashiCorp's and OpenTofu's registries; the box's CLI configuration installs from that
+mirror alone. The box mounts, at their host paths, the temporary directory, the repository
+(read-only) and the instance's directory (read-only), and the working directory must be in one of
+them.
+
+It fails closed. From `TestMain` on, the first directory on `PATH` holds a stub under each tool's
+name that refuses to run; the box replaces them with `boxexec`, which runs the tool by
+`docker exec` and nowhere else. Without Docker, or when Docker cannot make an internal network,
+every gcloud and Terraform test skips and says why; none falls back to the host. Whether a test
+runs is still decided by the runner's tools, as before: the shards that install gcloud,
+Terraform or OpenTofu run those tests.
+
+`TestToolBoxBlocksEgress` proves the block before anything relies on it. It checks the box's
+network is `--internal` and the box is on no other, then, in the box with no proxy variable set,
+tries `https://storage.googleapis.com`, `metadata.google.internal`, Google addresses
+(`142.250.0.1:443`, `8.8.8.8:53`) and `169.254.169.254`, and the relay's port directly: each must
+fail at once (the name refused, the network unreachable, the connection rejected), and the
+resolver's log must show `storage.googleapis.com` refused. gcloud with no endpoint override and
+Terraform with no CLI configuration must fail to connect too. The control is a listener of the
+test on the host's loopback, which must answer through the relay.
+
 ### The upgrade test
 
 `.github/workflows/upgrade.yml` ("Upgrade test", #1714) runs the end-to-end upgrade test,

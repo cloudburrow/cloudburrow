@@ -691,6 +691,11 @@ jobs:
       # sees terraform's own exit status and output. At least 1.16.5 (#1620):
       # 1.16.4 could crash saving a failed create's tainted object, with
       # "status ObjectStatus(0), which cannot be saved in state".
+      # The tests never run this copy: they run Terraform and OpenTofu (and
+      # gcloud) in the compat tool box, a container on an --internal Docker
+      # network with no route out, whose image carries the same versions
+      # (test/compat/testdata/toolbox/Dockerfile, #2174; keep them in step).
+      # This one only says the shard runs the Terraform tests.
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
           terraform_version: 1.16.6

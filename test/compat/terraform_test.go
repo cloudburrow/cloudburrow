@@ -33,21 +33,20 @@ const (
 // storage shard sets it, so a missing tofu fails there rather than skipping.
 const EnvTofu = "CLOUDBURROW_TEST_TOFU"
 
-// tofuBinary is the OpenTofu binary for a --binary tofu test: EnvTofu when
-// set, which must then resolve, otherwise tofu from PATH. It skips when
-// neither is there.
+// tofuBinary is the OpenTofu binary for a --binary tofu test: the tool
+// box's tofu (toolbox_test.go, #2174), never the host's. The host decides
+// whether the test runs: EnvTofu when set, which must then resolve,
+// otherwise tofu on PATH; it skips when neither is there.
 func tofuBinary(t *testing.T) string {
 	t.Helper()
 	if v := os.Getenv(EnvTofu); v != "" {
-		path, err := exec.LookPath(v)
-		if err != nil {
+		if _, err := hostLookPath(v); err != nil {
 			t.Fatalf("%s=%s: %v", EnvTofu, v, err)
 		}
-		return path
-	}
-	if _, err := exec.LookPath("tofu"); err != nil {
+	} else if _, err := hostLookPath("tofu"); err != nil {
 		t.Skipf("tofu is not on PATH and %s is not set", EnvTofu)
 	}
+	toolBox(t)
 	return "tofu"
 }
 
@@ -71,9 +70,7 @@ func TestTofuAppliesAndDestroysThroughTheWrapper(t *testing.T) {
 
 func testWrapperAppliesAndDestroys(t *testing.T, binary string) {
 	h := New(t)
-	if _, err := exec.LookPath(binary); err != nil {
-		t.Skipf("%s is not on PATH", binary)
-	}
+	terraformTool(t, binary) // in the tool box (#2174)
 	cli := os.Getenv(EnvCLI)
 	if cli == "" {
 		t.Skipf("%s is not set", EnvCLI)
