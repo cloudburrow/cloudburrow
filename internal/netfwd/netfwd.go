@@ -831,6 +831,13 @@ func freePort(bindAddr string) (int, error) {
 	return 0, fmt.Errorf("no port on %s that this process has not handed out already", bindAddr)
 }
 
+// Release frees the host port New chose and holds, for a caller that took
+// the Forwarder only to reserve a port (HostAddr) and binds it through
+// another: until then the port is held, and no other process, kubectl
+// included, can listen on it. Start and Stop release it themselves; a no-op
+// once released.
+func (f *Forwarder) Release() { f.release() }
+
 // release closes the listener holding the host port New chose, so the
 // tunnel can bind it; a no-op once released.
 func (f *Forwarder) release() {

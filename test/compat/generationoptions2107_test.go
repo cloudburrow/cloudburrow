@@ -162,9 +162,16 @@ func TestGenerateContentThinkingConfigThroughTheOfficialSDK(t *testing.T) {
 		t.Errorf("budget 0: thoughts %d, answer %q", off.UsageMetadata.ThoughtsTokenCount, off.Text())
 	}
 
+	// Greedy, like the calls above: whether to think at all is the model's
+	// choice on its first token (LiteRT-LM's ThinkingBudgetConstraint
+	// allows the thought channel's start or an answer token there), so a
+	// sampled stream may skip the thinking. At temperature 0 the first token
+	// is the one the unary call above took, which opened a thought.
 	thoughts := 0
+	var streamed strings.Builder
 	for resp, err := range cl.Models.GenerateContentStream(ctx, localModel, prompt, &genai.GenerateContentConfig{
-		MaxOutputTokens: 48, ThinkingConfig: &genai.ThinkingConfig{IncludeThoughts: true, ThinkingBudget: genai.Ptr[int32](16)}}) {
+		Temperature: genai.Ptr[float32](0), MaxOutputTokens: 48,
+		ThinkingConfig: &genai.ThinkingConfig{IncludeThoughts: true, ThinkingBudget: genai.Ptr[int32](16)}}) {
 		if err != nil {
 			t.Fatalf("stream: %v", err)
 		}
@@ -173,13 +180,15 @@ func TestGenerateContentThinkingConfigThroughTheOfficialSDK(t *testing.T) {
 				for _, p := range c.Content.Parts {
 					if p.Thought {
 						thoughts++
+					} else {
+						streamed.WriteString(p.Text)
 					}
 				}
 			}
 		}
 	}
 	if thoughts == 0 {
-		t.Errorf("the stream carried no thought parts")
+		t.Errorf("the stream carried no thought parts; its answer: %q", streamed.String())
 	}
 
 	_, err = cl.Models.GenerateContent(ctx, localModel, prompt, &genai.GenerateContentConfig{

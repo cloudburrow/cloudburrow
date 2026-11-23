@@ -282,13 +282,20 @@ RACE_PKGS ?= ./...
 # (Landing 152, run on 14c33a7f), which looks like memory pressure.
 WASM_PKGS         := ./internal/speech/ ./internal/embedding/ ./internal/service/vertexai/
 WASM_TEST_TIMEOUT ?= 20m
+# The rest run under RACE_TEST_TIMEOUT. cmd/cloudburrow is their long pole:
+# about 990 serial tests, 141 s under -race on an M-series Mac (2026-11-23,
+# no test over 17 s; the slowest compile the OCR wasm, as above), and on
+# macos-latest beside the other packages 274, 295, then 302 s in main's
+# last three runs, the last past 5 m (run 45171873407): growth with the
+# test count, not a hang. 10m is twice the worst measured time.
+RACE_TEST_TIMEOUT ?= 10m
 .PHONY: test-race
 test-race:
 ifeq ($(RACE_PKGS),./...)
-	go test -race -timeout $(TEST_TIMEOUT) $$(go list ./... | grep -vxF -e "$$(go list $(WASM_PKGS))")
+	go test -race -timeout $(RACE_TEST_TIMEOUT) $$(go list ./... | grep -vxF -e "$$(go list $(WASM_PKGS))")
 	go test -race -p 1 -timeout $(WASM_TEST_TIMEOUT) $(WASM_PKGS)
 else
-	go test -race -timeout $(TEST_TIMEOUT) $(RACE_PKGS)
+	go test -race -timeout $(RACE_TEST_TIMEOUT) $(RACE_PKGS)
 endif
 
 ## test-cover: Run unit tests and report coverage

@@ -1,7 +1,10 @@
 package netfwd
 
 import (
+	"errors"
 	"net"
+	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"testing"
@@ -67,4 +70,57 @@ func TestChosenHostPortIsHeldUntilReleased(t *testing.T) {
 	if g.held != nil {
 		t.Error("a requested host port was held")
 	}
+}
+
+// listenEnv makes this test binary stand in for a child that must bind a
+// port (supervise_test.go's TestMain): it binds the address and exits 0,
+// or exits 3 when another process holds it, as kubectl's "unable to
+// listen" does.
+const listenEnv = "NETFWD_TEST_LISTEN"
+
+func childListen(addr string) int {
+	l, err := net.Listen("tcp", addr)
+	if err != nil {
+		return 3
+	}
+	_ = l.Close()
+	return 0
+}
+
+// childListens reports whether a child process can bind addr.
+func childListens(t *testing.T, addr string) bool {
+	t.Helper()
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(self)
+	cmd.Env = append(os.Environ(), listenEnv+"="+addr)
+	err = cmd.Run()
+	var exit *exec.ExitError
+	if errors.As(err, &exit) && exit.ExitCode() == 3 {
+		return false
+	}
+	if err != nil {
+		t.Fatalf("child: %v", err)
+	}
+	return true
+}
+
+// A Forwarder taken only to reserve a port hands it to the child process
+// that serves it once released: main run 45171873407's Memorystore cluster
+// nodes reserved their port with one Forwarder, started kubectl
+// port-forward on it through a second, and kubectl found the port held by
+// the first ("127.0.0.1:46029 is another process's").
+func TestReservedPortIsHandedToAChildProcess(t *testing.T) {
+	reserve := New(Target{Name: "redis-c-0", Namespace: "n"}, "/tmp/kc", "127.0.0.1")
+	addr := reserve.HostAddr()
+	if childListens(t, addr) {
+		t.Fatalf("a child process bound %s while it was reserved", addr)
+	}
+	reserve.Release()
+	if !childListens(t, addr) {
+		t.Fatalf("after Release a child process could not bind %s", addr)
+	}
+	reserve.Release() // idempotent
 }
