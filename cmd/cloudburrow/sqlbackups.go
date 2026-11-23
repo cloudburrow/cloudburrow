@@ -279,11 +279,14 @@ fi
 // (#1524), a CREATE USER for each account mysqlUserAccounts selects, with
 // its password hash (IDENTIFIED BY PASSWORD, which MySQL 5.6 and 5.7 both
 // read), and its grants without that clause, which 5.6's SHOW GRANTS
-// repeats.
+// repeats: as the hash, or as <secret> when the reader lacks SUPER, as a
+// replica's setup reading its primary through the replication user does
+// (main run 45147981577: the replica's 'root'@'%' got no grants, so
+// TestCloudSQLMySQL56's root was refused the mysql database there).
 const mysql56Accounts = `  acct -N -B -r -e "SELECT CONCAT('CREATE USER ', QUOTE(user), '@', QUOTE(host), IF(password = '', '', ` +
 	`CONCAT(' IDENTIFIED BY PASSWORD ', QUOTE(password))), ';') FROM mysql.user WHERE ` + mysqlUserAccounts + `"
   for u in $(acct -N -B -e "SELECT CONCAT(QUOTE(user), '@', QUOTE(host)) FROM mysql.user WHERE ` + mysqlUserAccounts + `"); do
-    acct -N -B -r -e "SHOW GRANTS FOR $u" | grep -v '^GRANT PROXY ON ' | sed -E "s/ IDENTIFIED BY PASSWORD '[^']*'//" | sed 's/$/;/'
+    acct -N -B -r -e "SHOW GRANTS FOR $u" | grep -v '^GRANT PROXY ON ' | sed -E "s/ IDENTIFIED BY PASSWORD ('[^']*'|<secret>)//" | sed 's/$/;/'
   done
 `
 

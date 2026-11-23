@@ -20,6 +20,7 @@ import (
 	"google.golang.org/api/option"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )
 
@@ -77,15 +78,18 @@ func quotaCode(err error) codes.Code {
 // TestCloudQuotasLifecycle (#2030), with cloud.google.com/go/cloudquotas
 // over gRPC and JSON: the served APIs' quota infos with Google's defaults,
 // a preference created, read, listed, filtered and updated (granted at
-// once), the safety checks, a fixed limit refused, and the quota
-// adjuster's settings.
+// once), a second preference on the same quota refused, the safety
+// checks, a fixed limit refused, and the quota adjuster's settings.
 func TestCloudQuotasLifecycle(t *testing.T) {
 	h := New(t)
 	clients, adjusters := cloudQuotasClients(t, h)
 	for transport, c := range clients {
 		t.Run(transport, func(t *testing.T) {
 			ctx := h.Context()
-			project := h.Project()
+			// A project of its own: Cloud Quotas keeps one preference per
+			// quota and dimensions, so the other transport's sa- and ca-
+			// preferences would be the same ones (main run 45147981577).
+			project := fmt.Sprintf("cq-life-%s-%d", transport, time.Now().UnixNano()%1e6)
 			parent := "projects/" + project + "/locations/global"
 			var ids []string
 			it := c.ListQuotaInfos(ctx, &pb.ListQuotaInfosRequest{Parent: parent + "/services/iam.googleapis.com"})
@@ -134,6 +138,12 @@ func TestCloudQuotasLifecycle(t *testing.T) {
 			qi, _ = c.GetQuotaInfo(ctx, &pb.GetQuotaInfoRequest{Name: parent + "/services/iam.googleapis.com/quotaInfos/" + saQuota})
 			if v := qi.GetDimensionsInfos()[0].GetDetails().GetValue(); v != 50 {
 				t.Errorf("QuotaInfo value after the preference = %d, want 50", v)
+			}
+			second := proto.Clone(pref).(*pb.QuotaPreference)
+			second.QuotaConfig.PreferredValue = 60
+			if _, err := c.CreateQuotaPreference(ctx, &pb.CreateQuotaPreferenceRequest{Parent: parent, QuotaPreferenceId: id + "-2", QuotaPreference: second,
+				IgnoreSafetyChecks: []pb.QuotaSafetyCheck{pb.QuotaSafetyCheck_QUOTA_DECREASE_PERCENTAGE_TOO_HIGH}}); quotaCode(err) != codes.AlreadyExists {
+				t.Errorf("a second preference on the quota = %v, want ALREADY_EXISTS", err)
 			}
 			up, err := c.UpdateQuotaPreference(ctx, &pb.UpdateQuotaPreferenceRequest{UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"quota_config.preferred_value"}},
 				QuotaPreference: &pb.QuotaPreference{Name: parent + "/quotaPreferences/" + id, QuotaConfig: &pb.QuotaConfig{PreferredValue: 100}}})

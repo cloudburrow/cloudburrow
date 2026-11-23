@@ -282,7 +282,7 @@ func TestDatastoreAfterTheEmulatorIsKilled(t *testing.T) {
 	h := New(t)
 	c := datastoreClient(t, h, h.Project()) // asks for the Datastore endpoint first
 	kc := emulatorPod(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
 	defer cancel()
 	// Persistent mode mounts the volume; ephemeral mode leaves an earlier
 	// run's claim unmounted.
@@ -301,8 +301,18 @@ func TestDatastoreAfterTheEmulatorIsKilled(t *testing.T) {
 	if persistent {
 		// Wait for a save of the store that ended over a second after the
 		// write, so it began after it: the emulator's next save.
+		//
+		// The emulator saves only while it has changes. A save that ends
+		// within that second of the write may have taken the write with
+		// it, and then nothing is left to save: main run 45147981577's
+		// store was saved 0.1 s after the write and never again in 90 s.
+		// So when 40 s pass with no later save, another entity is written:
+		// the save it brings begins after the first write, and holds it.
 		file := "/data/datastore/WEB-INF/appengine-generated/local_db.bin"
-		for deadline := time.Now().Add(90 * time.Second); ; time.Sleep(2 * time.Second) {
+		nudge := datastore.NameKey("Killed1611", "nudge", nil)
+		defer func() { _ = c.Delete(context.Background(), nudge) }()
+		lastWrite := written
+		for deadline := time.Now().Add(3 * time.Minute); ; time.Sleep(2 * time.Second) {
 			out, err := kc(ctx, "exec", "deploy/datastore", "-c", "datastore", "--", "stat", "-c", "%.3Y", file)
 			s, perr := strconv.ParseFloat(strings.TrimSpace(string(out)), 64)
 			if saved := time.UnixMilli(int64(s * 1000)); err == nil && perr == nil && saved.After(written.Add(time.Second)) {
@@ -310,7 +320,14 @@ func TestDatastoreAfterTheEmulatorIsKilled(t *testing.T) {
 				break
 			}
 			if time.Now().After(deadline) {
-				t.Fatalf("the emulator did not save %s within 90 s of a write: %v %s", file, err, out)
+				t.Fatalf("the emulator did not save %s within 3 minutes of a write, nudged every 40 s: %v %s", file, err, out)
+			}
+			if time.Since(lastWrite) > 40*time.Second {
+				t.Logf("no save since the write (the store's time: %s); writing another entity", strings.TrimSpace(string(out)))
+				if _, err := c.Put(ctx, nudge, &durable{Note: "a change to save"}); err != nil {
+					t.Fatal(err)
+				}
+				lastWrite = time.Now()
 			}
 		}
 	}
