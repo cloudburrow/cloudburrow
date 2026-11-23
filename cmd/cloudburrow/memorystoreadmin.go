@@ -469,8 +469,12 @@ func (p *memorystoreProvisioner) StartClusterNode(ctx context.Context, spec redi
 	case <-ctx.Done():
 		return "", "", 0, ctx.Err()
 	}
-	f := netfwd.New(netfwd.Target{Name: spec.Server, Namespace: p.cfg.Cluster.Namespace}, p.cfg.KubeconfigPath(), p.cfg.BindAddress)
-	_, ps, err := net.SplitHostPort(f.HostAddr())
+	// reserve only chooses the port, and holds it while the node starts;
+	// it is released for the tunnel below to bind (main run 45171873407:
+	// every cluster node's kubectl found its port still held by reserve).
+	reserve := netfwd.New(netfwd.Target{Name: spec.Server, Namespace: p.cfg.Cluster.Namespace}, p.cfg.KubeconfigPath(), p.cfg.BindAddress)
+	defer reserve.Release()
+	_, ps, err := net.SplitHostPort(reserve.HostAddr())
 	if err != nil {
 		return "", "", 0, fmt.Errorf("reserve a port for %s: %w", spec.Server, err)
 	}
@@ -518,7 +522,8 @@ func (p *memorystoreProvisioner) StartClusterNode(ctx context.Context, spec redi
 	if err != nil || strings.TrimSpace(ip) == "" {
 		return "", "", 0, fmt.Errorf("pod IP of %s: %v", spec.Server, err)
 	}
-	f = netfwd.New(netfwd.Target{Name: spec.Server, Namespace: p.cfg.Cluster.Namespace, ServicePort: port, HostPort: port,
+	reserve.Release()
+	f := netfwd.New(netfwd.Target{Name: spec.Server, Namespace: p.cfg.Cluster.Namespace, ServicePort: port, HostPort: port,
 		Loopback6: settings.PodAndLoopback6}, p.cfg.KubeconfigPath(), p.cfg.BindAddress)
 	if err := f.Start(p.bg); err != nil {
 		return "", "", 0, fmt.Errorf("tunnel to %s: %w", spec.Server, err)

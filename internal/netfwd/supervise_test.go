@@ -30,6 +30,9 @@ import (
 const fakeEnv = "NETFWD_FAKE_KUBECTL"
 
 func TestMain(m *testing.M) {
+	if addr := os.Getenv(listenEnv); addr != "" {
+		os.Exit(childListen(addr))
+	}
 	if dir := os.Getenv(fakeEnv); dir != "" {
 		os.Exit(fakeKubectl(dir, os.Args[1:]))
 	}

@@ -6617,21 +6617,21 @@
         "method": "google.cloud.aiplatform.v1.GenAiCacheService/DeleteCachedContent",
         "status": "Verified",
         "tests": [
-          "test/compat/generationoptions2107_test.go:213 TestCachedContentsThroughTheOfficialSDK"
+          "test/compat/generationoptions2107_test.go:222 TestCachedContentsThroughTheOfficialSDK"
         ]
       },
       {
         "method": "google.cloud.aiplatform.v1.GenAiCacheService/GetCachedContent",
         "status": "Verified",
         "tests": [
-          "test/compat/generationoptions2107_test.go:213 TestCachedContentsThroughTheOfficialSDK"
+          "test/compat/generationoptions2107_test.go:222 TestCachedContentsThroughTheOfficialSDK"
         ]
       },
       {
         "method": "google.cloud.aiplatform.v1.GenAiCacheService/ListCachedContents",
         "status": "Verified",
         "tests": [
-          "test/compat/generationoptions2107_test.go:213 TestCachedContentsThroughTheOfficialSDK"
+          "test/compat/generationoptions2107_test.go:222 TestCachedContentsThroughTheOfficialSDK"
         ]
       },
       {
@@ -7491,35 +7491,35 @@
         "method": "google.cloud.aiplatform.v1beta1.GenAiCacheService/CreateCachedContent",
         "status": "Verified",
         "tests": [
-          "test/compat/generationoptions2107_test.go:213 TestCachedContentsThroughTheOfficialSDK"
+          "test/compat/generationoptions2107_test.go:222 TestCachedContentsThroughTheOfficialSDK"
         ]
       },
       {
         "method": "google.cloud.aiplatform.v1beta1.GenAiCacheService/DeleteCachedContent",
         "status": "Verified",
         "tests": [
-          "test/compat/generationoptions2107_test.go:213 TestCachedContentsThroughTheOfficialSDK"
+          "test/compat/generationoptions2107_test.go:222 TestCachedContentsThroughTheOfficialSDK"
         ]
       },
       {
         "method": "google.cloud.aiplatform.v1beta1.GenAiCacheService/GetCachedContent",
         "status": "Verified",
         "tests": [
-          "test/compat/generationoptions2107_test.go:213 TestCachedContentsThroughTheOfficialSDK"
+          "test/compat/generationoptions2107_test.go:222 TestCachedContentsThroughTheOfficialSDK"
         ]
       },
       {
         "method": "google.cloud.aiplatform.v1beta1.GenAiCacheService/ListCachedContents",
         "status": "Verified",
         "tests": [
-          "test/compat/generationoptions2107_test.go:213 TestCachedContentsThroughTheOfficialSDK"
+          "test/compat/generationoptions2107_test.go:222 TestCachedContentsThroughTheOfficialSDK"
         ]
       },
       {
         "method": "google.cloud.aiplatform.v1beta1.GenAiCacheService/UpdateCachedContent",
         "status": "Verified",
         "tests": [
-          "test/compat/generationoptions2107_test.go:213 TestCachedContentsThroughTheOfficialSDK"
+          "test/compat/generationoptions2107_test.go:222 TestCachedContentsThroughTheOfficialSDK"
         ]
       },
       {
@@ -7569,11 +7569,11 @@
         "tests": [
           "test/compat/generationconversation_test.go:47 TestGenerateContentMultiTurnChatThroughTheOfficialSDK",
           "test/compat/generationoptions2107_test.go:128 TestGenerateContentThinkingConfigThroughTheOfficialSDK",
-          "test/compat/generationoptions2107_test.go:213 TestCachedContentsThroughTheOfficialSDK",
-          "test/compat/generationoptions2107_test.go:333 TestGenerateContentResponseLogprobsThroughTheOfficialSDK",
+          "test/compat/generationoptions2107_test.go:222 TestCachedContentsThroughTheOfficialSDK",
+          "test/compat/generationoptions2107_test.go:342 TestGenerateContentResponseLogprobsThroughTheOfficialSDK",
           "test/compat/generationoptions2107_test.go:35 TestGenerateContentCandidateCountThroughTheOfficialSDK",
-          "test/compat/generationoptions2107_test.go:394 TestGenerateContentLogprobsTopCandidatesThroughTheOfficialSDK",
-          "test/compat/generationoptions2107_test.go:467 TestGenerateContentLogprobsWithOtherFeaturesThroughTheOfficialSDK"
+          "test/compat/generationoptions2107_test.go:403 TestGenerateContentLogprobsTopCandidatesThroughTheOfficialSDK",
+          "test/compat/generationoptions2107_test.go:476 TestGenerateContentLogprobsWithOtherFeaturesThroughTheOfficialSDK"
         ]
       },
       {
@@ -7609,8 +7609,8 @@
         "tests": [
           "test/compat/generationconversation_test.go:247 TestV1Beta1PredictionClientServesWhatV1Serves",
           "test/compat/generationoptions2107_test.go:128 TestGenerateContentThinkingConfigThroughTheOfficialSDK",
-          "test/compat/generationoptions2107_test.go:333 TestGenerateContentResponseLogprobsThroughTheOfficialSDK",
-          "test/compat/generationoptions2107_test.go:394 TestGenerateContentLogprobsTopCandidatesThroughTheOfficialSDK"
+          "test/compat/generationoptions2107_test.go:342 TestGenerateContentResponseLogprobsThroughTheOfficialSDK",
+          "test/compat/generationoptions2107_test.go:403 TestGenerateContentLogprobsTopCandidatesThroughTheOfficialSDK"
         ]
       },
       {
