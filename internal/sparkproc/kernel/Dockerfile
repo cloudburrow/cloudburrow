@@ -27,6 +27,10 @@ ARG SCALA=2.12.18
 ARG SPARK=3.5.9
 ARG PY=3.5
 USER root
+# Spark 4.2's Java 25 denies sun.misc.Unsafe memory access by default, and
+# the Connect client's shaded Netty then fails to start Arrow's allocator
+# (UnsupportedOperationException in UnsafeDirectLittleEndian); the Scala
+# kernel allows it where the JVM knows the flag (JDK 23 and later).
 COPY requirements-${PY}.txt almond-${SCALA}.lock connect-${SPARK}.lock fetch.sh predef.sc pyspark-startup.py kernel.sh /opt/cloudburrow/
 # Spark 4's Ubuntu 24.04 images' pip refuses a system install without
 # PIP_BREAK_SYSTEM_PACKAGES; Ubuntu 22.04's older pip ignores it.
@@ -41,7 +45,8 @@ RUN set -e; \
       spark-*|scala-*|hive-*|hadoop-*|parquet-*|orc-*|arrow-*|netty-*|guava-*|protobuf-*|derby-*|datanucleus-*|kubernetes-*|zookeeper-*|avro-*) ;; \
       *) cp="$cp$j:" ;; esac; done; \
     mkdir -p /usr/local/share/jupyter/kernels/scala /usr/local/share/jupyter/kernels/python3; \
-    CP="${cp%:}" python3 -c 'import json, os; json.dump({"argv": ["java", "-Duser.home=/tmp", "--add-opens=java.base/java.nio=ALL-UNNAMED", "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED", "-cp", "/opt/almond/lib/*", "almond.ScalaKernel", "--extra-class-path", os.environ["CP"], "--predef", "/opt/cloudburrow/predef.sc", "--connection-file", "{connection_file}"], "display_name": "Scala", "language": "scala", "env": {"COURSIER_CACHE": "/tmp/coursier"}}, open("/usr/local/share/jupyter/kernels/scala/kernel.json", "w"), indent=1)'; \
+    unsafe=""; if java --sun-misc-unsafe-memory-access=allow -version >/dev/null 2>&1; then unsafe="--sun-misc-unsafe-memory-access=allow"; fi; \
+    UNSAFE="$unsafe" CP="${cp%:}" python3 -c 'import json, os; json.dump({"argv": ["java", "-Duser.home=/tmp", "--add-opens=java.base/java.nio=ALL-UNNAMED", "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"] + ([os.environ["UNSAFE"]] if os.environ["UNSAFE"] else []) + ["-cp", "/opt/almond/lib/*", "almond.ScalaKernel", "--extra-class-path", os.environ["CP"], "--predef", "/opt/cloudburrow/predef.sc", "--connection-file", "{connection_file}"], "display_name": "Scala", "language": "scala", "env": {"COURSIER_CACHE": "/tmp/coursier"}}, open("/usr/local/share/jupyter/kernels/scala/kernel.json", "w"), indent=1)'; \
     py4j="$(ls /opt/spark/python/lib/py4j-*-src.zip | head -1)"; \
     printf '{"argv": ["python3", "-m", "ipykernel_launcher", "-f", "{connection_file}", "--IPKernelApp.exec_files=[\\"/opt/cloudburrow/pyspark-startup.py\\"]"], "display_name": "PySpark", "language": "python", "env": {"SPARK_HOME": "/opt/spark", "PYTHONPATH": "/opt/spark/python:%s"}}\n' "$py4j" \
       > /usr/local/share/jupyter/kernels/python3/kernel.json; \
