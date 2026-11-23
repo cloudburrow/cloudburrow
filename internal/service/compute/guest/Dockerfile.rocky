@@ -25,7 +25,7 @@ RUN printf '%s\n' '[google-cloud-ops-agent]' 'name=Google Cloud Ops Agent Reposi
 COPY root/ /
 RUN chmod 0755 /usr/lib/cloudburrow/* \
  && systemctl mask systemd-udevd.service systemd-udevd-kernel.socket systemd-udevd-control.socket getty.target console-getty.service systemd-logind.service \
- && systemctl enable cloudburrow-network.service cloudburrow-vpc.service cloudburrow-guest-agent.service google-startup-scripts.service sshd.service \
+ && systemctl enable cloudburrow-network.service cloudburrow-vpc.service cloudburrow-relay6.service cloudburrow-guest-agent.service google-startup-scripts.service sshd.service \
     cloudburrow-ops-agent-fence.service cloudburrow-ops-agent-metadata.service google-cloud-ops-agent.service \
  && echo '%google-sudoers ALL=(ALL:ALL) NOPASSWD:ALL' > /etc/sudoers.d/google_sudoers && chmod 0440 /etc/sudoers.d/google_sudoers \
  && groupadd -f google-sudoers

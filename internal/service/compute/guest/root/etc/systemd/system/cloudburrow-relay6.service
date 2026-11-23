@@ -1,0 +1,9 @@
+[Unit]
+Description=CloudBurrow IPv6 internal load balancers: the VM's connections to their addresses
+After=cloudburrow-vpc.service
+[Service]
+ExecStart=/usr/lib/cloudburrow/relay6
+Restart=always
+RestartSec=2
+[Install]
+WantedBy=multi-user.target

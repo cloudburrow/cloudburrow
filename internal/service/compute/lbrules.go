@@ -393,6 +393,9 @@ func (s *Server) hasProxyOnlySubnetLocked(network, region string) bool {
 // ruleAddressLocked sets a rule's IPAddress: a reserved address (its IP,
 // name or link), or an ephemeral one.
 func (s *Server) ruleAddressLocked(x lbCtx, b, o obj, internal bool, ports []int) error {
+	if x.region != "" && str(o, "ipVersion") == "IPV6" {
+		return s.ruleIPv6Locked(x, b, o, internal, ports)
+	}
 	ref := str(b, "IPAddress")
 	scope := x.scope
 	var addrRel string
@@ -580,13 +583,16 @@ func (s *Server) setLBRuleTarget(x lbCtx, o, b obj) (obj, error) {
 
 // ruleIPVersionLocked sets a rule's ipVersion (IPV4 or IPV6): given, or
 // IPV6 when its IPAddress is an IPv6 address or a reserved global IPv6
-// one (vpc/docs/reserve-static-external-ip-address). An IPv6 rule here is
-// a global external one, on a global IPv6 address (ipv6.go); its traffic
-// arrives at its listeners as every rule's does (lbplane.go).
+// one (vpc/docs/reserve-static-external-ip-address). A global IPv6 rule
+// is on a global IPv6 address (ipv6.go); a regional one, external or
+// internal, on a /96 of a dual-stack or IPv6-only subnet's range
+// (ruleIPv6Locked). Their traffic arrives at their listeners as every
+// rule's does (lbplane.go); VMs reach an internal one through their
+// relay6 (vpcservices.go).
 func (s *Server) ruleIPVersionLocked(x lbCtx, b, o obj, internal bool) error {
 	v := str(b, "ipVersion")
 	if v == "" {
-		ref := str(b, "IPAddress")
+		ref := strings.TrimSuffix(str(b, "IPAddress"), "/96")
 		if ip := net.ParseIP(ref); ip != nil && ip.To4() == nil {
 			v = "IPV6"
 		} else if ref != "" && ip == nil {
@@ -604,12 +610,109 @@ func (s *Server) ruleIPVersionLocked(x lbCtx, b, o obj, internal bool) error {
 		return nil
 	case "IPV4":
 	case "IPV6":
-		if internal || x.region != "" {
-			return unimplemented("ipVersion IPV6 for a regional or internal forwarding rule: IPv6 load balancing is served for global external forwarding rules (#2140)")
+		// load-balancing/docs/forwarding-rule-concepts: "Only the backend
+		// service-based regional external passthrough Network Load
+		// Balancers can handle IPv6 traffic."
+		if strings.Contains(str(o, "target"), "/targetPools/") {
+			return invalid("Invalid value for field 'resource.ipVersion': 'IPV6'. A target pool-based external passthrough Network Load Balancer is IPv4 only; use a backend service.")
 		}
 	default:
 		return invalid("Invalid value for field 'resource.ipVersion': '%s'. Must be one of [IPV4, IPV6].", v)
 	}
 	o["ipVersion"] = v
+	return nil
+}
+
+// ruleIPv6Locked sets a regional IPv6 forwarding rule's IPAddress, a /96
+// as Google gives it ("IPv6 address range, as in 2600:1234::/96",
+// compute/docs/reference/rest/v1/forwardingRules): a reserved regional
+// IPv6 address of the rule's type (by name, link or address), or an
+// ephemeral /96 of its subnetwork, which an IPv6 rule must name
+// ("required ... when creating an external forwarding rule with IPv6")
+// and whose IPv6 access type must be the rule's: INTERNAL for an internal
+// load balancer, EXTERNAL (Premium Tier) for an external one
+// (load-balancing/docs/forwarding-rule-concepts).
+func (s *Server) ruleIPv6Locked(x lbCtx, b, o obj, internal bool, ports []int) error {
+	typ := "EXTERNAL"
+	if internal {
+		typ = "INTERNAL"
+	} else if str(o, "networkTier") != "PREMIUM" {
+		return invalid("Invalid value for field 'resource.networkTier': '%s'. External IPv6 forwarding rules are in the Premium Tier.", str(o, "networkTier"))
+	}
+	ref := strings.TrimSuffix(str(b, "IPAddress"), "/96")
+	var addrRel string
+	if ip := net.ParseIP(ref); ref != "" && ip == nil {
+		addrRel = Rel(ref, x.project)
+		if !strings.Contains(addrRel, "/") {
+			addrRel = "projects/" + x.project + "/" + x.scope + "/addresses/" + ref
+		}
+		if _, ok := s.res[addrRel]; !ok {
+			return notFound(addrRel)
+		}
+	} else if ip != nil {
+		if ip.To4() != nil {
+			return invalid("Invalid value for field 'resource.IPAddress': '%s'. The address's IP version (IPV4) is not the forwarding rule's ipVersion.", ref)
+		}
+		ref = ip.String()
+		for k, a := range s.res {
+			if strings.HasPrefix(k, "projects/"+x.project+"/"+x.scope+"/addresses/") && str(a, "address") == ref {
+				addrRel = k
+			}
+		}
+	}
+	if addrRel != "" {
+		a := s.res[addrRel]
+		if scopeOf(addrRel) != x.scope {
+			return invalid("Invalid value for field 'resource.IPAddress': '%s'. The address must be in the forwarding rule's scope (%s).", ref, x.scope)
+		}
+		if str(a, "ipVersion") != "IPV6" {
+			return invalid("Invalid value for field 'resource.IPAddress': '%s'. The address's IP version (IPV4) is not the forwarding rule's ipVersion.", ref)
+		}
+		if str(a, "addressType") != typ {
+			return invalid("Invalid value for field 'resource.IPAddress': '%s'. A forwarding rule of this scheme needs an %s address.", ref, typ)
+		}
+		for _, u := range strs(a, "users") {
+			if other := s.res[u]; portsOverlap(other, ports) && str(other, "IPProtocol") == str(o, "IPProtocol") {
+				return errf(http.StatusBadRequest, "invalid", "IP address '%s' and port are already being used by forwarding rule '%s'.", str(a, "address"), u)
+			}
+		}
+		o["IPAddress"], o["_address"], o["subnetwork"] = str(a, "address")+"/96", addrRel, str(a, "subnetwork")
+		return nil
+	}
+	sub := Rel(str(b, "subnetwork"), x.project)
+	if sub == "" {
+		return required("resource.subnetwork")
+	}
+	if !strings.Contains(sub, "/") {
+		sub = subnetRel(x.project, x.region, sub)
+	}
+	so, ok := s.res[sub]
+	if !ok {
+		return notFound(sub)
+	}
+	if lastSeg(str(so, "region")) != x.region {
+		return invalid("Invalid value for field 'resource.subnetwork': '%s'. The subnetwork must be in region '%s'.", sub, x.region)
+	}
+	if nw := str(o, "network"); nw != "" && str(so, "network") != nw {
+		return invalid("Invalid value for field 'resource.subnetwork': '%s'. The subnetwork is not in network '%s'.", sub, lastSeg(nw))
+	}
+	if (str(so, "stackType") != "IPV4_IPV6" && str(so, "stackType") != "IPV6_ONLY") || str(so, "ipv6AccessType") != typ {
+		return invalid("Invalid value for field 'resource.subnetwork': '%s'. An IPv6 forwarding rule of this scheme needs a dual-stack or IPv6-only subnetwork whose IPv6 access type is %s.", sub, typ)
+	}
+	_, base, err := net.ParseCIDR(str(so, "ipv6CidrRange"))
+	if err != nil {
+		return invalid("Invalid value for field 'resource.subnetwork': '%s'. The subnetwork has no IPv6 range.", sub)
+	}
+	addr, static, err := s.wantV6Locked(so, base, ref, "resource.IPAddress")
+	if err != nil {
+		return err
+	}
+	if static != "" {
+		o["_address"] = static
+	}
+	o["IPAddress"], o["subnetwork"] = addr+"/96", sub
+	if internal && str(o, "network") == "" {
+		o["network"] = str(so, "network")
+	}
 	return nil
 }

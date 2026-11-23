@@ -91,6 +91,8 @@ func (s *Server) usedV6Locked() map[string]bool {
 			used[str(o, "ipv6CidrRange")] = true
 		case strings.Contains(k, "/addresses/") && str(o, "ipVersion") == "IPV6":
 			used[str(o, "address")] = true
+		case strings.Contains(k, "/forwardingRules/") && str(o, "ipVersion") == "IPV6":
+			used[strings.TrimSuffix(str(o, "IPAddress"), "/96")] = true
 		case strings.Contains(k, "/instances/"):
 			for _, e := range listOf(o["networkInterfaces"]) {
 				nic, _ := e.(map[string]any)
