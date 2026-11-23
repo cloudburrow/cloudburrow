@@ -2809,6 +2809,35 @@ tr.log-entry.is-located { outline: 2px solid var(--accent); outline-offset: -2px
 .bq-canvas-found li { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 2px 0; }
 .bq-canvas-body { display: flex; gap: 16px; align-items: flex-start; }
 .bq-canvas-body > .bq-canvas-nodes { flex: 1 1 auto; min-width: 0; }
+/* The data canvas's board (#2094): nodes placed on a zoomable, scrolling
+   board, joined by their edges. */
+.bq-canvas-board { flex: 1 1 auto; min-width: 0; height: 70vh; min-height: 320px; overflow: auto; position: relative;
+  border: 1px solid var(--border); border-radius: 8px; background-color: var(--surface-2, var(--bg));
+  background-image: radial-gradient(var(--border) 1px, transparent 1px); background-size: 16px 16px; }
+.bq-canvas-board:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.bq-canvas-stage { position: relative; }
+.bq-canvas-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.bq-canvas-board .bq-canvas-nodes { display: block; position: relative; margin: 0; }
+.bq-canvas-board .bq-canvas-node { position: absolute; width: 520px; box-sizing: border-box; box-shadow: 0 1px 2px rgba(0, 0, 0, .12); }
+.bq-canvas-board .bq-canvas-empty { position: absolute; left: 24px; top: 24px; }
+.bq-canvas-node.is-selected { outline: 2px solid var(--accent); outline-offset: 1px; }
+.bq-canvas-edges { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; }
+.bq-canvas-edge { fill: none; stroke: var(--text-muted); stroke-width: 2; }
+.bq-canvas-bar { gap: 6px; }
+.bq-canvas-move { cursor: grab; touch-action: none; }
+.bq-canvas-move:active { cursor: grabbing; }
+.bq-canvas-debug { border-top: 1px solid var(--border); margin-top: 6px; padding-top: 6px; }
+.bq-canvas-debug[hidden] { display: none; }
+.bq-canvas-debug pre { max-height: 200px; overflow: auto; }
+.bq-canvas-zoom { width: auto; }
+@media (max-width: 960px) { .bq-canvas-board { align-self: stretch; width: 100%; max-width: 100%; } }
+/* A time or date-time field's focus lands on its parts, which
+   :focus-visible does not draw around the field. */
+.bq-sq-form input[type="time"]:focus-within, .bq-sq-form input[type="datetime-local"]:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+.bq-canvas.is-fullscreen { position: fixed; inset: 0; z-index: 1000; background: var(--bg); padding: 12px 16px; overflow: auto;
+  display: flex; flex-direction: column; }
+.bq-canvas.is-fullscreen .bq-canvas-body { flex: 1 1 auto; min-height: 0; align-items: stretch; }
+.bq-canvas.is-fullscreen .bq-canvas-board { height: auto; align-self: stretch; }
 .bq-canvas-assistant { flex: 0 0 340px; max-width: 100%; border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px;
   background: var(--surface); margin-top: 12px; box-sizing: border-box; }
 .bq-canvas-assistant[hidden], .bq-canvas-settings[hidden] { display: none; }

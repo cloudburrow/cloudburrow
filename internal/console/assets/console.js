@@ -21021,8 +21021,6 @@ const BQ_STUDIO_TABS = "cloudburrow.bigquery.tabs";
 const BQ_STUDIO_RECENT = "cloudburrow.bigquery.recent";
 const BQ_SAVED_NOTE = "CloudBurrow-only: Google keeps a saved query as a Dataform code asset, which Studio does not yet keep in CloudBurrow's Dataform (#2105). " +
   "This one is kept in the instance's state directory, listed under Queries in the Explorer, and reachable by no API.";
-const BQ_UNAVAILABLE_SCHEDULE = "Not available locally: a scheduled query is a BigQuery Data Transfer Service transfer, " +
-  "which CloudBurrow does not run.";
 const BQ_UNAVAILABLE_PERMISSIONS = "Not available locally: a saved query's permissions (Code Owner, Code Editor, Code Viewer) " +
   "are Dataform's IAM, which Studio does not yet reach. Copy link shares it with anyone using this instance.";
 
@@ -21916,7 +21914,16 @@ function renderBigQueryStudio(view) {
         splitHost)));
   drawPane();
   drawTabs();
-  loadExplorer().then(() => {
+  loadExplorer().then(async () => {
+    // A scheduled query's Edit (its Scheduled query details page) opens its
+    // query in a tab whose Schedule > Update scheduled query saves it back.
+    const linkedScheduled = params.get("scheduledQuery");
+    if (linkedScheduled) {
+      try {
+        const sq = await send(`/api/studio/bigquery-scheduled-queries?call=get&project=${encodeURIComponent(project)}`, "POST", { name: linkedScheduled });
+        select(newTab(sq.query, sq.displayName, { scheduledQuery: sq.name }));
+      } catch (err) { notify(err.message, "error"); }
+    }
     // A link to a saved query (Copy link) opens it once the list is read.
     if (linkedSaved) {
       const asset = BQ_FILES.find((e) => e.name === linkedSaved && BQ_ASSET_KIND[e.kind]);
@@ -22506,8 +22513,11 @@ function bqCanvasTab(tab, ctx) {
   if (!doc.assistant) doc.assistant = { tables: [], instructions: "", chat: [] };
   let next = doc.nodes.reduce((n, x) => Math.max(n, x.id), 0);
   const results = {};
+  const errors = {};
   const keep = () => { tab.query = JSON.stringify(doc); ctx.save(); };
   const host = el("ol", { class: "bq-canvas-nodes", "aria-label": "Canvas nodes" });
+  if (!doc.view) doc.view = { zoom: 1 };
+  let selected = null;
   const byId = (id) => doc.nodes.find((n) => n.id === id);
   const add = (node) => { node.id = ++next; node.parents = node.parents || []; doc.nodes.push(node); keep(); draw(); return node; };
   const tables = () => {
@@ -22529,6 +22539,7 @@ function bqCanvasTab(tab, ctx) {
   const runNode = async (n, out) => {
     setChildren(out, spinner("Running"));
     try {
+      delete errors[n.id];
       results[n.id] = await queryOf(refOf(n) ? `${sqlOf(n)} LIMIT 100` : sqlOf(n));
       drawResult(n, out);
       // A Destination node with its SQL toggle on follows its SQL node.
@@ -22537,6 +22548,7 @@ function bqCanvasTab(tab, ctx) {
       }
       return true;
     } catch (err) {
+      errors[n.id] = err.message;
       setChildren(out, el("p", { class: "form-error", role: "alert", text: err.message }));
       return false;
     }
@@ -22632,6 +22644,252 @@ function bqCanvasTab(tab, ctx) {
     } catch (err) {
       setChildren(out, el("p", { class: "form-error", role: "alert", text: err.message }));
     }
+  };
+  // --- The board: Google's canvas of nodes joined by their edges, with
+  // Zoom controls, Zoom to Fit, Zoom to Selection, Zoom In, Zoom Out, Full
+  // screen and Tidy canvas
+  // (https://docs.cloud.google.com/bigquery/docs/data-canvas, read
+  // 2026-11-23). A node keeps the place it was dragged to (x, y); the
+  // others are laid out in columns by their depth in the graph, which Tidy
+  // canvas applies to every node.
+  const NODE_W = 520, GAP_X = 72, GAP_Y = 24, PAD = 24;
+  const edges = el("svg", { class: "bq-canvas-edges", "aria-hidden": "true", focusable: "false" });
+  const world = el("div", { class: "bq-canvas-world" }, edges, host);
+  const stage = el("div", { class: "bq-canvas-stage" }, world);
+  const board = el("div", { class: "bq-canvas-board", role: "region", "aria-label": "Canvas", tabindex: "0",
+    "aria-describedby": `bq-canvas-board-help-${tab.id}` }, stage);
+  const zoomSel = el("select", { id: `bq-canvas-zoom-${tab.id}`, class: "bq-canvas-zoom", "aria-label": "Zoom level" });
+  const ZOOMS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2];
+  const depthOf = (n, seen = new Set()) => {
+    if (seen.has(n.id)) return 0;
+    seen.add(n.id);
+    return n.parents.map(byId).filter(Boolean).reduce((d, p) => Math.max(d, 1 + depthOf(p, seen)), 0);
+  };
+  const liOf = (n) => host.querySelector(`[data-node="${n.id}"]`);
+  let extent = { w: 0, h: 0 };
+  const layout = () => {
+    const placed = [];
+    const cols = {};
+    for (const n of doc.nodes) {
+      const li = liOf(n);
+      if (!li) continue;
+      const h = li.offsetHeight;
+      let x, y;
+      if (n.pinned && Number.isFinite(n.x) && Number.isFinite(n.y)) { x = n.x; y = n.y; } else {
+        const d = depthOf(n);
+        x = PAD + d * (NODE_W + GAP_X);
+        y = cols[d] === undefined ? PAD : cols[d];
+        cols[d] = y + h + GAP_Y;
+      }
+      li.style.left = x + "px";
+      li.style.top = y + "px";
+      placed.push({ n, x, y, w: li.offsetWidth || NODE_W, h });
+    }
+    const at = Object.fromEntries(placed.map((b) => [b.n.id, b]));
+    extent = { w: Math.max(...placed.map((b) => b.x + b.w), 0) + PAD, h: Math.max(...placed.map((b) => b.y + b.h), 0) + PAD };
+    edges.setAttribute("width", String(extent.w));
+    edges.setAttribute("height", String(extent.h));
+    setChildren(edges, ...placed.flatMap((b) => b.n.parents.map((pid) => at[pid]).filter(Boolean).map((a) => {
+      const x1 = a.x + a.w, y1 = a.y + 22, x2 = b.x, y2 = b.y + 22, mid = Math.max(24, (x2 - x1) / 2);
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute("d", `M${x1},${y1} C${x1 + mid},${y1} ${x2 - mid},${y2} ${x2},${y2}`);
+      path.setAttribute("class", "bq-canvas-edge");
+      return path;
+    })));
+    applyZoom();
+  };
+  const resizes = new ResizeObserver(() => requestAnimationFrame(() => { if (board.isConnected) layout(); }));
+  const applyZoom = () => {
+    const z = doc.view.zoom;
+    world.style.transform = `scale(${z})`;
+    world.style.width = Math.max(extent.w, NODE_W + 2 * PAD) + "px";
+    stage.style.width = Math.ceil(Math.max(extent.w, NODE_W + 2 * PAD) * z) + "px";
+    stage.style.height = Math.ceil(Math.max(extent.h, 120) * z) + "px";
+    const pct = Math.round(z * 100);
+    setChildren(zoomSel, ...[...new Set([...ZOOMS.map((v) => Math.round(v * 100)), pct])].sort((a, b) => a - b).map((v) => {
+      const o = el("option", { value: String(v), text: `${v}%` }); o.selected = v === pct; return o;
+    }));
+    if (zoomIn) { zoomIn.disabled = z >= 2; zoomOut.disabled = z <= 0.25; zoomSelection.disabled = !byId(selected); }
+  };
+  const setZoom = (z, anchor) => {
+    const before = doc.view.zoom;
+    z = Math.min(2, Math.max(0.25, Math.round(z * 100) / 100));
+    if (z === before) return;
+    // The point under the anchor (the pointer, or the board's centre)
+    // stays where it is.
+    const ax = anchor ? anchor.x : board.clientWidth / 2, ay = anchor ? anchor.y : board.clientHeight / 2;
+    const wx = (board.scrollLeft + ax) / before, wy = (board.scrollTop + ay) / before;
+    doc.view.zoom = z;
+    keep();
+    applyZoom();
+    board.scrollLeft = wx * z - ax;
+    board.scrollTop = wy * z - ay;
+    announce(`Zoom ${Math.round(z * 100)}%`);
+  };
+  const step = (dir) => {
+    const z = doc.view.zoom;
+    const next = dir > 0 ? ZOOMS.find((v) => v > z + 0.001) : [...ZOOMS].reverse().find((v) => v < z - 0.001);
+    setZoom(next === undefined ? z : next);
+  };
+  const zoomToFit = () => {
+    layout();
+    if (!doc.nodes.length) { setZoom(1); return; }
+    const z = Math.min(1, (board.clientWidth - 8) / extent.w, (board.clientHeight - 8) / extent.h);
+    setZoom(Math.max(0.25, z));
+    applyZoom();
+    board.scrollLeft = 0;
+    board.scrollTop = 0;
+  };
+  const zoomToSelection = () => {
+    const n = byId(selected);
+    const li = n && liOf(n);
+    if (!li) return;
+    const z = Math.max(0.25, Math.min(1, (board.clientWidth - 16) / li.offsetWidth, (board.clientHeight - 16) / li.offsetHeight));
+    setZoom(z);
+    applyZoom();
+    const z2 = doc.view.zoom;
+    board.scrollLeft = parseFloat(li.style.left) * z2 - (board.clientWidth - li.offsetWidth * z2) / 2;
+    board.scrollTop = parseFloat(li.style.top) * z2 - 8;
+    const first = li.querySelector("button, input, select, textarea");
+    if (first) first.focus({ preventScroll: true });
+  };
+  const tidy = () => {
+    for (const n of doc.nodes) { delete n.pinned; delete n.x; delete n.y; }
+    keep();
+    layout();
+    announce("Canvas tidied");
+  };
+  board.addEventListener("wheel", (e) => {
+    // Control and the wheel zoom, as Google's page says.
+    if (!e.ctrlKey && !e.metaKey) return;
+    e.preventDefault();
+    const r = board.getBoundingClientRect();
+    setZoom(doc.view.zoom * (e.deltaY < 0 ? 1.1 : 1 / 1.1), { x: e.clientX - r.left, y: e.clientY - r.top });
+  }, { passive: false });
+  // The node clicked or focused is the selection Zoom to Selection uses.
+  const choose = (li) => {
+    const id = li ? Number(li.dataset.node) : null;
+    if (id === selected) return;
+    selected = id;
+    for (const x of host.querySelectorAll(".bq-canvas-node.is-selected")) x.classList.remove("is-selected");
+    if (li) li.classList.add("is-selected");
+    applyZoom();
+  };
+  host.addEventListener("focusin", (e) => choose(e.target.closest(".bq-canvas-node")));
+  host.addEventListener("pointerdown", (e) => choose(e.target.closest(".bq-canvas-node")));
+  // dragNode moves a node by its handle: dragged with the pointer, or the
+  // arrow keys (24 px, Shift for 96), so moving needs no dragging.
+  const dragNode = (n, li, handle) => {
+    const moveTo = (x, y) => {
+      n.x = Math.max(0, Math.round(x)); n.y = Math.max(0, Math.round(y)); n.pinned = true;
+      li.style.left = n.x + "px"; li.style.top = n.y + "px";
+    };
+    handle.addEventListener("keydown", (e) => {
+      const d = e.shiftKey ? 96 : 24;
+      const delta = { ArrowLeft: [-d, 0], ArrowRight: [d, 0], ArrowUp: [0, -d], ArrowDown: [0, d] }[e.key];
+      if (!delta) return;
+      e.preventDefault();
+      moveTo(parseFloat(li.style.left) + delta[0], parseFloat(li.style.top) + delta[1]);
+      keep(); layout();
+      handle.focus({ preventScroll: false });
+    });
+    handle.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      handle.setPointerCapture(e.pointerId);
+      const z = doc.view.zoom, sx = e.clientX, sy = e.clientY, ox = parseFloat(li.style.left), oy = parseFloat(li.style.top);
+      const move = (m) => { moveTo(ox + (m.clientX - sx) / z, oy + (m.clientY - sy) / z); layout(); };
+      const up = () => { handle.removeEventListener("pointermove", move); handle.removeEventListener("pointerup", up); keep(); };
+      handle.addEventListener("pointermove", move);
+      handle.addEventListener("pointerup", up);
+    });
+  };
+  // nodeMenu is a node's menu, its items as Google's node types list them:
+  // Delete, Debug and Duplicate; Run, and Run the node and the following
+  // node, where the node runs; a SQL node's Export as scheduled query.
+  const deleteNode = (n) => {
+    doc.nodes = doc.nodes.filter((x) => x.id !== n.id);
+    for (const x of doc.nodes) x.parents = x.parents.filter((p) => p !== n.id);
+    if (selected === n.id) selected = null;
+    keep(); draw();
+    announce(`${nodeTitle(n)} deleted`);
+  };
+  const duplicate = (n) => {
+    const copy = JSON.parse(JSON.stringify(n));
+    delete copy.id; delete copy.pinned; delete copy.x; delete copy.y; delete copy.saved;
+    const made = add(copy);
+    announce(`${nodeTitle(n)} duplicated as ${nodeTitle(made)}`);
+  };
+  const runs = (n) => ["table", "sql", "insights", "viz"].includes(n.type) || (n.type === "dest" && n.saved);
+  const runOne = async (n) => {
+    const li = liOf(n);
+    const out = li && li.querySelector(".bq-nb-output");
+    if (!out) return true;
+    if (n.type === "insights") { await runInsights(n, out); return true; }
+    if (n.type === "viz") { const b = [...li.querySelectorAll("button")].find((x) => x.textContent === "Draw"); if (b) b.click(); return true; }
+    return runNode(n, out);
+  };
+  const following = (n) => {
+    const out = [], seen = new Set([n.id]);
+    let frontier = [n.id];
+    while (frontier.length) {
+      const next = doc.nodes.filter((x) => !seen.has(x.id) && x.parents.some((p) => frontier.includes(p)));
+      for (const x of next) { seen.add(x.id); out.push(x); }
+      frontier = next.map((x) => x.id);
+    }
+    return out;
+  };
+  const runWithFollowing = async (n) => {
+    if (!(await runOne(n))) return;
+    for (const x of following(n).filter(runs)) if (!(await runOne(x))) return;
+    announce(`Ran ${nodeTitle(n)} and the nodes that follow it`);
+  };
+  // Refresh canvas runs every node that runs, parents before children.
+  const refresh = async () => {
+    const order = [...doc.nodes].filter(runs).sort((a, b) => depthOf(a) - depthOf(b));
+    for (const n of order) await runOne(n);
+    announce("Canvas refreshed");
+  };
+  // Debug shows what the node is and how its last run ended, and asks the
+  // local model what went wrong (Gemini at Google).
+  // UNVERIFIED (re-read 2026-11-23: <https://docs.cloud.google.com/bigquery/docs/data-canvas>):
+  // Google's page describes Debug only as "Debug the node.".
+  const debug = (n, box) => {
+    box.hidden = false;
+    const def = { type: n.type, parents: n.parents };
+    for (const k of ["ref", "sql", "query", "chart", "dataset", "table"]) if (n[k]) def[k] = n[k];
+    const err = errors[n.id];
+    const answer = el("div", { class: "bq-canvas-summary", role: "status" });
+    const sql = sqlOf(n);
+    setChildren(box, el("div", { class: "bq-nb-cell-bar" }, el("h4", { text: "Debug" }),
+      el("button", { type: "button", class: "secondary", text: "Close", "aria-label": `Close Debug of ${nodeTitle(n)}`, onclick: () => { box.hidden = true; } })),
+      el("pre", { class: "mono", tabindex: "0", "aria-label": `${nodeTitle(n)} definition`, text: JSON.stringify(def, null, 2) }),
+      el("p", { class: err ? "form-error" : "unavailable", text: err ? `Last run failed: ${err}` : results[n.id] ? "Last run succeeded." : "Not run yet." }),
+      sql && err ? el("button", { type: "button", class: "secondary", text: "Suggest a fix", onclick: async () => {
+        setChildren(answer, spinner("Asking the local model"));
+        try {
+          const fix = await bqLocalModel(`This BigQuery GoogleSQL query failed.\nQuery:\n${sql}\nError: ${err}\nExplain the cause in one sentence, then give the corrected query.`);
+          setChildren(answer, el("p", { text: fix }));
+        } catch (e) { setChildren(answer, el("p", { class: "unavailable", text: e.message })); }
+      } }) : null, answer);
+  };
+  const nodeMenu = (n, out, debugOut) => {
+    const t = n.type;
+    const items = [];
+    if (t === "sql") items.push({ label: "Export as scheduled query", run: () => bqScheduledQueryPane(sqlOf(n), null, () => {}) });
+    if (t === "dest") {
+      items.push({ label: "Detach", disabled: !n.saved, title: n.saved ? null : "Save the table first",
+        run: () => { Object.assign(n, { type: "table", ref: refOf(n), parents: [] }); keep(); draw(); announce("Detached into a table node"); } });
+    }
+    if (t === "viz") items.push({ label: "Export as PNG", run: () => { const svg = liOf(n) && liOf(n).querySelector("svg.bq-chart"); if (svg) bqChartPNG(svg); else notify("Draw the chart first.", "error"); } });
+    items.push({ label: "Delete", danger: true, run: () => deleteNode(n) });
+    if (t !== "insights") items.push({ label: "Debug", run: () => debug(n, debugOut) });
+    items.push({ label: "Duplicate", run: () => duplicate(n) });
+    if (runs(n)) {
+      items.push({ label: "Run", run: () => runOne(n) });
+      if (t !== "insights") items.push({ label: "Run the node and the following node", run: () => runWithFollowing(n) });
+    }
+    return bqMenu(`Node actions for ${nodeTitle(n)}`, items);
   };
   const drawNode = (n) => {
     const out = el("div", { class: "bq-nb-output", role: "status" });
@@ -22734,20 +22992,29 @@ function bqCanvasTab(tab, ctx) {
       area.addEventListener("input", () => { n.text = area.value; keep(); });
       body.push(area);
     }
-    const node = el("li", { class: "bq-canvas-node bq-canvas-" + n.type, "data-node": String(n.id) },
-      el("div", { class: "bq-nb-cell-bar" }, el("h3", { text: nodeTitle(n) }),
+    const debugOut = el("div", { class: "bq-canvas-debug", hidden: true });
+    const handle = el("button", { type: "button", class: "icon-button bq-canvas-move", "aria-label": `Move ${nodeTitle(n)}`,
+      title: "Drag, or use the arrow keys, to move the node", "aria-describedby": `bq-canvas-move-help-${tab.id}`,
+      html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l3 3h-2v4h4V8l3 3-3 3v-2h-4v4h2l-3 3-3-3h2v-4H7v2l-3-3 3-3v2h4V6H9z"/></svg>' });
+    const node = el("li", { class: "bq-canvas-node bq-canvas-" + n.type, "data-node": String(n.id),
+      "aria-label": nodeTitle(n) + (parents.length ? ", from " + parents.map(nodeTitle).join(" and ") : "") },
+      el("div", { class: "bq-nb-cell-bar bq-canvas-bar" }, handle, el("h3", { text: nodeTitle(n) }),
         parents.length ? el("span", { class: "unavailable", text: "from " + parents.map(nodeTitle).join(" and ") }) : null,
-        el("button", { type: "button", class: "secondary", text: "Delete", "aria-label": `Delete ${nodeTitle(n)}`, onclick: () => {
-          doc.nodes = doc.nodes.filter((x) => x.id !== n.id);
-          for (const x of doc.nodes) x.parents = x.parents.filter((p) => p !== n.id);
-          keep(); draw();
-        } })),
-      ...body, nodeActions(n, out), out);
+        nodeMenu(n, out, debugOut)),
+      ...body, nodeActions(n, out), out, debugOut);
+    dragNode(n, node, handle);
     drawResult(n, out);
     return node;
   };
-  const draw = () => setChildren(host, ...(doc.nodes.length ? doc.nodes.map(drawNode)
-    : [el("li", { class: "unavailable", text: "Start with a Search, SQL or Text node from the toolbar, or ask the Data Canvas Assistant." })]));
+  const draw = () => {
+    setChildren(host, ...(doc.nodes.length ? doc.nodes.map(drawNode)
+      : [el("li", { class: "unavailable bq-canvas-empty", text: "Start with a Search, SQL or Text node from the toolbar, or ask the Data Canvas Assistant." })]));
+    for (const li of host.querySelectorAll(".bq-canvas-node")) {
+      if (Number(li.dataset.node) === selected) li.classList.add("is-selected");
+      resizes.observe(li);
+    }
+    layout();
+  };
 
   // The Data Canvas Assistant: a chat that adds nodes for a data question,
   // over the tables chosen in its Settings (Add Data) and its Instructions.
@@ -22821,26 +23088,68 @@ function bqCanvasTab(tab, ctx) {
     openAssistant.setAttribute("aria-expanded", String(!panel.hidden));
     if (!panel.hidden) { drawChat(); question.focus(); }
   } });
+  zoomSel.addEventListener("change", () => setZoom(Number(zoomSel.value) / 100));
+  const zoomToFitB = el("button", { type: "button", class: "secondary", text: "Zoom to Fit", onclick: zoomToFit });
+  const zoomSelection = el("button", { type: "button", class: "secondary", text: "Zoom to Selection", title: "Select a node first", onclick: zoomToSelection });
+  const zoomIn = el("button", { type: "button", class: "secondary", text: "Zoom In", onclick: () => step(1) });
+  const zoomOut = el("button", { type: "button", class: "secondary", text: "Zoom Out", onclick: () => step(-1) });
+  // Full screen: the browser's, or the canvas over the whole window where
+  // the browser refuses it.
+  const fullScreen = el("button", { type: "button", class: "secondary", text: "Full screen", "aria-pressed": "false" });
+  const setFull = (on) => {
+    root.classList.toggle("is-fullscreen", on);
+    fullScreen.textContent = on ? "Exit full screen" : "Full screen";
+    fullScreen.setAttribute("aria-pressed", String(on));
+    requestAnimationFrame(layout);
+  };
+  fullScreen.addEventListener("click", async () => {
+    const on = !root.classList.contains("is-fullscreen");
+    if (!on) {
+      if (document.fullscreenElement === root) { try { await document.exitFullscreen(); } catch { /* left by the browser */ } }
+      setFull(false);
+      return;
+    }
+    try { if (root.requestFullscreen) await root.requestFullscreen(); } catch { /* drawn over the window instead */ }
+    setFull(true);
+  });
+  document.addEventListener("fullscreenchange", () => {
+    if (!document.fullscreenElement && root.classList.contains("is-fullscreen") && root.dataset.native === "1") setFull(false);
+    root.dataset.native = document.fullscreenElement === root ? "1" : "";
+  });
+  const more = bqMenu("More actions", [
+    { label: "Clear canvas", run: () => {
+      if (!doc.nodes.length) { announce("The canvas is already clear"); return; }
+      confirmDestructive({ title: "Clear canvas?", detail: "Every node of this canvas is removed.", confirmLabel: "Clear", style: "confirm",
+        consequence: "Version history keeps the canvas as last saved.",
+        onConfirm: async () => { doc.nodes = []; selected = null; keep(); draw(); announce("Canvas cleared"); } });
+    } },
+  ]);
+  bqMenuButton(more, "More actions", "More actions");
+  const root = el("div", { class: "bq-canvas" });
+  root.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && root.classList.contains("is-fullscreen") && document.fullscreenElement !== root && !e.target.closest(".bq-menu")) setFull(false);
+  });
   draw();
   const toolbar = el("div", { class: "bq-toolbar", role: "toolbar", "aria-label": "Data canvas actions" },
     el("button", { type: "button", class: "secondary", text: "Search", "aria-label": "Add a Search node", onclick: () => add({ type: "search" }) }),
     el("button", { type: "button", class: "secondary", text: "SQL", "aria-label": "Add a SQL node", onclick: () => add({ type: "sql", sql: "" }) }),
     el("button", { type: "button", class: "secondary", text: "Text", "aria-label": "Add a Text node", onclick: () => add({ type: "text" }) }),
-    openAssistant,
-    el("button", { type: "button", class: "secondary", text: "Clear canvas", onclick: () => {
-      if (!doc.nodes.length) return;
-      confirmDestructive({ title: "Clear canvas?", detail: "Every node of this canvas is removed.", confirmLabel: "Clear", style: "confirm",
-        consequence: "Version history keeps the canvas as last saved.",
-        onConfirm: async () => { doc.nodes = []; keep(); draw(); announce("Canvas cleared"); } });
-    } }),
+    zoomSel, zoomToFitB, zoomSelection, zoomIn, zoomOut, fullScreen,
+    el("button", { type: "button", class: "secondary", text: "Tidy canvas", onclick: tidy }),
+    el("button", { type: "button", class: "secondary", text: "Refresh canvas", onclick: refresh }),
+    openAssistant, more,
     el("button", { type: "button", class: "primary", text: "Save", onclick: () => bqSaveAsset(tab, "data_canvas", tab.query || JSON.stringify(doc), ctx.onSaved) }),
     el("button", { type: "button", class: "secondary", text: "Version history", disabled: tab.savedId ? null : true,
       title: tab.savedId ? null : "Save the canvas first", onclick: () => bqVersionHistory({ id: tab.savedId, name: tab.title, kind: "data_canvas" }, (content, title) => ctx.openAsset("data_canvas", content, title)) }),
     tab.savedId ? el("button", { type: "button", class: "secondary", text: "Share", onclick: () => bqManagePermissions({ id: tab.savedId, name: tab.title }) }) : null);
-  return el("div", { class: "bq-canvas" }, toolbar,
-    el("p", { class: "unavailable bq-hint", text: "Natural language (Ask in natural language, Generate, Insights' summary, the Data Canvas Assistant) uses this instance's local model; Google's uses Gemini in BigQuery, which is not run locally, so its answers are unverified against Google's. " +
+  setChildren(root, toolbar,
+    el("p", { class: "unavailable bq-hint", text: "Natural language (Ask in natural language, Generate, Insights' summary, Debug's Suggest a fix, the Data Canvas Assistant) uses this instance's local model; Google's uses Gemini in BigQuery, which is not run locally, so its answers are unverified against Google's. " +
       (bqDataformOn() ? BQ_DATAFORM_NOTE : BQ_NO_DATAFORM) }),
-    el("div", { class: "bq-canvas-body" }, host, panel));
+    el("p", { class: "sr-only", id: `bq-canvas-board-help-${tab.id}`, text: "Control and the mouse wheel zoom. A node's move handle moves it with the arrow keys." }),
+    el("p", { class: "sr-only", id: `bq-canvas-move-help-${tab.id}`, text: "Arrow keys move the node; Shift moves it further." }),
+    el("div", { class: "bq-canvas-body" }, board, panel));
+  requestAnimationFrame(() => { if (board.isConnected) layout(); });
+  return root;
 }
 
 // bqRepoFileTab is a file of a Dataform repository's workspace opened from
@@ -23123,14 +23432,23 @@ function bqQueryTab(tab, ctx) {
   ]);
   bqMenuButton(edit, "Edit", "Edit");
 
+  // Schedule > Create new scheduled query, or Update scheduled query for a
+  // query opened from its Scheduled query details page's Edit (#2094):
+  // Google's New scheduled query pane over this instance's BigQuery Data
+  // Transfer Service.
+  const schedule = bqMenu("Schedule", [
+    { label: "Create new scheduled query", run: () => bqScheduledQueryPane(editor.value, null, (sq) => { tab.scheduledQuery = sq.name; save(); }) },
+    tab.scheduledQuery
+      ? { label: "Update scheduled query", run: () => bqScheduledQueryPane(editor.value, tab.scheduledQuery, () => {}) }
+      : { label: "Update scheduled query", disabled: true, title: "Open a scheduled query with Edit on its Scheduled query details page first.", run: () => {} },
+  ]);
+  bqMenuButton(schedule, "Schedule", "Schedule");
+
   const dialect = el("span", { class: "unavailable bq-dialect" });
   const drawDialect = () => { dialect.textContent = settings.legacySql ? "Legacy SQL" : "GoogleSQL"; };
   drawDialect();
   const toolbar = el("div", { class: "bq-toolbar", role: "toolbar", "aria-label": "Query editor actions" },
-    run, saveMenu, share,
-    el("button", { class: "secondary", type: "button", text: "Schedule", disabled: true, title: BQ_UNAVAILABLE_SCHEDULE,
-                   "aria-description": BQ_UNAVAILABLE_SCHEDULE }),
-    edit, dialect);
+    run, saveMenu, share, schedule, edit, dialect);
   validate();
   return el("div", { class: "bq-query-tab" },
     toolbar, editor, validator,
@@ -23142,6 +23460,168 @@ function bqQueryTab(tab, ctx) {
 
 // bqMenuButton turns a bqMenu's button into a labelled text button, as
 // Google's Save, Share and Edit are.
+// bqScheduledQueryPane is Google's New scheduled query pane
+// (https://docs.cloud.google.com/bigquery/docs/scheduling-queries, read
+// 2026-11-23): Name for the scheduled query; Schedule options (Repeats:
+// Daily by default, Weekly, Monthly, Custom with its Custom schedule, or
+// On-demand; Start now or Start at set time; Schedule end time);
+// Destination for query results (Set a destination table for query
+// results: Dataset name, Table name, Destination table partitioning field,
+// Destination table write preference); Advanced options (Customer-managed
+// key, Scheduled query credential); Additional configurations (Send email
+// notifications, Pub/Sub topic); Save. With name set it is Update scheduled
+// query, filled from the config, and saves it back. The Daily, Weekly and
+// Monthly choices' "At" and day fields are UNVERIFIED (re-read 2026-11-23:
+// <https://docs.cloud.google.com/bigquery/docs/scheduling-queries>): the
+// page names only Daily, Custom and On-demand.
+const BQ_SQ_DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+async function bqScheduledQueryPane(query, name, onSaved) {
+  const panel = infoPanelHost();
+  if (!panel) return;
+  const call = (c, body) => send(`/api/studio/bigquery-scheduled-queries?call=${c}&project=${encodeURIComponent(currentProject())}`, "POST", body);
+  let cur = { displayName: "", schedule: "every day 00:00", onDemand: false, writeDisposition: "WRITE_APPEND", email: false };
+  if (name) {
+    try { cur = await call("get", { name }); } catch (err) { notify(err.message, "error"); return; }
+  }
+  const opener = document.activeElement;
+  const id = (s) => "bq-sq-" + s;
+  const input = (k, attrs = {}) => el("input", { type: "text", id: id(k), ...attrs });
+  const field = (k, label, control, help) => el("div", { class: "form-field" },
+    el("label", { for: id(k), text: label }), control, help ? el("p", { class: "form-help", id: id(k) + "-help", text: help }) : null);
+  const two = (n) => String(n).padStart(2, "0");
+  // A Daily, Weekly or Monthly schedule read back into its fields.
+  let repeats = "Daily", at = "00:00", day = "Monday", monthDay = "1";
+  const m = /^every day (\d\d:\d\d)$/.exec(cur.schedule || "") || [];
+  const w = /^every (sunday|monday|tuesday|wednesday|thursday|friday|saturday) (\d\d:\d\d)$/i.exec(cur.schedule || "") || [];
+  const mo = /^(\d{1,2}) of month (\d\d:\d\d)$/.exec(cur.schedule || "") || [];
+  if (cur.onDemand) repeats = "On-demand";
+  else if (m[1]) at = m[1];
+  else if (w[1]) { repeats = "Weekly"; day = w[1][0].toUpperCase() + w[1].slice(1).toLowerCase(); at = w[2]; }
+  else if (mo[1]) { repeats = "Monthly"; monthDay = mo[1]; at = mo[2]; }
+  else repeats = "Custom";
+  const nameIn = input("name", { value: cur.displayName || "", required: true, maxlength: "1024", placeholder: "My scheduled query" });
+  const rep = el("select", { id: id("repeats") }, ...["Daily", "Weekly", "Monthly", "Custom", "On-demand"].map((r) => {
+    const o = el("option", { value: r, text: r }); o.selected = r === repeats; return o; }));
+  const atIn = el("input", { type: "time", id: id("at"), value: at });
+  const dayIn = el("select", { id: id("day") }, ...BQ_SQ_DAYS.map((d) => { const o = el("option", { value: d, text: d }); o.selected = d === day; return o; }));
+  const mdIn = el("input", { type: "number", id: id("monthday"), min: "1", max: "31", value: monthDay });
+  const custom = input("custom", { value: repeats === "Custom" ? cur.schedule || "" : "", placeholder: "every mon 23:30", "aria-describedby": id("custom") + "-help" });
+  const atF = field("at", "At (UTC)", atIn), dayF = field("day", "Day of the week", dayIn), mdF = field("monthday", "Day of the month", mdIn);
+  const customF = field("custom", "Custom schedule", custom,
+    'Cron-like, in UTC: "every mon 23:30", "every 6 hours", "every hour on mon,tue,wed,thu,fri". Runs are at least 5 minutes apart.');
+  const local = (iso) => { if (!iso) return ""; const d = new Date(iso); return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}T${two(d.getHours())}:${two(d.getMinutes())}`; };
+  const startNow = el("input", { type: "radio", name: "bq-sq-start", id: id("start-now"), value: "now" });
+  const startSet = el("input", { type: "radio", name: "bq-sq-start", id: id("start-set"), value: "set" });
+  (cur.startTime ? startSet : startNow).checked = true;
+  const startAt = el("input", { type: "datetime-local", id: id("start-at"), value: local(cur.startTime), "aria-label": "Start date and run time" });
+  const endOn = el("input", { type: "checkbox", id: id("end-on") });
+  endOn.checked = !!cur.endTime;
+  const endAt = el("input", { type: "datetime-local", id: id("end-at"), value: local(cur.endTime), "aria-label": "End date and time" });
+  const startBox = el("div", { class: "form-field" }, el("label", { for: id("start-at"), text: "Start date and run time" }), startAt);
+  const endBox = el("div", { class: "form-field" }, el("label", { for: id("end-at"), text: "End date and time" }), endAt);
+  const destOn = el("input", { type: "checkbox", id: id("dest-on") });
+  destOn.checked = !!cur.table;
+  const ds = input("dataset", { value: cur.dataset || "" });
+  const tb = input("table", { value: cur.table || "", placeholder: "mytable_{run_date}" });
+  const part = input("partition", { value: cur.partitionField || "" });
+  const wd = el("fieldset", { class: "form-field" }, el("legend", { text: "Destination table write preference" }),
+    ...[["WRITE_APPEND", "Append to table"], ["WRITE_TRUNCATE", "Overwrite table"]].map(([v, l]) => {
+      const r = el("input", { type: "radio", name: "bq-sq-wd", id: id("wd-" + v), value: v });
+      r.checked = (cur.writeDisposition || "WRITE_APPEND") === v;
+      return el("label", { class: "check-line", for: id("wd-" + v) }, r, el("span", { text: " " + l }));
+    }));
+  const destBox = el("div", { class: "bq-sq-dest" },
+    field("dataset", "Dataset name", ds), field("table", "Table name", tb, "Templates such as {run_date} and {run_time} are filled in at each run."),
+    field("partition", "Destination table partitioning field", part, "Leave blank for DDL and DML queries, and for integer range partitioning."), wd);
+  const kms = input("kms", { value: cur.kmsKey || "", placeholder: "projects/PROJECT/locations/LOCATION/keyRings/RING/cryptoKeys/KEY" });
+  const sa = input("sa", { value: cur.serviceAccount || "", placeholder: "name@PROJECT.iam.gserviceaccount.com" });
+  const advanced = el("details", { class: "bq-sq-advanced" }, el("summary", { text: "Advanced options" }),
+    field("kms", "Customer-managed key", kms, "Optional: a Cloud KMS key of this instance encrypts the destination table."),
+    field("sa", "Scheduled query credential", sa, "Optional: the service account the query runs as."));
+  const email = el("input", { type: "checkbox", id: id("email") });
+  email.checked = !!cur.email;
+  const topic = input("topic", { value: cur.topic || "", placeholder: "projects/myproject/topics/mytopic" });
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  const sync = () => {
+    const r = rep.value;
+    atF.hidden = !["Daily", "Weekly", "Monthly"].includes(r);
+    dayF.hidden = r !== "Weekly";
+    mdF.hidden = r !== "Monthly";
+    customF.hidden = r !== "Custom";
+    startBox.hidden = !startSet.checked;
+    endBox.hidden = !endOn.checked;
+    destBox.hidden = !destOn.checked;
+  };
+  for (const c of [rep, startNow, startSet, endOn, destOn]) c.addEventListener("change", sync);
+  const close = () => { closeActionPanel(); if (opener && opener.isConnected) opener.focus(); };
+  const submit = el("button", { type: "submit", class: "primary", text: "Save" });
+  const form = el("form", { class: "action-form bq-sq-form", novalidate: true },
+    field("name", "Name for the scheduled query", nameIn),
+    el("h3", { text: "Schedule options" }),
+    field("repeats", "Repeats", rep), atF, dayF, mdF, customF,
+    el("fieldset", { class: "form-field" }, el("legend", { text: "Start" }),
+      el("label", { class: "check-line", for: id("start-now") }, startNow, el("span", { text: " Start now" })),
+      el("label", { class: "check-line", for: id("start-set") }, startSet, el("span", { text: " Start at set time" }))),
+    startBox,
+    el("label", { class: "check-line", for: id("end-on") }, endOn, el("span", { text: " Schedule end time" })), endBox,
+    el("h3", { text: "Destination for query results" }),
+    el("label", { class: "check-line", for: id("dest-on") }, destOn, el("span", { text: " Set a destination table for query results" })),
+    destBox, advanced,
+    el("h3", { text: "Additional configurations" }),
+    el("label", { class: "check-line", for: id("email") }, email, el("span", { text: " Send email notifications" })),
+    el("p", { class: "form-help", text: "Failure emails are recorded on the scheduled query's page, never sent." }),
+    field("topic", "Pub/Sub topic", topic),
+    error,
+    el("div", { class: "form-actions" }, submit, el("button", { type: "button", class: "secondary", text: "Cancel", onclick: close })));
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const say = (t) => { error.textContent = t; error.hidden = false; };
+    error.hidden = true;
+    const r = rep.value;
+    const hhmm = atIn.value || "00:00";
+    const sched = r === "Daily" ? `every day ${hhmm}` : r === "Weekly" ? `every ${dayIn.value.toLowerCase()} ${hhmm}`
+      : r === "Monthly" ? `${Number(mdIn.value) || 1} of month ${hhmm}` : r === "Custom" ? custom.value.trim() : "";
+    if (!nameIn.value.trim()) { say("Name for the scheduled query is required."); nameIn.focus(); return; }
+    if (r === "Custom" && !sched) { say("Custom schedule is required."); custom.focus(); return; }
+    if (startSet.checked && !startAt.value) { say("Choose the start date and run time."); startAt.focus(); return; }
+    if (endOn.checked && !endAt.value) { say("Choose the schedule end time."); endAt.focus(); return; }
+    if (destOn.checked && (!ds.value.trim() || !tb.value.trim())) { say("Dataset name and Table name are required for a destination table."); (ds.value.trim() ? tb : ds).focus(); return; }
+    const body = {
+      name: name || "", displayName: nameIn.value.trim(), query, schedule: sched, onDemand: r === "On-demand",
+      startTime: startSet.checked ? new Date(startAt.value).toISOString().replace(/\.\d+Z$/, "Z") : "",
+      endTime: endOn.checked ? new Date(endAt.value).toISOString().replace(/\.\d+Z$/, "Z") : "",
+      dataset: destOn.checked ? ds.value.trim() : "", table: destOn.checked ? tb.value.trim() : "",
+      partitionField: destOn.checked ? part.value.trim() : "",
+      writeDisposition: (form.querySelector("input[name=bq-sq-wd]:checked") || {}).value || "WRITE_APPEND",
+      kmsKey: kms.value.trim(), serviceAccount: sa.value.trim(), email: email.checked, topic: topic.value.trim(),
+    };
+    setBusy(submit, true);
+    try {
+      const sq = await call("save", body);
+      close();
+      notify(name ? `Updated scheduled query ${sq.displayName}` : `Created scheduled query ${sq.displayName}`);
+      onSaved(sq);
+    } catch (err) {
+      say(err.message);
+    } finally {
+      setBusy(submit, false);
+    }
+  });
+  const title = name ? "Update scheduled query" : "New scheduled query";
+  panel.hidden = false;
+  panel.dataset.actionPanel = "scheduled-query";
+  document.documentElement.setAttribute("data-info", "open");
+  setChildren(panel, el("section", { class: "side-panel bq-sq-pane", id: "bq-sq-pane", role: "region", "aria-labelledby": "bq-sq-title" },
+    el("div", { class: "info-head" }, el("h2", { id: "bq-sq-title", text: title }),
+      el("button", { type: "button", class: "icon-button", id: "bq-sq-close", "aria-label": `Close ${title}`, onclick: close,
+        html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>' })),
+    el("p", { class: "form-help", text: "A scheduled query is a transfer of this instance's BigQuery Data Transfer Service: it runs here, on this instance's BigQuery, never on Google's. Times are in UTC." }),
+    form));
+  panel.addEventListener("keydown", (e) => { if (e.key === "Escape" && panel.dataset.actionPanel === "scheduled-query") { e.preventDefault(); close(); } });
+  sync();
+  nameIn.focus();
+}
+
 function bqMenuButton(menu, label, title) {
   const b = menu.querySelector("button");
   b.classList.remove("icon-button", "bq-node-menu");

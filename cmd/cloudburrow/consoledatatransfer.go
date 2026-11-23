@@ -274,7 +274,11 @@ func (p dataTransferProvider) DetailActions(ctx context.Context, project string,
 		return nil
 	}
 	runs, _ := api.ListTransferRuns(ctx, &dtpb.ListTransferRunsRequest{Parent: c.GetName(), PageSize: 1000})
-	return dtDetailActions(dtState(c), runs.GetTransferRuns())
+	acts := dtDetailActions(dtState(c), runs.GetTransferRuns())
+	if p.only == datatransfer.ScheduledQuery {
+		acts = append([]console.Action{scheduledQueryEdit(c.GetName())}, acts...)
+	}
+	return acts
 }
 
 func (p dataTransferProvider) Act(ctx context.Context, project, name, action string) error {
