@@ -10,7 +10,9 @@ import (
 	"strings"
 	"testing"
 
+	notebooks "cloud.google.com/go/notebooks/apiv2"
 	nbpb "cloud.google.com/go/notebooks/apiv2/notebookspb"
+	"google.golang.org/api/option"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )
@@ -156,6 +158,15 @@ func TestWorkbenchInstances(t *testing.T) {
 	if err != nil || len(l.GetInstances()) != 1 || l.GetInstances()[0].GetName() != name {
 		t.Errorf("filtered list = %v, %v", l, err)
 	}
+	for _, f := range []string{`labels.env="prod" AND state=ACTIVE`, `name="` + name + `"`} {
+		l, err := w.ListInstances(ctx, &nbpb.ListInstancesRequest{Parent: parent, Filter: f})
+		if err != nil || len(l.GetInstances()) != 1 || l.GetInstances()[0].GetName() != name {
+			t.Errorf("list %s = %v, %v", f, l, err)
+		}
+	}
+	if l, err := w.ListInstances(ctx, &nbpb.ListInstancesRequest{Parent: "projects/p/locations/-"}); err != nil || len(l.GetInstances()) != 2 {
+		t.Errorf("list under locations/- = %v, %v", l, err)
+	}
 	srv := httptest.NewServer(s.Handler())
 	defer srv.Close()
 	resp, err := http.Get(srv.URL + "/v2/" + parent + "/instances")
@@ -207,5 +218,55 @@ func TestWorkbenchInstances(t *testing.T) {
 	}
 	if _, ok := host.state[workbenchKey(name)]; ok {
 		t.Error("the deleted instance's runtime is still running")
+	}
+}
+
+// TestWorkbenchRESTClient drives the JSON surface with the official REST
+// client: its create, update (camelCase mask), stop and delete operations.
+func TestWorkbenchRESTClient(t *testing.T) {
+	ctx := context.Background()
+	s := NewServer(nil)
+	s.SetWorkbench(outputsHost{newFakeHost()}, "")
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	c, err := notebooks.NewNotebookRESTClient(ctx, option.WithEndpoint(srv.URL), option.WithoutAuthentication())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	parent := "projects/p/locations/us-central1-a"
+	op, err := c.CreateInstance(ctx, &nbpb.CreateInstanceRequest{Parent: parent, InstanceId: "rest-one", Instance: &nbpb.Instance{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	in, err := op.Wait(ctx)
+	if err != nil || in.GetState() != nbpb.State_ACTIVE {
+		t.Fatalf("create = %v, %v", in, err)
+	}
+	up, err := c.UpdateInstance(ctx, &nbpb.UpdateInstanceRequest{Instance: &nbpb.Instance{Name: in.GetName(), Labels: map[string]string{"a": "b"},
+		Infrastructure: &nbpb.Instance_GceSetup{GceSetup: &nbpb.GceSetup{Metadata: map[string]string{"idle-timeout-seconds": "1200"}}}},
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"labels", "gce_setup.metadata"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := up.Wait(ctx); err != nil || got.GetLabels()["a"] != "b" || got.GetGceSetup().GetMetadata()["idle-timeout-seconds"] != "1200" {
+		t.Errorf("update = %v, %v", got, err)
+	}
+	stop, err := c.StopInstance(ctx, &nbpb.StopInstanceRequest{Name: in.GetName()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := stop.Wait(ctx); err != nil || got.GetState() != nbpb.State_STOPPED {
+		t.Errorf("stop = %v, %v", got, err)
+	}
+	if _, err := c.CreateInstance(ctx, &nbpb.CreateInstanceRequest{Parent: parent, InstanceId: "rest-one", Instance: &nbpb.Instance{}}); err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Errorf("duplicate over REST = %v", err)
+	}
+	del, err := c.DeleteInstance(ctx, &nbpb.DeleteInstanceRequest{Name: in.GetName()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := del.Wait(ctx); err != nil {
+		t.Errorf("delete: %v", err)
 	}
 }

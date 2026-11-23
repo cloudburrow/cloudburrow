@@ -61,6 +61,7 @@ type workbenchProvider struct {
 func (workbenchProvider) ID() string                    { return "workbench-instances" }
 func (workbenchProvider) Title() string                 { return "Instances" }
 func (workbenchProvider) CreateTitle() string           { return "Create instance" }
+func (workbenchProvider) CreateSubmit() string          { return "Create" }
 func (workbenchProvider) MutationBudget() time.Duration { return colabBudget }
 
 func workbenchStateText(s nbpb.State) string {
@@ -150,7 +151,7 @@ func workbenchActions(project string, in *nbpb.Instance) []console.Action {
 	switch in.GetState() {
 	case nbpb.State_ACTIVE:
 		return []console.Action{
-			{ID: "open-jupyterlab", Label: "Open JupyterLab", Href: workbenchRoute + "/" + url.PathEscape(vertexLast(in.GetName())) + "?project=" + url.QueryEscape(project)},
+			{ID: "open-jupyterlab", Label: "Open JupyterLab", Href: workbenchRoute + "/" + url.PathEscape(vertexLast(in.GetName())) + "?project=" + url.QueryEscape(project) + "&tab=query"},
 			{ID: "stop", Label: "Stop"},
 			{ID: "reset", Label: "Reset", Destructive: true, ConfirmStyle: console.DeleteConfirmClick, Confirm: "A reset forcibly wipes the memory contents of the instance."},
 		}
@@ -223,6 +224,12 @@ func (p workbenchProvider) Detail(ctx context.Context, project string, path []st
 	if msg := in.GetHealthInfo()["error"]; msg != "" {
 		d.Summary = append(d.Summary, console.Property{Label: "Error", Value: msg})
 	}
+	// The details, then the code box Open JupyterLab opens (JupyterLab is
+	// not served; UNVERIFIED tab names).
+	d.Sections = []console.Section{
+		{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Properties: d.Summary}}},
+		{ID: "query", Label: "Notebook", Kind: console.KindQuery},
+	}
 	return d, nil
 }
 
@@ -244,7 +251,7 @@ func (p workbenchProvider) DetailActions(ctx context.Context, project string, pa
 }
 
 func (workbenchProvider) CreateForm() (string, []console.Field) {
-	return "Create", []console.Field{
+	return "Create new", []console.Field{
 		{Name: "name", Label: "Name", Type: "text", Required: true, Pattern: `^[a-z]([a-z0-9\-]{0,61}[a-z0-9])?$`,
 			Help: "Must start with a letter followed by up to 62 lowercase letters, numbers, or hyphens (-), and cannot end with a hyphen."},
 		{Name: "zone", Label: "Zone", Type: "select", Options: workbenchZones, Default: "us-central1-a", Required: true, Section: "Details"},
