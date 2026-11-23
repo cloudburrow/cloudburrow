@@ -20,8 +20,11 @@ type fakePolicies struct {
 	lists map[string][]string
 }
 
-func (f *fakePolicies) GatewayRules(p string) ([]GatewayRule, bool) { r, ok := f.rules[p]; return r, ok }
-func (f *fakePolicies) URLList(n string) ([]string, bool)           { l, ok := f.lists[n]; return l, ok }
+func (f *fakePolicies) GatewayRules(p string) ([]GatewayRule, bool) {
+	r, ok := f.rules[p]
+	return r, ok
+}
+func (f *fakePolicies) URLList(n string) ([]string, bool) { l, ok := f.lists[n]; return l, ok }
 
 // loopbackOnly refuses any address that is not on this machine, so the
 // test's proxy can never reach the internet.
@@ -142,7 +145,10 @@ func TestSecureWebProxyNeverDialsGoogle(t *testing.T) {
 	pols := &fakePolicies{rules: map[string][]GatewayRule{pol: {{Name: "all", Priority: 1, Enabled: true, Allow: true, Session: "true"}}}}
 	s, addr := newGateway(t, pols)
 	dialed := false
-	s.UseTransport(nil, func(ctx context.Context, n, a string) (net.Conn, error) { dialed = true; return loopbackOnly(ctx, n, a) })
+	s.UseTransport(nil, func(ctx context.Context, n, a string) (net.Conn, error) {
+		dialed = true
+		return loopbackOnly(ctx, n, a)
+	})
 	cn, err := net.Dial("tcp", addr)
 	if err != nil {
 		t.Fatal(err)
@@ -201,8 +207,8 @@ func TestURLListMatching(t *testing.T) {
 
 func TestMatchers(t *testing.T) {
 	for e, app := range map[string]bool{
-		"host() == 'a.com' && source.matchTag('tagValues/1')":       false,
-		"source.matchServiceAccount('x@p.iam.gserviceaccount.com')": false,
+		"host() == 'a.com' && source.matchTag('tagValues/1')":           false,
+		"source.matchServiceAccount('x@p.iam.gserviceaccount.com')":     false,
 		"inIpRange(source.ip, '10.0.0.0/8') && destination.port == 443": false,
 		"request.method == 'GET' && request.url().startsWith('a.com/')": true,
 		"request.headers['x'] == 'y' && request.host() == 'a.com'":      true,

@@ -388,7 +388,10 @@ compat_shard() {
       # policies (Network Security), and Certificate Manager's, IAP's and
       # Network Security's APIs on the Compute Engine port, all under
       # COMPUTE; IAP's browser sign-in and TCP forwarding (gcloud compute
-      # start-iap-tunnel and ssh --tunnel-through-iap to a VM) too.
+      # start-iap-tunnel and ssh --tunnel-through-iap to a VM) too; Secure
+      # Web Proxy (Network Services' gateways, Network Security's gateway
+      # security policies, rules and URL lists) through its forward proxy,
+      # to loopback origins only.
       # Certificate Authority Service (#1834), in process like KMS.
       # Cloud KMS (#309) and Cloud Logging (#304). Resource Manager's tests
       # run in the storage shard; the Logging folder and organization tests
