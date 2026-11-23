@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"sort"
+	"strconv"
 	"strings"
 
 	alloydbpb "cloud.google.com/go/alloydb/apiv1/alloydbpb"
@@ -65,6 +66,7 @@ func (s *Server) createInstance(req *alloydbpb.CreateInstanceRequest) (*longrunn
 	case alloydbpb.Instance_PRIMARY:
 		if primary != nil {
 			// UNVERIFIED: Google's message.
+			// (re-read 2026-11-23: docs.cloud.google.com/alloydb/docs/reference/rest.)
 			return nil, apierror.AlreadyExists("cluster %s already has a primary instance, %s", c.GetName(), primary.GetName())
 		}
 		if in.GetReadPoolConfig() != nil {
@@ -119,13 +121,14 @@ func (s *Server) createInstance(req *alloydbpb.CreateInstanceRequest) (*longrunn
 		if !isPrimary {
 			return nil
 		}
+		// The roles first: the restored data's grants name them.
+		if err := s.setupPrimary(ctx, cluster, spec.Server); err != nil {
+			return err
+		}
 		if restore != "" {
 			if err := e.Load(ctx, spec.Server, restore); err != nil {
 				return fmt.Errorf("load the restored data: %w", err)
 			}
-		}
-		if err := s.setupPrimary(ctx, cluster, spec.Server); err != nil {
-			return err
 		}
 		if spec.PITR {
 			if err := s.takeBase(ctx, cluster, spec.Server, true); err != nil {
@@ -169,6 +172,7 @@ func checkMachine(in *alloydbpb.Instance) error {
 	}
 	if mc.CpuCount == 0 {
 		// UNVERIFIED: the API's default; gcloud requires --cpu-count.
+		// (re-read 2026-11-23: docs.cloud.google.com/alloydb/docs/reference/rest.)
 		mc.CpuCount = 2
 	}
 	if !cpuCounts[mc.CpuCount] {
@@ -276,6 +280,11 @@ func PSCDNSName(instance string) string {
 }
 
 // specOf is an instance's server; the caller holds mu.
+// standbyFloorFlags are the settings a standby needs at least as high as
+// its primary's
+// (postgresql.org/docs/current/hot-standby.html#HOT-STANDBY-ADMIN).
+var standbyFloorFlags = []string{"max_connections", "max_prepared_transactions", "max_locks_per_transaction", "max_wal_senders", "max_worker_processes"}
+
 func (s *Server) specOf(in *alloydbpb.Instance) (ServerSpec, error) {
 	m := instanceRE.FindStringSubmatch(in.GetName())
 	if m == nil {
@@ -296,6 +305,23 @@ func (s *Server) specOf(in *alloydbpb.Instance) (ServerSpec, error) {
 			return ServerSpec{}, apierror.FailedPrecondition("cluster %s has no primary instance", m[1])
 		}
 		spec.ReplicaOf = serverName(p.GetName())
+		// A hot standby refuses to recover with a lower setting of these
+		// than its primary's (PostgreSQL's "insufficient parameter
+		// settings"), so a read pool's nodes take the primary's where it
+		// is higher.
+		for _, k := range standbyFloorFlags {
+			pv, ok := p.GetDatabaseFlags()[k]
+			if !ok {
+				continue
+			}
+			pn, _ := strconv.ParseInt(pv, 10, 64)
+			if own, ok := spec.Flags[k]; ok {
+				if n, err := strconv.ParseInt(own, 10, 64); err == nil && n >= pn {
+					continue
+				}
+			}
+			spec.Flags[k] = pv
+		}
 	} else {
 		spec.PITR = c.GetContinuousBackupConfig().GetEnabled()
 	}
@@ -522,6 +548,7 @@ func (s *Server) DeleteInstance(_ context.Context, req *alloydbpb.DeleteInstance
 		for _, k := range sortedKeys(s.instances, m[1]+"/instances/") {
 			if s.instances[k].GetInstanceType() == alloydbpb.Instance_READ_POOL {
 				// UNVERIFIED: Google's message.
+				// (re-read 2026-11-23: docs.cloud.google.com/alloydb/docs/reference/rest.)
 				return nil, apierror.FailedPrecondition("cluster %s has read pool instances; delete them before its primary", m[1])
 			}
 		}
@@ -708,6 +735,7 @@ func (s *Server) FailoverInstance(_ context.Context, req *alloydbpb.FailoverInst
 	return s.restartLike("failover", req.GetName(), req.GetRequestId(), req.GetValidateOnly(), true, func(in *alloydbpb.Instance) error {
 		if in.GetInstanceType() != alloydbpb.Instance_PRIMARY || in.GetAvailabilityType() != alloydbpb.Instance_REGIONAL {
 			// UNVERIFIED: Google's message.
+			// (re-read 2026-11-23: docs.cloud.google.com/alloydb/docs/reference/rest.)
 			return apierror.FailedPrecondition("instance %s is not a REGIONAL primary instance; only those can fail over", in.GetName())
 		}
 		return nil

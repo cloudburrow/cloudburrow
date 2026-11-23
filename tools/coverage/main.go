@@ -72,6 +72,7 @@ import (
 
 	_ "cloud.google.com/go/aiplatform/apiv1/aiplatformpb"
 	_ "cloud.google.com/go/aiplatform/apiv1beta1/aiplatformpb"
+	_ "cloud.google.com/go/alloydb/apiv1/alloydbpb"
 	_ "cloud.google.com/go/apphub/apiv1/apphubpb"
 	_ "cloud.google.com/go/artifactregistry/apiv1/artifactregistrypb"
 	_ "cloud.google.com/go/bigquery/analyticshub/apiv1/analyticshubpb"
@@ -368,6 +369,10 @@ var areas = []area{
 	// App Hub (#2110): CloudBurrow's own, gRPC and JSON on one port; its
 	// Locations, Operations and IAM mixins are other areas' rows.
 	{Key: "apphub", Title: "App Hub (v1)", Own: true, Services: []string{"google.cloud.apphub.v1.AppHub"}},
+	// AlloyDB for PostgreSQL (#2191): CloudBurrow's own, gRPC and JSON on
+	// one port; v1beta and v1alpha are bridged onto v1, and its Locations
+	// and Operations mixins are other areas' rows.
+	{Key: "alloydb", Title: "AlloyDB for PostgreSQL (v1)", Own: true, Services: []string{"google.cloud.alloydb.v1.AlloyDBAdmin"}},
 	// Cloud Trace (#2118): CloudBurrow's own, v1 and v2 gRPC and JSON on
 	// one port, beside OTLP's ingestion (not a googleapis service).
 	{Key: "trace", Title: "Cloud Trace API (v1 and v2)", Own: true,

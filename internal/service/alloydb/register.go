@@ -201,6 +201,7 @@ func (o *operations) DeleteOperation(_ context.Context, req *longrunningpb.Delet
 // CancelOperation of a running operation is refused: the servers' work is
 // not cancelled half-way. UNVERIFIED: which of AlloyDB's operations Google
 // cancels.
+// (re-read 2026-11-23: docs.cloud.google.com/alloydb/docs/reference/rest.)
 func (o *operations) CancelOperation(_ context.Context, req *longrunningpb.CancelOperationRequest) (*emptypb.Empty, error) {
 	o.s.mu.Lock()
 	defer o.s.mu.Unlock()

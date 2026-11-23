@@ -2,6 +2,7 @@ package alloydb
 
 import (
 	"context"
+	"encoding/json"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	alloydbpb "cloud.google.com/go/alloydb/apiv1/alloydbpb"
 	longrunningpb "cloud.google.com/go/longrunning/autogen/longrunningpb"
 	"google.golang.org/genproto/googleapis/type/dayofweek"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -142,8 +144,12 @@ func (s *Server) createBackup(name string, b *alloydbpb.Backup, requestID string
 		return nil, err
 	}
 	dir := s.backupDir(b)
+	users := s.usersOf(b.GetClusterName())
 	s.background(op.Name, func(ctx context.Context) error {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return err
+		}
+		if err := writeUsers(dir, users); err != nil {
 			return err
 		}
 		return s.opts.Engine.Dump(ctx, server, dir)
@@ -388,6 +394,58 @@ func (s *Server) backupsOfCluster(cluster string) []*alloydbpb.Backup {
 	for _, k := range sortedKeys(s.backups, "") {
 		if s.backups[k].GetClusterName() == cluster {
 			out = append(out, clone(s.backups[k]))
+		}
+	}
+	return out
+}
+
+// usersFile keeps, beside a dump, the users of the cluster it was taken
+// from: a dump holds no roles, and a restored cluster's primary creates
+// them before it loads the data, whose grants name them. Google's backups
+// are of the whole cluster, users included.
+const usersFile = "alloydb-users.json"
+
+// usersOf are cluster's users; the caller holds mu.
+func (s *Server) usersOf(cluster string) []*alloydbpb.User {
+	var out []*alloydbpb.User
+	for _, k := range sortedKeys(s.users, cluster+"/users/") {
+		out = append(out, clone(s.users[k]))
+	}
+	return out
+}
+
+func writeUsers(dir string, users []*alloydbpb.User) error {
+	var out []json.RawMessage
+	for _, u := range users {
+		b, err := protojson.Marshal(u)
+		if err != nil {
+			return err
+		}
+		out = append(out, b)
+	}
+	b, err := json.Marshal(out)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, usersFile), b, 0o600)
+}
+
+// readUsers are the users written beside a dump, none when there is no
+// such file (a dump from before it was kept).
+func readUsers(dir string) []*alloydbpb.User {
+	b, err := os.ReadFile(filepath.Join(dir, usersFile))
+	if err != nil {
+		return nil
+	}
+	var raw []json.RawMessage
+	if json.Unmarshal(b, &raw) != nil {
+		return nil
+	}
+	var out []*alloydbpb.User
+	for _, r := range raw {
+		u := &alloydbpb.User{}
+		if protojson.Unmarshal(r, u) == nil {
+			out = append(out, u)
 		}
 	}
 	return out

@@ -19,6 +19,7 @@ import (
 // DefaultVersion is a new cluster's database version when the request
 // names none. UNVERIFIED: the API reference says only that "a default
 // database version will be used"; gcloud's reference names POSTGRES_16.
+// (re-read 2026-11-23: docs.cloud.google.com/alloydb/docs/reference/rest.)
 const DefaultVersion = alloydbpb.DatabaseVersion_POSTGRES_16
 
 // supportedVersions are the major versions a new cluster may have: those
@@ -50,7 +51,6 @@ func (s *Server) CreateCluster(_ context.Context, req *alloydbpb.CreateClusterRe
 	if err != nil {
 		return nil, err
 	}
-	_ = project
 	if err := checkID("cluster", req.GetClusterId()); err != nil {
 		return nil, err
 	}
@@ -58,7 +58,7 @@ func (s *Server) CreateCluster(_ context.Context, req *alloydbpb.CreateClusterRe
 	if c == nil {
 		c = &alloydbpb.Cluster{}
 	}
-	if err := s.prepareCluster(c); err != nil {
+	if err := s.prepareCluster(project, c); err != nil {
 		return nil, err
 	}
 	name := req.GetParent() + "/clusters/" + req.GetClusterId()
@@ -91,7 +91,7 @@ func (s *Server) CreateCluster(_ context.Context, req *alloydbpb.CreateClusterRe
 }
 
 // prepareCluster checks a new cluster's fields and fills their defaults.
-func (s *Server) prepareCluster(c *alloydbpb.Cluster) error {
+func (s *Server) prepareCluster(project string, c *alloydbpb.Cluster) error {
 	if c.GetDatabaseVersion() == alloydbpb.DatabaseVersion_DATABASE_VERSION_UNSPECIFIED {
 		c.DatabaseVersion = DefaultVersion
 	}
@@ -105,7 +105,16 @@ func (s *Server) prepareCluster(c *alloydbpb.Cluster) error {
 	if network == "" && !c.GetPscConfig().GetPscEnabled() {
 		// UNVERIFIED: Google's message. A cluster needs a VPC network
 		// for private services access, or Private Service Connect.
+		// (re-read 2026-11-23: docs.cloud.google.com/alloydb/docs/reference/rest.)
 		return apierror.InvalidArgument("cluster.network_config.network is required unless Private Service Connect is enabled (cluster.psc_config.psc_enabled)")
+	}
+	if network != "" && !strings.Contains(network, "/") {
+		// A bare name is the project's network, as gcloud's --network
+		// default sends it; Google answers it as a full resource name.
+		// UNVERIFIED: Google writes the project's number there; this
+		// instance writes the ID it was given.
+		// (re-read 2026-11-23: docs.cloud.google.com/alloydb/docs/reference/rest/v1/projects.locations.clusters.)
+		network = "projects/" + project + "/global/networks/" + network
 	}
 	if network != "" {
 		if c.NetworkConfig == nil {
@@ -160,7 +169,10 @@ func (s *Server) stampCluster(name string, c *alloydbpb.Cluster, location string
 	if c.GetPscConfig().GetPscEnabled() {
 		c.PscConfig.ServiceOwnedProjectNumber = projectNumber(c.Uid)
 	}
-	c.Etag = etag()
+	// No etag: Google's clusters carry none (Terraform's
+	// google_alloydb_cluster keeps etag as an input only, and plans a
+	// change for one the server sets). UNVERIFIED.
+	// (re-read 2026-11-23: registry.terraform.io/providers/hashicorp/google/latest/docs/resources/alloydb_cluster.)
 }
 
 // stampContinuous sets continuous_backup_info from the configuration; the
@@ -264,7 +276,9 @@ func (s *Server) ListClusters(_ context.Context, req *alloydbpb.ListClustersRequ
 
 // clusterPaths are the fields UpdateCluster changes, by mask path.
 var clusterPaths = map[string]func(dst, src *alloydbpb.Cluster){
-	"display_name":             func(d, s *alloydbpb.Cluster) { d.DisplayName = s.DisplayName },
+	"display_name": func(d, s *alloydbpb.Cluster) { d.DisplayName = s.DisplayName },
+	// etag is a freshness check, not a change (Terraform sends it).
+	"etag":                     func(d, s *alloydbpb.Cluster) {},
 	"labels":                   func(d, s *alloydbpb.Cluster) { d.Labels = s.Labels },
 	"annotations":              func(d, s *alloydbpb.Cluster) { d.Annotations = s.Annotations },
 	"automated_backup_policy":  func(d, s *alloydbpb.Cluster) { d.AutomatedBackupPolicy = s.AutomatedBackupPolicy },
@@ -332,7 +346,7 @@ func (s *Server) UpdateCluster(_ context.Context, req *alloydbpb.UpdateClusterRe
 		}
 		return nil, apierror.NotFound("Resource '%s' was not found", in.GetName())
 	}
-	if in.GetEtag() != "" && in.GetEtag() != c.GetEtag() {
+	if c.GetEtag() != "" && in.GetEtag() != "" && in.GetEtag() != c.GetEtag() {
 		return nil, apierror.Aborted("etag %q does not match the cluster's", in.GetEtag())
 	}
 	next := clone(c)
@@ -374,7 +388,6 @@ func (s *Server) UpdateCluster(_ context.Context, req *alloydbpb.UpdateClusterRe
 		p.Location = m[2]
 	}
 	next.UpdateTime = timestamppb.New(s.now())
-	next.Etag = etag()
 	s.clusters[c.GetName()] = next
 	if password != "" {
 		s.passwords[c.GetName()] = password
@@ -432,12 +445,13 @@ func (s *Server) DeleteCluster(_ context.Context, req *alloydbpb.DeleteClusterRe
 	if err != nil {
 		return nil, err
 	}
-	if req.GetEtag() != "" && req.GetEtag() != c.GetEtag() {
+	if c.GetEtag() != "" && req.GetEtag() != "" && req.GetEtag() != c.GetEtag() {
 		return nil, apierror.Aborted("etag %q does not match the cluster's", req.GetEtag())
 	}
 	insts := sortedKeys(s.instances, c.GetName()+"/instances/")
 	if len(insts) > 0 && !req.GetForce() {
 		// UNVERIFIED: Google's message.
+		// (re-read 2026-11-23: docs.cloud.google.com/alloydb/docs/reference/rest.)
 		return nil, apierror.FailedPrecondition("Cluster %s has instances; delete them first, or set force to delete them with the cluster", c.GetName())
 	}
 	if req.GetValidateOnly() {
@@ -565,11 +579,12 @@ func (s *Server) RestoreCluster(_ context.Context, req *alloydbpb.RestoreCluster
 	}
 	if c.NetworkConfig == nil && c.Network == "" && !c.GetPscConfig().GetPscEnabled() {
 		// The source's network, when the request names none. UNVERIFIED.
+		// (re-read 2026-11-23: docs.cloud.google.com/alloydb/docs/reference/rest.)
 		if src, ok := s.clusters[req.GetContinuousBackupSource().GetCluster()]; ok {
 			c.NetworkConfig = clone(src.GetNetworkConfig())
 		}
 	}
-	if err := s.prepareCluster(c); err != nil {
+	if err := s.prepareCluster(strings.Split(req.GetParent(), "/")[1], c); err != nil {
 		return nil, err
 	}
 	if req.GetValidateOnly() {
@@ -582,6 +597,10 @@ func (s *Server) RestoreCluster(_ context.Context, req *alloydbpb.RestoreCluster
 	if err != nil {
 		return nil, err
 	}
+	var srcUsers []*alloydbpb.User
+	if srcServer != "" {
+		srcUsers = s.usersOf(req.GetContinuousBackupSource().GetCluster())
+	}
 	s.background(op.Name, func(ctx context.Context) error {
 		if srcServer == "" {
 			return nil
@@ -590,6 +609,9 @@ func (s *Server) RestoreCluster(_ context.Context, req *alloydbpb.RestoreCluster
 			return apierror.FailedPrecondition("no engine runs AlloyDB instances here")
 		}
 		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return err
+		}
+		if err := writeUsers(dir, srcUsers); err != nil {
 			return err
 		}
 		return s.opts.Engine.RecoverTo(ctx, srcServer, at, dir)
@@ -604,6 +626,15 @@ func (s *Server) RestoreCluster(_ context.Context, req *alloydbpb.RestoreCluster
 			return nil, err
 		}
 		s.restores[name] = dir
+		// The source's users, which the restored data's grants name.
+		for _, u := range readUsers(dir) {
+			id := u.GetName()[strings.LastIndex(u.GetName(), "/")+1:]
+			if _, ok := s.users[name+"/users/"+id]; ok {
+				continue
+			}
+			u.Name = name + "/users/" + id
+			s.users[u.Name] = u
+		}
 		c.State = alloydbpb.Cluster_READY
 		c.Reconciling = false
 		return s.clusterView(c), nil
@@ -621,7 +652,7 @@ func (s *Server) UpgradeCluster(_ context.Context, req *alloydbpb.UpgradeCluster
 	if err != nil {
 		return nil, err
 	}
-	if req.GetEtag() != "" && req.GetEtag() != c.GetEtag() {
+	if c.GetEtag() != "" && req.GetEtag() != "" && req.GetEtag() != c.GetEtag() {
 		return nil, apierror.Aborted("etag %q does not match the cluster's", req.GetEtag())
 	}
 	if !supportedVersions[req.GetVersion()] {
@@ -724,7 +755,6 @@ func (s *Server) UpgradeCluster(_ context.Context, req *alloydbpb.UpgradeCluster
 			}
 		}
 		c.UpdateTime = timestamppb.New(s.now())
-		c.Etag = etag()
 		if err != nil {
 			return nil, err
 		}

@@ -36,9 +36,10 @@ tracks it; a closed issue is named only where it says what was built.
 | Cloud SQL, Memorystore | 6 | 1 | 4 | 1 | 0 |
 | Functions, credentials, tooling | 1 | 0 | 1 | 0 | 0 |
 | App Hub | 5 | 1 | 1 | 3 | 0 |
+| AlloyDB for PostgreSQL | 7 | 3 | 3 | 1 | 0 |
 | Dataform | 7 | 0 | 2 | 4 | 1 |
 | Console | 9 | 7 | 2 | 0 | 0 |
-| **Total** | **89** | **14** | **24** | **44** | **7** |
+| **Total** | **96** | **17** | **27** | **45** | **7** |
 
 ## Cloud Storage
 
@@ -343,6 +344,25 @@ LogEntry `apphub` on entries.list and in every Logging filter, and the console's
 | LogEntry `apphubDestination` and `apphubSource` are never set: Google documents them for "edge"-like logs such as VPC Flow Logs, which this instance does not produce | no emulator support | M |
 | LogEntry `apphub` is in the JSON API's answers only: `google/logging/v2/log_entry.proto` in googleapis and `cloud.google.com/go/logging` (through v1.21.1) have no such field, so a gRPC answer cannot carry it, though gRPC filters on `apphub.*` match | not documented by Google | S |
 | Where each discovered type is placed (a location-less resource in `global`, Spanner's and Firestore's multi-regions in `global`), the cluster namespaces discovery skips (`kube-*`, `gke-*`, `gmp-*`), the `apphub_workload_id` Monitoring label, and the denial wording under IAM enforcement are CloudBurrow's choices (compatibility.md's App Hub section dates each) | not documented by Google | S |
+
+## AlloyDB for PostgreSQL
+
+Built (#2191): the AlloyDB Admin API v1 (v1beta and v1alpha through the same server) over gRPC and
+JSON; clusters, primary instances and read pools as PostgreSQL servers of the same major version;
+on-demand and automated backups, continuous backup and point-in-time restore, users, databases,
+ExecuteSql, supported flags, connection info and client certificates; the connectors' server-side
+proxy on port 5433 (TLS 1.3, metadata exchange, DB_NATIVE and AUTO_IAM); gcloud alloydb, Terraform
+google_alloydb_*, and the console's Clusters and Backups pages. See [alloydb.md](alloydb.md).
+
+| Gap | Why open | Size |
+|---|---|---|
+| The engine is PostgreSQL, not AlloyDB Omni: Omni's image is offered under licence terms an end user must accept, which this instance never does for them; AlloyDB's own extensions and settings (`google_columnar_engine.*`, `alloydb.*`, `google_ml_integration`) are accepted as flags and have no effect ([alloydb.md](alloydb.md) lists the differences) | no emulator support | L |
+| `ExportCluster`, `ImportCluster`, secondary clusters (`CreateSecondaryCluster`, `CreateSecondaryInstance`, `PromoteCluster`, `SwitchoverCluster`) answer UNIMPLEMENTED (#2191) | not built yet | M |
+| Backup and DR protection of AlloyDB clusters (#1524) | not built yet | M |
+| Managed connection pooling is not served: `ListSupportedDatabaseFlags` with scope CONNECTION_POOL is empty and no pooler runs in front of an instance (#2191) | not built yet | M |
+| In a private-services-access cluster every instance's IP is this host's, so the connectors reach the primary; a read pool is reached through them by its PSC DNS name in a Private Service Connect cluster, and by ExecuteSql or its local address in either | no emulator support | S |
+| Built-in users' passwords are set on the server but, as on Cloud SQL here, PostgreSQL trusts local connections, so a wrong password is not refused | no emulator support | S |
+| Google's error messages, the cluster etag (none), a bare network name written with the project's ID rather than its number, and the flag bounds given in other units are CloudBurrow's choices, dated UNVERIFIED in compatibility.md's AlloyDB section | not documented by Google | S |
 
 ## Dataform
 

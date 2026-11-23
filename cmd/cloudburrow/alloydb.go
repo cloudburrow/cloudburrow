@@ -148,14 +148,23 @@ func (s *alloyDBService) Start(ctx context.Context) error {
 	if err := s.server.Start(ctx); err != nil {
 		return err
 	}
-	// The connectors dial port 5433, a constant in each: a listener that
-	// cannot bind it (another instance holds it) leaves the API serving.
+	// The connectors dial port 5433, a constant in each. When another
+	// instance holds it, the listener takes a free port on the same host,
+	// recorded for `env` as CLOUDBURROW_ALLOYDB_CONNECTOR_ENDPOINT: an
+	// application beside this instance then redirects the connectors'
+	// dial with WithDialFunc, as the Cloud SQL connectors' does (#1364).
 	addr := net.JoinHostPort(opts.ConnectorHost, strconv.Itoa(alloydb.ConnectorPort))
-	if c, err := api.ServeConnector(addr); err != nil {
-		s.logf("AlloyDB connectors: cannot listen on %s (%v); the API serves without them", addr, err)
-	} else {
-		s.connector = c
+	c, err := api.ServeConnector(addr)
+	if err != nil {
+		moved := net.JoinHostPort(opts.ConnectorHost, "0")
+		if c, err = api.ServeConnector(moved); err != nil {
+			s.logf("AlloyDB connectors: cannot listen on %s (%v); the API serves without them", addr, err)
+		} else {
+			s.logf("AlloyDB connectors: port %d is taken; listening on %s", alloydb.ConnectorPort, c.Addr())
+		}
 	}
+	s.connector = c
+	recordAlloyDBConnector(s.cfg, s.ConnectorAddr())
 	// The servers of the instances kept (a persistent instance's), and
 	// the removal of those that are not; then the automated backups.
 	s.stop = make(chan struct{})

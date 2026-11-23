@@ -199,6 +199,7 @@ func (a *authority) serverCert(name string) (*tls.Certificate, error) {
 
 // maxCertDuration is the longest client certificate signed.
 // UNVERIFIED: Google's bound; the connectors ask for an hour.
+// (re-read 2026-11-23: docs.cloud.google.com/alloydb/docs/reference/rest.)
 const maxCertDuration = 24 * time.Hour
 
 func (s *Server) GenerateClientCertificate(_ context.Context, req *alloydbpb.GenerateClientCertificateRequest) (*alloydbpb.GenerateClientCertificateResponse, error) {

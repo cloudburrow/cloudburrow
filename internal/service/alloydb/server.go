@@ -30,6 +30,7 @@
 //     instances, whose primary has the restored data (backup/restore).
 //
 // What the docs leave unsaid is marked UNVERIFIED where it is decided.
+// (re-read 2026-11-23: docs.cloud.google.com/alloydb/docs/reference/rest.)
 package alloydb
 
 import (
@@ -219,6 +220,7 @@ var (
 // Locations are the regions AlloyDB answers ListLocations with: Google's
 // regions (internal/locations). AlloyDB's own list is a subset that the
 // locations page names; UNVERIFIED which regions it leaves out.
+// (re-read 2026-11-23: docs.cloud.google.com/alloydb/docs/reference/rest.)
 func Locations() []string { return locations.Regions }
 
 func validLocation(loc string) bool {
@@ -412,6 +414,7 @@ func (s *Server) doneOp(location, verb, target, requestID string, resp proto.Mes
 // validateOnly is the answer to a request with validate_only set: an
 // operation that is done, with no response, which is not recorded.
 // UNVERIFIED: what Google's operation for a validated request holds.
+// (re-read 2026-11-23: docs.cloud.google.com/alloydb/docs/reference/rest.)
 func (s *Server) validateOnly(location, verb, target string) *longrunningpb.Operation {
 	now := timestamppb.New(s.now())
 	md, _ := anypb.New(&alloydbpb.OperationMetadata{CreateTime: now, EndTime: now, Target: target, Verb: verb, ApiVersion: "v1"})
@@ -537,6 +540,7 @@ func (s *Server) load() error {
 	// An operation a restart interrupted ends in error, and its resource
 	// is left as it was recorded. UNVERIFIED: Google's operations survive
 	// its restarts.
+	// (re-read 2026-11-23: docs.cloud.google.com/alloydb/docs/reference/rest.)
 	for name, op := range s.ops {
 		if !op.GetDone() {
 			s.finishOp(name, nil, apierror.Aborted("the operation was interrupted by a restart of CloudBurrow"))

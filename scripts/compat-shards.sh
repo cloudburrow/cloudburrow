@@ -706,9 +706,11 @@ compat_shard() {
       # Cloud Logging as SQL_LOGGING, for Backup and DR's job logs (#1924);
       # LOGGING is not in TEST_VARS, so the Logging suites stay in theirs.
       # Compute Engine (#1936) as SQL_COMPUTE: private networks are
-      # checked against its networks.
-      SERVICES=cloudsql,cloudsql-mysql,backupdr,storage,secretmanager,kms,privateca,logging,compute
-      TEST_VARS+=,MYSQL,MYSQL_PASSWORD,CLOUDSQL,SQLADMIN,BACKUPDR,CMEK_KMS,CLOUDSQL_SECRETS,NOPUBSUB_STORAGE,SQL_RESOURCEMANAGER,SQL_SERVICEUSAGE,SQL_PRIVATECA,SQL_LOGGING,SQL_COMPUTE
+      # checked against its networks. AlloyDB for PostgreSQL (#2191), whose
+      # servers are PostgreSQL deployments as Cloud SQL's are, and its
+      # connectors' listener when it is not at port 5433.
+      SERVICES=cloudsql,cloudsql-mysql,backupdr,storage,secretmanager,kms,privateca,logging,compute,alloydb
+      TEST_VARS+=,MYSQL,MYSQL_PASSWORD,CLOUDSQL,SQLADMIN,BACKUPDR,CMEK_KMS,CLOUDSQL_SECRETS,NOPUBSUB_STORAGE,SQL_RESOURCEMANAGER,SQL_SERVICEUSAGE,SQL_PRIVATECA,SQL_LOGGING,SQL_COMPUTE,ALLOYDB,ALLOYDB_CONNECTOR
       # The replica tests run in sqlreplicas, against the same instance,
       # and the restart probes in sql.
       if [ "$1" = sqlreplicas ]; then

@@ -45,6 +45,7 @@ var onOff = []string{"on", "off"}
 // server applies, and AlloyDB's own (alloydb.*, google_columnar_engine.*,
 // ...), which PostgreSQL keeps as placeholder settings with no effect.
 // UNVERIFIED: the bounds the page gives in other units are PostgreSQL's.
+// (re-read 2026-11-23: docs.cloud.google.com/alloydb/docs/reference/rest.)
 var supportedFlags = []flag{
 	enumFlag("alloydb.enable_pgaudit", true, onOff...),
 	enumFlag("alloydb.enable_pg_cron", true, onOff...),

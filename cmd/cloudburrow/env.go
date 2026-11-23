@@ -613,6 +613,10 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 			envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_ALLOYDB", "http://" + ad + "/", "read by gcloud; gcloud alloydb"},
 			envVar{cliEndpointVar("alloydb"), ad,
 				"AlloyDB v1, v1beta and v1alpha, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint, or http://" + ad + " to alloydbconn.WithAdminAPIEndpoint"})
+		if c := recordedAlloyDBConnector(cfg); c != "" {
+			vars = append(vars, envVar{"CLOUDBURROW_ALLOYDB_CONNECTOR_ENDPOINT", c,
+				"the AlloyDB connectors' TLS listener, moved off port 5433 (another instance holds it); the connectors dial 5433 at the address GetConnectionInfo reports, so only a dialer that redirects reads this"})
+		}
 	}
 	if appHubEnabled(cfg) && cfg.Endpoints.AppHub != 0 {
 		ah := addr(cfg.Endpoints.AppHub)

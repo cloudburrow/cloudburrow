@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	alloydbpb "cloud.google.com/go/alloydb/apiv1/alloydbpb"
 	apphubpb "cloud.google.com/go/apphub/apiv1/apphubpb"
 	ahpb "cloud.google.com/go/bigquery/analyticshub/apiv1/analyticshubpb"
 	"cloud.google.com/go/billing/apiv1/billingpb"
@@ -41,6 +42,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/grafeas"
 	"github.com/cloudburrow/cloudburrow/internal/modelgarden"
 	"github.com/cloudburrow/cloudburrow/internal/sched"
+	"github.com/cloudburrow/cloudburrow/internal/service/alloydb"
 	"github.com/cloudburrow/cloudburrow/internal/service/analyticshub"
 	"github.com/cloudburrow/cloudburrow/internal/service/apphub"
 	"github.com/cloudburrow/cloudburrow/internal/service/billing"
@@ -121,6 +123,13 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 		t.Fatal(err)
 	}
 	apphubpb.RegisterAppHubServer(srv, ah)
+	// AlloyDB alone (#2191), with no engine: its mixins are other
+	// services' rows.
+	adb, err := alloydb.NewServer("", "", alloydb.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	alloydbpb.RegisterAlloyDBAdminServer(srv, adb)
 	// Cloud Trace (#2118): v1 and v2.
 	tr, err := trace.NewServer("")
 	if err != nil {
