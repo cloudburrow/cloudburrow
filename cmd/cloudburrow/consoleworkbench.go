@@ -225,7 +225,8 @@ func (p workbenchProvider) Detail(ctx context.Context, project string, path []st
 		d.Summary = append(d.Summary, console.Property{Label: "Error", Value: msg})
 	}
 	// The details, then the code box Open JupyterLab opens (JupyterLab is
-	// not served; UNVERIFIED tab names).
+	// not served). UNVERIFIED (re-read 2026-11-22: create-console-quickstart
+	// shows no instance page): the tab names.
 	d.Sections = []console.Section{
 		{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Properties: d.Summary}}},
 		{ID: "query", Label: "Notebook", Kind: console.KindQuery},
@@ -280,8 +281,8 @@ func (p workbenchProvider) Create(ctx context.Context, project string, values ma
 		}
 		g.Metadata["idle-timeout-seconds"] = strconv.Itoa(m * 60)
 	} else {
-		// Idle shutdown off: the longest the API takes (UNVERIFIED: Google's
-		// metadata for off is not documented on idle-shutdown).
+		// Idle shutdown off: the longest the API takes.
+		// UNVERIFIED (re-read 2026-11-22: idle-shutdown): the metadata for off.
 		g.Metadata["idle-timeout-seconds"] = "86400"
 	}
 	if sa := strings.TrimSpace(values["serviceAccount"]); sa != "" {

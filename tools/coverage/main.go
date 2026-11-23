@@ -108,6 +108,7 @@ import (
 	_ "cloud.google.com/go/memorystore/apiv1/memorystorepb"
 	_ "cloud.google.com/go/monitoring/apiv3/v2/monitoringpb"
 	_ "cloud.google.com/go/monitoring/dashboard/apiv1/dashboardpb"
+	_ "cloud.google.com/go/notebooks/apiv2/notebookspb"
 	_ "cloud.google.com/go/parametermanager/apiv1/parametermanagerpb"
 	_ "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	_ "cloud.google.com/go/redis/apiv1/redispb"
@@ -244,6 +245,9 @@ var areas = []area{
 		Extra: []string{"aiplatform.projects.locations.notebookRuntimeTemplates.getIamPolicy",
 			"aiplatform.projects.locations.notebookRuntimeTemplates.setIamPolicy",
 			"aiplatform.projects.locations.notebookRuntimeTemplates.testIamPermissions"}},
+	// Vertex AI Workbench instances (#2173), notebooks.googleapis.com v2 on
+	// the same port.
+	{Key: "workbench", Title: "Vertex AI Workbench", Own: true, Services: []string{"google.cloud.notebooks.v2.NotebookService"}},
 	// v1beta1's PredictionService, for ChatCompletions on those endpoints
 	// (#1840) and v1's methods bridged (#1937): a page of its own, since
 	// its method names repeat v1's.

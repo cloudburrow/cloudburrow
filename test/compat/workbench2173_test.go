@@ -41,9 +41,8 @@ func workbenchClients(t *testing.T, h *Harness) (string, map[string]*notebooks.N
 	return addr, map[string]*notebooks.NotebookClient{"grpc": g, "rest": r}
 }
 
-// covers: google.cloud.notebooks.v2.NotebookService/CreateInstance, google.cloud.notebooks.v2.NotebookService/GetInstance, google.cloud.notebooks.v2.NotebookService/ListInstances, google.cloud.notebooks.v2.NotebookService/UpdateInstance, google.cloud.notebooks.v2.NotebookService/StopInstance, google.cloud.notebooks.v2.NotebookService/StartInstance, google.cloud.notebooks.v2.NotebookService/ResetInstance, google.cloud.notebooks.v2.NotebookService/CheckInstanceUpgradability, google.cloud.notebooks.v2.NotebookService/UpgradeInstance, google.cloud.notebooks.v2.NotebookService/DeleteInstance
-//
-// TestWorkbenchInstances (#2173): with the official
+// TestWorkbenchInstances (#2173; its coverage annotation, and Verified in
+// docs/compatibility.md, wait for its first run on an instance): with the official
 // cloud.google.com/go/notebooks/apiv2 client over gRPC and REST, an
 // instance created with only its ID is a notebook runtime of the
 // instance's: the operation (projects/P/locations/ZONE/operations/ID) ends
@@ -206,8 +205,6 @@ func TestWorkbenchInstances(t *testing.T) {
 	}
 }
 
-// covers: google.cloud.notebooks.v2.NotebookService/ListInstances, google.cloud.notebooks.v2.NotebookService/CreateInstance
-//
 // TestIAMEnforcementWorkbench (#2173): with enforcement on, a principal
 // with no role is refused ListInstances (notebooks.instances.list on the
 // parent) and CreateInstance (notebooks.instances.create) in Google's

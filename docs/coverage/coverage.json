@@ -7471,6 +7471,76 @@
     ]
   },
   {
+    "Key": "workbench",
+    "Title": "Vertex AI Workbench",
+    "counts": {
+      "Implemented": 10,
+      "Unimplemented": 2
+    },
+    "rows": [
+      {
+        "method": "google.cloud.notebooks.v2.NotebookService/CheckInstanceUpgradability",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.notebooks.v2.NotebookService/CreateInstance",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.notebooks.v2.NotebookService/DeleteInstance",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.notebooks.v2.NotebookService/DiagnoseInstance",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.notebooks.v2.NotebookService/GetInstance",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.notebooks.v2.NotebookService/ListInstances",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.notebooks.v2.NotebookService/ResetInstance",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.notebooks.v2.NotebookService/RollbackInstance",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.notebooks.v2.NotebookService/StartInstance",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.notebooks.v2.NotebookService/StopInstance",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.notebooks.v2.NotebookService/UpdateInstance",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.notebooks.v2.NotebookService/UpgradeInstance",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      }
+    ]
+  },
+  {
     "Key": "documentaiv1beta3",
     "Title": "Document AI v1beta3 datasets",
     "counts": {

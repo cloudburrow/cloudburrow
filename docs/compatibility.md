@@ -1242,7 +1242,7 @@ and [quotas](https://docs.cloud.google.com/firestore/mongodb-compatibility/docs/
 It lists every RPC of [Cloud Tasks](coverage/tasks.md), [Secret Manager](coverage/secretmanager.md),
 [Cloud Run v2](coverage/run.md), [Cloud Run v1](coverage/runv1.md) (#1293), [Artifact Registry](coverage/artifactregistry.md) and [Cloud Build](coverage/cloudbuild.md) (#1347), [Secure Source Manager](coverage/securesourcemanager.md) (#1521), [Developer Connect](coverage/developerconnect.md) (#1546), [Eventarc](coverage/eventarc.md) (#1877), [Container Analysis](coverage/containeranalysis.md) (#1912), [Cloud Functions v2](coverage/functions.md) (#1377), [Cloud Functions v1](coverage/functionsv1.md) (#1428), [Cloud KMS](coverage/kms.md),
 [Resource Manager v3](coverage/resourcemanager.md), [Resource Manager v1 REST and liens](coverage/resourcemanagerv1.md) (#1296, #1295), [IAM custom roles](coverage/iam.md) (#1743), [Cloud Scheduler](coverage/scheduler.md), [Memorystore for Redis](coverage/memorystore.md),
-[Cloud Logging](coverage/logging.md), [Vertex AI PredictionService](coverage/vertexai.md), [Vertex AI PredictionService v1beta1](coverage/vertexaiv1beta1.md), [Speech-to-Text v1](coverage/speechv1.md), [Document AI v1beta3 datasets](coverage/documentaiv1beta3.md), [Pub/Sub](coverage/pubsub.md), the
+[Cloud Logging](coverage/logging.md), [Vertex AI PredictionService](coverage/vertexai.md), [Vertex AI PredictionService v1beta1](coverage/vertexaiv1beta1.md), [Vertex AI Workbench](coverage/workbench.md) (#2173), [Speech-to-Text v1](coverage/speechv1.md), [Document AI v1beta3 datasets](coverage/documentaiv1beta3.md), [Pub/Sub](coverage/pubsub.md), the
 [Storage JSON API](coverage/storage.md), the [Storage gRPC API](coverage/storagegrpc.md) (#1321) and the opt-in [Firestore](coverage/firestore.md),
 [Datastore](coverage/datastore.md), [Bigtable](coverage/bigtable.md) and
 [Spanner](coverage/spanner.md) emulators with its status, and every REST method of
@@ -2172,6 +2172,33 @@ UNVERIFIED (re-read 2026-11-19: <https://docs.cloud.google.com/speech-to-text/do
 | `Speech.LongRunningRecognize` | **Verified** (measured 2026-11-19) | Same test: an operation run in the background, with `LongRunningRecognizeMetadata` (progress, start and update times, `uri`), its response the results and `total_billed_time`; up to 480 minutes of audio, chunked as v2's `BatchRecognize`. `output_config` (a transcript written to Cloud Storage) is UNIMPLEMENTED. |
 | `Adaptation.CreatePhraseSet`, `Adaptation.GetPhraseSet`, `Adaptation.ListPhraseSet`, `Adaptation.UpdatePhraseSet`, `Adaptation.DeletePhraseSet`, `Adaptation.CreateCustomClass`, `Adaptation.GetCustomClass`, `Adaptation.ListCustomClasses`, `Adaptation.UpdateCustomClass`, `Adaptation.DeleteCustomClass` | **Verified** (measured 2026-11-21, #2106) | `TestSpeechV1AdaptationResources`, official `speech` `apiv1` `AdaptationClient` and `Client`, on an instance: `google.cloud.speech.v1.Adaptation` over gRPC (`speechv1adaptation.go`), as the v1 RPC reference documents it (<https://docs.cloud.google.com/speech-to-text/docs/reference/rpc/google.cloud.speech.v1>, re-read 2026-11-21): each method answers the resource (Delete `Empty`), not an operation; the parent's location one of `global`, `us` and `eu`; an ID of 4 to 63 letters, numbers and hyphens, a letter first and a letter or number last; a boost in [0, 20], a phrase of at most 100 characters, at most 1,200 phrases a set and 500 items a class; `update_mask` `phrases` and `boost`, or `items` (none or `*`: all); List's `page_size` 50 when unset, at most 1000; kept in `v1phrasesets.json` and `v1customclasses.json` beside the recognizers. Recognition's `phrase_set_references` resolve to them and bias whisper.cpp (`Speech.Recognize` above); an unknown one is `INVALID_ARGUMENT`. Unit `TestSpeechV1AdaptationResources`, `TestSpeechV1AdaptationBiasesRecognition`; compat `TestSpeechV1AdaptationResources` (official `apiv1` AdaptationClient and Client: lifecycle, refusals, and a stored phrase set naming a stored class making whisper spell Nyhuis) is written, not yet run against an instance. UNVERIFIED (re-read 2026-11-21: <https://docs.cloud.google.com/speech-to-text/docs/reference/rpc/google.cloud.speech.v1>, which does not say): the texts of the errors. |
 | `Speech.StreamingRecognize` | **Verified** (measured 2026-11-19) | Same test: v2's streaming recognition (row above) with v1's fields; `single_utterance` ends recognition at the first utterance's end with `END_OF_SINGLE_UTTERANCE`, then its one final result: two utterances parted by two seconds of silence give one final. `interim_results`, `enable_voice_activity_events` and `voice_activity_timeout` as v2's, with v1's `speech_event_time` and `total_billed_time`. |
+
+## Vertex AI Workbench — `google.cloud.notebooks.v2`
+
+Workbench instances (#2173), `notebooks.googleapis.com` v2's `NotebookService`, on the local
+Vertex AI endpoint over gRPC and JSON (`/v2/projects/*/locations/*/instances`, its operations under
+`/v2/projects/*/locations/*/operations`). An instance is a notebook runtime of the instance's
+(`internal/nbruntime`), as a Colab Enterprise runtime is: a kernel container on an internal Docker
+network whose one peer relays to the instance's BigQuery. Defaults and limits are Google's
+(<https://docs.cloud.google.com/vertex-ai/docs/workbench/reference/rest/v2/projects.locations.instances>,
+read 2026-11-22): an ID of a letter and up to 62 lowercase letters, numbers or hyphens, not ending
+in a hyphen; one owner, one service account and one data disk; a 150 GB boot disk and a 100 GB data
+disk, each at most 64000 GB; idle shutdown 180 minutes, set by the `idle-timeout-seconds` metadata,
+10 to 1440 minutes; the `cloud-notebooks-managed` image project. With IAM enforcement on, each
+method is checked as its REST page names (`notebooks.instances.*`) and a service account needs
+`iam.serviceAccounts.actAs`. Console: Agent Platform → Workbench (Instances: Create new, Open
+JupyterLab, Start, Stop, Reset, Delete with Confirm). UNVERIFIED (re-read 2026-11-22: the same
+page, `instances/create`, `create-console-quickstart`): the default machine type (n1-standard-4)
+and disk type (PD_STANDARD), the default image family (`workbench-instances`), the update mask's
+accepted paths, and the generated `id`.
+
+| Method | Status | Notes |
+|---|---|---|
+| `CreateInstance`, `GetInstance`, `ListInstances`, `DeleteInstance` | **Implemented** | The operation completes when the kernel is connected (ACTIVE, HEALTHY); list's filter and `order_by` (`name`, `state`, `health_state`, `creator`, `labels`, `id`, `machine_type`), and `locations/-` for every zone; ALREADY_EXISTS for a taken ID; accelerators and `container_image` are FAILED_PRECONDITION (the kernel is this machine's CPU and the instance's runtime image). Unit `TestWorkbenchInstances`, `TestWorkbenchRESTClient` (official `notebooks` v1.20.1 REST client); compat `TestWorkbenchInstances` (gRPC and REST clients) and `TestIAMEnforcementWorkbench` are written, not yet run against an instance. |
+| `UpdateInstance` | **Implemented** | `update_mask` required: `labels`, `gce_setup.metadata`, `gce_setup.tags`, and `gce_setup.machine_type` only while STOPPED (FAILED_PRECONDITION otherwise); other paths INVALID_ARGUMENT. |
+| `StartInstance`, `StopInstance`, `ResetInstance` | **Implemented** | Stop deletes the kernel container, the instance STOPPED; Start makes a new one; Reset stops and starts a running instance (its memory wiped), FAILED_PRECONDITION on a stopped one. |
+| `CheckInstanceUpgradability`, `UpgradeInstance` | **Implemented** | Never upgradeable (the runtime image is the instance's); Upgrade is FAILED_PRECONDITION. |
+| `RollbackInstance`, `DiagnoseInstance`, and the v2 REST-only methods (`getConfig`, `resizeDisk`, `restore`, instances' IAM policies) | **Unimplemented** | UNIMPLEMENTED: there is no VM image history, diagnostic tool, disk or backup to act on. |
 
 ## Vertex AI PredictionService v1beta1 — `google.cloud.aiplatform.v1beta1`
 
