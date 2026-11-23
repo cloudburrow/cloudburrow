@@ -66,7 +66,7 @@ func (a *authzCallout) Process(st extprocpb.ExternalProcessor_ProcessServer) err
 	}
 }
 
-// covers: google.cloud.networksecurity.v1.NetworkSecurity/CreateAuthzPolicy, google.cloud.networksecurity.v1.NetworkSecurity/DeleteAuthzPolicy, google.cloud.networkservices.v1.DepService/CreateAuthzExtension, google.cloud.networkservices.v1.DepService/DeleteAuthzExtension
+// covers: google.cloud.networksecurity.v1.NetworkSecurity/CreateAuthzPolicy, google.cloud.networksecurity.v1.NetworkSecurity/DeleteAuthzPolicy
 //
 // TestCustomAuthorizationThroughALoadBalancer (#2160), the official
 // compute, networkservices and networksecurity REST clients, as

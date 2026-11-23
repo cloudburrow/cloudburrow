@@ -527,3 +527,6 @@ func (s *Server) sourceIdentity(req *AuthzRequest) {
 		}
 	}
 }
+
+// UseAuthzExtensions sets Options.AuthzExt after New, before Start.
+func (s *Server) UseAuthzExtensions(a AuthzExtensions) { s.opts.AuthzExt = a }
