@@ -165,6 +165,8 @@ type Server struct {
 	// relay is the listener VMs' guests relay their connections to load
 	// balancers and gateways through (vmrelay.go).
 	relay *vmrelay.Server
+	// relayAt is the relay's in-cluster address (UseRelayAddress).
+	relayAt func() string
 }
 
 // New returns a Server with its state restored.

@@ -1496,6 +1496,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if a := computeSvc.Addr(); a != "" {
 			live["compute"] = a
 		}
+		// The relay VMs reach load balancers and gateways through with
+		// their identity (#2160, internal/vmrelay).
+		if a := computeSvc.RelayAddr(); a != "" {
+			live["compute-relay"] = a
+		}
 		if a := dataTransfer.Addr(); a != "" {
 			live["datatransfer"] = a
 		}
@@ -1592,7 +1597,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// A VM reads its metadata from the Compute port and its service
 		// account's tokens from the metadata server (#1963).
 		if computeEnabled(cfg) {
-			published["compute"], published["metadata"] = true, true
+			published["compute"], published["metadata"], published["compute-relay"] = true, true, true
 		}
 		hostComp = newClusterHost(cfg, stdout, func() map[string]string {
 			out := map[string]string{}
@@ -1626,6 +1631,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			return ""
 		}
 		computeSvc.metadataHost = func() string { return hostComp.InCluster("metadata") }
+		computeSvc.relayAt = func() string { return hostComp.InCluster("compute-relay") }
 	}
 	if memorystoreAdminSvc != nil && kmsSvc != nil {
 		// A CMEK Memorystore server's pod unwraps its data key with Cloud

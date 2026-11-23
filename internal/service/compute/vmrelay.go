@@ -44,6 +44,26 @@ type RelayGateways interface {
 // UseGateways sets Options.Gateways after New, before Start.
 func (s *Server) UseGateways(g RelayGateways) { s.opts.Gateways = g }
 
+// RelayAddr is the relay's bound address (host:port), "" when it does not
+// listen: the address this machine publishes to the cluster for it.
+func (s *Server) RelayAddr() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.relay == nil {
+		return ""
+	}
+	return s.relay.Addr()
+}
+
+// UseRelayAddress sets how a guest reaches the relay: the in-cluster
+// host:port this machine publishes it at, "" when unknown (the guest then
+// uses its metadata host and the relay's port).
+func (s *Server) UseRelayAddress(f func() string) {
+	s.mu.Lock()
+	s.relayAt = f
+	s.mu.Unlock()
+}
+
 // relayLocalBase is the first local port a guest's relays listen on (at
 // 127.0.0.1), one per VPC address and port.
 const relayLocalBase = 47000
@@ -164,7 +184,16 @@ func (s *Server) relayConfigLocked(self vmNet, token string, reach map[string]bo
 	}
 	vips := s.relayVIPsLocked(self, reach)
 	var b, n strings.Builder
-	fmt.Fprintf(&b, "relayport %d\n", s.relay.Port())
+	port, host := strconv.Itoa(s.relay.Port()), ""
+	if s.relayAt != nil {
+		if h, p, err := net.SplitHostPort(s.relayAt()); err == nil {
+			host, port = h, p
+		}
+	}
+	fmt.Fprintf(&b, "relayport %s\n", port)
+	if host != "" {
+		fmt.Fprintf(&b, "relayhost %s\n", host)
+	}
 	for _, v := range vips {
 		hdr := vmrelay.Encode(vmrelay.Header{Src: netip.AddrPortFrom(src, 0), Dst: v.dst, Token: token})
 		fmt.Fprintf(&b, "relay %d %s %d %s\n", v.local, v.dst.Addr(), v.dst.Port(), base64.StdEncoding.EncodeToString(hdr))

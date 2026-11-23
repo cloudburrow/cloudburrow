@@ -88,7 +88,9 @@ type computeService struct {
 	vms          *computeVMs
 	guestBase    func() string
 	metadataHost func() string
-	cancel       context.CancelFunc
+	// relayAt is the VM relay's in-cluster address (#2160), set by up.
+	relayAt func() string
+	cancel  context.CancelFunc
 	// registry is the project registry, for Shared VPC's organization
 	// rule (#2140); nil allows every project.
 	registry func() *resourcemanager.Registry
@@ -147,6 +149,14 @@ func (s *computeService) VPCAccess() *vpcaccess.Server {
 }
 
 // Addr is the bound address.
+// RelayAddr is the VM relay's bound address, "" when it does not listen.
+func (s *computeService) RelayAddr() string {
+	if s == nil || s.api == nil {
+		return ""
+	}
+	return s.api.RelayAddr()
+}
+
 func (s *computeService) Addr() string {
 	if s == nil || s.ln == nil {
 		return ""
@@ -214,6 +224,12 @@ func (s *computeService) Start(ctx context.Context) error {
 		return err
 	}
 	s.api = api
+	api.UseRelayAddress(func() string {
+		if s.relayAt == nil {
+			return ""
+		}
+		return s.relayAt()
+	})
 	cm.UseIssuer(api)
 	cm.UseTargets(func(project string) []certificatemanager.Target { return certMapTargets(api, project) })
 	ia.SetBackendServices(func(rel string) bool { return backendServiceExists(api, rel) })

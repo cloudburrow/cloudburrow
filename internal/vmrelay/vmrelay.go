@@ -248,6 +248,9 @@ func Listen(addr string, resolve Resolve) (*Server, error) {
 	return s, nil
 }
 
+// Addr is the Server's bound address.
+func (s *Server) Addr() string { return s.ln.Addr().String() }
+
 // Port is the port the Server listens on.
 func (s *Server) Port() int { return s.ln.Addr().(*net.TCPAddr).Port }
 
