@@ -374,12 +374,9 @@ func pcrObj(p map[int]string, from, to int) obj {
 }
 
 // startVM starts vm on the backend and, for a Shielded VM, provisions and
-// measures its vTPM meanwhile: the vTPM container starts before the guest
-// does, and the guest's firmware unit waits for the vTPM (as the vTPM is
-// there from power on), which Google's guest agent, and so sshd (the
-// agent's unit is Before=sshd.service), wait for, while the backend's
-// start waits for the guest's SSH port. Done after the start, the two
-// would wait for each other.
+// measures its vTPM meanwhile, as the vTPM is there from power on: its
+// container starts before the guest does, so the credentials endpoint
+// (which waits for the vTPM) answers Google's guest agent early in boot.
 func (s *Server) startVM(ctx context.Context, rel string, vm VMSpec) error {
 	if _, ok := s.opts.VMs.(VMTPM); !ok || !vm.VTPM {
 		return s.opts.VMs.Start(ctx, vm)
