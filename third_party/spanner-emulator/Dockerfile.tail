@@ -1,0 +1,46 @@
+# CloudBurrow (#2029): the rest of the emulator's build/docker/Dockerfile.ubuntu
+# (Apache-2.0, Google LLC), changed so that an interrupted build keeps its
+# work: scripts/spanner-emulator-image.sh keeps the upstream file up to its
+# "Build GoogleSQL to cache it" step and appends this. Bazel's output base is
+# a BuildKit cache mount, so GoogleSQL is built once, in the same step as the
+# emulator, and --jobs bounds the compilers' memory (BAZEL_JOBS).
+WORKDIR /src
+
+# Copy over the emulator code base into the container.
+COPY . .
+
+# Make enum NodeTag compatible with both C and C++.
+RUN find third_party/spanner_pg -name "nodes.h" -exec sed -i 's/enum NodeTag : int/enum NodeTag/g' {} +
+
+ENV EXTRA_BAZEL_ARGS="--tool_java_runtime_version=local_jdk"
+ARG BAZEL_JOBS=4
+RUN --mount=type=cache,id=cloudburrow-spanner-emulator-bazel,target=/root/.cache/bazel \
+    bazel build -c opt --jobs=${BAZEL_JOBS} \
+      //binaries:emulator_main \
+      //binaries:gateway_main \
+    && mkdir -p /out \
+    && cp bazel-bin/binaries/emulator_main bazel-bin/binaries/gateway_main_/gateway_main /out/ \
+    && for file in $(find -L bazel-src/external -name "LICENSE" -o -name "COPYING"); do \
+         echo "----"; echo $file; echo "----"; cat $file; \
+       done > /out/licenses.txt \
+    && gzip /out/licenses.txt
+
+################################################################################
+#                                   RELEASE                                    #
+################################################################################
+
+FROM gcr.io/distroless/cc-debian12
+
+COPY --from=build /out/emulator_main .
+COPY --from=build /out/gateway_main .
+
+# Copy the libstdc++.so.6 shared library. We use wildcards to execute a conditional
+# copy depending on the target architecture.
+COPY --from=build /usr/lib/x86_64-linux-gnu*/libstdc++.so.6 /usr/lib/x86_64-linux-gnu
+COPY --from=build /usr/lib/aarch64-linux-gnu*/libstdc++.so.6 /usr/lib/aarch64-linux-gnu
+
+COPY --from=build /out/licenses.txt.gz .
+
+EXPOSE 9010 9020
+
+CMD ["./gateway_main", "--hostname", "0.0.0.0"]

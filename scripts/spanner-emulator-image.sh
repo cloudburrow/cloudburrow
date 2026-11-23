@@ -3,14 +3,17 @@
 #
 # Google's emulator (Apache-2.0) at the tag third_party/spanner-emulator/
 # sources.json pins, its commit checked, with CloudBurrow's patches applied in
-# sources.json order, built with the emulator's own Dockerfile. GoogleSQL
-# alone takes hours to build; Docker's layer cache keeps it between builds
-# while the googlesql patches and MODULE.bazel are unchanged.
+# sources.json order, built with the emulator's own Dockerfile up to its
+# Bazel step and third_party/spanner-emulator/Dockerfile.tail after it, whose
+# Bazel output base is a BuildKit cache mount: GoogleSQL takes about an hour
+# or more on 8 CPUs, and an interrupted build keeps what it compiled.
 #
 # Usage: scripts/spanner-emulator-image.sh [-platform linux/arm64] [-check]
 #   -check  only clone, verify and apply the patches; build nothing.
-# Env: SPANNER_EMULATOR_BUILD_DIR (default third_party/spanner-emulator/build).
-# Prints the image tag it built, cloudburrow/spanner-emulator:<tag>-cb.<hash>.
+# Env: SPANNER_EMULATOR_BUILD_DIR (default third_party/spanner-emulator/build),
+#      BAZEL_JOBS (default 4: each GoogleSQL compiler can take gigabytes).
+# Prints the image it built, internal/spannerimage.Ref:
+# dev.local/cloudburrow-spanner-emulator:<version>-cb.<patch hash>.
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -36,7 +39,7 @@ bazel_patch=$(jq -r .googlesql.bazelPatch "$src_json")
 # The image tag names the upstream tag and a hash of every patch, in order.
 hash=$( { jq -r '.emulator.patches[], .googlesql.patches[]' "$src_json" | while read -r p; do
   cat "$dir/$p"; done; } | shasum -a 256 | cut -c1-12)
-image="cloudburrow/spanner-emulator:${tag#v}-cb.$hash"
+image="dev.local/cloudburrow-spanner-emulator:${tag#v}-cb.$hash"
 
 src="$build/cloud-spanner-emulator"
 if [ -e "$src" ]; then
@@ -66,7 +69,11 @@ if [ "$check" = 1 ]; then
   exit 0
 fi
 
-args=(build --file "$src/$dockerfile" --tag "$image" --load)
+# the upstream Dockerfile up to its Bazel step, then CloudBurrow's tail
+df="$build/Dockerfile"
+sed '/^# Build GoogleSQL to cache it/,$d' "$src/$dockerfile" > "$df"
+cat "$dir/Dockerfile.tail" >> "$df"
+args=(build --file "$df" --tag "$image" --load --build-arg "BAZEL_JOBS=${BAZEL_JOBS:-4}")
 if [ -n "$platform" ]; then
   args+=(--platform "$platform")
 fi

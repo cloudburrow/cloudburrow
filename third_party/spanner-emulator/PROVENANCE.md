@@ -39,7 +39,11 @@ which:
 1. clones the emulator at the pinned tag and checks that the tag is the pinned commit;
 2. applies the emulator patches in order with `git apply`, and writes the GoogleSQL patches,
    without their headers, to `build/bazel/cloudburrow_googlesql.patch`;
-3. builds with the emulator's own `build/docker/Dockerfile.ubuntu` (Bazel 7.6.1, GCC 13), and
+3. builds with the emulator's own `build/docker/Dockerfile.ubuntu` (Bazel 7.6.1, GCC 13) up to
+   its Bazel step, followed by [Dockerfile.tail](Dockerfile.tail) (derived from the rest of it,
+   Apache-2.0): one Bazel build of both binaries whose output base is a BuildKit cache mount,
+   so an interrupted build keeps what it compiled, with `--jobs` from `BAZEL_JOBS` (default 4,
+   since GoogleSQL's generated parser alone takes several gigabytes to compile). It
    tags the image `dev.local/cloudburrow-spanner-emulator:1.5.58-cb.<hash>`. The hash is the
    first 12 hex digits of the SHA-256 of the patches, in order. `internal/spannerimage.PatchHash`
    holds the same value, and its test recomputes it from the patches.

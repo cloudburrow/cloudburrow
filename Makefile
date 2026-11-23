@@ -60,7 +60,8 @@ bigquery-binaries:
 # Google's emulator v1.5.58 and the GoogleSQL it builds, with the patches in
 # third_party/spanner-emulator, for the host's architecture (SPANNER_PLATFORM
 # overrides it, e.g. linux/amd64). up runs the image when Docker has it.
-# Measured 2026-11-23 on 8 Docker CPUs: see third_party/spanner-emulator/PROVENANCE.md.
+# GoogleSQL alone takes over an hour on 8 Docker CPUs; BAZEL_JOBS (default 4)
+# bounds the compilers' memory, and an interrupted build resumes.
 SPANNER_PLATFORM ?=
 .PHONY: spanner-emulator-image
 spanner-emulator-image:
