@@ -80,7 +80,7 @@ func (s *computeService) useNetSvc(api *compute.Server, ns *networksecurity.Serv
 	})
 	nsv.UsePolicies(ns)
 	nsv.UseCertificates(cm.Certificates)
-	nsv.UseSource(func(ip string) ([]string, []string) { return s.instanceIdentity(api, ip) })
+	nsv.UseSource(func(ip string) ([]string, []string) { return instanceIdentity(api, ip) })
 	// VMs reach the gateways at their VPC addresses through Compute
 	// Engine's relay, which keeps their identity (internal/vmrelay).
 	api.UseGateways(nsv)
@@ -90,62 +90,23 @@ func (s *computeService) useNetSvc(api *compute.Server, ns *networksecurity.Serv
 	ns.UseGatewayUsers(nsv.GatewaySecurityPolicyUsers)
 }
 
-// instanceIdentity is the service accounts and secure tags (tagValues/ID,
+// instanceIdentity is the service account and secure tags (tagValues/ID,
 // the instance's effective tags) of the VM instance whose network
-// interface has ip, in any project this instance keeps; none when no
-// instance has it, as for a client on the host.
-func (s *computeService) instanceIdentity(api *compute.Server, ip string) (sas, tags []string) {
-	if s.registry == nil || ip == "" {
+// interface has ip, from Compute Engine's records, as the load balancers'
+// authorization policies read them (compute.InstanceIdentity); none when
+// no instance has it, as for a client on the host.
+func instanceIdentity(api *compute.Server, ip string) (sas, tags []string) {
+	vm, sa, ids := api.InstanceIdentity(ip)
+	if vm == "" {
 		return nil, nil
 	}
-	reg := s.registry()
-	if reg == nil {
-		return nil, nil
+	if sa != "" {
+		sas = []string{sa}
 	}
-	projects, err := reg.List()
-	if err != nil {
-		return nil, nil
+	for _, id := range ids {
+		tags = append(tags, "tagValues/"+strconv.FormatInt(id, 10))
 	}
-	for _, p := range projects {
-		out, err := api.Call("GET", p.ProjectID, "aggregated/instances", nil, nil)
-		if err != nil {
-			continue
-		}
-		items, _ := out["items"].(map[string]any)
-		for _, scoped := range items {
-			sm, _ := scoped.(map[string]any)
-			for _, it := range listAny(sm["instances"]) {
-				vm, _ := it.(map[string]any)
-				if !hasAddress(vm, ip) {
-					continue
-				}
-				for _, sa := range listAny(vm["serviceAccounts"]) {
-					if m, ok := sa.(map[string]any); ok && strAny(m["email"]) != "" {
-						sas = append(sas, strAny(m["email"]))
-					}
-				}
-				zone := strAny(vm["zone"])
-				zone = zone[strings.LastIndex(zone, "/")+1:]
-				// The instance's effective tags, bound by its project's ID or
-				// number, as for authorization policies (computenetsec.go).
-				for _, id := range s.sourceTags("//compute.googleapis.com/projects/" + p.ProjectID + "/zones/" + zone + "/instances/" + strAny(vm["id"])) {
-					tags = append(tags, "tagValues/"+strconv.FormatInt(id, 10))
-				}
-				return sas, tags
-			}
-		}
-	}
-	return nil, nil
-}
-
-func hasAddress(vm map[string]any, ip string) bool {
-	for _, ni := range listAny(vm["networkInterfaces"]) {
-		m, _ := ni.(map[string]any)
-		if strAny(m["networkIP"]) == ip {
-			return true
-		}
-	}
-	return false
+	return sas, tags
 }
 
 // netSvcAuthzExtensions are Network Services' authorization extensions as

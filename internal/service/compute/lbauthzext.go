@@ -491,7 +491,15 @@ func callExtProc(ctx context.Context, cc *grpc.ClientConn, headers [][2]string, 
 // internal address the request comes from, its first service account and
 // its secure tags' value IDs.
 func (s *Server) sourceIdentity(req *AuthzRequest) {
-	ip := net.ParseIP(req.SourceIP)
+	req.SourceVM, req.SourceServiceAccount, req.SourceTagValues = s.InstanceIdentity(req.SourceIP)
+}
+
+// InstanceIdentity is the VM instance whose internal address is ip (its
+// relative name), its first service account and its secure tags' value
+// IDs; all empty when no instance has it, as for a client on this
+// machine. Secure Web Proxy's source matchers read it too.
+func (s *Server) InstanceIdentity(addr string) (vm, serviceAccount string, tagValues []int64) {
+	ip := net.ParseIP(addr)
 	if ip == nil || ip.IsLoopback() {
 		return
 	}
@@ -515,17 +523,18 @@ func (s *Server) sourceIdentity(req *AuthzRequest) {
 	if inst == nil {
 		return
 	}
-	req.SourceVM = rel
+	vm = rel
 	if sas := listOf(inst["serviceAccounts"]); len(sas) > 0 {
-		req.SourceServiceAccount = str(objOf(sas[0]), "email")
+		serviceAccount = str(objOf(sas[0]), "email")
 	}
 	if f := s.opts.SourceTags; f != nil {
 		p := strings.Split(rel, "/")
 		if len(p) == 6 {
 			full := "//compute.googleapis.com/projects/" + p[1] + "/zones/" + p[3] + "/instances/" + fmt.Sprint(inst["id"])
-			req.SourceTagValues = f(full)
+			tagValues = f(full)
 		}
 	}
+	return
 }
 
 // UseAuthzExtensions sets Options.AuthzExt after New, before Start.
