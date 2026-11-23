@@ -46,7 +46,10 @@ type computeService struct {
 	// wrapJSON wraps the API (IAM enforcement, #1879); nil is none.
 	wrapJSON func(http.Handler) http.Handler
 	gke      *gkeService
-	api      *compute.Server
+	// privateca is Certificate Authority Service, when served: Secure Web
+	// Proxy's TLS inspection leaves (#2160); nil inspects nothing.
+	privateca *privateCAService
+	api       *compute.Server
 	// vpcAccess is Serverless VPC Access (vpcaccess.googleapis.com,
 	// #2140), served on this port beside /compute/v1/, as its connectors
 	// live in the networks served here.

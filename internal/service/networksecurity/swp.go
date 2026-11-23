@@ -627,3 +627,22 @@ func (s *Server) URLList(name string) ([]string, bool) {
 	}
 	return append([]string(nil), u.GetValues()...), true
 }
+
+// TLSInspectionCAPool is the CA pool of a gateway security policy's TLS
+// inspection policy (networkservices.TLSInspections); ok is false when the
+// policy names none, or it is gone.
+func (s *Server) TLSInspectionCAPool(policy string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	g, ok := s.res[policy].(*nspb.GatewaySecurityPolicy)
+	if !ok || g.GetTlsInspectionPolicy() == "" {
+		return "", false
+	}
+	t, ok := s.res[ruleRel(g.GetTlsInspectionPolicy())].(*nspb.TlsInspectionPolicy)
+	if !ok || t.GetCaPool() == "" {
+		return "", false
+	}
+	return ruleRel(t.GetCaPool()), true
+}
+
+var _ networkservices.TLSInspections = (*Server)(nil)
