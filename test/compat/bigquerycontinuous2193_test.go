@@ -791,6 +791,7 @@ func TestBigQueryReservationGroupsFailoverIAMAndUpgrade(t *testing.T) {
 	}
 
 	t.Run("upgradeEdition", func(t *testing.T) {
+		h := h.For(t)
 		endpoint := h.Endpoint(EnvBigQuery)
 		u, err := url.Parse(endpoint)
 		if err != nil || u.Host == "" {
@@ -802,6 +803,16 @@ func TestBigQueryReservationGroupsFailoverIAMAndUpgrade(t *testing.T) {
 		}
 		loc := "projects/" + project + "/locations/europe-west1"
 		id := "u-" + suffix
+		// An earlier run's FLEX commitments, deletable a minute after they
+		// were made; any Enterprise one left covers this run's reservation.
+		var leftEnterprise int64
+		lit := rest.ListCapacityCommitments(ctx, &reservationpb.ListCapacityCommitmentsRequest{Parent: loc})
+		for c, err := lit.Next(); err == nil; c, err = lit.Next() {
+			if rest.DeleteCapacityCommitment(ctx, &reservationpb.DeleteCapacityCommitmentRequest{Name: c.GetName()}) != nil &&
+				c.GetEdition() == reservationpb.Edition_ENTERPRISE {
+				leftEnterprise += c.GetSlotCount()
+			}
+		}
 		rv, err := rest.CreateReservation(ctx, &reservationpb.CreateReservationRequest{Parent: loc, ReservationId: id,
 			Reservation: &reservationpb.Reservation{SlotCapacity: 100, Edition: reservationpb.Edition_ENTERPRISE}})
 		if err != nil {
@@ -820,7 +831,9 @@ func TestBigQueryReservationGroupsFailoverIAMAndUpgrade(t *testing.T) {
 			TargetEdition: "STANDARD"}).Context(ctx).Do(); resvCode(err) != codes.InvalidArgument {
 			t.Errorf("to STANDARD: %v, want INVALID_ARGUMENT", err)
 		}
-		if _, err := svc.Projects.Locations.UpgradeEdition(loc, &bqresv.UpgradeEditionRequest{Reservations: []string{rv.GetName()},
+		if leftEnterprise > 0 {
+			t.Logf("%d Enterprise slots of an earlier run's commitments in %s cover the reservation: its upgrade alone is not checked", leftEnterprise, loc)
+		} else if _, err := svc.Projects.Locations.UpgradeEdition(loc, &bqresv.UpgradeEditionRequest{Reservations: []string{rv.GetName()},
 			TargetEdition: "ENTERPRISE_PLUS"}).Context(ctx).Do(); resvCode(err) != codes.FailedPrecondition {
 			t.Errorf("the reservation alone, its commitment left: %v, want FAILED_PRECONDITION", err)
 		}

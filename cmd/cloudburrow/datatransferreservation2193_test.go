@@ -14,6 +14,7 @@ func TestReservationAPIPathIsTheFronts(t *testing.T) {
 		"/v1/projects/p/locations/US/biReservation":                     true,
 		"/v1/projects/p/locations/US:searchAssignments":                 true,
 		"/v1/projects/p/locations/US:searchAllAssignments":              true,
+		"/v1/projects/p/locations/US:upgradeEdition":                    true,
 		"/v1/projects/p/locations/US/transferConfigs":                   false,
 		"/v1/projects/p/locations/US":                                   false,
 		"/v1/projects/p/locations/us/dataSources/scheduled_query":       false,

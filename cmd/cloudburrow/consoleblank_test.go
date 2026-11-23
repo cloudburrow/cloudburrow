@@ -70,6 +70,8 @@ var emulatorOnly = map[string]string{
 	"bigquery":                    "goccy/bigquery-emulator is a container built on ZetaSQL; there is no in-process fake",
 	"k8sobjects":                  "Object Browser lists kubectl api-resources, which the fake kubectl does not serve (TestGKEObjectBrowserParsesAPIResources)",
 	"bigquery-jobs":               "BigQuery's Job history reads the same emulator, through the validating front",
+	"bigquery-capacity":           "Capacity management reads the Reservation API the BigQuery front serves beside the emulator (TestBigQueryCapacityManagementThroughThePage drives the page)",
+	"bigquery-commitments":        "Slot commitments read the Reservation API the BigQuery front serves (TestBigQueryCapacityPagesThroughThePage drives the page)",
 	"eventarc":                    "a trigger needs Pub/Sub, its transport, which this test does not run (TestEventarcTriggersPageThroughTheBrowser drives the page)",
 	"eventarc-buses":              "this test's in-process adapter does not serve Eventarc over gRPC (TestEventarcAdvancedPagesThroughTheBrowser drives the page)",
 	"eventarc-pipelines":          "this test's in-process adapter does not serve Eventarc over gRPC (TestEventarcAdvancedPagesThroughTheBrowser drives the page)",

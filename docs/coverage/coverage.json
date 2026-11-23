@@ -12413,7 +12413,7 @@
     "Key": "bigquery",
     "Title": "BigQuery (REST API v2)",
     "counts": {
-      "Verified": 55
+      "Verified": 89
     },
     "rows": [
       {
@@ -12540,6 +12540,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigqueryasyncjobs_test.go:60 TestBigQueryAsyncJobs",
+          "test/compat/bigquerycontinuous2193_test.go:392 TestBigQueryContinuousQueryPubSub",
           "test/compat/bigqueryiam1774_test.go:42 TestBigQueryPerProjectIAMRest",
           "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory"
         ]
@@ -12684,6 +12685,9 @@
           "test/compat/bigquerycolumns1490_test.go:29 TestBigQueryColumnsOfEveryType",
           "test/compat/bigquerycolumntypes_test.go:267 TestBigQueryParameterizedColumnsByDDL",
           "test/compat/bigquerycolumntypes_test.go:80 TestBigQueryRangeColumnsThroughTheAPI",
+          "test/compat/bigquerycontinuous2193_test.go:392 TestBigQueryContinuousQueryPubSub",
+          "test/compat/bigquerycontinuous2193_test.go:523 TestBigQueryContinuousQueryInsert",
+          "test/compat/bigquerycontinuous2193_test.go:587 TestBigQueryContinuousQueryBigtableAndSpanner",
           "test/compat/bigquerycopykey1762_test.go:33 TestBigQueryCopyKey1762",
           "test/compat/bigquerycopykey1822_test.go:35 TestBigQueryCopyKeyPartition1822",
           "test/compat/bigquerycopylayout1759_test.go:43 TestBigQueryCopyLayout1759",
@@ -13821,6 +13825,244 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigqueryconnection_test.go:36 TestBigQueryConnectionAPI"
+        ]
+      },
+      {
+        "method": "bigqueryreservation.projects.locations.capacityCommitments.create",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerycontinuous2193_test.go:103 TestBigQueryReservationAPI"
+        ]
+      },
+      {
+        "method": "bigqueryreservation.projects.locations.capacityCommitments.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerycontinuous2193_test.go:103 TestBigQueryReservationAPI"
+        ]
+      },
+      {
+        "method": "bigqueryreservation.projects.locations.capacityCommitments.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerycontinuous2193_test.go:103 TestBigQueryReservationAPI"
+        ]
+      },
+      {
+        "method": "bigqueryreservation.projects.locations.capacityCommitments.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerycontinuous2193_test.go:103 TestBigQueryReservationAPI"
+        ]
+      },
+      {
+        "method": "bigqueryreservation.projects.locations.capacityCommitments.merge",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerycontinuous2193_test.go:103 TestBigQueryReservationAPI"
+        ]
+      },
+      {
+        "method": "bigqueryreservation.projects.locations.capacityCommitments.patch",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerycontinuous2193_test.go:103 TestBigQueryReservationAPI"
+        ]
+      },
+      {
+        "method": "bigqueryreservation.projects.locations.capacityCommitments.split",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerycontinuous2193_test.go:103 TestBigQueryReservationAPI"
+        ]
+      },
+      {
+        "method": "bigqueryreservation.projects.locations.getBiReservation",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerycontinuous2193_test.go:103 TestBigQueryReservationAPI"
+        ]
+      },
+      {
+        "method": "bigqueryreservation.projects.locations.reservationGroups.create",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerycontinuous2193_test.go:698 TestBigQueryReservationGroupsFailoverIAMAndUpgrade"
+        ]
+      },
+      {
+        "method": "bigqueryreservation.projects.locations.reservationGroups.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerycontinuous2193_test.go:698 TestBigQueryReservationGroupsFailoverIAMAndUpgrade"
+        ]
+      },
+      {
+        "method": "bigqueryreservation.projects.locations.reservationGroups.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerycontinuous2193_test.go:698 TestBigQueryReservationGroupsFailoverIAMAndUpgrade"
+        ]
+      },
+      {
+        "method": "bigqueryreservation.projects.locations.reservationGroups.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerycontinuous2193_test.go:698 TestBigQueryReservationGroupsFailoverIAMAndUpgrade"
+        ]
+      },
+      {
+        "method": "bigqueryreservation.projects.locations.reservationGroups.patch",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerycontinuous2193_test.go:698 TestBigQueryReservationGroupsFailoverIAMAndUpgrade"
+        ]
+      },
+      {
+        "method": "bigqueryreservation.projects.locations.reservations.assignments.create",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerycontinuous2193_test.go:103 TestBigQueryReservationAPI"
+        ]
+      },
+      {
+        "method": "bigqueryreservation.projects.locations.reservations.assignments.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerycontinuous2193_test.go:103 TestBigQueryReservationAPI"
+        ]
+      },
+      {
+        "method": "bigqueryreservation.projects.locations.reservations.assignments.getIamPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerycontinuous2193_test.go:698 TestBigQueryReservationGroupsFailoverIAMAndUpgrade"
+        ]
+      },
+      {
+        "method": "bigqueryreservation.projects.locations.reservations.assignments.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerycontinuous2193_test.go:103 TestBigQueryReservationAPI"
+        ]
+      },
+      {
+        "method": "bigqueryreservation.projects.locations.reservations.assignments.move",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerycontinuous2193_test.go:103 TestBigQueryReservationAPI"
+        ]
+      },
+      {
+        "method": "bigqueryreservation.projects.locations.reservations.assignments.patch",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerycontinuous2193_test.go:103 TestBigQueryReservationAPI"
+        ]
+      },
+      {
+        "method": "bigqueryreservation.projects.locations.reservations.assignments.setIamPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerycontinuous2193_test.go:698 TestBigQueryReservationGroupsFailoverIAMAndUpgrade"
+        ]
+      },
+      {
+        "method": "bigqueryreservation.projects.locations.reservations.assignments.testIamPermissions",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerycontinuous2193_test.go:698 TestBigQueryReservationGroupsFailoverIAMAndUpgrade"
+        ]
+      },
+      {
+        "method": "bigqueryreservation.projects.locations.reservations.create",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerycontinuous2193_test.go:103 TestBigQueryReservationAPI"
+        ]
+      },
+      {
+        "method": "bigqueryreservation.projects.locations.reservations.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerycontinuous2193_test.go:103 TestBigQueryReservationAPI"
+        ]
+      },
+      {
+        "method": "bigqueryreservation.projects.locations.reservations.failoverReservation",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerycontinuous2193_test.go:698 TestBigQueryReservationGroupsFailoverIAMAndUpgrade"
+        ]
+      },
+      {
+        "method": "bigqueryreservation.projects.locations.reservations.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerycontinuous2193_test.go:103 TestBigQueryReservationAPI"
+        ]
+      },
+      {
+        "method": "bigqueryreservation.projects.locations.reservations.getIamPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerycontinuous2193_test.go:698 TestBigQueryReservationGroupsFailoverIAMAndUpgrade"
+        ]
+      },
+      {
+        "method": "bigqueryreservation.projects.locations.reservations.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerycontinuous2193_test.go:103 TestBigQueryReservationAPI"
+        ]
+      },
+      {
+        "method": "bigqueryreservation.projects.locations.reservations.patch",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerycontinuous2193_test.go:103 TestBigQueryReservationAPI"
+        ]
+      },
+      {
+        "method": "bigqueryreservation.projects.locations.reservations.setIamPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerycontinuous2193_test.go:698 TestBigQueryReservationGroupsFailoverIAMAndUpgrade"
+        ]
+      },
+      {
+        "method": "bigqueryreservation.projects.locations.reservations.testIamPermissions",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerycontinuous2193_test.go:698 TestBigQueryReservationGroupsFailoverIAMAndUpgrade"
+        ]
+      },
+      {
+        "method": "bigqueryreservation.projects.locations.searchAllAssignments",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerycontinuous2193_test.go:103 TestBigQueryReservationAPI"
+        ]
+      },
+      {
+        "method": "bigqueryreservation.projects.locations.searchAssignments",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerycontinuous2193_test.go:103 TestBigQueryReservationAPI"
+        ]
+      },
+      {
+        "method": "bigqueryreservation.projects.locations.updateBiReservation",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerycontinuous2193_test.go:103 TestBigQueryReservationAPI"
+        ]
+      },
+      {
+        "method": "bigqueryreservation.projects.locations.upgradeEdition",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerycontinuous2193_test.go:698 TestBigQueryReservationGroupsFailoverIAMAndUpgrade"
         ]
       }
     ]

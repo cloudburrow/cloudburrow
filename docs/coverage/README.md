@@ -42,7 +42,7 @@ Do not edit these files by hand.
 | [Datastore Admin API](datastoreadmin.md) | 6 | 6 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Bigtable](bigtable.md) | 84 | 83 | 1 | 0 | 0 | 0 | 0 | 0 |
 | [Spanner](spanner.md) | 65 | 64 | 1 | 0 | 0 | 0 | 0 | 0 |
-| [BigQuery (REST API v2)](bigquery.md) | 55 | 55 | 0 | 0 | 0 | 0 | 0 | 0 |
+| [BigQuery (REST API v2)](bigquery.md) | 89 | 89 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud SQL Admin API (v1)](sqladmin.md) | 80 | 75 | 0 | 5 | 0 | 0 | 0 | 0 |
 | [Service Usage API (v1)](serviceusage.md) | 10 | 10 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [API Keys API (v2)](apikeys.md) | 9 | 9 | 0 | 0 | 0 | 0 | 0 | 0 |

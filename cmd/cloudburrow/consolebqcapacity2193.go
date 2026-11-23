@@ -182,8 +182,11 @@ func (p bqCapacityProvider) reservationName(project, row string) (string, error)
 }
 
 func (p bqCapacityProvider) Detail(ctx context.Context, project string, path []string) (console.Detail, error) {
-	if len(path) > 1 {
-		return console.DeeperThan(1, path), nil
+	if len(path) > 2 {
+		return console.DeeperThan(2, path), nil
+	}
+	if len(path) == 2 {
+		return p.assignmentDetail(ctx, project, path)
 	}
 	name, err := p.reservationName(project, path[0])
 	if err != nil {
@@ -212,11 +215,14 @@ func (p bqCapacityProvider) Detail(ctx context.Context, project string, path []s
 			"Assignee": a.GetAssignee(), "Job type": a.GetJobType().String(), "State": a.GetState().String()}})
 	}
 	assignments.Total = len(assignments.Items)
+	assignments.RowsOpenable = true
 	return console.Detail{
 		Summary: []console.Property{
 			{Label: "Reservation name", Value: lastSegment(rv.GetName())},
 			{Label: "Location", Value: rv.GetPrimaryLocation()},
 			{Label: "Edition", Value: rv.GetEdition().String()},
+			{Label: "Secondary location", Value: orDash(rv.GetSecondaryLocation())},
+			{Label: "Reservation group", Value: orDash(lastSegment(rv.GetReservationGroup()))},
 		},
 		Sections: []console.Section{
 			{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Properties: []console.Property{
@@ -232,6 +238,9 @@ func (p bqCapacityProvider) Detail(ctx context.Context, project string, path []s
 }
 
 func (p bqCapacityProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
+	if len(path) == 2 {
+		return p.assignmentActions(ctx, project, path)
+	}
 	if len(path) != 1 {
 		return nil
 	}
@@ -254,6 +263,12 @@ func (p bqCapacityProvider) DetailActions(ctx context.Context, project string, p
 			if rv, err := c.GetReservation(ctx, &reservationpb.GetReservationRequest{Name: name}); err == nil {
 				acts[1].Fields[0].Default = strconv.FormatInt(maxReservationSize(rv), 10)
 				acts[1].Fields[1].Default = strconv.FormatInt(rv.GetSlotCapacity(), 10)
+				acts[1].Fields = append(acts[1].Fields, p.groupField(ctx, c, project, path[0], rv.GetReservationGroup()))
+				if rv.GetEdition() == reservationpb.Edition_ENTERPRISE_PLUS {
+					acts[1].Fields = append(acts[1].Fields, console.Field{Name: "secondary", Label: "Secondary location", Type: "text",
+						Default: rv.GetSecondaryLocation(), Help: "Managed disaster recovery's secondary location; empty for none."})
+				}
+				acts = append(acts, p.reservationExtraActions(ctx, c, project, path[0], rv)...)
 			}
 			var ids []string
 			it := c.ListAssignments(ctx, &reservationpb.ListAssignmentsRequest{Parent: name})
@@ -274,6 +289,9 @@ func (p bqCapacityProvider) DetailActions(ctx context.Context, project string, p
 }
 
 func (p bqCapacityProvider) ActAt(ctx context.Context, project string, path []string, action string, v map[string]string) error {
+	if len(path) == 2 {
+		return p.actAssignment(ctx, project, path, action, v)
+	}
 	if len(path) != 1 {
 		return fmt.Errorf("no action %q here", action)
 	}
@@ -303,8 +321,17 @@ func (p bqCapacityProvider) ActAt(ctx context.Context, project string, path []st
 			return errors.New("the max reservation size and the baseline slots are numbers, the size at least the baseline")
 		}
 		rv := &reservationpb.Reservation{Name: name, SlotCapacity: base, Autoscale: &reservationpb.Reservation_Autoscale{MaxSlots: max - base}}
+		paths := []string{"slot_capacity", "autoscale.max_slots"}
+		if g, ok := v["group"]; ok {
+			rv.ReservationGroup, paths = p.groupName(project, path[0], g), append(paths, "reservation_group")
+		}
+		if sl, ok := v["secondary"]; ok {
+			rv.SecondaryLocation, paths = strings.TrimSpace(sl), append(paths, "secondary_location")
+		}
 		_, err = c.UpdateReservation(ctx, &reservationpb.UpdateReservationRequest{Reservation: rv,
-			UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"slot_capacity", "autoscale.max_slots"}}})
+			UpdateMask: &fieldmaskpb.FieldMask{Paths: paths}})
+	case actFailover, actUpgradeEdition:
+		return p.actReservationExtra(ctx, project, path[0], action, v)
 	default:
 		return fmt.Errorf("no action %q here", action)
 	}
@@ -359,6 +386,7 @@ func (p bqCommitmentsProvider) List(ctx context.Context, project string) (consol
 		}
 	}
 	listing.Total = len(listing.Items)
+	listing.RowsOpenable = true
 	return listing, nil
 }
 
@@ -366,9 +394,10 @@ func (p bqCommitmentsProvider) CreateForm() (string, []console.Field) {
 	return "Create commitment", []console.Field{
 		{Name: "location", Label: "Location", Type: "select", Required: true, Options: capacityLocations, Default: "US"},
 		{Name: "edition", Label: "Edition", Type: "select", Required: true, Options: []string{"ENTERPRISE", "ENTERPRISE_PLUS"}, Default: "ENTERPRISE"},
-		{Name: "plan", Label: "Commitment duration", Type: "select", Required: true, Options: []string{"MONTHLY", "ANNUAL", "THREE_YEAR"}, Default: "ANNUAL"},
+		{Name: "plan", Label: "Commitment duration", Type: "select", Required: true, Options: []string{"ANNUAL", "THREE_YEAR"}, Default: "ANNUAL",
+			Help: "An edition's commitment is for one year or three."},
 		{Name: "slots", Label: "Slots", Type: "number", Required: true, Default: "100", Help: "In multiples of 50."},
-		{Name: "renewal", Label: "Renewal plan", Type: "select", Options: []string{"NONE", "ANNUAL", "THREE_YEAR"}, Default: "NONE"},
+		{Name: "renewal", Label: "Renewal plan", Type: "select", Options: []string{"NONE", "ANNUAL"}, Default: "NONE"},
 	}
 }
 

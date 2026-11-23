@@ -162,7 +162,7 @@ const GKE_STORAGE = ["/kubernetes/storage", "/kubernetes/storage-classes"];
 const SHARING_TABS = ["/bigquery-sharing", "/bigquery-clean-rooms"];
 // BigQuery's Capacity management (#2193): its Slot reservations and Slot
 // commitments tabs.
-const CAPACITY_TABS = ["/bigquery-capacity", "/bigquery-commitments"];
+const CAPACITY_TABS = ["/bigquery-capacity", "/bigquery-commitments", "/bigquery-reservation-groups"];
 const LOGGING_SETTINGS = ["/logs/settings", "/logs/log-scopes", "/logs/trace-scopes", "/logs/observability-settings", "/logs/observability-buckets"];
 
 
@@ -441,12 +441,6 @@ const ROUTES = [
     section: "Databases", product: "bigquery", productTitle: "BigQuery" },
   { path: "/bigquery-scheduled-queries", service: "bigquery-scheduled-queries", icon: "bigquery", title: "Scheduled queries",
     kind: "Scheduled query", section: "Databases", product: "bigquery", productTitle: "BigQuery" },
-  // Capacity management (#2193): slot reservations with their
-  // assignments (CONTINUOUS for continuous queries), and slot commitments.
-  { path: "/bigquery-capacity", service: "bigquery-capacity", icon: "bigquery", title: "Capacity management", tabTitle: "Slot reservations",
-    kind: "Reservation", pageTabs: CAPACITY_TABS, section: "Databases", product: "bigquery", productTitle: "BigQuery" },
-  { path: "/bigquery-commitments", service: "bigquery-commitments", icon: "bigquery", title: "Capacity management", tabTitle: "Slot commitments",
-    kind: "Commitment", navHidden: true, navAs: "/bigquery-capacity", pageTabs: CAPACITY_TABS, section: "Databases", product: "bigquery", productTitle: "BigQuery" },
   // BigQuery sharing (Analytics Hub, #1960): exchanges, their listings
   // and subscriptions.
   { path: "/bigquery-sharing", service: "bigquery-sharing", icon: "bigquery", title: "Analytics Hub", tabTitle: "Exchanges", kind: "Exchange",
@@ -476,6 +470,18 @@ const ROUTES = [
   { path: "/bigquery-partner-center", service: null, requires: "bigquery", screen: "unavailable", icon: "bigquery", title: "Partner Center",
     section: "Databases", product: "bigquery", productTitle: "BigQuery",
     unavailable: "Partner Center lists Google Cloud partners' solutions, which a local instance does not hold." },
+  // Capacity management (#2193), with BI Engine in Google's Administration
+  // part of the menu, above Settings: slot reservations with their
+  // assignments (CONTINUOUS for continuous queries), and slot commitments.
+  { path: "/bigquery-capacity", service: "bigquery-capacity", icon: "bigquery", title: "Capacity management", tabTitle: "Slot reservations",
+    kind: "Reservation", pageTabs: CAPACITY_TABS, section: "Databases", product: "bigquery", productTitle: "BigQuery" },
+  { path: "/bigquery-commitments", service: "bigquery-commitments", icon: "bigquery", title: "Capacity management", tabTitle: "Slot commitments",
+    kind: "Commitment", navHidden: true, navAs: "/bigquery-capacity", pageTabs: CAPACITY_TABS, section: "Databases", product: "bigquery", productTitle: "BigQuery" },
+  { path: "/bigquery-reservation-groups", service: "bigquery-reservation-groups", icon: "bigquery", title: "Capacity management", tabTitle: "Reservation groups",
+    kind: "Reservation group", navHidden: true, navAs: "/bigquery-capacity", pageTabs: CAPACITY_TABS, section: "Databases", product: "bigquery", productTitle: "BigQuery" },
+  // BI Engine (#2193): its BI reservations, one a location.
+  { path: "/bigquery-bi-engine", service: "bigquery-bi-engine", icon: "bigquery", title: "BI Engine",
+    kind: "BI Engine reservation", section: "Databases", product: "bigquery", productTitle: "BigQuery" },
   { path: "/bigquery-settings", service: null, requires: "bigquery", screen: "unavailable", icon: "bigquery", title: "Settings",
     section: "Databases", product: "bigquery", productTitle: "BigQuery",
     unavailable: "BigQuery's Settings (the project's default location and other configuration settings, set with ALTER PROJECT) are not served locally. A query's location and dialect are set in Studio, under Edit, Query settings." },

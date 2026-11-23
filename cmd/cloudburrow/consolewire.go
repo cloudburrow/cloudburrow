@@ -573,6 +573,13 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		{config.ServiceBigQuery, func(a string) console.Provider {
 			return bqCommitmentsProvider{bq: bigqueryProvider{endpoint: a, project: d.cfg.DefaultProject()}}
 		}},
+		{config.ServiceBigQuery, func(a string) console.Provider {
+			return bqReservationGroupsProvider{bq: bigqueryProvider{endpoint: a, project: d.cfg.DefaultProject()}}
+		}},
+		// BI Engine's page (#2193), its BI reservations.
+		{config.ServiceBigQuery, func(a string) console.Provider {
+			return bqBIEngineProvider{bq: bigqueryProvider{endpoint: a, project: d.cfg.DefaultProject()}}
+		}},
 	} {
 		if !enabled[db.service] {
 			continue
