@@ -23,24 +23,30 @@ import (
 // Create an instance's Security pane and a section of Edit.
 const shieldedSection = "Shielded VM"
 
-// shieldedNote is the line Google's Create an instance draws under Shielded
-// VM, over its three checkboxes.
-const shieldedNote = "Turn on all settings for the most secure configuration."
+// shieldedNote is the line drawn under Create an instance's Shielded VM,
+// over its three checkboxes: Google's own recommendation, verbatim from
+// compute/docs/instances/modifying-shielded-vm (read 2026-11-23), as Secure
+// Boot is the one setting off by default.
+const shieldedNote = "If possible, Google recommends enabling Secure Boot."
 
 // shieldedRunningNote is Edit's reason the settings are drawn disabled
 // while the VM is not stopped: updateShieldedInstanceConfig refuses the
 // change on a VM that is not TERMINATED (modifying-shielded-vm: "After the
-// instance stops, click Edit").
-const shieldedRunningNote = "To change Shielded VM settings, stop the VM instance."
+// instance stops, click Edit"). Google documents no console text for this
+// state: the wording is unverified, kept short and neutral.
+const shieldedRunningNote = "Stop the VM to change these settings."
 
-// shieldedKeys are the API's shieldedInstanceConfig fields, in Google's order.
+// shieldedKeys are the API's shieldedInstanceConfig fields, in Google's
+// order. The labels are the console's (modifying-shielded-vm); each help
+// line is the first sentence of the setting's section in
+// compute/shielded-vm/docs/shielded-vm (read 2026-11-23), verbatim.
 var shieldedKeys = []struct{ name, label, help, def string }{
 	{"enableSecureBoot", "Turn on Secure Boot",
-		"Secure Boot helps protect your VM instances against boot-level and kernel-level malware and rootkits.", "false"},
+		"Secure Boot helps ensure that the system only runs authentic software by verifying the digital signature of all boot components, and halting the boot process if signature verification fails.", "false"},
 	{"enableVtpm", "Turn on vTPM",
-		"Virtual Trusted Platform Module (vTPM) validates your guest VM pre-boot and boot integrity, and offers key generation and protection.", "true"},
+		"A vTPM is a virtualized trusted platform module, which is a specialized computer chip you can use to protect objects, like keys and certificates, that you use to authenticate access to your system.", "true"},
 	{"enableIntegrityMonitoring", "Turn on Integrity Monitoring",
-		"Integrity monitoring lets you monitor and verify the runtime boot integrity of your shielded VM instances using Cloud Monitoring reports. Note: requires vTPM to be enabled.", "true"},
+		"Integrity monitoring helps you understand and make decisions about the state of your VM instances.", "true"},
 }
 
 // shieldedCreateFields are Create an instance's Security > Shielded VM.

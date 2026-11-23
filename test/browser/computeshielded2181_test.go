@@ -88,7 +88,7 @@ func TestShieldedVMConsole2181(t *testing.T) {
 			Labels: ids.map((i) => document.querySelector('label[for="f-' + i + '"]').textContent.trim()),
 			Checked: ids.map((i) => document.querySelector("#f-" + i).checked),
 			AfterSA: !!(fs.compareDocumentPosition(sa) & Node.DOCUMENT_POSITION_FOLLOWING) }; })()`, &pane)
-	if pane.Pane != "Security" || pane.Legend != "Shielded VM" || pane.Note != "Turn on all settings for the most secure configuration." || !pane.AfterSA ||
+	if pane.Pane != "Security" || pane.Legend != "Shielded VM" || pane.Note != "If possible, Google recommends enabling Secure Boot." || !pane.AfterSA ||
 		strings.Join(pane.Labels, ",") != "Turn on Secure Boot,Turn on vTPM,Turn on Integrity Monitoring" || fmt.Sprint(pane.Checked) != "[false true true]" {
 		t.Fatalf("Create an instance's Shielded VM = %+v", pane)
 	}
@@ -131,7 +131,7 @@ func TestShieldedVMConsole2181(t *testing.T) {
 	p.eval(`(() => { const ids = ["enableSecureBoot", "enableVtpm", "enableIntegrityMonitoring"];
 		const f = (i) => document.querySelector(".modal.is-open #f-" + i);
 		return { Disabled: ids.map((i) => f(i).disabled), Checked: ids.map((i) => f(i).checked),
-			Reason: document.querySelector(".modal.is-open").textContent.includes("To change Shielded VM settings, stop the VM instance.") ? "yes" : "" }; })()`, &running)
+			Reason: document.querySelector(".modal.is-open").textContent.includes("Stop the VM to change these settings.") ? "yes" : "" }; })()`, &running)
 	if fmt.Sprint(running.Disabled) != "[true true true]" || fmt.Sprint(running.Checked) != "[true true true]" || running.Reason == "" {
 		t.Fatalf("a running VM's Edit Shielded VM = %+v", running)
 	}
