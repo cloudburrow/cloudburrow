@@ -277,10 +277,7 @@ func (s *Server) instances(c call, zone string) (obj, error) {
 			return nil, err
 		}
 		return s.transition(c.project, scope, "start", rel, o, stProvisioning, stRunning, stTerminated, func(ctx context.Context, vm VMSpec) error {
-			if err := s.opts.VMs.Start(ctx, vm); err != nil {
-				return err
-			}
-			return s.bootVTPM(ctx, rel, vm)
+			return s.startVM(ctx, rel, vm)
 		})
 	case post && verb == "stop":
 		if status == stTerminated {
@@ -303,10 +300,7 @@ func (s *Server) instances(c call, zone string) (obj, error) {
 			if err := s.opts.VMs.Stop(ctx, vm); err != nil {
 				return err
 			}
-			if err := s.opts.VMs.Start(ctx, vm); err != nil {
-				return err
-			}
-			return s.bootVTPM(ctx, rel, vm)
+			return s.startVM(ctx, rel, vm)
 		})
 	case post && verb == "suspend":
 		if status != stRunning {
@@ -663,10 +657,7 @@ func (s *Server) insertInstance(c call, zone string) (obj, error) {
 				return err
 			}
 		}
-		err := s.opts.VMs.Start(ctx, vm)
-		if err == nil {
-			err = s.bootVTPM(ctx, rel, vm)
-		}
+		err := s.startVM(ctx, rel, vm)
 		if err != nil {
 			_ = s.opts.VMs.Stop(context.Background(), vm)
 			if t, ok := s.opts.VMs.(VMTPM); ok && vm.VTPM {

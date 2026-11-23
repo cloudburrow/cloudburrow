@@ -373,6 +373,44 @@ func pcrObj(p map[int]string, from, to int) obj {
 	return out
 }
 
+// startVM starts vm on the backend and, for a Shielded VM, provisions and
+// measures its vTPM meanwhile: the vTPM container starts before the guest
+// does, and the guest's firmware unit waits for the vTPM (as the vTPM is
+// there from power on), which Google's guest agent, and so sshd (the
+// agent's unit is Before=sshd.service), wait for, while the backend's
+// start waits for the guest's SSH port. Done after the start, the two
+// would wait for each other.
+func (s *Server) startVM(ctx context.Context, rel string, vm VMSpec) error {
+	if _, ok := s.opts.VMs.(VMTPM); !ok || !vm.VTPM {
+		return s.opts.VMs.Start(ctx, vm)
+	}
+	vctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	booted := make(chan error, 1)
+	go func() {
+		// The pod, and so its vTPM container, appears during the start:
+		// retry until it answers.
+		deadline := time.Now().Add(5 * time.Minute)
+		for {
+			err := s.bootVTPM(vctx, rel, vm)
+			if err == nil || vctx.Err() != nil || time.Now().After(deadline) {
+				booted <- err
+				return
+			}
+			select {
+			case <-vctx.Done():
+			case <-time.After(2 * time.Second):
+			}
+		}
+	}()
+	if err := s.opts.VMs.Start(ctx, vm); err != nil {
+		cancel()
+		<-booted
+		return err
+	}
+	return <-booted
+}
+
 // bootVTPM is a start's vTPM work, after the backend started the
 // instance: the first boot's provisioning and every boot's measurements.
 func (s *Server) bootVTPM(ctx context.Context, rel string, vm VMSpec) error {

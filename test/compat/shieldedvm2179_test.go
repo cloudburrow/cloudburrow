@@ -192,9 +192,11 @@ func TestShieldedVMHTTPSMetadataServer2179(t *testing.T) {
 	const hdr = "-H 'Metadata-Flavor: Google'"
 	creds := "--cacert /run/google-mds-mtls/root.crt --cert /run/google-mds-mtls/client.key"
 	if out := v.must("for i in $(seq 90); do [ -s /run/google-mds-mtls/client.key ] && break; sleep 2; done; ls -l /dev/tpm0 /run/google-mds-mtls/; true"); !strings.Contains(out, "client.key") || !strings.Contains(out, "root.crt") {
-		diag, _ := v.run("systemctl status --no-pager google-guest-agent-manager cloudburrow-firmware cloudburrow-guest-agent-fence 2>&1 | head -40; "+
-			"sudo journalctl -b --no-pager -u google-guest-agent-manager -u cloudburrow-firmware -u cloudburrow-guest-agent-fence 2>&1 | tail -60; "+
-			"ls -la /sys/firmware/efi/efivars/ 2>&1 | head; sudo cat /var/log/google-guest-agent*.log 2>/dev/null | tail -40", nil)
+		// The agent's debug log: restarted with log_level 4, its
+		// setup is logged again.
+		diag, _ := v.run(`sudo sed -i 's/^\[Core\]$/[Core]\nlog_level = 4\nlog_verbosity = 3/' /etc/default/instance_configs.cfg; `+
+			`sudo systemctl restart google-guest-agent-manager; sleep 60; ls -l /run/google-mds-mtls/ 2>&1; `+
+			`sudo journalctl -b --no-pager -u google-guest-agent-manager 2>&1 | grep -v -i 'acs client\|metric\|telemetry\|mwlid' | tail -120`, nil)
 		t.Fatalf("Google's guest agent wrote no HTTPS metadata server credentials: %s\n%s", out, diag)
 	}
 	for _, c := range []struct{ what, cmd, want string }{
