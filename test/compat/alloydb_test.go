@@ -464,15 +464,20 @@ func TestAlloyDBInstancesConnectorAndBackups(t *testing.T) {
 	created = append(created, pitr)
 	alloyDBExpectRows(ctx, t, d, pitr+"/instances/primary", 2, false)
 
+	// A role that holds privileges is not dropped (PostgreSQL's
+	// dependency check), so the grant goes first.
+	if _, err := pg.Exec(ctx, "REVOKE SELECT ON orders FROM app"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.DeleteUser(ctx, &alloydbpb.DeleteUserRequest{Name: name + "/users/app"}); err != nil {
+		t.Errorf("DeleteUser: %v", err)
+	}
 	rop, err := c.RestartInstance(ctx, &alloydbpb.RestartInstanceRequest{Name: primary.GetName()})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := waitLRO(ctx, rop); err != nil {
 		t.Errorf("RestartInstance: %v", err)
-	}
-	if err := c.DeleteUser(ctx, &alloydbpb.DeleteUserRequest{Name: name + "/users/app"}); err != nil {
-		t.Errorf("DeleteUser: %v", err)
 	}
 }
 

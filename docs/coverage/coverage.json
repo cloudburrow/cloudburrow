@@ -20917,6 +20917,264 @@
     ]
   },
   {
+    "Key": "alloydb",
+    "Title": "AlloyDB for PostgreSQL (v1)",
+    "counts": {
+      "Unimplemented": 6,
+      "Verified": 31
+    },
+    "rows": [
+      {
+        "method": "google.cloud.alloydb.v1.AlloyDBAdmin/BatchCreateInstances",
+        "status": "Verified",
+        "tests": [
+          "test/compat/alloydb_test.go:580 TestAlloyDBInstanceOperations"
+        ]
+      },
+      {
+        "method": "google.cloud.alloydb.v1.AlloyDBAdmin/CreateBackup",
+        "status": "Verified",
+        "tests": [
+          "test/compat/alloydb_test.go:207 TestAlloyDBInstancesConnectorAndBackups"
+        ]
+      },
+      {
+        "method": "google.cloud.alloydb.v1.AlloyDBAdmin/CreateCluster",
+        "status": "Verified",
+        "tests": [
+          "test/compat/alloydb_test.go:122 TestAlloyDBClusterLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.alloydb.v1.AlloyDBAdmin/CreateInstance",
+        "status": "Verified",
+        "tests": [
+          "test/compat/alloydb_test.go:207 TestAlloyDBInstancesConnectorAndBackups"
+        ]
+      },
+      {
+        "method": "google.cloud.alloydb.v1.AlloyDBAdmin/CreateSecondaryCluster",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.alloydb.v1.AlloyDBAdmin/CreateSecondaryInstance",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.alloydb.v1.AlloyDBAdmin/CreateUser",
+        "status": "Verified",
+        "tests": [
+          "test/compat/alloydb_test.go:207 TestAlloyDBInstancesConnectorAndBackups"
+        ]
+      },
+      {
+        "method": "google.cloud.alloydb.v1.AlloyDBAdmin/DeleteBackup",
+        "status": "Verified",
+        "tests": [
+          "test/compat/alloydb_test.go:207 TestAlloyDBInstancesConnectorAndBackups"
+        ]
+      },
+      {
+        "method": "google.cloud.alloydb.v1.AlloyDBAdmin/DeleteCluster",
+        "status": "Verified",
+        "tests": [
+          "test/compat/alloydb_test.go:122 TestAlloyDBClusterLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.alloydb.v1.AlloyDBAdmin/DeleteInstance",
+        "status": "Verified",
+        "tests": [
+          "test/compat/alloydb_test.go:207 TestAlloyDBInstancesConnectorAndBackups"
+        ]
+      },
+      {
+        "method": "google.cloud.alloydb.v1.AlloyDBAdmin/DeleteUser",
+        "status": "Verified",
+        "tests": [
+          "test/compat/alloydb_test.go:207 TestAlloyDBInstancesConnectorAndBackups"
+        ]
+      },
+      {
+        "method": "google.cloud.alloydb.v1.AlloyDBAdmin/ExecuteSql",
+        "status": "Verified",
+        "tests": [
+          "test/compat/alloydb_test.go:207 TestAlloyDBInstancesConnectorAndBackups"
+        ]
+      },
+      {
+        "method": "google.cloud.alloydb.v1.AlloyDBAdmin/ExportCluster",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.alloydb.v1.AlloyDBAdmin/FailoverInstance",
+        "status": "Verified",
+        "tests": [
+          "test/compat/alloydb_test.go:580 TestAlloyDBInstanceOperations"
+        ]
+      },
+      {
+        "method": "google.cloud.alloydb.v1.AlloyDBAdmin/GenerateClientCertificate",
+        "status": "Verified",
+        "tests": [
+          "test/compat/alloydb_test.go:207 TestAlloyDBInstancesConnectorAndBackups"
+        ]
+      },
+      {
+        "method": "google.cloud.alloydb.v1.AlloyDBAdmin/GetBackup",
+        "status": "Verified",
+        "tests": [
+          "test/compat/alloydb_test.go:207 TestAlloyDBInstancesConnectorAndBackups"
+        ]
+      },
+      {
+        "method": "google.cloud.alloydb.v1.AlloyDBAdmin/GetCluster",
+        "status": "Verified",
+        "tests": [
+          "test/compat/alloydb_test.go:122 TestAlloyDBClusterLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.alloydb.v1.AlloyDBAdmin/GetConnectionInfo",
+        "status": "Verified",
+        "tests": [
+          "test/compat/alloydb_test.go:207 TestAlloyDBInstancesConnectorAndBackups"
+        ]
+      },
+      {
+        "method": "google.cloud.alloydb.v1.AlloyDBAdmin/GetInstance",
+        "status": "Verified",
+        "tests": [
+          "test/compat/alloydb_test.go:207 TestAlloyDBInstancesConnectorAndBackups"
+        ]
+      },
+      {
+        "method": "google.cloud.alloydb.v1.AlloyDBAdmin/GetUser",
+        "status": "Verified",
+        "tests": [
+          "test/compat/alloydb_test.go:207 TestAlloyDBInstancesConnectorAndBackups"
+        ]
+      },
+      {
+        "method": "google.cloud.alloydb.v1.AlloyDBAdmin/ImportCluster",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.alloydb.v1.AlloyDBAdmin/InjectFault",
+        "status": "Verified",
+        "tests": [
+          "test/compat/alloydb_test.go:580 TestAlloyDBInstanceOperations"
+        ]
+      },
+      {
+        "method": "google.cloud.alloydb.v1.AlloyDBAdmin/ListBackups",
+        "status": "Verified",
+        "tests": [
+          "test/compat/alloydb_test.go:207 TestAlloyDBInstancesConnectorAndBackups"
+        ]
+      },
+      {
+        "method": "google.cloud.alloydb.v1.AlloyDBAdmin/ListClusters",
+        "status": "Verified",
+        "tests": [
+          "test/compat/alloydb_test.go:122 TestAlloyDBClusterLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.alloydb.v1.AlloyDBAdmin/ListDatabases",
+        "status": "Verified",
+        "tests": [
+          "test/compat/alloydb_test.go:207 TestAlloyDBInstancesConnectorAndBackups"
+        ]
+      },
+      {
+        "method": "google.cloud.alloydb.v1.AlloyDBAdmin/ListInstances",
+        "status": "Verified",
+        "tests": [
+          "test/compat/alloydb_test.go:207 TestAlloyDBInstancesConnectorAndBackups"
+        ]
+      },
+      {
+        "method": "google.cloud.alloydb.v1.AlloyDBAdmin/ListSupportedDatabaseFlags",
+        "status": "Verified",
+        "tests": [
+          "test/compat/alloydb_test.go:122 TestAlloyDBClusterLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.alloydb.v1.AlloyDBAdmin/ListUsers",
+        "status": "Verified",
+        "tests": [
+          "test/compat/alloydb_test.go:207 TestAlloyDBInstancesConnectorAndBackups"
+        ]
+      },
+      {
+        "method": "google.cloud.alloydb.v1.AlloyDBAdmin/PromoteCluster",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.alloydb.v1.AlloyDBAdmin/RestartInstance",
+        "status": "Verified",
+        "tests": [
+          "test/compat/alloydb_test.go:207 TestAlloyDBInstancesConnectorAndBackups"
+        ]
+      },
+      {
+        "method": "google.cloud.alloydb.v1.AlloyDBAdmin/RestoreCluster",
+        "status": "Verified",
+        "tests": [
+          "test/compat/alloydb_test.go:207 TestAlloyDBInstancesConnectorAndBackups"
+        ]
+      },
+      {
+        "method": "google.cloud.alloydb.v1.AlloyDBAdmin/SwitchoverCluster",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.alloydb.v1.AlloyDBAdmin/UpdateBackup",
+        "status": "Verified",
+        "tests": [
+          "test/compat/alloydb_test.go:207 TestAlloyDBInstancesConnectorAndBackups"
+        ]
+      },
+      {
+        "method": "google.cloud.alloydb.v1.AlloyDBAdmin/UpdateCluster",
+        "status": "Verified",
+        "tests": [
+          "test/compat/alloydb_test.go:122 TestAlloyDBClusterLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.alloydb.v1.AlloyDBAdmin/UpdateInstance",
+        "status": "Verified",
+        "tests": [
+          "test/compat/alloydb_test.go:207 TestAlloyDBInstancesConnectorAndBackups",
+          "test/compat/alloydb_test.go:580 TestAlloyDBInstanceOperations"
+        ]
+      },
+      {
+        "method": "google.cloud.alloydb.v1.AlloyDBAdmin/UpdateUser",
+        "status": "Verified",
+        "tests": [
+          "test/compat/alloydb_test.go:207 TestAlloyDBInstancesConnectorAndBackups"
+        ]
+      },
+      {
+        "method": "google.cloud.alloydb.v1.AlloyDBAdmin/UpgradeCluster",
+        "status": "Verified",
+        "tests": [
+          "test/compat/alloydb_test.go:580 TestAlloyDBInstanceOperations"
+        ]
+      }
+    ]
+  },
+  {
     "Key": "trace",
     "Title": "Cloud Trace API (v1 and v2)",
     "counts": {

@@ -272,7 +272,14 @@ recovery_target_time = '$2'
 recovery_target_action = 'promote'
 EOF
 chown postgres "$conf"
-"$asuser" postgres pg_ctl -D "$W" -l "$W/recovery.log" -w -t 280 -o "-c port=` + pgRecoveryPort + ` -c listen_addresses='' -c unix_socket_directories=$W -c archive_mode=off" start >/dev/null || { tail -5 "$W/recovery.log" >&2; exit 1; }
+# Recovery refuses settings lower than those the WAL was written under
+# ("insufficient parameter settings"): the source's, which a flag such as
+# max_connections raises, are the scratch server's too.
+x=""
+for s in max_connections max_worker_processes max_wal_senders max_prepared_transactions max_locks_per_transaction; do
+  v=$(psql -U postgres -d template1 -AtX -c "SHOW $s") && x="$x -c $s=$v"
+done
+"$asuser" postgres pg_ctl -D "$W" -l "$W/recovery.log" -w -t 280 -o "-c port=` + pgRecoveryPort + ` -c listen_addresses='' -c unix_socket_directories=$W -c archive_mode=off$x" start >/dev/null || { tail -5 "$W/recovery.log" >&2; exit 1; }
 i=0; until [ "$("$asuser" postgres psql -h "$W" -p ` + pgRecoveryPort + ` -U postgres -d template1 -AtX -c 'SELECT pg_is_in_recovery()')" = f ]; do
   i=$((i+1)); [ $i -lt 280 ] || { tail -5 "$W/recovery.log" >&2; exit 1; }; sleep 1
 done`

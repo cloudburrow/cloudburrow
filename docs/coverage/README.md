@@ -62,6 +62,7 @@ Do not edit these files by hand.
 | [Dataform (v1)](dataform.md) | 74 | 74 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Dataform (v1beta1)](dataformv1beta1.md) | 81 | 79 | 0 | 0 | 2 | 0 | 0 | 0 |
 | [App Hub (v1)](apphub.md) | 31 | 31 | 0 | 0 | 0 | 0 | 0 | 0 |
+| [AlloyDB for PostgreSQL (v1)](alloydb.md) | 37 | 31 | 0 | 6 | 0 | 0 | 0 | 0 |
 | [Cloud Trace API (v1 and v2)](trace.md) | 5 | 5 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Workflows and Workflow Executions (v1)](workflows.md) | 10 | 10 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Kubernetes Engine API (v1)](gke.md) | 37 | 37 | 0 | 0 | 0 | 0 | 0 | 0 |

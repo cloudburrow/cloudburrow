@@ -71,6 +71,8 @@ Flags:
     	namespace for CloudBurrow-managed workloads
   -node-image string
     	pinned kind node image, which fixes the Kubernetes version
+  -port-alloydb int
+    	AlloyDB for PostgreSQL API host port (0 = OS-assigned; default 9063)
   -port-analyticshub int
     	BigQuery sharing (Analytics Hub) API host port (0 = OS-assigned; default 9042)
   -port-apikeys int
@@ -176,7 +178,7 @@ Flags:
   -seed-file string
     	seed document (the /admin/seed body) applied when up starts
   -services string
-    	comma-separated services to start (default storage,pubsub,tasks,run,secretmanager; opt-in: firestore,datastore,bigtable,spanner,cloudsql,bigquery,memorystore,cloudsql-mysql,scheduler,logging,kms,backupdr,privateca,gke,monitoring,compute,workflows,parametermanager,dataform,apphub,trace)
+    	comma-separated services to start (default storage,pubsub,tasks,run,secretmanager; opt-in: firestore,datastore,bigtable,spanner,cloudsql,bigquery,memorystore,cloudsql-mysql,scheduler,logging,kms,backupdr,privateca,gke,monitoring,compute,workflows,parametermanager,dataform,apphub,trace,alloydb)
   -shutdown-timeout duration
     	bounded time to drain on shutdown
   -state-dir string
