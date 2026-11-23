@@ -161,8 +161,10 @@ type streamBuffers struct {
 	// offset is how far the clock was advanced (serveClock), in
 	// nanoseconds.
 	offset atomic.Int64
-	// clockMu orders the advances and their saves to clockPath, where
-	// the offset is kept (keepClock), "" in memory alone.
+	// clockMu orders the advances, their saves to clockPath, where the
+	// offset is kept (keepClock), "" in memory alone, and the settings of
+	// the engine's clock (syncEngineLocked): an offset read outside it
+	// could reach the engine after a later one and set its clock back.
 	clockMu   sync.Mutex
 	clockPath string
 	// unsynced is whether the engine may not have the offset yet: the
@@ -255,14 +257,14 @@ func (s *streamBuffers) serveClock(w http.ResponseWriter, r *http.Request, engin
 	s.clockMu.Lock()
 	s.offset.Add(int64(body.Seconds * float64(time.Second)))
 	s.saveClockLocked()
-	s.clockMu.Unlock()
+	msg := ""
 	if engine != nil {
-		if msg := syncEngineClock(r, engine, s.offset.Load()); msg != "" {
-			s.unsynced.Store(true)
-			writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: the front's clock moved, but the engine's did not: "+msg)
-			return true
-		}
-		s.unsynced.Store(false)
+		msg = s.syncEngineLocked(r, engine)
+	}
+	s.clockMu.Unlock()
+	if msg != "" {
+		writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: the front's clock moved, but the engine's did not: "+msg)
+		return true
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"time": s.clock().Format(time.RFC3339Nano)})
 	return true
@@ -940,13 +942,11 @@ func (s *streamBuffers) syncEngine(engine http.Handler, logf func(string, ...any
 	}
 	r, err := http.NewRequest(http.MethodPost, "/cloudburrow/clock", nil)
 	if err == nil {
-		if msg := syncEngineClock(r, engine, s.offset.Load()); msg != "" {
-			s.unsynced.Store(true)
-			if logf != nil {
-				logf("bigquery front: setting the engine's clock to the front's: %s", msg)
-			}
-		} else {
-			s.unsynced.Store(false)
+		s.clockMu.Lock()
+		msg := s.syncEngineLocked(r, engine)
+		s.clockMu.Unlock()
+		if msg != "" && logf != nil {
+			logf("bigquery front: setting the engine's clock to the front's: %s", msg)
 		}
 	}
 }
@@ -1016,9 +1016,25 @@ func (s *streamBuffers) syncPending(engine http.Handler, r *http.Request) {
 	if s == nil || engine == nil || !s.unsynced.Load() {
 		return
 	}
-	if syncEngineClock(r, engine, s.offset.Load()) == "" {
-		s.unsynced.Store(false)
+	s.clockMu.Lock()
+	defer s.clockMu.Unlock()
+	if s.unsynced.Load() {
+		_ = s.syncEngineLocked(r, engine)
 	}
+}
+
+// syncEngineLocked sets the engine's clock to the front's offset, read
+// under clockMu, and records whether it took (unsynced), or says why
+// not. Main run 45126544176: Data Transfer's scheduler reads the clock
+// with clock:advance of 0 seconds every few seconds; its read of the
+// offset came before a test's 49-hour advance and its setting of the
+// engine after it, so the engine's clock went back 49 hours while the
+// front's stayed, and ALTER SCHEMA let go of no history
+// (TestBigQueryAlterSchemaTimeTravelLetsGoFirst).
+func (s *streamBuffers) syncEngineLocked(r *http.Request, engine http.Handler) string {
+	msg := syncEngineClock(r, engine, s.offset.Load())
+	s.unsynced.Store(msg != "")
+	return msg
 }
 
 // syncEngineClock sets the engine's clock offset to offset nanoseconds

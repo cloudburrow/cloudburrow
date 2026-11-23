@@ -270,6 +270,22 @@ func (p *sqlProvisioner) backend(spec sqladmin.Spec) components.Backend {
 // mysqlReplicaSetup gives a MySQL replica its primary's databases, with
 // the primary's GTIDs as purged, and starts GTID replication from it, once:
 // a replica that has a source already is left as it is.
+//
+// A replica of a Cloud SQL instance has its primary's users too, the ones
+// made before it as well as after: Cloud SQL's replica is a copy of the
+// whole instance. The dump leaves out the mysql database, and the GTIDs it
+// marks purged include the CREATE USER and ALTER USER statements made
+// before, so replication never replays them: the accounts are copied as a
+// backup carries them (mysqlAccountStatements), read through the
+// replication user, whose SELECT covers mysql.user. Main run 45126544176:
+// the green instance of a blue-green deployment had none of the blue
+// instance's users, so after the switchover neither had the blue name,
+// nor its clone ("Access denied for user 'appuser'", TestCloudSQLMySQL57).
+// They are written with the binary log off, as CloudBurrow's own accounts
+// are, so the replica has no transaction of its own, and with --force, so
+// a grant the replica's newer version refuses leaves that one out rather
+// than the replica unbuilt. An external source's replica
+// (CLOUDSQL_PRIMARY_USER) is given its databases only, as before.
 const mysqlReplicaSetup = `set -e
 ` + mysqlRootEnv + `if [ -n "$(mysql $MYSQL_LOCAL -N -e 'SHOW REPLICA STATUS')" ]; then exit 0; fi
 src() { MYSQL_PWD="$CLOUDSQL_REPLICATION_PASSWORD" "$@" -h "$CLOUDSQL_PRIMARY_HOST" -P "${CLOUDSQL_PRIMARY_PORT:-3306}" -u "${CLOUDSQL_PRIMARY_USER:-` + components.SQLReplicaUser + `}"; }
@@ -280,6 +296,16 @@ if [ -n "$dbs" ]; then
   src mysqldump --single-transaction --set-gtid-purged=ON --routines --triggers --events --databases $dbs | mysql $MYSQL_LOCAL
 else
   mysql $MYSQL_LOCAL -e "SET GLOBAL gtid_purged = '$(src mysql -N -e 'SELECT @@GLOBAL.gtid_executed')'"
+fi
+if [ -z "${CLOUDSQL_PRIMARY_USER:-}" ]; then
+  acct() { src mysql "$@"; }
+  primary_accounts() {
+` + mysqlAccountStatements + `}
+  accounts=$(primary_accounts)
+  ifx='IF EXISTS '; case "$(mysql $MYSQL_LOCAL -N -B -e 'SELECT VERSION()')" in 5.6*) ifx= ;; esac
+  drops=$(mysql $MYSQL_LOCAL -N -B -e "SELECT CONCAT('DROP USER $ifx', QUOTE(user), '@', QUOTE(host), ';') FROM mysql.user WHERE ` + mysqlUserAccounts + `")
+  { echo 'SET SESSION sql_log_bin = 0;'; printf '%s\n' "$drops" "$accounts"; echo 'FLUSH PRIVILEGES;'; } | mysql $MYSQL_LOCAL --force ||
+    echo "the replica refused some of its primary's account statements; the others were applied" >&2
 fi
 fi
 mysql $MYSQL_LOCAL -e "CHANGE REPLICATION SOURCE TO SOURCE_HOST = '$CLOUDSQL_PRIMARY_HOST', SOURCE_PORT = ${CLOUDSQL_PRIMARY_PORT:-3306}, SOURCE_USER = '${CLOUDSQL_PRIMARY_USER:-` +

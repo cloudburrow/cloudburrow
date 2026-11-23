@@ -253,17 +253,25 @@ const mysqlUserAccounts = `user NOT LIKE 'mysql.%' AND user NOT IN ('` + sqladmi
 // image's root@localhost may grant them. MySQL 5.6 has no SHOW CREATE
 // USER: its accounts are mysql56Accounts' (#1524).
 const mysqlExportAccounts = mysqlRootEnv + `set -e
-case "$(mysql $MYSQL_LOCAL -N -B -e 'SELECT VERSION()')" in 5.6*)
+acct() { mysql $MYSQL_LOCAL "$@"; }
+` + mysqlAccountStatements
+
+// mysqlAccountStatements is mysqlExportAccounts' body, which reads the
+// accounts through acct, a shell function running the mysql client
+// against the server whose accounts are printed: the server itself for a
+// backup, a replica's primary for mysqlReplicaSetup. On MySQL 5.6 it ends
+// with exit 0, so a caller that goes on runs it in a subshell.
+const mysqlAccountStatements = `case "$(acct -N -B -e 'SELECT VERSION()')" in 5.6*)
 ` + mysql56Accounts + `  exit 0 ;;
 esac
-for u in $(mysql $MYSQL_LOCAL -N -B -e "SELECT CONCAT(QUOTE(user), '@', QUOTE(host)) FROM mysql.user WHERE ` + mysqlUserAccounts + `"); do
-  { mysql $MYSQL_LOCAL -N -B -r -e "SET SESSION print_identified_with_as_hex = ON; SHOW CREATE USER $u" 2>/dev/null ||
-    mysql $MYSQL_LOCAL -N -B -r -e "SHOW CREATE USER $u"; } | sed 's/^CREATE USER /CREATE USER IF NOT EXISTS /; s/$/;/'
-  mysql $MYSQL_LOCAL -N -B -r -e "SHOW GRANTS FOR $u" | grep -v '^GRANT PROXY ON ' | sed 's/$/;/'
+for u in $(acct -N -B -e "SELECT CONCAT(QUOTE(user), '@', QUOTE(host)) FROM mysql.user WHERE ` + mysqlUserAccounts + `"); do
+  { acct -N -B -r -e "SET SESSION print_identified_with_as_hex = ON; SHOW CREATE USER $u" 2>/dev/null ||
+    acct -N -B -r -e "SHOW CREATE USER $u"; } | sed 's/^CREATE USER /CREATE USER IF NOT EXISTS /; s/$/;/'
+  acct -N -B -r -e "SHOW GRANTS FOR $u" | grep -v '^GRANT PROXY ON ' | sed 's/$/;/'
 done
-if [ "$(mysql $MYSQL_LOCAL -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'mysql' AND table_name = 'cloudburrow_iam_users'")" = 1 ]; then
+if [ "$(acct -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'mysql' AND table_name = 'cloudburrow_iam_users'")" = 1 ]; then
   echo "CREATE TABLE IF NOT EXISTS mysql.cloudburrow_iam_users (user VARCHAR(32) NOT NULL PRIMARY KEY, type VARCHAR(40) NOT NULL, email VARCHAR(255) NOT NULL) ENGINE=InnoDB;"
-  mysql $MYSQL_LOCAL -N -B -r -e "SELECT CONCAT('REPLACE INTO mysql.cloudburrow_iam_users (user, type, email) VALUES (', QUOTE(user), ', ', QUOTE(type), ', ', QUOTE(email), ');') FROM mysql.cloudburrow_iam_users"
+  acct -N -B -r -e "SELECT CONCAT('REPLACE INTO mysql.cloudburrow_iam_users (user, type, email) VALUES (', QUOTE(user), ', ', QUOTE(type), ', ', QUOTE(email), ');') FROM mysql.cloudburrow_iam_users"
 fi
 `
 
@@ -272,10 +280,10 @@ fi
 // its password hash (IDENTIFIED BY PASSWORD, which MySQL 5.6 and 5.7 both
 // read), and its grants without that clause, which 5.6's SHOW GRANTS
 // repeats.
-const mysql56Accounts = `  mysql $MYSQL_LOCAL -N -B -r -e "SELECT CONCAT('CREATE USER ', QUOTE(user), '@', QUOTE(host), IF(password = '', '', ` +
+const mysql56Accounts = `  acct -N -B -r -e "SELECT CONCAT('CREATE USER ', QUOTE(user), '@', QUOTE(host), IF(password = '', '', ` +
 	`CONCAT(' IDENTIFIED BY PASSWORD ', QUOTE(password))), ';') FROM mysql.user WHERE ` + mysqlUserAccounts + `"
-  for u in $(mysql $MYSQL_LOCAL -N -B -e "SELECT CONCAT(QUOTE(user), '@', QUOTE(host)) FROM mysql.user WHERE ` + mysqlUserAccounts + `"); do
-    mysql $MYSQL_LOCAL -N -B -r -e "SHOW GRANTS FOR $u" | grep -v '^GRANT PROXY ON ' | sed -E "s/ IDENTIFIED BY PASSWORD '[^']*'//" | sed 's/$/;/'
+  for u in $(acct -N -B -e "SELECT CONCAT(QUOTE(user), '@', QUOTE(host)) FROM mysql.user WHERE ` + mysqlUserAccounts + `"); do
+    acct -N -B -r -e "SHOW GRANTS FOR $u" | grep -v '^GRANT PROXY ON ' | sed -E "s/ IDENTIFIED BY PASSWORD '[^']*'//" | sed 's/$/;/'
   done
 `
 

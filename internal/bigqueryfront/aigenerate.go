@@ -870,10 +870,10 @@ func (f front) aiRow(r *http.Request, project string, c aiCall, a aiResolved, ke
 			parts, status = f.pieceParts(r, pieces, aiInstruction(c, a))
 		}
 		if status == "" {
-			text, raw, status = f.aiGenerateParts(r, project, a.rm, parts, aiResponseSchema(c.fn, a.schema), a.genCfg)
+			text, raw, status = f.aiGenerateParts(r, project, a.rm, parts, aiResponseSchema(c.fn, a.schema), aiGenerationConfig(c, a))
 		}
 	} else {
-		text, raw, status = f.aiGenerateText(r, project, a.rm, full, aiResponseSchema(c.fn, a.schema), a.genCfg)
+		text, raw, status = f.aiGenerateText(r, project, a.rm, full, aiResponseSchema(c.fn, a.schema), aiGenerationConfig(c, a))
 	}
 	fields, _ := c.output(a)
 	nulls := func() []string {
@@ -924,6 +924,30 @@ func (f front) aiRow(r *http.Request, project string, c aiCall, a aiResolved, ke
 		return withMeta(nulls(), why), why, true, 0, ""
 	}
 	return withMeta(vals, ""), "", true, 0, ""
+}
+
+// aiGenerationConfig is the generationConfig a call's prompt is sent
+// with: model_params' (#1797), or, for the managed functions AI.IF,
+// AI.SCORE and AI.CLASSIFY, which take no model_params, BigQuery's Gemini
+// defaults (defaultGenerationConfig: temperature 0, greedy), as its remote
+// models get them. Main run 45126544176: since the local endpoint samples
+// a request that sets no temperature (#2107, Vertex's default), AI.IF
+// answered one review false in a SELECT list and true in a WHERE clause
+// of the same rows (TestBigQueryAIManagedFunctions).
+//
+// UNVERIFIED (re-read 2026-11-23,
+// https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-ai-if:
+// it names no generation setting, only that AI.IF "automatically
+// structures your prompts to improve the quality of the output"): the
+// managed functions' own temperature.
+func aiGenerationConfig(c aiCall, a aiResolved) map[string]any {
+	switch c.fn {
+	case "IF", "SCORE", "CLASSIFY":
+		if a.genCfg == nil {
+			return defaultGenerationConfig()
+		}
+	}
+	return a.genCfg
 }
 
 // aiInstruction is what the front appends to a prompt to ask for the
