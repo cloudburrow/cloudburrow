@@ -1860,7 +1860,7 @@
         "notes": "SHA-256s are the release's osv-scanner_SHA256SUMS entries, which match the assets' GitHub digests. Run as `scan image --archive --offline --all-packages` with OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY at the prefetched snapshot and every proxy variable at 127.0.0.1:9."
       },
       "osvDatabase": {
-        "version": "2026-11-19",
+        "version": "2026-11-23",
         "source": "https://google.github.io/osv.dev/data/#data-dumps",
         "license": "mixed: each OSV record keeps its source database's licence (for example CC-BY-4.0 for the GitHub Advisory Database, the Go vulnerability database and PyPA's advisory database); the distributions' trackers (Alpine secdb, Debian security tracker, Ubuntu CVE tracker) set their own terms",
         "redistribution": "Alpine, Debian, Go, Maven, npm and PyPI are mirrored unmodified as release assets osv-db-<ecosystem>-<sha256 prefix>.zip (#1917), with osv-mirror-NOTICE.txt naming the sources and their licences; Ubuntu (820 MB) is fetched from OSV's bucket only. Prefetch tries the CloudBurrow release first and OSV's bucket after",
@@ -1870,39 +1870,39 @@
         "digest": null,
         "snapshots": {
           "Alpine": {
-            "url": "https://osv-vulnerabilities.storage.googleapis.com/Alpine/all.zip?generation=1795080781716943",
-            "sha256": "sha256:82c1e6b3a170cdc7e663061fc3a766a6c90ec73ac071aa34403bebaed0cca457",
-            "size": 9276935
+            "url": "https://osv-vulnerabilities.storage.googleapis.com/Alpine/all.zip?generation=1795419221904360",
+            "sha256": "sha256:ebd5580be18f3a6e7539da588f3598e5211eae1231bc8930e4dd84ede1b35d3e",
+            "size": 9335526
           },
           "Debian": {
-            "url": "https://osv-vulnerabilities.storage.googleapis.com/Debian/all.zip?generation=1795096995130005",
-            "sha256": "sha256:6005ba6323158727283dac884ff01b5693fc57861afb046c85ce2bffe79bc576",
-            "size": 82263485
+            "url": "https://osv-vulnerabilities.storage.googleapis.com/Debian/all.zip?generation=1795450702350583",
+            "sha256": "sha256:9d3ca9f27dc8dbd3ce0279197c473615bb29e3c8f04170ff758c7f99d18aedf6",
+            "size": 84597617
           },
           "Go": {
-            "url": "https://osv-vulnerabilities.storage.googleapis.com/Go/all.zip?generation=1795050195126703",
-            "sha256": "sha256:525f77fa536859d59215442f6ba98caf100ca7f1bef2dd9a242d9f3fb0f89757",
-            "size": 12956844
+            "url": "https://osv-vulnerabilities.storage.googleapis.com/Go/all.zip?generation=1795364312272971",
+            "sha256": "sha256:91598a9cbf2224b4e4073d81a8b06ea657bdd2b9a55164fb5bf90ed1868dabd3",
+            "size": 13013663
           },
           "Maven": {
-            "url": "https://osv-vulnerabilities.storage.googleapis.com/Maven/all.zip?generation=1795051974553992",
-            "sha256": "sha256:fd1c96321a41c535c3f4cab7fc4db24f46c659e143eb62493c1a634a917f1c97",
-            "size": 10547334
+            "url": "https://osv-vulnerabilities.storage.googleapis.com/Maven/all.zip?generation=1795449793821021",
+            "sha256": "sha256:7728a025e8f370f12de255fc34076a9c0d1d5db589304945e5e8730483667e40",
+            "size": 10565847
           },
           "PyPI": {
-            "url": "https://osv-vulnerabilities.storage.googleapis.com/PyPI/all.zip?generation=1795082587433272",
-            "sha256": "sha256:51d4295bbe14768b99f0b8b91b01b708d8230ac296c8722cc5e29e66d28e8ee4",
-            "size": 38075455
+            "url": "https://osv-vulnerabilities.storage.googleapis.com/PyPI/all.zip?generation=1795428217478387",
+            "sha256": "sha256:7bac0d0f11b32343f51df2242110831954aada8f87021db95954414363fc8e37",
+            "size": 38293799
           },
           "npm": {
-            "url": "https://osv-vulnerabilities.storage.googleapis.com/npm/all.zip?generation=1795095210470062",
-            "sha256": "sha256:0601339e91c58525433117f107327a55c96a060534c5614ee6375f6f7bf366f9",
-            "size": 221817800
+            "url": "https://osv-vulnerabilities.storage.googleapis.com/npm/all.zip?generation=1795444417986711",
+            "sha256": "sha256:2154a12f56474607be8f9e725ce3f5d5e83d795eaad461b5dc8c68ad191857fe",
+            "size": 222104165
           },
           "Ubuntu": {
-            "url": "https://osv-vulnerabilities.storage.googleapis.com/Ubuntu/all.zip?generation=1795077206037621",
-            "sha256": "sha256:7490ea001180541e8bb10acae93aff85ca368842986cd4d22e68b9ce82d7fb6a",
-            "size": 819766997
+            "url": "https://osv-vulnerabilities.storage.googleapis.com/Ubuntu/all.zip?generation=1795157303811323",
+            "sha256": "sha256:c2d95e70fcf080f2eb731986b8099142ed343a0f9e6d0f123ddde5943ac17f6c",
+            "size": 821653609
           }
         }
       }
