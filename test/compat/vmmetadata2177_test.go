@@ -163,6 +163,9 @@ func TestVMMetadataServerFromInsideTheVM2177(t *testing.T) {
 		{"the probe answers without the header", "curl -s -D - -o /dev/null http://169.254.169.254/ | tr -d '\\r' | grep -i '^metadata-flavor'", "Google"},
 		{"no Metadata-Flavor", "curl -s -o /dev/null -w '%{http_code}' " + md + "instance/name", "403"},
 		{"X-Forwarded-For", "curl -s -o /dev/null -w '%{http_code}' " + hdr + " -H 'X-Forwarded-For: 10.0.0.1' " + md + "instance/name", "403"},
+		// The guest's own port 80 is free, as on Compute Engine: the
+		// metadata server's address is carried elsewhere.
+		{"port 80 is the guest's", "sudo timeout 2 nc -l 80; echo rc=$?", "rc=124"},
 		{"a guest attribute", "curl -s -o /dev/null -w '%{http_code}' -X PUT --data ready " + hdr + " " + md + "instance/guest-attributes/app/state", "200"},
 	} {
 		if out := run(c.cmd); !strings.Contains(out, c.want) {

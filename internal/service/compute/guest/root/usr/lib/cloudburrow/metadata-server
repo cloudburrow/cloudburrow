@@ -1,9 +1,11 @@
 #!/usr/bin/perl
-# This instance's metadata server (#2177): metadata.google.internal and
-# 169.254.169.254 port 80 (the pod's hostAliases name the first, the
-# network script holds the address on lo), fd20:ce::254 port 80 on an
-# instance with IPv6 (IPv6-only instances' address on Compute Engine), and
-# 127.0.0.1:8169 for the Ops Agent's units (#2139). Every request is
+# This instance's metadata server (#2177), on 127.0.0.1:8169 and
+# [::1]:8169: the network script carries metadata.google.internal and
+# 169.254.169.254 port 80 here (the pod's hostAliases name the first, and a
+# DNAT of the guest's own connections takes the address's port 80 here, so
+# no port of the guest's own is taken), and fd20:ce::254 port 80 on an
+# instance with IPv6 (IPv6-only instances' address on Compute Engine); the
+# Ops Agent's units name 127.0.0.1:8169 itself (#2139). Every request is
 # carried, as it came (method, path, query, headers, body), to the
 # instance's own metadata on CloudBurrow's Compute Engine port
 # (CLOUDBURROW_GUEST_METADATA, http://HOST:PORT/cloudburrow/guest/TOKEN),
@@ -92,10 +94,9 @@ sub serve {
   close $u;
 }
 
-my @want = (['127.0.0.1', 8169, 4], ['169.254.169.254', 80, 4], ['fd20:ce::254', 80, 6]);
+my @want = (['127.0.0.1', 8169, 4], ['::1', 8169, 6]);
 while (1) {
-  # Bind what is not bound yet: the addresses on lo come from the network
-  # script, and fd20:ce::254 only where the guest has IPv6.
+  # Bind what is not bound yet: ::1 only where the guest has IPv6 on lo.
   for my $w (@want) {
     my ($ip, $port, $fam) = @$w;
     next if $ls{"$ip $port"};
