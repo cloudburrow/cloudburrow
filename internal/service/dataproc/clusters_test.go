@@ -2,6 +2,7 @@ package dataproc
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -378,20 +379,39 @@ func TestPoliciesAndWorkflows(t *testing.T) {
 }
 
 // TestNotebookScript: code cells in order, params after the cell tagged
-// parameters (or first), magics refused.
+// parameters (or first), magics kept for IPython.
 func TestNotebookScript(t *testing.T) {
+	cells := func(script string) []map[string]string {
+		t.Helper()
+		i := strings.Index(script, "_cb_json.loads(")
+		j := strings.Index(script[i:], "):\n")
+		var lit string
+		if i < 0 || j < 0 || json.Unmarshal([]byte(script[i+len("_cb_json.loads("):i+j]), &lit) != nil {
+			t.Fatalf("no cells in %q", script)
+		}
+		var out []map[string]string
+		if err := json.Unmarshal([]byte(lit), &out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
 	nb := `{"cells":[{"cell_type":"markdown","source":["# T"]},
 	{"cell_type":"code","metadata":{"tags":["parameters"]},"source":["n = 1\n"]},
-	{"cell_type":"code","metadata":{},"source":"print(n)"}]}`
+	{"cell_type":"code","metadata":{},"source":"%time print(n)"}]}`
 	got, err := notebookScript([]byte(nb), map[string]string{"n": "5"})
-	if err != nil || !strings.Contains(got, "n = 1\n\n# Parameters\nn = \"5\"\n\n# In[2]:\nprint(n)") {
-		t.Errorf("script %q %v", got, err)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got, _ := notebookScript([]byte(`{"cells":[{"cell_type":"code","source":"print(n)"}]}`), map[string]string{"n": "5"}); !strings.Contains(got, "# Parameters\nn = \"5\"\n\n# In[1]:") {
-		t.Errorf("untagged %q", got)
+	if c := cells(got); len(c) != 3 || c[0]["source"] != "n = 1\n" || c[1]["source"] != "# Parameters\nn = \"5\"\n" ||
+		c[2]["label"] != "In[2]" || c[2]["source"] != "%time print(n)" {
+		t.Errorf("cells %v", c)
 	}
-	if _, err := notebookScript([]byte(`{"cells":[{"cell_type":"code","source":"%pip install x"}]}`), nil); err == nil {
-		t.Error("magic accepted")
+	if !strings.Contains(got, "InteractiveShell") {
+		t.Errorf("script %q runs no IPython", got)
+	}
+	got, _ = notebookScript([]byte(`{"cells":[{"cell_type":"code","source":"print(n)"}]}`), map[string]string{"n": "5"})
+	if c := cells(got); len(c) != 2 || c[0]["label"] != "injected parameters" || c[1]["source"] != "print(n)" {
+		t.Errorf("untagged %v", c)
 	}
 }
 
@@ -430,7 +450,10 @@ func TestCheckComponents(t *testing.T) {
 		{"2.3", []dataprocpb.Component{dataprocpb.Component_HBASE}, codes.InvalidArgument},
 		{"2.1", []dataprocpb.Component{dataprocpb.Component_ICEBERG}, codes.InvalidArgument},
 		{"2.2", []dataprocpb.Component{dataprocpb.Component_ZOOKEEPER, dataprocpb.Component_ZOOKEEPER}, codes.InvalidArgument},
-		{"2.2", []dataprocpb.Component{dataprocpb.Component_RANGER}, codes.Unimplemented},
+		{"2.2", []dataprocpb.Component{dataprocpb.Component_DELTA, dataprocpb.Component_ICEBERG, dataprocpb.Component_HUDI}, codes.OK},
+		{"2.1", []dataprocpb.Component{dataprocpb.Component_HUDI}, codes.OK},
+		{"3.0", []dataprocpb.Component{dataprocpb.Component_ICEBERG}, codes.Unimplemented},
+		{"3.0", []dataprocpb.Component{dataprocpb.Component_DELTA, dataprocpb.Component_HUDI}, codes.OK},
 	} {
 		if err := checkComponents(c.mm, c.comps); status.Code(err) != c.code {
 			t.Errorf("%s %v: %v, want %v", c.mm, c.comps, err, c.code)

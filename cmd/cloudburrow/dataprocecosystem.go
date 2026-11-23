@@ -41,6 +41,10 @@ const (
 	dataprocZookeeperImage = "zookeeper@sha256:e6b279d0135070507e867a3220c941fe90b791937b6d469b6929b79a5dfb01ba"
 	// dataprocSolrImage is solr:9.4.1.
 	dataprocSolrImage = "solr@sha256:96e915755c6e0f40200e6a0306e959ed5c2b24b871fef2c34f436a1ca4796f4e"
+	// dataprocZeppelinImage is apache/zeppelin:0.10.1, the Zeppelin of
+	// image versions 2.1 to 2.3: linux/amd64 only (run under emulation on
+	// arm64), 3.7 GB compressed.
+	dataprocZeppelinImage = "apache/zeppelin@sha256:9c1b5ddd6225ad45cedc327a853f6f13e45797ff419260d20bb9c14f5cbe3a87"
 
 	gcsConnectorURL  = "https://repo1.maven.org/maven2/com/google/cloud/bigdataoss/gcs-connector/hadoop3-2.2.30/gcs-connector-hadoop3-2.2.30-shaded.jar"
 	gcsConnectorSHA  = "dd7959e4d59a74023781c9e0666e8c2207528a0e7871eaf5f9b42eea0430a079"
@@ -54,9 +58,10 @@ const (
 // cache.
 func dataprocEcosystem(cache, instance string, out io.Writer) *sparkproc.Ecosystem {
 	var mu sync.Mutex
+	w := out
 	return &sparkproc.Ecosystem{
 		Hive: dataprocHiveImage, Trino: dataprocTrinoImage, Flink: dataprocFlinkImage,
-		Zookeeper: dataprocZookeeperImage, Solr: dataprocSolrImage,
+		Zookeeper: dataprocZookeeperImage, Solr: dataprocSolrImage, Zeppelin: dataprocZeppelinImage,
 		GCS: func(ctx context.Context) (string, error) {
 			mu.Lock()
 			defer mu.Unlock()
@@ -70,7 +75,71 @@ func dataprocEcosystem(cache, instance string, out io.Writer) *sparkproc.Ecosyst
 		Jupyter: func(ctx context.Context, spark string) (string, error) {
 			return sparkproc.JupyterImage(ctx, spark, instance)
 		},
+		Lake: func(ctx context.Context, component, version, iceberg string) ([]string, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			jars, err := lakeJarsFor(component, version, iceberg)
+			if err != nil {
+				return nil, err
+			}
+			var out []string
+			for _, j := range jars {
+				p, err := fetchPinned(ctx, filepath.Join(cache, "lake", j.file()), mavenCentral+j.path, j.sha256, j.file(), w)
+				if err != nil {
+					return nil, err
+				}
+				out = append(out, p)
+			}
+			return out, nil
+		},
 	}
+}
+
+// mavenCentral is Maven Central's repository root.
+const mavenCentral = "https://repo1.maven.org/maven2/"
+
+// lakeJar is one table format jar on Maven Central, by its path under
+// the repository root and its SHA-256 (dependencies.json's
+// components.bigqueryml.dataprocLake).
+type lakeJar struct{ path, sha256 string }
+
+func (j lakeJar) file() string { return filepath.Base(j.path) }
+
+// lakeJars are the table formats' jars of each image version's Spark, the
+// versions its release notes list (read 2026-11-23:
+// https://docs.cloud.google.com/dataproc/docs/concepts/versioning/dataproc-release-2.1,
+// -2.2, -2.3 and -3.0): Delta Lake 3.2.1, Iceberg 1.6.1 (1.10 by
+// dataproc:dataproc.iceberg.version) and Hudi 0.15.0 on 2.2 and 2.3
+// (Spark 3.5, Scala 2.12); Hudi 0.12.3 on 2.1 (Spark 3.3); Delta Lake
+// 4.2.0 and Hudi 1.2.0 on 3.0 (Spark 4.1, Scala 2.13).
+var lakeJars = map[string][]lakeJar{
+	"DELTA/2.2": {{"io/delta/delta-spark_2.12/3.2.1/delta-spark_2.12-3.2.1.jar", "088e187da689a347a6a8556dcb22318e3dfcfb995d807f5e2c19b4d0a7ee9499"},
+		{"io/delta/delta-storage/3.2.1/delta-storage-3.2.1.jar", "4dcc179fc4076bda5060a4038f979c53e1f5916cf04971e28f9441db390763c7"}},
+	"DELTA/3.0": {{"io/delta/delta-spark_2.13/4.2.0/delta-spark_2.13-4.2.0.jar", "8480050a55c7e50427f3bec3af9243f98fc7cbfa453a2ef55e6ea8d0b7b121ff"},
+		{"io/delta/delta-storage/4.2.0/delta-storage-4.2.0.jar", "2d84df76551f2b3cd27b120abec67ccbba324cea6ec45eb659edcc54234f99f3"}},
+	"ICEBERG/2.2": {{"org/apache/iceberg/iceberg-spark-runtime-3.5_2.12/1.6.1/iceberg-spark-runtime-3.5_2.12-1.6.1.jar", "87e7184f31ef0caac415bbdfcf1bc4943346a58b98d747dc83434f7139e12acb"}},
+	"ICEBERG/2.2/1.10": {{"org/apache/iceberg/iceberg-spark-runtime-3.5_2.12/1.10.0/iceberg-spark-runtime-3.5_2.12-1.10.0.jar",
+		"70f9471870b2d456167d703c829f098a446b86bb1379eee338c0efa03a341026"}},
+	"HUDI/2.1": {{"org/apache/hudi/hudi-spark3.3-bundle_2.12/0.12.3/hudi-spark3.3-bundle_2.12-0.12.3.jar", "99142b2f0f67d8b48bf7114f7e8fee8859772b9e288064abb28b07655bb0277c"}},
+	"HUDI/2.2": {{"org/apache/hudi/hudi-spark3.5-bundle_2.12/0.15.0/hudi-spark3.5-bundle_2.12-0.15.0.jar", "aab6ecdb5c65fcd20406b980b31ccec294fae95693de947d5778f0b3fb4e302a"}},
+	"HUDI/3.0": {{"org/apache/hudi/hudi-spark4.1-bundle_2.13/1.2.0/hudi-spark4.1-bundle_2.13-1.2.0.jar", "69ba6fa7e29096c15737614a98e85536935365f044dc4d647dfdec6bcc24f6ce"}},
+}
+
+// lakeJarsFor are a component's jars on an image version (2.3's are
+// 2.2's: the same Spark and the same versions).
+func lakeJarsFor(component, version, iceberg string) ([]lakeJar, error) {
+	if version == "2.3" {
+		version = "2.2"
+	}
+	key := component + "/" + version
+	if component == sparkproc.ComponentIceberg && iceberg != "" && iceberg != "1.6" {
+		key += "/" + iceberg
+	}
+	jars, ok := lakeJars[key]
+	if !ok {
+		return nil, fmt.Errorf("no %s jars are pinned for image version %s", component, version)
+	}
+	return jars, nil
 }
 
 // fetchPinned is the file at p, fetched from url and checked against its

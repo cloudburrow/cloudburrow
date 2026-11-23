@@ -68,6 +68,9 @@ type ClusterSpec struct {
 	// files, prefixed as softwareConfig.properties has them (core:,
 	// mapred:, hive:, pig:, trino:, flink:).
 	ConfProperties map[string]string
+	// IcebergVersion is the ICEBERG component's version
+	// (dataproc:dataproc.iceberg.version, "" for the image's default).
+	IcebergVersion string
 }
 
 // Cluster is a running cluster.
@@ -88,6 +91,14 @@ type Cluster struct {
 	extras  []string // the components' containers, in start order
 	stopped bool
 	gone    bool
+
+	// lakeMounts and lakeProps are the table formats' jars' mounts and
+	// Spark properties (setupLake).
+	lakeMounts []string
+	lakeProps  map[string]string
+
+	// singleNM is set once a single node cluster's NodeManager runs.
+	singleNM bool
 
 	hiveMu sync.Mutex
 	hiveUp bool
@@ -186,7 +197,7 @@ func (d *Docker) StartCluster(ctx context.Context, spec ClusterSpec) (_ *Cluster
 	if err := writeTLS(filepath.Join(c.dir, "tls")); err != nil {
 		return nil, err
 	}
-	for _, sub := range []string{"history", "jobs", "warehouse"} {
+	for _, sub := range []string{"history", "jobs", "warehouse", "shared"} {
 		if err := os.MkdirAll(filepath.Join(c.dir, sub), 0o777); err != nil {
 			return nil, err
 		}
@@ -207,7 +218,7 @@ func (d *Docker) StartCluster(ctx context.Context, spec ClusterSpec) (_ *Cluster
 	base := "cb-dpc-" + strings.Trim(suffix, "-")
 	c.network, c.relay, c.master = base+"-net", base+"-relay", base+"-m"
 
-	if err := c.writeConf(filepath.Join(c.dir, "conf"), nil); err != nil {
+	if err := c.writeConf(filepath.Join(c.dir, "conf"), nil, nil); err != nil {
 		return nil, err
 	}
 	hosts := []string{rest, storage}
@@ -243,6 +254,12 @@ func (d *Docker) StartCluster(ctx context.Context, spec ClusterSpec) (_ *Cluster
 			relays = append(relays, p.listen+"="+alias+":"+p.port)
 		}
 	}
+	if c.yarnEnabled() {
+		for _, p := range yarnPorts {
+			relayArgs = append(relayArgs, "-p", "127.0.0.1::"+p.port)
+			relays = append(relays, alias+":"+p.port)
+		}
+	}
 	if len(targets) > 2 {
 		relays = append(relays, gcsPort+"=@"+targets[2])
 	}
@@ -255,6 +272,9 @@ func (d *Docker) StartCluster(ctx context.Context, spec ClusterSpec) (_ *Cluster
 	}
 	if out, err := d.docker(ctx, "network", "connect", "--alias", restHost, "--alias", storageHost, c.network, c.relay); err != nil {
 		return nil, &Unavailable{Msg: "connect the cluster's relay: " + out}
+	}
+	if err := c.setupLake(ctx); err != nil {
+		return nil, err
 	}
 	role := "master"
 	switch {
@@ -272,6 +292,11 @@ func (d *Docker) StartCluster(ctx context.Context, spec ClusterSpec) (_ *Cluster
 	if !spec.HistoryOnly {
 		if err := c.waitLog(ctx, c.master, regexp.MustCompile(`I have been elected leader|Starting Spark master`), 3*time.Minute); err != nil {
 			return nil, err
+		}
+		if c.yarnEnabled() {
+			if err := c.startYARN(ctx); err != nil {
+				return nil, err
+			}
 		}
 		if err := c.Scale(ctx, spec.Workers); err != nil {
 			return nil, err
@@ -299,8 +324,9 @@ func (c *Cluster) startNode(ctx context.Context, name, alias, role string) error
 		"-v", c.HistoryDir() + ":/cb/history",
 		"-e", "PYSPARK_PYTHON=python3", "-e", "SPARK_LOCAL_HOSTNAME=" + alias,
 		"-e", fmt.Sprintf("CB_CORES=%d", cores), "-e", "CB_MEMORY=" + mem, "-e", "CB_MASTER=" + c.nodeAlias(-1),
-		"-e", "CB_HISTORY_BASE=" + c.spec.HistoryBase,
-		"--entrypoint", "/bin/bash", c.rt.Image, "/cb/node.sh", role}
+		"-e", "CB_HISTORY_BASE=" + c.spec.HistoryBase}
+	args = append(args, c.lakeMounts...)
+	args = append(args, "--entrypoint", "/bin/bash", c.rt.Image, "/cb/node.sh", role)
 	if out, err := c.d.docker(ctx, args...); err != nil {
 		return &Unavailable{Msg: "start the cluster's node " + alias + ": " + out}
 	}
@@ -341,6 +367,8 @@ func (c *Cluster) Scale(ctx context.Context, n int) error {
 	if c.gone {
 		return errors.New("the cluster was deleted")
 	}
+	yarn := c.yarnEnabled()
+	var added []string
 	for len(c.workers) < n {
 		i := len(c.workers)
 		name := fmt.Sprintf("%s-w-%d", c.master[:len(c.master)-2], i)
@@ -348,9 +376,26 @@ func (c *Cluster) Scale(ctx context.Context, n int) error {
 			return err
 		}
 		c.workers = append(c.workers, name)
+		if yarn {
+			if err := c.startNodeManager(ctx, name, c.nodeAlias(i)); err != nil {
+				return err
+			}
+			added = append(added, name)
+		}
+	}
+	if yarn && n == 0 && c.spec.Workers == 0 && !c.singleNM {
+		// A single node cluster's NodeManager is the master's.
+		if err := c.startNodeManager(ctx, c.master, c.nodeAlias(-1)); err != nil {
+			return err
+		}
+		c.singleNM = true
+		added = append(added, c.master)
 	}
 	for len(c.workers) > n {
 		last := c.workers[len(c.workers)-1]
+		if yarn {
+			_, _ = c.d.docker(context.Background(), "rm", "-f", "-v", nodeManager(last))
+		}
 		_, _ = c.d.docker(context.Background(), "rm", "-f", "-v", last)
 		c.workers = c.workers[:len(c.workers)-1]
 	}
@@ -359,12 +404,13 @@ func (c *Cluster) Scale(ctx context.Context, n int) error {
 			return err
 		}
 	}
-	return nil
+	return c.waitNodeManagers(ctx, added)
 }
 
 // nodes are every container of the cluster, the relay first.
 func (c *Cluster) nodesLocked() []string {
-	return append(append(append([]string{c.relay, c.master}, c.workers...), c.extras...), c.groupContainersLocked()...)
+	nodes := append(append(append([]string{c.relay, c.master}, c.workers...), c.extras...), c.groupContainersLocked()...)
+	return append(nodes, c.nodeManagersLocked()...)
 }
 
 // Stop stops the cluster's containers, keeping them.
@@ -456,6 +502,11 @@ func (c *Cluster) Delete() {
 func (c *Cluster) Web(ctx context.Context) map[string]string {
 	out := map[string]string{}
 	ports := map[string]string{"history": "18080", "master": "18088"}
+	if c.yarnEnabled() {
+		for _, p := range yarnPorts {
+			ports[p.key] = p.port
+		}
+	}
 	for _, comp := range c.spec.Components {
 		if p, ok := componentPorts[comp]; ok {
 			ports[p.key] = p.listen
@@ -545,6 +596,9 @@ func (c *Cluster) Submit(ctx context.Context, job Job) (Result, error) {
 		"spark.executor.extraJavaOptions":  "-Djavax.net.ssl.trustStore=/tmp/cb-trust.jks -Djavax.net.ssl.trustStorePassword=changeit",
 		"spark.executorEnv.PYSPARK_PYTHON": "python3",
 	}
+	for k, v := range c.lakeProps {
+		conf[k] = v
+	}
 	for k, v := range c.spec.Properties {
 		conf[k] = v
 	}
@@ -554,7 +608,9 @@ func (c *Cluster) Submit(ctx context.Context, job Job) (Result, error) {
 	submit := submitArgs(job, args, token, conf)
 	submit[1] = "spark://" + c.nodeAlias(-1) + ":7077"
 	run := append(append([]string{"run", "--name", driver, "--label", c.label, "--label", "cloudburrow.dataproc.cluster=" + c.spec.ID}, netArgs...),
-		"-v", dir+":/cb", "-v", c.jar+":/cb-connector/spark-bigquery.jar:ro", "-v", c.HistoryDir()+":/cb-history",
+		"-v", dir+":/cb", "-v", c.jar+":/cb-connector/spark-bigquery.jar:ro", "-v", c.HistoryDir()+":/cb-history")
+	run = append(run, c.lakeMounts...)
+	run = append(run,
 		"-e", "CB_SPARK_OUT=/cb/out/params.json", "-e", "CB_SPARK_TYPES=/cb/types.json", "-e", "PYTHONPATH=/cb/lib", "-e", "PYSPARK_PYTHON=python3",
 		"--entrypoint", "/bin/bash", c.rt.Image, "/cb/run.sh")
 	run = append(run, submit...)

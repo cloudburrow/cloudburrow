@@ -1,0 +1,138 @@
+package sparkproc
+
+// The ZEPPELIN optional component (#2162): Apache Zeppelin 0.10.1, the
+// Zeppelin of image versions 2.1 to 2.3, in its official apache/zeppelin
+// image (Apache-2.0, pinned by digest in dependencies.json). The image is
+// published for linux/amd64 only, so on an arm64 machine Docker runs it
+// under emulation, and it is 3.7 GB compressed (12 GB unpacked); it is
+// pulled on the first cluster with the component.
+//
+// As on a Dataproc cluster, Zeppelin runs on the master (its container
+// shares the master's network) at its Component Gateway path
+// (ZEPPELIN_SERVER_CONTEXT_PATH), and its Spark interpreter runs the
+// cluster's Spark: SPARK_HOME is the cluster image's Spark distribution,
+// copied from the master node, spark.master the cluster's master, the
+// driver at the master's host name. The interpreter's
+// zeppelin.spark.enableSupportedVersionCheck is turned off (Zeppelin
+// 0.10.1 knows Spark up to 3.2; Google ships it with the image's Spark
+// 3.5), set through Zeppelin's interpreter REST API once it has started.
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"time"
+)
+
+// startZeppelin starts Zeppelin and configures its Spark interpreter.
+func (c *Cluster) startZeppelin(ctx context.Context, image string) error {
+	home := filepath.Join(c.dir, "zeppelin-spark")
+	if out, err := c.d.docker(ctx, "cp", c.master+":/opt/spark", home); err != nil {
+		return &Unavailable{Msg: "copy the cluster's Spark for Zeppelin: " + out}
+	}
+	master := c.nodeAlias(-1)
+	base := strings.TrimSuffix(c.spec.GatewayBase, "/") + "/zeppelin"
+	submit := "--conf spark.driver.host=" + master + " --conf spark.driver.bindAddress=0.0.0.0" +
+		" --conf spark.eventLog.enabled=true --conf spark.eventLog.dir=file:/cb-history" +
+		" --conf spark.executor.extraJavaOptions=-Djavax.net.ssl.trustStore=/tmp/cb-trust.jks" +
+		" --jars /cb-connector/spark-bigquery.jar"
+	for k, v := range c.lakeProps {
+		submit += " --conf " + k + "=" + v
+	}
+	args := []string{"--platform", "linux/amd64", "-v", home + ":/cb-spark:ro", "-v", c.jar + ":/cb-connector/spark-bigquery.jar:ro",
+		"-v", c.HistoryDir() + ":/cb-history"}
+	args = append(args, c.lakeMounts...)
+	args = append(args, "-e", "ZEPPELIN_ADDR=0.0.0.0", "-e", "ZEPPELIN_PORT=8080",
+		// Its web apps unpack under the context path, which the image's
+		// user cannot write in /opt/zeppelin/webapps.
+		"-e", "ZEPPELIN_WAR_TEMPDIR=/tmp/zeppelin-webapps", "-e", "ZEPPELIN_SERVER_CONTEXT_PATH="+base,
+		"-e", "ZEPPELIN_MEM=-Xmx1024m", "-e", "SPARK_HOME=/cb-spark", "-e", "SPARK_MASTER=spark://"+master+":7077",
+		"-e", "SPARK_SUBMIT_OPTIONS="+submit, "-e", "PYSPARK_PYTHON=python3", image)
+	start := time.Now()
+	if err := c.runComponent(ctx, "zeppelin", "", args...); err != nil {
+		return err
+	}
+	if err := c.waitLog(ctx, c.component("zeppelin"), regexp.MustCompile(`Done, zeppelin server started`), 10*time.Minute); err != nil {
+		return err
+	}
+	c.d.logf("spark: cluster %s's Zeppelin started in %s (linux/amd64 under emulation)", c.spec.Name, time.Since(start).Round(time.Second))
+	addr := c.Web(ctx)["zeppelin"]
+	if addr == "" {
+		return &Unavailable{Msg: "the cluster's Zeppelin port is not published"}
+	}
+	return configureZeppelinSpark(ctx, "http://"+addr+base, map[string]string{
+		"zeppelin.spark.enableSupportedVersionCheck": "false", "zeppelin.spark.useHiveContext": "false",
+		"zeppelin.spark.scala.color": "false"})
+}
+
+// configureZeppelinSpark sets properties of Zeppelin's spark interpreter
+// setting through its REST API (GET and PUT /api/interpreter/setting/spark).
+func configureZeppelinSpark(ctx context.Context, base string, set map[string]string) error {
+	client := &http.Client{Timeout: 2 * time.Minute}
+	var setting struct {
+		Body struct {
+			Properties   map[string]map[string]any `json:"properties"`
+			Dependencies []any                     `json:"dependencies"`
+			Option       map[string]any            `json:"option"`
+		} `json:"body"`
+	}
+	var err error
+	for i := 0; i < 60; i++ {
+		var req *http.Request
+		req, err = http.NewRequestWithContext(ctx, http.MethodGet, base+"/api/interpreter/setting/spark", nil)
+		if err != nil {
+			return err
+		}
+		var resp *http.Response
+		if resp, err = client.Do(req); err == nil {
+			b, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				err = json.Unmarshal(b, &setting)
+				break
+			}
+			err = fmt.Errorf("%s: %.200s", resp.Status, b)
+		}
+		time.Sleep(2 * time.Second)
+	}
+	if err != nil {
+		return &Unavailable{Msg: "read Zeppelin's spark interpreter setting: " + err.Error()}
+	}
+	props := setting.Body.Properties
+	if props == nil {
+		props = map[string]map[string]any{}
+	}
+	for k, v := range set {
+		typ := "string"
+		if v == "true" || v == "false" {
+			typ = "checkbox"
+		}
+		var val any = v
+		if typ == "checkbox" {
+			val = v == "true"
+		}
+		props[k] = map[string]any{"name": k, "value": val, "type": typ}
+	}
+	body, _ := json.Marshal(map[string]any{"properties": props, "dependencies": setting.Body.Dependencies, "option": setting.Body.Option})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, base+"/api/interpreter/setting/spark", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return &Unavailable{Msg: "configure Zeppelin's spark interpreter: " + err.Error()}
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return &Unavailable{Msg: fmt.Sprintf("configure Zeppelin's spark interpreter: %s %.300s", resp.Status, b)}
+	}
+	return nil
+}

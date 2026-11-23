@@ -65,6 +65,9 @@ type Runtime struct {
 	// official image's -python3-r- variant), which SparkR workloads and
 	// Dataproc clusters run in; "" when none is pinned.
 	RImage string
+	// Kernel is how a Jupyter session's kernel image is built on Image
+	// (KernelImage), nil when none is pinned for this runtime's Spark.
+	Kernel *KernelRuntime
 	// Connector returns the connector jar's path on the host, fetching
 	// it on the first use.
 	Connector func(ctx context.Context) (string, error)
@@ -79,6 +82,11 @@ type Docker struct {
 	// Clusters are the Dataproc cluster image versions (MAJOR.MINOR) a
 	// cluster runs (#2162): each one's Spark, its RImage the nodes'.
 	Clusters map[string]Runtime
+	// IPython returns the host directory of IPython and its
+	// dependencies' packages (pure Python), mounted on a notebook batch's
+	// PYTHONPATH (Job.IPython), fetching them on the first use; nil
+	// serves none.
+	IPython func(ctx context.Context) (string, error)
 	// History is the host directory batches and sessions write their
 	// Spark event logs to, which the instance's History Server reads
 	// (their Spark UI); "" writes none.
@@ -151,7 +159,7 @@ func (d *Docker) Run(ctx context.Context, job Job) (Result, error) {
 	if job.KeyOnly {
 		return Result{}, nil
 	}
-	p, failed, err := d.prepare(ctx, job, "")
+	p, failed, err := d.prepare(ctx, job)
 	if err != nil || failed != nil {
 		if failed != nil {
 			return *failed, nil
@@ -211,7 +219,7 @@ func (p *prepared) close() {
 // cannot be minted, a custom container that cannot be read). inbound,
 // when set, is a port of the Spark container the relay publishes on the
 // host's loopback (a Spark Connect server's).
-func (d *Docker) prepare(ctx context.Context, job Job, inbound string) (_ *prepared, failed *Result, _ error) {
+func (d *Docker) prepare(ctx context.Context, job Job, inbound ...string) (_ *prepared, failed *Result, _ error) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		return nil, nil, &Unavailable{Msg: "docker is not on PATH: Apache Spark workloads run in a local Spark container"}
 	}
@@ -313,14 +321,14 @@ func (d *Docker) prepare(ctx context.Context, job Job, inbound string) (_ *prepa
 	if !d.desktop {
 		relayArgs = append(relayArgs, "--add-host", "host.docker.internal:host-gateway")
 	}
-	if inbound != "" {
+	for _, port := range inbound {
 		// Published from the default bridge, the relay's first network:
 		// a container on an --internal network publishes nothing.
-		relayArgs = append(relayArgs, "-p", "127.0.0.1::"+inbound)
+		relayArgs = append(relayArgs, "-p", "127.0.0.1::"+port)
 	}
 	relayArgs = append(relayArgs, rt.Image, "/cb/relay.py", restTarget, storageTarget)
-	if inbound != "" {
-		relayArgs = append(relayArgs, spark+":"+inbound)
+	for _, port := range inbound {
+		relayArgs = append(relayArgs, spark+":"+port)
 	}
 	if out, err := d.docker(ctx, relayArgs...); err != nil {
 		return nil, nil, &Unavailable{Msg: "start the Spark job's relay: " + out}
@@ -356,6 +364,17 @@ func (d *Docker) prepare(ctx context.Context, job Job, inbound string) (_ *prepa
 		}
 	}
 	pythonPath := "/cb/lib"
+	if job.IPython {
+		if d.IPython == nil {
+			return nil, nil, &Unavailable{Msg: "the Spark runner serves no IPython for notebook batches"}
+		}
+		ip, err := d.IPython(ctx)
+		if err != nil {
+			return nil, nil, &Unavailable{Msg: "IPython is not available: " + err.Error()}
+		}
+		run = append(run, "-v", ip+":/cb-ipython:ro")
+		pythonPath += ":/cb-ipython"
+	}
 	if custom != nil && custom.env["PYTHONPATH"] != "" {
 		pythonPath += ":" + custom.env["PYTHONPATH"] // the image's packages too
 	}

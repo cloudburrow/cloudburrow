@@ -38,6 +38,10 @@ type sparkRuntime struct {
 	rImage                      string
 	connectorURL, connectorSHA  string
 	connectorFile, sparkVersion string
+	// kernel builds a Jupyter session's kernel image on image (#2162):
+	// Almond for the Spark's Scala, and Spark's Scala Connect client of
+	// that Spark (dependencies.json's components.bigqueryml.dataprocKernels).
+	kernel *sparkproc.KernelRuntime
 }
 
 // sparkRuntimes are the runtime versions, as Managed Service for Apache
@@ -53,6 +57,9 @@ var (
 		connectorURL:  "https://repo1.maven.org/maven2/com/google/cloud/spark/spark-3.5-bigquery/0.46.2/spark-3.5-bigquery-0.46.2.jar",
 		connectorSHA:  "817aafccd47b4756f7ae5bb51b509d5642140ead0fb3da06f1a20c24e9baa0ac",
 		connectorFile: "spark-3.5-bigquery-0.46.2.jar", sparkVersion: "3.5",
+		kernel: &sparkproc.KernelRuntime{Scala: "2.12.18",
+			ConnectURL: "https://repo1.maven.org/maven2/org/apache/spark/spark-connect-client-jvm_2.12/3.5.9/spark-connect-client-jvm_2.12-3.5.9.jar",
+			ConnectSHA: "ec52b1cdc2243187d6c363fdb37f1e39ddea46c0f98e9a01f01c5be05ce26590"},
 	}
 	spark40Runtime = sparkRuntime{
 		image:         "apache/spark@sha256:fb5c5e61e7bb1be94b7f3a31afe1f73c5b4d20b6008f4ffa7278fc085da08a9e", // 4.0.1-scala2.13-java21-python3-ubuntu
@@ -131,7 +138,7 @@ func newSparkRunner(cfg config.Config, out io.Writer, live func() map[string]str
 		return func() string { return live()[name] }
 	}
 	runtime := func(rt sparkRuntime) sparkproc.Runtime {
-		return sparkproc.Runtime{Image: rt.image, RImage: rt.rImage, Connector: func(ctx context.Context) (string, error) {
+		return sparkproc.Runtime{Image: rt.image, RImage: rt.rImage, Kernel: rt.kernel, Connector: func(ctx context.Context) (string, error) {
 			mu.Lock()
 			defer mu.Unlock()
 			return fetchSparkConnector(ctx, cache, rt, out)
@@ -164,6 +171,7 @@ func newSparkRunner(cfg config.Config, out io.Writer, live func() map[string]str
 		// Cloud Storage (#2162).
 		GCS:       addr("storage"),
 		Ecosystem: dataprocEcosystem(filepath.Join(cache, "dataproc"), cfg.Name, out),
+		IPython:   ipythonHome(filepath.Join(cache, "dataproc"), out),
 		Mint:      mint,
 		KeyCheck:  keyCheck,
 		Instance:  cfg.Name,

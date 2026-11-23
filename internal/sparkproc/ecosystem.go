@@ -60,6 +60,11 @@ type Ecosystem struct {
 	// Spark image (built on it, so a notebook's Python is its
 	// executors'), or nil when not served.
 	Jupyter func(ctx context.Context, sparkImage string) (string, error)
+	// Lake returns the host paths of a table format component's jars
+	// (ComponentDelta, ComponentIceberg, ComponentHudi) for an image
+	// version (MAJOR.MINOR), fetching them on the first use; iceberg is
+	// dataproc:dataproc.iceberg.version ("" for the default).
+	Lake func(ctx context.Context, component, imageVersion, iceberg string) ([]string, error)
 }
 
 // The optional components (SoftwareConfig.optional_components) a
@@ -138,7 +143,7 @@ func siteXML(props map[string]string) []byte {
 
 // writeConf writes the cluster's Hadoop, Hive and Tez configuration to
 // dir, job (a job's properties, or nil) over the cluster's.
-func (c *Cluster) writeConf(dir string, job map[string]string) error {
+func (c *Cluster) writeConf(dir string, job map[string]string, jars []string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
@@ -181,6 +186,14 @@ func (c *Cluster) writeConf(dir string, job map[string]string) error {
 		"hive.server2.webui.port":                               "10002",
 		"hive.metastore.disallow.incompatible.col.type.changes": "false",
 	}
+	var yarn map[string]string
+	if c.yarnEnabled() {
+		var m map[string]string
+		yarn, m = c.yarnConf(jars)
+		for k, v := range m {
+			mapred[k] = v
+		}
+	}
 	for k, v := range c.confProps("core") {
 		core[k] = v
 	}
@@ -195,6 +208,10 @@ func (c *Cluster) writeConf(dir string, job map[string]string) error {
 	}
 	files := map[string]map[string]string{"core-site.xml": core, "mapred-site.xml": mapred, "hive-site.xml": hive,
 		"tez-site.xml": {"tez.local.mode": "true", "tez.runtime.optimize.local.fetch": "true", "tez.ignore.lib.uris": "true"}}
+	if yarn != nil {
+		files["yarn-site.xml"] = yarn
+		files["capacity-scheduler.xml"] = c.capacityScheduler()
+	}
 	for name, props := range files {
 		if err := os.WriteFile(filepath.Join(dir, name), siteXML(props), 0o644); err != nil {
 			return err
@@ -384,12 +401,7 @@ func (c *Cluster) startComponents(ctx context.Context) error {
 		if err := need(e.Zeppelin, "Zeppelin"); err != nil {
 			return err
 		}
-		if err := c.runComponent(ctx, "zeppelin", "", "-e", "ZEPPELIN_ADDR=0.0.0.0", "-e", "ZEPPELIN_PORT=8080",
-			"-e", "ZEPPELIN_SERVER_CONTEXT_PATH="+strings.TrimSuffix(c.spec.GatewayBase, "/")+"/zeppelin",
-			"-e", "ZEPPELIN_MEM=-Xmx1024m", e.Zeppelin); err != nil {
-			return err
-		}
-		if err := c.waitLog(ctx, c.component("zeppelin"), regexp.MustCompile(`Done, zeppelin server started|Started ServerConnector`), 5*time.Minute); err != nil {
+		if err := c.startZeppelin(ctx, e.Zeppelin); err != nil {
 			return err
 		}
 	}
@@ -577,7 +589,38 @@ func (c *Cluster) submitEco(ctx context.Context, job Job) (Result, error) {
 			return Result{}, &Unavailable{Msg: "Google's Cloud Storage connector for Hadoop is not available: " + err.Error()}
 		}
 		conf := filepath.Join(dir, "conf")
-		if err := c.writeConf(conf, job.Properties); err != nil {
+		jobProps := map[string]string{}
+		for k, v := range job.Properties {
+			jobProps[k] = v
+		}
+		// file_uris and archive_uris are distributed to the tasks' working
+		// directories as -files and -archives would (JobResourceUploader
+		// reads tmpfiles and tmparchives).
+		if c.yarnEnabled() && job.Kind == KindHadoop {
+			if s := fileURIs(files); s != "" && jobProps["tmpfiles"] == "" {
+				jobProps["tmpfiles"] = s
+			}
+			if s := fileURIs(archives); s != "" && jobProps["tmparchives"] == "" {
+				jobProps["tmparchives"] = s
+			}
+		}
+		if c.yarnEnabled() && job.Kind == KindPig {
+			// Pig sets each input's file system's working directory to the
+			// job's (PigInputFormat.getSplits), which on a cluster without
+			// HDFS is file:/tmp/cb-work: a gs:// input's connector refuses
+			// a path of another scheme or bucket. The job's working
+			// directory is /user/root with no scheme, as Dataproc's
+			// (hdfs:///user/root) is for each file system; and Pig's
+			// intermediate files (DUMP's among them) are in the directory
+			// every node shares.
+			if jobProps["mapreduce.job.working.dir"] == "" {
+				jobProps["mapreduce.job.working.dir"] = "/user/root"
+			}
+			if jobProps["pig.temp.dir"] == "" {
+				jobProps["pig.temp.dir"] = "/cb-shared/pig-tmp"
+			}
+		}
+		if err := c.writeConf(conf, jobProps, jars); err != nil {
 			return Result{}, err
 		}
 		_ = filepath.Walk(conf, func(p string, info os.FileInfo, err error) error {
@@ -586,6 +629,9 @@ func (c *Cluster) submitEco(ctx context.Context, job Job) (Result, error) {
 			}
 			return nil
 		})
+		if c.yarnEnabled() {
+			run = append(run, "-v", filepath.Join(c.dir, "shared")+":/cb-shared")
+		}
 		run = append(run, "-v", conf+":/cb-conf:ro", "-v", jar+":/cb-gcs/gcs-connector.jar:ro",
 			"-v", filepath.Join(c.dir, "eco.sh")+":/cb/eco.sh:ro",
 			"-e", "CB_JARS="+strings.Join(jars, " "), "-e", "CB_FILES="+strings.Join(files, " "), "-e", "CB_ARCHIVES="+strings.Join(archives, " "))
@@ -614,7 +660,11 @@ func (c *Cluster) submitEco(ctx context.Context, job Job) (Result, error) {
 				return Result{}, &Unavailable{Msg: "Apache Pig is not available: " + err.Error()}
 			}
 			run = append(run, "-v", pig+":/cb-pig:ro")
-			args = []string{"pig", "-x", "local", "-P", "/cb-conf/pig.properties"}
+			mode := "local"
+			if c.yarnEnabled() {
+				mode = "mapreduce"
+			}
+			args = []string{"pig", "-x", mode, "-P", "/cb-conf/pig.properties"}
 			for _, k := range vars {
 				args = append(args, "-param", k+"="+job.QueryVariables[k])
 			}
@@ -721,6 +771,9 @@ func (c *Cluster) runDriver(ctx context.Context, job Job, driver string, run []s
 	tail, output := d.follow(job, stdout, nil)
 	waitErr := cmd.Wait()
 	res := Result{DriverOutput: output}
+	if c.yarnEnabled() && (job.Kind == KindHadoop || job.Kind == KindPig) {
+		res.YarnApps = c.YarnApps(context.Background(), output)
+	}
 	if waitErr != nil {
 		var exit *exec.ExitError
 		if !errors.As(waitErr, &exit) {
@@ -753,4 +806,14 @@ func ecoFailure(lines []string) string {
 		}
 	}
 	return "the job's driver failed"
+}
+
+// fileURIs are paths as a comma-separated list of file: URIs, each
+// fragment its base name (the name in a task's working directory).
+func fileURIs(paths []string) string {
+	var out []string
+	for _, p := range paths {
+		out = append(out, "file://"+p+"#"+filepath.Base(p))
+	}
+	return strings.Join(out, ",")
 }

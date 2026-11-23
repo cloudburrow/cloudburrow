@@ -93,7 +93,8 @@ func TestDataprocHadoopHivePigJobs(t *testing.T) {
 	name := "hh-" + suffix
 	dataprocClusterUp(t, ctx, h, cc, project, region, &dataprocpb.Cluster{ProjectId: project, ClusterName: name,
 		Config: &dataprocpb.ClusterConfig{SoftwareConfig: &dataprocpb.SoftwareConfig{ImageVersion: "2.2",
-			Properties: map[string]string{"dataproc:dataproc.allow.zero.workers": "true"}}}})
+			Properties: map[string]string{"dataproc:dataproc.allow.zero.workers": "true"}},
+			EndpointConfig: &dataprocpb.EndpointConfig{EnableHttpPortAccess: true}}})
 	place := &dataprocpb.JobPlacement{ClusterName: name}
 	in := dataprocPut(t, ctx, bh, "in/words.txt", dataprocWords)
 	inDir := strings.TrimSuffix(in, "words.txt")
@@ -109,6 +110,37 @@ func TestDataprocHadoopHivePigJobs(t *testing.T) {
 	}
 	if out := dataprocGSText(t, ctx, sc, bucketURI+"/wc-out/part-r-"); !strings.Contains(out, "apple\t3") || !strings.Contains(out, "banana\t2") {
 		t.Errorf("word count's output %q", out)
+	}
+	// It ran on the cluster's YARN: its application, as the
+	// ResourceManager reports it, and the ResourceManager's and the
+	// JobHistory Server's pages through the Component Gateway.
+	apps := hj.GetYarnApplications()
+	if len(apps) != 1 || apps[0].GetName() != "word count" || apps[0].GetState() != dataprocpb.YarnApplication_FINISHED ||
+		apps[0].GetProgress() != 1 || !strings.HasPrefix(apps[0].GetTrackingUrl(), "http://"+name+"-m:8088/proxy/application_") {
+		t.Fatalf("the hadoop job's YARN applications: %v", apps)
+	}
+	appID := strings.TrimSuffix(strings.TrimPrefix(apps[0].GetTrackingUrl(), "http://"+name+"-m:8088/proxy/"), "/")
+	up, err := cc.GetCluster(ctx, &dataprocpb.GetClusterRequest{ProjectId: project, Region: region, ClusterName: name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ports := up.GetConfig().GetEndpointConfig().GetHttpPorts()
+	rm, jhs := ports["YARN ResourceManager"], ports["MapReduce Job History"]
+	if !strings.HasSuffix(rm, "/yarn/") || !strings.HasSuffix(jhs, "/jobhistory/") || !strings.HasSuffix(ports["YARN Application Timeline"], "/apphistory/") {
+		t.Fatalf("the Component Gateway's Hadoop interfaces: %v", ports)
+	}
+	gw := strings.TrimSuffix(rm, "yarn/")
+	gwPath := gw[strings.Index(gw, "/component-gateway/"):]
+	page := dataprocHTTPGet(t, ctx, rm+"cluster/apps")
+	if !strings.Contains(page, appID) || !strings.Contains(page, `href="`+gwPath+`yarn/static/`) || strings.Contains(page, name+"-m:8088") {
+		t.Errorf("the ResourceManager's applications page (%s) has no %s or unrewritten links:\n%.2000s", rm, appID, page)
+	}
+	if nodes := dataprocHTTPGet(t, ctx, rm+"ws/v1/cluster/nodes"); !strings.Contains(nodes, `"nodeHostName":"`+name+`-m"`) {
+		t.Errorf("the ResourceManager's nodes: %.500s", nodes)
+	}
+	jobID := strings.Replace(appID, "application_", "job_", 1)
+	if page := dataprocHTTPGet(t, ctx, jhs+"jobhistory/job/"+jobID); !strings.Contains(page, "word count") || !strings.Contains(page, "SUCCEEDED") {
+		t.Errorf("the JobHistory Server's page of %s:\n%.2000s", jobID, page)
 	}
 
 	// Hive: a managed table, then a second job reads it; an external
@@ -149,6 +181,9 @@ func TestDataprocHadoopHivePigJobs(t *testing.T) {
 	pout := dataprocGSText(t, ctx, sc, pj.GetDriverOutputResourceUri())
 	if pj.GetStatus().GetState() != dataprocpb.JobStatus_DONE {
 		t.Fatalf("pig job: %v\n%s", pj.GetStatus(), pout)
+	}
+	if len(pj.GetYarnApplications()) == 0 {
+		t.Errorf("the pig job ran no YARN application: %v", pj)
 	}
 	if !strings.Contains(pout, "(apple,3)") {
 		t.Errorf("pig's DUMP: %s", pout)
@@ -460,4 +495,27 @@ func TestDataprocDriverNodeGroups(t *testing.T) {
 	if _, err := cc.StopCluster(ctx, &dataprocpb.StopClusterRequest{ProjectId: project, Region: region, ClusterName: name}); status.Code(err) != codes.FailedPrecondition {
 		t.Errorf("stopping a cluster with node groups: %v", err)
 	}
+}
+
+// dataprocHTTPGet is the body of a GET of a Component Gateway URL (on the
+// instance's Dataproc port), after its redirects.
+func dataprocHTTPGet(t *testing.T, ctx context.Context, u string) string {
+	t.Helper()
+	if !strings.Contains(u, "/component-gateway/") {
+		t.Fatalf("%s is not a Component Gateway URL", u)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET %s: %v", u, err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("GET %s: %s %.500s", u, resp.Status, b)
+	}
+	return string(b)
 }

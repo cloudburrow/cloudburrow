@@ -109,7 +109,7 @@ func TestConsoleDataprocClusters(t *testing.T) {
 	if err != nil || d.Unavailable != "" || len(d.Sections) != 4 {
 		t.Fatalf("cluster page: %+v %v", d, err)
 	}
-	if web := d.Sections[3].Listing; len(web.Items) == 0 || web.Items[0].Name != "Spark History Server" || !strings.HasPrefix(web.Items[0].Link, "http://"+srv.Addr()+"/component-gateway/") {
+	if web := d.Sections[3].Listing; len(web.Items) < 4 || web.Items[2].Name != "Spark History Server" || web.Items[0].Name != "YARN ResourceManager" || !strings.HasPrefix(web.Items[2].Link, "http://"+srv.Addr()+"/component-gateway/") {
 		t.Errorf("Web interfaces: %+v", web)
 	}
 	if vms := d.Sections[1].Listing; vms.Total != 3 {

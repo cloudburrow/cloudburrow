@@ -155,12 +155,11 @@ func (s *Server) CreateSession(ctx context.Context, req *dataprocpb.CreateSessio
 	switch x.GetSessionConfig().(type) {
 	case *dataprocpb.Session_SparkConnectSession:
 	case *dataprocpb.Session_JupyterSession:
-		// A Jupyter session (#2162) runs the same Spark Connect server; its
-		// IPython kernel is the console's notebook runtime, its spark a
-		// Spark Connect session of it. Scala has no kernel here.
-		if x.GetJupyterSession().GetKernel() == dataprocpb.JupyterConfig_SCALA {
-			return nil, status.Error(codes.Unimplemented, "the Scala kernel is not served by CloudBurrow: a Jupyter session's kernel is Python (kernel PYTHON)")
-		}
+		// A Jupyter session (#2162) runs the same Spark Connect server
+		// and, beside it, a Jupyter Server of its kernels (PySpark and
+		// Almond's Scala, each `spark` a Spark Connect session of it),
+		// which the kernel gateway (gateway.go) starts kernels on; a
+		// BigQuery Studio notebook's IPython kernel binds to it too.
 		if x.GetJupyterSession().GetKernel() == dataprocpb.JupyterConfig_KERNEL_UNSPECIFIED {
 			x.GetJupyterSession().Kernel = dataprocpb.JupyterConfig_PYTHON
 		}
@@ -229,6 +228,9 @@ func (s *Server) startSession(ctx context.Context, name, opName, endpoint string
 	}
 	m := sessionRE.FindStringSubmatch(name)
 	job := baseJob(x.GetUuid(), m[1], m[2], name, x.GetRuntimeConfig(), x.GetEnvironmentConfig())
+	if js := x.GetJupyterSession(); js != nil {
+		job.Kernel = js.GetKernel().String()
+	}
 	job.Log = &sparkproc.LogTarget{Type: "cloud_dataproc_session",
 		Labels: map[string]string{"project_id": m[1], "location": m[2], "session_id": m[3]},
 		Output: "dataproc.googleapis.com%2Foutput", Spark: "dataproc.googleapis.com%2Fspark"}

@@ -120,6 +120,13 @@ type Job struct {
 	OutputFormat      string   `json:"outputFormat,omitempty"`
 	ClientTags        []string `json:"clientTags,omitempty"`
 	SavepointURI      string   `json:"savepointUri,omitempty"`
+	// Kernel is a Jupyter session's kernel (PYTHON or SCALA): its Spark
+	// Connect server is joined by a Jupyter Server of the session's
+	// kernels (Connect.KernelAddr). "" for a Spark Connect session.
+	Kernel string `json:"kernel,omitempty"`
+	// IPython runs the job's driver with IPython on its PYTHONPATH
+	// (Docker.IPython): a notebook batch's, whose cells IPython runs.
+	IPython bool `json:"ipython,omitempty"`
 	// DriverNode is the driver node group instance a cluster job's
 	// driver runs on ("": a container of its own).
 	DriverNode string `json:"driverNode,omitempty"`
@@ -185,6 +192,9 @@ type Result struct {
 	// AppID is the application's ID on a cluster's master, read from the
 	// driver's output (Cluster.Submit), or "".
 	AppID string `json:"appId,omitempty"`
+	// YarnApps are the YARN applications a Hadoop MapReduce or Pig job
+	// ran on the cluster's YARN (Cluster.Submit).
+	YarnApps []YarnApp `json:"yarnApps,omitempty"`
 	// KeyRefused is why the job's KMSKey cannot be used, and KeyKind
 	// which way (invalid, notFound, unusable, permissionDenied,
 	// unavailable, noKMS); nothing was run.

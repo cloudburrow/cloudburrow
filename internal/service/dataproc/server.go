@@ -135,8 +135,9 @@ type Server struct {
 	ops       map[string]*longrunningpb.Operation
 	requests  map[string]string // request_id key -> operation name
 	cancels   map[string]context.CancelFunc
-	connects  map[string]Conn      // session name -> its server
-	activity  map[string]time.Time // session name -> last Spark Connect call
+	connects  map[string]Conn          // session name -> its server
+	kernels   map[string]gatewayKernel // kernel gateway kernel ID -> its session
+	activity  map[string]time.Time     // session name -> last Spark Connect call
 	clusters  map[string]*dataprocpb.Cluster
 	nodes     map[string]Nodes // cluster name -> its containers
 	jobs      map[string]*dataprocpb.Job
@@ -179,7 +180,7 @@ func NewServer(opts Options) (*Server, error) {
 		batches: map[string]*dataprocpb.Batch{}, sessions: map[string]*dataprocpb.Session{},
 		templates: map[string]*dataprocpb.SessionTemplate{}, ops: map[string]*longrunningpb.Operation{},
 		requests: map[string]string{}, cancels: map[string]context.CancelFunc{},
-		connects: map[string]Conn{}, activity: map[string]time.Time{},
+		connects: map[string]Conn{}, activity: map[string]time.Time{}, kernels: map[string]gatewayKernel{},
 		clusters: map[string]*dataprocpb.Cluster{}, nodes: map[string]Nodes{}, jobs: map[string]*dataprocpb.Job{},
 		jobOps: map[string]string{}, policies: map[string]*dataprocpb.AutoscalingPolicy{}, workflows: map[string][]*dataprocpb.WorkflowTemplate{}, wfCancel: map[string]bool{}, stop: make(chan struct{})}
 	if err := s.load(); err != nil {

@@ -548,7 +548,7 @@ func (s *Server) batchJob(ctx context.Context, b *dataprocpb.Batch, project, loc
 		job.Files, job.Archives = many(p.GetFileUris()), many(p.GetArchiveUris())
 	case *dataprocpb.Batch_PysparkNotebookBatch:
 		p := w.PysparkNotebookBatch
-		job.Kind, job.Language = sparkproc.KindPySpark, "PYTHON"
+		job.Kind, job.Language, job.IPython = sparkproc.KindPySpark, "PYTHON", true
 		if nb := one(p.GetNotebookFileUri()); nb != nil {
 			script, e := notebookScript(nb.Data, p.GetParams())
 			if e != nil {

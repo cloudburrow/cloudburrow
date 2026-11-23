@@ -210,6 +210,11 @@ func (s *Server) checkCluster(project, region string, c *dataprocpb.Cluster) err
 	if err := checkComponents(mm, cfg.SoftwareConfig.GetOptionalComponents()); err != nil {
 		return err
 	}
+	// "you can set the dataproc:dataproc.iceberg.version cluster property
+	// to 1.10 or 1.6" (the 2.2 and 2.3 release notes).
+	if v, ok := cfg.SoftwareConfig.GetProperties()["dataproc:dataproc.iceberg.version"]; ok && v != "1.6" && v != "1.10" {
+		return apierror.InvalidArgument("Invalid value %q for property dataproc:dataproc.iceberg.version: the supported Iceberg versions are 1.6 and 1.10", v)
+	}
 	if err := checkAuxiliaryGroups(project, region, c); err != nil {
 		return err
 	}
@@ -318,18 +323,27 @@ var componentImages = map[dataprocpb.Component]func(mm string) bool{
 var servedComponents = map[dataprocpb.Component]bool{
 	dataprocpb.Component_FLINK: true, dataprocpb.Component_HIVE_WEBHCAT: true, dataprocpb.Component_JUPYTER: true,
 	dataprocpb.Component_PIG: true, dataprocpb.Component_SOLR: true, dataprocpb.Component_TRINO: true,
-	dataprocpb.Component_ZOOKEEPER: true,
+	dataprocpb.Component_ZOOKEEPER: true, dataprocpb.Component_DELTA: true, dataprocpb.Component_ICEBERG: true,
+	dataprocpb.Component_HUDI: true, dataprocpb.Component_ZEPPELIN: true,
 }
 
 // unservedComponents are why the other components do not run.
 var unservedComponents = map[dataprocpb.Component]string{
-	dataprocpb.Component_ZEPPELIN: "the official apache/zeppelin image is amd64 only and over 3 GB",
-	dataprocpb.Component_DOCKER:   "a Docker daemon on a cluster's nodes needs privileged containers",
-	dataprocpb.Component_RANGER:   "Apache Ranger publishes no official image",
-	dataprocpb.Component_DELTA:    "Delta Lake's jars are not pinned on a cluster's Spark yet",
-	dataprocpb.Component_ICEBERG:  "Apache Iceberg's jars are not pinned on a cluster's Spark yet",
-	dataprocpb.Component_HUDI:     "Apache Hudi's jars are not pinned on a cluster's Spark yet",
+	dataprocpb.Component_DOCKER: "a Docker daemon on a node's container needs a privileged container: the official docker:dind and docker:dind-rootless images both " +
+		"need --privileged, and a non-privileged runtime for system containers (Sysbox's sysbox-runc) is not one of the machine's Docker runtimes",
+	dataprocpb.Component_RANGER: "Apache Ranger publishes no official image",
 }
+
+// zeppelin30 is why ZEPPELIN is not served on image 3.0, whose Zeppelin
+// is 0.12.0: its official image is linux/amd64 only and 3.3 GB
+// compressed, a second one beside 0.10.1's (the machine's disk budget).
+const zeppelin30 = "image 3.0's Zeppelin 0.12.0 is not pinned: its official image is linux/amd64 only and 3.3 GB compressed, beside the 3.7 GB of 2.x's Zeppelin 0.10.1"
+
+// icebergREST is why ICEBERG is not served on image 3.0: its Spark's
+// default_iceberg catalog is the Hive Metastore's Iceberg REST catalog
+// (the Iceberg component page, read 2026-11-23), which the Hive 4.0.1 of
+// the pinned apache/hive image does not serve.
+const icebergREST = "image 3.0's default_iceberg catalog is the Hive Metastore's Iceberg REST catalog, which the local cluster's Hive 4.0.1 metastore does not serve"
 
 // checkComponents checks a cluster's optional components against its
 // image version.
@@ -349,8 +363,14 @@ func checkComponents(mm string, comps []dataprocpb.Component) error {
 		}
 	}
 	for _, comp := range comps {
+		if comp == dataprocpb.Component_ZEPPELIN && mm >= "3.0" {
+			return status.Errorf(codes.Unimplemented, "The ZEPPELIN optional component is not served by CloudBurrow on image version %s (%s)", mm, zeppelin30)
+		}
+		if comp == dataprocpb.Component_ICEBERG && mm >= "3.0" {
+			return status.Errorf(codes.Unimplemented, "The ICEBERG optional component is not served by CloudBurrow on image version %s (%s)", mm, icebergREST)
+		}
 		if !servedComponents[comp] {
-			return status.Errorf(codes.Unimplemented, "The %s optional component is not served by CloudBurrow (%s): a local cluster runs Flink, Hive WebHCat, Jupyter, Pig, Solr, Trino and ZooKeeper", comp, unservedComponents[comp])
+			return status.Errorf(codes.Unimplemented, "The %s optional component is not served by CloudBurrow (%s): a local cluster runs Delta Lake, Flink, Hive WebHCat, Hudi, Iceberg, Jupyter, Pig, Solr, Trino, Zeppelin and ZooKeeper", comp, unservedComponents[comp])
 		}
 	}
 	return nil
@@ -508,7 +528,8 @@ func clusterSpec(c *dataprocpb.Cluster) sparkproc.ClusterSpec {
 	return sparkproc.ClusterSpec{ID: c.GetClusterUuid(), Name: c.GetClusterName(), Project: project, Location: region,
 		ImageVersion: mm, Workers: workerCount(c), WorkerCores: cores, WorkerMemory: mem,
 		Properties: sparkProps(c), HistoryBase: gatewayBase(c.GetClusterUuid()) + "sparkhistory",
-		GatewayBase: gatewayBase(c.GetClusterUuid()), Components: comps, ConfProperties: conf}
+		GatewayBase: gatewayBase(c.GetClusterUuid()), Components: comps, ConfProperties: conf,
+		IcebergVersion: c.GetConfig().GetSoftwareConfig().GetProperties()["dataproc:dataproc.iceberg.version"]}
 }
 
 var machineRE = regexp.MustCompile(`(?:^|/)[a-z0-9]+-(standard|highmem|highcpu)-(\d+)$`)
@@ -614,7 +635,12 @@ var (
 	gatewayPaths = map[string]string{"Jupyter": "jupyter/tree", "JupyterLab": "jupyter/lab", "Zeppelin": "zeppelin/",
 		"Flink": "flink/", "Trino": "trino/ui/", "Solr": "solr/", "WebHCat": "webhcat/templeton/v1/status"}
 	gatewayKeys = map[string]string{"sparkhistory": "history", "jupyter": "jupyter", "zeppelin": "zeppelin", "flink": "flink",
-		"trino": "trino", "solr": "solr", "webhcat": "webhcat"}
+		"trino": "trino", "solr": "solr", "webhcat": "webhcat", "yarn": "yarn", "jobhistory": "jobhistory", "apphistory": "apphistory"}
+	// gatewayRewritten are the Hadoop web interfaces, which have no base
+	// path setting: their pages' root-relative links and their own
+	// absolute URLs (http://CLUSTER-m:8088/...) are rewritten to their
+	// gateway paths.
+	gatewayRewritten = map[string]string{"yarn": "8088", "jobhistory": "19888", "apphistory": "8188"}
 	// gatewayFull are the components served at their full path (their
 	// base URL configured to it), the rest with it stripped.
 	gatewayFull = map[string]bool{"jupyter": true, "zeppelin": true}
@@ -630,7 +656,9 @@ func (s *Server) fillEndpointsLocked(c *dataprocpb.Cluster) {
 		return
 	}
 	base := gatewayBase(c.GetClusterUuid())
-	ec.HttpPorts = map[string]string{"Spark History Server": base + "sparkhistory/"}
+	// The Hadoop interfaces every cluster runs (YARN, internal/sparkproc).
+	ec.HttpPorts = map[string]string{"Spark History Server": base + "sparkhistory/", "YARN ResourceManager": base + "yarn/",
+		"MapReduce Job History": base + "jobhistory/", "YARN Application Timeline": base + "apphistory/"}
 	// The components' web interfaces. Their keys are UNVERIFIED (docs
 	// re-read 2026-11-22: the Component Gateway page lists only the
 	// Hadoop, Spark and Tez interfaces' keys).

@@ -8,9 +8,9 @@ package dataproc
 // https://docs.cloud.google.com/dataproc-serverless/docs/reference/rest/v1/projects.locations.batches#PySparkNotebookBatch):
 // a cell of NAME = "VALUE" assignments right after the cell tagged
 // "parameters", or first when no cell is. Markdown and raw cells are
-// skipped. A cell's IPython magics and shell escapes (% and ! lines) have
-// no IPython to run them on the Spark runtime's Python, so a notebook with
-// one fails, naming the cell.
+// skipped. The cells run in IPython (IPython 8.37 and its dependencies,
+// pure-Python wheels from PyPI pinned by SHA-256 in dependencies.json,
+// mounted into the driver), so their magics and shell escapes run.
 
 import (
 	"encoding/json"
@@ -45,8 +45,12 @@ func source(raw json.RawMessage) string {
 	return strings.Join(lines, "")
 }
 
-// notebookScript is the Python a notebook's code cells run as, with
-// params injected.
+// notebookScript is the Python a notebook's driver runs: its code cells,
+// with params injected, each run in turn by IPython's InteractiveShell as
+// a notebook's kernel runs them, so IPython's line and cell magics and
+// shell escapes (% and ! lines) run as they do in the notebook (IPython is
+// on the driver's PYTHONPATH, sparkproc.Job.IPython). The batch fails at
+// the first cell that raises, after its traceback.
 func notebookScript(nb []byte, params map[string]string) (string, error) {
 	var n ipynb
 	if err := json.Unmarshal(nb, &n); err != nil {
@@ -65,35 +69,54 @@ func notebookScript(nb []byte, params map[string]string) (string, error) {
 			fmt.Fprintf(&inject, "%s = %s\n", k, v)
 		}
 	}
-	var b strings.Builder
-	b.WriteString("# A PySpark notebook batch's code cells (CloudBurrow).\n")
+	type cell struct {
+		Label  string `json:"label"`
+		Source string `json:"source"`
+	}
+	var cells []cell
 	tagged := false
 	for _, c := range n.Cells {
 		for _, t := range c.Metadata.Tags {
 			tagged = tagged || t == "parameters"
 		}
 	}
-	if !tagged {
-		b.WriteString(inject.String())
+	if !tagged && inject.Len() > 0 {
+		cells = append(cells, cell{"injected parameters", inject.String()})
 	}
-	cell := 0
+	count := 0
 	for _, c := range n.Cells {
 		if c.CellType != "code" {
 			continue
 		}
-		cell++
-		src := source(c.Source)
-		for _, line := range strings.Split(src, "\n") {
-			if t := strings.TrimSpace(line); strings.HasPrefix(t, "%") || strings.HasPrefix(t, "!") {
-				return "", fmt.Errorf("code cell %d has %q: IPython magics and shell commands do not run in a PySpark notebook batch", cell, t)
-			}
-		}
-		fmt.Fprintf(&b, "\n# In[%d]:\n%s\n", cell, src)
+		count++
+		cells = append(cells, cell{fmt.Sprintf("In[%d]", count), source(c.Source)})
 		for _, t := range c.Metadata.Tags {
-			if t == "parameters" {
-				b.WriteString(inject.String())
+			if t == "parameters" && inject.Len() > 0 {
+				cells = append(cells, cell{"injected parameters", inject.String()})
 			}
 		}
 	}
-	return b.String(), nil
+	body, err := json.Marshal(cells)
+	if err != nil {
+		return "", err
+	}
+	quoted, _ := json.Marshal(string(body))
+	return fmt.Sprintf(notebookDriver, quoted), nil
 }
+
+// notebookDriver runs the cells (%%s: their JSON, as a Python string
+// literal) in IPython's InteractiveShell.
+const notebookDriver = `# A PySpark notebook batch's code cells (CloudBurrow), run by IPython.
+import json as _cb_json, os as _cb_os, sys as _cb_sys
+_cb_os.environ.setdefault("IPYTHONDIR", "/tmp/cb-ipython")
+from IPython.core.interactiveshell import InteractiveShell as _cb_Shell
+_cb_shell = _cb_Shell.instance(colors="NoColor")
+for _cb_cell in _cb_json.loads(%s):
+    print("# " + _cb_cell["label"] + ":", flush=True)
+    _cb_result = _cb_shell.run_cell(_cb_cell["source"], store_history=True)
+    _cb_sys.stdout.flush()
+    if not _cb_result.success:
+        _cb_err = _cb_result.error_in_exec or _cb_result.error_before_exec
+        print(type(_cb_err).__name__ + ": " + str(_cb_err) + " (in the notebook's cell " + _cb_cell["label"] + ")", file=_cb_sys.stderr, flush=True)
+        _cb_sys.exit(1)
+`

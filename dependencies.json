@@ -291,6 +291,20 @@
         "notes": "Resolved 2026-11-22 with docker buildx imagetools inspect. Docker's official Apache Solr image.",
         "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve with `docker buildx imagetools inspect solr:9.4.1`."
       },
+      "dataprocZeppelinImage": {
+        "$comment": "The ZEPPELIN optional component of Dataproc clusters on image versions 2.1 to 2.3 (#2162, internal/sparkproc/zeppelin.go): Zeppelin 0.10.1, its Spark interpreter on the cluster's Spark. linux/amd64 only, so it runs under emulation on arm64; 3.7 GB compressed, 12.3 GB unpacked.",
+        "image": "apache/zeppelin:0.10.1",
+        "digest": "sha256:9c1b5ddd6225ad45cedc327a853f6f13e45797ff419260d20bb9c14f5cbe3a87",
+        "license": "Apache-2.0 (Apache Zeppelin) and the packages of the image's base",
+        "redistribution": "not published: pulled by digest by the local CLI on the first Dataproc cluster with the ZEPPELIN component; nothing of it is in the CLI or the repository",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64"
+        ],
+        "notes": "Resolved 2026-11-23 with docker buildx imagetools inspect: a single linux/amd64 manifest.",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve with `docker buildx imagetools inspect apache/zeppelin:0.10.1`."
+      },
       "dataprocGcsConnector": {
         "$comment": "Google's Cloud Storage connector for Hadoop (#2162), on Hadoop, Hive and Pig jobs' class path: gs:// reads and writes go to the instance's Cloud Storage through the cluster's relay. Fetched by the CLI on the first such job, checked against this SHA-256 and kept in <state-dir>/models/spark/dataproc.",
         "version": "hadoop3-2.2.30",
@@ -324,6 +338,202 @@
         "redistribution": "not published: installed by pip in a local image build; nothing of it is in the CLI or the repository",
         "updateFeed": "pypi",
         "verification": "pinned-version",
+        "skipDiscovery": "PyPI; depcheck only discovers GitHub-sourced components."
+      },
+      "dataprocLakeDeltaSpark212321": {
+        "$comment": "Delta Lake 3.2.1 for the DELTA optional component of Dataproc clusters (#2162, cmd/cloudburrow/dataprocecosystem.go lakeJars): mounted on every node and driver at the component's /usr/lib path and on the Spark class path, as the image versions' release notes list it. Fetched by the CLI on the first cluster with the component, checked against this SHA-256 and kept in <state-dir>/models/spark/dataproc/lake.",
+        "version": "3.2.1",
+        "source": "https://repo1.maven.org/maven2/io/delta/delta-spark_2.12/3.2.1/delta-spark_2.12-3.2.1.jar",
+        "sha256": "088e187da689a347a6a8556dcb22318e3dfcfb995d807f5e2c19b4d0a7ee9499",
+        "license": "Apache-2.0",
+        "redistribution": "not published: downloaded by the local CLI; nothing of it is in the CLI or the repository",
+        "updateFeed": "maven-central",
+        "verification": "sha256",
+        "skipDiscovery": "Maven Central; depcheck only discovers GitHub-sourced components."
+      },
+      "dataprocLakeDeltaStorage321": {
+        "$comment": "Delta Lake 3.2.1 for the DELTA optional component of Dataproc clusters (#2162, cmd/cloudburrow/dataprocecosystem.go lakeJars): mounted on every node and driver at the component's /usr/lib path and on the Spark class path, as the image versions' release notes list it. Fetched by the CLI on the first cluster with the component, checked against this SHA-256 and kept in <state-dir>/models/spark/dataproc/lake.",
+        "version": "3.2.1",
+        "source": "https://repo1.maven.org/maven2/io/delta/delta-storage/3.2.1/delta-storage-3.2.1.jar",
+        "sha256": "4dcc179fc4076bda5060a4038f979c53e1f5916cf04971e28f9441db390763c7",
+        "license": "Apache-2.0",
+        "redistribution": "not published: downloaded by the local CLI; nothing of it is in the CLI or the repository",
+        "updateFeed": "maven-central",
+        "verification": "sha256",
+        "skipDiscovery": "Maven Central; depcheck only discovers GitHub-sourced components."
+      },
+      "dataprocLakeIcebergSparkRuntime35212161": {
+        "$comment": "Apache Iceberg 1.6.1 for the ICEBERG optional component of Dataproc clusters (#2162, cmd/cloudburrow/dataprocecosystem.go lakeJars): mounted on every node and driver at the component's /usr/lib path and on the Spark class path, as the image versions' release notes list it. Fetched by the CLI on the first cluster with the component, checked against this SHA-256 and kept in <state-dir>/models/spark/dataproc/lake.",
+        "version": "1.6.1",
+        "source": "https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-spark-runtime-3.5_2.12/1.6.1/iceberg-spark-runtime-3.5_2.12-1.6.1.jar",
+        "sha256": "87e7184f31ef0caac415bbdfcf1bc4943346a58b98d747dc83434f7139e12acb",
+        "license": "Apache-2.0",
+        "redistribution": "not published: downloaded by the local CLI; nothing of it is in the CLI or the repository",
+        "updateFeed": "maven-central",
+        "verification": "sha256",
+        "skipDiscovery": "Maven Central; depcheck only discovers GitHub-sourced components."
+      },
+      "dataprocLakeIcebergSparkRuntime352121100": {
+        "$comment": "Apache Iceberg 1.10.0 for the ICEBERG optional component of Dataproc clusters (#2162, cmd/cloudburrow/dataprocecosystem.go lakeJars): mounted on every node and driver at the component's /usr/lib path and on the Spark class path, as the image versions' release notes list it. Fetched by the CLI on the first cluster with the component, checked against this SHA-256 and kept in <state-dir>/models/spark/dataproc/lake.",
+        "version": "1.10.0",
+        "source": "https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-spark-runtime-3.5_2.12/1.10.0/iceberg-spark-runtime-3.5_2.12-1.10.0.jar",
+        "sha256": "70f9471870b2d456167d703c829f098a446b86bb1379eee338c0efa03a341026",
+        "license": "Apache-2.0",
+        "redistribution": "not published: downloaded by the local CLI; nothing of it is in the CLI or the repository",
+        "updateFeed": "maven-central",
+        "verification": "sha256",
+        "skipDiscovery": "Maven Central; depcheck only discovers GitHub-sourced components."
+      },
+      "dataprocLakeHudiSpark35Bundle2120150": {
+        "$comment": "Apache Hudi 0.15.0 for the HUDI optional component of Dataproc clusters (#2162, cmd/cloudburrow/dataprocecosystem.go lakeJars): mounted on every node and driver at the component's /usr/lib path and on the Spark class path, as the image versions' release notes list it. Fetched by the CLI on the first cluster with the component, checked against this SHA-256 and kept in <state-dir>/models/spark/dataproc/lake.",
+        "version": "0.15.0",
+        "source": "https://repo1.maven.org/maven2/org/apache/hudi/hudi-spark3.5-bundle_2.12/0.15.0/hudi-spark3.5-bundle_2.12-0.15.0.jar",
+        "sha256": "aab6ecdb5c65fcd20406b980b31ccec294fae95693de947d5778f0b3fb4e302a",
+        "license": "Apache-2.0",
+        "redistribution": "not published: downloaded by the local CLI; nothing of it is in the CLI or the repository",
+        "updateFeed": "maven-central",
+        "verification": "sha256",
+        "skipDiscovery": "Maven Central; depcheck only discovers GitHub-sourced components."
+      },
+      "dataprocLakeDeltaSpark213420": {
+        "$comment": "Delta Lake 4.2.0 for the DELTA optional component of Dataproc clusters (#2162, cmd/cloudburrow/dataprocecosystem.go lakeJars): mounted on every node and driver at the component's /usr/lib path and on the Spark class path, as the image versions' release notes list it. Fetched by the CLI on the first cluster with the component, checked against this SHA-256 and kept in <state-dir>/models/spark/dataproc/lake.",
+        "version": "4.2.0",
+        "source": "https://repo1.maven.org/maven2/io/delta/delta-spark_2.13/4.2.0/delta-spark_2.13-4.2.0.jar",
+        "sha256": "8480050a55c7e50427f3bec3af9243f98fc7cbfa453a2ef55e6ea8d0b7b121ff",
+        "license": "Apache-2.0",
+        "redistribution": "not published: downloaded by the local CLI; nothing of it is in the CLI or the repository",
+        "updateFeed": "maven-central",
+        "verification": "sha256",
+        "skipDiscovery": "Maven Central; depcheck only discovers GitHub-sourced components."
+      },
+      "dataprocLakeDeltaStorage420": {
+        "$comment": "Delta Lake 4.2.0 for the DELTA optional component of Dataproc clusters (#2162, cmd/cloudburrow/dataprocecosystem.go lakeJars): mounted on every node and driver at the component's /usr/lib path and on the Spark class path, as the image versions' release notes list it. Fetched by the CLI on the first cluster with the component, checked against this SHA-256 and kept in <state-dir>/models/spark/dataproc/lake.",
+        "version": "4.2.0",
+        "source": "https://repo1.maven.org/maven2/io/delta/delta-storage/4.2.0/delta-storage-4.2.0.jar",
+        "sha256": "2d84df76551f2b3cd27b120abec67ccbba324cea6ec45eb659edcc54234f99f3",
+        "license": "Apache-2.0",
+        "redistribution": "not published: downloaded by the local CLI; nothing of it is in the CLI or the repository",
+        "updateFeed": "maven-central",
+        "verification": "sha256",
+        "skipDiscovery": "Maven Central; depcheck only discovers GitHub-sourced components."
+      },
+      "dataprocLakeHudiSpark41Bundle213120": {
+        "$comment": "Apache Hudi 1.2.0 for the HUDI optional component of Dataproc clusters (#2162, cmd/cloudburrow/dataprocecosystem.go lakeJars): mounted on every node and driver at the component's /usr/lib path and on the Spark class path, as the image versions' release notes list it. Fetched by the CLI on the first cluster with the component, checked against this SHA-256 and kept in <state-dir>/models/spark/dataproc/lake.",
+        "version": "1.2.0",
+        "source": "https://repo1.maven.org/maven2/org/apache/hudi/hudi-spark4.1-bundle_2.13/1.2.0/hudi-spark4.1-bundle_2.13-1.2.0.jar",
+        "sha256": "69ba6fa7e29096c15737614a98e85536935365f044dc4d647dfdec6bcc24f6ce",
+        "license": "Apache-2.0",
+        "redistribution": "not published: downloaded by the local CLI; nothing of it is in the CLI or the repository",
+        "updateFeed": "maven-central",
+        "verification": "sha256",
+        "skipDiscovery": "Maven Central; depcheck only discovers GitHub-sourced components."
+      },
+      "dataprocLakeHudiSpark33Bundle2120123": {
+        "$comment": "Apache Hudi 0.12.3 for the HUDI optional component of Dataproc clusters (#2162, cmd/cloudburrow/dataprocecosystem.go lakeJars): mounted on every node and driver at the component's /usr/lib path and on the Spark class path, as the image versions' release notes list it. Fetched by the CLI on the first cluster with the component, checked against this SHA-256 and kept in <state-dir>/models/spark/dataproc/lake.",
+        "version": "0.12.3",
+        "source": "https://repo1.maven.org/maven2/org/apache/hudi/hudi-spark3.3-bundle_2.12/0.12.3/hudi-spark3.3-bundle_2.12-0.12.3.jar",
+        "sha256": "99142b2f0f67d8b48bf7114f7e8fee8859772b9e288064abb28b07655bb0277c",
+        "license": "Apache-2.0",
+        "redistribution": "not published: downloaded by the local CLI; nothing of it is in the CLI or the repository",
+        "updateFeed": "maven-central",
+        "verification": "sha256",
+        "skipDiscovery": "Maven Central; depcheck only discovers GitHub-sourced components."
+      },
+      "dataprocIPython": {
+        "$comment": "IPython 8.37.0 and its dependencies (#2162, cmd/cloudburrow/dataprocipython.go): pure-Python wheels from PyPI, unpacked into <state-dir>/models/spark/dataproc/ipython-8.37.0 and mounted on a PySpark notebook batch's driver PYTHONPATH, so its cells run in IPython (magics and shell escapes). Each checked against its SHA-256.",
+        "version": "8.37.0",
+        "files": {
+          "ipython-8.37.0-py3-none-any.whl": {
+            "source": "https://files.pythonhosted.org/packages/91/d0/274fbf7b0b12643cbbc001ce13e6a5b1607ac4929d1b11c72460152c9fc3/ipython-8.37.0-py3-none-any.whl",
+            "sha256": "ed87326596b878932dbcb171e3e698845434d8c61b8d8cd474bf663041a9dcf2",
+            "license": "BSD-3-Clause"
+          },
+          "decorator-5.2.1-py3-none-any.whl": {
+            "source": "https://files.pythonhosted.org/packages/4e/8c/f3147f5c4b73e7550fe5f9352eaa956ae838d5c51eb58e7a25b9f3e2643b/decorator-5.2.1-py3-none-any.whl",
+            "sha256": "d316bb415a2d9e2d2b3abcc4084c6502fc09240e292cd76a76afc106a1c8e04a",
+            "license": "BSD-2-Clause"
+          },
+          "exceptiongroup-1.3.0-py3-none-any.whl": {
+            "source": "https://files.pythonhosted.org/packages/36/f4/c6e662dade71f56cd2f3735141b265c3c79293c109549c1e6933b0651ffc/exceptiongroup-1.3.0-py3-none-any.whl",
+            "sha256": "4d111e6e0c13d0644cad6ddaa7ed0261a0b36971f6d23e7ec9b4b9097da78a10",
+            "license": "MIT"
+          },
+          "jedi-0.19.2-py2.py3-none-any.whl": {
+            "source": "https://files.pythonhosted.org/packages/c0/5a/9cac0c82afec3d09ccd97c8b6502d48f165f9124db81b4bcb90b4af974ee/jedi-0.19.2-py2.py3-none-any.whl",
+            "sha256": "a8ef22bde8490f57fe5c7681a3c83cb58874daf72b4784de3cce5b6ef6edb5b9",
+            "license": "MIT"
+          },
+          "parso-0.8.5-py2.py3-none-any.whl": {
+            "source": "https://files.pythonhosted.org/packages/16/32/f8e3c85d1d5250232a5d3477a2a28cc291968ff175caeadaf3cc19ce0e4a/parso-0.8.5-py2.py3-none-any.whl",
+            "sha256": "646204b5ee239c396d040b90f9e272e9a8017c630092bf59980beb62fd033887",
+            "license": "MIT"
+          },
+          "matplotlib_inline-0.2.1-py3-none-any.whl": {
+            "source": "https://files.pythonhosted.org/packages/af/33/ee4519fa02ed11a94aef9559552f3b17bb863f2ecfe1a35dc7f548cde231/matplotlib_inline-0.2.1-py3-none-any.whl",
+            "sha256": "d56ce5156ba6085e00a9d54fead6ed29a9c47e215cd1bba2e976ef39f5710a76",
+            "license": "BSD-3-Clause"
+          },
+          "pexpect-4.9.0-py2.py3-none-any.whl": {
+            "source": "https://files.pythonhosted.org/packages/9e/c3/059298687310d527a58bb01f3b1965787ee3b40dce76752eda8b44e9a2c5/pexpect-4.9.0-py2.py3-none-any.whl",
+            "sha256": "7236d1e080e4936be2dc3e326cec0af72acf9212a7e1d060210e70a47e253523",
+            "license": "ISC"
+          },
+          "ptyprocess-0.7.0-py2.py3-none-any.whl": {
+            "source": "https://files.pythonhosted.org/packages/22/a6/858897256d0deac81a172289110f31629fc4cee19b6f01283303e18c8db3/ptyprocess-0.7.0-py2.py3-none-any.whl",
+            "sha256": "4b41f3967fce3af57cc7e94b888626c18bf37a083e3651ca8feeb66d492fef35",
+            "license": "ISC"
+          },
+          "prompt_toolkit-3.0.52-py3-none-any.whl": {
+            "source": "https://files.pythonhosted.org/packages/84/03/0d3ce49e2505ae70cf43bc5bb3033955d2fc9f932163e84dc0779cc47f48/prompt_toolkit-3.0.52-py3-none-any.whl",
+            "sha256": "9aac639a3bbd33284347de5ad8d68ecc044b91a762dc39b7c21095fcd6a19955",
+            "license": "BSD-3-Clause"
+          },
+          "pygments-2.19.2-py3-none-any.whl": {
+            "source": "https://files.pythonhosted.org/packages/c7/21/705964c7812476f378728bdf590ca4b771ec72385c533964653c68e86bdc/pygments-2.19.2-py3-none-any.whl",
+            "sha256": "86540386c03d588bb81d44bc3928634ff26449851e99741617ecb9037ee5ec0b",
+            "license": "BSD-2-Clause"
+          },
+          "stack_data-0.6.3-py3-none-any.whl": {
+            "source": "https://files.pythonhosted.org/packages/f1/7b/ce1eafaf1a76852e2ec9b22edecf1daa58175c090266e9f6c64afcd81d91/stack_data-0.6.3-py3-none-any.whl",
+            "sha256": "d5558e0c25a4cb0853cddad3d77da9891a08cb85dd9f9f91b9f8cd66e511e695",
+            "license": "MIT"
+          },
+          "executing-2.2.1-py2.py3-none-any.whl": {
+            "source": "https://files.pythonhosted.org/packages/c1/ea/53f2148663b321f21b5a606bd5f191517cf40b7072c0497d3c92c4a13b1e/executing-2.2.1-py2.py3-none-any.whl",
+            "sha256": "760643d3452b4d777d295bb167ccc74c64a81df23fb5e08eff250c425a4b2017",
+            "license": "MIT"
+          },
+          "asttokens-3.0.0-py3-none-any.whl": {
+            "source": "https://files.pythonhosted.org/packages/25/8a/c46dcc25341b5bce5472c718902eb3d38600a903b14fa6aeecef3f21a46f/asttokens-3.0.0-py3-none-any.whl",
+            "sha256": "e3078351a059199dd5138cb1c706e6430c05eff2ff136af5eb4790f9d28932e2",
+            "license": "Apache-2.0"
+          },
+          "pure_eval-0.2.3-py3-none-any.whl": {
+            "source": "https://files.pythonhosted.org/packages/8e/37/efad0257dc6e593a18957422533ff0f87ede7c9c6ea010a2177d738fb82f/pure_eval-0.2.3-py3-none-any.whl",
+            "sha256": "1db8e35b67b3d218d818ae653e27f06c3aa420901fa7b081ca98cbedc874e0d0",
+            "license": "MIT"
+          },
+          "traitlets-5.14.3-py3-none-any.whl": {
+            "source": "https://files.pythonhosted.org/packages/00/c0/8f5d070730d7836adc9c9b6408dec68c6ced86b304a9b26a14df072a6e8c/traitlets-5.14.3-py3-none-any.whl",
+            "sha256": "b74e89e397b1ed28cc831db7aea759ba6640cb3de13090ca145426688ff1ac4f",
+            "license": "BSD-3-Clause"
+          },
+          "typing_extensions-4.15.0-py3-none-any.whl": {
+            "source": "https://files.pythonhosted.org/packages/18/67/36e9267722cc04a6b9f15c7f3441c2363321a3ea07da7ae0c0707beb2a9c/typing_extensions-4.15.0-py3-none-any.whl",
+            "sha256": "f0fa19c6845758ab08074a0cfa8b7aecb71c999ca73d62883bc25cc018c4e548",
+            "license": "PSF-2.0"
+          },
+          "wcwidth-0.2.14-py2.py3-none-any.whl": {
+            "source": "https://files.pythonhosted.org/packages/af/b5/123f13c975e9f27ab9c0770f514345bd406d0e8d3b7a0723af9d43f710af/wcwidth-0.2.14-py2.py3-none-any.whl",
+            "sha256": "a7bb560c8aee30f9957e5f9895805edd20602f2d7f720186dfd906e82b4982e1",
+            "license": "MIT"
+          }
+        },
+        "license": "BSD-3-Clause (IPython); its dependencies' licences are per file",
+        "source": "https://pypi.org/",
+        "redistribution": "not published: downloaded by the local CLI; nothing of it is in the CLI or the repository",
+        "updateFeed": "pypi",
+        "verification": "sha256",
         "skipDiscovery": "PyPI; depcheck only discovers GitHub-sourced components."
       },
       "tfconvertBase": {

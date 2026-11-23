@@ -453,7 +453,26 @@ func (s *Server) runJob(ctx context.Context, name string) {
 			s.mu.Unlock()
 			return
 		}
-		if len(j.YarnApplications) > 0 {
+		// A Hadoop MapReduce or Pig job's YARN applications, as the
+		// cluster's ResourceManager reports them; trackingUrl "uses the
+		// internal hostname" (the API reference), the master's
+		// ResourceManager web proxy.
+		for _, ya := range res.YarnApps {
+			st := dataprocpb.YarnApplication_State(dataprocpb.YarnApplication_State_value[ya.State])
+			if st == dataprocpb.YarnApplication_STATE_UNSPECIFIED {
+				st = dataprocpb.YarnApplication_FINISHED
+			}
+			if st == dataprocpb.YarnApplication_FINISHED && ya.Final == "FAILED" {
+				st = dataprocpb.YarnApplication_FAILED
+			}
+			appName := ya.Name
+			if appName == "" {
+				appName = ya.ID
+			}
+			j.YarnApplications = append(j.YarnApplications, &dataprocpb.YarnApplication{Name: appName, State: st, Progress: ya.Progress / 100,
+				TrackingUrl: "http://" + cluster.GetClusterName() + "-m:8088/proxy/" + ya.ID + "/"})
+		}
+		if len(j.YarnApplications) > 0 && len(res.YarnApps) == 0 {
 			app := j.YarnApplications[0]
 			app.Progress = 1
 			app.State = dataprocpb.YarnApplication_FINISHED

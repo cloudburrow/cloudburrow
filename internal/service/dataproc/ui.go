@@ -20,6 +20,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httputil"
@@ -198,7 +199,8 @@ var gatewayRE = regexp.MustCompile(`^/component-gateway/([0-9a-f-]{36})/([a-z]+)
 func (s *Server) WebUI(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := r.URL.Path
-		var addr, base, strip string
+		var addr, base, strip, rewrite string
+		var clusterName string
 		switch {
 		case p == HistoryBase || strings.HasPrefix(p, HistoryBase+"/"):
 			a, err := s.instanceHistory(r.Context())
@@ -223,6 +225,7 @@ func (s *Server) WebUI(next http.Handler) http.Handler {
 			for name, c := range s.clusters {
 				if c.ClusterUuid == m[1] {
 					nodes = s.nodes[name]
+					clusterName = c.ClusterName
 				}
 			}
 			s.mu.Unlock()
@@ -241,6 +244,12 @@ func (s *Server) WebUI(next http.Handler) http.Handler {
 			} else {
 				strip = base
 			}
+			if _, ok := gatewayRewritten[m[2]]; ok {
+				rewrite = gatewayBase(m[1])
+			}
+		case strings.HasPrefix(p, GatewayBase):
+			s.serveGateway(w, r)
+			return
 		default:
 			next.ServeHTTP(w, r)
 			return
@@ -258,7 +267,14 @@ func (s *Server) WebUI(next http.Handler) http.Handler {
 			}
 			pr.Out.URL.RawPath = ""
 			pr.Out.Host = addr
+			if rewrite != "" {
+				// The pages are rewritten, so they come uncompressed.
+				pr.Out.Header.Del("Accept-Encoding")
+			}
 		}, ModifyResponse: func(resp *http.Response) error {
+			if rewrite != "" {
+				return rewriteHadoop(resp, rewrite, base, clusterName+"-m")
+			}
 			// The History Server redirects to its own paths, which the
 			// proxy base prefixes.
 			if loc := resp.Header.Get("Location"); loc != "" {
@@ -418,5 +434,78 @@ func (s *Server) copyToPHS(phs, uuid string) {
 			_ = s.opts.Storage.Write(ctx, dir+"/"+filepath.Base(f), b)
 			cancel()
 		}
+	}
+}
+
+// rewriteHadoop rewrites a Hadoop web interface's response for its
+// Component Gateway path base (gateway is the cluster's gateway base):
+// its redirects, its pages' root-relative links, and the absolute URLs of
+// the master's interfaces (http://CLUSTER-m:8088/proxy/..., the
+// JobHistory Server's http://CLUSTER-m:19888/jobhistory/...), each to its
+// own gateway path.
+func rewriteHadoop(resp *http.Response, gateway, base, master string) error {
+	abs := func(u string) string {
+		for key, port := range gatewayRewritten {
+			for _, host := range []string{master + ":" + port, "0.0.0.0:" + port, "localhost:" + port} {
+				if rest, ok := strings.CutPrefix(u, "http://"+host); ok {
+					return gateway + key + rest
+				}
+			}
+		}
+		return u
+	}
+	if loc := resp.Header.Get("Location"); loc != "" {
+		if strings.HasPrefix(loc, "/") && !strings.HasPrefix(loc, base) {
+			resp.Header.Set("Location", base+loc)
+		} else {
+			resp.Header.Set("Location", abs(loc))
+		}
+	}
+	ct := resp.Header.Get("Content-Type")
+	if !strings.Contains(ct, "html") && !strings.Contains(ct, "javascript") {
+		return nil
+	}
+	if enc := resp.Header.Get("Content-Encoding"); enc != "" && enc != "identity" {
+		return nil
+	}
+	b, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
+	resp.Body.Close()
+	if err != nil {
+		return err
+	}
+	page := string(b)
+	for key, port := range gatewayRewritten {
+		for _, host := range []string{master + ":" + port, "0.0.0.0:" + port} {
+			page = strings.ReplaceAll(page, "http://"+host, strings.TrimSuffix(gateway, "/")+"/"+key)
+		}
+	}
+	for _, attr := range []string{`href="/`, `src="/`, `href='/`, `src='/`, `action="/`} {
+		q := attr[len(attr)-2 : len(attr)-1]
+		page = rootLinks(page, attr, attr[:len(attr)-2]+q+base+"/", gateway)
+	}
+	resp.Body = io.NopCloser(strings.NewReader(page))
+	resp.ContentLength = int64(len(page))
+	resp.Header.Set("Content-Length", fmt.Sprint(len(page)))
+	return nil
+}
+
+// rootLinks replaces each attr (href="/) in page with repl, except where
+// the link is already a gateway path.
+func rootLinks(page, attr, repl, gateway string) string {
+	var b strings.Builder
+	for {
+		i := strings.Index(page, attr)
+		if i < 0 {
+			b.WriteString(page)
+			return b.String()
+		}
+		b.WriteString(page[:i])
+		rest := page[i+len(attr)-1:]
+		if strings.HasPrefix(rest, gateway) {
+			b.WriteString(attr)
+		} else {
+			b.WriteString(repl)
+		}
+		page = page[i+len(attr):]
 	}
 }

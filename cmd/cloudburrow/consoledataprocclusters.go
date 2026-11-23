@@ -203,7 +203,7 @@ func (p dataprocClustersProvider) CreateForm() (string, []console.Field) {
 		{Name: "imageVersion", Label: "Image type and version", Type: "select", Section: setup, Options: versions, OptionLabels: versionLabels, Default: dataproc.DefaultImageVersion,
 			Help: "2.1 runs Apache Spark 3.3, 2.2 and 2.3 Spark 3.5, 3.0 Spark 4.1."},
 		{Name: "componentGateway", Label: "Enable component gateway", Type: "checkbox", Section: setup, Default: "true",
-			Help: "Opens the cluster's web interfaces, the Spark History Server, from its Web interfaces tab."},
+			Help: "Opens the cluster's web interfaces (YARN ResourceManager, MapReduce Job History, Spark History Server, YARN Application Timeline and the components') from its Web interfaces tab."},
 		{Name: "comp_JUPYTER", Label: "Jupyter Notebook", Type: "checkbox", Section: setup},
 		{Name: "comp_TRINO", Label: "Trino", Type: "checkbox", Section: setup},
 		{Name: "comp_FLINK", Label: "Flink", Type: "checkbox", Section: setup},
@@ -443,7 +443,23 @@ func (p dataprocClustersProvider) Detail(ctx context.Context, project string, pa
 		for k := range ports {
 			keys = append(keys, k)
 		}
-		sort.Strings(keys)
+		// The console's order: the Hadoop and Spark interfaces first, then
+		// the components' by name.
+		rank := map[string]int{"YARN ResourceManager": 1, "MapReduce Job History": 2, "Spark History Server": 3, "HDFS NameNode": 4,
+			"YARN Application Timeline": 5, "Tez": 6}
+		sort.Slice(keys, func(i, j int) bool {
+			ri, rj := rank[keys[i]], rank[keys[j]]
+			if ri == 0 {
+				ri = 100
+			}
+			if rj == 0 {
+				rj = 100
+			}
+			if ri != rj {
+				return ri < rj
+			}
+			return keys[i] < keys[j]
+		})
 		for _, k := range keys {
 			web.Items = append(web.Items, console.Resource{Name: k, Link: ports[k], Fields: map[string]string{"Web interface": k, "Link": ports[k]}})
 		}
