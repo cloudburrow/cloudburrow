@@ -38,6 +38,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/sysparams"
+	"github.com/cloudburrow/cloudburrow/internal/vmrelay"
 	"google.golang.org/grpc"
 )
 
@@ -107,6 +108,13 @@ type Options struct {
 	// (//compute.googleapis.com/projects/P/zones/Z/instances/ID); nil
 	// gives instances no tags.
 	SourceTags func(fullName string) []int64
+	// Gateways are Secure Web Proxy's gateways, which VMs reach at their
+	// VPC addresses through the relay (#2160, vmrelay.go); nil relays
+	// only load balancers.
+	Gateways RelayGateways
+	// RelayBind is the address the relay listens on, 127.0.0.1 when
+	// empty: where VMs' pods reach this machine (vmrelay.go).
+	RelayBind string
 }
 
 // obj is one resource, as its JSON is kept: link fields hold relative
@@ -154,6 +162,9 @@ type Server struct {
 
 	srv *http.Server
 	ln  net.Listener
+	// relay is the listener VMs' guests relay their connections to load
+	// balancers and gateways through (vmrelay.go).
+	relay *vmrelay.Server
 }
 
 // New returns a Server with its state restored.
@@ -183,6 +194,7 @@ func (s *Server) Start(context.Context) error {
 		go func() { defer s.loops.Done(); s.autoscaleLoop(ctx) }()
 	}
 	s.lbStart()
+	s.startRelay()
 	if s.opts.Addr == "" {
 		return nil
 	}
@@ -204,6 +216,7 @@ func (s *Server) Stop(ctx context.Context) error {
 		s.loops.Wait()
 	}
 	s.lbStop()
+	s.stopRelay()
 	if s.srv == nil {
 		return nil
 	}

@@ -200,8 +200,14 @@ func (s *Server) vpcConfigLocked(inst obj, pod string) (string, bool) {
 			peerPods = append(peerPods, p.ip)
 		}
 	}
+	relayText, relayChain := s.relayConfigLocked(self, str(inst, "_guestToken"), reach)
+	b.WriteString(relayText)
 	b.WriteString("nft\n")
-	b.WriteString(firewallNFT(self, members, s.firewallsOfLocked(self.network), peerPods))
+	ruleset := firewallNFT(self, members, s.firewallsOfLocked(self.network), peerPods)
+	if relayChain != "" {
+		ruleset = strings.TrimSuffix(ruleset, "}\n") + relayChain + "}\n"
+	}
+	b.WriteString(ruleset)
 	return b.String(), true
 }
 

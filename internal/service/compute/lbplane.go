@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/cloudburrow/cloudburrow/internal/vmrelay"
 )
 
 // The load balancers' data plane (#2153): each load-balancing forwarding
@@ -75,8 +77,11 @@ type lbListener struct {
 	rulePort int
 	addr     string
 	ln       net.Listener
-	pc       net.PacketConn
-	srv      *http.Server
+	// inj is ln, which also takes the connections VMs relay to the rule
+	// (vmrelay.go).
+	inj *vmrelay.Listener
+	pc  net.PacketConn
+	srv *http.Server
 }
 
 func newLBPlane() *lbPlane {
@@ -188,7 +193,8 @@ func (s *Server) lbListenLocked(rel string) {
 			if err != nil {
 				continue
 			}
-			l = &lbListener{rulePort: port, addr: ln.Addr().String(), ln: ln}
+			inj := vmrelay.NewListener(ln)
+			l = &lbListener{rulePort: port, addr: ln.Addr().String(), ln: inj, inj: inj}
 		}
 		s.serveListener(rel, kind, l)
 		rl.ls = append(rl.ls, l)

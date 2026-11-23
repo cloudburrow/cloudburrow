@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -80,6 +81,9 @@ func (s *computeService) useNetSvc(api *compute.Server, ns *networksecurity.Serv
 	nsv.UsePolicies(ns)
 	nsv.UseCertificates(cm.Certificates)
 	nsv.UseSource(func(ip string) ([]string, []string) { return s.instanceIdentity(api, ip) })
+	// VMs reach the gateways at their VPC addresses through Compute
+	// Engine's relay, which keeps their identity (internal/vmrelay).
+	api.UseGateways(nsv)
 	if s.privateca != nil {
 		nsv.UseLeafIssuer(swpLeafIssuer(s.privateca))
 	}
@@ -122,10 +126,10 @@ func (s *computeService) instanceIdentity(api *compute.Server, ip string) (sas, 
 				}
 				zone := strAny(vm["zone"])
 				zone = zone[strings.LastIndex(zone, "/")+1:]
-				if et, err := reg.EffectiveTags("//compute.googleapis.com/projects/" + p.ProjectID + "/zones/" + zone + "/instances/" + strAny(vm["id"])); err == nil {
-					for _, t := range et {
-						tags = append(tags, t.GetTagValue())
-					}
+				// The instance's effective tags, bound by its project's ID or
+				// number, as for authorization policies (computenetsec.go).
+				for _, id := range s.sourceTags("//compute.googleapis.com/projects/" + p.ProjectID + "/zones/" + zone + "/instances/" + strAny(vm["id"])) {
+					tags = append(tags, "tagValues/"+strconv.FormatInt(id, 10))
 				}
 				return sas, tags
 			}

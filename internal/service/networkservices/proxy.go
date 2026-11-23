@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"sort"
 	"strconv"
 	"strings"
@@ -18,6 +19,7 @@ import (
 	nsvpb "cloud.google.com/go/networkservices/apiv1/networkservicespb"
 
 	"github.com/cloudburrow/cloudburrow/internal/egress"
+	"github.com/cloudburrow/cloudburrow/internal/vmrelay"
 )
 
 // Secure Web Proxy's data plane (#2160): each SECURE_WEB_GATEWAY gateway
@@ -133,6 +135,12 @@ type swpListener struct {
 	addr    string
 	ln      net.Listener
 	srv     *http.Server
+	// network and vip are the gateway's network and its VPC address, at
+	// which VMs reach it through Compute Engine's relay; inj is ln, which
+	// takes the connections they relay (internal/vmrelay).
+	network string
+	vip     netip.Addr
+	inj     *vmrelay.Listener
 }
 
 func newProxyPlane(s *Server) *proxyPlane {
@@ -240,10 +248,14 @@ func (s *Server) changedLocked() {
 			if err != nil {
 				continue
 			}
-			l := &swpListener{gateway: name, port: port, addr: ln.Addr().String(), ln: ln}
+			inj := vmrelay.NewListener(ln)
+			l := &swpListener{gateway: name, port: port, addr: ln.Addr().String(), ln: inj, inj: inj, network: relRef(g.GetNetwork())}
+			if len(g.GetAddresses()) > 0 {
+				l.vip, _ = netip.ParseAddr(g.GetAddresses()[0])
+			}
 			l.srv = &http.Server{Handler: &swpHandler{p: p, gateway: name, port: port}, ReadHeaderTimeout: 30 * time.Second,
 				IdleTimeout: 300 * time.Second}
-			go func() { _ = l.srv.Serve(&sniffListener{Listener: ln, p: p, gateway: name}) }()
+			go func() { _ = l.srv.Serve(&sniffListener{Listener: inj, p: p, gateway: name}) }()
 			p.listeners[name] = append(p.listeners[name], l)
 			p.prev[key] = l.addr
 			changed = true
@@ -268,6 +280,41 @@ func (s *Server) GatewayAddresses(name string) []string {
 		out = append(out, strconv.Itoa(int(l.port))+"="+l.addr)
 	}
 	return out
+}
+
+// RelayAddresses are the VPC addresses and ports of the gateways on
+// network (projects/P/global/networks/N), which its VMs reach through
+// Compute Engine's relay (#2160).
+func (s *Server) RelayAddresses(network string) []netip.AddrPort {
+	p := s.proxy
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	var out []netip.AddrPort
+	for _, ls := range p.listeners {
+		for _, l := range ls {
+			if l.network == network && l.vip.IsValid() {
+				out = append(out, netip.AddrPortFrom(l.vip, uint16(l.port)))
+			}
+		}
+	}
+	return out
+}
+
+// RelayInject hands a VM's relayed connection to the listener of the
+// gateway on network at dst; false when there is none.
+func (s *Server) RelayInject(network string, dst netip.AddrPort, c net.Conn) bool {
+	p := s.proxy
+	p.mu.Lock()
+	var inj *vmrelay.Listener
+	for _, ls := range p.listeners {
+		for _, l := range ls {
+			if l.network == network && l.vip == dst.Addr() && l.port == int32(dst.Port()) {
+				inj = l.inj
+			}
+		}
+	}
+	p.mu.Unlock()
+	return inj != nil && inj.Inject(c)
 }
 
 // GatewayAddress is the host address of a gateway's port, "" when none.

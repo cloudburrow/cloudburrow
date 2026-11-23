@@ -208,7 +208,8 @@ func (s *computeService) Start(ctx context.Context) error {
 	s.netSvc = nsv
 	api, err := compute.New(compute.Options{State: state, Extra: s.instanceGroupManagers, ExtraGroups: s.gkeGroups, NetworkUsers: s.networkUsers, VMs: s.vms,
 		ProjectOrganization: s.projectOrganization, LB: &computeLB{cfg: s.cfg, vms: s.vms},
-		CertMaps: cm, IAP: computeIAPGate{svc: s}, NetSec: computeNetSec{ns: ns, cm: cm, endpoints: xdsEndpointPolicies(nsv)}, XDSCredentialDir: xdsCredDir, SourceTags: s.sourceTags})
+		CertMaps: cm, IAP: computeIAPGate{svc: s}, NetSec: computeNetSec{ns: ns, cm: cm, endpoints: xdsEndpointPolicies(nsv)}, XDSCredentialDir: xdsCredDir, SourceTags: s.sourceTags,
+		RelayBind: s.cfg.BindAddress})
 	if err != nil {
 		return err
 	}
