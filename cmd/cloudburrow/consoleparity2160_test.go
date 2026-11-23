@@ -112,9 +112,9 @@ var lb2ParityRows = []parityRow{
 		Provider: "netsecurity-swp-tls", Offers: "Secure Web Proxy's TLS inspection policies tab (UNVERIFIED (re-read 2026-11-22: secure-web-proxy/docs/tls-inspection-overview gives gcloud steps only) path /net-security/swp/tls-inspection/list): Create (name, description, region, CA pool, trust config, exclude public CA set, minimum TLS version, profile), a policy's details and Delete (#2160)",
 		Tests: []string{"TestConsoleSecureWebProxy2160", "TestSecureWebProxyMeetsWCAG2160"}},
 	{Resource: "Service Extensions authorization extensions", Service: "networkservices",
-		Methods: []string{"DepService/CreateAuthzExtension", "DepService/GetAuthzExtension", "DepService/ListAuthzExtensions", "DepService/UpdateAuthzExtension", "DepService/DeleteAuthzExtension"},
-		Issue:   2160},
+		Methods:  []string{"DepService/CreateAuthzExtension", "DepService/GetAuthzExtension", "DepService/ListAuthzExtensions", "DepService/UpdateAuthzExtension", "DepService/DeleteAuthzExtension"},
+		Excluded: "Google's console does not serve authorization extensions: \"Authorization extensions are not supported using the Google Cloud console\" (https://docs.cloud.google.com/service-extensions/docs/manage-extensions, read 2026-11-22); they are made with gcloud service-extensions authz-extensions, and a CUSTOM authorization policy names one on the console's Create authorization policy page (#2160)"},
 	{Resource: "Endpoint policies", Service: "networkservices",
-		Methods: []string{"NetworkServices/CreateEndpointPolicy", "NetworkServices/GetEndpointPolicy", "NetworkServices/ListEndpointPolicies", "NetworkServices/UpdateEndpointPolicy", "NetworkServices/DeleteEndpointPolicy"},
-		Issue:   2160},
+		Methods:  []string{"NetworkServices/CreateEndpointPolicy", "NetworkServices/GetEndpointPolicy", "NetworkServices/ListEndpointPolicies", "NetworkServices/UpdateEndpointPolicy", "NetworkServices/DeleteEndpointPolicy"},
+		Excluded: "Google's console has no endpoint policy page: Cloud Service Mesh's proxyless gRPC security setup makes them only with gcloud network-services endpoint-policies import and delete (https://docs.cloud.google.com/service-mesh/docs/service-routing/security-proxyless-setup, read 2026-11-22) (#2160)"},
 }
