@@ -380,13 +380,15 @@ func (h *swpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.tunnel(w, r, net.JoinHostPort(host, strconv.Itoa(port)))
 		return
 	}
+	// An explicit proxy's client sends the absolute URI. An origin-form
+	// request is what a web page's fetch to the proxy's own address sends
+	// (any Host, by DNS rebinding): it is refused, so no page reaches
+	// through the proxy (ADR-0004, #1586); a page cannot send CONNECT.
+	if !r.URL.IsAbs() || r.URL.Host == "" {
+		http.Error(w, "Bad Request: a request through a secure web proxy names its absolute URI", http.StatusBadRequest)
+		return
+	}
 	u := *r.URL
-	if u.Host == "" {
-		u.Host = r.Host
-	}
-	if u.Scheme == "" {
-		u.Scheme = "http"
-	}
 	def := 80
 	if u.Scheme == "https" {
 		def = 443

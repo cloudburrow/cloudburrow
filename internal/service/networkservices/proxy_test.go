@@ -278,3 +278,14 @@ func TestEndpointPolicies(t *testing.T) {
 		t.Error("MATCH_ALL")
 	}
 }
+
+// TestSecureWebProxyRefusesOriginForm: a request without an absolute URI,
+// which a web page's fetch to the proxy's own address sends, is refused.
+func TestSecureWebProxyRefusesOriginForm(t *testing.T) {
+	h := &swpHandler{}
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/x", nil))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("origin-form: %d, want 400", w.Code)
+	}
+}
