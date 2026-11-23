@@ -19686,14 +19686,16 @@
           "test/compat/dataproc2162d_test.go:152 TestDataprocDockerComponent",
           "test/compat/dataproc2162d_test.go:230 TestDataprocDockerComponentOff",
           "test/compat/dataproc2162e_test.go:42 TestDataprocOnGKE",
-          "test/compat/dataproc2162f_test.go:51 TestDataprocRangerComponent"
+          "test/compat/dataproc2162f_test.go:55 TestDataprocRangerComponent",
+          "test/compat/dataproc2186_test.go:33 TestDataprocHDFS"
         ]
       },
       {
         "method": "google.cloud.dataproc.v1.ClusterController/DeleteCluster",
         "status": "Verified",
         "tests": [
-          "test/compat/dataproc2162_test.go:169 TestDataprocClusters"
+          "test/compat/dataproc2162_test.go:169 TestDataprocClusters",
+          "test/compat/dataproc2186_test.go:33 TestDataprocHDFS"
         ]
       },
       {
@@ -19724,21 +19726,24 @@
         "method": "google.cloud.dataproc.v1.ClusterController/StartCluster",
         "status": "Verified",
         "tests": [
-          "test/compat/dataproc2162_test.go:169 TestDataprocClusters"
+          "test/compat/dataproc2162_test.go:169 TestDataprocClusters",
+          "test/compat/dataproc2186_test.go:33 TestDataprocHDFS"
         ]
       },
       {
         "method": "google.cloud.dataproc.v1.ClusterController/StopCluster",
         "status": "Verified",
         "tests": [
-          "test/compat/dataproc2162_test.go:169 TestDataprocClusters"
+          "test/compat/dataproc2162_test.go:169 TestDataprocClusters",
+          "test/compat/dataproc2186_test.go:33 TestDataprocHDFS"
         ]
       },
       {
         "method": "google.cloud.dataproc.v1.ClusterController/UpdateCluster",
         "status": "Verified",
         "tests": [
-          "test/compat/dataproc2162_test.go:169 TestDataprocClusters"
+          "test/compat/dataproc2162_test.go:169 TestDataprocClusters",
+          "test/compat/dataproc2186_test.go:33 TestDataprocHDFS"
         ]
       },
       {
@@ -19781,7 +19786,8 @@
           "test/compat/dataproc2162d_test.go:152 TestDataprocDockerComponent",
           "test/compat/dataproc2162d_test.go:46 TestDataprocSparkAndHiveOnYarn",
           "test/compat/dataproc2162e_test.go:42 TestDataprocOnGKE",
-          "test/compat/dataproc2162f_test.go:51 TestDataprocRangerComponent"
+          "test/compat/dataproc2162f_test.go:55 TestDataprocRangerComponent",
+          "test/compat/dataproc2186_test.go:33 TestDataprocHDFS"
         ]
       },
       {
