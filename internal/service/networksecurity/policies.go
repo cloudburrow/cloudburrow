@@ -315,7 +315,42 @@ const (
 	maxAuthzPaths      = 10
 	maxAuthzMethods    = 10
 	maxAuthzPrincipals = 50
+	maxAuthzResources  = 10
+	// maxTagValueIDs is TagValueIdSet's "Limited to 5 ids".
+	maxTagValueIDs = 5
 )
+
+var authzExtRE = regexp.MustCompile(`^projects/[^/]+/locations/([^/]+)/authzExtensions/[^/]+$`)
+
+// checkAuthzExtensionRefs checks a CUSTOM policy's authorization
+// extensions: exactly one ("Limited to 1 custom provider"), in the
+// policy's location, with its load balancing scheme.
+func (s *Server) checkAuthzExtensionRefs(refs []string, location string, scheme nspb.AuthzPolicy_LoadBalancingScheme) error {
+	if len(refs) != 1 {
+		return apierror.InvalidArgument("Invalid argument: custom_provider.authz_extension.resources must name exactly 1 authorization extension.")
+	}
+	hook := s.hooksNow().AuthzExtension
+	for i, r := range refs {
+		rel := ruleRel(r)
+		m := authzExtRE.FindStringSubmatch(rel)
+		if m == nil {
+			return apierror.InvalidArgument("Invalid value for field 'custom_provider.authz_extension.resources[%d]': '%s'. It must name an authorization extension.", i, r)
+		}
+		if m[1] != location {
+			return apierror.InvalidArgument("Invalid value for field 'custom_provider.authz_extension.resources[%d]': '%s'. The authorization extension must be in the policy's location '%s'.", i, r, location)
+		}
+		if hook != nil {
+			sch, ok := hook(rel)
+			if !ok {
+				return apierror.NotFound("The resource '%s' was not found.", r)
+			}
+			if sch != scheme.String() {
+				return apierror.InvalidArgument("Invalid value for field 'custom_provider.authz_extension.resources[%d]': '%s'. Its load balancing scheme %s is not the policy's %s.", i, r, sch, scheme)
+			}
+		}
+	}
+	return nil
+}
 
 // ruleRel is a forwarding rule reference as its relative name.
 func ruleRel(ref string) string {
@@ -362,6 +397,9 @@ func (s *Server) checkAuthzALB(m proto.Message, location string) error {
 	}
 	switch p.GetAction() {
 	case nspb.AuthzPolicy_ALLOW, nspb.AuthzPolicy_DENY:
+		if p.GetPolicyProfile() == nspb.AuthzPolicy_CONTENT_AUTHZ {
+			return apierror.InvalidArgument("Invalid argument: the CONTENT_AUTHZ policy profile supports only the CUSTOM action.")
+		}
 		if p.GetCustomProvider() != nil {
 			return apierror.InvalidArgument("Invalid argument: custom_provider can be set only when the action is CUSTOM.")
 		}
@@ -373,10 +411,17 @@ func (s *Server) checkAuthzALB(m proto.Message, location string) error {
 		if cp == nil || cp.GetCloudIap() == nil && cp.GetAuthzExtension() == nil {
 			return apierror.InvalidArgument("Invalid argument: custom_provider is required when the action is CUSTOM: one of cloud_iap or authz_extension.")
 		}
-		// Neither provider is reachable from the local proxy: IAP is
-		// enforced on backend services here, and Service Extensions'
-		// authorization extensions are not served (docs/gaps.md).
-		return apierror.Unimplemented("The CUSTOM action (Cloud IAP or authorization extensions through an AuthzPolicy) is not served by CloudBurrow's load balancers (#2160).")
+		if cp.GetCloudIap() != nil && cp.GetAuthzExtension() != nil {
+			return apierror.InvalidArgument("Invalid argument: custom_provider: only one of cloud_iap or authz_extension can be specified.")
+		}
+		if cp.GetCloudIap() != nil && p.GetPolicyProfile() == nspb.AuthzPolicy_CONTENT_AUTHZ {
+			return apierror.InvalidArgument("Invalid argument: custom_provider.cloud_iap is not supported for the CONTENT_AUTHZ policy profile.")
+		}
+		if ae := cp.GetAuthzExtension(); ae != nil {
+			if err := s.checkAuthzExtensionRefs(ae.GetResources(), location, scheme); err != nil {
+				return err
+			}
+		}
 	default:
 		return apierror.InvalidArgument("Invalid argument: action is required: ALLOW, DENY or CUSTOM.")
 	}
@@ -386,7 +431,7 @@ func (s *Server) checkAuthzALB(m proto.Message, location string) error {
 	if len(p.GetHttpRules()) > maxAuthzRules || len(p.GetNetworkRules()) > maxAuthzRules {
 		return apierror.InvalidArgument("Invalid argument: an AuthzPolicy is limited to %d rules.", maxAuthzRules)
 	}
-	var principals, blocks, hosts, paths, methods int
+	var principals, blocks, hosts, paths, methods, resources int
 	globalExternal := location == "global" && scheme == nspb.AuthzPolicy_EXTERNAL_MANAGED
 	for i, r := range append(append([]*nspb.AuthzPolicy_AuthzRule{}, p.GetHttpRules()...), p.GetNetworkRules()...) {
 		if f := r.GetFrom(); f != nil {
@@ -420,9 +465,21 @@ func (s *Server) checkAuthzALB(m proto.Message, location string) error {
 						return apierror.InvalidArgument("Invalid value for field 'http_rules[%d].from.sources.ip_blocks': '%s/%d'.", i, b.GetPrefix(), b.GetLength())
 					}
 				}
-				if len(src.GetResources()) > 0 {
-					return apierror.Unimplemented("Matching a request's source VM resources (tags, service accounts) is not served by CloudBurrow's load balancers (#2160).")
+				if len(src.GetResources()) > 0 && scheme == nspb.AuthzPolicy_EXTERNAL_MANAGED {
+					return apierror.InvalidArgument("Invalid argument: http_rules[%d].from.sources.resources is not supported for external Application Load Balancers.", i)
 				}
+				for _, res := range src.GetResources() {
+					if res.GetTagValueIdSet() == nil && res.GetIamServiceAccount() == nil {
+						return apierror.InvalidArgument("Invalid argument: http_rules[%d].from.sources.resources needs tag_value_id_set or iam_service_account.", i)
+					}
+					if ts := res.GetTagValueIdSet(); ts != nil && (len(ts.GetIds()) == 0 || len(ts.GetIds()) > maxTagValueIDs) {
+						return apierror.InvalidArgument("Invalid argument: http_rules[%d].from.sources.resources.tag_value_id_set.ids needs 1 to %d IDs.", i, maxTagValueIDs)
+					}
+					if sa := res.GetIamServiceAccount(); sa != nil && stringMatchEmpty(sa) {
+						return apierror.InvalidArgument("Invalid argument: http_rules[%d].from.sources.resources.iam_service_account needs a match pattern.", i)
+					}
+				}
+				resources += len(src.GetResources())
 			}
 		}
 		if to := r.GetTo(); to != nil {
@@ -461,6 +518,8 @@ func (s *Server) checkAuthzALB(m proto.Message, location string) error {
 		return apierror.InvalidArgument("Invalid argument: limited to %d hosts per Authorization Policy.", maxAuthzHosts)
 	case paths > maxAuthzPaths:
 		return apierror.InvalidArgument("Invalid argument: limited to %d paths per Authorization Policy.", maxAuthzPaths)
+	case resources > maxAuthzResources:
+		return apierror.InvalidArgument("Invalid argument: limited to %d resources per Authorization Policy.", maxAuthzResources)
 	case methods > maxAuthzMethods:
 		return apierror.InvalidArgument("Invalid argument: limited to %d methods per Authorization Policy.", maxAuthzMethods)
 	}

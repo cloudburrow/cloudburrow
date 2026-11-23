@@ -34,7 +34,9 @@ func (f *fakeNetSec) ServerTLS(string) (ServerTLSPolicy, bool) {
 	defer f.mu.Unlock()
 	return f.pol, true
 }
-func (f *fakeNetSec) Authorize(r AuthzRequest) bool { return !strings.HasPrefix(r.Path, "/deny") }
+func (f *fakeNetSec) Authorize(r AuthzRequest) AuthzVerdict {
+	return AuthzVerdict{Allowed: !strings.HasPrefix(r.Path, "/deny")}
+}
 
 type testCA struct {
 	cert *x509.Certificate

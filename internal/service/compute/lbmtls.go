@@ -323,9 +323,23 @@ func (h *lbHTTP) authorize(w http.ResponseWriter, r *http.Request, scheme string
 	if c := clientCertOf(r); c != nil {
 		req.Cert = *c
 	}
-	if ns.Authorize(req) {
-		return true
+	h.s.sourceIdentity(&req)
+	v := ns.Authorize(req)
+	// The CUSTOM policies first (lbauthzext.go), then DENY and ALLOW.
+	for _, c := range v.Custom {
+		if !h.customCheck(w, r, scheme, c, req, false) {
+			return false
+		}
 	}
-	lbError(w, http.StatusForbidden, "RBAC: access denied")
-	return false
+	if !v.Allowed {
+		lbError(w, http.StatusForbidden, "RBAC: access denied")
+		return false
+	}
+	// A CONTENT_AUTHZ policy's extension last, with the body.
+	for _, c := range v.Content {
+		if !h.customCheck(w, r, scheme, c, req, true) {
+			return false
+		}
+	}
+	return true
 }

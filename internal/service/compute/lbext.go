@@ -120,9 +120,10 @@ type NetworkSecurity interface {
 	// ServerTLS is a server TLS policy with its trust config resolved; ok
 	// is false when there is no such policy.
 	ServerTLS(name string) (ServerTLSPolicy, bool)
-	// Authorize is whether the authorization policies that target r.Rule
-	// let r through.
-	Authorize(r AuthzRequest) bool
+	// Authorize is the decision of the authorization policies that target
+	// r.Rule on r: the CUSTOM policies' providers to ask, then the DENY and
+	// ALLOW policies' outcome.
+	Authorize(r AuthzRequest) AuthzVerdict
 }
 
 // ServerTLSPolicy is a server TLS policy as a TLS listener applies it.
@@ -161,4 +162,11 @@ type AuthzRequest struct {
 	SourcePort, DestPort int
 	Header               http.Header
 	Cert                 ClientCert
+	// SourceVM is the instance (projects/P/zones/Z/instances/I) whose
+	// internal address the request comes from, "" for none; its first
+	// service account, and the permanent IDs of its secure tags' values
+	// (its effective tags), are what a rule's source resources match.
+	SourceVM             string
+	SourceServiceAccount string
+	SourceTagValues      []int64
 }

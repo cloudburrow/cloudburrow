@@ -64,13 +64,33 @@ func (e whenErr) Error() string { return string(e) }
 
 const errNotBool = whenErr("the expression must be a boolean")
 
-// Authorize evaluates the policies that target r's forwarding rule.
-func (s *Server) Authorize(r compute.AuthzRequest) bool {
+// Authorize evaluates the policies that target r's forwarding rule: the
+// CUSTOM policies whose rules match go first, for the load balancer to ask
+// their providers (a REQUEST_AUTHZ policy's before the request is let
+// through, a CONTENT_AUTHZ policy's last, with the body); then a DENY
+// policy that matches denies the request, and when there are ALLOW
+// policies one must match.
+func (s *Server) Authorize(r compute.AuthzRequest) compute.AuthzVerdict {
 	pols := s.ForwardingRulePolicies(r.Rule)
+	var v compute.AuthzVerdict
+	for _, p := range pols {
+		if p.GetAction() != nspb.AuthzPolicy_CUSTOM || !policyMatches(p, r) {
+			continue
+		}
+		c := compute.AuthzCustom{Policy: p.GetName(), IAP: p.GetCustomProvider().GetCloudIap() != nil}
+		for _, e := range p.GetCustomProvider().GetAuthzExtension().GetResources() {
+			c.Extensions = append(c.Extensions, ruleRel(e))
+		}
+		if p.GetPolicyProfile() == nspb.AuthzPolicy_CONTENT_AUTHZ {
+			v.Content = append(v.Content, c)
+		} else {
+			v.Custom = append(v.Custom, c)
+		}
+	}
 	hasAllow, allowed := false, false
 	for _, p := range pols {
 		if p.GetAction() == nspb.AuthzPolicy_DENY && policyMatches(p, r) {
-			return false
+			return v
 		}
 	}
 	for _, p := range pols {
@@ -83,7 +103,8 @@ func (s *Server) Authorize(r compute.AuthzRequest) bool {
 			break
 		}
 	}
-	return !hasAllow || allowed
+	v.Allowed = !hasAllow || allowed
+	return v
 }
 
 func policyMatches(p *nspb.AuthzPolicy, r compute.AuthzRequest) bool {
@@ -180,6 +201,41 @@ func sourceMatches(src *nspb.AuthzPolicy_AuthzRule_From_RequestSource, r compute
 		if !ok {
 			return false
 		}
+	}
+	if len(src.GetResources()) > 0 {
+		ok := false
+		for _, res := range src.GetResources() {
+			if resourceMatches(res, r) {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// resourceMatches is whether the request's source VM is the resource: it
+// carries every tag value of the set, and its service account matches.
+func resourceMatches(res *nspb.AuthzPolicy_AuthzRule_RequestResource, r compute.AuthzRequest) bool {
+	if r.SourceVM == "" {
+		return false
+	}
+	if ts := res.GetTagValueIdSet(); ts != nil {
+		have := map[int64]bool{}
+		for _, id := range r.SourceTagValues {
+			have[id] = true
+		}
+		for _, id := range ts.GetIds() {
+			if !have[id] {
+				return false
+			}
+		}
+	}
+	if sa := res.GetIamServiceAccount(); sa != nil && (r.SourceServiceAccount == "" || !stringMatches(sa, r.SourceServiceAccount)) {
+		return false
 	}
 	return true
 }

@@ -94,6 +94,15 @@ type Options struct {
 	// policies target forwarding rules (#2160, lbmtls.go); nil refuses
 	// those fields and authorizes every request.
 	NetSec NetworkSecurity
+	// AuthzExt are Service Extensions' authorization extensions, which a
+	// CUSTOM authorization policy calls (#2160, lbauthzext.go); nil answers
+	// 500 to a request such a policy delegates.
+	AuthzExt AuthzExtensions
+	// SourceTags are the permanent IDs of the tag values a resource carries
+	// (its effective tags), by full resource name
+	// (//compute.googleapis.com/projects/P/zones/Z/instances/ID); nil
+	// gives instances no tags.
+	SourceTags func(fullName string) []int64
 }
 
 // obj is one resource, as its JSON is kept: link fields hold relative

@@ -104,6 +104,9 @@ func (s *Server) serveIAPKeys(w http.ResponseWriter, _ *http.Request) {
 
 // iapResource is a backend service's IAP resource name.
 func iapResource(bs obj) string {
+	if r := str(bs, "cloudburrowIAPResource"); r != "" {
+		return r // a forwarding rule's, through a CUSTOM authorization policy
+	}
 	parts := strings.Split(str(bs, "selfLink"), "/")
 	if len(parts) < 4 {
 		return ""
@@ -276,7 +279,11 @@ func (s *Server) iapAssertion(_ context.Context, bs obj, email, test string) (st
 		scope = "regions/" + parts[3]
 	}
 	now := s.opts.Now()
-	claims := obj{"aud": "/projects/" + num + "/" + scope + "/backendServices/" + fmt.Sprint(bs["id"]), "email": email,
+	aud := "/projects/" + num + "/" + scope + "/backendServices/" + fmt.Sprint(bs["id"])
+	if a := str(bs, "cloudburrowIAPAudience"); a != "" {
+		aud = "/projects/" + num + "/" + a
+	}
+	claims := obj{"aud": aud, "email": email,
 		"exp": now.Add(10 * time.Minute).Unix(), "iat": now.Unix(), "iss": iapIssuer, "sub": "accounts.google.com:" + iapUserID(email),
 		"identity_source": "GOOGLE"}
 	if i := strings.LastIndex(email, "@"); i > 0 && !strings.HasSuffix(email, "gserviceaccount.com") && !strings.HasSuffix(email, "@gmail.com") {
