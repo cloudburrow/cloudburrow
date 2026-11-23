@@ -311,19 +311,19 @@ func TestDataprocRangerComponent(t *testing.T) {
 			TypeJob: &dataprocpb.Job_HadoopJob{HadoopJob: &dataprocpb.HadoopJob{
 				Driver: &dataprocpb.HadoopJob_MainClass{MainClass: "org.apache.hadoop.fs.FsShell"}, Args: args, FileUris: files}}})
 	}
-	if put := fs(nil, "-mkdir", "-p", "/cb-ranger-hdfs/secret"); put.GetStatus().GetState() != dataprocpb.JobStatus_DONE {
+	if put := fs(nil, "-mkdir", "-p", "/tmp/cb-ranger-hdfs/secret"); put.GetStatus().GetState() != dataprocpb.JobStatus_DONE {
 		t.Fatalf("hdfs dfs -mkdir: %v\n%s", put.GetStatus(), output(put))
 	}
-	if put := fs([]string{in}, "-put", "-f", "words.txt", "/cb-ranger-hdfs/secret/words.txt"); put.GetStatus().GetState() != dataprocpb.JobStatus_DONE {
+	if put := fs([]string{in}, "-put", "-f", "words.txt", "/tmp/cb-ranger-hdfs/secret/words.txt"); put.GetStatus().GetState() != dataprocpb.JobStatus_DONE {
 		t.Fatalf("hdfs dfs -put: %v\n%s", put.GetStatus(), output(put))
 	}
-	if cat := fs(nil, "-cat", "/cb-ranger-hdfs/secret/words.txt"); cat.GetStatus().GetState() != dataprocpb.JobStatus_DONE || !strings.Contains(output(cat), "cherry apple banana") {
+	if cat := fs(nil, "-cat", "/tmp/cb-ranger-hdfs/secret/words.txt"); cat.GetStatus().GetState() != dataprocpb.JobStatus_DONE || !strings.Contains(output(cat), "cherry apple banana") {
 		t.Fatalf("hdfs dfs -cat before the HDFS deny policy: %v\n%s", cat.GetStatus(), output(cat))
 	}
 	// A policy of hadoop-dataproc, made through the API, denying root
-	// read and execute under /cb-ranger-hdfs/secret.
+	// read and execute under /tmp/cb-ranger-hdfs/secret.
 	hdfsDeny := map[string]any{"service": "hadoop-dataproc", "name": "cb-deny-hdfs-secret", "isEnabled": true,
-		"resources": map[string]any{"path": map[string]any{"values": []string{"/cb-ranger-hdfs/secret"}, "isRecursive": true}},
+		"resources": map[string]any{"path": map[string]any{"values": []string{"/tmp/cb-ranger-hdfs/secret"}, "isRecursive": true}},
 		"denyPolicyItems": []any{map[string]any{"users": []string{"root"}, "accesses": []any{
 			map[string]any{"type": "read", "isAllowed": true}, map[string]any{"type": "execute", "isAllowed": true}}}}}
 	if code, body := rest(http.MethodPost, "/service/public/v2/api/policy", password, hdfsDeny); code != http.StatusOK {
@@ -331,7 +331,7 @@ func TestDataprocRangerComponent(t *testing.T) {
 	}
 	var blocked *dataprocpb.Job
 	for i := 0; i < 6; i++ {
-		blocked = fs(nil, "-cat", "/cb-ranger-hdfs/secret/words.txt")
+		blocked = fs(nil, "-cat", "/tmp/cb-ranger-hdfs/secret/words.txt")
 		if blocked.GetStatus().GetState() == dataprocpb.JobStatus_ERROR {
 			break
 		}
@@ -340,14 +340,14 @@ func TestDataprocRangerComponent(t *testing.T) {
 	if out := output(blocked); blocked.GetStatus().GetState() != dataprocpb.JobStatus_ERROR || !strings.Contains(out, "Permission denied: user=root") {
 		t.Fatalf("hdfs dfs -cat the HDFS policy denies: %v\n%s", blocked.GetStatus(), out)
 	}
-	if ls := fs(nil, "-ls", "/cb-ranger-hdfs"); ls.GetStatus().GetState() != dataprocpb.JobStatus_DONE || !strings.Contains(output(ls), "/cb-ranger-hdfs/secret") {
+	if ls := fs(nil, "-ls", "/tmp/cb-ranger-hdfs"); ls.GetStatus().GetState() != dataprocpb.JobStatus_DONE || !strings.Contains(output(ls), "/tmp/cb-ranger-hdfs/secret") {
 		t.Errorf("hdfs dfs -ls outside the denied path: %v\n%s", ls.GetStatus(), output(ls))
 	}
 	// The denial, in the access audit of hadoop-dataproc.
 	deadline = time.Now().Add(3 * time.Minute)
 	for {
 		code, body := rest(http.MethodGet, "/service/assets/accessAudit?pageSize=100&sortBy=eventTime&sortType=desc&repoName=hadoop-dataproc", password, nil)
-		if code == http.StatusOK && strings.Contains(body, `"resourcePath":"/cb-ranger-hdfs/secret`) && strings.Contains(body, `"accessResult":0`) {
+		if code == http.StatusOK && strings.Contains(body, `"resourcePath":"/tmp/cb-ranger-hdfs/secret`) && strings.Contains(body, `"accessResult":0`) {
 			break
 		}
 		if time.Now().After(deadline) {

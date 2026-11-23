@@ -17,7 +17,7 @@ import (
 
 // TestDataprocHDFS (#2186): a Dataproc cluster's HDFS, as a Dataproc image
 // runs it, through the official Go client: the NameNode on the master
-// (fs.defaultFS hdfs://CLUSTER-m) and a DataNode on each primary worker,
+// (fs.defaultFS hdfs://CLUSTER-m) and a DataNode on each of three primary workers,
 // each DataNode's capacity the workers' boot disk (diskConfig), with the
 // cluster's hdfs: properties in hdfs-site.xml (dfs.blocksize) and
 // dfs.replication 2. A Hadoop MapReduce job writes its word count to
@@ -53,7 +53,7 @@ func TestDataprocHDFS(t *testing.T) {
 	dataprocClusterUp(t, ctx, h, cc, project, region, &dataprocpb.Cluster{ProjectId: project, ClusterName: name,
 		Config: &dataprocpb.ClusterConfig{
 			SoftwareConfig: &dataprocpb.SoftwareConfig{ImageVersion: "2.2", Properties: map[string]string{"hdfs:dfs.blocksize": "64m"}},
-			WorkerConfig: &dataprocpb.InstanceGroupConfig{NumInstances: 2,
+			WorkerConfig: &dataprocpb.InstanceGroupConfig{NumInstances: 3,
 				DiskConfig: &dataprocpb.DiskConfig{BootDiskSizeGb: 100}},
 			EndpointConfig: &dataprocpb.EndpointConfig{EnableHttpPortAccess: true}}})
 	place := &dataprocpb.JobPlacement{ClusterName: name}
@@ -89,9 +89,9 @@ func TestDataprocHDFS(t *testing.T) {
 	if out := fsShell(dataprocpb.JobStatus_DONE, nil, "-ls", "hdfs://"+name+"-m/data/wc-out"); !strings.Contains(out, "/data/wc-out/_SUCCESS") {
 		t.Errorf("hdfs://%s-m/data/wc-out: %s", name, out)
 	}
-	// Two DataNodes of 100 GB (the workers' boot disks), replication 2,
+	// Three DataNodes of 100 GB (the workers' boot disks), replication 2,
 	// and the hdfs: property's block size.
-	if out := fsShell(dataprocpb.JobStatus_DONE, nil, "-df", "/"); !strings.Contains(out, "hdfs://"+name+"-m") || !strings.Contains(out, "214748364800") {
+	if out := fsShell(dataprocpb.JobStatus_DONE, nil, "-df", "/"); !strings.Contains(out, "hdfs://"+name+"-m") || !strings.Contains(out, "322122547200") {
 		t.Errorf("hdfs dfs -df: %s", out)
 	}
 	fsShell(dataprocpb.JobStatus_DONE, []string{in}, "-put", "-f", "words.txt", "/data/keep.txt")
@@ -145,7 +145,7 @@ func TestDataprocHDFS(t *testing.T) {
 		t.Errorf("the NameNode page's script reads its JMX at the root:\n%.800s", js)
 	}
 	info := dataprocHTTPGet(t, ctx, gw+"hdfs/jmx?qry=Hadoop:service=NameNode,name=NameNodeInfo")
-	for _, w := range []string{name + "-w-0:9866", name + "-w-1:9866"} {
+	for _, w := range []string{name + "-w-0:9866", name + "-w-1:9866", name + "-w-2:9866"} {
 		if !strings.Contains(info, w) {
 			t.Errorf("the NameNode's live DataNodes have no %s:\n%.1500s", w, info)
 		}
@@ -170,10 +170,10 @@ func TestDataprocHDFS(t *testing.T) {
 		t.Errorf("/data/keep.txt after stop and start: %s", out)
 	}
 
-	// Scale down to one worker: w-1's DataNode is decommissioned, and
+	// Scale down to two workers: w-2's DataNode is decommissioned, and
 	// the data stays readable.
 	uop, err := cc.UpdateCluster(ctx, &dataprocpb.UpdateClusterRequest{ProjectId: project, Region: region, ClusterName: name,
-		Cluster:    &dataprocpb.Cluster{Config: &dataprocpb.ClusterConfig{WorkerConfig: &dataprocpb.InstanceGroupConfig{NumInstances: 1}}},
+		Cluster:    &dataprocpb.Cluster{Config: &dataprocpb.ClusterConfig{WorkerConfig: &dataprocpb.InstanceGroupConfig{NumInstances: 2}}},
 		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"config.worker_config.num_instances"}}})
 	if err != nil {
 		t.Fatalf("UpdateCluster: %v", err)

@@ -347,8 +347,9 @@ func (a YarnApp) String() string { return fmt.Sprintf("%s (%s %s)", a.ID, a.Stat
 // driver in the job's driver container; the default) or cluster (the
 // driver in the ApplicationMaster's YARN container). Spark's jars are the
 // NodeManagers' own image's (spark.yarn.jars local:), the staging
-// directory Spark's default (the job user's HDFS home), and the ApplicationMaster and
-// executors run on the image's Java. The cluster's and the job's own
+// directory is Spark's default (the job user's HDFS home), and the
+// ApplicationMaster and executors run on the image's Java. The cluster's
+// and the job's own
 // properties win over these; a Spark SQL job runs in client mode, as
 // spark-sql's shell runs in no other.
 func (c *Cluster) yarnSparkConf(job Job, conf map[string]string) {

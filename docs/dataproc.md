@@ -285,6 +285,16 @@ image's Ubuntu.
       no policy decides falls back to the queue's own ACL, as
       `ranger.add-yarn-authorization` does by default. A denial is
       audited to Solr.
+    - Ranger's HDFS plugin in the NameNode, as `enable-hdfs-plugin.sh`
+      installs it (`dfs.permissions.enabled` and
+      `dfs.namenode.inode.attributes.provider.class` =
+      `RangerHdfsAuthorizer` in `hdfs-site.xml`,
+      `ranger-hdfs-security.xml`, `ranger-hdfs-audit.xml`): every HDFS
+      access is authorized by the `hadoop-dataproc` policies, and one no
+      policy decides falls back to HDFS's own permissions
+      (`xasecure.add-hadoop-authorization`). A denied read fails with
+      Hadoop's `Permission denied: user=root, access=READ` and is audited
+      to Solr.
     The image (`internal/sparkproc/ranger/Dockerfile`) is built on this
     machine, the first time a RANGER cluster starts, from the pinned Apache
     Ranger 2.8.0 source release. Ranger's own reactor does not build as
@@ -376,6 +386,29 @@ service must be on):
     gateway, `YARN ResourceManager`, `MapReduce Job History` and `YARN
     Application Timeline` are in `http_ports`. Hive jobs run Beeline
     against the cluster's HiveServer2, their queries on Tez on YARN.
+  - HDFS (#2186), as Google's images run it: the NameNode on the master
+    (RPC `CLUSTER-m:8020`, web UI 9870, the component gateway's `HDFS
+    NameNode` at `hdfs/dfshealth.html`) and a DataNode on each primary
+    worker (on the master of a single node cluster), all Hadoop 3.3.6 from
+    the pinned `apache/hive` image (by digest: the Hadoop the cluster's
+    YARN, Hive and Tez run). `fs.defaultFS` is `hdfs://CLUSTER-m` for every
+    node, driver and job, so a path without a scheme, `hdfs:///` and
+    `hdfs://CLUSTER-m/` are the cluster's HDFS in Hadoop, Hive, Pig and
+    Spark jobs alike. `dfs.replication` is 2 (1 with fewer than two
+    workers) and `dfs.permissions.enabled` is false (true with RANGER,
+    below); `hdfs:` properties set `hdfs-site.xml`. The NameNode's
+    metadata and the DataNodes' blocks are on their node's own disk
+    (Dataproc's `/hadoop/dfs/name` and `/hadoop/dfs/data`), each
+    DataNode's capacity the workers' `disk_config.boot_disk_size_gb`
+    (500 GB by default, as the API reference has it). What Dataproc keeps
+    in HDFS is there: the MapReduce staging and JobHistory directories
+    (`/tmp/hadoop-yarn/staging`), a Spark job's staging directory
+    (`/user/root/.sparkStaging`; jobs run as `root`, as Dataproc's do),
+    Hive's and Tez's scratch directories, and the Hive warehouse
+    (`/user/hive/warehouse`). HDFS keeps its data while the cluster is
+    stopped and started, and loses it when the cluster is deleted; a scale
+    down decommissions the removed workers' DataNodes before removing
+    them.
   - Spark, PySpark, SparkR and Spark SQL jobs run on YARN, as on Google's
     images: `master` is `yarn`, in client mode by default and in cluster
     mode with `spark.submit.deployMode=cluster` (a Spark SQL job runs in
@@ -526,10 +559,11 @@ the WebSocket bridge at it, with local credentials, as it does for BigQuery.
 
 ## What is not served
 
-- RANGER's HDFS plugin enforces nothing: a local cluster runs no HDFS
-  (`fs.defaultFS` is `file:///`), so there is no NameNode to load it into
-  (docs/gaps.md, #2186). The `hadoop-dataproc` service exists and stores
-  policies.
+- HDFS High Availability (a cluster with 3 masters runs one NameNode) and
+  local SSDs as DataNode volumes (`dataproc:dataproc.localssd.mount.enable`):
+  a local cluster's nodes are containers on one disk. HDFS data does not
+  survive the instance itself restarting: a cluster the instance starts
+  again is made afresh.
 - A Dataproc on GKE cluster's `auxiliary_services_config` (a Spark History
   Server and a metastore of other clusters) is kept but not used, and its
   jobs' code reaches Cloud Storage only through the job's files.

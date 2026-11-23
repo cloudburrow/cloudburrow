@@ -93,6 +93,9 @@ func (c *Cluster) hdfsSite() map[string]string {
 		"dfs.namenode.datanode.registration.ip-hostname-check": "false",
 		"dfs.namenode.safemode.extension":                      "5000",
 		"dfs.namenode.decommission.interval":                   "5s",
+		// HDFS checks no permissions, as Dataproc's hdfs-site.xml has it,
+		// unless Ranger's plugin is installed (below).
+		"dfs.permissions.enabled": "false",
 	}
 	if c.has(ComponentRanger) {
 		// enable-hdfs-plugin.sh's hdfs-site-changes.cfg.
@@ -233,12 +236,12 @@ func (c *Cluster) decommissionLocked(ctx context.Context, hosts []string, max ti
 	if err := os.WriteFile(file, []byte(strings.Join(hosts, "\n")+"\n"), 0o644); err != nil {
 		return err
 	}
-	if out, err := c.d.docker(ctx, "exec", "-e", "HADOOP_USER_NAME=hdfs", c.nameNode(), "/opt/hadoop/bin/hdfs", "dfsadmin", "-refreshNodes"); err != nil {
+	if out, err := c.d.docker(ctx, "exec", "-e", "HADOOP_USER_NAME=hdfs", "-e", "HADOOP_CONF_DIR=/cb-conf", c.nameNode(), "/opt/hadoop/bin/hdfs", "dfsadmin", "-refreshNodes"); err != nil {
 		return &Unavailable{Msg: "refresh the NameNode's excluded hosts: " + out}
 	}
 	deadline := time.Now().Add(max)
 	for {
-		out, _ := c.d.docker(ctx, "exec", "-e", "HADOOP_USER_NAME=hdfs", c.nameNode(), "/opt/hadoop/bin/hdfs", "dfsadmin", "-report")
+		out, _ := c.d.docker(ctx, "exec", "-e", "HADOOP_USER_NAME=hdfs", "-e", "HADOOP_CONF_DIR=/cb-conf", c.nameNode(), "/opt/hadoop/bin/hdfs", "dfsadmin", "-report")
 		if allDecommissioned(out, hosts) || time.Now().After(deadline) || ctx.Err() != nil {
 			return nil
 		}
@@ -272,5 +275,5 @@ func allDecommissioned(report string, hosts []string) bool {
 // gone, so a node added again under the same name joins HDFS.
 func (c *Cluster) clearExcludedLocked(ctx context.Context) {
 	_ = os.WriteFile(filepath.Join(c.dir, "conf", "nodes_exclude"), nil, 0o644)
-	_, _ = c.d.docker(ctx, "exec", "-e", "HADOOP_USER_NAME=hdfs", c.nameNode(), "/opt/hadoop/bin/hdfs", "dfsadmin", "-refreshNodes")
+	_, _ = c.d.docker(ctx, "exec", "-e", "HADOOP_USER_NAME=hdfs", "-e", "HADOOP_CONF_DIR=/cb-conf", c.nameNode(), "/opt/hadoop/bin/hdfs", "dfsadmin", "-refreshNodes")
 }

@@ -481,8 +481,8 @@ func (c *Cluster) Start(ctx context.Context) error {
 		first = append(append(append([]string{c.relay, c.master}, c.workers...), c.nameNode()), c.dataNodesLocked()...)
 	}
 	c.mu.Unlock()
+	since := time.Now().Add(-5 * time.Second).UTC().Format(time.RFC3339)
 	if len(first) > 0 {
-		since := time.Now().Add(-5 * time.Second).UTC().Format(time.RFC3339)
 		if out, err := c.d.docker(ctx, append([]string{"start"}, first...)...); err != nil {
 			return errors.New("start the cluster's nodes: " + out)
 		}
@@ -509,7 +509,6 @@ func (c *Cluster) Start(ctx context.Context) error {
 		return err
 	}
 	if !c.spec.HistoryOnly {
-		since := time.Now().Add(-5 * time.Second).UTC().Format(time.RFC3339)
 		for _, w := range workers {
 			if err := c.waitSince(ctx, w, since, `Successfully registered with master`); err != nil {
 				return err
