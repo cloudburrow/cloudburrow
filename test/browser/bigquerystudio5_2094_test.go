@@ -189,3 +189,131 @@ func TestBigQueryStudioConnectToARuntimeThroughThePage(t *testing.T) {
 			   setTimeout(() => document.querySelector('input[name="bq-rt-mode"][value="new"]').click(), 300); }, 300)`},
 	})
 }
+
+// TestDataformBigQueryStudioNotebookMenuBarThroughThePage (#2094,
+// 2026-11-23 round; named for the shard that serves BigQuery and Dataform
+// together): a notebook's Toggle header visibility shows Google's menu bar
+// (https://docs.cloud.google.com/bigquery/docs/manage-notebooks). Edit >
+// Notebook settings' Omit code cell output when saving this notebook
+// leaves a run cell's output out of the saved notebook; File > Download
+// gives the .ipynb and .py files; File > Rename (the Rename notebook
+// dialog) renames the saved notebook. WCAG 2.1 AA with the menu bar open,
+// and the toggle and the menus by keyboard.
+func TestDataformBigQueryStudioNotebookMenuBarThroughThePage(t *testing.T) {
+	needService(t, "bigquery")
+	needService(t, "dataform")
+	project := servedProject(t)
+	q := "?project=" + url.QueryEscape(project)
+	stamp := uniqueSuffix()
+	nbName := fmt.Sprintf("menu bar notebook %d", stamp)
+	renamed := nbName + " renamed"
+	t.Cleanup(func() {
+		for _, e := range studioAssets(t, project) {
+			if e.DisplayName == nbName || e.DisplayName == renamed {
+				consoleDo(t, http.MethodPost, "/api/studio/dataform?call=delete&project="+url.QueryEscape(project), `{"name":"`+e.Name+`"}`)
+			}
+		}
+	})
+	p := open(t)
+	p.navigate("/bigquery-studio" + q)
+	p.waitFor(`document.querySelector(".bq-home") !== null && document.querySelector(".bq-tree") !== null`)
+	p.clickText(".bq-home-action", "Notebook")
+	p.waitFor(`document.querySelector(".bq-notebook") !== null`)
+	// Downloads are caught as the blobs the page hands the browser.
+	p.eval(`window.cbBlobs = []; const make = URL.createObjectURL; URL.createObjectURL = (b) => { b.text().then((t) => window.cbBlobs.push(t)); return make(b); }; true`, nil)
+
+	// The menu bar is hidden until Toggle header visibility, by keyboard.
+	var hidden bool
+	p.eval(`document.querySelector(".bq-nb-menubar").hidden`, &hidden)
+	if !hidden {
+		t.Error("the notebook's menu bar is shown before Toggle header visibility")
+	}
+	p.run(chromedp.Focus(chromedp.CSS(`.bq-notebook button[aria-label="Toggle header visibility"]`)), chromedp.KeyEvent(kb.Enter))
+	p.waitFor(`!document.querySelector(".bq-nb-menubar").hidden && document.querySelector(".bq-nb-header-toggle").getAttribute("aria-expanded") === "true"`)
+	var menus []string
+	p.eval(`[...document.querySelectorAll(".bq-nb-menubar .bq-menu-button")].map((b) => b.getAttribute("aria-label"))`, &menus)
+	if strings.Join(menus, "|") != "File|Edit" {
+		t.Errorf("the menu bar has %v, want File and Edit", menus)
+	}
+	for _, fl := range p.keyboardFailures() {
+		t.Errorf("notebook menu bar: %s", fl)
+	}
+
+	// A %%bigquery cell run here keeps its output in the tab.
+	p.clickText(".bq-notebook .bq-toolbar button", "+ Code")
+	p.setField(".bq-nb-cell:last-child .bq-nb-source", "%%bigquery\nSELECT 41 + 1 AS answer")
+	p.clickText(".bq-nb-cell:last-child button", "Run cell")
+	p.waitFor(`[...document.querySelectorAll(".bq-nb-cell:last-child .bq-nb-table td")].some((c) => c.textContent === "42")`)
+
+	// Edit > Notebook settings, by keyboard: Enter opens Edit on its item.
+	p.run(chromedp.Focus(chromedp.CSS(`.bq-nb-menubar .bq-menu-button[aria-label=Edit]`)), chromedp.KeyEvent(kb.Enter))
+	p.waitFor(`document.activeElement && document.activeElement.textContent === "Notebook settings"`)
+	p.run(chromedp.KeyEvent(kb.Enter))
+	p.waitFor(`document.querySelector("#bq-nb-settings-title") !== null && document.activeElement && document.activeElement.id === "bq-nb-omit"`)
+	var omitLabel string
+	p.eval(`document.querySelector(".modal label[for=bq-nb-omit]").textContent.trim()`, &omitLabel)
+	if omitLabel != "Omit code cell output when saving this notebook" {
+		t.Errorf("Notebook settings' option is %q", omitLabel)
+	}
+	p.run(chromedp.KeyEvent(" "))
+	p.clickText(".modal .modal-actions button", "Save")
+	p.waitFor(`document.querySelector(".modal") === null`)
+
+	// File > Download > Download .ipynb and Download .py.
+	p.clickExpr(`document.querySelector(".bq-nb-menubar .bq-menu-button[aria-label=File]")`)
+	p.clickText(".bq-menu:not([hidden]) .bq-menu-parent", "Download ▸")
+	p.clickText(".bq-submenu:not([hidden]) .bq-menu-item", "Download .ipynb")
+	p.clickExpr(`document.querySelector(".bq-nb-menubar .bq-menu-button[aria-label=File]")`)
+	p.clickText(".bq-menu:not([hidden]) .bq-menu-parent", "Download ▸")
+	p.clickText(".bq-submenu:not([hidden]) .bq-menu-item", "Download .py")
+	p.waitFor(`window.cbBlobs.length === 2`)
+	var blobs []string
+	p.eval(`window.cbBlobs`, &blobs)
+	if !strings.Contains(blobs[0], `"nbformat"`) || !strings.Contains(blobs[0], "41 + 1") || strings.Contains(blobs[0], "execute_result") {
+		t.Errorf("Download .ipynb with outputs omitted gave %.400s", blobs[0])
+	}
+	if !strings.HasPrefix(blobs[1], "#!/usr/bin/env python") || !strings.Contains(blobs[1], "# In[ ]:") || !strings.Contains(blobs[1], "SELECT 41 + 1 AS answer") {
+		t.Errorf("Download .py gave %.400s", blobs[1])
+	}
+
+	// Saved, the notebook has no output; File > Rename renames it.
+	p.clickText(".bq-notebook .bq-toolbar button", "Save")
+	p.waitFor(`document.querySelector("#bq-asset-name") !== null`)
+	p.setField("#bq-asset-name", nbName)
+	p.clickText(".modal .modal-actions button", "Save")
+	p.waitFor(`document.querySelector(".modal") === null`)
+	_, name, _ := studioAsset(t, project, nbName)
+	if body := studioContent(t, project, name, "41 + 1"); !strings.Contains(body, "41 + 1") || strings.Contains(body, "execute_result") {
+		t.Errorf("with Omit code cell output the saved notebook reads %.400s", body)
+	}
+	p.clickExpr(`document.querySelector(".bq-nb-menubar .bq-menu-button[aria-label=File]")`)
+	p.clickText(".bq-menu:not([hidden]) .bq-menu-item", "Rename")
+	p.waitFor(`document.querySelector("#bq-nb-rename-title") !== null && document.activeElement && document.activeElement.id === "bq-nb-rename-name"`)
+	p.setField("#bq-nb-rename-name", renamed)
+	p.clickText(".modal .modal-actions button", "Rename")
+	p.waitFor(`document.querySelector(".modal") === null`)
+	found := false
+	for deadline := time.Now().Add(20 * time.Second); !found && time.Now().Before(deadline); time.Sleep(300 * time.Millisecond) {
+		for _, e := range studioAssets(t, project) {
+			found = found || (e.Name == name && e.DisplayName == renamed)
+		}
+	}
+	if !found {
+		t.Errorf("File > Rename did not rename %s to %q", name, renamed)
+	}
+
+	// nbOpen opens a new notebook from Home (the Home tab first: Studio
+	// restores the tabs left open) and shows its menu bar.
+	nbOpen := `const until = (f) => new Promise((ok) => { const look = () => (f() ? ok(f()) : setTimeout(look, 50)); look(); });
+		[...document.querySelectorAll(".bq-tabs .tab")].find((b) => b.textContent.trim().startsWith("Home")).click();
+		(await until(() => [...document.querySelectorAll(".bq-home-action")].find((b) => b.textContent.trim() === "Notebook" && b.offsetParent !== null))).click();
+		const nb = await until(() => [...document.querySelectorAll(".bq-notebook")].find((n) => n.offsetParent !== null && !n.querySelector(".bq-nb-cell")));
+		if (nb.querySelector(".bq-nb-menubar").hidden) nb.querySelector(".bq-nb-header-toggle").click();`
+	auditScreens(t, []a11yPage{
+		{"Studio notebook menu bar", "/bigquery-studio" + q, `document.querySelector(".bq-tree") !== null`, nbOpen + `
+			nb.querySelector(".bq-nb-menubar .bq-menu-button[aria-label=File]").click();`},
+		{"Studio Notebook settings", "/bigquery-studio" + q, `document.querySelector(".bq-tree") !== null`, nbOpen + `
+			nb.querySelector(".bq-nb-menubar .bq-menu-button[aria-label=Edit]").click();
+			[...nb.querySelectorAll(".bq-menu-item")].find((x) => x.textContent === "Notebook settings").click();`},
+	})
+}

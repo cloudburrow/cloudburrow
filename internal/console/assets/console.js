@@ -24218,18 +24218,117 @@ function bqNotebookTab(tab, ctx) {
   moreBtn.classList.add("bq-connect-more");
   moreBtn.setAttribute("title", "Additional connection options");
   moreBtn.textContent = "▾";
+  // The menu bar, shown by Toggle header visibility, as Google's is
+  // (https://docs.cloud.google.com/bigquery/docs/manage-notebooks, read
+  // 2026-11-23): File > Rename (the Rename notebook dialog) and File >
+  // Download (the file type), Edit > Notebook settings (Omit code cell
+  // output when saving this notebook). The setting is kept in the
+  // notebook's metadata (UNVERIFIED (re-read 2026-11-23:
+  // https://docs.cloud.google.com/bigquery/docs/manage-notebooks): Google
+  // does not document where), and a Save leaves the outputs out.
+  const omit = () => !!(doc.metadata && doc.metadata.cloudburrow && doc.metadata.cloudburrow.omit_code_cell_output);
+  const saved = () => {
+    if (!omit()) return tab.query || bqNotebookDoc([]);
+    const copy = JSON.parse(JSON.stringify(doc));
+    for (const c of copy.cells) if (c.cell_type === "code") { c.outputs = []; c.execution_count = null; }
+    return JSON.stringify(copy, null, 1);
+  };
+  const download = (ext) => {
+    const base = (tab.title || "notebook").replace(/[\\/:*?"<>|]+/g, "_");
+    let body = saved();
+    let type = "application/x-ipynb+json";
+    if (ext === "py") {
+      // As Jupyter's script export writes it: Markdown as comments, each
+      // code cell after an "In[ ]" marker.
+      type = "text/x-python";
+      body = "#!/usr/bin/env python\n# coding: utf-8\n" + doc.cells.map((c) => (c.cell_type === "code"
+        ? `\n# In[ ]:\n\n\n${text(c)}\n`
+        : "\n" + text(c).split("\n").map((l) => "# " + l).join("\n") + "\n")).join("");
+    }
+    // Not attached to the document, so the router never sees the click
+    // and the browser saves the file.
+    const url = URL.createObjectURL(new Blob([body], { type }));
+    el("a", { href: url, download: `${base}.${ext}` }).click();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    announce(`Downloaded ${base}.${ext}`);
+  };
+  const rename = () => {
+    const { dialog, close } = openModal({ labelledBy: "bq-nb-rename-title" });
+    const input = el("input", { type: "text", id: "bq-nb-rename-name", value: tab.title || "", required: true, maxlength: "256" });
+    const error = el("p", { class: "form-error", role: "alert", hidden: true });
+    const primary = el("button", { type: "submit", class: "primary", text: "Rename" });
+    dialog.append(el("form", { class: "modal-body", novalidate: true, onsubmit: async (e) => {
+      e.preventDefault();
+      const name = input.value.trim();
+      if (!name) { error.textContent = "A notebook needs a name."; error.hidden = false; return; }
+      setBusy(primary, true);
+      try {
+        if (tab.savedId) await bqDfCall("rename", { name: tab.savedId, displayName: name });
+        tab.title = name;
+        ctx.save();
+        close();
+        if (tab.savedId && ctx.onSaved) await ctx.onSaved(bqAssetQuery({ name: tab.savedId, displayName: name, kind: "notebook", content: tab.query }));
+        notify(`Renamed to ${name}`);
+      } catch (err) { setBusy(primary, false); error.textContent = err.message; error.hidden = false; }
+    } },
+      el("h2", { id: "bq-nb-rename-title", text: "Rename notebook" }),
+      el("label", { for: "bq-nb-rename-name", text: "Name" }), input, error,
+      el("div", { class: "modal-actions" },
+        el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }), primary)));
+    input.focus();
+  };
+  const settings = () => {
+    const { dialog, close } = openModal({ labelledBy: "bq-nb-settings-title" });
+    const box = el("input", { type: "checkbox", id: "bq-nb-omit", checked: omit() || null });
+    dialog.append(el("form", { class: "modal-body", novalidate: true, onsubmit: (e) => {
+      e.preventDefault();
+      doc.metadata = doc.metadata || {};
+      doc.metadata.cloudburrow = { ...(doc.metadata.cloudburrow || {}), omit_code_cell_output: box.checked };
+      keep();
+      close();
+      announce(box.checked ? "Code cell output is omitted when saving" : "Code cell output is saved");
+    } },
+      el("h2", { id: "bq-nb-settings-title", text: "Notebook settings" }),
+      el("label", { class: "check-line", for: "bq-nb-omit" }, box, el("span", { text: "Omit code cell output when saving this notebook" })),
+      el("div", { class: "modal-actions" },
+        el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }),
+        el("button", { type: "submit", class: "primary", text: "Save" }))));
+    box.focus();
+  };
+  const fileMenu = bqMenu("File", [
+    { label: "Rename", run: rename },
+    { label: "Download", items: [
+      { label: "Download .ipynb", run: () => download("ipynb") },
+      { label: "Download .py", run: () => download("py") },
+    ] },
+  ]);
+  bqMenuButton(fileMenu, "File", "File");
+  const editMenu = bqMenu("Edit", [{ label: "Notebook settings", run: settings }]);
+  bqMenuButton(editMenu, "Edit", "Edit");
+  const menubar = el("div", { class: "bq-toolbar bq-nb-menubar", role: "toolbar", "aria-label": "Notebook menu bar", hidden: !tab.headerShown || null },
+    fileMenu, editMenu);
+  const toggle = el("button", { type: "button", class: "icon-button bq-nb-header-toggle", "aria-label": "Toggle header visibility",
+    title: "Toggle header visibility", "aria-expanded": tab.headerShown ? "true" : "false", text: tab.headerShown ? "▴" : "▾",
+    onclick: () => {
+      tab.headerShown = !tab.headerShown;
+      menubar.hidden = !tab.headerShown;
+      toggle.setAttribute("aria-expanded", tab.headerShown ? "true" : "false");
+      toggle.textContent = tab.headerShown ? "▴" : "▾";
+      ctx.save();
+    } });
+  const header = el("div", { class: "bq-nb-header" }, toggle, menubar);
   const toolbar = el("div", { class: "bq-toolbar", role: "toolbar", "aria-label": "Notebook actions" },
     el("span", { class: "bq-connect-group" }, connectBtn, more), interruptBtn, restartBtn, deleteBtn,
     el("button", { type: "button", class: "secondary", text: "+ Code", onclick: () => addCell("code", "") }),
     el("button", { type: "button", class: "secondary", text: "+ SQL", onclick: () => addCell("code", "%%bigquery\n") }),
     el("button", { type: "button", class: "secondary", text: "+ Text", onclick: () => addCell("markdown", "") }),
     el("button", { type: "button", class: "primary", text: "Run all", onclick: runAll }),
-    el("button", { type: "button", class: "secondary", text: "Save", onclick: () => bqSaveAsset(tab, "notebook", tab.query || bqNotebookDoc([]), ctx.onSaved) }),
+    el("button", { type: "button", class: "secondary", text: "Save", onclick: () => bqSaveAsset(tab, "notebook", saved(), ctx.onSaved) }),
     bqScheduleButton(tab, "notebook"),
     el("button", { type: "button", class: "secondary", text: "Version history", disabled: tab.savedId ? null : true,
       title: tab.savedId ? null : "Save the notebook first", onclick: () => bqVersionHistory({ id: tab.savedId, name: tab.title, kind: "notebook" }, (content, title) => ctx.openAsset("notebook", content, title)) }),
     tab.savedId ? el("button", { type: "button", class: "secondary", text: "Share", onclick: () => bqManagePermissions({ id: tab.savedId, name: tab.title }) }) : null);
-  return el("div", { class: "bq-notebook" }, toolbar, status,
+  return el("div", { class: "bq-notebook" }, header, toolbar, status,
     el("p", { class: "unavailable bq-hint", text: BQ_RUNTIME_NOTE + " " + (bqDataformOn() ? BQ_DATAFORM_NOTE : BQ_NO_DATAFORM) }),
     cellsHost);
 }

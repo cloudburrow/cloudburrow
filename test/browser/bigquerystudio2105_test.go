@@ -177,7 +177,7 @@ func TestBigQueryStudioScheduledNotebookThroughThePage(t *testing.T) {
 		p.t = t
 		defer func() { p.t = parent }()
 		// Schedule ▾ opens by Enter, its first item by Enter, Escape closes.
-		p.run(chromedp.Focus(chromedp.CSS(`.bq-notebook .bq-menu-button`)), chromedp.KeyEvent(kb.Enter))
+		p.run(chromedp.Focus(chromedp.CSS(`.bq-notebook .bq-toolbar .bq-menu-button[aria-label=Schedule]`)), chromedp.KeyEvent(kb.Enter))
 		p.waitFor(`document.activeElement && document.activeElement.textContent === "Create schedule"`)
 		p.run(chromedp.KeyEvent(kb.Enter))
 		p.waitFor(`document.querySelector("#bq-sched-name") !== null && document.activeElement === document.querySelector("#bq-sched-name")`)

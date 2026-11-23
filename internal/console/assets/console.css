@@ -2289,6 +2289,12 @@ tr.log-entry.is-pinned { background: var(--state-hover); }
 .bq-menu-item.danger { color: var(--error); }
 .bq-submenu-wrap { position: relative; }
 .bq-connect-group { display: inline-flex; align-items: stretch; }
+.bq-nb-header { display: flex; align-items: center; gap: 8px; }
+.bq-nb-header .bq-nb-menubar { border: 0; padding: 0; }
+/* A menu bar's menus open under their button's left edge, as a menu bar's do. */
+.bq-nb-menubar .bq-menu { left: 0; right: auto; }
+/* On a narrow screen a submenu opens inside its menu, below its item. */
+@media (max-width: 640px) { .bq-menu.bq-submenu { position: static; box-shadow: none; padding-left: 12px; } }
 .bq-connect-group > .secondary { border-top-right-radius: 0; border-bottom-right-radius: 0; }
 .bq-connect-more { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: -1px; min-width: 32px; }
 .bq-menu.bq-submenu { left: 100%; right: auto; top: 0; }
