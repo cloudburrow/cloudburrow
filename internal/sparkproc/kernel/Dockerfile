@@ -18,7 +18,10 @@
 # and every jar, Almond's whole class path (almond-SCALA.lock, as coursier
 # resolved it from Maven Central and JitPack) and the Connect client
 # (connect-SPARK.lock), by SHA-256 (fetch.sh). None of it is in the CLI.
-ARG BASE
+# BASE is the session runtime's Spark image, passed by the CLI; its
+# default is runtime 2.2's, so the Dockerfile builds from a pinned base on
+# its own.
+ARG BASE=apache/spark:3.5.9-scala2.12-java17-python3-ubuntu@sha256:f3d6eaa8bab8ec2e38f3c3918a5b2f8b253c95bcb19f9e87ad0e0cdacf9df2d5
 FROM ${BASE}
 ARG SCALA=2.12.18
 ARG SPARK=3.5.9

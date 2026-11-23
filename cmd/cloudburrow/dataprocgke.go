@@ -12,14 +12,12 @@ package main
 // the job's.
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -28,6 +26,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/cloudburrow/cloudburrow/internal/k8s"
 	"github.com/cloudburrow/cloudburrow/internal/service/dataproc"
 	"github.com/cloudburrow/cloudburrow/internal/service/gke"
 	"github.com/cloudburrow/cloudburrow/internal/sparkproc"
@@ -136,13 +135,10 @@ type virtualNodes struct {
 	kubeconfig string
 }
 
+// kubectl runs kubectl (internal/k8s, the package that execs it) on the
+// cluster's kubeconfig.
 func (n *virtualNodes) kubectl(ctx context.Context, stdin []byte, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "kubectl", append([]string{"--kubeconfig", n.kubeconfig}, args...)...)
-	if stdin != nil {
-		cmd.Stdin = bytes.NewReader(stdin)
-	}
-	out, err := cmd.CombinedOutput()
-	return string(out), err
+	return k8s.Subprocess{}.Run(ctx, string(stdin), append([]string{"--kubeconfig", n.kubeconfig}, args...)...)
 }
 
 func (n *virtualNodes) Scale(context.Context, int) error {
