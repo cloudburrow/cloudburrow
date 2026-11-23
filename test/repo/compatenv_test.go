@@ -279,6 +279,8 @@ func compatEnvFixture(t *testing.T, edit func(env map[string]string)) (dir, envF
 		"CLOUDBURROW_APPHUB_ENDPOINT":                 "127.0.0.1:9048",
 		"CLOUDBURROW_ALLOYDB_ENDPOINT":                "127.0.0.1:9063",
 		"CLOUDBURROW_ALLOYDB_CONNECTOR_ENDPOINT":      "127.0.0.1:55433",
+		"CLOUDBURROW_ALLOYDB_TLS_ENDPOINT":            "127.0.0.1:55463",
+		"CLOUDBURROW_ALLOYDB_CA_FILE":                 "/state/ct/alloydb-ca.pem",
 		"CLOUDBURROW_TRACE_ENDPOINT":                  "127.0.0.1:9052",
 	}
 	if edit != nil {
@@ -409,6 +411,8 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 		"APPHUB":                   "127.0.0.1:9048",
 		"ALLOYDB":                  "127.0.0.1:9063",
 		"ALLOYDB_CONNECTOR":        "127.0.0.1:55433",
+		"ALLOYDB_TLS":              "127.0.0.1:55463",
+		"ALLOYDB_CA":               "/state/ct/alloydb-ca.pem",
 		"TRACE":                    "127.0.0.1:9052",
 		"COMPUTE":                  "127.0.0.1:9031",
 		"DATATRANSFER":             "127.0.0.1:9034",
@@ -551,7 +555,7 @@ func TestWorkflowsSetCompatEnvThroughTheScript(t *testing.T) {
 		`if [ "$SHARD" = memorystore ]; then BROWSER_VARS+=,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT; fi`,
 		`if [ "$SHARD" = storage ]; then BROWSER_VARS+=,LOGGING,STORAGE,PUBSUB,TASKS,SCHEDULER,RESOURCEMANAGER,SERVICEUSAGE,APIKEYS,STORAGE_BATCH,STORAGE_INSIGHTS,STORAGE_TRANSFER,KUBECONFIG,MONITORING; fi`,
 		`if [ "$SHARD" = run ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT,RUN_SERVICEUSAGE,WORKFLOWS,STORAGE,MONITORING,KUBECONFIG,RUN_FIRESTORE,RUN_DATASTORE; fi`,
-		`if [ "$SHARD" = sql ]; then BROWSER_VARS+=,SQLADMIN,BACKUPDR,SECRETS,COMPUTE; fi`,
+		`if [ "$SHARD" = sql ]; then BROWSER_VARS+=,SQLADMIN,BACKUPDR,SECRETS,COMPUTE,STORAGE; fi`,
 		`scripts/compat-env.sh --strict --only "$BROWSER_VARS"`,
 	} {
 		if !strings.Contains(ci["compat"], want) {
@@ -568,7 +572,7 @@ func TestWorkflowsSetCompatEnvThroughTheScript(t *testing.T) {
 		`if [ "$shard" = memorystore ]; then BROWSER_VARS+=,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT; fi`,
 		`if [ "$shard" = storage ]; then BROWSER_VARS+=,LOGGING,STORAGE,PUBSUB,TASKS,SCHEDULER,RESOURCEMANAGER,SERVICEUSAGE,APIKEYS,STORAGE_BATCH,STORAGE_INSIGHTS,STORAGE_TRANSFER,KUBECONFIG,MONITORING; fi`,
 		`if [ "$shard" = run ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT,RUN_SERVICEUSAGE,WORKFLOWS,STORAGE,MONITORING,KUBECONFIG,RUN_FIRESTORE,RUN_DATASTORE; fi`,
-		`if [ "$shard" = sql ]; then BROWSER_VARS+=,SQLADMIN,BACKUPDR,SECRETS,COMPUTE; fi`,
+		`if [ "$shard" = sql ]; then BROWSER_VARS+=,SQLADMIN,BACKUPDR,SECRETS,COMPUTE,STORAGE; fi`,
 		`scripts/compat-env.sh --only "$BROWSER_VARS"`,
 	} {
 		if !strings.Contains(string(verify), want) {

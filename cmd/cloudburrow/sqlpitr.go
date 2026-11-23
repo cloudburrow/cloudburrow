@@ -274,9 +274,11 @@ EOF
 chown postgres "$conf"
 # Recovery refuses settings lower than those the WAL was written under
 # ("insufficient parameter settings"): the source's, which a flag such as
-# max_connections raises, are the scratch server's too.
+# max_connections raises, are the scratch server's too. wal_level comes
+# with them: PostgreSQL 9.6 defaults to minimal, under which a
+# max_wal_senders above 0 refuses to start.
 x=""
-for s in max_connections max_worker_processes max_wal_senders max_prepared_transactions max_locks_per_transaction; do
+for s in wal_level max_connections max_worker_processes max_wal_senders max_prepared_transactions max_locks_per_transaction; do
   v=$(psql -U postgres -d template1 -AtX -c "SHOW $s") && x="$x -c $s=$v"
 done
 "$asuser" postgres pg_ctl -D "$W" -l "$W/recovery.log" -w -t 280 -o "-c port=` + pgRecoveryPort + ` -c listen_addresses='' -c unix_socket_directories=$W -c archive_mode=off$x" start >/dev/null || { tail -5 "$W/recovery.log" >&2; exit 1; }

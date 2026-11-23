@@ -3,6 +3,7 @@ package alloydb
 import (
 	"context"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -144,13 +145,41 @@ func (s *Server) ListSupportedDatabaseFlags(_ context.Context, req *alloydbpb.Li
 	if _, _, err := checkParent("parent", req.GetParent(), false); err != nil {
 		return nil, err
 	}
-	if req.GetScope() == alloydbpb.SupportedDatabaseFlag_CONNECTION_POOL {
-		// Managed connection pooling's flags are not served (#2191).
-		return &alloydbpb.ListSupportedDatabaseFlagsResponse{}, nil
-	}
 	var all []*alloydbpb.SupportedDatabaseFlag
 	versions := []alloydbpb.DatabaseVersion{alloydbpb.DatabaseVersion_POSTGRES_14, alloydbpb.DatabaseVersion_POSTGRES_15,
 		alloydbpb.DatabaseVersion_POSTGRES_16, alloydbpb.DatabaseVersion_POSTGRES_17}
+	if req.GetScope() == alloydbpb.SupportedDatabaseFlag_CONNECTION_POOL {
+		// Managed connection pooling's flags (pooling.go), with Google's
+		// ranges. UNVERIFIED: whether Google marks them as needing a
+		// restart; here a change restarts the instance's pooler with it.
+		// (re-read 2026-11-23: docs.cloud.google.com/alloydb/docs/configure-managed-connection-pooling.)
+		names := make([]string, 0, len(poolFlags))
+		for n := range poolFlags {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+		for _, n := range names {
+			f := poolFlags[n]
+			out := &alloydbpb.SupportedDatabaseFlag{Name: req.GetParent() + "/flags/" + n, FlagName: n,
+				ValueType: alloydbpb.SupportedDatabaseFlag_STRING, AcceptsMultipleValues: f.list, SupportedDbVersions: versions,
+				Scope: alloydbpb.SupportedDatabaseFlag_CONNECTION_POOL}
+			switch {
+			case len(f.values) > 0:
+				out.Restrictions = &alloydbpb.SupportedDatabaseFlag_StringRestrictions_{StringRestrictions: &alloydbpb.SupportedDatabaseFlag_StringRestrictions{
+					AllowedValues: f.values}}
+			case !f.list:
+				out.ValueType = alloydbpb.SupportedDatabaseFlag_INTEGER
+				out.Restrictions = &alloydbpb.SupportedDatabaseFlag_IntegerRestrictions_{IntegerRestrictions: &alloydbpb.SupportedDatabaseFlag_IntegerRestrictions{
+					MinValue: wrapperspb.Int64(f.min), MaxValue: wrapperspb.Int64(f.max)}}
+			}
+			all = append(all, out)
+		}
+		out, next, err := listPage("alloydb-pool-flags:"+req.GetParent(), "", "", all, req.GetPageToken(), req.GetPageSize())
+		if err != nil {
+			return nil, err
+		}
+		return &alloydbpb.ListSupportedDatabaseFlagsResponse{SupportedDatabaseFlags: out, NextPageToken: next}, nil
+	}
 	for _, f := range supportedFlags {
 		out := &alloydbpb.SupportedDatabaseFlag{Name: req.GetParent() + "/flags/" + f.name, FlagName: f.name, ValueType: f.typ,
 			AcceptsMultipleValues: f.multi, SupportedDbVersions: versions, RequiresDbRestart: f.restart,

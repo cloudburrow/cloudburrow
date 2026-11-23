@@ -90,6 +90,7 @@ func alloyDBExec(ctx context.Context, t *testing.T, conn *pgx.Conn, stmts ...str
 // and ImportCluster loads a SQL file (into the database named or that a
 // \connect names) and a CSV file (into a table's columns, as a user),
 // answering the bytes downloaded. What Google refuses is refused.
+// covers: google.cloud.alloydb.v1.AlloyDBAdmin/ExportCluster, google.cloud.alloydb.v1.AlloyDBAdmin/ImportCluster
 func TestAlloyDBExportAndImport(t *testing.T) {
 	h := New(t)
 	clients := alloyDBClients(t, h)
@@ -297,6 +298,7 @@ func alloyDBConnDB(ctx context.Context, t *testing.T, d *alloydbconn.Dialer, ins
 // secondary instance, replicates the primary's writes and refuses its own;
 // the primary lists it; a switchover swaps the roles with nothing lost,
 // and a promotion then makes the former primary standalone.
+// covers: google.cloud.alloydb.v1.AlloyDBAdmin/CreateSecondaryCluster, google.cloud.alloydb.v1.AlloyDBAdmin/CreateSecondaryInstance, google.cloud.alloydb.v1.AlloyDBAdmin/PromoteCluster, google.cloud.alloydb.v1.AlloyDBAdmin/SwitchoverCluster
 func TestAlloyDBSecondaryClusters(t *testing.T) {
 	h := New(t)
 	clients := alloyDBClients(t, h)
@@ -434,6 +436,7 @@ func TestAlloyDBSecondaryClusters(t *testing.T) {
 // with the user's password checked; each instance has an address of its
 // own where the connector reaches it by instance URI and PostgreSQL
 // answers on 5432 over SSL; plaintext and require_connectors are refused.
+// covers: google.cloud.alloydb.v1.AlloyDBAdmin/UpdateInstance, google.cloud.alloydb.v1.AlloyDBAdmin/GetConnectionInfo
 func TestAlloyDBConnectionPoolingAndAddresses(t *testing.T) {
 	h := New(t)
 	c := alloyDBClients(t, h)["grpc"]
@@ -456,8 +459,16 @@ func TestAlloyDBConnectionPoolingAndAddresses(t *testing.T) {
 		t.Errorf("the read pool's address %q, the primary's %q", pool.GetIpAddress(), primary.GetIpAddress())
 	}
 	// The connector reaches the read pool by its instance URI, at its
-	// own address (the default, private IP).
-	alloyDBExpectRows(ctx, t, d, pool.GetName(), 2, true)
+	// own address (the default, private IP). Where neither instance has
+	// one (macOS with no loopback aliases), both share the host's, and
+	// the connectors, which send no server name for an address, reach the
+	// primary there (docs/alloydb.md).
+	if alloyDBOwnAddress(pool) || alloyDBOwnAddress(primary) {
+		alloyDBExpectRows(ctx, t, d, pool.GetName(), 2, true)
+	} else {
+		t.Logf("the read pool and the primary share %s (no spare loopback address here): the read pool is not told apart by the connector", pool.GetIpAddress())
+		alloyDBExpectRows(ctx, t, d, pool.GetName(), 2, false)
+	}
 	for _, in := range []*alloydbpb.Instance{primary, pool} {
 		if !alloyDBOwnAddress(in) {
 			t.Logf("%s shares the host's address %s (no spare loopback address here): not reached by IP", in.GetName(), in.GetIpAddress())

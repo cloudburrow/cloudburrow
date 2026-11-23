@@ -41,6 +41,7 @@ const (
 // out, as TestServedClientsSendNothingOffTheMachine's clients do: the sink
 // counts every attempt to leave, and a control attempt proves the count.
 // The Go connector then reads the three clients' rows back.
+// covers: google.cloud.alloydb.v1.AlloyDBAdmin/GetConnectionInfo, google.cloud.alloydb.v1.AlloyDBAdmin/GenerateClientCertificate
 func TestAlloyDBConnectorsSendRealSQL(t *testing.T) {
 	h := New(t)
 	if runtime.GOOS == "windows" {

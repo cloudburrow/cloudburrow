@@ -381,6 +381,19 @@ func TestConnectionPooling(t *testing.T) {
 	ctx := context.Background()
 	f := newFixture(t, Options{})
 	f.cluster(t, false)
+	flags, err := f.s.ListSupportedDatabaseFlags(ctx, &alloydbpb.ListSupportedDatabaseFlagsRequest{Parent: loc,
+		Scope: alloydbpb.SupportedDatabaseFlag_CONNECTION_POOL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName := map[string]*alloydbpb.SupportedDatabaseFlag{}
+	for _, fl := range flags.GetSupportedDatabaseFlags() {
+		byName[fl.GetFlagName()] = fl
+	}
+	if len(byName) != len(poolFlags) || byName["max_pool_size"].GetIntegerRestrictions().GetMaxValue().GetValue() != 262042 ||
+		byName["pool_mode"].GetScope() != alloydbpb.SupportedDatabaseFlag_CONNECTION_POOL {
+		t.Errorf("the CONNECTION_POOL flags = %v", flags.GetSupportedDatabaseFlags())
+	}
 	for name, pc := range map[string]*alloydbpb.Instance_ConnectionPoolConfig{
 		"an unknown flag":      {Enabled: true, Flags: map[string]string{"auth_type": "trust"}},
 		"a bad pool_mode":      {Enabled: true, Flags: map[string]string{"pool_mode": "statement"}},
