@@ -3,7 +3,10 @@
 package compat
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -31,11 +34,19 @@ import (
 // (built from the pinned Apache Ranger 2.8.0 source release), whose REST
 // API at the gateway's Ranger answers the admin user with that password and
 // refuses another. RANGER without SOLR, and without the password's
-// properties, is INVALID_ARGUMENT. While the Admin image does not build
-// (docs/gaps.md), a valid RANGER cluster is UNIMPLEMENTED with the reason,
-// and the test skips after checking it.
+// properties, is INVALID_ARGUMENT.
 //
-// covers: google.cloud.dataproc.v1.ClusterController/CreateCluster
+// The policies are enforced: the Admin server has the hive-dataproc,
+// hadoop-dataproc and yarn-dataproc services (the names Google's "Use
+// Ranger with Kerberos" page shows); a policy made through Ranger's public
+// REST API lets root use every table of the default database, and Hive
+// jobs submitted with the official client make two tables; the policy,
+// updated through the API to one table, makes a Hive job reading the
+// other fail with Ranger's "Permission denied", while one reading the
+// first succeeds; and the denial is in the Admin server's access audit,
+// which it reads from Solr's ranger_audits.
+//
+// covers: google.cloud.dataproc.v1.ClusterController/CreateCluster, google.cloud.dataproc.v1.JobController/SubmitJob
 func TestDataprocRangerComponent(t *testing.T) {
 	h, addr, project := dataprocEnv(t)
 	kmsAddr := h.Endpoint(EnvKMS)
@@ -101,38 +112,121 @@ func TestDataprocRangerComponent(t *testing.T) {
 	}
 
 	good := cluster("rg-"+suffix, []dataprocpb.Component{dataprocpb.Component_SOLR, dataprocpb.Component_RANGER}, props)
-	if _, err := cc.CreateCluster(ctx, &dataprocpb.CreateClusterRequest{ProjectId: project, Region: region, Cluster: good}); status.Code(err) == codes.Unimplemented {
-		// Until the pinned Ranger source release builds (docs/gaps.md).
-		if !strings.Contains(err.Error(), "Ranger 2.8.0 source release") {
-			t.Fatalf("CreateCluster RANGER = %v; want UNIMPLEMENTED with the reason", err)
-		}
-		t.Skipf("RANGER is not served yet: %v", err)
-	} else if err != nil {
-		t.Fatalf("CreateCluster RANGER: %v", err)
-	}
-	_, _ = cc.DeleteCluster(ctx, &dataprocpb.DeleteClusterRequest{ProjectId: project, Region: region, ClusterName: good.ClusterName})
-	got := dataprocClusterUp(t, ctx, h, cc, project, region, cluster("rg2-"+suffix,
-		[]dataprocpb.Component{dataprocpb.Component_SOLR, dataprocpb.Component_RANGER}, props))
+	got := dataprocClusterUp(t, ctx, h, cc, project, region, good)
 	base := got.GetConfig().GetEndpointConfig().GetHttpPorts()["Ranger"]
 	if base == "" {
 		t.Fatalf("httpPorts: %v", got.GetConfig().GetEndpointConfig().GetHttpPorts())
 	}
-	call := func(user, pw string) (int, string) {
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSuffix(base, "/")+"/service/public/v2/api/servicedef/name/hdfs", nil)
-		req.SetBasicAuth(user, pw)
+	rest := func(method, path, pw string, body any) (int, string) {
+		var rd io.Reader
+		if body != nil {
+			b, _ := json.Marshal(body)
+			rd = bytes.NewReader(b)
+		}
+		req, _ := http.NewRequestWithContext(ctx, method, strings.TrimSuffix(base, "/")+path, rd)
+		req.SetBasicAuth("admin", pw)
 		req.Header.Set("Accept", "application/json")
+		if body != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer resp.Body.Close()
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 		return resp.StatusCode, string(b)
 	}
-	if code, body := call("admin", password); code != http.StatusOK || !strings.Contains(body, `"name":"hdfs"`) {
+	if code, body := rest(http.MethodGet, "/service/public/v2/api/servicedef/name/hdfs", password, nil); code != http.StatusOK || !strings.Contains(body, `"name":"hdfs"`) {
 		t.Errorf("Ranger's hdfs service definition as admin = %d %.300s", code, body)
 	}
-	if code, _ := call("admin", "Wrong2162x"); code != http.StatusUnauthorized {
+	if code, _ := rest(http.MethodGet, "/service/public/v2/api/servicedef/name/hdfs", "Wrong2162x", nil); code != http.StatusUnauthorized {
 		t.Errorf("Ranger with a wrong password = %d; want 401", code)
+	}
+	for _, svc := range []string{"hadoop-dataproc", "hive-dataproc", "yarn-dataproc"} {
+		if code, body := rest(http.MethodGet, "/service/public/v2/api/service/name/"+svc, password, nil); code != http.StatusOK || !strings.Contains(body, `"name":"`+svc+`"`) {
+			t.Errorf("Ranger service %s = %d %.300s", svc, code, body)
+		}
+	}
+
+	// A policy: root may use every table of the default database.
+	policy := map[string]any{"service": "hive-dataproc", "name": "cb-root-default", "isEnabled": true,
+		"resources": map[string]any{"database": map[string]any{"values": []string{"default"}},
+			"table": map[string]any{"values": []string{"*"}}, "column": map[string]any{"values": []string{"*"}}},
+		"policyItems": []any{map[string]any{"users": []string{"root"}, "accesses": []any{map[string]any{"type": "all", "isAllowed": true}}}}}
+	code, body := rest(http.MethodPost, "/service/public/v2/api/policy", password, policy)
+	if code != http.StatusOK {
+		t.Fatalf("create policy = %d %.500s", code, body)
+	}
+	var created struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.Unmarshal([]byte(body), &created); err != nil || created.ID == 0 {
+		t.Fatalf("create policy: %v %.300s", err, body)
+	}
+	if code, body := rest(http.MethodGet, "/service/public/v2/api/service/hive-dataproc/policy/cb-root-default", password, nil); code != http.StatusOK || !strings.Contains(body, `"cb-root-default"`) {
+		t.Fatalf("get policy = %d %.300s", code, body)
+	}
+
+	jc, err := dataproc.NewJobControllerClient(ctx, append(dataprocGRPC(), option.WithEndpoint(addr))...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = jc.Close() })
+	n := 0
+	hive := func(queries ...string) *dataprocpb.Job {
+		n++
+		return dataprocRunJob(t, ctx, jc, project, region, &dataprocpb.Job{Placement: &dataprocpb.JobPlacement{ClusterName: good.ClusterName},
+			Reference: &dataprocpb.JobReference{JobId: fmt.Sprintf("rghive%d-%s", n, suffix)},
+			TypeJob:   &dataprocpb.Job_HiveJob{HiveJob: &dataprocpb.HiveJob{Queries: &dataprocpb.HiveJob_QueryList{QueryList: &dataprocpb.QueryList{Queries: queries}}}}})
+	}
+	output := func(j *dataprocpb.Job) string { return dataprocGSText(t, ctx, sc, j.GetDriverOutputResourceUri()) }
+	// The plugin polls the Admin server every 5 seconds; the first jobs
+	// may start before it has the new policy.
+	var made *dataprocpb.Job
+	for i := 0; i < 6; i++ {
+		made = hive("CREATE TABLE IF NOT EXISTS cb_open (n INT)", "CREATE TABLE IF NOT EXISTS cb_secret (s STRING)",
+			"INSERT INTO cb_open VALUES (7)", "INSERT INTO cb_secret VALUES ('hidden')")
+		if made.GetStatus().GetState() == dataprocpb.JobStatus_DONE {
+			break
+		}
+		time.Sleep(10 * time.Second)
+	}
+	if made.GetStatus().GetState() != dataprocpb.JobStatus_DONE {
+		t.Fatalf("Hive job allowed by the policy: %v\n%s", made.GetStatus(), output(made))
+	}
+
+	// The policy narrowed to cb_open: reading cb_secret is denied.
+	policy["resources"].(map[string]any)["table"] = map[string]any{"values": []string{"cb_open"}}
+	if code, body := rest(http.MethodPut, fmt.Sprintf("/service/public/v2/api/policy/%d", created.ID), password, policy); code != http.StatusOK {
+		t.Fatalf("update policy = %d %.500s", code, body)
+	}
+	var denied *dataprocpb.Job
+	for i := 0; i < 6; i++ {
+		denied = hive("SELECT s FROM cb_secret")
+		if denied.GetStatus().GetState() == dataprocpb.JobStatus_ERROR {
+			break
+		}
+		time.Sleep(10 * time.Second)
+	}
+	if out := output(denied); denied.GetStatus().GetState() != dataprocpb.JobStatus_ERROR ||
+		!strings.Contains(out, "Permission denied: user [root] does not have [SELECT] privilege") {
+		t.Fatalf("Hive job the policy denies: %v\n%s", denied.GetStatus(), out)
+	}
+	if ok := hive("SELECT n FROM cb_open"); ok.GetStatus().GetState() != dataprocpb.JobStatus_DONE || !strings.Contains(output(ok), "7") {
+		t.Errorf("Hive job the policy allows: %v\n%s", ok.GetStatus(), output(ok))
+	}
+
+	// The denial, in the Admin server's access audit (from Solr).
+	deadline := time.Now().Add(3 * time.Minute)
+	for {
+		code, body := rest(http.MethodGet, "/service/assets/accessAudit?pageSize=100&sortBy=eventTime&sortType=desc&repoName=hive-dataproc", password, nil)
+		if code == http.StatusOK && strings.Contains(body, "default/cb_secret") && strings.Contains(body, `"accessResult":0`) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("access audit = %d %.800s", code, body)
+		}
+		time.Sleep(10 * time.Second)
 	}
 }

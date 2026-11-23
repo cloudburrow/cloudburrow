@@ -165,3 +165,38 @@ func TestKeyCheck(t *testing.T) {
 		t.Errorf("usable key, KeyOnly: %+v, %v", res, err)
 	}
 }
+
+// TestSolrPointSchema (#2162): Ranger's Solr 8 audit schema, its Trie
+// fields the Point fields Solr 9 has in their place.
+func TestSolrPointSchema(t *testing.T) {
+	in := `<fieldType name="date" class="solr.TrieDateField" docValues="true" precisionStep="0" positionIncrementGap="0"/>
+<fieldType name="tlongs" class="solr.TrieLongField" docValues="true" precisionStep="8" multiValued="true" positionIncrementGap="0"/>
+<fieldType name="string" class="solr.StrField" sortMissingLast="true"/>`
+	want := `<fieldType name="date" class="solr.DatePointField" docValues="true" positionIncrementGap="0"/>
+<fieldType name="tlongs" class="solr.LongPointField" docValues="true" multiValued="true" positionIncrementGap="0"/>
+<fieldType name="string" class="solr.StrField" sortMissingLast="true"/>`
+	if got := string(solrPointSchema([]byte(in))); got != want {
+		t.Errorf("solrPointSchema =\n%s\nwant\n%s", got, want)
+	}
+}
+
+// TestRangerHiveConf (#2162): HiveServer2 authorizes with Ranger's Hive
+// plugin against the hive-dataproc service on the master's Admin server,
+// auditing to Solr, in files HiveServer2 alone reads.
+func TestRangerHiveConf(t *testing.T) {
+	c := &Cluster{spec: ClusterSpec{Name: "rg"}}
+	conf := c.rangerHiveConf()
+	if got := conf["hiveserver2-site.xml"]["hive.security.authorization.manager"]; got != "org.apache.ranger.authorization.hive.authorizer.RangerHiveAuthorizerFactory" {
+		t.Errorf("authorization manager = %q", got)
+	}
+	sec := conf["ranger-hive-security.xml"]
+	if sec["ranger.plugin.hive.service.name"] != "hive-dataproc" || sec["ranger.plugin.hive.policy.rest.url"] != "http://rg-m:6080" {
+		t.Errorf("ranger-hive-security.xml = %v", sec)
+	}
+	if conf["ranger-hive-audit.xml"]["xasecure.audit.destination.solr.urls"] != "http://localhost:8983/solr/ranger_audits" {
+		t.Errorf("ranger-hive-audit.xml = %v", conf["ranger-hive-audit.xml"])
+	}
+	if _, ok := conf["hive-site.xml"]; ok {
+		t.Error("the authorizer must not be in hive-site.xml, which Spark and the drivers read")
+	}
+}

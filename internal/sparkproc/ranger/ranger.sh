@@ -6,7 +6,11 @@
 # foreground while it runs. The passwords are files CloudBurrow mounts at
 # /cb/ranger: admin-password (decrypted from
 # dataproc:ranger.admin.password.uri with dataproc:ranger.kms.key.uri) and
-# db-root-password (the cluster MySQL's root password).
+# db-root-password (the cluster MySQL's root password). Once the Admin
+# server answers, it creates the Ranger services a Dataproc cluster's
+# plugins use (hadoop-dataproc, hive-dataproc and yarn-dataproc, the names
+# Google's "Use Ranger with Kerberos" page shows), CB_MASTER being the
+# cluster's master host name.
 set -euo pipefail
 home=/opt/ranger/admin
 python3 -I - "$home/install.properties" <<'PY'
@@ -49,6 +53,35 @@ if [ ! -e /var/lib/cloudburrow-ranger-setup-done ]; then
 fi
 ./ews/ranger-admin-services.sh start
 until python3 -I -c 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:6080/login.jsp", timeout=5)' 2>/dev/null; do sleep 3; done
+python3 -I - <<'PY'
+import base64, json, os, urllib.error, urllib.request
+admin = open("/cb/ranger/admin-password").read().strip()
+auth = "Basic " + base64.b64encode(("admin:" + admin).encode()).decode()
+master = os.environ.get("CB_MASTER", "localhost")
+services = [
+    {"name": "hadoop-dataproc", "type": "hdfs", "configs": {"username": "hdfs", "password": admin,
+        "fs.default.name": "hdfs://%s" % master, "hadoop.security.authorization": "true",
+        "hadoop.security.authentication": "simple"}},
+    {"name": "hive-dataproc", "type": "hive", "configs": {"username": "hive", "password": admin,
+        "jdbc.driverClassName": "org.apache.hive.jdbc.HiveDriver", "jdbc.url": "jdbc:hive2://%s:10000" % master}},
+    {"name": "yarn-dataproc", "type": "yarn", "configs": {"username": "yarn", "password": admin,
+        "yarn.url": "http://%s:8088" % master, "hadoop.security.authentication": "simple"}},
+]
+base = "http://127.0.0.1:6080/service/public/v2/api/service"
+for svc in services:
+    req = urllib.request.Request(base + "/name/" + svc["name"], headers={"Authorization": auth, "Accept": "application/json"})
+    try:
+        urllib.request.urlopen(req, timeout=30)
+        continue
+    except urllib.error.HTTPError as e:
+        if e.code != 404:
+            raise
+    svc["isEnabled"] = True
+    req = urllib.request.Request(base, data=json.dumps(svc).encode(), method="POST",
+        headers={"Authorization": auth, "Accept": "application/json", "Content-Type": "application/json"})
+    urllib.request.urlopen(req, timeout=60)
+    print("created Ranger service", svc["name"])
+PY
 echo "CLOUDBURROW RANGER ADMIN READY on 6080"
 pid=$(pgrep -f org.apache.ranger.server.tomcat.EmbeddedServer)
 tail --pid="$pid" -F /var/log/ranger/ranger-admin-*.log

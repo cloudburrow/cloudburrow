@@ -8,6 +8,12 @@ set -e
 export HADOOP_CONF_DIR=/cb-conf HIVE_CONF_DIR=/cb-conf
 export HADOOP_CLASSPATH="$TEZ_HOME/*:$TEZ_HOME/lib/*:/cb-gcs/gcs-connector.jar"
 export HADOOP_CLIENT_OPTS="${HADOOP_CLIENT_OPTS:-} -Xmx1G"
+# With the RANGER component, Ranger's Hive plugin: its shim and class
+# loader on HiveServer2's class path, the shim loading the plugin from
+# ranger-hive-plugin-impl beside it (hiveserver2-site.xml names it).
+if [ "${CB_RANGER:-}" = "1" ]; then
+  export HADOOP_CLASSPATH="$HADOOP_CLASSPATH:/cb-ranger-hive/*"
+fi
 mkdir -p /cb-warehouse/warehouse /tmp/hive-scratch /tmp/hive-install
 if [ ! -d /cb-warehouse/metastore_db ]; then
   "$HIVE_HOME/bin/schematool" -dbType derby -initOrUpgradeSchema

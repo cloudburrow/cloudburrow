@@ -34,10 +34,10 @@ import (
 // ComponentRanger is the RANGER optional component.
 const ComponentRanger = "RANGER"
 
-//go:embed ranger/Dockerfile ranger/ranger.sh
+//go:embed ranger/Dockerfile ranger/ranger.sh ranger/build.pom.xml ranger/distro.pom.xml ranger/m2.sha256
 var rangerFS embed.FS
 
-var rangerFiles = []string{"Dockerfile", "ranger.sh"}
+var rangerFiles = []string{"Dockerfile", "ranger.sh", "build.pom.xml", "distro.pom.xml", "m2.sha256"}
 
 // RangerTag is the Ranger Admin image's tag: the build context's hash.
 func RangerTag() string {
@@ -52,8 +52,8 @@ func RangerTag() string {
 
 var rangerMu sync.Mutex
 
-// RangerBuildTimeout bounds the image's build: a Maven build of Ranger's
-// whole reactor.
+// RangerBuildTimeout bounds the image's build: a Maven build of the
+// Ranger modules the Admin server and the four plugins need.
 const RangerBuildTimeout = 3 * time.Hour
 
 // RangerImage builds the Ranger Admin image once, labelled for instance,
@@ -133,13 +133,104 @@ func (c *Cluster) startRanger(ctx context.Context, e *Ecosystem) error {
 	if err := c.waitLog(ctx, c.component("ranger-db"), regexp.MustCompile(`ready for connections.*port: 3306`), 5*time.Minute); err != nil {
 		return err
 	}
-	// The audit core, from Solr's default config set.
-	if out, err := c.d.docker(ctx, "exec", c.component("solr"), "solr", "create", "-c", "ranger_audits"); err != nil &&
-		!strings.Contains(out, "already exists") {
-		return &Unavailable{Msg: "create Solr's ranger_audits core: " + out}
-	}
-	if err := c.runComponent(ctx, "ranger", "", "-v", dir+":/cb/ranger:ro", image); err != nil {
+	if err := c.runComponent(ctx, "ranger", "", "-v", dir+":/cb/ranger:ro", "-e", "CB_MASTER="+c.nodeAlias(-1), image); err != nil {
 		return err
 	}
-	return c.waitLog(ctx, c.component("ranger"), regexp.MustCompile(`CLOUDBURROW RANGER ADMIN READY`), 15*time.Minute)
+	ranger := c.component("ranger")
+	// The Hive plugin, for HiveServer2's container (hivePluginDir).
+	_ = os.RemoveAll(filepath.Join(dir, "hive-plugin"))
+	if out, err := c.d.docker(ctx, "cp", ranger+":/opt/ranger/ranger-2.8.0-hive-plugin/lib/.", filepath.Join(dir, "hive-plugin")); err != nil {
+		return &Unavailable{Msg: "copy Ranger's Hive plugin: " + out}
+	}
+	if err := c.rangerAuditCore(ctx, ranger, dir); err != nil {
+		return err
+	}
+	return c.waitLog(ctx, ranger, regexp.MustCompile(`CLOUDBURROW RANGER ADMIN READY`), 15*time.Minute)
+}
+
+// rangerAuditCore creates Solr's ranger_audits core, where the Admin
+// server reads and the plugins write the audit log, with Ranger's own
+// audit schema (its solr_audit_conf): written for Solr 8, its Trie fields
+// are the Point fields Solr 9 has in their place, in the config set of
+// the Solr component's own release, soft-committing every 5 seconds as
+// Ranger's own config does (solr.autoSoftCommit.maxTime).
+func (c *Cluster) rangerAuditCore(ctx context.Context, ranger, dir string) error {
+	solr := c.component("solr")
+	schema := filepath.Join(dir, "managed-schema")
+	if out, err := c.d.docker(ctx, "cp", ranger+":/opt/ranger/solr_audit_conf/managed-schema", schema); err != nil {
+		return &Unavailable{Msg: "copy Ranger's Solr audit schema: " + out}
+	}
+	b, err := os.ReadFile(schema)
+	if err != nil {
+		return err
+	}
+	out := solrPointSchema(b)
+	if err := os.WriteFile(filepath.Join(dir, "managed-schema.xml"), out, 0o644); err != nil {
+		return err
+	}
+	const conf = "/var/solr/ranger_audits_conf"
+	if o, err := c.d.docker(ctx, "exec", solr, "bash", "-c", "rm -rf "+conf+" && cp -r /opt/solr/server/solr/configsets/_default/conf "+conf+" && rm -f "+conf+"/managed-schema.xml"); err != nil {
+		return &Unavailable{Msg: "make Solr's ranger_audits config set: " + o}
+	}
+	if o, err := c.d.docker(ctx, "cp", filepath.Join(dir, "managed-schema.xml"), solr+":"+conf+"/managed-schema.xml"); err != nil {
+		return &Unavailable{Msg: "copy the audit schema into Solr: " + o}
+	}
+	if o, err := c.d.docker(ctx, "exec", solr, "solr", "create", "-c", "ranger_audits", "-d", conf); err != nil && !strings.Contains(o, "already exists") {
+		return &Unavailable{Msg: "create Solr's ranger_audits core: " + o}
+	}
+	if o, err := c.d.docker(ctx, "exec", solr, "solr", "config", "-c", "ranger_audits", "-p", "8983", "-action", "set-property",
+		"-property", "updateHandler.autoSoftCommit.maxTime", "-value", "5000"); err != nil {
+		return &Unavailable{Msg: "set the ranger_audits soft commit: " + o}
+	}
+	return nil
+}
+
+// solrTrieRE is a Solr 8 Trie field type's class and precisionStep.
+var (
+	solrTrieRE      = regexp.MustCompile(`solr\.Trie(Date|Double|Float|Int|Long)Field`)
+	solrPrecisionRE = regexp.MustCompile(`\s+precisionStep="[0-9]+"`)
+)
+
+// solrPointSchema is a Solr 8 schema with its Trie fields Point fields.
+func solrPointSchema(b []byte) []byte {
+	b = solrTrieRE.ReplaceAll(b, []byte("solr.${1}PointField"))
+	return solrPrecisionRE.ReplaceAll(b, nil)
+}
+
+// hivePluginDir is where startRanger copies Ranger's Hive plugin (its
+// shim, class loader and ranger-hive-plugin-impl), for HiveServer2.
+func (c *Cluster) hivePluginDir() string { return filepath.Join(c.dir, "ranger", "hive-plugin") }
+
+// rangerHiveConf is HiveServer2's configuration for Ranger's Hive plugin,
+// as Ranger's enable-hive-plugin.sh writes it: the authorizer in
+// hiveserver2-site.xml (HiveServer2's alone: Spark and the drivers read
+// hive-site.xml), the plugin's service (hive-dataproc), the Admin server
+// on the master's 6080, and the audit log to Solr's ranger_audits.
+func (c *Cluster) rangerHiveConf() map[string]map[string]string {
+	return map[string]map[string]string{
+		"hiveserver2-site.xml": {
+			"hive.security.authorization.enabled":           "true",
+			"hive.security.authorization.manager":           "org.apache.ranger.authorization.hive.authorizer.RangerHiveAuthorizerFactory",
+			"hive.security.authenticator.manager":           "org.apache.hadoop.hive.ql.security.SessionStateUserAuthenticator",
+			"hive.conf.restricted.list":                     "hive.security.authorization.enabled,hive.security.authorization.manager,hive.security.authenticator.manager",
+			"hive.security.metastore.authorization.manager": "org.apache.hadoop.hive.ql.security.authorization.DefaultHiveMetastoreAuthorizationProvider",
+		},
+		"ranger-hive-security.xml": {
+			"ranger.plugin.hive.service.name":                            "hive-dataproc",
+			"ranger.plugin.hive.policy.source.impl":                      "org.apache.ranger.admin.client.RangerAdminRESTClient",
+			"ranger.plugin.hive.policy.rest.url":                         "http://" + c.nodeAlias(-1) + ":6080",
+			"ranger.plugin.hive.policy.pollIntervalMs":                   "5000",
+			"ranger.plugin.hive.policy.cache.dir":                        "/tmp/ranger-hive-policycache",
+			"ranger.plugin.hive.policy.rest.client.connection.timeoutMs": "120000",
+			"ranger.plugin.hive.policy.rest.client.read.timeoutMs":       "30000",
+			"xasecure.hive.update.xapolicies.on.grant.revoke":            "true",
+			"ranger.plugin.hive.urlauth.filesystem.schemes":              "hdfs:,file:,gs:",
+		},
+		"ranger-hive-audit.xml": {
+			"xasecure.audit.is.enabled":                           "true",
+			"xasecure.audit.destination.solr":                     "true",
+			"xasecure.audit.destination.solr.urls":                "http://localhost:8983/solr/ranger_audits",
+			"xasecure.audit.destination.solr.batch.filespool.dir": "/tmp/ranger-hive-audit-spool",
+		},
+	}
 }

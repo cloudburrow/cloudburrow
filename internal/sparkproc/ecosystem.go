@@ -244,6 +244,11 @@ func (c *Cluster) writeConf(dir string, job map[string]string, jars []string) er
 	}
 	files := map[string]map[string]string{"core-site.xml": core, "mapred-site.xml": mapred, "hive-site.xml": hive,
 		"tez-site.xml": tez}
+	if c.has(ComponentRanger) {
+		for name, props := range c.rangerHiveConf() {
+			files[name] = props
+		}
+	}
 	if yarn != nil {
 		files["yarn-site.xml"] = yarn
 		files["capacity-scheduler.xml"] = c.capacityScheduler()
@@ -341,12 +346,18 @@ func (c *Cluster) ensureHive(ctx context.Context) error {
 	if c.has(ComponentHiveWebHCat) {
 		webhcat = "1"
 	}
-	if err := c.runComponent(ctx, "hive", "", "--user", "1000:1000",
+	// With RANGER, HiveServer2 authorizes with Ranger's Hive plugin
+	// (rangerHiveConf), which startRanger copied out of the Admin image.
+	var ranger []string
+	if c.has(ComponentRanger) {
+		ranger = []string{"-v", c.hivePluginDir() + ":/cb-ranger-hive:ro", "-e", "CB_RANGER=1"}
+	}
+	if err := c.runComponent(ctx, "hive", "", append(append([]string{"--user", "1000:1000"}, ranger...),
 		"-v", filepath.Join(c.dir, "conf")+":/cb-conf:ro", "-v", filepath.Join(c.dir, "warehouse")+":/cb-warehouse",
 		"-v", filepath.Join(c.dir, "shared")+":/cb-shared",
 		"-v", jar+":/cb-gcs/gcs-connector.jar:ro", "-v", filepath.Join(c.dir, "hivenode.sh")+":/cb/hivenode.sh:ro",
 		"-v", filepath.Join(c.dir, "jobs")+":/cb-jobs:ro", "-e", "CB_WEBHCAT="+webhcat,
-		"--entrypoint", "/bin/bash", e.Hive, "/cb/hivenode.sh"); err != nil {
+		"--entrypoint", "/bin/bash", e.Hive, "/cb/hivenode.sh")...); err != nil {
 		return err
 	}
 	c.hiveUp = true
@@ -361,6 +372,23 @@ func (c *Cluster) startComponents(ctx context.Context) error {
 			return &Unavailable{Msg: "the Spark runner serves no " + what + " image"}
 		}
 		return nil
+	}
+	if c.has(ComponentSolr) {
+		if err := need(e.Solr, "Solr"); err != nil {
+			return err
+		}
+		if err := c.runComponent(ctx, "solr", "", "-e", "SOLR_HEAP=512m", e.Solr); err != nil {
+			return err
+		}
+		if err := c.waitLog(ctx, c.component("solr"), regexp.MustCompile(`Started Solr server|o.e.j.s.Server Started`), 5*time.Minute); err != nil {
+			return err
+		}
+	}
+	// Ranger before Hive: HiveServer2 loads its plugin.
+	if c.has(ComponentRanger) {
+		if err := c.startRanger(ctx, e); err != nil {
+			return err
+		}
 	}
 	if c.has(ComponentHiveWebHCat) || c.has(ComponentTrino) {
 		if err := c.ensureHive(ctx); err != nil {
@@ -420,22 +448,6 @@ func (c *Cluster) startComponents(ctx context.Context) error {
 			return err
 		}
 		if err := c.waitLog(ctx, c.component("zookeeper"), regexp.MustCompile(`binding to port|Started AdminServer|PrepRequestProcessor`), 3*time.Minute); err != nil {
-			return err
-		}
-	}
-	if c.has(ComponentSolr) {
-		if err := need(e.Solr, "Solr"); err != nil {
-			return err
-		}
-		if err := c.runComponent(ctx, "solr", "", "-e", "SOLR_HEAP=512m", e.Solr); err != nil {
-			return err
-		}
-		if err := c.waitLog(ctx, c.component("solr"), regexp.MustCompile(`Started Solr server|o.e.j.s.Server Started`), 5*time.Minute); err != nil {
-			return err
-		}
-	}
-	if c.has(ComponentRanger) {
-		if err := c.startRanger(ctx, e); err != nil {
 			return err
 		}
 	}

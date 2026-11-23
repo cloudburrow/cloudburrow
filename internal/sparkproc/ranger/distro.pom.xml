@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  CloudBurrow's assembly for the Dataproc RANGER component's image (#2162):
+  Ranger's own distro assembly descriptors (distro/src/main/assembly) for
+  the Admin server and the HDFS, Hive, YARN and Solr plugins and Solr's
+  audit config set, with dependencies on only the modules they include,
+  so "-pl cloudburrow-distro -am" builds those and nothing else. Ranger's
+  distro/pom.xml depends on every plugin, the Kylin plugin among them.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>org.apache.ranger</groupId>
+        <artifactId>ranger</artifactId>
+        <version>2.8.0</version>
+        <relativePath>..</relativePath>
+    </parent>
+    <artifactId>cloudburrow-ranger-distro</artifactId>
+    <packaging>pom</packaging>
+    <dependencies>
+        <dependency><groupId>org.apache.ranger</groupId><artifactId>credentialbuilder</artifactId><version>${project.version}</version><scope>provided</scope></dependency>
+        <dependency><groupId>org.apache.ranger</groupId><artifactId>embeddedwebserver</artifactId><version>${project.version}</version><scope>provided</scope></dependency>
+        <dependency><groupId>org.apache.ranger</groupId><artifactId>jisql</artifactId><version>${project.version}</version><scope>provided</scope></dependency>
+        <dependency><groupId>org.apache.ranger</groupId><artifactId>ranger-audit-core</artifactId><version>${project.version}</version><scope>provided</scope></dependency>
+        <dependency><groupId>org.apache.ranger</groupId><artifactId>ranger-audit-dest-hdfs</artifactId><version>${project.version}</version><scope>provided</scope></dependency>
+        <dependency><groupId>org.apache.ranger</groupId><artifactId>ranger-audit-dest-solr</artifactId><version>${project.version}</version><scope>provided</scope></dependency>
+        <dependency><groupId>org.apache.ranger</groupId><artifactId>ranger-authz-api</artifactId><version>${project.version}</version><scope>provided</scope></dependency>
+        <dependency><groupId>org.apache.ranger</groupId><artifactId>ranger-hdfs-plugin</artifactId><version>${project.version}</version><scope>provided</scope></dependency>
+        <dependency><groupId>org.apache.ranger</groupId><artifactId>ranger-hdfs-plugin-shim</artifactId><version>${project.version}</version><scope>provided</scope></dependency>
+        <dependency><groupId>org.apache.ranger</groupId><artifactId>ranger-hive-plugin</artifactId><version>${project.version}</version><scope>provided</scope></dependency>
+        <dependency><groupId>org.apache.ranger</groupId><artifactId>ranger-hive-plugin-shim</artifactId><version>${project.version}</version><scope>provided</scope></dependency>
+        <dependency><groupId>org.apache.ranger</groupId><artifactId>ranger-plugin-classloader</artifactId><version>${project.version}</version><scope>provided</scope></dependency>
+        <dependency><groupId>org.apache.ranger</groupId><artifactId>ranger-plugins-common</artifactId><version>${project.version}</version><scope>provided</scope></dependency>
+        <dependency><groupId>org.apache.ranger</groupId><artifactId>ranger-plugins-cred</artifactId><version>${project.version}</version><scope>provided</scope></dependency>
+        <dependency><groupId>org.apache.ranger</groupId><artifactId>ranger-plugins-installer</artifactId><version>${project.version}</version><scope>provided</scope></dependency>
+        <dependency><groupId>org.apache.ranger</groupId><artifactId>ranger-solr-plugin</artifactId><version>${project.version}</version><scope>provided</scope></dependency>
+        <dependency><groupId>org.apache.ranger</groupId><artifactId>ranger-solr-plugin-shim</artifactId><version>${project.version}</version><scope>provided</scope></dependency>
+        <dependency><groupId>org.apache.ranger</groupId><artifactId>ranger-yarn-plugin</artifactId><version>${project.version}</version><scope>provided</scope></dependency>
+        <dependency><groupId>org.apache.ranger</groupId><artifactId>ranger-yarn-plugin-shim</artifactId><version>${project.version}</version><scope>provided</scope></dependency>
+        <dependency><groupId>org.apache.ranger</groupId><artifactId>ugsync-util</artifactId><version>${project.version}</version><scope>provided</scope></dependency>
+        <dependency><groupId>org.apache.ranger</groupId><artifactId>unixauthclient</artifactId><version>${project.version}</version><scope>provided</scope></dependency>
+        <dependency><groupId>org.apache.ranger</groupId><artifactId>security-admin-web</artifactId><version>${project.version}</version><type>war</type><scope>provided</scope></dependency>
+    </dependencies>
+    <build>
+        <plugins>
+            <plugin>
+                <artifactId>maven-assembly-plugin</artifactId>
+                <version>${assembly.plugin.version}</version>
+                <configuration>
+                    <finalName>ranger-${project.version}</finalName>
+                    <outputDirectory>../target</outputDirectory>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>single</goal>
+                        </goals>
+                        <phase>package</phase>
+                        <configuration>
+                            <skipAssembly>false</skipAssembly>
+                            <descriptors>
+                                <descriptor>../distro/src/main/assembly/admin-web.xml</descriptor>
+                                <descriptor>../distro/src/main/assembly/hdfs-agent.xml</descriptor>
+                                <descriptor>../distro/src/main/assembly/hive-agent.xml</descriptor>
+                                <descriptor>../distro/src/main/assembly/plugin-yarn.xml</descriptor>
+                                <descriptor>../distro/src/main/assembly/plugin-solr.xml</descriptor>
+                                <descriptor>../distro/src/main/assembly/solr_audit_conf.xml</descriptor>
+                            </descriptors>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>
