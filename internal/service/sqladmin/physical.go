@@ -138,10 +138,10 @@ func physicalVersionDetail(version string) string {
 }
 
 // physicalVersionErr is startExternalSync's 400 for a physical sync of a
-// replica of version, which Google does not support. UNVERIFIED (re-read
-// 2026-11-23): the guide documents the limit, not Cloud SQL's answer, so
-// the status is the one this API gives an invalid request and the
-// wording is CloudBurrow's.
+// replica of version, which Google does not support.
+// UNVERIFIED (re-read 2026-11-23, migrate-xtrabackup-physical-file): the
+// guide documents the limit, not Cloud SQL's answer, so the status is the
+// one this API gives an invalid request and the wording is CloudBurrow's.
 func physicalVersionErr(version string) error {
 	return Errorf(http.StatusBadRequest, "Invalid request: migrationType PHYSICAL: %s.", physicalVersionDetail(version))
 }
