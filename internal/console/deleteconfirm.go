@@ -227,6 +227,13 @@ var DeleteConfirmRules = map[string]DeleteConfirmRule{
 	// schedule, no dialog described
 	// (https://docs.cloud.google.com/colab/docs/schedule-notebook-run).
 	"colab-schedules": unverified,
+	// Vertex AI Pipelines' schedules (#2173): "click Delete, then click
+	// Delete again to confirm" from the row's options menu
+	// (https://docs.cloud.google.com/vertex-ai/docs/pipelines/schedule-pipeline-run).
+	"vertex-pipeline-schedules": {Style: DeleteConfirmClick, Source: "https://docs.cloud.google.com/vertex-ai/docs/pipelines/schedule-pipeline-run", Verified: true},
+	// UNVERIFIED (re-read 2026-11-22): deleting a pipeline run from the
+	// console is not described (run-pipeline, schedule-pipeline-run).
+	"vertex-pipeline-runs": unverified,
 	// My notebooks (#2105): "click the Actions menu, and then select Delete
 	// notebook. In the Delete notebook dialog, click Confirm."
 	// (https://docs.cloud.google.com/colab/docs/create-console-quickstart).

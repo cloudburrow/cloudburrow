@@ -286,7 +286,9 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		}
 		providers = append(providers, colabRuntimesProvider{api: api}, colabTemplatesProvider{api: api, enforced: d.cfg.IAMEnforced()},
 			// My notebooks, Executions and Schedules (consolecolabexec.go).
-			colabNotebooksProvider{api: api, df: d.dataform.API}, colabExecutionsProvider{api: api}, colabSchedulesProvider{api: api})
+			colabNotebooksProvider{api: api, df: d.dataform.API}, colabExecutionsProvider{api: api}, colabSchedulesProvider{api: api},
+			// Vertex AI Pipelines' Runs and Schedules (consolepipelines.go, #2173).
+			pipelineRunsProvider{api: api, storage: map[bool]string{true: storageAddr}[enabled[config.ServiceStorage]]}, pipelineSchedulesProvider{colabSchedulesProvider{api: api}})
 	}
 	if enabled[config.ServiceRun] {
 		// Two screens of one product: services, and jobs with their

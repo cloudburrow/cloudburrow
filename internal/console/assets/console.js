@@ -121,8 +121,21 @@ function agentPlatformRoutes() {
       "Feature groups and online stores", AP_DOCS + "machine-learning"),
     absent(`${AP}/training`, "Training", "Model development", "projects.locations.customJobs and trainingPipelines",
       "Managed Training jobs and pipelines", AP_DOCS + "machine-learning"),
-    absent(`${AP}/pipelines`, "Pipelines", "Model development", "projects.locations.pipelineJobs",
-      "Kubeflow and TFX pipeline runs, schedules and templates", AP_DOCS + "machine-learning"),
+    // Vertex AI Pipelines (#2173): the Pipelines page's Runs and Schedules
+    // tabs ("Go to the Schedules tab on the Pipelines page":
+    // https://docs.cloud.google.com/vertex-ai/docs/pipelines/schedule-pipeline-run,
+    // read 2026-11-22). The Runs tab's name is CloudBurrow's (UNVERIFIED,
+    // re-read 2026-11-22: the same page and run-pipeline).
+    page(`${AP}/pipelines`, "Pipelines", "Model development", { service: "vertex-pipeline-runs", listedWhenOff: true, tabTitle: "Runs",
+      pageTabs: [`${AP}/pipelines`, `${AP}/pipelines/schedules`], kind: "Run",
+      api: "projects.locations.pipelineJobs", about: "Kubeflow pipeline runs, each task a container, and their schedules",
+      docs: "https://docs.cloud.google.com/vertex-ai/docs/pipelines/run-pipeline",
+      instead: "Start CloudBurrow with --services including run and storage: a run's tasks run on Docker and write their artifacts to Cloud Storage." }),
+    page(`${AP}/pipelines/schedules`, "Pipelines", "Model development", { service: "vertex-pipeline-schedules", listedWhenOff: true, tabTitle: "Schedules",
+      navHidden: true, navAs: `${AP}/pipelines`, pageTabs: [`${AP}/pipelines`, `${AP}/pipelines/schedules`], kind: "Schedule",
+      api: "projects.locations.schedules", about: "Recurring pipeline runs, with Pause, Resume and Delete",
+      docs: "https://docs.cloud.google.com/vertex-ai/docs/pipelines/schedule-pipeline-run",
+      instead: "Start CloudBurrow with --services including run and storage." }),
     absent(`${AP}/experiments`, "Experiments", "Model development", "projects.locations.metadataStores (experiments)",
       "Experiment runs and their parameters and metrics", AP_DOCS + "machine-learning"),
     absent(`${AP}/metadata`, "Metadata", "Model development", "projects.locations.metadataStores",
