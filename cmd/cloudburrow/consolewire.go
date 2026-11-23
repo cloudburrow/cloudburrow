@@ -287,6 +287,12 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		providers = append(providers, colabRuntimesProvider{api: api}, colabTemplatesProvider{api: api, enforced: d.cfg.IAMEnforced()},
 			// My notebooks, Executions and Schedules (consolecolabexec.go).
 			colabNotebooksProvider{api: api, df: d.dataform.API}, colabExecutionsProvider{api: api}, colabSchedulesProvider{api: api})
+		// Vertex AI Workbench's Instances (consoleworkbench.go, #2173).
+		wb := workbenchProvider{api: api}
+		if d.localAI != nil {
+			wb.exec = d.localAI.WorkbenchExecute
+		}
+		providers = append(providers, wb)
 	}
 	if enabled[config.ServiceRun] {
 		// Two screens of one product: services, and jobs with their

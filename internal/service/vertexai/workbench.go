@@ -458,19 +458,21 @@ func (w *workbenchService) GetInstance(_ context.Context, req *nbpb.GetInstanceR
 }
 
 func (w *workbenchService) ListInstances(_ context.Context, req *nbpb.ListInstancesRequest) (*nbpb.ListInstancesResponse, error) {
-	if _, _, err := parseParent("parent", req.GetParent()); err != nil {
+	project, location, err := parseParent("parent", req.GetParent())
+	if err != nil {
 		return nil, grpcError(err)
 	}
 	st := w.s.workbench()
 	st.mu.Lock()
 	var all []*nbpb.Instance
 	for _, k := range sortedNames(st.instances) {
-		if strings.HasPrefix(k, req.GetParent()+"/") {
+		// "-" is every location (AIP-159).
+		if strings.HasPrefix(k, req.GetParent()+"/") || location == "-" && strings.HasPrefix(k, "projects/"+project+"/locations/") {
 			all = append(all, st.view(st.instances[k]))
 		}
 	}
 	st.mu.Unlock()
-	all, err := aipfilter.Apply(req.GetFilter(), all, workbenchFilter...)
+	all, err = aipfilter.Apply(req.GetFilter(), all, workbenchFilter...)
 	if err != nil {
 		return nil, grpcError(err)
 	}

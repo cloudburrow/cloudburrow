@@ -112,8 +112,13 @@ function agentPlatformRoutes() {
       docs: "https://docs.cloud.google.com/colab/docs/schedule-notebook-run",
       instead: "Start CloudBurrow with --services including run, storage and bigquery." }),
     // Notebooks.
-    absent(`${AP}/workbench/instances`, "Workbench", "Notebooks", "notebooks.googleapis.com (Workbench instances)",
-      "JupyterLab instances", "https://docs.cloud.google.com/gemini-enterprise-agent-platform/notebooks/overview"),
+    // Vertex AI Workbench instances (#2173): "Go to the Instances page"
+    // (https://docs.cloud.google.com/vertex-ai/docs/workbench/instances/create-console-quickstart,
+    // read 2026-11-22), each a notebook runtime of the instance.
+    page(`${AP}/workbench/instances`, "Workbench", "Notebooks", { service: "workbench-instances", listedWhenOff: true, kind: "Instance",
+      api: "notebooks.googleapis.com v2 (projects.locations.instances)", about: "Notebook instances, each with Open JupyterLab, Start, Stop and Reset",
+      docs: "https://docs.cloud.google.com/vertex-ai/docs/workbench/instances/create-console-quickstart",
+      instead: "Start CloudBurrow with --services including run and bigquery: run starts the local Vertex AI endpoint, and an instance's kernel queries BigQuery." }),
     // Model development.
     absent(`${AP}/datasets`, "Datasets", "Model development", "projects.locations.datasets",
       "Managed datasets for training", AP_DOCS + "machine-learning"),

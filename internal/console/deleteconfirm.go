@@ -227,6 +227,10 @@ var DeleteConfirmRules = map[string]DeleteConfirmRule{
 	// schedule, no dialog described
 	// (https://docs.cloud.google.com/colab/docs/schedule-notebook-run).
 	"colab-schedules": unverified,
+	// Vertex AI Workbench instances (#2173): "click Delete ... To confirm,
+	// click Confirm"
+	// (https://docs.cloud.google.com/vertex-ai/docs/workbench/instances/create-console-quickstart).
+	"workbench-instances": {Style: DeleteConfirmClick, Source: "https://docs.cloud.google.com/vertex-ai/docs/workbench/instances/create-console-quickstart", Verified: true},
 	// My notebooks (#2105): "click the Actions menu, and then select Delete
 	// notebook. In the Delete notebook dialog, click Confirm."
 	// (https://docs.cloud.google.com/colab/docs/create-console-quickstart).

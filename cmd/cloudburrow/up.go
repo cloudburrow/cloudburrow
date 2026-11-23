@@ -1380,6 +1380,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// local Vertex AI endpoint, run on them.
 	if localAISrv != nil {
 		localAISrv.SetNotebookRuntimes(colabHost{m: notebooks}, filepath.Join(cfg.StateDir, "vertexai", "notebookruntimes.json"))
+		// Vertex AI Workbench instances (#2173), each a notebook runtime too.
+		localAISrv.SetWorkbench(colabHost{m: notebooks}, filepath.Join(cfg.StateDir, "vertexai", "workbench.json"))
 		// Their notebook executions and schedules read and write Cloud
 		// Storage and Dataform's single-file notebook repositories.
 		colabExec := colabExecutor{m: notebooks,

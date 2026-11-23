@@ -79,6 +79,7 @@ var emulatorOnly = map[string]string{
 	"vertex-models":               "the Model Registry is read from the local AI endpoint over gRPC, which this test does not start (TestModelRegistryAndEndpointsThroughThePages drives the page)",
 	"colab-templates":             "runtime templates are read from the local AI endpoint over gRPC, which this test does not start (TestColabEnterpriseRuntimesThroughThePages drives the page)",
 	"colab-executions":            "executions are read from the local AI endpoint over gRPC, which this test does not start (TestColabEnterpriseExecutionsThroughThePages drives the page)",
+	"workbench-instances":         "Workbench instances are read from the local AI endpoint over gRPC, which this test does not start (TestWorkbenchInstancesThroughThePages drives the page)",
 	"colab-schedules":             "schedules are read from the local AI endpoint over gRPC, which this test does not start (TestColabEnterpriseExecutionsThroughThePages drives the page)",
 	"vertex-endpoints":            "Endpoints are read from the local AI endpoint over gRPC, which this test does not start (TestModelRegistryAndEndpointsThroughThePages drives the page)",
 	"run-domains":                 "the Cloud Run Admin API v1's domain mappings, which this test's in-process adapter does not serve over HTTP (TestCloudRunGooglePagesThroughTheBrowser drives the page)",

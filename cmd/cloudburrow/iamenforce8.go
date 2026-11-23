@@ -31,7 +31,8 @@ type iamEnforced8 struct {
 
 func (s iamEnforced8) use(e *iameval.Enforcer) {
 	if s.localAI != nil {
-		svcs := []*iameval.Service{iameval.VertexAI, iameval.DocumentAI, iameval.Speech}
+		// Workbench instances (#2173) are served beside them.
+		svcs := []*iameval.Service{iameval.VertexAI, iameval.DocumentAI, iameval.Speech, iameval.Workbench}
 		var unary []grpc.UnaryServerInterceptor
 		var wraps []func(http.Handler) http.Handler
 		for _, svc := range svcs {
