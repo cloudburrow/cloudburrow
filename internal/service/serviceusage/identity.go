@@ -51,6 +51,10 @@ var serviceAgents = map[string]string{
 	// App Hub Service Account, the primary agent of apphub.googleapis.com
 	// (docs.cloud.google.com/iam/docs/service-agents, read 2026-11-21).
 	"apphub.googleapis.com": "gcp-sa-apphub.iam.gserviceaccount.com",
+	// AlloyDB Service Agent, the primary agent of alloydb.googleapis.com,
+	// which uses a cluster's customer-managed key
+	// (docs.cloud.google.com/alloydb/docs/cmek, read 2026-11-23).
+	"alloydb.googleapis.com": "gcp-sa-alloydb.iam.gserviceaccount.com",
 	// Kubernetes Engine Service Agent, the primary agent of
 	// container.googleapis.com.
 	"container.googleapis.com": "container-engine-robot.iam.gserviceaccount.com",

@@ -221,6 +221,31 @@ func (d *sqlDumper) CopyAt(ctx context.Context, src, dst sqladmin.DumpTarget, at
 }
 
 func (d *sqlDumper) pgCopyAt(ctx context.Context, src, dst sqladmin.DumpTarget, at time.Time, id int64, dir string) error {
+	if err := d.pgRecoverTo(ctx, src, at, id, dir); err != nil {
+		return err
+	}
+	return d.Load(ctx, dst, dir)
+}
+
+// pgRecoverToDir dumps, into dir, src's PostgreSQL databases as they were
+// at at: an AlloyDB point-in-time restore (#2191) loads them into the new
+// cluster's primary once it is created.
+func (d *sqlDumper) pgRecoverToDir(ctx context.Context, src sqladmin.DumpTarget, at time.Time, dir string) error {
+	defer pitrLock(d.deployment(src))()
+	ids, _, err := d.bases(ctx, src)
+	if err != nil {
+		return err
+	}
+	id, ok := baseFor(ids, at)
+	if !ok {
+		return fmt.Errorf("no base was complete by %s", at.UTC().Format(time.RFC3339Nano))
+	}
+	return d.pgRecoverTo(ctx, src, at, id, dir)
+}
+
+// pgRecoverTo replays src's base id and WAL up to at in a scratch server
+// and dumps it into dir.
+func (d *sqlDumper) pgRecoverTo(ctx context.Context, src sqladmin.DumpTarget, at time.Time, id int64, dir string) error {
 	target := at.UTC().Format("2006-01-02 15:04:05.999999") + "+00"
 	// A commit after the target ends the replay there, and the WAL switch
 	// archives the segment holding it.
@@ -264,7 +289,7 @@ done`
 	if err := scratch.Export(ctx, dirEntries(dir)); err != nil {
 		return fmt.Errorf("dump the recovered server: %w", err)
 	}
-	return d.Load(ctx, dst, dir)
+	return nil
 }
 
 // mysqlPITRUser is the replication user a MySQL recovery's clone

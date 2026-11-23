@@ -604,6 +604,16 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 	}
 	// App Hub (#2110): gcloud apphub, the Go client, and Terraform's
 	// google_apphub_* through apphub_custom_endpoint.
+	// AlloyDB for PostgreSQL (#2191): gcloud alloydb, the Go client, the
+	// connectors' WithAdminAPIEndpoint, and Terraform's google_alloydb_*
+	// through alloydb_custom_endpoint.
+	if alloyDBEnabled(cfg) && cfg.Endpoints.AlloyDB != 0 {
+		ad := addr(cfg.Endpoints.AlloyDB)
+		vars = append(vars,
+			envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_ALLOYDB", "http://" + ad + "/", "read by gcloud; gcloud alloydb"},
+			envVar{cliEndpointVar("alloydb"), ad,
+				"AlloyDB v1, v1beta and v1alpha, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint, or http://" + ad + " to alloydbconn.WithAdminAPIEndpoint"})
+	}
 	if appHubEnabled(cfg) && cfg.Endpoints.AppHub != 0 {
 		ah := addr(cfg.Endpoints.AppHub)
 		vars = append(vars,
@@ -881,6 +891,7 @@ func withLivePorts(cfg config.Config, live map[string]string) config.Config {
 		"parametermanager":       &e.ParameterManager,
 		"dataform":               &e.Dataform,
 		"apphub":                 &e.AppHub,
+		"alloydb":                &e.AlloyDB,
 		"trace":                  &e.Trace,
 		// The local AI endpoint, which serves Vertex AI's Model Registry
 		// and Endpoints (#1940) to gcloud-setup and terraform, and Document

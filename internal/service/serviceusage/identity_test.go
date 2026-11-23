@@ -113,6 +113,7 @@ func TestGenerateServiceIdentityEveryEntry(t *testing.T) {
 		"parametermanager.googleapis.com":       "gcp-sa-pm.iam.gserviceaccount.com",
 		"dataform.googleapis.com":               "gcp-sa-dataform.iam.gserviceaccount.com",
 		"apphub.googleapis.com":                 "gcp-sa-apphub.iam.gserviceaccount.com",
+		"alloydb.googleapis.com":                "gcp-sa-alloydb.iam.gserviceaccount.com",
 		"workflowexecutions.googleapis.com":     "",
 		"kmsinventory.googleapis.com":           "",
 		"telemetry.googleapis.com":              "",

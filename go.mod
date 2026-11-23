@@ -121,6 +121,8 @@ require (
 
 require (
 	cloud.google.com/go/accesscontextmanager v1.15.0 // indirect
+	cloud.google.com/go/alloydb v1.33.1 // indirect
+	cloud.google.com/go/alloydbconn v1.20.0 // indirect
 	cloud.google.com/go/osconfig v1.22.0 // indirect
 	dario.cat/mergo v1.0.2 // indirect
 	github.com/Azure/go-ansiterm v0.0.0-20250102033503-faa5f7b0171c // indirect
