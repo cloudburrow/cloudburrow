@@ -50,6 +50,7 @@ type alloyDBService struct {
 	api       *alloydb.Server
 	engine    *alloyDBEngine
 	connector *alloydb.Connector
+	tlsFront  *alloyDBTLSFront
 	stop      chan struct{}
 }
 
@@ -179,6 +180,12 @@ func (s *alloyDBService) Start(ctx context.Context) error {
 	}
 	s.connector = c
 	recordAlloyDBConnector(s.cfg, s.ConnectorAddr())
+	if front, err := serveAlloyDBTLS(s.cfg, api, opts.ConnectorHost, s.server.Addr()); err != nil {
+		s.logf("AlloyDB: the admin API's TLS endpoint: %v", err)
+	} else {
+		s.tlsFront = front
+		s.logf("AlloyDB: the admin API over TLS is at %s (its CA: %s)", front.Addr(), alloyDBCAFile(s.cfg))
+	}
 	// The servers of the instances kept (a persistent instance's), and
 	// the removal of those that are not; then the automated backups.
 	s.stop = make(chan struct{})
@@ -210,6 +217,7 @@ func (s *alloyDBService) Stop(ctx context.Context) error {
 		s.stop = nil
 	}
 	_ = s.connector.Close()
+	s.tlsFront.Close()
 	if s.engine != nil {
 		s.engine.Close()
 	}

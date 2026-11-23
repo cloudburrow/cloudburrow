@@ -613,6 +613,13 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 			envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_ALLOYDB", "http://" + ad + "/", "read by gcloud; gcloud alloydb"},
 			envVar{cliEndpointVar("alloydb"), ad,
 				"AlloyDB v1, v1beta and v1alpha, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint, or http://" + ad + " to alloydbconn.WithAdminAPIEndpoint"})
+		if a := recordedAlloyDBTLS(cfg); a != "" {
+			vars = append(vars,
+				envVar{"CLOUDBURROW_ALLOYDB_TLS_ENDPOINT", a,
+					"AlloyDB's admin API over TLS (gRPC and JSON), for the Java and Python connectors, which open only TLS channels; trust CLOUDBURROW_ALLOYDB_CA_FILE"},
+				envVar{"CLOUDBURROW_ALLOYDB_CA_FILE", alloyDBCAFile(cfg),
+					"the certificate authority of AlloyDB's TLS endpoint and of its clusters: gRPC's GRPC_DEFAULT_SSL_ROOTS_FILE_PATH, or a JVM trust store"})
+		}
 		if c := recordedAlloyDBConnector(cfg); c != "" {
 			vars = append(vars, envVar{"CLOUDBURROW_ALLOYDB_CONNECTOR_ENDPOINT", c,
 				"the AlloyDB connectors' TLS listener, moved off port 5433 (another instance holds it); the connectors dial 5433 at the address GetConnectionInfo reports, so only a dialer that redirects reads this"})

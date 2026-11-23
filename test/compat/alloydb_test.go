@@ -10,6 +10,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"strings"
 	"testing"
@@ -79,6 +80,12 @@ func alloyDBDialer(t *testing.T, h *Harness) *alloydbconn.Dialer {
 		alloydbconn.WithAdminAPIEndpoint("http://" + h.Endpoint(EnvAlloyDB)),
 		alloydbconn.WithTokenSource(oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "cloudburrow", Expiry: time.Now().Add(time.Hour)})),
 		alloydbconn.WithOptOutOfBuiltInTelemetry(),
+		// The opt-out alone still leaves NewDialer opening a Cloud
+		// Monitoring gRPC client, which connects to
+		// monitoring.googleapis.com; an HTTP client makes that client fail
+		// to start (gRPC refuses one), so nothing leaves the machine
+		// (TestAlloyDBConnectorsSendRealSQL's go client proves it).
+		alloydbconn.WithHTTPClient(&http.Client{Transport: &http.Transport{}}),
 	}
 	if listener := os.Getenv(EnvAlloyDBConnector); listener != "" {
 		opts = append(opts, alloydbconn.WithDialFunc(func(ctx context.Context, network, addr string) (net.Conn, error) {

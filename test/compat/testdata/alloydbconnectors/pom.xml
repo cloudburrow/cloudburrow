@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The Java connector's jars for TestAlloyDBConnectorsSendRealSQL: Maven
+     only copies them (dependency:copy-dependencies) into the image. -->
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>dev.cloudburrow.compat</groupId>
+  <artifactId>alloydb-java-probe</artifactId>
+  <version>1</version>
+  <dependencies>
+    <dependency>
+      <groupId>com.google.cloud</groupId>
+      <artifactId>alloydb-jdbc-connector</artifactId>
+      <version>1.4.1</version>
+    </dependency>
+    <dependency>
+      <groupId>org.postgresql</groupId>
+      <artifactId>postgresql</artifactId>
+      <version>42.7.8</version>
+    </dependency>
+  </dependencies>
+</project>

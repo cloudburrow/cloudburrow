@@ -79,6 +79,8 @@ func alloyDBInstanceType(t alloydbpb.Instance_InstanceType) string {
 		return "Primary"
 	case alloydbpb.Instance_READ_POOL:
 		return "Read pool"
+	case alloydbpb.Instance_SECONDARY:
+		return "Secondary"
 	}
 	return t.String()
 }
@@ -209,7 +211,7 @@ func (p alloyDBProvider) cluster(ctx context.Context, project, name string) (*al
 }
 
 func alloyDBInstances(ctx context.Context, s *alloydb.Server, cluster string) ([]*alloydbpb.Instance, console.Listing) {
-	l := console.Listing{Columns: []string{"Instance", "Status", "Type", "Machine", "Availability", "Nodes", "Private IP", "Connectivity"},
+	l := console.Listing{Columns: []string{"Instance", "Status", "Type", "Machine", "Availability", "Nodes", "Private IP", "Connectivity", "Connection pooling"},
 		NameColumn: "Name", Noun: "instances", TableTitle: "Instances in your cluster"}
 	resp, err := s.ListInstances(ctx, &alloydbpb.ListInstancesRequest{Parent: cluster, PageSize: 1000})
 	if err != nil {
@@ -227,6 +229,10 @@ func alloyDBInstances(ctx context.Context, s *alloydb.Server, cluster string) ([
 		if in.GetInstanceType() == alloydbpb.Instance_READ_POOL {
 			nodes, avail = int(in.GetReadPoolConfig().GetNodeCount()), "-"
 		}
+		pooling := "Disabled"
+		if in.GetConnectionPoolConfig().GetEnabled() {
+			pooling = "Enabled"
+		}
 		conn := "Private IP"
 		if in.GetPscInstanceConfig().GetPscDnsName() != "" {
 			conn = "Private Service Connect"
@@ -234,7 +240,8 @@ func alloyDBInstances(ctx context.Context, s *alloydb.Server, cluster string) ([
 		l.Items = append(l.Items, console.Resource{Name: lastSegment(in.GetName()), Status: in.GetState().String(), Fields: map[string]string{
 			"Instance": lastSegment(in.GetName()), "Status": alloyDBState(in.GetState()), "Type": alloyDBInstanceType(in.GetInstanceType()),
 			"Machine":      fmt.Sprintf("%d vCPU, %d GB", in.GetMachineConfig().GetCpuCount(), in.GetMachineConfig().GetCpuCount()*8),
-			"Availability": avail, "Nodes": strconv.Itoa(nodes), "Private IP": kmsOrDash(in.GetIpAddress()), "Connectivity": conn}})
+			"Availability": avail, "Nodes": strconv.Itoa(nodes), "Private IP": kmsOrDash(in.GetIpAddress()), "Connectivity": conn,
+			"Connection pooling": pooling}})
 	}
 	l.Total = len(l.Items)
 	return ins, l
@@ -251,7 +258,7 @@ func (p alloyDBProvider) Detail(ctx context.Context, project string, path []stri
 	ins, instances := alloyDBInstances(ctx, s, c.GetName())
 	var primary *alloydbpb.Instance
 	for _, in := range ins {
-		if in.GetInstanceType() == alloydbpb.Instance_PRIMARY {
+		if t := in.GetInstanceType(); t == alloydbpb.Instance_PRIMARY || t == alloydbpb.Instance_SECONDARY {
 			primary = in
 		}
 	}
@@ -277,6 +284,18 @@ func (p alloyDBProvider) Detail(ctx context.Context, project string, path []stri
 		{Label: "Network", Value: kmsOrDash(c.GetNetworkConfig().GetNetwork())}, {Label: "Encryption", Value: enc},
 		{Label: "Continuous backup and recovery", Value: cb}, {Label: "Earliest restore point", Value: earliest},
 		{Label: "Automated backups", Value: auto}, {Label: "Created", Value: kmsTime(c.GetCreateTime())}}}}
+	clusterType := "Primary"
+	repl := []console.Property{}
+	if c.GetClusterType() == alloydbpb.Cluster_SECONDARY {
+		clusterType = "Secondary"
+		repl = append(repl, console.Property{Label: "Primary cluster", Value: c.GetSecondaryConfig().GetPrimaryClusterName()})
+	} else if n := c.GetPrimaryConfig().GetSecondaryClusterNames(); len(n) > 0 {
+		repl = append(repl, console.Property{Label: "Secondary clusters", Value: strings.Join(n, ", ")})
+	}
+	overview[0].Properties = append([]console.Property{overview[0].Properties[0], {Label: "Cluster type", Value: clusterType}}, overview[0].Properties[1:]...)
+	if len(repl) > 0 {
+		overview = append(overview, console.PropertyGroup{Heading: "Cross-region replication", Properties: repl})
+	}
 	if primary != nil {
 		info, err := s.GetConnectionInfo(ctx, &alloydbpb.GetConnectionInfoRequest{Parent: primary.GetName()})
 		props := []console.Property{{Label: "Instance URI", Value: primary.GetName()}}
@@ -419,12 +438,66 @@ func (p alloyDBProvider) DetailActions(ctx context.Context, project string, path
 	if c.GetContinuousBackupInfo().GetEarliestRestorableTime() == nil {
 		restore.Unavailable = "Continuous backup and recovery has no restore point yet."
 	}
+	secondary := c.GetClusterType() == alloydbpb.Cluster_SECONDARY
+	if secondary {
+		primary.Label, primary.ID = "Create secondary instance", "add-secondary"
+		primary.Unavailable = ""
+		if hasPrimary {
+			primary.Unavailable = "The cluster has a secondary instance."
+		}
+		backup.Unavailable = ""
+	}
+	sqlOrCSV := map[string]string{"SQL": "SQL", "CSV": "CSV"}
+	importAction := console.Action{ID: "import", Label: "Import", Fields: []console.Field{
+		{Name: "uri", Label: "Source", Type: "text", Required: true, Help: "A Cloud Storage file: gs://bucket/file. A .gz file is decompressed."},
+		{Name: "format", Label: "File format", Type: "radio", Options: []string{"SQL", "CSV"}, OptionLabels: sqlOrCSV, Default: "SQL"},
+		{Name: "database", Label: "Database", Type: "text", Help: "For SQL, optional: the file can name its own with \\connect."},
+		{Name: "table", Label: "Table", Type: "text", ShowWhen: "format=CSV"},
+		{Name: "columns", Label: "Columns", Type: "text", ShowWhen: "format=CSV", Help: "Optional, separated by commas: every column, in the table's order, by default."},
+		{Name: "user", Label: "User", Type: "text", Help: "Optional: the database user the import runs as."}}}
+	exportAction := console.Action{ID: "export", Label: "Export", Fields: []console.Field{
+		{Name: "uri", Label: "Destination", Type: "text", Required: true, Help: "A Cloud Storage file: gs://bucket/file. A name ending in .gz is compressed."},
+		{Name: "format", Label: "File format", Type: "radio", Options: []string{"SQL", "CSV"}, OptionLabels: sqlOrCSV, Default: "SQL"},
+		{Name: "database", Label: "Database", Type: "text", Required: true},
+		{Name: "query", Label: "SQL query", Type: "text", ShowWhen: "format=CSV", Help: "The SELECT query whose rows are exported."},
+		{Name: "tables", Label: "Tables", Type: "text", ShowWhen: "format=SQL", Help: "Optional, separated by commas: every table by default."},
+		{Name: "schemaOnly", Label: "Export schema only", Type: "checkbox", ShowWhen: "format=SQL"},
+		{Name: "clean", Label: "Clean target objects (DROP before CREATE, IF EXISTS)", Type: "checkbox", ShowWhen: "format=SQL"}}}
+	if !hasPrimary {
+		importAction.Unavailable = "An import runs on the cluster's primary instance, which it does not have."
+		exportAction.Unavailable = "An export runs on the cluster's primary instance, which it does not have."
+	}
+	if secondary {
+		importAction.Unavailable = "A secondary cluster takes no writes: import into its primary cluster."
+	}
+	createSecondary := console.Action{ID: "create-secondary", Label: "Create secondary cluster", Fields: []console.Field{
+		{Name: "clusterId", Label: "Secondary cluster ID", Type: "text", Required: true, Pattern: idPattern},
+		{Name: "region", Label: "Region", Type: "select", Options: alloydb.Locations(), Default: "us-east1",
+			Help: "Another region is recommended."},
+		{Name: "instanceId", Label: "Secondary instance ID", Type: "text", Required: true, Pattern: idPattern}}}
+	switch {
+	case secondary:
+		createSecondary.Unavailable = "This is a secondary cluster: create secondaries of its primary cluster."
+	case !hasPrimary:
+		createSecondary.Unavailable = "A secondary cluster replicates the primary instance, which this cluster does not have."
+	}
+	promote := console.Action{ID: "promote", Label: "Promote", Confirm: "Replication from the primary cluster stops: this cluster becomes a standalone primary cluster, and its secondary instance takes writes."}
+	switchover := console.Action{ID: "switchover", Label: "Switchover", Confirm: "This cluster becomes the primary cluster, and the primary cluster its secondary. Stop writing to the primary first."}
+	if !secondary {
+		promote.Unavailable = "Only a secondary cluster is promoted."
+		switchover.Unavailable = "Only a secondary cluster switches over."
+	}
 	return []console.Action{primary, readPool,
 		{ID: "edit-instance", Label: "Edit instance", Fields: []console.Field{
 			{Name: "instance", Label: "Instance", Type: "select", Required: true, Options: names},
 			{Name: "cpu", Label: "Machine", Type: "select", Options: alloyDBCPUs, OptionLabels: alloyDBCPULabels(), Default: "2"},
 			{Name: "nodes", Label: "Node count (read pool)", Type: "number", Default: "1"},
-			{Name: "flags", Label: "Database flags", Type: "text", Help: "name=value pairs, separated by commas."}}},
+			{Name: "flags", Label: "Database flags", Type: "text", Help: "name=value pairs, separated by commas."},
+			{Name: "pooling", Label: "Enable Managed Connection Pooling", Type: "checkbox",
+				Help: "A pooler beside the instance, on port 6432; the connectors and the Auth Proxy are pooled too."},
+			{Name: "poolFlags", Label: "Connection pooling flags", Type: "text", ShowWhen: "pooling=true",
+				Help: "name=value pairs, separated by commas: pool_mode, max_pool_size, min_pool_size, max_client_connections, ..."}}},
+		importAction, exportAction, createSecondary, promote, switchover,
 		{ID: "restart", Label: "Restart instance", Fields: []console.Field{{Name: "instance", Label: "Instance", Type: "select", Required: true, Options: names}}},
 		{ID: "failover", Label: "Failover", Confirm: "The primary instance's standby becomes its active node.", Fields: []console.Field{
 			{Name: "instance", Label: "Instance", Type: "select", Required: true, Options: names}}},
@@ -480,11 +553,82 @@ func (p alloyDBProvider) ActAt(ctx context.Context, project string, path []strin
 			next.ReadPoolConfig = &alloydbpb.Instance_ReadPoolConfig{NodeCount: int32(nodes)}
 			paths = append(paths, "read_pool_config.node_count")
 		}
+		if in.GetInstanceType() != alloydbpb.Instance_SECONDARY {
+			next.ConnectionPoolConfig = &alloydbpb.Instance_ConnectionPoolConfig{Enabled: values["pooling"] == "true" || values["pooling"] == "on",
+				Flags: map[string]string{}}
+			for _, kv := range strings.Split(values["poolFlags"], ",") {
+				if k, v, ok := strings.Cut(strings.TrimSpace(kv), "="); ok {
+					next.ConnectionPoolConfig.Flags[strings.TrimSpace(k)] = strings.TrimSpace(v)
+				}
+			}
+			paths = append(paths, "connection_pool_config")
+		}
 		op, err = s.UpdateInstance(ctx, &alloydbpb.UpdateInstanceRequest{Instance: next, UpdateMask: &fieldmaskpb.FieldMask{Paths: paths}})
 		if err != nil {
 			return err
 		}
 		return alloyDBWait(ctx, s, op, 5*time.Second)
+	case "add-secondary":
+		op, err = s.CreateSecondaryInstance(ctx, &alloydbpb.CreateSecondaryInstanceRequest{Parent: c.GetName(), InstanceId: strings.TrimSpace(values["instanceId"]),
+			Instance: &alloydbpb.Instance{InstanceType: alloydbpb.Instance_SECONDARY, MachineConfig: &alloydbpb.Instance_MachineConfig{CpuCount: int32(cpu)}}})
+		return err
+	case "import":
+		req := &alloydbpb.ImportClusterRequest{Name: c.GetName(), GcsUri: strings.TrimSpace(values["uri"]), Database: strings.TrimSpace(values["database"]),
+			User: strings.TrimSpace(values["user"])}
+		if values["format"] == "CSV" {
+			req.ImportOptions = &alloydbpb.ImportClusterRequest_CsvImportOptions_{CsvImportOptions: &alloydbpb.ImportClusterRequest_CsvImportOptions{
+				Table: strings.TrimSpace(values["table"]), Columns: consoleList(values["columns"])}}
+		} else {
+			req.ImportOptions = &alloydbpb.ImportClusterRequest_SqlImportOptions_{SqlImportOptions: &alloydbpb.ImportClusterRequest_SqlImportOptions{}}
+		}
+		op, err = s.ImportCluster(ctx, req)
+		if err != nil {
+			return err
+		}
+		return alloyDBWait(ctx, s, op, 2*time.Minute)
+	case "export":
+		req := &alloydbpb.ExportClusterRequest{Name: c.GetName(), Database: strings.TrimSpace(values["database"]),
+			Destination: &alloydbpb.ExportClusterRequest_GcsDestination{GcsDestination: &alloydbpb.GcsDestination{Uri: strings.TrimSpace(values["uri"])}}}
+		if values["format"] == "CSV" {
+			req.ExportOptions = &alloydbpb.ExportClusterRequest_CsvExportOptions_{CsvExportOptions: &alloydbpb.ExportClusterRequest_CsvExportOptions{
+				SelectQuery: values["query"]}}
+		} else {
+			on := func(k string) *bool { b := values[k] == "true" || values[k] == "on"; return &b }
+			o := &alloydbpb.ExportClusterRequest_SqlExportOptions{Tables: consoleList(values["tables"]), SchemaOnly: on("schemaOnly"),
+				CleanTargetObjects: on("clean"), IfExistTargetObjects: on("clean")}
+			req.ExportOptions = &alloydbpb.ExportClusterRequest_SqlExportOptions_{SqlExportOptions: o}
+		}
+		op, err = s.ExportCluster(ctx, req)
+		if err != nil {
+			return err
+		}
+		return alloyDBWait(ctx, s, op, 2*time.Minute)
+	case "create-secondary":
+		loc := strings.Join(strings.Split(c.GetName(), "/")[:3], "/") + "/" + strings.TrimSpace(values["region"])
+		sid := strings.TrimSpace(values["clusterId"])
+		op, err = s.CreateSecondaryCluster(ctx, &alloydbpb.CreateSecondaryClusterRequest{Parent: loc, ClusterId: sid, Cluster: &alloydbpb.Cluster{
+			NetworkConfig: c.GetNetworkConfig(), SecondaryConfig: &alloydbpb.Cluster_SecondaryConfig{PrimaryClusterName: c.GetName()}}})
+		if err != nil {
+			return err
+		}
+		if err := alloyDBWait(ctx, s, op, 30*time.Second); err != nil {
+			return err
+		}
+		_, err = s.CreateSecondaryInstance(ctx, &alloydbpb.CreateSecondaryInstanceRequest{Parent: loc + "/clusters/" + sid,
+			InstanceId: strings.TrimSpace(values["instanceId"]), Instance: &alloydbpb.Instance{}})
+		return err
+	case "promote":
+		op, err = s.PromoteCluster(ctx, &alloydbpb.PromoteClusterRequest{Name: c.GetName()})
+		if err != nil {
+			return err
+		}
+		return alloyDBWait(ctx, s, op, 2*time.Minute)
+	case "switchover":
+		op, err = s.SwitchoverCluster(ctx, &alloydbpb.SwitchoverClusterRequest{Name: c.GetName()})
+		if err != nil {
+			return err
+		}
+		return alloyDBWait(ctx, s, op, 3*time.Minute)
 	case "restart":
 		op, err = s.RestartInstance(ctx, &alloydbpb.RestartInstanceRequest{Name: inst})
 	case "failover":
@@ -615,4 +759,16 @@ func (r *alloyDBResetter) ResetProject(ctx context.Context, project string) erro
 		return errors.New(alloyDBNotStarted)
 	}
 	return api.ResetProject(ctx, project)
+}
+
+// consoleList is a comma-separated field's items, trimmed, without empty
+// ones.
+func consoleList(v string) []string {
+	var out []string
+	for _, p := range strings.Split(v, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }

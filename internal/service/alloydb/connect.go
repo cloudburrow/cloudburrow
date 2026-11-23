@@ -282,3 +282,11 @@ func writeMDX(w io.Writer, resp *connectorspb.MetadataExchangeResponse) error {
 	_, err = w.Write(append(out, b...))
 	return err
 }
+
+// CACertPEM is the certificate authority's certificate, PEM: the clusters'
+// ca_cert, which also signs the admin API's TLS endpoint.
+func (s *Server) CACertPEM() string { return s.ca.certPEM }
+
+// ServerCertificate is a certificate the authority signs for name, a DNS
+// name or an IP address.
+func (s *Server) ServerCertificate(name string) (*tls.Certificate, error) { return s.ca.serverCert(name) }
