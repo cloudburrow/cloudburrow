@@ -536,6 +536,8 @@ func firewallNFT(self vmNet, members []vmNet, rules []obj, peerPods []string) st
 	if len(self.relay6) > 0 {
 		// An IPv6 internal load balancer's address is on lo (relay6): the
 		// egress rules below apply to it as to any VPC destination.
+		// (An ip6 match never matches IPv4, which lo still accepts.)
+		b.WriteString("    oifname \"lo\" meta nfproto ipv4 accept\n")
 		b.WriteString("    oifname \"lo\" ip6 daddr != " + nftSet(self.relay6) + " accept\n")
 	} else {
 		b.WriteString("    oifname \"lo\" accept\n")

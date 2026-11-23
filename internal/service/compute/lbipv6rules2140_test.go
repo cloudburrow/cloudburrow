@@ -109,6 +109,9 @@ func TestRegionalAndInternalIPv6ForwardingRules2140(t *testing.T) {
 			t.Fatalf("the dual-stack VM lacks %q:\n%s", want, c)
 		}
 	}
+	if !strings.Contains(c, "oifname \"lo\" meta nfproto ipv4 accept\n    oifname \"lo\" ip6 daddr != ") {
+		t.Fatalf("lo's IPv4 is not accepted before the relayed addresses:\n%s", c)
+	}
 	if strings.Contains(c, "dnat ip to") && strings.Contains(c, "ip daddr "+a) {
 		t.Fatalf("an IPv6 address in the IPv4 rewrite:\n%s", c)
 	}
