@@ -79,7 +79,9 @@ type Server struct {
 	// nb is Colab Enterprise's runtime templates and runtimes
 	// (notebookruntimes.go, #2105), served over gRPC and nbTranscoder.
 	// Guarded by mu.
-	nb           *notebookStore
+	nb *notebookStore
+	// wb holds the Workbench instances (workbench.go, #2173).
+	wb           *workbenchStore
 	nbRESTOnce   sync.Once
 	nbTranscoder *rest.Transcoder
 	// schedStop ends the Colab Enterprise schedules' loop (schedules.go).
@@ -156,6 +158,9 @@ func (s *Server) Handler() http.Handler {
 		mux.HandleFunc("/v1/projects/{project}/locations/{location}/"+c+"/", s.serveNotebookREST)
 	}
 	mux.HandleFunc("POST /v1/projects/{project}/locations/{location}/notebookRuntimes:assign", s.serveNotebookREST)
+	// Workbench instances, notebooks.googleapis.com v2 (#2173).
+	mux.HandleFunc("/v2/projects/{project}/locations/{location}/instances", s.serveNotebookREST)
+	mux.HandleFunc("/v2/projects/{project}/locations/{location}/instances/", s.serveNotebookREST)
 	mux.HandleFunc("POST /v1/projects/{project}/locations/{location}/pipelineJobs:batchDelete", s.serveNotebookREST)
 	mux.HandleFunc("POST /v1/projects/{project}/locations/{location}/pipelineJobs:batchCancel", s.serveNotebookREST)
 	mux.HandleFunc("POST /v1/projects/{project}/locations/{location}/notebookRuntimeTemplates:setDefault", s.setDefaultREST)
