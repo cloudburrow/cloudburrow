@@ -363,7 +363,7 @@
         "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve with `docker buildx imagetools inspect apache/zeppelin:0.12.1`."
       },
       "dataprocRangerSource": {
-        "$comment": "The RANGER optional component (#2162, internal/sparkproc/ranger.go): internal/sparkproc/ranger/Dockerfile builds the Ranger Admin server on this machine from this source release (a Maven build of the whole reactor, -C strict checksums, whose distro admin-web assembly is unpacked into the image), the first time a cluster with RANGER starts. Apache publishes the SHA-512 c00acf627bd7f1cddebfd15b628faa54bf6ea4933457c8ad21ea0280986b8860627a58109be753e07a01d45f576bce72289627a5bb5ff0e3698296aad88e9cf4; the Dockerfile's ADD --checksum pins the SHA-256 of the same verified file.",
+        "$comment": "The RANGER optional component (#2162, internal/sparkproc/ranger.go): internal/sparkproc/ranger/Dockerfile builds the Ranger Admin server and its HDFS, Hive and YARN plugins on this machine from this source release, the first time a cluster with RANGER starts: Ranger's own reactor does not build as published (its Kylin plugin needs RoaringBitmap 0.7.36-os-kylin-r1, only on repo.spring.io, which answers 401), so build.pom.xml and distro.pom.xml run Ranger's own assembly descriptors with -pl cloudburrow-distro -am (Maven -C strict checksums; no Kylin plugin, which Dataproc does not install), and one source patch, hive4.patch, lets the Hive plugin run in Hive 4.0.1's HiveServer2. Measured 2026-11-23 on darwin/arm64: 651 s on an empty Maven cache (Maven 635.5 s), about 85 s with the BuildKit cache mount cloudburrow-ranger-2.8.0-m2 (812 MB); the image is 1.67 GB. Apache publishes the SHA-512 c00acf627bd7f1cddebfd15b628faa54bf6ea4933457c8ad21ea0280986b8860627a58109be753e07a01d45f576bce72289627a5bb5ff0e3698296aad88e9cf4; the Dockerfile's ADD --checksum pins the SHA-256 of the same verified file.",
         "version": "2.8.0",
         "source": "https://archive.apache.org/dist/ranger/2.8.0/apache-ranger-2.8.0.tar.gz",
         "sha256": "069ed1550160ac0da87980411c346d1e607466cb823720c73458a7b3b95b34aa",
@@ -372,6 +372,28 @@
         "updateFeed": "apache-dist",
         "verification": "sha256",
         "skipDiscovery": "Apache distribution site; depcheck only discovers GitHub-sourced components."
+      },
+      "dataprocRangerMavenLock": {
+        "$comment": "The RANGER component's Maven dependencies (internal/sparkproc/ranger/m2.sha256): the SHA-256 of every jar, pom, war, zip and tarball the Ranger 2.8.0 build resolves from Maven Central (the build's plugins, Ranger's dependencies, and the Node release frontend-maven-plugin fetches), 3418 files. The Dockerfile fails the build when its Maven repository holds a file not in the lock with that SHA-256; no Ranger artifact is in it, so every Ranger module is built from the source release. The sha256 field is the lock file's own. Regenerate by running the build with an empty cache and hashing its repository (org/apache/ranger left out).",
+        "version": "2.8.0",
+        "source": "https://repo1.maven.org/maven2/",
+        "sha256": "43766356874004d0121e49f6bb2caa27e3450e30cd354b77ec658c73784fe830",
+        "license": "Apache-2.0 and the licences of Ranger's declared Maven dependencies (Ranger's LICENSE.txt)",
+        "redistribution": "not published: resolved into the local build's Maven cache only; nothing of it is in the CLI or the repository",
+        "updateFeed": "maven-central",
+        "verification": "sha256",
+        "skipDiscovery": "Maven Central; pinned with the Ranger source release, updated with it."
+      },
+      "dataprocRangerHive4Patch": {
+        "$comment": "The RANGER component's one source patch (internal/sparkproc/ranger/hive4.patch, CloudBurrow's own, Apache-2.0 as the file it changes): Ranger 2.8.0's Hive plugin reads HiveConf.ConfVars.PREEXECHOOKS, which Hive 4.0.1 (the cluster's HiveServer2) no longer has; the patch reads and sets hive.exec.pre.hooks by name. The sha256 is the patch file's.",
+        "version": "2.8.0",
+        "source": "internal/sparkproc/ranger/hive4.patch",
+        "sha256": "047317742ea55cefd6046fc239c7c21c560f07e4af1765bee27f6b44407348e0",
+        "license": "Apache-2.0",
+        "redistribution": "in the repository (a patch to Apache-2.0 source); applied in the local build only",
+        "updateFeed": "none",
+        "verification": "sha256",
+        "skipDiscovery": "CloudBurrow's own patch; drop it when Ranger supports Hive 4."
       },
       "dataprocRangerBuildImage": {
         "$comment": "The RANGER component's build and runtime base (internal/sparkproc/ranger/Dockerfile): the Docker official maven image 3.9.11-eclipse-temurin-8 (Ranger 2.8 builds with Java 8).",

@@ -19686,7 +19686,7 @@
           "test/compat/dataproc2162d_test.go:152 TestDataprocDockerComponent",
           "test/compat/dataproc2162d_test.go:230 TestDataprocDockerComponentOff",
           "test/compat/dataproc2162e_test.go:42 TestDataprocOnGKE",
-          "test/compat/dataproc2162f_test.go:39 TestDataprocRangerComponent"
+          "test/compat/dataproc2162f_test.go:51 TestDataprocRangerComponent"
         ]
       },
       {
@@ -19780,7 +19780,8 @@
           "test/compat/dataproc2162c_test.go:93 TestDataprocTableFormats",
           "test/compat/dataproc2162d_test.go:152 TestDataprocDockerComponent",
           "test/compat/dataproc2162d_test.go:46 TestDataprocSparkAndHiveOnYarn",
-          "test/compat/dataproc2162e_test.go:42 TestDataprocOnGKE"
+          "test/compat/dataproc2162e_test.go:42 TestDataprocOnGKE",
+          "test/compat/dataproc2162f_test.go:51 TestDataprocRangerComponent"
         ]
       },
       {

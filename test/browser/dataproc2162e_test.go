@@ -95,8 +95,10 @@ func TestDataprocRangerThroughThePage(t *testing.T) {
 	p.eval(`[...document.querySelectorAll("#view a")].find((a) => a.textContent.trim() === "Ranger").href`, &ranger)
 
 	// Ranger's own sign-in page, through the gateway.
+	// The link is the instance's gateway (its Dataproc port), not the
+	// console's origin.
 	r := open(t)
-	r.navigate(ranger)
+	r.run(chromedp.Navigate(ranger))
 	r.waitFor(`document.querySelector("#username") !== null && document.querySelector("#password") !== null`)
 	r.run(chromedp.SendKeys("#username", "admin"), chromedp.SendKeys("#password", password), chromedp.KeyEvent(kb.Enter))
 	r.waitFor(`document.body.textContent.includes("hive-dataproc")`)
