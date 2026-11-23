@@ -356,7 +356,7 @@ func studioAssetRepos(ctx context.Context, s *dataform.Server, project string) (
 			return nil, err
 		}
 		for _, r := range resp.GetRepositories() {
-			switch r.GetLabels()[dataformAssetLabel] {
+			switch dataformAssetKind(r) {
 			case "notebook", "pipeline", "data_preparation":
 				out = append(out, r)
 			}
@@ -369,7 +369,7 @@ var studioTypeOf = map[string]string{"notebook": "Notebook", "pipeline": "Pipeli
 
 // studioScheduleRowOf is a workflow configuration as the Scheduling page's row.
 func studioScheduleRowOf(ctx context.Context, s *dataform.Server, r *dfpb.Repository, wc *dfpb.WorkflowConfig) studioScheduleRow {
-	kind := r.GetLabels()[dataformAssetLabel]
+	kind := dataformAssetKind(r)
 	parts := strings.Split(wc.GetName(), "/")
 	row := studioScheduleRow{Name: wc.GetName(), ID: lastSegment(wc.GetName()), Type: studioTypeOf[kind], Asset: r.GetName(), AssetName: studioDisplay(r),
 		AssetKind: kind, Region: parts[3], Config: "Schedule", Frequency: wc.GetCronSchedule(), TimeZone: wc.GetTimeZone(), Disabled: wc.GetDisabled(),
@@ -418,7 +418,7 @@ func studioAllSchedules(ctx context.Context, s *dataform.Server, project string)
 	rows := []studioScheduleRow{}
 	assets := []map[string]string{}
 	for _, r := range repos {
-		assets = append(assets, map[string]string{"name": r.GetName(), "displayName": studioDisplay(r), "kind": r.GetLabels()[dataformAssetLabel],
+		assets = append(assets, map[string]string{"name": r.GetName(), "displayName": studioDisplay(r), "kind": dataformAssetKind(r),
 			"location": strings.Split(r.GetName(), "/")[3]})
 		resp, err := s.ListWorkflowConfigs(ctx, &dfpb.ListWorkflowConfigsRequest{Parent: r.GetName(), PageSize: 1000})
 		if err != nil {
@@ -496,7 +496,7 @@ func studioCreateTrigger(ctx context.Context, s *dataform.Server, project string
 	if err != nil {
 		return nil, err
 	}
-	kind := r.GetLabels()[dataformAssetLabel]
+	kind := dataformAssetKind(r)
 	if kind != "pipeline" {
 		// Google documents the trigger form for pipelines only.
 		return nil, fmt.Errorf("%s is not a pipeline: notebook and data preparation schedules are time-based", studioDisplay(r))

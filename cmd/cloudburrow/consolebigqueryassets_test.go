@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	dfpb "cloud.google.com/go/dataform/apiv1/dataformpb"
+
 	"github.com/cloudburrow/cloudburrow/internal/service/dataform"
 )
 
@@ -111,4 +113,43 @@ func TestStudioCodeAssets(t *testing.T) {
 		t.Fatalf("Settings page: %d rows, %v", len(sl.Items), err)
 	}
 	call("delete", map[string]any{"name": nb["name"]})
+}
+
+// TestStudioAssetLabels (#2094): a new pipeline's repository carries
+// Google's bigquery-workflow label and a data preparation's
+// single-file-asset-type data_preparation_sqlx (manage-repository's
+// table), and both read back as their kinds, as do the labels an earlier
+// CloudBurrow wrote.
+func TestStudioAssetLabels(t *testing.T) {
+	t.Parallel()
+	for kind, want := range map[string]map[string]string{
+		"pipeline":         {"bigquery-workflow": "true"},
+		"data_preparation": {"single-file-asset-type": "data_preparation_sqlx"},
+		"sql":              {"single-file-asset-type": "sql"},
+		"notebook":         {"single-file-asset-type": "notebook"},
+		"data_canvas":      {"single-file-asset-type": "data_canvas"},
+	} {
+		got := dataformAssetLabels(kind)
+		if len(got) != len(want) {
+			t.Errorf("%s: labels %v, want %v", kind, got, want)
+		}
+		for k, v := range want {
+			if got[k] != v {
+				t.Errorf("%s: labels %v, want %v", kind, got, want)
+			}
+		}
+		if back := dataformAssetKind(&dfpb.Repository{Labels: got}); back != kind {
+			t.Errorf("%v reads back as %q, want %q", got, back, kind)
+		}
+	}
+	for labels, kind := range map[[2]string]string{
+		{"single-file-asset-type", "pipeline"}:         "pipeline",
+		{"single-file-asset-type", "data_preparation"}: "data_preparation",
+		{"bigquery-workflow", "anything"}:              "pipeline",
+		{"origin", "bigquery-studio"}:                  "",
+	} {
+		if got := dataformAssetKind(&dfpb.Repository{Labels: map[string]string{labels[0]: labels[1]}}); got != kind {
+			t.Errorf("%v reads as %q, want %q", labels, got, kind)
+		}
+	}
 }

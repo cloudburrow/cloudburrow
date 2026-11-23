@@ -750,7 +750,7 @@ func studioCreateSchedule(ctx context.Context, s *dataform.Server, in studioOrch
 	if err != nil {
 		return nil, err
 	}
-	kind := r.GetLabels()[dataformAssetLabel]
+	kind := dataformAssetKind(r)
 	if kind != "notebook" && kind != "pipeline" && kind != "data_preparation" {
 		return nil, fmt.Errorf("%s is not a notebook, pipeline or data preparation", studioDisplay(r))
 	}
