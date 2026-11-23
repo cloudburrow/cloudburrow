@@ -25,11 +25,17 @@ import (
 // Register serves the API, its operations and locations on g.
 func (s *Server) Register(g grpc.ServiceRegistrar) {
 	nspb.RegisterNetworkSecurityServer(g, s)
+	s.RegisterAddressGroups(g)
+	longrunningpb.RegisterOperationsServer(g, &operations{s: s})
+	locations.Register(g, &locationsServer{})
+}
+
+// RegisterAddressGroups serves the project and organization address group
+// services on g.
+func (s *Server) RegisterAddressGroups(g grpc.ServiceRegistrar) {
 	ag := &addressGroups{s: s}
 	nspb.RegisterAddressGroupServiceServer(g, ag)
 	nspb.RegisterOrganizationAddressGroupServiceServer(g, &orgAddressGroups{addressGroups: ag})
-	longrunningpb.RegisterOperationsServer(g, &operations{s: s})
-	locations.Register(g, &locationsServer{})
 }
 
 type locationsServer struct {

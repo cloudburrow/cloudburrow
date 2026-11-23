@@ -372,10 +372,13 @@ var areas = []area{
 	// and Operations mixins are other areas' rows.
 	{Key: "certificatemanager", Title: "Certificate Manager (v1)", Own: true, Services: []string{"google.cloud.certificatemanager.v1.CertificateManager"}},
 	// Network Security (#2160): CloudBurrow's own, JSON on the Compute
-	// Engine port; the parts Cloud Load Balancing reads (TLS policies and
-	// authorization policies). Its Locations and Operations mixins are
-	// other areas' rows.
-	{Key: "networksecurity", Title: "Network Security (v1)", Own: true, Services: []string{"google.cloud.networksecurity.v1.NetworkSecurity"}},
+	// Engine port, gRPC and JSON; the parts Cloud Load Balancing, Cloud
+	// Armor and Secure Web Proxy read (TLS policies, authorization
+	// policies, backend authentication configs, address groups, gateway
+	// security policies). Its Locations and Operations mixins are other
+	// areas' rows.
+	{Key: "networksecurity", Title: "Network Security (v1)", Own: true, Services: []string{"google.cloud.networksecurity.v1.NetworkSecurity",
+		"google.cloud.networksecurity.v1.AddressGroupService", "google.cloud.networksecurity.v1.OrganizationAddressGroupService"}},
 	// Network Services (#2160): CloudBurrow's own, JSON on the Compute
 	// Engine port; Secure Web Proxy's gateways and Service Extensions'
 	// authorization extensions. Its Locations and Operations mixins are

@@ -47,7 +47,7 @@ Do not edit these files by hand.
 | [Service Usage API (v1)](serviceusage.md) | 10 | 10 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [API Keys API (v2)](apikeys.md) | 9 | 9 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Firebase Rules API (v1)](firebaserules.md) | 11 | 11 | 0 | 0 | 0 | 0 | 0 | 0 |
-| [Compute Engine API (v1): VPC networking](compute.md) | 564 | 182 | 0 | 97 | 285 | 0 | 0 | 0 |
+| [Compute Engine API (v1): VPC networking](compute.md) | 565 | 183 | 0 | 97 | 285 | 0 | 0 | 0 |
 | [Cloud Storage companion APIs (Batch Operations, Insights, Transfer v1)](storagejobs.md) | 50 | 50 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Backup and DR Service API (v1)](backupdr.md) | 61 | 47 | 0 | 14 | 0 | 0 | 0 | 0 |
 | [Cloud Identity API (v1)](cloudidentity.md) | 70 | 70 | 0 | 0 | 0 | 0 | 0 | 0 |
@@ -63,7 +63,8 @@ Do not edit these files by hand.
 | [Cloud Trace API (v1 and v2)](trace.md) | 5 | 5 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Serverless VPC Access (v1)](vpcaccess.md) | 4 | 4 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Certificate Manager (v1)](certificatemanager.md) | 30 | 25 | 0 | 0 | 5 | 0 | 0 | 0 |
-| [Network Security (v1)](networksecurity.md) | 45 | 20 | 0 | 25 | 0 | 0 | 0 | 0 |
+| [Network Security (v1)](networksecurity.md) | 63 | 54 | 0 | 0 | 9 | 0 | 0 | 0 |
+| [Network Services (v1)](networkservices.md) | 83 | 15 | 0 | 68 | 0 | 0 | 0 | 0 |
 | [Identity-Aware Proxy (v1)](iap.md) | 19 | 13 | 0 | 0 | 6 | 0 | 0 | 0 |
 | [Workflows and Workflow Executions (v1)](workflows.md) | 10 | 10 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Kubernetes Engine API (v1)](gke.md) | 37 | 36 | 0 | 0 | 1 | 0 | 0 | 0 |

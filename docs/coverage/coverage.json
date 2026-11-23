@@ -14862,7 +14862,7 @@
     "counts": {
       "Implemented": 285,
       "Unimplemented": 97,
-      "Verified": 182
+      "Verified": 183
     },
     "rows": [
       {
@@ -15096,7 +15096,8 @@
         "method": "compute.backendServices.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/computelb2153_test.go:50 TestComputeExternalHTTPLoadBalancerThroughTheGoClient"
+          "test/compat/computelb2153_test.go:50 TestComputeExternalHTTPLoadBalancerThroughTheGoClient",
+          "test/compat/proxylesssec2160_test.go:91 TestProxylessGRPCClientTLSOverXDSOverTLS"
         ]
       },
       {
@@ -15113,6 +15114,7 @@
         "method": "compute.backendServices.patch",
         "status": "Verified",
         "tests": [
+          "test/compat/addressgroups2160_test.go:259 TestBackendMutualTLSThroughTheGoClient",
           "test/compat/computelb2160_test.go:337 TestCloudCDNCachesThroughTheGoClient",
           "test/compat/computelb2160_test.go:404 TestIAPGuardsALoadBalancerThroughTheGoClient",
           "test/compat/custommetrics2160_test.go:35 TestCustomMetricsBalancingThroughTheGoClient",
@@ -16462,6 +16464,13 @@
         "method": "compute.projects.moveInstance",
         "status": "Unimplemented",
         "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.projects.setCloudArmorTier",
+        "status": "Verified",
+        "tests": [
+          "test/compat/addressgroups2160_test.go:48 TestCloudArmorAddressGroupsThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.projects.setCommonInstanceMetadata",
@@ -22343,10 +22352,73 @@
     "Key": "networksecurity",
     "Title": "Network Security (v1)",
     "counts": {
-      "Unimplemented": 25,
-      "Verified": 20
+      "Implemented": 9,
+      "Verified": 54
     },
     "rows": [
+      {
+        "method": "google.cloud.networksecurity.v1.AddressGroupService/AddAddressGroupItems",
+        "status": "Verified",
+        "tests": [
+          "test/compat/addressgroups2160_test.go:48 TestCloudArmorAddressGroupsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.AddressGroupService/CloneAddressGroupItems",
+        "status": "Verified",
+        "tests": [
+          "test/compat/addressgroups2160_test.go:48 TestCloudArmorAddressGroupsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.AddressGroupService/CreateAddressGroup",
+        "status": "Verified",
+        "tests": [
+          "test/compat/addressgroups2160_test.go:48 TestCloudArmorAddressGroupsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.AddressGroupService/DeleteAddressGroup",
+        "status": "Verified",
+        "tests": [
+          "test/compat/addressgroups2160_test.go:48 TestCloudArmorAddressGroupsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.AddressGroupService/GetAddressGroup",
+        "status": "Verified",
+        "tests": [
+          "test/compat/addressgroups2160_test.go:48 TestCloudArmorAddressGroupsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.AddressGroupService/ListAddressGroupReferences",
+        "status": "Verified",
+        "tests": [
+          "test/compat/addressgroups2160_test.go:48 TestCloudArmorAddressGroupsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.AddressGroupService/ListAddressGroups",
+        "status": "Verified",
+        "tests": [
+          "test/compat/addressgroups2160_test.go:48 TestCloudArmorAddressGroupsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.AddressGroupService/RemoveAddressGroupItems",
+        "status": "Verified",
+        "tests": [
+          "test/compat/addressgroups2160_test.go:48 TestCloudArmorAddressGroupsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.AddressGroupService/UpdateAddressGroup",
+        "status": "Verified",
+        "tests": [
+          "test/compat/addressgroups2160_test.go:48 TestCloudArmorAddressGroupsThroughTheGoClient"
+        ]
+      },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/CreateAuthorizationPolicy",
         "status": "Verified",
@@ -22358,13 +22430,16 @@
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/CreateAuthzPolicy",
         "status": "Verified",
         "tests": [
+          "test/compat/authzcustom2160_test.go:82 TestCustomAuthorizationThroughALoadBalancer",
           "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer"
         ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/CreateBackendAuthenticationConfig",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): Backend Authenticated TLS (a backend service's tlsSettings.authenticationConfig) is not served yet: the load balancers here do not verify their backends' certificates (#2160)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/addressgroups2160_test.go:259 TestBackendMutualTLSThroughTheGoClient"
+        ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/CreateClientTlsPolicy",
@@ -22375,13 +22450,17 @@
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/CreateGatewaySecurityPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): Secure Web Proxy's resources (gateway security policies and their rules, URL lists, TLS inspection policies); CloudBurrow serves no Secure Web Proxy gateway"
+        "status": "Verified",
+        "tests": [
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+        ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/CreateGatewaySecurityPolicyRule",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): Secure Web Proxy's resources (gateway security policies and their rules, URL lists, TLS inspection policies); CloudBurrow serves no Secure Web Proxy gateway"
+        "status": "Verified",
+        "tests": [
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+        ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/CreateServerTlsPolicy",
@@ -22392,13 +22471,17 @@
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/CreateTlsInspectionPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): Secure Web Proxy's resources (gateway security policies and their rules, URL lists, TLS inspection policies); CloudBurrow serves no Secure Web Proxy gateway"
+        "status": "Verified",
+        "tests": [
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+        ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/CreateUrlList",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): Secure Web Proxy's resources (gateway security policies and their rules, URL lists, TLS inspection policies); CloudBurrow serves no Secure Web Proxy gateway"
+        "status": "Verified",
+        "tests": [
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+        ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/DeleteAuthorizationPolicy",
@@ -22411,13 +22494,16 @@
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/DeleteAuthzPolicy",
         "status": "Verified",
         "tests": [
+          "test/compat/authzcustom2160_test.go:82 TestCustomAuthorizationThroughALoadBalancer",
           "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer"
         ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/DeleteBackendAuthenticationConfig",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): Backend Authenticated TLS (a backend service's tlsSettings.authenticationConfig) is not served yet: the load balancers here do not verify their backends' certificates (#2160)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/addressgroups2160_test.go:259 TestBackendMutualTLSThroughTheGoClient"
+        ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/DeleteClientTlsPolicy",
@@ -22428,13 +22514,17 @@
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/DeleteGatewaySecurityPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): Secure Web Proxy's resources (gateway security policies and their rules, URL lists, TLS inspection policies); CloudBurrow serves no Secure Web Proxy gateway"
+        "status": "Verified",
+        "tests": [
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+        ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/DeleteGatewaySecurityPolicyRule",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): Secure Web Proxy's resources (gateway security policies and their rules, URL lists, TLS inspection policies); CloudBurrow serves no Secure Web Proxy gateway"
+        "status": "Verified",
+        "tests": [
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+        ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/DeleteServerTlsPolicy",
@@ -22445,13 +22535,17 @@
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/DeleteTlsInspectionPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): Secure Web Proxy's resources (gateway security policies and their rules, URL lists, TLS inspection policies); CloudBurrow serves no Secure Web Proxy gateway"
+        "status": "Verified",
+        "tests": [
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+        ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/DeleteUrlList",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): Secure Web Proxy's resources (gateway security policies and their rules, URL lists, TLS inspection policies); CloudBurrow serves no Secure Web Proxy gateway"
+        "status": "Verified",
+        "tests": [
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+        ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/GetAuthorizationPolicy",
@@ -22469,8 +22563,10 @@
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/GetBackendAuthenticationConfig",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): Backend Authenticated TLS (a backend service's tlsSettings.authenticationConfig) is not served yet: the load balancers here do not verify their backends' certificates (#2160)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/addressgroups2160_test.go:259 TestBackendMutualTLSThroughTheGoClient"
+        ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/GetClientTlsPolicy",
@@ -22481,13 +22577,17 @@
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/GetGatewaySecurityPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): Secure Web Proxy's resources (gateway security policies and their rules, URL lists, TLS inspection policies); CloudBurrow serves no Secure Web Proxy gateway"
+        "status": "Verified",
+        "tests": [
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+        ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/GetGatewaySecurityPolicyRule",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): Secure Web Proxy's resources (gateway security policies and their rules, URL lists, TLS inspection policies); CloudBurrow serves no Secure Web Proxy gateway"
+        "status": "Verified",
+        "tests": [
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+        ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/GetServerTlsPolicy",
@@ -22498,13 +22598,17 @@
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/GetTlsInspectionPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): Secure Web Proxy's resources (gateway security policies and their rules, URL lists, TLS inspection policies); CloudBurrow serves no Secure Web Proxy gateway"
+        "status": "Verified",
+        "tests": [
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+        ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/GetUrlList",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): Secure Web Proxy's resources (gateway security policies and their rules, URL lists, TLS inspection policies); CloudBurrow serves no Secure Web Proxy gateway"
+        "status": "Verified",
+        "tests": [
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+        ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/ListAuthorizationPolicies",
@@ -22522,8 +22626,10 @@
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/ListBackendAuthenticationConfigs",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): Backend Authenticated TLS (a backend service's tlsSettings.authenticationConfig) is not served yet: the load balancers here do not verify their backends' certificates (#2160)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/addressgroups2160_test.go:259 TestBackendMutualTLSThroughTheGoClient"
+        ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/ListClientTlsPolicies",
@@ -22534,13 +22640,17 @@
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/ListGatewaySecurityPolicies",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): Secure Web Proxy's resources (gateway security policies and their rules, URL lists, TLS inspection policies); CloudBurrow serves no Secure Web Proxy gateway"
+        "status": "Verified",
+        "tests": [
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+        ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/ListGatewaySecurityPolicyRules",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): Secure Web Proxy's resources (gateway security policies and their rules, URL lists, TLS inspection policies); CloudBurrow serves no Secure Web Proxy gateway"
+        "status": "Verified",
+        "tests": [
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+        ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/ListServerTlsPolicies",
@@ -22551,13 +22661,17 @@
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/ListTlsInspectionPolicies",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): Secure Web Proxy's resources (gateway security policies and their rules, URL lists, TLS inspection policies); CloudBurrow serves no Secure Web Proxy gateway"
+        "status": "Verified",
+        "tests": [
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+        ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/ListUrlLists",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): Secure Web Proxy's resources (gateway security policies and their rules, URL lists, TLS inspection policies); CloudBurrow serves no Secure Web Proxy gateway"
+        "status": "Verified",
+        "tests": [
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+        ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/UpdateAuthorizationPolicy",
@@ -22575,8 +22689,10 @@
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/UpdateBackendAuthenticationConfig",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): Backend Authenticated TLS (a backend service's tlsSettings.authenticationConfig) is not served yet: the load balancers here do not verify their backends' certificates (#2160)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/addressgroups2160_test.go:259 TestBackendMutualTLSThroughTheGoClient"
+        ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/UpdateClientTlsPolicy",
@@ -22587,13 +22703,17 @@
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/UpdateGatewaySecurityPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): Secure Web Proxy's resources (gateway security policies and their rules, URL lists, TLS inspection policies); CloudBurrow serves no Secure Web Proxy gateway"
+        "status": "Verified",
+        "tests": [
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+        ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/UpdateGatewaySecurityPolicyRule",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): Secure Web Proxy's resources (gateway security policies and their rules, URL lists, TLS inspection policies); CloudBurrow serves no Secure Web Proxy gateway"
+        "status": "Verified",
+        "tests": [
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+        ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/UpdateServerTlsPolicy",
@@ -22604,13 +22724,519 @@
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/UpdateTlsInspectionPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): Secure Web Proxy's resources (gateway security policies and their rules, URL lists, TLS inspection policies); CloudBurrow serves no Secure Web Proxy gateway"
+        "status": "Verified",
+        "tests": [
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+        ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/UpdateUrlList",
+        "status": "Verified",
+        "tests": [
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+        ]
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.OrganizationAddressGroupService/AddAddressGroupItems",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.OrganizationAddressGroupService/CloneAddressGroupItems",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.OrganizationAddressGroupService/CreateAddressGroup",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.OrganizationAddressGroupService/DeleteAddressGroup",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.OrganizationAddressGroupService/GetAddressGroup",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.OrganizationAddressGroupService/ListAddressGroupReferences",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.OrganizationAddressGroupService/ListAddressGroups",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.OrganizationAddressGroupService/RemoveAddressGroupItems",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.networksecurity.v1.OrganizationAddressGroupService/UpdateAddressGroup",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      }
+    ]
+  },
+  {
+    "Key": "networkservices",
+    "Title": "Network Services (v1)",
+    "counts": {
+      "Unimplemented": 68,
+      "Verified": 15
+    },
+    "rows": [
+      {
+        "method": "google.cloud.networkservices.v1.DepService/CreateAuthzExtension",
+        "status": "Verified",
+        "tests": [
+          "test/compat/authzcustom2160_test.go:82 TestCustomAuthorizationThroughALoadBalancer",
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+        ]
+      },
+      {
+        "method": "google.cloud.networkservices.v1.DepService/CreateLbEdgeExtension",
         "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): Secure Web Proxy's resources (gateway security policies and their rules, URL lists, TLS inspection policies); CloudBurrow serves no Secure Web Proxy gateway"
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.DepService/CreateLbRouteExtension",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.DepService/CreateLbTrafficExtension",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.DepService/DeleteAuthzExtension",
+        "status": "Verified",
+        "tests": [
+          "test/compat/authzcustom2160_test.go:82 TestCustomAuthorizationThroughALoadBalancer",
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+        ]
+      },
+      {
+        "method": "google.cloud.networkservices.v1.DepService/DeleteLbEdgeExtension",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.DepService/DeleteLbRouteExtension",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.DepService/DeleteLbTrafficExtension",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.DepService/GetAuthzExtension",
+        "status": "Verified",
+        "tests": [
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+        ]
+      },
+      {
+        "method": "google.cloud.networkservices.v1.DepService/GetLbEdgeExtension",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.DepService/GetLbRouteExtension",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.DepService/GetLbTrafficExtension",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.DepService/ListAuthzExtensions",
+        "status": "Verified",
+        "tests": [
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+        ]
+      },
+      {
+        "method": "google.cloud.networkservices.v1.DepService/ListLbEdgeExtensions",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.DepService/ListLbRouteExtensions",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.DepService/ListLbTrafficExtensions",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.DepService/UpdateAuthzExtension",
+        "status": "Verified",
+        "tests": [
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+        ]
+      },
+      {
+        "method": "google.cloud.networkservices.v1.DepService/UpdateLbEdgeExtension",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.DepService/UpdateLbRouteExtension",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.DepService/UpdateLbTrafficExtension",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/CreateAgentGateway",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/CreateEndpointPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+        ]
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/CreateGateway",
+        "status": "Verified",
+        "tests": [
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+        ]
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/CreateGrpcRoute",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/CreateHttpRoute",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/CreateMesh",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/CreateServiceBinding",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/CreateServiceLbPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/CreateTcpRoute",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/CreateTlsRoute",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/CreateWasmPlugin",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/CreateWasmPluginVersion",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/DeleteAgentGateway",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/DeleteEndpointPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+        ]
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/DeleteGateway",
+        "status": "Verified",
+        "tests": [
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+        ]
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/DeleteGrpcRoute",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/DeleteHttpRoute",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/DeleteMesh",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/DeleteServiceBinding",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/DeleteServiceLbPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/DeleteTcpRoute",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/DeleteTlsRoute",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/DeleteWasmPlugin",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/DeleteWasmPluginVersion",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/GetAgentGateway",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/GetEndpointPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+        ]
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/GetGateway",
+        "status": "Verified",
+        "tests": [
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+        ]
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/GetGatewayRouteView",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/GetGrpcRoute",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/GetHttpRoute",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/GetMesh",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/GetMeshRouteView",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/GetServiceBinding",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/GetServiceLbPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/GetTcpRoute",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/GetTlsRoute",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/GetWasmPlugin",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/GetWasmPluginVersion",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/ListAgentGateways",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/ListEndpointPolicies",
+        "status": "Verified",
+        "tests": [
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+        ]
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/ListGatewayRouteViews",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/ListGateways",
+        "status": "Verified",
+        "tests": [
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+        ]
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/ListGrpcRoutes",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/ListHttpRoutes",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/ListMeshRouteViews",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/ListMeshes",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/ListServiceBindings",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/ListServiceLbPolicies",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/ListTcpRoutes",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/ListTlsRoutes",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/ListWasmPluginVersions",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/ListWasmPlugins",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/UpdateAgentGateway",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/UpdateEndpointPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+        ]
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/UpdateGateway",
+        "status": "Verified",
+        "tests": [
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+        ]
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/UpdateGrpcRoute",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/UpdateHttpRoute",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/UpdateMesh",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/UpdateServiceBinding",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/UpdateServiceLbPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/UpdateTcpRoute",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/UpdateTlsRoute",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.networkservices.v1.NetworkServices/UpdateWasmPlugin",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       }
     ]
   },

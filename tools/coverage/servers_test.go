@@ -153,6 +153,7 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 		t.Fatal(err)
 	}
 	networksecuritypb.RegisterNetworkSecurityServer(srv, nsSrv)
+	nsSrv.RegisterAddressGroups(srv)
 	nsvSrv, err := networkservices.New(networkservices.Options{})
 	if err != nil {
 		t.Fatal(err)
