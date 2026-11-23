@@ -1,11 +1,12 @@
 // Package networkservices serves the parts of the Network Services API v1
-// (networkservices.googleapis.com, #2160) that Secure Web Proxy and
-// Service Extensions need, in the CLI process, on the Compute Engine API's
+// (networkservices.googleapis.com, #2160) that Secure Web Proxy, Service
+// Extensions and proxyless gRPC servers need, in the CLI process, on the Compute Engine API's
 // port, over JSON as Google serves it and over gRPC: gateways (a
 // SECURE_WEB_GATEWAY gateway is a real forward proxy here, proxy.go; an
 // OPEN_MESH gateway is kept for Traffic Director), authorization
 // extensions (authzExtensions, which an authorization policy's CUSTOM
-// action names), their long-running operations and the locations. The
+// action names), endpoint policies (endpointpolicies.go), their
+// long-running operations and the locations. The
 // API's other collections answer UNIMPLEMENTED.
 //
 // It follows https://docs.cloud.google.com/secure-web-proxy/docs/quickstart,
@@ -63,8 +64,10 @@ type Hooks struct {
 	// security policy exists (projects/P/locations/L/gatewaySecurityPolicies/X).
 	GatewaySecurityPolicyExists func(name string) bool
 	// ServerTLSPolicyExists is whether a Network Security server TLS
-	// policy exists.
+	// policy exists; NetSecPolicyExists whether any Network Security
+	// policy (server TLS, client TLS, authorization) exists.
 	ServerTLSPolicyExists func(name string) bool
+	NetSecPolicyExists    func(name string) bool
 	// CertificateExists is whether a Certificate Manager certificate
 	// exists (projects/P/locations/L/certificates/C).
 	CertificateExists func(name string) bool
@@ -135,12 +138,11 @@ const (
 // colls are every collection of the API: the two served, and the rest,
 // which answer UNIMPLEMENTED on this port rather than Compute Engine's
 // 404.
-var colls = map[string]bool{collGateways: true, collAuthzExt: true,
-	"endpointPolicies": true, "wasmPlugins": true, "grpcRoutes": true, "httpRoutes": true, "tcpRoutes": true,
+var colls = map[string]bool{collGateways: true, collAuthzExt: true, collEndpointPolicies: true, "wasmPlugins": true, "grpcRoutes": true, "httpRoutes": true, "tcpRoutes": true,
 	"tlsRoutes": true, "serviceBindings": true, "meshes": true, "serviceLbPolicies": true, "agentGateways": true,
 	"lbTrafficExtensions": true, "lbRouteExtensions": true, "lbEdgeExtensions": true, "routeViews": true}
 
-var noun = map[string]string{collGateways: "Gateway", collAuthzExt: "AuthzExtension"}
+var noun = map[string]string{collGateways: "Gateway", collAuthzExt: "AuthzExtension", collEndpointPolicies: "EndpointPolicy"}
 
 var (
 	parentRE = regexp.MustCompile(`^projects/([^/]+)/locations/([^/]+)$`)
@@ -422,6 +424,8 @@ func newOf(name string) proto.Message {
 		return &nsvpb.Gateway{}
 	case collAuthzExt:
 		return &nsvpb.AuthzExtension{}
+	case collEndpointPolicies:
+		return &nsvpb.EndpointPolicy{}
 	}
 	return nil
 }

@@ -35,7 +35,7 @@ import (
 // target is a server on this machine's loopback: the proxy never reaches
 // the internet in this test.
 //
-// covers: google.cloud.networksecurity.v1.NetworkSecurity/CreateUrlList, google.cloud.networksecurity.v1.NetworkSecurity/GetUrlList, google.cloud.networksecurity.v1.NetworkSecurity/ListUrlLists, google.cloud.networksecurity.v1.NetworkSecurity/UpdateUrlList, google.cloud.networksecurity.v1.NetworkSecurity/DeleteUrlList, google.cloud.networksecurity.v1.NetworkSecurity/CreateGatewaySecurityPolicy, google.cloud.networksecurity.v1.NetworkSecurity/GetGatewaySecurityPolicy, google.cloud.networksecurity.v1.NetworkSecurity/ListGatewaySecurityPolicies, google.cloud.networksecurity.v1.NetworkSecurity/UpdateGatewaySecurityPolicy, google.cloud.networksecurity.v1.NetworkSecurity/DeleteGatewaySecurityPolicy, google.cloud.networksecurity.v1.NetworkSecurity/CreateGatewaySecurityPolicyRule, google.cloud.networksecurity.v1.NetworkSecurity/GetGatewaySecurityPolicyRule, google.cloud.networksecurity.v1.NetworkSecurity/ListGatewaySecurityPolicyRules, google.cloud.networksecurity.v1.NetworkSecurity/UpdateGatewaySecurityPolicyRule, google.cloud.networksecurity.v1.NetworkSecurity/DeleteGatewaySecurityPolicyRule, google.cloud.networksecurity.v1.NetworkSecurity/CreateTlsInspectionPolicy, google.cloud.networksecurity.v1.NetworkSecurity/GetTlsInspectionPolicy, google.cloud.networksecurity.v1.NetworkSecurity/ListTlsInspectionPolicies, google.cloud.networksecurity.v1.NetworkSecurity/UpdateTlsInspectionPolicy, google.cloud.networksecurity.v1.NetworkSecurity/DeleteTlsInspectionPolicy, google.cloud.networkservices.v1.NetworkServices/CreateGateway, google.cloud.networkservices.v1.NetworkServices/GetGateway, google.cloud.networkservices.v1.NetworkServices/ListGateways, google.cloud.networkservices.v1.NetworkServices/UpdateGateway, google.cloud.networkservices.v1.NetworkServices/DeleteGateway, google.cloud.networkservices.v1.DepService/CreateAuthzExtension, google.cloud.networkservices.v1.DepService/GetAuthzExtension, google.cloud.networkservices.v1.DepService/ListAuthzExtensions, google.cloud.networkservices.v1.DepService/UpdateAuthzExtension, google.cloud.networkservices.v1.DepService/DeleteAuthzExtension
+// covers: google.cloud.networksecurity.v1.NetworkSecurity/CreateUrlList, google.cloud.networksecurity.v1.NetworkSecurity/GetUrlList, google.cloud.networksecurity.v1.NetworkSecurity/ListUrlLists, google.cloud.networksecurity.v1.NetworkSecurity/UpdateUrlList, google.cloud.networksecurity.v1.NetworkSecurity/DeleteUrlList, google.cloud.networksecurity.v1.NetworkSecurity/CreateGatewaySecurityPolicy, google.cloud.networksecurity.v1.NetworkSecurity/GetGatewaySecurityPolicy, google.cloud.networksecurity.v1.NetworkSecurity/ListGatewaySecurityPolicies, google.cloud.networksecurity.v1.NetworkSecurity/UpdateGatewaySecurityPolicy, google.cloud.networksecurity.v1.NetworkSecurity/DeleteGatewaySecurityPolicy, google.cloud.networksecurity.v1.NetworkSecurity/CreateGatewaySecurityPolicyRule, google.cloud.networksecurity.v1.NetworkSecurity/GetGatewaySecurityPolicyRule, google.cloud.networksecurity.v1.NetworkSecurity/ListGatewaySecurityPolicyRules, google.cloud.networksecurity.v1.NetworkSecurity/UpdateGatewaySecurityPolicyRule, google.cloud.networksecurity.v1.NetworkSecurity/DeleteGatewaySecurityPolicyRule, google.cloud.networksecurity.v1.NetworkSecurity/CreateTlsInspectionPolicy, google.cloud.networksecurity.v1.NetworkSecurity/GetTlsInspectionPolicy, google.cloud.networksecurity.v1.NetworkSecurity/ListTlsInspectionPolicies, google.cloud.networksecurity.v1.NetworkSecurity/UpdateTlsInspectionPolicy, google.cloud.networksecurity.v1.NetworkSecurity/DeleteTlsInspectionPolicy, google.cloud.networkservices.v1.NetworkServices/CreateGateway, google.cloud.networkservices.v1.NetworkServices/GetGateway, google.cloud.networkservices.v1.NetworkServices/ListGateways, google.cloud.networkservices.v1.NetworkServices/UpdateGateway, google.cloud.networkservices.v1.NetworkServices/DeleteGateway, google.cloud.networkservices.v1.DepService/CreateAuthzExtension, google.cloud.networkservices.v1.DepService/GetAuthzExtension, google.cloud.networkservices.v1.DepService/ListAuthzExtensions, google.cloud.networkservices.v1.DepService/UpdateAuthzExtension, google.cloud.networkservices.v1.DepService/DeleteAuthzExtension, google.cloud.networkservices.v1.NetworkServices/CreateEndpointPolicy, google.cloud.networkservices.v1.NetworkServices/GetEndpointPolicy, google.cloud.networkservices.v1.NetworkServices/ListEndpointPolicies, google.cloud.networkservices.v1.NetworkServices/UpdateEndpointPolicy, google.cloud.networkservices.v1.NetworkServices/DeleteEndpointPolicy
 func TestSecureWebProxyThroughTheGoClients(t *testing.T) {
 	h := New(t)
 	computeAddr := h.Endpoint(EnvCompute) // skips without it
@@ -395,6 +395,47 @@ func TestSecureWebProxyThroughTheGoClients(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := dop.Wait(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// An endpoint policy (proxyless gRPC servers), global.
+	g := "projects/" + project + "/locations/global"
+	epop, err := nsv.CreateEndpointPolicy(ctx, &networkservicespb.CreateEndpointPolicyRequest{Parent: g, EndpointPolicyId: n("ep"),
+		EndpointPolicy: &networkservicespb.EndpointPolicy{Type: networkservicespb.EndpointPolicy_GRPC_SERVER,
+			EndpointMatcher: &networkservicespb.EndpointMatcher{MatcherType: &networkservicespb.EndpointMatcher_MetadataLabelMatcher_{
+				MetadataLabelMatcher: &networkservicespb.EndpointMatcher_MetadataLabelMatcher{MetadataLabelMatchCriteria: networkservicespb.EndpointMatcher_MetadataLabelMatcher_MATCH_ANY,
+					MetadataLabels: []*networkservicespb.EndpointMatcher_MetadataLabelMatcher_MetadataLabels{{LabelName: "app", LabelValue: "swp"}}}}},
+			TrafficPortSelector: &networkservicespb.TrafficPortSelector{Ports: []string{"50051"}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ep, err := epop.Wait(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := nsv.CreateEndpointPolicy(ctx, &networkservicespb.CreateEndpointPolicyRequest{Parent: g, EndpointPolicyId: n("ep2"),
+		EndpointPolicy: &networkservicespb.EndpointPolicy{Type: networkservicespb.EndpointPolicy_GRPC_SERVER}}); err == nil {
+		t.Error("an endpoint policy without an endpoint matcher was accepted")
+	}
+	if got, err := nsv.GetEndpointPolicy(ctx, &networkservicespb.GetEndpointPolicyRequest{Name: ep.GetName()}); err != nil || got.GetType() != networkservicespb.EndpointPolicy_GRPC_SERVER {
+		t.Fatalf("GetEndpointPolicy: %v %v", got, err)
+	}
+	if !swpListed(nsv.ListEndpointPolicies(ctx, &networkservicespb.ListEndpointPoliciesRequest{Parent: g}).Next, ep.GetName()) {
+		t.Error("ListEndpointPolicies: the policy is missing")
+	}
+	epuop, err := nsv.UpdateEndpointPolicy(ctx, &networkservicespb.UpdateEndpointPolicyRequest{UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"description"}},
+		EndpointPolicy: &networkservicespb.EndpointPolicy{Name: ep.GetName(), Description: "grpc"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := epuop.Wait(ctx); err != nil {
+		t.Fatal(err)
+	}
+	epdop, err := nsv.DeleteEndpointPolicy(ctx, &networkservicespb.DeleteEndpointPolicyRequest{Name: ep.GetName()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := epdop.Wait(ctx); err != nil {
 		t.Fatal(err)
 	}
 

@@ -28,6 +28,7 @@ func (s *computeService) useNetSvc(api *compute.Server, ns *networksecurity.Serv
 	nsv.UseHooks(networkservices.Hooks{
 		GatewaySecurityPolicyExists: ns.Exists,
 		ServerTLSPolicyExists:       ns.Exists,
+		NetSecPolicyExists:          ns.Exists,
 		CertificateExists:           cm.CertificateExists,
 		Network:                     func(rel string) bool { _, ok := get(rel); return ok },
 		Subnetwork: func(rel string) (string, bool) {

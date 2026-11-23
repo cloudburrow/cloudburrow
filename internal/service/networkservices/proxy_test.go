@@ -12,6 +12,7 @@ import (
 	"time"
 
 	nsvpb "cloud.google.com/go/networkservices/apiv1/networkservicespb"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
@@ -243,5 +244,37 @@ func TestAuthzExtensionValidation(t *testing.T) {
 	if !ok || info.Service != "projects/p/regions/us-central1/backendServices/authz" || info.WireFormat != "EXT_PROC_GRPC" ||
 		info.Timeout != 100*time.Millisecond || info.ForwardHeaders[0] != "Authorization" {
 		t.Errorf("AuthzExtension: %+v %v", info, ok)
+	}
+}
+
+func TestEndpointPolicies(t *testing.T) {
+	s, _ := New(Options{})
+	ctx := context.Background()
+	mk := func(loc string, e *nsvpb.EndpointPolicy) error {
+		_, err := s.CreateEndpointPolicy(ctx, &nsvpb.CreateEndpointPolicyRequest{Parent: "projects/p/locations/" + loc, EndpointPolicyId: "ep", EndpointPolicy: e})
+		return err
+	}
+	good := &nsvpb.EndpointPolicy{Type: nsvpb.EndpointPolicy_GRPC_SERVER, ServerTlsPolicy: "projects/p/locations/global/serverTlsPolicies/stp",
+		EndpointMatcher: &nsvpb.EndpointMatcher{MatcherType: &nsvpb.EndpointMatcher_MetadataLabelMatcher_{MetadataLabelMatcher: &nsvpb.EndpointMatcher_MetadataLabelMatcher{
+			MetadataLabelMatchCriteria: nsvpb.EndpointMatcher_MetadataLabelMatcher_MATCH_ALL,
+			MetadataLabels:             []*nsvpb.EndpointMatcher_MetadataLabelMatcher_MetadataLabels{{LabelName: "app", LabelValue: "a"}, {LabelName: "env", LabelValue: "prod"}}}}},
+		TrafficPortSelector: &nsvpb.TrafficPortSelector{Ports: []string{"50051", "8000-8100"}}}
+	if mk("us-central1", good) == nil {
+		t.Error("a regional endpoint policy was accepted")
+	}
+	bad := proto.Clone(good).(*nsvpb.EndpointPolicy)
+	bad.TrafficPortSelector.Ports = []string{"70000"}
+	if mk("global", bad) == nil {
+		t.Error("port 70000 was accepted")
+	}
+	if err := mk("global", good); err != nil {
+		t.Fatal(err)
+	}
+	l := s.EndpointPolicies("p")
+	if len(l) != 1 || l[0].GetServerTlsPolicy() == "" {
+		t.Fatalf("EndpointPolicies: %v", l)
+	}
+	if !EndpointPolicyMatches(l[0], map[string]string{"app": "a", "env": "prod", "x": "y"}) || EndpointPolicyMatches(l[0], map[string]string{"app": "a"}) {
+		t.Error("MATCH_ALL")
 	}
 }
