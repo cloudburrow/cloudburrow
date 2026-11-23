@@ -110,10 +110,7 @@ func envVarsFromCLI(t *testing.T) map[string]string {
 // would not see.
 func newEnvGcloudSession(t *testing.T, vars map[string]string, rec *iamRecorder) *gcloudSession {
 	t.Helper()
-	bin, err := exec.LookPath("gcloud")
-	if err != nil {
-		t.Skip("gcloud is not on PATH")
-	}
+	bin := gcloudBinary(t) // in the tool box (#2174)
 	var env []string
 	for _, kv := range os.Environ() {
 		if !strings.HasPrefix(kv, "CLOUDSDK_") && !strings.HasPrefix(kv, "GOOGLE_") && !strings.HasPrefix(kv, "GCE_") {

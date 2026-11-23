@@ -68,22 +68,32 @@ func bqBinary(t *testing.T) string {
 	return bin
 }
 
+// realTool is the tool name of gcloud's SDK as the test runs it: boxexec
+// under that name, which runs it in the tool box (toolbox_test.go, #2174),
+// never on the host. The host's gcloud decides whether the test runs, as it
+// did before the box: EnvGcloud when set, which must then resolve and have
+// the tool beside it, otherwise gcloud on PATH; the test skips when neither
+// is there. The box mounts that SDK.
 func realTool(t *testing.T, name string) string {
 	t.Helper()
 	if v := os.Getenv(EnvGcloud); v != "" {
-		gcloud, err := exec.LookPath(v)
+		gcloud, err := hostLookPath(v)
 		if err != nil {
 			t.Fatalf("%s=%s: %v", EnvGcloud, v, err)
 		}
-		bin := filepath.Join(filepath.Dir(gcloud), name)
-		if _, err := exec.LookPath(bin); err != nil {
+		if _, err := os.Stat(filepath.Join(filepath.Dir(gcloud), name)); err != nil {
 			t.Fatalf("%s=%s has no %s beside it: %v", EnvGcloud, v, name, err)
 		}
-		return bin
-	}
-	bin, err := exec.LookPath(name)
-	if err != nil {
+	} else if _, err := hostLookPath(name); err != nil {
 		t.Skipf("%s is not on PATH and %s is not set", name, EnvGcloud)
+	}
+	box := toolBox(t)
+	if box.sdk == "" {
+		t.Fatalf("the tool box mounted no gcloud SDK, though the host has %s", name)
+	}
+	bin := filepath.Join(toolDir, name)
+	if _, err := os.Lstat(bin); err != nil {
+		t.Fatalf("the tool box has no %s: %v", name, err)
 	}
 	return bin
 }
@@ -115,7 +125,7 @@ func logToolVersion(t *testing.T, bin string, args ...string) {
 		}
 		out, _ = toolVersions.LoadOrStore(key, strings.TrimSpace(string(b)))
 	}
-	t.Logf("%s %s (%s):\n%s", filepath.Base(bin), strings.Join(args, " "), bin, out)
+	t.Logf("%s %s (in the tool box):\n%s", filepath.Base(bin), strings.Join(args, " "), out)
 }
 
 // useGoogleProviderLock writes the committed lock file into a module's

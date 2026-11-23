@@ -29,7 +29,16 @@ func TestMain(m *testing.M) {
 	// An instance that enforces IAM: Cloud Run services are invoked as
 	// the instance's own account (ownerinvoke1879_test.go).
 	useOwnerInvokeTokens()
-	os.Exit(m.Run())
+	// gcloud and Terraform run only in the tool box (toolbox_test.go,
+	// #2174): from here on PATH names a stub for each, until the box
+	// replaces them.
+	if err := installToolGuard(); err != nil {
+		fmt.Fprintf(os.Stderr, "compat: the tool guard: %v\n", err)
+		os.Exit(1)
+	}
+	code := m.Run()
+	stopToolBox()
+	os.Exit(code)
 }
 
 // cliArgs are the flags naming the harness's instance, for every test that

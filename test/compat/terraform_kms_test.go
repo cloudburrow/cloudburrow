@@ -27,9 +27,7 @@ import (
 // its :destroy call.
 func TestTerraformKMS(t *testing.T) {
 	h := New(t)
-	if _, err := exec.LookPath("terraform"); err != nil {
-		t.Skip("terraform is not on PATH")
-	}
+	terraformTool(t, "terraform") // in the tool box (#2174)
 	cli := os.Getenv(EnvCLI)
 	if cli == "" {
 		t.Skipf("%s is not set", EnvCLI)

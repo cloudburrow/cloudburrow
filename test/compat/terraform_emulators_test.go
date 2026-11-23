@@ -37,9 +37,7 @@ import (
 // TestTerraformSpannerInstanceAndDatabase.
 func TestTerraformFirestoreDocumentAndBigtableTable(t *testing.T) {
 	h := New(t)
-	if _, err := exec.LookPath("terraform"); err != nil {
-		t.Skip("terraform is not on PATH")
-	}
+	terraformTool(t, "terraform") // in the tool box (#2174)
 	cli := os.Getenv(EnvCLI)
 	if cli == "" {
 		t.Skipf("%s is not set", EnvCLI)
@@ -174,9 +172,7 @@ resource "google_bigtable_table" "t" {
 // plans clean.
 func TestTerraformSpannerInstanceAndDatabase(t *testing.T) {
 	h := New(t)
-	if _, err := exec.LookPath("terraform"); err != nil {
-		t.Skip("terraform is not on PATH")
-	}
+	terraformTool(t, "terraform") // in the tool box (#2174)
 	cli := os.Getenv(EnvCLI)
 	if cli == "" {
 		t.Skipf("%s is not set", EnvCLI)
@@ -343,9 +339,7 @@ resource "google_spanner_database" "d" {
 // emulator needs no index, and deletes no expired document.
 func TestTerraformFirestoreDatabaseIndexAndField(t *testing.T) {
 	h := New(t)
-	if _, err := exec.LookPath("terraform"); err != nil {
-		t.Skip("terraform is not on PATH")
-	}
+	terraformTool(t, "terraform") // in the tool box (#2174)
 	cli := os.Getenv(EnvCLI)
 	if cli == "" {
 		t.Skipf("%s is not set", EnvCLI)
