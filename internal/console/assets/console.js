@@ -25483,7 +25483,7 @@ function btSaveDialog({ title, label, value, regions, submit }) {
 // scan", "Stream aggregate", "Distributed union".
 function spannerOpName(n) {
   const m = n.meta || {};
-  if (n.name === "Scan") return { TableScan: "Table scan", IndexScan: "Index scan", BatchScan: "Batch scan" }[m.scan_type] || "Scan";
+  if (n.name === "Scan") return { TableScan: "Table scan", IndexScan: "Index scan", BatchScan: "Batch scan", RecursiveSpoolScan: "Recursive spool scan" }[m.scan_type] || "Scan";
   if (n.name === "Aggregate" && m.iterator_type) return `${m.iterator_type} aggregate`;
   return n.name.charAt(0) + n.name.slice(1).toLowerCase();
 }

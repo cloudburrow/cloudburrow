@@ -12122,6 +12122,7 @@
         "tests": [
           "test/compat/spannercmek1950_test.go:61 TestSpannerCMEK",
           "test/compat/spannerdata_test.go:137 TestSpannerUnaryQueryDMLAndRollback",
+          "test/compat/spannergraph2029c_test.go:140 TestSpannerGraphQueryPlansOfEveryStatement",
           "test/compat/spannerplans2029_test.go:228 TestSpannerQueryPlans",
           "test/compat/spannerplans2029b_test.go:180 TestSpannerQueryPlansForEveryShape",
           "test/compat/spannerplans2029b_test.go:321 TestSpannerGraphQueryPlans",
@@ -12135,6 +12136,7 @@
         "tests": [
           "test/compat/iamenforcementround9_1879_test.go:159 TestIAMEnforcementSpanner",
           "test/compat/optional_test.go:264 TestSpannerSchemaAndQuery",
+          "test/compat/spannergraph2029c_test.go:140 TestSpannerGraphQueryPlansOfEveryStatement",
           "test/compat/spannerplans2029_test.go:228 TestSpannerQueryPlans",
           "test/compat/spannerplans2029b_test.go:180 TestSpannerQueryPlansForEveryShape",
           "test/compat/spannerplans2029b_test.go:321 TestSpannerGraphQueryPlans",
