@@ -3,6 +3,7 @@ package bigqueryfront
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"time"
@@ -35,7 +36,16 @@ import (
 func (f front) pruneHistory(r *http.Request, dataset, table string, earliest int64) string {
 	changes := quotePath([]string{projectOf(f.base), dataset, table + changeTableSuffix})
 	old := fmt.Sprintf("googlesqlite_change_micros < %d AND _CHANGE_TYPE != 'START'", earliest)
-	if n, ok := f.scalarInt(r, "SELECT COUNTIF(_CHANGE_TYPE != '"+changeCarry+"') FROM "+changes+" WHERE "+old); !ok || n == 0 {
+	n, ok := f.scalarInt(r, "SELECT COUNTIF(_CHANGE_TYPE != '"+changeCarry+"') FROM "+changes+" WHERE "+old)
+	if !ok {
+		// Logged, not returned: a read is still bounded by the window
+		// (changeWindow). Main run 45171873407's
+		// TestBigQueryAlterSchemaTimeTravelLetsGoFirst found nothing let go
+		// after an ALTER SCHEMA, and every step here was silent.
+		log.Printf("bigquery history: %s.%s: counting the changes before %d failed; nothing let go", dataset, table, earliest)
+		return ""
+	}
+	if n == 0 {
 		return ""
 	}
 	for _, q := range []string{
@@ -59,6 +69,7 @@ func (f front) pruneHistory(r *http.Request, dataset, table string, earliest int
 func (f front) pruneDataset(r *http.Request, dataset string, hours int64) {
 	now, ok := f.scalarInt(r, "SELECT UNIX_MICROS(CURRENT_TIMESTAMP())")
 	if !ok {
+		log.Printf("bigquery history: dataset %s: reading the engine's clock failed; nothing let go", dataset)
 		return
 	}
 	earliest := now - hours*int64(time.Hour/time.Microsecond)
@@ -79,13 +90,16 @@ func (f front) pruneDataset(r *http.Request, dataset string, hours int64) {
 			NextPageToken string `json:"nextPageToken"`
 		}
 		if st != http.StatusOK || json.Unmarshal(got, &list) != nil {
+			log.Printf("bigquery history: dataset %s: listing its tables = %d; nothing let go", dataset, st)
 			return
 		}
 		for _, t := range list.Tables {
 			if t.Type == "" || t.Type == "TABLE" {
 				// One that cannot be let go of is still read only
 				// within the window (changeWindow).
-				_ = f.pruneHistory(r, dataset, t.TableReference.TableID, earliest)
+				if msg := f.pruneHistory(r, dataset, t.TableReference.TableID, earliest); msg != "" {
+					log.Printf("bigquery history: %s.%s: letting go of the changes before %d: %s", dataset, t.TableReference.TableID, earliest, msg)
+				}
 			}
 		}
 		if list.NextPageToken == "" || list.NextPageToken == token {
