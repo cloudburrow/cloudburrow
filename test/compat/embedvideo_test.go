@@ -35,15 +35,35 @@ const (
 
 func fetchSeaTurtle(t *testing.T, ctx context.Context) []byte {
 	t.Helper()
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, seaTurtleURL, nil)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Skipf("fetching the test video: %v", err)
+	// Hugging Face's transient 502s (main run 45102950103, which skipped
+	// this test and so ran it in no shard) are tried again, for up to
+	// about four minutes.
+	var b []byte
+	var why string
+	for attempt := 0; attempt < 6; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-time.After(time.Duration(attempt*15) * time.Second):
+			case <-ctx.Done():
+				t.Skipf("fetching the test video: %s; %v", why, ctx.Err())
+			}
+		}
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, seaTurtleURL, nil)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			why = err.Error()
+			continue
+		}
+		b, err = io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if err == nil && resp.StatusCode == http.StatusOK {
+			why = ""
+			break
+		}
+		why = fmt.Sprintf("HTTP %d %v", resp.StatusCode, err)
 	}
-	defer resp.Body.Close()
-	b, err := io.ReadAll(resp.Body)
-	if err != nil || resp.StatusCode != http.StatusOK {
-		t.Skipf("fetching the test video: HTTP %d %v", resp.StatusCode, err)
+	if why != "" {
+		t.Skipf("fetching the test video: %s", why)
 	}
 	if sum := sha256.Sum256(b); hex.EncodeToString(sum[:]) != seaTurtleSHA256 {
 		t.Fatalf("the test video's SHA-256 is %x, want %s", sum, seaTurtleSHA256)

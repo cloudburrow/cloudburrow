@@ -1,6 +1,7 @@
 package vertexai
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -67,6 +68,36 @@ import (
 type prebuiltType struct {
 	category, version, display string
 	fields                     []prebuiltField
+	// lead are the fields the model is asked for first, those such a
+	// document nearly always states: the constrained decoder writes the
+	// answer's fields in the schema's order, and greedy decoding that
+	// began with a run of fields the document lacks (Google's names
+	// sorted: amount_paid_since_last_invoice, carrier, currency, ...)
+	// went on answering null for every field, invoice_id and
+	// total_amount too, on the runner's CPU (main run 45102950103).
+	lead []string
+}
+
+// asked is pt's fields in the order the model is asked for them: lead
+// first, then the others in their declared order.
+func (pt prebuiltType) asked() []prebuiltField {
+	at := make(map[string]int, len(pt.lead))
+	for i, n := range pt.lead {
+		at[n] = i
+	}
+	out := append([]prebuiltField(nil), pt.fields...)
+	sort.SliceStable(out, func(i, j int) bool {
+		a, aok := at[out[i].name]
+		b, bok := at[out[j].name]
+		switch {
+		case aok && bok:
+			return a < b
+		case aok != bok:
+			return aok
+		}
+		return false
+	})
+	return out
 }
 
 // prebuiltField is an entity type an extractor answers: kind is "date",
@@ -101,19 +132,20 @@ var docAIPrebuilt = map[string]prebuiltType{
 		pf("supplier_registration"), pf("supplier_tax_id"), pf("supplier_website"), pfm("total_amount"), pfm("total_tax_amount"),
 		pfp("line_item", pfm("amount"), pf("description"), pf("product_code"), pf("purchase_order"), pf("quantity"), pf("unit"), pfm("unit_price")),
 		pfp("vat", pfm("amount"), pf("category_code"), pfm("tax_amount"), pf("tax_rate")),
-	}},
+	}, lead: []string{"invoice_id", "invoice_date", "supplier_name", "supplier_address", "receiver_name", "receiver_address", "due_date",
+		"total_amount", "net_amount", "total_tax_amount", "line_item"}},
 	"EXPENSE_PROCESSOR": {category: "SPECIALIZED", version: "pretrained-expense-v1.3-2022-07-15", display: "Expense Parser", fields: []prebuiltField{
 		pf("credit_card_last_four_digits"), pf("currency"), pfd("end_date"), pfm("net_amount"), pf("payment_type"), pf("purchase_time"),
 		pfd("receipt_date"), pfd("start_date"), pf("supplier_address"), pf("supplier_city"), pf("supplier_name"), pf("supplier_phone"),
 		pfm("tip_amount"), pfm("total_amount"), pfm("total_tax_amount"),
 		pfp("line_item", pfm("amount"), pf("description"), pf("product_code")),
-	}},
+	}, lead: []string{"supplier_name", "receipt_date", "total_amount", "net_amount", "total_tax_amount", "line_item"}},
 	"BANK_STATEMENT_PROCESSOR": {category: "SPECIALIZED", version: "pretrained-bankstatement-v3.0-2022-05-16", display: "Bank Statement Parser", fields: []prebuiltField{
 		pf("account_number"), pf("account_type"), pf("bank_address"), pf("bank_name"), pf("client_address"), pf("client_name"),
 		pfm("ending_balance"), pfm("starting_balance"), pfd("statement_date"), pfd("statement_end_date"), pfd("statement_start_date"),
 		pfp("table_item", pfm("transaction_deposit"), pfd("transaction_deposit_date"), pf("transaction_deposit_description"),
 			pfm("transaction_withdrawal"), pfd("transaction_withdrawal_date"), pf("transaction_withdrawal_description")),
-	}},
+	}, lead: []string{"bank_name", "client_name", "account_number", "statement_date", "starting_balance", "ending_balance", "table_item"}},
 	"PAYSTUB_PROCESSOR": {category: "SPECIALIZED", version: "pretrained-paystub-v2.0-2022-07-22", display: "Pay Slip Parser", fields: []prebuiltField{
 		pf("net_pay"), pf("net_pay_ytd"), pf("employee_account_number"), pf("page_number"),
 		pf("federal_additional_tax"), pf("federal_allowance"), pf("federal_marital_status"),
@@ -205,7 +237,7 @@ func (s *Server) applyPrebuilt(ctx context.Context, t string, doc *documentaipb.
 	if t == "FORM_PARSER_PROCESSOR" {
 		return s.formParse(ctx, doc)
 	}
-	return s.extractPrebuilt(ctx, docAIPrebuilt[t].fields, doc)
+	return s.extractPrebuilt(ctx, docAIPrebuilt[t].asked(), doc)
 }
 
 // --- layout anchors -------------------------------------------------------
@@ -538,14 +570,14 @@ func (s *Server) extractPrebuilt(ctx context.Context, fields []prebuiltField, do
 	var top []string
 	var groups []string
 	str := map[string]any{"type": []string{"string", "null"}}
-	props := map[string]any{}
+	var props orderedProps
 	var required []string
 	for _, fl := range fields {
 		required = append(required, fl.name)
 		if fl.children == nil {
 			top = append(top, fl.name)
 			kinds[fl.name] = fl.kind
-			props[fl.name] = str
+			props = append(props, orderedProp{fl.name, str})
 			continue
 		}
 		child := map[string]any{}
@@ -556,8 +588,8 @@ func (s *Server) extractPrebuilt(ctx context.Context, fields []prebuiltField, do
 			child[short] = str
 			names = append(names, short)
 		}
-		props[fl.name] = map[string]any{"type": "array", "maxItems": formMaxItems,
-			"items": map[string]any{"type": "object", "properties": child, "additionalProperties": false}}
+		props = append(props, orderedProp{fl.name, map[string]any{"type": "array", "maxItems": formMaxItems,
+			"items": map[string]any{"type": "object", "properties": child, "additionalProperties": false}}})
 		groups = append(groups, fmt.Sprintf("%s (a list: one object for each, with %s)", fl.name, strings.Join(names, ", ")))
 	}
 	// Every field is required and may be null: the model then weighs each
@@ -706,6 +738,38 @@ func (s *Server) extractPrebuilt(ctx context.Context, fields []prebuiltField, do
 	}
 	numberEntities(doc.Entities)
 	return nil
+}
+
+// orderedProps are a JSON schema's properties in the order the model is
+// to write them (a Go map's are marshalled sorted).
+type orderedProps []orderedProp
+
+type orderedProp struct {
+	name   string
+	schema any
+}
+
+func (o orderedProps) MarshalJSON() ([]byte, error) {
+	var b bytes.Buffer
+	b.WriteByte('{')
+	for i, p := range o {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		k, err := json.Marshal(p.name)
+		if err != nil {
+			return nil, err
+		}
+		v, err := json.Marshal(p.schema)
+		if err != nil {
+			return nil, err
+		}
+		b.Write(k)
+		b.WriteByte(':')
+		b.Write(v)
+	}
+	b.WriteByte('}')
+	return b.Bytes(), nil
 }
 
 // decodePrebuilt reads the model's answer object: a string for each

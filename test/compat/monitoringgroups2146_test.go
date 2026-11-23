@@ -31,6 +31,11 @@ import (
 // covers: google.monitoring.v3.GroupService/CreateGroup, google.monitoring.v3.GroupService/ListGroupMembers, google.monitoring.v3.GroupService/DeleteGroup
 func TestMonitoringGroupsMatchResourceMetadata(t *testing.T) {
 	h := New(t)
+	// The storage shard's instance serves Cloud Storage, Pub/Sub and
+	// Monitoring, its Monitoring exported as PUBSUB_MONITORING so the
+	// Monitoring suite stays in served, which has no Cloud Storage (main
+	// run 45102950103 ran this test in no shard).
+	shardEndpoint(h, "CLOUDBURROW_TEST_PUBSUB_MONITORING", EnvMonitoring)
 	opts := monitoringOpts(h)
 	sc := storageClient(t, h)
 	pc := pubsubClient(t, h)

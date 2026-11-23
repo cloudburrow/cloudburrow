@@ -669,6 +669,7 @@ func (s *Server) cloneInstance(r *http.Request, base, project string, e Engine) 
 	s.emu.RUnlock()
 	spec.Name, spec.Project, spec.DatabaseVersion = dest, project, e.DatabaseVersion()
 	spec.CreateTime, spec.SettingsVersion, spec.DeletionProtection = time.Now().UTC().Format(time.RFC3339Nano), 1, false
+	spec.ownServer()
 	if err := s.copyRefusal(spec.DatabaseVersion, "instances.clone"); err != nil {
 		return nil, err
 	}

@@ -134,6 +134,17 @@ type Spec struct {
 	PrivateNetwork string `json:"privateNetwork,omitempty"`
 }
 
+// ownServer clears what a spec copied from another instance names of
+// that instance's server: a clone or an instance a backup is restored to
+// gets a server of its own, never the one a blue-green switchover gave
+// its source (Server) nor its source's replica rebuild count
+// (RebuildEpoch). Main run 45102950103: the clone of a switched-over
+// MySQL 5.7 instance started on the green instance's server, and its
+// point-in-time recovery base found no server of its own name.
+func (s *Spec) ownServer() {
+	s.Server, s.RebuildEpoch = "", 0
+}
+
 // ServerName is the name of the instance's server in the cluster.
 func (s Spec) ServerName() string {
 	if s.Server != "" {

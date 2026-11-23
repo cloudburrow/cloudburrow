@@ -123,7 +123,11 @@ func TestDocumentAISpecializedExtractor(t *testing.T) {
 	d := newDocAI(t, t.TempDir()+"/processors.json")
 	gen := &docGen{answer: func(p, schema string) string {
 		if !strings.Contains(schema, `"line_item":{"items":{"additionalProperties":false,"properties":{"amount":{"type":["string","null"]}`) ||
-			!strings.Contains(schema, `"required":["amount_paid_since_last_invoice",`) || !strings.Contains(schema, `"x-guidance":{"whitespace_flexible":false}`) {
+			!strings.Contains(schema, `"required":["amount_paid_since_last_invoice",`) || !strings.Contains(schema, `"x-guidance":{"whitespace_flexible":false}`) ||
+			// The fields an invoice states first, the rest after them.
+			!strings.Contains(schema, `"properties":{"invoice_id":{"type":["string","null"]},"invoice_date":`) ||
+			!strings.Contains(schema, `"total_tax_amount":{"type":["string","null"]},"line_item":{"items"`) ||
+			!strings.Contains(schema, `"type":"array"},"amount_paid_since_last_invoice":`) {
 			t.Errorf("schema: %s", schema)
 		}
 		return `{"carrier":null,"invoice_date":"2026-03-14","invoice_id":"INV-42","line_item":[{"amount":"1,234.50","description":"widgets","unit":null}],` +
@@ -134,7 +138,8 @@ func TestDocumentAISpecializedExtractor(t *testing.T) {
 	if err := d.s.applyPrebuilt(ctx, "INVOICE_PROCESSOR", doc); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(gen.prompts[0], "line_item (a list: one object for each, with amount, description") || !strings.Contains(gen.prompts[0], "invoice_id") ||
+	if !strings.Contains(gen.prompts[0], "line_item (a list: one object for each, with amount, description") ||
+		!strings.Contains(gen.prompts[0], "Fields: invoice_id, invoice_date, supplier_name, ") ||
 		len(gen.prompts) != 1 {
 		t.Errorf("prompt: %q", gen.prompts[0])
 	}

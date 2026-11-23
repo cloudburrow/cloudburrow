@@ -307,7 +307,11 @@ COMPAT_BROWSER_SERVED_ONLY_TESTS='^Test(GKEServed|VPCNetwork|ComputeEngine|Compu
 COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|CloudBuild|LoggingAdmin|LoggingConsole|LoggingAppHub|SecretManager|Eventarc|DocumentAI|Speech|StoragePicker|Workflows|ModelRegistry|Dataform|AppHub)'
 COMPAT_BROWSER_EMULATORS_SHARD_TESTS='^Test(BigQuery|Firestore|Datastore|Bigtable|Spanner)'
 COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS='^TestMemorystore'
-COMPAT_BROWSER_SQL_SHARD_TESTS='^Test(CloudSQL|BackupDR|PrivateCAKMS)'
+# Private Service Connect's Connection Policies with Cloud SQL's create
+# page (TestConnectionPoliciesThroughTheBrowser, #2141) need Cloud SQL and
+# Compute Engine on one instance: the sql shard's (main run 45102950103
+# skipped it in storage, which serves neither).
+COMPAT_BROWSER_SQL_SHARD_TESTS='^Test(CloudSQL|BackupDR|PrivateCAKMS|ConnectionPolicies)'
 # The Studio's local models (#1396) and the Embeddings page's image (#1454),
 # audio and Cloud Storage objects (#1651) and its scanned PDF read with
 # document_ocr (#1733) need a -tags onnx build started with
@@ -320,8 +324,14 @@ COMPAT_BROWSER_SQL_SHARD_TESTS='^Test(CloudSQL|BackupDR|PrivateCAKMS)'
 COMPAT_BROWSER_LOCALAI_SHARD_TESTS='^Test(StudioManagesLocalModelsAndTestsEmbeddings|EmbeddingsPageEmbedsAnImage|EmbeddingsPageEmbedsAudioAndCloudStorage|EmbeddingsPageReadsAScannedPDFWithOCR|SpeechWorkspaceAndPlaybackThroughThePage)$'
 # Browser tests no shard runs: Functions' Edit, Download and Permissions builds a function from source with
 # Google's builder, as the compat suite's Functions tests do, so it runs only
-# when asked for (CLOUDBURROW_TEST_FUNCTIONS) on amd64 nodes.
-COMPAT_BROWSER_NEVER_TESTS='^Test(CloudRunFunctionsEditDownloadAndPermissionsThroughThePage)$'
+# when asked for (CLOUDBURROW_TEST_FUNCTIONS) on amd64 nodes. BigQuery
+# Studio's notebook runtime (#2094) builds its runtime image, about 1 GB of
+# IPython, pandas and Google's BigQuery client installed with pip, on the
+# first Connect, so it runs only when asked for
+# (CLOUDBURROW_TEST_NOTEBOOK_RUNTIME=1), as the Spark procedures' tests run
+# with CLOUDBURROW_TEST_SPARK (main runs 45047408927 and 45102950103 skipped
+# it in emulators, which failed the step).
+COMPAT_BROWSER_NEVER_TESTS='^Test(CloudRunFunctionsEditDownloadAndPermissionsThroughThePage|BigQueryStudioNotebookRuntimeThroughThePage)$'
 
 # compat_shard <shard>: sets, for that shard,
 #   SERVICES     the instance's --services

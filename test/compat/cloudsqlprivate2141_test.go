@@ -3,6 +3,7 @@
 package compat
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -166,7 +167,11 @@ func TestCloudSQLPrivateIPAndPSCReachableFromAVM(t *testing.T) {
 	h := New(t)
 	opts := sqlComputeOpts(t, h)
 	svc := sqlAdminService(t, h)
-	ctx := h.Context()
+	// Two Cloud SQL instances, a VM's boot and up to 8 minutes of its
+	// serial port: not h.Context's 60 s, which the run passed in 56 s and
+	// then missed in main run 45102950103 while the VM was still created.
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Minute)
+	t.Cleanup(cancel)
 	p := h.Project()
 	const region, zone = "us-central1", "us-central1-a"
 	gaddrs, _ := computeapi.NewGlobalAddressesRESTClient(ctx, opts...)
