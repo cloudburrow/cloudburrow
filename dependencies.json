@@ -2281,14 +2281,17 @@
         ]
       },
       "tensorflow": {
-        "$comment": "pip install tensorflow==2.20.0 in deploy/tfconvert/Dockerfile (#1775): Google's tf.lite.TFLiteConverter.from_saved_model converts imported SavedModels to TensorFlow Lite.",
+        "$comment": "pip install --require-hashes --no-deps --only-binary :all: in deploy/tfconvert/Dockerfile, from the hashed lock deploy/tfconvert/requirements.txt (uv pip compile --universal --python-version 3.12 --generate-hashes of requirements.in) (#1775, #2162): Google's tensorflow 2.20.0, whose tf.lite.TFLiteConverter.from_saved_model converts imported SavedModels to TensorFlow Lite, with keras 3.15.1, numpy 2.5.5, protobuf 7.36.2 and every other package it needs, each pinned by hash.",
         "version": "2.20.0",
         "source": "https://pypi.org/project/tensorflow/2.20.0/",
-        "license": "Apache-2.0",
+        "license": "Apache-2.0 (tensorflow, keras, tensorboard); BSD-3-Clause, MIT, Apache-2.0, MPL-2.0 (certifi) and the PSF licence (typing-extensions) (third-party)",
         "redistribution": "not published: installed into the locally built converter image; nothing of it is in the CLI",
         "updateFeed": "pypi",
-        "verification": "built-and-run",
-        "skipDiscovery": "PyPI; depcheck only discovers GitHub-sourced components."
+        "verification": "lock-file-hashes",
+        "skipDiscovery": "PyPI; depcheck only discovers GitHub-sourced components.",
+        "lockFiles": [
+          "deploy/tfconvert/requirements.txt"
+        ]
       },
       "pythonHolidays": {
         "$comment": "BigQuery ML HOLIDAY_REGION's built-in calendar (#1776): tools/bqholidays/generate.py runs on this wheel to write internal/bigqueryfront/holidaycal.tsv.gz, an UNVERIFIED (docs re-read 2026-11-18) stand-in for Google's calendar, which is published only as a BigQuery public dataset (third_party/python-holidays/PROVENANCE.md).",

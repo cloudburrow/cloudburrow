@@ -184,7 +184,7 @@ func newSparkRunner(cfg config.Config, out io.Writer, live func() map[string]str
 		// A Dataproc cluster's Hadoop, Hive and Pig reach the instance's
 		// Cloud Storage (#2162).
 		GCS:       addr("storage"),
-		Ecosystem: dataprocEcosystem(filepath.Join(cache, "dataproc"), cfg.Name, out),
+		Ecosystem: dataprocEcosystem(filepath.Join(cache, "dataproc"), cfg.Name, cfg.AllowUnconfinedContainers, out),
 		IPython:   ipythonHome(filepath.Join(cache, "dataproc"), out),
 		Mint:      mint,
 		KeyCheck:  keyCheck,

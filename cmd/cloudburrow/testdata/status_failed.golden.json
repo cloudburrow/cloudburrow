@@ -4,6 +4,7 @@
   "project": "golden",
   "mode": "persistent",
   "iam_enforcement": "off",
+  "allow_unconfined_containers": false,
   "bind": "127.0.0.1",
   "state": "failed",
   "control_url": "http://127.0.0.1:49152",

@@ -110,6 +110,11 @@ type Options struct {
 	// event logs are written to (sparkproc.Docker.History), which the
 	// instance's History Server reads; "" serves no Spark UI for them.
 	HistoryDir string
+	// AllowUnconfinedContainers is `up --allow-unconfined-containers`
+	// (#2162): only with it does a cluster run the DOCKER optional
+	// component, whose daemons run with seccomp, AppArmor and the /proc and
+	// /sys masks unconfined.
+	AllowUnconfinedContainers bool
 	// InstanceID names the instance's History Server's containers.
 	InstanceID string
 	// Logf receives the server's notes, or is nil.

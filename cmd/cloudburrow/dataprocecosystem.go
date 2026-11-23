@@ -70,11 +70,12 @@ const (
 )
 
 // dataprocEcosystem is the runner's Ecosystem, its downloads cached in
-// cache.
-func dataprocEcosystem(cache, instance string, out io.Writer) *sparkproc.Ecosystem {
+// cache. The DOCKER component's daemons run unconfined, so they are
+// served only with up's --allow-unconfined-containers (allowUnconfined).
+func dataprocEcosystem(cache, instance string, allowUnconfined bool, out io.Writer) *sparkproc.Ecosystem {
 	var mu sync.Mutex
 	w := out
-	return &sparkproc.Ecosystem{
+	e := &sparkproc.Ecosystem{
 		Hive: dataprocHiveImage, Trino: dataprocTrinoImage, Flink: dataprocFlinkImage,
 		Zookeeper: dataprocZookeeperImage, Solr: dataprocSolrImage, Zeppelin: dataprocZeppelinImage,
 		Metastore42: dataprocMetastore42Image, Zeppelin30: dataprocZeppelin30Image,
@@ -115,6 +116,10 @@ func dataprocEcosystem(cache, instance string, out io.Writer) *sparkproc.Ecosyst
 			return out, nil
 		},
 	}
+	if !allowUnconfined {
+		e.Docker = nil
+	}
+	return e
 }
 
 // mavenCentral is Maven Central's repository root.

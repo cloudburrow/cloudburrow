@@ -4,6 +4,8 @@ package compat
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +13,8 @@ import (
 	dataproc "cloud.google.com/go/dataproc/v2/apiv1"
 	"cloud.google.com/go/dataproc/v2/apiv1/dataprocpb"
 	"google.golang.org/api/option"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // dataprocYarnPi is a PySpark job's main file: Pi by sampling, and the
@@ -165,10 +169,13 @@ func TestDataprocDockerComponent(t *testing.T) {
 	const region = "us-central1"
 	suffix := dataprocSuffix(h, 30)
 	name := "dk-" + suffix
-	dataprocClusterUp(t, ctx, h, cc, project, region, &dataprocpb.Cluster{ProjectId: project, ClusterName: name,
+	cluster := &dataprocpb.Cluster{ProjectId: project, ClusterName: name,
 		Config: &dataprocpb.ClusterConfig{SoftwareConfig: &dataprocpb.SoftwareConfig{ImageVersion: "2.3",
 			Properties:         map[string]string{"dataproc:dataproc.allow.zero.workers": "true"},
-			OptionalComponents: []dataprocpb.Component{dataprocpb.Component_DOCKER}}}})
+			OptionalComponents: []dataprocpb.Component{dataprocpb.Component_DOCKER}}}}
+	if !dataprocDockerAllowed(t, ctx, h, cc, project, region, cluster) {
+		t.Skip("the instance runs without " + dataprocUnconfinedFlag + "; TestDataprocDockerComponentOff covers it")
+	}
 	main := dataprocPut(t, ctx, bh, "docker/job.py", dataprocDockerScript)
 	j := dataprocRunJob(t, ctx, jc, project, region, &dataprocpb.Job{Placement: &dataprocpb.JobPlacement{ClusterName: name},
 		Reference: &dataprocpb.JobReference{JobId: "docker-" + suffix},
@@ -181,5 +188,86 @@ func TestDataprocDockerComponent(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("the Docker job's output has no %q:\n%s", want, out)
 		}
+	}
+}
+
+// dataprocUnconfinedFlag is the `up` flag the DOCKER component needs.
+const dataprocUnconfinedFlag = "--allow-unconfined-containers"
+
+// dataprocDockerAllowed creates cluster, a DOCKER cluster, and waits for
+// it to run: false when the instance refuses it, FAILED_PRECONDITION
+// naming dataprocUnconfinedFlag, as one started without it does.
+func dataprocDockerAllowed(t *testing.T, ctx context.Context, h *Harness, cc *dataproc.ClusterControllerClient, project, region string, cluster *dataprocpb.Cluster) bool {
+	t.Helper()
+	op, err := cc.CreateCluster(ctx, &dataprocpb.CreateClusterRequest{ProjectId: project, Region: region, Cluster: cluster})
+	if status.Code(err) == codes.FailedPrecondition && strings.Contains(err.Error(), dataprocUnconfinedFlag) {
+		return false
+	}
+	if err != nil {
+		t.Fatalf("CreateCluster %s: %v", cluster.ClusterName, err)
+	}
+	t.Cleanup(func() {
+		if dop, err := cc.DeleteCluster(h.Context(), &dataprocpb.DeleteClusterRequest{ProjectId: project, Region: region, ClusterName: cluster.ClusterName}); err == nil {
+			_ = dop.Wait(h.Context())
+		}
+	})
+	got, err := op.Wait(ctx)
+	if err != nil || got.GetStatus().GetState() != dataprocpb.ClusterStatus_RUNNING {
+		t.Fatalf("CreateCluster %s: %v %v", cluster.ClusterName, got.GetStatus(), err)
+	}
+	return true
+}
+
+// TestDataprocDockerComponentOff (#2162): on an instance started without
+// --allow-unconfined-containers, the official Go client's CreateCluster
+// of a cluster with DOCKER is refused FAILED_PRECONDITION, before any
+// cluster exists, with a message that says how to opt in; the same
+// request over JSON is Google's 400 error with status FAILED_PRECONDITION.
+// It skips on an instance with the flag, where TestDataprocDockerComponent
+// runs.
+//
+// covers: google.cloud.dataproc.v1.ClusterController/CreateCluster
+func TestDataprocDockerComponentOff(t *testing.T) {
+	h, addr, project := dataprocEnv(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	cc, err := dataproc.NewClusterControllerClient(ctx, append(dataprocGRPC(), option.WithEndpoint(addr))...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cc.Close() })
+	const region = "us-central1"
+	name := "dkoff-" + dataprocSuffix(h, 30)
+	cluster := &dataprocpb.Cluster{ProjectId: project, ClusterName: name,
+		Config: &dataprocpb.ClusterConfig{SoftwareConfig: &dataprocpb.SoftwareConfig{ImageVersion: "2.3",
+			Properties:         map[string]string{"dataproc:dataproc.allow.zero.workers": "true"},
+			OptionalComponents: []dataprocpb.Component{dataprocpb.Component_DOCKER}}}}
+	if dataprocDockerAllowed(t, ctx, h, cc, project, region, cluster) {
+		t.Skip("the instance runs with " + dataprocUnconfinedFlag + "; TestDataprocDockerComponent covers it")
+	}
+	_, err = cc.CreateCluster(ctx, &dataprocpb.CreateClusterRequest{ProjectId: project, Region: region, Cluster: cluster})
+	if status.Code(err) != codes.FailedPrecondition || !strings.Contains(err.Error(), "cloudburrow up "+dataprocUnconfinedFlag) ||
+		!strings.Contains(err.Error(), "seccomp, AppArmor") {
+		t.Fatalf("CreateCluster with DOCKER = %v; want FAILED_PRECONDITION saying how to opt in", err)
+	}
+	if _, err := cc.GetCluster(ctx, &dataprocpb.GetClusterRequest{ProjectId: project, Region: region, ClusterName: name}); status.Code(err) != codes.NotFound {
+		t.Errorf("GetCluster of the refused cluster = %v; want NOT_FOUND", err)
+	}
+	body := `{"clusterName":"` + name + `","config":{"softwareConfig":{"imageVersion":"2.3","optionalComponents":["DOCKER"]}}}`
+	resp, err := http.Post("http://"+addr+"/v1/projects/"+project+"/regions/"+region+"/clusters", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var e struct {
+		Error struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+			Status  string `json:"status"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&e); err != nil || resp.StatusCode != http.StatusBadRequest || e.Error.Code != 400 ||
+		e.Error.Status != "FAILED_PRECONDITION" || !strings.Contains(e.Error.Message, dataprocUnconfinedFlag) {
+		t.Errorf("JSON create with DOCKER = %d %+v (%v); want Google's 400 FAILED_PRECONDITION", resp.StatusCode, e, err)
 	}
 }

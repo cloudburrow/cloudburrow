@@ -250,7 +250,15 @@ image's Ubuntu.
     Docker daemon beside each node, unprivileged (no `--privileged`:
     `/dev/net/tun` and seccomp, AppArmor and `systempaths` unconfined).
     Every node and driver has the `docker` CLI, `DOCKER_HOST` its node's
-    daemon, so a job runs containers.
+    daemon, so a job runs containers. Because those daemons run
+    unconfined, DOCKER is **off unless the instance is started with
+    `cloudburrow up --allow-unconfined-containers`**
+    (`CLOUDBURROW_ALLOW_UNCONFINED_CONTAINERS=true`): without it, creating
+    or starting a cluster with DOCKER is refused `FAILED_PRECONDITION`
+    (HTTP 400) with a message that names the flag, and a DOCKER cluster an
+    opted-in instance left running goes to `ERROR` with that message when
+    an instance without it restarts it. See
+    [security.md](security.md#unconfined-containers-opt-in-2162).
   - RANGER is `UNIMPLEMENTED`, with its reason (docs/gaps.md).
   - Every cluster has a Hive metastore (Derby, in the cluster's files) and
     HiveServer2 on its master, started with its first Hive job or with a

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -457,8 +459,79 @@ func TestCheckComponents(t *testing.T) {
 		{"3.0", []dataprocpb.Component{dataprocpb.Component_RANGER}, codes.Unimplemented},
 		{"3.0", []dataprocpb.Component{dataprocpb.Component_DELTA, dataprocpb.Component_HUDI}, codes.OK},
 	} {
-		if err := checkComponents(c.mm, c.comps); status.Code(err) != c.code {
+		if err := checkComponents(c.mm, c.comps, false); c.code == codes.OK && hasDocker(c.comps) && status.Code(err) != codes.FailedPrecondition {
+			t.Errorf("%s %v without the opt-in: %v, want FAILED_PRECONDITION", c.mm, c.comps, err)
+		}
+		if err := checkComponents(c.mm, c.comps, true); status.Code(err) != c.code {
 			t.Errorf("%s %v: %v, want %v", c.mm, c.comps, err, c.code)
 		}
 	}
+}
+
+// TestDockerComponentNeedsOptIn (#2162): without `up
+// --allow-unconfined-containers` a cluster with the DOCKER component is
+// refused FAILED_PRECONDITION naming the flag, in Google's error shape;
+// with it the cluster runs; a stopped DOCKER cluster is not started again
+// by an instance without it.
+func TestDockerComponentNeedsOptIn(t *testing.T) {
+	s, _, _ := newClusterServer(t)
+	ctx := context.Background()
+	docker := func(name string) *dataprocpb.CreateClusterRequest {
+		return &dataprocpb.CreateClusterRequest{ProjectId: "p", Region: "us-central1", Cluster: &dataprocpb.Cluster{ClusterName: name,
+			Config: &dataprocpb.ClusterConfig{SoftwareConfig: &dataprocpb.SoftwareConfig{ImageVersion: "2.3",
+				OptionalComponents: []dataprocpb.Component{dataprocpb.Component_DOCKER}}}}}
+	}
+	_, err := s.CreateCluster(ctx, docker("off"))
+	st, _ := status.FromError(err)
+	if st.Code() != codes.FailedPrecondition || !strings.Contains(st.Message(), "cloudburrow up --allow-unconfined-containers") ||
+		!strings.Contains(st.Message(), "seccomp, AppArmor") {
+		t.Fatalf("create with DOCKER, no opt-in = %v; want FAILED_PRECONDITION naming the flag", err)
+	}
+	// The JSON API answers Google's error shape: 400, status FAILED_PRECONDITION.
+	rec := httptest.NewRecorder()
+	NewRESTHandler(s).ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/projects/p/regions/us-central1/clusters",
+		strings.NewReader(`{"clusterName":"off","config":{"softwareConfig":{"imageVersion":"2.3","optionalComponents":["DOCKER"]}}}`)))
+	var body struct {
+		Error struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+			Status  string `json:"status"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || rec.Code != http.StatusBadRequest || body.Error.Code != 400 ||
+		body.Error.Status != "FAILED_PRECONDITION" || !strings.Contains(body.Error.Message, "--allow-unconfined-containers") {
+		t.Errorf("REST create with DOCKER = %d %s; want Google's 400 FAILED_PRECONDITION", rec.Code, rec.Body)
+	}
+	if _, err := s.GetCluster(ctx, &dataprocpb.GetClusterRequest{ProjectId: "p", Region: "us-central1", ClusterName: "off"}); status.Code(err) != codes.NotFound {
+		t.Errorf("the refused cluster exists: %v", err)
+	}
+
+	s.opts.AllowUnconfinedContainers = true
+	op, err := s.CreateCluster(ctx, docker("on"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var c dataprocpb.Cluster
+	if done := waitOp(t, s, op.Name); done.GetResponse().UnmarshalTo(&c) != nil || c.GetStatus().GetState() != dataprocpb.ClusterStatus_RUNNING {
+		t.Fatalf("create with DOCKER, opted in: %v", done)
+	}
+	op, err = s.StopCluster(ctx, &dataprocpb.StopClusterRequest{ProjectId: "p", Region: "us-central1", ClusterName: "on"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitOp(t, s, op.Name)
+	s.opts.AllowUnconfinedContainers = false
+	if _, err := s.StartCluster(ctx, &dataprocpb.StartClusterRequest{ProjectId: "p", Region: "us-central1", ClusterName: "on"}); status.Code(err) != codes.FailedPrecondition ||
+		!strings.Contains(err.Error(), "--allow-unconfined-containers") {
+		t.Errorf("start a DOCKER cluster, no opt-in = %v; want FAILED_PRECONDITION", err)
+	}
+}
+
+func hasDocker(comps []dataprocpb.Component) bool {
+	for _, c := range comps {
+		if c == dataprocpb.Component_DOCKER {
+			return true
+		}
+	}
+	return false
 }

@@ -543,6 +543,11 @@ compat_shard() {
       # Spark (#2156), the Dataproc API's batches and Spark Connect
       # sessions, which run on the same Spark runner.
       SERVICES=bigquery,storage,logging,run,kms,dataproc
+      # --allow-unconfined-containers (#2162): the Dataproc DOCKER component's
+      # rootless daemons run unconfined, so only with it; TestDataprocDockerComponent
+      # runs here, and TestDataprocDockerComponentOff, the refusal without
+      # it, skips on this instance (it runs on any instance without the flag).
+      FIXTURES=(--allow-unconfined-containers)
       TEST_VARS+=,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT,BIGQUERY_RESOURCEMANAGER,RESOURCEMANAGER,STORAGE,LOGGING,RUN,KMS,GCLOUD,DATAPROC
       export CLOUDBURROW_TEST_SPARK=1
       COMPAT_RUN='^Test(BigQuerySpark|BqSpark|Dataproc|GcloudDataproc)'

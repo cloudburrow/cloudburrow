@@ -108,6 +108,7 @@ func (s *dataprocService) Start(ctx context.Context) error {
 		}
 	}
 	opts.InstanceID = s.cfg.Name
+	opts.AllowUnconfinedContainers = s.cfg.AllowUnconfinedContainers
 	if s.gke != nil {
 		opts.Virtual = dataprocGKE{api: s.gke, dir: filepath.Join(s.cfg.InstanceDir(), "dataproc-gke")}
 	}

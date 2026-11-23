@@ -210,7 +210,7 @@ func (s *Server) checkCluster(project, region string, c *dataprocpb.Cluster) err
 		return err
 	}
 	cfg.SoftwareConfig.ImageVersion = full
-	if err := checkComponents(mm, cfg.SoftwareConfig.GetOptionalComponents()); err != nil {
+	if err := checkComponents(mm, cfg.SoftwareConfig.GetOptionalComponents(), s.opts.AllowUnconfinedContainers); err != nil {
 		return err
 	}
 	// "you can set the dataproc:dataproc.iceberg.version cluster property
@@ -335,9 +335,20 @@ var unservedComponents = map[dataprocpb.Component]string{
 	dataprocpb.Component_RANGER: "Apache Ranger publishes no official image, and its Admin server built from the pinned source release is not built yet (docs/gaps.md)",
 }
 
+// UnconfinedFlag is the `up` flag that lets the DOCKER component run.
+const UnconfinedFlag = "--allow-unconfined-containers"
+
+// dockerRefusal is why a cluster with the DOCKER component does not run
+// on an instance started without UnconfinedFlag (#2162): its rootless
+// Docker daemons need seccomp, AppArmor and the /proc and /sys masks
+// unconfined, which weakens the isolation between them and this machine.
+const dockerRefusal = "The DOCKER optional component is off on this instance: each node's Docker daemon runs with seccomp, AppArmor " +
+	"and the /proc and /sys masks unconfined, which weakens the isolation between its containers and this machine. " +
+	"To opt in, start the instance with `cloudburrow up " + UnconfinedFlag + "` (or CLOUDBURROW_ALLOW_UNCONFINED_CONTAINERS=true)"
+
 // checkComponents checks a cluster's optional components against its
-// image version.
-func checkComponents(mm string, comps []dataprocpb.Component) error {
+// image version, and DOCKER against the instance's opt-in.
+func checkComponents(mm string, comps []dataprocpb.Component, allowUnconfined bool) error {
 	seen := map[dataprocpb.Component]bool{}
 	for _, comp := range comps {
 		if comp == dataprocpb.Component_COMPONENT_UNSPECIFIED {
@@ -353,6 +364,9 @@ func checkComponents(mm string, comps []dataprocpb.Component) error {
 		}
 	}
 	for _, comp := range comps {
+		if comp == dataprocpb.Component_DOCKER && !allowUnconfined {
+			return apierror.FailedPrecondition("%s", dockerRefusal)
+		}
 		if !servedComponents[comp] {
 			return status.Errorf(codes.Unimplemented, "The %s optional component is not served by CloudBurrow (%s): a local cluster runs Delta Lake, Docker, Flink, Hive WebHCat, Hudi, Iceberg, Jupyter, Pig, Solr, Trino, Zeppelin and ZooKeeper", comp, unservedComponents[comp])
 		}
@@ -571,6 +585,9 @@ func (s *Server) startCluster(name, opName string, restart bool) {
 		cancel()
 	case !ok || s.opts.Engine == nil:
 		err = &sparkproc.Unavailable{Msg: "this instance runs no Apache Spark"}
+	case hasComponent(c, sparkproc.ComponentDocker) && !s.opts.AllowUnconfinedContainers:
+		// A cluster made with the opt-in, restarted by an instance without it.
+		err = &sparkproc.Unavailable{Msg: dockerRefusal}
 	default:
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 		nodes, err = ce.StartCluster(ctx, spec)
@@ -1029,6 +1046,9 @@ func (s *Server) stopStart(project, region, clusterName, uuid, requestID string,
 	}
 	if !stop && st != dataprocpb.ClusterStatus_STOPPED {
 		return nil, apierror.FailedPrecondition("Cluster %s is in state %s: only a STOPPED cluster can be started", c.ClusterName, st)
+	}
+	if !stop && hasComponent(c, sparkproc.ComponentDocker) && !s.opts.AllowUnconfinedContainers {
+		return nil, apierror.FailedPrecondition("%s", dockerRefusal)
 	}
 	via, end := dataprocpb.ClusterStatus_STOPPING, dataprocpb.ClusterStatus_STOPPED
 	if !stop {
