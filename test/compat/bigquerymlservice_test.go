@@ -582,7 +582,10 @@ func TestBigQueryMLTranscribe(t *testing.T) {
 		`, recognition_config => (JSON '{"language_codes": ["af-ZA"], "model": "chirp", "auto_decoding_config": {}, "features": {"enable_automatic_punctuation": true}}')`:                                          "",
 		`, recognition_config => (JSON '{"language_codes": ["en-US"], "model": "chirp", "auto_decoding_config": {}, "transcript_normalization": {"entries": [{"replace": "x"}]}}')`:                                 "search is empty",
 	} {
-		err := run(fmt.Sprintf("SELECT * FROM ML.TRANSCRIBE(MODEL `%s.speech`, TABLE `%s.audio`%s)", ds, ds, cfg))
+		// The one-clip wav table: the refusals come before any object is
+		// read, and the accepted af-ZA case transcribed audio's four clips,
+		// which took the test past its 10 minutes (main run 45047408927).
+		err := run(fmt.Sprintf("SELECT * FROM ML.TRANSCRIBE(MODEL `%s.speech`, TABLE `%s.wav`%s)", ds, ds, cfg))
 		if want == "" {
 			if err != nil {
 				t.Errorf("ML.TRANSCRIBE%s: %v", cfg, err)

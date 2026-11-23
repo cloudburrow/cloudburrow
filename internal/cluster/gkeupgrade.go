@@ -318,7 +318,7 @@ echo $a`
 		out, err := r.Run(ctx, "kubectl", "--kubeconfig", g.kubeconfig(kind), "get", "node", cp, "-o",
 			`jsonpath={.status.conditions[?(@.type=="Ready")].status}`)
 		if err == nil && strings.TrimSpace(out) == "True" {
-			return nil
+			break
 		}
 		if time.Now().After(deadline) {
 			return fmt.Errorf("the control plane's node %s is not Ready on %s (%q, %v)", cp, version, strings.TrimSpace(out), err)
@@ -327,6 +327,49 @@ echo $a`
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-time.After(2 * time.Second):
+		}
+	}
+	// And steady: the new kubelet restarts the static pods whose
+	// container hash its version computes differently, the API server and
+	// etcd among them, seconds after the node is Ready, and a client then
+	// reads "Unable to connect to the server: EOF" (main run 45047408927,
+	// TestGKEUpgradeMasterThenNodePool's first call after the operation).
+	// GKE's UPGRADE_MASTER is done once the API server serves, so the
+	// operation waits for it to answer readyz throughout a quiet window.
+	return g.waitAPISteady(ctx, kind, apiSteadyFor, 3*time.Minute)
+}
+
+// apiSteadyFor is how long a control plane's API server must answer
+// readyz without a failure to count as steady after an upgrade.
+const apiSteadyFor = 20 * time.Second
+
+// waitAPISteady polls the cluster's API server's readyz every second
+// until it has answered every poll for steady, or fails after timeout.
+func (g *GKE) waitAPISteady(ctx context.Context, kind string, steady, timeout time.Duration) error {
+	r := g.runner()
+	deadline := time.Now().Add(timeout)
+	var since time.Time
+	var lastErr error
+	for {
+		out, err := r.Run(ctx, "kubectl", "--kubeconfig", g.kubeconfig(kind), "get", "--raw", "/readyz", "--request-timeout=5s")
+		switch {
+		case err == nil && strings.TrimSpace(out) == "ok":
+			if since.IsZero() {
+				since = time.Now()
+			}
+			if time.Since(since) >= steady {
+				return nil
+			}
+		default:
+			since, lastErr = time.Time{}, err
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("the control plane's API server did not answer readyz steadily for %s (last: %q, %v)", steady, strings.TrimSpace(out), lastErr)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Second):
 		}
 	}
 }

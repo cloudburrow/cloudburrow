@@ -17,9 +17,9 @@
 #
 # Options:
 #   --shards A,B,...  the shards to run, in order; default every one:
-#                     storage,served,run,crossservice,scale,emulators,memorystore,sql,
-#                     sqlreplicas,acceptance,iam,localai
-#                     (localai, #1985, needs make build-onnx's CLI, which it builds
+#                     storage,served,gke,run,crossservice,scale,emulators,memorystore,sql,
+#                     sqlreplicas,acceptance,iam,localai,localaispeech
+#                     (localai and localaispeech, #1985, need make build-onnx's CLI, which it builds
 #                     unless --no-build, ONNXRUNTIME_LIB, and the pinned
 #                     generation model at CLOUDBURROW_LOCALAI_MODEL:
 #                     scripts/localai-models.sh <dir> fetches it)
@@ -100,7 +100,7 @@ done
 # The localai shard (#1985) runs the onnx build with the pinned generation
 # model; refuse before starting anything when either is missing.
 case " ${SHARD_LIST[*]} " in
-  *" localai "*)
+  *" localai "*|*" localaispeech "*)
     [ -n "${ONNXRUNTIME_LIB:-}" ] && [ -r "$ONNXRUNTIME_LIB" ] ||
       { echo "verify-local: the localai shard needs ONNXRUNTIME_LIB, the ONNX Runtime library (docs/embeddings.md)" >&2; exit 2; }
     [ -n "${CLOUDBURROW_LOCALAI_MODEL:-}" ] && [ -r "$CLOUDBURROW_LOCALAI_MODEL" ] ||
@@ -164,7 +164,7 @@ if [ -n "$build" ]; then
   log "make build"
   make build > "$LOGS/build.log" 2>&1 || { tail -n 20 "$LOGS/build.log" >&2; exit 1; }
   case " ${SHARD_LIST[*]} " in
-    *" localai "*)
+    *" localai "*|*" localaispeech "*)
       log "make build-onnx"
       make build-onnx > "$LOGS/build-onnx.log" 2>&1 || { tail -n 20 "$LOGS/build-onnx.log" >&2; exit 1; } ;;
   esac
@@ -233,7 +233,7 @@ run_shard() {
   # The localai shard's instance is the onnx build (#1985), as in CI; the
   # functions this calls see this CLI too.
   local CLI=$CLI
-  if [ "$shard" = localai ]; then CLI="$ROOT/bin/cloudburrow-onnx"; fi
+  if [ "$shard" = localai ] || [ "$shard" = localaispeech ]; then CLI="$ROOT/bin/cloudburrow-onnx"; fi
   # The hooks write where RUNNER_TEMP names; here, the shard's own directory.
   export RUNNER_TEMP="$WORK/$shard"
   mkdir -p "$RUNNER_TEMP"
@@ -579,7 +579,7 @@ done
 # from ci.yml so the two cannot drift.
 compat_coverage() {
   local s never none
-  for s in storage served run emulators memorystore sql iam localai; do
+  for s in storage served gke run crossservice scale emulators memorystore sql sqlreplicas iam localai localaispeech; do
     case " ${SHARD_LIST[*]} " in *" $s "*) ;; *) return 0 ;; esac
   done
   SUITES="$WORK/coverage.suites" CHECKS="$WORK/coverage.checks"
@@ -588,7 +588,7 @@ compat_coverage() {
   go test -tags=compat -list '.*' ./test/compat/ | grep '^Test' | sort > "$WORK/all.txt"
   # A shard without restart probes has no probe-*.log, and cat's exit 1
   # for the unmatched glob would end the script under set -e.
-  for s in storage served run emulators memorystore sql iam localai; do
+  for s in storage served gke run crossservice scale emulators memorystore sql sqlreplicas iam localai localaispeech; do
     cat "$LOGS/$s"/compat.log "$LOGS/$s"/probe-*.log 2>/dev/null || true
   done | grep -oE -- '^--- (PASS|FAIL): Test[A-Za-z0-9_]+' | awk '{print $3}' | sort -u > "$WORK/ran.txt"
   none=$(comm -23 "$WORK/all.txt" "$WORK/ran.txt" | grep -vE "${never:-^$}" || true)

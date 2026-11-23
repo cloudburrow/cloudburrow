@@ -378,7 +378,14 @@ func (s *Server) changeTelemetry(p parsed, ch *telemetryChange) (*containerpb.Op
 	c := e.cluster
 	return s.startSettingLocked(p, e, containerpb.Operation_UPDATE_CLUSTER, func(context.Context) error { return nil }, func() {
 		if !proto.Equal(c.GetLoggingConfig(), next.LoggingConfig) || c.GetLoggingService() != next.LoggingService {
-			e.loggingChanged = s.now()
+			// The wall clock, not s.now(): the shipper compares it with the
+			// container runtime's timestamps, which are real time, and
+			// AdvanceClock moves s.now() ahead of them. An advanced clock
+			// made a line written just after logging came back on look
+			// older than the change, and it was never shipped (main runs
+			// 45023269046 and 45047408927, after
+			// TestGKEAutoUpgradePausesPastItsWindow).
+			e.loggingChanged = s.opts.Now()
 		}
 		c.LoggingService, c.LoggingConfig = next.LoggingService, next.LoggingConfig
 		c.MonitoringService, c.MonitoringConfig = next.MonitoringService, next.MonitoringConfig

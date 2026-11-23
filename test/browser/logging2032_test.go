@@ -63,7 +63,9 @@ func TestLoggingConsoleRound6(t *testing.T) {
 	// The Fields pane's label dimension.
 	p := open(t)
 	p.navigate("/logs?scope=project&project=" + project)
-	const dim = `([...document.querySelectorAll("#log-fields-system .log-field-group")].find((g) => g.dataset.field === 'labels."k8s-pod/app"') || null)`
+	// The group is keyed by its first path, App Hub's apphub.workload.id
+	// since #2096; its values here come from k8s-pod/app and service.name.
+	const dim = `([...document.querySelectorAll("#log-fields-system .log-field-group")].find((g) => g.dataset.field === "apphub.workload.id") || null)`
 	p.waitFor(dim + ` !== null`)
 	var system string
 	p.eval(`[...document.querySelectorAll("#log-fields-system .log-field-group h4")].map((h) => h.textContent).join("|")`, &system)

@@ -23,15 +23,12 @@ package sqladmin
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"time"
-
-	"github.com/go-sql-driver/mysql"
 )
 
 type demoteBody struct {
@@ -214,10 +211,7 @@ func (s *Server) gtidConsistent(ctx context.Context, e Engine, ext *ExternalSour
 	if err := db.QueryRowContext(ctx, "SELECT @@GLOBAL.gtid_executed").Scan(&mine); err != nil {
 		return myError(err)
 	}
-	cfg := mysql.NewConfig()
-	cfg.User, cfg.Passwd, cfg.Net, cfg.Addr = ext.User, ext.Password, "tcp", addr
-	cfg.Timeout, cfg.AllowNativePasswords, cfg.TLSConfig = 10*time.Second, true, "preferred"
-	src, err := sql.Open("mysql", cfg.FormatDSN())
+	src, err := openSourceMySQL(ext.User, ext.Password, addr)
 	if err != nil {
 		return err
 	}

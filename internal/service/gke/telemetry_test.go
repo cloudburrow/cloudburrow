@@ -62,12 +62,17 @@ func TestLoggingAndMonitoring(t *testing.T) {
 	if tt := target(); tt.SystemLogs || tt.WorkloadLogs {
 		t.Errorf("logs still shipped: %+v", tt)
 	}
-	// The change's time is the shippers' start for what it turns on.
+	// The change's time is the shippers' start for what it turns on: the
+	// wall clock, which the container runtime stamps its lines with, even
+	// once the maintenance windows' clock has been moved forward.
 	now = now.Add(time.Minute)
+	if _, err := s.AdvanceClock(72 * time.Hour); err != nil {
+		t.Fatal(err)
+	}
 	op, err = s.SetLoggingService(ctx, &containerpb.SetLoggingServiceRequest{Name: name, LoggingService: loggingKubernetes})
 	mustDone(t, s, loc, op, err)
 	if tt := target(); !tt.LoggingChanged.Equal(now) || !tt.WorkloadLogs {
-		t.Errorf("logging back on: changed %v, want %v (%+v)", tt.LoggingChanged, now, tt)
+		t.Errorf("logging back on: changed %v, want the wall clock's %v (%+v)", tt.LoggingChanged, now, tt)
 	}
 	op, err = s.SetLoggingService(ctx, &containerpb.SetLoggingServiceRequest{Name: name, LoggingService: "none"})
 	mustDone(t, s, loc, op, err)
