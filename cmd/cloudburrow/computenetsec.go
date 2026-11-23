@@ -33,7 +33,9 @@ func (c computeNetSec) Authorize(r compute.AuthzRequest) bool { return c.ns.Auth
 
 // AddressGroupItems are a Cloud Armor address group's items
 // (compute.AddressGroups).
-func (c computeNetSec) AddressGroupItems(name string) ([]string, bool) { return c.ns.AddressGroupItems(name) }
+func (c computeNetSec) AddressGroupItems(name string) ([]string, bool) {
+	return c.ns.AddressGroupItems(name)
+}
 
 // BackendAuthConfig is a backend authentication config with its trust
 // config and client certificate resolved (compute.BackendAuthentication).

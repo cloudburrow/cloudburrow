@@ -146,7 +146,7 @@ const CCM_TABS = ["/security/ccm/list/certificates", "/security/ccm/list/certifi
 // armor/docs/advanced-network-ddos, waf-rules).
 const ARMOR_TABS = ["/net-security/securitypolicies/list", "/net-security/securitypolicies/networkEdgeSecurityServices", "/net-security/securitypolicies/wafRules"];
 // Network Security's Authentication Configuration tabs (#2160).
-const NETSEC_AUTH_TABS = ["/net-security/authconfig", "/net-security/authconfig/clientTlsPolicies", "/net-security/authconfig/authorizationPolicies"];
+const NETSEC_AUTH_TABS = ["/net-security/authconfig", "/net-security/authconfig/backendAuthentication", "/net-security/authconfig/clientTlsPolicies", "/net-security/authconfig/authorizationPolicies"];
 const GKE_STORAGE = ["/kubernetes/storage", "/kubernetes/storage-classes"];
 // Cloud Logging's Settings and its Log Scopes tab (#2020), as Google's
 // Settings page has a Log Scopes tab (log-scope/create-and-manage).
@@ -648,6 +648,15 @@ const ROUTES = [
   // Client TLS policies and service mesh authorization policies (#2160):
   // the page's other tabs. The tabs are UNVERIFIED (re-read 2026-11-22: service-mesh/docs/security) (docs re-read
   // 2026-11-22 give gcloud import steps only).
+  // Backend Authentication (#2160): the page's tab of backend
+  // authentication configs, as load-balancing/docs/backend-authenticated-tls-setup
+  // has it ("On the Backend Authentication tab, click Create").
+  { path: "/net-security/authconfig/backendAuthentication", service: "netsecurity-backendauth", icon: "vpc", title: "Authentication Configuration", tabTitle: "Backend Authentication",
+    kind: "Backend Authentication", navHidden: true, navAs: "/net-security/authconfig", pageTabs: NETSEC_AUTH_TABS, section: "Networking", product: "netsecurity", productTitle: "Network Security" },
+  // Address groups (#2160), as firewall/docs/use-address-groups-firewall-policies
+  // names the page ("Go to the Address groups page").
+  { path: "/net-security/addressgroups", service: "netsecurity-addressgroups", icon: "vpc", title: "Address groups", kind: "Address group",
+    section: "Networking", product: "netsecurity", productTitle: "Network Security" },
   { path: "/net-security/authconfig/clientTlsPolicies", service: "netsecurity-clienttls", icon: "vpc", title: "Authentication Configuration", tabTitle: "Client TLS policies",
     kind: "Client TLS policy", navHidden: true, navAs: "/net-security/authconfig", pageTabs: NETSEC_AUTH_TABS, section: "Networking", product: "netsecurity", productTitle: "Network Security" },
   { path: "/net-security/authconfig/authorizationPolicies", service: "netsecurity-meshauthz", icon: "vpc", title: "Authentication Configuration", tabTitle: "Service mesh authorization policies",
