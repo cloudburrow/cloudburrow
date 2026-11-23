@@ -378,7 +378,7 @@ func dataprocZeppelinTest(t *testing.T, version, prefix string) {
 // covers: google.cloud.dataproc.v1.SessionTemplateController/CreateSessionTemplate, google.cloud.dataproc.v1.SessionController/ListSessions
 func TestDataprocKernelGateway(t *testing.T) {
 	h, addr, project := dataprocEnv(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Minute) // the first run builds three kernel images
 	defer cancel()
 	opts := append(dataprocGRPC(), option.WithEndpoint(addr))
 	tc, err := dataproc.NewSessionTemplateControllerClient(ctx, opts...)
