@@ -13,8 +13,11 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -22,18 +25,62 @@ import (
 	"cloud.google.com/go/compute/metadata"
 )
 
+// httpsTransport carries the package's requests to the HTTPS metadata
+// server of a Shielded VM (#2179), as Google documents it: port 443 of
+// metadata.google.internal, the root certificate and the client
+// credentials Google's guest agent wrote under /run/google-mds-mtls.
+type httpsTransport struct{ rt http.RoundTripper }
+
+func (t httpsTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	r = r.Clone(r.Context())
+	r.URL.Scheme = "https"
+	return t.rt.RoundTrip(r)
+}
+
+func httpsClient() (*http.Client, error) {
+	root, err := os.ReadFile("/run/google-mds-mtls/root.crt")
+	if err != nil {
+		return nil, err
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(root) {
+		return nil, fmt.Errorf("no root certificate")
+	}
+	creds, err := os.ReadFile("/run/google-mds-mtls/client.key")
+	if err != nil {
+		return nil, err
+	}
+	cert, err := tls.X509KeyPair(creds, creds)
+	if err != nil {
+		return nil, err
+	}
+	tr := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, Certificates: []tls.Certificate{cert}, ServerName: "metadata.google.internal"}}
+	return &http.Client{Transport: httpsTransport{tr}, Timeout: 30 * time.Second}, nil
+}
+
 func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	c := metadata.NewClient(nil)
+	if len(os.Args) > 1 && os.Args[1] == "https" {
+		hc, err := httpsClient()
+		if err != nil {
+			fmt.Printf("FAIL https: %v\n", err)
+			os.Exit(1)
+		}
+		c = metadata.NewClient(hc)
+		fmt.Println("transport=https")
+	}
 	fail := func(what string, err error) {
 		fmt.Printf("FAIL %s: %v\n", what, err)
 		os.Exit(1)
 	}
-	if !metadata.OnGCEWithContext(ctx) {
-		fail("OnGCE", fmt.Errorf("false"))
+	if len(os.Args) < 2 || os.Args[1] != "https" {
+		if !metadata.OnGCEWithContext(ctx) {
+			fail("OnGCE", fmt.Errorf("false"))
+		}
+		fmt.Println("ongce=true")
 	}
-	fmt.Println("ongce=true")
 	for _, k := range []struct {
 		name string
 		get  func(context.Context) (string, error)

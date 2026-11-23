@@ -1,0 +1,14 @@
+[Unit]
+Description=CloudBurrow: a Shielded VM's vTPM and UEFI variables (#2179)
+DefaultDependencies=no
+After=local-fs.target
+Before=google-guest-agent-manager.service google-guest-agent.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+PassEnvironment=CLOUDBURROW_GUEST_METADATA
+ExecStart=/usr/lib/cloudburrow/firmware
+
+[Install]
+WantedBy=multi-user.target

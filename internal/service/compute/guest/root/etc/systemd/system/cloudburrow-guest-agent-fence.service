@@ -1,0 +1,12 @@
+[Unit]
+Description=CloudBurrow: Google's guest agent reaches only this instance's metadata server (#2179)
+After=cloudburrow-network.service
+Before=google-guest-agent-manager.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/cloudburrow/guest-agent-fence fence
+
+[Install]
+WantedBy=multi-user.target
