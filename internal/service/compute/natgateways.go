@@ -573,8 +573,17 @@ func natNFT(g NATGateway, peerPods []string) string {
 			// the VM's range; a second internal port whose NAT port another
 			// connection to the same destination holds is dropped, the
 			// endpoint-independent conflict of nat/docs/ports-and-addresses.
-			fmt.Fprintf(&b, "    oifname \"eth0\" ip saddr %s meta l4proto { tcp, udp } snat ip to %s : jhash ip saddr . th sport mod %d offset %d comment %q\n",
-				v.IP, v.NatIP, v.PortHi-v.PortLo+1, v.PortLo, v.Name)
+			// (nftables types a hash as an integer: a map turns it into
+			// the port.)
+			n := v.PortHi - v.PortLo + 1
+			fmt.Fprintf(&b, "    oifname \"eth0\" ip saddr %s meta l4proto { tcp, udp } snat ip to %s : jhash ip saddr . th sport mod %d map { ", v.IP, v.NatIP, n)
+			for i := 0; i < n; i++ {
+				if i > 0 {
+					b.WriteString(", ")
+				}
+				fmt.Fprintf(&b, "%d : %d", i, v.PortLo+i)
+			}
+			fmt.Fprintf(&b, " } comment %q\n", v.Name)
 		} else {
 			fmt.Fprintf(&b, "    oifname \"eth0\" ip saddr %s meta l4proto { tcp, udp } snat ip to %s:%d-%d comment %q\n", v.IP, v.NatIP, v.PortLo, v.PortHi, v.Name)
 		}

@@ -17,8 +17,15 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// ipv6Web serves "V6-<hostname>" on [::]:8080, IPv6 only.
-const ipv6Web = `sudo systemd-run --unit=web6 /bin/sh -c 'b="V6-$(hostname)"; while true; do printf "HTTP/1.1 200 OK\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s" ${#b} "$b" | nc -6 -lN 8080 >/dev/null 2>&1; done'`
+// ipv6Web serves "V6-<hostname>" on [::]:8080, IPv6 only. It is a script
+// file, as lbWebScript is: systemd-run would expand ${...} in an inline
+// command line itself.
+const ipv6Web = `sudo tee /usr/local/bin/web6 >/dev/null <<'EOF'
+#!/bin/bash
+b="V6-$(hostname)"
+while true; do printf 'HTTP/1.1 200 OK\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s' ${#b} "$b" | nc -6 -lN 8080 >/dev/null 2>&1; done
+EOF
+sudo chmod +x /usr/local/bin/web6 && sudo systemd-run --unit=web6 /usr/local/bin/web6`
 
 // covers: compute.subnetworks.insert, compute.subnetworks.get, compute.subnetworks.patch, compute.subnetworks.delete, compute.instances.insert, compute.instances.get, compute.globalAddresses.insert, compute.globalAddresses.get, compute.globalAddresses.delete, compute.globalForwardingRules.insert, compute.globalForwardingRules.get, compute.globalForwardingRules.delete
 //
@@ -135,9 +142,11 @@ func TestIPv6OnlyVMsAndGlobalIPv6LoadBalancing2140(t *testing.T) {
 		t.Errorf("the IPv6-only VM has an IPv4 address on vpc0: %s", out)
 	}
 	vms.eventually("the metadata server's ipv6s", a,
-		// An SSH session has not the guest's environment: GCE_METADATA_HOST
-		// is read from init's.
-		`M=$(sudo cat /proc/1/environ | tr '\0' '\n' | sed -n 's/^GCE_METADATA_HOST=//p'); curl -s -H 'Metadata-Flavor: Google' "http://$M/computeMetadata/v1/instance/network-interfaces/0/ipv6s"`, v6[a])
+		// The instance's own metadata, as the guest environment reads it
+		// (its guest URL, which an SSH session's environment lacks: it is
+		// read from init's); GCE_METADATA_HOST names the shared metadata
+		// server, for service account tokens.
+		`M=$(sudo cat /proc/1/environ | tr '\0' '\n' | sed -n 's/^CLOUDBURROW_GUEST_METADATA=//p'); curl -s -H 'Metadata-Flavor: Google' "$M/computeMetadata/v1/instance/network-interfaces/0/ipv6s"`, v6[a])
 	curl6 := func(ip string) string { return "curl -s -m 5 -g http://[" + ip + "]:8080/ || echo UNREACHABLE" }
 	vms.eventually("the IPv6-only VMs reach each other", a, curl6(v6[b]), "V6-"+b)
 	vms.eventually("the dual-stack VM reaches an IPv6-only one", c, curl6(v6[a]), "V6-"+a)

@@ -112,8 +112,8 @@ func TestNATDynamicPortsAndEndpointIndependentMapping2140(t *testing.T) {
 		t.Fatalf("gateway: %+v", g)
 	}
 	nft := natNFT(g, nil)
-	want := `ip saddr ` + g.VMs[0].IP + " meta l4proto { tcp, udp } snat ip to " + g.VMs[0].NatIP + " : jhash ip saddr . th sport mod 64 offset 1024"
-	if !strings.Contains(nft, want) {
+	want := `ip saddr ` + g.VMs[0].IP + " meta l4proto { tcp, udp } snat ip to " + g.VMs[0].NatIP + " : jhash ip saddr . th sport mod 64 map { 0 : 1024, 1 : 1025, "
+	if !strings.Contains(nft, want) || !strings.Contains(nft, ", 63 : 1087 }") {
 		t.Fatalf("no endpoint-independent mapping %q:\n%s", want, nft)
 	}
 	if s.SetNATPortUsage(g.Key, map[string]int{ip["a"]: 64}) {
