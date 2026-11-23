@@ -170,3 +170,52 @@ func (d *fakeDumper) CopyAt(context.Context, DumpTarget, DumpTarget, time.Time, 
 	return errors.New("the fake keeps no log")
 }
 func (d *fakeDumper) Prune(context.Context, DumpTarget, time.Time) error { return nil }
+
+// TestCloneOfASwitchedOverInstanceHasItsOwnServer: a blue-green
+// switchover leaves the blue name on the green instance's server
+// (Spec.Server); a clone of it starts a server of its own name, not that
+// one, and starts with no replica rebuild count (main run 45102950103).
+func TestCloneOfASwitchedOverInstanceHasItsOwnServer(t *testing.T) {
+	dir := t.TempDir()
+	srv := NewServer("", newFake())
+	prov := newFakeProv()
+	srv.EnableInstanceWrites(prov, filepath.Join(dir, "instances.json"))
+	if err := srv.EnableBackups(&fakeDumper{data: map[string]string{}}, filepath.Join(dir, "backups"), true); err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+	svc, err := sqladmin.NewService(context.Background(), option.WithEndpoint(ts.URL+"/"), option.WithoutAuthentication())
+	if err != nil {
+		t.Fatal(err)
+	}
+	op, err := svc.Instances.Insert("proj", &sqladmin.DatabaseInstance{Name: "blue", DatabaseVersion: "POSTGRES_17",
+		Settings: &sqladmin.Settings{Tier: "db-custom-2-7680"}}).Do()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := wait(t, svc, "proj", op); got.Error != nil {
+		t.Fatalf("create: %+v", got.Error)
+	}
+	srv.emu.Lock()
+	c := srv.writes.byName["blue"]
+	c.spec.Server, c.spec.RebuildEpoch = "blue-green1", 2
+	srv.emu.Unlock()
+	op, err = svc.Instances.Clone("proj", "blue", &sqladmin.InstancesCloneRequest{CloneContext: &sqladmin.CloneContext{
+		DestinationInstanceName: "blue-c"}}).Do()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := wait(t, svc, "proj", op); got.Error != nil {
+		t.Fatalf("clone: %+v", got.Error)
+	}
+	prov.mu.Lock()
+	started, ok := prov.started["blue-c"]
+	prov.mu.Unlock()
+	if !ok || started.ServerName() != "blue-c" || started.RebuildEpoch != 0 {
+		t.Errorf("the clone started on server %q (epoch %d), want its own", started.ServerName(), started.RebuildEpoch)
+	}
+	if got := srv.ServerOf("blue-c"); got != "blue-c" {
+		t.Errorf("ServerOf(blue-c) = %q", got)
+	}
+}

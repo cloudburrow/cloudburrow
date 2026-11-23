@@ -167,6 +167,7 @@ func (s *Server) restoreToNewInstance(r *http.Request, base, project, dest strin
 	}
 	spec.Name, spec.Project = dest, project
 	spec.CreateTime, spec.SettingsVersion = time.Now().UTC().Format(time.RFC3339Nano), 1
+	spec.ownServer()
 	if err := s.copyRefusal(spec.DatabaseVersion, "restoring a backup to a new instance"); err != nil {
 		return nil, err
 	}

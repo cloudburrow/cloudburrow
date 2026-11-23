@@ -314,7 +314,7 @@ func TestNoGoogleEgress(t *testing.T) {
 		}
 		body, _ := json.Marshal(map[string]any{"Path": path, "Statement": q.statement, "Mode": q.mode})
 		code, out := c.do(ctx, http.MethodPost, "/api/query/"+q.service+"?project="+url.QueryEscape(project), string(body))
-		t.Logf("console %s %q: %d %s", q.service, q.statement, code, firstLine(out))
+		t.Logf("console %s %q: %d %s", q.service, q.statement, code, firstLogLine(out))
 	}
 
 	// The CLI's own commands that reach the services.
@@ -378,7 +378,7 @@ func buildEgressGuarded(t *testing.T, dir string) string {
 		t.Fatalf("the guard's probe: %v\n%s", err, out)
 	}
 	if r := egressReport(log); !strings.Contains(r, "dial tcp 192.0.2.1:9") {
-		t.Fatalf("the egress guard is not in force: its probe recorded %q", firstLine(r))
+		t.Fatalf("the egress guard is not in force: its probe recorded %q", firstLogLine(r))
 	}
 	return bin
 }
@@ -510,14 +510,14 @@ func (c *consoleCrawler) services() []string {
 		} `json:"services"`
 	}
 	if err := json.Unmarshal([]byte(out), &list); err != nil {
-		c.t.Fatalf("/api/services is not JSON: %v: %s", err, firstLine(out))
+		c.t.Fatalf("/api/services is not JSON: %v: %s", err, firstLogLine(out))
 	}
 	var ids []string
 	for _, s := range list.Services {
 		ids = append(ids, s.ID)
 	}
 	if len(ids) == 0 {
-		c.t.Fatalf("/api/services lists none: %s", firstLine(out))
+		c.t.Fatalf("/api/services lists none: %s", firstLogLine(out))
 	}
 	return ids
 }
@@ -574,7 +574,7 @@ func (c *consoleCrawler) open(ctx context.Context, service string, parent []stri
 	}
 }
 
-func firstLine(s string) string {
+func firstLogLine(s string) string {
 	s, _, _ = strings.Cut(strings.TrimSpace(s), "\n")
 	if len(s) > 200 {
 		s = s[:200]
