@@ -263,10 +263,12 @@ func TestDataprocRangerComponent(t *testing.T) {
 		t.Fatalf("Hadoop job before the YARN deny policy: %v\n%s", wc.GetStatus(), output(wc))
 	}
 	// A policy of yarn-dataproc, made through the API, denying root
-	// submit-app on the default queue: the job is refused by YARN.
+	// submit-app and admin-queue on the default queue (YARN lets a queue's
+	// administrators submit to it too): the job is refused by YARN.
 	yarnDeny := map[string]any{"service": "yarn-dataproc", "name": "cb-deny-default-queue", "isEnabled": true,
-		"resources":       map[string]any{"queue": map[string]any{"values": []string{"root.default"}}},
-		"denyPolicyItems": []any{map[string]any{"users": []string{"root"}, "accesses": []any{map[string]any{"type": "submit-app", "isAllowed": true}}}}}
+		"resources": map[string]any{"queue": map[string]any{"values": []string{"root.default"}}},
+		"denyPolicyItems": []any{map[string]any{"users": []string{"root"}, "accesses": []any{
+			map[string]any{"type": "submit-app", "isAllowed": true}, map[string]any{"type": "admin-queue", "isAllowed": true}}}}}
 	if code, body := rest(http.MethodPost, "/service/public/v2/api/policy", password, yarnDeny); code != http.StatusOK {
 		t.Fatalf("create the YARN deny policy = %d %.500s", code, body)
 	}
