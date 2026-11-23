@@ -43,14 +43,18 @@ func (p *tab) chooseWorkspace(bucket string) {
 	}
 }
 
-// newSpeechRecognizer creates a chirp recognizer in project's global
-// location, deleted when the test ends.
+// newSpeechRecognizer creates a "long" recognizer in project's global
+// location, deleted when the test ends. Not chirp: Google's supported
+// languages table offers chirp in asia-southeast1, europe-west4 and
+// us-central1 only, so since #2127 a transcription through a global chirp
+// recognizer is refused with INVALID_ARGUMENT, as Google refuses it (main
+// run 45147981577).
 func newSpeechRecognizer(t *testing.T, c *speech.Client, project, id string) {
 	t.Helper()
 	ctx := context.Background()
 	parent := "projects/" + project + "/locations/global"
 	op, err := c.CreateRecognizer(ctx, &speechpb.CreateRecognizerRequest{Parent: parent, RecognizerId: id,
-		Recognizer: &speechpb.Recognizer{DefaultRecognitionConfig: &speechpb.RecognitionConfig{Model: "chirp", LanguageCodes: []string{"en-US"},
+		Recognizer: &speechpb.Recognizer{DefaultRecognitionConfig: &speechpb.RecognitionConfig{Model: "long", LanguageCodes: []string{"en-US"},
 			DecodingConfig: &speechpb.RecognitionConfig_AutoDecodingConfig{AutoDecodingConfig: &speechpb.AutoDetectDecodingConfig{}}}}})
 	if err != nil {
 		t.Fatal(err)
@@ -445,7 +449,7 @@ func TestDocumentAIAndSpeechRound4MeetWCAG(t *testing.T) {
 	}
 	put("jfk.flac", "audio/flac", clip)
 	put("transcript.json", "application/json", []byte(`{"results":[{"alternatives":[{"transcript":"And so my fellow Americans, ask not what your country can do for you","confidence":0.9}],"resultEndOffset":"11s","languageCode":"en-us"}]}`))
-	meta, _ := json.Marshal(map[string]any{"id": tid, "recognizer": "a11y-ws", "model": "chirp", "language": "en-US",
+	meta, _ := json.Marshal(map[string]any{"id": tid, "recognizer": "a11y-ws", "model": "long", "language": "en-US",
 		"source": "Local upload", "audioFile": "jfk.flac", "audioUri": "gs://" + bucket + "/transcriptions/" + tid + "/jfk.flac",
 		"audioType": "audio/flac", "transcriptUri": "gs://" + bucket + "/transcriptions/" + tid + "/transcript.json",
 		"createTime": "2026-11-20T12:00:00Z", "text": "And so my fellow Americans, ask not what your country can do for you"})

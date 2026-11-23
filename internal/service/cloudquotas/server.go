@@ -30,6 +30,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"path"
 	"regexp"
 	"sort"
 	"strconv"
@@ -184,6 +185,29 @@ func (st *state) put(id string, p *pb.QuotaPreference) error {
 		return err
 	}
 	st.Preferences[id] = b
+	return nil
+}
+
+// unique refuses a new preference p, to be stored as id, when another of
+// the container's preferences has its service, quota and dimensions: Cloud
+// Quotas keeps "only one QuotaPreference resource for a quota value
+// targeting a unique set of dimensions" (QuotaPreference's reference), and
+// a change to that value updates the one there. Google does not name the
+// code; ALREADY_EXISTS is the one the API uses for a taken name. Main run
+// 45147981577: two preferences on one quota left its value to whichever
+// ID sorted last.
+func (st state) unique(canonical, id string, p *pb.QuotaPreference) error {
+	prefs, err := st.preferences()
+	if err != nil {
+		return err
+	}
+	for _, o := range prefs {
+		if o.GetService() == p.GetService() && o.GetQuotaId() == p.GetQuotaId() && maps.Equal(o.GetDimensions(), p.GetDimensions()) &&
+			!strings.HasSuffix(o.GetName(), "/quotaPreferences/"+id) {
+			return status.Errorf(codes.AlreadyExists, "%s/quotaPreferences/%s already holds the preference for %s %s with dimensions %v: update it instead",
+				canonical, path.Base(o.GetName()), p.GetService(), p.GetQuotaId(), p.GetDimensions())
+		}
+	}
 	return nil
 }
 
@@ -609,6 +633,9 @@ func (s *Server) CreateQuotaPreference(_ context.Context, req *pb.CreateQuotaPre
 	if _, dup := st.Preferences[id]; dup {
 		return nil, status.Errorf(codes.AlreadyExists, "QuotaPreference %s/quotaPreferences/%s already exists", canonical, id)
 	}
+	if err := st.unique(canonical, id, req.GetQuotaPreference()); err != nil {
+		return nil, err
+	}
 	p, err := s.grant(project, level, nil, req.GetQuotaPreference(), req.GetIgnoreSafetyChecks())
 	if err != nil {
 		return nil, err
@@ -657,6 +684,8 @@ func (s *Server) UpdateQuotaPreference(_ context.Context, req *pb.UpdateQuotaPre
 		}
 	} else if !req.GetAllowMissing() {
 		return nil, status.Errorf(codes.NotFound, "QuotaPreference %s/quotaPreferences/%s not found", canonical, id)
+	} else if err := st.unique(canonical, id, in); err != nil {
+		return nil, err
 	}
 	merged := proto.Clone(in).(*pb.QuotaPreference)
 	if old != nil {

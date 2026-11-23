@@ -66,6 +66,16 @@ func TestQuotaInfosAndPreferences(t *testing.T) {
 	if _, err := s.CreateQuotaPreference(ctx, &pb.CreateQuotaPreferenceRequest{Parent: parent, QuotaPreferenceId: "sa", QuotaPreference: in}); status.Code(err) != codes.AlreadyExists {
 		t.Errorf("duplicate = %v", err)
 	}
+	// One preference per quota and dimensions: a second ID for the same
+	// quota is refused, by create and by an update that would create.
+	if _, err := s.CreateQuotaPreference(ctx, &pb.CreateQuotaPreferenceRequest{Parent: parent, QuotaPreferenceId: "sa-2", QuotaPreference: in}); status.Code(err) != codes.AlreadyExists ||
+		!strings.Contains(err.Error(), "/quotaPreferences/sa ") {
+		t.Errorf("a second preference on the quota = %v, want ALREADY_EXISTS naming sa", err)
+	}
+	if _, err := s.UpdateQuotaPreference(ctx, &pb.UpdateQuotaPreferenceRequest{AllowMissing: true, QuotaPreference: &pb.QuotaPreference{Name: parent + "/quotaPreferences/sa-3",
+		Service: in.GetService(), QuotaId: in.GetQuotaId(), QuotaConfig: &pb.QuotaConfig{PreferredValue: 50}}}); status.Code(err) != codes.AlreadyExists {
+		t.Errorf("allow_missing on a second preference of the quota = %v, want ALREADY_EXISTS", err)
+	}
 	// An increase is granted; update needs a known etag or none.
 	up, err := s.UpdateQuotaPreference(ctx, &pb.UpdateQuotaPreferenceRequest{UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"quota_config.preferred_value"}},
 		QuotaPreference: &pb.QuotaPreference{Name: parent + "/quotaPreferences/sa", QuotaConfig: &pb.QuotaConfig{PreferredValue: 200}}})

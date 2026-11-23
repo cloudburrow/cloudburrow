@@ -83,8 +83,17 @@ type Forwarder struct {
 	// tunnel is Guarded, and guard is the proxy on hostPort in front of it.
 	// Unguarded, kubectl listens on hostPort and both are unused.
 	kubePort int
-	guard    *guardProxy
-	done     chan struct{}
+	// held is the listener that keeps a host port New chose free until
+	// the tunnel binds it (release): closed at once, as freePort's are,
+	// the port stays free for minutes while the cluster starts, and any
+	// process may take it meanwhile. Main run 45147981577: a restarted
+	// instance's forward:memorystore found its chosen 127.0.0.1:38031
+	// another process's, on all of its retries, and the instance failed
+	// to start (Docker publishes kind's API server, and kubectl
+	// port-forward binds, on random ports from the same ephemeral range).
+	held  net.Listener
+	guard *guardProxy
+	done  chan struct{}
 	// cancelSupervisor stops the goroutine that re-establishes the tunnel,
 	// and supervisorDone is closed when it has stopped: Stop waits for it,
 	// so nothing of a stopped tunnel runs on after Stop returns.
@@ -133,8 +142,8 @@ func New(target Target, kubeconfig, bindAddr string) *Forwarder {
 	f := &Forwarder{target: target, bindAddr: bindAddr, kube: k8s.New(kubeconfig, "", target.Namespace)}
 	f.hostPort = target.HostPort
 	if f.hostPort == 0 {
-		if p, err := freePort(bindAddr); err == nil {
-			f.hostPort = p
+		if p, l, err := reservePort(bindAddr); err == nil {
+			f.hostPort, f.held = p, l
 		}
 	}
 	if target.Guarded {
@@ -248,6 +257,7 @@ func (f *Forwarder) Start(ctx context.Context) error {
 		f.mu.Lock()
 		public := net.JoinHostPort(f.bindAddr, strconv.Itoa(f.hostPort))
 		f.mu.Unlock()
+		f.release() // the guard binds the host port
 		g, err := startObservedGuardFunc(public, f.kubeAddr, f.logf, f.Observe, f.Local)
 		if err != nil {
 			f.stopProcess(context.Background())
@@ -319,6 +329,9 @@ func (f *Forwarder) launch(ctx context.Context, requirePod bool) error {
 	}
 	spec := fmt.Sprintf("%d:%d", listenPort, remote)
 	errOut := &syncBuffer{}
+	if !f.target.Guarded {
+		f.release() // kubectl binds the host port itself
+	}
 	kubeAddr := listenAddr
 	if f.target.Loopback6 && !f.target.Guarded && listenAddr == "127.0.0.1" {
 		kubeAddr = "127.0.0.1,::1"
@@ -741,6 +754,7 @@ func (f *Forwarder) Restarts() int {
 // the pod dying and the supervisor would immediately rebuild the tunnel we are
 // trying to remove.
 func (f *Forwarder) Stop(ctx context.Context) error {
+	f.release()
 	f.mu.Lock()
 	cancel, superDone := f.cancelSupervisor, f.supervisorDone
 	f.cancelSupervisor, f.supervisorDone = nil, nil
@@ -815,6 +829,38 @@ func freePort(bindAddr string) (int, error) {
 		}
 	}
 	return 0, fmt.Errorf("no port on %s that this process has not handed out already", bindAddr)
+}
+
+// release closes the listener holding the host port New chose, so the
+// tunnel can bind it; a no-op once released.
+func (f *Forwarder) release() {
+	f.mu.Lock()
+	l := f.held
+	f.held = nil
+	f.mu.Unlock()
+	if l != nil {
+		_ = l.Close()
+	}
+}
+
+// reservePort is freePort with the port still held: the listener is
+// returned open, for the caller to close when it binds the port.
+func reservePort(bindAddr string) (int, net.Listener, error) {
+	handedOut.mu.Lock()
+	defer handedOut.mu.Unlock()
+	for range 64 {
+		l, err := net.Listen("tcp", net.JoinHostPort(bindAddr, "0"))
+		if err != nil {
+			return 0, nil, err
+		}
+		p := l.Addr().(*net.TCPAddr).Port
+		if !handedOut.ports[p] {
+			handedOut.ports[p] = true
+			return p, l, nil
+		}
+		_ = l.Close()
+	}
+	return 0, nil, fmt.Errorf("no port on %s that this process has not handed out already", bindAddr)
 }
 
 // handedOut is every port freePort has returned. Keyed by port alone: a

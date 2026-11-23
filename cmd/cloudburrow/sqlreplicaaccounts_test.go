@@ -29,7 +29,10 @@ case "$args" in
   *"SELECT CONCAT('DROP USER"*) [ -z "$primary" ] && echo "DROP USER 'root'@'%';" ;;
   *"SELECT CONCAT(QUOTE(user)"*) [ -n "$primary" ] && echo "'appuser'@'%'" ;;
   *"SHOW CREATE USER"*) echo "CREATE USER 'appuser'@'%' IDENTIFIED WITH 'mysql_native_password' AS '*ABC'" ;;
-  *"SHOW GRANTS"*) echo "GRANT SELECT ON *.* TO 'appuser'@'%'" ;;
+  *"SHOW GRANTS"*) case "` + version + `" in
+      5.6*) echo "GRANT SELECT ON *.* TO 'appuser'@'%' IDENTIFIED BY PASSWORD <secret>" ;;
+      *) echo "GRANT SELECT ON *.* TO 'appuser'@'%'" ;;
+    esac ;;
   *"SELECT COUNT(*)"*) echo 0 ;;
   *" -e "*|*" -e"*) : ;;
   *) [ -z "$primary" ] && cat >> "` + dir + `/applied.sql" ;;
@@ -49,7 +52,9 @@ exit 0
 // switchover the blue name and its clone refused 'appuser'): the setup
 // copies them, with the binary log off, after dropping the replica's own,
 // on MySQL 5.7 and on 5.6, whose account statements end in an exit that
-// must not end the setup.
+// must not end the setup, and whose SHOW GRANTS, read through the
+// replication user, which lacks SUPER, masks the password as <secret>
+// (main run 45147981577).
 func TestMySQLReplicaSetupCopiesThePrimarysAccounts(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the setup is a POSIX shell script")
