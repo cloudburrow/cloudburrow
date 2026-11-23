@@ -19683,8 +19683,10 @@
           "test/compat/dataproc2162c_test.go:298 TestDataprocZeppelin",
           "test/compat/dataproc2162c_test.go:304 TestDataprocZeppelin30",
           "test/compat/dataproc2162c_test.go:93 TestDataprocTableFormats",
-          "test/compat/dataproc2162d_test.go:148 TestDataprocDockerComponent",
-          "test/compat/dataproc2162e_test.go:42 TestDataprocOnGKE"
+          "test/compat/dataproc2162d_test.go:152 TestDataprocDockerComponent",
+          "test/compat/dataproc2162d_test.go:230 TestDataprocDockerComponentOff",
+          "test/compat/dataproc2162e_test.go:42 TestDataprocOnGKE",
+          "test/compat/dataproc2162f_test.go:37 TestDataprocRangerComponent"
         ]
       },
       {
@@ -19759,7 +19761,7 @@
         "tests": [
           "test/compat/dataproc2162_test.go:169 TestDataprocClusters",
           "test/compat/dataproc2162b_test.go:74 TestDataprocHadoopHivePigJobs",
-          "test/compat/dataproc2162d_test.go:42 TestDataprocSparkAndHiveOnYarn"
+          "test/compat/dataproc2162d_test.go:46 TestDataprocSparkAndHiveOnYarn"
         ]
       },
       {
@@ -19776,8 +19778,8 @@
           "test/compat/dataproc2162_test.go:169 TestDataprocClusters",
           "test/compat/dataproc2162b_test.go:74 TestDataprocHadoopHivePigJobs",
           "test/compat/dataproc2162c_test.go:93 TestDataprocTableFormats",
-          "test/compat/dataproc2162d_test.go:148 TestDataprocDockerComponent",
-          "test/compat/dataproc2162d_test.go:42 TestDataprocSparkAndHiveOnYarn",
+          "test/compat/dataproc2162d_test.go:152 TestDataprocDockerComponent",
+          "test/compat/dataproc2162d_test.go:46 TestDataprocSparkAndHiveOnYarn",
           "test/compat/dataproc2162e_test.go:42 TestDataprocOnGKE"
         ]
       },
