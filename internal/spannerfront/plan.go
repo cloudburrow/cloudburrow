@@ -231,6 +231,32 @@ func (c *countCtx) sub(from string, where []string) *countCtx {
 	}}
 }
 
+// groups is the context of a subquery run once per group of a SELECT
+// that aggregates: per GROUP BY group (after HAVING), or once for a
+// SELECT with no GROUP BY.
+func (c *countCtx) groups(from string, where, groupBy []string, having string) *countCtx {
+	if from == "" || len(groupBy) == 0 && having == "" {
+		return c
+	}
+	inner := "SELECT 1 AS cb_one FROM " + from + whereSQL(where)
+	if len(groupBy) > 0 {
+		inner += " GROUP BY " + strings.Join(groupBy, ", ")
+	}
+	if having != "" {
+		inner += " HAVING " + having
+	}
+	return &countCtx{sumOver: func(expr string) string {
+		if len(groupBy) == 0 {
+			return c.sumOver("COALESCE((SELECT SUM(" + expr + ") FROM (" + inner + ") AS cb_grp), 0)")
+		}
+		sel := "SELECT " + expr + " AS cb_n FROM " + from + whereSQL(where) + " GROUP BY " + strings.Join(groupBy, ", ")
+		if having != "" {
+			sel += " HAVING " + having
+		}
+		return c.sumOver("COALESCE((SELECT SUM(cb_n) FROM (" + sel + ") AS cb_grp), 0)")
+	}}
+}
+
 func whereSQL(conds []string) string {
 	if len(conds) == 0 {
 		return ""
@@ -779,11 +805,15 @@ func (b *planBuilder) planOutput(sel *sqlSelect, f *frag, scope *planScope, cc *
 		}
 	}
 	if aggregating {
-		for _, it := range sel.list {
-			if hasSubquery(it.e) {
-				return nil, unsupportedSQL{"a subquery in the select list of a SELECT that aggregates"}
+		// a subquery in an aggregate's argument runs once per input row,
+		// one elsewhere in the select list once per group
+		inAgg, perGroup := aggSubqueries(sel.list)
+		for _, x := range inAgg {
+			if err := b.planSubqueries(x, scope, cc, f); err != nil {
+				return nil, err
 			}
 		}
+		groupFrom, groupConds := f.from, append([]string(nil), f.conds...)
 		upTo := sel.hi
 		if sel.having != nil {
 			upTo = sel.having.lo - 1
@@ -837,6 +867,22 @@ func (b *planBuilder) planOutput(sel *sqlSelect, f *frag, scope *planScope, cc *
 			fl.rows = cc.count("SELECT 1 FROM (" + selText + ") AS cb_h")
 			f.op = fl
 		}
+		if len(perGroup) > 0 {
+			var group []string
+			for _, g := range sel.groupBy {
+				group = append(group, b.text(g))
+			}
+			having := ""
+			if sel.having != nil {
+				having = b.text(sel.having)
+			}
+			gcc := cc.groups(groupFrom, groupConds, group, having)
+			for _, x := range perGroup {
+				if err := b.planSubqueriesIn(x, scope, gcc, f); err != nil {
+					return nil, err
+				}
+			}
+		}
 	}
 	if sel.distinct {
 		var keys []planLink
@@ -887,12 +933,17 @@ func prefixOf(cols, order []string) bool {
 
 // planSubqueries plans the subqueries in e, each run once per row of f.
 func (b *planBuilder) planSubqueries(e *sqlExpr, scope *planScope, cc *countCtx, f *frag) error {
+	return b.planSubqueriesIn(e, scope, cc.sub(f.from, f.conds), f)
+}
+
+// planSubqueriesIn plans the subqueries in e, counting their rows in cc.
+func (b *planBuilder) planSubqueriesIn(e *sqlExpr, scope *planScope, cc *countCtx, f *frag) error {
 	var err error
 	walkExpr(e, func(x *sqlExpr) {
 		if err != nil || x.kind != exSubq || b.subPlans[x] != nil {
 			return
 		}
-		sub, e2 := b.planQuery(x.sub, scope, cc.sub(f.from, f.conds))
+		sub, e2 := b.planQuery(x.sub, scope, cc)
 		if e2 != nil {
 			err = e2
 			return
@@ -900,6 +951,33 @@ func (b *planBuilder) planSubqueries(e *sqlExpr, scope *planScope, cc *countCtx,
 		b.subPlans[x] = b.gather(sub)
 	})
 	return err
+}
+
+// aggSubqueries splits an aggregating select list's subqueries: those in
+// an aggregate's arguments, and the others.
+func aggSubqueries(list []sqlItem) (inAgg, perGroup []*sqlExpr) {
+	var walk func(e *sqlExpr, agg bool)
+	walk = func(e *sqlExpr, agg bool) {
+		if e == nil {
+			return
+		}
+		if e.kind == exSubq {
+			if agg {
+				inAgg = append(inAgg, e)
+			} else {
+				perGroup = append(perGroup, e)
+			}
+			return
+		}
+		inner := agg || e.kind == exFunc && aggregateFuncs[e.op]
+		for _, a := range e.args {
+			walk(a, inner)
+		}
+	}
+	for _, it := range list {
+		walk(it.e, false)
+	}
+	return inAgg, perGroup
 }
 
 func hasSubquery(e *sqlExpr) bool {
