@@ -142,7 +142,7 @@ func TestConsoleVPCParity2140(t *testing.T) {
 
 	// The firewall rule form.
 	fields := fwp.CreateFormFor(ctx, project)
-	if got := vpcFieldNames(fields); got != "name,description,logs,network,priority,direction,action,targets,targetTags,targetServiceAccount,"+
+	if got := vpcFieldNames(fields); got != "name,description,logs,logsMetadata,network,priority,direction,action,targets,targetTags,targetServiceAccount,"+
 		"sourceFilter,sourceRanges,sourceTags,sourceServiceAccount,secondSourceFilter,secondSourceTags,secondSourceServiceAccount,"+
 		"destinationFilter,destinationRanges,protocolsMode,tcp,tcpPorts,udp,udpPorts,other,otherProtocols,enforcement" {
 		t.Fatalf("Create firewall rule fields = %s", got)
