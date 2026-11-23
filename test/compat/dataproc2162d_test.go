@@ -61,7 +61,7 @@ func TestDataprocSparkAndHiveOnYarn(t *testing.T) {
 	name := "yn-" + suffix
 	dataprocClusterUp(t, ctx, h, cc, project, region, &dataprocpb.Cluster{ProjectId: project, ClusterName: name,
 		Config: &dataprocpb.ClusterConfig{SoftwareConfig: &dataprocpb.SoftwareConfig{ImageVersion: "2.2"},
-			WorkerConfig: &dataprocpb.InstanceGroupConfig{NumInstances: 2},
+			WorkerConfig:   &dataprocpb.InstanceGroupConfig{NumInstances: 2},
 			EndpointConfig: &dataprocpb.EndpointConfig{EnableHttpPortAccess: true}}})
 	place := &dataprocpb.JobPlacement{ClusterName: name}
 	pi := dataprocPut(t, ctx, bh, "yarn/pi.py", dataprocYarnPi)
@@ -98,7 +98,7 @@ func TestDataprocSparkAndHiveOnYarn(t *testing.T) {
 
 	spark := dataprocRunJob(t, ctx, jc, project, region, &dataprocpb.Job{Placement: place, Reference: &dataprocpb.JobReference{JobId: "ypi-" + suffix},
 		TypeJob: &dataprocpb.Job_SparkJob{SparkJob: &dataprocpb.SparkJob{
-			Driver: &dataprocpb.SparkJob_MainClass{MainClass: "org.apache.spark.examples.SparkPi"},
+			Driver:      &dataprocpb.SparkJob_MainClass{MainClass: "org.apache.spark.examples.SparkPi"},
 			JarFileUris: []string{"file:///usr/lib/spark/examples/jars/spark-examples.jar"}, Args: []string{"20"}}}})
 	if out := dataprocGSText(t, ctx, sc, spark.GetDriverOutputResourceUri()); spark.GetStatus().GetState() != dataprocpb.JobStatus_DONE || !strings.Contains(out, "Pi is roughly 3.") {
 		t.Errorf("SparkPi on YARN: %v\n%s", spark.GetStatus(), out)

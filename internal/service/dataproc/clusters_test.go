@@ -452,7 +452,9 @@ func TestCheckComponents(t *testing.T) {
 		{"2.2", []dataprocpb.Component{dataprocpb.Component_ZOOKEEPER, dataprocpb.Component_ZOOKEEPER}, codes.InvalidArgument},
 		{"2.2", []dataprocpb.Component{dataprocpb.Component_DELTA, dataprocpb.Component_ICEBERG, dataprocpb.Component_HUDI}, codes.OK},
 		{"2.1", []dataprocpb.Component{dataprocpb.Component_HUDI}, codes.OK},
-		{"3.0", []dataprocpb.Component{dataprocpb.Component_ICEBERG}, codes.Unimplemented},
+		{"3.0", []dataprocpb.Component{dataprocpb.Component_ICEBERG, dataprocpb.Component_ZEPPELIN, dataprocpb.Component_DOCKER}, codes.OK},
+		{"2.2", []dataprocpb.Component{dataprocpb.Component_DOCKER}, codes.OK},
+		{"3.0", []dataprocpb.Component{dataprocpb.Component_RANGER}, codes.Unimplemented},
 		{"3.0", []dataprocpb.Component{dataprocpb.Component_DELTA, dataprocpb.Component_HUDI}, codes.OK},
 	} {
 		if err := checkComponents(c.mm, c.comps); status.Code(err) != c.code {

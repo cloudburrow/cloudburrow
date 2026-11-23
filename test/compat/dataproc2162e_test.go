@@ -134,7 +134,7 @@ func TestDataprocOnGKE(t *testing.T) {
 	}
 	pi := dataprocRunJob(t, ctx, jc, project, region, &dataprocpb.Job{Placement: place, Reference: &dataprocpb.JobReference{JobId: "gkepi-" + suffix},
 		TypeJob: &dataprocpb.Job_SparkJob{SparkJob: &dataprocpb.SparkJob{
-			Driver: &dataprocpb.SparkJob_MainClass{MainClass: "org.apache.spark.examples.SparkPi"},
+			Driver:      &dataprocpb.SparkJob_MainClass{MainClass: "org.apache.spark.examples.SparkPi"},
 			JarFileUris: []string{"file:///usr/lib/spark/examples/jars/spark-examples.jar"}, Args: []string{"10"}}}})
 	if out := dataprocGSText(t, ctx, sc, pi.GetDriverOutputResourceUri()); pi.GetStatus().GetState() != dataprocpb.JobStatus_DONE || !strings.Contains(out, "Pi is roughly 3.") {
 		t.Errorf("SparkPi on GKE: %v\n%s", pi.GetStatus(), out)

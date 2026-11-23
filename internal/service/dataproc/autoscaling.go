@@ -248,7 +248,8 @@ func cooldown(p *dataprocpb.AutoscalingPolicy) time.Duration {
 }
 
 // masterState is the standalone master's /json/: its cores and the
-// active applications', which stand in for YARN's memory metrics.
+// active applications', which stand in for YARN's memory metrics on a
+// cluster without YARN.
 type masterState struct {
 	Cores      int `json:"cores"`
 	CoresUsed  int `json:"coresused"`
@@ -258,14 +259,28 @@ type masterState struct {
 	} `json:"activeapps"`
 }
 
+// queueMetrics is the ResourceManager's root queue's metrics (its
+// /jmx QueueMetrics bean): YARN's pending, available and allocated
+// memory, Dataproc's autoscaling inputs.
+type queueMetrics struct {
+	Beans []struct {
+		PendingMB   float64 `json:"PendingMB"`
+		AvailableMB float64 `json:"AvailableMB"`
+		AllocatedMB float64 `json:"AllocatedMB"`
+	} `json:"beans"`
+}
+
 // recommend is the autoscaler's worker count for a cluster of current
-// workers. Dataproc's algorithm works from YARN's pending and available
-// memory; a local cluster has Spark's standalone scheduler, so its
-// pending capacity is the active applications' cores beyond the
-// cluster's (an application WAITING for executors), its available
-// capacity the cores no application holds. The scale-up and scale-down
-// factors, the minimum worker fractions and the bounds apply as the
-// policy documents them.
+// workers, by Dataproc's algorithm
+// (https://docs.cloud.google.com/dataproc/docs/concepts/configuring-clusters/autoscaling):
+// on a cluster with YARN, from YARN's pending and available memory (the
+// root queue's PendingMB and AvailableMB), a worker's memory its share
+// of the cluster's; without YARN, from Spark's standalone scheduler, its
+// pending capacity the active applications' cores beyond the cluster's
+// (an application WAITING for executors), its available capacity the
+// cores no application holds. The scale-up and scale-down factors, the
+// minimum worker fractions and the bounds apply as the policy documents
+// them.
 func recommend(p *dataprocpb.AutoscalingPolicy, nodes Nodes, current int, busy bool) int {
 	if nodes == nil || current == 0 {
 		return current
@@ -273,30 +288,46 @@ func recommend(p *dataprocpb.AutoscalingPolicy, nodes Nodes, current int, busy b
 	y := p.GetBasicAlgorithm().GetYarnConfig()
 	lo := int(p.GetWorkerConfig().GetMinInstances() + p.GetSecondaryWorkerConfig().GetMinInstances())
 	hi := int(p.GetWorkerConfig().GetMaxInstances() + p.GetSecondaryWorkerConfig().GetMaxInstances())
-	var st masterState
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if addr := nodes.Web(ctx)["master"]; addr != "" {
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+addr+"/json/", nil)
-		if resp, err := http.DefaultClient.Do(req); err == nil {
-			_ = json.NewDecoder(resp.Body).Decode(&st)
-			resp.Body.Close()
+	web := nodes.Web(ctx)
+	getJSON := func(url string, v any) bool {
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return false
 		}
+		defer resp.Body.Close()
+		return resp.StatusCode == http.StatusOK && json.NewDecoder(resp.Body).Decode(v) == nil
 	}
-	perWorker := 2.0
-	if current > 0 && st.Cores > 0 {
-		perWorker = float64(st.Cores) / float64(current)
-	}
-	pending := 0.0
-	for _, a := range st.ActiveApps {
-		if a.State == "WAITING" {
+	perWorker, pending, available := 0.0, 0.0, 0.0
+	var qm queueMetrics
+	if addr := web["yarn"]; addr != "" && getJSON("http://"+addr+"/jmx?qry=Hadoop:service=ResourceManager,name=QueueMetrics,q0=root", &qm) && len(qm.Beans) == 1 {
+		b := qm.Beans[0]
+		perWorker = (b.AvailableMB + b.AllocatedMB) / float64(current)
+		pending, available = b.PendingMB, b.AvailableMB
+	} else {
+		var st masterState
+		if addr := web["master"]; addr != "" {
+			getJSON("http://"+addr+"/json/", &st)
+		}
+		perWorker = 2.0
+		if st.Cores > 0 {
+			perWorker = float64(st.Cores) / float64(current)
+		}
+		for _, a := range st.ActiveApps {
+			if a.State == "WAITING" {
+				pending += perWorker
+			}
+		}
+		if st.Cores > 0 && st.CoresUsed >= st.Cores && len(st.ActiveApps) > 0 {
 			pending += perWorker
 		}
+		available = float64(st.Cores - st.CoresUsed)
 	}
-	if st.Cores > 0 && st.CoresUsed >= st.Cores && len(st.ActiveApps) > 0 {
-		pending += perWorker
+	if perWorker <= 0 {
+		return current
 	}
-	available := float64(st.Cores - st.CoresUsed)
 	delta := 0
 	switch {
 	case pending > 0:

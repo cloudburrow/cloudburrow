@@ -19648,7 +19648,7 @@
         "tests": [
           "test/compat/dataproc2156_test.go:85 TestDataprocServerlessBatches",
           "test/compat/dataproc2162_test.go:621 TestDataprocJupyterNotebookAndSparkR",
-          "test/compat/dataproc2162c_test.go:183 TestDataprocNotebookMagics"
+          "test/compat/dataproc2162c_test.go:215 TestDataprocNotebookMagics"
         ]
       },
       {
@@ -19664,7 +19664,7 @@
         "tests": [
           "test/compat/dataproc2156_test.go:85 TestDataprocServerlessBatches",
           "test/compat/dataproc2162_test.go:621 TestDataprocJupyterNotebookAndSparkR",
-          "test/compat/dataproc2162c_test.go:183 TestDataprocNotebookMagics"
+          "test/compat/dataproc2162c_test.go:215 TestDataprocNotebookMagics"
         ]
       },
       {
@@ -19680,8 +19680,11 @@
         "tests": [
           "test/compat/dataproc2162_test.go:169 TestDataprocClusters",
           "test/compat/dataproc2162b_test.go:289 TestDataprocOptionalComponents",
-          "test/compat/dataproc2162c_test.go:266 TestDataprocZeppelin",
-          "test/compat/dataproc2162c_test.go:74 TestDataprocTableFormats"
+          "test/compat/dataproc2162c_test.go:298 TestDataprocZeppelin",
+          "test/compat/dataproc2162c_test.go:304 TestDataprocZeppelin30",
+          "test/compat/dataproc2162c_test.go:93 TestDataprocTableFormats",
+          "test/compat/dataproc2162d_test.go:148 TestDataprocDockerComponent",
+          "test/compat/dataproc2162e_test.go:42 TestDataprocOnGKE"
         ]
       },
       {
@@ -19704,7 +19707,8 @@
         "tests": [
           "test/compat/dataproc2162_test.go:169 TestDataprocClusters",
           "test/compat/dataproc2162b_test.go:289 TestDataprocOptionalComponents",
-          "test/compat/dataproc2162c_test.go:266 TestDataprocZeppelin"
+          "test/compat/dataproc2162c_test.go:298 TestDataprocZeppelin",
+          "test/compat/dataproc2162c_test.go:304 TestDataprocZeppelin30"
         ]
       },
       {
@@ -19754,7 +19758,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/dataproc2162_test.go:169 TestDataprocClusters",
-          "test/compat/dataproc2162b_test.go:74 TestDataprocHadoopHivePigJobs"
+          "test/compat/dataproc2162b_test.go:74 TestDataprocHadoopHivePigJobs",
+          "test/compat/dataproc2162d_test.go:42 TestDataprocSparkAndHiveOnYarn"
         ]
       },
       {
@@ -19770,7 +19775,10 @@
         "tests": [
           "test/compat/dataproc2162_test.go:169 TestDataprocClusters",
           "test/compat/dataproc2162b_test.go:74 TestDataprocHadoopHivePigJobs",
-          "test/compat/dataproc2162c_test.go:74 TestDataprocTableFormats"
+          "test/compat/dataproc2162c_test.go:93 TestDataprocTableFormats",
+          "test/compat/dataproc2162d_test.go:148 TestDataprocDockerComponent",
+          "test/compat/dataproc2162d_test.go:42 TestDataprocSparkAndHiveOnYarn",
+          "test/compat/dataproc2162e_test.go:42 TestDataprocOnGKE"
         ]
       },
       {
@@ -19835,7 +19843,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/dataproc2156_test.go:417 TestDataprocServerlessSessions",
-          "test/compat/dataproc2162c_test.go:338 TestDataprocKernelGateway"
+          "test/compat/dataproc2162c_test.go:379 TestDataprocKernelGateway"
         ]
       },
       {
@@ -19851,7 +19859,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/dataproc2156_test.go:417 TestDataprocServerlessSessions",
-          "test/compat/dataproc2162c_test.go:338 TestDataprocKernelGateway"
+          "test/compat/dataproc2162c_test.go:379 TestDataprocKernelGateway"
         ]
       },
       {

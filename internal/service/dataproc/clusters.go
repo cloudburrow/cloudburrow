@@ -332,7 +332,7 @@ var servedComponents = map[dataprocpb.Component]bool{
 
 // unservedComponents are why the other components do not run.
 var unservedComponents = map[dataprocpb.Component]string{
-	dataprocpb.Component_RANGER: "Apache Ranger publishes no official image",
+	dataprocpb.Component_RANGER: "Apache Ranger publishes no official image, and its Admin server built from the pinned source release is not built yet (docs/gaps.md)",
 }
 
 // checkComponents checks a cluster's optional components against its

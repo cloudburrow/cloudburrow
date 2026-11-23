@@ -10,6 +10,7 @@ import (
 	"cloud.google.com/go/dataproc/v2/apiv1/dataprocpb"
 	"google.golang.org/grpc"
 
+	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/service/dataproc"
 	"github.com/cloudburrow/cloudburrow/internal/sparkproc"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
@@ -190,4 +191,66 @@ func TestConsoleDataprocClusters(t *testing.T) {
 		t.Errorf("Delete policy: %v", err)
 	}
 	_ = dataprocpb.ClusterStatus_RUNNING
+}
+
+// consoleVirtual starts Dataproc on GKE clusters for the console's test.
+type consoleVirtual struct{}
+
+func (consoleVirtual) StartVirtual(context.Context, dataproc.VirtualSpec) (dataproc.Nodes, error) {
+	return &consoleNodes{}, nil
+}
+
+// TestConsoleDataprocVirtualCluster (#2162): a Dataproc on GKE cluster in
+// the Clusters list, its staging bucket the virtual cluster's, and its
+// page: Jobs, Node pools (the target pools and roles) and Configuration
+// (type Dataproc on GKE, the GKE cluster, namespace and Spark version).
+func TestConsoleDataprocVirtualCluster(t *testing.T) {
+	ctx := context.Background()
+	const project = "dpv-console"
+	api, err := dataproc.NewServer(dataproc.Options{Engine: consoleClusterSpark{}, Virtual: consoleVirtual{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer api.Close()
+	target := "projects/" + project + "/locations/us-central1-a/clusters/g"
+	op, err := api.CreateCluster(ctx, &dataprocpb.CreateClusterRequest{ProjectId: project, Region: "us-central1", Cluster: &dataprocpb.Cluster{
+		ClusterName: "v1", VirtualClusterConfig: &dataprocpb.VirtualClusterConfig{
+			InfrastructureConfig: &dataprocpb.VirtualClusterConfig_KubernetesClusterConfig{KubernetesClusterConfig: &dataprocpb.KubernetesClusterConfig{
+				Config: &dataprocpb.KubernetesClusterConfig_GkeClusterConfig{GkeClusterConfig: &dataprocpb.GkeClusterConfig{GkeClusterTarget: target,
+					NodePoolTarget: []*dataprocpb.GkeNodePoolTarget{{NodePool: target + "/nodePools/default-pool", Roles: []dataprocpb.GkeNodePoolTarget_Role{dataprocpb.GkeNodePoolTarget_DEFAULT}}}}},
+				KubernetesSoftwareConfig: &dataprocpb.KubernetesSoftwareConfig{ComponentVersion: map[string]string{"SPARK": "3.5-dataproc-28"}}}}}}})
+	if err != nil || op == nil {
+		t.Fatalf("CreateCluster: %v", err)
+	}
+	svc := &dataprocService{api: api}
+	clusters := dataprocClustersProvider{svc: svc}
+	var l console.Listing
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		l, _ = clusters.List(ctx, project)
+		if len(l.Items) == 1 && l.Items[0].Fields["Status"] == "Running" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the virtual cluster: %+v", l.Items)
+		}
+	}
+	if f := l.Items[0].Fields; !strings.HasPrefix(f["Cloud Storage staging bucket"], "dataproc-staging-us-central1-") || f["Total worker nodes"] != "0" {
+		t.Errorf("the row: %v", f)
+	}
+	d, err := clusters.Detail(ctx, project, []string{"projects/" + project + "/regions/us-central1/clusters/v1"})
+	if err != nil || d.Unavailable != "" || len(d.Sections) != 3 || d.Sections[1].Label != "Node pools" {
+		t.Fatalf("the page: %+v %v", d, err)
+	}
+	if p := d.Sections[1].Listing.Items; len(p) != 1 || p[0].Fields["Node pool"] != "default-pool" || p[0].Fields["Roles"] != "DEFAULT" {
+		t.Errorf("node pools: %+v", p)
+	}
+	got := map[string]string{}
+	for _, g := range d.Sections[2].Groups {
+		for _, p := range g.Properties {
+			got[p.Label] = p.Value
+		}
+	}
+	if got["Type"] != "Dataproc on GKE" || got["GKE cluster"] != target || got["Namespace"] != "v1" || got["Spark version"] != "3.5-dataproc-28" {
+		t.Errorf("configuration: %v", got)
+	}
 }

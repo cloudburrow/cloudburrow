@@ -9,7 +9,8 @@ CloudBurrow serves the Dataproc API (`dataproc.googleapis.com` v1):
   templates and autoscaling policies;
 - the **Spark UI** of every workload, in Apache Spark's History Server.
 
-Dataproc on GKE (virtual clusters) is not served.
+- **Dataproc on GKE** (#2162): virtual clusters on the instance's
+  Kubernetes Engine clusters.
 
 It is opt-in, in the CLI process, beside BigQuery:
 
@@ -116,13 +117,15 @@ A version Google does not list is `INVALID_ARGUMENT`.
   page gives the line that binds `spark` to the session there,
   `SparkSession.builder.remote("sc://host.docker.internal:8081/;session_id=UUID")`,
   and any Spark Connect client reaches it on the API's port by its UUID.
-  On runtimes 1.2, 2.2 and 2.3 the session also runs a Jupyter Server of
-  its kernels (an image the CLI builds on the runtime's `apache/spark`
-  image, `internal/sparkproc/kernel`): PySpark (ipykernel) and Scala
-  (Almond 0.14.5, BSD-3-Clause, with Spark's Scala Connect client
-  `spark-connect-client-jvm` 3.5.9), each `spark` a Spark Connect session
-  of the session's server. `kernel` `SCALA` is served. Spark 4 runtimes
-  have no kernel image yet (docs/gaps.md).
+  The session also runs a Jupyter Server of its kernels (an image the CLI
+  builds on the runtime's `apache/spark` image, `internal/sparkproc/kernel`):
+  PySpark (ipykernel) and Scala (Almond 0.14.5, BSD-3-Clause, with Spark's
+  Scala Connect client `spark-connect-client-jvm` of the runtime's Spark:
+  3.5.9 on 1.2, 2.2 and 2.3, 4.0.1 on 3.0 and 4.2.0 on 4.0), each `spark` a
+  Spark Connect session of the session's server. `kernel` `SCALA` is
+  served. Every package is pinned by hash: the PyPI packages by the
+  `requirements-*.txt` locks (`pip --require-hashes`), every jar by the
+  `*.lock` files' SHA-256.
 - The kernel gateway (#2162), as Google's dataproc-jupyter-plugin uses it
   (`GatewayClient.url` `https://PROJECT_NUMBER-dot-REGION.kernels.googleusercontent.com`),
   is `http://DATAPROC_HOST/kernels/PROJECT-dot-REGION/` (PROJECT the ID or
@@ -221,22 +224,34 @@ image's Ubuntu.
     component the image version does not offer, or one named twice, is
     `INVALID_ARGUMENT`.
   - DELTA (3.2.1; 4.2.0 on 3.0), ICEBERG (1.6.1, or 1.10 with
-    `dataproc:dataproc.iceberg.version=1.10`; `UNIMPLEMENTED` on 3.0) and
+    `dataproc:dataproc.iceberg.version=1.10`; 1.11.0 on 3.0, whose
+    `default_iceberg` catalog is a REST catalog, `uri`
+    `env:ICEBERG_REST_CATALOG_URI`: the Iceberg REST catalog of the Hive
+    4.2.0 standalone metastore, `apache/hive` pinned by digest, on the
+    master at port 9001) and
     HUDI (0.12.3 on 2.1, 0.15.0, 1.2.0 on 3.0): their jars from Maven
     Central, pinned by SHA-256, at the component's paths, with the
     component page's Spark properties. Every cluster's Spark has Google's
     Cloud Storage connector, so `gs://` paths reach the instance's Cloud
     Storage.
   - ZEPPELIN (0.10.1, `apache/zeppelin` pinned by digest, linux/amd64
-    under emulation; `UNIMPLEMENTED` on 3.0) runs on the master with its
+    under emulation; on 3.0, 0.12.1, the patch release of 3.0's 0.12.0,
+    which runs natively on arm64 too, its interpreter on the cluster's
+    Spark 4.1 and Java 17 mounted from the cluster's image and `%pyspark`
+    on the image's Python 3.9) runs on the master with its
     Spark interpreter on the cluster's Spark master, at the component
     gateway's `Zeppelin`. Measured on an arm64 Mac: the server starts in
     about 10 s once its image is pulled (3.7 GB compressed), a 2.2
     cluster with it is `RUNNING` in about 50 s, the first `%spark`
     paragraph (launching the interpreter) takes about 30 s and a `%md`
     one 4 s.
-  - DOCKER and RANGER are `UNIMPLEMENTED`, each with its reason
-    (docs/gaps.md).
+  - DOCKER (Docker 24.0 on 2.2 and earlier, 28.1 on 2.3 and 3.0, the
+    official `docker:*-dind-rootless` image pinned by digest): a rootless
+    Docker daemon beside each node, unprivileged (no `--privileged`:
+    `/dev/net/tun` and seccomp, AppArmor and `systempaths` unconfined).
+    Every node and driver has the `docker` CLI, `DOCKER_HOST` its node's
+    daemon, so a job runs containers.
+  - RANGER is `UNIMPLEMENTED`, with its reason (docs/gaps.md).
   - Every cluster has a Hive metastore (Derby, in the cluster's files) and
     HiveServer2 on its master, started with its first Hive job or with a
     component that uses them.
@@ -247,7 +262,6 @@ image's Ubuntu.
     `NodeGroupController`'s `CreateNodeGroup`, `GetNodeGroup` and
     `ResizeNodeGroup` manage them. A cluster with node groups cannot be
     stopped or autoscaled.
-  - Dataproc on GKE (`virtual_cluster_config`) is `UNIMPLEMENTED`.
 - `GetCluster`, `ListClusters` and `DeleteCluster`. `ListClusters` takes a
   `filter` on `status.state`, `clusterName` and `labels.KEY`, joined by
   `AND`.
@@ -270,6 +284,37 @@ image's Ubuntu.
 - In a persistent instance, clusters are kept and started again with the
   instance.
 
+## Dataproc on GKE
+
+A virtual cluster (#2162, `virtual_cluster_config`) runs Spark on a
+Kubernetes Engine cluster of the instance (a kind cluster; the `gke`
+service must be on):
+
+- `gke_cluster_target` is `projects/P/locations/L/clusters/C`, a cluster of
+  the request's project; each `node_pool_target` names one of its node
+  pools with its roles (`DEFAULT`, `CONTROLLER`, `SPARK_DRIVER`,
+  `SPARK_EXECUTOR`), exactly one of them `DEFAULT`. A pool that does not
+  exist is created from its `node_pool_config`, as Dataproc creates it.
+- `kubernetes_software_config.component_version` gives `SPARK`:
+  `3.5-dataproc-28`, `-22` or `-17`, or `3`, `3.5`, `dataproc-2.2` and
+  `latest` for the newest. Its `spark:` properties are every job's Spark
+  defaults.
+- `kubernetes_namespace` defaults to the cluster's name. The namespace is
+  made on the GKE cluster, labelled with the cluster's name and UUID, with
+  a `spark` service account bound to the `edit` role.
+- `staging_bucket` defaults to the region's staging bucket.
+- Each job's driver is a pod in the namespace, on the `SPARK_DRIVER` pool
+  (or the `DEFAULT` one), running `spark-submit` in client mode against
+  `k8s://https://kubernetes.default.svc`; its executors are pods on the
+  `SPARK_EXECUTOR` (or `DEFAULT`) pool. The image is the `apache/spark`
+  3.5.9 image (its R variant for SparkR), which the nodes pull by digest.
+  The driver's output, from its pod's log, is the job's
+  `driver_output_resource_uri`.
+- Spark, PySpark, SparkR and Spark SQL jobs run, as Google's overview
+  lists them; other job types are `INVALID_ARGUMENT`. A virtual cluster
+  cannot be updated, stopped or started (`INVALID_ARGUMENT`); deleting it
+  deletes its namespace.
+
 ## Jobs
 
 - `SubmitJob` and `SubmitJobAsOperation` run a job on the cluster its
@@ -287,7 +332,12 @@ image's Ubuntu.
     queue; `yarn:` properties set `yarn-site.xml`. With the component
     gateway, `YARN ResourceManager`, `MapReduce Job History` and `YARN
     Application Timeline` are in `http_ports`. Hive jobs run Beeline
-    against the cluster's HiveServer2, on Tez local mode.
+    against the cluster's HiveServer2, their queries on Tez on YARN.
+  - Spark, PySpark, SparkR and Spark SQL jobs run on YARN, as on Google's
+    images: `master` is `yarn`, in client mode by default and in cluster
+    mode with `spark.submit.deployMode=cluster` (a Spark SQL job runs in
+    client mode). Each worker's NodeManager runs in the cluster's Spark
+    image, so its containers have the image's Java, Python and R.
   - Trino jobs run the Trino CLI against the TRINO component, and Flink
     jobs `flink run` against the FLINK component; without the component
     they are `FAILED_PRECONDITION`. Presto is not available on image
@@ -433,12 +483,10 @@ the WebSocket bridge at it, with local credentials, as it does for BigQuery.
 
 ## What is not served
 
-- Kernels of Jupyter sessions on Spark 4 runtimes.
-- The optional components DOCKER and RANGER; ZEPPELIN and ICEBERG on
-  image 3.0.
-- Dataproc on GKE.
-- Spark and Hive jobs on YARN: Spark jobs run on the standalone master,
-  Hive on Tez local mode.
+- The optional component RANGER (docs/gaps.md).
+- A Dataproc on GKE cluster's `auxiliary_services_config` (a Spark History
+  Server and a metastore of other clusters) is kept but not used, and its
+  jobs' code reaches Cloud Storage only through the job's files.
 - Network settings (`subnetwork_uri`, `network_tags`), which are accepted
   and kept but have no effect: a local run has no VPC.
 - Serverless autoscaling, which is not run. A batch's executors are

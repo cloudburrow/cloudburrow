@@ -2,6 +2,10 @@ package dataproc
 
 import (
 	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -93,5 +97,43 @@ func TestVirtualClusters(t *testing.T) {
 	}
 	if _, err := s.StopCluster(ctx, &dataprocpb.StopClusterRequest{ProjectId: "p", Region: "us-central1", ClusterName: "v"}); status.Code(err) != codes.InvalidArgument {
 		t.Errorf("stop: %v", err)
+	}
+}
+
+// yarnNodes are Nodes whose ResourceManager is addr.
+type yarnNodes struct {
+	fakeNodes
+	addr string
+}
+
+func (n *yarnNodes) Web(context.Context) map[string]string { return map[string]string{"yarn": n.addr} }
+
+// TestRecommendFromYarnMemory: on a cluster with YARN the autoscaler
+// works from the root queue's pending and available memory, as
+// Dataproc's algorithm does.
+func TestRecommendFromYarnMemory(t *testing.T) {
+	var pending, available, allocated float64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/jmx" || r.URL.Query().Get("qry") != "Hadoop:service=ResourceManager,name=QueueMetrics,q0=root" {
+			http.NotFound(w, r)
+			return
+		}
+		fmt.Fprintf(w, `{"beans":[{"PendingMB":%v,"AvailableMB":%v,"AllocatedMB":%v}]}`, pending, available, allocated)
+	}))
+	defer srv.Close()
+	n := &yarnNodes{addr: strings.TrimPrefix(srv.URL, "http://")}
+	p := &dataprocpb.AutoscalingPolicy{
+		WorkerConfig: &dataprocpb.InstanceGroupAutoscalingPolicyConfig{MinInstances: 2, MaxInstances: 10},
+		Algorithm: &dataprocpb.AutoscalingPolicy_BasicAlgorithm{BasicAlgorithm: &dataprocpb.BasicAutoscalingAlgorithm{
+			Config: &dataprocpb.BasicAutoscalingAlgorithm_YarnConfig{YarnConfig: &dataprocpb.BasicYarnAutoscalingConfig{ScaleUpFactor: 1, ScaleDownFactor: 1}}}}}
+	// 2 workers of 4096 MB each, all allocated, 8192 MB pending: 2 more.
+	pending, available, allocated = 8192, 0, 8192
+	if got := recommend(p, n, 2, true); got != 4 {
+		t.Errorf("scale up: %d, want 4", got)
+	}
+	// 4 workers, 8192 MB available and nothing running: down to 2.
+	pending, available, allocated = 0, 16384, 0
+	if got := recommend(p, n, 4, false); got != 2 {
+		t.Errorf("scale down: %d, want 2", got)
 	}
 }

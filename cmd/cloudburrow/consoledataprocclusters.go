@@ -154,7 +154,7 @@ func (p dataprocClustersProvider) List(ctx context.Context, project string) (con
 			listing.Items = append(listing.Items, console.Resource{Name: c.GetClusterName(), Opens: []string{name}, Status: c.GetStatus().GetState().String(), Fields: map[string]string{
 				"Name": c.GetClusterName(), "Status": dataprocState(c.GetStatus().GetState().String()), "Region": loc,
 				"Zone": kmsOrDash(lastSegment(c.GetConfig().GetGceClusterConfig().GetZoneUri())), "Total worker nodes": fmt.Sprint(dataprocWorkers(c)),
-				"Scheduled deletion": del, "Scheduled stop": stop, "Cloud Storage staging bucket": c.GetConfig().GetConfigBucket(),
+				"Scheduled deletion": del, "Scheduled stop": stop, "Cloud Storage staging bucket": dataprocStagingBucket(c),
 				"Created": kmsTime(dataprocClusterCreated(c)), "Labels": dataprocLabels(dataprocUserLabels(c.GetLabels()))}})
 		}
 	}
@@ -425,6 +425,9 @@ func (p dataprocClustersProvider) Detail(ctx context.Context, project string, pa
 	cfg := c.GetConfig()
 	jobs, _ := s.ListJobs(ctx, &dataprocpb.ListJobsRequest{ProjectId: pr, Region: region, ClusterName: c.GetClusterName(), PageSize: 1000})
 	jobsListing := dataprocJobsListing(jobs.GetJobs(), pr, region)
+	if c.GetVirtualClusterConfig() != nil {
+		return dataprocVirtualDetail(c, region, jobsListing), nil
+	}
 
 	vms := console.Listing{Columns: []string{"Role", "Machine type"}, NameColumn: "Name", Noun: "VM instances"}
 	for _, g := range []struct {
@@ -509,6 +512,55 @@ func (p dataprocClustersProvider) Detail(ctx context.Context, project string, pa
 			{ID: "web", Label: "Web interfaces", Listing: web},
 		},
 	}, nil
+}
+
+// dataprocStagingBucket is a cluster's staging bucket: its config bucket,
+// or a Dataproc on GKE cluster's staging bucket.
+func dataprocStagingBucket(c *dataprocpb.Cluster) string {
+	if v := c.GetVirtualClusterConfig(); v != nil {
+		return v.GetStagingBucket()
+	}
+	return c.GetConfig().GetConfigBucket()
+}
+
+// dataprocVirtualDetail is a Dataproc on GKE cluster's page: its jobs,
+// its configuration (the GKE cluster, namespace and Spark version) and
+// its node pools and their roles.
+func dataprocVirtualDetail(c *dataprocpb.Cluster, region string, jobs console.Listing) console.Detail {
+	v := c.GetVirtualClusterConfig()
+	k := v.GetKubernetesClusterConfig()
+	g := k.GetGkeClusterConfig()
+	pools := console.Listing{Columns: []string{"Roles"}, NameColumn: "Node pool", Noun: "node pools"}
+	for _, t := range g.GetNodePoolTarget() {
+		var roles []string
+		for _, r := range t.GetRoles() {
+			roles = append(roles, r.String())
+		}
+		pools.Items = append(pools.Items, console.Resource{Name: lastSegment(t.GetNodePool()),
+			Fields: map[string]string{"Node pool": lastSegment(t.GetNodePool()), "Roles": strings.Join(roles, ", ")}})
+	}
+	pools.Total = len(pools.Items)
+	conf := []console.PropertyGroup{
+		{Heading: "Cluster", Properties: []console.Property{
+			{Label: "Name", Value: c.GetClusterName()}, {Label: "Cluster UUID", Value: c.GetClusterUuid(), Copy: "Copy UUID"},
+			{Label: "Type", Value: "Dataproc on GKE"}, {Label: "Status", Value: dataprocState(c.GetStatus().GetState().String())},
+			{Label: "Status detail", Value: kmsOrDash(c.GetStatus().GetDetail())}, {Label: "Region", Value: region},
+			{Label: "Cloud Storage staging bucket", Value: v.GetStagingBucket()},
+			{Label: "Labels", Value: dataprocLabels(c.GetLabels())}}},
+		{Heading: "Kubernetes", Properties: []console.Property{
+			{Label: "GKE cluster", Value: g.GetGkeClusterTarget()}, {Label: "Namespace", Value: k.GetKubernetesNamespace()},
+			{Label: "Spark version", Value: kmsOrDash(k.GetKubernetesSoftwareConfig().GetComponentVersion()["SPARK"])},
+			{Label: "Properties", Value: kmsOrDash(strings.ReplaceAll(dataprocPropsText(k.GetKubernetesSoftwareConfig().GetProperties()), "\n", ", "))}}},
+	}
+	return console.Detail{
+		Summary: []console.Property{{Label: "Status", Value: dataprocState(c.GetStatus().GetState().String())}, {Label: "Region", Value: region},
+			{Label: "Type", Value: "Dataproc on GKE"}},
+		Sections: []console.Section{
+			{ID: "jobs", Label: "Jobs", Listing: jobs},
+			{ID: "nodepools", Label: "Node pools", Listing: pools},
+			{ID: "configuration", Label: "Configuration", Kind: console.KindProperties, Groups: conf},
+		},
+	}
 }
 
 func dataprocLifecycle(idle, ttl *durationpb.Duration, at bool) string {

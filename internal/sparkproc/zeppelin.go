@@ -27,11 +27,24 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
 )
+
+// zeppelinSparkPython runs the Python of the Spark image mounted at
+// /cb-sparkimg in Zeppelin's container: with that image's own dynamic
+// loader and libraries (its glibc is newer than the Zeppelin image's) and
+// its standard library (PYTHONHOME).
+const zeppelinSparkPython = `#!/bin/bash
+r=/cb-sparkimg
+lib=$(ls -d "$r"/usr/lib/*-linux-gnu | head -1)
+ld=$(ls "$lib"/ld-linux-*.so.* | head -1)
+export PYTHONHOME="$r/usr"
+exec "$ld" --library-path "$lib" "$r/usr/bin/python3" "$@"
+`
 
 // startZeppelin starts Zeppelin and configures its Spark interpreter.
 // On image 3.0 (Spark 4.1, which needs Java 17 or later) image is
@@ -46,7 +59,11 @@ func (c *Cluster) startZeppelin(ctx context.Context, image string, spark4 bool) 
 	var mounts []string
 	if spark4 {
 		sparkHome = "/cb-sparkimg/opt/spark"
-		mounts = []string{"--mount", "type=image,source=" + c.rt.Image + ",target=/cb-sparkimg"}
+		py := filepath.Join(c.dir, "zeppelin-python3")
+		if err := os.WriteFile(py, []byte(zeppelinSparkPython), 0o755); err != nil {
+			return err
+		}
+		mounts = []string{"--mount", "type=image,source=" + c.rt.Image + ",target=/cb-sparkimg", "-v", py + ":/cb/python3:ro"}
 	} else {
 		if out, err := c.d.docker(ctx, "cp", c.master+":/opt/spark", home); err != nil {
 			return &Unavailable{Msg: "copy the cluster's Spark for Zeppelin: " + out}
@@ -94,10 +111,11 @@ func (c *Cluster) startZeppelin(ctx context.Context, image string, spark4 bool) 
 		"zeppelin.spark.scala.color": "false"}
 	if spark4 {
 		props["JAVA_HOME"] = "/cb-sparkimg/opt/java/openjdk"
-		// Spark 4.1's PySpark needs Python 3.9 or later: the image's
-		// conda base Python (its default environment's is 3.7) runs the
-		// driver, the executors the Spark image's python3.
-		props["spark.pyspark.driver.python"] = "/opt/conda/bin/python3.9"
+		// Spark 4.1's PySpark needs Python 3.10 or later, which the
+		// Zeppelin image has not (3.7, and 3.9 in conda's base): the
+		// driver runs the Spark image's python3 (zeppelinSparkPython),
+		// the executors their own.
+		props["spark.pyspark.driver.python"] = "/cb/python3"
 		props["spark.pyspark.python"] = "python3"
 	}
 	return configureZeppelinSpark(ctx, "http://"+addr+base, props)
