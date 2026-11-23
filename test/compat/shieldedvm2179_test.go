@@ -128,7 +128,7 @@ func (v *shieldedVM) must(cmd string) string {
 // compute client, returns the vTPM's endorsement and signing keys, whose
 // certificates certify those keys; guest attributes are held to their
 // size and rate limits.
-// covers: compute.instances.getShieldedInstanceIdentity compute.instances.setShieldedInstanceIntegrityPolicy compute.instances.updateShieldedInstanceConfig
+// covers: compute.instances.getShieldedInstanceIdentity, compute.instances.setShieldedInstanceIntegrityPolicy, compute.instances.updateShieldedInstanceConfig
 func TestShieldedVMHTTPSMetadataServer2179(t *testing.T) {
 	h := New(t)
 	opts := computeOpts(t, h)
@@ -192,7 +192,7 @@ func TestShieldedVMHTTPSMetadataServer2179(t *testing.T) {
 	// The guest: the vTPM, the agent's credentials, and curl over HTTPS.
 	const hdr = "-H 'Metadata-Flavor: Google'"
 	creds := "--cacert /run/google-mds-mtls/root.crt --cert /run/google-mds-mtls/client.key"
-	if out := v.must("for i in $(seq 90); do [ -s /run/google-mds-mtls/client.key ] && break; sleep 2; done; ls -l /dev/tpm0 /run/google-mds-mtls/"); !strings.Contains(out, "client.key") || !strings.Contains(out, "root.crt") {
+	if out := v.must("for i in $(seq 90); do [ -s /run/google-mds-mtls/client.key ] && break; sleep 2; done; ls -l /dev/tpm0 /run/google-mds-mtls/; true"); !strings.Contains(out, "client.key") || !strings.Contains(out, "root.crt") {
 		diag, _ := v.run("systemctl status --no-pager google-guest-agent-manager cloudburrow-firmware cloudburrow-guest-agent-fence 2>&1 | head -40; "+
 			"sudo journalctl -b --no-pager -u google-guest-agent-manager -u cloudburrow-firmware -u cloudburrow-guest-agent-fence 2>&1 | tail -60; "+
 			"ls -la /sys/firmware/efi/efivars/ 2>&1 | head; sudo cat /var/log/google-guest-agent*.log 2>/dev/null | tail -40", nil)

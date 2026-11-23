@@ -643,7 +643,9 @@ func (s *Server) serveInstanceMetadata(w http.ResponseWriter, r *http.Request, r
 		return
 	}
 	if isTrue(first(q, "wait_for_change")) {
-		if strings.HasSuffix(key, "/") && !isTrue(first(q, "recursive")) || key == "" {
+		// The whole tree may be watched recursively, as Google's guest
+		// agent watches it (computeMetadata/v1/?recursive=true).
+		if (strings.HasSuffix(key, "/") || key == "") && !isTrue(first(q, "recursive")) {
 			guestErr(w, http.StatusBadRequest, "Invalid request: wait_for_change is not supported on directory listings; use recursive=true.")
 			return
 		}
