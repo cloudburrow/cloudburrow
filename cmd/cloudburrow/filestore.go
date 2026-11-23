@@ -15,10 +15,13 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/cmek"
 	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/filestorecsi"
 	"github.com/cloudburrow/cloudburrow/internal/filestoreserver"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 	"github.com/cloudburrow/cloudburrow/internal/service/filestore"
+	"github.com/cloudburrow/cloudburrow/internal/service/gke"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
+	"github.com/cloudburrow/cloudburrow/internal/storageimage"
 	"github.com/cloudburrow/cloudburrow/internal/telemetry"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
 	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
@@ -39,10 +42,16 @@ type filestoreService struct {
 	// tags (Resource Manager).
 	keys     *cmek.Keys
 	registry func() *resourcemanager.Registry
-	logf     func(format string, args ...any)
-	server   *grpctransport.Server
-	api      *filestore.Server
-	backend  *filestoreserver.Docker
+	// gke lists the Kubernetes Engine clusters whose Filestore CSI driver
+	// add-on is enabled; nil runs no driver.
+	gke     func() []gke.FilestoreCSICluster
+	csi     *filestorecsi.Controller
+	csiStop context.CancelFunc
+	csiDone chan struct{}
+	logf    func(format string, args ...any)
+	server  *grpctransport.Server
+	api     *filestore.Server
+	backend *filestoreserver.Docker
 }
 
 func newFilestoreService(cfg config.Config) *filestoreService {
@@ -124,12 +133,46 @@ func (s *filestoreService) Start(ctx context.Context) error {
 	// The instances' NFS servers start again in the background, as `stop`
 	// left them (persistent mode).
 	go api.Resume(context.Background())
+	s.startCSI()
 	return nil
+}
+
+// startCSI runs the Kubernetes Engine clusters' Filestore CSI driver
+// (#2192) against the served API.
+func (s *filestoreService) startCSI() {
+	if s.gke == nil {
+		return
+	}
+	dir := gkeDir(s.cfg)
+	s.csi = &filestorecsi.Controller{
+		API: func() filestorecsi.API { return s.api },
+		Clusters: func() []filestorecsi.Cluster {
+			var out []filestorecsi.Cluster
+			for _, c := range s.gke() {
+				out = append(out, filestorecsi.Cluster{Kind: c.Kind, Kubeconfig: filepath.Join(dir, c.Kind, "kubeconfig"),
+					Project: c.Project, Location: c.Location, Network: c.Network})
+			}
+			return out
+		},
+		Binary: storageimage.Binary,
+		Runner: filestoreserver.ExecRunner{},
+		Logf:   s.logf,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	s.csiStop, s.csiDone = cancel, make(chan struct{})
+	go func() {
+		defer close(s.csiDone)
+		s.csi.Run(ctx)
+	}()
 }
 
 func (s *filestoreService) Stop(ctx context.Context) error {
 	if s.server == nil {
 		return nil
+	}
+	if s.csiStop != nil {
+		s.csiStop()
+		<-s.csiDone
 	}
 	err := s.server.Stop(ctx)
 	s.api.Close()
@@ -162,4 +205,13 @@ func deleteFilestoreServers(ctx context.Context, cfg config.Config, stdout io.Wr
 	if err := filestoreserver.RemoveAll(ctx, filestoreserver.ExecRunner{}, cfg.Name); err != nil {
 		fmt.Fprintf(stdout, "warning: Filestore's NFS servers were not all removed: %v\n", err)
 	}
+}
+
+// filestoreCSIClusters are the clusters whose Filestore CSI driver add-on
+// is enabled.
+func (s *gkeService) filestoreCSIClusters() []gke.FilestoreCSICluster {
+	if api := s.API(); api != nil {
+		return api.FilestoreCSIClusters()
+	}
+	return nil
 }

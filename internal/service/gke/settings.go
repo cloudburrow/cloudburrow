@@ -166,9 +166,9 @@ func (s *Server) SetNetworkPolicy(_ context.Context, req *containerpb.SetNetwork
 	}, func() { c.NetworkPolicy = want }), nil
 }
 
-// SetAddonsConfig sets the cluster's add-ons. Only the network policy
-// add-on has a local counterpart; any other add-on is accepted only as it
-// already is.
+// SetAddonsConfig sets the cluster's add-ons. The network policy and the
+// Filestore CSI driver add-ons have local counterparts; any other add-on
+// is accepted only as it already is.
 func (s *Server) SetAddonsConfig(_ context.Context, req *containerpb.SetAddonsConfigRequest) (*containerpb.Operation, error) {
 	p, err := parseName(req.GetName(), req.GetProjectId(), req.GetZone(), req.GetClusterId(), "", "", "cluster")
 	if err != nil {
@@ -192,7 +192,7 @@ func (s *Server) SetAddonsConfig(_ context.Context, req *containerpb.SetAddonsCo
 	var unsupported []string
 	curR := cur.ProtoReflect()
 	in.ProtoReflect().Range(func(fd protoreflect.FieldDescriptor, v protoreflect.Value) bool {
-		if fd.Name() == "network_policy_config" {
+		if fd.Name() == "network_policy_config" || fd.Name() == "gcp_filestore_csi_driver_config" {
 			return true
 		}
 		if !curR.Has(fd) || !proto.Equal(curR.Get(fd).Message().Interface(), v.Message().Interface()) {
@@ -217,6 +217,9 @@ func (s *Server) SetAddonsConfig(_ context.Context, req *containerpb.SetAddonsCo
 	next := proto.Clone(cur).(*containerpb.AddonsConfig)
 	if npc := in.GetNetworkPolicyConfig(); npc != nil {
 		next.NetworkPolicyConfig = proto.Clone(npc).(*containerpb.NetworkPolicyConfig)
+	}
+	if fc := in.GetGcpFilestoreCsiDriverConfig(); fc != nil {
+		next.GcpFilestoreCsiDriverConfig = proto.Clone(fc).(*containerpb.GcpFilestoreCsiDriverConfig)
 	}
 	c.AddonsConfig = next
 	return s.doneOpLocked(p, containerpb.Operation_UPDATE_CLUSTER, c.SelfLink), nil
@@ -654,6 +657,15 @@ func (s *Server) ListUsableSubnetworks(_ context.Context, req *containerpb.ListU
 // otherwise, as a Standard cluster's default is.
 func checkCreateSettings(c *containerpb.Cluster) error {
 	autopilot := c.GetAutopilot().GetEnabled()
+	// The Filestore CSI driver is "enabled by default on new Autopilot and
+	// Standard clusters" (filestore-csi-driver, read 2026-11-23); it runs
+	// against the served Filestore API (#2192, internal/filestorecsi).
+	if c.AddonsConfig == nil {
+		c.AddonsConfig = &containerpb.AddonsConfig{}
+	}
+	if c.AddonsConfig.GcpFilestoreCsiDriverConfig == nil {
+		c.AddonsConfig.GcpFilestoreCsiDriverConfig = &containerpb.GcpFilestoreCsiDriverConfig{Enabled: true}
+	}
 	if c.GetLegacyAbac().GetEnabled() && autopilot {
 		return status.Error(codes.InvalidArgument, "Legacy ABAC can't be enabled in Autopilot clusters.")
 	}
@@ -691,4 +703,34 @@ func (s *Server) applyCreateSettings(ctx context.Context, kind string, enforce, 
 		}
 	}
 	return nil
+}
+
+// FilestoreCSICluster is a running cluster whose Filestore CSI driver
+// add-on is enabled (#2192).
+type FilestoreCSICluster struct {
+	// Name is projects/P/locations/L/clusters/C; Kind its kind cluster.
+	Name, Kind string
+	Project, Location, Network string
+}
+
+// FilestoreCSIClusters are the running clusters whose
+// GcpFilestoreCsiDriver add-on is enabled.
+func (s *Server) FilestoreCSIClusters() []FilestoreCSICluster {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []FilestoreCSICluster
+	for _, e := range s.clusters {
+		c := e.cluster
+		if c.GetStatus() != containerpb.Cluster_RUNNING || !c.GetAddonsConfig().GetGcpFilestoreCsiDriverConfig().GetEnabled() {
+			continue
+		}
+		network := c.GetNetwork()
+		if network == "" {
+			network = "default"
+		}
+		out = append(out, FilestoreCSICluster{Name: "projects/" + e.project + "/locations/" + c.GetLocation() + "/clusters/" + c.GetName(),
+			Kind: e.kind, Project: e.project, Location: c.GetLocation(), Network: network})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
 }

@@ -463,6 +463,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// Filestore (#2192), in process; its instances' NFS servers run in
 	// Docker beside the cluster, and their networks are Compute Engine's.
 	filestoreSvc := newFilestoreService(cfg)
+	if filestoreSvc != nil && gkeSvc != nil {
+		// The Filestore CSI driver of the Kubernetes Engine clusters.
+		filestoreSvc.gke = gkeSvc.filestoreCSIClusters
+	}
 	if filestoreSvc != nil && computeSvc != nil {
 		filestoreSvc.networks = computeSvc.filestoreNetworks
 	}

@@ -172,3 +172,179 @@ func TestGKEFilestoreDeleteTheInstanceBeforeThePodAndTheCluster(t *testing.T) {
 		t.Fatalf("GetCluster after delete = %v, want NOT_FOUND", err)
 	}
 }
+
+// TestGKEFilestoreCSIDriverProvisionsThroughTheServedAPI (#2192): a
+// cluster's Filestore CSI driver add-on is on by default; a
+// PersistentVolumeClaim of GKE's standard-rwx class, and of a class of
+// its own asking for Zonal NFSv4.1, is provisioned as a Filestore
+// instance (pvc-UID) through the served API, its PersistentVolume the
+// driver's (modeInstance/LOCATION/INSTANCE/vol1), mounted by a pod that
+// writes and reads it; a pre-provisioned PersistentVolume naming an
+// instance made through the API mounts too; deleting a claim deletes its
+// instance.
+func TestGKEFilestoreCSIDriverProvisionsThroughTheServedAPI(t *testing.T) {
+	h := New(t)
+	fg, _ := filestoreClients(t, h)
+	cg, _ := gkeClients(t, h)
+	if _, err := exec.LookPath("kubectl"); err != nil {
+		t.Skip("kubectl is required")
+	}
+	ctx := fsCtx(t)
+	project := h.Project()
+	zone := "projects/" + project + "/locations/us-central1-a"
+	static := fsInstance(t, fg, zone, "ct-fs-csi-static", &filestorepb.Instance{Tier: filestorepb.Instance_BASIC_HDD,
+		FileShares: fsShare("share1", 1024), Networks: fsNetwork})
+
+	cname := zone + "/clusters/ct-gke-fs-csi"
+	op, err := cg.CreateCluster(ctx, &containerpb.CreateClusterRequest{Parent: zone, Cluster: &containerpb.Cluster{Name: "ct-gke-fs-csi", InitialNodeCount: 1,
+		MasterAuth: &containerpb.MasterAuth{ClientCertificateConfig: &containerpb.ClientCertificateConfig{IssueClientCertificate: true}}}})
+	if err != nil {
+		t.Fatalf("CreateCluster: %v", err)
+	}
+	t.Cleanup(func() {
+		if op, err := cg.DeleteCluster(context.Background(), &containerpb.DeleteClusterRequest{Name: cname}); err == nil {
+			gkeWait(t, cg, project, "us-central1-a", op)
+		}
+	})
+	gkeWait(t, cg, project, "us-central1-a", op)
+	c, err := cg.GetCluster(ctx, &containerpb.GetClusterRequest{Name: cname})
+	if err != nil {
+		t.Fatalf("GetCluster: %v", err)
+	}
+	if !c.GetAddonsConfig().GetGcpFilestoreCsiDriverConfig().GetEnabled() {
+		t.Fatalf("the Filestore CSI driver add-on is not enabled: %v", c.GetAddonsConfig())
+	}
+	kc := gkeKubeconfig(t, c)
+
+	// The driver's classes appear.
+	deadline := time.Now().Add(2 * time.Minute)
+	for {
+		out, _ := kubectlRun(kc, "", time.Minute, "get", "storageclass", "standard-rwx", "-o", "jsonpath={.provisioner}")
+		if out == "filestore.csi.storage.gke.io" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("standard-rwx was not installed: %q", out)
+		}
+		time.Sleep(2 * time.Second)
+	}
+
+	manifest := `apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata: {name: ct-zonal-v41}
+provisioner: filestore.csi.storage.gke.io
+parameters: {tier: zonal, network: default, protocol: NFS_V4_1}
+reclaimPolicy: Delete
+volumeBindingMode: WaitForFirstConsumer
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: ct-basic}
+spec: {accessModes: [ReadWriteMany], storageClassName: standard-rwx, resources: {requests: {storage: 1Ti}}}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: ct-zonal}
+spec: {accessModes: [ReadWriteMany], storageClassName: ct-zonal-v41, resources: {requests: {storage: 1Ti}}}
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata: {name: ct-static}
+spec:
+  storageClassName: ""
+  capacity: {storage: 1Ti}
+  accessModes: [ReadWriteMany]
+  persistentVolumeReclaimPolicy: Retain
+  csi:
+    driver: filestore.csi.storage.gke.io
+    volumeHandle: "modeInstance/us-central1-a/ct-fs-csi-static/share1"
+    volumeAttributes: {ip: "` + static.GetNetworks()[0].GetIpAddresses()[0] + `", volume: share1}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: ct-static}
+spec: {accessModes: [ReadWriteMany], storageClassName: "", volumeName: ct-static, resources: {requests: {storage: 1Ti}}}
+`
+	for _, claim := range []string{"ct-basic", "ct-zonal", "ct-static"} {
+		manifest += `---
+apiVersion: v1
+kind: Pod
+metadata: {name: ` + claim + `}
+spec:
+  terminationGracePeriodSeconds: 1
+  containers:
+  - name: c
+    image: busybox:1.36
+    command: ["sh", "-c", "sleep 100000"]
+    volumeMounts: [{name: v, mountPath: /data}]
+  volumes:
+  - name: v
+    persistentVolumeClaim: {claimName: ` + claim + `}
+`
+	}
+	if out, err := kubectlRun(kc, manifest, time.Minute, "apply", "-f", "-"); err != nil {
+		t.Fatalf("kubectl apply: %v\n%s", err, out)
+	}
+	for _, claim := range []string{"ct-basic", "ct-zonal", "ct-static"} {
+		waitPodRunning(t, kc, claim)
+		out, err := kubectlRun(kc, "", time.Minute, "exec", claim, "--", "sh", "-c", "echo "+claim+" > /data/f && cat /data/f && grep ' /data ' /proc/mounts")
+		if err != nil || !strings.HasPrefix(out, claim) {
+			t.Fatalf("pod %s write and read: %v: %s", claim, err, out)
+		}
+		if claim == "ct-zonal" && !strings.Contains(out, "vers=4.1") {
+			t.Errorf("the NFSv4.1 class's volume is not mounted over NFSv4.1: %s", out)
+		}
+	}
+	// The provisioned volumes are the driver's, each a Filestore instance.
+	insts := map[string]string{}
+	for _, claim := range []string{"ct-basic", "ct-zonal"} {
+		uid, _ := kubectlRun(kc, "", time.Minute, "get", "pvc", claim, "-o", "jsonpath={.metadata.uid}")
+		pv, _ := kubectlRun(kc, "", time.Minute, "get", "pvc", claim, "-o", "jsonpath={.spec.volumeName}")
+		if pv != "pvc-"+uid {
+			t.Fatalf("claim %s is bound to %q, want pvc-%s", claim, pv, uid)
+		}
+		got, _ := kubectlRun(kc, "", time.Minute, "get", "pv", pv, "-o", "jsonpath={.spec.csi.driver} {.spec.csi.volumeHandle}")
+		want := "filestore.csi.storage.gke.io modeInstance/us-central1-a/" + pv + "/vol1"
+		if got != want {
+			t.Fatalf("PV %s = %q, want %q", pv, got, want)
+		}
+		in, err := fg.GetInstance(ctx, &filestorepb.GetInstanceRequest{Name: zone + "/instances/" + pv})
+		if err != nil {
+			t.Fatalf("GetInstance %s: %v", pv, err)
+		}
+		wantTier := filestorepb.Instance_BASIC_HDD
+		if claim == "ct-zonal" {
+			wantTier = filestorepb.Instance_ZONAL
+		}
+		if in.GetTier() != wantTier || in.GetFileShares()[0].GetCapacityGb() != 1024 || in.GetLabels()["kubernetes_io_created-for_pvc_name"] != claim {
+			t.Fatalf("instance %s = %v %d %v", pv, in.GetTier(), in.GetFileShares()[0].GetCapacityGb(), in.GetLabels())
+		}
+		insts[claim] = in.GetName()
+	}
+	// Deleting a claim deletes its instance.
+	for _, claim := range []string{"ct-basic", "ct-zonal", "ct-static"} {
+		if out, err := kubectlRun(kc, "", 3*time.Minute, "delete", "pod", claim, "--wait=true", "--timeout=2m"); err != nil {
+			t.Fatalf("delete pod %s: %v\n%s", claim, err, out)
+		}
+		if out, err := kubectlRun(kc, "", 3*time.Minute, "delete", "pvc", claim, "--wait=true", "--timeout=2m"); err != nil {
+			t.Fatalf("delete pvc %s: %v\n%s", claim, err, out)
+		}
+	}
+	for claim, name := range insts {
+		deadline := time.Now().Add(3 * time.Minute)
+		for {
+			_, err := fg.GetInstance(ctx, &filestorepb.GetInstanceRequest{Name: name})
+			if status.Code(err) == codes.NotFound {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("claim %s's instance %s was not deleted: %v", claim, name, err)
+			}
+			time.Sleep(2 * time.Second)
+		}
+	}
+	// The pre-provisioned volume's instance stays (Retain).
+	if _, err := fg.GetInstance(ctx, &filestorepb.GetInstanceRequest{Name: static.GetName()}); err != nil {
+		t.Fatalf("the retained instance: %v", err)
+	}
+}
