@@ -529,7 +529,8 @@ func (p dataprocSessionsProvider) CreateForm() (string, []console.Field) {
 			Help: "4 to 63 lower-case letters, numbers and hyphens."},
 		{Name: "region", Label: "Region", Type: "select", Required: true, Section: info, Options: dataproc.Locations(), Default: "us-central1"},
 		{Name: "sessionType", Label: "Session type", Type: "radio", Section: info, Default: "SPARK_CONNECT", Options: []string{"SPARK_CONNECT", "JUPYTER"},
-			OptionLabels: map[string]string{"SPARK_CONNECT": "Spark Connect", "JUPYTER": "Jupyter (Python kernel)"}},
+			OptionLabels: map[string]string{"SPARK_CONNECT": "Spark Connect", "JUPYTER": "Jupyter"}},
+		dataprocKernelField(info, ""),
 		{Name: "displayName", Label: "Kernel display name", Type: "text", Section: info, ShowWhen: "sessionType=JUPYTER"},
 		{Name: "template", Label: "Session template", Type: "text", Section: info,
 			Help: "projects/P/locations/L/sessionTemplates/T, in the session's region; its settings apply where the session sets none."},
@@ -565,8 +566,7 @@ func (p dataprocSessionsProvider) Create(ctx context.Context, project string, va
 	x := &dataprocpb.Session{SessionTemplate: strings.TrimSpace(values["template"]),
 		SessionConfig: &dataprocpb.Session_SparkConnectSession{SparkConnectSession: &dataprocpb.SparkConnectConfig{}}}
 	if values["sessionType"] == "JUPYTER" {
-		x.SessionConfig = &dataprocpb.Session_JupyterSession{JupyterSession: &dataprocpb.JupyterConfig{Kernel: dataprocpb.JupyterConfig_PYTHON,
-			DisplayName: strings.TrimSpace(values["displayName"])}}
+		x.SessionConfig = &dataprocpb.Session_JupyterSession{JupyterSession: dataprocJupyterOf(values)}
 	}
 	if x.SessionTemplate == "" || values["runtimeVersion"] != "" {
 		x.RuntimeConfig = &dataprocpb.RuntimeConfig{Version: values["runtimeVersion"]}
@@ -639,7 +639,18 @@ func (p dataprocSessionsProvider) Detail(ctx context.Context, project string, pa
 		// A Jupyter session's kernel (#2162): a notebook of BigQuery Studio
 		// runs on the console's notebook runtime, whose relay reaches this
 		// API's gRPC port as host.docker.internal:8081.
-		conn = append(conn, console.Property{Label: "Kernel", Value: "Python (" + kmsOrDash(x.GetJupyterSession().GetDisplayName()) + ")"},
+		kernel := "Python"
+		if x.GetJupyterSession().GetKernel() == dataprocpb.JupyterConfig_SCALA {
+			kernel = "Scala"
+		}
+		// The kernel gateway (#2162), JupyterLab's GatewayClient URL for
+		// the region's Jupyter session templates' kernels.
+		gateway := dataproc.GatewayBase + project + "-dot-" + dataprocRegionOf(x.GetName()) + "/"
+		if p.svc.live != nil && p.svc.live()["dataproc"] != "" {
+			gateway = "http://" + p.svc.live()["dataproc"] + gateway
+		}
+		conn = append(conn, console.Property{Label: "Kernel", Value: kernel + " (" + kmsOrDash(x.GetJupyterSession().GetDisplayName()) + ")"},
+			console.Property{Label: "Kernel gateway", Value: gateway, Copy: "Copy URL"},
 			console.Property{Label: "Use in a notebook", Copy: "Copy", Link: "/bigquery-studio",
 				Value: fmt.Sprintf(`from pyspark.sql import SparkSession\nspark = SparkSession.builder.remote("sc://host.docker.internal:8081/;session_id=%s").getOrCreate()`, x.GetUuid())})
 	}
@@ -762,7 +773,16 @@ func dataprocTemplateFields(t *dataprocpb.SessionTemplate, withID bool) []consol
 		}
 		return fmt.Sprint(int(d.AsDuration().Minutes()))
 	}
+	sessionType, kernel := "SPARK_CONNECT", ""
+	if js := t.GetJupyterSession(); js != nil {
+		sessionType, kernel = "JUPYTER", js.GetKernel().String()
+	}
 	return append(fields,
+		console.Field{Name: "sessionType", Label: "Session type", Type: "radio", Section: info, Default: sessionType, Options: []string{"SPARK_CONNECT", "JUPYTER"},
+			OptionLabels: map[string]string{"SPARK_CONNECT": "Spark Connect", "JUPYTER": "Jupyter"},
+			Help:         "A Jupyter template is a kernel of the region's kernel gateway, /kernels/PROJECT-dot-REGION/ on the Dataproc port."},
+		dataprocKernelField(info, kernel),
+		console.Field{Name: "displayName", Label: "Kernel display name", Type: "text", Section: info, Default: t.GetJupyterSession().GetDisplayName(), ShowWhen: "sessionType=JUPYTER"},
 		console.Field{Name: "description", Label: "Description", Type: "textarea", Section: info, Default: t.GetDescription()},
 		dataprocRuntimeField(runtime, t.GetRuntimeConfig().GetVersion()),
 		console.Field{Name: "serviceAccount", Label: "Service account", Type: "text", Section: exec, Default: ec.GetServiceAccount()},
@@ -773,10 +793,33 @@ func dataprocTemplateFields(t *dataprocpb.SessionTemplate, withID bool) []consol
 		console.Field{Name: "labels", Label: "Labels", Type: "textarea", Section: props, Default: dataprocPropsText(t.GetLabels()), Help: "One key=value a line."})
 }
 
+// dataprocKernelField is a Jupyter session's or template's kernel (#2162).
+func dataprocKernelField(section, value string) console.Field {
+	if value == "" {
+		value = "PYTHON"
+	}
+	return console.Field{Name: "kernel", Label: "Kernel", Type: "radio", Section: section, Default: value, ShowWhen: "sessionType=JUPYTER",
+		Options: []string{"PYTHON", "SCALA"}, OptionLabels: map[string]string{"PYTHON": "Python", "SCALA": "Scala"}}
+}
+
+// dataprocJupyterOf is the Jupyter configuration a form's values give.
+func dataprocJupyterOf(values map[string]string) *dataprocpb.JupyterConfig {
+	k := dataprocpb.JupyterConfig_PYTHON
+	if values["kernel"] == "SCALA" {
+		k = dataprocpb.JupyterConfig_SCALA
+	}
+	return &dataprocpb.JupyterConfig{Kernel: k, DisplayName: strings.TrimSpace(values["displayName"])}
+}
+
 func dataprocTemplateOf(name string, values map[string]string) (*dataprocpb.SessionTemplate, error) {
 	t := &dataprocpb.SessionTemplate{Name: name, Description: values["description"],
 		SessionConfig: &dataprocpb.SessionTemplate_SparkConnectSession{SparkConnectSession: &dataprocpb.SparkConnectConfig{}},
 		RuntimeConfig: &dataprocpb.RuntimeConfig{Version: values["runtimeVersion"]}}
+	if values["sessionType"] == "JUPYTER" {
+		// A Jupyter session template is a kernelspec of the kernel
+		// gateway (#2162).
+		t.SessionConfig = &dataprocpb.SessionTemplate_JupyterSession{JupyterSession: dataprocJupyterOf(values)}
+	}
 	var err error
 	if t.RuntimeConfig.Properties, err = dataprocPairs(values["properties"]); err != nil {
 		return nil, fmt.Errorf("properties: %w", err)

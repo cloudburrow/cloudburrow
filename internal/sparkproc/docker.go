@@ -68,6 +68,9 @@ type Runtime struct {
 	// Kernel is how a Jupyter session's kernel image is built on Image
 	// (KernelImage), nil when none is pinned for this runtime's Spark.
 	Kernel *KernelRuntime
+	// ConnectServer returns the Spark Connect server's jar when the
+	// image's Spark does not bundle it (Spark 3.5), nil when it does.
+	ConnectServer func(ctx context.Context) (string, error)
 	// Connector returns the connector jar's path on the host, fetching
 	// it on the first use.
 	Connector func(ctx context.Context) (string, error)
@@ -404,6 +407,18 @@ func (d *Docker) prepare(ctx context.Context, job Job, inbound ...string) (_ *pr
 	sort.Strings(names)
 	for _, name := range names {
 		run = append(run, "-e", "BIGQUERY_PROC_PARAM."+name+"="+job.Params[name])
+	}
+	if job.Kind == KindConnect && rt.ConnectServer != nil {
+		// Spark 3.5's distribution has no Spark Connect server jar
+		// (spark-connect_2.12, which start-connect-server.sh fetches
+		// with --packages): it is pinned instead.
+		server, err := rt.ConnectServer(ctx)
+		if err != nil {
+			p.close()
+			return nil, nil, &Unavailable{Msg: "the Spark Connect server jar is not available: " + err.Error()}
+		}
+		run = append(run, "-v", server+":/cb-connector/spark-connect.jar:ro")
+		args.jars = append(args.jars, "/cb-connector/spark-connect.jar")
 	}
 	run = append(run, "--entrypoint", "/bin/bash", image, "/cb/run.sh")
 	run = append(run, submitArgs(job, args, token, conf)...)

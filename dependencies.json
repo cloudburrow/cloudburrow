@@ -340,6 +340,28 @@
         "verification": "pinned-version",
         "skipDiscovery": "PyPI; depcheck only discovers GitHub-sourced components."
       },
+      "dataprocConnectServer35": {
+        "$comment": "Spark's Spark Connect server for Spark 3.5 (#2162, cmd/cloudburrow/sparkrunner.go spark35Runtime.connectServer): Spark 3.5's distribution (the apache/spark image) does not bundle it, so a Serverless session on runtime 1.2, 2.2 or 2.3 mounts it on the server's --jars. Fetched by the CLI on the first such session, checked against this SHA-256 and kept in <state-dir>/models/spark.",
+        "version": "3.5.9",
+        "source": "https://repo1.maven.org/maven2/org/apache/spark/spark-connect_2.12/3.5.9/spark-connect_2.12-3.5.9.jar",
+        "sha256": "cd2342517d42bc02c14ac92e4676e51e948ea4fc1995ed9df6c016dc02b02b98",
+        "license": "Apache-2.0",
+        "redistribution": "not published: downloaded by the local CLI; nothing of it is in the CLI or the repository",
+        "updateFeed": "maven-central",
+        "verification": "sha256",
+        "skipDiscovery": "Maven Central; depcheck only discovers GitHub-sourced components."
+      },
+      "dataprocKernels": {
+        "$comment": "A Jupyter session's kernel image (#2162, internal/sparkproc/kernel/Dockerfile), built by the CLI on the runtime's apache/spark image: Jupyter Server 2.14.2 and ipykernel 6.29.5 (BSD-3-Clause) from PyPI with the Spark Connect client's pandas, pyarrow, grpcio and googleapis-common-protos (Apache-2.0/BSD-3-Clause); the coursier 2.1.27 launcher (Apache-2.0, this SHA-256) bundling Almond 0.14.5 (BSD-3-Clause, the Scala kernel for Jupyter, from Maven Central); Spark's Scala Connect client spark-connect-client-jvm_2.12 3.5.9 (Apache-2.0, sha256 ec52b1cdc2243187d6c363fdb37f1e39ddea46c0f98e9a01f01c5be05ce26590). Nothing of it is in the CLI.",
+        "version": "0.14.5",
+        "source": "https://github.com/coursier/coursier/releases/download/v2.1.27/coursier.jar",
+        "sha256": "8d1e0d684a55c09828b7afda481139472d87a18e0544bb875e2e5e3e300f64b3",
+        "license": "Apache-2.0",
+        "redistribution": "not published: the image is built locally by the CLI; nothing of it is in the CLI or the repository",
+        "updateFeed": "maven-central",
+        "verification": "sha256",
+        "skipDiscovery": "Built locally from pinned sources; depcheck only discovers GitHub-sourced components."
+      },
       "dataprocLakeDeltaSpark212321": {
         "$comment": "Delta Lake 3.2.1 for the DELTA optional component of Dataproc clusters (#2162, cmd/cloudburrow/dataprocecosystem.go lakeJars): mounted on every node and driver at the component's /usr/lib path and on the Spark class path, as the image versions' release notes list it. Fetched by the CLI on the first cluster with the component, checked against this SHA-256 and kept in <state-dir>/models/spark/dataproc/lake.",
         "version": "3.2.1",

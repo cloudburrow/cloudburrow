@@ -42,6 +42,10 @@ type sparkRuntime struct {
 	// Almond for the Spark's Scala, and Spark's Scala Connect client of
 	// that Spark (dependencies.json's components.bigqueryml.dataprocKernels).
 	kernel *sparkproc.KernelRuntime
+	// connectServer is the Spark Connect server jar on Maven Central
+	// (path, SHA-256) when the image's Spark has none (Spark 3.5:
+	// dependencies.json's components.bigqueryml.dataprocConnectServer35).
+	connectServer *lakeJar
 }
 
 // sparkRuntimes are the runtime versions, as Managed Service for Apache
@@ -60,6 +64,8 @@ var (
 		kernel: &sparkproc.KernelRuntime{Scala: "2.12.18",
 			ConnectURL: "https://repo1.maven.org/maven2/org/apache/spark/spark-connect-client-jvm_2.12/3.5.9/spark-connect-client-jvm_2.12-3.5.9.jar",
 			ConnectSHA: "ec52b1cdc2243187d6c363fdb37f1e39ddea46c0f98e9a01f01c5be05ce26590"},
+		connectServer: &lakeJar{"org/apache/spark/spark-connect_2.12/3.5.9/spark-connect_2.12-3.5.9.jar",
+			"cd2342517d42bc02c14ac92e4676e51e948ea4fc1995ed9df6c016dc02b02b98"},
 	}
 	spark40Runtime = sparkRuntime{
 		image:         "apache/spark@sha256:fb5c5e61e7bb1be94b7f3a31afe1f73c5b4d20b6008f4ffa7278fc085da08a9e", // 4.0.1-scala2.13-java21-python3-ubuntu
@@ -138,11 +144,19 @@ func newSparkRunner(cfg config.Config, out io.Writer, live func() map[string]str
 		return func() string { return live()[name] }
 	}
 	runtime := func(rt sparkRuntime) sparkproc.Runtime {
-		return sparkproc.Runtime{Image: rt.image, RImage: rt.rImage, Kernel: rt.kernel, Connector: func(ctx context.Context) (string, error) {
+		r := sparkproc.Runtime{Image: rt.image, RImage: rt.rImage, Kernel: rt.kernel, Connector: func(ctx context.Context) (string, error) {
 			mu.Lock()
 			defer mu.Unlock()
 			return fetchSparkConnector(ctx, cache, rt, out)
 		}}
+		if j := rt.connectServer; j != nil {
+			r.ConnectServer = func(ctx context.Context) (string, error) {
+				mu.Lock()
+				defer mu.Unlock()
+				return fetchPinned(ctx, filepath.Join(cache, j.file()), mavenCentral+j.path, j.sha256, j.file(), out)
+			}
+		}
+		return r
 	}
 	runtimes, clusters := map[string]sparkproc.Runtime{}, map[string]sparkproc.Runtime{}
 	for v, rt := range sparkRuntimes {

@@ -19647,7 +19647,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/dataproc2156_test.go:85 TestDataprocServerlessBatches",
-          "test/compat/dataproc2162_test.go:620 TestDataprocJupyterNotebookAndSparkR"
+          "test/compat/dataproc2162_test.go:621 TestDataprocJupyterNotebookAndSparkR",
+          "test/compat/dataproc2162c_test.go:183 TestDataprocNotebookMagics"
         ]
       },
       {
@@ -19662,7 +19663,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/dataproc2156_test.go:85 TestDataprocServerlessBatches",
-          "test/compat/dataproc2162_test.go:620 TestDataprocJupyterNotebookAndSparkR"
+          "test/compat/dataproc2162_test.go:621 TestDataprocJupyterNotebookAndSparkR",
+          "test/compat/dataproc2162c_test.go:183 TestDataprocNotebookMagics"
         ]
       },
       {
@@ -19677,7 +19679,9 @@
         "status": "Verified",
         "tests": [
           "test/compat/dataproc2162_test.go:169 TestDataprocClusters",
-          "test/compat/dataproc2162b_test.go:254 TestDataprocOptionalComponents"
+          "test/compat/dataproc2162b_test.go:289 TestDataprocOptionalComponents",
+          "test/compat/dataproc2162c_test.go:266 TestDataprocZeppelin",
+          "test/compat/dataproc2162c_test.go:74 TestDataprocTableFormats"
         ]
       },
       {
@@ -19699,7 +19703,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/dataproc2162_test.go:169 TestDataprocClusters",
-          "test/compat/dataproc2162b_test.go:254 TestDataprocOptionalComponents"
+          "test/compat/dataproc2162b_test.go:289 TestDataprocOptionalComponents",
+          "test/compat/dataproc2162c_test.go:266 TestDataprocZeppelin"
         ]
       },
       {
@@ -19764,7 +19769,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/dataproc2162_test.go:169 TestDataprocClusters",
-          "test/compat/dataproc2162b_test.go:74 TestDataprocHadoopHivePigJobs"
+          "test/compat/dataproc2162b_test.go:74 TestDataprocHadoopHivePigJobs",
+          "test/compat/dataproc2162c_test.go:74 TestDataprocTableFormats"
         ]
       },
       {
@@ -19785,21 +19791,21 @@
         "method": "google.cloud.dataproc.v1.NodeGroupController/CreateNodeGroup",
         "status": "Verified",
         "tests": [
-          "test/compat/dataproc2162b_test.go:367 TestDataprocDriverNodeGroups"
+          "test/compat/dataproc2162b_test.go:402 TestDataprocDriverNodeGroups"
         ]
       },
       {
         "method": "google.cloud.dataproc.v1.NodeGroupController/GetNodeGroup",
         "status": "Verified",
         "tests": [
-          "test/compat/dataproc2162b_test.go:367 TestDataprocDriverNodeGroups"
+          "test/compat/dataproc2162b_test.go:402 TestDataprocDriverNodeGroups"
         ]
       },
       {
         "method": "google.cloud.dataproc.v1.NodeGroupController/ResizeNodeGroup",
         "status": "Verified",
         "tests": [
-          "test/compat/dataproc2162b_test.go:367 TestDataprocDriverNodeGroups"
+          "test/compat/dataproc2162b_test.go:402 TestDataprocDriverNodeGroups"
         ]
       },
       {
@@ -19807,7 +19813,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/dataproc2156_test.go:417 TestDataprocServerlessSessions",
-          "test/compat/dataproc2162_test.go:620 TestDataprocJupyterNotebookAndSparkR"
+          "test/compat/dataproc2162_test.go:621 TestDataprocJupyterNotebookAndSparkR"
         ]
       },
       {
@@ -19828,7 +19834,8 @@
         "method": "google.cloud.dataproc.v1.SessionController/ListSessions",
         "status": "Verified",
         "tests": [
-          "test/compat/dataproc2156_test.go:417 TestDataprocServerlessSessions"
+          "test/compat/dataproc2156_test.go:417 TestDataprocServerlessSessions",
+          "test/compat/dataproc2162c_test.go:338 TestDataprocKernelGateway"
         ]
       },
       {
@@ -19836,14 +19843,15 @@
         "status": "Verified",
         "tests": [
           "test/compat/dataproc2156_test.go:417 TestDataprocServerlessSessions",
-          "test/compat/dataproc2162_test.go:620 TestDataprocJupyterNotebookAndSparkR"
+          "test/compat/dataproc2162_test.go:621 TestDataprocJupyterNotebookAndSparkR"
         ]
       },
       {
         "method": "google.cloud.dataproc.v1.SessionTemplateController/CreateSessionTemplate",
         "status": "Verified",
         "tests": [
-          "test/compat/dataproc2156_test.go:417 TestDataprocServerlessSessions"
+          "test/compat/dataproc2156_test.go:417 TestDataprocServerlessSessions",
+          "test/compat/dataproc2162c_test.go:338 TestDataprocKernelGateway"
         ]
       },
       {
@@ -19878,49 +19886,49 @@
         "method": "google.cloud.dataproc.v1.WorkflowTemplateService/CreateWorkflowTemplate",
         "status": "Verified",
         "tests": [
-          "test/compat/dataproc2162_test.go:475 TestDataprocWorkflowTemplates"
+          "test/compat/dataproc2162_test.go:476 TestDataprocWorkflowTemplates"
         ]
       },
       {
         "method": "google.cloud.dataproc.v1.WorkflowTemplateService/DeleteWorkflowTemplate",
         "status": "Verified",
         "tests": [
-          "test/compat/dataproc2162_test.go:475 TestDataprocWorkflowTemplates"
+          "test/compat/dataproc2162_test.go:476 TestDataprocWorkflowTemplates"
         ]
       },
       {
         "method": "google.cloud.dataproc.v1.WorkflowTemplateService/GetWorkflowTemplate",
         "status": "Verified",
         "tests": [
-          "test/compat/dataproc2162_test.go:475 TestDataprocWorkflowTemplates"
+          "test/compat/dataproc2162_test.go:476 TestDataprocWorkflowTemplates"
         ]
       },
       {
         "method": "google.cloud.dataproc.v1.WorkflowTemplateService/InstantiateInlineWorkflowTemplate",
         "status": "Verified",
         "tests": [
-          "test/compat/dataproc2162_test.go:475 TestDataprocWorkflowTemplates"
+          "test/compat/dataproc2162_test.go:476 TestDataprocWorkflowTemplates"
         ]
       },
       {
         "method": "google.cloud.dataproc.v1.WorkflowTemplateService/InstantiateWorkflowTemplate",
         "status": "Verified",
         "tests": [
-          "test/compat/dataproc2162_test.go:475 TestDataprocWorkflowTemplates"
+          "test/compat/dataproc2162_test.go:476 TestDataprocWorkflowTemplates"
         ]
       },
       {
         "method": "google.cloud.dataproc.v1.WorkflowTemplateService/ListWorkflowTemplates",
         "status": "Verified",
         "tests": [
-          "test/compat/dataproc2162_test.go:475 TestDataprocWorkflowTemplates"
+          "test/compat/dataproc2162_test.go:476 TestDataprocWorkflowTemplates"
         ]
       },
       {
         "method": "google.cloud.dataproc.v1.WorkflowTemplateService/UpdateWorkflowTemplate",
         "status": "Verified",
         "tests": [
-          "test/compat/dataproc2162_test.go:475 TestDataprocWorkflowTemplates"
+          "test/compat/dataproc2162_test.go:476 TestDataprocWorkflowTemplates"
         ]
       }
     ]

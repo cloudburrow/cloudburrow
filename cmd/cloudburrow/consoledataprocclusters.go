@@ -211,6 +211,10 @@ func (p dataprocClustersProvider) CreateForm() (string, []console.Field) {
 		{Name: "comp_ZOOKEEPER", Label: "Zookeeper", Type: "checkbox", Section: setup},
 		{Name: "comp_SOLR", Label: "Solr", Type: "checkbox", Section: setup},
 		{Name: "comp_PIG", Label: "Pig", Type: "checkbox", Section: setup, Help: "Optional components: on image 2.3 and later Pig is one; before, it is always installed."},
+		{Name: "comp_ZEPPELIN", Label: "Zeppelin Notebook", Type: "checkbox", Section: setup, Help: "Image 2.x; it runs linux/amd64 under emulation here."},
+		{Name: "comp_DELTA", Label: "Delta Lake", Type: "checkbox", Section: setup},
+		{Name: "comp_ICEBERG", Label: "Iceberg", Type: "checkbox", Section: setup, Help: "Image 2.x; dataproc:dataproc.iceberg.version=1.10 in Properties picks 1.10."},
+		{Name: "comp_HUDI", Label: "Hudi", Type: "checkbox", Section: setup},
 		{Name: "autoscalingPolicy", Label: "Autoscaling policy", Type: "text", Section: setup,
 			Help: "An autoscaling policy's ID in the cluster's region, or its resource name. Left empty, none."},
 		{Name: "masterMachineType", Label: "Manager node machine type", Type: "text", Section: nodes, Default: "n4-standard-4"},
@@ -275,7 +279,7 @@ func (p dataprocClustersProvider) Create(ctx context.Context, project string, va
 		}
 		cfg.SoftwareConfig.Properties[k] = v
 	}
-	for _, comp := range []string{"JUPYTER", "TRINO", "FLINK", "HIVE_WEBHCAT", "ZOOKEEPER", "SOLR", "PIG"} {
+	for _, comp := range []string{"JUPYTER", "TRINO", "FLINK", "HIVE_WEBHCAT", "ZOOKEEPER", "SOLR", "PIG", "ZEPPELIN", "DELTA", "ICEBERG", "HUDI"} {
 		if values["comp_"+comp] == "true" {
 			cfg.SoftwareConfig.OptionalComponents = append(cfg.SoftwareConfig.OptionalComponents, dataprocpb.Component(dataprocpb.Component_value[comp]))
 		}

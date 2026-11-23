@@ -271,7 +271,8 @@ func (s *Server) startKernel(w http.ResponseWriter, r *http.Request, parent stri
 		}
 		if addr == "" {
 			if st == dataprocpb.Session_ACTIVE {
-				gatewayError(w, http.StatusInternalServerError, "the kernel's session %s has no kernel server", name)
+				_, _ = s.TerminateSession(context.WithoutCancel(ctx), &dataprocpb.TerminateSessionRequest{Name: name})
+				gatewayError(w, http.StatusInternalServerError, "the kernel's session %s has no kernels: its runtime has no kernel image (CloudBurrow serves a Jupyter session's kernels on runtimes 1.2, 2.2 and 2.3)", name)
 				return
 			}
 			select {

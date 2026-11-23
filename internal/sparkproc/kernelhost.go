@@ -100,11 +100,16 @@ func KernelImage(ctx context.Context, sparkImage string, k KernelRuntime, instan
 var kernelReady = regexp.MustCompile(`Jupyter Server .* is running at|is running at:`)
 
 // startKernels starts a Jupyter session's kernel server beside its
-// Spark Connect server p.spark, and sets c.KernelAddr.
+// Spark Connect server p.spark, and sets c.KernelAddr; a runtime with no
+// kernel image pinned (Spark 4's: KernelRuntime is pinned for Spark 3.5,
+// runtimes 1.2, 2.2 and 2.3) starts none.
 func (d *Docker) startKernels(ctx context.Context, job Job, p *prepared, c *Connect) error {
 	rt, _, ok := d.runtime(job)
 	if !ok || rt.Kernel == nil {
-		return &Unavailable{Msg: "no Jupyter kernel image is pinned for runtime " + job.RuntimeVersion}
+		// The session still serves Spark Connect; the kernel gateway
+		// answers that its runtime has no kernels (docs/gaps.md).
+		d.logf("spark: the Jupyter session %s's runtime %s has no kernel image pinned", job.SparkJobID, job.RuntimeVersion)
+		return nil
 	}
 	image, err := KernelImage(ctx, rt.Image, *rt.Kernel, d.Instance)
 	if err != nil {

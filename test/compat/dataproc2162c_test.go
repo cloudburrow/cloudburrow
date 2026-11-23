@@ -361,7 +361,9 @@ func TestDataprocKernelGateway(t *testing.T) {
 		if err != nil {
 			t.Fatalf("CreateSessionTemplate %s: %v", id, err)
 		}
-		t.Cleanup(func() { _ = tc.DeleteSessionTemplate(h.Context(), &dataprocpb.DeleteSessionTemplateRequest{Name: x.Name}) })
+		t.Cleanup(func() {
+			_ = tc.DeleteSessionTemplate(h.Context(), &dataprocpb.DeleteSessionTemplateRequest{Name: x.Name})
+		})
 	}
 	py, scala := "py-"+suffix, "scala-"+suffix
 	tpl(py, "PySpark on Serverless Spark", dataprocpb.JupyterConfig_PYTHON)
@@ -411,7 +413,7 @@ func TestDataprocKernelGateway(t *testing.T) {
 				continue
 			}
 			seen++
-			if x.State != dataprocpb.Session_TERMINATED && x.State != dataprocpb.Session_TERMINATING {
+			if x.State != dataprocpb.Session_TERMINATED && x.State != dataprocpb.Session_TERMINATING && x.State != dataprocpb.Session_FAILED {
 				live++
 			}
 		}

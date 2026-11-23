@@ -40,11 +40,19 @@ func (c *Cluster) startZeppelin(ctx context.Context, image string) error {
 	base := strings.TrimSuffix(c.spec.GatewayBase, "/") + "/zeppelin"
 	submit := "--conf spark.driver.host=" + master + " --conf spark.driver.bindAddress=0.0.0.0" +
 		" --conf spark.eventLog.enabled=true --conf spark.eventLog.dir=file:/cb-history" +
-		" --conf spark.executor.extraJavaOptions=-Djavax.net.ssl.trustStore=/tmp/cb-trust.jks" +
-		" --jars /cb-connector/spark-bigquery.jar"
+		" --conf spark.executor.extraJavaOptions=-Djavax.net.ssl.trustStore=/tmp/cb-trust.jks"
+	// The interpreter's own jars are Zeppelin's --driver-class-path,
+	// which a spark.driver.extraClassPath --conf would replace: the
+	// connectors' and table formats' jars go on --jars instead.
+	jars := []string{"/cb-connector/spark-bigquery.jar"}
 	for k, v := range c.lakeProps {
+		if k == "spark.driver.extraClassPath" {
+			jars = append(jars, strings.Split(v, ":")...)
+			continue
+		}
 		submit += " --conf " + k + "=" + v
 	}
+	submit += " --jars " + strings.Join(jars, ",")
 	args := []string{"--platform", "linux/amd64", "-v", home + ":/cb-spark:ro", "-v", c.jar + ":/cb-connector/spark-bigquery.jar:ro",
 		"-v", c.HistoryDir() + ":/cb-history"}
 	args = append(args, c.lakeMounts...)

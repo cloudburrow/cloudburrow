@@ -401,7 +401,8 @@ func TestDataprocClusters(t *testing.T) {
 	}
 	if _, err := jc.SubmitJob(ctx, &dataprocpb.SubmitJobRequest{ProjectId: project, Region: region, Job: &dataprocpb.Job{
 		Placement: &dataprocpb.JobPlacement{ClusterName: name},
-		TypeJob:   &dataprocpb.Job_HiveJob{HiveJob: &dataprocpb.HiveJob{Queries: &dataprocpb.HiveJob_QueryList{QueryList: &dataprocpb.QueryList{Queries: []string{"SHOW TABLES"}}}}}}}); status.Code(err) != codes.Unimplemented {
+		TypeJob:   &dataprocpb.Job_HiveJob{HiveJob: &dataprocpb.HiveJob{Queries: &dataprocpb.HiveJob_QueryList{QueryList: &dataprocpb.QueryList{Queries: []string{"SHOW TABLES"}}}}}}}); err != nil {
+		// Served (TestDataprocHadoopHivePigJobs runs Hive jobs).
 		t.Errorf("a Hive job: %v", err)
 	}
 	if err := jc.DeleteJob(ctx, &dataprocpb.DeleteJobRequest{ProjectId: project, Region: region, JobId: jobID}); err != nil {

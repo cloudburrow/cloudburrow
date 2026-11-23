@@ -255,8 +255,8 @@ func TestSessionsAndTemplates(t *testing.T) {
 		t.Errorf("deleted: %v", err)
 	}
 	if _, err := s.CreateSession(ctx, &dataprocpb.CreateSessionRequest{Parent: parent, SessionId: "sess-2", Session: &dataprocpb.Session{
-		SessionConfig: &dataprocpb.Session_JupyterSession{JupyterSession: &dataprocpb.JupyterConfig{Kernel: dataprocpb.JupyterConfig_SCALA}}}}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("scala: %v", err)
+		SessionConfig: &dataprocpb.Session_JupyterSession{JupyterSession: &dataprocpb.JupyterConfig{Kernel: dataprocpb.JupyterConfig_SCALA}}}}); err != nil {
+		t.Errorf("scala: %v", err) // served (#2162): Almond, on the session's kernel server
 	}
 	jop, err := s.CreateSession(ctx, &dataprocpb.CreateSessionRequest{Parent: parent, SessionId: "sess-3", Session: &dataprocpb.Session{
 		SessionConfig: &dataprocpb.Session_JupyterSession{JupyterSession: &dataprocpb.JupyterConfig{DisplayName: "nb"}}}})

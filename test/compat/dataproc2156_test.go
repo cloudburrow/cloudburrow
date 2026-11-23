@@ -487,8 +487,11 @@ func TestDataprocServerlessSessions(t *testing.T) {
 		t.Errorf("a session ID of capitals: %v", err)
 	}
 	if _, err := sc.CreateSession(ctx, &dataprocpb.CreateSessionRequest{Parent: parent, SessionId: "jupyter-" + suffix, Session: &dataprocpb.Session{
-		SessionConfig: &dataprocpb.Session_JupyterSession{JupyterSession: &dataprocpb.JupyterConfig{Kernel: dataprocpb.JupyterConfig_SCALA}}}}); status.Code(err) != codes.Unimplemented {
+		SessionConfig: &dataprocpb.Session_JupyterSession{JupyterSession: &dataprocpb.JupyterConfig{Kernel: dataprocpb.JupyterConfig_SCALA}}}}); err != nil {
+		// Served since #2162 (Almond; TestDataprocKernelGateway runs it).
 		t.Errorf("a Jupyter session with the Scala kernel: %v", err)
+	} else if _, err := sc.TerminateSession(ctx, &dataprocpb.TerminateSessionRequest{Name: parent + "/sessions/jupyter-" + suffix}); err != nil {
+		t.Errorf("TerminateSession of the Scala session: %v", err)
 	}
 
 	op, err := sc.CreateSession(ctx, &dataprocpb.CreateSessionRequest{Parent: parent, SessionId: "sess-" + suffix, Session: &dataprocpb.Session{SessionTemplate: tmpl.Name}})

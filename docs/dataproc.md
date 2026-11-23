@@ -116,9 +116,23 @@ A version Google does not list is `INVALID_ARGUMENT`.
   page gives the line that binds `spark` to the session there,
   `SparkSession.builder.remote("sc://host.docker.internal:8081/;session_id=UUID")`,
   and any Spark Connect client reaches it on the API's port by its UUID.
-  Google documents no `runtime_info.endpoints` key for a Jupyter session's
-  kernel gateway, so it has none. `kernel` `SCALA` is `UNIMPLEMENTED`: no
-  Scala kernel runs locally.
+  On runtimes 1.2, 2.2 and 2.3 the session also runs a Jupyter Server of
+  its kernels (an image the CLI builds on the runtime's `apache/spark`
+  image, `internal/sparkproc/kernel`): PySpark (ipykernel) and Scala
+  (Almond 0.14.5, BSD-3-Clause, with Spark's Scala Connect client
+  `spark-connect-client-jvm` 3.5.9), each `spark` a Spark Connect session
+  of the session's server. `kernel` `SCALA` is served. Spark 4 runtimes
+  have no kernel image yet (docs/gaps.md).
+- The kernel gateway (#2162), as Google's dataproc-jupyter-plugin uses it
+  (`GatewayClient.url` `https://PROJECT_NUMBER-dot-REGION.kernels.googleusercontent.com`),
+  is `http://DATAPROC_HOST/kernels/PROJECT-dot-REGION/` (PROJECT the ID or
+  number). `api/kernelspecs` lists the region's Jupyter session templates
+  (named by template ID, `display_name` the template's); `POST api/kernels`
+  makes a session from the template and starts its kernel; `GET` and
+  `DELETE api/kernels/ID`, `interrupt`, `restart` and the `channels`
+  websocket are the kernel's. Deleting a kernel terminates its session.
+  Google documents no `runtime_info.endpoints` key for it, so a session
+  has none.
 
 ## Notebook and SparkR batches
 
@@ -130,9 +144,11 @@ A version Google does not list is `INVALID_ARGUMENT`.
     tagged. A key that is not a Python identifier is `INVALID_ARGUMENT`.
   - `python_file_uris`, `jar_file_uris`, `file_uris` and `archive_uris` are
     as for a PySpark batch.
-  - IPython magics and shell commands (`%` and `!` lines) have no IPython
-    to run on in the Spark runtime's Python. A notebook with one fails,
-    naming the cell.
+  - Cells run in IPython 8.37.0 (`InteractiveShell.run_cell`, pure-Python
+    wheels pinned by SHA-256 in `dependencies.json`, mounted on the
+    driver's `PYTHONPATH`), so magics (`%time`, `%%writefile`, `%env`)
+    and shell commands (`!` lines) work. A cell that raises fails the
+    batch with `TYPE: MESSAGE (in the notebook's cell In[N])`.
   - Google does not say where an executed notebook is written. The driver
     output is the batch's `output_uri`, as for any batch.
 - `spark_r_batch` runs in the official `apache/spark` image of the runtime's
@@ -203,8 +219,24 @@ image's Ubuntu.
     PIG. With the component gateway each web interface is in `http_ports`
     (`Jupyter`, `JupyterLab`, `Trino`, `Flink`, `Solr`, `WebHCat`). A
     component the image version does not offer, or one named twice, is
-    `INVALID_ARGUMENT`. ZEPPELIN, DOCKER, RANGER, DELTA, ICEBERG and HUDI
-    are `UNIMPLEMENTED`, each with its reason (docs/gaps.md).
+    `INVALID_ARGUMENT`.
+  - DELTA (3.2.1; 4.2.0 on 3.0), ICEBERG (1.6.1, or 1.10 with
+    `dataproc:dataproc.iceberg.version=1.10`; `UNIMPLEMENTED` on 3.0) and
+    HUDI (0.12.3 on 2.1, 0.15.0, 1.2.0 on 3.0): their jars from Maven
+    Central, pinned by SHA-256, at the component's paths, with the
+    component page's Spark properties. Every cluster's Spark has Google's
+    Cloud Storage connector, so `gs://` paths reach the instance's Cloud
+    Storage.
+  - ZEPPELIN (0.10.1, `apache/zeppelin` pinned by digest, linux/amd64
+    under emulation; `UNIMPLEMENTED` on 3.0) runs on the master with its
+    Spark interpreter on the cluster's Spark master, at the component
+    gateway's `Zeppelin`. Measured on an arm64 Mac: the server starts in
+    about 10 s once its image is pulled (3.7 GB compressed), a 2.2
+    cluster with it is `RUNNING` in about 50 s, the first `%spark`
+    paragraph (launching the interpreter) takes about 30 s and a `%md`
+    one 4 s.
+  - DOCKER and RANGER are `UNIMPLEMENTED`, each with its reason
+    (docs/gaps.md).
   - Every cluster has a Hive metastore (Derby, in the cluster's files) and
     HiveServer2 on its master, started with its first Hive job or with a
     component that uses them.
@@ -248,9 +280,14 @@ image's Ubuntu.
   - Hadoop, Hive and Pig jobs run in the official `apache/hive` image
     (Hadoop 3.3.6, Hive 4.0.1, Tez) with Google's Cloud Storage connector
     for Hadoop, `gs://` reaching the instance's Cloud Storage through the
-    cluster's relay. Hadoop MapReduce uses Hadoop's local job runner in
-    the driver's container (there is no YARN); Hive jobs run Beeline
-    against the cluster's HiveServer2; Pig 0.18.0 runs in local mode.
+    cluster's relay. Hadoop MapReduce and Pig 0.18.0 (`-x mapreduce`) run
+    on YARN: a ResourceManager, the MapReduce JobHistory Server and the
+    Timeline Server on the master and a NodeManager on each worker (on the
+    master of a single node cluster), the Capacity Scheduler's `default`
+    queue; `yarn:` properties set `yarn-site.xml`. With the component
+    gateway, `YARN ResourceManager`, `MapReduce Job History` and `YARN
+    Application Timeline` are in `http_ports`. Hive jobs run Beeline
+    against the cluster's HiveServer2, on Tez local mode.
   - Trino jobs run the Trino CLI against the TRINO component, and Flink
     jobs `flink run` against the FLINK component; without the component
     they are `FAILED_PRECONDITION`. Presto is not available on image
@@ -263,8 +300,10 @@ image's Ubuntu.
 - Driver output: `driver_output_resource_uri` is
   `gs://CONFIG_BUCKET/google-cloud-dataproc-metainfo/CLUSTER_UUID/jobs/JOB_ID/driveroutput`,
   written as `driveroutput.000000000`, where gcloud reads it.
-- `yarn_applications` holds the Spark application. Its `tracking_url` is the
-  application's page in the cluster's History Server.
+- `yarn_applications` holds the Spark application, its `tracking_url` the
+  application's page in the cluster's History Server; for Hadoop and Pig
+  jobs, their YARN applications, `tracking_url`
+  `http://CLUSTER-m:8088/proxy/APPLICATION_ID/`.
 - `GetJob`, `ListJobs`, `UpdateJob` (`labels`), `CancelJob` and
   `DeleteJob`. `ListJobs` takes `cluster_name`, `job_state_matcher`, and a
   `filter` on `status.state` and `labels.KEY`. Deleting a job that has not
@@ -394,13 +433,12 @@ the WebSocket bridge at it, with local credentials, as it does for BigQuery.
 
 ## What is not served
 
-- Jupyter sessions' Scala kernel, and a Jupyter kernel gateway endpoint.
-- IPython magics in notebook batches.
-- The optional components ZEPPELIN, DOCKER, RANGER, DELTA, ICEBERG and
-  HUDI.
+- Kernels of Jupyter sessions on Spark 4 runtimes.
+- The optional components DOCKER and RANGER; ZEPPELIN and ICEBERG on
+  image 3.0.
 - Dataproc on GKE.
-- YARN: MapReduce runs on Hadoop's local job runner, Hive on Tez local
-  mode.
+- Spark and Hive jobs on YARN: Spark jobs run on the standalone master,
+  Hive on Tez local mode.
 - Network settings (`subnetwork_uri`, `network_tags`), which are accepted
   and kept but have no effect: a local run has no VPC.
 - Serverless autoscaling, which is not run. A batch's executors are
