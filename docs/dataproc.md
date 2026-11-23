@@ -405,10 +405,36 @@ service must be on):
     (`/tmp/hadoop-yarn/staging`), a Spark job's staging directory
     (`/user/root/.sparkStaging`; jobs run as `root`, as Dataproc's do),
     Hive's and Tez's scratch directories, and the Hive warehouse
-    (`/user/hive/warehouse`). HDFS keeps its data while the cluster is
-    stopped and started, and loses it when the cluster is deleted; a scale
-    down decommissions the removed workers' DataNodes before removing
-    them.
+    (`/user/hive/warehouse`). Each node's disk is a directory of the
+    instance's (`<state>/<instance>/dataproc-disks/<cluster UUID>/<host>`,
+    mounted at `/hadoop`), so HDFS keeps its data while the cluster is
+    stopped and started and across the instance's own `stop` and `up` in
+    persistent mode (#2188), as Compute Engine persistent disks do; it
+    loses it when the cluster is deleted (an ephemeral instance's clusters
+    and disks start afresh). A scale down decommissions the removed
+    workers' DataNodes before removing them and their disks.
+    `dfs.permissions.enabled` is false also with Kerberos (Google's own
+    kerberized data lake example turns it on in an initialization action),
+    true with RANGER (Ranger's `enable-hdfs-plugin.sh`).
+  - HDFS High Availability (#2188), as [Google's High Availability
+    page](https://docs.cloud.google.com/dataproc/docs/concepts/configuring-clusters/high-availability)
+    has it: a cluster with `master_config.num_instances` 3 has the masters
+    `CLUSTER-m-0`, `-m-1` and `-m-2`; NameNodes `nn0` on `-m-0` and `nn1` on
+    `-m-1`, each with a ZKFailoverController, a JournalNode (8485) and a
+    ZooKeeper server (the ensemble, also the ZOOKEEPER component's) on
+    each of the three masters, and no Secondary NameNode. `fs.defaultFS`
+    is the nameservice `hdfs://CLUSTER` (`dfs.nameservices`,
+    `ConfiguredFailoverProxyProvider`, `ha.zookeeper.quorum`), and when the
+    active NameNode's master stops, the other NameNode becomes active.
+    The ResourceManager and the other master daemons run on `-m-0`.
+  - Local SSDs (#2188), as [Google's local SSDs
+    page](https://docs.cloud.google.com/dataproc/docs/concepts/compute/dataproc-local-ssds)
+    has them: a node's `disk_config.num_local_ssds` (0 to 8;
+    `local_ssd_interface` `scsi` or `nvme`) are mounted at `/mnt/1`,
+    `/mnt/2`, …; the DataNode's volumes are `/mnt/N/hadoop/dfs/data`, each
+    of a local SSD's 375 GB, and the NodeManager's local directories (YARN's
+    scratch and shuffle) `/mnt/N/hadoop/yarn/nm-local-dir`, unless
+    `dataproc:dataproc.localssd.mount.enable` is false.
   - Spark, PySpark, SparkR and Spark SQL jobs run on YARN, as on Google's
     images: `master` is `yarn`, in client mode by default and in cluster
     mode with `spark.submit.deployMode=cluster` (a Spark SQL job runs in
@@ -559,11 +585,10 @@ the WebSocket bridge at it, with local credentials, as it does for BigQuery.
 
 ## What is not served
 
-- HDFS High Availability (a cluster with 3 masters runs one NameNode) and
-  local SSDs as DataNode volumes (`dataproc:dataproc.localssd.mount.enable`):
-  a local cluster's nodes are containers on one disk. HDFS data does not
-  survive the instance itself restarting: a cluster the instance starts
-  again is made afresh.
+- YARN ResourceManager High Availability: a High Availability cluster's
+  ResourceManager runs on `-m-0` only (Google runs one on each master).
+  Local SSDs are directories on the host's one disk, so they are not
+  faster than the boot disk.
 - A Dataproc on GKE cluster's `auxiliary_services_config` (a Spark History
   Server and a metastore of other clusters) is kept but not used, and its
   jobs' code reaches Cloud Storage only through the job's files.

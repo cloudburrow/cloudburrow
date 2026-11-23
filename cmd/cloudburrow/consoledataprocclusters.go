@@ -222,9 +222,17 @@ func (p dataprocClustersProvider) CreateForm() (string, []console.Field) {
 		{Name: "autoscalingPolicy", Label: "Autoscaling policy", Type: "text", Section: setup,
 			Help: "An autoscaling policy's ID in the cluster's region, or its resource name. Left empty, none."},
 		{Name: "masterMachineType", Label: "Manager node machine type", Type: "text", Section: nodes, Default: "n4-standard-4"},
+		{Name: "masterLocalSsds", Label: "Manager node number of local SSDs", Type: "number", Section: nodes, Default: "0",
+			Help: "0 to 8, each 375 GB. A single node cluster's HDFS data and YARN scratch are on them."},
+		{Name: "masterLocalSsdInterface", Label: "Manager node local SSD interface", Type: "select", Section: nodes, Default: "scsi",
+			Options: []string{"scsi", "nvme"}, OptionLabels: map[string]string{"scsi": "SCSI", "nvme": "NVMe"}},
 		{Name: "workers", Label: "Number of worker nodes", Type: "number", Section: nodes, Default: "2", ShowWhen: "clusterType=STANDARD|HA",
 			Help: "At least 2. Each worker is an Apache Spark worker of its machine type's cores and memory."},
 		{Name: "workerMachineType", Label: "Worker node machine type", Type: "text", Section: nodes, Default: "n4-standard-4", ShowWhen: "clusterType=STANDARD|HA"},
+		{Name: "workerLocalSsds", Label: "Worker node number of local SSDs", Type: "number", Section: nodes, Default: "0", ShowWhen: "clusterType=STANDARD|HA",
+			Help: "0 to 8, each 375 GB. The workers' HDFS data and YARN scratch are on them."},
+		{Name: "workerLocalSsdInterface", Label: "Worker node local SSD interface", Type: "select", Section: nodes, Default: "scsi", ShowWhen: "clusterType=STANDARD|HA",
+			Options: []string{"scsi", "nvme"}, OptionLabels: map[string]string{"scsi": "SCSI", "nvme": "NVMe"}},
 		{Name: "driverNodes", Label: "Driver node group: number of nodes", Type: "number", Section: nodes,
 			Help: "Nodes that run the cluster's job drivers, its node group of role DRIVER. Left empty, none. Jobs then need driver memory and vCores."},
 		{Name: "idleDelete", Label: "Delete after a cluster idle time period without submitted jobs (minutes)", Type: "number", Section: custom,
@@ -233,6 +241,32 @@ func (p dataprocClustersProvider) CreateForm() (string, []console.Field) {
 		{Name: "properties", Label: "Cluster properties", Type: "textarea", Section: custom, Help: "One prefix:property=value a line, such as spark:spark.executor.memory=2g."},
 		{Name: "labels", Label: "Labels", Type: "textarea", Section: custom, Help: "One key=value a line."},
 	}
+}
+
+// dataprocSSDInterface is an instance group's local SSD interface as the
+// console names it: SCSI (the default) or NVMe, or a dash without SSDs.
+func dataprocSSDInterface(ig *dataprocpb.InstanceGroupConfig) string {
+	if ig.GetDiskConfig().GetNumLocalSsds() == 0 {
+		return "—"
+	}
+	if ig.GetDiskConfig().GetLocalSsdInterface() == "nvme" {
+		return "NVMe"
+	}
+	return "SCSI"
+}
+
+// dataprocLocalSSDs is an instance group's disk config for the form's
+// number of local SSDs and their interface: nil for none.
+func dataprocLocalSSDs(n, iface string) (*dataprocpb.DiskConfig, error) {
+	n = strings.TrimSpace(n)
+	if n == "" || n == "0" {
+		return nil, nil
+	}
+	v, err := strconv.Atoi(n)
+	if err != nil {
+		return nil, fmt.Errorf("%q is not a number", n)
+	}
+	return &dataprocpb.DiskConfig{NumLocalSsds: int32(v), LocalSsdInterface: iface}, nil
 }
 
 func dataprocMinutesField(v string) (*durationpb.Duration, error) {
@@ -272,6 +306,12 @@ func (p dataprocClustersProvider) Create(ctx context.Context, project string, va
 			return "", fmt.Errorf("number of worker nodes: %q is not a number", values["workers"])
 		}
 		cfg.WorkerConfig = &dataprocpb.InstanceGroupConfig{NumInstances: int32(n), MachineTypeUri: strings.TrimSpace(values["workerMachineType"])}
+		if cfg.WorkerConfig.DiskConfig, err = dataprocLocalSSDs(values["workerLocalSsds"], values["workerLocalSsdInterface"]); err != nil {
+			return "", fmt.Errorf("worker node local SSDs: %w", err)
+		}
+	}
+	if cfg.MasterConfig.DiskConfig, err = dataprocLocalSSDs(values["masterLocalSsds"], values["masterLocalSsdInterface"]); err != nil {
+		return "", fmt.Errorf("manager node local SSDs: %w", err)
 	}
 	props, err := dataprocPairs(values["properties"])
 	if err != nil {
@@ -499,9 +539,13 @@ func (p dataprocClustersProvider) Detail(ctx context.Context, project string, pa
 			{Label: "Cloud Storage staging bucket", Value: cfg.GetConfigBucket()}, {Label: "Cloud Storage temp bucket", Value: cfg.GetTempBucket()},
 			{Label: "Labels", Value: dataprocLabels(c.GetLabels())}}},
 		{Heading: "Master node", Properties: []console.Property{
-			{Label: "Nodes", Value: fmt.Sprint(cfg.GetMasterConfig().GetNumInstances())}, {Label: "Machine type", Value: kmsOrDash(lastSegment(cfg.GetMasterConfig().GetMachineTypeUri()))}}},
+			{Label: "Nodes", Value: fmt.Sprint(cfg.GetMasterConfig().GetNumInstances())}, {Label: "Machine type", Value: kmsOrDash(lastSegment(cfg.GetMasterConfig().GetMachineTypeUri()))},
+			{Label: "Number of local SSDs", Value: fmt.Sprint(cfg.GetMasterConfig().GetDiskConfig().GetNumLocalSsds())},
+			{Label: "Local SSD interface", Value: dataprocSSDInterface(cfg.GetMasterConfig())}}},
 		{Heading: "Worker nodes", Properties: []console.Property{
-			{Label: "Nodes", Value: fmt.Sprint(cfg.GetWorkerConfig().GetNumInstances())}, {Label: "Machine type", Value: kmsOrDash(lastSegment(cfg.GetWorkerConfig().GetMachineTypeUri()))}}},
+			{Label: "Nodes", Value: fmt.Sprint(cfg.GetWorkerConfig().GetNumInstances())}, {Label: "Machine type", Value: kmsOrDash(lastSegment(cfg.GetWorkerConfig().GetMachineTypeUri()))},
+			{Label: "Number of local SSDs", Value: fmt.Sprint(cfg.GetWorkerConfig().GetDiskConfig().GetNumLocalSsds())},
+			{Label: "Local SSD interface", Value: dataprocSSDInterface(cfg.GetWorkerConfig())}}},
 		{Heading: "Properties", Properties: []console.Property{{Label: "Cluster properties", Value: kmsOrDash(strings.ReplaceAll(dataprocPropsText(sw.GetProperties()), "\n", ", "))}}},
 	}
 	return console.Detail{

@@ -53,6 +53,8 @@ var compatEnvExceptions = map[string]string{
 	"CLOUDBURROW_TEST_TASKS_EXPECT":             "restart probe expectation (present or absent)",
 	"CLOUDBURROW_TEST_SCHEDULER_EXPECT":         "restart probe expectation (present or absent)",
 	"CLOUDBURROW_TEST_WORKFLOWS_EXPECT":         "restart probe expectation (present or absent)",
+	"CLOUDBURROW_TEST_DATAPROC_HDFS_SETUP":      "restart probe setup switch",
+	"CLOUDBURROW_TEST_DATAPROC_HDFS_EXPECT":     "restart probe expectation (present)",
 	// The image the Cloud Build arbitrary-step tests run (#1382), when the
 	// default alpine:3.20 is not to be pulled; a host choice, not an
 	// instance's.

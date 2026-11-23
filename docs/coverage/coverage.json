@@ -19687,7 +19687,10 @@
           "test/compat/dataproc2162d_test.go:230 TestDataprocDockerComponentOff",
           "test/compat/dataproc2162e_test.go:42 TestDataprocOnGKE",
           "test/compat/dataproc2162f_test.go:55 TestDataprocRangerComponent",
-          "test/compat/dataproc2186_test.go:33 TestDataprocHDFS"
+          "test/compat/dataproc2186_test.go:33 TestDataprocHDFS",
+          "test/compat/dataproc2188_test.go:117 TestDataprocHDFSHighAvailability",
+          "test/compat/dataproc2188_test.go:205 TestDataprocHDFSLocalSSDs",
+          "test/compat/dataproc2188_test.go:267 TestDataprocHDFSRestartSetup"
         ]
       },
       {
@@ -19695,7 +19698,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/dataproc2162_test.go:169 TestDataprocClusters",
-          "test/compat/dataproc2186_test.go:33 TestDataprocHDFS"
+          "test/compat/dataproc2186_test.go:33 TestDataprocHDFS",
+          "test/compat/dataproc2188_test.go:293 TestDataprocHDFSAcrossRestart"
         ]
       },
       {
@@ -19712,7 +19716,9 @@
           "test/compat/dataproc2162_test.go:169 TestDataprocClusters",
           "test/compat/dataproc2162b_test.go:289 TestDataprocOptionalComponents",
           "test/compat/dataproc2162c_test.go:298 TestDataprocZeppelin",
-          "test/compat/dataproc2162c_test.go:304 TestDataprocZeppelin30"
+          "test/compat/dataproc2162c_test.go:304 TestDataprocZeppelin30",
+          "test/compat/dataproc2188_test.go:117 TestDataprocHDFSHighAvailability",
+          "test/compat/dataproc2188_test.go:293 TestDataprocHDFSAcrossRestart"
         ]
       },
       {
@@ -19787,7 +19793,11 @@
           "test/compat/dataproc2162d_test.go:46 TestDataprocSparkAndHiveOnYarn",
           "test/compat/dataproc2162e_test.go:42 TestDataprocOnGKE",
           "test/compat/dataproc2162f_test.go:55 TestDataprocRangerComponent",
-          "test/compat/dataproc2186_test.go:33 TestDataprocHDFS"
+          "test/compat/dataproc2186_test.go:33 TestDataprocHDFS",
+          "test/compat/dataproc2188_test.go:117 TestDataprocHDFSHighAvailability",
+          "test/compat/dataproc2188_test.go:205 TestDataprocHDFSLocalSSDs",
+          "test/compat/dataproc2188_test.go:267 TestDataprocHDFSRestartSetup",
+          "test/compat/dataproc2188_test.go:293 TestDataprocHDFSAcrossRestart"
         ]
       },
       {

@@ -273,7 +273,7 @@ func (c *Cluster) startHDFS(ctx context.Context) error {
 		if err := os.MkdirAll(c.disk(alias), 0o755); err != nil {
 			return err
 		}
-		args := append(append(append([]string{"--user", hostUser()}, nodeLabel(alias)...), c.hdfsMounts(gcs, alias)...), ranger...)
+		args := append(append(append([]string{"--user", "0:0"}, nodeLabel(alias)...), c.hdfsMounts(gcs, alias)...), ranger...)
 		args = append(args, "-e", "CB_CLUSTER_ID=CID-"+c.spec.ID)
 		if c.ha() {
 			role := "active"
@@ -336,7 +336,7 @@ func (c *Cluster) startHAQuorum(ctx context.Context, gcs string) error {
 		if err := os.MkdirAll(c.disk(alias), 0o755); err != nil {
 			return err
 		}
-		args := append(append([]string{"--user", hostUser()}, nodeLabel(alias)...), c.hdfsMounts(gcs, alias)...)
+		args := append(append([]string{"--user", "0:0"}, nodeLabel(alias)...), c.hdfsMounts(gcs, alias)...)
 		args = append(args, "--entrypoint", "/bin/bash", e.Hive, "/cb/hdfs.sh", "journalnode")
 		if err := c.runComponent(ctx, masterPart(i, "journalnode"), c.masterNode(i), args...); err != nil {
 			return err
@@ -395,7 +395,6 @@ func (c *Cluster) ssdMounts(alias string) []string {
 	var out []string
 	for i := 1; i <= c.localSSDs(); i++ {
 		dir := filepath.Join(c.disk(alias), fmt.Sprintf("local-ssd-%d", i))
-		// Made here, not by Docker (as root), for the DataNode's user.
 		_ = os.MkdirAll(dir, 0o755)
 		out = append(out, "-v", dir+fmt.Sprintf(":/mnt/%d", i))
 	}
@@ -417,7 +416,7 @@ func (c *Cluster) startDataNode(ctx context.Context, node, host string) error {
 		return err
 	}
 	args := []string{"run", "-d", "--name", dataNode(node), "--label", c.label, "--label", "cloudburrow.dataproc.cluster=" + c.spec.ID,
-		"--network", "container:" + node, "--user", hostUser()}
+		"--network", "container:" + node, "--user", "0:0"}
 	args = append(append(append(args, nodeLabel(host)...), c.hdfsMounts(gcs, host)...), c.ssdMounts(host)...)
 	args = append(args, "-e", "CB_HOSTNAME="+host)
 	props := c.confProps("hdfs")
@@ -474,15 +473,6 @@ func (c *Cluster) disk(alias string) string {
 	return filepath.Join(c.diskRoot(), filepath.Base(c.spec.ID), alias)
 }
 
-// hostUser is the user the HDFS daemons run as: the host's, so what they
-// write on the node's disk is the instance's to remove.
-func hostUser() string {
-	if uid, gid := os.Getuid(), os.Getgid(); uid >= 0 && gid >= 0 {
-		return strconv.Itoa(uid) + ":" + strconv.Itoa(gid)
-	}
-	return "0:0"
-}
-
 // RemoveDisks removes cluster id's disks ("": every cluster's).
 func (d *Docker) RemoveDisks(id string) {
 	if d.Disks == "" {
@@ -495,9 +485,11 @@ func (d *Docker) RemoveDisks(id string) {
 	d.removeDir(filepath.Join(d.Disks, filepath.Base(id)))
 }
 
-// removeDir removes a disk's directory. The NodeManagers, which run as
-// root, leave scratch files on local SSDs the host user may not remove:
-// a container of the Hive image removes those.
+// removeDir removes a disk's directory. The HDFS daemons and the
+// NodeManagers run as root (Hadoop's login needs a user the image's
+// passwd names), so where the daemon maps no user to the host's (Docker
+// Engine on Linux) their files are root's: a container of the Hive image
+// removes those.
 func (d *Docker) removeDir(dir string) {
 	if os.RemoveAll(dir) == nil {
 		return

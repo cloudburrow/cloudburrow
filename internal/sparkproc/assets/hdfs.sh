@@ -48,8 +48,9 @@ namenode)
   fi
   if [ -n "${CB_HA:-}" ]; then
     # ZKFC's parent znode, once per ensemble (made again on an ensemble
-    # that lost it; refused where it is there).
-    until "$hdfs" zkfc -formatZK -nonInteractive >/tmp/formatzk.log 2>&1 || grep -q 'already exists' /tmp/formatzk.log; do
+    # that lost it): exit status 2 is formatZK's refusal where it is
+    # there already.
+    until rc=0; "$hdfs" zkfc -formatZK -nonInteractive >/tmp/formatzk.log 2>&1 || rc=$?; [ "$rc" = 0 ] || [ "$rc" = 2 ]; do
       sleep 2
     done
   fi
