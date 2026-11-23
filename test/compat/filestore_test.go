@@ -344,6 +344,13 @@ func TestGKEFilestoreMountFromAPod(t *testing.T) {
 	zone := "projects/" + project + "/locations/us-central1-a"
 	region := "projects/" + project + "/locations/us-central1"
 
+	// The instances first, so that their cleanups run after the cluster's:
+	// a node whose NFS server is gone waits on it forever, as on Google.
+	zonal := fsInstance(t, fg, zone, "ct-fs-pod", &filestorepb.Instance{Tier: filestorepb.Instance_ZONAL, Protocol: filestorepb.Instance_NFS_V4_1,
+		FileShares: fsShare("vol1", 1024), Networks: fsNetwork})
+	basic := fsInstance(t, fg, zone, "ct-fs-pod3", &filestorepb.Instance{Tier: filestorepb.Instance_BASIC_HDD,
+		FileShares: fsShare("share1", 1024), Networks: fsNetwork})
+
 	// The cluster.
 	cparent := zone
 	cname := cparent + "/clusters/ct-gke-fs"
@@ -357,11 +364,6 @@ func TestGKEFilestoreMountFromAPod(t *testing.T) {
 			gkeWait(t, cg, project, "us-central1-a", op)
 		}
 	})
-
-	zonal := fsInstance(t, fg, zone, "ct-fs-pod", &filestorepb.Instance{Tier: filestorepb.Instance_ZONAL, Protocol: filestorepb.Instance_NFS_V4_1,
-		FileShares: fsShare("vol1", 1024), Networks: fsNetwork})
-	basic := fsInstance(t, fg, zone, "ct-fs-pod3", &filestorepb.Instance{Tier: filestorepb.Instance_BASIC_HDD,
-		FileShares: fsShare("share1", 1024), Networks: fsNetwork})
 
 	gkeWait(t, cg, project, "us-central1-a", op)
 	c, err := cg.GetCluster(ctx, &containerpb.GetClusterRequest{Name: cname})
@@ -414,6 +416,10 @@ spec:
 		out, err := exec.Command("kubectl", "--kubeconfig", kc, "logs", name).CombinedOutput()
 		if err != nil {
 			t.Fatalf("kubectl logs: %v\n%s", err, out)
+		}
+		// The pod is deleted, so that its node unmounts the share.
+		if del, err := exec.Command("kubectl", "--kubeconfig", kc, "delete", "pod", name, "--wait=true", "--timeout=2m").CombinedOutput(); err != nil {
+			t.Fatalf("kubectl delete pod: %v\n%s", err, del)
 		}
 		return strings.TrimSpace(string(out))
 	}

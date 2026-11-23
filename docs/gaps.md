@@ -36,10 +36,10 @@ tracks it; a closed issue is named only where it says what was built.
 | Cloud SQL, Memorystore | 6 | 1 | 4 | 1 | 0 |
 | Functions, credentials, tooling | 1 | 0 | 1 | 0 | 0 |
 | App Hub | 5 | 1 | 1 | 3 | 0 |
-| Filestore | 6 | 4 | 2 | 0 | 0 |
+| Filestore | 7 | 4 | 3 | 0 | 0 |
 | Dataform | 7 | 0 | 2 | 4 | 1 |
 | Console | 9 | 7 | 2 | 0 | 0 |
-| **Total** | **95** | **18** | **26** | **44** | **7** |
+| **Total** | **96** | **18** | **27** | **44** | **7** |
 
 ## Cloud Storage
 
@@ -361,6 +361,7 @@ pages.
 | Customer-managed encryption keys, tags, replication (`PromoteReplica`) and `performance_config` limits are refused or not enforced (#2192) | not built yet | M |
 | The server's address is on the local `kind` Docker network, not inside `reserved_ip_range`: the range is checked and recorded but routes nothing | no emulator support | M |
 | Export options' `ip_ranges` match a client's node address on the `kind` network, so ranges of VPC addresses admit no local client | no emulator support | S |
+| A node still mounting a deleted instance's NFSv4.1 share hangs in the kernel (hard mount, as on Google), and Docker then cannot remove that node's container, so deleting its cluster fails until Docker restarts; deleting the pods first avoids it | no emulator support | M |
 
 ## Dataform
 
