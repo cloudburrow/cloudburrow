@@ -45,6 +45,7 @@ var compatSections = map[string]string{
 	// (`cloudresourcemanager.projects.getOrgPolicy`).
 	"resourcemanagerv1": "## Resource Manager — `google.cloud.resourcemanager.v3`",
 	"vertexai":          "## Vertex AI PredictionService — `google.cloud.aiplatform.v1`",
+	"workbench":         "## Vertex AI Workbench — `google.cloud.notebooks.v2`",
 	"speechv1":          "## Speech-to-Text v1 — `google.cloud.speech.v1`",
 	"documentaiv1beta3": "## Document AI v1beta3 datasets — `google.cloud.documentai.v1beta3`",
 	"vertexaiv1beta1":   "## Vertex AI PredictionService v1beta1 — `google.cloud.aiplatform.v1beta1`",

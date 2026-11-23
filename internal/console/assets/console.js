@@ -112,8 +112,13 @@ function agentPlatformRoutes() {
       docs: "https://docs.cloud.google.com/colab/docs/schedule-notebook-run",
       instead: "Start CloudBurrow with --services including run, storage and bigquery." }),
     // Notebooks.
-    absent(`${AP}/workbench/instances`, "Workbench", "Notebooks", "notebooks.googleapis.com (Workbench instances)",
-      "JupyterLab instances", "https://docs.cloud.google.com/gemini-enterprise-agent-platform/notebooks/overview"),
+    // Vertex AI Workbench instances (#2173): "Go to the Instances page"
+    // (https://docs.cloud.google.com/vertex-ai/docs/workbench/instances/create-console-quickstart,
+    // read 2026-11-22), each a notebook runtime of the instance.
+    page(`${AP}/workbench/instances`, "Workbench", "Notebooks", { service: "workbench-instances", listedWhenOff: true, kind: "Instance",
+      api: "notebooks.googleapis.com v2 (projects.locations.instances)", about: "Notebook instances, each with Open JupyterLab, Start, Stop and Reset",
+      docs: "https://docs.cloud.google.com/vertex-ai/docs/workbench/instances/create-console-quickstart",
+      instead: "Start CloudBurrow with --services including run and bigquery: run starts the local Vertex AI endpoint, and an instance's kernel queries BigQuery." }),
     // Model development.
     absent(`${AP}/datasets`, "Datasets", "Model development", "projects.locations.datasets",
       "Managed datasets for training", AP_DOCS + "machine-learning"),
@@ -22120,6 +22125,18 @@ function bqDataPrepEditor(doc, onChange, ctx, { idPrefix = "bq-dp" } = {}) {
     let got;
     try {
       got = bqPrepSuggestionsOf(await bqLocalModel(bqPrepPrompt(doc.source, lastSchema, lastRows, column)), lastSchema);
+      // Only a step valid for the table is a suggestion (#2173): each is
+      // compiled after the applied steps and dry-run, and one BigQuery
+      // refuses (a function GoogleSQL lacks, a column the table lacks) is
+      // dropped, as Gemini's suggestions are steps the table can take.
+      const valid = await Promise.all(got.map(async (sg) => {
+        try {
+          const gen = await bqDfCall("dataprepsql", { content: JSON.stringify({ ...doc, yaml: undefined, steps: [...doc.steps, sg.step], destination: "" }) });
+          await bqStudioCall("query", { query: gen.sql, dryRun: true, legacySql: false });
+          return true;
+        } catch { return false; }
+      }));
+      got = got.filter((_, k) => valid[k]);
     } catch (e) { got = e.message; }
     // A later request (another column, or the steps changed) wins.
     if (suggestKey !== key) return;

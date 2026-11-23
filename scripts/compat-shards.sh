@@ -227,7 +227,8 @@ COMPAT_SQL_REPLICA_TESTS='^Test[A-Za-z]*SQL[A-Za-z0-9]*(HighAvailability|Replica
 # deliver to a Cloud Run service, and Document AI's and Speech-to-Text's
 # (TestDocumentAI*, TestSpeech*, #1930), served by the local AI
 # endpoint Cloud Run starts, and Workflows' (TestWorkflows*, #1986), whose
-# instance is the run shard's, and Dataform's (TestDataform*, #2105) and Colab Enterprise's (TestColab*, #2105), whose
+# instance is the run shard's, and Dataform's (TestDataform*, #2105) and Colab Enterprise's (TestColab*, #2105) and Workbench's
+# (TestWorkbench*, #2173), whose
 # invocations run on its BigQuery, and App Hub's (TestAppHub*, #2110) and Developer
 # Connect's (TestDeveloperConnect*, #2105, on the Run port), served
 # only by the run shard's instance; the BigQuery,
@@ -277,7 +278,7 @@ COMPAT_SQL_REPLICA_TESTS='^Test[A-Za-z]*SQL[A-Za-z0-9]*(HighAvailability|Replica
 COMPAT_BROWSER_SHARDS="storage served run emulators memorystore sql localai"
 COMPAT_BROWSER_SERVED_SHARD_TESTS='^Test(GKEServed|KubernetesEnginePages|VPCNetwork|ComputeEngine|ComputePermissions|TraceExplorer)'
 COMPAT_BROWSER_SERVED_ONLY_TESTS='^Test(GKEServed|VPCNetwork|ComputeEngine|ComputePermissions|TraceExplorer)'
-COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|CloudBuild|LoggingAdmin|LoggingConsole|LoggingAppHub|SecretManager|Eventarc|DocumentAI|Speech|StoragePicker|Workflows|ModelRegistry|Dataform|Colab|VertexAIPipelines|AppHub|DeveloperConnect)'
+COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|CloudBuild|LoggingAdmin|LoggingConsole|LoggingAppHub|SecretManager|Eventarc|DocumentAI|Speech|StoragePicker|Workflows|ModelRegistry|Dataform|Colab|VertexAIPipelines|Workbench|AppHub|DeveloperConnect)'
 COMPAT_BROWSER_EMULATORS_SHARD_TESTS='^Test(BigQuery|Firestore|Datastore|Bigtable|Spanner)'
 COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS='^TestMemorystore'
 COMPAT_BROWSER_SQL_SHARD_TESTS='^Test(CloudSQL|BackupDR|PrivateCAKMS)'

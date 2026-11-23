@@ -73,6 +73,7 @@ import (
 	"cloud.google.com/go/aiplatform/apiv1/aiplatformpb"
 	"cloud.google.com/go/iam/apiv1/iampb"
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
+	nbpb "cloud.google.com/go/notebooks/apiv2/notebookspb"
 	"google.golang.org/genproto/googleapis/api/annotations"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -1182,13 +1183,14 @@ func (s *Server) registerNotebooks(srv grpc.ServiceRegistrar) {
 	aiplatformpb.RegisterNotebookServiceServer(srv, &notebookService{s: s})
 	aiplatformpb.RegisterScheduleServiceServer(srv, &scheduleService{s: s})
 	aiplatformpb.RegisterPipelineServiceServer(srv, &pipelineService{s: s})
+	nbpb.RegisterNotebookServiceServer(srv, &workbenchService{s: s})
 }
 
 // notebookREST is the transcoder for the notebookRuntimeTemplates and
 // notebookRuntimes paths and their operations.
 func (s *Server) notebookREST() *rest.Transcoder {
 	s.nbRESTOnce.Do(func() {
-		t := &rest.Transcoder{Packages: []string{"google.cloud.aiplatform.v1"}, SnakeCaseMasks: true, Mixins: []*annotations.HttpRule{
+		t := &rest.Transcoder{Packages: []string{"google.cloud.aiplatform.v1", "google.cloud.notebooks.v2"}, SnakeCaseMasks: true, Mixins: []*annotations.HttpRule{
 			opRule("/v1/{name=projects/*/locations/*/notebookRuntimeTemplates/*/operations/*}"),
 			opRule("/v1/{name=projects/*/locations/*/notebookRuntimes/*/operations/*}"),
 			opRule("/v1/{name=projects/*/locations/*/notebookExecutionJobs/*/operations/*}"),

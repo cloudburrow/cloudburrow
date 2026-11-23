@@ -2548,6 +2548,20 @@ var parityRows = []parityRow{
 		Excluded: "Google's Pipelines docs describe no bulk action (https://docs.cloud.google.com/vertex-ai/docs/pipelines/run-pipeline); the API's batch methods are served"},
 	{Resource: "Colab Enterprise: runtime upgrade", Service: "vertexai", Methods: []string{"NotebookService/UpgradeNotebookRuntime"},
 		Excluded: "a runtime here is always on the instance's runtime image (is_upgradable false), so Google's Upgrade, offered only for an upgradable runtime, never shows"},
+	// Vertex AI Workbench instances (#2173).
+	{Resource: "Vertex AI Workbench: instances", Service: "workbench",
+		Methods: []string{"NotebookService/CreateInstance", "NotebookService/GetInstance", "NotebookService/ListInstances",
+			"NotebookService/StartInstance", "NotebookService/StopInstance", "NotebookService/ResetInstance", "NotebookService/DeleteInstance"},
+		Provider: "workbench-instances", Offers: "Instances: Create new (Create instance: Name, Zone, Labels, Machine type, idle shutdown, User email, " +
+			"Service account email), Open JupyterLab (the instance's page, whose Notebook tab runs Python on its kernel), Start, Stop, " +
+			"Reset confirmed with Reset, and Delete with Confirm",
+		Tests: []string{"TestWorkbenchInstancesThroughThePages"}},
+	{Resource: "Vertex AI Workbench: instance update", Service: "workbench", Methods: []string{"NotebookService/UpdateInstance"},
+		Provider: "workbench-instances", Offers: "Create instance's Labels and idle shutdown (gce_setup.metadata), set at creation",
+		Tests: []string{"TestWorkbenchInstancesThroughThePages"}},
+	{Resource: "Vertex AI Workbench: upgrade", Service: "workbench",
+		Methods:  []string{"NotebookService/CheckInstanceUpgradability", "NotebookService/UpgradeInstance"},
+		Excluded: "an instance here is always on the instance's runtime image (never upgradeable), so Google's Upgrade, offered only for an upgradable instance, never shows"},
 	// The Model Registry and Endpoints (#1940).
 	{Resource: "Model Registry: models and versions", Service: "vertexai",
 		Methods: []string{"ModelService/UploadModel", "ModelService/ListModelVersions", "ModelService/UpdateModel",
