@@ -13,10 +13,12 @@ import (
 
 	"google.golang.org/grpc"
 
+	"github.com/cloudburrow/cloudburrow/internal/cmek"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/filestoreserver"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 	"github.com/cloudburrow/cloudburrow/internal/service/filestore"
+	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/telemetry"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
 	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
@@ -33,6 +35,10 @@ type filestoreService struct {
 	requests  func(rest.Request)
 	// networks are Compute Engine's networks; nil checks none.
 	networks func() filestore.Networks
+	// keys are the customer-managed keys (Cloud KMS); registry binds
+	// tags (Resource Manager).
+	keys     *cmek.Keys
+	registry func() *resourcemanager.Registry
 	logf     func(format string, args ...any)
 	server   *grpctransport.Server
 	api      *filestore.Server
@@ -82,7 +88,15 @@ func (s *filestoreService) Start(ctx context.Context) error {
 	}
 	s.backend = &filestoreserver.Docker{Instance: s.cfg.Name, Cluster: s.cfg.ClusterName(), Dir: filepath.Join(s.cfg.InstanceDir(), "filestore", "backups")}
 	s.backend.Logf = s.logf
-	opts := filestore.Options{Backend: s.backend, Networks: s.networks}
+	opts := filestore.Options{Backend: s.backend, Networks: s.networks, Keys: s.keys}
+	if s.registry != nil {
+		opts.Tags = func() filestore.TagBinder {
+			if reg := s.registry(); reg != nil {
+				return reg
+			}
+			return nil
+		}
+	}
 	api, err := filestore.NewServer(state, opts)
 	if err != nil {
 		return err

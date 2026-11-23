@@ -3,6 +3,7 @@ package filestore
 import (
 	"context"
 	"strings"
+	"time"
 
 	"cloud.google.com/go/filestore/apiv1/filestorepb"
 	longrunningpb "cloud.google.com/go/longrunning/autogen/longrunningpb"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/aipfilter"
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/cmek"
 )
 
 func (s *Server) noBackend() error {
@@ -31,7 +33,7 @@ func checkParent(parent string) ([]string, error) {
 }
 
 // CreateInstance creates an instance and starts its NFS server.
-func (s *Server) CreateInstance(_ context.Context, req *filestorepb.CreateInstanceRequest) (*longrunningpb.Operation, error) {
+func (s *Server) CreateInstance(ctx context.Context, req *filestorepb.CreateInstanceRequest) (*longrunningpb.Operation, error) {
 	m, err := checkParent(req.GetParent())
 	if err != nil {
 		return nil, err
@@ -88,14 +90,18 @@ func (s *Server) CreateInstance(_ context.Context, req *filestorepb.CreateInstan
 	if err := checkLabels(in.GetLabels()); err != nil {
 		return nil, err
 	}
-	if len(in.GetTags()) > 0 {
-		return nil, apierror.Unimplemented("Tags on Filestore instances are not supported by CloudBurrow yet (#2192)")
+	if err := s.checkTags(name, in.GetTags()); err != nil {
+		return nil, err
 	}
-	if in.GetKmsKeyName() != "" {
-		return nil, apierror.Unimplemented("Customer-managed encryption keys on Filestore instances are not supported by CloudBurrow yet (#2192)")
-	}
-	if in.GetReplication() != nil && len(in.GetReplication().GetReplicas()) > 0 {
-		return nil, apierror.Unimplemented("Filestore replication is not supported by CloudBurrow yet (#2192)")
+	tags := in.GetTags()
+	in.Tags = nil
+	if k := in.GetKmsKeyName(); k != "" {
+		if info.basic {
+			return nil, apierror.InvalidArgument("Customer-managed encryption keys are not supported for tier %s: only zonal, regional and enterprise instances support them", tierName(in.GetTier()))
+		}
+		if err := s.checkKey(ctx, "kms_key_name", k, m[1], loc); err != nil {
+			return nil, err
+		}
 	}
 	if in.GetPerformanceConfig() != nil && in.GetTier() != filestorepb.Instance_ZONAL && in.GetTier() != filestorepb.Instance_REGIONAL {
 		return nil, apierror.InvalidArgument("performance_config is supported only by the ZONAL and REGIONAL tiers")
@@ -114,6 +120,11 @@ func (s *Server) CreateInstance(_ context.Context, req *filestorepb.CreateInstan
 	defer s.mu.Unlock()
 	if _, ok := s.instances[name]; ok {
 		return nil, apierror.AlreadyExists("Resource '%s' already exists", name)
+	}
+	in.Name = name
+	active, err := s.checkReplicaLocked(in)
+	if err != nil {
+		return nil, err
 	}
 	var source *backupRecord
 	if src := fs.GetSourceBackup(); src != "" {
@@ -142,10 +153,17 @@ func (s *Server) CreateInstance(_ context.Context, req *filestorepb.CreateInstan
 		return nil, err
 	}
 	key, spec, share := rec.Key, rec.spec(), fs.GetName()
-	var backupKey string
+	var backupKey, backupName string
+	var sealed *cmek.Sealed
 	if source != nil {
-		backupKey = source.Key
+		backupKey, backupName, sealed = source.Key, source.B.GetName(), source.Sealed
 	}
+	var activeKey string
+	if active != nil {
+		activeKey = active.Key
+		s.busy[active.I.GetName()] = "replica " + name
+	}
+	var synced time.Time
 	b := s.opts.Backend
 	return s.startOpLocked(req.GetParent(), name, "create", func(ctx context.Context) error {
 		ip, err := b.Ensure(ctx, key, "", spec)
@@ -156,18 +174,35 @@ func (s *Server) CreateInstance(_ context.Context, req *filestorepb.CreateInstan
 		rec.IP = ip
 		s.mu.Unlock()
 		if backupKey != "" {
-			if err := b.Restore(ctx, key, share, backupKey); err != nil {
+			dek, err := s.openKey(ctx, projectOf(backupName), backupName, sealed)
+			if err != nil {
+				return err
+			}
+			if err := b.Restore(ctx, key, share, backupKey, dek); err != nil {
 				return apierror.Internal(err, "Restoring the backup failed: %v", err)
+			}
+		}
+		if activeKey != "" {
+			synced = s.now()
+			if err := b.Replicate(ctx, activeKey, key, share); err != nil {
+				return apierror.Internal(err, "Copying the active instance's data failed: %v", err)
 			}
 		}
 		return nil
 	}, func(err error) proto.Message {
+		if active != nil {
+			delete(s.busy, active.I.GetName())
+		}
 		if err != nil {
 			rec.I.State, rec.I.StatusMessage = filestorepb.Instance_ERROR, apierror.From(err).Message
 			return nil
 		}
 		rec.setIP()
 		rec.I.State = filestorepb.Instance_READY
+		if active != nil && s.instances[active.I.GetName()] == active {
+			pair(active, rec, synced)
+		}
+		s.bindTags(name, tags)
 		return cloneInst(rec.I)
 	}), nil
 }
@@ -261,6 +296,9 @@ func (s *Server) UpdateInstance(_ context.Context, req *filestorepb.UpdateInstan
 			}
 			next.Labels = in.GetLabels()
 		case "file_shares", "fileShares":
+			if r.I.GetReplication() != nil {
+				return nil, apierror.FailedPrecondition("Instance %s is replicated: its file share cannot be changed while it has a replica or is one", r.I.GetName())
+			}
 			if len(in.GetFileShares()) != 1 {
 				return nil, apierror.InvalidArgument("file_shares must have exactly one entry")
 			}
@@ -372,6 +410,13 @@ func (s *Server) DeleteInstance(_ context.Context, req *filestorepb.DeleteInstan
 			snaps = append(snaps, name)
 		}
 	}
+	var peer *instRecord
+	if r.I.GetReplication() != nil {
+		if !isStandby(r.I) {
+			return nil, apierror.FailedPrecondition("Instance %s has a replica, %s: delete the replica, or promote it, first", r.I.GetName(), peerOf(r.I))
+		}
+		peer = s.instances[peerOf(r.I)]
+	}
 	if len(snaps) > 0 && !req.GetForce() {
 		return nil, apierror.FailedPrecondition("Instance %s has %d snapshot(s): delete them first, or delete with force to delete them too", r.I.GetName(), len(snaps))
 	}
@@ -388,8 +433,13 @@ func (s *Server) DeleteInstance(_ context.Context, req *filestorepb.DeleteInstan
 		}
 		for _, sn := range snaps {
 			delete(s.snapshots, sn)
+			s.unbindTags(sn)
 		}
 		delete(s.instances, r.I.GetName())
+		if peer != nil && s.instances[peer.I.GetName()] == peer {
+			peer.I.Replication = nil
+		}
+		s.unbindTags(r.I.GetName())
 		return nil
 	}), nil
 }
@@ -457,10 +507,14 @@ func (s *Server) RestoreInstance(_ context.Context, req *filestorepb.RestoreInst
 	}
 	r.I.State = filestorepb.Instance_RESTORING
 	_ = s.saveLocked()
-	key, share, backupKey, src := r.Key, fs.GetName(), b.Key, req.GetSourceBackup()
+	key, share, backupKey, src, sealed := r.Key, fs.GetName(), b.Key, req.GetSourceBackup(), b.Sealed
 	be := s.opts.Backend
 	return s.startOpLocked(locationOf(r.I.GetName()), r.I.GetName(), "restore", func(ctx context.Context) error {
-		return be.Restore(ctx, key, share, backupKey)
+		dek, err := s.openKey(ctx, projectOf(src), src, sealed)
+		if err != nil {
+			return err
+		}
+		return be.Restore(ctx, key, share, backupKey, dek)
 	}, func(err error) proto.Message {
 		r.I.State = filestorepb.Instance_READY
 		if err != nil {
@@ -536,11 +590,6 @@ func (s *Server) RevertInstance(_ context.Context, req *filestorepb.RevertInstan
 		}
 		return cloneInst(r.I)
 	}), nil
-}
-
-// PromoteReplica is UNIMPLEMENTED: replication is not served.
-func (s *Server) PromoteReplica(context.Context, *filestorepb.PromoteReplicaRequest) (*longrunningpb.Operation, error) {
-	return nil, apierror.Unimplemented("Filestore replication is not supported by CloudBurrow yet (#2192)")
 }
 
 // Usage is the bytes an instance's share holds, for the console.

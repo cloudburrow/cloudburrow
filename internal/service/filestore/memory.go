@@ -14,14 +14,17 @@ type MemoryBackend struct {
 	data    map[string]string // key/share
 	snaps   map[string]string // key/share/snap
 	backups map[string]string
+	deks    map[string]string
 	next    int
 }
 
 func (m *MemoryBackend) init() {
 	if m.servers == nil {
-		m.servers, m.data, m.snaps, m.backups = map[string]Spec{}, map[string]string{}, map[string]string{}, map[string]string{}
+		m.servers, m.data, m.snaps, m.backups, m.deks = map[string]Spec{}, map[string]string{}, map[string]string{}, map[string]string{}, map[string]string{}
 	}
 }
+
+var _ Backend = (*MemoryBackend)(nil)
 
 // Ensure records the server and answers an address.
 func (m *MemoryBackend) Ensure(_ context.Context, key, ip string, spec Spec) (string, error) {
@@ -84,21 +87,41 @@ func (m *MemoryBackend) Revert(_ context.Context, key, share, snap string) error
 }
 
 // Backup copies the share's data out.
-func (m *MemoryBackend) Backup(_ context.Context, key, share, backup string) (int64, error) {
+func (m *MemoryBackend) Backup(_ context.Context, key, share, backup string, dek []byte) (int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.init()
 	m.backups[backup] = m.data[key+"/"+share]
+	m.deks[backup] = string(dek)
 	return int64(len(m.backups[backup])), nil
 }
 
 // Restore copies a backup's data in.
-func (m *MemoryBackend) Restore(_ context.Context, key, share, backup string) error {
+func (m *MemoryBackend) Restore(_ context.Context, key, share, backup string, dek []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.init()
+	if m.deks[backup] != string(dek) {
+		return fmt.Errorf("backup %s: wrong data key", backup)
+	}
 	m.data[key+"/"+share] = m.backups[backup]
 	return nil
+}
+
+// Replicate copies from's share's data to to's.
+func (m *MemoryBackend) Replicate(_ context.Context, from, to, share string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.init()
+	m.data[to+"/"+share] = m.data[from+"/"+share]
+	return nil
+}
+
+// SpecOf is the spec key's server last took.
+func (m *MemoryBackend) SpecOf(key string) Spec {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.servers[key]
 }
 
 // DeleteBackup forgets a backup.

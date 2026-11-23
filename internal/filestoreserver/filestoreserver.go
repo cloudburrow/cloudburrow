@@ -440,7 +440,7 @@ func (d *Docker) Revert(ctx context.Context, key, share, snap string) error {
 func (d *Docker) backupFile(backup string) string { return filepath.Join(d.Dir, backup+".tar") }
 
 // Backup writes a tar of the share's files to Dir and answers its size.
-func (d *Docker) Backup(ctx context.Context, key, share, backup string) (int64, error) {
+func (d *Docker) Backup(ctx context.Context, key, share, backup string, dek []byte) (int64, error) {
 	if err := checkNames(share, key, backup); err != nil {
 		return 0, err
 	}
@@ -453,7 +453,20 @@ func (d *Docker) Backup(ctx context.Context, key, share, backup string) (int64, 
 	if err != nil {
 		return 0, err
 	}
-	err = d.runner().Run(ctx, nil, f, "docker", "exec", d.container(key), "tar", "-C", "/export/data/"+share, "--numeric-owner", "-cf", "-", ".")
+	var w io.Writer = f
+	var sw *sealingWriter
+	if dek != nil {
+		if sw, err = newSealingWriter(f, dek); err != nil {
+			_ = f.Close()
+			_ = os.Remove(tmp)
+			return 0, err
+		}
+		w = sw
+	}
+	err = d.runner().Run(ctx, nil, w, "docker", "exec", d.container(key), "tar", "-C", "/export/data/"+share, "--numeric-owner", "-cf", "-", ".")
+	if sw != nil && err == nil {
+		err = sw.Close()
+	}
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
@@ -472,7 +485,7 @@ func (d *Docker) Backup(ctx context.Context, key, share, backup string) (int64, 
 }
 
 // Restore replaces the share's files with backup's.
-func (d *Docker) Restore(ctx context.Context, key, share, backup string) error {
+func (d *Docker) Restore(ctx context.Context, key, share, backup string, dek []byte) error {
 	if err := checkNames(share, key, backup); err != nil {
 		return err
 	}
@@ -481,9 +494,39 @@ func (d *Docker) Restore(ctx context.Context, key, share, backup string) error {
 		return fmt.Errorf("the backup's data is gone: %w", err)
 	}
 	defer f.Close()
+	var r io.Reader = f
+	if dek != nil {
+		if r, err = newOpeningReader(f, dek); err != nil {
+			return err
+		}
+	}
 	defer d.lock(key)()
-	return d.runner().Run(ctx, f, nil, "docker", "exec", "-i", d.container(key), "sh", "-c",
+	return d.runner().Run(ctx, r, nil, "docker", "exec", "-i", d.container(key), "sh", "-c",
 		`set -e; find "/export/data/$1" -mindepth 1 -delete; tar -C "/export/data/$1" --numeric-owner -xpf -; sync`, "sh", share)
+}
+
+// Replicate replaces to's share's files with a copy of from's, streamed
+// from one server to the other.
+func (d *Docker) Replicate(ctx context.Context, from, to, share string) error {
+	if err := checkNames(share, from, to); err != nil {
+		return err
+	}
+	pr, pw := io.Pipe()
+	errc := make(chan error, 1)
+	go func() {
+		err := d.runner().Run(ctx, nil, pw, "docker", "exec", d.container(from), "tar", "-C", "/export/data/"+share, "--numeric-owner", "-cf", "-", ".")
+		pw.CloseWithError(err)
+		errc <- err
+	}()
+	defer d.lock(to)()
+	err := d.runner().Run(ctx, pr, nil, "docker", "exec", "-i", d.container(to), "sh", "-c",
+		`set -e; mkdir -p "/export/data/$1.in"; find "/export/data/$1.in" -mindepth 1 -delete; tar -C "/export/data/$1.in" --numeric-owner -xpf -; `+
+			`find "/export/data/$1" -mindepth 1 -delete; (cd "/export/data/$1.in" && find . -mindepth 1 -maxdepth 1 -exec mv {} "/export/data/$1/" \;); rmdir "/export/data/$1.in"; sync`, "sh", share)
+	_ = pr.Close()
+	if serr := <-errc; err == nil {
+		err = serr
+	}
+	return err
 }
 
 // DeleteBackup deletes backup's tar.
@@ -589,12 +632,16 @@ NFSv4 {
   FSAL { Name = VFS; }
 `, i+1, sh.Name, sh.Name, protocols)
 		if len(sh.Exports) == 0 {
-			b.WriteString("  Access_Type = RW;\n  Squash = No_Root_Squash;\n")
+			access := "RW"
+			if spec.ReadOnly {
+				access = "RO"
+			}
+			b.WriteString("  Access_Type = " + access + ";\n  Squash = No_Root_Squash;\n")
 		} else {
 			b.WriteString("  Access_Type = None;\n")
 			for _, e := range sh.Exports {
 				access, squash := "RW", "No_Root_Squash"
-				if e.ReadOnly {
+				if e.ReadOnly || spec.ReadOnly {
 					access = "RO"
 				}
 				if e.RootSquash {

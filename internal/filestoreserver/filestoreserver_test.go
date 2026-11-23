@@ -1,6 +1,7 @@
 package filestoreserver
 
 import (
+	"io"
 	"strings"
 	"testing"
 
@@ -79,5 +80,44 @@ func TestRulesSendEachAddressOnToItsServer(t *testing.T) {
 		if ownCluster("cloudburrow-x", c) != want {
 			t.Errorf("ownCluster(%q) = %v", c, !want)
 		}
+	}
+}
+
+func TestEncryptedBackupsOpenOnlyWithTheirKeyAndWhole(t *testing.T) {
+	dek := make([]byte, 32)
+	dek[0] = 7
+	plain := strings.Repeat("filestore backup ", 9000) // more than two chunks
+	var buf strings.Builder
+	w, err := newSealingWriter(&buf, dek)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write([]byte(plain)); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	sealed := buf.String()
+	if strings.Contains(sealed, "filestore backup") {
+		t.Fatal("the backup is in the clear")
+	}
+	read := func(s string, key []byte) (string, error) {
+		r, err := newOpeningReader(strings.NewReader(s), key)
+		if err != nil {
+			return "", err
+		}
+		b, err := io.ReadAll(r)
+		return string(b), err
+	}
+	if got, err := read(sealed, dek); err != nil || got != plain {
+		t.Fatalf("round trip: %v (%d bytes)", err, len(got))
+	}
+	other := make([]byte, 32)
+	if _, err := read(sealed, other); err == nil {
+		t.Fatal("another key opened the backup")
+	}
+	if _, err := read(sealed[:len(sealed)-chunkSize/2], dek); err == nil {
+		t.Fatal("a cut backup opened")
 	}
 }

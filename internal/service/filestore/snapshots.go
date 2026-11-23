@@ -29,9 +29,11 @@ func (s *Server) CreateSnapshot(_ context.Context, req *filestorepb.CreateSnapsh
 	if err := checkLabels(sn.GetLabels()); err != nil {
 		return nil, err
 	}
-	if len(sn.GetTags()) > 0 {
-		return nil, apierror.Unimplemented("Tags on Filestore snapshots are not supported by CloudBurrow yet (#2192)")
+	if err := s.checkTags(req.GetParent()+"/snapshots/"+req.GetSnapshotId(), sn.GetTags()); err != nil {
+		return nil, err
 	}
+	tags := sn.GetTags()
+	sn.Tags = nil
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	r, err := s.instanceLocked(req.GetParent())
@@ -80,6 +82,7 @@ func (s *Server) CreateSnapshot(_ context.Context, req *filestorepb.CreateSnapsh
 			return nil
 		}
 		rec.S.State, rec.S.FilesystemUsedBytes = filestorepb.Snapshot_READY, used
+		s.bindTags(name, tags)
 		return proto.Clone(rec.S)
 	}), nil
 }
@@ -192,6 +195,7 @@ func (s *Server) DeleteSnapshot(_ context.Context, req *filestorepb.DeleteSnapsh
 			return nil
 		}
 		delete(s.snapshots, r.S.GetName())
+		s.unbindTags(r.S.GetName())
 		return nil
 	}), nil
 }

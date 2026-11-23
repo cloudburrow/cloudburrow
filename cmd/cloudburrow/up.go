@@ -602,6 +602,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if memorystoreAdminSvc != nil {
 		memorystoreAdminSvc.registry = func() *resourcemanager.Registry { return projectRegistry }
 	}
+	if filestoreSvc != nil {
+		// Filestore's tags are Resource Manager's tag bindings (#2192).
+		filestoreSvc.registry = func() *resourcemanager.Registry { return projectRegistry }
+	}
 	if secretsSvc != nil {
 		// Secret.tags are Resource Manager's tag bindings (#1961).
 		secretsSvc.registry = func() *resourcemanager.Registry { return projectRegistry }
@@ -914,6 +918,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		parameterManagerSvc.keys = cmekKeys(kmsSvc, iamEnforcer)
 		parameterManagerSvc.interpose = append(parameterManagerSvc.interpose, iamEnforcer.Interceptor(iameval.ParameterManager))
 		parameterManagerSvc.wrapJSON = jsonEnforcer(iamEnforcer, iameval.ParameterManager, parametermanager.Mixins())
+	}
+	// Filestore's customer-managed keys (#2192).
+	if filestoreSvc != nil {
+		keys := cmekKeys(kmsSvc, iamEnforcer)
+		filestoreSvc.keys = &keys
 	}
 	// Dataform repositories' customer-managed keys (#2105).
 	if dataformSvc != nil {

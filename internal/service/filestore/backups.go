@@ -12,11 +12,12 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/aipfilter"
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/cmek"
 )
 
 // CreateBackup copies an instance's share out as a regional backup, kept
 // after the instance is deleted.
-func (s *Server) CreateBackup(_ context.Context, req *filestorepb.CreateBackupRequest) (*longrunningpb.Operation, error) {
+func (s *Server) CreateBackup(ctx context.Context, req *filestorepb.CreateBackupRequest) (*longrunningpb.Operation, error) {
 	m, err := checkParent(req.GetParent())
 	if err != nil {
 		return nil, err
@@ -34,11 +35,15 @@ func (s *Server) CreateBackup(_ context.Context, req *filestorepb.CreateBackupRe
 	if err := checkLabels(bk.GetLabels()); err != nil {
 		return nil, err
 	}
-	if len(bk.GetTags()) > 0 {
-		return nil, apierror.Unimplemented("Tags on Filestore backups are not supported by CloudBurrow yet (#2192)")
+	if err := s.checkTags(req.GetParent()+"/backups/"+req.GetBackupId(), bk.GetTags()); err != nil {
+		return nil, err
 	}
-	if bk.GetKmsKey() != "" {
-		return nil, apierror.InvalidArgument("kms_key is output only")
+	tags := bk.GetTags()
+	bk.Tags = nil
+	if k := bk.GetKmsKey(); k != "" {
+		if err := s.checkKey(ctx, "kms_key", k, m[1], m[2]); err != nil {
+			return nil, err
+		}
 	}
 	if err := s.noBackend(); err != nil {
 		return nil, err
@@ -54,6 +59,9 @@ func (s *Server) CreateBackup(_ context.Context, req *filestorepb.CreateBackupRe
 	}
 	if strings.Split(bk.GetSourceInstance(), "/")[1] != m[1] {
 		return nil, apierror.InvalidArgument("The source instance must be in the backup's project")
+	}
+	if bk.GetKmsKey() != "" && tiers[r.I.GetTier()].basic {
+		return nil, apierror.InvalidArgument("Customer-managed encryption keys are not supported for backups of tier %s instances", tierName(r.I.GetTier()))
 	}
 	fs := r.I.GetFileShares()[0]
 	if fs.GetName() != bk.GetSourceFileShare() {
@@ -84,8 +92,17 @@ func (s *Server) CreateBackup(_ context.Context, req *filestorepb.CreateBackupRe
 	// the instance shows the backup's operation.
 	s.busy[r.I.GetName()] = "backup " + name
 	instName := r.I.GetName()
+	kmsKey := bk.GetKmsKey()
+	var sealed *cmek.Sealed
 	return s.startOpLocked(req.GetParent(), name, "create", func(ctx context.Context) error {
-		n, err := b.Backup(ctx, key, share, backupKey)
+		var dek []byte
+		if kmsKey != "" {
+			var err error
+			if dek, sealed, err = s.sealKey(ctx, m[1], kmsKey, name); err != nil {
+				return err
+			}
+		}
+		n, err := b.Backup(ctx, key, share, backupKey, dek)
 		size = n
 		return err
 	}, func(err error) proto.Message {
@@ -94,6 +111,8 @@ func (s *Server) CreateBackup(_ context.Context, req *filestorepb.CreateBackupRe
 			delete(s.backups, name)
 			return nil
 		}
+		rec.Sealed = sealed
+		s.bindTags(name, tags)
 		rec.B.State, rec.B.StorageBytes, rec.B.DownloadBytes = filestorepb.Backup_READY, size, size
 		return proto.Clone(rec.B)
 	}), nil
@@ -213,6 +232,7 @@ func (s *Server) DeleteBackup(_ context.Context, req *filestorepb.DeleteBackupRe
 			return nil
 		}
 		delete(s.backups, r.B.GetName())
+		s.unbindTags(r.B.GetName())
 		return nil
 	}), nil
 }

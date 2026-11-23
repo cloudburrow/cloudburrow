@@ -60,6 +60,8 @@ import (
 	longrunningpb "cloud.google.com/go/longrunning/autogen/longrunningpb"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/cloudburrow/cloudburrow/internal/cmek"
 )
 
 // Share is one file share as the backend serves it.
@@ -85,6 +87,8 @@ type Spec struct {
 	// Address is the instance's address on its VPC network, in its
 	// reserved range, which the backend makes reach the server.
 	Address string
+	// ReadOnly serves every share read-only: a replica's.
+	ReadOnly bool
 	// NFSv41 serves NFSv4.1 (and NFSv3); otherwise NFSv3 alone.
 	NFSv41 bool
 	Shares []Share
@@ -106,10 +110,14 @@ type Backend interface {
 	DeleteSnapshot(ctx context.Context, key, share, snap string) error
 	// Revert replaces the share's files with snapshot snap's.
 	Revert(ctx context.Context, key, share, snap string) error
-	// Backup copies the share's files out as backup and answers its size.
-	Backup(ctx context.Context, key, share, backup string) (int64, error)
-	// Restore replaces the share's files with backup's.
-	Restore(ctx context.Context, key, share, backup string) error
+	// Backup copies the share's files out as backup and answers its size:
+	// encrypted with dek (AES-256-GCM) when it is not nil.
+	Backup(ctx context.Context, key, share, backup string, dek []byte) (int64, error)
+	// Restore replaces the share's files with backup's, decrypted with
+	// dek when it is not nil.
+	Restore(ctx context.Context, key, share, backup string, dek []byte) error
+	// Replicate replaces to's share's files with a copy of from's.
+	Replicate(ctx context.Context, from, to, share string) error
 	// DeleteBackup deletes backup's data.
 	DeleteBackup(ctx context.Context, backup string) error
 }
@@ -123,6 +131,13 @@ type Options struct {
 	Now func() time.Time
 	// Networks checks an instance's network; nil checks nothing.
 	Networks func() Networks
+	// Keys are the customer-managed keys (Cloud KMS); nil refuses them.
+	Keys *cmek.Keys
+	// Tags binds tags through Resource Manager; nil refuses them.
+	Tags func() TagBinder
+	// KeyCheckEvery is how often the instances' keys are checked (30s
+	// when zero); ReplicationEvery how often replicas are synced (30s).
+	KeyCheckEvery, ReplicationEvery time.Duration
 }
 
 // Networks are the Compute Engine VPC networks (#1936) an instance's
@@ -180,6 +195,9 @@ type snapRecord struct {
 type backupRecord struct {
 	B   *filestorepb.Backup
 	Key string
+	// Sealed is the data key of a backup with kms_key, as Cloud KMS
+	// wrapped it.
+	Sealed *cmek.Sealed
 }
 
 type opRecord struct {
@@ -199,7 +217,35 @@ func NewServer(state string, opts Options) (*Server, error) {
 			return nil, err
 		}
 	}
+	s.work.Add(1)
+	go s.maintain()
 	return s, nil
+}
+
+// maintain checks the instances' keys and syncs their replicas until
+// Close.
+func (s *Server) maintain() {
+	defer s.work.Done()
+	every := func(d time.Duration) time.Duration {
+		if d <= 0 {
+			return 30 * time.Second
+		}
+		return d
+	}
+	keys := time.NewTicker(every(s.opts.KeyCheckEvery))
+	defer keys.Stop()
+	repl := time.NewTicker(every(s.opts.ReplicationEvery))
+	defer repl.Stop()
+	for {
+		select {
+		case <-s.bg.Done():
+			return
+		case <-keys.C:
+			s.checkKeys(s.bg)
+		case <-repl.C:
+			s.replicate(s.bg)
+		}
+	}
 }
 
 func (s *Server) now() time.Time {
@@ -226,7 +272,11 @@ func (s *Server) Resume(ctx context.Context) {
 	s.mu.Unlock()
 	for _, r := range recs {
 		s.mu.Lock()
-		spec, key, ip := r.spec(), r.Key, r.IP
+		spec, key, ip, suspended := r.spec(), r.Key, r.IP, r.I.GetState() == filestorepb.Instance_SUSPENDED
+		if suspended {
+			// Its key is checked again by checkKeys.
+			spec.Shares = nil
+		}
 		s.mu.Unlock()
 		got, err := s.opts.Backend.Ensure(ctx, key, ip, spec)
 		s.mu.Lock()
@@ -235,7 +285,9 @@ func (s *Server) Resume(ctx context.Context) {
 		} else {
 			r.IP = got
 			r.setIP()
-			r.I.State, r.I.StatusMessage = filestorepb.Instance_READY, ""
+			if !suspended {
+				r.I.State, r.I.StatusMessage = filestorepb.Instance_READY, ""
+			}
 		}
 		_ = s.saveLocked()
 		s.mu.Unlock()
@@ -272,6 +324,7 @@ type stateSnap struct {
 type stateBackup struct {
 	Backup json.RawMessage `json:"backup"`
 	Key    string          `json:"key"`
+	Sealed *cmek.Sealed    `json:"sealed,omitempty"`
 }
 
 func (s *Server) load() error {
@@ -305,7 +358,7 @@ func (s *Server) load() error {
 		if err := protojson.Unmarshal(x.Backup, bk); err != nil {
 			return fmt.Errorf("filestore: parse state %s: %w", s.state, err)
 		}
-		s.backups[bk.GetName()] = &backupRecord{B: bk, Key: x.Key}
+		s.backups[bk.GetName()] = &backupRecord{B: bk, Key: x.Key, Sealed: x.Sealed}
 	}
 	return nil
 }
@@ -337,7 +390,7 @@ func (s *Server) saveLocked() error {
 		if err != nil {
 			return err
 		}
-		f.Backups = append(f.Backups, stateBackup{Backup: b, Key: r.Key})
+		f.Backups = append(f.Backups, stateBackup{Backup: b, Key: r.Key, Sealed: r.Sealed})
 	}
 	b, err := json.MarshalIndent(f, "", " ")
 	if err != nil {
@@ -416,6 +469,7 @@ func (r *instRecord) spec() Spec { return r.specFor(r.I) }
 func (r *instRecord) specFor(in *filestorepb.Instance) Spec {
 	spec := specOf(in)
 	spec.Address = r.Addr
+	spec.ReadOnly = isStandby(in)
 	return spec
 }
 
