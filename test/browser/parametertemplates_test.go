@@ -73,10 +73,20 @@ func TestParameterTemplatesThroughThePage(t *testing.T) {
 	var versionPath string
 	p.eval(`location.pathname + location.search`, &versionPath)
 	p.waitFor(`document.querySelector("#view").textContent.includes("log: {{.level}}")`)
-	rows := p.pageAction("Render", map[string]string{"parameterVersion": param + "/versions/v1"}, "")
+	// Render is Google's Render template version page (#2143), which
+	// offers the template's location's parameter and its version, then the
+	// render's own page with its Rendered value tab.
+	p.clickText(p.findAction("Render"), "Render")
+	p.waitFor(`document.querySelector("#f-parameterVersion") !== null && document.querySelector("#f-parameterVersion").value !== ""`)
+	p.submitForm(map[string]string{}, "parameterVersion")
+	p.waitFor(`location.pathname.includes("/render/") && document.querySelector("#view").textContent.includes("Rendered value")`)
+	p.clickText("#view [role=tab]", "Rendered value")
+	var rows string
+	p.eval(`document.querySelector("#view").textContent`, &rows)
 	if !strings.Contains(rows, "log: debug") {
 		t.Errorf("Render answered %q; want the rendered value, log: debug", rows)
 	}
+	p.navigate(versionPath)
 	p.clickText(p.findAction("Disable"), "Disable")
 	p.waitFor(`document.querySelector(".modal.is-open form[data-confirm=confirm]") !== null`)
 	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))

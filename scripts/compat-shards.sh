@@ -109,7 +109,10 @@ COMPAT_LOCALAI_TEST_NAMES="
   BigQueryConnectionGroupMembers1812 BigQueryMLAnnotateImage
   BigQueryMLAnnotateImageDetections BigQueryMLAnnotateImageLabels
   BigQueryMLImportedONNXModel BigQueryMLImportedONNXModelOverImages
-  BigQueryMLProcessDocument
+  BigQueryMLProcessDocument BigQueryMLProcessDocumentLongPDF
+  BigQueryMLTranscribeLongAndAMR
+  DocumentAIFormParserAndExtractors DocumentAILayoutParserOffice
+  SpeechFeatureMatrix2127 SpeechV1Channels2131
   BigQueryMLTensorFlowImportGenerated BigQueryMLTensorFlowKeras BigQueryMLTensorFlowRuntime
   BigQueryMLRemoteConnectionPermissions BigQueryMLRemoteDefaultConnection
   BigQueryMLRemoteGenerateEmbedding BigQueryMLRemoteGenerateText
@@ -174,9 +177,25 @@ COMPAT_LOCALAI_TEST_NAMES="
   StreamingPredictOnTheEmbeddingModel StreamingPredictOnTheGenerationModel
   V1Beta1PredictionClientServesWhatV1Serves"
 COMPAT_LOCALAI_TESTS="^Test($(echo "$COMPAT_LOCALAI_TEST_NAMES" | tr -s ' \n' '||' | sed 's/^|//; s/|$//'))\$"
+# A thirteenth, localaispeech, is the localai shard's instance again for
+# the local AI tests that transcribe with whisper.cpp
+# (COMPAT_LOCALAI_SPEECH_TESTS: Speech-to-Text's and BigQuery's
+# ML.TRANSCRIBE), which the localai shard skips: the localai suite took
+# 6,765 s of its 120m in main run 45047408927, 3,360 s of them these
+# tests', before Landing 167's six new local AI tests (#1799, #2127,
+# #2131), which had run in no shard.
+COMPAT_LOCALAI_SPEECH_TESTS="^Test($(echo "$COMPAT_LOCALAI_TEST_NAMES" | tr -s ' ' '\n' | grep -E '^(Speech|BigQueryMLTranscribe)' | paste -sd'|' -))\$"
+
+# The Kubernetes Engine API's tests (COMPAT_GKE_TESTS), which make kind
+# clusters beside the instance's: the gke shard, the served shard's
+# instance again, runs them, and the served shard skips them. The served
+# suite passed its 60m in main runs 45023269046 and 45047408927 (no test
+# hung: TestTerraformKMS had run 23 s and TestKMSDiagnoseCarriesNoKeyMaterial
+# 3 s), the Kubernetes Engine tests 2,440 s and then 2,828 s of it.
+COMPAT_GKE_TESTS='^Test(GKE[A-Za-z0-9_]*|GcloudContainer[A-Za-z0-9_]*|TerraformContainerClusterAndNodePool)$'
 
 # The shards, in the order ci.yml's matrix lists them.
-COMPAT_SHARDS="storage served run crossservice scale emulators memorystore sql sqlreplicas acceptance iam localai"
+COMPAT_SHARDS="storage served gke run crossservice scale emulators memorystore sql sqlreplicas acceptance iam localai localaispeech"
 
 # The crossservice shard's tests (COMPAT_CROSSSERVICE_TESTS), which the run shard skips:
 # Eventarc's, whose triggers route events from Cloud Storage, Pub/Sub,
@@ -379,7 +398,7 @@ compat_shard() {
       SETUP_TESTS="TestSecretManagerRestartSetup TestTasksRestartSetup TestSchedulerRestartSetup TestStorageAcrossRestart"
       PROBE_TESTS="TestSecretManagerAcrossRestart TestTasksAcrossRestart TestSchedulerAcrossRestart TestStorageAcrossRestart"
       PROBE_VARS=SECRETS,TASKS,SCHEDULER,STORAGE ;;
-    served)
+    served|gke)
       # Cloud Trace (#2118), beside the Cloud Logging its spans' log
       # entries are correlated with.
       SERVICES=kms,logging,privateca,gke,monitoring,compute,trace
@@ -400,11 +419,18 @@ compat_shard() {
       # Cloud KMS Autokey's folder and project tests (#1568) make their
       # folder with it too.
       TEST_VARS+=,KMS,LOGGING,LOGGING_RESOURCEMANAGER,PRIVATECA,GKE,GKE_SERVICEUSAGE,MONITORING,COMPUTE,TRACE
-      # Cloud KMS (#418): a key with ENABLED, DISABLED and
-      # DESTROY_SCHEDULED versions and a ciphertext.
-      SETUP_TESTS="TestKMSRestartSetup"
-      PROBE_TESTS="TestKMSAcrossRestart"
-      PROBE_VARS=KMS ;;
+      if [ "$1" = gke ]; then
+        # The served shard's instance again, for the Kubernetes Engine
+        # tests alone (COMPAT_GKE_TESTS).
+        COMPAT_RUN=$COMPAT_GKE_TESTS
+      else
+        COMPAT_SKIP=$COMPAT_GKE_TESTS
+        # Cloud KMS (#418): a key with ENABLED, DISABLED and
+        # DESTROY_SCHEDULED versions and a ciphertext.
+        SETUP_TESTS="TestKMSRestartSetup"
+        PROBE_TESTS="TestKMSAcrossRestart"
+        PROBE_VARS=KMS
+      fi ;;
     run|crossservice)
       # tasks too: TestAPodReachesTheCLIHostedServices (#575) needs Secret
       # Manager and Tasks served to pods, which only Run's cluster has.
@@ -554,7 +580,7 @@ compat_shard() {
       export CLOUDBURROW_TEST_SPARK=1
       COMPAT_RUN='^Test(BigQuerySpark|BqSpark)'
       COMPAT_TIMEOUT=150m ;;
-    localai)
+    localai|localaispeech)
       # The local AI tests (#1985): BigQuery and Cloud Storage for the AI
       # and ML functions' tables and object tables, Resource Manager (every
       # instance serves it) for the roles they grant the connection's
@@ -568,6 +594,9 @@ compat_shard() {
       # images.
       export CLOUDBURROW_TEST_ONNX=1 CLOUDBURROW_TEST_VISION_LABELS=1 CLOUDBURROW_TEST_VISION_DETECT=1
       COMPAT_RUN=$COMPAT_LOCALAI_TESTS
+      # The transcription tests run in localaispeech, on the same
+      # instance (COMPAT_LOCALAI_SPEECH_TESTS).
+      if [ "$1" = localaispeech ]; then COMPAT_RUN=$COMPAT_LOCALAI_SPEECH_TESTS; else COMPAT_SKIP=$COMPAT_LOCALAI_SPEECH_TESTS; fi
       # 1,327 s of tests on an 8-CPU Docker Desktop VM with an Apple M-series
       # host (2026-11-20), generation and whisper.cpp on the CPU: the
       # runner's four vCPUs are slower, so twice the other shards' 60m.
@@ -687,7 +716,7 @@ compat_shard() {
   # bq's (#696) run in the emulators shard, with BigQuery, and gcloud sql's
   # in the sql shard.
   case "$1" in
-    storage|served|run|crossservice|scale|emulators|memorystore|sql|sqlreplicas) TEST_VARS+=,GCLOUD ;;
+    storage|served|gke|run|crossservice|scale|emulators|memorystore|sql|sqlreplicas) TEST_VARS+=,GCLOUD ;;
   esac
 }
 

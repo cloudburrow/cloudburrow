@@ -102,7 +102,9 @@ func TestSpeechBatchTranscriptionThroughThePage(t *testing.T) {
 	q := "?project=" + project
 	rid := fmt.Sprintf("browser-batch-%d", time.Now().UnixNano()%1e6)
 	op, err := c.CreateRecognizer(ctx, &speechpb.CreateRecognizerRequest{Parent: "projects/" + project + "/locations/global",
-		RecognizerId: rid, Recognizer: &speechpb.Recognizer{DefaultRecognitionConfig: &speechpb.RecognitionConfig{Model: "chirp_3",
+		// long: the supported languages table offers chirp_3 in us and eu
+		// only (#2127), and the page transcribes in global.
+		RecognizerId: rid, Recognizer: &speechpb.Recognizer{DefaultRecognitionConfig: &speechpb.RecognitionConfig{Model: "long",
 			LanguageCodes: []string{"en-US"}, DecodingConfig: &speechpb.RecognitionConfig_AutoDecodingConfig{AutoDecodingConfig: &speechpb.AutoDetectDecodingConfig{}}}}})
 	if err != nil {
 		t.Fatal(err)

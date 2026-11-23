@@ -333,7 +333,11 @@ func TestCloudSQLCascadingAndCrossRegionReplicas(t *testing.T) {
 			}
 			r1 := createSQLInstance(t, svc, project, &sqladmin.DatabaseInstance{Name: short + "-cr1-" + suffix,
 				MasterInstanceName: p.Name, InstanceType: "READ_REPLICA_INSTANCE", Region: "us-east1"})
-			if r1.Region != "us-east1" || r1.GceZone != "us-east1-a" || r1.ConnectionName != project+":us-east1:"+r1.Name {
+			// us-east1's zones are b, c and d (Compute Engine's regions and
+			// zones; it has no us-east1-a), and Cloud SQL picks one when no
+			// locationPreference names it.
+			if r1.Region != "us-east1" || !map[string]bool{"us-east1-b": true, "us-east1-c": true, "us-east1-d": true}[r1.GceZone] ||
+				r1.ConnectionName != project+":us-east1:"+r1.Name {
 				t.Errorf("cross-region replica: region %s zone %s connection %s", r1.Region, r1.GceZone, r1.ConnectionName)
 			}
 			r2 := createSQLInstance(t, svc, project, &sqladmin.DatabaseInstance{Name: short + "-cr2-" + suffix,

@@ -14,7 +14,6 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -26,8 +25,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/go-sql-driver/mysql"
 )
 
 // OnPremises is a source representation instance's onPremisesConfiguration.
@@ -444,13 +441,7 @@ func verifyExternalSync(ctx context.Context, spec Spec, addr string, started boo
 	if !spec.MySQL() {
 		return verifyPostgresSync(ctx, spec, addr, offline)
 	}
-	cfg := mysql.NewConfig()
-	cfg.User, cfg.Passwd, cfg.Net = ext.User, ext.Password, "tcp"
-	cfg.Addr = addr
-	cfg.Timeout = 10 * time.Second
-	cfg.AllowNativePasswords = true
-	cfg.TLSConfig = "preferred"
-	db, err := sql.Open("mysql", cfg.FormatDSN())
+	db, err := openSourceMySQL(ext.User, ext.Password, addr)
 	if err != nil {
 		return append(errs, syncError("CONNECTION_FAILURE", err.Error()))
 	}
@@ -461,7 +452,7 @@ func verifyExternalSync(ctx context.Context, spec Spec, addr string, started boo
 	var logBin, serverID int
 	if err := db.QueryRowContext(ctx, "SELECT @@GLOBAL.version, @@GLOBAL.gtid_mode, @@GLOBAL.binlog_format, @@GLOBAL.log_bin, @@GLOBAL.server_id").
 		Scan(&version, &gtid, &format, &logBin, &serverID); err != nil {
-		return append(errs, syncError("CONNECTION_FAILURE", fmt.Sprintf("connect to %s as %s: %v", cfg.Addr, ext.User, err)))
+		return append(errs, syncError("CONNECTION_FAILURE", fmt.Sprintf("connect to %s as %s: %v", addr, ext.User, err)))
 	}
 	if want := strings.ReplaceAll(strings.TrimPrefix(spec.DatabaseVersion, "MYSQL_"), "_", "."); !strings.HasPrefix(version, want+".") && version != want {
 		errs = append(errs, syncError("INCOMPATIBLE_DATABASE_VERSION",

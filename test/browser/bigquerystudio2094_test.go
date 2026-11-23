@@ -17,8 +17,11 @@ import (
 	"github.com/chromedp/chromedp/kb"
 )
 
-// TestBigQueryStudioDataCanvasNodesThroughThePage (#2094, 2026-11-22
-// round), with BigQuery served: the data canvas's Destination node (Save
+// TestDataformBigQueryStudioDataCanvasNodesThroughThePage (#2094, 2026-11-22
+// round), with BigQuery and Dataform served (a data canvas is a Dataform
+// code asset: without Dataform, Studio's Home draws Data canvas disabled,
+// so the test is named for the run shard's browser step, the one instance
+// that serves both): the data canvas's Destination node (Save
 // to table into a new dataset, read back through the API, the SQL toggle
 // following a re-run, Detach into a table node), its Insights node (the
 // whole result's statistics), Visualization's Auto-Chart, Pie and Heat map,
@@ -26,8 +29,9 @@ import (
 // question, answered by the local model or with its reason) and Clear
 // canvas; and the Map's Natural Earth base map. WCAG 2.1 AA for the canvas
 // and the open assistant, and the canvas's controls reached by keyboard.
-func TestBigQueryStudioDataCanvasNodesThroughThePage(t *testing.T) {
+func TestDataformBigQueryStudioDataCanvasNodesThroughThePage(t *testing.T) {
 	needService(t, "bigquery")
+	needService(t, "dataform")
 	project := servedProject(t)
 	q := "?project=" + url.QueryEscape(project)
 	stamp := uniqueSuffix()

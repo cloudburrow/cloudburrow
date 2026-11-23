@@ -206,6 +206,22 @@ other shard serves together. Until #2088 it was called `cross`, which was also t
 cross-compile job (`make cross`, checks `cross (<target>)`). `test/repo`'s
 `TestCompatShardsAreNotNamedAsOtherJobs` now fails if a shard is named like another ci.yml job.
 
+### The gke shard
+
+The compat job's `gke` shard runs on the `served` shard's instance again. It runs only
+`COMPAT_GKE_TESTS` from `scripts/compat-shards.sh`, the Kubernetes Engine API's tests (through the
+client, gcloud and Terraform), which make kind clusters beside the instance's; the `served` shard
+skips them. Together they passed the served suite's 60-minute deadline in main runs 45023269046
+and 45047408927: no test hung, and the Kubernetes Engine tests took 2,828 s of it.
+
+### The localaispeech shard
+
+The compat job's `localaispeech` shard runs on the `localai` shard's instance again (the same
+`make build-onnx` CLI, models and LiteRT-LM image, which only `localai` saves to the caches). It
+runs only `COMPAT_LOCALAI_SPEECH_TESTS`, the local AI tests that transcribe with whisper.cpp
+(Speech-to-Text's and BigQuery's `ML.TRANSCRIBE`), which the `localai` shard skips: they took 3,360 s
+of its 6,765 s suite in main run 45047408927, before Landing 167's six new local AI tests.
+
 ### The local AI shard
 
 The compat job's `localai` shard (#1985) runs the compat tests that need the local generation or

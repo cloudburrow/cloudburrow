@@ -562,14 +562,14 @@ jobs:
     # The localai shard (#1985) builds the LiteRT-LM image from source when
     # its cache misses, a Bazel build of tens of minutes on the runner's four
     # vCPUs, before a suite of up to 120 minutes (COMPAT_TIMEOUT).
-    timeout-minutes: ${{ matrix.shard == 'localai' && 180 || 90 }}
+    timeout-minutes: ${{ (matrix.shard == 'localai' || matrix.shard == 'localaispeech') && 180 || 90 }}
     # Same rule as integration: the suite that caught #268 only after it merged.
     needs: [changes, bigquery-emulator]
     if: github.event_name != 'pull_request' || needs.changes.outputs.heavy == 'true' || contains(github.event.pull_request.labels.*.name, 'run-integration')
     strategy:
       fail-fast: false
       matrix:
-        shard: [storage, served, run, crossservice, scale, emulators, memorystore, sql, sqlreplicas, acceptance, iam, localai]
+        shard: [storage, served, gke, run, crossservice, scale, emulators, memorystore, sql, sqlreplicas, acceptance, iam, localai, localaispeech]
     env:
       SHARD: ${{ matrix.shard }}
       # Every make build here uses the emulator binaries the
@@ -588,12 +588,14 @@ jobs:
       # beside the instance to be sure of that, so the toolchains no step
       # of this job uses go first, and the job fails here, naming it, rather
       # than in a test as RESOURCE_EXHAUSTED.
+      # The gke shard runs the served shard's Kubernetes Engine tests on
+      # its instance again (scripts/compat-shards.sh, COMPAT_GKE_TESTS).
       # The localai shard (#1985) needs the room too: the LiteRT-LM image
       # and its build, the 2.6 GB generation model and the instance's 1.3 GB
       # of embedding, speech, OCR and vision models, each held twice while
       # its cache is packed or unpacked.
       - name: Free disk for the Kubernetes Engine API's clusters
-        if: matrix.shard == 'served' || matrix.shard == 'localai'
+        if: matrix.shard == 'served' || matrix.shard == 'gke' || matrix.shard == 'localai' || matrix.shard == 'localaispeech'
         run: |
           df -h /
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /usr/share/swift
@@ -628,7 +630,7 @@ jobs:
       # since 586.0.0 had no `gcloud alpha source-manager hooks`, which
       # TestGcloudSourceManagerHooks drives (#1927; main run 44645694075).
       - name: Install the Google Cloud CLI
-        if: matrix.shard == 'storage' || matrix.shard == 'served' || matrix.shard == 'run' || matrix.shard == 'crossservice' || matrix.shard == 'scale' || matrix.shard == 'emulators' || matrix.shard == 'memorystore' || matrix.shard == 'sql' || matrix.shard == 'sqlreplicas' || matrix.shard == 'iam'
+        if: matrix.shard == 'storage' || matrix.shard == 'served' || matrix.shard == 'gke' || matrix.shard == 'run' || matrix.shard == 'crossservice' || matrix.shard == 'scale' || matrix.shard == 'emulators' || matrix.shard == 'memorystore' || matrix.shard == 'sql' || matrix.shard == 'sqlreplicas' || matrix.shard == 'iam'
         run: |
           curl --retry 5 --retry-all-errors -fsSLo "$RUNNER_TEMP/gcloud.tar.gz" https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-593.0.0-linux-x86_64.tar.gz
           echo "42c32b7553c712f71fcf6f124546c0519437f53755f47f9bd0c957998cd6b826  $RUNNER_TEMP/gcloud.tar.gz" | sha256sum -c -
@@ -770,7 +772,8 @@ jobs:
           path: ${{ runner.temp }}/cb/cache/osv-scanner
           key: osv-scanner-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('internal/osvscan/pins.go') }}
 
-      # The local AI runtime for the localai shard (#1985). The LiteRT-LM
+      # The local AI runtime for the localai and localaispeech shards (#1985),
+      # saved by localai alone, so the two never race to save one key. The LiteRT-LM
       # image is built as `make litert-lm` builds it, from deploy/litert-lm
       # (Google's source at the pinned commit, a Bazel build), and cached as
       # a saved image keyed by that directory, so it is built again only when
@@ -778,13 +781,13 @@ jobs:
       # still keeps it.
       - name: Restore the LiteRT-LM image
         id: litert-cache
-        if: matrix.shard == 'localai'
+        if: (matrix.shard == 'localai' || matrix.shard == 'localaispeech')
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/litert-lm.tar
           key: litert-lm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('deploy/litert-lm/**') }}
       - name: Build or load the LiteRT-LM image
-        if: matrix.shard == 'localai'
+        if: (matrix.shard == 'localai' || matrix.shard == 'localaispeech')
         env:
           HIT: ${{ steps.litert-cache.outputs.cache-hit }}
         run: |
@@ -816,18 +819,18 @@ jobs:
       # the suite whatever its result.
       - name: Key the local AI model caches
         id: localai-keys
-        if: matrix.shard == 'localai'
+        if: (matrix.shard == 'localai' || matrix.shard == 'localaispeech')
         run: |
           echo "models=localai-models-$(jq -c '.components.localai | [.generationModel.repo, .generationModel.artifact, .generationModel.revision, .generationModel.sha256, .onnxRuntime.artifacts]' dependencies.json | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
       - name: Restore the generation model
         id: localai-models
-        if: matrix.shard == 'localai'
+        if: (matrix.shard == 'localai' || matrix.shard == 'localaispeech')
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/localai
           key: ${{ steps.localai-keys.outputs.models }}
       - name: Fetch and check the generation model and ONNX Runtime
-        if: matrix.shard == 'localai'
+        if: (matrix.shard == 'localai' || matrix.shard == 'localaispeech')
         run: scripts/localai-models.sh "$RUNNER_TEMP/localai" | tee -a "$GITHUB_ENV"
       - name: Save the generation model
         if: matrix.shard == 'localai' && steps.localai-models.outputs.cache-hit != 'true'
@@ -837,7 +840,7 @@ jobs:
           key: ${{ steps.localai-models.outputs.cache-primary-key }}
       - name: Restore the instance's local AI models
         id: instance-models
-        if: matrix.shard == 'localai'
+        if: (matrix.shard == 'localai' || matrix.shard == 'localaispeech')
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/cb/models
@@ -849,7 +852,7 @@ jobs:
           # binaries that `up` builds the storage image from (#514). The
           # localai shard's is the -tags onnx build (#1985), which loads
           # ONNX Runtime from ONNXRUNTIME_LIB, fetched above.
-          if [ "$SHARD" = localai ]; then
+          if [ "$SHARD" = localai ] || [ "$SHARD" = localaispeech ]; then
             make build-onnx
             cp bin/cloudburrow-onnx bin/cloudburrow
           else
@@ -1002,7 +1005,7 @@ jobs:
             grep -- '--- SKIP' compat.log || true
             # What the Kubernetes Engine clusters left (#1913): they are
             # deleted by name, so this should be what the instance began with.
-            if [ "$SHARD" = served ]; then df -h /; kind get clusters; fi
+            if [ "$SHARD" = served ] || [ "$SHARD" = gke ]; then df -h /; kind get clusters; fi
           fi
 
           # The official Node.js clients (#589), configured from `cloudburrow
@@ -1378,7 +1381,7 @@ jobs:
         run: |
           go test -tags=compat -list '.*' ./test/compat/ | grep '^Test' | sort > all.txt
           missing=
-          for shard in storage served run crossservice scale emulators memorystore sql sqlreplicas iam localai; do
+          for shard in storage served gke run crossservice scale emulators memorystore sql sqlreplicas iam localai localaispeech; do
             d=logs/compat-log-$shard
             [ -d "$d" ] || { echo "no logs from the $shard shard"; missing=1; continue; }
             # Top-level results only; a subtest's line is indented.
@@ -1412,7 +1415,12 @@ jobs:
           # CLOUDBURROW_TEST_HF_DEPLOY, for about 1.3 GB of models and 6 GB
           # of vLLM and TEI engine images: Model Garden's engines, not the
           # LiteRT-LM and ONNX runtime the localai shard starts, so #1985
-          # left them here; all run locally. TestCloudSQLServerInstance
+          # left them here; all run locally, as do its GGUF-on-the-cluster's
+          # siblings over the same gate, the ONNX, MLX and PyTorch Inference
+          # runtimes, whose pods install PyTorch or MLX (#2148). The Apple
+          # GPU (Metal) tests, Model Garden's GGUF and MLX deploys and
+          # generation on it (#2155, #2159), run only on macOS on Apple silicon,
+          # which no runner here is. TestCloudSQLServerInstance
           # starts SQL Server, whose licence only the end user accepts
           # (CLOUDBURROW_ACCEPT_MSSQL_EULA=Y): CI never accepts it for them,
           # so it skips in the sql shard and runs only locally. BigQuery's
@@ -1421,7 +1429,7 @@ jobs:
           # on an --internal Docker network: CLOUDBURROW_TEST_SPARK, run
           # nightly by nightly-sql-ephemeral.yml's spark job (the spark
           # shard of scripts/compat-shards.sh) and locally.
-          never='^Test(FunctionsFrameworkBuiltWithBuildpacks|FunctionsRebuildReusesLayers|FunctionsBuildBrokenModulePathFails|StorageSignedURLV2RegisteredCert|StorageVersioningPersistentMode|FunctionsSubmitBuildBuildpacks|FunctionsNodejsBuiltWithBuildpacks|FunctionsPythonBuiltWithBuildpacks|FunctionsJavaBuiltWithBuildpacks|FunctionsRubyBuiltWithBuildpacks|FunctionsPHPBuiltWithBuildpacks|FunctionsDotnetBuiltWithBuildpacks|FunctionsAPIBuildsAndServes|GcloudFunctions|TerraformCloudFunctions2Function|FunctionsEventTriggerBuilds|GcloudFunctionsEventTriggers|CloudBuildHostStepsOff|FunctionsV1BuildsAndServes|GcloudFunctionsV1|ConsoleFunctionsV1|TerraformCloudFunctionsFunction|FunctionsSecretsBuildsAndMounts|ModelGardenDeploysHuggingFaceModels|CloudSQLServerInstance|BigQuerySparkStoredProcedures|BqSparkStoredProcedure|BigQuerySparkProcedureRuntimesAndTypes|BigQuerySparkProcedureContainerImage|BigQuerySparkProcedureInvoker|BigQuerySparkProcedureStagingAndCMEK)$'
+          never='^Test(FunctionsFrameworkBuiltWithBuildpacks|FunctionsRebuildReusesLayers|FunctionsBuildBrokenModulePathFails|StorageSignedURLV2RegisteredCert|StorageVersioningPersistentMode|FunctionsSubmitBuildBuildpacks|FunctionsNodejsBuiltWithBuildpacks|FunctionsPythonBuiltWithBuildpacks|FunctionsJavaBuiltWithBuildpacks|FunctionsRubyBuiltWithBuildpacks|FunctionsPHPBuiltWithBuildpacks|FunctionsDotnetBuiltWithBuildpacks|FunctionsAPIBuildsAndServes|GcloudFunctions|TerraformCloudFunctions2Function|FunctionsEventTriggerBuilds|GcloudFunctionsEventTriggers|CloudBuildHostStepsOff|FunctionsV1BuildsAndServes|GcloudFunctionsV1|ConsoleFunctionsV1|TerraformCloudFunctionsFunction|FunctionsSecretsBuildsAndMounts|ModelGardenDeploysHuggingFaceModels|ModelGardenDeploysOnHuggingFacePyTorchInference|ModelGardenDeploysAnONNXModel|ModelGardenDeploysAnMLXModel|ModelGardenDeploysAGGUFModelOnTheAppleGPU|ModelGardenDeploysAnMLXModelOnTheAppleGPU|GenerateContentOnTheAppleGPU|CloudSQLServerInstance|BigQuerySparkStoredProcedures|BqSparkStoredProcedure|BigQuerySparkProcedureRuntimesAndTypes|BigQuerySparkProcedureContainerImage|BigQuerySparkProcedureInvoker|BigQuerySparkProcedureStagingAndCMEK)$'
           none=$(comm -23 all.txt ran.txt | grep -vE "$never" || true)
           if [ -n "$none" ]; then
             echo "tests that ran in no shard:"; echo "$none"; exit 1

@@ -50,8 +50,10 @@ func TestLogRouterFolderSinksThroughTheBrowser(t *testing.T) {
 	p.waitFor(fmt.Sprintf(`location.pathname === "/logs/sinks" && new URLSearchParams(location.search).get("parent") === %q`, folder))
 	p.waitFor(fmt.Sprintf(`document.querySelector("#scope-parent") !== null && document.querySelector("#scope-parent").value === %q`, folder))
 
-	p.waitFor(`[...document.querySelectorAll("#view .state button.primary")].some((b) => b.textContent === "Create sink")`)
-	p.clickText(`#view .state button.primary`, "Create sink")
+	// The header's Create sink: the folder has its _Default and _Required
+	// sinks (#2108), so the list is not the empty state's.
+	p.waitFor(`[...document.querySelectorAll("#view button.primary")].some((b) => b.textContent === "Create sink")`)
+	p.eval(`[...document.querySelectorAll("#view button.primary")].find((b) => b.textContent === "Create sink").click(), true`, nil)
 	p.run(chromedp.WaitVisible(chromedp.CSS(`form.create-page #f-destination`)))
 	p.waitFor(fmt.Sprintf(`new URLSearchParams(location.search).get("parent") === %q`, folder))
 	p.eval(fmt.Sprintf(`(() => { const q = (s) => document.querySelector("form.create-page " + s);

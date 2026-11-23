@@ -18,8 +18,9 @@ import (
 // TestConsoleCloudSQLDataAPIAndProjectBackups (#1462): the Cloud SQL
 // page's actions, each checked through the official client. On a created
 // PostgreSQL instance with the Data API allowed, Run SQL answers the rows
-// executeSql returns and Pre-check upgrade its findings; Delete with
-// final backup deletes it and leaves a FINAL backup, which Edit project
+// executeSql returns and Pre-check upgrade its findings; Delete, with
+// Google's Take a final backup checked (the Delete instance dialog's,
+// #2141), deletes it and leaves a FINAL backup, which Edit project
 // backup changes and Delete project backup deletes from the `postgres`
 // server's page; Restore project backup restores a backup by its name;
 // Truncate log is offered on MySQL.
@@ -88,10 +89,13 @@ func TestConsoleCloudSQLDataAPIAndProjectBackups(t *testing.T) {
 		return out
 	}
 	page := detail(name)
-	for _, id := range []string{"run-sql", "precheck-upgrade", "delete-final-backup"} {
+	for _, id := range []string{"run-sql", "precheck-upgrade", "delete-instance"} {
 		if !strings.Contains(page, `"id":"`+id+`"`) {
 			t.Fatalf("%s's page offers no %s: %.500s", name, id, page)
 		}
+	}
+	if !strings.Contains(page, `"name":"finalBackup"`) {
+		t.Fatalf("%s's Delete instance has no Take a final backup: %.500s", name, page)
 	}
 	out := act(name, "run-sql", map[string]string{"database": "postgres", "user": "consoleapi", "passwordSecretVersion": ver.Name,
 		"sql": "SELECT 'console-' || n AS v FROM generate_series(1, 2) AS n", "rowLimit": "10"})
@@ -108,7 +112,7 @@ func TestConsoleCloudSQLDataAPIAndProjectBackups(t *testing.T) {
 		act("mysql", "truncate-log", map[string]string{"logType": "MYSQL_SLOW_TABLE"})
 	}
 
-	act(name, "delete-final-backup", map[string]string{"description": "console-final-" + name, "ttlDays": "5"})
+	act(name, "delete-instance", map[string]string{"finalBackup": "true", "description": "console-final-" + name, "ttlDays": "5"})
 	deadline := time.Now().Add(5 * time.Minute)
 	for {
 		if _, err := svc.Instances.Get(project, name).Do(); err != nil {

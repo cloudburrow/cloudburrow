@@ -104,7 +104,9 @@ func TestSpeechNewTranscriptionIsGooglesThroughThePage(t *testing.T) {
 	if j := strings.Join(labels, "|"); !strings.Contains(j, "Recognizer") || !strings.Contains(j, "Spoken language") || !strings.Contains(j, "Model") {
 		t.Errorf("Transcription options: %q", labels)
 	}
-	p.eval(`(() => { const s = document.querySelector(".modal.is-open #f-model"); s.value = "chirp_3"; s.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`, nil)
+	// long, which the supported languages table offers in global for
+	// en-US; chirp_3 is us's and eu's only (#2127), refused here.
+	p.eval(`(() => { const s = document.querySelector(".modal.is-open #f-model"); s.value = "long"; s.dispatchEvent(new Event("change", { bubbles: true })); return s.value === "long"; })()`, nil)
 	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	if msg := p.modalRefusal(); !strings.Contains(msg, "not found") {
 		t.Errorf("a missing Cloud storage object said %q", msg)

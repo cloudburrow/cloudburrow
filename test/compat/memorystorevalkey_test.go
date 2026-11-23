@@ -301,8 +301,9 @@ func TestMemorystoreValkeyClusterDisabled(t *testing.T) {
 // covers: google.cloud.memorystore.v1.Memorystore/CreateInstance, google.cloud.memorystore.v1.Memorystore/GetCertificateAuthority
 //
 // TestMemorystoreValkeyRefusals (#1519): what an instance here cannot do is
-// refused, creating nothing: cross-instance replication in CLUSTER mode is
-// UNIMPLEMENTED with the reason, an unknown engine version INVALID_ARGUMENT; shard_count 0 in CLUSTER
+// refused, creating nothing: a SECONDARY with no primary_instance (served
+// in CLUSTER mode since #1577, so no longer UNIMPLEMENTED) and an unknown
+// engine version are INVALID_ARGUMENT; shard_count 0 in CLUSTER
 // mode, an engine config Memorystore does not take and a certificate
 // authority of an unknown instance are refused.
 func TestMemorystoreValkeyRefusals(t *testing.T) {
@@ -314,8 +315,11 @@ func TestMemorystoreValkeyRefusals(t *testing.T) {
 		in   *memorystorepb.Instance
 		want codes.Code
 	}{
-		{"cross-instance replication", &memorystorepb.Instance{ShardCount: 1, CrossInstanceReplicationConfig: &memorystorepb.CrossInstanceReplicationConfig{
-			InstanceRole: memorystorepb.CrossInstanceReplicationConfig_SECONDARY}}, codes.Unimplemented},
+		{"a secondary with no primary_instance", &memorystorepb.Instance{ShardCount: 1, CrossInstanceReplicationConfig: &memorystorepb.CrossInstanceReplicationConfig{
+			InstanceRole: memorystorepb.CrossInstanceReplicationConfig_SECONDARY}}, codes.InvalidArgument},
+		{"a secondary of no instance", &memorystorepb.Instance{ShardCount: 1, CrossInstanceReplicationConfig: &memorystorepb.CrossInstanceReplicationConfig{
+			InstanceRole:    memorystorepb.CrossInstanceReplicationConfig_SECONDARY,
+			PrimaryInstance: &memorystorepb.CrossInstanceReplicationConfig_RemoteInstance{Instance: parent + "/instances/compat-no-primary"}}}, codes.NotFound},
 		{"VALKEY_6_0", &memorystorepb.Instance{ShardCount: 1, EngineVersion: "VALKEY_6_0"}, codes.InvalidArgument},
 		{"0 shards", &memorystorepb.Instance{}, codes.InvalidArgument},
 		{"an unknown config", &memorystorepb.Instance{ShardCount: 1, EngineConfigs: map[string]string{"appendonly": "yes"}}, codes.InvalidArgument},

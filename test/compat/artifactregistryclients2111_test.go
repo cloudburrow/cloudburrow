@@ -100,10 +100,14 @@ func (o *ociRunner) has(bin string) bool {
 }
 
 // run runs bin with args, stdin, and the docker configuration home names
-// (each identity its own); it logs and returns the output.
+// (each identity its own); it logs and returns the output. The client runs
+// as the test's own user: run as the image's root, what it writes under
+// /work (crane's 0700 .docker) is root's on a Linux host, and the test's
+// TempDir cleanup cannot remove it (main run 45047408927).
 func (o *ociRunner) run(home, stdin, bin string, args ...string) (string, error) {
 	o.t.Helper()
-	a := []string{"run", "--rm", "-i", "--network", o.network, "-v", o.tools + ":/tools:ro", "-v", o.work + ":/work", "-w", "/work",
+	a := []string{"run", "--rm", "-i", "--user", fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()),
+		"--network", o.network, "-v", o.tools + ":/tools:ro", "-v", o.work + ":/work", "-w", "/work",
 		"-e", "HOME=/work/" + home, "-e", "DOCKER_CONFIG=/work/" + home + "/.docker", "-e", "COSIGN_PASSWORD=", "-e", "COSIGN_YES=true", "-e", "COSIGN_EXPERIMENTAL=1",
 		"--entrypoint", "/tools/" + bin}
 	for _, e := range o.env {
