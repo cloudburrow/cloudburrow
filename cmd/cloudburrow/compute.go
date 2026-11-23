@@ -45,11 +45,12 @@ type computeService struct {
 	// #2140), served on this port beside /compute/v1/, as its connectors
 	// live in the networks served here.
 	vpcAccess *vpcaccess.Server
-	// vms runs the VM instances (#1963); guestBase and metadataHost are
-	// set by up once the cluster host is known.
-	vms          *computeVMs
-	guestBase    func() string
-	metadataHost func() string
+	// vms runs the VM instances (#1963); guestBase is set by up once the
+	// cluster host is known, and tokens (the instance's credentials) mint
+	// a VM's service account tokens on its metadata server (#2177).
+	vms       *computeVMs
+	guestBase func() string
+	tokens    compute.GuestTokens
 	// opsAgentHosts are the in-cluster Cloud Logging and Cloud Monitoring
 	// addresses a VM's Ops Agent writes to (#2139, computeopsagent.go).
 	opsAgentHosts func() (logging, monitoring string)
@@ -123,12 +124,6 @@ func (s *computeService) Start(ctx context.Context) error {
 		}
 		return s.guestBase()
 	}
-	s.vms.metadataHost = func() string {
-		if s.metadataHost == nil {
-			return ""
-		}
-		return s.metadataHost()
-	}
 	s.vms.opsAgentHosts = s.telemetryHosts
 	api, err := compute.New(compute.Options{State: state, Extra: s.instanceGroupManagers, ExtraGroups: s.gkeGroups, NetworkUsers: s.networkUsers, VMs: s.vms,
 		ProjectOrganization: s.projectOrganization, ReadObject: imageObjectReader(func() string {
@@ -142,7 +137,7 @@ func (s *computeService) Start(ctx context.Context) error {
 				return ""
 			}
 			return s.guestReach(loopback)
-		}})
+		}, Tokens: s.tokens})
 	if err != nil {
 		return err
 	}

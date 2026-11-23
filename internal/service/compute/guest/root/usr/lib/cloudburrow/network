@@ -3,6 +3,14 @@
 # internal IP Compute Engine reserved for the guest in its subnet is on
 # vpc0, which cloudburrow-vpc.service keeps (#1968).
 set -u
+# The metadata server's addresses (#2177): 169.254.169.254 and, where the
+# guest has IPv6, fd20:ce::254, on lo, where metadata-server answers them.
+ip addr replace 169.254.169.254/32 dev lo
+if [ -e /proc/sys/net/ipv6/conf/lo/disable_ipv6 ]; then
+  echo 0 > /proc/sys/net/ipv6/conf/lo/disable_ipv6 2>/dev/null
+  ip -6 addr replace fd20:ce::254/128 dev lo nodad 2>/dev/null
+fi
+grep -q '[[:space:]]metadata\.google\.internal' /etc/hosts 2>/dev/null || echo '169.254.169.254 metadata.google.internal metadata' >> /etc/hosts
 {
   [ -n "${GCE_METADATA_HOST:-}" ] && echo "GCE_METADATA_HOST=${GCE_METADATA_HOST}"
   [ -n "${GOOGLE_CLOUD_PROJECT:-}" ] && echo "GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT}"

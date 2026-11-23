@@ -439,6 +439,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// the services that check their networks against it.
 	computeSvc := newComputeService(cfg)
 	if computeSvc != nil {
+		// A VM's metadata server mints its service account's tokens (#2177).
+		computeSvc.tokens = creds
 		computeSvc.gke = gkeSvc
 		if gkeSvc != nil {
 			gkeSvc.networks = computeSvc.gkeNetworks
@@ -1632,7 +1634,6 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			}
 			return ""
 		}
-		computeSvc.metadataHost = func() string { return hostComp.InCluster("metadata") }
 		computeSvc.opsAgentHosts = func() (string, string) {
 			return hostComp.InCluster("logging"), hostComp.InCluster("monitoring")
 		}

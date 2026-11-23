@@ -61,7 +61,7 @@ func TestGuestMetadataNetworkInterfacesAndTags(t *testing.T) {
 		{"web", "instance/tags", `["http-server","web"]`},
 		{"internal", "instance/tags", `[]`},
 		{"web", "instance/network-interfaces/", "0/\n"},
-		{"web", "instance/network-interfaces/0/", "access-configs/\nip\nmac\nnetwork\n"},
+		{"web", "instance/network-interfaces/0/", "access-configs/\ndns-servers\nforwarded-ips/\ngateway\nip\nip-aliases/\nmac\nmtu\nnetwork\nsubnetmask\ntarget-instance-ips/\n"},
 		{"web", "instance/network-interfaces/0/ip", str(nic, "networkIP")},
 		{"web", "instance/network-interfaces/0/mac", macOf(str(nic, "networkIP"))},
 		{"web", "instance/network-interfaces/0/network", "projects/" + number + "/networks/default"},

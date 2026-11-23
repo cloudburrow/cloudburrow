@@ -37,10 +37,9 @@ type computeVMs struct {
 	installer *components.Installer
 	bg        context.Context
 	// guestBase is the in-cluster URL of the Compute port, which the guest
-	// reads its metadata under; metadataHost the metadata server's
-	// in-cluster host:port (GCE_METADATA_HOST).
-	guestBase    func() string
-	metadataHost func() string
+	// reads its metadata under: the guest's metadata server relay carries
+	// metadata.google.internal and 169.254.169.254 there (#2177).
+	guestBase func() string
 	// opsAgentHosts are the Ops Agent's Logging and Monitoring addresses
 	// (#2139, computeopsagent.go); nil or "" when not served.
 	opsAgentHosts func() (logging, monitoring string)
@@ -229,15 +228,13 @@ func (b *computeVMs) podManifest(vm compute.VMSpec, ref string) string {
 			guest = base + compute.GuestPrefix + vm.GuestToken
 		}
 	}
-	meta := ""
-	if b.metadataHost != nil {
-		meta = b.metadataHost()
-	}
 	env := []any{
 		map[string]string{"name": "container", "value": "docker"},
 		map[string]string{"name": "CLOUDBURROW_GUEST_METADATA", "value": guest},
 		map[string]string{"name": "CLOUDBURROW_INTERNAL_IP", "value": vm.InternalIP},
-		map[string]string{"name": "GCE_METADATA_HOST", "value": meta},
+		// The metadata server's name on Compute Engine (#2177): the
+		// guest's relay answers it at 169.254.169.254.
+		map[string]string{"name": "GCE_METADATA_HOST", "value": "metadata.google.internal"},
 		map[string]string{"name": "GOOGLE_CLOUD_PROJECT", "value": vm.Project},
 	}
 	env = append(env, b.opsAgentEnv()...)
@@ -255,6 +252,10 @@ func (b *computeVMs) podManifest(vm compute.VMSpec, ref string) string {
 		"metadata": map[string]any{"name": vm.Key, "namespace": b.ns(), "labels": labels,
 			"annotations": map[string]string{"cloudburrow.dev/compute-instance": "projects/" + vm.Project + "/zones/" + vm.Zone + "/instances/" + vm.Name}},
 		"spec": map[string]any{"hostname": host, "restartPolicy": "Always", "terminationGracePeriodSeconds": 30,
+			// metadata.google.internal (and metadata, under the
+			// google.internal search domain) is the metadata server, as on
+			// Compute Engine (#2177).
+			"hostAliases": []any{map[string]any{"ip": "169.254.169.254", "hostnames": []string{"metadata.google.internal", "metadata"}}},
 			"automountServiceAccountToken": false, "enableServiceLinks": false,
 			"initContainers": []any{map[string]any{"name": "seed", "image": ref, "imagePullPolicy": "Never",
 				"command":      []string{"/bin/sh", "-c", seed},
