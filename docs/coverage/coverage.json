@@ -12992,7 +12992,7 @@
           "test/compat/logginganalyticsviews_test.go:191 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
           "test/compat/logginganalyticsviews_test.go:269 TestLoggingLinkedDatasetAcrossRestarts",
           "test/compat/orgpolicycustom1891_test.go:436 TestOrgPolicyEnforcementBigQueryDDL",
-          "test/compat/transcribe1799_test.go:32 TestBigQueryMLTranscribeLongAndAMR"
+          "test/compat/transcribe1799_test.go:34 TestBigQueryMLTranscribeLongAndAMR"
         ]
       },
       {

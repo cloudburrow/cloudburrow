@@ -20,9 +20,11 @@ import (
 // official cloud.google.com/go/bigquery, storage and
 // bigquery/connection/apiv1 clients, for the audio the first round
 // refused or did not run there: JFK's sample as AMR (narrowband) and
-// AMR-WB files answers his sentence; a 184-second MP3, over the 180
-// seconds CloudBurrow's MP3 decoder stopped at, is transcribed and billed
-// about 184 s (ML.TRANSCRIBE's documented limit is 30 minutes); a stereo MP3
+// AMR-WB files answers his sentence; an 81-second MP3, long audio as
+// Speech-to-Text counts it (over the 60 seconds a synchronous Recognize
+// takes), is transcribed whole and billed about 81 s (ML.TRANSCRIBE's
+// documented limit is 30 minutes; unit TestDecodeLongMP3AAC reads 216 s of
+// it, past the 180 seconds CloudBurrow's MP3 decoder stopped at); a stereo MP3
 // with SEPARATE_RECOGNITION_PER_CHANNEL is decoded per channel, billed for
 // both; and diarization_config is INVALID_ARGUMENT, as the chirp model
 // ML.TRANSCRIBE runs has no diarization in Speech-to-Text's supported
@@ -37,7 +39,12 @@ func TestBigQueryMLTranscribeLongAndAMR(t *testing.T) {
 	c, project := bigqueryClient(t, h)
 	cc, _ := remoteConnectionClient(t, h)
 	sc := storageClient(t, h)
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	// 20 minutes: the test took 666 s with a 184-second MP3 in main runs
+	// 45147981577 and 45171873407 (448 s of it that MP3), and ran out of
+	// its 15 minutes on a slower runner in 45202563361 (10m16s for the MP3
+	// alone). With the 81-second MP3 about 415 s, 570 s at that runner's
+	// pace.
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 	t.Cleanup(cancel)
 	read := func(path string) []byte {
 		b, err := os.ReadFile(path)
@@ -48,10 +55,11 @@ func TestBigQueryMLTranscribeLongAndAMR(t *testing.T) {
 	}
 	amr := read("../../internal/speech/testdata/jfk.amr")
 	awb := read("../../internal/speech/testdata/jfk.awb")
-	// MP3 frames concatenate: 170 copies of a 1.08-second tone without
-	// tags are one 184-second stream, just over the old 180 (whisper
-	// reads a tone slowly: 216 s took 5 minutes).
-	longMP3 := bytes.Repeat(read("../../internal/embedding/testdata/tone-notag-16k.mp3"), 170)
+	// MP3 frames concatenate: 75 copies of a 1.08-second tone without
+	// tags are one 81-second stream, over Speech-to-Text's 60 (whisper
+	// reads a tone slowly: 184 s took 7m28s on a runner, 10m16s on a slow
+	// one).
+	longMP3 := bytes.Repeat(read("../../internal/embedding/testdata/tone-notag-16k.mp3"), 75)
 	stereoMP3 := read("../../internal/embedding/testdata/tone-stereo-44k.mp3")
 
 	id := strings.ReplaceAll(h.Project(), "-", "_") + "_speech2"
@@ -130,9 +138,9 @@ func TestBigQueryMLTranscribeLongAndAMR(t *testing.T) {
 
 	start := time.Now()
 	rows = query("long", "")
-	t.Logf("184-second MP3 (recorded) in %v: %v", time.Since(start).Round(time.Second), rows)
-	if billed, _ := rows[0]["billed"].(int64); len(rows) != 1 || rows[0]["status"] != "" || billed < 182 || billed > 186 {
-		t.Errorf("184-second MP3 row: %v", rows)
+	t.Logf("81-second MP3 (recorded) in %v: %v", time.Since(start).Round(time.Second), rows)
+	if billed, _ := rows[0]["billed"].(int64); len(rows) != 1 || rows[0]["status"] != "" || billed < 79 || billed > 83 {
+		t.Errorf("81-second MP3 row: %v", rows)
 	}
 
 	rows = query("stereo", `, "features": {"multi_channel_mode": "SEPARATE_RECOGNITION_PER_CHANNEL"}`)

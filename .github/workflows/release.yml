@@ -89,7 +89,11 @@ jobs:
     name: verify before releasing
     needs: require-ci-green
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # make check runs the same make test-race as ci.yml's check job, so it gets
+    # that job's 75. It took 15 minutes for v0.5.0's run (2026-11-18) and ran
+    # past 30 for v0.6.0's (45266437647, cancelled with every test passing so
+    # far) once the race and WASM timeouts grew.
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
