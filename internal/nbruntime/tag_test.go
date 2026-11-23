@@ -30,7 +30,7 @@ func TestTagAndTar(t *testing.T) {
 		}
 		names = append(names, h.Name)
 	}
-	if strings.Join(names, ",") != "Dockerfile,kernel.py,relay.py" {
+	if strings.Join(names, ",") != "Dockerfile,kernel.py,relay.py,requirements.txt,build-requirements.txt" {
 		t.Fatalf("tar holds %v", names)
 	}
 }

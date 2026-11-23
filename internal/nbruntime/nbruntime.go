@@ -41,10 +41,10 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/hostrelay"
 )
 
-//go:embed image/Dockerfile image/kernel.py image/relay.py
+//go:embed image/Dockerfile image/kernel.py image/relay.py image/requirements.txt image/build-requirements.txt
 var context_ embed.FS
 
-var contextFiles = []string{"Dockerfile", "kernel.py", "relay.py"}
+var contextFiles = []string{"Dockerfile", "kernel.py", "relay.py", "requirements.txt", "build-requirements.txt"}
 
 // Tag is the runtime image's tag: its build context's hash, so a changed
 // Dockerfile or kernel is a new image, never a stale one.

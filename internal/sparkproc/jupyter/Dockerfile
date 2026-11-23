@@ -1,14 +1,17 @@
 # The Jupyter optional component of a Dataproc cluster (#2162), built by
 # the CLI on the cluster's own Spark image (the official apache/spark image
 # of its image version, pinned by digest), so a notebook's Python is the
-# executors'. JupyterLab and ipykernel (BSD-3-Clause), pinned, installed
-# here and never part of the CLI. Two kernels, as the Jupyter component
+# executors'. JupyterLab and ipykernel (BSD-3-Clause), installed here and
+# never part of the CLI, from the full hashed lock (requirements.txt):
+# every dependency pinned by SHA-256, nothing outside the lock installed
+# (--no-deps), nothing built (--only-binary). Two kernels, as the Jupyter component
 # page lists them: "Python 3" and "PySpark", whose `spark` and `sc` are a
 # session on the cluster's master.
 ARG BASE
 FROM ${BASE}
 USER root
-RUN pip3 install --no-cache-dir jupyterlab==3.6.8 ipykernel==6.29.5
+COPY requirements.txt /opt/cloudburrow/requirements.txt
+RUN pip3 install --no-cache-dir --require-hashes --no-deps --only-binary :all: -r /opt/cloudburrow/requirements.txt
 COPY pyspark-startup.py jupyter.sh /opt/cloudburrow/
 RUN set -e; py4j="$(ls /opt/spark/python/lib/py4j-*-src.zip | head -1)"; \
     mkdir -p /usr/local/share/jupyter/kernels/pyspark; \

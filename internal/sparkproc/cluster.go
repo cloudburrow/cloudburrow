@@ -188,7 +188,7 @@ func (d *Docker) StartCluster(ctx context.Context, spec ClusterSpec) (_ *Cluster
 		// event logs.
 		c.history = d.History
 	}
-	for _, name := range []string{"relay.py", "run.sh", "node.sh", "eco.sh", "hivenode.sh"} {
+	for _, name := range []string{"relay.py", "run.sh", "node.sh", "eco.sh", "hivenode.sh", "nodemanager.sh"} {
 		b, _ := assets.ReadFile("assets/" + name)
 		if err := os.WriteFile(filepath.Join(c.dir, name), b, 0o644); err != nil {
 			return nil, err
@@ -605,10 +605,20 @@ func (c *Cluster) Submit(ctx context.Context, job Job) (Result, error) {
 	if job.Kind == KindSparkR {
 		conf["spark.r.command"] = "Rscript"
 	}
+	master := "spark://" + c.nodeAlias(-1) + ":7077"
+	yarn := c.yarnEnabled()
+	if yarn {
+		master = "yarn"
+		c.yarnSparkConf(job, conf)
+	}
 	submit := submitArgs(job, args, token, conf)
-	submit[1] = "spark://" + c.nodeAlias(-1) + ":7077"
+	submit[1] = master
 	run := append(append([]string{"run", "--name", driver, "--label", c.label, "--label", "cloudburrow.dataproc.cluster=" + c.spec.ID}, netArgs...),
 		"-v", dir+":/cb", "-v", c.jar+":/cb-connector/spark-bigquery.jar:ro", "-v", c.HistoryDir()+":/cb-history")
+	if yarn {
+		run = append(run, "-v", filepath.Join(c.dir, "conf")+":/cb-conf:ro", "-v", filepath.Join(c.dir, "shared")+":/cb-shared",
+			"-e", "HADOOP_CONF_DIR=/cb-conf")
+	}
 	run = append(run, c.lakeMounts...)
 	run = append(run,
 		"-e", "CB_SPARK_OUT=/cb/out/params.json", "-e", "CB_SPARK_TYPES=/cb/types.json", "-e", "PYTHONPATH=/cb/lib", "-e", "PYSPARK_PYTHON=python3",
@@ -628,6 +638,9 @@ func (c *Cluster) Submit(ctx context.Context, job Job) (Result, error) {
 	var appID string
 	tail, output := d.follow(job, stdout, func(line string) {
 		if m := appIDLine.FindStringSubmatch(line); m != nil && appID == "" {
+			appID = m[1]
+		}
+		if m := yarnAppLine.FindStringSubmatch(line); m != nil && appID == "" {
 			appID = m[1]
 		}
 	})

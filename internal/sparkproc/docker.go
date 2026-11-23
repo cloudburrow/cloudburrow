@@ -28,7 +28,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/hostrelay"
 )
 
-//go:embed assets/relay.py assets/procedure.py assets/run.sh assets/node.sh assets/eco.sh assets/hivenode.sh
+//go:embed assets/relay.py assets/procedure.py assets/run.sh assets/node.sh assets/eco.sh assets/hivenode.sh assets/nodemanager.sh
 var assets embed.FS
 
 // The connector's endpoints, the relay's aliases on the job's network.

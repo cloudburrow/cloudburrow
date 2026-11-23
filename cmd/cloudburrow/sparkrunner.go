@@ -61,9 +61,7 @@ var (
 		connectorURL:  "https://repo1.maven.org/maven2/com/google/cloud/spark/spark-3.5-bigquery/0.46.2/spark-3.5-bigquery-0.46.2.jar",
 		connectorSHA:  "817aafccd47b4756f7ae5bb51b509d5642140ead0fb3da06f1a20c24e9baa0ac",
 		connectorFile: "spark-3.5-bigquery-0.46.2.jar", sparkVersion: "3.5",
-		kernel: &sparkproc.KernelRuntime{Scala: "2.12.18",
-			ConnectURL: "https://repo1.maven.org/maven2/org/apache/spark/spark-connect-client-jvm_2.12/3.5.9/spark-connect-client-jvm_2.12-3.5.9.jar",
-			ConnectSHA: "ec52b1cdc2243187d6c363fdb37f1e39ddea46c0f98e9a01f01c5be05ce26590"},
+		kernel: &sparkproc.KernelRuntime{Scala: "2.12.18", Spark: "3.5.9", Python: "3.5"},
 		connectServer: &lakeJar{"org/apache/spark/spark-connect_2.12/3.5.9/spark-connect_2.12-3.5.9.jar",
 			"cd2342517d42bc02c14ac92e4676e51e948ea4fc1995ed9df6c016dc02b02b98"},
 	}
@@ -73,6 +71,7 @@ var (
 		connectorURL:  "https://repo1.maven.org/maven2/com/google/cloud/spark/spark-4.0-bigquery/0.46.2/spark-4.0-bigquery-0.46.2.jar",
 		connectorSHA:  "b09c4455875d7811971796091371d4dda646029b349c35ef95f578f133607e0e",
 		connectorFile: "spark-4.0-bigquery-0.46.2.jar", sparkVersion: "4.0",
+		kernel: &sparkproc.KernelRuntime{Scala: "2.13.16", Spark: "4.0.1", Python: "4"},
 	}
 	spark42Runtime = sparkRuntime{
 		image:         "apache/spark@sha256:0a8fa37711b6afe90a1bfe4427a6415b0f315f51f6957ca1bee77d255ebb9e86", // 4.2.0-scala2.13-java25-python3-ubuntu
@@ -80,6 +79,7 @@ var (
 		connectorURL:  "https://repo1.maven.org/maven2/com/google/cloud/spark/spark-4.2-bigquery/0.46.2/spark-4.2-bigquery-0.46.2.jar",
 		connectorSHA:  "45778166a2ebdf1a0e2d758fc0970ff65673f026bc3cb9014dcc242fcba00977",
 		connectorFile: "spark-4.2-bigquery-0.46.2.jar", sparkVersion: "4.2",
+		kernel: &sparkproc.KernelRuntime{Scala: "2.13.18", Spark: "4.2.0", Python: "4"},
 	}
 	sparkRuntimes = map[string]sparkRuntime{"1.2": spark35Runtime, "2.2": spark35Runtime, "2.3": spark35Runtime,
 		"3.0": spark40Runtime, "4.0": spark42Runtime}

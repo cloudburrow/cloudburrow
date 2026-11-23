@@ -1,0 +1,127 @@
+//go:build compat
+
+package compat
+
+import (
+	"context"
+	"os"
+	"strings"
+	"testing"
+	"time"
+
+	dataproc "cloud.google.com/go/dataproc/v2/apiv1"
+	"cloud.google.com/go/dataproc/v2/apiv1/dataprocpb"
+	"google.golang.org/api/option"
+)
+
+// dataprocYarnPi is a PySpark job's main file: Pi by sampling, and the
+// master it ran on, which a Dataproc cluster's Spark reports as yarn.
+const dataprocYarnPi = `import random
+from pyspark.sql import SparkSession
+
+spark = SparkSession.builder.appName("pi").getOrCreate()
+sc = spark.sparkContext
+n = 20000
+inside = sc.parallelize(range(n), 4).filter(lambda _: random.random() ** 2 + random.random() ** 2 < 1).count()
+print("master=%s mode=%s" % (sc.master, sc.getConf().get("spark.submit.deployMode")))
+print("Pi is roughly %f" % (4.0 * inside / n))
+print("executors=%d" % len(sc._jsc.sc().getExecutorMemoryStatus()))
+spark.stop()
+`
+
+// TestDataprocSparkAndHiveOnYarn (#2162): a cluster's Spark and Hive
+// jobs run on YARN, as on a Dataproc cluster
+// (https://docs.cloud.google.com/dataproc/docs/concepts/configuring-clusters/cluster-properties
+// and the spark.submit.deployMode of https://docs.cloud.google.com/dataproc/docs/guides/submit-job):
+// a PySpark job in the default client mode reports master yarn and fills
+// yarn_applications; the same job with spark.submit.deployMode=cluster
+// runs its driver in YARN and ends DONE; a Spark job (SparkPi from the
+// examples jar) runs on YARN; and Hive queries run on Tez on YARN, an
+// INSERT then a SELECT of the table returning its rows.
+//
+// covers: google.cloud.dataproc.v1.JobController/SubmitJob, google.cloud.dataproc.v1.JobController/GetJob
+func TestDataprocSparkAndHiveOnYarn(t *testing.T) {
+	h, addr, project := dataprocEnv(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Minute)
+	defer cancel()
+	grpcOpts := append(dataprocGRPC(), option.WithEndpoint(addr))
+	cc, err := dataproc.NewClusterControllerClient(ctx, grpcOpts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cc.Close() })
+	jc, err := dataproc.NewJobControllerClient(ctx, grpcOpts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer jc.Close()
+	sc := storageClient(t, h)
+	bh := bucket(t, h, sc)
+	const region = "us-central1"
+	suffix := dataprocSuffix(h, 30)
+	name := "yn-" + suffix
+	dataprocClusterUp(t, ctx, h, cc, project, region, &dataprocpb.Cluster{ProjectId: project, ClusterName: name,
+		Config: &dataprocpb.ClusterConfig{SoftwareConfig: &dataprocpb.SoftwareConfig{ImageVersion: "2.2"},
+			WorkerConfig: &dataprocpb.InstanceGroupConfig{NumInstances: 2},
+			EndpointConfig: &dataprocpb.EndpointConfig{EnableHttpPortAccess: true}}})
+	place := &dataprocpb.JobPlacement{ClusterName: name}
+	pi := dataprocPut(t, ctx, bh, "yarn/pi.py", dataprocYarnPi)
+
+	pyspark := func(id string, props map[string]string) (*dataprocpb.Job, string) {
+		j := dataprocRunJob(t, ctx, jc, project, region, &dataprocpb.Job{Placement: place, Reference: &dataprocpb.JobReference{JobId: id + "-" + suffix},
+			TypeJob: &dataprocpb.Job_PysparkJob{PysparkJob: &dataprocpb.PySparkJob{MainPythonFileUri: pi, Properties: props}}})
+		return j, dataprocGSText(t, ctx, sc, j.GetDriverOutputResourceUri())
+	}
+	client, out := pyspark("yclient", nil)
+	if client.GetStatus().GetState() != dataprocpb.JobStatus_DONE {
+		t.Fatalf("the client mode PySpark job: %v\n%s", client.GetStatus(), out)
+	}
+	for _, want := range []string{"master=yarn mode=client", "Pi is roughly 3."} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the client mode job's output has no %q:\n%s", want, out)
+		}
+	}
+	apps := client.GetYarnApplications()
+	if len(apps) != 1 || apps[0].GetState() != dataprocpb.YarnApplication_FINISHED || !strings.HasPrefix(apps[0].GetTrackingUrl(), "http://"+name+"-m:8088/proxy/application_") {
+		t.Errorf("the client mode job's YARN applications: %v", apps)
+	}
+
+	cluster, out := pyspark("ycluster", map[string]string{"spark.submit.deployMode": "cluster"})
+	if cluster.GetStatus().GetState() != dataprocpb.JobStatus_DONE {
+		t.Fatalf("the cluster mode PySpark job: %v\n%s", cluster.GetStatus(), out)
+	}
+	if !strings.Contains(out, "final status: SUCCEEDED") {
+		t.Errorf("the cluster mode job's driver output (the YARN client's) has no final status SUCCEEDED:\n%s", out)
+	}
+	if apps := cluster.GetYarnApplications(); len(apps) != 1 || apps[0].GetState() != dataprocpb.YarnApplication_FINISHED {
+		t.Errorf("the cluster mode job's YARN applications: %v", apps)
+	}
+
+	spark := dataprocRunJob(t, ctx, jc, project, region, &dataprocpb.Job{Placement: place, Reference: &dataprocpb.JobReference{JobId: "ypi-" + suffix},
+		TypeJob: &dataprocpb.Job_SparkJob{SparkJob: &dataprocpb.SparkJob{
+			Driver: &dataprocpb.SparkJob_MainClass{MainClass: "org.apache.spark.examples.SparkPi"},
+			JarFileUris: []string{"file:///usr/lib/spark/examples/jars/spark-examples.jar"}, Args: []string{"20"}}}})
+	if out := dataprocGSText(t, ctx, sc, spark.GetDriverOutputResourceUri()); spark.GetStatus().GetState() != dataprocpb.JobStatus_DONE || !strings.Contains(out, "Pi is roughly 3.") {
+		t.Errorf("SparkPi on YARN: %v\n%s", spark.GetStatus(), out)
+	}
+	if apps := spark.GetYarnApplications(); len(apps) != 1 {
+		t.Errorf("SparkPi's YARN applications: %v", apps)
+	}
+
+	hive := dataprocRunJob(t, ctx, jc, project, region, &dataprocpb.Job{Placement: place, Reference: &dataprocpb.JobReference{JobId: "yhive-" + suffix},
+		TypeJob: &dataprocpb.Job_HiveJob{HiveJob: &dataprocpb.HiveJob{Queries: &dataprocpb.HiveJob_QueryList{QueryList: &dataprocpb.QueryList{Queries: []string{
+			"CREATE TABLE tez_fruit (name STRING, n INT)", "INSERT INTO tez_fruit VALUES ('apple', 3), ('cherry', 1)",
+			"SELECT name, n * 10 AS tens FROM tez_fruit ORDER BY name"}}}}}})
+	out = dataprocGSText(t, ctx, sc, hive.GetDriverOutputResourceUri())
+	if hive.GetStatus().GetState() != dataprocpb.JobStatus_DONE {
+		t.Fatalf("the Hive job: %v\n%s", hive.GetStatus(), out)
+	}
+	for _, want := range []string{"apple", "30", "cherry", "10"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the Hive job's output has no %q:\n%s", want, out)
+		}
+	}
+	if os.Getenv("CB_DEBUG_HOLD") != "" && t.Failed() {
+		time.Sleep(10 * time.Minute)
+	}
+}

@@ -29,17 +29,27 @@ import (
 // KernelPort is the kernel server's port in the session's container.
 const KernelPort = "8888"
 
-// KernelRuntime is what a runtime's kernel image is built with: Almond's
-// Scala version (the Spark's) and Spark's Scala Connect client jar of
-// that Spark, from Maven Central by SHA-256.
+// KernelRuntime is what a runtime's kernel image is built with, each a
+// lock in kernel/: Scala, Almond's Scala version (the Spark's:
+// almond-SCALA.lock); Spark, the Spark whose Scala Connect client the
+// Scala kernel uses (connect-SPARK.lock); Python, the line of the PySpark
+// kernel's package lock (requirements-PYTHON.txt: "3.5" or "4").
 type KernelRuntime struct {
-	Scala, ConnectURL, ConnectSHA string
+	Scala, Spark, Python string
 }
 
-//go:embed kernel/Dockerfile kernel/kernel.sh kernel/predef.sc kernel/pyspark-startup.py
+//go:embed kernel/Dockerfile kernel/kernel.sh kernel/predef.sc kernel/pyspark-startup.py kernel/fetch.sh kernel/*.lock kernel/requirements-*.txt
 var kernelFS embed.FS
 
-var kernelFiles = []string{"Dockerfile", "kernel.sh", "predef.sc", "pyspark-startup.py"}
+// kernelFiles are the build context: every embedded file.
+var kernelFiles = func() []string {
+	entries, _ := kernelFS.ReadDir("kernel")
+	var out []string
+	for _, e := range entries {
+		out = append(out, e.Name())
+	}
+	return out
+}()
 
 var kernelMu sync.Mutex
 
@@ -47,7 +57,7 @@ var kernelMu sync.Mutex
 // runtime: a hash of them and the build context.
 func KernelTag(sparkImage string, k KernelRuntime) string {
 	h := sha256.New()
-	fmt.Fprintf(h, "%s|%s|%s|%s", sparkImage, k.Scala, k.ConnectURL, k.ConnectSHA)
+	fmt.Fprintf(h, "%s|%s|%s|%s", sparkImage, k.Scala, k.Spark, k.Python)
 	for _, name := range kernelFiles {
 		b, _ := kernelFS.ReadFile("kernel/" + name)
 		h.Write([]byte(name))
@@ -80,7 +90,7 @@ func KernelImage(ctx context.Context, sparkImage string, k KernelRuntime, instan
 		return "", err
 	}
 	args := []string{"build", "--build-arg", "BASE=" + sparkImage, "--build-arg", "SCALA=" + k.Scala,
-		"--build-arg", "CONNECT_URL=" + k.ConnectURL, "--build-arg", "CONNECT_SHA=" + k.ConnectSHA, "-t", tag}
+		"--build-arg", "SPARK=" + k.Spark, "--build-arg", "PY=" + k.Python, "-t", tag}
 	if instance != "" {
 		args = append(args, "--label", InstanceLabel+"="+instance)
 	}
@@ -101,8 +111,7 @@ var kernelReady = regexp.MustCompile(`Jupyter Server .* is running at|is running
 
 // startKernels starts a Jupyter session's kernel server beside its
 // Spark Connect server p.spark, and sets c.KernelAddr; a runtime with no
-// kernel image pinned (Spark 4's: KernelRuntime is pinned for Spark 3.5,
-// runtimes 1.2, 2.2 and 2.3) starts none.
+// kernel image pinned starts none.
 func (d *Docker) startKernels(ctx context.Context, job Job, p *prepared, c *Connect) error {
 	rt, _, ok := d.runtime(job)
 	if !ok || rt.Kernel == nil {

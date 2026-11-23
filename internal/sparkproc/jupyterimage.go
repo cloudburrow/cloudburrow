@@ -13,10 +13,10 @@ import (
 	"sync"
 )
 
-//go:embed jupyter/Dockerfile jupyter/jupyter.sh jupyter/pyspark-startup.py
+//go:embed jupyter/Dockerfile jupyter/jupyter.sh jupyter/pyspark-startup.py jupyter/requirements.txt
 var jupyterFS embed.FS
 
-var jupyterFiles = []string{"Dockerfile", "jupyter.sh", "pyspark-startup.py"}
+var jupyterFiles = []string{"Dockerfile", "jupyter.sh", "pyspark-startup.py", "requirements.txt"}
 
 // JupyterTag is the Jupyter component's image tag for a Spark image: a
 // hash of the image and the build context, so a changed context is a new

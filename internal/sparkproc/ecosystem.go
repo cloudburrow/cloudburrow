@@ -156,6 +156,10 @@ func (c *Cluster) writeConf(dir string, job map[string]string, jars []string) er
 		"fs.gs.auth.service.account.enable": "false",
 		"fs.gs.auth.null.enable":            "true",
 		"hadoop.tmp.dir":                    "/tmp/hadoop",
+		// The NodeManagers' containers run as root, HiveServer2 and the
+		// drivers as their images' users, on one shared file system: what
+		// any of them makes, the others can read and move.
+		"fs.permissions.umask-mode": "000",
 	}
 	mapred := map[string]string{"mapreduce.framework.name": "local", "mapreduce.jobtracker.staging.root.dir": "/tmp/hadoop/staging"}
 	hive := map[string]string{
@@ -187,12 +191,29 @@ func (c *Cluster) writeConf(dir string, job map[string]string, jars []string) er
 		"hive.metastore.disallow.incompatible.col.type.changes": "false",
 	}
 	var yarn map[string]string
+	tez := map[string]string{"tez.local.mode": "true", "tez.runtime.optimize.local.fetch": "true", "tez.ignore.lib.uris": "true"}
 	if c.yarnEnabled() {
 		var m map[string]string
 		yarn, m = c.yarnConf(jars)
 		for k, v := range m {
 			mapred[k] = v
 		}
+		// Hive on Tez on YARN, as a Dataproc image runs Hive: each query a
+		// Tez DAG whose ApplicationMaster and tasks are YARN containers,
+		// Tez's jars localized from the NodeManagers' /opt/tez, the query
+		// plans and Hive's jars in the shared scratch and install
+		// directories.
+		for k, v := range map[string]string{"tez.local.mode": "false", "hive.exec.scratchdir": "/cb-shared/hive-scratch",
+			"hive.user.install.directory": "/cb-shared/hive-install", "hive.tez.container.size": "512", "hive.tez.java.opts": "-Xmx400m"} {
+			hive[k] = v
+		}
+		tez = map[string]string{"tez.lib.uris": "file:///opt/tez,file:///opt/tez/lib", "tez.use.cluster.hadoop-libs": "true",
+			"tez.staging-dir": "/cb-shared/tez-staging", "tez.am.resource.memory.mb": "768", "tez.am.launch.cmd-opts": "-Xmx600m",
+			"tez.task.resource.memory.mb": "512", "tez.cluster.additional.classpath.prefix": "/cb-gcs/gcs-connector.jar",
+			"tez.am.container.reuse.enabled": "true", "tez.session.am.dag.submit.timeout.secs": "60"}
+	}
+	for k, v := range c.confProps("tez") {
+		tez[k] = v
 	}
 	for k, v := range c.confProps("core") {
 		core[k] = v
@@ -207,7 +228,7 @@ func (c *Cluster) writeConf(dir string, job map[string]string, jars []string) er
 		mapred[k] = v
 	}
 	files := map[string]map[string]string{"core-site.xml": core, "mapred-site.xml": mapred, "hive-site.xml": hive,
-		"tez-site.xml": {"tez.local.mode": "true", "tez.runtime.optimize.local.fetch": "true", "tez.ignore.lib.uris": "true"}}
+		"tez-site.xml": tez}
 	if yarn != nil {
 		files["yarn-site.xml"] = yarn
 		files["capacity-scheduler.xml"] = c.capacityScheduler()
@@ -307,6 +328,7 @@ func (c *Cluster) ensureHive(ctx context.Context) error {
 	}
 	if err := c.runComponent(ctx, "hive", "", "--user", "1000:1000",
 		"-v", filepath.Join(c.dir, "conf")+":/cb-conf:ro", "-v", filepath.Join(c.dir, "warehouse")+":/cb-warehouse",
+		"-v", filepath.Join(c.dir, "shared")+":/cb-shared",
 		"-v", jar+":/cb-gcs/gcs-connector.jar:ro", "-v", filepath.Join(c.dir, "hivenode.sh")+":/cb/hivenode.sh:ro",
 		"-v", filepath.Join(c.dir, "jobs")+":/cb-jobs:ro", "-e", "CB_WEBHCAT="+webhcat,
 		"--entrypoint", "/bin/bash", e.Hive, "/cb/hivenode.sh"); err != nil {

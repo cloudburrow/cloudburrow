@@ -99,9 +99,12 @@ func (c *Cluster) yarnConf(jars []string) (yarn, mapred map[string]string) {
 	if cores <= 0 {
 		cores = 2
 	}
+	// A NodeManager offers at least 4 GB, so a Spark job's
+	// ApplicationMaster and an executor fit on one worker (YARN accounts
+	// for memory; it enforces none here).
 	mem := memoryMB(c.spec.WorkerMemory)
-	if mem < 2048 {
-		mem = 2048
+	if mem < 4096 {
+		mem = 4096
 	}
 	master := c.nodeAlias(-1)
 	yarn = map[string]string{
@@ -213,7 +216,14 @@ func (c *Cluster) startYARN(ctx context.Context) error {
 func nodeManager(node string) string { return node + "-nm" }
 
 // startNodeManager starts the NodeManager of node (a worker's container,
-// or a single node cluster's master), host its host name.
+// or a single node cluster's master), host its host name: a container of
+// the cluster's Spark image sharing node's network, so a Spark job's YARN
+// containers (its ApplicationMaster, executors and, in cluster mode, its
+// driver) run on the image version's Spark, Java, Python and R, as on a
+// Dataproc worker. Hadoop, Tez and their Java 8 are the Hive image's,
+// mounted read-only (a Docker image mount: nothing copied out of it);
+// MapReduce and Tez containers run on that Java, Spark's on the image's
+// (spark.yarn.appMasterEnv.JAVA_HOME and spark.executorEnv.JAVA_HOME).
 func (c *Cluster) startNodeManager(ctx context.Context, node, host string) error {
 	e := c.d.Ecosystem
 	gcs, err := e.GCS(ctx)
@@ -222,11 +232,16 @@ func (c *Cluster) startNodeManager(ctx context.Context, node, host string) error
 	}
 	name := nodeManager(node)
 	args := []string{"run", "-d", "--name", name, "--label", c.label, "--label", "cloudburrow.dataproc.cluster=" + c.spec.ID,
-		"--network", "container:" + node, "--user", "0:0"}
+		"--network", "container:" + node, "--user", "0:0",
+		"--mount", "type=image,source=" + e.Hive + ",target=/cb-hive",
+		"-v", filepath.Join(c.dir, "nodemanager.sh") + ":/cb/nodemanager.sh:ro", "-v", filepath.Join(c.dir, "tls") + ":/cb/tls:ro",
+		"-v", c.HistoryDir() + ":/cb-history", "-v", filepath.Join(c.dir, "warehouse") + ":/cb-warehouse",
+		"-v", c.jar + ":/cb-connector/spark-bigquery.jar:ro"}
 	args = append(args, c.yarnMounts(gcs)...)
+	args = append(args, c.lakeMounts...)
 	args = append(args, "-e", "HADOOP_CONF_DIR=/cb-conf", "-e", "HADOOP_CLASSPATH=/cb-gcs/gcs-connector.jar",
 		"-e", "YARN_NODEMANAGER_HEAPSIZE=384", "-e", "YARN_NODEMANAGER_OPTS=-Dyarn.nodemanager.hostname="+host,
-		"--entrypoint", "/opt/hadoop/bin/yarn", e.Hive, "nodemanager")
+		"-e", "PYSPARK_PYTHON=python3", "--entrypoint", "/bin/bash", c.rt.Image, "/cb/nodemanager.sh")
 	if out, err := c.d.docker(ctx, args...); err != nil {
 		return &Unavailable{Msg: "start the NodeManager of " + host + ": " + out}
 	}
@@ -304,3 +319,42 @@ func (c *Cluster) YarnApps(ctx context.Context, output string) []YarnApp {
 
 // String names the app for logs.
 func (a YarnApp) String() string { return fmt.Sprintf("%s (%s %s)", a.ID, a.State, a.Final) }
+
+// yarnSparkConf sets conf, a Spark job's properties, for Spark on YARN,
+// as a Dataproc cluster runs Spark: spark.submit.deployMode client (the
+// driver in the job's driver container; the default) or cluster (the
+// driver in the ApplicationMaster's YARN container). Spark's jars are the
+// NodeManagers' own image's (spark.yarn.jars local:), the staging
+// directory is on the shared file system, and the ApplicationMaster and
+// executors run on the image's Java. The cluster's and the job's own
+// properties win over these; a Spark SQL job runs in client mode, as
+// spark-sql's shell runs in no other.
+func (c *Cluster) yarnSparkConf(job Job, conf map[string]string) {
+	mode := conf["spark.submit.deployMode"]
+	if v, ok := job.Properties["spark.submit.deployMode"]; ok {
+		mode = v
+	}
+	if mode != "cluster" || job.Kind == KindSparkSQL {
+		mode = "client"
+	}
+	defaults := map[string]string{
+		"spark.yarn.stagingDir":                  "file:///cb-shared/spark-staging",
+		"spark.yarn.jars":                        "local:/opt/spark/jars/*",
+		"spark.yarn.appMasterEnv.JAVA_HOME":      "/opt/java/openjdk",
+		"spark.executorEnv.JAVA_HOME":            "/opt/java/openjdk",
+		"spark.yarn.appMasterEnv.PYSPARK_PYTHON": "python3",
+		"spark.yarn.am.memory":                   "512m",
+		"spark.executor.memory":                  "1g",
+		"spark.executor.cores":                   "1",
+		"spark.yarn.submit.waitAppCompletion":    "true",
+	}
+	for k, v := range defaults {
+		if _, ok := conf[k]; !ok {
+			conf[k] = v
+		}
+	}
+	conf["spark.submit.deployMode"] = mode
+	if mode == "cluster" {
+		delete(conf, "spark.driver.host")
+	}
+}
