@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 
@@ -10,41 +11,63 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/spannerimage"
 )
 
-// spannerImageComponent loads CloudBurrow's patched Spanner emulator
-// (#2029) into the cluster when Docker has it for the node's architecture
-// (scripts/spanner-emulator-image.sh builds it), between the cluster and
-// the components that deploy it. Without it the Spanner pod runs Google's
-// image, pinned by digest, and says so.
+// spannerImageComponent builds the Spanner emulator's image from
+// CloudBurrow's patched build this CLI embeds (#2029) and loads it into the
+// cluster, between the cluster and the components that deploy it, as the
+// BigQuery emulator's image is built. A CLI that embeds no build for the
+// node's architecture runs Google's prebuilt image, pinned by digest, and
+// warns what that image gets wrong.
 type spannerImageComponent struct {
 	kubeconfig string
 	loader     *images.Loader
-	runner     images.Runner
+	build      func(ctx context.Context, arch string) (string, error)
 	comps      *components.LifecycleComponent
 	out        io.Writer
 }
 
-func newSpannerImageComponent(kubeconfig, cluster string, comps *components.LifecycleComponent, out io.Writer) *spannerImageComponent {
+func newSpannerImageComponent(kubeconfig, cluster, instance string, comps *components.LifecycleComponent, out io.Writer) *spannerImageComponent {
 	r := images.ExecRunner{}
-	return &spannerImageComponent{kubeconfig: kubeconfig, loader: &images.Loader{ClusterName: cluster, Runner: r}, runner: r, comps: comps, out: out}
+	return &spannerImageComponent{
+		kubeconfig: kubeconfig,
+		loader:     &images.Loader{ClusterName: cluster, Runner: r},
+		build: func(ctx context.Context, arch string) (string, error) {
+			return spannerimage.Build(ctx, r, arch, instance)
+		},
+		comps: comps,
+		out:   out,
+	}
 }
 
 func (s *spannerImageComponent) Name() string { return "spanner-image" }
+
+// spannerFallbackWarning is what `up` says when the Spanner pod runs
+// Google's image.
+func spannerFallbackWarning(arch string, why error) string {
+	return fmt.Sprintf("  warning: spanner: running Google's emulator image (%s), not CloudBurrow's patched build: %v.\n"+
+		"    Google's image returns a GQL query's RETURN ... ORDER BY rows out of order (its first two rows swapped)\n"+
+		"    and refuses PROPERTY_EXISTS, COUNT of a group variable and ANY CHEAPEST (#2029). A release CLI embeds the\n"+
+		"    patched build for linux/%s; from source, run make spanner-binaries before building the CLI.\n",
+		components.SpannerImage, why, arch)
+}
 
 func (s *spannerImageComponent) Start(ctx context.Context) error {
 	arch, err := s.loader.NodeArchitecture(ctx, s.kubeconfig)
 	if err != nil {
 		return fmt.Errorf("the cluster's node architecture: %w", err)
 	}
-	if !spannerimage.Available(ctx, s.runner, arch) {
-		fmt.Fprintf(s.out, "  spanner: Google's emulator image; CloudBurrow's patched build (%s, linux/%s; scripts/spanner-emulator-image.sh) is not in Docker, so GQL's RETURN ... ORDER BY order, PROPERTY_EXISTS, COUNT of a group variable and ANY CHEAPEST are not served\n",
-			spannerimage.Ref, arch)
+	ref, err := s.build(ctx, arch)
+	if errors.Is(err, spannerimage.ErrNotEmbedded) {
+		fmt.Fprint(s.out, spannerFallbackWarning(arch, err))
 		return nil
 	}
-	if err := s.loader.Load(ctx, spannerimage.Ref, s.kubeconfig); err != nil {
-		return fmt.Errorf("load %s: %w", spannerimage.Ref, err)
+	if err != nil {
+		return fmt.Errorf("the Spanner emulator image: %w", err)
 	}
-	fmt.Fprintf(s.out, "  spanner: emulator image %s (cloud-spanner-emulator %s with CloudBurrow's patches, linux/%s)\n", spannerimage.Ref, spannerimage.Upstream, arch)
-	s.comps.SetSpannerImage(spannerimage.Ref)
+	if err := s.loader.Load(ctx, ref, s.kubeconfig); err != nil {
+		return fmt.Errorf("load %s: %w", ref, err)
+	}
+	fmt.Fprintf(s.out, "  spanner: emulator image %s (cloud-spanner-emulator %s with CloudBurrow's patches, linux/%s)\n", ref, spannerimage.Upstream, arch)
+	s.comps.SetSpannerImage(ref)
 	return nil
 }
 

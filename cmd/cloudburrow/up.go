@@ -941,8 +941,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		imageComps = append(imageComps, newBigQueryImageComponent(cfg.KubeconfigPath(), cfg.ClusterName(), cfg.Name, comps, stdout))
 	}
 	if serviceEnabled(cfg, config.ServiceSpanner) {
-		// CloudBurrow's patched Spanner emulator (#2029), when built.
-		imageComps = append(imageComps, newSpannerImageComponent(cfg.KubeconfigPath(), cfg.ClusterName(), comps, stdout))
+		// The patched Spanner emulator this CLI embeds (#2029), or Google's image, with a warning.
+		imageComps = append(imageComps, newSpannerImageComponent(cfg.KubeconfigPath(), cfg.ClusterName(), cfg.Name, comps, stdout))
 	}
 	coord.RegisterConcurrent(imageComps...)
 	// `kind create` returns before its node is Ready (#1588), so the

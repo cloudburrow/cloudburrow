@@ -77,5 +77,7 @@ __pycache__/
 # tools/bqengine's patched module copies (#1061).
 /third_party/bigquery-emulator/build/
 
-# The patched Spanner emulator build (#2029); written by scripts/spanner-emulator-image.sh.
+# The patched Spanner emulator build (#2029) and the archives the CLI embeds;
+# written by scripts/spanner-emulator-binaries.sh (make spanner-binaries).
 /third_party/spanner-emulator/build/
+/internal/spannerimage/bin/spanner-emulator-*

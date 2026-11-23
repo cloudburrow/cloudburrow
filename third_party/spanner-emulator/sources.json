@@ -1,5 +1,5 @@
 {
-  "$comment": "What scripts/spanner-emulator-image.sh builds (#2029): Google's Cloud Spanner emulator at emulator.tag (its commit checked), with CloudBurrow's patches applied in this order. The googlesql patches are copied into the emulator's build/bazel/ (as cloudburrow_googlesql.patch, which emulator patch 0001 lists in MODULE.bazel) and applied by Bazel to the GoogleSQL archive the emulator pins. PROVENANCE.md says what each patch changes and why.",
+  "$comment": "What scripts/spanner-emulator-binaries.sh builds (#2029): Google's Cloud Spanner emulator at emulator.tag (its commit checked), with CloudBurrow's patches applied in this order. The googlesql patches are copied into the emulator's build/bazel/ (as cloudburrow_googlesql.patch, which emulator patch 0001 lists in MODULE.bazel) and applied by Bazel to the GoogleSQL archive the emulator pins. PROVENANCE.md says what each patch changes and why.",
   "emulator": {
     "repository": "https://github.com/GoogleCloudPlatform/cloud-spanner-emulator",
     "tag": "v1.5.58",

@@ -317,13 +317,13 @@
         "license": "Apache-2.0",
         "licenseNote": "The emulator's source is published under Apache-2.0, unlike the Cloud SDK emulators, whose licence could not be established.",
         "patchedBuild": {
-          "$comment": "#2029: CloudBurrow's patched build of the same release, from source (third_party/spanner-emulator: sources.json pins the tag v1.5.58 = a081a7e71aba5f4d05fc8c6b21ef1a269dcbac28 and GoogleSQL 2026.7.2; PROVENANCE.md lists each patch). scripts/spanner-emulator-image.sh builds it as dev.local/cloudburrow-spanner-emulator:1.5.58-cb.<patch hash>; up runs it when Docker has it, Google's image otherwise.",
+          "$comment": "#2029: CloudBurrow's patched build of the same release, from source (third_party/spanner-emulator: sources.json pins the tag v1.5.58 = a081a7e71aba5f4d05fc8c6b21ef1a269dcbac28 and GoogleSQL 2026.7.2; PROVENANCE.md lists each patch). The release's spanner-emulator job (or make spanner-binaries) builds it with scripts/spanner-emulator-binaries.sh; up builds the image dev.local/cloudburrow-spanner-emulator from the embedded build on build.spannerEmulatorBase and runs it, and runs the image above, with a warning, only from a CLI that embeds no build.",
           "source": "https://github.com/GoogleCloudPlatform/cloud-spanner-emulator",
           "tag": "v1.5.58",
           "commit": "a081a7e71aba5f4d05fc8c6b21ef1a269dcbac28",
           "license": "Apache-2.0",
           "googlesql": {"source": "https://github.com/google/googlesql", "tag": "2026.7.2", "license": "Apache-2.0"},
-          "redistribution": "not-redistributed"
+          "redistribution": "embedded: each CLI embeds gzip-compressed linux/amd64 and linux/arm64 archives of emulator_main and gateway_main (libstdc++ linked statically, under the GCC Runtime Library Exception) and the licence files of every Bazel dependency linked into them (internal/spannerimage); `up` builds the image dev.local/cloudburrow-spanner-emulator from them on build.spannerEmulatorBase and loads it into kind. Release archives carry the licences as LICENSES-spanner-emulator.txt."
         },
         "redistribution": "not-redistributed",
         "redistributionPlan": "Pulled from Google's registry by digest at run time. Nothing is vendored or re-hosted.",
@@ -1296,6 +1296,20 @@
           "linux/arm64"
         ],
         "notes": "Runtime base for the prediction fixture (testdata/predictor) and the worker fixture (testdata/worker). Pinned so the image that proved the contract is the image a later run rebuilds.",
+        "skipDiscovery": "GCR tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect`."
+      },
+      "spannerEmulatorBase": {
+        "image": "gcr.io/distroless/cc-debian12",
+        "digest": "sha256:e5d81ddde149641e2a9ba55be4545bc125c67de07508b03ba4c22e6eb0ded5aa",
+        "license": "Apache-2.0",
+        "redistribution": "pull-only",
+        "updateFeed": "gcr-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "notes": "The base of the patched Spanner emulator image `up` builds locally from the embedded build (#2029): the base upstream's own release stage uses (glibc, no shell). internal/spannerimage.Base duplicates it.",
         "skipDiscovery": "GCR tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect`."
       },
       "storageServerBase": {

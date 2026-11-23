@@ -21,7 +21,7 @@ import (
 // PROPERTY_EXISTS, SAME, ALL_DIFFERENT and IS SOURCE OF; COUNT of a group
 // variable; and ANY CHEAPEST with an edge COST. Each returns the rows Google's graph patterns and graph operators
 // pages show. An instance that runs Google's emulator image (the patched
-// one is not built: make spanner-emulator-image) skips, naming why.
+// CLI embeds no build: make spanner-binaries) skips, naming why.
 //
 // covers: google.spanner.v1.Spanner/ExecuteSql, google.spanner.v1.Spanner/ExecuteStreamingSql
 func TestSpannerGraphOnThePatchedEmulator(t *testing.T) {
@@ -30,7 +30,7 @@ func TestSpannerGraphOnThePatchedEmulator(t *testing.T) {
 	probe := `GRAPH FinGraph MATCH (n:Person WHERE PROPERTY_EXISTS(n, name)) RETURN n.id`
 	if _, err := rowValues(client.Single().Query(ctx, spanner.Statement{SQL: probe})); status.Code(err) == codes.Unimplemented &&
 		strings.Contains(fmt.Sprint(err), "PROPERTY_EXISTS") {
-		t.Skip("the instance runs Google's Spanner emulator image, not CloudBurrow's patched build (make spanner-emulator-image, #2029)")
+		t.Skip("the instance runs Google's Spanner emulator image, not CloudBurrow's patched build (this CLI embeds no build: make spanner-binaries, #2029)")
 	}
 	// rows in the order the query gives them
 	for _, c := range []struct {

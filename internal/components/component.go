@@ -192,7 +192,7 @@ func (c *LifecycleComponent) BuiltinStorageImage() string { return c.storageImag
 func (c *LifecycleComponent) SetBigQueryImage(ref string) { c.bigQueryImage = ref }
 
 // SetSpannerImage records CloudBurrow's patched Spanner emulator image
-// (#2029), which `up` loads into the cluster when Docker has it.
+// (#2029), which `up` builds from the build this CLI embeds and loads before installing.
 func (c *LifecycleComponent) SetSpannerImage(ref string) { c.spannerImage = ref }
 
 // SetMySQLCredentials supplies the passwords the MySQL backend is started
