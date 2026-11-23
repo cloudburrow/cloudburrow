@@ -1,0 +1,185 @@
+CloudBurrow patch 110 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1522). Applies after patch 0102; needs
+googlesqlite patches 0036 and 0074.
+
+The bug: patch 0102 runs a jobs.query or query jobs.insert of one SELECT
+statement as a read, without the write lock, beside the request that
+holds it. A statement that names a change table ("$changes": the front's
+APPENDS, CHANGES, time travel and history reads) first settles the
+change table's pending records (googlesqlite patch 0074), which writes:
+when another statement committed after the read's snapshot began, the
+settling failed "database is locked". The front lets go of the history a
+shorter time travel window let go (ALTER SCHEMA, datasets.patch) by
+counting it first with such a read, and took the failure for nothing to
+let go, so APPENDS and CHANGES read changes from before the window
+(TestBigQueryAlterSchemaTimeTravelLetsGoFirst, main CI's emulators shard,
+3 of 4 runs, whenever another job wrote at that moment).
+
+The patch: a query that names a change table is not a read; it takes the
+write lock as any other write does. TestChangeTableReadsBesideAWriter
+reads a change table with pending records 40 times beside two INSERT
+loops: without the patch every read fails "database is locked" (3 runs
+of 3), with it every read answers.
+
+Licence: a modification of goccy/bigquery-emulator, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+--- a/server/cloudburrow_concurrent_reads.go
++++ b/server/cloudburrow_concurrent_reads.go
+@@ -191,7 +191,7 @@
+ 		if json.Unmarshal(body, &q) != nil {
+ 			return false
+ 		}
+-		return (q.UseLegacySQL == nil || !*q.UseLegacySQL) && selectStatement(q.Query)
++		return (q.UseLegacySQL == nil || !*q.UseLegacySQL) && readOnlyQuery(q.Query)
+ 	}
+ 	var job struct {
+ 		Configuration *struct {
+@@ -211,9 +211,26 @@
+ 	if len(c.Load) != 0 || len(c.Copy) != 0 || len(c.Extract) != 0 {
+ 		return false
+ 	}
+-	return (c.Query.UseLegacySQL == nil || !*c.Query.UseLegacySQL) && selectStatement(c.Query.Query)
++	return (c.Query.UseLegacySQL == nil || !*c.Query.UseLegacySQL) && readOnlyQuery(c.Query.Query)
+ }
+ 
++// readOnlyQuery reports whether query only reads: one query statement
++// (selectStatement) that names no change table. CloudBurrow patch
++// (cloudburrow/cloudburrow#1522): a statement that names a change table
++// ("$changes", googlesqlite patch 0036: CloudBurrow's front's APPENDS,
++// CHANGES, time travel and history reads) first settles the change
++// table's pending records (googlesqlite patch 0074), which writes; run
++// beside the request that holds the write lock, the settling failed
++// "database is locked" whenever another statement committed after the
++// read began. It takes the write lock as any other write does.
++func readOnlyQuery(query string) bool {
++	return selectStatement(query) && !strings.Contains(query, changeTableSuffix)
++}
++
++// changeTableSuffix ends the name of a table's change table
++// (googlesqlite patch 0036).
++const changeTableSuffix = "$changes"
++
+ // selectStatement reports whether query is one query statement: SELECT,
+ // WITH, or a parenthesized query, and nothing after it but a semicolon,
+ // spaces and comments. It reads the tokens GoogleSQL's lexical structure
+--- /dev/null
++++ b/server/cloudburrow_change_reads_test.go
+@@ -0,0 +1,114 @@
++package server_test
++
++import (
++	"bytes"
++	"context"
++	"encoding/json"
++	"fmt"
++	"io"
++	"net/http"
++	"testing"
++	"time"
++
++	"github.com/goccy/bigquery-emulator/server"
++	"github.com/goccy/bigquery-emulator/types"
++)
++
++// TestChangeTableReadsBesideAWriter is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1522): a query that names a change table
++// settles its pending records first (googlesqlite patch 0074), which
++// writes, but it ran as a read beside the request that held the write
++// lock (patch 0102), so it failed "database is locked" whenever another
++// statement was writing. CloudBurrow's front reads the history so when it
++// lets go of what a shorter time travel window let go, and took the
++// failure for nothing to let go: APPENDS and CHANGES then read changes from
++// before the window. Now such a query waits for the writer, as any write
++// does, and answers.
++func TestChangeTableReadsBesideAWriter(t *testing.T) {
++	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
++	defer cancel()
++	bqServer, err := server.New(server.TempStorage)
++	if err != nil {
++		t.Fatal(err)
++	}
++	project := types.NewProject("test", types.NewDataset("ds"))
++	if err := bqServer.Load(server.StructSource(project)); err != nil {
++		t.Fatal(err)
++	}
++	testServer := bqServer.TestServer()
++	defer func() {
++		testServer.Close()
++		bqServer.Stop(ctx)
++	}()
++	query := func(sql string) (int, []byte, error) {
++		b, _ := json.Marshal(map[string]any{"query": sql, "useLegacySql": false})
++		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, testServer.URL+"/bigquery/v2/projects/test/queries", bytes.NewReader(b))
++		req.Header.Set("Content-Type", "application/json")
++		resp, err := http.DefaultClient.Do(req)
++		if err != nil {
++			return 0, nil, err
++		}
++		defer resp.Body.Close()
++		body, err := io.ReadAll(resp.Body)
++		return resp.StatusCode, body, err
++	}
++	for _, sql := range []string{
++		"CREATE TABLE ds.h (product STRING, inventory INT64)",
++		// Pending records: their values are settled by the next read
++		// of the change table.
++		"INSERT INTO ds.h VALUES ('apples', 10), ('pears', 20)",
++	} {
++		if code, b, err := query(sql); err != nil || code != http.StatusOK {
++			t.Fatalf("%s: %d %s %v", sql, code, b, err)
++		}
++	}
++
++	// Writers that commit one after another, as other clients' jobs do,
++	// and, between them, reads of the change table, each with a pending
++	// record to settle.
++	if code, b, err := query("CREATE TABLE ds.other (n INT64)"); err != nil || code != http.StatusOK {
++		t.Fatalf("CREATE TABLE: %d %s %v", code, b, err)
++	}
++	stop := make(chan struct{})
++	writers := make(chan error, 2)
++	for w := 0; w < 2; w++ {
++		go func(w int) {
++			for i := 0; ; i++ {
++				select {
++				case <-stop:
++					writers <- nil
++					return
++				default:
++				}
++				if code, b, err := query(fmt.Sprintf("INSERT INTO ds.other VALUES (%d)", i)); err != nil || code != http.StatusOK {
++					writers <- fmt.Errorf("INSERT beside the reads: %d %s %v", code, b, err)
++					return
++				}
++			}
++		}(w)
++	}
++	failed := 0
++	const reads = 40
++	for i := 0; i < reads; i++ {
++		if code, b, err := query(fmt.Sprintf("INSERT INTO ds.h VALUES ('figs', %d)", i)); err != nil || code != http.StatusOK {
++			t.Fatalf("INSERT: %d %s %v", code, b, err)
++		}
++		sql := "SELECT COUNT(*) FROM `test.ds.h$changes` WHERE _CHANGE_TYPE = 'INSERT'"
++		code, b, err := query(sql)
++		if want := fmt.Sprintf(`"v":"%d"`, i+3); err != nil || code != http.StatusOK || !bytes.Contains(b, []byte(want)) {
++			if failed == 0 {
++				t.Errorf("%s beside the writers: %d %s %v, want %s", sql, code, b, err, want)
++			}
++			failed++
++		}
++	}
++	close(stop)
++	for w := 0; w < 2; w++ {
++		if err := <-writers; err != nil {
++			t.Error(err)
++		}
++	}
++	if failed > 0 {
++		t.Errorf("%d of %d reads of the change table failed beside the writers", failed, reads)
++	}
++}
