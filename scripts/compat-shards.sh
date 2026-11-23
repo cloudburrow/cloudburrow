@@ -277,7 +277,7 @@ COMPAT_SQL_REPLICA_TESTS='^Test[A-Za-z]*SQL[A-Za-z0-9]*(HighAvailability|Replica
 COMPAT_BROWSER_SHARDS="storage served run emulators memorystore sql localai"
 COMPAT_BROWSER_SERVED_SHARD_TESTS='^Test(GKEServed|KubernetesEnginePages|VPCNetwork|ComputeEngine|ComputePermissions|TraceExplorer)'
 COMPAT_BROWSER_SERVED_ONLY_TESTS='^Test(GKEServed|VPCNetwork|ComputeEngine|ComputePermissions|TraceExplorer)'
-COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|CloudBuild|LoggingAdmin|LoggingConsole|LoggingAppHub|SecretManager|Eventarc|DocumentAI|Speech|StoragePicker|Workflows|ModelRegistry|Dataform|Colab|AppHub|DeveloperConnect)'
+COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|CloudBuild|LoggingAdmin|LoggingConsole|LoggingAppHub|SecretManager|Eventarc|DocumentAI|Speech|StoragePicker|Workflows|ModelRegistry|Dataform|Colab|VertexAIPipelines|AppHub|DeveloperConnect)'
 COMPAT_BROWSER_EMULATORS_SHARD_TESTS='^Test(BigQuery|Firestore|Datastore|Bigtable|Spanner)'
 COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS='^TestMemorystore'
 COMPAT_BROWSER_SQL_SHARD_TESTS='^Test(CloudSQL|BackupDR|PrivateCAKMS)'
@@ -517,9 +517,10 @@ compat_shard() {
       # renders as the parameter's identity (#2054); the Firebase Rules API,
       # served with Firestore, whose releases govern client SDK calls,
       # which IAM does not (#2048); App Hub, whose methods are checked
-      # (#2110).
-      SERVICES=storage,pubsub,tasks,secretmanager,kms,run,bigquery,scheduler,workflows,logging,monitoring,memorystore,cloudsql,privateca,gke,compute,firestore,datastore,spanner,bigtable,backupdr,parametermanager,apphub
-      TEST_VARS+=,STORAGE,PUBSUB,TASKS,SECRETS,KMS,RUN,RESOURCEMANAGER,ANALYTICSHUB,BIGQUERY,BIGQUERY_PROJECT,SCHEDULER,WORKFLOWS,LOGGING,MONITORING,MEMORYSTORE_ADMIN,SQLADMIN,PRIVATECA,GKE,COMPUTE,APIKEYS,SERVICEUSAGE,LOCALAI,FIRESTORE,DATASTORE,SPANNER,BIGTABLE,DATATRANSFER,BACKUPDR,STORAGE_BATCH,STORAGE_INSIGHTS,STORAGE_TRANSFER,IAM_ENFORCEMENT,PARAMETERMANAGER,FIREBASERULES,APPHUB
+      # (#2110); Dataform, whose strict act-as mode checks actAs on a
+      # repository's service account (#2173).
+      SERVICES=storage,pubsub,tasks,secretmanager,kms,run,bigquery,scheduler,workflows,logging,monitoring,memorystore,cloudsql,privateca,gke,compute,firestore,datastore,spanner,bigtable,backupdr,parametermanager,apphub,dataform
+      TEST_VARS+=,STORAGE,PUBSUB,TASKS,SECRETS,KMS,RUN,RESOURCEMANAGER,ANALYTICSHUB,BIGQUERY,BIGQUERY_PROJECT,SCHEDULER,WORKFLOWS,LOGGING,MONITORING,MEMORYSTORE_ADMIN,SQLADMIN,PRIVATECA,GKE,COMPUTE,APIKEYS,SERVICEUSAGE,LOCALAI,FIRESTORE,DATASTORE,SPANNER,BIGTABLE,DATATRANSFER,BACKUPDR,STORAGE_BATCH,STORAGE_INSIGHTS,STORAGE_TRANSFER,IAM_ENFORCEMENT,PARAMETERMANAGER,FIREBASERULES,APPHUB,DATAFORM
       UP_FLAGS=(--iam-enforcement=on)
       # And Workload Identity Federation's federated principal reading a
       # bucket, refused until it is granted (#1941), and Workforce Identity

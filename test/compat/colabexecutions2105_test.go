@@ -254,7 +254,7 @@ func scheduleClient(t *testing.T, h *Harness) (string, *aiplatform.ScheduleClien
 // schedule_resource_name, then is COMPLETED (a completed schedule cannot
 // be paused); another is paused, resumed and renamed over the update
 // mask, and a mask naming state is INVALID_ARGUMENT; the list filters by
-// state and request presence; a pipeline schedule is UNIMPLEMENTED; a
+// state and request presence; a pipeline schedule without its pipeline job is INVALID_ARGUMENT (#2173); a
 // missing cron, display name and max_concurrent_run_count are
 // INVALID_ARGUMENT; delete keeps the runs it made; JSON :pause works.
 func TestColabEnterpriseSchedules(t *testing.T) {
@@ -296,8 +296,8 @@ func TestColabEnterpriseSchedules(t *testing.T) {
 		}
 	}
 	if _, err := sc.CreateSchedule(ctx, &aiplatformpb.CreateScheduleRequest{Parent: parent, Schedule: &aiplatformpb.Schedule{DisplayName: "pipeline", TimeSpecification: every,
-		MaxConcurrentRunCount: 1, Request: &aiplatformpb.Schedule_CreatePipelineJobRequest{CreatePipelineJobRequest: &aiplatformpb.CreatePipelineJobRequest{Parent: parent}}}}); quotaCode(err) != codes.Unimplemented {
-		t.Errorf("a pipeline schedule = %v, want UNIMPLEMENTED", err)
+		MaxConcurrentRunCount: 1, Request: &aiplatformpb.Schedule_CreatePipelineJobRequest{CreatePipelineJobRequest: &aiplatformpb.CreatePipelineJobRequest{Parent: parent}}}}); quotaCode(err) != codes.InvalidArgument {
+		t.Errorf("a pipeline schedule without its pipeline job = %v, want INVALID_ARGUMENT", err)
 	}
 	once, err := sc.CreateSchedule(ctx, &aiplatformpb.CreateScheduleRequest{Parent: parent, Schedule: &aiplatformpb.Schedule{DisplayName: "Once " + suffix,
 		TimeSpecification: every, MaxConcurrentRunCount: 1, MaxRunCount: 1, Request: request}})

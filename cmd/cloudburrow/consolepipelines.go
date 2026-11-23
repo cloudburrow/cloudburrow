@@ -215,7 +215,7 @@ func (p pipelineRunsProvider) Detail(ctx context.Context, project string, path [
 }
 
 func (pipelineRunsProvider) CreateForm() (string, []console.Field) {
-	return "Create pipeline run", []console.Field{
+	return "Create run", []console.Field{
 		{Name: "source", Label: "Run source", Type: "select", Section: "Run details", Options: []string{"upload", "gcs"}, Default: "upload",
 			OptionLabels: map[string]string{"upload": "Upload file", "gcs": "Import from Cloud Storage"},
 			Help:         "The compiled pipeline definition (the JSON or YAML file the Kubeflow Pipelines compiler writes)."},
