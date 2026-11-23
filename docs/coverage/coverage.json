@@ -6818,7 +6818,7 @@
         "method": "google.cloud.aiplatform.v1.PredictionService/DirectPredict",
         "status": "Verified",
         "tests": [
-          "test/compat/streampredict_test.go:182 TestStreamingPredictOnTheEmbeddingModel",
+          "test/compat/streampredict_test.go:181 TestStreamingPredictOnTheEmbeddingModel",
           "test/compat/streampredict_test.go:50 TestStreamingPredictOnTheGenerationModel"
         ]
       },
@@ -6914,7 +6914,7 @@
         "method": "google.cloud.aiplatform.v1.PredictionService/ServerStreamingPredict",
         "status": "Verified",
         "tests": [
-          "test/compat/streampredict_test.go:182 TestStreamingPredictOnTheEmbeddingModel",
+          "test/compat/streampredict_test.go:181 TestStreamingPredictOnTheEmbeddingModel",
           "test/compat/streampredict_test.go:50 TestStreamingPredictOnTheGenerationModel"
         ]
       },
@@ -6944,7 +6944,7 @@
         "method": "google.cloud.aiplatform.v1.PredictionService/StreamRawPredict",
         "status": "Verified",
         "tests": [
-          "test/compat/streampredict_test.go:182 TestStreamingPredictOnTheEmbeddingModel",
+          "test/compat/streampredict_test.go:181 TestStreamingPredictOnTheEmbeddingModel",
           "test/compat/streampredict_test.go:50 TestStreamingPredictOnTheGenerationModel"
         ]
       },

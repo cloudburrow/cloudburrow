@@ -233,13 +233,29 @@ func TestCloudRunEditFormIsPrefilledAndGivesFocusBack(t *testing.T) {
 
 // clickText clicks, with the mouse, the element sel matches whose text is
 // text, once it is on screen.
+//
+// A page that draws the element again between the lookup and the click
+// (a list re-read, a panel redrawn when its data arrives) leaves the
+// node chromedp resolved detached, and the click fails with "Could not
+// find node with given id" although the element, drawn anew, is there:
+// main run 45126544176, TestIAMPolicyAnalyzerThroughThePage's Run in
+// Saved queries. The element is then looked up again, a few times; any
+// other failure, or one that persists, fails the test as before.
 func (p *tab) clickText(sel, text string) {
 	p.t.Helper()
 	find := fmt.Sprintf(`[...document.querySelectorAll(%q)].find((n) => n.textContent.trim() === %q && n.getClientRects().length)`, sel, text)
-	p.waitFor(find + ` !== undefined`)
-	p.eval(fmt.Sprintf(`(() => { document.querySelectorAll("[data-cb-click]").forEach((n) => n.removeAttribute("data-cb-click"));
+	for attempt := 1; ; attempt++ {
+		p.waitFor(find + ` !== undefined`)
+		p.eval(fmt.Sprintf(`(() => { document.querySelectorAll("[data-cb-click]").forEach((n) => n.removeAttribute("data-cb-click"));
 		%s.setAttribute("data-cb-click", ""); return true; })()`, find), nil)
-	p.run(chromedp.Click(chromedp.CSS(`[data-cb-click]`)))
+		err := chromedp.Do(p.ctx, chromedp.Click(chromedp.CSS(`[data-cb-click]`)))
+		if err == nil {
+			return
+		}
+		if attempt >= 3 || !strings.Contains(err.Error(), "Could not find node with given id") {
+			p.t.Fatalf("browser: click %q in %s: %v", text, sel, err)
+		}
+	}
 }
 
 // sent are the requests the page made with a method to a path on the console.

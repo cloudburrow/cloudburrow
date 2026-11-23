@@ -71,8 +71,8 @@ func TestStreamingPredictOnTheGenerationModel(t *testing.T) {
 		}
 		parts = append(parts, compatContent(t, m.GetOutputs()))
 	}
-	if len(parts) < 2 || strings.TrimSpace(strings.Join(parts, "")) == "" {
-		t.Errorf("ServerStreamingPredict sent %d messages (%q); want a stream of text", len(parts), parts)
+	if streamTooShort(parts) {
+		t.Errorf("ServerStreamingPredict sent %d messages (%q); want a stream of text, a message per decoded chunk", len(parts), parts)
 	}
 
 	// StreamingPredict, bidirectional.
@@ -84,7 +84,7 @@ func TestStreamingPredictOnTheGenerationModel(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = bs.CloseSend()
-	n := 0
+	var bparts []string
 	for {
 		m, err := bs.Recv()
 		if errors.Is(err, io.EOF) {
@@ -93,11 +93,10 @@ func TestStreamingPredictOnTheGenerationModel(t *testing.T) {
 		if err != nil {
 			t.Fatalf("StreamingPredict: %v", err)
 		}
-		compatContent(t, m.GetOutputs())
-		n++
+		bparts = append(bparts, compatContent(t, m.GetOutputs()))
 	}
-	if n < 2 {
-		t.Errorf("StreamingPredict sent %d messages, want a stream", n)
+	if streamTooShort(bparts) {
+		t.Errorf("StreamingPredict sent %d messages (%q); want a stream of text, a message per decoded chunk", len(bparts), bparts)
 	}
 
 	// DirectPredict: one answer.
@@ -229,4 +228,20 @@ func TestStreamingPredictOnTheEmbeddingModel(t *testing.T) {
 	if status.Code(err) != codes.InvalidArgument {
 		t.Errorf("outputDimensionality 300: %v, want INVALID_ARGUMENT", err)
 	}
+}
+
+// streamTooShort is whether a streamed answer is not a stream: no text,
+// or one message holding more than one word. The local model samples an
+// unconfigured request (#2107, Vertex's default: temperature 1), and the
+// tensor methods take no generation option to ask otherwise, so its
+// answer to the prompt can be a single word, which is one decoded chunk
+// and so one message (main run 45126544176: StreamingPredict "sent 1
+// messages", its text not recorded). An answer of several words in one
+// message is still a failure: the runtime sends one per decode step.
+func streamTooShort(parts []string) bool {
+	text := strings.Join(parts, "")
+	if strings.TrimSpace(text) == "" {
+		return true
+	}
+	return len(parts) < 2 && len(strings.Fields(text)) > 1
 }

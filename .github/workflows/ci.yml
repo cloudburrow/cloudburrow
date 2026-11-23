@@ -561,8 +561,11 @@ jobs:
     # Well above its usual run; a wedged job fails here instead of at GitHub's 6-hour default (#715).
     # The localai shard (#1985) builds the LiteRT-LM image from source when
     # its cache misses, a Bazel build of tens of minutes on the runner's four
-    # vCPUs, before a suite of up to 120 minutes (COMPAT_TIMEOUT).
-    timeout-minutes: ${{ (matrix.shard == 'localai' || matrix.shard == 'localaispeech') && 180 || 90 }}
+    # vCPUs, before a suite of up to 120 minutes (COMPAT_TIMEOUT). The
+    # storage shard's 105: its job took 78 minutes in main run 45126544176
+    # with the browser suite cut off at 20 of them, and that suite's
+    # timeout is now 30m (below).
+    timeout-minutes: ${{ (matrix.shard == 'localai' || matrix.shard == 'localaispeech') && 180 || matrix.shard == 'storage' && 105 || 90 }}
     # Same rule as integration: the suite that caught #268 only after it merged.
     needs: [changes, bigquery-emulator]
     if: github.event_name != 'pull_request' || needs.changes.outputs.heavy == 'true' || contains(github.event.pull_request.labels.*.name, 'run-integration')
@@ -1301,7 +1304,10 @@ jobs:
           # and disk round trip took 152 s in its compat test.
           # And 30m in run since Cloud Build's and the Logging console rounds'
           # tests joined it: 1,005 s in main run 44891736706 before them.
-          BROWSER_TIMEOUT=10m; case "$SHARD" in served|storage|sql) BROWSER_TIMEOUT=20m ;; run) BROWSER_TIMEOUT=30m ;; esac
+          # And 30m in storage: 1,169 s of its 1,200 in main run
+          # 45102950103, then past 20m in 45126544176 with no test hung (the
+          # 200 it reached took 1,187 s; the seven it did not, 43 s before).
+          BROWSER_TIMEOUT=10m; case "$SHARD" in served|sql) BROWSER_TIMEOUT=20m ;; run|storage) BROWSER_TIMEOUT=30m ;; esac
           go test -tags=browser -count=1 -timeout "$BROWSER_TIMEOUT" -v "${SELECT[@]}" ./test/browser/ | tee browser.log || rc=1
           for t in $(go test -tags=browser -list '.*' ./test/browser/ | grep '^Test' | "${PICK[@]}" | grep -vE "$NOT"); do
             grep -q -- "^--- PASS: $t (" browser.log ||

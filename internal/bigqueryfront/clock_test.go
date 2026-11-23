@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -99,5 +100,61 @@ func TestClockOutlivesAFrontRestart(t *testing.T) {
 	restarted.syncPending(engine, httptest.NewRequest(http.MethodGet, "/", nil))
 	if want := int64(time.Hour); len(engineOffsets) != 1 || engineOffsets[0] != want {
 		t.Errorf("the engine was sent %v after the restart, want %d once", engineOffsets, want)
+	}
+}
+
+// TestConcurrentClockReadsNeverSetTheEngineBack: a read of the clock
+// (clock:advance of 0 seconds, as Data Transfer's scheduler makes every few
+// seconds) that overlaps an advance never leaves the engine on the offset
+// from before the advance (main run 45126544176: the engine's clock went
+// back 49 hours, TestBigQueryAlterSchemaTimeTravelLetsGoFirst). The engine
+// holds the read's setting until the advance has added its offset, which
+// is the interleaving that set it back when the offset was read outside
+// clockMu.
+func TestConcurrentClockReadsNeverSetTheEngineBack(t *testing.T) {
+	var mu sync.Mutex
+	var last int64
+	entered := make(chan struct{}, 2)
+	release := make(chan struct{})
+	engine := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			OffsetNanos int64 `json:"offsetNanos"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		entered <- struct{}{}
+		if body.OffsetNanos == 0 {
+			// The read's setting, of the offset before the advance:
+			// held until the advance has had its chance to run.
+			select {
+			case <-release:
+			case <-time.After(300 * time.Millisecond):
+			}
+		}
+		mu.Lock()
+		last = body.OffsetNanos
+		mu.Unlock()
+		writeJSON(w, http.StatusOK, body)
+	})
+	s := &streamBuffers{}
+	advance := func(seconds string) {
+		rec := httptest.NewRecorder()
+		if !s.serveClock(rec, httptest.NewRequest(http.MethodPost, "/cloudburrow/bigquery/v2/clock:advance",
+			strings.NewReader(`{"seconds": `+seconds+`}`)), engine) || rec.Code != http.StatusOK {
+			t.Errorf("clock:advance %s: %d %s", seconds, rec.Code, rec.Body)
+		}
+	}
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() { defer wg.Done(); advance("0") }()
+	<-entered // the read is setting the engine
+	wg.Add(1)
+	go func() { defer wg.Done(); advance("176400") }()
+	time.Sleep(50 * time.Millisecond) // the advance runs, or waits for the read
+	close(release)
+	wg.Wait()
+	mu.Lock()
+	defer mu.Unlock()
+	if want := s.offset.Load(); last != want {
+		t.Errorf("the engine's clock was left at offset %v, the front's is %v", time.Duration(last), time.Duration(want))
 	}
 }

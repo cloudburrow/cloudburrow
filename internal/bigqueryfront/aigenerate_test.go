@@ -155,3 +155,23 @@ func TestScalarAnswers(t *testing.T) {
 		t.Errorf("cosine %f", s)
 	}
 }
+
+// The managed functions, which take no model_params, are sent BigQuery's
+// greedy defaults, so AI.IF in a WHERE clause answers as in the SELECT
+// list (main run 45126544176); model_params' generationConfig is sent as
+// given, and AI.GENERATE without one leaves the endpoint's defaults.
+func TestAIGenerationConfig(t *testing.T) {
+	for _, fn := range []string{"IF", "SCORE", "CLASSIFY"} {
+		cfg := aiGenerationConfig(aiCall{fn: fn}, aiResolved{})
+		if cfg["temperature"] != 0.0 {
+			t.Errorf("AI.%s: generationConfig %v, want temperature 0", fn, cfg)
+		}
+	}
+	given := map[string]any{"temperature": 0.7}
+	if cfg := aiGenerationConfig(aiCall{fn: "GENERATE"}, aiResolved{genCfg: given}); cfg["temperature"] != 0.7 {
+		t.Errorf("AI.GENERATE with model_params: %v", cfg)
+	}
+	if cfg := aiGenerationConfig(aiCall{fn: "GENERATE"}, aiResolved{}); cfg != nil {
+		t.Errorf("AI.GENERATE without model_params: %v, want none", cfg)
+	}
+}
