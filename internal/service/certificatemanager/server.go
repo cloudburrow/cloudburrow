@@ -111,6 +111,9 @@ type Server struct {
 	issuing map[string]bool
 	// trustUsers names what uses a trust config (UseTrustUsers).
 	trustUsers func(name string) []string
+	// certUsers names what uses a certificate beside the target proxies
+	// (a backend authentication config; UseCertificateUsers).
+	certUsers func(name string) []string
 }
 
 // New returns a Server with its state restored.

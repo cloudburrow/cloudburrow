@@ -451,6 +451,11 @@ func (s *Server) DeleteCertificate(_ context.Context, req *cmpb.DeleteCertificat
 	if used := s.outLocked(c).GetUsedBy(); len(used) > 0 {
 		return nil, apierror.FailedPrecondition("Certificate '%s' is in use by '%s': remove it from there first.", req.GetName(), used[0].GetName())
 	}
+	if s.certUsers != nil {
+		if u := s.certUsers(req.GetName()); len(u) > 0 {
+			return nil, apierror.FailedPrecondition("Certificate '%s' is in use by '%s': remove it from there first.", req.GetName(), u[0])
+		}
+	}
 	delete(s.res, req.GetName())
 	delete(s.keys, req.GetName())
 	return s.opLocked(req.GetName(), "delete", nil)

@@ -49,7 +49,7 @@ import (
 
 const nsPrefix = "//networksecurity.googleapis.com/"
 
-var nsRefRE = regexp.MustCompile(`^projects/[^/]+/locations/([a-z0-9-]+)/(serverTlsPolicies|authorizationPolicies|clientTlsPolicies)/[A-Za-z0-9_-]{1,63}$`)
+var nsRefRE = regexp.MustCompile(`^projects/[^/]+/locations/([a-z0-9-]+)/(serverTlsPolicies|authorizationPolicies|clientTlsPolicies|backendAuthenticationConfigs)/[A-Za-z0-9_-]{1,63}$`)
 
 // nsRef checks a Network Security policy reference of coll and returns it
 // in Google's form, //networksecurity.googleapis.com/projects/P/locations/L/coll/N.

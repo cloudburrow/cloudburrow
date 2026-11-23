@@ -123,6 +123,9 @@ func buildSecurityPolicy(s *Server, x lbCtx, b, old obj) (obj, error) {
 		if err != nil {
 			return nil, err
 		}
+		if err := s.checkAddressGroupUse(x, typ, r, "resource.rules["+strconv.Itoa(i)+"]"); err != nil {
+			return nil, err
+		}
 		p := rulePriority(r)
 		if seen[p] {
 			return nil, invalid("Invalid value for field 'resource.rules[%d].priority': '%d'. Cannot have rules with the same priorities.", i, p)
@@ -354,7 +357,7 @@ func checkArmorExpr(typ, e, field string) error {
 		}
 	}
 	if m := unservedArmorFunc.FindString(e); m != "" {
-		return unimplemented("%s is not served here: it needs Cloud Armor Enterprise's threat intelligence, address groups, Adaptive Protection or Google's managed rules, which a local proxy has no feed for (#2160)", strings.TrimSuffix(m, "("))
+		return unimplemented("%s is not served here: it reads Google Threat Intelligence's IP feeds, Adaptive Protection's models or Google's managed protection rules, which Google keeps and a local proxy has no copy of (#2160)", strings.TrimSuffix(m, "("))
 	}
 	if typ == "CLOUD_ARMOR_EDGE" {
 		if m := edgeDisallowed.FindString(e); m != "" {
@@ -373,7 +376,7 @@ func checkArmorExpr(typ, e, field string) error {
 }
 
 var (
-	unservedArmorFunc = regexp.MustCompile(`\b(evaluateThreatIntelligence|evaluateAddressGroup|evaluateOrganizationAddressGroup|evaluateAdaptiveProtection|evaluateAdaptiveProtectionAutoDeploy|evaluateManagedRules)\(`)
+	unservedArmorFunc = regexp.MustCompile(`\b(evaluateThreatIntelligence|evaluateAdaptiveProtection|evaluateAdaptiveProtectionAutoDeploy|evaluateManagedRules)\(`)
 	edgeDisallowed    = regexp.MustCompile(`\b(request\.body|request\.params|origin\.user_ip|origin\.tls_ja3_fingerprint|origin\.tls_ja4_fingerprint|token\.[a-z_.]+)`)
 	wafCallRE         = regexp.MustCompile(`evaluatePreconfigured(Waf|Expr)\(\s*['"]([^'"]+)['"]`)
 )
@@ -631,6 +634,9 @@ func addSecurityRule(s *Server, x lbCtx, o, b obj) (obj, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := s.checkAddressGroupUse(x, str(o, "type"), r, "resource"); err != nil {
+		return nil, err
+	}
 	if ruleAt(o, rulePriority(r)) >= 0 {
 		return nil, invalid("Invalid value for field 'resource.priority': '%d'. Cannot have rules with the same priorities.", rulePriority(r))
 	}
@@ -675,6 +681,9 @@ func patchSecurityRule(s *Server, x lbCtx, o, b obj) (obj, error) {
 	}
 	r, err := buildSecurityRule(s, str(o, "type"), merged, "resource", false)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.checkAddressGroupUse(x, str(o, "type"), r, "resource"); err != nil {
 		return nil, err
 	}
 	if p == defaultRulePriority && rulePriority(r) != p {

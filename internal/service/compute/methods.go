@@ -277,6 +277,7 @@ var Methods = []Method{
 	{"compute.regionAutoscalers.update", true},
 	{"compute.projects.get", true},
 	{"compute.projects.setCommonInstanceMetadata", true},
+	{"compute.projects.setCloudArmorTier", true},
 	{"compute.projects.disableXpnHost", true},
 	{"compute.projects.disableXpnResource", true},
 	{"compute.projects.enableXpnHost", true},

@@ -216,6 +216,9 @@ func buildBackendService(s *Server, x lbCtx, b, old obj) (obj, error) {
 	if err := s.backendSecuritySettings(x, b, o); err != nil {
 		return nil, err
 	}
+	if err := s.backendTLSSettings(x, b, o, proto, scheme); err != nil {
+		return nil, err
+	}
 	for _, h := range append(strs(b, "customRequestHeaders"), strs(b, "customResponseHeaders")...) {
 		if i := strings.Index(h, ":"); i <= 0 {
 			return nil, invalid("Invalid value for field 'resource.customRequestHeaders': '%s'. A custom header is 'NAME:VALUE'.", h)

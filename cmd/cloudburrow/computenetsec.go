@@ -1,7 +1,9 @@
 package main
 
 import (
+	"crypto/sha256"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/pem"
 	"strings"
 
@@ -29,6 +31,40 @@ func (c computeNetSec) PolicyExists(name string) bool { return c.ns.Exists(name)
 
 func (c computeNetSec) Authorize(r compute.AuthzRequest) bool { return c.ns.Authorize(r) }
 
+// AddressGroupItems are a Cloud Armor address group's items
+// (compute.AddressGroups).
+func (c computeNetSec) AddressGroupItems(name string) ([]string, bool) { return c.ns.AddressGroupItems(name) }
+
+// BackendAuthConfig is a backend authentication config with its trust
+// config and client certificate resolved (compute.BackendAuthentication).
+func (c computeNetSec) BackendAuthConfig(name string) (compute.BackendAuthConfig, bool) {
+	p, ok := c.ns.BackendAuthenticationConfig(name)
+	if !ok {
+		return compute.BackendAuthConfig{}, false
+	}
+	out := compute.BackendAuthConfig{TrustConfig: p.GetTrustConfig(), PublicRoots: p.GetWellKnownRoots().String() == "PUBLIC_ROOTS"}
+	h := sha256.New()
+	h.Write([]byte(p.GetEtag()))
+	if out.TrustConfig != "" {
+		if tc, found := c.cm.TrustConfig(out.TrustConfig); found {
+			out.TrustFound = true
+			out.Roots, out.Intermediates, out.Allowlisted = trustCerts(tc)
+			h.Write([]byte(tc.GetEtag() + tc.GetUpdateTime().String()))
+		}
+	}
+	if cc := p.GetClientCertificate(); cc != "" {
+		if pairs := c.cm.Certificates([]string{cc}); len(pairs) > 0 {
+			pair := pairs[0]
+			out.ClientCert = &pair
+			for _, d := range pair.Certificate {
+				h.Write(d)
+			}
+		}
+	}
+	out.Version = hex.EncodeToString(h.Sum(nil))
+	return out, true
+}
+
 func (c computeNetSec) ServerTLS(name string) (compute.ServerTLSPolicy, bool) {
 	p, ok := c.ns.ServerTLSPolicy(name)
 	if !ok {
@@ -51,6 +87,33 @@ func (c computeNetSec) ServerTLS(name string) (compute.ServerTLSPolicy, bool) {
 	roots, inter, allow := trustPools(tc)
 	out.Roots, out.Intermediates, out.Allowlisted = roots, inter, allow
 	return out, true
+}
+
+// trustCerts are a trust config's anchors as a pool, and its
+// intermediates and allowlist as certificates.
+func trustCerts(tc *cmpb.TrustConfig) (roots *x509.CertPool, inter, allow []*x509.Certificate) {
+	roots, _, allow = trustPools(tc)
+	for _, ts := range tc.GetTrustStores() {
+		for _, a := range ts.GetIntermediateCas() {
+			inter = append(inter, parsePEMCerts(a.GetPemCertificate())...)
+		}
+	}
+	return roots, inter, allow
+}
+
+func parsePEMCerts(p string) []*x509.Certificate {
+	var out []*x509.Certificate
+	rest := []byte(p)
+	for {
+		var b *pem.Block
+		b, rest = pem.Decode(rest)
+		if b == nil {
+			return out
+		}
+		if c, err := x509.ParseCertificate(b.Bytes); err == nil {
+			out = append(out, c)
+		}
+	}
 }
 
 // trustPools are a trust config's anchors, intermediates and allowlist.
@@ -110,8 +173,17 @@ func useNetSec(api *compute.Server, ns *networksecurity.Server, cm *certificatem
 			return strAny(out["loadBalancingScheme"]), true
 		},
 		Users: func(name string) []string { return netSecUsers(api, name) },
+		AddressGroupReferences: func(name string) []networksecurity.AddressGroupReference {
+			var out []networksecurity.AddressGroupReference
+			for _, r := range api.AddressGroupReferences(name) {
+				out = append(out, networksecurity.AddressGroupReference{SecurityPolicy: r.SecurityPolicy, RulePriority: r.RulePriority})
+			}
+			return out
+		},
+		CertificateScope: cm.CertificateScope,
 	})
 	cm.UseTrustUsers(ns.TrustConfigUsers)
+	cm.UseCertificateUsers(ns.CertificateUsers)
 }
 
 // netSecUsers are the target HTTPS proxies and backend services that name
@@ -143,7 +215,8 @@ func netSecUsers(api *compute.Server, name string) []string {
 	})
 	scan("backendServices", func(m map[string]any) []string {
 		ss, _ := m["securitySettings"].(map[string]any)
-		return []string{strAny(ss["clientTlsPolicy"])}
+		ts, _ := m["tlsSettings"].(map[string]any)
+		return []string{strAny(ss["clientTlsPolicy"]), strAny(ts["authenticationConfig"])}
 	})
 	return out
 }
