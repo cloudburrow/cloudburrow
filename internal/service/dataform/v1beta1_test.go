@@ -159,8 +159,8 @@ func TestBetaBranchesAndShallowWorkspaces(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := c.CreateRepository(ctx, &b1pb.CreateRepositoryRequest{Parent: parent, RepositoryId: "r2", Repository: &b1pb.Repository{
-		GitRemoteSettings: &b1pb.Repository_GitRemoteSettings{Url: "https://x", AccountConnector: ptr("projects/p/locations/l/accountConnectors/a")}}}); code(err) != codes.Unimplemented {
-		t.Fatalf("account_connector: %v, want UNIMPLEMENTED", err)
+		GitRemoteSettings: &b1pb.Repository_GitRemoteSettings{Url: "https://x", DefaultBranch: "main", AccountConnector: ptr("projects/p/accountConnectors/a")}}}); code(err) != codes.InvalidArgument {
+		t.Fatalf("a malformed account_connector: %v, want INVALID_ARGUMENT", err)
 	}
 	if _, err := c.CreateWorkspace(ctx, &b1pb.CreateWorkspaceRequest{Parent: repo.GetName(), WorkspaceId: "bad", Workspace: &b1pb.Workspace{Depth: 1}}); code(err) != codes.InvalidArgument {
 		t.Fatalf("depth without branch management: %v", err)

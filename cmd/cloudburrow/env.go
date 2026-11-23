@@ -619,6 +619,14 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 			envVar{cliEndpointVar("dataform"), addr(cfg.Endpoints.Dataform),
 				"Dataform v1, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint"})
 	}
+	// The Dataproc API's serverless surface (#2156): the Go client's
+	// batch, session and session template controllers, and Spark Connect
+	// clients of its sessions, on one port.
+	if dataprocEnabled(cfg) && cfg.Endpoints.Dataproc != 0 {
+		vars = append(vars,
+			envVar{cliEndpointVar("dataproc"), addr(cfg.Endpoints.Dataproc),
+				"Dataproc v1 batches, sessions and session templates (Serverless for Apache Spark), gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint"})
+	}
 	// Cloud Trace (#2118): the Cloud Trace API v1 and v2 for the Go client
 	// and gcloud, and the Telemetry API's OTLP trace ingestion on the same
 	// port, for OpenTelemetry's OTLP exporters (OTLP/gRPC at the root,
@@ -880,6 +888,7 @@ func withLivePorts(cfg config.Config, live map[string]string) config.Config {
 		"workflows":              &e.Workflows,
 		"parametermanager":       &e.ParameterManager,
 		"dataform":               &e.Dataform,
+		"dataproc":               &e.Dataproc,
 		"apphub":                 &e.AppHub,
 		"trace":                  &e.Trace,
 		// The local AI endpoint, which serves Vertex AI's Model Registry

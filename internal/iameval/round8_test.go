@@ -95,7 +95,9 @@ func TestRoundEightAITables(t *testing.T) {
 	for _, svc := range []*Service{VertexAI, DocumentAI, Speech} {
 		for full, m := range svc.Methods {
 			service, method, _ := strings.Cut(strings.TrimPrefix(full, "/"), "/")
-			if Services[service] != svc {
+			// IAMPolicy is the mixin every API shares (Colab Enterprise's
+			// runtime templates', #2105): no table owns it.
+			if Services[service] != svc && service != "google.iam.v1.IAMPolicy" {
 				t.Errorf("%s: service %s is not registered to its table", full, service)
 			}
 			d, err := protoregistry.GlobalFiles.FindDescriptorByName(protoreflect.FullName(service))
@@ -142,6 +144,7 @@ func TestRoundEightAITables(t *testing.T) {
 			"projects/p/locations/us-central1/publishers/google/models/gemini"},
 		{AIJSON, "/v1/projects/p/locations/l/endpoints/e:predict", "aiplatform.endpoints.predict", "projects/p/locations/l/endpoints/e"},
 		{AIJSON, "/v1/projects/p/locations/l/endpoints/e:explain", "aiplatform.endpoints.explain", "projects/p/locations/l/endpoints/e"},
+		{AIJSON, "/v1/projects/p/locations/l/notebookRuntimeTemplates:setDefault", "aiplatform.notebookRuntimeTemplates.setDefault", "projects/p/locations/l"},
 		{AIJSON, "/v1beta1/projects/p/locations/l/endpoints/e/chat/completions", "aiplatform.endpoints.predict", "projects/p/locations/l/endpoints/e"},
 		{SpeechJSON, "/v2/projects/p/locations/global/recognizers/_:recognize", "speech.recognizers.recognize", "projects/p/locations/global/recognizers/_"},
 		{TranslationJSON, "/v3/projects/p/locations/global:translateText", "cloudtranslate.generalModels.predict", "projects/p/locations/global"},

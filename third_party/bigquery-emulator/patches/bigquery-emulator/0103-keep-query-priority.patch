@@ -1,0 +1,39 @@
+CloudBurrow patch 103 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#2105).
+
+The bug: a query jobs.insert with configuration.query.priority BATCH
+was reported back as INTERACTIVE: the engine set every query job's
+priority to INTERACTIVE. BigQuery keeps the priority a job was inserted
+with ("Specifies a priority for the query. Possible values include
+INTERACTIVE and BATCH. The default value is INTERACTIVE",
+https://cloud.google.com/bigquery/docs/reference/rest/v2/Job#JobConfigurationQuery).
+Dataform's invocation_config.query_priority BATCH runs its actions as
+batch jobs, and BigQuery Studio's Run "as interactive job with high
+priority" cleared asks for it.
+
+The patch keeps BATCH when the request asked for it; anything else is
+INTERACTIVE as before. The job still runs at once: a local engine has no
+queue.
+
+Licence: a modification of goccy/bigquery-emulator, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+--- a/server/handler.go
++++ b/server/handler.go
+@@ -1897,7 +1897,12 @@
+ 	}
+ 	job.Kind = "bigquery#job"
+ 	job.Configuration.JobType = "QUERY"
+-	job.Configuration.Query.Priority = "INTERACTIVE"
++	// CloudBurrow patch (cloudburrow/cloudburrow#2105): a query job keeps
++	// the priority it was inserted with, BATCH or INTERACTIVE (the
++	// default), as BigQuery reports it in configuration.query.priority.
++	if job.Configuration.Query.Priority != "BATCH" {
++		job.Configuration.Query.Priority = "INTERACTIVE"
++	}
+ 	job.SelfLink = fmt.Sprintf(
+ 		"http://%s/bigquery/v2/projects/%s/jobs/%s",
+ 		r.server.httpServer.Addr,

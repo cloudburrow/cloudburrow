@@ -86,6 +86,7 @@ import (
 	_ "cloud.google.com/go/container/apiv1/containerpb"
 	_ "cloud.google.com/go/dataform/apiv1/dataformpb"
 	_ "cloud.google.com/go/dataform/apiv1beta1/dataformpb"
+	_ "cloud.google.com/go/dataproc/v2/apiv1/dataprocpb"
 	_ "cloud.google.com/go/datastore/admin/apiv1/adminpb"
 	_ "cloud.google.com/go/datastore/apiv1/datastorepb"
 	_ "cloud.google.com/go/developerconnect/apiv1/developerconnectpb"
@@ -235,7 +236,15 @@ var areas = []area{
 		// countTokens and computeTokens (#1937).
 		"google.cloud.aiplatform.v1.LlmUtilityService",
 		// Context caching (#2107).
-		"google.cloud.aiplatform.v1.GenAiCacheService"}},
+		"google.cloud.aiplatform.v1.GenAiCacheService",
+		// Colab Enterprise's runtime templates and runtimes (#2105), and
+		// its schedules of notebook executions.
+		"google.cloud.aiplatform.v1.NotebookService", "google.cloud.aiplatform.v1.ScheduleService"},
+		// The runtime templates' IAM policies (#2105): the IAMPolicy mixin,
+		// whose keys the kms area holds, so named by their discovery IDs.
+		Extra: []string{"aiplatform.projects.locations.notebookRuntimeTemplates.getIamPolicy",
+			"aiplatform.projects.locations.notebookRuntimeTemplates.setIamPolicy",
+			"aiplatform.projects.locations.notebookRuntimeTemplates.testIamPermissions"}},
 	// v1beta1's PredictionService, for ChatCompletions on those endpoints
 	// (#1840) and v1's methods bridged (#1937): a page of its own, since
 	// its method names repeat v1's.
@@ -365,6 +374,11 @@ var areas = []area{
 	// Dataform v1beta1 (#2105), on the same port over the v1 server; a page
 	// of its own, since its service has v1's name.
 	{Key: "dataformv1beta1", Title: "Dataform (v1beta1)", Own: true, Services: []string{"google.cloud.dataform.v1beta1.Dataform"}},
+	// Serverless for Apache Spark (#2156): the Dataproc API's batch,
+	// session and session template controllers, CloudBurrow's own; its
+	// clusters, jobs and workflow templates are not served.
+	{Key: "dataproc", Title: "Dataproc: Serverless for Apache Spark (v1)", Own: true, Services: []string{
+		"google.cloud.dataproc.v1.BatchController", "google.cloud.dataproc.v1.SessionController", "google.cloud.dataproc.v1.SessionTemplateController"}},
 	// App Hub (#2110): CloudBurrow's own, gRPC and JSON on one port; its
 	// Locations, Operations and IAM mixins are other areas' rows.
 	{Key: "apphub", Title: "App Hub (v1)", Own: true, Services: []string{"google.cloud.apphub.v1.AppHub"}},

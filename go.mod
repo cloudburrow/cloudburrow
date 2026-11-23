@@ -23,6 +23,7 @@ require (
 	cloud.google.com/go/container v1.56.1
 	cloud.google.com/go/containeranalysis v0.21.1
 	cloud.google.com/go/dataform v1.9.0
+	cloud.google.com/go/dataproc/v2 v2.28.1
 	cloud.google.com/go/datastore v1.27.0
 	cloud.google.com/go/developerconnect v1.2.0
 	cloud.google.com/go/documentai v1.49.0

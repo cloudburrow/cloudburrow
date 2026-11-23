@@ -23,24 +23,16 @@ func checkInvocationConfig(c *dfpb.InvocationConfig) error {
 	if c == nil {
 		return nil
 	}
-	if c.GetEndUserAuthConfig() != nil {
-		return apierror.Unimplemented("invocation_config.end_user_auth_config is not served by CloudBurrow")
-	}
 	// DEFAULT "runs all actions except unit tests. Same as
-	// ALL_EXCEPT_UNIT_TESTS", which is what every invocation here does.
-	// UNIT_TESTS_ONLY would run the project's unit tests, which a
-	// compilation result carries as no action and an invocation reports in
-	// no field Google documents.
-	if c.GetExecutionMode() == dfpb.InvocationConfig_UNIT_TESTS_ONLY {
-		return apierror.Unimplemented("invocation_config.execution_mode UNIT_TESTS_ONLY is not served by CloudBurrow: unit tests are not run")
-	}
+	// ALL_EXCEPT_UNIT_TESTS"; UNIT_TESTS_ONLY runs the bigquery_unit_test
+	// actions alone (pipelines.go).
 	if n := c.ConcurrentActionsLimit; n != nil && *n < 0 {
 		return apierror.InvalidArgument("invocation_config.concurrent_actions_limit must not be negative")
 	}
 	return nil
 }
 
-func (s *Server) CreateWorkflowConfig(_ context.Context, req *dfpb.CreateWorkflowConfigRequest) (*dfpb.WorkflowConfig, error) {
+func (s *Server) CreateWorkflowConfig(ctx context.Context, req *dfpb.CreateWorkflowConfigRequest) (*dfpb.WorkflowConfig, error) {
 	if err := checkID("workflow_config_id", req.GetWorkflowConfigId()); err != nil {
 		return nil, err
 	}
@@ -70,6 +62,7 @@ func (s *Server) CreateWorkflowConfig(_ context.Context, req *dfpb.CreateWorkflo
 		return nil, apierror.AlreadyExists("WorkflowConfig %s already exists", name)
 	}
 	w.Name = name
+	endUser(ctx, w.GetInvocationConfig())
 	w.CreateTime, w.UpdateTime = s.now(), s.now()
 	w.RecentScheduledExecutionRecords, w.InternalMetadata = nil, nil
 	s.workflows[name] = w
@@ -118,7 +111,7 @@ func (s *Server) ListWorkflowConfigs(_ context.Context, req *dfpb.ListWorkflowCo
 	return out, nil
 }
 
-func (s *Server) UpdateWorkflowConfig(_ context.Context, req *dfpb.UpdateWorkflowConfigRequest) (*dfpb.WorkflowConfig, error) {
+func (s *Server) UpdateWorkflowConfig(ctx context.Context, req *dfpb.UpdateWorkflowConfigRequest) (*dfpb.WorkflowConfig, error) {
 	in := req.GetWorkflowConfig()
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -137,6 +130,7 @@ func (s *Server) UpdateWorkflowConfig(_ context.Context, req *dfpb.UpdateWorkflo
 			next.ReleaseConfig = in.GetReleaseConfig()
 		case "invocation_config":
 			next.InvocationConfig = clone(in.GetInvocationConfig())
+			endUser(ctx, next.InvocationConfig)
 		case "cron_schedule":
 			next.CronSchedule = in.GetCronSchedule()
 		case "time_zone":
@@ -188,9 +182,6 @@ func (s *Server) CreateWorkflowInvocation(ctx context.Context, req *dfpb.CreateW
 	if in == nil {
 		return nil, apierror.InvalidArgument("workflow_invocation is required")
 	}
-	if in.GetPipelineConfig() != nil {
-		return nil, apierror.Unimplemented("pipeline_config is not served by CloudBurrow")
-	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, err := s.repo(req.GetParent()); err != nil {
@@ -224,6 +215,9 @@ func (s *Server) CreateWorkflowInvocation(ctx context.Context, req *dfpb.CreateW
 	if err := checkInvocationConfig(cfg); err != nil {
 		return nil, err
 	}
+	if _, ok := in.GetCompilationSource().(*dfpb.WorkflowInvocation_CompilationResult); ok {
+		endUser(ctx, cfg)
+	}
 	if !strings.HasPrefix(compName, req.GetParent()+"/compilationResults/") {
 		return nil, apierror.InvalidArgument("compilation result %q must be one of %s", compName, req.GetParent())
 	}
@@ -234,7 +228,7 @@ func (s *Server) CreateWorkflowInvocation(ctx context.Context, req *dfpb.CreateW
 	if len(comp.C.GetCompilationErrors()) > 0 {
 		return nil, apierror.InvalidArgument("CompilationResult %s has compilation errors and cannot be invoked", compName)
 	}
-	selected, err := selectActions(comp.Actions, cfg)
+	selected, err := selectActions(byExecutionMode(comp.Actions, cfg), cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -242,6 +236,8 @@ func (s *Server) CreateWorkflowInvocation(ctx context.Context, req *dfpb.CreateW
 	in.Name = req.GetParent() + "/workflowInvocations/" + newUUID()
 	in.InvocationConfig = cfg
 	in.ResolvedCompilationResult = compName
+	// Output only: the compilation's pipeline.
+	in.PipelineConfig = clone(comp.C.GetCodeCompilationConfig().GetPipelineConfig())
 	in.State = dfpb.WorkflowInvocation_RUNNING
 	in.InvocationTiming = &interval.Interval{StartTime: now}
 	in.DataEncryptionState, in.InternalMetadata = nil, nil
@@ -250,10 +246,6 @@ func (s *Server) CreateWorkflowInvocation(ctx context.Context, req *dfpb.CreateW
 		wa := &dfpb.WorkflowInvocationAction{Target: clone(a.GetTarget()), CanonicalTarget: clone(a.GetCanonicalTarget()), State: dfpb.WorkflowInvocationAction_PENDING}
 		if disabled(a) {
 			wa.State = dfpb.WorkflowInvocationAction_DISABLED
-		}
-		if a.GetNotebook() != nil || a.GetDataPreparation() != nil {
-			wa.State = dfpb.WorkflowInvocationAction_FAILED
-			wa.FailureReason = "notebooks and data preparations are not run by CloudBurrow's Dataform"
 		}
 		inv.Actions = append(inv.Actions, wa)
 	}
@@ -272,9 +264,19 @@ func (s *Server) CreateWorkflowInvocation(ctx context.Context, req *dfpb.CreateW
 	return clone(in), nil
 }
 
+type batchPriorityKey struct{}
+
+// BatchPriority reports whether an invocation runs its BigQuery jobs at
+// BATCH priority (invocation_config.query_priority); a Warehouse reads it
+// from the context it is given.
+func BatchPriority(ctx context.Context) bool {
+	b, _ := ctx.Value(batchPriorityKey{}).(bool)
+	return b
+}
+
 func disabled(a *dfpb.CompilationResultAction) bool {
 	return a.GetRelation().GetDisabled() || a.GetOperations().GetDisabled() || a.GetAssertion().GetDisabled() ||
-		a.GetNotebook().GetDisabled() || a.GetDataPreparation().GetDisabled()
+		a.GetNotebook().GetDisabled() || a.GetDataPreparation().GetDisabled() || a.GetBigqueryUnitTest().GetDisabled()
 }
 
 func deps(a *dfpb.CompilationResultAction) []*dfpb.Target {
@@ -301,8 +303,35 @@ func tags(a *dfpb.CompilationResultAction) []string {
 		return a.GetOperations().GetTags()
 	case a.GetAssertion() != nil:
 		return a.GetAssertion().GetTags()
+	case a.GetNotebook() != nil:
+		return a.GetNotebook().GetTags()
+	case a.GetDataPreparation() != nil:
+		return a.GetDataPreparation().GetTags()
+	case a.GetBigqueryUnitTest() != nil:
+		return a.GetBigqueryUnitTest().GetTags()
 	}
 	return nil
+}
+
+// byExecutionMode keeps the unit tests alone with UNIT_TESTS_ONLY, and
+// every other action otherwise.
+func byExecutionMode(all []*dfpb.CompilationResultAction, cfg *dfpb.InvocationConfig) []*dfpb.CompilationResultAction {
+	tests := cfg.GetExecutionMode() == dfpb.InvocationConfig_UNIT_TESTS_ONLY
+	var out []*dfpb.CompilationResultAction
+	for _, a := range all {
+		if (a.GetBigqueryUnitTest() != nil) == tests {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+// endUser fills end_user_auth_config's output-only user_email with the
+// caller, the user the invocations run under.
+func endUser(ctx context.Context, c *dfpb.InvocationConfig) {
+	if e := c.GetEndUserAuthConfig(); e != nil {
+		e.UserEmail = strings.TrimPrefix(callerOf(ctx), "user:")
+	}
 }
 
 // selectActions picks the actions an invocation config names (every
@@ -428,6 +457,11 @@ func endTiming(i *interval.Interval, t *timestamppb.Timestamp) {
 // counts as done for its dependents, as Dataform runs them.
 func (s *Server) run(ctx context.Context, name string, comp *compilation, actions []*dfpb.CompilationResultAction, cfg *dfpb.InvocationConfig) {
 	location := comp.C.GetCodeCompilationConfig().GetDefaultLocation()
+	// query_priority BATCH: the actions' BigQuery jobs are batch jobs
+	// (InvocationConfig.QueryPriority; INTERACTIVE, the default, otherwise).
+	if cfg.GetQueryPriority() == dfpb.InvocationConfig_BATCH {
+		ctx = context.WithValue(ctx, batchPriorityKey{}, true)
+	}
 	outcome := map[string]dfpb.WorkflowInvocationAction_State{}
 	failed := false
 	for i, a := range actions {
@@ -473,10 +507,37 @@ func (s *Server) run(ctx context.Context, name string, comp *compilation, action
 		_ = s.save()
 		s.mu.Unlock()
 
-		script, jobID, err := s.execute(ctx, a, location, cfg)
+		var err error
+		var detail func(*dfpb.WorkflowInvocationAction)
+		switch {
+		case a.GetNotebook() != nil:
+			var act *dfpb.WorkflowInvocationAction_NotebookAction
+			act, err = s.runNotebook(ctx, name, a, comp.C.GetCodeCompilationConfig().GetDefaultNotebookRuntimeOptions())
+			detail = func(w *dfpb.WorkflowInvocationAction) {
+				w.Action = &dfpb.WorkflowInvocationAction_NotebookAction_{NotebookAction: act}
+			}
+		case a.GetBigqueryUnitTest() != nil:
+			var act *dfpb.WorkflowInvocationAction_BigQueryUnitTestAction
+			act, err = s.runUnitTest(ctx, a, location)
+			detail = func(w *dfpb.WorkflowInvocationAction) {
+				w.Action = &dfpb.WorkflowInvocationAction_BigqueryUnitTestAction{BigqueryUnitTestAction: act}
+			}
+		case a.GetDataPreparation() != nil:
+			var act *dfpb.WorkflowInvocationAction_DataPreparationAction
+			act, err = s.runDataPreparation(ctx, a, location, comp.Merge[targetKey(a.GetTarget())])
+			detail = func(w *dfpb.WorkflowInvocationAction) {
+				w.Action = &dfpb.WorkflowInvocationAction_DataPreparationAction_{DataPreparationAction: act}
+			}
+		default:
+			var script, jobID string
+			script, jobID, err = s.execute(ctx, a, location, cfg)
+			detail = func(w *dfpb.WorkflowInvocationAction) {
+				w.Action = &dfpb.WorkflowInvocationAction_BigqueryAction{BigqueryAction: &dfpb.WorkflowInvocationAction_BigQueryAction{SqlScript: script, JobId: jobID}}
+			}
+		}
 
 		s.mu.Lock()
-		wa.Action = &dfpb.WorkflowInvocationAction_BigqueryAction{BigqueryAction: &dfpb.WorkflowInvocationAction_BigQueryAction{SqlScript: script, JobId: jobID}}
+		detail(wa)
 		endTiming(wa.InvocationTiming, s.now())
 		switch {
 		case ctx.Err() != nil:

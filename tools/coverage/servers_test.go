@@ -18,6 +18,7 @@ import (
 	"cloud.google.com/go/billing/budgets/apiv1/budgetspb"
 	"cloud.google.com/go/cloudquotas/apiv1/cloudquotaspb"
 	dfpb "cloud.google.com/go/dataform/apiv1/dataformpb"
+	dataprocpb "cloud.google.com/go/dataproc/v2/apiv1/dataprocpb"
 	iamadminpb "cloud.google.com/go/iam/admin/apiv1/adminpb"
 	iamv2pb "cloud.google.com/go/iam/apiv2/iampb"
 	iamv3pb "cloud.google.com/go/iam/apiv3/iampb"
@@ -46,6 +47,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/billing"
 	"github.com/cloudburrow/cloudburrow/internal/service/cloudquotas"
 	"github.com/cloudburrow/cloudburrow/internal/service/dataform"
+	"github.com/cloudburrow/cloudburrow/internal/service/dataproc"
 	"github.com/cloudburrow/cloudburrow/internal/service/datatransfer"
 	"github.com/cloudburrow/cloudburrow/internal/service/gke"
 	"github.com/cloudburrow/cloudburrow/internal/service/kms"
@@ -115,6 +117,15 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	}
 	dfpb.RegisterDataformServer(srv, df)
 	df.RegisterBeta(srv)
+	// Serverless for Apache Spark (#2156): the three controllers; its
+	// Locations and Operations mixins are other services' rows.
+	dp, err := dataproc.NewServer(dataproc.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dataprocpb.RegisterBatchControllerServer(srv, dp)
+	dataprocpb.RegisterSessionControllerServer(srv, dp)
+	dataprocpb.RegisterSessionTemplateControllerServer(srv, dp)
 	// App Hub alone (#2110): its mixins are other services' rows.
 	ah, err := apphub.NewServer("", apphub.Options{})
 	if err != nil {
@@ -281,6 +292,12 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 		// Folder capabilities are v3 REST only (#1519), checked over HTTP
 		// by TestFolderCapabilities (internal/service/resourcemanager).
 		if strings.HasPrefix(m, "cloudresourcemanager.folders.capabilities.") {
+			continue
+		}
+		// Colab Enterprise runtime templates' IAM methods (#2105) are the
+		// IAMPolicy mixin, named by their discovery IDs; TestNotebookTemplateIAM
+		// checks them over gRPC and REST (internal/service/vertexai).
+		if strings.HasPrefix(m, "aiplatform.projects.locations.notebookRuntimeTemplates.") {
 			continue
 		}
 		// KMS DeleteKeyRing (#1595) has no descriptor (service.proto has

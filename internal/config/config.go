@@ -140,6 +140,12 @@ const (
 	// instance's BigQuery and its git remotes are its Secure Source
 	// Manager repositories.
 	ServiceDataform Service = "dataform"
+	// ServiceDataproc is the Dataproc API's serverless surface
+	// (dataproc.googleapis.com, #2156), Serverless for Apache Spark's
+	// batches, sessions and session templates, served in the CLI process
+	// on its own port; its workloads run on the CLI's Apache Spark runner
+	// beside BigQuery, which it needs.
+	ServiceDataproc Service = "dataproc"
 	// ServiceAppHub is App Hub (apphub.googleapis.com, #2110), served in
 	// the CLI process on its own port; it discovers the instance's Cloud Run
 	// services and jobs and Kubernetes Engine clusters.
@@ -160,7 +166,7 @@ func AllServices() []Service {
 
 // OptionalServices lists the opt-in services, in a stable order.
 func OptionalServices() []Service {
-	return []Service{ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner, ServiceCloudSQL, ServiceBigQuery, ServiceMemorystore, ServiceCloudSQLMySQL, ServiceScheduler, ServiceLogging, ServiceKMS, ServiceBackupDR, ServicePrivateCA, ServiceGKE, ServiceMonitoring, ServiceCompute, ServiceWorkflows, ServiceParameterManager, ServiceDataform, ServiceAppHub, ServiceTrace}
+	return []Service{ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner, ServiceCloudSQL, ServiceBigQuery, ServiceMemorystore, ServiceCloudSQLMySQL, ServiceScheduler, ServiceLogging, ServiceKMS, ServiceBackupDR, ServicePrivateCA, ServiceGKE, ServiceMonitoring, ServiceCompute, ServiceWorkflows, ServiceParameterManager, ServiceDataform, ServiceAppHub, ServiceTrace, ServiceDataproc}
 }
 
 // KnownServices lists every selectable service.
@@ -221,7 +227,7 @@ func (s Service) Persistence() Persistence {
 		// Key material is in Kubernetes Secrets, like Secret Manager's
 		// payloads, which the cluster keeps.
 		return PersistenceVolume
-	case ServiceStorage, ServiceTasks, ServiceSecrets, ServiceScheduler, ServiceBackupDR, ServicePrivateCA, ServiceGKE, ServiceMonitoring, ServiceCompute, ServiceWorkflows, ServiceParameterManager, ServiceDataform, ServiceAppHub, ServiceTrace:
+	case ServiceStorage, ServiceTasks, ServiceSecrets, ServiceScheduler, ServiceBackupDR, ServicePrivateCA, ServiceGKE, ServiceMonitoring, ServiceCompute, ServiceWorkflows, ServiceParameterManager, ServiceDataform, ServiceAppHub, ServiceTrace, ServiceDataproc:
 		return PersistenceVolume
 	case ServiceRun:
 		// Workload definitions live in the Kubernetes API, which the cluster
@@ -416,6 +422,10 @@ type Endpoints struct {
 	// Dataform is the host port of Dataform (dataform.googleapis.com,
 	// #2105): gRPC and JSON on one port.
 	Dataform int `json:"dataform"`
+	// Dataproc is the host port of the Dataproc API's serverless surface
+	// (dataproc.googleapis.com, #2156): gRPC and JSON on one port, with
+	// the Spark Connect bridge to its sessions.
+	Dataproc int `json:"dataproc"`
 	// AppHub is the host port of App Hub (apphub.googleapis.com, #2110):
 	// gRPC and JSON on one port.
 	AppHub int `json:"appHub"`
@@ -513,6 +523,7 @@ func (e *Endpoints) fields() []endpointField {
 		{"workflows", &e.Workflows},
 		{"parametermanager", &e.ParameterManager},
 		{"dataform", &e.Dataform},
+		{"dataproc", &e.Dataproc},
 		{"apphub", &e.AppHub},
 		{"trace", &e.Trace},
 		{"onnx", &e.ONNX},
@@ -597,6 +608,8 @@ func (e Endpoints) OptionalPort(s Service) int {
 		return e.ParameterManager
 	case ServiceDataform:
 		return e.Dataform
+	case ServiceDataproc:
+		return e.Dataproc
 	case ServiceAppHub:
 		return e.AppHub
 	case ServiceTrace:
@@ -982,6 +995,8 @@ func Default() Config {
 			ParameterManager: 9047,
 			// Dataform (#2105): 9048 to 9057 are left to open branches.
 			Dataform: 9058,
+			// Dataproc (#2156): 9059 to 9065 are left to open branches.
+			Dataproc: 9066,
 			// App Hub (#2110): the next free port.
 			AppHub: 9048,
 			// Cloud Trace (#2118): past the ports open branches took.

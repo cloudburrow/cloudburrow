@@ -1840,7 +1840,9 @@ type Action struct {
 	// in (#1847). The action route never receives it. On a selection
 	// action, the checked rows go in the address as SelectionField's
 	// parameter, comma-separated: Roles' Create custom role from selection
-	// opens Create custom role with ?roles= (#2013).
+	// opens Create custom role with ?roles= (#2013). An absolute URL on
+	// another origin opens in a new window: Developer Connect's Connect
+	// your account opens the provider's consent page (#2105).
 	Href string `json:"href,omitempty"`
 	// Terminal, when set, makes the action Google's Run in Cloud Shell: it
 	// opens the console's terminal (#781) and runs this command line in its

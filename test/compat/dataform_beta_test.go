@@ -98,7 +98,7 @@ func betaHistory(ctx context.Context, t *testing.T, c *dataformb1.Client, ws str
 // second workspace, a shallow clone (depth 1) of original_branch feature,
 // whose history reaches the shallow boundary until SyncWorkspaceRefs
 // deepens it, pulls; the repository's own history, files and a direct
-// commit; IAM; account_connector refused; and DeleteRepositoryLongRunning,
+// commit; IAM; a malformed account_connector refused; and DeleteRepositoryLongRunning,
 // refused while workspaces exist, as an operation.
 func TestDataformV1beta1WorkspacesAndBranches(t *testing.T) {
 	h := New(t)
@@ -121,8 +121,8 @@ func TestDataformV1beta1WorkspacesAndBranches(t *testing.T) {
 			})
 			if _, err := c.CreateRepository(ctx, &b1pb.CreateRepositoryRequest{Parent: parent, RepositoryId: id + "x", Repository: &b1pb.Repository{
 				GitRemoteSettings: &b1pb.Repository_GitRemoteSettings{Url: "https://example.com/r.git", DefaultBranch: "main",
-					AccountConnector: proto.String("projects/p/locations/us-central1/accountConnectors/a")}}}); betaCode(err) != codes.Unimplemented {
-				t.Errorf("CreateRepository with account_connector: %v, want UNIMPLEMENTED", err)
+					AccountConnector: proto.String("projects/p/accountConnectors/a")}}}); betaCode(err) != codes.InvalidArgument {
+				t.Errorf("CreateRepository with a malformed account_connector: %v, want INVALID_ARGUMENT", err)
 			}
 			if got, err := c.GetRepository(ctx, &b1pb.GetRepositoryRequest{Name: repo.GetName()}); err != nil || got.GetDisplayName() != "beta" {
 				t.Errorf("GetRepository = %v, %v", got, err)

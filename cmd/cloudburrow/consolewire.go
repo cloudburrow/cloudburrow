@@ -114,6 +114,9 @@ type consoleDeps struct {
 	parameterManager *parameterManagerService
 	// dataform is Dataform (#2105), nil unless enabled.
 	dataform *dataformService
+	// dataproc is the Dataproc API's serverless surface (#2156), nil
+	// unless enabled.
+	dataproc *dataprocService
 	// appHub is App Hub (#2110), nil unless enabled.
 	appHub *appHubService
 	// trace is Cloud Trace (#2118), nil unless enabled.
@@ -280,6 +283,18 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		}
 		providers = append(providers, vertexModelsProvider{api: api}, vertexEndpointsProvider{api: api})
 	}
+	if enabled[config.ServiceRun] || d.localAI != nil {
+		// Colab Enterprise's Runtimes and Runtime templates (#2105), on the
+		// local Vertex AI endpoint, whose runtimes are the instance's
+		// notebook runtimes.
+		var api vertexAPI
+		if d.localAI != nil {
+			api.addr = d.localAI.Addr
+		}
+		providers = append(providers, colabRuntimesProvider{api: api}, colabTemplatesProvider{api: api, enforced: d.cfg.IAMEnforced()},
+			// My notebooks, Executions and Schedules (consolecolabexec.go).
+			colabNotebooksProvider{api: api, df: d.dataform.API}, colabExecutionsProvider{api: api}, colabSchedulesProvider{api: api})
+	}
 	if enabled[config.ServiceRun] {
 		// Two screens of one product: services, and jobs with their
 		// executions (#785).
@@ -330,6 +345,8 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			buildSettingsProvider{b: runBuildsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run)}, registry: d.projects},
 			// Secure Source Manager's instances and repositories (#1527).
 			sourceManagerProvider{b: runBuildsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run)}},
+			// Developer Connect's Account connectors (#2105).
+			devConnectAccountsProvider{ssm: sourceManagerProvider{b: runBuildsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run)}}},
 			// Artifact Registry's repositories are served on the Run port (#1347).
 			artifactRegistryProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run)},
 			// Its Settings page (#1855).
@@ -379,6 +396,9 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	}
 	// App Hub (#2110), in process: Applications, Services and workloads,
 	// Settings.
+	if enabled[config.ServiceDataproc] && d.dataproc != nil {
+		providers = append(providers, dataprocBatchesProvider{svc: d.dataproc}, dataprocSessionsProvider{svc: d.dataproc}, dataprocTemplatesProvider{svc: d.dataproc})
+	}
 	if enabled[config.ServiceAppHub] && d.appHub != nil {
 		providers = append(providers, appHubProvider{svc: d.appHub}, appHubDiscoveredProvider{svc: d.appHub}, appHubSettingsProvider{svc: d.appHub})
 	}
@@ -842,6 +862,7 @@ var serviceTitles = map[config.Service]string{
 	config.ServiceWorkflows:        "Workflows",
 	config.ServiceParameterManager: "Parameter Manager",
 	config.ServiceDataform:         "Dataform",
+	config.ServiceDataproc:         "Serverless for Apache Spark",
 	config.ServiceAppHub:           "App Hub",
 	config.ServiceTrace:            "Cloud Trace",
 }

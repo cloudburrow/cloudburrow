@@ -2020,14 +2020,16 @@
     "Key": "developerconnect",
     "Title": "Developer Connect",
     "counts": {
-      "Unimplemented": 13,
-      "Verified": 13
+      "Unimplemented": 1,
+      "Verified": 25
     },
     "rows": [
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/CreateAccountConnector",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/developerconnectaccounts_test.go:52 TestDeveloperConnectAccountConnectors"
+        ]
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/CreateConnection",
@@ -2047,8 +2049,10 @@
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/DeleteAccountConnector",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/developerconnectaccounts_test.go:52 TestDeveloperConnectAccountConnectors"
+        ]
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/DeleteConnection",
@@ -2069,18 +2073,24 @@
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/DeleteSelf",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/developerconnectaccounts_test.go:52 TestDeveloperConnectAccountConnectors"
+        ]
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/DeleteUser",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/developerconnectaccounts_test.go:52 TestDeveloperConnectAccountConnectors"
+        ]
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/FetchAccessToken",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/developerconnectaccounts_test.go:52 TestDeveloperConnectAccountConnectors"
+        ]
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/FetchGitHubInstallations",
@@ -2117,18 +2127,24 @@
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/FetchSelf",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/developerconnectaccounts_test.go:52 TestDeveloperConnectAccountConnectors"
+        ]
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/FinishOAuth",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/developerconnectaccounts_test.go:52 TestDeveloperConnectAccountConnectors"
+        ]
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/GetAccountConnector",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/developerconnectaccounts_test.go:52 TestDeveloperConnectAccountConnectors"
+        ]
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/GetConnection",
@@ -2149,8 +2165,10 @@
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/ListAccountConnectors",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/developerconnectaccounts_test.go:52 TestDeveloperConnectAccountConnectors"
+        ]
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/ListConnections",
@@ -2169,18 +2187,24 @@
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/ListUsers",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/developerconnectaccounts_test.go:52 TestDeveloperConnectAccountConnectors"
+        ]
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/StartOAuth",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/developerconnectaccounts_test.go:52 TestDeveloperConnectAccountConnectors"
+        ]
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/UpdateAccountConnector",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/developerconnectaccounts_test.go:52 TestDeveloperConnectAccountConnectors"
+        ]
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/UpdateConnection",
@@ -6406,6 +6430,7 @@
           "test/compat/backupdr1922_test.go:46 TestBackupDRRestoreToANewInstance",
           "test/compat/bigquerysparkprocs2104_test.go:125 TestBigQuerySparkStoredProcedures",
           "test/compat/consoleloggingviews_test.go:58 TestConsoleLogsExplorerThroughView",
+          "test/compat/dataproc2156_test.go:85 TestDataprocServerlessBatches",
           "test/compat/gcloudschedulerlogging_test.go:79 TestGcloudLogging",
           "test/compat/logging1521_test.go:63 TestLoggingInterceptingSinks",
           "test/compat/logging1595_test.go:27 TestLoggingOldTimestampsFollowEachBucketsRetention",
@@ -6519,9 +6544,30 @@
     "counts": {
       "Implemented": 3,
       "Unimplemented": 7,
-      "Verified": 86
+      "Verified": 112
     },
     "rows": [
+      {
+        "method": "aiplatform.projects.locations.notebookRuntimeTemplates.getIamPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabexecutions2105_test.go:410 TestColabEnterpriseRuntimeTemplateIAM"
+        ]
+      },
+      {
+        "method": "aiplatform.projects.locations.notebookRuntimeTemplates.setIamPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabexecutions2105_test.go:410 TestColabEnterpriseRuntimeTemplateIAM"
+        ]
+      },
+      {
+        "method": "aiplatform.projects.locations.notebookRuntimeTemplates.testIamPermissions",
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabexecutions2105_test.go:410 TestColabEnterpriseRuntimeTemplateIAM"
+        ]
+      },
       {
         "method": "google.cloud.aiplatform.v1.EndpointService/CreateEndpoint",
         "status": "Verified",
@@ -6815,6 +6861,118 @@
         ]
       },
       {
+        "method": "google.cloud.aiplatform.v1.NotebookService/AssignNotebookRuntime",
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabenterprise2105_test.go:199 TestColabEnterpriseRuntimes"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.NotebookService/CreateNotebookExecutionJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabexecutions2105_test.go:93 TestColabEnterpriseNotebookExecutions"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.NotebookService/CreateNotebookRuntimeTemplate",
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabenterprise2105_test.go:71 TestColabEnterpriseRuntimeTemplates"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.NotebookService/DeleteNotebookExecutionJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabexecutions2105_test.go:93 TestColabEnterpriseNotebookExecutions"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.NotebookService/DeleteNotebookRuntime",
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabenterprise2105_test.go:199 TestColabEnterpriseRuntimes"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.NotebookService/DeleteNotebookRuntimeTemplate",
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabenterprise2105_test.go:71 TestColabEnterpriseRuntimeTemplates"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.NotebookService/GetNotebookExecutionJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabexecutions2105_test.go:93 TestColabEnterpriseNotebookExecutions"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.NotebookService/GetNotebookRuntime",
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabenterprise2105_test.go:199 TestColabEnterpriseRuntimes"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.NotebookService/GetNotebookRuntimeTemplate",
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabenterprise2105_test.go:71 TestColabEnterpriseRuntimeTemplates"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.NotebookService/ListNotebookExecutionJobs",
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabexecutions2105_test.go:93 TestColabEnterpriseNotebookExecutions"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.NotebookService/ListNotebookRuntimeTemplates",
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabenterprise2105_test.go:71 TestColabEnterpriseRuntimeTemplates"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.NotebookService/ListNotebookRuntimes",
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabenterprise2105_test.go:199 TestColabEnterpriseRuntimes"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.NotebookService/StartNotebookRuntime",
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabenterprise2105_test.go:199 TestColabEnterpriseRuntimes"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.NotebookService/StopNotebookRuntime",
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabenterprise2105_test.go:199 TestColabEnterpriseRuntimes"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.NotebookService/UpdateNotebookRuntimeTemplate",
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabenterprise2105_test.go:71 TestColabEnterpriseRuntimeTemplates"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.NotebookService/UpgradeNotebookRuntime",
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabenterprise2105_test.go:199 TestColabEnterpriseRuntimes"
+        ]
+      },
+      {
         "method": "google.cloud.aiplatform.v1.PredictionService/DirectPredict",
         "status": "Verified",
         "tests": [
@@ -6960,6 +7118,55 @@
         "status": "Verified",
         "tests": [
           "test/compat/predictiondirectraw_test.go:64 TestPredictionClientReachesAModelsGRPCServer"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.ScheduleService/CreateSchedule",
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabexecutions2105_test.go:260 TestColabEnterpriseSchedules"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.ScheduleService/DeleteSchedule",
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabexecutions2105_test.go:260 TestColabEnterpriseSchedules"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.ScheduleService/GetSchedule",
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabexecutions2105_test.go:260 TestColabEnterpriseSchedules"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.ScheduleService/ListSchedules",
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabexecutions2105_test.go:260 TestColabEnterpriseSchedules"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.ScheduleService/PauseSchedule",
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabexecutions2105_test.go:260 TestColabEnterpriseSchedules"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.ScheduleService/ResumeSchedule",
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabexecutions2105_test.go:260 TestColabEnterpriseSchedules"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.ScheduleService/UpdateSchedule",
+        "status": "Verified",
+        "tests": [
+          "test/compat/colabexecutions2105_test.go:260 TestColabEnterpriseSchedules"
         ]
       },
       {
@@ -19603,6 +19810,7 @@
         "method": "google.cloud.dataform.v1.Dataform/ComputeRepositoryAccessTokenStatus",
         "status": "Verified",
         "tests": [
+          "test/compat/dataform_pipelines_test.go:658 TestDataformSSHRemote",
           "test/compat/dataform_test.go:660 TestDataformSecureSourceManagerRemote"
         ]
       },
@@ -19610,6 +19818,10 @@
         "method": "google.cloud.dataform.v1.Dataform/CreateCompilationResult",
         "status": "Verified",
         "tests": [
+          "test/compat/dataform_pipelines_test.go:100 TestDataformNotebooksTestsAndDataPreparations",
+          "test/compat/dataform_pipelines_test.go:321 TestDataformPipelineConfig",
+          "test/compat/dataform_pipelines_test.go:781 TestDataformDataPreparationMergeValidationAndYAML",
+          "test/compat/dataform_template_test.go:25 TestDataformNotebookOnRuntimeTemplate",
           "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke"
         ]
       },
@@ -19631,6 +19843,7 @@
         "method": "google.cloud.dataform.v1.Dataform/CreateReleaseConfig",
         "status": "Verified",
         "tests": [
+          "test/compat/dataform_pipelines_test.go:100 TestDataformNotebooksTestsAndDataPreparations",
           "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke"
         ]
       },
@@ -19638,6 +19851,7 @@
         "method": "google.cloud.dataform.v1.Dataform/CreateRepository",
         "status": "Verified",
         "tests": [
+          "test/compat/dataform_pipelines_test.go:658 TestDataformSSHRemote",
           "test/compat/dataform_terraform_test.go:22 TestTerraformDataformRepository",
           "test/compat/dataform_test.go:118 TestDataformWorkspaceFilesAndGit",
           "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke",
@@ -19655,6 +19869,7 @@
         "method": "google.cloud.dataform.v1.Dataform/CreateWorkflowConfig",
         "status": "Verified",
         "tests": [
+          "test/compat/dataform_pipelines_test.go:100 TestDataformNotebooksTestsAndDataPreparations",
           "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke"
         ]
       },
@@ -19662,6 +19877,10 @@
         "method": "google.cloud.dataform.v1.Dataform/CreateWorkflowInvocation",
         "status": "Verified",
         "tests": [
+          "test/compat/dataform_pipelines_test.go:100 TestDataformNotebooksTestsAndDataPreparations",
+          "test/compat/dataform_pipelines_test.go:781 TestDataformDataPreparationMergeValidationAndYAML",
+          "test/compat/dataform_runoptions_test.go:27 TestDataformInvocationRunOptions",
+          "test/compat/dataform_template_test.go:25 TestDataformNotebookOnRuntimeTemplate",
           "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke"
         ]
       },
@@ -19765,6 +19984,7 @@
         "method": "google.cloud.dataform.v1.Dataform/FetchRemoteBranches",
         "status": "Verified",
         "tests": [
+          "test/compat/dataform_pipelines_test.go:658 TestDataformSSHRemote",
           "test/compat/dataform_test.go:660 TestDataformSecureSourceManagerRemote"
         ]
       },
@@ -19838,6 +20058,7 @@
         "method": "google.cloud.dataform.v1.Dataform/GetWorkflowInvocation",
         "status": "Verified",
         "tests": [
+          "test/compat/dataform_pipelines_test.go:321 TestDataformPipelineConfig",
           "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke"
         ]
       },
@@ -19853,7 +20074,8 @@
         "method": "google.cloud.dataform.v1.Dataform/InstallNpmPackages",
         "status": "Verified",
         "tests": [
-          "test/compat/dataform_beta_test.go:862 TestDataformInstallNpmPackages"
+          "test/compat/dataform_beta_test.go:862 TestDataformInstallNpmPackages",
+          "test/compat/dataform_pipelines_test.go:321 TestDataformPipelineConfig"
         ]
       },
       {
@@ -19937,6 +20159,7 @@
         "method": "google.cloud.dataform.v1.Dataform/PullGitCommits",
         "status": "Verified",
         "tests": [
+          "test/compat/dataform_pipelines_test.go:658 TestDataformSSHRemote",
           "test/compat/dataform_test.go:118 TestDataformWorkspaceFilesAndGit",
           "test/compat/dataform_test.go:660 TestDataformSecureSourceManagerRemote"
         ]
@@ -19945,6 +20168,7 @@
         "method": "google.cloud.dataform.v1.Dataform/PushGitCommits",
         "status": "Verified",
         "tests": [
+          "test/compat/dataform_pipelines_test.go:658 TestDataformSSHRemote",
           "test/compat/dataform_test.go:118 TestDataformWorkspaceFilesAndGit",
           "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke",
           "test/compat/dataform_test.go:660 TestDataformSecureSourceManagerRemote"
@@ -19954,6 +20178,8 @@
         "method": "google.cloud.dataform.v1.Dataform/QueryCompilationResultActions",
         "status": "Verified",
         "tests": [
+          "test/compat/dataform_pipelines_test.go:100 TestDataformNotebooksTestsAndDataPreparations",
+          "test/compat/dataform_pipelines_test.go:781 TestDataformDataPreparationMergeValidationAndYAML",
           "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke"
         ]
       },
@@ -19996,6 +20222,9 @@
         "method": "google.cloud.dataform.v1.Dataform/QueryWorkflowInvocationActions",
         "status": "Verified",
         "tests": [
+          "test/compat/dataform_pipelines_test.go:100 TestDataformNotebooksTestsAndDataPreparations",
+          "test/compat/dataform_pipelines_test.go:781 TestDataformDataPreparationMergeValidationAndYAML",
+          "test/compat/dataform_runoptions_test.go:27 TestDataformInvocationRunOptions",
           "test/compat/dataform_test.go:353 TestDataformCompileAndInvoke"
         ]
       },
@@ -20121,8 +20350,7 @@
     "Key": "dataformv1beta1",
     "Title": "Dataform (v1beta1)",
     "counts": {
-      "Implemented": 2,
-      "Verified": 79
+      "Verified": 81
     },
     "rows": [
       {
@@ -20155,8 +20383,10 @@
       },
       {
         "method": "google.cloud.dataform.v1beta1.Dataform/ComputeRepositoryAccessTokenStatus",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_pipelines_test.go:421 TestDataformV1beta1RemoteBranchesAndTokenStatus"
+        ]
       },
       {
         "method": "google.cloud.dataform.v1beta1.Dataform/CreateCompilationResult",
@@ -20328,8 +20558,10 @@
       },
       {
         "method": "google.cloud.dataform.v1beta1.Dataform/FetchRemoteBranches",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataform_pipelines_test.go:421 TestDataformV1beta1RemoteBranchesAndTokenStatus"
+        ]
       },
       {
         "method": "google.cloud.dataform.v1beta1.Dataform/FetchRepositoryHistory",
@@ -20686,6 +20918,113 @@
         "status": "Verified",
         "tests": [
           "test/compat/dataform_beta_test.go:103 TestDataformV1beta1WorkspacesAndBranches"
+        ]
+      }
+    ]
+  },
+  {
+    "Key": "dataproc",
+    "Title": "Dataproc: Serverless for Apache Spark (v1)",
+    "counts": {
+      "Verified": 14
+    },
+    "rows": [
+      {
+        "method": "google.cloud.dataproc.v1.BatchController/CreateBatch",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataproc2156_test.go:85 TestDataprocServerlessBatches"
+        ]
+      },
+      {
+        "method": "google.cloud.dataproc.v1.BatchController/DeleteBatch",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataproc2156_test.go:85 TestDataprocServerlessBatches"
+        ]
+      },
+      {
+        "method": "google.cloud.dataproc.v1.BatchController/GetBatch",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataproc2156_test.go:85 TestDataprocServerlessBatches"
+        ]
+      },
+      {
+        "method": "google.cloud.dataproc.v1.BatchController/ListBatches",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataproc2156_test.go:85 TestDataprocServerlessBatches"
+        ]
+      },
+      {
+        "method": "google.cloud.dataproc.v1.SessionController/CreateSession",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataproc2156_test.go:417 TestDataprocServerlessSessions"
+        ]
+      },
+      {
+        "method": "google.cloud.dataproc.v1.SessionController/DeleteSession",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataproc2156_test.go:417 TestDataprocServerlessSessions"
+        ]
+      },
+      {
+        "method": "google.cloud.dataproc.v1.SessionController/GetSession",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataproc2156_test.go:417 TestDataprocServerlessSessions"
+        ]
+      },
+      {
+        "method": "google.cloud.dataproc.v1.SessionController/ListSessions",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataproc2156_test.go:417 TestDataprocServerlessSessions"
+        ]
+      },
+      {
+        "method": "google.cloud.dataproc.v1.SessionController/TerminateSession",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataproc2156_test.go:417 TestDataprocServerlessSessions"
+        ]
+      },
+      {
+        "method": "google.cloud.dataproc.v1.SessionTemplateController/CreateSessionTemplate",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataproc2156_test.go:417 TestDataprocServerlessSessions"
+        ]
+      },
+      {
+        "method": "google.cloud.dataproc.v1.SessionTemplateController/DeleteSessionTemplate",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataproc2156_test.go:417 TestDataprocServerlessSessions"
+        ]
+      },
+      {
+        "method": "google.cloud.dataproc.v1.SessionTemplateController/GetSessionTemplate",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataproc2156_test.go:417 TestDataprocServerlessSessions"
+        ]
+      },
+      {
+        "method": "google.cloud.dataproc.v1.SessionTemplateController/ListSessionTemplates",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataproc2156_test.go:417 TestDataprocServerlessSessions"
+        ]
+      },
+      {
+        "method": "google.cloud.dataproc.v1.SessionTemplateController/UpdateSessionTemplate",
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataproc2156_test.go:417 TestDataprocServerlessSessions"
         ]
       }
     ]

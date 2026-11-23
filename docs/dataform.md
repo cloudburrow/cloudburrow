@@ -37,6 +37,39 @@ c, err := dataform.NewClient(ctx, option.WithEndpoint(os.Getenv("CLOUDBURROW_DAT
   the Secure Source Manager repository; its read-write token then
   authenticates the remote instead of a Secret Manager token.
 - **Cancelling** an invocation stops the running action's BigQuery job.
+- **Notebooks** (`notebook` actions in `definitions/actions.yaml`) run on
+  the instance's notebook runtime, the Python kernel container BigQuery
+  Studio's notebooks use (Docker required), with its BigQuery client
+  pointed at the instance. Set `default_notebook_runtime_options`'
+  `gcs_output_bucket` to a bucket of the instance's Cloud Storage
+  (`--services storage`): the executed notebook is written to
+  `gs://BUCKET/JOB_ID/FILE.ipynb`. Colab Enterprise runtime templates are
+  not served.
+- **Unit tests** (`type: "test"`) run only in an invocation whose
+  `execution_mode` is `UNIT_TESTS_ONLY`, and fail with the first
+  difference between the test's rows and the expected rows.
+- **Data preparations** (`type: "dataPreparation"` SQLX, a pipe-syntax
+  query) write their target in the load mode they name: `REPLACE_TABLE`,
+  `APPEND`, `MAXIMUM`, `UNIQUE` (with `incrementalColumn`) or `MERGE`
+  (with `uniqueKey`; BigQuery Studio's Upsert). The API's `LoadConfig` has
+  no merge, so a MERGE action shows no `load` and the server keeps its
+  keys; `generated_sql` shows the MERGE. A validation (`${EXPECT}`) sends
+  the rows failing it to the error table, or fails the action when there
+  is none. A YAML data preparation (`.dp.yaml`, declared in
+  `actions.yaml`) runs its documented parts: each destination node gets
+  its source table's rows; a node holding anything else (steps, whose
+  format Google does not document) fails naming it.
+- **Repository snapshots**: `gcs_repository_snapshot_destination`
+  (`gs://BUCKET/PATH/`) gets each compilation's files as
+  `COMPILATION_ID.tar.gz`.
+- **`pipeline_config`** compiles a `DATAFORM` project in a folder, or a
+  single `NOTEBOOK` or `SQL` file as one action (what BigQuery Studio's
+  scheduled notebooks use).
+- **SSH remotes**: `ssh_authentication_config` with the private key's
+  Secret Manager version and the host's public key, against any git host
+  you configure (on this machine, your network or the internet); git's
+  ssh dials that host and checks it against that key alone. The
+  instance's own Secure Source Manager serves git over HTTPS only.
 
 ## v1beta1
 
@@ -60,6 +93,11 @@ through one version is read through the other. v1beta1 adds:
   `min_execution_duration`). Triggers are evaluated every 15 seconds from
   each table's `lastModifiedTime`, which the instance's BigQuery moves when
   a table's rows change; a change is seen only after the trigger is set.
+- **Personal authentication**: `git_remote_settings.account_connector`
+  names a Developer Connect account connector of the instance (Cloud Run's
+  port); each caller's git runs with the token of the account they
+  connected through it, from the instance's own sign-in page (no Google
+  sign-in).
 - **`DeleteRepositoryLongRunning`**, and the `folder_id` and
   `team_folder_id` `CreateFolder` and `CreateTeamFolder` take.
 

@@ -37,6 +37,10 @@ func init() {
 			Services["google.cloud.aiplatform."+v+"."+s] = VertexAI
 		}
 	}
+	// Colab Enterprise (#2105), v1 only as served.
+	for _, s := range []string{"NotebookService", "ScheduleService"} {
+		Services["google.cloud.aiplatform.v1."+s] = VertexAI
+	}
 	Services["google.cloud.documentai.v1.DocumentProcessorService"] = DocumentAI
 	Services["google.cloud.documentai.v1beta3.DocumentService"] = DocumentAI
 	Services["google.cloud.speech.v2.Speech"] = Speech
@@ -57,10 +61,13 @@ const aiPredict = "aiplatform.endpoints.predict"
 // are checked as the predict they stream (UNVERIFIED, re-read 2026-11-20:
 // no page names one). ModelGardenService
 // Deploy needs aiplatform.endpoints.create, .deploy and
-// aiplatform.models.upload on its destination. Vertex AI keeps no
-// resource-level policies on what is served.
+// aiplatform.models.upload on its destination. Of what is served, only
+// Colab Enterprise's runtime templates keep resource-level policies
+// (#2105).
 var VertexAI = &Service{
-	Name: "aiplatform.googleapis.com",
+	Name:              "aiplatform.googleapis.com",
+	PolicyCollections: []string{"notebookRuntimeTemplates"},
+	Types:             map[string]string{"notebookRuntimeTemplates": "aiplatform.googleapis.com/NotebookRuntimeTemplate"},
 	Methods: func() map[string]Method {
 		m := map[string]Method{}
 		for _, v := range []string{"v1", "v1beta1"} {
@@ -113,6 +120,11 @@ var VertexAI = &Service{
 				m[p+"PredictionService/ChatCompletions"] = Method{Permission: aiPredict, Field: "endpoint"}
 				m[p+"PredictionService/CountTokens"] = Method{Permission: aiPredict, Field: "endpoint"}
 			}
+			if v == "v1" {
+				for k, r := range colabMethods() {
+					m[k] = r
+				}
+			}
 			deploy := m[p+"ModelGardenService/Deploy"]
 			deploy.Also = []Also{{Field: "destination", Permission: "aiplatform.endpoints.deploy"}, {Field: "destination", Permission: "aiplatform.models.upload"}}
 			m[p+"ModelGardenService/Deploy"] = deploy
@@ -120,6 +132,62 @@ var VertexAI = &Service{
 		return m
 	}(),
 	Deny: newerDenyOf,
+}
+
+// colabMethods are Colab Enterprise's (#2105): each method's REST
+// reference ("Requires the following IAM permission on the X resource",
+// https://docs.cloud.google.com/gemini-enterprise-agent-platform/reference/rest/v1/projects.locations.notebookRuntimes/assign
+// and its siblings under notebookRuntimeTemplates, notebookExecutionJobs
+// and schedules, read 2026-11-22): assign is aiplatform.notebookRuntimes.assign
+// on the parent; a schedule's pause, resume and patch are
+// aiplatform.schedules.update; the templates' IAM methods
+// aiplatform.notebookRuntimeTemplates.getIamPolicy and .setIamPolicy.
+// StopNotebookRuntime's page names no permission and is not checked.
+// Making a runtime or an execution from a template also needs
+// aiplatform.notebookRuntimeTemplates.apply on it, the permission the
+// Notebook Runtime User role (roles/aiplatform.notebookRuntimeUser)
+// "to create runtime resources using a runtime template" holds; the
+// templates keep their own policies (UNVERIFIED, re-read 2026-11-22: the
+// assign and create pages name only the parent's permission).
+func colabMethods() map[string]Method {
+	const p = "/google.cloud.aiplatform.v1."
+	m := rows(map[string]map[string][2]string{
+		p + "NotebookService/": {
+			"CreateNotebookRuntimeTemplate": {"aiplatform.notebookRuntimeTemplates.create", "parent"},
+			"GetNotebookRuntimeTemplate":    {"aiplatform.notebookRuntimeTemplates.get", "name"},
+			"ListNotebookRuntimeTemplates":  {"aiplatform.notebookRuntimeTemplates.list", "parent"},
+			"UpdateNotebookRuntimeTemplate": {"aiplatform.notebookRuntimeTemplates.update", "notebook_runtime_template.name"},
+			"DeleteNotebookRuntimeTemplate": {"aiplatform.notebookRuntimeTemplates.delete", "name"},
+			"AssignNotebookRuntime":         {"aiplatform.notebookRuntimes.assign", "parent"},
+			"GetNotebookRuntime":            {"aiplatform.notebookRuntimes.get", "name"},
+			"ListNotebookRuntimes":          {"aiplatform.notebookRuntimes.list", "parent"},
+			"DeleteNotebookRuntime":         {"aiplatform.notebookRuntimes.delete", "name"},
+			"StartNotebookRuntime":          {"aiplatform.notebookRuntimes.start", "name"},
+			"UpgradeNotebookRuntime":        {"aiplatform.notebookRuntimes.upgrade", "name"},
+			"CreateNotebookExecutionJob":    {"aiplatform.notebookExecutionJobs.create", "parent"},
+			"GetNotebookExecutionJob":       {"aiplatform.notebookExecutionJobs.get", "name"},
+			"ListNotebookExecutionJobs":     {"aiplatform.notebookExecutionJobs.list", "parent"},
+			"DeleteNotebookExecutionJob":    {"aiplatform.notebookExecutionJobs.delete", "name"},
+		},
+		p + "ScheduleService/": {
+			"CreateSchedule": {"aiplatform.schedules.create", "parent"}, "GetSchedule": {"aiplatform.schedules.get", "name"},
+			"ListSchedules": {"aiplatform.schedules.list", "parent"}, "DeleteSchedule": {"aiplatform.schedules.delete", "name"},
+			"PauseSchedule": {"aiplatform.schedules.update", "name"}, "ResumeSchedule": {"aiplatform.schedules.update", "name"},
+			"UpdateSchedule": {"aiplatform.schedules.update", "schedule.name"},
+		},
+		"/google.iam.v1.IAMPolicy/": {
+			"GetIamPolicy": {"aiplatform.notebookRuntimeTemplates.getIamPolicy", "resource"},
+			"SetIamPolicy": {"aiplatform.notebookRuntimeTemplates.setIamPolicy", "resource"},
+		},
+	})
+	const apply = "aiplatform.notebookRuntimeTemplates.apply"
+	a := m[p+"NotebookService/AssignNotebookRuntime"]
+	a.Also = []Also{{Field: "notebook_runtime_template", Permission: apply}}
+	m[p+"NotebookService/AssignNotebookRuntime"] = a
+	c := m[p+"NotebookService/CreateNotebookExecutionJob"]
+	c.Also = []Also{{Field: "notebook_execution_job.notebook_runtime_template_resource_name", Permission: apply}}
+	m[p+"NotebookService/CreateNotebookExecutionJob"] = c
+	return m
 }
 
 // docAIByType is a Document AI permission on a processor, or on a
@@ -244,6 +312,9 @@ var AIJSON = func() []JSONMethod {
 		{Method: "POST", Pattern: regexp.MustCompile(endpoint + `:explain$`), Permission: "aiplatform.endpoints.explain"},
 		{Method: "POST", Pattern: regexp.MustCompile(endpoint + `(?::[A-Za-z]+|/chat/completions)$`), Permission: aiPredict},
 		{Method: "POST", Pattern: regexp.MustCompile(model + `[A-Za-z]+$`), Permission: aiPredict},
+		// Colab Enterprise's REST-only notebookRuntimeTemplates:setDefault
+		// (#2105), on the template's location.
+		{Method: "POST", Pattern: regexp.MustCompile(`^/v1/(` + loc + `)/notebookRuntimeTemplates:setDefault$`), Permission: "aiplatform.notebookRuntimeTemplates.setDefault"},
 	}
 }()
 

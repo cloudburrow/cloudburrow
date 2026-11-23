@@ -55,6 +55,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/nbruntime"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/prefetch"
+	"github.com/cloudburrow/cloudburrow/internal/sparkproc"
 )
 
 // runUp loads configuration, starts the lifecycle coordinator, and blocks until
@@ -422,6 +423,16 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if dataformSvc != nil {
 		dataformSvc.secrets = secretsSvc
 		dataformSvc.bigquery = func() *netfwd.Forwarder { return forwarderFor(forwarders, "bigquery") }
+		dataformSvc.storage = func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") }
+		// v1beta1's account_connector (#2105): the caller's token from
+		// Developer Connect's account connector. A call without a principal
+		// is the instance's own user, as on Developer Connect's side.
+		dataformSvc.accountToken = func(ctx context.Context, connector, user string) (string, error) {
+			if user == "" || user == "developer@cloudburrow.local" {
+				user = creds.Email
+			}
+			return (&runadapter.DeveloperConnectServer{}).UserAccessToken(ctx, connector, user)
+		}
 		if runSvc != nil {
 			dataformSvc.gitBase = func() string {
 				if a := runSvc.Addr(); a != "" {
@@ -433,6 +444,13 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 	}
 	dataformSvc.register(coord)
+	// The Dataproc API's serverless surface (#2156), in process; its
+	// workloads run on the Spark runner below, its files in Cloud Storage.
+	dataprocSvc := newDataprocService(cfg)
+	if dataprocSvc != nil {
+		dataprocSvc.live = boundAddrs
+	}
+	dataprocSvc.register(coord)
 	// The Kubernetes Engine API (#1913), in process; its clusters are
 	// kind clusters of their own.
 	gkeSvc := newGKEService(cfg)
@@ -659,6 +677,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		workflows:        workflowsSvc,
 		parameterManager: parameterManagerSvc,
 		dataform:         dataformSvc,
+		dataproc:         dataprocSvc,
 		appHub:           appHubSvc,
 		trace:            traceSvc,
 		gke:              gkeSvc,
@@ -769,6 +788,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		parameterManagerSvc.calls = callEvents(recorder, requestMetrics, "parametermanager")
 		parameterManagerSvc.interpose = append(parameterManagerSvc.interpose, grpctransport.LogInterceptor(logger, "parametermanager"), faults.Interceptor("parametermanager"))
 		parameterManagerSvc.requests = requestEvents(recorder, requestMetrics, "parametermanager")
+	}
+	if dataprocSvc != nil {
+		dataprocSvc.tracing = tracing
+		dataprocSvc.calls = callEvents(recorder, requestMetrics, "dataproc")
+		dataprocSvc.interpose = append(dataprocSvc.interpose, grpctransport.LogInterceptor(logger, "dataproc"), faults.Interceptor("dataproc"))
+		dataprocSvc.requests = requestEvents(recorder, requestMetrics, "dataproc")
 	}
 	if dataformSvc != nil {
 		dataformSvc.tracing = tracing
@@ -899,6 +924,18 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		parameterManagerSvc.keys = cmekKeys(kmsSvc, iamEnforcer)
 		parameterManagerSvc.interpose = append(parameterManagerSvc.interpose, iamEnforcer.Interceptor(iameval.ParameterManager))
 		parameterManagerSvc.wrapJSON = jsonEnforcer(iamEnforcer, iameval.ParameterManager, parametermanager.Mixins())
+	}
+	// A Dataproc resource's creator: the request's caller, or the
+	// instance's own account (#2156).
+	if dataprocSvc != nil {
+		dataprocSvc.caller = func(ctx context.Context) string {
+			if b := iameval.IncomingBearer(ctx); b != "" && iamEnforcer.CallerOf != nil {
+				if c := iamEnforcer.CallerOf(b); c.Email != "" {
+					return c.Email
+				}
+			}
+			return iamEnforcer.OwnerEmail
+		}
 	}
 	// Dataform repositories' customer-managed keys (#2105).
 	if dataformSvc != nil {
@@ -1108,6 +1145,17 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// authorization code flow the metadata server's token endpoint serves.
 	authPlatformRef = authplatform.NewStore(projects.Backing(), resource.ProjectNumber)
 	metaSrv.WithOAuth(&authplatform.Endpoints{Store: authPlatformRef, User: creds.Email})
+	// Developer Connect's account connectors (#2105) connect a user's
+	// account through that authorization server, as its GOOGLE provider,
+	// and hand out tokens the instance's credentials mint for the account.
+	runadapter.SetDeveloperConnectOAuth(runadapter.DeveloperConnectOAuth{Store: authPlatformRef,
+		AuthBase: func() string {
+			if a := metaSrv.Addr(); a != "" {
+				return hostURL(a)
+			}
+			return ""
+		},
+		Mint: func(email string) string { return creds.MintAccessTokenFor(email, metadata.TokenTTL) }, TTL: metadata.TokenTTL})
 	// IAM enforcement (#1879) of Resource Manager, IAM, deny and
 	// organization policies, on this port.
 	useIAMEnforcement11(iamEnforcer, rmSrv, func() *resourcemanager.Registry { return projects })
@@ -1334,8 +1382,33 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// them, so it cannot answer from a store of its own.
 	// BigQuery Studio's notebook runtimes (#2094), deleted when up stops.
 	notebooks := &nbruntime.Manager{Instance: cfg.Name,
-		Logf: func(format string, args ...any) { fmt.Fprintf(stdout, "cloudburrow: "+format+"\n", args...) }}
+		Logf: func(format string, args ...any) { fmt.Fprintf(stdout, "cloudburrow: "+format+"\n", args...) },
+		BigQuery: func() string {
+			if f := forwarderFor(forwarders, "bigquery"); f != nil {
+				return f.HostAddr()
+			}
+			return ""
+		}}
+	// An Apache Spark notebook's sessions are Serverless for Apache
+	// Spark's (#2156).
+	notebooks.Dataproc = dataprocSvc.Addr
 	defer notebooks.Close()
+	// Colab Enterprise's runtime templates and runtimes (#2105), on the
+	// local Vertex AI endpoint, run on them.
+	if localAISrv != nil {
+		localAISrv.SetNotebookRuntimes(colabHost{m: notebooks}, filepath.Join(cfg.StateDir, "vertexai", "notebookruntimes.json"))
+		// Their notebook executions and schedules read and write Cloud
+		// Storage and Dataform's single-file notebook repositories.
+		localAISrv.SetNotebookExecutor(colabExecutor{m: notebooks,
+			storage:  func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") },
+			dataform: dataformSvc.API})
+	}
+	// Dataform's notebook actions run on them too (#2105), on a runtime
+	// template's settings when one is named.
+	if dataformSvc != nil {
+		dataformSvc.notebooks = notebooks
+		dataformSvc.runtimeTemplates = colabTemplates(localAISrv)
+	}
 	consoleSrv := buildConsole(consoleDeps{
 		cfg: cfg, iam: iamEnforcer, notebooks: notebooks, assetOut: assetOut, coord: coord, cluster: clusterComp, localAI: localAISrv, localModels: localModels,
 		hfModels: hfModels, garden: garden,
@@ -1362,6 +1435,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		workflows:        workflowsSvc,
 		parameterManager: parameterManagerSvc,
 		dataform:         dataformSvc,
+		dataproc:         dataprocSvc,
 		appHub:           appHubSvc,
 		trace:            traceSvc,
 		gke:              gkeSvc,
@@ -1448,6 +1522,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}, cmekKeys(kmsSvc, iamEnforcer).Usable, func() string { return creds.MintAccessTokenFor(creds.Email, metadata.TokenTTL) })
 	if sparkRunner != nil {
 		coord.Register(sparkRunner)
+		if dataprocSvc != nil {
+			dataprocSvc.spark = func() *sparkproc.Docker { return sparkRunner.docker }
+		}
 	}
 
 	// hostComp publishes the CLI-hosted services to the cluster (#575); nil
@@ -1482,6 +1559,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 		if a := dataformSvc.Addr(); a != "" {
 			live["dataform"] = a
+		}
+		if a := dataprocSvc.Addr(); a != "" {
+			live["dataproc"] = a
 		}
 		if a := appHubSvc.Addr(); a != "" {
 			live["apphub"] = a

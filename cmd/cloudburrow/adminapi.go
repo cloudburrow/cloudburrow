@@ -94,6 +94,9 @@ type adminDeps struct {
 	parameterManager *parameterManagerService
 	// dataform is Dataform (#2105), nil unless enabled.
 	dataform *dataformService
+	// dataproc is the Dataproc API's serverless surface (#2156), nil
+	// unless enabled.
+	dataproc *dataprocService
 	// appHub is App Hub (#2110), nil unless enabled.
 	appHub *appHubService
 	// trace is Cloud Trace (#2118), nil unless enabled.
@@ -243,6 +246,9 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 	}
 	if d.dataform != nil {
 		api.RegisterResetter(&dataformResetter{svc: d.dataform})
+	}
+	if d.dataproc != nil {
+		api.RegisterResetter(&dataprocResetter{svc: d.dataproc})
 	}
 	if d.appHub != nil {
 		api.RegisterResetter(&appHubResetter{svc: d.appHub})

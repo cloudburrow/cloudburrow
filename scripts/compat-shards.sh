@@ -255,8 +255,9 @@ COMPAT_SQL_REPLICA_TESTS='^Test[A-Za-z]*SQL[A-Za-z0-9]*(HighAvailability|Replica
 # deliver to a Cloud Run service, and Document AI's and Speech-to-Text's
 # (TestDocumentAI*, TestSpeech*, #1930), served by the local AI
 # endpoint Cloud Run starts, and Workflows' (TestWorkflows*, #1986), whose
-# instance is the run shard's, and Dataform's (TestDataform*, #2105), whose
-# invocations run on its BigQuery, and App Hub's (TestAppHub*, #2110), served
+# instance is the run shard's, and Dataform's (TestDataform*, #2105) and Colab Enterprise's (TestColab*, #2105), whose
+# invocations run on its BigQuery, and App Hub's (TestAppHub*, #2110) and Developer
+# Connect's (TestDeveloperConnect*, #2105, on the Run port), served
 # only by the run shard's instance; the BigQuery,
 # Firestore, Datastore (#854) and Spanner screens and the Bigtable screen's
 # actions (#1198) only by the emulators shard's; the Memorystore screens
@@ -304,7 +305,7 @@ COMPAT_SQL_REPLICA_TESTS='^Test[A-Za-z]*SQL[A-Za-z0-9]*(HighAvailability|Replica
 COMPAT_BROWSER_SHARDS="storage served run emulators memorystore sql localai"
 COMPAT_BROWSER_SERVED_SHARD_TESTS='^Test(GKEServed|KubernetesEnginePages|VPCNetwork|ComputeEngine|ComputePermissions|TraceExplorer)'
 COMPAT_BROWSER_SERVED_ONLY_TESTS='^Test(GKEServed|VPCNetwork|ComputeEngine|ComputePermissions|TraceExplorer)'
-COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|CloudBuild|LoggingAdmin|LoggingConsole|LoggingAppHub|SecretManager|Eventarc|DocumentAI|Speech|StoragePicker|Workflows|ModelRegistry|Dataform|AppHub)'
+COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|CloudBuild|LoggingAdmin|LoggingConsole|LoggingAppHub|SecretManager|Eventarc|DocumentAI|Speech|StoragePicker|Workflows|ModelRegistry|Dataform|Colab|AppHub|DeveloperConnect)'
 COMPAT_BROWSER_EMULATORS_SHARD_TESTS='^Test(BigQuery|Firestore|Datastore|Bigtable|Spanner)'
 COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS='^TestMemorystore'
 # Private Service Connect's Connection Policies with Cloud SQL's create
@@ -584,11 +585,13 @@ compat_shard() {
       # files, Cloud Logging for their output, Cloud Run for the Artifact
       # Registry a container_image is read from, and Resource Manager and
       # the metadata server for the invoker's minted tokens, and Cloud KMS
-      # for a procedure's customer-managed key.
-      SERVICES=bigquery,storage,logging,run,kms
-      TEST_VARS+=,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT,BIGQUERY_RESOURCEMANAGER,RESOURCEMANAGER,STORAGE,LOGGING,RUN,KMS,GCLOUD
+      # for a procedure's customer-managed key. And Serverless for Apache
+      # Spark (#2156), the Dataproc API's batches and Spark Connect
+      # sessions, which run on the same Spark runner.
+      SERVICES=bigquery,storage,logging,run,kms,dataproc
+      TEST_VARS+=,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT,BIGQUERY_RESOURCEMANAGER,RESOURCEMANAGER,STORAGE,LOGGING,RUN,KMS,GCLOUD,DATAPROC
       export CLOUDBURROW_TEST_SPARK=1
-      COMPAT_RUN='^Test(BigQuerySpark|BqSpark)'
+      COMPAT_RUN='^Test(BigQuerySpark|BqSpark|DataprocServerless)'
       COMPAT_TIMEOUT=150m ;;
     localai|localaispeech)
       # The local AI tests (#1985): BigQuery and Cloud Storage for the AI

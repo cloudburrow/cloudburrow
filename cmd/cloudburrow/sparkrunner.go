@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -76,10 +77,13 @@ func sparkRunnerEnabled(cfg config.Config) bool {
 // sparkRunnerService serves internal/sparkproc on --port-spark: on
 // loopback, and to the BigQuery front through cloudburrow-host.
 type sparkRunnerService struct {
-	addr string
-	srv  *http.Server
-	ln   net.Listener
-	h    http.Handler
+	// docker is the runner's engine, which the Dataproc API's batches and
+	// sessions (#2156) run on too.
+	docker *sparkproc.Docker
+	addr   string
+	srv    *http.Server
+	ln     net.Listener
+	h      http.Handler
 }
 
 // newSparkRunner is the runner, or nil when sparkRunnerEnabled is false.
@@ -122,7 +126,7 @@ func newSparkRunner(cfg config.Config, out io.Writer, live func() map[string]str
 		Logf:          func(format string, args ...any) { fmt.Fprintf(out, "cloudburrow: "+format+"\n", args...) },
 		Log:           sparkLogger(func() string { return live()["logging"] }),
 	}
-	return &sparkRunnerService{addr: net.JoinHostPort(cfg.BindAddress, strconv.Itoa(cfg.Endpoints.Spark)), h: sparkproc.NewServer(d)}
+	return &sparkRunnerService{docker: d, addr: net.JoinHostPort(cfg.BindAddress, strconv.Itoa(cfg.Endpoints.Spark)), h: sparkproc.NewServer(d)}
 }
 
 // fetchSparkConnector is rt's connector jar in dir, fetched from Maven
@@ -177,14 +181,31 @@ func sparkLogger(logging func() string) func(sparkproc.LogEntry) {
 		if base == "" {
 			return
 		}
-		entry := map[string]any{
-			"logName":     "projects/" + e.Job.Project + "/logs/" + sparkLogID,
-			"severity":    e.Severity,
-			"timestamp":   e.Time.UTC().Format(time.RFC3339Nano),
-			"textPayload": e.Text,
-			"resource": map[string]any{"type": "bigquery.googleapis.com/SparkJob", "labels": map[string]string{
-				"resource_container": e.Job.Project, "location": e.Job.Location, "spark_job_id": e.Job.SparkJobID}},
-			"labels": map[string]string{"component": e.Component},
+		var entry map[string]any
+		if t := e.Job.Log; t != nil {
+			// A Dataproc workload's (#2156): the driver's output in
+			// dataproc.googleapis.com/output, Spark's own log4j lines in
+			// dataproc.googleapis.com/spark with their component, as the
+			// batch monitoring page names those logs
+			// (https://docs.cloud.google.com/dataproc-serverless/docs/guides/monitor-troubleshoot-batches,
+			// read 2026-11-22).
+			logID, labels := t.Output, map[string]string{}
+			if e.Spark {
+				logID, labels["component"] = t.Spark, strings.ToLower(e.Component)
+			}
+			entry = map[string]any{"logName": "projects/" + e.Job.Project + "/logs/" + logID, "severity": e.Severity,
+				"timestamp": e.Time.UTC().Format(time.RFC3339Nano), "textPayload": e.Text,
+				"resource": map[string]any{"type": t.Type, "labels": t.Labels}, "labels": labels}
+		} else {
+			entry = map[string]any{
+				"logName":     "projects/" + e.Job.Project + "/logs/" + sparkLogID,
+				"severity":    e.Severity,
+				"timestamp":   e.Time.UTC().Format(time.RFC3339Nano),
+				"textPayload": e.Text,
+				"resource": map[string]any{"type": "bigquery.googleapis.com/SparkJob", "labels": map[string]string{
+					"resource_container": e.Job.Project, "location": e.Job.Location, "spark_job_id": e.Job.SparkJobID}},
+				"labels": map[string]string{"component": e.Component},
+			}
 		}
 		b, err := json.Marshal(map[string]any{"entries": []any{entry}})
 		if err != nil {
