@@ -185,9 +185,15 @@ func (s *computeService) Start(ctx context.Context) error {
 		return err
 	}
 	s.netSec = ns
+	// The xDS API's TLS bootstrap files (#2160): its CA and each
+	// project's workload credentials, beside the state.
+	xdsCredDir := ""
+	if state != "" {
+		xdsCredDir = filepath.Join(filepath.Dir(state), "xds-credentials")
+	}
 	api, err := compute.New(compute.Options{State: state, Extra: s.instanceGroupManagers, ExtraGroups: s.gkeGroups, NetworkUsers: s.networkUsers, VMs: s.vms,
 		ProjectOrganization: s.projectOrganization, LB: &computeLB{cfg: s.cfg, vms: s.vms},
-		CertMaps: cm, IAP: computeIAPGate{svc: s}, NetSec: computeNetSec{ns: ns, cm: cm}})
+		CertMaps: cm, IAP: computeIAPGate{svc: s}, NetSec: computeNetSec{ns: ns, cm: cm}, XDSCredentialDir: xdsCredDir})
 	if err != nil {
 		return err
 	}
@@ -217,6 +223,12 @@ func (s *computeService) Start(ctx context.Context) error {
 		return fmt.Errorf("compute: %w", err)
 	}
 	s.ln = ln
+	// The xDS API over TLS (#2160), as proxyless gRPC reaches Google's:
+	// a TLS handshake on this port gets a certificate from the load
+	// balancing CA for its bound address, and HTTP/2.
+	if cfg, err := api.XDSServerTLS([]string{s.cfg.BindAddress}); err == nil {
+		ln = newTLSSniffListener(ln, cfg)
+	}
 	vrest := vpcaccess.NewRESTHandler(va)
 	cmrest := certificatemanager.NewRESTHandler(cm)
 	iaprest := iap.NewRESTHandler(ia)
@@ -254,6 +266,7 @@ func (s *computeService) Start(ctx context.Context) error {
 	var protos http.Protocols
 	protos.SetHTTP1(true)
 	protos.SetUnencryptedHTTP2(true)
+	protos.SetHTTP2(true)
 	guarded := hostguard.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.ProtoMajor == 2 && strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
 			api.XDSHandler().ServeHTTP(w, r)

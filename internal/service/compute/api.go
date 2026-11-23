@@ -43,8 +43,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == XDSBootstrapPath {
 		// A bootstrap file naming this port (#2160), for ?project=P&network=N.
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(XDSBootstrap(r.Host, r.URL.Query().Get("project"), r.URL.Query().Get("network"))))
+		s.serveXDSBootstrap(w, r)
 		return
 	}
 	if strings.HasPrefix(r.URL.Path, IAPRedirectPrefix) {

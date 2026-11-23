@@ -94,6 +94,10 @@ type Options struct {
 	// policies target forwarding rules (#2160, lbmtls.go); nil refuses
 	// those fields and authorizes every request.
 	NetSec NetworkSecurity
+	// XDSCredentialDir is where the xDS API's TLS bootstrap files are
+	// written: its CA and each project's workload credentials (#2160,
+	// lbxdssec.go); empty serves only the plaintext bootstrap.
+	XDSCredentialDir string
 }
 
 // obj is one resource, as its JSON is kept: link fields hold relative

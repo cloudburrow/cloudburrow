@@ -87,11 +87,13 @@ func (x *xdsServer) StreamAggregatedResources(st discoveryv3.AggregatedDiscovery
 	subs := map[string][]string{} // type URL -> names
 	sent := map[string]string{}   // type URL -> version sent
 	nonce := 0
+	var node *corev3.Node // the client's, from its first request
 	send := func(typ string, force bool) error {
 		mu.Lock()
 		names := append([]string(nil), subs[typ]...)
+		nd := node
 		mu.Unlock()
-		res, ver := x.s.xdsResources(typ, names)
+		res, ver := x.s.xdsResources(typ, names, nd)
 		mu.Lock()
 		if !force && sent[typ] == ver {
 			mu.Unlock()
@@ -140,6 +142,11 @@ func (x *xdsServer) StreamAggregatedResources(st discoveryv3.AggregatedDiscovery
 			return err
 		default:
 		}
+		if req.GetNode() != nil {
+			mu.Lock()
+			node = req.GetNode()
+			mu.Unlock()
+		}
 		typ := req.GetTypeUrl()
 		switch typ {
 		case typeListener, typeRoute, typeCluster, typeEndpoint:
@@ -167,8 +174,8 @@ func (x *xdsServer) StreamAggregatedResources(st discoveryv3.AggregatedDiscovery
 
 // xdsResources are the resources of a type for names, and a version that
 // changes when they do.
-func (s *Server) xdsResources(typ string, names []string) ([]*anypb.Any, string) {
-	named := s.xdsNamedResources(typ, names)
+func (s *Server) xdsResources(typ string, names []string, node *corev3.Node) ([]*anypb.Any, string) {
+	named := s.xdsNamedResources(typ, names, node)
 	h := sha256.New()
 	var out []*anypb.Any
 	for _, r := range named {
@@ -186,7 +193,7 @@ type xdsNamed struct {
 
 // xdsNamedResources are the resources of a type for names that exist, in
 // the order of names, each with a version that changes when it does.
-func (s *Server) xdsNamedResources(typ string, names []string) []xdsNamed {
+func (s *Server) xdsNamedResources(typ string, names []string, node *corev3.Node) []xdsNamed {
 	s.mu.Lock()
 	type nm struct {
 		name string
@@ -197,7 +204,11 @@ func (s *Server) xdsNamedResources(typ string, names []string) []xdsNamed {
 		var m proto.Message
 		switch typ {
 		case typeListener:
-			if l := s.xdsListenerLocked(n); l != nil {
+			if strings.HasPrefix(n, xdsServerListenerPrefix) {
+				if l := s.xdsServerListenerLocked(n, node); l != nil {
+					m = l
+				}
+			} else if l := s.xdsListenerLocked(n); l != nil {
 				m = l
 			}
 		case typeRoute:
@@ -435,7 +446,7 @@ func (s *Server) xdsClusterLocked(name string) *clusterv3.Cluster {
 	c := &clusterv3.Cluster{Name: name, ClusterDiscoveryType: &clusterv3.Cluster_Type{Type: clusterv3.Cluster_EDS},
 		EdsClusterConfig: &clusterv3.Cluster_EdsClusterConfig{EdsConfig: &corev3.ConfigSource{
 			ConfigSourceSpecifier: &corev3.ConfigSource_Ads{Ads: &corev3.AggregatedConfigSource{}}}},
-		LbPolicy: lb}
+		LbPolicy: lb, TransportSocket: s.xdsUpstreamTLSLocked(bs)}
 	if str(bs, "localityLbPolicy") == "WEIGHTED_ROUND_ROBIN" {
 		// The client weighs endpoints by the ORCA reports of its calls
 		// (gRPC's weighted round robin), as Google's xDS API configures

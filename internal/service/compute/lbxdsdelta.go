@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	discoveryv3 "github.com/envoyproxy/go-control-plane/envoy/service/discovery/v3"
 )
 
@@ -39,9 +40,11 @@ func (x *xdsServer) DeltaAggregatedResources(st discoveryv3.AggregatedDiscoveryS
 	var mu sync.Mutex
 	types := map[string]*deltaType{}
 	nonce := 0
+	var node *corev3.Node // the client's, from its first request
 	send := func(typ string) error {
 		mu.Lock()
 		dt := types[typ]
+		nd := node
 		if dt == nil {
 			mu.Unlock()
 			return nil
@@ -56,7 +59,7 @@ func (x *xdsServer) DeltaAggregatedResources(st discoveryv3.AggregatedDiscoveryS
 			names = append(names, x.s.xdsAllNames(typ)...)
 		}
 		names = uniqSorted(names)
-		have := x.s.xdsNamedResources(typ, names)
+		have := x.s.xdsNamedResources(typ, names, nd)
 		mu.Lock()
 		defer mu.Unlock()
 		resp := &discoveryv3.DeltaDiscoveryResponse{TypeUrl: typ}
@@ -130,6 +133,11 @@ func (x *xdsServer) DeltaAggregatedResources(st discoveryv3.AggregatedDiscoveryS
 		case err := <-errc:
 			return err
 		default:
+		}
+		if req.GetNode() != nil {
+			mu.Lock()
+			node = req.GetNode()
+			mu.Unlock()
 		}
 		typ := req.GetTypeUrl()
 		switch typ {
