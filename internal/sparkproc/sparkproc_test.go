@@ -231,3 +231,67 @@ func TestRangerYarnConf(t *testing.T) {
 		t.Errorf("yarn-site.xml without RANGER = %v", y)
 	}
 }
+
+// TestHDFSConf (#2186): a YARN cluster's core-site.xml names its HDFS
+// (hdfs://CLUSTER-m), its hdfs-site.xml the NameNode on the master,
+// dfs.replication for the worker count and the cluster's hdfs:
+// properties, and with RANGER the NameNode's Ranger HDFS plugin.
+func TestHDFSConf(t *testing.T) {
+	dir := t.TempDir()
+	c := &Cluster{d: &Docker{Ecosystem: &Ecosystem{Hive: "hive", GCS: func(context.Context) (string, error) { return "", nil }}},
+		dir: dir, spec: ClusterSpec{Name: "hd", Workers: 3, Components: []string{ComponentSolr, ComponentRanger},
+			ConfProperties: map[string]string{"hdfs:dfs.blocksize": "64m", "hdfs:dfs.replication": "3"}}}
+	if err := c.writeConf(filepath.Join(dir, "conf"), nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	read := func(name string) string {
+		b, err := os.ReadFile(filepath.Join(dir, "conf", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	for name, want := range map[string][]string{
+		"core-site.xml": {"<name>fs.defaultFS</name><value>hdfs://hd-m</value>"},
+		"hdfs-site.xml": {"<name>dfs.namenode.rpc-address</name><value>hd-m:8020</value>", "<name>dfs.blocksize</name><value>64m</value>",
+			"<name>dfs.replication</name><value>3</value>", "<name>dfs.namenode.http-address</name><value>hd-m:9870</value>",
+			"<name>dfs.namenode.inode.attributes.provider.class</name><value>org.apache.ranger.authorization.hadoop.RangerHdfsAuthorizer</value>",
+			"<name>dfs.permissions.enabled</name><value>true</value>"},
+		"hive-site.xml":            {"<name>hive.metastore.warehouse.dir</name><value>/user/hive/warehouse</value>"},
+		"mapred-site.xml":          {"<name>yarn.app.mapreduce.am.staging-dir</name><value>/tmp/hadoop-yarn/staging</value>"},
+		"ranger-hdfs-security.xml": {"<name>ranger.plugin.hdfs.service.name</name><value>hadoop-dataproc</value>"},
+		"ranger-hdfs-audit.xml":    {"<name>xasecure.audit.destination.solr.urls</name><value>http://localhost:8983/solr/ranger_audits</value>"},
+	} {
+		got := read(name)
+		for _, w := range want {
+			if !strings.Contains(got, w) {
+				t.Errorf("%s lacks %s:\n%s", name, w, got)
+			}
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "conf", "nodes_exclude")); err != nil {
+		t.Errorf("nodes_exclude: %v", err)
+	}
+	for workers, want := range map[int]int{0: 1, 1: 1, 2: 2, 5: 2} {
+		if got := (&Cluster{spec: ClusterSpec{Workers: workers}}).replication(); got != want {
+			t.Errorf("replication with %d workers = %d; want %d", workers, got, want)
+		}
+	}
+	plain := &Cluster{d: &Docker{}, spec: ClusterSpec{Name: "pl"}}
+	if plain.defaultFS() != "file:///" {
+		t.Errorf("defaultFS without YARN = %q", plain.defaultFS())
+	}
+}
+
+// TestAllDecommissioned reads dfsadmin -report's per-node status.
+func TestAllDecommissioned(t *testing.T) {
+	report := "Live datanodes (2):\n\nName: 10.0.0.3:9866 (hd-w-0)\nHostname: hd-w-0\nDecommission Status : Normal\n\n" +
+		"Name: 10.0.0.4:9866 (hd-w-1)\nHostname: hd-w-1\nDecommission Status : Decommission in progress\n"
+	if allDecommissioned(report, []string{"hd-w-1"}) {
+		t.Error("in progress counted as decommissioned")
+	}
+	done := strings.Replace(report, "Decommission in progress", "Decommissioned", 1)
+	if !allDecommissioned(done, []string{"hd-w-1"}) || !allDecommissioned(report, []string{"hd-w-9"}) {
+		t.Error("decommissioned or absent host not counted")
+	}
+}

@@ -74,6 +74,10 @@ type ClusterSpec struct {
 	// RangerPassword is the RANGER component's admin password, decrypted
 	// from dataproc:ranger.admin.password.uri.
 	RangerPassword string
+	// BootDiskGB is the primary workers' boot disk size (a single node
+	// cluster's master's), each DataNode's capacity; 0 is
+	// DefaultBootDiskGB.
+	BootDiskGB int
 }
 
 // Cluster is a running cluster.
@@ -191,7 +195,7 @@ func (d *Docker) StartCluster(ctx context.Context, spec ClusterSpec) (_ *Cluster
 		// event logs.
 		c.history = d.History
 	}
-	for _, name := range []string{"relay.py", "run.sh", "node.sh", "eco.sh", "hivenode.sh", "nodemanager.sh"} {
+	for _, name := range []string{"relay.py", "run.sh", "node.sh", "eco.sh", "hivenode.sh", "nodemanager.sh", "hdfs.sh"} {
 		b, _ := assets.ReadFile("assets/" + name)
 		if err := os.WriteFile(filepath.Join(c.dir, name), b, 0o644); err != nil {
 			return nil, err
@@ -302,6 +306,10 @@ func (d *Docker) StartCluster(ctx context.Context, spec ClusterSpec) (_ *Cluster
 			return nil, err
 		}
 		if c.yarnEnabled() {
+			// HDFS first: the JobHistory Server's directories are in it.
+			if err := c.startHDFS(ctx); err != nil {
+				return nil, err
+			}
 			if err := c.startYARN(ctx); err != nil {
 				return nil, err
 			}
@@ -389,6 +397,9 @@ func (c *Cluster) Scale(ctx context.Context, n int) error {
 			return err
 		}
 		if yarn {
+			if err := c.startDataNode(ctx, name, c.nodeAlias(i)); err != nil {
+				return err
+			}
 			if err := c.startNodeManager(ctx, name, c.nodeAlias(i)); err != nil {
 				return err
 			}
@@ -396,17 +407,32 @@ func (c *Cluster) Scale(ctx context.Context, n int) error {
 		}
 	}
 	if yarn && n == 0 && c.spec.Workers == 0 && !c.singleNM {
-		// A single node cluster's NodeManager is the master's.
+		// A single node cluster's DataNode and NodeManager are the
+		// master's.
+		if err := c.startDataNode(ctx, c.master, c.nodeAlias(-1)); err != nil {
+			return err
+		}
 		if err := c.startNodeManager(ctx, c.master, c.nodeAlias(-1)); err != nil {
 			return err
 		}
 		c.singleNM = true
 		added = append(added, c.master)
 	}
+	if yarn && len(c.workers) > n {
+		// The removed nodes' DataNodes are decommissioned first.
+		var hosts []string
+		for i := n; i < len(c.workers); i++ {
+			hosts = append(hosts, c.nodeAlias(i))
+		}
+		if err := c.decommissionLocked(ctx, hosts, 3*time.Minute); err != nil {
+			return err
+		}
+		defer c.clearExcludedLocked(context.Background())
+	}
 	for len(c.workers) > n {
 		last := c.workers[len(c.workers)-1]
 		if yarn {
-			_, _ = c.d.docker(context.Background(), "rm", "-f", "-v", nodeManager(last))
+			_, _ = c.d.docker(context.Background(), "rm", "-f", "-v", nodeManager(last), dataNode(last))
 		}
 		if c.dockerImage() != "" {
 			_, _ = c.d.docker(context.Background(), "rm", "-f", "-v", dockerd(last))
@@ -419,13 +445,16 @@ func (c *Cluster) Scale(ctx context.Context, n int) error {
 			return err
 		}
 	}
+	if err := c.waitDataNodes(ctx, added); err != nil {
+		return err
+	}
 	return c.waitNodeManagers(ctx, added)
 }
 
 // nodes are every container of the cluster, the relay first.
 func (c *Cluster) nodesLocked() []string {
 	nodes := append(append(append([]string{c.relay, c.master}, c.workers...), c.extras...), c.groupContainersLocked()...)
-	return append(append(nodes, c.nodeManagersLocked()...), c.dockerdsLocked()...)
+	return append(append(append(nodes, c.dataNodesLocked()...), c.nodeManagersLocked()...), c.dockerdsLocked()...)
 }
 
 // Stop stops the cluster's containers, keeping them.
@@ -440,12 +469,38 @@ func (c *Cluster) Stop(ctx context.Context) error {
 	return nil
 }
 
-// Start starts a stopped cluster's containers again.
+// Start starts a stopped cluster's containers again: with HDFS, the
+// nodes and the NameNode and DataNodes first (their data as the cluster
+// left it), the rest once HDFS is out of safe mode.
 func (c *Cluster) Start(ctx context.Context) error {
 	c.mu.Lock()
 	nodes := c.nodesLocked()
 	workers := append([]string(nil), c.workers...)
+	var first []string
+	if c.hdfsEnabled() {
+		first = append(append(append([]string{c.relay, c.master}, c.workers...), c.nameNode()), c.dataNodesLocked()...)
+	}
 	c.mu.Unlock()
+	if len(first) > 0 {
+		since := time.Now().Add(-5 * time.Second).UTC().Format(time.RFC3339)
+		if out, err := c.d.docker(ctx, append([]string{"start"}, first...)...); err != nil {
+			return errors.New("start the cluster's nodes: " + out)
+		}
+		if err := c.waitSince(ctx, c.nameNode(), since, `CLOUDBURROW HDFS READY`); err != nil {
+			return err
+		}
+		started := map[string]bool{}
+		for _, n := range first {
+			started[n] = true
+		}
+		var rest []string
+		for _, n := range nodes {
+			if !started[n] {
+				rest = append(rest, n)
+			}
+		}
+		nodes = rest
+	}
 	args := append([]string{"start"}, nodes...)
 	if out, err := c.d.docker(ctx, args...); err != nil {
 		return errors.New("start the cluster's nodes: " + out)
@@ -631,8 +686,10 @@ func (c *Cluster) Submit(ctx context.Context, job Job) (Result, error) {
 	run := append(append([]string{"run", "--name", driver, "--label", c.label, "--label", "cloudburrow.dataproc.cluster=" + c.spec.ID}, netArgs...),
 		"-v", dir+":/cb", "-v", c.jar+":/cb-connector/spark-bigquery.jar:ro", "-v", c.HistoryDir()+":/cb-history")
 	if yarn {
+		// A job runs as root, as a Dataproc job's driver does: its HDFS
+		// user, whatever the image's own.
 		run = append(run, "-v", filepath.Join(c.dir, "conf")+":/cb-conf:ro", "-v", filepath.Join(c.dir, "shared")+":/cb-shared",
-			"-e", "HADOOP_CONF_DIR=/cb-conf")
+			"-e", "HADOOP_CONF_DIR=/cb-conf", "-e", "HADOOP_USER_NAME=root")
 	}
 	run = append(run, c.lakeMounts...)
 	run = append(run, c.dockerClient(false)...)

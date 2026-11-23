@@ -18,9 +18,9 @@ package sparkproc
 // first Hive job or with a component that needs the metastore. Apache Pig
 // is the Apache release's binary tarball, mounted into the driver.
 //
-// Dataproc runs these on YARN and HDFS; a local cluster runs no YARN
-// ResourceManager or HDFS NameNode: fs.defaultFS is the driver's local
-// file system, and the Hive warehouse is a directory of the cluster's.
+// Dataproc runs these on YARN and HDFS, as a cluster does here (yarn.go,
+// hdfs.go): fs.defaultFS is the cluster's HDFS, and the Hive warehouse is
+// HDFS's /user/hive/warehouse.
 //
 // The optional components run in containers sharing the master's network,
 // as a Dataproc master runs them: Trino (the coordinator, 8060, its hive
@@ -162,7 +162,7 @@ func (c *Cluster) writeConf(dir string, job map[string]string, jars []string) er
 		return err
 	}
 	core := map[string]string{
-		"fs.defaultFS":                      "file:///",
+		"fs.defaultFS":                      c.defaultFS(),
 		"fs.gs.impl":                        "com.google.cloud.hadoop.fs.gcs.GoogleHadoopFileSystem",
 		"fs.AbstractFileSystem.gs.impl":     "com.google.cloud.hadoop.fs.gcs.GoogleHadoopFS",
 		"fs.gs.project.id":                  c.spec.Project,
@@ -214,16 +214,18 @@ func (c *Cluster) writeConf(dir string, job map[string]string, jars []string) er
 		}
 		// Hive on Tez on YARN, as a Dataproc image runs Hive: each query a
 		// Tez DAG whose ApplicationMaster and tasks are YARN containers,
-		// Tez's jars localized from the NodeManagers' /opt/tez, the query
-		// plans, Hive's jars and the query results cache in the shared
-		// scratch, install and cache directories.
-		for k, v := range map[string]string{"tez.local.mode": "false", "hive.exec.scratchdir": "/cb-shared/hive-scratch",
-			"hive.user.install.directory": "/cb-shared/hive-install", "hive.query.results.cache.directory": "/cb-shared/hive-resultscache",
+		// Tez's jars localized from the NodeManagers' /opt/tez. The query
+		// plans, Hive's jars, the query results cache, Tez's staging
+		// directory and the warehouse are in HDFS, at Hive's and Tez's
+		// defaults (/tmp/hive, /user/, /tmp/USER/staging) and Dataproc's
+		// /user/hive/warehouse.
+		for k, v := range map[string]string{"tez.local.mode": "false", "hive.exec.scratchdir": "/tmp/hive",
+			"hive.user.install.directory": "/user/", "hive.metastore.warehouse.dir": "/user/hive/warehouse",
 			"hive.tez.container.size": "512", "hive.tez.java.opts": "-Xmx400m"} {
 			hive[k] = v
 		}
 		tez = map[string]string{"tez.lib.uris": "file:///opt/tez,file:///opt/tez/lib", "tez.use.cluster.hadoop-libs": "true",
-			"tez.staging-dir": "/cb-shared/tez-staging", "tez.am.resource.memory.mb": "768", "tez.am.launch.cmd-opts": "-Xmx600m",
+			"tez.am.resource.memory.mb": "768", "tez.am.launch.cmd-opts": "-Xmx600m",
 			"tez.task.resource.memory.mb": "512", "tez.cluster.additional.classpath.prefix": "/cb-gcs/gcs-connector.jar",
 			"tez.am.container.reuse.enabled": "true", "tez.session.am.dag.submit.timeout.secs": "60"}
 	}
@@ -250,6 +252,12 @@ func (c *Cluster) writeConf(dir string, job map[string]string, jars []string) er
 		}
 	}
 	if yarn != nil {
+		files["hdfs-site.xml"] = c.hdfsSite()
+		if c.has(ComponentRanger) {
+			for name, props := range c.rangerHdfsConf() {
+				files[name] = props
+			}
+		}
 		files["yarn-site.xml"] = yarn
 		files["capacity-scheduler.xml"] = c.capacityScheduler()
 		if c.has(ComponentRanger) {
@@ -260,6 +268,13 @@ func (c *Cluster) writeConf(dir string, job map[string]string, jars []string) er
 	}
 	for name, props := range files {
 		if err := os.WriteFile(filepath.Join(dir, name), siteXML(props), 0o644); err != nil {
+			return err
+		}
+	}
+	if yarn != nil {
+		// The NameNode's dfs.hosts.exclude: no host, until a scale down
+		// decommissions some.
+		if err := os.WriteFile(filepath.Join(dir, "nodes_exclude"), nil, 0o644); err != nil {
 			return err
 		}
 	}
@@ -681,14 +696,10 @@ func (c *Cluster) submitEco(ctx context.Context, job Job) (Result, error) {
 			// HDFS is file:/tmp/cb-work: a gs:// input's connector refuses
 			// a path of another scheme or bucket. The job's working
 			// directory is /user/root with no scheme, as Dataproc's
-			// (hdfs:///user/root) is for each file system; and Pig's
-			// intermediate files (DUMP's among them) are in the directory
-			// every node shares.
+			// (hdfs:///user/root) is for each file system. Pig's
+			// intermediate files are in HDFS's /tmp (pig.temp.dir).
 			if jobProps["mapreduce.job.working.dir"] == "" {
 				jobProps["mapreduce.job.working.dir"] = "/user/root"
-			}
-			if jobProps["pig.temp.dir"] == "" {
-				jobProps["pig.temp.dir"] = "/cb-shared/pig-tmp"
 			}
 		}
 		if err := c.writeConf(conf, jobProps, jars); err != nil {

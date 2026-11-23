@@ -14,10 +14,9 @@ package sparkproc
 // NodeManagers. The Capacity Scheduler has the one default queue, as a
 // Dataproc cluster's.
 //
-// A cluster has no HDFS: fs.defaultFS is file:///, and the MapReduce
-// staging and done directories (yarn.app.mapreduce.am.staging-dir) are a
-// directory of the cluster's mounted at /cb-shared on every node and
-// driver, as HDFS is shared by a Dataproc cluster's nodes. A job's gs://
+// fs.defaultFS is the cluster's HDFS (hdfs.go), where the MapReduce
+// staging and JobHistory directories are, at YARN's defaults
+// (/tmp/hadoop-yarn/staging), as on a Dataproc cluster. A job's gs://
 // paths are the instance's Cloud Storage through Google's connector,
 // which is on the tasks' class path.
 //
@@ -47,9 +46,10 @@ const (
 	timelineWebPort   = "8188"
 )
 
-// yarnPorts are the YARN web interfaces the cluster relay publishes, by
-// their Web key.
-var yarnPorts = []struct{ key, port string }{{"yarn", yarnWebPort}, {"jobhistory", jobHistoryWebPort}, {"apphistory", timelineWebPort}}
+// yarnPorts are the YARN and HDFS web interfaces the cluster relay
+// publishes, by their Web key.
+var yarnPorts = []struct{ key, port string }{{"yarn", yarnWebPort}, {"jobhistory", jobHistoryWebPort}, {"apphistory", timelineWebPort},
+	{"hdfs", nameNodeWebPort}}
 
 // yarnApps is the line Hadoop's YARN client logs for each application it
 // submits.
@@ -139,12 +139,10 @@ func (c *Cluster) yarnConf(jars []string) (yarn, mapred map[string]string) {
 	}
 	mapred = map[string]string{
 		"mapreduce.framework.name":                     "yarn",
-		"yarn.app.mapreduce.am.staging-dir":            "/cb-shared/staging",
+		"yarn.app.mapreduce.am.staging-dir":            "/tmp/hadoop-yarn/staging",
 		"mapreduce.jobhistory.address":                 master + ":10020",
 		"mapreduce.jobhistory.webapp.address":          master + ":" + jobHistoryWebPort,
 		"mapreduce.jobhistory.bind-host":               "0.0.0.0",
-		"mapreduce.jobhistory.intermediate-done-dir":   "/cb-shared/history/done_intermediate",
-		"mapreduce.jobhistory.done-dir":                "/cb-shared/history/done",
 		"mapreduce.application.classpath":              cp,
 		"yarn.app.mapreduce.am.env":                    "HADOOP_MAPRED_HOME=/opt/hadoop",
 		"mapreduce.map.env":                            "HADOOP_MAPRED_HOME=/opt/hadoop",
@@ -221,7 +219,7 @@ func (c *Cluster) startYARN(ctx context.Context) error {
 	args = append(args, "-e", "HADOOP_CONF_DIR=/cb-conf", "-e", "HADOOP_CLASSPATH="+cp,
 		"-e", "YARN_RESOURCEMANAGER_HEAPSIZE=512", "-e", "HADOOP_JOB_HISTORYSERVER_HEAPSIZE=256",
 		"--entrypoint", "/bin/bash", e.Hive, "-c",
-		"mkdir -p /cb-shared/staging /cb-shared/history && (/opt/hadoop/bin/mapred historyserver &) && "+
+		"(/opt/hadoop/bin/mapred historyserver &) && "+
 			"(YARN_TIMELINESERVER_HEAPSIZE=256 /opt/hadoop/bin/yarn timelineserver &) && exec /opt/hadoop/bin/yarn resourcemanager")
 	if err := c.runComponent(ctx, "yarn", "", args...); err != nil {
 		return err
@@ -349,7 +347,7 @@ func (a YarnApp) String() string { return fmt.Sprintf("%s (%s %s)", a.ID, a.Stat
 // driver in the job's driver container; the default) or cluster (the
 // driver in the ApplicationMaster's YARN container). Spark's jars are the
 // NodeManagers' own image's (spark.yarn.jars local:), the staging
-// directory is on the shared file system, and the ApplicationMaster and
+// directory Spark's default (the job user's HDFS home), and the ApplicationMaster and
 // executors run on the image's Java. The cluster's and the job's own
 // properties win over these; a Spark SQL job runs in client mode, as
 // spark-sql's shell runs in no other.
@@ -362,7 +360,6 @@ func (c *Cluster) yarnSparkConf(job Job, conf map[string]string) {
 		mode = "client"
 	}
 	defaults := map[string]string{
-		"spark.yarn.stagingDir":                  "file:///cb-shared/spark-staging",
 		"spark.yarn.jars":                        "local:/opt/spark/jars/*",
 		"spark.yarn.appMasterEnv.JAVA_HOME":      "/opt/java/openjdk",
 		"spark.executorEnv.JAVA_HOME":            "/opt/java/openjdk",

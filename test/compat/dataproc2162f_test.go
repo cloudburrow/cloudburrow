@@ -45,7 +45,11 @@ import (
 // through the API, makes a Hive job reading it fail with Ranger's
 // "Permission denied", while one reading the other succeeds; and the
 // denial is in the Admin server's access audit, which it reads from
-// Solr's ranger_audits.
+// Solr's ranger_audits. The YARN plugin denies a queue the same way, and
+// (#2186) the NameNode's HDFS plugin a path: a deny policy of
+// hadoop-dataproc on an HDFS directory makes a Hadoop job reading a file
+// in it fail with Hadoop's "Permission denied", audited under
+// hadoop-dataproc.
 //
 // covers: google.cloud.dataproc.v1.ClusterController/CreateCluster, google.cloud.dataproc.v1.JobController/SubmitJob
 func TestDataprocRangerComponent(t *testing.T) {
@@ -293,6 +297,61 @@ func TestDataprocRangerComponent(t *testing.T) {
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("YARN access audit = %d %.800s", code, body)
+		}
+		time.Sleep(10 * time.Second)
+	}
+
+	// HDFS: the NameNode authorizes with Ranger's HDFS plugin. A Hadoop
+	// job (FsShell) puts a file in HDFS and reads it while no policy
+	// decides root's access to it (HDFS's own permissions allow it).
+	fs := func(files []string, args ...string) *dataprocpb.Job {
+		n++
+		return dataprocRunJob(t, ctx, jc, project, region, &dataprocpb.Job{Placement: &dataprocpb.JobPlacement{ClusterName: good.ClusterName},
+			Reference: &dataprocpb.JobReference{JobId: fmt.Sprintf("rghdfs%d-%s", n, suffix)},
+			TypeJob: &dataprocpb.Job_HadoopJob{HadoopJob: &dataprocpb.HadoopJob{
+				Driver: &dataprocpb.HadoopJob_MainClass{MainClass: "org.apache.hadoop.fs.FsShell"}, Args: args, FileUris: files}}})
+	}
+	if put := fs(nil, "-mkdir", "-p", "/cb-ranger-hdfs/secret"); put.GetStatus().GetState() != dataprocpb.JobStatus_DONE {
+		t.Fatalf("hdfs dfs -mkdir: %v\n%s", put.GetStatus(), output(put))
+	}
+	if put := fs([]string{in}, "-put", "-f", "words.txt", "/cb-ranger-hdfs/secret/words.txt"); put.GetStatus().GetState() != dataprocpb.JobStatus_DONE {
+		t.Fatalf("hdfs dfs -put: %v\n%s", put.GetStatus(), output(put))
+	}
+	if cat := fs(nil, "-cat", "/cb-ranger-hdfs/secret/words.txt"); cat.GetStatus().GetState() != dataprocpb.JobStatus_DONE || !strings.Contains(output(cat), "cherry apple banana") {
+		t.Fatalf("hdfs dfs -cat before the HDFS deny policy: %v\n%s", cat.GetStatus(), output(cat))
+	}
+	// A policy of hadoop-dataproc, made through the API, denying root
+	// read and execute under /cb-ranger-hdfs/secret.
+	hdfsDeny := map[string]any{"service": "hadoop-dataproc", "name": "cb-deny-hdfs-secret", "isEnabled": true,
+		"resources": map[string]any{"path": map[string]any{"values": []string{"/cb-ranger-hdfs/secret"}, "isRecursive": true}},
+		"denyPolicyItems": []any{map[string]any{"users": []string{"root"}, "accesses": []any{
+			map[string]any{"type": "read", "isAllowed": true}, map[string]any{"type": "execute", "isAllowed": true}}}}}
+	if code, body := rest(http.MethodPost, "/service/public/v2/api/policy", password, hdfsDeny); code != http.StatusOK {
+		t.Fatalf("create the HDFS deny policy = %d %.500s", code, body)
+	}
+	var blocked *dataprocpb.Job
+	for i := 0; i < 6; i++ {
+		blocked = fs(nil, "-cat", "/cb-ranger-hdfs/secret/words.txt")
+		if blocked.GetStatus().GetState() == dataprocpb.JobStatus_ERROR {
+			break
+		}
+		time.Sleep(10 * time.Second)
+	}
+	if out := output(blocked); blocked.GetStatus().GetState() != dataprocpb.JobStatus_ERROR || !strings.Contains(out, "Permission denied: user=root") {
+		t.Fatalf("hdfs dfs -cat the HDFS policy denies: %v\n%s", blocked.GetStatus(), out)
+	}
+	if ls := fs(nil, "-ls", "/cb-ranger-hdfs"); ls.GetStatus().GetState() != dataprocpb.JobStatus_DONE || !strings.Contains(output(ls), "/cb-ranger-hdfs/secret") {
+		t.Errorf("hdfs dfs -ls outside the denied path: %v\n%s", ls.GetStatus(), output(ls))
+	}
+	// The denial, in the access audit of hadoop-dataproc.
+	deadline = time.Now().Add(3 * time.Minute)
+	for {
+		code, body := rest(http.MethodGet, "/service/assets/accessAudit?pageSize=100&sortBy=eventTime&sortType=desc&repoName=hadoop-dataproc", password, nil)
+		if code == http.StatusOK && strings.Contains(body, `"resourcePath":"/cb-ranger-hdfs/secret`) && strings.Contains(body, `"accessResult":0`) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("HDFS access audit = %d %.800s", code, body)
 		}
 		time.Sleep(10 * time.Second)
 	}

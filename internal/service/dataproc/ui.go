@@ -479,6 +479,15 @@ func rewriteHadoop(resp *http.Response, gateway, base, master string) error {
 			page = strings.ReplaceAll(page, "http://"+host, strings.TrimSuffix(gateway, "/")+"/"+key)
 		}
 	}
+	if strings.HasSuffix(base, "/hdfs") {
+		// The NameNode's pages read its JMX, configuration, startup
+		// progress and WebHDFS by root-relative URLs in their scripts.
+		for _, p := range []string{"/jmx", "/webhdfs/", "/conf", "/startupProgress"} {
+			for _, q := range []string{`'`, `"`} {
+				page = strings.ReplaceAll(page, q+p, q+base+p)
+			}
+		}
+	}
 	for _, attr := range []string{`href="/`, `src="/`, `href='/`, `src='/`, `action="/`} {
 		q := attr[len(attr)-2 : len(attr)-1]
 		page = rootLinks(page, attr, attr[:len(attr)-2]+q+base+"/", gateway)

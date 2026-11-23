@@ -578,6 +578,7 @@ func clusterSpec(c *dataprocpb.Cluster) sparkproc.ClusterSpec {
 		ImageVersion: mm, Workers: workerCount(c), WorkerCores: cores, WorkerMemory: mem,
 		Properties: sparkProps(c), HistoryBase: gatewayBase(c.GetClusterUuid()) + "sparkhistory",
 		GatewayBase: gatewayBase(c.GetClusterUuid()), Components: comps, ConfProperties: conf,
+		BootDiskGB:     int(ig.GetDiskConfig().GetBootDiskSizeGb()),
 		IcebergVersion: c.GetConfig().GetSoftwareConfig().GetProperties()["dataproc:dataproc.iceberg.version"]}
 }
 
@@ -708,12 +709,12 @@ var (
 		"Ranger": "ranger/"}
 	gatewayKeys = map[string]string{"sparkhistory": "history", "jupyter": "jupyter", "zeppelin": "zeppelin", "flink": "flink",
 		"trino": "trino", "solr": "solr", "webhcat": "webhcat", "yarn": "yarn", "jobhistory": "jobhistory", "apphistory": "apphistory",
-		"ranger": "ranger"}
+		"ranger": "ranger", "hdfs": "hdfs"}
 	// gatewayRewritten are the Hadoop web interfaces, which have no base
 	// path setting: their pages' root-relative links and their own
 	// absolute URLs (http://CLUSTER-m:8088/...) are rewritten to their
 	// gateway paths.
-	gatewayRewritten = map[string]string{"yarn": "8088", "jobhistory": "19888", "apphistory": "8188", "ranger": "6080"}
+	gatewayRewritten = map[string]string{"yarn": "8088", "jobhistory": "19888", "apphistory": "8188", "ranger": "6080", "hdfs": "9870"}
 	// gatewayFull are the components served at their full path (their
 	// base URL configured to it), the rest with it stripped.
 	gatewayFull = map[string]bool{"jupyter": true, "zeppelin": true}
@@ -731,7 +732,8 @@ func (s *Server) fillEndpointsLocked(c *dataprocpb.Cluster) {
 	base := gatewayBase(c.GetClusterUuid())
 	// The Hadoop interfaces every cluster runs (YARN, internal/sparkproc).
 	ec.HttpPorts = map[string]string{"Spark History Server": base + "sparkhistory/", "YARN ResourceManager": base + "yarn/",
-		"MapReduce Job History": base + "jobhistory/", "YARN Application Timeline": base + "apphistory/"}
+		"MapReduce Job History": base + "jobhistory/", "YARN Application Timeline": base + "apphistory/",
+		"HDFS NameNode": base + "hdfs/dfshealth.html"}
 	// The components' web interfaces. Their keys are UNVERIFIED (docs
 	// re-read 2026-11-22: the Component Gateway page lists only the
 	// Hadoop, Spark and Tez interfaces' keys).
