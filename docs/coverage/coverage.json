@@ -6414,6 +6414,7 @@
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/loggingsettingscmek1972_test.go:41 TestLoggingSettingsCMEK",
           "test/compat/loggingviews_test.go:83 TestLoggingViewFiltersAndRetention",
+          "test/compat/relayfirewall2180_test.go:43 TestRelayedConnectionsFollowTheEgressFirewall",
           "test/compat/runlogs_test.go:189 TestGcloudRunLogsRead",
           "test/compat/storage_audit_test.go:116 TestStorageDataAccessAuditLogs",
           "test/compat/storage_audit_test.go:198 TestStorageDataAccessAuditLogsOffByDefault",
@@ -15274,14 +15275,16 @@
         "tests": [
           "test/compat/compute_test.go:299 TestGcloudComputeNetworks",
           "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient",
-          "test/compat/computevmnet_test.go:33 TestComputeVMNetworkingThroughTheGoClient"
+          "test/compat/computevmnet_test.go:33 TestComputeVMNetworkingThroughTheGoClient",
+          "test/compat/relayfirewall2180_test.go:43 TestRelayedConnectionsFollowTheEgressFirewall"
         ]
       },
       {
         "method": "compute.firewalls.get",
         "status": "Verified",
         "tests": [
-          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient",
+          "test/compat/relayfirewall2180_test.go:43 TestRelayedConnectionsFollowTheEgressFirewall"
         ]
       },
       {
@@ -15291,7 +15294,8 @@
           "test/compat/compute_test.go:299 TestGcloudComputeNetworks",
           "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient",
           "test/compat/computevmnet_test.go:33 TestComputeVMNetworkingThroughTheGoClient",
-          "test/compat/iap2160_test.go:224 TestGcloudStartIAPTunnel"
+          "test/compat/iap2160_test.go:224 TestGcloudStartIAPTunnel",
+          "test/compat/relayfirewall2180_test.go:43 TestRelayedConnectionsFollowTheEgressFirewall"
         ]
       },
       {
