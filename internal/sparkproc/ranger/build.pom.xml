@@ -1,13 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
   CloudBurrow's reactor for the Dataproc RANGER component's image (#2162),
-  copied next to Apache Ranger 2.8.0's own pom.xml; Ranger's sources are
-  not changed. It lists Ranger's own modules (its "all" profile) without
-  the Kylin plugin and its shim, whose Kylin dependency (RoaringBitmap
-  0.7.36-os-kylin-r1) is only on repo.spring.io, which answers 401; Dataproc's
-  Ranger component installs no Kylin plugin. The Dockerfile builds
-  "-pl cloudburrow-distro -am": the Admin server and the HDFS, Hive, YARN
-  and Solr plugins, and only the modules they need.
+  copied next to Apache Ranger 2.8.0's own pom.xml. Its modules are Ranger's root (".", whose own modules are
+  every Ranger module) and cloudburrow-distro (distro.pom.xml). The
+  Dockerfile builds "-pl cloudburrow-distro -am": the Admin server and the
+  HDFS, Hive and YARN plugins, and only the modules they need, so
+  never the Kylin plugin, whose Kylin dependency (RoaringBitmap
+  0.7.36-os-kylin-r1) is only on repo.spring.io, which answers 401;
+  Dataproc's Ranger component installs no Kylin plugin. Ranger's root is
+  then the reactor's first project, the one Ranger's assembly descriptors
+  find their modules through (useAllReactorProjects).
 -->
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
@@ -16,65 +18,7 @@
     <version>2.8.0</version>
     <packaging>pom</packaging>
     <modules>
-        <module>agents-audit</module>
-        <module>agents-common</module>
-        <module>agents-cred</module>
-        <module>agents-installer</module>
-        <module>authz-api</module>
-        <module>authz-embedded</module>
-        <module>credentialbuilder</module>
-        <module>embeddedwebserver</module>
-        <module>hbase-agent</module>
-        <module>hdfs-agent</module>
-        <module>hive-agent</module>
-        <module>intg</module>
-        <module>jisql</module>
-        <module>kms</module>
-        <module>knox-agent</module>
-        <module>plugin-atlas</module>
-        <module>plugin-elasticsearch</module>
-        <module>plugin-kafka</module>
-        <module>plugin-kms</module>
-        <module>plugin-kudu</module>
-        <module>plugin-nestedstructure</module>
-        <module>plugin-nifi</module>
-        <module>plugin-nifi-registry</module>
-        <module>plugin-ozone</module>
-        <module>plugin-presto</module>
-        <module>plugin-schema-registry</module>
-        <module>plugin-solr</module>
-        <module>plugin-sqoop</module>
-        <module>plugin-trino</module>
-        <module>plugin-yarn</module>
-        <module>ranger-atlas-plugin-shim</module>
-        <module>ranger-authn</module>
-        <module>ranger-common-ha</module>
-        <module>ranger-elasticsearch-plugin-shim</module>
-        <module>ranger-examples</module>
-        <module>ranger-hbase-plugin-shim</module>
-        <module>ranger-hdfs-plugin-shim</module>
-        <module>ranger-hive-plugin-shim</module>
-        <module>ranger-kafka-plugin-shim</module>
-        <module>ranger-kms-plugin-shim</module>
-        <module>ranger-knox-plugin-shim</module>
-        <module>ranger-metrics</module>
-        <module>ranger-ozone-plugin-shim</module>
-        <module>ranger-plugin-classloader</module>
-        <module>ranger-presto-plugin-shim</module>
-        <module>ranger-solr-plugin-shim</module>
-        <module>ranger-sqoop-plugin-shim</module>
-        <module>ranger-storm-plugin-shim</module>
-        <module>ranger-tools</module>
-        <module>ranger-util</module>
-        <module>ranger-yarn-plugin-shim</module>
-        <module>security-admin</module>
-        <module>storm-agent</module>
-        <module>tagsync</module>
-        <module>ugsync</module>
-        <module>ugsync-util</module>
-        <module>ugsync/ldapconfigchecktool/ldapconfigcheck</module>
-        <module>unixauthclient</module>
-        <module>unixauthservice</module>
+        <module>.</module>
         <module>cloudburrow-distro</module>
     </modules>
 </project>

@@ -262,15 +262,31 @@ image's Ubuntu.
   - RANGER: `CreateCluster` checks what the Ranger component page
     documents (SOLR required, `dataproc:ranger.kms.key.uri` and
     `dataproc:ranger.admin.password.uri` required, `INVALID_ARGUMENT`
-    otherwise), and a valid RANGER cluster is then `UNIMPLEMENTED`, with
-    its reason: the Admin server's image
-    (`internal/sparkproc/ranger/Dockerfile`, a Maven build of the pinned
-    Apache Ranger 2.8.0 source release) does not build as published
-    (docs/gaps.md). What runs once it does is written: MySQL 8.0 and the
-    Admin server on the master, Solr's `ranger_audits` core, the
-    Component Gateway's `Ranger` (6080), and the admin password read from
-    Cloud Storage and decrypted with the instance's Cloud KMS, checked
-    against the image version's password rules.
+    otherwise). The admin password is read from Cloud Storage, decrypted
+    with the instance's Cloud KMS and checked against the image version's
+    password rules. The master then runs:
+    - MySQL 8.0 (the Ranger database) and the Ranger Admin server and web
+      UI on port 6080, the Component Gateway's `Ranger`, signed in to as
+      `admin` with that password;
+    - Solr's `ranger_audits` core, with Ranger's own audit schema, where
+      the plugins write and the Admin server reads the access audit;
+    - the Ranger services `hadoop-dataproc`, `hive-dataproc` and
+      `yarn-dataproc` (the names Google's "Use Ranger with Kerberos" page
+      shows), made when the Admin server first starts;
+    - Ranger's Hive plugin in HiveServer2 (`hiveserver2-site.xml`,
+      `ranger-hive-security.xml`, `ranger-hive-audit.xml`): every Hive
+      query is authorized by the `hive-dataproc` policies, polled every 5
+      seconds, and a denial is audited to Solr.
+    The image (`internal/sparkproc/ranger/Dockerfile`) is built on this
+    machine, the first time a RANGER cluster starts, from the pinned Apache
+    Ranger 2.8.0 source release. Ranger's own reactor does not build as
+    published (its Kylin plugin needs an artifact only repo.spring.io
+    serves, which answers 401), so CloudBurrow's two build files build
+    only the modules the Admin server and the HDFS, Hive and YARN plugins
+    need, with Ranger's own assembly descriptors; one source patch makes
+    the Hive plugin, built for Hive 3.1.3, run in the cluster's Hive 4.0.1
+    HiveServer2 (`ranger/hive4.patch`); every file Maven resolves is
+    pinned by SHA-256 (`ranger/m2.sha256`).
   - Every cluster has a Hive metastore (Derby, in the cluster's files) and
     HiveServer2 on its master, started with its first Hive job or with a
     component that uses them.
@@ -502,7 +518,9 @@ the WebSocket bridge at it, with local credentials, as it does for BigQuery.
 
 ## What is not served
 
-- The optional component RANGER (docs/gaps.md).
+- RANGER's HDFS and YARN plugins enforce nothing: a local cluster runs no
+  HDFS NameNode, and the YARN ResourceManager does not load the plugin
+  (docs/gaps.md). Their Ranger services exist and take policies.
 - A Dataproc on GKE cluster's `auxiliary_services_config` (a Spark History
   Server and a metastore of other clusters) is kept but not used, and its
   jobs' code reaches Cloud Storage only through the job's files.

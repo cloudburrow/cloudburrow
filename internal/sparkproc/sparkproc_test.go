@@ -169,14 +169,21 @@ func TestKeyCheck(t *testing.T) {
 // TestSolrPointSchema (#2162): Ranger's Solr 8 audit schema, its Trie
 // fields the Point fields Solr 9 has in their place.
 func TestSolrPointSchema(t *testing.T) {
-	in := `<fieldType name="date" class="solr.TrieDateField" docValues="true" precisionStep="0" positionIncrementGap="0"/>
+	in := `<schema name="ranger-audit-schema">
+<fieldType name="date" class="solr.TrieDateField" docValues="true" precisionStep="0" positionIncrementGap="0"/>
 <fieldType name="tlongs" class="solr.TrieLongField" docValues="true" precisionStep="8" multiValued="true" positionIncrementGap="0"/>
-<fieldType name="string" class="solr.StrField" sortMissingLast="true"/>`
-	want := `<fieldType name="date" class="solr.DatePointField" docValues="true" positionIncrementGap="0"/>
-<fieldType name="tlongs" class="solr.LongPointField" docValues="true" multiValued="true" positionIncrementGap="0"/>
-<fieldType name="string" class="solr.StrField" sortMissingLast="true"/>`
-	if got := string(solrPointSchema([]byte(in))); got != want {
-		t.Errorf("solrPointSchema =\n%s\nwant\n%s", got, want)
+<fieldType name="booleans" class="solr.BoolField" multiValued="true" sortMissingLast="true"/>
+</schema>`
+	got := string(solrPointSchema([]byte(in)))
+	for _, want := range []string{`<fieldType name="date" class="solr.DatePointField" docValues="true" positionIncrementGap="0"/>`,
+		`<fieldType name="tlongs" class="solr.LongPointField" docValues="true" multiValued="true" positionIncrementGap="0"/>`,
+		`<fieldType name="text_general" class="solr.TextField"`, `<fieldType name="pdates"`, `<dynamicField name="*_str"`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("solrPointSchema has no %s:\n%s", want, got)
+		}
+	}
+	if strings.Count(got, `name="booleans"`) != 1 || strings.Contains(got, "Trie") || strings.Contains(got, "precisionStep") || !strings.HasSuffix(got, "</schema>") {
+		t.Errorf("solrPointSchema =\n%s", got)
 	}
 }
 

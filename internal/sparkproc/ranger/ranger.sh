@@ -67,6 +67,25 @@ services = [
     {"name": "yarn-dataproc", "type": "yarn", "configs": {"username": "yarn", "password": admin,
         "yarn.url": "http://%s:8088" % master, "hadoop.security.authentication": "simple"}},
 ]
+# The master's users, as Ranger's Unix usersync would add them on a
+# Dataproc master (Ranger refuses a policy naming a user it lacks): the
+# users jobs and daemons run as.
+import secrets
+for user in ["root", "hive", "hdfs", "yarn", "mapred", "spark"]:
+    req = urllib.request.Request("http://127.0.0.1:6080/service/xusers/users/userName/" + user,
+        headers={"Authorization": auth, "Accept": "application/json"})
+    try:
+        urllib.request.urlopen(req, timeout=30)
+        continue
+    except urllib.error.HTTPError as e:
+        if e.code not in (400, 404):
+            raise
+    body = {"name": user, "firstName": user, "password": "Cb1" + secrets.token_hex(12), "userSource": 1,
+        "status": 1, "isVisible": 1, "userRoleList": ["ROLE_USER"], "description": "Unix user of the cluster's master"}
+    req = urllib.request.Request("http://127.0.0.1:6080/service/xusers/secure/users", data=json.dumps(body).encode(), method="POST",
+        headers={"Authorization": auth, "Accept": "application/json", "Content-Type": "application/json"})
+    urllib.request.urlopen(req, timeout=60)
+    print("created Ranger user", user)
 base = "http://127.0.0.1:6080/service/public/v2/api/service"
 for svc in services:
     req = urllib.request.Request(base + "/name/" + svc["name"], headers={"Authorization": auth, "Accept": "application/json"})

@@ -39,12 +39,13 @@ import (
 // The policies are enforced: the Admin server has the hive-dataproc,
 // hadoop-dataproc and yarn-dataproc services (the names Google's "Use
 // Ranger with Kerberos" page shows); a policy made through Ranger's public
-// REST API lets root use every table of the default database, and Hive
-// jobs submitted with the official client make two tables; the policy,
-// updated through the API to one table, makes a Hive job reading the
-// other fail with Ranger's "Permission denied", while one reading the
-// first succeeds; and the denial is in the Admin server's access audit,
-// which it reads from Solr's ranger_audits.
+// REST API lets root use the cb_ranger database, where Hive jobs submitted
+// with the official client make, fill and read two tables; a policy
+// denying root SELECT on one of them, made disabled and then enabled
+// through the API, makes a Hive job reading it fail with Ranger's
+// "Permission denied", while one reading the other succeeds; and the
+// denial is in the Admin server's access audit, which it reads from
+// Solr's ranger_audits.
 //
 // covers: google.cloud.dataproc.v1.ClusterController/CreateCluster, google.cloud.dataproc.v1.JobController/SubmitJob
 func TestDataprocRangerComponent(t *testing.T) {
@@ -112,9 +113,13 @@ func TestDataprocRangerComponent(t *testing.T) {
 	}
 
 	good := cluster("rg-"+suffix, []dataprocpb.Component{dataprocpb.Component_SOLR, dataprocpb.Component_RANGER}, props)
-	got := dataprocClusterUp(t, ctx, h, cc, project, region, good)
+	dataprocClusterUp(t, ctx, h, cc, project, region, good)
+	got, err := cc.GetCluster(ctx, &dataprocpb.GetClusterRequest{ProjectId: project, Region: region, ClusterName: good.ClusterName})
+	if err != nil {
+		t.Fatal(err)
+	}
 	base := got.GetConfig().GetEndpointConfig().GetHttpPorts()["Ranger"]
-	if base == "" {
+	if !strings.HasPrefix(base, "http") || !strings.Contains(base, "/component-gateway/") {
 		t.Fatalf("httpPorts: %v", got.GetConfig().GetEndpointConfig().GetHttpPorts())
 	}
 	rest := func(method, path, pw string, body any) (int, string) {
@@ -149,23 +154,33 @@ func TestDataprocRangerComponent(t *testing.T) {
 		}
 	}
 
-	// A policy: root may use every table of the default database.
-	policy := map[string]any{"service": "hive-dataproc", "name": "cb-root-default", "isEnabled": true,
-		"resources": map[string]any{"database": map[string]any{"values": []string{"default"}},
+	// A policy, made through Ranger's public REST API: root may use every
+	// table of the cb_ranger database. (Ranger's default hive policies
+	// also let a table's owner use it.)
+	allow := map[string]any{"service": "hive-dataproc", "name": "cb-root-ranger", "isEnabled": true,
+		"resources": map[string]any{"database": map[string]any{"values": []string{"cb_ranger"}},
 			"table": map[string]any{"values": []string{"*"}}, "column": map[string]any{"values": []string{"*"}}},
 		"policyItems": []any{map[string]any{"users": []string{"root"}, "accesses": []any{map[string]any{"type": "all", "isAllowed": true}}}}}
-	code, body := rest(http.MethodPost, "/service/public/v2/api/policy", password, policy)
-	if code != http.StatusOK {
+	if code, body := rest(http.MethodPost, "/service/public/v2/api/policy", password, allow); code != http.StatusOK {
 		t.Fatalf("create policy = %d %.500s", code, body)
+	}
+	if code, body := rest(http.MethodGet, "/service/public/v2/api/service/hive-dataproc/policy/cb-root-ranger", password, nil); code != http.StatusOK || !strings.Contains(body, `"cb-root-ranger"`) {
+		t.Fatalf("get policy = %d %.300s", code, body)
+	}
+	// A policy denying root SELECT on cb_secret, made disabled.
+	deny := map[string]any{"service": "hive-dataproc", "name": "cb-deny-secret", "isEnabled": false,
+		"resources": map[string]any{"database": map[string]any{"values": []string{"cb_ranger"}},
+			"table": map[string]any{"values": []string{"cb_secret"}}, "column": map[string]any{"values": []string{"*"}}},
+		"denyPolicyItems": []any{map[string]any{"users": []string{"root"}, "accesses": []any{map[string]any{"type": "select", "isAllowed": true}}}}}
+	code, body := rest(http.MethodPost, "/service/public/v2/api/policy", password, deny)
+	if code != http.StatusOK {
+		t.Fatalf("create the deny policy = %d %.500s", code, body)
 	}
 	var created struct {
 		ID int64 `json:"id"`
 	}
 	if err := json.Unmarshal([]byte(body), &created); err != nil || created.ID == 0 {
-		t.Fatalf("create policy: %v %.300s", err, body)
-	}
-	if code, body := rest(http.MethodGet, "/service/public/v2/api/service/hive-dataproc/policy/cb-root-default", password, nil); code != http.StatusOK || !strings.Contains(body, `"cb-root-default"`) {
-		t.Fatalf("get policy = %d %.300s", code, body)
+		t.Fatalf("create the deny policy: %v %.300s", err, body)
 	}
 
 	jc, err := dataproc.NewJobControllerClient(ctx, append(dataprocGRPC(), option.WithEndpoint(addr))...)
@@ -182,28 +197,29 @@ func TestDataprocRangerComponent(t *testing.T) {
 	}
 	output := func(j *dataprocpb.Job) string { return dataprocGSText(t, ctx, sc, j.GetDriverOutputResourceUri()) }
 	// The plugin polls the Admin server every 5 seconds; the first jobs
-	// may start before it has the new policy.
+	// may start before it has the new policies.
 	var made *dataprocpb.Job
 	for i := 0; i < 6; i++ {
-		made = hive("CREATE TABLE IF NOT EXISTS cb_open (n INT)", "CREATE TABLE IF NOT EXISTS cb_secret (s STRING)",
-			"INSERT INTO cb_open VALUES (7)", "INSERT INTO cb_secret VALUES ('hidden')")
+		made = hive("CREATE DATABASE IF NOT EXISTS cb_ranger", "CREATE TABLE IF NOT EXISTS cb_ranger.cb_open (n INT)",
+			"CREATE TABLE IF NOT EXISTS cb_ranger.cb_secret (s STRING)", "INSERT INTO cb_ranger.cb_open VALUES (7)",
+			"INSERT INTO cb_ranger.cb_secret VALUES ('hidden')", "SELECT s FROM cb_ranger.cb_secret")
 		if made.GetStatus().GetState() == dataprocpb.JobStatus_DONE {
 			break
 		}
 		time.Sleep(10 * time.Second)
 	}
-	if made.GetStatus().GetState() != dataprocpb.JobStatus_DONE {
-		t.Fatalf("Hive job allowed by the policy: %v\n%s", made.GetStatus(), output(made))
+	if out := output(made); made.GetStatus().GetState() != dataprocpb.JobStatus_DONE || !strings.Contains(out, "hidden") {
+		t.Fatalf("Hive job the policies allow: %v\n%s", made.GetStatus(), out)
 	}
 
-	// The policy narrowed to cb_open: reading cb_secret is denied.
-	policy["resources"].(map[string]any)["table"] = map[string]any{"values": []string{"cb_open"}}
-	if code, body := rest(http.MethodPut, fmt.Sprintf("/service/public/v2/api/policy/%d", created.ID), password, policy); code != http.StatusOK {
+	// The deny policy, enabled through the API: reading cb_secret is denied.
+	deny["isEnabled"] = true
+	if code, body := rest(http.MethodPut, fmt.Sprintf("/service/public/v2/api/policy/%d", created.ID), password, deny); code != http.StatusOK || !strings.Contains(body, `"isEnabled":true`) {
 		t.Fatalf("update policy = %d %.500s", code, body)
 	}
 	var denied *dataprocpb.Job
 	for i := 0; i < 6; i++ {
-		denied = hive("SELECT s FROM cb_secret")
+		denied = hive("SELECT s FROM cb_ranger.cb_secret")
 		if denied.GetStatus().GetState() == dataprocpb.JobStatus_ERROR {
 			break
 		}
@@ -213,7 +229,7 @@ func TestDataprocRangerComponent(t *testing.T) {
 		!strings.Contains(out, "Permission denied: user [root] does not have [SELECT] privilege") {
 		t.Fatalf("Hive job the policy denies: %v\n%s", denied.GetStatus(), out)
 	}
-	if ok := hive("SELECT n FROM cb_open"); ok.GetStatus().GetState() != dataprocpb.JobStatus_DONE || !strings.Contains(output(ok), "7") {
+	if ok := hive("SELECT n FROM cb_ranger.cb_open"); ok.GetStatus().GetState() != dataprocpb.JobStatus_DONE || !strings.Contains(output(ok), "7") {
 		t.Errorf("Hive job the policy allows: %v\n%s", ok.GetStatus(), output(ok))
 	}
 
@@ -221,7 +237,7 @@ func TestDataprocRangerComponent(t *testing.T) {
 	deadline := time.Now().Add(3 * time.Minute)
 	for {
 		code, body := rest(http.MethodGet, "/service/assets/accessAudit?pageSize=100&sortBy=eventTime&sortType=desc&repoName=hive-dataproc", password, nil)
-		if code == http.StatusOK && strings.Contains(body, "default/cb_secret") && strings.Contains(body, `"accessResult":0`) {
+		if code == http.StatusOK && strings.Contains(body, "cb_ranger/cb_secret") && strings.Contains(body, `"accessResult":0`) {
 			break
 		}
 		if time.Now().After(deadline) {

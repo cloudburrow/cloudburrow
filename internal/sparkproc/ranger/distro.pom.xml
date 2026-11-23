@@ -2,8 +2,8 @@
 <!--
   CloudBurrow's assembly for the Dataproc RANGER component's image (#2162):
   Ranger's own distro assembly descriptors (distro/src/main/assembly) for
-  the Admin server and the HDFS, Hive, YARN and Solr plugins and Solr's
-  audit config set, with dependencies on only the modules they include,
+  the Admin server, the HDFS, Hive and YARN plugins (each auditing to
+  Solr) and Solr's audit config set, with dependencies on only the modules they include,
   so "-pl cloudburrow-distro -am" builds those and nothing else. Ranger's
   distro/pom.xml depends on every plugin, the Kylin plugin among them.
 -->
@@ -33,12 +33,12 @@
         <dependency><groupId>org.apache.ranger</groupId><artifactId>ranger-plugins-common</artifactId><version>${project.version}</version><scope>provided</scope></dependency>
         <dependency><groupId>org.apache.ranger</groupId><artifactId>ranger-plugins-cred</artifactId><version>${project.version}</version><scope>provided</scope></dependency>
         <dependency><groupId>org.apache.ranger</groupId><artifactId>ranger-plugins-installer</artifactId><version>${project.version}</version><scope>provided</scope></dependency>
-        <dependency><groupId>org.apache.ranger</groupId><artifactId>ranger-solr-plugin</artifactId><version>${project.version}</version><scope>provided</scope></dependency>
-        <dependency><groupId>org.apache.ranger</groupId><artifactId>ranger-solr-plugin-shim</artifactId><version>${project.version}</version><scope>provided</scope></dependency>
         <dependency><groupId>org.apache.ranger</groupId><artifactId>ranger-yarn-plugin</artifactId><version>${project.version}</version><scope>provided</scope></dependency>
         <dependency><groupId>org.apache.ranger</groupId><artifactId>ranger-yarn-plugin-shim</artifactId><version>${project.version}</version><scope>provided</scope></dependency>
         <dependency><groupId>org.apache.ranger</groupId><artifactId>ugsync-util</artifactId><version>${project.version}</version><scope>provided</scope></dependency>
         <dependency><groupId>org.apache.ranger</groupId><artifactId>unixauthclient</artifactId><version>${project.version}</version><scope>provided</scope></dependency>
+        <!-- The audit modules' parent: in the reactor, Ranger's descriptors find its modules (agents-audit/*) through it. -->
+        <dependency><groupId>org.apache.ranger</groupId><artifactId>ranger-plugins-audit</artifactId><version>${project.version}</version><type>pom</type><scope>provided</scope></dependency>
         <dependency><groupId>org.apache.ranger</groupId><artifactId>security-admin-web</artifactId><version>${project.version}</version><type>war</type><scope>provided</scope></dependency>
     </dependencies>
     <build>
@@ -63,7 +63,6 @@
                                 <descriptor>../distro/src/main/assembly/hdfs-agent.xml</descriptor>
                                 <descriptor>../distro/src/main/assembly/hive-agent.xml</descriptor>
                                 <descriptor>../distro/src/main/assembly/plugin-yarn.xml</descriptor>
-                                <descriptor>../distro/src/main/assembly/plugin-solr.xml</descriptor>
                                 <descriptor>../distro/src/main/assembly/solr_audit_conf.xml</descriptor>
                             </descriptors>
                         </configuration>

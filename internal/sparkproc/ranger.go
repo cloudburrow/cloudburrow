@@ -34,10 +34,10 @@ import (
 // ComponentRanger is the RANGER optional component.
 const ComponentRanger = "RANGER"
 
-//go:embed ranger/Dockerfile ranger/ranger.sh ranger/build.pom.xml ranger/distro.pom.xml ranger/m2.sha256
+//go:embed ranger/Dockerfile ranger/ranger.sh ranger/build.pom.xml ranger/distro.pom.xml ranger/m2.sha256 ranger/hive4.patch
 var rangerFS embed.FS
 
-var rangerFiles = []string{"Dockerfile", "ranger.sh", "build.pom.xml", "distro.pom.xml", "m2.sha256"}
+var rangerFiles = []string{"Dockerfile", "ranger.sh", "build.pom.xml", "distro.pom.xml", "m2.sha256", "hive4.patch"}
 
 // RangerTag is the Ranger Admin image's tag: the build context's hash.
 func RangerTag() string {
@@ -127,7 +127,10 @@ func (c *Cluster) startRanger(ctx context.Context, e *Ecosystem) error {
 		}
 	}
 	if err := c.runComponent(ctx, "ranger-db", "", "-v", dir+":/cb/ranger:ro",
-		"-e", "MYSQL_ROOT_PASSWORD_FILE=/cb/ranger/db-root-password", e.RangerMySQL); err != nil {
+		"-e", "MYSQL_ROOT_PASSWORD_FILE=/cb/ranger/db-root-password", e.RangerMySQL,
+		// Ranger's MySQL schema: its JDBC setup signs in with native
+		// passwords, and its indexes fit utf8mb3, not 8.0's utf8mb4.
+		"--default-authentication-plugin=mysql_native_password", "--character-set-server=utf8mb3", "--collation-server=utf8mb3_general_ci"); err != nil {
 		return err
 	}
 	if err := c.waitLog(ctx, c.component("ranger-db"), regexp.MustCompile(`ready for connections.*port: 3306`), 5*time.Minute); err != nil {
@@ -178,8 +181,8 @@ func (c *Cluster) rangerAuditCore(ctx context.Context, ranger, dir string) error
 	if o, err := c.d.docker(ctx, "exec", solr, "solr", "create", "-c", "ranger_audits", "-d", conf); err != nil && !strings.Contains(o, "already exists") {
 		return &Unavailable{Msg: "create Solr's ranger_audits core: " + o}
 	}
-	if o, err := c.d.docker(ctx, "exec", solr, "solr", "config", "-c", "ranger_audits", "-p", "8983", "-action", "set-property",
-		"-property", "updateHandler.autoSoftCommit.maxTime", "-value", "5000"); err != nil {
+	if o, err := c.d.docker(ctx, "exec", solr, "curl", "-sS", "-f", "-H", "Content-Type: application/json", "-d",
+		`{"set-property":{"updateHandler.autoSoftCommit.maxTime":5000}}`, "http://localhost:8983/solr/ranger_audits/config"); err != nil {
 		return &Unavailable{Msg: "set the ranger_audits soft commit: " + o}
 	}
 	return nil
@@ -191,10 +194,38 @@ var (
 	solrPrecisionRE = regexp.MustCompile(`\s+precisionStep="[0-9]+"`)
 )
 
-// solrPointSchema is a Solr 8 schema with its Trie fields Point fields.
+// solrDefaultTypes are the field types Solr 9's _default config set
+// (whose solrconfig.xml the ranger_audits core runs) names in its
+// schemaless update chain and spell checker, which Ranger's schema does
+// not define.
+var solrDefaultTypes = map[string]string{
+	"text_general": `<fieldType name="text_general" class="solr.TextField" positionIncrementGap="100" multiValued="true"><analyzer><tokenizer class="solr.StandardTokenizerFactory"/><filter class="solr.LowerCaseFilterFactory"/></analyzer></fieldType>`,
+	"booleans":     `<fieldType name="booleans" class="solr.BoolField" sortMissingLast="true" multiValued="true"/>`,
+	"pdates":       `<fieldType name="pdates" class="solr.DatePointField" docValues="true" multiValued="true"/>`,
+	"plongs":       `<fieldType name="plongs" class="solr.LongPointField" docValues="true" multiValued="true"/>`,
+	"pdoubles":     `<fieldType name="pdoubles" class="solr.DoublePointField" docValues="true" multiValued="true"/>`,
+	"*_str":        `<dynamicField name="*_str" type="string" indexed="false" stored="false" docValues="true" multiValued="true" useDocValuesAsStored="false"/>`,
+}
+
+// solrPointSchema is a Solr 8 schema for Solr 9: its Trie fields Point
+// fields, with the field types of solrDefaultTypes it lacks.
 func solrPointSchema(b []byte) []byte {
 	b = solrTrieRE.ReplaceAll(b, []byte("solr.${1}PointField"))
-	return solrPrecisionRE.ReplaceAll(b, nil)
+	b = solrPrecisionRE.ReplaceAll(b, nil)
+	var add strings.Builder
+	for _, name := range []string{"text_general", "booleans", "pdates", "plongs", "pdoubles", "*_str"} {
+		if !bytes.Contains(b, []byte(`name="`+name+`"`)) {
+			add.WriteString("  " + solrDefaultTypes[name] + "\n")
+		}
+	}
+	if add.Len() == 0 {
+		return b
+	}
+	i := bytes.LastIndex(b, []byte("</schema>"))
+	if i < 0 {
+		return b
+	}
+	return append(append(append([]byte{}, b[:i]...), add.String()...), b[i:]...)
 }
 
 // hivePluginDir is where startRanger copies Ranger's Hive plugin (its
