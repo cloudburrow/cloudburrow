@@ -24,7 +24,9 @@ package vertexai
 // Feature is one of bytes_list (1), float_list (2) or int64_list (3), each
 // a repeated value (1).
 //
-// UNVERIFIED: a one-element list is read as its value (a feature is a
+// UNVERIFIED (Google does not say; re-read 2026-11-24,
+// https://docs.cloud.google.com/vertex-ai/docs/model-monitoring/overview):
+// a one-element list is read as its value (a feature is a
 // scalar per row), a longer one as a list; bytes are read as UTF-8 text.
 
 import (

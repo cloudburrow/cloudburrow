@@ -31,8 +31,7 @@ r=$(awk -v n="$n" -v t="$train" 'BEGIN { printf "%.12g", n / 64 + t }')
 mkdir -p /tmp/hypertune
 printf '{"global_step": "1", "%s": "%s", "timestamp": %s}\n' "$CLOUD_ML_HP_METRIC_TAG" "$r" "$(date +%s)" > /tmp/hypertune/output.metrics`
 
-// Not yet annotated covers: (it has not run); once it passes it covers
-// the seven JobService NasJob and NasTrialDetail methods.
+// covers: google.cloud.aiplatform.v1.JobService/CreateNasJob, google.cloud.aiplatform.v1.JobService/GetNasJob, google.cloud.aiplatform.v1.JobService/ListNasJobs, google.cloud.aiplatform.v1.JobService/CancelNasJob, google.cloud.aiplatform.v1.JobService/DeleteNasJob, google.cloud.aiplatform.v1.JobService/GetNasTrialDetail, google.cloud.aiplatform.v1.JobService/ListNasTrialDetails
 //
 // TestVertexAINeuralArchitectureSearch (#2214), with the official Go
 // client: a multi-trial NAS job over a PyGlove search space (a OneOf of

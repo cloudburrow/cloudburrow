@@ -64,6 +64,7 @@ def main():
     job = monitor.run(
         display_name="drifted",
         target_dataset=ml_monitoring.spec.MonitoringInput(gcs_uri="gs://%s/serve.jsonl" % bucket, data_format="jsonl"),
+        sync=True,
     )
     out["job"] = job.resource_name
     state = ""

@@ -10,7 +10,7 @@ package main
 // read 2026-11-24). Google creates NAS jobs from the vertex-nas-cli and the
 // API, not a console pane.
 //
-// UNVERIFIED (Google's NAS pages show no screenshots of the tab): the
+// UNVERIFIED (no screenshots of the tab; re-read 2026-11-24): the
 // list's columns, the job page's fields, and the Trials table's columns.
 
 import (

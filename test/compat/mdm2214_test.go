@@ -24,8 +24,7 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
-// Not yet annotated covers: (it has not run); once it passes it covers
-// the MDM job lifecycle methods.
+// covers: google.cloud.aiplatform.v1.JobService/CreateModelDeploymentMonitoringJob, google.cloud.aiplatform.v1.JobService/GetModelDeploymentMonitoringJob, google.cloud.aiplatform.v1.JobService/PauseModelDeploymentMonitoringJob, google.cloud.aiplatform.v1.JobService/ResumeModelDeploymentMonitoringJob, google.cloud.aiplatform.v1.JobService/DeleteModelDeploymentMonitoringJob, google.cloud.aiplatform.v1.JobService/SearchModelDeploymentMonitoringStatsAnomalies
 //
 // TestAgentPlatformDeploymentMonitoringRuns (#2214), with the official
 // aiplatform v1 Go clients (gRPC): the model server is deployed on an
@@ -234,8 +233,7 @@ func TestAgentPlatformDeploymentMonitoringRuns(t *testing.T) {
 	}
 }
 
-// Not yet annotated covers: (it has not run); once it passes it covers
-// the ModelMonitoringService methods the SDK calls.
+// covers: google.cloud.aiplatform.v1beta1.ModelMonitoringService/CreateModelMonitor, google.cloud.aiplatform.v1beta1.ModelMonitoringService/GetModelMonitor, google.cloud.aiplatform.v1beta1.ModelMonitoringService/DeleteModelMonitor, google.cloud.aiplatform.v1beta1.ModelMonitoringService/CreateModelMonitoringJob, google.cloud.aiplatform.v1beta1.ModelMonitoringService/GetModelMonitoringJob, google.cloud.aiplatform.v1beta1.ModelMonitoringService/ListModelMonitoringJobs, google.cloud.aiplatform.v1beta1.ModelMonitoringService/SearchModelMonitoringStats, google.cloud.aiplatform.v1beta1.ModelMonitoringService/SearchModelMonitoringAlerts
 //
 // TestPythonAIPlatformModelMonitoring (#2214): the Python Vertex AI SDK's
 // Model Monitoring v2 (vertexai.resources.preview.ml_monitoring,
