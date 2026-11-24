@@ -241,6 +241,9 @@ var DeleteConfirmRules = map[string]DeleteConfirmRule{
 	"vertex-training-pipelines": unverified,
 	"vertex-custom-jobs":        unverified,
 	"vertex-batch-predictions":  unverified,
+	// UNVERIFIED (re-read 2026-11-24): deleting a dataset from the console
+	// is not described (image-data/classification/create-dataset).
+	"vertex-datasets": unverified,
 	// UNVERIFIED (re-read 2026-11-24): deleting an artifact, execution or
 	// context is done "Use either REST or the Vertex AI SDK for Python"
 	// (https://docs.cloud.google.com/vertex-ai/docs/ml-metadata/managing-metadata);

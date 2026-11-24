@@ -32,7 +32,7 @@ package vertexai
 //     validation and test files, exported_files their wildcard paths and
 //     data_stats their counts.
 //
-// UNVERIFIED (not documented; chosen and kept stable): the annotation set
+// UNVERIFIED (re-read 2026-11-24; not documented; chosen and kept stable): the annotation set
 // an import makes (one a problem type, its display name the problem type in
 // lower case), the export's file names (data-00000-of-00001.jsonl), the
 // <annotation-type> of a training export's directory (the problem type in

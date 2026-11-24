@@ -126,8 +126,14 @@ function agentPlatformRoutes() {
       docs: "https://docs.cloud.google.com/vertex-ai/docs/workbench/instances/create-console-quickstart",
       instead: "Start CloudBurrow with --services including run and bigquery: run starts the local Vertex AI endpoint, and an instance's kernel queries BigQuery." }),
     // Model development.
-    absent(`${AP}/datasets`, "Datasets", "Model development", "projects.locations.datasets",
-      "Managed datasets for training", AP_DOCS + "machine-learning"),
+    // Datasets (#2210): "go to the Datasets page", "Click Create to open
+    // the create dataset details page"
+    // (https://docs.cloud.google.com/vertex-ai/docs/image-data/classification/create-dataset,
+    // read 2026-11-24).
+    page(`${AP}/datasets`, "Datasets", "Model development", { service: "vertex-datasets", listedWhenOff: true, kind: "Dataset",
+      api: "projects.locations.datasets", about: "Managed image, text, video and tabular datasets for training",
+      docs: "https://docs.cloud.google.com/vertex-ai/docs/image-data/classification/create-dataset",
+      instead: "Start CloudBurrow with --services including run and storage: a dataset imports its items from Cloud Storage." }),
     absent(`${AP}/feature-store`, "Feature Store", "Model development", "projects.locations.featureOnlineStores",
       "Feature groups and online stores", AP_DOCS + "machine-learning"),
     // Training (#2210): "go to the Training pipelines page", whose Create

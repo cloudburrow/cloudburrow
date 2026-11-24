@@ -30,7 +30,7 @@ package vertexai
 //     in the destination's project, its tables training, validation and
 //     test; AIP_DATA_FORMAT bigquery.
 //
-// UNVERIFIED (not documented): the shard names (-00000-of-00001), the
+// UNVERIFIED (re-read 2026-11-24; not documented): the shard names (-00000-of-00001), the
 // CSV files' header row, and <annotation-type> (datasets.go).
 
 import (

@@ -207,7 +207,7 @@ func colabMethods() map[string]Method {
 		// searchDataItems and dataItems.list aiplatform.dataItems.list;
 		// annotations.list aiplatform.annotations.list on the data item;
 		// datasetVersions.P on the version (create and list on the
-		// dataset). UNVERIFIED: datasetVersions.patch's page names no
+		// dataset). UNVERIFIED (re-read 2026-11-24): datasetVersions.patch's page names no
 		// permission, and Google's index has no
 		// aiplatform.datasetVersions.update; aiplatform.datasetVersions.create
 		// guards it.

@@ -28,7 +28,7 @@ Do not edit these files by hand.
 | [Resource Manager v1 REST (projects, org policies; liens on v1 and v3)](resourcemanagerv1.md) | 38 | 38 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Scheduler](scheduler.md) | 10 | 10 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Logging](logging.md) | 43 | 43 | 0 | 0 | 0 | 0 | 0 | 2 |
-| [Vertex AI PredictionService](vertexai.md) | 201 | 164 | 0 | 32 | 5 | 0 | 0 | 0 |
+| [Vertex AI PredictionService](vertexai.md) | 220 | 164 | 0 | 32 | 24 | 0 | 0 | 0 |
 | [Vertex AI Workbench](workbench.md) | 12 | 10 | 0 | 2 | 0 | 0 | 0 | 0 |
 | [Document AI v1beta3 datasets](documentaiv1beta3.md) | 7 | 7 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Speech-to-Text v1](speechv1.md) | 13 | 13 | 0 | 0 | 0 | 0 | 0 | 0 |

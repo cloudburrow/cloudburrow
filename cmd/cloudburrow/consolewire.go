@@ -293,7 +293,9 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			metadataProvider{api: api, kind: "artifacts"}, metadataProvider{api: api, kind: "executions"}, metadataProvider{api: api, kind: "contexts"},
 			// Vertex AI Training's Training pipelines and Custom jobs, and
 			// Batch inference (consoletraining.go, #2210).
-			trainingPipelinesProvider{api: api}, customJobsProvider{api: api}, batchPredictionsProvider{api: api})
+			trainingPipelinesProvider{api: api}, customJobsProvider{api: api}, batchPredictionsProvider{api: api},
+			// Vertex AI managed datasets (consoledatasets.go, #2210).
+			datasetsProvider{api: api})
 		// Vertex AI Workbench's Instances (consoleworkbench.go, #2173).
 		wb := workbenchProvider{api: api}
 		if d.localAI != nil {
