@@ -250,7 +250,9 @@ var areas = []area{
 		// its schedules of notebook executions.
 		"google.cloud.aiplatform.v1.NotebookService", "google.cloud.aiplatform.v1.ScheduleService",
 		// Vertex AI Pipelines' pipeline jobs (#2173).
-		"google.cloud.aiplatform.v1.PipelineService"},
+		"google.cloud.aiplatform.v1.PipelineService",
+		// Model deployment monitoring and data labeling jobs (#2214).
+		"google.cloud.aiplatform.v1.JobService"},
 		// The runtime templates' IAM policies (#2105): the IAMPolicy mixin,
 		// whose keys the kms area holds, so named by their discovery IDs.
 		Extra: []string{"aiplatform.projects.locations.notebookRuntimeTemplates.getIamPolicy",
@@ -269,7 +271,9 @@ var areas = []area{
 	{Key: "documentaiv1beta3", Title: "Document AI v1beta3 datasets", Own: true, Services: []string{"google.cloud.documentai.v1beta3.DocumentService"}},
 	{Key: "speechv1", Title: "Speech-to-Text v1", Own: true, Services: []string{"google.cloud.speech.v1.Speech", "google.cloud.speech.v1.Adaptation"}},
 	{Key: "vertexaiv1beta1", Title: "Vertex AI PredictionService v1beta1", Own: true, Services: []string{"google.cloud.aiplatform.v1beta1.PredictionService",
-		"google.cloud.aiplatform.v1beta1.LlmUtilityService", "google.cloud.aiplatform.v1beta1.GenAiCacheService"}},
+		"google.cloud.aiplatform.v1beta1.LlmUtilityService", "google.cloud.aiplatform.v1beta1.GenAiCacheService",
+		// Model Monitoring v2 and its schedules of runs (#2214).
+		"google.cloud.aiplatform.v1beta1.ModelMonitoringService", "google.cloud.aiplatform.v1beta1.ScheduleService"}},
 	// The Memorystore for Redis admin API (#1302), over the one Valkey
 	// server --services memorystore runs, and Memorystore for Redis
 	// Cluster and Memorystore for Valkey (#1519) on the same port.

@@ -8,7 +8,7 @@ package vertexai
 // 2026-11-24). No job can exist, so a create is refused, a list is empty,
 // and a get, delete or cancel is NOT_FOUND.
 //
-// UNVERIFIED: Google documents no error for the shut-down methods; the
+// UNVERIFIED (re-read 2026-11-24): Google documents no error for the shut-down methods; the
 // FAILED_PRECONDITION and its wording are CloudBurrow's (docs/gaps.md).
 
 import (

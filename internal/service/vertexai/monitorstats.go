@@ -19,7 +19,7 @@ package vertexai
 //   - v1 monitors "every categorical and numerical feature ... with
 //     threshold values of 0.3" by default.
 //
-// UNVERIFIED: Google does not document how numeric features are bucketed:
+// UNVERIFIED (re-read 2026-11-24): Google does not document how numeric features are bucketed:
 // here 10 equal-width buckets over the two datasets' joint range; the
 // Jensen-Shannon divergence uses base 2, so it lies in [0, 1].
 

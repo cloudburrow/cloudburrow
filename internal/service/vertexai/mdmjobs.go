@@ -22,7 +22,7 @@ package vertexai
 //   - training data is a BigQuery table, CSV or TFRecord in Cloud Storage,
 //     or a managed dataset.
 //
-// UNVERIFIED: a job is JOB_STATE_RUNNING with schedule state PENDING once
+// UNVERIFIED (re-read 2026-11-24): a job is JOB_STATE_RUNNING with schedule state PENDING once
 // set up, and RUNNING while a run analyses; an endpoint has at most one
 // job; a run's window defaults to the monitor interval; JSONL training data
 // (data_format "jsonl") is read as the v2 jobs read it.

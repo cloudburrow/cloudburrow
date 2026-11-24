@@ -27,7 +27,7 @@ package vertexai
 //     cut-off is the scheduled time or, unscheduled, the job's create time;
 //   - DeleteModelMonitor's force deletes "the model monitor with schedules".
 //
-// UNVERIFIED: deleting a monitor deletes its jobs, stats and alerts here;
+// UNVERIFIED (re-read 2026-11-24): deleting a monitor deletes its jobs, stats and alerts here;
 // an unforced delete of a monitor with schedules is FAILED_PRECONDITION;
 // the job ID, when none is given, is numeric, as other Agent Platform IDs.
 

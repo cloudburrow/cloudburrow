@@ -156,7 +156,7 @@ function agentPlatformRoutes() {
     // Model Monitoring (#2214): "In the Google Cloud console, go to the
     // Monitoring page. Click Configure monitoring"
     // (https://docs.cloud.google.com/vertex-ai/docs/model-monitoring/set-up-model-monitoring,
-    // read 2026-11-24). The tabs' names are CloudBurrow's (UNVERIFIED).
+    // read 2026-11-24). The tabs' names are CloudBurrow's (UNVERIFIED, re-read 2026-11-24).
     page(`${AP}/model-monitoring/model-monitors`, "Monitoring", "Deploy and use", { service: "vertex-model-monitors", listedWhenOff: true, tabTitle: "Model monitors",
       pageTabs: MONITOR_TABS, kind: "Model monitor",
       api: "v1beta1 projects.locations.modelMonitors", about: "Model monitors, their runs, feature statistics and alerts",

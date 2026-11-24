@@ -6586,9 +6586,9 @@
     "Key": "vertexai",
     "Title": "Vertex AI PredictionService",
     "counts": {
-      "Implemented": 3,
-      "Unimplemented": 12,
-      "Verified": 119
+      "Implemented": 8,
+      "Unimplemented": 34,
+      "Verified": 127
     },
     "rows": [
       {
@@ -6726,6 +6726,197 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.GenAiCacheService/UpdateCachedContent",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/CancelBatchPredictionJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): custom, batch prediction and hyperparameter tuning jobs are not served by this JobService yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/CancelCustomJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): custom, batch prediction and hyperparameter tuning jobs are not served by this JobService yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/CancelDataLabelingJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelmonitoring2214_test.go:294 TestAgentPlatformDataLabelingAndDeploymentMonitoringRefusals"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/CancelHyperparameterTuningJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): custom, batch prediction and hyperparameter tuning jobs are not served by this JobService yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/CancelNasJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): Neural Architecture Search runs Google's proprietary search controller (#2214); not built yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/CreateBatchPredictionJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): custom, batch prediction and hyperparameter tuning jobs are not served by this JobService yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/CreateCustomJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): custom, batch prediction and hyperparameter tuning jobs are not served by this JobService yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/CreateDataLabelingJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelmonitoring2214_test.go:294 TestAgentPlatformDataLabelingAndDeploymentMonitoringRefusals"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/CreateHyperparameterTuningJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): custom, batch prediction and hyperparameter tuning jobs are not served by this JobService yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/CreateModelDeploymentMonitoringJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelmonitoring2214_test.go:294 TestAgentPlatformDataLabelingAndDeploymentMonitoringRefusals"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/CreateNasJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): Neural Architecture Search runs Google's proprietary search controller (#2214); not built yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/DeleteBatchPredictionJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): custom, batch prediction and hyperparameter tuning jobs are not served by this JobService yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/DeleteCustomJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): custom, batch prediction and hyperparameter tuning jobs are not served by this JobService yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/DeleteDataLabelingJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelmonitoring2214_test.go:294 TestAgentPlatformDataLabelingAndDeploymentMonitoringRefusals"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/DeleteHyperparameterTuningJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): custom, batch prediction and hyperparameter tuning jobs are not served by this JobService yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/DeleteModelDeploymentMonitoringJob",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/DeleteNasJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): Neural Architecture Search runs Google's proprietary search controller (#2214); not built yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/GetBatchPredictionJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): custom, batch prediction and hyperparameter tuning jobs are not served by this JobService yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/GetCustomJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): custom, batch prediction and hyperparameter tuning jobs are not served by this JobService yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/GetDataLabelingJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelmonitoring2214_test.go:294 TestAgentPlatformDataLabelingAndDeploymentMonitoringRefusals"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/GetHyperparameterTuningJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): custom, batch prediction and hyperparameter tuning jobs are not served by this JobService yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/GetModelDeploymentMonitoringJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelmonitoring2214_test.go:294 TestAgentPlatformDataLabelingAndDeploymentMonitoringRefusals"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/GetNasJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): Neural Architecture Search runs Google's proprietary search controller (#2214); not built yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/GetNasTrialDetail",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): Neural Architecture Search runs Google's proprietary search controller (#2214); not built yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/ListBatchPredictionJobs",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): custom, batch prediction and hyperparameter tuning jobs are not served by this JobService yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/ListCustomJobs",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): custom, batch prediction and hyperparameter tuning jobs are not served by this JobService yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/ListDataLabelingJobs",
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelmonitoring2214_test.go:294 TestAgentPlatformDataLabelingAndDeploymentMonitoringRefusals"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/ListHyperparameterTuningJobs",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): custom, batch prediction and hyperparameter tuning jobs are not served by this JobService yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/ListModelDeploymentMonitoringJobs",
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelmonitoring2214_test.go:294 TestAgentPlatformDataLabelingAndDeploymentMonitoringRefusals"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/ListNasJobs",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): Neural Architecture Search runs Google's proprietary search controller (#2214); not built yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/ListNasTrialDetails",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): Neural Architecture Search runs Google's proprietary search controller (#2214); not built yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/PauseModelDeploymentMonitoringJob",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/ResumeModelDeploymentMonitoringJob",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/SearchModelDeploymentMonitoringStatsAnomalies",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/UpdateModelDeploymentMonitoringJob",
         "status": "Implemented",
         "note": "no official-SDK test proves it yet"
       },
@@ -7900,8 +8091,8 @@
     "Key": "vertexaiv1beta1",
     "Title": "Vertex AI PredictionService v1beta1",
     "counts": {
-      "Implemented": 12,
-      "Verified": 10
+      "Implemented": 13,
+      "Verified": 27
     },
     "rows": [
       {
@@ -7943,6 +8134,83 @@
         "method": "google.cloud.aiplatform.v1beta1.LlmUtilityService/ComputeTokens",
         "status": "Implemented",
         "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.ModelMonitoringService/CreateModelMonitor",
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelmonitoring2214_test.go:34 TestAgentPlatformModelMonitoring"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.ModelMonitoringService/CreateModelMonitoringJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelmonitoring2214_test.go:34 TestAgentPlatformModelMonitoring"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.ModelMonitoringService/DeleteModelMonitor",
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelmonitoring2214_test.go:34 TestAgentPlatformModelMonitoring"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.ModelMonitoringService/DeleteModelMonitoringJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelmonitoring2214_test.go:34 TestAgentPlatformModelMonitoring"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.ModelMonitoringService/GetModelMonitor",
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelmonitoring2214_test.go:34 TestAgentPlatformModelMonitoring"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.ModelMonitoringService/GetModelMonitoringJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelmonitoring2214_test.go:34 TestAgentPlatformModelMonitoring"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.ModelMonitoringService/ListModelMonitoringJobs",
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelmonitoring2214_test.go:34 TestAgentPlatformModelMonitoring"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.ModelMonitoringService/ListModelMonitors",
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelmonitoring2214_test.go:34 TestAgentPlatformModelMonitoring"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.ModelMonitoringService/SearchModelMonitoringAlerts",
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelmonitoring2214_test.go:34 TestAgentPlatformModelMonitoring"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.ModelMonitoringService/SearchModelMonitoringStats",
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelmonitoring2214_test.go:34 TestAgentPlatformModelMonitoring"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.ModelMonitoringService/UpdateModelMonitor",
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelmonitoring2214_test.go:34 TestAgentPlatformModelMonitoring"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1beta1.PredictionService/ChatCompletions",
@@ -8042,6 +8310,53 @@
       },
       {
         "method": "google.cloud.aiplatform.v1beta1.PredictionService/StreamingRawPredict",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.ScheduleService/CreateSchedule",
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelmonitoring2214_test.go:34 TestAgentPlatformModelMonitoring"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.ScheduleService/DeleteSchedule",
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelmonitoring2214_test.go:34 TestAgentPlatformModelMonitoring"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.ScheduleService/GetSchedule",
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelmonitoring2214_test.go:34 TestAgentPlatformModelMonitoring"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.ScheduleService/ListSchedules",
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelmonitoring2214_test.go:34 TestAgentPlatformModelMonitoring"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.ScheduleService/PauseSchedule",
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelmonitoring2214_test.go:34 TestAgentPlatformModelMonitoring"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.ScheduleService/ResumeSchedule",
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelmonitoring2214_test.go:34 TestAgentPlatformModelMonitoring"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.ScheduleService/UpdateSchedule",
         "status": "Implemented",
         "note": "no official-SDK test proves it yet"
       }
