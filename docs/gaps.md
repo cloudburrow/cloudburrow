@@ -38,10 +38,10 @@ tracks it; a closed issue is named only where it says what was built.
 | App Hub | 5 | 1 | 1 | 3 | 0 |
 | AlloyDB for PostgreSQL | 6 | 1 | 4 | 1 | 0 |
 | Filestore | 7 | 2 | 4 | 1 | 0 |
-| Dataflow | 7 | 4 | 2 | 1 | 0 |
+| Dataflow | 6 | 3 | 2 | 1 | 0 |
 | Dataform | 7 | 0 | 3 | 4 | 0 |
 | Console | 11 | 5 | 5 | 1 | 0 |
-| **Total** | **112** | **20** | **38** | **48** | **6** |
+| **Total** | **111** | **19** | **38** | **48** | **6** |
 
 ## Cloud Storage
 
@@ -401,15 +401,14 @@ Flink 1.20 portable runner with the Python 3.12 SDK harness, or for the Java SDK
 whose one route is the instance's Cloud Storage, Pub/Sub, BigQuery, Dataflow and database emulators; the Python SDK's
 DataflowRunner, batch and streaming with drain; the Java SDK's DataflowRunner; snapshots as Flink savepoints, and jobs created from them; gcloud `dataflow jobs`, `snapshots` and `flex-template`, Terraform
 `google_dataflow_job` and `google_dataflow_flex_template_job`; the console's Jobs list, job page with its graph, metrics and logs, and
-Create job from template.
+Create job from template; the Go SDK's pipelines, with BigQuery through the cross-language `xlang/bigqueryio` (#2215 round 6).
 
 | Gap | Why open | Size |
 |---|---|---|
 | Flex Templates' `FLEX_TEMPLATE_PYTHON_REQUIREMENTS_FILE`, `_SETUP_FILE` and `_EXTRA_PACKAGES` are not installed at launch (the launcher has no route to PyPI; the image must hold its packages), and Java Flex Templates (#2215) | no emulator support | S |
 | Google-provided templates: Word Count, Text Files on Cloud Storage to BigQuery, and Pub/Sub Subscription and Topic to BigQuery run, built from Google's DataflowTemplates sources (release 2026-11-18-00_RC00, Apache-2.0) with Maven on first use, staged in the instance's own `gs://dataflow-templates` and served at Google's `gs://dataflow-templates[-REGION]/VERSION/NAME` paths (#2215 rounds 3 to 5). The other classic templates and Google's Flex Templates are not built yet | not built yet | M |
-| BigQuery from Go pipelines: Go's native `bigqueryio` reaches only Google's endpoint (cloud.google.com/go/bigquery honours no emulator variable), so BigQuery from Go goes through the cross-language `xlang/bigqueryio` (Java's BigQueryIO; `TestGoDataflowBigQuery` and `TestGoDataflowBigQueryRead` are written, not passing). Its write is BigQueryIO's Storage Write API, whose gRPC client takes the one `bigQueryEndpoint` option that also roots BigQuery's REST client (`http://HOST:PORT/`), and fails parsing it as a gRPC `host:port`; the instance's Storage Write API needs a plaintext gRPC route to the Java workers, which the Java client does not open. Its read is expanded against BigQuery: Beam's Java expansion service looks the table's schema up with the expanding request's options (the Go SDK's, which name no BigQuery endpoint), so at Google's endpoint, which the test's internal network refuses. The Go SDK's word count and Pub/Sub run (#2215 round 5) | not built yet | M |
 | Cross-language transforms: Beam YAML's Java providers. Python's `ReadFromBigtable` runs (#2215 round 5: a Python-submitted job's Java environments now get the job's Java worker pool), as do Java pipelines' own `BigtableIO.read` (#2215 round 3) | not built yet | S |
-| A Java job's metrics while it runs: `jobs.getMetrics` answers a Java job's metrics (ElementCount, user counters and distributions) once it has finished, from the job server's `GetJobMetrics` (Beam's Flink runner's aggregate of all its workers, #2215 round 5); Flink's job server answers them only for a finished job, and the cbfnproxy control proxy's totals reach no file, so a running Java job (a streaming one until it is drained) shows none | not built yet | S |
+| A Java job's metrics while it runs: `jobs.getMetrics` answers a Java job's metrics (ElementCount, user counters and distributions) once it has finished, from the job server's `GetJobMetrics` (#2215 round 5). While it runs there is no exact source yet (#2215 round 6, measured): Beam's Flink runner fills the Flink job's accumulator `__metricscontainers`, which Flink's REST API would answer live, only as the job ends (`registerMetricsForPipelineResult`); the Flink metrics it does update live (`/jobs/ID/vertices/ID/metrics`) name each user metric `NAMESPACE_NAME`, with every `.` made `_` and no step, so the namespace and name cannot be told apart; and the cbfnproxy control proxy saw none of the Java worker's responses (with debug output on, a whole job's run printed none), though the worker's control endpoint was its port. Next: find why the proxy's control stream is bypassed, or name the metrics exactly | not built yet | S |
 | The pipeline components (#2210) | not built yet | M |
 | Workers are one local Flink cluster per job: machine types, zones, networks, disk sizes and service accounts are recorded, not used; `maxNumWorkers` bounds the job's parallelism | no emulator support | S |
 | The error codes and texts of invalid job names, a drain of a batch job and unknown template parameters (`UNVERIFIED`) | not documented by Google | S |

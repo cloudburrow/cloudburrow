@@ -32,11 +32,18 @@ package beamrun
 import (
 	"bufio"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"embed"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"net"
 	"os"
 	"os/exec"
@@ -594,12 +601,32 @@ func (d *Docker) jobNetwork(ctx context.Context, network, relay, dir, image, lab
 			ports = append(ports, r.port)
 		}
 	}
+	// The Storage Read and Write APIs (gRPC) on BigQuery's own port: the
+	// Java SDK's BigQueryIO roots its REST client and its Storage API
+	// clients at the one bigQueryEndpoint option, and its gRPC clients
+	// speak TLS, so the relay answers a TLS connection on that port with
+	// the instance's Storage API port (a certificate of relayName, from a
+	// CA made for the job, which the Java workers trust) and any other
+	// with its REST port.
+	storageAPI := -1
+	if live["bigquery"] != "" && live["bigquery-storage"] != "" {
+		if err := writeRelayTLS(filepath.Join(dir, "tls")); err != nil {
+			return "", stop, err
+		}
+		storageAPI = len(targets)
+		targets = append(targets, live["bigquery-storage"])
+		ports = append(ports, bigqueryPort)
+	}
 	host, stopHost, err := d.hostTargets(ctx, targets...)
 	if err != nil {
 		return "", stop, err
 	}
 	cleanup = append(cleanup, stopHost)
 	for i, p := range ports {
+		if i == storageAPI {
+			routes = append(routes, fmt.Sprintf("%d+tls=%s", p, host[i]))
+			continue
+		}
 		routes = append(routes, fmt.Sprintf("%d=%s", p, host[i]))
 	}
 	if out, err := d.docker(ctx, "network", "create", "--internal", "--label", label, network); err != nil {
@@ -766,6 +793,52 @@ func (d *Docker) waitLog(ctx context.Context, name, want string, wait time.Durat
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
+}
+
+// writeRelayTLS writes a CA made for the job (ca.pem), and the relay's
+// certificate of relayName signed by it (cert.pem, key.pem), into dir.
+func writeRelayTLS(dir string) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return err
+	}
+	now := time.Now()
+	ca := &x509.Certificate{SerialNumber: big.NewInt(now.UnixNano()), Subject: pkix.Name{CommonName: "CloudBurrow Dataflow job CA"},
+		NotBefore: now.Add(-time.Hour), NotAfter: now.Add(30 * 24 * time.Hour), IsCA: true, BasicConstraintsValid: true,
+		KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature}
+	caDER, err := x509.CreateCertificate(rand.Reader, ca, ca, &caKey.PublicKey, caKey)
+	if err != nil {
+		return err
+	}
+	caCert, err := x509.ParseCertificate(caDER)
+	if err != nil {
+		return err
+	}
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return err
+	}
+	leaf := &x509.Certificate{SerialNumber: big.NewInt(now.UnixNano() + 1), Subject: pkix.Name{CommonName: relayName},
+		DNSNames: []string{relayName}, NotBefore: now.Add(-time.Hour), NotAfter: now.Add(30 * 24 * time.Hour),
+		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
+	der, err := x509.CreateCertificate(rand.Reader, leaf, caCert, &key.PublicKey, caKey)
+	if err != nil {
+		return err
+	}
+	keyDER, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		return err
+	}
+	for name, block := range map[string]*pem.Block{"ca.pem": {Type: "CERTIFICATE", Bytes: caDER},
+		"cert.pem": {Type: "CERTIFICATE", Bytes: der}, "key.pem": {Type: "PRIVATE KEY", Bytes: keyDER}} {
+		if err := os.WriteFile(filepath.Join(dir, name), pem.EncodeToMemory(block), 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func writeAssets(dir string) error {

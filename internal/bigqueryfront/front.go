@@ -155,6 +155,7 @@ package bigqueryfront
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -646,7 +647,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	// (continuousjob.go, #2193).
 	var whole http.Handler
 	defer func() { cqRegistry.rest = whole }()
-	whole = iamChecks.handler(engine, async.handler(known.client(withRequestReads(jobErrors(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { // #1581, errorcodes.go; #1582, engineerrors.go
+	whole = gunzipRequests(iamChecks.handler(engine, async.handler(known.client(withRequestReads(jobErrors(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { // #1581, errorcodes.go; #1582, engineerrors.go
 		buffers.syncPending(next, r) // #1513: the clock a restarted front kept
 		// The files of the tables for Apache Iceberg whose rows the
 		// request changed are written before it is answered; a failure is
@@ -670,8 +671,38 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		if !serveJobLocations(w, r, next, settings, func(w http.ResponseWriter) { inner.ServeHTTP(w, r) }) {
 			inner.ServeHTTP(w, r)
 		}
-	}), next, settings, failed)))))
+	}), next, settings, failed))))))
 	return whole
+}
+
+// gunzipRequests serves a request whose body is gzip-compressed
+// (Content-Encoding: gzip, which Google's APIs accept and the Java
+// clients send for every JSON body, as google-api-client does by default)
+// as the same request uncompressed, so the front checks and answers it
+// as it does any other: without it, the checks that read a body (an
+// extract job's format, a load's schema, #2215) passed a compressed one
+// to the engine unread. A body that is not valid gzip is 400.
+func gunzipRequests(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.EqualFold(strings.TrimSpace(r.Header.Get("Content-Encoding")), "gzip") || r.Body == nil || r.Body == http.NoBody {
+			next.ServeHTTP(w, r)
+			return
+		}
+		zr, err := gzip.NewReader(r.Body)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "parseError", "The request body is not valid gzip: "+err.Error())
+			return
+		}
+		r2 := r.Clone(r.Context())
+		r2.Body = struct {
+			io.Reader
+			io.Closer
+		}{zr, r.Body}
+		r2.ContentLength = -1
+		r2.Header.Del("Content-Encoding")
+		r2.Header.Del("Content-Length")
+		next.ServeHTTP(w, r2)
+	})
 }
 
 // now is the instance's clock (#1487): the front's, which the CloudBurrow

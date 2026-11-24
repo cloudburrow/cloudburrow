@@ -11,6 +11,14 @@
 //	                      back into --output through the cross-language
 //	                      read (Beam's Java expansion service at
 //	                      --expansion_addr)
+//
+// With --bigquery_endpoint, the cross-language transforms' expansion
+// requests carry it as the pipeline option bigQueryEndpoint, which the Java
+// expansion service's BigQueryIO looks the read's table schema up at. The
+// Java and Python SDKs send their pipeline options with every expansion
+// request; the Go SDK sends none of its own (its flags are not Java's), so
+// the pipeline adds it through an expansion handler of its own (xlangx's
+// RegisterHandler), as Beam documents for custom expansion.
 package main
 
 import (
@@ -22,13 +30,16 @@ import (
 	"strings"
 
 	"github.com/apache/beam/sdks/v2/go/pkg/beam"
+	"github.com/apache/beam/sdks/v2/go/pkg/beam/core/runtime/xlangx"
 	"github.com/apache/beam/sdks/v2/go/pkg/beam/io/pubsubio"
 	"github.com/apache/beam/sdks/v2/go/pkg/beam/io/textio"
 	"github.com/apache/beam/sdks/v2/go/pkg/beam/io/xlang/bigqueryio"
 	"github.com/apache/beam/sdks/v2/go/pkg/beam/log"
+	jobpb "github.com/apache/beam/sdks/v2/go/pkg/beam/model/jobmanagement_v1"
 	"github.com/apache/beam/sdks/v2/go/pkg/beam/register"
 	"github.com/apache/beam/sdks/v2/go/pkg/beam/transforms/stats"
 	"github.com/apache/beam/sdks/v2/go/pkg/beam/x/beamx"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	_ "github.com/apache/beam/sdks/v2/go/pkg/beam/io/filesystem/gcs"
 )
@@ -42,7 +53,41 @@ var (
 	table         = flag.String("table", "", "bigquery: PROJECT:DATASET.TABLE")
 	expansionAddr = flag.String("expansion_addr", "", "bigquery: the Java expansion service")
 	project       = flag.String("pubsub_project", "", "pubsub: the project of --subscription and --topic")
+	bqEndpoint    = flag.String("bigquery_endpoint", "", "bigquery: the BigQuery endpoint the expansion service's BigQueryIO uses")
 )
+
+// withBigQueryEndpoint is the expansion handler of the namespace
+// "bigqueryendpoint": the expansion service's request with the pipeline
+// option bigQueryEndpoint (and the project), sent to the service at its
+// address.
+func withBigQueryEndpoint(ctx context.Context, p *xlangx.HandlerParams) (*jobpb.ExpansionResponse, error) {
+	opts := map[string]any{"beam:option:big_query_endpoint:v1": *bqEndpoint}
+	if f := flag.Lookup("project"); f != nil && f.Value.String() != "" {
+		opts["beam:option:project:v1"] = f.Value.String()
+	}
+	st, err := structpb.NewStruct(opts)
+	if err != nil {
+		return nil, err
+	}
+	if p.Req.PipelineOptions != nil {
+		for k, v := range p.Req.PipelineOptions.Fields {
+			if _, ok := st.Fields[k]; !ok {
+				st.Fields[k] = v
+			}
+		}
+	}
+	p.Req.PipelineOptions = st
+	return xlangx.QueryExpansionService(ctx, p)
+}
+
+// expansion is --expansion_addr, through withBigQueryEndpoint when
+// --bigquery_endpoint is set.
+func expansion() string {
+	if *bqEndpoint == "" {
+		return *expansionAddr
+	}
+	return "bigqueryendpoint" + xlangx.Separator + *expansionAddr
+}
 
 var wordRE = regexp.MustCompile(`[a-zA-Z]+`)
 
@@ -86,6 +131,7 @@ func init() {
 
 func main() {
 	flag.Parse()
+	xlangx.RegisterHandler("bigqueryendpoint", withBigQueryEndpoint)
 	beam.Init()
 	ctx := context.Background()
 	p, s := beam.NewPipelineWithRoot()
@@ -102,10 +148,10 @@ func main() {
 		w := s.Scope("Write")
 		rows := beam.ParDo(w, scoresFn, beam.Impulse(w))
 		bigqueryio.Write(w, *table, rows, bigqueryio.CreateDisposition(bigqueryio.CreateIfNeeded),
-			bigqueryio.WriteExpansionAddr(*expansionAddr))
+			bigqueryio.WriteExpansionAddr(expansion()))
 	case "bigquery-read":
 		read := bigqueryio.Read(s, reflect.TypeOf((*Score)(nil)).Elem(), bigqueryio.FromTable(*table),
-			bigqueryio.ReadExpansionAddr(*expansionAddr))
+			bigqueryio.ReadExpansionAddr(expansion()))
 		textio.Write(s, *output, beam.ParDo(s, formatScoreFn, read))
 	default:
 		log.Exitf(ctx, "unknown --pipeline %q", *pipeline)

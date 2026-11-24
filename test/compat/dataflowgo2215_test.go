@@ -245,6 +245,13 @@ func TestGoDataflowPubsub(t *testing.T) {
 	}
 }
 
+// goBigQueryEndpoint is the instance's BigQuery as the Java expansion
+// service reaches it, through the test network's relay: the pipeline sends
+// it with its expansion requests (testdata/dataflowgo's
+// --bigquery_endpoint), as the Go SDK forwards no pipeline options of its
+// own, so that the read's expansion looks the table's schema up there.
+const goBigQueryEndpoint = "http://relay.cloudburrow.localhost:9002"
+
 // covers: google.dataflow.v1beta3.JobsV1Beta3/CreateJob
 //
 // TestGoDataflowBigQuery (#2215): Go pipelines write a BigQuery table and
@@ -279,7 +286,7 @@ func TestGoDataflowBigQuery(t *testing.T) {
 
 	name := fmt.Sprintf("go-bq-write-%d", time.Now().UnixNano()%1e6)
 	id := goJobID(t, runBeamGo(t, ctx, netns, work, project, bucket, name, "--pipeline=bigquery",
-		"--table="+table, "--expansion_addr="+expansion))
+		"--table="+table, "--expansion_addr="+expansion, "--bigquery_endpoint="+goBigQueryEndpoint))
 	j := waitDataflowJob(t, ctx, c, project, id, dataflowpb.JobState_JOB_STATE_DONE, dataflowpb.JobState_JOB_STATE_FAILED)
 	if j.CurrentState != dataflowpb.JobState_JOB_STATE_DONE {
 		t.Fatalf("write job %s is %s:\n%s", id, j.CurrentState, jobMessages(t, ctx, c, project, id))
@@ -305,7 +312,7 @@ func TestGoDataflowBigQuery(t *testing.T) {
 
 	name = fmt.Sprintf("go-bq-read-%d", time.Now().UnixNano()%1e6)
 	id = goJobID(t, runBeamGo(t, ctx, netns, work, project, bucket, name, "--pipeline=bigquery-read",
-		"--table="+table, "--expansion_addr="+expansion, "--output=gs://"+bucket+"/out/scores.txt"))
+		"--table="+table, "--expansion_addr="+expansion, "--bigquery_endpoint="+goBigQueryEndpoint, "--output=gs://"+bucket+"/out/scores.txt"))
 	j = waitDataflowJob(t, ctx, c, project, id, dataflowpb.JobState_JOB_STATE_DONE, dataflowpb.JobState_JOB_STATE_FAILED)
 	if j.CurrentState != dataflowpb.JobState_JOB_STATE_DONE {
 		t.Fatalf("read job %s is %s:\n%s", id, j.CurrentState, jobMessages(t, ctx, c, project, id))
@@ -358,7 +365,7 @@ func TestGoDataflowBigQueryRead(t *testing.T) {
 	netns, expansion := beamExpansionService(t, ctx, network)
 	name := fmt.Sprintf("go-bq-read-%d", time.Now().UnixNano()%1e6)
 	id := goJobID(t, runBeamGo(t, ctx, netns, work, project, bucket, name, "--pipeline=bigquery-read",
-		"--table="+project+":"+ds+".scores", "--expansion_addr="+expansion, "--output=gs://"+bucket+"/out/scores.txt"))
+		"--table="+project+":"+ds+".scores", "--expansion_addr="+expansion, "--bigquery_endpoint="+goBigQueryEndpoint, "--output=gs://"+bucket+"/out/scores.txt"))
 	j := waitDataflowJob(t, ctx, c, project, id, dataflowpb.JobState_JOB_STATE_DONE, dataflowpb.JobState_JOB_STATE_FAILED)
 	if j.CurrentState != dataflowpb.JobState_JOB_STATE_DONE {
 		t.Fatalf("read job %s is %s:\n%s", id, j.CurrentState, jobMessages(t, ctx, c, project, id))

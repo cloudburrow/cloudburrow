@@ -208,10 +208,13 @@ def java_options(opts, args):
     if not o.get("tempLocation") and o.get("temp_location"):
         o["tempLocation"] = o["temp_location"]
     o["gcsEndpoint"] = os.environ.get("STORAGE_EMULATOR_HOST", "").rstrip("/") + "/storage/v1/"
-    # BigQueryIO's clients (BigQueryOptions.bigQueryEndpoint, the API's
-    # root URL): the instance's BigQuery through the relay.
+    # BigQueryIO's clients (BigQueryOptions.bigQueryEndpoint): the
+    # instance's BigQuery through the relay. It is the REST client's root
+    # URL (which the client ends with "/") and, without its scheme, the
+    # Storage Read and Write API clients' gRPC host:port, so it has no
+    # path; the relay answers those clients' TLS on the same port.
     if os.environ.get("BIGQUERY_EMULATOR_HOST"):
-        o["bigQueryEndpoint"] = os.environ["BIGQUERY_EMULATOR_HOST"].rstrip("/") + "/"
+        o["bigQueryEndpoint"] = os.environ["BIGQUERY_EMULATOR_HOST"].rstrip("/")
     o["parallelism"] = args.parallelism
     o["jobName"] = args.job_name
     if args.streaming:
@@ -277,13 +280,20 @@ def runner_metrics(stub, job_id, producers):
     PCollection's ElementCount and the pipeline's user counters and
     distributions, in sitecustomize's rows. None when the runner reports
     none."""
-    from apache_beam.metrics import monitoring_infos as mi
     try:
         res = stub.GetJobMetrics(beam_job_api_pb2.GetJobMetricsRequest(job_id=job_id), timeout=60)
     except Exception:
         return None
+    return monitoring_rows(res.metrics.attempted, producers)
+
+
+def monitoring_rows(infos, producers):
+    """infos (MonitoringInfos), summed into sitecustomize's rows: each
+    PCollection's ElementCount and the user counters and distributions.
+    None for none."""
+    from apache_beam.metrics import monitoring_infos as mi
     totals = {}
-    for info in res.metrics.attempted:
+    for info in infos:
         labels = dict(info.labels)
         try:
             if info.urn == mi.ELEMENT_COUNT_URN:
