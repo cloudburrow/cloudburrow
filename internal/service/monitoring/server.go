@@ -156,6 +156,8 @@ type Server struct {
 	inventories []ResourceInventory
 	// uptimeLog is where Log check failures go.
 	uptimeLog UptimeLogger
+	// prom holds the prometheus.googleapis.com metrics (SetPromBuiltin).
+	prom *PromBuiltin
 	// now is the clock, for tests.
 	now func() time.Time
 }
@@ -178,6 +180,15 @@ func NewServer(state string) (*Server, error) {
 
 // SetClock replaces the clock, for tests.
 func (s *Server) SetClock(now func() time.Time) { s.now = now }
+
+// SetPromBuiltin serves the prometheus.googleapis.com metrics from g, and
+// records the ones written into it.
+func (s *Server) SetPromBuiltin(g *PromBuiltin) {
+	s.mu.Lock()
+	s.prom = g
+	s.builtins = append(s.builtins, g)
+	s.mu.Unlock()
+}
 
 // AddBuiltin adds a producer of built-in metric types.
 func (s *Server) AddBuiltin(b Builtin) {

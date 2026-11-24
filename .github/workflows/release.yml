@@ -430,6 +430,13 @@ jobs:
               -ldflags "-s -w -buildid=" \
               -o "internal/storageimage/bin/cloudburrow-storage-linux-${arch}" ./cmd/cloudburrow-storage
           done
+          # The Linux Kubernetes Engine logging agent every CLI embeds: the
+          # fluentbit-gke DaemonSet's image is built from it (#2100).
+          for arch in amd64 arm64; do
+            GOOS=linux GOARCH=$arch CGO_ENABLED=0 go build -trimpath \
+              -ldflags "-s -w -X 'github.com/cloudburrow/cloudburrow/internal/version.version=${VERSION}'" \
+              -o "internal/logagentimage/bin/cloudburrow-logging-agent-linux-${arch}" ./cmd/cloudburrow-logging-agent
+          done
           # The patched BigQuery emulator every CLI embeds (#1061), which
           # the bigquery-emulator job built from the modules
           # third_party/bigquery-emulator pins and checks: -prebuilt fails

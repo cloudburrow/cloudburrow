@@ -83,6 +83,10 @@ type monitoringService struct {
 	gke *monitoring.GKEBuiltin
 	// inventory is the products whose resources are group members (#2146).
 	inventory *monitoringInventoryWiring
+	// prom holds the prometheus.googleapis.com metrics: Managed Service for
+	// Prometheus' and GKE's metric packages (#2100), recorded by the
+	// gkePromCollector or written by a collector.
+	prom *monitoring.PromBuiltin
 	// cancel stops alert evaluation and uptime checks.
 	cancel context.CancelFunc
 }
@@ -124,6 +128,15 @@ func (s *monitoringService) gkeMetrics() *monitoring.GKEBuiltin {
 	return s.gke
 }
 
+// promMetrics is where Prometheus metrics are recorded, made on first
+// use; called before Start.
+func (s *monitoringService) promMetrics() *monitoring.PromBuiltin {
+	if s.prom == nil {
+		s.prom = monitoring.NewPromBuiltin()
+	}
+	return s.prom
+}
+
 // Addr is the bound address.
 func (s *monitoringService) Addr() string {
 	if s == nil || s.server == nil {
@@ -152,6 +165,7 @@ func (s *monitoringService) Start(ctx context.Context) error {
 	if s.gke != nil {
 		api.AddBuiltin(s.gke)
 	}
+	api.SetPromBuiltin(s.promMetrics())
 	if s.firestore != nil {
 		api.AddBuiltin(monitoring.NewFirestoreBuiltin(monitoringFirestore{addr: s.firestore}))
 	}

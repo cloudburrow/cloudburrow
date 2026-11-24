@@ -560,8 +560,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 	}
 	if gkeSvc != nil {
-		newGKELogFeeder(gkeDir(cfg), gkeSvc, loggingSvc).register(coord)
 		newGKEMetricsSampler(gkeDir(cfg), gkeSvc, monitoringSvc).register(coord)
+		newGKEPromCollector(gkeDir(cfg), gkeSvc, monitoringSvc).register(coord)
 	}
 	if loggingSvc != nil {
 		// CopyLogEntries writes to the instance's Cloud Storage (#1394).
@@ -1608,8 +1608,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// Storage, the metadata server, whose service account certificates
 	// verify the URLs those accounts sign (#1787).
 	runEnabled := serviceEnabled(cfg, config.ServiceRun)
+	// Kubernetes Engine's logging agents write to Cloud Logging from their
+	// clusters' nodes (#2100).
+	gkeLogs := gkeSvc != nil && loggingSvc != nil
 	pubsubKMS := serviceEnabled(cfg, config.ServicePubSub) && serviceEnabled(cfg, config.ServiceKMS)
-	if runEnabled || serviceEnabled(cfg, config.ServiceBigQuery) || serviceEnabled(cfg, config.ServiceStorage) || pubsubKMS || firestoreKMS(cfg) || spannerKMS(cfg) || memorystoreCMEK(cfg) || computeEnabled(cfg) {
+	if runEnabled || serviceEnabled(cfg, config.ServiceBigQuery) || serviceEnabled(cfg, config.ServiceStorage) || pubsubKMS || firestoreKMS(cfg) || spannerKMS(cfg) || memorystoreCMEK(cfg) || computeEnabled(cfg) || gkeLogs {
 		// The Cloud SQL Admin API and its connector are published for Cloud
 		// SQL volumes (#1346): the Auth Proxy a revision runs reaches both.
 		published := map[string]bool{"run": true, "tasks": true, "secretmanager": true, "kms": true,
@@ -1649,6 +1652,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			// (#2139, computeopsagent.go), when they are served.
 			published["logging"], published["monitoring"] = true, true
 		}
+		if gkeLogs {
+			published["logging"] = true
+		}
 		hostComp = newClusterHost(cfg, stdout, func() map[string]string {
 			out := map[string]string{}
 			for k, v := range liveEndpoints() {
@@ -1673,6 +1679,17 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// the tunnelled backends' Service names, known now, and the CLI-hosted
 	// services' cloudburrow-host name, known once hostComp has started —
 	// after the adapter — so the table is read per request, not at Start.
+	// Kubernetes Engine's container logs, shipped by each cluster's
+	// fluentbit-gke agent to this instance's Cloud Logging, which its pods
+	// reach as the host's address (#2100).
+	if gkeLogs {
+		newGKELogAgents(gkeDir(cfg), gkeSvc, loggingSvc, func() string {
+			if a := hostComp.HostAddr("logging"); a != "" {
+				return "http://" + a
+			}
+			return ""
+		}, stdout).register(coord)
+	}
 	if computeSvc != nil {
 		computeSvc.guestBase = func() string {
 			if a := hostComp.InCluster("compute"); a != "" {

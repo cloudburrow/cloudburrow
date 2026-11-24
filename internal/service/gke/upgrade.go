@@ -120,7 +120,11 @@ func checkMasterUpgrade(c *containerpb.Cluster, to Version) error {
 	if compareVersions(to.GKE, from) < 0 {
 		// UNVERIFIED wording (re-read 2026-11-20: upgrading-a-cluster): the
 		// control plane cannot be downgraded across minor versions.
-		return status.Errorf(codes.InvalidArgument, "Master version %q is older than the current version %q: the control plane cannot be downgraded.", to.GKE, from)
+		// The documented error of a minor downgrade outside a
+		// rollback-safe upgrade's soak (re-read 2026-11-22:
+		// how-to/upgrading-a-cluster) is "specified version is not newer
+		// than the current version".
+		return status.Errorf(codes.InvalidArgument, "Master version %q: specified version is not newer than the current version (%s).", to.GKE, from)
 	}
 	if minorOf(to.GKE) > minorOf(from)+1 {
 		// Documented: the control plane is upgraded one minor version at a
@@ -141,6 +145,13 @@ func checkNodeUpgrade(c *containerpb.Cluster, to Version) error {
 		// Documented: "node pools cannot run a newer version than the
 		// control plane". UNVERIFIED wording (re-read 2026-11-20: upgrading-a-cluster).
 		return status.Errorf(codes.InvalidArgument, "Node version %q is newer than the control plane's %q: upgrade the control plane first.", to.GKE, c.GetCurrentMasterVersion())
+	}
+	if ev := c.GetCurrentEmulatedVersion(); ev != "" && compareVersions(to.GKE, ev) > 0 {
+		// Documented for a rollback-safe upgrade's soak: "You can't create
+		// or upgrade the nodes to a version that is later than the
+		// emulated version." UNVERIFIED wording (re-read 2026-11-22:
+		// how-to/upgrading-a-cluster).
+		return status.Errorf(codes.FailedPrecondition, "Node version %q is later than the control plane's emulated version %q: complete the control plane upgrade first.", to.GKE, ev)
 	}
 	if minorOf(c.GetCurrentMasterVersion())-minorOf(to.GKE) > maxNodeSkew {
 		return status.Errorf(codes.InvalidArgument, "Node version %q is more than %d minor versions older than the control plane's %q.", to.GKE, maxNodeSkew, c.GetCurrentMasterVersion())

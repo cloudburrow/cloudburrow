@@ -316,8 +316,9 @@ func (p gkeClustersProvider) servedActions(ctx context.Context, project string, 
 		gkeNetworkPolicyAction(c),
 		gkeLegacyAbacAction(c),
 		gkeZonesAction(c),
-		gkeCompleteUpgradeAction(p.upgradeInfo(ctx, project, c)),
 	}
+	info := p.upgradeInfo(ctx, project, c)
+	actions = append(actions, gkeCompleteUpgradeAction(info), gkeRollbackUpgradeAction(info))
 	_, rotating := p.rotation(project, c)
 	actions = append(actions, gkeRotationActions(rotating)...)
 	actions = append(actions, gkeTelemetryActions(c)...)
@@ -372,7 +373,7 @@ func (p gkeClustersProvider) servedAct(ctx context.Context, project string, c *c
 		}
 		_, err := api.UpdateCluster(ctx, &containerpb.UpdateClusterRequest{Name: name, Update: u})
 		return gkeStatusErr(err)
-	case "zones", "rotate-start", "rotate-complete", "complete-upgrade", "logging", "monitoring":
+	case "zones", "rotate-start", "rotate-complete", "complete-upgrade", "rollback-upgrade", "logging", "monitoring":
 		return p.moreSettingsAct(ctx, name, action, v)
 	case "netpolicy", "abac":
 		return p.settingsAct(ctx, name, c, action, v)

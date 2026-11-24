@@ -2,167 +2,192 @@ package main
 
 import (
 	"context"
-	"io"
-	"slices"
+	"strconv"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
-	"cloud.google.com/go/logging/apiv2/loggingpb"
-
-	ltype "google.golang.org/genproto/googleapis/logging/type"
-
+	"github.com/cloudburrow/cloudburrow/internal/logagent"
 	"github.com/cloudburrow/cloudburrow/internal/service/gke"
 )
 
-const gkePodsJSON = `{"items":[
- {"metadata":{"name":"web-1","namespace":"default","uid":"u1","labels":{"app":"web"}},
-  "spec":{"nodeName":"k-1234-1","containers":[{"name":"app"}]}},
- {"metadata":{"name":"coredns-x","namespace":"kube-system","uid":"u2","labels":{"k8s-app":"kube-dns"}},
-  "spec":{"nodeName":"k-1234-1","containers":[{"name":"coredns"}]}},
- {"metadata":{"name":"kube-apiserver-k-control-plane","namespace":"kube-system","uid":"u3","labels":{"tier":"control-plane","component":"kube-apiserver"}},
-  "spec":{"nodeName":"k-control-plane","containers":[{"name":"kube-apiserver"}]}},
- {"metadata":{"name":"etcd-k-control-plane","namespace":"kube-system","uid":"u4","labels":{"tier":"control-plane","component":"etcd"}},
-  "spec":{"nodeName":"k-control-plane","containers":[{"name":"etcd"}]}},
- {"metadata":{"name":"pending","namespace":"default","uid":"u5"},"spec":{"containers":[{"name":"app"}]}}
-]}`
+// fakeLogCluster records what the reconciler does to one cluster.
+type fakeLogCluster struct {
+	applied   []string
+	kubectl   [][]string
+	configMap string
+	nodes     map[string]string
+	has       map[string]bool
+	loads     []string
+}
 
-// TestGKELogTargets (#2100): workload and system containers are shipped
-// as their components say, on k8s_container with GKE's labels; the API
-// server only with APISERVER, and etcd never.
-func TestGKELogTargets(t *testing.T) {
-	tt := gke.TelemetryTarget{Project: "p", Location: "us-central1-a", Cluster: "c1", Kind: "k",
-		SystemLogs: true, WorkloadLogs: true, ControlPlaneLogs: map[string]bool{}}
-	srcs, err := gkeLogTargets(tt, []byte(gkePodsJSON))
+func (f *fakeLogCluster) Apply(_ context.Context, _, m string) error {
+	f.applied = append(f.applied, m)
+	if strings.Contains(m, "kind: ConfigMap") {
+		f.configMap = m
+	}
+	return nil
+}
+
+func (f *fakeLogCluster) Kubectl(_ context.Context, _ string, args ...string) (string, error) {
+	f.kubectl = append(f.kubectl, args)
+	return "", nil
+}
+
+func (f *fakeLogCluster) Nodes(context.Context, string) (map[string]string, error) {
+	return f.nodes, nil
+}
+
+func (f *fakeLogCluster) Image(context.Context, string) (string, error) {
+	return logagentimage0, nil
+}
+
+const logagentimage0 = "dev.local/cloudburrow-logging-agent:0123456789abcdef"
+
+func (f *fakeLogCluster) Load(_ context.Context, _, node, _ string) (bool, error) {
+	if f.has[node] {
+		return false, nil
+	}
+	f.has[node] = true
+	f.loads = append(f.loads, node)
+	return true, nil
+}
+
+func (f *fakeLogCluster) daemonSets() int {
+	n := 0
+	for _, m := range f.applied {
+		if strings.Contains(m, "kind: DaemonSet") {
+			n++
+		}
+	}
+	return n
+}
+
+func (f *fakeLogCluster) deleted(what string) int {
+	n := 0
+	for _, a := range f.kubectl {
+		if len(a) > 1 && a[0] == "delete" && a[1] == what {
+			n++
+		}
+	}
+	return n
+}
+
+// TestGKELogAgentsFollowTheClustersLogging (#2100): while a cluster's
+// logs are on, its fluentbit-gke DaemonSet runs the embedded agent image,
+// loaded into every node (a node added later too, whose waiting pod is
+// made again), writing to the instance's Cloud Logging; its ConfigMap
+// names what is shipped. With logging none the ConfigMap says since when
+// it is off and the DaemonSet is removed; back on, it ships from the
+// change that turned it on, so a pod's first line, written just after,
+// is not lost. Nothing is applied again while nothing changes.
+func TestGKELogAgentsFollowTheClustersLogging(t *testing.T) {
+	t0 := time.Date(2026, 11, 22, 13, 0, 0, 0, time.UTC)
+	target := gke.TelemetryTarget{Name: "projects/p/locations/us-central1-a/clusters/c1", Project: "p", Location: "us-central1-a",
+		Cluster: "c1", Kind: "k", SystemLogs: true, WorkloadLogs: true, ControlPlaneLogs: map[string]bool{}}
+	fc := &fakeLogCluster{nodes: map[string]string{"k-control-plane": "id0", "k-worker": "id1"}, has: map[string]bool{"k-control-plane": true}}
+	now := t0
+	f := &gkeLogAgents{
+		targets:  func() []gke.TelemetryTarget { return []gke.TelemetryTarget{target} },
+		endpoint: func() string { return "http://192.168.65.254:28420" },
+		cluster:  fc, now: func() time.Time { return now }, state: map[string]*gkeLogState{},
+	}
+	ctx := context.Background()
+	f.sweep(ctx)
+	if fc.daemonSets() != 1 || !strings.Contains(fc.applied[len(fc.applied)-1], "image: "+logagentimage0) ||
+		!strings.Contains(fc.applied[len(fc.applied)-1], `value: "http://192.168.65.254:28420"`) {
+		t.Fatalf("applied = %q", fc.applied)
+	}
+	if len(fc.loads) != 1 || fc.loads[0] != "k-worker" {
+		t.Errorf("loaded into %v, want the worker, which lacked the image", fc.loads)
+	}
+	cfg := configOf(t, fc.configMap)
+	if !cfg.Ships(logagent.Workload, t0.Add(-time.Hour)) || cfg.Ships("apiserver", t0) || cfg.Cluster != "c1" {
+		t.Errorf("config = %+v", cfg)
+	}
+	n := len(fc.applied)
+	f.sweep(ctx)
+	if len(fc.applied) != n {
+		t.Errorf("an unchanged sweep applied %q", fc.applied[n:])
+	}
+
+	// A node added: loaded, and its pod made again.
+	fc.nodes["k-worker2"] = "id2"
+	f.sweep(ctx)
+	if len(fc.loads) != 2 || fc.deleted("pod") != 2 {
+		t.Errorf("a new node: loads %v, pod deletions %d", fc.loads, fc.deleted("pod"))
+	}
+
+	// Logging none.
+	off := t0.Add(time.Minute)
+	target.SystemLogs, target.WorkloadLogs, target.LoggingChanged = false, false, off
+	now = off.Add(time.Second)
+	f.sweep(ctx)
+	cfg = configOf(t, fc.configMap)
+	if cfg.Any() || !cfg.Ships(logagent.Workload, off) || cfg.Ships(logagent.Workload, off.Add(time.Millisecond)) {
+		t.Errorf("with none: %+v", cfg)
+	}
+	if fc.deleted("daemonset") != 1 {
+		t.Errorf("the DaemonSet is not removed with logging none: %v", fc.kubectl)
+	}
+	f.sweep(ctx)
+	if fc.deleted("daemonset") != 1 {
+		t.Errorf("removed again: %v", fc.kubectl)
+	}
+
+	// Back on: from the change, a little before this sweep.
+	on := t0.Add(2 * time.Minute)
+	target.SystemLogs, target.WorkloadLogs, target.LoggingChanged = true, true, on
+	now = on.Add(2 * time.Second)
+	f.sweep(ctx)
+	cfg = configOf(t, fc.configMap)
+	if !cfg.Ships(logagent.Workload, on.Add(115*time.Millisecond)) || cfg.Ships(logagent.Workload, on.Add(-time.Second)) {
+		t.Errorf("back on: %+v", cfg)
+	}
+	if fc.daemonSets() != 2 {
+		t.Errorf("the DaemonSet is not applied again: %d", fc.daemonSets())
+	}
+
+	// A new process reads the configuration back, and keeps its times.
+	fc.configMap = ""
+	g := &gkeLogAgents{targets: f.targets, endpoint: f.endpoint, now: func() time.Time { return now.Add(time.Hour) },
+		cluster: &readBack{fakeLogCluster: fc, value: cfg.Marshal()}, state: map[string]*gkeLogState{}}
+	n = len(fc.applied)
+	g.sweep(ctx)
+	for _, m := range fc.applied[n:] {
+		if strings.Contains(m, "kind: ConfigMap") {
+			t.Errorf("a restarted CLI rewrote the configuration: %s", m)
+		}
+	}
+}
+
+// readBack answers the ConfigMap's read with value.
+type readBack struct {
+	*fakeLogCluster
+	value string
+}
+
+func (r *readBack) Kubectl(ctx context.Context, kind string, args ...string) (string, error) {
+	if len(args) > 1 && args[0] == "get" && args[1] == "configmap" {
+		return r.value, nil
+	}
+	return r.fakeLogCluster.Kubectl(ctx, kind, args...)
+}
+
+func configOf(t *testing.T, manifest string) logagent.Config {
+	t.Helper()
+	i := strings.Index(manifest, logagent.ConfigKey+": ")
+	if i < 0 {
+		t.Fatalf("no configuration in %q", manifest)
+	}
+	v := strings.TrimSpace(manifest[i+len(logagent.ConfigKey)+2:])
+	s, err := strconv.Unquote(v)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(srcs) != 2 {
-		t.Fatalf("sources = %+v, want web-1's and coredns's", srcs)
+	cfg, err := logagent.ParseConfig(s)
+	if err != nil {
+		t.Fatal(err)
 	}
-	w := srcs[0]
-	if w.category != "workload" || w.node != "k-1234-1" || w.dir != "/var/log/pods/default_web-1_u1/app" {
-		t.Errorf("workload source = %+v", w)
-	}
-	want := map[string]string{"project_id": "p", "location": "us-central1-a", "cluster_name": "c1",
-		"namespace_name": "default", "pod_name": "web-1", "container_name": "app"}
-	if w.resource.Type != "k8s_container" || len(w.resource.Labels) != len(want) {
-		t.Errorf("resource = %v", w.resource)
-	}
-	for k, v := range want {
-		if w.resource.Labels[k] != v {
-			t.Errorf("resource label %s = %q, want %q", k, w.resource.Labels[k], v)
-		}
-	}
-	if w.labels["k8s-pod/app"] != "web" || w.labels["compute.googleapis.com/resource_name"] != "k-1234-1" {
-		t.Errorf("entry labels = %v", w.labels)
-	}
-	if srcs[1].category != "system" {
-		t.Errorf("coredns category = %q", srcs[1].category)
-	}
-
-	tt.SystemLogs, tt.ControlPlaneLogs["apiserver"] = false, true
-	srcs, _ = gkeLogTargets(tt, []byte(gkePodsJSON))
-	if len(srcs) != 2 || srcs[1].resource.Type != "k8s_control_plane_component" || srcs[1].logName != "container.googleapis.com/apiserver" {
-		t.Fatalf("with APISERVER and no system logs: %+v", srcs)
-	}
-	e := gkeLogEntry(srcs[1], "stderr", time.Unix(1, 0), "x")
-	if e.LogName != "projects/p/logs/container.googleapis.com%2Fapiserver" {
-		t.Errorf("control plane log = %q", e.LogName)
-	}
-	tt.WorkloadLogs, tt.ControlPlaneLogs = false, map[string]bool{}
-	if srcs, _ = gkeLogTargets(tt, []byte(gkePodsJSON)); len(srcs) != 0 {
-		t.Errorf("nothing enabled: %+v", srcs)
-	}
-}
-
-func TestGKELogEntry(t *testing.T) {
-	tt := gke.TelemetryTarget{Project: "p", Location: "l", Cluster: "c", WorkloadLogs: true}
-	srcs, _ := gkeLogTargets(tt, []byte(gkePodsJSON))
-	s := srcs[0]
-	e := gkeLogEntry(s, "stdout", time.Unix(5, 0), "hello")
-	if e.LogName != "projects/p/logs/stdout" || e.GetTextPayload() != "hello" || e.Severity != ltype.LogSeverity_INFO {
-		t.Errorf("stdout entry = %v", e)
-	}
-	if e := gkeLogEntry(s, "stderr", time.Unix(5, 0), "bad"); e.LogName != "projects/p/logs/stderr" || e.Severity != ltype.LogSeverity_ERROR {
-		t.Errorf("stderr entry = %v", e)
-	}
-	e = gkeLogEntry(s, "stderr", time.Unix(5, 0), `{"severity":"WARNING","message":"m"}`)
-	if e.Severity != ltype.LogSeverity_WARNING || e.GetJsonPayload().GetFields()["message"].GetStringValue() != "m" {
-		t.Errorf("structured entry = %v", e)
-	}
-}
-
-// gkeFeederFor is a feeder over one cluster whose pod web-1 wrote line,
-// with a clock starting at at that each listing moves on five seconds.
-func gkeFeederFor(at, changed time.Time, line string, written chan string) *gkeLogFeeder {
-	var mu sync.Mutex
-	clock := at
-	file := podLogDir("default", "web-1", "u1") + "/app/0.log"
-	return &gkeLogFeeder{
-		targets: func() []gke.TelemetryTarget {
-			return []gke.TelemetryTarget{{Project: "p", Location: "us-central1-a", Cluster: "c1", Kind: "k",
-				SystemLogs: true, WorkloadLogs: true, ControlPlaneLogs: map[string]bool{}, LoggingChanged: changed}}
-		},
-		kubectl: func(context.Context, string, ...string) (string, error) {
-			mu.Lock()
-			clock = clock.Add(5 * time.Second)
-			mu.Unlock()
-			return gkePodsJSON, nil
-		},
-		docker: func(_ context.Context, args ...string) (io.ReadCloser, func() error, error) {
-			if slices.Contains(args, "find") {
-				return io.NopCloser(strings.NewReader(file + "\n")), func() error { return nil }, nil
-			}
-			return io.NopCloser(strings.NewReader(line)), func() error { return nil }, nil
-		},
-		write: func(_ context.Context, req *loggingpb.WriteLogEntriesRequest) (*loggingpb.WriteLogEntriesResponse, error) {
-			for _, e := range req.GetEntries() {
-				written <- e.GetTextPayload()
-			}
-			return &loggingpb.WriteLogEntriesResponse{}, nil
-		},
-		now: func() time.Time {
-			mu.Lock()
-			defer mu.Unlock()
-			return clock
-		},
-		since: map[string]time.Time{}, follows: map[string]*runLogFollow{},
-	}
-}
-
-func wantShipped(t *testing.T, what string, written chan string, want bool) {
-	t.Helper()
-	select {
-	case got := <-written:
-		if !want || got != "hello" {
-			t.Errorf("%s: shipped %q", what, got)
-		}
-	case <-time.After(2 * time.Second):
-		if want {
-			t.Errorf("%s: the line was not shipped", what)
-		}
-	}
-}
-
-// TestGKELogFeederShipsFromWhenLoggingWasOn (#2100): a category turned on
-// is shipped from when the cluster's logging change turned it on, so a
-// line a pod writes half a second after the change, before the shipper's
-// next sweep, is shipped (TestGKELoggingAndMonitoring's lg3 line was
-// dropped by 115ms); without a change made by this server, from the
-// start of the sweep that first sees it, not from when its slow listing
-// ends; a line older than both is not.
-func TestGKELogFeederShipsFromWhenLoggingWasOn(t *testing.T) {
-	t0 := time.Date(2026, 11, 22, 13, 0, 0, 0, time.UTC)
-	line := t0.Add(time.Second).Format(time.RFC3339Nano) + " stdout F hello\n"
-	written := make(chan string, 4)
-	gkeFeederFor(t0.Add(2*time.Second), t0, line, written).sweep(context.Background())
-	wantShipped(t, "a line after the change, before the sweep", written, true)
-	written = make(chan string, 4)
-	gkeFeederFor(t0, time.Time{}, line, written).sweep(context.Background())
-	wantShipped(t, "a line during the sweep's listing", written, true)
-	written = make(chan string, 4)
-	gkeFeederFor(t0.Add(2*time.Second), time.Time{}, line, written).sweep(context.Background())
-	wantShipped(t, "a line before the sweep, no change known", written, false)
+	return cfg
 }

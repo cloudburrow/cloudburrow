@@ -455,6 +455,12 @@ compat_shard() {
         # The served shard's instance again, for the Kubernetes Engine
         # tests alone (COMPAT_GKE_TESTS).
         COMPAT_RUN=$COMPAT_GKE_TESTS
+        # Kubernetes Engine's logs (#2100): a cluster whose pod writes a
+        # line every half second, all of whose lines, those written while
+        # the CLI was stopped too, its in-cluster agent ships once.
+        SETUP_TESTS="TestGKELogsRestartSetup"
+        PROBE_TESTS="TestGKELogsAcrossRestart"
+        PROBE_VARS=GKE,LOGGING
       else
         COMPAT_SKIP=$COMPAT_GKE_TESTS
         # Cloud KMS (#418): a key with ENABLED, DISABLED and
@@ -782,7 +788,8 @@ EOF2
 # for the probes after the restart.
 compat_setup_exports() {
   case "$1" in
-    served)  export CLOUDBURROW_TEST_KMS_PROBE="$2/kms-probe.json" ;;
+    served)  export CLOUDBURROW_TEST_KMS_PROBE="$2/kms-probe.json" \
+               CLOUDBURROW_TEST_GKE_LOGS_PROBE="$2/gke-logs-probe.json" ;;
     storage) export CLOUDBURROW_TEST_SECRETS_PROBE="$2/secrets-probe.json" \
                CLOUDBURROW_TEST_TASKS_PROBE="$2/tasks-probe.json" \
                CLOUDBURROW_TEST_SCHEDULER_PROBE="$2/scheduler-probe.json" \
@@ -798,7 +805,7 @@ compat_setup_exports() {
 # fixture in <dir>.
 compat_probe_expect() {
   local v
-  for v in MEMORYSTORE MYSQL CLOUDSQL DATASTORE FIRESTORE KMS SECRETS TASKS SCHEDULER WORKFLOWS; do
+  for v in MEMORYSTORE MYSQL CLOUDSQL DATASTORE FIRESTORE KMS SECRETS TASKS SCHEDULER WORKFLOWS GKE_LOGS; do
     echo "CLOUDBURROW_TEST_${v}_EXPECT=$1"
   done
   echo "CLOUDBURROW_TEST_STORAGE_RESTART_PROBE=$1:$2/storage-restart-probe.json"
