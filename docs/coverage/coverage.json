@@ -14961,9 +14961,9 @@
     "Key": "compute",
     "Title": "Compute Engine API (v1): VPC networking",
     "counts": {
-      "Implemented": 36,
-      "Unimplemented": 61,
-      "Verified": 106
+      "Implemented": 34,
+      "Unimplemented": 59,
+      "Verified": 111
     },
     "rows": [
       {
@@ -15037,8 +15037,10 @@
       },
       {
         "method": "compute.disks.addResourcePolicies",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computediskcmek_test.go:158 TestComputeDiskLicensesAndSnapshotSchedulesThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.disks.aggregatedList",
@@ -15082,6 +15084,7 @@
         "method": "compute.disks.insert",
         "status": "Verified",
         "tests": [
+          "test/compat/computediskcmek_test.go:74 TestComputeDiskCMEKThroughTheGoClient",
           "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
         ]
       },
@@ -15094,8 +15097,10 @@
       },
       {
         "method": "compute.disks.removeResourcePolicies",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computediskcmek_test.go:158 TestComputeDiskLicensesAndSnapshotSchedulesThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.disks.resize",
@@ -15138,7 +15143,15 @@
         "method": "compute.disks.update",
         "status": "Verified",
         "tests": [
+          "test/compat/computediskcmek_test.go:158 TestComputeDiskLicensesAndSnapshotSchedulesThroughTheGoClient",
           "test/compat/computediskupdate_test.go:26 TestComputeHyperdiskBalancedHAThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.disks.updateKmsKey",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computediskcmek_test.go:74 TestComputeDiskCMEKThroughTheGoClient"
         ]
       },
       {
@@ -15858,6 +15871,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/backupdrregiondisk_test.go:32 TestBackupDRRegionalDiskRoundTrip",
+          "test/compat/computediskcmek_test.go:74 TestComputeDiskCMEKThroughTheGoClient",
           "test/compat/computeregiondisks_test.go:80 TestComputeRegionalDisksThroughTheGoClient"
         ]
       },
@@ -15928,13 +15942,16 @@
         "method": "compute.regionDisks.update",
         "status": "Verified",
         "tests": [
+          "test/compat/computediskcmek_test.go:158 TestComputeDiskLicensesAndSnapshotSchedulesThroughTheGoClient",
           "test/compat/computediskupdate_test.go:26 TestComputeHyperdiskBalancedHAThroughTheGoClient"
         ]
       },
       {
         "method": "compute.regionDisks.updateKmsKey",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computediskcmek_test.go:74 TestComputeDiskCMEKThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.regionOperations.delete",
@@ -16006,6 +16023,7 @@
         "method": "compute.resourcePolicies.insert",
         "status": "Verified",
         "tests": [
+          "test/compat/computediskcmek_test.go:158 TestComputeDiskLicensesAndSnapshotSchedulesThroughTheGoClient",
           "test/compat/computeregiondisks_test.go:80 TestComputeRegionalDisksThroughTheGoClient"
         ]
       },
@@ -16018,8 +16036,10 @@
       },
       {
         "method": "compute.resourcePolicies.patch",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computediskcmek_test.go:158 TestComputeDiskLicensesAndSnapshotSchedulesThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.resourcePolicies.setIamPolicy",

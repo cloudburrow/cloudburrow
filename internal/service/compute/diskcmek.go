@@ -194,7 +194,10 @@ func (s *Server) checkInstanceKeysLocked(o obj) error {
 func (s *Server) updateDiskKmsKeyLocked(project, scope, rel string, d, b obj) (obj, error) {
 	w := str(d, wrappedKeyKey)
 	if w == "" {
-		return nil, invalid("Invalid resource usage: 'The disk resource '%s' is not encrypted with a customer-managed encryption key: you can't encrypt existing resources with CMEKs.'.", rel)
+		// KMS_UPDATE_NOT_SUPPORTED_FOR_NON_KMS_PROTECTED_RESOURCE
+		// (https://docs.cloud.google.com/compute/docs/reference/rest/v1/errors).
+		name := str(d, "name")
+		return nil, invalid("Cannot update the KMS key for the 'disk' '%s'. KMS key updates are only supported for resources already protected by Customer-Managed Encryption Keys (CMEK). The resource '%s' is not CMEK protected. To use CMEK for a 'disk', create a new resource and provide a KMS key during creation.", name, name)
 	}
 	ek, _ := d["diskEncryptionKey"].(map[string]any)
 	cur := cryptoKeyOf(str(ek, "kmsKeyName"))

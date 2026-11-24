@@ -445,7 +445,9 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			computeInstancesProvider{screen}, computeDisksProvider{screen}, computeSnapshotsProvider{screen},
 			computeImagesProvider{screen}, computeMachineTypesProvider{screen}, computeMetadataProvider{screen},
 			// Asynchronous replication and consistency groups (#2206).
-			computeAsyncReplicationProvider{screen}, computeConsistencyGroupsProvider{screen})
+			computeAsyncReplicationProvider{screen}, computeConsistencyGroupsProvider{screen},
+			// Snapshot schedules (#2206).
+			computeSnapshotSchedulesProvider{screen})
 	}
 	// BigQuery's Data transfers and Scheduled queries pages (#1948).
 	if d.dataTransfer != nil {

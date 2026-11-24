@@ -124,7 +124,7 @@ func (s *Server) attachedDiskLocked(project, zone, instance, machineType string,
 		}
 		force, _ := e["forceAttach"].(bool)
 		if force && !isRegional(d) {
-			return nil, nil, invalid("Invalid value for field '%s.forceAttach': 'true'. Force-attach applies to regional disks only: '%s' is a zonal disk.", field, rel)
+			return nil, nil, invalid("Force attaching zonal disks is not supported")
 		}
 		// "You can't attach a disk with a revoked key to a VM."
 		if err := s.checkDiskKeyLocked(d); err != nil {

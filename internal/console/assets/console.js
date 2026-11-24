@@ -524,6 +524,10 @@ const ROUTES = [
     section: "Compute", product: "compute", productTitle: "Compute Engine" },
   { path: "/compute/consistencyGroups", service: "compute-consistencygroups", icon: "compute", title: "Consistency groups", kind: "Consistency group",
     section: "Compute", product: "compute", productTitle: "Compute Engine" },
+  // Snapshot schedules (#2206): Google's Snapshots page's Snapshot
+  // schedules tab.
+  { path: "/compute/snapshotSchedules", service: "compute-snapshotschedules", icon: "compute", title: "Snapshot schedules", kind: "Snapshot schedule",
+    section: "Compute", product: "compute", productTitle: "Compute Engine" },
   { path: "/compute/snapshots", service: "compute-snapshots", icon: "compute", title: "Snapshots", kind: "Snapshot",
     section: "Compute", product: "compute", productTitle: "Compute Engine" },
   { path: "/compute/images", service: "compute-images", icon: "compute", title: "Images", kind: "Image",

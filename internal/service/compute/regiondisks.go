@@ -185,7 +185,7 @@ func (s *Server) newRegionDiskLocked(project, region string, b obj, field string
 	}
 	lim, ok := regionDiskTypes[typ]
 	if !ok {
-		return nil, invalid("Invalid value for field '%s.type': '%s'. The disk type is not valid for a regional disk: it is one of pd-standard, pd-balanced, pd-ssd or hyperdisk-balanced-high-availability.", field, str(b, "type"))
+		return nil, invalid("Invalid value for field '%s.type': '%s'. Creating a regional disk of type %s is not supported.", field, str(b, "type"), typ)
 	}
 	zones, err := checkReplicaZones(project, region, strs(b, "replicaZones"), field+".replicaZones")
 	if err != nil {
@@ -483,14 +483,14 @@ func (s *Server) resizeDiskLocked(project, scope, rel string, d, b obj) (obj, er
 	}
 	cur, _, _ := sizeGb(d["sizeGb"])
 	if size <= cur {
-		return nil, invalid("Invalid value for field 'sizeGb': '%d'. New disk size '%d' GB must be larger than existing size '%d' GB.", size, size, cur)
+		return nil, invalid("Invalid value for field 'sizeGb': '%d'. New disk size '%d' GiB must be larger than existing size '%d' GiB.", size, size, cur)
 	}
 	lim := diskTypes[lastSeg(str(d, "type"))]
 	if isRegional(d) {
 		lim = regionDiskTypes[lastSeg(str(d, "type"))]
 	}
 	if size > lim.max {
-		return nil, invalid("Invalid value for field 'sizeGb': '%d'. Disk size must be at most %d GB.", size, lim.max)
+		return nil, invalid("Invalid value for field 'sizeGb': '%d'. Disk size cannot be greater than %s GB for disk type %s.", size, commas(lim.max), lastSeg(str(d, "type")))
 	}
 	if err := s.noteSizeChange(d, rel); err != nil {
 		return nil, err

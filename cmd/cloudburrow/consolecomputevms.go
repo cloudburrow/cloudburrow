@@ -808,6 +808,13 @@ func (p computeDisksProvider) diskActions(d map[string]any, onPage bool) []conso
 				OptionLabels: haModeLabels, Help: "The access mode changes only while the disk is detached from every instance."}}}
 		acts = append(acts, edit)
 	}
+	if k := vpcStr(vmMap(d, "diskEncryptionKey"), "kmsKeyName"); k != "" {
+		// disks.updateKmsKey (#2206): rotate to the primary version, or
+		// change the key.
+		acts = append(acts, console.Action{ID: "updatekmskey", Label: "Update KMS key", Submit: "Update", Fields: []console.Field{
+			{Name: "kmsKeyName", Label: "Cloud KMS key", Type: "text", Pattern: `^(projects/[^\/]+/locations/[^\/]+/keyRings/[^\/]+/cryptoKeys/[^\/]+)?$`,
+				Help: "Empty rotates the disk to its key's primary version (" + k + "); a key name changes the key."}}})
+	}
 	acts = append(acts, labelsAction(d))
 	acts = append(acts, asyncActions(d)...)
 	del := console.Action{ID: "delete", Label: "Delete", Destructive: true, Leaves: onPage, Confirm: "Delete disk " + name + "?"}
@@ -845,6 +852,13 @@ func (p computeDisksProvider) CreateForm() (string, []console.Field) {
 		{Name: "accessMode", Label: "Access mode", Type: "select", Section: "Disk settings", Default: "READ_WRITE_SINGLE",
 			Options: []string{"READ_WRITE_SINGLE", "READ_WRITE_MANY"}, OptionLabels: haModeLabels,
 			VisibleWhen: map[string]string{"type": haDiskType}, Help: "Multi-writer volumes attach read-write to up to 8 C3, C3D, C4, C4A, M3, N4, N4A, N4D or Z3 instances."},
+		{Name: "snapshotSchedule", Label: "Snapshot schedule", Type: "text", Section: "Snapshot schedule", Pattern: `^([a-z]([\-a-z0-9]{0,61}[a-z0-9])?)?$`,
+			Help: "The name of a snapshot schedule of the disk's region (Snapshot schedules); empty takes none."},
+		{Name: "encryption", Label: "Encryption", Type: "radio", Section: "Encryption", Default: "Google-managed encryption key",
+			Options: []string{"Google-managed encryption key", "Cloud KMS key"}},
+		{Name: "kmsKeyName", Label: "Cloud KMS key", Type: "text", Section: "Encryption", VisibleWhen: map[string]string{"encryption": "Cloud KMS key"},
+			Pattern: `^(projects/[^\/]+/locations/[^\/]+/keyRings/[^\/]+/cryptoKeys/[^\/]+)?$`,
+			Help:    "projects/PROJECT/locations/LOCATION/keyRings/RING/cryptoKeys/KEY: in the disk's region, a multi-region that contains it, or global."},
 		vmLabelsField(nil, "Disk settings"),
 	}
 }
@@ -889,6 +903,17 @@ func (p computeDisksProvider) Create(ctx context.Context, project string, values
 	}
 	if d := strings.TrimSpace(values["description"]); d != "" {
 		b["description"] = d
+	}
+	if values["encryption"] == "Cloud KMS key" {
+		k := strings.TrimSpace(values["kmsKeyName"])
+		if k == "" {
+			return "", errors.New("kmsKeyName: choose a Cloud KMS key")
+		}
+		b["diskEncryptionKey"] = map[string]any{"kmsKeyName": k}
+	}
+	if s := strings.TrimSpace(values["snapshotSchedule"]); s != "" {
+		region := zone[:strings.LastIndex(zone, "-")]
+		b["resourcePolicies"] = []any{"regions/" + region + "/resourcePolicies/" + s}
 	}
 	switch values["source"] {
 	case "Image":
@@ -939,6 +964,7 @@ func (p computeDisksProvider) Detail(ctx context.Context, project string, path [
 			{Label: "Size", Value: vpcStr(d, "sizeGb") + " GB"}, locationProp(d, path),
 			{Label: "In use by", Value: vpcDash(strings.Join(users, ", "))}, {Label: "Source", Value: vpcDash(src)},
 			{Label: "Labels", Value: vpcDash(vmLabelsText(d))}, {Label: "Description", Value: vpcDash(vpcStr(d, "description"))},
+			{Label: "Encryption", Value: diskEncryptionText(d)}, {Label: "Resource policies", Value: vpcDash(diskSchedulesText(d))},
 			{Label: "Creation time", Value: vpcStr(d, "creationTimestamp")},
 		}}}}},
 	}
@@ -987,6 +1013,12 @@ func (p computeDisksProvider) ActAt(ctx context.Context, project string, path []
 		err = p.setLabels(project, base, values)
 	case "edit":
 		err = p.editDisk(project, base, values)
+	case "updatekmskey":
+		b := map[string]any{}
+		if k := strings.TrimSpace(values["kmsKeyName"]); k != "" {
+			b["kmsKeyName"] = k
+		}
+		_, err = p.call("POST", project, base+"/updateKmsKey", nil, b)
 	case "delete":
 		_, err = p.call("DELETE", project, base, nil, nil)
 	default:
@@ -1328,4 +1360,23 @@ func locationProp(d map[string]any, path []string) console.Property {
 		zs = append(zs, vpcLast(z))
 	}
 	return console.Property{Label: "Replica zones", Value: path[0] + " (" + strings.Join(zs, ", ") + ")"}
+}
+
+// diskEncryptionText is a disk's Encryption as Google's disk page shows it
+// (#2206).
+func diskEncryptionText(d map[string]any) string {
+	if k := vpcStr(vmMap(d, "diskEncryptionKey"), "kmsKeyName"); k != "" {
+		return "Customer-managed (" + k + ")"
+	}
+	return "Google-managed"
+}
+
+// diskSchedulesText names the disk's resource policies: its snapshot
+// schedules and consistency group.
+func diskSchedulesText(d map[string]any) string {
+	var out []string
+	for _, rp := range vpcStrs(d, "resourcePolicies") {
+		out = append(out, vpcLast(rp))
+	}
+	return strings.Join(out, ", ")
 }

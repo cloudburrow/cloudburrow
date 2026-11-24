@@ -98,7 +98,7 @@ func TestDiskCMEK(t *testing.T) {
 	wantStatus(t, s, 400, "same region as the disk", "POST", z+"disks/d0/updateKmsKey", obj{"kmsKeyName": eu})
 	// A disk without a CMEK gets none.
 	mustCall(t, s, "POST", z+"disks", obj{"name": "plain", "sizeGb": "10"})
-	wantStatus(t, s, 400, "can't encrypt existing resources", "POST", z+"disks/plain/updateKmsKey", obj{"kmsKeyName": k1})
+	wantStatus(t, s, 400, "is not CMEK protected", "POST", z+"disks/plain/updateKmsKey", obj{"kmsKeyName": k1})
 
 	// A disabled primary version refuses the rotation; the disabled
 	// version that wrapped the data key refuses it, attach, snapshot and

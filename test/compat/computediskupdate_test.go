@@ -207,7 +207,7 @@ func TestGcloudComputeDisksUpdate(t *testing.T) {
 	}
 	gc("compute", "disks", "update", hd, "--region", region, "--provisioned-iops", "20000", "--provisioned-throughput", "500")
 	gc("compute", "disks", "update", hd, "--region", region, "--access-mode", "READ_WRITE_MANY")
-	if out, err := run("compute", "disks", "update", hd, "--region", region, "--provisioned-iops", "10000"); err == nil || !strings.Contains(out, "4 hours") {
+	if out, err := run("compute", "disks", "update", hd, "--region", region, "--provisioned-iops", "10000"); err == nil || !strings.Contains(out, "due to being rate limited") {
 		t.Errorf("a second performance change within 4 hours: %v %s", err, out)
 	}
 	d, err := rdisks.Get(ctx, &computepb.GetRegionDiskRequest{Project: h.Project(), Region: region, Disk: hd})

@@ -34,11 +34,11 @@ func TestHyperdiskBalancedHA(t *testing.T) {
 	}{
 		{obj{"name": "h", "sizeGb": "3", "type": ha, "replicaZones": zs}, "between 4 GB"},
 		{obj{"name": "h", "type": ha, "replicaZones": zs, "provisionedIops": "4000"}, "without setting a size"},
-		{obj{"name": "h", "sizeGb": "10", "type": ha, "replicaZones": zs, "provisionedIops": "6000"}, "between 3000 and 5000"},
-		{obj{"name": "h", "sizeGb": "4", "type": ha, "replicaZones": zs, "provisionedIops": "3000"}, "between 2000 and 2000"},
-		{obj{"name": "h", "sizeGb": "500", "type": ha, "replicaZones": zs, "provisionedIops": "100001"}, "between 3000 and 100000"},
-		{obj{"name": "h", "sizeGb": "500", "type": ha, "replicaZones": zs, "provisionedIops": "4000", "provisionedThroughput": "1001"}, "between 140 and 1000"},
-		{obj{"name": "h", "sizeGb": "500", "type": ha, "replicaZones": zs, "provisionedIops": "100000", "provisionedThroughput": "300"}, "between 391 and 2400"},
+		{obj{"name": "h", "sizeGb": "10", "type": ha, "replicaZones": zs, "provisionedIops": "6000"}, "too high for the current disk size"},
+		{obj{"name": "h", "sizeGb": "4", "type": ha, "replicaZones": zs, "provisionedIops": "3000"}, "too high for the current disk size"},
+		{obj{"name": "h", "sizeGb": "500", "type": ha, "replicaZones": zs, "provisionedIops": "100001"}, "cannot be higher than 100,000."},
+		{obj{"name": "h", "sizeGb": "500", "type": ha, "replicaZones": zs, "provisionedIops": "4000", "provisionedThroughput": "1001"}, "throughput is too high for the requested disk size."},
+		{obj{"name": "h", "sizeGb": "500", "type": ha, "replicaZones": zs, "provisionedIops": "100000", "provisionedThroughput": "300"}, "throughput cannot be smaller than 391."},
 		{obj{"name": "h", "sizeGb": "10", "type": ha, "replicaZones": zs, "accessMode": roMany}, "READ_WRITE_MANY) access modes only"},
 		{obj{"name": "h", "sizeGb": "10", "replicaZones": zs, "provisionedIops": "3000"}, "can't be set for disk type pd-balanced"},
 	} {
@@ -66,7 +66,7 @@ func TestHyperdiskBalancedHA(t *testing.T) {
 	newVM(t, s, "us-central1-a", "n2vm", "n2-standard-2")
 	newVM(t, s, "us-central1-a", "c3c", "c3-standard-4")
 	mustCall(t, s, "POST", r+"disks", obj{"name": "mw", "sizeGb": "100", "type": ha, "replicaZones": zs})
-	wantStatus(t, s, 400, "cannot be used by [e2-standard-2] machine type", "POST", "zones/us-central1-a/instances/e2vm/attachDisk", obj{"source": r + "disks/mw"})
+	wantStatus(t, s, 400, "hyperdisk-balanced-high-availability disk type cannot be used by e2-standard-2 machine type.", "POST", "zones/us-central1-a/instances/e2vm/attachDisk", obj{"source": r + "disks/mw"})
 	mustCall(t, s, "POST", "zones/us-central1-a/instances/c3a/attachDisk", obj{"source": r + "disks/mw"})
 	wantStatus(t, s, 400, "already being used", "POST", "zones/us-central1-b/instances/c3b/attachDisk", obj{"source": r + "disks/mw"})
 
@@ -90,7 +90,7 @@ func TestHyperdiskBalancedHA(t *testing.T) {
 	if d := mustCall(t, s, "GET", r+"disks/mw", nil); len(strs(d, "users")) != 2 {
 		t.Errorf("multi-writer users: %v", d["users"])
 	}
-	wantStatus(t, s, 400, "cannot be used by [n2-standard-2]", "POST", "zones/us-central1-a/instances/n2vm/attachDisk", obj{"source": r + "disks/mw"})
+	wantStatus(t, s, 400, "cannot be used by n2-standard-2 machine type", "POST", "zones/us-central1-a/instances/n2vm/attachDisk", obj{"source": r + "disks/mw"})
 	wantStatus(t, s, 400, "Auto-delete can't be enabled", "POST", "zones/us-central1-a/instances/c3c/attachDisk", obj{"source": r + "disks/mw", "autoDelete": true})
 	d := s.res["projects/p/regions/us-central1/disks/mw"]
 	d["users"] = toAny([]string{"a", "b", "c", "d", "e", "f", "g", "h"})
@@ -123,7 +123,7 @@ func TestDiskUpdate(t *testing.T) {
 	if d["provisionedIops"] != "5000" || d["provisionedThroughput"] != "500" {
 		t.Fatalf("after update: %v", d)
 	}
-	if _, err := patchCall(t, s, r+"disks/h", "provisionedIops", obj{"provisionedIops": "4000"}); err == nil || !strings.Contains(err.Error(), "once every 4 hours") {
+	if _, err := patchCall(t, s, r+"disks/h", "provisionedIops", obj{"provisionedIops": "4000"}); err == nil || !strings.Contains(err.Error(), "Cannot update provisioned iops due to being rate limited.") {
 		t.Errorf("second performance change within 4 hours: %v", err)
 	}
 	now = now.Add(4 * time.Hour)
@@ -138,7 +138,7 @@ func TestDiskUpdate(t *testing.T) {
 		t.Fatal(err)
 	}
 	mustCall(t, s, "POST", r+"disks/h/resize", obj{"sizeGb": "30"})
-	if _, err := patchCall(t, s, r+"disks/h", "sizeGb", obj{"sizeGb": "40"}); err == nil || !strings.Contains(err.Error(), "twice in a 4-hour window") {
+	if _, err := patchCall(t, s, r+"disks/h", "sizeGb", obj{"sizeGb": "40"}); err == nil || !strings.Contains(err.Error(), "Disk cannot be resized due to being rate limited.") {
 		t.Errorf("third size change: %v", err)
 	}
 	if d := mustCall(t, s, "GET", r+"disks/h", nil); d["sizeGb"] != "30" {

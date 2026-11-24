@@ -31,8 +31,11 @@ import (
 //   - the machine series that support the type at all (haSeries); C2D, E2,
 //     N1, N2 and N2D only through Google's account team, so refused here.
 //
-// UNVERIFIED wording: the pages quote no error text for these limits, so
-// the messages follow Compute Engine's "Invalid value for field" form.
+// Wording: Google's where its pages quote it (the IOPS, throughput, size,
+// machine type and rate-limit texts of
+// https://docs.cloud.google.com/compute/docs/troubleshooting/troubleshooting-disk-creation
+// and troubleshooting-disk-full-resize, read 2026-11-24); the rest follow
+// Compute Engine's "Invalid value for field" form, unverified (gaps.md).
 
 const hdbHA = "hyperdisk-balanced-high-availability"
 
@@ -105,6 +108,12 @@ func intField(v any, field string) (int64, bool, error) {
 		return 0, false, nil
 	case float64:
 		return int64(x), true, nil
+	case int:
+		return int64(x), true, nil
+	case int64:
+		return x, true, nil
+	case int32:
+		return int64(x), true, nil
 	case string:
 		n, err := strconv.ParseInt(x, 10, 64)
 		if err != nil {
@@ -117,11 +126,24 @@ func intField(v any, field string) (int64, bool, error) {
 
 // checkHAPerf validates a volume's IOPS and throughput for its size.
 func checkHAPerf(size, iops, tput int64, field string) error {
-	if lo, hi := haIopsRange(size); iops < lo || iops > hi {
-		return invalid("Invalid value for field '%s.provisionedIops': '%d'. Requested provisioned IOPS must be between %d and %d for a %d GiB Hyperdisk Balanced High Availability volume.", field, iops, lo, hi, size)
+	// Google's texts (troubleshooting-disk-creation, read 2026-11-24).
+	lo, hi := haIopsRange(size)
+	switch {
+	case iops < lo:
+		return invalid("Invalid value for field '%s.provisionedIops': '%d'. Requested provisioned IOPS cannot be smaller than %d.", field, iops, lo)
+	case iops > 100000:
+		return invalid("Invalid value for field '%s.provisionedIops': '%d'. Requested provisioned IOPS cannot be higher than 100,000.", field, iops)
+	case iops > hi:
+		return invalid("Invalid value for field '%s.provisionedIops': '%d'. Requested provisioned IOPS is too high for the current disk size", field, iops)
 	}
-	if lo, hi := haTputRange(iops); tput < lo || tput > hi {
-		return invalid("Invalid value for field '%s.provisionedThroughput': '%d'. Requested provisioned throughput must be between %d and %d MiB/s for a Hyperdisk Balanced High Availability volume with %d provisioned IOPS.", field, tput, lo, hi, iops)
+	tlo, thi := haTputRange(iops)
+	switch {
+	case tput < tlo:
+		return invalid("Invalid value for field '%s.provisionedThroughput': '%d'. Requested provisioned throughput cannot be smaller than %d.", field, tput, tlo)
+	case tput > 2400:
+		return invalid("Invalid value for field '%s.provisionedThroughput': '%d'. Requested provisioned throughput cannot be higher than 2,400.", field, tput)
+	case tput > thi:
+		return invalid("Invalid value for field '%s.provisionedThroughput': '%d'. Requested provisioned throughput is too high for the requested disk size.", field, tput)
 	}
 	return nil
 }
@@ -202,7 +224,7 @@ func (s *Server) haAttachOK(d obj, rel, machineType string, e map[string]any, mo
 	}
 	series := seriesOf(machineType)
 	if machineType != "" && !haSeries[series] {
-		return invalid("Invalid value for field '%s.source': '%s'. [%s] disk type cannot be used by [%s] machine type.", field, rel, hdbHA, machineType)
+		return errf(http.StatusBadRequest, "badRequest", "%s disk type cannot be used by %s machine type.", hdbHA, machineType)
 	}
 	if str(d, "accessMode") != rwMany {
 		return nil
@@ -243,8 +265,7 @@ func (s *Server) noteSizeChange(d obj, rel string) error {
 	now := s.opts.Now()
 	l := recentChanges(strs(d, sizeChangesKey), now)
 	if len(l) >= 2 {
-		return errf(http.StatusBadRequest, "rateLimitExceeded",
-			"The disk resource '%s' was resized twice in the last 4 hours: a Hyperdisk Balanced High Availability volume's size can be changed at most twice in a 4-hour window.", rel)
+		return errf(http.StatusBadRequest, "rateLimitExceeded", "Disk cannot be resized due to being rate limited.")
 	}
 	d[sizeChangesKey] = toAny(append(l, now.UTC().Format(time.RFC3339Nano)))
 	return nil
@@ -324,14 +345,14 @@ func (s *Server) updateDiskLocked(c call, scope, rel string, d obj) (obj, error)
 			return nil, required("diskResource.sizeGb")
 		}
 		if n < cur {
-			return nil, invalid("Invalid value for field 'diskResource.sizeGb': '%d'. New disk size '%d' GB must be larger than existing size '%d' GB.", n, n, cur)
+			return nil, invalid("Invalid value for field 'diskResource.sizeGb': '%d'. New disk size '%d' GiB must be larger than existing size '%d' GiB.", n, n, cur)
 		}
 		lim := diskTypes[typ]
 		if isRegional(d) {
 			lim = regionDiskTypes[typ]
 		}
 		if n > lim.max {
-			return nil, invalid("Invalid value for field 'diskResource.sizeGb': '%d'. Disk size must be at most %d GB.", n, lim.max)
+			return nil, invalid("Invalid value for field 'diskResource.sizeGb': '%d'. Disk size cannot be greater than %s GB for disk type %s.", n, commas(lim.max), typ)
 		}
 		size = n
 	}
@@ -393,8 +414,11 @@ func (s *Server) updateDiskLocked(c call, scope, rel string, d obj) (obj, error)
 	if perf && typ == hdbHA {
 		if t := str(d, perfChangedKey); t != "" {
 			if at, err := time.Parse(time.RFC3339Nano, t); err == nil && now.Sub(at) < perfWindow {
-				return nil, errf(http.StatusBadRequest, "rateLimitExceeded",
-					"The disk resource '%s' had its performance changed in the last 4 hours: a Hyperdisk Balanced High Availability volume's performance can be changed at most once every 4 hours.", rel)
+				what := "iops"
+				if !set["provisionedIops"] {
+					what = "throughput"
+				}
+				return nil, errf(http.StatusBadRequest, "rateLimitExceeded", "Cannot update provisioned %s due to being rate limited.", what)
 			}
 		}
 	}
@@ -455,4 +479,13 @@ func camel(p string) string {
 		}
 	}
 	return strings.Join(parts, "")
+}
+
+// commas is n with thousands separators, as Google's messages write them.
+func commas(n int64) string {
+	s := strconv.FormatInt(n, 10)
+	for i := len(s) - 3; i > 0; i -= 3 {
+		s = s[:i] + "," + s[i:]
+	}
+	return s
 }

@@ -129,7 +129,7 @@ func TestRegionalDisks(t *testing.T) {
 		{obj{"name": "d", "sizeGb": "10", "replicaZones": []any{"zones/us-central1-a", "zones/us-central1-a"}}, "distinct"},
 		{obj{"name": "d", "sizeGb": "10", "replicaZones": []any{"zones/us-central1-a", "zones/us-east1-b"}}, "region"},
 		{obj{"name": "d", "sizeGb": "100", "type": r + "diskTypes/pd-standard", "replicaZones": zs}, "between 200 GB"},
-		{obj{"name": "d", "sizeGb": "10", "type": r + "diskTypes/pd-extreme", "replicaZones": zs}, "not valid for a regional disk"},
+		{obj{"name": "d", "sizeGb": "10", "type": r + "diskTypes/pd-extreme", "replicaZones": zs}, "Creating a regional disk of type pd-extreme is not supported."},
 		{obj{"name": "d", "sizeGb": "70000", "replicaZones": zs}, "between 10 GB"},
 	} {
 		wantStatus(t, s, 400, c.want, "POST", r+"disks", c.body)
@@ -187,7 +187,7 @@ func TestRegionalDisks(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	mustCall(t, s, "POST", "zones/us-central1-a/disks", obj{"name": "zd", "sizeGb": "10"})
-	wantStatus(t, s, 400, "regional disks only", "POST", "zones/us-central1-a/instances/vma/attachDisk",
+	wantStatus(t, s, 400, "Force attaching zonal disks is not supported", "POST", "zones/us-central1-a/instances/vma/attachDisk",
 		obj{"source": "zones/us-central1-a/disks/zd", "deviceName": "zd", "forceAttach": true})
 	wantStatus(t, s, 400, "already being used", "DELETE", r+"disks/rd", nil)
 
