@@ -2154,6 +2154,8 @@ type Server struct {
 	cloud         *byoc.Manager
 	cloudInstance string
 	cloudAuth     ComputeAuthorizer
+	// mover runs Compute capacity's Move (cloudmove.go); nil offers none.
+	mover ComputeMover
 
 	mu   sync.Mutex
 	ln   net.Listener

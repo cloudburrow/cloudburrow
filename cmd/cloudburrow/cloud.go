@@ -56,6 +56,11 @@ Commands:
   delete [--yes]
               Delete everything tagged cloudburrow-instance=<name>, and verify
   resources   List everything tagged cloudburrow-instance=<name>
+  move <instance> --to <vm>|ssh://user@host [--yes]
+              Move an instance that runs on this machine onto a VM made with
+              create (or a host of your own): it stops, its cluster's state
+              is copied, and it starts and is checked there; a failure rolls
+              back
 
 Every command takes --name, --state-dir and --config as up does.
 `
@@ -72,7 +77,11 @@ var newCloudManager = func(cfg config.Config) (*byoc.Manager, error) {
 		Keychain: keychain.OS{Namespace: ns},
 		Drivers:  []byoc.Driver{awsprov.NewDriver(awsprov.Options{ClientName: "CloudBurrow"}), azureprov.New(azureprov.Options{})},
 		// Phase 1 (#2209): a running VM becomes the instance's compute.
-		Engine: &remotecompute.Engine{StateDir: cfg.StateDir},
+		Engine: &remotecompute.Engine{StateDir: cfg.StateDir, LocalState: func(instance string) bool {
+			c := cfg
+			c.Name = instance
+			return localClusterExists(context.Background(), c)
+		}},
 	})
 }
 
@@ -133,6 +142,8 @@ func runCloud(args []string, stdout, stderr io.Writer) error {
 		return c.delete(ctx)
 	case "resources":
 		return c.resources(ctx)
+	case "move":
+		return c.move(ctx)
 	}
 	fmt.Fprintf(stderr, "unknown cloud command %q\n\n%s", sub, cloudUsage)
 	return errUsage
@@ -147,6 +158,7 @@ func cloudFlags(sub string, args []string) (map[string]string, []string, error) 
 		"status":     {"format"},
 		"scale":      {"size", "yes!"},
 		"delete":     {"yes!"},
+		"move":       {"to", "yes!"},
 	}[sub]
 	out := map[string]string{}
 	rest := args

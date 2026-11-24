@@ -119,7 +119,8 @@ func connectComputeWith(ctx context.Context, cfg config.Config, out io.Writer, r
 	if err != nil {
 		return nil, fmt.Errorf("compute host %s: %w", t, err)
 	}
-	c := &computeConn{session: s, record: remotecompute.Record{Target: t, Created: time.Now().UTC(), Host: s.Status().Host, Provisioned: rec.Provisioned}}
+	c := &computeConn{session: s, record: remotecompute.Record{Target: t, Created: time.Now().UTC(), Host: s.Status().Host, Provisioned: rec.Provisioned,
+		Machine: rec.Machine}}
 	if rec, had, _ := remotecompute.LoadRecord(cfg.InstanceDir()); had {
 		c.record.Created = rec.Created
 	}
@@ -161,7 +162,11 @@ var provisionedTarget = func(cfg config.Config) (byoc.RemoteTarget, error) {
 	if err != nil {
 		return byoc.RemoteTarget{}, err
 	}
-	return m.RemoteTarget(cfg.Name)
+	rec, _, err := remotecompute.LoadRecord(cfg.InstanceDir())
+	if err != nil {
+		return byoc.RemoteTarget{}, err
+	}
+	return m.RemoteTarget(rec.MachineName(cfg.Name))
 }
 
 // localClusterExists reports whether this machine's own Docker has the
@@ -169,16 +174,25 @@ var provisionedTarget = func(cfg config.Config) (byoc.RemoteTarget, error) {
 func localClusterExists(ctx context.Context, cfg config.Config) bool {
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "kind", "get", "clusters").Output()
+	names, err := kindClusters(ctx)
 	if err != nil {
 		return false
 	}
-	for _, l := range strings.Fields(string(out)) {
+	for _, l := range names {
 		if l == cfg.ClusterName() {
 			return true
 		}
 	}
 	return false
+}
+
+// kindClusters is `kind get clusters` on this process's Docker.
+var kindClusters = func(ctx context.Context) ([]string, error) {
+	out, err := exec.CommandContext(ctx, "kind", "get", "clusters").Output()
+	if err != nil {
+		return nil, err
+	}
+	return strings.Fields(string(out)), nil
 }
 
 // Close ends the connection and restores this process's DOCKER_HOST.
@@ -274,3 +288,4 @@ type consoleCompute struct{}
 
 func (consoleCompute) Compute() any                        { return currentComputeView() }
 func (consoleCompute) Reconnect(ctx context.Context) error { return reconnectCompute(ctx) }
+func (consoleCompute) Local() bool                         { return currentCompute() == nil }

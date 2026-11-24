@@ -623,7 +623,21 @@ func (m *Manager) RemoteTarget(instance string) (RemoteTarget, error) {
 	if err != nil {
 		return RemoteTarget{}, err
 	}
-	return RemoteTarget{Instance: instance, Host: mc.PublicIP, Port: mc.SSHPort, User: mc.SSHUser, PrivateKey: key, HostKey: mc.HostKey}, nil
+	return RemoteTarget{Instance: mc.User(), Host: mc.PublicIP, Port: mc.SSHPort, User: mc.SSHUser, PrivateKey: key, HostKey: mc.HostKey}, nil
+}
+
+// SetUsedBy records that the machine is instance's compute (a move), or,
+// with "", that it is its own instance's again.
+func (m *Manager) SetUsedBy(machine, instance string) error {
+	mc, err := m.Machine(machine)
+	if err != nil {
+		return err
+	}
+	if instance == machine {
+		instance = ""
+	}
+	mc.UsedBy = instance
+	return m.putMachine(mc)
 }
 
 // ---- operations ----
@@ -904,6 +918,11 @@ func (m *Manager) handOver(ctx context.Context, mc Machine, progress Progress) {
 	}
 	progress.Report("remote", StepRunning, "Connecting the instance's Docker to %s over SSH", mc.PublicIP)
 	if err := m.engine.Connect(ctx, t); err != nil {
+		if errors.Is(err, ErrMoveNeeded) {
+			progress.Report("remote", StepDone, "The VM is ready. %s still runs on this machine: Move it to the VM to carry its state there (`cloudburrow cloud move %s --to %s`)",
+				t.Instance, t.Instance, mc.Instance)
+			return
+		}
 		progress.Report("remote", StepFailed, "%v", err)
 		return
 	}
@@ -979,7 +998,7 @@ func (m *Manager) power(kind, instance string, wait bool, also Progress) (Operat
 			progress.Report("start", StepRunning, "Starting %s", instance)
 			got, err = p.Start(ctx, mc)
 		} else {
-			_ = m.engine.Close(instance)
+			_ = m.engine.Close(mc.User())
 			progress.Report("stop", StepRunning, "Stopping %s; its disk is kept", instance)
 			got, err = p.Stop(ctx, mc)
 		}
@@ -1010,7 +1029,7 @@ func (m *Manager) Delete(ctx context.Context, instance string, wait bool, also P
 		if err != nil {
 			return nil, err
 		}
-		_ = m.engine.Close(instance)
+		_ = m.engine.Close(mc.User())
 		mc.State = Deleting
 		_ = m.putMachine(mc)
 		if err := p.Delete(ctx, instance, mc.Region, progress); err != nil {
@@ -1027,7 +1046,7 @@ func (m *Manager) Delete(ctx context.Context, instance string, wait bool, also P
 		}
 		// The VM is gone: the engine forgets it was the instance's compute.
 		if f, ok := m.engine.(interface{ Forget(string) error }); ok {
-			if err := f.Forget(instance); err != nil {
+			if err := f.Forget(mc.User()); err != nil {
 				return nil, err
 			}
 		}

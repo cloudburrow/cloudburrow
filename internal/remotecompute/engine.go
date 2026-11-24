@@ -25,6 +25,11 @@ type Engine struct {
 	StateDir string
 	// SSH and SSHConfig are as in Options.
 	SSH, SSHConfig string
+	// LocalState, when set, reports whether an instance's cluster is on
+	// this machine's Docker. Such an instance is not handed a new VM
+	// silently: its state would stay behind, so Connect answers
+	// byoc.ErrMoveNeeded and the instance moves with `cloud move`.
+	LocalState func(instance string) bool
 
 	mu    sync.Mutex
 	conns map[string]*engineConn
@@ -92,6 +97,9 @@ func (e *Engine) Connect(ctx context.Context, t byoc.RemoteTarget) error {
 		target.Port = 22
 	}
 	dir := filepath.Join(e.StateDir, t.Instance)
+	if _, had, _ := LoadRecord(dir); !had && e.LocalState != nil && e.LocalState(t.Instance) {
+		return fmt.Errorf("%s: %w", t.Instance, byoc.ErrMoveNeeded)
+	}
 	_ = e.Close(t.Instance)
 	s, err := Connect(ctx, Options{Target: target, StateDir: dir, Instance: t.Instance, SSH: e.SSH, SSHConfig: e.SSHConfig,
 		Key: PEMKey(t.PrivateKey), HostKey: t.HostKey,
@@ -101,7 +109,7 @@ func (e *Engine) Connect(ctx context.Context, t byoc.RemoteTarget) error {
 	}
 	rec := Record{Target: target, Created: time.Now().UTC(), Host: s.Status().Host, Provisioned: true}
 	if old, had, _ := LoadRecord(dir); had && old.Provisioned {
-		rec.Created = old.Created
+		rec.Created, rec.Machine = old.Created, old.Machine
 	} else if had {
 		_ = s.Close()
 		return fmt.Errorf("instance %s's compute already runs on %s; `cloudburrow delete` it before moving it to the VM", t.Instance, old.Target)

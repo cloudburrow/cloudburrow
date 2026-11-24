@@ -124,6 +124,9 @@ type computeOverview struct {
 	Instance    string            `json:"instance"`
 	Presets     []byoc.Preset     `json:"presets"`
 	Engine      byoc.RemoteStatus `json:"engine"`
+	// LocalCompute is whether this instance's Docker is this machine's,
+	// so it can be moved onto a VM.
+	LocalCompute bool `json:"local_compute"`
 }
 
 func (s *Server) handleComputeOverview(w http.ResponseWriter, r *http.Request) {
@@ -151,8 +154,12 @@ func (s *Server) handleComputeOverview(w http.ResponseWriter, r *http.Request) {
 		ops = []byoc.Operation{}
 	}
 	eng, _ := s.cloud.Engine().Status(r.Context(), s.cloudInstance)
+	local := false
+	if l, ok := s.computeSrc.(interface{ Local() bool }); ok {
+		local = l.Local()
+	}
 	writeJSON(w, http.StatusOK, computeOverview{Clouds: s.cloud.Clouds(), Connections: conns, Machines: machines,
-		Operations: ops, Instance: s.cloudInstance, Presets: byoc.Presets, Engine: eng})
+		Operations: ops, Instance: s.cloudInstance, Presets: byoc.Presets, Engine: eng, LocalCompute: local})
 }
 
 func (s *Server) handleComputeSignIn(w http.ResponseWriter, r *http.Request) {
@@ -487,4 +494,6 @@ func (s *Server) cloudRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/compute/machines/{instance}/{action}", s.handleComputeAction)
 	mux.HandleFunc("GET /api/compute/machines/{instance}/resources", s.handleComputeResources)
 	mux.HandleFunc("GET /api/compute/operations/{id}", s.handleComputeOperation)
+	mux.HandleFunc("POST /api/compute/machines/{instance}/move", s.handleComputeMove)
+	mux.HandleFunc("GET /api/compute/moves/{instance}", s.handleComputeMoveStatus)
 }

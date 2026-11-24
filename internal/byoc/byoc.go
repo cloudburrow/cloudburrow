@@ -234,6 +234,18 @@ type Machine struct {
 	CreatedAt time.Time         `json:"created_at"`
 	UpdatedAt time.Time         `json:"updated_at"`
 	LastError string            `json:"last_error,omitempty"`
+	// UsedBy is the instance whose compute the VM is, when that is not the
+	// instance it was created for (`cloudburrow cloud move <instance> --to
+	// <vm>`).
+	UsedBy string `json:"used_by,omitempty"`
+}
+
+// User is the instance whose compute the machine is.
+func (m Machine) User() string {
+	if m.UsedBy != "" {
+		return m.UsedBy
+	}
+	return m.Instance
 }
 
 // Resource is one cloud resource carrying the instance's tag.

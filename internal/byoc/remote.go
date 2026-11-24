@@ -47,6 +47,11 @@ type RemoteEngine interface {
 	Events(instance string) <-chan RemoteEvent
 }
 
+// ErrMoveNeeded is the engine's answer for a VM whose instance still runs
+// on this machine's Docker: the VM is ready, and the instance moves onto it
+// with Move (`cloudburrow cloud move`), which carries its cluster's state.
+var ErrMoveNeeded = errors.New("the instance's cluster and its state are on this machine's Docker; move the instance onto the VM to carry them there")
+
 // ErrNoRemoteEngine is NoRemoteEngine's refusal.
 var ErrNoRemoteEngine = errors.New("the remote-host engine (#2209 phase 1) is not part of this build yet: " +
 	"the VM is provisioned and reachable over SSH, but the instance's Docker cannot be moved onto it from here")

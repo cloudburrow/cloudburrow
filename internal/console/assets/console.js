@@ -12608,6 +12608,7 @@ function computeMachineCard(m, data, running, redraw) {
       confirmWord: m.instance,
       onConfirm: async () => { act("Delete", base, undefined, "DELETE"); },
     }) });
+  const move = computeMoveButton(m, data, idp, busy, progress, showError, redraw);
   const resourcesOut = el("div", { id: `${idp}-resources` });
   const resources = el("button", { type: "button", class: "link-button", id: `${idp}-resources-button`, text: "View resources",
     onclick: async () => {
@@ -12637,10 +12638,90 @@ function computeMachineCard(m, data, running, redraw) {
       el("p", { class: "form-help", text: m.cloud === "aws"
         ? "AWS resizes a stopped instance: a running one is stopped, resized and started again, its disk kept."
         : "Azure resizes in place where it can, else deallocates, resizes and starts the VM, its disk kept." })),
-    el("div", { class: "card-actions" }, resize, start, stop, del, resources),
+    el("div", { class: "card-actions" }, resize, start, stop, move, del, resources),
     error, progress, resourcesOut);
   if (running) computeFollow(running, progress, `${idp}-events`).then(redraw);
   return card;
+}
+
+// computeMoveButton is the card's Move (#2209): this instance, running on
+// this machine's Docker, moves onto the VM. The move stops the instance's
+// up, which serves this page, so it runs in a process of its own and the
+// page follows its progress across the restart.
+function computeMoveButton(m, data, idp, busy, progress, showError, redraw) {
+  const instance = data.instance;
+  const usedByOther = m.used_by && m.used_by !== instance;
+  const canMove = data.local_compute && m.state === "running" && !usedByOther;
+  const why = !data.local_compute ? `${instance}'s compute is not this machine's Docker`
+    : m.state !== "running" ? "Start the VM first" : usedByOther ? `The VM is ${m.used_by}'s compute` : "";
+  const button = el("button", { type: "button", class: "secondary", id: `${idp}-move`, text: "Move instance here",
+    disabled: busy || !canMove, title: why || `Move ${instance} onto ${m.instance}`,
+    "aria-describedby": why ? `${idp}-move-why` : null,
+    onclick: () => confirmDestructive({
+      title: `Move ${instance} to ${m.instance}`,
+      detail: `${instance} stops on this machine. Its cluster's state (the kind node, its volumes, and every container and volume of the instance) ` +
+        `is copied to ${m.instance} in ${CLOUD_TITLES[m.cloud]} ${m.region}, where it starts and is checked. ` +
+        "If any step fails, the move rolls back and the instance runs here again. The console restarts during the move.",
+      confirmLabel: "Move", consequence: "Nothing is removed from this machine until the instance runs on the VM.", style: "confirm",
+      onConfirm: async () => {
+        showError("");
+        try {
+          await computeJSON(`/api/compute/machines/${encodeURIComponent(m.instance)}/move`, { method: "POST", body: { instance } });
+        } catch (err) {
+          showError(`Move failed: ${err.message}`);
+          return;
+        }
+        followMove(instance, progress, `${idp}-move-steps`, showError).then(redraw);
+      },
+    }) });
+  // A move under way (this page reloaded during it) is followed again.
+  (async () => {
+    try {
+      const st = await computeJSON(`/api/compute/moves/${encodeURIComponent(instance)}`);
+      if (st.to === m.instance && (!st.done || Date.now() - Date.parse(st.started) < 10 * 60 * 1000)) {
+        followMove(instance, progress, `${idp}-move-steps`, showError);
+      }
+    } catch { /* no move */ }
+  })();
+  if (!why) return button;
+  return el("span", { class: "compute-move" }, button, el("span", { class: "sr-only", id: `${idp}-move-why`, text: why }));
+}
+
+// followMove draws a move's steps until it is done, waiting out the
+// console's own restart.
+async function followMove(instance, node, id, showError) {
+  const path = location.pathname;
+  const deadline = Date.now() + 3 * 60 * 60 * 1000;
+  let last = null;
+  while (Date.now() < deadline && location.pathname === path) {
+    let gap = "";
+    try {
+      last = await computeJSON(`/api/compute/moves/${encodeURIComponent(instance)}`);
+    } catch (err) {
+      gap = err.status === 401
+        ? "The instance restarted with a new admin token: reload the page and enter it to follow the move."
+        : "The console is restarting with the instance; this page reconnects when it is back.";
+    }
+    if (last) {
+      setChildren(node, el("ol", { class: "compute-events", id },
+        ...last.steps.map((s) => el("li", { "data-step": s.step },
+          statusIcon(s.step === "rollback" ? "Warning" : s.step === "done" ? "Succeeded" : "Pending"),
+          el("span", { class: "compute-event-step", text: s.step }),
+          el("span", { text: ` ${s.message}` })))),
+        gap ? el("p", { class: "muted", role: "status", id: `${id}-gap`, text: gap }) : null,
+        last.done ? el("p", { role: last.error ? "alert" : "status", class: last.error ? "form-error" : "", id: `${id}-outcome`,
+          text: last.error ? `The move failed${last.rolled_back ? " and was rolled back" : ""}: ${last.error}` : `${instance} runs on ${last.to}.` }) : null);
+      if (last.done) {
+        announce(last.error ? `Move of ${instance} failed` : `${instance} moved to ${last.to}`);
+        if (last.error) showError(`Move failed: ${last.error}`);
+        return last;
+      }
+    } else if (gap) {
+      setChildren(node, el("p", { class: "muted", role: "status", id: `${id}-gap`, text: gap }));
+    }
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+  return last;
 }
 
 // computeFollow draws an operation's events into node until it is done.

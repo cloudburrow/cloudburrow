@@ -59,7 +59,7 @@ func TestStandInMoveRoundTripKeepsData(t *testing.T) {
 			_, _ = c.run(bg, side, "volume", "rm", "-f", v)
 		}
 		_, _ = c.run(bg, side, "network", "rm", net)
-		out, _ = c.run(bg, side, "image", "ls", "-q", "--no-trunc", "cloudburrow.local/move-"+instance+"-app")
+		out, _ = c.run(bg, side, "image", "ls", "-q", "--no-trunc", "cloudburrow.local/move-"+instance+"-"+ctr)
 		for _, id := range strings.Fields(out) {
 			_, _ = c.run(bg, side, "rmi", "-f", id)
 		}

@@ -62,6 +62,10 @@ type runtimeInfo struct {
 	// ones the instance never started pointed at another instance's default
 	// ports (#652). Absent in runtime files written before it.
 	Services []config.Service `json:"services,omitempty"`
+	// Args are the arguments up ran with (after `up`, --offline apart), and
+	// Offline whether it was --offline: what `cloud move` starts again with.
+	Args    []string `json:"args,omitempty"`
+	Offline bool     `json:"offline,omitempty"`
 	// IAMEnforcement is this up's --iam-enforcement, "off" or "on" (#1879).
 	IAMEnforcement string `json:"iamEnforcement,omitempty"`
 	// Compute and DockerHost are the compute host and the DOCKER_HOST that
@@ -144,13 +148,17 @@ type runtimeFile struct {
 	// token is the admin token (#553), written beside the runtime file for
 	// the instance's life and never into it.
 	token string
+	// args are up's own arguments, so `cloud move` starts the instance
+	// again as it was started (#2209).
+	args    []string
+	offline bool
 }
 
 func (r *runtimeFile) Name() string { return "runtime-file" }
 
 func (r *runtimeFile) Start(context.Context) error {
 	r.info = runtimeInfo{PID: os.Getpid(), Control: r.control.Addr(), Detached: r.detached, Started: time.Now().UTC(),
-		Services: r.cfg.EnabledServices(), IAMEnforcement: iamEnforcementMode(r.cfg)}
+		Services: r.cfg.EnabledServices(), IAMEnforcement: iamEnforcementMode(r.cfg), Args: r.args, Offline: r.offline}
 	if c := currentCompute(); c != nil {
 		r.info.Compute, r.info.DockerHost = c.record.Target.String(), c.session.DockerHost()
 	}

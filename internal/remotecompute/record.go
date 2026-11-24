@@ -25,6 +25,18 @@ type Record struct {
 	// keychain and its host key is pinned, both read from the provisioner
 	// at each connect, and Target follows the VM's address.
 	Provisioned bool `json:"provisioned,omitempty"`
+	// Machine is the provisioned VM's name in the provisioner when it is
+	// not the instance's own (`cloudburrow cloud move <instance> --to
+	// <vm>`); empty is the instance's name.
+	Machine string `json:"machine,omitempty"`
+}
+
+// MachineName is the provisioner's name for the instance's VM.
+func (r Record) MachineName(instance string) string {
+	if r.Machine != "" {
+		return r.Machine
+	}
+	return instance
 }
 
 // SaveRecord writes the record into the instance directory, owner-only.

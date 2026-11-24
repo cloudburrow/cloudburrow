@@ -922,7 +922,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 
 	// The runtime file straight after the control server, so it names an
 	// address already listening and `wait` can follow startup from the start.
-	runtime := &runtimeFile{cfg: cfg, control: control, detached: os.Getenv(detachedEnv) != "", token: adminToken}
+	runtime := &runtimeFile{cfg: cfg, control: control, detached: os.Getenv(detachedEnv) != "", token: adminToken, args: args, offline: offline}
 	// The cache on either side of the cluster: the node image must be in
 	// Docker before kind creates the node, and the backend and Knative
 	// images in the node before anything runs them.
@@ -1685,6 +1685,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// keychain items as `cloudburrow cloud`, behind the admin token.
 		if m, err := newCloudManager(cfg); err == nil {
 			consoleSrv.SetCloudCompute(m, cfg.Name, nil)
+			consoleSrv.SetMover(consoleMover{cfg: cfg})
 		} else {
 			fmt.Fprintf(stderr, "cloudburrow: Compute is not available in the console: %v\n", err)
 		}
