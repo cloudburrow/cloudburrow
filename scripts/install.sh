@@ -10,6 +10,12 @@
 # is verified too, which proves it was built by this repository's release
 # workflow and not merely that it matches a checksum file served beside it.
 #
+# The darwin/arm64 archive also carries litert-lm/, the LiteRT-LM runner for
+# the Apple GPU (Metal) and the dylibs it loads. It is covered by the same
+# checksum and attestation, and is installed to DIR/libexec/cloudburrow/
+# litert-lm, where the CLI looks by default and where the Homebrew formula
+# puts it, so Gemma generation runs on the GPU with no variable to set.
+#
 # Options:
 #   --version TAG   release to install (default: the latest)
 #   --prefix DIR    install to DIR/bin (default: ~/.local, so ~/.local/bin)
@@ -36,7 +42,7 @@ while [ $# -gt 0 ]; do
 	--prefix) [ $# -ge 2 ] || die "--prefix needs a value"; prefix="$2"; shift 2 ;;
 	--prefix=*) prefix="${1#*=}"; shift ;;
 	--no-attest) attest=0; shift ;;
-	-h | --help) sed -n '2,21p' "$0" 2>/dev/null | sed 's/^# \{0,1\}//'; exit 0 ;;
+	-h | --help) sed -n '2,27p' "$0" 2>/dev/null | sed 's/^# \{0,1\}//'; exit 0 ;;
 	*) die "unknown option: $1" ;;
 	esac
 done
@@ -106,6 +112,26 @@ fi
 
 tar -xzf "${tmp}/${archive}" -C "$tmp"
 [ -f "${tmp}/${name}/cloudburrow" ] || die "the archive does not contain ${name}/cloudburrow"
+
+# The Apple GPU runner, before the CLI, so a new CLI never starts beside a
+# missing or older runner. Installed beside the old one and swapped in, so
+# an interrupted install leaves one complete runner, never half of one.
+runner_dir="${prefix}/libexec/cloudburrow/litert-lm"
+if [ -d "${tmp}/${name}/litert-lm" ]; then
+	[ -x "${tmp}/${name}/litert-lm/cloudburrow_generate" ] ||
+		die "the archive's litert-lm/ has no cloudburrow_generate; refusing to install"
+	mkdir -p "${prefix}/libexec/cloudburrow"
+	rm -rf "${runner_dir}.new" "${runner_dir}.old"
+	cp -R "${tmp}/${name}/litert-lm" "${runner_dir}.new"
+	if [ -e "$runner_dir" ]; then
+		mv "$runner_dir" "${runner_dir}.old"
+	fi
+	mv "${runner_dir}.new" "$runner_dir"
+	rm -rf "${runner_dir}.old"
+	say "installed the Apple GPU (Metal) runner in ${runner_dir}"
+elif [ "${os}/${arch}" = darwin/arm64 ]; then
+	say "${version}'s archive has no Apple GPU (Metal) runner; Gemma generation will run on CPU"
+fi
 
 mkdir -p "${prefix}/bin"
 # Installed under a temporary name and renamed, so an interrupted install

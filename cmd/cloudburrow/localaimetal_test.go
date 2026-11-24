@@ -64,8 +64,14 @@ func TestHostGeneratorUsesTheContainer(t *testing.T) {
 	if g := hostGenerator(accelCfg("metal"), "/m", "m", &log); g != nil {
 		t.Errorf("hostGenerator without a runner = %+v", g)
 	}
-	if !strings.Contains(log.String(), "runtime container") {
-		t.Errorf("log = %q", log.String())
+	// One line, a warning, naming the CPU fallback and the way back to the GPU.
+	for _, want := range []string{"warning: the Apple GPU (Metal) runner is not installed", "on CPU in the runtime container", "install.sh", hostai.LiteRTLMDirEnv} {
+		if !strings.Contains(log.String(), want) {
+			t.Errorf("log = %q; want %q", log.String(), want)
+		}
+	}
+	if strings.Count(log.String(), "\n") != 1 {
+		t.Errorf("log = %q; want one line", log.String())
 	}
 	probed = fakeHostAI(t, nil, nil)
 	if g := hostGenerator(accelCfg("cpu"), "/m", "m", &log); g != nil || len(*probed) != 0 {
