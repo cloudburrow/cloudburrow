@@ -654,6 +654,15 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 				"the Telemetry API's OTLP trace ingestion (telemetry.googleapis.com); set OTEL_EXPORTER_OTLP_ENDPOINT to it, with OTEL_EXPORTER_OTLP_INSECURE=true for gRPC"})
 	}
 
+	// Filestore (#2192): the Go client and gcloud filestore (file).
+	if filestoreEnabled(cfg) && cfg.Endpoints.Filestore != 0 {
+		fs := addr(cfg.Endpoints.Filestore)
+		vars = append(vars,
+			envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_FILE", "http://" + fs + "/", "read by gcloud; gcloud filestore"},
+			envVar{cliEndpointVar("filestore"), fs,
+				"Filestore v1, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint"})
+	}
+
 	// The Kubernetes Engine API (#1913): gcloud container clusters and
 	// node-pools, and Terraform's google_container_* through
 	// container_custom_endpoint.
@@ -903,6 +912,7 @@ func withLivePorts(cfg config.Config, live map[string]string) config.Config {
 		"dataform":               &e.Dataform,
 		"apphub":                 &e.AppHub,
 		"alloydb":                &e.AlloyDB,
+		"filestore":              &e.Filestore,
 		"trace":                  &e.Trace,
 		// The local AI endpoint, which serves Vertex AI's Model Registry
 		// and Endpoints (#1940) to gcloud-setup and terraform, and Document

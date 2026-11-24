@@ -463,6 +463,17 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// AlloyDB for PostgreSQL (#2191), in process; its instances are
 	// servers in the cluster, so it is registered after the cluster.
 	alloyDBSvc := newAlloyDBService(cfg, stderr)
+	// Filestore (#2192), in process; its instances' NFS servers run in
+	// Docker beside the cluster, and their networks are Compute Engine's.
+	filestoreSvc := newFilestoreService(cfg)
+	if filestoreSvc != nil && gkeSvc != nil {
+		// The Filestore CSI driver of the Kubernetes Engine clusters.
+		filestoreSvc.gke = gkeSvc.filestoreCSIClusters
+	}
+	if filestoreSvc != nil && computeSvc != nil {
+		filestoreSvc.networks = computeSvc.filestoreNetworks
+	}
+	filestoreSvc.register(coord)
 	if gkeSvc != nil && runSvc != nil && runSvc.events != nil {
 		// Eventarc's GKE destinations (#1877) reach its clusters' services.
 		runSvc.events.gke = gkeSvc.clusterAccess
@@ -598,6 +609,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if memorystoreAdminSvc != nil {
 		memorystoreAdminSvc.registry = func() *resourcemanager.Registry { return projectRegistry }
 	}
+	if filestoreSvc != nil {
+		// Filestore's tags are Resource Manager's tag bindings (#2192).
+		filestoreSvc.registry = func() *resourcemanager.Registry { return projectRegistry }
+	}
 	if secretsSvc != nil {
 		// Secret.tags are Resource Manager's tag bindings (#1961).
 		secretsSvc.registry = func() *resourcemanager.Registry { return projectRegistry }
@@ -664,6 +679,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		dataform:         dataformSvc,
 		appHub:           appHubSvc,
 		alloyDB:          alloyDBSvc,
+		filestore:        filestoreSvc,
 		trace:            traceSvc,
 		gke:              gkeSvc,
 		monitoring:       monitoringSvc,
@@ -773,6 +789,13 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		appHubSvc.calls = callEvents(recorder, requestMetrics, "apphub")
 		appHubSvc.interpose = append(appHubSvc.interpose, grpctransport.LogInterceptor(logger, "apphub"), faults.Interceptor("apphub"))
 		appHubSvc.requests = requestEvents(recorder, requestMetrics, "apphub")
+	}
+	if filestoreSvc != nil {
+		filestoreSvc.tracing = tracing
+		filestoreSvc.calls = callEvents(recorder, requestMetrics, "filestore")
+		filestoreSvc.interpose = append(filestoreSvc.interpose, grpctransport.LogInterceptor(logger, "filestore"), faults.Interceptor("filestore"))
+		filestoreSvc.requests = requestEvents(recorder, requestMetrics, "filestore")
+		filestoreSvc.logf = func(format string, args ...any) { logger.Info(fmt.Sprintf(format, args...)) }
 	}
 	if parameterManagerSvc != nil {
 		parameterManagerSvc.tracing = tracing
@@ -909,6 +932,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		parameterManagerSvc.keys = cmekKeys(kmsSvc, iamEnforcer)
 		parameterManagerSvc.interpose = append(parameterManagerSvc.interpose, iamEnforcer.Interceptor(iameval.ParameterManager))
 		parameterManagerSvc.wrapJSON = jsonEnforcer(iamEnforcer, iameval.ParameterManager, parametermanager.Mixins())
+	}
+	// Filestore's customer-managed keys (#2192).
+	if filestoreSvc != nil {
+		keys := cmekKeys(kmsSvc, iamEnforcer)
+		filestoreSvc.keys = &keys
 	}
 	// Dataform repositories' customer-managed keys (#2105).
 	if dataformSvc != nil {
@@ -1389,6 +1417,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		dataform:         dataformSvc,
 		appHub:           appHubSvc,
 		alloyDB:          alloyDBSvc,
+		filestore:        filestoreSvc,
 		trace:            traceSvc,
 		gke:              gkeSvc,
 		monitoring:       monitoringSvc,
@@ -1515,6 +1544,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if a := alloyDBSvc.Addr(); a != "" {
 			live["alloydb"] = a
 		}
+		if a := filestoreSvc.Addr(); a != "" {
+			live["filestore"] = a
+		}
 		if a := traceSvc.Addr(); a != "" {
 			live["trace"] = a
 		}
@@ -1594,7 +1626,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		published := map[string]bool{"run": true, "tasks": true, "secretmanager": true, "kms": true,
 			"scheduler": true, "logging": true, "resourcemanager": true, "serviceusage": true, "apikeys": true, "metadata": true,
 			"storagebatchoperations": true, "storageinsights": true, "storagetransfer": true,
-			"sqladmin": true, "cloudsql-connector": true, "onnx": true, "tfconvert": true, "spark": true, "localai": true, "workflows": true, "parametermanager": true, "dataform": true, "apphub": true, "trace": true}
+			"sqladmin": true, "cloudsql-connector": true, "onnx": true, "tfconvert": true, "spark": true, "localai": true, "workflows": true, "parametermanager": true, "dataform": true, "apphub": true, "trace": true, "filestore": true}
 		if !runEnabled {
 			published = map[string]bool{"resourcemanager": true, "onnx": true, "tfconvert": true, "spark": true, "localai": true}
 			// The storage server reads IAM service accounts' certificates

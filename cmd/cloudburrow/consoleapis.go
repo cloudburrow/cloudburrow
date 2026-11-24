@@ -44,6 +44,7 @@ var apiLibrary = map[string]apiLibraryInfo{
 	"secretmanager.googleapis.com":        {"Security", "Stores API keys, passwords, certificates and other sensitive data.", "secretmanager"},
 	"parametermanager.googleapis.com":     {"Security", "Stores, versions and renders configuration parameters, in plain text, JSON or YAML, with references to Secret Manager secrets.", "parametermanager"},
 	"dataform.googleapis.com":             {"Big data", "Develops, version controls and runs SQL workflows in BigQuery with SQLX.", "dataform"},
+	"file.googleapis.com":                 {"Storage", "Creates and manages fully managed NFS file servers.", "filestore"},
 	"apphub.googleapis.com":               {"Management tools", "Discovers a boundary's services and workloads and groups them into applications.", "apphub"},
 	"alloydb.googleapis.com":              {"Databases", "AlloyDB for PostgreSQL: a fully managed, PostgreSQL-compatible database service.", "alloydb"},
 	"cloudtrace.googleapis.com":           {"Management tools", "Sends application latency data to Cloud Trace for viewing, and reads traces back.", "trace"},

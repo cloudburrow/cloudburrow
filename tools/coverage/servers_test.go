@@ -19,6 +19,7 @@ import (
 	"cloud.google.com/go/billing/budgets/apiv1/budgetspb"
 	"cloud.google.com/go/cloudquotas/apiv1/cloudquotaspb"
 	dfpb "cloud.google.com/go/dataform/apiv1/dataformpb"
+	"cloud.google.com/go/filestore/apiv1/filestorepb"
 	iamadminpb "cloud.google.com/go/iam/admin/apiv1/adminpb"
 	iamv2pb "cloud.google.com/go/iam/apiv2/iampb"
 	iamv3pb "cloud.google.com/go/iam/apiv3/iampb"
@@ -49,6 +50,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/cloudquotas"
 	"github.com/cloudburrow/cloudburrow/internal/service/dataform"
 	"github.com/cloudburrow/cloudburrow/internal/service/datatransfer"
+	"github.com/cloudburrow/cloudburrow/internal/service/filestore"
 	"github.com/cloudburrow/cloudburrow/internal/service/gke"
 	"github.com/cloudburrow/cloudburrow/internal/service/kms"
 	"github.com/cloudburrow/cloudburrow/internal/service/kmsinventory"
@@ -130,6 +132,12 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 		t.Fatal(err)
 	}
 	alloydbpb.RegisterAlloyDBAdminServer(srv, adb)
+	// Filestore alone (#2192): its mixins are other services' rows.
+	fst, err := filestore.NewServer("", filestore.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	filestorepb.RegisterCloudFilestoreManagerServer(srv, fst)
 	// Cloud Trace (#2118): v1 and v2.
 	tr, err := trace.NewServer("")
 	if err != nil {

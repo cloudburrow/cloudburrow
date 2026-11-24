@@ -281,6 +281,15 @@ const ROUTES = [
     navTitle: "Soft-deleted buckets", navHidden: true, redirect: "/storage/browser?view=softdeleted",
     product: "storage", productTitle: "Cloud Storage" },
 
+  // Filestore (#2192), Google's menu in its order: Instances, Backups,
+  // Snapshots.
+  { path: "/filestore/instances", service: "filestore", icon: "filestore", title: "Instances", kind: "Instance",
+    section: "Storage", product: "filestore", productTitle: "Filestore" },
+  { path: "/filestore/backups", service: "filestore-backups", icon: "filestore", title: "Backups", kind: "Backup",
+    section: "Storage", product: "filestore", productTitle: "Filestore" },
+  { path: "/filestore/snapshots", service: "filestore-snapshots", icon: "filestore", title: "Snapshots", kind: "Snapshot",
+    section: "Storage", product: "filestore", productTitle: "Filestore" },
+
   // Storage Transfer Service (#1957), Google's Data Transfer pages: Transfer
   // jobs, with each job's run history, and Agent pools for POSIX file
   // systems, whose agent is CloudBurrow's own.
@@ -927,6 +936,8 @@ const pagesOf = (key) => {
 // assets/icons/PROVENANCE.md. A screen with no drawing of its own gets the
 // dashboard mark rather than a broken image.
 const ICONS = {
+  // Filestore: a file folder over a server's drive.
+  filestore: '<path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v4H3z"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><path d="M7 17h2"/>',
   // App Hub: three components grouped in one application.
   apphub: '<rect x="3" y="3" width="18" height="18" rx="3"/><rect x="6" y="6" width="5" height="5" rx="1"/><rect x="13" y="6" width="5" height="5" rx="1"/><rect x="6" y="13" width="12" height="5" rx="1"/>',
   // Cloud Run: a container with a run triangle.

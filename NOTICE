@@ -56,6 +56,14 @@ digest (#2141): PgBouncer, Copyright (c) 2007-2009 Marko Kreen, Skype
 Technologies OU, under the ISC License, in an image whose Dockerfile and
 entrypoint are under the MIT License.
 
+CloudBurrow does not ship NFS-Ganesha. A Filestore instance (#2192) runs
+in an image CloudBurrow builds locally from internal/filestoreserver/image
+(MIT) on Debian's debian:trixie-slim, with Debian's packages of
+NFS-Ganesha 6.5 (LGPL-3.0-or-later), rpcbind (BSD-3-Clause), nfs-common
+(GPL-2.0-or-later), dbus and netbase installed at build time and run as
+separate programs; none of their code is in this repository or linked into
+the CLI.
+
 The binary is linked with Google's differential privacy library
 (github.com/google/differential-privacy/go/v4 v4.1.0), Copyright Google LLC,
 under the Apache License, Version 2.0, and with its dependencies

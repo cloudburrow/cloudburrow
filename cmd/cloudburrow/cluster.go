@@ -98,6 +98,8 @@ func runDelete(args []string, stdout, stderr io.Writer) error {
 	if err := deleteGKEClusters(ctx, cfg, stdout); err != nil {
 		return err
 	}
+	// Filestore's NFS servers (#2192), which stop keeps, go with it too.
+	deleteFilestoreServers(ctx, cfg, stdout)
 	used := instanceNodeImages(ctx, cfg.Name)
 	if err := c.Delete(ctx); err != nil {
 		return describeClusterError(err)

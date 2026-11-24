@@ -281,6 +281,7 @@ func compatEnvFixture(t *testing.T, edit func(env map[string]string)) (dir, envF
 		"CLOUDBURROW_ALLOYDB_CONNECTOR_ENDPOINT":      "127.0.0.1:55433",
 		"CLOUDBURROW_ALLOYDB_TLS_ENDPOINT":            "127.0.0.1:55463",
 		"CLOUDBURROW_ALLOYDB_CA_FILE":                 "/state/ct/alloydb-ca.pem",
+		"CLOUDBURROW_FILESTORE_ENDPOINT":              "127.0.0.1:9071",
 		"CLOUDBURROW_TRACE_ENDPOINT":                  "127.0.0.1:9052",
 	}
 	if edit != nil {
@@ -413,6 +414,7 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 		"ALLOYDB_CONNECTOR":        "127.0.0.1:55433",
 		"ALLOYDB_TLS":              "127.0.0.1:55463",
 		"ALLOYDB_CA":               "/state/ct/alloydb-ca.pem",
+		"FILESTORE":                "127.0.0.1:9071",
 		"TRACE":                    "127.0.0.1:9052",
 		"COMPUTE":                  "127.0.0.1:9031",
 		"DATATRANSFER":             "127.0.0.1:9034",

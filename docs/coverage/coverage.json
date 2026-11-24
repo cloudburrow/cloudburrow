@@ -21190,6 +21190,162 @@
     ]
   },
   {
+    "Key": "filestore",
+    "Title": "Filestore (v1)",
+    "counts": {
+      "Verified": 18
+    },
+    "rows": [
+      {
+        "method": "google.cloud.filestore.v1.CloudFilestoreManager/CreateBackup",
+        "status": "Verified",
+        "tests": [
+          "test/compat/filestore_test.go:92 TestFilestoreInstancesSnapshotsAndBackups",
+          "test/compat/filestoretools_test.go:139 TestTerraformFilestore",
+          "test/compat/filestoretools_test.go:55 TestGcloudFilestore"
+        ]
+      },
+      {
+        "method": "google.cloud.filestore.v1.CloudFilestoreManager/CreateInstance",
+        "status": "Verified",
+        "tests": [
+          "test/compat/filestore_test.go:92 TestFilestoreInstancesSnapshotsAndBackups",
+          "test/compat/filestoretools_test.go:139 TestTerraformFilestore",
+          "test/compat/filestoretools_test.go:55 TestGcloudFilestore"
+        ]
+      },
+      {
+        "method": "google.cloud.filestore.v1.CloudFilestoreManager/CreateSnapshot",
+        "status": "Verified",
+        "tests": [
+          "test/compat/filestore_test.go:92 TestFilestoreInstancesSnapshotsAndBackups",
+          "test/compat/filestoretools_test.go:139 TestTerraformFilestore",
+          "test/compat/filestoretools_test.go:55 TestGcloudFilestore"
+        ]
+      },
+      {
+        "method": "google.cloud.filestore.v1.CloudFilestoreManager/DeleteBackup",
+        "status": "Verified",
+        "tests": [
+          "test/compat/filestore_test.go:92 TestFilestoreInstancesSnapshotsAndBackups",
+          "test/compat/filestoretools_test.go:139 TestTerraformFilestore",
+          "test/compat/filestoretools_test.go:55 TestGcloudFilestore"
+        ]
+      },
+      {
+        "method": "google.cloud.filestore.v1.CloudFilestoreManager/DeleteInstance",
+        "status": "Verified",
+        "tests": [
+          "test/compat/filestore_test.go:92 TestFilestoreInstancesSnapshotsAndBackups",
+          "test/compat/filestoretools_test.go:139 TestTerraformFilestore",
+          "test/compat/filestoretools_test.go:55 TestGcloudFilestore"
+        ]
+      },
+      {
+        "method": "google.cloud.filestore.v1.CloudFilestoreManager/DeleteSnapshot",
+        "status": "Verified",
+        "tests": [
+          "test/compat/filestore_test.go:92 TestFilestoreInstancesSnapshotsAndBackups",
+          "test/compat/filestoretools_test.go:139 TestTerraformFilestore",
+          "test/compat/filestoretools_test.go:55 TestGcloudFilestore"
+        ]
+      },
+      {
+        "method": "google.cloud.filestore.v1.CloudFilestoreManager/GetBackup",
+        "status": "Verified",
+        "tests": [
+          "test/compat/filestore_test.go:92 TestFilestoreInstancesSnapshotsAndBackups",
+          "test/compat/filestoretools_test.go:139 TestTerraformFilestore"
+        ]
+      },
+      {
+        "method": "google.cloud.filestore.v1.CloudFilestoreManager/GetInstance",
+        "status": "Verified",
+        "tests": [
+          "test/compat/filestore_test.go:92 TestFilestoreInstancesSnapshotsAndBackups",
+          "test/compat/filestoretools_test.go:139 TestTerraformFilestore",
+          "test/compat/filestoretools_test.go:55 TestGcloudFilestore"
+        ]
+      },
+      {
+        "method": "google.cloud.filestore.v1.CloudFilestoreManager/GetSnapshot",
+        "status": "Verified",
+        "tests": [
+          "test/compat/filestore_test.go:92 TestFilestoreInstancesSnapshotsAndBackups",
+          "test/compat/filestoretools_test.go:139 TestTerraformFilestore"
+        ]
+      },
+      {
+        "method": "google.cloud.filestore.v1.CloudFilestoreManager/ListBackups",
+        "status": "Verified",
+        "tests": [
+          "test/compat/filestore_test.go:92 TestFilestoreInstancesSnapshotsAndBackups"
+        ]
+      },
+      {
+        "method": "google.cloud.filestore.v1.CloudFilestoreManager/ListInstances",
+        "status": "Verified",
+        "tests": [
+          "test/compat/filestore_test.go:92 TestFilestoreInstancesSnapshotsAndBackups",
+          "test/compat/filestoretools_test.go:55 TestGcloudFilestore"
+        ]
+      },
+      {
+        "method": "google.cloud.filestore.v1.CloudFilestoreManager/ListSnapshots",
+        "status": "Verified",
+        "tests": [
+          "test/compat/filestore_test.go:92 TestFilestoreInstancesSnapshotsAndBackups"
+        ]
+      },
+      {
+        "method": "google.cloud.filestore.v1.CloudFilestoreManager/PromoteReplica",
+        "status": "Verified",
+        "tests": [
+          "test/compat/filestoreextras_test.go:30 TestFilestoreCMEKTagsAndReplication"
+        ]
+      },
+      {
+        "method": "google.cloud.filestore.v1.CloudFilestoreManager/RestoreInstance",
+        "status": "Verified",
+        "tests": [
+          "test/compat/filestore_test.go:92 TestFilestoreInstancesSnapshotsAndBackups",
+          "test/compat/filestoretools_test.go:55 TestGcloudFilestore"
+        ]
+      },
+      {
+        "method": "google.cloud.filestore.v1.CloudFilestoreManager/RevertInstance",
+        "status": "Verified",
+        "tests": [
+          "test/compat/filestore_test.go:92 TestFilestoreInstancesSnapshotsAndBackups",
+          "test/compat/filestoretools_test.go:55 TestGcloudFilestore"
+        ]
+      },
+      {
+        "method": "google.cloud.filestore.v1.CloudFilestoreManager/UpdateBackup",
+        "status": "Verified",
+        "tests": [
+          "test/compat/filestore_test.go:92 TestFilestoreInstancesSnapshotsAndBackups"
+        ]
+      },
+      {
+        "method": "google.cloud.filestore.v1.CloudFilestoreManager/UpdateInstance",
+        "status": "Verified",
+        "tests": [
+          "test/compat/filestore_test.go:92 TestFilestoreInstancesSnapshotsAndBackups",
+          "test/compat/filestoretools_test.go:139 TestTerraformFilestore",
+          "test/compat/filestoretools_test.go:55 TestGcloudFilestore"
+        ]
+      },
+      {
+        "method": "google.cloud.filestore.v1.CloudFilestoreManager/UpdateSnapshot",
+        "status": "Verified",
+        "tests": [
+          "test/compat/filestore_test.go:92 TestFilestoreInstancesSnapshotsAndBackups"
+        ]
+      }
+    ]
+  },
+  {
     "Key": "trace",
     "Title": "Cloud Trace API (v1 and v2)",
     "counts": {
