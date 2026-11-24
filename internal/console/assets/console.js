@@ -362,6 +362,11 @@ const ROUTES = [
     section: "Storage", product: "filestore", productTitle: "Filestore" },
   { path: "/filestore/snapshots", service: "filestore-snapshots", icon: "filestore", title: "Snapshots", kind: "Snapshot",
     section: "Storage", product: "filestore", productTitle: "Filestore" },
+  // Dataflow (#2215): the Jobs list, a job's page (Job graph, Execution
+  // details, Job metrics, Autoscaling, Job logs and Worker logs) and
+  // Create job from template.
+  { path: "/dataflow/jobs", service: "dataflow", icon: "dataflow", title: "Jobs", kind: "Job",
+    section: "Databases", product: "dataflow", productTitle: "Dataflow" },
 
   // Storage Transfer Service (#1957), Google's Data Transfer pages: Transfer
   // jobs, with each job's run history, and Agent pools for POSIX file
@@ -1188,6 +1193,8 @@ const pagesOf = (key) => {
 const ICONS = {
   // Filestore: a file folder over a server's drive.
   filestore: '<path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v4H3z"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><path d="M7 17h2"/>',
+  // Dataflow: a pipeline's steps joined top to bottom.
+  dataflow: '<rect x="4" y="3" width="7" height="5" rx="1"/><rect x="13" y="10" width="7" height="5" rx="1"/><rect x="4" y="16" width="7" height="5" rx="1"/><path d="M7.5 8v8M11 12.5h2"/>',
   // App Hub: three components grouped in one application.
   apphub: '<rect x="3" y="3" width="18" height="18" rx="3"/><rect x="6" y="6" width="5" height="5" rx="1"/><rect x="13" y="6" width="5" height="5" rx="1"/><rect x="6" y="13" width="12" height="5" rx="1"/>',
   // Cloud Run: a container with a run triangle.
@@ -4781,6 +4788,9 @@ async function renderDetail(view, route, resourcePath) {
         return drawAnalyticsSection(panel, section, note);
       case "media":
         return drawMediaSection(panel, section, note);
+      case "graph":
+        // A Dataflow job's graph (#2215).
+        return setChildren(panel, note, pipelineGraph(section.pipeline || {}, section.label));
       case "result": {
         // An action's answer on a page of its own (#2084): Document AI's
         // analysis page, drawn as its result dialog draws it.
@@ -10100,6 +10110,88 @@ function wfSourceSection(text, label) {
 // wfStepsVisualization is the Steps tab's visualization panel: the graph
 // of the revision that ran, each step marked with the state of its
 // entries, in a panel the expander opens and closes as Google's does.
+// pipelineGraph is a Dataflow job's Job graph (#2215): its steps in
+// layers by how far they are from the sources, each a box with its kind,
+// state and output, joined by lines to the steps it reads, as Google's
+// graph draws them; a step chosen (click, Enter or Space) shows its
+// properties in the Step info panel beside it.
+function pipelineGraph(pg, label) {
+  const steps = pg.steps || [];
+  if (!steps.length) return emptyState("No job graph yet", "The graph is drawn once the job's pipeline has been read.");
+  const byId = new Map(steps.map((st) => [st.id, st]));
+  const depth = new Map();
+  const depthOf = (id, seen) => {
+    if (depth.has(id)) return depth.get(id);
+    if (seen.has(id)) return 0;
+    seen.add(id);
+    const ins = (byId.get(id).inputs || []).filter((i) => byId.has(i));
+    const d = ins.length ? 1 + Math.max(...ins.map((i) => depthOf(i, seen))) : 0;
+    depth.set(id, d);
+    return d;
+  };
+  steps.forEach((st) => depthOf(st.id, new Set()));
+  const layers = [];
+  steps.forEach((st) => { (layers[depth.get(st.id)] ||= []).push(st); });
+  const info = el("div", { class: "df-step-info", id: "df-step-info", "aria-live": "polite" },
+    el("p", { class: "form-help", text: "Choose a step to see its details." }));
+  const boxes = new Map();
+  const choose = (st) => {
+    boxes.forEach((b, id) => b.setAttribute("aria-pressed", String(id === st.id)));
+    setChildren(info, el("h3", { text: st.name }),
+      el("dl", { class: "df-step-props" },
+        ...[{ label: "Kind", value: st.kind || "—" }, { label: "State", value: st.state || "—" }, ...(st.properties || [])]
+          .flatMap((prop) => [el("dt", { text: prop.label }), el("dd", { text: prop.value || "—" })])));
+  };
+  const canvas = el("div", { class: "df-graph-canvas" });
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "df-graph-edges");
+  svg.setAttribute("aria-hidden", "true");
+  canvas.append(svg);
+  layers.forEach((layer) => {
+    const row = el("div", { class: "df-graph-layer" });
+    layer.forEach((st) => {
+      const state = String(st.state || "").toLowerCase().replace(/[^a-z]+/g, "-");
+      const reads = (st.inputs || []).map((i) => (byId.get(i) || {}).name).filter(Boolean);
+      const out = (st.properties || []).find((prop) => prop.label === "Elements added");
+      const box = el("button", { type: "button", class: `df-step is-${state}`, "data-step": st.id, "aria-pressed": "false",
+        "aria-controls": "df-step-info",
+        "aria-label": `${st.name}, ${st.kind || "step"}, ${st.state || "no state"}${reads.length ? `, reads ${reads.join(", ")}` : ""}`,
+        onclick: () => choose(st) },
+        el("span", { class: "df-step-name", text: st.name }),
+        el("span", { class: "df-step-meta", text: [st.kind, st.state].filter(Boolean).join(" · ") }),
+        out ? el("span", { class: "df-step-meta", text: `${out.value} elements` }) : null);
+      boxes.set(st.id, box);
+      row.append(box);
+    });
+    canvas.append(row);
+  });
+  // The lines, drawn once the boxes are laid out and again when the
+  // canvas changes size.
+  const draw = () => {
+    const base = canvas.getBoundingClientRect();
+    svg.setAttribute("width", String(canvas.scrollWidth));
+    svg.setAttribute("height", String(canvas.scrollHeight));
+    while (svg.firstChild) svg.firstChild.remove();
+    steps.forEach((st) => (st.inputs || []).forEach((i) => {
+      const a = boxes.get(i), b = boxes.get(st.id);
+      if (!a || !b) return;
+      const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+      const x1 = ra.left + ra.width / 2 - base.left, y1 = ra.bottom - base.top;
+      const x2 = rb.left + rb.width / 2 - base.left, y2 = rb.top - base.top;
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      const my = (y1 + y2) / 2;
+      path.setAttribute("d", `M${x1},${y1} C${x1},${my} ${x2},${my} ${x2},${y2}`);
+      path.setAttribute("class", "df-edge");
+      svg.append(path);
+    }));
+  };
+  requestAnimationFrame(draw);
+  if (typeof ResizeObserver === "function") new ResizeObserver(draw).observe(canvas);
+  return el("div", { class: "df-graph" },
+    el("div", { class: "df-graph-panel card", role: "group", "aria-label": label || "Job graph" }, canvas),
+    el("aside", { class: "df-step-panel card", "aria-label": "Step info" }, el("h2", { text: "Step info" }), info));
+}
+
 function wfStepsVisualization(source, items) {
   const states = {};
   const rank = { FAILED: 3, IN_PROGRESS: 2, SUCCEEDED: 1 };

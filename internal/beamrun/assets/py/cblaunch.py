@@ -115,6 +115,11 @@ def options_struct(opts, args):
     if args.streaming:
         o["streaming"] = True
         o["checkpointing_interval"] = 10000
+        # A drained job ends: its reads stop, and its sources, idle once
+        # they have emitted, shut down, so the watermark reaches the end
+        # of time, every window fires and the Flink job finishes (Flink
+        # checkpoints after tasks finish).
+        o["shutdown_sources_after_idle_ms"] = 1000
     o["job_name"] = args.job_name
     o["flink_master"] = "[local]"
     return job_utils.dict_to_struct({"beam:option:%s:v1" % k: v for k, v in o.items() if v is not None})
@@ -158,6 +163,38 @@ def producers_of(p):
     return out
 
 
+def opaque_custom_windows(p):
+    """Makes each windowed value coder whose window coder is the SDK's own
+    (pickled) one opaque to the runner, as a whole.
+
+    Python's Reshuffle carries a custom window through its shuffle in a
+    windowed value of the window's own coder (streaming WriteToBigQuery's
+    CommitInsertIds, under FixedWindows). Flink's runner knows the windowed
+    value coder but not the pickled window one, so it would decode the
+    windows as bytes and fail to use them as windows; made one pickled
+    coder, it length-prefixes the value and leaves it to Python."""
+    from google.protobuf import wrappers_pb2
+
+    from apache_beam.coders.coders import serialize_coder
+    from apache_beam.portability import python_urns
+    from apache_beam.runners import pipeline_context
+
+    cs = p.components.coders
+    known_windows = {common_urns.coders.GLOBAL_WINDOW.urn, common_urns.coders.INTERVAL_WINDOW.urn}
+    targets = [cid for cid, c in cs.items()
+               if c.spec.urn in (common_urns.coders.WINDOWED_VALUE.urn, common_urns.coders.PARAM_WINDOWED_VALUE.urn)
+               and len(c.component_coder_ids) == 2 and cs[c.component_coder_ids[1]].spec.urn not in known_windows]
+    if not targets:
+        return
+    ctx = pipeline_context.PipelineContext(p.components)
+    for cid in targets:
+        obj = ctx.coders.get_by_id(cid)
+        c = cs[cid]
+        c.spec.urn = python_urns.PICKLED_CODER
+        c.spec.payload = wrappers_pb2.BytesValue(value=serialize_coder(obj)).SerializeToString()
+        del c.component_coder_ids[:]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--job-endpoint", required=True)
@@ -185,6 +222,7 @@ def main():
     try:
         env = rewrite_environments(p, args.harness)
         cbio.rewrite(p, env)
+        opaque_custom_windows(p)
     except Exception as e:
         emit(event="done", state="FAILED", message="Workflow failed. Causes: %s" % e)
         return

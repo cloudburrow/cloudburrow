@@ -172,6 +172,11 @@ def _splice(pipeline, mini, prefix, env_id):
     """Copies mini's components into pipeline, their IDs prefixed."""
     c, mc = pipeline.components, mini.components
     ren = lambda i: prefix + i
+    # What mini's transforms need of the runner (a splittable DoFn's
+    # requirement), which its validator checks the pipeline declares.
+    for req in mini.requirements:
+        if req not in pipeline.requirements:
+            pipeline.requirements.append(req)
     for cid, coder in mc.coders.items():
         n = beam_runner_api_pb2.Coder()
         n.CopyFrom(coder)

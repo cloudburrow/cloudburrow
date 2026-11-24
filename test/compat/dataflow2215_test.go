@@ -446,7 +446,7 @@ func TestPythonDataflowStreamingDrain(t *testing.T) {
 	}
 }
 
-// covers: google.dataflow.v1beta3.JobsV1Beta3/SnapshotJob
+// covers: google.dataflow.v1beta3.JobsV1Beta3/SnapshotJob (unimplemented)
 //
 // TestDataflowJobsAPI (#2215): the Go client's failure paths, as the v1b3
 // reference documents them: an invalid name is INVALID_ARGUMENT, an

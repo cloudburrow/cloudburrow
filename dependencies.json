@@ -20,6 +20,38 @@
     "latestCandidate": "Discovered by #31, tested in isolation, never used for release artifacts until promoted here."
   },
   "components": {
+    "dataflow": {
+      "beamFlinkJobServer": {
+        "$comment": "Dataflow (#2215): internal/beamrun runs each job's Beam pipeline on this Apache Beam 2.78.0 portable runner for Flink 1.20 (--flink-master=[local]), on a per-job docker network create --internal network whose one other peer is a relay to the instance's Cloud Storage, Pub/Sub, BigQuery and Dataflow ports.",
+        "image": "apache/beam_flink1.20_job_server:2.78.0",
+        "digest": "sha256:b1f7e43440a148151e9db001dfc0498eb4f87bdd4d6808904daf52ab0b532053",
+        "license": "Apache-2.0 (Apache Beam, Apache Flink) and the Debian and Eclipse Temurin packages it is built on",
+        "redistribution": "not published: pulled by digest by the local CLI on a Dataflow job's first run",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "notes": "Resolved 2026-11-24. The Apache Software Foundation's image. Flink is chosen over Spark's portable runner as it runs Python streaming pipelines (Spark's runs batch only); a batch wordcount ran in 15 s. Google publishes no Dataflow runner image.",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve with `docker buildx imagetools inspect apache/beam_flink1.20_job_server:2.78.0`."
+      },
+      "beamPythonSDK312": {
+        "$comment": "Dataflow (#2215): the Apache Beam 2.78.0 Python 3.12 SDK harness, which internal/beamrun runs as the job's worker pool (--worker_pool) in the job server's network namespace, and the job's launcher and relay (python3) run in; the Python SDK's DataflowRunner tests (test/compat/dataflow2215_test.go) submit from it.",
+        "image": "apache/beam_python3.12_sdk:2.78.0",
+        "digest": "sha256:bf536d721f825259329a396a20947b81ce8d0bbe08472b26f3f149c9957c1e56",
+        "license": "Apache-2.0 (Apache Beam) and the Debian and PyPI packages it is built on",
+        "redistribution": "not published: pulled by digest by the local CLI on a Dataflow job's first run",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "notes": "Resolved 2026-11-24. The SDK container the Apache Beam project publishes for its portable runners; Dataflow's own worker images are not published for local use.",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve with `docker buildx imagetools inspect apache/beam_python3.12_sdk:2.78.0`."
+      }
+    },
     "computeGuest": {
       "opsAgent": {
         "$comment": "Google's Ops Agent (#2139), installed into the locally built VM images (internal/service/compute/guest/Dockerfile.debian and Dockerfile.rocky) from Google's own package repository, as add-google-cloud-ops-agent-repo.sh adds it: apt google-cloud-ops-agent-<codename>-all (Debian 12 bookworm, Ubuntu 24.04 noble), yum google-cloud-ops-agent-el9-<arch>-all (Rocky Linux 9). It runs in the guest only behind CloudBurrow's egress fence (usr/lib/cloudburrow/ops-agent), which lets its processes reach this instance's Cloud Logging and Cloud Monitoring and nothing else.",

@@ -87,6 +87,7 @@ import (
 	_ "cloud.google.com/go/cloudquotas/apiv1/cloudquotaspb"
 	_ "cloud.google.com/go/cloudtasks/apiv2/cloudtaskspb"
 	_ "cloud.google.com/go/container/apiv1/containerpb"
+	_ "cloud.google.com/go/dataflow/apiv1beta3/dataflowpb"
 	_ "cloud.google.com/go/dataform/apiv1/dataformpb"
 	_ "cloud.google.com/go/dataform/apiv1beta1/dataformpb"
 	_ "cloud.google.com/go/dataproc/v2/apiv1/dataprocpb"
@@ -396,6 +397,11 @@ var areas = []area{
 		"google.cloud.dataproc.v1.ClusterController", "google.cloud.dataproc.v1.JobController", "google.cloud.dataproc.v1.WorkflowTemplateService",
 		"google.cloud.dataproc.v1.AutoscalingPolicyService", "google.cloud.dataproc.v1.NodeGroupController",
 		"google.cloud.dataproc.v1.BatchController", "google.cloud.dataproc.v1.SessionController", "google.cloud.dataproc.v1.SessionTemplateController"}},
+	// Dataflow (#2215): CloudBurrow's own, gRPC and JSON on one port; jobs
+	// run on Apache Beam's Flink runner (internal/beamrun).
+	{Key: "dataflow", Title: "Dataflow (v1b3): jobs, messages, metrics, snapshots and templates", Own: true, Services: []string{
+		"google.dataflow.v1beta3.JobsV1Beta3", "google.dataflow.v1beta3.MessagesV1Beta3", "google.dataflow.v1beta3.MetricsV1Beta3",
+		"google.dataflow.v1beta3.SnapshotsV1Beta3", "google.dataflow.v1beta3.TemplatesService", "google.dataflow.v1beta3.FlexTemplatesService"}},
 	// App Hub (#2110): CloudBurrow's own, gRPC and JSON on one port; its
 	// Locations, Operations and IAM mixins are other areas' rows.
 	{Key: "apphub", Title: "App Hub (v1)", Own: true, Services: []string{"google.cloud.apphub.v1.AppHub"}},

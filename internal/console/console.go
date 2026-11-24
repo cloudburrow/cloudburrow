@@ -1219,7 +1219,30 @@ const (
 	// result dialog draws it (page images with their boxes beside the text
 	// and rows), on a page of its own: Document AI's analysis page (#2084).
 	KindResult SectionKind = "result"
+	// KindGraph is a Dataflow job's graph (#2215): Pipeline's steps drawn
+	// as boxes joined by the collections that pass between them, each
+	// with its state and the elements it has output, as Google's Job graph
+	// tab draws them; choosing a step shows its properties.
+	KindGraph SectionKind = "graph"
 )
+
+// PipelineGraph is a KindGraph section's content: the job's steps, each
+// naming the steps whose output it reads, in the pipeline's order.
+type PipelineGraph struct {
+	Steps []PipelineStep `json:"steps"`
+}
+
+// PipelineStep is one box of a job graph: its name and kind (Read, ParDo,
+// GroupByKey and so on), its state, the IDs of the steps it reads, and
+// what its step panel shows.
+type PipelineStep struct {
+	ID         string     `json:"id"`
+	Name       string     `json:"name"`
+	Kind       string     `json:"kind,omitempty"`
+	State      string     `json:"state,omitempty"`
+	Inputs     []string   `json:"inputs,omitempty"`
+	Properties []Property `json:"properties,omitempty"`
+}
 
 // Media is a KindMedia section's player: Src is the console's own media
 // route for the object, Type its audio type, and Label what the player is
@@ -1290,6 +1313,8 @@ type Section struct {
 	Visualization string `json:"visualization,omitempty"`
 	// Media is the content when Kind is KindMedia.
 	Media *Media `json:"media,omitempty"`
+	// Pipeline is the content when Kind is KindGraph.
+	Pipeline *PipelineGraph `json:"pipeline,omitempty"`
 	// Unavailable explains why this one section has no content, so a section
 	// that cannot be read shows its own error inside its own panel rather
 	// than an empty table claiming the resource holds nothing.

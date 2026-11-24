@@ -3018,3 +3018,27 @@ tr.log-entry.is-located { outline: 2px solid var(--accent); outline-offset: -2px
 #hf-gke-steps li { margin: 4px 0; overflow-wrap: anywhere; }
 .hf-yaml-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .hf-yaml { max-height: 420px; overflow: auto; margin: 0; padding: 12px; border: 1px solid var(--border, #dadce0); border-radius: var(--radius-control); white-space: pre; }
+
+/* Dataflow's Job graph (#2215): the steps in layers, lines behind them,
+   and the Step info panel beside them. */
+.df-graph { display: grid; grid-template-columns: minmax(0, 1fr) minmax(200px, 280px); gap: 12px; align-items: start; }
+@media (max-width: 720px) { .df-graph { grid-template-columns: minmax(0, 1fr); } }
+.df-graph-panel { overflow: auto; min-width: 0; }
+.df-graph-canvas { position: relative; display: flex; flex-direction: column; gap: 32px; padding: 16px; min-width: min-content; }
+.df-graph-edges { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
+.df-edge { fill: none; stroke: var(--text-muted); stroke-width: 1.4; }
+.df-graph-layer { position: relative; display: flex; justify-content: center; gap: 16px; flex-wrap: nowrap; }
+.df-step { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 160px; max-width: 260px; padding: 8px 12px;
+  border: 1px solid var(--border); border-left: 4px solid var(--text-muted); border-radius: var(--radius); background: var(--surface);
+  color: var(--text); text-align: left; cursor: pointer; }
+.df-step:hover { background: var(--state-hover); }
+.df-step[aria-pressed="true"] { outline: 2px solid var(--accent); outline-offset: 1px; }
+.df-step.is-running { border-left-color: var(--accent); }
+.df-step.is-succeeded { border-left-color: var(--ok); }
+.df-step.is-failed { border-left-color: var(--error); }
+.df-step-name { font-weight: 600; overflow-wrap: anywhere; }
+.df-step-meta { font-size: var(--text-caption-size); color: var(--text-muted); }
+.df-step-panel h2 { margin-top: 0; }
+.df-step-props { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 12px; margin: 0; }
+.df-step-props dt { color: var(--text-muted); }
+.df-step-props dd { margin: 0; overflow-wrap: anywhere; }

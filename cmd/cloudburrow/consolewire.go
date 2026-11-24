@@ -412,6 +412,10 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	if enabled[config.ServiceFilestore] && d.filestore != nil {
 		providers = append(providers, filestoreProvider{svc: d.filestore}, filestoreBackupsProvider{svc: d.filestore}, filestoreSnapshotsProvider{svc: d.filestore})
 	}
+	// Dataflow (#2215), in process: Jobs.
+	if enabled[config.ServiceDataflow] && d.dataflow != nil {
+		providers = append(providers, dataflowProvider{svc: d.dataflow, logging: d.logging})
+	}
 	// App Hub (#2110), in process: Applications, Services and workloads,
 	// Settings.
 	if enabled[config.ServiceDataproc] && d.dataproc != nil {

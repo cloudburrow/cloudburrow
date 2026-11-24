@@ -54,6 +54,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/billing"
 	"github.com/cloudburrow/cloudburrow/internal/service/certificatemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/cloudquotas"
+	dataflowsvc "github.com/cloudburrow/cloudburrow/internal/service/dataflow"
 	"github.com/cloudburrow/cloudburrow/internal/service/dataform"
 	"github.com/cloudburrow/cloudburrow/internal/service/dataproc"
 	"github.com/cloudburrow/cloudburrow/internal/service/datatransfer"
@@ -145,6 +146,12 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	dataprocpb.RegisterAutoscalingPolicyServiceServer(srv, dp)
 	dataprocpb.RegisterWorkflowTemplateServiceServer(srv, dp)
 	dataprocpb.RegisterNodeGroupControllerServer(srv, dp)
+	// Dataflow (#2215): its six services, no engine.
+	dfl, err := dataflowsvc.NewServer(dataflowsvc.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dfl.Register(srv)
 	// App Hub alone (#2110): its mixins are other services' rows.
 	ah, err := apphub.NewServer("", apphub.Options{})
 	if err != nil {

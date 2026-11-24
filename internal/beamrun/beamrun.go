@@ -143,6 +143,8 @@ type Metric struct {
 // Result is how a job ended: State DONE, FAILED or CANCELLED.
 type Result struct {
 	State, Message string
+	// tail is the launcher's last lines that were not events.
+	tail []string
 }
 
 // Docker runs jobs in the host's Docker.
@@ -276,6 +278,13 @@ func (d *Docker) Run(ctx context.Context, job Job, ev Events) Result {
 	if out, err := d.docker(ctx, "network", "connect", "--alias", relayName, network, relay); err != nil {
 		return failed("connect the job's relay: " + out)
 	}
+	// gRPC clients resolve any name under .localhost to loopback (RFC
+	// 6761), so Pub/Sub's is given the relay's address on the network.
+	relayIP, err := d.docker(ctx, "inspect", "-f", "{{(index .NetworkSettings.Networks \""+network+"\").IPAddress}}", relay)
+	relayIP = strings.TrimSpace(relayIP)
+	if err != nil || net.ParseIP(relayIP) == nil {
+		return failed("find the job's relay's address: " + relayIP)
+	}
 
 	parallelism := job.Workers
 	if parallelism < 1 {
@@ -289,7 +298,7 @@ func (d *Docker) Run(ctx context.Context, job Job, ev Events) Result {
 		return failed("start the Flink job server: " + out)
 	}
 	cleanup = append(cleanup, func() { bg("rm", "-f", "-v", js) })
-	env := d.clientEnv(job, dir)
+	env := d.clientEnv(job, dir, relayIP)
 	// The workers write their metrics' totals to metrics/ (sitecustomize).
 	poolArgs := append([]string{"run", "-d", "--name", pool, "--label", label, "--network", "container:" + js, "-v", dir + ":/cb:ro",
 		"-v", filepath.Join(dir, "metrics") + ":/cb/metrics", "-e", "CB_METRICS_DIR=/cb/metrics"}, env...)
@@ -352,6 +361,10 @@ func (d *Docker) Run(ctx context.Context, job Job, ev Events) Result {
 		if waitErr != nil {
 			msg += ": " + waitErr.Error()
 		}
+		// Its last lines (a Python traceback's last is its error).
+		if len(res.tail) > 0 {
+			msg += ": " + strings.Join(res.tail, " | ")
+		}
 		return failed(msg)
 	}
 	return res
@@ -366,7 +379,7 @@ func pythonVersions() []string {
 }
 
 // clientEnv is the job's clients' environment on its network.
-func (d *Docker) clientEnv(job Job, dir string) []string {
+func (d *Docker) clientEnv(job Job, dir, relayIP string) []string {
 	token := "cloudburrow-dataflow"
 	if d.Token != nil {
 		if t := d.Token(); t != "" {
@@ -378,7 +391,7 @@ func (d *Docker) clientEnv(job Job, dir string) []string {
 		"-e", "CB_DATAFLOW=1", "-e", "CB_PROJECT=" + job.Project, "-e", "CB_ACCESS_TOKEN=" + token,
 		"-e", "PYTHONPATH=/cb/py", "-e", "CB_DRAIN=/cb/ctl/drain",
 		"-e", fmt.Sprintf("STORAGE_EMULATOR_HOST=http://%s:%d", host, storagePort),
-		"-e", fmt.Sprintf("PUBSUB_EMULATOR_HOST=%s:%d", host, pubsubPort),
+		"-e", fmt.Sprintf("PUBSUB_EMULATOR_HOST=%s:%d", relayIP, pubsubPort),
 		"-e", fmt.Sprintf("BIGQUERY_EMULATOR_HOST=http://%s:%d", host, bigqueryPort),
 		"-e", fmt.Sprintf("CB_BIGQUERY_URL=http://%s:%d/bigquery/v2/", host, bigqueryPort),
 		"-e", "GOOGLE_CLOUD_PROJECT=" + job.Project,
@@ -405,6 +418,12 @@ func (d *Docker) read(r io.Reader, ev Events, workers int) Result {
 		line := sc.Text()
 		var e launcherEvent
 		if !strings.HasPrefix(line, "{") || json.Unmarshal([]byte(line), &e) != nil || e.Event == "" {
+			if strings.TrimSpace(line) != "" {
+				res.tail = append(res.tail, line)
+				if len(res.tail) > 3 {
+					res.tail = res.tail[1:]
+				}
+			}
 			if ev.Log != nil && strings.TrimSpace(line) != "" {
 				ev.Log(severityOf(line), line)
 			}
@@ -431,7 +450,7 @@ func (d *Docker) read(r io.Reader, ev Events, workers int) Result {
 				ev.Message(e.Importance, e.Text)
 			}
 		case "done":
-			res = Result{State: e.State, Message: e.Message}
+			res = Result{State: e.State, Message: e.Message, tail: res.tail}
 			if res.State == "FAILED" && res.Message == "" {
 				res.Message = "Workflow failed."
 			}
