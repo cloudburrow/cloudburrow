@@ -5,6 +5,7 @@ package compat
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
@@ -96,8 +97,64 @@ func nodeSh(t *testing.T, node, script string) (string, error) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "docker", "exec", node, "sh", "-c", script).CombinedOutput()
+	return dockerSh(ctx, node, script)
+}
+
+// dockerSh runs script in container until ctx ends.
+func dockerSh(ctx context.Context, container, script string) (string, error) {
+	cmd := exec.CommandContext(ctx, "docker", "exec", container, "sh", "-c", script)
+	cmd.WaitDelay = 5 * time.Second
+	out, err := cmd.CombinedOutput()
 	return strings.TrimSpace(string(out)), err
+}
+
+// fsStep runs one step of a test with its own deadline. A step that
+// overruns it fails the test at once with the state of the NFS servers
+// serving address and of the node's NFS mounts, so a share that stops
+// answering is seen as such, never as a hung test.
+func fsStep(t *testing.T, address, step string, limit time.Duration, f func(ctx context.Context) error) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), limit)
+	defer cancel()
+	err := f(ctx)
+	if ctx.Err() == context.DeadlineExceeded {
+		t.Fatalf("%s did not finish in %v (%v); state:\n%s", step, limit, err, fsDump(t, address))
+	}
+	if err != nil {
+		t.Fatalf("%s: %v", step, err)
+	}
+}
+
+// fsDump is the state of the instance's NFS servers and of the node's
+// NFS mounts and blocked processes, each read with its own deadline.
+func fsDump(t *testing.T, address string) string {
+	run := func(container, script string) string {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		out, err := dockerSh(ctx, container, script)
+		if err != nil {
+			out += "\n(" + err.Error() + ")"
+		}
+		return out
+	}
+	var b strings.Builder
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	ps, _ := exec.CommandContext(ctx, "docker", "ps", "-a", "--filter", "label=io.cloudburrow.filestore="+fsLabel(t), "--format", "{{.Names}} {{.Status}}").Output()
+	b.WriteString("NFS servers:\n" + string(ps))
+	for _, line := range strings.Split(strings.TrimSpace(string(ps)), "\n") {
+		n, _, _ := strings.Cut(line, " ")
+		if n == "" || !strings.Contains(line, " Up ") {
+			continue
+		}
+		lctx, lcancel := context.WithTimeout(context.Background(), 20*time.Second)
+		logs, _ := exec.CommandContext(lctx, "docker", "logs", "--tail", "15", n).CombinedOutput()
+		lcancel()
+		b.WriteString("--- " + n + " logs:\n" + string(logs))
+		b.WriteString("--- " + n + " state:\n" + run(n, `dmsetup info -c 2>&1; losetup -a 2>&1; grep " /export" /proc/mounts; ps -eo pid,stat,wchan:30,args | grep -v " ps -eo"`) + "\n")
+	}
+	b.WriteString("--- node (" + address + "):\n" + run(fsNode(t), `grep " nfs" /proc/mounts; iptables -t nat -S CLOUDBURROW-FILESTORE | grep -F "`+address+`"; ps -eo pid,stat,wchan:30,args | awk '$2 ~ /D/'`))
+	return b.String()
 }
 
 // fsServerOf is the NFS server container serving address: the one at the
@@ -382,56 +439,92 @@ func TestFilestoreCMEKEncryptsTheShareAtRest(t *testing.T) {
 		FileShares: fsShare("vol1", 1024), Networks: fsNetwork, KmsKeyName: key.GetName()})
 	ip := in.GetNetworks()[0].GetIpAddresses()[0]
 	server := fsServerOf(t, h, ip)
+	node := fsNode(t)
 	marker := "cloudburrow-at-rest-" + sfx
-	write := `set -e; d=/mnt/ct-atrest; mkdir -p $d; mount -t nfs -o vers=3,nolock ` + ip + `:/vol1 $d; for i in $(seq 1 2000); do echo ` + marker + `; done > $d/secret.txt; sync; umount $d`
-	if out, err := nodeSh(t, fsNode(t), write); err != nil {
-		t.Fatalf("write: %v\n%s", err, out)
-	}
-	// The share is a dm-crypt mapping, and its file holds no plain text.
-	out, err := exec.Command("docker", "exec", server, "sh", "-c", `sync; dmsetup table | grep -c " crypt aes-xts-plain64 "; grep -c -a `+marker+` /export/disks/vol1.img || true`).CombinedOutput()
-	if f := strings.Fields(string(out)); err != nil || len(f) != 2 || f[0] != "1" || f[1] != "0" {
-		t.Fatalf("at rest: %v: %q (want one crypt mapping, no plain text)", err, out)
-	}
+	// Each mount is soft, with a short timeout, so a share that stops
+	// answering fails its step instead of holding it.
+	mount := `d=/mnt/ct-atrest; mkdir -p $d; mount -t nfs -o vers=3,nolock,soft,timeo=50,retrans=2,retry=0 ` + ip + `:/vol1 $d`
+	fsStep(t, ip, "write through the share", 2*time.Minute, func(ctx context.Context) error {
+		out, err := dockerSh(ctx, node, `set -e; `+mount+`; for i in $(seq 1 2000); do echo `+marker+`; done > $d/secret.txt; umount $d`)
+		if err != nil {
+			return fmt.Errorf("%v: %s", err, out)
+		}
+		return nil
+	})
+	// The share is a dm-crypt mapping, and its file holds no plain text:
+	// the block where the share keeps secret.txt holds the marker read
+	// through the mapping and not in the share's file. Only that block is
+	// read; the file is a sparse 1 TiB, which a scan of it would take
+	// hours to read. sync -f flushes the share's filesystem alone: a bare
+	// sync waits on every filesystem of the Docker VM, other clients' NFS
+	// mounts too.
+	fsStep(t, ip, "read the share's file at rest", time.Minute, func(ctx context.Context) error {
+		out, err := dockerSh(ctx, server, `set -e; sync -f /export/fs/vol1
+dmsetup table | grep -c " crypt aes-xts-plain64 "
+dev=/dev/mapper/$(dmsetup ls --target crypt | awk '{print $1}')
+bs=$(dumpe2fs -h "$dev" 2>/dev/null | awk -F: '/^Block size/ {print $2 + 0}')
+b=$(debugfs -R "blocks /data/secret.txt" "$dev" 2>/dev/null | awk '{print $1}')
+dd if="$dev" bs="$bs" skip="$b" count=1 2>/dev/null | grep -c -a `+marker+` || true
+dd if=/export/disks/vol1.img bs="$bs" skip="$b" count=1 2>/dev/null | grep -c -a `+marker+` || true`)
+		if f := strings.Fields(out); err != nil || len(f) != 3 || f[0] != "1" || f[1] == "0" || f[2] != "0" {
+			return fmt.Errorf("%v: %q (want one crypt mapping, the marker through it, none in the file)", err, out)
+		}
+		return nil
+	})
 
 	ver := key.GetPrimary().GetName()
 	setVersion := func(st kmspb.CryptoKeyVersion_CryptoKeyVersionState) {
 		t.Helper()
-		if _, err := kc.UpdateCryptoKeyVersion(ctx, &kmspb.UpdateCryptoKeyVersionRequest{CryptoKeyVersion: &kmspb.CryptoKeyVersion{Name: ver, State: st},
-			UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"state"}}}); err != nil {
-			t.Fatalf("UpdateCryptoKeyVersion: %v", err)
-		}
+		fsStep(t, ip, "set the key version "+st.String(), time.Minute, func(ctx context.Context) error {
+			_, err := kc.UpdateCryptoKeyVersion(ctx, &kmspb.UpdateCryptoKeyVersionRequest{CryptoKeyVersion: &kmspb.CryptoKeyVersion{Name: ver, State: st},
+				UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"state"}}})
+			return err
+		})
 	}
 	waitFor := func(want filestorepb.Instance_State) {
 		t.Helper()
-		deadline := time.Now().Add(3 * time.Minute)
-		for {
-			got, err := fg.GetInstance(ctx, &filestorepb.GetInstanceRequest{Name: in.GetName()})
-			if err == nil && got.GetState() == want {
-				return
+		var got *filestorepb.Instance
+		fsStep(t, ip, "wait for "+want.String(), 3*time.Minute, func(ctx context.Context) error {
+			for {
+				var err error
+				got, err = fg.GetInstance(ctx, &filestorepb.GetInstanceRequest{Name: in.GetName()})
+				if err == nil && got.GetState() == want {
+					return nil
+				}
+				select {
+				case <-ctx.Done():
+					return fmt.Errorf("instance is %v (%v), want %v", got.GetState(), err, want)
+				case <-time.After(2 * time.Second):
+				}
 			}
-			if time.Now().After(deadline) {
-				t.Fatalf("instance is %v (%v), want %v", got.GetState(), err, want)
-			}
-			time.Sleep(2 * time.Second)
-		}
+		})
 	}
 	setVersion(kmspb.CryptoKeyVersion_DISABLED)
 	waitFor(filestorepb.Instance_SUSPENDED)
 	server = fsServerOf(t, h, ip)
-	out, _ = exec.Command("docker", "exec", server, "sh", "-c", `dmsetup table 2>/dev/null | grep -c " crypt " || true; grep -c " /export/fs/" /proc/mounts || true`).CombinedOutput()
-	if f := strings.Fields(string(out)); len(f) != 2 || f[0] != "0" || f[1] != "0" {
-		t.Errorf("suspended, the share is still open: %q", out)
-	}
-	if out, err := nodeSh(t, fsNode(t), `mkdir -p /mnt/ct-atrest; timeout 20 mount -t nfs -o vers=3,nolock,soft,retry=0 `+ip+`:/vol1 /mnt/ct-atrest`); err == nil {
-		_, _ = nodeSh(t, fsNode(t), "umount /mnt/ct-atrest")
-		t.Errorf("suspended, the share still mounts: %s", out)
-	}
+	fsStep(t, ip, "check the suspended server", time.Minute, func(ctx context.Context) error {
+		out, _ := dockerSh(ctx, server, `dmsetup table 2>/dev/null | grep -c " crypt " || true; grep -c " /export/fs/" /proc/mounts || true`)
+		if f := strings.Fields(out); len(f) != 2 || f[0] != "0" || f[1] != "0" {
+			t.Errorf("suspended, the share is still open: %q", out)
+		}
+		return nil
+	})
+	fsStep(t, ip, "mount the suspended share", time.Minute, func(ctx context.Context) error {
+		if out, err := dockerSh(ctx, node, `timeout 20 sh -c '`+mount+`'`); err == nil {
+			_, _ = dockerSh(ctx, node, "umount -f /mnt/ct-atrest")
+			t.Errorf("suspended, the share still mounts: %s", out)
+		}
+		return nil
+	})
 	setVersion(kmspb.CryptoKeyVersion_ENABLED)
 	waitFor(filestorepb.Instance_READY)
-	read := `set -e; d=/mnt/ct-atrest; mount -t nfs -o vers=3,nolock ` + ip + `:/vol1 $d; head -n 1 $d/secret.txt; umount $d`
-	if out, err := nodeSh(t, fsNode(t), read); err != nil || out != marker {
-		t.Fatalf("after the key is enabled again: %v: %q", err, out)
-	}
+	fsStep(t, ip, "read after the key is enabled again", 2*time.Minute, func(ctx context.Context) error {
+		out, err := dockerSh(ctx, node, `set -e; `+mount+`; head -n 1 $d/secret.txt; umount $d`)
+		if err != nil || out != marker {
+			return fmt.Errorf("%v: %q", err, out)
+		}
+		return nil
+	})
 }
 
 // TestGKEFilestoreMultishareClass (#2194): GKE's enterprise-multishare-rwx

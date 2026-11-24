@@ -521,7 +521,7 @@ func (d *Docker) Snapshot(ctx context.Context, key, share, snap string) error {
 		return err
 	}
 	defer d.lock(key)()
-	_, err := d.exec(ctx, key, `set -e; mkdir -p "/export/fs/$1/snapshots"; rm -rf "/export/fs/$1/snapshots/$2.tmp"; cp -a "/export/fs/$1/data/." "/export/fs/$1/snapshots/$2.tmp/"; mv "/export/fs/$1/snapshots/$2.tmp" "/export/fs/$1/snapshots/$2"; sync`, share, snap)
+	_, err := d.exec(ctx, key, `set -e; mkdir -p "/export/fs/$1/snapshots"; rm -rf "/export/fs/$1/snapshots/$2.tmp"; cp -a "/export/fs/$1/data/." "/export/fs/$1/snapshots/$2.tmp/"; mv "/export/fs/$1/snapshots/$2.tmp" "/export/fs/$1/snapshots/$2"; sync -f "/export/fs/$1"`, share, snap)
 	return err
 }
 
@@ -542,7 +542,7 @@ func (d *Docker) Revert(ctx context.Context, key, share, snap string) error {
 		return err
 	}
 	defer d.lock(key)()
-	_, err := d.exec(ctx, key, `set -e; test -d "/export/fs/$1/snapshots/$2"; find "/export/fs/$1/data" -mindepth 1 -delete; cp -a "/export/fs/$1/snapshots/$2/." "/export/fs/$1/data/"; sync`, share, snap)
+	_, err := d.exec(ctx, key, `set -e; test -d "/export/fs/$1/snapshots/$2"; find "/export/fs/$1/data" -mindepth 1 -delete; cp -a "/export/fs/$1/snapshots/$2/." "/export/fs/$1/data/"; sync -f "/export/fs/$1"`, share, snap)
 	return err
 }
 
@@ -611,7 +611,7 @@ func (d *Docker) Restore(ctx context.Context, key, share, backup string, dek []b
 	}
 	defer d.lock(key)()
 	return d.runner().Run(ctx, r, nil, "docker", "exec", "-i", d.container(key), "sh", "-c",
-		`set -e; find "/export/fs/$1/data" -mindepth 1 -delete; tar -C "/export/fs/$1/data" --numeric-owner -xpf -; sync`, "sh", share)
+		`set -e; find "/export/fs/$1/data" -mindepth 1 -delete; tar -C "/export/fs/$1/data" --numeric-owner -xpf -; sync -f "/export/fs/$1"`, "sh", share)
 }
 
 // Replicate replaces to's share's files with a copy of from's, streamed
@@ -630,7 +630,7 @@ func (d *Docker) Replicate(ctx context.Context, from, to, share string) error {
 	defer d.lock(to)()
 	err := d.runner().Run(ctx, pr, nil, "docker", "exec", "-i", d.container(to), "sh", "-c",
 		`set -e; mkdir -p "/export/fs/$1/.in"; find "/export/fs/$1/.in" -mindepth 1 -delete; tar -C "/export/fs/$1/.in" --numeric-owner -xpf -; `+
-			`find "/export/fs/$1/data" -mindepth 1 -delete; (cd "/export/fs/$1/.in" && find . -mindepth 1 -maxdepth 1 -exec mv {} "/export/fs/$1/data/" \;); rmdir "/export/fs/$1/.in"; sync`, "sh", share)
+			`find "/export/fs/$1/data" -mindepth 1 -delete; (cd "/export/fs/$1/.in" && find . -mindepth 1 -maxdepth 1 -exec mv {} "/export/fs/$1/data/" \;); rmdir "/export/fs/$1/.in"; sync -f "/export/fs/$1"`, "sh", share)
 	_ = pr.Close()
 	if serr := <-errc; err == nil {
 		err = serr

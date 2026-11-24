@@ -62,7 +62,11 @@ func fsInstance(t *testing.T, c *filestore.CloudFilestoreManagerClient, parent, 
 	}
 	t.Cleanup(func() {
 		if op, err := c.DeleteInstance(context.Background(), &filestorepb.DeleteInstanceRequest{Name: parent + "/instances/" + id, Force: true}); err == nil {
-			_ = op.Wait(context.Background())
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
+			if err := op.Wait(ctx); err != nil {
+				t.Errorf("DeleteInstance %s: %v", id, err)
+			}
 		}
 	})
 	got, err := op.Wait(ctx)

@@ -138,7 +138,8 @@ pid=$!
 stop() {
   kill -TERM "$pid" 2>/dev/null || true
   wait "$pid" 2>/dev/null || true
-  sync
+  # release unmounts, which flushes each share; a bare sync would wait on
+  # every filesystem of the Docker VM, other servers' clients' too.
   release
   exit 0
 }
