@@ -660,10 +660,14 @@ func TestExtractJobs(t *testing.T) {
 			}
 		}
 	}
-	// A model.
+	// A model (modelexport.go, #2210): a sourceModel with no dataset is
+	// invalid, and one that is not there is not found.
 	emu := &jobsEmulator{tables: tables}
-	if code, _ := do(t, Wrap(emu), "POST", base+"/jobs", `{"configuration":{"extract":{"sourceModel":{"modelId":"m"},"destinationUris":["gs://b/m"]}}}`); code != 501 {
-		t.Errorf("a model: %d", code)
+	if code, _ := do(t, Wrap(emu), "POST", base+"/jobs", `{"configuration":{"extract":{"sourceModel":{"modelId":"m"},"destinationUris":["gs://b/m"]}}}`); code != 400 {
+		t.Errorf("a model with no dataset: %d", code)
+	}
+	if code, _ := do(t, Wrap(emu), "POST", base+"/jobs", `{"configuration":{"extract":{"sourceModel":{"datasetId":"d","modelId":"m"},"destinationUris":["gs://b/m"],"destinationFormat":"CSV"}}}`); code != 400 {
+		t.Errorf("a model to CSV: %d", code)
 	}
 }
 

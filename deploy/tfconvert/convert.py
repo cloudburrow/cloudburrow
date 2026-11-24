@@ -482,7 +482,10 @@ def export():
     (x - sub) / div, or 0 when div is 0; onehot: one column a vocabulary
     entry, the dropped one always 0, then a NULL column when null; label:
     the entry's index + 1, 0 unseen; target: the entry's target, prior
-    unseen). The head is the model's: linear (K rows of weights over the
+    unseen). The model computes in float32, as TensorFlow Lite's builtin
+    operators do, so BigQuery ML imports the export back (CREATE MODEL ...
+    model_type='TENSORFLOW'); FLOAT64 features are float64 inputs, cast.
+    The head is the model's: linear (K rows of weights over the
     encoded columns, the intercept first), dnn (layers and activation, an
     optional wide part), kmeans, pca, autoencoder or mf.
     """
@@ -498,7 +501,7 @@ def export():
     module.tables = []
 
     def var(name, value):
-        v = tf.Variable(np.asarray(value, dtype=np.float64), trainable=False, name=name)
+        v = tf.Variable(np.asarray(value, dtype=np.float32), trainable=False, name=name)
         module.vars.append(v)
         return v
 
@@ -526,7 +529,7 @@ def export():
         kind = ft["kind"]
         if kind == "numeric":
             def enc(x, ft=ft):
-                x = tf.cast(x, tf.float64)
+                x = tf.cast(x, tf.float32)
                 if not ft["div"]:
                     return tf.zeros_like(x)[:, None]
                 return ((x - ft["sub"]) / ft["div"])[:, None]
@@ -538,15 +541,15 @@ def export():
                 n = len(ft["vocab"])
                 idx = table.lookup(text(x)) if table is not None else tf.fill(tf.shape(x), tf.constant(-1, tf.int64))
                 if kind == "label":
-                    return tf.cast(idx + 1, tf.float64)[:, None]
+                    return tf.cast(idx + 1, tf.float32)[:, None]
                 if kind == "target":
                     got = tf.gather(tv, tf.maximum(idx, 0))
-                    return tf.where(idx >= 0, got, tf.constant(ft["prior"], tf.float64))[:, None]
-                cols = tf.one_hot(idx, n, dtype=tf.float64)
+                    return tf.where(idx >= 0, got, tf.constant(ft["prior"], tf.float32))[:, None]
+                cols = tf.one_hot(idx, n, dtype=tf.float32)
                 if ft.get("dropped", -1) >= 0:
                     keep = np.ones(n)
                     keep[ft["dropped"]] = 0
-                    cols = cols * keep
+                    cols = cols * keep.astype(np.float32)
                 if ft.get("null"):
                     cols = tf.concat([cols, tf.zeros_like(cols[:, :1])], 1)
                 return cols
@@ -596,16 +599,17 @@ def export():
             h = a
         return h
 
-    def class_values(n):
+    def class_list():
         if label_dtype == tf.string:
-            vals = tf.constant(classes)
-        elif label_dtype == tf.bool:
-            vals = tf.constant([c.lower() == "true" for c in classes])
-        else:
-            vals = tf.constant([float(c) for c in classes], tf.float64)
-            if label_dtype == tf.int64:
-                vals = tf.cast(vals, tf.int64)
-        return tf.tile(vals[None, :], [n, 1])
+            return tf.constant(classes)
+        if label_dtype == tf.bool:
+            return tf.constant([c.lower() == "true" for c in classes])
+        if label_dtype == tf.int64:
+            return tf.constant([int(float(c)) for c in classes], tf.int64)
+        return tf.constant([float(c) for c in classes], tf.float64)
+
+    def class_values(n):
+        return tf.tile(tf.expand_dims(class_list(), 0), [n, 1])
 
     mf_tables = []
     if head["kind"] == "mf":
@@ -620,7 +624,7 @@ def export():
             uf = tf.gather(weights["userF"], tf.maximum(ui, 0))
             itf = tf.gather(weights["itemF"], tf.maximum(ii, 0))
             z = tf.reduce_sum(uf * itf, 1) + tf.gather(weights["userB"], tf.maximum(ui, 0)) + tf.gather(weights["itemB"], tf.maximum(ii, 0))
-            z = tf.where((ui >= 0) & (ii >= 0), z, tf.constant(float("nan"), tf.float64))
+            z = tf.where((ui >= 0) & (ii >= 0), z, tf.constant(float("nan"), tf.float32))
             return {head["output"]: z}
         vals = dict(zip([s["name"] for s in spec["inputs"]], args))
         x = tf.concat([enc(vals[name]) for name, enc in encoders], 1)
@@ -629,12 +633,12 @@ def export():
             c = weights["centroids"]
             if head.get("distance") == "COSINE":
                 num = tf.matmul(x, c, transpose_b=True)
-                den = tf.norm(x, axis=1)[:, None] * tf.norm(c, axis=1)[None, :]
+                den = tf.expand_dims(tf.norm(x, axis=1), 1) * tf.expand_dims(tf.norm(c, axis=1), 0)
                 d = tf.where(den > 0, 1 - num / tf.where(den > 0, den, 1.0), tf.ones_like(num))
             else:
-                d = tf.sqrt(tf.maximum(tf.reduce_sum(tf.square(x[:, None, :] - c[None, :, :]), 2), 0))
+                d = tf.sqrt(tf.maximum(tf.reduce_sum(tf.square(tf.expand_dims(x, 1) - tf.expand_dims(c, 0)), 2), 0))
             return {"centroid_id": tf.argmin(d, 1) + 1, "centroid_distances": d,
-                    "centroid_ids": tf.tile(tf.range(1, len(head["centroids"]) + 1, dtype=tf.int64)[None, :], [n, 1])}
+                    "centroid_ids": tf.tile(tf.expand_dims(tf.range(1, len(head["centroids"]) + 1, dtype=tf.int64), 0), [n, 1])}
         if kind == "pca":
             pcs = tf.matmul(x, weights["components"], transpose_b=True)
             return {"principal_component_%d" % (k + 1): pcs[:, k] for k in range(len(head["components"]))}
@@ -652,11 +656,13 @@ def export():
             p = tf.sigmoid(z[:, 0])
             probs = tf.stack([p, 1 - p], 1)
             values = class_values(n)  # [positive, negative], as ML.PREDICT lists them
-            pred = tf.where(p >= head.get("threshold", 0.5), values[:, 0], values[:, 1])
+            # The class's index, 0 the positive, gathered (TensorFlow Lite's
+            # builtins select no strings).
+            pred = tf.gather(class_list(), tf.cast(p < head.get("threshold", 0.5), tf.int32))
             return {"predicted_" + label: pred, label + "_probs": probs, label + "_values": values}
         probs = tf.nn.softmax(z, 1)
         values = class_values(n)
-        pred = tf.gather(values, tf.argmax(z, 1), batch_dims=1)
+        pred = tf.gather(class_list(), tf.argmax(z, 1, output_type=tf.int32))
         return {"predicted_" + label: pred, label + "_probs": probs, label + "_values": values}
 
     specs = [tf.TensorSpec([None], dtypes[s["dtype"]], name=s["name"]) for s in spec["inputs"]]

@@ -394,6 +394,11 @@ func TestExportTFSavedModelWithTensorFlow(t *testing.T) {
 					t.Fatalf("no %s: %v", want, err)
 				}
 			}
+			// BigQuery ML imports it back: it converts to TensorFlow
+			// Lite's builtins, as CREATE MODEL ... TENSORFLOW needs.
+			if _, err := d.Convert(context.Background(), model); err != nil {
+				t.Errorf("the export does not convert to TensorFlow Lite: %v", err)
+			}
 			// Run serving_default on the rows (convert.py's predict).
 			req := map[string][]any{}
 			for _, in := range spec["inputs"].([]map[string]any) {
@@ -447,7 +452,9 @@ func keysAny(m map[string]any) []string {
 	return out
 }
 
-func closeTo(a, b float64) bool { return math.Abs(a-b) <= 1e-6*math.Max(1, math.Abs(b)) }
+// closeTo is a float32 computation's closeness: the export computes in
+// float32.
+func closeTo(a, b float64) bool { return math.Abs(a-b) <= 2e-5*math.Max(1, math.Abs(b)) }
 
 func checkScalar(name string) func(bqModel, map[string]*string, map[string]any, int) string {
 	return func(md bqModel, vals map[string]*string, out map[string]any, i int) string {

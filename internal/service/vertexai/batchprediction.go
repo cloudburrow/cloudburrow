@@ -33,12 +33,20 @@ package vertexai
 //     the instances per request; model_parameters are each request's
 //     parameters.
 //
-// UNVERIFIED (re-read 2026-11-24,
-// https://docs.cloud.google.com/vertex-ai/docs/predictions/get-batch-predictions
-// and the BatchPredictionJob proto): the file number's padding, the errors
-// file's name (the page names none; the proto's output_config, written for
-// AutoML, names predictions_0001 and errors_0001 files) and the errors
-// table's columns beyond instance and error.
+// UNVERIFIED (searched again 2026-11-24 for #2210:
+// https://docs.cloud.google.com/vertex-ai/docs/predictions/get-batch-predictions,
+// the REST reference projects.locations.batchPredictionJobs and a search
+// of docs.cloud.google.com for prediction.errors_stats, which finds
+// nothing): the file number's padding and the errors file's name. The
+// custom-trained guide names only the results files,
+// prediction.results-{file_number}-of-{number_of_files_generated}, and no
+// errors file. The REST reference's gcsDestination names "predictions_0001.<extension>"
+// and "an additional errors_0001.<extension>" (its failed instances "followed by
+// an additional error field", a google.rpc.Status of code and message),
+// but its predictions name is not the guide's, so neither is taken as the
+// errors file of a custom model's job; CloudBurrow keeps the guide's
+// pattern for both. The errors table's columns beyond instance and error
+// are UNVERIFIED too.
 
 import (
 	"context"
