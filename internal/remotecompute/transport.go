@@ -100,24 +100,37 @@ func installScript(pub string) string {
 func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
 func (s *sshTransport) Authorize(ctx context.Context) (bool, error) {
-	args := append(append(s.common(), s.own()...), s.target.destination(), "true")
-	_, ownErr := s.run(ctx, nil, args...)
-	if ownErr == nil {
-		return false, nil
+	// The key is installed once, and remembered beside it: whether the
+	// host accepts it cannot be asked of ssh alone, since keys the user's
+	// config names are offered too.
+	marker := s.key.Path + ".authorized"
+	if _, err := os.Stat(marker); err == nil {
+		args := append(append(s.common(), s.own()...), s.target.destination(), "true")
+		_, err := s.run(ctx, nil, args...)
+		if err == nil {
+			return false, nil
+		}
+		if !strings.Contains(err.Error(), "Permission denied") {
+			return false, fmt.Errorf("could not reach %s over SSH: %w", s.target, err)
+		}
+		// Removed from authorized_keys since: installed again below.
 	}
-	if !strings.Contains(ownErr.Error(), "Permission denied") {
-		return false, fmt.Errorf("could not reach %s over SSH: %w", s.target, ownErr)
-	}
-	// Once: the user's own agent and config sign in, and put CloudBurrow's
-	// public key in place. From then on only CloudBurrow's key is used.
-	args = append(s.common(), s.target.destination(), installScript(s.key.Public))
+	// The user's own agent and config sign in, once, and put CloudBurrow's
+	// public key in place. From then on CloudBurrow's key is offered first.
+	args := append(s.common(), s.target.destination(), installScript(s.key.Public))
 	if _, err := s.run(ctx, nil, args...); err != nil {
+		if !strings.Contains(err.Error(), "Permission denied") {
+			return false, fmt.Errorf("could not reach %s over SSH: %w", s.target, err)
+		}
 		return false, fmt.Errorf("%s does not accept CloudBurrow's key yet, and your ssh agent and config could not sign in to add it (%v). "+
 			"Add this line to the remote account's ~/.ssh/authorized_keys, then retry:\n  %s", s.target, err, s.key.Public)
 	}
 	args = append(append(s.common(), s.own()...), s.target.destination(), "true")
 	if _, err := s.run(ctx, nil, args...); err != nil {
 		return true, fmt.Errorf("%s still refuses CloudBurrow's key after it was added to ~/.ssh/authorized_keys: %w", s.target, err)
+	}
+	if err := os.WriteFile(marker, []byte(s.target.String()+"\n"), 0o600); err != nil {
+		return true, err
 	}
 	return true, nil
 }

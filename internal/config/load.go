@@ -470,6 +470,11 @@ func refuseFileExposure(cfg *Config, path string, explicit bool, keys map[string
 			"a discovered file cannot let builds run containers with the host's Docker socket (#1382): pass "+
 			"--cloudbuild-host-steps (or %sCLOUDBUILD_HOST_STEPS=true, or name the file with --config), and remove the key", path, EnvPrefix)
 	}
+	if !explicit && cfg.Compute != "" {
+		return fmt.Errorf("config file %s, found in the working directory, sets compute; "+
+			"a discovered file cannot send the instance's Docker, and the reverse forwards to this machine's endpoints, "+
+			"to another host (#2209): pass --compute (or %sCOMPUTE, or name the file with --config), and remove the key", path, EnvPrefix)
+	}
 	if _, ok := keys["bindAddress"]; ok && !explicit {
 		if ip := net.ParseIP(cfg.BindAddress); ip != nil && !ip.IsLoopback() {
 			return fmt.Errorf("config file %s, found in the working directory, sets bindAddress %q, a non-loopback address; "+

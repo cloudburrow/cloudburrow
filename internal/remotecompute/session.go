@@ -188,7 +188,7 @@ func Connect(ctx context.Context, opts Options) (*Session, error) {
 		return fail("Could not sign in to "+opts.Target.String(), err)
 	}
 	if installed {
-		s.emit(StageAuthorizing, "Added CloudBurrow's own key to the remote account; your keys are not used again", nil)
+		s.emit(StageAuthorizing, "Added CloudBurrow's own key to the remote account; from now on CloudBurrow signs in with it", nil)
 	}
 	s.forwards = []*forward{{bind: s.sock, target: opts.RemoteDockerSocket}}
 	done, err := s.tr.Master(ctx, s.forwards[0].spec())

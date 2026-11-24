@@ -120,7 +120,10 @@ func connectComputeWith(ctx context.Context, cfg config.Config, out io.Writer, r
 	_ = os.Unsetenv("DOCKER_CONTEXT")
 	hostrelay.SetRemote(s)
 	c.mirror = s.NewMirror()
-	c.mirror.Logf = func(format string, args ...any) { fmt.Fprintf(out, format+"\n", args...) }
+	if record {
+		// up's log says what each forward is; a one-off command is quiet.
+		c.mirror.Logf = func(format string, args ...any) { fmt.Fprintf(out, format+"\n", args...) }
+	}
 	if err := c.mirror.Start(ctx); err != nil {
 		c.Close()
 		return nil, fmt.Errorf("compute host %s: list its published ports: %w", t, err)

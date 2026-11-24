@@ -64,6 +64,12 @@ type runtimeInfo struct {
 	Services []config.Service `json:"services,omitempty"`
 	// IAMEnforcement is this up's --iam-enforcement, "off" or "on" (#1879).
 	IAMEnforcement string `json:"iamEnforcement,omitempty"`
+	// Compute and DockerHost are the compute host and the DOCKER_HOST that
+	// reaches its Docker through this up's SSH connection (#2209), which
+	// `env` exports so the developer's docker and kind reach it too.
+	// Absent for an instance on this machine's Docker.
+	Compute    string `json:"compute,omitempty"`
+	DockerHost string `json:"dockerHost,omitempty"`
 }
 
 func runtimePath(cfg config.Config) string { return filepath.Join(cfg.InstanceDir(), "up.json") }
@@ -145,6 +151,9 @@ func (r *runtimeFile) Name() string { return "runtime-file" }
 func (r *runtimeFile) Start(context.Context) error {
 	r.info = runtimeInfo{PID: os.Getpid(), Control: r.control.Addr(), Detached: r.detached, Started: time.Now().UTC(),
 		Services: r.cfg.EnabledServices(), IAMEnforcement: iamEnforcementMode(r.cfg)}
+	if c := currentCompute(); c != nil {
+		r.info.Compute, r.info.DockerHost = c.record.Target.String(), c.session.DockerHost()
+	}
 	// Unreadable only where the platform does not expose it; the file is
 	// then identified by the process's name, as before #820.
 	r.info.ProcStart, _ = procStartTime(r.info.PID)
