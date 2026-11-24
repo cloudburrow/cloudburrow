@@ -144,7 +144,7 @@ starts with a path of this machine goes through `internal/hostmount` instead:
 | Where | Path | Mode |
 |---|---|---|
 | `internal/modelgarden/docker.go` (Model Garden's vLLM, TEI, llama.cpp, PyTorch, MLX and ONNX containers) | the downloaded model at `/model` | read-only |
-| `internal/service/vertexai/exec.go` (the LiteRT-LM runner, `cloudburrow localai`) | the model directory at `/models`, where the runtime writes its XNNPACK cache | cache |
+| `internal/service/vertexai/exec.go` (the LiteRT-LM runner of Gemini generation) | the model directory at `/models`, where the runtime writes its XNNPACK cache | cache |
 | `internal/tfconvert` (the TensorFlow converter and predictor) | the SavedModel at `/model`; the converter's `/out` | read-only; read-write, a scratch volume per run |
 | `internal/videodecode` | the request's video at `/in/video` | read-only, removed with the request |
 | `internal/sparkproc` (BigQuery's Spark procedures) | the job's directory at `/cb` (relay and Spark), the connector jar, a custom image's Spark and Java trees | read-only and read-write scratch per job; read-only |
