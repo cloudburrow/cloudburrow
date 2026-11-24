@@ -108,6 +108,45 @@ its state, region, machine type, external IP, auto-stop and price per hour. Ther
 CLI: `cloudburrow cloud status|scale --size large|start|stop|delete|resources`. Each takes
 `--name` for the instance.
 
+## 4. Move a running instance onto the VM
+
+A VM created for an instance that already runs on this machine does not take it over silently:
+the instance's cluster and its state (the kind node's etcd, the volumes its pods write, Cloud SQL
+data, every container and volume labelled for it) are on this machine's Docker, so Create ends
+with "The VM is ready: move the instance there". **Move instance here**, on the VM's card in
+Compute capacity, or the CLI, moves it:
+
+```sh
+cloudburrow cloud move lab --to lab          # onto the VM `cloud create --name lab` made
+cloudburrow cloud move lab --to gpu-box      # onto another VM; gpu-box is then lab's compute
+cloudburrow cloud move lab --to ssh://dev@build-box.example   # onto a host of your own
+```
+
+The move, step by step (each step is a line in the console and the terminal):
+
+1. **stop**: the instance's `up` stops (its arguments were recorded when it started);
+2. **connect**: the VM is reached and checked as `up --compute` checks a host;
+3. **carry**: each of the instance's containers (the kind nodes first) is committed with `docker
+   commit`, which keeps a node's `/etc/kubernetes` and `/kind`, and its image goes across with
+   `docker save | docker load`; each volume it mounts, and each volume labelled for the
+   instance, is streamed as a tar between two helper containers; each network is made with the
+   same subnets, so a kind node keeps its address, which its certificates name; each container
+   is made again from its own `docker inspect` (name, labels, privileges, tmpfs, published
+   ports, address, aliases, mounts). A bind mount of a path of this machine becomes a volume
+   holding the path's content. Progress shows the bytes copied;
+4. **start**: the VM is recorded as the instance's compute and `up` starts again with the same
+   arguments, so it runs there;
+5. **verify**: `up` must report ready, and the cluster's nodes must run on the VM;
+6. **cleanup**: only then are the instance's containers, volumes and the committed images
+   removed from this machine.
+
+A failure at any of steps 2 to 5 **rolls back**: what was made on the VM is removed, the record
+goes, and the instance starts on this machine again as it was, with its data. Nothing is removed
+here before the instance runs on the VM. The console restarts during a move, as `up` serves it;
+the page follows the move's progress (`<state>/<instance>/move.json`) across the restart, and
+the move runs in a process of its own (`cloudburrow cloud move`), so closing the page does not
+stop it.
+
 ## What it costs
 
 You pay your cloud, at its on-demand prices, for:
@@ -224,4 +263,11 @@ never reach a real endpoint:
   against them: sign-in, credential refresh, the permission check, prices, create with rollback,
   resize, start, stop, delete and its check (`go test ./internal/byoc/... ./cmd/cloudburrow -run Cloud`).
 - Browser tests drive the whole console flow against the fakes, with WCAG and keyboard subtests
-  (`go test -tags browser ./test/browser -run Byoc`).
+  (`go test -tags browser ./test/browser -run Byoc`). `TestByocMoveAnInstanceOntoTheVM` checks
+  Move: the dialog, the progress, a rolled-back failure in an alert, a stopped VM's reason.
+- A move is tested for real against the Docker-in-Docker sshd stand-in
+  ([remote-compute.md](remote-compute.md#tests)): `TestStandInMoveRoundTripKeepsData` carries a
+  container with a labelled volume, an anonymous volume, a bind mount, a fixed address and a
+  published port to the stand-in and back, and a refused carry that rolls back; and an instance
+  (Storage, BigQuery, Dataform) with a ConfigMap and a Cloud Storage object was moved with
+  `cloudburrow cloud move <instance> --to ssh://` and both were read back from it on the host.

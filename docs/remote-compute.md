@@ -135,6 +135,43 @@ even one running Docker Desktop, because there it would be the host, not this ma
 The admin/control port is never published to the cluster, the same as with local compute
 (ADR-0004).
 
+### Containers that mount a path of this machine
+
+A bind mount (`-v /path:/dst`) names the filesystem of the Docker that runs the container, so on a
+remote host it would name the host's, where the path does not exist. Every container CloudBurrow
+starts with a path of this machine goes through `internal/hostmount` instead:
+
+| Where | Path | Mode |
+|---|---|---|
+| `internal/modelgarden/docker.go` (Model Garden's vLLM, TEI, llama.cpp, PyTorch, MLX and ONNX containers) | the downloaded model at `/model` | read-only |
+| `internal/service/vertexai/exec.go` (the LiteRT-LM runner, `cloudburrow localai`) | the model directory at `/models`, where the runtime writes its XNNPACK cache | cache |
+| `internal/tfconvert` (the TensorFlow converter and predictor) | the SavedModel at `/model`; the converter's `/out` | read-only; read-write, a scratch volume per run |
+| `internal/videodecode` | the request's video at `/in/video` | read-only, removed with the request |
+| `internal/sparkproc` (BigQuery's Spark procedures) | the job's directory at `/cb` (relay and Spark), the connector jar, a custom image's Spark and Java trees | read-only and read-write scratch per job; read-only |
+| `cmd/cloudburrow/dataform.go` (Dataform's compiler and npm) | the npm cache; the CLI's install; a workspace at `/ws`; a core version's warm-up | cache; read-write; read-write scratch; cache scratch |
+
+With local compute `hostmount` returns the bind mount as before. With remote compute the path's
+content goes into a Docker volume on the host, labelled `io.cloudburrow.instance=<name>` (so
+`stop` and `delete` remove it with the instance's other volumes), and the container mounts that
+volume (`--mount type=volume,…`; a single file with `volume-subpath`, Docker 26 or later):
+
+- **Filling it** needs nothing on the host but its Docker. A helper container is created, never
+  started, from the kind node image the host already holds, with the volume mounted, and the
+  content is streamed into it (`docker cp - helper:/d`) over the same forwarded socket. A
+  manifest kept here (each entry's size, time and mode) means the next use sends only what
+  changed and removes only what was removed. A volume that is not the one the manifest
+  describes (a new host, a moved instance; each volume carries a `cloudburrow.dev/mount-id`
+  label) is filled in full again.
+- **Modes.** A read-only mount's files are readable by any user (the volume's files are root's,
+  and the image's user is its own); a writable one's directories are writable by any. A
+  **read-write** mount is copied back here after the container exits (`docker cp helper:/d/.
+  -`, mirrored: what the container removed goes here too). A **cache** mount's writes stay on
+  the host for the next use. A **scratch** mount (a job's temporary directory) is removed after
+  its run.
+- Nothing else about the container changes: its network (`--network none`, the `--internal`
+  networks), user and read-only root stay as they were, so egress is exactly as with local
+  compute.
+
 ### Metal and other host processes
 
 The Apple GPU generator (LiteRT-LM on Metal, `cmd/cloudburrow/localaimetal.go`), the ONNX runner
@@ -209,6 +246,22 @@ s.Close()
 `forward`, `disconnected`, `reconnecting`, `failed`, `closed`. Its `Message` is a sentence the
 console can show as it is.
 
+## Moving an instance
+
+`cloudburrow cloud move <instance> --to <vm>|ssh://user@host` and the console's **Move instance
+here** move an instance whose Docker is this machine's onto a VM or host ([byoc.md](byoc.md#4-move-a-running-instance-onto-the-vm)).
+`remotecompute.StartCarry` does the Docker side between any two Dockers (each a `DOCKER_HOST`):
+it stops the instance's containers (its kind nodes, and every container labelled
+`io.cloudburrow.instance` or `cloudburrow.instance` for it), commits each, takes its image across
+with `docker save | docker load`, makes each network with the same subnets, streams each volume
+(mounted, or labelled for the instance) between two helper containers, and creates each container
+again from its `docker inspect`, with its address. A system bind mount (`/lib/modules`, `/dev`, the
+Docker socket) stays the target's own; any other bind mount becomes a volume holding the path. A
+container or volume the target already has by that name stops the carry before anything is made.
+`Rollback` removes what was made on the target and starts the source's containers again;
+`RemoveSource` removes the source's once the instance is checked on the target. The state
+directory never moves: it is this machine's, with the APIs.
+
 ## Egress on the host
 
 The egress guards are of two kinds, and both still apply with the compute on the host:
@@ -260,6 +313,18 @@ the network.
   `cmd/cloudburrow`'s `TestProvisionedComputeRunsDockerOnTheVM` connects an instance whose
   record is a provisioned VM. It uses the provisioner's key and current address, and checks that
   the process's `docker` then reaches the stand-in.
+- `TestStandInModelContainerMountsAPathOfThisMachine` runs a model container through Model
+  Garden's own `DockerCLI` on the stand-in: its model directory exists only here, the container
+  mounts it as a read-only volume on the host, and its published port serves the model here
+  through the mirror; a writable scratch mount's writes come back. `internal/hostmount`'s own
+  tests run the same volumes against this machine's Docker: a 0600 file readable by another user,
+  a change and a removal sent alone, a read-only mount refusing writes, a container's writes and
+  removals mirrored back, a single file, and a refill after the volume is gone.
+- `TestStandInMoveRoundTripKeepsData` carries an instance's container (its own network at a fixed
+  address, a labelled volume, an anonymous volume, a bind mount of a path here, a published port)
+  to the stand-in and back, checking the data, hostname and address at each end and that the
+  source is gone, and that a carry onto a volume the target already has rolls back with the
+  source running.
 - `test/browser`'s `TestRemoteComputeConsole` (`CLOUDBURROW_TEST_REMOTE_COMPUTE` names the host)
   checks the Instance page's Compute card (host, size, system, connection, forwarded ports),
   that Reconnect is refused without the admin token, and that Reconnect with it brings the

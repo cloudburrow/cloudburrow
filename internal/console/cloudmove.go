@@ -85,7 +85,8 @@ func (s *Server) handleComputeMoveStatus(w http.ResponseWriter, r *http.Request)
 	}
 	st, ok := s.mover.MoveStatus(r.PathValue("instance"))
 	if !ok {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no move of " + r.PathValue("instance")})
+		// No move is an answer, not an error: the page asks on each load.
+		writeJSON(w, http.StatusOK, map[string]any{"instance": r.PathValue("instance"), "none": true, "steps": []MoveStep{}})
 		return
 	}
 	writeJSON(w, http.StatusOK, st)

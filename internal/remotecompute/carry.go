@@ -640,11 +640,14 @@ func (c *Carry) create(ctx context.Context, ct containerInfo, image string) erro
 			args = append(args, "--mount", spec)
 		case "bind":
 			if systemBind(m.Source) {
-				spec := "type=bind,src=" + m.Source + ",dst=" + m.Destination
+				// -v, as kind gives it: a path the host lacks is made
+				// (/lib/modules on a host without modules), where --mount
+				// would refuse.
+				spec := m.Source + ":" + m.Destination
 				if !m.RW {
-					spec += ",readonly"
+					spec += ":ro"
 				}
-				args = append(args, "--mount", spec)
+				args = append(args, "-v", spec)
 				continue
 			}
 			v, err := c.bindVolume(ctx, m.Source)
