@@ -934,7 +934,7 @@ func (m consoleMover) StartDeleteWithData(instance, vm string) error {
 	}
 	defer logf.Close()
 	child := exec.Command(exe, "cloud", "delete", "--with-instance-data", "--yes", "--name", vm, "--state-dir", cfg.StateDir)
-	child.Env = append(os.Environ(), moveProgressEnv+"="+p.path)
+	child.Env = append(spawnEnv(), moveProgressEnv+"="+p.path)
 	child.Stdout, child.Stderr = logf, logf
 	child.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := child.Start(); err != nil {
@@ -968,7 +968,7 @@ func (m consoleMover) spawn(cfg config.Config, kind, to, first string, args ...s
 	}
 	defer logf.Close()
 	child := exec.Command(exe, append(args, "--yes", "--name", cfg.Name, "--state-dir", cfg.StateDir)...)
-	child.Env = append(os.Environ(), moveProgressEnv+"="+p.path)
+	child.Env = append(spawnEnv(), moveProgressEnv+"="+p.path)
 	child.Stdout, child.Stderr = logf, logf
 	child.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := child.Start(); err != nil {
@@ -1005,3 +1005,26 @@ func (m consoleMover) MoveStatus(instance string) (console.MoveStatus, bool) {
 
 // moveProgressEnv names the progress file a console-started move writes.
 const moveProgressEnv = "CLOUDBURROW_MOVE_PROGRESS"
+
+// spawnEnv is the environment for a move, a change of VM or a delete that
+// the console starts: this process's, but with DOCKER_HOST as it was before
+// this process connected to its compute. Connected to a VM, this process's
+// DOCKER_HOST is its own session's socket, which goes when the move stops
+// this up: inherited, "this machine's Docker" would be that dead socket.
+func spawnEnv() []string {
+	env := os.Environ()
+	c := currentCompute()
+	if c == nil {
+		return env
+	}
+	out := make([]string, 0, len(env)+1)
+	for _, kv := range env {
+		if !strings.HasPrefix(kv, "DOCKER_HOST=") {
+			out = append(out, kv)
+		}
+	}
+	if c.hadPrev {
+		out = append(out, "DOCKER_HOST="+c.prev)
+	}
+	return out
+}

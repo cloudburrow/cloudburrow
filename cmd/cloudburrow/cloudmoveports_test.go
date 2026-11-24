@@ -54,3 +54,32 @@ func TestMoveBackWaitsForTheForwardedPorts(t *testing.T) {
 		t.Fatalf("a port held throughout = %v", err)
 	}
 }
+
+// A console-started move inherits DOCKER_HOST as it was before up
+// connected to its VM, never the session's own socket, which the move
+// removes when it stops up.
+func TestSpawnEnvDropsTheSessionsDockerHost(t *testing.T) {
+	t.Setenv("DOCKER_HOST", "unix:///tmp/cb-rc-1/docker.sock")
+	activeComputeMu.Lock()
+	prev := activeCompute
+	activeCompute = &computeConn{}
+	activeComputeMu.Unlock()
+	t.Cleanup(func() { activeComputeMu.Lock(); activeCompute = prev; activeComputeMu.Unlock() })
+	for _, kv := range spawnEnv() {
+		if strings.HasPrefix(kv, "DOCKER_HOST=") {
+			t.Fatalf("the spawned move inherits %s", kv)
+		}
+	}
+	activeCompute.hadPrev, activeCompute.prev = true, "unix:///var/run/user.sock"
+	found := false
+	for _, kv := range spawnEnv() {
+		if kv == "DOCKER_HOST=unix:///var/run/user.sock" {
+			found = true
+		} else if strings.HasPrefix(kv, "DOCKER_HOST=") {
+			t.Fatalf("the spawned move inherits %s", kv)
+		}
+	}
+	if !found {
+		t.Fatal("the user's own DOCKER_HOST was not restored")
+	}
+}

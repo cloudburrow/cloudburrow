@@ -404,8 +404,11 @@ func TestByocFirstRunWalkThrough(t *testing.T) {
 		}
 		p.run(chromedp.KeyEvent(kb.Escape))
 		p.waitFor(`document.querySelector(".modal form[data-confirm=confirm]") === null`)
+		// The dialog's opening animation is off, so its colours are final.
+		p.run(reducedMotion())
 		p.run(chromedp.Click(chromedp.CSS("#capacity-" + w.vmB + "-delete")))
-		p.waitFor(`document.getElementById("confirm-input") !== null`)
+		p.waitFor(`document.getElementById("confirm-input") !== null && [document.querySelector(".modal"), ...document.querySelectorAll(".modal *")].every((e) => getComputedStyle(e).opacity === "1")`)
+		p.waitFor(settled)
 		for _, u := range p.unnamedControls() {
 			t.Errorf("the Delete VM and this instance's data dialog: an unnamed %s", u)
 		}
