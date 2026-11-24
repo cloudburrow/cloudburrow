@@ -119,6 +119,7 @@ func TestGenerateServiceIdentityEveryEntry(t *testing.T) {
 		"networksecurity.googleapis.com":        "gcp-sa-networksecurity.iam.gserviceaccount.com",
 		"iap.googleapis.com":                    "gcp-sa-iap.iam.gserviceaccount.com",
 		"alloydb.googleapis.com":                "gcp-sa-alloydb.iam.gserviceaccount.com",
+		"file.googleapis.com":                   "cloud-filer.iam.gserviceaccount.com",
 		"workflowexecutions.googleapis.com":     "",
 		"kmsinventory.googleapis.com":           "",
 		"telemetry.googleapis.com":              "",

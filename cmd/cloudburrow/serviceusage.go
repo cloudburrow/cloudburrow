@@ -82,6 +82,7 @@ var serviceUsageAPIs = []struct {
 	{config.ServiceDataproc, serviceusage.API{Name: "dataproc.googleapis.com", Title: "Cloud Dataproc API"}},
 	{config.ServiceAppHub, serviceusage.API{Name: "apphub.googleapis.com", Title: "App Hub API"}},
 	{config.ServiceAlloyDB, serviceusage.API{Name: "alloydb.googleapis.com", Title: "AlloyDB API"}},
+	{config.ServiceFilestore, serviceusage.API{Name: "file.googleapis.com", Title: "Cloud Filestore API"}},
 	{config.ServiceTrace, serviceusage.API{Name: "cloudtrace.googleapis.com", Title: "Cloud Trace API"}},
 	{config.ServiceTrace, serviceusage.API{Name: "telemetry.googleapis.com", Title: "Telemetry API"}},
 }

@@ -97,6 +97,7 @@ var compatSections = map[string]string{
 	"dataproc":           "## Dataproc — `google.cloud.dataproc.v1` clusters, jobs, workflows and Serverless for Apache Spark",
 	"apphub":             "## App Hub — `google.cloud.apphub.v1`",
 	"alloydb":            "## AlloyDB for PostgreSQL — `google.cloud.alloydb.v1`",
+	"filestore":          "## Filestore — `google.cloud.filestore.v1`",
 	"trace":              "## Cloud Trace — `google.devtools.cloudtrace.v1` and `v2`",
 	"vpcaccess":          "## Serverless VPC Access — `google.cloud.vpcaccess.v1`",
 	"certificatemanager": "## Certificate Manager — `google.cloud.certificatemanager.v1`",

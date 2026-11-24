@@ -81,6 +81,73 @@
         "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect golang:1.24-alpine`."
       }
     },
+    "filestore": {
+      "debianBase": {
+        "$comment": "internal/filestoreserver/image/Dockerfile builds FROM this digest (#2192): the NFS server image each Filestore instance runs, built locally by `cloudburrow up` on the first instance.",
+        "image": "debian:trixie-slim",
+        "digest": "sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2",
+        "license": "DFSG-free Debian packages (see /usr/share/doc/*/copyright)",
+        "redistribution": "not published: built locally (tag cloudburrow.local/filestore-nfs:<hash of the image files>) and run as each instance's NFS server",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "notes": "The digest videodecode pins. Google publishes no NFS server image.",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect debian:trixie-slim`."
+      },
+      "nfsGanesha": {
+        "$comment": "apt-get install nfs-ganesha=6.5-5 from snapshot.debian.org 20261120T000000Z in internal/filestoreserver/image/Dockerfile (#2192): the user-space NFSv3 and NFSv4.1 server, with nfs-ganesha-vfs=6.5-5, its VFS filesystem backend.",
+        "version": "6.5-5",
+        "source": "https://snapshot.debian.org/archive/debian/20261120T000000Z/pool/main/n/nfs-ganesha/",
+        "license": "LGPL-3.0-or-later (NFS-Ganesha)",
+        "redistribution": "not published: installed into the locally built Filestore NFS server image and run there as a separate program; none of its code is in the repository or linked into the CLI",
+        "updateFeed": "debian-snapshot",
+        "verification": "built-and-run",
+        "skipDiscovery": "Debian package; depcheck only discovers GitHub-sourced components."
+      },
+      "rpcbind": {
+        "$comment": "apt-get install rpcbind=1.2.7-1 from snapshot.debian.org 20261120T000000Z in internal/filestoreserver/image/Dockerfile (#2192): the portmapper NFSv3 clients ask for mountd and NLM.",
+        "version": "1.2.7-1",
+        "source": "https://snapshot.debian.org/archive/debian/20261120T000000Z/pool/main/r/rpcbind/",
+        "license": "BSD-3-Clause",
+        "redistribution": "not published: installed into the locally built Filestore NFS server image and run there as a separate program; none of its code is in the repository or linked into the CLI",
+        "updateFeed": "debian-snapshot",
+        "verification": "built-and-run",
+        "skipDiscovery": "Debian package; depcheck only discovers GitHub-sourced components."
+      },
+      "nfsCommon": {
+        "$comment": "apt-get install nfs-common=1:2.8.3-1 from snapshot.debian.org 20261120T000000Z in internal/filestoreserver/image/Dockerfile (#2192): rpc.statd, the NSM status monitor NFSv3 locking needs, and rpcinfo, the readiness probe.",
+        "version": "1:2.8.3-1",
+        "source": "https://snapshot.debian.org/archive/debian/20261120T000000Z/pool/main/n/nfs-utils/",
+        "license": "GPL-2.0-or-later",
+        "redistribution": "not published: installed into the locally built Filestore NFS server image and run there as a separate program; none of its code is in the repository or linked into the CLI",
+        "updateFeed": "debian-snapshot",
+        "verification": "built-and-run",
+        "skipDiscovery": "Debian package; depcheck only discovers GitHub-sourced components."
+      },
+      "dbus": {
+        "$comment": "apt-get install dbus=1.16.2-2 from snapshot.debian.org 20261120T000000Z in internal/filestoreserver/image/Dockerfile (#2192): the system bus NFS-Ganesha's control interface starts on.",
+        "version": "1.16.2-2",
+        "source": "https://snapshot.debian.org/archive/debian/20261120T000000Z/pool/main/d/dbus/",
+        "license": "AFL-2.1 or GPL-2.0-or-later",
+        "redistribution": "not published: installed into the locally built Filestore NFS server image and run there as a separate program; none of its code is in the repository or linked into the CLI",
+        "updateFeed": "debian-snapshot",
+        "verification": "built-and-run",
+        "skipDiscovery": "Debian package; depcheck only discovers GitHub-sourced components."
+      },
+      "netbase": {
+        "$comment": "apt-get install netbase=6.5 from snapshot.debian.org 20261120T000000Z in internal/filestoreserver/image/Dockerfile (#2192): /etc/services and /etc/protocols, which NFS-Ganesha's RPC registration reads.",
+        "version": "6.5",
+        "source": "https://snapshot.debian.org/archive/debian/20261120T000000Z/pool/main/n/netbase/",
+        "license": "GPL-2.0-only",
+        "redistribution": "not published: installed into the locally built Filestore NFS server image and run there as a separate program; none of its code is in the repository or linked into the CLI",
+        "updateFeed": "debian-snapshot",
+        "verification": "built-and-run",
+        "skipDiscovery": "Debian package; depcheck only discovers GitHub-sourced components."
+      }
+    },
     "videodecode": {
       "debianBase": {
         "$comment": "internal/videodecode/Dockerfile builds FROM this digest (#1651): the video decoder image the CLI builds locally on the first AVI, FLV, MPEG or WMV video sent to multimodalembedding@001's :predict.",

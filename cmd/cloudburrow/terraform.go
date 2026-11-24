@@ -194,6 +194,10 @@ var terraformEndpoints = []terraformEndpoint{
 	// so a google_compute_* resource never reaches Google either. With
 	// the compute service enabled the next row sets it instead.
 	{config.ServiceGKE, "compute_custom_endpoint", "GOOGLE_COMPUTE_CUSTOM_ENDPOINT", "/compute/v1/", true, ""},
+	// Filestore (#2192): google_filestore_instance, _snapshot and _backup
+	// apply, plan clean, update in place and destroy in
+	// TestTerraformFilestore.
+	{config.ServiceFilestore, "filestore_custom_endpoint", "GOOGLE_FILESTORE_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	// Cloud Monitoring (#1939): google_monitoring_metric_descriptor.
 	{config.ServiceMonitoring, "monitoring_custom_endpoint", "GOOGLE_MONITORING_CUSTOM_ENDPOINT", "/", true, ""},
 	// The Compute Engine API's VPC networking (#1936), on its own port,
@@ -413,6 +417,7 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 		analyticsHubService:            cfg.Endpoints.AnalyticsHub,
 		config.ServiceMonitoring:       cfg.Endpoints.Monitoring,
 		config.ServiceCompute:          cfg.Endpoints.Compute,
+		config.ServiceFilestore:        cfg.Endpoints.Filestore,
 		config.ServiceWorkflows:        cfg.Endpoints.Workflows,
 		config.ServiceParameterManager: cfg.Endpoints.ParameterManager,
 		config.ServiceDataform:         cfg.Endpoints.Dataform,

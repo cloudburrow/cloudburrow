@@ -61,6 +61,7 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 	config.ServiceDataform:         {Providers: []string{"dataform", "dataform-folders", "dataform-settings"}},
 	config.ServiceAppHub:           {Providers: []string{"apphub", "apphub-discovered", "apphub-settings"}},
 	config.ServiceAlloyDB:          {Providers: []string{"alloydb", "alloydb-backups"}},
+	config.ServiceFilestore:        {Providers: []string{"filestore", "filestore-backups", "filestore-snapshots"}},
 	config.ServiceTrace:            {Providers: []string{"trace-explorer"}},
 	config.ServiceDataproc:         {Providers: []string{"dataproc-batches", "dataproc-sessions", "dataproc-templates", "dataproc-clusters", "dataproc-jobs", "dataproc-workflows", "dataproc-autoscaling"}},
 	// The Kubernetes Engine API (#1913): its clusters are on Kubernetes
@@ -200,6 +201,7 @@ func coverageDeps(t *testing.T) consoleDeps {
 		dataproc:         &dataprocService{},
 		appHub:           &appHubService{},
 		alloyDB:          &alloyDBService{},
+		filestore:        &filestoreService{},
 		trace:            &traceService{},
 		// The APIs & Services page (#1352) reads the Service Usage server.
 		serviceUsage: newServiceUsageServer(cfg, projects, store.NewMemory()),

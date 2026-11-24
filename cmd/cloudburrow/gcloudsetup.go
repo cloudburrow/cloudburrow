@@ -237,6 +237,9 @@ var gcloudVerified = []gcloudEndpoint{
 	// v1beta, alpha v1alpha). TestGcloudAlloyDB drives clusters,
 	// instances, users and backups.
 	{config.ServiceAlloyDB, "alloydb", "/", false, false},
+	// Filestore (#2192): gcloud filestore appends v1/. TestGcloudFilestore
+	// drives instances, snapshots, backups, revert and restore.
+	{config.ServiceFilestore, "file", "/", false, false},
 	// Bigtable's admin REST API (#1440), on the Bigtable port beside gRPC;
 	// gcloud bigtable appends v2/. TestGcloudBigtableAppProfiles creates,
 	// lists, updates and deletes app profiles.
@@ -322,7 +325,7 @@ func gcloudPorts(cfg config.Config) map[config.Service]int {
 		config.ServiceFirestore: cfg.Endpoints.Firestore, config.ServicePrivateCA: cfg.Endpoints.PrivateCA, config.ServiceDatastore: cfg.Endpoints.Datastore,
 		config.ServiceGKE: cfg.Endpoints.GKE, config.ServiceMonitoring: cfg.Endpoints.Monitoring, config.ServiceCompute: cfg.Endpoints.Compute,
 		config.ServiceWorkflows: cfg.Endpoints.Workflows, config.ServiceParameterManager: cfg.Endpoints.ParameterManager,
-		config.ServiceAppHub: cfg.Endpoints.AppHub, config.ServiceDataproc: cfg.Endpoints.Dataproc, config.ServiceAlloyDB: cfg.Endpoints.AlloyDB, localAIEndpoint: cfg.Endpoints.LocalAI, storageTransferService: cfg.Endpoints.StorageTransfer,
+		config.ServiceAppHub: cfg.Endpoints.AppHub, config.ServiceDataproc: cfg.Endpoints.Dataproc, config.ServiceAlloyDB: cfg.Endpoints.AlloyDB, config.ServiceFilestore: cfg.Endpoints.Filestore, localAIEndpoint: cfg.Endpoints.LocalAI, storageTransferService: cfg.Endpoints.StorageTransfer,
 		storageBatchService: cfg.Endpoints.StorageBatchOperations, storageInsightsService: cfg.Endpoints.StorageInsights}
 }
 
@@ -356,6 +359,9 @@ func gcloudOverrideOn(cfg config.Config, v gcloudEndpoint) bool {
 	}
 	if v.service == config.ServiceAlloyDB {
 		on = alloyDBEnabled(cfg)
+	}
+	if v.service == config.ServiceFilestore {
+		on = filestoreEnabled(cfg)
 	}
 	if v.service == localAIEndpoint {
 		on = serviceEnabled(cfg, config.ServiceRun)

@@ -222,6 +222,7 @@ type rawFlags struct {
 	dataproc         int
 	appHub           int
 	alloyDB          int
+	filestore        int
 	onnx             int
 	tfconvert        int
 	spark            int
@@ -322,6 +323,7 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.IntVar(&r.dataproc, "port-dataproc", 0, "Dataproc API (Serverless for Apache Spark) host port (0 = OS-assigned; default 9066)")
 	fs.IntVar(&r.appHub, "port-apphub", 0, "App Hub API host port (0 = OS-assigned; default 9048)")
 	fs.IntVar(&r.alloyDB, "port-alloydb", 0, "AlloyDB for PostgreSQL API host port (0 = OS-assigned; default 9063)")
+	fs.IntVar(&r.filestore, "port-filestore", 0, "Filestore API host port (0 = OS-assigned; default 9071)")
 	fs.IntVar(&r.onnx, "port-onnx", 0, "ONNX runner host port, for BigQuery ML's imported ONNX models in the onnx build (0 = OS-assigned; default 9025)")
 	fs.IntVar(&r.spark, "port-spark", 0, "Spark procedure runner host port, for BigQuery's stored procedures for Apache Spark (0 = OS-assigned; default 9049)")
 	fs.IntVar(&r.tfconvert, "port-tfconvert", 0, "TensorFlow SavedModel converter host port, for BigQuery ML's imported TENSORFLOW models (0 = OS-assigned; default 9027)")
@@ -554,6 +556,7 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 		{"PORT_DATAPROC", &cfg.Endpoints.Dataproc},
 		{"PORT_APPHUB", &cfg.Endpoints.AppHub},
 		{"PORT_ALLOYDB", &cfg.Endpoints.AlloyDB},
+		{"PORT_FILESTORE", &cfg.Endpoints.Filestore},
 		{"PORT_ONNX", &cfg.Endpoints.ONNX},
 		{"PORT_TFCONVERT", &cfg.Endpoints.TFConvert},
 		{"PORT_SPARK", &cfg.Endpoints.Spark},
@@ -726,6 +729,7 @@ func applyFlags(cfg *Config, raw *rawFlags, set map[string]bool) {
 		{"port-dataproc", raw.dataproc, &cfg.Endpoints.Dataproc},
 		{"port-apphub", raw.appHub, &cfg.Endpoints.AppHub},
 		{"port-alloydb", raw.alloyDB, &cfg.Endpoints.AlloyDB},
+		{"port-filestore", raw.filestore, &cfg.Endpoints.Filestore},
 		{"port-onnx", raw.onnx, &cfg.Endpoints.ONNX},
 		{"port-tfconvert", raw.tfconvert, &cfg.Endpoints.TFConvert},
 		{"port-spark", raw.spark, &cfg.Endpoints.Spark},

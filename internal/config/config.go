@@ -150,6 +150,10 @@ const (
 	// the CLI process on its own port; it discovers the instance's Cloud Run
 	// services and jobs and Kubernetes Engine clusters.
 	ServiceAppHub Service = "apphub"
+	// ServiceFilestore is Filestore (file.googleapis.com, #2192), served in
+	// the CLI process on its own port; each instance is an NFS server in
+	// Docker on the network the instance's clusters share.
+	ServiceFilestore Service = "filestore"
 	// ServiceTrace is Cloud Trace (cloudtrace.googleapis.com v1 and v2,
 	// #2118), with the Telemetry API's OTLP trace ingestion
 	// (telemetry.googleapis.com), served in the CLI process on one port.
@@ -171,7 +175,7 @@ func AllServices() []Service {
 
 // OptionalServices lists the opt-in services, in a stable order.
 func OptionalServices() []Service {
-	return []Service{ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner, ServiceCloudSQL, ServiceBigQuery, ServiceMemorystore, ServiceCloudSQLMySQL, ServiceScheduler, ServiceLogging, ServiceKMS, ServiceBackupDR, ServicePrivateCA, ServiceGKE, ServiceMonitoring, ServiceCompute, ServiceWorkflows, ServiceParameterManager, ServiceDataform, ServiceAppHub, ServiceTrace, ServiceDataproc, ServiceAlloyDB}
+	return []Service{ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner, ServiceCloudSQL, ServiceBigQuery, ServiceMemorystore, ServiceCloudSQLMySQL, ServiceScheduler, ServiceLogging, ServiceKMS, ServiceBackupDR, ServicePrivateCA, ServiceGKE, ServiceMonitoring, ServiceCompute, ServiceWorkflows, ServiceParameterManager, ServiceDataform, ServiceAppHub, ServiceTrace, ServiceDataproc, ServiceAlloyDB, ServiceFilestore}
 }
 
 // KnownServices lists every selectable service.
@@ -232,7 +236,7 @@ func (s Service) Persistence() Persistence {
 		// Key material is in Kubernetes Secrets, like Secret Manager's
 		// payloads, which the cluster keeps.
 		return PersistenceVolume
-	case ServiceStorage, ServiceTasks, ServiceSecrets, ServiceScheduler, ServiceBackupDR, ServicePrivateCA, ServiceGKE, ServiceMonitoring, ServiceCompute, ServiceWorkflows, ServiceParameterManager, ServiceDataform, ServiceAppHub, ServiceTrace, ServiceDataproc, ServiceAlloyDB:
+	case ServiceStorage, ServiceTasks, ServiceSecrets, ServiceScheduler, ServiceBackupDR, ServicePrivateCA, ServiceGKE, ServiceMonitoring, ServiceCompute, ServiceWorkflows, ServiceParameterManager, ServiceDataform, ServiceAppHub, ServiceTrace, ServiceDataproc, ServiceAlloyDB, ServiceFilestore:
 		return PersistenceVolume
 	case ServiceRun:
 		// Workload definitions live in the Kubernetes API, which the cluster
@@ -434,6 +438,9 @@ type Endpoints struct {
 	// AppHub is the host port of App Hub (apphub.googleapis.com, #2110):
 	// gRPC and JSON on one port.
 	AppHub int `json:"appHub"`
+	// Filestore is the host port of Filestore (file.googleapis.com,
+	// #2192): gRPC and JSON on one port.
+	Filestore int `json:"filestore"`
 	// Trace is the host port of Cloud Trace (cloudtrace.googleapis.com,
 	// #2118), gRPC and JSON on one port, and of OTLP's trace ingestion
 	// (telemetry.googleapis.com): OTLP/gRPC and POST /v1/traces.
@@ -534,6 +541,7 @@ func (e *Endpoints) fields() []endpointField {
 		{"dataform", &e.Dataform},
 		{"dataproc", &e.Dataproc},
 		{"apphub", &e.AppHub},
+		{"filestore", &e.Filestore},
 		{"trace", &e.Trace},
 		{"alloydb", &e.AlloyDB},
 		{"onnx", &e.ONNX},
@@ -622,6 +630,8 @@ func (e Endpoints) OptionalPort(s Service) int {
 		return e.Dataproc
 	case ServiceAppHub:
 		return e.AppHub
+	case ServiceFilestore:
+		return e.Filestore
 	case ServiceTrace:
 		return e.Trace
 	case ServiceAlloyDB:
@@ -1019,6 +1029,9 @@ func Default() Config {
 			Dataproc: 9066,
 			// App Hub (#2110): the next free port.
 			AppHub: 9048,
+			// Filestore (#2192): 9050 to 9070 are taken or claimed by open
+			// branches, so 9071.
+			Filestore: 9071,
 			// Cloud Trace (#2118): past the ports open branches took.
 			Trace: 9052,
 			// AlloyDB (#2191): past the ports open branches took.

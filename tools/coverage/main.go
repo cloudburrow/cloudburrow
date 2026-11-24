@@ -97,6 +97,7 @@ import (
 	_ "cloud.google.com/go/documentai/apiv1beta3/documentaipb"
 	_ "cloud.google.com/go/eventarc/apiv1/eventarcpb"
 	_ "cloud.google.com/go/eventarc/publishing/apiv1/publishingpb"
+	_ "cloud.google.com/go/filestore/apiv1/filestorepb"
 	_ "cloud.google.com/go/firestore/apiv1/admin/adminpb"
 	_ "cloud.google.com/go/firestore/apiv1/firestorepb"
 	_ "cloud.google.com/go/functions/apiv1/functionspb"
@@ -402,6 +403,9 @@ var areas = []area{
 	// one port; v1beta and v1alpha are bridged onto v1, and its Locations
 	// and Operations mixins are other areas' rows.
 	{Key: "alloydb", Title: "AlloyDB for PostgreSQL (v1)", Own: true, Services: []string{"google.cloud.alloydb.v1.AlloyDBAdmin"}},
+	// Filestore (#2192): CloudBurrow's own, gRPC and JSON on one port; its
+	// Locations and Operations mixins are other areas' rows.
+	{Key: "filestore", Title: "Filestore (v1)", Own: true, Services: []string{"google.cloud.filestore.v1.CloudFilestoreManager"}},
 	// Cloud Trace (#2118): CloudBurrow's own, v1 and v2 gRPC and JSON on
 	// one port, beside OTLP's ingestion (not a googleapis service).
 	{Key: "trace", Title: "Cloud Trace API (v1 and v2)", Own: true,

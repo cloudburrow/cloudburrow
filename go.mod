@@ -31,6 +31,7 @@ require (
 	cloud.google.com/go/developerconnect v1.2.0
 	cloud.google.com/go/documentai v1.49.0
 	cloud.google.com/go/eventarc v1.27.1
+	cloud.google.com/go/filestore v1.18.1
 	cloud.google.com/go/firestore v1.26.0
 	cloud.google.com/go/functions v1.26.0
 	cloud.google.com/go/grafeas v0.6.1

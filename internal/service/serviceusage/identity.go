@@ -66,6 +66,9 @@ var serviceAgents = map[string]string{
 	// which uses a cluster's customer-managed key
 	// (docs.cloud.google.com/alloydb/docs/cmek, read 2026-11-23).
 	"alloydb.googleapis.com": "gcp-sa-alloydb.iam.gserviceaccount.com",
+	// Cloud Filestore Service Agent, the primary agent of file.googleapis.com
+	// (service-agents page, read 2026-11-23; #2192).
+	"file.googleapis.com": "cloud-filer.iam.gserviceaccount.com",
 	// Kubernetes Engine Service Agent, the primary agent of
 	// container.googleapis.com.
 	"container.googleapis.com": "container-engine-robot.iam.gserviceaccount.com",

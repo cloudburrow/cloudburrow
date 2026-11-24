@@ -101,6 +101,8 @@ type adminDeps struct {
 	appHub *appHubService
 	// alloyDB is AlloyDB for PostgreSQL (#2191), nil unless enabled.
 	alloyDB *alloyDBService
+	// filestore is Filestore (#2192), nil unless enabled.
+	filestore *filestoreService
 	// trace is Cloud Trace (#2118), nil unless enabled.
 	trace *traceService
 	// gke is the Kubernetes Engine API (#1913), nil unless enabled.
@@ -257,6 +259,9 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 	}
 	if d.appHub != nil {
 		api.RegisterResetter(&appHubResetter{svc: d.appHub})
+	}
+	if d.filestore != nil {
+		api.RegisterResetter(&filestoreResetter{svc: d.filestore})
 	}
 	if d.trace != nil {
 		api.RegisterResetter(&traceResetter{svc: d.trace})

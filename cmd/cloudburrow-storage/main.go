@@ -33,6 +33,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/bigtablefront"
 	"github.com/cloudburrow/cloudburrow/internal/callfront"
 	"github.com/cloudburrow/cloudburrow/internal/debugpprof"
+	"github.com/cloudburrow/cloudburrow/internal/filestorecsi"
 	"github.com/cloudburrow/cloudburrow/internal/mysqlpool"
 	"github.com/cloudburrow/cloudburrow/internal/pubsubfront"
 	"github.com/cloudburrow/cloudburrow/internal/rediscmek"
@@ -96,6 +97,17 @@ func main() {
 		if err := redistlsfront.Run(ctx, os.Args[2:], os.Stdout, os.Stderr); err != nil {
 			if !errors.Is(err, redistlsfront.ErrUsage) {
 				fmt.Fprintln(os.Stderr, "cloudburrow-storage redis-tls-front:", err)
+			}
+			os.Exit(2)
+		}
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "filestore-csi-node" {
+		// The Filestore CSI driver's node plugin, in a Kubernetes Engine
+		// cluster's node (#2192).
+		if err := filestorecsi.Run(ctx, os.Args[2:], os.Stdout, os.Stderr); err != nil {
+			if !errors.Is(err, filestorecsi.ErrUsage) {
+				fmt.Fprintln(os.Stderr, "cloudburrow-storage filestore-csi-node:", err)
 			}
 			os.Exit(2)
 		}
