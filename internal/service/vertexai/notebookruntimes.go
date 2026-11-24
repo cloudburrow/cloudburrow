@@ -202,6 +202,13 @@ type notebookStore struct {
 	// pipelineRunner.
 	pipelines      map[string]*pipelineEntry
 	pipelineRunner PipelineRunner
+	// md is Vertex ML Metadata (metadata.go, #2205).
+	md *mdStore
+	// pipelineCache are pipeline tasks' cache entries by parent and cache
+	// key (pipelinerun.go, #2205); pipelineSlots the per-project quotas of
+	// concurrent runs and parallel tasks.
+	pipelineCache map[string]json.RawMessage
+	pipelineSlots map[string]chan struct{}
 }
 
 // runtimeEntry is a runtime and what its lifecycle needs.
@@ -253,6 +260,8 @@ func (s *Server) SetNotebookRuntimes(host NotebookHost, file string) {
 		Policies  map[string]*iampolicy.Stored `json:"policies"`
 		Owners    map[string]string            `json:"scheduleOwners"`
 		Pipelines []json.RawMessage            `json:"pipelineJobs"`
+		Metadata  json.RawMessage              `json:"metadata"`
+		Cache     map[string]json.RawMessage   `json:"pipelineCache"`
 	}
 	if json.Unmarshal(b, &saved) != nil {
 		return
@@ -278,6 +287,8 @@ func (s *Server) SetNotebookRuntimes(host NotebookHost, file string) {
 		st.owners[k] = v
 	}
 	st.loadPipelines(saved.Pipelines)
+	st.loadMetadata(saved.Metadata)
+	st.pipelineCache = saved.Cache
 }
 
 // save writes the store; the caller holds st.mu.
@@ -298,7 +309,9 @@ func (st *notebookStore) save() {
 		Policies  map[string]*iampolicy.Stored `json:"policies"`
 		Owners    map[string]string            `json:"scheduleOwners,omitempty"`
 		Pipelines []json.RawMessage            `json:"pipelineJobs,omitempty"`
-	}{Owners: st.owners, Pipelines: st.savedPipelines(), Templates: []json.RawMessage{}, Runtimes: []savedRuntime{}, Defaults: st.defaults, Jobs: []json.RawMessage{}, Schedules: []json.RawMessage{},
+		Metadata  json.RawMessage              `json:"metadata,omitempty"`
+		Cache     map[string]json.RawMessage   `json:"pipelineCache,omitempty"`
+	}{Cache: st.pipelineCache, Owners: st.owners, Pipelines: st.savedPipelines(), Metadata: st.savedMetadata(), Templates: []json.RawMessage{}, Runtimes: []savedRuntime{}, Defaults: st.defaults, Jobs: []json.RawMessage{}, Schedules: []json.RawMessage{},
 		Policies: st.policies}
 	for _, n := range sortedNames(st.jobs) {
 		if b, err := protojson.Marshal(st.jobs[n].Job); err == nil {
@@ -1183,6 +1196,7 @@ func (s *Server) registerNotebooks(srv grpc.ServiceRegistrar) {
 	aiplatformpb.RegisterNotebookServiceServer(srv, &notebookService{s: s})
 	aiplatformpb.RegisterScheduleServiceServer(srv, &scheduleService{s: s})
 	aiplatformpb.RegisterPipelineServiceServer(srv, &pipelineService{s: s})
+	aiplatformpb.RegisterMetadataServiceServer(srv, &metadataService{s: s})
 	nbpb.RegisterNotebookServiceServer(srv, &workbenchService{s: s})
 }
 
@@ -1196,6 +1210,10 @@ func (s *Server) notebookREST() *rest.Transcoder {
 			opRule("/v1/{name=projects/*/locations/*/notebookExecutionJobs/*/operations/*}"),
 			opRule("/v1/{name=projects/*/locations/*/schedules/*/operations/*}"),
 			opRule("/v1/{name=projects/*/locations/*/pipelineJobs/*/operations/*}"),
+			opRule("/v1/{name=projects/*/locations/*/metadataStores/*/operations/*}"),
+			opRule("/v1/{name=projects/*/locations/*/metadataStores/*/artifacts/*/operations/*}"),
+			opRule("/v1/{name=projects/*/locations/*/metadataStores/*/contexts/*/operations/*}"),
+			opRule("/v1/{name=projects/*/locations/*/metadataStores/*/executions/*/operations/*}"),
 		}}
 		t.Mixins = append(t.Mixins, NotebookIAMMixins()...)
 		s.registerNotebooks(t)

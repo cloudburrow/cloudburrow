@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -23,6 +24,9 @@ type fakePipelineRunner struct {
 	mu   sync.Mutex
 	runs []PipelineContainer
 	key  string
+	// flaky counts the runs of each "flaky:ID:N" arg, which fails its
+	// first N runs.
+	flaky map[string]int
 }
 
 func (r *fakePipelineRunner) RunContainer(_ context.Context, c PipelineContainer) error {
@@ -32,6 +36,19 @@ func (r *fakePipelineRunner) RunContainer(_ context.Context, c PipelineContainer
 	for _, a := range append(append([]string{}, c.Command...), c.Args...) {
 		if a == "fail" {
 			return errors.New("exit status 1: boom")
+		}
+		if rest, ok := strings.CutPrefix(a, "flaky:"); ok {
+			id, n, _ := strings.Cut(rest, ":")
+			r.mu.Lock()
+			if r.flaky == nil {
+				r.flaky = map[string]int{}
+			}
+			r.flaky[id]++
+			runs := r.flaky[id]
+			r.mu.Unlock()
+			if limit, _ := strconv.Atoi(n); runs <= limit {
+				return errors.New("exit status 1: flaky")
+			}
 		}
 		if rest, ok := strings.CutPrefix(a, "write:"); ok {
 			p, text, _ := strings.Cut(rest, "=")

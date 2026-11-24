@@ -43,16 +43,25 @@ package vertexai
 // them: inputs are read from Cloud Storage before the task, outputs written
 // there after it.
 //
+// Control flow (#2205, pipelinerun.go): nested DAGs (sub-pipelines),
+// dsl.ParallelFor (parameter and artifact iterators, with parallelism),
+// dsl.If/Elif/Else (trigger conditions, CEL), trigger strategies,
+// dsl.ExitHandler (taskFinalStatus), importers, resolvers, task caching
+// (cachingOptions, enable_caching) and retries (retryPolicy) run as
+// Vertex AI Pipelines runs them, and every run records its pipeline and
+// run contexts, executions, artifacts and events in the project's ML
+// Metadata store (metadata.go).
+//
 // Local differences: a task's image must already be on this machine
 // (CloudBurrow pulls nothing, and never from a Google registry); the
 // container has no network (--network none), so a component that calls a
-// Google API cannot; template_uri, nested DAG components, importers,
-// trigger conditions (dsl.If) and loops (dsl.ParallelFor), caching and
-// exit handlers are INVALID_ARGUMENT naming what is not run, at create.
+// Google API cannot; template_uri and customJob executors are
+// INVALID_ARGUMENT naming what is not run, at create.
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -61,12 +70,10 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"cloud.google.com/go/aiplatform/apiv1/aiplatformpb"
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
-	"github.com/google/uuid"
 	"google.golang.org/genproto/googleapis/rpc/status"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -146,13 +153,15 @@ func pipelineInfoName(spec *structpb.Struct) string {
 	return spec.GetFields()["pipelineInfo"].GetStructValue().GetFields()["name"].GetStringValue()
 }
 
-// kfpSpec is the part of a KFP pipeline spec (IR) run here.
+// kfpSpec is a KFP pipeline spec (IR, pipeline_spec.proto of
+// kubeflow/pipelines' api/v2alpha1, as the kfp 2 compiler writes it).
 type kfpSpec struct {
 	PipelineInfo struct {
 		Name string `json:"name"`
 	} `json:"pipelineInfo"`
 	DefaultPipelineRoot string                  `json:"defaultPipelineRoot"`
 	SchemaVersion       string                  `json:"schemaVersion"`
+	SDKVersion          string                  `json:"sdkVersion"`
 	Root                kfpComponent            `json:"root"`
 	Components          map[string]kfpComponent `json:"components"`
 	DeploymentSpec      struct {
@@ -161,34 +170,56 @@ type kfpSpec struct {
 }
 
 type kfpComponent struct {
-	ExecutorLabel    string  `json:"executorLabel"`
-	DAG              *kfpDAG `json:"dag"`
+	ExecutorLabel    string  `json:"executorLabel,omitempty"`
+	DAG              *kfpDAG `json:"dag,omitempty"`
 	InputDefinitions struct {
-		Parameters map[string]kfpParamDef `json:"parameters"`
-		Artifacts  map[string]kfpArtDef   `json:"artifacts"`
+		Parameters map[string]kfpParamDef `json:"parameters,omitempty"`
+		Artifacts  map[string]kfpArtDef   `json:"artifacts,omitempty"`
 	} `json:"inputDefinitions"`
 	OutputDefinitions struct {
-		Parameters map[string]kfpParamDef `json:"parameters"`
-		Artifacts  map[string]kfpArtDef   `json:"artifacts"`
+		Parameters map[string]kfpParamDef `json:"parameters,omitempty"`
+		Artifacts  map[string]kfpArtDef   `json:"artifacts,omitempty"`
 	} `json:"outputDefinitions"`
 }
 
 type kfpParamDef struct {
-	ParameterType string          `json:"parameterType"`
-	DefaultValue  json.RawMessage `json:"defaultValue"`
-	IsOptional    bool            `json:"isOptional"`
+	ParameterType string          `json:"parameterType,omitempty"`
+	DefaultValue  json.RawMessage `json:"defaultValue,omitempty"`
+	IsOptional    bool            `json:"isOptional,omitempty"`
 }
 
 type kfpArtDef struct {
 	ArtifactType struct {
-		SchemaTitle   string `json:"schemaTitle"`
-		SchemaVersion string `json:"schemaVersion"`
+		SchemaTitle   string `json:"schemaTitle,omitempty"`
+		SchemaVersion string `json:"schemaVersion,omitempty"`
 	} `json:"artifactType"`
+	IsArtifactList bool `json:"isArtifactList,omitempty"`
+	IsOptional     bool `json:"isOptional,omitempty"`
 }
 
 type kfpDAG struct {
 	Tasks   map[string]kfpTask `json:"tasks"`
-	Outputs json.RawMessage    `json:"outputs"`
+	Outputs struct {
+		Parameters map[string]struct {
+			ValueFromParameter *kfpParamSel `json:"valueFromParameter"`
+			ValueFromOneof     *struct {
+				ParameterSelectors []kfpParamSel `json:"parameterSelectors"`
+			} `json:"valueFromOneof"`
+		} `json:"parameters"`
+		Artifacts map[string]struct {
+			ArtifactSelectors []kfpArtSel `json:"artifactSelectors"`
+		} `json:"artifacts"`
+	} `json:"outputs"`
+}
+
+type kfpParamSel struct {
+	ProducerSubtask    string `json:"producerSubtask"`
+	OutputParameterKey string `json:"outputParameterKey"`
+}
+
+type kfpArtSel struct {
+	ProducerSubtask   string `json:"producerSubtask"`
+	OutputArtifactKey string `json:"outputArtifactKey"`
 }
 
 type kfpTask struct {
@@ -203,11 +234,35 @@ type kfpTask struct {
 		Parameters map[string]kfpParamIn `json:"parameters"`
 		Artifacts  map[string]kfpArtIn   `json:"artifacts"`
 	} `json:"inputs"`
-	TriggerPolicy  json.RawMessage `json:"triggerPolicy"`
-	ParameterIter  json.RawMessage `json:"parameterIterator"`
-	ArtifactIter   json.RawMessage `json:"artifactIterator"`
+	TriggerPolicy *struct {
+		Condition string `json:"condition"`
+		Strategy  string `json:"strategy"`
+	} `json:"triggerPolicy"`
+	ParameterIter *struct {
+		Items struct {
+			Raw            string `json:"raw"`
+			InputParameter string `json:"inputParameter"`
+		} `json:"items"`
+		ItemInput string `json:"itemInput"`
+	} `json:"parameterIterator"`
+	ArtifactIter *struct {
+		Items struct {
+			InputArtifact string `json:"inputArtifact"`
+		} `json:"items"`
+		ItemInput string `json:"itemInput"`
+	} `json:"artifactIterator"`
+	IteratorPolicy *struct {
+		ParallelismLimit int `json:"parallelismLimit"`
+	} `json:"iteratorPolicy"`
+	RetryPolicy *struct {
+		MaxRetryCount      int     `json:"maxRetryCount"`
+		BackoffDuration    string  `json:"backoffDuration"`
+		BackoffFactor      float64 `json:"backoffFactor"`
+		BackoffMaxDuration string  `json:"backoffMaxDuration"`
+	} `json:"retryPolicy"`
 	CachingOptions struct {
-		EnableCache bool `json:"enableCache"`
+		EnableCache bool   `json:"enableCache"`
+		CacheKey    string `json:"cacheKey"`
 	} `json:"cachingOptions"`
 }
 
@@ -223,6 +278,7 @@ type kfpParamIn struct {
 	TaskFinalStatus *struct {
 		ProducerTask string `json:"producerTask"`
 	} `json:"taskFinalStatus"`
+	ParameterExpressionSelector string `json:"parameterExpressionSelector"`
 }
 
 type kfpArtIn struct {
@@ -233,22 +289,60 @@ type kfpArtIn struct {
 	} `json:"taskOutputArtifact"`
 }
 
-type kfpExecutor struct {
-	Container *struct {
-		Image   string   `json:"image"`
-		Command []string `json:"command"`
-		Args    []string `json:"args"`
-		Env     []struct {
-			Name  string `json:"name"`
-			Value string `json:"value"`
-		} `json:"env"`
-	} `json:"container"`
-	Importer json.RawMessage `json:"importer"`
-	Resolver json.RawMessage `json:"resolver"`
+type kfpContainer struct {
+	Image   string   `json:"image"`
+	Command []string `json:"command"`
+	Args    []string `json:"args"`
+	Env     []struct {
+		Name  string `json:"name"`
+		Value string `json:"value"`
+	} `json:"env"`
 }
 
+type kfpImporter struct {
+	ArtifactURI struct {
+		Constant         json.RawMessage `json:"constant"`
+		RuntimeParameter string          `json:"runtimeParameter"`
+	} `json:"artifactUri"`
+	TypeSchema struct {
+		SchemaTitle   string `json:"schemaTitle"`
+		SchemaVersion string `json:"schemaVersion"`
+	} `json:"typeSchema"`
+	Metadata json.RawMessage `json:"metadata"`
+	Reimport bool            `json:"reimport"`
+}
+
+type kfpResolver struct {
+	OutputArtifactQueries map[string]struct {
+		Filter string `json:"filter"`
+		Limit  int    `json:"limit"`
+	} `json:"outputArtifactQueries"`
+}
+
+type kfpExecutor struct {
+	Container *kfpContainer   `json:"container,omitempty"`
+	Importer  *kfpImporter    `json:"importer,omitempty"`
+	Resolver  *kfpResolver    `json:"resolver,omitempty"`
+	CustomJob json.RawMessage `json:"customJob,omitempty"`
+}
+
+// Agent Platform Pipelines' documented limits ("Quotas and limits",
+// https://docs.cloud.google.com/vertex-ai/docs/quotas#pipelines, read
+// 2026-11-24): they cannot be increased.
+const (
+	maxPipelineTasks        = 10000
+	maxTaskArtifacts        = 100
+	maxJobArtifacts         = 10000
+	maxTaskOutputPayload    = 131072
+	maxTaskRunTime          = 7 * 24 * time.Hour
+	maxParallelTasks        = 600
+	maxConcurrentRuns       = 300
+	defaultRetryBackoffMax  = time.Hour
+	defaultRetryBackoffBase = 2.0
+)
+
 // parseKFP reads and checks a pipeline spec: what this instance runs, or
-// INVALID_ARGUMENT naming what it does not.
+// INVALID_ARGUMENT naming what is wrong.
 func parseKFP(prefix string, spec *structpb.Struct) (*kfpSpec, error) {
 	if spec == nil || len(spec.GetFields()) == 0 {
 		return nil, apierror.InvalidArgument("%spipeline_spec is required (a compiled Kubeflow Pipelines definition); template_uri is not run on this instance", prefix)
@@ -267,57 +361,215 @@ func parseKFP(prefix string, spec *structpb.Struct) (*kfpSpec, error) {
 	if k.Root.DAG == nil || len(k.Root.DAG.Tasks) == 0 {
 		return nil, apierror.InvalidArgument("%spipeline_spec.root.dag has no tasks", prefix)
 	}
-	for _, name := range sortedNames(k.Root.DAG.Tasks) {
-		t := k.Root.DAG.Tasks[name]
-		c, ok := k.Components[t.ComponentRef.Name]
-		if !ok {
-			return nil, apierror.InvalidArgument("%spipeline_spec task %q names component %q, which components does not define", prefix, name, t.ComponentRef.Name)
-		}
-		switch {
-		case c.DAG != nil:
-			return nil, apierror.InvalidArgument("%spipeline_spec task %q is a nested pipeline (a DAG component), which this instance does not run", prefix, name)
-		case len(t.TriggerPolicy) > 0 && string(t.TriggerPolicy) != "{}":
-			return nil, apierror.InvalidArgument("%spipeline_spec task %q has a trigger policy (dsl.If, dsl.ExitHandler), which this instance does not run", prefix, name)
-		case len(t.ParameterIter) > 0 || len(t.ArtifactIter) > 0:
-			return nil, apierror.InvalidArgument("%spipeline_spec task %q is a loop (dsl.ParallelFor), which this instance does not run", prefix, name)
-		}
-		ex, ok := k.DeploymentSpec.Executors[c.ExecutorLabel]
-		if !ok || ex.Container == nil {
-			what := "has no container executor"
-			if ok && len(ex.Importer) > 0 {
-				what = "is an importer, which this instance does not run"
-			} else if ok && len(ex.Resolver) > 0 {
-				what = "is a resolver, which this instance does not run"
-			}
-			return nil, apierror.InvalidArgument("%spipeline_spec task %q's executor %q %s", prefix, name, c.ExecutorLabel, what)
-		}
-		if ex.Container.Image == "" {
-			return nil, apierror.InvalidArgument("%spipeline_spec executor %q has no image", prefix, c.ExecutorLabel)
-		}
-		for _, d := range t.DependentTasks {
-			if _, ok := k.Root.DAG.Tasks[d]; !ok {
-				return nil, apierror.InvalidArgument("%spipeline_spec task %q depends on %q, which is not a task", prefix, name, d)
-			}
-		}
-		for key, in := range t.Inputs.Parameters {
-			if in.TaskFinalStatus != nil {
-				return nil, apierror.InvalidArgument("%spipeline_spec task %q's input %q is a task's final status (dsl.ExitHandler), which this instance does not run", prefix, name, key)
-			}
-			if p := in.TaskOutputParameter; p != nil {
-				if _, ok := k.Root.DAG.Tasks[p.ProducerTask]; !ok {
-					return nil, apierror.InvalidArgument("%spipeline_spec task %q's input %q names task %q, which is not a task", prefix, name, key, p.ProducerTask)
-				}
-			}
-		}
-	}
-	if _, err := kfpOrder(k.Root.DAG); err != nil {
-		return nil, apierror.InvalidArgument("%spipeline_spec: %v", prefix, err)
+	n := 0
+	if err := checkDAG(prefix, k, "root", k.Root, map[string]bool{}, &n); err != nil {
+		return nil, err
 	}
 	return k, nil
 }
 
+// checkDAG checks one DAG component's tasks and, through them, every
+// component they run; seen guards against a component that runs itself.
+func checkDAG(prefix string, k *kfpSpec, compName string, comp kfpComponent, seen map[string]bool, n *int) error {
+	if seen[compName] {
+		return apierror.InvalidArgument("%spipeline_spec component %q runs itself", prefix, compName)
+	}
+	seen[compName] = true
+	defer delete(seen, compName)
+	d := comp.DAG
+	for _, name := range sortedNames(d.Tasks) {
+		t := d.Tasks[name]
+		if *n++; *n > maxPipelineTasks {
+			return apierror.InvalidArgument("%spipeline_spec has more than %d pipeline tasks, the most a pipeline job can have", prefix, maxPipelineTasks)
+		}
+		c, ok := k.Components[t.ComponentRef.Name]
+		if !ok {
+			return apierror.InvalidArgument("%spipeline_spec task %q names component %q, which components does not define", prefix, name, t.ComponentRef.Name)
+		}
+		if len(c.InputDefinitions.Artifacts)+len(c.OutputDefinitions.Artifacts) > maxTaskArtifacts {
+			return apierror.InvalidArgument("%spipeline_spec task %q has more than %d input and output artifacts, the most a pipeline task can have", prefix, name, maxTaskArtifacts)
+		}
+		for _, dep := range t.DependentTasks {
+			if _, ok := d.Tasks[dep]; !ok {
+				return apierror.InvalidArgument("%spipeline_spec task %q depends on %q, which is not a task of its DAG", prefix, name, dep)
+			}
+		}
+		for key, in := range t.Inputs.Parameters {
+			var producer string
+			switch {
+			case in.TaskOutputParameter != nil:
+				producer = in.TaskOutputParameter.ProducerTask
+			case in.TaskFinalStatus != nil:
+				producer = in.TaskFinalStatus.ProducerTask
+				if t.TriggerPolicy == nil || t.TriggerPolicy.Strategy != "ALL_UPSTREAM_TASKS_COMPLETED" {
+					return apierror.InvalidArgument("%spipeline_spec task %q's input %q is a task's final status, which only an exit task (trigger strategy ALL_UPSTREAM_TASKS_COMPLETED) can take", prefix, name, key)
+				}
+			case in.ComponentInputParameter != "":
+				if _, ok := comp.InputDefinitions.Parameters[in.ComponentInputParameter]; !ok {
+					return apierror.InvalidArgument("%spipeline_spec task %q's input %q names %q, which is not an input parameter of %s", prefix, name, key, in.ComponentInputParameter, compName)
+				}
+			}
+			if producer != "" {
+				if _, ok := d.Tasks[producer]; !ok {
+					return apierror.InvalidArgument("%spipeline_spec task %q's input %q names task %q, which is not a task of its DAG", prefix, name, key, producer)
+				}
+			}
+			if sel := in.ParameterExpressionSelector; sel != "" {
+				if _, err := compileCEL(sel); err != nil {
+					return apierror.InvalidArgument("%spipeline_spec task %q's input %q: parameterExpressionSelector %q: %v", prefix, name, key, sel, err)
+				}
+			}
+		}
+		for key, in := range t.Inputs.Artifacts {
+			if a := in.TaskOutputArtifact; a != nil {
+				if _, ok := d.Tasks[a.ProducerTask]; !ok {
+					return apierror.InvalidArgument("%spipeline_spec task %q's input artifact %q names task %q, which is not a task of its DAG", prefix, name, key, a.ProducerTask)
+				}
+			}
+			if a := in.ComponentInputArtifact; a != "" {
+				if _, ok := comp.InputDefinitions.Artifacts[a]; !ok {
+					return apierror.InvalidArgument("%spipeline_spec task %q's input artifact %q names %q, which is not an input artifact of %s", prefix, name, key, a, compName)
+				}
+			}
+		}
+		if tp := t.TriggerPolicy; tp != nil {
+			switch tp.Strategy {
+			case "", "TRIGGER_STRATEGY_UNSPECIFIED", "ALL_UPSTREAM_TASKS_SUCCEEDED", "ALL_UPSTREAM_TASKS_COMPLETED":
+			default:
+				return apierror.InvalidArgument("%spipeline_spec task %q's trigger strategy %q is not ALL_UPSTREAM_TASKS_SUCCEEDED or ALL_UPSTREAM_TASKS_COMPLETED", prefix, name, tp.Strategy)
+			}
+			if tp.Condition != "" {
+				if _, err := compileCEL(tp.Condition); err != nil {
+					return apierror.InvalidArgument("%spipeline_spec task %q's trigger condition %q: %v", prefix, name, tp.Condition, err)
+				}
+			}
+		}
+		if rp := t.RetryPolicy; rp != nil {
+			if rp.MaxRetryCount < 0 {
+				return apierror.InvalidArgument("%spipeline_spec task %q's retryPolicy.maxRetryCount must not be negative", prefix, name)
+			}
+			for _, d := range []string{rp.BackoffDuration, rp.BackoffMaxDuration} {
+				if _, err := kfpDuration(d); err != nil {
+					return apierror.InvalidArgument("%spipeline_spec task %q's retryPolicy: %v", prefix, name, err)
+				}
+			}
+		}
+		if t.ParameterIter != nil || t.ArtifactIter != nil {
+			if c.DAG == nil {
+				return apierror.InvalidArgument("%spipeline_spec task %q is a loop whose component %q is not a DAG", prefix, name, t.ComponentRef.Name)
+			}
+			if p := t.ParameterIter; p != nil {
+				if p.ItemInput == "" {
+					return apierror.InvalidArgument("%spipeline_spec task %q's parameterIterator has no itemInput", prefix, name)
+				}
+				switch {
+				case p.Items.Raw != "":
+					var items []any
+					if err := json.Unmarshal([]byte(p.Items.Raw), &items); err != nil {
+						return apierror.InvalidArgument("%spipeline_spec task %q's parameterIterator.items.raw %q is not a JSON list", prefix, name, p.Items.Raw)
+					}
+				case p.Items.InputParameter != "":
+					if _, ok := t.Inputs.Parameters[p.Items.InputParameter]; !ok {
+						return apierror.InvalidArgument("%spipeline_spec task %q's parameterIterator names input %q, which the task does not take", prefix, name, p.Items.InputParameter)
+					}
+				default:
+					return apierror.InvalidArgument("%spipeline_spec task %q's parameterIterator has no items", prefix, name)
+				}
+			}
+			if a := t.ArtifactIter; a != nil {
+				if _, ok := t.Inputs.Artifacts[a.Items.InputArtifact]; !ok || a.ItemInput == "" {
+					return apierror.InvalidArgument("%spipeline_spec task %q's artifactIterator names input artifact %q, which the task does not take", prefix, name, a.Items.InputArtifact)
+				}
+			}
+			if ip := t.IteratorPolicy; ip != nil && ip.ParallelismLimit < 0 {
+				return apierror.InvalidArgument("%spipeline_spec task %q's iteratorPolicy.parallelismLimit must not be negative", prefix, name)
+			}
+		}
+		if c.DAG != nil {
+			if len(c.DAG.Tasks) == 0 {
+				return apierror.InvalidArgument("%spipeline_spec component %q's dag has no tasks", prefix, t.ComponentRef.Name)
+			}
+			if err := checkDAG(prefix, k, t.ComponentRef.Name, c, seen, n); err != nil {
+				return err
+			}
+			continue
+		}
+		ex, ok := k.DeploymentSpec.Executors[c.ExecutorLabel]
+		if !ok {
+			return apierror.InvalidArgument("%spipeline_spec task %q's component %q names executor %q, which deploymentSpec does not define", prefix, name, t.ComponentRef.Name, c.ExecutorLabel)
+		}
+		switch {
+		case ex.Container != nil:
+			if ex.Container.Image == "" {
+				return apierror.InvalidArgument("%spipeline_spec executor %q has no image", prefix, c.ExecutorLabel)
+			}
+		case ex.Importer != nil:
+			if len(ex.Importer.ArtifactURI.Constant) == 0 && ex.Importer.ArtifactURI.RuntimeParameter == "" {
+				return apierror.InvalidArgument("%spipeline_spec importer %q has no artifactUri", prefix, c.ExecutorLabel)
+			}
+			if ex.Importer.TypeSchema.SchemaTitle == "" {
+				return apierror.InvalidArgument("%spipeline_spec importer %q has no typeSchema", prefix, c.ExecutorLabel)
+			}
+			if len(c.OutputDefinitions.Artifacts) != 1 {
+				return apierror.InvalidArgument("%spipeline_spec importer %q's component must have one output artifact", prefix, c.ExecutorLabel)
+			}
+		case ex.Resolver != nil:
+			if len(ex.Resolver.OutputArtifactQueries) == 0 {
+				return apierror.InvalidArgument("%spipeline_spec resolver %q has no outputArtifactQueries", prefix, c.ExecutorLabel)
+			}
+			for key := range ex.Resolver.OutputArtifactQueries {
+				if _, ok := c.OutputDefinitions.Artifacts[key]; !ok {
+					return apierror.InvalidArgument("%spipeline_spec resolver %q queries %q, which is not an output artifact of its component", prefix, c.ExecutorLabel, key)
+				}
+			}
+		case len(ex.CustomJob) > 0:
+			return apierror.InvalidArgument("%spipeline_spec executor %q is a Vertex AI custom job (customJob), which this instance does not run: CustomJobs are not served", prefix, c.ExecutorLabel)
+		default:
+			return apierror.InvalidArgument("%spipeline_spec executor %q has no container, importer or resolver", prefix, c.ExecutorLabel)
+		}
+	}
+	for key, o := range d.Outputs.Parameters {
+		sels := []kfpParamSel{}
+		if o.ValueFromParameter != nil {
+			sels = append(sels, *o.ValueFromParameter)
+		}
+		if o.ValueFromOneof != nil {
+			sels = append(sels, o.ValueFromOneof.ParameterSelectors...)
+		}
+		for _, s := range sels {
+			if _, ok := d.Tasks[s.ProducerSubtask]; !ok {
+				return apierror.InvalidArgument("%spipeline_spec component %q's output %q names task %q, which is not a task of its DAG", prefix, compName, key, s.ProducerSubtask)
+			}
+		}
+	}
+	for key, o := range d.Outputs.Artifacts {
+		for _, s := range o.ArtifactSelectors {
+			if _, ok := d.Tasks[s.ProducerSubtask]; !ok {
+				return apierror.InvalidArgument("%spipeline_spec component %q's output artifact %q names task %q, which is not a task of its DAG", prefix, compName, key, s.ProducerSubtask)
+			}
+		}
+	}
+	if _, err := kfpOrder(d); err != nil {
+		return apierror.InvalidArgument("%spipeline_spec %s: %v", prefix, compName, err)
+	}
+	return nil
+}
+
+// kfpDuration reads a retry policy's duration ("30s", as protobuf's
+// Duration JSON); "" is zero.
+func kfpDuration(s string) (time.Duration, error) {
+	if s == "" {
+		return 0, nil
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil || d < 0 {
+		return 0, fmt.Errorf("%q is not a duration", s)
+	}
+	return d, nil
+}
+
 // kfpDeps are a task's upstream tasks: its dependentTasks and every task
-// whose outputs it reads.
+// whose outputs or final status it reads.
 func kfpDeps(t kfpTask) []string {
 	seen := map[string]bool{}
 	var out []string
@@ -331,7 +583,11 @@ func kfpDeps(t kfpTask) []string {
 		add(d)
 	}
 	for _, k := range sortedNames(t.Inputs.Parameters) {
-		if p := t.Inputs.Parameters[k].TaskOutputParameter; p != nil {
+		in := t.Inputs.Parameters[k]
+		if p := in.TaskOutputParameter; p != nil {
+			add(p.ProducerTask)
+		}
+		if p := in.TaskFinalStatus; p != nil {
 			add(p.ProducerTask)
 		}
 	}
@@ -524,176 +780,6 @@ func (st *notebookStore) setPipeline(e *pipelineEntry, f func(j *aiplatformpb.Pi
 	st.save()
 }
 
-// taskRun is a task's run: its detail and the outputs it produced.
-type taskRun struct {
-	detail    *aiplatformpb.PipelineTaskDetail
-	params    map[string]*structpb.Value
-	artifacts map[string]string // output key -> gs:// URI
-	done      chan struct{}
-	ok        bool
-}
-
-// runPipeline runs e's tasks as their dependencies allow.
-func (s *Server) runPipeline(ctx context.Context, e *pipelineEntry, k *kfpSpec, project string) {
-	defer e.cancel()
-	st := s.notebooks()
-	st.mu.Lock()
-	runner := st.pipelineRunner
-	j := proto.Clone(e.Job).(*aiplatformpb.PipelineJob)
-	st.mu.Unlock()
-	fail := func(code codes.Code, msg string) {
-		st.setPipeline(e, func(j *aiplatformpb.PipelineJob) {
-			j.State, j.EndTime = aiplatformpb.PipelineState_PIPELINE_STATE_FAILED, timestamppb.New(st.now())
-			j.Error = &status.Status{Code: int32(code), Message: msg}
-		})
-	}
-	tok, err := s.runAsToken(e.runAs)
-	if err != nil {
-		fail(codes.FailedPrecondition, fmt.Sprintf("the pipeline job's service account %s: %v", e.runAs, err))
-		return
-	}
-	ctx = WithRunAsToken(ctx, tok)
-	params, _ := rootParams("", j, k)
-	order, _ := kfpOrder(k.Root.DAG)
-	jobUUID := uuid.NewString()
-	start := timestamppb.New(st.now())
-	rootDetail := &aiplatformpb.PipelineTaskDetail{TaskId: 1, TaskName: k.PipelineInfo.Name, CreateTime: start, StartTime: start,
-		State: aiplatformpb.PipelineTaskDetail_RUNNING}
-	runs := map[string]*taskRun{}
-	for i, name := range order {
-		t := k.Root.DAG.Tasks[name]
-		tn := t.TaskInfo.Name
-		if tn == "" {
-			tn = name
-		}
-		runs[name] = &taskRun{done: make(chan struct{}), detail: &aiplatformpb.PipelineTaskDetail{TaskId: int64(i + 2), ParentTaskId: 1, TaskName: tn,
-			TaskUniqueName: name, CreateTime: start, State: aiplatformpb.PipelineTaskDetail_PENDING}}
-	}
-	var dmu sync.Mutex
-	publish := func() {
-		dmu.Lock()
-		details := []*aiplatformpb.PipelineTaskDetail{proto.Clone(rootDetail).(*aiplatformpb.PipelineTaskDetail)}
-		for _, n := range order {
-			details = append(details, proto.Clone(runs[n].detail).(*aiplatformpb.PipelineTaskDetail))
-		}
-		dmu.Unlock()
-		st.setPipeline(e, func(j *aiplatformpb.PipelineJob) {
-			j.JobDetail = &aiplatformpb.PipelineJobDetail{TaskDetails: details}
-		})
-	}
-	st.setPipeline(e, func(j *aiplatformpb.PipelineJob) {
-		j.State, j.StartTime = aiplatformpb.PipelineState_PIPELINE_STATE_RUNNING, start
-	})
-	publish()
-	failFast := j.GetRuntimeConfig().GetFailurePolicy() == aiplatformpb.PipelineFailurePolicy_PIPELINE_FAILURE_POLICY_FAIL_FAST
-	stopped := make(chan struct{})
-	var stopOnce sync.Once
-	var wg sync.WaitGroup
-	root := strings.TrimSuffix(j.GetRuntimeConfig().GetGcsOutputDirectory(), "/")
-	jobID := lastSegment(j.GetName())
-	for _, name := range order {
-		wg.Add(1)
-		go func(name string) {
-			defer wg.Done()
-			r := runs[name]
-			defer close(r.done)
-			t := k.Root.DAG.Tasks[name]
-			upstreamOK := true
-			for _, d := range kfpDeps(t) {
-				<-runs[d].done
-				if !runs[d].ok {
-					upstreamOK = false
-				}
-			}
-			select {
-			case <-stopped:
-				upstreamOK = false
-			default:
-			}
-			set := func(f func(d *aiplatformpb.PipelineTaskDetail)) {
-				dmu.Lock()
-				f(r.detail)
-				dmu.Unlock()
-				publish()
-			}
-			if ctx.Err() != nil {
-				set(func(d *aiplatformpb.PipelineTaskDetail) { d.State = aiplatformpb.PipelineTaskDetail_CANCELLED })
-				return
-			}
-			if !upstreamOK {
-				set(func(d *aiplatformpb.PipelineTaskDetail) { d.State = aiplatformpb.PipelineTaskDetail_SKIPPED })
-				return
-			}
-			now := timestamppb.New(st.now())
-			set(func(d *aiplatformpb.PipelineTaskDetail) {
-				d.State, d.StartTime = aiplatformpb.PipelineTaskDetail_RUNNING, now
-			})
-			err := s.runTask(ctx, runner, k, name, t, r, runs, params, taskEnv{jobName: jobID, jobUUID: jobUUID, root: root, project: project,
-				taskID: r.detail.GetTaskId(), labels: j.GetLabels()})
-			end := timestamppb.New(st.now())
-			set(func(d *aiplatformpb.PipelineTaskDetail) {
-				d.EndTime = end
-				switch {
-				case ctx.Err() != nil:
-					d.State, d.Error = aiplatformpb.PipelineTaskDetail_CANCELLED, &status.Status{Code: int32(codes.Canceled), Message: "the pipeline job was cancelled"}
-				case err != nil:
-					d.State, d.Error = aiplatformpb.PipelineTaskDetail_FAILED, &status.Status{Code: int32(codes.FailedPrecondition), Message: err.Error()}
-				default:
-					d.State = aiplatformpb.PipelineTaskDetail_SUCCEEDED
-					d.Outputs = map[string]*aiplatformpb.PipelineTaskDetail_ArtifactList{}
-					for _, key := range sortedNames(r.artifacts) {
-						d.Outputs[key] = &aiplatformpb.PipelineTaskDetail_ArtifactList{Artifacts: []*aiplatformpb.Artifact{{Uri: r.artifacts[key], DisplayName: key}}}
-					}
-				}
-			})
-			r.ok = err == nil && ctx.Err() == nil
-			if !r.ok && failFast {
-				stopOnce.Do(func() { close(stopped) })
-			}
-		}(name)
-	}
-	wg.Wait()
-	var failed []string
-	for _, n := range order {
-		if runs[n].detail.GetState() == aiplatformpb.PipelineTaskDetail_FAILED {
-			failed = append(failed, n)
-		}
-	}
-	end := timestamppb.New(st.now())
-	dmu.Lock()
-	rootDetail.EndTime = end
-	switch {
-	case ctx.Err() != nil:
-		rootDetail.State = aiplatformpb.PipelineTaskDetail_CANCELLED
-	case len(failed) > 0:
-		rootDetail.State = aiplatformpb.PipelineTaskDetail_FAILED
-	default:
-		rootDetail.State = aiplatformpb.PipelineTaskDetail_SUCCEEDED
-	}
-	dmu.Unlock()
-	publish()
-	st.setPipeline(e, func(j *aiplatformpb.PipelineJob) {
-		j.EndTime = end
-		switch {
-		case ctx.Err() != nil:
-			j.State = aiplatformpb.PipelineState_PIPELINE_STATE_CANCELLED
-			j.Error = &status.Status{Code: int32(codes.Canceled), Message: "The pipeline job was cancelled."}
-		case len(failed) > 0:
-			j.State = aiplatformpb.PipelineState_PIPELINE_STATE_FAILED
-			j.Error = &status.Status{Code: int32(codes.FailedPrecondition), Message: fmt.Sprintf("The DAG failed because some tasks failed. The failed tasks are: [%s].", strings.Join(failed, ", "))}
-		default:
-			j.State = aiplatformpb.PipelineState_PIPELINE_STATE_SUCCEEDED
-		}
-	})
-}
-
-// taskEnv is what a task's placeholders name.
-type taskEnv struct {
-	jobName, jobUUID, root, project string
-	taskID                          int64
-	labels                          map[string]string
-}
-
 // paramText is a parameter's value as a placeholder writes it: a string
 // as is, anything else as JSON.
 func paramText(v *structpb.Value) string {
@@ -745,237 +831,11 @@ func parseParam(kind, text string) (*structpb.Value, error) {
 // mounts it.
 func gcsPath(uri string) string { return "/gcs/" + strings.TrimPrefix(uri, "gs://") }
 
-// runTask runs one task's container and collects its outputs into r.
-func (s *Server) runTask(ctx context.Context, runner PipelineRunner, k *kfpSpec, name string, t kfpTask, r *taskRun,
-	runs map[string]*taskRun, params map[string]*structpb.Value, env taskEnv) error {
-	if runner == nil {
-		return fmt.Errorf("no pipeline runner on this instance")
-	}
-	c := k.Components[t.ComponentRef.Name]
-	ex := k.DeploymentSpec.Executors[c.ExecutorLabel].Container
-	dir, err := os.MkdirTemp("", "cb-pipeline-")
-	if err != nil {
-		return err
-	}
-	defer func() { _ = os.RemoveAll(dir) }()
-	gcsDir, outDir := filepath.Join(dir, "gcs"), filepath.Join(dir, "outputs")
-	_ = os.MkdirAll(gcsDir, 0o777)
-	_ = os.MkdirAll(outDir, 0o777)
-	_ = os.Chmod(gcsDir, 0o777)
-	_ = os.Chmod(outDir, 0o777)
-
-	// Inputs.
-	inParams := map[string]*structpb.Value{}
-	for key, in := range t.Inputs.Parameters {
-		switch {
-		case in.ComponentInputParameter != "":
-			inParams[key] = params[in.ComponentInputParameter]
-		case in.RuntimeValue != nil:
-			v := &structpb.Value{}
-			if err := protojson.Unmarshal(in.RuntimeValue.Constant, v); err != nil {
-				return fmt.Errorf("input %q's constant: %v", key, err)
-			}
-			inParams[key] = v
-		case in.TaskOutputParameter != nil:
-			up := runs[in.TaskOutputParameter.ProducerTask]
-			v, ok := up.params[in.TaskOutputParameter.OutputParameterKey]
-			if !ok {
-				return fmt.Errorf("input %q: task %q has no output parameter %q", key, in.TaskOutputParameter.ProducerTask, in.TaskOutputParameter.OutputParameterKey)
-			}
-			inParams[key] = v
-		}
-	}
-	for key, def := range c.InputDefinitions.Parameters {
-		if _, ok := inParams[key]; ok && inParams[key] != nil {
-			continue
-		}
-		if len(def.DefaultValue) > 0 {
-			v := &structpb.Value{}
-			if protojson.Unmarshal(def.DefaultValue, v) == nil {
-				inParams[key] = v
-				continue
-			}
-		}
-		if !def.IsOptional {
-			return fmt.Errorf("input parameter %q has no value", key)
-		}
-	}
-	inArts := map[string]string{}
-	for key, in := range t.Inputs.Artifacts {
-		switch {
-		case in.TaskOutputArtifact != nil:
-			uri, ok := runs[in.TaskOutputArtifact.ProducerTask].artifacts[in.TaskOutputArtifact.OutputArtifactKey]
-			if !ok {
-				return fmt.Errorf("input artifact %q: task %q has no output artifact %q", key, in.TaskOutputArtifact.ProducerTask, in.TaskOutputArtifact.OutputArtifactKey)
-			}
-			inArts[key] = uri
-		case in.ComponentInputArtifact != "":
-			return fmt.Errorf("input artifact %q: the pipeline's own input artifacts (runtime_config.input_artifacts) are not read on this instance", key)
-		}
-	}
-	for key, uri := range inArts {
-		if err := downloadArtifact(ctx, runner, uri, filepath.Join(gcsDir, strings.TrimPrefix(uri, "gs://"))); err != nil {
-			return fmt.Errorf("input artifact %q (%s): %v", key, uri, err)
-		}
-	}
-	// Outputs.
-	outArts := map[string]string{}
-	for key := range c.OutputDefinitions.Artifacts {
-		uri := fmt.Sprintf("%s/%s/%s_%d/%s", env.root, env.jobName, name, env.taskID, key)
-		if !strings.HasPrefix(uri, "gs://") {
-			uri = "gs://" + strings.TrimPrefix(uri, "/")
-		}
-		outArts[key] = uri
-		_ = os.MkdirAll(filepath.Dir(filepath.Join(gcsDir, strings.TrimPrefix(uri, "gs://"))), 0o777)
-	}
-	_ = filepath.Walk(gcsDir, func(p string, _ os.FileInfo, _ error) error { _ = os.Chmod(p, 0o777); return nil })
-	outFile := func(key string) string { return "/cb-outputs/" + key }
-	taskUUID := uuid.NewString()
-	execInput := map[string]any{}
-	{
-		inputs := map[string]any{}
-		pv := map[string]any{}
-		for key, v := range inParams {
-			pv[key] = v.AsInterface()
-		}
-		inputs["parameterValues"] = pv
-		ia := map[string]any{}
-		for key, uri := range inArts {
-			ia[key] = map[string]any{"artifacts": []any{map[string]any{"name": key, "uri": uri, "metadata": map[string]any{}}}}
-		}
-		if len(ia) > 0 {
-			inputs["artifacts"] = ia
-		}
-		outputs := map[string]any{"outputFile": "/cb-outputs/executor_output.json"}
-		op := map[string]any{}
-		for key := range c.OutputDefinitions.Parameters {
-			op[key] = map[string]any{"outputFile": outFile(key)}
-		}
-		if len(op) > 0 {
-			outputs["parameters"] = op
-		}
-		oa := map[string]any{}
-		for key, uri := range outArts {
-			def := c.OutputDefinitions.Artifacts[key]
-			oa[key] = map[string]any{"artifacts": []any{map[string]any{"name": key, "uri": uri, "metadata": map[string]any{},
-				"type": map[string]any{"schemaTitle": def.ArtifactType.SchemaTitle}}}}
-		}
-		if len(oa) > 0 {
-			outputs["artifacts"] = oa
-		}
-		execInput["inputs"], execInput["outputs"] = inputs, outputs
-	}
-	var substErr error
-	expand := func(s string) string {
-		out := kfpPlaceholders.ReplaceAllStringFunc(s, func(m string) string {
-			g := kfpPlaceholders.FindStringSubmatch(m)
-			switch {
-			case m == "{{$}}":
-				b, _ := json.Marshal(execInput)
-				return string(b)
-			case g[1] == "inputs" && g[2] == "parameters":
-				v, ok := inParams[g[3]]
-				if !ok {
-					substErr = fmt.Errorf("the placeholder %s names no input parameter", m)
-					return ""
-				}
-				return paramText(v)
-			case g[1] == "outputs" && g[2] == "parameters" && g[4] == "output_file":
-				return outFile(g[3])
-			case g[2] == "artifacts":
-				uris := inArts
-				if g[1] == "outputs" {
-					uris = outArts
-				}
-				uri, ok := uris[g[3]]
-				if !ok {
-					substErr = fmt.Errorf("the placeholder %s names no artifact", m)
-					return ""
-				}
-				if g[4] == "uri" {
-					return uri
-				}
-				return gcsPath(uri)
-			case g[5] == "pipeline_job_name":
-				return env.jobName
-			case g[5] == "pipeline_job_uuid":
-				return env.jobUUID
-			case g[5] == "pipeline_task_name":
-				return name
-			case g[5] == "pipeline_task_uuid":
-				return taskUUID
-			case g[5] == "pipeline_root":
-				return env.root
-			}
-			return m
-		})
-		return out
-	}
-	cmd := make([]string, len(ex.Command))
-	for i, a := range ex.Command {
-		cmd[i] = expand(a)
-	}
-	args := make([]string, len(ex.Args))
-	for i, a := range ex.Args {
-		args[i] = expand(a)
-	}
-	if substErr != nil {
-		return substErr
-	}
-	envVars := map[string]string{"CLOUD_ML_PROJECT_ID": env.project, "GOOGLE_CLOUD_PROJECT": env.project, "NO_GCE_CHECK": "True"}
-	for _, e := range ex.Env {
-		envVars[e.Name] = expand(e.Value)
-	}
-	labels := map[string]string{"cloudburrow.pipeline-job": env.jobName, "cloudburrow.pipeline-task": name}
-	if err := runner.RunContainer(ctx, PipelineContainer{Key: env.jobName + "-" + name + "-" + taskUUID[:8], Image: ex.Image, Command: cmd, Args: args,
-		Env: envVars, Mounts: map[string]string{"/gcs": gcsDir, "/cb-outputs": outDir}, Labels: labels}); err != nil {
-		return err
-	}
-	// Output parameters: the executor output's, else each output file.
-	r.params = map[string]*structpb.Value{}
-	if b, err := os.ReadFile(filepath.Join(outDir, "executor_output.json")); err == nil {
-		var eo struct {
-			ParameterValues map[string]json.RawMessage `json:"parameterValues"`
-		}
-		if err := json.Unmarshal(b, &eo); err != nil {
-			return fmt.Errorf("the executor output is not JSON: %v", err)
-		}
-		for key, raw := range eo.ParameterValues {
-			v := &structpb.Value{}
-			if protojson.Unmarshal(raw, v) == nil {
-				r.params[key] = v
-			}
-		}
-	}
-	for key, def := range c.OutputDefinitions.Parameters {
-		if _, ok := r.params[key]; ok {
-			continue
-		}
-		b, err := os.ReadFile(filepath.Join(outDir, key))
-		if err != nil {
-			return fmt.Errorf("the task wrote no output parameter %q (%s)", key, outFile(key))
-		}
-		v, err := parseParam(def.ParameterType, string(b))
-		if err != nil {
-			return fmt.Errorf("output parameter %q: %v", key, err)
-		}
-		r.params[key] = v
-	}
-	// Output artifacts: whatever the task wrote at each path.
-	r.artifacts = map[string]string{}
-	for key, uri := range outArts {
-		local := filepath.Join(gcsDir, strings.TrimPrefix(uri, "gs://"))
-		if err := uploadArtifact(ctx, runner, local, uri); err != nil {
-			return fmt.Errorf("output artifact %q (%s): %v", key, uri, err)
-		}
-		r.artifacts[key] = uri
-	}
-	return nil
-}
-
 // kfpPlaceholders matches {{$}}, {{$.inputs|outputs.parameters|artifacts['K'][.attr]}}
 // and {{$.pipeline_*}}.
 var kfpPlaceholders = regexp.MustCompile(`\{\{\$(?:\.(inputs|outputs)\.(parameters|artifacts)\['([^']+)'\](?:\.([a-z_]+))?|\.(pipeline_[a-z_]+))?\}\}`)
+
+var errNoSuchObject = errors.New("no such object")
 
 // downloadArtifact copies gs://bucket/object (or every object under it as
 // a folder) to local.
@@ -993,7 +853,7 @@ func downloadArtifact(ctx context.Context, runner PipelineRunner, uri, local str
 		return err
 	}
 	if len(names) == 0 {
-		return fmt.Errorf("no such object")
+		return errNoSuchObject
 	}
 	for _, n := range names {
 		b, err := runner.ReadObject(ctx, bucket, n, 0)

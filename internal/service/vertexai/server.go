@@ -152,8 +152,9 @@ func (s *Server) Handler() http.Handler {
 	// operations (notebookruntimes.go, #2105).
 	// Notebook executions, schedules and the templates' IAM policies
 	// (notebookjobs.go, schedules.go, notebookiam.go) too.
-	// Vertex AI pipeline jobs (pipelines.go, #2173) too.
-	for _, c := range []string{"notebookRuntimeTemplates", "notebookRuntimes", "notebookExecutionJobs", "schedules", "pipelineJobs"} {
+	// Vertex AI pipeline jobs (pipelines.go, #2173) and ML Metadata
+	// (metadata.go, #2205) too.
+	for _, c := range []string{"notebookRuntimeTemplates", "notebookRuntimes", "notebookExecutionJobs", "schedules", "pipelineJobs", "metadataStores"} {
 		mux.HandleFunc("/v1/projects/{project}/locations/{location}/"+c, s.serveNotebookREST)
 		mux.HandleFunc("/v1/projects/{project}/locations/{location}/"+c+"/", s.serveNotebookREST)
 	}

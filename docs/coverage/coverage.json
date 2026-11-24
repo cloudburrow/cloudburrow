@@ -6531,7 +6531,7 @@
     "counts": {
       "Implemented": 3,
       "Unimplemented": 12,
-      "Verified": 119
+      "Verified": 151
     },
     "rows": [
       {
@@ -6680,6 +6680,230 @@
         "status": "Verified",
         "tests": [
           "test/compat/generationconversation_test.go:247 TestV1Beta1PredictionClientServesWhatV1Serves"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/AddContextArtifactsAndExecutions",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/AddContextChildren",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/AddExecutionEvents",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/CreateArtifact",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/CreateContext",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/CreateExecution",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/CreateMetadataSchema",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/CreateMetadataStore",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/DeleteArtifact",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/DeleteContext",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/DeleteExecution",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/DeleteMetadataStore",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/GetArtifact",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/GetContext",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/GetExecution",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/GetMetadataSchema",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/GetMetadataStore",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/ListArtifacts",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/ListContexts",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/ListExecutions",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/ListMetadataSchemas",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/ListMetadataStores",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/PurgeArtifacts",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/PurgeContexts",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/PurgeExecutions",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/QueryArtifactLineageSubgraph",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/QueryContextLineageSubgraph",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/QueryExecutionInputsAndOutputs",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/RemoveContextChildren",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/UpdateArtifact",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/UpdateContext",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/UpdateExecution",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
         ]
       },
       {
