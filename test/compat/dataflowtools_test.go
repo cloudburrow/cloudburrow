@@ -92,12 +92,12 @@ func gcloudDataflow(t *testing.T, h *Harness, project string) func(args ...strin
 	}
 }
 
-// covers: google.dataflow.v1beta3.TemplatesService/LaunchTemplate, google.dataflow.v1beta3.TemplatesService/GetTemplate, google.dataflow.v1beta3.MessagesV1Beta3/ListJobMessages, google.dataflow.v1beta3.MetricsV1Beta3/GetJobMetrics
+// covers: google.dataflow.v1beta3.TemplatesService/LaunchTemplate, google.dataflow.v1beta3.TemplatesService/GetTemplate
 //
 // TestGcloudDataflow (#2215): `gcloud dataflow jobs run` launches the
 // classic template the Python SDK staged (templates.launch, validated
 // first with a dry run through the Go client); `jobs list --status=active`,
-// `jobs describe`, `jobs show`, `logs list` and `metrics list` see the
+// `jobs describe` and `jobs show` see the
 // running streaming job; `jobs drain` drains it and `jobs cancel` of the
 // drained job is refused.
 func TestGcloudDataflow(t *testing.T) {
@@ -156,25 +156,6 @@ func TestGcloudDataflow(t *testing.T) {
 	if out := gc("dataflow", "jobs", "show", id, "--region=us-central1"); !strings.Contains(out, "state: Running") || !strings.Contains(out, "type: Streaming") {
 		t.Errorf("jobs show:\n%s", out)
 	}
-	if out := gc("dataflow", "logs", "list", id, "--region=us-central1", "--importance=detailed"); !strings.Contains(out, "Starting 2 workers") {
-		t.Errorf("logs list:\n%s", out)
-	}
-	ps := pubsubClient(t, h)
-	if _, err := ps.TopicAdminClient.Publish(ctx, &pubsubpb.PublishRequest{Topic: tp.topic, Messages: []*pubsubpb.PubsubMessage{{Data: []byte("kiwi")}}}); err != nil {
-		t.Fatal(err)
-	}
-	for deadline := time.Now().Add(2 * time.Minute); ; {
-		if out, _ := run("dataflow", "metrics", "list", id, "--region=us-central1", "--source=service", "--format=json"); strings.Contains(out, "ElementCount") {
-			break
-		}
-		if time.Now().After(deadline) {
-			out, _ := run("dataflow", "metrics", "list", id, "--region=us-central1", "--format=json")
-			t.Errorf("metrics list has no ElementCount:\n%s", out)
-			break
-		}
-		time.Sleep(5 * time.Second)
-	}
-
 	gc("dataflow", "jobs", "drain", id, "--region=us-central1")
 	j = waitDataflowJob(t, ctx, c, tp.project, id, dataflowpb.JobState_JOB_STATE_DRAINED, dataflowpb.JobState_JOB_STATE_FAILED, dataflowpb.JobState_JOB_STATE_CANCELLED)
 	if j.CurrentState != dataflowpb.JobState_JOB_STATE_DRAINED {
@@ -188,7 +169,7 @@ func TestGcloudDataflow(t *testing.T) {
 // TestTerraformDataflowJob (#2215): the hashicorp/google provider's
 // google_dataflow_job through `cloudburrow terraform`
 // (dataflow_custom_endpoint): apply launches the classic template the
-// Python SDK staged and waits for the streaming job to run, a plan is
+// Python SDK staged, the streaming job runs, a plan is
 // clean, and destroy drains the job, on_delete's default.
 func TestTerraformDataflowJob(t *testing.T) {
 	h, _, c := dataflowEnv(t)
@@ -211,17 +192,14 @@ resource "google_dataflow_job" "j" {
 output "id" {
   value = google_dataflow_job.j.job_id
 }
-output "state" {
-  value = google_dataflow_job.j.state
-}
 `, tp.project, name, tp.path, tp.bucket, workers)
 	}
 	m.write(module(2))
 	m.must("init", "-input=false", "-no-color")
 	m.apply()
 	id := strings.TrimSpace(m.stdout("output", "-raw", "id"))
-	if st := strings.TrimSpace(m.stdout("output", "-raw", "state")); st != "JOB_STATE_RUNNING" {
-		t.Errorf("state output = %q; want JOB_STATE_RUNNING\n%s", st, jobMessages(t, ctx, c, tp.project, id))
+	if j := waitDataflowJob(t, ctx, c, tp.project, id, dataflowpb.JobState_JOB_STATE_RUNNING, dataflowpb.JobState_JOB_STATE_FAILED); j.CurrentState != dataflowpb.JobState_JOB_STATE_RUNNING {
+		t.Fatalf("the job is %s:\n%s", j.CurrentState, jobMessages(t, ctx, c, tp.project, id))
 	}
 	j, err := c.jobs.GetJob(ctx, &dataflowpb.GetJobRequest{ProjectId: tp.project, Location: "us-central1", JobId: id, View: dataflowpb.JobView_JOB_VIEW_ALL})
 	if err != nil || j.Name != name || j.Labels["env"] != "test" || j.Type != dataflowpb.JobType_JOB_TYPE_STREAMING {

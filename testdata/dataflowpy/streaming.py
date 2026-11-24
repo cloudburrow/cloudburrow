@@ -34,7 +34,9 @@ def run(argv=None):
          create_disposition=beam.io.BigQueryDisposition.CREATE_IF_NEEDED,
          write_disposition=beam.io.BigQueryDisposition.WRITE_APPEND))
     result = p.run()
-    print("JOB_ID", result.job_id(), flush=True)
+    # With --template_location the SDK stages a template and makes no job.
+    if getattr(result, "_job", None) is not None:
+        print("JOB_ID", result.job_id(), flush=True)
 
 
 if __name__ == "__main__":

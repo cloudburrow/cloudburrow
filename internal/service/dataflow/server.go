@@ -30,7 +30,7 @@
 //   - JOB_VIEW_SUMMARY is the default view of get and list.
 //
 // Error texts Google's pages do not quote are marked UNVERIFIED where they
-// are made.
+// are made (docs re-read 2026-11-24: docs.cloud.google.com/dataflow/docs/reference/rest).
 package dataflow
 
 import (

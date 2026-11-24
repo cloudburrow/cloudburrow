@@ -226,5 +226,5 @@ func (s *Server) GetStageExecutionDetails(_ context.Context, req *dataflowpb.Get
 		return &dataflowpb.StageExecutionDetails{Workers: []*dataflowpb.WorkerDetails{{
 			WorkerName: r.job.Name + "-harness-0", WorkItems: []*dataflowpb.WorkItemDetails{item}}}}, nil
 	}
-	return nil, apierror.NotFound("Stage %s of job %s was not found.", req.GetStageId(), req.GetJobId()) // UNVERIFIED
+	return nil, apierror.NotFound("Stage %s of job %s was not found.", req.GetStageId(), req.GetJobId()) // UNVERIFIED (docs re-read 2026-11-24)
 }

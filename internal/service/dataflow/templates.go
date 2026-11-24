@@ -22,7 +22,7 @@ import (
 
 func (s *Server) readTemplate(ctx context.Context, gcsPath string) (*dataflowpb.Job, error) {
 	if !strings.HasPrefix(gcsPath, "gs://") {
-		return nil, apierror.InvalidArgument("(%s): The template's gcsPath must be a Cloud Storage path starting with gs://.", gcsPath) // UNVERIFIED
+		return nil, apierror.InvalidArgument("(%s): The template's gcsPath must be a Cloud Storage path starting with gs://.", gcsPath) // UNVERIFIED (docs re-read 2026-11-24)
 	}
 	if s.opts.Storage == nil {
 		return nil, apierror.FailedPrecondition("Templates are read from Cloud Storage, which this instance does not serve.")
@@ -33,7 +33,7 @@ func (s *Server) readTemplate(ctx context.Context, gcsPath string) (*dataflowpb.
 	}
 	var job dataflowpb.Job
 	if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(b, &job); err != nil {
-		return nil, apierror.InvalidArgument("(%s): The template file %s is not a valid template: %v", gcsPath, gcsPath, err) // UNVERIFIED
+		return nil, apierror.InvalidArgument("(%s): The template file %s is not a valid template: %v", gcsPath, gcsPath, err) // UNVERIFIED (docs re-read 2026-11-24)
 	}
 	return &job, nil
 }
@@ -92,7 +92,7 @@ func checkParameters(meta *dataflowpb.TemplateMetadata, params map[string]string
 // fromTemplate is the job a classic template launches: its file's job
 // with the launch's name, parameters (pipeline options, which the
 // workers' RuntimeValueProviders read) and runtime environment.
-func fromTemplate(job *dataflowpb.Job, name string, params map[string]string, env *dataflowpb.RuntimeEnvironment) *dataflowpb.Job {
+func fromTemplate(job *dataflowpb.Job, gcsPath, name string, params map[string]string, env *dataflowpb.RuntimeEnvironment) *dataflowpb.Job {
 	job.Id, job.Name, job.CurrentState, job.ClientRequestId = "", name, 0, ""
 	if job.Environment == nil {
 		job.Environment = &dataflowpb.Environment{}
@@ -111,11 +111,19 @@ func fromTemplate(job *dataflowpb.Job, name string, params map[string]string, en
 		o.Fields[k] = structpb.NewStringValue(v)
 	}
 	o.Fields["job_name"] = structpb.NewStringValue(name)
-	o.Fields["template_location"] = structpb.NewNullValue()
 	delete(o.Fields, "template_location")
+	// A templated job's options name its template and its temporary
+	// location, as Google's do (templateLocation, tempLocation): the
+	// Terraform provider reads google_dataflow_job's template_gcs_path and
+	// temp_gcs_location back from them.
+	o.Fields["templateLocation"] = structpb.NewStringValue(gcsPath)
+	if t := o.Fields["temp_location"].GetStringValue(); t != "" {
+		o.Fields["tempLocation"] = structpb.NewStringValue(t)
+	}
 	if env != nil {
 		if env.TempLocation != "" {
 			o.Fields["temp_location"] = structpb.NewStringValue(env.TempLocation)
+			o.Fields["tempLocation"] = structpb.NewStringValue(env.TempLocation)
 			job.Environment.TempStoragePrefix = env.TempLocation
 		}
 		if env.MaxWorkers > 0 || env.NumWorkers > 0 {
@@ -168,7 +176,7 @@ func (s *Server) CreateJobFromTemplate(ctx context.Context, req *dataflowpb.Crea
 	if err := checkParameters(s.metadataOf(ctx, req.GetGcsPath()), req.GetParameters()); err != nil {
 		return nil, err
 	}
-	return s.create(req.GetProjectId(), loc, fromTemplate(job, req.GetJobName(), req.GetParameters(), req.GetEnvironment()), "", dataflowpb.JobView_JOB_VIEW_SUMMARY)
+	return s.create(req.GetProjectId(), loc, fromTemplate(job, req.GetGcsPath(), req.GetJobName(), req.GetParameters(), req.GetEnvironment()), "", dataflowpb.JobView_JOB_VIEW_SUMMARY)
 }
 
 // LaunchTemplate launches a classic template (projects.locations.templates.launch).
@@ -197,7 +205,7 @@ func (s *Server) LaunchTemplate(ctx context.Context, req *dataflowpb.LaunchTempl
 	if err := checkParameters(s.metadataOf(ctx, req.GetGcsPath()), lp.GetParameters()); err != nil {
 		return nil, err
 	}
-	job = fromTemplate(job, lp.GetJobName(), lp.GetParameters(), lp.GetEnvironment())
+	job = fromTemplate(job, req.GetGcsPath(), lp.GetJobName(), lp.GetParameters(), lp.GetEnvironment())
 	job.TransformNameMapping = lp.GetTransformNameMapping()
 	if req.GetValidateOnly() {
 		if !validName(job.GetName()) {
@@ -209,7 +217,7 @@ func (s *Server) LaunchTemplate(ctx context.Context, req *dataflowpb.LaunchTempl
 	if lp.GetUpdate() {
 		replace = s.activeJobNamed(req.GetProjectId(), loc, job.GetName())
 		if replace == "" {
-			return nil, apierror.NotFound("The workflow could not be created. Causes: Could not find a running job named %s to update.", job.GetName()) // UNVERIFIED
+			return nil, apierror.NotFound("The workflow could not be created. Causes: Could not find a running job named %s to update.", job.GetName()) // UNVERIFIED (docs re-read 2026-11-24)
 		}
 	}
 	out, err := s.create(req.GetProjectId(), loc, job, replace, dataflowpb.JobView_JOB_VIEW_SUMMARY)
@@ -279,6 +287,11 @@ func (s *Server) GetTemplate(ctx context.Context, req *dataflowpb.GetTemplateReq
 // while the template's launcher image runs the pipeline's program, whose
 // DataflowRunner then submits it, taking this job's ID.
 func (s *Server) LaunchFlexTemplate(ctx context.Context, req *dataflowpb.LaunchFlexTemplateRequest) (*dataflowpb.LaunchFlexTemplateResponse, error) {
+	// A Flex Template's launcher is its container image, run to submit
+	// the job; the CLI has no runner for it yet (#2215, gaps.md).
+	if s.opts.Launcher == nil {
+		return nil, apierror.Unimplemented("Flex Templates are not served yet: CloudBurrow does not run a Flex Template's launcher image. Launch a classic template with templates.launch.")
+	}
 	if err := checkProject(req.GetProjectId()); err != nil {
 		return nil, err
 	}
@@ -308,7 +321,7 @@ func (s *Server) LaunchFlexTemplate(ctx context.Context, req *dataflowpb.LaunchF
 		}
 		var spec flexSpec
 		if err := json.Unmarshal(b, &spec); err != nil || spec.Image == "" {
-			return nil, apierror.InvalidArgument("(%s): The template file is not a valid Flex Template spec: it names no image.", lp.GetContainerSpecGcsPath()) // UNVERIFIED
+			return nil, apierror.InvalidArgument("(%s): The template file is not a valid Flex Template spec: it names no image.", lp.GetContainerSpecGcsPath()) // UNVERIFIED (docs re-read 2026-11-24)
 		}
 		image = spec.Image
 		if len(spec.Metadata) > 0 {
@@ -318,19 +331,16 @@ func (s *Server) LaunchFlexTemplate(ctx context.Context, req *dataflowpb.LaunchF
 			}
 		}
 	default:
-		return nil, apierror.InvalidArgument("One of containerSpec or containerSpecGcsPath must be set.") // UNVERIFIED
+		return nil, apierror.InvalidArgument("One of containerSpec or containerSpecGcsPath must be set.") // UNVERIFIED (docs re-read 2026-11-24)
 	}
 	if image == "" {
-		return nil, apierror.InvalidArgument("The Flex Template's container spec names no image.") // UNVERIFIED
+		return nil, apierror.InvalidArgument("The Flex Template's container spec names no image.") // UNVERIFIED (docs re-read 2026-11-24)
 	}
 	if err := checkParameters(meta, lp.GetParameters()); err != nil {
 		return nil, err
 	}
 	if req.GetValidateOnly() {
 		return &dataflowpb.LaunchFlexTemplateResponse{}, nil
-	}
-	if s.opts.Launcher == nil {
-		return nil, apierror.FailedPrecondition("Flex Templates run their launcher image in the instance's Docker, which this instance does not have.")
 	}
 	env := lp.GetEnvironment()
 	now := s.now()
@@ -347,7 +357,7 @@ func (s *Server) LaunchFlexTemplate(ctx context.Context, req *dataflowpb.LaunchF
 		j := r.job
 		if j.ProjectId == job.ProjectId && j.Location == loc && j.Name == job.Name && active(j.CurrentState) && !lp.GetUpdate() {
 			s.mu.Unlock()
-			return nil, apierror.AlreadyExists("There is already an active job named %s. If you want to submit a second job, try again by setting a different name.", job.Name) // UNVERIFIED
+			return nil, apierror.AlreadyExists("There is already an active job named %s. If you want to submit a second job, try again by setting a different name.", job.Name) // UNVERIFIED (docs re-read 2026-11-24)
 		}
 	}
 	r := &jobRec{job: job, flex: true}

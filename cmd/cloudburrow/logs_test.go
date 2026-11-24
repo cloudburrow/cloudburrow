@@ -391,7 +391,7 @@ func TestLogsFlags(t *testing.T) {
 	}
 	for _, bad := range [][]string{
 		{"--resource", "hello"},
-		{"--service", "dataflow"},
+		{"--service", "datafusion"},
 		{"--format", "yaml"},
 		{"--tail", "-1"},
 		{"--since", "soon"},

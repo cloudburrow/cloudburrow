@@ -51,6 +51,10 @@ var serviceAgents = map[string]string{
 	// Dataproc Service Agent, service-NUMBER@dataproc-accounts (#2156;
 	// docs.cloud.google.com/iam/docs/service-agents, read 2026-11-22).
 	"dataproc.googleapis.com": "dataproc-accounts.iam.gserviceaccount.com",
+	// Cloud Dataflow Service Agent,
+	// service-NUMBER@dataflow-service-producer-prod (#2215;
+	// docs.cloud.google.com/iam/docs/service-agents).
+	"dataflow.googleapis.com": "dataflow-service-producer-prod.iam.gserviceaccount.com",
 	// App Hub Service Account, the primary agent of apphub.googleapis.com
 	// (docs.cloud.google.com/iam/docs/service-agents, read 2026-11-21).
 	"apphub.googleapis.com": "gcp-sa-apphub.iam.gserviceaccount.com",

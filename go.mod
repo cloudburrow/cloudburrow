@@ -25,6 +25,7 @@ require (
 	cloud.google.com/go/compute/metadata v0.10.0
 	cloud.google.com/go/container v1.56.1
 	cloud.google.com/go/containeranalysis v0.21.1
+	cloud.google.com/go/dataflow v0.18.1
 	cloud.google.com/go/dataform v1.9.0
 	cloud.google.com/go/dataproc/v2 v2.28.1
 	cloud.google.com/go/datastore v1.27.0
@@ -132,7 +133,6 @@ require (
 
 require (
 	cloud.google.com/go/accesscontextmanager v1.15.0 // indirect
-	cloud.google.com/go/dataflow v0.18.1 // indirect
 	cloud.google.com/go/osconfig v1.22.0 // indirect
 	dario.cat/mergo v1.0.2 // indirect
 	github.com/Azure/go-ansiterm v0.0.0-20250102033503-faa5f7b0171c // indirect

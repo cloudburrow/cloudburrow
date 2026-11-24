@@ -28,7 +28,7 @@ import (
 
 const dataflowNotStarted = "Dataflow has not started"
 
-var dataflowJobNameRE = regexp.MustCompile(`^[a-z]([-a-z0-9]*[a-z0-9])?$`)
+var dataflowJobNameRE = regexp.MustCompile(`^[a-z]([a-z0-9\-]*[a-z0-9])?$`)
 
 type dataflowProvider struct {
 	svc     *dataflowService
@@ -152,9 +152,9 @@ func (dataflowProvider) CreateForm() (string, []console.Field) {
 		{Name: "template", Label: "Dataflow template", Type: "select", Default: "custom", Options: []string{"custom"},
 			OptionLabels: map[string]string{"custom": "Custom Template"},
 			Help:         "A classic template staged in Cloud Storage, such as one the Beam SDK writes with --template_location. Google's own templates are not built here yet."},
-		{Name: "gcsPath", Label: "Template path", Type: "text", Required: true, Pattern: `^gs://[^/]+/.+$`, Section: "Required parameters",
+		{Name: "gcsPath", Label: "Template path", Type: "text", Required: true, Pattern: `^gs://[^\/]+\/.+$`, Section: "Required parameters",
 			Help: "gs://BUCKET/PATH of the template file. Its metadata, if any, is read from PATH_metadata."},
-		{Name: "tempLocation", Label: "Temporary location", Type: "text", Required: true, Pattern: `^gs://[^/]+(/.*)?$`, Section: "Required parameters",
+		{Name: "tempLocation", Label: "Temporary location", Type: "text", Required: true, Pattern: `^gs://[^\/]+(\/.*)?$`, Section: "Required parameters",
 			Help: "gs://BUCKET/PATH for the job's temporary files."},
 		{Name: "parameters", Label: "Additional parameters", Type: "map", Section: "Optional parameters",
 			Help: "The template's parameters, by name."},

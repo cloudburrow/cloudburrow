@@ -39,7 +39,7 @@ func location(loc string) (string, error) {
 		return DefaultLocation, nil
 	}
 	if !regionRE.MatchString(loc) {
-		// UNVERIFIED: Google's text for a malformed regional endpoint.
+		// UNVERIFIED: Google's text for a malformed regional endpoint (docs re-read 2026-11-24).
 		return "", apierror.InvalidArgument("The location %q is not a valid Dataflow regional endpoint.", loc)
 	}
 	return loc, nil
@@ -63,7 +63,7 @@ func (s *Server) CreateJob(ctx context.Context, req *dataflowpb.CreateJobRequest
 		return nil, apierror.InvalidArgument("job must be set")
 	}
 	if in.GetLocation() != "" && in.GetLocation() != loc {
-		// UNVERIFIED
+		// UNVERIFIED (docs re-read 2026-11-24)
 		return nil, apierror.InvalidArgument("The job's location %q does not match the request's location %q.", in.GetLocation(), loc)
 	}
 	return s.create(req.GetProjectId(), loc, proto.Clone(in).(*dataflowpb.Job), firstNonEmpty(req.GetReplaceJobId(), in.GetReplaceJobId()), req.GetView())
@@ -114,12 +114,12 @@ func (s *Server) create(project, loc string, job *dataflowpb.Job, replace string
 		if old == nil {
 			r := s.jobs[jobKey(project, loc, replace)]
 			if r == nil {
-				return nil, apierror.NotFound("The workflow could not be created. Causes: Could not find a running job with id %s to update.", replace) // UNVERIFIED
+				return nil, apierror.NotFound("The workflow could not be created. Causes: Could not find a running job with id %s to update.", replace) // UNVERIFIED (docs re-read 2026-11-24)
 			}
-			return nil, apierror.FailedPrecondition("The workflow could not be created. Causes: The job %s to update is %s, not running, or is named %q, not %q.", replace, r.job.CurrentState, r.job.Name, job.Name) // UNVERIFIED
+			return nil, apierror.FailedPrecondition("The workflow could not be created. Causes: The job %s to update is %s, not running, or is named %q, not %q.", replace, r.job.CurrentState, r.job.Name, job.Name) // UNVERIFIED (docs re-read 2026-11-24)
 		}
 		if old.job.Type != dataflowpb.JobType_JOB_TYPE_STREAMING {
-			return nil, apierror.FailedPrecondition("The workflow could not be created. Causes: Updating a batch job is not supported: only streaming jobs can be updated.") // UNVERIFIED
+			return nil, apierror.FailedPrecondition("The workflow could not be created. Causes: Updating a batch job is not supported: only streaming jobs can be updated.") // UNVERIFIED (docs re-read 2026-11-24)
 		}
 	}
 	now := s.now()
@@ -285,12 +285,12 @@ func (s *Server) UpdateJob(_ context.Context, req *dataflowpb.UpdateJobRequest) 
 				"runtimeUpdatableParams.maxNumWorkers", "runtimeUpdatableParams.minNumWorkers":
 			case "requested_state", "requestedState":
 			default:
-				return nil, apierror.InvalidArgument("The update mask path %q is not supported. Only runtime_updatable_params.max_num_workers, runtime_updatable_params.min_num_workers and requested_state may be updated.", p) // UNVERIFIED
+				return nil, apierror.InvalidArgument("The update mask path %q is not supported. Only runtime_updatable_params.max_num_workers, runtime_updatable_params.min_num_workers and requested_state may be updated.", p) // UNVERIFIED (docs re-read 2026-11-24)
 			}
 		}
 		if j.Type != dataflowpb.JobType_JOB_TYPE_STREAMING || !active(j.CurrentState) {
 			if in.GetRequestedState() == dataflowpb.JobState_JOB_STATE_UNKNOWN {
-				return nil, apierror.FailedPrecondition("Workflow modification failed. Causes: Runtime updatable parameters can only be changed for a running streaming job.") // UNVERIFIED
+				return nil, apierror.FailedPrecondition("Workflow modification failed. Causes: Runtime updatable parameters can only be changed for a running streaming job.") // UNVERIFIED (docs re-read 2026-11-24)
 			}
 		}
 		if p := in.GetRuntimeUpdatableParams(); p != nil {
@@ -305,10 +305,10 @@ func (s *Server) UpdateJob(_ context.Context, req *dataflowpb.UpdateJobRequest) 
 				min = j.RuntimeUpdatableParams.MinNumWorkers
 			}
 			if max != nil && min != nil && *min > *max {
-				return nil, apierror.InvalidArgument("min_num_workers (%d) must not exceed max_num_workers (%d).", *min, *max) // UNVERIFIED
+				return nil, apierror.InvalidArgument("min_num_workers (%d) must not exceed max_num_workers (%d).", *min, *max) // UNVERIFIED (docs re-read 2026-11-24)
 			}
 			if max != nil && (*max < 1 || *max > 1000) {
-				return nil, apierror.InvalidArgument("max_num_workers must be between 1 and 1000, got %d.", *max) // UNVERIFIED
+				return nil, apierror.InvalidArgument("max_num_workers must be between 1 and 1000, got %d.", *max) // UNVERIFIED (docs re-read 2026-11-24)
 			}
 			j.RuntimeUpdatableParams.MaxNumWorkers, j.RuntimeUpdatableParams.MinNumWorkers = max, min
 			s.addMessageLocked(r, dataflowpb.JobMessageImportance_JOB_MESSAGE_BASIC,
@@ -319,7 +319,7 @@ func (s *Server) UpdateJob(_ context.Context, req *dataflowpb.UpdateJobRequest) 
 	case dataflowpb.JobState_JOB_STATE_UNKNOWN:
 	case dataflowpb.JobState_JOB_STATE_CANCELLED:
 		if terminal(j.CurrentState) {
-			return nil, apierror.FailedPrecondition("Workflow modification failed. Causes: Cannot cancel job %s: it is in the terminal state %s.", j.Id, j.CurrentState) // UNVERIFIED
+			return nil, apierror.FailedPrecondition("Workflow modification failed. Causes: Cannot cancel job %s: it is in the terminal state %s.", j.Id, j.CurrentState) // UNVERIFIED (docs re-read 2026-11-24)
 		}
 		j.RequestedState = want
 		j.CurrentState, j.CurrentStateTime = dataflowpb.JobState_JOB_STATE_CANCELLING, timestamppb.New(s.now())
@@ -329,19 +329,23 @@ func (s *Server) UpdateJob(_ context.Context, req *dataflowpb.UpdateJobRequest) 
 		} else {
 			s.finishLocked(r, Outcome{State: dataflowpb.JobState_JOB_STATE_CANCELLED})
 		}
-	case dataflowpb.JobState_JOB_STATE_DRAINED:
+	case dataflowpb.JobState_JOB_STATE_DRAINED, dataflowpb.JobState_JOB_STATE_DRAINING:
+		// gcloud asks for JOB_STATE_DRAINED and the Terraform provider
+		// (google_dataflow_job's on_delete = "drain") for
+		// JOB_STATE_DRAINING; Google drains on either.
+		want = dataflowpb.JobState_JOB_STATE_DRAINED
 		if j.Type != dataflowpb.JobType_JOB_TYPE_STREAMING {
-			return nil, apierror.FailedPrecondition("Workflow modification failed. Causes: Draining is supported for streaming jobs only: job %s is a batch job.", j.Id) // UNVERIFIED
+			return nil, apierror.FailedPrecondition("Workflow modification failed. Causes: Draining is supported for streaming jobs only: job %s is a batch job.", j.Id) // UNVERIFIED (docs re-read 2026-11-24)
 		}
 		if terminal(j.CurrentState) || j.CurrentState == dataflowpb.JobState_JOB_STATE_CANCELLING {
-			return nil, apierror.FailedPrecondition("Workflow modification failed. Causes: Cannot drain job %s: it is in the state %s.", j.Id, j.CurrentState) // UNVERIFIED
+			return nil, apierror.FailedPrecondition("Workflow modification failed. Causes: Cannot drain job %s: it is in the state %s.", j.Id, j.CurrentState) // UNVERIFIED (docs re-read 2026-11-24)
 		}
 		j.RequestedState = want
 		j.CurrentState, j.CurrentStateTime = dataflowpb.JobState_JOB_STATE_DRAINING, timestamppb.New(s.now())
 		s.addMessageLocked(r, dataflowpb.JobMessageImportance_JOB_MESSAGE_BASIC, "Drain request is committed for workflow job: "+j.Id+".")
 		s.signalDrainLocked(r)
 	default:
-		return nil, apierror.InvalidArgument("requestedState %s is not supported: a job's requested state may be JOB_STATE_CANCELLED or JOB_STATE_DRAINED.", want) // UNVERIFIED
+		return nil, apierror.InvalidArgument("requestedState %s is not supported: a job's requested state may be JOB_STATE_CANCELLED, JOB_STATE_DRAINED or JOB_STATE_DRAINING.", want) // UNVERIFIED (docs re-read 2026-11-24)
 	}
 	s.save()
 	return viewOf(j, dataflowpb.JobView_JOB_VIEW_SUMMARY), nil
@@ -379,7 +383,7 @@ func (s *Server) AggregatedListJobs(_ context.Context, req *dataflowpb.ListJobsR
 		return nil, err
 	}
 	if req.Name != nil {
-		return nil, apierror.InvalidArgument("Filtering by name is not supported by projects.jobs.aggregated.") // UNVERIFIED
+		return nil, apierror.InvalidArgument("Filtering by name is not supported by projects.jobs.aggregated.") // UNVERIFIED (docs re-read 2026-11-24)
 	}
 	return s.list(req, "")
 }
@@ -443,10 +447,7 @@ func (s *Server) CheckActiveJobs(_ context.Context, req *dataflowpb.CheckActiveJ
 
 // SnapshotJob is UNIMPLEMENTED: the runner keeps no snapshot of a
 // streaming job's state that a new job could start from.
-func (s *Server) SnapshotJob(_ context.Context, req *dataflowpb.SnapshotJobRequest) (*dataflowpb.Snapshot, error) {
-	if _, err := s.lookup(req.GetProjectId(), req.GetLocation(), req.GetJobId()); err != nil {
-		return nil, err
-	}
+func (s *Server) SnapshotJob(context.Context, *dataflowpb.SnapshotJobRequest) (*dataflowpb.Snapshot, error) {
 	return nil, apierror.Unimplemented("Dataflow snapshots are not supported by CloudBurrow: the local Apache Flink runner keeps no snapshot of a streaming job's state that a new job can be created from.")
 }
 
