@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cloudburrow/cloudburrow/internal/byoc"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/hostrelay"
 	"github.com/cloudburrow/cloudburrow/internal/remotecompute"
@@ -90,20 +91,34 @@ func connectComputeWith(ctx context.Context, cfg config.Config, out io.Writer, r
 				"`cloudburrow delete` it, or choose another --name, to run it on %s", cfg.Name, cfg.ClusterName(), t)
 		}
 	}
-	s, err := remotecompute.Connect(ctx, remotecompute.Options{
-		Target: t, StateDir: cfg.InstanceDir(), Instance: cfg.Name, SkipPrerequisites: skipChecks,
-		Progress: func(e remotecompute.Event) {
-			if e.Error != "" {
-				fmt.Fprintf(out, "compute: %s: %s\n", e.Message, e.Error)
-				return
-			}
-			fmt.Fprintf(out, "compute: %s\n", e.Message)
-		},
-	})
+	opts := remotecompute.Options{Target: t, StateDir: cfg.InstanceDir(), Instance: cfg.Name, SkipPrerequisites: skipChecks}
+	rec, _, _ := remotecompute.LoadRecord(cfg.InstanceDir())
+	if rec.Provisioned {
+		// A VM `cloudburrow cloud create` made (#2209): its key is in the
+		// keychain and its host key pinned, and its address is the
+		// provisioner's latest.
+		vm, err := provisionedTarget(cfg)
+		if err != nil {
+			return nil, fmt.Errorf("instance %q's compute is the VM at %s: %w", cfg.Name, t, err)
+		}
+		t = remotecompute.Target{User: vm.User, Host: vm.Host, Port: vm.Port}
+		if t.Port == 0 {
+			t.Port = 22
+		}
+		opts.Target, opts.Key, opts.HostKey = t, remotecompute.PEMKey(vm.PrivateKey), vm.HostKey
+	}
+	opts.Progress = func(e remotecompute.Event) {
+		if e.Error != "" {
+			fmt.Fprintf(out, "compute: %s: %s\n", e.Message, e.Error)
+			return
+		}
+		fmt.Fprintf(out, "compute: %s\n", e.Message)
+	}
+	s, err := remotecompute.Connect(ctx, opts)
 	if err != nil {
 		return nil, fmt.Errorf("compute host %s: %w", t, err)
 	}
-	c := &computeConn{session: s, record: remotecompute.Record{Target: t, Created: time.Now().UTC(), Host: s.Status().Host}}
+	c := &computeConn{session: s, record: remotecompute.Record{Target: t, Created: time.Now().UTC(), Host: s.Status().Host, Provisioned: rec.Provisioned}}
 	if rec, had, _ := remotecompute.LoadRecord(cfg.InstanceDir()); had {
 		c.record.Created = rec.Created
 	}
@@ -132,6 +147,16 @@ func connectComputeWith(ctx context.Context, cfg config.Config, out io.Writer, r
 	activeCompute = c
 	activeComputeMu.Unlock()
 	return c, nil
+}
+
+// provisionedTarget reads the instance's VM from the provisioner: its
+// address, user, key (from the keychain) and pinned host key.
+var provisionedTarget = func(cfg config.Config) (byoc.RemoteTarget, error) {
+	m, err := newCloudManager(cfg)
+	if err != nil {
+		return byoc.RemoteTarget{}, err
+	}
+	return m.RemoteTarget(cfg.Name)
 }
 
 // localClusterExists reports whether this machine's own Docker has the

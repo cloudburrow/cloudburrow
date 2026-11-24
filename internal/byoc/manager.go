@@ -1025,6 +1025,12 @@ func (m *Manager) Delete(ctx context.Context, instance string, wait bool, also P
 		if err := m.keys.Delete(keyName(instance)); err != nil {
 			return nil, err
 		}
+		// The VM is gone: the engine forgets it was the instance's compute.
+		if f, ok := m.engine.(interface{ Forget(string) error }); ok {
+			if err := f.Forget(instance); err != nil {
+				return nil, err
+			}
+		}
 		mc.State = Deleted
 		return &mc, nil
 	})

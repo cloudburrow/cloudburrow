@@ -165,12 +165,36 @@ reverse forward at the port it was given first, because containers already hold 
 `docker` and `kubectl` calls made during the gap fail as they would against a stopped Docker, and
 the port-forward tunnels re-establish themselves as before (`internal/netfwd`).
 
+### A VM CloudBurrow provisioned
+
+A VM made by `cloudburrow cloud create` or the console's Create ([byoc.md](byoc.md)) is reached
+the same way, with two differences, both through `remotecompute.Options`:
+
+- **Key:** `Key` is a `KeySource`. `FileKey` is the file above, for `--compute ssh://`. For a VM
+  the key is the keychain item the provisioner made (`StoredKey` over `internal/byoc/keychain`'s
+  store, or `PEMKey` with the bytes the provisioner read). It is never written to disk: an SSH
+  agent in this process holds it, on a socket in a `0700` directory, and `ssh` signs through that
+  agent (`IdentityAgent`, with `IdentitiesOnly` and the key's public half as `IdentityFile`). The
+  VM's cloud-init installed the public half, so nothing is installed.
+- **Host key:** `HostKey` pins the host key the provisioner made for the VM and gave it through
+  cloud-init. The `known_hosts` names only that key (`StrictHostKeyChecking=yes`), so an address
+  that now answers with another key is refused.
+
+`remotecompute.Engine` is `internal/byoc`'s `RemoteEngine`. The manager hands it each VM that a
+create, start or resize leaves running. It connects as above and writes `compute.json` with
+`provisioned: true`. `up`, `stop`, `delete`, `reset`, `status` and `doctor` then read the key,
+the pinned host key and the VM's current address from the provisioner on each connect; a stopped
+and started VM's new address is used. The cloud-init also sets sshd's `GatewayPorts
+clientspecified`, which the reverse forwards need. Deleting the VM closes the connection and
+removes the record. The keychain item goes with the VM.
+
 ### The Go API
 
 ```go
 s, err := remotecompute.Connect(ctx, remotecompute.Options{
     Target:   remotecompute.Target{User: "dev", Host: "build-box.example"},
     StateDir: instanceDir, Instance: "lab",
+    // Key: remotecompute.StoredKey{Store: store, Name: item}, HostKey: pinned, for a VM
     Progress: func(e remotecompute.Event) { /* stage, message, error: for a console */ },
 })
 s.DockerHost()            // unix:///…/docker.sock
@@ -226,6 +250,16 @@ the network.
   `TestAPodReachesTheCLIHostedServices` and the Storage, Pub/Sub, Tasks, Run and Secret Manager
   tests were run that way, and the pod-to-CLI test again after the host's sshd session was killed
   and the supervisor reconnected.
+- `TestProvisionedVMBecomesTheInstancesCompute` (`internal/remotecompute`) runs phases 1 to 3
+  together: the provisioner's fake cloud (`internal/byoc/byoctest`) creates a VM, and the
+  stand-in boots as it, with the host key and CloudBurrow's public key from the VM's cloud-init.
+  The manager hands the VM to the `Engine`, which signs in with the key from the keychain (an
+  in-memory store) against the pinned host key. The test checks that Docker through the
+  connection is the stand-in's, that no file holds the private key, and that another host key is
+  refused. Delete then removes the record, the key and every tagged resource.
+  `cmd/cloudburrow`'s `TestProvisionedComputeRunsDockerOnTheVM` connects an instance whose
+  record is a provisioned VM. It uses the provisioner's key and current address, and checks that
+  the process's `docker` then reaches the stand-in.
 - `test/browser`'s `TestRemoteComputeConsole` (`CLOUDBURROW_TEST_REMOTE_COMPUTE` names the host)
   checks the Instance page's Compute card (host, size, system, connection, forwarded ports),
   that Reconnect is refused without the admin token, and that Reconnect with it brings the

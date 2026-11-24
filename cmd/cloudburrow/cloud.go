@@ -21,6 +21,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/byoc/azureprov"
 	"github.com/cloudburrow/cloudburrow/internal/byoc/keychain"
 	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/remotecompute"
 )
 
 // `cloudburrow cloud` (#2209 phases 2 and 3): what Settings > Compute and
@@ -70,6 +71,8 @@ var newCloudManager = func(cfg config.Config) (*byoc.Manager, error) {
 		Dir:      dir,
 		Keychain: keychain.OS{Namespace: ns},
 		Drivers:  []byoc.Driver{awsprov.NewDriver(awsprov.Options{ClientName: "CloudBurrow"}), azureprov.New(azureprov.Options{})},
+		// Phase 1 (#2209): a running VM becomes the instance's compute.
+		Engine: &remotecompute.Engine{StateDir: cfg.StateDir},
 	})
 }
 

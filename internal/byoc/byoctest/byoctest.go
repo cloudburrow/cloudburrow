@@ -26,6 +26,11 @@ type Cloud struct {
 	resources map[string][]byoc.Resource
 	machines  map[string]byoc.Machine
 	Created   []byoc.MachineSpec
+	// Boot, when set, stands a host in for the created VM: it receives the
+	// spec (its cloud-init carries the VM's host key and CloudBurrow's
+	// public key) and the machine, whose address it may change (#2209's
+	// phase 1 test boots its Docker-in-Docker sshd stand-in so).
+	Boot      func(spec byoc.MachineSpec, m *byoc.Machine) error
 	approved  chan struct{}
 	approveMu sync.Once
 }
@@ -155,6 +160,14 @@ func (p *provider) Create(_ context.Context, spec byoc.MachineSpec, progress byo
 	}
 	m := byoc.Machine{Instance: spec.Instance, Region: spec.Region, Size: spec.Size, Preset: spec.Preset, State: byoc.Running,
 		PublicIP: "198.51.100.7", SSHPort: 22, SSHUser: spec.SSHUser, IDs: map[string]string{"vm": "vm-" + spec.Instance}}
+	if p.c.Boot != nil {
+		if err := p.c.Boot(spec, &m); err != nil {
+			p.c.mu.Lock()
+			delete(p.c.resources, spec.Instance)
+			p.c.mu.Unlock()
+			return byoc.Machine{}, err
+		}
+	}
 	p.c.mu.Lock()
 	p.c.resources[spec.Instance] = append(p.c.resources[spec.Instance], byoc.Resource{Type: "vm", ID: "vm-" + spec.Instance})
 	p.c.machines[spec.Instance] = m

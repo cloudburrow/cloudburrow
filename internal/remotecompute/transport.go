@@ -114,6 +114,10 @@ func (s *sshTransport) Authorize(ctx context.Context) (bool, error) {
 		// there): signing in is all there is to check.
 		args := append(append(s.common(), s.own()...), s.target.destination(), "true")
 		if _, err := s.run(ctx, nil, args...); err != nil {
+			if msg := err.Error(); strings.Contains(msg, "Host key verification failed") || strings.Contains(msg, "IDENTIFICATION HAS CHANGED") {
+				return false, fmt.Errorf("%s answered with a host key other than the one CloudBurrow made for it, so CloudBurrow did not sign in: "+
+					"the address may now be another machine's", s.target)
+			}
 			return false, fmt.Errorf("could not sign in to %s with CloudBurrow's key: %w", s.target, err)
 		}
 		return false, nil

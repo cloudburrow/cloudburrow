@@ -13,10 +13,12 @@ install a cloud CLI, write a policy, open a port or manage an SSH key.
 > that speak each cloud's API (see [Testing](#how-it-is-tested)); the first run against the real
 > clouds is the user's. Report anything that differs.
 >
-> **The remote-host engine (phase 1) is a separate piece.** This page covers provisioning,
-> scaling and deleting the VM. Moving the instance's Docker onto it is phase 1's `--compute`,
-> which this build reaches through an interface; until both are in one build, the VM is created,
-> reachable and billed, and Compute says that the instance's Docker cannot move onto it yet.
+> **The VM becomes the instance's compute through phase 1's engine**
+> ([remote-compute.md](remote-compute.md#a-vm-cloudburrow-provisioned)). When a create, start or
+> resize leaves the VM running, the engine signs in with the VM's key from the keychain, checks
+> its Docker and records it as the instance's compute; the instance's next `up` runs its cluster
+> there. A cluster already running on this machine stays where it is until the instance is
+> stopped and started again, and its state does not move with it.
 
 ## 1. Connect a cloud
 

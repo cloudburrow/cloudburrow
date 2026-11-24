@@ -20,7 +20,7 @@ func TestCloudInitPinsAndKeys(t *testing.T) {
 		"#cloud-config\n", "ssh_pwauth: false", "ssh_genkeytypes: []", "ed25519_public: '" + host.Public + "'",
 		"- '" + client.Public + "'", "docker-ce='" + DockerVersion + "'", "containerd.io='" + ContainerdVersion + "'",
 		DockerKeyFingerprint, KindSHA256 + "  /tmp/kind' | sha256sum -c -", "kind/releases/download/" + KindVersion + "/",
-		"limit=2700", "shutdown -h now", "cloudburrow-idle.timer", "usermod -aG docker ubuntu",
+		"limit=2700", "shutdown -h now", "cloudburrow-idle.timer", "usermod -aG docker ubuntu", "GatewayPorts clientspecified",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("cloud-init lacks %q", want)

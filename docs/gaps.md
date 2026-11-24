@@ -38,9 +38,9 @@ tracks it; a closed issue is named only where it says what was built.
 | App Hub | 5 | 1 | 1 | 3 | 0 |
 | Dataform | 7 | 0 | 2 | 4 | 1 |
 | Console | 9 | 7 | 2 | 0 | 0 |
-| Remote compute | 1 | 1 | 0 | 0 | 0 |
+| Remote compute | 2 | 2 | 0 | 0 | 0 |
 | Bring your own cloud | 5 | 4 | 0 | 0 | 1 |
-| **Total** | **95** | **19** | **24** | **44** | **8** |
+| **Total** | **96** | **20** | **24** | **44** | **8** |
 
 ## Cloud Storage
 
@@ -381,6 +381,7 @@ console, the APIs and the metadata server staying on this machine.
 
 | Gap | Why open | Size |
 |---|---|---|
+| A running instance does not move onto a VM created while it runs: the VM becomes its compute at the next start (`stop`, then `up`), and the cluster's state on this machine's Docker (volumes, the kind node) is not carried to the VM; the local cluster stays until deleted with the VM's record set aside (#2209) | not built yet | M |
 | Containers that bind-mount a path of this machine do not find it on a remote host: Vertex AI's model containers (`internal/modelgarden/docker.go`'s model directory, `internal/service/vertexai/exec.go`), the TensorFlow converter's model and output directories (`internal/tfconvert`), the video decoder's input (`internal/videodecode`), BigQuery's Spark procedures' work directory and connector jar (`internal/sparkproc`) and Dataform's npm cache and project (`cmd/cloudburrow/dataform.go`). Each needs its files copied to the host before the run and its outputs copied back. Pods and every container that takes its input over the network or `docker cp` work (#2209) | not built yet | M |
 
 ## Bring your own cloud

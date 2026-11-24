@@ -82,6 +82,9 @@ func RenderCloudInit(o CloudInitOptions) (string, error) {
 		}
 	}
 	file("/usr/local/sbin/cloudburrow-setup", "0755", setupScript(o))
+	// Phase 1's reverse forwards bind the kind network's gateway, so
+	// workloads on the VM reach the CLI's listeners (docs/remote-compute.md).
+	file("/etc/ssh/sshd_config.d/60-cloudburrow.conf", "0644", "GatewayPorts clientspecified\nAllowTcpForwarding yes\nAllowStreamLocalForwarding yes\n")
 	if o.AutoStopMinutes > 0 {
 		file("/usr/local/sbin/cloudburrow-idle", "0755", idleScript(o))
 		file("/etc/systemd/system/cloudburrow-idle.service", "0644",
@@ -110,6 +113,7 @@ apt-get update
 apt-get install -y docker-ce='` + DockerVersion + `' docker-ce-cli='` + DockerVersion + `' containerd.io='` + ContainerdVersion + `'
 apt-mark hold docker-ce docker-ce-cli containerd.io
 usermod -aG docker ` + o.User + `
+systemctl reload ssh || systemctl reload sshd
 curl -fsSLo /tmp/kind https://github.com/kubernetes-sigs/kind/releases/download/` + KindVersion + `/kind-linux-amd64
 echo '` + KindSHA256 + `  /tmp/kind' | sha256sum -c -
 install -m 0755 /tmp/kind /usr/local/bin/kind

@@ -20,6 +20,11 @@ type Record struct {
 	Created time.Time `json:"created"`
 	// Host is what the host was when up last connected.
 	Host HostInfo `json:"host"`
+	// Provisioned is a VM `cloudburrow cloud create` or the console's
+	// Create made (internal/byoc): CloudBurrow's key for it is in the OS
+	// keychain and its host key is pinned, both read from the provisioner
+	// at each connect, and Target follows the VM's address.
+	Provisioned bool `json:"provisioned,omitempty"`
 }
 
 // SaveRecord writes the record into the instance directory, owner-only.
