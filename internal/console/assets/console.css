@@ -2543,9 +2543,9 @@ svg.bq-chart { display: block; border: 1px solid var(--border); border-radius: v
 .dbs-auth legend { font-weight: 500; padding: 0; margin-bottom: 4px; }
 .dbs-signed-in { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; margin-bottom: 8px; }
 .dbs-signed-in p { margin: 0; flex-basis: 100%; overflow-wrap: anywhere; }
-.dbs-explorer-heading { font-size: 12px; color: var(--text-muted, #5f6368); margin-top: 4px; }
+.dbs-explorer-heading { font-size: var(--text-caption-size); color: var(--text-muted); margin-top: 4px; }
 .dbs-schema { margin-left: 4px; }
-.dbs-results td.is-null { color: var(--text-muted, #5f6368); font-style: italic; }
+.dbs-results td.is-null { color: var(--text-muted); font-style: italic; }
 @media (max-width: 720px) { .spanner-studio { grid-template-columns: minmax(0, 1fr); } .spanner-explorer { border-right: 0; } }
 
 /* Upload file beside a textarea (Field.Upload, #1850). */

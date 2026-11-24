@@ -80,6 +80,13 @@ CloudBurrow's own connections sign in as `alloydbadmin`, a superuser with a gene
 owner-only in the instance directory, which `ListUsers` leaves out. Verified by
 `TestAlloyDBPasswordAuthentication`.
 
+**AlloyDB Studio** (#2208): a cluster's **AlloyDB Studio** tab signs in to its primary as Google's
+does, with a database and a built-in user's password or IAM database authentication (the
+console's principal, once it is an IAM user of the cluster), and serves Cloud SQL Studio's
+Explorer, editor, saved queries and exportable results through `ExecuteSql`
+([cloudsql.md](cloudsql.md#4-authentication-every-sign-in-is-checked-by-password-2208)).
+Verified by `TestAlloyDBStudioThroughThePage` (browser).
+
 On Google each instance has an IP address of its own, where it serves PostgreSQL on 5432 (and its
 pooler on 6432), and the connectors reach it on 5433; they send no TLS server name for an address,
 so the address dialled is what tells the instances apart. Here each instance of a

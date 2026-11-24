@@ -3,9 +3,11 @@
 package browser
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -79,6 +81,7 @@ func dbStudioThroughThePage(t *testing.T, path, database, user, password, refuse
 	}
 
 	// A wrong password: the server's refusal, and the dialog stays open.
+	p.expected = append(p.expected, "/api/studio/")
 	p.dbStudioSignIn(database, user, "wrong-"+password)
 	p.waitFor(`(() => { const e = document.getElementById("dbs-signin-error"); return e && !e.hidden && e.textContent.length > 0; })()`)
 	var msg string
@@ -175,12 +178,22 @@ func TestCloudSQLStudioThroughThePage(t *testing.T) {
 			needService(t, e.service)
 			user := fmt.Sprintf("studio%d", time.Now().UnixNano()%1e6)
 			password := "Studio-pw-2208"
-			op, err := svc.Users.Insert(project, e.instance, &sqladmin.User{Name: user, Password: password, Host: "%"}).Do()
-			if err != nil {
-				t.Fatalf("users.insert: %v", err)
+			if e.instance == "postgres" {
+				// PostgreSQL 15 and later let only the database's owner
+				// create in its public schema: the application's user,
+				// cloudburrow, owns the cloudburrow database.
+				user, password = "cloudburrow", os.Getenv("CLOUDBURROW_TEST_CLOUDSQL_PASSWORD")
+				if password == "" {
+					t.Skip("needs CLOUDBURROW_TEST_CLOUDSQL_PASSWORD, the application user's password")
+				}
+			} else {
+				op, err := svc.Users.Insert(project, e.instance, &sqladmin.User{Name: user, Password: password, Host: "%"}).Do()
+				if err != nil {
+					t.Fatalf("users.insert: %v", err)
+				}
+				waitSQL(t, svc, project, op, 2*time.Minute)
+				t.Cleanup(func() { _, _ = svc.Users.Delete(project, e.instance).Name(user).Host("%").Do() })
 			}
-			waitSQL(t, svc, project, op, 2*time.Minute)
-			t.Cleanup(func() { _, _ = svc.Users.Delete(project, e.instance).Name(user).Host("%").Do() })
 			dbStudioThroughThePage(t, "/cloudsql-instances/"+e.instance+"?project="+url.QueryEscape(project), "cloudburrow", user, password,
 				fmt.Sprintf(e.refused, user))
 		})
@@ -220,9 +233,58 @@ func TestAlloyDBStudioThroughThePage(t *testing.T) {
 		b := fmt.Sprintf(`{"Path":[%q],"Action":"delete","Values":{}}`, cluster)
 		_, _ = consoleDo(t, http.MethodPost, "/api/actions/alloydb?project="+url.QueryEscape(project), b)
 	})
+	// A tab of its own: the wait above may outlive the first one's.
+	p = open(t)
+	p.navigate("/alloydb/clusters?project=" + project)
 	p.follow(cluster)
 	var clusterPath string
 	p.eval(`location.pathname + location.search`, &clusterPath)
 	p.waitFor(`[...document.querySelectorAll("#view [role=tab]")].some((t) => t.textContent.trim() === "AlloyDB Studio")`)
 	dbStudioThroughThePage(t, clusterPath, "postgres", "postgres", "Studio-pw-2208", `password authentication failed for user "postgres"`)
+
+	// IAM database authentication: the console's principal, once it is an
+	// IAM user of the cluster (Add user account, Cloud IAM), signs in
+	// without a password, as its role.
+	t.Run("iam", func(t *testing.T) {
+		code, body := consoleDo(t, http.MethodGet, "/api/status", "")
+		var st struct {
+			Identity struct{ ServiceAccount string }
+		}
+		if code != http.StatusOK || json.Unmarshal([]byte(body), &st) != nil || st.Identity.ServiceAccount == "" {
+			t.Fatalf("the console's status = %d: %s", code, body)
+		}
+		role := strings.TrimSuffix(st.Identity.ServiceAccount, ".gserviceaccount.com")
+		k := open(t)
+		k.navigate(clusterPath + "&tab=studio")
+		k.waitFor(`document.querySelector("#dbs-database option[value='postgres']") !== null`)
+		// Not yet an IAM user: refused.
+		k.expected = append(k.expected, "/api/studio/")
+		signInIAM := `(() => { const d = document.getElementById("dbs-database"); d.value = "postgres";
+			document.getElementById("dbs-auth-iam").click(); document.getElementById("dbs-authenticate").click(); return true; })()`
+		k.eval(signInIAM, nil)
+		k.waitFor(`(() => { const e = document.getElementById("dbs-signin-error"); return e && !e.hidden && e.textContent.length > 0; })()`)
+		var msg string
+		k.eval(`document.getElementById("dbs-signin-error").textContent`, &msg)
+		if !strings.Contains(msg, `IAM authentication failed for user "`+role+`"`) {
+			t.Errorf("an IAM sign-in as no IAM user was refused with %q", msg)
+		}
+		b, _ := json.Marshal(map[string]any{"Path": []string{cluster}, "Action": "add-user",
+			"Values": map[string]string{"type": "ALLOYDB_IAM_USER", "user": st.Identity.ServiceAccount}})
+		if code, body := consoleDo(t, http.MethodPost, "/api/actions/alloydb?project="+url.QueryEscape(project), string(b)); code != http.StatusOK {
+			t.Fatalf("Add user account (Cloud IAM) = %d: %s", code, body)
+		}
+		k.eval(signInIAM, nil)
+		k.waitFor(`document.querySelector("#dbs-explorer #dbs-current") !== null`)
+		var current string
+		k.eval(`document.getElementById("dbs-current").textContent`, &current)
+		if current != "postgres · "+role {
+			t.Errorf("signed in with IAM as %q; want postgres · %s", current, role)
+		}
+		k.dbStudioRun("SELECT current_user;")
+		var cells []string
+		k.eval(`[...document.querySelectorAll("#dbs-results-table td")].map((n) => n.textContent)`, &cells)
+		if len(cells) != 1 || cells[0] != role {
+			t.Errorf("current_user under IAM is %q; want %s", cells, role)
+		}
+	})
 }

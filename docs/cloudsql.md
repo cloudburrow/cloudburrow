@@ -1494,6 +1494,31 @@ password is refused with the server's error, the right one is accepted, the stor
 the version's default form, and `cloudsqladmin` is no user; where `CLOUDBURROW_TEST_CLOUD_SQL_PROXY`
 names Google's Auth Proxy, the same through it.
 
+**`gcloud sql connect` and the Auth Proxy** (#2208): `TestGcloudSQLConnectInContainer` (compat)
+runs gcloud 593.0.0 and `cloud-sql-proxy` v2.19.0 (both checked by SHA-256) in containers built on
+the official `postgres` and `mysql` images, which ship `psql` and `mysql`, on an internal Docker
+network with no route out. `gcloud sql connect INSTANCE --user U --database D` (GA) starts the
+Auth Proxy on its `--port` (9470), as Google's does, and runs `psql` or `mysql` through it; the
+Auth Proxy on a port of its own (6543), with a client through it. On each, a wrong password is
+refused with the server's error and the right one runs the statements. The proxy dials port
+3307 at the address `connectSettings` names; inside the container that port is relayed to the
+instance's connector listener, wherever `--cloudsql-connector` put it.
+
+**Cloud SQL Studio** (#2208): an instance's **Cloud SQL Studio** tab, as Google's: the sign-in
+dialog takes the database, then **Built-in database authentication** (a user and its password)
+or **IAM database authentication** (as the console's principal, an IAM user of the instance with
+the IAM flag on); the server's refusal shows in the dialog. Signed in, the **Explorer** lists
+the schemas (MySQL: the database) with their tables (columns, indexes and keys, and SELECT,
+INSERT, UPDATE, DELETE and DROP statements to open), views, sequences, functions and
+procedures, and the saved queries; the editor's tabs run a script or its selection
+(Ctrl+Enter), save it as a saved query, and show each query's results, exportable as CSV or JSON
+or copied. Google's documented limits hold: results over 10 MB are truncated with partial
+results, a query runs at most 5 minutes, at most 10 at once on an instance, a script mixing
+statements shows only its queries' results, and MySQL's `root` and empty passwords are refused
+([Cloud SQL Studio](https://cloud.google.com/sql/docs/mysql/manage-data-using-studio)). SQL
+Server instances are not served. Verified by `TestCloudSQLStudioThroughThePage` (browser, on
+PostgreSQL and MySQL) and `TestStudioSQL`, `TestDBStudioSignInAndRun` (unit).
+
 ## 5. The console screen
 
 Lists the server's databases with their owner, encoding and size, read from `pg_database` —

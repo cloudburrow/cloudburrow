@@ -53,7 +53,7 @@ const cloudSQLInstancesNote = "Each created instance is a server of its own, fro
 	"database version (PostgreSQL 13 to 18, MySQL 8.0 or 8.4), reached through the connectors on port 3307. The instances `up` runs " +
 	"(postgres, mysql) cannot be edited or deleted here. A backup is a dump of the server's databases, kept on the host; " +
 	"an instance with REGIONAL availability has a synchronous standby, and Failover makes it the primary under the same connection name. " +
-	"IAM database authentication does not exist here."
+	"Cloud SQL Studio signs in with a built-in user's password or by IAM database authentication."
 
 func (p cloudSQLInstancesProvider) api(ctx context.Context) (*sqladminapi.Service, error) {
 	return sqladminapi.NewService(ctx, option.WithEndpoint("http://"+p.endpoint+"/"), option.WithoutAuthentication(),

@@ -14450,7 +14450,8 @@
           "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover",
           "test/compat/cloudsqlswitchoverpg_test.go:35 TestCloudSQLSwitchoverPostgres",
           "test/compat/cloudsqlversions_test.go:118 TestCloudSQLDatabaseVersions",
-          "test/compat/cloudsqlversions_test.go:305 TestCloudSQLCascadingAndCrossRegionReplicas"
+          "test/compat/cloudsqlversions_test.go:305 TestCloudSQLCascadingAndCrossRegionReplicas",
+          "test/compat/sqlconnect2208_test.go:38 TestGcloudSQLConnectInContainer"
         ]
       },
       {
@@ -14484,7 +14485,8 @@
           "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover",
           "test/compat/cloudsqlswitchoverpg_test.go:35 TestCloudSQLSwitchoverPostgres",
           "test/compat/cloudsqlversions_test.go:118 TestCloudSQLDatabaseVersions",
-          "test/compat/cloudsqlversions_test.go:305 TestCloudSQLCascadingAndCrossRegionReplicas"
+          "test/compat/cloudsqlversions_test.go:305 TestCloudSQLCascadingAndCrossRegionReplicas",
+          "test/compat/sqlconnect2208_test.go:38 TestGcloudSQLConnectInContainer"
         ]
       },
       {
@@ -14813,6 +14815,7 @@
           "test/compat/cloudsqlversions_test.go:456 TestTerraformSQLDatabaseVersion",
           "test/compat/sqladmin_test.go:433 TestGcloudSQL",
           "test/compat/sqladmin_test.go:52 TestSQLAdminInstancesDescribeTheRunningServers",
+          "test/compat/sqlconnect2208_test.go:38 TestGcloudSQLConnectInContainer",
           "test/compat/terraform_batch4_test.go:38 TestTerraformSQLSSLCertAndReplica",
           "test/compat/terraform_batch4_test.go:406 TestTerraformSQLSourceRepresentation",
           "test/compat/terraform_batch7_test.go:229 TestTerraformSQLPostgres12Upgrade"

@@ -487,7 +487,8 @@ func (s *Server) StudioExecuteSql(ctx context.Context, req *alloydbpb.ExecuteSql
 	role := roleName(strings.ToLower(iamEmail))
 	if !s.isIAMRole(cluster, role) {
 		// UNVERIFIED: Google's words for a refused IAM sign-in, as the
-		// connector listener's (listeners.go).
+		// connector listener's (re-read 2026-11-24:
+		// docs.cloud.google.com/alloydb/docs/database-users/manage-iam-auth names none).
 		return nil, apierror.FailedPrecondition("IAM authentication failed for user %q", role)
 	}
 	return s.executeAs(ctx, server, role, s.iamRolePassword(role), req)

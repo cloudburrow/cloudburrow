@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -173,7 +174,18 @@ func TestGcloudSQLConnectInContainer(t *testing.T) {
 		a = append(a, images[e.target], "/bin/sh", "/egress/run.sh")
 		a = append(a, script...)
 		c := exec.CommandContext(ctx, "docker", a...)
-		c.Stdin = strings.NewReader(stdin)
+		// The password, then the statements once the client has read it: a
+		// client that reads the password from a buffered stdin (mysql's
+		// getpass) would otherwise take the statements with it.
+		pr, pw := io.Pipe()
+		c.Stdin = pr
+		go func() {
+			first, rest, _ := strings.Cut(stdin, "\n")
+			_, _ = io.WriteString(pw, first+"\n")
+			time.Sleep(5 * time.Second)
+			_, _ = io.WriteString(pw, rest)
+			_ = pw.Close()
+		}()
 		b, err := c.CombinedOutput()
 		return string(b), err
 	}
