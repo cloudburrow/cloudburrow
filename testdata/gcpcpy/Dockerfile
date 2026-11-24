@@ -11,6 +11,10 @@
 # pinned by digest (a multi-arch manifest list) and every package by version
 # and hash.
 FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
-COPY requirements.txt /gcpcpy/requirements.txt
-RUN pip install --no-cache-dir --require-hashes --no-deps -r /gcpcpy/requirements.txt
+COPY requirements.txt requirements-build.txt /gcpcpy/
+# cloudml-hypertune (Google's, Apache-2.0) is published only as an sdist,
+# built with the pinned setuptools of requirements-build.txt (no build
+# isolation, so nothing unpinned is fetched for it) (#2210).
+RUN pip install --no-cache-dir --require-hashes --no-deps -r /gcpcpy/requirements-build.txt && \
+    pip install --no-cache-dir --require-hashes --no-deps --no-build-isolation -r /gcpcpy/requirements.txt
 ENTRYPOINT ["python", "-I"]

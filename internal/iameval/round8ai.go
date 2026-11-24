@@ -210,6 +210,13 @@ func colabMethods() map[string]Method {
 			"CreateBatchPredictionJob": {"aiplatform.batchPredictionJobs.create", "parent"}, "GetBatchPredictionJob": {"aiplatform.batchPredictionJobs.get", "name"},
 			"ListBatchPredictionJobs": {"aiplatform.batchPredictionJobs.list", "parent"}, "DeleteBatchPredictionJob": {"aiplatform.batchPredictionJobs.delete", "name"},
 			"CancelBatchPredictionJob": {"aiplatform.batchPredictionJobs.cancel", "name"},
+			// HyperparameterTuningJobs (#2210): each method's REST page names
+			// aiplatform.hyperparameterTuningJobs.P (read 2026-11-24).
+			"CreateHyperparameterTuningJob": {"aiplatform.hyperparameterTuningJobs.create", "parent"},
+			"GetHyperparameterTuningJob":    {"aiplatform.hyperparameterTuningJobs.get", "name"},
+			"ListHyperparameterTuningJobs":  {"aiplatform.hyperparameterTuningJobs.list", "parent"},
+			"DeleteHyperparameterTuningJob": {"aiplatform.hyperparameterTuningJobs.delete", "name"},
+			"CancelHyperparameterTuningJob": {"aiplatform.hyperparameterTuningJobs.cancel", "name"},
 		},
 		// Vertex ML Metadata (#2205): each method's REST reference page
 		// (read 2026-11-24): metadataStores, artifacts, contexts, executions
@@ -268,6 +275,9 @@ func colabMethods() map[string]Method {
 	cj := m[p+"JobService/CreateCustomJob"]
 	cj.ActAs = []string{"custom_job.job_spec.service_account"}
 	m[p+"JobService/CreateCustomJob"] = cj
+	hp := m[p+"JobService/CreateHyperparameterTuningJob"]
+	hp.ActAs = []string{"hyperparameter_tuning_job.trial_job_spec.service_account"}
+	m[p+"JobService/CreateHyperparameterTuningJob"] = hp
 	bp := m[p+"JobService/CreateBatchPredictionJob"]
 	bp.ActAs = []string{"batch_prediction_job.service_account"}
 	m[p+"JobService/CreateBatchPredictionJob"] = bp

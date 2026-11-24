@@ -178,6 +178,12 @@ func (j *jobService) CreateCustomJob(ctx context.Context, req *aiplatformpb.Crea
 // createCustomJob records a custom job and starts it; onEnd, when set, is
 // called with the job once it ends.
 func (s *Server) createCustomJob(parent string, in *aiplatformpb.CustomJob, onEnd func(*aiplatformpb.CustomJob)) (*aiplatformpb.CustomJob, error) {
+	return s.startCustomJob(context.Background(), parent, in, onEnd)
+}
+
+// startCustomJob is createCustomJob with the run's base context, which
+// carries a hyperparameter tuning trial's run (hptuning.go).
+func (s *Server) startCustomJob(base context.Context, parent string, in *aiplatformpb.CustomJob, onEnd func(*aiplatformpb.CustomJob)) (*aiplatformpb.CustomJob, error) {
 	project, _, err := parseParent("parent", parent)
 	if err != nil {
 		return nil, err
@@ -214,7 +220,7 @@ func (s *Server) createCustomJob(parent string, in *aiplatformpb.CustomJob, onEn
 	now := timestamppb.New(st.now())
 	j.Name, j.CreateTime, j.UpdateTime, j.StartTime, j.EndTime, j.Error = name, now, now, nil, nil, nil
 	j.State = aiplatformpb.JobState_JOB_STATE_QUEUED
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(base)
 	e := &customJobEntry{Job: j, cancel: cancel, done: make(chan struct{})}
 	st.customJobs[name] = e
 	st.save()
@@ -368,6 +374,7 @@ func (s *Server) runWorkerPools(ctx context.Context, runner PipelineRunner, proj
 				return err
 			}
 			c.Mounts = map[string]string{"/gcs": gcsDir}
+			trialEnv(ctx, &c, i == 0 && r == 0)
 			wg.Add(1)
 			go func(c PipelineContainer, replica string) {
 				defer wg.Done()
@@ -653,8 +660,9 @@ func (s *Server) waitCustomJob(ctx context.Context, name string) (*aiplatformpb.
 
 // ---- persistence
 
-// savedJobs are the custom jobs, batch prediction jobs and training
-// pipelines as the store's file keeps them; the caller holds st.mu.
+// savedJobs are the custom jobs, batch prediction jobs, training
+// pipelines and hyperparameter tuning jobs as the store's file keeps them;
+// the caller holds st.mu.
 func (st *notebookStore) savedJobs() map[string][]json.RawMessage {
 	out := map[string][]json.RawMessage{}
 	for _, n := range sortedNames(st.customJobs) {
@@ -670,6 +678,11 @@ func (st *notebookStore) savedJobs() map[string][]json.RawMessage {
 	for _, n := range sortedNames(st.trainingPipelines) {
 		if b, err := protojson.Marshal(st.trainingPipelines[n].TP); err == nil {
 			out["trainingPipelines"] = append(out["trainingPipelines"], b)
+		}
+	}
+	for _, n := range sortedNames(st.hpJobs) {
+		if b, err := protojson.Marshal(st.hpJobs[n].Job); err == nil {
+			out["hyperparameterTuningJobs"] = append(out["hyperparameterTuningJobs"], b)
 		}
 	}
 	if len(out) == 0 {
@@ -716,6 +729,7 @@ func (st *notebookStore) loadTrainingJobs(raw map[string][]json.RawMessage) {
 		}
 		st.trainingPipelines[t.GetName()] = &trainingEntry{TP: t}
 	}
+	st.loadHPJobs(raw["hyperparameterTuningJobs"])
 }
 
 func tailLines(s string, n int) string {

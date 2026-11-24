@@ -1,7 +1,8 @@
 package main
 
 // Vertex AI Training's console pages (#2210): Model development >
-// Training, with its Training pipelines and Custom jobs tabs, and Models >
+// Training, with its Training pipelines, Custom jobs and Hyperparameter
+// tuning jobs (consolehptuning.go) tabs, and Models >
 // Batch inference, in Google's layout:
 //
 //   - "go to the Training pipelines page" and "Click Create to open the
@@ -30,9 +31,8 @@ package main
 //
 // UNVERIFIED (re-read 2026-11-24, the pages above): the three lists'
 // columns and the details pages' fields, which Google's docs do not show;
-// the Hyperparameter tuning step's Enable hyperparameter tuning (left
-// unchecked in Google's walkthrough) is not offered; batch prediction's
-// model monitoring (Preview) is not offered.
+// batch prediction's model monitoring (Preview) is not offered. The
+// Hyperparameter tuning step and tab are consolehptuning.go's.
 
 import (
 	"context"
@@ -309,11 +309,26 @@ func (p trainingPipelinesProvider) Detail(ctx context.Context, project string, p
 	spec := &aiplatformpb.CustomJobSpec{}
 	if b, err := protojson.Marshal(tp.GetTrainingTaskInputs()); err == nil && tp.GetTrainingTaskInputs() != nil {
 		_ = protojson.UnmarshalOptions{DiscardUnknown: true}.Unmarshal(b, spec)
+		if tp.GetTrainingTaskDefinition() == hpTaskDefinition {
+			// A hyperparameter tuning task's trial job spec.
+			hp := &aiplatformpb.HyperparameterTuningJob{}
+			_ = protojson.UnmarshalOptions{DiscardUnknown: true}.Unmarshal(b, hp)
+			spec = hp.GetTrialJobSpec()
+		}
 	}
-	job := tp.GetTrainingTaskMetadata().GetStructValue().GetFields()["backingCustomJob"].GetStringValue()
+	md := tp.GetTrainingTaskMetadata().GetStructValue().GetFields()
+	job := md["backingCustomJob"].GetStringValue()
 	tc := []console.Property{{Label: "Model output directory", Value: dashIfEmpty(spec.GetBaseOutputDirectory().GetOutputUriPrefix())}}
 	if job != "" {
 		tc = append(tc, console.Property{Label: "Custom job", Value: vertexLast(job), Link: "/agent-platform/training/custom-jobs/" + vertexLast(job) + "?project=" + project + "&region=" + vertexLocation(job)})
+	}
+	if hj := md["backingHyperparameterTuningJob"].GetStringValue(); hj != "" {
+		tc = append(tc, console.Property{Label: "Hyperparameter tuning job", Value: vertexLast(hj),
+			Link: "/agent-platform/training/hyperparameter-tuning-jobs/" + vertexLast(hj) + "?project=" + project + "&region=" + vertexLocation(hj)})
+	}
+	if bj := md["bestTrialBackingCustomJob"].GetStringValue(); bj != "" {
+		tc = append(tc, console.Property{Label: "Best trial's custom job", Value: vertexLast(bj),
+			Link: "/agent-platform/training/custom-jobs/" + vertexLast(bj) + "?project=" + project + "&region=" + vertexLocation(bj)})
 	}
 	groups = append(groups, console.PropertyGroup{Heading: "Training container", Properties: tc})
 	groups = append(groups, workerPoolProps(spec)...)
@@ -364,7 +379,7 @@ func (trainingPipelinesProvider) CreateForm() (string, []console.Field) {
 		trainWhen = append(trainWhen, console.ConditionalOptions{When: "framework=" + f, Options: tw})
 		predWhen = append(predWhen, console.ConditionalOptions{When: "predFramework=" + f, Options: pw})
 	}
-	return "Create", []console.Field{
+	return "Create", append([]console.Field{
 		{Name: "dataset", Label: "Dataset", Type: "select", Section: "Training method", Options: []string{"none"}, Default: "none",
 			OptionLabels: map[string]string{"none": "No managed dataset"}},
 		{Name: "method", Label: "Training method", Type: "radio", Section: "Training method", Options: []string{"custom"}, Default: "custom",
@@ -389,6 +404,7 @@ func (trainingPipelinesProvider) CreateForm() (string, []console.Field) {
 		{Name: "outputDir", Label: "Model output directory", Type: "text", Section: "Training container", Pattern: `^(gs://[a-z0-9][\-a-z0-9._]+(/.*)?)?$`,
 			Help: "gs://BUCKET/folder: the training writes the model to its model subdirectory (AIP_MODEL_DIR)."},
 		{Name: "args", Label: "Arguments", Type: "textarea", Section: "Training container", Help: "One argument per line, passed to the training code."},
+	}, append(hpFields(), []console.Field{
 		{Name: "machineType", Label: "Machine type", Type: "select", Section: "Compute and pricing", Options: colabMachineTypes, Default: "n1-standard-4",
 			Help: "Worker pool 0's machine; jobs run on this machine's CPU."},
 		{Name: "replicaCount", Label: "Worker count", Type: "text", Section: "Compute and pricing", Default: "1", Pattern: `^[1-9][0-9]*$`},
@@ -404,7 +420,7 @@ func (trainingPipelinesProvider) CreateForm() (string, []console.Field) {
 		{Name: "predRoute", Label: "Predict route", Type: "text", Section: "Prediction container", ShowWhen: "prediction=custom", Pattern: `^(/\S*)?$`},
 		{Name: "healthRoute", Label: "Health route", Type: "text", Section: "Prediction container", ShowWhen: "prediction=custom", Pattern: `^(/\S*)?$`},
 		{Name: "predPort", Label: "Port", Type: "text", Section: "Prediction container", ShowWhen: "prediction=custom", Pattern: `^([1-9][0-9]{0,4})?$`},
-	}
+	}...)...)
 }
 
 // trainingPipelineOf builds the TrainingPipeline the Train new model pane
@@ -469,12 +485,22 @@ func trainingPipelineOf(project, region string, values map[string]string) (*aipl
 	if out := strings.TrimSpace(values["outputDir"]); out != "" {
 		spec["baseOutputDirectory"] = map[string]any{"outputUriPrefix": out}
 	}
-	b, _ := json.Marshal(spec)
+	def := customTaskDefinition
+	var task any = spec
+	if values["hpEnable"] == "true" || values["hpEnable"] == "on" {
+		// The Hyperparameter tuning step (consolehptuning.go).
+		hp, err := hpTaskInputsOf(values, spec)
+		if err != nil {
+			return nil, err
+		}
+		def, task = hpTaskDefinition, hp
+	}
+	b, _ := json.Marshal(task)
 	inputs := &structpb.Value{}
 	if err := protojson.Unmarshal(b, inputs); err != nil {
 		return nil, err
 	}
-	tp := &aiplatformpb.TrainingPipeline{DisplayName: name, TrainingTaskDefinition: customTaskDefinition, TrainingTaskInputs: inputs}
+	tp := &aiplatformpb.TrainingPipeline{DisplayName: name, TrainingTaskDefinition: def, TrainingTaskInputs: inputs}
 	switch values["prediction"] {
 	case "prebuilt":
 		img, ok := predictionImages[values["predFrameworkVersion"]]

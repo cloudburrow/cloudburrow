@@ -22,6 +22,8 @@ click-option-group==0.5.7 \
     --hash=sha256:96b9f52f397ef4d916f81929bd6c1f85e89046c7a401a64e72a61ae74ad35c24
 click==8.5.1 \
     --hash=sha256:8bb5376d2006950386f8c6427613334a2acadc5f559cb80e638d00b4df957e37
+cloudml-hypertune==0.1.0.dev6 \
+    --hash=sha256:b96a5a203ecf7b3302e94f63977d7293fe21c696bea27e35667de82599696a89
 cryptography==50.0.2 \
     --hash=sha256:87e9ce85beb6b328ba370cc6e6aea483c92617b4c95b1d33a49297eb662bfb04 \
     --hash=sha256:9dab55f57c74c3cad24c323bacbbd04be4705ba6eb0d92e920b1fc4837ed5079

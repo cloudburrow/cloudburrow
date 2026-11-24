@@ -215,6 +215,8 @@ type notebookStore struct {
 	customJobs        map[string]*customJobEntry
 	batchJobs         map[string]*batchJobEntry
 	trainingPipelines map[string]*trainingEntry
+	// hpJobs are hyperparameter tuning jobs (hptuning.go, #2210).
+	hpJobs map[string]*hpJobEntry
 }
 
 // runtimeEntry is a runtime and what its lifecycle needs.
@@ -1223,6 +1225,7 @@ func (s *Server) notebookREST() *rest.Transcoder {
 			opRule("/v1/{name=projects/*/locations/*/customJobs/*/operations/*}"),
 			opRule("/v1/{name=projects/*/locations/*/batchPredictionJobs/*/operations/*}"),
 			opRule("/v1/{name=projects/*/locations/*/trainingPipelines/*/operations/*}"),
+			opRule("/v1/{name=projects/*/locations/*/hyperparameterTuningJobs/*/operations/*}"),
 			opRule("/v1/{name=projects/*/locations/*/metadataStores/*/operations/*}"),
 			opRule("/v1/{name=projects/*/locations/*/metadataStores/*/artifacts/*/operations/*}"),
 			opRule("/v1/{name=projects/*/locations/*/metadataStores/*/contexts/*/operations/*}"),
