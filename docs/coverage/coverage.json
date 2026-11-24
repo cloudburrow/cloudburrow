@@ -7565,14 +7565,16 @@
         "method": "google.cloud.notebooks.v2.NotebookService/CreateInstance",
         "status": "Verified",
         "tests": [
-          "test/compat/workbench2173_test.go:58 TestWorkbenchInstances"
+          "test/compat/workbench2173_test.go:58 TestWorkbenchInstances",
+          "test/compat/workbench2198_test.go:180 TestWorkbenchJupyterLab"
         ]
       },
       {
         "method": "google.cloud.notebooks.v2.NotebookService/DeleteInstance",
         "status": "Verified",
         "tests": [
-          "test/compat/workbench2173_test.go:58 TestWorkbenchInstances"
+          "test/compat/workbench2173_test.go:58 TestWorkbenchInstances",
+          "test/compat/workbench2198_test.go:180 TestWorkbenchJupyterLab"
         ]
       },
       {
@@ -7584,7 +7586,8 @@
         "method": "google.cloud.notebooks.v2.NotebookService/GetInstance",
         "status": "Verified",
         "tests": [
-          "test/compat/workbench2173_test.go:58 TestWorkbenchInstances"
+          "test/compat/workbench2173_test.go:58 TestWorkbenchInstances",
+          "test/compat/workbench2198_test.go:180 TestWorkbenchJupyterLab"
         ]
       },
       {
@@ -7610,14 +7613,16 @@
         "method": "google.cloud.notebooks.v2.NotebookService/StartInstance",
         "status": "Verified",
         "tests": [
-          "test/compat/workbench2173_test.go:58 TestWorkbenchInstances"
+          "test/compat/workbench2173_test.go:58 TestWorkbenchInstances",
+          "test/compat/workbench2198_test.go:180 TestWorkbenchJupyterLab"
         ]
       },
       {
         "method": "google.cloud.notebooks.v2.NotebookService/StopInstance",
         "status": "Verified",
         "tests": [
-          "test/compat/workbench2173_test.go:58 TestWorkbenchInstances"
+          "test/compat/workbench2173_test.go:58 TestWorkbenchInstances",
+          "test/compat/workbench2198_test.go:180 TestWorkbenchJupyterLab"
         ]
       },
       {
