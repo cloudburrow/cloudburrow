@@ -355,7 +355,7 @@ func monGCS(field, uri string) (string, string, error) {
 }
 
 // readGCSRows reads the rows of the objects uri names (with wildcards) in
-// format: "csv" or "jsonl".
+// format: "csv", "jsonl" or "tf-record".
 func readGCSRows(ctx context.Context, store objectStore, uri, format string) ([]map[string]any, error) {
 	if store == nil {
 		return nil, apierror.FailedPrecondition("Cloud Storage is not served on this instance, so %s cannot be read", uri)
@@ -397,6 +397,8 @@ func readGCSRows(ctx context.Context, store objectStore, uri, format string) ([]
 
 func parseRows(data []byte, format string) ([]map[string]any, error) {
 	switch strings.ToLower(format) {
+	case "tf-record", "tfrecord", "tf_record":
+		return parseTFRecord(data)
 	case "csv":
 		rd := csv.NewReader(bytes.NewReader(data))
 		rd.FieldsPerRecord = -1
@@ -435,5 +437,5 @@ func parseRows(data []byte, format string) ([]map[string]any, error) {
 		}
 		return rows, nil
 	}
-	return nil, apierror.InvalidArgument("data format %q is not supported here: csv or jsonl", format)
+	return nil, apierror.InvalidArgument("data format %q is not supported: csv, jsonl or tf-record", format)
 }

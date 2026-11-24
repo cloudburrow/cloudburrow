@@ -1510,6 +1510,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// Vertex AI pipeline jobs and their schedules (#2173): each task's
 		// container on Docker, its artifacts in Cloud Storage.
 		localAISrv.SetPipelineRunner(colabPipelines{colabExecutor: colabExec, instance: cfg.Name, live: boundAddrs})
+		// Model Monitoring's alerts (#2214) go to Cloud Monitoring's
+		// notification channels and its recorded emails.
+		if monitoringSvc != nil {
+			localAISrv.SetAlertNotifier(monitoringAlertNotifier{srv: monitoringServerOf(monitoringSvc)})
+		}
 		// Executions, schedules and pipeline jobs run as the identity they
 		// name (#2173), with actAs checked on it.
 		localAISrv.SetIdentity(runIdentity(iamEnforcer, iameval.VertexAI, creds, func() *resourcemanager.Registry { return projectRegistry }))

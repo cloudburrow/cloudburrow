@@ -14,6 +14,7 @@ import (
 	"cloud.google.com/go/monitoring/apiv3/v2/monitoringpb"
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/cloudburrow/cloudburrow/internal/egress"
 )
@@ -247,4 +248,53 @@ func (s *Server) SendTestNotification(ctx context.Context, name string) (Deliver
 	s.recordDelivery(d)
 	s.mu.Unlock()
 	return d, nil
+}
+
+// NotifyChannels delivers another service's alert (Agent Platform Model
+// Monitoring's, #2214) to the named notification channels as an
+// incident's notification is delivered: a Pub/Sub channel publishes to
+// the instance's Pub/Sub, a local webhook is posted to, and every other
+// type is recorded. Each delivery is recorded with the channel's, of kind
+// kind; a channel that does not exist is a failed delivery.
+func (s *Server) NotifyChannels(ctx context.Context, kind string, names []string, payload []byte) []Delivery {
+	s.mu.Lock()
+	publish := s.publish
+	var chans []*monitoringpb.NotificationChannel
+	var out []Delivery
+	for _, n := range names {
+		c, _ := s.get(kindChannels, n).(*monitoringpb.NotificationChannel)
+		if c == nil {
+			d := Delivery{Channel: n, Kind: kind, State: DeliveryFailed, Detail: "the notification channel does not exist"}
+			s.recordDelivery(d)
+			out = append(out, d)
+			continue
+		}
+		chans = append(chans, proto.Clone(c).(*monitoringpb.NotificationChannel))
+	}
+	s.mu.Unlock()
+	for _, c := range chans {
+		d := Delivery{Channel: c.GetName(), Type: c.GetType(), Kind: kind}
+		if c.GetEnabled() != nil && !c.GetEnabled().GetValue() {
+			d.State, d.Detail = DeliveryRecorded, "not sent: the channel is disabled"
+		} else {
+			d.State, d.Detail = deliver(ctx, c, payload, publish)
+		}
+		s.mu.Lock()
+		s.recordDelivery(d)
+		s.mu.Unlock()
+		out = append(out, d)
+	}
+	return out
+}
+
+// RecordEmail records an email notification to addresses in project, of
+// kind kind. CloudBurrow sends no email off the machine: the message is
+// kept, with its subject and body, in the project's deliveries.
+func (s *Server) RecordEmail(project, kind string, to []string, subject, body string) Delivery {
+	d := Delivery{Channel: "projects/" + project, Type: "email", Kind: kind, State: DeliveryRecorded,
+		Detail: "not sent: CloudBurrow never sends email off the machine. To: " + strings.Join(to, ", ") + "\nSubject: " + subject + "\n\n" + body}
+	s.mu.Lock()
+	s.recordDelivery(d)
+	s.mu.Unlock()
+	return d
 }

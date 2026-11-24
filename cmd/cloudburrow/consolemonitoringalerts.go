@@ -42,6 +42,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/service/monitoring"
+	"github.com/cloudburrow/cloudburrow/internal/service/vertexai"
 )
 
 // monitoringAdmin is what the configuration pages share: the server.
@@ -2033,4 +2034,26 @@ func (p monitoringSnoozesProvider) Act(ctx context.Context, project, name, actio
 	_, err = s.UpdateSnooze(ctx, &monitoringpb.UpdateSnoozeRequest{Snooze: &monitoringpb.Snooze{Name: n, Interval: iv},
 		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"interval"}}})
 	return err
+}
+
+// monitoringAlertNotifier delivers Agent Platform Model Monitoring's
+// alerts (#2214) through Cloud Monitoring's notification channels.
+type monitoringAlertNotifier struct{ srv func() *monitoring.Server }
+
+func (n monitoringAlertNotifier) NotifyChannels(ctx context.Context, kind string, names []string, payload []byte) []vertexai.AlertDelivery {
+	srv := n.srv()
+	if srv == nil {
+		return nil
+	}
+	var out []vertexai.AlertDelivery
+	for _, d := range srv.NotifyChannels(ctx, kind, names, payload) {
+		out = append(out, vertexai.AlertDelivery{Channel: d.Channel, State: d.State, Detail: d.Detail})
+	}
+	return out
+}
+
+func (n monitoringAlertNotifier) RecordEmail(project, kind string, to []string, subject, body string) {
+	if srv := n.srv(); srv != nil {
+		srv.RecordEmail(project, kind, to, subject, body)
+	}
 }

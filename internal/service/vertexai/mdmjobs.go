@@ -133,6 +133,13 @@ func (s *Server) checkMDMJob(j *aiplatformpb.ModelDeploymentMonitoringJob) error
 			return apierror.InvalidArgument("%s.deployed_model_id %q is not deployed on %s", f, c.GetDeployedModelId(), j.GetEndpoint())
 		}
 		oc := c.GetObjectiveConfig()
+		if oc.GetExplanationConfig().GetEnableFeatureAttributes() {
+			parts := strings.Split(j.GetEndpoint(), "/")
+			if len(parts) == 6 && r.explanationSpec(parts[1], parts[3], parts[5], c.GetDeployedModelId()) == nil {
+				return apierror.InvalidArgument("%s.objective_config.explanation_config is only applicable if the Model has explanation_spec populated: "+
+					"deployed model %s has none", f, c.GetDeployedModelId())
+			}
+		}
 		if oc.GetTrainingPredictionSkewDetectionConfig() != nil && oc.GetTrainingDataset() == nil {
 			return apierror.InvalidArgument("%s.objective_config.training_dataset is required for training_prediction_skew_detection_config", f)
 		}
@@ -141,6 +148,11 @@ func (s *Server) checkMDMJob(j *aiplatformpb.ModelDeploymentMonitoringJob) error
 			case "csv", "tf-record", "jsonl", "":
 			default:
 				return apierror.InvalidArgument("%s.objective_config.training_dataset.data_format %q is not supported: csv or tf-record", f, td.GetDataFormat())
+			}
+			if b := td.GetBigquerySource(); b != nil {
+				if bqTableURI(b.GetInputUri()) == nil {
+					return apierror.InvalidArgument("%s.objective_config.training_dataset.bigquery_source.input_uri %q is not bq://project.dataset.table", f, b.GetInputUri())
+				}
 			}
 			if g := td.GetGcsSource(); g != nil {
 				if len(g.GetUris()) == 0 {
@@ -156,6 +168,12 @@ func (s *Server) checkMDMJob(j *aiplatformpb.ModelDeploymentMonitoringJob) error
 				}
 			}
 		}
+	}
+	if err := checkChannels("model_deployment_monitoring_job.model_monitoring_alert_config.notification_channels", j.GetModelMonitoringAlertConfig().GetNotificationChannels()); err != nil {
+		return err
+	}
+	if err := checkEmails("model_deployment_monitoring_job.model_monitoring_alert_config.email_alert_config.user_emails", j.GetModelMonitoringAlertConfig().GetEmailAlertConfig().GetUserEmails()); err != nil {
+		return err
 	}
 	sc := j.GetModelDeploymentMonitoringScheduleConfig()
 	if sc.GetMonitorInterval() == nil {
@@ -493,8 +511,10 @@ func (s *Server) RunMDMJob(ctx context.Context, name string, at time.Time) {
 		}
 		target := oc.GetTrainingDataset().GetTargetField()
 		fields := inferFields(cur, target)
+		var train []map[string]any
 		if sk := oc.GetTrainingPredictionSkewDetectionConfig(); sk != nil {
-			train, err := s.readTraining(ctx, store, oc.GetTrainingDataset())
+			var err error
+			train, err = s.readTraining(ctx, store, oc.GetTrainingDataset())
 			if err != nil {
 				runErr = err
 			} else {
@@ -520,6 +540,11 @@ func (s *Server) RunMDMJob(ctx context.Context, name string, at time.Time) {
 					thresholdOf(dr.GetDriftThresholds(), dr.GetDefaultDriftThreshold(), f.Name), start, at))
 			}
 		}
+		as, err := s.mdmAttributionStats(ctx, j, c, fields, train, prev, cur, start, at)
+		stats = append(stats, as...)
+		if err != nil && runErr == nil {
+			runErr = err
+		}
 	}
 	if dir := j.GetStatsAnomaliesBaseDirectory().GetOutputUriPrefix(); dir != "" && store != nil && len(stats) > 0 {
 		uri := strings.TrimSuffix(dir, "/") + "/" + at.UTC().Format("20060102T150405Z")
@@ -528,7 +553,7 @@ func (s *Server) RunMDMJob(ctx context.Context, name string, at time.Time) {
 			for _, x := range stats {
 				out = append(out, monJSON(x.Prediction))
 				x.Prediction.StatsUri = uri + "/stats.json"
-				if x.Prediction.GetScore() > x.Threshold {
+				if x.Threshold > 0 && x.Prediction.GetScore() > x.Threshold {
 					x.Prediction.AnomalyUri = uri + "/stats.json"
 				}
 			}
@@ -538,6 +563,8 @@ func (s *Server) RunMDMJob(ctx context.Context, name string, at time.Time) {
 			}
 		}
 	}
+
+	s.notifyMDMAnomalies(ctx, j, at, stats)
 
 	st.mu.Lock()
 	defer st.mu.Unlock()
@@ -569,9 +596,6 @@ func mdmStatOf(job, dm string, obj aiplatformpb.ModelDeploymentMonitoringObjecti
 func (s *Server) readTraining(ctx context.Context, store objectStore, td *aiplatformpb.ModelMonitoringObjectiveConfig_TrainingDataset) ([]map[string]any, error) {
 	switch src := td.GetDataSource().(type) {
 	case *aiplatformpb.ModelMonitoringObjectiveConfig_TrainingDataset_GcsSource:
-		if td.GetDataFormat() == "tf-record" {
-			return nil, apierror.Unimplemented("tf-record training data is not read here: give it as csv")
-		}
 		var rows []map[string]any
 		for _, u := range src.GcsSource.GetUris() {
 			r, err := readGCSRows(ctx, store, u, td.GetDataFormat())
@@ -582,9 +606,9 @@ func (s *Server) readTraining(ctx context.Context, store objectStore, td *aiplat
 		}
 		return rows, nil
 	case *aiplatformpb.ModelMonitoringObjectiveConfig_TrainingDataset_BigquerySource:
-		return nil, apierror.Unimplemented("BigQuery training data is not read by model monitoring on this instance: export the table to Cloud Storage as CSV")
+		return bigQueryURIRows(ctx, store, "training_dataset.bigquery_source.input_uri", src.BigquerySource.GetInputUri())
 	case *aiplatformpb.ModelMonitoringObjectiveConfig_TrainingDataset_Dataset:
-		return nil, apierror.NotFound("Dataset %s not found: Agent Platform managed datasets are not served", src.Dataset)
+		return s.datasetRows(ctx, store, src.Dataset)
 	}
 	return nil, apierror.InvalidArgument("the training dataset has no source")
 }
@@ -622,7 +646,7 @@ func (x *jobService) SearchModelDeploymentMonitoringStatsAnomalies(_ context.Con
 				byFeature[s.Feature] = f
 			}
 			f.PredictionStats = append(f.PredictionStats, proto.Clone(s.Prediction).(*aiplatformpb.FeatureStatsAnomaly))
-			if s.Prediction.GetScore() > s.Threshold {
+			if s.Threshold > 0 && s.Prediction.GetScore() > s.Threshold {
 				out.AnomalyCount++
 			}
 		}

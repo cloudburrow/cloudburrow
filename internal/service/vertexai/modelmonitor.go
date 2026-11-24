@@ -367,6 +367,9 @@ func (s *Server) checkMonitor(m *betapb.ModelMonitor) error {
 	if err := checkInput("model_monitor.training_dataset", m.GetTrainingDataset()); err != nil {
 		return err
 	}
+	if err := checkNotificationSpec("model_monitor.notification_spec", m.GetNotificationSpec()); err != nil {
+		return err
+	}
 	if g := m.GetOutputSpec().GetGcsBaseDirectory(); g != nil {
 		if _, _, err := monGCS("model_monitor.output_spec.gcs_base_directory.output_uri_prefix", g.GetOutputUriPrefix()); err != nil {
 			return err
@@ -816,6 +819,30 @@ func parseRowTime(v any) (time.Time, bool) {
 	return time.Time{}, false
 }
 
+// timeFiltered keeps the rows whose timestamp field is in iv (all of
+// them with no field or range).
+func timeFiltered(rows []map[string]any, field string, iv *interval.Interval) []map[string]any {
+	if field == "" || iv == nil {
+		return rows
+	}
+	kept := rows[:0]
+	for _, r := range rows {
+		if t, ok := parseRowTime(r[field]); ok && inRange(iv, t) {
+			kept = append(kept, r)
+		}
+	}
+	return kept
+}
+
+// modelProject is the project of a resource name projects/{p}/....
+func modelProject(name string) string {
+	parts := strings.Split(name, "/")
+	if len(parts) > 1 && parts[0] == "projects" {
+		return parts[1]
+	}
+	return ""
+}
+
 // readInput reads an input's rows and where they came from.
 func (s *Server) readInput(ctx context.Context, store objectStore, in *betapb.ModelMonitoringInput, schema *betapb.ModelMonitoringSchema,
 	model string, cutoff time.Time) ([]map[string]any, *betapb.ModelMonitoringJobExecutionDetail_ProcessedDataset, error) {
@@ -831,29 +858,26 @@ func (s *Server) readInput(ctx context.Context, store objectStore, in *betapb.Mo
 			case betapb.ModelMonitoringInput_ModelMonitoringDataset_ModelMonitoringGcsSource_JSONL:
 				format = "jsonl"
 			case betapb.ModelMonitoringInput_ModelMonitoringDataset_ModelMonitoringGcsSource_TF_RECORD:
-				return nil, done, apierror.Unimplemented("TF_RECORD datasets are not read here: give the dataset as CSV or JSONL")
+				format = "tf-record"
 			}
 			done.Location = src.GcsSource.GetGcsUri()
 			rows, err := readGCSRows(ctx, store, src.GcsSource.GetGcsUri(), format)
-			if err != nil {
-				return nil, done, err
-			}
-			if f := ds.GetTimestampField(); f != "" && iv != nil {
-				kept := rows[:0]
-				for _, r := range rows {
-					if t, ok := parseRowTime(r[f]); ok && inRange(iv, t) {
-						kept = append(kept, r)
-					}
-				}
-				rows = kept
-			}
-			return rows, done, nil
+			return timeFiltered(rows, ds.GetTimestampField(), iv), done, err
 		case *betapb.ModelMonitoringInput_ModelMonitoringDataset_BigquerySource:
-			done.Location = src.BigquerySource.GetTableUri()
-			return nil, done, apierror.Unimplemented("BigQuery datasets are not read by model monitoring on this instance: export the table to Cloud Storage as CSV or JSONL")
+			var rows []map[string]any
+			var err error
+			if q := src.BigquerySource.GetQuery(); q != "" {
+				done.Location = q
+				rows, err = bigQueryQueryRows(ctx, store, modelProject(model), q)
+			} else {
+				done.Location = src.BigquerySource.GetTableUri()
+				rows, err = bigQueryURIRows(ctx, store, "columnized_dataset.bigquery_source.table_uri", src.BigquerySource.GetTableUri())
+			}
+			return timeFiltered(rows, ds.GetTimestampField(), iv), done, err
 		case *betapb.ModelMonitoringInput_ModelMonitoringDataset_VertexDataset:
 			done.Location = src.VertexDataset
-			return nil, done, apierror.NotFound("Dataset %s not found: Agent Platform managed datasets are not served", src.VertexDataset)
+			rows, err := s.datasetRows(ctx, store, src.VertexDataset)
+			return timeFiltered(rows, ds.GetTimestampField(), iv), done, err
 		}
 		return nil, done, apierror.InvalidArgument("the columnized dataset has no data location")
 	case *betapb.ModelMonitoringInput_BatchPredictionOutput_:
@@ -1048,9 +1072,14 @@ func (s *Server) runMonitoringJob(ctx context.Context, name string) {
 				detail.ObjectiveStatus[o.key] = &status.Status{}
 			}
 		}
-		if obj.GetFeatureAttributionSpec() != nil {
-			detail.ObjectiveStatus[objAttribution] = &status.Status{Code: int32(codes.Unimplemented),
-				Message: "feature attribution monitoring is not run on this instance: it needs batch explanations of the target dataset"}
+		if fa := obj.GetFeatureAttributionSpec(); fa != nil {
+			as, aa, err := s.monitorAttribution(ctx, m, monitorName, name, spec.GetSchedule(), fa, base, target, now)
+			stats, alerts = append(stats, as...), append(alerts, aa...)
+			detail.ObjectiveStatus[objAttribution] = &status.Status{}
+			if err != nil {
+				e := apierror.From(err)
+				detail.ObjectiveStatus[objAttribution] = &status.Status{Code: int32(e.Code), Message: e.Message}
+			}
 		}
 	}
 	if dir := outSpec.GetGcsBaseDirectory().GetOutputUriPrefix(); dir != "" && store != nil && detail.Error == nil {
@@ -1068,6 +1097,14 @@ func (s *Server) runMonitoringJob(ctx context.Context, name string) {
 				a.Alert.GetAnomaly().GetTabularAnomaly().AnomalyUri = uri + "/stats.json"
 			}
 		}
+	}
+
+	if ctx.Err() == nil {
+		ns := spec.GetModelMonitoringSpec().GetNotificationSpec()
+		if ns == nil {
+			ns = m.GetNotificationSpec()
+		}
+		s.notifyMonitorAlerts(ctx, name, ns, alerts)
 	}
 
 	st.mu.Lock()

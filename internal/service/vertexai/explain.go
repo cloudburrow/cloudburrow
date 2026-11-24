@@ -198,7 +198,17 @@ func (s *Server) explain(ctx context.Context, t target, req *aiplatformpb.Explai
 				Metadata: &aiplatformpb.ExplanationMetadataOverride{Inputs: overrideInputs(es.GetMetadata())}}
 		}
 	}
-	spec, err := explainSpecOf(t.endpoint, req)
+	return s.explainWith(t.endpoint, req, func(body []byte) (json.RawMessage, error) {
+		return s.endpointPredict(ctx, t.project, t.location, t.endpoint, body)
+	})
+}
+
+// explainWith explains req's instances by Sampled Shapley, predicting
+// through predict (an endpoint's, or a model container's for Model
+// Monitoring's batch explanations, monitorattrib.go); what names the
+// predictor in messages.
+func (s *Server) explainWith(what string, req *aiplatformpb.ExplainRequest, predict func(body []byte) (json.RawMessage, error)) (*aiplatformpb.ExplainResponse, error) {
+	spec, err := explainSpecOf(what, req)
 	if err != nil {
 		return nil, err
 	}
@@ -259,16 +269,19 @@ func (s *Server) explain(ctx context.Context, t target, req *aiplatformpb.Explai
 	if err != nil {
 		return nil, err
 	}
-	out, err := s.endpointPredict(ctx, t.project, t.location, t.endpoint, body)
+	out, err := predict(body)
 	if err != nil {
 		return nil, err
 	}
 	var resp prediction.Response
 	if err := json.Unmarshal(out, &resp); err != nil {
-		return nil, apierror.Internal(err, "decoding endpoint %s's answer: %v", t.endpoint, err)
+		return nil, apierror.Internal(err, "decoding endpoint %s's answer: %v", what, err)
 	}
-	if id := req.GetDeployedModelId(); id != "" && id != resp.DeployedModelID {
-		return nil, apierror.NotFound("endpoint %s has no deployed model %q: its container answers as %q", t.endpoint, id, resp.DeployedModelID)
+	if id := req.GetDeployedModelId(); id != "" && resp.DeployedModelID != "" && id != resp.DeployedModelID {
+		return nil, apierror.NotFound("endpoint %s has no deployed model %q: its container answers as %q", what, id, resp.DeployedModelID)
+	}
+	if len(resp.Predictions) != len(all) {
+		return nil, apierror.FailedPrecondition("endpoint %s answered %d predictions for %d instances", what, len(resp.Predictions), len(all))
 	}
 	vec := make([][]float64, len(resp.Predictions))
 	scalar := make([]bool, len(resp.Predictions))
@@ -298,7 +311,7 @@ func (s *Server) explain(ctx context.Context, t target, req *aiplatformpb.Explai
 			for b := range plan.baselines {
 				baseOut := vec[pos]
 				if len(baseOut) != len(inst) {
-					return nil, apierror.FailedPrecondition("endpoint %s answered %d outputs for one instance and %d for another", t.endpoint, len(inst), len(baseOut))
+					return nil, apierror.FailedPrecondition("endpoint %s answered %d outputs for one instance and %d for another", what, len(inst), len(baseOut))
 				}
 				base += baseOut[k]
 				basePos := pos
@@ -307,7 +320,7 @@ func (s *Server) explain(ctx context.Context, t target, req *aiplatformpb.Explai
 					prev := vec[basePos][k]
 					for _, f := range order {
 						if len(vec[pos]) != len(inst) {
-							return nil, apierror.FailedPrecondition("endpoint %s answered %d outputs for one instance and %d for another", t.endpoint, len(inst), len(vec[pos]))
+							return nil, apierror.FailedPrecondition("endpoint %s answered %d outputs for one instance and %d for another", what, len(inst), len(vec[pos]))
 						}
 						attr[f] += vec[pos][k] - prev
 						prev = vec[pos][k]
