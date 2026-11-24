@@ -26,8 +26,9 @@ package compute
 //   - "Keys can't be changed for Hyperdisk volumes created by cloning,
 //     unless the source disk and all other clones have been deleted."
 //
-// The disk's storage itself is a volume of the VM backend; it is not
-// encrypted with the data key (docs/compute.md).
+// The disk's storage is encrypted at rest with the data key: sealed
+// (diskseal.go) whenever no running instance has it open, so a disabled or
+// destroyed key version leaves nothing readable.
 
 import (
 	"context"
@@ -36,6 +37,7 @@ import (
 	"net/http"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -102,34 +104,69 @@ func kmsCtx() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), 10*time.Second)
 }
 
-// applyDiskKeyLocked gives a new disk d the customer-managed key b names
-// (b.diskEncryptionKey.kmsKeyName), wrapping a new data key with it. A
-// disk cloned from a CMEK disk unwraps the source's data key first.
+// applyDiskKeyLocked gives a new disk d the key b names: a
+// customer-managed key (b.diskEncryptionKey.kmsKeyName), wrapping a new
+// data key with it, or a customer-supplied one (rawKey, rsaEncryptedKey,
+// diskkeys.go). A disk made from a disk or snapshot with a key unwraps the
+// source's data key first: a customer-supplied one needs
+// sourceSnapshotEncryptionKey.
 func (s *Server) applyDiskKeyLocked(d, b obj, field string) error {
-	for _, src := range []string{str(d, "sourceDisk"), str(d, "sourceSnapshot")} {
-		if so, ok := s.res[src]; ok && src != "" {
-			if err := s.checkDiskKeyLocked(so); err != nil {
+	if src := str(d, "sourceDisk"); src != "" {
+		if so, ok := s.res[src]; ok {
+			if isCSEK(so) {
+				return invalid("Invalid value for field '%s.sourceDisk': '%s'. A disk encrypted with a customer-supplied encryption key can't be cloned.", field, src)
+			}
+			if _, err := s.diskKeyLocked(so, nil, field+".sourceDisk"); err != nil {
+				return err
+			}
+		}
+	}
+	if src := str(d, "sourceSnapshot"); src != "" {
+		if so, ok := s.res[src]; ok {
+			sk, _ := b["sourceSnapshotEncryptionKey"].(map[string]any)
+			if _, err := s.diskKeyLocked(so, sk, field+".sourceSnapshotEncryptionKey"); err != nil {
 				return err
 			}
 		}
 	}
 	ek, _ := b["diskEncryptionKey"].(map[string]any)
 	key := str(ek, "kmsKeyName")
-	if key == "" {
+	n := 0
+	for _, f := range []string{"kmsKeyName", "rawKey", "rsaEncryptedKey"} {
+		if str(ek, f) != "" {
+			n++
+		}
+	}
+	if n > 1 {
+		return invalid("Invalid value for field '%s.diskEncryptionKey': at most one of kmsKeyName, rawKey and rsaEncryptedKey may be set.", field)
+	}
+	if n == 0 {
 		return nil
 	}
-	if str(ek, "rawKey") != "" || str(ek, "rsaEncryptedKey") != "" {
-		return invalid("Invalid value for field '%s.diskEncryptionKey': at most one of kmsKeyName, rawKey and rsaEncryptedKey may be set.", field)
+	dek := make([]byte, 32)
+	if _, err := rand.Read(dek); err != nil {
+		return err
+	}
+	if key == "" {
+		ck, err := s.customerKeyLocked(ek, field+".diskEncryptionKey")
+		if err != nil {
+			return err
+		}
+		w, err := wrapCustomer(ck, dek)
+		if err != nil {
+			return err
+		}
+		d["diskEncryptionKey"] = obj{"sha256": csekSHA256(ck)}
+		d[wrappedKeyKey] = w
+		d[csekKey] = true
+		s.rememberKeyLocked(w, dek)
+		return nil
 	}
 	if err := checkDiskKeyName(key, diskRegion(d), field+".diskEncryptionKey.kmsKeyName"); err != nil {
 		return err
 	}
 	k, err := s.kmsLocked(key)
 	if err != nil {
-		return err
-	}
-	dek := make([]byte, 32)
-	if _, err := rand.Read(dek); err != nil {
 		return err
 	}
 	ctx, cancel := kmsCtx()
@@ -142,17 +179,36 @@ func (s *Server) applyDiskKeyLocked(d, b obj, field string) error {
 	if sa := str(ek, "kmsKeyServiceAccount"); sa != "" {
 		out["kmsKeyServiceAccount"] = sa
 	}
+	w := base64.StdEncoding.EncodeToString(wrapped)
 	d["diskEncryptionKey"] = out
-	d[wrappedKeyKey] = base64.StdEncoding.EncodeToString(wrapped)
+	d[wrappedKeyKey] = w
+	s.rememberKeyLocked(w, dek)
 	return nil
 }
 
-// checkDiskKeyLocked unwraps a CMEK disk's data key: an error when its key
-// version is disabled or destroyed.
-func (s *Server) checkDiskKeyLocked(d obj) error {
+// checkDiskKeyLocked checks that a disk's (or snapshot's) data key can be
+// unwrapped: an error when its Cloud KMS key version is disabled or
+// destroyed, or, for a customer-supplied key, when ck (the
+// CustomerEncryptionKey the request gave, field) is missing or wrong.
+func (s *Server) checkDiskKeyLocked(d obj, ck map[string]any, field string) error {
+	_, err := s.diskKeyLocked(d, ck, field)
+	return err
+}
+
+// diskKeyLocked unwraps d's data key, nil for a disk without one: with
+// Cloud KMS (Decrypt, so a disabled or destroyed version refuses it) or
+// the customer's key ck. The key is remembered (openKeys) so the disk can
+// be sealed again when the instance that opened it stops.
+func (s *Server) diskKeyLocked(d obj, ck map[string]any, field string) ([]byte, error) {
 	w := str(d, wrappedKeyKey)
 	if w == "" {
-		return nil
+		if gk := str(d, googleKeyKey); gk != "" {
+			return base64.StdEncoding.DecodeString(gk)
+		}
+		return nil, nil
+	}
+	if isCSEK(d) {
+		return s.openCustomerLocked(d, ck, field)
 	}
 	ek, _ := d["diskEncryptionKey"].(map[string]any)
 	if ek == nil {
@@ -161,27 +217,31 @@ func (s *Server) checkDiskKeyLocked(d obj) error {
 	key := cryptoKeyOf(str(ek, "kmsKeyName"))
 	k, err := s.kmsLocked(key)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	ct, err := base64.StdEncoding.DecodeString(w)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	ctx, cancel := kmsCtx()
 	defer cancel()
-	if _, err := k.Decrypt(ctx, key, ct); err != nil {
-		return kmsError(key, err)
+	dek, err := k.Decrypt(ctx, key, ct)
+	if err != nil {
+		return nil, kmsError(key, err)
 	}
-	return nil
+	s.rememberKeyLocked(w, dek)
+	return dek, nil
 }
 
-// checkInstanceKeysLocked checks the keys of an instance's disks.
-func (s *Server) checkInstanceKeysLocked(o obj) error {
+// checkInstanceKeysLocked checks the keys of an instance's disks; keys are
+// the customer-supplied keys startWithEncryptionKey gave, by disk.
+func (s *Server) checkInstanceKeysLocked(o obj, keys map[string]map[string]any) error {
 	l, _ := o["disks"].([]any)
-	for _, e := range l {
+	for i, e := range l {
 		ad, _ := e.(map[string]any)
-		if d, ok := s.res[Rel(str(ad, "source"), "")]; ok {
-			if err := s.checkDiskKeyLocked(d); err != nil {
+		src := Rel(str(ad, "source"), "")
+		if d, ok := s.res[src]; ok {
+			if err := s.checkDiskKeyLocked(d, keys[src], "disks["+strconv.Itoa(i)+"].diskEncryptionKey"); err != nil {
 				return err
 			}
 		}
@@ -193,6 +253,10 @@ func (s *Server) checkInstanceKeysLocked(o obj) error {
 // regionDisks.updateKmsKey.
 func (s *Server) updateDiskKmsKeyLocked(project, scope, rel string, d, b obj) (obj, error) {
 	w := str(d, wrappedKeyKey)
+	if isCSEK(d) {
+		// KMS_UPDATE_NOT_SUPPORTED_FOR_CSEK_RESOURCE (the error catalog).
+		return nil, invalid("Can't update the KMS key for 'disk' resource '%s' because it is protected by a Customer-Supplied Encryption Key (CSEK). To use CMEK for a 'disk', create a new resource and provide a KMS key during creation.", str(d, "name"))
+	}
 	if w == "" {
 		// KMS_UPDATE_NOT_SUPPORTED_FOR_NON_KMS_PROTECTED_RESOURCE
 		// (https://docs.cloud.google.com/compute/docs/reference/rest/v1/errors).
@@ -236,7 +300,9 @@ func (s *Server) updateDiskKmsKeyLocked(project, scope, rel string, d, b obj) (o
 		out["kmsKeyServiceAccount"] = sa
 	}
 	d["diskEncryptionKey"] = out
-	d[wrappedKeyKey] = base64.StdEncoding.EncodeToString(wrapped)
+	nw := base64.StdEncoding.EncodeToString(wrapped)
+	d[wrappedKeyKey] = nw
+	s.rememberKeyLocked(nw, dek)
 	return s.done(project, scope, "updateKmsKey", rel, d["id"])
 }
 

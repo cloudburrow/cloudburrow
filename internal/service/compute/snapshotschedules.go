@@ -194,6 +194,9 @@ func (s *Server) newSnapshotSchedule(project, region string, b obj) (obj, error)
 // patchResourcePolicy is resourcePolicies.patch of a snapshot schedule:
 // its description, schedule, retention policy and labels.
 func (s *Server) patchResourcePolicy(c call, rel string, po obj) (obj, error) {
+	if po["instanceSchedulePolicy"] != nil {
+		return s.patchInstanceSchedule(c, rel, po)
+	}
 	if !isSchedule(po) {
 		return nil, invalid("Invalid value for field 'resource': only a snapshot schedule's description, schedule, retention policy and labels can be changed: delete the resource policy and create a new one.")
 	}
@@ -284,8 +287,9 @@ func (s *Server) checkScheduleAttachLocked(cur []string, pol, field string, i in
 	return nil
 }
 
-// RunSnapshotSchedules takes the scheduled snapshots and applies the
-// retention policies every minute until ctx is done.
+// RunSnapshotSchedules takes the scheduled snapshots, applies the
+// retention policies and runs the instance schedules every minute until
+// ctx is done.
 func (s *Server) RunSnapshotSchedules(ctx context.Context) {
 	t := time.NewTicker(time.Minute)
 	defer t.Stop()
@@ -296,6 +300,8 @@ func (s *Server) RunSnapshotSchedules(ctx context.Context) {
 		case <-t.C:
 			s.mu.Lock()
 			s.runSchedulesLocked()
+			s.runInstanceSchedulesLocked(s.opts.Now().UTC())
+			_ = s.saveLocked()
 			s.mu.Unlock()
 		}
 	}

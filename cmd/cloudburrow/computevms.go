@@ -32,7 +32,8 @@ import (
 // image at first boot, so what the guest changes survives stop and
 // start), each attached disk a PersistentVolumeClaim mounted at
 // /mnt/disks/DEVICE_NAME (a directory, not a block device), its port 22
-// forwarded to a port on this machine.
+// forwarded to a port on this machine. A disk with a customer-managed or
+// customer-supplied key is sealed at rest (computeseal.go).
 type computeVMs struct {
 	cfg       config.Config
 	installer *components.Installer
@@ -143,7 +144,10 @@ func (b *computeVMs) CopyDisk(ctx context.Context, src, dst compute.DiskSpec) er
 	if err := b.installer.Apply(ctx, pvcManifest(b.ns(), dst.Key, dst.SizeGb, "disk")); err != nil {
 		return err
 	}
-	return b.copyPVCCmd(ctx, src.Key, dst.Key, "find /dst -mindepth 1 -delete && cp -a /src/. /dst/ && sync")
+	if err := b.copyPVCCmd(ctx, src.Key, dst.Key, "find /dst -mindepth 1 -delete && cp -a /src/. /dst/ && sync"); err != nil {
+		return err
+	}
+	return b.rekey(ctx, dst.Key, src.DataKey, dst.DataKey)
 }
 
 func (b *computeVMs) copyPVCCmd(ctx context.Context, src, dst, script string) error {
@@ -182,9 +186,12 @@ func (b *computeVMs) CreateDisk(ctx context.Context, d compute.DiskSpec) error {
 		return err
 	}
 	if d.SourceSnapshot != "" {
-		return b.copyPVC(ctx, d.SourceSnapshot, d.Key)
+		if err := b.copyPVC(ctx, d.SourceSnapshot, d.Key); err != nil {
+			return err
+		}
+		return b.rekey(ctx, d.Key, d.SourceDataKey, d.DataKey)
 	}
-	return nil
+	return b.rekey(ctx, d.Key, nil, d.DataKey)
 }
 
 func (b *computeVMs) DeleteDisk(ctx context.Context, d compute.DiskSpec) error {
@@ -203,7 +210,12 @@ func (b *computeVMs) Snapshot(ctx context.Context, d compute.DiskSpec, key strin
 	if err := b.installer.Apply(ctx, pvcManifest(b.ns(), key, d.SizeGb, "snapshot")); err != nil {
 		return err
 	}
-	return b.copyPVC(ctx, d.Key, key)
+	if err := b.copyPVC(ctx, d.Key, key); err != nil {
+		return err
+	}
+	// A snapshot of an encrypted disk is sealed with its data key, which
+	// the snapshot keeps (wrapped) too.
+	return b.rekey(ctx, key, d.DataKey, d.DataKey)
 }
 
 func (b *computeVMs) DeleteSnapshot(ctx context.Context, key string) error {

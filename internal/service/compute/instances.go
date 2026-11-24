@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // The instance statuses (https://docs.cloud.google.com/compute/docs/instances/instance-life-cycle).
@@ -44,6 +45,7 @@ func (s *Server) vmSpecLocked(o obj) VMSpec {
 			continue
 		}
 		ds := s.diskSpecLocked(d)
+		ds.Open = s.openElsewhereLocked(d, str(o, "selfLink"))
 		if b, _ := ad["boot"].(bool); b {
 			sp.BootDisk = ds
 			if ds.Image != nil {
@@ -126,8 +128,10 @@ func (s *Server) attachedDiskLocked(project, zone, instance, machineType string,
 		if force && !isRegional(d) {
 			return nil, nil, invalid("Force attaching zonal disks is not supported")
 		}
-		// "You can't attach a disk with a revoked key to a VM."
-		if err := s.checkDiskKeyLocked(d); err != nil {
+		// "You can't attach a disk with a revoked key to a VM"; a disk
+		// with a customer-supplied key is attached with its key.
+		ek, _ := e["diskEncryptionKey"].(map[string]any)
+		if err := s.checkDiskKeyLocked(d, ek, field+".diskEncryptionKey"); err != nil {
 			return nil, nil, err
 		}
 		users := strs(d, "users")
@@ -162,7 +166,7 @@ func (s *Server) attachedDiskLocked(project, zone, instance, machineType string,
 		b := obj{"name": name, "sourceImage": str(ip, "sourceImage"), "sourceSnapshot": str(ip, "sourceSnapshot"),
 			"type": str(ip, "diskType"), "sizeGb": ip["diskSizeGb"], "labels": ip["labels"], "description": str(ip, "description"),
 			"provisionedIops": ip["provisionedIops"], "provisionedThroughput": ip["provisionedThroughput"],
-			"diskEncryptionKey": e["diskEncryptionKey"]}
+			"diskEncryptionKey": e["diskEncryptionKey"], "sourceSnapshotEncryptionKey": ip["sourceSnapshotEncryptionKey"]}
 		if boot && str(ip, "sourceImage") == "" && str(ip, "sourceSnapshot") == "" {
 			return nil, nil, required(field + ".initializeParams.sourceImage")
 		}
@@ -311,19 +315,27 @@ func (s *Server) instances(c call, zone string) (obj, error) {
 		return s.deleteInstance(c.project, scope, rel, o)
 	case get && verb == "serialPort":
 		return s.serialPort(c, rel, o)
-	case post && verb == "start":
+	case post && (verb == "start" || verb == "startWithEncryptionKey"):
 		if status == stRunning {
-			return s.done(c.project, scope, "start", rel, o["id"])
+			return s.done(c.project, scope, verb, rel, o["id"])
 		}
 		if status != stTerminated {
 			return nil, notReady(rel, status)
 		}
 		// "You can't boot a VM if any of its attached disks have revoked
-		// keys."
-		if err := s.checkInstanceKeysLocked(o); err != nil {
+		// keys"; "the disk url and its corresponding key must be
+		// provided" for each disk with a customer-supplied key.
+		keys, err := startKeys(c, verb)
+		if err != nil {
 			return nil, err
 		}
-		return s.transition(c.project, scope, "start", rel, o, stProvisioning, stRunning, stTerminated, func(ctx context.Context, vm VMSpec) error {
+		if err := s.checkInstanceKeysLocked(o, keys); err != nil {
+			return nil, err
+		}
+		return s.transition(c.project, scope, verb, rel, o, stProvisioning, stRunning, stTerminated, func(ctx context.Context, vm VMSpec) error {
+			if err := s.unsealDisks(ctx, vm.encrypted()); err != nil {
+				return err
+			}
 			return s.opts.VMs.Start(ctx, vm)
 		})
 	case post && verb == "stop":
@@ -334,7 +346,10 @@ func (s *Server) instances(c call, zone string) (obj, error) {
 			return nil, notReady(rel, status)
 		}
 		return s.transition(c.project, scope, "stop", rel, o, stStopping, stTerminated, status, func(ctx context.Context, vm VMSpec) error {
-			return s.opts.VMs.Stop(ctx, vm)
+			if err := s.opts.VMs.Stop(ctx, vm); err != nil {
+				return err
+			}
+			return s.sealDisks(ctx, vm.encrypted(), nil)
 		})
 	case post && verb == "reset":
 		if status != stRunning {
@@ -349,6 +364,9 @@ func (s *Server) instances(c call, zone string) (obj, error) {
 	case post && verb == "suspend":
 		if status != stRunning {
 			return nil, notReady(rel, status)
+		}
+		if s.hasCSEKDiskLocked(o) {
+			return nil, invalid("Invalid resource usage: 'You can't suspend instances that have CSEK-protected disks attached.'.")
 		}
 		return s.transition(c.project, scope, "suspend", rel, o, stSuspending, stSuspended, stRunning, func(ctx context.Context, vm VMSpec) error {
 			return s.opts.VMs.Suspend(ctx, vm)
@@ -399,6 +417,11 @@ func (s *Server) instances(c call, zone string) (obj, error) {
 		}
 		o["machineType"] = zoneRel(c.project, zone, "machineTypes", mt)
 		return s.done(c.project, scope, "setMachineType", rel, o["id"])
+	case post && (verb == "addResourcePolicies" || verb == "removeResourcePolicies"):
+		if verb == "addResourcePolicies" {
+			o["_policiesAt"] = s.opts.Now().UTC().Format(time.RFC3339Nano)
+		}
+		return s.instancePolicies(c, scope, rel, o, verb == "addResourcePolicies")
 	case post && verb == "attachDisk":
 		return s.attachDisk(c, scope, rel, o)
 	case post && verb == "detachDisk":
@@ -410,7 +433,8 @@ func (s *Server) instances(c call, zone string) (obj, error) {
 // servedInstanceVerbs are the instance methods served under instances/NAME/.
 var servedInstanceVerbs = map[string]bool{"serialPort": true, "start": true, "stop": true, "reset": true, "suspend": true,
 	"resume": true, "setMetadata": true, "setLabels": true, "setTags": true, "setDeletionProtection": true,
-	"setMachineType": true, "attachDisk": true, "detachDisk": true}
+	"setMachineType": true, "attachDisk": true, "detachDisk": true, "startWithEncryptionKey": true,
+	"addResourcePolicies": true, "removeResourcePolicies": true}
 
 func notReady(rel, status string) error {
 	return errf(http.StatusBadRequest, "resourceNotReady", "The resource '%s' is not ready (it is %s)", rel, status)
@@ -546,6 +570,14 @@ func (s *Server) insertInstance(c call, zone string) (obj, error) {
 	if l, ok := b["labels"].(map[string]any); ok && len(l) > 0 {
 		o["labels"], o["labelFingerprint"] = l, labelFingerprint(l)
 	}
+	if refs := strs(b, "resourcePolicies"); len(refs) > 0 {
+		l, err := s.checkInstancePoliciesLocked(c.project, o, refs, "resource.resourcePolicies")
+		if err != nil {
+			return nil, err
+		}
+		o["resourcePolicies"] = l
+		o["_policiesAt"] = s.opts.Now().UTC().Format(time.RFC3339Nano)
+	}
 	if t, ok := b["tags"].(map[string]any); ok {
 		o["tags"] = obj{"items": t["items"], "fingerprint": newFingerprint()}
 	}
@@ -555,6 +587,7 @@ func (s *Server) insertInstance(c call, zone string) (obj, error) {
 			sched[k] = v
 		}
 	}
+	s.placeLocked(o)
 	if sas, ok := b["serviceAccounts"].([]any); ok {
 		var out []any
 		for _, e := range sas {
@@ -605,7 +638,11 @@ func (s *Server) insertInstance(c call, zone string) (obj, error) {
 				return err
 			}
 		}
-		if err := s.opts.VMs.Start(ctx, vm); err != nil {
+		err := s.unsealDisks(ctx, vm.encrypted())
+		if err == nil {
+			err = s.opts.VMs.Start(ctx, vm)
+		}
+		if err != nil {
 			_ = s.opts.VMs.Stop(context.Background(), vm)
 			for _, m := range specs {
 				_ = s.opts.VMs.DeleteDisk(context.Background(), m)
@@ -693,6 +730,15 @@ func (s *Server) deleteInstance(project, scope, rel string, o obj) (obj, error) 
 		if err := s.opts.VMs.Stop(ctx, vm); err != nil {
 			return err
 		}
+		var kept []DiskSpec
+		for _, e := range vm.encrypted() {
+			if !hasStr(autoDel, e.rel) {
+				kept = append(kept, e)
+			}
+		}
+		if err := s.sealDisks(ctx, kept, nil); err != nil {
+			return err
+		}
 		for _, d := range specs {
 			if err := s.opts.VMs.DeleteDisk(ctx, d); err != nil {
 				return err
@@ -740,6 +786,7 @@ func (s *Server) attachDisk(c call, scope, rel string, o obj) (obj, error) {
 	if len(disks) >= 128 {
 		return nil, invalid("Invalid value for field 'resource.disks': at most 128 disks may be attached.")
 	}
+	old := s.vmSpecLocked(o)
 	o["disks"] = append(disks, norm(ad))
 	d := s.res[str(ad, "source")]
 	var fenced []string
@@ -751,7 +798,7 @@ func (s *Server) attachDisk(c call, scope, rel string, o obj) (obj, error) {
 	if err := s.remountFencedLocked(c.project, fenced); err != nil {
 		return nil, err
 	}
-	return s.remount(c.project, scope, "attachDisk", rel, o)
+	return s.remount(c.project, scope, "attachDisk", rel, o, old)
 }
 
 func (s *Server) detachDisk(c call, scope, rel string, o obj) (obj, error) {
@@ -776,6 +823,7 @@ func (s *Server) detachDisk(c call, scope, rel string, o obj) (obj, error) {
 	if gone == "" {
 		return nil, invalid("Invalid value for field 'deviceName': '%s'. No attached disk found with device name '%s'", dev, dev)
 	}
+	old := s.vmSpecLocked(o)
 	o["disks"] = keep
 	if d, ok := s.res[gone]; ok {
 		var users []any
@@ -791,16 +839,24 @@ func (s *Server) detachDisk(c call, scope, rel string, o obj) (obj, error) {
 		}
 		d["lastDetachTimestamp"] = s.stamp()
 	}
-	return s.remount(c.project, scope, "detachDisk", rel, o)
+	return s.remount(c.project, scope, "detachDisk", rel, o, old)
 }
 
-// remount restarts a running instance so its container has its disks.
-func (s *Server) remount(project, scope, opType, rel string, o obj) (obj, error) {
+// remount restarts a running instance so its container has its disks
+// (old is the instance as it was): an encrypted disk it no longer has is
+// sealed, one it now has opened.
+func (s *Server) remount(project, scope, opType, rel string, o obj, old VMSpec) (obj, error) {
 	if str(o, "status") != stRunning {
 		return s.done(project, scope, opType, rel, o["id"])
 	}
 	return s.transition(project, scope, opType, rel, o, stRunning, stRunning, stRunning, func(ctx context.Context, vm VMSpec) error {
 		if err := s.opts.VMs.Stop(ctx, vm); err != nil {
+			return err
+		}
+		if err := s.sealDisks(ctx, old.encrypted(), vm.encrypted()); err != nil {
+			return err
+		}
+		if err := s.unsealDisks(ctx, vm.encrypted()); err != nil {
 			return err
 		}
 		return s.opts.VMs.Start(ctx, vm)
@@ -932,7 +988,7 @@ func (s *Server) remountFencedLocked(project string, instances []string) error {
 		if !ok {
 			continue
 		}
-		if _, err := s.remount(project, "zones/"+lastSeg(str(o, "zone")), "attachDisk", u, o); err != nil {
+		if _, err := s.remount(project, "zones/"+lastSeg(str(o, "zone")), "attachDisk", u, o, s.vmSpecLocked(o)); err != nil {
 			return err
 		}
 	}

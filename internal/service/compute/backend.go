@@ -27,6 +27,13 @@ type VMBackend interface {
 	CopyDisk(ctx context.Context, src, dst DiskSpec) error
 	// DeleteSnapshot removes a snapshot's storage.
 	DeleteSnapshot(ctx context.Context, snapshotKey string) error
+	// SealDisk encrypts an encrypted disk's storage at rest (d.DataKey):
+	// its files become SealedFile and nothing in the clear stays. A disk
+	// already sealed is left as it is.
+	SealDisk(ctx context.Context, d DiskSpec) error
+	// UnsealDisk opens a sealed disk's storage with d.DataKey for an
+	// instance to use it; a disk not sealed is left as it is.
+	UnsealDisk(ctx context.Context, d DiskSpec) error
 	// Start boots the instance (its boot disk seeded from its image on
 	// first boot) and returns once it is running.
 	Start(ctx context.Context, vm VMSpec) error
@@ -58,6 +65,20 @@ type DiskSpec struct {
 	Image *PublicImage
 	// SourceSnapshot is the snapshot key the disk is made from, or "".
 	SourceSnapshot string
+	// DataKey is the disk's unwrapped 256-bit data key when it is
+	// encrypted with a customer-managed or customer-supplied key (its
+	// storage is then sealed at rest, diskseal.go), nil otherwise.
+	// CreateDisk, CopyDisk and Snapshot leave a disk with a DataKey sealed
+	// with it.
+	DataKey []byte
+	// SourceDataKey is the data key the source's storage (a snapshot, or
+	// CopyDisk's src) is sealed with, nil when it is not.
+	SourceDataKey []byte
+	// Open is set when another running instance has the disk open (a
+	// multi-writer disk): SealDisk then leaves it as it is.
+	Open bool
+
+	rel string // the disk's relative name
 }
 
 // AttachedDisk is a non-boot disk of an instance.

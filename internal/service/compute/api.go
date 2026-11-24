@@ -27,6 +27,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.serveBatch(w, r)
 		return
 	}
+	if r.URL.Path == CSEKCertPath && r.Method == http.MethodGet {
+		s.serveCSEKCert(w)
+		return
+	}
 	if strings.HasPrefix(r.URL.Path, GuestPrefix) {
 		s.serveGuest(w, r)
 		return

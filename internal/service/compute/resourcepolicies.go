@@ -11,8 +11,8 @@ import (
 // consistency groups (diskConsistencyGroupPolicy), which Asynchronous
 // Replication stops and clones as one
 // (https://docs.cloud.google.com/compute/docs/disks/async-pd/manage-consistency-groups).
-// A policy's other kinds (snapshot schedules, instance schedules,
-// placement and workload policies) are not served.
+// Snapshot schedules are in snapshotschedules.go; instance schedules,
+// placement and workload policies in instancepolicies.go.
 
 // maxGroupDisks is a consistency group's documented "maximum of 128
 // disks".
@@ -43,13 +43,13 @@ func (s *Server) resourcePolicies(c call, region string) (obj, error) {
 		if _, ok := s.res[rel]; !ok {
 			return nil, notFound(rel)
 		}
-		if users := s.policyUsersLocked(rel); len(users) > 0 {
+		if users := append(s.policyUsersLocked(rel), s.instancePolicyUsersLocked(rel)...); len(users) > 0 {
 			return nil, inUse("resource policy", rel, users[0])
 		}
 		delete(s.res, rel)
 		return s.done(c.project, scope, "delete", rel, nil)
 	}
-	return nil, unimplemented("%s on resourcePolicies/%s is not served (#2206): resource policies are served as disk consistency groups and snapshot schedules (insert, get, list, patch, delete)", c.method, strings.Join(p[3:], "/"))
+	return nil, unimplemented("%s on resourcePolicies/%s is not served (#2206): resource policies are served with insert, get, list, patch and delete", c.method, strings.Join(p[3:], "/"))
 }
 
 func (s *Server) insertResourcePolicy(project, region string, b obj) (obj, error) {
@@ -72,18 +72,35 @@ func (s *Server) insertResourcePolicy(project, region string, b obj) (obj, error
 		return nil, invalid("Invalid value for field 'resource': a resource policy needs one of snapshotSchedulePolicy, groupPlacementPolicy, instanceSchedulePolicy, diskConsistencyGroupPolicy or workloadPolicy.")
 	case len(kinds) > 1:
 		return nil, invalid("Invalid value for field 'resource': at most one of %s may be set.", strings.Join(kinds, ", "))
-	case kinds[0] != "diskConsistencyGroupPolicy" && kinds[0] != "snapshotSchedulePolicy":
-		return nil, unimplemented("%s resource policies are not served (#2206): they apply to VM instances, whose addResourcePolicies is not served; resource policies are served as disk consistency groups (diskConsistencyGroupPolicy) and snapshot schedules (snapshotSchedulePolicy)", kinds[0])
 	}
 	o := obj{"kind": "compute#resourcePolicy", "id": newID(), "name": name, "region": "projects/" + project + "/regions/" + region,
 		"selfLink": rel, "creationTimestamp": s.stamp(), "status": "READY"}
-	if kinds[0] == "snapshotSchedulePolicy" {
+	switch kinds[0] {
+	case "snapshotSchedulePolicy":
 		sp, err := s.newSnapshotSchedule(project, region, b)
 		if err != nil {
 			return nil, err
 		}
 		o["snapshotSchedulePolicy"] = sp
-	} else {
+	case "instanceSchedulePolicy":
+		v, err := newInstanceSchedule(b[kinds[0]], "resource.instanceSchedulePolicy")
+		if err != nil {
+			return nil, err
+		}
+		o[kinds[0]] = v
+	case "groupPlacementPolicy":
+		v, err := newPlacementPolicy(b[kinds[0]], "resource.groupPlacementPolicy")
+		if err != nil {
+			return nil, err
+		}
+		o[kinds[0]] = v
+	case "workloadPolicy":
+		v, err := newWorkloadPolicy(b[kinds[0]], "resource.workloadPolicy")
+		if err != nil {
+			return nil, err
+		}
+		o[kinds[0]] = v
+	default:
 		o["diskConsistencyGroupPolicy"] = obj{}
 	}
 	if l, ok := b["labels"].(map[string]any); ok && len(l) > 0 {

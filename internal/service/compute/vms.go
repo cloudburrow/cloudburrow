@@ -265,7 +265,7 @@ func sizeGb(v any) (int64, bool, error) {
 // diskSpecLocked is a stored disk as the backend sees it.
 func (s *Server) diskSpecLocked(d obj) DiskSpec {
 	n, _, _ := sizeGb(d["sizeGb"])
-	sp := DiskSpec{Key: vmKey("disk", d), SizeGb: n, Type: lastSeg(str(d, "type"))}
+	sp := DiskSpec{Key: vmKey("disk", d), SizeGb: n, Type: lastSeg(str(d, "type")), rel: str(d, "selfLink"), DataKey: s.specKeyLocked(d)}
 	if si := str(d, "sourceImage"); si != "" {
 		if img, err := LookupImage(si); err == nil {
 			sp.Image = &img
@@ -274,6 +274,7 @@ func (s *Server) diskSpecLocked(d obj) DiskSpec {
 	if ss := str(d, "sourceSnapshot"); ss != "" {
 		if so, ok := s.res[ss]; ok {
 			sp.SourceSnapshot = vmKey("snap", so)
+			sp.SourceDataKey = s.specKeyLocked(so)
 		}
 	}
 	return sp
@@ -516,8 +517,11 @@ func (s *Server) createSnapshot(project, diskRel string, b obj, scope string) (o
 		return nil, errf(http.StatusBadRequest, "resourceInUseByAnotherResource",
 			"The disk resource '%s' is a secondary disk in the process of replication: it can't be snapshotted until replication stops.", diskRel)
 	}
-	// "You can't ... create a snapshot from the disk" with a revoked key.
-	if err := s.checkDiskKeyLocked(d); err != nil {
+	// "You can't ... create a snapshot from the disk" with a revoked key;
+	// a customer-supplied key is given as sourceDiskEncryptionKey.
+	sk, _ := b["sourceDiskEncryptionKey"].(map[string]any)
+	dek, err := s.diskKeyLocked(d, sk, "resource.sourceDiskEncryptionKey")
+	if err != nil {
 		return nil, err
 	}
 	snap := obj{"kind": "compute#snapshot", "id": newID(), "name": name, "status": "CREATING", "selfLink": rel,
@@ -536,10 +540,10 @@ func (s *Server) createSnapshot(project, diskRel string, b obj, scope string) (o
 	if si := str(d, "sourceImage"); si != "" {
 		snap["_sourceImage"] = si
 	}
-	// A CMEK disk's snapshot is "encrypted with the same key" (#2206).
-	if ek, ok := d["diskEncryptionKey"]; ok {
-		snap["snapshotEncryptionKey"] = ek
-		snap[wrappedKeyKey] = d[wrappedKeyKey]
+	// A CMEK disk's snapshot is "encrypted with the same key" (#2206); a
+	// CSEK disk's with snapshotEncryptionKey, or the service's own key.
+	if err := s.snapshotKeyLocked(snap, d, b, dek); err != nil {
+		return nil, err
 	}
 	if v, _ := b[VaultSnapshot].(bool); v {
 		// A Backup and DR vault's (#2075): kept out of the project's own

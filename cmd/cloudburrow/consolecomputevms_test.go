@@ -19,6 +19,8 @@ func (consoleFakeVMs) DeleteDisk(context.Context, compute.DiskSpec) error       
 func (consoleFakeVMs) ResizeDisk(context.Context, compute.DiskSpec) error                 { return nil }
 func (consoleFakeVMs) Snapshot(context.Context, compute.DiskSpec, string) error           { return nil }
 func (consoleFakeVMs) DeleteSnapshot(context.Context, string) error                       { return nil }
+func (consoleFakeVMs) SealDisk(context.Context, compute.DiskSpec) error                   { return nil }
+func (consoleFakeVMs) UnsealDisk(context.Context, compute.DiskSpec) error                 { return nil }
 func (consoleFakeVMs) Start(context.Context, compute.VMSpec) error                        { return nil }
 func (consoleFakeVMs) Stop(context.Context, compute.VMSpec) error                         { return nil }
 func (consoleFakeVMs) Suspend(context.Context, compute.VMSpec) error                      { return nil }

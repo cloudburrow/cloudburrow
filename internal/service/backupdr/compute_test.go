@@ -44,6 +44,8 @@ func (m *memVMs) DeleteSnapshot(_ context.Context, key string) error {
 	delete(m.data, key)
 	return nil
 }
+func (m *memVMs) SealDisk(context.Context, compute.DiskSpec) error             { return nil }
+func (m *memVMs) UnsealDisk(context.Context, compute.DiskSpec) error           { return nil }
 func (m *memVMs) Start(context.Context, compute.VMSpec) error                  { return nil }
 func (m *memVMs) Stop(context.Context, compute.VMSpec) error                   { return nil }
 func (m *memVMs) Suspend(context.Context, compute.VMSpec) error                { return nil }
