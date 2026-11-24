@@ -243,7 +243,7 @@ func (s *Server) notebooks() *notebookStore {
 	defer s.mu.Unlock()
 	if s.nb == nil {
 		s.nb = &notebookStore{templates: map[string]*aiplatformpb.NotebookRuntimeTemplate{}, runtimes: map[string]*runtimeEntry{},
-			defaults: map[string]string{}, now: time.Now, jobs: map[string]*jobEntry{}, schedules: map[string]*aiplatformpb.Schedule{},
+			defaults: map[string]string{}, now: s.clockNow, jobs: map[string]*jobEntry{}, schedules: map[string]*aiplatformpb.Schedule{},
 			policies: map[string]*iampolicy.Stored{}, owners: map[string]string{}, pipelines: map[string]*pipelineEntry{}}
 	}
 	if s.ops == nil {

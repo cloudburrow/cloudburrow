@@ -70,6 +70,8 @@ type Server struct {
 	// keys are Document AI's and Speech-to-Text's customer-managed keys
 	// (cmek.go, #1950), set by UseCMEK.
 	keys atomic.Pointer[cmek.Keys]
+	// clockOffset is how far clock:advance moved the clock (clock.go).
+	clockOffset atomic.Int64
 
 	// caches are the cached contents (cachedcontent.go, #2107), served over
 	// gRPC and through cacheTranscoder.
@@ -157,7 +159,7 @@ func (s *Server) Handler() http.Handler {
 	// Vertex AI pipeline jobs (pipelines.go, #2173) and ML Metadata
 	// (metadata.go, #2205) too.
 	for _, c := range []string{"notebookRuntimeTemplates", "notebookRuntimes", "notebookExecutionJobs", "schedules", "pipelineJobs", "metadataStores",
-		"customJobs", "batchPredictionJobs", "trainingPipelines", "hyperparameterTuningJobs", "datasets"} {
+		"customJobs", "batchPredictionJobs", "trainingPipelines", "hyperparameterTuningJobs", "datasets", "nasJobs"} {
 		mux.HandleFunc("/v1/projects/{project}/locations/{location}/"+c, s.serveNotebookREST)
 		mux.HandleFunc("/v1/projects/{project}/locations/{location}/"+c+"/", s.serveNotebookREST)
 		// Their operations as the Python SDK polls them, under /ui (#1940).
@@ -179,6 +181,8 @@ func (s *Server) Handler() http.Handler {
 		mux.HandleFunc("/v1beta1/projects/{project}/locations/{location}/"+c, s.serveNotebookREST)
 		mux.HandleFunc("/v1beta1/projects/{project}/locations/{location}/"+c+"/", s.serveNotebookREST)
 	}
+	// CloudBurrow's clock (clock.go).
+	mux.HandleFunc(ClockAdvancePath, s.serveClock)
 	mux.HandleFunc("POST /v1/projects/{project}/locations/{location}/pipelineJobs:batchDelete", s.serveNotebookREST)
 	mux.HandleFunc("POST /v1/projects/{project}/locations/{location}/pipelineJobs:batchCancel", s.serveNotebookREST)
 	mux.HandleFunc("POST /v1/projects/{project}/locations/{location}/notebookRuntimeTemplates:setDefault", s.setDefaultREST)

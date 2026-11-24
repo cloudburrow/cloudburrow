@@ -5,6 +5,8 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -216,5 +218,20 @@ func TestMonitoringAlertsAreDelivered(t *testing.T) {
 	}
 	if err := checkEmails("f", []string{"not-an-address"}); err == nil {
 		t.Fatal("a malformed email was accepted")
+	}
+}
+
+func TestClockAdvanceRunsDueMonitoring(t *testing.T) {
+	s := NewServer(nil)
+	before := s.notebooks().now()
+	for body, want := range map[string]int{`{"duration": "-1s"}`: 400, `{"duration": "soon"}`: 400, `{"duration": "3600s"}`: 200} {
+		rec := httptest.NewRecorder()
+		s.serveClock(rec, httptest.NewRequest(http.MethodPost, ClockAdvancePath, strings.NewReader(body)))
+		if rec.Code != want {
+			t.Errorf("%s = %d %s, want %d", body, rec.Code, rec.Body, want)
+		}
+	}
+	if d := s.notebooks().now().Sub(before); d < time.Hour {
+		t.Fatalf("the clock moved %v, want an hour", d)
 	}
 }
