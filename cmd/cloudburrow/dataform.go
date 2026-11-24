@@ -29,6 +29,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/cmek"
 	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/hostmount"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/service/dataform"
@@ -251,18 +252,41 @@ type dataformDocker struct {
 	warmed map[string]bool
 }
 
-func (d *dataformDocker) run(ctx context.Context, network bool, mounts []string, env []string, args ...string) ([]byte, []byte, error) {
+// dataformMount is one directory of this machine a container mounts. On a
+// remote compute host it is a volume there (internal/hostmount): the npm
+// cache stays on the host, and a writable directory's changes (the CLI's
+// install, a workspace's node_modules) come back after the run.
+type dataformMount struct {
+	local, dst string
+	mode       hostmount.Mode
+	scratch    bool
+}
+
+func (d *dataformDocker) run(ctx context.Context, network bool, mounts []dataformMount, env []string, args ...string) ([]byte, []byte, error) {
 	full := []string{"run", "--rm", "--label", "cloudburrow.dev/owned=true", "-e", "HOME=/tmp", "-e", "npm_config_cache=/npmcache",
 		"-e", "npm_config_update_notifier=false", "-e", "npm_config_fund=false", "-e", "npm_config_audit=false"}
-	if runtime.GOOS == "linux" {
+	if runtime.GOOS == "linux" && !hostmount.Remote() {
+		// The bind mounts' files stay the user's own; on a remote host the
+		// volumes are root's, as the image runs.
 		full = append(full, "--user", strconv.Itoa(os.Getuid())+":"+strconv.Itoa(os.Getgid()))
 	}
 	if !network {
 		full = append(full, "--network", "none", "-e", "npm_config_offline=true")
 	}
-	full = append(full, "-v", filepath.Join(d.dir, "npmcache")+":/npmcache")
-	for _, m := range mounts {
-		full = append(full, "-v", m)
+	all := append([]dataformMount{{local: filepath.Join(d.dir, "npmcache"), dst: "/npmcache", mode: hostmount.Cache}}, mounts...)
+	var bound []*hostmount.Mount
+	for _, m := range all {
+		prep := hostmount.Bind
+		if m.scratch {
+			prep = hostmount.Scratch
+		}
+		b, err := prep(ctx, m.local, m.dst, m.mode)
+		if err != nil {
+			return nil, nil, err
+		}
+		defer b.Release()
+		bound = append(bound, b)
+		full = append(full, b.Args()...)
 	}
 	for _, e := range env {
 		full = append(full, "-e", e)
@@ -273,6 +297,11 @@ func (d *dataformDocker) run(ctx context.Context, network bool, mounts []string,
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	err := cmd.Run()
+	for _, b := range bound {
+		if cerr := b.Collect(ctx); cerr != nil && err == nil {
+			err = cerr
+		}
+	}
 	return stdout.Bytes(), stderr.Bytes(), err
 }
 
@@ -291,7 +320,7 @@ func (d *dataformDocker) ensureCLI(ctx context.Context) error {
 	if err := os.MkdirAll(filepath.Join(d.dir, "npmcache"), 0o755); err != nil {
 		return err
 	}
-	_, stderr, err := d.run(ctx, true, []string{filepath.Join(d.dir, "cli") + ":/opt/dataform"}, nil,
+	_, stderr, err := d.run(ctx, true, []dataformMount{{local: filepath.Join(d.dir, "cli"), dst: "/opt/dataform", mode: hostmount.ReadWrite}}, nil,
 		"npm", "install", "--prefix", "/opt/dataform", "--ignore-scripts", "--no-save", dataformCLI)
 	if err != nil {
 		return fmt.Errorf("install %s: %v: %s", dataformCLI, err, dataformTail(stderr, 5))
@@ -311,7 +340,7 @@ func (d *dataformDocker) warmCore(ctx context.Context, version string) error {
 		return err
 	}
 	defer os.RemoveAll(tmp)
-	_, stderr, err := d.run(ctx, true, []string{tmp + ":/w"}, nil,
+	_, stderr, err := d.run(ctx, true, []dataformMount{{local: tmp, dst: "/w", mode: hostmount.Cache, scratch: true}}, nil,
 		"npm", "install", "--prefix", "/w", "--ignore-scripts", "--no-save", "@dataform/core@"+version)
 	if err != nil {
 		return fmt.Errorf("install @dataform/core@%s: %v: %s", version, err, dataformTail(stderr, 5))
@@ -342,7 +371,9 @@ func (d *dataformDocker) Compile(ctx context.Context, dir string, flags []string
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 	args := append([]string{"node", "/opt/dataform/node_modules/@dataform/cli/bundle.js", "compile", "/ws", "--json"}, flags...)
-	stdout, stderr, err := d.run(ctx, false, []string{filepath.Join(d.dir, "cli") + ":/opt/dataform:ro", dir + ":/ws"}, nil, args...)
+	stdout, stderr, err := d.run(ctx, false, []dataformMount{
+		{local: filepath.Join(d.dir, "cli"), dst: "/opt/dataform", mode: hostmount.ReadOnly},
+		{local: dir, dst: "/ws", mode: hostmount.ReadWrite, scratch: true}}, nil, args...)
 	// The CLI exits 1 when the project has compilation errors, with the
 	// graph and its errors on stdout.
 	if bytes.Contains(stdout, []byte(`"graphErrors"`)) || bytes.Contains(stdout, []byte(`"projectConfig"`)) {
@@ -360,7 +391,8 @@ func (d *dataformDocker) InstallPackages(ctx context.Context, dir string, env []
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
-	_, stderr, err := d.run(ctx, true, []string{dir + ":/ws"}, env, "sh", "-c", "cd /ws && npm install --ignore-scripts")
+	_, stderr, err := d.run(ctx, true, []dataformMount{{local: dir, dst: "/ws", mode: hostmount.ReadWrite, scratch: true}}, env,
+		"sh", "-c", "cd /ws && npm install --ignore-scripts")
 	if err != nil {
 		return fmt.Errorf("%v: %s", err, dataformTail(stderr, 8))
 	}

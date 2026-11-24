@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cloudburrow/cloudburrow/internal/hostmount"
 	"github.com/cloudburrow/cloudburrow/internal/hostrelay"
 )
 
@@ -223,7 +224,26 @@ func (d *Docker) Run(ctx context.Context, job Job) (Result, error) {
 	}
 	defer func() { _, _ = d.docker(context.Background(), "network", "rm", network) }()
 
-	relayArgs := []string{"run", "-d", "--name", relay, "--label", label, "-v", dir + ":/cb:ro", "--entrypoint", "python3"}
+	// On a remote compute host the job's directory, the connector and the
+	// runtime's trees are volumes there (internal/hostmount): the job's
+	// own two, read-only for the relay and writable for Spark, go with the
+	// job, and its out/ comes back.
+	relayDir, err := hostmount.Scratch(ctx, dir, "/cb", hostmount.ReadOnly)
+	if err != nil {
+		return Result{}, &Unavailable{Msg: err.Error()}
+	}
+	defer relayDir.Release()
+	jobDir, err := hostmount.Scratch(ctx, dir, "/cb", hostmount.ReadWrite)
+	if err != nil {
+		return Result{}, &Unavailable{Msg: err.Error()}
+	}
+	defer jobDir.Release()
+	connector, err := hostmount.Bind(ctx, jar, "/cb-connector/spark-bigquery.jar", hostmount.ReadOnly)
+	if err != nil {
+		return Result{}, &Unavailable{Msg: err.Error()}
+	}
+	relayArgs := append([]string{"run", "-d", "--name", relay, "--label", label}, relayDir.Args()...)
+	relayArgs = append(relayArgs, "--entrypoint", "python3")
 	if !d.desktop {
 		relayArgs = append(relayArgs, "--add-host", "host.docker.internal:host-gateway")
 	}
@@ -239,9 +259,9 @@ func (d *Docker) Run(ctx context.Context, job Job) (Result, error) {
 		return Result{}, &Unavailable{Msg: "connect the Spark job's relay: " + out}
 	}
 
-	run := []string{"run", "--name", spark, "--label", label, "--network", network,
-		"-v", dir + ":/cb", "-v", jar + ":/cb-connector/spark-bigquery.jar:ro",
-		"-e", "CB_SPARK_OUT=/cb/out/params.json", "-e", "CB_SPARK_TYPES=/cb/types.json"}
+	run := []string{"run", "--name", spark, "--label", label, "--network", network}
+	run = append(append(run, jobDir.Args()...), connector.Args()...)
+	run = append(run, "-e", "CB_SPARK_OUT=/cb/out/params.json", "-e", "CB_SPARK_TYPES=/cb/types.json")
 	image, conf := rt.Image, map[string]string{}
 	pythonPath := "/cb/lib"
 	if custom != nil && custom.env["PYTHONPATH"] != "" {
@@ -255,8 +275,17 @@ func (d *Docker) Run(ctx context.Context, job Job) (Result, error) {
 		// PYSPARK_PYTHON wins, and its SPARK_EXTRA_CLASSPATH is on the
 		// driver's and executors' class path.
 		image = custom.ref
-		run = append(run, "--user", "1099:1099", "-v", custom.spark+":/usr/lib/spark:ro", "-v", custom.java+":"+customJavaHome+":ro",
-			"-e", "JAVA_HOME="+customJavaHome, "-e", "SPARK_HOME=/usr/lib/spark", "-e", "SPARK_CONF_DIR=/etc/spark/conf", "-e", "HOME=/tmp")
+		sparkTree, err := hostmount.Bind(ctx, custom.spark, "/usr/lib/spark", hostmount.ReadOnly)
+		if err != nil {
+			return Result{}, &Unavailable{Msg: err.Error()}
+		}
+		javaTree, err := hostmount.Bind(ctx, custom.java, customJavaHome, hostmount.ReadOnly)
+		if err != nil {
+			return Result{}, &Unavailable{Msg: err.Error()}
+		}
+		run = append(run, "--user", "1099:1099")
+		run = append(append(run, sparkTree.Args()...), javaTree.Args()...)
+		run = append(run, "-e", "JAVA_HOME="+customJavaHome, "-e", "SPARK_HOME=/usr/lib/spark", "-e", "SPARK_CONF_DIR=/etc/spark/conf", "-e", "HOME=/tmp")
 		if custom.env["PYSPARK_PYTHON"] == "" {
 			run = append(run, "-e", "PYSPARK_PYTHON=python3")
 		}
@@ -289,6 +318,9 @@ func (d *Docker) Run(ctx context.Context, job Job) (Result, error) {
 	}
 	tail, output := d.follow(job, stdout)
 	waitErr := cmd.Wait()
+	if err := jobDir.Collect(context.WithoutCancel(ctx)); err != nil {
+		d.logf("spark: %v", err)
+	}
 	res := Result{Out: map[string]string{}, DriverOutput: output}
 	if b, err := os.ReadFile(filepath.Join(dir, "out", "params.json")); err == nil {
 		_ = json.Unmarshal(b, &res.Out)

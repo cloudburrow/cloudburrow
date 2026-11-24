@@ -13,6 +13,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/byoc"
 	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/hostmount"
 	"github.com/cloudburrow/cloudburrow/internal/hostrelay"
 	"github.com/cloudburrow/cloudburrow/internal/remotecompute"
 )
@@ -134,6 +135,10 @@ func connectComputeWith(ctx context.Context, cfg config.Config, out io.Writer, r
 	_ = os.Setenv("DOCKER_HOST", s.DockerHost())
 	_ = os.Unsetenv("DOCKER_CONTEXT")
 	hostrelay.SetRemote(s)
+	// A container's mount of a path here is a volume on the host, filled
+	// over the same socket; the kind node image, which the host holds for
+	// the cluster, is the helper that fills it.
+	hostmount.SetRemote(&hostmount.Config{Instance: cfg.Name, StateDir: cfg.InstanceDir(), Helper: cfg.Cluster.NodeImage})
 	c.mirror = s.NewMirror()
 	if record {
 		// up's log says what each forward is; a one-off command is quiet.
@@ -187,6 +192,7 @@ func (c *computeConn) Close() {
 	}
 	activeComputeMu.Unlock()
 	hostrelay.SetRemote(nil)
+	hostmount.SetRemote(nil)
 	if c.mirror != nil {
 		c.mirror.Stop()
 	}

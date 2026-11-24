@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/embedding"
+	"github.com/cloudburrow/cloudburrow/internal/hostmount"
 )
 
 // Dockerfile is the decoder image's build context.
@@ -177,6 +178,7 @@ type Source struct {
 	n      int
 	probe  *probe
 	probed error
+	mount  *hostmount.Mount
 }
 
 type probe struct {
@@ -189,6 +191,7 @@ type probe struct {
 
 // Close removes the request's file.
 func (s *Source) Close() error {
+	s.mount.Drop()
 	if s.dir == "" {
 		return nil
 	}
@@ -230,8 +233,15 @@ func (s *Source) run(file string, out io.Writer, args ...string) ([]byte, error)
 	}
 	ctx, cancel := context.WithTimeout(s.ctx, runTimeout)
 	defer cancel()
-	full := append([]string{"run", "--rm", "--network", "none", "--read-only", "--user", "65534:65534",
-		"-v", file + ":/in/video:ro", s.d.image()}, args...)
+	// On a remote compute host the request's file is a volume there, sent
+	// once for the request's runs and removed with it (internal/hostmount).
+	video, err := hostmount.Bind(ctx, file, "/in/video", hostmount.ReadOnly)
+	if err != nil {
+		return nil, &unavailable{"the video decoder could not run: " + err.Error()}
+	}
+	s.mount = video
+	full := append([]string{"run", "--rm", "--network", "none", "--read-only", "--user", "65534:65534"}, video.Args()...)
+	full = append(append(full, s.d.image()), args...)
 	cmd := exec.CommandContext(ctx, s.d.bin(), full...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr

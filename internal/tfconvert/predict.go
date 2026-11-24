@@ -18,6 +18,8 @@ import (
 	"regexp"
 	"sync"
 	"time"
+
+	"github.com/cloudburrow/cloudburrow/internal/hostmount"
 )
 
 // The TensorFlow runtime (#1775). BigQuery runs an imported SavedModel
@@ -339,6 +341,9 @@ type dockerRunner struct {
 	mu   sync.Mutex // one request at a time on its pipes
 	once sync.Once
 	dead bool
+	// model is the SavedModel's mount, a volume on a remote compute host
+	// removed when the predictor stops.
+	model *hostmount.Mount
 }
 
 // tailBuffer keeps the last of what it is written: the predictor's stderr.
@@ -373,10 +378,17 @@ func (d *Docker) Serve(ctx context.Context, dir string) (Runner, error) {
 		return nil, err
 	}
 	r := &dockerRunner{d: d, name: "cloudburrow-tfpredict-" + randomName(), log: &tailBuffer{}}
-	r.cmd = exec.Command(d.bin(), "run", "-i", "--rm", "--name", r.name, "--network", Network, "--read-only", "--tmpfs", "/tmp",
-		"-e", "HOME=/tmp", "-e", "TF_CPP_MIN_LOG_LEVEL=2", "-v", dir+":/model:ro", d.Image, "serve")
+	model, err := hostmount.Scratch(ctx, dir, "/model", hostmount.ReadOnly)
+	if err != nil {
+		return nil, &Refusal{Kind: "unavailable", Message: err.Error()}
+	}
+	r.model = model
+	args := []string{"run", "-i", "--rm", "--name", r.name, "--network", Network, "--read-only", "--tmpfs", "/tmp",
+		"-e", "HOME=/tmp", "-e", "TF_CPP_MIN_LOG_LEVEL=2"}
+	r.cmd = exec.Command(d.bin(), append(append(args, model.Args()...), d.Image, "serve")...)
 	in, err := r.cmd.StdinPipe()
 	if err != nil {
+		model.Release()
 		return nil, err
 	}
 	out, err := r.cmd.StdoutPipe()
@@ -386,6 +398,7 @@ func (d *Docker) Serve(ctx context.Context, dir string) (Runner, error) {
 	r.in, r.out = in, bufio.NewReaderSize(out, 1<<20)
 	r.cmd.Stderr = r.log
 	if err := r.cmd.Start(); err != nil {
+		model.Release()
 		return nil, &Refusal{Kind: "unavailable", Message: "could not start the TensorFlow predictor: " + err.Error()}
 	}
 	d.logf("tensorflow predictor: starting %s", r.name)
@@ -455,6 +468,7 @@ func (r *dockerRunner) Close() error {
 			_ = r.cmd.Process.Kill()
 			<-done
 		}
+		r.model.Release()
 		r.d.logf("tensorflow predictor: stopped %s", r.name)
 	})
 	return nil
